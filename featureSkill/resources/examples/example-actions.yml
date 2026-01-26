@@ -1,0 +1,304 @@
+# spec/actions/actions.yml 完整範例
+# 訂單管理系統 Server Actions 規格
+
+project:
+  name: "order-management"
+  description: "訂單管理系統 - 基於 BDD Feature Files 設計的 Server Actions"
+  version: "1.0.0"
+  framework: "next.js"
+  database: "supabase"
+
+actions:
+  # ----------------------------------------------------------
+  # 訂單相關 Actions
+  # ----------------------------------------------------------
+  - name: createOrder
+    summary: 建立訂單
+
+    description: |
+      建立一筆新的訂單，包含顧客資訊與訂購品項。
+      系統會自動計算訂單總額並檢查庫存。
+
+      ## 關聯的業務規則
+      - 訂單總額計算（後置條件）
+      - 庫存檢查（前置條件）
+      - 品項數量驗證（前置條件）
+
+    featureFile: spec/features/建立訂單.feature
+    rules:
+      - rule: 後置 - 訂單總額為所有品項小計加總
+        step: "Then 建立訂單成功, with table:"
+      - rule: 前置 - 建立訂單前必須檢查庫存
+        step: "Then 操作失敗"
+      - rule: 前置 - 訂單必須包含至少一個品項
+        step: "Then 操作失敗"
+      - rule: 前置 - 品項數量必須大於 0
+        step: "Then 操作失敗"
+
+    input:
+      type: CreateOrderInput
+      properties:
+        customerId:
+          type: string
+          description: 顧客 ID
+          required: true
+        items:
+          type: array
+          description: 訂購品項列表
+          items:
+            type: object
+            properties:
+              productId:
+                type: string
+                description: 商品 ID
+              quantity:
+                type: integer
+                description: 數量
+                minimum: 1
+          minItems: 1
+          required: true
+
+    output:
+      success:
+        type: Order
+        properties:
+          orderId:
+            type: string
+          totalAmount:
+            type: number
+          status:
+            type: string
+            enum: [pending, confirmed, completed, cancelled]
+      error:
+        type: ActionError
+        properties:
+          message:
+            type: string
+
+  - name: getOrderById
+    summary: 查詢訂單
+
+    description: 根據訂單 ID 查詢訂單詳細資訊
+
+    featureFile: spec/features/查詢訂單.feature
+    rules:
+      - rule: 後置 - 可根據訂單編號查詢訂單詳情
+        step: "Then 查詢訂單成功, with table:"
+      - rule: 前置 - 訂單必須存在
+        step: "Then 操作失敗"
+
+    input:
+      type: GetOrderInput
+      properties:
+        orderId:
+          type: string
+          description: 訂單 ID
+          required: true
+
+    output:
+      success:
+        type: OrderDetail
+        properties:
+          orderId:
+            type: string
+          customerId:
+            type: string
+          totalAmount:
+            type: number
+          status:
+            type: string
+          items:
+            type: array
+            items:
+              $ref: '#/types/OrderItem'
+          createdAt:
+            type: string
+            format: date-time
+      error:
+        type: ActionError
+
+  - name: cancelOrder
+    summary: 取消訂單
+
+    description: 取消指定的訂單，並恢復庫存
+
+    featureFile: spec/features/取消訂單.feature
+    rules:
+      - rule: 後置 - 取消訂單後狀態變更為 cancelled
+        step: "Then 取消訂單成功, with table:"
+      - rule: 後置 - 取消訂單後恢復對應商品庫存
+        step: "And 存在一個商品, with table:"
+      - rule: 前置 - 只能取消 pending 狀態的訂單
+        step: "Then 操作失敗"
+
+    input:
+      type: CancelOrderInput
+      properties:
+        orderId:
+          type: string
+          description: 訂單 ID
+          required: true
+
+    output:
+      success:
+        type: Order
+      error:
+        type: ActionError
+
+  # ----------------------------------------------------------
+  # 商品相關 Actions
+  # ----------------------------------------------------------
+  - name: listProducts
+    summary: 查詢商品列表
+
+    description: 查詢所有可用的商品
+
+    featureFile: spec/features/查詢商品列表.feature
+    rules:
+      - rule: 後置 - 回傳所有上架商品
+        step: "Then 查詢商品列表成功, with table:"
+
+    input:
+      type: ListProductsInput
+      properties:
+        limit:
+          type: integer
+          description: 每頁筆數
+          default: 20
+        offset:
+          type: integer
+          description: 起始位置
+          default: 0
+
+    output:
+      success:
+        type: ProductList
+        properties:
+          items:
+            type: array
+            items:
+              $ref: '#/types/Product'
+          total:
+            type: integer
+      error:
+        type: ActionError
+
+types:
+  Order:
+    description: 訂單實體（對應 spec/data/schema.sql 中的 orders 表）
+    properties:
+      id:
+        type: string
+        description: 訂單 ID
+      customerId:
+        type: string
+        description: 顧客 ID
+      totalAmount:
+        type: number
+        description: 訂單總額
+      status:
+        type: string
+        enum: [pending, confirmed, completed, cancelled]
+        description: 訂單狀態
+      createdAt:
+        type: string
+        format: date-time
+        description: 建立時間
+    required:
+      - id
+      - customerId
+      - totalAmount
+      - status
+
+  OrderItem:
+    description: 訂單品項
+    properties:
+      orderId:
+        type: string
+      productId:
+        type: string
+      productName:
+        type: string
+      quantity:
+        type: integer
+      unitPrice:
+        type: number
+      subtotal:
+        type: number
+    required:
+      - orderId
+      - productId
+      - quantity
+      - subtotal
+
+  OrderDetail:
+    description: 訂單詳情（包含品項）
+    properties:
+      orderId:
+        type: string
+      customerId:
+        type: string
+      totalAmount:
+        type: number
+      status:
+        type: string
+      items:
+        type: array
+        items:
+          $ref: '#/types/OrderItem'
+      createdAt:
+        type: string
+        format: date-time
+
+  Product:
+    description: 商品實體
+    properties:
+      id:
+        type: string
+      name:
+        type: string
+      price:
+        type: number
+      stock:
+        type: integer
+    required:
+      - id
+      - name
+      - price
+      - stock
+
+  ProductList:
+    description: 商品列表
+    properties:
+      items:
+        type: array
+        items:
+          $ref: '#/types/Product'
+      total:
+        type: integer
+
+  CreateOrderInput:
+    properties:
+      customerId:
+        type: string
+      items:
+        type: array
+        items:
+          type: object
+          properties:
+            productId:
+              type: string
+            quantity:
+              type: integer
+        minItems: 1
+    required:
+      - customerId
+      - items
+
+  ActionError:
+    properties:
+      message:
+        type: string
+        description: 錯誤訊息
+    required:
+      - message

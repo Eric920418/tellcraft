@@ -1,0 +1,177 @@
+# spec/actions/actions.yml 模板
+#
+# Server Actions 規格定義
+# 使用說明：根據 spec/features/*.feature 產出對應的 Action 定義
+#
+# ============================================================
+
+project:
+  name: "{project_name}"
+  description: "基於 BDD Feature Files 設計的 Server Actions"
+  version: "1.0.0"
+  framework: "next.js"
+  database: "supabase"
+
+# ============================================================
+# Actions 定義
+# ============================================================
+actions:
+  # ----------------------------------------------------------
+  # Action 範例：建立資源
+  # ----------------------------------------------------------
+  - name: "{actionFunctionName}"           # Server Action 函數名稱（camelCase）
+    summary: "{Feature 名稱}"              # 必須與 Feature 名稱一致
+
+    description: |
+      {功能描述}
+
+      ## 關聯的業務規則
+      此 Action 實作了以下 Feature Rules：
+      - {規則 1}（後置條件）
+      - {規則 2}（前置條件）
+
+    # Feature 關聯（核心）
+    featureFile: "spec/features/{Feature名稱}.feature"
+    rules:
+      - rule: "後置 - {規則描述}"
+        step: "Then {summary}成功, with table:"
+      - rule: "前置 - {驗證條件}"
+        step: "Then 操作失敗"
+
+    # 輸入參數定義
+    input:
+      type: "{ActionName}Input"
+      properties:
+        {field1}:
+          type: "string"
+          description: "{欄位描述}"
+          required: true
+        {field2}:
+          type: "number"
+          description: "{欄位描述}"
+          required: false
+          default: 0
+        {nestedField}:
+          type: "array"
+          description: "{陣列欄位描述}"
+          items:
+            type: "object"
+            properties:
+              subField1:
+                type: "string"
+              subField2:
+                type: "number"
+          minItems: 1
+          required: true
+
+    # 輸出定義
+    output:
+      success:
+        type: "{EntityName}"
+        properties:
+          id:
+            type: "string"
+          {field1}:
+            type: "string"
+          {field2}:
+            type: "number"
+          status:
+            type: "string"
+            enum: ["{status1}", "{status2}", "{status3}"]
+          createdAt:
+            type: "string"
+            format: "date-time"
+      error:
+        type: "ActionError"
+        properties:
+          message:
+            type: "string"
+
+  # ----------------------------------------------------------
+  # Action 範例：查詢資源
+  # ----------------------------------------------------------
+  - name: "get{EntityName}ById"
+    summary: "查詢{Entity中文名}"
+
+    description: "根據 ID 查詢{Entity中文名}詳細資訊"
+
+    featureFile: "spec/features/查詢{Entity中文名}.feature"
+    rules:
+      - rule: "後置 - 可根據 ID 查詢詳情"
+        step: "Then 查詢{Entity中文名}成功, with table:"
+      - rule: "前置 - {Entity中文名}必須存在"
+        step: "Then 操作失敗"
+
+    input:
+      type: "Get{EntityName}Input"
+      properties:
+        id:
+          type: "string"
+          description: "唯一識別碼"
+          required: true
+
+    output:
+      success:
+        type: "{EntityName}"
+      error:
+        type: "ActionError"
+
+# ============================================================
+# Types 定義（對應 SQL Schema）
+# ============================================================
+types:
+  # Entity 類型（對應資料表）
+  "{EntityName}":
+    description: "{Entity描述}（對應 spec/data/schema.sql 中的 {table_name} 表）"
+    properties:
+      id:
+        type: "string"
+        description: "唯一識別碼"
+      {field1}:
+        type: "string"
+        description: "{欄位描述}"
+      {field2}:
+        type: "number"
+        description: "{欄位描述}，必須 >= 0"
+      status:
+        type: "string"
+        enum: ["{status1}", "{status2}", "{status3}"]
+        description: "狀態"
+      createdAt:
+        type: "string"
+        format: "date-time"
+        description: "建立時間"
+    required:
+      - id
+      - {field1}
+      - status
+
+  # 輸入類型
+  "{ActionName}Input":
+    properties:
+      {field1}:
+        type: "string"
+      {field2}:
+        type: "number"
+    required:
+      - {field1}
+
+  # 錯誤類型
+  "ActionError":
+    properties:
+      message:
+        type: "string"
+        description: "錯誤訊息"
+    required:
+      - message
+
+# ============================================================
+# 檢查清單（完成後刪除此區塊）
+# ============================================================
+# [ ] 每個 Feature File 至少有一個對應的 Action
+# [ ] Action name 為 camelCase
+# [ ] Action summary 與 Feature 名稱一致
+# [ ] featureFile 路徑正確
+# [ ] rules 包含所有相關的 Rule（含前置/後置標註）
+# [ ] rules[].step 使用 sdd.os ISA 格式
+# [ ] Types 屬性與 schema.sql 欄位一致

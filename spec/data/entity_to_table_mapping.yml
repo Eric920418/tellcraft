@@ -1,0 +1,21 @@
+# AI-Genesis Platform - Entity 與資料表映射
+# 生成日期：2026-01-23
+# 包含 Orchestrator 實體
+
+entity_to_table_mapping:
+  # 原有實體
+  - 用戶: users
+  - 專案: projects
+  - 對話: conversations
+  - 生成記錄: generations
+  - 部署記錄: deployments
+  - Supabase組織: supabase_organizations
+
+  # Orchestrator 實體（決議 #22-28）
+  - 技能: skills
+  - 任務: tasks
+  - 任務步驟: task_steps
+  - 技能執行: skill_executions
+  - LLM呼叫: llm_calls
+  - Webhook配置: user_webhooks
+  - 通知: notifications

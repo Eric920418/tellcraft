@@ -1,0 +1,40 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npx ts-node:*)",
+      "Bash(pnpm init:*)",
+      "Bash(pnpm add:*)",
+      "Bash(python3:*)",
+      "Bash(source:*)",
+      "Bash(pip install:*)",
+      "Bash(isa-lint:*)",
+      "Bash(python:*)",
+      "Bash(pnpm install:*)",
+      "Bash(chmod:*)",
+      "Bash(./scripts/verify_typescript.sh:*)",
+      "Bash(claude:*)",
+      "Bash(ls:*)",
+      "Bash(npx tsc:*)",
+      "Bash(pnpm dev)",
+      "Bash(curl:*)",
+      "Bash(pkill:*)",
+      "Skill(frontend-design)",
+      "Bash(__NEW_LINE_cd34be729a54d80d__ echo -e \"\\\\n\\\\n=== 測試 /domain/checkAvailability ===\")",
+      "Bash(__NEW_LINE_5c85948763014aba__ echo -e \"\\\\n\\\\n=== 測試 /domain/listAll ===\")",
+      "Bash(__NEW_LINE_71276cb164f5b722__ echo -e \"\\\\n=== 測試 Google DNS ===\")",
+      "Bash(echo:*)",
+      "Bash(__NEW_LINE_1550200fc18aa86d__ echo -e \"\\\\n=== 測試 Google DNS \\(5秒超時\\) ===\")",
+      "Bash(tree:*)",
+      "Bash(wc:*)",
+      "Bash(grep:*)",
+      "Bash(pnpm typecheck:*)",
+      "WebFetch(domain:reactbits.dev)",
+      "WebSearch",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:reactscript.com)",
+      "WebFetch(domain:deepwiki.com)",
+      "Bash(git init:*)",
+      "Bash(git add:*)"
+    ]
+  }
+}

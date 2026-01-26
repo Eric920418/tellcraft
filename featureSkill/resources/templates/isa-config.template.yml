@@ -1,0 +1,101 @@
+# isa_codegen.yml 模板
+#
+# sdd.os ISA 配置檔案（Server Actions + Supabase 版）
+# 使用說明：根據專案的 spec/features/*.feature 配置步驟模式與 Executor 對應
+#
+# ============================================================
+
+# 專案技術棧：Next.js Server Actions + Supabase + PostgreSQL
+
+instructions:
+  # ============================================
+  # Given 步驟 - 資料準備
+  # ============================================
+
+  - name: Entity setup
+    format: ^準備一個(?P<entity>[\u4e00-\u9fffa-zA-Z]+), with table:$
+    step_type: Given
+    executor:
+      type: plugin
+      plugin_python_path: "{sdd_os_path}/src/sdd_os/features/executors/typescript/backend/setup/codegen/candidates/supabase_setup/executor.py"
+    constraints:
+      - <entity> must be a valid entity defined in entity_to_table_mapping.yml
+      - All column headers in the DataTable must be valid schema fields
+    subpackage: given
+    situation: to prepare test data in the database before Server Action calls
+
+  # ============================================
+  # When 步驟 - Server Action 呼叫
+  # ============================================
+
+  - name: Action call
+    format: ^(?P<summary>.+?), call table:$
+    step_type: When
+    executor:
+      type: plugin
+      plugin_python_path: "{sdd_os_path}/src/sdd_os/features/executors/typescript/backend/action_call/codegen/candidates/cucumberjs_server_action/executor.py"
+    subpackage: action
+    situation: to invoke the Server Action with the given parameters
+
+  # ============================================
+  # Then 步驟 - 回應驗證
+  # ============================================
+
+  - name: Action success validation
+    format: ^(?P<summary>.+?)成功,?\s*with table:$
+    step_type: Then
+    executor:
+      type: skip
+    linters:
+      - python_plugin_path: "{sdd_os_path}/src/isa_linters/plugins/extensions/action_response_validation/action_response_validation_linter.py"
+        config:
+          actions_spec_path: spec/actions
+    subpackage: then
+    situation: to validate the Server Action success response using table
+
+  - name: Operation failure
+    format: ^操作失敗$
+    step_type: Then
+    executor:
+      type: skip
+    subpackage: then
+    situation: to validate that the Server Action returned an error
+
+  # ============================================
+  # Then 步驟 - Entity 驗證
+  # ============================================
+
+  - name: Entity validate
+    format: ^存在一個(?P<entity>[\u4e00-\u9fffa-zA-Z]+), with table:$
+    step_type: Then
+    executor:
+      type: plugin
+      plugin_python_path: "{sdd_os_path}/src/sdd_os/features/executors/typescript/backend/validator/codegen/candidates/supabase_entity/executor.py"
+    constraints:
+      - <entity> must be a valid entity defined in entity_to_table_mapping.yml
+      - the entity's properties defined in the DataTable must match the entity spec
+      - All column headers in the DataTable must be valid schema structure paths
+    subpackage: then
+    situation: to validate the entity in the database with the given parameters
+
+# ============================================================
+# 配置項說明
+# ============================================================
+# name: 指令名稱，描述此步驟的用途
+# format: 正規表示式，用於匹配步驟文字
+# step_type: 步驟類型（Given/When/Then）
+# executor.type: Executor 類型（plugin/skip）
+# executor.plugin_python_path: Executor Python 模組路徑
+# linters: Linter 配置列表（可選）
+# constraints: 限制條件列表（可選）
+# subpackage: 生成程式碼的子套件目錄
+# situation: 情境說明，描述此步驟的執行時機
+#
+# ============================================================
+# 路徑配置說明
+# ============================================================
+# 將 {sdd_os_path} 替換為實際的 sdd.os 安裝路徑
+# 例如：/Users/eric/Desktop/sdd.os
+#
+# 或使用相對路徑（若專案在 sdd.os/benchmark 下）
+# 例如：../../../src/sdd_os/...

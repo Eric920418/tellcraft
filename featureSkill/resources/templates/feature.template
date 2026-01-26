@@ -1,0 +1,80 @@
+# sdd.os ISA Feature File 模板（Server Actions 版）
+#
+# 使用說明：
+# 1. 將 {action_name} 替換為實際的 Server Action 函數名稱（camelCase）
+# 2. 將 {summary} 替換為功能的中文描述（與 Feature 名稱一致）
+# 3. 根據實際需求修改 Background、Rule、Example
+#
+# ============================================================
+
+# Action: {action_name}
+# Summary: {summary}
+Feature: {summary}
+
+  # Background 用於準備測試所需的基礎資料
+  # 每個 Example 執行前都會先執行 Background
+  Background:
+    Given 準備一個{entity1}, with table:
+      | id   | {field1} | {field2} |
+      | E001 | value1   | value2   |
+    And 準備一個{entity2}, with table:
+      | id   | {field1} | {field2} |
+      | E002 | value1   | value2   |
+
+  #------------------------------------------------------------
+  # Rule 格式：{前置|後置} - {規則描述}
+  # 前置：執行前的驗證條件，失敗時回傳錯誤
+  # 後置：執行成功後的系統狀態變更
+  #------------------------------------------------------------
+  Rule: 後置 - {規則描述}
+  #------------------------------------------------------------
+
+    # Example 名稱應清楚描述測試場景
+    Example: 成功{action_description}
+      # When 步驟：呼叫 Server Action
+      # 格式：{summary}, call table:
+      When {summary}, call table:
+        | {input_field1} | {input_field2} |
+        | value1         | value2         |
+
+      # Then 步驟（成功）：驗證回應
+      # 格式：{summary}成功, with table:
+      Then {summary}成功, with table:
+        | {output_field1} | {output_field2} |
+        | expected1       | expected2       |
+
+      # 可選：驗證資料庫狀態
+      # 格式：存在一個{entity}, with table:
+      And 存在一個{entity}, with table:
+        | id   | {field1}  | {field2}  |
+        | E003 | expected1 | expected2 |
+
+  #------------------------------------------------------------
+  Rule: 前置 - {驗證條件描述}
+  #------------------------------------------------------------
+
+    # 失敗場景範例
+    Example: {validation_description}時拒絕操作
+      # Given 可用於覆寫 Background 中的資料
+      Given 準備一個{entity}, with table:
+        | id   | {field1}       | {field2} |
+        | E004 | invalid_value  | value    |
+
+      When {summary}, call table:
+        | {input_field1} | {input_field2} |
+        | invalid_input  | value          |
+
+      # Then 步驟（失敗）：驗證操作失敗
+      Then 操作失敗
+
+# ============================================================
+# 檢查清單（完成後刪除此區塊）
+# ============================================================
+# [ ] Action 名稱為 camelCase（如 createOrder）
+# [ ] Summary 與 Feature 名稱一致
+# [ ] 所有 Rule 都標註前置或後置
+# [ ] When 步驟使用 "{summary}, call table:" 格式
+# [ ] 成功 Then 使用 "{summary}成功, with table:" 格式
+# [ ] 失敗 Then 使用 "操作失敗"
+# [ ] DataTable 欄位與 schema.sql 一致
+# [ ] Entity 名稱與 entity_to_table_mapping.yml 一致
