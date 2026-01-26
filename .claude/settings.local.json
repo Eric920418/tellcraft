@@ -34,7 +34,10 @@
       "WebFetch(domain:reactscript.com)",
       "WebFetch(domain:deepwiki.com)",
       "Bash(git init:*)",
-      "Bash(git add:*)"
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(git remote add:*)",
+      "Bash(git push:*)"
     ]
   }
 }
