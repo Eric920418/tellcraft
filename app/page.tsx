@@ -2001,7 +2001,7 @@ function Footer() {
             © 2026 Tellcraft. All rights reserved.
           </div>
           <div style={{ fontSize: 12, color: 'var(--gray-400)' }}>
-            Made with AI in Taiwan
+            Made with AI in Taiwan 
           </div>
         </div>
       </div>
