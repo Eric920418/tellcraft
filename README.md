@@ -25,9 +25,11 @@ Tellcraft 是一個 AI 驅動的自動化開發平台。用戶只需描述需求
 | React 19 | UI 框架 | ✅ |
 | Framer Motion | 動畫效果 | ✅ |
 | next-themes | 深色/淺色模式 | ✅ |
-| Inngest | 事件驅動任務編排 | ✅ |
-| Supabase | 資料庫 (PostgreSQL) | ✅ |
-| Vercel | 網站部署 | ✅ |
+| Inngest | 事件驅動任務編排（大腦）| ✅ |
+| Modal | sdd.os 執行環境（手腳）| ⏳ 待整合 |
+| sdd.os | 規格驅動開發、TDD 迭代 | ⏳ 待整合 |
+| Supabase | 資料庫 + Storage | ✅ |
+| Vercel | 網站部署 + 用戶專案部署 | ✅ |
 | Cloudflare | DNS 託管 | ✅ |
 | Porkbun | 網域購買 | ⏳ Mock |
 
@@ -117,9 +119,217 @@ Hero → 往下滾動 → 產品介紹（SEO 友好）→ Testimonials → CTA
 | 27 | 任務優先級 | plan + task_type 混合 |
 | 28 | 外部通知機制 | Webhook + 內建通知 |
 
-**待完成**：完整測試覆蓋、Porkbun API 串接
+### Skill 整合狀態
 
-## 架構
+| Skill | 狀態 | 說明 |
+|-------|------|------|
+| `bdd-spec` | ✅ 完成 | 整合真正 LLM（Claude API）進行需求釐清與規格產出 |
+| `coder` | ⏳ Mock | 呼叫 generateCode，待 Modal + sdd.os 整合 |
+| `deployer` | ✅ 完成 | 整合 Vercel Deployments API，部署後自動詢問網域設定 |
+| `domain-manager` | ✅ 完成 | 網域管理入口，支援三種選擇 |
+| `domain-purchase` | ✅ 完成 | Porkbun 網域註冊 |
+| `domain-dns` | ✅ 完成 | Cloudflare Zone + Vercel 綁定 |
+
+### Domain Skills（拆分降低風險）
+
+| Skill | 功能 | 觸發詞 |
+|-------|------|--------|
+| `domain-manager` | 入口，詢問用戶選擇 | 網域、domain、自訂網址 |
+| `domain-purchase` | 購買網域（Porkbun 註冊） | 買網域、購買網域 |
+| `domain-dns` | 設定 DNS + 綁定 Vercel | 設定 DNS、自有網域 |
+
+```
+用戶：「設定網域」
+    ↓
+domain-manager（入口）
+    ↓
+┌─────────────────────────────────────┐
+│  1. 免費網域 → 直接完成             │
+│  2. 購買網域 → domain-purchase      │
+│  3. 自有網域 → domain-dns           │
+└─────────────────────────────────────┘
+
+購買網域流程（domain-purchase）：
+查詢可用性 → 收集 Registrant 資訊 → Porkbun 註冊 → 完成
+    ↓
+「輸入『設定 DNS』來完成設定」
+
+DNS 設定流程（domain-dns）：
+建立 Cloudflare Zone → 更新 Nameserver → 設定 DNS 記錄 → 綁定 Vercel → 完成
+```
+
+**相關 API**：
+- `porkbun.ts` - 網域購買/查詢 API
+- `cloudflare.ts` - DNS 管理 API
+- `domain.ts` - 網域工作流程整合
+
+**待完成**：
+- [ ] Modal 整合（sdd.os 執行環境）
+- [ ] Supabase Storage 版本管理
+- [x] Vercel Deployments API 整合（`deployProjectFromDb` 橋接真正的 Vercel/Supabase API）
+- [x] Domain Manager Skill（獨立於部署的網域管理）
+- [ ] 完整測試覆蓋
+- [x] Porkbun API 串接（網域購買功能待付款整合）
+- [x] BDD Spec 整合真正 LLM（Claude API）
+
+## 系統架構
+
+### 整體架構：Inngest 是大腦，Modal 是手腳
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│              用戶請求（tellcraft.com / Vercel）              │
+└─────────────────────────┬───────────────────────────────────┘
+                          ↓
+┌─────────────────────────────────────────────────────────────┐
+│                    Inngest（大腦）                           │
+│  - 接收用戶請求                                              │
+│  - 任務排隊 + 優先級                                         │
+│  - 狀態追蹤                                                  │
+│  - 等待用戶確認（waitForEvent）                              │
+│  - 錯誤重試                                                  │
+│  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐         │
+│  │   Intent    │→ │   Skill     │→ │  Workflow   │         │
+│  │ Classifier  │  │  Registry   │  │  Executor   │         │
+│  └─────────────┘  └─────────────┘  └─────────────┘         │
+└─────────────────────────┬───────────────────────────────────┘
+                          ↓ 觸發
+┌─────────────────────────────────────────────────────────────┐
+│                    Modal（手腳）                             │
+│  - 執行 sdd.os（規格驅動開發）                               │
+│  - TDD 迭代循環（測試 → 實作 → 測試）                        │
+│  - 生成程式碼                                                │
+│  - 長時間運行（最多 30 分鐘）                                │
+└─────────────────────────┬───────────────────────────────────┘
+                          ↓ 完成後回報
+┌─────────────────────────────────────────────────────────────┐
+│                 Inngest（繼續編排）                          │
+│  - 存到 Supabase Storage                                    │
+│  - 呼叫 Vercel Deployments API 部署                         │
+│  - 通知用戶完成                                              │
+└─────────────────────────┬───────────────────────────────────┘
+                          ↓
+┌─────────────────────────────────────────────────────────────┐
+│                   Server Actions（14 個）                    │
+│  createProject · sendMessage · generateCode · deployProject │
+│  updateProject · cancelSubscription · exportData · ...      │
+└─────────────────────────────────────────────────────────────┘
+                          ↓
+┌─────────────────────────────────────────────────────────────┐
+│                        外部服務                              │
+│       Vercel · Supabase · Cloudflare · Modal · sdd.os       │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### 為什麼這樣分工？
+
+| 元件 | 職責 | 原因 |
+|------|------|------|
+| **Inngest** | 任務編排、狀態追蹤、等待事件 | 免費額度 25,000 runs/月，擅長編排 |
+| **Modal** | 執行 sdd.os、TDD 迭代 | 按秒計費，支援長時間運行 |
+| **Vercel** | 前端 + API + 用戶專案部署 | Serverless，自動擴展 |
+| **Supabase** | 資料庫 + Storage | 統一存儲，便宜 |
+
+### 並發處理策略
+
+當 100 個用戶同時開發時：
+
+```typescript
+// Inngest 自動排隊 + 並發控制
+inngest.createFunction(
+  {
+    id: 'handle-user-request',
+    concurrency: {
+      limit: 10,  // 同時最多處理 10 個請求
+    },
+  },
+  // ...
+)
+```
+
+- **Inngest**：自動排隊、優先級調度（付費用戶優先）
+- **Modal**：按需啟動 Worker，閒置不花錢
+- **LLM API**：多 Key 輪換分散 rate limit
+
+### 程式碼存儲：Supabase Storage
+
+選擇 Supabase Storage 而非 Git 的原因：
+
+| 面向 | Git | Supabase Storage |
+|------|-----|------------------|
+| 管理 100 用戶 | ❌ 100 個 repo 很亂 | ✅ 一個 bucket 搞定 |
+| Rate Limit | ❌ GitHub API 有限制 | ✅ 無限制 |
+| 費用 | ❌ Private repo 要錢 | ✅ 便宜 |
+| 版本控制 | ✅ 原生支援 | ⚠️ 自建版本管理 |
+
+```
+/storage/projects/{projectId}/
+  ├── v1/
+  │   ├── src/
+  │   ├── package.json
+  │   └── ...
+  ├── v2/
+  └── current -> v2  (最新版本)
+```
+
+### 部署方式：Vercel Deployments API
+
+不需要 Git，直接用 API 部署：
+
+```typescript
+const response = await fetch('https://api.vercel.com/v13/deployments', {
+  method: 'POST',
+  headers: {
+    Authorization: `Bearer ${VERCEL_TOKEN}`,
+  },
+  body: JSON.stringify({
+    name: 'user-project-123',
+    files: [
+      { file: 'pages/index.tsx', data: btoa(generatedCode) },
+      { file: 'package.json', data: btoa(packageJson) },
+    ],
+    projectSettings: { framework: 'nextjs' },
+  }),
+})
+```
+
+## Inngest 配置
+
+### 部署設定
+
+| 項目 | 值 |
+|------|-----|
+| 平台 | Vercel |
+| Endpoint | `https://tellcraft.com/api/inngest` |
+| App ID | `tellcraft` |
+| Integration | Vercel Integration（自動注入環境變數）|
+
+### 環境變數（Vercel）
+
+```bash
+INNGEST_EVENT_KEY=xxx      # 從 Inngest Dashboard 取得
+INNGEST_SIGNING_KEY=xxx    # 從 Inngest Dashboard 取得
+```
+
+### Vercel Integration 設定
+
+1. 啟用 Inngest Vercel Integration
+2. 設定 Custom Production Domain：`tellcraft.com`
+3. 關閉 Vercel Deployment Protection（否則 Inngest 無法同步）
+
+### 驗證 Inngest 連線
+
+```bash
+curl https://tellcraft.com/api/inngest
+# 應返回：
+# {
+#   "has_event_key": true,
+#   "has_signing_key": true,
+#   "function_count": 1
+# }
+```
+
+## 舊架構（參考）
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
@@ -129,17 +339,6 @@ Hero → 往下滾動 → 產品介紹（SEO 友好）→ Testimonials → CTA
 │  │ Classifier  │  │  Registry   │  │  Executor   │         │
 │  └─────────────┘  └─────────────┘  └─────────────┘         │
 └─────────────────────────────────────────────────────────────┘
-                            ↓
-┌─────────────────────────────────────────────────────────────┐
-│                   Server Actions（14 個）                    │
-│  createProject · sendMessage · generateCode · deployProject │
-│  updateProject · cancelSubscription · exportData · ...      │
-└─────────────────────────────────────────────────────────────┘
-                            ↓
-┌─────────────────────────────────────────────────────────────┐
-│                        外部 API                              │
-│       Vercel · Supabase · Cloudflare · Porkbun              │
-└─────────────────────────────────────────────────────────────┘
 ```
 
 ## 執行流程
@@ -147,13 +346,36 @@ Hero → 往下滾動 → 產品介紹（SEO 友好）→ Testimonials → CTA
 ```
 用戶：「幫我建一個訂單管理系統」
   ↓
-Intent Classification → bdd-spec Skill
+┌─────────────────────────────────────────┐
+│ Inngest: Intent Classification          │
+│ → 識別為 bdd-spec Skill                 │
+└─────────────────────────────────────────┘
   ↓
-多輪對話釐清需求（最長 24 小時）
+┌─────────────────────────────────────────┐
+│ Inngest: 多輪對話釐清需求               │
+│ → waitForEvent（最長 24 小時）          │
+└─────────────────────────────────────────┘
   ↓
-規格確認 → coder Skill（自癒機制，最多 3 次）
+┌─────────────────────────────────────────┐
+│ Inngest: 規格確認                       │
+│ → 生成 BDD Feature Files + Schema       │
+└─────────────────────────────────────────┘
   ↓
-部署到 Vercel + Supabase
+┌─────────────────────────────────────────┐
+│ Modal: 執行 sdd.os                      │
+│ → TDD 迭代（測試 → 實作 → 測試）        │
+│ → 自癒機制，最多 3 次                   │
+│ → 完成後回報 Inngest                    │
+└─────────────────────────────────────────┘
+  ↓
+┌─────────────────────────────────────────┐
+│ Inngest: 存儲 + 部署                    │
+│ → 存到 Supabase Storage                 │
+│ → Vercel Deployments API 部署           │
+│ → 通知用戶                              │
+└─────────────────────────────────────────┘
+  ↓
+用戶收到：https://user-project.vercel.app
 ```
 
 ## 快速開始
@@ -172,16 +394,6 @@ npx inngest-cli@latest dev
 - 應用：http://localhost:3000
 - Inngest Dashboard：http://localhost:8288
 - 測試頁面：http://localhost:3000/test
-
-## 環境變數
-
-```bash
-# .env.local
-ANTHROPIC_API_KEY=sk-ant-xxx
-SUPABASE_URL=...
-VERCEL_TOKEN=...
-CLOUDFLARE_API_TOKEN=...
-```
 
 ## 專案結構
 

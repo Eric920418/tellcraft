@@ -2,7 +2,7 @@
 // Skill 註冊表
 // ============================================================
 
-export type SkillName = 'bdd-spec' | 'coder' | 'deployer'
+export type SkillName = 'bdd-spec' | 'coder' | 'deployer' | 'domain-manager' | 'domain-purchase' | 'domain-dns'
 
 export interface SkillMetadata {
   name: SkillName
@@ -76,6 +76,61 @@ export const SKILL_REGISTRY: Record<SkillName, SkillMetadata> = {
     timeoutMs: 300000, // 5 分鐘
     inputSchema: {
       required: ['projectId'],
+      optional: [],
+    },
+  },
+
+  'domain-manager': {
+    name: 'domain-manager',
+    displayName: '網域管理',
+    description: `管理專案的自訂網域（入口）：
+      1. 使用免費 .vercel.app 網域（預設）
+      2. 透過平台購買網域（Porkbun）
+      3. 使用自有網域`,
+    triggerPatterns: [
+      '網域', 'domain', '網址', 'URL',
+      '自訂網域', '綁定網域', '設定網域',
+    ],
+    minPlan: 'free',
+    costLevel: 'low',
+    timeoutMs: 300000,
+    inputSchema: {
+      required: ['projectId'],
+      optional: ['domainType', 'domain'],
+    },
+  },
+
+  'domain-purchase': {
+    name: 'domain-purchase',
+    displayName: '購買網域',
+    description: '透過 Porkbun 購買並註冊新網域（不含 DNS 設定）',
+    triggerPatterns: [
+      '買網域', '購買網域', '註冊網域',
+      'buy domain', 'register domain',
+    ],
+    minPlan: 'free',
+    costLevel: 'medium',
+    timeoutMs: 300000, // 5 分鐘
+    inputSchema: {
+      required: ['projectId'],
+      optional: ['domain'],
+    },
+  },
+
+  'domain-dns': {
+    name: 'domain-dns',
+    displayName: '設定 DNS',
+    description: '設定 Cloudflare DNS 並綁定到 Vercel（適用於已購買或自有網域）',
+    triggerPatterns: [
+      '設定 dns', 'dns 設定', '綁定 dns',
+      'cloudflare', 'nameserver',
+      '自有網域', '已有網域',
+    ],
+    minPlan: 'free',
+    costLevel: 'low',
+    timeoutMs: 600000, // 10 分鐘
+    inputSchema: {
+      required: ['projectId', 'domain'],
       optional: [],
     },
   },

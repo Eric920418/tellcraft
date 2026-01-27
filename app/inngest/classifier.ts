@@ -49,11 +49,14 @@ ${skillDescriptions}
 1. 如果用戶描述的是「想要建立什麼系統/功能」，通常是 bdd-spec
 2. 如果用戶明確說「生成程式碼」或「實作」，而且已經有規格，是 coder
 3. 如果用戶說「部署」或「上線」，是 deployer
-4. 如果無法確定，返回 clarification_needed
+4. 如果用戶說「網域」、「domain」、「自訂網址」（一般性），是 domain-manager
+5. 如果用戶明確說「買網域」、「購買網域」、「註冊網域」，是 domain-purchase
+6. 如果用戶說「設定 DNS」、「綁定 DNS」、「自有網域」、「已有網域」，是 domain-dns
+7. 如果無法確定，返回 clarification_needed
 
 ## 輸出格式（JSON）:
 {
-  "intent": "bdd-spec" | "coder" | "deployer" | "unknown" | "clarification_needed",
+  "intent": "bdd-spec" | "coder" | "deployer" | "domain-manager" | "domain-purchase" | "domain-dns" | "unknown" | "clarification_needed",
   "confidence": 0.0-1.0,
   "reasoning": "判斷理由",
   "extractedEntities": {
@@ -124,6 +127,53 @@ ${skillDescriptions}
 
 function ruleBasedClassification(message: string): ClassificationResult {
   const lowerMessage = message.toLowerCase()
+
+  // 購買網域（優先檢查，更具體）
+  if (
+    lowerMessage.includes('買網域') ||
+    lowerMessage.includes('購買網域') ||
+    lowerMessage.includes('註冊網域') ||
+    lowerMessage.includes('buy domain') ||
+    lowerMessage.includes('register domain')
+  ) {
+    return {
+      intent: 'domain-purchase',
+      confidence: 0.9,
+      reasoning: '訊息包含購買網域相關關鍵詞',
+    }
+  }
+
+  // 設定 DNS（優先檢查，更具體）
+  if (
+    lowerMessage.includes('設定 dns') ||
+    lowerMessage.includes('dns 設定') ||
+    lowerMessage.includes('綁定 dns') ||
+    lowerMessage.includes('自有網域') ||
+    lowerMessage.includes('已有網域') ||
+    lowerMessage.includes('cloudflare') ||
+    lowerMessage.includes('nameserver')
+  ) {
+    return {
+      intent: 'domain-dns',
+      confidence: 0.9,
+      reasoning: '訊息包含 DNS 設定相關關鍵詞',
+    }
+  }
+
+  // 網域管理（一般性）
+  if (
+    lowerMessage.includes('網域') ||
+    lowerMessage.includes('domain') ||
+    lowerMessage.includes('自訂網址') ||
+    lowerMessage.includes('綁定網域') ||
+    lowerMessage.includes('設定網域')
+  ) {
+    return {
+      intent: 'domain-manager',
+      confidence: 0.8,
+      reasoning: '訊息包含網域管理相關關鍵詞',
+    }
+  }
 
   // 部署相關
   if (

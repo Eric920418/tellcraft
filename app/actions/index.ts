@@ -1,6 +1,7 @@
 'use server'
 
 import { supabase, PLAN_MESSAGE_LIMITS, PLAN_PROJECT_LIMITS, PLAN_PRIORITY_WEIGHTS } from '../lib/supabase'
+import { deployProject as deployProjectReal, generateNextJsTemplate } from './deploy'
 
 // ============================================================
 // 類型定義
@@ -924,5 +925,125 @@ export async function configureWebhook(input: {
   return {
     success: true,
     data: { webhookId: newWebhookId, url, isActive: true }
+  }
+}
+
+// ============================================================
+// 部署整合 Actions
+// ============================================================
+
+/**
+ * 從資料庫取得專案 Schema
+ * 優先從 generations 表讀取，否則返回空字串
+ */
+async function getProjectSchema(projectId: string): Promise<string> {
+  // 優先從 generations 表讀取
+  const { data: gen } = await supabase
+    .from('generations')
+    .select('generated_code_url')
+    .eq('project_id', projectId)
+    .eq('status', 'success')
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .single()
+
+  if (gen?.generated_code_url) {
+    // TODO: 從 Storage 讀取 schema
+    // 暫時返回空 schema
+  }
+
+  // 暫時返回空 schema（用模板）
+  return ''
+}
+
+/**
+ * 從資料庫或模板取得專案檔案
+ */
+async function getProjectFiles(projectId: string): Promise<Array<{ file: string; data: string }>> {
+  // 優先從 Storage 讀取
+  // TODO: 實作 Storage 讀取
+
+  // 暫時使用模板
+  const { data: project } = await supabase
+    .from('projects')
+    .select('name')
+    .eq('id', projectId)
+    .single()
+
+  return generateNextJsTemplate(project?.name || 'my-app', '')
+}
+
+/**
+ * 從資料庫部署專案（整合真正的 Vercel API）
+ * - 前置：專案狀態必須為 testing
+ * - 後置：部署成功後更新專案的 Vercel/Supabase 資訊
+ */
+export async function deployProjectFromDb(input: {
+  projectId: string
+}): Promise<ActionResult<{ deploymentId: string; url?: string; status: string }>> {
+  const { projectId } = input
+
+  // 1. 查詢專案資訊
+  const { data: project, error: projectError } = await supabase
+    .from('projects')
+    .select('id, name, status')
+    .eq('id', projectId)
+    .single()
+
+  if (projectError || !project) {
+    return { success: false, error: '專案不存在' }
+  }
+
+  // 2. 前置條件檢查
+  if (project.status !== 'testing') {
+    return { success: false, error: '專案狀態必須為 testing' }
+  }
+
+  // 3. 讀取 schema
+  const schema = await getProjectSchema(projectId)
+
+  // 4. 讀取或生成程式碼
+  const files = await getProjectFiles(projectId)
+
+  // 5. 呼叫真正的部署 API
+  const result = await deployProjectReal({
+    name: project.name,
+    schema,
+    files,
+  })
+
+  // 6. 根據結果更新資料庫
+  if (result.stage === 'complete') {
+    await supabase
+      .from('projects')
+      .update({
+        status: 'deployed',
+        vercel_url: result.deploymentUrl,
+        vercel_project_id: result.vercelProjectId,
+        supabase_project_id: result.supabaseProjectId,
+        supabase_url: result.supabaseUrl,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', projectId)
+
+    return {
+      success: true,
+      data: {
+        deploymentId: result.vercelProjectId || '',
+        url: result.deploymentUrl,
+        status: result.stage,
+      },
+    }
+  }
+
+  // 部署失敗
+  return {
+    success: false,
+    data: {
+      deploymentId: '',
+      url: undefined,
+      status: result.stage,
+    },
+    error: result.error || result.message,
   }
 }
