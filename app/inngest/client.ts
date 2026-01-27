@@ -118,7 +118,7 @@ type Events = {
 // ============================================================
 
 export const inngest = new Inngest({
-  id: 'ai-genesis',
+  id: 'tellcraft',
   schemas: new EventSchemas().fromRecord<Events>(),
 })
 
