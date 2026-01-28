@@ -1,8 +1,11 @@
 import { createClient } from '@supabase/supabase-js'
 
 // Supabase client - 使用環境變量或測試模式
-const supabaseUrl = process.env.SUPABASE_URL || 'http://localhost:54321'
-const supabaseKey = process.env.SUPABASE_ANON_KEY || 'test-key'
+// 注意：這是 admin/service client，用於 Server Actions
+// 前端應使用 app/lib/supabase/client.ts
+// Server 端認證應使用 app/lib/supabase/server.ts
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL || 'http://localhost:54321'
+const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY || 'test-key'
 
 export const supabase = createClient(supabaseUrl, supabaseKey)
 

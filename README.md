@@ -12,10 +12,73 @@ Tellcraft 是一個 AI 驅動的自動化開發平台。用戶只需描述需求
 
 ## 當前開發進度
 
-- **狀態**：✅ Phase 1-5 + Server Actions + Inngest Orchestrator 完成
+- **狀態**：✅ Phase 1-5 + Server Actions + Inngest Orchestrator + 前端 Chat 串接 + 認證系統完成
 - **釐清項目**：28 項全部解決
-- **Server Actions**：14/14 已實作並通過測試
+- **Server Actions**：22/22 已實作並通過測試
 - **詳情**：[`.clarify/overview.md`](.clarify/overview.md)
+
+### 認證系統
+
+支援 Google 和 LINE OAuth 登入，使用 `@supabase/ssr` 實現 SSR 友善的 session 管理：
+
+```
+登入頁 → Google/LINE OAuth → Supabase Auth → Session Cookie → 受保護路由
+```
+
+**架構**：
+- `app/lib/supabase/client.ts` - Browser client（前端）
+- `app/lib/supabase/server.ts` - Server client（Server Actions）
+- `middleware.ts` - Session refresh + 路由保護
+- `app/auth/login/page.tsx` - 登入頁面（卡片式設計）
+- `app/auth/callback/route.ts` - OAuth callback（PKCE）
+- `app/api/auth/line/` - LINE OAuth 自訂流程
+
+**新增 Server Actions**：
+- `initializeSessionFromAuth` - 從認證 session 初始化（已登入用戶）
+- `getCurrentUser` - 取得當前認證用戶
+- `signOut` - 登出
+
+**環境變數**：
+```bash
+# Supabase Auth
+NEXT_PUBLIC_SUPABASE_URL=https://xxx.supabase.co
+NEXT_PUBLIC_SUPABASE_ANON_KEY=eyJ...
+SUPABASE_SERVICE_ROLE_KEY=eyJ...  # LINE 備選方案
+
+# LINE OAuth
+LINE_CHANNEL_ID=xxx
+LINE_CHANNEL_SECRET=xxx
+
+# App URL
+NEXT_PUBLIC_APP_URL=https://tellcraft.com
+```
+
+**Supabase Dashboard 配置**：
+1. Authentication > Providers > 啟用 Google
+2. 配置 Google Cloud Console 的 Client ID/Secret
+3. Site URL: `https://tellcraft.com`
+4. Redirect URLs: `https://tellcraft.com/auth/callback`
+
+### 前端 Chat 串接 Inngest
+
+用戶在首頁輸入需求後，真正觸發 `bdd-spec` skill，實現完整的多輪對話流程：
+
+```
+用戶輸入 → initializeSession（匿名用戶）
+    → sendMessageAndTrigger → triggerUserRequest
+    → Inngest Orchestrator → bdd-spec skill
+    → AI 回覆寫入 DB → 前端輪詢取得
+    → 用戶回覆 → triggerUserReply → Inngest 恢復
+```
+
+**Chat 相關 Server Actions**：
+- `initializeSession` - 創建或獲取匿名用戶的會話（訪客模式）
+- `initializeSessionFromAuth` - 從認證 session 初始化（已登入用戶）
+- `sendMessageAndTrigger` - 發送消息並觸發 Inngest
+- `replyToConversation` - 多輪對話時用戶回覆
+- `getConversationMessages` - 獲取對話消息（用於輪詢）
+- `getCurrentUser` - 取得當前認證用戶
+- `signOut` - 登出
 
 ## 技術棧
 
@@ -25,10 +88,11 @@ Tellcraft 是一個 AI 驅動的自動化開發平台。用戶只需描述需求
 | React 19 | UI 框架 | ✅ |
 | Framer Motion | 動畫效果 | ✅ |
 | next-themes | 深色/淺色模式 | ✅ |
+| @supabase/ssr | SSR 認證 | ✅ |
 | Inngest | 事件驅動任務編排（大腦）| ✅ |
 | Modal | sdd.os 執行環境（手腳）| ⏳ 待整合 |
 | sdd.os | 規格驅動開發、TDD 迭代 | ⏳ 待整合 |
-| Supabase | 資料庫 + Storage | ✅ |
+| Supabase | 資料庫 + Storage + Auth | ✅ |
 | Vercel | 網站部署 + 用戶專案部署 | ✅ |
 | Cloudflare | DNS 託管 | ✅ |
 | Porkbun | 網域購買 | ⏳ Mock |
@@ -210,9 +274,10 @@ DNS 設定流程（domain-dns）：
 └─────────────────────────┬───────────────────────────────────┘
                           ↓
 ┌─────────────────────────────────────────────────────────────┐
-│                   Server Actions（14 個）                    │
+│                   Server Actions（18 個）                    │
 │  createProject · sendMessage · generateCode · deployProject │
 │  updateProject · cancelSubscription · exportData · ...      │
+│  initializeSession · sendMessageAndTrigger · replyToConv... │
 └─────────────────────────────────────────────────────────────┘
                           ↓
 ┌─────────────────────────────────────────────────────────────┐
@@ -401,8 +466,15 @@ npx inngest-cli@latest dev
 app/
 ├── actions/           # Server Actions（API 封裝）
 ├── inngest/           # Orchestrator（任務編排）
-├── lib/               # 共用工具
+├── lib/
+│   └── supabase/      # Supabase clients（client.ts, server.ts）
+├── auth/
+│   ├── login/         # 登入頁面
+│   └── callback/      # OAuth callback
+├── api/auth/line/     # LINE OAuth 路由
 └── test/              # 測試頁面
+
+middleware.ts          # Session refresh + 路由保護
 
 spec/
 ├── data/              # Schema + Entity Mapping

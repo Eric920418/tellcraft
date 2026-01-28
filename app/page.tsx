@@ -9,6 +9,15 @@ import CardSwap, { Card } from './components/CardSwap'
 // import GridDistortion from './components/GridDistortion'
 import TextType from './components/TextType'
 import { AnimatedThemeToggler } from './components/AnimatedThemeToggler'
+import {
+  initializeSession,
+  initializeSessionFromAuth,
+  sendMessageAndTrigger,
+  replyToConversation,
+  getConversationMessages,
+  getCurrentUser,
+  signOut
+} from './actions'
 
 // ============ Types ============
 interface Message {
@@ -557,6 +566,19 @@ function HeroSection({
 }
 
 // ============ Chat Section ============
+interface SessionInfo {
+  userId: string
+  projectId: string
+  conversationId: string
+  currentTaskId?: string
+  isAuthenticated?: boolean
+  user?: {
+    email?: string
+    name?: string
+    avatarUrl?: string
+  }
+}
+
 function ChatSection({
   isActive,
   initialMessage,
@@ -570,141 +592,225 @@ function ChatSection({
   const [input, setInput] = useState('')
   const [isTyping, setIsTyping] = useState(false)
   const [currentStage, setCurrentStage] = useState<Message['stage']>('discovery')
+  const [sessionInfo, setSessionInfo] = useState<SessionInfo | null>(null)
+  const [isInitializing, setIsInitializing] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [lastTimestamp, setLastTimestamp] = useState<string | null>(null)
   const messagesEndRef = useRef<HTMLDivElement>(null)
+  const hasInitialized = useRef(false)
 
+  // 初始化會話
   useEffect(() => {
-    if (isActive && initialMessage && messages.length === 0) {
-      const userMsg: Message = {
-        id: '1',
-        role: 'user',
-        content: initialMessage,
-        timestamp: new Date()
-      }
-      setMessages([userMsg])
-      setIsTyping(true)
+    if (!isActive || hasInitialized.current) return
+    hasInitialized.current = true
 
-      setTimeout(() => {
-        const aiMsg: Message = {
-          id: '2',
-          role: 'assistant',
-          content: `好的，我需要了解更多細節：
+    const init = async () => {
+      setIsInitializing(true)
+      setError(null)
 
-1. 主要功能有哪些？
-2. 需要會員系統嗎？
-3. 有沒有付款需求？`,
-          timestamp: new Date(),
-          stage: 'clarify'
+      // 優先嘗試從認證 session 初始化
+      const authResult = await initializeSessionFromAuth()
+
+      let session: SessionInfo
+
+      if (authResult.success && authResult.data) {
+        // 已登入用戶
+        session = {
+          userId: authResult.data.userId,
+          projectId: authResult.data.projectId,
+          conversationId: authResult.data.conversationId,
+          isAuthenticated: true,
+          user: authResult.data.user
         }
-        setMessages(prev => [...prev, aiMsg])
-        setCurrentStage('clarify')
-        setIsTyping(false)
-      }, 1200)
-    }
-  }, [isActive, initialMessage, messages.length])
+      } else {
+        // 未登入，使用匿名模式
+        let anonymousId = localStorage.getItem('tellcraft_anonymous_id')
+        if (!anonymousId) {
+          anonymousId = crypto.randomUUID()
+          localStorage.setItem('tellcraft_anonymous_id', anonymousId)
+        }
 
+        const result = await initializeSession({ anonymousId })
+
+        if (!result.success || !result.data) {
+          setError(result.error || '初始化失敗')
+          setIsInitializing(false)
+          return
+        }
+
+        session = {
+          userId: result.data.userId,
+          projectId: result.data.projectId,
+          conversationId: result.data.conversationId,
+          isAuthenticated: false
+        }
+      }
+
+      setSessionInfo(session)
+
+      // 如果有初始消息，發送它
+      if (initialMessage) {
+        // 樂觀更新：先顯示用戶消息
+        const userMsg: Message = {
+          id: crypto.randomUUID(),
+          role: 'user',
+          content: initialMessage,
+          timestamp: new Date()
+        }
+        setMessages([userMsg])
+        setIsTyping(true)
+        setCurrentStage('clarify')
+
+        // 發送消息並觸發 Inngest
+        const sendResult = await sendMessageAndTrigger({
+          conversationId: session.conversationId,
+          content: initialMessage,
+          userId: session.userId,
+          projectId: session.projectId
+        })
+
+        if (!sendResult.success) {
+          setError(sendResult.error || '發送消息失敗')
+        }
+      }
+
+      setIsInitializing(false)
+    }
+
+    init()
+  }, [isActive, initialMessage])
+
+  // 輪詢獲取新消息
+  useEffect(() => {
+    if (!sessionInfo) return
+
+    const poll = async () => {
+      const result = await getConversationMessages({
+        conversationId: sessionInfo.conversationId,
+        afterTimestamp: lastTimestamp || undefined
+      })
+
+      if (result.success && result.data) {
+        const newMessages = result.data.messages
+
+        if (newMessages.length > 0) {
+          // 轉換消息格式
+          const formattedMessages: Message[] = newMessages.map((m) => ({
+            id: m.id,
+            role: m.role,
+            content: m.content,
+            timestamp: new Date(m.timestamp),
+            stage: m.stage as Message['stage']
+          }))
+
+          // 更新消息列表（合併現有消息和新消息）
+          setMessages(prev => {
+            const existingIds = new Set(prev.map(m => m.id))
+            const uniqueNewMessages = formattedMessages.filter(m => !existingIds.has(m.id))
+            if (uniqueNewMessages.length > 0) {
+              // 找到最後一條 AI 消息，更新 stage
+              const lastAiMessage = [...prev, ...uniqueNewMessages]
+                .filter(m => m.role === 'assistant')
+                .pop()
+              if (lastAiMessage?.stage) {
+                setCurrentStage(lastAiMessage.stage)
+              }
+              // 如果有新的 AI 消息，停止 typing
+              if (uniqueNewMessages.some(m => m.role === 'assistant')) {
+                setIsTyping(false)
+              }
+              return [...prev, ...uniqueNewMessages]
+            }
+            return prev
+          })
+
+          // 更新最後時間戳
+          const latestTimestamp = newMessages[newMessages.length - 1]?.timestamp
+          if (latestTimestamp) {
+            setLastTimestamp(latestTimestamp)
+          }
+        }
+
+        // 更新 taskId
+        if (result.data.currentTaskId) {
+          setSessionInfo(prev => prev ? {
+            ...prev,
+            currentTaskId: result.data!.currentTaskId
+          } : null)
+        }
+      }
+    }
+
+    // 立即執行一次
+    poll()
+
+    // 設置輪詢間隔
+    const interval = setInterval(poll, 2000)
+
+    return () => clearInterval(interval)
+  }, [sessionInfo?.conversationId, lastTimestamp])
+
+  // 滾動到底部
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages])
 
-  const handleSend = () => {
-    if (!input.trim() || isTyping) return
+  // 重置狀態當離開
+  useEffect(() => {
+    if (!isActive) {
+      hasInitialized.current = false
+      setMessages([])
+      setSessionInfo(null)
+      setLastTimestamp(null)
+      setCurrentStage('discovery')
+      setError(null)
+    }
+  }, [isActive])
 
+  const handleSend = async () => {
+    if (!sessionInfo || !input.trim() || isTyping) return
+
+    const content = input.trim()
+    setInput('')
+
+    // 樂觀更新
     const userMessage: Message = {
-      id: Date.now().toString(),
+      id: crypto.randomUUID(),
       role: 'user',
-      content: input,
+      content,
       timestamp: new Date()
     }
     setMessages(prev => [...prev, userMessage])
-    setInput('')
     setIsTyping(true)
 
-    setTimeout(() => {
-      let response: Message
+    // 判斷是首次消息還是多輪對話回覆
+    if (sessionInfo.currentTaskId) {
+      // 多輪對話回覆
+      const result = await replyToConversation({
+        conversationId: sessionInfo.conversationId,
+        projectId: sessionInfo.projectId,
+        taskId: sessionInfo.currentTaskId,
+        content
+      })
 
-      if (currentStage === 'clarify') {
-        response = {
-          id: (Date.now() + 1).toString(),
-          role: 'assistant',
-          content: `了解。我整理出以下規格：
-
-• 功能清單已確認
-• 業務規則已定義
-• 資料結構已設計
-
-這樣對嗎？確認後我會開始生成程式碼。`,
-          timestamp: new Date(),
-          stage: 'formulation'
-        }
-        setCurrentStage('formulation')
-      } else if (currentStage === 'formulation') {
-        response = {
-          id: (Date.now() + 1).toString(),
-          role: 'assistant',
-          content: `開始生成程式碼...`,
-          timestamp: new Date(),
-          stage: 'generating'
-        }
-        setCurrentStage('generating')
-
-        setTimeout(() => {
-          setMessages(prev => [...prev, {
-            id: (Date.now() + 2).toString(),
-            role: 'system',
-            content: '正在建立資料庫結構...',
-            timestamp: new Date()
-          }])
-        }, 1500)
-
-        setTimeout(() => {
-          setMessages(prev => [...prev, {
-            id: (Date.now() + 3).toString(),
-            role: 'system',
-            content: '正在生成前端元件...',
-            timestamp: new Date()
-          }])
-        }, 3000)
-
-        setTimeout(() => {
-          setMessages(prev => [...prev, {
-            id: (Date.now() + 4).toString(),
-            role: 'assistant',
-            content: `你的網站已上線！
-
-網址：https://your-project.tellcraft.app
-
-接下來你可以：
-• 綁定自訂網域
-• 進入後台設定
-• 繼續新增功能`,
-            timestamp: new Date(),
-            stage: 'complete'
-          }])
-          setCurrentStage('complete')
-        }, 5000)
-      } else if (currentStage === 'complete') {
-        response = {
-          id: (Date.now() + 1).toString(),
-          role: 'assistant',
-          content: `好的，我來幫你修改。請描述你想要的變更。`,
-          timestamp: new Date(),
-          stage: 'clarify'
-        }
-        setCurrentStage('clarify')
-      } else {
-        response = {
-          id: (Date.now() + 1).toString(),
-          role: 'assistant',
-          content: `收到，讓我處理一下。`,
-          timestamp: new Date()
-        }
+      if (!result.success) {
+        setError(result.error || '發送失敗')
+        setIsTyping(false)
       }
+    } else {
+      // 首次消息
+      const result = await sendMessageAndTrigger({
+        conversationId: sessionInfo.conversationId,
+        content,
+        userId: sessionInfo.userId,
+        projectId: sessionInfo.projectId
+      })
 
-      if (currentStage !== 'formulation') {
-        setMessages(prev => [...prev, response])
+      if (!result.success) {
+        setError(result.error || '發送失敗')
+        setIsTyping(false)
       }
-      setIsTyping(false)
-    }, 800)
+    }
   }
 
   const stages = [
@@ -771,21 +877,96 @@ function ChatSection({
                 Tellcraft
               </span>
             </div>
-            <div style={{ display: 'flex', gap: 24 }}>
-              {stages.map((stage, i) => (
-                <ProcessStep
-                  key={stage.key}
-                  step={i + 1}
-                  title={stage.title}
-                  active={currentStage === stage.key}
-                  completed={i < currentStageIndex}
-                />
-              ))}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 24 }}>
+              <div style={{ display: 'flex', gap: 24 }}>
+                {stages.map((stage, i) => (
+                  <ProcessStep
+                    key={stage.key}
+                    step={i + 1}
+                    title={stage.title}
+                    active={currentStage === stage.key}
+                    completed={i < currentStageIndex}
+                  />
+                ))}
+              </div>
+              {/* 用戶資訊 */}
+              {sessionInfo && (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginLeft: 24 }}>
+                  {sessionInfo.isAuthenticated ? (
+                    <>
+                      {sessionInfo.user?.avatarUrl && (
+                        <img
+                          src={sessionInfo.user.avatarUrl}
+                          alt=""
+                          style={{
+                            width: 28,
+                            height: 28,
+                            borderRadius: '50%',
+                            border: '1px solid var(--border-color)',
+                          }}
+                        />
+                      )}
+                      <span style={{ fontSize: 13, color: 'var(--gray-600)' }}>
+                        {sessionInfo.user?.name || sessionInfo.user?.email?.split('@')[0] || '用戶'}
+                      </span>
+                    </>
+                  ) : (
+                    <a
+                      href="/auth/login"
+                      style={{
+                        fontSize: 13,
+                        color: 'var(--gray-500)',
+                        textDecoration: 'none',
+                        padding: '6px 12px',
+                        border: '1px solid var(--border-color)',
+                      }}
+                    >
+                      登入
+                    </a>
+                  )}
+                </div>
+              )}
             </div>
           </motion.header>
 
           <div style={{ flex: 1, overflow: 'auto', padding: '32px 0' }}>
             <div style={{ maxWidth: 680, margin: '0 auto', padding: '0 24px' }}>
+              {/* 錯誤提示 */}
+              {error && (
+                <motion.div
+                  initial={{ opacity: 0, y: -10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  style={{
+                    padding: '12px 16px',
+                    background: '#FEE2E2',
+                    border: '1px solid #FECACA',
+                    color: '#DC2626',
+                    fontSize: 14,
+                    marginBottom: 20,
+                  }}
+                >
+                  {error}
+                </motion.div>
+              )}
+
+              {/* 初始化中 */}
+              {isInitializing && (
+                <motion.div
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    padding: '40px 0',
+                    color: 'var(--gray-500)',
+                    fontSize: 14,
+                  }}
+                >
+                  正在初始化...
+                </motion.div>
+              )}
+
               {messages.map((message, index) => (
                 <motion.div
                   key={message.id}
@@ -895,6 +1076,7 @@ function ChatSection({
                   }}
                   placeholder="輸入訊息..."
                   rows={1}
+                  disabled={isInitializing || !sessionInfo}
                   style={{
                     flex: 1,
                     resize: 'none',
@@ -905,6 +1087,7 @@ function ChatSection({
                     fontFamily: 'inherit',
                     lineHeight: 1.5,
                     transition: 'border-color 0.2s ease',
+                    opacity: isInitializing || !sessionInfo ? 0.5 : 1,
                   }}
                   onFocus={(e) => e.currentTarget.style.borderColor = 'var(--black)'}
                   onBlur={(e) => e.currentTarget.style.borderColor = 'var(--border-color)'}
@@ -913,15 +1096,15 @@ function ChatSection({
                   whileHover={{ scale: 1.02 }}
                   whileTap={{ scale: 0.98 }}
                   onClick={handleSend}
-                  disabled={!input.trim() || isTyping}
+                  disabled={!input.trim() || isTyping || isInitializing || !sessionInfo}
                   style={{
                     padding: '14px 28px',
                     fontSize: 14,
                     fontWeight: 500,
                     border: '1px solid var(--black)',
-                    background: !input.trim() || isTyping ? 'var(--gray-100)' : 'var(--black)',
-                    color: !input.trim() || isTyping ? 'var(--gray-400)' : 'var(--white)',
-                    cursor: !input.trim() || isTyping ? 'not-allowed' : 'pointer',
+                    background: !input.trim() || isTyping || isInitializing || !sessionInfo ? 'var(--gray-100)' : 'var(--black)',
+                    color: !input.trim() || isTyping || isInitializing || !sessionInfo ? 'var(--gray-400)' : 'var(--white)',
+                    cursor: !input.trim() || isTyping || isInitializing || !sessionInfo ? 'not-allowed' : 'pointer',
                     transition: 'all 0.2s ease'
                   }}
                 >

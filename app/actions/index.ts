@@ -1,6 +1,7 @@
 'use server'
 
 import { supabase, PLAN_MESSAGE_LIMITS, PLAN_PROJECT_LIMITS, PLAN_PRIORITY_WEIGHTS } from '../lib/supabase'
+import { createClient } from '../lib/supabase/server'
 import { deployProject as deployProjectReal, generateNextJsTemplate } from './deploy'
 
 // ============================================================
@@ -925,6 +926,540 @@ export async function configureWebhook(input: {
   return {
     success: true,
     data: { webhookId: newWebhookId, url, isActive: true }
+  }
+}
+
+// ============================================================
+// Chat 串接 Inngest Actions
+// ============================================================
+
+import { triggerUserRequest, triggerUserReply } from '../inngest'
+
+/**
+ * 初始化會話
+ * - 創建或獲取匿名用戶
+ * - 創建或獲取專案
+ * - 創建或獲取對話
+ */
+export async function initializeSession(input: {
+  anonymousId?: string
+}): Promise<ActionResult<{
+  userId: string
+  projectId: string
+  conversationId: string
+  isNew: boolean
+}>> {
+  const { anonymousId } = input
+
+  if (!anonymousId) {
+    return { success: false, error: '缺少 anonymousId' }
+  }
+
+  const email = `${anonymousId}@anonymous.tellcraft.app`
+
+  // 1. 查找或創建用戶
+  let { data: user, error: userError } = await supabase
+    .from('users')
+    .select('id')
+    .eq('email', email)
+    .single()
+
+  let isNew = false
+
+  if (userError || !user) {
+    // 創建新用戶
+    const { data: newUser, error: createUserError } = await supabase
+      .from('users')
+      .insert({
+        email,
+        plan: 'free',
+        subscription_status: 'active',
+        message_count_this_period: 0
+      })
+      .select('id')
+      .single()
+
+    if (createUserError || !newUser) {
+      return { success: false, error: createUserError?.message || '創建用戶失敗' }
+    }
+    user = newUser
+    isNew = true
+  }
+
+  // 2. 查找或創建專案
+  let { data: project, error: projectError } = await supabase
+    .from('projects')
+    .select('id')
+    .eq('user_id', user.id)
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .single()
+
+  if (projectError || !project) {
+    // 創建新專案
+    const { data: newProject, error: createProjectError } = await supabase
+      .from('projects')
+      .insert({
+        user_id: user.id,
+        name: '我的專案',
+        status: 'draft'
+      })
+      .select('id')
+      .single()
+
+    if (createProjectError || !newProject) {
+      return { success: false, error: createProjectError?.message || '創建專案失敗' }
+    }
+    project = newProject
+    isNew = true
+  }
+
+  // 3. 查找或創建對話
+  let { data: conversation, error: convError } = await supabase
+    .from('conversations')
+    .select('id')
+    .eq('project_id', project.id)
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .single()
+
+  if (convError || !conversation) {
+    // 創建新對話
+    const { data: newConv, error: createConvError } = await supabase
+      .from('conversations')
+      .insert({
+        project_id: project.id,
+        messages: [],
+        spec_complete: false
+      })
+      .select('id')
+      .single()
+
+    if (createConvError || !newConv) {
+      return { success: false, error: createConvError?.message || '創建對話失敗' }
+    }
+    conversation = newConv
+    isNew = true
+  }
+
+  return {
+    success: true,
+    data: {
+      userId: user.id,
+      projectId: project.id,
+      conversationId: conversation.id,
+      isNew
+    }
+  }
+}
+
+/**
+ * 從認證 Session 初始化會話
+ * - 從 Supabase Auth 讀取當前登入用戶
+ * - 創建或獲取專案和對話
+ * - 用於已登入用戶
+ */
+export async function initializeSessionFromAuth(): Promise<ActionResult<{
+  userId: string
+  projectId: string
+  conversationId: string
+  isNew: boolean
+  isAuthenticated: boolean
+  user?: {
+    email?: string
+    name?: string
+    avatarUrl?: string
+  }
+}>> {
+  const authClient = await createClient()
+  const { data: { user: authUser } } = await authClient.auth.getUser()
+
+  if (!authUser) {
+    return { success: false, error: '未登入' }
+  }
+
+  // 從 auth user 的 metadata 取得用戶資訊
+  const email = authUser.email || `${authUser.id}@auth.tellcraft.app`
+  const name = authUser.user_metadata?.name || authUser.user_metadata?.full_name
+  const avatarUrl = authUser.user_metadata?.avatar_url || authUser.user_metadata?.picture
+
+  // 1. 查找或創建 users 表中的用戶記錄
+  let { data: user, error: userError } = await supabase
+    .from('users')
+    .select('id')
+    .eq('id', authUser.id)
+    .single()
+
+  let isNew = false
+
+  if (userError || !user) {
+    // 嘗試用 email 查找（處理舊資料遷移）
+    const { data: userByEmail } = await supabase
+      .from('users')
+      .select('id')
+      .eq('email', email)
+      .single()
+
+    if (userByEmail) {
+      // 更新現有用戶的 id 為 auth user id
+      await supabase
+        .from('users')
+        .update({ id: authUser.id })
+        .eq('id', userByEmail.id)
+      user = { id: authUser.id }
+    } else {
+      // 創建新用戶
+      const { data: newUser, error: createUserError } = await supabase
+        .from('users')
+        .insert({
+          id: authUser.id,
+          email,
+          plan: 'free',
+          subscription_status: 'active',
+          message_count_this_period: 0
+        })
+        .select('id')
+        .single()
+
+      if (createUserError || !newUser) {
+        return { success: false, error: createUserError?.message || '創建用戶失敗' }
+      }
+      user = newUser
+      isNew = true
+    }
+  }
+
+  // 2. 查找或創建專案
+  let { data: project, error: projectError } = await supabase
+    .from('projects')
+    .select('id')
+    .eq('user_id', user.id)
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .single()
+
+  if (projectError || !project) {
+    // 創建新專案
+    const { data: newProject, error: createProjectError } = await supabase
+      .from('projects')
+      .insert({
+        user_id: user.id,
+        name: '我的專案',
+        status: 'draft'
+      })
+      .select('id')
+      .single()
+
+    if (createProjectError || !newProject) {
+      return { success: false, error: createProjectError?.message || '創建專案失敗' }
+    }
+    project = newProject
+    isNew = true
+  }
+
+  // 3. 查找或創建對話
+  let { data: conversation, error: convError } = await supabase
+    .from('conversations')
+    .select('id')
+    .eq('project_id', project.id)
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .single()
+
+  if (convError || !conversation) {
+    // 創建新對話
+    const { data: newConv, error: createConvError } = await supabase
+      .from('conversations')
+      .insert({
+        project_id: project.id,
+        messages: [],
+        spec_complete: false
+      })
+      .select('id')
+      .single()
+
+    if (createConvError || !newConv) {
+      return { success: false, error: createConvError?.message || '創建對話失敗' }
+    }
+    conversation = newConv
+    isNew = true
+  }
+
+  return {
+    success: true,
+    data: {
+      userId: user.id,
+      projectId: project.id,
+      conversationId: conversation.id,
+      isNew,
+      isAuthenticated: true,
+      user: {
+        email,
+        name,
+        avatarUrl
+      }
+    }
+  }
+}
+
+/**
+ * 取得當前認證用戶
+ * - 用於前端檢查登入狀態
+ */
+export async function getCurrentUser(): Promise<ActionResult<{
+  userId: string
+  email?: string
+  name?: string
+  avatarUrl?: string
+} | null>> {
+  const authClient = await createClient()
+  const { data: { user: authUser } } = await authClient.auth.getUser()
+
+  if (!authUser) {
+    return { success: true, data: null }
+  }
+
+  return {
+    success: true,
+    data: {
+      userId: authUser.id,
+      email: authUser.email,
+      name: authUser.user_metadata?.name || authUser.user_metadata?.full_name,
+      avatarUrl: authUser.user_metadata?.avatar_url || authUser.user_metadata?.picture
+    }
+  }
+}
+
+/**
+ * 登出
+ */
+export async function signOut(): Promise<ActionResult<null>> {
+  const authClient = await createClient()
+  const { error } = await authClient.auth.signOut()
+
+  if (error) {
+    return { success: false, error: error.message }
+  }
+
+  return { success: true, data: null }
+}
+
+/**
+ * 發送消息並觸發 Inngest
+ * - 存消息到 DB
+ * - 觸發 user/request 事件
+ * - userId 為可選：如未提供，從認證 session 讀取
+ */
+export async function sendMessageAndTrigger(input: {
+  conversationId: string
+  content: string
+  userId?: string // 可選，未提供時從 session 讀取
+  projectId: string
+}): Promise<ActionResult<{ messageId: string }>> {
+  let { conversationId, content, userId, projectId } = input
+
+  // 如果未提供 userId，從認證 session 讀取
+  if (!userId) {
+    const authClient = await createClient()
+    const { data: { user: authUser } } = await authClient.auth.getUser()
+    if (!authUser) {
+      return { success: false, error: '未登入' }
+    }
+    userId = authUser.id
+  }
+
+  // 1. 讀取現有消息
+  const { data: conversation, error: readError } = await supabase
+    .from('conversations')
+    .select('messages')
+    .eq('id', conversationId)
+    .single()
+
+  if (readError || !conversation) {
+    return { success: false, error: readError?.message || '對話不存在' }
+  }
+
+  // 2. 新增用戶消息
+  const messageId = crypto.randomUUID()
+  const currentMessages = conversation.messages || []
+  const newMessage = {
+    id: messageId,
+    role: 'user',
+    content,
+    timestamp: new Date().toISOString()
+  }
+
+  const { error: updateError } = await supabase
+    .from('conversations')
+    .update({
+      messages: [...currentMessages, newMessage],
+      updated_at: new Date().toISOString()
+    })
+    .eq('id', conversationId)
+
+  if (updateError) {
+    return { success: false, error: updateError.message }
+  }
+
+  // 3. 更新用戶消息計數
+  try {
+    const { data: userData } = await supabase
+      .from('users')
+      .select('message_count_this_period')
+      .eq('id', userId)
+      .single()
+
+    if (userData) {
+      await supabase
+        .from('users')
+        .update({ message_count_this_period: (userData.message_count_this_period || 0) + 1 })
+        .eq('id', userId)
+    }
+  } catch {
+    // 忽略計數更新錯誤，不阻塞主流程
+  }
+
+  // 4. 觸發 Inngest
+  try {
+    await triggerUserRequest({
+      projectId,
+      conversationId,
+      userId,
+      message: content
+    })
+  } catch (err) {
+    console.error('Failed to trigger Inngest:', err)
+    // 不阻塞，讓消息先存入
+  }
+
+  return {
+    success: true,
+    data: { messageId }
+  }
+}
+
+/**
+ * 多輪對話回覆
+ * - 存消息到 DB
+ * - 觸發 user/reply 事件（帶 taskId）
+ */
+export async function replyToConversation(input: {
+  conversationId: string
+  projectId: string
+  taskId: string
+  content: string
+  specConfirmed?: boolean
+}): Promise<ActionResult<{ messageId: string }>> {
+  const { conversationId, projectId, taskId, content, specConfirmed } = input
+
+  // 1. 讀取現有消息
+  const { data: conversation, error: readError } = await supabase
+    .from('conversations')
+    .select('messages')
+    .eq('id', conversationId)
+    .single()
+
+  if (readError || !conversation) {
+    return { success: false, error: readError?.message || '對話不存在' }
+  }
+
+  // 2. 新增用戶消息
+  const messageId = crypto.randomUUID()
+  const currentMessages = conversation.messages || []
+  const newMessage = {
+    id: messageId,
+    role: 'user',
+    content,
+    timestamp: new Date().toISOString()
+  }
+
+  const { error: updateError } = await supabase
+    .from('conversations')
+    .update({
+      messages: [...currentMessages, newMessage],
+      updated_at: new Date().toISOString()
+    })
+    .eq('id', conversationId)
+
+  if (updateError) {
+    return { success: false, error: updateError.message }
+  }
+
+  // 3. 觸發 Inngest user/reply
+  try {
+    await triggerUserReply({
+      projectId,
+      conversationId,
+      taskId,
+      message: content,
+      specConfirmed
+    })
+  } catch (err) {
+    console.error('Failed to trigger Inngest reply:', err)
+  }
+
+  return {
+    success: true,
+    data: { messageId }
+  }
+}
+
+/**
+ * 獲取對話消息（用於輪詢）
+ * - 返回消息列表
+ * - 返回當前活躍的 taskId
+ */
+export async function getConversationMessages(input: {
+  conversationId: string
+  afterTimestamp?: string
+}): Promise<ActionResult<{
+  messages: Array<{
+    id: string
+    role: 'user' | 'assistant' | 'system'
+    content: string
+    timestamp: string
+    stage?: string
+  }>
+  currentTaskId?: string
+  taskStatus?: string
+}>> {
+  const { conversationId, afterTimestamp } = input
+
+  // 1. 讀取對話消息
+  const { data: conversation, error: convError } = await supabase
+    .from('conversations')
+    .select('messages, project_id')
+    .eq('id', conversationId)
+    .single()
+
+  if (convError || !conversation) {
+    return { success: false, error: convError?.message || '對話不存在' }
+  }
+
+  let messages = conversation.messages || []
+
+  // 如果有 afterTimestamp，只返回之後的消息
+  if (afterTimestamp) {
+    messages = messages.filter((m: { timestamp: string }) => m.timestamp > afterTimestamp)
+  }
+
+  // 2. 查找當前活躍的任務
+  const { data: task } = await supabase
+    .from('tasks')
+    .select('id, status')
+    .eq('project_id', conversation.project_id)
+    .in('status', ['planning', 'executing', 'pending_approval', 'waiting_approval'])
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .single()
+
+  return {
+    success: true,
+    data: {
+      messages,
+      currentTaskId: task?.id,
+      taskStatus: task?.status
+    }
   }
 }
 
