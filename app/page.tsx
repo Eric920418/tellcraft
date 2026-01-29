@@ -2197,6 +2197,32 @@ export default function Home() {
   const [isChatActive, setIsChatActive] = useState(false)
   const [heroInput, setHeroInput] = useState('')
   const [initialMessage, setInitialMessage] = useState('')
+  const [currentUser, setCurrentUser] = useState<{
+    userId: string
+    email?: string
+    name?: string
+    avatarUrl?: string
+  } | null>(null)
+  const [isLoadingUser, setIsLoadingUser] = useState(true)
+
+  // 載入當前用戶狀態
+  useEffect(() => {
+    const loadUser = async () => {
+      const result = await getCurrentUser()
+      if (result.success && result.data) {
+        setCurrentUser(result.data)
+      }
+      setIsLoadingUser(false)
+    }
+    loadUser()
+  }, [])
+
+  // 登出處理
+  const handleSignOut = async () => {
+    await signOut()
+    setCurrentUser(null)
+    window.location.reload()
+  }
 
   const handleStartChat = useCallback(() => {
     if (heroInput.trim()) {
@@ -2230,6 +2256,75 @@ export default function Home() {
         }}
       >
         <AnimatedThemeToggler />
+      </div>
+
+      {/* Auth Button - Fixed Top Right */}
+      <div
+        style={{
+          position: 'fixed',
+          top: 20,
+          right: 20,
+          zIndex: 1000,
+          display: 'flex',
+          alignItems: 'center',
+          gap: 12,
+        }}
+      >
+        {isLoadingUser ? (
+          <div style={{ width: 80, height: 36 }} />
+        ) : currentUser ? (
+          // 已登入 - 顯示用戶資訊
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            {currentUser.avatarUrl && (
+              <img
+                src={currentUser.avatarUrl}
+                alt=""
+                style={{
+                  width: 32,
+                  height: 32,
+                  borderRadius: '50%',
+                  border: '1px solid var(--border-color)',
+                }}
+              />
+            )}
+            <span style={{ fontSize: 14, color: 'var(--gray-600)' }}>
+              {currentUser.name || currentUser.email?.split('@')[0] || '用戶'}
+            </span>
+            <button
+              onClick={handleSignOut}
+              style={{
+                fontSize: 13,
+                color: 'var(--gray-500)',
+                background: 'none',
+                border: 'none',
+                cursor: 'pointer',
+                padding: '4px 8px',
+              }}
+            >
+              登出
+            </button>
+          </div>
+        ) : (
+          // 未登入 - 顯示登入按鈕
+          <a
+            href="/auth/login"
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 8,
+              fontSize: 14,
+              fontWeight: 500,
+              color: 'var(--black)',
+              background: 'var(--white)',
+              border: '1px solid var(--border-color)',
+              padding: '8px 16px',
+              textDecoration: 'none',
+              transition: 'all 0.2s ease',
+            }}
+          >
+            登入
+          </a>
+        )}
       </div>
 
       {/* Hero */}

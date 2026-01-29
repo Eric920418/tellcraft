@@ -37,7 +37,8 @@
       "Bash(git add:*)",
       "Bash(git commit:*)",
       "Bash(git remote add:*)",
-      "Bash(git push:*)"
+      "Bash(git push:*)",
+      "Bash(# 停止所有 Next.js 進程 pkill -f \"\"next\"\" || true sleep 2 # 清理 lock 文件 rm -f /Users/eric/Desktop/tellcraft/.next/dev/lock # 重新啟動 pnpm dev & sleep 6 echo \"\"=== Testing ===\"\" curl -s http://localhost:3000 2>&1)"
     ]
   }
 }

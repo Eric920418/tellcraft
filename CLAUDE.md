@@ -61,7 +61,7 @@ npx ts-node bdd-spec/scripts/validate-feature.ts spec/features/      # 第二步
 | **Orchestrator** | `app/inngest/functions/orchestrator.ts` | 主編排函數，處理用戶請求的完整流程 |
 | **Classifier** | `app/inngest/classifier.ts` | AI 意圖分類（Anthropic API + 規則 fallback） |
 | **Registry** | `app/inngest/registry.ts` | Skill 註冊表，定義觸發詞和元數據 |
-| **Server Actions** | `app/actions/index.ts` | 14 個核心 Actions（createProject, sendMessage 等）|
+| **Server Actions** | `app/actions/index.ts` | 22 個核心 Actions（含 Chat、Auth、部署整合）|
 
 ### Skill 系統
 
@@ -86,12 +86,39 @@ npx ts-node bdd-spec/scripts/validate-feature.ts spec/features/      # 第二步
         deployer: Vercel Deployments API → 詢問網域設定
 ```
 
+### 認證系統
+
+支援 Google 和 LINE OAuth 登入，使用 `@supabase/ssr` 實現 SSR 友善的 session 管理：
+
+```
+登入頁 → Google/LINE OAuth → Supabase Auth → Session Cookie → 受保護路由
+```
+
+| 檔案 | 職責 |
+|------|------|
+| `app/lib/supabase/client.ts` | Browser client（前端）|
+| `app/lib/supabase/server.ts` | Server client（Server Actions）|
+| `middleware.ts` | Session refresh + 路由保護 |
+| `app/auth/callback/route.ts` | OAuth callback（PKCE）|
+
+### Chat 串接 Inngest
+
+前端輸入 → Inngest Orchestrator → AI 回覆 → 輪詢取得：
+
+```
+用戶輸入 → initializeSession（匿名）/ initializeSessionFromAuth（已登入）
+    → sendMessageAndTrigger → triggerUserRequest
+    → Inngest Orchestrator → bdd-spec skill
+    → AI 回覆寫入 DB → 前端 getConversationMessages 輪詢
+    → 用戶回覆 → replyToConversation → triggerUserReply → Inngest 恢復
+```
+
 ## 專案結構
 
 ```
 app/
-├── actions/           # Server Actions
-│   ├── index.ts       # 14 個核心 Actions 匯出
+├── actions/           # Server Actions（22 個）
+│   ├── index.ts       # 主匯出：核心 + Chat + Auth Actions
 │   ├── deploy.ts      # Vercel Deployments API 整合
 │   ├── cloudflare.ts  # DNS 管理
 │   ├── porkbun.ts     # 網域購買
@@ -102,8 +129,16 @@ app/
 │   ├── registry.ts    # Skill 註冊表
 │   └── functions/
 │       └── orchestrator.ts  # 主編排函數（1500+ 行）
+├── lib/supabase/      # Supabase clients
+│   ├── client.ts      # Browser client
+│   └── server.ts      # Server client
+├── auth/              # 認證相關
+│   ├── login/         # 登入頁面
+│   └── callback/      # OAuth callback
 ├── api/inngest/route.ts     # Inngest webhook endpoint
 └── components/              # UI 動效元件（reactbits 風格）
+
+middleware.ts          # Session refresh + 路由保護
 
 spec/                  # BDD 規格產出
 ├── data/

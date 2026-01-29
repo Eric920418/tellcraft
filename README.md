@@ -28,7 +28,7 @@ Tellcraft 是一個 AI 驅動的自動化開發平台。用戶只需描述需求
 **架構**：
 - `app/lib/supabase/client.ts` - Browser client（前端）
 - `app/lib/supabase/server.ts` - Server client（Server Actions）
-- `middleware.ts` - Session refresh + 路由保護
+- `proxy.ts` - Session refresh + 路由保護
 - `app/auth/login/page.tsx` - 登入頁面（卡片式設計）
 - `app/auth/callback/route.ts` - OAuth callback（PKCE）
 - `app/api/auth/line/` - LINE OAuth 自訂流程
@@ -84,8 +84,8 @@ NEXT_PUBLIC_APP_URL=https://tellcraft.com
 
 | 服務 | 用途 | 狀態 |
 |------|------|------|
-| Next.js 15 | Server Actions | ✅ |
-| React 19 | UI 框架 | ✅ |
+| Next.js 16 | Server Actions + Turbopack | ✅ |
+| React 19.2 | UI 框架 | ✅ |
 | Framer Motion | 動畫效果 | ✅ |
 | next-themes | 深色/淺色模式 | ✅ |
 | @supabase/ssr | SSR 認證 | ✅ |
@@ -474,7 +474,7 @@ app/
 ├── api/auth/line/     # LINE OAuth 路由
 └── test/              # 測試頁面
 
-middleware.ts          # Session refresh + 路由保護
+proxy.ts          # Session refresh + 路由保護
 
 spec/
 ├── data/              # Schema + Entity Mapping

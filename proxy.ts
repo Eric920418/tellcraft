@@ -7,7 +7,7 @@ const protectedRoutes = ['/dashboard', '/projects', '/settings']
 // 登入後應重導向的路由
 const authRoutes = ['/auth/login']
 
-export async function middleware(request: NextRequest) {
+export async function proxy(request: NextRequest) {
   let supabaseResponse = NextResponse.next({
     request,
   })
