@@ -606,6 +606,7 @@ function ChatSection({
   const [isInitializing, setIsInitializing] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [lastTimestamp, setLastTimestamp] = useState<string | null>(null)
+  const [lastUpdatedAt, setLastUpdatedAt] = useState<string | null>(null)  // 用於輪詢優化
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const hasInitialized = useRef(false)
 
@@ -789,11 +790,19 @@ function ChatSection({
     init()
   }, [isActive, initialMessage, resumeConversationId, getAnonymousId])
 
-  // 輪詢獲取新消息
+  // 輪詢獲取新消息（智慧退避機制）
   useEffect(() => {
     if (!sessionInfo) return
 
+    let pollInterval = 3000 // 基本間隔 3 秒
+    const MAX_INTERVAL = 15000 // 最大間隔 15 秒
+    const MIN_INTERVAL = 3000 // 最小間隔 3 秒
+    let timeoutId: NodeJS.Timeout | null = null
+    let isPolling = true
+
     const poll = async () => {
+      if (!isPolling) return
+
       const result = await getConversationMessages({
         conversationId: sessionInfo.conversationId,
         afterTimestamp: lastTimestamp || undefined
@@ -803,6 +812,9 @@ function ChatSection({
         const newMessages = result.data.messages
 
         if (newMessages.length > 0) {
+          // 有新消息，重置間隔
+          pollInterval = MIN_INTERVAL
+
           // 轉換消息格式
           const formattedMessages: Message[] = newMessages.map((m) => ({
             id: m.id,
@@ -839,6 +851,9 @@ function ChatSection({
           if (latestTimestamp) {
             setLastTimestamp(latestTimestamp)
           }
+        } else {
+          // 沒有新消息，逐漸增加間隔（指數退避）
+          pollInterval = Math.min(pollInterval * 1.5, MAX_INTERVAL)
         }
 
         // 更新 taskId
@@ -849,15 +864,20 @@ function ChatSection({
           } : null)
         }
       }
+
+      // 安排下一次輪詢
+      if (isPolling) {
+        timeoutId = setTimeout(poll, pollInterval)
+      }
     }
 
     // 立即執行一次
     poll()
 
-    // 設置輪詢間隔
-    const interval = setInterval(poll, 2000)
-
-    return () => clearInterval(interval)
+    return () => {
+      isPolling = false
+      if (timeoutId) clearTimeout(timeoutId)
+    }
   }, [sessionInfo?.conversationId, lastTimestamp])
 
   // 滾動到底部

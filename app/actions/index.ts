@@ -1795,10 +1795,12 @@ export async function getUserConversations(input: {
  * 獲取對話消息（用於輪詢）
  * - 返回消息列表
  * - 返回當前活躍的 taskId
+ * - 優化：先檢查 updated_at，若無更新則跳過載入 messages
  */
 export async function getConversationMessages(input: {
   conversationId: string
   afterTimestamp?: string
+  lastUpdatedAt?: string  // 新增：上次查詢時的 updated_at
 }): Promise<ActionResult<{
   messages: Array<{
     id: string
@@ -1809,13 +1811,45 @@ export async function getConversationMessages(input: {
   }>
   currentTaskId?: string
   taskStatus?: string
+  updatedAt?: string  // 新增：返回當前 updated_at 供下次比對
 }>> {
-  const { conversationId, afterTimestamp } = input
+  const { conversationId, afterTimestamp, lastUpdatedAt } = input
 
-  // 1. 讀取對話消息
+  // 1. 先檢查 updated_at 是否有變化（輕量查詢）
+  if (lastUpdatedAt) {
+    const { data: check } = await supabase
+      .from('conversations')
+      .select('updated_at, project_id')
+      .eq('id', conversationId)
+      .single()
+
+    if (check && check.updated_at === lastUpdatedAt) {
+      // 沒有更新，只查詢 task 狀態
+      const { data: task } = await supabase
+        .from('tasks')
+        .select('id, status')
+        .eq('project_id', check.project_id)
+        .in('status', ['planning', 'executing', 'pending_approval', 'waiting_approval'])
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .single()
+
+      return {
+        success: true,
+        data: {
+          messages: [],  // 沒有新消息
+          currentTaskId: task?.id,
+          taskStatus: task?.status,
+          updatedAt: check.updated_at
+        }
+      }
+    }
+  }
+
+  // 2. 有更新或首次查詢，載入完整 messages
   const { data: conversation, error: convError } = await supabase
     .from('conversations')
-    .select('messages, project_id')
+    .select('messages, project_id, updated_at')
     .eq('id', conversationId)
     .single()
 
@@ -1830,7 +1864,7 @@ export async function getConversationMessages(input: {
     messages = messages.filter((m: { timestamp: string }) => m.timestamp > afterTimestamp)
   }
 
-  // 2. 查找當前活躍的任務
+  // 3. 查找當前活躍的任務
   const { data: task } = await supabase
     .from('tasks')
     .select('id, status')
@@ -1845,7 +1879,8 @@ export async function getConversationMessages(input: {
     data: {
       messages,
       currentTaskId: task?.id,
-      taskStatus: task?.status
+      taskStatus: task?.status,
+      updatedAt: conversation.updated_at
     }
   }
 }
