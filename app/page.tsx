@@ -9,6 +9,7 @@ import CardSwap, { Card } from './components/CardSwap'
 // import GridDistortion from './components/GridDistortion'
 import TextType from './components/TextType'
 import { AnimatedThemeToggler } from './components/AnimatedThemeToggler'
+import GlowButton from './components/GlowButton'
 import {
   initializeSession,
   initializeSessionFromAuth,
@@ -2483,38 +2484,43 @@ export default function Home() {
   return (
     <main>
       {/* Theme Toggler - Fixed Top Left (隱藏於 Chat 模式) */}
-      {!isChatActive && (
-        <motion.div
-          initial={{ opacity: 0, y: -10 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.5, delay: 0.2 }}
-          style={{
-            position: 'fixed',
-            top: 20,
-            left: 20,
-            zIndex: 1000,
-          }}
-        >
-          <AnimatedThemeToggler />
-        </motion.div>
-      )}
+      <AnimatePresence>
+        {!isChatActive && (
+          <motion.div
+            initial={{ opacity: 0, y: -30 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -30 }}
+            transition={{ duration: 0.6, delay: 0.5, ease: [0.25, 0.46, 0.45, 0.94] }}
+            style={{
+              position: 'fixed',
+              top: 20,
+              left: 20,
+              zIndex: 1000,
+            }}
+          >
+            <AnimatedThemeToggler />
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* Auth Button - Fixed Top Right (隱藏於 Chat 模式) */}
-      {!isChatActive && (
-        <motion.div
-          initial={{ opacity: 0, y: -10 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.5, delay: 0.3 }}
-          style={{
-            position: 'fixed',
-            top: 20,
-            right: 20,
-            zIndex: 1000,
-            display: 'flex',
-            alignItems: 'center',
-            gap: 12,
-          }}
-        >
+      <AnimatePresence>
+        {!isChatActive && (
+          <motion.div
+            initial={{ opacity: 0, y: -30 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -30 }}
+            transition={{ duration: 0.6, delay: 0.7, ease: [0.25, 0.46, 0.45, 0.94] }}
+            style={{
+              position: 'fixed',
+              top: 20,
+              right: 20,
+              zIndex: 1000,
+              display: 'flex',
+              alignItems: 'center',
+              gap: 12,
+            }}
+          >
         {isLoadingUser ? (
           <div style={{ width: 80, height: 36 }} />
         ) : currentUser ? (
@@ -2535,59 +2541,22 @@ export default function Home() {
             <span style={{ fontSize: 14, color: 'var(--gray-600)' }}>
               {currentUser.name || currentUser.email?.split('@')[0] || '用戶'}
             </span>
-            <a
-              href="/dashboard"
-              style={{
-                fontSize: 13,
-                color: 'var(--gray-600)',
-                background: 'var(--gray-100)',
-                border: 'none',
-                padding: '6px 12px',
-                textDecoration: 'none',
-                transition: 'background 0.15s ease',
-              }}
-              onMouseEnter={(e) => e.currentTarget.style.background = 'var(--gray-200)'}
-              onMouseLeave={(e) => e.currentTarget.style.background = 'var(--gray-100)'}
-            >
+            <GlowButton href="/dashboard" variant="outline" size="sm">
               儀表板
-            </a>
-            <button
-              onClick={handleSignOut}
-              style={{
-                fontSize: 13,
-                color: 'var(--gray-500)',
-                background: 'none',
-                border: 'none',
-                cursor: 'pointer',
-                padding: '4px 8px',
-              }}
-            >
+            </GlowButton>
+            <GlowButton onClick={handleSignOut} variant="outline" size="sm">
               登出
-            </button>
+            </GlowButton>
           </div>
         ) : (
           // 未登入 - 顯示登入按鈕
-          <a
-            href="/auth/login"
-            style={{
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: 8,
-              fontSize: 14,
-              fontWeight: 500,
-              color: 'var(--black)',
-              background: 'var(--white)',
-              border: '1px solid var(--border-color)',
-              padding: '8px 16px',
-              textDecoration: 'none',
-              transition: 'all 0.2s ease',
-            }}
-          >
+          <GlowButton href="/auth/login" variant="outline" size="sm">
             登入
-          </a>
+          </GlowButton>
         )}
-      </motion.div>
-      )}
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* Hero */}
       <HeroSection
