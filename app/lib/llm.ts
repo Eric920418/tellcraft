@@ -3,7 +3,21 @@
 // 注意：這個模組直接在服務器端使用，不是 Server Actions
 // ============================================================
 
+import { createClient } from '@supabase/supabase-js'
+
 const ANTHROPIC_API = 'https://api.anthropic.com/v1/messages'
+
+// Supabase service client for logging
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || ''
+const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || ''
+
+// Claude 定價 (每百萬 tokens，美元)
+const MODEL_PRICING: Record<string, { input: number; output: number }> = {
+  'claude-sonnet-4-20250514': { input: 3, output: 15 },
+  'claude-3-5-sonnet-20241022': { input: 3, output: 15 },
+  'claude-3-5-haiku-20241022': { input: 0.8, output: 4 },
+  'claude-3-opus-20240229': { input: 15, output: 75 },
+}
 
 interface Message {
   role: 'user' | 'assistant'
@@ -14,6 +28,49 @@ interface LlmResponse {
   success: boolean
   content?: string
   error?: string
+  usage?: {
+    inputTokens: number
+    outputTokens: number
+    cost: number
+  }
+}
+
+interface LlmTrackingContext {
+  userId?: string
+  conversationId?: string
+  purpose?: string
+}
+
+/**
+ * 記錄 LLM 使用量到資料庫
+ */
+async function logLlmUsage(
+  model: string,
+  inputTokens: number,
+  outputTokens: number,
+  cost: number,
+  context?: LlmTrackingContext
+): Promise<void> {
+  if (!supabaseUrl || !supabaseServiceKey) {
+    console.log('[LLM] 無法記錄使用量：缺少 Supabase 設定')
+    return
+  }
+
+  try {
+    const supabase = createClient(supabaseUrl, supabaseServiceKey)
+    await supabase.from('llm_usage').insert({
+      user_id: context?.userId || null,
+      conversation_id: context?.conversationId || null,
+      model,
+      input_tokens: inputTokens,
+      output_tokens: outputTokens,
+      cost_usd: cost,
+      purpose: context?.purpose || null,
+    })
+    console.log(`[LLM] 已記錄使用量: ${inputTokens} in / ${outputTokens} out, $${cost.toFixed(6)}`)
+  } catch (err) {
+    console.error('[LLM] 記錄使用量失敗:', err)
+  }
 }
 
 /**
@@ -26,7 +83,8 @@ export async function callClaude(
     model?: string
     maxTokens?: number
     temperature?: number
-  }
+  },
+  trackingContext?: LlmTrackingContext
 ): Promise<LlmResponse> {
   const apiKey = process.env.CLAUDE_API_KEY
 
@@ -38,6 +96,8 @@ export async function callClaude(
     return { success: false, error: '缺少 ANTHROPIC_API_KEY' }
   }
 
+  const model = options?.model || 'claude-sonnet-4-20250514'
+
   try {
     const response = await fetch(ANTHROPIC_API, {
       method: 'POST',
@@ -47,7 +107,7 @@ export async function callClaude(
         'anthropic-version': '2023-06-01',
       },
       body: JSON.stringify({
-        model: options?.model || 'claude-sonnet-4-20250514',
+        model,
         max_tokens: options?.maxTokens || 4096,
         temperature: options?.temperature ?? 0.7,
         system: systemPrompt,
@@ -70,7 +130,20 @@ export async function callClaude(
       return { success: false, error: '無法取得回應內容' }
     }
 
-    return { success: true, content }
+    // 計算 token 使用量和成本
+    const inputTokens = data.usage?.input_tokens || 0
+    const outputTokens = data.usage?.output_tokens || 0
+    const pricing = MODEL_PRICING[model] || MODEL_PRICING['claude-sonnet-4-20250514']
+    const cost = (inputTokens * pricing.input + outputTokens * pricing.output) / 1_000_000
+
+    // 記錄使用量
+    await logLlmUsage(model, inputTokens, outputTokens, cost, trackingContext)
+
+    return {
+      success: true,
+      content,
+      usage: { inputTokens, outputTokens, cost }
+    }
   } catch (err) {
     return { success: false, error: `呼叫 LLM 時發生錯誤: ${err}` }
   }

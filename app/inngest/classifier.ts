@@ -1,4 +1,12 @@
 import { SkillName, SKILL_REGISTRY, getSkillDescriptionsForClassifier } from './registry'
+import { createClient } from '@supabase/supabase-js'
+
+// Supabase for logging
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || ''
+const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || ''
+
+// Haiku 定價 (每百萬 tokens)
+const HAIKU_PRICING = { input: 0.8, output: 4 }
 
 // ============================================================
 // Intent Classification 結果類型
@@ -96,6 +104,27 @@ ${skillDescriptions}
 
     const data = await response.json()
     const content = data.content?.[0]?.text
+
+    // 記錄 LLM 使用量
+    if (data.usage && supabaseUrl && supabaseServiceKey) {
+      const inputTokens = data.usage.input_tokens || 0
+      const outputTokens = data.usage.output_tokens || 0
+      const cost = (inputTokens * HAIKU_PRICING.input + outputTokens * HAIKU_PRICING.output) / 1_000_000
+
+      try {
+        const supabase = createClient(supabaseUrl, supabaseServiceKey)
+        await supabase.from('llm_usage').insert({
+          model: 'claude-3-5-haiku-20241022',
+          input_tokens: inputTokens,
+          output_tokens: outputTokens,
+          cost_usd: cost,
+          purpose: 'intent_classification',
+        })
+        console.log(`[Classifier] 已記錄使用量: ${inputTokens} in / ${outputTokens} out, $${cost.toFixed(6)}`)
+      } catch (err) {
+        console.error('[Classifier] 記錄使用量失敗:', err)
+      }
+    }
 
     if (!content) {
       return ruleBasedClassification(message)
