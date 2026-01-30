@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useRef, useEffect, useCallback } from 'react'
+import { useSearchParams } from 'next/navigation'
 import { motion, AnimatePresence, useScroll, useTransform, useInView } from 'framer-motion'
 import SplitText from './components/SplitText'
 import RotatingText from './components/RotatingText'
@@ -589,10 +590,12 @@ interface ConversationItem {
 function ChatSection({
   isActive,
   initialMessage,
+  resumeConversationId,
   onBack
 }: {
   isActive: boolean
   initialMessage: string
+  resumeConversationId?: string | null
   onBack: () => void
 }) {
   const [messages, setMessages] = useState<Message[]>([])
@@ -673,7 +676,8 @@ function ChatSection({
       // 優先嘗試從認證 session 初始化
       const authResult = await initializeSessionFromAuth({
         anonymousId, // 傳遞 anonymousId 用於帳號合併
-        createNew: !!initialMessage // 有初始消息時創建新對話
+        conversationId: resumeConversationId || undefined, // 恢復指定對話
+        createNew: !!initialMessage && !resumeConversationId // 有初始消息且不是恢復對話時創建新對話
       })
 
       let session: SessionInfo
@@ -694,7 +698,8 @@ function ChatSection({
         // 未登入，使用匿名模式
         const result = await initializeSession({
           anonymousId,
-          createNew: !!initialMessage // 有初始消息時創建新對話
+          conversationId: resumeConversationId || undefined, // 恢復指定對話
+          createNew: !!initialMessage && !resumeConversationId // 有初始消息且不是恢復對話時創建新對話
         })
 
         if (!result.success || !result.data) {
@@ -715,6 +720,32 @@ function ChatSection({
 
       setSessionInfo(session)
 
+      // 如果是恢復對話，加載歷史消息
+      if (resumeConversationId) {
+        const historyResult = await getConversationMessages({
+          conversationId: session.conversationId
+        })
+
+        if (historyResult.success && historyResult.data) {
+          const historyMessages: Message[] = historyResult.data.messages.map((m) => ({
+            id: m.id,
+            role: m.role,
+            content: m.content,
+            timestamp: new Date(m.timestamp),
+            stage: m.stage as Message['stage']
+          }))
+          setMessages(historyMessages)
+
+          // 找到最後一條 AI 消息的 stage
+          const lastAiMessage = historyMessages.filter(m => m.role === 'assistant').pop()
+          if (lastAiMessage?.stage) {
+            setCurrentStage(lastAiMessage.stage)
+          }
+        }
+        setIsInitializing(false)
+        return
+      }
+
       // 如果有初始消息，發送它
       if (initialMessage) {
         // 樂觀更新：先顯示用戶消息
@@ -725,6 +756,7 @@ function ChatSection({
           timestamp: new Date()
         }
         setMessages([userMsg])
+        setIsInitializing(false) // 消息顯示後立即隱藏初始化提示
         setIsTyping(true)
         setCurrentStage('clarify')
 
@@ -739,6 +771,7 @@ function ChatSection({
         if (!sendResult.success) {
           setError(sendResult.error || '發送消息失敗')
         }
+        return // 已經設置 isInitializing = false，直接返回
       } else if (hasHistory && !session.isAuthenticated) {
         // 沒有初始消息但有歷史對話 → 顯示對話選擇器
         setIsLoadingConversations(true)
@@ -754,7 +787,7 @@ function ChatSection({
     }
 
     init()
-  }, [isActive, initialMessage, getAnonymousId])
+  }, [isActive, initialMessage, resumeConversationId, getAnonymousId])
 
   // 輪詢獲取新消息
   useEffect(() => {
@@ -1110,34 +1143,14 @@ function ChatSection({
                       <span style={{ fontSize: 13, color: 'var(--gray-600)' }}>
                         {sessionInfo.user?.name || sessionInfo.user?.email?.split('@')[0] || '用戶'}
                       </span>
-                      <a
-                        href="/dashboard"
-                        style={{
-                          fontSize: 12,
-                          color: 'var(--gray-500)',
-                          background: 'var(--gray-100)',
-                          padding: '4px 10px',
-                          textDecoration: 'none',
-                        }}
-                      >
+                      <GlowButton href="/dashboard" variant="outline" size="sm">
                         儀表板
-                      </a>
+                      </GlowButton>
                     </>
                   ) : (
-                    <button
-                      onClick={handleLogin}
-                      style={{
-                        fontSize: 13,
-                        color: 'var(--gray-500)',
-                        background: 'none',
-                        textDecoration: 'none',
-                        padding: '6px 12px',
-                        border: '1px solid var(--border-color)',
-                        cursor: 'pointer',
-                      }}
-                    >
+                    <GlowButton onClick={handleLogin} variant="outline" size="sm">
                       登入
-                    </button>
+                    </GlowButton>
                   )}
                 </div>
               )}
@@ -2443,9 +2456,11 @@ function Footer() {
 
 // ============ Main Component ============
 export default function Home() {
+  const searchParams = useSearchParams()
   const [isChatActive, setIsChatActive] = useState(false)
   const [heroInput, setHeroInput] = useState('')
   const [initialMessage, setInitialMessage] = useState('')
+  const [resumeConversationId, setResumeConversationId] = useState<string | null>(null)
   const [currentUser, setCurrentUser] = useState<{
     userId: string
     email?: string
@@ -2453,6 +2468,15 @@ export default function Home() {
     avatarUrl?: string
   } | null>(null)
   const [isLoadingUser, setIsLoadingUser] = useState(true)
+
+  // 檢查 URL 參數，如果有 conversation 則恢復對話
+  useEffect(() => {
+    const conversationId = searchParams.get('conversation')
+    if (conversationId) {
+      setResumeConversationId(conversationId)
+      setIsChatActive(true)
+    }
+  }, [searchParams])
 
   // 載入當前用戶狀態
   useEffect(() => {
@@ -2484,6 +2508,9 @@ export default function Home() {
     setIsChatActive(false)
     setHeroInput('')
     setInitialMessage('')
+    setResumeConversationId(null)
+    // 清除 URL 參數
+    window.history.replaceState({}, '', '/')
   }, [])
 
   const handleFocusInput = useCallback(() => {
@@ -2582,6 +2609,7 @@ export default function Home() {
       <ChatSection
         isActive={isChatActive}
         initialMessage={initialMessage}
+        resumeConversationId={resumeConversationId}
         onBack={handleBackToHome}
       />
 

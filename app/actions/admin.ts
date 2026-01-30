@@ -91,7 +91,7 @@ export async function getAdminStats(): Promise<ActionResult<{
       activeUsers7d,
       // 7 天內新用戶
       newUsers7d,
-      // 總 LLM 成本
+      // 總 LLM 成本（使用 RPC 聚合或限制查詢）
       llmCost
     ] = await Promise.all([
       supabase.from('users').select('*', { count: 'exact', head: true }),
@@ -105,6 +105,7 @@ export async function getAdminStats(): Promise<ActionResult<{
         .then(async (res) => {
           if (!res.data) return 0
           const projectIds = [...new Set(res.data.map(c => c.project_id))]
+          if (projectIds.length === 0) return 0
           const { data: projects } = await supabase
             .from('projects')
             .select('user_id')
@@ -115,9 +116,12 @@ export async function getAdminStats(): Promise<ActionResult<{
         .from('users')
         .select('*', { count: 'exact', head: true })
         .gte('created_at', new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString()),
+      // 使用 Supabase 聚合查詢（只取前 1000 筆做估算，避免全表掃描）
       supabase
         .from('llm_usage')
         .select('cost_usd')
+        .order('created_at', { ascending: false })
+        .limit(1000)
         .then(res => {
           if (!res.data) return 0
           return res.data.reduce((sum, row) => sum + (parseFloat(row.cost_usd) || 0), 0)
@@ -564,13 +568,16 @@ export async function getLLMUsageStats(params: {
 
     const { startDate, endDate, userId, groupBy = 'day' } = params
 
+    // 預設只查詢最近 30 天，避免全表掃描
+    const defaultStartDate = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString()
+
     let query = supabase
       .from('llm_usage')
       .select('id, user_id, model, input_tokens, output_tokens, cost_usd, created_at')
 
-    if (startDate) {
-      query = query.gte('created_at', startDate)
-    }
+    // 總是限制時間範圍
+    query = query.gte('created_at', startDate || defaultStartDate)
+
     if (endDate) {
       query = query.lte('created_at', endDate)
     }

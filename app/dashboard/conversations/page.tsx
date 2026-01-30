@@ -142,7 +142,8 @@ export default function ConversationsPage() {
           isLoading={isLoading}
           emptyMessage="還沒有對話記錄"
           onRowClick={(conv) => {
-            window.location.href = `/dashboard/projects/${conv.projectId}`
+            // 跳轉到首頁並帶上對話 ID，讓首頁載入該對話
+            window.location.href = `/?conversation=${conv.id}`
           }}
         />
       </motion.div>
