@@ -1097,6 +1097,18 @@ function ChatSection({
                       <span style={{ fontSize: 13, color: 'var(--gray-600)' }}>
                         {sessionInfo.user?.name || sessionInfo.user?.email?.split('@')[0] || '用戶'}
                       </span>
+                      <a
+                        href="/dashboard"
+                        style={{
+                          fontSize: 12,
+                          color: 'var(--gray-500)',
+                          background: 'var(--gray-100)',
+                          padding: '4px 10px',
+                          textDecoration: 'none',
+                        }}
+                      >
+                        儀表板
+                      </a>
                     </>
                   ) : (
                     <button
@@ -2517,6 +2529,22 @@ export default function Home() {
             <span style={{ fontSize: 14, color: 'var(--gray-600)' }}>
               {currentUser.name || currentUser.email?.split('@')[0] || '用戶'}
             </span>
+            <a
+              href="/dashboard"
+              style={{
+                fontSize: 13,
+                color: 'var(--gray-600)',
+                background: 'var(--gray-100)',
+                border: 'none',
+                padding: '6px 12px',
+                textDecoration: 'none',
+                transition: 'background 0.15s ease',
+              }}
+              onMouseEnter={(e) => e.currentTarget.style.background = 'var(--gray-200)'}
+              onMouseLeave={(e) => e.currentTarget.style.background = 'var(--gray-100)'}
+            >
+              儀表板
+            </a>
             <button
               onClick={handleSignOut}
               style={{
