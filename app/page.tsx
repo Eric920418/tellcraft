@@ -1039,8 +1039,10 @@ function ChatSection({
               justifyContent: 'space-between',
               padding: '0 24px',
               background: 'var(--white)',
+              position: 'relative',
             }}
           >
+            {/* 左側：返回 + Logo */}
             <div style={{ display: 'flex', alignItems: 'center', gap: 24 }}>
               <button
                 onClick={onBack}
@@ -1064,18 +1066,28 @@ function ChatSection({
                 Tellcraft
               </span>
             </div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 24 }}>
-              <div style={{ display: 'flex', gap: 24 }}>
-                {stages.map((stage, i) => (
-                  <ProcessStep
-                    key={stage.key}
-                    step={i + 1}
-                    title={stage.title}
-                    active={currentStage === stage.key}
-                    completed={i < currentStageIndex}
-                  />
-                ))}
-              </div>
+
+            {/* 中間：步驟指示器（絕對定位居中）*/}
+            <div style={{
+              position: 'absolute',
+              left: '50%',
+              transform: 'translateX(-50%)',
+              display: 'flex',
+              gap: 24,
+            }}>
+              {stages.map((stage, i) => (
+                <ProcessStep
+                  key={stage.key}
+                  step={i + 1}
+                  title={stage.title}
+                  active={currentStage === stage.key}
+                  completed={i < currentStageIndex}
+                />
+              ))}
+            </div>
+
+            {/* 右側：主題切換 + 用戶資訊 */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
               {/* 主題切換 */}
               <AnimatedThemeToggler />
               {/* 用戶資訊 */}
