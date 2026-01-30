@@ -1617,7 +1617,22 @@ export async function sendMessageAndTrigger(input: {
     })
   } catch (err) {
     console.error('Failed to trigger Inngest:', err)
-    // 不阻塞，讓消息先存入
+    // 將錯誤記錄到對話中，讓前端看到
+    const errorMsg = {
+      id: crypto.randomUUID(),
+      role: 'assistant',
+      content: `[系統錯誤] 無法啟動 AI 處理流程：${err instanceof Error ? err.message : String(err)}\n\n請聯繫管理員。`,
+      timestamp: new Date().toISOString(),
+    }
+    const { data: conv } = await supabase
+      .from('conversations')
+      .select('messages')
+      .eq('id', conversationId)
+      .single()
+    await supabase
+      .from('conversations')
+      .update({ messages: [...(conv?.messages || []), errorMsg] })
+      .eq('id', conversationId)
   }
 
   return {
