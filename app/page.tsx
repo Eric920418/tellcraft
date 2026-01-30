@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useRef, useEffect, useCallback } from 'react'
+import { useState, useRef, useEffect, useCallback, Suspense } from 'react'
 import { useSearchParams } from 'next/navigation'
 import { motion, AnimatePresence, useScroll, useTransform, useInView } from 'framer-motion'
 import SplitText from './components/SplitText'
@@ -2484,7 +2484,7 @@ function Footer() {
 }
 
 // ============ Main Component ============
-export default function Home() {
+function HomeContent() {
   const searchParams = useSearchParams()
   const [isChatActive, setIsChatActive] = useState(false)
   const [heroInput, setHeroInput] = useState('')
@@ -2653,5 +2653,23 @@ export default function Home() {
       <CTASection onStartChat={handleFocusInput} />
       <Footer />
     </main>
+  )
+}
+
+// 用 Suspense 包裹以支援 useSearchParams
+export default function Home() {
+  return (
+    <Suspense fallback={
+      <div style={{
+        minHeight: '100vh',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center'
+      }}>
+        載入中...
+      </div>
+    }>
+      <HomeContent />
+    </Suspense>
   )
 }
