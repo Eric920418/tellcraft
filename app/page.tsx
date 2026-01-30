@@ -2484,7 +2484,10 @@ export default function Home() {
     <main>
       {/* Theme Toggler - Fixed Top Left (隱藏於 Chat 模式) */}
       {!isChatActive && (
-        <div
+        <motion.div
+          initial={{ opacity: 0, y: -10 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.5, delay: 0.2 }}
           style={{
             position: 'fixed',
             top: 20,
@@ -2493,12 +2496,15 @@ export default function Home() {
           }}
         >
           <AnimatedThemeToggler />
-        </div>
+        </motion.div>
       )}
 
       {/* Auth Button - Fixed Top Right (隱藏於 Chat 模式) */}
       {!isChatActive && (
-        <div
+        <motion.div
+          initial={{ opacity: 0, y: -10 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.5, delay: 0.3 }}
           style={{
             position: 'fixed',
             top: 20,
@@ -2580,7 +2586,7 @@ export default function Home() {
             登入
           </a>
         )}
-      </div>
+      </motion.div>
       )}
 
       {/* Hero */}

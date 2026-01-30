@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { Sidebar } from '../components/dashboard'
 import { getCurrentUser } from '../actions'
-import { supabase } from '../lib/supabase'
+import { createClient } from '../lib/supabase/client'
 
 interface UserInfo {
   userId: string
@@ -33,7 +33,8 @@ export default function DashboardLayout({
         return
       }
 
-      // 查詢是否為管理員
+      // 查詢是否為管理員（使用 browser client 帶 auth session）
+      const supabase = createClient()
       const { data: userData } = await supabase
         .from('users')
         .select('is_admin')
