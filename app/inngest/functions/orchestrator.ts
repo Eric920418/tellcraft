@@ -460,7 +460,7 @@ ${specSummaryText}
       timestamp: new Date().toISOString(),
     }
 
-    const { data: conv } = await supabase
+    const { data: convForUpdate } = await supabase
       .from('conversations')
       .select('messages')
       .eq('id', conversationId)
@@ -469,7 +469,7 @@ ${specSummaryText}
     await supabase
       .from('conversations')
       .update({
-        messages: [...(conv?.messages || []), completeMessage],
+        messages: [...(convForUpdate?.messages || []), completeMessage],
         updated_at: new Date().toISOString(),
       })
       .eq('id', conversationId)
