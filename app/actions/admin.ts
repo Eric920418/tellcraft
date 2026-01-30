@@ -81,7 +81,7 @@ export async function getAdminStats(): Promise<ActionResult<{
   try {
     await requireAdmin()
 
-    // 並行查詢所有統計數據
+    // 並行查詢所有統計數據（使用 select('id') 而非 select('*') 減少流量）
     const [
       usersCount,
       projectsCount,
@@ -94,10 +94,10 @@ export async function getAdminStats(): Promise<ActionResult<{
       // 總 LLM 成本（使用 RPC 聚合或限制查詢）
       llmCost
     ] = await Promise.all([
-      supabase.from('users').select('*', { count: 'exact', head: true }),
-      supabase.from('projects').select('*', { count: 'exact', head: true }),
-      supabase.from('conversations').select('*', { count: 'exact', head: true }),
-      supabase.from('deployments').select('*', { count: 'exact', head: true }).eq('status', 'success'),
+      supabase.from('users').select('id', { count: 'exact', head: true }),
+      supabase.from('projects').select('id', { count: 'exact', head: true }),
+      supabase.from('conversations').select('id', { count: 'exact', head: true }),
+      supabase.from('deployments').select('id', { count: 'exact', head: true }).eq('status', 'success'),
       supabase
         .from('conversations')
         .select('project_id')
@@ -114,7 +114,7 @@ export async function getAdminStats(): Promise<ActionResult<{
         }),
       supabase
         .from('users')
-        .select('*', { count: 'exact', head: true })
+        .select('id', { count: 'exact', head: true })
         .gte('created_at', new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString()),
       // 使用 Supabase 聚合查詢（只取前 1000 筆做估算，避免全表掃描）
       supabase

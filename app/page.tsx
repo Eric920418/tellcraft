@@ -790,7 +790,7 @@ function ChatSection({
     init()
   }, [isActive, initialMessage, resumeConversationId, getAnonymousId])
 
-  // 輪詢獲取新消息（智慧退避機制）
+  // 輪詢獲取新消息（智慧退避機制 + updated_at 優化）
   useEffect(() => {
     if (!sessionInfo) return
 
@@ -799,16 +799,24 @@ function ChatSection({
     const MIN_INTERVAL = 3000 // 最小間隔 3 秒
     let timeoutId: NodeJS.Timeout | null = null
     let isPolling = true
+    let currentUpdatedAt = lastUpdatedAt  // 本地追蹤，避免 closure 問題
 
     const poll = async () => {
       if (!isPolling) return
 
       const result = await getConversationMessages({
         conversationId: sessionInfo.conversationId,
-        afterTimestamp: lastTimestamp || undefined
+        afterTimestamp: lastTimestamp || undefined,
+        lastUpdatedAt: currentUpdatedAt || undefined  // 傳入上次的 updated_at
       })
 
       if (result.success && result.data) {
+        // 更新 updatedAt 追蹤
+        if (result.data.updatedAt) {
+          currentUpdatedAt = result.data.updatedAt
+          setLastUpdatedAt(result.data.updatedAt)
+        }
+
         const newMessages = result.data.messages
 
         if (newMessages.length > 0) {
@@ -878,7 +886,7 @@ function ChatSection({
       isPolling = false
       if (timeoutId) clearTimeout(timeoutId)
     }
-  }, [sessionInfo?.conversationId, lastTimestamp])
+  }, [sessionInfo?.conversationId, lastTimestamp, lastUpdatedAt])
 
   // 滾動到底部
   useEffect(() => {
@@ -892,6 +900,7 @@ function ChatSection({
       setMessages([])
       setSessionInfo(null)
       setLastTimestamp(null)
+      setLastUpdatedAt(null)
       setCurrentStage('discovery')
       setError(null)
       setShowConversationPicker(false)

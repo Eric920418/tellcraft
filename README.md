@@ -137,6 +137,13 @@ NEXT_PUBLIC_APP_URL=https://tellcraft.com
 - LLM 用量統計（按日/週/月/模型分組、成本追蹤，預設查詢最近 30 天）
 - 審計日誌（操作記錄、篩選）
 
+**Supabase 流量優化**（2025-01）：
+- 輪詢機制：智慧退避（3-15秒），有新消息重置為 3 秒
+- `getConversationMessages`：先檢查 `updated_at`，無更新時跳過載入 messages
+- `getAdminStats`：使用 `select('id')` 取代 `select('*')` 減少流量
+- `getUserStats`：合併重複查詢，並行執行減少往返
+- `getLLMUsageStats`：預設只查詢最近 30 天
+
 **路由結構**：
 ```
 /dashboard                    # 用戶首頁

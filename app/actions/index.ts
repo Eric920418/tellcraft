@@ -1909,47 +1909,44 @@ export async function getUserStats(): Promise<ActionResult<{
     return { success: false, error: '未登入' }
   }
 
-  // 查詢用戶資訊
-  const { data: user, error: userError } = await supabase
-    .from('users')
-    .select('plan, message_count_this_period')
-    .eq('id', authUser.id)
-    .single()
+  // 查詢用戶資訊和專案 IDs（合併查詢，減少請求次數）
+  const [userResult, projectsResult] = await Promise.all([
+    supabase
+      .from('users')
+      .select('plan, message_count_this_period')
+      .eq('id', authUser.id)
+      .single(),
+    supabase
+      .from('projects')
+      .select('id', { count: 'exact' })  // 一次查詢同時取得 count 和 IDs
+      .eq('user_id', authUser.id)
+  ])
 
-  if (userError || !user) {
+  if (userResult.error || !userResult.data) {
     return { success: false, error: '用戶不存在' }
   }
 
-  // 查詢專案數量
-  const { count: projectCount } = await supabase
-    .from('projects')
-    .select('*', { count: 'exact', head: true })
-    .eq('user_id', authUser.id)
+  const user = userResult.data
+  const projectIds = projectsResult.data?.map(p => p.id) || []
+  const projectCount = projectsResult.count || 0
 
-  // 查詢專案 IDs
-  const { data: projects } = await supabase
-    .from('projects')
-    .select('id')
-    .eq('user_id', authUser.id)
+  // 並行查詢對話和部署數量（減少往返次數）
+  const [convResult, deployResult] = projectIds.length > 0
+    ? await Promise.all([
+        supabase
+          .from('conversations')
+          .select('id', { count: 'exact', head: true })  // 使用 id 而非 *
+          .in('project_id', projectIds),
+        supabase
+          .from('deployments')
+          .select('id', { count: 'exact', head: true })  // 使用 id 而非 *
+          .in('project_id', projectIds)
+          .eq('status', 'success')
+      ])
+    : [{ count: 0 }, { count: 0 }]
 
-  const projectIds = projects?.map(p => p.id) || []
-
-  // 查詢對話數量
-  const { count: convCount } = projectIds.length > 0
-    ? await supabase
-        .from('conversations')
-        .select('*', { count: 'exact', head: true })
-        .in('project_id', projectIds)
-    : { count: 0 }
-
-  // 查詢成功部署數量
-  const { count: deployCount } = projectIds.length > 0
-    ? await supabase
-        .from('deployments')
-        .select('*', { count: 'exact', head: true })
-        .in('project_id', projectIds)
-        .eq('status', 'success')
-    : { count: 0 }
+  const convCount = convResult.count || 0
+  const deployCount = deployResult.count || 0
 
   return {
     success: true,

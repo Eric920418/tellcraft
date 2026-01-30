@@ -236,7 +236,7 @@ async function executeBddSpecSkill(input: BddSpecSkillInput) {
   const askedQuestions: string[] = []
   let questionCounter = 0
   let specComplete = false
-  const maxQuestions = 20  // 最多問 20 題
+  const maxQuestions = 5  // 最多問 5 題
 
   // 第一輪：發現問題
   const initialDiscovery = await step.run('bdd-initial-discovery', async () => {
@@ -353,10 +353,24 @@ async function executeBddSpecSkill(input: BddSpecSkillInput) {
     // 如果問題問完了，檢查是否需要更多問題
     if (pendingQuestions.length === 0 && !specComplete) {
       const moreQuestions = await step.run(`discover-more-${questionCounter}`, async () => {
+        // 從資料庫讀取已問過的問題（因為 step 之間不共享變數狀態）
+        const { data: conv } = await supabase
+          .from('conversations')
+          .select('messages')
+          .eq('id', conversationId)
+          .single()
+
+        const existingMessages = conv?.messages || []
+        const alreadyAskedQuestions = existingMessages
+          .filter((m: { role: string }) => m.role === 'assistant')
+          .map((m: { content: string }) => m.content)
+
+        console.log('[BDD Discovery] 已問過的問題數量:', alreadyAskedQuestions.length)
+
         const result = await discoverAmbiguities(
           message,
           projectContext || undefined,
-          askedQuestions
+          alreadyAskedQuestions  // 傳遞完整的已問問題列表
         )
 
         if (!result.success || !result.questions?.length) {
@@ -377,10 +391,34 @@ async function executeBddSpecSkill(input: BddSpecSkillInput) {
 
   // 產出規格摘要
   const specResult = await step.run('generate-spec', async () => {
+    // 從資料庫讀取問答歷史（因為 step 之間不共享變數狀態）
+    const { data: conv } = await supabase
+      .from('conversations')
+      .select('messages')
+      .eq('id', conversationId)
+      .single()
+
+    const allMessages = conv?.messages || []
+    const qaHistory: Array<{ question: string; answer: string }> = []
+
+    // 從消息中提取問答對
+    for (let i = 0; i < allMessages.length - 1; i++) {
+      const current = allMessages[i]
+      const next = allMessages[i + 1]
+      if (current.role === 'assistant' && next.role === 'user' && !current.content.startsWith('[系統')) {
+        qaHistory.push({
+          question: current.content,
+          answer: next.content
+        })
+      }
+    }
+
+    console.log('[BDD Spec] 問答歷史數量:', qaHistory.length)
+
     // 使用 LLM 生成規格摘要
     const summaryResult = await generateSpecSummary(
       message,
-      questionsAndAnswers,
+      qaHistory,
       projectContext || undefined
     )
 
