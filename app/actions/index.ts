@@ -1711,6 +1711,7 @@ export async function replyToConversation(input: {
  * 獲取用戶所有對話列表
  * - 用於顯示歷史對話選擇器
  * - 支援匿名用戶和已登入用戶
+ * - 優化：使用 JOIN 減少請求次數
  */
 export async function getUserConversations(input: {
   userId: string
@@ -1729,17 +1730,28 @@ export async function getUserConversations(input: {
 }>> {
   const { userId, limit = 10 } = input
 
-  // 查詢用戶的所有專案
-  const { data: projects, error: projectsError } = await supabase
-    .from('projects')
-    .select('id, name')
-    .eq('user_id', userId)
+  // 使用 JOIN 一次查詢取得對話和專案名稱
+  // 注意：messages 欄位仍需載入以取得 lastMessage 和 count
+  // 未來可考慮在 DB 層添加 message_count 欄位來進一步優化
+  const { data: conversations, error: convError } = await supabase
+    .from('conversations')
+    .select(`
+      id,
+      project_id,
+      messages,
+      updated_at,
+      created_at,
+      projects!inner(name, user_id)
+    `)
+    .eq('projects.user_id', userId)
+    .order('updated_at', { ascending: false })
+    .limit(limit + 1)  // 多取一條用於判斷是否有更多
 
-  if (projectsError) {
-    return { success: false, error: projectsError.message }
+  if (convError) {
+    return { success: false, error: convError.message }
   }
 
-  if (!projects || projects.length === 0) {
+  if (!conversations || conversations.length === 0) {
     return {
       success: true,
       data: {
@@ -1749,32 +1761,20 @@ export async function getUserConversations(input: {
     }
   }
 
-  const projectIds = projects.map(p => p.id)
-  const projectMap = new Map(projects.map(p => [p.id, p.name]))
-
-  // 查詢對話
-  const { data: conversations, error: convError, count } = await supabase
-    .from('conversations')
-    .select('id, project_id, messages, updated_at, created_at', { count: 'exact' })
-    .in('project_id', projectIds)
-    .order('updated_at', { ascending: false })
-    .limit(limit + 1) // 多取一條用於判斷是否有更多
-
-  if (convError) {
-    return { success: false, error: convError.message }
-  }
-
-  const hasMore = (conversations?.length || 0) > limit
-  const limitedConversations = (conversations || []).slice(0, limit)
+  const hasMore = conversations.length > limit
+  const limitedConversations = conversations.slice(0, limit)
 
   const formattedConversations = limitedConversations.map(conv => {
     const messages = conv.messages || []
     const lastUserMessage = [...messages].reverse().find((m: { role: string }) => m.role === 'user')
+    // 取得 JOIN 的專案名稱（Supabase 返回的 projects 是單一物件，因為是 !inner join）
+    const project = conv.projects as unknown as { name: string } | null
+    const projectName = project?.name || '未命名專案'
 
     return {
       id: conv.id,
       projectId: conv.project_id,
-      projectName: projectMap.get(conv.project_id) || '未命名專案',
+      projectName,
       lastMessage: lastUserMessage?.content?.slice(0, 100) || undefined,
       messageCount: messages.length,
       updatedAt: conv.updated_at,

@@ -142,7 +142,32 @@ NEXT_PUBLIC_APP_URL=https://tellcraft.com
 - `getConversationMessages`：先檢查 `updated_at`，無更新時跳過載入 messages
 - `getAdminStats`：使用 `select('id')` 取代 `select('*')` 減少流量
 - `getUserStats`：合併重複查詢，並行執行減少往返
+- `getUserConversations`：使用 JOIN 減少 2 次查詢為 1 次
+- `listAllConversations`：使用 JOIN 減少 3 次查詢為 1 次
 - `getLLMUsageStats`：預設只查詢最近 30 天
+- Admin Users 頁面：搜尋 debounce（300ms）
+- Admin Usage 頁面：圖表數據使用 useMemo 快取
+
+**建議的資料庫索引**（在 Supabase SQL Editor 執行）：
+```sql
+-- 加速 conversations 查詢
+CREATE INDEX IF NOT EXISTS idx_conversations_project_updated
+  ON conversations(project_id, updated_at DESC);
+
+-- 加速用戶統計
+CREATE INDEX IF NOT EXISTS idx_projects_user_id
+  ON projects(user_id);
+
+CREATE INDEX IF NOT EXISTS idx_deployments_project_status
+  ON deployments(project_id, status);
+
+-- 加速 LLM 使用查詢
+CREATE INDEX IF NOT EXISTS idx_llm_usage_created
+  ON llm_usage(created_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_llm_usage_user_created
+  ON llm_usage(user_id, created_at DESC);
+```
 
 **路由結構**：
 ```

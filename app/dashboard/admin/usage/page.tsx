@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useMemo } from 'react'
 import { useRouter } from 'next/navigation'
 import { motion } from 'framer-motion'
 import { StatsCard, BarChart, LineChart, DateRangePicker } from '../../../components/dashboard'
@@ -75,16 +75,20 @@ export default function AdminUsagePage() {
     )
   }
 
-  // 準備圖表數據
-  const chartData = usage?.breakdown.map((d) => ({
-    label: d.key.length > 10 ? d.key.slice(5) : d.key, // 縮短日期顯示
-    value: d.count,
-  })) || []
+  // 準備圖表數據（使用 useMemo 避免不必要的重新計算）
+  const chartData = useMemo(() =>
+    usage?.breakdown.map((d) => ({
+      label: d.key.length > 10 ? d.key.slice(5) : d.key, // 縮短日期顯示
+      value: d.count,
+    })) || []
+  , [usage?.breakdown])
 
-  const costChartData = usage?.breakdown.map((d) => ({
-    label: d.key.length > 10 ? d.key.slice(5) : d.key,
-    value: d.cost,
-  })) || []
+  const costChartData = useMemo(() =>
+    usage?.breakdown.map((d) => ({
+      label: d.key.length > 10 ? d.key.slice(5) : d.key,
+      value: d.cost,
+    })) || []
+  , [usage?.breakdown])
 
   return (
     <div>

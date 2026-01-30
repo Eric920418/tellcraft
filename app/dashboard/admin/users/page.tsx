@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useRef, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
 import { motion } from 'framer-motion'
 import { DataTable, StatusBadge, SearchInput, type Column } from '../../../components/dashboard'
@@ -44,11 +44,36 @@ export default function AdminUsersPage() {
   const [page, setPage] = useState(1)
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
-  const [search, setSearch] = useState('')
+  const [searchInput, setSearchInput] = useState('')  // 輸入框的值（即時更新）
+  const [searchQuery, setSearchQuery] = useState('')  // 實際查詢的值（debounced）
   const [sortBy, setSortBy] = useState('created_at')
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc')
+  const debounceTimerRef = useRef<NodeJS.Timeout | null>(null)
 
   const pageSize = 20
+
+  // Debounced search - 用戶停止輸入 300ms 後才查詢
+  const handleSearchChange = useCallback((value: string) => {
+    setSearchInput(value)
+
+    if (debounceTimerRef.current) {
+      clearTimeout(debounceTimerRef.current)
+    }
+
+    debounceTimerRef.current = setTimeout(() => {
+      setSearchQuery(value)
+      setPage(1)  // 重置頁碼
+    }, 300)
+  }, [])
+
+  // 清理 timer
+  useEffect(() => {
+    return () => {
+      if (debounceTimerRef.current) {
+        clearTimeout(debounceTimerRef.current)
+      }
+    }
+  }, [])
 
   useEffect(() => {
     const fetchUsers = async () => {
@@ -58,7 +83,7 @@ export default function AdminUsersPage() {
         pageSize,
         sortBy,
         sortOrder,
-        search: search || undefined,
+        search: searchQuery || undefined,
       })
 
       if (!result.success) {
@@ -79,7 +104,7 @@ export default function AdminUsersPage() {
     }
 
     fetchUsers()
-  }, [page, sortBy, sortOrder, search, router])
+  }, [page, sortBy, sortOrder, searchQuery, router])
 
   const handleToggleAdmin = async (userId: string, currentIsAdmin: boolean) => {
     const result = await setUserAdmin({ userId, isAdmin: !currentIsAdmin })
@@ -263,8 +288,8 @@ export default function AdminUsersPage() {
         style={{ marginBottom: 20, width: 320 }}
       >
         <SearchInput
-          value={search}
-          onChange={setSearch}
+          value={searchInput}
+          onChange={handleSearchChange}
           placeholder="搜尋 Email 或名稱..."
         />
       </motion.div>

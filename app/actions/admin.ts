@@ -325,6 +325,7 @@ export async function listAllProjects(params: PaginationParams & {
 
 /**
  * 列出所有對話
+ * 優化：使用 JOIN 減少 3 次查詢為 1 次
  */
 export async function listAllConversations(params: PaginationParams & {
   userId?: string
@@ -345,9 +346,18 @@ export async function listAllConversations(params: PaginationParams & {
 
     const { page = 1, pageSize = 20, sortBy = 'updated_at', sortOrder = 'desc', projectId } = params
 
+    // 使用 JOIN 一次查詢取得對話、專案和用戶資訊
     let query = supabase
       .from('conversations')
-      .select('id, project_id, messages, spec_complete, created_at, updated_at', { count: 'exact' })
+      .select(`
+        id,
+        project_id,
+        messages,
+        spec_complete,
+        created_at,
+        updated_at,
+        projects(id, name, user_id, users(id, email))
+      `, { count: 'exact' })
 
     if (projectId) {
       query = query.eq('project_id', projectId)
@@ -368,31 +378,15 @@ export async function listAllConversations(params: PaginationParams & {
       return { success: false, error: error.message }
     }
 
-    // 查詢專案和用戶資訊
-    const projectIds = [...new Set(conversations?.map(c => c.project_id) || [])]
-    const { data: projects } = await supabase
-      .from('projects')
-      .select('id, name, user_id')
-      .in('id', projectIds)
-
-    const projectMap = new Map(projects?.map(p => [p.id, p]) || [])
-
-    const userIds = [...new Set(projects?.map(p => p.user_id) || [])]
-    const { data: users } = await supabase
-      .from('users')
-      .select('id, email')
-      .in('id', userIds)
-
-    const userEmailMap = new Map(users?.map(u => [u.id, u.email]) || [])
-
     const items = (conversations || []).map(conv => {
-      const project = projectMap.get(conv.project_id)
+      // Supabase JOIN 返回的是單一物件（因為是 1:1 關係）
+      const project = conv.projects as unknown as { id: string; name: string; user_id: string; users: { id: string; email: string } | null } | null
       return {
         id: conv.id,
         projectId: conv.project_id,
         projectName: project?.name || '',
         userId: project?.user_id || '',
-        userEmail: userEmailMap.get(project?.user_id || '') || '',
+        userEmail: project?.users?.email || '',
         messageCount: (conv.messages || []).length,
         specComplete: conv.spec_complete,
         createdAt: conv.created_at,
