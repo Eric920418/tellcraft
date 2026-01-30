@@ -1,7 +1,6 @@
-'use server'
-
 // ============================================================
 // LLM 服務 - Anthropic Claude API
+// 注意：這個模組直接在服務器端使用，不是 Server Actions
 // ============================================================
 
 const ANTHROPIC_API = 'https://api.anthropic.com/v1/messages'
@@ -29,9 +28,13 @@ export async function callClaude(
     temperature?: number
   }
 ): Promise<LlmResponse> {
-  const apiKey = process.env.ANTHROPIC_API_KEY
+  const apiKey = process.env.CLAUDE_API_KEY
+
+  console.log('[LLM] CLAUDE_API_KEY exists:', !!apiKey)
+  console.log('[LLM] API Key prefix:', apiKey?.substring(0, 15) || 'NONE')
 
   if (!apiKey) {
+    console.error('[LLM] ERROR: 缺少 ANTHROPIC_API_KEY')
     return { success: false, error: '缺少 ANTHROPIC_API_KEY' }
   }
 

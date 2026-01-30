@@ -109,6 +109,8 @@ CREATE TABLE users (
     cancelled_at TIMESTAMPTZ COMMENT '取消訂閱時間（用於計算 30 天暫停期）',
     message_count_this_period INT NOT NULL DEFAULT 0 COMMENT '本週期對話次數（決議 #7：每則用戶訊息 = 1 次）',
     subscription_period_start DATE NOT NULL DEFAULT CURRENT_DATE COMMENT '訂閱週期起始日（決議：對話次數按週期重置，Free 用戶以註冊日期為準）',
+    anonymous_user_id UUID COMMENT '關聯的匿名用戶 ID（登入時用於資料遷移）',
+    is_admin BOOLEAN NOT NULL DEFAULT FALSE COMMENT '是否為管理員',
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 ) COMMENT '平台用戶';
 
@@ -365,6 +367,34 @@ CREATE TABLE notifications (
 ) COMMENT '站內通知（決議 #28）';
 
 -- ============================================================
+-- 審計與監控資料表
+-- ============================================================
+
+-- 審計日誌（記錄用戶操作）
+CREATE TABLE audit_logs (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID REFERENCES users(id) ON DELETE SET NULL,
+    action VARCHAR(50) NOT NULL COMMENT '操作類型：login, logout, create_project, deploy, message, etc.',
+    entity_type VARCHAR(50) COMMENT '實體類型：user, project, conversation, task',
+    entity_id UUID COMMENT '實體 ID',
+    metadata JSONB COMMENT '額外資訊（IP、User Agent、詳情）',
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+) COMMENT '審計日誌';
+
+-- LLM 用量追蹤
+CREATE TABLE llm_usage (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+    conversation_id UUID REFERENCES conversations(id) ON DELETE SET NULL,
+    model VARCHAR(50) NOT NULL COMMENT 'LLM 模型名稱：claude-3-5-sonnet, gpt-4 等',
+    input_tokens INTEGER NOT NULL COMMENT '輸入 token 數',
+    output_tokens INTEGER NOT NULL COMMENT '輸出 token 數',
+    cost_usd DECIMAL(10, 6) COMMENT '成本（美元）',
+    purpose VARCHAR(100) COMMENT '用途：classification, generation, clarification',
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+) COMMENT 'LLM 用量追蹤';
+
+-- ============================================================
 -- 索引
 -- ============================================================
 
@@ -374,6 +404,8 @@ CREATE INDEX idx_conversations_project_id ON conversations(project_id);
 CREATE INDEX idx_generations_project_id ON generations(project_id);
 CREATE INDEX idx_deployments_project_id ON deployments(project_id);
 CREATE INDEX idx_users_subscription_status ON users(subscription_status);
+CREATE INDEX idx_users_anonymous_user_id ON users(anonymous_user_id);
+CREATE INDEX idx_users_is_admin ON users(is_admin);
 
 -- Orchestrator 索引
 CREATE INDEX idx_skills_status ON skills(status);
@@ -389,6 +421,16 @@ CREATE INDEX idx_llm_calls_user_id ON llm_calls(user_id);
 CREATE INDEX idx_llm_calls_task_id ON llm_calls(task_id);
 CREATE INDEX idx_notifications_user_id ON notifications(user_id);
 CREATE INDEX idx_notifications_is_read ON notifications(user_id, is_read);
+
+-- 審計與監控索引
+CREATE INDEX idx_audit_logs_user_id ON audit_logs(user_id);
+CREATE INDEX idx_audit_logs_action ON audit_logs(action);
+CREATE INDEX idx_audit_logs_entity ON audit_logs(entity_type, entity_id);
+CREATE INDEX idx_audit_logs_created_at ON audit_logs(created_at DESC);
+CREATE INDEX idx_llm_usage_user_id ON llm_usage(user_id);
+CREATE INDEX idx_llm_usage_conversation_id ON llm_usage(conversation_id);
+CREATE INDEX idx_llm_usage_created_at ON llm_usage(created_at DESC);
+CREATE INDEX idx_llm_usage_model ON llm_usage(model);
 
 -- ============================================================
 -- RLS 政策
@@ -465,3 +507,69 @@ CREATE POLICY "user_webhooks_own_data" ON user_webhooks
 
 CREATE POLICY "notifications_own_data" ON notifications
     FOR ALL USING (auth.uid() = user_id);
+
+-- 審計與監控 RLS 政策
+ALTER TABLE audit_logs ENABLE ROW LEVEL SECURITY;
+ALTER TABLE llm_usage ENABLE ROW LEVEL SECURITY;
+
+-- 用戶只能看到自己的 LLM 用量
+CREATE POLICY "llm_usage_own_data" ON llm_usage
+    FOR ALL USING (auth.uid() = user_id);
+
+-- 審計日誌只有管理員可以查看（用戶無法直接訪問）
+-- 透過 service_role 在後端存取
+
+-- ============================================================
+-- 管理員 RLS 政策（管理員可查看所有資料）
+-- ============================================================
+
+-- 管理員可查看所有用戶
+CREATE POLICY "admin_view_all_users" ON users
+    FOR SELECT TO authenticated
+    USING (
+        EXISTS (SELECT 1 FROM users WHERE id = auth.uid() AND is_admin = TRUE)
+        OR auth.uid() = id
+    );
+
+-- 管理員可查看所有專案
+CREATE POLICY "admin_view_all_projects" ON projects
+    FOR SELECT TO authenticated
+    USING (
+        EXISTS (SELECT 1 FROM users WHERE id = auth.uid() AND is_admin = TRUE)
+        OR auth.uid() = user_id
+    );
+
+-- 管理員可查看所有對話
+CREATE POLICY "admin_view_all_conversations" ON conversations
+    FOR SELECT TO authenticated
+    USING (
+        EXISTS (SELECT 1 FROM users WHERE id = auth.uid() AND is_admin = TRUE)
+        OR EXISTS (
+            SELECT 1 FROM projects
+            WHERE projects.id = conversations.project_id
+            AND projects.user_id = auth.uid()
+        )
+    );
+
+-- 管理員可查看所有任務
+CREATE POLICY "admin_view_all_tasks" ON tasks
+    FOR SELECT TO authenticated
+    USING (
+        EXISTS (SELECT 1 FROM users WHERE id = auth.uid() AND is_admin = TRUE)
+        OR auth.uid() = user_id
+    );
+
+-- 管理員可查看所有 LLM 用量
+CREATE POLICY "admin_view_all_llm_usage" ON llm_usage
+    FOR SELECT TO authenticated
+    USING (
+        EXISTS (SELECT 1 FROM users WHERE id = auth.uid() AND is_admin = TRUE)
+        OR auth.uid() = user_id
+    );
+
+-- 管理員可查看審計日誌
+CREATE POLICY "admin_view_audit_logs" ON audit_logs
+    FOR SELECT TO authenticated
+    USING (
+        EXISTS (SELECT 1 FROM users WHERE id = auth.uid() AND is_admin = TRUE)
+    );

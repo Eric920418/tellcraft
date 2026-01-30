@@ -1,12 +1,24 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect, Suspense } from 'react'
+import { useSearchParams } from 'next/navigation'
 import { createClient } from '@/app/lib/supabase/client'
 import { motion } from 'framer-motion'
 
-export default function LoginPage() {
+function LoginContent() {
   const [isLoading, setIsLoading] = useState<'google' | 'line' | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const searchParams = useSearchParams()
+
+  // 從 URL 獲取 anonymousId
+  const anonymousId = searchParams.get('anonymousId')
+
+  // 將 anonymousId 存到 sessionStorage，以便 callback 後使用
+  useEffect(() => {
+    if (anonymousId) {
+      sessionStorage.setItem('tellcraft_pending_anonymous_id', anonymousId)
+    }
+  }, [anonymousId])
 
   const handleGoogleLogin = async () => {
     setIsLoading('google')
@@ -232,6 +244,25 @@ export default function LoginPage() {
         </div>
       </motion.div>
     </div>
+  )
+}
+
+// 包裝 Suspense 以處理 useSearchParams
+export default function LoginPage() {
+  return (
+    <Suspense fallback={
+      <div style={{
+        minHeight: '100vh',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        background: 'var(--gray-50)',
+      }}>
+        <div style={{ color: 'var(--gray-500)', fontSize: 14 }}>載入中...</div>
+      </div>
+    }>
+      <LoginContent />
+    </Suspense>
   )
 }
 

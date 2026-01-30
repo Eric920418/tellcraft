@@ -12,9 +12,9 @@ Tellcraft 是一個 AI 驅動的自動化開發平台。用戶只需描述需求
 
 ## 當前開發進度
 
-- **狀態**：✅ Phase 1-5 + Server Actions + Inngest Orchestrator + 前端 Chat 串接 + 認證系統完成
+- **狀態**：✅ Phase 1-9 + Server Actions + Inngest Orchestrator + 前端 Chat 串接 + 認證系統 + 訪客體驗改善 + 儀表板系統完成
 - **釐清項目**：28 項全部解決
-- **Server Actions**：22/22 已實作並通過測試
+- **Server Actions**：30+ 已實作
 - **詳情**：[`.clarify/overview.md`](.clarify/overview.md)
 
 ### 認證系統
@@ -34,9 +34,11 @@ Tellcraft 是一個 AI 驅動的自動化開發平台。用戶只需描述需求
 - `app/api/auth/line/` - LINE OAuth 自訂流程
 
 **新增 Server Actions**：
-- `initializeSessionFromAuth` - 從認證 session 初始化（已登入用戶）
+- `initializeSessionFromAuth` - 從認證 session 初始化（已登入用戶，支援帳號合併）
 - `getCurrentUser` - 取得當前認證用戶
 - `signOut` - 登出
+- `getUserConversations` - 獲取用戶所有對話列表（用於歷史對話選擇器）
+- `migrateAnonymousAccount` - 遷移匿名帳號資料到認證帳號
 
 **環境變數**：
 ```bash
@@ -72,13 +74,127 @@ NEXT_PUBLIC_APP_URL=https://tellcraft.com
 ```
 
 **Chat 相關 Server Actions**：
-- `initializeSession` - 創建或獲取匿名用戶的會話（訪客模式）
-- `initializeSessionFromAuth` - 從認證 session 初始化（已登入用戶）
+- `initializeSession` - 創建或獲取匿名用戶的會話（訪客模式，支援恢復指定對話）
+- `initializeSessionFromAuth` - 從認證 session 初始化（已登入用戶，支援帳號合併）
 - `sendMessageAndTrigger` - 發送消息並觸發 Inngest
 - `replyToConversation` - 多輪對話時用戶回覆
 - `getConversationMessages` - 獲取對話消息（用於輪詢）
+- `getUserConversations` - 獲取用戶所有對話列表（用於歷史對話選擇器）
+- `migrateAnonymousAccount` - 遷移匿名帳號資料到認證帳號
 - `getCurrentUser` - 取得當前認證用戶
 - `signOut` - 登出
+
+### 訪客體驗改善
+
+實現訪客對話持久化和帳號合併功能：
+
+**功能特點**：
+1. **對話恢復** - 訪客關閉瀏覽器後重新訪問，可選擇繼續之前的對話或開始新對話
+2. **Cookie 備份** - 防止 localStorage 被清除時遺失 anonymousId
+3. **帳號合併** - 訪客登入後自動將專案和對話遷移到認證帳號
+4. **登入提示** - 在適當時機（對話 3 輪後、生成中、部署成功後）提示登入
+
+**相關檔案**：
+- `app/api/session/route.ts` - Cookie 備份 anonymousId
+- `app/components/ConversationPicker.tsx` - 歷史對話選擇器
+- `app/components/LoginPrompt.tsx` - 登入提示（subtle/emphasized 兩種版本）
+- `app/auth/post-login/page.tsx` - 登入後帳號合併處理
+
+**流程**：
+```
+訪客流程：
+訪客創建對話 → 關閉瀏覽器 → 重新訪問
+    → 顯示對話選擇器 → 「繼續之前的對話」或「開始新對話」
+
+帳號合併流程：
+訪客創建專案 → 點擊登入 → OAuth → post-login 頁面
+    → migrateAnonymousAccount → 專案/對話遷移 → 跳轉首頁
+```
+
+**登入提示觸發時機**：
+| 時機 | 版本 | 文案 |
+|------|------|------|
+| 對話 3 輪後 | subtle（頂部橫幅）| 登入後可隨時恢復這個對話 |
+| 生成程式碼中 | subtle | 登入後可在任何裝置查看生成進度 |
+| 部署成功後 | emphasized（彈窗）| 你的網站已上線，登入以管理和更新 |
+
+**拒絕後 24 小時內不再提示**
+
+### 儀表板系統
+
+完整的用戶和管理員儀表板系統：
+
+**用戶儀表板**（`/dashboard`）：
+- 個人統計（專案數、對話數、部署數、訊息配額）
+- 我的專案列表（搜尋、篩選、分頁）
+- 專案詳情（對話歷史、部署記錄、生成記錄）
+- 對話列表（按時間排序）
+
+**管理員儀表板**（`/dashboard/admin`）：
+- 平台總覽統計（用戶、專案、對話、部署、7 天活躍用戶）
+- 用戶管理（列表、搜尋、排序、設定管理員權限）
+- 用戶詳情（專案、對話、LLM 成本）
+- LLM 用量統計（按日/週/月/模型分組、成本追蹤）
+- 審計日誌（操作記錄、篩選）
+
+**路由結構**：
+```
+/dashboard                    # 用戶首頁
+/dashboard/projects           # 我的專案
+/dashboard/projects/[id]      # 專案詳情
+/dashboard/conversations      # 我的對話
+/dashboard/admin              # 管理員總覽（需 is_admin）
+/dashboard/admin/users        # 用戶管理
+/dashboard/admin/users/[id]   # 用戶詳情
+/dashboard/admin/usage        # LLM 用量統計
+/dashboard/admin/logs         # 審計日誌
+```
+
+**權限控制**：
+- Middleware 攔截未登入訪問 `/dashboard`
+- Middleware 攔截非管理員訪問 `/dashboard/admin`
+- Server Actions 使用 `requireAdmin()` 二次驗證
+
+**資料庫變更**：
+```sql
+-- users 表新增欄位
+is_admin BOOLEAN DEFAULT FALSE
+
+-- 新增審計日誌表
+CREATE TABLE audit_logs (
+  id, user_id, action, entity_type, entity_id, metadata, created_at
+)
+
+-- 新增 LLM 用量追蹤表
+CREATE TABLE llm_usage (
+  id, user_id, conversation_id, model, input_tokens, output_tokens, cost_usd, purpose, created_at
+)
+
+-- 管理員 RLS 策略（可查看所有資料）
+```
+
+**新增 Server Actions**：
+- 管理員 Actions（`app/actions/admin.ts`）：
+  - `getAdminStats` - 總覽統計
+  - `listAllUsers` - 用戶列表（分頁、搜尋、排序）
+  - `listAllProjects` - 專案列表
+  - `listAllConversations` - 對話列表
+  - `getUserDetail` - 用戶詳情
+  - `getLLMUsageStats` - LLM 用量統計
+  - `getAuditLogs` - 審計日誌查詢
+  - `setUserAdmin` - 設定管理員權限
+  - `logAuditEvent` - 記錄審計日誌
+- 用戶 Actions（`app/actions/index.ts` 新增）：
+  - `getUserStats` - 個人統計
+  - `getUserProjects` - 我的專案列表
+  - `getProjectDetail` - 專案詳情
+
+**UI 元件**（`app/components/dashboard/`）：
+- `Sidebar.tsx` - 側邊導航（根據 is_admin 顯示管理選項）
+- `StatsCard.tsx` - 統計卡片（數字 + 趨勢）
+- `DataTable.tsx` - 資料表格（分頁、排序、搜尋）
+- `Chart.tsx` - 圖表元件（BarChart、LineChart、ProgressBar、DonutChart）
+- `DateRangePicker.tsx` - 日期範圍選擇器
 
 ## 技術棧
 
@@ -465,16 +581,42 @@ npx inngest-cli@latest dev
 ```
 app/
 ├── actions/           # Server Actions（API 封裝）
+│   ├── index.ts       # 核心 + Chat + Auth Actions
+│   └── admin.ts       # 管理員 Actions
 ├── inngest/           # Orchestrator（任務編排）
 ├── lib/
 │   └── supabase/      # Supabase clients（client.ts, server.ts）
+├── components/        # UI 元件
+│   ├── dashboard/     # 儀表板元件
+│   │   ├── Sidebar.tsx
+│   │   ├── StatsCard.tsx
+│   │   ├── DataTable.tsx
+│   │   ├── Chart.tsx
+│   │   └── DateRangePicker.tsx
+│   ├── ConversationPicker.tsx  # 歷史對話選擇器
+│   ├── LoginPrompt.tsx         # 登入提示
+│   └── ...                     # 其他動效元件
+├── dashboard/         # 儀表板頁面
+│   ├── layout.tsx     # 共用版面（側邊欄）
+│   ├── page.tsx       # 用戶首頁
+│   ├── projects/      # 專案管理
+│   ├── conversations/ # 對話列表
+│   └── admin/         # 管理員頁面
+│       ├── page.tsx   # 管理員總覽
+│       ├── users/     # 用戶管理
+│       ├── usage/     # LLM 用量
+│       └── logs/      # 審計日誌
 ├── auth/
 │   ├── login/         # 登入頁面
-│   └── callback/      # OAuth callback
-├── api/auth/line/     # LINE OAuth 路由
+│   ├── callback/      # OAuth callback
+│   └── post-login/    # 登入後帳號合併處理
+├── api/
+│   ├── auth/line/     # LINE OAuth 路由
+│   ├── inngest/       # Inngest webhook endpoint
+│   └── session/       # Session Cookie 備份
 └── test/              # 測試頁面
 
-proxy.ts          # Session refresh + 路由保護
+middleware.ts     # Session refresh + 路由保護 + 管理員權限
 
 spec/
 ├── data/              # Schema + Entity Mapping

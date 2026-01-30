@@ -30,7 +30,7 @@ export async function classifyIntent(
   message: string,
   conversationHistory?: Array<{ role: 'user' | 'assistant'; content: string }>
 ): Promise<ClassificationResult> {
-  const apiKey = process.env.ANTHROPIC_API_KEY
+  const apiKey = process.env.CLAUDE_API_KEY
 
   if (!apiKey) {
     console.warn('[Classifier] ANTHROPIC_API_KEY 未設定，使用規則式分類')

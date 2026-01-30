@@ -15,9 +15,12 @@ import {
   sendMessageAndTrigger,
   replyToConversation,
   getConversationMessages,
+  getUserConversations,
   getCurrentUser,
   signOut
 } from './actions'
+import ConversationPicker from './components/ConversationPicker'
+import LoginPrompt, { shouldShowLoginPrompt, dismissLoginPrompt } from './components/LoginPrompt'
 
 // ============ Types ============
 interface Message {
@@ -424,13 +427,6 @@ function HeroSection({
   const [isFocused, setIsFocused] = useState(false)
   const inputRef = useRef<HTMLTextAreaElement>(null)
 
-  const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter' && !e.shiftKey && inputValue.trim()) {
-      e.preventDefault()
-      onStartChat()
-    }
-  }
-
   return (
     <motion.section
       initial={{ opacity: 1 }}
@@ -509,7 +505,6 @@ function HeroSection({
               ref={inputRef}
               value={inputValue}
               onChange={(e) => onInputChange(e.target.value)}
-              onKeyDown={handleKeyDown}
               onFocus={() => setIsFocused(true)}
               onBlur={() => setIsFocused(false)}
               placeholder="例如：一個線上訂餐系統..."
@@ -535,7 +530,7 @@ function HeroSection({
               background: 'var(--gray-50)',
             }}>
               <span style={{ fontSize: 12, color: 'var(--gray-400)' }}>
-                按 Enter 開始對話
+                描述你的想法，點擊按鈕開始
               </span>
               <motion.button
                 whileHover={{ scale: 1.02 }}
@@ -572,11 +567,22 @@ interface SessionInfo {
   conversationId: string
   currentTaskId?: string
   isAuthenticated?: boolean
+  hasHistory?: boolean
   user?: {
     email?: string
     name?: string
     avatarUrl?: string
   }
+}
+
+interface ConversationItem {
+  id: string
+  projectId: string
+  projectName: string
+  lastMessage?: string
+  messageCount: number
+  updatedAt: string
+  createdAt: string
 }
 
 function ChatSection({
@@ -599,6 +605,59 @@ function ChatSection({
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const hasInitialized = useRef(false)
 
+  // 對話選擇器相關狀態
+  const [showConversationPicker, setShowConversationPicker] = useState(false)
+  const [conversations, setConversations] = useState<ConversationItem[]>([])
+  const [isLoadingConversations, setIsLoadingConversations] = useState(false)
+
+  // 登入提示相關狀態
+  const [loginPromptConfig, setLoginPromptConfig] = useState<{
+    show: boolean
+    variant: 'subtle' | 'emphasized'
+    message: string
+    subMessage?: string
+    promptId: string
+  } | null>(null)
+
+  // 獲取或創建 anonymousId
+  const getAnonymousId = useCallback(async () => {
+    // 先嘗試從 localStorage 獲取
+    let anonymousId = localStorage.getItem('tellcraft_anonymous_id')
+
+    if (!anonymousId) {
+      // 嘗試從 Cookie 恢復
+      try {
+        const response = await fetch('/api/session')
+        const data = await response.json()
+        if (data.anonymousId) {
+          anonymousId = data.anonymousId as string
+          localStorage.setItem('tellcraft_anonymous_id', anonymousId)
+        }
+      } catch {
+        // ignore
+      }
+    }
+
+    if (!anonymousId) {
+      // 創建新的
+      anonymousId = crypto.randomUUID()
+      localStorage.setItem('tellcraft_anonymous_id', anonymousId)
+    }
+
+    // 備份到 Cookie
+    try {
+      await fetch('/api/session', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ anonymousId })
+      })
+    } catch {
+      // ignore
+    }
+
+    return anonymousId
+  }, [])
+
   // 初始化會話
   useEffect(() => {
     if (!isActive || hasInitialized.current) return
@@ -608,10 +667,16 @@ function ChatSection({
       setIsInitializing(true)
       setError(null)
 
+      const anonymousId = await getAnonymousId()
+
       // 優先嘗試從認證 session 初始化
-      const authResult = await initializeSessionFromAuth()
+      const authResult = await initializeSessionFromAuth({
+        anonymousId, // 傳遞 anonymousId 用於帳號合併
+        createNew: !!initialMessage // 有初始消息時創建新對話
+      })
 
       let session: SessionInfo
+      let hasHistory = false
 
       if (authResult.success && authResult.data) {
         // 已登入用戶
@@ -620,17 +685,16 @@ function ChatSection({
           projectId: authResult.data.projectId,
           conversationId: authResult.data.conversationId,
           isAuthenticated: true,
+          hasHistory: authResult.data.hasHistory,
           user: authResult.data.user
         }
+        hasHistory = authResult.data.hasHistory
       } else {
         // 未登入，使用匿名模式
-        let anonymousId = localStorage.getItem('tellcraft_anonymous_id')
-        if (!anonymousId) {
-          anonymousId = crypto.randomUUID()
-          localStorage.setItem('tellcraft_anonymous_id', anonymousId)
-        }
-
-        const result = await initializeSession({ anonymousId })
+        const result = await initializeSession({
+          anonymousId,
+          createNew: !!initialMessage // 有初始消息時創建新對話
+        })
 
         if (!result.success || !result.data) {
           setError(result.error || '初始化失敗')
@@ -642,8 +706,10 @@ function ChatSection({
           userId: result.data.userId,
           projectId: result.data.projectId,
           conversationId: result.data.conversationId,
-          isAuthenticated: false
+          isAuthenticated: false,
+          hasHistory: result.data.hasHistory
         }
+        hasHistory = result.data.hasHistory
       }
 
       setSessionInfo(session)
@@ -672,13 +738,22 @@ function ChatSection({
         if (!sendResult.success) {
           setError(sendResult.error || '發送消息失敗')
         }
+      } else if (hasHistory && !session.isAuthenticated) {
+        // 沒有初始消息但有歷史對話 → 顯示對話選擇器
+        setIsLoadingConversations(true)
+        const convResult = await getUserConversations({ userId: session.userId })
+        if (convResult.success && convResult.data) {
+          setConversations(convResult.data.conversations)
+        }
+        setIsLoadingConversations(false)
+        setShowConversationPicker(true)
       }
 
       setIsInitializing(false)
     }
 
     init()
-  }, [isActive, initialMessage])
+  }, [isActive, initialMessage, getAnonymousId])
 
   // 輪詢獲取新消息
   useEffect(() => {
@@ -704,9 +779,10 @@ function ChatSection({
           }))
 
           // 更新消息列表（合併現有消息和新消息）
+          // 使用 content + role 去重，避免樂觀更新和後端 ID 不一致
           setMessages(prev => {
-            const existingIds = new Set(prev.map(m => m.id))
-            const uniqueNewMessages = formattedMessages.filter(m => !existingIds.has(m.id))
+            const existingKeys = new Set(prev.map(m => `${m.role}:${m.content}`))
+            const uniqueNewMessages = formattedMessages.filter(m => !existingKeys.has(`${m.role}:${m.content}`))
             if (uniqueNewMessages.length > 0) {
               // 找到最後一條 AI 消息，更新 stage
               const lastAiMessage = [...prev, ...uniqueNewMessages]
@@ -764,8 +840,118 @@ function ChatSection({
       setLastTimestamp(null)
       setCurrentStage('discovery')
       setError(null)
+      setShowConversationPicker(false)
+      setConversations([])
+      setLoginPromptConfig(null)
     }
   }, [isActive])
+
+  // 登入提示觸發邏輯
+  useEffect(() => {
+    if (!sessionInfo || sessionInfo.isAuthenticated) return
+
+    // 對話 3 輪後顯示 subtle 提示
+    const userMessageCount = messages.filter(m => m.role === 'user').length
+    if (userMessageCount === 3) {
+      const promptId = 'after_3_rounds'
+      if (shouldShowLoginPrompt(promptId)) {
+        setLoginPromptConfig({
+          show: true,
+          variant: 'subtle',
+          message: '登入後可隨時恢復這個對話',
+          promptId
+        })
+      }
+    }
+
+    // 生成程式碼時顯示 subtle 提示
+    if (currentStage === 'generating') {
+      const promptId = 'generating_code'
+      if (shouldShowLoginPrompt(promptId)) {
+        setLoginPromptConfig({
+          show: true,
+          variant: 'subtle',
+          message: '登入後可在任何裝置查看生成進度',
+          promptId
+        })
+      }
+    }
+
+    // 部署成功時顯示 emphasized 提示
+    if (currentStage === 'complete') {
+      const promptId = 'deploy_success'
+      if (shouldShowLoginPrompt(promptId)) {
+        setLoginPromptConfig({
+          show: true,
+          variant: 'emphasized',
+          message: '你的網站已上線',
+          subMessage: '登入以管理和更新你的網站，並在任何裝置訪問。',
+          promptId
+        })
+      }
+    }
+  }, [messages.length, currentStage, sessionInfo])
+
+  // 處理選擇歷史對話
+  const handleSelectConversation = async (conversationId: string) => {
+    if (!sessionInfo) return
+
+    setShowConversationPicker(false)
+    setIsInitializing(true)
+
+    // 載入選中對話的消息
+    const result = await getConversationMessages({ conversationId })
+    if (result.success && result.data) {
+      const formattedMessages: Message[] = result.data.messages.map((m) => ({
+        id: m.id,
+        role: m.role,
+        content: m.content,
+        timestamp: new Date(m.timestamp),
+        stage: m.stage as Message['stage']
+      }))
+      setMessages(formattedMessages)
+
+      // 更新 session 中的 conversationId
+      setSessionInfo({
+        ...sessionInfo,
+        conversationId,
+        currentTaskId: result.data.currentTaskId
+      })
+
+      // 設定最後時間戳
+      if (formattedMessages.length > 0) {
+        const lastMsg = formattedMessages[formattedMessages.length - 1]
+        setLastTimestamp(lastMsg.timestamp.toISOString())
+      }
+    }
+
+    setIsInitializing(false)
+  }
+
+  // 處理開始新對話
+  const handleStartNewConversation = () => {
+    setShowConversationPicker(false)
+    // 新對話已在 initializeSession 中創建，直接開始即可
+  }
+
+  // 處理登入
+  const handleLogin = () => {
+    // 將 anonymousId 傳到登入頁面
+    const anonymousId = localStorage.getItem('tellcraft_anonymous_id')
+    if (anonymousId) {
+      window.location.href = `/auth/login?anonymousId=${encodeURIComponent(anonymousId)}`
+    } else {
+      window.location.href = '/auth/login'
+    }
+  }
+
+  // 處理關閉登入提示
+  const handleDismissLoginPrompt = () => {
+    if (loginPromptConfig) {
+      dismissLoginPrompt(loginPromptConfig.promptId)
+      setLoginPromptConfig(null)
+    }
+  }
 
   const handleSend = async () => {
     if (!sessionInfo || !input.trim() || isTyping) return
@@ -889,9 +1075,11 @@ function ChatSection({
                   />
                 ))}
               </div>
+              {/* 主題切換 */}
+              <AnimatedThemeToggler />
               {/* 用戶資訊 */}
               {sessionInfo && (
-                <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginLeft: 24 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
                   {sessionInfo.isAuthenticated ? (
                     <>
                       {sessionInfo.user?.avatarUrl && (
@@ -911,24 +1099,51 @@ function ChatSection({
                       </span>
                     </>
                   ) : (
-                    <a
-                      href="/auth/login"
+                    <button
+                      onClick={handleLogin}
                       style={{
                         fontSize: 13,
                         color: 'var(--gray-500)',
+                        background: 'none',
                         textDecoration: 'none',
                         padding: '6px 12px',
                         border: '1px solid var(--border-color)',
+                        cursor: 'pointer',
                       }}
                     >
                       登入
-                    </a>
+                    </button>
                   )}
                 </div>
               )}
             </div>
           </motion.header>
 
+          {/* Subtle 登入提示 */}
+          {loginPromptConfig?.show && loginPromptConfig.variant === 'subtle' && (
+            <LoginPrompt
+              variant="subtle"
+              message={loginPromptConfig.message}
+              onLogin={handleLogin}
+              onDismiss={handleDismissLoginPrompt}
+              autoHideAfter={15000}
+            />
+          )}
+
+          {/* 對話選擇器 */}
+          {showConversationPicker && (
+            <div style={{ flex: 1, overflow: 'auto' }}>
+              <ConversationPicker
+                conversations={conversations}
+                onSelectConversation={handleSelectConversation}
+                onStartNewConversation={handleStartNewConversation}
+                isLoading={isLoadingConversations}
+              />
+            </div>
+          )}
+
+          {/* 對話內容 */}
+          {!showConversationPicker && (
           <div style={{ flex: 1, overflow: 'auto', padding: '32px 0' }}>
             <div style={{ maxWidth: 680, margin: '0 auto', padding: '0 24px' }}>
               {/* 錯誤提示 */}
@@ -1005,7 +1220,7 @@ function ChatSection({
                         textTransform: 'uppercase',
                         letterSpacing: '0.05em'
                       }}>
-                        {message.role === 'user' ? '你' : 'AI'}
+                        {message.role === 'user' ? '你' : '泰爾'}
                       </div>
                       <div style={{
                         padding: '18px 22px',
@@ -1033,7 +1248,7 @@ function ChatSection({
                     marginBottom: 8,
                     textTransform: 'uppercase',
                     letterSpacing: '0.05em'
-                  }}>AI</div>
+                  }}>泰爾</div>
                   <div style={{
                     padding: '18px 22px',
                     background: 'var(--gray-50)',
@@ -1056,7 +1271,10 @@ function ChatSection({
               <div ref={messagesEndRef} />
             </div>
           </div>
+          )}
 
+          {/* 輸入區域 - 對話選擇器時隱藏 */}
+          {!showConversationPicker && (
           <motion.div
             initial={{ y: 20, opacity: 0 }}
             animate={{ y: 0, opacity: 1 }}
@@ -1068,12 +1286,6 @@ function ChatSection({
                 <textarea
                   value={input}
                   onChange={(e) => setInput(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter' && !e.shiftKey) {
-                      e.preventDefault()
-                      handleSend()
-                    }
-                  }}
                   placeholder="輸入訊息..."
                   rows={1}
                   disabled={isInitializing || !sessionInfo}
@@ -1113,6 +1325,18 @@ function ChatSection({
               </div>
             </div>
           </motion.div>
+          )}
+
+          {/* Emphasized 登入提示 (Modal) */}
+          {loginPromptConfig?.show && loginPromptConfig.variant === 'emphasized' && (
+            <LoginPrompt
+              variant="emphasized"
+              message={loginPromptConfig.message}
+              subMessage={loginPromptConfig.subMessage}
+              onLogin={handleLogin}
+              onDismiss={handleDismissLoginPrompt}
+            />
+          )}
         </motion.div>
       )}
     </AnimatePresence>
@@ -2246,30 +2470,33 @@ export default function Home() {
 
   return (
     <main>
-      {/* Theme Toggler - Fixed Top Left */}
-      <div
-        style={{
-          position: 'fixed',
-          top: 20,
-          left: 20,
-          zIndex: 1000,
-        }}
-      >
-        <AnimatedThemeToggler />
-      </div>
+      {/* Theme Toggler - Fixed Top Left (隱藏於 Chat 模式) */}
+      {!isChatActive && (
+        <div
+          style={{
+            position: 'fixed',
+            top: 20,
+            left: 20,
+            zIndex: 1000,
+          }}
+        >
+          <AnimatedThemeToggler />
+        </div>
+      )}
 
-      {/* Auth Button - Fixed Top Right */}
-      <div
-        style={{
-          position: 'fixed',
-          top: 20,
-          right: 20,
-          zIndex: 1000,
-          display: 'flex',
-          alignItems: 'center',
-          gap: 12,
-        }}
-      >
+      {/* Auth Button - Fixed Top Right (隱藏於 Chat 模式) */}
+      {!isChatActive && (
+        <div
+          style={{
+            position: 'fixed',
+            top: 20,
+            right: 20,
+            zIndex: 1000,
+            display: 'flex',
+            alignItems: 'center',
+            gap: 12,
+          }}
+        >
         {isLoadingUser ? (
           <div style={{ width: 80, height: 36 }} />
         ) : currentUser ? (
@@ -2326,6 +2553,7 @@ export default function Home() {
           </a>
         )}
       </div>
+      )}
 
       {/* Hero */}
       <HeroSection

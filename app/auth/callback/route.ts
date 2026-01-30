@@ -50,8 +50,9 @@ export async function GET(request: Request) {
       )
     }
 
-    // 登入成功，重導向到目標頁面
-    return NextResponse.redirect(`${origin}${next}`)
+    // 登入成功，重導向到 post-login 頁面處理帳號合併
+    // 帶上 next 參數以便合併後繼續導向
+    return NextResponse.redirect(`${origin}/auth/post-login?next=${encodeURIComponent(next)}`)
   }
 
   // 沒有 code 參數，返回登入頁

@@ -68,70 +68,22 @@ export const handleUserRequest = inngest.createFunction(
     })
 
     // ============================================================
-    // Step 3: 處理需要釐清的情況
+    // Step 3: 處理無法分類的情況 → 預設進入 BDD Spec
     // ============================================================
+    // 設計原則：新用戶/新對話一定是描述需求，應該直接進入 bdd-spec
+    // 只有當專案已有規格，用戶才可能要「生成程式碼」或「部署」
+    let effectiveIntent = classification.intent
+
     if (classification.intent === 'clarification_needed' || classification.intent === 'unknown') {
-      await step.run('request-clarification', async () => {
-        const clarificationMessage = {
-          id: crypto.randomUUID(),
-          role: 'assistant',
-          content: `我需要更多資訊來理解您的需求。您想要：
-1. 釐清需求並產出規格（BDD Spec）
-2. 根據現有規格生成程式碼
-3. 部署已完成的專案
-
-請告訴我您目前的需求是什麼？`,
-          timestamp: new Date().toISOString(),
-        }
-
-        // 更新對話
-        const { data: conv } = await supabase
-          .from('conversations')
-          .select('messages')
-          .eq('id', conversationId)
-          .single()
-
-        const messages = [...(conv?.messages || []), clarificationMessage]
-
-        await supabase
-          .from('conversations')
-          .update({ messages, updated_at: new Date().toISOString() })
-          .eq('id', conversationId)
-
-        // 更新任務狀態
-        await supabase
-          .from('tasks')
-          .update({ status: 'waiting_approval' })
-          .eq('id', taskId)
-
-        return { needsClarification: true }
-      })
-
-      // 等待用戶回覆
-      const reply = await step.waitForEvent('wait-for-clarification', {
-        event: 'user/reply',
-        timeout: '24h',
-        match: 'data.conversationId',
-      })
-
-      if (!reply) {
-        await step.run('timeout-cleanup', async () => {
-          await supabase
-            .from('tasks')
-            .update({ status: 'cancelled' })
-            .eq('id', taskId)
-        })
-        return { status: 'timeout', taskId }
-      }
-
-      // 重新分類
-      return { status: 'needs_reclassification', taskId, newMessage: reply.data.message }
+      // 預設當作 bdd-spec 處理
+      effectiveIntent = 'bdd-spec'
+      console.log('[Orchestrator] 無法確定意圖，預設進入 bdd-spec')
     }
 
     // ============================================================
     // Step 4: 路由到對應 Skill
     // ============================================================
-    const skillName = classification.intent as SkillName
+    const skillName = effectiveIntent as SkillName
     const skillMetadata = getSkillMetadata(skillName)
 
     if (!skillMetadata) {
@@ -279,103 +231,82 @@ async function executeBddSpecSkill(input: BddSpecSkillInput) {
     return project?.description || project?.name || undefined
   })
 
-  // 發送初始回應
-  await step.run('bdd-spec-initial-response', async () => {
-    const initialMessage = {
-      id: crypto.randomUUID(),
-      role: 'assistant',
-      content: `好的，我來幫您${extractedEntities?.projectType ? `建立「${extractedEntities.projectType}」` : '釐清需求'}。
-
-我會執行以下步驟：
-1. **發現階段**：識別需求中的歧義和遺漏
-2. **釐清階段**：與您確認細節
-3. **規格產出**：產出 BDD 規格（Gherkin Feature Files）
-
-讓我先分析您的需求...`,
-      timestamp: new Date().toISOString(),
-    }
-
-    const { data: conv } = await supabase
-      .from('conversations')
-      .select('messages')
-      .eq('id', conversationId)
-      .single()
-
-    await supabase
-      .from('conversations')
-      .update({
-        messages: [...(conv?.messages || []), initialMessage],
-        updated_at: new Date().toISOString(),
-      })
-      .eq('id', conversationId)
-  })
-
   // 追蹤已問過的問題和回答
   const questionsAndAnswers: Array<{ question: string; answer: string }> = []
   const askedQuestions: string[] = []
-
-  // 多輪對話迴圈
-  let clarificationRound = 0
-  const maxRounds = 10
+  let questionCounter = 0
   let specComplete = false
+  const maxQuestions = 20  // 最多問 20 題
 
-  while (!specComplete && clarificationRound < maxRounds) {
-    clarificationRound++
+  // 第一輪：發現問題
+  const initialDiscovery = await step.run('bdd-initial-discovery', async () => {
+    console.log('[BDD Discovery] 開始分析需求:', message)
+    console.log('[BDD Discovery] 專案背景:', projectContext)
 
-    // 執行 Discovery - 使用真正的 LLM 分析
-    const discoveryResult = await step.run(`bdd-discovery-round-${clarificationRound}`, async () => {
-      const result = await discoverAmbiguities(
-        message,
-        projectContext || undefined,
-        askedQuestions.length > 0 ? askedQuestions : undefined
-      )
+    const result = await discoverAmbiguities(
+      message,
+      projectContext || undefined,
+      undefined
+    )
 
-      if (!result.success) {
-        console.error('[BDD Discovery] LLM 呼叫失敗:', result.error)
-        return { questions: [], hasMoreQuestions: false, error: result.error }
-      }
+    console.log('[BDD Discovery] LLM 返回結果:', JSON.stringify(result, null, 2))
 
-      return {
-        questions: result.questions || [],
-        hasMoreQuestions: (result.questions?.length || 0) > 0,
-      }
-    })
-
-    // 如果沒有問題或 LLM 錯誤，結束釐清
-    if (discoveryResult.questions.length === 0) {
-      specComplete = true
-      break
+    if (!result.success) {
+      console.error('[BDD Discovery] LLM 呼叫失敗:', result.error)
+      return { questions: [], error: result.error }
     }
 
-    // 格式化問題訊息
-    const formattedQuestions = discoveryResult.questions.map((q: ClarifyQuestion, i: number) => {
-      const priorityLabel = q.priority === 'high' ? '🔴' : q.priority === 'medium' ? '🟡' : '🟢'
-      const categoryLabel = q.category === 'data' ? '[資料]' : q.category === 'feature' ? '[功能]' : '[術語]'
+    console.log('[BDD Discovery] 發現問題數量:', result.questions?.length || 0)
+    return { questions: result.questions || [] }
+  })
 
-      let questionText = `${i + 1}. ${priorityLabel} ${categoryLabel} ${q.question}`
+  // 如果 LLM 錯誤，顯示錯誤訊息
+  if (initialDiscovery.error) {
+    await step.run('show-error', async () => {
+      const errorMsg = {
+        id: crypto.randomUUID(),
+        role: 'assistant',
+        content: `[系統錯誤] ${initialDiscovery.error}\n\n請聯繫管理員或稍後再試。`,
+        timestamp: new Date().toISOString(),
+      }
+      const { data: conv } = await supabase
+        .from('conversations')
+        .select('messages')
+        .eq('id', conversationId)
+        .single()
+      await supabase
+        .from('conversations')
+        .update({ messages: [...(conv?.messages || []), errorMsg] })
+        .eq('id', conversationId)
+    })
+    specComplete = true
+  }
 
+  // 待問問題清單
+  let pendingQuestions: ClarifyQuestion[] = initialDiscovery.questions || []
+
+  // 一題一題問
+  while (!specComplete && pendingQuestions.length > 0 && questionCounter < maxQuestions) {
+    const currentQuestion = pendingQuestions.shift()!
+    questionCounter++
+
+    // 格式化問題
+    const formatQuestion = (q: ClarifyQuestion) => {
+      let text = q.question
       if (q.options && q.options.length > 0) {
-        questionText += '\n' + q.options.map((opt: { label: string; description: string }, j: number) =>
-          `   ${String.fromCharCode(65 + j)}. ${opt.label}${opt.description ? ` - ${opt.description}` : ''}`
+        text += '\n\n' + q.options.map((opt, j) =>
+          `${String.fromCharCode(65 + j)}. ${opt.description || opt.label}`
         ).join('\n')
       }
+      return text
+    }
 
-      return questionText
-    })
-
-    // 發送問題給用戶
-    await step.run(`send-questions-round-${clarificationRound}`, async () => {
+    // 發送問題
+    await step.run(`send-question-${questionCounter}`, async () => {
       const questionMessage = {
         id: crypto.randomUUID(),
         role: 'assistant',
-        content: `**第 ${clarificationRound} 輪釐清**
-
-我發現以下問題需要確認：
-
-${formattedQuestions.join('\n\n')}
-
----
-請回答這些問題，或輸入「確認規格」來完成釐清階段。`,
+        content: formatQuestion(currentQuestion),
         timestamp: new Date().toISOString(),
       }
 
@@ -393,85 +324,52 @@ ${formattedQuestions.join('\n\n')}
         })
         .eq('id', conversationId)
 
-      // 記錄已問過的問題
-      discoveryResult.questions.forEach((q: ClarifyQuestion) => {
-        askedQuestions.push(q.question)
-      })
+      askedQuestions.push(currentQuestion.question)
     })
 
     // 等待用戶回覆
-    const reply = await step.waitForEvent(`wait-for-reply-round-${clarificationRound}`, {
+    const reply = await step.waitForEvent(`wait-for-reply-${questionCounter}`, {
       event: 'user/reply',
       timeout: '24h',
       match: 'data.conversationId',
     })
 
     if (!reply) {
-      return { status: 'timeout', round: clarificationRound }
+      return { status: 'timeout', questionsAsked: questionCounter }
     }
 
     // 檢查是否確認規格
     if (reply.data.specConfirmed || reply.data.message.includes('確認規格')) {
       specComplete = true
+      break
     }
 
-    // 記錄用戶回覆
-    await step.run(`record-reply-round-${clarificationRound}`, async () => {
-      const userMsg = {
-        id: crypto.randomUUID(),
-        role: 'user',
-        content: reply.data.message,
-        timestamp: new Date().toISOString(),
-      }
-
-      const { data: conv } = await supabase
-        .from('conversations')
-        .select('messages')
-        .eq('id', conversationId)
-        .single()
-
-      await supabase
-        .from('conversations')
-        .update({
-          messages: [...(conv?.messages || []), userMsg],
-          updated_at: new Date().toISOString(),
-        })
-        .eq('id', conversationId)
-
-      // 記錄問答歷史（簡化：將所有問題合併為一個）
-      const combinedQuestion = discoveryResult.questions.map((q: ClarifyQuestion) => q.question).join('; ')
-      questionsAndAnswers.push({
-        question: combinedQuestion,
-        answer: reply.data.message,
-      })
+    // 記錄問答
+    questionsAndAnswers.push({
+      question: currentQuestion.question,
+      answer: reply.data.message,
     })
 
-    // 如果尚未確認規格，使用 LLM 分析回答是否需要追問
-    if (!specComplete) {
-      const answerAnalysis = await step.run(`analyze-answer-round-${clarificationRound}`, async () => {
-        const combinedQuestion = discoveryResult.questions.map((q: ClarifyQuestion) => q.question).join('; ')
-
-        const result = await processAnswer(
-          combinedQuestion,
-          reply.data.message,
-          questionsAndAnswers,
-          message
+    // 如果問題問完了，檢查是否需要更多問題
+    if (pendingQuestions.length === 0 && !specComplete) {
+      const moreQuestions = await step.run(`discover-more-${questionCounter}`, async () => {
+        const result = await discoverAmbiguities(
+          message,
+          projectContext || undefined,
+          askedQuestions
         )
 
-        if (!result.success) {
-          console.error('[BDD ProcessAnswer] LLM 呼叫失敗:', result.error)
-          return { needMoreQuestions: false }
+        if (!result.success || !result.questions?.length) {
+          return { questions: [] }
         }
 
-        return {
-          needMoreQuestions: result.needMoreQuestions,
-          summary: result.summary,
-          followUpQuestions: result.followUpQuestions,
-        }
+        return { questions: result.questions }
       })
 
-      // 如果 LLM 判斷不需要更多問題
-      if (!answerAnalysis.needMoreQuestions && !answerAnalysis.followUpQuestions?.length) {
+      pendingQuestions = moreQuestions.questions || []
+
+      // 如果沒有更多問題，結束釐清
+      if (pendingQuestions.length === 0) {
         specComplete = true
       }
     }
@@ -515,14 +413,8 @@ ${decisions.map(d => `- Q: ${d.question}\n  A: ${d.answer}\n  影響: ${d.impact
     const completeMessage = {
       id: crypto.randomUUID(),
       role: 'assistant',
-      content: `規格釐清完成！共進行了 ${clarificationRound} 輪對話。
+      content: `好的，我已經了解您的需求了！
 ${specSummaryText}
-
----
-
-我已經產出以下檔案：
-- \`spec/data/schema.sql\` - 資料庫結構
-- \`spec/features/*.feature\` - BDD 規格
 
 接下來您可以：
 1. 輸入「生成程式碼」來產生應用程式
@@ -546,7 +438,6 @@ ${specSummaryText}
 
     return {
       status: 'success',
-      rounds: clarificationRound,
       questionsAnswered: questionsAndAnswers.length,
       summary: summaryResult.success ? summaryResult.summary : null,
       artifacts: {

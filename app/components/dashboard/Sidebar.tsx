@@ -1,0 +1,215 @@
+'use client'
+
+import { motion } from 'framer-motion'
+import Link from 'next/link'
+import { usePathname } from 'next/navigation'
+
+interface SidebarProps {
+  isAdmin?: boolean
+  user?: {
+    email?: string
+    name?: string
+    avatarUrl?: string
+  }
+}
+
+interface NavItem {
+  href: string
+  label: string
+  icon: string
+  adminOnly?: boolean
+}
+
+const navItems: NavItem[] = [
+  { href: '/dashboard', label: '總覽', icon: '◐' },
+  { href: '/dashboard/projects', label: '專案', icon: '□' },
+  { href: '/dashboard/conversations', label: '對話', icon: '◇' },
+  // 管理員專用
+  { href: '/dashboard/admin', label: '管理總覽', icon: '⬡', adminOnly: true },
+  { href: '/dashboard/admin/users', label: '用戶管理', icon: '○', adminOnly: true },
+  { href: '/dashboard/admin/usage', label: 'LLM 用量', icon: '◈', adminOnly: true },
+  { href: '/dashboard/admin/logs', label: '審計日誌', icon: '≡', adminOnly: true },
+]
+
+export default function Sidebar({ isAdmin = false, user }: SidebarProps) {
+  const pathname = usePathname()
+
+  const filteredItems = navItems.filter(item => !item.adminOnly || isAdmin)
+
+  // 分組：普通項目和管理員項目
+  const userItems = filteredItems.filter(item => !item.adminOnly)
+  const adminItems = filteredItems.filter(item => item.adminOnly)
+
+  return (
+    <aside
+      style={{
+        width: 240,
+        height: '100vh',
+        background: 'var(--white)',
+        borderRight: '1px solid var(--border-color)',
+        display: 'flex',
+        flexDirection: 'column',
+        position: 'fixed',
+        left: 0,
+        top: 0,
+      }}
+    >
+      {/* Logo */}
+      <div
+        style={{
+          padding: '20px 24px',
+          borderBottom: '1px solid var(--border-color)',
+        }}
+      >
+        <Link
+          href="/"
+          style={{
+            fontSize: 18,
+            fontWeight: 600,
+            letterSpacing: '-0.02em',
+            color: 'var(--black)',
+            textDecoration: 'none',
+          }}
+        >
+          Tellcraft
+        </Link>
+      </div>
+
+      {/* Navigation */}
+      <nav style={{ flex: 1, padding: '16px 12px', overflow: 'auto' }}>
+        {/* 用戶導航 */}
+        <div style={{ marginBottom: 24 }}>
+          {userItems.map((item) => (
+            <NavLink key={item.href} item={item} isActive={pathname === item.href} />
+          ))}
+        </div>
+
+        {/* 管理員導航 */}
+        {adminItems.length > 0 && (
+          <>
+            <div
+              style={{
+                fontSize: 11,
+                color: 'var(--gray-400)',
+                textTransform: 'uppercase',
+                letterSpacing: '0.1em',
+                padding: '8px 12px',
+                marginBottom: 4,
+              }}
+            >
+              管理員
+            </div>
+            {adminItems.map((item) => (
+              <NavLink
+                key={item.href}
+                item={item}
+                isActive={pathname === item.href || pathname.startsWith(item.href + '/')}
+              />
+            ))}
+          </>
+        )}
+      </nav>
+
+      {/* User info */}
+      <div
+        style={{
+          padding: '16px 24px',
+          borderTop: '1px solid var(--border-color)',
+          display: 'flex',
+          alignItems: 'center',
+          gap: 12,
+        }}
+      >
+        {user?.avatarUrl ? (
+          <img
+            src={user.avatarUrl}
+            alt=""
+            style={{
+              width: 32,
+              height: 32,
+              borderRadius: '50%',
+              border: '1px solid var(--border-color)',
+            }}
+          />
+        ) : (
+          <div
+            style={{
+              width: 32,
+              height: 32,
+              borderRadius: '50%',
+              background: 'var(--gray-100)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              fontSize: 14,
+              color: 'var(--gray-500)',
+            }}
+          >
+            {user?.name?.[0] || user?.email?.[0] || '?'}
+          </div>
+        )}
+        <div style={{ flex: 1, overflow: 'hidden' }}>
+          <div
+            style={{
+              fontSize: 13,
+              fontWeight: 500,
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              whiteSpace: 'nowrap',
+            }}
+          >
+            {user?.name || user?.email?.split('@')[0] || '用戶'}
+          </div>
+          {isAdmin && (
+            <div
+              style={{
+                fontSize: 11,
+                color: 'var(--gray-400)',
+              }}
+            >
+              管理員
+            </div>
+          )}
+        </div>
+      </div>
+    </aside>
+  )
+}
+
+function NavLink({ item, isActive }: { item: NavItem; isActive: boolean }) {
+  return (
+    <Link href={item.href} style={{ textDecoration: 'none' }}>
+      <motion.div
+        whileHover={{ x: 2 }}
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 10,
+          padding: '10px 12px',
+          marginBottom: 2,
+          background: isActive ? 'var(--gray-50)' : 'transparent',
+          borderLeft: isActive ? '2px solid var(--black)' : '2px solid transparent',
+          transition: 'all 0.15s ease',
+        }}
+      >
+        <span
+          style={{
+            fontSize: 14,
+            opacity: isActive ? 1 : 0.5,
+          }}
+        >
+          {item.icon}
+        </span>
+        <span
+          style={{
+            fontSize: 14,
+            fontWeight: isActive ? 500 : 400,
+            color: isActive ? 'var(--black)' : 'var(--gray-600)',
+          }}
+        >
+          {item.label}
+        </span>
+      </motion.div>
+    </Link>
+  )
+}
