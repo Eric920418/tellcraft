@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Moon, Sun } from 'lucide-react'
 import { flushSync } from 'react-dom'
+import { motion } from 'framer-motion'
 
 interface AnimatedThemeTogglerProps extends React.ComponentPropsWithoutRef<'button'> {
   duration?: number
@@ -15,6 +16,7 @@ export function AnimatedThemeToggler({
 }: AnimatedThemeTogglerProps) {
   const [isDark, setIsDark] = useState(false)
   const [mounted, setMounted] = useState(false)
+  const [isHovered, setIsHovered] = useState(false)
   const buttonRef = useRef<HTMLButtonElement>(null)
 
   useEffect(() => {
@@ -80,19 +82,83 @@ export function AnimatedThemeToggler({
     )
   }, [isDark, duration])
 
+  const borderColor = 'var(--gray-400)'
+
   const buttonStyle: React.CSSProperties = {
-    width: 40,
-    height: 40,
+    position: 'relative',
+    width: 36,
+    height: 36,
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
-    border: '1px solid var(--border-color)',
+    border: 'none',
     background: 'transparent',
     cursor: 'pointer',
-    transition: 'background-color 0.15s ease',
-    color: 'var(--text-primary)',
+    color: 'var(--black)',
+    overflow: 'hidden',
     ...style,
   }
+
+  const borderContent = (
+    <>
+      {/* Corner borders - Top Left */}
+      <motion.span
+        animate={{ width: isHovered ? '60%' : '50%' }}
+        transition={{ duration: 0.3 }}
+        style={{
+          position: 'absolute',
+          top: 0,
+          left: 0,
+          height: '20%',
+          borderLeft: `1px solid ${borderColor}`,
+          borderTop: `1px solid ${borderColor}`,
+          pointerEvents: 'none',
+        }}
+      />
+      {/* Corner borders - Top Right */}
+      <motion.span
+        animate={{ height: isHovered ? '90%' : '60%' }}
+        transition={{ duration: 0.3 }}
+        style={{
+          position: 'absolute',
+          top: 0,
+          right: 0,
+          width: '50%',
+          borderRight: `1px solid ${borderColor}`,
+          borderTop: `1px solid ${borderColor}`,
+          pointerEvents: 'none',
+        }}
+      />
+      {/* Corner borders - Bottom Left */}
+      <motion.span
+        animate={{ height: isHovered ? '90%' : '60%' }}
+        transition={{ duration: 0.3 }}
+        style={{
+          position: 'absolute',
+          bottom: 0,
+          left: 0,
+          width: '50%',
+          borderLeft: `1px solid ${borderColor}`,
+          borderBottom: `1px solid ${borderColor}`,
+          pointerEvents: 'none',
+        }}
+      />
+      {/* Corner borders - Bottom Right */}
+      <motion.span
+        animate={{ width: isHovered ? '60%' : '50%' }}
+        transition={{ duration: 0.3 }}
+        style={{
+          position: 'absolute',
+          bottom: 0,
+          right: 0,
+          height: '20%',
+          borderRight: `1px solid ${borderColor}`,
+          borderBottom: `1px solid ${borderColor}`,
+          pointerEvents: 'none',
+        }}
+      />
+    </>
+  )
 
   // 避免 hydration mismatch
   if (!mounted) {
@@ -101,6 +167,7 @@ export function AnimatedThemeToggler({
         style={buttonStyle}
         {...props}
       >
+        {borderContent}
         <span className="sr-only">Toggle theme</span>
       </button>
     )
@@ -112,15 +179,12 @@ export function AnimatedThemeToggler({
       onClick={toggleTheme}
       style={buttonStyle}
       aria-label={isDark ? '切換至淺色模式' : '切換至深色模式'}
-      onMouseEnter={(e) => {
-        e.currentTarget.style.backgroundColor = 'var(--gray-100)'
-      }}
-      onMouseLeave={(e) => {
-        e.currentTarget.style.backgroundColor = 'transparent'
-      }}
+      onMouseEnter={() => setIsHovered(true)}
+      onMouseLeave={() => setIsHovered(false)}
       {...props}
     >
-      {isDark ? <Sun size={20} /> : <Moon size={20} />}
+      {borderContent}
+      {isDark ? <Sun size={18} /> : <Moon size={18} />}
       <span className="sr-only">Toggle theme</span>
     </button>
   )

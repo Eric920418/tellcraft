@@ -23,12 +23,14 @@ export function GlowButton({
   const [isHovered, setIsHovered] = useState(false)
 
   const isOutline = variant === 'outline'
-  const padding = size === 'sm' ? '8px 16px' : '12px 24px'
-  const fontSize = size === 'sm' ? 13 : 14
+  const height = size === 'sm' ? 36 : 44
+  const padding = size === 'sm' ? '0 14px' : '0 20px'
+  const fontSize = size === 'sm' ? 12 : 13
 
   const baseStyles: React.CSSProperties = {
     position: 'relative',
     cursor: 'pointer',
+    height,
     padding,
     fontSize,
     fontWeight: 500,
@@ -46,7 +48,7 @@ export function GlowButton({
     ...style
   }
 
-  const borderColor = isOutline ? 'var(--black)' : 'var(--gray-400)'
+  const borderColor = isOutline ? 'var(--gray-400)' : 'var(--gray-500)'
 
   const content = (
     <>
@@ -81,8 +83,8 @@ export function GlowButton({
           top: 0,
           left: 0,
           height: '20%',
-          borderLeft: `2px solid ${borderColor}`,
-          borderTop: `2px solid ${borderColor}`,
+          borderLeft: `1px solid ${borderColor}`,
+          borderTop: `1px solid ${borderColor}`,
         }}
       />
 
@@ -95,8 +97,8 @@ export function GlowButton({
           top: 0,
           right: 0,
           width: '50%',
-          borderRight: `2px solid ${borderColor}`,
-          borderTop: `2px solid ${borderColor}`,
+          borderRight: `1px solid ${borderColor}`,
+          borderTop: `1px solid ${borderColor}`,
         }}
       />
 
@@ -109,8 +111,8 @@ export function GlowButton({
           bottom: 0,
           left: 0,
           width: '50%',
-          borderLeft: `2px solid ${borderColor}`,
-          borderBottom: `2px solid ${borderColor}`,
+          borderLeft: `1px solid ${borderColor}`,
+          borderBottom: `1px solid ${borderColor}`,
         }}
       />
 
@@ -123,8 +125,8 @@ export function GlowButton({
           bottom: 0,
           right: 0,
           height: '20%',
-          borderRight: `2px solid ${borderColor}`,
-          borderBottom: `2px solid ${borderColor}`,
+          borderRight: `1px solid ${borderColor}`,
+          borderBottom: `1px solid ${borderColor}`,
         }}
       />
     </>

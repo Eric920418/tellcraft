@@ -99,13 +99,19 @@ export default function Sidebar({ isAdmin = false, user }: SidebarProps) {
             >
               管理員
             </div>
-            {adminItems.map((item) => (
-              <NavLink
-                key={item.href}
-                item={item}
-                isActive={pathname === item.href || pathname.startsWith(item.href + '/')}
-              />
-            ))}
+            {adminItems.map((item) => {
+              // 精確匹配：只有完全相同或是該項目的直接子頁面才算 active
+              // 但 /dashboard/admin 只在完全匹配時才 active
+              const isExactMatch = pathname === item.href
+              const isChildRoute = item.href !== '/dashboard/admin' && pathname.startsWith(item.href + '/')
+              return (
+                <NavLink
+                  key={item.href}
+                  item={item}
+                  isActive={isExactMatch || isChildRoute}
+                />
+              )
+            })}
           </>
         )}
       </nav>
