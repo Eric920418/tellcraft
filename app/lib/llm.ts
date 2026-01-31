@@ -347,7 +347,15 @@ export async function runPrdDiscovery(
   coverageSummary?: Record<string, 'clear' | 'partial' | 'missing'>
   error?: string
 }> {
-  const existingQuestions = existingItems?.map(item => item.question) || []
+  // 建立已釐清的 Q&A 列表（包含問題和答案）
+  const existingQA = existingItems
+    ?.filter(item => item.answer) // 只包含已回答的
+    ?.map(item => `Q: ${item.whiteTextQuestion || item.question}\nA: ${item.answer}`) || []
+
+  // 待處理的問題（還沒回答的）
+  const pendingQuestions = existingItems
+    ?.filter(item => !item.answer)
+    ?.map(item => item.whiteTextQuestion || item.question) || []
 
   const systemPrompt = `你是一位資深的 BDD（行為驅動開發）分析師。請根據以下檢查清單掃描用戶的需求描述，找出歧義、遺漏和需要釐清的問題。
 
@@ -420,8 +428,16 @@ export async function runPrdDiscovery(
 - 不要問太技術的問題，用領域語言
 - 一次最多返回 10 個問題
 - 按優先級排序：High → Medium → Low
+${existingQA.length ? `
 
-${existingQuestions.length ? `\n**已經問過的問題**（不要重複）：\n${existingQuestions.join('\n')}` : ''}`
+**已經釐清的問題**（這些主題已經確認，絕對不要再問類似的問題）：
+${existingQA.join('\n\n')}` : ''}
+${pendingQuestions.length ? `
+
+**待處理的問題**（這些問題正在等待回答，不要重複）：
+${pendingQuestions.join('\n')}` : ''}
+
+**重要**：不要問與「已經釐清的問題」語意相似或主題相同的問題。如果某個主題（例如：金額小數點處理、日期格式等）已經被回答過，就絕對不要用不同措辭再問一次。`
 
   const userMessage = projectContext
     ? `專案背景：${projectContext}\n\n需求描述：\n${requirements}`
@@ -695,7 +711,15 @@ export async function runSpecDiscovery(
   items?: ClarifyItem[]
   error?: string
 }> {
-  const existingQuestions = existingItems?.map(item => item.question) || []
+  // 建立已釐清的 Q&A 列表
+  const existingQA = existingItems
+    ?.filter(item => item.answer)
+    ?.map(item => `Q: ${item.whiteTextQuestion || item.question}\nA: ${item.answer}`) || []
+
+  // 待處理的問題
+  const pendingQuestions = existingItems
+    ?.filter(item => !item.answer)
+    ?.map(item => item.whiteTextQuestion || item.question) || []
 
   const systemPrompt = `你是一位資深的 BDD 分析師。請檢查以下 Feature Files，找出需要補充或釐清的地方。
 
@@ -727,8 +751,16 @@ export async function runSpecDiscovery(
 ## 規則
 - 如果 Feature Files 已經很完整，返回空陣列
 - 一次最多返回 5 個問題
+${existingQA.length ? `
 
-${existingQuestions.length ? `\n**已經問過的問題**（不要重複）：\n${existingQuestions.join('\n')}` : ''}`
+**已經釐清的問題**（這些主題已經確認，絕對不要再問類似的問題）：
+${existingQA.join('\n\n')}` : ''}
+${pendingQuestions.length ? `
+
+**待處理的問題**（不要重複）：
+${pendingQuestions.join('\n')}` : ''}
+
+**重要**：不要問與「已經釐清的問題」語意相似或主題相同的問題。`
 
   const featuresContent = features
     .map(f => `### ${f.name}\n\`\`\`gherkin\n${f.content}\n\`\`\``)
