@@ -654,6 +654,7 @@ function ChatSection({
   const [messages, setMessages] = useState<Message[]>([])
   const [input, setInput] = useState('')
   const [isTyping, setIsTyping] = useState(false)
+  const [showTypingIndicator, setShowTypingIndicator] = useState(false)
   const [currentStage, setCurrentStage] = useState<Message['stage']>('discovery')
   const [sessionInfo, setSessionInfo] = useState<SessionInfo | null>(null)
   const [isInitializing, setIsInitializing] = useState(false)
@@ -663,6 +664,27 @@ function ChatSection({
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const hasInitialized = useRef(false)
   const inputRef = useRef<HTMLTextAreaElement>(null)
+  const typingTimerRef = useRef<NodeJS.Timeout | null>(null)
+
+  // 延遲顯示打字指示器（10 秒後才顯示）
+  useEffect(() => {
+    if (isTyping) {
+      typingTimerRef.current = setTimeout(() => {
+        setShowTypingIndicator(true)
+      }, 10000)
+    } else {
+      if (typingTimerRef.current) {
+        clearTimeout(typingTimerRef.current)
+        typingTimerRef.current = null
+      }
+      setShowTypingIndicator(false)
+    }
+    return () => {
+      if (typingTimerRef.current) {
+        clearTimeout(typingTimerRef.current)
+      }
+    }
+  }, [isTyping])
 
   // 自動調整輸入框高度
   const adjustTextareaHeight = useCallback(() => {
@@ -1472,11 +1494,11 @@ function ChatSection({
                 )
               })}
 
-              {isTyping && (
+              {showTypingIndicator && (
                 <motion.div
                   initial={{ opacity: 0, y: 10 }}
                   animate={{ opacity: 1, y: 0 }}
-                  transition={{ duration: 0.25, delay: 0.15 }}
+                  transition={{ duration: 0.25 }}
                   style={{ marginBottom: 28 }}
                 >
                   <div style={{
@@ -1492,14 +1514,15 @@ function ChatSection({
                     border: '1px solid var(--border-color)',
                     display: 'inline-flex',
                     alignItems: 'center',
-                    gap: 4,
+                    gap: 10,
                   }}>
+                    <span style={{ fontSize: 14, color: 'var(--gray-500)' }}>問題正在釐清中，請稍等</span>
                     {[0, 1, 2].map(i => (
                       <motion.span
                         key={i}
                         animate={{ opacity: [0.3, 1, 0.3] }}
                         transition={{ duration: 1, repeat: Infinity, delay: i * 0.2 }}
-                        style={{ width: 6, height: 6, background: 'var(--gray-400)', display: 'inline-block' }}
+                        style={{ width: 5, height: 5, borderRadius: '50%', background: 'var(--gray-400)', display: 'inline-block' }}
                       />
                     ))}
                   </div>

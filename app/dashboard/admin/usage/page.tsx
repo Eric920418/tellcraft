@@ -16,7 +16,6 @@ interface LLMUsage {
     outputTokens: number
     cost: number
     count: number
-    conversationId?: string
   }>
 }
 
@@ -298,9 +297,9 @@ export default function AdminUsagePage() {
                 {usage?.breakdown.map((row) => (
                   <tr key={row.key} style={{ borderBottom: '1px solid var(--border-color)' }}>
                     <td style={{ padding: '14px 16px', fontSize: 14 }}>
-                      {groupBy === 'conversation' && row.conversationId ? (
+                      {groupBy === 'conversation' && row.key !== '(無對話)' ? (
                         <a
-                          href={`/dashboard/conversations/${row.conversationId}`}
+                          href={`/dashboard/conversations/${row.key}`}
                           style={{
                             color: 'var(--blue-600)',
                             textDecoration: 'none',

@@ -564,7 +564,6 @@ export async function getLLMUsageStats(params: {
     outputTokens: number
     cost: number
     count: number
-    conversationId?: string
   }>
 }>> {
   try {
@@ -610,7 +609,6 @@ export async function getLLMUsageStats(params: {
       outputTokens: number
       cost: number
       count: number
-      conversationId?: string
     }>()
 
     for (const row of usage || []) {
@@ -654,7 +652,6 @@ export async function getLLMUsageStats(params: {
         outputTokens: existing.outputTokens + (row.output_tokens || 0),
         cost: existing.cost + (parseFloat(row.cost_usd) || 0),
         count: existing.count + 1,
-        ...(groupBy === 'conversation' && row.conversation_id ? { conversationId: row.conversation_id } : {}),
       })
     }
 
