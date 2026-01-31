@@ -583,7 +583,9 @@ export async function getLLMUsageStats(params: {
     query = query.gte('created_at', startDate || defaultStartDate)
 
     if (endDate) {
-      query = query.lte('created_at', endDate)
+      // endDate 可能只有日期（如 2026-01-31），需要加上時間以包含當天所有記錄
+      const endDateTime = endDate.includes('T') ? endDate : `${endDate}T23:59:59.999Z`
+      query = query.lte('created_at', endDateTime)
     }
     if (userId) {
       query = query.eq('user_id', userId)
@@ -711,7 +713,9 @@ export async function getAuditLogs(params: PaginationParams & {
       query = query.gte('created_at', startDate)
     }
     if (endDate) {
-      query = query.lte('created_at', endDate)
+      // endDate 可能只有日期，需要加上時間以包含當天所有記錄
+      const endDateTime = endDate.includes('T') ? endDate : `${endDate}T23:59:59.999Z`
+      query = query.lte('created_at', endDateTime)
     }
 
     query = query.order('created_at', { ascending: false })
