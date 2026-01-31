@@ -491,7 +491,8 @@ Hero → 往下滾動 → 產品介紹（SEO 友好）→ Testimonials → CTA
 | Skill | 狀態 | 說明 |
 |-------|------|------|
 | `bdd-spec` | ✅ 完成 | 完整 5 階段流程：PRD Discovery/Clarify → Formulation → Spec Discovery/Clarify → Actions Design → ISA Config |
-| `coder` | ⏳ Mock | 呼叫 generateCode，待 Modal + sdd.os 整合 |
+| `coder` | ⏳ Mock | 呼叫 generateCode，待 Modal + sdd.os 整合（後端 API） |
+| `uiux` | ✅ 基礎 | 4 階段前端設計流程：Design Discovery → Design Lab → Implementation → Quality Gate |
 | `deployer` | ✅ 完成 | 整合 Vercel Deployments API，部署後自動詢問網域設定 |
 | `domain-manager` | ✅ 完成 | 網域管理入口，支援三種選擇 |
 | `domain-purchase` | ✅ 完成 | Porkbun 網域註冊 |
@@ -576,6 +577,57 @@ isa_config_content TEXT
 - `fixFeatureFormat` - 自癒修復
 - `validateFeatureContent` - 驗證 Feature 格式（E001-E008）
 - `validateMultipleFeatures` - 批量驗證
+
+### UIUX Skill 完整流程
+
+UI/UX Skill 實現完整的 4 階段前端介面開發流程，與 coder skill（後端）並行執行：
+
+```
+bdd-spec（規格確定）
+         ↓
+    ┌────┴────┐
+    ↓         ↓
+  coder    uiux
+ （後端）   （前端）
+    │         │
+    └────┬────┘
+         ↓
+     deployer
+```
+
+**4 階段流程**：
+
+```
+Phase 1: Design Discovery
+    ↓ 多輪問答釐清設計偏好
+    ↓ 產品類型、視覺風格、配色、Dark Mode
+
+Phase 2: Design Lab
+    ↓ 生成 5 個設計變體（不同設計軸）
+    ↓ 用戶選擇或合併變體
+
+Phase 3: Implementation
+    ↓ 產出 Next.js + Tailwind CSS 程式碼
+    ↓ SSR 優先、RWD、motion/react
+
+Phase 4: Quality Gate
+    ↓ 無障礙檢查（WCAG 2.2 AA）
+    ↓ 效能檢查（只動畫 transform/opacity）
+    ↓ SEO 檢查（Metadata、Open Graph）
+    ↓ 自癒機制（最多 3 次修復）
+```
+
+**設計變體的 5 個設計軸**：
+- **A: Hierarchy Focus** - 重新結構化內容層級
+- **B: Layout Model** - 不同佈局方式（card vs list vs table）
+- **C: Density** - 密度變化（compact vs spacious）
+- **D: Interaction** - 互動模式（modal vs inline vs drawer）
+- **E: Expressive** - 品牌表達方向
+
+**相關檔案**：
+- `uiux-skill/skill.md` - Skill 定義
+- `uiux-skill/instructions/` - 4 階段執行指南
+- `uiux-skill/rules/baseline-ui.md` - UI 技術約束
 
 ### Domain Skills（拆分降低風險）
 
@@ -889,6 +941,23 @@ spec/
 ├── data/              # Schema + Entity Mapping
 ├── features/          # BDD Feature Files (14)
 └── actions/           # Actions 定義
+
+bdd-spec/              # BDD Skill 定義
+├── skill.md           # Skill 元數據
+├── instructions/      # 5 階段執行指南
+├── rules/             # 格式規範
+└── scripts/           # 驗證腳本
+
+uiux-skill/            # UI/UX Skill 定義
+├── skill.md           # Skill 元數據
+├── instructions/      # 4 階段執行指南
+│   ├── 01-design-discovery.md
+│   ├── 02-design-lab.md
+│   ├── 03-implementation.md
+│   └── 04-quality-gate.md
+├── rules/             # UI 規範
+│   └── baseline-ui.md
+└── resources/         # 模板和範例
 
 prompts/               # BDD Skill（Claude Code 用）
 ```

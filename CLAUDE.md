@@ -11,14 +11,14 @@ Tellcraft 是一個 **AI 驅動的自動化開發平台**。用戶描述需求�
 ## 常用指令
 
 ```bash
-# 開發
-pnpm install          # 安裝依賴
-pnpm dev              # 啟動 Next.js（http://localhost:3000）
-npx inngest-cli@latest dev  # 啟動 Inngest Dev Server（http://localhost:8288）
+# 開發（需同時運行兩個終端）
+pnpm install              # 安裝依賴
+pnpm dev                  # 啟動 Next.js（http://localhost:3000）
+pnpm dev:inngest          # 啟動 Inngest Dev Server（http://localhost:8288）
 
 # 檢查
-pnpm lint             # ESLint
-pnpm typecheck        # TypeScript 型別檢查
+pnpm lint                 # ESLint
+pnpm typecheck            # TypeScript 型別檢查
 
 # BDD 規格驗證（Formulation 後必須依序執行）
 npx ts-node bdd-spec/scripts/lint-gherkin-format.ts spec/features/   # 第一步：ISA Format Lint
@@ -49,7 +49,7 @@ npx ts-node bdd-spec/scripts/validate-feature.ts spec/features/      # 第二步
 └─────────────────────────────────────────────────┘
          ↓
 ┌─────────────────────────────────────────────────┐
-│  Server Actions（14 個）- API 封裝              │
+│  Server Actions（30+）- API 封裝                │
 │  → Vercel · Supabase · Cloudflare · Porkbun    │
 └─────────────────────────────────────────────────┘
 ```
@@ -61,7 +61,7 @@ npx ts-node bdd-spec/scripts/validate-feature.ts spec/features/      # 第二步
 | **Orchestrator** | `app/inngest/functions/orchestrator.ts` | 主編排函數，處理用戶請求的完整流程 |
 | **Classifier** | `app/inngest/classifier.ts` | AI 意圖分類（Anthropic API + 規則 fallback） |
 | **Registry** | `app/inngest/registry.ts` | Skill 註冊表，定義觸發詞和元數據 |
-| **Server Actions** | `app/actions/index.ts` | 22 個核心 Actions（含 Chat、Auth、部署整合）|
+| **Server Actions** | `app/actions/index.ts` | 30+ 核心 Actions（含 Chat、Auth、部署整合）|
 
 ### Skill 系統
 
@@ -117,8 +117,9 @@ npx ts-node bdd-spec/scripts/validate-feature.ts spec/features/      # 第二步
 
 ```
 app/
-├── actions/           # Server Actions（22 個）
+├── actions/           # Server Actions（30+）
 │   ├── index.ts       # 主匯出：核心 + Chat + Auth Actions
+│   ├── admin.ts       # 管理員 Actions（用戶管理、LLM 統計、審計日誌）
 │   ├── deploy.ts      # Vercel Deployments API 整合
 │   ├── cloudflare.ts  # DNS 管理
 │   ├── porkbun.ts     # 網域購買
@@ -212,6 +213,13 @@ VERCEL_TEAM_ID=xxx
 NEXT_PUBLIC_SUPABASE_URL=xxx
 NEXT_PUBLIC_SUPABASE_ANON_KEY=xxx
 SUPABASE_SERVICE_ROLE_KEY=xxx
+
+# LINE OAuth
+LINE_CHANNEL_ID=xxx
+LINE_CHANNEL_SECRET=xxx
+
+# App URL
+NEXT_PUBLIC_APP_URL=https://tellcraft.com
 
 # Cloudflare
 CLOUDFLARE_API_TOKEN=xxx

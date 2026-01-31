@@ -189,48 +189,163 @@ function FeatureCard({
 }
 
 // ============ Process Step ============
+// Apple 風格緩動
+const stepEasing: [number, number, number, number] = [0.32, 0.72, 0, 1]
+
 function ProcessStep({
   step,
   title,
   active,
-  completed
+  completed,
+  isLast = false
 }: {
   step: number
   title: string
   active: boolean
   completed: boolean
+  isLast?: boolean
 }) {
   return (
     <div style={{
       display: 'flex',
       alignItems: 'center',
-      gap: 12,
-      opacity: active || completed ? 1 : 0.4,
-      transition: 'opacity 0.3s ease',
+      gap: 0,
     }}>
+      {/* 步驟指示器 */}
       <div style={{
-        width: 28,
-        height: 28,
         display: 'flex',
         alignItems: 'center',
-        justifyContent: 'center',
-        fontSize: 12,
-        fontFamily: 'var(--font-mono)',
-        border: '1px solid',
-        borderColor: active ? 'var(--black)' : 'var(--border-color)',
-        background: completed ? 'var(--black)' : 'transparent',
-        color: completed ? 'var(--white)' : 'var(--black)',
-        transition: 'all 0.3s ease',
+        gap: 10,
+        position: 'relative',
       }}>
-        {completed ? '✓' : step}
+        {/* 圓點/勾選 */}
+        <motion.div
+          initial={false}
+          animate={{
+            scale: active ? 1 : completed ? 1 : 0.85,
+            backgroundColor: completed
+              ? 'var(--black)'
+              : active
+                ? 'var(--white)'
+                : 'var(--gray-100)',
+            borderColor: completed || active ? 'var(--black)' : 'var(--gray-200)',
+          }}
+          transition={{ duration: 0.4, ease: stepEasing }}
+          style={{
+            width: 24,
+            height: 24,
+            borderRadius: '50%',
+            border: '1.5px solid',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            position: 'relative',
+            flexShrink: 0,
+          }}
+        >
+          {/* 完成勾選 */}
+          <AnimatePresence mode="wait">
+            {completed ? (
+              <motion.svg
+                key="check"
+                initial={{ opacity: 0, scale: 0.5 }}
+                animate={{ opacity: 1, scale: 1 }}
+                exit={{ opacity: 0, scale: 0.5 }}
+                transition={{ duration: 0.25, ease: stepEasing }}
+                width="12"
+                height="12"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="var(--white)"
+                strokeWidth="3"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <polyline points="20 6 9 17 4 12" />
+              </motion.svg>
+            ) : active ? (
+              <motion.div
+                key="pulse"
+                initial={{ scale: 0 }}
+                animate={{ scale: 1 }}
+                exit={{ scale: 0 }}
+                transition={{ duration: 0.3, ease: stepEasing }}
+                style={{
+                  width: 8,
+                  height: 8,
+                  borderRadius: '50%',
+                  background: 'var(--black)',
+                }}
+              />
+            ) : (
+              <motion.span
+                key="number"
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                transition={{ duration: 0.2 }}
+                style={{
+                  fontSize: 11,
+                  fontWeight: 500,
+                  color: 'var(--gray-400)',
+                  fontFamily: 'var(--font-mono)',
+                }}
+              >
+                {step}
+              </motion.span>
+            )}
+          </AnimatePresence>
+        </motion.div>
+
+        {/* 標題 */}
+        <motion.span
+          initial={false}
+          animate={{
+            color: completed || active ? 'var(--black)' : 'var(--gray-400)',
+            fontWeight: active ? 500 : 400,
+          }}
+          transition={{ duration: 0.3, ease: stepEasing }}
+          style={{
+            fontSize: 13,
+            letterSpacing: '-0.01em',
+            whiteSpace: 'nowrap',
+          }}
+        >
+          {title}
+        </motion.span>
       </div>
-      <span style={{
-        fontSize: 13,
-        fontWeight: active ? 500 : 400,
-        color: active ? 'var(--black)' : 'var(--gray-500)',
-      }}>
-        {title}
-      </span>
+
+      {/* 連接線 */}
+      {!isLast && (
+        <div style={{
+          width: 32,
+          height: 1,
+          marginLeft: 12,
+          position: 'relative',
+          overflow: 'hidden',
+        }}>
+          {/* 背景線 */}
+          <div style={{
+            position: 'absolute',
+            inset: 0,
+            background: 'var(--gray-200)',
+          }} />
+          {/* 進度線 */}
+          <motion.div
+            initial={false}
+            animate={{
+              scaleX: completed ? 1 : 0,
+              transformOrigin: 'left',
+            }}
+            transition={{ duration: 0.5, ease: stepEasing, delay: completed ? 0.1 : 0 }}
+            style={{
+              position: 'absolute',
+              inset: 0,
+              background: 'var(--black)',
+            }}
+          />
+        </div>
+      )}
     </div>
   )
 }
@@ -667,6 +782,7 @@ function ChatSection({
   const hasInitialized = useRef(false)
   const inputRef = useRef<HTMLTextAreaElement>(null)
   const typingTimerRef = useRef<NodeJS.Timeout | null>(null)
+  const isComposingRef = useRef(false)  // 追蹤 IME 輸入法狀態
 
   // 打字指示器：立即顯示 "..."，10 秒後顯示完整提示
   useEffect(() => {
@@ -959,8 +1075,18 @@ function ChatSection({
             progress: m.progress as Message['progress']
           }))
 
+          // 找出最新的 AI 消息 stage（在 setMessages 外部計算，確保狀態更新正確）
+          const latestAiMessageWithStage = [...formattedMessages]
+            .reverse()
+            .find(m => m.role === 'assistant' && m.stage)
+
+          // 更新 stage（在 setMessages 外部調用，避免 React 批處理問題）
+          if (latestAiMessageWithStage?.stage) {
+            setCurrentStage(latestAiMessageWithStage.stage)
+          }
+
           // 更新消息列表（合併現有消息和新消息）
-          // 使用 content + role 去重，避免樂觀更新和後端 ID 不一致
+          // 使用 ID 去重，並對相同內容的進度訊息進行合併（更新進度值）
           setMessages(prev => {
             // 如果收到真正的 AI 回覆，移除預告消息
             const hasRealAiMessage = formattedMessages.some(m => m.role === 'assistant')
@@ -968,21 +1094,43 @@ function ChatSection({
               ? prev.filter(m => m.id !== 'preview-analyzing')
               : prev
 
-            const existingKeys = new Set(filteredPrev.map(m => `${m.role}:${m.content}`))
-            const uniqueNewMessages = formattedMessages.filter(m => !existingKeys.has(`${m.role}:${m.content}`))
+            // 使用 ID 去重
+            const existingIds = new Set(filteredPrev.map(m => m.id))
+            const uniqueNewMessages = formattedMessages.filter(m => !existingIds.has(m.id))
+
             if (uniqueNewMessages.length > 0) {
-              // 找到最後一條 AI 消息，更新 stage
-              const lastAiMessage = [...filteredPrev, ...uniqueNewMessages]
-                .filter(m => m.role === 'assistant')
-                .pop()
-              if (lastAiMessage?.stage) {
-                setCurrentStage(lastAiMessage.stage)
-              }
               // 如果有新的 AI 消息，停止 typing
               if (uniqueNewMessages.some(m => m.role === 'assistant')) {
                 setIsTyping(false)
               }
-              return [...filteredPrev, ...uniqueNewMessages]
+
+              // 合併訊息，對相同內容的進度訊息只保留最新的
+              const combined = [...filteredPrev, ...uniqueNewMessages]
+              const contentMap = new Map<string, Message>()
+              const result: Message[] = []
+
+              for (const msg of combined) {
+                const key = `${msg.role}:${msg.content}`
+                const existing = contentMap.get(key)
+
+                // 如果是進度訊息（有 progress 欄位），只保留最新的
+                if (msg.progress && existing?.progress) {
+                  // 用新的進度覆蓋舊的
+                  const idx = result.indexOf(existing)
+                  if (idx !== -1) {
+                    result[idx] = msg
+                    contentMap.set(key, msg)
+                  }
+                } else if (!existing) {
+                  result.push(msg)
+                  contentMap.set(key, msg)
+                } else {
+                  // 非進度訊息，保留第一個（去重）
+                  // 已經存在，跳過
+                }
+              }
+
+              return result
             }
             return filteredPrev
           })
@@ -1219,20 +1367,23 @@ function ChatSection({
   const mapBackendStageToFrontend = (backendStage: string | undefined): string => {
     if (!backendStage) return 'discovery'
 
-    // 初始階段
-    if (backendStage === 'init') return 'discovery'
+    // 初始階段（需求探索）
+    if (backendStage === 'init' || backendStage === 'init_progress') return 'discovery'
 
-    // PRD Discovery 和釐清階段
+    // PRD Discovery 和釐清階段（細節釐清）
     if (backendStage.includes('prd_discovery') ||
         backendStage === 'clarify_question' ||
         backendStage === 'batch_confirm' ||
         backendStage === 'clarify_summary') return 'clarify'
 
-    // Spec Discovery 和規格階段
-    if (backendStage.includes('spec_') ||
-        backendStage === 'formulation' ||
+    // Formulation 和 Spec 階段（規格確認）
+    // 注意：formulation_progress 和 spec_clarify_complete 都應該在這裡
+    if (backendStage.includes('formulation') ||
+        backendStage.includes('spec_') ||
         backendStage.includes('feature') ||
-        backendStage.includes('schema')) return 'formulation'
+        backendStage.includes('schema') ||
+        backendStage.includes('actions') ||
+        backendStage.includes('isa')) return 'formulation'
 
     // 程式生成階段
     if (backendStage === 'generating' ||
@@ -1319,7 +1470,8 @@ function ChatSection({
               left: '50%',
               transform: 'translateX(-50%)',
               display: 'flex',
-              gap: 24,
+              alignItems: 'center',
+              gap: 0,
             }}>
               {stages.map((stage, i) => (
                 <ProcessStep
@@ -1328,6 +1480,7 @@ function ChatSection({
                   title={stage.title}
                   active={mappedStage === stage.key}
                   completed={i < currentStageIndex}
+                  isLast={i === stages.length - 1}
                 />
               ))}
             </div>
@@ -1657,7 +1810,15 @@ function ChatSection({
                     setInput(e.target.value)
                     adjustTextareaHeight()
                   }}
+                  onCompositionStart={() => {
+                    isComposingRef.current = true
+                  }}
+                  onCompositionEnd={() => {
+                    isComposingRef.current = false
+                  }}
                   onKeyDown={(e) => {
+                    // IME 輸入法選字中，不處理 Enter
+                    if (isComposingRef.current) return
                     // Enter 送出，Shift+Enter 換行
                     if (e.key === 'Enter' && !e.shiftKey) {
                       e.preventDefault()

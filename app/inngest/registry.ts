@@ -2,7 +2,7 @@
 // Skill 註冊表
 // ============================================================
 
-export type SkillName = 'bdd-spec' | 'coder' | 'deployer' | 'domain-manager' | 'domain-purchase' | 'domain-dns'
+export type SkillName = 'bdd-spec' | 'coder' | 'uiux' | 'deployer' | 'domain-manager' | 'domain-purchase' | 'domain-dns'
 
 export interface SkillMetadata {
   name: SkillName
@@ -60,6 +60,29 @@ export const SKILL_REGISTRY: Record<SkillName, SkillMetadata> = {
     inputSchema: {
       required: ['projectId', 'specPath'],
       optional: [],
+    },
+  },
+
+  'uiux': {
+    name: 'uiux',
+    displayName: 'UI/UX 介面設計',
+    description: `AI 驅動的完整前端介面開發：
+      1. Design Discovery - 探索用戶偏好與設計方向
+      2. Design Lab - 生成多個設計變體供用戶選擇
+      3. Implementation - 產出 Next.js + Tailwind CSS 前端程式碼
+      4. Quality Gate - 無障礙、效能、SEO 品質檢查`,
+    triggerPatterns: [
+      '設計', '介面', 'UI', 'UX', '前端', '頁面', '畫面',
+      'landing page', 'dashboard', '後台', '管理介面',
+      '美化', '視覺', '風格', '配色', '排版',
+      'design', 'frontend', 'interface',
+    ],
+    minPlan: 'free',
+    costLevel: 'high',
+    timeoutMs: 1800000, // 30 分鐘（多輪對話可能很長）
+    inputSchema: {
+      required: ['projectId'],
+      optional: ['bddSessionId', 'scope', 'designMemoryPath'],
     },
   },
 
