@@ -416,6 +416,9 @@ function FAQItem({
 }
 
 // ============ Hero Section ============
+// 自訂緩動函數 - 更絲滑的 Apple 風格過渡
+const smoothEasing: [number, number, number, number] = [0.32, 0.72, 0, 1]
+
 function HeroSection({
   onStartChat,
   inputValue,
@@ -428,16 +431,35 @@ function HeroSection({
   isChatActive: boolean
 }) {
   const [isFocused, setIsFocused] = useState(false)
+  const [isTransitioning, setIsTransitioning] = useState(false)
   const inputRef = useRef<HTMLTextAreaElement>(null)
+
+  const handleStartClick = () => {
+    if (!inputValue.trim()) return
+    setIsTransitioning(true)
+    // 延遲調用以讓退場動畫開始
+    setTimeout(() => {
+      onStartChat()
+    }, 150)
+  }
 
   return (
     <motion.section
       initial={{ opacity: 1 }}
       animate={{
         opacity: isChatActive ? 0 : 1,
+        scale: isChatActive ? 0.96 : 1,
+        y: isChatActive ? -30 : 0,
+        filter: isChatActive ? 'blur(8px)' : 'blur(0px)',
         pointerEvents: isChatActive ? 'none' : 'auto'
       }}
-      transition={{ duration: 0.4 }}
+      transition={{
+        duration: 0.5,
+        ease: smoothEasing,
+        opacity: { duration: 0.4, ease: smoothEasing },
+        scale: { duration: 0.6, ease: smoothEasing },
+        filter: { duration: 0.4 }
+      }}
       style={{
         minHeight: '100vh',
         display: 'flex',
@@ -446,14 +468,22 @@ function HeroSection({
         justifyContent: 'center',
         padding: '0 24px',
         position: 'relative',
+        willChange: 'transform, opacity, filter',
       }}
     >
-      <div style={{
-        position: 'absolute',
-        inset: 0,
-        background: 'radial-gradient(ellipse at 50% 30%, var(--gray-50) 0%, var(--white) 70%)',
-        pointerEvents: 'none',
-      }} />
+      <motion.div
+        animate={{
+          opacity: isChatActive ? 0 : 1,
+          scale: isChatActive ? 1.1 : 1,
+        }}
+        transition={{ duration: 0.6, ease: smoothEasing }}
+        style={{
+          position: 'absolute',
+          inset: 0,
+          background: 'radial-gradient(ellipse at 50% 30%, var(--gray-50) 0%, var(--white) 70%)',
+          pointerEvents: 'none',
+        }}
+      />
 
       <div style={{
         position: 'relative',
@@ -461,7 +491,20 @@ function HeroSection({
         maxWidth: 600,
         textAlign: 'center',
       }}>
-        <div style={{ marginBottom: 48 }}>
+        {/* 標題區塊 - 先退場 */}
+        <motion.div
+          animate={{
+            opacity: isTransitioning || isChatActive ? 0 : 1,
+            y: isTransitioning || isChatActive ? -40 : 0,
+            scale: isTransitioning || isChatActive ? 0.95 : 1,
+          }}
+          transition={{
+            duration: 0.4,
+            ease: smoothEasing,
+            delay: isTransitioning ? 0 : 0
+          }}
+          style={{ marginBottom: 48 }}
+        >
           <h1 className="hero-title" style={{ textAlign: 'center' }}>
             <TextType
               texts={["告訴我你想做什麼"]}
@@ -475,8 +518,8 @@ function HeroSection({
           </h1>
           <motion.p
             initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            transition={{ duration: 0.6, delay: 1.2 }}
+            animate={{ opacity: isTransitioning || isChatActive ? 0 : 1 }}
+            transition={{ duration: 0.3, delay: isTransitioning ? 0 : 1.2 }}
             style={{
               fontSize: 15,
               color: 'var(--gray-500)',
@@ -487,12 +530,21 @@ function HeroSection({
           >
             描述你的想法，AI 會幫你釐清需求、生成程式碼、部署上線
           </motion.p>
-        </div>
+        </motion.div>
 
+        {/* 輸入框區塊 - 稍後退場，有不同的動態 */}
         <motion.div
           initial={{ opacity: 0, y: 30 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.6, delay: 0.5 }}
+          animate={{
+            opacity: isTransitioning || isChatActive ? 0 : 1,
+            y: isTransitioning || isChatActive ? 20 : 0,
+            scale: isTransitioning || isChatActive ? 0.98 : 1,
+          }}
+          transition={{
+            duration: 0.45,
+            ease: smoothEasing,
+            delay: isTransitioning ? 0.05 : 0.5
+          }}
           style={{ position: 'relative' }}
         >
           <motion.div
@@ -537,9 +589,9 @@ function HeroSection({
               </span>
               <motion.button
                 whileHover={{ scale: 1.02 }}
-                whileTap={{ scale: 0.98 }}
-                onClick={onStartChat}
-                disabled={!inputValue.trim()}
+                whileTap={{ scale: 0.96 }}
+                onClick={handleStartClick}
+                disabled={!inputValue.trim() || isTransitioning}
                 style={{
                   padding: '8px 20px',
                   fontSize: 13,
@@ -547,18 +599,18 @@ function HeroSection({
                   background: inputValue.trim() ? 'var(--black)' : 'var(--gray-200)',
                   color: inputValue.trim() ? 'var(--white)' : 'var(--gray-400)',
                   border: 'none',
-                  cursor: inputValue.trim() ? 'pointer' : 'not-allowed',
+                  cursor: inputValue.trim() && !isTransitioning ? 'pointer' : 'not-allowed',
                   transition: 'all 0.2s ease',
                 }}
               >
-                開始
+                {isTransitioning ? '...' : '開始'}
               </motion.button>
             </div>
           </motion.div>
         </motion.div>
       </div>
 
-      <ScrollIndicator visible={!isFocused && !inputValue} />
+      <ScrollIndicator visible={!isFocused && !inputValue && !isTransitioning} />
     </motion.section>
   )
 }
@@ -1099,10 +1151,14 @@ function ChatSection({
     <AnimatePresence>
       {isActive && (
         <motion.div
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          exit={{ opacity: 0 }}
-          transition={{ duration: 0.4 }}
+          initial={{ opacity: 0, scale: 1.02 }}
+          animate={{ opacity: 1, scale: 1 }}
+          exit={{ opacity: 0, scale: 0.98, filter: 'blur(4px)' }}
+          transition={{
+            duration: 0.5,
+            ease: smoothEasing,
+            scale: { duration: 0.6, ease: smoothEasing }
+          }}
           style={{
             position: 'fixed',
             inset: 0,
@@ -1110,12 +1166,13 @@ function ChatSection({
             display: 'flex',
             flexDirection: 'column',
             zIndex: 100,
+            willChange: 'transform, opacity',
           }}
         >
           <motion.header
-            initial={{ y: -20, opacity: 0 }}
+            initial={{ y: -30, opacity: 0 }}
             animate={{ y: 0, opacity: 1 }}
-            transition={{ duration: 0.4, delay: 0.1 }}
+            transition={{ duration: 0.5, delay: 0.15, ease: smoothEasing }}
             style={{
               height: 64,
               borderBottom: '1px solid var(--border-color)',
@@ -2582,13 +2639,13 @@ function HomeContent() {
   return (
     <main>
       {/* Theme Toggler - Fixed Top Left (隱藏於 Chat 模式) */}
-      <AnimatePresence>
+      <AnimatePresence mode="wait">
         {!isChatActive && (
           <motion.div
-            initial={{ opacity: 0, y: -30 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -30 }}
-            transition={{ duration: 0.6, delay: 0.5, ease: [0.25, 0.46, 0.45, 0.94] }}
+            initial={{ opacity: 0, y: -20, scale: 0.9 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: -15, scale: 0.95 }}
+            transition={{ duration: 0.35, ease: smoothEasing }}
             style={{
               position: 'fixed',
               top: 20,
@@ -2602,13 +2659,13 @@ function HomeContent() {
       </AnimatePresence>
 
       {/* Auth Button - Fixed Top Right (隱藏於 Chat 模式) */}
-      <AnimatePresence>
+      <AnimatePresence mode="wait">
         {!isChatActive && (
           <motion.div
-            initial={{ opacity: 0, y: -30 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -30 }}
-            transition={{ duration: 0.6, delay: 0.7, ease: [0.25, 0.46, 0.45, 0.94] }}
+            initial={{ opacity: 0, y: -20, scale: 0.9 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: -15, scale: 0.95 }}
+            transition={{ duration: 0.35, ease: smoothEasing }}
             style={{
               position: 'fixed',
               top: 20,
