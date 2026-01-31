@@ -553,7 +553,7 @@ export async function getLLMUsageStats(params: {
   startDate?: string
   endDate?: string
   userId?: string
-  groupBy?: 'day' | 'week' | 'month' | 'model' | 'user'
+  groupBy?: 'day' | 'week' | 'month' | 'model' | 'user' | 'conversation'
 } = {}): Promise<ActionResult<{
   totalInputTokens: number
   totalOutputTokens: number
@@ -564,6 +564,7 @@ export async function getLLMUsageStats(params: {
     outputTokens: number
     cost: number
     count: number
+    conversationId?: string
   }>
 }>> {
   try {
@@ -577,7 +578,7 @@ export async function getLLMUsageStats(params: {
 
     let query = supabase
       .from('llm_usage')
-      .select('id, user_id, model, input_tokens, output_tokens, cost_usd, created_at')
+      .select('id, user_id, conversation_id, model, input_tokens, output_tokens, cost_usd, purpose, created_at')
 
     // 總是限制時間範圍
     query = query.gte('created_at', startDate || defaultStartDate)
@@ -609,6 +610,7 @@ export async function getLLMUsageStats(params: {
       outputTokens: number
       cost: number
       count: number
+      conversationId?: string
     }>()
 
     for (const row of usage || []) {
@@ -639,6 +641,9 @@ export async function getLLMUsageStats(params: {
         case 'user':
           key = row.user_id
           break
+        case 'conversation':
+          key = row.conversation_id || '(無對話)'
+          break
         default:
           key = date.toISOString().split('T')[0]
       }
@@ -648,7 +653,8 @@ export async function getLLMUsageStats(params: {
         inputTokens: existing.inputTokens + (row.input_tokens || 0),
         outputTokens: existing.outputTokens + (row.output_tokens || 0),
         cost: existing.cost + (parseFloat(row.cost_usd) || 0),
-        count: existing.count + 1
+        count: existing.count + 1,
+        ...(groupBy === 'conversation' && row.conversation_id ? { conversationId: row.conversation_id } : {}),
       })
     }
 

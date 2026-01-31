@@ -159,6 +159,16 @@ NEXT_PUBLIC_APP_URL=https://tellcraft.com
     → 用戶回覆 → triggerUserReply → Inngest 恢復
 ```
 
+**專案創建邏輯**（2026-01-31 修復）：
+
+| 最近專案狀態 | 行為 |
+|-------------|------|
+| `draft` / `generating` | 複用現有專案（進行中的工作可繼續）|
+| `deployed` / `testing` / `failed` | 創建新專案（已完成的不覆蓋）|
+| 無專案 | 創建新專案 |
+
+這樣確保已上線的專案不會被意外改動，同時草稿階段可以繼續編輯。
+
 **Chat 相關 Server Actions**：
 - `initializeSession` - 創建或獲取匿名用戶的會話（訪客模式，支援恢復指定對話）
 - `initializeSessionFromAuth` - 從認證 session 初始化（已登入用戶，支援帳號合併）
@@ -220,7 +230,7 @@ NEXT_PUBLIC_APP_URL=https://tellcraft.com
 - 平台總覽統計（用戶、專案、對話、部署、7 天活躍用戶）
 - 用戶管理（列表、搜尋、排序、設定管理員權限）
 - 用戶詳情（專案、對話、LLM 成本）
-- LLM 用量統計（按日/週/月/模型分組、成本追蹤，預設查詢最近 30 天）
+- LLM 用量統計（按日/週/月/模型/對話分組、成本追蹤，預設查詢最近 30 天）
 - 審計日誌（操作記錄、篩選）
 
 **Supabase 流量優化**（2025-01）：

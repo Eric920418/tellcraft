@@ -1035,16 +1035,25 @@ export async function initializeSession(input: {
   }
 
   // 2. 查找或創建專案
-  let { data: project, error: _projectError } = await supabase
+  // 規則：draft/generating 狀態的專案可以複用，deployed/testing/failed 則創建新專案
+  const reusableStatuses = ['draft', 'generating']
+
+  const { data: existingProject } = await supabase
     .from('projects')
-    .select('id')
+    .select('id, status')
     .eq('user_id', user.id)
+    .in('status', reusableStatuses)
     .order('created_at', { ascending: false })
     .limit(1)
     .single()
 
-  if (_projectError || !project) {
-    // 創建新專案
+  let project: { id: string }
+
+  if (existingProject) {
+    // 複用現有的 draft/generating 專案
+    project = existingProject
+  } else {
+    // 沒有可複用的專案，創建新專案
     const { data: newProject, error: createProjectError } = await supabase
       .from('projects')
       .insert({
@@ -1253,17 +1262,25 @@ export async function initializeSessionFromAuth(input?: {
   }
 
   // 3. 查找或創建專案
-  const projectQueryResult = await supabase
+  // 規則：draft/generating 狀態的專案可以複用，deployed/testing/failed 則創建新專案
+  const reusableStatuses = ['draft', 'generating']
+
+  const { data: existingProject } = await supabase
     .from('projects')
-    .select('id')
+    .select('id, status')
     .eq('user_id', user.id)
+    .in('status', reusableStatuses)
     .order('created_at', { ascending: false })
     .limit(1)
     .single()
 
-  let project = projectQueryResult.data
-  if (projectQueryResult.error || !project) {
-    // 創建新專案
+  let project: { id: string }
+
+  if (existingProject) {
+    // 複用現有的 draft/generating 專案
+    project = existingProject
+  } else {
+    // 沒有可複用的專案，創建新專案
     const { data: newProject, error: createProjectError } = await supabase
       .from('projects')
       .insert({

@@ -16,10 +16,11 @@ interface LLMUsage {
     outputTokens: number
     cost: number
     count: number
+    conversationId?: string
   }>
 }
 
-type GroupBy = 'day' | 'week' | 'month' | 'model'
+type GroupBy = 'day' | 'week' | 'month' | 'model' | 'conversation'
 
 export default function AdminUsagePage() {
   const router = useRouter()
@@ -168,7 +169,7 @@ export default function AdminUsagePage() {
         style={{ marginBottom: 24 }}
       >
         <div style={{ display: 'flex', gap: 8 }}>
-          {(['day', 'week', 'month', 'model'] as GroupBy[]).map((g) => (
+          {(['day', 'week', 'month', 'model', 'conversation'] as GroupBy[]).map((g) => (
             <motion.button
               key={g}
               whileHover={{ scale: 1.02 }}
@@ -188,6 +189,7 @@ export default function AdminUsagePage() {
               {g === 'week' && '按週'}
               {g === 'month' && '按月'}
               {g === 'model' && '按模型'}
+              {g === 'conversation' && '按對話'}
             </motion.button>
           ))}
         </div>
@@ -276,7 +278,7 @@ export default function AdminUsagePage() {
               <thead>
                 <tr style={{ borderBottom: '1px solid var(--border-color)' }}>
                   <th style={{ padding: '12px 16px', textAlign: 'left', fontSize: 12, color: 'var(--gray-500)', fontWeight: 500 }}>
-                    {groupBy === 'model' ? '模型' : '日期'}
+                    {groupBy === 'model' ? '模型' : groupBy === 'conversation' ? '對話 ID' : '日期'}
                   </th>
                   <th style={{ padding: '12px 16px', textAlign: 'right', fontSize: 12, color: 'var(--gray-500)', fontWeight: 500 }}>
                     次數
@@ -295,7 +297,24 @@ export default function AdminUsagePage() {
               <tbody>
                 {usage?.breakdown.map((row) => (
                   <tr key={row.key} style={{ borderBottom: '1px solid var(--border-color)' }}>
-                    <td style={{ padding: '14px 16px', fontSize: 14 }}>{row.key}</td>
+                    <td style={{ padding: '14px 16px', fontSize: 14 }}>
+                      {groupBy === 'conversation' && row.conversationId ? (
+                        <a
+                          href={`/dashboard/conversations/${row.conversationId}`}
+                          style={{
+                            color: 'var(--blue-600)',
+                            textDecoration: 'none',
+                            fontFamily: 'var(--font-mono)',
+                            fontSize: 12,
+                          }}
+                          title={row.key}
+                        >
+                          {row.key.slice(0, 8)}...
+                        </a>
+                      ) : (
+                        row.key
+                      )}
+                    </td>
                     <td style={{ padding: '14px 16px', fontSize: 14, textAlign: 'right', fontFamily: 'var(--font-mono)' }}>
                       {row.count.toLocaleString()}
                     </td>

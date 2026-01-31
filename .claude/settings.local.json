@@ -45,7 +45,10 @@
       "Bash(SERVICE_KEY=\"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6IndsY2lpeWNrYmRpdm1nenpkdmZwIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc2OTU4Mjk0NCwiZXhwIjoyMDg1MTU4OTQ0fQ.gUbuJimMJhkxMt6QHq_qbFZV_9qsf4_VLLir0g-XVkk\")",
       "Bash(__NEW_LINE_4fe9407d685d08e1__ curl -s \"https://wlciiyckbdivmgzzdvfp.supabase.co/rest/v1/users?select=id,email,is_admin\" -H \"apikey: $SERVICE_KEY\" -H \"Authorization: Bearer $SERVICE_KEY\")",
       "Bash(pnpm build:*)",
-      "Bash(pnpm lint:*)"
+      "Bash(pnpm lint:*)",
+      "Bash(__NEW_LINE_d437941fd9b38a18__ echo \"=== 6. 刪除 deployments ===\")",
+      "Bash(__NEW_LINE_d437941fd9b38a18__ echo \"=== 7. 刪除 generations ===\")",
+      "Bash(__NEW_LINE_d437941fd9b38a18__ echo \"=== 8. 刪除 skill_executions ===\")"
     ]
   }
 }
