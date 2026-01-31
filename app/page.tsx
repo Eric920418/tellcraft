@@ -2346,33 +2346,13 @@ function ComparisonSection() {
   ]
 
   return (
-    <section ref={ref} className="comparison-section" style={{ padding: 'clamp(48px, 10vw, 80px) clamp(16px, 4vw, 24px)', background: 'var(--white)' }}>
-      <style jsx>{`
-        @media (max-width: 640px) {
-          .comparison-section :global(.comparison-table-header),
-          .comparison-section :global(.comparison-table-row) {
-            grid-template-columns: 1fr !important;
-            gap: 8px;
-          }
-          .comparison-section :global(.comparison-cell-center) {
-            text-align: left !important;
-          }
-          .comparison-section :global(.comparison-label) {
-            display: inline-block;
-            min-width: 70px;
-            color: var(--gray-400);
-            font-size: 11px;
-            text-transform: uppercase;
-            letter-spacing: 0.05em;
-          }
-        }
-      `}</style>
+    <section ref={ref} className="comparison-section" style={{ padding: '80px 24px', background: 'var(--white)' }}>
       <div style={{ maxWidth: 800, margin: '0 auto' }}>
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={isInView ? { opacity: 1, y: 0 } : {}}
           transition={{ duration: 0.6 }}
-          style={{ textAlign: 'center', marginBottom: 'clamp(32px, 8vw, 64px)' }}
+          style={{ textAlign: 'center', marginBottom: 64 }}
         >
           <div style={{
             fontSize: 11,
@@ -2384,14 +2364,14 @@ function ComparisonSection() {
             Comparison
           </div>
           <h2 style={{
-            fontSize: 'clamp(24px, 4vw, 40px)',
+            fontSize: 'clamp(28px, 4vw, 40px)',
             fontWeight: 400,
             letterSpacing: '-0.03em',
             marginBottom: 16,
           }}>
             傳統開發 vs Tellcraft
           </h2>
-          <p style={{ fontSize: 'clamp(14px, 2vw, 16px)', color: 'var(--gray-500)' }}>
+          <p style={{ fontSize: 16, color: 'var(--gray-500)' }}>
             為什麼越來越多人選擇 AI 驅動開發
           </p>
         </motion.div>
@@ -2400,48 +2380,39 @@ function ComparisonSection() {
           initial={{ opacity: 0, y: 30 }}
           animate={isInView ? { opacity: 1, y: 0 } : {}}
           transition={{ duration: 0.6, delay: 0.2 }}
+          className="comparison-table"
           style={{ border: '1px solid var(--border-color)', overflow: 'hidden' }}
         >
-          {/* Desktop header - hidden on mobile */}
-          <div
-            className="comparison-table-header"
-            style={{
-              display: 'grid',
-              gridTemplateColumns: '2fr 1fr 1fr',
-              background: 'var(--gray-50)',
-              borderBottom: '1px solid var(--border-color)',
-              padding: 'clamp(12px, 2vw, 16px) clamp(12px, 3vw, 24px)',
-              fontSize: 'clamp(10px, 1.5vw, 12px)',
-              fontWeight: 500,
-              textTransform: 'uppercase',
-              letterSpacing: '0.05em',
-            }}
-          >
+          <div className="comparison-header" style={{
+            display: 'grid',
+            gridTemplateColumns: '2fr 1fr 1fr',
+            background: 'var(--gray-50)',
+            borderBottom: '1px solid var(--border-color)',
+            padding: '16px 24px',
+            fontSize: 12,
+            fontWeight: 500,
+            textTransform: 'uppercase',
+            letterSpacing: '0.05em',
+          }}>
             <span>項目</span>
-            <span className="comparison-cell-center" style={{ textAlign: 'center' }}>傳統開發</span>
-            <span className="comparison-cell-center" style={{ textAlign: 'center', color: 'var(--black)' }}>Tellcraft</span>
+            <span style={{ textAlign: 'center' }}>傳統開發</span>
+            <span style={{ textAlign: 'center', color: 'var(--black)' }}>Tellcraft</span>
           </div>
           {comparisons.map((row, i) => (
             <div
               key={row.feature}
-              className="comparison-table-row"
+              className="comparison-row"
               style={{
                 display: 'grid',
                 gridTemplateColumns: '2fr 1fr 1fr',
-                padding: 'clamp(12px, 2vw, 20px) clamp(12px, 3vw, 24px)',
+                padding: '20px 24px',
                 borderBottom: i < comparisons.length - 1 ? '1px solid var(--border-color)' : 'none',
-                fontSize: 'clamp(12px, 2vw, 14px)',
+                fontSize: 14,
               }}
             >
-              <span style={{ fontWeight: 500, marginBottom: 4 }}>{row.feature}</span>
-              <span className="comparison-cell-center" style={{ textAlign: 'center', color: 'var(--gray-500)' }}>
-                <span className="comparison-label" style={{ display: 'none' }}>傳統：</span>
-                {row.traditional}
-              </span>
-              <span className="comparison-cell-center" style={{ textAlign: 'center', fontWeight: 500 }}>
-                <span className="comparison-label" style={{ display: 'none' }}>Tellcraft：</span>
-                {row.tellcraft}
-              </span>
+              <span style={{ fontWeight: 500 }}>{row.feature}</span>
+              <span style={{ textAlign: 'center', color: 'var(--gray-500)' }}>{row.traditional}</span>
+              <span style={{ textAlign: 'center', fontWeight: 500 }}>{row.tellcraft}</span>
             </div>
           ))}
         </motion.div>
@@ -2454,14 +2425,6 @@ function ComparisonSection() {
 function ShowcaseSection() {
   const ref = useRef(null)
   const isInView = useInView(ref, { once: true, margin: '-100px' })
-  const [isMobile, setIsMobile] = useState(false)
-
-  useEffect(() => {
-    const checkMobile = () => setIsMobile(window.innerWidth < 768)
-    checkMobile()
-    window.addEventListener('resize', checkMobile)
-    return () => window.removeEventListener('resize', checkMobile)
-  }, [])
 
   const showcases = [
     {
@@ -2495,12 +2458,12 @@ function ShowcaseSection() {
   ]
 
   return (
-    <section ref={ref} style={{ padding: 'clamp(48px, 10vw, 80px) clamp(16px, 4vw, 24px)', background: 'var(--white)', overflow: 'hidden' }}>
+    <section ref={ref} className="showcase-section" style={{ padding: '80px 24px', background: 'var(--white)', overflow: 'hidden' }}>
       <div style={{ maxWidth: 1200, margin: '0 auto' }}>
-        <div style={{
+        <div className="showcase-grid" style={{
           display: 'grid',
-          gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr',
-          gap: isMobile ? 40 : 80,
+          gridTemplateColumns: '1fr 1fr',
+          gap: 80,
           alignItems: 'center',
         }}>
           {/* Left: Text */}
@@ -2508,7 +2471,7 @@ function ShowcaseSection() {
             initial={{ opacity: 0, x: -30 }}
             animate={isInView ? { opacity: 1, x: 0 } : {}}
             transition={{ duration: 0.6 }}
-            style={{ textAlign: isMobile ? 'center' : 'left' }}
+            className="showcase-text"
           >
             <div style={{
               fontSize: 11,
@@ -2520,7 +2483,7 @@ function ShowcaseSection() {
               Showcase
             </div>
             <h2 style={{
-              fontSize: 'clamp(24px, 4vw, 40px)',
+              fontSize: 'clamp(28px, 4vw, 40px)',
               fontWeight: 400,
               letterSpacing: '-0.03em',
               lineHeight: 1.3,
@@ -2531,44 +2494,42 @@ function ShowcaseSection() {
               <BlurRevealText text="各種應用" delay={0.15} />
             </h2>
             <p style={{
-              fontSize: 'clamp(14px, 2vw, 16px)',
+              fontSize: 16,
               color: 'var(--gray-500)',
               lineHeight: 1.7,
               marginBottom: 32,
-              maxWidth: isMobile ? '100%' : 400,
-              margin: isMobile ? '0 auto 32px' : undefined,
+              maxWidth: 400,
             }}>
               這些都是真實用戶透過對話完成的專案。
               從電商平台到 SaaS 系統，各種類型都能實現。
             </p>
-            <div style={{
+            <div className="showcase-stats" style={{
               display: 'flex',
-              gap: 'clamp(24px, 4vw, 32px)',
+              gap: 32,
               paddingTop: 24,
               borderTop: '1px solid var(--border-color)',
-              justifyContent: isMobile ? 'center' : 'flex-start',
             }}>
               <div>
                 <div style={{
-                  fontSize: 'clamp(24px, 4vw, 32px)',
+                  fontSize: 32,
                   fontWeight: 300,
                   fontFamily: 'var(--font-mono)',
                   letterSpacing: '-0.02em',
                 }}>
                   <AnimatedCounter target={50} suffix="+" />
                 </div>
-                <div style={{ fontSize: 'clamp(11px, 1.5vw, 13px)', color: 'var(--gray-500)' }}>專案上線</div>
+                <div style={{ fontSize: 13, color: 'var(--gray-500)' }}>專案上線</div>
               </div>
               <div>
                 <div style={{
-                  fontSize: 'clamp(24px, 4vw, 32px)',
+                  fontSize: 32,
                   fontWeight: 300,
                   fontFamily: 'var(--font-mono)',
                   letterSpacing: '-0.02em',
                 }}>
                   <AnimatedCounter target={12} suffix="種" />
                 </div>
-                <div style={{ fontSize: 'clamp(11px, 1.5vw, 13px)', color: 'var(--gray-500)' }}>產業類型</div>
+                <div style={{ fontSize: 13, color: 'var(--gray-500)' }}>產業類型</div>
               </div>
             </div>
           </motion.div>
@@ -2578,19 +2539,20 @@ function ShowcaseSection() {
             initial={{ opacity: 0, x: 30 }}
             animate={isInView ? { opacity: 1, x: 0 } : {}}
             transition={{ duration: 0.6, delay: 0.2 }}
+            className="showcase-cards"
             style={{
               display: 'flex',
               justifyContent: 'center',
               alignItems: 'center',
-              minHeight: isMobile ? 320 : 450,
+              minHeight: 450,
               position: 'relative',
             }}
           >
             <CardSwap
-              width={isMobile ? 280 : 360}
-              height={isMobile ? 220 : 280}
-              cardDistance={isMobile ? 30 : 45}
-              verticalDistance={isMobile ? 40 : 55}
+              width="min(360px, calc(100vw - 80px))"
+              height="min(280px, 65vw)"
+              cardDistance={45}
+              verticalDistance={55}
               delay={2500}
               pauseOnHover={true}
               skewAmount={3}
@@ -2599,7 +2561,7 @@ function ShowcaseSection() {
               {showcases.map((item, i) => (
                 <Card key={i}>
                   <div style={{
-                    padding: isMobile ? 20 : 28,
+                    padding: 28,
                     height: '100%',
                     display: 'flex',
                     flexDirection: 'column',
@@ -2609,11 +2571,11 @@ function ShowcaseSection() {
                       display: 'flex',
                       justifyContent: 'space-between',
                       alignItems: 'flex-start',
-                      marginBottom: isMobile ? 12 : 16,
+                      marginBottom: 16,
                     }}>
                       <span style={{
-                        fontSize: isMobile ? 10 : 11,
-                        padding: isMobile ? '3px 6px' : '4px 8px',
+                        fontSize: 11,
+                        padding: '4px 8px',
                         background: 'var(--white)',
                         border: '1px solid var(--border-color)',
                         color: 'var(--gray-500)',
@@ -2623,7 +2585,7 @@ function ShowcaseSection() {
                         {item.category}
                       </span>
                       <span style={{
-                        fontSize: isMobile ? 11 : 12,
+                        fontSize: 12,
                         color: 'var(--gray-400)',
                         fontFamily: 'var(--font-mono)',
                       }}>
@@ -2631,15 +2593,15 @@ function ShowcaseSection() {
                       </span>
                     </div>
                     <h3 style={{
-                      fontSize: isMobile ? 17 : 20,
+                      fontSize: 20,
                       fontWeight: 500,
-                      marginBottom: isMobile ? 8 : 12,
+                      marginBottom: 12,
                       letterSpacing: '-0.02em',
                     }}>
                       {item.title}
                     </h3>
                     <p style={{
-                      fontSize: isMobile ? 13 : 14,
+                      fontSize: 14,
                       color: 'var(--gray-500)',
                       lineHeight: 1.6,
                       flex: 1,
@@ -2647,13 +2609,13 @@ function ShowcaseSection() {
                       {item.description}
                     </p>
                     <div style={{
-                      marginTop: isMobile ? 12 : 16,
-                      paddingTop: isMobile ? 12 : 16,
+                      marginTop: 16,
+                      paddingTop: 16,
                       borderTop: '1px solid var(--border-color)',
-                      fontSize: isMobile ? 11 : 13,
+                      fontSize: 13,
                       color: 'var(--gray-400)',
                     }}>
-                      {isMobile ? '點擊查看詳情' : 'Hover 暫停 · 點擊查看詳情'}
+                      Hover 暫停 · 點擊查看詳情
                     </div>
                   </div>
                 </Card>

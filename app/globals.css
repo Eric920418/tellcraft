@@ -401,3 +401,53 @@ textarea {
 .markdown-content a:hover {
   opacity: 0.7;
 }
+
+/* ============ Homepage Mobile Responsive ============ */
+
+/* Comparison Section */
+@media (max-width: 640px) {
+  .comparison-section {
+    padding: 48px 16px !important;
+  }
+
+  .comparison-header,
+  .comparison-row {
+    grid-template-columns: 1fr 1fr !important;
+    padding: 12px 16px !important;
+    gap: 4px;
+  }
+
+  .comparison-header > span:first-child,
+  .comparison-row > span:first-child {
+    grid-column: 1 / -1;
+    margin-bottom: 8px;
+  }
+}
+
+/* Showcase Section */
+@media (max-width: 768px) {
+  .showcase-section {
+    padding: 48px 16px !important;
+  }
+
+  .showcase-grid {
+    grid-template-columns: 1fr !important;
+    gap: 40px !important;
+  }
+
+  .showcase-text {
+    text-align: center;
+  }
+
+  .showcase-text p {
+    max-width: 100% !important;
+  }
+
+  .showcase-stats {
+    justify-content: center;
+  }
+
+  .showcase-cards {
+    min-height: 320px !important;
+  }
+}
