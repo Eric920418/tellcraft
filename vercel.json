@@ -2,8 +2,11 @@
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "regions": ["sin1"],
   "functions": {
+    "app/api/inngest/route.ts": {
+      "maxDuration": 300
+    },
     "app/**/*.ts": {
-      "maxDuration": 30
+      "maxDuration": 60
     }
   }
 }

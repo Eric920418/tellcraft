@@ -5,6 +5,7 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
+    "dev:inngest": "npx inngest-cli@latest dev --timeout 120s",
     "build": "next build",
     "start": "next start",
     "lint": "eslint . --ext .ts,.tsx",

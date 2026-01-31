@@ -354,21 +354,8 @@ async function executeBddSpecSkill(input: BddSpecSkillInput) {
     return result.data.sessionId
   })
 
-  // 發送歡迎消息
-  await step.run('send-welcome', async () => {
-    await sendMessage(
-      conversationId,
-      `收到您的需求！我將協助您釐清細節，產出完整的 BDD 規格。\n\n` +
-      `**流程說明**：\n` +
-      `1. 需求釐清（Phase 1）- 逐一確認核心概念\n` +
-      `2. 規格產出（Phase 2）- 產出 Schema 和 Feature Files\n` +
-      `3. 規格精煉（Phase 3）- 補充邊界條件和例子\n` +
-      `4. Actions 設計（Phase 4）- 定義 Server Actions\n` +
-      `5. ISA 配置（Phase 5）- 產出 sdd.os 配置\n\n` +
-      `讓我們開始吧！正在分析您的需求...`,
-      'init'
-    )
-  })
+  // 注意：前端已有即時回應（send-immediate-response），這裡不再發送歡迎消息
+  // 避免重複訊息，直接進入 PRD Discovery
 
   // ============================================================
   // Phase 1: PRD Discovery + Clarify
