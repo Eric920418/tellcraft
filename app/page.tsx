@@ -32,7 +32,8 @@ interface Message {
   role: 'user' | 'assistant' | 'system'
   content: string
   timestamp: Date
-  stage?: 'init' | 'discovery' | 'clarify' | 'prd_discovery_complete' | 'formulation_start' | 'formulation' | 'generating' | 'deploying' | 'complete'
+  stage?: 'init' | 'init_progress' | 'discovery' | 'clarify' | 'prd_discovery_complete' | 'formulation_start' | 'formulation_progress' | 'formulation' | 'generating' | 'deploying' | 'complete'
+  progress?: { current: number; total: number; step: string }
 }
 
 // ============ Animated Text Components ============
@@ -827,7 +828,8 @@ function ChatSection({
             role: m.role,
             content: m.content,
             timestamp: new Date(m.timestamp),
-            stage: m.stage as Message['stage']
+            stage: m.stage as Message['stage'],
+            progress: m.progress as Message['progress']
           }))
           setMessages(historyMessages)
 
@@ -889,7 +891,8 @@ function ChatSection({
             role: m.role,
             content: m.content,
             timestamp: new Date(m.timestamp),
-            stage: m.stage as Message['stage']
+            stage: m.stage as Message['stage'],
+            progress: m.progress as Message['progress']
           }))
           setMessages(historyMessages)
 
@@ -952,7 +955,8 @@ function ChatSection({
             role: m.role,
             content: m.content,
             timestamp: new Date(m.timestamp),
-            stage: m.stage as Message['stage']
+            stage: m.stage as Message['stage'],
+            progress: m.progress as Message['progress']
           }))
 
           // 更新消息列表（合併現有消息和新消息）
@@ -1105,7 +1109,8 @@ function ChatSection({
         role: m.role,
         content: m.content,
         timestamp: new Date(m.timestamp),
-        stage: m.stage as Message['stage']
+        stage: m.stage as Message['stage'],
+            progress: m.progress as Message['progress']
       }))
       setMessages(formattedMessages)
 
@@ -1493,8 +1498,8 @@ function ChatSection({
                           </div>
                         )}
                       </div>
-                      {/* 處理中的進度條（init / formulation_start / prd_discovery_complete） */}
-                      {(['init', 'formulation_start', 'prd_discovery_complete'].includes(message.stage || '')) && index === messages.length - 1 && (
+                      {/* 處理中的進度條（只在 init_progress 和 formulation_progress 階段顯示） */}
+                      {(['init_progress', 'formulation_progress'].includes(message.stage || '')) && index === messages.length - 1 && (
                         <motion.div
                           initial={{ opacity: 0, y: 8 }}
                           animate={{ opacity: 1, y: 0 }}
@@ -1530,31 +1535,53 @@ function ChatSection({
                             {/* 進度條 */}
                             <div style={{ flex: 1 }}>
                               <div style={{
-                                fontSize: 12,
-                                color: 'var(--gray-500)',
+                                display: 'flex',
+                                justifyContent: 'space-between',
+                                alignItems: 'center',
                                 marginBottom: 6,
                               }}>
-                                {message.stage === 'init' ? '正在分析需求...' : '正在產出規格文件...'}
+                                <span style={{ fontSize: 12, color: 'var(--gray-500)' }}>
+                                  {message.progress?.step || (message.stage === 'init' ? '正在分析需求...' : '正在產出規格文件...')}
+                                </span>
+                                {message.progress && (
+                                  <span style={{ fontSize: 11, color: 'var(--gray-400)' }}>
+                                    {message.progress.current}/{message.progress.total}
+                                  </span>
+                                )}
                               </div>
                               <div style={{
                                 height: 3,
                                 background: 'var(--gray-100)',
                                 borderRadius: 2,
                                 overflow: 'hidden',
+                                position: 'relative',
                               }}>
-                                <motion.div
-                                  initial={{ width: '0%' }}
-                                  animate={{ width: '100%' }}
-                                  transition={{
-                                    duration: message.stage === 'init' ? 8 : 15,
-                                    ease: 'easeInOut'
-                                  }}
-                                  style={{
-                                    height: '100%',
-                                    background: 'var(--black)',
-                                    borderRadius: 2,
-                                  }}
-                                />
+                                {message.progress ? (
+                                  // 真實進度條
+                                  <motion.div
+                                    initial={{ width: 0 }}
+                                    animate={{ width: `${(message.progress.current / message.progress.total) * 100}%` }}
+                                    transition={{ duration: 0.5, ease: 'easeOut' }}
+                                    style={{
+                                      height: '100%',
+                                      background: 'var(--black)',
+                                      borderRadius: 2,
+                                    }}
+                                  />
+                                ) : (
+                                  // 無限進度條（沒有進度信息時）
+                                  <motion.div
+                                    animate={{ x: ['-100%', '200%'] }}
+                                    transition={{ duration: 1.5, repeat: Infinity, ease: 'easeInOut' }}
+                                    style={{
+                                      position: 'absolute',
+                                      width: '50%',
+                                      height: '100%',
+                                      background: 'linear-gradient(90deg, transparent, var(--black), transparent)',
+                                      borderRadius: 2,
+                                    }}
+                                  />
+                                )}
                               </div>
                             </div>
                           </div>

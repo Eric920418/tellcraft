@@ -1881,6 +1881,7 @@ export async function getConversationMessages(input: {
     content: string
     timestamp: string
     stage?: string
+    progress?: { current: number; total: number; step: string }
   }>
   currentTaskId?: string
   taskStatus?: string

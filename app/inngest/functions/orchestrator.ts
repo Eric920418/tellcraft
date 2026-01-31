@@ -70,7 +70,8 @@ export const handleUserRequest = inngest.createFunction(
         role: 'assistant',
         content: '收到！讓我先了解一下你的需求，稍後會有幾個問題想確認。',
         timestamp: new Date().toISOString(),
-        stage: 'init',
+        stage: 'init_progress',
+        progress: { current: 0, total: 3, step: '準備分析' },
       }
 
       const { data: conv } = await supabase
@@ -92,6 +93,14 @@ export const handleUserRequest = inngest.createFunction(
     // Step 2: Intent Classification
     // ============================================================
     const classification = await step.run('classify-intent', async () => {
+      // 發送進度更新
+      await sendMessage(
+        conversationId,
+        '收到！讓我先了解一下你的需求，稍後會有幾個問題想確認。',
+        'init_progress',
+        { current: 1, total: 3, step: '分析意圖' }
+      )
+
       // 取得對話歷史
       const { data: conversation } = await supabase
         .from('conversations')
@@ -276,13 +285,23 @@ interface BddSpecSkillInput {
 }
 
 // 輔助函數：發送消息到對話
-async function sendMessage(conversationId: string, content: string, stage?: string) {
-  const message = {
+async function sendMessage(
+  conversationId: string,
+  content: string,
+  stage?: string,
+  progress?: { current: number; total: number; step: string }
+) {
+  const message: Record<string, unknown> = {
     id: crypto.randomUUID(),
     role: 'assistant',
     content,
     timestamp: new Date().toISOString(),
     stage,
+  }
+
+  // 添加進度信息（如果有）
+  if (progress) {
+    message.progress = progress
   }
 
   const { data: conv } = await supabase
@@ -391,6 +410,14 @@ async function executeBddSpecSkill(input: BddSpecSkillInput) {
 
   // Phase 1.1: PRD Discovery
   const prdDiscoveryResult = await step.run('prd-discovery', async () => {
+    // 發送進度更新
+    await sendMessage(
+      conversationId,
+      '收到！讓我先了解一下你的需求，稍後會有幾個問題想確認。',
+      'init_progress',
+      { current: 2, total: 3, step: '識別需求細節' }
+    )
+
     console.log('[BDD Phase 1] 開始 PRD Discovery')
 
     const result = await runPrdDiscovery(
@@ -735,12 +762,20 @@ async function executeBddSpecSkill(input: BddSpecSkillInput) {
     await sendMessage(
       conversationId,
       `正在產出規格文件...`,
-      'formulation_start'
+      'formulation_progress',
+      { current: 0, total: 4, step: '準備中' }
     )
   })
 
   // 產出 Schema
   const schemaResult = await step.run('generate-schema', async () => {
+    // 發送進度更新
+    await sendMessage(
+      conversationId,
+      `正在產出規格文件...`,
+      'formulation_progress',
+      { current: 1, total: 4, step: '產出資料庫結構' }
+    )
     const session = await getBddSession({ sessionId })
     if (!session.data) throw new Error('Session 不存在')
 
@@ -771,6 +806,14 @@ async function executeBddSpecSkill(input: BddSpecSkillInput) {
 
   // 產出 Feature Files
   const featuresResult = await step.run('generate-features', async () => {
+    // 發送進度更新
+    await sendMessage(
+      conversationId,
+      `正在產出規格文件...`,
+      'formulation_progress',
+      { current: 2, total: 4, step: '產出功能規格' }
+    )
+
     const session = await getBddSession({ sessionId })
     if (!session.data) throw new Error('Session 不存在')
 
@@ -799,6 +842,13 @@ async function executeBddSpecSkill(input: BddSpecSkillInput) {
 
   // 驗證 Feature Files（使用真實驗證函數）
   let validationResult = await step.run('validate-features', async () => {
+    // 發送進度更新
+    await sendMessage(
+      conversationId,
+      `正在產出規格文件...`,
+      'formulation_progress',
+      { current: 3, total: 4, step: '驗證規格格式' }
+    )
     const features = (featuresResult.features || []).map((f: FeatureFile) => ({
       name: f.name,
       content: f.content,
