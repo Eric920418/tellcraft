@@ -662,6 +662,21 @@ function ChatSection({
   const [lastUpdatedAt, setLastUpdatedAt] = useState<string | null>(null)  // 用於輪詢優化
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const hasInitialized = useRef(false)
+  const inputRef = useRef<HTMLTextAreaElement>(null)
+
+  // 自動調整輸入框高度
+  const adjustTextareaHeight = useCallback(() => {
+    const textarea = inputRef.current
+    if (!textarea) return
+    // 重置高度以獲得正確的 scrollHeight
+    textarea.style.height = 'auto'
+    // 限制最大高度為 200px（約 8 行）
+    const maxHeight = 200
+    const newHeight = Math.min(textarea.scrollHeight, maxHeight)
+    textarea.style.height = `${newHeight}px`
+    // 如果超過最大高度，允許滾動
+    textarea.style.overflowY = textarea.scrollHeight > maxHeight ? 'auto' : 'hidden'
+  }, [])
 
   // 對話選擇器相關狀態
   const [showConversationPicker, setShowConversationPicker] = useState(false)
@@ -1115,6 +1130,10 @@ function ChatSection({
 
     const content = input.trim()
     setInput('')
+    // 重置輸入框高度
+    if (inputRef.current) {
+      inputRef.current.style.height = 'auto'
+    }
 
     // 樂觀更新
     const userMessage: Message = {
@@ -1455,11 +1474,24 @@ function ChatSection({
             style={{ borderTop: '1px solid var(--border-color)', padding: '20px 24px', background: 'var(--white)' }}
           >
             <div style={{ maxWidth: 680, margin: '0 auto' }}>
-              <div style={{ display: 'flex', gap: 12 }}>
+              <div style={{ display: 'flex', gap: 12, alignItems: 'flex-end' }}>
                 <textarea
+                  ref={inputRef}
                   value={input}
-                  onChange={(e) => setInput(e.target.value)}
-                  placeholder="輸入訊息..."
+                  onChange={(e) => {
+                    setInput(e.target.value)
+                    adjustTextareaHeight()
+                  }}
+                  onKeyDown={(e) => {
+                    // Enter 送出，Shift+Enter 換行
+                    if (e.key === 'Enter' && !e.shiftKey) {
+                      e.preventDefault()
+                      if (input.trim() && !isTyping && !isInitializing && sessionInfo) {
+                        handleSend()
+                      }
+                    }
+                  }}
+                  placeholder="輸入訊息...（Shift+Enter 換行）"
                   rows={1}
                   disabled={isInitializing || !sessionInfo}
                   style={{
@@ -1471,8 +1503,11 @@ function ChatSection({
                     outline: 'none',
                     fontFamily: 'inherit',
                     lineHeight: 1.5,
-                    transition: 'border-color 0.2s ease',
+                    transition: 'border-color 0.2s ease, height 0.15s ease',
                     opacity: isInitializing || !sessionInfo ? 0.5 : 1,
+                    minHeight: 48,
+                    maxHeight: 200,
+                    overflowY: 'hidden',
                   }}
                   onFocus={(e) => e.currentTarget.style.borderColor = 'var(--black)'}
                   onBlur={(e) => e.currentTarget.style.borderColor = 'var(--border-color)'}
@@ -1483,14 +1518,16 @@ function ChatSection({
                   onClick={handleSend}
                   disabled={!input.trim() || isTyping || isInitializing || !sessionInfo}
                   style={{
-                    padding: '14px 28px',
+                    padding: '0 28px',
+                    height: 48,
                     fontSize: 14,
                     fontWeight: 500,
                     border: '1px solid var(--black)',
                     background: !input.trim() || isTyping || isInitializing || !sessionInfo ? 'var(--gray-100)' : 'var(--black)',
                     color: !input.trim() || isTyping || isInitializing || !sessionInfo ? 'var(--gray-400)' : 'var(--white)',
                     cursor: !input.trim() || isTyping || isInitializing || !sessionInfo ? 'not-allowed' : 'pointer',
-                    transition: 'all 0.2s ease'
+                    transition: 'all 0.2s ease',
+                    flexShrink: 0,
                   }}
                 >
                   送出
