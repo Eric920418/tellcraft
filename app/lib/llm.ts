@@ -227,155 +227,6 @@ ${existingQuestions?.length ? `**已經問過的問題**（不要重複）：\n$
   }
 }
 
-/**
- * 處理用戶回答，決定是否需要更多問題
- */
-export async function processAnswer(
-  originalQuestion: string,
-  userAnswer: string,
-  allQuestionsAndAnswers: Array<{ question: string; answer: string }>,
-  requirements: string
-): Promise<{
-  success: boolean
-  needMoreQuestions: boolean
-  summary?: string
-  followUpQuestions?: Array<{
-    id: string
-    question: string
-    category: 'data' | 'feature' | 'terminology'
-    priority: 'high' | 'medium' | 'low'
-    options?: Array<{ label: string; description: string }>
-  }>
-  error?: string
-}> {
-  const systemPrompt = `你是一位 BDD 分析師。用戶剛回答了一個釐清問題，請分析這個回答：
-
-1. 這個回答是否清楚、完整？
-2. 是否引發了新的問題需要釐清？
-3. 根據目前所有的問答，需求是否已經足夠清楚？
-
-**輸出格式**（JSON）：
-{
-  "answerClear": true/false,
-  "answerSummary": "對回答的簡短總結",
-  "needMoreQuestions": true/false,
-  "followUpQuestions": [
-    {
-      "id": "Q-follow-1",
-      "question": "追問問題",
-      "category": "data" | "feature" | "terminology",
-      "priority": "high" | "medium" | "low",
-      "options": [...]
-    }
-  ],
-  "specReadiness": "ready" | "almost" | "needs_more"
-}`
-
-  const qaHistory = allQuestionsAndAnswers
-    .map((qa, i) => `Q${i + 1}: ${qa.question}\nA${i + 1}: ${qa.answer}`)
-    .join('\n\n')
-
-  const userMessage = `原始需求：
-${requirements}
-
----
-
-已釐清的問答：
-${qaHistory}
-
----
-
-最新問題：${originalQuestion}
-最新回答：${userAnswer}`
-
-  const response = await callClaude(systemPrompt, [{ role: 'user', content: userMessage }])
-
-  if (!response.success) {
-    return { success: false, needMoreQuestions: false, error: response.error }
-  }
-
-  try {
-    const jsonMatch = response.content?.match(/\{[\s\S]*\}/)
-    if (!jsonMatch) {
-      return { success: false, needMoreQuestions: false, error: '無法解析 LLM 回應' }
-    }
-
-    const parsed = JSON.parse(jsonMatch[0])
-    return {
-      success: true,
-      needMoreQuestions: parsed.needMoreQuestions || false,
-      summary: parsed.answerSummary,
-      followUpQuestions: parsed.followUpQuestions || [],
-    }
-  } catch (err) {
-    return { success: false, needMoreQuestions: false, error: `解析回應時發生錯誤: ${err}` }
-  }
-}
-
-/**
- * 產出 BDD 規格摘要
- */
-export async function generateSpecSummary(
-  requirements: string,
-  questionsAndAnswers: Array<{ question: string; answer: string }>,
-  projectContext?: string
-): Promise<{
-  success: boolean
-  summary?: {
-    entities: Array<{ name: string; description: string; attributes: string[] }>
-    features: Array<{ name: string; description: string; rules: string[] }>
-    decisions: Array<{ question: string; answer: string; impact: string }>
-  }
-  error?: string
-}> {
-  const systemPrompt = `你是一位 BDD 分析師。根據需求和釐清問答，產出規格摘要。
-
-**輸出格式**（JSON）：
-{
-  "summary": {
-    "entities": [
-      { "name": "實體名稱", "description": "說明", "attributes": ["屬性1", "屬性2"] }
-    ],
-    "features": [
-      { "name": "功能名稱", "description": "說明", "rules": ["規則1", "規則2"] }
-    ],
-    "decisions": [
-      { "question": "釐清的問題", "answer": "決定", "impact": "這個決定如何影響規格" }
-    ]
-  }
-}`
-
-  const qaHistory = questionsAndAnswers
-    .map((qa, i) => `Q${i + 1}: ${qa.question}\nA${i + 1}: ${qa.answer}`)
-    .join('\n\n')
-
-  const userMessage = `${projectContext ? `專案背景：${projectContext}\n\n` : ''}需求描述：
-${requirements}
-
----
-
-釐清問答：
-${qaHistory}`
-
-  const response = await callClaude(systemPrompt, [{ role: 'user', content: userMessage }])
-
-  if (!response.success) {
-    return { success: false, error: response.error }
-  }
-
-  try {
-    const jsonMatch = response.content?.match(/\{[\s\S]*\}/)
-    if (!jsonMatch) {
-      return { success: false, error: '無法解析 LLM 回應' }
-    }
-
-    const parsed = JSON.parse(jsonMatch[0])
-    return { success: true, summary: parsed.summary }
-  } catch (err) {
-    return { success: false, error: `解析回應時發生錯誤: ${err}` }
-  }
-}
-
 // ============================================================
 // BDD Spec 完整流程 - Phase 1-5 專用 Prompts
 // ============================================================
@@ -525,61 +376,6 @@ ${existingQuestions.length ? `\n**已經問過的問題**（不要重複）：\n
     }
   } catch (err) {
     return { success: false, error: `解析回應時發生錯誤: ${err}` }
-  }
-}
-
-/**
- * 白話翻譯問題
- * 將技術問題翻譯為用戶可理解的白話文
- */
-export async function translateToWhiteText(
-  question: string,
-  terminology: Map<string, string>,
-  trackingContext?: LlmTrackingContext
-): Promise<{
-  success: boolean
-  whiteText?: string
-  error?: string
-}> {
-  const termList = Array.from(terminology.entries())
-    .map(([en, zh]) => `- ${en}: ${zh}`)
-    .join('\n')
-
-  const systemPrompt = `你是一位翻譯專家。將以下技術問題翻譯為白話文，讓非技術人員也能理解。
-
-## 翻譯規則
-1. 將英文欄位名替換為中文（使用提供的術語對照表）
-2. 首次提及時可用小括號備註英文，如：「價格 (price)」
-3. 將技術詞彙轉換為領域語言：
-   - 「屬性」→「資訊」
-   - 「欄位」→「項目」
-   - 「關係」→「關聯」
-   - 「約束」→「限制」
-   - >= → 「大於等於」
-   - != → 「不等於」
-   - null → 「空白」或「未設定」
-4. 保持問題的完整語義，不簡化技術細節
-5. 嚴禁發明新術語
-
-## 術語對照表
-${termList || '（無）'}
-
-直接輸出翻譯後的問題，不要加任何其他說明。`
-
-  const response = await callClaude(
-    systemPrompt,
-    [{ role: 'user', content: question }],
-    { maxTokens: 1024, temperature: 0.2 },
-    trackingContext
-  )
-
-  if (!response.success) {
-    return { success: false, error: response.error }
-  }
-
-  return {
-    success: true,
-    whiteText: response.content?.trim(),
   }
 }
 
@@ -1061,18 +857,22 @@ ${featuresContent}`
 }
 
 /**
- * 修正 Feature File 格式錯誤
+ * 批量修正多個 Feature Files 格式錯誤
+ * 優化：一次 LLM 調用修復所有 Features，節省 Token
  */
-export async function fixFeatureFormat(
-  featureContent: string,
-  errors: string[],
+export async function fixMultipleFeatures(
+  features: Array<{ name: string; content: string; errors: string[] }>,
   trackingContext?: LlmTrackingContext
 ): Promise<{
   success: boolean
-  fixedContent?: string
+  fixedFeatures?: Array<{ name: string; content: string }>
   error?: string
 }> {
-  const systemPrompt = `你是一位 sdd.os ISA Gherkin 專家。請修正以下 Feature File 的格式錯誤。
+  if (features.length === 0) {
+    return { success: true, fixedFeatures: [] }
+  }
+
+  const systemPrompt = `你是一位 sdd.os ISA Gherkin 專家。請修正以下多個 Feature Files 的格式錯誤。
 
 ## sdd.os ISA 格式規範
 1. 檔案開頭必須有 \`# Action:\` 和 \`# Summary:\` 註解
@@ -1082,15 +882,25 @@ export async function fixFeatureFormat(
 5. Then 失敗格式：\`操作失敗\`
 6. Entity 驗證格式：\`存在一個{entity}, with table:\`
 
-## 錯誤列表
-${errors.map((e, i) => `${i + 1}. ${e}`).join('\n')}
+## 輸出格式
+請以 JSON 格式輸出修正後的內容：
+\`\`\`json
+{
+  "features": [
+    { "name": "Feature名稱", "content": "修正後的完整內容" }
+  ]
+}
+\`\`\``
 
-直接輸出修正後的完整 Feature File 內容，不要加任何說明。`
+  // 構建用戶消息，包含所有需要修復的 Features
+  const userMessage = features.map(f =>
+    `### Feature: ${f.name}\n\n**錯誤**:\n${f.errors.map((e, i) => `${i + 1}. ${e}`).join('\n')}\n\n**內容**:\n\`\`\`gherkin\n${f.content}\n\`\`\``
+  ).join('\n\n---\n\n')
 
   const response = await callClaude(
     systemPrompt,
-    [{ role: 'user', content: featureContent }],
-    { maxTokens: 8192, temperature: 0.1 },
+    [{ role: 'user', content: userMessage }],
+    { maxTokens: 16384, temperature: 0.1 },
     trackingContext
   )
 
@@ -1098,14 +908,23 @@ ${errors.map((e, i) => `${i + 1}. ${e}`).join('\n')}
     return { success: false, error: response.error }
   }
 
-  // 提取 gherkin 內容
-  let fixedContent = response.content?.trim() || ''
-  const gherkinMatch = fixedContent.match(/```gherkin\s*([\s\S]*?)\s*```/)
-  if (gherkinMatch) {
-    fixedContent = gherkinMatch[1]
-  }
+  try {
+    const jsonMatch = response.content?.match(/```json\s*([\s\S]*?)\s*```/) ||
+                      response.content?.match(/\{[\s\S]*\}/)
+    if (!jsonMatch) {
+      return { success: false, error: '無法解析 LLM 回應' }
+    }
 
-  return { success: true, fixedContent }
+    const jsonStr = jsonMatch[1] || jsonMatch[0]
+    const parsed = JSON.parse(jsonStr)
+
+    return {
+      success: true,
+      fixedFeatures: parsed.features || [],
+    }
+  } catch (err) {
+    return { success: false, error: `解析回應時發生錯誤: ${err}` }
+  }
 }
 
 // ============================================================

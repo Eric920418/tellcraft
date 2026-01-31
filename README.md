@@ -28,9 +28,35 @@ Tellcraft 是一個 AI 驅動的自動化開發平台。用戶只需描述需求
 | **自癒機制** | 修復後真正重新驗證，不再假設通過 |
 | **反悔機制** | 「修改 N」指令調用 `revertAnswer` 將項目移回待處理 |
 
-**新增 LLM 函數**（`app/lib/llm.ts`）：
-- `validateFeatureContent()` - 驗證單個 Feature 內容
-- `validateMultipleFeatures()` - 批量驗證多個 Feature
+### Token 優化（2026-01-31）
+
+優化 LLM Token 使用效率：
+
+| 優化項目 | 節省估算 | 說明 |
+|----------|----------|------|
+| **批量 Feature 修復** | ~2500-5000 tokens/次 | 原本逐個 Feature 調用 LLM，改為一次批量修復 |
+| **刪除死代碼** | 維護成本 | 移除 `processAnswer`、`translateToWhiteText`、`generateSpecSummary` |
+
+**LLM 函數變更**（`app/lib/llm.ts`）：
+- ✅ 新增 `fixMultipleFeatures()` - 一次 LLM 調用批量修復多個 Feature
+- ❌ 刪除 `processAnswer()` - 未使用
+- ❌ 刪除 `translateToWhiteText()` - 未使用
+- ❌ 刪除 `generateSpecSummary()` - 未使用
+
+**現有 LLM 函數**：
+- `validateFeatureContent()` - 驗證單個 Feature 內容（本地 Regex，不調用 LLM）
+- `validateMultipleFeatures()` - 批量驗證多個 Feature（本地 Regex，不調用 LLM）
+
+### UX 改進（2026-01-31）
+
+| 改進項目 | 說明 |
+|----------|------|
+| **完成訊息措辭** | 不再要求用戶輸入「生成程式碼」，改為直接確認「這樣對嗎？」|
+| **Markdown 渲染** | 聊天介面支援 Markdown 格式美化（表格、粗體、列表等）|
+
+**新增套件**：
+- `react-markdown` - Markdown 渲染
+- `remark-gfm` - GitHub Flavored Markdown（表格、刪除線等）
 
 **驗證規則**：
 - E001: 缺少 Action 註解

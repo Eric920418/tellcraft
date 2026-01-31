@@ -965,7 +965,7 @@ export async function initializeSession(input: {
   const email = `${anonymousId}@anonymous.tellcraft.app`
 
   // 1. 查找現有用戶（先在 users 表查）
-  const { data: user, error: _userError } = await supabase
+  let { data: user, error: _userError } = await supabase
     .from('users')
     .select('id')
     .eq('email', email)
@@ -1035,7 +1035,7 @@ export async function initializeSession(input: {
   }
 
   // 2. 查找或創建專案
-  const { data: project, error: _projectError } = await supabase
+  let { data: project, error: _projectError } = await supabase
     .from('projects')
     .select('id')
     .eq('user_id', user.id)

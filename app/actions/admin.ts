@@ -569,13 +569,11 @@ export async function getLLMUsageStats(params: {
 
     const { startDate, endDate, userId, groupBy = 'day' } = params
 
-    // 使用 server client（帶 user session）以符合 RLS 策略
-    const serverClient = await createClient()
-
+    // 管理員已驗證，使用 service role client 繞過 RLS 查詢所有數據
     // 預設只查詢最近 30 天，避免全表掃描
     const defaultStartDate = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString()
 
-    let query = serverClient
+    let query = supabase
       .from('llm_usage')
       .select('id, user_id, model, input_tokens, output_tokens, cost_usd, created_at')
 
@@ -693,10 +691,8 @@ export async function getAuditLogs(params: PaginationParams & {
 
     const { page = 1, pageSize = 50, userId, action, entityType, startDate, endDate } = params
 
-    // 使用 server client（帶 user session）以符合 RLS 策略
-    const serverClient = await createClient()
-
-    let query = serverClient
+    // 管理員已驗證，使用 service role client 繞過 RLS 查詢所有數據
+    let query = supabase
       .from('audit_logs')
       .select('id, user_id, action, entity_type, entity_id, metadata, created_at', { count: 'exact' })
 

@@ -10,7 +10,7 @@ import {
   runSpecDiscovery,
   generateActionsYml,
   generateIsaConfig,
-  fixFeatureFormat,
+  fixMultipleFeatures,
   validateMultipleFeatures,
   type ClarifyItem,
   type ValidationError,
@@ -58,6 +58,33 @@ export const handleUserRequest = inngest.createFunction(
 
       if (error) throw new Error(`建立任務失敗: ${error.message}`)
       return data.id
+    })
+
+    // ============================================================
+    // Step 1.5: 立即發送確認消息（優化感知延遲）
+    // ============================================================
+    await step.run('send-immediate-response', async () => {
+      const immediateMessage = {
+        id: crypto.randomUUID(),
+        role: 'assistant',
+        content: '收到！正在分析您的需求...',
+        timestamp: new Date().toISOString(),
+        stage: 'init',
+      }
+
+      const { data: conv } = await supabase
+        .from('conversations')
+        .select('messages')
+        .eq('id', conversationId)
+        .single()
+
+      await supabase
+        .from('conversations')
+        .update({
+          messages: [...(conv?.messages || []), immediateMessage],
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', conversationId)
     })
 
     // ============================================================
@@ -755,36 +782,56 @@ async function executeBddSpecSkill(input: BddSpecSkillInput) {
         )
       })
 
-      // 嘗試修復每個 Feature
+      // 批量修復所有有錯誤的 Features（一次 LLM 調用，節省 Token）
       const fixedFeatures = await step.run(`fix-features-${fixAttempt}`, async () => {
         const session = await getBddSession({ sessionId })
         if (!session.data?.featuresContent) return []
 
-        const results = []
+        // 收集需要修復的 Features 和它們的錯誤
+        const featuresToFix: Array<{ name: string; content: string; errors: string[] }> = []
+        const featuresNoError: FeatureFile[] = []
+
         for (const feature of session.data.featuresContent) {
-          // 收集該 feature 相關的錯誤
           const featureErrors = validationResult.errors.filter((e: string) =>
             e.includes(feature.name)
           )
 
           if (featureErrors.length > 0) {
-            const fixResult = await fixFeatureFormat(
-              feature.content,
-              featureErrors,
-              { conversationId, purpose: 'fix_feature' }
-            )
-
-            if (fixResult.success && fixResult.fixedContent) {
-              results.push({
-                ...feature,
-                content: fixResult.fixedContent,
-              })
-            } else {
-              results.push(feature)
-            }
+            featuresToFix.push({
+              name: feature.name,
+              content: feature.content,
+              errors: featureErrors,
+            })
           } else {
-            results.push(feature)
+            featuresNoError.push(feature)
           }
+        }
+
+        // 如果沒有需要修復的，直接返回
+        if (featuresToFix.length === 0) {
+          return session.data.featuresContent
+        }
+
+        // 一次 LLM 調用批量修復所有 Features
+        const fixResult = await fixMultipleFeatures(
+          featuresToFix,
+          { conversationId, purpose: 'fix_features_batch' }
+        )
+
+        // 合併結果
+        let results: FeatureFile[]
+        if (fixResult.success && fixResult.fixedFeatures) {
+          // 用修復後的內容替換原來的
+          const fixedMap = new Map(
+            fixResult.fixedFeatures.map(f => [f.name, f.content])
+          )
+          results = session.data.featuresContent.map((f: FeatureFile) => {
+            const fixedContent = fixedMap.get(f.name)
+            return fixedContent ? { ...f, content: fixedContent } : f
+          })
+        } else {
+          // 修復失敗，保留原來的
+          results = session.data.featuresContent
         }
 
         // 更新 session
@@ -1289,7 +1336,7 @@ async function executeBddSpecSkill(input: BddSpecSkillInput) {
 
     await sendMessage(
       conversationId,
-      `🎉 **BDD 規格產出完成！**\n\n` +
+      `🎉 **規格產出完成！**\n\n` +
       `**產出內容**：\n` +
       `- Schema SQL：已產出\n` +
       `- Entity Mapping：已產出\n` +
@@ -1297,10 +1344,10 @@ async function executeBddSpecSkill(input: BddSpecSkillInput) {
       `- Actions Spec：已產出\n` +
       `- ISA Config：已產出\n\n` +
       `**驗證結果**：${session.data?.validationResult?.passed ? '✅ 通過' : '⚠️ 有警告'}\n\n` +
-      `接下來您可以：\n` +
-      `1. 輸入「生成程式碼」來產生應用程式\n` +
-      `2. 輸入「查看規格」來檢視產出內容\n` +
-      `3. 輸入「修改規格」來調整需求`,
+      `---\n\n` +
+      `請確認以上規格是否正確？\n` +
+      `- 如果沒問題，我會開始生成程式碼\n` +
+      `- 如果有需要調整的地方，請直接告訴我`,
       'completed'
     )
   })

@@ -3,6 +3,8 @@
 import { useState, useRef, useEffect, useCallback, Suspense } from 'react'
 import { useSearchParams } from 'next/navigation'
 import { motion, AnimatePresence, useInView } from 'framer-motion'
+import ReactMarkdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
 import RotatingText from './components/RotatingText'
 import GlareHover from './components/GlareHover'
 import CardSwap, { Card } from './components/CardSwap'
@@ -755,7 +757,17 @@ function ChatSection({
           content: initialMessage,
           timestamp: new Date()
         }
-        setMessages([userMsg])
+
+        // 立即顯示預告消息，減少感知等待時間
+        const previewMsg: Message = {
+          id: 'preview-analyzing',
+          role: 'assistant',
+          content: '正在分析您的需求，請稍候...',
+          timestamp: new Date(),
+          stage: 'clarify'
+        }
+
+        setMessages([userMsg, previewMsg])
         setIsInitializing(false) // 消息顯示後立即隱藏初始化提示
         setIsTyping(true)
         setCurrentStage('clarify')
@@ -834,11 +846,17 @@ function ChatSection({
           // 更新消息列表（合併現有消息和新消息）
           // 使用 content + role 去重，避免樂觀更新和後端 ID 不一致
           setMessages(prev => {
-            const existingKeys = new Set(prev.map(m => `${m.role}:${m.content}`))
+            // 如果收到真正的 AI 回覆，移除預告消息
+            const hasRealAiMessage = formattedMessages.some(m => m.role === 'assistant')
+            const filteredPrev = hasRealAiMessage
+              ? prev.filter(m => m.id !== 'preview-analyzing')
+              : prev
+
+            const existingKeys = new Set(filteredPrev.map(m => `${m.role}:${m.content}`))
             const uniqueNewMessages = formattedMessages.filter(m => !existingKeys.has(`${m.role}:${m.content}`))
             if (uniqueNewMessages.length > 0) {
               // 找到最後一條 AI 消息，更新 stage
-              const lastAiMessage = [...prev, ...uniqueNewMessages]
+              const lastAiMessage = [...filteredPrev, ...uniqueNewMessages]
                 .filter(m => m.role === 'assistant')
                 .pop()
               if (lastAiMessage?.stage) {
@@ -848,9 +866,9 @@ function ChatSection({
               if (uniqueNewMessages.some(m => m.role === 'assistant')) {
                 setIsTyping(false)
               }
-              return [...prev, ...uniqueNewMessages]
+              return [...filteredPrev, ...uniqueNewMessages]
             }
-            return prev
+            return filteredPrev
           })
 
           // 更新最後時間戳
@@ -1303,9 +1321,16 @@ function ChatSection({
                         maxWidth: '85%',
                         fontSize: 15,
                         lineHeight: 1.75,
-                        whiteSpace: 'pre-wrap'
                       }}>
-                        {message.content}
+                        {message.role === 'user' ? (
+                          <span style={{ whiteSpace: 'pre-wrap' }}>{message.content}</span>
+                        ) : (
+                          <div className="markdown-content">
+                            <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                              {message.content}
+                            </ReactMarkdown>
+                          </div>
+                        )}
                       </div>
                     </>
                   )}
