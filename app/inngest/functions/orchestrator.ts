@@ -474,6 +474,14 @@ async function executeBddSpecSkill(input: BddSpecSkillInput) {
         })
         continue
       } else {
+        // 告知用戶發現了新問題
+        await step.run(`notify-new-questions-${loopIteration}`, async () => {
+          await sendMessage(
+            conversationId,
+            `根據您的回答，我發現還有 **${moreDiscovery.newItems.length}** 個細節需要確認。`,
+            'discovery_update'
+          )
+        })
         consecutiveEmptyRounds = 0
         continue
       }
@@ -1030,6 +1038,14 @@ async function executeBddSpecSkill(input: BddSpecSkillInput) {
           })
           continue
         } else {
+          // 告知用戶發現了新問題
+          await step.run(`notify-spec-new-questions-${specLoopIteration}`, async () => {
+            await sendMessage(
+              conversationId,
+              `根據您的回答，我發現還有 **${moreSpecDiscovery.newItems.length}** 個規格細節需要確認。`,
+              'spec_discovery_update'
+            )
+          })
           specConsecutiveEmptyRounds = 0
           continue
         }

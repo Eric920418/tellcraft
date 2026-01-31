@@ -2733,26 +2733,53 @@ export async function addClarifyItems(input: {
     ...session.resolvedItems,
   ]
 
-  // 正規化問題文字（移除標點符號、空白，轉小寫）
-  const normalizeText = (text: string): string => {
-    return text
+  // 提取問題核心關鍵詞（移除問法相關的詞彙）
+  const extractKeywords = (text: string): Set<string> => {
+    // 移除常見問法詞彙
+    const stopWords = [
+      '請問', '是否', '需要', '可以', '應該', '會', '要', '能', '嗎', '呢', '還是',
+      '例如', '比如', '這個', '那個', '什麼', '哪些', '如何', '怎麼', '怎樣',
+      '的', '了', '在', '是', '有', '和', '與', '或', '等', '以', '為', '從', '到',
+    ]
+    const normalized = text
       .toLowerCase()
-      .replace(/[，。？！、：；""''（）\[\]【】\s]/g, '')
-      .replace(/[,.?!:;"'()\[\]\s]/g, '')
+      .replace(/[，。？！、：；""''（）\[\]【】\s,.?!:;"'()\[\]\s]/g, ' ')
+      .split(/\s+/)
+      .filter(word => word.length >= 2 && !stopWords.includes(word))
+
+    return new Set(normalized)
   }
 
-  // 建立現有問題的正規化集合
-  const existingNormalized = new Set(
-    allExistingItems.map(item => normalizeText(item.whiteTextQuestion || item.question))
-  )
+  // 計算兩個關鍵詞集合的相似度（Jaccard similarity）
+  const calculateSimilarity = (set1: Set<string>, set2: Set<string>): number => {
+    const intersection = new Set([...set1].filter(x => set2.has(x)))
+    const union = new Set([...set1, ...set2])
+    return union.size > 0 ? intersection.size / union.size : 0
+  }
 
-  // 過濾掉重複的項目
+  // 建立現有問題的關鍵詞列表
+  const existingKeywordSets = allExistingItems.map(item => ({
+    keywords: extractKeywords(item.whiteTextQuestion || item.question),
+    text: item.whiteTextQuestion || item.question,
+  }))
+
+  // 過濾掉重複或相似的項目
   const uniqueItems = items.filter(item => {
-    const normalized = normalizeText(item.whiteTextQuestion || item.question)
-    if (existingNormalized.has(normalized)) {
-      return false // 跳過重複項目
+    const newKeywords = extractKeywords(item.whiteTextQuestion || item.question)
+
+    // 檢查是否與任何現有問題相似
+    for (const existing of existingKeywordSets) {
+      const similarity = calculateSimilarity(newKeywords, existing.keywords)
+      if (similarity > 0.6) { // 相似度超過 60% 視為重複
+        return false
+      }
     }
-    existingNormalized.add(normalized) // 加入集合避免新項目間重複
+
+    // 加入現有列表，避免新項目間重複
+    existingKeywordSets.push({
+      keywords: newKeywords,
+      text: item.whiteTextQuestion || item.question,
+    })
     return true
   })
 
