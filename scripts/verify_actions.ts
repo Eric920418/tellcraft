@@ -15,23 +15,24 @@ interface TestResult {
 
 const results: TestResult[] = []
 
-async function testAction(name: string, fn: () => Promise<any>) {
+async function testAction(name: string, fn: () => Promise<unknown>) {
   try {
-    const result = await fn()
+    await fn()
     // Action 已實作：回傳結果（不論成功或失敗都算已實作）
     // 只有拋出 "Not implemented" 才算未實作
     results.push({ name, passed: true })
     console.log(`✓ ${name}`)
-  } catch (error: any) {
-    const isNotImplemented = error.message === 'Not implemented'
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error)
+    const isNotImplemented = errorMessage === 'Not implemented'
     if (isNotImplemented) {
-      results.push({ name, passed: false, error: error.message })
+      results.push({ name, passed: false, error: errorMessage })
       console.log(`✗ ${name} - Not implemented`)
     } else {
       // 其他錯誤（如資料庫連接失敗）也算已實作
       // 因為 action 有執行到業務邏輯
       results.push({ name, passed: true })
-      console.log(`✓ ${name} (with expected error: ${error.message.slice(0, 50)}...)`)
+      console.log(`✓ ${name} (with expected error: ${errorMessage.slice(0, 50)}...)`)
     }
   }
 }

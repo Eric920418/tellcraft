@@ -65,7 +65,7 @@ const statusLabels: Record<string, string> = {
 
 export default function ProjectDetailPage() {
   const params = useParams()
-  const router = useRouter()
+  const _router = useRouter()
   const [data, setData] = useState<ProjectDetail | null>(null)
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -317,7 +317,7 @@ export default function ProjectDetailPage() {
           <p style={{ color: 'var(--gray-400)', fontSize: 14 }}>沒有部署記錄</p>
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-            {deployments.map((deploy, index) => (
+            {deployments.map((deploy, _index) => (
               <div
                 key={deploy.id}
                 style={{

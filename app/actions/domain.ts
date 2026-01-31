@@ -1,8 +1,8 @@
 'use server'
 
 import { checkDomainAvailability, registerDomain, updateNameservers } from './porkbun'
-import { createZone, setupVercelDns, getZone } from './cloudflare'
-import { createVercelProject, setEnvironmentVariables, deployFiles } from './vercel'
+import { createZone, setupVercelDns } from './cloudflare'
+import { createVercelProject, deployFiles } from './vercel'
 
 // 網域生命週期狀態
 export type DomainStatus =
@@ -414,7 +414,7 @@ export async function deployWithOwnDomain(
   }
 
   // Step 3: 綁定網域
-  const domainResult = await addDomainToVercel(vercelResult.project!.id, domain)
+  await addDomainToVercel(vercelResult.project!.id, domain)
 
   // 生成 DNS 設定說明
   const dnsInstructions = `

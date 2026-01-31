@@ -310,7 +310,7 @@ export async function deployProject(input: {
     .select('id, project_count, max_projects, is_primary')
     .order('is_primary', { ascending: false })
 
-  let availableOrg = orgs?.find(org => org.project_count < org.max_projects)
+  const availableOrg = orgs?.find(org => org.project_count < org.max_projects)
 
   // 建立部署記錄
   const deploymentId = crypto.randomUUID()
@@ -377,7 +377,7 @@ export async function updateProject(input: {
   changes: string
   isDestructive?: boolean
 }): Promise<ActionResult<{ projectId: string; status: ProjectStatus; backupCreated?: boolean }>> {
-  const { projectId, changes, isDestructive } = input
+  const { projectId, changes: _changes, isDestructive } = input
 
   // 查詢專案
   const { data: project, error: projectError } = await supabase
@@ -490,7 +490,7 @@ export async function exportData(input: {
   projectId?: string
   requestUserId?: string
 }): Promise<ActionResult<{ downloadUrl: string; format: string }>> {
-  const { userId, format, projectId, requestUserId } = input
+  const { userId: _userId, format, projectId, requestUserId } = input
 
   // 如果指定了 projectId，檢查擁有權
   if (projectId) {
@@ -965,7 +965,7 @@ export async function initializeSession(input: {
   const email = `${anonymousId}@anonymous.tellcraft.app`
 
   // 1. 查找現有用戶（先在 users 表查）
-  let { data: user, error: userError } = await supabase
+  const { data: user, error: _userError } = await supabase
     .from('users')
     .select('id')
     .eq('email', email)
@@ -973,7 +973,7 @@ export async function initializeSession(input: {
 
   let isNew = false
 
-  if (userError || !user) {
+  if (_userError || !user) {
     // 用戶不存在，需要先在 auth.users 創建，再在 users 表創建
     // 使用 Supabase Admin API 創建 auth 用戶
     const { data: authData, error: authError } = await supabase.auth.admin.createUser({
@@ -1035,7 +1035,7 @@ export async function initializeSession(input: {
   }
 
   // 2. 查找或創建專案
-  let { data: project, error: projectError } = await supabase
+  const { data: project, error: _projectError } = await supabase
     .from('projects')
     .select('id')
     .eq('user_id', user.id)
@@ -1043,7 +1043,7 @@ export async function initializeSession(input: {
     .limit(1)
     .single()
 
-  if (projectError || !project) {
+  if (_projectError || !project) {
     // 創建新專案
     const { data: newProject, error: createProjectError } = await supabase
       .from('projects')
@@ -1192,15 +1192,16 @@ export async function initializeSessionFromAuth(input?: {
   const avatarUrl = authUser.user_metadata?.avatar_url || authUser.user_metadata?.picture
 
   // 1. 查找或創建 users 表中的用戶記錄
-  let { data: user, error: userError } = await supabase
+  const userQueryResult = await supabase
     .from('users')
     .select('id')
     .eq('id', authUser.id)
     .single()
 
+  let user = userQueryResult.data
   let isNew = false
 
-  if (userError || !user) {
+  if (userQueryResult.error || !user) {
     // 嘗試用 email 查找（處理舊資料遷移）
     const { data: userByEmail } = await supabase
       .from('users')
@@ -1252,7 +1253,7 @@ export async function initializeSessionFromAuth(input?: {
   }
 
   // 3. 查找或創建專案
-  let { data: project, error: projectError } = await supabase
+  const projectQueryResult = await supabase
     .from('projects')
     .select('id')
     .eq('user_id', user.id)
@@ -1260,7 +1261,8 @@ export async function initializeSessionFromAuth(input?: {
     .limit(1)
     .single()
 
-  if (projectError || !project) {
+  let project = projectQueryResult.data
+  if (projectQueryResult.error || !project) {
     // 創建新專案
     const { data: newProject, error: createProjectError } = await supabase
       .from('projects')
@@ -1544,7 +1546,8 @@ export async function sendMessageAndTrigger(input: {
   userId?: string // 可選，未提供時從 session 讀取
   projectId: string
 }): Promise<ActionResult<{ messageId: string }>> {
-  let { conversationId, content, userId, projectId } = input
+  const { conversationId, content, projectId } = input
+  let { userId } = input
 
   // 如果未提供 userId，從認證 session 讀取
   if (!userId) {
@@ -1811,15 +1814,16 @@ export async function getConversationMessages(input: {
   }>
   currentTaskId?: string
   taskStatus?: string
-  updatedAt?: string  // 新增：返回當前 updated_at 供下次比對
+  updatedAt?: string  // 返回當前 updated_at 供下次比對
+  isComplete?: boolean  // 對話是否已完成（spec_complete），用於停止輪詢
 }>> {
   const { conversationId, afterTimestamp, lastUpdatedAt } = input
 
-  // 1. 先檢查 updated_at 是否有變化（輕量查詢）
+  // 1. 先檢查 updated_at 和 spec_complete 是否有變化（輕量查詢）
   if (lastUpdatedAt) {
     const { data: check } = await supabase
       .from('conversations')
-      .select('updated_at, project_id')
+      .select('updated_at, project_id, spec_complete')
       .eq('id', conversationId)
       .single()
 
@@ -1840,7 +1844,8 @@ export async function getConversationMessages(input: {
           messages: [],  // 沒有新消息
           currentTaskId: task?.id,
           taskStatus: task?.status,
-          updatedAt: check.updated_at
+          updatedAt: check.updated_at,
+          isComplete: check.spec_complete  // 告訴前端對話是否完成
         }
       }
     }
@@ -1849,7 +1854,7 @@ export async function getConversationMessages(input: {
   // 2. 有更新或首次查詢，載入完整 messages
   const { data: conversation, error: convError } = await supabase
     .from('conversations')
-    .select('messages, project_id, updated_at')
+    .select('messages, project_id, updated_at, spec_complete')
     .eq('id', conversationId)
     .single()
 
@@ -1880,7 +1885,8 @@ export async function getConversationMessages(input: {
       messages,
       currentTaskId: task?.id,
       taskStatus: task?.status,
-      updatedAt: conversation.updated_at
+      updatedAt: conversation.updated_at,
+      isComplete: conversation.spec_complete  // 告訴前端對話是否完成
     }
   }
 }
@@ -2110,28 +2116,30 @@ export async function getProjectDetail(projectId: string): Promise<ActionResult<
     return { success: false, error: '無權訪問此專案' }
   }
 
-  // 查詢對話
-  const { data: conversations } = await supabase
-    .from('conversations')
-    .select('id, messages, spec_complete, created_at, updated_at')
-    .eq('project_id', projectId)
-    .order('updated_at', { ascending: false })
+  // 並行查詢對話、部署和生成記錄（減少往返時間）
+  const [convResult, deployResult, genResult] = await Promise.all([
+    supabase
+      .from('conversations')
+      .select('id, messages, spec_complete, created_at, updated_at')
+      .eq('project_id', projectId)
+      .order('updated_at', { ascending: false }),
+    supabase
+      .from('deployments')
+      .select('id, url, status, created_at')
+      .eq('project_id', projectId)
+      .order('created_at', { ascending: false })
+      .limit(10),
+    supabase
+      .from('generations')
+      .select('id, status, attempt_count, created_at')
+      .eq('project_id', projectId)
+      .order('created_at', { ascending: false })
+      .limit(10)
+  ])
 
-  // 查詢部署記錄
-  const { data: deployments } = await supabase
-    .from('deployments')
-    .select('id, url, status, created_at')
-    .eq('project_id', projectId)
-    .order('created_at', { ascending: false })
-    .limit(10)
-
-  // 查詢生成記錄
-  const { data: generations } = await supabase
-    .from('generations')
-    .select('id, status, attempt_count, created_at')
-    .eq('project_id', projectId)
-    .order('created_at', { ascending: false })
-    .limit(10)
+  const conversations = convResult.data
+  const deployments = deployResult.data
+  const generations = genResult.data
 
   return {
     success: true,
@@ -2292,5 +2300,493 @@ export async function deployProjectFromDb(input: {
       status: result.stage,
     },
     error: result.error || result.message,
+  }
+}
+
+// ============================================================
+// BDD Session Actions
+// ============================================================
+
+import type { ClarifyItem } from '../lib/llm'
+
+// BDD Session 階段類型
+type BddPhase =
+  | 'prd_discovery'
+  | 'prd_clarify'
+  | 'formulation'
+  | 'spec_discovery'
+  | 'spec_clarify'
+  | 'actions_design'
+  | 'isa_config'
+  | 'completed'
+
+// BDD Session 資料結構
+interface BddSession {
+  id: string
+  projectId: string
+  conversationId: string
+  taskId?: string
+  currentPhase: BddPhase
+  currentRound: number
+  currentQuestionIndex: number
+  totalDiscovered: number
+  totalResolved: number
+  consecutiveEmptyRounds: number
+  clarifyItems: ClarifyItem[]
+  stagingItems: ClarifyItem[]
+  resolvedItems: ClarifyItem[]
+  originalRequirements?: string
+  projectContext?: string
+  schemaSqlContent?: string
+  entityMappingContent?: string
+  featuresContent?: Array<{ name: string; actionName?: string; content: string }>
+  actionsYmlContent?: string
+  isaConfigContent?: string
+  validationResult?: { passed: boolean; errors: string[]; warnings: string[] }
+  createdAt: string
+  updatedAt: string
+}
+
+/**
+ * 創建 BDD Session
+ */
+export async function createBddSession(input: {
+  projectId: string
+  conversationId: string
+  taskId?: string
+  originalRequirements: string
+  projectContext?: string
+}): Promise<ActionResult<{ sessionId: string }>> {
+  const { projectId, conversationId, taskId, originalRequirements, projectContext } = input
+
+  const { data, error } = await supabase
+    .from('bdd_sessions')
+    .insert({
+      project_id: projectId,
+      conversation_id: conversationId,
+      task_id: taskId,
+      current_phase: 'prd_discovery',
+      original_requirements: originalRequirements,
+      project_context: projectContext,
+    })
+    .select('id')
+    .single()
+
+  if (error || !data) {
+    return { success: false, error: error?.message || '創建 BDD Session 失敗' }
+  }
+
+  return { success: true, data: { sessionId: data.id } }
+}
+
+/**
+ * 獲取 BDD Session
+ */
+export async function getBddSession(input: {
+  sessionId?: string
+  conversationId?: string
+  projectId?: string
+}): Promise<ActionResult<BddSession | null>> {
+  const { sessionId, conversationId, projectId } = input
+
+  let query = supabase.from('bdd_sessions').select('*')
+
+  if (sessionId) {
+    query = query.eq('id', sessionId)
+  } else if (conversationId) {
+    query = query.eq('conversation_id', conversationId)
+  } else if (projectId) {
+    query = query.eq('project_id', projectId)
+  } else {
+    return { success: false, error: '必須提供 sessionId、conversationId 或 projectId' }
+  }
+
+  const { data, error } = await query.order('created_at', { ascending: false }).limit(1).single()
+
+  if (error) {
+    if (error.code === 'PGRST116') {
+      // 沒有找到記錄
+      return { success: true, data: null }
+    }
+    return { success: false, error: error.message }
+  }
+
+  // 轉換 snake_case 到 camelCase
+  const session: BddSession = {
+    id: data.id,
+    projectId: data.project_id,
+    conversationId: data.conversation_id,
+    taskId: data.task_id,
+    currentPhase: data.current_phase,
+    currentRound: data.current_round,
+    currentQuestionIndex: data.current_question_index,
+    totalDiscovered: data.total_discovered,
+    totalResolved: data.total_resolved,
+    consecutiveEmptyRounds: data.consecutive_empty_rounds,
+    clarifyItems: data.clarify_items || [],
+    stagingItems: data.staging_items || [],
+    resolvedItems: data.resolved_items || [],
+    originalRequirements: data.original_requirements,
+    projectContext: data.project_context,
+    schemaSqlContent: data.schema_sql_content,
+    entityMappingContent: data.entity_mapping_content,
+    featuresContent: data.features_content,
+    actionsYmlContent: data.actions_yml_content,
+    isaConfigContent: data.isa_config_content,
+    validationResult: data.validation_result,
+    createdAt: data.created_at,
+    updatedAt: data.updated_at,
+  }
+
+  return { success: true, data: session }
+}
+
+/**
+ * 更新 BDD Session
+ */
+export async function updateBddSession(input: {
+  sessionId: string
+  updates: Partial<{
+    currentPhase: BddPhase
+    currentRound: number
+    currentQuestionIndex: number
+    totalDiscovered: number
+    totalResolved: number
+    consecutiveEmptyRounds: number
+    clarifyItems: ClarifyItem[]
+    stagingItems: ClarifyItem[]
+    resolvedItems: ClarifyItem[]
+    schemaSqlContent: string
+    entityMappingContent: string
+    featuresContent: Array<{ name: string; actionName?: string; content: string }>
+    actionsYmlContent: string
+    isaConfigContent: string
+    validationResult: { passed: boolean; errors: string[]; warnings: string[] }
+  }>
+}): Promise<ActionResult<null>> {
+  const { sessionId, updates } = input
+
+  // 轉換 camelCase 到 snake_case
+  const dbUpdates: Record<string, unknown> = {}
+  if (updates.currentPhase !== undefined) dbUpdates.current_phase = updates.currentPhase
+  if (updates.currentRound !== undefined) dbUpdates.current_round = updates.currentRound
+  if (updates.currentQuestionIndex !== undefined) dbUpdates.current_question_index = updates.currentQuestionIndex
+  if (updates.totalDiscovered !== undefined) dbUpdates.total_discovered = updates.totalDiscovered
+  if (updates.totalResolved !== undefined) dbUpdates.total_resolved = updates.totalResolved
+  if (updates.consecutiveEmptyRounds !== undefined) dbUpdates.consecutive_empty_rounds = updates.consecutiveEmptyRounds
+  if (updates.clarifyItems !== undefined) dbUpdates.clarify_items = updates.clarifyItems
+  if (updates.stagingItems !== undefined) dbUpdates.staging_items = updates.stagingItems
+  if (updates.resolvedItems !== undefined) dbUpdates.resolved_items = updates.resolvedItems
+  if (updates.schemaSqlContent !== undefined) dbUpdates.schema_sql_content = updates.schemaSqlContent
+  if (updates.entityMappingContent !== undefined) dbUpdates.entity_mapping_content = updates.entityMappingContent
+  if (updates.featuresContent !== undefined) dbUpdates.features_content = updates.featuresContent
+  if (updates.actionsYmlContent !== undefined) dbUpdates.actions_yml_content = updates.actionsYmlContent
+  if (updates.isaConfigContent !== undefined) dbUpdates.isa_config_content = updates.isaConfigContent
+  if (updates.validationResult !== undefined) dbUpdates.validation_result = updates.validationResult
+
+  const { error } = await supabase
+    .from('bdd_sessions')
+    .update(dbUpdates)
+    .eq('id', sessionId)
+
+  if (error) {
+    return { success: false, error: error.message }
+  }
+
+  return { success: true, data: null }
+}
+
+/**
+ * 記錄釐清項目的回答
+ * 將項目移到 staging 區
+ */
+export async function answerClarifyItem(input: {
+  sessionId: string
+  itemId: string
+  answer: string
+}): Promise<ActionResult<null>> {
+  const { sessionId, itemId, answer } = input
+
+  // 讀取當前 session
+  const sessionResult = await getBddSession({ sessionId })
+  if (!sessionResult.success || !sessionResult.data) {
+    return { success: false, error: sessionResult.error || 'Session 不存在' }
+  }
+
+  const session = sessionResult.data
+  const clarifyItems = [...session.clarifyItems]
+  const stagingItems = [...session.stagingItems]
+
+  // 找到並更新項目
+  const itemIndex = clarifyItems.findIndex(item => item.id === itemId)
+  if (itemIndex === -1) {
+    return { success: false, error: '找不到釐清項目' }
+  }
+
+  const item = clarifyItems[itemIndex]
+  item.answer = answer
+  item.status = 'reviewing'
+  item.answeredAt = new Date().toISOString()
+
+  // 移到 staging
+  clarifyItems.splice(itemIndex, 1)
+  stagingItems.push(item)
+
+  // 更新 session
+  return await updateBddSession({
+    sessionId,
+    updates: {
+      clarifyItems,
+      stagingItems,
+      currentQuestionIndex: session.currentQuestionIndex + 1,
+    },
+  })
+}
+
+/**
+ * 批量確認釐清項目
+ * 將 staging 區的項目移到 resolved 區
+ */
+export async function confirmBatch(input: {
+  sessionId: string
+  itemIds?: string[]  // 如果不提供，確認所有 staging 項目
+}): Promise<ActionResult<{ confirmedCount: number }>> {
+  const { sessionId, itemIds } = input
+
+  // 讀取當前 session
+  const sessionResult = await getBddSession({ sessionId })
+  if (!sessionResult.success || !sessionResult.data) {
+    return { success: false, error: sessionResult.error || 'Session 不存在' }
+  }
+
+  const session = sessionResult.data
+  let stagingItems = [...session.stagingItems]
+  const resolvedItems = [...session.resolvedItems]
+
+  // 確認項目
+  let confirmedCount = 0
+  if (itemIds) {
+    // 確認指定項目
+    const toConfirm = stagingItems.filter(item => itemIds.includes(item.id))
+    stagingItems = stagingItems.filter(item => !itemIds.includes(item.id))
+    toConfirm.forEach(item => {
+      item.status = 'resolved'
+      resolvedItems.push(item)
+      confirmedCount++
+    })
+  } else {
+    // 確認所有 staging 項目
+    stagingItems.forEach(item => {
+      item.status = 'resolved'
+      resolvedItems.push(item)
+      confirmedCount++
+    })
+    stagingItems = []
+  }
+
+  // 更新 session
+  await updateBddSession({
+    sessionId,
+    updates: {
+      stagingItems,
+      resolvedItems,
+      totalResolved: session.totalResolved + confirmedCount,
+    },
+  })
+
+  return { success: true, data: { confirmedCount } }
+}
+
+/**
+ * 撤回答案（反悔）
+ * 將項目從 staging 移回 clarify
+ */
+export async function revertAnswer(input: {
+  sessionId: string
+  itemId: string
+}): Promise<ActionResult<null>> {
+  const { sessionId, itemId } = input
+
+  // 讀取當前 session
+  const sessionResult = await getBddSession({ sessionId })
+  if (!sessionResult.success || !sessionResult.data) {
+    return { success: false, error: sessionResult.error || 'Session 不存在' }
+  }
+
+  const session = sessionResult.data
+  const clarifyItems = [...session.clarifyItems]
+  const stagingItems = [...session.stagingItems]
+
+  // 找到項目
+  const itemIndex = stagingItems.findIndex(item => item.id === itemId)
+  if (itemIndex === -1) {
+    return { success: false, error: '找不到待確認的項目' }
+  }
+
+  const item = stagingItems[itemIndex]
+  item.status = 'pending'
+  item.answer = undefined
+  item.answeredAt = undefined
+
+  // 移回 clarify
+  stagingItems.splice(itemIndex, 1)
+  clarifyItems.unshift(item)  // 放到最前面，讓用戶重新回答
+
+  // 更新 session
+  return await updateBddSession({
+    sessionId,
+    updates: {
+      clarifyItems,
+      stagingItems,
+      currentQuestionIndex: Math.max(0, session.currentQuestionIndex - 1),
+    },
+  })
+}
+
+/**
+ * 跳過釐清項目
+ */
+export async function skipClarifyItem(input: {
+  sessionId: string
+  itemId: string
+}): Promise<ActionResult<null>> {
+  const { sessionId, itemId } = input
+
+  // 讀取當前 session
+  const sessionResult = await getBddSession({ sessionId })
+  if (!sessionResult.success || !sessionResult.data) {
+    return { success: false, error: sessionResult.error || 'Session 不存在' }
+  }
+
+  const session = sessionResult.data
+  const clarifyItems = [...session.clarifyItems]
+  const resolvedItems = [...session.resolvedItems]
+
+  // 找到並更新項目
+  const itemIndex = clarifyItems.findIndex(item => item.id === itemId)
+  if (itemIndex === -1) {
+    return { success: false, error: '找不到釐清項目' }
+  }
+
+  const item = clarifyItems[itemIndex]
+  item.status = 'skipped'
+
+  // 移到 resolved
+  clarifyItems.splice(itemIndex, 1)
+  resolvedItems.push(item)
+
+  // 更新 session
+  return await updateBddSession({
+    sessionId,
+    updates: {
+      clarifyItems,
+      resolvedItems,
+      currentQuestionIndex: session.currentQuestionIndex + 1,
+    },
+  })
+}
+
+/**
+ * 添加新的釐清項目（Discovery 階段產出）
+ */
+export async function addClarifyItems(input: {
+  sessionId: string
+  items: ClarifyItem[]
+}): Promise<ActionResult<{ addedCount: number }>> {
+  const { sessionId, items } = input
+
+  // 讀取當前 session
+  const sessionResult = await getBddSession({ sessionId })
+  if (!sessionResult.success || !sessionResult.data) {
+    return { success: false, error: sessionResult.error || 'Session 不存在' }
+  }
+
+  const session = sessionResult.data
+  const clarifyItems = [...session.clarifyItems, ...items]
+
+  // 更新 session
+  await updateBddSession({
+    sessionId,
+    updates: {
+      clarifyItems,
+      totalDiscovered: session.totalDiscovered + items.length,
+    },
+  })
+
+  return { success: true, data: { addedCount: items.length } }
+}
+
+/**
+ * 獲取當前待回答的釐清項目
+ */
+export async function getCurrentClarifyItem(input: {
+  sessionId: string
+}): Promise<ActionResult<ClarifyItem | null>> {
+  const { sessionId } = input
+
+  // 讀取當前 session
+  const sessionResult = await getBddSession({ sessionId })
+  if (!sessionResult.success || !sessionResult.data) {
+    return { success: false, error: sessionResult.error || 'Session 不存在' }
+  }
+
+  const session = sessionResult.data
+  const pendingItems = session.clarifyItems.filter(item => item.status === 'pending')
+
+  if (pendingItems.length === 0) {
+    return { success: true, data: null }
+  }
+
+  // 按優先級排序：high > medium > low
+  const priorityOrder = { high: 0, medium: 1, low: 2 }
+  pendingItems.sort((a, b) => priorityOrder[a.priority] - priorityOrder[b.priority])
+
+  return { success: true, data: pendingItems[0] }
+}
+
+/**
+ * 獲取 BDD Session 進度統計
+ */
+export async function getBddSessionProgress(input: {
+  sessionId: string
+}): Promise<ActionResult<{
+  phase: BddPhase
+  round: number
+  totalQuestions: number
+  answeredQuestions: number
+  pendingQuestions: number
+  stagingQuestions: number
+  progress: number  // 0-100
+}>> {
+  const { sessionId } = input
+
+  // 讀取當前 session
+  const sessionResult = await getBddSession({ sessionId })
+  if (!sessionResult.success || !sessionResult.data) {
+    return { success: false, error: sessionResult.error || 'Session 不存在' }
+  }
+
+  const session = sessionResult.data
+
+  const totalQuestions = session.totalDiscovered
+  const pendingQuestions = session.clarifyItems.filter(item => item.status === 'pending').length
+  const stagingQuestions = session.stagingItems.length
+  const answeredQuestions = session.totalResolved + stagingQuestions
+
+  const progress = totalQuestions > 0
+    ? Math.round((answeredQuestions / totalQuestions) * 100)
+    : 0
+
+  return {
+    success: true,
+    data: {
+      phase: session.currentPhase,
+      round: session.currentRound,
+      totalQuestions,
+      answeredQuestions,
+      pendingQuestions,
+      stagingQuestions,
+      progress,
+    },
   }
 }

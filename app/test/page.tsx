@@ -1,12 +1,13 @@
 'use client'
 
 import { useState } from 'react'
+import Link from 'next/link'
 import { testDeploymentConfig, generateNextJsTemplate } from '../actions/deploy'
 import { listProjects } from '../actions/supabase'
 import { listVercelProjects } from '../actions/vercel'
-import { listZones, createZone } from '../actions/cloudflare'
+import { listZones } from '../actions/cloudflare'
 import { searchDomain, deployWithFreeDomain } from '../actions/domain'
-import { checkDomainAvailability, getDomainPricing, pingPorkbun } from '../actions/porkbun'
+import { getDomainPricing, pingPorkbun } from '../actions/porkbun'
 
 export default function TestPage() {
   const [output, setOutput] = useState<string>('')
@@ -327,7 +328,7 @@ export default function TestPage() {
       </div>
 
       <div style={{ marginTop: 24, paddingTop: 24, borderTop: '1px solid #e0e0e0' }}>
-        <a href="/" style={{ color: '#737373', fontSize: 14 }}>← 返回首頁</a>
+        <Link href="/" style={{ color: '#737373', fontSize: 14 }}>← 返回首頁</Link>
       </div>
     </div>
   )

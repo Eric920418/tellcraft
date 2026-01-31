@@ -175,7 +175,7 @@ function injectEnvToFiles(
 }
 
 // 生成簡單的 Next.js 專案模板
-export async function generateNextJsTemplate(projectName: string, schema: string): Promise<Array<{ file: string; data: string }>> {
+export async function generateNextJsTemplate(projectName: string, _schema: string): Promise<Array<{ file: string; data: string }>> {
   return [
     {
       file: 'package.json',

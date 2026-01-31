@@ -188,17 +188,24 @@ export async function listAllUsers(params: PaginationParams = {}): Promise<Actio
       return { success: false, error: error.message }
     }
 
-    // 查詢每個用戶的專案數量
+    // 並行查詢每個用戶的專案數量（使用 count 而非返回所有 projects）
     const userIds = users?.map(u => u.id) || []
-    const { data: projectCounts } = await supabase
-      .from('projects')
-      .select('user_id')
-      .in('user_id', userIds)
-
     const projectCountMap = new Map<string, number>()
-    projectCounts?.forEach(p => {
-      projectCountMap.set(p.user_id, (projectCountMap.get(p.user_id) || 0) + 1)
-    })
+
+    if (userIds.length > 0) {
+      // 並行執行所有計數查詢
+      const countPromises = userIds.map(userId =>
+        supabase
+          .from('projects')
+          .select('id', { count: 'exact', head: true })
+          .eq('user_id', userId)
+          .then(result => ({ userId, count: result.count || 0 }))
+      )
+      const counts = await Promise.all(countPromises)
+      counts.forEach(({ userId, count }) => {
+        projectCountMap.set(userId, count)
+      })
+    }
 
     const items = (users || []).map(user => ({
       id: user.id,

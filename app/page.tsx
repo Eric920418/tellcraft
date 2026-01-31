@@ -2,8 +2,7 @@
 
 import { useState, useRef, useEffect, useCallback, Suspense } from 'react'
 import { useSearchParams } from 'next/navigation'
-import { motion, AnimatePresence, useScroll, useTransform, useInView } from 'framer-motion'
-import SplitText from './components/SplitText'
+import { motion, AnimatePresence, useInView } from 'framer-motion'
 import RotatingText from './components/RotatingText'
 import GlareHover from './components/GlareHover'
 import CardSwap, { Card } from './components/CardSwap'
@@ -870,6 +869,12 @@ function ChatSection({
             ...prev,
             currentTaskId: result.data!.currentTaskId
           } : null)
+        }
+
+        // 對話已完成，停止輪詢
+        if (result.data.isComplete) {
+          isPolling = false
+          return
         }
       }
 

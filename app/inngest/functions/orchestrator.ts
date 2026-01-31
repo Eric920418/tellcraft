@@ -2,8 +2,20 @@ import { inngest } from '../client'
 import { classifyIntent } from '../classifier'
 import { getSkillMetadata, SkillName } from '../registry'
 import { supabase } from '../../lib/supabase'
-import { generateCode, deployProjectFromDb } from '../../actions'
-import { discoverAmbiguities, processAnswer, generateSpecSummary } from '../../lib/llm'
+import { generateCode, deployProjectFromDb, createBddSession, getBddSession, updateBddSession, addClarifyItems, answerClarifyItem, confirmBatch, revertAnswer } from '../../actions'
+import {
+  runPrdDiscovery,
+  generateSchemaSql,
+  generateFeatureFiles,
+  runSpecDiscovery,
+  generateActionsYml,
+  generateIsaConfig,
+  fixFeatureFormat,
+  validateMultipleFeatures,
+  type ClarifyItem,
+  type ValidationError,
+  type ValidationWarning
+} from '../../lib/llm'
 
 // ============================================================
 // 主要 Orchestrator Function
@@ -192,8 +204,35 @@ export const handleUserRequest = inngest.createFunction(
 )
 
 // ============================================================
-// BDD Spec Skill 執行
+// BDD Spec Skill 執行 - 完整 5 階段流程
 // ============================================================
+//
+// Phase 1: PRD Discovery + Clarify
+//   - 使用 A1-A6, B1-B5, C1-C2, D1-D2 檢查清單掃描需求
+//   - 迭代釐清直到連續 2 輪無新問題
+//
+// Phase 2: Formulation
+//   - 產出 schema.sql + feature files
+//   - 執行驗證腳本（自癒機制）
+//
+// Phase 3: Spec Discovery + Clarify
+//   - 對 Feature Files 再次 Discovery
+//   - 迭代釐清
+//
+// Phase 4: Actions Design
+//   - 產出 actions.yml
+//
+// Phase 5: ISA Config
+//   - 產出 isa_codegen.yml
+//
+// ============================================================
+
+// Feature 類型定義
+interface FeatureFile {
+  name: string
+  actionName?: string
+  content: string
+}
 
 interface BddSpecSkillInput {
   step: Parameters<Parameters<typeof inngest.createFunction>[2]>[0]['step']
@@ -208,19 +247,59 @@ interface BddSpecSkillInput {
   }
 }
 
-// BDD 釐清問題類型
-interface ClarifyQuestion {
-  id: string
-  question: string
-  category: 'data' | 'feature' | 'terminology'
-  priority: 'high' | 'medium' | 'low'
-  options?: Array<{ label: string; description: string }>
+// 輔助函數：發送消息到對話
+async function sendMessage(conversationId: string, content: string, stage?: string) {
+  const message = {
+    id: crypto.randomUUID(),
+    role: 'assistant',
+    content,
+    timestamp: new Date().toISOString(),
+    stage,
+  }
+
+  const { data: conv } = await supabase
+    .from('conversations')
+    .select('messages')
+    .eq('id', conversationId)
+    .single()
+
+  await supabase
+    .from('conversations')
+    .update({
+      messages: [...(conv?.messages || []), message],
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', conversationId)
+}
+
+// 輔助函數：格式化釐清問題
+function formatClarifyQuestion(item: ClarifyItem, index: number, total: number): string {
+  let text = `---\n[釐清進度：第 ${index + 1} / 總 ${total} 題] [優先級：${item.priority}]\n\n`
+  text += `**問題**\n\n${item.whiteTextQuestion || item.question}\n\n`
+
+  if (item.location) {
+    text += `**定位**\n\n${item.location}\n\n`
+  }
+
+  if (item.options && item.options.length > 0) {
+    text += `**選項**\n\n`
+    text += item.options.map((opt, j) =>
+      `${String.fromCharCode(65 + j)}. ${opt.description || opt.label}`
+    ).join('\n')
+    text += '\n\n（或輸入您的答案）'
+  }
+
+  text += '\n---'
+  return text
 }
 
 async function executeBddSpecSkill(input: BddSpecSkillInput) {
-  const { step, taskId, projectId, conversationId, message, extractedEntities } = input
+  const { step, taskId, projectId, conversationId, userId: _userId, message } = input
 
-  // 取得專案背景資訊
+  // ============================================================
+  // 初始化：取得專案背景 & 創建 BDD Session
+  // ============================================================
+
   const projectContext = await step.run('get-project-context', async () => {
     const { data: project } = await supabase
       .from('projects')
@@ -231,261 +310,1013 @@ async function executeBddSpecSkill(input: BddSpecSkillInput) {
     return project?.description || project?.name || undefined
   })
 
-  // 追蹤已問過的問題和回答
-  const questionsAndAnswers: Array<{ question: string; answer: string }> = []
-  const askedQuestions: string[] = []
-  let questionCounter = 0
-  let specComplete = false
-  const maxQuestions = 5  // 最多問 5 題
+  const sessionId = await step.run('create-bdd-session', async () => {
+    const result = await createBddSession({
+      projectId,
+      conversationId,
+      taskId,
+      originalRequirements: message,
+      projectContext: projectContext || undefined,
+    })
 
-  // 第一輪：發現問題
-  const initialDiscovery = await step.run('bdd-initial-discovery', async () => {
-    console.log('[BDD Discovery] 開始分析需求:', message)
-    console.log('[BDD Discovery] 專案背景:', projectContext)
-
-    const result = await discoverAmbiguities(
-      message,
-      projectContext || undefined,
-      undefined
-    )
-
-    console.log('[BDD Discovery] LLM 返回結果:', JSON.stringify(result, null, 2))
-
-    if (!result.success) {
-      console.error('[BDD Discovery] LLM 呼叫失敗:', result.error)
-      return { questions: [], error: result.error }
+    if (!result.success || !result.data) {
+      throw new Error(result.error || '創建 BDD Session 失敗')
     }
 
-    console.log('[BDD Discovery] 發現問題數量:', result.questions?.length || 0)
-    return { questions: result.questions || [] }
+    return result.data.sessionId
   })
 
-  // 如果 LLM 錯誤，顯示錯誤訊息
-  if (initialDiscovery.error) {
-    await step.run('show-error', async () => {
-      const errorMsg = {
-        id: crypto.randomUUID(),
-        role: 'assistant',
-        content: `[系統錯誤] ${initialDiscovery.error}\n\n請聯繫管理員或稍後再試。`,
-        timestamp: new Date().toISOString(),
-      }
-      const { data: conv } = await supabase
-        .from('conversations')
-        .select('messages')
-        .eq('id', conversationId)
-        .single()
-      await supabase
-        .from('conversations')
-        .update({ messages: [...(conv?.messages || []), errorMsg] })
-        .eq('id', conversationId)
-    })
-    specComplete = true
-  }
+  // 發送歡迎消息
+  await step.run('send-welcome', async () => {
+    await sendMessage(
+      conversationId,
+      `收到您的需求！我將協助您釐清細節，產出完整的 BDD 規格。\n\n` +
+      `**流程說明**：\n` +
+      `1. 需求釐清（Phase 1）- 逐一確認核心概念\n` +
+      `2. 規格產出（Phase 2）- 產出 Schema 和 Feature Files\n` +
+      `3. 規格精煉（Phase 3）- 補充邊界條件和例子\n` +
+      `4. Actions 設計（Phase 4）- 定義 Server Actions\n` +
+      `5. ISA 配置（Phase 5）- 產出 sdd.os 配置\n\n` +
+      `讓我們開始吧！正在分析您的需求...`,
+      'init'
+    )
+  })
 
-  // 待問問題清單
-  let pendingQuestions: ClarifyQuestion[] = initialDiscovery.questions || []
+  // ============================================================
+  // Phase 1: PRD Discovery + Clarify
+  // ============================================================
 
-  // 一題一題問
-  while (!specComplete && pendingQuestions.length > 0 && questionCounter < maxQuestions) {
-    const currentQuestion = pendingQuestions.shift()!
-    questionCounter++
+  // Phase 1.1: PRD Discovery
+  const prdDiscoveryResult = await step.run('prd-discovery', async () => {
+    console.log('[BDD Phase 1] 開始 PRD Discovery')
 
-    // 格式化問題
-    const formatQuestion = (q: ClarifyQuestion) => {
-      let text = q.question
-      if (q.options && q.options.length > 0) {
-        text += '\n\n' + q.options.map((opt, j) =>
-          `${String.fromCharCode(65 + j)}. ${opt.description || opt.label}`
-        ).join('\n')
-      }
-      return text
+    const result = await runPrdDiscovery(
+      message,
+      projectContext || undefined,
+      undefined,
+      { conversationId, purpose: 'prd_discovery' }
+    )
+
+    if (!result.success) {
+      throw new Error(result.error || 'PRD Discovery 失敗')
     }
 
-    // 發送問題
-    await step.run(`send-question-${questionCounter}`, async () => {
-      const questionMessage = {
-        id: crypto.randomUUID(),
-        role: 'assistant',
-        content: formatQuestion(currentQuestion),
-        timestamp: new Date().toISOString(),
-      }
+    console.log('[BDD Phase 1] 發現問題數量:', result.items?.length || 0)
 
-      const { data: conv } = await supabase
-        .from('conversations')
-        .select('messages')
-        .eq('id', conversationId)
-        .single()
+    // 儲存到 BDD Session
+    if (result.items && result.items.length > 0) {
+      await addClarifyItems({ sessionId, items: result.items })
+    }
 
-      await supabase
-        .from('conversations')
-        .update({
-          messages: [...(conv?.messages || []), questionMessage],
-          updated_at: new Date().toISOString(),
+    return {
+      itemCount: result.items?.length || 0,
+      coverageSummary: result.coverageSummary,
+    }
+  })
+
+  // 更新階段
+  await step.run('update-phase-prd-clarify', async () => {
+    await updateBddSession({
+      sessionId,
+      updates: { currentPhase: 'prd_clarify' },
+    })
+
+    if (prdDiscoveryResult.itemCount === 0) {
+      await sendMessage(
+        conversationId,
+        `需求分析完成！您的需求描述非常清楚，沒有需要額外釐清的問題。\n\n正在產出規格...`,
+        'prd_discovery_complete'
+      )
+    } else {
+      await sendMessage(
+        conversationId,
+        `需求分析完成，發現 **${prdDiscoveryResult.itemCount}** 個需要釐清的問題。\n\n` +
+        `我會一題一題詢問，每 5 題會請您確認一次。\n` +
+        `您可以隨時輸入「跳過」跳過低優先級問題，或輸入「完成釐清」結束釐清階段。`,
+        'prd_discovery_complete'
+      )
+    }
+  })
+
+  // Phase 1.2: PRD Clarify Loop
+  let consecutiveEmptyRounds = 0
+  let questionIndex = 0
+  let batchCount = 0
+  let loopIteration = 0 // 確保 step name 唯一的計數器
+  const BATCH_SIZE = 5
+
+  while (consecutiveEmptyRounds < 2) {
+    loopIteration++
+    // 取得當前 session 狀態
+    const sessionData = await step.run(`get-session-${loopIteration}`, async () => {
+      const result = await getBddSession({ sessionId })
+      return result.data
+    })
+
+    if (!sessionData) break
+
+    const pendingItems = sessionData.clarifyItems.filter(
+      (item: ClarifyItem) => item.status === 'pending'
+    )
+
+    // 如果沒有待處理問題，進行再次 Discovery
+    if (pendingItems.length === 0) {
+      const moreDiscovery = await step.run(`re-discovery-${sessionData.currentRound}`, async () => {
+        const existingItems = [
+          ...sessionData.clarifyItems,
+          ...sessionData.stagingItems,
+          ...sessionData.resolvedItems,
+        ]
+
+        const result = await runPrdDiscovery(
+          message,
+          projectContext || undefined,
+          existingItems,
+          { conversationId, purpose: 're_discovery' }
+        )
+
+        if (!result.success || !result.items?.length) {
+          return { newItems: [] }
+        }
+
+        // 添加新問題
+        await addClarifyItems({ sessionId, items: result.items })
+
+        return { newItems: result.items }
+      })
+
+      if (moreDiscovery.newItems.length === 0) {
+        consecutiveEmptyRounds++
+        await step.run(`update-empty-round-${consecutiveEmptyRounds}`, async () => {
+          await updateBddSession({
+            sessionId,
+            updates: {
+              consecutiveEmptyRounds,
+              currentRound: sessionData.currentRound + 1,
+            },
+          })
         })
-        .eq('id', conversationId)
+        continue
+      } else {
+        consecutiveEmptyRounds = 0
+        continue
+      }
+    }
 
-      askedQuestions.push(currentQuestion.question)
+    // 重置連續空輪數
+    consecutiveEmptyRounds = 0
+
+    // 取得當前問題（按優先級排序）
+    const priorityOrder = { high: 0, medium: 1, low: 2 }
+    pendingItems.sort((a: ClarifyItem, b: ClarifyItem) =>
+      priorityOrder[a.priority] - priorityOrder[b.priority]
+    )
+    const currentItem = pendingItems[0]
+    const totalPending = sessionData.totalDiscovered - sessionData.totalResolved
+
+    // 發送問題
+    await step.run(`send-question-${loopIteration}`, async () => {
+      const questionText = formatClarifyQuestion(currentItem, questionIndex, totalPending)
+      await sendMessage(conversationId, questionText, 'clarify_question')
     })
 
     // 等待用戶回覆
-    const reply = await step.waitForEvent(`wait-for-reply-${questionCounter}`, {
+    const reply = await step.waitForEvent(`wait-reply-${loopIteration}`, {
       event: 'user/reply',
       timeout: '24h',
       match: 'data.conversationId',
     })
 
     if (!reply) {
-      return { status: 'timeout', questionsAsked: questionCounter }
+      return { status: 'timeout', phase: 'prd_clarify', questionIndex }
     }
 
-    // 檢查是否確認規格
-    if (reply.data.specConfirmed || reply.data.message.includes('確認規格')) {
-      specComplete = true
+    const userMessage = reply.data.message.trim()
+
+    // 處理特殊指令
+    if (userMessage === '跳過' || userMessage.toLowerCase() === 'skip') {
+      await step.run(`skip-question-${loopIteration}`, async () => {
+        // 更新項目狀態為 skipped
+        const session = await getBddSession({ sessionId })
+        if (session.data) {
+          const clarifyItems = session.data.clarifyItems.map((item: ClarifyItem) =>
+            item.id === currentItem.id ? { ...item, status: 'skipped' as const } : item
+          )
+          const resolvedItems = [...session.data.resolvedItems, { ...currentItem, status: 'skipped' as const }]
+          await updateBddSession({
+            sessionId,
+            updates: {
+              clarifyItems: clarifyItems.filter((item: ClarifyItem) => item.id !== currentItem.id),
+              resolvedItems,
+            },
+          })
+        }
+      })
+      questionIndex++
+      continue
+    }
+
+    if (userMessage === '完成釐清' || userMessage.toLowerCase() === 'done') {
+      // 確認所有 staging 項目
+      await step.run('confirm-all-staging', async () => {
+        await confirmBatch({ sessionId })
+      })
       break
     }
 
-    // 記錄問答
-    questionsAndAnswers.push({
-      question: currentQuestion.question,
-      answer: reply.data.message,
+    // 記錄答案
+    await step.run(`record-answer-${loopIteration}`, async () => {
+      await answerClarifyItem({
+        sessionId,
+        itemId: currentItem.id,
+        answer: userMessage,
+      })
     })
 
-    // 如果問題問完了，檢查是否需要更多問題
-    if (pendingQuestions.length === 0 && !specComplete) {
-      const moreQuestions = await step.run(`discover-more-${questionCounter}`, async () => {
-        // 從資料庫讀取已問過的問題（因為 step 之間不共享變數狀態）
-        const { data: conv } = await supabase
-          .from('conversations')
-          .select('messages')
-          .eq('id', conversationId)
-          .single()
+    questionIndex++
+    batchCount++
 
-        const existingMessages = conv?.messages || []
-        const alreadyAskedQuestions = existingMessages
-          .filter((m: { role: string }) => m.role === 'assistant')
-          .map((m: { content: string }) => m.content)
-
-        console.log('[BDD Discovery] 已問過的問題數量:', alreadyAskedQuestions.length)
-
-        const result = await discoverAmbiguities(
-          message,
-          projectContext || undefined,
-          alreadyAskedQuestions  // 傳遞完整的已問問題列表
-        )
-
-        if (!result.success || !result.questions?.length) {
-          return { questions: [] }
-        }
-
-        return { questions: result.questions }
+    // 每 5 題批量確認
+    if (batchCount >= BATCH_SIZE) {
+      const stagingSession = await step.run(`get-staging-${loopIteration}`, async () => {
+        const result = await getBddSession({ sessionId })
+        return result.data
       })
 
-      pendingQuestions = moreQuestions.questions || []
+      if (stagingSession && stagingSession.stagingItems.length > 0) {
+        // 發送確認檢查點
+        await step.run(`send-batch-confirm-${loopIteration}`, async () => {
+          let confirmText = `---\n📋 **釐清確認檢查點**\n\n以下 ${stagingSession.stagingItems.length} 題已回答完成，請確認是否正確：\n\n`
+          confirmText += `| # | 問題摘要 | 您的回答 |\n|---|----------|----------|\n`
+          stagingSession.stagingItems.forEach((item: ClarifyItem, i: number) => {
+            const question = (item.whiteTextQuestion || item.question).slice(0, 30) + '...'
+            const answer = (item.answer || '').slice(0, 20) + '...'
+            confirmText += `| ${i + 1} | ${question} | ${answer} |\n`
+          })
+          confirmText += `\n請選擇：\n`
+          confirmText += `- **確認全部 (Y)** - 確認以上答案並繼續\n`
+          confirmText += `- **修改第 N 題** - 例如輸入「修改 3」重新回答\n`
+          confirmText += `---`
 
-      // 如果沒有更多問題，結束釐清
-      if (pendingQuestions.length === 0) {
-        specComplete = true
+          await sendMessage(conversationId, confirmText, 'batch_confirm')
+        })
+
+        // 等待確認
+        const confirmReply = await step.waitForEvent(`wait-batch-confirm-${loopIteration}`, {
+          event: 'user/reply',
+          timeout: '24h',
+          match: 'data.conversationId',
+        })
+
+        if (confirmReply) {
+          const confirmMessage = confirmReply.data.message.trim().toLowerCase()
+
+          if (confirmMessage === 'y' || confirmMessage === '確認' || confirmMessage === '確認全部') {
+            await step.run(`confirm-batch-${loopIteration}`, async () => {
+              await confirmBatch({ sessionId })
+            })
+          } else if (confirmMessage.startsWith('修改')) {
+            // 解析「修改 N」指令
+            const modifyMatch = confirmMessage.match(/修改\s*(\d+)/)
+            if (modifyMatch) {
+              const itemIndex = parseInt(modifyMatch[1], 10) - 1 // 轉換為 0-based index
+              if (itemIndex >= 0 && itemIndex < stagingSession.stagingItems.length) {
+                const itemToRevert = stagingSession.stagingItems[itemIndex]
+                await step.run(`revert-answer-${loopIteration}`, async () => {
+                  await revertAnswer({ sessionId, itemId: itemToRevert.id })
+                  await sendMessage(
+                    conversationId,
+                    `已將第 ${itemIndex + 1} 題移回待回答。稍後會重新詢問這個問題。`,
+                    'revert_confirm'
+                  )
+                })
+                // 不 confirmBatch，讓循環繼續處理被反悔的項目
+              } else {
+                // 索引超出範圍
+                await step.run(`revert-invalid-index-${loopIteration}`, async () => {
+                  await sendMessage(
+                    conversationId,
+                    `無效的題號 ${itemIndex + 1}，有效範圍是 1-${stagingSession.stagingItems.length}。已確認所有答案。`,
+                    'revert_invalid'
+                  )
+                  await confirmBatch({ sessionId })
+                })
+              }
+            } else {
+              // 無法解析修改指令
+              await step.run(`confirm-batch-fallback-${loopIteration}`, async () => {
+                await sendMessage(
+                  conversationId,
+                  `無法解析修改指令，請使用「修改 N」格式（如「修改 3」）。已確認所有答案。`,
+                  'revert_parse_error'
+                )
+                await confirmBatch({ sessionId })
+              })
+            }
+          }
+        }
+      }
+
+      batchCount = 0
+    }
+  }
+
+  // 確認剩餘的 staging 項目
+  await step.run('confirm-remaining-staging', async () => {
+    await confirmBatch({ sessionId })
+  })
+
+  // ============================================================
+  // Phase 2: Formulation - 產出規格
+  // ============================================================
+
+  await step.run('update-phase-formulation', async () => {
+    await updateBddSession({
+      sessionId,
+      updates: { currentPhase: 'formulation' },
+    })
+    await sendMessage(
+      conversationId,
+      `需求釐清完成！\n\n正在產出規格文件...`,
+      'formulation_start'
+    )
+  })
+
+  // 產出 Schema
+  const schemaResult = await step.run('generate-schema', async () => {
+    const session = await getBddSession({ sessionId })
+    if (!session.data) throw new Error('Session 不存在')
+
+    const result = await generateSchemaSql(
+      message,
+      session.data.resolvedItems,
+      projectContext || undefined,
+      { conversationId, purpose: 'generate_schema' }
+    )
+
+    if (!result.success) {
+      throw new Error(result.error || '產出 Schema 失敗')
+    }
+
+    await updateBddSession({
+      sessionId,
+      updates: {
+        schemaSqlContent: result.schemaSql,
+        entityMappingContent: result.entityMapping,
+      },
+    })
+
+    return {
+      schemaSql: result.schemaSql,
+      entityMapping: result.entityMapping,
+    }
+  })
+
+  // 產出 Feature Files
+  const featuresResult = await step.run('generate-features', async () => {
+    const session = await getBddSession({ sessionId })
+    if (!session.data) throw new Error('Session 不存在')
+
+    const result = await generateFeatureFiles(
+      message,
+      session.data.resolvedItems,
+      schemaResult.schemaSql || '',
+      schemaResult.entityMapping || '',
+      projectContext || undefined,
+      { conversationId, purpose: 'generate_features' }
+    )
+
+    if (!result.success) {
+      throw new Error(result.error || '產出 Feature Files 失敗')
+    }
+
+    await updateBddSession({
+      sessionId,
+      updates: {
+        featuresContent: result.features,
+      },
+    })
+
+    return { features: result.features }
+  })
+
+  // 驗證 Feature Files（使用真實驗證函數）
+  let validationResult = await step.run('validate-features', async () => {
+    const features = (featuresResult.features || []).map((f: FeatureFile) => ({
+      name: f.name,
+      content: f.content,
+    }))
+
+    const validation = validateMultipleFeatures(features)
+
+    // 轉換為簡化格式存儲
+    const errors = validation.allErrors.map(e =>
+      `[${e.code}]${e.line ? ` 行 ${e.line}` : ''} ${e.message}${e.suggestion ? ` (建議: ${e.suggestion})` : ''}`
+    )
+    const warnings = validation.allWarnings.map(w =>
+      `[${w.code}]${w.line ? ` 行 ${w.line}` : ''} ${w.message}`
+    )
+
+    await updateBddSession({
+      sessionId,
+      updates: {
+        validationResult: {
+          passed: validation.passed,
+          errors,
+          warnings,
+        },
+      },
+    })
+
+    return {
+      passed: validation.passed,
+      errors,
+      warnings,
+      totalErrors: validation.totalErrors,
+      totalWarnings: validation.totalWarnings,
+      detailedResults: validation.results,
+    }
+  })
+
+  // 如果驗證失敗，嘗試修復（最多 3 次）
+  if (!validationResult.passed) {
+    let fixAttempt = 0
+    const maxFixAttempts = 3
+
+    while (fixAttempt < maxFixAttempts && !validationResult.passed) {
+      fixAttempt++
+
+      // 發送修復進度訊息
+      await step.run(`send-fix-progress-${fixAttempt}`, async () => {
+        await sendMessage(
+          conversationId,
+          `驗證發現 ${validationResult.errors.length} 個格式問題，正在自動修復 (嘗試 ${fixAttempt}/${maxFixAttempts})...`,
+          'fix_attempt'
+        )
+      })
+
+      // 嘗試修復每個 Feature
+      const fixedFeatures = await step.run(`fix-features-${fixAttempt}`, async () => {
+        const session = await getBddSession({ sessionId })
+        if (!session.data?.featuresContent) return []
+
+        const results = []
+        for (const feature of session.data.featuresContent) {
+          // 收集該 feature 相關的錯誤
+          const featureErrors = validationResult.errors.filter((e: string) =>
+            e.includes(feature.name)
+          )
+
+          if (featureErrors.length > 0) {
+            const fixResult = await fixFeatureFormat(
+              feature.content,
+              featureErrors,
+              { conversationId, purpose: 'fix_feature' }
+            )
+
+            if (fixResult.success && fixResult.fixedContent) {
+              results.push({
+                ...feature,
+                content: fixResult.fixedContent,
+              })
+            } else {
+              results.push(feature)
+            }
+          } else {
+            results.push(feature)
+          }
+        }
+
+        // 更新 session
+        await updateBddSession({
+          sessionId,
+          updates: { featuresContent: results },
+        })
+
+        return results
+      })
+
+      // 真正重新驗證
+      validationResult = await step.run(`revalidate-features-${fixAttempt}`, async () => {
+        const features = (fixedFeatures || []).map((f: FeatureFile) => ({
+          name: f.name,
+          content: f.content,
+        }))
+
+        const validation = validateMultipleFeatures(features)
+
+        const errors = validation.allErrors.map((e: ValidationError) =>
+          `[${e.code}]${e.line ? ` 行 ${e.line}` : ''} ${e.message}${e.suggestion ? ` (建議: ${e.suggestion})` : ''}`
+        )
+        const warnings = validation.allWarnings.map((w: ValidationWarning) =>
+          `[${w.code}]${w.line ? ` 行 ${w.line}` : ''} ${w.message}`
+        )
+
+        await updateBddSession({
+          sessionId,
+          updates: {
+            validationResult: {
+              passed: validation.passed,
+              errors,
+              warnings,
+            },
+          },
+        })
+
+        return {
+          passed: validation.passed,
+          errors,
+          warnings,
+          totalErrors: validation.totalErrors,
+          totalWarnings: validation.totalWarnings,
+          detailedResults: validation.results,
+        }
+      })
+
+      // 如果還是失敗且已達最大嘗試次數，發送警告
+      if (!validationResult.passed && fixAttempt >= maxFixAttempts) {
+        await step.run('send-fix-failed-warning', async () => {
+          await sendMessage(
+            conversationId,
+            `⚠️ 自動修復未能解決所有問題 (嘗試 ${fixAttempt} 次)。\n` +
+            `剩餘問題：\n${validationResult.errors.slice(0, 5).map((e: string) => `- ${e}`).join('\n')}` +
+            (validationResult.errors.length > 5 ? `\n... 還有 ${validationResult.errors.length - 5} 個問題` : '') +
+            `\n\n將繼續進行，但可能需要人工檢查規格。`,
+            'fix_warning'
+          )
+        })
       }
     }
   }
 
-  // 產出規格摘要
-  const specResult = await step.run('generate-spec', async () => {
-    // 從資料庫讀取問答歷史（因為 step 之間不共享變數狀態）
-    const { data: conv } = await supabase
-      .from('conversations')
-      .select('messages')
-      .eq('id', conversationId)
-      .single()
+  // ============================================================
+  // Phase 3: Spec Discovery + Clarify（完整實現）
+  // ============================================================
 
-    const allMessages = conv?.messages || []
-    const qaHistory: Array<{ question: string; answer: string }> = []
+  await step.run('update-phase-spec-discovery', async () => {
+    await updateBddSession({
+      sessionId,
+      updates: { currentPhase: 'spec_discovery' },
+    })
+  })
 
-    // 從消息中提取問答對
-    for (let i = 0; i < allMessages.length - 1; i++) {
-      const current = allMessages[i]
-      const next = allMessages[i + 1]
-      if (current.role === 'assistant' && next.role === 'user' && !current.content.startsWith('[系統')) {
-        qaHistory.push({
-          question: current.content,
-          answer: next.content
+  // Spec Discovery
+  const specDiscoveryResult = await step.run('spec-discovery', async () => {
+    const session = await getBddSession({ sessionId })
+    if (!session.data?.featuresContent) {
+      return { items: [] }
+    }
+
+    const features = session.data.featuresContent.map((f: FeatureFile) => ({
+      name: f.name,
+      content: f.content,
+    }))
+
+    const result = await runSpecDiscovery(
+      features,
+      session.data.schemaSqlContent || '',
+      session.data.resolvedItems,
+      { conversationId, purpose: 'spec_discovery' }
+    )
+
+    if (!result.success || !result.items?.length) {
+      return { items: [] }
+    }
+
+    // 為 Spec Discovery 的項目添加來源標記
+    const itemsWithSource = result.items.map(item => ({
+      ...item,
+      checklistItem: 'spec_discovery', // 標記來源
+    }))
+
+    return { items: itemsWithSource }
+  })
+
+  // 如果有新問題，進入 Spec Clarify 完整循環
+  if (specDiscoveryResult.items.length > 0) {
+    // 更新階段並添加釐清項目
+    await step.run('update-phase-spec-clarify', async () => {
+      await addClarifyItems({ sessionId, items: specDiscoveryResult.items })
+      await updateBddSession({
+        sessionId,
+        updates: { currentPhase: 'spec_clarify' },
+      })
+      await sendMessage(
+        conversationId,
+        `規格檢查發現 **${specDiscoveryResult.items.length}** 個可以補充的地方。\n\n` +
+        `這些問題主要關於：\n` +
+        `- 規則完整性\n` +
+        `- Example 覆蓋度\n` +
+        `- 邊界條件\n\n` +
+        `接下來我會一題一題詢問，每 5 題會請您確認一次。`,
+        'spec_discovery_complete'
+      )
+    })
+
+    // Spec Clarify 循環 (複用 PRD Clarify 的邏輯)
+    let specConsecutiveEmptyRounds = 0
+    let specQuestionIndex = 0
+    let specBatchCount = 0
+    let specLoopIteration = 0 // 確保 step name 唯一的計數器
+
+    while (specConsecutiveEmptyRounds < 2) {
+      specLoopIteration++
+      // 取得當前 session 狀態
+      const specSessionData = await step.run(`get-spec-session-${specLoopIteration}`, async () => {
+        const result = await getBddSession({ sessionId })
+        return result.data
+      })
+
+      if (!specSessionData) break
+
+      const specPendingItems = specSessionData.clarifyItems.filter(
+        (item: ClarifyItem) => item.status === 'pending'
+      )
+
+      // 如果沒有待處理問題，進行再次 Discovery
+      if (specPendingItems.length === 0) {
+        const moreSpecDiscovery = await step.run(`spec-re-discovery-${specSessionData.currentRound}`, async () => {
+          const session = await getBddSession({ sessionId })
+          if (!session.data?.featuresContent) return { newItems: [] }
+
+          const features = session.data.featuresContent.map((f: FeatureFile) => ({
+            name: f.name,
+            content: f.content,
+          }))
+
+          const existingItems = [
+            ...specSessionData.clarifyItems,
+            ...specSessionData.stagingItems,
+            ...specSessionData.resolvedItems,
+          ]
+
+          const result = await runSpecDiscovery(
+            features,
+            session.data.schemaSqlContent || '',
+            existingItems,
+            { conversationId, purpose: 'spec_re_discovery' }
+          )
+
+          if (!result.success || !result.items?.length) {
+            return { newItems: [] }
+          }
+
+          // 添加新問題
+          await addClarifyItems({ sessionId, items: result.items })
+
+          return { newItems: result.items }
         })
+
+        if (moreSpecDiscovery.newItems.length === 0) {
+          specConsecutiveEmptyRounds++
+          await step.run(`update-spec-empty-round-${specConsecutiveEmptyRounds}`, async () => {
+            await updateBddSession({
+              sessionId,
+              updates: {
+                consecutiveEmptyRounds: specConsecutiveEmptyRounds,
+                currentRound: specSessionData.currentRound + 1,
+              },
+            })
+          })
+          continue
+        } else {
+          specConsecutiveEmptyRounds = 0
+          continue
+        }
+      }
+
+      // 重置連續空輪數
+      specConsecutiveEmptyRounds = 0
+
+      // 取得當前問題（按優先級排序）
+      const priorityOrder = { high: 0, medium: 1, low: 2 }
+      specPendingItems.sort((a: ClarifyItem, b: ClarifyItem) =>
+        priorityOrder[a.priority] - priorityOrder[b.priority]
+      )
+      const currentSpecItem = specPendingItems[0]
+      const totalSpecPending = specSessionData.totalDiscovered - specSessionData.totalResolved
+
+      // 發送問題
+      await step.run(`send-spec-question-${specLoopIteration}`, async () => {
+        const questionText = formatClarifyQuestion(currentSpecItem, specQuestionIndex, totalSpecPending)
+        await sendMessage(conversationId, questionText, 'spec_clarify_question')
+      })
+
+      // 等待用戶回覆
+      const specReply = await step.waitForEvent(`wait-spec-reply-${specLoopIteration}`, {
+        event: 'user/reply',
+        timeout: '24h',
+        match: 'data.conversationId',
+      })
+
+      if (!specReply) {
+        return { status: 'timeout', phase: 'spec_clarify', questionIndex: specQuestionIndex }
+      }
+
+      const specUserMessage = specReply.data.message.trim()
+
+      // 處理特殊指令
+      if (specUserMessage === '跳過' || specUserMessage.toLowerCase() === 'skip') {
+        await step.run(`skip-spec-question-${specLoopIteration}`, async () => {
+          const session = await getBddSession({ sessionId })
+          if (session.data) {
+            const clarifyItems = session.data.clarifyItems.map((item: ClarifyItem) =>
+              item.id === currentSpecItem.id ? { ...item, status: 'skipped' as const } : item
+            )
+            const resolvedItems = [...session.data.resolvedItems, { ...currentSpecItem, status: 'skipped' as const }]
+            await updateBddSession({
+              sessionId,
+              updates: {
+                clarifyItems: clarifyItems.filter((item: ClarifyItem) => item.id !== currentSpecItem.id),
+                resolvedItems,
+              },
+            })
+          }
+        })
+        specQuestionIndex++
+        continue
+      }
+
+      if (specUserMessage === '完成釐清' || specUserMessage.toLowerCase() === 'done') {
+        await step.run('confirm-spec-all-staging', async () => {
+          await confirmBatch({ sessionId })
+        })
+        break
+      }
+
+      // 記錄答案
+      await step.run(`record-spec-answer-${specLoopIteration}`, async () => {
+        await answerClarifyItem({
+          sessionId,
+          itemId: currentSpecItem.id,
+          answer: specUserMessage,
+        })
+      })
+
+      specQuestionIndex++
+      specBatchCount++
+
+      // 每 5 題批量確認
+      if (specBatchCount >= BATCH_SIZE) {
+        const specStagingSession = await step.run(`get-spec-staging-${specLoopIteration}`, async () => {
+          const result = await getBddSession({ sessionId })
+          return result.data
+        })
+
+        if (specStagingSession && specStagingSession.stagingItems.length > 0) {
+          // 發送確認檢查點
+          await step.run(`send-spec-batch-confirm-${specLoopIteration}`, async () => {
+            let confirmText = `---\n📋 **規格釐清確認檢查點**\n\n以下 ${specStagingSession.stagingItems.length} 題已回答完成，請確認是否正確：\n\n`
+            confirmText += `| # | 問題摘要 | 您的回答 |\n|---|----------|----------|\n`
+            specStagingSession.stagingItems.forEach((item: ClarifyItem, i: number) => {
+              const question = (item.whiteTextQuestion || item.question).slice(0, 30) + '...'
+              const answer = (item.answer || '').slice(0, 20) + '...'
+              confirmText += `| ${i + 1} | ${question} | ${answer} |\n`
+            })
+            confirmText += `\n請選擇：\n`
+            confirmText += `- **確認全部 (Y)** - 確認以上答案並繼續\n`
+            confirmText += `- **修改第 N 題** - 例如輸入「修改 3」重新回答\n`
+            confirmText += `---`
+
+            await sendMessage(conversationId, confirmText, 'spec_batch_confirm')
+          })
+
+          // 等待確認
+          const specConfirmReply = await step.waitForEvent(`wait-spec-batch-confirm-${specLoopIteration}`, {
+            event: 'user/reply',
+            timeout: '24h',
+            match: 'data.conversationId',
+          })
+
+          if (specConfirmReply) {
+            const confirmMessage = specConfirmReply.data.message.trim().toLowerCase()
+
+            if (confirmMessage === 'y' || confirmMessage === '確認' || confirmMessage === '確認全部') {
+              await step.run(`confirm-spec-batch-${specLoopIteration}`, async () => {
+                await confirmBatch({ sessionId })
+              })
+            } else if (confirmMessage.startsWith('修改')) {
+              // 調用反悔機制
+              const modifyMatch = confirmMessage.match(/修改\s*(\d+)/)
+              if (modifyMatch) {
+                const itemIndex = parseInt(modifyMatch[1], 10) - 1 // 轉換為 0-based index
+                if (itemIndex >= 0 && itemIndex < specStagingSession.stagingItems.length) {
+                  const itemToRevert = specStagingSession.stagingItems[itemIndex]
+                  await step.run(`revert-spec-answer-${specLoopIteration}`, async () => {
+                    await revertAnswer({ sessionId, itemId: itemToRevert.id })
+                    await sendMessage(
+                      conversationId,
+                      `已將第 ${itemIndex + 1} 題移回待回答。`,
+                      'revert_confirm'
+                    )
+                  })
+                } else {
+                  // 索引超出範圍
+                  await step.run(`revert-spec-invalid-index-${specLoopIteration}`, async () => {
+                    await sendMessage(
+                      conversationId,
+                      `無效的題號 ${itemIndex + 1}，有效範圍是 1-${specStagingSession.stagingItems.length}。已確認所有答案。`,
+                      'revert_invalid'
+                    )
+                    await confirmBatch({ sessionId })
+                  })
+                }
+              } else {
+                // 無法解析，先確認
+                await step.run(`confirm-spec-batch-fallback-${specLoopIteration}`, async () => {
+                  await sendMessage(
+                    conversationId,
+                    `無法解析修改指令，請使用「修改 N」格式（如「修改 3」）。已確認所有答案。`,
+                    'revert_parse_error'
+                  )
+                  await confirmBatch({ sessionId })
+                })
+              }
+            }
+          }
+        }
+
+        specBatchCount = 0
       }
     }
 
-    console.log('[BDD Spec] 問答歷史數量:', qaHistory.length)
+    // 確認剩餘的 staging 項目
+    await step.run('confirm-spec-remaining-staging', async () => {
+      await confirmBatch({ sessionId })
+    })
 
-    // 使用 LLM 生成規格摘要
-    const summaryResult = await generateSpecSummary(
-      message,
-      qaHistory,
-      projectContext || undefined
+    // 發送 Spec Clarify 完成訊息
+    await step.run('send-spec-clarify-complete', async () => {
+      await sendMessage(
+        conversationId,
+        `規格釐清完成！正在進入 Actions 設計階段...`,
+        'spec_clarify_complete'
+      )
+    })
+  } else {
+    // 沒有需要釐清的問題
+    await step.run('send-spec-no-clarify-needed', async () => {
+      await sendMessage(
+        conversationId,
+        `規格檢查通過，沒有需要額外釐清的問題。正在進入 Actions 設計階段...`,
+        'spec_discovery_pass'
+      )
+    })
+  }
+
+  // ============================================================
+  // Phase 4: Actions Design
+  // ============================================================
+
+  await step.run('update-phase-actions-design', async () => {
+    await updateBddSession({
+      sessionId,
+      updates: { currentPhase: 'actions_design' },
+    })
+    await sendMessage(
+      conversationId,
+      `正在設計 Server Actions...`,
+      'actions_design_start'
     )
+  })
 
-    let specSummaryText = ''
-
-    if (summaryResult.success && summaryResult.summary) {
-      const { entities, features, decisions } = summaryResult.summary
-
-      specSummaryText = `
-## 資料模型
-${entities.map(e => `- **${e.name}**：${e.description}\n  屬性：${e.attributes.join(', ')}`).join('\n')}
-
-## 功能規格
-${features.map(f => `- **${f.name}**：${f.description}\n  規則：${f.rules.join('; ')}`).join('\n')}
-
-## 決策記錄
-${decisions.map(d => `- Q: ${d.question}\n  A: ${d.answer}\n  影響: ${d.impact}`).join('\n')}`
+  await step.run('generate-actions-yml', async () => {
+    const session = await getBddSession({ sessionId })
+    if (!session.data?.featuresContent) {
+      throw new Error('缺少 Feature Files')
     }
 
+    const features = session.data.featuresContent.map((f: FeatureFile) => ({
+      name: f.name,
+      actionName: f.actionName || f.name.replace(/\s+/g, ''),
+      content: f.content,
+    }))
+
+    const result = await generateActionsYml(
+      features,
+      session.data.schemaSqlContent || '',
+      { conversationId, purpose: 'generate_actions' }
+    )
+
+    if (!result.success) {
+      throw new Error(result.error || '產出 actions.yml 失敗')
+    }
+
+    await updateBddSession({
+      sessionId,
+      updates: { actionsYmlContent: result.actionsYml },
+    })
+
+    return { actionsYml: result.actionsYml }
+  })
+
+  // ============================================================
+  // Phase 5: ISA Config
+  // ============================================================
+
+  await step.run('update-phase-isa-config', async () => {
+    await updateBddSession({
+      sessionId,
+      updates: { currentPhase: 'isa_config' },
+    })
+    await sendMessage(
+      conversationId,
+      `正在產出 sdd.os ISA 配置...`,
+      'isa_config_start'
+    )
+  })
+
+  await step.run('generate-isa-config', async () => {
+    const session = await getBddSession({ sessionId })
+    if (!session.data?.featuresContent) {
+      throw new Error('缺少 Feature Files')
+    }
+
+    const features = session.data.featuresContent.map((f: FeatureFile) => ({
+      name: f.name,
+      actionName: f.actionName || f.name.replace(/\s+/g, ''),
+      content: f.content,
+    }))
+
+    const result = await generateIsaConfig(
+      features,
+      session.data.entityMappingContent || '',
+      session.data.actionsYmlContent || '',
+      { conversationId, purpose: 'generate_isa_config' }
+    )
+
+    if (!result.success) {
+      throw new Error(result.error || '產出 ISA Config 失敗')
+    }
+
+    await updateBddSession({
+      sessionId,
+      updates: { isaConfigContent: result.isaConfig },
+    })
+
+    return { isaConfig: result.isaConfig }
+  })
+
+  // ============================================================
+  // 完成
+  // ============================================================
+
+  await step.run('complete-bdd-spec', async () => {
+    await updateBddSession({
+      sessionId,
+      updates: { currentPhase: 'completed' },
+    })
+
     // 標記對話的 spec 完成
+    const session = await getBddSession({ sessionId })
+
     await supabase
       .from('conversations')
       .update({
         spec_complete: true,
-        spec_summary: summaryResult.success ? summaryResult.summary : null,
+        spec_summary: {
+          schemaSql: session.data?.schemaSqlContent,
+          entityMapping: session.data?.entityMappingContent,
+          features: session.data?.featuresContent?.map(f => f.name),
+          actionsYml: session.data?.actionsYmlContent,
+          isaConfig: session.data?.isaConfigContent,
+        },
       })
       .eq('id', conversationId)
 
     // 發送完成訊息
-    const completeMessage = {
-      id: crypto.randomUUID(),
-      role: 'assistant',
-      content: `好的，我已經了解您的需求了！
-${specSummaryText}
+    const featureNames = session.data?.featuresContent?.map(f => f.name).join(', ') || '無'
 
-接下來您可以：
-1. 輸入「生成程式碼」來產生應用程式
-2. 輸入「修改規格」來調整需求`,
-      timestamp: new Date().toISOString(),
-    }
-
-    const { data: convForUpdate } = await supabase
-      .from('conversations')
-      .select('messages')
-      .eq('id', conversationId)
-      .single()
-
-    await supabase
-      .from('conversations')
-      .update({
-        messages: [...(convForUpdate?.messages || []), completeMessage],
-        updated_at: new Date().toISOString(),
-      })
-      .eq('id', conversationId)
-
-    return {
-      status: 'success',
-      questionsAnswered: questionsAndAnswers.length,
-      summary: summaryResult.success ? summaryResult.summary : null,
-      artifacts: {
-        schemaSql: 'spec/data/schema.sql',
-        features: ['spec/features/*.feature'],
-      },
-    }
+    await sendMessage(
+      conversationId,
+      `🎉 **BDD 規格產出完成！**\n\n` +
+      `**產出內容**：\n` +
+      `- Schema SQL：已產出\n` +
+      `- Entity Mapping：已產出\n` +
+      `- Feature Files：${featureNames}\n` +
+      `- Actions Spec：已產出\n` +
+      `- ISA Config：已產出\n\n` +
+      `**驗證結果**：${session.data?.validationResult?.passed ? '✅ 通過' : '⚠️ 有警告'}\n\n` +
+      `接下來您可以：\n` +
+      `1. 輸入「生成程式碼」來產生應用程式\n` +
+      `2. 輸入「查看規格」來檢視產出內容\n` +
+      `3. 輸入「修改規格」來調整需求`,
+      'completed'
+    )
   })
 
-  return specResult
+  return {
+    status: 'success',
+    sessionId,
+    phase: 'completed',
+    artifacts: {
+      schemaSql: 'spec/data/schema.sql',
+      entityMapping: 'spec/data/entity_to_table_mapping.yml',
+      features: featuresResult.features?.map((f: FeatureFile) => `spec/features/${f.name}.feature`) || [],
+      actionsYml: 'spec/actions/actions.yml',
+      isaConfig: 'isa_codegen.yml',
+    },
+  }
 }
 
 // ============================================================
@@ -1465,8 +2296,6 @@ async function handleOwnDomain(
   let vercelBindResult: { success: boolean; error?: string } = { success: false }
 
   if (project?.vercel_project_id) {
-    const { deployWithOwnDomain } = await import('../../actions/domain')
-
     await step.run('bind-domain-to-vercel', async () => {
       const bindMessage = {
         id: crypto.randomUUID(),

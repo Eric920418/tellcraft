@@ -12,10 +12,35 @@ Tellcraft 是一個 AI 驅動的自動化開發平台。用戶只需描述需求
 
 ## 當前開發進度
 
-- **狀態**：✅ Phase 1-9 + Server Actions + Inngest Orchestrator + 前端 Chat 串接 + 認證系統 + 訪客體驗改善 + 儀表板系統完成
+- **狀態**：✅ Phase 1-9 + Server Actions + Inngest Orchestrator + 前端 Chat 串接 + 認證系統 + 訪客體驗改善 + 儀表板系統 + BDD Spec 完整修復
 - **釐清項目**：28 項全部解決
 - **Server Actions**：30+ 已實作
 - **詳情**：[`.clarify/overview.md`](.clarify/overview.md)
+
+### 最新修復（2026-01-31）
+
+修復 BDD Spec Skill 的多項問題：
+
+| 修復項目 | 描述 |
+|----------|------|
+| **Phase 3 Spec Clarify** | 實現完整迭代釐清循環，不再跳過 |
+| **真實驗證腳本** | 使用 `validateFeatureContent()` 函數驗證 Feature 格式 |
+| **自癒機制** | 修復後真正重新驗證，不再假設通過 |
+| **反悔機制** | 「修改 N」指令調用 `revertAnswer` 將項目移回待處理 |
+
+**新增 LLM 函數**（`app/lib/llm.ts`）：
+- `validateFeatureContent()` - 驗證單個 Feature 內容
+- `validateMultipleFeatures()` - 批量驗證多個 Feature
+
+**驗證規則**：
+- E001: 缺少 Action 註解
+- E002: 缺少 Summary 註解
+- E003: 缺少 Feature 宣告
+- E004: Summary 與 Feature 名稱不一致
+- E005: Rule 缺少前置/後置標註
+- E006: When 步驟格式錯誤（應為 `{summary}, call table:`）
+- E007: Then 步驟格式錯誤
+- E008: 沒有 Example
 
 ### 認證系統
 
@@ -139,11 +164,14 @@ NEXT_PUBLIC_APP_URL=https://tellcraft.com
 
 **Supabase 流量優化**（2025-01）：
 - 輪詢機制：智慧退避（3-15秒），有新消息重置為 3 秒
+- 輪詢停止：對話完成（spec_complete）後自動停止輪詢
 - `getConversationMessages`：先檢查 `updated_at`，無更新時跳過載入 messages
+- `getProjectDetail`：並行查詢對話、部署、生成記錄（3 次串行 → 1 次並行）
 - `getAdminStats`：使用 `select('id')` 取代 `select('*')` 減少流量
 - `getUserStats`：合併重複查詢，並行執行減少往返
 - `getUserConversations`：使用 JOIN 減少 2 次查詢為 1 次
 - `listAllConversations`：使用 JOIN 減少 3 次查詢為 1 次
+- `listAllUsers`：並行計數查詢取代返回所有 projects
 - `getLLMUsageStats`：預設只查詢最近 30 天
 - Admin Users 頁面：搜尋 debounce（300ms）
 - Admin Usage 頁面：圖表數據使用 useMemo 快取
@@ -335,12 +363,92 @@ Hero → 往下滾動 → 產品介紹（SEO 友好）→ Testimonials → CTA
 
 | Skill | 狀態 | 說明 |
 |-------|------|------|
-| `bdd-spec` | ✅ 完成 | 整合真正 LLM（Claude API）進行需求釐清與規格產出 |
+| `bdd-spec` | ✅ 完成 | 完整 5 階段流程：PRD Discovery/Clarify → Formulation → Spec Discovery/Clarify → Actions Design → ISA Config |
 | `coder` | ⏳ Mock | 呼叫 generateCode，待 Modal + sdd.os 整合 |
 | `deployer` | ✅ 完成 | 整合 Vercel Deployments API，部署後自動詢問網域設定 |
 | `domain-manager` | ✅ 完成 | 網域管理入口，支援三種選擇 |
 | `domain-purchase` | ✅ 完成 | Porkbun 網域註冊 |
 | `domain-dns` | ✅ 完成 | Cloudflare Zone + Vercel 綁定 |
+
+### BDD Spec Skill 完整流程
+
+BDD Spec Skill 實現完整的 5 階段規格產出流程，使用 `bdd_sessions` 資料表追蹤會話狀態：
+
+```
+Phase 1: PRD Discovery + Clarify
+    ↓ 使用 A1-A6, B1-B5, C1-C2, D1-D2 檢查清單掃描
+    ↓ 每次問一題（白話翻譯）
+    ↓ 每 5 題批量確認（支援反悔修改）
+    ↓ 連續 2 輪無新問題後進入下一階段
+
+Phase 2: Formulation
+    ↓ 產出 schema.sql + entity_to_table_mapping.yml
+    ↓ 產出 feature files（sdd.os ISA Gherkin 格式）
+    ↓ 執行驗證腳本（lint + validate）
+    ↓ 自癒機制（最多 3 次修復）
+
+Phase 3: Spec Discovery + Clarify
+    ↓ 對產出的 Feature Files 再次 Discovery
+    ↓ 檢查規則完整性、Example 覆蓋度、邊界條件
+
+Phase 4: Actions Design
+    ↓ 產出 spec/actions/actions.yml
+
+Phase 5: ISA Config
+    ↓ 產出 isa_codegen.yml
+```
+
+**bdd_sessions 資料表**（`scripts/create-bdd-sessions.sql`）：
+```sql
+-- 核心欄位
+current_phase TEXT     -- prd_discovery, prd_clarify, formulation, spec_discovery, spec_clarify, actions_design, isa_config, completed
+current_round INT      -- 當前輪次
+consecutive_empty_rounds INT  -- 連續空輪數（終止條件）
+
+-- 釐清項目狀態
+clarify_items JSONB    -- 待處理項目 [{ id, question, category, priority, status }]
+staging_items JSONB    -- 暫存區（待確認）
+resolved_items JSONB   -- 已解決
+
+-- 規格內容
+schema_sql_content TEXT
+entity_mapping_content TEXT
+features_content JSONB  -- [{ name, content }]
+actions_yml_content TEXT
+isa_config_content TEXT
+```
+
+**檢查清單**：
+| 類別 | 檢查項目 |
+|------|----------|
+| A1-A6 | 領域與資料模型（Entity 定義、屬性完整性、關聯性、約束條件、命名規範、擴展性）|
+| B1-B5 | 功能模型（CRUD 完整性、業務規則、狀態轉換、權限控制、錯誤處理）|
+| C1-C2 | 術語一致性（專有名詞定義、跨功能一致性）|
+| D1-D2 | 品質檢查（效能考量、安全性）|
+
+**相關 Server Actions**（`app/actions/index.ts`）：
+- `createBddSession` - 創建 BDD 會話
+- `getBddSession` - 獲取會話狀態
+- `updateBddSession` - 更新會話
+- `answerClarifyItem` - 回答釐清項目
+- `confirmBatch` - 批量確認
+- `revertAnswer` - 反悔修改
+- `skipClarifyItem` - 跳過項目
+- `addClarifyItems` - 新增發現項目
+- `getCurrentClarifyItem` - 獲取當前待處理項目
+- `getBddSessionProgress` - 獲取進度統計
+
+**相關 LLM 函數**（`app/lib/llm.ts`）：
+- `runPrdDiscovery` - PRD Discovery（使用檢查清單）
+- `translateToWhiteText` - 白話翻譯
+- `generateSchemaSql` - 產出 SQL Schema
+- `generateFeatureFiles` - 產出 Feature Files
+- `runSpecDiscovery` - Spec Discovery
+- `generateActionsYml` - 產出 Actions 規格
+- `generateIsaConfig` - 產出 ISA 配置
+- `fixFeatureFormat` - 自癒修復
+- `validateFeatureContent` - 驗證 Feature 格式（E001-E008）
+- `validateMultipleFeatures` - 批量驗證
 
 ### Domain Skills（拆分降低風險）
 

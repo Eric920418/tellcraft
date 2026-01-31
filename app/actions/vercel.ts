@@ -123,7 +123,7 @@ export async function deployFromGitHub(
     if (teamId) params.append('teamId', teamId)
 
     // 解析 GitHub URL
-    const match = repoUrl.match(/github\.com\/([^\/]+)\/([^\/]+)/)
+    const match = repoUrl.match(/github\.com\/([^/]+)\/([^/]+)/)
     if (!match) {
       return { success: false, error: '無效的 GitHub URL' }
     }

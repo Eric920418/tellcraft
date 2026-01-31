@@ -31,7 +31,7 @@ export interface CardProps extends React.HTMLAttributes<HTMLDivElement> {
   customClass?: string
 }
 
-export const Card = forwardRef<HTMLDivElement, CardProps>(({ customClass, style, ...rest }, ref) => (
+export const Card = forwardRef<HTMLDivElement, CardProps>(({ customClass: _customClass, style, ...rest }, ref) => (
   <div
     ref={ref}
     {...rest}

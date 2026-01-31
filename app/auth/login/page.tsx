@@ -2,6 +2,7 @@
 
 import { useState, useEffect, Suspense } from 'react'
 import { useSearchParams } from 'next/navigation'
+import Link from 'next/link'
 import { createClient } from '@/app/lib/supabase/client'
 import { motion } from 'framer-motion'
 
@@ -37,7 +38,7 @@ function LoginContent() {
         setError(error.message)
         setIsLoading(null)
       }
-    } catch (err) {
+    } catch {
       setError('登入失敗，請稍後再試')
       setIsLoading(null)
     }
@@ -50,7 +51,7 @@ function LoginContent() {
     try {
       // LINE OAuth 使用自訂路由
       window.location.href = '/api/auth/line'
-    } catch (err) {
+    } catch {
       setError('登入失敗，請稍後再試')
       setIsLoading(null)
     }
@@ -203,7 +204,7 @@ function LoginContent() {
         </div>
 
         {/* Guest Option */}
-        <a
+        <Link
           href="/"
           style={{
             display: 'block',
@@ -214,7 +215,7 @@ function LoginContent() {
           }}
         >
           以訪客身份繼續（功能受限）
-        </a>
+        </Link>
 
         {/* Footer */}
         <div
