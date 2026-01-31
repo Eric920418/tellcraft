@@ -19,7 +19,22 @@ Tellcraft 是一個 AI 驅動的自動化開發平台。用戶只需描述需求
 
 ### 效能優化（2026-01-31）
 
-修復嚴重延遲問題，預期改善 50-60%（從 3-5 秒 → 1-1.5 秒）：
+**第二輪：Server Component 重構**
+
+Dashboard 從 Client Component 改為 Server Component，消除瀑布式載入：
+
+| 變更 | 說明 |
+|------|------|
+| `dashboard/layout.tsx` | 改為 Server Component，server 端直接查詢用戶資料 |
+| `dashboard/page.tsx` | 改為 Server Component，server 端並行查詢所有資料 |
+| `DashboardShell.tsx` | 新增 Client Component，處理 Sidebar 和互動 |
+| `DashboardContent.tsx` | 新增 Client Component，處理動畫和 UI |
+
+**效果**：原本需要 2 次瀑布式載入（layout → page），現在 server 端一次完成。
+
+---
+
+**第一輪：查詢優化**
 
 | 問題 | 位置 | 修復方式 | 改善 |
 |------|------|---------|------|
