@@ -626,6 +626,20 @@ Phase 4: Quality Gate
 - `uiux-skill/skill.md` - Skill 定義
 - `uiux-skill/instructions/` - 4 階段執行指南
 - `uiux-skill/rules/baseline-ui.md` - UI 技術約束
+- `app/actions/storage.ts` - Supabase Storage 整合
+
+**儲存架構**：
+```
+UIUX 產出程式碼
+      ↓
+打包成 JSON（code-package.json）
+      ↓
+上傳到 Supabase Storage（generations bucket）
+      ↓
+URL 存入 generations.generated_code_url
+      ↓
+部署時下載 → 部署到 Vercel
+```
 
 ### Domain Skills（拆分降低風險）
 

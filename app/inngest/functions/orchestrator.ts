@@ -3,6 +3,7 @@ import { classifyIntent } from '../classifier'
 import { getSkillMetadata, SkillName } from '../registry'
 import { supabase } from '../../lib/supabase'
 import { generateCode, deployProjectFromDb, createBddSession, getBddSession, updateBddSession, addClarifyItems, answerClarifyItem, confirmBatch, revertAnswer } from '../../actions'
+import { createUiuxGeneration, type GenerationArtifacts, type GeneratedFile } from '../../actions/storage'
 import {
   runPrdDiscovery,
   generateSchemaSql,
@@ -1637,15 +1638,21 @@ async function executeBddSpecSkill(input: BddSpecSkillInput) {
   const darkMode = parseDesignChoice(darkModeReply.data.message, ['yes', 'no', 'nice-to-have'])
 
   // 組裝 Design Brief
-  const designBrief = {
+  const designBrief: DesignBrief = {
     scope: 'full' as const,
     productType,
     style: {
       direction: styleDirection,
       references: [reference],
+      adjectives: [], // TODO: 從用戶回答中提取形容詞
     },
     color: {
+      preference: 'brand', // TODO: 詢問用戶配色偏好
       darkMode: darkMode === 'yes',
+    },
+    persona: {
+      primary: 'user', // TODO: 從 BDD spec 提取目標用戶
+      context: 'web', // TODO: 從專案類型推斷
     },
   }
 
@@ -1707,12 +1714,60 @@ async function executeBddSpecSkill(input: BddSpecSkillInput) {
     )
   })
 
-  // TODO: 實際實作程式碼生成
+  // 生成程式碼並儲存到 Supabase Storage
   const uiuxImplementation = await step.run('uiux-generate-code', async () => {
+    // TODO: 實際用 LLM 生成程式碼，目前是 mock 內容
+    const artifacts: GenerationArtifacts = {
+      pages: [
+        {
+          path: 'app/page.tsx',
+          content: generateMockPageContent('Home', designBrief),
+        },
+        {
+          path: 'app/dashboard/page.tsx',
+          content: generateMockPageContent('Dashboard', designBrief),
+        },
+      ],
+      components: [
+        {
+          path: 'components/ui/Button.tsx',
+          content: generateMockButtonComponent(designBrief),
+        },
+        {
+          path: 'components/ui/Card.tsx',
+          content: generateMockCardComponent(designBrief),
+        },
+        {
+          path: 'components/layout/Header.tsx',
+          content: generateMockHeaderComponent(designBrief),
+        },
+      ],
+      styles: [
+        {
+          path: 'styles/globals.css',
+          content: generateMockGlobalStyles(designBrief),
+        },
+      ],
+    }
+
+    // 儲存到 Supabase Storage
+    const result = await createUiuxGeneration(
+      projectId,
+      artifacts,
+      designBrief as unknown as Record<string, unknown>,
+      selectedVariant
+    )
+
+    if (!result.success) {
+      throw new Error(`儲存程式碼失敗: ${result.error}`)
+    }
+
     return {
-      pages: ['app/page.tsx', 'app/dashboard/page.tsx'],
-      components: ['components/ui/Button.tsx', 'components/ui/Card.tsx', 'components/layout/Header.tsx'],
-      styles: ['styles/globals.css'],
+      generationId: result.generationId,
+      codeUrl: result.codeUrl,
+      pages: artifacts.pages.map(p => p.path),
+      components: artifacts.components.map(c => c.path),
+      styles: artifacts.styles?.map(s => s.path) || [],
     }
   })
 
@@ -3321,6 +3376,195 @@ function formatReference(ref: string): string {
     apple: 'Apple',
   }
   return refs[ref] || ref
+}
+
+// ============================================================
+// Mock 程式碼生成函數（TODO: 替換為真實 LLM 生成）
+// ============================================================
+
+function generateMockPageContent(pageName: string, brief: DesignBrief): string {
+  const isDark = brief.color?.darkMode ? 'dark' : ''
+  const style = brief.style?.direction || 'minimal'
+
+  return `import { Header } from '@/components/layout/Header'
+import { Card } from '@/components/ui/Card'
+import { Button } from '@/components/ui/Button'
+
+export default function ${pageName}Page() {
+  return (
+    <div className="min-h-dvh bg-background ${isDark}">
+      <Header />
+      <main className="container mx-auto px-4 py-8">
+        <h1 className="text-4xl font-bold text-balance mb-8">${pageName}</h1>
+        <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
+          <Card>
+            <h2 className="text-xl font-semibold">Card Title</h2>
+            <p className="text-pretty text-muted-foreground">
+              Card content with ${style} style.
+            </p>
+            <Button>Action</Button>
+          </Card>
+        </div>
+      </main>
+    </div>
+  )
+}
+`
+}
+
+function generateMockButtonComponent(brief: DesignBrief): string {
+  return `import { cn } from '@/lib/utils'
+import { forwardRef, type ButtonHTMLAttributes } from 'react'
+
+export interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
+  variant?: 'primary' | 'secondary' | 'ghost'
+  size?: 'sm' | 'md' | 'lg'
+}
+
+export const Button = forwardRef<HTMLButtonElement, ButtonProps>(
+  ({ className, variant = 'primary', size = 'md', ...props }, ref) => {
+    return (
+      <button
+        ref={ref}
+        className={cn(
+          'inline-flex items-center justify-center rounded-md font-medium',
+          'transition-colors duration-150',
+          'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2',
+          'disabled:pointer-events-none disabled:opacity-50',
+          {
+            'bg-primary text-primary-foreground hover:bg-primary/90': variant === 'primary',
+            'bg-secondary text-secondary-foreground hover:bg-secondary/80': variant === 'secondary',
+            'hover:bg-accent hover:text-accent-foreground': variant === 'ghost',
+          },
+          {
+            'h-8 px-3 text-sm': size === 'sm',
+            'h-10 px-4': size === 'md',
+            'h-12 px-6 text-lg': size === 'lg',
+          },
+          className
+        )}
+        {...props}
+      />
+    )
+  }
+)
+Button.displayName = 'Button'
+`
+}
+
+function generateMockCardComponent(brief: DesignBrief): string {
+  return `import { cn } from '@/lib/utils'
+import { forwardRef, type HTMLAttributes } from 'react'
+
+export interface CardProps extends HTMLAttributes<HTMLDivElement> {}
+
+export const Card = forwardRef<HTMLDivElement, CardProps>(
+  ({ className, ...props }, ref) => {
+    return (
+      <div
+        ref={ref}
+        className={cn(
+          'rounded-lg border bg-card p-6 shadow-sm',
+          'transition-shadow duration-150 hover:shadow-md',
+          className
+        )}
+        {...props}
+      />
+    )
+  }
+)
+Card.displayName = 'Card'
+`
+}
+
+function generateMockHeaderComponent(brief: DesignBrief): string {
+  return `import { cn } from '@/lib/utils'
+import Link from 'next/link'
+
+export function Header({ className }: { className?: string }) {
+  return (
+    <header className={cn(
+      'sticky top-0 z-[var(--z-sticky)] border-b bg-background/80 backdrop-blur-sm',
+      'safe-area-inset-top',
+      className
+    )}>
+      <div className="container mx-auto flex h-16 items-center justify-between px-4">
+        <Link href="/" className="text-xl font-bold">
+          Logo
+        </Link>
+        <nav className="flex items-center gap-4">
+          <Link href="/dashboard" className="text-muted-foreground hover:text-foreground">
+            Dashboard
+          </Link>
+        </nav>
+      </div>
+    </header>
+  )
+}
+`
+}
+
+function generateMockGlobalStyles(brief: DesignBrief): string {
+  const colorScheme = brief.color?.preference || 'blue'
+
+  return `@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --z-dropdown: 10;
+  --z-sticky: 20;
+  --z-fixed: 30;
+  --z-modal-backdrop: 40;
+  --z-modal: 50;
+  --z-popover: 60;
+  --z-tooltip: 70;
+}
+
+@layer base {
+  :root {
+    --background: 0 0% 100%;
+    --foreground: 0 0% 3.9%;
+    --card: 0 0% 100%;
+    --card-foreground: 0 0% 3.9%;
+    --primary: 221.2 83.2% 53.3%;
+    --primary-foreground: 210 40% 98%;
+    --secondary: 210 40% 96.1%;
+    --secondary-foreground: 222.2 47.4% 11.2%;
+    --muted: 210 40% 96.1%;
+    --muted-foreground: 215.4 16.3% 46.9%;
+    --accent: 210 40% 96.1%;
+    --accent-foreground: 222.2 47.4% 11.2%;
+    --ring: 221.2 83.2% 53.3%;
+    --radius: 0.5rem;
+  }
+
+  .dark {
+    --background: 222.2 84% 4.9%;
+    --foreground: 210 40% 98%;
+    --card: 222.2 84% 4.9%;
+    --card-foreground: 210 40% 98%;
+    --primary: 217.2 91.2% 59.8%;
+    --primary-foreground: 222.2 47.4% 11.2%;
+    --secondary: 217.2 32.6% 17.5%;
+    --secondary-foreground: 210 40% 98%;
+    --muted: 217.2 32.6% 17.5%;
+    --muted-foreground: 215 20.2% 65.1%;
+    --accent: 217.2 32.6% 17.5%;
+    --accent-foreground: 210 40% 98%;
+    --ring: 224.3 76.3% 48%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground;
+  }
+}
+`
 }
 
 // ============================================================
