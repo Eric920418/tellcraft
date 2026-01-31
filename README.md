@@ -491,8 +491,8 @@ Hero → 往下滾動 → 產品介紹（SEO 友好）→ Testimonials → CTA
 | Skill | 狀態 | 說明 |
 |-------|------|------|
 | `bdd-spec` | ✅ 完成 | 完整 5 階段流程：PRD Discovery/Clarify → Formulation → Spec Discovery/Clarify → Actions Design → ISA Config |
-| `coder` | ⏳ Mock | 呼叫 generateCode，待 Modal + sdd.os 整合（後端 API） |
-| `uiux` | ✅ 基礎 | 4 階段前端設計流程：Design Discovery → Design Lab → Implementation → Quality Gate |
+| `coder` | ⏳ 開發中 | 後端 API 生成，待開發完成後與 uiux 並行執行 |
+| `uiux` | 🧪 可測試 | 4 階段前端設計流程：Design Discovery → Design Lab → Implementation → Quality Gate（目前單獨執行） |
 | `deployer` | ✅ 完成 | 整合 Vercel Deployments API，部署後自動詢問網域設定 |
 | `domain-manager` | ✅ 完成 | 網域管理入口，支援三種選擇 |
 | `domain-purchase` | ✅ 完成 | Porkbun 網域註冊 |
@@ -580,19 +580,17 @@ isa_config_content TEXT
 
 ### UIUX Skill 完整流程
 
-UI/UX Skill 實現完整的 4 階段前端介面開發流程，與 coder skill（後端）並行執行：
+UI/UX Skill 實現完整的 4 階段前端介面開發流程：
 
 ```
 bdd-spec（規格確定）
          ↓
-    ┌────┴────┐
-    ↓         ↓
-  coder    uiux
- （後端）   （前端）
-    │         │
-    └────┬────┘
+       uiux（前端）    ← 目前只執行這個
          ↓
      deployer
+
+# TODO: coder 開發完成後改為並行執行：
+# bdd-spec → [coder + uiux 並行] → deployer
 ```
 
 **4 階段流程**：

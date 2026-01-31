@@ -1516,55 +1516,25 @@ async function executeBddSpecSkill(input: BddSpecSkillInput) {
   }
 
   // ============================================================
-  // 用戶確認，並行執行 UIUX + Coder
+  // 用戶確認，執行 UIUX Skill
+  // TODO: coder 開發完成後，改回並行執行 UIUX + Coder
   // ============================================================
 
-  await step.run('notify-parallel-start', async () => {
+  await step.run('notify-uiux-start', async () => {
     await sendMessage(
       conversationId,
-      `太好了！現在開始並行生成前端介面和後端 API：\n\n` +
-      `🎨 **前端 (UIUX)** - 設計探索 → 生成介面\n` +
-      `⚙️ **後端 (Coder)** - 根據規格生成 API\n\n` +
-      `兩者會同時進行，完成後會通知你。`,
-      'parallel_start'
+      `太好了！現在開始設計前端介面：\n\n` +
+      `🎨 **前端 (UIUX)** - 設計探索 → 生成介面\n\n` +
+      `讓我先了解一下你對介面的偏好...`,
+      'uiux_start'
     )
   })
 
-  // 並行執行 UIUX 和 Coder
-  const [uiuxResult, coderResult] = await Promise.all([
-    // UIUX Skill
-    step.run('execute-uiux-parallel', async () => {
-      // 簡化版：直接發送開始訊息，實際流程在 executeUiuxSkill 中
-      await sendMessage(
-        conversationId,
-        `🎨 **前端設計開始**\n\n讓我先了解一下你對介面的偏好...`,
-        'uiux_parallel_start'
-      )
-      return { status: 'started', skill: 'uiux' }
-    }),
-
-    // Coder Skill
-    step.run('execute-coder-parallel', async () => {
-      // 呼叫現有的 generateCode Server Action
-      const genResult = await generateCode({ projectId })
-      if (!genResult.success) {
-        return { status: 'failed', skill: 'coder', error: genResult.error }
-      }
-      return { status: 'success', skill: 'coder', generationId: genResult.data?.generationId }
-    }),
-  ])
-
-  // 如果 Coder 成功，繼續 UIUX 的問答流程
-  if (coderResult.status === 'success') {
-    await step.run('coder-success-notify', async () => {
-      await sendMessage(
-        conversationId,
-        `✅ **後端 API 生成完成！**\n\n` +
-        `現在讓我們繼續設計前端介面。`,
-        'coder_complete'
-      )
-    })
-  }
+  // TODO: coder 開發完成後，改回並行執行：
+  // const [uiuxResult, coderResult] = await Promise.all([
+  //   step.run('execute-uiux-parallel', ...),
+  //   step.run('execute-coder-parallel', ...),
+  // ])
 
   // 開始 UIUX 問答流程（Design Discovery）
   // 問題 1: 產品類型
@@ -1771,10 +1741,10 @@ async function executeBddSpecSkill(input: BddSpecSkillInput) {
                       qualityResult.performance.passed &&
                       qualityResult.seo.passed
 
+    // TODO: coder 開發完成後，加回後端狀態顯示
     await sendMessage(
       conversationId,
-      `🎉 **前端和後端都已完成！**\n\n` +
-      `**後端 API**：${coderResult.status === 'success' ? '✅ 生成成功' : '⚠️ ' + coderResult.error}\n\n` +
+      `🎉 **前端介面設計完成！**\n\n` +
       `**前端介面**：${allPassed ? '✅ 品質檢查全部通過' : '⚠️ 有警告'}\n` +
       `- 無障礙標準 (WCAG 2.2 AA): ✅\n` +
       `- 效能最佳化: ✅\n` +
@@ -1782,15 +1752,15 @@ async function executeBddSpecSkill(input: BddSpecSkillInput) {
       `產出的前端檔案：\n` +
       `- 頁面：${uiuxImplementation.pages.length} 個\n` +
       `- 組件：${uiuxImplementation.components.length} 個\n\n` +
-      `現在可以進行部署了！輸入「部署」開始。`,
-      'all_complete'
+      `（後端 Coder 尚在開發中）`,
+      'uiux_complete'
     )
   })
 
   return {
     status: 'success',
     sessionId,
-    phase: 'all_completed',
+    phase: 'uiux_completed', // TODO: coder 完成後改為 'all_completed'
     bddArtifacts: {
       schemaSql: 'spec/data/schema.sql',
       entityMapping: 'spec/data/entity_to_table_mapping.yml',
@@ -1798,7 +1768,7 @@ async function executeBddSpecSkill(input: BddSpecSkillInput) {
       actionsYml: 'spec/actions/actions.yml',
       isaConfig: 'isa_codegen.yml',
     },
-    coderResult,
+    // TODO: coder 開發完成後加回 coderResult
     uiuxResult: {
       designBrief,
       selectedVariant,
