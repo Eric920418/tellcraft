@@ -49,16 +49,46 @@ export async function middleware(request: NextRequest) {
       return NextResponse.redirect(url)
     }
 
-    // 管理員路由保護
+    // 管理員路由保護（使用 cookie 快取避免每次查詢資料庫）
     if (pathname.startsWith('/dashboard/admin')) {
-      // 查詢用戶是否為管理員
-      const { data: userData } = await supabase
-        .from('users')
-        .select('is_admin')
-        .eq('id', user.id)
-        .single()
+      const isAdminCookie = request.cookies.get('is_admin')
+      let isAdmin = false
 
-      if (!userData?.is_admin) {
+      // 檢查 cookie 是否存在且未過期（快取 5 分鐘）
+      if (isAdminCookie) {
+        try {
+          const { value, exp } = JSON.parse(isAdminCookie.value)
+          if (exp > Date.now()) {
+            isAdmin = value === true
+          }
+        } catch {
+          // cookie 格式錯誤，需要重新查詢
+        }
+      }
+
+      // 如果沒有有效的快取，才查詢資料庫
+      if (!isAdminCookie || !isAdmin) {
+        const { data: userData } = await supabase
+          .from('users')
+          .select('is_admin')
+          .eq('id', user.id)
+          .single()
+
+        isAdmin = userData?.is_admin || false
+
+        // 設定 cookie 快取（5 分鐘）
+        supabaseResponse.cookies.set('is_admin', JSON.stringify({
+          value: isAdmin,
+          exp: Date.now() + 5 * 60 * 1000
+        }), {
+          httpOnly: true,
+          secure: process.env.NODE_ENV === 'production',
+          sameSite: 'lax',
+          maxAge: 5 * 60 // 5 分鐘
+        })
+      }
+
+      if (!isAdmin) {
         // 非管理員，導向一般儀表板
         const url = request.nextUrl.clone()
         url.pathname = '/dashboard'

@@ -231,6 +231,91 @@ ${existingQuestions?.length ? `**已經問過的問題**（不要重複）：\n$
 // BDD Spec 完整流程 - Phase 1-5 專用 Prompts
 // ============================================================
 
+/**
+ * 生成釐清完成摘要
+ * 將釐清結果整理成格式化的 Markdown 摘要
+ */
+export async function generateClarifySummary(
+  requirements: string,
+  resolvedItems: Array<{
+    question: string
+    whiteTextQuestion?: string
+    answer?: string
+    category?: string
+  }>,
+  trackingContext?: LlmTrackingContext
+): Promise<{
+  success: boolean
+  summary?: string
+  error?: string
+}> {
+  const systemPrompt = `你是一位 BDD 分析師。請根據原始需求和釐清問答，產出一份結構化的需求摘要。
+
+## 輸出格式（Markdown）
+
+請依照以下格式輸出，**每個區塊之間用空行分隔**：
+
+我已經了解您的需求了！
+
+## 資料模型
+- **實體名稱**：簡短說明
+  屬性：屬性1, 屬性2, 屬性3
+
+## 功能規格
+- **功能名稱**：功能說明
+  規則：規則1; 規則2; 規則3
+
+## 決策記錄
+
+---
+
+**Q: 問題1？**
+**A:** 答案1
+**影響:** 這個決定的影響說明
+
+---
+
+**Q: 問題2？**
+**A:** 答案2
+**影響:** 這個決定的影響說明
+
+---
+
+## 規則
+1. 每個決策記錄之間用 \`---\` 分隔線隔開
+2. 問題和答案要用粗體標記
+3. 影響說明要具體說明對系統設計的影響
+4. 資料模型和功能規格要從釐清結果中提煉，不要只是複述
+5. 整體內容要簡潔明瞭，讓非技術人員也能理解`
+
+  const qaList = resolvedItems
+    .filter(item => item.answer)
+    .map(item => `問題：${item.whiteTextQuestion || item.question}\n答案：${item.answer}`)
+    .join('\n\n')
+
+  const userMessage = `## 原始需求
+${requirements}
+
+## 釐清問答
+${qaList || '（無額外釐清）'}`
+
+  const response = await callClaude(
+    systemPrompt,
+    [{ role: 'user', content: userMessage }],
+    { maxTokens: 4096, temperature: 0.3 },
+    trackingContext
+  )
+
+  if (!response.success) {
+    return { success: false, error: response.error }
+  }
+
+  return {
+    success: true,
+    summary: response.content?.trim(),
+  }
+}
+
 // 釐清項目類型定義
 export interface ClarifyItem {
   id: string

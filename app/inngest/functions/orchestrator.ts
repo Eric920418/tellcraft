@@ -12,6 +12,7 @@ import {
   generateIsaConfig,
   fixMultipleFeatures,
   validateMultipleFeatures,
+  generateClarifySummary,
   type ClarifyItem,
   type ValidationError,
   type ValidationWarning
@@ -657,6 +658,22 @@ async function executeBddSpecSkill(input: BddSpecSkillInput) {
   // Phase 2: Formulation - 產出規格
   // ============================================================
 
+  // 生成釐清摘要
+  await step.run('generate-clarify-summary', async () => {
+    const session = await getBddSession({ sessionId })
+    if (!session.data) return
+
+    const summaryResult = await generateClarifySummary(
+      message,
+      session.data.resolvedItems,
+      { conversationId, purpose: 'clarify_summary' }
+    )
+
+    if (summaryResult.success && summaryResult.summary) {
+      await sendMessage(conversationId, summaryResult.summary, 'clarify_summary')
+    }
+  })
+
   await step.run('update-phase-formulation', async () => {
     await updateBddSession({
       sessionId,
@@ -664,7 +681,7 @@ async function executeBddSpecSkill(input: BddSpecSkillInput) {
     })
     await sendMessage(
       conversationId,
-      `需求釐清完成！\n\n正在產出規格文件...`,
+      `正在產出規格文件...`,
       'formulation_start'
     )
   })

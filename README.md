@@ -17,6 +17,18 @@ Tellcraft 是一個 AI 驅動的自動化開發平台。用戶只需描述需求
 - **Server Actions**：30+ 已實作
 - **詳情**：[`.clarify/overview.md`](.clarify/overview.md)
 
+### 效能優化（2026-01-31）
+
+修復嚴重延遲問題，預期改善 50-60%（從 3-5 秒 → 1-1.5 秒）：
+
+| 問題 | 位置 | 修復方式 | 改善 |
+|------|------|---------|------|
+| Middleware 每次查 DB | `middleware.ts` | is_admin 用 cookie 快取 5 分鐘 | -500ms |
+| Admin N+1 查詢 | `admin.ts:listAllUsers` | 批量查詢 user_id → 記憶體計數 | -1.5s |
+| 序列 await 迴圈 | `index.ts:migrateAnonymousAccount` | Promise.all 並行處理 | -800ms |
+| Layout 瀑布式請求 | `dashboard/layout.tsx` | getCurrentUser 直接返回 isAdmin | -150ms |
+| select('*') 計數 | 多處 | 改用 select('id') | -200ms |
+
 ### 最新修復（2026-01-31）
 
 修復 BDD Spec Skill 的多項問題：
@@ -53,10 +65,14 @@ Tellcraft 是一個 AI 驅動的自動化開發平台。用戶只需描述需求
 |----------|------|
 | **完成訊息措辭** | 不再要求用戶輸入「生成程式碼」，改為直接確認「這樣對嗎？」|
 | **Markdown 渲染** | 聊天介面支援 Markdown 格式美化（表格、粗體、列表等）|
+| **釐清摘要格式化** | 決策記錄分段顯示，每題用分隔線隔開，Q/A 用粗體標記 |
 
 **新增套件**：
 - `react-markdown` - Markdown 渲染
 - `remark-gfm` - GitHub Flavored Markdown（表格、刪除線等）
+
+**新增 LLM 函數**：
+- `generateClarifySummary()` - 生成格式化的釐清摘要（資料模型、功能規格、決策記錄）
 
 **驗證規則**：
 - E001: 缺少 Action 註解

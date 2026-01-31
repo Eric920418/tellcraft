@@ -51,10 +51,10 @@ export async function createProject(input: {
     return { success: false, error: '訂閱狀態必須為 active' }
   }
 
-  // 前置：檢查專案數量
+  // 前置：檢查專案數量（使用 select('id') 減少開銷）
   const { count } = await supabase
     .from('projects')
-    .select('*', { count: 'exact', head: true })
+    .select('id', { count: 'exact', head: true })
     .eq('user_id', userId)
 
   const limit = PLAN_PROJECT_LIMITS[user.plan] || 1
@@ -1373,12 +1373,14 @@ export async function initializeSessionFromAuth(input?: {
 /**
  * 取得當前認證用戶
  * - 用於前端檢查登入狀態
+ * - 包含 isAdmin 狀態避免前端重複查詢
  */
 export async function getCurrentUser(): Promise<ActionResult<{
   userId: string
   email?: string
   name?: string
   avatarUrl?: string
+  isAdmin: boolean
 } | null>> {
   const authClient = await createClient()
   const { data: { user: authUser } } = await authClient.auth.getUser()
@@ -1387,13 +1389,21 @@ export async function getCurrentUser(): Promise<ActionResult<{
     return { success: true, data: null }
   }
 
+  // 查詢 is_admin 狀態（避免前端再次查詢）
+  const { data: userData } = await supabase
+    .from('users')
+    .select('is_admin')
+    .eq('id', authUser.id)
+    .single()
+
   return {
     success: true,
     data: {
       userId: authUser.id,
       email: authUser.email,
       name: authUser.user_metadata?.name || authUser.user_metadata?.full_name,
-      avatarUrl: authUser.user_metadata?.avatar_url || authUser.user_metadata?.picture
+      avatarUrl: authUser.user_metadata?.avatar_url || authUser.user_metadata?.picture,
+      isAdmin: userData?.is_admin || false
     }
   }
 }
@@ -1456,11 +1466,12 @@ export async function migrateAnonymousAccount(input: {
 
   const existingNames = new Set((authProjects || []).map(p => p.name))
 
-  // 4. 遷移專案，處理同名衝突
+  // 4. 遷移專案，處理同名衝突（並行處理避免序列 await）
   let migratedProjects = 0
   let migratedConversations = 0
 
-  for (const project of anonymousProjects || []) {
+  // 預處理：計算所有新名稱（純計算，無 async）
+  const projectsToMigrate = (anonymousProjects || []).map(project => {
     let newName = project.name
 
     // 處理同名衝突
@@ -1472,28 +1483,39 @@ export async function migrateAnonymousAccount(input: {
       newName = `${project.name} (${suffix})`
     }
 
-    // 更新專案擁有者
-    const { error: updateError } = await supabase
-      .from('projects')
-      .update({
-        user_id: authUserId,
-        name: newName,
-        updated_at: new Date().toISOString()
-      })
-      .eq('id', project.id)
+    existingNames.add(newName) // 預先添加避免後續衝突
+    return { ...project, newName }
+  })
 
-    if (!updateError) {
-      migratedProjects++
-      existingNames.add(newName)
+  // 並行執行所有專案更新
+  const updateResults = await Promise.all(
+    projectsToMigrate.map(project =>
+      supabase
+        .from('projects')
+        .update({
+          user_id: authUserId,
+          name: project.newName,
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', project.id)
+        .then(result => ({ projectId: project.id, error: result.error }))
+    )
+  )
 
-      // 計算遷移的對話數量
-      const { count } = await supabase
-        .from('conversations')
-        .select('id', { count: 'exact', head: true })
-        .eq('project_id', project.id)
+  // 統計成功遷移的專案
+  const successfulProjectIds = updateResults
+    .filter(r => !r.error)
+    .map(r => r.projectId)
+  migratedProjects = successfulProjectIds.length
 
-      migratedConversations += count || 0
-    }
+  // 一次性查詢所有成功遷移專案的對話數量
+  if (successfulProjectIds.length > 0) {
+    const { count } = await supabase
+      .from('conversations')
+      .select('id', { count: 'exact', head: true })
+      .in('project_id', successfulProjectIds)
+
+    migratedConversations = count || 0
   }
 
   // 5. 更新認證用戶，記錄關聯的匿名用戶 ID

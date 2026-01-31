@@ -188,22 +188,20 @@ export async function listAllUsers(params: PaginationParams = {}): Promise<Actio
       return { success: false, error: error.message }
     }
 
-    // 並行查詢每個用戶的專案數量（使用 count 而非返回所有 projects）
+    // 一次查詢所有用戶的專案（避免 N+1 問題）
     const userIds = users?.map(u => u.id) || []
     const projectCountMap = new Map<string, number>()
 
     if (userIds.length > 0) {
-      // 並行執行所有計數查詢
-      const countPromises = userIds.map(userId =>
-        supabase
-          .from('projects')
-          .select('id', { count: 'exact', head: true })
-          .eq('user_id', userId)
-          .then(result => ({ userId, count: result.count || 0 }))
-      )
-      const counts = await Promise.all(countPromises)
-      counts.forEach(({ userId, count }) => {
-        projectCountMap.set(userId, count)
+      // 單一查詢取得所有用戶的專案 user_id，在記憶體中計數
+      const { data: projects } = await supabase
+        .from('projects')
+        .select('user_id')
+        .in('user_id', userIds)
+
+      // 在記憶體中計算每個用戶的專案數量
+      projects?.forEach(p => {
+        projectCountMap.set(p.user_id, (projectCountMap.get(p.user_id) || 0) + 1)
       })
     }
 
@@ -483,21 +481,25 @@ export async function getUserDetail(userId: string): Promise<ActionResult<{
 
     const projectNameMap = new Map(projects?.map(p => [p.id, p.name]) || [])
 
-    // 統計
-    const { count: convCount } = projectIds.length > 0
-      ? await supabase
-          .from('conversations')
-          .select('*', { count: 'exact', head: true })
-          .in('project_id', projectIds)
-      : { count: 0 }
+    // 統計（使用 select('id') 而非 select('*') 減少開銷）
+    const [convCountResult, deployCountResult] = await Promise.all([
+      projectIds.length > 0
+        ? supabase
+            .from('conversations')
+            .select('id', { count: 'exact', head: true })
+            .in('project_id', projectIds)
+        : Promise.resolve({ count: 0 }),
+      projectIds.length > 0
+        ? supabase
+            .from('deployments')
+            .select('id', { count: 'exact', head: true })
+            .in('project_id', projectIds)
+            .eq('status', 'success')
+        : Promise.resolve({ count: 0 })
+    ])
 
-    const { count: deployCount } = projectIds.length > 0
-      ? await supabase
-          .from('deployments')
-          .select('*', { count: 'exact', head: true })
-          .in('project_id', projectIds)
-          .eq('status', 'success')
-      : { count: 0 }
+    const convCount = convCountResult.count || 0
+    const deployCount = deployCountResult.count || 0
 
     const { data: llmUsage } = await supabase
       .from('llm_usage')
