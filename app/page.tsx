@@ -1183,7 +1183,41 @@ function ChatSection({
     { key: 'complete', title: '已上線' },
   ]
 
-  const currentStageIndex = stages.findIndex(s => s.key === currentStage)
+  // 將後端 stage 值映射到前端顯示的 stage
+  const mapBackendStageToFrontend = (backendStage: string | undefined): string => {
+    if (!backendStage) return 'discovery'
+
+    // 初始階段
+    if (backendStage === 'init') return 'discovery'
+
+    // PRD Discovery 和釐清階段
+    if (backendStage.includes('prd_discovery') ||
+        backendStage === 'clarify_question' ||
+        backendStage === 'batch_confirm' ||
+        backendStage === 'clarify_summary') return 'clarify'
+
+    // Spec Discovery 和規格階段
+    if (backendStage.includes('spec_') ||
+        backendStage === 'formulation' ||
+        backendStage.includes('feature') ||
+        backendStage.includes('schema')) return 'formulation'
+
+    // 程式生成階段
+    if (backendStage === 'generating' ||
+        backendStage.includes('code') ||
+        backendStage.includes('build')) return 'generating'
+
+    // 完成/部署階段
+    if (backendStage === 'completed' ||
+        backendStage === 'complete' ||
+        backendStage.includes('deploy')) return 'complete'
+
+    // 預設返回 clarify（大多數對話都在釐清階段）
+    return 'clarify'
+  }
+
+  const mappedStage = mapBackendStageToFrontend(currentStage)
+  const currentStageIndex = stages.findIndex(s => s.key === mappedStage)
 
   return (
     <AnimatePresence>
@@ -1260,7 +1294,7 @@ function ChatSection({
                   key={stage.key}
                   step={i + 1}
                   title={stage.title}
-                  active={currentStage === stage.key}
+                  active={mappedStage === stage.key}
                   completed={i < currentStageIndex}
                 />
               ))}
