@@ -1026,7 +1026,7 @@ function ChatSection({
   // 滾動到底部
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [messages])
+  }, [messages, typingStage])
 
   // 重置狀態當離開
   useEffect(() => {
