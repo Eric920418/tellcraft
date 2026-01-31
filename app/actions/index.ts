@@ -2128,6 +2128,156 @@ export async function getUserProjects(params: {
 }
 
 /**
+ * 獲取專案提醒（用於首頁顯示待處理專案）
+ * 支援匿名用戶和已登入用戶
+ */
+export async function getProjectReminder(input: {
+  anonymousId?: string
+} = {}): Promise<ActionResult<{
+  hasReminder: boolean
+  reminder?: {
+    type: 'in_progress' | 'completed' | 'failed'
+    projectId: string
+    projectName: string
+    conversationId?: string
+    message: string
+    url?: string
+    updatedAt: string
+  }
+}>> {
+  const { anonymousId } = input
+
+  // 嘗試從認證 session 獲取用戶
+  const authClient = await createClient()
+  const { data: { user: authUser } } = await authClient.auth.getUser()
+
+  let userId: string | null = null
+
+  if (authUser) {
+    // 已登入用戶
+    const { data: user } = await supabase
+      .from('users')
+      .select('id')
+      .eq('id', authUser.id)
+      .single()
+    userId = user?.id || null
+  } else if (anonymousId) {
+    // 匿名用戶
+    const email = `${anonymousId}@anonymous.tellcraft.app`
+    const { data: user } = await supabase
+      .from('users')
+      .select('id')
+      .eq('email', email)
+      .single()
+    userId = user?.id || null
+  }
+
+  if (!userId) {
+    return { success: true, data: { hasReminder: false } }
+  }
+
+  // 1. 先檢查是否有進行中的專案（draft/generating）有未完成對話
+  const { data: inProgressProject } = await supabase
+    .from('projects')
+    .select('id, name, status, updated_at')
+    .eq('user_id', userId)
+    .in('status', ['draft', 'generating'])
+    .order('updated_at', { ascending: false })
+    .limit(1)
+    .single()
+
+  if (inProgressProject) {
+    // 檢查是否有未完成的對話
+    const { data: pendingConv } = await supabase
+      .from('conversations')
+      .select('id, updated_at')
+      .eq('project_id', inProgressProject.id)
+      .eq('spec_complete', false)
+      .order('updated_at', { ascending: false })
+      .limit(1)
+      .single()
+
+    if (pendingConv) {
+      return {
+        success: true,
+        data: {
+          hasReminder: true,
+          reminder: {
+            type: 'in_progress',
+            projectId: inProgressProject.id,
+            projectName: inProgressProject.name,
+            conversationId: pendingConv.id,
+            message: inProgressProject.status === 'generating'
+              ? '你的專案正在生成中，點擊查看進度'
+              : '你有一個專案正在進行中，點擊繼續',
+            updatedAt: pendingConv.updated_at
+          }
+        }
+      }
+    }
+  }
+
+  // 2. 檢查是否有最近完成的專案（deployed，24 小時內）
+  const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString()
+  const { data: completedProject } = await supabase
+    .from('projects')
+    .select('id, name, status, vercel_url, custom_domain, updated_at')
+    .eq('user_id', userId)
+    .eq('status', 'deployed')
+    .gte('updated_at', oneDayAgo)
+    .order('updated_at', { ascending: false })
+    .limit(1)
+    .single()
+
+  if (completedProject) {
+    const url = completedProject.custom_domain || completedProject.vercel_url
+    return {
+      success: true,
+      data: {
+        hasReminder: true,
+        reminder: {
+          type: 'completed',
+          projectId: completedProject.id,
+          projectName: completedProject.name,
+          message: '你的專案已上線！點擊查看',
+          url: url ? (url.startsWith('http') ? url : `https://${url}`) : undefined,
+          updatedAt: completedProject.updated_at
+        }
+      }
+    }
+  }
+
+  // 3. 檢查是否有失敗的專案（failed，24 小時內）
+  const { data: failedProject } = await supabase
+    .from('projects')
+    .select('id, name, status, updated_at')
+    .eq('user_id', userId)
+    .eq('status', 'failed')
+    .gte('updated_at', oneDayAgo)
+    .order('updated_at', { ascending: false })
+    .limit(1)
+    .single()
+
+  if (failedProject) {
+    return {
+      success: true,
+      data: {
+        hasReminder: true,
+        reminder: {
+          type: 'failed',
+          projectId: failedProject.id,
+          projectName: failedProject.name,
+          message: '你的專案生成失敗，點擊重試',
+          updatedAt: failedProject.updated_at
+        }
+      }
+    }
+  }
+
+  return { success: true, data: { hasReminder: false } }
+}
+
+/**
  * 獲取專案詳情
  */
 export async function getProjectDetail(projectId: string): Promise<ActionResult<{

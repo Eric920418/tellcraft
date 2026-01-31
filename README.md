@@ -177,6 +177,19 @@ NEXT_PUBLIC_APP_URL=https://tellcraft.com
 
 這樣確保用戶重新整理頁面時，能自動恢復未完成的對話。
 
+**專案提醒橫幅**（2026-01-31 新增）：
+
+用戶回到首頁時，顯示提醒橫幅：
+
+| 情況 | 提醒類型 | 顏色 | 訊息 |
+|------|----------|------|------|
+| 有 draft/generating 專案 + 未完成對話 | `in_progress` | 藍色 | 「你有一個專案正在進行中，點擊繼續」|
+| 專案 deployed（24h 內）| `completed` | 綠色 | 「你的專案已上線！點擊查看」|
+| 專案 failed（24h 內）| `failed` | 紅色 | 「你的專案生成失敗，點擊重試」|
+
+- 使用 `sessionStorage` 記錄關閉狀態（關閉瀏覽器後重置）
+- 支援匿名用戶和已登入用戶
+
 **Chat 相關 Server Actions**：
 - `initializeSession` - 創建或獲取匿名用戶的會話（訪客模式，支援恢復指定對話）
 - `initializeSessionFromAuth` - 從認證 session 初始化（已登入用戶，支援帳號合併）

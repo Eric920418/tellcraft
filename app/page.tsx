@@ -24,6 +24,7 @@ import {
 } from './actions'
 import ConversationPicker from './components/ConversationPicker'
 import LoginPrompt, { shouldShowLoginPrompt, dismissLoginPrompt } from './components/LoginPrompt'
+import ProjectReminder from './components/ProjectReminder'
 
 // ============ Types ============
 interface Message {
@@ -654,7 +655,7 @@ function ChatSection({
   const [messages, setMessages] = useState<Message[]>([])
   const [input, setInput] = useState('')
   const [isTyping, setIsTyping] = useState(false)
-  const [showTypingIndicator, setShowTypingIndicator] = useState(false)
+  const [typingStage, setTypingStage] = useState<'none' | 'dots' | 'message'>('none')
   const [currentStage, setCurrentStage] = useState<Message['stage']>('discovery')
   const [sessionInfo, setSessionInfo] = useState<SessionInfo | null>(null)
   const [isInitializing, setIsInitializing] = useState(false)
@@ -666,18 +667,21 @@ function ChatSection({
   const inputRef = useRef<HTMLTextAreaElement>(null)
   const typingTimerRef = useRef<NodeJS.Timeout | null>(null)
 
-  // 延遲顯示打字指示器（10 秒後才顯示）
+  // 打字指示器：立即顯示 "..."，10 秒後顯示完整提示
   useEffect(() => {
     if (isTyping) {
+      // 立即顯示 "..."
+      setTypingStage('dots')
+      // 10 秒後顯示完整提示
       typingTimerRef.current = setTimeout(() => {
-        setShowTypingIndicator(true)
+        setTypingStage('message')
       }, 10000)
     } else {
       if (typingTimerRef.current) {
         clearTimeout(typingTimerRef.current)
         typingTimerRef.current = null
       }
-      setShowTypingIndicator(false)
+      setTypingStage('none')
     }
     return () => {
       if (typingTimerRef.current) {
@@ -1494,7 +1498,7 @@ function ChatSection({
                 )
               })}
 
-              {showTypingIndicator && (
+              {typingStage !== 'none' && (
                 <motion.div
                   initial={{ opacity: 0, y: 10 }}
                   animate={{ opacity: 1, y: 0 }}
@@ -1514,15 +1518,23 @@ function ChatSection({
                     border: '1px solid var(--border-color)',
                     display: 'inline-flex',
                     alignItems: 'center',
-                    gap: 10,
+                    gap: typingStage === 'message' ? 10 : 4,
                   }}>
-                    <span style={{ fontSize: 14, color: 'var(--gray-500)' }}>問題正在釐清中，請稍等</span>
+                    {typingStage === 'message' && (
+                      <span style={{ fontSize: 14, color: 'var(--gray-500)' }}>問題正在釐清中，請稍等</span>
+                    )}
                     {[0, 1, 2].map(i => (
                       <motion.span
                         key={i}
                         animate={{ opacity: [0.3, 1, 0.3] }}
                         transition={{ duration: 1, repeat: Infinity, delay: i * 0.2 }}
-                        style={{ width: 5, height: 5, borderRadius: '50%', background: 'var(--gray-400)', display: 'inline-block' }}
+                        style={{
+                          width: typingStage === 'message' ? 5 : 6,
+                          height: typingStage === 'message' ? 5 : 6,
+                          borderRadius: '50%',
+                          background: 'var(--gray-400)',
+                          display: 'inline-block'
+                        }}
                       />
                     ))}
                   </div>
@@ -2708,6 +2720,13 @@ function HomeContent() {
     avatarUrl?: string
   } | null>(null)
   const [isLoadingUser, setIsLoadingUser] = useState(true)
+  const [anonymousId, setAnonymousId] = useState<string | undefined>(undefined)
+
+  // 獲取 anonymousId（用於提醒組件）
+  useEffect(() => {
+    const id = localStorage.getItem('tellcraft_anonymous_id') || undefined
+    setAnonymousId(id)
+  }, [])
 
   // 檢查 URL 參數，如果有 conversation 則恢復對話
   useEffect(() => {
@@ -2760,8 +2779,22 @@ function HomeContent() {
     }
   }, [])
 
+  // 處理提醒的繼續對話
+  const handleContinueFromReminder = useCallback((conversationId: string) => {
+    setResumeConversationId(conversationId)
+    setIsChatActive(true)
+  }, [])
+
   return (
     <main>
+      {/* Project Reminder - 提醒用戶有未完成的專案 (隱藏於 Chat 模式) */}
+      {!isChatActive && (
+        <ProjectReminder
+          anonymousId={anonymousId}
+          onContinue={handleContinueFromReminder}
+        />
+      )}
+
       {/* Theme Toggler - Fixed Top Left (隱藏於 Chat 模式) */}
       <AnimatePresence mode="wait">
         {!isChatActive && (
