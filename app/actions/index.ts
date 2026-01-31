@@ -2710,11 +2710,12 @@ export async function skipClarifyItem(input: {
 
 /**
  * 添加新的釐清項目（Discovery 階段產出）
+ * 包含去重邏輯，避免語意相似的問題重複出現
  */
 export async function addClarifyItems(input: {
   sessionId: string
   items: ClarifyItem[]
-}): Promise<ActionResult<{ addedCount: number }>> {
+}): Promise<ActionResult<{ addedCount: number; duplicatesRemoved: number }>> {
   const { sessionId, items } = input
 
   // 讀取當前 session
@@ -2724,18 +2725,53 @@ export async function addClarifyItems(input: {
   }
 
   const session = sessionResult.data
-  const clarifyItems = [...session.clarifyItems, ...items]
 
-  // 更新 session
-  await updateBddSession({
-    sessionId,
-    updates: {
-      clarifyItems,
-      totalDiscovered: session.totalDiscovered + items.length,
-    },
+  // 收集所有現有問題（用於去重）
+  const allExistingItems = [
+    ...session.clarifyItems,
+    ...session.stagingItems,
+    ...session.resolvedItems,
+  ]
+
+  // 正規化問題文字（移除標點符號、空白，轉小寫）
+  const normalizeText = (text: string): string => {
+    return text
+      .toLowerCase()
+      .replace(/[，。？！、：；""''（）\[\]【】\s]/g, '')
+      .replace(/[,.?!:;"'()\[\]\s]/g, '')
+  }
+
+  // 建立現有問題的正規化集合
+  const existingNormalized = new Set(
+    allExistingItems.map(item => normalizeText(item.whiteTextQuestion || item.question))
+  )
+
+  // 過濾掉重複的項目
+  const uniqueItems = items.filter(item => {
+    const normalized = normalizeText(item.whiteTextQuestion || item.question)
+    if (existingNormalized.has(normalized)) {
+      return false // 跳過重複項目
+    }
+    existingNormalized.add(normalized) // 加入集合避免新項目間重複
+    return true
   })
 
-  return { success: true, data: { addedCount: items.length } }
+  const duplicatesRemoved = items.length - uniqueItems.length
+
+  if (uniqueItems.length > 0) {
+    const clarifyItems = [...session.clarifyItems, ...uniqueItems]
+
+    // 更新 session
+    await updateBddSession({
+      sessionId,
+      updates: {
+        clarifyItems,
+        totalDiscovered: session.totalDiscovered + uniqueItems.length,
+      },
+    })
+  }
+
+  return { success: true, data: { addedCount: uniqueItems.length, duplicatesRemoved } }
 }
 
 /**
