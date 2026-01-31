@@ -571,16 +571,17 @@ async function executeBddSpecSkill(input: BddSpecSkillInput) {
         // 發送確認檢查點
         await step.run(`send-batch-confirm-${loopIteration}`, async () => {
           const pendingCount = stagingSession.clarifyItems.filter((i: ClarifyItem) => i.status === 'pending').length
-          const resolvedCount = stagingSession.resolvedItems.length
+          const confirmedCount = stagingSession.resolvedItems.length
+          const currentBatchCount = stagingSession.stagingItems.length
 
-          let confirmText = `📋 **釐清確認檢查點**\n\n以下 ${stagingSession.stagingItems.length} 題已回答完成，請確認是否正確：\n\n`
+          let confirmText = `📋 **釐清確認檢查點**\n\n以下 ${currentBatchCount} 題已回答完成，請確認是否正確：\n\n`
           stagingSession.stagingItems.forEach((item: ClarifyItem, i: number) => {
             const question = item.whiteTextQuestion || item.question
             const answer = getFullAnswer(item)
             confirmText += `**${i + 1}. ${question}**\n\n→ ${answer}\n\n`
           })
           confirmText += `---\n\n`
-          confirmText += `📊 **進度**：已完成 ${resolvedCount} 題，還剩 ${pendingCount} 題\n\n`
+          confirmText += `📊 **進度**：已確認 ${confirmedCount} 題，本批 ${currentBatchCount} 題待確認，還剩 ${pendingCount} 題待回答\n\n`
           confirmText += `請選擇：\n\n`
           confirmText += `- **確認全部 (Y)** - 確認以上答案並繼續\n\n`
           confirmText += `- **修改第 N 題** - 例如輸入「修改 3」重新回答`
@@ -1133,16 +1134,17 @@ async function executeBddSpecSkill(input: BddSpecSkillInput) {
           // 發送確認檢查點
           await step.run(`send-spec-batch-confirm-${specLoopIteration}`, async () => {
             const specPendingCount = specStagingSession.clarifyItems.filter((i: ClarifyItem) => i.status === 'pending').length
-            const specResolvedCount = specStagingSession.resolvedItems.length
+            const specConfirmedCount = specStagingSession.resolvedItems.length
+            const specCurrentBatchCount = specStagingSession.stagingItems.length
 
-            let confirmText = `📋 **規格釐清確認檢查點**\n\n以下 ${specStagingSession.stagingItems.length} 題已回答完成，請確認是否正確：\n\n`
+            let confirmText = `📋 **規格釐清確認檢查點**\n\n以下 ${specCurrentBatchCount} 題已回答完成，請確認是否正確：\n\n`
             specStagingSession.stagingItems.forEach((item: ClarifyItem, i: number) => {
               const question = item.whiteTextQuestion || item.question
               const answer = getFullAnswer(item)
               confirmText += `**${i + 1}. ${question}**\n\n→ ${answer}\n\n`
             })
             confirmText += `---\n\n`
-            confirmText += `📊 **進度**：已完成 ${specResolvedCount} 題，還剩 ${specPendingCount} 題\n\n`
+            confirmText += `📊 **進度**：已確認 ${specConfirmedCount} 題，本批 ${specCurrentBatchCount} 題待確認，還剩 ${specPendingCount} 題待回答\n\n`
             confirmText += `請選擇：\n\n`
             confirmText += `- **確認全部 (Y)** - 確認以上答案並繼續\n\n`
             confirmText += `- **修改第 N 題** - 例如輸入「修改 3」重新回答`

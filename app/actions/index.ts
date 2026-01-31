@@ -1124,22 +1124,37 @@ export async function initializeSession(input: {
     finalConversationId = newConv.id
     isNew = true
   } else {
-    // 有歷史但未指定要恢復哪個，返回空 conversationId 讓前端顯示選擇器
-    // 但為了保持 API 一致性，先創建一個新對話
-    const { data: newConv, error: createConvError } = await supabase
+    // 有歷史但未指定要恢復哪個 → 返回最近的未完成對話
+    const { data: recentConv } = await supabase
       .from('conversations')
-      .insert({
-        project_id: project.id,
-        messages: [],
-        spec_complete: false
-      })
       .select('id')
+      .eq('project_id', project.id)
+      .eq('spec_complete', false)
+      .order('updated_at', { ascending: false })
+      .limit(1)
       .single()
 
-    if (createConvError || !newConv) {
-      return { success: false, error: createConvError?.message || '創建對話失敗' }
+    if (recentConv) {
+      // 有未完成的對話，恢復它
+      finalConversationId = recentConv.id
+    } else {
+      // 沒有未完成的對話，創建新的
+      const { data: newConv, error: createConvError } = await supabase
+        .from('conversations')
+        .insert({
+          project_id: project.id,
+          messages: [],
+          spec_complete: false
+        })
+        .select('id')
+        .single()
+
+      if (createConvError || !newConv) {
+        return { success: false, error: createConvError?.message || '創建對話失敗' }
+      }
+      finalConversationId = newConv.id
+      isNew = true
     }
-    finalConversationId = newConv.id
   }
 
   return {
@@ -1351,21 +1366,37 @@ export async function initializeSessionFromAuth(input?: {
     finalConversationId = newConv.id
     isNew = true
   } else {
-    // 有歷史但未指定，創建新對話
-    const { data: newConv, error: createConvError } = await supabase
+    // 有歷史但未指定要恢復哪個 → 返回最近的未完成對話
+    const { data: recentConv } = await supabase
       .from('conversations')
-      .insert({
-        project_id: project.id,
-        messages: [],
-        spec_complete: false
-      })
       .select('id')
+      .eq('project_id', project.id)
+      .eq('spec_complete', false)
+      .order('updated_at', { ascending: false })
+      .limit(1)
       .single()
 
-    if (createConvError || !newConv) {
-      return { success: false, error: createConvError?.message || '創建對話失敗' }
+    if (recentConv) {
+      // 有未完成的對話，恢復它
+      finalConversationId = recentConv.id
+    } else {
+      // 沒有未完成的對話，創建新的
+      const { data: newConv, error: createConvError } = await supabase
+        .from('conversations')
+        .insert({
+          project_id: project.id,
+          messages: [],
+          spec_complete: false
+        })
+        .select('id')
+        .single()
+
+      if (createConvError || !newConv) {
+        return { success: false, error: createConvError?.message || '創建對話失敗' }
+      }
+      finalConversationId = newConv.id
+      isNew = true
     }
-    finalConversationId = newConv.id
   }
 
   return {
