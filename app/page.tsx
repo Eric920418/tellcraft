@@ -1156,8 +1156,9 @@ function ChatSection({
 
     const content = input.trim()
     setInput('')
-    // 重置輸入框高度
+    // 直接清空 DOM 值（修復中文輸入法問題）
     if (inputRef.current) {
+      inputRef.current.value = ''
       inputRef.current.style.height = 'auto'
     }
 
