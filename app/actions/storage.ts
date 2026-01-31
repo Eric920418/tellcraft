@@ -42,7 +42,7 @@ async function ensureBucketExists(): Promise<{ success: boolean; error?: string 
   if (!exists) {
     const { error: createError } = await supabase.storage.createBucket(BUCKET_NAME, {
       public: false,  // 私有 bucket，需要 signed URL 存取
-      fileSizeLimit: 10485760,  // 10MB
+      fileSizeLimit: 52428800,  // 50MB（預留未來存設計預覽圖等）
     })
 
     if (createError) {

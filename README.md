@@ -492,7 +492,7 @@ Hero → 往下滾動 → 產品介紹（SEO 友好）→ Testimonials → CTA
 |-------|------|------|
 | `bdd-spec` | ✅ 完成 | 完整 5 階段流程：PRD Discovery/Clarify → Formulation → Spec Discovery/Clarify → Actions Design → ISA Config |
 | `coder` | ⏳ 開發中 | 後端 API 生成，待開發完成後與 uiux 並行執行 |
-| `uiux` | 🧪 可測試 | 4 階段前端設計流程：Design Discovery → Design Lab → Implementation → Quality Gate（目前單獨執行） |
+| `uiux` | 🧪 可測試 | 4 階段前端設計流程 + LLM 程式碼生成 + Supabase Storage 儲存（目前單獨執行） |
 | `deployer` | ✅ 完成 | 整合 Vercel Deployments API，部署後自動詢問網域設定 |
 | `domain-manager` | ✅ 完成 | 網域管理入口，支援三種選擇 |
 | `domain-purchase` | ✅ 完成 | Porkbun 網域註冊 |
@@ -577,6 +577,13 @@ isa_config_content TEXT
 - `fixFeatureFormat` - 自癒修復
 - `validateFeatureContent` - 驗證 Feature 格式（E001-E008）
 - `validateMultipleFeatures` - 批量驗證
+
+**UIUX LLM 函數**（`app/lib/llm.ts`）：
+- `generatePageComponent` - 生成頁面元件
+- `generateUiComponent` - 生成 UI 元件（Button, Card, Input 等）
+- `generateLayoutComponent` - 生成 Layout 元件（Header, Footer, Sidebar）
+- `generateGlobalStyles` - 生成全域樣式
+- `generateFullFrontend` - 批量生成完整前端
 
 ### UIUX Skill 完整流程
 
@@ -763,26 +770,57 @@ inngest.createFunction(
 - **Modal**：按需啟動 Worker，閒置不花錢
 - **LLM API**：多 Key 輪換分散 rate limit
 
-### 程式碼存儲：Supabase Storage
+### 多租戶架構（Multi-Tenant SaaS）
 
-選擇 Supabase Storage 而非 Git 的原因：
+每個用戶的專案都有獨立的 Supabase + Vercel，但都在 Tellcraft 組織下：
+
+```
+Tellcraft 組織
+│
+├── 主 Supabase（tellcraft 平台本身）
+│   ├── users, projects, conversations...（平台資料）
+│   └── generations bucket（暫存生成的程式碼，50MB 限制）
+│
+├── 用戶 A 的 Supabase Project（動態建立）
+│   └── 用戶 A 的業務資料（訂單、用戶、產品...）
+├── 用戶 B 的 Supabase Project
+│   └── 用戶 B 的業務資料
+└── ...
+
+Tellcraft Vercel Team
+├── tellcraft.com（平台本身）
+├── 用戶 A 的 Vercel Project（動態建立）
+│   └── 綁定用戶 A 的 Supabase
+├── 用戶 B 的 Vercel Project
+│   └── 綁定用戶 B 的 Supabase
+└── ...
+```
+
+### 程式碼生成與部署流程
+
+```
+UIUX Skill 生成程式碼
+      ↓
+暫存到 generations bucket（主 Supabase Storage）
+路徑：/{projectId}/{generationId}/code-package.json
+      ↓
+部署時：
+  1. 用 Supabase Management API 建立用戶專屬 Project（如果還沒有）
+  2. 用 Vercel API 建立用戶專屬 Project（如果還沒有）
+  3. 從 generations 拉程式碼 → Vercel Deployments API 部署
+  4. 設定環境變數（用戶 Supabase URL + Key）
+      ↓
+完成後：generations 暫存檔可保留 7 天後清理
+```
+
+### 為什麼用 Supabase Storage 而非 Git
 
 | 面向 | Git | Supabase Storage |
 |------|-----|------------------|
-| 管理 100 用戶 | ❌ 100 個 repo 很亂 | ✅ 一個 bucket 搞定 |
+| 管理 100 用戶 | ❌ 100 個 repo 很亂 | ✅ 一個 bucket + 路徑分離 |
 | Rate Limit | ❌ GitHub API 有限制 | ✅ 無限制 |
 | 費用 | ❌ Private repo 要錢 | ✅ 便宜 |
-| 版本控制 | ✅ 原生支援 | ⚠️ 自建版本管理 |
-
-```
-/storage/projects/{projectId}/
-  ├── v1/
-  │   ├── src/
-  │   ├── package.json
-  │   └── ...
-  ├── v2/
-  └── current -> v2  (最新版本)
-```
+| 版本控制 | ✅ 原生支援 | ⚠️ 用 generationId 追蹤 |
 
 ### 部署方式：Vercel Deployments API
 

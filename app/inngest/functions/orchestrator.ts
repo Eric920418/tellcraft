@@ -14,9 +14,11 @@ import {
   fixMultipleFeatures,
   validateMultipleFeatures,
   generateClarifySummary,
+  generateFullFrontend,
   type ClarifyItem,
   type ValidationError,
-  type ValidationWarning
+  type ValidationWarning,
+  type UiuxDesignBrief,
 } from '../../lib/llm'
 
 // ============================================================
@@ -381,7 +383,7 @@ function getFullAnswer(item: ClarifyItem): string {
 }
 
 async function executeBddSpecSkill(input: BddSpecSkillInput) {
-  const { step, taskId, projectId, conversationId, userId: _userId, message } = input
+  const { step, taskId, projectId, conversationId, userId, message } = input
 
   // ============================================================
   // 初始化：取得專案背景 & 創建 BDD Session
@@ -1716,37 +1718,64 @@ async function executeBddSpecSkill(input: BddSpecSkillInput) {
 
   // 生成程式碼並儲存到 Supabase Storage
   const uiuxImplementation = await step.run('uiux-generate-code', async () => {
-    // TODO: 實際用 LLM 生成程式碼，目前是 mock 內容
+    // 使用 LLM 生成前端程式碼
+    const llmBrief: UiuxDesignBrief = {
+      scope: designBrief.scope,
+      productType: designBrief.productType,
+      style: designBrief.style,
+      color: designBrief.color,
+      persona: designBrief.persona,
+    }
+
+    const trackingContext = {
+      userId,
+      conversationId,
+      purpose: 'uiux_code_generation',
+    }
+
+    // 根據產品類型決定要生成的頁面
+    const pagesToGenerate = designBrief.productType === 'saas'
+      ? ['Home', 'Dashboard', 'Settings']
+      : designBrief.productType === 'ecommerce'
+      ? ['Home', 'Products', 'Cart']
+      : ['Home', 'About']
+
+    const llmResult = await generateFullFrontend(
+      llmBrief,
+      pagesToGenerate,
+      undefined, // TODO: 傳入 BDD spec
+      trackingContext
+    )
+
+    if (!llmResult.success) {
+      // 如果 LLM 失敗，使用 mock 作為 fallback
+      console.error('[UIUX] LLM 生成失敗，使用 mock fallback')
+    }
+
+    // 組裝 artifacts
     const artifacts: GenerationArtifacts = {
-      pages: [
-        {
-          path: 'app/page.tsx',
-          content: generateMockPageContent('Home', designBrief),
-        },
-        {
-          path: 'app/dashboard/page.tsx',
-          content: generateMockPageContent('Dashboard', designBrief),
-        },
+      pages: llmResult.pages?.map(p => ({
+        path: p.path,
+        content: p.content,
+      })) || [
+        // Fallback mock
+        { path: 'app/page.tsx', content: generateMockPageContent('Home', designBrief) },
+        { path: 'app/dashboard/page.tsx', content: generateMockPageContent('Dashboard', designBrief) },
       ],
-      components: [
-        {
-          path: 'components/ui/Button.tsx',
-          content: generateMockButtonComponent(designBrief),
-        },
-        {
-          path: 'components/ui/Card.tsx',
-          content: generateMockCardComponent(designBrief),
-        },
-        {
-          path: 'components/layout/Header.tsx',
-          content: generateMockHeaderComponent(designBrief),
-        },
+      components: llmResult.components?.map(c => ({
+        path: c.path,
+        content: c.content,
+      })) || [
+        // Fallback mock
+        { path: 'components/ui/Button.tsx', content: generateMockButtonComponent(designBrief) },
+        { path: 'components/ui/Card.tsx', content: generateMockCardComponent(designBrief) },
+        { path: 'components/layout/Header.tsx', content: generateMockHeaderComponent(designBrief) },
       ],
-      styles: [
-        {
-          path: 'styles/globals.css',
-          content: generateMockGlobalStyles(designBrief),
-        },
+      styles: llmResult.styles ? [
+        { path: 'styles/globals.css', content: llmResult.styles },
+      ] : [
+        // Fallback mock
+        { path: 'styles/globals.css', content: generateMockGlobalStyles(designBrief) },
       ],
     }
 

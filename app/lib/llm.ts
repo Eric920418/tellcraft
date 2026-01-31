@@ -1388,3 +1388,372 @@ export function validateMultipleFeatures(
     allWarnings,
   }
 }
+
+// ============================================================
+// UIUX Skill - 程式碼生成
+// ============================================================
+
+export interface UiuxDesignBrief {
+  scope: 'component' | 'page' | 'full'
+  productType: string
+  style: {
+    direction: string
+    references: string[]
+    adjectives: string[]
+  }
+  color: {
+    preference: string
+    brandColor?: string
+    darkMode: boolean
+  }
+  persona: {
+    primary: string
+    context: string
+  }
+}
+
+export interface GeneratedComponent {
+  path: string
+  content: string
+  description: string
+}
+
+const UIUX_SYSTEM_PROMPT = `你是一個專業的前端開發者，專精於 Next.js 14+ App Router 和 Tailwind CSS。
+
+## 技術棧
+- Next.js 14+ App Router（優先使用 Server Components）
+- Tailwind CSS（使用預設值，不自訂）
+- TypeScript
+- motion/react（JavaScript 動畫）
+- tw-animate-css（入場動畫）
+- cn utility（clsx + tailwind-merge）
+
+## UI 規則（必須遵守）
+
+### Components
+- 有鍵盤/focus 行為的組件使用 Base UI、Radix 或 React Aria
+- icon-only buttons 必須有 aria-label
+- 不手寫鍵盤/focus 行為
+
+### Interaction
+- 破壞性操作用 AlertDialog 確認
+- loading state 用 skeleton
+- 使用 h-dvh 而非 h-screen
+- 固定元素尊重 safe-area-inset
+- 錯誤顯示在操作發生處
+
+### Animation
+- 只動畫 transform 和 opacity
+- 不動畫 width/height/top/left/margin/padding
+- 入場用 ease-out
+- 互動反饋不超過 200ms
+- 尊重 prefers-reduced-motion
+
+### Typography
+- 標題用 text-balance
+- 內文用 text-pretty
+- 數據用 tabular-nums
+- 密集 UI 用 truncate 或 line-clamp
+
+### Layout
+- 使用固定 z-index scale（dropdown:10, sticky:20, fixed:30, modal-backdrop:40, modal:50, popover:60, tooltip:70）
+- 方形元素用 size-* 取代 w-* h-*
+
+### Design
+- 不使用漸層（除非明確要求）
+- 不使用紫色漸層
+- 不使用 glow 效果作為主要 affordance
+- empty state 有明確的下一步 action
+- 每個視圖限制一個 accent color
+
+### 禁止（AI Slop 特徵）
+- Inter, Roboto, Arial 作為唯一字體
+- 紫色漸層 on 白色背景
+- Glow effects 作為主要視覺元素
+- 過度使用 emoji 作為 icon
+- 無目的的動畫
+- 千篇一律的 card grid 佈局
+
+## 輸出格式
+使用以下格式輸出每個檔案：
+
+\`\`\`tsx:path/to/file.tsx
+// 檔案內容
+\`\`\`
+
+確保每個檔案都是完整可用的，包含所有必要的 imports。`
+
+/**
+ * 生成頁面元件
+ */
+export async function generatePageComponent(
+  pageName: string,
+  brief: UiuxDesignBrief,
+  bddSpec?: string,
+  trackingContext?: LlmTrackingContext
+): Promise<{ success: boolean; component?: GeneratedComponent; error?: string }> {
+  const prompt = `根據以下設計簡報生成 ${pageName} 頁面：
+
+## 設計簡報
+- 產品類型：${brief.productType}
+- 風格方向：${brief.style.direction}
+- 參考：${brief.style.references.join(', ') || '無'}
+- 配色偏好：${brief.color.preference}
+- Dark Mode：${brief.color.darkMode ? '需要支援' : '不需要'}
+- 目標用戶：${brief.persona.primary}
+
+${bddSpec ? `## BDD 規格\n${bddSpec}` : ''}
+
+請生成 \`app/${pageName.toLowerCase()}/page.tsx\` 檔案。
+
+要求：
+1. 使用 Server Component（除非需要互動）
+2. 包含必要的 metadata export
+3. RWD 支援（mobile-first）
+4. 符合上述所有 UI 規則`
+
+  const response = await callClaude(
+    UIUX_SYSTEM_PROMPT,
+    [{ role: 'user', content: prompt }],
+    { maxTokens: 4096, temperature: 0.7 },
+    trackingContext
+  )
+
+  if (!response.success || !response.content) {
+    return { success: false, error: response.error }
+  }
+
+  // 解析生成的程式碼
+  const codeMatch = response.content.match(/```tsx:([^\n]+)\n([\s\S]*?)```/)
+  if (!codeMatch) {
+    return { success: false, error: '無法解析生成的程式碼' }
+  }
+
+  return {
+    success: true,
+    component: {
+      path: codeMatch[1].trim(),
+      content: codeMatch[2].trim(),
+      description: `${pageName} 頁面`,
+    },
+  }
+}
+
+/**
+ * 生成 UI 元件
+ */
+export async function generateUiComponent(
+  componentName: string,
+  componentType: 'button' | 'card' | 'input' | 'modal' | 'header' | 'footer' | 'sidebar' | 'nav' | 'other',
+  brief: UiuxDesignBrief,
+  trackingContext?: LlmTrackingContext
+): Promise<{ success: boolean; component?: GeneratedComponent; error?: string }> {
+  const prompt = `根據以下設計簡報生成 ${componentName} 元件：
+
+## 設計簡報
+- 產品類型：${brief.productType}
+- 風格方向：${brief.style.direction}
+- 配色偏好：${brief.color.preference}
+- Dark Mode：${brief.color.darkMode ? '需要支援' : '不需要'}
+
+## 元件類型
+${componentType}
+
+請生成 \`components/ui/${componentName}.tsx\` 檔案。
+
+要求：
+1. 使用 forwardRef 模式
+2. 包含完整的 TypeScript 類型
+3. 使用 cn utility 處理 className
+4. 支援 variant 和 size props（如適用）
+5. 符合無障礙標準`
+
+  const response = await callClaude(
+    UIUX_SYSTEM_PROMPT,
+    [{ role: 'user', content: prompt }],
+    { maxTokens: 2048, temperature: 0.7 },
+    trackingContext
+  )
+
+  if (!response.success || !response.content) {
+    return { success: false, error: response.error }
+  }
+
+  const codeMatch = response.content.match(/```tsx:([^\n]+)\n([\s\S]*?)```/)
+  if (!codeMatch) {
+    return { success: false, error: '無法解析生成的程式碼' }
+  }
+
+  return {
+    success: true,
+    component: {
+      path: codeMatch[1].trim(),
+      content: codeMatch[2].trim(),
+      description: `${componentName} 元件`,
+    },
+  }
+}
+
+/**
+ * 生成 Layout 元件
+ */
+export async function generateLayoutComponent(
+  layoutType: 'header' | 'footer' | 'sidebar' | 'nav',
+  brief: UiuxDesignBrief,
+  trackingContext?: LlmTrackingContext
+): Promise<{ success: boolean; component?: GeneratedComponent; error?: string }> {
+  const layoutNames: Record<string, string> = {
+    header: 'Header',
+    footer: 'Footer',
+    sidebar: 'Sidebar',
+    nav: 'Navigation',
+  }
+
+  const prompt = `根據以下設計簡報生成 ${layoutNames[layoutType]} 元件：
+
+## 設計簡報
+- 產品類型：${brief.productType}
+- 風格方向：${brief.style.direction}
+- 配色偏好：${brief.color.preference}
+- Dark Mode：${brief.color.darkMode ? '需要支援' : '不需要'}
+
+請生成 \`components/layout/${layoutNames[layoutType]}.tsx\` 檔案。
+
+要求：
+1. ${layoutType === 'header' ? 'sticky top-0，支援 backdrop-blur' : ''}
+2. ${layoutType === 'sidebar' ? '支援 collapsed 狀態' : ''}
+3. ${layoutType === 'nav' ? '支援 mobile menu（hamburger）' : ''}
+4. ${layoutType === 'footer' ? '包含版權和常用連結' : ''}
+5. RWD 支援
+6. 使用 safe-area-inset（如適用）`
+
+  const response = await callClaude(
+    UIUX_SYSTEM_PROMPT,
+    [{ role: 'user', content: prompt }],
+    { maxTokens: 2048, temperature: 0.7 },
+    trackingContext
+  )
+
+  if (!response.success || !response.content) {
+    return { success: false, error: response.error }
+  }
+
+  const codeMatch = response.content.match(/```tsx:([^\n]+)\n([\s\S]*?)```/)
+  if (!codeMatch) {
+    return { success: false, error: '無法解析生成的程式碼' }
+  }
+
+  return {
+    success: true,
+    component: {
+      path: codeMatch[1].trim(),
+      content: codeMatch[2].trim(),
+      description: `${layoutNames[layoutType]} 元件`,
+    },
+  }
+}
+
+/**
+ * 生成全域樣式
+ */
+export async function generateGlobalStyles(
+  brief: UiuxDesignBrief,
+  trackingContext?: LlmTrackingContext
+): Promise<{ success: boolean; content?: string; error?: string }> {
+  const prompt = `根據以下設計簡報生成 globals.css：
+
+## 設計簡報
+- 風格方向：${brief.style.direction}
+- 配色偏好：${brief.color.preference}
+- 品牌色：${brief.color.brandColor || '使用預設藍色'}
+- Dark Mode：${brief.color.darkMode ? '需要支援' : '不需要'}
+
+請生成 \`styles/globals.css\` 檔案。
+
+要求：
+1. 使用 CSS 變數定義顏色
+2. 包含 :root 和 .dark 兩組配色
+3. 定義 z-index scale
+4. 使用 Tailwind @layer 結構
+5. 不要加入不必要的裝飾`
+
+  const response = await callClaude(
+    UIUX_SYSTEM_PROMPT,
+    [{ role: 'user', content: prompt }],
+    { maxTokens: 2048, temperature: 0.5 },
+    trackingContext
+  )
+
+  if (!response.success || !response.content) {
+    return { success: false, error: response.error }
+  }
+
+  const codeMatch = response.content.match(/```css:([^\n]+)\n([\s\S]*?)```/)
+  if (!codeMatch) {
+    // 嘗試不帶路徑的格式
+    const altMatch = response.content.match(/```css\n([\s\S]*?)```/)
+    if (altMatch) {
+      return { success: true, content: altMatch[1].trim() }
+    }
+    return { success: false, error: '無法解析生成的樣式' }
+  }
+
+  return { success: true, content: codeMatch[2].trim() }
+}
+
+/**
+ * 批量生成完整前端
+ */
+export async function generateFullFrontend(
+  brief: UiuxDesignBrief,
+  pages: string[],
+  bddSpec?: string,
+  trackingContext?: LlmTrackingContext
+): Promise<{
+  success: boolean
+  pages?: GeneratedComponent[]
+  components?: GeneratedComponent[]
+  styles?: string
+  error?: string
+}> {
+  const generatedPages: GeneratedComponent[] = []
+  const generatedComponents: GeneratedComponent[] = []
+
+  // 1. 生成頁面
+  for (const pageName of pages) {
+    const result = await generatePageComponent(pageName, brief, bddSpec, trackingContext)
+    if (result.success && result.component) {
+      generatedPages.push(result.component)
+    }
+  }
+
+  // 2. 生成基礎 UI 元件
+  const uiComponents: Array<{ name: string; type: 'button' | 'card' | 'input' }> = [
+    { name: 'Button', type: 'button' },
+    { name: 'Card', type: 'card' },
+    { name: 'Input', type: 'input' },
+  ]
+
+  for (const comp of uiComponents) {
+    const result = await generateUiComponent(comp.name, comp.type, brief, trackingContext)
+    if (result.success && result.component) {
+      generatedComponents.push(result.component)
+    }
+  }
+
+  // 3. 生成 Layout 元件
+  const layoutResult = await generateLayoutComponent('header', brief, trackingContext)
+  if (layoutResult.success && layoutResult.component) {
+    generatedComponents.push(layoutResult.component)
+  }
+
+  // 4. 生成全域樣式
+  const stylesResult = await generateGlobalStyles(brief, trackingContext)
+
+  return {
+    success: true,
+    pages: generatedPages,
+    components: generatedComponents,
+    styles: stylesResult.content,
+  }
+}
