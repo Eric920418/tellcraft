@@ -122,9 +122,8 @@ export default function ProjectReminder({ anonymousId, onContinue, onDismiss }: 
           transition={{ duration: 0.5, ease: smoothEasing }}
           style={{
             position: 'fixed',
-            bottom: 32,
-            left: '50%',
-            transform: 'translateX(-50%)',
+            bottom: 24,
+            right: 24,
             zIndex: 1001,
           }}
         >
