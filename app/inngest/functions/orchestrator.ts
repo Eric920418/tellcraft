@@ -40,6 +40,9 @@ export const handleUserRequest = inngest.createFunction(
     id: 'handle-user-request',
     name: '處理用戶請求',
     retries: 3,
+    concurrency: {
+      limit: 50,  // 同時最多 50 個並行執行
+    },
   },
   { event: 'user/request' },
   async ({ event, step }) => {

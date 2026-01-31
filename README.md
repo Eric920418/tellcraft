@@ -759,7 +759,7 @@ inngest.createFunction(
   {
     id: 'handle-user-request',
     concurrency: {
-      limit: 10,  // 同時最多處理 10 個請求
+      limit: 50,  // 同時最多處理 50 個請求
     },
   },
   // ...
