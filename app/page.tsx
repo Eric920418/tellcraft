@@ -836,15 +836,34 @@ function ChatSection({
           setError(sendResult.error || '發送消息失敗')
         }
         return // 已經設置 isInitializing = false，直接返回
-      } else if (hasHistory && !session.isAuthenticated) {
-        // 沒有初始消息但有歷史對話 → 顯示對話選擇器
-        setIsLoadingConversations(true)
-        const convResult = await getUserConversations({ userId: session.userId })
-        if (convResult.success && convResult.data) {
-          setConversations(convResult.data.conversations)
+      } else if (hasHistory) {
+        // 沒有初始消息但有歷史對話 → 自動恢復最近對話
+        const historyResult = await getConversationMessages({
+          conversationId: session.conversationId
+        })
+
+        if (historyResult.success && historyResult.data) {
+          const historyMessages: Message[] = historyResult.data.messages.map((m) => ({
+            id: m.id,
+            role: m.role,
+            content: m.content,
+            timestamp: new Date(m.timestamp),
+            stage: m.stage as Message['stage']
+          }))
+          setMessages(historyMessages)
+
+          // 找到最後一條 AI 消息的 stage
+          const lastAiMessage = historyMessages.filter(m => m.role === 'assistant').pop()
+          if (lastAiMessage?.stage) {
+            setCurrentStage(lastAiMessage.stage)
+          }
+
+          // 設定最後時間戳用於輪詢
+          if (historyMessages.length > 0) {
+            const lastMsg = historyMessages[historyMessages.length - 1]
+            setLastTimestamp(lastMsg.timestamp.toISOString())
+          }
         }
-        setIsLoadingConversations(false)
-        setShowConversationPicker(true)
       }
 
       setIsInitializing(false)

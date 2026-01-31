@@ -68,7 +68,7 @@ export const handleUserRequest = inngest.createFunction(
       const immediateMessage = {
         id: crypto.randomUUID(),
         role: 'assistant',
-        content: '收到！正在分析您的需求...',
+        content: '收到！讓我先了解一下你的需求，稍後會有幾個問題想確認。',
         timestamp: new Date().toISOString(),
         stage: 'init',
       }
@@ -300,24 +300,17 @@ async function sendMessage(conversationId: string, content: string, stage?: stri
     .eq('id', conversationId)
 }
 
-// 輔助函數：格式化釐清問題
-function formatClarifyQuestion(item: ClarifyItem, index: number, total: number): string {
-  let text = `---\n[釐清進度：第 ${index + 1} / 總 ${total} 題] [優先級：${item.priority}]\n\n`
-  text += `**問題**\n\n${item.whiteTextQuestion || item.question}\n\n`
-
-  if (item.location) {
-    text += `**定位**\n\n${item.location}\n\n`
-  }
+// 輔助函數：格式化釐清問題（簡潔版：只顯示問題和選項）
+function formatClarifyQuestion(item: ClarifyItem, _index: number, _total: number): string {
+  let text = item.whiteTextQuestion || item.question
 
   if (item.options && item.options.length > 0) {
-    text += `**選項**\n\n`
+    text += '\n\n'
     text += item.options.map((opt, j) =>
       `${String.fromCharCode(65 + j)}. ${opt.description || opt.label}`
     ).join('\n')
-    text += '\n\n（或輸入您的答案）'
   }
 
-  text += '\n---'
   return text
 }
 
@@ -399,18 +392,11 @@ async function executeBddSpecSkill(input: BddSpecSkillInput) {
     if (prdDiscoveryResult.itemCount === 0) {
       await sendMessage(
         conversationId,
-        `需求分析完成！您的需求描述非常清楚，沒有需要額外釐清的問題。\n\n正在產出規格...`,
-        'prd_discovery_complete'
-      )
-    } else {
-      await sendMessage(
-        conversationId,
-        `需求分析完成，發現 **${prdDiscoveryResult.itemCount}** 個需要釐清的問題。\n\n` +
-        `我會一題一題詢問，每 5 題會請您確認一次。\n` +
-        `您可以隨時輸入「跳過」跳過低優先級問題，或輸入「完成釐清」結束釐清階段。`,
+        `需求很清楚，正在產出規格...`,
         'prd_discovery_complete'
       )
     }
+    // 如果有問題要釐清，不發送額外消息，直接進入問答
   })
 
   // Phase 1.2: PRD Clarify Loop
@@ -954,12 +940,7 @@ async function executeBddSpecSkill(input: BddSpecSkillInput) {
       })
       await sendMessage(
         conversationId,
-        `規格檢查發現 **${specDiscoveryResult.items.length}** 個可以補充的地方。\n\n` +
-        `這些問題主要關於：\n` +
-        `- 規則完整性\n` +
-        `- Example 覆蓋度\n` +
-        `- 邊界條件\n\n` +
-        `接下來我會一題一題詢問，每 5 題會請您確認一次。`,
+        `規格產出完成，還有 **${specDiscoveryResult.items.length}** 個細節想確認。`,
         'spec_discovery_complete'
       )
     })
