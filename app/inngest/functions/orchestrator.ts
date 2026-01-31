@@ -547,17 +547,15 @@ async function executeBddSpecSkill(input: BddSpecSkillInput) {
       if (stagingSession && stagingSession.stagingItems.length > 0) {
         // 發送確認檢查點
         await step.run(`send-batch-confirm-${loopIteration}`, async () => {
-          let confirmText = `---\n📋 **釐清確認檢查點**\n\n以下 ${stagingSession.stagingItems.length} 題已回答完成，請確認是否正確：\n\n`
-          confirmText += `| # | 問題摘要 | 您的回答 |\n|---|----------|----------|\n`
+          let confirmText = `📋 **釐清確認檢查點**\n\n以下 ${stagingSession.stagingItems.length} 題已回答完成，請確認是否正確：\n\n`
           stagingSession.stagingItems.forEach((item: ClarifyItem, i: number) => {
-            const question = (item.whiteTextQuestion || item.question).slice(0, 30) + '...'
-            const answer = (item.answer || '').slice(0, 20) + '...'
-            confirmText += `| ${i + 1} | ${question} | ${answer} |\n`
+            const question = item.whiteTextQuestion || item.question
+            const answer = item.answer || ''
+            confirmText += `**${i + 1}. ${question}**\n\n→ ${answer}\n\n`
           })
-          confirmText += `\n請選擇：\n`
-          confirmText += `- **確認全部 (Y)** - 確認以上答案並繼續\n`
-          confirmText += `- **修改第 N 題** - 例如輸入「修改 3」重新回答\n`
-          confirmText += `---`
+          confirmText += `---\n\n請選擇：\n\n`
+          confirmText += `- **確認全部 (Y)** - 確認以上答案並繼續\n\n`
+          confirmText += `- **修改第 N 題** - 例如輸入「修改 3」重新回答`
 
           await sendMessage(conversationId, confirmText, 'batch_confirm')
         })
@@ -1098,17 +1096,15 @@ async function executeBddSpecSkill(input: BddSpecSkillInput) {
         if (specStagingSession && specStagingSession.stagingItems.length > 0) {
           // 發送確認檢查點
           await step.run(`send-spec-batch-confirm-${specLoopIteration}`, async () => {
-            let confirmText = `---\n📋 **規格釐清確認檢查點**\n\n以下 ${specStagingSession.stagingItems.length} 題已回答完成，請確認是否正確：\n\n`
-            confirmText += `| # | 問題摘要 | 您的回答 |\n|---|----------|----------|\n`
+            let confirmText = `📋 **規格釐清確認檢查點**\n\n以下 ${specStagingSession.stagingItems.length} 題已回答完成，請確認是否正確：\n\n`
             specStagingSession.stagingItems.forEach((item: ClarifyItem, i: number) => {
-              const question = (item.whiteTextQuestion || item.question).slice(0, 30) + '...'
-              const answer = (item.answer || '').slice(0, 20) + '...'
-              confirmText += `| ${i + 1} | ${question} | ${answer} |\n`
+              const question = item.whiteTextQuestion || item.question
+              const answer = item.answer || ''
+              confirmText += `**${i + 1}. ${question}**\n\n→ ${answer}\n\n`
             })
-            confirmText += `\n請選擇：\n`
-            confirmText += `- **確認全部 (Y)** - 確認以上答案並繼續\n`
-            confirmText += `- **修改第 N 題** - 例如輸入「修改 3」重新回答\n`
-            confirmText += `---`
+            confirmText += `---\n\n請選擇：\n\n`
+            confirmText += `- **確認全部 (Y)** - 確認以上答案並繼續\n\n`
+            confirmText += `- **修改第 N 題** - 例如輸入「修改 3」重新回答`
 
             await sendMessage(conversationId, confirmText, 'spec_batch_confirm')
           })
