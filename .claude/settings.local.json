@@ -58,7 +58,8 @@
       "Bash(__NEW_LINE_22df7d65fa8d6b1d__ echo \"=== 8. 刪除 task_steps ===\")",
       "Bash(__NEW_LINE_22df7d65fa8d6b1d__ echo \"=== 9. 刪除 tasks ===\")",
       "Bash(__NEW_LINE_22df7d65fa8d6b1d__ echo \"=== 10. 刪除 conversations ===\")",
-      "Bash(__NEW_LINE_22df7d65fa8d6b1d__ echo \"=== 11. 刪除 projects ===\")"
+      "Bash(__NEW_LINE_22df7d65fa8d6b1d__ echo \"=== 11. 刪除 projects ===\")",
+      "Bash(node scripts/check-options.js:*)"
     ]
   }
 }

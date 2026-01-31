@@ -326,7 +326,8 @@ export interface ClarifyItem {
   checklistItem?: string  // 對應的檢查清單項目 (A1-A6, B1-B5, C1-C2, D1-D2)
   location?: string  // 定位：哪個實體/功能
   impact?: string  // 影響範圍
-  options?: Array<{ label: string; description: string }>
+  // 支援兩種格式：字串陣列 ["A. 描述..."] 或物件陣列 [{ label, description }]
+  options?: Array<string | { label: string; description: string }>
   status: 'pending' | 'reviewing' | 'confirmed' | 'resolved' | 'skipped' | 'deferred'
   answer?: string
   answeredAt?: string

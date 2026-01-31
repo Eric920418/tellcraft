@@ -32,7 +32,7 @@ interface Message {
   role: 'user' | 'assistant' | 'system'
   content: string
   timestamp: Date
-  stage?: 'init' | 'discovery' | 'clarify' | 'formulation' | 'generating' | 'deploying' | 'complete'
+  stage?: 'init' | 'discovery' | 'clarify' | 'prd_discovery_complete' | 'formulation_start' | 'formulation' | 'generating' | 'deploying' | 'complete'
 }
 
 // ============ Animated Text Components ============
@@ -1493,8 +1493,8 @@ function ChatSection({
                           </div>
                         )}
                       </div>
-                      {/* Init 階段的進度條 */}
-                      {message.stage === 'init' && index === messages.length - 1 && (
+                      {/* 處理中的進度條（init / formulation_start / prd_discovery_complete） */}
+                      {(['init', 'formulation_start', 'prd_discovery_complete'].includes(message.stage || '')) && index === messages.length - 1 && (
                         <motion.div
                           initial={{ opacity: 0, y: 8 }}
                           animate={{ opacity: 1, y: 0 }}
@@ -1534,7 +1534,7 @@ function ChatSection({
                                 color: 'var(--gray-500)',
                                 marginBottom: 6,
                               }}>
-                                正在分析需求...
+                                {message.stage === 'init' ? '正在分析需求...' : '正在產出規格文件...'}
                               </div>
                               <div style={{
                                 height: 3,
@@ -1545,7 +1545,10 @@ function ChatSection({
                                 <motion.div
                                   initial={{ width: '0%' }}
                                   animate={{ width: '100%' }}
-                                  transition={{ duration: 8, ease: 'easeInOut' }}
+                                  transition={{
+                                    duration: message.stage === 'init' ? 8 : 15,
+                                    ease: 'easeInOut'
+                                  }}
                                   style={{
                                     height: '100%',
                                     background: 'var(--black)',

@@ -306,9 +306,20 @@ function formatClarifyQuestion(item: ClarifyItem, _index: number, _total: number
 
   if (item.options && item.options.length > 0) {
     text += '\n\n'
-    text += item.options.map((opt, j) =>
-      `**${String.fromCharCode(65 + j)}.** ${opt.description || opt.label}`
-    ).join('\n\n')
+    text += item.options.map((opt, j) => {
+      // 處理兩種格式：字串或物件
+      if (typeof opt === 'string') {
+        // 字串格式："A. 描述..." - 直接使用，但加粗字母
+        const match = opt.match(/^([A-Z])\.\s*(.*)$/)
+        if (match) {
+          return `**${match[1]}.** ${match[2]}`
+        }
+        return `**${String.fromCharCode(65 + j)}.** ${opt}`
+      } else {
+        // 物件格式：{ label, description }
+        return `**${String.fromCharCode(65 + j)}.** ${opt.description || opt.label || ''}`
+      }
+    }).join('\n\n')
   }
 
   return text
@@ -321,8 +332,17 @@ function getFullAnswer(item: ClarifyItem): string {
   // 如果答案是單個字母（A/B/C/D），找到對應的選項描述
   if (/^[A-Da-d]$/.test(answer) && item.options && item.options.length > 0) {
     const optionIndex = answer.toUpperCase().charCodeAt(0) - 65
-    if (item.options[optionIndex]) {
-      return `**${answer.toUpperCase()}.** ${item.options[optionIndex].description || item.options[optionIndex].label}`
+    const opt = item.options[optionIndex]
+    if (opt) {
+      // 處理兩種格式：字串或物件
+      if (typeof opt === 'string') {
+        // 字串格式："A. 描述..."
+        const match = opt.match(/^[A-Z]\.\s*(.*)$/)
+        return `**${answer.toUpperCase()}.** ${match ? match[1] : opt}`
+      } else {
+        // 物件格式：{ label, description }
+        return `**${answer.toUpperCase()}.** ${opt.description || opt.label || ''}`
+      }
     }
   }
 
