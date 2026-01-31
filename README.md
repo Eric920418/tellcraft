@@ -44,6 +44,38 @@ Dashboard 從 Client Component 改為 Server Component，消除瀑布式載入�
 | Layout 瀑布式請求 | `dashboard/layout.tsx` | getCurrentUser 直接返回 isAdmin | -150ms |
 | select('*') 計數 | 多處 | 改用 select('id') | -200ms |
 
+### 釐清流程簡化（2026-01-31）
+
+將無限迭代改為最多 2 輪，用戶體驗大幅改善：
+
+**舊流程**（問題：無限循環、不可預期）：
+```
+Discovery → 問5題 → 問完 → Re-discovery → 問5題 → ... → 連續2輪沒新問題 → 結束
+```
+
+**新流程**（改善：可預期、最多3輪）：
+```
+第一輪 Discovery（一次產出所有問題）
+    ↓
+告知用戶「總共 N 題」
+    ↓
+每5題確認一次，顯示進度 (5/30)
+    ↓
+全部答完 → 分析是否有遺漏
+    ↓
+├─ 0 題 → 進入 Formulation
+├─ 1-10 題 → 第二輪 → 進入 Formulation
+└─ >10 題 → 第二輪 → 答完 → 再分析 → 第三輪（最後）→ 進入 Formulation
+```
+
+| 改善項目 | 說明 |
+|----------|------|
+| **問題總數可見** | 一開始告知用戶「總共 N 題」|
+| **進度顯示** | 每題顯示 (5/30) 進度 |
+| **動態輪數** | 第二輪 ≤10 題結束；>10 題進入第三輪 |
+| **第三輪保險** | 複雜需求有第三輪兜底，但絕對封頂 |
+| **語意去重** | 每輪都過濾重複問題 |
+
 ### 最新修復（2026-01-31）
 
 修復 BDD Spec Skill 的多項問題：
@@ -62,10 +94,12 @@ Dashboard 從 Client Component 改為 Server Component，消除瀑布式載入�
 | 優化項目 | 節省估算 | 說明 |
 |----------|----------|------|
 | **批量 Feature 修復** | ~2500-5000 tokens/次 | 原本逐個 Feature 調用 LLM，改為一次批量修復 |
+| **語意去重過濾** | 節省重複問答 token | Discovery 後用 Haiku 過濾語意重複問題，避免浪費 token 問相同問題 |
 | **刪除死代碼** | 維護成本 | 移除 `processAnswer`、`translateToWhiteText`、`generateSpecSummary` |
 
 **LLM 函數變更**（`app/lib/llm.ts`）：
 - ✅ 新增 `fixMultipleFeatures()` - 一次 LLM 調用批量修復多個 Feature
+- ✅ 新增 `filterDuplicateQuestions()` - 用 Haiku 判斷語意相似度過濾重複問題
 - ❌ 刪除 `processAnswer()` - 未使用
 - ❌ 刪除 `translateToWhiteText()` - 未使用
 - ❌ 刪除 `generateSpecSummary()` - 未使用
@@ -84,6 +118,7 @@ Dashboard 從 Client Component 改為 Server Component，消除瀑布式載入�
 | **問題格式簡化** | 釐清問題只顯示問題和選項，移除進度/優先級/定位等冗餘資訊 |
 | **自動恢復對話** | 重開網頁時自動恢復最近對話，無需手動選擇 |
 | **問題去重** | `addClarifyItems` 加入正規化去重，避免語意相似問題重複出現 |
+| **語意去重** | Discovery 後用 Claude Haiku 過濾語意重複問題（`filterDuplicateQuestions`）|
 | **確認檢查點格式** | 改用列表格式，完整顯示問題和答案（含選項描述）|
 
 **新增套件**：

@@ -397,7 +397,7 @@ async function executeBddSpecSkill(input: BddSpecSkillInput) {
     }
   })
 
-  // 更新階段
+  // 更新階段並告知用戶問題總數
   await step.run('update-phase-prd-clarify', async () => {
     await updateBddSession({
       sessionId,
@@ -410,19 +410,29 @@ async function executeBddSpecSkill(input: BddSpecSkillInput) {
         `需求很清楚，正在產出規格...`,
         'prd_discovery_complete'
       )
+    } else {
+      // 告知用戶問題總數
+      await sendMessage(
+        conversationId,
+        `我需要釐清 **${prdDiscoveryResult.itemCount}** 個問題，每 5 題會讓您確認一次。`,
+        'prd_discovery_complete'
+      )
     }
-    // 如果有問題要釐清，不發送額外消息，直接進入問答
   })
 
-  // Phase 1.2: PRD Clarify Loop
-  let consecutiveEmptyRounds = 0
+  // Phase 1.2: PRD Clarify Loop（最多 3 輪，第三輪僅在第二輪 >10 題時觸發）
+  let currentRound = 1
   let questionIndex = 0
   let batchCount = 0
-  let loopIteration = 0 // 確保 step name 唯一的計數器
+  let loopIteration = 0
+  let round2QuestionCount = 0  // 記錄第二輪問題數，用於判斷是否需要第三輪
   const BATCH_SIZE = 5
+  const MAX_ROUNDS = 3
+  const ROUND3_THRESHOLD = 10  // 第二輪超過此數量才進入第三輪
 
-  while (consecutiveEmptyRounds < 2) {
+  while (currentRound <= MAX_ROUNDS) {
     loopIteration++
+
     // 取得當前 session 狀態
     const sessionData = await step.run(`get-session-${loopIteration}`, async () => {
       const result = await getBddSession({ sessionId })
@@ -435,60 +445,65 @@ async function executeBddSpecSkill(input: BddSpecSkillInput) {
       (item: ClarifyItem) => item.status === 'pending'
     )
 
-    // 如果沒有待處理問題，進行再次 Discovery
+    // 如果本輪沒有待處理問題
     if (pendingItems.length === 0) {
-      const moreDiscovery = await step.run(`re-discovery-${sessionData.currentRound}`, async () => {
-        const existingItems = [
-          ...sessionData.clarifyItems,
-          ...sessionData.stagingItems,
-          ...sessionData.resolvedItems,
-        ]
+      // 判斷是否需要進行下一輪 discovery
+      const shouldDoDiscovery =
+        currentRound === 1 || // 第一輪結束一定要做
+        (currentRound === 2 && round2QuestionCount > ROUND3_THRESHOLD) // 第二輪 >10 題才做第三輪
 
-        const result = await runPrdDiscovery(
-          message,
-          projectContext || undefined,
-          existingItems,
-          { conversationId, purpose: 're_discovery' }
-        )
+      if (shouldDoDiscovery && currentRound < MAX_ROUNDS) {
+        const nextRound = currentRound + 1
+        const moreDiscovery = await step.run(`round-${nextRound}-discovery`, async () => {
+          const existingItems = [
+            ...sessionData.clarifyItems,
+            ...sessionData.stagingItems,
+            ...sessionData.resolvedItems,
+          ]
 
-        if (!result.success || !result.items?.length) {
-          return { newItems: [] }
-        }
-
-        // 添加新問題
-        await addClarifyItems({ sessionId, items: result.items })
-
-        return { newItems: result.items }
-      })
-
-      if (moreDiscovery.newItems.length === 0) {
-        consecutiveEmptyRounds++
-        await step.run(`update-empty-round-${consecutiveEmptyRounds}`, async () => {
-          await updateBddSession({
-            sessionId,
-            updates: {
-              consecutiveEmptyRounds,
-              currentRound: sessionData.currentRound + 1,
-            },
-          })
-        })
-        continue
-      } else {
-        // 告知用戶發現了新問題
-        await step.run(`notify-new-questions-${loopIteration}`, async () => {
-          await sendMessage(
-            conversationId,
-            `根據您的回答，我發現還有 **${moreDiscovery.newItems.length}** 個細節需要確認。`,
-            'discovery_update'
+          const result = await runPrdDiscovery(
+            message,
+            projectContext || undefined,
+            existingItems,
+            { conversationId, purpose: 're_discovery' },
+            { isFirstRound: false }
           )
-        })
-        consecutiveEmptyRounds = 0
-        continue
-      }
-    }
 
-    // 重置連續空輪數
-    consecutiveEmptyRounds = 0
+          if (!result.success || !result.items?.length) {
+            return { newItems: [] }
+          }
+
+          // 添加新問題
+          await addClarifyItems({ sessionId, items: result.items })
+          return { newItems: result.items }
+        })
+
+        if (moreDiscovery.newItems.length > 0) {
+          // 記錄第二輪問題數（用於判斷是否需要第三輪）
+          if (nextRound === 2) {
+            round2QuestionCount = moreDiscovery.newItems.length
+          }
+
+          currentRound = nextRound
+          await step.run(`notify-round-${nextRound}`, async () => {
+            const roundLabel = nextRound === 2 ? '第二輪' : '第三輪（最後）'
+            const extraNote = nextRound === 3 ? '\n\n這是最後一輪釐清，之後將進入規格產出階段。' : ''
+            await sendMessage(
+              conversationId,
+              `根據您的回答，我發現還有 **${moreDiscovery.newItems.length}** 個細節需要確認（${roundLabel}）。${extraNote}`,
+              `round_${nextRound}_start`
+            )
+            await updateBddSession({
+              sessionId,
+              updates: { currentRound: nextRound },
+            })
+          })
+          continue
+        }
+      }
+      // 本輪結束且無需/無法進入下一輪，跳出循環
+      break
+    }
 
     // 取得當前問題（按優先級排序）
     const priorityOrder = { high: 0, medium: 1, low: 2 }
@@ -496,11 +511,22 @@ async function executeBddSpecSkill(input: BddSpecSkillInput) {
       priorityOrder[a.priority] - priorityOrder[b.priority]
     )
     const currentItem = pendingItems[0]
-    const totalPending = sessionData.totalDiscovered - sessionData.totalResolved
+
+    // 計算進度
+    const totalInRound = sessionData.clarifyItems.length + sessionData.stagingItems.length
+    const answeredInRound = sessionData.stagingItems.length
+    let progressText: string
+    if (currentRound === 1) {
+      progressText = `（${answeredInRound + 1}/${totalInRound + sessionData.resolvedItems.length}）`
+    } else if (currentRound === 2) {
+      progressText = `（第二輪 ${answeredInRound + 1}/${totalInRound}）`
+    } else {
+      progressText = `（最後一輪 ${answeredInRound + 1}/${totalInRound}）`
+    }
 
     // 發送問題
     await step.run(`send-question-${loopIteration}`, async () => {
-      const questionText = formatClarifyQuestion(currentItem, questionIndex, totalPending)
+      const questionText = `${progressText}\n\n${formatClarifyQuestion(currentItem, questionIndex, pendingItems.length)}`
       await sendMessage(conversationId, questionText, 'clarify_question')
     })
 

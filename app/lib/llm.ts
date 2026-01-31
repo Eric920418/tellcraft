@@ -340,7 +340,8 @@ export async function runPrdDiscovery(
   requirements: string,
   projectContext?: string,
   existingItems?: ClarifyItem[],
-  trackingContext?: LlmTrackingContext
+  trackingContext?: LlmTrackingContext,
+  options?: { isFirstRound?: boolean }
 ): Promise<{
   success: boolean
   items?: ClarifyItem[]
@@ -426,7 +427,7 @@ export async function runPrdDiscovery(
 - 每個問題最多 4 個選項（加上「其他」選項）
 - 白話翻譯：將英文欄位名替換為中文，移除程式語法符號
 - 不要問太技術的問題，用領域語言
-- 一次最多返回 10 個問題
+- ${options?.isFirstRound !== false ? '盡可能一次列出所有需要釐清的問題，不要保留' : '只列出根據答案發現的新問題，最多 10 個'}
 - 按優先級排序：High → Medium → Low
 ${existingQA.length ? `
 
@@ -470,6 +471,17 @@ ${pendingQuestions.join('\n')}` : ''}
       status: 'pending',
     }))
 
+    // 語意去重：過濾掉與現有問題重複的新問題
+    if (items.length > 0 && existingItems && existingItems.length > 0) {
+      const filteredItems = await filterDuplicateQuestions(items, existingItems, trackingContext)
+      console.log(`[LLM] 語意去重: ${items.length} → ${filteredItems.length} 題`)
+      return {
+        success: true,
+        items: filteredItems,
+        coverageSummary: parsed.coverageSummary,
+      }
+    }
+
     return {
       success: true,
       items,
@@ -477,6 +489,102 @@ ${pendingQuestions.join('\n')}` : ''}
     }
   } catch (err) {
     return { success: false, error: `解析回應時發生錯誤: ${err}` }
+  }
+}
+
+/**
+ * 語意去重：過濾掉與現有問題語意相似的新問題
+ * 使用 Claude 判斷語意相似度
+ */
+async function filterDuplicateQuestions(
+  newItems: ClarifyItem[],
+  existingItems: ClarifyItem[],
+  trackingContext?: LlmTrackingContext
+): Promise<ClarifyItem[]> {
+  // 提取現有問題的主題摘要
+  const existingTopics = existingItems.map((item, i) => ({
+    id: i + 1,
+    question: item.whiteTextQuestion || item.question,
+    answer: item.answer || '(未回答)',
+  }))
+
+  // 新問題列表
+  const newQuestions = newItems.map((item, i) => ({
+    id: i + 1,
+    question: item.whiteTextQuestion || item.question,
+  }))
+
+  const systemPrompt = `你是一個語意相似度判斷專家。你的任務是找出新問題中，哪些與已經問過的問題在語意上重複。
+
+## 判斷標準
+
+兩個問題算「重複」的情況：
+1. 問的是同一個主題/概念（即使措辭不同）
+2. 問的是同一件事的不同面向（例如：「金額可以有小數嗎？」和「金額要保留幾位小數？」）
+3. 答案會互相矛盾或覆蓋（例如：「日期格式是什麼？」已回答後，不需要再問「用什麼格式記錄日期？」）
+
+兩個問題「不重複」的情況：
+1. 問的是不同實體/功能
+2. 問的是同一實體的不同屬性（例如：「用戶名最多幾個字？」和「用戶 email 格式？」不重複）
+3. 問的是新的邊界條件（例如：已問「最多幾個」，再問「最少幾個」不算重複）
+
+## 輸出格式
+
+只返回 JSON，包含要保留的新問題 ID 列表：
+\`\`\`json
+{
+  "keep": [1, 3, 5],
+  "duplicates": [
+    { "id": 2, "similar_to": 15, "reason": "都在問金額小數點" },
+    { "id": 4, "similar_to": 8, "reason": "都在問分類刪除後的處理" }
+  ]
+}
+\`\`\``
+
+  const userMessage = `## 已經問過的問題（共 ${existingTopics.length} 題）
+
+${existingTopics.map(t => `${t.id}. ${t.question}\n   答: ${t.answer}`).join('\n\n')}
+
+## 新產生的問題（共 ${newQuestions.length} 題）
+
+${newQuestions.map(q => `${q.id}. ${q.question}`).join('\n')}
+
+請判斷新問題中哪些與已問過的問題重複，返回要保留的問題 ID。`
+
+  const response = await callClaude(
+    systemPrompt,
+    [{ role: 'user', content: userMessage }],
+    { maxTokens: 1024, temperature: 0, model: 'claude-3-5-haiku-20241022' }, // 用 Haiku 省錢
+    { ...trackingContext, purpose: 'semantic_dedup' }
+  )
+
+  if (!response.success || !response.content) {
+    console.log('[LLM] 語意去重失敗，返回所有新問題')
+    return newItems
+  }
+
+  try {
+    const jsonMatch = response.content.match(/```json\s*([\s\S]*?)\s*```/) ||
+                      response.content.match(/\{[\s\S]*\}/)
+    if (!jsonMatch) {
+      return newItems
+    }
+
+    const parsed = JSON.parse(jsonMatch[1] || jsonMatch[0])
+    const keepIds = new Set(parsed.keep || [])
+
+    // 記錄被過濾的問題
+    if (parsed.duplicates?.length > 0) {
+      console.log('[LLM] 過濾重複問題:')
+      parsed.duplicates.forEach((d: { id: number; similar_to: number; reason: string }) => {
+        console.log(`  - 新問題 ${d.id} 與舊問題 ${d.similar_to} 重複: ${d.reason}`)
+      })
+    }
+
+    return newItems.filter((_, i) => keepIds.has(i + 1))
+  } catch (err) {
+    console.log('[LLM] 解析語意去重結果失敗:', err)
+    return newItems
   }
 }
 
@@ -799,6 +907,13 @@ ${featuresContent}`
       ...item,
       status: 'pending',
     }))
+
+    // 語意去重：過濾掉與現有問題重複的新問題
+    if (items.length > 0 && existingItems && existingItems.length > 0) {
+      const filteredItems = await filterDuplicateQuestions(items, existingItems, trackingContext)
+      console.log(`[LLM] Spec Discovery 語意去重: ${items.length} → ${filteredItems.length} 題`)
+      return { success: true, items: filteredItems }
+    }
 
     return { success: true, items }
   } catch (err) {
