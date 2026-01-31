@@ -512,16 +512,23 @@ async function executeBddSpecSkill(input: BddSpecSkillInput) {
     )
     const currentItem = pendingItems[0]
 
-    // 計算進度
-    const totalInRound = sessionData.clarifyItems.length + sessionData.stagingItems.length
-    const answeredInRound = sessionData.stagingItems.length
+    // 計算進度（已完成 = resolved + staging，當前 = 已完成 + 1）
+    const totalQuestions = sessionData.clarifyItems.length + sessionData.stagingItems.length + sessionData.resolvedItems.length
+    const completedQuestions = sessionData.resolvedItems.length + sessionData.stagingItems.length
+    const currentQuestionNum = completedQuestions + 1
     let progressText: string
     if (currentRound === 1) {
-      progressText = `（${answeredInRound + 1}/${totalInRound + sessionData.resolvedItems.length}）`
+      progressText = `（${currentQuestionNum}/${totalQuestions}）`
     } else if (currentRound === 2) {
-      progressText = `（第二輪 ${answeredInRound + 1}/${totalInRound}）`
+      // 第二輪只顯示本輪進度
+      const round2Total = sessionData.clarifyItems.length + sessionData.stagingItems.length
+      const round2Current = sessionData.stagingItems.length + 1
+      progressText = `（第二輪 ${round2Current}/${round2Total}）`
     } else {
-      progressText = `（最後一輪 ${answeredInRound + 1}/${totalInRound}）`
+      // 第三輪
+      const round3Total = sessionData.clarifyItems.length + sessionData.stagingItems.length
+      const round3Current = sessionData.stagingItems.length + 1
+      progressText = `（最後一輪 ${round3Current}/${round3Total}）`
     }
 
     // 發送問題

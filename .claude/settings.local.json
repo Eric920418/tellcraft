@@ -48,7 +48,17 @@
       "Bash(pnpm lint:*)",
       "Bash(__NEW_LINE_d437941fd9b38a18__ echo \"=== 6. 刪除 deployments ===\")",
       "Bash(__NEW_LINE_d437941fd9b38a18__ echo \"=== 7. 刪除 generations ===\")",
-      "Bash(__NEW_LINE_d437941fd9b38a18__ echo \"=== 8. 刪除 skill_executions ===\")"
+      "Bash(__NEW_LINE_d437941fd9b38a18__ echo \"=== 8. 刪除 skill_executions ===\")",
+      "Bash(__NEW_LINE_22df7d65fa8d6b1d__ echo \"=== 2. 刪除 audit_logs ===\")",
+      "Bash(__NEW_LINE_22df7d65fa8d6b1d__ echo \"=== 3. 刪除 notifications ===\")",
+      "Bash(__NEW_LINE_22df7d65fa8d6b1d__ echo \"=== 4. 刪除 llm_calls ===\")",
+      "Bash(__NEW_LINE_22df7d65fa8d6b1d__ echo \"=== 5. 刪除 deployments ===\")",
+      "Bash(__NEW_LINE_22df7d65fa8d6b1d__ echo \"=== 6. 刪除 generations ===\")",
+      "Bash(__NEW_LINE_22df7d65fa8d6b1d__ echo \"=== 7. 刪除 skill_executions ===\")",
+      "Bash(__NEW_LINE_22df7d65fa8d6b1d__ echo \"=== 8. 刪除 task_steps ===\")",
+      "Bash(__NEW_LINE_22df7d65fa8d6b1d__ echo \"=== 9. 刪除 tasks ===\")",
+      "Bash(__NEW_LINE_22df7d65fa8d6b1d__ echo \"=== 10. 刪除 conversations ===\")",
+      "Bash(__NEW_LINE_22df7d65fa8d6b1d__ echo \"=== 11. 刪除 projects ===\")"
     ]
   }
 }

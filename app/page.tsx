@@ -32,7 +32,7 @@ interface Message {
   role: 'user' | 'assistant' | 'system'
   content: string
   timestamp: Date
-  stage?: 'discovery' | 'clarify' | 'formulation' | 'generating' | 'deploying' | 'complete'
+  stage?: 'init' | 'discovery' | 'clarify' | 'formulation' | 'generating' | 'deploying' | 'complete'
 }
 
 // ============ Animated Text Components ============
@@ -1493,6 +1493,70 @@ function ChatSection({
                           </div>
                         )}
                       </div>
+                      {/* Init 階段的進度條 */}
+                      {message.stage === 'init' && index === messages.length - 1 && (
+                        <motion.div
+                          initial={{ opacity: 0, y: 8 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          transition={{ duration: 0.4, delay: 0.3 }}
+                          style={{
+                            marginTop: 16,
+                            maxWidth: '85%',
+                          }}
+                        >
+                          <div style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: 12,
+                            padding: '12px 16px',
+                            background: 'var(--white)',
+                            border: '1px solid var(--border-color)',
+                            borderRadius: 8,
+                          }}>
+                            {/* 旋轉圖示 */}
+                            <motion.div
+                              animate={{ rotate: 360 }}
+                              transition={{ duration: 2, repeat: Infinity, ease: 'linear' }}
+                              style={{
+                                width: 18,
+                                height: 18,
+                                flexShrink: 0,
+                              }}
+                            >
+                              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--gray-400)" strokeWidth="2">
+                                <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83" />
+                              </svg>
+                            </motion.div>
+                            {/* 進度條 */}
+                            <div style={{ flex: 1 }}>
+                              <div style={{
+                                fontSize: 12,
+                                color: 'var(--gray-500)',
+                                marginBottom: 6,
+                              }}>
+                                正在分析需求...
+                              </div>
+                              <div style={{
+                                height: 3,
+                                background: 'var(--gray-100)',
+                                borderRadius: 2,
+                                overflow: 'hidden',
+                              }}>
+                                <motion.div
+                                  initial={{ width: '0%' }}
+                                  animate={{ width: '100%' }}
+                                  transition={{ duration: 8, ease: 'easeInOut' }}
+                                  style={{
+                                    height: '100%',
+                                    background: 'var(--black)',
+                                    borderRadius: 2,
+                                  }}
+                                />
+                              </div>
+                            </div>
+                          </div>
+                        </motion.div>
+                      )}
                     </>
                   )}
                 </motion.div>
