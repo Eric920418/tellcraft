@@ -307,8 +307,8 @@ function formatClarifyQuestion(item: ClarifyItem, _index: number, _total: number
   if (item.options && item.options.length > 0) {
     text += '\n\n'
     text += item.options.map((opt, j) =>
-      `${String.fromCharCode(65 + j)}. ${opt.description || opt.label}`
-    ).join('\n')
+      `**${String.fromCharCode(65 + j)}.** ${opt.description || opt.label}`
+    ).join('\n\n')
   }
 
   return text
