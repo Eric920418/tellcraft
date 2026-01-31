@@ -1401,12 +1401,17 @@ function ChatSection({
                 </motion.div>
               )}
 
-              {messages.map((message, index) => (
+              {messages.map((message, index) => {
+                // 只對最後 3 條消息應用進場動畫，避免長列表時新消息延遲過久
+                const isRecentMessage = index >= messages.length - 3
+                const animationDelay = isRecentMessage ? (index - (messages.length - 3)) * 0.05 : 0
+
+                return (
                 <motion.div
                   key={message.id}
-                  initial={{ opacity: 0, y: 20 }}
+                  initial={isRecentMessage ? { opacity: 0, y: 15 } : false}
                   animate={{ opacity: 1, y: 0 }}
-                  transition={{ duration: 0.4, delay: index * 0.05 }}
+                  transition={{ duration: 0.3, delay: animationDelay }}
                   style={{
                     marginBottom: 28,
                     display: 'flex',
@@ -1464,10 +1469,16 @@ function ChatSection({
                     </>
                   )}
                 </motion.div>
-              ))}
+                )
+              })}
 
               {isTyping && (
-                <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} style={{ marginBottom: 28 }}>
+                <motion.div
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ duration: 0.25, delay: 0.15 }}
+                  style={{ marginBottom: 28 }}
+                >
                   <div style={{
                     fontSize: 11,
                     color: 'var(--gray-400)',

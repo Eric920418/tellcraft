@@ -314,6 +314,21 @@ function formatClarifyQuestion(item: ClarifyItem, _index: number, _total: number
   return text
 }
 
+// 輔助函數：解析答案（將選項字母轉為完整描述）
+function getFullAnswer(item: ClarifyItem): string {
+  const answer = item.answer || ''
+
+  // 如果答案是單個字母（A/B/C/D），找到對應的選項描述
+  if (/^[A-Da-d]$/.test(answer) && item.options && item.options.length > 0) {
+    const optionIndex = answer.toUpperCase().charCodeAt(0) - 65
+    if (item.options[optionIndex]) {
+      return `**${answer.toUpperCase()}.** ${item.options[optionIndex].description || item.options[optionIndex].label}`
+    }
+  }
+
+  return answer
+}
+
 async function executeBddSpecSkill(input: BddSpecSkillInput) {
   const { step, taskId, projectId, conversationId, userId: _userId, message } = input
 
@@ -550,7 +565,7 @@ async function executeBddSpecSkill(input: BddSpecSkillInput) {
           let confirmText = `📋 **釐清確認檢查點**\n\n以下 ${stagingSession.stagingItems.length} 題已回答完成，請確認是否正確：\n\n`
           stagingSession.stagingItems.forEach((item: ClarifyItem, i: number) => {
             const question = item.whiteTextQuestion || item.question
-            const answer = item.answer || ''
+            const answer = getFullAnswer(item)
             confirmText += `**${i + 1}. ${question}**\n\n→ ${answer}\n\n`
           })
           confirmText += `---\n\n請選擇：\n\n`
@@ -1099,7 +1114,7 @@ async function executeBddSpecSkill(input: BddSpecSkillInput) {
             let confirmText = `📋 **規格釐清確認檢查點**\n\n以下 ${specStagingSession.stagingItems.length} 題已回答完成，請確認是否正確：\n\n`
             specStagingSession.stagingItems.forEach((item: ClarifyItem, i: number) => {
               const question = item.whiteTextQuestion || item.question
-              const answer = item.answer || ''
+              const answer = getFullAnswer(item)
               confirmText += `**${i + 1}. ${question}**\n\n→ ${answer}\n\n`
             })
             confirmText += `---\n\n請選擇：\n\n`
