@@ -80,20 +80,54 @@ Discovery → 問5題 → 問完 → Re-discovery → 問5題 → ... → 連續
 
 **問題**：Vercel Serverless 有執行時間限制（10-60秒），19 個 Features 無法一次生成，JSON 被截斷導致解析失敗。
 
-**解決方案**：集成 Modal 無伺服器平台，執行長時間 LLM 任務。
+**解決方案**：集成 Modal 無伺服器平台，使用異步回調模式執行長時間 LLM 任務。
 
 | 項目 | 說明 |
 |------|------|
-| **新增檔案** | `modal_functions/formulation.py` - Modal Python 函數 |
-| **修改檔案** | `app/inngest/functions/orchestrator.ts` - 條件調用 Modal |
+| **Modal 函數** | `modal_functions/formulation.py` - 包含 `generate_spec` 端點和 `formulation_worker` 異步 worker |
+| **回調端點** | `app/api/modal/callback/route.ts` - 接收 Modal 完成回調，發送 Inngest 事件 |
+| **Inngest 事件** | `modal/formulation-complete` - Modal 完成後觸發的事件 |
+| **Orchestrator** | 使用 `step.waitForEvent` 等待 Modal 完成（最多 30 分鐘） |
 | **環境變數** | `MODAL_FORMULATION_URL` - Modal HTTP endpoint URL |
 | **Fallback** | 未配置 Modal 時自動使用原有的分批生成邏輯 |
+
+**異步回調架構**：
+```
+Inngest                           Modal                          Vercel
+  │                                 │                              │
+  │  1. 觸發 Modal（不等待）         │                              │
+  │ ────────────────────────────>   │                              │
+  │  2. 立即返回 {accepted: true}   │                              │
+  │ <────────────────────────────   │                              │
+  │                                 │                              │
+  │  3. waitForEvent (最多 30 分鐘) │                              │
+  │  ...                            │  4. formulation_worker 執行  │
+  │                                 │     （Schema + Features）     │
+  │                                 │                              │
+  │                                 │  5. 完成後調用 callback      │
+  │                                 │ ──────────────────────────>  │
+  │                                 │                              │
+  │  6. 收到事件，繼續流程          │       (Inngest 事件)          │
+  │ <──────────────────────────────────────────────────────────────│
+```
 
 **Modal 優勢**：
 - 無執行時間限制（可運行 30+ 分鐘）
 - 一次生成所有 Features，確保跨 Feature 一致性
 - 按秒計費，只付實際使用時間
 - 包含驗證和自癒修復（最多 3 次）
+- 使用 `.spawn()` 真正異步執行，避免 Vercel 超時
+
+**兩階段 Feature 生成**：
+```
+Phase 1: identify_features_with_interfaces()
+    → 一次識別所有 Features 並定義統一接口
+    → 確保 orderId, userId 等命名跨 Feature 一致
+
+Phase 2: generate_single_feature_with_interface()
+    → 根據統一接口逐個生成 Feature 內容
+    → 每個 Feature 遵守預定義的接口規範
+```
 
 **部署步驟**：
 ```bash
@@ -106,13 +140,23 @@ modal secret create tellcraft-secrets \
   ANTHROPIC_API_KEY=sk-ant-xxx
 
 # 3. 部署
-modal deploy modal_functions/formulation.py
+python3 -m modal deploy modal_functions/formulation.py
 
 # 4. 設置環境變數
 MODAL_FORMULATION_URL=https://your-username--tellcraft-formulation-generate-spec.modal.run
 ```
 
 **成本估算**：每次規格生成約 $0.20（Modal ~$0.05 + Claude API ~$0.15）
+
+**Rate Limit 處理**：
+- `callClaude()` 函數內建重試機制（最多 3 次）
+- 遇到 rate_limit_error 自動等待 30-120 秒後重試
+- 使用 `retry-after` header 或指數退避策略
+
+**多輪對話修復**（2026-02-01）：
+- 問題：前端無法正確識別是否需要使用 `replyToConversation`，導致 `waitForEvent` 永遠收不到事件
+- 原因：`getConversationMessages` 只查詢 `tasks` 表，但 orchestrator 沒有創建 task 記錄
+- 解決：`getConversationMessages` 現在也查詢 `bdd_sessions` 表，如果有活躍的 session 則返回其 ID 作為 `currentTaskId`
 
 ---
 

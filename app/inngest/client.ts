@@ -111,6 +111,24 @@ type Events = {
       error?: string
     }
   }
+
+  // Modal Formulation 完成事件
+  'modal/formulation-complete': {
+    data: {
+      sessionId: string
+      conversationId: string
+      success: boolean
+      schema_sql?: string
+      entity_mapping?: string
+      features?: Array<{ name: string; actionName: string; content: string }>
+      validation?: {
+        passed: boolean
+        errors: string[]
+        total_errors: number
+      }
+      error?: string
+    }
+  }
 }
 
 // ============================================================

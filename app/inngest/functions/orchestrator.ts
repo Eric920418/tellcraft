@@ -839,13 +839,14 @@ async function executeBddSpecSkill(input: BddSpecSkillInput) {
 
   if (useModal) {
     // ============================================================
-    // Modal 模式：一次完成所有規格生成
-    // - 無執行時間限制（可運行 30+ 分鐘）
-    // - 一次生成所有 Features，確保跨 Feature 一致性
-    // - 包含驗證和自癒修復
+    // Modal 模式（異步回調）：
+    // - 觸發 Modal 後不等待，而是等待 Modal 完成後的回調事件
+    // - 避免 Vercel Serverless 超時（10-60 秒限制）
+    // - Modal 可運行 30+ 分鐘，完成後調用 callback URL
     // ============================================================
 
-    const modalResult = await step.run('modal-formulation', async () => {
+    // Step 1: 觸發 Modal（不等待結果）
+    await step.run('trigger-modal-formulation', async () => {
       await sendMessage(
         conversationId,
         `正在產出規格文件...`,
@@ -856,7 +857,11 @@ async function executeBddSpecSkill(input: BddSpecSkillInput) {
       const session = await getBddSession({ sessionId })
       if (!session.data) throw new Error('Session 不存在')
 
-      // 調用 Modal HTTP endpoint
+      // 構建 callback URL
+      const appUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'
+      const callbackUrl = `${appUrl}/api/modal/callback`
+
+      // 觸發 Modal HTTP endpoint（不等待結果）
       const response = await fetch(modalFormulationUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -864,15 +869,37 @@ async function executeBddSpecSkill(input: BddSpecSkillInput) {
           requirements: message,
           resolved_items: session.data.resolvedItems || [],
           project_context: projectContext || null,
+          // 異步回調參數
+          session_id: sessionId,
+          conversation_id: conversationId,
+          callback_url: callbackUrl,
         }),
       })
 
       if (!response.ok) {
         const errorText = await response.text()
-        throw new Error(`Modal 調用失敗 (${response.status}): ${errorText}`)
+        throw new Error(`Modal 觸發失敗 (${response.status}): ${errorText}`)
       }
 
+      // Modal 會立即返回 { triggered: true }，不等待處理完成
       const result = await response.json()
+      if (result.error) {
+        throw new Error(result.error)
+      }
+
+      console.log('[Orchestrator] Modal 已觸發，等待回調事件...')
+    })
+
+    // Step 2: 等待 Modal 完成回調事件（最多 30 分鐘）
+    const modalEvent = await step.waitForEvent('wait-modal-formulation-complete', {
+      event: 'modal/formulation-complete',
+      timeout: '30m',
+      match: 'data.sessionId',
+    })
+
+    // Step 3: 處理 Modal 結果
+    const modalResult = await step.run('process-modal-result', async () => {
+      const result = modalEvent.data
 
       if (!result.success) {
         throw new Error(result.error || 'Modal Formulation 失敗')

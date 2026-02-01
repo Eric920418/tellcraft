@@ -686,40 +686,133 @@ def fix_features(
 # 主函數 - Modal HTTP Endpoint
 # ============================================================
 
+def send_callback(callback_url: str, session_id: str, conversation_id: str, result: dict):
+    """發送結果到 callback URL"""
+    import urllib.request
+    import urllib.error
+
+    payload = {
+        "sessionId": session_id,
+        "conversationId": conversation_id,
+        **result,
+    }
+
+    try:
+        req = urllib.request.Request(
+            callback_url,
+            data=json.dumps(payload).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with urllib.request.urlopen(req, timeout=30) as response:
+            print(f"[Callback] 成功發送到 {callback_url}, status={response.status}")
+    except urllib.error.URLError as e:
+        print(f"[Callback] 發送失敗: {e}")
+    except Exception as e:
+        print(f"[Callback] 發送失敗: {e}")
+
+
 @app.function(
     image=image,
     timeout=30 * 60,  # 30 分鐘超時
     secrets=[modal.Secret.from_name("tellcraft-secrets")],
 )
+def formulation_worker(
+    requirements: str,
+    resolved_items: list,
+    project_context: Optional[str],
+    session_id: str,
+    conversation_id: str,
+    callback_url: str,
+):
+    """
+    異步執行 Formulation 並回調結果。
+    這個函數會被 generate_spec 使用 .spawn() 觸發，在後台運行。
+    """
+    print(f"[Worker] 開始執行 Formulation: session_id={session_id}")
+
+    try:
+        result = _execute_formulation(requirements, resolved_items, project_context)
+        print(f"[Worker] Formulation 完成，發送回調...")
+        send_callback(callback_url, session_id, conversation_id, result)
+    except Exception as e:
+        error_result = {"success": False, "error": str(e)}
+        print(f"[Worker] Formulation 失敗: {e}")
+        send_callback(callback_url, session_id, conversation_id, error_result)
+
+    print(f"[Worker] 任務完成: session_id={session_id}")
+
+
+@app.function(
+    image=image,
+    timeout=60,  # HTTP 端點只需要很短的超時
+    secrets=[modal.Secret.from_name("tellcraft-secrets")],
+)
 @modal.fastapi_endpoint(method="POST")
 def generate_spec(request: dict) -> dict:
     """
-    完整的 Formulation 階段：
+    完整的 Formulation 階段（異步模式）：
     1. 生成 Schema SQL + Entity Mapping
     2. 生成所有 Feature Files（一次完成，確保跨 Feature 一致性）
     3. 驗證格式
     4. 自癒修復（如有錯誤，最多 3 次）
+    5. 完成後調用 callback_url 發送結果
 
     Request Body:
     {
         "requirements": "需求描述",
-        "resolved_items": [...],  // ClarifyItem[]
-        "project_context": "專案背景（可選）"
+        "resolved_items": [...],
+        "project_context": "專案背景（可選）",
+        "session_id": "BDD Session ID",
+        "conversation_id": "對話 ID",
+        "callback_url": "完成後回調的 URL"
     }
 
-    Response:
+    Response (立即返回):
     {
-        "success": true,
-        "schema_sql": "...",
-        "entity_mapping": "...",
-        "features": [...],
-        "validation": { "passed": true, "errors": [] }
+        "accepted": true,
+        "message": "任務已接受，完成後會調用 callback"
     }
     """
     requirements = request.get("requirements", "")
     resolved_items = request.get("resolved_items", [])
     project_context = request.get("project_context")
+    session_id = request.get("session_id", "")
+    conversation_id = request.get("conversation_id", "")
+    callback_url = request.get("callback_url", "")
 
+    # 驗證必要參數
+    if not requirements:
+        return {"success": False, "error": "缺少 requirements 參數"}
+
+    if not callback_url or not session_id or not conversation_id:
+        # 沒有 callback 配置，使用同步模式（向後兼容）
+        print("[Formulation] 同步模式（無 callback）")
+        return _execute_formulation(requirements, resolved_items, project_context)
+
+    # 異步模式：使用 spawn() 觸發後台 worker，立即返回
+    print(f"[Formulation] 異步模式：觸發 worker，session_id={session_id}")
+
+    # spawn() 會在後台異步執行，不會阻塞
+    formulation_worker.spawn(
+        requirements=requirements,
+        resolved_items=resolved_items,
+        project_context=project_context,
+        session_id=session_id,
+        conversation_id=conversation_id,
+        callback_url=callback_url,
+    )
+
+    # 立即返回確認
+    return {"accepted": True, "message": "任務已接受，完成後會調用 callback"}
+
+
+def _execute_formulation(
+    requirements: str,
+    resolved_items: list,
+    project_context: Optional[str],
+) -> dict:
+    """執行 Formulation 的核心邏輯"""
     if not requirements:
         return {"success": False, "error": "缺少 requirements 參數"}
 

@@ -1899,7 +1899,7 @@ export async function getConversationMessages(input: {
       .single()
 
     if (check && check.updated_at === lastUpdatedAt) {
-      // 沒有更新，只查詢 task 狀態
+      // 沒有更新，只查詢 task/session 狀態
       const { data: task } = await supabase
         .from('tasks')
         .select('id, status')
@@ -1909,12 +1909,32 @@ export async function getConversationMessages(input: {
         .limit(1)
         .single()
 
+      let activeSessionId = task?.id
+      let sessionStatus = task?.status
+
+      // 如果沒有活躍的 task，檢查 bdd_session
+      if (!activeSessionId) {
+        const { data: bddSession } = await supabase
+          .from('bdd_sessions')
+          .select('id, current_phase')
+          .eq('conversation_id', conversationId)
+          .neq('current_phase', 'completed')
+          .order('created_at', { ascending: false })
+          .limit(1)
+          .single()
+
+        if (bddSession) {
+          activeSessionId = bddSession.id
+          sessionStatus = bddSession.current_phase
+        }
+      }
+
       return {
         success: true,
         data: {
           messages: [],  // 沒有新消息
-          currentTaskId: task?.id,
-          taskStatus: task?.status,
+          currentTaskId: activeSessionId,
+          taskStatus: sessionStatus,
           updatedAt: check.updated_at,
           isComplete: check.spec_complete  // 告訴前端對話是否完成
         }
@@ -1940,7 +1960,7 @@ export async function getConversationMessages(input: {
     messages = messages.filter((m: { timestamp: string }) => m.timestamp > afterTimestamp)
   }
 
-  // 3. 查找當前活躍的任務
+  // 3. 查找當前活躍的任務或 BDD Session
   const { data: task } = await supabase
     .from('tasks')
     .select('id, status')
@@ -1950,12 +1970,33 @@ export async function getConversationMessages(input: {
     .limit(1)
     .single()
 
+  // 如果沒有活躍的 task，檢查是否有活躍的 bdd_session
+  // 這樣前端可以知道應該使用 replyToConversation 而不是 sendMessageAndTrigger
+  let activeSessionId = task?.id
+  let sessionStatus = task?.status
+
+  if (!activeSessionId) {
+    const { data: bddSession } = await supabase
+      .from('bdd_sessions')
+      .select('id, current_phase')
+      .eq('conversation_id', conversationId)
+      .neq('current_phase', 'completed')
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .single()
+
+    if (bddSession) {
+      activeSessionId = bddSession.id
+      sessionStatus = bddSession.current_phase
+    }
+  }
+
   return {
     success: true,
     data: {
       messages,
-      currentTaskId: task?.id,
-      taskStatus: task?.status,
+      currentTaskId: activeSessionId,
+      taskStatus: sessionStatus,
       updatedAt: conversation.updated_at,
       isComplete: conversation.spec_complete  // 告訴前端對話是否完成
     }

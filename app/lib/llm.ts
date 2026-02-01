@@ -154,7 +154,7 @@ async function logLlmUsage(
 }
 
 /**
- * 呼叫 Claude API
+ * 呼叫 Claude API（含 rate limit 重試機制）
  */
 export async function callClaude(
   systemPrompt: string,
@@ -177,56 +177,84 @@ export async function callClaude(
   }
 
   const model = options?.model || 'claude-sonnet-4-5-20250929'
+  const maxRetries = 3
+  const baseDelay = 30000 // 30 秒基礎等待時間
 
-  try {
-    const response = await fetch(ANTHROPIC_API, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': apiKey,
-        'anthropic-version': '2023-06-01',
-      },
-      body: JSON.stringify({
-        model,
-        max_tokens: options?.maxTokens || 4096,
-        temperature: options?.temperature ?? 0.7,
-        system: systemPrompt,
-        messages: messages.map(m => ({
-          role: m.role,
-          content: m.content,
-        })),
-      }),
-    })
+  for (let attempt = 0; attempt < maxRetries; attempt++) {
+    try {
+      const response = await fetch(ANTHROPIC_API, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-api-key': apiKey,
+          'anthropic-version': '2023-06-01',
+        },
+        body: JSON.stringify({
+          model,
+          max_tokens: options?.maxTokens || 4096,
+          temperature: options?.temperature ?? 0.7,
+          system: systemPrompt,
+          messages: messages.map(m => ({
+            role: m.role,
+            content: m.content,
+          })),
+        }),
+      })
 
-    if (!response.ok) {
-      const errorText = await response.text()
-      return { success: false, error: `API 錯誤: ${errorText}` }
+      if (!response.ok) {
+        const errorText = await response.text()
+
+        // 檢查是否為 rate limit 錯誤
+        if (response.status === 429 || errorText.includes('rate_limit_error')) {
+          if (attempt < maxRetries - 1) {
+            // 從 header 取得重試等待時間，或使用指數退避
+            const retryAfter = response.headers.get('retry-after')
+            const waitTime = retryAfter
+              ? parseInt(retryAfter, 10) * 1000
+              : baseDelay * Math.pow(2, attempt)
+
+            console.log(`[LLM] Rate limit hit, waiting ${waitTime / 1000}s before retry ${attempt + 1}/${maxRetries}...`)
+            await new Promise(resolve => setTimeout(resolve, waitTime))
+            continue
+          }
+        }
+
+        return { success: false, error: `API 錯誤: ${errorText}` }
+      }
+
+      const data = await response.json()
+      const content = data.content?.[0]?.text
+
+      if (!content) {
+        return { success: false, error: '無法取得回應內容' }
+      }
+
+      // 計算 token 使用量和成本
+      const inputTokens = data.usage?.input_tokens || 0
+      const outputTokens = data.usage?.output_tokens || 0
+      const pricing = MODEL_PRICING[model] || MODEL_PRICING['claude-sonnet-4-5-20250929']
+      const cost = (inputTokens * pricing.input + outputTokens * pricing.output) / 1_000_000
+
+      // 記錄使用量
+      await logLlmUsage(model, inputTokens, outputTokens, cost, trackingContext)
+
+      return {
+        success: true,
+        content,
+        usage: { inputTokens, outputTokens, cost }
+      }
+    } catch (err) {
+      // 如果是網路錯誤且還有重試次數，繼續重試
+      if (attempt < maxRetries - 1) {
+        console.log(`[LLM] 請求失敗，重試 ${attempt + 1}/${maxRetries}...`, err)
+        await new Promise(resolve => setTimeout(resolve, baseDelay))
+        continue
+      }
+      return { success: false, error: `呼叫 LLM 時發生錯誤: ${err}` }
     }
-
-    const data = await response.json()
-    const content = data.content?.[0]?.text
-
-    if (!content) {
-      return { success: false, error: '無法取得回應內容' }
-    }
-
-    // 計算 token 使用量和成本
-    const inputTokens = data.usage?.input_tokens || 0
-    const outputTokens = data.usage?.output_tokens || 0
-    const pricing = MODEL_PRICING[model] || MODEL_PRICING['claude-sonnet-4-5-20250929']
-    const cost = (inputTokens * pricing.input + outputTokens * pricing.output) / 1_000_000
-
-    // 記錄使用量
-    await logLlmUsage(model, inputTokens, outputTokens, cost, trackingContext)
-
-    return {
-      success: true,
-      content,
-      usage: { inputTokens, outputTokens, cost }
-    }
-  } catch (err) {
-    return { success: false, error: `呼叫 LLM 時發生錯誤: ${err}` }
   }
+
+  return { success: false, error: '超過最大重試次數' }
 }
 
 // ============================================================
