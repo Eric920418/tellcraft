@@ -668,16 +668,18 @@ ${decisions || '（無額外決策）'}`
 /**
  * Phase 2: Formulation - 產出 Feature Files (sdd.os ISA 格式)
  */
-export async function generateFeatureFiles(
+/**
+ * Step 1: 識別所有需要的 Feature
+ */
+export async function identifyFeatures(
   requirements: string,
   resolvedItems: ClarifyItem[],
   schemaSql: string,
-  entityMapping: string,
   projectContext?: string,
   trackingContext?: LlmTrackingContext
 ): Promise<{
   success: boolean
-  features?: Array<{ name: string; actionName: string; content: string }>
+  features?: Array<{ name: string; actionName: string; description: string }>
   error?: string
 }> {
   const decisions = resolvedItems
@@ -685,54 +687,10 @@ export async function generateFeatureFiles(
     .map(item => `Q: ${item.whiteTextQuestion}\nA: ${item.answer}`)
     .join('\n\n')
 
-  const systemPrompt = `你是一位資深的 BDD 分析師。根據需求、釐清決策和 Schema，產出 sdd.os ISA 格式的 Feature Files。
+  const systemPrompt = `你是一位資深的 BDD 分析師。根據需求和 Schema，識別所有需要的功能（Feature）。
 
-## sdd.os ISA Gherkin 格式（Server Actions 版）
-
-### Feature 檔案結構
-\`\`\`gherkin
-# Action: actionFunctionName
-# Summary: 功能名稱
-Feature: 功能名稱
-
-  Background:
-    Given 準備一個{entity}, with table:
-      | column1 | column2 |
-      | value1  | value2  |
-
-  #------------------------------------------------------------
-  Rule: 前置/後置 - 規則描述
-  #------------------------------------------------------------
-
-    Example: 例子名稱
-      When {功能名稱}, call table:
-        | param1 | param2 |
-        | value1 | value2 |
-      Then {功能名稱}成功, with table:
-        | field1 | field2 |
-        | value1 | value2 |
-      And 存在一個{entity}, with table:
-        | column1 | column2 |
-        | value1  | value2  |
-
-    Example: 錯誤情境
-      When {功能名稱}, call table:
-        | param1 | param2 |
-        | value1 | value2 |
-      Then 操作失敗
-\`\`\`
-
-## 格式規則
-1. **Action 綁定**：檔案開頭必須有 \`# Action:\` 和 \`# Summary:\` 註解
-2. **Rule 標註**：每個 Rule 必須標註 \`前置\` 或 \`後置\`
-3. **When 格式**：\`{summary}, call table:\`
-4. **Then 成功格式**：\`{summary}成功, with table:\`
-5. **Then 失敗格式**：\`操作失敗\`
-6. **Entity 驗證格式**：\`存在一個{entity}, with table:\`
-7. **summary 一致**：Feature 名稱必須與 When/Then 中的 summary 一致
-
-## Entity 映射
-${entityMapping}
+## 任務
+分析需求，列出所有需要實現的功能。每個功能對應一個 Server Action。
 
 ## 輸出格式
 \`\`\`json
@@ -741,11 +699,21 @@ ${entityMapping}
     {
       "name": "建立訂單",
       "actionName": "createOrder",
-      "content": "完整的 .feature 檔案內容"
+      "description": "用戶可以建立新訂單，包含商品和數量"
+    },
+    {
+      "name": "取消訂單",
+      "actionName": "cancelOrder",
+      "description": "用戶可以取消未出貨的訂單"
     }
   ]
 }
-\`\`\``
+\`\`\`
+
+## 規則
+1. 每個功能名稱要簡潔明確（如「建立訂單」而非「訂單建立功能」）
+2. actionName 用 camelCase（如 createOrder）
+3. description 簡述功能用途和主要規則`
 
   const userMessage = `${projectContext ? `專案背景：${projectContext}\n\n` : ''}需求描述：
 ${requirements}
@@ -763,8 +731,8 @@ ${decisions || '（無額外決策）'}`
   const response = await callClaude(
     systemPrompt,
     [{ role: 'user', content: userMessage }],
-    { maxTokens: 16384, temperature: 0.3 },
-    trackingContext
+    { maxTokens: 4096, temperature: 0.3 },
+    { ...trackingContext, purpose: 'identify_features' }
   )
 
   if (!response.success) {
@@ -787,6 +755,264 @@ ${decisions || '（無額外決策）'}`
     }
   } catch (err) {
     return { success: false, error: `解析回應時發生錯誤: ${err}` }
+  }
+}
+
+/**
+ * Feature 接口摘要（用於跨 Feature 一致性）
+ */
+interface FeatureSummary {
+  name: string
+  actionName: string
+  inputs: string   // 輸入參數摘要
+  outputs: string  // 輸出結果摘要
+}
+
+/**
+ * Step 2: 生成單個 Feature 的完整內容
+ */
+export async function generateSingleFeature(
+  featureInfo: { name: string; actionName: string; description: string },
+  requirements: string,
+  resolvedItems: ClarifyItem[],
+  schemaSql: string,
+  entityMapping: string,
+  projectContext?: string,
+  trackingContext?: LlmTrackingContext,
+  previousFeatures?: FeatureSummary[]  // 已生成的 Features 摘要
+): Promise<{
+  success: boolean
+  feature?: { name: string; actionName: string; content: string }
+  featureSummary?: FeatureSummary  // 返回這個 Feature 的摘要供下一個使用
+  error?: string
+}> {
+  const decisions = resolvedItems
+    .filter(item => item.status === 'resolved' && item.answer)
+    .map(item => `Q: ${item.whiteTextQuestion}\nA: ${item.answer}`)
+    .join('\n\n')
+
+  // 構建已生成 Features 的上下文
+  const previousFeaturesContext = previousFeatures && previousFeatures.length > 0
+    ? `## 已生成的其他功能（請保持接口一致）
+
+${previousFeatures.map((f, i) => `${i + 1}. **${f.name}** (${f.actionName})
+   - 輸入：${f.inputs}
+   - 輸出：${f.outputs}`).join('\n\n')}
+
+**重要**：如果你的功能需要引用其他功能的輸出（如 orderId），請使用與上面一致的命名。
+
+---
+
+`
+    : ''
+
+  const systemPrompt = `你是一位資深的 BDD 分析師。為指定的功能產出完整的 sdd.os ISA 格式 Feature File。
+
+## 要產出的功能
+- 名稱：${featureInfo.name}
+- Action：${featureInfo.actionName}
+- 描述：${featureInfo.description}
+
+${previousFeaturesContext}## sdd.os ISA Gherkin 格式
+
+\`\`\`gherkin
+# Action: ${featureInfo.actionName}
+# Summary: ${featureInfo.name}
+Feature: ${featureInfo.name}
+
+  Background:
+    Given 準備一個{entity}, with table:
+      | column1 | column2 |
+      | value1  | value2  |
+
+  #------------------------------------------------------------
+  Rule: 前置/後置 - 規則描述
+  #------------------------------------------------------------
+
+    Example: 例子名稱
+      When ${featureInfo.name}, call table:
+        | param1 | param2 |
+        | value1 | value2 |
+      Then ${featureInfo.name}成功, with table:
+        | field1 | field2 |
+        | value1 | value2 |
+      And 存在一個{entity}, with table:
+        | column1 | column2 |
+        | value1  | value2  |
+
+    Example: 錯誤情境
+      When ${featureInfo.name}, call table:
+        | param1 | param2 |
+        | value1 | value2 |
+      Then 操作失敗
+\`\`\`
+
+## 格式規則
+1. **Action 綁定**：檔案開頭必須有 \`# Action:\` 和 \`# Summary:\` 註解
+2. **Rule 標註**：每個 Rule 必須標註 \`前置\` 或 \`後置\`
+3. **When 格式**：\`${featureInfo.name}, call table:\`
+4. **Then 成功格式**：\`${featureInfo.name}成功, with table:\`
+5. **Then 失敗格式**：\`操作失敗\`
+6. **Entity 驗證格式**：\`存在一個{entity}, with table:\`
+7. **summary 一致**：Feature 名稱必須與 When/Then 中的 summary 一致
+
+## Entity 映射
+${entityMapping}
+
+## 輸出
+直接輸出完整的 .feature 檔案內容，不需要 JSON 包裝。以 \`# Action:\` 開頭。`
+
+  const userMessage = `${projectContext ? `專案背景：${projectContext}\n\n` : ''}需求描述：
+${requirements}
+
+---
+
+SQL Schema：
+${schemaSql}
+
+---
+
+釐清決策：
+${decisions || '（無額外決策）'}
+
+---
+
+請產出「${featureInfo.name}」的完整 Feature File 內容。`
+
+  const response = await callClaude(
+    systemPrompt,
+    [{ role: 'user', content: userMessage }],
+    { maxTokens: 8192, temperature: 0.3 },
+    { ...trackingContext, purpose: 'generate_single_feature' }
+  )
+
+  if (!response.success) {
+    return { success: false, error: response.error }
+  }
+
+  // 直接使用回應內容作為 feature content
+  const content = response.content?.trim() || ''
+
+  // 驗證內容是否包含必要元素
+  if (!content.includes('# Action:') || !content.includes('Feature:')) {
+    return { success: false, error: '生成的內容缺少必要元素' }
+  }
+
+  // 從生成的內容中提取輸入輸出摘要（用於跨 Feature 一致性）
+  const featureSummary = extractFeatureSummary(content, featureInfo)
+
+  return {
+    success: true,
+    feature: {
+      name: featureInfo.name,
+      actionName: featureInfo.actionName,
+      content,
+    },
+    featureSummary,
+  }
+}
+
+/**
+ * 從 Feature 內容中提取輸入輸出摘要
+ */
+function extractFeatureSummary(
+  content: string,
+  featureInfo: { name: string; actionName: string }
+): FeatureSummary {
+  // 提取 When 步驟的表格欄位作為輸入
+  const whenMatch = content.match(/When\s+[^,]+,\s*call table:\s*\n\s*\|([^|]+(?:\|[^|]+)*)\|/i)
+  const inputs = whenMatch
+    ? whenMatch[1].split('|').map(s => s.trim()).filter(Boolean).join(', ')
+    : '(未識別)'
+
+  // 提取 Then 成功步驟的表格欄位作為輸出
+  const thenMatch = content.match(/Then\s+[^,]+成功,?\s*with table:\s*\n\s*\|([^|]+(?:\|[^|]+)*)\|/i)
+  const outputs = thenMatch
+    ? thenMatch[1].split('|').map(s => s.trim()).filter(Boolean).join(', ')
+    : '(未識別)'
+
+  return {
+    name: featureInfo.name,
+    actionName: featureInfo.actionName,
+    inputs,
+    outputs,
+  }
+}
+
+/**
+ * 完整的 Feature Files 生成（分批處理，避免截斷）
+ */
+export async function generateFeatureFiles(
+  requirements: string,
+  resolvedItems: ClarifyItem[],
+  schemaSql: string,
+  entityMapping: string,
+  projectContext?: string,
+  trackingContext?: LlmTrackingContext,
+  onProgress?: (current: number, total: number, featureName: string) => Promise<void>
+): Promise<{
+  success: boolean
+  features?: Array<{ name: string; actionName: string; content: string }>
+  error?: string
+}> {
+  // Step 1: 識別所有 Features
+  const identifyResult = await identifyFeatures(
+    requirements,
+    resolvedItems,
+    schemaSql,
+    projectContext,
+    trackingContext
+  )
+
+  if (!identifyResult.success || !identifyResult.features) {
+    return { success: false, error: identifyResult.error || '識別功能失敗' }
+  }
+
+  const featureInfos = identifyResult.features
+  const generatedFeatures: Array<{ name: string; actionName: string; content: string }> = []
+  const featureSummaries: FeatureSummary[] = []  // 收集已生成 Features 的摘要
+
+  // Step 2: 逐個生成每個 Feature（傳入已生成的摘要保持一致性）
+  for (let i = 0; i < featureInfos.length; i++) {
+    const featureInfo = featureInfos[i]
+
+    // 回報進度
+    if (onProgress) {
+      await onProgress(i + 1, featureInfos.length, featureInfo.name)
+    }
+
+    const result = await generateSingleFeature(
+      featureInfo,
+      requirements,
+      resolvedItems,
+      schemaSql,
+      entityMapping,
+      projectContext,
+      trackingContext,
+      featureSummaries  // 傳入已生成的 Features 摘要
+    )
+
+    if (!result.success || !result.feature) {
+      console.error(`[LLM] 生成 Feature "${featureInfo.name}" 失敗:`, result.error)
+      // 繼續生成其他 Features，不中斷整個流程
+      continue
+    }
+
+    generatedFeatures.push(result.feature)
+
+    // 收集這個 Feature 的摘要，供下一個 Feature 參考
+    if (result.featureSummary) {
+      featureSummaries.push(result.featureSummary)
+    }
+  }
+
+  if (generatedFeatures.length === 0) {
+    return { success: false, error: '沒有成功生成任何 Feature' }
+  }
+
+  return {
+    success: true,
+    features: generatedFeatures,
   }
 }
 

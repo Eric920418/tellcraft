@@ -78,7 +78,34 @@ Discovery → 問5題 → 問完 → Re-discovery → 問5題 → ... → 連續
 
 ### 最新修復（2026-02-01）
 
-修復 Spec Clarify 無限循環問題（保持全面釐清）：
+**修復 Feature Files 生成被截斷問題**：
+
+| 修復項目 | 描述 |
+|----------|------|
+| **分批生成** | 從一次生成所有 Features 改為逐個生成，避免超過 max_tokens 限制 |
+| **兩階段流程** | Step 1: `identifyFeatures` 列出所有功能名稱；Step 2: `generateSingleFeature` 逐個生成 |
+| **跨 Feature 一致性** | 每個 Feature 生成時傳入已生成 Features 的輸入/輸出摘要，確保接口命名一致 |
+| **容錯處理** | 單個 Feature 生成失敗不會中斷整個流程，繼續生成其他 Features |
+| **進度顯示** | 顯示當前生成的 Feature 名稱（產出功能規格 2/8: 建立訂單）|
+
+**跨 Feature 一致性機制**：
+```
+生成 Feature 1: 建立訂單
+    → 提取摘要: inputs=userId,items / outputs=orderId,totalAmount
+
+生成 Feature 2: 查詢訂單
+    → 告訴 LLM: "建立訂單 輸出 orderId，請使用相同命名"
+    → 提取摘要: inputs=orderId / outputs=order details
+
+生成 Feature 3: 取消訂單
+    → 告訴 LLM: "建立訂單 輸出 orderId，查詢訂單 輸入 orderId..."
+```
+
+**問題根因**：Claude Sonnet 4.5 max output 是 8192 tokens，一次生成所有 Features 會被截斷導致 JSON 解析失敗 → Inngest 重試 → 無限循環。
+
+---
+
+**修復 Spec Clarify 無限循環問題（保持全面釐清）**：
 
 | 修復項目 | 描述 |
 |----------|------|
@@ -86,6 +113,7 @@ Discovery → 問5題 → 問完 → Re-discovery → 問5題 → ... → 連續
 | **自然終止** | 去重後沒有新問題 → 才結束。確保全面釐清不遺漏 |
 | **極端保險** | 最多 10 輪（正常情況語意去重會讓它自然結束，這只是防萬一）|
 | **進度顯示** | 動態顯示輪數和進度（規格釐清第 2 輪 3/5）|
+| **修復 Inngest step name** | 舊邏輯 step name 重複導致返回緩存結果，新邏輯每輪 step name 唯一 |
 
 **核心改變**：
 - 舊邏輯：`consecutiveEmptyRounds < 2`（每次發現新問題就重置，導致無限循環問類似問題）

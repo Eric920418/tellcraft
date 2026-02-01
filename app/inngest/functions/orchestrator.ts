@@ -865,18 +865,20 @@ async function executeBddSpecSkill(input: BddSpecSkillInput) {
     }
   })
 
-  // 產出 Feature Files
+  // 產出 Feature Files（分批生成，避免截斷）
   const featuresResult = await step.run('generate-features', async () => {
-    // 發送進度更新
-    await sendMessage(
-      conversationId,
-      `正在產出規格文件...`,
-      'formulation_progress',
-      { current: 2, total: 4, step: '產出功能規格' }
-    )
-
     const session = await getBddSession({ sessionId })
     if (!session.data) throw new Error('Session 不存在')
+
+    // 進度回調：每生成一個 Feature 就更新進度
+    const onProgress = async (current: number, total: number, featureName: string) => {
+      await sendMessage(
+        conversationId,
+        `正在產出規格文件...`,
+        'formulation_progress',
+        { current: 2, total: 4, step: `產出功能規格 (${current}/${total}: ${featureName})` }
+      )
+    }
 
     const result = await generateFeatureFiles(
       message,
@@ -884,7 +886,8 @@ async function executeBddSpecSkill(input: BddSpecSkillInput) {
       schemaResult.schemaSql || '',
       schemaResult.entityMapping || '',
       projectContext || undefined,
-      { conversationId, purpose: 'generate_features' }
+      { conversationId, purpose: 'generate_features' },
+      onProgress  // 傳入進度回調
     )
 
     if (!result.success) {
