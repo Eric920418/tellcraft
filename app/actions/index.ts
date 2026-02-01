@@ -2626,17 +2626,22 @@ export async function createBddSession(input: {
 }): Promise<ActionResult<{ sessionId: string }>> {
   const { projectId, conversationId, taskId, originalRequirements, projectContext } = input
 
-  // 查詢同一對話是否有之前的 session（用於繼承決策）
-  const { data: previousSessions } = await supabase
+  // 查詢同一對話中有已解決項目的 session（用於繼承決策）
+  // 注意：不能只用 not null，因為空陣列 [] 也不是 null
+  // 需要找到有實際內容的 resolved_items
+  const { data: allSessions } = await supabase
     .from('bdd_sessions')
     .select('resolved_items')
     .eq('conversation_id', conversationId)
-    .not('resolved_items', 'is', null)
     .order('created_at', { ascending: false })
-    .limit(1)
+
+  // 找到第一個有內容的 resolved_items
+  const sessionWithItems = allSessions?.find(
+    (s) => Array.isArray(s.resolved_items) && s.resolved_items.length > 0
+  )
 
   // 繼承之前的決策（如果有）
-  const inheritedResolvedItems = previousSessions?.[0]?.resolved_items || []
+  const inheritedResolvedItems = sessionWithItems?.resolved_items || []
 
   console.log(`[BDD Session] 創建新 session，繼承 ${inheritedResolvedItems.length} 個之前的決策`)
 
