@@ -1222,35 +1222,44 @@ function ChatSection({
             const uniqueNewMessages = formattedMessages.filter(m => !existingIds.has(m.id))
 
             if (uniqueNewMessages.length > 0) {
-              // 如果有新的 AI 消息，停止 typing
-              if (uniqueNewMessages.some(m => m.role === 'assistant')) {
+              // 如果有新的 AI 消息（非進度訊息），停止 typing
+              // 進度訊息（init_progress, formulation_progress）不應該停止打字指示器
+              const hasNonProgressAiMessage = uniqueNewMessages.some(m =>
+                m.role === 'assistant' &&
+                !['init_progress', 'formulation_progress'].includes(m.stage || '')
+              )
+              if (hasNonProgressAiMessage) {
                 setIsTyping(false)
               }
 
-              // 合併訊息，對相同內容的進度訊息只保留最新的
+              // 合併訊息，只對 AI 進度訊息做內容去重（用戶訊息不去重）
               const combined = [...filteredPrev, ...uniqueNewMessages]
-              const contentMap = new Map<string, Message>()
+              const progressMap = new Map<string, { index: number; msg: Message }>()
               const result: Message[] = []
 
               for (const msg of combined) {
-                const key = `${msg.role}:${msg.content}`
-                const existing = contentMap.get(key)
-
-                // 如果是進度訊息（有 progress 欄位），只保留最新的
-                if (msg.progress && existing?.progress) {
-                  // 用新的進度覆蓋舊的
-                  const idx = result.indexOf(existing)
-                  if (idx !== -1) {
-                    result[idx] = msg
-                    contentMap.set(key, msg)
-                  }
-                } else if (!existing) {
+                // 用戶訊息永遠保留（不管內容是否重複，例如多次回答「A」）
+                if (msg.role === 'user') {
                   result.push(msg)
-                  contentMap.set(key, msg)
-                } else {
-                  // 非進度訊息，保留第一個（去重）
-                  // 已經存在，跳過
+                  continue
                 }
+
+                // AI 進度訊息：相同內容只保留最新的進度值
+                if (msg.progress) {
+                  const key = msg.content
+                  const existing = progressMap.get(key)
+                  if (existing) {
+                    result[existing.index] = msg
+                    progressMap.set(key, { index: existing.index, msg })
+                  } else {
+                    progressMap.set(key, { index: result.length, msg })
+                    result.push(msg)
+                  }
+                  continue
+                }
+
+                // 其他 AI 訊息：直接加入（ID 去重已在 uniqueNewMessages 處理）
+                result.push(msg)
               }
 
               return result
@@ -1580,11 +1589,22 @@ function ChatSection({
               </motion.div>
             )}
 
-            {messages.map((message, index) => {
-              const isRecentMessage = index >= messages.length - 3
-              const animationDelay = isRecentMessage ? (index - (messages.length - 3)) * 0.05 : 0
+            {/* 計算是否顯示進度條 */}
+            {(() => {
+              // 找出最後一條訊息的階段
+              const lastMessage = messages[messages.length - 1]
+              const lastMessageStage = lastMessage?.stage || ''
 
-              return (
+              // 只有當最後一條訊息是進度訊息時才顯示進度條
+              const isShowingProgress = ['init_progress', 'formulation_progress'].includes(lastMessageStage)
+
+              return messages.map((message, index) => {
+                const isRecentMessage = index >= messages.length - 3
+                const animationDelay = isRecentMessage ? (index - (messages.length - 3)) * 0.05 : 0
+                // 只在最後一條訊息上顯示進度條（且該訊息是進度訊息）
+                const showProgressBar = isShowingProgress && index === messages.length - 1
+
+                return (
                 <motion.div
                   key={message.id}
                   initial={isRecentMessage ? { opacity: 0, y: 15 } : false}
@@ -1645,6 +1665,92 @@ function ChatSection({
                         )}
                       </div>
 
+                      {/* 處理中的進度條 */}
+                      {showProgressBar && (
+                        <motion.div
+                          initial={{ opacity: 0, y: 8 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          transition={{ duration: 0.4, delay: 0.3 }}
+                          style={{
+                            marginTop: 16,
+                            maxWidth: layoutMode === 'split' ? '95%' : '85%',
+                          }}
+                        >
+                          <div style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: 12,
+                            padding: '12px 16px',
+                            background: 'var(--white)',
+                            border: '1px solid var(--border-color)',
+                          }}>
+                            {/* 旋轉圖示 */}
+                            <motion.div
+                              animate={{ rotate: 360 }}
+                              transition={{ duration: 2, repeat: Infinity, ease: 'linear' }}
+                              style={{
+                                width: 18,
+                                height: 18,
+                                flexShrink: 0,
+                              }}
+                            >
+                              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--gray-400)" strokeWidth="2">
+                                <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83" />
+                              </svg>
+                            </motion.div>
+                            {/* 進度條 */}
+                            <div style={{ flex: 1 }}>
+                              <div style={{
+                                display: 'flex',
+                                justifyContent: 'space-between',
+                                alignItems: 'center',
+                                marginBottom: 6,
+                              }}>
+                                <span style={{ fontSize: 12, color: 'var(--gray-500)' }}>
+                                  {message.progress?.step || (message.stage === 'init_progress' ? '正在分析需求...' : '正在產出規格文件...')}
+                                </span>
+                                {message.progress && (
+                                  <span style={{ fontSize: 11, color: 'var(--gray-400)' }}>
+                                    {message.progress.current}/{message.progress.total}
+                                  </span>
+                                )}
+                              </div>
+                              <div style={{
+                                height: 3,
+                                background: 'var(--gray-100)',
+                                overflow: 'hidden',
+                                position: 'relative',
+                              }}>
+                                {message.progress ? (
+                                  // 真實進度條
+                                  <motion.div
+                                    initial={{ width: 0 }}
+                                    animate={{ width: `${(message.progress.current / message.progress.total) * 100}%` }}
+                                    transition={{ duration: 0.5, ease: 'easeOut' }}
+                                    style={{
+                                      height: '100%',
+                                      background: 'var(--black)',
+                                    }}
+                                  />
+                                ) : (
+                                  // 無限進度條（沒有進度信息時）
+                                  <motion.div
+                                    animate={{ x: ['-100%', '200%'] }}
+                                    transition={{ duration: 1.5, repeat: Infinity, ease: 'easeInOut' }}
+                                    style={{
+                                      position: 'absolute',
+                                      width: '50%',
+                                      height: '100%',
+                                      background: 'linear-gradient(90deg, transparent, var(--black), transparent)',
+                                    }}
+                                  />
+                                )}
+                              </div>
+                            </div>
+                          </div>
+                        </motion.div>
+                      )}
+
                       {/* UIUX 模板選擇器 - 在分屏模式下顯示在右側預覽面板，這裡不重複渲染 */}
                       {message.richContent?.type === 'template_picker' && layoutMode !== 'split' && (
                         <motion.div
@@ -1663,8 +1769,9 @@ function ChatSection({
                     </>
                   )}
                 </motion.div>
-              )
-            })}
+                )
+              })
+            })()}
 
             {typingStage !== 'none' && (
               <motion.div
