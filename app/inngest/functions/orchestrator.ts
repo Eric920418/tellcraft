@@ -429,6 +429,68 @@ function getFullAnswer(item: ClarifyItem): string {
   return answer
 }
 
+// 輔助函數：驗證用戶答案是否有效
+function validateAnswer(item: ClarifyItem, answer: string): { valid: boolean; normalizedAnswer?: string; errorMessage?: string } {
+  // 如果問題沒有選項，任何答案都有效
+  if (!item.options || item.options.length === 0) {
+    return { valid: true, normalizedAnswer: answer }
+  }
+
+  const trimmedAnswer = answer.trim()
+  const upperAnswer = trimmedAnswer.toUpperCase()
+
+  // 檢查是否是有效的選項字母（A/B/C/D...）
+  const validLetters = item.options.map((_, i) => String.fromCharCode(65 + i))
+
+  // 情況 1: 單個字母回答（A, B, C, D...）
+  if (/^[A-Za-z]$/.test(trimmedAnswer)) {
+    if (validLetters.includes(upperAnswer)) {
+      return { valid: true, normalizedAnswer: upperAnswer }
+    } else {
+      const optionList = validLetters.join('、')
+      return {
+        valid: false,
+        errorMessage: `請輸入有效的選項（${optionList}）`
+      }
+    }
+  }
+
+  // 情況 2: 帶點的格式（A. 或 B.）
+  const letterWithDot = trimmedAnswer.match(/^([A-Za-z])\.?\s*/)
+  if (letterWithDot) {
+    const letter = letterWithDot[1].toUpperCase()
+    if (validLetters.includes(letter)) {
+      return { valid: true, normalizedAnswer: letter }
+    }
+  }
+
+  // 情況 3: 輸入了選項的完整描述（模糊匹配）
+  for (let i = 0; i < item.options.length; i++) {
+    const opt = item.options[i]
+    let optText = ''
+
+    if (typeof opt === 'string') {
+      // 移除開頭的字母編號
+      optText = opt.replace(/^[A-Z]\.\s*/, '').toLowerCase()
+    } else {
+      optText = (opt.description || opt.label || '').toLowerCase()
+    }
+
+    // 如果用戶輸入包含選項文字的主要內容（至少 5 個字符匹配）
+    const userInput = trimmedAnswer.toLowerCase()
+    if (optText.length >= 5 && (userInput.includes(optText.slice(0, 10)) || optText.includes(userInput))) {
+      return { valid: true, normalizedAnswer: String.fromCharCode(65 + i) }
+    }
+  }
+
+  // 無效答案
+  const optionList = validLetters.join('、')
+  return {
+    valid: false,
+    errorMessage: `請選擇有效的選項（${optionList}），或輸入選項字母來回答。`
+  }
+}
+
 async function executeBddSpecSkill(input: BddSpecSkillInput) {
   const { step, taskId, projectId, conversationId, userId, message } = input
 
@@ -697,12 +759,28 @@ async function executeBddSpecSkill(input: BddSpecSkillInput) {
       break
     }
 
-    // 記錄答案
+    // 驗證答案（如果問題有選項）
+    const validation = validateAnswer(currentItem, userMessage)
+
+    if (!validation.valid) {
+      // 答案無效，發送錯誤訊息並重新詢問
+      await step.run(`invalid-answer-${loopIteration}`, async () => {
+        await sendMessage(
+          conversationId,
+          `⚠️ ${validation.errorMessage}\n\n請重新回答上面的問題。`,
+          'clarify_question'
+        )
+      })
+      // 不增加 questionIndex，下一輪會重新問同一題
+      continue
+    }
+
+    // 記錄答案（使用標準化後的答案）
     await step.run(`record-answer-${loopIteration}`, async () => {
       await answerClarifyItem({
         sessionId,
         itemId: currentItem.id,
-        answer: userMessage,
+        answer: validation.normalizedAnswer || userMessage,
       })
     })
 
