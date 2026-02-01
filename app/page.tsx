@@ -45,6 +45,8 @@ interface Message {
     type: 'template_picker' | 'design_preview' | 'code_preview'
     data: Record<string, unknown>
   }
+  // 樂觀更新標記：pending 表示尚未確認儲存到 DB
+  pending?: boolean
 }
 
 // ============ Animated Text Components ============
@@ -1084,12 +1086,13 @@ function ChatSection({
 
       // 如果有初始消息，發送它
       if (initialMessage) {
-        // 樂觀更新：先顯示用戶消息
+        // 樂觀更新：先顯示用戶消息（標記為 pending）
         const userMsg: Message = {
           id: crypto.randomUUID(),
           role: 'user',
           content: initialMessage,
-          timestamp: new Date()
+          timestamp: new Date(),
+          pending: true  // 標記為待確認
         }
 
         // 立即顯示預告消息，減少感知等待時間
@@ -1116,6 +1119,11 @@ function ChatSection({
 
         if (!sendResult.success) {
           setError(sendResult.error || '發送消息失敗')
+        } else if (sendResult.data?.messageId) {
+          // 更新樂觀訊息的 ID 為實際的 DB ID，避免重複顯示
+          setMessages(prev => prev.map(m =>
+            m.id === userMsg.id ? { ...m, id: sendResult.data!.messageId } : m
+          ))
         }
         return // 已經設置 isInitializing = false，直接返回
       } else if (hasHistory) {
@@ -1232,13 +1240,39 @@ function ChatSection({
                 setIsTyping(false)
               }
 
-              // 合併訊息，只對 AI 進度訊息做內容去重（用戶訊息不去重）
-              const combined = [...filteredPrev, ...uniqueNewMessages]
+              // 合併訊息：
+              // 1. 用 DB 訊息替換 pending 的樂觀訊息（相同內容）
+              // 2. AI 進度訊息只保留最新的
+
+              // 先處理 pending 訊息的替換
+              let updatedPrev = [...filteredPrev]
+              const newMessagesToAdd: Message[] = []
+
+              for (const newMsg of uniqueNewMessages) {
+                if (newMsg.role === 'user') {
+                  // 找是否有 pending 的用戶訊息有相同內容
+                  const pendingIndex = updatedPrev.findIndex(m =>
+                    m.role === 'user' && m.pending && m.content === newMsg.content
+                  )
+                  if (pendingIndex !== -1) {
+                    // 用 DB 訊息替換 pending 訊息
+                    updatedPrev[pendingIndex] = newMsg
+                  } else {
+                    // 沒有對應的 pending 訊息，加入新訊息
+                    newMessagesToAdd.push(newMsg)
+                  }
+                } else {
+                  newMessagesToAdd.push(newMsg)
+                }
+              }
+
+              // 合併剩餘的新訊息
+              const combined = [...updatedPrev, ...newMessagesToAdd]
               const progressMap = new Map<string, { index: number; msg: Message }>()
               const result: Message[] = []
 
               for (const msg of combined) {
-                // 用戶訊息永遠保留（不管內容是否重複，例如多次回答「A」）
+                // 用戶訊息直接保留
                 if (msg.role === 'user') {
                   result.push(msg)
                   continue
@@ -1258,7 +1292,7 @@ function ChatSection({
                   continue
                 }
 
-                // 其他 AI 訊息：直接加入（ID 去重已在 uniqueNewMessages 處理）
+                // 其他 AI 訊息：直接加入
                 result.push(msg)
               }
 
@@ -1447,12 +1481,13 @@ function ChatSection({
       inputRef.current.style.height = 'auto'
     }
 
-    // 樂觀更新
+    // 樂觀更新（標記為 pending）
     const userMessage: Message = {
       id: crypto.randomUUID(),
       role: 'user',
       content,
-      timestamp: new Date()
+      timestamp: new Date(),
+      pending: true  // 標記為待確認，輪詢時會被 DB 訊息替換
     }
     setMessages(prev => [...prev, userMessage])
     setIsTyping(true)
@@ -1470,6 +1505,11 @@ function ChatSection({
       if (!result.success) {
         setError(result.error || '發送失敗')
         setIsTyping(false)
+      } else if (result.data?.messageId) {
+        // 更新樂觀訊息的 ID 為實際的 DB ID，避免重複顯示
+        setMessages(prev => prev.map(m =>
+          m.id === userMessage.id ? { ...m, id: result.data!.messageId } : m
+        ))
       }
     } else {
       // 首次消息
@@ -1483,6 +1523,11 @@ function ChatSection({
       if (!result.success) {
         setError(result.error || '發送失敗')
         setIsTyping(false)
+      } else if (result.data?.messageId) {
+        // 更新樂觀訊息的 ID 為實際的 DB ID，避免重複顯示
+        setMessages(prev => prev.map(m =>
+          m.id === userMessage.id ? { ...m, id: result.data!.messageId } : m
+        ))
       }
     }
   }
