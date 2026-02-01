@@ -448,6 +448,7 @@ textarea {
   }
 
   .showcase-cards {
-    min-height: 320px !important;
+    min-height: 380px !important;
+    padding-top: 60px !important;
   }
 }
