@@ -481,10 +481,18 @@ async function executeBddSpecSkill(input: BddSpecSkillInput) {
 
     console.log('[BDD Phase 1] 開始 PRD Discovery')
 
+    // 獲取已有的決策（從之前的 session 繼承的）
+    const session = await getBddSession({ sessionId })
+    const inheritedItems = session.data?.resolvedItems || []
+
+    if (inheritedItems.length > 0) {
+      console.log(`[BDD Phase 1] 繼承 ${inheritedItems.length} 個之前的決策，將跳過相關問題`)
+    }
+
     const result = await runPrdDiscovery(
       message,
       projectContext || undefined,
-      undefined,
+      inheritedItems, // 傳入已有決策，讓 LLM 跳過已回答的問題
       { conversationId, purpose: 'prd_discovery' }
     )
 
@@ -1704,6 +1712,14 @@ async function executeBddSpecSkill(input: BddSpecSkillInput) {
   // 用戶確認，執行 UIUX Skill（模板驅動流程）
   // 新流程：發送模板選擇器 → 用戶選擇 → 預覽調整 → 生成程式碼
   // ============================================================
+
+  // 更新 session phase 為 'uiux'，讓前端知道需要使用 replyToConversation
+  await step.run('update-phase-uiux', async () => {
+    await updateBddSession({
+      sessionId,
+      updates: { currentPhase: 'uiux' },
+    })
+  })
 
   // Step 1: 通知前端切換到分屏佈局 + 發送模板選擇器
   await step.run('uiux-show-templates', async () => {

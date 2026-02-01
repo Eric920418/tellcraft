@@ -1936,7 +1936,9 @@ export async function getConversationMessages(input: {
           currentTaskId: activeSessionId,
           taskStatus: sessionStatus,
           updatedAt: check.updated_at,
-          isComplete: check.spec_complete  // 告訴前端對話是否完成
+          // 只有當沒有活躍的 task/session 時，才告訴前端對話已完成
+          // 這樣 UIUX 階段（spec_complete=true 但 session 仍活躍）前端會繼續輪詢
+          isComplete: check.spec_complete && !activeSessionId
         }
       }
     }
@@ -1998,7 +2000,9 @@ export async function getConversationMessages(input: {
       currentTaskId: activeSessionId,
       taskStatus: sessionStatus,
       updatedAt: conversation.updated_at,
-      isComplete: conversation.spec_complete  // 告訴前端對話是否完成
+      // 只有當沒有活躍的 task/session 時，才告訴前端對話已完成
+      // 這樣 UIUX 階段（spec_complete=true 但 session 仍活躍）前端會繼續輪詢
+      isComplete: conversation.spec_complete && !activeSessionId
     }
   }
 }
@@ -2580,6 +2584,7 @@ type BddPhase =
   | 'spec_clarify'
   | 'actions_design'
   | 'isa_config'
+  | 'uiux'
   | 'completed'
 
 // BDD Session 資料結構
@@ -2621,6 +2626,20 @@ export async function createBddSession(input: {
 }): Promise<ActionResult<{ sessionId: string }>> {
   const { projectId, conversationId, taskId, originalRequirements, projectContext } = input
 
+  // 查詢同一對話是否有之前的 session（用於繼承決策）
+  const { data: previousSessions } = await supabase
+    .from('bdd_sessions')
+    .select('resolved_items')
+    .eq('conversation_id', conversationId)
+    .not('resolved_items', 'is', null)
+    .order('created_at', { ascending: false })
+    .limit(1)
+
+  // 繼承之前的決策（如果有）
+  const inheritedResolvedItems = previousSessions?.[0]?.resolved_items || []
+
+  console.log(`[BDD Session] 創建新 session，繼承 ${inheritedResolvedItems.length} 個之前的決策`)
+
   const { data, error } = await supabase
     .from('bdd_sessions')
     .insert({
@@ -2630,6 +2649,8 @@ export async function createBddSession(input: {
       current_phase: 'prd_discovery',
       original_requirements: originalRequirements,
       project_context: projectContext,
+      // 繼承之前的決策，避免重複問已回答的問題
+      resolved_items: inheritedResolvedItems.length > 0 ? inheritedResolvedItems : [],
     })
     .select('id')
     .single()

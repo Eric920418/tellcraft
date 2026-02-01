@@ -163,6 +163,26 @@ MODAL_FORMULATION_URL=https://your-username--tellcraft-formulation-generate-spec
 - 原因：`page.tsx` 中 `formattedMessages` 轉換時沒有包含 `layoutHint` 和 `richContent` 欄位
 - 解決：添加 `layoutHint` 和 `richContent` 欄位到消息轉換中
 
+**決策繼承修復**（2026-02-01）：
+- 問題：新 session 會重新問用戶已經否定的功能相關問題（如已回答「不需要帳號系統」，新 session 仍問帳號相關問題）
+- 原因：`createBddSession` 每次創建全新 session，不繼承之前的決策
+- 解決：
+  1. `createBddSession` 現在會查詢同一對話之前的 session，繼承其 `resolved_items`
+  2. `prd-discovery` 步驟將繼承的決策傳給 `runPrdDiscovery`
+  3. LLM prompt 增強：如果用戶回答「不需要」某功能，完全跳過該功能相關的所有問題
+
+**UIUX 階段流程修復**（2026-02-01）：
+- 問題：在 UIUX 模板選擇階段回答後，系統又重新開始釐清流程（重新問 15 個問題）
+- 原因：
+  1. Formulation 完成後 session phase 變成 'completed'
+  2. `getConversationMessages` 查詢時排除 'completed' 的 session，找不到活躍 session
+  3. 沒有 `currentTaskId` 返回，前端認為對話已完成
+  4. 用戶回覆觸發 `user/request`（新請求）而非 `user/reply`（回覆）
+- 解決：
+  1. 新增 `update-phase-uiux` step，在 UIUX 階段開始前將 session phase 設為 'uiux'
+  2. `BddPhase` 類型新增 'uiux' 值
+  3. 修改 `isComplete` 邏輯：只有當 `spec_complete=true` **且**沒有活躍 session 時才返回 `true`
+
 ---
 
 ### 最新修復（2026-02-01）
