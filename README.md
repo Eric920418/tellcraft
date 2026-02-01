@@ -76,6 +76,46 @@ Discovery → 問5題 → 問完 → Re-discovery → 問5題 → ... → 連續
 | **第三輪保險** | 複雜需求有第三輪兜底，但絕對封頂 |
 | **語意去重** | 每輪都過濾重複問題 |
 
+### Modal 集成 - BDD Spec 規格生成（2026-02-01）
+
+**問題**：Vercel Serverless 有執行時間限制（10-60秒），19 個 Features 無法一次生成，JSON 被截斷導致解析失敗。
+
+**解決方案**：集成 Modal 無伺服器平台，執行長時間 LLM 任務。
+
+| 項目 | 說明 |
+|------|------|
+| **新增檔案** | `modal_functions/formulation.py` - Modal Python 函數 |
+| **修改檔案** | `app/inngest/functions/orchestrator.ts` - 條件調用 Modal |
+| **環境變數** | `MODAL_FORMULATION_URL` - Modal HTTP endpoint URL |
+| **Fallback** | 未配置 Modal 時自動使用原有的分批生成邏輯 |
+
+**Modal 優勢**：
+- 無執行時間限制（可運行 30+ 分鐘）
+- 一次生成所有 Features，確保跨 Feature 一致性
+- 按秒計費，只付實際使用時間
+- 包含驗證和自癒修復（最多 3 次）
+
+**部署步驟**：
+```bash
+# 1. 安裝 Modal CLI
+pip install modal
+modal token set  # 打開瀏覽器登入
+
+# 2. 創建 secrets
+modal secret create tellcraft-secrets \
+  ANTHROPIC_API_KEY=sk-ant-xxx
+
+# 3. 部署
+modal deploy modal_functions/formulation.py
+
+# 4. 設置環境變數
+MODAL_FORMULATION_URL=https://your-username--tellcraft-formulation-generate-spec.modal.run
+```
+
+**成本估算**：每次規格生成約 $0.20（Modal ~$0.05 + Claude API ~$0.15）
+
+---
+
 ### 最新修復（2026-02-01）
 
 **修復 BDD-Spec Formulation 階段決策丟失問題**：

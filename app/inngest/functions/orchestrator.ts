@@ -798,6 +798,11 @@ async function executeBddSpecSkill(input: BddSpecSkillInput) {
   // ============================================================
   // Phase 2: Formulation - 產出規格
   // ============================================================
+  //
+  // 支援兩種模式：
+  // 1. Modal 模式（推薦）：調用 Modal HTTP endpoint，無執行時間限制
+  // 2. Fallback 模式：使用原有的分批生成邏輯（當未配置 Modal 時）
+  // ============================================================
 
   // 生成釐清摘要
   await step.run('generate-clarify-summary', async () => {
@@ -828,258 +833,350 @@ async function executeBddSpecSkill(input: BddSpecSkillInput) {
     )
   })
 
-  // 產出 Schema
-  const schemaResult = await step.run('generate-schema', async () => {
-    // 發送進度更新
-    await sendMessage(
-      conversationId,
-      `正在產出規格文件...`,
-      'formulation_progress',
-      { current: 1, total: 4, step: '產出資料庫結構' }
-    )
-    const session = await getBddSession({ sessionId })
-    if (!session.data) throw new Error('Session 不存在')
+  // 判斷是否使用 Modal
+  const modalFormulationUrl = process.env.MODAL_FORMULATION_URL
+  const useModal = !!modalFormulationUrl
 
-    const result = await generateSchemaSql(
-      message,
-      session.data.resolvedItems,
-      projectContext || undefined,
-      { conversationId, purpose: 'generate_schema' }
-    )
+  if (useModal) {
+    // ============================================================
+    // Modal 模式：一次完成所有規格生成
+    // - 無執行時間限制（可運行 30+ 分鐘）
+    // - 一次生成所有 Features，確保跨 Feature 一致性
+    // - 包含驗證和自癒修復
+    // ============================================================
 
-    if (!result.success) {
-      throw new Error(result.error || '產出 Schema 失敗')
-    }
-
-    await updateBddSession({
-      sessionId,
-      updates: {
-        schemaSqlContent: result.schemaSql,
-        entityMappingContent: result.entityMapping,
-      },
-    })
-
-    return {
-      schemaSql: result.schemaSql,
-      entityMapping: result.entityMapping,
-    }
-  })
-
-  // 產出 Feature Files（分批生成，避免截斷）
-  const featuresResult = await step.run('generate-features', async () => {
-    const session = await getBddSession({ sessionId })
-    if (!session.data) throw new Error('Session 不存在')
-
-    // 進度回調：每生成一個 Feature 就更新進度
-    const onProgress = async (current: number, total: number, featureName: string) => {
+    const modalResult = await step.run('modal-formulation', async () => {
       await sendMessage(
         conversationId,
         `正在產出規格文件...`,
         'formulation_progress',
-        { current: 2, total: 4, step: `產出功能規格 (${current}/${total}: ${featureName})` }
+        { current: 1, total: 4, step: '調用 Modal 生成規格（可能需要幾分鐘）' }
       )
-    }
 
-    const result = await generateFeatureFiles(
-      message,
-      session.data.resolvedItems,
-      schemaResult.schemaSql || '',
-      schemaResult.entityMapping || '',
-      projectContext || undefined,
-      { conversationId, purpose: 'generate_features' },
-      onProgress  // 傳入進度回調
-    )
+      const session = await getBddSession({ sessionId })
+      if (!session.data) throw new Error('Session 不存在')
 
-    if (!result.success) {
-      throw new Error(result.error || '產出 Feature Files 失敗')
-    }
+      // 調用 Modal HTTP endpoint
+      const response = await fetch(modalFormulationUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          requirements: message,
+          resolved_items: session.data.resolvedItems || [],
+          project_context: projectContext || null,
+        }),
+      })
 
-    await updateBddSession({
-      sessionId,
-      updates: {
-        featuresContent: result.features,
-      },
-    })
+      if (!response.ok) {
+        const errorText = await response.text()
+        throw new Error(`Modal 調用失敗 (${response.status}): ${errorText}`)
+      }
 
-    return { features: result.features }
-  })
+      const result = await response.json()
 
-  // 驗證 Feature Files（使用真實驗證函數）
-  let validationResult = await step.run('validate-features', async () => {
-    // 發送進度更新
-    await sendMessage(
-      conversationId,
-      `正在產出規格文件...`,
-      'formulation_progress',
-      { current: 3, total: 4, step: '驗證規格格式' }
-    )
-    const features = (featuresResult.features || []).map((f: FeatureFile) => ({
-      name: f.name,
-      content: f.content,
-    }))
+      if (!result.success) {
+        throw new Error(result.error || 'Modal Formulation 失敗')
+      }
 
-    const validation = validateMultipleFeatures(features)
-
-    // 轉換為簡化格式存儲
-    const errors = validation.allErrors.map(e =>
-      `[${e.code}]${e.line ? ` 行 ${e.line}` : ''} ${e.message}${e.suggestion ? ` (建議: ${e.suggestion})` : ''}`
-    )
-    const warnings = validation.allWarnings.map(w =>
-      `[${w.code}]${w.line ? ` 行 ${w.line}` : ''} ${w.message}`
-    )
-
-    await updateBddSession({
-      sessionId,
-      updates: {
-        validationResult: {
-          passed: validation.passed,
-          errors,
-          warnings,
+      // 保存結果到 session
+      await updateBddSession({
+        sessionId,
+        updates: {
+          schemaSqlContent: result.schema_sql,
+          entityMappingContent: result.entity_mapping,
+          featuresContent: result.features,
+          validationResult: {
+            passed: result.validation?.passed ?? true,
+            errors: result.validation?.errors || [],
+            warnings: [],
+          },
         },
-      },
+      })
+
+      await sendMessage(
+        conversationId,
+        `正在產出規格文件...`,
+        'formulation_progress',
+        { current: 4, total: 4, step: `完成！生成了 ${result.features?.length || 0} 個功能規格` }
+      )
+
+      return {
+        validationPassed: result.validation?.passed ?? true,
+        validationErrors: result.validation?.errors || [],
+      }
     })
 
-    return {
-      passed: validation.passed,
-      errors,
-      warnings,
-      totalErrors: validation.totalErrors,
-      totalWarnings: validation.totalWarnings,
-      detailedResults: validation.results,
-    }
-  })
-
-  // 如果驗證失敗，嘗試修復（最多 3 次）
-  if (!validationResult.passed) {
-    let fixAttempt = 0
-    const maxFixAttempts = 3
-
-    while (fixAttempt < maxFixAttempts && !validationResult.passed) {
-      fixAttempt++
-
-      // 發送修復進度訊息
-      await step.run(`send-fix-progress-${fixAttempt}`, async () => {
+    // 如果 Modal 驗證有錯誤，發送警告
+    if (!modalResult.validationPassed && modalResult.validationErrors.length > 0) {
+      await step.run('send-modal-validation-warning', async () => {
         await sendMessage(
           conversationId,
-          `驗證發現 ${validationResult.errors.length} 個格式問題，正在自動修復 (嘗試 ${fixAttempt}/${maxFixAttempts})...`,
-          'fix_attempt'
+          `⚠️ Modal 自動修復未能解決所有問題。\n` +
+          `剩餘問題：\n${modalResult.validationErrors.slice(0, 5).map((e: string) => `- ${e}`).join('\n')}` +
+          (modalResult.validationErrors.length > 5 ? `\n... 還有 ${modalResult.validationErrors.length - 5} 個問題` : '') +
+          `\n\n將繼續進行，但可能需要人工檢查規格。`,
+          'fix_warning'
         )
       })
+    }
+  } else {
+    // ============================================================
+    // Fallback 模式：使用原有的分批生成邏輯
+    // ============================================================
 
-      // 批量修復所有有錯誤的 Features（一次 LLM 調用，節省 Token）
-      const fixedFeatures = await step.run(`fix-features-${fixAttempt}`, async () => {
-        const session = await getBddSession({ sessionId })
-        if (!session.data?.featuresContent) return []
+    // 產出 Schema
+    const schemaResult = await step.run('generate-schema', async () => {
+      // 發送進度更新
+      await sendMessage(
+        conversationId,
+        `正在產出規格文件...`,
+        'formulation_progress',
+        { current: 1, total: 4, step: '產出資料庫結構' }
+      )
+      const session = await getBddSession({ sessionId })
+      if (!session.data) throw new Error('Session 不存在')
 
-        // 收集需要修復的 Features 和它們的錯誤
-        const featuresToFix: Array<{ name: string; content: string; errors: string[] }> = []
-        const featuresNoError: FeatureFile[] = []
+      const result = await generateSchemaSql(
+        message,
+        session.data.resolvedItems,
+        projectContext || undefined,
+        { conversationId, purpose: 'generate_schema' }
+      )
 
-        for (const feature of session.data.featuresContent) {
-          const featureErrors = validationResult.errors.filter((e: string) =>
-            e.includes(feature.name)
-          )
+      if (!result.success) {
+        throw new Error(result.error || '產出 Schema 失敗')
+      }
 
-          if (featureErrors.length > 0) {
-            featuresToFix.push({
-              name: feature.name,
-              content: feature.content,
-              errors: featureErrors,
-            })
-          } else {
-            featuresNoError.push(feature)
-          }
-        }
-
-        // 如果沒有需要修復的，直接返回
-        if (featuresToFix.length === 0) {
-          return session.data.featuresContent
-        }
-
-        // 一次 LLM 調用批量修復所有 Features（包含用戶釐清決策）
-        const fixResult = await fixMultipleFeatures(
-          featuresToFix,
-          session.data?.resolvedItems || [],
-          { conversationId, purpose: 'fix_features_batch' }
-        )
-
-        // 合併結果
-        let results: FeatureFile[]
-        if (fixResult.success && fixResult.fixedFeatures) {
-          // 用修復後的內容替換原來的
-          const fixedMap = new Map(
-            fixResult.fixedFeatures.map(f => [f.name, f.content])
-          )
-          results = session.data.featuresContent.map((f: FeatureFile) => {
-            const fixedContent = fixedMap.get(f.name)
-            return fixedContent ? { ...f, content: fixedContent } : f
-          })
-        } else {
-          // 修復失敗，保留原來的
-          results = session.data.featuresContent
-        }
-
-        // 更新 session
-        await updateBddSession({
-          sessionId,
-          updates: { featuresContent: results },
-        })
-
-        return results
+      await updateBddSession({
+        sessionId,
+        updates: {
+          schemaSqlContent: result.schemaSql,
+          entityMappingContent: result.entityMapping,
+        },
       })
 
-      // 真正重新驗證
-      validationResult = await step.run(`revalidate-features-${fixAttempt}`, async () => {
-        const features = (fixedFeatures || []).map((f: FeatureFile) => ({
-          name: f.name,
-          content: f.content,
-        }))
+      return {
+        schemaSql: result.schemaSql,
+        entityMapping: result.entityMapping,
+      }
+    })
 
-        const validation = validateMultipleFeatures(features)
+    // 產出 Feature Files（分批生成，避免截斷）
+    const featuresResult = await step.run('generate-features', async () => {
+      const session = await getBddSession({ sessionId })
+      if (!session.data) throw new Error('Session 不存在')
 
-        const errors = validation.allErrors.map((e: ValidationError) =>
-          `[${e.code}]${e.line ? ` 行 ${e.line}` : ''} ${e.message}${e.suggestion ? ` (建議: ${e.suggestion})` : ''}`
+      // 進度回調：每生成一個 Feature 就更新進度
+      const onProgress = async (current: number, total: number, featureName: string) => {
+        await sendMessage(
+          conversationId,
+          `正在產出規格文件...`,
+          'formulation_progress',
+          { current: 2, total: 4, step: `產出功能規格 (${current}/${total}: ${featureName})` }
         )
-        const warnings = validation.allWarnings.map((w: ValidationWarning) =>
-          `[${w.code}]${w.line ? ` 行 ${w.line}` : ''} ${w.message}`
-        )
+      }
 
-        await updateBddSession({
-          sessionId,
-          updates: {
-            validationResult: {
-              passed: validation.passed,
-              errors,
-              warnings,
-            },
+      const result = await generateFeatureFiles(
+        message,
+        session.data.resolvedItems,
+        schemaResult.schemaSql || '',
+        schemaResult.entityMapping || '',
+        projectContext || undefined,
+        { conversationId, purpose: 'generate_features' },
+        onProgress  // 傳入進度回調
+      )
+
+      if (!result.success) {
+        throw new Error(result.error || '產出 Feature Files 失敗')
+      }
+
+      await updateBddSession({
+        sessionId,
+        updates: {
+          featuresContent: result.features,
+        },
+      })
+
+      return { features: result.features }
+    })
+
+    // 驗證 Feature Files（使用真實驗證函數）
+    let validationResult = await step.run('validate-features', async () => {
+      // 發送進度更新
+      await sendMessage(
+        conversationId,
+        `正在產出規格文件...`,
+        'formulation_progress',
+        { current: 3, total: 4, step: '驗證規格格式' }
+      )
+      const features = (featuresResult.features || []).map((f: FeatureFile) => ({
+        name: f.name,
+        content: f.content,
+      }))
+
+      const validation = validateMultipleFeatures(features)
+
+      // 轉換為簡化格式存儲
+      const errors = validation.allErrors.map(e =>
+        `[${e.code}]${e.line ? ` 行 ${e.line}` : ''} ${e.message}${e.suggestion ? ` (建議: ${e.suggestion})` : ''}`
+      )
+      const warnings = validation.allWarnings.map(w =>
+        `[${w.code}]${w.line ? ` 行 ${w.line}` : ''} ${w.message}`
+      )
+
+      await updateBddSession({
+        sessionId,
+        updates: {
+          validationResult: {
+            passed: validation.passed,
+            errors,
+            warnings,
           },
-        })
-
-        return {
-          passed: validation.passed,
-          errors,
-          warnings,
-          totalErrors: validation.totalErrors,
-          totalWarnings: validation.totalWarnings,
-          detailedResults: validation.results,
-        }
+        },
       })
 
-      // 如果還是失敗且已達最大嘗試次數，發送警告
-      if (!validationResult.passed && fixAttempt >= maxFixAttempts) {
-        await step.run('send-fix-failed-warning', async () => {
+      return {
+        passed: validation.passed,
+        errors,
+        warnings,
+        totalErrors: validation.totalErrors,
+        totalWarnings: validation.totalWarnings,
+        detailedResults: validation.results,
+      }
+    })
+
+    // 如果驗證失敗，嘗試修復（最多 3 次）
+    if (!validationResult.passed) {
+      let fixAttempt = 0
+      const maxFixAttempts = 3
+
+      while (fixAttempt < maxFixAttempts && !validationResult.passed) {
+        fixAttempt++
+
+        // 發送修復進度訊息
+        await step.run(`send-fix-progress-${fixAttempt}`, async () => {
           await sendMessage(
             conversationId,
-            `⚠️ 自動修復未能解決所有問題 (嘗試 ${fixAttempt} 次)。\n` +
-            `剩餘問題：\n${validationResult.errors.slice(0, 5).map((e: string) => `- ${e}`).join('\n')}` +
-            (validationResult.errors.length > 5 ? `\n... 還有 ${validationResult.errors.length - 5} 個問題` : '') +
-            `\n\n將繼續進行，但可能需要人工檢查規格。`,
-            'fix_warning'
+            `驗證發現 ${validationResult.errors.length} 個格式問題，正在自動修復 (嘗試 ${fixAttempt}/${maxFixAttempts})...`,
+            'fix_attempt'
           )
         })
+
+        // 批量修復所有有錯誤的 Features（一次 LLM 調用，節省 Token）
+        const fixedFeatures = await step.run(`fix-features-${fixAttempt}`, async () => {
+          const session = await getBddSession({ sessionId })
+          if (!session.data?.featuresContent) return []
+
+          // 收集需要修復的 Features 和它們的錯誤
+          const featuresToFix: Array<{ name: string; content: string; errors: string[] }> = []
+          const featuresNoError: FeatureFile[] = []
+
+          for (const feature of session.data.featuresContent) {
+            const featureErrors = validationResult.errors.filter((e: string) =>
+              e.includes(feature.name)
+            )
+
+            if (featureErrors.length > 0) {
+              featuresToFix.push({
+                name: feature.name,
+                content: feature.content,
+                errors: featureErrors,
+              })
+            } else {
+              featuresNoError.push(feature)
+            }
+          }
+
+          // 如果沒有需要修復的，直接返回
+          if (featuresToFix.length === 0) {
+            return session.data.featuresContent
+          }
+
+          // 一次 LLM 調用批量修復所有 Features（包含用戶釐清決策）
+          const fixResult = await fixMultipleFeatures(
+            featuresToFix,
+            session.data?.resolvedItems || [],
+            { conversationId, purpose: 'fix_features_batch' }
+          )
+
+          // 合併結果
+          let results: FeatureFile[]
+          if (fixResult.success && fixResult.fixedFeatures) {
+            // 用修復後的內容替換原來的
+            const fixedMap = new Map(
+              fixResult.fixedFeatures.map(f => [f.name, f.content])
+            )
+            results = session.data.featuresContent.map((f: FeatureFile) => {
+              const fixedContent = fixedMap.get(f.name)
+              return fixedContent ? { ...f, content: fixedContent } : f
+            })
+          } else {
+            // 修復失敗，保留原來的
+            results = session.data.featuresContent
+          }
+
+          // 更新 session
+          await updateBddSession({
+            sessionId,
+            updates: { featuresContent: results },
+          })
+
+          return results
+        })
+
+        // 真正重新驗證
+        validationResult = await step.run(`revalidate-features-${fixAttempt}`, async () => {
+          const features = (fixedFeatures || []).map((f: FeatureFile) => ({
+            name: f.name,
+            content: f.content,
+          }))
+
+          const validation = validateMultipleFeatures(features)
+
+          const errors = validation.allErrors.map((e: ValidationError) =>
+            `[${e.code}]${e.line ? ` 行 ${e.line}` : ''} ${e.message}${e.suggestion ? ` (建議: ${e.suggestion})` : ''}`
+          )
+          const warnings = validation.allWarnings.map((w: ValidationWarning) =>
+            `[${w.code}]${w.line ? ` 行 ${w.line}` : ''} ${w.message}`
+          )
+
+          await updateBddSession({
+            sessionId,
+            updates: {
+              validationResult: {
+                passed: validation.passed,
+                errors,
+                warnings,
+              },
+            },
+          })
+
+          return {
+            passed: validation.passed,
+            errors,
+            warnings,
+            totalErrors: validation.totalErrors,
+            totalWarnings: validation.totalWarnings,
+            detailedResults: validation.results,
+          }
+        })
+
+        // 如果還是失敗且已達最大嘗試次數，發送警告
+        if (!validationResult.passed && fixAttempt >= maxFixAttempts) {
+          await step.run('send-fix-failed-warning', async () => {
+            await sendMessage(
+              conversationId,
+              `⚠️ 自動修復未能解決所有問題 (嘗試 ${fixAttempt} 次)。\n` +
+              `剩餘問題：\n${validationResult.errors.slice(0, 5).map((e: string) => `- ${e}`).join('\n')}` +
+              (validationResult.errors.length > 5 ? `\n... 還有 ${validationResult.errors.length - 5} 個問題` : '') +
+              `\n\n將繼續進行，但可能需要人工檢查規格。`,
+              'fix_warning'
+            )
+          })
+        }
       }
     }
-  }
+  }  // End of Formulation Phase 2
 
   // ============================================================
   // Phase 3: Spec Discovery + Clarify（完整實現）
@@ -1557,6 +1654,10 @@ async function executeBddSpecSkill(input: BddSpecSkillInput) {
       )
     })
 
+    // 從 session 獲取 features（因為 featuresResult 在條件區塊內）
+    const sessionForArtifacts = await getBddSession({ sessionId })
+    const featuresForArtifacts = sessionForArtifacts.data?.featuresContent || []
+
     return {
       status: 'adjustment_requested',
       sessionId,
@@ -1565,7 +1666,7 @@ async function executeBddSpecSkill(input: BddSpecSkillInput) {
       artifacts: {
         schemaSql: 'spec/data/schema.sql',
         entityMapping: 'spec/data/entity_to_table_mapping.yml',
-        features: featuresResult.features?.map((f: FeatureFile) => `spec/features/${f.name}.feature`) || [],
+        features: featuresForArtifacts.map((f: FeatureFile) => `spec/features/${f.name}.feature`),
         actionsYml: 'spec/actions/actions.yml',
         isaConfig: 'isa_codegen.yml',
       },
@@ -2031,6 +2132,10 @@ async function executeBddSpecSkill(input: BddSpecSkillInput) {
     )
   })
 
+  // 從 session 獲取 features（因為 featuresResult 在條件區塊內）
+  const finalSession = await getBddSession({ sessionId })
+  const finalFeatures = finalSession.data?.featuresContent || []
+
   return {
     status: 'success',
     sessionId,
@@ -2038,7 +2143,7 @@ async function executeBddSpecSkill(input: BddSpecSkillInput) {
     bddArtifacts: {
       schemaSql: 'spec/data/schema.sql',
       entityMapping: 'spec/data/entity_to_table_mapping.yml',
-      features: featuresResult.features?.map((f: FeatureFile) => `spec/features/${f.name}.feature`) || [],
+      features: finalFeatures.map((f: FeatureFile) => `spec/features/${f.name}.feature`),
       actionsYml: 'spec/actions/actions.yml',
       isaConfig: 'isa_codegen.yml',
     },

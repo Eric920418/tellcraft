@@ -61,7 +61,8 @@
       "Bash(__NEW_LINE_22df7d65fa8d6b1d__ echo \"=== 11. 刪除 projects ===\")",
       "Bash(node scripts/check-options.js:*)",
       "Bash(INNGEST_SIGNING=\"signkey-prod-e7360954ebe942b5a503e1f097718c903b942e2dd04caeab671fe310c49daeab\":*)",
-      "Bash(node -e:*)"
+      "Bash(node -e:*)",
+      "Bash(npx tsx:*)"
     ]
   }
 }
