@@ -158,6 +158,11 @@ MODAL_FORMULATION_URL=https://your-username--tellcraft-formulation-generate-spec
 - 原因：`getConversationMessages` 只查詢 `tasks` 表，但 orchestrator 沒有創建 task 記錄
 - 解決：`getConversationMessages` 現在也查詢 `bdd_sessions` 表，如果有活躍的 session 則返回其 ID 作為 `currentTaskId`
 
+**UIUX 分屏模式修復**（2026-02-01）：
+- 問題：前端沒有進入分屏模式（SplitLayout）
+- 原因：`page.tsx` 中 `formattedMessages` 轉換時沒有包含 `layoutHint` 和 `richContent` 欄位
+- 解決：添加 `layoutHint` 和 `richContent` 欄位到消息轉換中
+
 ---
 
 ### 最新修復（2026-02-01）

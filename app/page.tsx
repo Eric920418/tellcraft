@@ -1197,13 +1197,17 @@ function ChatSection({
           pollInterval = MIN_INTERVAL
 
           // 轉換消息格式
-          const formattedMessages: Message[] = newMessages.map((m) => ({
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const formattedMessages: Message[] = newMessages.map((m: any) => ({
             id: m.id,
             role: m.role,
             content: m.content,
             timestamp: new Date(m.timestamp),
             stage: m.stage as Message['stage'],
-            progress: m.progress as Message['progress']
+            progress: m.progress as Message['progress'],
+            // UIUX 模板系統欄位
+            layoutHint: m.layoutHint as Message['layoutHint'],
+            richContent: m.richContent as Message['richContent'],
           }))
 
           // 找出最新的 AI 消息 stage（在 setMessages 外部計算，確保狀態更新正確）
