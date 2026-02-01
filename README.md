@@ -585,6 +585,69 @@ isa_config_content TEXT
 - `generateGlobalStyles` - 生成全域樣式
 - `generateFullFrontend` - 批量生成完整前端
 
+### UIUX 模板系統（2026-02-01）
+
+實現模板引導式設計流程，包含分屏佈局和互動預覽：
+
+```
+用戶確認 BDD Spec → 進入 UIUX 階段 → 分屏佈局
+┌────────────────┬─────────────────────────────┐
+│   聊天區塊     │      預覽面板               │
+│   (30% 寬)     │      (70% 寬)               │
+│                │                             │
+│  [模板選擇]    │   [模板預覽/iframe]         │
+│  [AI 引導]     │   [設備切換 D/T/M]          │
+│                │   [互動編輯器]              │
+└────────────────┴─────────────────────────────┘
+```
+
+**核心元件**（`app/components/uiux/`）：
+- `SplitLayout.tsx` - 可拖曳分屏佈局（30%/70%）
+- `PreviewPanel.tsx` - 預覽面板 + iframe + 設備切換
+- `DeviceSwitcher.tsx` - 設備切換器（desktop/tablet/mobile）
+- `TemplatePicker.tsx` - 模板選擇器（網格 + 分類）
+- `TemplateCard.tsx` - 模板卡片（預覽圖 + 標籤）
+- `InteractivePreview.tsx` - 互動預覽（postMessage 通訊）
+- `PropertyEditor.tsx` - 屬性編輯器（文字/顏色/間距）
+- `UiuxChatSection.tsx` - UIUX 階段聊天介面
+
+**訊息結構擴展**：
+```typescript
+interface Message {
+  // 現有欄位
+  layoutHint?: 'default' | 'split' | 'full_preview'
+  richContent?: {
+    type: 'template_picker' | 'design_preview' | 'code_preview'
+    data: Record<string, unknown>
+  }
+}
+```
+
+**模板資料**（`app/lib/templates.ts`）：
+- 5 個初始模板：saas-minimal, saas-pro, landing-startup, landing-corporate, ecommerce-modern
+- 分類：saas, landing, ecommerce, content
+- Server Actions：`getTemplates()`, `getTemplateById()`, `getRecommendedTemplates()`
+
+**iframe 互動協議**（`public/scripts/interactive-preview.js`）：
+```typescript
+// 父視窗 → iframe
+iframe.postMessage({ type: 'ENABLE_SELECTION_MODE' }, '*')
+iframe.postMessage({ type: 'UPDATE_ELEMENT', elementId, changes }, '*')
+
+// iframe → 父視窗
+window.parent.postMessage({ type: 'ELEMENT_SELECTED', element }, '*')
+window.parent.postMessage({ type: 'STYLES_UPDATED', elementId }, '*')
+```
+
+**資料庫變更**（`spec/data/schema.sql`）：
+```sql
+CREATE TYPE template_category AS ENUM ('saas', 'landing', 'ecommerce', 'content');
+CREATE TABLE templates (
+  id, name, slug, category, description, thumbnail_url, preview_image_url,
+  tags, design_defaults, page_structure, is_active, is_featured, sort_order
+);
+```
+
 ### UIUX Skill 完整流程
 
 UI/UX Skill 實現完整的 4 階段前端介面開發流程：

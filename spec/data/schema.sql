@@ -433,6 +433,55 @@ CREATE INDEX idx_llm_usage_created_at ON llm_usage(created_at DESC);
 CREATE INDEX idx_llm_usage_model ON llm_usage(model);
 
 -- ============================================================
+-- UIUX 模板系統
+-- ============================================================
+
+-- 模板分類
+CREATE TYPE template_category AS ENUM (
+    'saas',         -- SaaS 應用
+    'landing',      -- Landing Page
+    'ecommerce',    -- 電商
+    'content'       -- 內容網站
+);
+
+-- UIUX 模板（預設模板庫）
+CREATE TABLE templates (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    name VARCHAR(100) NOT NULL UNIQUE COMMENT '模板名稱',
+    slug VARCHAR(100) NOT NULL UNIQUE COMMENT 'URL 友好的識別碼',
+    category template_category NOT NULL COMMENT '模板分類',
+    description TEXT NOT NULL COMMENT '模板描述',
+
+    -- 視覺資源
+    thumbnail_url TEXT COMMENT '縮圖 URL（小圖，用於列表）',
+    preview_image_url TEXT COMMENT '預覽圖 URL（大圖，用於詳情）',
+
+    -- 標籤與搜尋
+    tags TEXT[] NOT NULL DEFAULT '{}' COMMENT '標籤（如 minimal, dark, modern）',
+
+    -- 設計預設值
+    design_defaults JSONB NOT NULL DEFAULT '{}' COMMENT 'UiuxDesignBrief 預設值',
+
+    -- 頁面結構
+    page_structure JSONB NOT NULL DEFAULT '{"pages": [], "components": []}' COMMENT '頁面和元件結構',
+
+    -- 狀態
+    is_active BOOLEAN NOT NULL DEFAULT TRUE COMMENT '是否啟用',
+    is_featured BOOLEAN NOT NULL DEFAULT FALSE COMMENT '是否推薦',
+    sort_order INT NOT NULL DEFAULT 0 COMMENT '排序權重',
+
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+) COMMENT 'UIUX 模板庫';
+
+-- 模板索引
+CREATE INDEX idx_templates_category ON templates(category);
+CREATE INDEX idx_templates_is_active ON templates(is_active);
+CREATE INDEX idx_templates_is_featured ON templates(is_featured);
+CREATE INDEX idx_templates_sort_order ON templates(sort_order);
+CREATE INDEX idx_templates_tags ON templates USING GIN(tags);
+
+-- ============================================================
 -- RLS 政策
 -- ============================================================
 

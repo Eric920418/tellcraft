@@ -336,6 +336,50 @@ async function sendMessage(
     .eq('id', conversationId)
 }
 
+// 擴展版 sendMessage：支援 layoutHint 和 richContent（用於 UIUX 模板系統）
+async function sendMessageWithRichContent(
+  conversationId: string,
+  content: string,
+  stage: string,
+  richContent?: {
+    type: 'template_picker' | 'design_preview' | 'code_preview'
+    data: Record<string, unknown>
+  },
+  layoutHint?: 'default' | 'split' | 'full_preview'
+) {
+  const message: Record<string, unknown> = {
+    id: crypto.randomUUID(),
+    role: 'assistant',
+    content,
+    timestamp: new Date().toISOString(),
+    stage,
+  }
+
+  // 添加 layoutHint（如果有）
+  if (layoutHint) {
+    message.layoutHint = layoutHint
+  }
+
+  // 添加 richContent（如果有）
+  if (richContent) {
+    message.richContent = richContent
+  }
+
+  const { data: conv } = await supabase
+    .from('conversations')
+    .select('messages')
+    .eq('id', conversationId)
+    .single()
+
+  await supabase
+    .from('conversations')
+    .update({
+      messages: [...(conv?.messages || []), message],
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', conversationId)
+}
+
 // 輔助函數：格式化釐清問題（簡潔版：只顯示問題和選項）
 function formatClarifyQuestion(item: ClarifyItem, _index: number, _total: number): string {
   let text = item.whiteTextQuestion || item.question
@@ -1522,31 +1566,167 @@ async function executeBddSpecSkill(input: BddSpecSkillInput) {
   }
 
   // ============================================================
-  // 用戶確認，執行 UIUX Skill
-  // TODO: coder 開發完成後，改回並行執行 UIUX + Coder
+  // 用戶確認，執行 UIUX Skill（模板驅動流程）
+  // 新流程：發送模板選擇器 → 用戶選擇 → 預覽調整 → 生成程式碼
   // ============================================================
 
-  await step.run('notify-uiux-start', async () => {
-    await sendMessage(
+  // Step 1: 通知前端切換到分屏佈局 + 發送模板選擇器
+  await step.run('uiux-show-templates', async () => {
+    // 根據專案類型推薦模板
+    const templates = [
+      {
+        id: 'saas-minimal',
+        name: 'SaaS Dashboard - 極簡',
+        category: 'saas',
+        description: '簡潔的 SaaS 控制台模板，強調留白與易讀性。',
+        thumbnailUrl: '/templates/thumbnails/saas-minimal.png',
+        tags: ['minimal', 'light', 'dashboard'],
+        isFeatured: true
+      },
+      {
+        id: 'saas-pro',
+        name: 'SaaS Dashboard - 專業',
+        category: 'saas',
+        description: '專業級深色 SaaS 控制台，適合開發者工具。',
+        thumbnailUrl: '/templates/thumbnails/saas-pro.png',
+        tags: ['professional', 'dark', 'dashboard'],
+        isFeatured: true
+      },
+      {
+        id: 'landing-startup',
+        name: 'Startup Landing Page',
+        category: 'landing',
+        description: '現代感十足的新創公司 Landing Page。',
+        thumbnailUrl: '/templates/thumbnails/landing-startup.png',
+        tags: ['modern', 'vibrant', 'startup'],
+        isFeatured: true
+      },
+      {
+        id: 'landing-corporate',
+        name: 'Corporate Website',
+        category: 'landing',
+        description: '專業企業官網模板，穩重的配色與清晰的資訊層次。',
+        thumbnailUrl: '/templates/thumbnails/landing-corporate.png',
+        tags: ['professional', 'clean', 'corporate'],
+        isFeatured: false
+      },
+      {
+        id: 'ecommerce-modern',
+        name: 'Modern E-commerce',
+        category: 'ecommerce',
+        description: '現代電商模板，極簡設計讓產品成為主角。',
+        thumbnailUrl: '/templates/thumbnails/ecommerce-modern.png',
+        tags: ['minimal', 'light', 'ecommerce'],
+        isFeatured: true
+      }
+    ]
+
+    await sendMessageWithRichContent(
       conversationId,
-      `太好了！現在開始設計前端介面：\n\n` +
-      `🎨 **前端 (UIUX)** - 設計探索 → 生成介面\n\n` +
-      `讓我先了解一下你對介面的偏好...`,
-      'uiux_start'
+      `太好了！現在來選擇前端設計的方向。\n\n` +
+      `根據你的專案類型，我推薦以下幾個模板：`,
+      'uiux_template_picker',
+      {
+        type: 'template_picker',
+        data: {
+          templates,
+          recommendedIds: templates.filter(t => t.isFeatured).map(t => t.id)
+        }
+      },
+      'split'  // 切換到分屏佈局
     )
   })
 
-  // TODO: coder 開發完成後，改回並行執行：
-  // const [uiuxResult, coderResult] = await Promise.all([
-  //   step.run('execute-uiux-parallel', ...),
-  //   step.run('execute-coder-parallel', ...),
-  // ])
+  // Step 2: 等待用戶選擇模板
+  const templateChoice = await step.waitForEvent('wait-template-choice', {
+    event: 'user/reply',
+    timeout: '24h',
+    match: 'data.conversationId',
+  })
 
-  // 開始 UIUX 問答流程（Design Discovery）
-  // 問題 1: 產品類型
+  if (!templateChoice) {
+    return { status: 'timeout', phase: 'uiux_template_selection' }
+  }
+
+  // 解析用戶選擇的模板
+  const templateMessage = templateChoice.data.message.toLowerCase()
+  let selectedTemplateId = 'saas-minimal' // 預設值
+
+  // 嘗試匹配模板 ID
+  const templateIds = ['saas-minimal', 'saas-pro', 'landing-startup', 'landing-corporate', 'ecommerce-modern']
+  for (const id of templateIds) {
+    if (templateMessage.includes(id)) {
+      selectedTemplateId = id
+      break
+    }
+  }
+
+  // 也匹配模板名稱關鍵字
+  if (templateMessage.includes('極簡') || templateMessage.includes('minimal')) {
+    selectedTemplateId = 'saas-minimal'
+  } else if (templateMessage.includes('專業') || templateMessage.includes('pro') || templateMessage.includes('深色')) {
+    selectedTemplateId = 'saas-pro'
+  } else if (templateMessage.includes('startup') || templateMessage.includes('新創')) {
+    selectedTemplateId = 'landing-startup'
+  } else if (templateMessage.includes('corporate') || templateMessage.includes('企業')) {
+    selectedTemplateId = 'landing-corporate'
+  } else if (templateMessage.includes('ecommerce') || templateMessage.includes('電商')) {
+    selectedTemplateId = 'ecommerce-modern'
+  }
+
+  // Step 3: 確認選擇並詢問是否需要調整
+  await step.run('uiux-confirm-template', async () => {
+    await sendMessage(
+      conversationId,
+      `你選擇了 **${selectedTemplateId}** 模板！\n\n` +
+      `你可以在右側預覽面板中查看效果。\n\n` +
+      `需要調整什麼嗎？例如：\n` +
+      `- 「改成深色模式」\n` +
+      `- 「把主色調換成藍色」\n` +
+      `- 「標題字體大一點」\n\n` +
+      `或輸入「開始生成」直接進入程式碼生成階段。`,
+      'uiux_template_selected'
+    )
+  })
+
+  // Step 4: 等待用戶確認或調整
+  const adjustmentReply = await step.waitForEvent('wait-template-adjustment', {
+    event: 'user/reply',
+    timeout: '24h',
+    match: 'data.conversationId',
+  })
+
+  if (!adjustmentReply) {
+    return { status: 'timeout', phase: 'uiux_template_adjustment' }
+  }
+
+  const adjustMessage = adjustmentReply.data.message.toLowerCase()
+  const startPatterns = ['開始', '生成', 'ok', 'yes', '確認', '沒問題', '好']
+  const shouldStartGeneration = startPatterns.some(p => adjustMessage.includes(p))
+
+  if (!shouldStartGeneration) {
+    // 用戶要求調整，目前先回應後繼續（實際實作時可加入更多調整邏輯）
+    await step.run('uiux-apply-adjustment', async () => {
+      await sendMessage(
+        conversationId,
+        `收到！我會根據你的要求調整設計。\n\n` +
+        `調整完成後會更新右側的預覽。現在開始生成程式碼...`,
+        'uiux_adjustment_applied'
+      )
+    })
+  }
+
+  // 繼續原有的 UIUX 流程（問答式收集更多偏好）
+  // 為了向後兼容，保留原有的問答流程，但可以在未來簡化
+  const inferredProductType = selectedTemplateId.startsWith('saas') ? 'saas' :
+                              selectedTemplateId.startsWith('landing') ? 'landing' :
+                              selectedTemplateId.startsWith('ecommerce') ? 'ecommerce' : 'content'
+
+  // 問題 1: 視覺風格（簡化版，根據模板選擇預設）
   await step.run('uiux-ask-product-type', async () => {
     await sendMessage(
       conversationId,
+      `正在根據 **${inferredProductType}** 類型生成設計...\n\n` +
       `**這是什麼類型的產品？**\n\n` +
       `**A.** SaaS Dashboard - 管理後台、數據儀表板\n\n` +
       `**B.** Landing Page - 行銷頁面、產品介紹\n\n` +
@@ -1566,7 +1746,7 @@ async function executeBddSpecSkill(input: BddSpecSkillInput) {
     return { status: 'timeout', phase: 'uiux_discovery' }
   }
 
-  const productType = parseDesignChoice(productTypeReply.data.message, ['saas', 'landing', 'ecommerce', 'content'])
+  const productType = parseDesignChoice(productTypeReply.data.message, ['saas', 'landing', 'ecommerce', 'content']) || inferredProductType
 
   // 問題 2: 視覺風格
   await step.run('uiux-ask-style', async () => {

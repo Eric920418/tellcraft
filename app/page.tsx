@@ -25,6 +25,11 @@ import {
 import ConversationPicker from './components/ConversationPicker'
 import LoginPrompt, { shouldShowLoginPrompt, dismissLoginPrompt } from './components/LoginPrompt'
 import ProjectReminder from './components/ProjectReminder'
+import SplitLayout from './components/uiux/SplitLayout'
+import PreviewPanel from './components/uiux/PreviewPanel'
+import TemplatePicker from './components/uiux/TemplatePicker'
+import { getTemplateById } from './actions/templates'
+import type { Template, TemplateCardData } from './lib/templates'
 
 // ============ Types ============
 interface Message {
@@ -32,8 +37,14 @@ interface Message {
   role: 'user' | 'assistant' | 'system'
   content: string
   timestamp: Date
-  stage?: 'init' | 'init_progress' | 'discovery' | 'clarify' | 'prd_discovery_complete' | 'formulation_start' | 'formulation_progress' | 'formulation' | 'generating' | 'deploying' | 'complete'
+  stage?: 'init' | 'init_progress' | 'discovery' | 'clarify' | 'prd_discovery_complete' | 'formulation_start' | 'formulation_progress' | 'formulation' | 'uiux' | 'uiux_template_picker' | 'generating' | 'deploying' | 'complete'
   progress?: { current: number; total: number; step: string }
+  // UIUX 模板系統擴展
+  layoutHint?: 'default' | 'split' | 'full_preview'
+  richContent?: {
+    type: 'template_picker' | 'design_preview' | 'code_preview'
+    data: Record<string, unknown>
+  }
 }
 
 // ============ Animated Text Components ============
@@ -901,6 +912,52 @@ function ChatSection({
     promptId: string
   } | null>(null)
 
+  // UIUX 分屏佈局相關狀態
+  const [layoutMode, setLayoutMode] = useState<'default' | 'split'>('default')
+  const [selectedTemplateId, setSelectedTemplateId] = useState<string | null>(null)
+  const [selectedTemplate, setSelectedTemplate] = useState<Template | null>(null)
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null)
+
+  // 監聽訊息的 layoutHint，切換佈局模式
+  useEffect(() => {
+    const lastHintMessage = [...messages].reverse().find(m => m.layoutHint)
+    if (lastHintMessage?.layoutHint) {
+      setLayoutMode(lastHintMessage.layoutHint === 'split' ? 'split' : 'default')
+    }
+
+    // 檢查是否有預覽 URL
+    const lastPreviewMessage = [...messages].reverse().find(m =>
+      m.richContent?.data && 'previewUrl' in m.richContent.data
+    )
+    if (lastPreviewMessage?.richContent?.data) {
+      const data = lastPreviewMessage.richContent.data as { previewUrl?: string }
+      if (data.previewUrl) {
+        setPreviewUrl(data.previewUrl)
+      }
+    }
+  }, [messages])
+
+  // 載入選中的模板詳情
+  useEffect(() => {
+    if (!selectedTemplateId) {
+      setSelectedTemplate(null)
+      return
+    }
+
+    const loadTemplate = async () => {
+      const result = await getTemplateById(selectedTemplateId)
+      if (result.success && result.data) {
+        setSelectedTemplate(result.data)
+      }
+    }
+    loadTemplate()
+  }, [selectedTemplateId])
+
+  // 處理模板選擇
+  const handleTemplateSelect = useCallback((templateId: string) => {
+    setSelectedTemplateId(templateId)
+  }, [])
+
   // 獲取或創建 anonymousId
   const getAnonymousId = useCallback(async () => {
     // 先嘗試從 localStorage 獲取
@@ -1468,6 +1525,340 @@ function ChatSection({
   const mappedStage = mapBackendStageToFrontend(currentStage)
   const currentStageIndex = stages.findIndex(s => s.key === mappedStage)
 
+  // 提取聊天面板的內容渲染函數（用於 SplitLayout）
+  const renderChatContent = () => (
+    <>
+      {/* 對話選擇器 */}
+      {showConversationPicker && (
+        <div style={{ flex: 1, overflow: 'auto' }}>
+          <ConversationPicker
+            conversations={conversations}
+            onSelectConversation={handleSelectConversation}
+            onStartNewConversation={handleStartNewConversation}
+            isLoading={isLoadingConversations}
+          />
+        </div>
+      )}
+
+      {/* 對話內容 */}
+      {!showConversationPicker && (
+        <div style={{ flex: 1, overflow: 'auto', padding: layoutMode === 'split' ? '16px 0' : '32px 0' }}>
+          <div style={{ maxWidth: layoutMode === 'split' ? '100%' : 680, margin: '0 auto', padding: layoutMode === 'split' ? '0 16px' : '0 24px' }}>
+            {/* 錯誤提示 */}
+            {error && (
+              <motion.div
+                initial={{ opacity: 0, y: -10 }}
+                animate={{ opacity: 1, y: 0 }}
+                style={{
+                  padding: '12px 16px',
+                  background: '#FEE2E2',
+                  border: '1px solid #FECACA',
+                  color: '#DC2626',
+                  fontSize: 14,
+                  marginBottom: 20,
+                }}
+              >
+                {error}
+              </motion.div>
+            )}
+
+            {/* 初始化中 */}
+            {isInitializing && (
+              <motion.div
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  padding: '40px 0',
+                  color: 'var(--gray-500)',
+                  fontSize: 14,
+                }}
+              >
+                正在初始化...
+              </motion.div>
+            )}
+
+            {messages.map((message, index) => {
+              const isRecentMessage = index >= messages.length - 3
+              const animationDelay = isRecentMessage ? (index - (messages.length - 3)) * 0.05 : 0
+
+              return (
+                <motion.div
+                  key={message.id}
+                  initial={isRecentMessage ? { opacity: 0, y: 15 } : false}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ duration: 0.3, delay: animationDelay }}
+                  style={{
+                    marginBottom: layoutMode === 'split' ? 16 : 28,
+                    display: 'flex',
+                    flexDirection: 'column',
+                    alignItems: message.role === 'user' ? 'flex-end' : 'flex-start'
+                  }}
+                >
+                  {message.role === 'system' ? (
+                    <div style={{
+                      fontSize: 13,
+                      color: 'var(--gray-500)',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 10,
+                      padding: '8px 0'
+                    }}>
+                      <motion.span
+                        animate={{ opacity: [1, 0.4, 1] }}
+                        transition={{ duration: 1.2, repeat: Infinity }}
+                        style={{ width: 6, height: 6, background: 'var(--black)', display: 'inline-block' }}
+                      />
+                      {message.content}
+                    </div>
+                  ) : (
+                    <>
+                      <div style={{
+                        fontSize: 11,
+                        color: 'var(--gray-400)',
+                        marginBottom: 8,
+                        textTransform: 'uppercase',
+                        letterSpacing: '0.05em'
+                      }}>
+                        {message.role === 'user' ? '你' : '泰爾'}
+                      </div>
+                      <div style={{
+                        padding: layoutMode === 'split' ? '12px 16px' : '18px 22px',
+                        background: message.role === 'user' ? 'var(--black)' : 'var(--gray-50)',
+                        color: message.role === 'user' ? 'var(--white)' : 'var(--black)',
+                        border: '1px solid',
+                        borderColor: message.role === 'user' ? 'var(--black)' : 'var(--border-color)',
+                        maxWidth: layoutMode === 'split' ? '95%' : '85%',
+                        fontSize: layoutMode === 'split' ? 14 : 15,
+                        lineHeight: 1.75,
+                      }}>
+                        {message.role === 'user' ? (
+                          <span style={{ whiteSpace: 'pre-wrap' }}>{message.content}</span>
+                        ) : (
+                          <div className="markdown-content">
+                            <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                              {message.content}
+                            </ReactMarkdown>
+                          </div>
+                        )}
+                      </div>
+
+                      {/* UIUX 模板選擇器 - 在分屏模式下顯示在右側預覽面板，這裡不重複渲染 */}
+                      {message.richContent?.type === 'template_picker' && layoutMode !== 'split' && (
+                        <motion.div
+                          initial={{ opacity: 0, y: 10 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          transition={{ delay: 0.2 }}
+                          style={{ marginTop: 16, width: '100%' }}
+                        >
+                          <TemplatePicker
+                            onSelect={handleTemplateSelect}
+                            selectedId={selectedTemplateId || undefined}
+                            columns={2}
+                          />
+                        </motion.div>
+                      )}
+                    </>
+                  )}
+                </motion.div>
+              )
+            })}
+
+            {typingStage !== 'none' && (
+              <motion.div
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.25 }}
+                style={{ marginBottom: layoutMode === 'split' ? 16 : 28 }}
+              >
+                <div style={{
+                  fontSize: 11,
+                  color: 'var(--gray-400)',
+                  marginBottom: 8,
+                  textTransform: 'uppercase',
+                  letterSpacing: '0.05em'
+                }}>泰爾</div>
+                <div style={{
+                  padding: layoutMode === 'split' ? '12px 16px' : '18px 22px',
+                  background: 'var(--gray-50)',
+                  border: '1px solid var(--border-color)',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: typingStage === 'message' ? 10 : 4,
+                }}>
+                  {typingStage === 'message' && (
+                    <span style={{ fontSize: 14, color: 'var(--gray-500)' }}>問題正在釐清中，請稍等</span>
+                  )}
+                  {[0, 1, 2].map(i => (
+                    <motion.span
+                      key={i}
+                      animate={{ opacity: [0.3, 1, 0.3] }}
+                      transition={{ duration: 1, repeat: Infinity, delay: i * 0.2 }}
+                      style={{
+                        width: typingStage === 'message' ? 5 : 6,
+                        height: typingStage === 'message' ? 5 : 6,
+                        borderRadius: '50%',
+                        background: 'var(--gray-400)',
+                        display: 'inline-block'
+                      }}
+                    />
+                  ))}
+                </div>
+              </motion.div>
+            )}
+            <div ref={messagesEndRef} />
+          </div>
+        </div>
+      )}
+
+      {/* 輸入區域 */}
+      {!showConversationPicker && (
+        <motion.div
+          initial={{ y: 20, opacity: 0 }}
+          animate={{ y: 0, opacity: 1 }}
+          transition={{ duration: 0.4, delay: 0.2 }}
+          style={{ borderTop: '1px solid var(--border-color)', padding: layoutMode === 'split' ? '12px 16px' : '20px 24px', background: 'var(--white)' }}
+        >
+          <div style={{ maxWidth: layoutMode === 'split' ? '100%' : 680, margin: '0 auto' }}>
+            <div style={{ display: 'flex', gap: layoutMode === 'split' ? 8 : 12, alignItems: 'flex-end' }}>
+              <textarea
+                ref={inputRef}
+                value={input}
+                onChange={(e) => {
+                  setInput(e.target.value)
+                  adjustTextareaHeight()
+                }}
+                onCompositionStart={() => {
+                  isComposingRef.current = true
+                }}
+                onCompositionEnd={() => {
+                  isComposingRef.current = false
+                }}
+                onKeyDown={(e) => {
+                  if (isComposingRef.current) return
+                  if (e.key === 'Enter' && !e.shiftKey) {
+                    e.preventDefault()
+                    if (input.trim() && !isTyping && !isInitializing && sessionInfo) {
+                      handleSend()
+                    }
+                  }
+                }}
+                placeholder={layoutMode === 'split' ? '輸入訊息...' : '輸入訊息...（Shift+Enter 換行）'}
+                rows={1}
+                disabled={isInitializing || !sessionInfo}
+                style={{
+                  flex: 1,
+                  resize: 'none',
+                  padding: layoutMode === 'split' ? '10px 14px' : '14px 18px',
+                  fontSize: layoutMode === 'split' ? 14 : 15,
+                  border: '1px solid var(--border-color)',
+                  outline: 'none',
+                  fontFamily: 'inherit',
+                  lineHeight: 1.5,
+                  transition: 'border-color 0.2s ease, height 0.15s ease',
+                  opacity: isInitializing || !sessionInfo ? 0.5 : 1,
+                  minHeight: layoutMode === 'split' ? 40 : 48,
+                  maxHeight: layoutMode === 'split' ? 120 : 200,
+                  overflowY: 'hidden',
+                }}
+                onFocus={(e) => e.currentTarget.style.borderColor = 'var(--black)'}
+                onBlur={(e) => e.currentTarget.style.borderColor = 'var(--border-color)'}
+              />
+              <motion.button
+                whileHover={{ scale: 1.02 }}
+                whileTap={{ scale: 0.98 }}
+                onClick={handleSend}
+                disabled={!input.trim() || isTyping || isInitializing || !sessionInfo}
+                style={{
+                  padding: layoutMode === 'split' ? '0 20px' : '0 28px',
+                  height: layoutMode === 'split' ? 40 : 48,
+                  fontSize: layoutMode === 'split' ? 13 : 14,
+                  fontWeight: 500,
+                  border: '1px solid var(--black)',
+                  background: !input.trim() || isTyping || isInitializing || !sessionInfo ? 'var(--gray-100)' : 'var(--black)',
+                  color: !input.trim() || isTyping || isInitializing || !sessionInfo ? 'var(--gray-400)' : 'var(--white)',
+                  cursor: !input.trim() || isTyping || isInitializing || !sessionInfo ? 'not-allowed' : 'pointer',
+                  transition: 'all 0.2s ease',
+                  flexShrink: 0,
+                }}
+              >
+                送出
+              </motion.button>
+            </div>
+          </div>
+        </motion.div>
+      )}
+    </>
+  )
+
+  // 預覽面板渲染函數（用於 SplitLayout）
+  const renderPreviewPanel = () => (
+    <PreviewPanel
+      previewUrl={previewUrl || undefined}
+      previewImageUrl={selectedTemplate?.previewImageUrl}
+      templateName={selectedTemplate?.name}
+      isLoading={!selectedTemplate && !!selectedTemplateId}
+    />
+  )
+
+  // 分屏佈局模式
+  if (layoutMode === 'split' && isActive) {
+    return (
+      <motion.div
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        exit={{ opacity: 0 }}
+        style={{
+          position: 'fixed',
+          inset: 0,
+          zIndex: 100,
+        }}
+      >
+        <SplitLayout
+          chatPanel={
+            <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+              {/* Split Layout Header */}
+              <div
+                style={{
+                  height: 56,
+                  borderBottom: '1px solid var(--border-color)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  padding: '0 16px',
+                  gap: 12,
+                }}
+              >
+                <button
+                  onClick={onBack}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 6,
+                    fontSize: 13,
+                    color: 'var(--gray-600)',
+                    background: 'none',
+                    border: 'none',
+                    cursor: 'pointer',
+                    padding: '6px 0',
+                  }}
+                >
+                  <span>←</span>
+                  返回
+                </button>
+                <div style={{ width: 1, height: 20, background: 'var(--border-color)' }} />
+                <span style={{ fontSize: 14, fontWeight: 500 }}>UIUX 設計</span>
+              </div>
+              {renderChatContent()}
+            </div>
+          }
+          previewPanel={renderPreviewPanel()}
+        />
+      </motion.div>
+    )
+  }
+
   return (
     <AnimatePresence>
       {isActive && (
@@ -1600,344 +1991,8 @@ function ChatSection({
             />
           )}
 
-          {/* 對話選擇器 */}
-          {showConversationPicker && (
-            <div style={{ flex: 1, overflow: 'auto' }}>
-              <ConversationPicker
-                conversations={conversations}
-                onSelectConversation={handleSelectConversation}
-                onStartNewConversation={handleStartNewConversation}
-                isLoading={isLoadingConversations}
-              />
-            </div>
-          )}
-
-          {/* 對話內容 */}
-          {!showConversationPicker && (
-          <div style={{ flex: 1, overflow: 'auto', padding: '32px 0' }}>
-            <div style={{ maxWidth: 680, margin: '0 auto', padding: '0 24px' }}>
-              {/* 錯誤提示 */}
-              {error && (
-                <motion.div
-                  initial={{ opacity: 0, y: -10 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  style={{
-                    padding: '12px 16px',
-                    background: '#FEE2E2',
-                    border: '1px solid #FECACA',
-                    color: '#DC2626',
-                    fontSize: 14,
-                    marginBottom: 20,
-                  }}
-                >
-                  {error}
-                </motion.div>
-              )}
-
-              {/* 初始化中 */}
-              {isInitializing && (
-                <motion.div
-                  initial={{ opacity: 0 }}
-                  animate={{ opacity: 1 }}
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    padding: '40px 0',
-                    color: 'var(--gray-500)',
-                    fontSize: 14,
-                  }}
-                >
-                  正在初始化...
-                </motion.div>
-              )}
-
-              {messages.map((message, index) => {
-                // 只對最後 3 條消息應用進場動畫，避免長列表時新消息延遲過久
-                const isRecentMessage = index >= messages.length - 3
-                const animationDelay = isRecentMessage ? (index - (messages.length - 3)) * 0.05 : 0
-
-                return (
-                <motion.div
-                  key={message.id}
-                  initial={isRecentMessage ? { opacity: 0, y: 15 } : false}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ duration: 0.3, delay: animationDelay }}
-                  style={{
-                    marginBottom: 28,
-                    display: 'flex',
-                    flexDirection: 'column',
-                    alignItems: message.role === 'user' ? 'flex-end' : 'flex-start'
-                  }}
-                >
-                  {message.role === 'system' ? (
-                    <div style={{
-                      fontSize: 13,
-                      color: 'var(--gray-500)',
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: 10,
-                      padding: '8px 0'
-                    }}>
-                      <motion.span
-                        animate={{ opacity: [1, 0.4, 1] }}
-                        transition={{ duration: 1.2, repeat: Infinity }}
-                        style={{ width: 6, height: 6, background: 'var(--black)', display: 'inline-block' }}
-                      />
-                      {message.content}
-                    </div>
-                  ) : (
-                    <>
-                      <div style={{
-                        fontSize: 11,
-                        color: 'var(--gray-400)',
-                        marginBottom: 8,
-                        textTransform: 'uppercase',
-                        letterSpacing: '0.05em'
-                      }}>
-                        {message.role === 'user' ? '你' : '泰爾'}
-                      </div>
-                      <div style={{
-                        padding: '18px 22px',
-                        background: message.role === 'user' ? 'var(--black)' : 'var(--gray-50)',
-                        color: message.role === 'user' ? 'var(--white)' : 'var(--black)',
-                        border: '1px solid',
-                        borderColor: message.role === 'user' ? 'var(--black)' : 'var(--border-color)',
-                        maxWidth: '85%',
-                        fontSize: 15,
-                        lineHeight: 1.75,
-                      }}>
-                        {message.role === 'user' ? (
-                          <span style={{ whiteSpace: 'pre-wrap' }}>{message.content}</span>
-                        ) : (
-                          <div className="markdown-content">
-                            <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                              {message.content}
-                            </ReactMarkdown>
-                          </div>
-                        )}
-                      </div>
-                      {/* 處理中的進度條（只在 init_progress 和 formulation_progress 階段顯示） */}
-                      {(['init_progress', 'formulation_progress'].includes(message.stage || '')) && index === messages.length - 1 && (
-                        <motion.div
-                          initial={{ opacity: 0, y: 8 }}
-                          animate={{ opacity: 1, y: 0 }}
-                          transition={{ duration: 0.4, delay: 0.3 }}
-                          style={{
-                            marginTop: 16,
-                            maxWidth: '85%',
-                          }}
-                        >
-                          <div style={{
-                            display: 'flex',
-                            alignItems: 'center',
-                            gap: 12,
-                            padding: '12px 16px',
-                            background: 'var(--white)',
-                            border: '1px solid var(--border-color)',
-                            borderRadius: 8,
-                          }}>
-                            {/* 旋轉圖示 */}
-                            <motion.div
-                              animate={{ rotate: 360 }}
-                              transition={{ duration: 2, repeat: Infinity, ease: 'linear' }}
-                              style={{
-                                width: 18,
-                                height: 18,
-                                flexShrink: 0,
-                              }}
-                            >
-                              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--gray-400)" strokeWidth="2">
-                                <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83" />
-                              </svg>
-                            </motion.div>
-                            {/* 進度條 */}
-                            <div style={{ flex: 1 }}>
-                              <div style={{
-                                display: 'flex',
-                                justifyContent: 'space-between',
-                                alignItems: 'center',
-                                marginBottom: 6,
-                              }}>
-                                <span style={{ fontSize: 12, color: 'var(--gray-500)' }}>
-                                  {message.progress?.step || (message.stage === 'init' ? '正在分析需求...' : '正在產出規格文件...')}
-                                </span>
-                                {message.progress && (
-                                  <span style={{ fontSize: 11, color: 'var(--gray-400)' }}>
-                                    {message.progress.current}/{message.progress.total}
-                                  </span>
-                                )}
-                              </div>
-                              <div style={{
-                                height: 3,
-                                background: 'var(--gray-100)',
-                                borderRadius: 2,
-                                overflow: 'hidden',
-                                position: 'relative',
-                              }}>
-                                {message.progress ? (
-                                  // 真實進度條
-                                  <motion.div
-                                    initial={{ width: 0 }}
-                                    animate={{ width: `${(message.progress.current / message.progress.total) * 100}%` }}
-                                    transition={{ duration: 0.5, ease: 'easeOut' }}
-                                    style={{
-                                      height: '100%',
-                                      background: 'var(--black)',
-                                      borderRadius: 2,
-                                    }}
-                                  />
-                                ) : (
-                                  // 無限進度條（沒有進度信息時）
-                                  <motion.div
-                                    animate={{ x: ['-100%', '200%'] }}
-                                    transition={{ duration: 1.5, repeat: Infinity, ease: 'easeInOut' }}
-                                    style={{
-                                      position: 'absolute',
-                                      width: '50%',
-                                      height: '100%',
-                                      background: 'linear-gradient(90deg, transparent, var(--black), transparent)',
-                                      borderRadius: 2,
-                                    }}
-                                  />
-                                )}
-                              </div>
-                            </div>
-                          </div>
-                        </motion.div>
-                      )}
-                    </>
-                  )}
-                </motion.div>
-                )
-              })}
-
-              {typingStage !== 'none' && (
-                <motion.div
-                  initial={{ opacity: 0, y: 10 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ duration: 0.25 }}
-                  style={{ marginBottom: 28 }}
-                >
-                  <div style={{
-                    fontSize: 11,
-                    color: 'var(--gray-400)',
-                    marginBottom: 8,
-                    textTransform: 'uppercase',
-                    letterSpacing: '0.05em'
-                  }}>泰爾</div>
-                  <div style={{
-                    padding: '18px 22px',
-                    background: 'var(--gray-50)',
-                    border: '1px solid var(--border-color)',
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    gap: typingStage === 'message' ? 10 : 4,
-                  }}>
-                    {typingStage === 'message' && (
-                      <span style={{ fontSize: 14, color: 'var(--gray-500)' }}>問題正在釐清中，請稍等</span>
-                    )}
-                    {[0, 1, 2].map(i => (
-                      <motion.span
-                        key={i}
-                        animate={{ opacity: [0.3, 1, 0.3] }}
-                        transition={{ duration: 1, repeat: Infinity, delay: i * 0.2 }}
-                        style={{
-                          width: typingStage === 'message' ? 5 : 6,
-                          height: typingStage === 'message' ? 5 : 6,
-                          borderRadius: '50%',
-                          background: 'var(--gray-400)',
-                          display: 'inline-block'
-                        }}
-                      />
-                    ))}
-                  </div>
-                </motion.div>
-              )}
-              <div ref={messagesEndRef} />
-            </div>
-          </div>
-          )}
-
-          {/* 輸入區域 - 對話選擇器時隱藏 */}
-          {!showConversationPicker && (
-          <motion.div
-            initial={{ y: 20, opacity: 0 }}
-            animate={{ y: 0, opacity: 1 }}
-            transition={{ duration: 0.4, delay: 0.2 }}
-            style={{ borderTop: '1px solid var(--border-color)', padding: '20px 24px', background: 'var(--white)' }}
-          >
-            <div style={{ maxWidth: 680, margin: '0 auto' }}>
-              <div style={{ display: 'flex', gap: 12, alignItems: 'flex-end' }}>
-                <textarea
-                  ref={inputRef}
-                  value={input}
-                  onChange={(e) => {
-                    setInput(e.target.value)
-                    adjustTextareaHeight()
-                  }}
-                  onCompositionStart={() => {
-                    isComposingRef.current = true
-                  }}
-                  onCompositionEnd={() => {
-                    isComposingRef.current = false
-                  }}
-                  onKeyDown={(e) => {
-                    // IME 輸入法選字中，不處理 Enter
-                    if (isComposingRef.current) return
-                    // Enter 送出，Shift+Enter 換行
-                    if (e.key === 'Enter' && !e.shiftKey) {
-                      e.preventDefault()
-                      if (input.trim() && !isTyping && !isInitializing && sessionInfo) {
-                        handleSend()
-                      }
-                    }
-                  }}
-                  placeholder="輸入訊息...（Shift+Enter 換行）"
-                  rows={1}
-                  disabled={isInitializing || !sessionInfo}
-                  style={{
-                    flex: 1,
-                    resize: 'none',
-                    padding: '14px 18px',
-                    fontSize: 15,
-                    border: '1px solid var(--border-color)',
-                    outline: 'none',
-                    fontFamily: 'inherit',
-                    lineHeight: 1.5,
-                    transition: 'border-color 0.2s ease, height 0.15s ease',
-                    opacity: isInitializing || !sessionInfo ? 0.5 : 1,
-                    minHeight: 48,
-                    maxHeight: 200,
-                    overflowY: 'hidden',
-                  }}
-                  onFocus={(e) => e.currentTarget.style.borderColor = 'var(--black)'}
-                  onBlur={(e) => e.currentTarget.style.borderColor = 'var(--border-color)'}
-                />
-                <motion.button
-                  whileHover={{ scale: 1.02 }}
-                  whileTap={{ scale: 0.98 }}
-                  onClick={handleSend}
-                  disabled={!input.trim() || isTyping || isInitializing || !sessionInfo}
-                  style={{
-                    padding: '0 28px',
-                    height: 48,
-                    fontSize: 14,
-                    fontWeight: 500,
-                    border: '1px solid var(--black)',
-                    background: !input.trim() || isTyping || isInitializing || !sessionInfo ? 'var(--gray-100)' : 'var(--black)',
-                    color: !input.trim() || isTyping || isInitializing || !sessionInfo ? 'var(--gray-400)' : 'var(--white)',
-                    cursor: !input.trim() || isTyping || isInitializing || !sessionInfo ? 'not-allowed' : 'pointer',
-                    transition: 'all 0.2s ease',
-                    flexShrink: 0,
-                  }}
-                >
-                  送出
-                </motion.button>
-              </div>
-            </div>
-          </motion.div>
-          )}
+          {/* 使用提取的渲染函數顯示對話內容 */}
+          {renderChatContent()}
 
           {/* Emphasized 登入提示 (Modal) */}
           {loginPromptConfig?.show && loginPromptConfig.variant === 'emphasized' && (
