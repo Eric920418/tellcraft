@@ -996,9 +996,10 @@ async function executeBddSpecSkill(input: BddSpecSkillInput) {
           return session.data.featuresContent
         }
 
-        // 一次 LLM 調用批量修復所有 Features
+        // 一次 LLM 調用批量修復所有 Features（包含用戶釐清決策）
         const fixResult = await fixMultipleFeatures(
           featuresToFix,
+          session.data?.resolvedItems || [],
           { conversationId, purpose: 'fix_features_batch' }
         )
 

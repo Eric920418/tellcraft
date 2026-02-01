@@ -1304,6 +1304,7 @@ ${featuresContent}`
  */
 export async function fixMultipleFeatures(
   features: Array<{ name: string; content: string; errors: string[] }>,
+  resolvedItems: ClarifyItem[],
   trackingContext?: LlmTrackingContext
 ): Promise<{
   success: boolean
@@ -1313,6 +1314,12 @@ export async function fixMultipleFeatures(
   if (features.length === 0) {
     return { success: true, fixedFeatures: [] }
   }
+
+  // 構建用戶釐清決策
+  const decisions = resolvedItems
+    .filter(item => item.status === 'resolved' && item.answer)
+    .map(item => `Q: ${item.whiteTextQuestion}\nA: ${item.answer}`)
+    .join('\n\n')
 
   const systemPrompt = `你是一位 sdd.os ISA Gherkin 專家。請修正以下多個 Feature Files 的格式錯誤。
 
@@ -1324,6 +1331,9 @@ export async function fixMultipleFeatures(
 5. Then 失敗格式：\`操作失敗\`
 6. Entity 驗證格式：\`存在一個{entity}, with table:\`
 
+## 重要約束
+修復格式時，必須嚴格遵守用戶在釐清階段做出的所有決策。不要擅自添加或修改用戶已明確拒絕的功能。
+
 ## 輸出格式
 請以 JSON 格式輸出修正後的內容：
 \`\`\`json
@@ -1334,10 +1344,14 @@ export async function fixMultipleFeatures(
 }
 \`\`\``
 
-  // 構建用戶消息，包含所有需要修復的 Features
-  const userMessage = features.map(f =>
+  // 構建用戶消息，包含所有需要修復的 Features 和釐清決策
+  const featuresContent = features.map(f =>
     `### Feature: ${f.name}\n\n**錯誤**:\n${f.errors.map((e, i) => `${i + 1}. ${e}`).join('\n')}\n\n**內容**:\n\`\`\`gherkin\n${f.content}\n\`\`\``
   ).join('\n\n---\n\n')
+
+  const userMessage = decisions
+    ? `${featuresContent}\n\n---\n\n## 重要：用戶釐清決策（修復時必須遵守）\n\n${decisions}`
+    : featuresContent
 
   const response = await callClaude(
     systemPrompt,

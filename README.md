@@ -78,6 +78,21 @@ Discovery → 問5題 → 問完 → Re-discovery → 問5題 → ... → 連續
 
 ### 最新修復（2026-02-01）
 
+**修復 BDD-Spec Formulation 階段決策丟失問題**：
+
+| 修復項目 | 描述 |
+|----------|------|
+| **問題根因** | `fixMultipleFeatures` 在修復 Feature Files 格式時沒有接收用戶的釐清決策，導致 AI 修復時可能產出違反用戶回答的規格 |
+| **修改函數簽名** | `fixMultipleFeatures` 新增 `resolvedItems: ClarifyItem[]` 參數 |
+| **修改 prompt** | 將用戶的釐清決策（Q/A）加入 userMessage，並在 systemPrompt 強調「必須嚴格遵守用戶決策」|
+| **更新調用點** | orchestrator.ts 調用時傳入 `session.data?.resolvedItems || []` |
+
+**影響範圍**：
+- `app/lib/llm.ts`：`fixMultipleFeatures` 函數
+- `app/inngest/functions/orchestrator.ts`：調用點
+
+---
+
 **修復 Feature Files 生成被截斷問題**：
 
 | 修復項目 | 描述 |
