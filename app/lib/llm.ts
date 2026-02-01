@@ -41,6 +41,87 @@ interface LlmTrackingContext {
 }
 
 /**
+ * 修復被截斷的 JSON
+ * 嘗試找到最後一個完整的數組元素，截斷後面的部分
+ */
+function repairTruncatedJson(jsonStr: string): string | null {
+  try {
+    // 常見的截斷情況：數組中間被截斷
+    // 策略：找到 "items" 數組，保留完整的元素
+
+    // 找到 items 數組的開始位置
+    const itemsMatch = jsonStr.match(/"items"\s*:\s*\[/)
+    if (!itemsMatch || itemsMatch.index === undefined) {
+      return null
+    }
+
+    const itemsStart = itemsMatch.index + itemsMatch[0].length
+
+    // 從 items 數組開始，找到所有完整的對象
+    let depth = 1  // 已經在數組內
+    let lastCompleteItemEnd = itemsStart
+    let inString = false
+    let escapeNext = false
+
+    for (let i = itemsStart; i < jsonStr.length; i++) {
+      const char = jsonStr[i]
+
+      if (escapeNext) {
+        escapeNext = false
+        continue
+      }
+
+      if (char === '\\') {
+        escapeNext = true
+        continue
+      }
+
+      if (char === '"') {
+        inString = !inString
+        continue
+      }
+
+      if (inString) continue
+
+      if (char === '{') {
+        depth++
+      } else if (char === '}') {
+        depth--
+        if (depth === 1) {
+          // 完成了一個完整的對象
+          lastCompleteItemEnd = i + 1
+        }
+      } else if (char === '[') {
+        depth++
+      } else if (char === ']') {
+        depth--
+        if (depth === 0) {
+          // 數組正常結束
+          return null  // 不需要修復
+        }
+      }
+    }
+
+    // 如果我們找到了至少一個完整的對象，構建修復後的 JSON
+    if (lastCompleteItemEnd > itemsStart) {
+      // 提取到最後一個完整對象的部分
+      const repairedItems = jsonStr.substring(0, lastCompleteItemEnd)
+      // 關閉數組和對象
+      const repaired = repairedItems + ']}'
+
+      // 驗證修復後的 JSON
+      JSON.parse(repaired)
+      console.log(`[LLM] JSON 修復：截斷位置 ${lastCompleteItemEnd}，原長度 ${jsonStr.length}`)
+      return repaired
+    }
+
+    return null
+  } catch {
+    return null
+  }
+}
+
+/**
  * 記錄 LLM 使用量到資料庫
  */
 async function logLlmUsage(
@@ -411,7 +492,8 @@ export async function runPrdDiscovery(
 - 每個問題最多 4 個選項（加上「其他」選項）
 - 白話翻譯：將英文欄位名替換為中文，移除程式語法符號
 - 不要問太技術的問題，用領域語言
-- ${options?.isFirstRound !== false ? '盡可能一次列出所有需要釐清的問題，不要保留' : '只列出根據答案發現的新問題，最多 10 個'}
+- **最多列出 15 個最重要的問題**（優先處理 High 優先級）
+- ${options?.isFirstRound !== false ? '選擇最關鍵的問題，後續輪次可以補充' : '只列出根據答案發現的新問題，最多 10 個'}
 - 按優先級排序：High → Medium → Low
 ${existingQA.length ? `
 
@@ -431,7 +513,7 @@ ${pendingQuestions.join('\n')}` : ''}
   const response = await callClaude(
     systemPrompt,
     [{ role: 'user', content: userMessage }],
-    { maxTokens: 8192, temperature: 0.3 },
+    { maxTokens: 16384, temperature: 0.3 },  // 增加 max_tokens
     trackingContext
   )
 
@@ -446,14 +528,29 @@ ${pendingQuestions.join('\n')}` : ''}
       return { success: false, error: '無法解析 LLM 回應' }
     }
 
-    const jsonStr = jsonMatch[1] || jsonMatch[0]
-    const parsed = JSON.parse(jsonStr)
+    let jsonStr = jsonMatch[1] || jsonMatch[0]
+
+    // 嘗試解析 JSON，如果失敗則嘗試修復截斷的 JSON
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    let parsed: any
+    try {
+      parsed = JSON.parse(jsonStr)
+    } catch (parseError) {
+      console.log('[LLM] PRD Discovery JSON 解析失敗，嘗試修復截斷的 JSON...')
+      const repaired = repairTruncatedJson(jsonStr)
+      if (repaired) {
+        parsed = JSON.parse(repaired)
+        console.log('[LLM] JSON 修復成功')
+      } else {
+        throw parseError
+      }
+    }
 
     // 為每個項目設置初始狀態
     const items: ClarifyItem[] = (parsed.items || []).map((item: Partial<ClarifyItem>) => ({
       ...item,
-      status: 'pending',
-    }))
+      status: 'pending' as const,
+    })) as ClarifyItem[]
 
     // 語意去重：過濾掉與現有問題重複的新問題
     if (items.length > 0 && existingItems && existingItems.length > 0) {
@@ -462,14 +559,14 @@ ${pendingQuestions.join('\n')}` : ''}
       return {
         success: true,
         items: filteredItems,
-        coverageSummary: parsed.coverageSummary,
+        coverageSummary: parsed.coverageSummary as Record<string, 'clear' | 'partial' | 'missing'> | undefined,
       }
     }
 
     return {
       success: true,
       items,
-      coverageSummary: parsed.coverageSummary,
+      coverageSummary: parsed.coverageSummary as Record<string, 'clear' | 'partial' | 'missing'> | undefined,
     }
   } catch (err) {
     return { success: false, error: `解析回應時發生錯誤: ${err}` }
