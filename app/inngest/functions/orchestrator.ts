@@ -1136,13 +1136,14 @@ async function executeBddSpecSkill(input: BddSpecSkillInput) {
       )
     })
 
-    // Spec Clarify 循環 (複用 PRD Clarify 的邏輯)
-    let specConsecutiveEmptyRounds = 0
+    // Spec Clarify 循環（全面釐清 + 語意去重 + 極端保險）
+    let specCurrentRound = 1
     let specQuestionIndex = 0
     let specBatchCount = 0
-    let specLoopIteration = 0 // 確保 step name 唯一的計數器
+    let specLoopIteration = 0
+    const SPEC_MAX_ROUNDS = 10  // 極端保險：最多 10 輪（正常情況下語意去重會讓它自然結束）
 
-    while (specConsecutiveEmptyRounds < 2) {
+    while (specCurrentRound <= SPEC_MAX_ROUNDS) {
       specLoopIteration++
       // 取得當前 session 狀態
       const specSessionData = await step.run(`get-spec-session-${specLoopIteration}`, async () => {
@@ -1156,9 +1157,9 @@ async function executeBddSpecSkill(input: BddSpecSkillInput) {
         (item: ClarifyItem) => item.status === 'pending'
       )
 
-      // 如果沒有待處理問題，進行再次 Discovery
+      // 如果本輪沒有待處理問題，做 re-discovery
       if (specPendingItems.length === 0) {
-        const moreSpecDiscovery = await step.run(`spec-re-discovery-${specSessionData.currentRound}`, async () => {
+        const moreSpecDiscovery = await step.run(`spec-round-${specCurrentRound + 1}-discovery`, async () => {
           const session = await getBddSession({ sessionId })
           if (!session.data?.featuresContent) return { newItems: [] }
 
@@ -1167,6 +1168,7 @@ async function executeBddSpecSkill(input: BddSpecSkillInput) {
             content: f.content,
           }))
 
+          // 傳入所有已存在的問題，讓 runSpecDiscovery 進行語意去重
           const existingItems = [
             ...specSessionData.clarifyItems,
             ...specSessionData.stagingItems,
@@ -1176,7 +1178,7 @@ async function executeBddSpecSkill(input: BddSpecSkillInput) {
           const result = await runSpecDiscovery(
             features,
             session.data.schemaSqlContent || '',
-            existingItems,
+            existingItems,  // 語意去重會過濾掉重複問題
             { conversationId, purpose: 'spec_re_discovery' }
           )
 
@@ -1184,40 +1186,32 @@ async function executeBddSpecSkill(input: BddSpecSkillInput) {
             return { newItems: [] }
           }
 
-          // 添加新問題
+          // 添加新問題（已經過語意去重）
           await addClarifyItems({ sessionId, items: result.items })
-
           return { newItems: result.items }
         })
 
+        // 語意去重後沒有新問題 → 釐清完成
         if (moreSpecDiscovery.newItems.length === 0) {
-          specConsecutiveEmptyRounds++
-          await step.run(`update-spec-empty-round-${specConsecutiveEmptyRounds}`, async () => {
-            await updateBddSession({
-              sessionId,
-              updates: {
-                consecutiveEmptyRounds: specConsecutiveEmptyRounds,
-                currentRound: specSessionData.currentRound + 1,
-              },
-            })
-          })
-          continue
-        } else {
-          // 告知用戶發現了新問題
-          await step.run(`notify-spec-new-questions-${specLoopIteration}`, async () => {
-            await sendMessage(
-              conversationId,
-              `根據您的回答，我發現還有 **${moreSpecDiscovery.newItems.length}** 個規格細節需要確認。`,
-              'spec_discovery_update'
-            )
-          })
-          specConsecutiveEmptyRounds = 0
-          continue
+          break
         }
-      }
 
-      // 重置連續空輪數
-      specConsecutiveEmptyRounds = 0
+        // 語意去重後還有新問題 → 繼續下一輪
+        specCurrentRound++
+        await step.run(`notify-spec-round-${specCurrentRound}`, async () => {
+          const roundLabel = specCurrentRound >= SPEC_MAX_ROUNDS ? '（最後一輪）' : `（第 ${specCurrentRound} 輪）`
+          await sendMessage(
+            conversationId,
+            `根據您的回答，我發現還有 **${moreSpecDiscovery.newItems.length}** 個規格細節需要確認${roundLabel}。`,
+            `spec_round_${specCurrentRound}_start`
+          )
+          await updateBddSession({
+            sessionId,
+            updates: { currentRound: specCurrentRound },
+          })
+        })
+        continue
+      }
 
       // 取得當前問題（按優先級排序）
       const priorityOrder = { high: 0, medium: 1, low: 2 }
@@ -1225,11 +1219,20 @@ async function executeBddSpecSkill(input: BddSpecSkillInput) {
         priorityOrder[a.priority] - priorityOrder[b.priority]
       )
       const currentSpecItem = specPendingItems[0]
-      const totalSpecPending = specSessionData.totalDiscovered - specSessionData.totalResolved
+
+      // 計算進度（本輪進度）
+      const roundTotal = specSessionData.clarifyItems.length + specSessionData.stagingItems.length
+      const roundCurrent = specSessionData.stagingItems.length + 1
+      let specProgressText: string
+      if (specCurrentRound === 1) {
+        specProgressText = `（規格釐清 ${roundCurrent}/${roundTotal}）`
+      } else {
+        specProgressText = `（規格釐清第 ${specCurrentRound} 輪 ${roundCurrent}/${roundTotal}）`
+      }
 
       // 發送問題
       await step.run(`send-spec-question-${specLoopIteration}`, async () => {
-        const questionText = formatClarifyQuestion(currentSpecItem, specQuestionIndex, totalSpecPending)
+        const questionText = `${specProgressText}\n\n${formatClarifyQuestion(currentSpecItem, specQuestionIndex, specPendingItems.length)}`
         await sendMessage(conversationId, questionText, 'spec_clarify_question')
       })
 
