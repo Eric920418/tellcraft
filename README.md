@@ -183,6 +183,28 @@ MODAL_FORMULATION_URL=https://your-username--tellcraft-formulation-generate-spec
   2. `BddPhase` 類型新增 'uiux' 值
   3. 修改 `isComplete` 邏輯：只有當 `spec_complete=true` **且**沒有活躍 session 時才返回 `true`
 
+**Discovery 邏輯推論修復**（2026-02-02）：
+- 問題：用戶回答「分類是固定的，不可新增修改」後，系統仍然問「刪除分類後怎麼辦」
+- 原因：
+  1. prompt 只處理顯式的「不需要」，沒有理解邏輯推論
+  2. 15 個問題一次性生成，問題間沒有邏輯依賴
+- 解決（雙重保險）：
+  1. **生成時**：增強 `runPrdDiscovery` prompt，新增「邏輯推論」規則
+  2. **回答後**：新增 `filterIrrelevantQuestions` 函數，每回答一題就檢查剩餘問題是否仍相關
+     - 在 orchestrator 中，每次 `answerClarifyItem` 後調用
+     - 使用 Claude Haiku（便宜快速）判斷邏輯相關性
+     - 過濾掉邏輯上被排除的問題（如「固定分類」→ 過濾「刪除分類」問題）
+
+**決策繼承查詢修復**（2026-02-02）：
+- 問題：新 session 繼承決策時，查詢返回空 session 而非有內容的 session
+- 原因：`.not('resolved_items', 'is', null)` 只過濾 NULL，空陣列 `[]` 不是 null
+- 解決：改用 `.find()` 找第一個 `resolved_items.length > 0` 的 session
+
+**Modal Callback 308 重定向修復**（2026-02-02）：
+- 問題：Modal callback 發送失敗 `HTTP Error 308: Permanent Redirect`，導致 Inngest 收不到完成事件
+- 原因：Python `urllib` 不自動處理 308 重定向，Vercel 的 URL 正規化導致重定向
+- 解決：改用 `requests` 庫，設置 `allow_redirects=True` 自動處理重定向
+
 ---
 
 ### 最新修復（2026-02-01）

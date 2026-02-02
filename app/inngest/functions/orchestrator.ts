@@ -15,6 +15,7 @@ import {
   validateMultipleFeatures,
   generateClarifySummary,
   generateFullFrontend,
+  filterIrrelevantQuestions,
   type ClarifyItem,
   type ValidationError,
   type ValidationWarning,
@@ -782,6 +783,42 @@ async function executeBddSpecSkill(input: BddSpecSkillInput) {
         itemId: currentItem.id,
         answer: validation.normalizedAnswer || userMessage,
       })
+    })
+
+    // 根據新回答過濾邏輯上不相關的問題
+    await step.run(`filter-irrelevant-${loopIteration}`, async () => {
+      const updatedSession = await getBddSession({ sessionId })
+      if (!updatedSession.data) return
+
+      const pendingItems = updatedSession.data.clarifyItems.filter(
+        (item: ClarifyItem) => item.status === 'pending'
+      )
+      const answeredItems = [
+        ...updatedSession.data.resolvedItems,
+        ...updatedSession.data.stagingItems,
+      ]
+
+      // 只有在有待處理問題且有已回答問題時才過濾
+      if (pendingItems.length > 0 && answeredItems.length > 0) {
+        const filteredItems = await filterIrrelevantQuestions(
+          pendingItems,
+          answeredItems,
+          { userId, conversationId, purpose: 'filter-irrelevant-questions' }
+        )
+
+        // 如果有問題被過濾，更新 session
+        if (filteredItems.length < pendingItems.length) {
+          const filteredIds = new Set(filteredItems.map((item: ClarifyItem) => item.id))
+          const newClarifyItems = updatedSession.data.clarifyItems.filter(
+            (item: ClarifyItem) => item.status !== 'pending' || filteredIds.has(item.id)
+          )
+          await updateBddSession({
+            sessionId,
+            updates: { clarifyItems: newClarifyItems },
+          })
+          console.log(`[Orchestrator] 過濾不相關問題: ${pendingItems.length} → ${filteredItems.length}`)
+        }
+      }
     })
 
     questionIndex++

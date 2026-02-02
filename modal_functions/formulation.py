@@ -32,6 +32,7 @@ app = modal.App("tellcraft-formulation")
 image = modal.Image.debian_slim(python_version="3.11").pip_install(
     "anthropic>=0.40.0",
     "fastapi",
+    "requests",  # 用於 callback，自動處理重定向
 )
 
 # ============================================================
@@ -687,9 +688,8 @@ def fix_features(
 # ============================================================
 
 def send_callback(callback_url: str, session_id: str, conversation_id: str, result: dict):
-    """發送結果到 callback URL"""
-    import urllib.request
-    import urllib.error
+    """發送結果到 callback URL（使用 requests 自動處理重定向）"""
+    import requests
 
     payload = {
         "sessionId": session_id,
@@ -698,15 +698,15 @@ def send_callback(callback_url: str, session_id: str, conversation_id: str, resu
     }
 
     try:
-        req = urllib.request.Request(
+        response = requests.post(
             callback_url,
-            data=json.dumps(payload).encode("utf-8"),
-            headers={"Content-Type": "application/json"},
-            method="POST",
+            json=payload,
+            timeout=30,
+            allow_redirects=True,  # 自動處理 308 等重定向
         )
-        with urllib.request.urlopen(req, timeout=30) as response:
-            print(f"[Callback] 成功發送到 {callback_url}, status={response.status}")
-    except urllib.error.URLError as e:
+        response.raise_for_status()
+        print(f"[Callback] 成功發送到 {callback_url}, status={response.status_code}")
+    except requests.exceptions.RequestException as e:
         print(f"[Callback] 發送失敗: {e}")
     except Exception as e:
         print(f"[Callback] 發送失敗: {e}")

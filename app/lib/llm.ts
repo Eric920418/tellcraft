@@ -535,7 +535,12 @@ ${pendingQuestions.join('\n')}` : ''}
 **重要**：
 1. 不要問與「已經釐清的問題」語意相似或主題相同的問題
 2. 如果某個主題（例如：金額小數點處理、日期格式等）已經被回答過，就絕對不要用不同措辭再問一次
-3. **特別注意**：如果用戶的回答是「不需要」、「不用」、「不要」某個功能（例如「不需要帳號系統」、「不需要會員功能」），則完全跳過與該功能相關的所有問題。例如用戶說「不需要帳號系統」，就不要問任何關於帳號、密碼、使用者、登入、註冊等相關的問題。`
+3. **特別注意**：如果用戶的回答是「不需要」、「不用」、「不要」某個功能（例如「不需要帳號系統」、「不需要會員功能」），則完全跳過與該功能相關的所有問題。例如用戶說「不需要帳號系統」，就不要問任何關於帳號、密碼、使用者、登入、註冊等相關的問題。
+4. **邏輯推論**：根據已回答的問題推論哪些功能不存在。例如：
+   - 用戶說「分類是固定的，不可新增修改」→ 表示分類不能新增、不能修改、不能刪除，不要問任何關於「新增分類」「修改分類」「刪除分類」的問題
+   - 用戶說「只有一個帳戶」→ 表示不需要帳戶管理、不需要轉帳功能，不要問關於多帳戶或轉帳的問題
+   - 用戶說「不需要多幣別」→ 表示所有金額都是單一貨幣，不要問匯率或幣別轉換的問題
+   - 請仔細理解用戶答案的**隱含意義**，不要問邏輯上已經被排除的功能`
 
   const userMessage = projectContext
     ? `專案背景：${projectContext}\n\n需求描述：\n${requirements}`
@@ -697,6 +702,116 @@ ${newQuestions.map(q => `${q.id}. ${q.question}`).join('\n')}
   } catch (err) {
     console.log('[LLM] 解析語意去重結果失敗:', err)
     return newItems
+  }
+}
+
+/**
+ * 邏輯過濾：根據已回答的問題，過濾掉邏輯上不相關的待處理問題
+ * 例如：用戶說「分類是固定的」，就過濾掉「刪除分類後怎麼辦」
+ */
+export async function filterIrrelevantQuestions(
+  pendingItems: ClarifyItem[],
+  answeredItems: ClarifyItem[],
+  trackingContext?: LlmTrackingContext
+): Promise<ClarifyItem[]> {
+  // 如果沒有已回答的問題，或沒有待處理的問題，直接返回
+  if (answeredItems.length === 0 || pendingItems.length === 0) {
+    return pendingItems
+  }
+
+  // 提取已回答的 Q&A
+  const answeredQA = answeredItems
+    .filter(item => item.answer)
+    .map((item, i) => ({
+      id: i + 1,
+      question: item.whiteTextQuestion || item.question,
+      answer: item.answer,
+    }))
+
+  // 待處理的問題
+  const pendingQuestions = pendingItems.map((item, i) => ({
+    id: i + 1,
+    question: item.whiteTextQuestion || item.question,
+  }))
+
+  const systemPrompt = `你是一個邏輯推理專家。根據用戶已經回答的問題，判斷哪些待處理的問題已經**邏輯上不相關**，應該被過濾掉。
+
+## 判斷標準
+
+一個問題應該被過濾的情況：
+1. **功能已被排除**：用戶說不需要某功能，則該功能的細節問題都應過濾
+   - 例：用戶說「不需要帳號系統」→ 過濾所有關於登入、註冊、密碼的問題
+2. **邏輯上不可能**：用戶的回答已經排除了某種情況
+   - 例：用戶說「分類是固定的，不可修改」→ 過濾「新增分類」「修改分類」「刪除分類」相關問題
+   - 例：用戶說「只有一個帳戶」→ 過濾「轉帳」「帳戶間轉移」相關問題
+   - 例：用戶說「只支援台幣」→ 過濾「匯率」「多幣別」相關問題
+3. **答案已隱含**：問題的答案可以從已有回答推導出來
+   - 例：用戶說「金額精確到小數點後兩位」→ 過濾「金額顯示格式」相關問題
+
+## 輸出格式
+
+\`\`\`json
+{
+  "keep": [1, 3, 5],  // 保留的問題 ID（仍然相關）
+  "filtered": [
+    { "id": 2, "reason": "用戶說分類固定，不可能有刪除分類的情況" },
+    { "id": 4, "reason": "用戶說只有一個帳戶，不需要轉帳功能" }
+  ]
+}
+\`\`\`
+
+## 重要
+- 只過濾**明確邏輯上不相關**的問題
+- 如果不確定，就保留該問題（寧可多問，不要漏問）
+- 輸出純 JSON，不要有其他文字`
+
+  const userMessage = `## 已回答的問題
+
+${answeredQA.map(qa => `${qa.id}. Q: ${qa.question}\n   A: ${qa.answer}`).join('\n\n')}
+
+## 待處理的問題
+
+${pendingQuestions.map(q => `${q.id}. ${q.question}`).join('\n')}
+
+請判斷哪些待處理的問題應該被過濾掉。`
+
+  const response = await callClaude(
+    systemPrompt,
+    [{ role: 'user', content: userMessage }],
+    { model: 'claude-3-5-haiku-20241022', maxTokens: 2048, temperature: 0 },
+    trackingContext
+  )
+
+  if (!response.success || !response.content) {
+    console.log('[LLM] 邏輯過濾失敗，保留所有問題')
+    return pendingItems
+  }
+
+  try {
+    const jsonMatch = response.content.match(/```json\s*([\s\S]*?)\s*```/) ||
+                      response.content.match(/\{[\s\S]*\}/)
+    if (!jsonMatch) {
+      return pendingItems
+    }
+
+    const parsed = JSON.parse(jsonMatch[1] || jsonMatch[0])
+    const keepIds = new Set(parsed.keep || [])
+
+    // 記錄被過濾的問題
+    if (parsed.filtered?.length > 0) {
+      console.log('[LLM] 邏輯過濾問題:')
+      parsed.filtered.forEach((f: { id: number; reason: string }) => {
+        const item = pendingItems[f.id - 1]
+        console.log(`  - [${f.id}] ${item?.whiteTextQuestion?.substring(0, 30)}... → ${f.reason}`)
+      })
+    }
+
+    const filtered = pendingItems.filter((_, i) => keepIds.has(i + 1))
+    console.log(`[LLM] 邏輯過濾: ${pendingItems.length} → ${filtered.length} 題`)
+    return filtered
+  } catch (err) {
+    console.log('[LLM] 解析邏輯過濾結果失敗:', err)
+    return pendingItems
   }
 }
 
