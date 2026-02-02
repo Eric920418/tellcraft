@@ -916,15 +916,44 @@ function ChatSection({
 
   // UIUX 分屏佈局相關狀態
   const [layoutMode, setLayoutMode] = useState<'default' | 'split'>('default')
+  const [isLayoutTransitioning, setIsLayoutTransitioning] = useState(false)
+  const layoutModeRef = useRef(layoutMode)
   const [selectedTemplateId, setSelectedTemplateId] = useState<string | null>(null)
   const [selectedTemplate, setSelectedTemplate] = useState<Template | null>(null)
   const [previewUrl, setPreviewUrl] = useState<string | null>(null)
 
-  // 監聽訊息的 layoutHint，切換佈局模式
+  // 監聽訊息的 layoutHint 或 UIUX 相關 stage，切換佈局模式
   useEffect(() => {
+    let targetMode: 'default' | 'split' = 'default'
+
+    // 方法 1: 根據 layoutHint
     const lastHintMessage = [...messages].reverse().find(m => m.layoutHint)
     if (lastHintMessage?.layoutHint) {
-      setLayoutMode(lastHintMessage.layoutHint === 'split' ? 'split' : 'default')
+      targetMode = lastHintMessage.layoutHint === 'split' ? 'split' : 'default'
+    } else {
+      // 方法 2: 根據 UIUX 相關的 stage（處理直接跳轉或頁面刷新的情況）
+      const hasUiuxMessage = messages.some(m =>
+        m.stage?.startsWith('uiux') ||
+        m.richContent?.type === 'template_picker'
+      )
+      if (hasUiuxMessage) {
+        targetMode = 'split'
+      }
+    }
+
+    // 如果模式要改變，加入過渡動畫
+    if (targetMode !== layoutModeRef.current) {
+      setIsLayoutTransitioning(true)
+      // 先等舊介面淡出，再切換模式
+      const transitionTimer = setTimeout(() => {
+        layoutModeRef.current = targetMode
+        setLayoutMode(targetMode)
+        // 等新介面淡入後結束過渡
+        setTimeout(() => {
+          setIsLayoutTransitioning(false)
+        }, 400)
+      }, 300)
+      return () => clearTimeout(transitionTimer)
     }
 
     // 檢查是否有預覽 URL
@@ -1647,11 +1676,19 @@ function ChatSection({
               // 只有當最後一條訊息是進度訊息時才顯示進度條
               const isShowingProgress = ['init_progress', 'formulation_progress'].includes(lastMessageStage)
 
-              return messages.map((message, index) => {
-                const isRecentMessage = index >= messages.length - 3
-                const animationDelay = isRecentMessage ? (index - (messages.length - 3)) * 0.05 : 0
+              // 分屏模式下只顯示 UIUX 相關的消息（隱藏之前的釐清歷史）
+              const uiuxStartIndex = messages.findIndex(m =>
+                m.stage?.startsWith('uiux') || m.richContent?.type === 'template_picker'
+              )
+              const displayMessages = layoutMode === 'split' && uiuxStartIndex !== -1
+                ? messages.slice(uiuxStartIndex)  // 只顯示 UIUX 開始之後的消息
+                : messages
+
+              return displayMessages.map((message, index) => {
+                const isRecentMessage = index >= displayMessages.length - 3
+                const animationDelay = isRecentMessage ? (index - (displayMessages.length - 3)) * 0.05 : 0
                 // 只在最後一條訊息上顯示進度條（且該訊息是進度訊息）
-                const showProgressBar = isShowingProgress && index === messages.length - 1
+                const showProgressBar = isShowingProgress && index === displayMessages.length - 1
 
                 return (
                 <motion.div
@@ -1800,8 +1837,8 @@ function ChatSection({
                         </motion.div>
                       )}
 
-                      {/* UIUX 模板選擇器 - 在分屏模式下顯示在右側預覽面板，這裡不重複渲染 */}
-                      {message.richContent?.type === 'template_picker' && layoutMode !== 'split' && (
+                      {/* UIUX 模板選擇器 */}
+                      {message.richContent?.type === 'template_picker' && (
                         <motion.div
                           initial={{ opacity: 0, y: 10 }}
                           animate={{ opacity: 1, y: 0 }}
@@ -1811,7 +1848,7 @@ function ChatSection({
                           <TemplatePicker
                             onSelect={handleTemplateSelect}
                             selectedId={selectedTemplateId || undefined}
-                            columns={2}
+                            columns={layoutMode === 'split' ? 1 : 2}
                           />
                         </motion.div>
                       )}
@@ -1963,9 +2000,11 @@ function ChatSection({
   if (layoutMode === 'split' && isActive) {
     return (
       <motion.div
+        key="split-layout"
         initial={{ opacity: 0 }}
-        animate={{ opacity: 1 }}
+        animate={{ opacity: isLayoutTransitioning ? 0.5 : 1 }}
         exit={{ opacity: 0 }}
+        transition={{ duration: 0.4, ease: [0.32, 0.72, 0, 1] }}
         style={{
           position: 'fixed',
           inset: 0,
@@ -2019,13 +2058,18 @@ function ChatSection({
     <AnimatePresence>
       {isActive && (
         <motion.div
+          key="default-layout"
           initial={{ opacity: 0, scale: 1.02 }}
-          animate={{ opacity: 1, scale: 1 }}
+          animate={{
+            opacity: isLayoutTransitioning ? 0 : 1,
+            scale: isLayoutTransitioning ? 0.98 : 1,
+            filter: isLayoutTransitioning ? 'blur(4px)' : 'blur(0px)'
+          }}
           exit={{ opacity: 0, scale: 0.98, filter: 'blur(4px)' }}
           transition={{
-            duration: 0.5,
+            duration: 0.4,
             ease: smoothEasing,
-            scale: { duration: 0.6, ease: smoothEasing }
+            scale: { duration: 0.5, ease: smoothEasing }
           }}
           style={{
             position: 'fixed',
