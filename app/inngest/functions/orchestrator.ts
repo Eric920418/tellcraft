@@ -401,6 +401,9 @@ function formatClarifyQuestion(item: ClarifyItem, _index: number, _total: number
         return `**${String.fromCharCode(65 + j)}.** ${opt.description || opt.label || ''}`
       }
     }).join('\n\n')
+
+    // 提示用戶可以輸入自訂答案
+    text += '\n\n_（或直接輸入您的答案）_'
   }
 
   return text
@@ -410,7 +413,15 @@ function formatClarifyQuestion(item: ClarifyItem, _index: number, _total: number
 function getFullAnswer(item: ClarifyItem): string {
   const answer = item.answer || ''
 
-  // 如果答案是單個字母（A/B/C/D），找到對應的選項描述
+  // 情況 1: 帶自訂說明的答案（如 "D: 不用提醒"）
+  const customMatch = answer.match(/^([A-Da-d]):\s*(.+)$/)
+  if (customMatch) {
+    const letter = customMatch[1].toUpperCase()
+    const customText = customMatch[2]
+    return `**${letter}.** ${customText}`
+  }
+
+  // 情況 2: 單個字母（A/B/C/D），找到對應的選項描述
   if (/^[A-Da-d]$/.test(answer) && item.options && item.options.length > 0) {
     const optionIndex = answer.toUpperCase().charCodeAt(0) - 65
     const opt = item.options[optionIndex]
@@ -456,11 +467,16 @@ function validateAnswer(item: ClarifyItem, answer: string): { valid: boolean; no
     }
   }
 
-  // 情況 2: 帶點的格式（A. 或 B.）
-  const letterWithDot = trimmedAnswer.match(/^([A-Za-z])\.?\s*/)
+  // 情況 2: 帶點的格式（A. 或 B. 或 D. 不用提醒）
+  const letterWithDot = trimmedAnswer.match(/^([A-Za-z])\.?\s*(.*)/)
   if (letterWithDot) {
     const letter = letterWithDot[1].toUpperCase()
+    const customText = letterWithDot[2]?.trim()
     if (validLetters.includes(letter)) {
+      // 如果有額外說明文字（通常是「其他」選項），保留完整內容
+      if (customText) {
+        return { valid: true, normalizedAnswer: `${letter}: ${customText}` }
+      }
       return { valid: true, normalizedAnswer: letter }
     }
   }
@@ -590,10 +606,10 @@ async function executeBddSpecSkill(input: BddSpecSkillInput) {
         'prd_discovery_complete'
       )
     } else {
-      // 告知用戶問題總數
+      // 告知用戶即將開始釐清（不說具體數字，因為會根據回答動態調整）
       await sendMessage(
         conversationId,
-        `我需要釐清 **${prdDiscoveryResult.itemCount}** 個問題，每 5 題會讓您確認一次。`,
+        `我有一些問題需要跟您確認，讓我們開始吧！`,
         'prd_discovery_complete'
       )
     }
@@ -612,8 +628,8 @@ async function executeBddSpecSkill(input: BddSpecSkillInput) {
   while (currentRound <= MAX_ROUNDS) {
     loopIteration++
 
-    // 取得當前 session 狀態
-    const sessionData = await step.run(`get-session-${loopIteration}`, async () => {
+    // 取得當前 session 狀態（使用 round + index 作為確定性標識符）
+    const sessionData = await step.run(`get-session-r${currentRound}-q${questionIndex}`, async () => {
       const result = await getBddSession({ sessionId })
       return result.data
     })
@@ -710,14 +726,14 @@ async function executeBddSpecSkill(input: BddSpecSkillInput) {
       progressText = `（最後一輪 ${round3Current}/${round3Total}）`
     }
 
-    // 發送問題
-    await step.run(`send-question-${loopIteration}`, async () => {
+    // 發送問題（使用問題 ID 確保 step 名稱確定性）
+    await step.run(`send-question-${currentItem.id}`, async () => {
       const questionText = `${progressText}\n\n${formatClarifyQuestion(currentItem, questionIndex, pendingItems.length)}`
       await sendMessage(conversationId, questionText, 'clarify_question')
     })
 
-    // 等待用戶回覆
-    const reply = await step.waitForEvent(`wait-reply-${loopIteration}`, {
+    // 等待用戶回覆（使用問題 ID 確保 step 名稱確定性）
+    const reply = await step.waitForEvent(`wait-reply-${currentItem.id}`, {
       event: 'user/reply',
       timeout: '24h',
       match: 'data.conversationId',
@@ -731,7 +747,7 @@ async function executeBddSpecSkill(input: BddSpecSkillInput) {
 
     // 處理特殊指令
     if (userMessage === '跳過' || userMessage.toLowerCase() === 'skip') {
-      await step.run(`skip-question-${loopIteration}`, async () => {
+      await step.run(`skip-question-${currentItem.id}`, async () => {
         // 更新項目狀態為 skipped
         const session = await getBddSession({ sessionId })
         if (session.data) {
@@ -765,7 +781,7 @@ async function executeBddSpecSkill(input: BddSpecSkillInput) {
 
     if (!validation.valid) {
       // 答案無效，發送錯誤訊息並重新詢問
-      await step.run(`invalid-answer-${loopIteration}`, async () => {
+      await step.run(`invalid-answer-${currentItem.id}`, async () => {
         await sendMessage(
           conversationId,
           `⚠️ ${validation.errorMessage}\n\n請重新回答上面的問題。`,
@@ -777,7 +793,7 @@ async function executeBddSpecSkill(input: BddSpecSkillInput) {
     }
 
     // 記錄答案（使用標準化後的答案）
-    await step.run(`record-answer-${loopIteration}`, async () => {
+    await step.run(`record-answer-${currentItem.id}`, async () => {
       await answerClarifyItem({
         sessionId,
         itemId: currentItem.id,
@@ -786,7 +802,7 @@ async function executeBddSpecSkill(input: BddSpecSkillInput) {
     })
 
     // 根據新回答過濾邏輯上不相關的問題
-    await step.run(`filter-irrelevant-${loopIteration}`, async () => {
+    await step.run(`filter-irrelevant-${currentItem.id}`, async () => {
       const updatedSession = await getBddSession({ sessionId })
       if (!updatedSession.data) return
 
@@ -806,8 +822,9 @@ async function executeBddSpecSkill(input: BddSpecSkillInput) {
           { userId, conversationId, purpose: 'filter-irrelevant-questions' }
         )
 
-        // 如果有問題被過濾，更新 session
+        // 如果有問題被過濾，更新 session 並告知用戶
         if (filteredItems.length < pendingItems.length) {
+          const filteredCount = pendingItems.length - filteredItems.length
           const filteredIds = new Set(filteredItems.map((item: ClarifyItem) => item.id))
           const newClarifyItems = updatedSession.data.clarifyItems.filter(
             (item: ClarifyItem) => item.status !== 'pending' || filteredIds.has(item.id)
@@ -816,6 +833,14 @@ async function executeBddSpecSkill(input: BddSpecSkillInput) {
             sessionId,
             updates: { clarifyItems: newClarifyItems },
           })
+
+          // 告知用戶過濾了哪些問題
+          await sendMessage(
+            conversationId,
+            `💡 根據您的回答，我跳過了 **${filteredCount}** 個不再相關的問題`,
+            'filter_notification'
+          )
+
           console.log(`[Orchestrator] 過濾不相關問題: ${pendingItems.length} → ${filteredItems.length}`)
         }
       }
@@ -826,14 +851,17 @@ async function executeBddSpecSkill(input: BddSpecSkillInput) {
 
     // 每 5 題批量確認
     if (batchCount >= BATCH_SIZE) {
-      const stagingSession = await step.run(`get-staging-${loopIteration}`, async () => {
+      const stagingSession = await step.run(`get-staging-r${sessionData.resolvedItems.length}`, async () => {
         const result = await getBddSession({ sessionId })
         return result.data
       })
 
       if (stagingSession && stagingSession.stagingItems.length > 0) {
+        // 使用 resolvedItems.length 作為確定性的批次標識符
+        const batchId = stagingSession.resolvedItems.length
+
         // 發送確認檢查點
-        await step.run(`send-batch-confirm-${loopIteration}`, async () => {
+        await step.run(`send-batch-confirm-b${batchId}`, async () => {
           const pendingCount = stagingSession.clarifyItems.filter((i: ClarifyItem) => i.status === 'pending').length
           const confirmedCount = stagingSession.resolvedItems.length
           const currentBatchCount = stagingSession.stagingItems.length
@@ -854,7 +882,7 @@ async function executeBddSpecSkill(input: BddSpecSkillInput) {
         })
 
         // 等待確認
-        const confirmReply = await step.waitForEvent(`wait-batch-confirm-${loopIteration}`, {
+        const confirmReply = await step.waitForEvent(`wait-batch-confirm-b${batchId}`, {
           event: 'user/reply',
           timeout: '24h',
           match: 'data.conversationId',
@@ -864,7 +892,7 @@ async function executeBddSpecSkill(input: BddSpecSkillInput) {
           const confirmMessage = confirmReply.data.message.trim().toLowerCase()
 
           if (confirmMessage === 'y' || confirmMessage === '確認' || confirmMessage === '確認全部') {
-            await step.run(`confirm-batch-${loopIteration}`, async () => {
+            await step.run(`confirm-batch-b${batchId}`, async () => {
               await confirmBatch({ sessionId })
             })
           } else if (confirmMessage.startsWith('修改')) {
@@ -874,7 +902,7 @@ async function executeBddSpecSkill(input: BddSpecSkillInput) {
               const itemIndex = parseInt(modifyMatch[1], 10) - 1 // 轉換為 0-based index
               if (itemIndex >= 0 && itemIndex < stagingSession.stagingItems.length) {
                 const itemToRevert = stagingSession.stagingItems[itemIndex]
-                await step.run(`revert-answer-${loopIteration}`, async () => {
+                await step.run(`revert-answer-b${batchId}-${itemToRevert.id}`, async () => {
                   await revertAnswer({ sessionId, itemId: itemToRevert.id })
                   await sendMessage(
                     conversationId,
@@ -885,7 +913,7 @@ async function executeBddSpecSkill(input: BddSpecSkillInput) {
                 // 不 confirmBatch，讓循環繼續處理被反悔的項目
               } else {
                 // 索引超出範圍
-                await step.run(`revert-invalid-index-${loopIteration}`, async () => {
+                await step.run(`revert-invalid-index-b${batchId}`, async () => {
                   await sendMessage(
                     conversationId,
                     `無效的題號 ${itemIndex + 1}，有效範圍是 1-${stagingSession.stagingItems.length}。已確認所有答案。`,
@@ -896,7 +924,7 @@ async function executeBddSpecSkill(input: BddSpecSkillInput) {
               }
             } else {
               // 無法解析修改指令
-              await step.run(`confirm-batch-fallback-${loopIteration}`, async () => {
+              await step.run(`confirm-batch-fallback-b${batchId}`, async () => {
                 await sendMessage(
                   conversationId,
                   `無法解析修改指令，請使用「修改 N」格式（如「修改 3」）。已確認所有答案。`,
@@ -1355,7 +1383,8 @@ async function executeBddSpecSkill(input: BddSpecSkillInput) {
       features,
       session.data.schemaSqlContent || '',
       session.data.resolvedItems,
-      { conversationId, purpose: 'spec_discovery' }
+      { conversationId, purpose: 'spec_discovery' },
+      { maxItems: 15 }  // 初始發現：一次性找出所有問題
     )
 
     if (!result.success || !result.items?.length) {
@@ -1387,17 +1416,19 @@ async function executeBddSpecSkill(input: BddSpecSkillInput) {
       )
     })
 
-    // Spec Clarify 循環（全面釐清 + 語意去重 + 極端保險）
+    // Spec Clarify 循環（最多 2 輪：初始 + 1 輪 re-discovery）
+    // 設計原則：PRD clarify 已經做了充分的需求釐清，spec_clarify 只是補充少量細節
+    // 限制輪數避免用戶等太久（每輪 re-discovery 都要調用 LLM）
     let specCurrentRound = 1
     let specQuestionIndex = 0
     let specBatchCount = 0
     let specLoopIteration = 0
-    const SPEC_MAX_ROUNDS = 10  // 極端保險：最多 10 輪（正常情況下語意去重會讓它自然結束）
+    const SPEC_MAX_ROUNDS = 2  // 最多 2 輪（初始 + 1 輪 re-discovery）
 
     while (specCurrentRound <= SPEC_MAX_ROUNDS) {
       specLoopIteration++
-      // 取得當前 session 狀態
-      const specSessionData = await step.run(`get-spec-session-${specLoopIteration}`, async () => {
+      // 取得當前 session 狀態（使用 round + question index 作為確定性標識符）
+      const specSessionData = await step.run(`get-spec-session-r${specCurrentRound}-q${specQuestionIndex}`, async () => {
         const result = await getBddSession({ sessionId })
         return result.data
       })
@@ -1408,60 +1439,60 @@ async function executeBddSpecSkill(input: BddSpecSkillInput) {
         (item: ClarifyItem) => item.status === 'pending'
       )
 
-      // 如果本輪沒有待處理問題，做 re-discovery
+      // 沒有待處理問題
       if (specPendingItems.length === 0) {
-        const moreSpecDiscovery = await step.run(`spec-round-${specCurrentRound + 1}-discovery`, async () => {
-          const session = await getBddSession({ sessionId })
-          if (!session.data?.featuresContent) return { newItems: [] }
+        // 只有第一輪結束時才做 re-discovery（最多做一次）
+        if (specCurrentRound === 1) {
+          const moreSpecDiscovery = await step.run('spec-round-2-discovery', async () => {
+            const session = await getBddSession({ sessionId })
+            if (!session.data?.featuresContent) return { newItems: [] }
 
-          const features = session.data.featuresContent.map((f: FeatureFile) => ({
-            name: f.name,
-            content: f.content,
-          }))
+            const features = session.data.featuresContent.map((f: FeatureFile) => ({
+              name: f.name,
+              content: f.content,
+            }))
 
-          // 傳入所有已存在的問題，讓 runSpecDiscovery 進行語意去重
-          const existingItems = [
-            ...specSessionData.clarifyItems,
-            ...specSessionData.stagingItems,
-            ...specSessionData.resolvedItems,
-          ]
+            const existingItems = [
+              ...specSessionData.clarifyItems,
+              ...specSessionData.stagingItems,
+              ...specSessionData.resolvedItems,
+            ]
 
-          const result = await runSpecDiscovery(
-            features,
-            session.data.schemaSqlContent || '',
-            existingItems,  // 語意去重會過濾掉重複問題
-            { conversationId, purpose: 'spec_re_discovery' }
-          )
+            const result = await runSpecDiscovery(
+              features,
+              session.data.schemaSqlContent || '',
+              existingItems,
+              { conversationId, purpose: 'spec_re_discovery' },
+              { maxItems: 10 }  // re-discovery：補充遺漏的問題
+            )
 
-          if (!result.success || !result.items?.length) {
-            return { newItems: [] }
-          }
+            if (!result.success || !result.items?.length) {
+              return { newItems: [] }
+            }
 
-          // 添加新問題（已經過語意去重）
-          await addClarifyItems({ sessionId, items: result.items })
-          return { newItems: result.items }
-        })
-
-        // 語意去重後沒有新問題 → 釐清完成
-        if (moreSpecDiscovery.newItems.length === 0) {
-          break
-        }
-
-        // 語意去重後還有新問題 → 繼續下一輪
-        specCurrentRound++
-        await step.run(`notify-spec-round-${specCurrentRound}`, async () => {
-          const roundLabel = specCurrentRound >= SPEC_MAX_ROUNDS ? '（最後一輪）' : `（第 ${specCurrentRound} 輪）`
-          await sendMessage(
-            conversationId,
-            `根據您的回答，我發現還有 **${moreSpecDiscovery.newItems.length}** 個規格細節需要確認${roundLabel}。`,
-            `spec_round_${specCurrentRound}_start`
-          )
-          await updateBddSession({
-            sessionId,
-            updates: { currentRound: specCurrentRound },
+            await addClarifyItems({ sessionId, items: result.items })
+            return { newItems: result.items }
           })
-        })
-        continue
+
+          // 有新問題 → 進入第二輪
+          if (moreSpecDiscovery.newItems.length > 0) {
+            specCurrentRound = 2
+            await step.run('notify-spec-round-2', async () => {
+              await sendMessage(
+                conversationId,
+                `根據您的回答，還有 **${moreSpecDiscovery.newItems.length}** 個細節需要確認（最後一輪）。`,
+                'spec_round_2_start'
+              )
+              await updateBddSession({
+                sessionId,
+                updates: { currentRound: 2 },
+              })
+            })
+            continue
+          }
+        }
+        // 第二輪結束或沒有新問題 → 釐清完成
+        break
       }
 
       // 取得當前問題（按優先級排序）
@@ -1471,24 +1502,21 @@ async function executeBddSpecSkill(input: BddSpecSkillInput) {
       )
       const currentSpecItem = specPendingItems[0]
 
-      // 計算進度（本輪進度）
-      const roundTotal = specSessionData.clarifyItems.length + specSessionData.stagingItems.length
-      const roundCurrent = specSessionData.stagingItems.length + 1
-      let specProgressText: string
-      if (specCurrentRound === 1) {
-        specProgressText = `（規格釐清 ${roundCurrent}/${roundTotal}）`
-      } else {
-        specProgressText = `（規格釐清第 ${specCurrentRound} 輪 ${roundCurrent}/${roundTotal}）`
-      }
+      // 計算進度
+      const specTotal = specSessionData.clarifyItems.length + specSessionData.stagingItems.length
+      const specCurrent = specSessionData.stagingItems.length + 1
+      const specProgressText = specCurrentRound === 1
+        ? `（規格確認 ${specCurrent}/${specTotal}）`
+        : `（規格確認 最後一輪 ${specCurrent}/${specTotal}）`
 
-      // 發送問題
-      await step.run(`send-spec-question-${specLoopIteration}`, async () => {
+      // 發送問題（使用問題 ID 確保 step 名稱確定性）
+      await step.run(`send-spec-question-${currentSpecItem.id}`, async () => {
         const questionText = `${specProgressText}\n\n${formatClarifyQuestion(currentSpecItem, specQuestionIndex, specPendingItems.length)}`
         await sendMessage(conversationId, questionText, 'spec_clarify_question')
       })
 
-      // 等待用戶回覆
-      const specReply = await step.waitForEvent(`wait-spec-reply-${specLoopIteration}`, {
+      // 等待用戶回覆（使用問題 ID 確保 step 名稱確定性）
+      const specReply = await step.waitForEvent(`wait-spec-reply-${currentSpecItem.id}`, {
         event: 'user/reply',
         timeout: '24h',
         match: 'data.conversationId',
@@ -1502,7 +1530,7 @@ async function executeBddSpecSkill(input: BddSpecSkillInput) {
 
       // 處理特殊指令
       if (specUserMessage === '跳過' || specUserMessage.toLowerCase() === 'skip') {
-        await step.run(`skip-spec-question-${specLoopIteration}`, async () => {
+        await step.run(`skip-spec-question-${currentSpecItem.id}`, async () => {
           const session = await getBddSession({ sessionId })
           if (session.data) {
             const clarifyItems = session.data.clarifyItems.map((item: ClarifyItem) =>
@@ -1530,7 +1558,7 @@ async function executeBddSpecSkill(input: BddSpecSkillInput) {
       }
 
       // 記錄答案
-      await step.run(`record-spec-answer-${specLoopIteration}`, async () => {
+      await step.run(`record-spec-answer-${currentSpecItem.id}`, async () => {
         await answerClarifyItem({
           sessionId,
           itemId: currentSpecItem.id,
@@ -1543,14 +1571,17 @@ async function executeBddSpecSkill(input: BddSpecSkillInput) {
 
       // 每 5 題批量確認
       if (specBatchCount >= BATCH_SIZE) {
-        const specStagingSession = await step.run(`get-spec-staging-${specLoopIteration}`, async () => {
+        const specStagingSession = await step.run(`get-spec-staging-r${specSessionData.resolvedItems.length}`, async () => {
           const result = await getBddSession({ sessionId })
           return result.data
         })
 
         if (specStagingSession && specStagingSession.stagingItems.length > 0) {
+          // 使用 resolvedItems.length 作為確定性的批次標識符
+          const batchId = specStagingSession.resolvedItems.length
+
           // 發送確認檢查點
-          await step.run(`send-spec-batch-confirm-${specLoopIteration}`, async () => {
+          await step.run(`send-spec-batch-confirm-b${batchId}`, async () => {
             const specPendingCount = specStagingSession.clarifyItems.filter((i: ClarifyItem) => i.status === 'pending').length
             const specConfirmedCount = specStagingSession.resolvedItems.length
             const specCurrentBatchCount = specStagingSession.stagingItems.length
@@ -1571,7 +1602,7 @@ async function executeBddSpecSkill(input: BddSpecSkillInput) {
           })
 
           // 等待確認
-          const specConfirmReply = await step.waitForEvent(`wait-spec-batch-confirm-${specLoopIteration}`, {
+          const specConfirmReply = await step.waitForEvent(`wait-spec-batch-confirm-b${batchId}`, {
             event: 'user/reply',
             timeout: '24h',
             match: 'data.conversationId',
@@ -1581,7 +1612,7 @@ async function executeBddSpecSkill(input: BddSpecSkillInput) {
             const confirmMessage = specConfirmReply.data.message.trim().toLowerCase()
 
             if (confirmMessage === 'y' || confirmMessage === '確認' || confirmMessage === '確認全部') {
-              await step.run(`confirm-spec-batch-${specLoopIteration}`, async () => {
+              await step.run(`confirm-spec-batch-b${batchId}`, async () => {
                 await confirmBatch({ sessionId })
               })
             } else if (confirmMessage.startsWith('修改')) {
@@ -1591,7 +1622,7 @@ async function executeBddSpecSkill(input: BddSpecSkillInput) {
                 const itemIndex = parseInt(modifyMatch[1], 10) - 1 // 轉換為 0-based index
                 if (itemIndex >= 0 && itemIndex < specStagingSession.stagingItems.length) {
                   const itemToRevert = specStagingSession.stagingItems[itemIndex]
-                  await step.run(`revert-spec-answer-${specLoopIteration}`, async () => {
+                  await step.run(`revert-spec-answer-b${batchId}-${itemToRevert.id}`, async () => {
                     await revertAnswer({ sessionId, itemId: itemToRevert.id })
                     await sendMessage(
                       conversationId,
@@ -1601,7 +1632,7 @@ async function executeBddSpecSkill(input: BddSpecSkillInput) {
                   })
                 } else {
                   // 索引超出範圍
-                  await step.run(`revert-spec-invalid-index-${specLoopIteration}`, async () => {
+                  await step.run(`revert-spec-invalid-index-b${batchId}`, async () => {
                     await sendMessage(
                       conversationId,
                       `無效的題號 ${itemIndex + 1}，有效範圍是 1-${specStagingSession.stagingItems.length}。已確認所有答案。`,
@@ -1612,7 +1643,7 @@ async function executeBddSpecSkill(input: BddSpecSkillInput) {
                 }
               } else {
                 // 無法解析，先確認
-                await step.run(`confirm-spec-batch-fallback-${specLoopIteration}`, async () => {
+                await step.run(`confirm-spec-batch-fallback-b${batchId}`, async () => {
                   await sendMessage(
                     conversationId,
                     `無法解析修改指令，請使用「修改 N」格式（如「修改 3」）。已確認所有答案。`,

@@ -205,6 +205,31 @@ MODAL_FORMULATION_URL=https://your-username--tellcraft-formulation-generate-spec
 - 原因：Python `urllib` 不自動處理 308 重定向，Vercel 的 URL 正規化導致重定向
 - 解決：改用 `requests` 庫，設置 `allow_redirects=True` 自動處理重定向
 
+**Inngest waitForEvent 匹配修復**（2026-02-02）：
+- 問題：Modal callback 成功但 Inngest 仍卡在 `wait-modal-formulation-complete`
+- 原因：`match: 'data.sessionId'` 嘗試匹配原始事件的 sessionId，但 `user/request` 事件沒有 sessionId
+- 解決：改為 `match: 'data.conversationId'`
+
+**Discovery 架構重構**（2026-02-02）：
+- 問題：一次生成 15 個問題，問題之間沒有邏輯依賴，導致後面的問題與前面的答案矛盾
+- 解決：
+  1. **小批量生成**：從 15 題改為 5 題，每批回答完後根據答案重新生成下一批
+  2. **簡化 prompt**：移除所有具體例子，只保留通用原則，讓 LLM 自己推理
+  3. **動態數量**：不再承諾具體問題數，因為數量會根據回答動態調整
+  4. **即時過濾**：每回答一題就檢查剩餘問題是否仍相關，並告知用戶跳過了幾題
+
+**「其他」選項自訂答案修復**（2026-02-02）：
+- 問題：用戶回答「D. 不用提醒」時，系統只記錄「D」，丟失了「不用提醒」的說明
+- 解決：
+  1. `validateAnswer` 改為保留完整答案，格式為 `D: 不用提醒`
+  2. `getFullAnswer` 正確解析並顯示自訂說明
+
+**移除「其他」選項，改為提示**（2026-02-02）：
+- 問題：「D. 其他」選項讓用戶不知道可以自己輸入，可能只選 D 卻什麼都沒打
+- 解決：
+  1. prompt 不再要求 LLM 生成「其他」選項
+  2. 問題底部加上提示：「_（或直接輸入您的答案）_」
+
 ---
 
 ### 最新修復（2026-02-01）
@@ -1196,6 +1221,42 @@ npx inngest-cli@latest dev
 - 應用：http://localhost:3000
 - Inngest Dashboard：http://localhost:8288
 - 測試頁面：http://localhost:3000/test
+
+## UI 元件
+
+### SpecGenerationView - AI 規格生成等待畫面
+
+全屏沉浸式等待體驗，用於「生成規格」階段。當 AI 正在生成 BDD 規格文件時，取代原本無聊的聊天介面。
+
+**設計概念**：「觀測站」— 用戶透過高科技監控台觀察 AI 大腦運作。
+
+**視覺特色**：
+- 深邃太空感背景 + 網格底紋
+- 神經網絡連線動畫（5 節點圍繞中心核心）
+- 浮動粒子系統
+- 掃描線效果
+
+**功能**：
+- 5 個階段進度：分析需求 → 釐清細節 → 建立資料模型 → 生成功能規格 → 品質檢查
+- 動態標題文字（思考/分析/建構/生成 輪播）
+- 當前階段脈動動畫 + 完成標記
+- 底部提示輪播
+
+**使用方式**：
+```tsx
+import { SpecGenerationView } from '@/app/components/SpecGenerationView'
+
+// 基本使用（自動 demo 模式，每 3 秒推進一階段）
+<SpecGenerationView />
+
+// 控制階段（0-4 對應 5 個階段）
+<SpecGenerationView currentStage={2} />
+
+// 完成回調
+<SpecGenerationView onComplete={() => console.log('done')} />
+```
+
+**檔案位置**：`app/components/SpecGenerationView.tsx`
 
 ## 專案結構
 

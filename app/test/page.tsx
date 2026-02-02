@@ -327,8 +327,9 @@ export default function TestPage() {
         </pre>
       </div>
 
-      <div style={{ marginTop: 24, paddingTop: 24, borderTop: '1px solid #e0e0e0' }}>
+      <div style={{ marginTop: 24, paddingTop: 24, borderTop: '1px solid #e0e0e0', display: 'flex', gap: 24 }}>
         <Link href="/" style={{ color: '#737373', fontSize: 14 }}>← 返回首頁</Link>
+        <Link href="/test/spec-generation" style={{ color: '#737373', fontSize: 14 }}>測試規格生成畫面 →</Link>
       </div>
     </div>
   )
