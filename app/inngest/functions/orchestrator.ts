@@ -1017,7 +1017,7 @@ async function executeBddSpecSkill(input: BddSpecSkillInput) {
     const modalEvent = await step.waitForEvent('wait-modal-formulation-complete', {
       event: 'modal/formulation-complete',
       timeout: '30m',
-      match: 'data.sessionId',
+      match: 'data.conversationId',  // 原本是 sessionId 但原始事件沒有 sessionId
     })
 
     // Step 3: 處理 Modal 結果
