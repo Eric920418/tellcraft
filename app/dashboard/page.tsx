@@ -45,7 +45,7 @@ export default async function DashboardPage() {
   const user = userResult.data
   const projects = projectsResult.data || []
   const projectCount = projectsResult.count || 0
-  const projectIds = projects.map(p => p.id)
+  const projectIds = projects.map((p: any) => p.id)
 
   // 並行查詢對話和部署數量
   const [convResult, deployResult, convCountsResult] = projectIds.length > 0
@@ -83,7 +83,7 @@ export default async function DashboardPage() {
     }
   }
 
-  const recentProjects = projects.map(p => ({
+  const recentProjects = projects.map((p: any) => ({
     id: p.id,
     name: p.name,
     status: p.status,

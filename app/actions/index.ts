@@ -71,7 +71,7 @@ export async function createProject(input: {
     .like('name', `${name}%`)
 
   if (existingProjects && existingProjects.length > 0) {
-    const existingNames = new Set(existingProjects.map(p => p.name))
+    const existingNames = new Set(existingProjects.map((p: any) => p.name))
     if (existingNames.has(name)) {
       let suffix = 2
       while (existingNames.has(`${name} (${suffix})`)) {
@@ -310,7 +310,7 @@ export async function deployProject(input: {
     .select('id, project_count, max_projects, is_primary')
     .order('is_primary', { ascending: false })
 
-  const availableOrg = orgs?.find(org => org.project_count < org.max_projects)
+  const availableOrg = orgs?.find((org: any) => org.project_count < org.max_projects)
 
   // 建立部署記錄
   const deploymentId = crypto.randomUUID()
@@ -1042,7 +1042,7 @@ export async function initializeSession(input: {
     if (authError || !authData.user) {
       // 如果 auth 用戶已存在（可能之前創建過），嘗試獲取
       const { data: existingAuth } = await supabase.auth.admin.listUsers()
-      const existingUser = existingAuth?.users?.find(u => u.email === email)
+      const existingUser = existingAuth?.users?.find((u: any) => u.email === email)
 
       if (!existingUser) {
         return { success: false, error: authError?.message || '創建認證用戶失敗' }
@@ -1564,14 +1564,14 @@ export async function migrateAnonymousAccount(input: {
     .select('name')
     .eq('user_id', authUserId)
 
-  const existingNames = new Set((authProjects || []).map(p => p.name))
+  const existingNames = new Set((authProjects || []).map((p: any) => p.name))
 
   // 4. 遷移專案，處理同名衝突（並行處理避免序列 await）
   let migratedProjects = 0
   let migratedConversations = 0
 
   // 預處理：計算所有新名稱（純計算，無 async）
-  const projectsToMigrate = (anonymousProjects || []).map(project => {
+  const projectsToMigrate = (anonymousProjects || []).map((project: any) => {
     let newName = project.name
 
     // 處理同名衝突
@@ -1589,7 +1589,7 @@ export async function migrateAnonymousAccount(input: {
 
   // 並行執行所有專案更新
   const updateResults = await Promise.all(
-    projectsToMigrate.map(project =>
+    projectsToMigrate.map((project: any) =>
       supabase
         .from('projects')
         .update({
@@ -1887,7 +1887,7 @@ export async function getUserConversations(input: {
   const hasMore = conversations.length > limit
   const limitedConversations = conversations.slice(0, limit)
 
-  const formattedConversations = limitedConversations.map(conv => {
+  const formattedConversations = limitedConversations.map((conv: any) => {
     const messages = conv.messages || []
     const lastUserMessage = [...messages].reverse().find((m: { role: string }) => m.role === 'user')
     // 取得 JOIN 的專案名稱（Supabase 返回的 projects 是單一物件，因為是 !inner join）
@@ -2098,7 +2098,7 @@ export async function getUserStats(): Promise<ActionResult<{
   }
 
   const user = userResult.data
-  const projectIds = projectsResult.data?.map(p => p.id) || []
+  const projectIds = projectsResult.data?.map((p: any) => p.id) || []
   const projectCount = projectsResult.count || 0
 
   // 並行查詢對話和部署數量（減少往返次數）
@@ -2187,7 +2187,7 @@ export async function getUserProjects(params: {
   }
 
   // 查詢每個專案的對話數量
-  const projectIds = projects?.map(p => p.id) || []
+  const projectIds = projects?.map((p: any) => p.id) || []
   const { data: convCounts } = projectIds.length > 0
     ? await supabase
         .from('conversations')
@@ -2196,14 +2196,14 @@ export async function getUserProjects(params: {
     : { data: [] }
 
   const convCountMap = new Map<string, number>()
-  convCounts?.forEach(c => {
+  convCounts?.forEach((c: any) => {
     convCountMap.set(c.project_id, (convCountMap.get(c.project_id) || 0) + 1)
   })
 
   return {
     success: true,
     data: {
-      projects: (projects || []).map(p => ({
+      projects: (projects || []).map((p: any) => ({
         id: p.id,
         name: p.name,
         description: p.description,
@@ -2467,7 +2467,7 @@ export async function getProjectDetail(projectId: string): Promise<ActionResult<
         createdAt: project.created_at,
         updatedAt: project.updated_at
       },
-      conversations: (conversations || []).map(c => {
+      conversations: (conversations || []).map((c: any) => {
         const messages = c.messages || []
         const lastUserMessage = [...messages].reverse().find((m: { role: string; content: string }) => m.role === 'user')
         return {
@@ -2479,13 +2479,13 @@ export async function getProjectDetail(projectId: string): Promise<ActionResult<
           updatedAt: c.updated_at
         }
       }),
-      deployments: (deployments || []).map(d => ({
+      deployments: (deployments || []).map((d: any) => ({
         id: d.id,
         url: d.url,
         status: d.status,
         createdAt: d.created_at
       })),
-      generations: (generations || []).map(g => ({
+      generations: (generations || []).map((g: any) => ({
         id: g.id,
         status: g.status,
         attemptCount: g.attempt_count,
@@ -2683,7 +2683,7 @@ export async function createBddSession(input: {
 
   // 找到第一個有內容的 resolved_items
   const sessionWithItems = allSessions?.find(
-    (s) => Array.isArray(s.resolved_items) && s.resolved_items.length > 0
+    (s: any) => Array.isArray(s.resolved_items) && s.resolved_items.length > 0
   )
 
   // 繼承之前的決策（如果有）

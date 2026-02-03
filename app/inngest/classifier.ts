@@ -1,9 +1,5 @@
 import { SkillName, SKILL_REGISTRY, getSkillDescriptionsForClassifier } from './registry'
-import { createClient } from '@supabase/supabase-js'
-
-// Supabase for logging
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || ''
-const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || ''
+import { supabase } from '../lib/supabase'
 
 // Haiku 定價 (每百萬 tokens)
 const HAIKU_PRICING = { input: 0.8, output: 4 }
@@ -106,13 +102,12 @@ ${skillDescriptions}
     const content = data.content?.[0]?.text
 
     // 記錄 LLM 使用量
-    if (data.usage && supabaseUrl && supabaseServiceKey) {
+    if (data.usage) {
       const inputTokens = data.usage.input_tokens || 0
       const outputTokens = data.usage.output_tokens || 0
       const cost = (inputTokens * HAIKU_PRICING.input + outputTokens * HAIKU_PRICING.output) / 1_000_000
 
       try {
-        const supabase = createClient(supabaseUrl, supabaseServiceKey)
         await supabase.from('llm_usage').insert({
           model: 'claude-3-5-haiku-20241022',
           input_tokens: inputTokens,

@@ -3,13 +3,9 @@
 // 注意：這個模組直接在服務器端使用，不是 Server Actions
 // ============================================================
 
-import { createClient } from '@supabase/supabase-js'
+import { supabase } from './supabase'
 
 const ANTHROPIC_API = 'https://api.anthropic.com/v1/messages'
-
-// Supabase service client for logging
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || ''
-const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || ''
 
 // Claude 定價 (每百萬 tokens，美元)
 const MODEL_PRICING: Record<string, { input: number; output: number }> = {
@@ -131,13 +127,7 @@ async function logLlmUsage(
   cost: number,
   context?: LlmTrackingContext
 ): Promise<void> {
-  if (!supabaseUrl || !supabaseServiceKey) {
-    console.log('[LLM] 無法記錄使用量：缺少 Supabase 設定')
-    return
-  }
-
   try {
-    const supabase = createClient(supabaseUrl, supabaseServiceKey)
     await supabase.from('llm_usage').insert({
       user_id: context?.userId || null,
       conversation_id: context?.conversationId || null,

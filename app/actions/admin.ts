@@ -109,13 +109,13 @@ export async function getAdminStats(): Promise<ActionResult<{
         .gte('updated_at', new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString())
         .then(async (res) => {
           if (!res.data) return 0
-          const projectIds = [...new Set(res.data.map(c => c.project_id))]
+          const projectIds = [...new Set(res.data.map((c: any) => c.project_id))]
           if (projectIds.length === 0) return 0
           const { data: projects } = await supabase
             .from('projects')
             .select('user_id')
             .in('id', projectIds)
-          return new Set(projects?.map(p => p.user_id) || []).size
+          return new Set(projects?.map((p: any) => p.user_id) || []).size
         }),
       supabase
         .from('users')
@@ -129,7 +129,7 @@ export async function getAdminStats(): Promise<ActionResult<{
         .limit(1000)
         .then(res => {
           if (!res.data) return 0
-          return res.data.reduce((sum, row) => sum + (parseFloat(row.cost_usd) || 0), 0)
+          return res.data.reduce((sum: any, row: any) => sum + (parseFloat(row.cost_usd) || 0), 0)
         })
     ])
 
@@ -194,7 +194,7 @@ export async function listAllUsers(params: PaginationParams = {}): Promise<Actio
     }
 
     // 一次查詢所有用戶的專案（避免 N+1 問題）
-    const userIds = users?.map(u => u.id) || []
+    const userIds = users?.map((u: any) => u.id) || []
     const projectCountMap = new Map<string, number>()
 
     if (userIds.length > 0) {
@@ -205,12 +205,12 @@ export async function listAllUsers(params: PaginationParams = {}): Promise<Actio
         .in('user_id', userIds)
 
       // 在記憶體中計算每個用戶的專案數量
-      projects?.forEach(p => {
+      projects?.forEach((p: any) => {
         projectCountMap.set(p.user_id, (projectCountMap.get(p.user_id) || 0) + 1)
       })
     }
 
-    const items = (users || []).map(user => ({
+    const items = (users || []).map((user: any) => ({
       id: user.id,
       email: user.email,
       name: user.name,
@@ -290,8 +290,8 @@ export async function listAllProjects(params: PaginationParams & {
     }
 
     // 查詢用戶 email 和對話數量
-    const userIds = [...new Set(projects?.map(p => p.user_id) || [])]
-    const projectIds = projects?.map(p => p.id) || []
+    const userIds = [...new Set(projects?.map((p: any) => p.user_id) || [])]
+    const projectIds = projects?.map((p: any) => p.id) || []
 
     const [usersResult, convCounts] = await Promise.all([
       supabase.from('users').select('id, email').in('id', userIds),
@@ -299,14 +299,14 @@ export async function listAllProjects(params: PaginationParams & {
     ])
 
     const userEmailMap = new Map<string, string>()
-    usersResult.data?.forEach(u => userEmailMap.set(u.id, u.email))
+    usersResult.data?.forEach((u: any) => userEmailMap.set(u.id, u.email))
 
     const convCountMap = new Map<string, number>()
-    convCounts.data?.forEach(c => {
+    convCounts.data?.forEach((c: any) => {
       convCountMap.set(c.project_id, (convCountMap.get(c.project_id) || 0) + 1)
     })
 
-    const items = (projects || []).map(project => ({
+    const items = (projects || []).map((project: any) => ({
       id: project.id,
       name: project.name,
       status: project.status,
@@ -388,7 +388,7 @@ export async function listAllConversations(params: PaginationParams & {
       return { success: false, error: error.message }
     }
 
-    const items = (conversations || []).map(conv => {
+    const items = (conversations || []).map((conv: any) => {
       // Supabase JOIN 返回的是單一物件（因為是 1:1 關係）
       const project = conv.projects as unknown as { id: string; name: string; user_id: string; users: { id: string; email: string } | null } | null
       return {
@@ -474,7 +474,7 @@ export async function getUserDetail(userId: string): Promise<ActionResult<{
       .order('created_at', { ascending: false })
 
     // 查詢對話
-    const projectIds = projects?.map(p => p.id) || []
+    const projectIds = projects?.map((p: any) => p.id) || []
     const { data: conversations } = projectIds.length > 0
       ? await supabase
           .from('conversations')
@@ -484,7 +484,7 @@ export async function getUserDetail(userId: string): Promise<ActionResult<{
           .limit(5)
       : { data: [] }
 
-    const projectNameMap = new Map(projects?.map(p => [p.id, p.name]) || [])
+    const projectNameMap = new Map(projects?.map((p: any) => [p.id, p.name]) || [])
 
     // 統計（使用 select('id') 而非 select('*') 減少開銷）
     const [convCountResult, deployCountResult] = await Promise.all([
@@ -511,7 +511,7 @@ export async function getUserDetail(userId: string): Promise<ActionResult<{
       .select('cost_usd')
       .eq('user_id', userId)
 
-    const totalLLMCost = llmUsage?.reduce((sum, row) => sum + (parseFloat(row.cost_usd) || 0), 0) || 0
+    const totalLLMCost = llmUsage?.reduce((sum: any, row: any) => sum + (parseFloat(row.cost_usd) || 0), 0) || 0
 
     return {
       success: true,
@@ -526,13 +526,13 @@ export async function getUserDetail(userId: string): Promise<ActionResult<{
           messageCount: user.message_count_this_period,
           createdAt: user.created_at
         },
-        projects: (projects || []).map(p => ({
+        projects: (projects || []).map((p: any) => ({
           id: p.id,
           name: p.name,
           status: p.status,
           createdAt: p.created_at
         })),
-        recentConversations: (conversations || []).map(c => ({
+        recentConversations: (conversations || []).map((c: any) => ({
           id: c.id,
           projectName: projectNameMap.get(c.project_id) || '',
           messageCount: (c.messages || []).length,
@@ -740,14 +740,14 @@ export async function getAuditLogs(params: PaginationParams & {
     }
 
     // 查詢用戶 email
-    const userIds = [...new Set((logs || []).map(l => l.user_id).filter(Boolean) as string[])]
+    const userIds = [...new Set((logs || []).map((l: any) => l.user_id).filter(Boolean) as string[])]
     const { data: users } = userIds.length > 0
       ? await supabase.from('users').select('id, email').in('id', userIds)
       : { data: [] }
 
-    const userEmailMap = new Map(users?.map(u => [u.id, u.email]) || [])
+    const userEmailMap = new Map(users?.map((u: any) => [u.id, u.email]) || [])
 
-    const items = (logs || []).map(log => ({
+    const items = (logs || []).map((log: any) => ({
       id: log.id,
       userId: log.user_id,
       userEmail: log.user_id ? userEmailMap.get(log.user_id) || null : null,
