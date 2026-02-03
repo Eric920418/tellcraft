@@ -11,10 +11,9 @@ Tellcraft 是一個 **AI 驅動的自動化開發平台**。用戶描述需求�
 ## 常用指令
 
 ```bash
-# 開發（需同時運行兩個終端）
+# 前端開發（Vercel 上的 Next.js）
 pnpm install              # 安裝依賴
 pnpm dev                  # 啟動 Next.js（http://localhost:3000）
-pnpm dev:inngest          # 啟動 Inngest Dev Server（http://localhost:8288）
 
 # 檢查
 pnpm lint                 # ESLint
@@ -23,209 +22,133 @@ pnpm typecheck            # TypeScript 型別檢查
 # BDD 規格驗證（Formulation 後必須依序執行）
 npx ts-node bdd-spec/scripts/lint-gherkin-format.ts spec/features/   # 第一步：ISA Format Lint
 npx ts-node bdd-spec/scripts/validate-feature.ts spec/features/      # 第二步：結構驗證
+# 驗證腳本選項：--json, --strict, --fix
 
-# 驗證腳本選項
---json                # JSON 輸出
---strict              # 嚴格模式（警告也視為錯誤）
---fix                 # 自動修復（實驗性）
+# VPS 後端部署（tellcraft-backend/）
+ssh -i ~/Desktop/LightsailDefaultKey-ap-northeast-1.pem ubuntu@54.238.4.117 '~/deploy.sh'
 ```
 
 ## 系統架構
 
-### 整體架構：Inngest 是大腦，Modal 是手腳
+### 雙端架構：Vercel 前端 + VPS 後端
 
 ```
-用戶請求（tellcraft.com）
-         ↓
-┌─────────────────────────────────────────────────┐
-│  Inngest（大腦）- 任務編排、狀態追蹤            │
-│  ├─ Intent Classifier → 識別意圖               │
-│  ├─ Skill Registry → 路由到對應 Skill          │
-│  └─ Workflow Executor → 執行流程               │
-└─────────────────────────────────────────────────┘
-         ↓ 觸發
-┌─────────────────────────────────────────────────┐
-│  Modal（手腳）- 執行 sdd.os、TDD 迭代           │
-└─────────────────────────────────────────────────┘
-         ↓
-┌─────────────────────────────────────────────────┐
-│  Server Actions（30+）- API 封裝                │
-│  → Vercel · Supabase · Cloudflare · Porkbun    │
-└─────────────────────────────────────────────────┘
+┌─────────────────┐         ┌─────────────────────────────────────┐
+│  Vercel (前端)   │────────>│  VPS (54.238.4.117:8080)           │
+│  tellcraft.com  │  HTTP   │  ├─ Express API (Port 3100)         │
+│  Next.js 16     │  WS     │  ├─ BullMQ Worker（任務編排）        │
+└─────────────────┘         │  ├─ Socket.io（即時通訊）            │
+                            │  ├─ PostgreSQL（資料庫）             │
+                            │  └─ Redis（隊列 + 狀態）             │
+                            └─────────────────────────────────────┘
 ```
+
+**為什麼遷移到 VPS**：Vercel Serverless 超時限制（10-60 秒）無法處理長時間 LLM 任務。
 
 ### 核心模組
 
 | 模組 | 路徑 | 職責 |
 |------|------|------|
-| **Orchestrator** | `app/inngest/functions/orchestrator.ts` | 主編排函數，處理用戶請求的完整流程 |
-| **Classifier** | `app/inngest/classifier.ts` | AI 意圖分類（Anthropic API + 規則 fallback） |
-| **Registry** | `app/inngest/registry.ts` | Skill 註冊表，定義觸發詞和元數據 |
-| **Server Actions** | `app/actions/index.ts` | 30+ 核心 Actions（含 Chat、Auth、部署整合）|
+| **VPS Orchestrator** | `tellcraft-backend/src/workers/orchestrator.ts` | BullMQ Worker，處理用戶請求 |
+| **Classifier** | `tellcraft-backend/src/services/classifier.ts` | AI 意圖分類 |
+| **Registry** | `tellcraft-backend/src/services/registry.ts` | Skill 註冊表 |
+| **Server Actions** | `app/actions/index.ts` | 30+ 前端 Actions |
+| **VPS API Client** | `app/lib/vps-api.ts` | 前端呼叫 VPS 的 HTTP 客戶端 |
+| **WebSocket Hook** | `app/hooks/useVpsWebSocket.ts` | 即時訊息推送 |
 
 ### Skill 系統
-
-6 個已註冊 Skills，各有獨立觸發詞和執行邏輯：
 
 | Skill | 用途 | 觸發詞 |
 |-------|------|--------|
 | `bdd-spec` | 需求釐清 + BDD 規格產出 | 需求、幫我做、幫我建 |
-| `coder` | 程式碼生成（含自癒機制，最多 3 次重試） | 生成程式碼、實作 |
-| `deployer` | 部署到 Vercel（Deployments API） | 部署、上線 |
+| `coder` | 程式碼生成（自癒 3 次） | 生成程式碼、實作 |
+| `deployer` | Vercel 部署 | 部署、上線 |
 | `domain-manager` | 網域管理入口 | 網域、domain |
-| `domain-purchase` | Porkbun 購買網域 | 買網域、購買網域 |
-| `domain-dns` | Cloudflare DNS + Vercel 綁定 | 設定 DNS、自有網域 |
+| `domain-purchase` | Porkbun 購買網域 | 買網域 |
+| `domain-dns` | Cloudflare DNS + Vercel 綁定 | 設定 DNS |
 
-### 執行流程
-
-```
-用戶輸入 → Intent Classification → 路由到 Skill
-                ↓
-        bdd-spec: 多輪對話（waitForEvent）→ 產出規格
-        coder: generateCode（自癒 3 次）→ 專案狀態變 testing
-        deployer: Vercel Deployments API → 詢問網域設定
-```
-
-### 認證系統
-
-支援 Google 和 LINE OAuth 登入，使用 `@supabase/ssr` 實現 SSR 友善的 session 管理：
+### 認證系統（VPS 自建 JWT）
 
 ```
-登入頁 → Google/LINE OAuth → Supabase Auth → Session Cookie → 受保護路由
+登入頁 → Vercel Proxy → VPS OAuth → JWT Token → localStorage + Cookie
 ```
 
 | 檔案 | 職責 |
 |------|------|
-| `app/lib/supabase/client.ts` | Browser client（前端）|
-| `app/lib/supabase/server.ts` | Server client（Server Actions）|
-| `middleware.ts` | Session refresh + 路由保護 |
-| `app/auth/callback/route.ts` | OAuth callback（PKCE）|
+| `app/hooks/useAuth.ts` | Client-side JWT auth hook |
+| `app/api/auth/google/` | Google OAuth Vercel proxy |
+| `app/api/auth/line/` | LINE OAuth Vercel proxy |
+| `tellcraft-backend/src/routes/auth.ts` | VPS OAuth 處理 |
 
-### Chat 串接 Inngest
-
-前端輸入 → Inngest Orchestrator → AI 回覆 → 輪詢取得：
-
-```
-用戶輸入 → initializeSession（匿名）/ initializeSessionFromAuth（已登入）
-    → sendMessageAndTrigger → triggerUserRequest
-    → Inngest Orchestrator → bdd-spec skill
-    → AI 回覆寫入 DB → 前端 getConversationMessages 輪詢
-    → 用戶回覆 → replyToConversation → triggerUserReply → Inngest 恢復
-```
+**雙軌儲存**：localStorage 供前端 hook 使用，Cookie 供 middleware/Server Components 使用。
 
 ## 專案結構
 
 ```
-app/
-├── actions/           # Server Actions（30+）
-│   ├── index.ts       # 主匯出：核心 + Chat + Auth Actions
-│   ├── admin.ts       # 管理員 Actions（用戶管理、LLM 統計、審計日誌）
-│   ├── deploy.ts      # Vercel Deployments API 整合
-│   ├── cloudflare.ts  # DNS 管理
-│   ├── porkbun.ts     # 網域購買
-│   └── domain.ts      # 網域工作流程整合
-├── inngest/
-│   ├── client.ts      # Inngest 客戶端
-│   ├── classifier.ts  # 意圖分類器
-│   ├── registry.ts    # Skill 註冊表
-│   └── functions/
-│       └── orchestrator.ts  # 主編排函數（1500+ 行）
-├── lib/supabase/      # Supabase clients
-│   ├── client.ts      # Browser client
-│   └── server.ts      # Server client
-├── auth/              # 認證相關
-│   ├── login/         # 登入頁面
-│   └── callback/      # OAuth callback
-├── api/inngest/route.ts     # Inngest webhook endpoint
-└── components/              # UI 動效元件（reactbits 風格）
+app/                       # Next.js 前端（Vercel）
+├── actions/               # Server Actions（30+）
+├── hooks/useAuth.ts       # JWT 認證 hook
+├── hooks/useVpsWebSocket.ts # WebSocket hook
+├── lib/vps-api.ts         # VPS API 客戶端
+├── lib/supabase/          # Supabase clients
+├── components/            # UI 元件（reactbits 風格動效）
+├── dashboard/             # 用戶/管理員儀表板
+└── auth/                  # OAuth 登入
 
-middleware.ts          # Session refresh + 路由保護
+tellcraft-backend/         # Express 後端（VPS）
+├── src/
+│   ├── index.ts           # Express + Socket.io + BullMQ
+│   ├── routes/            # API 路由
+│   ├── workers/           # BullMQ Workers
+│   └── services/          # 業務邏輯（classifier, registry）
+├── nginx/tellcraft.conf   # Nginx 配置
+└── ecosystem.config.js    # PM2 配置
 
-spec/                  # BDD 規格產出
-├── data/
-│   ├── schema.sql
-│   └── entity_to_table_mapping.yml
-├── features/          # 14 個 Feature Files
+spec/                      # BDD 規格產出
+├── data/schema.sql
+├── features/*.feature     # 14 個 Feature Files
 └── actions/actions.yml
 
-bdd-spec/              # BDD Skill 定義
-├── skill.md           # Skill 元數據與 Schema
-├── instructions/      # 5 階段執行指南
-├── rules/             # 格式規範
-└── scripts/           # 驗證腳本
+bdd-spec/                  # BDD Skill 定義
+├── instructions/          # 5 階段執行指南
+├── rules/                 # 格式規範
+└── scripts/               # 驗證腳本
 ```
 
 ## BDD 規格格式（sdd.os ISA）
 
-| 步驟類型 | 格式 | 範例 |
-|----------|------|------|
-| Action 呼叫 | `{summary}, call table:` | `建立訂單, call table:` |
-| 成功回應 | `{summary}成功, with table:` | `建立訂單成功, with table:` |
-| 操作失敗 | `操作失敗` | - |
-| Entity 驗證 | `存在一個{entity}, with table:` | `存在一個訂單, with table:` |
+| 步驟類型 | 格式 |
+|----------|------|
+| Action 呼叫 | `{summary}, call table:` |
+| 成功回應 | `{summary}成功, with table:` |
+| 操作失敗 | `操作失敗` |
+| Entity 驗證 | `存在一個{entity}, with table:` |
 
-### 驗證錯誤代碼
-
-| 代碼 | 說明 |
-|------|------|
-| E001 | 缺少 Action 註解 |
-| E002 | 缺少 Summary 註解 |
-| E003 | 缺少 Feature 宣告 |
-| E004 | Summary 與 Feature 名稱不一致 |
-| E005 | Rule 缺少前置/後置標註 |
-| E006 | When 步驟格式錯誤 |
-| E008 | 沒有 Example |
+**驗證錯誤代碼**：E001（缺 Action 註解）、E002（缺 Summary）、E003（缺 Feature）、E004（Summary 不一致）、E005（Rule 缺標註）、E006（When 格式錯）、E008（沒 Example）
 
 ## 核心原則
 
 1. **無腦補原則**：嚴格遵守規格，不擅自假設
 2. **summary 一致**：Action summary 必須與 Feature 名稱一致
-3. **前置/後置標註**：每個 Rule 都必須標註
-4. **硬性閘門**：Quality Gate 由腳本強制執行
-5. **自我修復**：腳本失敗時進入修正迴圈（最多 3 次）
-
-## 狀態檔案
-
-```
-.clarify/
-├── overview.md    # 主狀態檔 - 迭代統計
-├── data/          # 資料模型釐清項目
-├── features/      # 功能模型釐清項目
-├── staging/       # 暫存區
-└── resolved/      # 已歸檔項目
-```
+3. **自我修復**：驗證失敗時進入修正迴圈（最多 3 次）
 
 ## 環境變數
 
 ```bash
-# Inngest（Vercel Integration 自動注入）
-INNGEST_EVENT_KEY=xxx
-INNGEST_SIGNING_KEY=xxx
-
-# Anthropic（Intent Classification）
-ANTHROPIC_API_KEY=xxx
-
-# Vercel Deployments API
-VERCEL_ACCESS_TOKEN=xxx
-VERCEL_TEAM_ID=xxx
-
-# Supabase
+# Vercel 前端
+VPS_API_URL=http://54.238.4.117:8080
+NEXT_PUBLIC_VPS_API_URL=http://54.238.4.117:8080
+NEXT_PUBLIC_VPS_WS_URL=http://54.238.4.117:8080
 NEXT_PUBLIC_SUPABASE_URL=xxx
 NEXT_PUBLIC_SUPABASE_ANON_KEY=xxx
-SUPABASE_SERVICE_ROLE_KEY=xxx
 
-# LINE OAuth
+# VPS 後端（tellcraft-backend/.env）
+GOOGLE_CLIENT_ID=xxx
+GOOGLE_CLIENT_SECRET=xxx
 LINE_CHANNEL_ID=xxx
 LINE_CHANNEL_SECRET=xxx
-
-# App URL
-NEXT_PUBLIC_APP_URL=https://tellcraft.com
-
-# Cloudflare
-CLOUDFLARE_API_TOKEN=xxx
-CLOUDFLARE_ACCOUNT_ID=xxx
-
-# Porkbun
-PORKBUN_API_KEY=xxx
-PORKBUN_SECRET_KEY=xxx
+JWT_SECRET=xxx
+ANTHROPIC_API_KEY=xxx
+DATABASE_URL=postgresql://...
+REDIS_URL=redis://localhost:6379
 ```

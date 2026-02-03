@@ -707,29 +707,49 @@ NEXT_PUBLIC_VPS_WS_URL=http://54.238.4.117:8080
 
 ### VPS 部署步驟
 
+**首次設定**（已完成）：
 ```bash
 # 1. SSH 到 VPS
 ssh -i ~/Desktop/LightsailDefaultKey-ap-northeast-1.pem ubuntu@54.238.4.117
 
-# 2. 安裝後端
-cd /home/ubuntu
-git clone <repo> tellcraft-backend
-cd tellcraft-backend
-pnpm install
-pnpm build
+# 2. Clone repo（使用 SSH key）
+git clone git@github.com:Eric920418/tellcraft.git ~/tellcraft-repo
 
 # 3. 配置環境變數
-cp .env.example .env
+cp ~/tellcraft-repo/tellcraft-backend/.env.example ~/tellcraft-repo/tellcraft-backend/.env
 # 編輯 .env
 
-# 4. 配置 Nginx
+# 4. 安裝依賴並 build
+cd ~/tellcraft-repo/tellcraft-backend
+pnpm install && pnpm build
+
+# 5. 配置 Nginx
 sudo cp nginx/tellcraft.conf /etc/nginx/sites-available/tellcraft
 sudo ln -s /etc/nginx/sites-available/tellcraft /etc/nginx/sites-enabled/
 sudo nginx -t && sudo systemctl reload nginx
 
-# 5. 啟動服務
+# 6. 啟動服務
 pm2 start ecosystem.config.js
 pm2 save
+```
+
+**日常部署**（一行搞定）：
+```bash
+# 本地推送後，SSH 到 VPS 執行：
+~/deploy.sh
+
+# 或從本地直接執行：
+ssh -i ~/Desktop/LightsailDefaultKey-ap-northeast-1.pem ubuntu@54.238.4.117 '~/deploy.sh'
+```
+
+**deploy.sh 內容**：
+```bash
+#!/bin/bash
+set -e
+cd ~/tellcraft-repo && git pull origin main
+cd tellcraft-backend && pnpm install && pnpm build
+pm2 restart tellcraft-backend
+curl -s http://localhost:8080/health
 ```
 
 ### 驗證步驟
