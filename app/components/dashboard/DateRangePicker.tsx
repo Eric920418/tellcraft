@@ -1,7 +1,7 @@
 'use client'
 
 import { motion, AnimatePresence } from 'framer-motion'
-import { useState, useRef, useEffect, useMemo } from 'react'
+import { useState, useRef, useEffect } from 'react'
 
 interface DateRangePickerProps {
   value: { start: string; end: string }
@@ -12,43 +12,26 @@ interface DateRangePickerProps {
   }>
 }
 
-// 生成預設時間範圍的函數（在客戶端調用）
-function generateDefaultPresets() {
+// 靜態預設值（不含日期，避免 SSR/客戶端不一致）
+const PRESET_LABELS = ['今天', '最近 7 天', '最近 30 天', '最近 90 天', '今年'] as const
+
+// 計算預設時間範圍的日期值（只在客戶端調用）
+function calculatePresetValue(label: string): { start: string; end: string } {
   const today = new Date().toISOString().split('T')[0]
-  return [
-    {
-      label: '今天',
-      value: { start: today, end: today },
-    },
-    {
-      label: '最近 7 天',
-      value: {
-        start: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
-        end: today,
-      },
-    },
-    {
-      label: '最近 30 天',
-      value: {
-        start: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
-        end: today,
-      },
-    },
-    {
-      label: '最近 90 天',
-      value: {
-        start: new Date(Date.now() - 90 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
-        end: today,
-      },
-    },
-    {
-      label: '今年',
-      value: {
-        start: `${new Date().getFullYear()}-01-01`,
-        end: today,
-      },
-    },
-  ]
+  switch (label) {
+    case '今天':
+      return { start: today, end: today }
+    case '最近 7 天':
+      return { start: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0], end: today }
+    case '最近 30 天':
+      return { start: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0], end: today }
+    case '最近 90 天':
+      return { start: new Date(Date.now() - 90 * 24 * 60 * 60 * 1000).toISOString().split('T')[0], end: today }
+    case '今年':
+      return { start: `${new Date().getFullYear()}-01-01`, end: today }
+    default:
+      return { start: today, end: today }
+  }
 }
 
 export default function DateRangePicker({
@@ -56,8 +39,6 @@ export default function DateRangePicker({
   onChange,
   presets: customPresets,
 }: DateRangePickerProps) {
-  // 使用 useMemo 確保預設值在客戶端計算，避免 SSR hydration 問題
-  const presets = useMemo(() => customPresets || generateDefaultPresets(), [customPresets])
   const [isOpen, setIsOpen] = useState(false)
   const [customStart, setCustomStart] = useState(value.start)
   const [customEnd, setCustomEnd] = useState(value.end)
@@ -167,30 +148,52 @@ export default function DateRangePicker({
                 快速選擇
               </div>
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-                {presets.map((preset) => (
-                  <motion.button
-                    key={preset.label}
-                    whileHover={{ scale: 1.02 }}
-                    whileTap={{ scale: 0.98 }}
-                    onClick={() => handlePresetClick(preset.value)}
-                    style={{
-                      padding: '6px 10px',
-                      fontSize: 12,
-                      background:
-                        value.start === preset.value.start && value.end === preset.value.end
-                          ? 'var(--black)'
-                          : 'var(--gray-50)',
-                      color:
-                        value.start === preset.value.start && value.end === preset.value.end
-                          ? 'var(--white)'
-                          : 'var(--gray-600)',
-                      border: 'none',
-                      cursor: 'pointer',
-                    }}
-                  >
-                    {preset.label}
-                  </motion.button>
-                ))}
+                {customPresets ? (
+                  customPresets.map((preset) => {
+                    const isSelected = value.start === preset.value.start && value.end === preset.value.end
+                    return (
+                      <motion.button
+                        key={preset.label}
+                        whileHover={{ scale: 1.02 }}
+                        whileTap={{ scale: 0.98 }}
+                        onClick={() => handlePresetClick(preset.value)}
+                        style={{
+                          padding: '6px 10px',
+                          fontSize: 12,
+                          background: isSelected ? 'var(--black)' : 'var(--gray-50)',
+                          color: isSelected ? 'var(--white)' : 'var(--gray-600)',
+                          border: 'none',
+                          cursor: 'pointer',
+                        }}
+                      >
+                        {preset.label}
+                      </motion.button>
+                    )
+                  })
+                ) : (
+                  PRESET_LABELS.map((label) => {
+                    const presetValue = calculatePresetValue(label)
+                    const isSelected = value.start === presetValue.start && value.end === presetValue.end
+                    return (
+                      <motion.button
+                        key={label}
+                        whileHover={{ scale: 1.02 }}
+                        whileTap={{ scale: 0.98 }}
+                        onClick={() => handlePresetClick(presetValue)}
+                        style={{
+                          padding: '6px 10px',
+                          fontSize: 12,
+                          background: isSelected ? 'var(--black)' : 'var(--gray-50)',
+                          color: isSelected ? 'var(--white)' : 'var(--gray-600)',
+                          border: 'none',
+                          cursor: 'pointer',
+                        }}
+                      >
+                        {label}
+                      </motion.button>
+                    )
+                  })
+                )}
               </div>
             </div>
 

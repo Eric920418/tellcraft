@@ -10,6 +10,18 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Vercel CLI
+        run: npm install -g vercel
+
+      - name: Deploy to Vercel
+        run: vercel --prod --token=${{ secrets.VERCEL_ACCESS_TOKEN }}
+        env:
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_TEAM_ID }}
+          VERCEL_PROJECT_ID: prj_mvgQILpq900LyUXAeQIg0n6jW2rT
+
       - name: Decode SSH Key
         run: |
           echo "${{ secrets.VPS_SSH_KEY_B64 }}" | base64 -d > /tmp/ssh_key
