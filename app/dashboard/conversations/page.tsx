@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react'
 import { motion } from 'framer-motion'
 import { DataTable, type Column } from '../../components/dashboard'
 import { getUserConversations } from '../../actions'
-import { getCurrentUser } from '../../actions'
+import { getCurrentUserAction } from '../../actions'
 
 interface Conversation {
   id: string
@@ -24,7 +24,7 @@ export default function ConversationsPage() {
   useEffect(() => {
     const fetchData = async () => {
       // 先獲取當前用戶
-      const userResult = await getCurrentUser()
+      const userResult = await getCurrentUserAction()
       if (!userResult.success || !userResult.data) {
         setError('未登入')
         setIsLoading(false)
