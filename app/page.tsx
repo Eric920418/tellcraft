@@ -24,6 +24,7 @@ import {
 } from './actions'
 import ConversationPicker from './components/ConversationPicker'
 import LoginPrompt, { shouldShowLoginPrompt, dismissLoginPrompt } from './components/LoginPrompt'
+import { useAuth } from './hooks/useAuth'
 import ProjectReminder from './components/ProjectReminder'
 import SplitLayout from './components/uiux/SplitLayout'
 import SpecGenerationView from './components/SpecGenerationView'
@@ -857,6 +858,9 @@ function ChatSection({
   const [isInitializing, setIsInitializing] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [lastTimestamp, setLastTimestamp] = useState<string | null>(null)
+
+  // VPS JWT Auth Hook
+  const auth = useAuth()
   const [lastUpdatedAt, setLastUpdatedAt] = useState<string | null>(null)  // 用於輪詢優化
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const hasInitialized = useRef(false)
@@ -2179,37 +2183,35 @@ function ChatSection({
             <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
               {/* 主題切換 */}
               <AnimatedThemeToggler />
-              {/* 用戶資訊 */}
-              {sessionInfo && (
-                <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                  {sessionInfo.isAuthenticated ? (
-                    <>
-                      {sessionInfo.user?.avatarUrl && (
-                        <img
-                          src={sessionInfo.user.avatarUrl}
-                          alt=""
-                          style={{
-                            width: 28,
-                            height: 28,
-                            borderRadius: '50%',
-                            border: '1px solid var(--border-color)',
-                          }}
-                        />
-                      )}
-                      <span style={{ fontSize: 13, color: 'var(--gray-600)' }}>
-                        {sessionInfo.user?.name || sessionInfo.user?.email?.split('@')[0] || '用戶'}
-                      </span>
-                      <GlowButton href="/dashboard" variant="outline" size="sm">
-                        儀表板
-                      </GlowButton>
-                    </>
-                  ) : (
-                    <GlowButton onClick={handleLogin} variant="outline" size="sm">
-                      登入
+              {/* 用戶資訊 - 優先使用 VPS auth 狀態 */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                {(auth.isAuthenticated || sessionInfo?.isAuthenticated) ? (
+                  <>
+                    {(auth.user?.avatarUrl || sessionInfo?.user?.avatarUrl) && (
+                      <img
+                        src={auth.user?.avatarUrl || sessionInfo?.user?.avatarUrl}
+                        alt=""
+                        style={{
+                          width: 28,
+                          height: 28,
+                          borderRadius: '50%',
+                          border: '1px solid var(--border-color)',
+                        }}
+                      />
+                    )}
+                    <span style={{ fontSize: 13, color: 'var(--gray-600)' }}>
+                      {auth.user?.name || sessionInfo?.user?.name || auth.user?.email?.split('@')[0] || sessionInfo?.user?.email?.split('@')[0] || '用戶'}
+                    </span>
+                    <GlowButton href="/dashboard" variant="outline" size="sm">
+                      儀表板
                     </GlowButton>
-                  )}
-                </div>
-              )}
+                  </>
+                ) : (
+                  <GlowButton onClick={handleLogin} variant="outline" size="sm">
+                    登入
+                  </GlowButton>
+                )}
+              </div>
             </div>
           </motion.header>
 
