@@ -72,6 +72,16 @@ export function useAuth() {
 
       const data = await response.json() as { user: AuthUser }
 
+      // 同步 cookie（確保 middleware 和 Server Components 也能驗證）
+      // 這是異步的，不阻塞 UI
+      fetch('/api/auth/set-cookie', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token }),
+      }).catch(() => {
+        // 忽略錯誤，不影響客戶端認證狀態
+      })
+
       setState({
         isLoading: false,
         isAuthenticated: true,

@@ -14,13 +14,27 @@ function LoginContent() {
   const next = searchParams.get('next') || searchParams.get('returnTo') || '/'
   const urlError = searchParams.get('error')
 
-  // 清除舊的 localStorage token（因為沒有對應的 cookie，需要重新登入）
+  // 如果 localStorage 有 token，嘗試同步 cookie 並跳轉
   useEffect(() => {
-    // 如果是從 dashboard 被重定向來的，說明 cookie 無效或不存在
-    // 清除 localStorage 讓狀態一致
-    if (next.startsWith('/dashboard')) {
-      localStorage.removeItem('auth_token')
-    }
+    const token = localStorage.getItem('auth_token')
+    if (!token) return
+
+    // 同步 cookie，成功後跳轉到目標頁面
+    fetch('/api/auth/set-cookie', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ token }),
+    })
+      .then(res => {
+        if (res.ok) {
+          // Cookie 設置成功，跳轉
+          window.location.href = next
+        }
+        // 如果失敗（token 無效），不做任何事，讓用戶重新登入
+      })
+      .catch(() => {
+        // 網路錯誤，不做任何事
+      })
   }, [next])
 
   const handleGoogleLogin = () => {
