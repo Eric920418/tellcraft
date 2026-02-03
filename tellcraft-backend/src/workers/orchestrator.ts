@@ -14,6 +14,7 @@ import {
   revertAnswer,
   ClarifyItem,
 } from '../services/bdd-session'
+import { runPrdDiscovery } from '../services/prd-discovery'
 
 // ============================================================
 // 類型定義
@@ -269,41 +270,24 @@ async function executeBddSpecSkill(input: BddSpecSkillInput) {
   await sendMessage(conversationId, io, {
     content: '收到！讓我先了解一下你的需求，稍後會有幾個問題想確認。',
     stage: 'init_progress',
-    progress: { current: 2, total: 3, step: '識別需求細節' },
+    progress: { current: 2, total: 3, step: '分析需求細節' },
   })
 
-  // 調用 LLM 進行 PRD Discovery
-  // 注意：這裡需要實現 runPrdDiscovery 函數
-  // 為了演示，我們模擬一些釐清項目
-  const discoveryItems: ClarifyItem[] = [
-    {
-      id: crypto.randomUUID(),
-      question: '您希望系統支援哪種用戶角色？',
-      whiteTextQuestion: '您希望系統支援哪種用戶角色？',
-      checklistItem: 'B1',
-      priority: 'high',
-      status: 'pending',
-      options: [
-        'A. 只有管理員',
-        'B. 管理員 + 一般用戶',
-        'C. 多層級權限（管理員、主管、一般用戶）',
-        'D. 其他',
-      ],
-    },
-    {
-      id: crypto.randomUUID(),
-      question: '系統需要支援多語言嗎？',
-      whiteTextQuestion: '系統需要支援多語言嗎？',
-      checklistItem: 'C1',
-      priority: 'medium',
-      status: 'pending',
-      options: [
-        'A. 只需要繁體中文',
-        'B. 繁體中文 + 英文',
-        'C. 多語言（需要更多語言）',
-      ],
-    },
-  ]
+  // 調用 LLM 進行 PRD Discovery（動態生成釐清問題）
+  console.log(`[Orchestrator] 調用 PRD Discovery 分析需求: ${message.slice(0, 100)}...`)
+  const discoveryResult = await runPrdDiscovery(message, conversationId)
+
+  if (!discoveryResult.success || !discoveryResult.items) {
+    console.error('[Orchestrator] PRD Discovery 失敗:', discoveryResult.error)
+    await sendMessage(conversationId, io, {
+      content: `分析需求時發生問題：${discoveryResult.error || '未知錯誤'}。請重新描述您的需求。`,
+      stage: 'error',
+    })
+    return
+  }
+
+  const discoveryItems: ClarifyItem[] = discoveryResult.items
+  console.log(`[Orchestrator] PRD Discovery 生成 ${discoveryItems.length} 個釐清問題`)
 
   // 添加釐清項目
   await addClarifyItems({ sessionId, items: discoveryItems })
