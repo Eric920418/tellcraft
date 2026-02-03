@@ -21,16 +21,21 @@ interface LLMUsage {
 
 type GroupBy = 'day' | 'week' | 'month' | 'model' | 'conversation'
 
+// 計算預設日期範圍的函數
+function getDefaultDateRange() {
+  const today = new Date().toISOString().split('T')[0]
+  const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]
+  return { start: thirtyDaysAgo, end: today }
+}
+
 export default function AdminUsagePage() {
   const router = useRouter()
   const [usage, setUsage] = useState<LLMUsage | null>(null)
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [groupBy, setGroupBy] = useState<GroupBy>('day')
-  const [dateRange, setDateRange] = useState({
-    start: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
-    end: new Date().toISOString().split('T')[0],
-  })
+  // 使用函數初始化確保在客戶端計算，避免 SSR hydration 問題
+  const [dateRange, setDateRange] = useState(getDefaultDateRange)
 
   useEffect(() => {
     const fetchData = async () => {

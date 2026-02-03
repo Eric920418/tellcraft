@@ -1,7 +1,7 @@
 'use client'
 
 import { motion, AnimatePresence } from 'framer-motion'
-import { useState, useRef, useEffect } from 'react'
+import { useState, useRef, useEffect, useMemo } from 'react'
 
 interface DateRangePickerProps {
   value: { start: string; end: string }
@@ -12,50 +12,52 @@ interface DateRangePickerProps {
   }>
 }
 
-// 預設時間範圍
-const defaultPresets = [
-  {
-    label: '今天',
-    value: {
-      start: new Date().toISOString().split('T')[0],
-      end: new Date().toISOString().split('T')[0],
+// 生成預設時間範圍的函數（在客戶端調用）
+function generateDefaultPresets() {
+  const today = new Date().toISOString().split('T')[0]
+  return [
+    {
+      label: '今天',
+      value: { start: today, end: today },
     },
-  },
-  {
-    label: '最近 7 天',
-    value: {
-      start: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
-      end: new Date().toISOString().split('T')[0],
+    {
+      label: '最近 7 天',
+      value: {
+        start: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+        end: today,
+      },
     },
-  },
-  {
-    label: '最近 30 天',
-    value: {
-      start: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
-      end: new Date().toISOString().split('T')[0],
+    {
+      label: '最近 30 天',
+      value: {
+        start: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+        end: today,
+      },
     },
-  },
-  {
-    label: '最近 90 天',
-    value: {
-      start: new Date(Date.now() - 90 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
-      end: new Date().toISOString().split('T')[0],
+    {
+      label: '最近 90 天',
+      value: {
+        start: new Date(Date.now() - 90 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+        end: today,
+      },
     },
-  },
-  {
-    label: '今年',
-    value: {
-      start: `${new Date().getFullYear()}-01-01`,
-      end: new Date().toISOString().split('T')[0],
+    {
+      label: '今年',
+      value: {
+        start: `${new Date().getFullYear()}-01-01`,
+        end: today,
+      },
     },
-  },
-]
+  ]
+}
 
 export default function DateRangePicker({
   value,
   onChange,
-  presets = defaultPresets,
+  presets: customPresets,
 }: DateRangePickerProps) {
+  // 使用 useMemo 確保預設值在客戶端計算，避免 SSR hydration 問題
+  const presets = useMemo(() => customPresets || generateDefaultPresets(), [customPresets])
   const [isOpen, setIsOpen] = useState(false)
   const [customStart, setCustomStart] = useState(value.start)
   const [customEnd, setCustomEnd] = useState(value.end)

@@ -135,7 +135,10 @@ export function LineChart({
     }
   }, [height])
 
-  if (data.length === 0) return null
+  // 如果沒有數據，渲染空的 SVG 而不是 return null（避免 hooks 數量不一致）
+  if (data.length === 0) {
+    return <svg ref={ref} width="100%" height={height} />
+  }
 
   const maxValue = Math.max(...data.map((d) => d.value), 1)
   const padding = { top: 20, right: 20, bottom: 40, left: 20 }

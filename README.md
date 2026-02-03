@@ -12,7 +12,7 @@ Tellcraft 是一個 AI 驅動的自動化開發平台。用戶只需描述需求
 
 ## 當前開發進度
 
-- **狀態**：✅ Phase 1-9 + Server Actions + Inngest Orchestrator + 前端 Chat 串接 + 認證系統 + 訪客體驗改善 + 儀表板系統 + BDD Spec 完整修復
+- **狀態**：✅ Phase 1-9 + Server Actions + VPS Backend + 前端 Chat 串接 + 認證系統 + 訪客體驗改善 + 儀表板系統 + BDD Spec 完整修復
 - **釐清項目**：28 項全部解決
 - **Server Actions**：30+ 已實作
 - **詳情**：[`.clarify/overview.md`](.clarify/overview.md)
@@ -76,163 +76,26 @@ Discovery → 問5題 → 問完 → Re-discovery → 問5題 → ... → 連續
 | **第三輪保險** | 複雜需求有第三輪兜底，但絕對封頂 |
 | **語意去重** | 每輪都過濾重複問題 |
 
-### Modal 集成 - BDD Spec 規格生成（2026-02-01）
+---
 
-**問題**：Vercel Serverless 有執行時間限制（10-60秒），19 個 Features 無法一次生成，JSON 被截斷導致解析失敗。
+### 最新修復（2026-02-04）
 
-**解決方案**：集成 Modal 無伺服器平台，使用異步回調模式執行長時間 LLM 任務。
+**修復 Admin Usage 頁面 React Error #300**：
 
-| 項目 | 說明 |
-|------|------|
-| **Modal 函數** | `modal_functions/formulation.py` - 包含 `generate_spec` 端點和 `formulation_worker` 異步 worker |
-| **回調端點** | `app/api/modal/callback/route.ts` - 接收 Modal 完成回調，發送 Inngest 事件 |
-| **Inngest 事件** | `modal/formulation-complete` - Modal 完成後觸發的事件 |
-| **Orchestrator** | 使用 `step.waitForEvent` 等待 Modal 完成（最多 30 分鐘） |
-| **環境變數** | `MODAL_FORMULATION_URL` - Modal HTTP endpoint URL |
-| **Fallback** | 未配置 Modal 時自動使用原有的分批生成邏輯 |
+| 修復項目 | 描述 |
+|----------|------|
+| **問題根因** | React Error #300 "Rendered fewer hooks than expected" - SSR/客戶端 hydration 不一致 |
+| **Chart.tsx** | `LineChart` 中 `if (data.length === 0) return null` 改為渲染空 SVG，避免 hooks 數量變化 |
+| **DateRangePicker.tsx** | `defaultPresets` 從模塊級別移到 `useMemo` 中，確保日期在客戶端計算 |
+| **usage/page.tsx** | `dateRange` 初始值改用函數初始化 `useState(getDefaultDateRange)`，避免 SSR/客戶端不一致 |
 
-**異步回調架構**：
-```
-Inngest                           Modal                          Vercel
-  │                                 │                              │
-  │  1. 觸發 Modal（不等待）         │                              │
-  │ ────────────────────────────>   │                              │
-  │  2. 立即返回 {accepted: true}   │                              │
-  │ <────────────────────────────   │                              │
-  │                                 │                              │
-  │  3. waitForEvent (最多 30 分鐘) │                              │
-  │  ...                            │  4. formulation_worker 執行  │
-  │                                 │     （Schema + Features）     │
-  │                                 │                              │
-  │                                 │  5. 完成後調用 callback      │
-  │                                 │ ──────────────────────────>  │
-  │                                 │                              │
-  │  6. 收到事件，繼續流程          │       (Inngest 事件)          │
-  │ <──────────────────────────────────────────────────────────────│
-```
-
-**Modal 優勢**：
-- 無執行時間限制（可運行 30+ 分鐘）
-- 一次生成所有 Features，確保跨 Feature 一致性
-- 按秒計費，只付實際使用時間
-- 包含驗證和自癒修復（最多 3 次）
-- 使用 `.spawn()` 真正異步執行，避免 Vercel 超時
-
-**兩階段 Feature 生成**：
-```
-Phase 1: identify_features_with_interfaces()
-    → 一次識別所有 Features 並定義統一接口
-    → 確保 orderId, userId 等命名跨 Feature 一致
-
-Phase 2: generate_single_feature_with_interface()
-    → 根據統一接口逐個生成 Feature 內容
-    → 每個 Feature 遵守預定義的接口規範
-```
-
-**部署步驟**：
-```bash
-# 1. 安裝 Modal CLI
-pip install modal
-modal token set  # 打開瀏覽器登入
-
-# 2. 創建 secrets
-modal secret create tellcraft-secrets \
-  ANTHROPIC_API_KEY=sk-ant-xxx
-
-# 3. 部署
-python3 -m modal deploy modal_functions/formulation.py
-
-# 4. 設置環境變數
-MODAL_FORMULATION_URL=https://your-username--tellcraft-formulation-generate-spec.modal.run
-```
-
-**成本估算**：每次規格生成約 $0.20（Modal ~$0.05 + Claude API ~$0.15）
-
-**Rate Limit 處理**：
-- `callClaude()` 函數內建重試機制（最多 3 次）
-- 遇到 rate_limit_error 自動等待 30-120 秒後重試
-- 使用 `retry-after` header 或指數退避策略
-
-**多輪對話修復**（2026-02-01）：
-- 問題：前端無法正確識別是否需要使用 `replyToConversation`，導致 `waitForEvent` 永遠收不到事件
-- 原因：`getConversationMessages` 只查詢 `tasks` 表，但 orchestrator 沒有創建 task 記錄
-- 解決：`getConversationMessages` 現在也查詢 `bdd_sessions` 表，如果有活躍的 session 則返回其 ID 作為 `currentTaskId`
-
-**UIUX 分屏模式修復**（2026-02-01）：
-- 問題：前端沒有進入分屏模式（SplitLayout）
-- 原因：`page.tsx` 中 `formattedMessages` 轉換時沒有包含 `layoutHint` 和 `richContent` 欄位
-- 解決：添加 `layoutHint` 和 `richContent` 欄位到消息轉換中
-
-**決策繼承修復**（2026-02-01）：
-- 問題：新 session 會重新問用戶已經否定的功能相關問題（如已回答「不需要帳號系統」，新 session 仍問帳號相關問題）
-- 原因：`createBddSession` 每次創建全新 session，不繼承之前的決策
-- 解決：
-  1. `createBddSession` 現在會查詢同一對話之前的 session，繼承其 `resolved_items`
-  2. `prd-discovery` 步驟將繼承的決策傳給 `runPrdDiscovery`
-  3. LLM prompt 增強：如果用戶回答「不需要」某功能，完全跳過該功能相關的所有問題
-
-**UIUX 階段流程修復**（2026-02-01）：
-- 問題：在 UIUX 模板選擇階段回答後，系統又重新開始釐清流程（重新問 15 個問題）
-- 原因：
-  1. Formulation 完成後 session phase 變成 'completed'
-  2. `getConversationMessages` 查詢時排除 'completed' 的 session，找不到活躍 session
-  3. 沒有 `currentTaskId` 返回，前端認為對話已完成
-  4. 用戶回覆觸發 `user/request`（新請求）而非 `user/reply`（回覆）
-- 解決：
-  1. 新增 `update-phase-uiux` step，在 UIUX 階段開始前將 session phase 設為 'uiux'
-  2. `BddPhase` 類型新增 'uiux' 值
-  3. 修改 `isComplete` 邏輯：只有當 `spec_complete=true` **且**沒有活躍 session 時才返回 `true`
-
-**Discovery 邏輯推論修復**（2026-02-02）：
-- 問題：用戶回答「分類是固定的，不可新增修改」後，系統仍然問「刪除分類後怎麼辦」
-- 原因：
-  1. prompt 只處理顯式的「不需要」，沒有理解邏輯推論
-  2. 15 個問題一次性生成，問題間沒有邏輯依賴
-- 解決（雙重保險）：
-  1. **生成時**：增強 `runPrdDiscovery` prompt，新增「邏輯推論」規則
-  2. **回答後**：新增 `filterIrrelevantQuestions` 函數，每回答一題就檢查剩餘問題是否仍相關
-     - 在 orchestrator 中，每次 `answerClarifyItem` 後調用
-     - 使用 Claude Haiku（便宜快速）判斷邏輯相關性
-     - 過濾掉邏輯上被排除的問題（如「固定分類」→ 過濾「刪除分類」問題）
-
-**決策繼承查詢修復**（2026-02-02）：
-- 問題：新 session 繼承決策時，查詢返回空 session 而非有內容的 session
-- 原因：`.not('resolved_items', 'is', null)` 只過濾 NULL，空陣列 `[]` 不是 null
-- 解決：改用 `.find()` 找第一個 `resolved_items.length > 0` 的 session
-
-**Modal Callback 308 重定向修復**（2026-02-02）：
-- 問題：Modal callback 發送失敗 `HTTP Error 308: Permanent Redirect`，導致 Inngest 收不到完成事件
-- 原因：Python `urllib` 不自動處理 308 重定向，Vercel 的 URL 正規化導致重定向
-- 解決：改用 `requests` 庫，設置 `allow_redirects=True` 自動處理重定向
-
-**Inngest waitForEvent 匹配修復**（2026-02-02）：
-- 問題：Modal callback 成功但 Inngest 仍卡在 `wait-modal-formulation-complete`
-- 原因：`match: 'data.sessionId'` 嘗試匹配原始事件的 sessionId，但 `user/request` 事件沒有 sessionId
-- 解決：改為 `match: 'data.conversationId'`
-
-**Discovery 架構重構**（2026-02-02）：
-- 問題：一次生成 15 個問題，問題之間沒有邏輯依賴，導致後面的問題與前面的答案矛盾
-- 解決：
-  1. **小批量生成**：從 15 題改為 5 題，每批回答完後根據答案重新生成下一批
-  2. **簡化 prompt**：移除所有具體例子，只保留通用原則，讓 LLM 自己推理
-  3. **動態數量**：不再承諾具體問題數，因為數量會根據回答動態調整
-  4. **即時過濾**：每回答一題就檢查剩餘問題是否仍相關，並告知用戶跳過了幾題
-
-**「其他」選項自訂答案修復**（2026-02-02）：
-- 問題：用戶回答「D. 不用提醒」時，系統只記錄「D」，丟失了「不用提醒」的說明
-- 解決：
-  1. `validateAnswer` 改為保留完整答案，格式為 `D: 不用提醒`
-  2. `getFullAnswer` 正確解析並顯示自訂說明
-
-**移除「其他」選項，改為提示**（2026-02-02）：
-- 問題：「D. 其他」選項讓用戶不知道可以自己輸入，可能只選 D 卻什麼都沒打
-- 解決：
-  1. prompt 不再要求 LLM 生成「其他」選項
-  2. 問題底部加上提示：「_（或直接輸入您的答案）_」
+**清理過時腳本**：
+- 刪除 `scripts/create-uiux-test.ts`（使用已移除的 inngest）
+- 刪除 `scripts/skip-to-uiux.ts`（使用已移除的 inngest）
 
 ---
 
-### 最新修復（2026-02-01）
+### 修復記錄（2026-02-01）
 
 **修復 BDD-Spec Formulation 階段決策丟失問題**：
 
@@ -245,7 +108,7 @@ MODAL_FORMULATION_URL=https://your-username--tellcraft-formulation-generate-spec
 
 **影響範圍**：
 - `app/lib/llm.ts`：`fixMultipleFeatures` 函數
-- `app/inngest/functions/orchestrator.ts`：調用點
+- `tellcraft-backend/src/workers/orchestrator.ts`：調用點
 
 ---
 
@@ -272,7 +135,7 @@ MODAL_FORMULATION_URL=https://your-username--tellcraft-formulation-generate-spec
     → 告訴 LLM: "建立訂單 輸出 orderId，查詢訂單 輸入 orderId..."
 ```
 
-**問題根因**：Claude Sonnet 4.5 max output 是 8192 tokens，一次生成所有 Features 會被截斷導致 JSON 解析失敗 → Inngest 重試 → 無限循環。
+**問題根因**：Claude Sonnet 4.5 max output 是 8192 tokens，一次生成所有 Features 會被截斷導致 JSON 解析失敗。
 
 ---
 
@@ -284,7 +147,7 @@ MODAL_FORMULATION_URL=https://your-username--tellcraft-formulation-generate-spec
 | **自然終止** | 去重後沒有新問題 → 才結束。確保全面釐清不遺漏 |
 | **極端保險** | 最多 10 輪（正常情況語意去重會讓它自然結束，這只是防萬一）|
 | **進度顯示** | 動態顯示輪數和進度（規格釐清第 2 輪 3/5）|
-| **修復 Inngest step name** | 舊邏輯 step name 重複導致返回緩存結果，新邏輯每輪 step name 唯一 |
+| **修復 step name** | 舊邏輯 step name 重複導致返回緩存結果，新邏輯每輪 step name 唯一 |
 
 **核心改變**：
 - 舊邏輯：`consecutiveEmptyRounds < 2`（每次發現新問題就重置，導致無限循環問類似問題）
@@ -417,16 +280,16 @@ JWT_SECRET=your-secret-key
 | localStorage (`auth_token`) | 客戶端 `useAuth` hook 使用 |
 | Cookie (`auth_token`) | Middleware + Server Components 使用 |
 
-### 前端 Chat 串接 Inngest
+### 前端 Chat 串接 VPS Backend
 
 用戶在首頁輸入需求後，真正觸發 `bdd-spec` skill，實現完整的多輪對話流程：
 
 ```
 用戶輸入 → initializeSession（匿名用戶）
-    → sendMessageAndTrigger → triggerUserRequest
-    → Inngest Orchestrator → bdd-spec skill
-    → AI 回覆寫入 DB → 前端輪詢取得
-    → 用戶回覆 → triggerUserReply → Inngest 恢復
+    → sendMessageAndTrigger → VPS API
+    → BullMQ Orchestrator → bdd-spec skill
+    → AI 回覆寫入 DB → WebSocket 推送
+    → 用戶回覆 → replyToConversation → 恢復流程
 ```
 
 **專案創建邏輯**（2026-01-31 修復）：
@@ -463,7 +326,7 @@ JWT_SECRET=your-secret-key
 **Chat 相關 Server Actions**：
 - `initializeSession` - 創建或獲取匿名用戶的會話（訪客模式，支援恢復指定對話）
 - `initializeSessionFromAuth` - 從認證 session 初始化（已登入用戶，支援帳號合併）
-- `sendMessageAndTrigger` - 發送消息並觸發 Inngest
+- `sendMessageAndTrigger` - 發送消息並觸發 VPS 處理
 - `replyToConversation` - 多輪對話時用戶回覆
 - `getConversationMessages` - 獲取對話消息（用於輪詢）
 - `getUserConversations` - 獲取用戶所有對話列表（用於歷史對話選擇器）
@@ -624,7 +487,7 @@ CREATE TABLE llm_usage (
 
 | 當前問題 | 原因 | 遷移後 |
 |----------|------|--------|
-| Inngest waitForEvent 卡住 | 事件機制複雜，狀態難追蹤 | BullMQ 直接控制，可隨時檢查 |
+| 事件驅動卡住 | 事件機制複雜，狀態難追蹤 | BullMQ 直接控制，可隨時檢查 |
 | Vercel Serverless 超時 | 10-60 秒限制 | VPS 無限制 |
 | Supabase 延遲 | 跨區域網路延遲 50-150ms | 本地 PostgreSQL < 1ms |
 | RLS 黑箱 | Supabase RLS 難調試 | 自己寫，完全控制 |
@@ -681,15 +544,15 @@ tellcraft-backend/
 └── .env.example
 ```
 
-### Inngest → BullMQ 對照
+### BullMQ 任務模式
 
-| Inngest | BullMQ |
-|---------|--------|
-| `step.run('name', fn)` | 直接執行 `await fn()` |
-| `step.waitForEvent()` | Redis 狀態 + 新 Job |
-| `step.sleep()` | `await delay(ms)` |
+| 功能 | 實現方式 |
+|------|----------|
+| 執行步驟 | 直接執行 `await fn()` |
+| 等待用戶回覆 | Redis 狀態 + 新 Job |
+| 延遲執行 | `await delay(ms)` |
 | 自動重試 | `attempts: 3` 配置 |
-| 事件觸發 | `queue.add()` |
+| 觸發任務 | `queue.add()` |
 
 ### 前端 API 切換
 
@@ -775,12 +638,10 @@ socket.on('connect', () => console.log('Connected!'))
 | Framer Motion | 動畫效果 | ✅ |
 | next-themes | 深色/淺色模式 | ✅ |
 | @supabase/ssr | SSR 認證 | ✅ |
-| **VPS Backend** | Express + BullMQ + Socket.io | ✅ 完成 |
-| Inngest | ~~事件驅動任務編排~~ | ❌ 已棄用，改用 BullMQ |
-| Modal | sdd.os 執行環境（手腳）| ⏳ 待整合 |
+| **VPS Backend** | Express + BullMQ + Socket.io | ✅ |
 | sdd.os | 規格驅動開發、TDD 迭代 | ⏳ 待整合 |
 | Supabase | Auth（JWT 驗證）| ✅ |
-| PostgreSQL | 資料庫（VPS 本地）| ✅ 完成 |
+| PostgreSQL | 資料庫（VPS 本地）| ✅ |
 | Redis | BullMQ 隊列 + 狀態管理 | ✅ |
 | Vercel | 前端部署 | ✅ |
 | Cloudflare | DNS 託管 | ✅ |
@@ -1131,7 +992,7 @@ DNS 設定流程（domain-dns）：
 - `domain.ts` - 網域工作流程整合
 
 **待完成**：
-- [ ] Modal 整合（sdd.os 執行環境）
+- [ ] sdd.os 整合（規格驅動開發執行環境）
 - [ ] Supabase Storage 版本管理
 - [x] Vercel Deployments API 整合（`deployProjectFromDb` 橋接真正的 Vercel/Supabase API）
 - [x] Domain Manager Skill（獨立於部署的網域管理）
@@ -1141,82 +1002,59 @@ DNS 設定流程（domain-dns）：
 
 ## 系統架構
 
-### 整體架構：Inngest 是大腦，Modal 是手腳
+### 整體架構：Vercel 前端 + VPS 後端
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
 │              用戶請求（tellcraft.com / Vercel）              │
 └─────────────────────────┬───────────────────────────────────┘
-                          ↓
+                          ↓ HTTP / WebSocket
 ┌─────────────────────────────────────────────────────────────┐
-│                    Inngest（大腦）                           │
-│  - 接收用戶請求                                              │
-│  - 任務排隊 + 優先級                                         │
-│  - 狀態追蹤                                                  │
-│  - 等待用戶確認（waitForEvent）                              │
-│  - 錯誤重試                                                  │
+│                    VPS Backend                               │
 │  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐         │
-│  │   Intent    │→ │   Skill     │→ │  Workflow   │         │
-│  │ Classifier  │  │  Registry   │  │  Executor   │         │
+│  │   Intent    │→ │   Skill     │→ │   BullMQ    │         │
+│  │ Classifier  │  │  Registry   │  │  Worker     │         │
 │  └─────────────┘  └─────────────┘  └─────────────┘         │
-└─────────────────────────┬───────────────────────────────────┘
-                          ↓ 觸發
-┌─────────────────────────────────────────────────────────────┐
-│                    Modal（手腳）                             │
-│  - 執行 sdd.os（規格驅動開發）                               │
-│  - TDD 迭代循環（測試 → 實作 → 測試）                        │
-│  - 生成程式碼                                                │
-│  - 長時間運行（最多 30 分鐘）                                │
-└─────────────────────────┬───────────────────────────────────┘
-                          ↓ 完成後回報
-┌─────────────────────────────────────────────────────────────┐
-│                 Inngest（繼續編排）                          │
-│  - 存到 Supabase Storage                                    │
-│  - 呼叫 Vercel Deployments API 部署                         │
-│  - 通知用戶完成                                              │
+│                                                              │
+│  - 接收用戶請求                                              │
+│  - 任務排隊（BullMQ）                                        │
+│  - 狀態追蹤（Redis）                                         │
+│  - 等待用戶回覆                                              │
+│  - 錯誤重試                                                  │
 └─────────────────────────┬───────────────────────────────────┘
                           ↓
 ┌─────────────────────────────────────────────────────────────┐
-│                   Server Actions（18 個）                    │
+│                   Server Actions（30+）                      │
 │  createProject · sendMessage · generateCode · deployProject │
-│  updateProject · cancelSubscription · exportData · ...      │
 │  initializeSession · sendMessageAndTrigger · replyToConv... │
 └─────────────────────────────────────────────────────────────┘
                           ↓
 ┌─────────────────────────────────────────────────────────────┐
 │                        外部服務                              │
-│       Vercel · Supabase · Cloudflare · Modal · sdd.os       │
+│         Vercel · Supabase · Cloudflare · sdd.os             │
 └─────────────────────────────────────────────────────────────┘
 ```
 
-### 為什麼這樣分工？
+### 為什麼用 VPS？
 
-| 元件 | 職責 | 原因 |
-|------|------|------|
-| **Inngest** | 任務編排、狀態追蹤、等待事件 | 免費額度 25,000 runs/月，擅長編排 |
-| **Modal** | 執行 sdd.os、TDD 迭代 | 按秒計費，支援長時間運行 |
-| **Vercel** | 前端 + API + 用戶專案部署 | Serverless，自動擴展 |
-| **Supabase** | 資料庫 + Storage | 統一存儲，便宜 |
+| 問題 | Vercel Serverless | VPS Backend |
+|------|-------------------|-------------|
+| 執行時間限制 | 10-60 秒 | 無限制 |
+| 狀態管理 | 無狀態 | Redis + PostgreSQL |
+| 長時間 LLM 任務 | 超時失敗 | 正常完成 |
+| 調試 | 困難 | PM2 + 日誌 |
 
 ### 並發處理策略
 
-當 100 個用戶同時開發時：
-
 ```typescript
-// Inngest 自動排隊 + 並發控制
-inngest.createFunction(
-  {
-    id: 'handle-user-request',
-    concurrency: {
-      limit: 50,  // 同時最多處理 50 個請求
-    },
-  },
-  // ...
-)
+// BullMQ 並發控制
+const worker = new Worker('orchestrator', processor, {
+  concurrency: 50,  // 同時最多處理 50 個請求
+})
 ```
 
-- **Inngest**：自動排隊、優先級調度（付費用戶優先）
-- **Modal**：按需啟動 Worker，閒置不花錢
+- **BullMQ**：自動排隊、重試機制
+- **Redis**：狀態管理、隊列儲存
 - **LLM API**：多 Key 輪換分散 rate limit
 
 ### 多租戶架構（Multi-Tenant SaaS）
@@ -1292,83 +1130,29 @@ const response = await fetch('https://api.vercel.com/v13/deployments', {
 })
 ```
 
-## Inngest 配置
-
-### 部署設定
-
-| 項目 | 值 |
-|------|-----|
-| 平台 | Vercel |
-| Endpoint | `https://tellcraft.com/api/inngest` |
-| App ID | `tellcraft` |
-| Integration | Vercel Integration（自動注入環境變數）|
-
-### 環境變數（Vercel）
-
-```bash
-INNGEST_EVENT_KEY=xxx      # 從 Inngest Dashboard 取得
-INNGEST_SIGNING_KEY=xxx    # 從 Inngest Dashboard 取得
-```
-
-### Vercel Integration 設定
-
-1. 啟用 Inngest Vercel Integration
-2. 設定 Custom Production Domain：`tellcraft.com`
-3. 關閉 Vercel Deployment Protection（否則 Inngest 無法同步）
-
-### 驗證 Inngest 連線
-
-```bash
-curl https://tellcraft.com/api/inngest
-# 應返回：
-# {
-#   "has_event_key": true,
-#   "has_signing_key": true,
-#   "function_count": 1
-# }
-```
-
-## 舊架構（參考）
-
-```
-┌─────────────────────────────────────────────────────────────┐
-│                    Inngest Orchestrator                     │
-│  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐         │
-│  │   Intent    │→ │   Skill     │→ │  Workflow   │         │
-│  │ Classifier  │  │  Registry   │  │  Executor   │         │
-│  └─────────────┘  └─────────────┘  └─────────────┘         │
-└─────────────────────────────────────────────────────────────┘
-```
-
 ## 執行流程
 
 ```
 用戶：「幫我建一個訂單管理系統」
   ↓
 ┌─────────────────────────────────────────┐
-│ Inngest: Intent Classification          │
+│ VPS: Intent Classification              │
 │ → 識別為 bdd-spec Skill                 │
 └─────────────────────────────────────────┘
   ↓
 ┌─────────────────────────────────────────┐
-│ Inngest: 多輪對話釐清需求               │
-│ → waitForEvent（最長 24 小時）          │
+│ VPS: 多輪對話釐清需求                   │
+│ → Redis 狀態管理 + WebSocket 推送       │
 └─────────────────────────────────────────┘
   ↓
 ┌─────────────────────────────────────────┐
-│ Inngest: 規格確認                       │
+│ VPS: 規格生成                           │
 │ → 生成 BDD Feature Files + Schema       │
-└─────────────────────────────────────────┘
-  ↓
-┌─────────────────────────────────────────┐
-│ Modal: 執行 sdd.os                      │
-│ → TDD 迭代（測試 → 實作 → 測試）        │
 │ → 自癒機制，最多 3 次                   │
-│ → 完成後回報 Inngest                    │
 └─────────────────────────────────────────┘
   ↓
 ┌─────────────────────────────────────────┐
-│ Inngest: 存儲 + 部署                    │
+│ VPS: 存儲 + 部署                        │
 │ → 存到 Supabase Storage                 │
 │ → Vercel Deployments API 部署           │
 │ → 通知用戶                              │
@@ -1380,18 +1164,18 @@ curl https://tellcraft.com/api/inngest
 ## 快速開始
 
 ```bash
-# 安裝依賴
+# 前端
 pnpm install
-
-# 啟動開發伺服器
 pnpm dev
 
-# 另開終端，啟動 Inngest Dev Server
-npx inngest-cli@latest dev
+# 後端（另開終端）
+cd tellcraft-backend
+pnpm install
+pnpm dev
 ```
 
-- 應用：http://localhost:3000
-- Inngest Dashboard：http://localhost:8288
+- 前端：http://localhost:3000
+- 後端：http://localhost:3100
 - 測試頁面：http://localhost:3000/test
 
 ## UI 元件
@@ -1437,9 +1221,13 @@ app/
 ├── actions/           # Server Actions（API 封裝）
 │   ├── index.ts       # 核心 + Chat + Auth Actions
 │   └── admin.ts       # 管理員 Actions
-├── inngest/           # Orchestrator（任務編排）
 ├── lib/
+│   ├── vps-api.ts     # VPS API 客戶端
+│   ├── llm.ts         # LLM 函數
 │   └── supabase/      # Supabase clients（client.ts, server.ts）
+├── hooks/
+│   ├── useAuth.ts     # JWT 認證 hook
+│   └── useVpsWebSocket.ts  # WebSocket hook
 ├── components/        # UI 元件
 │   ├── dashboard/     # 儀表板元件
 │   │   ├── Sidebar.tsx
@@ -1465,8 +1253,7 @@ app/
 │   ├── callback/      # OAuth callback
 │   └── post-login/    # 登入後帳號合併處理
 ├── api/
-│   ├── auth/line/     # LINE OAuth 路由
-│   ├── inngest/       # Inngest webhook endpoint
+│   ├── auth/          # OAuth 路由（google/, line/）
 │   └── session/       # Session Cookie 備份
 └── test/              # 測試頁面
 
