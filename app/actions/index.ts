@@ -1,7 +1,7 @@
 'use server'
 
 import { supabase, PLAN_MESSAGE_LIMITS, PLAN_PROJECT_LIMITS, PLAN_PRIORITY_WEIGHTS } from '../lib/supabase'
-import { createClient } from '../lib/supabase/server'
+import { getCurrentUser } from '../lib/auth'
 import { deployProject as deployProjectReal, generateNextJsTemplate } from './deploy'
 
 // ============================================================
@@ -1257,17 +1257,16 @@ export async function initializeSessionFromAuth(input?: {
 }>> {
   const { anonymousId, conversationId, createNew = false } = input || {}
 
-  const authClient = await createClient()
-  const { data: { user: authUser } } = await authClient.auth.getUser()
+  const authUser = await getCurrentUser()
 
   if (!authUser) {
     return { success: false, error: '未登入' }
   }
 
-  // 從 auth user 的 metadata 取得用戶資訊
+  // 從 JWT 取得用戶資訊
   const email = authUser.email || `${authUser.id}@auth.tellcraft.app`
-  const name = authUser.user_metadata?.name || authUser.user_metadata?.full_name
-  const avatarUrl = authUser.user_metadata?.avatar_url || authUser.user_metadata?.picture
+  const name = authUser.name
+  const avatarUrl: string | undefined = undefined // JWT 中沒有 avatarUrl，之後從資料庫取
 
   // 1. 查找或創建 users 表中的用戶記錄
   const userQueryResult = await supabase
@@ -1646,15 +1645,12 @@ export async function migrateAnonymousAccount(input: {
 
 /**
  * 登出
+ * JWT 模式下，登出由前端清除 localStorage 和 cookie 處理
+ * 這個 action 只是一個 placeholder
  */
 export async function signOut(): Promise<ActionResult<null>> {
-  const authClient = await createClient()
-  const { error } = await authClient.auth.signOut()
-
-  if (error) {
-    return { success: false, error: error.message }
-  }
-
+  // JWT 模式下，登出主要由前端處理（清除 localStorage 和 cookie）
+  // 這裡可以添加任何服務端清理邏輯（如：加入 token 黑名單）
   return { success: true, data: null }
 }
 
@@ -2080,8 +2076,7 @@ export async function getUserStats(): Promise<ActionResult<{
     plan: string
   }
 }>> {
-  const authClient = await createClient()
-  const { data: { user: authUser } } = await authClient.auth.getUser()
+  const authUser = await getCurrentUser()
 
   if (!authUser) {
     return { success: false, error: '未登入' }
@@ -2164,8 +2159,7 @@ export async function getUserProjects(params: {
   page: number
   pageSize: number
 }>> {
-  const authClient = await createClient()
-  const { data: { user: authUser } } = await authClient.auth.getUser()
+  const authUser = await getCurrentUser()
 
   if (!authUser) {
     return { success: false, error: '未登入' }
@@ -2415,8 +2409,7 @@ export async function getProjectDetail(projectId: string): Promise<ActionResult<
     createdAt: string
   }>
 }>> {
-  const authClient = await createClient()
-  const { data: { user: authUser } } = await authClient.auth.getUser()
+  const authUser = await getCurrentUser()
 
   if (!authUser) {
     return { success: false, error: '未登入' }

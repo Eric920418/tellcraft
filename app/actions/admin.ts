@@ -1,7 +1,7 @@
 'use server'
 
 import { supabase } from '../lib/supabase'
-import { createClient } from '../lib/supabase/server'
+import { getCurrentUser } from '../lib/auth'
 
 // ============================================================
 // 類型定義
@@ -38,13 +38,18 @@ interface PaginatedResult<T> {
  * 如果不是管理員，拋出錯誤
  */
 async function requireAdmin(): Promise<{ userId: string; email: string }> {
-  const authClient = await createClient()
-  const { data: { user: authUser } } = await authClient.auth.getUser()
+  const authUser = await getCurrentUser()
 
   if (!authUser) {
     throw new Error('未登入')
   }
 
+  // 先檢查 JWT 中的 isAdmin flag
+  if (authUser.isAdmin) {
+    return { userId: authUser.id, email: authUser.email || '' }
+  }
+
+  // 如果 JWT 沒有 isAdmin，從資料庫確認（fallback）
   const { data: user, error } = await supabase
     .from('users')
     .select('is_admin, email')
