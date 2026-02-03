@@ -5,8 +5,8 @@
  * 取代原有的 Inngest 觸發機制
  */
 
-// API 基礎 URL
-const API_BASE = process.env.NEXT_PUBLIC_VPS_API_URL || 'http://54.238.4.117:8080'
+// API 基礎 URL - 通過 Vercel API Route 代理，避免 Mixed Content 問題
+const API_BASE = '/api/vps'
 
 // ============================================================
 // 類型定義
