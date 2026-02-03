@@ -3,7 +3,7 @@ import { jwtVerify } from 'jose'
 
 // JWT Secret - 必須與 VPS 使用的 secret 一致
 const JWT_SECRET = new TextEncoder().encode(
-  process.env.JWT_SECRET || 'your-jwt-secret-key'
+  process.env.JWT_SECRET || 'tellcraft-jwt-secret-change-in-production'
 )
 
 interface JWTPayload {
