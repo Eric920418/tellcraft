@@ -21,12 +21,13 @@ const API_URL = process.env.API_URL || 'http://54.238.4.117:8080'
 // 輔助函數
 // ============================================================
 
-function generateToken(user: { id: string; email: string; name?: string }): string {
+function generateToken(user: { id: string; email: string; name?: string; isAdmin?: boolean }): string {
   return jwt.sign(
     {
       sub: user.id,
       email: user.email,
       name: user.name,
+      isAdmin: user.isAdmin || false,
     },
     JWT_SECRET,
     { expiresIn: JWT_EXPIRES_IN }
@@ -39,20 +40,20 @@ async function findOrCreateUser(profile: {
   email: string
   name?: string
   avatarUrl?: string
-}): Promise<{ id: string; email: string; name?: string; isNew: boolean }> {
+}): Promise<{ id: string; email: string; name?: string; isAdmin?: boolean; isNew: boolean }> {
   // 先用 provider + providerId 查找
-  let user = await db.queryOne<{ id: string; email: string; name: string | null }>(
-    'SELECT id, email, name FROM users WHERE provider = $1 AND provider_id = $2',
+  let user = await db.queryOne<{ id: string; email: string; name: string | null; is_admin: boolean }>(
+    'SELECT id, email, name, is_admin FROM users WHERE provider = $1 AND provider_id = $2',
     [profile.provider, profile.providerId]
   )
 
   if (user) {
-    return { id: user.id, email: user.email, name: user.name || undefined, isNew: false }
+    return { id: user.id, email: user.email, name: user.name || undefined, isAdmin: user.is_admin, isNew: false }
   }
 
   // 再用 email 查找（可能是之前匿名或其他方式註冊的）
-  user = await db.queryOne<{ id: string; email: string; name: string | null }>(
-    'SELECT id, email, name FROM users WHERE email = $1',
+  user = await db.queryOne<{ id: string; email: string; name: string | null; is_admin: boolean }>(
+    'SELECT id, email, name, is_admin FROM users WHERE email = $1',
     [profile.email]
   )
 
@@ -62,7 +63,7 @@ async function findOrCreateUser(profile: {
       'UPDATE users SET provider = $1, provider_id = $2, name = COALESCE(name, $3), avatar_url = COALESCE(avatar_url, $4) WHERE id = $5',
       [profile.provider, profile.providerId, profile.name, profile.avatarUrl, user.id]
     )
-    return { id: user.id, email: user.email, name: profile.name || user.name || undefined, isNew: false }
+    return { id: user.id, email: user.email, name: profile.name || user.name || undefined, isAdmin: user.is_admin, isNew: false }
   }
 
   // 創建新用戶（使用 gen_random_uuid() 生成 ID）
@@ -77,7 +78,7 @@ async function findOrCreateUser(profile: {
     throw new Error('Failed to create user')
   }
 
-  return { id: newUser.id, email: profile.email, name: profile.name, isNew: true }
+  return { id: newUser.id, email: profile.email, name: profile.name, isAdmin: false, isNew: true }
 }
 
 // ============================================================
@@ -588,8 +589,8 @@ router.post('/refresh', async (req, res) => {
       }
 
       // 查詢用戶確認存在
-      const user = await db.queryOne<{ id: string; email: string; name: string | null }>(
-        'SELECT id, email, name FROM users WHERE id = $1',
+      const user = await db.queryOne<{ id: string; email: string; name: string | null; is_admin: boolean }>(
+        'SELECT id, email, name, is_admin FROM users WHERE id = $1',
         [payload.sub]
       )
 
@@ -602,6 +603,7 @@ router.post('/refresh', async (req, res) => {
         id: user.id,
         email: user.email,
         name: user.name || undefined,
+        isAdmin: user.is_admin,
       })
 
       res.json({ token: newToken })
