@@ -1472,28 +1472,27 @@ export async function initializeSessionFromAuth(input?: {
 }
 
 /**
- * 取得當前認證用戶
+ * 取得當前認證用戶（Server Action 版本）
  * - 用於前端檢查登入狀態
  * - 包含 isAdmin 狀態避免前端重複查詢
  */
-export async function getCurrentUser(): Promise<ActionResult<{
+export async function getCurrentUserAction(): Promise<ActionResult<{
   userId: string
   email?: string
   name?: string
   avatarUrl?: string
   isAdmin: boolean
 } | null>> {
-  const authClient = await createClient()
-  const { data: { user: authUser } } = await authClient.auth.getUser()
+  const authUser = await getCurrentUser()
 
   if (!authUser) {
     return { success: true, data: null }
   }
 
-  // 查詢 is_admin 狀態（避免前端再次查詢）
+  // 查詢完整用戶資訊（包含 avatarUrl）
   const { data: userData } = await supabase
     .from('users')
-    .select('is_admin')
+    .select('is_admin, avatar_url, name')
     .eq('id', authUser.id)
     .single()
 
@@ -1502,9 +1501,9 @@ export async function getCurrentUser(): Promise<ActionResult<{
     data: {
       userId: authUser.id,
       email: authUser.email,
-      name: authUser.user_metadata?.name || authUser.user_metadata?.full_name,
-      avatarUrl: authUser.user_metadata?.avatar_url || authUser.user_metadata?.picture,
-      isAdmin: userData?.is_admin || false
+      name: userData?.name || authUser.name,
+      avatarUrl: userData?.avatar_url,
+      isAdmin: userData?.is_admin || authUser.isAdmin || false
     }
   }
 }
@@ -1669,10 +1668,9 @@ export async function sendMessageAndTrigger(input: {
   const { conversationId, content, projectId } = input
   let { userId } = input
 
-  // 如果未提供 userId，從認證 session 讀取
+  // 如果未提供 userId，從 JWT 讀取
   if (!userId) {
-    const authClient = await createClient()
-    const { data: { user: authUser } } = await authClient.auth.getUser()
+    const authUser = await getCurrentUser()
     if (!authUser) {
       return { success: false, error: '未登入' }
     }
@@ -2243,9 +2241,8 @@ export async function getProjectReminder(input: {
 }>> {
   const { anonymousId } = input
 
-  // 嘗試從認證 session 獲取用戶
-  const authClient = await createClient()
-  const { data: { user: authUser } } = await authClient.auth.getUser()
+  // 嘗試從 JWT 獲取用戶
+  const authUser = await getCurrentUser()
 
   let userId: string | null = null
 
