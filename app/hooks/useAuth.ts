@@ -93,8 +93,17 @@ export function useAuth() {
     checkAuth()
   }, [checkAuth])
 
-  const logout = useCallback(() => {
+  const logout = useCallback(async () => {
+    // 清除 localStorage
     localStorage.removeItem('auth_token')
+
+    // 清除 httpOnly cookie
+    try {
+      await fetch('/api/auth/set-cookie', { method: 'DELETE' })
+    } catch {
+      // 忽略錯誤，繼續登出流程
+    }
+
     setState({
       isLoading: false,
       isAuthenticated: false,

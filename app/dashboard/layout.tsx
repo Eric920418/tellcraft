@@ -1,39 +1,60 @@
 import { redirect } from 'next/navigation'
-import { createClient } from '../lib/supabase/server'
-import { supabase } from '../lib/supabase'
+import { cookies, headers } from 'next/headers'
 import { DashboardShell } from '../components/dashboard/DashboardShell'
+
+const VPS_API_URL = process.env.VPS_API_URL || 'http://54.238.4.117:8080'
 
 export default async function DashboardLayout({
   children,
 }: {
   children: React.ReactNode
 }) {
-  // Server-side 認證檢查（middleware 已處理，這裡是雙重保障）
-  const authClient = await createClient()
-  const { data: { user: authUser } } = await authClient.auth.getUser()
+  // 從 cookie 獲取 JWT token
+  const cookieStore = await cookies()
+  const token = cookieStore.get('auth_token')?.value
 
-  if (!authUser) {
+  if (!token) {
     redirect('/auth/login?next=/dashboard')
   }
 
-  // Server-side 查詢用戶資料（一次查詢，無需等待）
-  const { data: userData } = await supabase
-    .from('users')
-    .select('is_admin, email, name')
-    .eq('id', authUser.id)
-    .single()
+  // 驗證 token 並獲取用戶資訊
+  try {
+    const response = await fetch(`${VPS_API_URL}/auth/me`, {
+      headers: { 'Authorization': `Bearer ${token}` },
+      // 避免快取，確保每次都驗證
+      cache: 'no-store',
+    })
 
-  const user = {
-    userId: authUser.id,
-    email: userData?.email || authUser.email,
-    name: userData?.name || authUser.user_metadata?.name || authUser.user_metadata?.full_name,
-    avatarUrl: authUser.user_metadata?.avatar_url || authUser.user_metadata?.picture,
-    isAdmin: userData?.is_admin || false,
+    if (!response.ok) {
+      redirect('/auth/login?next=/dashboard')
+    }
+
+    const data = await response.json() as {
+      user: {
+        id: string
+        email: string
+        name?: string
+        avatarUrl?: string
+        plan?: string
+        isAdmin?: boolean
+      }
+    }
+
+    const user = {
+      userId: data.user.id,
+      email: data.user.email,
+      name: data.user.name,
+      avatarUrl: data.user.avatarUrl,
+      isAdmin: data.user.isAdmin || false,
+    }
+
+    return (
+      <DashboardShell user={user}>
+        {children}
+      </DashboardShell>
+    )
+  } catch (error) {
+    console.error('[Dashboard] Auth error:', error)
+    redirect('/auth/login?next=/dashboard')
   }
-
-  return (
-    <DashboardShell user={user}>
-      {children}
-    </DashboardShell>
-  )
 }

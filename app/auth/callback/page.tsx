@@ -27,12 +27,19 @@ function AuthCallbackContent() {
       return
     }
 
-    // 儲存 token 到 localStorage
+    // 儲存 token 到 localStorage（供 useAuth hook 使用）
     localStorage.setItem('auth_token', token)
 
-    // 使用完整頁面重新載入（而非客戶端導航）
-    // 這確保 useAuth hook 會重新讀取 localStorage 中的 token
-    window.location.href = returnTo
+    // 同時設置 httpOnly cookie（供 middleware 和 Server Components 使用）
+    fetch('/api/auth/set-cookie', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ token }),
+    }).finally(() => {
+      // 無論 cookie 設置成功與否，都跳轉
+      // 使用完整頁面重新載入，確保 useAuth hook 重新讀取 token
+      window.location.href = returnTo
+    })
   }, [searchParams, router])
 
   if (error) {

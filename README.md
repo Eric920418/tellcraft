@@ -409,6 +409,13 @@ JWT_SECRET=your-secret-key
 
 **已修復問題（2026-02-03）**：
 - **Header 登入後不更新**：`/auth/callback` 使用 `router.replace()` 客戶端導航，不會觸發頁面重新載入，導致 `useAuth` hook 無法讀取新存的 token。修復：改用 `window.location.href` 強制頁面重新載入。
+- **Dashboard 要求重新登入**：middleware 和 Server Components 無法讀取 localStorage。修復：登入時同時設置 httpOnly cookie，middleware 和 layout 改用 cookie 驗證。
+
+**認證雙軌機制**：
+| 儲存位置 | 用途 |
+|----------|------|
+| localStorage (`auth_token`) | 客戶端 `useAuth` hook 使用 |
+| Cookie (`auth_token`) | Middleware + Server Components 使用 |
 
 ### 前端 Chat 串接 Inngest
 
