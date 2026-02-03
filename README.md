@@ -80,6 +80,22 @@ Discovery → 問5題 → 問完 → Re-discovery → 問5題 → ... → 連續
 
 ### 最新修復（2026-02-04）
 
+**VPS API 遷移 - 修復 Vercel 無法連接 VPS PostgreSQL**：
+
+問題：Vercel Serverless 無法連接 VPS 的 PostgreSQL（`listen_addresses = 'localhost'`），導致所有使用 `db` 的 Server Actions 超時。
+
+解決方案：將前端核心功能遷移到 VPS HTTP API，通過 API 而非直連資料庫：
+
+| 新增/修改 | 說明 |
+|----------|------|
+| `tellcraft-backend/src/routes/session.ts` | 新增 Session API（初始化會話、對話列表、專案提醒）|
+| `tellcraft-backend/src/routes/dashboard.ts` | 新增 Dashboard API（用戶統計、管理員統計、LLM 用量）|
+| `app/lib/vps-api.ts` | 新增 `initializeSession`, `getUserConversations`, `getProjectReminder`, `getDashboardStats`, `getAdminStats`, `getLLMUsageStats` |
+| `app/page.tsx` | 從 Server Actions 改用 VPS API（`vpsInitializeSession`, `vpsGetConversationMessages`, `vpsReplyToConversation`, `vpsSendMessage`）|
+| `app/dashboard/page.tsx` | 改用 `getDashboardStats` VPS API |
+| `app/dashboard/admin/page.tsx` | 改用 `getAdminStats` VPS API |
+| `app/dashboard/admin/usage/page.tsx` | 改用 `getLLMUsageStats` VPS API |
+
 **修復 Admin Usage 頁面 React Error #300**：
 
 | 修復項目 | 描述 |

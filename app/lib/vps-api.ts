@@ -320,6 +320,97 @@ export async function getLLMUsageStats(input: {
 }
 
 // ============================================================
+// Session API
+// ============================================================
+
+/**
+ * 初始化會話（支援匿名用戶）
+ */
+export async function initializeSession(input: {
+  anonymousId?: string
+  conversationId?: string
+  createNew?: boolean
+  token?: string
+}): Promise<ApiResponse<{
+  userId: string
+  projectId: string
+  conversationId: string
+  messages: Message[]
+  isNewUser: boolean
+  isNewProject: boolean
+  isNewConversation: boolean
+  resumed: boolean
+}>> {
+  return apiRequest('/api/session/initialize', {
+    method: 'POST',
+    headers: input.token
+      ? { Authorization: `Bearer ${input.token}` }
+      : undefined,
+    body: JSON.stringify({
+      anonymousId: input.anonymousId,
+      conversationId: input.conversationId,
+      createNew: input.createNew,
+    }),
+  })
+}
+
+/**
+ * 獲取用戶對話列表
+ */
+export async function getUserConversations(input: {
+  anonymousId?: string
+  token?: string
+}): Promise<ApiResponse<{
+  conversations: Array<{
+    id: string
+    projectId: string
+    projectName: string
+    messageCount: number
+    lastMessage: string
+    specComplete: boolean
+    updatedAt: string
+  }>
+}>> {
+  const params = new URLSearchParams()
+  if (input.anonymousId) params.set('anonymousId', input.anonymousId)
+  const query = params.toString() ? `?${params.toString()}` : ''
+
+  return apiRequest(`/api/session/conversations${query}`, {
+    method: 'GET',
+    headers: input.token
+      ? { Authorization: `Bearer ${input.token}` }
+      : undefined,
+  })
+}
+
+/**
+ * 獲取專案提醒（橫幅顯示）
+ */
+export async function getProjectReminder(input: {
+  anonymousId?: string
+  token?: string
+}): Promise<ApiResponse<{
+  reminder: {
+    type: 'in_progress' | 'completed' | 'failed'
+    projectId: string
+    projectName: string
+    message: string
+    url?: string
+  } | null
+}>> {
+  const params = new URLSearchParams()
+  if (input.anonymousId) params.set('anonymousId', input.anonymousId)
+  const query = params.toString() ? `?${params.toString()}` : ''
+
+  return apiRequest(`/api/session/project-reminder${query}`, {
+    method: 'GET',
+    headers: input.token
+      ? { Authorization: `Bearer ${input.token}` }
+      : undefined,
+  })
+}
+
+// ============================================================
 // 導出
 // ============================================================
 
@@ -334,4 +425,7 @@ export const vpsApi = {
   getDashboardStats,
   getAdminStats,
   getLLMUsageStats,
+  initializeSession,
+  getUserConversations,
+  getProjectReminder,
 }

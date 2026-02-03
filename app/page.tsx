@@ -12,15 +12,15 @@ import CardSwap, { Card } from './components/CardSwap'
 import TextType from './components/TextType'
 import { AnimatedThemeToggler } from './components/AnimatedThemeToggler'
 import GlowButton from './components/GlowButton'
+import { signOut } from './actions'
 import {
-  initializeSession,
-  initializeSessionFromAuth,
-  sendMessageAndTrigger,
-  replyToConversation,
-  getConversationMessages,
-  getUserConversations,
-  signOut
-} from './actions'
+  initializeSession as vpsInitializeSession,
+  getUserConversations as vpsGetUserConversations,
+  getConversationMessages as vpsGetConversationMessages,
+  replyToConversation as vpsReplyToConversation,
+  sendMessage as vpsSendMessage,
+} from './lib/vps-api'
+import { getAuthToken } from './hooks/useAuth'
 import ConversationPicker from './components/ConversationPicker'
 import LoginPrompt, { shouldShowLoginPrompt, dismissLoginPrompt } from './components/LoginPrompt'
 import { useAuth } from './hooks/useAuth'
@@ -1044,58 +1044,38 @@ function ChatSection({
       setError(null)
 
       const anonymousId = await getAnonymousId()
+      const token = getAuthToken()
 
-      // 優先嘗試從認證 session 初始化
-      const authResult = await initializeSessionFromAuth({
-        anonymousId, // 傳遞 anonymousId 用於帳號合併
-        conversationId: resumeConversationId || undefined, // 恢復指定對話
-        createNew: !!initialMessage && !resumeConversationId // 有初始消息且不是恢復對話時創建新對話
+      // 使用 VPS API 初始化會話
+      const result = await vpsInitializeSession({
+        anonymousId,
+        conversationId: resumeConversationId || undefined,
+        createNew: !!initialMessage && !resumeConversationId,
+        token: token || undefined
       })
 
-      let session: SessionInfo
-      let hasHistory = false
-
-      if (authResult.success && authResult.data) {
-        // 已登入用戶
-        session = {
-          userId: authResult.data.userId,
-          projectId: authResult.data.projectId,
-          conversationId: authResult.data.conversationId,
-          isAuthenticated: true,
-          hasHistory: authResult.data.hasHistory,
-          user: authResult.data.user
-        }
-        hasHistory = authResult.data.hasHistory
-      } else {
-        // 未登入，使用匿名模式
-        const result = await initializeSession({
-          anonymousId,
-          conversationId: resumeConversationId || undefined, // 恢復指定對話
-          createNew: !!initialMessage && !resumeConversationId // 有初始消息且不是恢復對話時創建新對話
-        })
-
-        if (!result.success || !result.data) {
-          setError(result.error || '初始化失敗')
-          setIsInitializing(false)
-          return
-        }
-
-        session = {
-          userId: result.data.userId,
-          projectId: result.data.projectId,
-          conversationId: result.data.conversationId,
-          isAuthenticated: false,
-          hasHistory: result.data.hasHistory
-        }
-        hasHistory = result.data.hasHistory
+      if (!result.success || !result.data) {
+        setError(result.error || '初始化失敗')
+        setIsInitializing(false)
+        return
       }
+
+      const session: SessionInfo = {
+        userId: result.data.userId,
+        projectId: result.data.projectId,
+        conversationId: result.data.conversationId,
+        isAuthenticated: !!token,
+        hasHistory: result.data.messages.length > 0
+      }
+      const hasHistory = result.data.messages.length > 0
 
       setSessionInfo(session)
 
       // 如果是恢復對話，加載歷史消息
       if (resumeConversationId) {
-        const historyResult = await getConversationMessages({
-          conversationId: session.conversationId
+        const historyResult = await vpsGetConversationMessages({
+          conversationId: session.conversationId,
+          token: token || undefined
         })
 
         if (historyResult.success && historyResult.data) {
@@ -1106,8 +1086,8 @@ function ChatSection({
             timestamp: new Date(m.timestamp),
             stage: m.stage as Message['stage'],
             progress: m.progress as Message['progress'],
-            layoutHint: (m as Record<string, unknown>).layoutHint as Message['layoutHint'],
-            richContent: (m as Record<string, unknown>).richContent as Message['richContent']
+            layoutHint: (m as unknown as Record<string, unknown>).layoutHint as Message['layoutHint'],
+            richContent: (m as unknown as Record<string, unknown>).richContent as Message['richContent']
           }))
           setMessages(historyMessages)
 
@@ -1154,12 +1134,12 @@ function ChatSection({
         setIsTyping(true)
         setCurrentStage('clarify')
 
-        // 發送消息並觸發 Inngest
-        const sendResult = await sendMessageAndTrigger({
+        // 發送消息到 VPS（觸發 Orchestrator）
+        const sendResult = await vpsSendMessage({
           conversationId: session.conversationId,
-          content: initialMessage,
-          userId: session.userId,
-          projectId: session.projectId
+          message: initialMessage,
+          projectId: session.projectId,
+          token: token || undefined
         })
 
         if (!sendResult.success) {
@@ -1173,8 +1153,9 @@ function ChatSection({
         return // 已經設置 isInitializing = false，直接返回
       } else if (hasHistory) {
         // 沒有初始消息但有歷史對話 → 自動恢復最近對話
-        const historyResult = await getConversationMessages({
-          conversationId: session.conversationId
+        const historyResult = await vpsGetConversationMessages({
+          conversationId: session.conversationId,
+          token: token || undefined
         })
 
         if (historyResult.success && historyResult.data) {
@@ -1222,10 +1203,11 @@ function ChatSection({
     const poll = async () => {
       if (!isPolling) return
 
-      const result = await getConversationMessages({
+      const token = getAuthToken()
+      const result = await vpsGetConversationMessages({
         conversationId: sessionInfo.conversationId,
-        afterTimestamp: lastTimestamp || undefined,
-        lastUpdatedAt: currentUpdatedAt || undefined  // 傳入上次的 updated_at
+        lastUpdatedAt: currentUpdatedAt || undefined,  // 傳入上次的 updated_at
+        token: token || undefined
       })
 
       if (result.success && result.data) {
@@ -1465,7 +1447,8 @@ function ChatSection({
     setIsInitializing(true)
 
     // 載入選中對話的消息
-    const result = await getConversationMessages({ conversationId })
+    const token = getAuthToken()
+    const result = await vpsGetConversationMessages({ conversationId, token: token || undefined })
     if (result.success && result.data) {
       const formattedMessages: Message[] = result.data.messages.map((m) => ({
         id: m.id,
@@ -1568,14 +1551,15 @@ function ChatSection({
     setIsTyping(true)
 
     // 判斷是首次消息還是多輪對話回覆
+    const token = getAuthToken()
     if (sessionInfo.currentTaskId) {
       // 多輪對話回覆
-      const result = await replyToConversation({
+      const result = await vpsReplyToConversation({
         conversationId: sessionInfo.conversationId,
         projectId: sessionInfo.projectId,
-        userId: sessionInfo.userId,
         taskId: sessionInfo.currentTaskId,
-        content
+        message: content,
+        token: token || undefined
       })
 
       if (!result.success) {
@@ -1589,11 +1573,11 @@ function ChatSection({
       }
     } else {
       // 首次消息
-      const result = await sendMessageAndTrigger({
+      const result = await vpsSendMessage({
         conversationId: sessionInfo.conversationId,
-        content,
-        userId: sessionInfo.userId,
-        projectId: sessionInfo.projectId
+        message: content,
+        projectId: sessionInfo.projectId,
+        token: token || undefined
       })
 
       if (!result.success) {

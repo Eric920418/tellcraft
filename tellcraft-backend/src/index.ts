@@ -13,6 +13,7 @@ import projectRoutes from './routes/project'
 import healthRoutes from './routes/health'
 import authRoutes from './routes/auth'
 import dashboardRoutes from './routes/dashboard'
+import sessionRoutes from './routes/session'
 
 // ============================================================
 // 環境變數
@@ -119,6 +120,7 @@ app.use('/auth', authRoutes)
 app.use('/api/conversation', conversationRoutes)
 app.use('/api/project', projectRoutes)
 app.use('/api/dashboard', dashboardRoutes)
+app.use('/api/session', sessionRoutes)
 
 // 404 處理
 app.use((_req, res) => {
