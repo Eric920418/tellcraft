@@ -1,4 +1,5 @@
 import { recordLlmUsage } from '../db/client'
+import { ClarifyItem } from './bdd-session'
 
 // Sonnet 定價 (每百萬 tokens)
 const SONNET_PRICING = { input: 3, output: 15 }
@@ -6,21 +7,6 @@ const SONNET_PRICING = { input: 3, output: 15 }
 // ============================================================
 // PRD Discovery 類型
 // ============================================================
-
-export interface ClarifyItem {
-  id: string
-  question: string
-  whiteTextQuestion: string
-  category: 'data' | 'feature' | 'terminology'
-  priority: 'high' | 'medium' | 'low'
-  checklistItem: string
-  location?: string
-  impact?: string
-  status: 'pending' | 'answered' | 'skipped'
-  options: string[]
-  answer?: string
-  answeredAt?: string
-}
 
 interface PrdDiscoveryResult {
   success: boolean
@@ -198,26 +184,20 @@ ${pendingQuestions.join('\n')}` : ''}
     const jsonStr = jsonMatch[1] || jsonMatch[0]
     const parsed = JSON.parse(jsonStr)
 
-    // 轉換格式
+    // 轉換格式（符合 bdd-session.ts 的 ClarifyItem 類型）
     const items: ClarifyItem[] = (parsed.items || []).map((item: {
       id?: string
       question: string
       whiteTextQuestion?: string
-      category?: string
       priority?: string
       checklistItem?: string
-      location?: string
-      impact?: string
       options?: Array<string | { label: string; description: string }>
     }) => ({
       id: item.id || crypto.randomUUID(),
       question: item.question,
       whiteTextQuestion: item.whiteTextQuestion || item.question,
-      category: item.category || 'feature',
-      priority: item.priority || 'medium',
+      priority: (item.priority as 'high' | 'medium' | 'low') || 'medium',
       checklistItem: item.checklistItem || 'B1',
-      location: item.location,
-      impact: item.impact,
       status: 'pending' as const,
       options: (item.options || []).map((opt: string | { label: string; description: string }) =>
         typeof opt === 'string' ? opt : `${opt.label}. ${opt.description}`

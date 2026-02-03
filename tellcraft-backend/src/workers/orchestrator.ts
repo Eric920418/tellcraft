@@ -46,6 +46,14 @@ interface FlowState {
   taskId?: string
   waitingForReply: boolean
   currentItemId?: string
+  totalQuestionsAsked: number  // 累計已問問題數
+}
+
+// PRD Discovery 限制
+const PRD_DISCOVERY_LIMITS = {
+  MAX_ROUNDS: 3,              // 最多 3 輪
+  MAX_TOTAL_QUESTIONS: 15,    // 累計最多 15 題
+  QUESTIONS_PER_ROUND: 5,     // 每輪最多 5 題
 }
 
 // ============================================================
@@ -262,6 +270,7 @@ async function executeBddSpecSkill(input: BddSpecSkillInput) {
     sessionId,
     taskId,
     waitingForReply: false,
+    totalQuestionsAsked: 0,
   }
 
   await saveFlowState(redis, conversationId, state)
@@ -551,6 +560,84 @@ async function sendBatchConfirmation(
 }
 
 async function completeClärifyPhase(
+  conversationId: string,
+  state: FlowState,
+  redis: Redis,
+  io: SocketIOServer
+) {
+  // 取得 session 和已回答的問題
+  const session = await getBddSession({ sessionId: state.sessionId! })
+  if (!session.success || !session.data) {
+    console.error('[Orchestrator] 無法取得 BDD Session')
+    return
+  }
+
+  const resolvedItems = session.data.resolvedItems || []
+  const totalAnswered = resolvedItems.length
+
+  // 檢查是否達到終止條件
+  const shouldStop =
+    state.currentRound >= PRD_DISCOVERY_LIMITS.MAX_ROUNDS ||
+    totalAnswered >= PRD_DISCOVERY_LIMITS.MAX_TOTAL_QUESTIONS
+
+  if (shouldStop) {
+    console.log(`[Orchestrator] 達到終止條件 (輪數: ${state.currentRound}, 問題數: ${totalAnswered})，進入 Formulation`)
+    await finishClarifyAndStartFormulation(conversationId, state, redis, io)
+    return
+  }
+
+  // 嘗試生成更多問題（多輪 PRD Discovery）
+  console.log(`[Orchestrator] 開始第 ${state.currentRound + 1} 輪 PRD Discovery`)
+
+  await sendMessage(conversationId, io, {
+    content: `好的，讓我根據您的回答再確認一些細節...`,
+    stage: 'prd_discovery_continue',
+    progress: { current: state.currentRound + 1, total: PRD_DISCOVERY_LIMITS.MAX_ROUNDS, step: `第 ${state.currentRound + 1} 輪釐清` },
+  })
+
+  // 取得原始需求
+  const originalRequirements = session.data.originalRequirements || ''
+
+  // 調用 LLM 生成更多問題，傳入已回答的問題避免重複
+  const discoveryResult = await runPrdDiscovery(
+    originalRequirements,
+    conversationId,
+    resolvedItems  // 傳入已回答的問題
+  )
+
+  if (!discoveryResult.success || !discoveryResult.items || discoveryResult.items.length === 0) {
+    // 沒有更多問題了，進入 Formulation
+    console.log(`[Orchestrator] 第 ${state.currentRound + 1} 輪沒有新問題，進入 Formulation`)
+    await sendMessage(conversationId, io, {
+      content: `需求已經足夠清楚了！`,
+      stage: 'prd_discovery_complete',
+    })
+    await finishClarifyAndStartFormulation(conversationId, state, redis, io)
+    return
+  }
+
+  // 有新問題，繼續釐清
+  const newItems = discoveryResult.items
+  console.log(`[Orchestrator] 第 ${state.currentRound + 1} 輪生成 ${newItems.length} 個新問題`)
+
+  // 添加新問題到 session
+  await addClarifyItems({ sessionId: state.sessionId!, items: newItems })
+
+  // 更新狀態
+  state.currentRound++
+  state.totalQuestionsAsked += newItems.length
+  state.batchCount = 0
+
+  // 發送第一個新問題
+  const totalQuestions = totalAnswered + newItems.length
+  await sendClarifyQuestion(conversationId, io, newItems[0], totalAnswered, totalQuestions)
+
+  state.currentItemId = newItems[0].id
+  state.waitingForReply = true
+  await saveFlowState(redis, conversationId, state)
+}
+
+async function finishClarifyAndStartFormulation(
   conversationId: string,
   state: FlowState,
   redis: Redis,
