@@ -1,45 +1,19 @@
 import { NextResponse } from 'next/server'
-import { cookies } from 'next/headers'
 
-export async function GET() {
-  const channelId = process.env.LINE_CHANNEL_ID
-  const redirectUri = `${process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'}/api/auth/line/callback`
+const VPS_API_URL = process.env.VPS_API_URL || 'http://54.238.4.117:8080'
 
-  if (!channelId) {
-    return NextResponse.redirect(
-      `${process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'}/auth/login?error=line_not_configured`
-    )
-  }
+/**
+ * GET /api/auth/line
+ * 代理到 VPS 的 LINE OAuth 入口
+ */
+export async function GET(request: Request) {
+  const url = new URL(request.url)
+  const returnTo = url.searchParams.get('returnTo') || '/'
 
-  // 生成 state 用於 CSRF 保護
-  const state = crypto.randomUUID()
-  const nonce = crypto.randomUUID()
+  // 重定向到 VPS OAuth（使用 Vercel callback）
+  const vpsUrl = new URL(`${VPS_API_URL}/auth/line`)
+  vpsUrl.searchParams.set('returnTo', returnTo)
+  vpsUrl.searchParams.set('callbackHost', url.origin) // 告訴 VPS 回調到 Vercel
 
-  // 儲存 state 到 cookie（用於驗證 callback）
-  const cookieStore = await cookies()
-  cookieStore.set('line_oauth_state', state, {
-    httpOnly: true,
-    secure: process.env.NODE_ENV === 'production',
-    sameSite: 'lax',
-    maxAge: 60 * 10, // 10 分鐘
-    path: '/',
-  })
-  cookieStore.set('line_oauth_nonce', nonce, {
-    httpOnly: true,
-    secure: process.env.NODE_ENV === 'production',
-    sameSite: 'lax',
-    maxAge: 60 * 10,
-    path: '/',
-  })
-
-  // LINE OAuth 授權 URL
-  const authUrl = new URL('https://access.line.me/oauth2/v2.1/authorize')
-  authUrl.searchParams.set('response_type', 'code')
-  authUrl.searchParams.set('client_id', channelId)
-  authUrl.searchParams.set('redirect_uri', redirectUri)
-  authUrl.searchParams.set('state', state)
-  authUrl.searchParams.set('scope', 'profile openid email')
-  authUrl.searchParams.set('nonce', nonce)
-
-  return NextResponse.redirect(authUrl.toString())
+  return NextResponse.redirect(vpsUrl.toString())
 }

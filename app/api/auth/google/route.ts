@@ -1,0 +1,19 @@
+import { NextResponse } from 'next/server'
+
+const VPS_API_URL = process.env.VPS_API_URL || 'http://54.238.4.117:8080'
+
+/**
+ * GET /api/auth/google
+ * 代理到 VPS 的 Google OAuth 入口
+ */
+export async function GET(request: Request) {
+  const url = new URL(request.url)
+  const returnTo = url.searchParams.get('returnTo') || '/'
+
+  // 重定向到 VPS OAuth（使用 Vercel callback）
+  const vpsUrl = new URL(`${VPS_API_URL}/auth/google`)
+  vpsUrl.searchParams.set('returnTo', returnTo)
+  vpsUrl.searchParams.set('callbackHost', url.origin) // 告訴 VPS 回調到 Vercel
+
+  return NextResponse.redirect(vpsUrl.toString())
+}

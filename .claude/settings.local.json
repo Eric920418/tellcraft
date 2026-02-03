@@ -62,7 +62,8 @@
       "Bash(node scripts/check-options.js:*)",
       "Bash(INNGEST_SIGNING=\"signkey-prod-e7360954ebe942b5a503e1f097718c903b942e2dd04caeab671fe310c49daeab\":*)",
       "Bash(node -e:*)",
-      "Bash(npx tsx:*)"
+      "Bash(npx tsx:*)",
+      "Bash(ssh:*)"
     ]
   }
 }

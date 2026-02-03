@@ -1,9 +1,8 @@
 'use client'
 
-import { useState, useEffect, Suspense } from 'react'
+import { useState, Suspense } from 'react'
 import { useSearchParams } from 'next/navigation'
 import Link from 'next/link'
-import { createClient } from '@/app/lib/supabase/client'
 import { motion } from 'framer-motion'
 
 function LoginContent() {
@@ -11,51 +10,25 @@ function LoginContent() {
   const [error, setError] = useState<string | null>(null)
   const searchParams = useSearchParams()
 
-  // 從 URL 獲取 anonymousId
-  const anonymousId = searchParams.get('anonymousId')
+  // 從 URL 獲取 returnTo
+  const returnTo = searchParams.get('returnTo') || '/'
+  const urlError = searchParams.get('error')
 
-  // 將 anonymousId 存到 sessionStorage，以便 callback 後使用
-  useEffect(() => {
-    if (anonymousId) {
-      sessionStorage.setItem('tellcraft_pending_anonymous_id', anonymousId)
-    }
-  }, [anonymousId])
-
-  const handleGoogleLogin = async () => {
+  const handleGoogleLogin = () => {
     setIsLoading('google')
     setError(null)
-
-    try {
-      const supabase = createClient()
-      const { error } = await supabase.auth.signInWithOAuth({
-        provider: 'google',
-        options: {
-          redirectTo: `${window.location.origin}/auth/callback`,
-        },
-      })
-
-      if (error) {
-        setError(error.message)
-        setIsLoading(null)
-      }
-    } catch {
-      setError('登入失敗，請稍後再試')
-      setIsLoading(null)
-    }
+    // 使用 Vercel 代理路由（解決 Google 不允許 IP callback 的問題）
+    window.location.href = `/api/auth/google?returnTo=${encodeURIComponent(returnTo)}`
   }
 
-  const handleLineLogin = async () => {
+  const handleLineLogin = () => {
     setIsLoading('line')
     setError(null)
-
-    try {
-      // LINE OAuth 使用自訂路由
-      window.location.href = '/api/auth/line'
-    } catch {
-      setError('登入失敗，請稍後再試')
-      setIsLoading(null)
-    }
+    // 使用 Vercel 代理路由
+    window.location.href = `/api/auth/line?returnTo=${encodeURIComponent(returnTo)}`
   }
+
+  const displayError = error || (urlError ? getErrorMessage(urlError) : null)
 
   return (
     <div
@@ -103,7 +76,7 @@ function LoginContent() {
         </div>
 
         {/* Error Message */}
-        {error && (
+        {displayError && (
           <motion.div
             initial={{ opacity: 0, y: -10 }}
             animate={{ opacity: 1, y: 0 }}
@@ -116,7 +89,7 @@ function LoginContent() {
               marginBottom: 24,
             }}
           >
-            {error}
+            {displayError}
           </motion.div>
         )}
 
@@ -265,6 +238,17 @@ export default function LoginPage() {
       <LoginContent />
     </Suspense>
   )
+}
+
+function getErrorMessage(error: string): string {
+  const errorMessages: Record<string, string> = {
+    missing_code: '缺少授權碼，請重試',
+    token_failed: '取得認證失敗，請重試',
+    userinfo_failed: '取得用戶資訊失敗，請重試',
+    profile_failed: '取得用戶資料失敗，請重試',
+    callback_failed: '認證過程發生錯誤，請重試',
+  }
+  return errorMessages[error] || `登入失敗: ${error}`
 }
 
 // Icons
