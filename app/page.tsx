@@ -19,7 +19,6 @@ import {
   replyToConversation,
   getConversationMessages,
   getUserConversations,
-  getCurrentUser,
   signOut
 } from './actions'
 import ConversationPicker from './components/ConversationPicker'
