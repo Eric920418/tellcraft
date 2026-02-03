@@ -65,10 +65,10 @@ async function findOrCreateUser(profile: {
     return { id: user.id, email: user.email, name: profile.name || user.name || undefined, isNew: false }
   }
 
-  // 創建新用戶
+  // 創建新用戶（使用 gen_random_uuid() 生成 ID）
   const newUser = await db.queryOne<{ id: string }>(
-    `INSERT INTO users (email, name, avatar_url, provider, provider_id, plan, subscription_status, created_at)
-     VALUES ($1, $2, $3, $4, $5, 'free', 'active', NOW())
+    `INSERT INTO users (id, email, name, avatar_url, provider, provider_id, plan, subscription_status, created_at)
+     VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, 'free', 'active', NOW())
      RETURNING id`,
     [profile.email, profile.name, profile.avatarUrl, profile.provider, profile.providerId]
   )
