@@ -1,12 +1,12 @@
 /**
  * Modal Formulation 回調 Webhook
  *
- * Modal 完成後會調用這個 endpoint，然後這裡發送 Inngest 事件
- * 這樣可以避免 Vercel 函數超時問題
+ * Modal 完成後會調用這個 endpoint，然後轉發到 VPS Backend
  */
 
 import { NextResponse } from 'next/server'
-import { inngest } from '../../../inngest/client'
+
+const VPS_API_URL = process.env.VPS_API_URL || 'http://54.238.4.117:8080'
 
 export async function POST(request: Request) {
   try {
@@ -30,10 +30,11 @@ export async function POST(request: Request) {
       )
     }
 
-    // 發送 Inngest 事件
-    await inngest.send({
-      name: 'modal/formulation-complete',
-      data: {
+    // 轉發到 VPS Backend
+    const response = await fetch(`${VPS_API_URL}/api/modal/formulation-complete`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
         sessionId,
         conversationId,
         success: success ?? false,
@@ -42,8 +43,12 @@ export async function POST(request: Request) {
         features,
         validation,
         error,
-      },
+      }),
     })
+
+    if (!response.ok) {
+      console.error('[Modal Callback] VPS error:', await response.text())
+    }
 
     return NextResponse.json({ received: true })
   } catch (err) {

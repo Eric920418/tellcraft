@@ -2,7 +2,8 @@
 
 import { useState, useEffect, useCallback } from 'react'
 
-const VPS_API_URL = process.env.NEXT_PUBLIC_VPS_API_URL || 'http://54.238.4.117:8080'
+// 使用 Vercel proxy 避免 Mixed Content 問題
+const AUTH_API_URL = '/api/auth'
 
 export interface AuthUser {
   id: string
@@ -51,7 +52,7 @@ export function useAuth() {
     }
 
     try {
-      const response = await fetch(`${VPS_API_URL}/auth/me`, {
+      const response = await fetch(`${AUTH_API_URL}/me`, {
         headers: {
           'Authorization': `Bearer ${token}`,
         },
