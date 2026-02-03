@@ -407,6 +407,9 @@ JWT_SECRET=your-secret-key
 1. Channel > LINE Login Settings
 2. Callback URL 添加：`https://tellcraft.com/api/auth/line/callback`
 
+**已修復問題（2026-02-03）**：
+- **Header 登入後不更新**：`/auth/callback` 使用 `router.replace()` 客戶端導航，不會觸發頁面重新載入，導致 `useAuth` hook 無法讀取新存的 token。修復：改用 `window.location.href` 強制頁面重新載入。
+
 ### 前端 Chat 串接 Inngest
 
 用戶在首頁輸入需求後，真正觸發 `bdd-spec` skill，實現完整的多輪對話流程：

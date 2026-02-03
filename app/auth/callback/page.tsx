@@ -30,8 +30,9 @@ function AuthCallbackContent() {
     // 儲存 token 到 localStorage
     localStorage.setItem('auth_token', token)
 
-    // 重定向到目標頁面
-    router.replace(returnTo)
+    // 使用完整頁面重新載入（而非客戶端導航）
+    // 這確保 useAuth hook 會重新讀取 localStorage 中的 token
+    window.location.href = returnTo
   }, [searchParams, router])
 
   if (error) {
