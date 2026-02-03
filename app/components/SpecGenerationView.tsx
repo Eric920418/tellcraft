@@ -3,13 +3,13 @@
 import React, { useState, useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 
-// 階段定義
+// 階段定義（對應 orchestrator 的 formulation 流程）
 const STAGES = [
-  { id: 'analyze', label: '分析需求', description: '理解意圖與目標' },
-  { id: 'clarify', label: '釐清細節', description: '確認邊界條件' },
-  { id: 'model', label: '建立資料模型', description: '設計實體結構' },
-  { id: 'spec', label: '生成功能規格', description: '產出 Feature Files' },
-  { id: 'quality', label: '品質檢查', description: '驗證完整性' },
+  { id: 'prepare', label: '準備生成', description: '彙整釐清決策' },
+  { id: 'schema', label: '產出資料庫結構', description: '設計實體與關聯' },
+  { id: 'features', label: '生成功能規格', description: '產出 Feature Files' },
+  { id: 'validate', label: '驗證規格格式', description: '檢查語法與完整性' },
+  { id: 'complete', label: '完成', description: '規格產出成功' },
 ]
 
 interface SpecGenerationViewProps {
@@ -114,7 +114,7 @@ function StageIndicator({ stage, index, isActive, isPast }: {
 
 // 動態標題
 function AnimatedTitle() {
-  const words = ['思考', '分析', '建構', '生成']
+  const words = ['分析', '整理', '建構', '生成']
   const [currentWord, setCurrentWord] = useState(0)
 
   useEffect(() => {

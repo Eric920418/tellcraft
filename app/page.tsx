@@ -26,6 +26,7 @@ import ConversationPicker from './components/ConversationPicker'
 import LoginPrompt, { shouldShowLoginPrompt, dismissLoginPrompt } from './components/LoginPrompt'
 import ProjectReminder from './components/ProjectReminder'
 import SplitLayout from './components/uiux/SplitLayout'
+import SpecGenerationView from './components/SpecGenerationView'
 import PreviewPanel from './components/uiux/PreviewPanel'
 import TemplatePicker from './components/uiux/TemplatePicker'
 import { getTemplateById } from './actions/templates'
@@ -987,6 +988,8 @@ function ChatSection({
   // 處理模板選擇
   const handleTemplateSelect = useCallback((templateId: string) => {
     setSelectedTemplateId(templateId)
+    // 設定預覽 URL 為 API route
+    setPreviewUrl(`/api/templates/preview/${templateId}`)
   }, [])
 
   // 獲取或創建 anonymousId
@@ -1099,9 +1102,19 @@ function ChatSection({
             content: m.content,
             timestamp: new Date(m.timestamp),
             stage: m.stage as Message['stage'],
-            progress: m.progress as Message['progress']
+            progress: m.progress as Message['progress'],
+            layoutHint: (m as Record<string, unknown>).layoutHint as Message['layoutHint'],
+            richContent: (m as Record<string, unknown>).richContent as Message['richContent']
           }))
           setMessages(historyMessages)
+
+          // 重要：恢復 currentTaskId，否則後續發消息會走錯誤的流程
+          if (historyResult.data.currentTaskId) {
+            setSessionInfo(prev => prev ? {
+              ...prev,
+              currentTaskId: historyResult.data!.currentTaskId
+            } : prev)
+          }
 
           // 找到最後一條 AI 消息的 stage
           const lastAiMessage = historyMessages.filter(m => m.role === 'assistant').pop()
@@ -1995,6 +2008,26 @@ function ChatSection({
       isLoading={!selectedTemplate && !!selectedTemplateId}
     />
   )
+
+  // 檢查是否在 formulation 階段（顯示全屏等待畫面）
+  const lastMessage = messages[messages.length - 1]
+  const isFormulationStage = lastMessage?.stage === 'formulation_progress' || lastMessage?.stage === 'formulation_start'
+
+  // Formulation 階段：顯示全屏 SpecGenerationView
+  if (isFormulationStage && isActive) {
+    // 直接使用 progress.current 作為階段 (0-4)
+    const progress = lastMessage?.progress
+    const currentStage = Math.min(4, progress?.current || 0)
+
+    return (
+      <SpecGenerationView
+        currentStage={currentStage}
+        onComplete={() => {
+          // 完成後會自動切換到下一個階段
+        }}
+      />
+    )
+  }
 
   // 分屏佈局模式
   if (layoutMode === 'split' && isActive) {

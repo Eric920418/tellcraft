@@ -1,11 +1,29 @@
 'use client'
 
+import { useState } from 'react'
 import { motion } from 'framer-motion'
 import { TemplateCardData, CATEGORY_LABELS, CATEGORY_ICONS } from '../../lib/templates'
 
 // ============================================================
 // TemplateCard - 模板卡片元件
 // ============================================================
+
+// 模板預設漸層背景（當沒有縮圖時使用）
+const TEMPLATE_GRADIENTS: Record<string, string> = {
+  'saas-minimal': 'linear-gradient(135deg, #f5f7fa 0%, #e4e8ed 100%)',
+  'saas-pro': 'linear-gradient(135deg, #1a1a2e 0%, #16213e 100%)',
+  'landing-startup': 'linear-gradient(135deg, #ff9a56 0%, #ff6b6b 100%)',
+  'landing-corporate': 'linear-gradient(135deg, #1e3a5f 0%, #2c5282 100%)',
+  'ecommerce-modern': 'linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%)',
+}
+
+// 分類預設漸層
+const CATEGORY_GRADIENTS: Record<string, string> = {
+  saas: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+  landing: 'linear-gradient(135deg, #f093fb 0%, #f5576c 100%)',
+  ecommerce: 'linear-gradient(135deg, #4facfe 0%, #00f2fe 100%)',
+  content: 'linear-gradient(135deg, #43e97b 0%, #38f9d7 100%)',
+}
 
 interface TemplateCardProps {
   template: TemplateCardData
@@ -20,6 +38,14 @@ export default function TemplateCard({
   onSelect,
   onPreview
 }: TemplateCardProps) {
+  const [imageError, setImageError] = useState(true) // 預設不顯示圖片，因為我們還沒有真正的縮圖
+
+  // 使用 iframe 縮圖預覽
+  const previewUrl = `/api/templates/preview/${template.id}`
+
+  // 決定背景：使用模板特定漸層 > 分類漸層
+  const fallbackGradient = TEMPLATE_GRADIENTS[template.id] || CATEGORY_GRADIENTS[template.category] || CATEGORY_GRADIENTS.saas
+
   return (
     <motion.div
       initial={{ opacity: 0, y: 20 }}
@@ -42,20 +68,49 @@ export default function TemplateCard({
         style={{
           position: 'relative',
           paddingTop: '62.5%', // 16:10 比例
-          background: 'var(--gray-100)',
+          background: fallbackGradient,
           overflow: 'hidden',
         }}
       >
-        {/* 模板縮圖 */}
-        <div
-          style={{
-            position: 'absolute',
-            inset: 0,
-            backgroundImage: `url(${template.thumbnailUrl})`,
-            backgroundSize: 'cover',
-            backgroundPosition: 'top center',
-          }}
-        />
+        {/* 使用 iframe 顯示真實模板預覽 */}
+        {!imageError && (
+          <iframe
+            src={previewUrl}
+            title={template.name}
+            onError={() => setImageError(true)}
+            style={{
+              position: 'absolute',
+              top: 0,
+              left: 0,
+              width: '400%',
+              height: '400%',
+              transform: 'scale(0.25)',
+              transformOrigin: 'top left',
+              border: 'none',
+              pointerEvents: 'none',
+            }}
+          />
+        )}
+
+        {/* 漸層背景上的模板名稱（當沒有縮圖時） */}
+        {imageError && (
+          <div
+            style={{
+              position: 'absolute',
+              inset: 0,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              color: template.id.includes('pro') || template.id.includes('corporate') ? 'rgba(255,255,255,0.8)' : 'rgba(0,0,0,0.5)',
+              fontSize: 14,
+              fontWeight: 600,
+              textAlign: 'center',
+              padding: 16,
+            }}
+          >
+            {template.name}
+          </div>
+        )}
 
         {/* 漸層遮罩 */}
         <div
