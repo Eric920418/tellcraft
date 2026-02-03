@@ -352,49 +352,60 @@ MODAL_FORMULATION_URL=https://your-username--tellcraft-formulation-generate-spec
 - E007: Then 步驟格式錯誤
 - E008: 沒有 Example
 
-### 認證系統
+### 認證系統（VPS 自建 OAuth）
 
-支援 Google 和 LINE OAuth 登入，使用 `@supabase/ssr` 實現 SSR 友善的 session 管理：
+支援 Google 和 LINE OAuth 登入，使用 VPS 自建 JWT 認證（已從 Supabase Auth 遷移）：
 
 ```
-登入頁 → Google/LINE OAuth → Supabase Auth → Session Cookie → 受保護路由
+登入頁 → Vercel Proxy → VPS OAuth → JWT Token → localStorage → useAuth Hook
 ```
 
 **架構**：
-- `app/lib/supabase/client.ts` - Browser client（前端）
-- `app/lib/supabase/server.ts` - Server client（Server Actions）
-- `proxy.ts` - Session refresh + 路由保護
-- `app/auth/login/page.tsx` - 登入頁面（卡片式設計）
-- `app/auth/callback/route.ts` - OAuth callback（PKCE）
-- `app/api/auth/line/` - LINE OAuth 自訂流程
+- `app/hooks/useAuth.ts` - Client-side JWT auth hook
+- `app/auth/login/page.tsx` - 登入頁面
+- `app/auth/callback/page.tsx` - JWT token 處理
+- `app/api/auth/google/` - Google OAuth Vercel proxy
+- `app/api/auth/line/` - LINE OAuth Vercel proxy
+- `app/api/auth/me/route.ts` - 驗證 token proxy
+- `tellcraft-backend/src/routes/auth.ts` - VPS OAuth 處理
 
-**新增 Server Actions**：
-- `initializeSessionFromAuth` - 從認證 session 初始化（已登入用戶，支援帳號合併）
-- `getCurrentUser` - 取得當前認證用戶
-- `signOut` - 登出
-- `getUserConversations` - 獲取用戶所有對話列表（用於歷史對話選擇器）
-- `migrateAnonymousAccount` - 遷移匿名帳號資料到認證帳號
+**OAuth 流程**（以 Google 為例）：
+```
+1. 用戶點擊「Google 登入」
+2. → Vercel /api/auth/google（proxy）
+3. → VPS /auth/google（設定 callbackHost）
+4. → Google OAuth 授權頁
+5. → Vercel /api/auth/google/callback（接收 code）
+6. → VPS /auth/google/exchange（用 code 換 JWT）
+7. → Vercel /auth/callback（存 token 到 localStorage）
+8. → 首頁（useAuth hook 驗證 token）
+```
+
+**為什麼用 Vercel Proxy**：
+- Google OAuth 不允許 IP 地址作為 callback URI
+- HTTPS → HTTP (Mixed Content) 被瀏覽器阻擋
+- Vercel proxy 解決這兩個問題
 
 **環境變數**：
 ```bash
-# Supabase Auth
-NEXT_PUBLIC_SUPABASE_URL=https://xxx.supabase.co
-NEXT_PUBLIC_SUPABASE_ANON_KEY=eyJ...
-SUPABASE_SERVICE_ROLE_KEY=eyJ...  # LINE 備選方案
+# Vercel 前端
+VPS_API_URL=http://54.238.4.117:8080
 
-# LINE OAuth
+# VPS 後端
+GOOGLE_CLIENT_ID=xxx
+GOOGLE_CLIENT_SECRET=xxx
 LINE_CHANNEL_ID=xxx
 LINE_CHANNEL_SECRET=xxx
-
-# App URL
-NEXT_PUBLIC_APP_URL=https://tellcraft.com
+JWT_SECRET=your-secret-key
 ```
 
-**Supabase Dashboard 配置**：
-1. Authentication > Providers > 啟用 Google
-2. 配置 Google Cloud Console 的 Client ID/Secret
-3. Site URL: `https://tellcraft.com`
-4. Redirect URLs: `https://tellcraft.com/auth/callback`
+**Google Cloud Console 配置**：
+1. APIs & Services > Credentials > OAuth 2.0 Client IDs
+2. Authorized redirect URIs 添加：`https://tellcraft.com/api/auth/google/callback`
+
+**LINE Developers Console 配置**：
+1. Channel > LINE Login Settings
+2. Callback URL 添加：`https://tellcraft.com/api/auth/line/callback`
 
 ### 前端 Chat 串接 Inngest
 
