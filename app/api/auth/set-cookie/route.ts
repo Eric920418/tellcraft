@@ -1,29 +1,19 @@
 import { NextResponse } from 'next/server'
 
-const VPS_API_URL = process.env.VPS_API_URL || 'http://54.238.4.117:8080'
-
 /**
  * POST /api/auth/set-cookie
- * 設置 JWT token 為 httpOnly cookie（供 middleware 和 Server Components 使用）
+ * 設置 JWT token 為 httpOnly cookie
+ * 不做驗證，讓 middleware 去驗證
  */
 export async function POST(request: Request) {
   try {
     const { token } = await request.json()
 
-    if (!token) {
-      return NextResponse.json({ error: 'Missing token' }, { status: 400 })
+    if (!token || typeof token !== 'string' || token.length < 10) {
+      return NextResponse.json({ error: 'Invalid token format' }, { status: 400 })
     }
 
-    // 驗證 token 有效性
-    const verifyResponse = await fetch(`${VPS_API_URL}/auth/me`, {
-      headers: { 'Authorization': `Bearer ${token}` },
-    })
-
-    if (!verifyResponse.ok) {
-      return NextResponse.json({ error: 'Invalid token' }, { status: 401 })
-    }
-
-    // 設置 cookie
+    // 直接設置 cookie，不驗證（讓 middleware 驗證）
     const response = NextResponse.json({ success: true })
 
     response.cookies.set('auth_token', token, {
@@ -31,7 +21,7 @@ export async function POST(request: Request) {
       secure: process.env.NODE_ENV === 'production',
       sameSite: 'lax',
       path: '/',
-      maxAge: 7 * 24 * 60 * 60, // 7 天（與 JWT 過期時間一致）
+      maxAge: 7 * 24 * 60 * 60, // 7 天
     })
 
     return response
@@ -43,7 +33,7 @@ export async function POST(request: Request) {
 
 /**
  * DELETE /api/auth/set-cookie
- * 清除 auth cookie（登出時使用）
+ * 清除 auth cookie
  */
 export async function DELETE() {
   const response = NextResponse.json({ success: true })
@@ -53,7 +43,7 @@ export async function DELETE() {
     secure: process.env.NODE_ENV === 'production',
     sameSite: 'lax',
     path: '/',
-    maxAge: 0, // 立即過期
+    maxAge: 0,
   })
 
   return response
