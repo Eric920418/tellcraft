@@ -1,8 +1,18 @@
 import { redirect } from 'next/navigation'
-import { cookies, headers } from 'next/headers'
+import { cookies } from 'next/headers'
+import { jwtVerify } from 'jose'
 import { DashboardShell } from '../components/dashboard/DashboardShell'
 
-const VPS_API_URL = process.env.VPS_API_URL || 'http://54.238.4.117:8080'
+const JWT_SECRET = new TextEncoder().encode(
+  process.env.JWT_SECRET || 'tellcraft-jwt-secret-change-in-production'
+)
+
+interface JWTPayload {
+  sub: string
+  email: string
+  name?: string
+  isAdmin?: boolean
+}
 
 export default async function DashboardLayout({
   children,
@@ -17,35 +27,15 @@ export default async function DashboardLayout({
     redirect('/auth/login?next=/dashboard')
   }
 
-  // 驗證 token 並獲取用戶資訊
+  // 本地驗證 JWT（不需要訪問 VPS）
   try {
-    const response = await fetch(`${VPS_API_URL}/auth/me`, {
-      headers: { 'Authorization': `Bearer ${token}` },
-      // 避免快取，確保每次都驗證
-      cache: 'no-store',
-    })
-
-    if (!response.ok) {
-      redirect('/auth/login?next=/dashboard')
-    }
-
-    const data = await response.json() as {
-      user: {
-        id: string
-        email: string
-        name?: string
-        avatarUrl?: string
-        plan?: string
-        isAdmin?: boolean
-      }
-    }
+    const { payload } = await jwtVerify(token, JWT_SECRET) as { payload: JWTPayload }
 
     const user = {
-      userId: data.user.id,
-      email: data.user.email,
-      name: data.user.name,
-      avatarUrl: data.user.avatarUrl,
-      isAdmin: data.user.isAdmin || false,
+      userId: payload.sub,
+      email: payload.email,
+      name: payload.name,
+      isAdmin: payload.isAdmin || false,
     }
 
     return (
@@ -54,7 +44,7 @@ export default async function DashboardLayout({
       </DashboardShell>
     )
   } catch (error) {
-    console.error('[Dashboard] Auth error:', error)
+    console.error('[Dashboard] JWT verification failed:', error)
     redirect('/auth/login?next=/dashboard')
   }
 }
