@@ -1,6 +1,6 @@
 'use server'
 
-import { supabase } from '@/app/lib/supabase'
+import { db } from '@/app/lib/db'
 
 // ============================================================
 // Supabase Storage - 生成程式碼儲存
@@ -31,7 +31,7 @@ const BUCKET_NAME = 'generations'
  * 確保 Storage Bucket 存在
  */
 async function ensureBucketExists(): Promise<{ success: boolean; error?: string }> {
-  const { data: buckets, error: listError } = await supabase.storage.listBuckets()
+  const { data: buckets, error: listError } = await db.storage.listBuckets()
 
   if (listError) {
     return { success: false, error: `列出 buckets 失敗: ${listError.message}` }
@@ -40,7 +40,7 @@ async function ensureBucketExists(): Promise<{ success: boolean; error?: string 
   const exists = buckets?.some(b => b.name === BUCKET_NAME)
 
   if (!exists) {
-    const { error: createError } = await supabase.storage.createBucket(BUCKET_NAME, {
+    const { error: createError } = await db.storage.createBucket(BUCKET_NAME, {
       public: false,  // 私有 bucket，需要 signed URL 存取
       fileSizeLimit: 52428800,  // 50MB（預留未來存設計預覽圖等）
     })
@@ -92,7 +92,7 @@ export async function uploadGeneratedCode(
   const packagePath = `${projectId}/${generationId}/code-package.json`
 
   // 上傳打包檔案
-  const { error: uploadError } = await supabase.storage
+  const { error: uploadError } = await db.storage
     .from(BUCKET_NAME)
     .upload(packagePath, packageContent, {
       contentType: 'application/json',
@@ -104,7 +104,7 @@ export async function uploadGeneratedCode(
   }
 
   // 取得 signed URL（有效期 7 天）
-  const { data: urlData, error: urlError } = await supabase.storage
+  const { data: urlData, error: urlError } = await db.storage
     .from(BUCKET_NAME)
     .createSignedUrl(packagePath, 7 * 24 * 60 * 60)
 
@@ -183,7 +183,7 @@ export async function createUiuxGeneration(
   error?: string
 }> {
   // 建立生成記錄
-  const { data: generation, error: genError } = await supabase
+  const { data: generation, error: genError } = await db
     .from('generations')
     .insert({
       project_id: projectId,
@@ -209,7 +209,7 @@ export async function createUiuxGeneration(
 
   if (!uploadResult.success) {
     // 標記生成失敗
-    await supabase
+    await db
       .from('generations')
       .update({ status: 'failed', error_message: uploadResult.error })
       .eq('id', generation.id)
@@ -218,7 +218,7 @@ export async function createUiuxGeneration(
   }
 
   // 更新 URL
-  await supabase
+  await db
     .from('generations')
     .update({ generated_code_url: uploadResult.url })
     .eq('id', generation.id)
@@ -244,7 +244,7 @@ export async function getLatestUiuxGeneration(projectId: string): Promise<{
   }
   error?: string
 }> {
-  const { data, error } = await supabase
+  const { data, error } = await db
     .from('generations')
     .select('id, generated_code_url, requirement_spec, technical_design, created_at')
     .eq('project_id', projectId)

@@ -1,6 +1,6 @@
 'use server'
 
-import { supabase, PLAN_MESSAGE_LIMITS, PLAN_PROJECT_LIMITS, PLAN_PRIORITY_WEIGHTS } from '../lib/supabase'
+import { db, PLAN_MESSAGE_LIMITS, PLAN_PROJECT_LIMITS, PLAN_PRIORITY_WEIGHTS } from '../lib/db'
 import { getCurrentUser } from '../lib/auth'
 import { deployProject as deployProjectReal, generateNextJsTemplate } from './deploy'
 
@@ -36,7 +36,7 @@ export async function createProject(input: {
   const { userId, name, description } = input
 
   // 查詢用戶
-  const { data: user, error: userError } = await supabase
+  const { data: user, error: userError } = await db
     .from('users')
     .select('id, plan, subscription_status')
     .eq('id', userId)
@@ -52,7 +52,7 @@ export async function createProject(input: {
   }
 
   // 前置：檢查專案數量（使用 select('id') 減少開銷）
-  const { count } = await supabase
+  const { count } = await db
     .from('projects')
     .select('id', { count: 'exact', head: true })
     .eq('user_id', userId)
@@ -64,7 +64,7 @@ export async function createProject(input: {
 
   // 後置：處理名稱重複
   let finalName = name
-  const { data: existingProjects } = await supabase
+  const { data: existingProjects } = await db
     .from('projects')
     .select('name')
     .eq('user_id', userId)
@@ -82,7 +82,7 @@ export async function createProject(input: {
   }
 
   // 建立專案
-  const { data: project, error: createError } = await supabase
+  const { data: project, error: createError } = await db
     .from('projects')
     .insert({
       user_id: userId,
@@ -115,7 +115,7 @@ export async function sendMessage(input: {
   const { conversationId, content } = input
 
   // 查詢對話及關聯的專案和用戶
-  const { data: conversation, error: convError } = await supabase
+  const { data: conversation, error: convError } = await db
     .from('conversations')
     .select('id, project_id, projects(user_id, users(id, plan, message_count_this_period))')
     .eq('id', conversationId)
@@ -139,7 +139,7 @@ export async function sendMessage(input: {
   }
 
   // 更新對話內容
-  const { data: messages } = await supabase
+  const { data: messages } = await db
     .from('conversations')
     .select('messages')
     .eq('id', conversationId)
@@ -154,7 +154,7 @@ export async function sendMessage(input: {
     timestamp: new Date().toISOString()
   }
 
-  await supabase
+  await db
     .from('conversations')
     .update({
       messages: [...currentMessages, newMessage],
@@ -163,7 +163,7 @@ export async function sendMessage(input: {
     .eq('id', conversationId)
 
   // 後置：更新對話次數
-  await supabase
+  await db
     .from('users')
     .update({
       message_count_this_period: user.message_count_this_period + 1
@@ -188,7 +188,7 @@ export async function generateCode(input: {
   const { projectId } = input
 
   // 查詢專案和對話
-  const { data: project, error: projectError } = await supabase
+  const { data: project, error: projectError } = await db
     .from('projects')
     .select('id, status')
     .eq('id', projectId)
@@ -199,7 +199,7 @@ export async function generateCode(input: {
   }
 
   // 前置：檢查是否有對話且已完成釐清
-  const { data: conversation } = await supabase
+  const { data: conversation } = await db
     .from('conversations')
     .select('id, spec_complete')
     .eq('project_id', projectId)
@@ -214,7 +214,7 @@ export async function generateCode(input: {
   }
 
   // 檢查是否有失敗的生成記錄
-  const { data: existingGeneration } = await supabase
+  const { data: existingGeneration } = await db
     .from('generations')
     .select('id, attempt_count, status')
     .eq('project_id', projectId)
@@ -224,7 +224,7 @@ export async function generateCode(input: {
 
   // 自癒機制：3 次失敗後停止
   if (existingGeneration?.status === 'failed' && existingGeneration.attempt_count >= 3) {
-    await supabase
+    await db
       .from('projects')
       .update({ status: 'failed' })
       .eq('id', projectId)
@@ -239,7 +239,7 @@ export async function generateCode(input: {
     // 重試現有生成
     generationId = existingGeneration.id
     attemptCount = existingGeneration.attempt_count + 1
-    await supabase
+    await db
       .from('generations')
       .update({
         status: 'success',
@@ -249,7 +249,7 @@ export async function generateCode(input: {
   } else {
     // 建立新生成記錄
     attemptCount = 1
-    const { data: newGeneration, error: genError } = await supabase
+    const { data: newGeneration, error: genError } = await db
       .from('generations')
       .insert({
         project_id: projectId,
@@ -266,7 +266,7 @@ export async function generateCode(input: {
   }
 
   // 後置：更新專案狀態為 testing
-  await supabase
+  await db
     .from('projects')
     .update({ status: 'testing', updated_at: new Date().toISOString() })
     .eq('id', projectId)
@@ -289,7 +289,7 @@ export async function deployProject(input: {
   const { projectId } = input
 
   // 查詢專案
-  const { data: project, error: projectError } = await supabase
+  const { data: project, error: projectError } = await db
     .from('projects')
     .select('id, status')
     .eq('id', projectId)
@@ -305,8 +305,8 @@ export async function deployProject(input: {
   }
 
   // 查找可用的 Supabase Organization
-  const { data: orgs } = await supabase
-    .from('supabase_organizations')
+  const { data: orgs } = await db
+    .from('db_organizations')
     .select('id, project_count, max_projects, is_primary')
     .order('is_primary', { ascending: false })
 
@@ -317,7 +317,7 @@ export async function deployProject(input: {
 
   if (!availableOrg) {
     // 所有 Org 都滿，標記為 pending
-    await supabase
+    await db
       .from('deployments')
       .insert({
         id: deploymentId,
@@ -335,7 +335,7 @@ export async function deployProject(input: {
   // 成功部署
   const url = `https://${projectId.slice(0, 8)}.vercel.app`
 
-  await supabase
+  await db
     .from('deployments')
     .insert({
       id: deploymentId,
@@ -345,19 +345,19 @@ export async function deployProject(input: {
     })
 
   // 更新專案狀態和 Org 資訊
-  await supabase
+  await db
     .from('projects')
     .update({
       status: 'deployed',
-      supabase_org_id: availableOrg.id,
+      db_org_id: availableOrg.id,
       vercel_url: url,
       updated_at: new Date().toISOString()
     })
     .eq('id', projectId)
 
   // 更新 Org 計數
-  await supabase
-    .from('supabase_organizations')
+  await db
+    .from('db_organizations')
     .update({ project_count: availableOrg.project_count + 1 })
     .eq('id', availableOrg.id)
 
@@ -380,7 +380,7 @@ export async function updateProject(input: {
   const { projectId, changes: _changes, isDestructive } = input
 
   // 查詢專案
-  const { data: project, error: projectError } = await supabase
+  const { data: project, error: projectError } = await db
     .from('projects')
     .select('id, status')
     .eq('id', projectId)
@@ -400,7 +400,7 @@ export async function updateProject(input: {
   // 後置：破壞性變更前備份
   if (isDestructive) {
     const backupUrl = `https://r2.example.com/backup-${Date.now()}.sql`
-    await supabase
+    await db
       .from('generations')
       .insert({
         project_id: projectId,
@@ -412,7 +412,7 @@ export async function updateProject(input: {
   }
 
   // 更新專案狀態為 generating
-  await supabase
+  await db
     .from('projects')
     .update({
       status: 'generating',
@@ -438,7 +438,7 @@ export async function cancelSubscription(input: {
   const { userId, action = 'cancel' } = input
 
   // 查詢用戶
-  const { data: user, error: userError } = await supabase
+  const { data: user, error: userError } = await db
     .from('users')
     .select('id, subscription_status')
     .eq('id', userId)
@@ -450,7 +450,7 @@ export async function cancelSubscription(input: {
 
   if (action === 'resubscribe') {
     // 重新訂閱
-    await supabase
+    await db
       .from('users')
       .update({
         subscription_status: 'active',
@@ -465,7 +465,7 @@ export async function cancelSubscription(input: {
   }
 
   // 取消訂閱
-  await supabase
+  await db
     .from('users')
     .update({
       subscription_status: 'suspended',
@@ -494,7 +494,7 @@ export async function exportData(input: {
 
   // 如果指定了 projectId，檢查擁有權
   if (projectId) {
-    const { data: project } = await supabase
+    const { data: project } = await db
       .from('projects')
       .select('user_id')
       .eq('id', projectId)
@@ -523,13 +523,13 @@ export async function exportData(input: {
 export async function transferResources(input: {
   projectId: string
   targetUserId: string
-  supabaseApiKey?: string
+  dbApiKey?: string
   vercelToken?: string
 }): Promise<ActionResult<{ projectId: string; transferred: boolean }>> {
-  const { projectId, supabaseApiKey, vercelToken } = input
+  const { projectId, dbApiKey, vercelToken } = input
 
   // 查詢專案
-  const { data: project, error: projectError } = await supabase
+  const { data: project, error: projectError } = await db
     .from('projects')
     .select('id, user_id, is_transferred, users(subscription_status)')
     .eq('id', projectId)
@@ -552,12 +552,12 @@ export async function transferResources(input: {
   }
 
   // 前置：驗證 API Key（簡單驗證）
-  if (!supabaseApiKey?.startsWith('sb_key') || !vercelToken?.startsWith('vercel_')) {
+  if (!dbApiKey?.startsWith('sb_key') || !vercelToken?.startsWith('vercel_')) {
     return { success: false, error: 'API Key 無效' }
   }
 
   // 執行移轉
-  await supabase
+  await db
     .from('projects')
     .update({
       is_transferred: true,
@@ -590,7 +590,7 @@ export async function createTask(input: {
   const { projectId, goal, userId } = input
 
   // 查詢專案
-  const { data: project, error: projectError } = await supabase
+  const { data: project, error: projectError } = await db
     .from('projects')
     .select('id, user_id, users(id, plan, subscription_status)')
     .eq('id', projectId)
@@ -604,7 +604,7 @@ export async function createTask(input: {
 
   // 如果提供了 userId，使用它來檢查；否則使用專案的 user
   if (userId) {
-    const { data: requestUser } = await supabase
+    const { data: requestUser } = await db
       .from('users')
       .select('subscription_status')
       .eq('id', userId)
@@ -623,7 +623,7 @@ export async function createTask(input: {
 
   // 建立任務
   const taskId = crypto.randomUUID()
-  const { error: taskError } = await supabase
+  const { error: taskError } = await db
     .from('tasks')
     .insert({
       id: taskId,
@@ -642,7 +642,7 @@ export async function createTask(input: {
   const stepCount = 2 // 假設生成 2 個步驟
 
   // 更新任務狀態為等待確認
-  await supabase
+  await db
     .from('tasks')
     .update({
       status: 'pending_approval',
@@ -670,7 +670,7 @@ export async function confirmTaskPlan(input: {
   const { taskId, approved, requestUserId } = input
 
   // 查詢任務
-  const { data: task, error: taskError } = await supabase
+  const { data: task, error: taskError } = await db
     .from('tasks')
     .select('id, status, user_id')
     .eq('id', taskId)
@@ -692,7 +692,7 @@ export async function confirmTaskPlan(input: {
 
   const newStatus: TaskStatus = approved ? 'executing' : 'cancelled'
 
-  await supabase
+  await db
     .from('tasks')
     .update({
       status: newStatus,
@@ -719,7 +719,7 @@ export async function cancelTask(input: {
   const { taskId } = input
 
   // 查詢任務
-  const { data: task, error: taskError } = await supabase
+  const { data: task, error: taskError } = await db
     .from('tasks')
     .select('id, status, user_id')
     .eq('id', taskId)
@@ -735,14 +735,14 @@ export async function cancelTask(input: {
   }
 
   // 取消運行中的步驟
-  await supabase
+  await db
     .from('task_steps')
     .update({ status: 'cancelled' })
     .eq('task_id', taskId)
     .eq('status', 'running')
 
   // 更新任務狀態
-  await supabase
+  await db
     .from('tasks')
     .update({
       status: 'cancelled',
@@ -751,7 +751,7 @@ export async function cancelTask(input: {
     .eq('id', taskId)
 
   // 後置：發送通知
-  await supabase
+  await db
     .from('notifications')
     .insert({
       user_id: task.user_id,
@@ -777,7 +777,7 @@ export async function retryTask(input: {
   const { taskId } = input
 
   // 查詢任務
-  const { data: task, error: taskError } = await supabase
+  const { data: task, error: taskError } = await db
     .from('tasks')
     .select('id, status, failed_step')
     .eq('id', taskId)
@@ -795,14 +795,14 @@ export async function retryTask(input: {
   const currentStep = task.failed_step || 1
 
   // 將失敗的步驟改為 running
-  await supabase
+  await db
     .from('task_steps')
     .update({ status: 'running' })
     .eq('task_id', taskId)
     .eq('step_number', currentStep)
 
   // 更新任務狀態
-  await supabase
+  await db
     .from('tasks')
     .update({
       status: 'executing',
@@ -833,7 +833,7 @@ export async function registerSkill(input: {
   const { name, displayName, description, minPlan = 'free', costLevel = 'medium', timeoutMs = 300000 } = input
 
   // 前置：檢查名稱重複
-  const { data: existingSkill } = await supabase
+  const { data: existingSkill } = await db
     .from('skills')
     .select('id')
     .eq('name', name)
@@ -845,7 +845,7 @@ export async function registerSkill(input: {
 
   // 建立技能
   const skillId = crypto.randomUUID()
-  const { error: skillError } = await supabase
+  const { error: skillError } = await db
     .from('skills')
     .insert({
       id: skillId,
@@ -896,7 +896,7 @@ export async function configureWebhook(input: {
     if (events !== undefined) updateData.events = events.split(',')
     if (isActive !== undefined) updateData.is_active = isActive
 
-    await supabase
+    await db
       .from('user_webhooks')
       .update(updateData)
       .eq('id', webhookId)
@@ -913,7 +913,7 @@ export async function configureWebhook(input: {
   }
 
   const newWebhookId = crypto.randomUUID()
-  await supabase
+  await db
     .from('user_webhooks')
     .insert({
       id: newWebhookId,
@@ -1019,7 +1019,7 @@ export async function initializeSession(input: {
   const email = `${anonymousId}@anonymous.tellcraft.app`
 
   // 1. 查找現有用戶（先在 users 表查）
-  let { data: user, error: _userError } = await supabase
+  let { data: user, error: _userError } = await db
     .from('users')
     .select('id')
     .eq('email', email)
@@ -1030,7 +1030,7 @@ export async function initializeSession(input: {
   if (_userError || !user) {
     // 用戶不存在，需要先在 auth.users 創建，再在 users 表創建
     // 使用 Supabase Admin API 創建 auth 用戶
-    const { data: authData, error: authError } = await supabase.auth.admin.createUser({
+    const { data: authData, error: authError } = await db.auth.admin.createUser({
       email,
       email_confirm: true, // 自動確認 email
       user_metadata: {
@@ -1041,7 +1041,7 @@ export async function initializeSession(input: {
 
     if (authError || !authData.user) {
       // 如果 auth 用戶已存在（可能之前創建過），嘗試獲取
-      const { data: existingAuth } = await supabase.auth.admin.listUsers()
+      const { data: existingAuth } = await db.auth.admin.listUsers()
       const existingUser = existingAuth?.users?.find((u: any) => u.email === email)
 
       if (!existingUser) {
@@ -1049,7 +1049,7 @@ export async function initializeSession(input: {
       }
 
       // 在 users 表創建記錄
-      const { data: newUser, error: createUserError } = await supabase
+      const { data: newUser, error: createUserError } = await db
         .from('users')
         .insert({
           id: existingUser.id,
@@ -1068,7 +1068,7 @@ export async function initializeSession(input: {
       isNew = true
     } else {
       // 在 users 表創建記錄
-      const { data: newUser, error: createUserError } = await supabase
+      const { data: newUser, error: createUserError } = await db
         .from('users')
         .insert({
           id: authData.user.id,
@@ -1092,7 +1092,7 @@ export async function initializeSession(input: {
   // 規則：draft/generating 狀態的專案可以複用，deployed/testing/failed 則創建新專案
   const reusableStatuses = ['draft', 'generating']
 
-  const { data: existingProject } = await supabase
+  const { data: existingProject } = await db
     .from('projects')
     .select('id, status')
     .eq('user_id', user.id)
@@ -1108,7 +1108,7 @@ export async function initializeSession(input: {
     project = existingProject
   } else {
     // 沒有可複用的專案，創建新專案
-    const { data: newProject, error: createProjectError } = await supabase
+    const { data: newProject, error: createProjectError } = await db
       .from('projects')
       .insert({
         user_id: user.id,
@@ -1126,7 +1126,7 @@ export async function initializeSession(input: {
   }
 
   // 3. 檢查是否有歷史對話
-  const { count: historyCount } = await supabase
+  const { count: historyCount } = await db
     .from('conversations')
     .select('id', { count: 'exact', head: true })
     .eq('project_id', project.id)
@@ -1138,7 +1138,7 @@ export async function initializeSession(input: {
 
   if (conversationId) {
     // 嘗試恢復指定對話
-    const { data: existingConv, error: convError } = await supabase
+    const { data: existingConv, error: convError } = await db
       .from('conversations')
       .select('id, project_id')
       .eq('id', conversationId)
@@ -1149,7 +1149,7 @@ export async function initializeSession(input: {
     }
 
     // 驗證對話屬於該用戶的專案
-    const { data: convProject } = await supabase
+    const { data: convProject } = await db
       .from('projects')
       .select('user_id')
       .eq('id', existingConv.project_id)
@@ -1162,7 +1162,7 @@ export async function initializeSession(input: {
     finalConversationId = conversationId
   } else if (createNew || !hasHistory) {
     // 創建新對話
-    const { data: newConv, error: createConvError } = await supabase
+    const { data: newConv, error: createConvError } = await db
       .from('conversations')
       .insert({
         project_id: project.id,
@@ -1179,7 +1179,7 @@ export async function initializeSession(input: {
     isNew = true
   } else {
     // 有歷史但未指定要恢復哪個 → 返回最近的未完成對話
-    const { data: recentConv } = await supabase
+    const { data: recentConv } = await db
       .from('conversations')
       .select('id')
       .eq('project_id', project.id)
@@ -1193,7 +1193,7 @@ export async function initializeSession(input: {
       finalConversationId = recentConv.id
     } else {
       // 沒有未完成的對話，創建新的
-      const { data: newConv, error: createConvError } = await supabase
+      const { data: newConv, error: createConvError } = await db
         .from('conversations')
         .insert({
           project_id: project.id,
@@ -1269,7 +1269,7 @@ export async function initializeSessionFromAuth(input?: {
   const avatarUrl: string | undefined = undefined // JWT 中沒有 avatarUrl，之後從資料庫取
 
   // 1. 查找或創建 users 表中的用戶記錄
-  const userQueryResult = await supabase
+  const userQueryResult = await db
     .from('users')
     .select('id')
     .eq('id', authUser.id)
@@ -1280,7 +1280,7 @@ export async function initializeSessionFromAuth(input?: {
 
   if (userQueryResult.error || !user) {
     // 嘗試用 email 查找（處理舊資料遷移）
-    const { data: userByEmail } = await supabase
+    const { data: userByEmail } = await db
       .from('users')
       .select('id')
       .eq('email', email)
@@ -1288,14 +1288,14 @@ export async function initializeSessionFromAuth(input?: {
 
     if (userByEmail) {
       // 更新現有用戶的 id 為 auth user id
-      await supabase
+      await db
         .from('users')
         .update({ id: authUser.id })
         .eq('id', userByEmail.id)
       user = { id: authUser.id }
     } else {
       // 創建新用戶
-      const { data: newUser, error: createUserError } = await supabase
+      const { data: newUser, error: createUserError } = await db
         .from('users')
         .insert({
           id: authUser.id,
@@ -1333,7 +1333,7 @@ export async function initializeSessionFromAuth(input?: {
   // 規則：draft/generating 狀態的專案可以複用，deployed/testing/failed 則創建新專案
   const reusableStatuses = ['draft', 'generating']
 
-  const { data: existingProject } = await supabase
+  const { data: existingProject } = await db
     .from('projects')
     .select('id, status')
     .eq('user_id', user.id)
@@ -1349,7 +1349,7 @@ export async function initializeSessionFromAuth(input?: {
     project = existingProject
   } else {
     // 沒有可複用的專案，創建新專案
-    const { data: newProject, error: createProjectError } = await supabase
+    const { data: newProject, error: createProjectError } = await db
       .from('projects')
       .insert({
         user_id: user.id,
@@ -1367,7 +1367,7 @@ export async function initializeSessionFromAuth(input?: {
   }
 
   // 4. 檢查是否有歷史對話
-  const { count: historyCount } = await supabase
+  const { count: historyCount } = await db
     .from('conversations')
     .select('id', { count: 'exact', head: true })
     .eq('project_id', project.id)
@@ -1379,7 +1379,7 @@ export async function initializeSessionFromAuth(input?: {
 
   if (conversationId) {
     // 嘗試恢復指定對話
-    const { data: existingConv, error: convError } = await supabase
+    const { data: existingConv, error: convError } = await db
       .from('conversations')
       .select('id, project_id')
       .eq('id', conversationId)
@@ -1390,7 +1390,7 @@ export async function initializeSessionFromAuth(input?: {
     }
 
     // 驗證對話屬於該用戶的專案
-    const { data: convProject } = await supabase
+    const { data: convProject } = await db
       .from('projects')
       .select('user_id')
       .eq('id', existingConv.project_id)
@@ -1403,7 +1403,7 @@ export async function initializeSessionFromAuth(input?: {
     finalConversationId = conversationId
   } else if (createNew || !hasHistory) {
     // 創建新對話
-    const { data: newConv, error: createConvError } = await supabase
+    const { data: newConv, error: createConvError } = await db
       .from('conversations')
       .insert({
         project_id: project.id,
@@ -1420,7 +1420,7 @@ export async function initializeSessionFromAuth(input?: {
     isNew = true
   } else {
     // 有歷史但未指定要恢復哪個 → 返回最近的未完成對話
-    const { data: recentConv } = await supabase
+    const { data: recentConv } = await db
       .from('conversations')
       .select('id')
       .eq('project_id', project.id)
@@ -1434,7 +1434,7 @@ export async function initializeSessionFromAuth(input?: {
       finalConversationId = recentConv.id
     } else {
       // 沒有未完成的對話，創建新的
-      const { data: newConv, error: createConvError } = await supabase
+      const { data: newConv, error: createConvError } = await db
         .from('conversations')
         .insert({
           project_id: project.id,
@@ -1490,7 +1490,7 @@ export async function getCurrentUserAction(): Promise<ActionResult<{
   }
 
   // 查詢完整用戶資訊（包含 avatarUrl）
-  const { data: userData } = await supabase
+  const { data: userData } = await db
     .from('users')
     .select('is_admin, avatar_url, name')
     .eq('id', authUser.id)
@@ -1526,7 +1526,7 @@ export async function migrateAnonymousAccount(input: {
   const anonymousEmail = `${anonymousId}@anonymous.tellcraft.app`
 
   // 1. 查找匿名用戶
-  const { data: anonymousUser, error: anonError } = await supabase
+  const { data: anonymousUser, error: anonError } = await db
     .from('users')
     .select('id')
     .eq('email', anonymousEmail)
@@ -1549,7 +1549,7 @@ export async function migrateAnonymousAccount(input: {
   }
 
   // 2. 查詢匿名用戶的專案
-  const { data: anonymousProjects, error: projError } = await supabase
+  const { data: anonymousProjects, error: projError } = await db
     .from('projects')
     .select('id, name')
     .eq('user_id', anonymousUser.id)
@@ -1559,7 +1559,7 @@ export async function migrateAnonymousAccount(input: {
   }
 
   // 3. 查詢認證用戶現有的專案名稱
-  const { data: authProjects } = await supabase
+  const { data: authProjects } = await db
     .from('projects')
     .select('name')
     .eq('user_id', authUserId)
@@ -1590,7 +1590,7 @@ export async function migrateAnonymousAccount(input: {
   // 並行執行所有專案更新
   const updateResults = await Promise.all(
     projectsToMigrate.map((project: any) =>
-      supabase
+      db
         .from('projects')
         .update({
           user_id: authUserId,
@@ -1610,7 +1610,7 @@ export async function migrateAnonymousAccount(input: {
 
   // 一次性查詢所有成功遷移專案的對話數量
   if (successfulProjectIds.length > 0) {
-    const { count } = await supabase
+    const { count } = await db
       .from('conversations')
       .select('id', { count: 'exact', head: true })
       .in('project_id', successfulProjectIds)
@@ -1619,13 +1619,13 @@ export async function migrateAnonymousAccount(input: {
   }
 
   // 5. 更新認證用戶，記錄關聯的匿名用戶 ID
-  await supabase
+  await db
     .from('users')
     .update({ anonymous_user_id: anonymousUser.id })
     .eq('id', authUserId)
 
   // 6. 標記匿名用戶為 cancelled
-  await supabase
+  await db
     .from('users')
     .update({
       subscription_status: 'cancelled',
@@ -1678,7 +1678,7 @@ export async function sendMessageAndTrigger(input: {
   }
 
   // 1. 讀取現有消息
-  const { data: conversation, error: readError } = await supabase
+  const { data: conversation, error: readError } = await db
     .from('conversations')
     .select('messages')
     .eq('id', conversationId)
@@ -1698,7 +1698,7 @@ export async function sendMessageAndTrigger(input: {
     timestamp: new Date().toISOString()
   }
 
-  const { error: updateError } = await supabase
+  const { error: updateError } = await db
     .from('conversations')
     .update({
       messages: [...currentMessages, newMessage],
@@ -1712,14 +1712,14 @@ export async function sendMessageAndTrigger(input: {
 
   // 3. 更新用戶消息計數
   try {
-    const { data: userData } = await supabase
+    const { data: userData } = await db
       .from('users')
       .select('message_count_this_period')
       .eq('id', userId)
       .single()
 
     if (userData) {
-      await supabase
+      await db
         .from('users')
         .update({ message_count_this_period: (userData.message_count_this_period || 0) + 1 })
         .eq('id', userId)
@@ -1745,12 +1745,12 @@ export async function sendMessageAndTrigger(input: {
       content: `[系統錯誤] 無法啟動 AI 處理流程：${err instanceof Error ? err.message : String(err)}\n\n請聯繫管理員。`,
       timestamp: new Date().toISOString(),
     }
-    const { data: conv } = await supabase
+    const { data: conv } = await db
       .from('conversations')
       .select('messages')
       .eq('id', conversationId)
       .single()
-    await supabase
+    await db
       .from('conversations')
       .update({ messages: [...(conv?.messages || []), errorMsg] })
       .eq('id', conversationId)
@@ -1778,7 +1778,7 @@ export async function replyToConversation(input: {
   const { conversationId, projectId, userId, taskId, content, specConfirmed } = input
 
   // 1. 讀取現有消息
-  const { data: conversation, error: readError } = await supabase
+  const { data: conversation, error: readError } = await db
     .from('conversations')
     .select('messages')
     .eq('id', conversationId)
@@ -1798,7 +1798,7 @@ export async function replyToConversation(input: {
     timestamp: new Date().toISOString()
   }
 
-  const { error: updateError } = await supabase
+  const { error: updateError } = await db
     .from('conversations')
     .update({
       messages: [...currentMessages, newMessage],
@@ -1856,7 +1856,7 @@ export async function getUserConversations(input: {
   // 使用 JOIN 一次查詢取得對話和專案名稱
   // 注意：messages 欄位仍需載入以取得 lastMessage 和 count
   // 未來可考慮在 DB 層添加 message_count 欄位來進一步優化
-  const { data: conversations, error: convError } = await supabase
+  const { data: conversations, error: convError } = await db
     .from('conversations')
     .select(`
       id,
@@ -1942,7 +1942,7 @@ export async function getConversationMessages(input: {
 
   // 1. 先檢查 updated_at 和 spec_complete 是否有變化（輕量查詢）
   if (lastUpdatedAt) {
-    const { data: check } = await supabase
+    const { data: check } = await db
       .from('conversations')
       .select('updated_at, project_id, spec_complete')
       .eq('id', conversationId)
@@ -1950,7 +1950,7 @@ export async function getConversationMessages(input: {
 
     if (check && check.updated_at === lastUpdatedAt) {
       // 沒有更新，只查詢 task/session 狀態
-      const { data: task } = await supabase
+      const { data: task } = await db
         .from('tasks')
         .select('id, status')
         .eq('project_id', check.project_id)
@@ -1964,7 +1964,7 @@ export async function getConversationMessages(input: {
 
       // 如果沒有活躍的 task，檢查 bdd_session
       if (!activeSessionId) {
-        const { data: bddSession } = await supabase
+        const { data: bddSession } = await db
           .from('bdd_sessions')
           .select('id, current_phase')
           .eq('conversation_id', conversationId)
@@ -1995,7 +1995,7 @@ export async function getConversationMessages(input: {
   }
 
   // 2. 有更新或首次查詢，載入完整 messages
-  const { data: conversation, error: convError } = await supabase
+  const { data: conversation, error: convError } = await db
     .from('conversations')
     .select('messages, project_id, updated_at, spec_complete')
     .eq('id', conversationId)
@@ -2013,7 +2013,7 @@ export async function getConversationMessages(input: {
   }
 
   // 3. 查找當前活躍的任務或 BDD Session
-  const { data: task } = await supabase
+  const { data: task } = await db
     .from('tasks')
     .select('id, status')
     .eq('project_id', conversation.project_id)
@@ -2028,7 +2028,7 @@ export async function getConversationMessages(input: {
   let sessionStatus = task?.status
 
   if (!activeSessionId) {
-    const { data: bddSession } = await supabase
+    const { data: bddSession } = await db
       .from('bdd_sessions')
       .select('id, current_phase')
       .eq('conversation_id', conversationId)
@@ -2082,12 +2082,12 @@ export async function getUserStats(): Promise<ActionResult<{
 
   // 查詢用戶資訊和專案 IDs（合併查詢，減少請求次數）
   const [userResult, projectsResult] = await Promise.all([
-    supabase
+    db
       .from('users')
       .select('plan, message_count_this_period')
       .eq('id', authUser.id)
       .single(),
-    supabase
+    db
       .from('projects')
       .select('id', { count: 'exact' })  // 一次查詢同時取得 count 和 IDs
       .eq('user_id', authUser.id)
@@ -2104,11 +2104,11 @@ export async function getUserStats(): Promise<ActionResult<{
   // 並行查詢對話和部署數量（減少往返次數）
   const [convResult, deployResult] = projectIds.length > 0
     ? await Promise.all([
-        supabase
+        db
           .from('conversations')
           .select('id', { count: 'exact', head: true })  // 使用 id 而非 *
           .in('project_id', projectIds),
-        supabase
+        db
           .from('deployments')
           .select('id', { count: 'exact', head: true })  // 使用 id 而非 *
           .in('project_id', projectIds)
@@ -2165,7 +2165,7 @@ export async function getUserProjects(params: {
 
   const { page = 1, pageSize = 10, status } = params
 
-  let query = supabase
+  let query = db
     .from('projects')
     .select('id, name, description, status, vercel_url, custom_domain, created_at, updated_at', { count: 'exact' })
     .eq('user_id', authUser.id)
@@ -2189,7 +2189,7 @@ export async function getUserProjects(params: {
   // 查詢每個專案的對話數量
   const projectIds = projects?.map((p: any) => p.id) || []
   const { data: convCounts } = projectIds.length > 0
-    ? await supabase
+    ? await db
         .from('conversations')
         .select('project_id')
         .in('project_id', projectIds)
@@ -2248,7 +2248,7 @@ export async function getProjectReminder(input: {
 
   if (authUser) {
     // 已登入用戶
-    const { data: user } = await supabase
+    const { data: user } = await db
       .from('users')
       .select('id')
       .eq('id', authUser.id)
@@ -2257,7 +2257,7 @@ export async function getProjectReminder(input: {
   } else if (anonymousId) {
     // 匿名用戶
     const email = `${anonymousId}@anonymous.tellcraft.app`
-    const { data: user } = await supabase
+    const { data: user } = await db
       .from('users')
       .select('id')
       .eq('email', email)
@@ -2270,7 +2270,7 @@ export async function getProjectReminder(input: {
   }
 
   // 1. 先檢查是否有進行中的專案（draft/generating）有未完成對話
-  const { data: inProgressProject } = await supabase
+  const { data: inProgressProject } = await db
     .from('projects')
     .select('id, name, status, updated_at')
     .eq('user_id', userId)
@@ -2281,7 +2281,7 @@ export async function getProjectReminder(input: {
 
   if (inProgressProject) {
     // 檢查是否有未完成的對話
-    const { data: pendingConv } = await supabase
+    const { data: pendingConv } = await db
       .from('conversations')
       .select('id, updated_at')
       .eq('project_id', inProgressProject.id)
@@ -2312,7 +2312,7 @@ export async function getProjectReminder(input: {
 
   // 2. 檢查是否有最近完成的專案（deployed，24 小時內）
   const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString()
-  const { data: completedProject } = await supabase
+  const { data: completedProject } = await db
     .from('projects')
     .select('id, name, status, vercel_url, custom_domain, updated_at')
     .eq('user_id', userId)
@@ -2341,7 +2341,7 @@ export async function getProjectReminder(input: {
   }
 
   // 3. 檢查是否有失敗的專案（failed，24 小時內）
-  const { data: failedProject } = await supabase
+  const { data: failedProject } = await db
     .from('projects')
     .select('id, name, status, updated_at')
     .eq('user_id', userId)
@@ -2413,7 +2413,7 @@ export async function getProjectDetail(projectId: string): Promise<ActionResult<
   }
 
   // 查詢專案
-  const { data: project, error: projectError } = await supabase
+  const { data: project, error: projectError } = await db
     .from('projects')
     .select('id, name, description, status, vercel_url, custom_domain, domain_status, created_at, updated_at, user_id')
     .eq('id', projectId)
@@ -2430,18 +2430,18 @@ export async function getProjectDetail(projectId: string): Promise<ActionResult<
 
   // 並行查詢對話、部署和生成記錄（減少往返時間）
   const [convResult, deployResult, genResult] = await Promise.all([
-    supabase
+    db
       .from('conversations')
       .select('id, messages, spec_complete, created_at, updated_at')
       .eq('project_id', projectId)
       .order('updated_at', { ascending: false }),
-    supabase
+    db
       .from('deployments')
       .select('id, url, status, created_at')
       .eq('project_id', projectId)
       .order('created_at', { ascending: false })
       .limit(10),
-    supabase
+    db
       .from('generations')
       .select('id, status, attempt_count, created_at')
       .eq('project_id', projectId)
@@ -2505,7 +2505,7 @@ export async function getProjectDetail(projectId: string): Promise<ActionResult<
  */
 async function getProjectSchema(projectId: string): Promise<string> {
   // 優先從 generations 表讀取
-  const { data: gen } = await supabase
+  const { data: gen } = await db
     .from('generations')
     .select('generated_code_url')
     .eq('project_id', projectId)
@@ -2531,7 +2531,7 @@ async function getProjectFiles(projectId: string): Promise<Array<{ file: string;
   // TODO: 實作 Storage 讀取
 
   // 暫時使用模板
-  const { data: project } = await supabase
+  const { data: project } = await db
     .from('projects')
     .select('name')
     .eq('id', projectId)
@@ -2551,7 +2551,7 @@ export async function deployProjectFromDb(input: {
   const { projectId } = input
 
   // 1. 查詢專案資訊
-  const { data: project, error: projectError } = await supabase
+  const { data: project, error: projectError } = await db
     .from('projects')
     .select('id, name, status')
     .eq('id', projectId)
@@ -2581,14 +2581,14 @@ export async function deployProjectFromDb(input: {
 
   // 6. 根據結果更新資料庫
   if (result.stage === 'complete') {
-    await supabase
+    await db
       .from('projects')
       .update({
         status: 'deployed',
         vercel_url: result.deploymentUrl,
         vercel_project_id: result.vercelProjectId,
-        supabase_project_id: result.supabaseProjectId,
-        supabase_url: result.supabaseUrl,
+        db_project_id: result.supabaseProjectId,
+        db_url: result.supabaseUrl,
         updated_at: new Date().toISOString(),
       })
       .eq('id', projectId)
@@ -2675,7 +2675,7 @@ export async function createBddSession(input: {
   // 查詢同一對話中有已解決項目的 session（用於繼承決策）
   // 注意：不能只用 not null，因為空陣列 [] 也不是 null
   // 需要找到有實際內容的 resolved_items
-  const { data: allSessions } = await supabase
+  const { data: allSessions } = await db
     .from('bdd_sessions')
     .select('resolved_items')
     .eq('conversation_id', conversationId)
@@ -2691,7 +2691,7 @@ export async function createBddSession(input: {
 
   console.log(`[BDD Session] 創建新 session，繼承 ${inheritedResolvedItems.length} 個之前的決策`)
 
-  const { data, error } = await supabase
+  const { data, error } = await db
     .from('bdd_sessions')
     .insert({
       project_id: projectId,
@@ -2723,7 +2723,7 @@ export async function getBddSession(input: {
 }): Promise<ActionResult<BddSession | null>> {
   const { sessionId, conversationId, projectId } = input
 
-  let query = supabase.from('bdd_sessions').select('*')
+  let query = db.from('bdd_sessions').select('*')
 
   if (sessionId) {
     query = query.eq('id', sessionId)
@@ -2818,7 +2818,7 @@ export async function updateBddSession(input: {
   if (updates.isaConfigContent !== undefined) dbUpdates.isa_config_content = updates.isaConfigContent
   if (updates.validationResult !== undefined) dbUpdates.validation_result = updates.validationResult
 
-  const { error } = await supabase
+  const { error } = await db
     .from('bdd_sessions')
     .update(dbUpdates)
     .eq('id', sessionId)

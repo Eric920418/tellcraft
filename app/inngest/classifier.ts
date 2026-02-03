@@ -1,5 +1,5 @@
 import { SkillName, SKILL_REGISTRY, getSkillDescriptionsForClassifier } from './registry'
-import { supabase } from '../lib/supabase'
+import { db } from '../lib/db'
 
 // Haiku 定價 (每百萬 tokens)
 const HAIKU_PRICING = { input: 0.8, output: 4 }
@@ -108,7 +108,7 @@ ${skillDescriptions}
       const cost = (inputTokens * HAIKU_PRICING.input + outputTokens * HAIKU_PRICING.output) / 1_000_000
 
       try {
-        await supabase.from('llm_usage').insert({
+        await db.from('llm_usage').insert({
           model: 'claude-3-5-haiku-20241022',
           input_tokens: inputTokens,
           output_tokens: outputTokens,

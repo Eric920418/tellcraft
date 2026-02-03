@@ -1,6 +1,6 @@
 'use server'
 
-import { supabase } from '../lib/supabase'
+import { db } from '../lib/db'
 import {
   Template,
   TemplateCategory,
@@ -38,7 +38,7 @@ export async function getTemplates(input?: {
 
   try {
     // 嘗試從資料庫獲取
-    let query = supabase
+    let query = db
       .from('templates')
       .select('*')
       .eq('is_active', true)
@@ -113,7 +113,7 @@ export async function getTemplateById(
 ): Promise<ActionResult<Template>> {
   try {
     // 嘗試從資料庫獲取
-    const { data, error } = await supabase
+    const { data, error } = await db
       .from('templates')
       .select('*')
       .eq('id', templateId)
@@ -163,7 +163,7 @@ export async function getTemplateBySlug(
   slug: string
 ): Promise<ActionResult<Template>> {
   try {
-    const { data, error } = await supabase
+    const { data, error } = await db
       .from('templates')
       .select('*')
       .eq('slug', slug)
@@ -299,7 +299,7 @@ export async function initializeTemplates(): Promise<ActionResult<{ count: numbe
     }))
 
     // Upsert（避免重複插入）
-    const { error } = await supabase
+    const { error } = await db
       .from('templates')
       .upsert(templateRows, { onConflict: 'id' })
 

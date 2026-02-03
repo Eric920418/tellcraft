@@ -3,7 +3,7 @@
 // 注意：這個模組直接在服務器端使用，不是 Server Actions
 // ============================================================
 
-import { supabase } from './supabase'
+import { db } from './db'
 
 const ANTHROPIC_API = 'https://api.anthropic.com/v1/messages'
 
@@ -128,7 +128,7 @@ async function logLlmUsage(
   context?: LlmTrackingContext
 ): Promise<void> {
   try {
-    await supabase.from('llm_usage').insert({
+    await db.from('llm_usage').insert({
       user_id: context?.userId || null,
       conversation_id: context?.conversationId || null,
       model,
@@ -1451,7 +1451,7 @@ export async function generateIsaConfig(
 \`\`\`yaml
 isa_codegen:
   target: nextjs-server-actions
-  database: supabase
+  database: db
 
   entity_mapping:
     # 從 entity_to_table_mapping.yml 複製
@@ -1474,12 +1474,12 @@ isa_codegen:
 
     entity_verify:
       pattern: "存在一個{entity}, with table:"
-      executor: supabase-query
+      executor: db-query
       mode: existence-check
 
     entity_prepare:
       pattern: "準備一個{entity}, with table:"
-      executor: supabase-insert
+      executor: db-insert
       mode: test-fixture
 
   actions:

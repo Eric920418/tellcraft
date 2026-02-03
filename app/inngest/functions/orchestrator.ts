@@ -1,7 +1,7 @@
 import { inngest } from '../client'
 import { classifyIntent } from '../classifier'
 import { getSkillMetadata, SkillName } from '../registry'
-import { supabase } from '../../lib/supabase'
+import { db } from '../../lib/db'
 import { generateCode, deployProjectFromDb, createBddSession, getBddSession, updateBddSession, addClarifyItems, answerClarifyItem, confirmBatch, revertAnswer } from '../../actions'
 import { createUiuxGeneration, type GenerationArtifacts, type GeneratedFile } from '../../actions/storage'
 import {
@@ -53,7 +53,7 @@ export const handleUserRequest = inngest.createFunction(
     // Step 1: 更新任務狀態為處理中
     // ============================================================
     const taskId = await step.run('create-task-record', async () => {
-      const { data, error } = await supabase
+      const { data, error } = await db
         .from('tasks')
         .insert({
           project_id: projectId,
@@ -81,13 +81,13 @@ export const handleUserRequest = inngest.createFunction(
         progress: { current: 0, total: 3, step: '準備分析' },
       }
 
-      const { data: conv } = await supabase
+      const { data: conv } = await db
         .from('conversations')
         .select('messages')
         .eq('id', conversationId)
         .single()
 
-      await supabase
+      await db
         .from('conversations')
         .update({
           messages: [...(conv?.messages || []), immediateMessage],
@@ -109,7 +109,7 @@ export const handleUserRequest = inngest.createFunction(
       )
 
       // 取得對話歷史
-      const { data: conversation } = await supabase
+      const { data: conversation } = await db
         .from('conversations')
         .select('messages')
         .eq('id', conversationId)
@@ -147,7 +147,7 @@ export const handleUserRequest = inngest.createFunction(
     }
 
     await step.run('update-task-skill', async () => {
-      await supabase
+      await db
         .from('tasks')
         .update({
           status: 'executing',
@@ -240,7 +240,7 @@ export const handleUserRequest = inngest.createFunction(
     // Step 6: 完成任務
     // ============================================================
     await step.run('complete-task', async () => {
-      await supabase
+      await db
         .from('tasks')
         .update({
           status: 'completed',
@@ -322,13 +322,13 @@ async function sendMessage(
     message.progress = progress
   }
 
-  const { data: conv } = await supabase
+  const { data: conv } = await db
     .from('conversations')
     .select('messages')
     .eq('id', conversationId)
     .single()
 
-  await supabase
+  await db
     .from('conversations')
     .update({
       messages: [...(conv?.messages || []), message],
@@ -366,13 +366,13 @@ async function sendMessageWithRichContent(
     message.richContent = richContent
   }
 
-  const { data: conv } = await supabase
+  const { data: conv } = await db
     .from('conversations')
     .select('messages')
     .eq('id', conversationId)
     .single()
 
-  await supabase
+  await db
     .from('conversations')
     .update({
       messages: [...(conv?.messages || []), message],
@@ -516,7 +516,7 @@ async function executeBddSpecSkill(input: BddSpecSkillInput) {
   // ============================================================
 
   const projectContext = await step.run('get-project-context', async () => {
-    const { data: project } = await supabase
+    const { data: project } = await db
       .from('projects')
       .select('name, description')
       .eq('id', projectId)
@@ -1780,7 +1780,7 @@ async function executeBddSpecSkill(input: BddSpecSkillInput) {
     // 標記對話的 spec 完成
     const session = await getBddSession({ sessionId })
 
-    await supabase
+    await db
       .from('conversations')
       .update({
         spec_complete: true,
@@ -2448,7 +2448,7 @@ async function executeCoderSkill(input: CoderSkillInput) {
     if (attempt < maxRetries) {
       await step.run(`analyze-error-${attempt}`, async () => {
         // 記錄錯誤供下次嘗試參考
-        await supabase
+        await db
           .from('tasks')
           .update({
             plan: {
@@ -2521,13 +2521,13 @@ async function executeDeployerSkill(input: DeployerSkillInput) {
         timestamp: new Date().toISOString(),
       }
 
-      const { data: conv } = await supabase
+      const { data: conv } = await db
         .from('conversations')
         .select('messages')
         .eq('id', conversationId)
         .single()
 
-      await supabase
+      await db
         .from('conversations')
         .update({
           messages: [...(conv?.messages || []), domainMessage],
@@ -2558,7 +2558,7 @@ async function executeDomainManagerSkill(input: DomainManagerSkillInput) {
 
   // 取得專案資訊
   const projectInfo = await step.run('get-project-info', async () => {
-    const { data: project } = await supabase
+    const { data: project } = await db
       .from('projects')
       .select('id, name, vercel_url, custom_domain, domain_status')
       .eq('id', projectId)
@@ -2586,13 +2586,13 @@ async function executeDomainManagerSkill(input: DomainManagerSkillInput) {
         timestamp: new Date().toISOString(),
       }
 
-      const { data: conv } = await supabase
+      const { data: conv } = await db
         .from('conversations')
         .select('messages')
         .eq('id', conversationId)
         .single()
 
-      await supabase
+      await db
         .from('conversations')
         .update({
           messages: [...(conv?.messages || []), statusMessage],
@@ -2619,13 +2619,13 @@ async function executeDomainManagerSkill(input: DomainManagerSkillInput) {
       timestamp: new Date().toISOString(),
     }
 
-    const { data: conv } = await supabase
+    const { data: conv } = await db
       .from('conversations')
       .select('messages')
       .eq('id', conversationId)
       .single()
 
-    await supabase
+    await db
       .from('conversations')
       .update({
         messages: [...(conv?.messages || []), choiceMessage],
@@ -2671,13 +2671,13 @@ async function executeDomainManagerSkill(input: DomainManagerSkillInput) {
       timestamp: new Date().toISOString(),
     }
 
-    const { data: conv } = await supabase
+    const { data: conv } = await db
       .from('conversations')
       .select('messages')
       .eq('id', conversationId)
       .single()
 
-    await supabase
+    await db
       .from('conversations')
       .update({
         messages: [...(conv?.messages || []), userMsg],
@@ -2720,13 +2720,13 @@ async function handleFreeDomain(
       timestamp: new Date().toISOString(),
     }
 
-    const { data: conv } = await supabase
+    const { data: conv } = await db
       .from('conversations')
       .select('messages')
       .eq('id', conversationId)
       .single()
 
-    await supabase
+    await db
       .from('conversations')
       .update({
         messages: [...(conv?.messages || []), confirmMessage],
@@ -2763,13 +2763,13 @@ async function handlePurchaseDomain(
         timestamp: new Date().toISOString(),
       }
 
-      const { data: conv } = await supabase
+      const { data: conv } = await db
         .from('conversations')
         .select('messages')
         .eq('id', conversationId)
         .single()
 
-      await supabase
+      await db
         .from('conversations')
         .update({
           messages: [...(conv?.messages || []), askMessage],
@@ -2809,13 +2809,13 @@ async function handlePurchaseDomain(
         timestamp: new Date().toISOString(),
       }
 
-      const { data: conv } = await supabase
+      const { data: conv } = await db
         .from('conversations')
         .select('messages')
         .eq('id', conversationId)
         .single()
 
-      await supabase
+      await db
         .from('conversations')
         .update({
           messages: [...(conv?.messages || []), unavailableMessage],
@@ -2847,13 +2847,13 @@ async function handlePurchaseDomain(
       timestamp: new Date().toISOString(),
     }
 
-    const { data: conv } = await supabase
+    const { data: conv } = await db
       .from('conversations')
       .select('messages')
       .eq('id', conversationId)
       .single()
 
-    await supabase
+    await db
       .from('conversations')
       .update({
         messages: [...(conv?.messages || []), askMessage],
@@ -2884,13 +2884,13 @@ async function handlePurchaseDomain(
         timestamp: new Date().toISOString(),
       }
 
-      const { data: conv } = await supabase
+      const { data: conv } = await db
         .from('conversations')
         .select('messages')
         .eq('id', conversationId)
         .single()
 
-      await supabase
+      await db
         .from('conversations')
         .update({
           messages: [...(conv?.messages || []), errorMessage],
@@ -2936,13 +2936,13 @@ async function handlePurchaseDomain(
         timestamp: new Date().toISOString(),
       }
 
-      const { data: conv } = await supabase
+      const { data: conv } = await db
         .from('conversations')
         .select('messages')
         .eq('id', conversationId)
         .single()
 
-      await supabase
+      await db
         .from('conversations')
         .update({
           messages: [...(conv?.messages || []), errorMessage],
@@ -2956,7 +2956,7 @@ async function handlePurchaseDomain(
 
   // 更新專案（僅記錄網域，DNS 尚未設定）
   await step.run('update-project-domain-pending', async () => {
-    await supabase
+    await db
       .from('projects')
       .update({
         custom_domain: suggestedDomain,
@@ -2982,13 +2982,13 @@ async function handlePurchaseDomain(
       timestamp: new Date().toISOString(),
     }
 
-    const { data: conv } = await supabase
+    const { data: conv } = await db
       .from('conversations')
       .select('messages')
       .eq('id', conversationId)
       .single()
 
-    await supabase
+    await db
       .from('conversations')
       .update({
         messages: [...(conv?.messages || []), successMessage],
@@ -3025,7 +3025,7 @@ async function executeDomainDnsSkill(input: DomainManagerSkillInput) {
 
   // 取得專案資訊
   const projectInfo = await step.run('get-project-for-dns', async () => {
-    const { data: project } = await supabase
+    const { data: project } = await db
       .from('projects')
       .select('id, name, custom_domain, domain_status, vercel_project_id, vercel_url')
       .eq('id', projectId)
@@ -3052,13 +3052,13 @@ async function executeDomainDnsSkill(input: DomainManagerSkillInput) {
         timestamp: new Date().toISOString(),
       }
 
-      const { data: conv } = await supabase
+      const { data: conv } = await db
         .from('conversations')
         .select('messages')
         .eq('id', conversationId)
         .single()
 
-      await supabase
+      await db
         .from('conversations')
         .update({
           messages: [...(conv?.messages || []), askMessage],
@@ -3095,13 +3095,13 @@ async function executeDomainDnsSkill(input: DomainManagerSkillInput) {
       timestamp: new Date().toISOString(),
     }
 
-    const { data: conv } = await supabase
+    const { data: conv } = await db
       .from('conversations')
       .select('messages')
       .eq('id', conversationId)
       .single()
 
-    await supabase
+    await db
       .from('conversations')
       .update({
         messages: [...(conv?.messages || []), startMessage],
@@ -3129,13 +3129,13 @@ async function executeDomainDnsSkill(input: DomainManagerSkillInput) {
         timestamp: new Date().toISOString(),
       }
 
-      const { data: conv } = await supabase
+      const { data: conv } = await db
         .from('conversations')
         .select('messages')
         .eq('id', conversationId)
         .single()
 
-      await supabase
+      await db
         .from('conversations')
         .update({
           messages: [...(conv?.messages || []), errorMessage],
@@ -3168,13 +3168,13 @@ ${nameservers.map((ns: string) => `- ${ns}`).join('\n')}`,
           timestamp: new Date().toISOString(),
         }
 
-        const { data: conv } = await supabase
+        const { data: conv } = await db
           .from('conversations')
           .select('messages')
           .eq('id', conversationId)
           .single()
 
-        await supabase
+        await db
           .from('conversations')
           .update({
             messages: [...(conv?.messages || []), errorMessage],
@@ -3208,13 +3208,13 @@ ${nameservers.map((ns: string) => `- ${ns}`).join('\n')}`,
         timestamp: new Date().toISOString(),
       }
 
-      const { data: conv } = await supabase
+      const { data: conv } = await db
         .from('conversations')
         .select('messages')
         .eq('id', conversationId)
         .single()
 
-      await supabase
+      await db
         .from('conversations')
         .update({
           messages: [...(conv?.messages || []), errorMessage],
@@ -3267,7 +3267,7 @@ ${nameservers.map((ns: string) => `- ${ns}`).join('\n')}`,
 
   // 更新專案
   await step.run('update-project-dns-complete', async () => {
-    await supabase
+    await db
       .from('projects')
       .update({
         custom_domain: domain,
@@ -3298,13 +3298,13 @@ DNS 傳播可能需要幾分鐘到 48 小時。完成後您可以透過 **https:
       timestamp: new Date().toISOString(),
     }
 
-    const { data: conv } = await supabase
+    const { data: conv } = await db
       .from('conversations')
       .select('messages')
       .eq('id', conversationId)
       .single()
 
-    await supabase
+    await db
       .from('conversations')
       .update({
         messages: [...(conv?.messages || []), completeMessage],
@@ -3340,13 +3340,13 @@ async function handleOwnDomain(
         timestamp: new Date().toISOString(),
       }
 
-      const { data: conv } = await supabase
+      const { data: conv } = await db
         .from('conversations')
         .select('messages')
         .eq('id', conversationId)
         .single()
 
-      await supabase
+      await db
         .from('conversations')
         .update({
           messages: [...(conv?.messages || []), askMessage],
@@ -3369,7 +3369,7 @@ async function handleOwnDomain(
   }
 
   // 取得專案資訊
-  const { data: project } = await supabase
+  const { data: project } = await db
     .from('projects')
     .select('vercel_project_id')
     .eq('id', projectId)
@@ -3387,13 +3387,13 @@ async function handleOwnDomain(
         timestamp: new Date().toISOString(),
       }
 
-      const { data: conv } = await supabase
+      const { data: conv } = await db
         .from('conversations')
         .select('messages')
         .eq('id', conversationId)
         .single()
 
-      await supabase
+      await db
         .from('conversations')
         .update({
           messages: [...(conv?.messages || []), bindMessage],
@@ -3440,7 +3440,7 @@ async function handleOwnDomain(
 
   // 更新專案的 custom_domain
   await step.run('update-project-domain', async () => {
-    await supabase
+    await db
       .from('projects')
       .update({
         custom_domain: domain,
@@ -3479,13 +3479,13 @@ async function handleOwnDomain(
       timestamp: new Date().toISOString(),
     }
 
-    const { data: conv } = await supabase
+    const { data: conv } = await db
       .from('conversations')
       .select('messages')
       .eq('id', conversationId)
       .single()
 
-    await supabase
+    await db
       .from('conversations')
       .update({
         messages: [...(conv?.messages || []), dnsMessage],

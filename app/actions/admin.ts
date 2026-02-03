@@ -1,6 +1,6 @@
 'use server'
 
-import { supabase } from '../lib/supabase'
+import { db } from '../lib/db'
 import { getCurrentUser } from '../lib/auth'
 
 // ============================================================
@@ -50,7 +50,7 @@ async function requireAdmin(): Promise<{ userId: string; email: string }> {
   }
 
   // 如果 JWT 沒有 isAdmin，從資料庫確認（fallback）
-  const { data: user, error } = await supabase
+  const { data: user, error } = await db
     .from('users')
     .select('is_admin, email')
     .eq('id', authUser.id)
@@ -99,11 +99,11 @@ export async function getAdminStats(): Promise<ActionResult<{
       // 總 LLM 成本（使用 RPC 聚合或限制查詢）
       llmCost
     ] = await Promise.all([
-      supabase.from('users').select('id', { count: 'exact', head: true }),
-      supabase.from('projects').select('id', { count: 'exact', head: true }),
-      supabase.from('conversations').select('id', { count: 'exact', head: true }),
-      supabase.from('deployments').select('id', { count: 'exact', head: true }).eq('status', 'success'),
-      supabase
+      db.from('users').select('id', { count: 'exact', head: true }),
+      db.from('projects').select('id', { count: 'exact', head: true }),
+      db.from('conversations').select('id', { count: 'exact', head: true }),
+      db.from('deployments').select('id', { count: 'exact', head: true }).eq('status', 'success'),
+      db
         .from('conversations')
         .select('project_id')
         .gte('updated_at', new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString())
@@ -111,18 +111,18 @@ export async function getAdminStats(): Promise<ActionResult<{
           if (!res.data) return 0
           const projectIds = [...new Set(res.data.map((c: any) => c.project_id))]
           if (projectIds.length === 0) return 0
-          const { data: projects } = await supabase
+          const { data: projects } = await db
             .from('projects')
             .select('user_id')
             .in('id', projectIds)
           return new Set(projects?.map((p: any) => p.user_id) || []).size
         }),
-      supabase
+      db
         .from('users')
         .select('id', { count: 'exact', head: true })
         .gte('created_at', new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString()),
       // 使用 Supabase 聚合查詢（只取前 1000 筆做估算，避免全表掃描）
-      supabase
+      db
         .from('llm_usage')
         .select('cost_usd')
         .order('created_at', { ascending: false })
@@ -169,7 +169,7 @@ export async function listAllUsers(params: PaginationParams = {}): Promise<Actio
 
     const { page = 1, pageSize = 20, sortBy = 'created_at', sortOrder = 'desc', search } = params
 
-    let query = supabase
+    let query = db
       .from('users')
       .select('id, email, name, plan, subscription_status, is_admin, message_count_this_period, created_at', { count: 'exact' })
 
@@ -199,7 +199,7 @@ export async function listAllUsers(params: PaginationParams = {}): Promise<Actio
 
     if (userIds.length > 0) {
       // 單一查詢取得所有用戶的專案 user_id，在記憶體中計數
-      const { data: projects } = await supabase
+      const { data: projects } = await db
         .from('projects')
         .select('user_id')
         .in('user_id', userIds)
@@ -259,7 +259,7 @@ export async function listAllProjects(params: PaginationParams & {
 
     const { page = 1, pageSize = 20, sortBy = 'created_at', sortOrder = 'desc', search, status, userId } = params
 
-    let query = supabase
+    let query = db
       .from('projects')
       .select('id, name, status, user_id, vercel_url, created_at, updated_at', { count: 'exact' })
 
@@ -294,8 +294,8 @@ export async function listAllProjects(params: PaginationParams & {
     const projectIds = projects?.map((p: any) => p.id) || []
 
     const [usersResult, convCounts] = await Promise.all([
-      supabase.from('users').select('id, email').in('id', userIds),
-      supabase.from('conversations').select('project_id').in('project_id', projectIds)
+      db.from('users').select('id, email').in('id', userIds),
+      db.from('conversations').select('project_id').in('project_id', projectIds)
     ])
 
     const userEmailMap = new Map<string, string>()
@@ -357,7 +357,7 @@ export async function listAllConversations(params: PaginationParams & {
     const { page = 1, pageSize = 20, sortBy = 'updated_at', sortOrder = 'desc', projectId } = params
 
     // 使用 JOIN 一次查詢取得對話、專案和用戶資訊
-    let query = supabase
+    let query = db
       .from('conversations')
       .select(`
         id,
@@ -456,7 +456,7 @@ export async function getUserDetail(userId: string): Promise<ActionResult<{
     await requireAdmin()
 
     // 查詢用戶
-    const { data: user, error: userError } = await supabase
+    const { data: user, error: userError } = await db
       .from('users')
       .select('id, email, name, plan, subscription_status, is_admin, message_count_this_period, created_at')
       .eq('id', userId)
@@ -467,7 +467,7 @@ export async function getUserDetail(userId: string): Promise<ActionResult<{
     }
 
     // 查詢專案
-    const { data: projects } = await supabase
+    const { data: projects } = await db
       .from('projects')
       .select('id, name, status, created_at')
       .eq('user_id', userId)
@@ -476,7 +476,7 @@ export async function getUserDetail(userId: string): Promise<ActionResult<{
     // 查詢對話
     const projectIds = projects?.map((p: any) => p.id) || []
     const { data: conversations } = projectIds.length > 0
-      ? await supabase
+      ? await db
           .from('conversations')
           .select('id, project_id, messages, updated_at')
           .in('project_id', projectIds)
@@ -489,13 +489,13 @@ export async function getUserDetail(userId: string): Promise<ActionResult<{
     // 統計（使用 select('id') 而非 select('*') 減少開銷）
     const [convCountResult, deployCountResult] = await Promise.all([
       projectIds.length > 0
-        ? supabase
+        ? db
             .from('conversations')
             .select('id', { count: 'exact', head: true })
             .in('project_id', projectIds)
         : Promise.resolve({ count: 0 }),
       projectIds.length > 0
-        ? supabase
+        ? db
             .from('deployments')
             .select('id', { count: 'exact', head: true })
             .in('project_id', projectIds)
@@ -506,7 +506,7 @@ export async function getUserDetail(userId: string): Promise<ActionResult<{
     const convCount = convCountResult.count || 0
     const deployCount = deployCountResult.count || 0
 
-    const { data: llmUsage } = await supabase
+    const { data: llmUsage } = await db
       .from('llm_usage')
       .select('cost_usd')
       .eq('user_id', userId)
@@ -580,7 +580,7 @@ export async function getLLMUsageStats(params: {
     // 預設只查詢最近 30 天，避免全表掃描
     const defaultStartDate = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString()
 
-    let query = supabase
+    let query = db
       .from('llm_usage')
       .select('id, user_id, conversation_id, model, input_tokens, output_tokens, cost_usd, purpose, created_at')
 
@@ -704,7 +704,7 @@ export async function getAuditLogs(params: PaginationParams & {
     const { page = 1, pageSize = 50, userId, action, entityType, startDate, endDate } = params
 
     // 管理員已驗證，使用 service role client 繞過 RLS 查詢所有數據
-    let query = supabase
+    let query = db
       .from('audit_logs')
       .select('id, user_id, action, entity_type, entity_id, metadata, created_at', { count: 'exact' })
 
@@ -742,7 +742,7 @@ export async function getAuditLogs(params: PaginationParams & {
     // 查詢用戶 email
     const userIds = [...new Set((logs || []).map((l: any) => l.user_id).filter(Boolean) as string[])]
     const { data: users } = userIds.length > 0
-      ? await supabase.from('users').select('id, email').in('id', userIds)
+      ? await db.from('users').select('id, email').in('id', userIds)
       : { data: [] }
 
     const userEmailMap = new Map(users?.map((u: any) => [u.id, u.email]) || [])
@@ -789,7 +789,7 @@ export async function setUserAdmin(input: {
       return { success: false, error: '不能修改自己的管理員權限' }
     }
 
-    const { error } = await supabase
+    const { error } = await db
       .from('users')
       .update({ is_admin: isAdmin })
       .eq('id', userId)
@@ -799,7 +799,7 @@ export async function setUserAdmin(input: {
     }
 
     // 記錄審計日誌
-    await supabase.from('audit_logs').insert({
+    await db.from('audit_logs').insert({
       user_id: admin.userId,
       action: isAdmin ? 'grant_admin' : 'revoke_admin',
       entity_type: 'user',
@@ -829,7 +829,7 @@ export async function logAuditEvent(input: {
   const { userId, action, entityType, entityId, metadata } = input
 
   try {
-    await supabase.from('audit_logs').insert({
+    await db.from('audit_logs').insert({
       user_id: userId || null,
       action,
       entity_type: entityType || null,

@@ -1,6 +1,6 @@
 /**
  * 資料庫連接層
- * 已從 Supabase 遷移到 VPS PostgreSQL
+ * 連接 VPS PostgreSQL (54.238.4.117:5432)
  */
 import vpsDb, {
   from,
@@ -10,8 +10,8 @@ import vpsDb, {
   getClient,
 } from './vps-db'
 
-// 相容層：讓現有程式碼可以繼續使用 supabase.from() 語法
-export const supabase = {
+// VPS PostgreSQL 資料庫客戶端
+export const db = {
   from,
   auth: {
     admin: {

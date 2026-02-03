@@ -1,7 +1,7 @@
 import { redirect } from 'next/navigation'
 import { cookies } from 'next/headers'
 import { jwtVerify } from 'jose'
-import { supabase, PLAN_MESSAGE_LIMITS } from '../lib/supabase'
+import { db, PLAN_MESSAGE_LIMITS } from '../lib/db'
 import { DashboardContent } from '../components/dashboard/DashboardContent'
 
 const JWT_SECRET = new TextEncoder().encode(
@@ -29,12 +29,12 @@ export default async function DashboardPage() {
 
   // 並行查詢所有資料（一次 server 往返）
   const [userResult, projectsResult] = await Promise.all([
-    supabase
+    db
       .from('users')
       .select('plan, message_count_this_period')
       .eq('id', authUser.id)
       .single(),
-    supabase
+    db
       .from('projects')
       .select('id, name, status, created_at, updated_at', { count: 'exact' })
       .eq('user_id', authUser.id)
@@ -50,16 +50,16 @@ export default async function DashboardPage() {
   // 並行查詢對話和部署數量
   const [convResult, deployResult, convCountsResult] = projectIds.length > 0
     ? await Promise.all([
-        supabase
+        db
           .from('conversations')
           .select('id', { count: 'exact', head: true })
           .in('project_id', projectIds),
-        supabase
+        db
           .from('deployments')
           .select('id', { count: 'exact', head: true })
           .in('project_id', projectIds)
           .eq('status', 'success'),
-        supabase
+        db
           .from('conversations')
           .select('project_id')
           .in('project_id', projectIds)
