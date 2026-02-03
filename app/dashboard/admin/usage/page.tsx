@@ -28,11 +28,10 @@ function getDefaultDateRange() {
   return { start: thirtyDaysAgo, end: today }
 }
 
-// 從 cookie 獲取 token（客戶端）
+// 從 localStorage 獲取 token（客戶端）
 function getAuthToken(): string | null {
-  if (typeof document === 'undefined') return null
-  const match = document.cookie.match(/auth_token=([^;]+)/)
-  return match ? match[1] : null
+  if (typeof window === 'undefined') return null
+  return localStorage.getItem('auth_token')
 }
 
 export default function AdminUsagePage() {

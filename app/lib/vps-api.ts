@@ -411,6 +411,156 @@ export async function getProjectReminder(input: {
 }
 
 // ============================================================
+// Admin User Management API
+// ============================================================
+
+/**
+ * 獲取所有用戶列表（管理員專用）
+ */
+export async function listAllUsers(input: {
+  token: string
+  page?: number
+  pageSize?: number
+  sortBy?: string
+  sortOrder?: 'asc' | 'desc'
+  search?: string
+}): Promise<ApiResponse<{
+  items: Array<{
+    id: string
+    email: string
+    name: string | null
+    plan: string
+    subscriptionStatus: string
+    isAdmin: boolean
+    projectCount: number
+    messageCount: number
+    createdAt: string
+  }>
+  total: number
+  page: number
+  pageSize: number
+}>> {
+  const params = new URLSearchParams()
+  if (input.page) params.set('page', input.page.toString())
+  if (input.pageSize) params.set('pageSize', input.pageSize.toString())
+  if (input.sortBy) params.set('sortBy', input.sortBy)
+  if (input.sortOrder) params.set('sortOrder', input.sortOrder)
+  if (input.search) params.set('search', input.search)
+
+  const query = params.toString() ? `?${params.toString()}` : ''
+
+  return apiRequest(`/api/dashboard/admin/users${query}`, {
+    method: 'GET',
+    headers: {
+      Authorization: `Bearer ${input.token}`,
+    },
+  })
+}
+
+/**
+ * 獲取單一用戶詳情（管理員專用）
+ */
+export async function getUserDetail(input: {
+  token: string
+  userId: string
+}): Promise<ApiResponse<{
+  user: {
+    id: string
+    email: string
+    name: string | null
+    plan: string
+    subscriptionStatus: string
+    isAdmin: boolean
+    messageCount: number
+    createdAt: string
+  }
+  projects: Array<{
+    id: string
+    name: string
+    status: string
+    createdAt: string
+  }>
+  recentConversations: Array<{
+    id: string
+    projectName: string
+    messageCount: number
+    updatedAt: string
+  }>
+  stats: {
+    totalProjects: number
+    totalConversations: number
+    totalDeployments: number
+    totalLLMCost: number
+  }
+}>> {
+  return apiRequest(`/api/dashboard/admin/users/${input.userId}`, {
+    method: 'GET',
+    headers: {
+      Authorization: `Bearer ${input.token}`,
+    },
+  })
+}
+
+/**
+ * 獲取審計日誌（管理員專用）
+ */
+export async function getAuditLogs(input: {
+  token: string
+  page?: number
+  pageSize?: number
+  action?: string
+  startDate?: string
+  endDate?: string
+}): Promise<ApiResponse<{
+  items: Array<{
+    id: string
+    userId: string | null
+    userEmail: string | null
+    action: string
+    entityType: string | null
+    entityId: string | null
+    metadata: Record<string, unknown> | null
+    createdAt: string
+  }>
+  total: number
+  page: number
+  pageSize: number
+}>> {
+  const params = new URLSearchParams()
+  if (input.page) params.set('page', input.page.toString())
+  if (input.pageSize) params.set('pageSize', input.pageSize.toString())
+  if (input.action) params.set('action', input.action)
+  if (input.startDate) params.set('startDate', input.startDate)
+  if (input.endDate) params.set('endDate', input.endDate)
+
+  const query = params.toString() ? `?${params.toString()}` : ''
+
+  return apiRequest(`/api/dashboard/admin/logs${query}`, {
+    method: 'GET',
+    headers: {
+      Authorization: `Bearer ${input.token}`,
+    },
+  })
+}
+
+/**
+ * 設置用戶管理員狀態
+ */
+export async function setUserAdmin(input: {
+  token: string
+  userId: string
+  isAdmin: boolean
+}): Promise<ApiResponse<{ success: boolean }>> {
+  return apiRequest(`/api/dashboard/admin/users/${input.userId}/admin`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${input.token}`,
+    },
+    body: JSON.stringify({ isAdmin: input.isAdmin }),
+  })
+}
+
+// ============================================================
 // 導出
 // ============================================================
 
@@ -428,4 +578,8 @@ export const vpsApi = {
   initializeSession,
   getUserConversations,
   getProjectReminder,
+  listAllUsers,
+  setUserAdmin,
+  getUserDetail,
+  getAuditLogs,
 }

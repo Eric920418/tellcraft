@@ -4,7 +4,13 @@ import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { motion } from 'framer-motion'
 import { DataTable, DateRangePicker, type Column } from '../../../components/dashboard'
-import { getAuditLogs } from '../../../actions/admin'
+import { getAuditLogs } from '../../../lib/vps-api'
+
+// 從 localStorage 獲取 token
+function getAuthToken(): string | null {
+  if (typeof window === 'undefined') return null
+  return localStorage.getItem('auth_token')
+}
 
 interface AuditLog {
   id: string
@@ -44,8 +50,15 @@ export default function AdminLogsPage() {
 
   useEffect(() => {
     const fetchLogs = async () => {
+      const token = getAuthToken()
+      if (!token) {
+        router.push('/auth/login?next=/dashboard/admin/logs')
+        return
+      }
+
       setIsLoading(true)
       const result = await getAuditLogs({
+        token,
         page,
         pageSize,
         action: actionFilter || undefined,

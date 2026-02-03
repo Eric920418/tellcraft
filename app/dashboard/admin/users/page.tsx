@@ -4,7 +4,13 @@ import { useEffect, useState, useRef, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
 import { motion } from 'framer-motion'
 import { DataTable, StatusBadge, SearchInput, type Column } from '../../../components/dashboard'
-import { listAllUsers, setUserAdmin } from '../../../actions/admin'
+import { listAllUsers, setUserAdmin } from '../../../lib/vps-api'
+
+// 從 localStorage 獲取 token
+function getAuthToken(): string | null {
+  if (typeof window === 'undefined') return null
+  return localStorage.getItem('auth_token')
+}
 
 interface User {
   id: string
@@ -77,8 +83,15 @@ export default function AdminUsersPage() {
 
   useEffect(() => {
     const fetchUsers = async () => {
+      const token = getAuthToken()
+      if (!token) {
+        router.push('/auth/login?next=/dashboard/admin/users')
+        return
+      }
+
       setIsLoading(true)
       const result = await listAllUsers({
+        token,
         page,
         pageSize,
         sortBy,
@@ -107,7 +120,13 @@ export default function AdminUsersPage() {
   }, [page, sortBy, sortOrder, searchQuery, router])
 
   const handleToggleAdmin = async (userId: string, currentIsAdmin: boolean) => {
-    const result = await setUserAdmin({ userId, isAdmin: !currentIsAdmin })
+    const token = getAuthToken()
+    if (!token) {
+      alert('請重新登入')
+      return
+    }
+
+    const result = await setUserAdmin({ token, userId, isAdmin: !currentIsAdmin })
     if (result.success) {
       // 更新本地狀態
       setUsers((prev) =>

@@ -5,7 +5,13 @@ import { useParams, useRouter } from 'next/navigation'
 import { motion } from 'framer-motion'
 import Link from 'next/link'
 import { StatusBadge, MiniStatsCard } from '../../../../components/dashboard'
-import { getUserDetail, setUserAdmin } from '../../../../actions/admin'
+import { getUserDetail, setUserAdmin } from '../../../../lib/vps-api'
+
+// 從 localStorage 獲取 token
+function getAuthToken(): string | null {
+  if (typeof window === 'undefined') return null
+  return localStorage.getItem('auth_token')
+}
 
 interface UserDetail {
   user: {
@@ -71,7 +77,13 @@ export default function AdminUserDetailPage() {
 
   useEffect(() => {
     const fetchData = async () => {
-      const result = await getUserDetail(userId)
+      const token = getAuthToken()
+      if (!token) {
+        router.push('/auth/login?next=/dashboard/admin/users/' + userId)
+        return
+      }
+
+      const result = await getUserDetail({ token, userId })
 
       if (!result.success) {
         if (result.error === '無管理員權限') {
@@ -94,7 +106,14 @@ export default function AdminUserDetailPage() {
 
   const handleToggleAdmin = async () => {
     if (!data) return
+    const token = getAuthToken()
+    if (!token) {
+      alert('請重新登入')
+      return
+    }
+
     const result = await setUserAdmin({
+      token,
       userId: data.user.id,
       isAdmin: !data.user.isAdmin,
     })

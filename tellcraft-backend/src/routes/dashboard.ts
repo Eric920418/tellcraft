@@ -292,4 +292,355 @@ router.get('/admin/usage', requireAuth, async (req, res) => {
   }
 })
 
+/**
+ * GET /api/dashboard/admin/users
+ * 獲取所有用戶列表（管理員專用）
+ */
+router.get('/admin/users', requireAuth, async (req, res) => {
+  try {
+    // 檢查是否為管理員
+    const adminCheck = await queryOne<{ is_admin: boolean }>(
+      'SELECT is_admin FROM users WHERE id = $1',
+      [req.user!.id]
+    )
+
+    if (!adminCheck?.is_admin) {
+      return res.status(403).json({ error: '無管理員權限' })
+    }
+
+    const { page = '1', pageSize = '20', sortBy = 'created_at', sortOrder = 'desc', search } = req.query as {
+      page?: string
+      pageSize?: string
+      sortBy?: string
+      sortOrder?: string
+      search?: string
+    }
+
+    const pageNum = parseInt(page, 10)
+    const limit = parseInt(pageSize, 10)
+    const offset = (pageNum - 1) * limit
+
+    // 允許的排序欄位
+    const allowedSortFields: Record<string, string> = {
+      email: 'email',
+      plan: 'plan',
+      created_at: 'created_at',
+      createdAt: 'created_at',
+      projectCount: 'project_count',
+    }
+
+    const sortField = allowedSortFields[sortBy] || 'created_at'
+    const order = sortOrder === 'asc' ? 'ASC' : 'DESC'
+
+    // 構建查詢
+    let whereClause = ''
+    const params: (string | number)[] = []
+
+    if (search) {
+      whereClause = 'WHERE (u.email ILIKE $1 OR u.name ILIKE $1)'
+      params.push(`%${search}%`)
+    }
+
+    // 查詢總數
+    const countResult = await queryOne<{ count: string }>(
+      `SELECT COUNT(*) as count FROM users u ${whereClause}`,
+      params
+    )
+    const total = parseInt(countResult?.count || '0', 10)
+
+    // 查詢用戶列表（包含專案數量）
+    const usersResult = await query<{
+      id: string
+      email: string
+      name: string | null
+      plan: string
+      subscription_status: string
+      is_admin: boolean
+      message_count_this_period: number
+      created_at: string
+      project_count: string
+    }>(
+      `SELECT
+        u.id, u.email, u.name, u.plan, u.subscription_status, u.is_admin,
+        u.message_count_this_period, u.created_at,
+        COUNT(p.id) as project_count
+       FROM users u
+       LEFT JOIN projects p ON p.user_id = u.id
+       ${whereClause}
+       GROUP BY u.id
+       ORDER BY ${sortField === 'project_count' ? 'project_count' : 'u.' + sortField} ${order}
+       LIMIT $${params.length + 1} OFFSET $${params.length + 2}`,
+      [...params, limit, offset]
+    )
+
+    const items = usersResult.rows.map(u => ({
+      id: u.id,
+      email: u.email,
+      name: u.name,
+      plan: u.plan,
+      subscriptionStatus: u.subscription_status,
+      isAdmin: u.is_admin,
+      projectCount: parseInt(u.project_count, 10),
+      messageCount: u.message_count_this_period,
+      createdAt: u.created_at
+    }))
+
+    res.json({ items, total, page: pageNum, pageSize: limit })
+  } catch (error) {
+    console.error('[Dashboard] 獲取用戶列表失敗:', error)
+    res.status(500).json({ error: '獲取用戶列表失敗' })
+  }
+})
+
+/**
+ * GET /api/dashboard/admin/logs
+ * 獲取審計日誌（管理員專用）
+ */
+router.get('/admin/logs', requireAuth, async (req, res) => {
+  try {
+    // 檢查是否為管理員
+    const adminCheck = await queryOne<{ is_admin: boolean }>(
+      'SELECT is_admin FROM users WHERE id = $1',
+      [req.user!.id]
+    )
+
+    if (!adminCheck?.is_admin) {
+      return res.status(403).json({ error: '無管理員權限' })
+    }
+
+    const { page = '1', pageSize = '50', action, startDate, endDate } = req.query as {
+      page?: string
+      pageSize?: string
+      action?: string
+      startDate?: string
+      endDate?: string
+    }
+
+    const pageNum = parseInt(page, 10)
+    const limit = parseInt(pageSize, 10)
+    const offset = (pageNum - 1) * limit
+
+    // 構建 WHERE 條件
+    const conditions: string[] = []
+    const params: (string | number)[] = []
+    let paramIndex = 1
+
+    if (action) {
+      conditions.push(`al.action = $${paramIndex}`)
+      params.push(action)
+      paramIndex++
+    }
+
+    if (startDate) {
+      conditions.push(`al.created_at >= $${paramIndex}`)
+      params.push(startDate)
+      paramIndex++
+    }
+
+    if (endDate) {
+      conditions.push(`al.created_at <= $${paramIndex}::date + interval '1 day'`)
+      params.push(endDate)
+      paramIndex++
+    }
+
+    const whereClause = conditions.length > 0 ? 'WHERE ' + conditions.join(' AND ') : ''
+
+    // 查詢總數
+    const countResult = await queryOne<{ count: string }>(
+      `SELECT COUNT(*) as count FROM audit_logs al ${whereClause}`,
+      params
+    )
+    const total = parseInt(countResult?.count || '0', 10)
+
+    // 查詢日誌列表
+    const logsResult = await query<{
+      id: string
+      user_id: string | null
+      action: string
+      entity_type: string | null
+      entity_id: string | null
+      metadata: any
+      created_at: string
+      user_email: string | null
+    }>(
+      `SELECT al.id, al.user_id, al.action, al.entity_type, al.entity_id, al.metadata, al.created_at, u.email as user_email
+       FROM audit_logs al
+       LEFT JOIN users u ON al.user_id = u.id
+       ${whereClause}
+       ORDER BY al.created_at DESC
+       LIMIT $${paramIndex} OFFSET $${paramIndex + 1}`,
+      [...params, limit, offset]
+    )
+
+    const items = logsResult.rows.map(log => ({
+      id: log.id,
+      userId: log.user_id,
+      userEmail: log.user_email,
+      action: log.action,
+      entityType: log.entity_type,
+      entityId: log.entity_id,
+      metadata: log.metadata,
+      createdAt: log.created_at
+    }))
+
+    res.json({ items, total, page: pageNum, pageSize: limit })
+  } catch (error) {
+    console.error('[Dashboard] 獲取審計日誌失敗:', error)
+    res.status(500).json({ error: '獲取審計日誌失敗' })
+  }
+})
+
+/**
+ * GET /api/dashboard/admin/users/:userId
+ * 獲取單一用戶詳情
+ */
+router.get('/admin/users/:userId', requireAuth, async (req, res) => {
+  try {
+    // 檢查是否為管理員
+    const adminCheck = await queryOne<{ is_admin: boolean }>(
+      'SELECT is_admin FROM users WHERE id = $1',
+      [req.user!.id]
+    )
+
+    if (!adminCheck?.is_admin) {
+      return res.status(403).json({ error: '無管理員權限' })
+    }
+
+    const { userId } = req.params
+
+    // 獲取用戶基本資料
+    const user = await queryOne<{
+      id: string
+      email: string
+      name: string | null
+      plan: string
+      subscription_status: string
+      is_admin: boolean
+      message_count_this_period: number
+      created_at: string
+    }>(
+      'SELECT id, email, name, plan, subscription_status, is_admin, message_count_this_period, created_at FROM users WHERE id = $1',
+      [userId]
+    )
+
+    if (!user) {
+      return res.status(404).json({ error: '用戶不存在' })
+    }
+
+    // 獲取專案列表
+    const projectsResult = await query<{
+      id: string
+      name: string
+      status: string
+      created_at: string
+    }>(
+      'SELECT id, name, status, created_at FROM projects WHERE user_id = $1 ORDER BY created_at DESC LIMIT 10',
+      [userId]
+    )
+
+    // 獲取最近對話
+    const conversationsResult = await query<{
+      id: string
+      project_name: string
+      message_count: string
+      updated_at: string
+    }>(
+      `SELECT c.id, p.name as project_name, jsonb_array_length(c.messages) as message_count, c.updated_at
+       FROM conversations c
+       JOIN projects p ON c.project_id = p.id
+       WHERE p.user_id = $1
+       ORDER BY c.updated_at DESC
+       LIMIT 10`,
+      [userId]
+    )
+
+    // 獲取統計數據
+    const [projectCount, convCount, deployCount, llmCost] = await Promise.all([
+      queryOne<{ count: string }>('SELECT COUNT(*) as count FROM projects WHERE user_id = $1', [userId]),
+      queryOne<{ count: string }>(
+        'SELECT COUNT(*) as count FROM conversations c JOIN projects p ON c.project_id = p.id WHERE p.user_id = $1',
+        [userId]
+      ),
+      queryOne<{ count: string }>(
+        `SELECT COUNT(*) as count FROM deployments d JOIN projects p ON d.project_id = p.id WHERE p.user_id = $1 AND d.status = 'success'`,
+        [userId]
+      ),
+      queryOne<{ total: string }>(
+        'SELECT COALESCE(SUM(cost_usd), 0) as total FROM llm_usage WHERE user_id = $1',
+        [userId]
+      ),
+    ])
+
+    res.json({
+      user: {
+        id: user.id,
+        email: user.email,
+        name: user.name,
+        plan: user.plan,
+        subscriptionStatus: user.subscription_status,
+        isAdmin: user.is_admin,
+        messageCount: user.message_count_this_period,
+        createdAt: user.created_at
+      },
+      projects: projectsResult.rows.map(p => ({
+        id: p.id,
+        name: p.name,
+        status: p.status,
+        createdAt: p.created_at
+      })),
+      recentConversations: conversationsResult.rows.map(c => ({
+        id: c.id,
+        projectName: c.project_name,
+        messageCount: parseInt(c.message_count, 10),
+        updatedAt: c.updated_at
+      })),
+      stats: {
+        totalProjects: parseInt(projectCount?.count || '0', 10),
+        totalConversations: parseInt(convCount?.count || '0', 10),
+        totalDeployments: parseInt(deployCount?.count || '0', 10),
+        totalLLMCost: parseFloat(llmCost?.total || '0')
+      }
+    })
+  } catch (error) {
+    console.error('[Dashboard] 獲取用戶詳情失敗:', error)
+    res.status(500).json({ error: '獲取用戶詳情失敗' })
+  }
+})
+
+/**
+ * POST /api/dashboard/admin/users/:userId/admin
+ * 設置用戶管理員狀態
+ */
+router.post('/admin/users/:userId/admin', requireAuth, async (req, res) => {
+  try {
+    // 檢查是否為管理員
+    const adminCheck = await queryOne<{ is_admin: boolean }>(
+      'SELECT is_admin FROM users WHERE id = $1',
+      [req.user!.id]
+    )
+
+    if (!adminCheck?.is_admin) {
+      return res.status(403).json({ error: '無管理員權限' })
+    }
+
+    const { userId } = req.params
+    const { isAdmin } = req.body as { isAdmin: boolean }
+
+    // 不能修改自己的管理員狀態
+    if (userId === req.user!.id) {
+      return res.status(400).json({ error: '不能修改自己的管理員狀態' })
+    }
+
+    await query(
+      'UPDATE users SET is_admin = $1 WHERE id = $2',
+      [isAdmin, userId]
+    )
+
+    res.json({ success: true })
+  } catch (error) {
+    console.error('[Dashboard] 設置管理員狀態失敗:', error)
+    res.status(500).json({ error: '設置管理員狀態失敗' })
+  }
+})
+
 export default router
