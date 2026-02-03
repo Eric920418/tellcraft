@@ -27,9 +27,16 @@ export async function middleware(request: NextRequest) {
 
   // 獲取 auth_token cookie
   const token = request.cookies.get('auth_token')?.value
+  const allCookies = request.cookies.getAll().map(c => c.name)
+
+  console.log('[Middleware] Path:', pathname)
+  console.log('[Middleware] Has token:', !!token)
+  console.log('[Middleware] All cookies:', allCookies)
+  console.log('[Middleware] Token preview:', token ? token.substring(0, 50) + '...' : 'none')
 
   if (!token) {
     // 未登入，導向登入頁
+    console.log('[Middleware] No token, redirecting to login')
     const url = request.nextUrl.clone()
     url.pathname = '/auth/login'
     url.searchParams.set('next', pathname)
