@@ -1512,6 +1512,32 @@ function ChatSection({
     }
   }
 
+  // 進入儀表板（先同步 cookie 再跳轉）
+  const handleDashboard = async () => {
+    const token = localStorage.getItem('auth_token')
+    if (!token) {
+      window.location.href = '/auth/login?next=/dashboard'
+      return
+    }
+
+    try {
+      const res = await fetch('/api/auth/set-cookie', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token }),
+      })
+
+      if (res.ok) {
+        window.location.href = '/dashboard'
+      } else {
+        localStorage.removeItem('auth_token')
+        window.location.href = '/auth/login?next=/dashboard'
+      }
+    } catch {
+      window.location.href = '/dashboard'
+    }
+  }
+
   // 處理關閉登入提示
   const handleDismissLoginPrompt = () => {
     if (loginPromptConfig) {
@@ -2203,7 +2229,7 @@ function ChatSection({
                     <span style={{ fontSize: 13, color: 'var(--gray-600)' }}>
                       {auth.user?.name || sessionInfo?.user?.name || auth.user?.email?.split('@')[0] || sessionInfo?.user?.email?.split('@')[0] || '用戶'}
                     </span>
-                    <GlowButton href="/dashboard" variant="outline" size="sm">
+                    <GlowButton onClick={handleDashboard} variant="outline" size="sm">
                       儀表板
                     </GlowButton>
                   </>
@@ -3386,6 +3412,34 @@ function HomeContent() {
     window.location.reload()
   }
 
+  // 進入儀表板（先同步 cookie 再跳轉）
+  const handleDashboard = async () => {
+    const token = localStorage.getItem('auth_token')
+    if (!token) {
+      window.location.href = '/auth/login?next=/dashboard'
+      return
+    }
+
+    try {
+      const res = await fetch('/api/auth/set-cookie', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token }),
+      })
+
+      if (res.ok) {
+        window.location.href = '/dashboard'
+      } else {
+        // Token 無效，清除並重新登入
+        localStorage.removeItem('auth_token')
+        window.location.href = '/auth/login?next=/dashboard'
+      }
+    } catch {
+      // 網路錯誤，直接嘗試跳轉（讓 middleware 處理）
+      window.location.href = '/dashboard'
+    }
+  }
+
   const handleStartChat = useCallback(() => {
     if (heroInput.trim()) {
       setInitialMessage(heroInput)
@@ -3483,7 +3537,7 @@ function HomeContent() {
             <span style={{ fontSize: 14, color: 'var(--gray-600)' }}>
               {auth.user.name || auth.user.email?.split('@')[0] || '用戶'}
             </span>
-            <GlowButton href="/dashboard" variant="outline" size="sm">
+            <GlowButton onClick={handleDashboard} variant="outline" size="sm">
               儀表板
             </GlowButton>
             <GlowButton onClick={handleSignOut} variant="outline" size="sm">
