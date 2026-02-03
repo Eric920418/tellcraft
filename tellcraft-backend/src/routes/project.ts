@@ -18,25 +18,88 @@ const PLAN_PROJECT_LIMITS: Record<string, number> = {
 
 /**
  * GET /api/project
- * 取得用戶的所有專案
+ * 取得用戶的所有專案（支持分頁和搜索）
  */
 router.get('/', requireAuth, async (req, res) => {
   try {
     const userId = req.user!.id
+    const { page = '1', pageSize = '10', search, status } = req.query as {
+      page?: string
+      pageSize?: string
+      search?: string
+      status?: string
+    }
 
+    const pageNum = parseInt(page, 10)
+    const limit = parseInt(pageSize, 10)
+    const offset = (pageNum - 1) * limit
+
+    // 構建 WHERE 條件
+    const conditions = ['p.user_id = $1']
+    const params: (string | number)[] = [userId]
+    let paramIndex = 2
+
+    if (search) {
+      conditions.push(`(p.name ILIKE $${paramIndex} OR p.description ILIKE $${paramIndex})`)
+      params.push(`%${search}%`)
+      paramIndex++
+    }
+
+    if (status) {
+      conditions.push(`p.status = $${paramIndex}`)
+      params.push(status)
+      paramIndex++
+    }
+
+    const whereClause = conditions.join(' AND ')
+
+    // 查詢總數
+    const countResult = await db.queryOne<{ count: string }>(
+      `SELECT COUNT(*) as count FROM projects p WHERE ${whereClause}`,
+      params
+    )
+    const total = parseInt(countResult?.count || '0', 10)
+
+    // 查詢專案列表（包含對話數量）
     const projects = await db.queryMany<{
       id: string
       name: string
       description: string | null
       status: string
+      vercel_url: string | null
+      custom_domain: string | null
       created_at: string
       updated_at: string
+      conversation_count: string
     }>(
-      'SELECT id, name, description, status, created_at, updated_at FROM projects WHERE user_id = $1 ORDER BY updated_at DESC',
-      [userId]
+      `SELECT p.id, p.name, p.description, p.status, p.vercel_url, p.custom_domain,
+              p.created_at, p.updated_at,
+              COUNT(c.id) as conversation_count
+       FROM projects p
+       LEFT JOIN conversations c ON c.project_id = p.id
+       WHERE ${whereClause}
+       GROUP BY p.id
+       ORDER BY p.updated_at DESC
+       LIMIT $${paramIndex} OFFSET $${paramIndex + 1}`,
+      [...params, limit, offset]
     )
 
-    res.json({ projects })
+    res.json({
+      projects: projects.map(p => ({
+        id: p.id,
+        name: p.name,
+        description: p.description,
+        status: p.status,
+        vercelUrl: p.vercel_url,
+        customDomain: p.custom_domain,
+        conversationCount: parseInt(p.conversation_count, 10),
+        createdAt: p.created_at,
+        updatedAt: p.updated_at
+      })),
+      total,
+      page: pageNum,
+      pageSize: limit
+    })
   } catch (error) {
     console.error('[Project] 取得專案列表失敗:', error)
     res.status(500).json({ error: 'Failed to get projects' })

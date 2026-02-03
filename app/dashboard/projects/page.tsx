@@ -1,10 +1,17 @@
 'use client'
 
 import { useEffect, useState } from 'react'
+import { useRouter } from 'next/navigation'
 import { motion } from 'framer-motion'
 import Link from 'next/link'
 import { DataTable, StatusBadge, SearchInput, type Column } from '../../components/dashboard'
-import { getUserProjects } from '../../actions'
+import { getProjects } from '../../lib/vps-api'
+
+// 從 localStorage 獲取 token
+function getAuthToken(): string | null {
+  if (typeof window === 'undefined') return null
+  return localStorage.getItem('auth_token')
+}
 
 interface Project {
   id: string
@@ -35,6 +42,7 @@ const statusLabels: Record<string, string> = {
 }
 
 export default function ProjectsPage() {
+  const router = useRouter()
   const [projects, setProjects] = useState<Project[]>([])
   const [total, setTotal] = useState(0)
   const [page, setPage] = useState(1)
@@ -46,31 +54,30 @@ export default function ProjectsPage() {
 
   useEffect(() => {
     const fetchProjects = async () => {
+      const token = getAuthToken()
+      if (!token) {
+        router.push('/auth/login?next=/dashboard/projects')
+        return
+      }
+
       setIsLoading(true)
-      const result = await getUserProjects({
+      const result = await getProjects({
+        token,
         page,
         pageSize,
+        search: search || undefined,
         status: statusFilter || undefined,
       })
 
       if (result.success && result.data) {
-        // 簡單的前端搜尋過濾
-        let filtered = result.data.projects
-        if (search) {
-          filtered = filtered.filter(
-            (p) =>
-              p.name.toLowerCase().includes(search.toLowerCase()) ||
-              p.description?.toLowerCase().includes(search.toLowerCase())
-          )
-        }
-        setProjects(filtered)
+        setProjects(result.data.projects)
         setTotal(result.data.total)
       }
       setIsLoading(false)
     }
 
     fetchProjects()
-  }, [page, statusFilter, search])
+  }, [page, statusFilter, search, router])
 
   const columns: Column<Project>[] = [
     {

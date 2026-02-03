@@ -171,15 +171,35 @@ export async function createProject(input: {
  */
 export async function getProjects(input: {
   token: string
-}): Promise<ApiResponse<{ projects: Array<{
-  id: string
-  name: string
-  description: string | null
-  status: string
-  created_at: string
-  updated_at: string
-}> }>> {
-  return apiRequest('/api/project', {
+  page?: number
+  pageSize?: number
+  search?: string
+  status?: string
+}): Promise<ApiResponse<{
+  projects: Array<{
+    id: string
+    name: string
+    description: string | null
+    status: string
+    vercelUrl: string | null
+    customDomain: string | null
+    conversationCount: number
+    createdAt: string
+    updatedAt: string
+  }>
+  total: number
+  page: number
+  pageSize: number
+}>> {
+  const params = new URLSearchParams()
+  if (input.page) params.set('page', input.page.toString())
+  if (input.pageSize) params.set('pageSize', input.pageSize.toString())
+  if (input.search) params.set('search', input.search)
+  if (input.status) params.set('status', input.status)
+
+  const query = params.toString() ? `?${params.toString()}` : ''
+
+  return apiRequest(`/api/project${query}`, {
     method: 'GET',
     headers: {
       Authorization: `Bearer ${input.token}`,

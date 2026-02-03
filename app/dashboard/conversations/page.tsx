@@ -1,10 +1,16 @@
 'use client'
 
 import { useEffect, useState } from 'react'
+import { useRouter } from 'next/navigation'
 import { motion } from 'framer-motion'
 import { DataTable, type Column } from '../../components/dashboard'
-import { getUserConversations } from '../../actions'
-import { getCurrentUserAction } from '../../actions'
+import { getUserConversations } from '../../lib/vps-api'
+
+// 從 localStorage 獲取 token
+function getAuthToken(): string | null {
+  if (typeof window === 'undefined') return null
+  return localStorage.getItem('auth_token')
+}
 
 interface Conversation {
   id: string
@@ -13,28 +19,24 @@ interface Conversation {
   lastMessage?: string
   messageCount: number
   updatedAt: string
-  createdAt: string
+  createdAt?: string
 }
 
 export default function ConversationsPage() {
+  const router = useRouter()
   const [conversations, setConversations] = useState<Conversation[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
     const fetchData = async () => {
-      // 先獲取當前用戶
-      const userResult = await getCurrentUserAction()
-      if (!userResult.success || !userResult.data) {
-        setError('未登入')
-        setIsLoading(false)
+      const token = getAuthToken()
+      if (!token) {
+        router.push('/auth/login?next=/dashboard/conversations')
         return
       }
 
-      const result = await getUserConversations({
-        userId: userResult.data.userId,
-        limit: 50,
-      })
+      const result = await getUserConversations({ token })
 
       if (result.success && result.data) {
         setConversations(result.data.conversations)
@@ -45,7 +47,7 @@ export default function ConversationsPage() {
     }
 
     fetchData()
-  }, [])
+  }, [router])
 
   const columns: Column<Conversation>[] = [
     {
