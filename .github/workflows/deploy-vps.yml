@@ -4,10 +4,6 @@ on:
   push:
     branches:
       - main
-    paths:
-      # 只有這些路徑變更時才觸發 VPS 部署
-      - 'tellcraft-backend/**'
-      - '.github/workflows/deploy-vps.yml'
 
 jobs:
   deploy:
@@ -53,4 +49,3 @@ jobs:
             echo "Deployment complete!"
             pm2 status
             echo "=========================================="
-
