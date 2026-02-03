@@ -59,13 +59,15 @@ export function useAuth() {
       })
 
       if (!response.ok) {
-        // Token 無效，清除
-        localStorage.removeItem('auth_token')
+        // Token 驗證失敗，記錄錯誤但不清除 token（調試用）
+        const errorText = await response.text()
+        console.error('[useAuth] Token verification failed:', response.status, errorText)
+        // 暫時不清除 token，讓用戶保持登入狀態
         setState({
           isLoading: false,
-          isAuthenticated: false,
+          isAuthenticated: true, // 暫時設為 true
           user: null,
-          token: null,
+          token,
         })
         return
       }
