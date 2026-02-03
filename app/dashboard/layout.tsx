@@ -28,8 +28,12 @@ export default async function DashboardLayout({
   }
 
   // 本地驗證 JWT（不需要訪問 VPS）
+  console.log('[Dashboard Layout] Verifying token...')
+  console.log('[Dashboard Layout] Token preview:', token.substring(0, 50) + '...')
+
   try {
     const { payload } = await jwtVerify(token, JWT_SECRET) as { payload: JWTPayload }
+    console.log('[Dashboard Layout] JWT verified successfully, user:', payload.sub)
 
     const user = {
       userId: payload.sub,
@@ -44,7 +48,7 @@ export default async function DashboardLayout({
       </DashboardShell>
     )
   } catch (error) {
-    console.error('[Dashboard] JWT verification failed:', error)
+    console.error('[Dashboard Layout] JWT verification failed:', error)
     redirect('/auth/login?next=/dashboard')
   }
 }
