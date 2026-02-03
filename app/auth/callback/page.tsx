@@ -1,13 +1,13 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useState, Suspense } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 
 /**
- * VPS Auth Callback Page
+ * VPS Auth Callback Content
  * 處理 OAuth 回調，儲存 token 並重定向
  */
-export default function AuthCallbackPage() {
+function AuthCallbackContent() {
   const router = useRouter()
   const searchParams = useSearchParams()
   const [error, setError] = useState<string | null>(null)
@@ -38,7 +38,7 @@ export default function AuthCallbackPage() {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gray-50 dark:bg-gray-900">
         <div className="max-w-md w-full p-6 text-center">
-          <div className="text-red-500 text-6xl mb-4">⚠️</div>
+          <div className="text-red-500 text-6xl mb-4">!</div>
           <h1 className="text-xl font-semibold text-gray-900 dark:text-white mb-2">
             登入失敗
           </h1>
@@ -64,6 +64,22 @@ export default function AuthCallbackPage() {
   )
 }
 
+// 包裝 Suspense 以處理 useSearchParams
+export default function AuthCallbackPage() {
+  return (
+    <Suspense fallback={
+      <div className="min-h-screen flex items-center justify-center bg-gray-50 dark:bg-gray-900">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-blue-500 mx-auto mb-4"></div>
+          <p className="text-gray-600 dark:text-gray-400">載入中...</p>
+        </div>
+      </div>
+    }>
+      <AuthCallbackContent />
+    </Suspense>
+  )
+}
+
 function getErrorMessage(error: string): string {
   const errorMessages: Record<string, string> = {
     missing_code: '缺少授權碼',
@@ -71,6 +87,7 @@ function getErrorMessage(error: string): string {
     userinfo_failed: '取得用戶資訊失敗',
     profile_failed: '取得用戶資料失敗',
     callback_failed: '認證回調失敗',
+    exchange_failed: 'Token 交換失敗',
   }
   return errorMessages[error] || `認證錯誤: ${error}`
 }
