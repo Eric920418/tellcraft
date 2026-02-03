@@ -3330,14 +3330,10 @@ function HomeContent() {
   const [heroInput, setHeroInput] = useState('')
   const [initialMessage, setInitialMessage] = useState('')
   const [resumeConversationId, setResumeConversationId] = useState<string | null>(null)
-  const [currentUser, setCurrentUser] = useState<{
-    userId: string
-    email?: string
-    name?: string
-    avatarUrl?: string
-  } | null>(null)
-  const [isLoadingUser, setIsLoadingUser] = useState(true)
   const [anonymousId, setAnonymousId] = useState<string | undefined>(undefined)
+
+  // VPS JWT Auth Hook
+  const auth = useAuth()
 
   // 獲取 anonymousId（用於提醒組件）
   useEffect(() => {
@@ -3353,18 +3349,6 @@ function HomeContent() {
       setIsChatActive(true)
     }
   }, [searchParams])
-
-  // 載入當前用戶狀態
-  useEffect(() => {
-    const loadUser = async () => {
-      const result = await getCurrentUser()
-      if (result.success && result.data) {
-        setCurrentUser(result.data)
-      }
-      setIsLoadingUser(false)
-    }
-    loadUser()
-  }, [])
 
   // 對話模式時禁用首頁滾動
   useEffect(() => {
@@ -3397,9 +3381,8 @@ function HomeContent() {
   }, [isChatActive])
 
   // 登出處理
-  const handleSignOut = async () => {
-    await signOut()
-    setCurrentUser(null)
+  const handleSignOut = () => {
+    auth.logout()
     window.location.reload()
   }
 
@@ -3480,14 +3463,14 @@ function HomeContent() {
               gap: 12,
             }}
           >
-        {isLoadingUser ? (
+        {auth.isLoading ? (
           <div style={{ width: 80, height: 36 }} />
-        ) : currentUser ? (
+        ) : auth.isAuthenticated && auth.user ? (
           // 已登入 - 顯示用戶資訊
           <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-            {currentUser.avatarUrl && (
+            {auth.user.avatarUrl && (
               <img
-                src={currentUser.avatarUrl}
+                src={auth.user.avatarUrl}
                 alt=""
                 style={{
                   width: 32,
@@ -3498,7 +3481,7 @@ function HomeContent() {
               />
             )}
             <span style={{ fontSize: 14, color: 'var(--gray-600)' }}>
-              {currentUser.name || currentUser.email?.split('@')[0] || '用戶'}
+              {auth.user.name || auth.user.email?.split('@')[0] || '用戶'}
             </span>
             <GlowButton href="/dashboard" variant="outline" size="sm">
               儀表板
