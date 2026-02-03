@@ -230,6 +230,95 @@ export async function healthCheck(): Promise<ApiResponse<{
   })
 }
 
+/**
+ * 獲取 Dashboard 統計數據
+ */
+export async function getDashboardStats(input: {
+  token: string
+}): Promise<ApiResponse<{
+  stats: {
+    totalProjects: number
+    totalConversations: number
+    totalDeployments: number
+    messageUsage: {
+      used: number
+      limit: number
+      plan: string
+    }
+  }
+  recentProjects: Array<{
+    id: string
+    name: string
+    status: string
+    conversationCount: number
+    updatedAt: string
+  }>
+}>> {
+  return apiRequest('/api/dashboard/stats', {
+    method: 'GET',
+    headers: {
+      Authorization: `Bearer ${input.token}`,
+    },
+  })
+}
+
+/**
+ * 獲取管理員統計數據
+ */
+export async function getAdminStats(input: {
+  token: string
+}): Promise<ApiResponse<{
+  totalUsers: number
+  totalProjects: number
+  totalConversations: number
+  totalDeployments: number
+  activeUsers7d: number
+  newUsers7d: number
+  totalLLMCost: number
+}>> {
+  return apiRequest('/api/dashboard/admin/stats', {
+    method: 'GET',
+    headers: {
+      Authorization: `Bearer ${input.token}`,
+    },
+  })
+}
+
+/**
+ * 獲取 LLM 用量統計
+ */
+export async function getLLMUsageStats(input: {
+  token: string
+  startDate?: string
+  endDate?: string
+  groupBy?: 'day' | 'week' | 'month' | 'model' | 'conversation'
+}): Promise<ApiResponse<{
+  totalInputTokens: number
+  totalOutputTokens: number
+  totalCost: number
+  breakdown: Array<{
+    key: string
+    inputTokens: number
+    outputTokens: number
+    cost: number
+    count: number
+  }>
+}>> {
+  const params = new URLSearchParams()
+  if (input.startDate) params.set('startDate', input.startDate)
+  if (input.endDate) params.set('endDate', input.endDate)
+  if (input.groupBy) params.set('groupBy', input.groupBy)
+
+  const query = params.toString() ? `?${params.toString()}` : ''
+
+  return apiRequest(`/api/dashboard/admin/usage${query}`, {
+    method: 'GET',
+    headers: {
+      Authorization: `Bearer ${input.token}`,
+    },
+  })
+}
+
 // ============================================================
 // 導出
 // ============================================================
@@ -242,4 +331,7 @@ export const vpsApi = {
   getProjects,
   getProject,
   healthCheck,
+  getDashboardStats,
+  getAdminStats,
+  getLLMUsageStats,
 }

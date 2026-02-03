@@ -12,6 +12,7 @@ import conversationRoutes, { setOrchestratorQueue } from './routes/conversation'
 import projectRoutes from './routes/project'
 import healthRoutes from './routes/health'
 import authRoutes from './routes/auth'
+import dashboardRoutes from './routes/dashboard'
 
 // ============================================================
 // 環境變數
@@ -117,6 +118,7 @@ app.use('/health', healthRoutes)
 app.use('/auth', authRoutes)
 app.use('/api/conversation', conversationRoutes)
 app.use('/api/project', projectRoutes)
+app.use('/api/dashboard', dashboardRoutes)
 
 // 404 處理
 app.use((_req, res) => {
