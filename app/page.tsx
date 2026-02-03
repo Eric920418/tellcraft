@@ -1548,6 +1548,7 @@ function ChatSection({
       const result = await replyToConversation({
         conversationId: sessionInfo.conversationId,
         projectId: sessionInfo.projectId,
+        userId: sessionInfo.userId,
         taskId: sessionInfo.currentTaskId,
         content
       })

@@ -930,10 +930,64 @@ export async function configureWebhook(input: {
 }
 
 // ============================================================
-// Chat 串接 Inngest Actions
+// Chat 串接 VPS Backend Actions
 // ============================================================
 
-import { triggerUserRequest, triggerUserReply } from '../inngest'
+const VPS_API_URL = process.env.VPS_API_URL || 'http://54.238.4.117:8080'
+
+/**
+ * 呼叫 VPS API 觸發訊息處理（取代 Inngest）
+ */
+async function triggerVpsMessage(input: {
+  projectId: string
+  conversationId: string
+  userId: string
+  message: string
+}): Promise<void> {
+  const response = await fetch(`${VPS_API_URL}/api/conversation/${input.conversationId}/message`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      projectId: input.projectId,
+      userId: input.userId,
+      message: input.message,
+    }),
+  })
+
+  if (!response.ok) {
+    const error = await response.text()
+    throw new Error(`VPS API error: ${error}`)
+  }
+}
+
+/**
+ * 呼叫 VPS API 觸發回覆處理（取代 Inngest）
+ */
+async function triggerVpsReply(input: {
+  projectId: string
+  conversationId: string
+  userId: string
+  taskId: string
+  message: string
+  specConfirmed?: boolean
+}): Promise<void> {
+  const response = await fetch(`${VPS_API_URL}/api/conversation/${input.conversationId}/reply`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      projectId: input.projectId,
+      userId: input.userId,
+      taskId: input.taskId,
+      message: input.message,
+      specConfirmed: input.specConfirmed,
+    }),
+  })
+
+  if (!response.ok) {
+    const error = await response.text()
+    throw new Error(`VPS API error: ${error}`)
+  }
+}
 
 /**
  * 初始化會話
@@ -1680,16 +1734,16 @@ export async function sendMessageAndTrigger(input: {
     // 忽略計數更新錯誤，不阻塞主流程
   }
 
-  // 4. 觸發 Inngest
+  // 4. 觸發 VPS Backend
   try {
-    await triggerUserRequest({
+    await triggerVpsMessage({
       projectId,
       conversationId,
       userId,
       message: content
     })
   } catch (err) {
-    console.error('Failed to trigger Inngest:', err)
+    console.error('Failed to trigger VPS backend:', err)
     // 將錯誤記錄到對話中，讓前端看到
     const errorMsg = {
       id: crypto.randomUUID(),
@@ -1717,16 +1771,17 @@ export async function sendMessageAndTrigger(input: {
 /**
  * 多輪對話回覆
  * - 存消息到 DB
- * - 觸發 user/reply 事件（帶 taskId）
+ * - 觸發 VPS Backend reply
  */
 export async function replyToConversation(input: {
   conversationId: string
   projectId: string
+  userId: string
   taskId: string
   content: string
   specConfirmed?: boolean
 }): Promise<ActionResult<{ messageId: string }>> {
-  const { conversationId, projectId, taskId, content, specConfirmed } = input
+  const { conversationId, projectId, userId, taskId, content, specConfirmed } = input
 
   // 1. 讀取現有消息
   const { data: conversation, error: readError } = await supabase
@@ -1761,17 +1816,18 @@ export async function replyToConversation(input: {
     return { success: false, error: updateError.message }
   }
 
-  // 3. 觸發 Inngest user/reply
+  // 3. 觸發 VPS Backend reply
   try {
-    await triggerUserReply({
+    await triggerVpsReply({
       projectId,
       conversationId,
+      userId,
       taskId,
       message: content,
       specConfirmed
     })
   } catch (err) {
-    console.error('Failed to trigger Inngest reply:', err)
+    console.error('Failed to trigger VPS reply:', err)
   }
 
   return {

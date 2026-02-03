@@ -19,12 +19,19 @@ export function setOrchestratorQueue(queue: Queue) {
 /**
  * POST /api/conversation/:id/message
  * 發送消息到對話（觸發 Orchestrator）
+ * 支援兩種模式：
+ * 1. Bearer token 認證（前端直接呼叫）
+ * 2. userId 在 body 中（server action 呼叫）
  */
-router.post('/:id/message', requireAuth, async (req, res) => {
+router.post('/:id/message', optionalAuth, async (req, res) => {
   try {
     const { id: conversationId } = req.params
-    const { message, projectId } = req.body
-    const userId = req.user!.id
+    const { message, projectId, userId: bodyUserId } = req.body
+    const userId = req.user?.id || bodyUserId
+
+    if (!userId) {
+      return res.status(401).json({ error: 'Missing userId or authentication' })
+    }
 
     if (!message || !projectId) {
       return res.status(400).json({ error: 'Missing message or projectId' })
@@ -85,12 +92,19 @@ router.post('/:id/message', requireAuth, async (req, res) => {
 /**
  * POST /api/conversation/:id/reply
  * 回覆對話（多輪對話機制）
+ * 支援兩種模式：
+ * 1. Bearer token 認證（前端直接呼叫）
+ * 2. userId 在 body 中（server action 呼叫）
  */
-router.post('/:id/reply', requireAuth, async (req, res) => {
+router.post('/:id/reply', optionalAuth, async (req, res) => {
   try {
     const { id: conversationId } = req.params
-    const { message, projectId, taskId, specConfirmed } = req.body
-    const userId = req.user!.id
+    const { message, projectId, taskId, specConfirmed, userId: bodyUserId } = req.body
+    const userId = req.user?.id || bodyUserId
+
+    if (!userId) {
+      return res.status(401).json({ error: 'Missing userId or authentication' })
+    }
 
     if (!message || !projectId) {
       return res.status(400).json({ error: 'Missing message or projectId' })
