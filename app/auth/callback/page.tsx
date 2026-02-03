@@ -30,16 +30,31 @@ function AuthCallbackContent() {
     // 儲存 token 到 localStorage（供 useAuth hook 使用）
     localStorage.setItem('auth_token', token)
 
-    // 同時設置 httpOnly cookie（供 middleware 和 Server Components 使用）
-    fetch('/api/auth/set-cookie', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ token }),
-    }).finally(() => {
-      // 無論 cookie 設置成功與否，都跳轉
-      // 使用完整頁面重新載入，確保 useAuth hook 重新讀取 token
+    // 設置 httpOnly cookie（供 middleware 使用）- 必須等待完成
+    const setCookie = async () => {
+      try {
+        const response = await fetch('/api/auth/set-cookie', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ token }),
+          credentials: 'same-origin',
+        })
+
+        if (!response.ok) {
+          console.error('[Auth] Failed to set cookie:', await response.text())
+        }
+      } catch (err) {
+        console.error('[Auth] Error setting cookie:', err)
+      }
+
+      // 等待一小段時間確保 cookie 完全設定
+      await new Promise(resolve => setTimeout(resolve, 100))
+
+      // 跳轉到目標頁面
       window.location.href = returnTo
-    })
+    }
+
+    setCookie()
   }, [searchParams, router])
 
   if (error) {
