@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation'
 import { motion } from 'framer-motion'
 import Link from 'next/link'
 import { StatsCard, BarChart } from '../../components/dashboard'
-import { getAdminStats, getLLMUsageStats } from '../../actions/admin'
+import { getAdminStats, getLLMUsageStats } from '../../lib/vps-api'
 
 interface AdminStats {
   totalUsers: number
@@ -30,6 +30,13 @@ interface LLMUsage {
   }>
 }
 
+// 從 cookie 獲取 token（客戶端）
+function getAuthToken(): string | null {
+  if (typeof document === 'undefined') return null
+  const match = document.cookie.match(/auth_token=([^;]+)/)
+  return match ? match[1] : null
+}
+
 export default function AdminDashboardPage() {
   const router = useRouter()
   const [stats, setStats] = useState<AdminStats | null>(null)
@@ -39,9 +46,15 @@ export default function AdminDashboardPage() {
 
   useEffect(() => {
     const fetchData = async () => {
+      const token = getAuthToken()
+      if (!token) {
+        router.push('/auth/login?next=/dashboard/admin')
+        return
+      }
+
       const [statsResult, usageResult] = await Promise.all([
-        getAdminStats(),
-        getLLMUsageStats({ groupBy: 'day' }),
+        getAdminStats({ token }),
+        getLLMUsageStats({ token, groupBy: 'day' }),
       ])
 
       if (!statsResult.success) {

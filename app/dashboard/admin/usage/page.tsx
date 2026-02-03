@@ -4,7 +4,7 @@ import { useEffect, useState, useMemo } from 'react'
 import { useRouter } from 'next/navigation'
 import { motion } from 'framer-motion'
 import { StatsCard, BarChart, LineChart, DateRangePicker } from '../../../components/dashboard'
-import { getLLMUsageStats } from '../../../actions/admin'
+import { getLLMUsageStats } from '../../../lib/vps-api'
 
 interface LLMUsage {
   totalInputTokens: number
@@ -28,6 +28,13 @@ function getDefaultDateRange() {
   return { start: thirtyDaysAgo, end: today }
 }
 
+// 從 cookie 獲取 token（客戶端）
+function getAuthToken(): string | null {
+  if (typeof document === 'undefined') return null
+  const match = document.cookie.match(/auth_token=([^;]+)/)
+  return match ? match[1] : null
+}
+
 export default function AdminUsagePage() {
   const router = useRouter()
   const [usage, setUsage] = useState<LLMUsage | null>(null)
@@ -39,8 +46,15 @@ export default function AdminUsagePage() {
 
   useEffect(() => {
     const fetchData = async () => {
+      const token = getAuthToken()
+      if (!token) {
+        router.push('/auth/login?next=/dashboard/admin/usage')
+        return
+      }
+
       setIsLoading(true)
       const result = await getLLMUsageStats({
+        token,
         startDate: dateRange.start,
         endDate: dateRange.end,
         groupBy,
