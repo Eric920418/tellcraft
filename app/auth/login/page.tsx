@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, Suspense } from 'react'
+import { useState, useEffect, Suspense } from 'react'
 import { useSearchParams } from 'next/navigation'
 import Link from 'next/link'
 import { motion } from 'framer-motion'
@@ -8,11 +8,63 @@ import { motion } from 'framer-motion'
 function LoginContent() {
   const [isLoading, setIsLoading] = useState<'google' | 'line' | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [isSyncing, setIsSyncing] = useState(true)
   const searchParams = useSearchParams()
 
-  // 從 URL 獲取 returnTo
-  const returnTo = searchParams.get('returnTo') || '/'
+  // 從 URL 獲取 returnTo（支援 next 和 returnTo 兩種參數名）
+  const returnTo = searchParams.get('next') || searchParams.get('returnTo') || '/'
   const urlError = searchParams.get('error')
+
+  // 檢查是否已登入（localStorage 有 token）
+  // 如果有，同步 cookie 並跳轉
+  useEffect(() => {
+    const token = localStorage.getItem('auth_token')
+    if (token) {
+      // 同步 cookie
+      fetch('/api/auth/set-cookie', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token }),
+      })
+        .then(res => {
+          if (res.ok) {
+            // Cookie 設置成功，跳轉到目標頁面
+            window.location.href = returnTo
+          } else {
+            // Token 無效，清除並顯示登入頁
+            localStorage.removeItem('auth_token')
+            setIsSyncing(false)
+          }
+        })
+        .catch(() => {
+          setIsSyncing(false)
+        })
+    } else {
+      setIsSyncing(false)
+    }
+  }, [returnTo])
+
+  // 如果正在同步，顯示載入中
+  if (isSyncing) {
+    return (
+      <div
+        style={{
+          minHeight: '100vh',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          background: 'var(--gray-50)',
+        }}
+      >
+        <div style={{ textAlign: 'center' }}>
+          <LoadingSpinner />
+          <p style={{ marginTop: 16, color: 'var(--gray-500)', fontSize: 14 }}>
+            檢查登入狀態...
+          </p>
+        </div>
+      </div>
+    )
+  }
 
   const handleGoogleLogin = () => {
     setIsLoading('google')
