@@ -8,76 +8,31 @@ import { motion } from 'framer-motion'
 function LoginContent() {
   const [isLoading, setIsLoading] = useState<'google' | 'line' | null>(null)
   const [error, setError] = useState<string | null>(null)
-  const [isSyncing, setIsSyncing] = useState(true)
   const searchParams = useSearchParams()
 
   // 從 URL 獲取 returnTo（支援 next 和 returnTo 兩種參數名）
-  const returnTo = searchParams.get('next') || searchParams.get('returnTo') || '/'
+  const next = searchParams.get('next') || searchParams.get('returnTo') || '/'
   const urlError = searchParams.get('error')
 
-  // 檢查是否已登入（localStorage 有 token）
-  // 如果有，同步 cookie 並跳轉
+  // 清除舊的 localStorage token（因為沒有對應的 cookie，需要重新登入）
   useEffect(() => {
-    const token = localStorage.getItem('auth_token')
-    if (token) {
-      // 同步 cookie
-      fetch('/api/auth/set-cookie', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ token }),
-      })
-        .then(res => {
-          if (res.ok) {
-            // Cookie 設置成功，跳轉到目標頁面
-            window.location.href = returnTo
-          } else {
-            // Token 無效，清除並顯示登入頁
-            localStorage.removeItem('auth_token')
-            setIsSyncing(false)
-          }
-        })
-        .catch(() => {
-          setIsSyncing(false)
-        })
-    } else {
-      setIsSyncing(false)
+    // 如果是從 dashboard 被重定向來的，說明 cookie 無效或不存在
+    // 清除 localStorage 讓狀態一致
+    if (next.startsWith('/dashboard')) {
+      localStorage.removeItem('auth_token')
     }
-  }, [returnTo])
-
-  // 如果正在同步，顯示載入中
-  if (isSyncing) {
-    return (
-      <div
-        style={{
-          minHeight: '100vh',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          background: 'var(--gray-50)',
-        }}
-      >
-        <div style={{ textAlign: 'center' }}>
-          <LoadingSpinner />
-          <p style={{ marginTop: 16, color: 'var(--gray-500)', fontSize: 14 }}>
-            檢查登入狀態...
-          </p>
-        </div>
-      </div>
-    )
-  }
+  }, [next])
 
   const handleGoogleLogin = () => {
     setIsLoading('google')
     setError(null)
-    // 使用 Vercel 代理路由（解決 Google 不允許 IP callback 的問題）
-    window.location.href = `/api/auth/google?returnTo=${encodeURIComponent(returnTo)}`
+    window.location.href = `/api/auth/google?returnTo=${encodeURIComponent(next)}`
   }
 
   const handleLineLogin = () => {
     setIsLoading('line')
     setError(null)
-    // 使用 Vercel 代理路由
-    window.location.href = `/api/auth/line?returnTo=${encodeURIComponent(returnTo)}`
+    window.location.href = `/api/auth/line?returnTo=${encodeURIComponent(next)}`
   }
 
   const displayError = error || (urlError ? getErrorMessage(urlError) : null)
@@ -273,7 +228,6 @@ function LoginContent() {
   )
 }
 
-// 包裝 Suspense 以處理 useSearchParams
 export default function LoginPage() {
   return (
     <Suspense fallback={
@@ -299,11 +253,11 @@ function getErrorMessage(error: string): string {
     userinfo_failed: '取得用戶資訊失敗，請重試',
     profile_failed: '取得用戶資料失敗，請重試',
     callback_failed: '認證過程發生錯誤，請重試',
+    exchange_failed: 'Token 交換失敗，請重試',
   }
   return errorMessages[error] || `登入失敗: ${error}`
 }
 
-// Icons
 function GoogleIcon() {
   return (
     <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
