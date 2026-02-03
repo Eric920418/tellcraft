@@ -10,42 +10,47 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      - name: Decode SSH Key
+        run: |
+          echo "${{ secrets.VPS_SSH_KEY_B64 }}" | base64 -d > /tmp/ssh_key
+          chmod 600 /tmp/ssh_key
+
       - name: Deploy to VPS
-        uses: appleboy/ssh-action@v1.0.3
-        with:
-          host: 54.238.4.117
-          username: ubuntu
-          key: ${{ secrets.VPS_SSH_KEY }}
-          port: 22
-          script: |
-            echo "=========================================="
-            echo "Starting VPS deployment..."
-            echo "=========================================="
+        run: |
+          ssh -o StrictHostKeyChecking=no -i /tmp/ssh_key ubuntu@54.238.4.117 << 'ENDSSH'
+          echo "=========================================="
+          echo "Starting VPS deployment..."
+          echo "=========================================="
 
-            cd ~/tellcraft-repo
+          cd ~/tellcraft-repo
 
-            # 拉取最新代碼
-            echo "Pulling latest code..."
-            git fetch origin main
-            git reset --hard origin/main
+          # 拉取最新代碼
+          echo "Pulling latest code..."
+          git fetch origin main
+          git reset --hard origin/main
 
-            # 檢查 backend 是否有變更需要重建
-            cd tellcraft-backend
+          # 檢查 backend 是否有變更需要重建
+          cd tellcraft-backend
 
-            # 安裝依賴（如果 package.json 有變更）
-            echo "Installing dependencies..."
-            pnpm install --frozen-lockfile
+          # 安裝依賴（如果 package.json 有變更）
+          echo "Installing dependencies..."
+          pnpm install --frozen-lockfile
 
-            # 重新編譯 TypeScript
-            echo "Building TypeScript..."
-            pnpm build
+          # 重新編譯 TypeScript
+          echo "Building TypeScript..."
+          pnpm build
 
-            # 重啟 PM2
-            echo "Restarting PM2..."
-            pm2 restart tellcraft-backend
+          # 重啟 PM2
+          echo "Restarting PM2..."
+          pm2 restart tellcraft-backend
 
-            # 顯示狀態
-            echo "=========================================="
-            echo "Deployment complete!"
-            pm2 status
-            echo "=========================================="
+          # 顯示狀態
+          echo "=========================================="
+          echo "Deployment complete!"
+          pm2 status
+          echo "=========================================="
+          ENDSSH
+
+      - name: Cleanup
+        if: always()
+        run: rm -f /tmp/ssh_key
