@@ -597,6 +597,134 @@ CREATE TABLE llm_usage (
 - `Chart.tsx` - 圖表元件（BarChart、LineChart、ProgressBar、DonutChart）
 - `DateRangePicker.tsx` - 日期範圍選擇器
 
+## VPS 後端遷移（2026-02-03）
+
+### 遷移原因
+
+| 當前問題 | 原因 | 遷移後 |
+|----------|------|--------|
+| Inngest waitForEvent 卡住 | 事件機制複雜，狀態難追蹤 | BullMQ 直接控制，可隨時檢查 |
+| Vercel Serverless 超時 | 10-60 秒限制 | VPS 無限制 |
+| Supabase 延遲 | 跨區域網路延遲 50-150ms | 本地 PostgreSQL < 1ms |
+| RLS 黑箱 | Supabase RLS 難調試 | 自己寫，完全控制 |
+
+### VPS 後端架構
+
+```
+┌─────────────────┐         ┌─────────────────────────────────────┐
+│  Vercel (前端)   │────────>│  VPS (54.238.4.117:8080)           │
+│  tellcraft.com  │  HTTP   │                                     │
+└─────────────────┘         │  ┌─────────────────────────────────┐ │
+                            │  │  Nginx (Port 8080)              │ │
+                            │  │  → localhost:3100               │ │
+                            │  └─────────────────────────────────┘ │
+                            │              ↓                       │
+                            │  ┌─────────────────────────────────┐ │
+                            │  │  Tellcraft Backend (3100)       │ │
+                            │  │  - Express API                   │ │
+                            │  │  - BullMQ Worker                 │ │
+                            │  │  - Socket.io WebSocket           │ │
+                            │  └─────────────────────────────────┘ │
+                            │              ↓                       │
+                            │  ┌───────────┐  ┌─────────────────┐ │
+                            │  │ PostgreSQL│  │ Redis (6379)    │ │
+                            │  │ (5432)    │  │                 │ │
+                            │  └───────────┘  └─────────────────┘ │
+                            └─────────────────────────────────────┘
+```
+
+### 後端專案結構
+
+```
+tellcraft-backend/
+├── src/
+│   ├── index.ts           # Express + WebSocket + BullMQ 入口
+│   ├── routes/            # API 路由
+│   │   ├── conversation.ts
+│   │   ├── project.ts
+│   │   └── health.ts
+│   ├── workers/           # BullMQ Workers
+│   │   └── orchestrator.ts
+│   ├── services/          # 業務邏輯
+│   │   ├── classifier.ts
+│   │   ├── registry.ts
+│   │   └── bdd-session.ts
+│   ├── middleware/        # 中間件
+│   │   └── auth.ts
+│   └── db/                # 資料庫
+│       └── client.ts
+├── nginx/                 # Nginx 配置
+│   └── tellcraft.conf
+├── package.json
+├── ecosystem.config.js    # PM2 配置
+└── .env.example
+```
+
+### Inngest → BullMQ 對照
+
+| Inngest | BullMQ |
+|---------|--------|
+| `step.run('name', fn)` | 直接執行 `await fn()` |
+| `step.waitForEvent()` | Redis 狀態 + 新 Job |
+| `step.sleep()` | `await delay(ms)` |
+| 自動重試 | `attempts: 3` 配置 |
+| 事件觸發 | `queue.add()` |
+
+### 前端 API 切換
+
+新增文件：
+- `app/lib/vps-api.ts` - VPS API 客戶端
+- `app/hooks/useVpsWebSocket.ts` - WebSocket Hook
+
+環境變數：
+```bash
+# Vercel 前端（Production）
+VPS_API_URL=http://54.238.4.117:8080
+NEXT_PUBLIC_VPS_API_URL=http://54.238.4.117:8080
+NEXT_PUBLIC_VPS_WS_URL=http://54.238.4.117:8080
+```
+
+### VPS 部署步驟
+
+```bash
+# 1. SSH 到 VPS
+ssh -i ~/Desktop/LightsailDefaultKey-ap-northeast-1.pem ubuntu@54.238.4.117
+
+# 2. 安裝後端
+cd /home/ubuntu
+git clone <repo> tellcraft-backend
+cd tellcraft-backend
+pnpm install
+pnpm build
+
+# 3. 配置環境變數
+cp .env.example .env
+# 編輯 .env
+
+# 4. 配置 Nginx
+sudo cp nginx/tellcraft.conf /etc/nginx/sites-available/tellcraft
+sudo ln -s /etc/nginx/sites-available/tellcraft /etc/nginx/sites-enabled/
+sudo nginx -t && sudo systemctl reload nginx
+
+# 5. 啟動服務
+pm2 start ecosystem.config.js
+pm2 save
+```
+
+### 驗證步驟
+
+```bash
+# 健康檢查
+curl http://54.238.4.117:8080/health
+# 預期: {"status":"ok","timestamp":"...","services":{"database":"connected","redis":"connected"}}
+
+# WebSocket 測試（瀏覽器 console）
+const socket = io('http://54.238.4.117:8080')
+socket.on('connect', () => console.log('Connected!'))
+```
+
+---
+
 ## 技術棧
 
 | 服務 | 用途 | 狀態 |
@@ -606,11 +734,14 @@ CREATE TABLE llm_usage (
 | Framer Motion | 動畫效果 | ✅ |
 | next-themes | 深色/淺色模式 | ✅ |
 | @supabase/ssr | SSR 認證 | ✅ |
-| Inngest | 事件驅動任務編排（大腦）| ✅ |
+| **VPS Backend** | Express + BullMQ + Socket.io | ✅ 完成 |
+| Inngest | ~~事件驅動任務編排~~ | ❌ 已棄用，改用 BullMQ |
 | Modal | sdd.os 執行環境（手腳）| ⏳ 待整合 |
 | sdd.os | 規格驅動開發、TDD 迭代 | ⏳ 待整合 |
-| Supabase | 資料庫 + Storage + Auth | ✅ |
-| Vercel | 網站部署 + 用戶專案部署 | ✅ |
+| Supabase | Auth（JWT 驗證）| ✅ |
+| PostgreSQL | 資料庫（VPS 本地）| ✅ 完成 |
+| Redis | BullMQ 隊列 + 狀態管理 | ✅ |
+| Vercel | 前端部署 | ✅ |
 | Cloudflare | DNS 託管 | ✅ |
 | Porkbun | 網域購買 | ⏳ Mock |
 
