@@ -1,16 +1,31 @@
 import { redirect } from 'next/navigation'
-import { createClient } from '../lib/supabase/server'
+import { cookies } from 'next/headers'
+import { jwtVerify } from 'jose'
 import { supabase, PLAN_MESSAGE_LIMITS } from '../lib/supabase'
 import { DashboardContent } from '../components/dashboard/DashboardContent'
 
-export default async function DashboardPage() {
-  // Server-side 認證
-  const authClient = await createClient()
-  const { data: { user: authUser } } = await authClient.auth.getUser()
+const JWT_SECRET = new TextEncoder().encode(
+  process.env.JWT_SECRET || 'tellcraft-jwt-secret-change-in-production'
+)
 
-  if (!authUser) {
+export default async function DashboardPage() {
+  // 從 JWT 獲取用戶 ID（layout 已驗證過，這裡直接解析）
+  const cookieStore = await cookies()
+  const token = cookieStore.get('auth_token')?.value
+
+  if (!token) {
     redirect('/auth/login?next=/dashboard')
   }
+
+  let userId: string
+  try {
+    const { payload } = await jwtVerify(token, JWT_SECRET)
+    userId = payload.sub as string
+  } catch {
+    redirect('/auth/login?next=/dashboard')
+  }
+
+  const authUser = { id: userId }
 
   // 並行查詢所有資料（一次 server 往返）
   const [userResult, projectsResult] = await Promise.all([
