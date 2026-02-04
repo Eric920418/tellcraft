@@ -1,8 +1,9 @@
 'use server'
 
 import { db, PLAN_MESSAGE_LIMITS, PLAN_PROJECT_LIMITS, PLAN_PRIORITY_WEIGHTS } from '../lib/db'
-import { getCurrentUser } from '../lib/auth'
+import { getCurrentUser, getAuthToken } from '../lib/auth'
 import { deployProject as deployProjectReal, generateNextJsTemplate } from './deploy'
+import * as vpsApi from '../lib/vps-api'
 
 // ============================================================
 // 類型定義
@@ -1475,6 +1476,7 @@ export async function initializeSessionFromAuth(input?: {
  * 取得當前認證用戶（Server Action 版本）
  * - 用於前端檢查登入狀態
  * - 包含 isAdmin 狀態避免前端重複查詢
+ * - 透過 VPS API 取得，避免直連資料庫
  */
 export async function getCurrentUserAction(): Promise<ActionResult<{
   userId: string
@@ -1483,28 +1485,23 @@ export async function getCurrentUserAction(): Promise<ActionResult<{
   avatarUrl?: string
   isAdmin: boolean
 } | null>> {
-  const authUser = await getCurrentUser()
+  try {
+    const token = await getAuthToken()
 
-  if (!authUser) {
-    return { success: true, data: null }
-  }
-
-  // 查詢完整用戶資訊（包含 avatarUrl）
-  const { data: userData } = await db
-    .from('users')
-    .select('is_admin, avatar_url, name')
-    .eq('id', authUser.id)
-    .single()
-
-  return {
-    success: true,
-    data: {
-      userId: authUser.id,
-      email: authUser.email,
-      name: userData?.name || authUser.name,
-      avatarUrl: userData?.avatar_url,
-      isAdmin: userData?.is_admin || authUser.isAdmin || false
+    if (!token) {
+      return { success: true, data: null }
     }
+
+    const result = await vpsApi.getCurrentUserFromVps({ token })
+
+    if (!result.success || !result.data) {
+      return { success: true, data: null }
+    }
+
+    return { success: true, data: result.data }
+  } catch (error) {
+    console.error('[getCurrentUserAction] 錯誤:', error)
+    return { success: true, data: null }
   }
 }
 
@@ -1513,6 +1510,7 @@ export async function getCurrentUserAction(): Promise<ActionResult<{
  * - 將訪客的專案和對話遷移到認證帳號
  * - 處理同名專案衝突（重命名）
  * - 標記原訪客帳號為 cancelled
+ * - 透過 VPS API 執行，避免直連資料庫
  */
 export async function migrateAnonymousAccount(input: {
   authUserId: string
@@ -1521,124 +1519,26 @@ export async function migrateAnonymousAccount(input: {
   migratedProjects: number
   migratedConversations: number
 }>> {
-  const { authUserId, anonymousId } = input
+  try {
+    const token = await getAuthToken()
 
-  const anonymousEmail = `${anonymousId}@anonymous.tellcraft.app`
-
-  // 1. 查找匿名用戶
-  const { data: anonymousUser, error: anonError } = await db
-    .from('users')
-    .select('id')
-    .eq('email', anonymousEmail)
-    .single()
-
-  if (anonError || !anonymousUser) {
-    // 沒有匿名用戶資料，無需遷移
-    return {
-      success: true,
-      data: { migratedProjects: 0, migratedConversations: 0 }
-    }
-  }
-
-  // 如果匿名用戶就是認證用戶，無需遷移
-  if (anonymousUser.id === authUserId) {
-    return {
-      success: true,
-      data: { migratedProjects: 0, migratedConversations: 0 }
-    }
-  }
-
-  // 2. 查詢匿名用戶的專案
-  const { data: anonymousProjects, error: projError } = await db
-    .from('projects')
-    .select('id, name')
-    .eq('user_id', anonymousUser.id)
-
-  if (projError) {
-    return { success: false, error: projError.message }
-  }
-
-  // 3. 查詢認證用戶現有的專案名稱
-  const { data: authProjects } = await db
-    .from('projects')
-    .select('name')
-    .eq('user_id', authUserId)
-
-  const existingNames = new Set((authProjects || []).map((p: any) => p.name))
-
-  // 4. 遷移專案，處理同名衝突（並行處理避免序列 await）
-  let migratedProjects = 0
-  let migratedConversations = 0
-
-  // 預處理：計算所有新名稱（純計算，無 async）
-  const projectsToMigrate = (anonymousProjects || []).map((project: any) => {
-    let newName = project.name
-
-    // 處理同名衝突
-    if (existingNames.has(newName)) {
-      let suffix = 2
-      while (existingNames.has(`${project.name} (${suffix})`)) {
-        suffix++
-      }
-      newName = `${project.name} (${suffix})`
+    if (!token) {
+      return { success: false, error: '未登入' }
     }
 
-    existingNames.add(newName) // 預先添加避免後續衝突
-    return { ...project, newName }
-  })
-
-  // 並行執行所有專案更新
-  const updateResults = await Promise.all(
-    projectsToMigrate.map((project: any) =>
-      db
-        .from('projects')
-        .update({
-          user_id: authUserId,
-          name: project.newName,
-          updated_at: new Date().toISOString()
-        })
-        .eq('id', project.id)
-        .then(result => ({ projectId: project.id, error: result.error }))
-    )
-  )
-
-  // 統計成功遷移的專案
-  const successfulProjectIds = updateResults
-    .filter(r => !r.error)
-    .map(r => r.projectId)
-  migratedProjects = successfulProjectIds.length
-
-  // 一次性查詢所有成功遷移專案的對話數量
-  if (successfulProjectIds.length > 0) {
-    const { count } = await db
-      .from('conversations')
-      .select('id', { count: 'exact', head: true })
-      .in('project_id', successfulProjectIds)
-
-    migratedConversations = count || 0
-  }
-
-  // 5. 更新認證用戶，記錄關聯的匿名用戶 ID
-  await db
-    .from('users')
-    .update({ anonymous_user_id: anonymousUser.id })
-    .eq('id', authUserId)
-
-  // 6. 標記匿名用戶為 cancelled
-  await db
-    .from('users')
-    .update({
-      subscription_status: 'cancelled',
-      cancelled_at: new Date().toISOString()
+    const result = await vpsApi.migrateAnonymousAccount({
+      token,
+      anonymousId: input.anonymousId,
     })
-    .eq('id', anonymousUser.id)
 
-  return {
-    success: true,
-    data: {
-      migratedProjects,
-      migratedConversations
+    if (!result.success || !result.data) {
+      return { success: false, error: result.error || '遷移失敗' }
     }
+
+    return { success: true, data: result.data }
+  } catch (error) {
+    console.error('[migrateAnonymousAccount] 錯誤:', error)
+    return { success: false, error: (error as Error).message }
   }
 }
 
@@ -2063,6 +1963,7 @@ export async function getConversationMessages(input: {
 
 /**
  * 獲取當前用戶統計
+ * 透過 VPS API 取得，避免直連資料庫
  */
 export async function getUserStats(): Promise<ActionResult<{
   totalProjects: number
@@ -2074,68 +1975,37 @@ export async function getUserStats(): Promise<ActionResult<{
     plan: string
   }
 }>> {
-  const authUser = await getCurrentUser()
+  try {
+    const token = await getAuthToken()
 
-  if (!authUser) {
-    return { success: false, error: '未登入' }
-  }
+    if (!token) {
+      return { success: false, error: '未登入' }
+    }
 
-  // 查詢用戶資訊和專案 IDs（合併查詢，減少請求次數）
-  const [userResult, projectsResult] = await Promise.all([
-    db
-      .from('users')
-      .select('plan, message_count_this_period')
-      .eq('id', authUser.id)
-      .single(),
-    db
-      .from('projects')
-      .select('id', { count: 'exact' })  // 一次查詢同時取得 count 和 IDs
-      .eq('user_id', authUser.id)
-  ])
+    const result = await vpsApi.getDashboardStats({ token })
 
-  if (userResult.error || !userResult.data) {
-    return { success: false, error: '用戶不存在' }
-  }
+    if (!result.success || !result.data) {
+      return { success: false, error: result.error || '獲取統計失敗' }
+    }
 
-  const user = userResult.data
-  const projectIds = projectsResult.data?.map((p: any) => p.id) || []
-  const projectCount = projectsResult.count || 0
-
-  // 並行查詢對話和部署數量（減少往返次數）
-  const [convResult, deployResult] = projectIds.length > 0
-    ? await Promise.all([
-        db
-          .from('conversations')
-          .select('id', { count: 'exact', head: true })  // 使用 id 而非 *
-          .in('project_id', projectIds),
-        db
-          .from('deployments')
-          .select('id', { count: 'exact', head: true })  // 使用 id 而非 *
-          .in('project_id', projectIds)
-          .eq('status', 'success')
-      ])
-    : [{ count: 0 }, { count: 0 }]
-
-  const convCount = convResult.count || 0
-  const deployCount = deployResult.count || 0
-
-  return {
-    success: true,
-    data: {
-      totalProjects: projectCount || 0,
-      totalConversations: convCount || 0,
-      totalDeployments: deployCount || 0,
-      messageUsage: {
-        used: user.message_count_this_period,
-        limit: PLAN_MESSAGE_LIMITS[user.plan] || 50,
-        plan: user.plan
+    return {
+      success: true,
+      data: {
+        totalProjects: result.data.stats.totalProjects,
+        totalConversations: result.data.stats.totalConversations,
+        totalDeployments: result.data.stats.totalDeployments,
+        messageUsage: result.data.stats.messageUsage
       }
     }
+  } catch (error) {
+    console.error('[getUserStats] 錯誤:', error)
+    return { success: false, error: (error as Error).message }
   }
 }
 
 /**
  * 獲取當前用戶的專案列表
+ * 透過 VPS API 取得，避免直連資料庫
  */
 export async function getUserProjects(params: {
   page?: number
@@ -2157,67 +2027,39 @@ export async function getUserProjects(params: {
   page: number
   pageSize: number
 }>> {
-  const authUser = await getCurrentUser()
+  try {
+    const token = await getAuthToken()
 
-  if (!authUser) {
-    return { success: false, error: '未登入' }
-  }
-
-  const { page = 1, pageSize = 10, status } = params
-
-  let query = db
-    .from('projects')
-    .select('id, name, description, status, vercel_url, custom_domain, created_at, updated_at', { count: 'exact' })
-    .eq('user_id', authUser.id)
-
-  if (status) {
-    query = query.eq('status', status)
-  }
-
-  query = query.order('updated_at', { ascending: false })
-
-  const from = (page - 1) * pageSize
-  const to = from + pageSize - 1
-  query = query.range(from, to)
-
-  const { data: projects, error, count } = await query
-
-  if (error) {
-    return { success: false, error: error.message }
-  }
-
-  // 查詢每個專案的對話數量
-  const projectIds = projects?.map((p: any) => p.id) || []
-  const { data: convCounts } = projectIds.length > 0
-    ? await db
-        .from('conversations')
-        .select('project_id')
-        .in('project_id', projectIds)
-    : { data: [] }
-
-  const convCountMap = new Map<string, number>()
-  convCounts?.forEach((c: any) => {
-    convCountMap.set(c.project_id, (convCountMap.get(c.project_id) || 0) + 1)
-  })
-
-  return {
-    success: true,
-    data: {
-      projects: (projects || []).map((p: any) => ({
-        id: p.id,
-        name: p.name,
-        description: p.description,
-        status: p.status as ProjectStatus,
-        vercelUrl: p.vercel_url,
-        customDomain: p.custom_domain,
-        conversationCount: convCountMap.get(p.id) || 0,
-        createdAt: p.created_at,
-        updatedAt: p.updated_at
-      })),
-      total: count || 0,
-      page,
-      pageSize
+    if (!token) {
+      return { success: false, error: '未登入' }
     }
+
+    const result = await vpsApi.getProjects({
+      token,
+      page: params.page,
+      pageSize: params.pageSize,
+      status: params.status,
+    })
+
+    if (!result.success || !result.data) {
+      return { success: false, error: result.error || '獲取專案列表失敗' }
+    }
+
+    return {
+      success: true,
+      data: {
+        projects: result.data.projects.map(p => ({
+          ...p,
+          status: p.status as ProjectStatus,
+        })),
+        total: result.data.total,
+        page: result.data.page,
+        pageSize: result.data.pageSize
+      }
+    }
+  } catch (error) {
+    console.error('[getUserProjects] 錯誤:', error)
+    return { success: false, error: (error as Error).message }
   }
 }
 

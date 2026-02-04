@@ -608,6 +608,229 @@ router.get('/admin/users/:userId', requireAuth, async (req, res) => {
 })
 
 /**
+ * GET /api/dashboard/admin/projects
+ * 獲取所有專案列表（管理員專用）
+ */
+router.get('/admin/projects', requireAuth, async (req, res) => {
+  try {
+    // 檢查是否為管理員
+    const adminCheck = await queryOne<{ is_admin: boolean }>(
+      'SELECT is_admin FROM users WHERE id = $1',
+      [req.user!.id]
+    )
+
+    if (!adminCheck?.is_admin) {
+      return res.status(403).json({ error: '無管理員權限' })
+    }
+
+    const { page = '1', pageSize = '20', sortBy = 'created_at', sortOrder = 'desc', search, status, userId } = req.query as {
+      page?: string
+      pageSize?: string
+      sortBy?: string
+      sortOrder?: string
+      search?: string
+      status?: string
+      userId?: string
+    }
+
+    const pageNum = parseInt(page, 10)
+    const limit = parseInt(pageSize, 10)
+    const offset = (pageNum - 1) * limit
+
+    // 允許的排序欄位
+    const allowedSortFields: Record<string, string> = {
+      name: 'name',
+      status: 'status',
+      created_at: 'created_at',
+      createdAt: 'created_at',
+      updated_at: 'updated_at',
+      updatedAt: 'updated_at',
+    }
+
+    const sortField = allowedSortFields[sortBy] || 'created_at'
+    const order = sortOrder === 'asc' ? 'ASC' : 'DESC'
+
+    // 構建 WHERE 條件
+    const conditions: string[] = []
+    const params: (string | number)[] = []
+    let paramIndex = 1
+
+    if (status) {
+      conditions.push(`p.status = $${paramIndex}`)
+      params.push(status)
+      paramIndex++
+    }
+
+    if (userId) {
+      conditions.push(`p.user_id = $${paramIndex}`)
+      params.push(userId)
+      paramIndex++
+    }
+
+    if (search) {
+      conditions.push(`p.name ILIKE $${paramIndex}`)
+      params.push(`%${search}%`)
+      paramIndex++
+    }
+
+    const whereClause = conditions.length > 0 ? 'WHERE ' + conditions.join(' AND ') : ''
+
+    // 查詢總數
+    const countResult = await queryOne<{ count: string }>(
+      `SELECT COUNT(*) as count FROM projects p ${whereClause}`,
+      params
+    )
+    const total = parseInt(countResult?.count || '0', 10)
+
+    // 查詢專案列表（包含用戶 email 和對話數量）
+    const projectsResult = await query<{
+      id: string
+      name: string
+      status: string
+      user_id: string
+      user_email: string
+      vercel_url: string | null
+      created_at: string
+      updated_at: string
+      conversation_count: string
+    }>(
+      `SELECT
+        p.id, p.name, p.status, p.user_id, u.email as user_email,
+        p.vercel_url, p.created_at, p.updated_at,
+        COUNT(c.id) as conversation_count
+       FROM projects p
+       LEFT JOIN users u ON p.user_id = u.id
+       LEFT JOIN conversations c ON c.project_id = p.id
+       ${whereClause}
+       GROUP BY p.id, u.email
+       ORDER BY p.${sortField} ${order}
+       LIMIT $${paramIndex} OFFSET $${paramIndex + 1}`,
+      [...params, limit, offset]
+    )
+
+    const items = projectsResult.rows.map(p => ({
+      id: p.id,
+      name: p.name,
+      status: p.status,
+      userId: p.user_id,
+      userEmail: p.user_email || '',
+      conversationCount: parseInt(p.conversation_count, 10),
+      vercelUrl: p.vercel_url,
+      createdAt: p.created_at,
+      updatedAt: p.updated_at
+    }))
+
+    res.json({ items, total, page: pageNum, pageSize: limit, totalPages: Math.ceil(total / limit) })
+  } catch (error) {
+    console.error('[Dashboard] 獲取專案列表失敗:', error)
+    res.status(500).json({ error: '獲取專案列表失敗' })
+  }
+})
+
+/**
+ * GET /api/dashboard/admin/conversations
+ * 獲取所有對話列表（管理員專用）
+ */
+router.get('/admin/conversations', requireAuth, async (req, res) => {
+  try {
+    // 檢查是否為管理員
+    const adminCheck = await queryOne<{ is_admin: boolean }>(
+      'SELECT is_admin FROM users WHERE id = $1',
+      [req.user!.id]
+    )
+
+    if (!adminCheck?.is_admin) {
+      return res.status(403).json({ error: '無管理員權限' })
+    }
+
+    const { page = '1', pageSize = '20', sortBy = 'updated_at', sortOrder = 'desc', projectId } = req.query as {
+      page?: string
+      pageSize?: string
+      sortBy?: string
+      sortOrder?: string
+      projectId?: string
+    }
+
+    const pageNum = parseInt(page, 10)
+    const limit = parseInt(pageSize, 10)
+    const offset = (pageNum - 1) * limit
+
+    // 允許的排序欄位
+    const allowedSortFields: Record<string, string> = {
+      created_at: 'created_at',
+      createdAt: 'created_at',
+      updated_at: 'updated_at',
+      updatedAt: 'updated_at',
+    }
+
+    const sortField = allowedSortFields[sortBy] || 'updated_at'
+    const order = sortOrder === 'asc' ? 'ASC' : 'DESC'
+
+    // 構建 WHERE 條件
+    const conditions: string[] = []
+    const params: (string | number)[] = []
+    let paramIndex = 1
+
+    if (projectId) {
+      conditions.push(`c.project_id = $${paramIndex}`)
+      params.push(projectId)
+      paramIndex++
+    }
+
+    const whereClause = conditions.length > 0 ? 'WHERE ' + conditions.join(' AND ') : ''
+
+    // 查詢總數
+    const countResult = await queryOne<{ count: string }>(
+      `SELECT COUNT(*) as count FROM conversations c ${whereClause}`,
+      params
+    )
+    const total = parseInt(countResult?.count || '0', 10)
+
+    // 查詢對話列表（包含專案和用戶資訊）
+    const conversationsResult = await query<{
+      id: string
+      project_id: string
+      project_name: string
+      user_id: string
+      user_email: string
+      messages: any[]
+      spec_complete: boolean
+      created_at: string
+      updated_at: string
+    }>(
+      `SELECT
+        c.id, c.project_id, p.name as project_name,
+        p.user_id, u.email as user_email,
+        c.messages, c.spec_complete, c.created_at, c.updated_at
+       FROM conversations c
+       JOIN projects p ON c.project_id = p.id
+       LEFT JOIN users u ON p.user_id = u.id
+       ${whereClause}
+       ORDER BY c.${sortField} ${order}
+       LIMIT $${paramIndex} OFFSET $${paramIndex + 1}`,
+      [...params, limit, offset]
+    )
+
+    const items = conversationsResult.rows.map(conv => ({
+      id: conv.id,
+      projectId: conv.project_id,
+      projectName: conv.project_name || '',
+      userId: conv.user_id || '',
+      userEmail: conv.user_email || '',
+      messageCount: (conv.messages || []).length,
+      specComplete: conv.spec_complete,
+      createdAt: conv.created_at,
+      updatedAt: conv.updated_at
+    }))
+
+    res.json({ items, total, page: pageNum, pageSize: limit, totalPages: Math.ceil(total / limit) })
+  } catch (error) {
+    console.error('[Dashboard] 獲取對話列表失敗:', error)
+    res.status(500).json({ error: '獲取對話列表失敗' })
+  }
+})
+
+/**
  * POST /api/dashboard/admin/users/:userId/admin
  * 設置用戶管理員狀態
  */

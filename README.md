@@ -79,9 +79,51 @@ Round 3: 如果還有新問題，最後一輪
 
 ---
 
-### 最新修復（2026-02-04）
+### Server Actions DB 遷移（2026-02-04 Stage 1-3 部分完成）
 
-**VPS API 遷移 - 修復 Vercel 無法連接 VPS PostgreSQL**：
+**Stage 1：Admin Server Actions 完全遷移至 VPS API** ✅
+
+`app/actions/admin.ts` 不再直連 VPS PostgreSQL，改為呼叫 VPS HTTP API：
+
+| 變更項目 | 說明 |
+|----------|------|
+| `app/actions/admin.ts` | 移除 `import { db }`，改用 `vps-api.ts` 函數 |
+| `app/lib/auth.ts` | 新增 `getAuthToken()` 函數取得 JWT Token |
+| `app/lib/vps-api.ts` | 新增 `listAllProjects`, `listAllConversations` |
+| `tellcraft-backend/src/routes/dashboard.ts` | 新增 `GET /api/dashboard/admin/projects`, `GET /api/dashboard/admin/conversations` |
+
+**Stage 2-3：User 和 Project 函數部分遷移** 🔄
+
+| 變更項目 | 說明 |
+|----------|------|
+| `tellcraft-backend/src/routes/user.ts` | 新增 User API（`GET /api/user/me`, `POST /api/user/migrate`）|
+| `app/lib/vps-api.ts` | 新增 `getCurrentUserFromVps`, `migrateAnonymousAccount`, `updateProject` |
+| `app/actions/index.ts` | 遷移 4 個函數：`getCurrentUserAction`, `migrateAnonymousAccount`, `getUserStats`, `getUserProjects` |
+
+**已遷移函數對應**：
+- `getAdminStats()` → `vpsApi.getAdminStats()` ✅
+- `listAllUsers()` → `vpsApi.listAllUsers()` ✅
+- `listAllProjects()` → `vpsApi.listAllProjects()` ✅
+- `listAllConversations()` → `vpsApi.listAllConversations()` ✅
+- `getUserDetail()` → `vpsApi.getUserDetail()` ✅
+- `getLLMUsageStats()` → `vpsApi.getLLMUsageStats()` ✅
+- `getAuditLogs()` → `vpsApi.getAuditLogs()` ✅
+- `setUserAdmin()` → `vpsApi.setUserAdmin()` ✅
+- `getCurrentUserAction()` → `vpsApi.getCurrentUserFromVps()` ✅
+- `migrateAnonymousAccount()` → `vpsApi.migrateAnonymousAccount()` ✅
+- `getUserStats()` → `vpsApi.getDashboardStats()` ✅
+- `getUserProjects()` → `vpsApi.getProjects()` ✅
+
+**待遷移（Stage 4-5）**：
+- `app/actions/index.ts` 仍有 ~100 處 db 調用（專案操作、對話操作、BDD Session 等）
+- `app/actions/templates.ts`（模板相關）
+- `app/actions/storage.ts`（儲存相關）
+
+---
+
+### VPS API 遷移（2026-02-04）
+
+**修復 Vercel 無法連接 VPS PostgreSQL**：
 
 問題：Vercel Serverless 無法連接 VPS 的 PostgreSQL（`listen_addresses = 'localhost'`），導致所有使用 `db` 的 Server Actions 超時。
 

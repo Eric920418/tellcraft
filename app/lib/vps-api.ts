@@ -580,6 +580,162 @@ export async function setUserAdmin(input: {
   })
 }
 
+/**
+ * 獲取所有專案列表（管理員專用）
+ */
+export async function listAllProjects(input: {
+  token: string
+  page?: number
+  pageSize?: number
+  sortBy?: string
+  sortOrder?: 'asc' | 'desc'
+  search?: string
+  status?: string
+  userId?: string
+}): Promise<ApiResponse<{
+  items: Array<{
+    id: string
+    name: string
+    status: string
+    userId: string
+    userEmail: string
+    conversationCount: number
+    vercelUrl: string | null
+    createdAt: string
+    updatedAt: string
+  }>
+  total: number
+  page: number
+  pageSize: number
+  totalPages: number
+}>> {
+  const params = new URLSearchParams()
+  if (input.page) params.set('page', input.page.toString())
+  if (input.pageSize) params.set('pageSize', input.pageSize.toString())
+  if (input.sortBy) params.set('sortBy', input.sortBy)
+  if (input.sortOrder) params.set('sortOrder', input.sortOrder)
+  if (input.search) params.set('search', input.search)
+  if (input.status) params.set('status', input.status)
+  if (input.userId) params.set('userId', input.userId)
+
+  const query = params.toString() ? `?${params.toString()}` : ''
+
+  return apiRequest(`/api/dashboard/admin/projects${query}`, {
+    method: 'GET',
+    headers: {
+      Authorization: `Bearer ${input.token}`,
+    },
+  })
+}
+
+/**
+ * 獲取所有對話列表（管理員專用）
+ */
+export async function listAllConversations(input: {
+  token: string
+  page?: number
+  pageSize?: number
+  sortBy?: string
+  sortOrder?: 'asc' | 'desc'
+  projectId?: string
+}): Promise<ApiResponse<{
+  items: Array<{
+    id: string
+    projectId: string
+    projectName: string
+    userId: string
+    userEmail: string
+    messageCount: number
+    specComplete: boolean
+    createdAt: string
+    updatedAt: string
+  }>
+  total: number
+  page: number
+  pageSize: number
+  totalPages: number
+}>> {
+  const params = new URLSearchParams()
+  if (input.page) params.set('page', input.page.toString())
+  if (input.pageSize) params.set('pageSize', input.pageSize.toString())
+  if (input.sortBy) params.set('sortBy', input.sortBy)
+  if (input.sortOrder) params.set('sortOrder', input.sortOrder)
+  if (input.projectId) params.set('projectId', input.projectId)
+
+  const query = params.toString() ? `?${params.toString()}` : ''
+
+  return apiRequest(`/api/dashboard/admin/conversations${query}`, {
+    method: 'GET',
+    headers: {
+      Authorization: `Bearer ${input.token}`,
+    },
+  })
+}
+
+// ============================================================
+// User API
+// ============================================================
+
+/**
+ * 獲取當前用戶資訊
+ */
+export async function getCurrentUserFromVps(input: {
+  token?: string
+}): Promise<ApiResponse<{
+  userId: string
+  email?: string
+  name?: string
+  avatarUrl?: string
+  isAdmin: boolean
+} | null>> {
+  return apiRequest('/api/user/me', {
+    method: 'GET',
+    headers: input.token
+      ? { Authorization: `Bearer ${input.token}` }
+      : undefined,
+  })
+}
+
+/**
+ * 遷移匿名帳號到認證帳號
+ */
+export async function migrateAnonymousAccount(input: {
+  token: string
+  anonymousId: string
+}): Promise<ApiResponse<{
+  migratedProjects: number
+  migratedConversations: number
+}>> {
+  return apiRequest('/api/user/migrate', {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${input.token}`,
+    },
+    body: JSON.stringify({ anonymousId: input.anonymousId }),
+  })
+}
+
+/**
+ * 更新專案
+ */
+export async function updateProject(input: {
+  projectId: string
+  name?: string
+  description?: string
+  token: string
+}): Promise<ApiResponse<{ success: boolean }>> {
+  return apiRequest(`/api/project/${input.projectId}`, {
+    method: 'PATCH',
+    headers: {
+      Authorization: `Bearer ${input.token}`,
+    },
+    body: JSON.stringify({
+      name: input.name,
+      description: input.description,
+    }),
+  })
+}
+
 // ============================================================
 // 導出
 // ============================================================
@@ -602,4 +758,9 @@ export const vpsApi = {
   setUserAdmin,
   getUserDetail,
   getAuditLogs,
+  listAllProjects,
+  listAllConversations,
+  getCurrentUserFromVps,
+  migrateAnonymousAccount,
+  updateProject,
 }

@@ -60,3 +60,16 @@ export async function requireAdmin(): Promise<AuthUser> {
   }
   return user
 }
+
+/**
+ * 從 cookie 取得 JWT token
+ * 用於呼叫 VPS API
+ */
+export async function getAuthToken(): Promise<string | null> {
+  try {
+    const cookieStore = await cookies()
+    return cookieStore.get('auth_token')?.value || null
+  } catch {
+    return null
+  }
+}
