@@ -4,13 +4,15 @@ import { Pool, type PoolClient } from 'pg'
 const VPS_DATABASE_URL = process.env.VPS_DATABASE_URL ||
   'postgresql://tellcraft_user:tellcraft_secure_2024@54.238.4.117:5432/tellcraft'
 
-// 建立連線池
+// 建立連線池（Serverless 環境優化）
 const pool = new Pool({
   connectionString: VPS_DATABASE_URL,
-  max: 10,
-  idleTimeoutMillis: 30000,
+  max: 3,                            // Serverless 用更少連線，避免爆炸
+  idleTimeoutMillis: 10000,          // 更短閒置超時（10秒）
   connectionTimeoutMillis: 10000,
   ssl: false,
+  keepAlive: true,                   // 啟用 TCP keepAlive
+  keepAliveInitialDelayMillis: 10000, // 10秒後開始發送 keepAlive
 })
 
 pool.on('error', (err) => {
