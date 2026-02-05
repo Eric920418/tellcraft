@@ -110,6 +110,7 @@ export async function runPrdDiscovery(
 - 白話翻譯：將英文欄位名替換為中文，移除程式語法符號
 - 不要問太技術的問題，用領域語言
 - **最多列出 5 個問題**（小批量，確保問題間有邏輯連貫性）
+- **這 5 個問題之間也不能語意重複**（例如「資料存哪裡」和「如何儲存」是重複的）
 - 按優先級排序：High → Medium → Low
 ${existingQA.length ? `
 
@@ -121,9 +122,10 @@ ${pendingQuestions.length ? `
 ${pendingQuestions.join('\n')}` : ''}
 
 **核心原則**：
-1. **不重複**：不要問與已釐清問題語意相似的問題
+1. **不重複**：不要問與已釐清問題語意相似的問題，也不要問這一批問題中互相重複的問題
 2. **邏輯推論**：根據已有答案推論哪些功能/情況已被排除，不要問邏輯上不可能存在的問題
-3. **理解隱含意義**：用戶的回答可能隱含排除了某些功能，仔細分析答案的完整含義`
+3. **理解隱含意義**：用戶的回答可能隱含排除了某些功能，仔細分析答案的完整含義
+4. **尊重用戶明確排除的功能**：如果用戶說「不需要 X」「不要 Y」，就不要問任何關於 X 或 Y 的問題`
 
   const userMessage = `需求描述：\n${requirements}`
 
@@ -140,7 +142,7 @@ ${pendingQuestions.join('\n')}` : ''}
       body: JSON.stringify({
         model: 'claude-sonnet-4-20250514',
         max_tokens: 8192,
-        temperature: 0.3,
+        temperature: 0.2,  // 降低溫度，減少隨機性，避免重複問題
         system: systemPrompt,
         messages: [{ role: 'user', content: userMessage }],
       }),
