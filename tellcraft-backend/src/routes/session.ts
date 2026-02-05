@@ -57,8 +57,8 @@ router.post('/initialize', optionalAuth, async (req: Request, res: Response) => 
         // 創建匿名用戶
         userId = crypto.randomUUID()
         await query(
-          `INSERT INTO users (id, email, plan, subscription_status, message_count_this_period, created_at, updated_at)
-           VALUES ($1, $2, 'free', 'active', 0, NOW(), NOW())`,
+          `INSERT INTO users (id, email, plan, subscription_status, message_count_this_period)
+           VALUES ($1, $2, 'free', 'active', 0)`,
           [userId, anonEmail]
         )
         isNewUser = true
