@@ -159,7 +159,8 @@ export default function AdminTemplatesPage() {
     )
   }
 
-  const vpsUrl = process.env.NEXT_PUBLIC_VPS_API_URL || 'http://54.238.4.117:8080'
+  // 使用本地 API route（HTTPS 代理），避免混合內容問題
+  const previewBaseUrl = ''  // 相對路徑，自動使用當前域名
 
   return (
     <div>
@@ -468,7 +469,7 @@ export default function AdminTemplatesPage() {
               </button>
             </div>
             <iframe
-              src={`${vpsUrl}/api/templates/preview/${previewingId}`}
+              src={`${previewBaseUrl}/api/templates/preview/${previewingId}`}
               style={{
                 flex: 1,
                 width: '100%',

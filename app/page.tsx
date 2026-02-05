@@ -998,9 +998,8 @@ function ChatSection({
   // 處理模板選擇
   const handleTemplateSelect = useCallback((templateId: string) => {
     setSelectedTemplateId(templateId)
-    // 設定預覽 URL 為 VPS API（LLM 動態生成的 HTML）
-    const vpsUrl = process.env.NEXT_PUBLIC_VPS_API_URL || 'http://54.238.4.117:8080'
-    setPreviewUrl(`${vpsUrl}/api/templates/preview/${templateId}`)
+    // 設定預覽 URL（使用本地代理，避免混合內容問題）
+    setPreviewUrl(`/api/templates/preview/${templateId}`)
   }, [])
 
   // 獲取或創建 anonymousId

@@ -570,6 +570,29 @@ export async function GET(
 ) {
   const { templateId } = await params
 
+  // 優先代理到 VPS API（支援 UUID 和預生成模板）
+  const vpsUrl = process.env.VPS_API_URL || 'http://54.238.4.117:8080'
+  try {
+    const response = await fetch(`${vpsUrl}/api/templates/preview/${templateId}`, {
+      headers: {
+        'Accept': 'text/html',
+      },
+    })
+
+    if (response.ok) {
+      const html = await response.text()
+      return new NextResponse(html, {
+        headers: {
+          'Content-Type': 'text/html; charset=utf-8',
+          'X-Proxy': 'VPS',
+        },
+      })
+    }
+  } catch (error) {
+    console.error('[Template Preview] VPS proxy failed:', error)
+  }
+
+  // Fallback: 使用本地模板（如果有的話）
   const html = TEMPLATE_PREVIEWS[templateId]
 
   if (!html) {
@@ -579,6 +602,7 @@ export async function GET(
   return new NextResponse(html, {
     headers: {
       'Content-Type': 'text/html; charset=utf-8',
+      'X-Proxy': 'Local',
     },
   })
 }
