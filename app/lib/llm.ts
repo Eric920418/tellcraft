@@ -11,7 +11,7 @@ const ANTHROPIC_API = 'https://api.anthropic.com/v1/messages'
 const MODEL_PRICING: Record<string, { input: number; output: number }> = {
   'claude-sonnet-4-5-20250929': { input: 3, output: 15 },  // 最新 Sonnet 4.5
   'claude-opus-4-5-20250514': { input: 15, output: 75 },   // Opus 4.5
-  'claude-3-5-haiku-20241022': { input: 0.8, output: 4 },
+  'claude-haiku-4-5-20251001': { input: 0.8, output: 4 },
 }
 
 interface Message {
@@ -655,7 +655,7 @@ ${newQuestions.map(q => `${q.id}. ${q.question}`).join('\n')}
   const response = await callClaude(
     systemPrompt,
     [{ role: 'user', content: userMessage }],
-    { maxTokens: 1024, temperature: 0, model: 'claude-3-5-haiku-20241022' }, // 用 Haiku 省錢
+    { maxTokens: 1024, temperature: 0, model: 'claude-haiku-4-5-20251001' }, // 用 Haiku 省錢
     { ...trackingContext, purpose: 'semantic_dedup' }
   )
 
@@ -757,7 +757,7 @@ ${pendingQuestions.map(q => `${q.id}. ${q.question}`).join('\n')}
   const response = await callClaude(
     systemPrompt,
     [{ role: 'user', content: userMessage }],
-    { model: 'claude-3-5-haiku-20241022', maxTokens: 2048, temperature: 0 },
+    { model: 'claude-haiku-4-5-20251001', maxTokens: 2048, temperature: 0 },
     trackingContext
   )
 
