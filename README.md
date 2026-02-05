@@ -17,6 +17,45 @@ Tellcraft 是一個 AI 驅動的自動化開發平台。用戶只需描述需求
 - **Server Actions**：30+ 已實作
 - **詳情**：[`.clarify/overview.md`](.clarify/overview.md)
 
+### 模板預覽系統優化（2026-02-05）
+
+實現預生成模板 HTML 預覽，減少 LLM API 消耗並提供管理員後台。
+
+**預生成模板**：
+
+| 模板 | 狀態 |
+|------|------|
+| SaaS Dashboard - 極簡 | ✅ 預生成（零 LLM 消耗）|
+| SaaS Dashboard - 專業 | ✅ 預生成（零 LLM 消耗）|
+| Startup Landing Page | ✅ 預生成（零 LLM 消耗）|
+| Corporate Website | ✅ 預生成（零 LLM 消耗）|
+| Modern E-commerce | ✅ 預生成（零 LLM 消耗）|
+
+**預覽優先順序**：
+1. 預生成文件（`src/data/template-previews/*.html`）
+2. 數據庫緩存（`template_previews` 表）
+3. LLM 動態生成（最後手段）
+
+**管理員後台**：
+- 新增 `/dashboard/admin/templates` 模板管理頁面
+- 顯示預覽狀態（預生成/已緩存/無預覽）
+- 支援預覽模板和重新生成
+
+**新增檔案**：
+- `tellcraft-backend/src/data/template-previews/*.html` - 5 個預生成模板
+- `tellcraft-backend/src/scripts/init-template-previews.ts` - 同步腳本
+- `app/dashboard/admin/templates/page.tsx` - 管理頁面
+
+**VPS 部署**：
+```bash
+cd /var/www/tellcraft-backend
+git pull origin main
+pnpm install && pnpm build
+pm2 restart tellcraft-backend
+```
+
+---
+
 ### 修復 LLM Usage 按對話分組顯示「無對話」問題（2026-02-05）
 
 修復 `/dashboard/admin/usage` 頁面按「對話」分組時只顯示一項「無對話」的問題。
