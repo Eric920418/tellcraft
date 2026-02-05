@@ -1,6 +1,7 @@
 import { Job, Worker } from 'bullmq'
 import { Server as SocketIOServer } from 'socket.io'
 import Redis from 'ioredis'
+import crypto from 'crypto'
 import * as db from '../db/client'
 import { classifyIntent, ClassificationResult } from '../services/classifier'
 import { getSkillMetadata, SkillName } from '../services/registry'
