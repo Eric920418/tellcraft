@@ -18,11 +18,11 @@ const anthropic = new Anthropic({
 
 // 預生成模板映射（模板 slug -> 文件名）
 const PREGENERATED_TEMPLATES: Record<string, string> = {
-  'saas-dashboard-minimal': 'saas-dashboard-minimal.html',
-  'saas-dashboard-professional': 'saas-dashboard-professional.html',
-  'startup-landing-page': 'startup-landing-page.html',
-  'corporate-website': 'corporate-website.html',
-  'modern-ecommerce': 'modern-ecommerce.html',
+  'saas-minimal': 'saas-dashboard-minimal.html',
+  'saas-pro': 'saas-dashboard-professional.html',
+  'landing-startup': 'startup-landing-page.html',
+  'landing-corporate': 'corporate-website.html',
+  'ecommerce-modern': 'modern-ecommerce.html',
 }
 
 // 預生成模板目錄
@@ -632,7 +632,7 @@ router.get('/admin/list', requireAuth, async (req, res) => {
         t.*,
         tp.version as preview_version,
         tp.updated_at as preview_updated_at,
-        CASE WHEN t.slug IN ('saas-dashboard-minimal', 'saas-dashboard-professional', 'startup-landing-page', 'corporate-website', 'modern-ecommerce')
+        CASE WHEN t.slug IN ('saas-minimal', 'saas-pro', 'landing-startup', 'landing-corporate', 'ecommerce-modern')
           THEN true ELSE false END as has_pregenerated
       FROM templates t
       LEFT JOIN template_previews tp ON t.id = tp.template_id
