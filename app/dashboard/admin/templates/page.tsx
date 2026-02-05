@@ -3,7 +3,7 @@
 import { useEffect, useState, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
 import { motion } from 'framer-motion'
-import { getAdminTemplates, regenerateTemplatePreview } from '../../../lib/vps-api'
+import { getAdminTemplates } from '../../../lib/vps-api'
 
 interface TemplatePreview {
   version: number | null
@@ -38,7 +38,6 @@ export default function AdminTemplatesPage() {
   const [templates, setTemplates] = useState<AdminTemplate[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
-  const [regenerating, setRegenerating] = useState<string | null>(null)
   const [previewingId, setPreviewingId] = useState<string | null>(null)
 
   const fetchTemplates = useCallback(async () => {
@@ -69,22 +68,6 @@ export default function AdminTemplatesPage() {
   useEffect(() => {
     fetchTemplates()
   }, [fetchTemplates])
-
-  const handleRegenerate = async (templateId: string) => {
-    const token = getAuthToken()
-    if (!token) return
-
-    setRegenerating(templateId)
-    const result = await regenerateTemplatePreview({ token, templateId })
-    setRegenerating(null)
-
-    if (result.success) {
-      // 重新獲取列表
-      fetchTemplates()
-    } else {
-      alert(result.error || '重新生成失敗')
-    }
-  }
 
   const getStatusBadge = (preview: TemplatePreview) => {
     switch (preview.status) {
@@ -352,37 +335,19 @@ export default function AdminTemplatesPage() {
                   </div>
                 </td>
                 <td style={{ padding: '16px', textAlign: 'right' }}>
-                  <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
-                    <button
-                      onClick={() => setPreviewingId(previewingId === template.id ? null : template.id)}
-                      style={{
-                        padding: '6px 12px',
-                        fontSize: 12,
-                        background: 'var(--gray-100)',
-                        border: 'none',
-                        borderRadius: 4,
-                        cursor: 'pointer',
-                      }}
-                    >
-                      {previewingId === template.id ? '關閉' : '預覽'}
-                    </button>
-                    <button
-                      onClick={() => handleRegenerate(template.id)}
-                      disabled={regenerating === template.id}
-                      style={{
-                        padding: '6px 12px',
-                        fontSize: 12,
-                        background: 'var(--black)',
-                        color: 'var(--white)',
-                        border: 'none',
-                        borderRadius: 4,
-                        cursor: regenerating === template.id ? 'not-allowed' : 'pointer',
-                        opacity: regenerating === template.id ? 0.5 : 1,
-                      }}
-                    >
-                      {regenerating === template.id ? '生成中...' : '重新生成'}
-                    </button>
-                  </div>
+                  <button
+                    onClick={() => setPreviewingId(previewingId === template.id ? null : template.id)}
+                    style={{
+                      padding: '6px 12px',
+                      fontSize: 12,
+                      background: 'var(--gray-100)',
+                      border: 'none',
+                      borderRadius: 4,
+                      cursor: 'pointer',
+                    }}
+                  >
+                    {previewingId === template.id ? '關閉' : '預覽'}
+                  </button>
                 </td>
               </motion.tr>
             ))}
