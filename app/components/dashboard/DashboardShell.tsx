@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import Sidebar from './Sidebar'
 
 interface UserInfo {
@@ -19,6 +19,19 @@ export function DashboardShell({
   children: React.ReactNode
 }) {
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false)
+  const [overlayVisible, setOverlayVisible] = useState(false)
+
+  // 動畫延遲：開啟時先顯示 overlay，關閉時先隱藏 sidebar
+  useEffect(() => {
+    if (isMobileMenuOpen) {
+      // 開啟：立即顯示 overlay 動畫
+      requestAnimationFrame(() => setOverlayVisible(true))
+    } else {
+      // 關閉：延遲隱藏 overlay
+      const timer = setTimeout(() => setOverlayVisible(false), 50)
+      return () => clearTimeout(timer)
+    }
+  }, [isMobileMenuOpen])
 
   return (
     <div
@@ -29,44 +42,26 @@ export function DashboardShell({
         display: 'flex',
       }}
     >
-      {/* 手機版 Menu 按鈕 */}
+      {/* 手機版漢堡選單按鈕 - 精緻動畫版 */}
       <button
-        className="mobile-menu-toggle"
+        className={`mobile-menu-toggle ${isMobileMenuOpen ? 'is-open' : ''}`}
         onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
-        style={{
-          display: 'none',
-          position: 'fixed',
-          top: 16,
-          left: 16,
-          zIndex: 1001,
-          width: 40,
-          height: 40,
-          background: 'var(--white)',
-          border: '1px solid var(--border-color)',
-          borderRadius: 8,
-          alignItems: 'center',
-          justifyContent: 'center',
-          cursor: 'pointer',
-          fontSize: 20,
-        }}
+        aria-label={isMobileMenuOpen ? '關閉選單' : '開啟選單'}
+        aria-expanded={isMobileMenuOpen}
       >
-        {isMobileMenuOpen ? '✕' : '☰'}
+        <div className="hamburger-lines">
+          <span className="hamburger-line" />
+          <span className="hamburger-line" />
+          <span className="hamburger-line" />
+        </div>
       </button>
 
-      {/* 手機版遮罩 */}
-      {isMobileMenuOpen && (
-        <div
-          className="mobile-menu-overlay"
-          onClick={() => setIsMobileMenuOpen(false)}
-          style={{
-            display: 'none',
-            position: 'fixed',
-            inset: 0,
-            background: 'rgba(0,0,0,0.3)',
-            zIndex: 999,
-          }}
-        />
-      )}
+      {/* 手機版遮罩 - 模糊背景效果 */}
+      <div
+        className={`mobile-menu-overlay ${overlayVisible ? 'is-visible' : ''}`}
+        onClick={() => setIsMobileMenuOpen(false)}
+        style={{ pointerEvents: isMobileMenuOpen ? 'auto' : 'none' }}
+      />
 
       <Sidebar
         isAdmin={user.isAdmin}

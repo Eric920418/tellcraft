@@ -1746,6 +1746,78 @@ function ChatSection({
                       />
                       {message.content}
                     </div>
+                  ) : message.stage === 'init_progress' ? (
+                    // init_progress 訊息只顯示進度條，不顯示文字內容
+                    <motion.div
+                      initial={{ opacity: 0, y: 8 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      transition={{ duration: 0.4 }}
+                      style={{
+                        maxWidth: layoutMode === 'split' ? '95%' : '85%',
+                      }}
+                    >
+                      <div style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 12,
+                        padding: '12px 16px',
+                        background: 'var(--white)',
+                        border: '1px solid var(--border-color)',
+                      }}>
+                        <motion.div
+                          animate={{ rotate: 360 }}
+                          transition={{ duration: 2, repeat: Infinity, ease: 'linear' }}
+                          style={{ width: 18, height: 18, flexShrink: 0 }}
+                        >
+                          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--gray-400)" strokeWidth="2">
+                            <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83" />
+                          </svg>
+                        </motion.div>
+                        <div style={{ flex: 1 }}>
+                          <div style={{
+                            display: 'flex',
+                            justifyContent: 'space-between',
+                            alignItems: 'center',
+                            marginBottom: 6,
+                          }}>
+                            <span style={{ fontSize: 12, color: 'var(--gray-500)' }}>
+                              {message.progress?.step || '正在分析需求...'}
+                            </span>
+                            {message.progress && (
+                              <span style={{ fontSize: 11, color: 'var(--gray-400)' }}>
+                                {message.progress.current}/{message.progress.total}
+                              </span>
+                            )}
+                          </div>
+                          <div style={{
+                            height: 3,
+                            background: 'var(--gray-100)',
+                            overflow: 'hidden',
+                            position: 'relative',
+                          }}>
+                            {message.progress ? (
+                              <motion.div
+                                initial={{ width: 0 }}
+                                animate={{ width: `${(message.progress.current / message.progress.total) * 100}%` }}
+                                transition={{ duration: 0.5, ease: 'easeOut' }}
+                                style={{ height: '100%', background: 'var(--black)' }}
+                              />
+                            ) : (
+                              <motion.div
+                                animate={{ x: ['-100%', '200%'] }}
+                                transition={{ duration: 1.5, repeat: Infinity, ease: 'easeInOut' }}
+                                style={{
+                                  position: 'absolute',
+                                  width: '50%',
+                                  height: '100%',
+                                  background: 'linear-gradient(90deg, transparent, var(--black), transparent)',
+                                }}
+                              />
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    </motion.div>
                   ) : (
                     <>
                       <div style={{
@@ -1820,7 +1892,7 @@ function ChatSection({
                                 marginBottom: 6,
                               }}>
                                 <span style={{ fontSize: 12, color: 'var(--gray-500)' }}>
-                                  {message.progress?.step || (message.stage === 'init_progress' ? '正在分析需求...' : '正在產出規格文件...')}
+                                  {message.progress?.step || '正在產出規格文件...'}
                                 </span>
                                 {message.progress && (
                                   <span style={{ fontSize: 11, color: 'var(--gray-400)' }}>
@@ -1906,19 +1978,16 @@ function ChatSection({
                   border: '1px solid var(--border-color)',
                   display: 'inline-flex',
                   alignItems: 'center',
-                  gap: typingStage === 'message' ? 10 : 4,
+                  gap: 4,
                 }}>
-                  {typingStage === 'message' && (
-                    <span style={{ fontSize: 14, color: 'var(--gray-500)' }}>問題正在釐清中，請稍等</span>
-                  )}
                   {[0, 1, 2].map(i => (
                     <motion.span
                       key={i}
                       animate={{ opacity: [0.3, 1, 0.3] }}
                       transition={{ duration: 1, repeat: Infinity, delay: i * 0.2 }}
                       style={{
-                        width: typingStage === 'message' ? 5 : 6,
-                        height: typingStage === 'message' ? 5 : 6,
+                        width: 6,
+                        height: 6,
                         borderRadius: '50%',
                         background: 'var(--gray-400)',
                         display: 'inline-block'
@@ -2162,7 +2231,7 @@ function ChatSection({
                   padding: '8px 0',
                 }}
               >
-                <span style={{ fontSize: 18 }}>←</span>
+                <span className="back-arrow" style={{ fontSize: 18 }}>←</span>
                 <span className="back-text">返回</span>
               </button>
               <div className="header-divider" style={{ width: 1, height: 24, background: 'var(--border-color)' }} />
@@ -2192,31 +2261,32 @@ function ChatSection({
               ))}
             </div>
 
-            {/* 手機版簡化進度指示器 */}
-            <div className="mobile-progress" style={{
-              display: 'none',
-              alignItems: 'center',
-              gap: 4,
-              position: 'absolute',
-              left: '50%',
-              transform: 'translateX(-50%)',
-            }}>
-              {stages.map((stage, i) => (
-                <div
-                  key={stage.key}
-                  style={{
-                    width: i < currentStageIndex ? 16 : 8,
-                    height: 4,
-                    borderRadius: 2,
-                    background: i < currentStageIndex
-                      ? 'var(--black)'
-                      : mappedStage === stage.key
-                        ? 'var(--gray-600)'
-                        : 'var(--gray-200)',
-                    transition: 'all 0.3s ease',
-                  }}
-                />
-              ))}
+            {/* 手機版進度膠囊 - 精緻設計 */}
+            <div className="mobile-progress-capsule">
+              {/* 進度環 */}
+              <div className="progress-ring-container">
+                <svg className="progress-ring" width="24" height="24" viewBox="0 0 24 24">
+                  <circle
+                    className="progress-ring-bg"
+                    cx="12"
+                    cy="12"
+                    r="9"
+                  />
+                  <circle
+                    className="progress-ring-fill"
+                    cx="12"
+                    cy="12"
+                    r="9"
+                    strokeDasharray={`${2 * Math.PI * 9}`}
+                    strokeDashoffset={`${2 * Math.PI * 9 * (1 - (currentStageIndex + 1) / stages.length)}`}
+                  />
+                </svg>
+                <span className="progress-step-number">{currentStageIndex + 1}</span>
+              </div>
+              {/* 當前階段名稱 */}
+              <span className="progress-stage-label">
+                {stages[currentStageIndex]?.title || '準備中'}
+              </span>
             </div>
 
             {/* 右側：主題切換 + 用戶資訊 */}

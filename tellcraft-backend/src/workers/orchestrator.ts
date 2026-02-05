@@ -185,16 +185,13 @@ async function handleContinueFlow(
 ) {
   const { projectId, conversationId, userId, message } = data
 
-  // 取得當前流程狀態
-  const stateKey = `flow:${conversationId}`
-  const stateJson = await redis.get(stateKey)
+  // 取得當前流程狀態（優先 Redis，備用 PostgreSQL）
+  const state = await getFlowState(redis, conversationId)
 
-  if (!stateJson) {
+  if (!state) {
     console.log('[Orchestrator] 沒有找到流程狀態，可能是新對話')
     return
   }
-
-  const state: FlowState = JSON.parse(stateJson)
 
   if (!state.waitingForReply) {
     console.log('[Orchestrator] 流程不在等待回覆狀態')
@@ -423,9 +420,78 @@ async function processUserReply(input: ProcessReplyInput) {
 // 輔助函數
 // ============================================================
 
+/**
+ * 保存流程狀態（雙寫：Redis + PostgreSQL）
+ * - Redis: 主要存儲，快速讀寫，24 小時過期
+ * - PostgreSQL: 備份存儲，用於 Redis 故障恢復
+ */
 async function saveFlowState(redis: Redis, conversationId: string, state: FlowState) {
   const stateKey = `flow:${conversationId}`
-  await redis.set(stateKey, JSON.stringify(state), 'EX', 86400) // 24 小時過期
+
+  // 並行寫入 Redis 和 PostgreSQL
+  await Promise.all([
+    // Redis（主要）
+    redis.set(stateKey, JSON.stringify(state), 'EX', 86400), // 24 小時過期
+    // PostgreSQL（備份）
+    db.saveFlowState(conversationId, state).catch(err => {
+      // PostgreSQL 寫入失敗不應阻塞流程，只記錄錯誤
+      console.error('[Orchestrator] PostgreSQL 備份寫入失敗:', err)
+    }),
+  ])
+}
+
+/**
+ * 取得流程狀態（優先 Redis，備用 PostgreSQL）
+ * - 先嘗試從 Redis 讀取
+ * - Redis 失敗或無數據時，從 PostgreSQL 恢復
+ * - 從 PostgreSQL 恢復後，同步寫回 Redis
+ */
+async function getFlowState(redis: Redis, conversationId: string): Promise<FlowState | null> {
+  const stateKey = `flow:${conversationId}`
+
+  // 1. 嘗試從 Redis 讀取
+  try {
+    const stateJson = await redis.get(stateKey)
+    if (stateJson) {
+      return JSON.parse(stateJson) as FlowState
+    }
+  } catch (err) {
+    console.error('[Orchestrator] Redis 讀取失敗，嘗試從 PostgreSQL 恢復:', err)
+  }
+
+  // 2. Redis 無數據，嘗試從 PostgreSQL 恢復
+  try {
+    const dbState = await db.getFlowState(conversationId)
+    if (dbState && dbState.state) {
+      const state = dbState.state as FlowState
+      console.log('[Orchestrator] 從 PostgreSQL 恢復流程狀態:', conversationId)
+
+      // 恢復到 Redis
+      await redis.set(stateKey, JSON.stringify(state), 'EX', 86400).catch(err => {
+        console.error('[Orchestrator] 恢復到 Redis 失敗:', err)
+      })
+
+      return state
+    }
+  } catch (err) {
+    console.error('[Orchestrator] PostgreSQL 讀取失敗:', err)
+  }
+
+  return null
+}
+
+/**
+ * 刪除流程狀態（同時刪除 Redis 和 PostgreSQL）
+ */
+async function deleteFlowState(redis: Redis, conversationId: string) {
+  const stateKey = `flow:${conversationId}`
+
+  await Promise.all([
+    redis.del(stateKey),
+    db.deleteFlowState(conversationId).catch(err => {
+      console.error('[Orchestrator] PostgreSQL 刪除失敗:', err)
+    }),
+  ])
 }
 
 async function sendMessage(

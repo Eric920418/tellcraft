@@ -17,21 +17,43 @@ Tellcraft 是一個 AI 驅動的自動化開發平台。用戶只需描述需求
 - **Server Actions**：30+ 已實作
 - **詳情**：[`.clarify/overview.md`](.clarify/overview.md)
 
+### 進入對話時 UI 簡化（2026-02-05）
+
+優化用戶提交需求進入對話模式時的 UI，移除冗餘訊息：
+
+| 修改項目 | 說明 |
+|----------|------|
+| **移除文字訊息** | `init_progress` 階段不再顯示「收到！讓我先了解一下你的需求」文字氣泡 |
+| **移除 typing 文字** | 移除「問題正在釐清中，請稍等」文字，只保留三個跳動圓點 |
+| **只保留進度條** | 進入對話後只顯示進度條（如「準備分析 0/3」） |
+
+**修改檔案**：
+- `app/page.tsx` - `init_progress` 訊息直接渲染進度條、typing indicator 簡化
+
+---
+
 ### 手機版響應式修復（2026-02-05）
 
-修復手機版 Header 爆版（溢出）問題：
+修復手機版 Header 爆版（溢出）問題，並優化為精緻設計：
 
 | 修復項目 | 說明 |
 |----------|------|
-| **Chat Header 響應式** | 平板以下（< 900px）隱藏步驟指示器文字，改為簡化進度條 |
-| **手機版進一步簡化** | < 640px 時隱藏「返回」文字、Logo、用戶名稱 |
-| **Landing Page 右上角** | 手機版隱藏用戶名稱，縮小間距 |
-| **Dashboard Sidebar** | 手機版改為抽屜式，新增漢堡選單按鈕 |
+| **進度膠囊設計** | 圓形進度環 + 當前階段名稱，取代簡陋的小圓點 |
+| **返回按鈕精緻化** | 圓角方形背景 + hover 箭頭位移動畫 + 點擊縮放回饋 |
+| **漢堡選單動畫** | 三條線條平滑變形為 X，使用 cubic-bezier 彈性曲線 |
+| **遮罩層優化** | 背景模糊 + 漸變透明度過渡 |
+| **整體風格** | 延續 Swiss Design 極簡感，精煉而非簡化 |
+
+**視覺細節**：
+- 進度環使用 SVG stroke-dashoffset 動態填充
+- 漢堡線條寬度 1.5px，間距講究
+- 按鈕 border-radius 12px 統一圓角
+- 陰影層次：hover 時 4px blur → 12px blur
 
 **修改檔案**：
-- `app/page.tsx` - Chat Header 添加 className、手機版簡化進度指示器
-- `app/globals.css` - 添加 media queries 響應式樣式
-- `app/components/dashboard/DashboardShell.tsx` - 手機版漢堡選單
+- `app/page.tsx` - 進度膠囊 SVG 進度環設計
+- `app/globals.css` - 精緻動畫樣式（cubic-bezier 曲線）
+- `app/components/dashboard/DashboardShell.tsx` - 漢堡選單動畫邏輯
 - `app/components/dashboard/Sidebar.tsx` - 支援 className prop
 
 ---

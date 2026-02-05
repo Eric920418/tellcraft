@@ -309,6 +309,56 @@ export async function recordLlmUsage(data: {
 }
 
 // ============================================================
+// Flow State 持久化（Redis 備份）
+// ============================================================
+
+/**
+ * 保存 Flow State 到 PostgreSQL
+ */
+export async function saveFlowState(conversationId: string, state: unknown) {
+  return query(
+    `INSERT INTO flow_states (conversation_id, state, updated_at)
+     VALUES ($1, $2, NOW())
+     ON CONFLICT (conversation_id)
+     DO UPDATE SET state = $2, updated_at = NOW()`,
+    [conversationId, JSON.stringify(state)]
+  )
+}
+
+/**
+ * 從 PostgreSQL 取得 Flow State
+ */
+export async function getFlowState(conversationId: string) {
+  return queryOne<{
+    conversation_id: string
+    state: unknown
+    updated_at: string
+  }>(
+    'SELECT * FROM flow_states WHERE conversation_id = $1',
+    [conversationId]
+  )
+}
+
+/**
+ * 刪除 Flow State
+ */
+export async function deleteFlowState(conversationId: string) {
+  return query(
+    'DELETE FROM flow_states WHERE conversation_id = $1',
+    [conversationId]
+  )
+}
+
+/**
+ * 清理過期的 Flow States（超過 24 小時）
+ */
+export async function cleanupExpiredFlowStates() {
+  return query(
+    `DELETE FROM flow_states WHERE updated_at < NOW() - INTERVAL '24 hours'`
+  )
+}
+
+// ============================================================
 // 連接管理
 // ============================================================
 
