@@ -16,7 +16,8 @@ import {
   ClarifyItem,
 } from '../services/bdd-session'
 import { runPrdDiscovery } from '../services/prd-discovery'
-import { runFormulation } from '../services/formulation'
+import { runFormulation, fixMultipleFeatures, GeneratedFeature, FeatureFixInput } from '../services/formulation'
+import { runSpecDiscovery, specIssuesToClarifyItems, SpecIssue } from '../services/spec-discovery'
 
 // ============================================================
 // 類型定義
@@ -49,12 +50,23 @@ interface FlowState {
   waitingForReply: boolean
   currentItemId?: string
   totalQuestionsAsked: number  // 累計已問問題數
+  // Spec Discovery 專用
+  specRound?: number           // Spec Discovery 輪數
+  specTotalQuestions?: number  // Spec Discovery 累計問題數
+  specIssues?: SpecIssue[]     // 當前輪次發現的問題（用於修復）
 }
 
 // PRD Discovery 限制
 const PRD_DISCOVERY_LIMITS = {
   MAX_ROUNDS: 3,              // 最多 3 輪
   MAX_TOTAL_QUESTIONS: 15,    // 累計最多 15 題
+  QUESTIONS_PER_ROUND: 5,     // 每輪最多 5 題
+}
+
+// Spec Discovery 限制
+const SPEC_DISCOVERY_LIMITS = {
+  MAX_ROUNDS: 2,              // 最多 2 輪
+  MAX_TOTAL_QUESTIONS: 10,    // 累計最多 10 題
   QUESTIONS_PER_ROUND: 5,     // 每輪最多 5 題
 }
 
@@ -616,7 +628,13 @@ async function continueToNextQuestion(
   if (pendingItems.length === 0) {
     // 本輪問完，確認並進入下一階段
     await confirmBatch({ sessionId: state.sessionId! })
-    await completeClärifyPhase(conversationId, state, redis, io)
+
+    // 根據當前階段決定下一步
+    if (state.phase === 'spec_clarify') {
+      await completeSpecClarifyPhase(conversationId, state, redis, io)
+    } else {
+      await completeClärifyPhase(conversationId, state, redis, io)
+    }
     return
   }
 
@@ -822,40 +840,29 @@ async function finishClarifyAndStartFormulation(
     return
   }
 
-  // 保存生成的內容到 BDD Session
+  // 保存生成的內容到 BDD Session（注意：這裡不設為 completed，因為還要進入 Spec Discovery）
   await updateBddSession({
     sessionId: state.sessionId,
     updates: {
-      currentPhase: 'completed',
+      currentPhase: 'spec_discovery',
       schemaSqlContent: result.schemaSql,
       entityMappingContent: result.entityMapping,
       featuresContent: result.features,
     },
   })
 
-  // 發送完成消息
+  // 發送消息，提示進入 Spec Discovery
   const featureCount = result.features?.length || 0
   await sendMessage(conversationId, io, {
-    content: `規格產出完成！\n\n已生成：\n- 資料庫 Schema\n- ${featureCount} 個功能規格 (Feature Files)\n\n你可以在專案詳情頁面查看完整規格。`,
+    content: `規格初稿完成！\n\n已生成：\n- 資料庫 Schema\n- ${featureCount} 個功能規格 (Feature Files)\n\n正在進行品質檢查...`,
     stage: 'formulation_complete',
-    progress: { current: 3, total: 3, step: '完成' },
+    progress: { current: 3, total: 4, step: '品質檢查' },
   })
 
-  // 更新對話為完成
-  await db.query(
-    'UPDATE conversations SET spec_complete = true, updated_at = NOW() WHERE id = $1',
-    [conversationId]
-  )
+  console.log('[Orchestrator] Formulation 完成，進入 Spec Discovery')
 
-  // 完成任務
-  if (state.taskId) {
-    await db.updateTask(state.taskId, {
-      status: 'completed',
-      completed_at: new Date(),
-    })
-  }
-
-  console.log('[Orchestrator] Formulation 完成')
+  // 進入 Spec Discovery 階段
+  await startSpecDiscovery(conversationId, state, result.features || [], result.schemaSql || '', result.entityMapping || '', redis, io)
 }
 
 function validateAnswer(
@@ -920,4 +927,332 @@ function getFullAnswer(item: ClarifyItem): string {
   }
 
   return answer
+}
+
+// ============================================================
+// Spec Discovery 相關函數
+// ============================================================
+
+/**
+ * 啟動 Spec Discovery 階段
+ * 調用 LLM 審查 Feature Files 品質，發現問題則進入 Spec Clarify
+ */
+async function startSpecDiscovery(
+  conversationId: string,
+  state: FlowState,
+  features: GeneratedFeature[],
+  schemaSql: string,
+  entityMapping: string,
+  redis: Redis,
+  io: SocketIOServer
+) {
+  state.phase = 'spec_discovery'
+  state.specRound = (state.specRound || 0) + 1
+  state.waitingForReply = false
+  await saveFlowState(redis, conversationId, state)
+
+  // 取得 session
+  const session = await getBddSession({ sessionId: state.sessionId! })
+  if (!session.success || !session.data) {
+    console.error('[Orchestrator] 無法取得 BDD Session')
+    await sendMessage(conversationId, io, {
+      content: '發生錯誤：無法取得對話資料',
+      stage: 'error',
+    })
+    return
+  }
+
+  // 取得已有的 Spec 問題（避免重複）
+  const existingSpecItems = (session.data.resolvedItems || []).filter(item =>
+    item.checklistItem?.startsWith('S')
+  )
+
+  console.log(`[Orchestrator] 開始第 ${state.specRound} 輪 Spec Discovery`)
+
+  // 調用 Spec Discovery LLM
+  const discoveryResult = await runSpecDiscovery(
+    features,
+    schemaSql,
+    entityMapping,
+    existingSpecItems
+  )
+
+  if (!discoveryResult.success) {
+    console.error('[Orchestrator] Spec Discovery 失敗:', discoveryResult.error)
+    // Spec Discovery 失敗時，直接完成（不阻塞用戶）
+    await sendMessage(conversationId, io, {
+      content: `品質檢查遇到問題：${discoveryResult.error}。已略過，規格已完成。`,
+      stage: 'spec_discovery_error',
+    })
+    await completeSpecPhase(conversationId, state, redis, io)
+    return
+  }
+
+  const issues = discoveryResult.issues || []
+  console.log(`[Orchestrator] Spec Discovery 發現 ${issues.length} 個問題`)
+
+  // 檢查終止條件
+  const specTotalQuestions = (state.specTotalQuestions || 0) + issues.length
+  const shouldStop =
+    state.specRound! >= SPEC_DISCOVERY_LIMITS.MAX_ROUNDS ||
+    specTotalQuestions >= SPEC_DISCOVERY_LIMITS.MAX_TOTAL_QUESTIONS
+
+  if (issues.length === 0 || shouldStop) {
+    if (issues.length === 0) {
+      console.log('[Orchestrator] Spec Discovery 沒有發現問題，規格品質良好')
+      await sendMessage(conversationId, io, {
+        content: '規格品質檢查通過！',
+        stage: 'spec_discovery_complete',
+      })
+    } else {
+      console.log(`[Orchestrator] 達到 Spec Discovery 終止條件 (輪數: ${state.specRound}, 問題數: ${specTotalQuestions})`)
+      await sendMessage(conversationId, io, {
+        content: '品質檢查完成。',
+        stage: 'spec_discovery_complete',
+      })
+    }
+    await completeSpecPhase(conversationId, state, redis, io)
+    return
+  }
+
+  // 有問題需要確認，保存問題並進入 Spec Clarify
+  state.specIssues = issues
+  state.specTotalQuestions = specTotalQuestions
+
+  // 將問題轉換為 ClarifyItem 並添加到 session
+  const clarifyItems = specIssuesToClarifyItems(issues)
+  await addClarifyItems({ sessionId: state.sessionId!, items: clarifyItems })
+
+  // 更新階段
+  await updateBddSession({
+    sessionId: state.sessionId!,
+    updates: { currentPhase: 'spec_clarify' },
+  })
+
+  // 發送消息
+  await sendMessage(conversationId, io, {
+    content: `品質檢查發現 ${issues.length} 個需要確認的問題，讓我們一起確認：`,
+    stage: 'spec_discovery_complete',
+  })
+
+  // 發送第一個問題
+  await sendClarifyQuestion(conversationId, io, clarifyItems[0], 0, clarifyItems.length)
+
+  // 更新狀態
+  state.phase = 'spec_clarify'
+  state.questionIndex = 0
+  state.batchCount = 0
+  state.currentItemId = clarifyItems[0].id
+  state.waitingForReply = true
+  await saveFlowState(redis, conversationId, state)
+}
+
+/**
+ * 完成 Spec Clarify 階段
+ * 根據用戶回答修復 Features，然後決定是否需要更多輪 Spec Discovery
+ */
+async function completeSpecClarifyPhase(
+  conversationId: string,
+  state: FlowState,
+  redis: Redis,
+  io: SocketIOServer
+) {
+  // 取得 session
+  const session = await getBddSession({ sessionId: state.sessionId! })
+  if (!session.success || !session.data) {
+    console.error('[Orchestrator] 無法取得 BDD Session')
+    return
+  }
+
+  // 取得用戶的回答（這一輪的 spec 問題）
+  const specAnswers = (session.data.resolvedItems || []).filter(item =>
+    item.id?.startsWith('spec_') && item.status === 'answered'
+  )
+
+  if (specAnswers.length === 0) {
+    // 沒有回答（可能用戶全部跳過），直接完成
+    console.log('[Orchestrator] Spec Clarify 沒有回答，直接完成')
+    await completeSpecPhase(conversationId, state, redis, io)
+    return
+  }
+
+  // 根據回答修復 Features
+  await sendMessage(conversationId, io, {
+    content: '正在根據您的回答修正規格...',
+    stage: 'spec_fix_start',
+  })
+
+  await fixFeaturesAndComplete(conversationId, state, specAnswers, redis, io)
+}
+
+/**
+ * 根據用戶回答修復 Features
+ */
+async function fixFeaturesAndComplete(
+  conversationId: string,
+  state: FlowState,
+  specAnswers: ClarifyItem[],
+  redis: Redis,
+  io: SocketIOServer
+) {
+  // 取得 session
+  const session = await getBddSession({ sessionId: state.sessionId! })
+  if (!session.success || !session.data) {
+    console.error('[Orchestrator] 無法取得 BDD Session')
+    return
+  }
+
+  // 將 FeatureFile 轉換為 GeneratedFeature（過濾掉沒有 actionName 的）
+  const features: GeneratedFeature[] = (session.data.featuresContent || [])
+    .filter((f): f is GeneratedFeature => !!f.actionName)
+    .map(f => ({ name: f.name, actionName: f.actionName!, content: f.content }))
+
+  const schemaSql = session.data.schemaSqlContent || ''
+  const entityMapping = session.data.entityMappingContent || ''
+
+  // 將問題和回答整理成修復指令
+  // 根據 specIssues 找出需要修復的 Features
+  const specIssues = state.specIssues || []
+
+  // 按 Feature 分組
+  const featureIssuesMap = new Map<string, { issues: string[]; feature: GeneratedFeature }>()
+
+  for (const issue of specIssues) {
+    const answer = specAnswers.find(a => a.id === issue.id)
+    if (!answer || !answer.answer) continue
+
+    const feature = features.find(f => f.actionName === issue.actionName)
+    if (!feature) continue
+
+    if (!featureIssuesMap.has(issue.actionName)) {
+      featureIssuesMap.set(issue.actionName, { issues: [], feature })
+    }
+
+    // 將問題和回答整合為修復指令
+    const fixInstruction = `${issue.description}\n用戶回答: ${answer.answer}${issue.suggestedFix ? `\n建議修復: ${issue.suggestedFix}` : ''}`
+    featureIssuesMap.get(issue.actionName)!.issues.push(fixInstruction)
+  }
+
+  // 如果沒有需要修復的 Feature，直接進入下一輪或完成
+  if (featureIssuesMap.size === 0) {
+    console.log('[Orchestrator] 沒有需要修復的 Feature')
+    // 檢查是否需要更多輪 Spec Discovery
+    if (state.specRound! < SPEC_DISCOVERY_LIMITS.MAX_ROUNDS) {
+      await startSpecDiscovery(conversationId, state, features, schemaSql, entityMapping, redis, io)
+    } else {
+      await completeSpecPhase(conversationId, state, redis, io)
+    }
+    return
+  }
+
+  // 準備修復輸入
+  const featuresToFix: FeatureFixInput[] = Array.from(featureIssuesMap.entries()).map(([actionName, data]) => ({
+    name: data.feature.name,
+    actionName,
+    content: data.feature.content,
+    issues: data.issues,
+  }))
+
+  // 取得所有 resolved items（包括 PRD 階段的）作為釐清決策
+  const allResolvedItems = session.data.resolvedItems || []
+
+  console.log(`[Orchestrator] 修復 ${featuresToFix.length} 個 Features`)
+
+  // 調用修復函數
+  const fixResult = await fixMultipleFeatures(
+    featuresToFix,
+    allResolvedItems,
+    schemaSql,
+    entityMapping
+  )
+
+  if (!fixResult.success || !fixResult.fixedFeatures) {
+    console.error('[Orchestrator] Feature 修復失敗:', fixResult.error)
+    await sendMessage(conversationId, io, {
+      content: `規格修正遇到問題：${fixResult.error}。已保留原始規格。`,
+      stage: 'spec_fix_error',
+    })
+    await completeSpecPhase(conversationId, state, redis, io)
+    return
+  }
+
+  // 更新 Features
+  const updatedFeatures = features.map(f => {
+    const fixed = fixResult.fixedFeatures!.find(ff => ff.actionName === f.actionName)
+    return fixed || f
+  })
+
+  await updateBddSession({
+    sessionId: state.sessionId!,
+    updates: {
+      featuresContent: updatedFeatures,
+    },
+  })
+
+  await sendMessage(conversationId, io, {
+    content: `已修正 ${fixResult.fixedFeatures.length} 個功能規格。`,
+    stage: 'spec_fix_complete',
+  })
+
+  // 檢查是否需要更多輪 Spec Discovery
+  if (state.specRound! < SPEC_DISCOVERY_LIMITS.MAX_ROUNDS) {
+    await sendMessage(conversationId, io, {
+      content: '正在進行第二輪品質檢查...',
+      stage: 'spec_discovery_continue',
+    })
+    // 清除這一輪的 issues
+    state.specIssues = undefined
+    await startSpecDiscovery(conversationId, state, updatedFeatures, schemaSql, entityMapping, redis, io)
+  } else {
+    await completeSpecPhase(conversationId, state, redis, io)
+  }
+}
+
+/**
+ * 完成 Spec 階段，設為 completed
+ */
+async function completeSpecPhase(
+  conversationId: string,
+  state: FlowState,
+  redis: Redis,
+  io: SocketIOServer
+) {
+  // 更新 session 為 completed
+  await updateBddSession({
+    sessionId: state.sessionId!,
+    updates: {
+      currentPhase: 'completed',
+    },
+  })
+
+  // 發送最終完成消息
+  const session = await getBddSession({ sessionId: state.sessionId! })
+  const featureCount = session.data?.featuresContent?.length || 0
+
+  await sendMessage(conversationId, io, {
+    content: `規格產出完成！\n\n已生成：\n- 資料庫 Schema\n- ${featureCount} 個功能規格 (Feature Files)\n\n你可以在專案詳情頁面查看完整規格。`,
+    stage: 'spec_complete',
+    progress: { current: 4, total: 4, step: '完成' },
+  })
+
+  // 更新對話為完成
+  await db.query(
+    'UPDATE conversations SET spec_complete = true, updated_at = NOW() WHERE id = $1',
+    [conversationId]
+  )
+
+  // 完成任務
+  if (state.taskId) {
+    await db.updateTask(state.taskId, {
+      status: 'completed',
+      completed_at: new Date(),
+    })
+  }
+
+  // 清理流程狀態
+  state.phase = 'completed'
+  state.waitingForReply = false
+  await saveFlowState(redis, conversationId, state)
+
+  console.log('[Orchestrator] Spec 階段完成，規格最終完成')
 }

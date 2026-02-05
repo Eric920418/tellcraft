@@ -894,15 +894,27 @@ Phase 1: PRD Discovery + Clarify（多輪動態釐清）
     ↓ 回答後 LLM 根據答案動態生成追問（最多 3 輪 / 15 題）
     ↓ 無新問題或達到上限後進入下一階段
 
-Phase 2: Formulation
+Phase 2: Formulation（一個 API = 一個 Feature）
     ↓ 產出 schema.sql + entity_to_table_mapping.yml
+    ↓ 識別 Features：每個 actionName 對應一個獨立 Feature
+    ↓   - create_{entity}, get_{entity}, list_{entities}
+    ↓   - update_{entity}, delete_{entity}
+    ↓   - {action}_{entity}（狀態轉換如 cancel_order）
     ↓ 產出 feature files（sdd.os ISA Gherkin 格式）
     ↓ 執行驗證腳本（lint + validate）
     ↓ 自癒機制（最多 3 次修復）
 
-Phase 3: Spec Discovery + Clarify
-    ↓ 對產出的 Feature Files 再次 Discovery
-    ↓ 檢查規則完整性、Example 覆蓋度、邊界條件
+Phase 3: Spec Discovery + Clarify（2026-02-05 實作完成）
+    ↓ 對產出的 Feature Files 進行品質審查
+    ↓ 檢查項目（S1-S6）：
+    ↓   - S1: 規則完整性（前置/後置條件）
+    ↓   - S2: Example 覆蓋度
+    ↓   - S3: 邊界條件覆蓋
+    ↓   - S4: 格式正確性（sdd.os ISA）
+    ↓   - S5: 跨 Feature 一致性
+    ↓   - S6: Schema 對應
+    ↓ 終止條件：最多 2 輪 / 10 題 / 0 問題
+    ↓ 根據用戶回答修復 Features
 
 Phase 4: Actions Design
     ↓ 產出 spec/actions/actions.yml

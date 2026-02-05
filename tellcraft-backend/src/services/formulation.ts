@@ -213,10 +213,23 @@ export async function identifyFeatures(
 
   const systemPrompt = `你是一位資深的 BDD 分析師。根據需求和 Schema，識別所有需要的功能（Feature）。
 
+## 核心原則：一個 API = 一個 Feature
+
+**每個 Feature 必須對應到一個獨立的 API endpoint**，遵循 RESTful 設計原則：
+
+| 操作類型 | actionName 格式 | 範例 |
+|----------|-----------------|------|
+| 建立 | create_{entity} | create_order |
+| 查詢單筆 | get_{entity} | get_order |
+| 查詢列表 | list_{entities} | list_orders |
+| 更新 | update_{entity} | update_order |
+| 刪除 | delete_{entity} | delete_order |
+| 狀態轉換 | {action}_{entity} | cancel_order, complete_order |
+
 ## 任務
-1. 分析需求和資料模型
+1. 分析需求和資料模型（Schema 中的每個主要 Table 通常需要 CRUD 操作）
 2. 識別所有使用者與系統的交互點
-3. 為每個功能命名
+3. 為每個 **獨立的 API 操作** 建立一個 Feature
 
 ## 輸出格式
 \`\`\`json
@@ -233,7 +246,9 @@ export async function identifyFeatures(
 
 ## 命名規則
 - actionName 使用 snake_case，格式：動詞_名詞（如 create_order, update_user_profile）
-- 功能名稱要精確描述交互，不要太抽象`
+- 功能名稱要精確描述交互，不要太抽象
+- **禁止合併**：不要把多個 API 合併成一個「管理 XX」的 Feature
+- **適度拆分**：狀態轉換如果業務邏輯不同（如「取消訂單」vs「完成訂單」），應該拆成獨立 Feature`
 
   const userMessage = `${projectContext ? `專案背景：${projectContext}\n\n` : ''}需求描述：
 ${requirements}
@@ -497,5 +512,128 @@ export async function runFormulation(
       success: false,
       error: error instanceof Error ? error.message : 'Unknown error',
     }
+  }
+}
+
+// ============================================================
+// 修復多個 Feature Files
+// ============================================================
+
+export interface FeatureFixInput {
+  name: string
+  actionName: string
+  content: string
+  issues: string[]  // 需要修復的問題描述
+}
+
+export async function fixMultipleFeatures(
+  features: FeatureFixInput[],
+  resolvedItems: ClarifyItem[],
+  schemaSql: string,
+  entityMapping: string
+): Promise<{
+  success: boolean
+  fixedFeatures?: GeneratedFeature[]
+  error?: string
+}> {
+  if (features.length === 0) {
+    return { success: true, fixedFeatures: [] }
+  }
+
+  // 構建用戶釐清決策
+  const decisions = resolvedItems
+    .filter(item => item.status === 'answered' && item.answer)
+    .map(item => `Q: ${item.whiteTextQuestion || item.question}\nA: ${item.answer}`)
+    .join('\n\n')
+
+  const systemPrompt = `你是一位 sdd.os ISA Gherkin 專家。請根據用戶反饋修正以下 Feature Files。
+
+## sdd.os ISA 格式規範
+1. 檔案開頭必須有 \`@Action(ActionName)\` 和 \`# Summary:\` 註解
+2. 每個 Rule 必須標註 \`@Pre\` 或 \`@Post\`
+3. When 格式：\`{summary}, call table:\`
+4. Then 成功格式：\`{summary}成功, with table:\`
+5. Then 失敗格式：\`操作失敗\`
+6. Entity 驗證格式：\`存在一個{entity}, with table:\`
+
+## 重要約束
+修復時必須嚴格遵守：
+1. 用戶在釐清階段做出的所有決策
+2. Schema 定義的欄位名稱和類型
+3. Entity Mapping 中的實體命名
+
+## 輸出格式
+請以 JSON 格式輸出修正後的內容：
+\`\`\`json
+{
+  "features": [
+    { "name": "Feature名稱", "actionName": "action_name", "content": "修正後的完整 gherkin 內容" }
+  ]
+}
+\`\`\``
+
+  // 構建用戶消息
+  const featuresContent = features.map(f =>
+    `### Feature: ${f.name} (${f.actionName})\n\n**需修復的問題**:\n${f.issues.map((e, i) => `${i + 1}. ${e}`).join('\n')}\n\n**當前內容**:\n\`\`\`gherkin\n${f.content}\n\`\`\``
+  ).join('\n\n---\n\n')
+
+  const userMessage = `## 需要修復的 Feature Files
+
+${featuresContent}
+
+---
+
+## SQL Schema
+\`\`\`sql
+${schemaSql}
+\`\`\`
+
+## Entity Mapping
+\`\`\`yaml
+${entityMapping}
+\`\`\`
+
+${decisions ? `---
+
+## 用戶釐清決策（修復時必須遵守）
+
+${decisions}` : ''}`
+
+  console.log('[Formulation] 修復 Features...')
+  const response = await callClaude(systemPrompt, userMessage, { maxTokens: 16384, temperature: 0.1 })
+
+  if (!response.success) {
+    return { success: false, error: response.error }
+  }
+
+  // 記錄使用量
+  if (response.inputTokens && response.outputTokens) {
+    const costUsd = (response.inputTokens * SONNET_PRICING.input + response.outputTokens * SONNET_PRICING.output) / 1000000
+    await recordLlmUsage({
+      model: 'claude-sonnet-4-5-20250929',
+      inputTokens: response.inputTokens,
+      outputTokens: response.outputTokens,
+      costUsd,
+      purpose: 'formulation_fix_features',
+    }).catch(err => console.error('[Formulation] 記錄使用量失敗:', err))
+  }
+
+  try {
+    const jsonMatch = response.content?.match(/```json\s*([\s\S]*?)\s*```/) ||
+                      response.content?.match(/\{[\s\S]*\}/)
+    if (!jsonMatch) {
+      return { success: false, error: '無法解析 LLM 回應' }
+    }
+
+    const jsonStr = jsonMatch[1] || jsonMatch[0]
+    const parsed = JSON.parse(jsonStr)
+
+    console.log(`[Formulation] 修復完成，${parsed.features?.length || 0} 個 Features`)
+    return {
+      success: true,
+      fixedFeatures: parsed.features || [],
+    }
+  } catch (err) {
+    return { success: false, error: `解析回應時發生錯誤: ${err}` }
   }
 }
