@@ -954,7 +954,9 @@ Hero → 往下滾動 → 產品介紹（SEO 友好）→ Testimonials → CTA
 |-------|------|------|
 | `bdd-spec` | ✅ 完成 | 完整 5 階段流程：PRD Discovery/Clarify → Formulation → Spec Discovery/Clarify → Actions Design → ISA Config |
 | `coder` | ⏳ 開發中 | 後端 API 生成，待開發完成後與 uiux 並行執行 |
-| `uiux` | 🧪 可測試 | 4 階段前端設計流程 + LLM 程式碼生成 + Supabase Storage 儲存（目前單獨執行） |
+| `uiux` | 🧪 可測試 | 3 階段前端設計流程（Design Discovery → Design Lab → Implementation）+ Supabase Storage 儲存 |
+| `quality-gate` | 📋 規劃中 | 獨立品質檢查 Skill（A11y/Performance/SEO），UIUX 完成後自動觸發，生成報告 |
+| `universal-fixer` | 📋 規劃中 | 萬用修復 Skill，讀取 Quality Gate 報告自動修復問題 |
 | `deployer` | ✅ 完成 | 整合 Vercel Deployments API，部署後自動詢問網域設定 |
 | `domain-manager` | ✅ 完成 | 網域管理入口，支援三種選擇 |
 | `domain-purchase` | ✅ 完成 | Porkbun 網域註冊 |
@@ -1124,20 +1126,24 @@ CREATE TABLE templates (
 
 ### UIUX Skill 完整流程
 
-UI/UX Skill 實現完整的 4 階段前端介面開發流程：
+UI/UX Skill 實現完整的 3 階段前端介面開發流程（Quality Gate 已獨立為單獨 Skill）：
 
 ```
 bdd-spec（規格確定）
          ↓
-       uiux（前端）    ← 目前只執行這個
+       uiux（前端）
+         ↓
+   quality-gate（品質檢查）  ← 獨立 Skill，自動觸發
+         ↓
+   universal-fixer（萬用修復）← TODO: 未來開發
          ↓
      deployer
 
 # TODO: coder 開發完成後改為並行執行：
-# bdd-spec → [coder + uiux 並行] → deployer
+# bdd-spec → [coder + uiux 並行] → quality-gate → deployer
 ```
 
-**4 階段流程**：
+**UIUX 3 階段流程**：
 
 ```
 Phase 1: Design Discovery
@@ -1151,13 +1157,96 @@ Phase 2: Design Lab
 Phase 3: Implementation
     ↓ 產出 Next.js + Tailwind CSS 程式碼
     ↓ SSR 優先、RWD、motion/react
-
-Phase 4: Quality Gate
-    ↓ 無障礙檢查（WCAG 2.2 AA）
-    ↓ 效能檢查（只動畫 transform/opacity）
-    ↓ SEO 檢查（Metadata、Open Graph）
-    ↓ 自癒機制（最多 3 次修復）
+    ↓ 完成後自動觸發 quality-gate Skill
 ```
+
+### Quality Gate Skill（獨立品質檢查）
+
+從 UIUX Skill 分離出來的獨立品質檢查 Skill，UIUX Implementation 完成後自動觸發。
+
+**觸發時機**：
+- UIUX Phase 3 Implementation 完成後自動觸發
+- 未來 Coder Skill 完成後也會觸發
+
+**檢查項目**：
+
+| 類別 | 全名 | 檢查內容 |
+|------|------|----------|
+| **A11y** | Accessibility（無障礙性）| WCAG 2.2 AA：色彩對比度 ≥ 4.5:1、Focus states、ARIA labels、鍵盤導航 |
+| **Performance** | 效能 | 只動畫 transform/opacity、微互動 ≤ 200ms、頁面轉場 ≤ 300ms、prefers-reduced-motion |
+| **SEO** | 搜尋引擎優化 | title/meta description、Open Graph tags、語義化 HTML、標題層級 |
+
+**輸出**：
+- 生成品質報告（JSON 格式）
+- 列出所有問題和嚴重程度
+- 自動觸發 `universal-fixer` Skill 進行修復（TODO）
+
+**報告格式**：
+```json
+{
+  "timestamp": "2026-02-05T12:00:00Z",
+  "projectId": "xxx",
+  "generationId": "xxx",
+  "summary": {
+    "total": 15,
+    "critical": 2,
+    "warning": 8,
+    "info": 5
+  },
+  "issues": [
+    {
+      "id": "a11y-001",
+      "category": "a11y",
+      "severity": "critical",
+      "rule": "color-contrast",
+      "message": "文字與背景對比度不足 (2.1:1 < 4.5:1)",
+      "file": "components/Button.tsx",
+      "line": 15,
+      "suggestion": "將文字顏色從 #999 改為 #666"
+    }
+  ]
+}
+```
+
+**相關檔案**（TODO 待建立）：
+- `quality-gate-skill/skill.md` - Skill 定義
+- `quality-gate-skill/instructions/` - 檢查規則
+- `quality-gate-skill/rules/` - 各類別檢查標準
+
+### Universal Fixer Skill（萬用修復，TODO）
+
+根據 Quality Gate 報告自動修復問題的 Skill。
+
+**功能**：
+- 讀取 Quality Gate 報告
+- 按嚴重程度排序問題
+- 逐一嘗試自動修復
+- 無法自動修復的問題提示用戶手動處理
+- 修復後重新觸發 Quality Gate 驗證
+
+**流程**：
+```
+Quality Gate 報告
+       ↓
+Universal Fixer 讀取報告
+       ↓
+按 critical → warning → info 順序處理
+       ↓
+┌─────────────────────────────┐
+│ 可自動修復？                 │
+│   是 → LLM 生成修復程式碼    │
+│   否 → 記錄到「需人工處理」  │
+└─────────────────────────────┘
+       ↓
+重新觸發 Quality Gate
+       ↓
+通過 → 進入 Deployer
+失敗 → 最多重試 3 次，仍失敗則提示用戶
+```
+
+**相關檔案**（TODO 待建立）：
+- `universal-fixer-skill/skill.md` - Skill 定義
+- `universal-fixer-skill/instructions/` - 修復策略
 
 **設計變體的 5 個設計軸**：
 - **A: Hierarchy Focus** - 重新結構化內容層級

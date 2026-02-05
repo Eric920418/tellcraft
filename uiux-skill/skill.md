@@ -4,14 +4,14 @@
 
 ```yaml
 name: uiux
-version: 1.0.0
+version: 2.0.0
 description: |
-  AI 驅動的完整前端介面開發：
+  AI 驅動的前端介面開發（3 階段）：
   1. Design Discovery - 探索用戶偏好與設計方向
   2. Design Lab - 生成多個設計變體供用戶選擇
   3. Implementation - 產出 Next.js + Tailwind CSS 前端程式碼
-  4. Quality Gate - 無障礙、效能、SEO 品質檢查
 
+  完成後自動觸發 quality-gate Skill 進行品質檢查。
   與 coder skill（後端 API）並行執行，確保前後端獨立開發不干涉。
 
 author: Tellcraft Team
@@ -55,10 +55,10 @@ output_format:
 - 生成多個設計變體供用戶比較選擇
 - 產出 Next.js + Tailwind CSS 前端程式碼
 - 確保 RWD 響應式設計（Mobile-first）
-- 確保無障礙標準（WCAG 2.2 AA）
-- 確保 SEO 最佳化（Metadata、Open Graph）
 
 ### 不解決的問題
+- ❌ 品質檢查（由 quality-gate skill 負責）
+- ❌ 問題修復（由 universal-fixer skill 負責）
 - ❌ 後端 API 開發（由 coder skill 負責）
 - ❌ 資料庫設計（由 bdd-spec skill 負責）
 - ❌ 部署（由 deployer skill 負責）
@@ -107,7 +107,7 @@ output_format:
   "properties": {
     "status": {
       "type": "string",
-      "enum": ["success", "design_pending", "quality_failed"],
+      "enum": ["success", "design_pending"],
       "description": "執行結果狀態"
     },
     "artifacts": {
@@ -142,14 +142,10 @@ output_format:
         "selected_variant": { "type": "string" }
       }
     },
-    "quality_result": {
-      "type": "object",
-      "properties": {
-        "accessibility_passed": { "type": "boolean" },
-        "performance_passed": { "type": "boolean" },
-        "seo_passed": { "type": "boolean" },
-        "issues": { "type": "array" }
-      }
+    "next_skill": {
+      "type": "string",
+      "const": "quality-gate",
+      "description": "完成後自動觸發的下一個 Skill"
     }
   },
   "required": ["status", "artifacts"]
@@ -160,7 +156,7 @@ output_format:
 
 ## Workflow Overview（流程概覽）
 
-### 階段流程圖（4 階段架構）
+### 階段流程圖（3 階段架構）
 
 ```
 ┌─────────────────────────────────────────────────────────────────────┐
@@ -208,36 +204,10 @@ output_format:
 └─────────────────────────────────────────────────────────────────────┘
                                     │
                                     ▼
-┌─────────────────────────────────────────────────────────────────────┐
-│                    Phase 4: Quality Gate                             │
-│                                                                     │
-│    品質檢查（硬性閘門）：                                            │
-│                                                                     │
-│    ├─ Accessibility（WCAG 2.2 AA）                                  │
-│    │   ├─ Color contrast ≥ 4.5:1                                    │
-│    │   ├─ Focus states visible                                      │
-│    │   ├─ Keyboard navigation                                       │
-│    │   └─ ARIA labels                                               │
-│    │                                                                │
-│    ├─ Performance                                                   │
-│    │   ├─ 只動畫 transform/opacity                                  │
-│    │   ├─ prefers-reduced-motion                                    │
-│    │   └─ 動畫 ≤ 300ms                                              │
-│    │                                                                │
-│    ├─ SEO                                                           │
-│    │   ├─ Metadata 完整                                             │
-│    │   ├─ Open Graph tags                                           │
-│    │   └─ Semantic HTML                                             │
-│    │                                                                │
-│    └─ 自癒機制（最多 3 次修復）                                      │
-│                                                                     │
-└─────────────────────────────────────────────────────────────────────┘
-                                    │
-                                    ▼
-                          ┌─────────────────┐
-                          │   前端完成！     │
-                          │   可交付部署     │
-                          └─────────────────┘
+                    ┌───────────────────────────┐
+                    │  自動觸發 quality-gate    │
+                    │  Skill 進行品質檢查       │
+                    └───────────────────────────┘
 ```
 
 ---
@@ -249,12 +219,14 @@ output_format:
 | 1. 設計探索 | `instructions/01-design-discovery.md` | 開始探索設計時 | 必要 |
 | 2. 設計實驗室 | `instructions/02-design-lab.md` | 生成設計變體時 | 必要 |
 | 3. 程式碼實作 | `instructions/03-implementation.md` | 產出程式碼時 | 必要 |
-| 4. 品質檢查 | `instructions/04-quality-gate.md` | 品質驗證時 | 必要 |
 
 **輔助規則文件**：
 - `rules/baseline-ui.md` - UI 技術約束（效能、無障礙底線）
 - `rules/design-principles.md` - 設計原則（typography、color、spacing）
 - `rules/tailwind-patterns.md` - Tailwind CSS 最佳實踐
+
+**後續 Skill**：
+- 完成後自動觸發 `quality-gate` Skill 進行品質檢查
 
 ---
 
@@ -283,20 +255,11 @@ output_format:
 | 組件已抽取 | 重複元素已組件化 |
 | RWD 已實作 | 有 sm/md/lg breakpoints |
 
-### Phase 4: Quality Gate（硬性閘門）
+### 後續：Quality Gate Skill（硬性閘門）
 
-**⚠️ 以下檢查為強制執行**：
+Implementation 完成後，自動觸發獨立的 `quality-gate` Skill 進行品質檢查。
 
-| 檢查項目 | 驗證規則 | 自動修復 |
-|----------|----------|----------|
-| Color Contrast | ≥ 4.5:1（文字）、≥ 3:1（UI） | 調整色彩 |
-| Focus States | 所有互動元素有可見 focus | 加 focus ring |
-| ARIA Labels | icon-only buttons 有 aria-label | 補充標籤 |
-| Animation Duration | ≤ 300ms（微互動） | 調整時間 |
-| prefers-reduced-motion | 有對應處理 | 加 media query |
-| Metadata | title、description 完整 | 補充 metadata |
-
-**自癒機制**：檢查失敗 → 自動修復 → 重新驗證（最多 3 次）
+詳見：`quality-gate-skill/skill.md`
 
 ---
 
@@ -341,7 +304,7 @@ output_format:
 | 無 BDD 規格 | 直接進入 Discovery，從用戶描述開始 |
 | 用戶無法決定風格 | 提供更多參考範例，生成更多變體 |
 | 設計變體都不滿意 | 收集詳細反饋，生成新一批變體 |
-| 品質檢查失敗 | 進入自癒迴圈（最多 3 次） |
+| 程式碼生成失敗 | 重試或提示用戶簡化需求 |
 
 ---
 
