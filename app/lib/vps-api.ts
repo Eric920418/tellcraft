@@ -1255,6 +1255,82 @@ export async function updateTask(input: {
 }
 
 /**
+ * 完整建立任務（包含訂閱檢查、優先級計算）
+ */
+export async function createTaskFull(input: {
+  projectId: string
+  goal: string
+  token: string
+}): Promise<ApiResponse<{
+  taskId: string
+  status: string
+  stepCount: number
+  calculatedPriority: number
+}>> {
+  return apiRequest('/api/operations/tasks/full', {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${input.token}` },
+    body: JSON.stringify({
+      projectId: input.projectId,
+      goal: input.goal,
+    }),
+  })
+}
+
+/**
+ * 確認任務計劃
+ */
+export async function confirmTaskPlan(input: {
+  taskId: string
+  approved: boolean
+  token: string
+}): Promise<ApiResponse<{
+  taskId: string
+  status: string
+}>> {
+  return apiRequest(`/api/operations/tasks/${input.taskId}/confirm`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${input.token}` },
+    body: JSON.stringify({
+      approved: input.approved,
+    }),
+  })
+}
+
+/**
+ * 取消任務
+ */
+export async function cancelTask(input: {
+  taskId: string
+  token: string
+}): Promise<ApiResponse<{
+  taskId: string
+  status: string
+}>> {
+  return apiRequest(`/api/operations/tasks/${input.taskId}/cancel`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${input.token}` },
+  })
+}
+
+/**
+ * 重試任務
+ */
+export async function retryTask(input: {
+  taskId: string
+  token: string
+}): Promise<ApiResponse<{
+  taskId: string
+  status: string
+  currentStep: number
+}>> {
+  return apiRequest(`/api/operations/tasks/${input.taskId}/retry`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${input.token}` },
+  })
+}
+
+/**
  * 獲取任務
  */
 export async function getTask(input: {
@@ -1398,6 +1474,39 @@ export async function createNotification(input: {
 }
 
 /**
+ * 迭代修改專案
+ */
+export async function iterateProject(input: {
+  projectId: string
+  changes: string
+  isDestructive?: boolean
+  token: string
+}): Promise<ApiResponse<{ projectId: string; status: string; backupCreated: boolean }>> {
+  return apiRequest(`/api/operations/projects/${input.projectId}/iterate`, {
+    method: 'PATCH',
+    headers: { Authorization: `Bearer ${input.token}` },
+    body: JSON.stringify({
+      changes: input.changes,
+      isDestructive: input.isDestructive,
+    }),
+  })
+}
+
+/**
+ * 訂閱操作（取消/重新訂閱）
+ */
+export async function subscriptionAction(input: {
+  action: 'cancel' | 'resubscribe'
+  token: string
+}): Promise<ApiResponse<{ userId: string; status: string }>> {
+  return apiRequest('/api/operations/subscription/action', {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${input.token}` },
+    body: JSON.stringify({ action: input.action }),
+  })
+}
+
+/**
  * 生成程式碼
  */
 export async function generateCode(input: {
@@ -1480,6 +1589,90 @@ export const vpsApi = {
   createNotification,
   generateCode,
   deployProjectVps,
+  iterateProject,
+  subscriptionAction,
+  exportData,
+  transferResources,
+  registerSkill,
+  configureWebhook,
+}
+
+/**
+ * 導出資料
+ */
+export async function exportData(input: {
+  format: 'sql' | 'json'
+  projectId?: string
+  token: string
+}): Promise<ApiResponse<{ downloadUrl: string; format: string }>> {
+  return apiRequest('/api/operations/export', {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${input.token}` },
+    body: JSON.stringify({
+      format: input.format,
+      projectId: input.projectId,
+    }),
+  })
+}
+
+/**
+ * 移轉資源
+ */
+export async function transferResources(input: {
+  projectId: string
+  dbApiKey: string
+  vercelToken: string
+  token: string
+}): Promise<ApiResponse<{ projectId: string; transferred: boolean }>> {
+  return apiRequest('/api/operations/transfer', {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${input.token}` },
+    body: JSON.stringify({
+      projectId: input.projectId,
+      dbApiKey: input.dbApiKey,
+      vercelToken: input.vercelToken,
+    }),
+  })
+}
+
+/**
+ * 註冊技能
+ */
+export async function registerSkill(input: {
+  name: string
+  description?: string
+  version: string
+  token: string
+}): Promise<ApiResponse<{ skillId: string; status: string }>> {
+  return apiRequest('/api/operations/skills', {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${input.token}` },
+    body: JSON.stringify({
+      name: input.name,
+      description: input.description,
+      version: input.version,
+    }),
+  })
+}
+
+/**
+ * 配置 Webhook
+ */
+export async function configureWebhook(input: {
+  url: string
+  events: string[]
+  secret?: string
+  token: string
+}): Promise<ApiResponse<{ webhookId: string; status: string }>> {
+  return apiRequest('/api/operations/webhooks', {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${input.token}` },
+    body: JSON.stringify({
+      url: input.url,
+      events: input.events,
+      secret: input.secret,
+    }),
+  })
 }
 
 // 導出類型

@@ -1,6 +1,6 @@
 'use server'
 
-import { db, PLAN_MESSAGE_LIMITS, PLAN_PROJECT_LIMITS, PLAN_PRIORITY_WEIGHTS } from '../lib/db'
+// db 直連已遷移至 VPS API，此導入已移除
 import { getCurrentUser, getAuthToken } from '../lib/auth'
 import { deployProject as deployProjectReal, generateNextJsTemplate } from './deploy'
 import * as vpsApi from '../lib/vps-api'
@@ -184,52 +184,31 @@ export async function updateProject(input: {
   changes: string
   isDestructive?: boolean
 }): Promise<ActionResult<{ projectId: string; status: ProjectStatus; backupCreated?: boolean }>> {
-  const { projectId, changes: _changes, isDestructive } = input
+  const { projectId, changes, isDestructive } = input
 
-  // 查詢專案
-  const { data: project, error: projectError } = await db
-    .from('projects')
-    .select('id, status')
-    .eq('id', projectId)
-    .single()
-
-  if (projectError || !project) {
-    return { success: false, error: '專案不存在' }
+  const token = await getAuthToken()
+  if (!token) {
+    return { success: false, error: '未登入' }
   }
 
-  // 前置：檢查專案狀態
-  if (project.status !== 'deployed' && project.status !== 'failed') {
-    return { success: false, error: '專案狀態必須為 deployed 或 failed' }
+  const result = await vpsApi.iterateProject({
+    projectId,
+    changes,
+    isDestructive,
+    token,
+  })
+
+  if (!result.success || !result.data) {
+    return { success: false, error: result.error || '迭代修改失敗' }
   }
-
-  let backupCreated = false
-
-  // 後置：破壞性變更前備份
-  if (isDestructive) {
-    const backupUrl = `https://r2.example.com/backup-${Date.now()}.sql`
-    await db
-      .from('generations')
-      .insert({
-        project_id: projectId,
-        backup_sql_url: backupUrl,
-        backup_created_at: new Date().toISOString(),
-        status: 'pending'
-      })
-    backupCreated = true
-  }
-
-  // 更新專案狀態為 generating
-  await db
-    .from('projects')
-    .update({
-      status: 'generating',
-      updated_at: new Date().toISOString()
-    })
-    .eq('id', projectId)
 
   return {
     success: true,
-    data: { projectId, status: 'generating', backupCreated }
+    data: {
+      projectId: result.data.projectId,
+      status: result.data.status as ProjectStatus,
+      backupCreated: result.data.backupCreated
+    }
   }
 }
 
@@ -244,45 +223,26 @@ export async function cancelSubscription(input: {
 }): Promise<ActionResult<{ userId: string; status: SubscriptionStatus }>> {
   const { userId, action = 'cancel' } = input
 
-  // 查詢用戶
-  const { data: user, error: userError } = await db
-    .from('users')
-    .select('id, subscription_status')
-    .eq('id', userId)
-    .single()
-
-  if (userError || !user) {
-    return { success: false, error: '用戶不存在' }
+  const token = await getAuthToken()
+  if (!token) {
+    return { success: false, error: '未登入' }
   }
 
-  if (action === 'resubscribe') {
-    // 重新訂閱
-    await db
-      .from('users')
-      .update({
-        subscription_status: 'active',
-        cancelled_at: null
-      })
-      .eq('id', userId)
+  const result = await vpsApi.subscriptionAction({
+    action,
+    token,
+  })
 
-    return {
-      success: true,
-      data: { userId, status: 'active' }
-    }
+  if (!result.success || !result.data) {
+    return { success: false, error: result.error || '訂閱操作失敗' }
   }
-
-  // 取消訂閱
-  await db
-    .from('users')
-    .update({
-      subscription_status: 'suspended',
-      cancelled_at: new Date().toISOString()
-    })
-    .eq('id', userId)
 
   return {
     success: true,
-    data: { userId, status: 'suspended' }
+    data: {
+      userId: result.data.userId,
+      status: result.data.status as SubscriptionStatus
+    }
   }
 }
 
@@ -297,27 +257,22 @@ export async function exportData(input: {
   projectId?: string
   requestUserId?: string
 }): Promise<ActionResult<{ downloadUrl: string; format: string }>> {
-  const { userId: _userId, format, projectId, requestUserId } = input
+  const { format, projectId } = input
 
-  // 如果指定了 projectId，檢查擁有權
-  if (projectId) {
-    const { data: project } = await db
-      .from('projects')
-      .select('user_id')
-      .eq('id', projectId)
-      .single()
-
-    if (requestUserId && project?.user_id !== requestUserId) {
-      return { success: false, error: '僅專案擁有者可導出' }
-    }
+  const token = await getAuthToken()
+  if (!token) {
+    return { success: false, error: '未登入' }
   }
 
-  // 生成導出 URL
-  const downloadUrl = `https://r2.example.com/export-${Date.now()}.${format === 'sql' ? 'sql' : 'json'}`
+  const result = await vpsApi.exportData({ format, projectId, token })
+
+  if (!result.success || !result.data) {
+    return { success: false, error: result.error || '導出資料失敗' }
+  }
 
   return {
     success: true,
-    data: { downloadUrl, format: format === 'sql' ? 'sql_dump' : 'json' }
+    data: result.data
   }
 }
 
@@ -335,47 +290,29 @@ export async function transferResources(input: {
 }): Promise<ActionResult<{ projectId: string; transferred: boolean }>> {
   const { projectId, dbApiKey, vercelToken } = input
 
-  // 查詢專案
-  const { data: project, error: projectError } = await db
-    .from('projects')
-    .select('id, user_id, is_transferred, users(subscription_status)')
-    .eq('id', projectId)
-    .single()
-
-  if (projectError || !project) {
-    return { success: false, error: '專案不存在' }
+  const token = await getAuthToken()
+  if (!token) {
+    return { success: false, error: '未登入' }
   }
 
-  const user = project.users as any
-
-  // 前置：檢查訂閱狀態
-  if (user?.subscription_status !== 'active') {
-    return { success: false, error: '訂閱狀態必須為 active' }
-  }
-
-  // 前置：檢查是否已移轉
-  if (project.is_transferred) {
-    return { success: false, error: '已移轉的專案不可再次移轉' }
-  }
-
-  // 前置：驗證 API Key（簡單驗證）
-  if (!dbApiKey?.startsWith('sb_key') || !vercelToken?.startsWith('vercel_')) {
+  if (!dbApiKey || !vercelToken) {
     return { success: false, error: 'API Key 無效' }
   }
 
-  // 執行移轉
-  await db
-    .from('projects')
-    .update({
-      is_transferred: true,
-      transferred_at: new Date().toISOString(),
-      updated_at: new Date().toISOString()
-    })
-    .eq('id', projectId)
+  const result = await vpsApi.transferResources({
+    projectId,
+    dbApiKey,
+    vercelToken,
+    token,
+  })
+
+  if (!result.success || !result.data) {
+    return { success: false, error: result.error || '移轉資源失敗' }
+  }
 
   return {
     success: true,
-    data: { projectId, transferred: true }
+    data: result.data
   }
 }
 
@@ -394,72 +331,31 @@ export async function createTask(input: {
   goal: string
   userId?: string
 }): Promise<ActionResult<{ taskId: string; status: TaskStatus; stepCount?: number; calculatedPriority?: number }>> {
-  const { projectId, goal, userId } = input
+  const { projectId, goal } = input
 
-  // 查詢專案
-  const { data: project, error: projectError } = await db
-    .from('projects')
-    .select('id, user_id, users(id, plan, subscription_status)')
-    .eq('id', projectId)
-    .single()
-
-  if (projectError || !project) {
-    return { success: false, error: '專案不存在' }
+  const token = await getAuthToken()
+  if (!token) {
+    return { success: false, error: '未登入' }
   }
 
-  const user = project.users as any
+  const result = await vpsApi.createTaskFull({
+    projectId,
+    goal,
+    token,
+  })
 
-  // 如果提供了 userId，使用它來檢查；否則使用專案的 user
-  if (userId) {
-    const { data: requestUser } = await db
-      .from('users')
-      .select('subscription_status')
-      .eq('id', userId)
-      .single()
-
-    if (requestUser?.subscription_status !== 'active') {
-      return { success: false, error: '訂閱狀態必須為 active' }
-    }
-  } else if (user?.subscription_status !== 'active') {
-    return { success: false, error: '訂閱狀態必須為 active' }
+  if (!result.success || !result.data) {
+    return { success: false, error: result.error || '建立任務失敗' }
   }
-
-  // 計算優先級
-  const planPriority = PLAN_PRIORITY_WEIGHTS[user?.plan || 'free'] || 0
-  const calculatedPriority = planPriority
-
-  // 建立任務
-  const taskId = crypto.randomUUID()
-  const { error: taskError } = await db
-    .from('tasks')
-    .insert({
-      id: taskId,
-      project_id: projectId,
-      user_id: project.user_id,
-      goal,
-      status: 'planning',
-      calculated_priority: calculatedPriority
-    })
-
-  if (taskError) {
-    return { success: false, error: taskError.message }
-  }
-
-  // 模擬 LLM Planning - 生成執行計劃
-  const stepCount = 2 // 假設生成 2 個步驟
-
-  // 更新任務狀態為等待確認
-  await db
-    .from('tasks')
-    .update({
-      status: 'pending_approval',
-      plan: { steps: stepCount }
-    })
-    .eq('id', taskId)
 
   return {
     success: true,
-    data: { taskId, status: 'pending_approval', stepCount, calculatedPriority }
+    data: {
+      taskId: result.data.taskId,
+      status: result.data.status as TaskStatus,
+      stepCount: result.data.stepCount,
+      calculatedPriority: result.data.calculatedPriority
+    }
   }
 }
 
@@ -474,43 +370,29 @@ export async function confirmTaskPlan(input: {
   approved: boolean
   requestUserId?: string
 }): Promise<ActionResult<{ taskId: string; status: TaskStatus }>> {
-  const { taskId, approved, requestUserId } = input
+  const { taskId, approved } = input
 
-  // 查詢任務
-  const { data: task, error: taskError } = await db
-    .from('tasks')
-    .select('id, status, user_id')
-    .eq('id', taskId)
-    .single()
-
-  if (taskError || !task) {
-    return { success: false, error: '任務不存在' }
+  const token = await getAuthToken()
+  if (!token) {
+    return { success: false, error: '未登入' }
   }
 
-  // 前置：檢查擁有權
-  if (requestUserId && task.user_id !== requestUserId) {
-    return { success: false, error: '僅任務擁有者可確認' }
+  const result = await vpsApi.confirmTaskPlan({
+    taskId,
+    approved,
+    token,
+  })
+
+  if (!result.success || !result.data) {
+    return { success: false, error: result.error || '確認任務失敗' }
   }
-
-  // 前置：檢查任務狀態
-  if (task.status !== 'pending_approval') {
-    return { success: false, error: '任務狀態必須為 pending_approval' }
-  }
-
-  const newStatus: TaskStatus = approved ? 'executing' : 'cancelled'
-
-  await db
-    .from('tasks')
-    .update({
-      status: newStatus,
-      started_at: approved ? new Date().toISOString() : undefined,
-      updated_at: new Date().toISOString()
-    })
-    .eq('id', taskId)
 
   return {
     success: true,
-    data: { taskId, status: newStatus }
+    data: {
+      taskId: result.data.taskId,
+      status: result.data.status as TaskStatus
+    }
   }
 }
 
@@ -525,51 +407,26 @@ export async function cancelTask(input: {
 }): Promise<ActionResult<{ taskId: string; status: TaskStatus }>> {
   const { taskId } = input
 
-  // 查詢任務
-  const { data: task, error: taskError } = await db
-    .from('tasks')
-    .select('id, status, user_id')
-    .eq('id', taskId)
-    .single()
-
-  if (taskError || !task) {
-    return { success: false, error: '任務不存在' }
+  const token = await getAuthToken()
+  if (!token) {
+    return { success: false, error: '未登入' }
   }
 
-  // 前置：檢查任務狀態
-  if (task.status === 'completed' || task.status === 'cancelled') {
-    return { success: false, error: '已完成或已取消的任務無法再取消' }
+  const result = await vpsApi.cancelTask({
+    taskId,
+    token,
+  })
+
+  if (!result.success || !result.data) {
+    return { success: false, error: result.error || '取消任務失敗' }
   }
-
-  // 取消運行中的步驟
-  await db
-    .from('task_steps')
-    .update({ status: 'cancelled' })
-    .eq('task_id', taskId)
-    .eq('status', 'running')
-
-  // 更新任務狀態
-  await db
-    .from('tasks')
-    .update({
-      status: 'cancelled',
-      updated_at: new Date().toISOString()
-    })
-    .eq('id', taskId)
-
-  // 後置：發送通知
-  await db
-    .from('notifications')
-    .insert({
-      user_id: task.user_id,
-      type: 'task_cancelled',
-      title: '任務已取消',
-      task_id: taskId
-    })
 
   return {
     success: true,
-    data: { taskId, status: 'cancelled' }
+    data: {
+      taskId: result.data.taskId,
+      status: result.data.status as TaskStatus
+    }
   }
 }
 
@@ -583,44 +440,27 @@ export async function retryTask(input: {
 }): Promise<ActionResult<{ taskId: string; status: TaskStatus; currentStep?: number }>> {
   const { taskId } = input
 
-  // 查詢任務
-  const { data: task, error: taskError } = await db
-    .from('tasks')
-    .select('id, status, failed_step')
-    .eq('id', taskId)
-    .single()
-
-  if (taskError || !task) {
-    return { success: false, error: '任務不存在' }
+  const token = await getAuthToken()
+  if (!token) {
+    return { success: false, error: '未登入' }
   }
 
-  // 前置：檢查任務狀態
-  if (task.status !== 'failed') {
-    return { success: false, error: '只有 failed 狀態的任務可重試' }
+  const result = await vpsApi.retryTask({
+    taskId,
+    token,
+  })
+
+  if (!result.success || !result.data) {
+    return { success: false, error: result.error || '重試任務失敗' }
   }
-
-  const currentStep = task.failed_step || 1
-
-  // 將失敗的步驟改為 running
-  await db
-    .from('task_steps')
-    .update({ status: 'running' })
-    .eq('task_id', taskId)
-    .eq('step_number', currentStep)
-
-  // 更新任務狀態
-  await db
-    .from('tasks')
-    .update({
-      status: 'executing',
-      current_step: currentStep,
-      updated_at: new Date().toISOString()
-    })
-    .eq('id', taskId)
 
   return {
     success: true,
-    data: { taskId, status: 'executing', currentStep }
+    data: {
+      taskId: result.data.taskId,
+      status: result.data.status as TaskStatus,
+      currentStep: result.data.currentStep
+    }
   }
 }
 
@@ -637,43 +477,32 @@ export async function registerSkill(input: {
   costLevel?: 'low' | 'medium' | 'high'
   timeoutMs?: number
 }): Promise<ActionResult<{ skillId: string; name: string; status: string; hasEmbedding?: boolean }>> {
-  const { name, displayName, description, minPlan = 'free', costLevel = 'medium', timeoutMs = 300000 } = input
+  const { name, description } = input
 
-  // 前置：檢查名稱重複
-  const { data: existingSkill } = await db
-    .from('skills')
-    .select('id')
-    .eq('name', name)
-    .single()
-
-  if (existingSkill) {
-    return { success: false, error: '技能名稱已存在' }
+  const token = await getAuthToken()
+  if (!token) {
+    return { success: false, error: '未登入' }
   }
 
-  // 建立技能
-  const skillId = crypto.randomUUID()
-  const { error: skillError } = await db
-    .from('skills')
-    .insert({
-      id: skillId,
-      name,
-      display_name: displayName,
-      description,
-      min_plan: minPlan,
-      cost_level: costLevel,
-      timeout_ms: timeoutMs,
-      status: 'enabled',
-      // 模擬 embedding（實際上會調用 LLM）
-      description_embedding: new Array(1536).fill(0.1)
-    })
+  const result = await vpsApi.registerSkill({
+    name,
+    description,
+    version: '1.0.0',
+    token,
+  })
 
-  if (skillError) {
-    return { success: false, error: skillError.message }
+  if (!result.success || !result.data) {
+    return { success: false, error: result.error || '註冊技能失敗' }
   }
 
   return {
     success: true,
-    data: { skillId, name, status: 'enabled', hasEmbedding: true }
+    data: {
+      skillId: result.data.skillId,
+      name,
+      status: result.data.status,
+      hasEmbedding: true
+    }
   }
 }
 
@@ -689,50 +518,39 @@ export async function configureWebhook(input: {
   events?: string
   isActive?: boolean
 }): Promise<ActionResult<{ webhookId: string; url?: string; isActive: boolean }>> {
-  const { userId, webhookId, url, events, isActive } = input
+  const { url, events } = input
 
   // 前置：URL 必須是 HTTPS
   if (url && !url.startsWith('https://')) {
     return { success: false, error: 'URL 必須是 HTTPS' }
   }
 
-  if (webhookId) {
-    // 更新現有 Webhook
-    const updateData: Record<string, unknown> = { updated_at: new Date().toISOString() }
-    if (url !== undefined) updateData.url = url
-    if (events !== undefined) updateData.events = events.split(',')
-    if (isActive !== undefined) updateData.is_active = isActive
-
-    await db
-      .from('user_webhooks')
-      .update(updateData)
-      .eq('id', webhookId)
-
-    return {
-      success: true,
-      data: { webhookId, url, isActive: isActive ?? true }
-    }
+  const token = await getAuthToken()
+  if (!token) {
+    return { success: false, error: '未登入' }
   }
 
-  // 建立新 Webhook
-  if (!userId || !url || !events) {
+  if (!url || !events) {
     return { success: false, error: '缺少必要參數' }
   }
 
-  const newWebhookId = crypto.randomUUID()
-  await db
-    .from('user_webhooks')
-    .insert({
-      id: newWebhookId,
-      user_id: userId,
-      url,
-      events: events.split(','),
-      is_active: true
-    })
+  const result = await vpsApi.configureWebhook({
+    url,
+    events: events.split(','),
+    token,
+  })
+
+  if (!result.success || !result.data) {
+    return { success: false, error: result.error || '配置 Webhook 失敗' }
+  }
 
   return {
     success: true,
-    data: { webhookId: newWebhookId, url, isActive: true }
+    data: {
+      webhookId: result.data.webhookId,
+      url,
+      isActive: true
+    }
   }
 }
 
@@ -823,209 +641,25 @@ export async function initializeSession(input: {
     return { success: false, error: '缺少 anonymousId' }
   }
 
-  const email = `${anonymousId}@anonymous.tellcraft.app`
+  const result = await vpsApi.initializeSession({
+    anonymousId,
+    conversationId,
+    createNew,
+  })
 
-  // 1. 查找現有用戶（先在 users 表查）
-  let { data: user, error: _userError } = await db
-    .from('users')
-    .select('id')
-    .eq('email', email)
-    .single()
-
-  let isNew = false
-
-  if (_userError || !user) {
-    // 用戶不存在，需要先在 auth.users 創建，再在 users 表創建
-    // 使用 Supabase Admin API 創建 auth 用戶
-    const { data: authData, error: authError } = await db.auth.admin.createUser({
-      email,
-      email_confirm: true, // 自動確認 email
-      user_metadata: {
-        anonymous: true,
-        anonymousId
-      }
-    })
-
-    if (authError || !authData.user) {
-      // 如果 auth 用戶已存在（可能之前創建過），嘗試獲取
-      const { data: existingAuth } = await db.auth.admin.listUsers()
-      const existingUser = existingAuth?.users?.find((u: any) => u.email === email)
-
-      if (!existingUser) {
-        return { success: false, error: authError?.message || '創建認證用戶失敗' }
-      }
-
-      // 在 users 表創建記錄
-      const { data: newUser, error: createUserError } = await db
-        .from('users')
-        .insert({
-          id: existingUser.id,
-          email,
-          plan: 'free',
-          subscription_status: 'active',
-          message_count_this_period: 0
-        })
-        .select('id')
-        .single()
-
-      if (createUserError || !newUser) {
-        return { success: false, error: createUserError?.message || '創建用戶失敗' }
-      }
-      user = newUser
-      isNew = true
-    } else {
-      // 在 users 表創建記錄
-      const { data: newUser, error: createUserError } = await db
-        .from('users')
-        .insert({
-          id: authData.user.id,
-          email,
-          plan: 'free',
-          subscription_status: 'active',
-          message_count_this_period: 0
-        })
-        .select('id')
-        .single()
-
-      if (createUserError || !newUser) {
-        return { success: false, error: createUserError?.message || '創建用戶失敗' }
-      }
-      user = newUser
-      isNew = true
-    }
+  if (!result.success || !result.data) {
+    return { success: false, error: result.error || '初始化會話失敗' }
   }
 
-  // 2. 查找或創建專案
-  // 規則：draft/generating 狀態的專案可以複用，deployed/testing/failed 則創建新專案
-  const reusableStatuses = ['draft', 'generating']
-
-  const { data: existingProject } = await db
-    .from('projects')
-    .select('id, status')
-    .eq('user_id', user.id)
-    .in('status', reusableStatuses)
-    .order('created_at', { ascending: false })
-    .limit(1)
-    .single()
-
-  let project: { id: string }
-
-  if (existingProject) {
-    // 複用現有的 draft/generating 專案
-    project = existingProject
-  } else {
-    // 沒有可複用的專案，創建新專案
-    const { data: newProject, error: createProjectError } = await db
-      .from('projects')
-      .insert({
-        user_id: user.id,
-        name: '我的專案',
-        status: 'draft'
-      })
-      .select('id')
-      .single()
-
-    if (createProjectError || !newProject) {
-      return { success: false, error: createProjectError?.message || '創建專案失敗' }
-    }
-    project = newProject
-    isNew = true
-  }
-
-  // 3. 檢查是否有歷史對話
-  const { count: historyCount } = await db
-    .from('conversations')
-    .select('id', { count: 'exact', head: true })
-    .eq('project_id', project.id)
-
-  const hasHistory = (historyCount || 0) > 0
-
-  // 4. 處理對話：恢復指定對話、創建新對話、或返回需選擇
-  let finalConversationId: string
-
-  if (conversationId) {
-    // 嘗試恢復指定對話
-    const { data: existingConv, error: convError } = await db
-      .from('conversations')
-      .select('id, project_id')
-      .eq('id', conversationId)
-      .single()
-
-    if (convError || !existingConv) {
-      return { success: false, error: '對話不存在或無權訪問' }
-    }
-
-    // 驗證對話屬於該用戶的專案
-    const { data: convProject } = await db
-      .from('projects')
-      .select('user_id')
-      .eq('id', existingConv.project_id)
-      .single()
-
-    if (convProject?.user_id !== user.id) {
-      return { success: false, error: '無權訪問此對話' }
-    }
-
-    finalConversationId = conversationId
-  } else if (createNew || !hasHistory) {
-    // 創建新對話
-    const { data: newConv, error: createConvError } = await db
-      .from('conversations')
-      .insert({
-        project_id: project.id,
-        messages: [],
-        spec_complete: false
-      })
-      .select('id')
-      .single()
-
-    if (createConvError || !newConv) {
-      return { success: false, error: createConvError?.message || '創建對話失敗' }
-    }
-    finalConversationId = newConv.id
-    isNew = true
-  } else {
-    // 有歷史但未指定要恢復哪個 → 返回最近的未完成對話
-    const { data: recentConv } = await db
-      .from('conversations')
-      .select('id')
-      .eq('project_id', project.id)
-      .eq('spec_complete', false)
-      .order('updated_at', { ascending: false })
-      .limit(1)
-      .single()
-
-    if (recentConv) {
-      // 有未完成的對話，恢復它
-      finalConversationId = recentConv.id
-    } else {
-      // 沒有未完成的對話，創建新的
-      const { data: newConv, error: createConvError } = await db
-        .from('conversations')
-        .insert({
-          project_id: project.id,
-          messages: [],
-          spec_complete: false
-        })
-        .select('id')
-        .single()
-
-      if (createConvError || !newConv) {
-        return { success: false, error: createConvError?.message || '創建對話失敗' }
-      }
-      finalConversationId = newConv.id
-      isNew = true
-    }
-  }
-
+  const data = result.data
   return {
     success: true,
     data: {
-      userId: user.id,
-      projectId: project.id,
-      conversationId: finalConversationId,
-      isNew,
-      hasHistory
+      userId: data.userId,
+      projectId: data.projectId,
+      conversationId: data.conversationId,
+      isNew: data.isNewUser || data.isNewConversation,
+      hasHistory: data.resumed || (data.messages && data.messages.length > 0)
     }
   }
 }
@@ -1064,215 +698,56 @@ export async function initializeSessionFromAuth(input?: {
 }>> {
   const { anonymousId, conversationId, createNew = false } = input || {}
 
-  const authUser = await getCurrentUser()
+  const token = await getAuthToken()
+  if (!token) {
+    return { success: false, error: '未登入' }
+  }
 
+  const authUser = await getCurrentUser()
   if (!authUser) {
     return { success: false, error: '未登入' }
   }
 
-  // 從 JWT 取得用戶資訊
-  const email = authUser.email || `${authUser.id}@auth.tellcraft.app`
-  const name = authUser.name
-  const avatarUrl: string | undefined = undefined // JWT 中沒有 avatarUrl，之後從資料庫取
+  // 使用 VPS API 初始化會話（帶 token 表示已認證用戶）
+  const result = await vpsApi.initializeSession({
+    anonymousId,
+    conversationId,
+    createNew,
+    token,
+  })
 
-  // 1. 查找或創建 users 表中的用戶記錄
-  const userQueryResult = await db
-    .from('users')
-    .select('id')
-    .eq('id', authUser.id)
-    .single()
-
-  let user = userQueryResult.data
-  let isNew = false
-
-  if (userQueryResult.error || !user) {
-    // 嘗試用 email 查找（處理舊資料遷移）
-    const { data: userByEmail } = await db
-      .from('users')
-      .select('id')
-      .eq('email', email)
-      .single()
-
-    if (userByEmail) {
-      // 更新現有用戶的 id 為 auth user id
-      await db
-        .from('users')
-        .update({ id: authUser.id })
-        .eq('id', userByEmail.id)
-      user = { id: authUser.id }
-    } else {
-      // 創建新用戶
-      const { data: newUser, error: createUserError } = await db
-        .from('users')
-        .insert({
-          id: authUser.id,
-          email,
-          plan: 'free',
-          subscription_status: 'active',
-          message_count_this_period: 0
-        })
-        .select('id')
-        .single()
-
-      if (createUserError || !newUser) {
-        return { success: false, error: createUserError?.message || '創建用戶失敗' }
-      }
-      user = newUser
-      isNew = true
-    }
+  if (!result.success || !result.data) {
+    return { success: false, error: result.error || '初始化會話失敗' }
   }
 
-  // 2. 執行帳號合併（如果有 anonymousId）
-  let migrationResult: { migratedProjects: number; migratedConversations: number } | undefined
+  const data = result.data
 
+  // 如果有 anonymousId，執行帳號合併
+  let migrationResult: { migratedProjects: number; migratedConversations: number } | undefined
   if (anonymousId) {
     const migration = await migrateAnonymousAccount({
-      authUserId: user.id,
+      authUserId: data.userId,
       anonymousId
     })
-
     if (migration.success && migration.data) {
       migrationResult = migration.data
-    }
-  }
-
-  // 3. 查找或創建專案
-  // 規則：draft/generating 狀態的專案可以複用，deployed/testing/failed 則創建新專案
-  const reusableStatuses = ['draft', 'generating']
-
-  const { data: existingProject } = await db
-    .from('projects')
-    .select('id, status')
-    .eq('user_id', user.id)
-    .in('status', reusableStatuses)
-    .order('created_at', { ascending: false })
-    .limit(1)
-    .single()
-
-  let project: { id: string }
-
-  if (existingProject) {
-    // 複用現有的 draft/generating 專案
-    project = existingProject
-  } else {
-    // 沒有可複用的專案，創建新專案
-    const { data: newProject, error: createProjectError } = await db
-      .from('projects')
-      .insert({
-        user_id: user.id,
-        name: '我的專案',
-        status: 'draft'
-      })
-      .select('id')
-      .single()
-
-    if (createProjectError || !newProject) {
-      return { success: false, error: createProjectError?.message || '創建專案失敗' }
-    }
-    project = newProject
-    isNew = true
-  }
-
-  // 4. 檢查是否有歷史對話
-  const { count: historyCount } = await db
-    .from('conversations')
-    .select('id', { count: 'exact', head: true })
-    .eq('project_id', project.id)
-
-  const hasHistory = (historyCount || 0) > 0
-
-  // 5. 處理對話：恢復指定對話、創建新對話
-  let finalConversationId: string
-
-  if (conversationId) {
-    // 嘗試恢復指定對話
-    const { data: existingConv, error: convError } = await db
-      .from('conversations')
-      .select('id, project_id')
-      .eq('id', conversationId)
-      .single()
-
-    if (convError || !existingConv) {
-      return { success: false, error: '對話不存在或無權訪問' }
-    }
-
-    // 驗證對話屬於該用戶的專案
-    const { data: convProject } = await db
-      .from('projects')
-      .select('user_id')
-      .eq('id', existingConv.project_id)
-      .single()
-
-    if (convProject?.user_id !== user.id) {
-      return { success: false, error: '無權訪問此對話' }
-    }
-
-    finalConversationId = conversationId
-  } else if (createNew || !hasHistory) {
-    // 創建新對話
-    const { data: newConv, error: createConvError } = await db
-      .from('conversations')
-      .insert({
-        project_id: project.id,
-        messages: [],
-        spec_complete: false
-      })
-      .select('id')
-      .single()
-
-    if (createConvError || !newConv) {
-      return { success: false, error: createConvError?.message || '創建對話失敗' }
-    }
-    finalConversationId = newConv.id
-    isNew = true
-  } else {
-    // 有歷史但未指定要恢復哪個 → 返回最近的未完成對話
-    const { data: recentConv } = await db
-      .from('conversations')
-      .select('id')
-      .eq('project_id', project.id)
-      .eq('spec_complete', false)
-      .order('updated_at', { ascending: false })
-      .limit(1)
-      .single()
-
-    if (recentConv) {
-      // 有未完成的對話，恢復它
-      finalConversationId = recentConv.id
-    } else {
-      // 沒有未完成的對話，創建新的
-      const { data: newConv, error: createConvError } = await db
-        .from('conversations')
-        .insert({
-          project_id: project.id,
-          messages: [],
-          spec_complete: false
-        })
-        .select('id')
-        .single()
-
-      if (createConvError || !newConv) {
-        return { success: false, error: createConvError?.message || '創建對話失敗' }
-      }
-      finalConversationId = newConv.id
-      isNew = true
     }
   }
 
   return {
     success: true,
     data: {
-      userId: user.id,
-      projectId: project.id,
-      conversationId: finalConversationId,
-      isNew,
+      userId: data.userId,
+      projectId: data.projectId,
+      conversationId: data.conversationId,
+      isNew: data.isNewUser || data.isNewConversation,
       isAuthenticated: true,
-      hasHistory,
+      hasHistory: data.resumed || (data.messages && data.messages.length > 0),
       migrationResult,
       user: {
-        email,
-        name,
-        avatarUrl
+        email: authUser.email,
+        name: authUser.name,
+        avatarUrl: undefined
       }
     }
   }
@@ -1372,99 +847,24 @@ export async function sendMessageAndTrigger(input: {
   projectId: string
 }): Promise<ActionResult<{ messageId: string }>> {
   const { conversationId, content, projectId } = input
-  let { userId } = input
 
-  // 如果未提供 userId，從 JWT 讀取
-  if (!userId) {
-    const authUser = await getCurrentUser()
-    if (!authUser) {
-      return { success: false, error: '未登入' }
-    }
-    userId = authUser.id
-  }
+  const token = await getAuthToken()
 
-  // 1. 讀取現有消息
-  const { data: conversation, error: readError } = await db
-    .from('conversations')
-    .select('messages')
-    .eq('id', conversationId)
-    .single()
+  // 使用 VPS API 發送消息（sendMessage 會處理消息存儲和觸發後端）
+  const result = await vpsApi.sendMessage({
+    conversationId,
+    projectId,
+    message: content,
+    token: token || undefined,
+  })
 
-  if (readError || !conversation) {
-    return { success: false, error: readError?.message || '對話不存在' }
-  }
-
-  // 2. 新增用戶消息
-  const messageId = crypto.randomUUID()
-  const currentMessages = conversation.messages || []
-  const newMessage = {
-    id: messageId,
-    role: 'user',
-    content,
-    timestamp: new Date().toISOString()
-  }
-
-  const { error: updateError } = await db
-    .from('conversations')
-    .update({
-      messages: [...currentMessages, newMessage],
-      updated_at: new Date().toISOString()
-    })
-    .eq('id', conversationId)
-
-  if (updateError) {
-    return { success: false, error: updateError.message }
-  }
-
-  // 3. 更新用戶消息計數
-  try {
-    const { data: userData } = await db
-      .from('users')
-      .select('message_count_this_period')
-      .eq('id', userId)
-      .single()
-
-    if (userData) {
-      await db
-        .from('users')
-        .update({ message_count_this_period: (userData.message_count_this_period || 0) + 1 })
-        .eq('id', userId)
-    }
-  } catch {
-    // 忽略計數更新錯誤，不阻塞主流程
-  }
-
-  // 4. 觸發 VPS Backend
-  try {
-    await triggerVpsMessage({
-      projectId,
-      conversationId,
-      userId,
-      message: content
-    })
-  } catch (err) {
-    console.error('Failed to trigger VPS backend:', err)
-    // 將錯誤記錄到對話中，讓前端看到
-    const errorMsg = {
-      id: crypto.randomUUID(),
-      role: 'assistant',
-      content: `[系統錯誤] 無法啟動 AI 處理流程：${err instanceof Error ? err.message : String(err)}\n\n請聯繫管理員。`,
-      timestamp: new Date().toISOString(),
-    }
-    const { data: conv } = await db
-      .from('conversations')
-      .select('messages')
-      .eq('id', conversationId)
-      .single()
-    await db
-      .from('conversations')
-      .update({ messages: [...(conv?.messages || []), errorMsg] })
-      .eq('id', conversationId)
+  if (!result.success || !result.data) {
+    return { success: false, error: result.error || '發送消息失敗' }
   }
 
   return {
     success: true,
-    data: { messageId }
+    data: { messageId: result.data.messageId || crypto.randomUUID() }
   }
 }
 
@@ -1481,58 +881,27 @@ export async function replyToConversation(input: {
   content: string
   specConfirmed?: boolean
 }): Promise<ActionResult<{ messageId: string }>> {
-  const { conversationId, projectId, userId, taskId, content, specConfirmed } = input
+  const { conversationId, projectId, taskId, content, specConfirmed } = input
 
-  // 1. 讀取現有消息
-  const { data: conversation, error: readError } = await db
-    .from('conversations')
-    .select('messages')
-    .eq('id', conversationId)
-    .single()
+  const token = await getAuthToken()
 
-  if (readError || !conversation) {
-    return { success: false, error: readError?.message || '對話不存在' }
-  }
+  // 使用 VPS API 發送回覆
+  const result = await vpsApi.replyToConversation({
+    conversationId,
+    projectId,
+    taskId,
+    message: content,
+    specConfirmed,
+    token: token || undefined,
+  })
 
-  // 2. 新增用戶消息
-  const messageId = crypto.randomUUID()
-  const currentMessages = conversation.messages || []
-  const newMessage = {
-    id: messageId,
-    role: 'user',
-    content,
-    timestamp: new Date().toISOString()
-  }
-
-  const { error: updateError } = await db
-    .from('conversations')
-    .update({
-      messages: [...currentMessages, newMessage],
-      updated_at: new Date().toISOString()
-    })
-    .eq('id', conversationId)
-
-  if (updateError) {
-    return { success: false, error: updateError.message }
-  }
-
-  // 3. 觸發 VPS Backend reply
-  try {
-    await triggerVpsReply({
-      projectId,
-      conversationId,
-      userId,
-      taskId,
-      message: content,
-      specConfirmed
-    })
-  } catch (err) {
-    console.error('Failed to trigger VPS reply:', err)
+  if (!result.success || !result.data) {
+    return { success: false, error: result.error || '回覆失敗' }
   }
 
   return {
     success: true,
-    data: { messageId }
+    data: { messageId: result.data.messageId || crypto.randomUUID() }
   }
 }
 
@@ -1610,108 +979,45 @@ export async function getConversationMessages(input: {
 }>> {
   const { conversationId, afterTimestamp, lastUpdatedAt } = input
 
-  // 1. 先檢查 updated_at 和 spec_complete 是否有變化（輕量查詢）
-  if (lastUpdatedAt) {
-    const { data: check } = await db
-      .from('conversations')
-      .select('updated_at, project_id, spec_complete')
-      .eq('id', conversationId)
-      .single()
+  const token = await getAuthToken()
 
-    if (check && check.updated_at === lastUpdatedAt) {
-      // 沒有更新，只查詢 task/session 狀態
-      const { data: task } = await db
-        .from('tasks')
-        .select('id, status')
-        .eq('project_id', check.project_id)
-        .in('status', ['planning', 'executing', 'pending_approval', 'waiting_approval'])
-        .order('created_at', { ascending: false })
-        .limit(1)
-        .single()
+  // 使用 VPS API 獲取對話消息（帶任務狀態）
+  const result = await vpsApi.getConversationMessagesWithTask({
+    conversationId,
+    lastUpdatedAt,
+    token: token || undefined,
+  })
 
-      let activeSessionId = task?.id
-      let sessionStatus = task?.status
+  if (!result.success || !result.data) {
+    return { success: false, error: result.error || '獲取消息失敗' }
+  }
 
-      // 如果沒有活躍的 task，檢查 bdd_session
-      if (!activeSessionId) {
-        const { data: bddSession } = await db
-          .from('bdd_sessions')
-          .select('id, current_phase')
-          .eq('conversation_id', conversationId)
-          .neq('current_phase', 'completed')
-          .order('created_at', { ascending: false })
-          .limit(1)
-          .single()
+  const data = result.data
 
-        if (bddSession) {
-          activeSessionId = bddSession.id
-          sessionStatus = bddSession.current_phase
-        }
-      }
-
-      return {
-        success: true,
-        data: {
-          messages: [],  // 沒有新消息
-          currentTaskId: activeSessionId,
-          taskStatus: sessionStatus,
-          updatedAt: check.updated_at,
-          // 只有當沒有活躍的 task/session 時，才告訴前端對話已完成
-          // 這樣 UIUX 階段（spec_complete=true 但 session 仍活躍）前端會繼續輪詢
-          isComplete: check.spec_complete && !activeSessionId
-        }
+  // 如果 API 返回 noChange，表示沒有更新
+  if (data.noChange) {
+    return {
+      success: true,
+      data: {
+        messages: [],
+        currentTaskId: data.currentTaskId,
+        taskStatus: data.taskStatus,
+        updatedAt: data.updatedAt,
+        isComplete: data.specComplete && !data.currentTaskId
       }
     }
   }
 
-  // 2. 有更新或首次查詢，載入完整 messages
-  const { data: conversation, error: convError } = await db
-    .from('conversations')
-    .select('messages, project_id, updated_at, spec_complete')
-    .eq('id', conversationId)
-    .single()
-
-  if (convError || !conversation) {
-    return { success: false, error: convError?.message || '對話不存在' }
-  }
-
-  let messages = conversation.messages || []
+  let messages = data.messages || []
 
   // 如果有 afterTimestamp，只返回之後的消息
   if (afterTimestamp) {
     messages = messages.filter((m: { timestamp: string }) => m.timestamp > afterTimestamp)
   }
 
-  // 3. 查找當前活躍的任務或 BDD Session
-  const { data: task } = await db
-    .from('tasks')
-    .select('id, status')
-    .eq('project_id', conversation.project_id)
-    .in('status', ['planning', 'executing', 'pending_approval', 'waiting_approval'])
-    .order('created_at', { ascending: false })
-    .limit(1)
-    .single()
-
-  // 如果沒有活躍的 task，檢查是否有活躍的 bdd_session
-  // 這樣前端可以知道應該使用 replyToConversation 而不是 sendMessageAndTrigger
-  let activeSessionId = task?.id
-  let sessionStatus = task?.status
-
-  if (!activeSessionId) {
-    const { data: bddSession } = await db
-      .from('bdd_sessions')
-      .select('id, current_phase')
-      .eq('conversation_id', conversationId)
-      .neq('current_phase', 'completed')
-      .order('created_at', { ascending: false })
-      .limit(1)
-      .single()
-
-    if (bddSession) {
-      activeSessionId = bddSession.id
-      sessionStatus = bddSession.current_phase
-    }
-  }
+  // 使用 bddSessionId 作為 currentTaskId（如果沒有 task）
+  const activeSessionId = data.currentTaskId || data.bddSessionId
+  const sessionStatus = data.taskStatus || data.bddPhase
 
   return {
     success: true,
@@ -1719,10 +1025,8 @@ export async function getConversationMessages(input: {
       messages,
       currentTaskId: activeSessionId,
       taskStatus: sessionStatus,
-      updatedAt: conversation.updated_at,
-      // 只有當沒有活躍的 task/session 時，才告訴前端對話已完成
-      // 這樣 UIUX 階段（spec_complete=true 但 session 仍活躍）前端會繼續輪詢
-      isComplete: conversation.spec_complete && !activeSessionId
+      updatedAt: data.updatedAt,
+      isComplete: data.specComplete && !activeSessionId
     }
   }
 }
@@ -1853,133 +1157,38 @@ export async function getProjectReminder(input: {
 }>> {
   const { anonymousId } = input
 
-  // 嘗試從 JWT 獲取用戶
-  const authUser = await getCurrentUser()
+  const token = await getAuthToken()
 
-  let userId: string | null = null
+  // 使用 VPS API 獲取專案提醒
+  const result = await vpsApi.getProjectReminder({
+    anonymousId,
+    token: token || undefined,
+  })
 
-  if (authUser) {
-    // 已登入用戶
-    const { data: user } = await db
-      .from('users')
-      .select('id')
-      .eq('id', authUser.id)
-      .single()
-    userId = user?.id || null
-  } else if (anonymousId) {
-    // 匿名用戶
-    const email = `${anonymousId}@anonymous.tellcraft.app`
-    const { data: user } = await db
-      .from('users')
-      .select('id')
-      .eq('email', email)
-      .single()
-    userId = user?.id || null
-  }
-
-  if (!userId) {
+  if (!result.success || !result.data) {
     return { success: true, data: { hasReminder: false } }
   }
 
-  // 1. 先檢查是否有進行中的專案（draft/generating）有未完成對話
-  const { data: inProgressProject } = await db
-    .from('projects')
-    .select('id, name, status, updated_at')
-    .eq('user_id', userId)
-    .in('status', ['draft', 'generating'])
-    .order('updated_at', { ascending: false })
-    .limit(1)
-    .single()
+  const reminder = result.data.reminder
 
-  if (inProgressProject) {
-    // 檢查是否有未完成的對話
-    const { data: pendingConv } = await db
-      .from('conversations')
-      .select('id, updated_at')
-      .eq('project_id', inProgressProject.id)
-      .eq('spec_complete', false)
-      .order('updated_at', { ascending: false })
-      .limit(1)
-      .single()
+  if (!reminder) {
+    return { success: true, data: { hasReminder: false } }
+  }
 
-    if (pendingConv) {
-      return {
-        success: true,
-        data: {
-          hasReminder: true,
-          reminder: {
-            type: 'in_progress',
-            projectId: inProgressProject.id,
-            projectName: inProgressProject.name,
-            conversationId: pendingConv.id,
-            message: inProgressProject.status === 'generating'
-              ? '你的專案正在生成中，點擊查看進度'
-              : '你有一個專案正在進行中，點擊繼續',
-            updatedAt: pendingConv.updated_at
-          }
-        }
+  return {
+    success: true,
+    data: {
+      hasReminder: true,
+      reminder: {
+        type: reminder.type,
+        projectId: reminder.projectId,
+        projectName: reminder.projectName,
+        message: reminder.message,
+        url: reminder.url,
+        updatedAt: new Date().toISOString()
       }
     }
   }
-
-  // 2. 檢查是否有最近完成的專案（deployed，24 小時內）
-  const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString()
-  const { data: completedProject } = await db
-    .from('projects')
-    .select('id, name, status, vercel_url, custom_domain, updated_at')
-    .eq('user_id', userId)
-    .eq('status', 'deployed')
-    .gte('updated_at', oneDayAgo)
-    .order('updated_at', { ascending: false })
-    .limit(1)
-    .single()
-
-  if (completedProject) {
-    const url = completedProject.custom_domain || completedProject.vercel_url
-    return {
-      success: true,
-      data: {
-        hasReminder: true,
-        reminder: {
-          type: 'completed',
-          projectId: completedProject.id,
-          projectName: completedProject.name,
-          message: '你的專案已上線！點擊查看',
-          url: url ? (url.startsWith('http') ? url : `https://${url}`) : undefined,
-          updatedAt: completedProject.updated_at
-        }
-      }
-    }
-  }
-
-  // 3. 檢查是否有失敗的專案（failed，24 小時內）
-  const { data: failedProject } = await db
-    .from('projects')
-    .select('id, name, status, updated_at')
-    .eq('user_id', userId)
-    .eq('status', 'failed')
-    .gte('updated_at', oneDayAgo)
-    .order('updated_at', { ascending: false })
-    .limit(1)
-    .single()
-
-  if (failedProject) {
-    return {
-      success: true,
-      data: {
-        hasReminder: true,
-        reminder: {
-          type: 'failed',
-          projectId: failedProject.id,
-          projectName: failedProject.name,
-          message: '你的專案生成失敗，點擊重試',
-          updatedAt: failedProject.updated_at
-        }
-      }
-    }
-  }
-
-  return { success: true, data: { hasReminder: false } }
 }
 
 /**
@@ -2065,22 +1274,8 @@ export async function getProjectDetail(projectId: string): Promise<ActionResult<
  * 從資料庫取得專案 Schema
  * 優先從 generations 表讀取，否則返回空字串
  */
-async function getProjectSchema(projectId: string): Promise<string> {
-  // 優先從 generations 表讀取
-  const { data: gen } = await db
-    .from('generations')
-    .select('generated_code_url')
-    .eq('project_id', projectId)
-    .eq('status', 'success')
-    .order('created_at', { ascending: false })
-    .limit(1)
-    .single()
-
-  if (gen?.generated_code_url) {
-    // TODO: 從 Storage 讀取 schema
-    // 暫時返回空 schema
-  }
-
+async function getProjectSchema(_projectId: string): Promise<string> {
+  // TODO: 透過 VPS API 從 Storage 讀取 schema
   // 暫時返回空 schema（用模板）
   return ''
 }
@@ -2090,16 +1285,18 @@ async function getProjectSchema(projectId: string): Promise<string> {
  */
 async function getProjectFiles(projectId: string): Promise<Array<{ file: string; data: string }>> {
   // 優先從 Storage 讀取
-  // TODO: 實作 Storage 讀取
+  // TODO: 實作 VPS API Storage 讀取
 
-  // 暫時使用模板
-  const { data: project } = await db
-    .from('projects')
-    .select('name')
-    .eq('id', projectId)
-    .single()
+  // 暫時使用模板，透過 VPS API 取得專案名稱
+  const token = await getAuthToken()
+  if (token) {
+    const result = await vpsApi.getProject({ projectId, token })
+    if (result.success && result.data) {
+      return generateNextJsTemplate(result.data.project.name || 'my-app', '')
+    }
+  }
 
-  return generateNextJsTemplate(project?.name || 'my-app', '')
+  return generateNextJsTemplate('my-app', '')
 }
 
 /**
@@ -2112,16 +1309,19 @@ export async function deployProjectFromDb(input: {
 }): Promise<ActionResult<{ deploymentId: string; url?: string; status: string }>> {
   const { projectId } = input
 
-  // 1. 查詢專案資訊
-  const { data: project, error: projectError } = await db
-    .from('projects')
-    .select('id, name, status')
-    .eq('id', projectId)
-    .single()
-
-  if (projectError || !project) {
-    return { success: false, error: '專案不存在' }
+  const token = await getAuthToken()
+  if (!token) {
+    return { success: false, error: '未登入' }
   }
+
+  // 1. 透過 VPS API 查詢專案資訊
+  const projectResult = await vpsApi.getProject({ projectId, token })
+
+  if (!projectResult.success || !projectResult.data) {
+    return { success: false, error: projectResult.error || '專案不存在' }
+  }
+
+  const project = projectResult.data.project
 
   // 2. 前置條件檢查
   if (project.status !== 'testing') {
@@ -2141,19 +1341,14 @@ export async function deployProjectFromDb(input: {
     files,
   })
 
-  // 6. 根據結果更新資料庫
+  // 6. 根據結果透過 VPS API 更新狀態
   if (result.stage === 'complete') {
-    await db
-      .from('projects')
-      .update({
-        status: 'deployed',
-        vercel_url: result.deploymentUrl,
-        vercel_project_id: result.vercelProjectId,
-        db_project_id: result.supabaseProjectId,
-        db_url: result.supabaseUrl,
-        updated_at: new Date().toISOString(),
-      })
-      .eq('id', projectId)
+    await vpsApi.updateProjectStatus({
+      projectId,
+      status: 'deployed',
+      vercelUrl: result.deploymentUrl,
+      token,
+    })
 
     return {
       success: true,

@@ -44,7 +44,7 @@ Dashboard 從 Client Component 改為 Server Component，消除瀑布式載入�
 | Layout 瀑布式請求 | `dashboard/layout.tsx` | getCurrentUser 直接返回 isAdmin | -150ms |
 | select('*') 計數 | 多處 | 改用 select('id') | -200ms |
 
-### VPS API 遷移（2026-02-05 進行中）
+### VPS API 遷移（2026-02-05 ✅ 完成）
 
 將 Server Actions 的資料庫操作從直連 VPS PostgreSQL 遷移到 VPS HTTP API：
 
@@ -54,27 +54,32 @@ Before: Vercel Server Actions ──直連──> VPS PostgreSQL (超時問題)
 After:  Vercel Server Actions ──HTTP──> VPS Express API ──> PostgreSQL
 ```
 
-**已完成**：
-| 檔案 | 狀態 |
-|------|------|
-| `app/actions/admin.ts` | ✅ 完成 |
-| `app/actions/templates.ts` | ✅ 完成 |
-| `app/actions/index.ts` 核心函數 | ✅ 部分完成 |
+**遷移結果**：
+| 檔案 | 狀態 | 說明 |
+|------|------|------|
+| `app/actions/admin.ts` | ✅ 完成 | 管理員功能 |
+| `app/actions/templates.ts` | ✅ 完成 | 模板操作 |
+| `app/actions/index.ts` | ✅ 完成 | 103 → 0 個 db.from() 呼叫 |
+| `app/lib/db.ts` | 🗑️ 可刪除 | 不再直連資料庫 |
 
-**已遷移的函數**：
-- `createProject` - 建立專案
-- `sendMessage` - 發送訊息
-- `generateCode` - 生成程式碼
-- `deployProject` - 部署專案
-- `getUserConversations` - 獲取對話列表
-- `getProjectDetail` - 獲取專案詳情
-- `createBddSession` / `getBddSession` / `updateBddSession` - BDD Session 操作
+**已遷移的核心函數**：
+- 任務管理：`createTask`, `confirmTaskPlan`, `cancelTask`, `retryTask`
+- 會話管理：`initializeSession`, `initializeSessionFromAuth`
+- 對話操作：`sendMessageAndTrigger`, `replyToConversation`, `getConversationMessages`
+- 專案操作：`createProject`, `getProjectDetail`, `getProjectReminder`, `deployProjectFromDb`
+- BDD Session：`createBddSession`, `getBddSession`, `updateBddSession` 等
+- 用戶功能：`getUserConversations`, `getUserStats`, `getUserProjects`
+- 其他：`registerSkill`, `configureWebhook`, `exportData`, `transferResources`
 
 **新增的 VPS 路由**：
-- `/api/bdd/*` - BDD Session API
-- `/api/operations/*` - 綜合操作 API（生成、部署、任務、對話等）
+- `/api/bdd/*` - BDD Session API（10+ 端點）
+- `/api/operations/*` - 綜合操作 API（任務、生成、部署、對話等）
+- `/api/session/*` - 會話初始化 API
 
-**剩餘工作**：`app/actions/index.ts` 中仍有 73 個 `db.from()` 調用需要遷移
+**新增的 vps-api.ts 函數**：
+- `createTaskFull`, `confirmTaskPlan`, `cancelTask`, `retryTask`
+- `getConversationMessagesWithTask`, `replyToConversation`
+- `getProjectReminder`, `updateProjectStatus`
 
 ---
 

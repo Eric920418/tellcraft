@@ -299,6 +299,223 @@ router.get('/tasks/:id', optionalAuth, async (req: Request, res: Response) => {
   }
 })
 
+// 方案優先級權重
+const PLAN_PRIORITY_WEIGHTS: Record<string, number> = {
+  free: 0,
+  creator: 10,
+  pro: 50,
+  business: 100
+}
+
+/**
+ * POST /api/operations/tasks/full
+ * 完整建立任務（包含訂閱檢查、優先級計算）
+ */
+router.post('/tasks/full', requireAuth, async (req: Request, res: Response) => {
+  try {
+    const userId = req.user!.id
+    const { projectId, goal } = req.body
+
+    // 查詢專案
+    const project = await queryOne<{ id: string; user_id: string }>(
+      'SELECT id, user_id FROM projects WHERE id = $1',
+      [projectId]
+    )
+
+    if (!project) {
+      return res.status(404).json({ error: '專案不存在' })
+    }
+
+    // 查詢用戶訂閱狀態
+    const user = await queryOne<{ plan: string; subscription_status: string }>(
+      'SELECT plan, subscription_status FROM users WHERE id = $1',
+      [userId]
+    )
+
+    if (!user || user.subscription_status !== 'active') {
+      return res.status(403).json({ error: '訂閱狀態必須為 active' })
+    }
+
+    // 計算優先級
+    const calculatedPriority = PLAN_PRIORITY_WEIGHTS[user.plan] || 0
+
+    // 建立任務
+    const taskId = crypto.randomUUID()
+    await query(
+      `INSERT INTO tasks (id, project_id, user_id, input, status, priority, created_at, updated_at)
+       VALUES ($1, $2, $3, $4, 'planning', $5, NOW(), NOW())`,
+      [taskId, projectId, project.user_id, JSON.stringify({ goal }), calculatedPriority]
+    )
+
+    // 模擬 LLM Planning - 更新任務狀態為等待確認
+    const stepCount = 2
+    await query(
+      `UPDATE tasks SET status = 'pending_approval', output = $1, updated_at = NOW() WHERE id = $2`,
+      [JSON.stringify({ plan: { steps: stepCount } }), taskId]
+    )
+
+    res.json({
+      taskId,
+      status: 'pending_approval',
+      stepCount,
+      calculatedPriority
+    })
+  } catch (error) {
+    console.error('[Operations] 完整建立任務失敗:', error)
+    res.status(500).json({ error: '建立任務失敗' })
+  }
+})
+
+/**
+ * POST /api/operations/tasks/:id/confirm
+ * 確認任務計劃
+ */
+router.post('/tasks/:id/confirm', requireAuth, async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params
+    const userId = req.user!.id
+    const { approved } = req.body
+
+    // 查詢任務
+    const task = await queryOne<{ id: string; status: string; user_id: string }>(
+      'SELECT id, status, user_id FROM tasks WHERE id = $1',
+      [id]
+    )
+
+    if (!task) {
+      return res.status(404).json({ error: '任務不存在' })
+    }
+
+    // 檢查擁有權
+    if (task.user_id !== userId) {
+      return res.status(403).json({ error: '僅任務擁有者可確認' })
+    }
+
+    // 檢查任務狀態
+    if (task.status !== 'pending_approval') {
+      return res.status(400).json({ error: '任務狀態必須為 pending_approval' })
+    }
+
+    const newStatus = approved ? 'executing' : 'cancelled'
+    await query(
+      `UPDATE tasks SET status = $1, ${approved ? 'started_at = NOW(),' : ''} updated_at = NOW() WHERE id = $2`,
+      [newStatus, id]
+    )
+
+    res.json({ taskId: id, status: newStatus })
+  } catch (error) {
+    console.error('[Operations] 確認任務失敗:', error)
+    res.status(500).json({ error: '確認任務失敗' })
+  }
+})
+
+/**
+ * POST /api/operations/tasks/:id/cancel
+ * 取消任務
+ */
+router.post('/tasks/:id/cancel', requireAuth, async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params
+    const userId = req.user!.id
+
+    // 查詢任務
+    const task = await queryOne<{ id: string; status: string; user_id: string }>(
+      'SELECT id, status, user_id FROM tasks WHERE id = $1',
+      [id]
+    )
+
+    if (!task) {
+      return res.status(404).json({ error: '任務不存在' })
+    }
+
+    // 檢查擁有權
+    if (task.user_id !== userId) {
+      return res.status(403).json({ error: '僅任務擁有者可取消' })
+    }
+
+    // 檢查任務狀態
+    if (task.status === 'completed' || task.status === 'cancelled') {
+      return res.status(400).json({ error: '已完成或已取消的任務無法再取消' })
+    }
+
+    // 取消運行中的步驟
+    await query(
+      `UPDATE task_steps SET status = 'cancelled', updated_at = NOW()
+       WHERE task_id = $1 AND status = 'running'`,
+      [id]
+    )
+
+    // 更新任務狀態
+    await query(
+      `UPDATE tasks SET status = 'cancelled', updated_at = NOW() WHERE id = $1`,
+      [id]
+    )
+
+    // 發送通知
+    await query(
+      `INSERT INTO notifications (id, user_id, type, title, task_id, created_at)
+       VALUES ($1, $2, 'task_cancelled', '任務已取消', $3, NOW())`,
+      [crypto.randomUUID(), task.user_id, id]
+    )
+
+    res.json({ taskId: id, status: 'cancelled' })
+  } catch (error) {
+    console.error('[Operations] 取消任務失敗:', error)
+    res.status(500).json({ error: '取消任務失敗' })
+  }
+})
+
+/**
+ * POST /api/operations/tasks/:id/retry
+ * 重試任務
+ */
+router.post('/tasks/:id/retry', requireAuth, async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params
+    const userId = req.user!.id
+
+    // 查詢任務
+    const task = await queryOne<{ id: string; status: string; user_id: string; failed_step: number | null }>(
+      'SELECT id, status, user_id, failed_step FROM tasks WHERE id = $1',
+      [id]
+    )
+
+    if (!task) {
+      return res.status(404).json({ error: '任務不存在' })
+    }
+
+    // 檢查擁有權
+    if (task.user_id !== userId) {
+      return res.status(403).json({ error: '僅任務擁有者可重試' })
+    }
+
+    // 檢查任務狀態
+    if (task.status !== 'failed') {
+      return res.status(400).json({ error: '只有 failed 狀態的任務可重試' })
+    }
+
+    const currentStep = task.failed_step || 1
+
+    // 將失敗的步驟改為 running
+    await query(
+      `UPDATE task_steps SET status = 'running', updated_at = NOW()
+       WHERE task_id = $1 AND step_number = $2`,
+      [id, currentStep]
+    )
+
+    // 更新任務狀態
+    await query(
+      `UPDATE tasks SET status = 'executing', current_step = $1, updated_at = NOW() WHERE id = $2`,
+      [currentStep, id]
+    )
+
+    res.json({ taskId: id, status: 'executing', currentStep })
+  } catch (error) {
+    console.error('[Operations] 重試任務失敗:', error)
+    res.status(500).json({ error: '重試任務失敗' })
+  }
+})
+
 // ============================================================
 // 對話消息 API
 // ============================================================
@@ -638,6 +855,95 @@ router.post('/generate', requireAuth, async (req: Request, res: Response) => {
 })
 
 /**
+ * PATCH /api/operations/projects/:id/iterate
+ * 迭代修改專案
+ */
+router.patch('/projects/:id/iterate', requireAuth, async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params
+    const userId = req.user!.id
+    const { changes, isDestructive } = req.body
+
+    // 驗證專案
+    const project = await queryOne<{ id: string; status: string; user_id: string }>(
+      'SELECT id, status, user_id FROM projects WHERE id = $1',
+      [id]
+    )
+
+    if (!project || project.user_id !== userId) {
+      return res.status(404).json({ error: '專案不存在' })
+    }
+
+    if (project.status !== 'deployed' && project.status !== 'failed') {
+      return res.status(400).json({ error: '專案狀態必須為 deployed 或 failed' })
+    }
+
+    let backupCreated = false
+
+    // 破壞性變更前備份
+    if (isDestructive) {
+      const backupUrl = `https://r2.example.com/backup-${Date.now()}.sql`
+      await query(
+        `INSERT INTO generations (id, project_id, backup_sql_url, backup_created_at, status, created_at)
+         VALUES ($1, $2, $3, NOW(), 'pending', NOW())`,
+        [crypto.randomUUID(), id, backupUrl]
+      )
+      backupCreated = true
+    }
+
+    // 更新專案狀態
+    await query(
+      "UPDATE projects SET status = 'generating', updated_at = NOW() WHERE id = $1",
+      [id]
+    )
+
+    res.json({ projectId: id, status: 'generating', backupCreated })
+  } catch (error) {
+    console.error('[Operations] 迭代修改失敗:', error)
+    res.status(500).json({ error: '迭代修改失敗' })
+  }
+})
+
+/**
+ * POST /api/operations/subscription/action
+ * 訂閱操作（取消/重新訂閱）
+ */
+router.post('/subscription/action', requireAuth, async (req: Request, res: Response) => {
+  try {
+    const userId = req.user!.id
+    const { action } = req.body as { action?: 'cancel' | 'resubscribe' }
+
+    const user = await queryOne<{ subscription_status: string }>(
+      'SELECT subscription_status FROM users WHERE id = $1',
+      [userId]
+    )
+
+    if (!user) {
+      return res.status(404).json({ error: '用戶不存在' })
+    }
+
+    if (action === 'resubscribe') {
+      await query(
+        "UPDATE users SET subscription_status = 'active', cancelled_at = NULL, updated_at = NOW() WHERE id = $1",
+        [userId]
+      )
+      return res.json({ userId, status: 'active' })
+    }
+
+    // 取消訂閱
+    await query(
+      "UPDATE users SET subscription_status = 'suspended', cancelled_at = NOW(), updated_at = NOW() WHERE id = $1",
+      [userId]
+    )
+
+    res.json({ userId, status: 'suspended' })
+  } catch (error) {
+    console.error('[Operations] 訂閱操作失敗:', error)
+    res.status(500).json({ error: '訂閱操作失敗' })
+  }
+})
+
+/**
  * POST /api/operations/deploy
  * 部署專案
  */
@@ -687,6 +993,182 @@ router.post('/deploy', requireAuth, async (req: Request, res: Response) => {
   } catch (error) {
     console.error('[Operations] 部署專案失敗:', error)
     res.status(500).json({ error: '部署專案失敗' })
+  }
+})
+
+// ============================================================
+// 資料導出 API
+// ============================================================
+
+/**
+ * POST /api/operations/export
+ * 導出資料
+ */
+router.post('/export', requireAuth, async (req: Request, res: Response) => {
+  try {
+    const userId = req.user!.id
+    const { format, projectId } = req.body as { format: 'sql' | 'json'; projectId?: string }
+
+    // 如果指定了 projectId，檢查擁有權
+    if (projectId) {
+      const project = await queryOne<{ user_id: string }>(
+        'SELECT user_id FROM projects WHERE id = $1',
+        [projectId]
+      )
+
+      if (!project || project.user_id !== userId) {
+        return res.status(403).json({ error: '僅專案擁有者可導出' })
+      }
+    }
+
+    // 生成導出 URL
+    const downloadUrl = `https://r2.example.com/export-${Date.now()}.${format === 'sql' ? 'sql' : 'json'}`
+
+    res.json({ downloadUrl, format: format === 'sql' ? 'sql_dump' : 'json' })
+  } catch (error) {
+    console.error('[Operations] 導出資料失敗:', error)
+    res.status(500).json({ error: '導出資料失敗' })
+  }
+})
+
+/**
+ * POST /api/operations/transfer
+ * 移轉資源
+ */
+router.post('/transfer', requireAuth, async (req: Request, res: Response) => {
+  try {
+    const userId = req.user!.id
+    const { projectId, dbApiKey, vercelToken } = req.body
+
+    // 查詢專案
+    const project = await queryOne<{
+      id: string
+      user_id: string
+      is_transferred: boolean
+    }>(
+      'SELECT id, user_id, is_transferred FROM projects WHERE id = $1',
+      [projectId]
+    )
+
+    if (!project) {
+      return res.status(404).json({ error: '專案不存在' })
+    }
+
+    if (project.user_id !== userId) {
+      return res.status(403).json({ error: '無權訪問此專案' })
+    }
+
+    // 檢查用戶訂閱狀態
+    const user = await queryOne<{ subscription_status: string }>(
+      'SELECT subscription_status FROM users WHERE id = $1',
+      [userId]
+    )
+
+    if (user?.subscription_status !== 'active') {
+      return res.status(400).json({ error: '訂閱狀態必須為 active' })
+    }
+
+    if (project.is_transferred) {
+      return res.status(400).json({ error: '已移轉的專案不可再次移轉' })
+    }
+
+    // 驗證 API Key
+    if (!dbApiKey?.startsWith('sb_key') || !vercelToken?.startsWith('vercel_')) {
+      return res.status(400).json({ error: 'API Key 無效' })
+    }
+
+    // 執行移轉
+    await query(
+      `UPDATE projects SET is_transferred = true, transferred_at = NOW(), updated_at = NOW()
+       WHERE id = $1`,
+      [projectId]
+    )
+
+    res.json({ projectId, transferred: true })
+  } catch (error) {
+    console.error('[Operations] 移轉資源失敗:', error)
+    res.status(500).json({ error: '移轉資源失敗' })
+  }
+})
+
+// ============================================================
+// 技能 API
+// ============================================================
+
+/**
+ * POST /api/operations/skills
+ * 註冊技能
+ */
+router.post('/skills', requireAuth, async (req: Request, res: Response) => {
+  try {
+    const { name, description, version } = req.body
+
+    // 檢查是否已存在
+    const existing = await queryOne<{ id: string }>(
+      'SELECT id FROM skills WHERE name = $1 AND version = $2',
+      [name, version]
+    )
+
+    if (existing) {
+      return res.json({ skillId: existing.id, status: 'exists' })
+    }
+
+    // 創建新技能
+    const skillId = crypto.randomUUID()
+    await query(
+      `INSERT INTO skills (id, name, description, version, status, created_at)
+       VALUES ($1, $2, $3, $4, 'active', NOW())`,
+      [skillId, name, description || '', version]
+    )
+
+    res.json({ skillId, status: 'created' })
+  } catch (error) {
+    console.error('[Operations] 註冊技能失敗:', error)
+    res.status(500).json({ error: '註冊技能失敗' })
+  }
+})
+
+// ============================================================
+// Webhook API
+// ============================================================
+
+/**
+ * POST /api/operations/webhooks
+ * 配置 Webhook
+ */
+router.post('/webhooks', requireAuth, async (req: Request, res: Response) => {
+  try {
+    const userId = req.user!.id
+    const { url, events, secret } = req.body
+
+    // 檢查是否已存在
+    const existing = await queryOne<{ id: string }>(
+      'SELECT id FROM user_webhooks WHERE user_id = $1 AND url = $2',
+      [userId, url]
+    )
+
+    if (existing) {
+      // 更新現有 webhook
+      await query(
+        `UPDATE user_webhooks SET events = $1, secret = $2, updated_at = NOW()
+         WHERE id = $3`,
+        [JSON.stringify(events), secret, existing.id]
+      )
+      return res.json({ webhookId: existing.id, status: 'updated' })
+    }
+
+    // 創建新 webhook
+    const webhookId = crypto.randomUUID()
+    await query(
+      `INSERT INTO user_webhooks (id, user_id, url, events, secret, is_active, created_at)
+       VALUES ($1, $2, $3, $4, $5, true, NOW())`,
+      [webhookId, userId, url, JSON.stringify(events), secret]
+    )
+
+    res.json({ webhookId, status: 'created' })
+  } catch (error) {
+    console.error('[Operations] 配置 Webhook 失敗:', error)
+    res.status(500).json({ error: '配置 Webhook 失敗' })
   }
 })
 
