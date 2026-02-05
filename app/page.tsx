@@ -1562,6 +1562,9 @@ function ChatSection({
       timestamp: new Date(),
       pending: true  // 標記為待確認，輪詢時會被 DB 訊息替換
     }
+    // 用戶發送訊息後強制滾動到底部（必須在 state 更新前設置）
+    isNearBottomRef.current = true
+
     setMessages(prev => [...prev, userMessage])
     setIsTyping(true)
 
