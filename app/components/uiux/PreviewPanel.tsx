@@ -96,6 +96,13 @@ export default function PreviewPanel({
 
   const deviceWidth = getDeviceWidth(device)
 
+  // 切換設備時重新載入 iframe，讓響應式樣式生效
+  useEffect(() => {
+    if (previewUrl && iframeRef.current) {
+      reloadPreview()
+    }
+  }, [device, previewUrl, reloadPreview])
+
   return (
     <div
       style={{
