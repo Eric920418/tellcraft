@@ -9,56 +9,91 @@ export default function SaasPro({ containerWidth }: TemplateProps) {
   const isTablet = containerWidth >= 768
   const isMobile = containerWidth < 768
 
+  const colors = {
+    white: '#ffffff',
+    slate50: '#f8fafc',
+    slate100: '#f1f5f9',
+    slate200: '#e2e8f0',
+    slate300: '#cbd5e1',
+    slate400: '#94a3b8',
+    slate500: '#64748b',
+    slate600: '#475569',
+    slate700: '#334155',
+    slate900: '#0f172a',
+    emerald100: '#d1fae5',
+    emerald600: '#059669',
+    emerald700: '#047857',
+    amber100: '#fef3c7',
+    amber600: '#d97706',
+    amber700: '#b45309',
+    red500: '#ef4444',
+  }
+
   return (
-    <div className="bg-slate-50 text-slate-900 antialiased" style={{ minHeight: '100%' }}>
-      <div className="flex" style={{ minHeight: '100%' }}>
+    <div style={{ minHeight: '100%', background: colors.slate50, color: colors.slate900, fontFamily: 'system-ui, -apple-system, sans-serif' }}>
+      <div style={{ display: 'flex', minHeight: '100%' }}>
         {/* Sidebar */}
         {isDesktop && (
-          <aside className="w-72 bg-slate-900 text-white p-6 flex flex-col">
-            <div className="mb-8">
-              <h1 className="text-xl font-bold text-balance">Enterprise</h1>
-              <p className="text-slate-400 text-sm">企業管理平台</p>
+          <aside style={{
+            width: 288,
+            background: colors.slate900,
+            color: colors.white,
+            padding: 24,
+            display: 'flex',
+            flexDirection: 'column',
+          }}>
+            <div style={{ marginBottom: 32 }}>
+              <h1 style={{ fontSize: 20, fontWeight: 700 }}>Enterprise</h1>
+              <p style={{ color: colors.slate400, fontSize: 14 }}>企業管理平台</p>
             </div>
 
-            <nav className="flex-1 space-y-1">
-              <a href="#" className="flex items-center gap-3 px-4 py-3 rounded-lg bg-white/10 text-white font-medium">
-                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z"/>
-                </svg>
-                儀表板
-              </a>
-              <a href="#" className="flex items-center gap-3 px-4 py-3 rounded-lg text-slate-300 hover:bg-white/5 transition-colors">
-                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/>
-                </svg>
-                數據分析
-              </a>
-              <a href="#" className="flex items-center gap-3 px-4 py-3 rounded-lg text-slate-300 hover:bg-white/5 transition-colors">
-                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z"/>
-                </svg>
-                團隊管理
-              </a>
-              <a href="#" className="flex items-center gap-3 px-4 py-3 rounded-lg text-slate-300 hover:bg-white/5 transition-colors">
-                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
-                </svg>
-                文件管理
-              </a>
-              <a href="#" className="flex items-center gap-3 px-4 py-3 rounded-lg text-slate-300 hover:bg-white/5 transition-colors">
-                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
-                </svg>
-                財務報表
-              </a>
+            <nav style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 4 }}>
+              {[
+                { icon: 'M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z', label: '儀表板', active: true },
+                { icon: 'M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z', label: '數據分析', active: false },
+                { icon: 'M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z', label: '團隊管理', active: false },
+                { icon: 'M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z', label: '文件管理', active: false },
+                { icon: 'M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z', label: '財務報表', active: false },
+              ].map((item, i) => (
+                <a
+                  key={i}
+                  href="#"
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 12,
+                    padding: '12px 16px',
+                    borderRadius: 8,
+                    background: item.active ? 'rgba(255,255,255,0.1)' : 'transparent',
+                    color: item.active ? colors.white : colors.slate300,
+                    fontWeight: item.active ? 500 : 400,
+                    textDecoration: 'none',
+                  }}
+                >
+                  <svg style={{ width: 20, height: 20 }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d={item.icon}/>
+                  </svg>
+                  {item.label}
+                </a>
+              ))}
             </nav>
 
-            <div className="mt-auto pt-6 border-t border-slate-700">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 bg-slate-700 rounded-full flex items-center justify-center text-sm font-medium">管</div>
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium truncate">管理員</p>
-                  <p className="text-xs text-slate-400 truncate">admin@company.com</p>
+            <div style={{ paddingTop: 24, borderTop: `1px solid ${colors.slate700}` }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                <div style={{
+                  width: 40,
+                  height: 40,
+                  background: colors.slate700,
+                  borderRadius: '50%',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  fontSize: 14,
+                  fontWeight: 500,
+                }}>管</div>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <p style={{ fontSize: 14, fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>管理員</p>
+                  <p style={{ fontSize: 12, color: colors.slate400, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>admin@company.com</p>
                 </div>
               </div>
             </div>
@@ -66,161 +101,199 @@ export default function SaasPro({ containerWidth }: TemplateProps) {
         )}
 
         {/* Main Content */}
-        <main className="flex-1 flex flex-col">
+        <main style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
           {/* Top Bar */}
-          <header className="bg-white border-b border-slate-200 px-6 py-4 flex items-center justify-between">
-            <div className="flex items-center gap-4">
+          <header style={{
+            background: colors.white,
+            borderBottom: `1px solid ${colors.slate200}`,
+            padding: '16px 24px',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
               <input
                 type="search"
                 placeholder="搜尋..."
-                className={`${isMobile ? 'w-40' : 'w-64'} px-4 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-slate-900 focus:border-transparent`}
+                style={{
+                  width: isMobile ? 160 : 256,
+                  padding: '8px 16px',
+                  border: `1px solid ${colors.slate200}`,
+                  borderRadius: 8,
+                  fontSize: 14,
+                  outline: 'none',
+                }}
               />
             </div>
-            <div className="flex items-center gap-4">
-              <button className="relative p-2 text-slate-600 hover:bg-slate-100 rounded-lg transition-colors" aria-label="通知">
-                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+              <button style={{
+                position: 'relative',
+                padding: 8,
+                background: 'none',
+                border: 'none',
+                cursor: 'pointer',
+                color: colors.slate600,
+              }} aria-label="通知">
+                <svg style={{ width: 20, height: 20 }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9"/>
                 </svg>
-                <span className="absolute top-1.5 right-1.5 w-2 h-2 bg-red-500 rounded-full"></span>
+                <span style={{
+                  position: 'absolute',
+                  top: 6,
+                  right: 6,
+                  width: 8,
+                  height: 8,
+                  background: colors.red500,
+                  borderRadius: '50%',
+                }}></span>
               </button>
-              <button className="px-4 py-2 bg-slate-900 text-white rounded-lg hover:bg-slate-800 transition-colors">
+              <button style={{
+                padding: '8px 16px',
+                background: colors.slate900,
+                color: colors.white,
+                borderRadius: 8,
+                border: 'none',
+                cursor: 'pointer',
+              }}>
                 升級方案
               </button>
             </div>
           </header>
 
           {/* Content */}
-          <div className="flex-1 p-6 overflow-auto">
+          <div style={{ flex: 1, padding: 24, overflow: 'auto' }}>
             {/* Page Title */}
-            <div className="mb-6">
-              <h2 className="text-2xl font-bold text-balance">儀表板</h2>
-              <p className="text-slate-500 text-pretty">業務績效一覽</p>
+            <div style={{ marginBottom: 24 }}>
+              <h2 style={{ fontSize: 24, fontWeight: 700 }}>儀表板</h2>
+              <p style={{ color: colors.slate500 }}>業務績效一覽</p>
             </div>
 
             {/* Stats Row */}
-            <div className={`grid gap-4 mb-6 ${
-              isDesktop ? 'grid-cols-4' : isTablet ? 'grid-cols-2' : 'grid-cols-1'
-            }`}>
-              <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
-                <div className="flex items-center justify-between mb-4">
-                  <span className="text-sm font-medium text-slate-500">月營收</span>
-                  <span className="px-2 py-1 bg-emerald-100 text-emerald-700 text-xs font-medium rounded">+12%</span>
+            <div style={{
+              display: 'grid',
+              gridTemplateColumns: isDesktop ? 'repeat(4, 1fr)' : isTablet ? 'repeat(2, 1fr)' : '1fr',
+              gap: 16,
+              marginBottom: 24,
+            }}>
+              {[
+                { label: '月營收', value: '$128,430', change: '+12%', changeLabel: '較上月 +$13,847', positive: true },
+                { label: '活躍客戶', value: '2,847', change: '+8%', changeLabel: '較上月 +218 位', positive: true },
+                { label: '客戶留存率', value: '94.2%', change: '穩定', changeLabel: '行業平均 87%', positive: null },
+                { label: '待處理工單', value: '23', change: '注意', changeLabel: '平均響應 2.4 小時', positive: false },
+              ].map((stat, i) => (
+                <div key={i} style={{
+                  background: colors.white,
+                  padding: 24,
+                  borderRadius: 12,
+                  boxShadow: '0 1px 3px rgba(0,0,0,0.06)',
+                  border: `1px solid ${colors.slate200}`,
+                }}>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
+                    <span style={{ fontSize: 14, fontWeight: 500, color: colors.slate500 }}>{stat.label}</span>
+                    <span style={{
+                      padding: '4px 8px',
+                      background: stat.positive === true ? colors.emerald100 : stat.positive === false ? colors.amber100 : colors.slate100,
+                      color: stat.positive === true ? colors.emerald700 : stat.positive === false ? colors.amber700 : colors.slate700,
+                      fontSize: 12,
+                      fontWeight: 500,
+                      borderRadius: 4,
+                    }}>{stat.change}</span>
+                  </div>
+                  <p style={{ fontSize: 30, fontWeight: 700 }}>{stat.value}</p>
+                  <p style={{ fontSize: 14, color: colors.slate500, marginTop: 4 }}>{stat.changeLabel}</p>
                 </div>
-                <p className="text-3xl font-bold tabular-nums">$128,430</p>
-                <p className="text-sm text-slate-500 mt-1">較上月 +$13,847</p>
-              </div>
-              <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
-                <div className="flex items-center justify-between mb-4">
-                  <span className="text-sm font-medium text-slate-500">活躍客戶</span>
-                  <span className="px-2 py-1 bg-emerald-100 text-emerald-700 text-xs font-medium rounded">+8%</span>
-                </div>
-                <p className="text-3xl font-bold tabular-nums">2,847</p>
-                <p className="text-sm text-slate-500 mt-1">較上月 +218 位</p>
-              </div>
-              <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
-                <div className="flex items-center justify-between mb-4">
-                  <span className="text-sm font-medium text-slate-500">客戶留存率</span>
-                  <span className="px-2 py-1 bg-slate-100 text-slate-700 text-xs font-medium rounded">穩定</span>
-                </div>
-                <p className="text-3xl font-bold tabular-nums">94.2%</p>
-                <p className="text-sm text-slate-500 mt-1">行業平均 87%</p>
-              </div>
-              <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
-                <div className="flex items-center justify-between mb-4">
-                  <span className="text-sm font-medium text-slate-500">待處理工單</span>
-                  <span className="px-2 py-1 bg-amber-100 text-amber-700 text-xs font-medium rounded">注意</span>
-                </div>
-                <p className="text-3xl font-bold tabular-nums">23</p>
-                <p className="text-sm text-slate-500 mt-1">平均響應 2.4 小時</p>
-              </div>
+              ))}
             </div>
 
             {/* Two Column Layout */}
-            <div className={`grid gap-6 ${isDesktop ? 'grid-cols-3' : 'grid-cols-1'}`}>
+            <div style={{
+              display: 'grid',
+              gridTemplateColumns: isDesktop ? '2fr 1fr' : '1fr',
+              gap: 24,
+            }}>
               {/* Chart */}
-              <div className={`bg-white p-6 rounded-xl shadow-sm border border-slate-200 ${isDesktop ? 'col-span-2' : ''}`}>
-                <div className="flex items-center justify-between mb-6">
-                  <h3 className="font-semibold text-balance">營收趨勢</h3>
-                  <div className="flex gap-2">
-                    <button className="px-3 py-1.5 text-sm bg-slate-900 text-white rounded-lg">月</button>
-                    <button className="px-3 py-1.5 text-sm text-slate-600 hover:bg-slate-100 rounded-lg transition-colors">季</button>
-                    <button className="px-3 py-1.5 text-sm text-slate-600 hover:bg-slate-100 rounded-lg transition-colors">年</button>
+              <div style={{
+                background: colors.white,
+                padding: 24,
+                borderRadius: 12,
+                boxShadow: '0 1px 3px rgba(0,0,0,0.06)',
+                border: `1px solid ${colors.slate200}`,
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 24 }}>
+                  <h3 style={{ fontWeight: 600 }}>營收趨勢</h3>
+                  <div style={{ display: 'flex', gap: 8 }}>
+                    {['月', '季', '年'].map((period, i) => (
+                      <button key={i} style={{
+                        padding: '6px 12px',
+                        fontSize: 14,
+                        background: i === 0 ? colors.slate900 : 'transparent',
+                        color: i === 0 ? colors.white : colors.slate600,
+                        borderRadius: 8,
+                        border: 'none',
+                        cursor: 'pointer',
+                      }}>{period}</button>
+                    ))}
                   </div>
                 </div>
-                <div className="h-64 flex items-end gap-3">
-                  <div className="flex-1 flex flex-col items-center gap-1">
-                    <div className="w-full bg-slate-200 rounded-t" style={{ height: '45%' }}></div>
-                    <span className="text-xs text-slate-500">1月</span>
-                  </div>
-                  <div className="flex-1 flex flex-col items-center gap-1">
-                    <div className="w-full bg-slate-200 rounded-t" style={{ height: '62%' }}></div>
-                    <span className="text-xs text-slate-500">2月</span>
-                  </div>
-                  <div className="flex-1 flex flex-col items-center gap-1">
-                    <div className="w-full bg-slate-200 rounded-t" style={{ height: '55%' }}></div>
-                    <span className="text-xs text-slate-500">3月</span>
-                  </div>
-                  <div className="flex-1 flex flex-col items-center gap-1">
-                    <div className="w-full bg-slate-200 rounded-t" style={{ height: '78%' }}></div>
-                    <span className="text-xs text-slate-500">4月</span>
-                  </div>
-                  <div className="flex-1 flex flex-col items-center gap-1">
-                    <div className="w-full bg-slate-200 rounded-t" style={{ height: '68%' }}></div>
-                    <span className="text-xs text-slate-500">5月</span>
-                  </div>
-                  <div className="flex-1 flex flex-col items-center gap-1">
-                    <div className="w-full bg-slate-900 rounded-t" style={{ height: '85%' }}></div>
-                    <span className="text-xs text-slate-500">6月</span>
-                  </div>
+                <div style={{ height: 256, display: 'flex', alignItems: 'flex-end', gap: 12 }}>
+                  {[45, 62, 55, 78, 68, 85].map((height, i) => (
+                    <div key={i} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4 }}>
+                      <div style={{
+                        width: '100%',
+                        height: `${height}%`,
+                        background: i === 5 ? colors.slate900 : colors.slate200,
+                        borderRadius: '4px 4px 0 0',
+                      }}></div>
+                      <span style={{ fontSize: 12, color: colors.slate500 }}>{i + 1}月</span>
+                    </div>
+                  ))}
                 </div>
               </div>
 
               {/* Recent Orders */}
-              <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
-                <h3 className="font-semibold mb-4 text-balance">最近訂單</h3>
-                <div className="space-y-4">
-                  <div className="flex items-center justify-between py-3 border-b border-slate-100">
-                    <div>
-                      <p className="font-medium">#ORD-7829</p>
-                      <p className="text-sm text-slate-500">企業方案</p>
+              <div style={{
+                background: colors.white,
+                padding: 24,
+                borderRadius: 12,
+                boxShadow: '0 1px 3px rgba(0,0,0,0.06)',
+                border: `1px solid ${colors.slate200}`,
+              }}>
+                <h3 style={{ fontWeight: 600, marginBottom: 16 }}>最近訂單</h3>
+                <div style={{ display: 'flex', flexDirection: 'column' }}>
+                  {[
+                    { id: '#ORD-7829', plan: '企業方案', amount: '$4,500', status: '已完成', statusColor: colors.emerald600 },
+                    { id: '#ORD-7828', plan: '專業方案', amount: '$1,200', status: '處理中', statusColor: colors.amber600 },
+                    { id: '#ORD-7827', plan: '團隊方案', amount: '$890', status: '已完成', statusColor: colors.emerald600 },
+                    { id: '#ORD-7826', plan: '基礎方案', amount: '$290', status: '已完成', statusColor: colors.emerald600 },
+                  ].map((order, i) => (
+                    <div key={i} style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      padding: '12px 0',
+                      borderBottom: i < 3 ? `1px solid ${colors.slate100}` : 'none',
+                    }}>
+                      <div>
+                        <p style={{ fontWeight: 500 }}>{order.id}</p>
+                        <p style={{ fontSize: 14, color: colors.slate500 }}>{order.plan}</p>
+                      </div>
+                      <div style={{ textAlign: 'right' }}>
+                        <p style={{ fontWeight: 500 }}>{order.amount}</p>
+                        <p style={{ fontSize: 14, color: order.statusColor }}>{order.status}</p>
+                      </div>
                     </div>
-                    <div className="text-right">
-                      <p className="font-medium tabular-nums">$4,500</p>
-                      <p className="text-sm text-emerald-600">已完成</p>
-                    </div>
-                  </div>
-                  <div className="flex items-center justify-between py-3 border-b border-slate-100">
-                    <div>
-                      <p className="font-medium">#ORD-7828</p>
-                      <p className="text-sm text-slate-500">專業方案</p>
-                    </div>
-                    <div className="text-right">
-                      <p className="font-medium tabular-nums">$1,200</p>
-                      <p className="text-sm text-amber-600">處理中</p>
-                    </div>
-                  </div>
-                  <div className="flex items-center justify-between py-3 border-b border-slate-100">
-                    <div>
-                      <p className="font-medium">#ORD-7827</p>
-                      <p className="text-sm text-slate-500">團隊方案</p>
-                    </div>
-                    <div className="text-right">
-                      <p className="font-medium tabular-nums">$890</p>
-                      <p className="text-sm text-emerald-600">已完成</p>
-                    </div>
-                  </div>
-                  <div className="flex items-center justify-between py-3">
-                    <div>
-                      <p className="font-medium">#ORD-7826</p>
-                      <p className="text-sm text-slate-500">基礎方案</p>
-                    </div>
-                    <div className="text-right">
-                      <p className="font-medium tabular-nums">$290</p>
-                      <p className="text-sm text-emerald-600">已完成</p>
-                    </div>
-                  </div>
+                  ))}
                 </div>
-                <button className="w-full mt-4 py-2 text-sm text-slate-600 hover:bg-slate-50 rounded-lg transition-colors">
+                <button style={{
+                  width: '100%',
+                  marginTop: 16,
+                  padding: 8,
+                  fontSize: 14,
+                  color: colors.slate600,
+                  background: 'none',
+                  border: 'none',
+                  cursor: 'pointer',
+                }}>
                   查看全部訂單 →
                 </button>
               </div>

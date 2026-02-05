@@ -12,10 +12,76 @@ Tellcraft 是一個 AI 驅動的自動化開發平台。用戶只需描述需求
 
 ## 當前開發進度
 
-- **狀態**：✅ Phase 1-9 + Server Actions + VPS Backend + 前端 Chat 串接 + 認證系統 + 訪客體驗改善 + 儀表板系統 + BDD Spec 完整修復 + 專案版本管理
+- **狀態**：✅ Phase 1-9 + Server Actions + VPS Backend + 前端 Chat 串接 + 認證系統 + 訪客體驗改善 + 儀表板系統 + BDD Spec 完整修復 + 專案版本管理 + **UIUX 生成邏輯重構**
 - **釐清項目**：28 項全部解決
 - **Server Actions**：30+ 已實作
 - **詳情**：[`.clarify/overview.md`](.clarify/overview.md)
+
+### UIUX 生成邏輯重構：5 變體選擇 + Design System（2026-02-05）
+
+重構 UIUX 生成邏輯，從「逐個獨立生成」改為「Design System 驅動的統一生成」，確保風格一致性。
+
+**問題**：
+| 問題 | 影響 |
+|------|------|
+| 模板選擇後無處理 | orchestrator 收到選擇訊息沒有後續邏輯 |
+| 逐個獨立生成 | 每個組件單獨調用 LLM，風格各自為政 |
+| temperature 0.7 太高 | 導致每次生成風格都飄 |
+| 沒有 Design System | designDefaults 存在但沒轉換為 CSS variables |
+
+**解決方案**：
+1. **5 變體生成**：一次 LLM 調用生成 5 個設計方向（Hierarchy/Layout/Density/Interaction/Expressive）
+2. **Design System 驅動**：統一的 CSS variables + Tailwind extend
+3. **三階段代碼生成**：拆分成結構→動畫→響應式，每階段可確認或重做
+4. **降低 temperature**：UIUX 相關函數從 0.7 改為 0.2
+
+**新的生成流程（三階段）**：
+```
+用戶選擇模板
+    ↓
+生成 5 變體 → 用戶選擇/合併變體
+    ↓
+階段 1: generateStructure() - 靜態桌面版（HTML 結構、基礎 CSS）
+    ↓ 用戶確認
+階段 2: generateAnimations() - 動畫增強（入場動畫、hover、狀態轉換）
+    ↓ 用戶確認
+階段 3: generateRwd() - 響應式設計（移動端適配、漢堡選單）
+    ↓
+完成
+```
+
+**三階段設計優勢**：
+- 每次 LLM 調用更專注，品質更高
+- 用戶可在每一步確認結果或要求重做
+- 減少一次性生成過多內容導致的風格不一致
+
+**新增/修改文件**：
+| 文件 | 說明 |
+|------|------|
+| `tellcraft-backend/src/services/uiux-generation.ts` | **新增** UIUX 生成服務 |
+| `tellcraft-backend/src/workers/orchestrator.ts` | 添加模板選擇和變體處理 |
+| `tellcraft-backend/src/services/bdd-session.ts` | 添加 UIUX 欄位類型 |
+| `tellcraft-backend/src/db/client.ts` | 添加 UIUX 欄位映射 |
+| `tellcraft-backend/migrations/add_uiux_columns.sql` | **新增** 資料庫遷移 |
+| `app/components/uiux/VariantPicker.tsx` | **新增** 變體選擇組件 |
+| `app/components/uiux/CodePreview.tsx` | **新增** 程式碼預覽組件 |
+| `app/components/uiux/UiuxChatSection.tsx` | 支援 variant_picker 和 code_preview |
+| `app/lib/llm.ts` | 降低 temperature 到 0.2 |
+
+**資料庫遷移**（執行前請確保 DATABASE_URL 已配置）：
+```bash
+cd tellcraft-backend
+psql "$DATABASE_URL" -f migrations/add_uiux_columns.sql
+```
+
+**新增欄位**：
+- `uiux_template_id` - 用戶選擇的模板
+- `design_variants` - 5 個設計變體
+- `selected_variant_ids` - 用戶選擇的變體 ID
+- `final_design_system` - 最終合併的 Design System
+- `generated_pages` / `generated_components` / `generated_styles` - 生成的代碼
+
+---
 
 ### 模板預覽：從 iframe 改為直接渲染（2026-02-05）
 

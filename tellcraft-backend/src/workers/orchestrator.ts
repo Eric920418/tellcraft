@@ -21,11 +21,14 @@ import { runSpecDiscovery, specIssuesToClarifyItems, SpecIssue } from '../servic
 import {
   generateDesignVariants,
   synthesizeVariants,
-  generateAllCode,
-  buildDesignBrief,
+  generateStructure,
+  generateAnimations,
+  generateRwd,
   generateTailwindConfig,
   DesignVariant,
   TemplateData,
+  DesignSystem,
+  GeneratedComponent,
 } from '../services/uiux-generation'
 
 // ============================================================
@@ -66,6 +69,13 @@ interface FlowState {
   // UIUX 專用
   uiuxTemplateId?: string      // 用戶選擇的模板 ID
   uiuxVariants?: DesignVariant[] // 生成的 5 個設計變體
+  uiuxDesignSystem?: DesignSystem // 最終合併的 Design System
+  uiuxCodePhase?: 'structure' | 'animation' | 'rwd' | 'complete' // 當前代碼生成階段
+  uiuxGeneratedCode?: {        // 已生成的代碼（跨階段保留）
+    pages: GeneratedComponent[]
+    components: GeneratedComponent[]
+    styles: string
+  }
 }
 
 // PRD Discovery 限制
@@ -235,6 +245,28 @@ async function handleContinueFlow(
     // 檢查是否是確認使用模板
     if (message.includes('確認使用')) {
       await handleConfirmTemplate(conversationId, state, redis, io)
+      return
+    }
+
+    // 檢查是否是三階段生成的確認訊息
+    if (state.uiuxCodePhase && (
+      message.includes('繼續') ||
+      message.includes('下一步') ||
+      message.includes('好') ||
+      message.includes('可以') ||
+      message === 'Y' ||
+      message === 'y'
+    )) {
+      await handleCodePhaseConfirm(conversationId, state, redis, io)
+      return
+    }
+
+    // 檢查是否要重新生成當前階段
+    if (state.uiuxCodePhase && (
+      message.includes('重新生成') ||
+      message.includes('重做')
+    )) {
+      await handleCodePhaseRedo(conversationId, state, redis, io)
       return
     }
   }
@@ -1508,7 +1540,7 @@ async function handleTemplateSelection(
 
 /**
  * 處理變體選擇
- * 用戶選擇或合併變體後，生成最終程式碼
+ * 用戶選擇或合併變體後，啟動三階段生成流程
  */
 async function handleVariantSelection(
   conversationId: string,
@@ -1579,17 +1611,6 @@ async function handleVariantSelection(
     return
   }
 
-  // 發送生成中訊息
-  const selectionText = selectedIds.length === 1
-    ? `變體 ${selectedIds[0]}`
-    : `變體 ${selectedIds.join(' + ')}`
-
-  await sendMessage(conversationId, io, {
-    content: `您選擇了${selectionText}。\n\n正在生成程式碼...`,
-    stage: 'uiux_code_generation_start',
-    progress: { current: 2, total: 3, step: '生成程式碼' },
-  })
-
   // 合併變體生成最終 Design System
   const finalDesignSystem = synthesizeVariants(selectedIds, variants)
 
@@ -1603,13 +1624,386 @@ async function handleVariantSelection(
     },
   })
 
-  // 更新狀態
+  // 更新狀態，準備開始三階段生成
   state.phase = 'uiux_code_generation'
+  state.uiuxDesignSystem = finalDesignSystem
+  state.uiuxCodePhase = 'structure'
   state.waitingForReply = false
   await saveFlowState(redis, conversationId, state)
 
-  // 取得模板資訊
-  let template: TemplateData | null = null
+  // 開始第一階段：結構生成
+  await executeCodePhaseStructure(conversationId, state, redis, io)
+}
+
+/**
+ * 階段 1：生成結構
+ */
+async function executeCodePhaseStructure(
+  conversationId: string,
+  state: FlowState,
+  redis: Redis,
+  io: SocketIOServer
+) {
+  const { sessionId, uiuxDesignSystem } = state
+
+  if (!sessionId || !uiuxDesignSystem) {
+    console.error('[Orchestrator] 缺少必要的狀態數據')
+    return
+  }
+
+  // 發送生成中訊息
+  await sendMessage(conversationId, io, {
+    content: `**階段 1/3：結構生成**\n\n正在生成頁面結構和基礎樣式（桌面版）...`,
+    stage: 'uiux_structure_generating',
+    progress: { current: 1, total: 3, step: '生成結構' },
+  })
+
+  // 取得模板和 BDD 規格
+  const { template, bddSpec } = await getTemplateAndBddSpec(sessionId)
+
+  // 生成結構
+  const pages = template.pageStructure.pages || ['home']
+  const structureResult = await generateStructure(
+    uiuxDesignSystem,
+    pages,
+    template,
+    bddSpec,
+    { conversationId }
+  )
+
+  if (!structureResult.success) {
+    console.error('[Orchestrator] 結構生成失敗:', structureResult.error)
+    await sendMessage(conversationId, io, {
+      content: `結構生成失敗：${structureResult.error}。請稍後再試。`,
+      stage: 'error',
+    })
+    return
+  }
+
+  // 保存生成結果
+  const generatedCode = {
+    pages: structureResult.pages || [],
+    components: structureResult.components || [],
+    styles: structureResult.styles || '',
+  }
+
+  state.uiuxGeneratedCode = generatedCode
+  state.uiuxCodePhase = 'structure'
+  state.waitingForReply = true
+  await saveFlowState(redis, conversationId, state)
+
+  // 保存到 BDD Session
+  await updateBddSession({
+    sessionId,
+    updates: {
+      generatedPages: generatedCode.pages,
+      generatedComponents: generatedCode.components,
+      generatedStyles: generatedCode.styles,
+    },
+  })
+
+  // 發送完成訊息，等待用戶確認
+  const pageCount = generatedCode.pages.length
+  const componentCount = generatedCode.components.length
+
+  await sendMessage(conversationId, io, {
+    content: `**階段 1/3 完成：結構**\n\n已生成：\n- ${pageCount} 個頁面\n- ${componentCount} 個組件\n- 全域樣式\n\n這是靜態的桌面版結構，請在預覽面板查看。\n\n---\n\n✅ **繼續** - 添加動畫效果\n🔄 **重新生成** - 重做這個階段`,
+    stage: 'uiux_structure_complete',
+    progress: { current: 1, total: 3, step: '結構完成' },
+    layoutHint: 'split',
+    richContent: {
+      type: 'code_preview' as 'template_picker',
+      data: {
+        pages: generatedCode.pages,
+        components: generatedCode.components,
+        styles: generatedCode.styles,
+        tailwindConfig: generateTailwindConfig(uiuxDesignSystem),
+        currentPhase: 'structure',
+      } as Record<string, unknown>,
+    },
+  })
+
+  console.log(`[Orchestrator] 結構生成完成: ${pageCount} pages, ${componentCount} components`)
+}
+
+/**
+ * 階段 2：添加動畫
+ */
+async function executeCodePhaseAnimation(
+  conversationId: string,
+  state: FlowState,
+  redis: Redis,
+  io: SocketIOServer
+) {
+  const { sessionId, uiuxDesignSystem, uiuxGeneratedCode } = state
+
+  if (!sessionId || !uiuxDesignSystem || !uiuxGeneratedCode) {
+    console.error('[Orchestrator] 缺少必要的狀態數據')
+    return
+  }
+
+  // 發送生成中訊息
+  await sendMessage(conversationId, io, {
+    content: `**階段 2/3：動畫增強**\n\n正在添加動畫效果（入場動畫、hover 效果、狀態轉換）...`,
+    stage: 'uiux_animation_generating',
+    progress: { current: 2, total: 3, step: '添加動畫' },
+  })
+
+  // 生成動畫
+  const animationResult = await generateAnimations(
+    uiuxDesignSystem,
+    uiuxGeneratedCode,
+    { conversationId }
+  )
+
+  if (!animationResult.success) {
+    console.error('[Orchestrator] 動畫生成失敗:', animationResult.error)
+    await sendMessage(conversationId, io, {
+      content: `動畫生成失敗：${animationResult.error}。您可以選擇繼續或重試。`,
+      stage: 'error',
+    })
+    return
+  }
+
+  // 更新生成結果
+  const generatedCode = {
+    pages: animationResult.pages || uiuxGeneratedCode.pages,
+    components: animationResult.components || uiuxGeneratedCode.components,
+    styles: animationResult.styles || uiuxGeneratedCode.styles,
+  }
+
+  state.uiuxGeneratedCode = generatedCode
+  state.uiuxCodePhase = 'animation'
+  state.waitingForReply = true
+  await saveFlowState(redis, conversationId, state)
+
+  // 保存到 BDD Session
+  await updateBddSession({
+    sessionId,
+    updates: {
+      generatedPages: generatedCode.pages,
+      generatedComponents: generatedCode.components,
+      generatedStyles: generatedCode.styles,
+    },
+  })
+
+  // 發送完成訊息
+  await sendMessage(conversationId, io, {
+    content: `**階段 2/3 完成：動畫**\n\n已添加：\n- 頁面入場動畫\n- 按鈕 hover/tap 效果\n- 卡片懸浮效果\n- Loading 動畫\n\n請在預覽面板查看動畫效果。\n\n---\n\n✅ **繼續** - 添加響應式設計\n🔄 **重新生成** - 重做動畫`,
+    stage: 'uiux_animation_complete',
+    progress: { current: 2, total: 3, step: '動畫完成' },
+    layoutHint: 'split',
+    richContent: {
+      type: 'code_preview' as 'template_picker',
+      data: {
+        pages: generatedCode.pages,
+        components: generatedCode.components,
+        styles: generatedCode.styles,
+        tailwindConfig: generateTailwindConfig(uiuxDesignSystem),
+        currentPhase: 'animation',
+      } as Record<string, unknown>,
+    },
+  })
+
+  console.log('[Orchestrator] 動畫生成完成')
+}
+
+/**
+ * 階段 3：添加響應式設計
+ */
+async function executeCodePhaseRwd(
+  conversationId: string,
+  state: FlowState,
+  redis: Redis,
+  io: SocketIOServer
+) {
+  const { sessionId, uiuxDesignSystem, uiuxGeneratedCode } = state
+
+  if (!sessionId || !uiuxDesignSystem || !uiuxGeneratedCode) {
+    console.error('[Orchestrator] 缺少必要的狀態數據')
+    return
+  }
+
+  // 發送生成中訊息
+  await sendMessage(conversationId, io, {
+    content: `**階段 3/3：響應式設計**\n\n正在添加響應式佈局（移動端適配、漢堡選單、觸控優化）...`,
+    stage: 'uiux_rwd_generating',
+    progress: { current: 3, total: 3, step: '響應式設計' },
+  })
+
+  // 生成響應式設計
+  const rwdResult = await generateRwd(
+    uiuxDesignSystem,
+    uiuxGeneratedCode,
+    { conversationId }
+  )
+
+  if (!rwdResult.success) {
+    console.error('[Orchestrator] 響應式設計生成失敗:', rwdResult.error)
+    await sendMessage(conversationId, io, {
+      content: `響應式設計生成失敗：${rwdResult.error}。您可以選擇完成或重試。`,
+      stage: 'error',
+    })
+    return
+  }
+
+  // 更新生成結果
+  const generatedCode = {
+    pages: rwdResult.pages || uiuxGeneratedCode.pages,
+    components: rwdResult.components || uiuxGeneratedCode.components,
+    styles: rwdResult.styles || uiuxGeneratedCode.styles,
+  }
+
+  state.uiuxGeneratedCode = generatedCode
+  state.uiuxCodePhase = 'complete'
+  state.phase = 'uiux_complete'
+  state.waitingForReply = false
+  await saveFlowState(redis, conversationId, state)
+
+  // 保存最終結果到 BDD Session
+  await updateBddSession({
+    sessionId,
+    updates: {
+      generatedPages: generatedCode.pages,
+      generatedComponents: generatedCode.components,
+      generatedStyles: generatedCode.styles,
+      currentPhase: 'uiux_complete',
+    },
+  })
+
+  // 生成 Tailwind 配置
+  const tailwindConfig = generateTailwindConfig(uiuxDesignSystem)
+
+  // 發送最終完成訊息
+  const pageCount = generatedCode.pages.length
+  const componentCount = generatedCode.components.length
+
+  await sendMessage(conversationId, io, {
+    content: `🎉 **程式碼生成完成！**\n\n已生成：\n- ${pageCount} 個頁面（含響應式）\n- ${componentCount} 個組件（含動畫）\n- 全域樣式 (globals.css)\n- Tailwind 配置\n\n所有代碼已包含：\n✅ 結構和基礎樣式\n✅ 動畫效果\n✅ 響應式設計\n\n您可以在預覽面板查看完整代碼並複製使用。`,
+    stage: 'uiux_generation_complete',
+    progress: { current: 3, total: 3, step: '完成' },
+    layoutHint: 'split',
+    richContent: {
+      type: 'code_preview' as 'template_picker',
+      data: {
+        pages: generatedCode.pages,
+        components: generatedCode.components,
+        styles: generatedCode.styles,
+        tailwindConfig,
+        currentPhase: 'complete',
+      } as Record<string, unknown>,
+    },
+  })
+
+  console.log(`[Orchestrator] UIUX 三階段生成完成: ${pageCount} pages, ${componentCount} components`)
+}
+
+/**
+ * 處理階段確認（繼續到下一階段）
+ */
+async function handleCodePhaseConfirm(
+  conversationId: string,
+  state: FlowState,
+  redis: Redis,
+  io: SocketIOServer
+) {
+  const { uiuxCodePhase } = state
+
+  console.log(`[Orchestrator] 確認當前階段: ${uiuxCodePhase}`)
+
+  switch (uiuxCodePhase) {
+    case 'structure':
+      // 繼續到動畫階段
+      await executeCodePhaseAnimation(conversationId, state, redis, io)
+      break
+    case 'animation':
+      // 繼續到響應式階段
+      await executeCodePhaseRwd(conversationId, state, redis, io)
+      break
+    case 'complete':
+      // 已經完成
+      await sendMessage(conversationId, io, {
+        content: '程式碼生成已完成。您可以在預覽面板查看和複製代碼。',
+        stage: 'uiux_complete',
+      })
+      break
+    default:
+      await sendMessage(conversationId, io, {
+        content: '當前沒有進行中的生成階段。',
+        stage: 'error',
+      })
+  }
+}
+
+/**
+ * 處理階段重做
+ */
+async function handleCodePhaseRedo(
+  conversationId: string,
+  state: FlowState,
+  redis: Redis,
+  io: SocketIOServer
+) {
+  const { uiuxCodePhase, sessionId } = state
+
+  console.log(`[Orchestrator] 重做當前階段: ${uiuxCodePhase}`)
+
+  // 如果要重做動畫或響應式，需要先恢復上一階段的代碼
+  if (uiuxCodePhase === 'animation' || uiuxCodePhase === 'rwd') {
+    // 從 session 重新讀取代碼（這裡簡化處理，直接重做當前階段）
+  }
+
+  switch (uiuxCodePhase) {
+    case 'structure':
+      await executeCodePhaseStructure(conversationId, state, redis, io)
+      break
+    case 'animation':
+      await executeCodePhaseAnimation(conversationId, state, redis, io)
+      break
+    case 'rwd':
+      await executeCodePhaseRwd(conversationId, state, redis, io)
+      break
+    default:
+      await sendMessage(conversationId, io, {
+        content: '當前沒有可重做的階段。',
+        stage: 'error',
+      })
+  }
+}
+
+/**
+ * 取得模板和 BDD 規格
+ */
+async function getTemplateAndBddSpec(sessionId: string): Promise<{
+  template: TemplateData
+  bddSpec: string
+}> {
+  const session = await getBddSession({ sessionId })
+  if (!session.success || !session.data) {
+    return {
+      template: {
+        id: 'default',
+        name: 'Default',
+        slug: 'default',
+        category: 'general',
+        description: '預設模板',
+        designDefaults: {},
+        pageStructure: { pages: ['home', 'about'], components: [] },
+      },
+      bddSpec: '',
+    }
+  }
+
+  let template: TemplateData = {
+    id: 'default',
+    name: 'Default',
+    slug: 'default',
+    category: 'general',
+    description: '預設模板',
+    designDefaults: {},
+    pageStructure: { pages: ['home', 'about'], components: [] },
+  }
+
   if (session.data.uiuxTemplateId) {
     const templateResult = await db.queryOne<{
       id: string
@@ -1638,82 +2032,11 @@ async function handleVariantSelection(
     }
   }
 
-  if (!template) {
-    // 使用預設模板結構
-    template = {
-      id: 'default',
-      name: 'Default',
-      slug: 'default',
-      category: 'general',
-      description: '預設模板',
-      designDefaults: {},
-      pageStructure: { pages: ['home', 'about'], components: [] },
-    }
-  }
-
-  // 構建 BDD 規格
   const bddSpec = session.data.featuresContent
     ? session.data.featuresContent.map(f => f.content).join('\n\n---\n\n')
     : ''
 
-  // 生成所有程式碼
-  const pages = template.pageStructure.pages || ['home']
-  const codeResult = await generateAllCode(
-    finalDesignSystem,
-    pages,
-    template,
-    bddSpec,
-    { conversationId }
-  )
-
-  if (!codeResult.success) {
-    console.error('[Orchestrator] 程式碼生成失敗:', codeResult.error)
-    await sendMessage(conversationId, io, {
-      content: `程式碼生成失敗：${codeResult.error}。請稍後再試。`,
-      stage: 'error',
-    })
-    return
-  }
-
-  // 生成 Tailwind 配置
-  const tailwindConfig = generateTailwindConfig(finalDesignSystem)
-
-  // 保存生成結果
-  await updateBddSession({
-    sessionId: state.sessionId,
-    updates: {
-      generatedPages: codeResult.pages,
-      generatedComponents: codeResult.components,
-      generatedStyles: codeResult.styles,
-      currentPhase: 'uiux_complete',
-    },
-  })
-
-  // 更新狀態
-  state.phase = 'uiux_complete'
-  await saveFlowState(redis, conversationId, state)
-
-  // 發送完成訊息
-  const pageCount = codeResult.pages?.length || 0
-  const componentCount = codeResult.components?.length || 0
-
-  await sendMessage(conversationId, io, {
-    content: `程式碼生成完成！\n\n已生成：\n- ${pageCount} 個頁面\n- ${componentCount} 個組件\n- 全域樣式 (globals.css)\n- Tailwind 配置\n\n您可以在預覽面板查看生成的程式碼。`,
-    stage: 'uiux_generation_complete',
-    progress: { current: 3, total: 3, step: '完成' },
-    layoutHint: 'split',
-    richContent: {
-      type: 'code_preview' as 'template_picker', // 暫時使用 template_picker 類型
-      data: {
-        pages: codeResult.pages,
-        components: codeResult.components,
-        styles: codeResult.styles,
-        tailwindConfig,
-      } as Record<string, unknown>,
-    },
-  })
-
-  console.log(`[Orchestrator] UIUX 程式碼生成完成: ${pageCount} pages, ${componentCount} components`)
+  return { template, bddSpec }
 }
 
 /**

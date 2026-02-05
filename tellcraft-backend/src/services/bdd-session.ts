@@ -199,6 +199,14 @@ export async function updateBddSession(input: {
     actionsYmlContent: string
     isaConfigContent: string
     validationResult: { passed: boolean; errors: string[]; warnings: string[] }
+    // UIUX 欄位
+    uiuxTemplateId: string
+    designVariants: DesignVariant[]
+    selectedVariantIds: string[]
+    finalDesignSystem: DesignSystem
+    generatedPages: GeneratedComponent[]
+    generatedComponents: GeneratedComponent[]
+    generatedStyles: string
   }>
 }): Promise<{ success: boolean; error?: string }> {
   try {
