@@ -864,6 +864,7 @@ function ChatSection({
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const chatScrollRef = useRef<HTMLDivElement>(null)
   const isNearBottomRef = useRef(true)  // 追蹤用戶是否在底部附近
+  const isProgrammaticScrollRef = useRef(false)  // 程式控制滾動時暫時禁用檢測
   const hasInitialized = useRef(false)
   const inputRef = useRef<HTMLTextAreaElement>(null)
   const typingTimerRef = useRef<NodeJS.Timeout | null>(null)
@@ -1383,6 +1384,9 @@ function ChatSection({
 
   // 處理滾動事件，判斷用戶是否在底部附近
   const handleChatScroll = useCallback(() => {
+    // 程式控制滾動時不更新狀態
+    if (isProgrammaticScrollRef.current) return
+
     const container = chatScrollRef.current
     if (!container) return
 
@@ -1562,11 +1566,21 @@ function ChatSection({
       timestamp: new Date(),
       pending: true  // 標記為待確認，輪詢時會被 DB 訊息替換
     }
-    // 用戶發送訊息後強制滾動到底部（必須在 state 更新前設置）
+    // 用戶發送訊息後強制滾動到底部
     isNearBottomRef.current = true
+    isProgrammaticScrollRef.current = true
 
     setMessages(prev => [...prev, userMessage])
     setIsTyping(true)
+
+    // 延遲滾動，確保 DOM 已更新
+    setTimeout(() => {
+      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+      // 滾動動畫完成後重置 flag
+      setTimeout(() => {
+        isProgrammaticScrollRef.current = false
+      }, 500)
+    }, 50)
 
     // 判斷是首次消息還是多輪對話回覆
     const token = getAuthToken()
