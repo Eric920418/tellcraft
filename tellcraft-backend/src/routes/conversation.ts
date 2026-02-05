@@ -1,5 +1,6 @@
 import { Router, type Router as RouterType } from 'express'
 import { Queue } from 'bullmq'
+import crypto from 'crypto'
 import { requireAuth, optionalAuth } from '../middleware/auth'
 import * as db from '../db/client'
 

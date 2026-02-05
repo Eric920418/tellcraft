@@ -3374,6 +3374,14 @@ function HomeContent() {
   // VPS JWT Auth Hook
   const auth = useAuth()
 
+  // 頁面載入時強制滾動到頂部（禁用瀏覽器滾動恢復）
+  useEffect(() => {
+    if ('scrollRestoration' in history) {
+      history.scrollRestoration = 'manual'
+    }
+    window.scrollTo(0, 0)
+  }, [])
+
   // 獲取 anonymousId（用於提醒組件）
   useEffect(() => {
     const id = localStorage.getItem('tellcraft_anonymous_id') || undefined
