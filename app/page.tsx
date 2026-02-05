@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useRef, useEffect, useCallback, Suspense } from 'react'
+import { useState, useRef, useEffect, useCallback, Suspense, useMemo, useDeferredValue } from 'react'
 import { useSearchParams } from 'next/navigation'
 import { motion, AnimatePresence, useInView } from 'framer-motion'
 import ReactMarkdown from 'react-markdown'
@@ -850,11 +850,13 @@ function ChatSection({
 }) {
   const [messages, setMessages] = useState<Message[]>([])
   const [input, setInput] = useState('')
+  // 延遲更新按鈕狀態，優化 INP
+  const deferredInput = useDeferredValue(input)
   const [isTyping, setIsTyping] = useState(false)
   const [typingStage, setTypingStage] = useState<'none' | 'dots' | 'message'>('none')
   const [currentStage, setCurrentStage] = useState<Message['stage']>('discovery')
   const [sessionInfo, setSessionInfo] = useState<SessionInfo | null>(null)
-  const [isInitializing, setIsInitializing] = useState(false)
+  const [isInitializing, setIsInitializing] = useState(true)  // 初始為 true 避免閃爍
   const [error, setError] = useState<string | null>(null)
   const [lastTimestamp, setLastTimestamp] = useState<string | null>(null)
 
@@ -893,18 +895,20 @@ function ChatSection({
     }
   }, [isTyping])
 
-  // 自動調整輸入框高度
+  // 自動調整輸入框高度（使用 rAF 避免阻塞輸入）
   const adjustTextareaHeight = useCallback(() => {
-    const textarea = inputRef.current
-    if (!textarea) return
-    // 重置高度以獲得正確的 scrollHeight
-    textarea.style.height = 'auto'
-    // 限制最大高度為 200px（約 8 行）
-    const maxHeight = 200
-    const newHeight = Math.min(textarea.scrollHeight, maxHeight)
-    textarea.style.height = `${newHeight}px`
-    // 如果超過最大高度，允許滾動
-    textarea.style.overflowY = textarea.scrollHeight > maxHeight ? 'auto' : 'hidden'
+    requestAnimationFrame(() => {
+      const textarea = inputRef.current
+      if (!textarea) return
+      // 重置高度以獲得正確的 scrollHeight
+      textarea.style.height = 'auto'
+      // 限制最大高度為 200px（約 8 行）
+      const maxHeight = 200
+      const newHeight = Math.min(textarea.scrollHeight, maxHeight)
+      textarea.style.height = `${newHeight}px`
+      // 如果超過最大高度，允許滾動
+      textarea.style.overflowY = textarea.scrollHeight > maxHeight ? 'auto' : 'hidden'
+    })
   }, [])
 
   // 對話選擇器相關狀態
@@ -1414,6 +1418,7 @@ function ChatSection({
       setShowConversationPicker(false)
       setConversations([])
       setLoginPromptConfig(null)
+      setIsInitializing(true)  // 重置為 true，下次進入時直接顯示初始化中
     }
   }, [isActive])
 
@@ -2029,16 +2034,16 @@ function ChatSection({
                 whileHover={{ scale: 1.02 }}
                 whileTap={{ scale: 0.98 }}
                 onClick={handleSend}
-                disabled={!input.trim() || isTyping || isInitializing || !sessionInfo}
+                disabled={!deferredInput.trim() || isTyping || isInitializing || !sessionInfo}
                 style={{
                   padding: layoutMode === 'split' ? '0 20px' : '0 28px',
                   height: layoutMode === 'split' ? 40 : 48,
                   fontSize: layoutMode === 'split' ? 13 : 14,
                   fontWeight: 500,
                   border: '1px solid var(--black)',
-                  background: !input.trim() || isTyping || isInitializing || !sessionInfo ? 'var(--gray-100)' : 'var(--black)',
-                  color: !input.trim() || isTyping || isInitializing || !sessionInfo ? 'var(--gray-400)' : 'var(--white)',
-                  cursor: !input.trim() || isTyping || isInitializing || !sessionInfo ? 'not-allowed' : 'pointer',
+                  background: !deferredInput.trim() || isTyping || isInitializing || !sessionInfo ? 'var(--gray-100)' : 'var(--black)',
+                  color: !deferredInput.trim() || isTyping || isInitializing || !sessionInfo ? 'var(--gray-400)' : 'var(--white)',
+                  cursor: !deferredInput.trim() || isTyping || isInitializing || !sessionInfo ? 'not-allowed' : 'pointer',
                   transition: 'all 0.2s ease',
                   flexShrink: 0,
                 }}
