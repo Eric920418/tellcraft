@@ -30,6 +30,7 @@ const navItems: NavItem[] = [
   { href: '/dashboard/admin/users', label: '用戶管理', icon: '○', adminOnly: true },
   { href: '/dashboard/admin/usage', label: 'LLM 用量', icon: '◈', adminOnly: true },
   { href: '/dashboard/admin/logs', label: '審計日誌', icon: '≡', adminOnly: true },
+  { href: '/dashboard/admin/templates', label: '模板管理', icon: '◫', adminOnly: true },
 ]
 
 export default function Sidebar({ isAdmin = false, user, className = '' }: SidebarProps) {
