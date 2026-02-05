@@ -44,9 +44,11 @@ router.post('/initialize', optionalAuth, async (req: Request, res: Response) => 
       userId = req.user.id
     } else if (anonymousId) {
       // 匿名用戶 - 查找或創建
+      // 優先使用 email 查找（更可靠）
+      const anonEmail = `anon_${anonymousId}@tellcraft.local`
       const existingUser = await queryOne<{ id: string }>(
-        'SELECT id FROM users WHERE anonymous_user_id = $1',
-        [anonymousId]
+        'SELECT id FROM users WHERE email = $1',
+        [anonEmail]
       )
 
       if (existingUser) {
@@ -55,9 +57,9 @@ router.post('/initialize', optionalAuth, async (req: Request, res: Response) => 
         // 創建匿名用戶
         userId = crypto.randomUUID()
         await query(
-          `INSERT INTO users (id, email, anonymous_user_id, plan, subscription_status, message_count_this_period)
-           VALUES ($1, $2, $3, 'free', 'active', 0)`,
-          [userId, `anon_${anonymousId}@tellcraft.local`, anonymousId]
+          `INSERT INTO users (id, email, plan, subscription_status, message_count_this_period, created_at, updated_at)
+           VALUES ($1, $2, 'free', 'active', 0, NOW(), NOW())`,
+          [userId, anonEmail]
         )
         isNewUser = true
       }
@@ -208,7 +210,11 @@ router.post('/initialize', optionalAuth, async (req: Request, res: Response) => 
     })
   } catch (error) {
     console.error('[Session] 初始化失敗:', error)
-    res.status(500).json({ error: '初始化失敗' })
+    res.status(500).json({
+      error: '初始化失敗',
+      message: process.env.NODE_ENV === 'development' ? (error as Error).message : undefined,
+      stack: process.env.NODE_ENV === 'development' ? (error as Error).stack : undefined,
+    })
   }
 })
 
@@ -225,9 +231,10 @@ router.get('/conversations', optionalAuth, async (req: Request, res: Response) =
     if (req.user) {
       userId = req.user.id
     } else if (anonymousId) {
+      const anonEmail = `anon_${anonymousId}@tellcraft.local`
       const user = await queryOne<{ id: string }>(
-        'SELECT id FROM users WHERE anonymous_user_id = $1',
-        [anonymousId]
+        'SELECT id FROM users WHERE email = $1',
+        [anonEmail]
       )
       userId = user?.id
     }
@@ -283,9 +290,10 @@ router.get('/project-reminder', optionalAuth, async (req: Request, res: Response
     if (req.user) {
       userId = req.user.id
     } else if (anonymousId) {
+      const anonEmail = `anon_${anonymousId}@tellcraft.local`
       const user = await queryOne<{ id: string }>(
-        'SELECT id FROM users WHERE anonymous_user_id = $1',
-        [anonymousId]
+        'SELECT id FROM users WHERE email = $1',
+        [anonEmail]
       )
       userId = user?.id
     }

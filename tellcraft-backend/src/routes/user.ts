@@ -60,10 +60,11 @@ router.post('/migrate', requireAuth, async (req: Request, res: Response) => {
       return res.status(400).json({ error: '缺少 anonymousId' })
     }
 
-    // 1. 查找匿名用戶
+    // 1. 查找匿名用戶（使用 email 查詢）
+    const anonEmail = `anon_${anonymousId}@tellcraft.local`
     const anonymousUser = await queryOne<{ id: string }>(
-      'SELECT id FROM users WHERE anonymous_user_id = $1',
-      [anonymousId]
+      'SELECT id FROM users WHERE email = $1',
+      [anonEmail]
     )
 
     if (!anonymousUser) {
@@ -141,10 +142,10 @@ router.post('/migrate', requireAuth, async (req: Request, res: Response) => {
       migratedConversations = parseInt(convCountResult?.count || '0', 10)
     }
 
-    // 5. 更新認證用戶，記錄關聯的匿名用戶 ID（如果欄位允許）
+    // 5. 更新認證用戶的更新時間
     await query(
-      'UPDATE users SET anonymous_user_id = $1 WHERE id = $2',
-      [anonymousId, authUserId]
+      'UPDATE users SET updated_at = NOW() WHERE id = $1',
+      [authUserId]
     )
 
     // 6. 標記匿名用戶為 cancelled
