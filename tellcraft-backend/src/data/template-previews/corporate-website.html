@@ -1,0 +1,317 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Corporate Website</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after {
+        animation-duration: 0.01ms !important;
+        transition-duration: 0.01ms !important;
+      }
+    }
+  </style>
+</head>
+<body class="bg-white text-slate-900 antialiased">
+  <div class="min-h-dvh">
+    <!-- Navigation -->
+    <nav class="bg-white border-b border-slate-200">
+      <div class="max-w-7xl mx-auto px-6 py-4 flex items-center justify-between">
+        <a href="#" class="text-2xl font-bold tracking-tight">Nexus Corp</a>
+        <div class="hidden lg:flex items-center gap-8">
+          <a href="#about" class="text-slate-600 hover:text-slate-900 transition-colors">關於我們</a>
+          <a href="#services" class="text-slate-600 hover:text-slate-900 transition-colors">服務項目</a>
+          <a href="#team" class="text-slate-600 hover:text-slate-900 transition-colors">專業團隊</a>
+          <a href="#contact" class="text-slate-600 hover:text-slate-900 transition-colors">聯繫我們</a>
+        </div>
+        <a href="#contact" class="hidden md:inline-block px-5 py-2.5 bg-slate-900 text-white rounded-lg hover:bg-slate-800 transition-colors">
+          預約諮詢
+        </a>
+      </div>
+    </nav>
+
+    <!-- Hero Section -->
+    <section class="py-24 px-6 bg-slate-50">
+      <div class="max-w-7xl mx-auto grid lg:grid-cols-2 gap-12 items-center">
+        <div>
+          <h1 class="text-4xl lg:text-5xl font-bold mb-6 text-balance leading-tight">
+            專業的企業解決方案<br/>值得信賴的合作夥伴
+          </h1>
+          <p class="text-lg text-slate-600 mb-8 text-pretty">
+            超過 20 年的行業經驗，我們為全球 500+ 企業提供數位轉型、策略諮詢與技術服務。讓我們幫助您的企業邁向下一個高峰。
+          </p>
+          <div class="flex flex-wrap gap-4">
+            <a href="#contact" class="px-6 py-3 bg-slate-900 text-white font-medium rounded-lg hover:bg-slate-800 transition-colors">
+              免費諮詢
+            </a>
+            <a href="#services" class="px-6 py-3 border border-slate-300 font-medium rounded-lg hover:bg-white transition-colors">
+              了解更多
+            </a>
+          </div>
+        </div>
+        <div class="hidden lg:block">
+          <div class="aspect-[4/3] bg-slate-200 rounded-2xl"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Stats Section -->
+    <section class="py-16 px-6 border-b border-slate-200">
+      <div class="max-w-7xl mx-auto grid grid-cols-2 lg:grid-cols-4 gap-8">
+        <div class="text-center">
+          <p class="text-4xl font-bold tabular-nums mb-2">20+</p>
+          <p class="text-slate-600">年行業經驗</p>
+        </div>
+        <div class="text-center">
+          <p class="text-4xl font-bold tabular-nums mb-2">500+</p>
+          <p class="text-slate-600">服務企業</p>
+        </div>
+        <div class="text-center">
+          <p class="text-4xl font-bold tabular-nums mb-2">50+</p>
+          <p class="text-slate-600">專業顧問</p>
+        </div>
+        <div class="text-center">
+          <p class="text-4xl font-bold tabular-nums mb-2">98%</p>
+          <p class="text-slate-600">客戶滿意度</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- Services Section -->
+    <section id="services" class="py-24 px-6">
+      <div class="max-w-7xl mx-auto">
+        <div class="max-w-2xl mb-16">
+          <h2 class="text-3xl lg:text-4xl font-bold mb-4 text-balance">全方位服務項目</h2>
+          <p class="text-lg text-slate-600 text-pretty">
+            從策略規劃到執行落地，我們提供一站式的企業解決方案
+          </p>
+        </div>
+
+        <div class="grid md:grid-cols-2 lg:grid-cols-3 gap-8">
+          <div class="p-8 border border-slate-200 rounded-xl hover:border-slate-300 transition-colors">
+            <div class="size-14 bg-slate-100 rounded-xl flex items-center justify-center mb-6">
+              <svg class="size-7 text-slate-700" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/>
+              </svg>
+            </div>
+            <h3 class="text-xl font-semibold mb-3 text-balance">策略諮詢</h3>
+            <p class="text-slate-600 text-pretty">
+              深度市場分析，協助企業制定長期發展戰略與競爭優勢。
+            </p>
+          </div>
+
+          <div class="p-8 border border-slate-200 rounded-xl hover:border-slate-300 transition-colors">
+            <div class="size-14 bg-slate-100 rounded-xl flex items-center justify-center mb-6">
+              <svg class="size-7 text-slate-700" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4"/>
+              </svg>
+            </div>
+            <h3 class="text-xl font-semibold mb-3 text-balance">數位轉型</h3>
+            <p class="text-slate-600 text-pretty">
+              從流程優化到系統整合，全面提升企業數位化能力。
+            </p>
+          </div>
+
+          <div class="p-8 border border-slate-200 rounded-xl hover:border-slate-300 transition-colors">
+            <div class="size-14 bg-slate-100 rounded-xl flex items-center justify-center mb-6">
+              <svg class="size-7 text-slate-700" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z"/>
+              </svg>
+            </div>
+            <h3 class="text-xl font-semibold mb-3 text-balance">組織發展</h3>
+            <p class="text-slate-600 text-pretty">
+              人才培育、組織設計、企業文化建設的專業顧問服務。
+            </p>
+          </div>
+
+          <div class="p-8 border border-slate-200 rounded-xl hover:border-slate-300 transition-colors">
+            <div class="size-14 bg-slate-100 rounded-xl flex items-center justify-center mb-6">
+              <svg class="size-7 text-slate-700" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+              </svg>
+            </div>
+            <h3 class="text-xl font-semibold mb-3 text-balance">財務規劃</h3>
+            <p class="text-slate-600 text-pretty">
+              資本結構優化、投資評估、風險管理的專業建議。
+            </p>
+          </div>
+
+          <div class="p-8 border border-slate-200 rounded-xl hover:border-slate-300 transition-colors">
+            <div class="size-14 bg-slate-100 rounded-xl flex items-center justify-center mb-6">
+              <svg class="size-7 text-slate-700" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"/>
+              </svg>
+            </div>
+            <h3 class="text-xl font-semibold mb-3 text-balance">資安合規</h3>
+            <p class="text-slate-600 text-pretty">
+              ISO 認證輔導、資安稽核、法規遵循的完整服務。
+            </p>
+          </div>
+
+          <div class="p-8 border border-slate-200 rounded-xl hover:border-slate-300 transition-colors">
+            <div class="size-14 bg-slate-100 rounded-xl flex items-center justify-center mb-6">
+              <svg class="size-7 text-slate-700" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3.055 11H5a2 2 0 012 2v1a2 2 0 002 2 2 2 0 012 2v2.945M8 3.935V5.5A2.5 2.5 0 0010.5 8h.5a2 2 0 012 2 2 2 0 104 0 2 2 0 012-2h1.064M15 20.488V18a2 2 0 012-2h3.064M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+              </svg>
+            </div>
+            <h3 class="text-xl font-semibold mb-3 text-balance">國際拓展</h3>
+            <p class="text-slate-600 text-pretty">
+              海外市場進入策略、在地化營運、跨境合作支援。
+            </p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Team Section -->
+    <section id="team" class="py-24 px-6 bg-slate-50">
+      <div class="max-w-7xl mx-auto">
+        <div class="text-center mb-16">
+          <h2 class="text-3xl lg:text-4xl font-bold mb-4 text-balance">專業團隊</h2>
+          <p class="text-lg text-slate-600 text-pretty">
+            資深顧問團隊，平均擁有 15 年以上產業經驗
+          </p>
+        </div>
+
+        <div class="grid md:grid-cols-2 lg:grid-cols-4 gap-8">
+          <div class="bg-white p-6 rounded-xl border border-slate-200">
+            <div class="aspect-square bg-slate-200 rounded-lg mb-4"></div>
+            <h3 class="font-semibold text-lg">陳建華</h3>
+            <p class="text-slate-500 text-sm mb-3">執行長 / 創辦人</p>
+            <p class="text-slate-600 text-sm text-pretty">前麥肯錫資深合夥人，專注企業策略 25 年</p>
+          </div>
+          <div class="bg-white p-6 rounded-xl border border-slate-200">
+            <div class="aspect-square bg-slate-200 rounded-lg mb-4"></div>
+            <h3 class="font-semibold text-lg">林美玲</h3>
+            <p class="text-slate-500 text-sm mb-3">技術長</p>
+            <p class="text-slate-600 text-sm text-pretty">前 Google 工程總監，數位轉型專家</p>
+          </div>
+          <div class="bg-white p-6 rounded-xl border border-slate-200">
+            <div class="aspect-square bg-slate-200 rounded-lg mb-4"></div>
+            <h3 class="font-semibold text-lg">王志明</h3>
+            <p class="text-slate-500 text-sm mb-3">財務長</p>
+            <p class="text-slate-600 text-sm text-pretty">前高盛亞太區副總裁，財務規劃專家</p>
+          </div>
+          <div class="bg-white p-6 rounded-xl border border-slate-200">
+            <div class="aspect-square bg-slate-200 rounded-lg mb-4"></div>
+            <h3 class="font-semibold text-lg">張雅婷</h3>
+            <p class="text-slate-500 text-sm mb-3">營運長</p>
+            <p class="text-slate-600 text-sm text-pretty">前台積電營運主管，流程優化專家</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Contact Section -->
+    <section id="contact" class="py-24 px-6">
+      <div class="max-w-3xl mx-auto">
+        <div class="text-center mb-12">
+          <h2 class="text-3xl lg:text-4xl font-bold mb-4 text-balance">預約免費諮詢</h2>
+          <p class="text-lg text-slate-600 text-pretty">
+            留下您的聯繫方式，我們的顧問將在 24 小時內與您聯繫
+          </p>
+        </div>
+
+        <form class="space-y-6">
+          <div class="grid md:grid-cols-2 gap-6">
+            <div>
+              <label for="name" class="block text-sm font-medium mb-2">姓名</label>
+              <input
+                type="text"
+                id="name"
+                class="w-full px-4 py-3 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-slate-900 focus:border-transparent"
+                placeholder="您的姓名"
+              />
+            </div>
+            <div>
+              <label for="company" class="block text-sm font-medium mb-2">公司名稱</label>
+              <input
+                type="text"
+                id="company"
+                class="w-full px-4 py-3 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-slate-900 focus:border-transparent"
+                placeholder="公司名稱"
+              />
+            </div>
+          </div>
+          <div class="grid md:grid-cols-2 gap-6">
+            <div>
+              <label for="email" class="block text-sm font-medium mb-2">電子郵件</label>
+              <input
+                type="email"
+                id="email"
+                class="w-full px-4 py-3 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-slate-900 focus:border-transparent"
+                placeholder="email@example.com"
+              />
+            </div>
+            <div>
+              <label for="phone" class="block text-sm font-medium mb-2">聯繫電話</label>
+              <input
+                type="tel"
+                id="phone"
+                class="w-full px-4 py-3 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-slate-900 focus:border-transparent"
+                placeholder="0912-345-678"
+              />
+            </div>
+          </div>
+          <div>
+            <label for="message" class="block text-sm font-medium mb-2">諮詢內容</label>
+            <textarea
+              id="message"
+              rows="4"
+              class="w-full px-4 py-3 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-slate-900 focus:border-transparent resize-none"
+              placeholder="請簡述您的需求..."
+            ></textarea>
+          </div>
+          <button
+            type="submit"
+            class="w-full py-4 bg-slate-900 text-white font-medium rounded-lg hover:bg-slate-800 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-900 focus-visible:ring-offset-2"
+          >
+            提交諮詢
+          </button>
+        </form>
+      </div>
+    </section>
+
+    <!-- Footer -->
+    <footer class="py-12 px-6 bg-slate-900 text-white">
+      <div class="max-w-7xl mx-auto grid md:grid-cols-4 gap-8">
+        <div>
+          <h3 class="text-xl font-bold mb-4">Nexus Corp</h3>
+          <p class="text-slate-400 text-sm text-pretty">
+            專業的企業解決方案，值得信賴的合作夥伴
+          </p>
+        </div>
+        <div>
+          <h4 class="font-semibold mb-4">服務項目</h4>
+          <ul class="space-y-2 text-sm text-slate-400">
+            <li><a href="#" class="hover:text-white transition-colors">策略諮詢</a></li>
+            <li><a href="#" class="hover:text-white transition-colors">數位轉型</a></li>
+            <li><a href="#" class="hover:text-white transition-colors">組織發展</a></li>
+          </ul>
+        </div>
+        <div>
+          <h4 class="font-semibold mb-4">關於我們</h4>
+          <ul class="space-y-2 text-sm text-slate-400">
+            <li><a href="#" class="hover:text-white transition-colors">公司介紹</a></li>
+            <li><a href="#" class="hover:text-white transition-colors">專業團隊</a></li>
+            <li><a href="#" class="hover:text-white transition-colors">加入我們</a></li>
+          </ul>
+        </div>
+        <div>
+          <h4 class="font-semibold mb-4">聯繫方式</h4>
+          <ul class="space-y-2 text-sm text-slate-400">
+            <li>台北市信義區信義路五段7號</li>
+            <li>+886 2 8101 8888</li>
+            <li>contact@nexuscorp.com</li>
+          </ul>
+        </div>
+      </div>
+      <div class="max-w-7xl mx-auto mt-12 pt-8 border-t border-slate-700 text-center text-sm text-slate-400">
+        © 2024 Nexus Corp. All rights reserved.
+      </div>
+    </footer>
+  </div>
+</body>
+</html>

@@ -5,11 +5,14 @@
   "main": "dist/index.js",
   "scripts": {
     "dev": "tsx watch src/index.ts",
-    "build": "tsc",
+    "build": "tsc && npm run copy-assets",
+    "copy-assets": "mkdir -p dist/data/template-previews && cp -r src/data/template-previews/* dist/data/template-previews/",
     "start": "node dist/index.js",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "init-previews": "tsx src/scripts/init-template-previews.ts"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.72.1",
     "bullmq": "^5.1.0",
     "cors": "^2.8.5",
     "dotenv": "^16.4.1",

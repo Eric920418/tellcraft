@@ -85,10 +85,11 @@ export default function UiuxChatSection({
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages])
 
-  // 載入選中的模板詳情
+  // 載入選中的模板詳情並設置預覽 URL
   useEffect(() => {
     if (!selectedTemplateId) {
       setSelectedTemplate(null)
+      setPreviewUrl(null)
       return
     }
 
@@ -96,6 +97,9 @@ export default function UiuxChatSection({
       const result = await getTemplateById(selectedTemplateId)
       if (result.success && result.data) {
         setSelectedTemplate(result.data)
+        // 設置預覽 URL（LLM 動態生成的 HTML）
+        const vpsUrl = process.env.NEXT_PUBLIC_VPS_API_URL || 'http://54.238.4.117:8080'
+        setPreviewUrl(`${vpsUrl}/api/templates/preview/${selectedTemplateId}`)
       }
     }
     loadTemplate()
