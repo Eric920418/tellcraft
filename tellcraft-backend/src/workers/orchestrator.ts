@@ -380,6 +380,49 @@ async function processUserReply(input: ProcessReplyInput) {
     return
   }
 
+  // 處理批量確認回覆
+  if (userMessage.toUpperCase() === 'Y' || userMessage === '確認' || userMessage === '確認全部') {
+    // 用戶確認批次
+    await confirmBatch({ sessionId: session.id })
+    await sendMessage(conversationId, io, {
+      content: '✅ 已確認！讓我們繼續...',
+      stage: 'batch_confirmed',
+    })
+    // 繼續下一個問題或進入下一輪
+    await continueToNextQuestion(conversationId, state, session, redis, io)
+    return
+  }
+
+  // 處理「修改 N」指令
+  const modifyMatch = userMessage.match(/^修改\s*(\d+)$/i)
+  if (modifyMatch) {
+    const itemIndex = parseInt(modifyMatch[1], 10) - 1
+    const stagingItems = session.stagingItems || []
+
+    if (itemIndex >= 0 && itemIndex < stagingItems.length) {
+      const itemToRevert = stagingItems[itemIndex]
+      await revertAnswer({ sessionId: session.id, itemId: itemToRevert.id })
+
+      // 重新發送該問題
+      await sendMessage(conversationId, io, {
+        content: `好的，讓我們重新回答第 ${modifyMatch[1]} 題：`,
+        stage: 'clarify_revert',
+      })
+      await sendClarifyQuestion(conversationId, io, itemToRevert, itemIndex, stagingItems.length)
+
+      state.currentItemId = itemToRevert.id
+      state.waitingForReply = true
+      await saveFlowState(redis, conversationId, state)
+      return
+    } else {
+      await sendMessage(conversationId, io, {
+        content: `⚠️ 無效的題號。請輸入 1-${stagingItems.length} 之間的數字。`,
+        stage: 'error',
+      })
+      return
+    }
+  }
+
   // 驗證並記錄答案
   if (state.currentItemId) {
     const currentItem = session.clarifyItems.find(i => i.id === state.currentItemId)

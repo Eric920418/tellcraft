@@ -17,18 +17,17 @@ Tellcraft 是一個 AI 驅動的自動化開發平台。用戶只需描述需求
 - **Server Actions**：30+ 已實作
 - **詳情**：[`.clarify/overview.md`](.clarify/overview.md)
 
-### 進入對話時 UI 簡化（2026-02-05）
+### 進度條時隱藏 Typing Indicator（2026-02-05）
 
-優化用戶提交需求進入對話模式時的 UI，移除冗餘訊息：
+優化用戶提交需求進入對話模式時的 UI，避免重複顯示：
 
 | 修改項目 | 說明 |
 |----------|------|
-| **移除文字訊息** | `init_progress` 階段不再顯示「收到！讓我先了解一下你的需求」文字氣泡 |
-| **移除 typing 文字** | 移除「問題正在釐清中，請稍等」文字，只保留三個跳動圓點 |
-| **只保留進度條** | 進入對話後只顯示進度條（如「準備分析 0/3」） |
+| **隱藏重複指示器** | 當有進度條顯示時（`init_progress` / `formulation_progress`），隱藏 typing indicator（三個跳動圓點）|
+| **平常對話正常顯示** | 非進度訊息時，typing indicator 正常顯示 |
 
 **修改檔案**：
-- `app/page.tsx` - `init_progress` 訊息直接渲染進度條、typing indicator 簡化
+- `app/page.tsx` - typing indicator 條件增加進度訊息檢查
 
 ---
 

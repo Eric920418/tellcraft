@@ -862,6 +862,8 @@ function ChatSection({
   const auth = useAuth()
   const [lastUpdatedAt, setLastUpdatedAt] = useState<string | null>(null)  // 用於輪詢優化
   const messagesEndRef = useRef<HTMLDivElement>(null)
+  const chatScrollRef = useRef<HTMLDivElement>(null)
+  const isNearBottomRef = useRef(true)  // 追蹤用戶是否在底部附近
   const hasInitialized = useRef(false)
   const inputRef = useRef<HTMLTextAreaElement>(null)
   const typingTimerRef = useRef<NodeJS.Timeout | null>(null)
@@ -1372,10 +1374,23 @@ function ChatSection({
     }
   }, [sessionInfo?.conversationId, lastTimestamp, lastUpdatedAt])
 
-  // 滾動到底部
+  // 滾動到底部（只在用戶處於底部附近時才自動滾動）
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+    if (isNearBottomRef.current) {
+      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+    }
   }, [messages, typingStage])
+
+  // 處理滾動事件，判斷用戶是否在底部附近
+  const handleChatScroll = useCallback(() => {
+    const container = chatScrollRef.current
+    if (!container) return
+
+    // 檢查是否在底部附近（距離底部 100px 以內）
+    const threshold = 100
+    const distanceFromBottom = container.scrollHeight - container.scrollTop - container.clientHeight
+    isNearBottomRef.current = distanceFromBottom < threshold
+  }, [])
 
   // 重置狀態當離開
   useEffect(() => {
@@ -1656,7 +1671,11 @@ function ChatSection({
 
       {/* 對話內容 */}
       {!showConversationPicker && (
-        <div style={{ flex: 1, overflow: 'auto', padding: layoutMode === 'split' ? '16px 0' : '32px 0' }}>
+        <div
+          ref={chatScrollRef}
+          onScroll={handleChatScroll}
+          style={{ flex: 1, overflow: 'auto', padding: layoutMode === 'split' ? '16px 0' : '32px 0' }}
+        >
           <div style={{ maxWidth: layoutMode === 'split' ? '100%' : 680, margin: '0 auto', padding: layoutMode === 'split' ? '0 16px' : '0 24px' }}>
             {/* 錯誤提示 */}
             {error && (
@@ -1746,78 +1765,6 @@ function ChatSection({
                       />
                       {message.content}
                     </div>
-                  ) : message.stage === 'init_progress' ? (
-                    // init_progress 訊息只顯示進度條，不顯示文字內容
-                    <motion.div
-                      initial={{ opacity: 0, y: 8 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      transition={{ duration: 0.4 }}
-                      style={{
-                        maxWidth: layoutMode === 'split' ? '95%' : '85%',
-                      }}
-                    >
-                      <div style={{
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: 12,
-                        padding: '12px 16px',
-                        background: 'var(--white)',
-                        border: '1px solid var(--border-color)',
-                      }}>
-                        <motion.div
-                          animate={{ rotate: 360 }}
-                          transition={{ duration: 2, repeat: Infinity, ease: 'linear' }}
-                          style={{ width: 18, height: 18, flexShrink: 0 }}
-                        >
-                          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--gray-400)" strokeWidth="2">
-                            <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83" />
-                          </svg>
-                        </motion.div>
-                        <div style={{ flex: 1 }}>
-                          <div style={{
-                            display: 'flex',
-                            justifyContent: 'space-between',
-                            alignItems: 'center',
-                            marginBottom: 6,
-                          }}>
-                            <span style={{ fontSize: 12, color: 'var(--gray-500)' }}>
-                              {message.progress?.step || '正在分析需求...'}
-                            </span>
-                            {message.progress && (
-                              <span style={{ fontSize: 11, color: 'var(--gray-400)' }}>
-                                {message.progress.current}/{message.progress.total}
-                              </span>
-                            )}
-                          </div>
-                          <div style={{
-                            height: 3,
-                            background: 'var(--gray-100)',
-                            overflow: 'hidden',
-                            position: 'relative',
-                          }}>
-                            {message.progress ? (
-                              <motion.div
-                                initial={{ width: 0 }}
-                                animate={{ width: `${(message.progress.current / message.progress.total) * 100}%` }}
-                                transition={{ duration: 0.5, ease: 'easeOut' }}
-                                style={{ height: '100%', background: 'var(--black)' }}
-                              />
-                            ) : (
-                              <motion.div
-                                animate={{ x: ['-100%', '200%'] }}
-                                transition={{ duration: 1.5, repeat: Infinity, ease: 'easeInOut' }}
-                                style={{
-                                  position: 'absolute',
-                                  width: '50%',
-                                  height: '100%',
-                                  background: 'linear-gradient(90deg, transparent, var(--black), transparent)',
-                                }}
-                              />
-                            )}
-                          </div>
-                        </div>
-                      </div>
-                    </motion.div>
                   ) : (
                     <>
                       <div style={{
@@ -1892,7 +1839,7 @@ function ChatSection({
                                 marginBottom: 6,
                               }}>
                                 <span style={{ fontSize: 12, color: 'var(--gray-500)' }}>
-                                  {message.progress?.step || '正在產出規格文件...'}
+                                  {message.progress?.step || (message.stage === 'init_progress' ? '正在分析需求...' : '正在產出規格文件...')}
                                 </span>
                                 {message.progress && (
                                   <span style={{ fontSize: 11, color: 'var(--gray-400)' }}>
@@ -1958,7 +1905,8 @@ function ChatSection({
               })
             })()}
 
-            {typingStage !== 'none' && (
+            {/* 當有進度條顯示時，不顯示 typing indicator（避免重複） */}
+            {typingStage !== 'none' && !['init_progress', 'formulation_progress'].includes(messages[messages.length - 1]?.stage || '') && (
               <motion.div
                 initial={{ opacity: 0, y: 10 }}
                 animate={{ opacity: 1, y: 0 }}
