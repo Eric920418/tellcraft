@@ -16,6 +16,7 @@ import {
   ClarifyItem,
 } from '../services/bdd-session'
 import { runPrdDiscovery } from '../services/prd-discovery'
+import { runFormulation } from '../services/formulation'
 
 // ============================================================
 // 類型定義
@@ -755,15 +756,96 @@ async function finishClarifyAndStartFormulation(
 ) {
   await sendMessage(conversationId, io, {
     content: '釐清完成！正在產出規格文件...',
-    stage: 'clarify_complete',
+    stage: 'formulation_start',
   })
-
-  // TODO: 進入 Formulation 階段
-  // 這裡需要調用 LLM 生成 schema.sql 和 feature files
 
   state.phase = 'formulation'
   state.waitingForReply = false
   await saveFlowState(redis, conversationId, state)
+
+  // 取得 BDD Session 資料
+  if (!state.sessionId) {
+    console.error('[Orchestrator] 缺少 sessionId，無法執行 Formulation')
+    await sendMessage(conversationId, io, {
+      content: '發生錯誤：缺少 Session 資料',
+      stage: 'error',
+    })
+    return
+  }
+
+  const session = await getBddSession({ sessionId: state.sessionId })
+  if (!session.success || !session.data) {
+    console.error('[Orchestrator] 無法取得 BDD Session')
+    await sendMessage(conversationId, io, {
+      content: '發生錯誤：無法取得對話資料',
+      stage: 'error',
+    })
+    return
+  }
+
+  // 合併所有已回答的項目
+  const allResolvedItems = [
+    ...(session.data.stagingItems || []),
+    ...(session.data.resolvedItems || []),
+  ].filter(item => item.answer)
+
+  console.log(`[Orchestrator] 開始 Formulation，共 ${allResolvedItems.length} 個釐清項目`)
+
+  // 執行 Formulation
+  const result = await runFormulation(
+    session.data.originalRequirements,
+    allResolvedItems,
+    session.data.projectContext || undefined,
+    async (step, current, total, detail) => {
+      // 推送進度更新
+      io.to(`conversation:${conversationId}`).emit('progress', {
+        stage: 'formulation',
+        step,
+        current,
+        total,
+        detail,
+      })
+    }
+  )
+
+  if (!result.success) {
+    console.error('[Orchestrator] Formulation 失敗:', result.error)
+    await sendMessage(conversationId, io, {
+      content: `規格產出失敗：${result.error}`,
+      stage: 'error',
+    })
+
+    // 更新任務狀態為失敗
+    if (state.taskId) {
+      await db.updateTask(state.taskId, { status: 'failed' })
+    }
+    return
+  }
+
+  // 保存生成的內容到 BDD Session
+  await updateBddSession({
+    sessionId: state.sessionId,
+    updates: {
+      currentPhase: 'completed',
+      schemaSqlContent: result.schemaSql,
+      entityMappingContent: result.entityMapping,
+      featuresContent: result.features,
+    },
+  })
+
+  // 發送完成消息
+  const featureCount = result.features?.length || 0
+  await sendMessage(conversationId, io, {
+    content: `規格產出完成！\n\n已生成：\n- 資料庫 Schema\n- ${featureCount} 個功能規格 (Feature Files)\n\n你可以在專案詳情頁面查看完整規格。`,
+    stage: 'formulation_complete',
+    progress: { current: 3, total: 3, step: '完成' },
+  })
+
+  // 更新對話為完成
+  await db.query(
+    'UPDATE conversations SET spec_complete = true, updated_at = NOW() WHERE id = $1',
+    [conversationId]
+  )
 
   // 完成任務
   if (state.taskId) {
@@ -772,6 +854,8 @@ async function finishClarifyAndStartFormulation(
       completed_at: new Date(),
     })
   }
+
+  console.log('[Orchestrator] Formulation 完成')
 }
 
 function validateAnswer(

@@ -1265,10 +1265,10 @@ function ChatSection({
 
             if (uniqueNewMessages.length > 0) {
               // 如果有新的 AI 消息（非進度訊息），停止 typing
-              // 進度訊息（init_progress, formulation_progress）不應該停止打字指示器
+              // 進度訊息（init_progress, formulation_start, formulation_progress）不應該停止打字指示器
               const hasNonProgressAiMessage = uniqueNewMessages.some(m =>
                 m.role === 'assistant' &&
-                !['init_progress', 'formulation_progress'].includes(m.stage || '')
+                !['init_progress', 'formulation_start', 'formulation_progress'].includes(m.stage || '')
               )
               if (hasNonProgressAiMessage) {
                 setIsTyping(false)
@@ -1742,7 +1742,7 @@ function ChatSection({
               const lastMessageStage = lastMessage?.stage || ''
 
               // 只有當最後一條訊息是進度訊息時才顯示進度條
-              const isShowingProgress = ['init_progress', 'formulation_progress'].includes(lastMessageStage)
+              const isShowingProgress = ['init_progress', 'formulation_start', 'formulation_progress'].includes(lastMessageStage)
 
               // 分屏模式下只顯示 UIUX 相關的消息（隱藏之前的釐清歷史）
               const uiuxStartIndex = messages.findIndex(m =>
@@ -1928,7 +1928,7 @@ function ChatSection({
             })()}
 
             {/* 當有進度條顯示時，不顯示 typing indicator（避免重複） */}
-            {typingStage !== 'none' && !['init_progress', 'formulation_progress'].includes(messages[messages.length - 1]?.stage || '') && (
+            {typingStage !== 'none' && !['init_progress', 'formulation_start', 'formulation_progress'].includes(messages[messages.length - 1]?.stage || '') && (
               <motion.div
                 initial={{ opacity: 0, y: 10 }}
                 animate={{ opacity: 1, y: 0 }}
