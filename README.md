@@ -12,10 +12,64 @@ Tellcraft 是一個 AI 驅動的自動化開發平台。用戶只需描述需求
 
 ## 當前開發進度
 
-- **狀態**：✅ Phase 1-9 + Server Actions + VPS Backend + 前端 Chat 串接 + 認證系統 + 訪客體驗改善 + 儀表板系統 + BDD Spec 完整修復
+- **狀態**：✅ Phase 1-9 + Server Actions + VPS Backend + 前端 Chat 串接 + 認證系統 + 訪客體驗改善 + 儀表板系統 + BDD Spec 完整修復 + 專案版本管理
 - **釐清項目**：28 項全部解決
 - **Server Actions**：30+ 已實作
 - **詳情**：[`.clarify/overview.md`](.clarify/overview.md)
+
+### 專案版本管理功能（2026-02-05）
+
+實現完整的專案版本管理功能，將「專案」從單純的對話容器改造成「可迭代的產品」：
+
+**Phase 1：基礎操作按鈕**
+
+| 功能 | 說明 |
+|------|------|
+| **繼續對話** | 回到最近未完成的對話，按鈕在有進行中對話時顯示 |
+| **新增迭代** | 創建新對話開始新一輪迭代，按鈕在專案已部署/失敗時顯示 |
+| **對話卡片可點擊** | 點擊對話記錄可直接跳轉到該對話 |
+
+**Phase 2：版本歷史列表**
+
+| 功能 | 說明 |
+|------|------|
+| **版本時間線** | 顯示所有版本的時間線，包含狀態、時間、變更摘要 |
+| **版本標籤** | 可編輯的版本標籤（如 v1.0.0, MVP 版本等）|
+| **版本對比** | 選擇兩個版本進行 Schema 和 Feature Files 差異對比 |
+
+**Phase 3：版本回滾**
+
+| 功能 | 說明 |
+|------|------|
+| **快照存儲** | 生成成功時自動保存 Schema 和 Features 快照 |
+| **回滾操作** | 回滾會創建新版本，不覆蓋現有數據 |
+| **確認彈窗** | 回滾前顯示警告，提醒可能影響生產數據 |
+
+**Phase 4：版本對比**
+
+| 功能 | 說明 |
+|------|------|
+| **Schema Diff** | 顯示 SQL Schema 的行差異（新增/刪除/修改）|
+| **Features Diff** | 顯示 Feature Files 的變更（新增/刪除/修改）|
+| **語法高亮** | 新增行綠色、刪除行紅色高亮 |
+
+**資料庫變更**（需執行 migration）：
+```sql
+-- 執行 spec/data/migrations/001_add_version_management.sql
+```
+
+**新增檔案**：
+- `app/components/dashboard/VersionHistory.tsx` - 版本歷史組件
+- `spec/data/migrations/001_add_version_management.sql` - Schema migration
+
+**修改檔案**：
+- `app/dashboard/projects/[id]/page.tsx` - 新增操作按鈕和版本歷史區塊
+- `tellcraft-backend/src/routes/project.ts` - 新增版本管理 API
+- `tellcraft-backend/src/routes/operations.ts` - 生成時保存快照
+- `app/lib/vps-api.ts` - 新增版本管理 API 函數
+- `spec/data/schema.sql` - 記錄 Schema 變更
+
+---
 
 ### 進度條時隱藏 Typing Indicator（2026-02-05）
 

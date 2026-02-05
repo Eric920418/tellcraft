@@ -161,6 +161,12 @@ CREATE TABLE generations (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     project_id UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
     skill_execution_id UUID COMMENT '關聯的技能執行記錄（決議 #26）',
+    conversation_id UUID REFERENCES conversations(id) COMMENT '關聯的對話（版本管理用）',
+
+    -- 版本管理欄位（2026-02-05 新增）
+    version_number INT NOT NULL DEFAULT 1 COMMENT '版本號（同專案內遞增）',
+    version_label VARCHAR(100) COMMENT '版本標籤（用戶自定義，如 v1.0.0）',
+    change_summary TEXT COMMENT '變更摘要',
 
     -- 輸入
     requirement_spec JSONB COMMENT '需求規格（sdd.os BDD Spec Skill 輸出）',
@@ -179,8 +185,15 @@ CREATE TABLE generations (
     backup_sql_url TEXT COMMENT '資料備份 URL（破壞性變更前）',
     backup_created_at TIMESTAMPTZ COMMENT '備份時間',
 
+    -- 快照（版本回滾用）
+    schema_snapshot TEXT COMMENT 'Schema SQL 快照（版本回滾用）',
+    features_snapshot JSONB COMMENT 'Feature Files 快照（版本回滾用）',
+
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 ) COMMENT '生成記錄';
+
+-- 版本管理索引
+CREATE INDEX idx_generations_project_version ON generations(project_id, version_number DESC);
 
 -- 部署記錄（決議 #26：關聯 skill_execution）
 CREATE TABLE deployments (

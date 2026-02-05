@@ -819,6 +819,24 @@ router.post('/generate', requireAuth, async (req: Request, res: Response) => {
       return res.status(400).json({ error: '生成失敗次數已達上限' })
     }
 
+    // 獲取 BDD Session 的快照數據
+    const bddSession = await queryOne<{
+      schema_sql_content: string | null
+      features_content: string | null
+    }>(
+      `SELECT schema_sql_content, features_content FROM bdd_sessions
+       WHERE conversation_id = $1
+       ORDER BY created_at DESC LIMIT 1`,
+      [conversation.id]
+    )
+
+    // 計算版本號
+    const maxVersion = await queryOne<{ max_version: number }>(
+      'SELECT COALESCE(MAX(version_number), 0) as max_version FROM generations WHERE project_id = $1',
+      [projectId]
+    )
+    const newVersionNumber = (maxVersion?.max_version || 0) + 1
+
     // 創建或更新生成記錄
     let generationId: string
     let attemptCount: number
@@ -827,17 +845,42 @@ router.post('/generate', requireAuth, async (req: Request, res: Response) => {
       generationId = existingGeneration.id
       attemptCount = existingGeneration.attempt_count + 1
       await query(
-        `UPDATE generations SET status = 'success', attempt_count = $1, updated_at = NOW()
-         WHERE id = $2`,
-        [attemptCount, generationId]
+        `UPDATE generations SET
+           status = 'success',
+           attempt_count = $1,
+           version_number = $2,
+           conversation_id = $3,
+           schema_snapshot = $4,
+           features_snapshot = $5,
+           updated_at = NOW()
+         WHERE id = $6`,
+        [
+          attemptCount,
+          newVersionNumber,
+          conversation.id,
+          bddSession?.schema_sql_content || null,
+          bddSession?.features_content ? JSON.stringify(bddSession.features_content) : null,
+          generationId
+        ]
       )
     } else {
       generationId = crypto.randomUUID()
       attemptCount = 1
       await query(
-        `INSERT INTO generations (id, project_id, status, attempt_count, created_at, updated_at)
-         VALUES ($1, $2, 'success', 1, NOW(), NOW())`,
-        [generationId, projectId]
+        `INSERT INTO generations (
+           id, project_id, status, attempt_count,
+           version_number, conversation_id,
+           schema_snapshot, features_snapshot,
+           created_at, updated_at
+         ) VALUES ($1, $2, 'success', 1, $3, $4, $5, $6, NOW(), NOW())`,
+        [
+          generationId,
+          projectId,
+          newVersionNumber,
+          conversation.id,
+          bddSession?.schema_sql_content || null,
+          bddSession?.features_content ? JSON.stringify(bddSession.features_content) : null
+        ]
       )
     }
 

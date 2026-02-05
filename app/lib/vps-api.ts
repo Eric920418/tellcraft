@@ -1076,6 +1076,115 @@ export async function getBddSessionProgress(input: {
 // ============================================================
 
 /**
+ * 開始專案新迭代
+ * 創建新對話 + 專案狀態改為 generating
+ */
+export async function startProjectIteration(input: {
+  projectId: string
+  description?: string
+  token?: string
+}): Promise<ApiResponse<{ conversationId: string; projectStatus: string }>> {
+  return apiRequest(`/api/project/${input.projectId}/iterate`, {
+    method: 'POST',
+    headers: input.token
+      ? { Authorization: `Bearer ${input.token}` }
+      : undefined,
+    body: JSON.stringify({
+      description: input.description,
+    }),
+  })
+}
+
+/**
+ * 獲取專案版本歷史
+ */
+export async function getProjectVersions(input: {
+  projectId: string
+  token: string
+}): Promise<ApiResponse<{
+  versions: Array<{
+    id: string
+    versionNumber: number
+    versionLabel: string | null
+    status: string
+    changeSummary: string | null
+    conversationId: string | null
+    createdAt: string
+    hasBackup: boolean
+  }>
+}>> {
+  return apiRequest(`/api/project/${input.projectId}/versions`, {
+    method: 'GET',
+    headers: {
+      Authorization: `Bearer ${input.token}`,
+    },
+  })
+}
+
+/**
+ * 更新版本標籤
+ */
+export async function updateVersionLabel(input: {
+  projectId: string
+  versionNumber: number
+  label: string
+  token: string
+}): Promise<ApiResponse<{ success: boolean }>> {
+  return apiRequest(`/api/project/${input.projectId}/versions/${input.versionNumber}`, {
+    method: 'PATCH',
+    headers: {
+      Authorization: `Bearer ${input.token}`,
+    },
+    body: JSON.stringify({ label: input.label }),
+  })
+}
+
+/**
+ * 回滾到指定版本
+ */
+export async function rollbackVersion(input: {
+  projectId: string
+  versionNumber: number
+  token: string
+}): Promise<ApiResponse<{
+  success: boolean
+  newVersionNumber: number
+  message: string
+}>> {
+  return apiRequest(`/api/project/${input.projectId}/versions/${input.versionNumber}/rollback`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${input.token}`,
+    },
+    body: JSON.stringify({ confirm: true }),
+  })
+}
+
+/**
+ * 對比兩個版本
+ */
+export async function compareVersions(input: {
+  projectId: string
+  v1: number
+  v2: number
+  token: string
+}): Promise<ApiResponse<{
+  schemaDiff: string
+  featuresDiff: Array<{
+    name: string
+    status: 'added' | 'removed' | 'modified'
+    diff?: string
+  }>
+}>> {
+  return apiRequest(`/api/project/${input.projectId}/versions/compare?v1=${input.v1}&v2=${input.v2}`, {
+    method: 'GET',
+    headers: {
+      Authorization: `Bearer ${input.token}`,
+    },
+  })
+}
+
+/**
  * 獲取專案完整詳情
  */
 export async function getProjectDetail(input: {
@@ -1575,6 +1684,12 @@ export const vpsApi = {
   // Project Detail
   getProjectDetail,
   getLatestGeneration,
+  // Project Iteration & Versioning
+  startProjectIteration,
+  getProjectVersions,
+  updateVersionLabel,
+  rollbackVersion,
+  compareVersions,
   // Operations
   createOrUpdateGeneration,
   createDeployment,
