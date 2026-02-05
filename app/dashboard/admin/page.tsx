@@ -174,7 +174,7 @@ export default function AdminDashboardPage() {
         transition={{ duration: 0.4, delay: 0.2 }}
         style={{
           display: 'grid',
-          gridTemplateColumns: 'repeat(3, 1fr)',
+          gridTemplateColumns: 'repeat(4, 1fr)',
           gap: 20,
           marginBottom: 32,
         }}
@@ -233,6 +233,25 @@ export default function AdminDashboardPage() {
             </div>
             <div style={{ fontSize: 13, color: 'var(--gray-500)' }}>
               查看操作記錄
+            </div>
+          </motion.div>
+        </Link>
+        <Link href="/dashboard/admin/templates" style={{ textDecoration: 'none' }}>
+          <motion.div
+            whileHover={{ y: -2 }}
+            style={{
+              padding: 24,
+              background: 'var(--white)',
+              border: '1px solid var(--border-color)',
+              cursor: 'pointer',
+            }}
+          >
+            <div style={{ fontSize: 20, marginBottom: 8 }}>◫</div>
+            <div style={{ fontSize: 16, fontWeight: 500, marginBottom: 4, color: 'var(--black)' }}>
+              模板管理
+            </div>
+            <div style={{ fontSize: 13, color: 'var(--gray-500)' }}>
+              管理 UIUX 模板
             </div>
           </motion.div>
         </Link>

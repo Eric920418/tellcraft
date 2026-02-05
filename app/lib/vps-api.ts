@@ -763,6 +763,48 @@ export async function initializeTemplates(input: {
   })
 }
 
+/**
+ * 管理員模板列表資料
+ */
+interface AdminTemplateData extends TemplateData {
+  createdAt: string
+  preview: {
+    version: number | null
+    updatedAt: string | null
+    hasPregenerated: boolean
+    status: 'pregenerated' | 'cached' | 'none'
+  }
+}
+
+/**
+ * 獲取管理員模板列表（包含預覽狀態）
+ */
+export async function getAdminTemplates(input: {
+  token: string
+}): Promise<ApiResponse<{ templates: AdminTemplateData[] }>> {
+  return apiRequest('/api/templates/admin/list', {
+    method: 'GET',
+    headers: {
+      Authorization: `Bearer ${input.token}`,
+    },
+  })
+}
+
+/**
+ * 重新生成模板預覽
+ */
+export async function regenerateTemplatePreview(input: {
+  token: string
+  templateId: string
+}): Promise<ApiResponse<{ success: boolean; version: number; message: string }>> {
+  return apiRequest(`/api/templates/preview/${input.templateId}/regenerate`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${input.token}`,
+    },
+  })
+}
+
 // ============================================================
 // User API
 // ============================================================

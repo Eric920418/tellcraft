@@ -594,4 +594,77 @@ router.post('/init', requireAuth, async (req, res) => {
   }
 })
 
+/**
+ * GET /api/templates/admin/list
+ * 管理員專用：獲取所有模板（包含預覽狀態）
+ */
+router.get('/admin/list', requireAuth, async (req, res) => {
+  try {
+    // 檢查是否為管理員
+    const adminCheck = await queryOne<{ is_admin: boolean }>(
+      'SELECT is_admin FROM users WHERE id = $1',
+      [req.user!.id]
+    )
+
+    if (!adminCheck?.is_admin) {
+      return res.status(403).json({ error: '無管理員權限' })
+    }
+
+    // 獲取所有模板和預覽狀態
+    const result = await query<{
+      id: string
+      name: string
+      slug: string
+      category: string
+      description: string
+      thumbnail_url: string
+      preview_image_url: string | null
+      tags: string[]
+      is_active: boolean
+      is_featured: boolean
+      sort_order: number
+      created_at: Date
+      preview_version: number | null
+      preview_updated_at: Date | null
+      has_pregenerated: boolean
+    }>(
+      `SELECT
+        t.*,
+        tp.version as preview_version,
+        tp.updated_at as preview_updated_at,
+        CASE WHEN t.slug IN ('saas-dashboard-minimal', 'saas-dashboard-professional', 'startup-landing-page', 'corporate-website', 'modern-ecommerce')
+          THEN true ELSE false END as has_pregenerated
+      FROM templates t
+      LEFT JOIN template_previews tp ON t.id = tp.template_id
+      ORDER BY t.sort_order ASC`
+    )
+
+    const templates = result.rows.map(row => ({
+      id: row.id,
+      name: row.name,
+      slug: row.slug,
+      category: row.category,
+      description: row.description,
+      thumbnailUrl: row.thumbnail_url,
+      previewImageUrl: row.preview_image_url,
+      tags: row.tags,
+      isActive: row.is_active,
+      isFeatured: row.is_featured,
+      sortOrder: row.sort_order,
+      createdAt: row.created_at,
+      preview: {
+        version: row.preview_version,
+        updatedAt: row.preview_updated_at,
+        hasPregenerated: row.has_pregenerated,
+        status: row.has_pregenerated ? 'pregenerated' : (row.preview_version ? 'cached' : 'none')
+      }
+    }))
+
+    res.json({ templates })
+  } catch (error) {
+    console.error('[Templates] 獲取管理員模板列表失敗:', error)
+    res.status(500).json({ error: '獲取模板列表失敗' })
+  }
+})
+
 export default router
