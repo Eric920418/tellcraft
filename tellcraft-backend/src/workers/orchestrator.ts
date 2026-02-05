@@ -558,6 +558,10 @@ async function sendMessage(
     stage?: string
     progress?: { current: number; total: number; step: string }
     layoutHint?: 'default' | 'split' | 'full_preview'
+    richContent?: {
+      type: 'template_picker' | 'design_preview' | 'code_preview'
+      data: Record<string, unknown>
+    }
   }
 ) {
   const message = {
@@ -568,6 +572,7 @@ async function sendMessage(
     stage: options.stage,
     progress: options.progress,
     layoutHint: options.layoutHint,
+    richContent: options.richContent,
   }
 
   // 更新 DB
@@ -1240,11 +1245,53 @@ async function completeSpecPhase(
     progress: { current: 4, total: 4, step: '完成' },
   })
 
-  // 發送 UIUX 開始消息，觸發前端切換到分屏模式（帶 3 秒延遲提示）
+  // 獲取模板列表
+  const templatesResult = await db.query<{
+    id: string
+    name: string
+    slug: string
+    category: string
+    description: string
+    thumbnail_url: string
+    preview_image_url: string | null
+    tags: string[]
+    design_defaults: unknown
+    page_structure: unknown
+    is_featured: boolean
+    sort_order: number
+  }>('SELECT * FROM templates WHERE is_active = true ORDER BY sort_order ASC')
+
+  const templates = templatesResult.rows.map(row => ({
+    id: row.id,
+    name: row.name,
+    slug: row.slug,
+    category: row.category,
+    description: row.description,
+    thumbnailUrl: row.thumbnail_url,
+    previewImageUrl: row.preview_image_url,
+    tags: row.tags,
+    designDefaults: row.design_defaults,
+    pageStructure: row.page_structure,
+    isFeatured: row.is_featured,
+    sortOrder: row.sort_order,
+  }))
+
+  // 獲取推薦的模板 ID（featured 的模板）
+  const recommendedIds = templates.filter(t => t.isFeatured).map(t => t.id)
+
+  // 發送 UIUX 開始消息，觸發前端切換到分屏模式並顯示模板選擇器
   await sendMessage(conversationId, io, {
-    content: '正在進入設計模式...',
-    stage: 'uiux',
+    content: '規格已完成！現在讓我們為您的產品選擇一個設計模板。\n\n請從下方選擇一個最符合您需求的模板，或直接告訴我您想要的設計風格。',
+    stage: 'uiux_template_picker',
     layoutHint: 'split',
+    richContent: {
+      type: 'template_picker',
+      data: {
+        templates,
+        recommendedIds,
+        selectedTemplateId: null,
+      },
+    },
   })
 
   // 更新對話為完成
