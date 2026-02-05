@@ -1378,7 +1378,12 @@ function ChatSection({
   // 滾動到底部（只在用戶處於底部附近時才自動滾動）
   useEffect(() => {
     if (isNearBottomRef.current) {
+      isProgrammaticScrollRef.current = true
       messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+      // 滾動動畫完成後重置 flag
+      setTimeout(() => {
+        isProgrammaticScrollRef.current = false
+      }, 500)
     }
   }, [messages, typingStage])
 

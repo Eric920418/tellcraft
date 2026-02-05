@@ -27,6 +27,9 @@ pnpm typecheck            # 型別檢查
 npx ts-node bdd-spec/scripts/lint-gherkin-format.ts spec/features/   # ISA Format Lint
 npx ts-node bdd-spec/scripts/validate-feature.ts spec/features/      # 結構驗證
 # 選項：--json, --strict, --fix
+
+# VPS 部署（SSH 到 VPS 後執行）
+~/deploy.sh               # 自動 git pull + build + pm2 restart
 ```
 
 ## 系統架構
@@ -76,6 +79,13 @@ npx ts-node bdd-spec/scripts/validate-feature.ts spec/features/      # 結構驗
 - `app/api/auth/google/`, `app/api/auth/line/` - OAuth Vercel proxy
 - `tellcraft-backend/src/routes/auth.ts` - VPS OAuth 處理
 - **雙軌儲存**：localStorage 供前端 hook 使用，Cookie 供 middleware/Server Components 使用
+
+### 資料流：前端 → VPS
+
+前端**不直連資料庫**，所有資料操作通過 VPS HTTP API：
+```
+Vercel Server Actions → app/lib/vps-api.ts → VPS Express API → PostgreSQL
+```
 
 ## 專案結構
 
@@ -134,6 +144,7 @@ uiux-skill/                # UIUX Skill 定義
 1. **無腦補原則**：嚴格遵守規格，不擅自假設
 2. **summary 一致**：Action summary 必須與 Feature 名稱一致
 3. **自我修復**：驗證失敗時進入修正迴圈（最多 3 次）
+4. **不直連資料庫**：前端透過 VPS API 操作資料，禁止 `accept-data-loss`
 
 ## 關鍵 LLM 函數（app/lib/llm.ts）
 
