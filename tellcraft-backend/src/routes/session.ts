@@ -149,12 +149,30 @@ router.post('/initialize', optionalAuth, async (req: Request, res: Response) => 
           return res.status(403).json({ error: '已達到專案數量上限' })
         }
       } else {
-        // 創建新專案
+        // 創建新專案（處理名稱衝突）
         projectId = crypto.randomUUID()
+        const baseName = `專案 ${new Date().toLocaleDateString('zh-TW')}`
+
+        // 檢查名稱是否已存在
+        const existingNames = await query<{ name: string }>(
+          `SELECT name FROM projects WHERE user_id = $1 AND name LIKE $2`,
+          [userId, `${baseName}%`]
+        )
+
+        let finalName = baseName
+        if (existingNames.rows.length > 0) {
+          const existingSet = new Set(existingNames.rows.map(r => r.name))
+          let suffix = 2
+          while (existingSet.has(finalName)) {
+            finalName = `${baseName} (${suffix})`
+            suffix++
+          }
+        }
+
         await query(
           `INSERT INTO projects (id, user_id, name, status, created_at, updated_at)
            VALUES ($1, $2, $3, 'draft', NOW(), NOW())`,
-          [projectId, userId, `專案 ${new Date().toLocaleDateString('zh-TW')}`]
+          [projectId, userId, finalName]
         )
         isNewProject = true
       }
