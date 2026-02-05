@@ -17,6 +17,44 @@ Tellcraft 是一個 AI 驅動的自動化開發平台。用戶只需描述需求
 - **Server Actions**：30+ 已實作
 - **詳情**：[`.clarify/overview.md`](.clarify/overview.md)
 
+### 模板預覽：從 iframe 改為直接渲染（2026-02-05）
+
+將模板預覽從 iframe 改為 React 組件直接渲染，讓響應式即時生效，無需重新載入。
+
+**問題**：
+| 問題 | 原因 |
+|------|------|
+| 響應式需重新載入 | iframe 是獨立文檔，切換設備需 reload |
+| HTTPS/HTTP 混合 | VPS API 是 HTTP，Vercel 是 HTTPS |
+| 載入慢 | iframe 需要額外的 HTTP 請求 |
+
+**方案**：將 5 個 HTML 模板轉換為 React 組件，根據 `containerWidth` prop 實現響應式。
+
+**新增組件**：
+```
+app/components/templates/
+├── SaasMinimal.tsx         # SaaS Dashboard - 極簡
+├── SaasPro.tsx             # SaaS Dashboard - 專業
+├── LandingStartup.tsx      # Startup Landing Page
+├── LandingCorporate.tsx    # Corporate Website
+├── EcommerceModern.tsx     # Modern E-commerce
+└── index.ts                # TemplateComponents 映射
+```
+
+**修改文件**：
+| 文件 | 修改 |
+|------|------|
+| `PreviewPanel.tsx` | 移除 iframe，根據 `templateSlug` 渲染組件 |
+| `UiuxChatSection.tsx` | `previewUrl` → `templateSlug` |
+| `app/page.tsx` | 同上 |
+
+**效果**：
+- 切換設備（桌面/平板/手機）時預覽即時更新，無需重新載入
+- 消除 HTTPS/HTTP 混合內容問題
+- 響應式斷點：桌面 ≥1024px / 平板 ≥768px / 手機 <768px
+
+---
+
 ### 模板預覽系統優化（2026-02-05）
 
 實現預生成模板 HTML 預覽，減少 LLM API 消耗並提供管理員後台。

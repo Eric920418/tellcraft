@@ -5,9 +5,8 @@ import { motion } from 'framer-motion'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import SplitLayout from './SplitLayout'
-import PreviewPanel, { type ElementInfo } from './PreviewPanel'
+import PreviewPanel from './PreviewPanel'
 import TemplatePicker from './TemplatePicker'
-import InteractivePreview from './InteractivePreview'
 import type { Template, TemplateCardData } from '../../lib/templates'
 import { getTemplateById } from '../../actions/templates'
 
@@ -57,9 +56,6 @@ export default function UiuxChatSection({
   const [input, setInput] = useState('')
   const [selectedTemplateId, setSelectedTemplateId] = useState<string | null>(null)
   const [selectedTemplate, setSelectedTemplate] = useState<Template | null>(null)
-  const [previewUrl, setPreviewUrl] = useState<string | null>(null)
-  const [_selectedElement, setSelectedElement] = useState<ElementInfo | null>(null)
-  const [isEditMode, setIsEditMode] = useState(false)
 
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLTextAreaElement>(null)
@@ -70,26 +66,15 @@ export default function UiuxChatSection({
     m.layoutHint === 'split' || m.richContent?.type === 'template_picker'
   )
 
-  // 從訊息中提取最新的預覽 URL
-  useEffect(() => {
-    const lastPreviewMessage = [...messages].reverse().find(m =>
-      m.richContent?.data?.previewUrl
-    )
-    if (lastPreviewMessage?.richContent?.data?.previewUrl) {
-      setPreviewUrl(lastPreviewMessage.richContent.data.previewUrl)
-    }
-  }, [messages])
-
   // 滾動到底部
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages])
 
-  // 載入選中的模板詳情並設置預覽 URL
+  // 載入選中的模板詳情
   useEffect(() => {
     if (!selectedTemplateId) {
       setSelectedTemplate(null)
-      setPreviewUrl(null)
       return
     }
 
@@ -97,8 +82,6 @@ export default function UiuxChatSection({
       const result = await getTemplateById(selectedTemplateId)
       if (result.success && result.data) {
         setSelectedTemplate(result.data)
-        // 設置預覽 URL（使用本地代理，避免混合內容問題）
-        setPreviewUrl(`/api/templates/preview/${selectedTemplateId}`)
       }
     }
     loadTemplate()
@@ -117,11 +100,6 @@ export default function UiuxChatSection({
     // 只預覽，不發送訊息
   }, [])
 
-  // 處理元素編輯
-  const handleElementUpdate = useCallback((elementId: string, changes: Record<string, string>) => {
-    // TODO: 同步到後端
-    console.log('Element update:', elementId, changes)
-  }, [])
 
   // 處理發送訊息
   const handleSend = useCallback(() => {
@@ -390,31 +368,15 @@ export default function UiuxChatSection({
   // 預覽面板內容
   const previewPanel = (
     <div style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
-      {isEditMode && previewUrl ? (
-        <InteractivePreview
-          previewUrl={previewUrl}
-          templateName={selectedTemplate?.name}
-          onElementUpdate={handleElementUpdate}
-          onSaveChanges={(changes) => {
-            console.log('Save changes:', changes)
-            // TODO: 同步到後端
-          }}
-        />
-      ) : (
-        <PreviewPanel
-          previewUrl={previewUrl || undefined}
-          previewImageUrl={selectedTemplate?.previewImageUrl}
-          templateName={selectedTemplate?.name}
-          isLoading={!selectedTemplate && !previewUrl}
-          onInteract={(element) => {
-            setSelectedElement(element)
-            setIsEditMode(true)
-          }}
-        />
-      )}
+      <PreviewPanel
+        templateSlug={selectedTemplate?.slug}
+        previewImageUrl={selectedTemplate?.previewImageUrl}
+        templateName={selectedTemplate?.name}
+        isLoading={selectedTemplateId !== null && !selectedTemplate}
+      />
 
       {/* 底部操作按鈕 */}
-      {selectedTemplate && !isEditMode && (
+      {selectedTemplate && (
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
@@ -436,23 +398,6 @@ export default function UiuxChatSection({
             </div>
           </div>
           <div style={{ display: 'flex', gap: 8 }}>
-            <motion.button
-              whileHover={{ scale: 1.02 }}
-              whileTap={{ scale: 0.98 }}
-              onClick={() => setIsEditMode(true)}
-              style={{
-                padding: '8px 16px',
-                fontSize: 13,
-                fontWeight: 500,
-                background: 'var(--gray-100)',
-                color: 'var(--gray-700)',
-                border: 'none',
-                borderRadius: 6,
-                cursor: 'pointer',
-              }}
-            >
-              編輯
-            </motion.button>
             <motion.button
               whileHover={{ scale: 1.02 }}
               whileTap={{ scale: 0.98 }}

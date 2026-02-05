@@ -1,24 +1,24 @@
 'use client'
 
-import { useState, useRef, useEffect, useCallback } from 'react'
+import { useState, useRef, useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import DeviceSwitcher, { DeviceType, getDeviceWidth } from './DeviceSwitcher'
+import { TemplateComponents, isSupportedTemplate } from '../templates'
 
 // ============================================================
 // PreviewPanel - 預覽面板元件
-// 支援 iframe 預覽 + 設備切換 + 縮放
+// 直接渲染模板組件，響應式即時生效
 // ============================================================
 
 interface PreviewPanelProps {
-  previewUrl?: string                    // iframe 預覽 URL
-  previewImageUrl?: string               // 靜態預覽圖 URL（fallback）
-  templateName?: string                  // 模板名稱
-  isLoading?: boolean                    // 是否正在載入
-  error?: string                         // 錯誤訊息
-  onInteract?: (element: ElementInfo) => void  // 元素互動回調
+  templateSlug?: string                   // 模板 slug（用於直接渲染）
+  previewImageUrl?: string                // 靜態預覽圖 URL（fallback）
+  templateName?: string                   // 模板名稱
+  isLoading?: boolean                     // 是否正在載入
+  error?: string                          // 錯誤訊息
 }
 
-// 元素資訊（用於互動編輯）
+// 元素資訊（用於互動編輯）- 保留介面兼容性
 export interface ElementInfo {
   id: string
   tagName: string
@@ -28,18 +28,17 @@ export interface ElementInfo {
 }
 
 export default function PreviewPanel({
-  previewUrl,
+  templateSlug,
   previewImageUrl,
   templateName,
   isLoading = false,
   error,
-  onInteract
 }: PreviewPanelProps) {
   const [device, setDevice] = useState<DeviceType>('desktop')
   const [zoom, setZoom] = useState(1)
-  const [iframeLoaded, setIframeLoaded] = useState(false)
   const containerRef = useRef<HTMLDivElement>(null)
-  const iframeRef = useRef<HTMLIFrameElement>(null)
+
+  const deviceWidth = getDeviceWidth(device)
 
   // 計算適合的縮放比例
   useEffect(() => {
@@ -48,7 +47,6 @@ export default function PreviewPanel({
 
       const containerWidth = containerRef.current.clientWidth - 48  // padding
       const containerHeight = containerRef.current.clientHeight - 48
-      const deviceWidth = getDeviceWidth(device)
       const deviceHeight = deviceWidth * 0.75  // 假設 4:3 比例
 
       const scaleX = containerWidth / deviceWidth
@@ -61,47 +59,11 @@ export default function PreviewPanel({
     calculateZoom()
     window.addEventListener('resize', calculateZoom)
     return () => window.removeEventListener('resize', calculateZoom)
-  }, [device])
+  }, [device, deviceWidth])
 
-  // 處理 iframe postMessage
-  useEffect(() => {
-    const handleMessage = (event: MessageEvent) => {
-      // 驗證來源（實際部署時需要更嚴格的驗證）
-      if (event.data?.type === 'ELEMENT_SELECTED' && onInteract) {
-        onInteract(event.data.element as ElementInfo)
-      }
-    }
-
-    window.addEventListener('message', handleMessage)
-    return () => window.removeEventListener('message', handleMessage)
-  }, [onInteract])
-
-  // 啟用選擇模式
-  const enableSelectionMode = useCallback(() => {
-    iframeRef.current?.contentWindow?.postMessage(
-      { type: 'ENABLE_SELECTION_MODE' },
-      '*'
-    )
-  }, [])
-
-  // 重新載入 iframe
-  const reloadPreview = useCallback(() => {
-    setIframeLoaded(false)
-    if (iframeRef.current && iframeRef.current.src) {
-      const currentSrc = iframeRef.current.src
-      iframeRef.current.src = ''
-      iframeRef.current.src = currentSrc
-    }
-  }, [])
-
-  const deviceWidth = getDeviceWidth(device)
-
-  // 切換設備時重新載入 iframe，讓響應式樣式生效
-  useEffect(() => {
-    if (previewUrl && iframeRef.current) {
-      reloadPreview()
-    }
-  }, [device, previewUrl, reloadPreview])
+  // 檢查模板是否支援直接渲染
+  const canRenderDirectly = templateSlug && isSupportedTemplate(templateSlug)
+  const TemplateComponent = canRenderDirectly ? TemplateComponents[templateSlug] : null
 
   return (
     <div
@@ -136,7 +98,7 @@ export default function PreviewPanel({
               {templateName}
             </span>
           )}
-          {previewUrl && (
+          {templateSlug && (
             <span
               style={{
                 fontSize: 12,
@@ -152,61 +114,8 @@ export default function PreviewPanel({
         {/* 中間：設備切換器 */}
         <DeviceSwitcher activeDevice={device} onDeviceChange={setDevice} />
 
-        {/* 右側：操作按鈕 */}
-        <div style={{ display: 'flex', gap: 8 }}>
-          {previewUrl && (
-            <>
-              {/* 互動模式按鈕 */}
-              <motion.button
-                whileHover={{ scale: 1.05 }}
-                whileTap={{ scale: 0.95 }}
-                onClick={enableSelectionMode}
-                style={{
-                  padding: '6px 12px',
-                  fontSize: 12,
-                  fontWeight: 500,
-                  background: 'var(--gray-100)',
-                  color: 'var(--gray-700)',
-                  border: 'none',
-                  borderRadius: 6,
-                  cursor: 'pointer',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 4,
-                }}
-              >
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <path d="M3 3l7.07 16.97 2.51-7.39 7.39-2.51L3 3z" />
-                </svg>
-                選擇
-              </motion.button>
-
-              {/* 重新載入按鈕 */}
-              <motion.button
-                whileHover={{ scale: 1.05 }}
-                whileTap={{ scale: 0.95 }}
-                onClick={reloadPreview}
-                style={{
-                  padding: 6,
-                  background: 'var(--gray-100)',
-                  border: 'none',
-                  borderRadius: 6,
-                  cursor: 'pointer',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                }}
-              >
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--gray-600)" strokeWidth="2">
-                  <path d="M21 2v6h-6" />
-                  <path d="M3 12a9 9 0 0 1 15-6.7L21 8" />
-                  <path d="M3 22v-6h6" />
-                  <path d="M21 12a9 9 0 0 1-15 6.7L3 16" />
-                </svg>
-              </motion.button>
-            </>
-          )}
-        </div>
+        {/* 右側：空白（保持佈局對稱）*/}
+        <div style={{ width: 80 }} />
       </div>
 
       {/* 預覽區域 */}
@@ -248,7 +157,7 @@ export default function PreviewPanel({
                   borderTopColor: 'var(--gray-500)',
                 }}
               />
-              <span style={{ fontSize: 14 }}>正在生成預覽...</span>
+              <span style={{ fontSize: 14 }}>正在載入模板...</span>
             </motion.div>
           )}
 
@@ -276,9 +185,9 @@ export default function PreviewPanel({
             </motion.div>
           )}
 
-          {!isLoading && !error && previewUrl && (
+          {!isLoading && !error && TemplateComponent && (
             <motion.div
-              key="iframe"
+              key={`template-${templateSlug}-${device}`}
               initial={{ opacity: 0, scale: 0.95 }}
               animate={{ opacity: 1, scale: 1 }}
               exit={{ opacity: 0, scale: 0.95 }}
@@ -295,49 +204,20 @@ export default function PreviewPanel({
                 position: 'relative',
               }}
             >
-              {/* 載入指示器 */}
-              {!iframeLoaded && (
-                <div
-                  style={{
-                    position: 'absolute',
-                    inset: 0,
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    background: 'var(--white)',
-                  }}
-                >
-                  <motion.div
-                    animate={{ rotate: 360 }}
-                    transition={{ duration: 1, repeat: Infinity, ease: 'linear' }}
-                    style={{
-                      width: 24,
-                      height: 24,
-                      borderRadius: '50%',
-                      border: '2px solid var(--gray-200)',
-                      borderTopColor: 'var(--gray-500)',
-                    }}
-                  />
-                </div>
-              )}
-
-              <iframe
-                ref={iframeRef}
-                src={previewUrl}
-                onLoad={() => setIframeLoaded(true)}
+              {/* 直接渲染模板組件 */}
+              <div
                 style={{
                   width: '100%',
                   height: '100%',
-                  border: 'none',
-                  opacity: iframeLoaded ? 1 : 0,
-                  transition: 'opacity 0.3s ease',
+                  overflow: 'auto',
                 }}
-                sandbox="allow-scripts allow-same-origin allow-forms"
-              />
+              >
+                <TemplateComponent containerWidth={deviceWidth} />
+              </div>
             </motion.div>
           )}
 
-          {!isLoading && !error && !previewUrl && previewImageUrl && (
+          {!isLoading && !error && !TemplateComponent && previewImageUrl && (
             <motion.div
               key="image"
               initial={{ opacity: 0, scale: 0.95 }}
@@ -365,7 +245,7 @@ export default function PreviewPanel({
             </motion.div>
           )}
 
-          {!isLoading && !error && !previewUrl && !previewImageUrl && (
+          {!isLoading && !error && !TemplateComponent && !previewImageUrl && (
             <motion.div
               key="empty"
               initial={{ opacity: 0 }}

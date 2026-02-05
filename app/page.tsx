@@ -931,7 +931,6 @@ function ChatSection({
   const layoutModeRef = useRef(layoutMode)
   const [selectedTemplateId, setSelectedTemplateId] = useState<string | null>(null)
   const [selectedTemplate, setSelectedTemplate] = useState<Template | null>(null)
-  const [previewUrl, setPreviewUrl] = useState<string | null>(null)
 
   // 監聽訊息的 layoutHint 或 UIUX 相關 stage，切換佈局模式
   useEffect(() => {
@@ -967,16 +966,6 @@ function ChatSection({
       return () => clearTimeout(transitionTimer)
     }
 
-    // 檢查是否有預覽 URL
-    const lastPreviewMessage = [...messages].reverse().find(m =>
-      m.richContent?.data && 'previewUrl' in m.richContent.data
-    )
-    if (lastPreviewMessage?.richContent?.data) {
-      const data = lastPreviewMessage.richContent.data as { previewUrl?: string }
-      if (data.previewUrl) {
-        setPreviewUrl(data.previewUrl)
-      }
-    }
   }, [messages])
 
   // 載入選中的模板詳情
@@ -998,8 +987,6 @@ function ChatSection({
   // 處理模板選擇
   const handleTemplateSelect = useCallback((templateId: string) => {
     setSelectedTemplateId(templateId)
-    // 設定預覽 URL（使用本地代理，避免混合內容問題）
-    setPreviewUrl(`/api/templates/preview/${templateId}`)
   }, [])
 
   // 獲取或創建 anonymousId
@@ -2064,7 +2051,7 @@ function ChatSection({
   // 預覽面板渲染函數（用於 SplitLayout）
   const renderPreviewPanel = () => (
     <PreviewPanel
-      previewUrl={previewUrl || undefined}
+      templateSlug={selectedTemplate?.slug}
       previewImageUrl={selectedTemplate?.previewImageUrl}
       templateName={selectedTemplate?.name}
       isLoading={!selectedTemplate && !!selectedTemplateId}
