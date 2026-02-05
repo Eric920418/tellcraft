@@ -452,3 +452,101 @@ textarea {
     padding-top: 60px !important;
   }
 }
+
+/* ============ Chat Header Mobile Responsive ============ */
+
+/* 平板以下：隱藏步驟指示器文字，只顯示簡化進度條 */
+@media (max-width: 900px) {
+  .chat-header {
+    padding: 0 16px !important;
+  }
+
+  .chat-header .steps-indicator {
+    display: none !important;
+  }
+
+  .chat-header .mobile-progress {
+    display: flex !important;
+  }
+}
+
+/* 手機版：進一步簡化 */
+@media (max-width: 640px) {
+  .chat-header {
+    padding: 0 12px !important;
+    height: 56px !important;
+  }
+
+  /* 隱藏「返回」文字 */
+  .chat-header .back-text {
+    display: none;
+  }
+
+  /* 隱藏分隔線和 Logo */
+  .chat-header .header-divider,
+  .chat-header .header-logo {
+    display: none;
+  }
+
+  /* 隱藏用戶名稱 */
+  .chat-header .user-name {
+    display: none;
+  }
+
+  /* 縮小間距 */
+  .chat-header .back-button {
+    gap: 0 !important;
+  }
+}
+
+/* Landing Page 右上角響應式 */
+@media (max-width: 640px) {
+  /* 縮小定位間距 */
+  .landing-auth-area {
+    top: 12px !important;
+    right: 12px !important;
+    gap: 8px !important;
+  }
+
+  /* 隱藏用戶名稱 */
+  .landing-user-name {
+    display: none !important;
+  }
+
+  /* 縮小用戶區域的間距 */
+  .landing-user-info {
+    gap: 8px !important;
+  }
+}
+
+/* ============ Dashboard Mobile Responsive ============ */
+@media (max-width: 768px) {
+  /* 顯示手機版 menu 按鈕 */
+  .mobile-menu-toggle {
+    display: flex !important;
+  }
+
+  /* 顯示遮罩 */
+  .mobile-menu-overlay {
+    display: block !important;
+  }
+
+  /* 隱藏 Sidebar（預設） */
+  .dashboard-sidebar {
+    transform: translateX(-100%);
+    transition: transform 0.3s ease;
+    z-index: 1000;
+  }
+
+  /* 展開 Sidebar */
+  .dashboard-sidebar.sidebar-open {
+    transform: translateX(0);
+  }
+
+  /* main 區域不需要 margin */
+  .dashboard-main {
+    margin-left: 0 !important;
+    padding: 16px !important;
+    padding-top: 72px !important;
+  }
+}

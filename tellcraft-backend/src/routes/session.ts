@@ -210,10 +210,10 @@ router.post('/initialize', optionalAuth, async (req: Request, res: Response) => 
     })
   } catch (error) {
     console.error('[Session] 初始化失敗:', error)
+    // 臨時返回詳細錯誤用於診斷
     res.status(500).json({
       error: '初始化失敗',
-      message: process.env.NODE_ENV === 'development' ? (error as Error).message : undefined,
-      stack: process.env.NODE_ENV === 'development' ? (error as Error).stack : undefined,
+      detail: (error as Error).message,
     })
   }
 })

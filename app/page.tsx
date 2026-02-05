@@ -2132,6 +2132,7 @@ function ChatSection({
             initial={{ y: -30, opacity: 0 }}
             animate={{ y: 0, opacity: 1 }}
             transition={{ duration: 0.5, delay: 0.15, ease: smoothEasing }}
+            className="chat-header"
             style={{
               height: 64,
               borderBottom: '1px solid var(--border-color)',
@@ -2141,12 +2142,14 @@ function ChatSection({
               padding: '0 24px',
               background: 'var(--white)',
               position: 'relative',
+              overflow: 'hidden',
             }}
           >
             {/* 左側：返回 + Logo */}
-            <div style={{ display: 'flex', alignItems: 'center', gap: 24 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 24, flexShrink: 0 }}>
               <button
                 onClick={onBack}
+                className="back-button"
                 style={{
                   display: 'flex',
                   alignItems: 'center',
@@ -2160,16 +2163,16 @@ function ChatSection({
                 }}
               >
                 <span style={{ fontSize: 18 }}>←</span>
-                返回
+                <span className="back-text">返回</span>
               </button>
-              <div style={{ width: 1, height: 24, background: 'var(--border-color)' }} />
-              <span style={{ fontSize: 15, fontWeight: 500, letterSpacing: '-0.01em' }}>
+              <div className="header-divider" style={{ width: 1, height: 24, background: 'var(--border-color)' }} />
+              <span className="header-logo" style={{ fontSize: 15, fontWeight: 500, letterSpacing: '-0.01em' }}>
                 Tellcraft
               </span>
             </div>
 
-            {/* 中間：步驟指示器（絕對定位居中）*/}
-            <div style={{
+            {/* 中間：步驟指示器（絕對定位居中）- 手機版隱藏 */}
+            <div className="steps-indicator" style={{
               position: 'absolute',
               left: '50%',
               transform: 'translateX(-50%)',
@@ -2189,8 +2192,35 @@ function ChatSection({
               ))}
             </div>
 
+            {/* 手機版簡化進度指示器 */}
+            <div className="mobile-progress" style={{
+              display: 'none',
+              alignItems: 'center',
+              gap: 4,
+              position: 'absolute',
+              left: '50%',
+              transform: 'translateX(-50%)',
+            }}>
+              {stages.map((stage, i) => (
+                <div
+                  key={stage.key}
+                  style={{
+                    width: i < currentStageIndex ? 16 : 8,
+                    height: 4,
+                    borderRadius: 2,
+                    background: i < currentStageIndex
+                      ? 'var(--black)'
+                      : mappedStage === stage.key
+                        ? 'var(--gray-600)'
+                        : 'var(--gray-200)',
+                    transition: 'all 0.3s ease',
+                  }}
+                />
+              ))}
+            </div>
+
             {/* 右側：主題切換 + 用戶資訊 */}
-            <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 16, flexShrink: 0 }}>
               {/* 主題切換 */}
               <AnimatedThemeToggler />
               {/* 用戶資訊 - 優先使用 VPS auth 狀態 */}
@@ -2209,7 +2239,7 @@ function ChatSection({
                         }}
                       />
                     )}
-                    <span style={{ fontSize: 13, color: 'var(--gray-600)' }}>
+                    <span className="user-name" style={{ fontSize: 13, color: 'var(--gray-600)' }}>
                       {auth.user?.name || sessionInfo?.user?.name || auth.user?.email?.split('@')[0] || sessionInfo?.user?.email?.split('@')[0] || '用戶'}
                     </span>
                     <GlowButton onClick={handleDashboard} variant="outline" size="sm">
@@ -3490,6 +3520,7 @@ function HomeContent() {
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: -15, scale: 0.95 }}
             transition={{ duration: 0.35, ease: smoothEasing }}
+            className="landing-auth-area"
             style={{
               position: 'fixed',
               top: 20,
@@ -3504,7 +3535,7 @@ function HomeContent() {
           <div style={{ width: 80, height: 36 }} />
         ) : auth.isAuthenticated && auth.user ? (
           // 已登入 - 顯示用戶資訊
-          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          <div className="landing-user-info" style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
             {auth.user.avatarUrl && (
               <img
                 src={auth.user.avatarUrl}
@@ -3517,7 +3548,7 @@ function HomeContent() {
                 }}
               />
             )}
-            <span style={{ fontSize: 14, color: 'var(--gray-600)' }}>
+            <span className="landing-user-name" style={{ fontSize: 14, color: 'var(--gray-600)' }}>
               {auth.user.name || auth.user.email?.split('@')[0] || '用戶'}
             </span>
             <GlowButton onClick={handleDashboard} variant="outline" size="sm">

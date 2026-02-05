@@ -17,6 +17,25 @@ Tellcraft 是一個 AI 驅動的自動化開發平台。用戶只需描述需求
 - **Server Actions**：30+ 已實作
 - **詳情**：[`.clarify/overview.md`](.clarify/overview.md)
 
+### 手機版響應式修復（2026-02-05）
+
+修復手機版 Header 爆版（溢出）問題：
+
+| 修復項目 | 說明 |
+|----------|------|
+| **Chat Header 響應式** | 平板以下（< 900px）隱藏步驟指示器文字，改為簡化進度條 |
+| **手機版進一步簡化** | < 640px 時隱藏「返回」文字、Logo、用戶名稱 |
+| **Landing Page 右上角** | 手機版隱藏用戶名稱，縮小間距 |
+| **Dashboard Sidebar** | 手機版改為抽屜式，新增漢堡選單按鈕 |
+
+**修改檔案**：
+- `app/page.tsx` - Chat Header 添加 className、手機版簡化進度指示器
+- `app/globals.css` - 添加 media queries 響應式樣式
+- `app/components/dashboard/DashboardShell.tsx` - 手機版漢堡選單
+- `app/components/dashboard/Sidebar.tsx` - 支援 className prop
+
+---
+
 ### 效能優化（2026-01-31）
 
 **第二輪：Server Component 重構**

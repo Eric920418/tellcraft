@@ -11,6 +11,7 @@ interface SidebarProps {
     name?: string
     avatarUrl?: string
   }
+  className?: string
 }
 
 interface NavItem {
@@ -31,7 +32,7 @@ const navItems: NavItem[] = [
   { href: '/dashboard/admin/logs', label: '審計日誌', icon: '≡', adminOnly: true },
 ]
 
-export default function Sidebar({ isAdmin = false, user }: SidebarProps) {
+export default function Sidebar({ isAdmin = false, user, className = '' }: SidebarProps) {
   const pathname = usePathname()
 
   const filteredItems = navItems.filter(item => !item.adminOnly || isAdmin)
@@ -42,6 +43,7 @@ export default function Sidebar({ isAdmin = false, user }: SidebarProps) {
 
   return (
     <aside
+      className={`dashboard-sidebar ${className}`}
       style={{
         width: 240,
         height: '100vh',
