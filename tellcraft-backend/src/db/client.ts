@@ -222,6 +222,14 @@ export async function getBddSession(sessionId: string) {
     actions_yml_content: string | null
     isa_config_content: string | null
     validation_result: unknown | null
+    // UIUX 欄位
+    uiux_template_id: string | null
+    design_variants: unknown[] | null
+    selected_variant_ids: string[] | null
+    final_design_system: unknown | null
+    generated_pages: unknown[] | null
+    generated_components: unknown[] | null
+    generated_styles: string | null
   }>(
     `SELECT * FROM bdd_sessions WHERE id = $1`,
     [sessionId]
@@ -274,6 +282,14 @@ export async function updateBddSession(
     actionsYmlContent: 'actions_yml_content',
     isaConfigContent: 'isa_config_content',
     validationResult: 'validation_result',
+    // UIUX 欄位映射
+    uiuxTemplateId: 'uiux_template_id',
+    designVariants: 'design_variants',
+    selectedVariantIds: 'selected_variant_ids',
+    finalDesignSystem: 'final_design_system',
+    generatedPages: 'generated_pages',
+    generatedComponents: 'generated_components',
+    generatedStyles: 'generated_styles',
   }
 
   for (const [key, value] of Object.entries(updates)) {

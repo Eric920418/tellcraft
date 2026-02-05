@@ -7,12 +7,21 @@ import remarkGfm from 'remark-gfm'
 import SplitLayout from './SplitLayout'
 import PreviewPanel from './PreviewPanel'
 import TemplatePicker from './TemplatePicker'
+import VariantPicker, { DesignVariant } from './VariantPicker'
+import CodePreview from './CodePreview'
 import type { Template, TemplateCardData } from '../../lib/templates'
 import { getTemplateById } from '../../actions/templates'
 
 // ============================================================
 // UiuxChatSection - UIUX 階段的分屏聊天介面
 // ============================================================
+
+// 生成的組件類型
+interface GeneratedComponent {
+  path: string
+  content: string
+  description: string
+}
 
 // 擴展的訊息介面
 export interface UiuxMessage {
@@ -24,12 +33,20 @@ export interface UiuxMessage {
   progress?: { current: number; total: number; step: string }
   layoutHint?: 'default' | 'split' | 'full_preview'
   richContent?: {
-    type: 'template_picker' | 'design_preview' | 'code_preview'
+    type: 'template_picker' | 'design_preview' | 'code_preview' | 'variant_picker'
     data: {
       templates?: TemplateCardData[]
       recommendedIds?: string[]
       previewUrl?: string
       selectedTemplateId?: string
+      // 變體選擇器數據
+      variants?: DesignVariant[]
+      selectedIds?: string[]
+      // 程式碼預覽數據
+      pages?: GeneratedComponent[]
+      components?: GeneratedComponent[]
+      styles?: string
+      tailwindConfig?: string
     }
   }
 }
@@ -63,7 +80,10 @@ export default function UiuxChatSection({
 
   // 檢測是否應該使用分屏佈局
   const shouldUseSplitLayout = messages.some(m =>
-    m.layoutHint === 'split' || m.richContent?.type === 'template_picker'
+    m.layoutHint === 'split' ||
+    m.richContent?.type === 'template_picker' ||
+    m.richContent?.type === 'variant_picker' ||
+    m.richContent?.type === 'code_preview'
   )
 
   // 滾動到底部
@@ -100,6 +120,14 @@ export default function UiuxChatSection({
     // 只預覽，不發送訊息
   }, [])
 
+  // 處理變體選擇
+  const handleVariantSelect = useCallback((selectedIds: string[]) => {
+    if (selectedIds.length === 1) {
+      onSendMessage(`選擇變體 ${selectedIds[0]}`)
+    } else {
+      onSendMessage(`合併 ${selectedIds.join('+')}`)
+    }
+  }, [onSendMessage])
 
   // 處理發送訊息
   const handleSend = useCallback(() => {
@@ -243,6 +271,81 @@ export default function UiuxChatSection({
                 />
               </motion.div>
             )}
+
+            {/* Rich Content: Variant Picker */}
+            {message.richContent?.type === 'variant_picker' && message.richContent.data?.variants && (
+              <motion.div
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 0.2 }}
+                style={{
+                  marginTop: 12,
+                  width: '100%',
+                }}
+              >
+                <VariantPicker
+                  variants={message.richContent.data.variants}
+                  onSelect={handleVariantSelect}
+                  selectedIds={message.richContent.data.selectedIds}
+                  multiSelect={true}
+                  maxSelections={2}
+                />
+              </motion.div>
+            )}
+
+            {/* Rich Content: Code Preview (在聊天中顯示摘要) */}
+            {message.richContent?.type === 'code_preview' && (
+              <motion.div
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 0.2 }}
+                style={{
+                  marginTop: 12,
+                  width: '100%',
+                  padding: 16,
+                  background: 'var(--gray-50)',
+                  borderRadius: 8,
+                  border: '1px solid var(--border-color)',
+                }}
+              >
+                <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 8 }}>
+                  生成的程式碼
+                </div>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                  {message.richContent.data.pages?.map((page) => (
+                    <span
+                      key={page.path}
+                      style={{
+                        padding: '4px 8px',
+                        fontSize: 11,
+                        background: 'var(--white)',
+                        border: '1px solid var(--border-color)',
+                        borderRadius: 4,
+                      }}
+                    >
+                      {page.path}
+                    </span>
+                  ))}
+                  {message.richContent.data.components?.map((comp) => (
+                    <span
+                      key={comp.path}
+                      style={{
+                        padding: '4px 8px',
+                        fontSize: 11,
+                        background: 'var(--white)',
+                        border: '1px solid var(--border-color)',
+                        borderRadius: 4,
+                      }}
+                    >
+                      {comp.path}
+                    </span>
+                  ))}
+                </div>
+                <div style={{ fontSize: 11, color: 'var(--gray-500)', marginTop: 8 }}>
+                  在右側預覽面板查看完整程式碼
+                </div>
+              </motion.div>
+            )}
           </motion.div>
         ))}
 
@@ -365,58 +468,74 @@ export default function UiuxChatSection({
     </div>
   )
 
+  // 檢測是否有程式碼預覽
+  const codePreviewMessage = messages.find(m => m.richContent?.type === 'code_preview')
+  const hasCodePreview = !!codePreviewMessage?.richContent?.data
+
   // 預覽面板內容
   const previewPanel = (
     <div style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
-      <PreviewPanel
-        templateSlug={selectedTemplate?.slug}
-        previewImageUrl={selectedTemplate?.previewImageUrl}
-        templateName={selectedTemplate?.name}
-        isLoading={selectedTemplateId !== null && !selectedTemplate}
-      />
+      {/* 如果有程式碼預覽，顯示 CodePreview */}
+      {hasCodePreview && codePreviewMessage?.richContent?.data ? (
+        <CodePreview
+          pages={codePreviewMessage.richContent.data.pages}
+          components={codePreviewMessage.richContent.data.components}
+          styles={codePreviewMessage.richContent.data.styles}
+          tailwindConfig={codePreviewMessage.richContent.data.tailwindConfig}
+        />
+      ) : (
+        <>
+          <PreviewPanel
+            templateSlug={selectedTemplate?.slug}
+            previewImageUrl={selectedTemplate?.previewImageUrl}
+            templateName={selectedTemplate?.name}
+            isLoading={selectedTemplateId !== null && !selectedTemplate}
+          />
 
-      {/* 底部操作按鈕 */}
-      {selectedTemplate && (
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          style={{
-            padding: 16,
-            borderTop: '1px solid var(--border-color)',
-            background: 'var(--white)',
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'center',
-          }}
-        >
-          <div>
-            <div style={{ fontSize: 14, fontWeight: 500 }}>
-              {selectedTemplate.name}
-            </div>
-            <div style={{ fontSize: 12, color: 'var(--gray-500)' }}>
-              {selectedTemplate.description.substring(0, 50)}...
-            </div>
-          </div>
-          <div style={{ display: 'flex', gap: 8 }}>
-            <motion.button
-              whileHover={{ scale: 1.02 }}
-              whileTap={{ scale: 0.98 }}
-              onClick={() => onSendMessage('確認使用這個模板')}
+          {/* 底部操作按鈕 */}
+          {selectedTemplate && (
+            <motion.div
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
               style={{
-                padding: '8px 16px',
-                fontSize: 13,
-                fontWeight: 500,
-                background: 'var(--black)',
-                color: 'var(--white)',
-                border: 'none',
-                borderRadius: 6,
-                cursor: 'pointer',
+                padding: 16,
+                borderTop: '1px solid var(--border-color)',
+                background: 'var(--white)',
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
               }}
             >
-              確認使用
-            </motion.button>
-          </div>
-        </motion.div>
+              <div>
+                <div style={{ fontSize: 14, fontWeight: 500 }}>
+                  {selectedTemplate.name}
+                </div>
+                <div style={{ fontSize: 12, color: 'var(--gray-500)' }}>
+                  {selectedTemplate.description.substring(0, 50)}...
+                </div>
+              </div>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <motion.button
+                  whileHover={{ scale: 1.02 }}
+                  whileTap={{ scale: 0.98 }}
+                  onClick={() => onSendMessage('確認使用這個模板')}
+                  style={{
+                    padding: '8px 16px',
+                    fontSize: 13,
+                    fontWeight: 500,
+                    background: 'var(--black)',
+                    color: 'var(--white)',
+                    border: 'none',
+                    borderRadius: 6,
+                    cursor: 'pointer',
+                  }}
+                >
+                  確認使用
+                </motion.button>
+              </div>
+            </motion.div>
+          )}
+        </>
       )}
     </div>
   )

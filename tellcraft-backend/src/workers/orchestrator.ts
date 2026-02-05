@@ -18,6 +18,15 @@ import {
 import { runPrdDiscovery } from '../services/prd-discovery'
 import { runFormulation, fixMultipleFeatures, GeneratedFeature, FeatureFixInput } from '../services/formulation'
 import { runSpecDiscovery, specIssuesToClarifyItems, SpecIssue } from '../services/spec-discovery'
+import {
+  generateDesignVariants,
+  synthesizeVariants,
+  generateAllCode,
+  buildDesignBrief,
+  generateTailwindConfig,
+  DesignVariant,
+  TemplateData,
+} from '../services/uiux-generation'
 
 // ============================================================
 // 類型定義
@@ -54,6 +63,9 @@ interface FlowState {
   specRound?: number           // Spec Discovery 輪數
   specTotalQuestions?: number  // Spec Discovery 累計問題數
   specIssues?: SpecIssue[]     // 當前輪次發現的問題（用於修復）
+  // UIUX 專用
+  uiuxTemplateId?: string      // 用戶選擇的模板 ID
+  uiuxVariants?: DesignVariant[] // 生成的 5 個設計變體
 }
 
 // PRD Discovery 限制
@@ -204,6 +216,27 @@ async function handleContinueFlow(
   if (!state) {
     console.log('[Orchestrator] 沒有找到流程狀態，可能是新對話')
     return
+  }
+
+  // 特殊處理：UIUX 階段的訊息（不需要 waitingForReply）
+  if (state.phase === 'completed' || state.phase === 'uiux_template_selection') {
+    // 檢查是否是模板選擇訊息
+    if (message.includes('我選擇') && message.includes('模板')) {
+      await handleTemplateSelection(conversationId, state, message, redis, io)
+      return
+    }
+
+    // 檢查是否是變體選擇訊息
+    if (message.includes('選擇變體') || message.includes('合併') || message.match(/選擇\s*[A-E]/i)) {
+      await handleVariantSelection(conversationId, state, message, redis, io)
+      return
+    }
+
+    // 檢查是否是確認使用模板
+    if (message.includes('確認使用')) {
+      await handleConfirmTemplate(conversationId, state, redis, io)
+      return
+    }
   }
 
   if (!state.waitingForReply) {
@@ -1314,4 +1347,397 @@ async function completeSpecPhase(
   await saveFlowState(redis, conversationId, state)
 
   console.log('[Orchestrator] Spec 階段完成，規格最終完成')
+}
+
+// ============================================================
+// UIUX 處理函數
+// ============================================================
+
+/**
+ * 處理模板選擇
+ * 當用戶選擇模板後，生成 5 個設計變體
+ */
+async function handleTemplateSelection(
+  conversationId: string,
+  state: FlowState,
+  message: string,
+  redis: Redis,
+  io: SocketIOServer
+) {
+  // 從訊息中提取模板 ID
+  // 訊息格式：「我選擇「xxx」這個模板」
+  const templateMatch = message.match(/我選擇「([^」]+)」/)
+  if (!templateMatch) {
+    await sendMessage(conversationId, io, {
+      content: '無法識別您選擇的模板，請重新選擇。',
+      stage: 'error',
+    })
+    return
+  }
+
+  const templateIdOrName = templateMatch[1]
+  console.log(`[Orchestrator] 用戶選擇模板: ${templateIdOrName}`)
+
+  // 查詢模板
+  const templateResult = await db.queryOne<{
+    id: string
+    name: string
+    slug: string
+    category: string
+    description: string
+    design_defaults: unknown
+    page_structure: unknown
+  }>(
+    `SELECT id, name, slug, category, description, design_defaults, page_structure
+     FROM templates
+     WHERE id = $1 OR slug = $1 OR name = $1`,
+    [templateIdOrName]
+  )
+
+  if (!templateResult) {
+    await sendMessage(conversationId, io, {
+      content: '找不到該模板，請重新選擇。',
+      stage: 'error',
+    })
+    return
+  }
+
+  const template: TemplateData = {
+    id: templateResult.id,
+    name: templateResult.name,
+    slug: templateResult.slug,
+    category: templateResult.category,
+    description: templateResult.description,
+    designDefaults: templateResult.design_defaults as TemplateData['designDefaults'],
+    pageStructure: templateResult.page_structure as TemplateData['pageStructure'],
+  }
+
+  // 取得 BDD Session
+  if (!state.sessionId) {
+    console.error('[Orchestrator] 缺少 sessionId')
+    return
+  }
+
+  const session = await getBddSession({ sessionId: state.sessionId })
+  if (!session.success || !session.data) {
+    console.error('[Orchestrator] 無法取得 BDD Session')
+    return
+  }
+
+  // 構建 BDD 規格摘要
+  const bddSpec = session.data.featuresContent
+    ? session.data.featuresContent.map(f => `- ${f.name}`).join('\n')
+    : ''
+
+  // 發送生成中訊息
+  await sendMessage(conversationId, io, {
+    content: `很好！您選擇了「${template.name}」模板。\n\n正在為您生成 5 個設計變體...`,
+    stage: 'uiux_variants_generating',
+    progress: { current: 1, total: 3, step: '生成設計變體' },
+  })
+
+  // 更新狀態
+  state.phase = 'uiux_generating_variants'
+  state.uiuxTemplateId = template.id
+  await saveFlowState(redis, conversationId, state)
+
+  // 更新 BDD Session
+  await updateBddSession({
+    sessionId: state.sessionId,
+    updates: {
+      uiuxTemplateId: template.id,
+      currentPhase: 'uiux_generating_variants',
+    },
+  })
+
+  // 生成 5 個設計變體
+  const productType = session.data.projectContext || '通用應用'
+  const variantsResult = await generateDesignVariants(
+    template,
+    bddSpec,
+    productType,
+    { conversationId }
+  )
+
+  if (!variantsResult.success || !variantsResult.variants) {
+    console.error('[Orchestrator] 生成設計變體失敗:', variantsResult.error)
+    await sendMessage(conversationId, io, {
+      content: `生成設計變體時發生錯誤：${variantsResult.error}。請稍後再試。`,
+      stage: 'error',
+    })
+    return
+  }
+
+  const variants = variantsResult.variants
+  console.log(`[Orchestrator] 成功生成 ${variants.length} 個設計變體`)
+
+  // 保存變體到 BDD Session
+  await updateBddSession({
+    sessionId: state.sessionId,
+    updates: {
+      designVariants: variants,
+      currentPhase: 'uiux_variant_selection',
+    },
+  })
+
+  // 更新狀態
+  state.phase = 'uiux_variant_selection'
+  state.uiuxVariants = variants
+  state.waitingForReply = true
+  await saveFlowState(redis, conversationId, state)
+
+  // 構建變體描述
+  const variantDescriptions = variants.map(v =>
+    `**${v.id}. ${v.name}**\n${v.description}\n關鍵特點：${v.keyFeatures.join('、')}`
+  ).join('\n\n')
+
+  // 發送變體選擇訊息
+  await sendMessage(conversationId, io, {
+    content: `設計變體已生成完成！\n\n${variantDescriptions}\n\n請選擇您喜歡的設計方向：\n- 輸入「選擇 A」直接使用某個變體\n- 輸入「合併 A+C」組合多個變體的特點`,
+    stage: 'uiux_variants_ready',
+    layoutHint: 'split',
+    richContent: {
+      type: 'variant_picker' as 'template_picker', // 暫時使用 template_picker 類型，後續擴展
+      data: {
+        variants: variants,
+        selectedIds: [],
+      } as Record<string, unknown>,
+    },
+  })
+}
+
+/**
+ * 處理變體選擇
+ * 用戶選擇或合併變體後，生成最終程式碼
+ */
+async function handleVariantSelection(
+  conversationId: string,
+  state: FlowState,
+  message: string,
+  redis: Redis,
+  io: SocketIOServer
+) {
+  // 解析用戶選擇
+  // 支援格式：「選擇 A」、「選擇變體 A」、「合併 A+C」、「合併 A 和 C」
+  let selectedIds: string[] = []
+
+  const singleMatch = message.match(/選擇\s*變體?\s*([A-E])/i)
+  const mergeMatch = message.match(/合併\s*([A-E])\s*[+和與]\s*([A-E])/i)
+  const multiMergeMatch = message.match(/合併\s*([A-E](?:\s*[+和與,]\s*[A-E])+)/i)
+
+  if (singleMatch) {
+    selectedIds = [singleMatch[1].toUpperCase()]
+  } else if (mergeMatch) {
+    selectedIds = [mergeMatch[1].toUpperCase(), mergeMatch[2].toUpperCase()]
+  } else if (multiMergeMatch) {
+    const ids = multiMergeMatch[1].match(/[A-E]/gi)
+    if (ids) {
+      selectedIds = ids.map(id => id.toUpperCase())
+    }
+  }
+
+  if (selectedIds.length === 0) {
+    await sendMessage(conversationId, io, {
+      content: '無法識別您的選擇。請輸入「選擇 A」或「合併 A+C」格式。',
+      stage: 'error',
+    })
+    return
+  }
+
+  console.log(`[Orchestrator] 用戶選擇變體: ${selectedIds.join(', ')}`)
+
+  // 取得 BDD Session
+  if (!state.sessionId) {
+    console.error('[Orchestrator] 缺少 sessionId')
+    return
+  }
+
+  const session = await getBddSession({ sessionId: state.sessionId })
+  if (!session.success || !session.data) {
+    console.error('[Orchestrator] 無法取得 BDD Session')
+    return
+  }
+
+  // 取得變體
+  const variants = session.data.designVariants || state.uiuxVariants
+  if (!variants || variants.length === 0) {
+    await sendMessage(conversationId, io, {
+      content: '找不到設計變體，請重新選擇模板。',
+      stage: 'error',
+    })
+    return
+  }
+
+  // 驗證選擇的變體 ID
+  const validIds = ['A', 'B', 'C', 'D', 'E']
+  const invalidIds = selectedIds.filter(id => !validIds.includes(id))
+  if (invalidIds.length > 0) {
+    await sendMessage(conversationId, io, {
+      content: `無效的變體 ID: ${invalidIds.join(', ')}。請選擇 A-E 之間的變體。`,
+      stage: 'error',
+    })
+    return
+  }
+
+  // 發送生成中訊息
+  const selectionText = selectedIds.length === 1
+    ? `變體 ${selectedIds[0]}`
+    : `變體 ${selectedIds.join(' + ')}`
+
+  await sendMessage(conversationId, io, {
+    content: `您選擇了${selectionText}。\n\n正在生成程式碼...`,
+    stage: 'uiux_code_generation_start',
+    progress: { current: 2, total: 3, step: '生成程式碼' },
+  })
+
+  // 合併變體生成最終 Design System
+  const finalDesignSystem = synthesizeVariants(selectedIds, variants)
+
+  // 保存到 BDD Session
+  await updateBddSession({
+    sessionId: state.sessionId,
+    updates: {
+      selectedVariantIds: selectedIds,
+      finalDesignSystem: finalDesignSystem,
+      currentPhase: 'uiux_code_generation',
+    },
+  })
+
+  // 更新狀態
+  state.phase = 'uiux_code_generation'
+  state.waitingForReply = false
+  await saveFlowState(redis, conversationId, state)
+
+  // 取得模板資訊
+  let template: TemplateData | null = null
+  if (session.data.uiuxTemplateId) {
+    const templateResult = await db.queryOne<{
+      id: string
+      name: string
+      slug: string
+      category: string
+      description: string
+      design_defaults: unknown
+      page_structure: unknown
+    }>(
+      `SELECT id, name, slug, category, description, design_defaults, page_structure
+       FROM templates WHERE id = $1`,
+      [session.data.uiuxTemplateId]
+    )
+
+    if (templateResult) {
+      template = {
+        id: templateResult.id,
+        name: templateResult.name,
+        slug: templateResult.slug,
+        category: templateResult.category,
+        description: templateResult.description,
+        designDefaults: templateResult.design_defaults as TemplateData['designDefaults'],
+        pageStructure: templateResult.page_structure as TemplateData['pageStructure'],
+      }
+    }
+  }
+
+  if (!template) {
+    // 使用預設模板結構
+    template = {
+      id: 'default',
+      name: 'Default',
+      slug: 'default',
+      category: 'general',
+      description: '預設模板',
+      designDefaults: {},
+      pageStructure: { pages: ['home', 'about'], components: [] },
+    }
+  }
+
+  // 構建 BDD 規格
+  const bddSpec = session.data.featuresContent
+    ? session.data.featuresContent.map(f => f.content).join('\n\n---\n\n')
+    : ''
+
+  // 生成所有程式碼
+  const pages = template.pageStructure.pages || ['home']
+  const codeResult = await generateAllCode(
+    finalDesignSystem,
+    pages,
+    template,
+    bddSpec,
+    { conversationId }
+  )
+
+  if (!codeResult.success) {
+    console.error('[Orchestrator] 程式碼生成失敗:', codeResult.error)
+    await sendMessage(conversationId, io, {
+      content: `程式碼生成失敗：${codeResult.error}。請稍後再試。`,
+      stage: 'error',
+    })
+    return
+  }
+
+  // 生成 Tailwind 配置
+  const tailwindConfig = generateTailwindConfig(finalDesignSystem)
+
+  // 保存生成結果
+  await updateBddSession({
+    sessionId: state.sessionId,
+    updates: {
+      generatedPages: codeResult.pages,
+      generatedComponents: codeResult.components,
+      generatedStyles: codeResult.styles,
+      currentPhase: 'uiux_complete',
+    },
+  })
+
+  // 更新狀態
+  state.phase = 'uiux_complete'
+  await saveFlowState(redis, conversationId, state)
+
+  // 發送完成訊息
+  const pageCount = codeResult.pages?.length || 0
+  const componentCount = codeResult.components?.length || 0
+
+  await sendMessage(conversationId, io, {
+    content: `程式碼生成完成！\n\n已生成：\n- ${pageCount} 個頁面\n- ${componentCount} 個組件\n- 全域樣式 (globals.css)\n- Tailwind 配置\n\n您可以在預覽面板查看生成的程式碼。`,
+    stage: 'uiux_generation_complete',
+    progress: { current: 3, total: 3, step: '完成' },
+    layoutHint: 'split',
+    richContent: {
+      type: 'code_preview' as 'template_picker', // 暫時使用 template_picker 類型
+      data: {
+        pages: codeResult.pages,
+        components: codeResult.components,
+        styles: codeResult.styles,
+        tailwindConfig,
+      } as Record<string, unknown>,
+    },
+  })
+
+  console.log(`[Orchestrator] UIUX 程式碼生成完成: ${pageCount} pages, ${componentCount} components`)
+}
+
+/**
+ * 處理確認使用模板
+ * 當用戶確認使用當前預覽的模板時
+ */
+async function handleConfirmTemplate(
+  conversationId: string,
+  state: FlowState,
+  redis: Redis,
+  io: SocketIOServer
+) {
+  // 如果已經有選擇的模板，直接進入變體生成
+  if (state.uiuxTemplateId) {
+    // 發送訊息讓用戶選擇變體
+    await sendMessage(conversationId, io, {
+      content: '請選擇您喜歡的設計方向，或輸入「選擇 A」直接使用該變體。',
+      stage: 'uiux_prompt_variant_selection',
+    })
+    return
+  }
+
+  await sendMessage(conversationId, io, {
+    content: '請先選擇一個模板。',
+    stage: 'uiux_prompt_template_selection',
+  })
 }

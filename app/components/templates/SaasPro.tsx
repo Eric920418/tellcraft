@@ -10,8 +10,8 @@ export default function SaasPro({ containerWidth }: TemplateProps) {
   const isMobile = containerWidth < 768
 
   return (
-    <div className="bg-slate-50 text-slate-900 antialiased min-h-full">
-      <div className="min-h-dvh flex">
+    <div className="bg-slate-50 text-slate-900 antialiased" style={{ minHeight: '100%' }}>
+      <div className="flex" style={{ minHeight: '100%' }}>
         {/* Sidebar */}
         {isDesktop && (
           <aside className="w-72 bg-slate-900 text-white p-6 flex flex-col">

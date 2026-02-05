@@ -10,8 +10,8 @@ export default function EcommerceModern({ containerWidth }: TemplateProps) {
   const isMobile = containerWidth < 768
 
   return (
-    <div className="bg-white text-slate-900 antialiased min-h-full">
-      <div className="min-h-dvh">
+    <div className="bg-white text-slate-900 antialiased" style={{ minHeight: '100%' }}>
+      <div>
         {/* Announcement Bar */}
         <div className="bg-slate-900 text-white text-center py-2 text-sm">
           限時優惠：全館滿 $2000 免運費 | 新會員首購 9 折

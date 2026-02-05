@@ -1979,7 +1979,7 @@ ${bddSpec ? `## BDD 規格\n${bddSpec}` : ''}
   const response = await callClaude(
     UIUX_SYSTEM_PROMPT,
     [{ role: 'user', content: prompt }],
-    { maxTokens: 4096, temperature: 0.7 },
+    { maxTokens: 4096, temperature: 0.2 }, // 降低 temperature 確保風格一致性
     trackingContext
   )
 
@@ -2035,7 +2035,7 @@ ${componentType}
   const response = await callClaude(
     UIUX_SYSTEM_PROMPT,
     [{ role: 'user', content: prompt }],
-    { maxTokens: 2048, temperature: 0.7 },
+    { maxTokens: 2048, temperature: 0.2 }, // 降低 temperature 確保風格一致性
     trackingContext
   )
 
@@ -2094,7 +2094,7 @@ export async function generateLayoutComponent(
   const response = await callClaude(
     UIUX_SYSTEM_PROMPT,
     [{ role: 'user', content: prompt }],
-    { maxTokens: 2048, temperature: 0.7 },
+    { maxTokens: 2048, temperature: 0.2 }, // 降低 temperature 確保風格一致性
     trackingContext
   )
 
@@ -2144,7 +2144,7 @@ export async function generateGlobalStyles(
   const response = await callClaude(
     UIUX_SYSTEM_PROMPT,
     [{ role: 'user', content: prompt }],
-    { maxTokens: 2048, temperature: 0.5 },
+    { maxTokens: 2048, temperature: 0.2 }, // 降低 temperature 確保風格一致性
     trackingContext
   )
 

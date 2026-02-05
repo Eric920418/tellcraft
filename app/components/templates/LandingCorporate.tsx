@@ -9,8 +9,8 @@ export default function LandingCorporate({ containerWidth }: TemplateProps) {
   const isTablet = containerWidth >= 768
 
   return (
-    <div className="bg-white text-slate-900 antialiased min-h-full">
-      <div className="min-h-dvh">
+    <div className="bg-white text-slate-900 antialiased" style={{ minHeight: '100%' }}>
+      <div>
         {/* Navigation */}
         <nav className="bg-white border-b border-slate-200">
           <div className="max-w-7xl mx-auto px-6 py-4 flex items-center justify-between">

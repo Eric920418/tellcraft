@@ -35,31 +35,32 @@ export default function PreviewPanel({
   error,
 }: PreviewPanelProps) {
   const [device, setDevice] = useState<DeviceType>('desktop')
-  const [zoom, setZoom] = useState(1)
+  const [containerSize, setContainerSize] = useState({ width: 0, height: 0 })
   const containerRef = useRef<HTMLDivElement>(null)
 
   const deviceWidth = getDeviceWidth(device)
+  // 設備對應的視口高度（模擬實際設備）
+  const deviceHeight = device === 'mobile' ? 812 : device === 'tablet' ? 1024 : 900
 
-  // 計算適合的縮放比例
+  // 監聽容器大小
   useEffect(() => {
-    const calculateZoom = () => {
+    const updateSize = () => {
       if (!containerRef.current) return
-
-      const containerWidth = containerRef.current.clientWidth - 48  // padding
-      const containerHeight = containerRef.current.clientHeight - 48
-      const deviceHeight = deviceWidth * 0.75  // 假設 4:3 比例
-
-      const scaleX = containerWidth / deviceWidth
-      const scaleY = containerHeight / deviceHeight
-      const scale = Math.min(scaleX, scaleY, 1)  // 最大縮放 1
-
-      setZoom(scale)
+      setContainerSize({
+        width: containerRef.current.clientWidth - 48,  // padding
+        height: containerRef.current.clientHeight - 48,
+      })
     }
 
-    calculateZoom()
-    window.addEventListener('resize', calculateZoom)
-    return () => window.removeEventListener('resize', calculateZoom)
-  }, [device, deviceWidth])
+    updateSize()
+    window.addEventListener('resize', updateSize)
+    return () => window.removeEventListener('resize', updateSize)
+  }, [])
+
+  // 計算縮放比例，讓預覽框適合容器
+  const scaleX = containerSize.width / deviceWidth
+  const scaleY = containerSize.height / deviceHeight
+  const scale = Math.min(scaleX, scaleY, 1)
 
   // 檢查模板是否支援直接渲染
   const canRenderDirectly = templateSlug && isSupportedTemplate(templateSlug)
@@ -114,8 +115,20 @@ export default function PreviewPanel({
         {/* 中間：設備切換器 */}
         <DeviceSwitcher activeDevice={device} onDeviceChange={setDevice} />
 
-        {/* 右側：空白（保持佈局對稱）*/}
-        <div style={{ width: 80 }} />
+        {/* 右側：縮放比例 */}
+        <div style={{ width: 80, textAlign: 'right' }}>
+          {scale < 1 && (
+            <span
+              style={{
+                fontSize: 11,
+                color: 'var(--gray-400)',
+                fontFamily: 'var(--font-mono)',
+              }}
+            >
+              {Math.round(scale * 100)}%
+            </span>
+          )}
+        </div>
       </div>
 
       {/* 預覽區域 */}
@@ -188,27 +201,27 @@ export default function PreviewPanel({
           {!isLoading && !error && TemplateComponent && (
             <motion.div
               key={`template-${templateSlug}-${device}`}
-              initial={{ opacity: 0, scale: 0.95 }}
-              animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.95 }}
-              transition={{ duration: 0.3 }}
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: 0.2 }}
               style={{
-                width: deviceWidth,
-                height: deviceWidth * 0.75,
-                transform: `scale(${zoom})`,
-                transformOrigin: 'center center',
-                background: 'var(--white)',
+                // 外層：縮放容器
+                width: deviceWidth * scale,
+                height: deviceHeight * scale,
+                overflow: 'hidden',
                 borderRadius: 8,
                 boxShadow: '0 8px 32px rgba(0,0,0,0.12), 0 2px 8px rgba(0,0,0,0.08)',
-                overflow: 'hidden',
-                position: 'relative',
+                background: 'var(--white)',
               }}
             >
-              {/* 直接渲染模板組件 */}
+              {/* 內層：實際設備尺寸，使用 transform 縮放 */}
               <div
                 style={{
-                  width: '100%',
-                  height: '100%',
+                  width: deviceWidth,
+                  height: deviceHeight,
+                  transform: `scale(${scale})`,
+                  transformOrigin: 'top left',
                   overflow: 'auto',
                 }}
               >
@@ -225,9 +238,8 @@ export default function PreviewPanel({
               exit={{ opacity: 0, scale: 0.95 }}
               transition={{ duration: 0.3 }}
               style={{
-                width: deviceWidth,
-                transform: `scale(${zoom})`,
-                transformOrigin: 'center center',
+                maxWidth: '100%',
+                maxHeight: '100%',
                 borderRadius: 8,
                 boxShadow: '0 8px 32px rgba(0,0,0,0.12)',
                 overflow: 'hidden',
@@ -237,8 +249,8 @@ export default function PreviewPanel({
                 src={previewImageUrl}
                 alt={templateName || '預覽'}
                 style={{
-                  width: '100%',
-                  height: 'auto',
+                  maxWidth: '100%',
+                  maxHeight: '100%',
                   display: 'block',
                 }}
               />

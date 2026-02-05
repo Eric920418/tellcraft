@@ -37,6 +37,69 @@ export interface BddSession {
     errors: string[]
     warnings: string[]
   } | null
+  // UIUX 生成相關欄位
+  uiuxTemplateId: string | null
+  designVariants: DesignVariant[] | null
+  selectedVariantIds: string[] | null
+  finalDesignSystem: DesignSystem | null
+  generatedPages: GeneratedComponent[] | null
+  generatedComponents: GeneratedComponent[] | null
+  generatedStyles: string | null
+}
+
+// UIUX 設計系統類型
+export interface DesignSystem {
+  cssVariables: string
+  tailwindExtend: {
+    colors?: Record<string, string>
+    spacing?: Record<string, string>
+    borderRadius?: Record<string, string>
+    fontFamily?: Record<string, string[]>
+  }
+  typography: {
+    fontFamily: string
+    scale: Record<string, string>
+  }
+  colorPalette: {
+    primary: string
+    secondary: string
+    accent: string
+    background: string
+    foreground: string
+    muted: string
+    border: string
+    destructive?: string
+    success?: string
+  }
+  spacing: {
+    unit: number
+    scale: Record<string, string>
+  }
+  borderRadius: {
+    none: string
+    sm: string
+    md: string
+    lg: string
+    full: string
+  }
+}
+
+// 設計變體類型
+export interface DesignVariant {
+  id: 'A' | 'B' | 'C' | 'D' | 'E'
+  name: string
+  axis: 'hierarchy' | 'layout' | 'density' | 'interaction' | 'expressive'
+  description: string
+  designSystem: DesignSystem
+  previewDescription: string
+  keyFeatures: string[]
+}
+
+// 生成的組件類型
+export interface GeneratedComponent {
+  path: string
+  content: string
+  description: string
 }
 
 export interface FeatureFile {
@@ -102,6 +165,14 @@ export async function getBddSession(input: {
       actionsYmlContent: session.actions_yml_content,
       isaConfigContent: session.isa_config_content,
       validationResult: session.validation_result as BddSession['validationResult'],
+      // UIUX 欄位
+      uiuxTemplateId: session.uiux_template_id || null,
+      designVariants: (session.design_variants || null) as DesignVariant[] | null,
+      selectedVariantIds: (session.selected_variant_ids || null) as string[] | null,
+      finalDesignSystem: (session.final_design_system || null) as DesignSystem | null,
+      generatedPages: (session.generated_pages || null) as GeneratedComponent[] | null,
+      generatedComponents: (session.generated_components || null) as GeneratedComponent[] | null,
+      generatedStyles: session.generated_styles || null,
     }
 
     return { success: true, data }

@@ -11,8 +11,8 @@ export default function SaasMinimal({ containerWidth }: TemplateProps) {
   const isMobile = containerWidth < 768
 
   return (
-    <div className="bg-white text-slate-900 antialiased min-h-full">
-      <div className="min-h-dvh flex">
+    <div className="bg-white text-slate-900 antialiased" style={{ minHeight: '100%' }}>
+      <div className="flex" style={{ minHeight: '100%' }}>
         {/* Sidebar - 隱藏在手機上 */}
         {isTablet && (
           <aside className="w-64 border-r border-slate-200 p-6">
