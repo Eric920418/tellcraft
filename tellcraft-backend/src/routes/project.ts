@@ -274,6 +274,156 @@ router.patch('/:id', requireAuth, async (req, res) => {
 })
 
 /**
+ * GET /api/project/:id/detail
+ * 取得專案完整詳情（包含對話、部署、生成記錄）
+ */
+router.get('/:id/detail', requireAuth, async (req, res) => {
+  try {
+    const { id } = req.params
+    const userId = req.user!.id
+
+    const project = await db.queryOne<{
+      id: string
+      name: string
+      description: string | null
+      status: string
+      vercel_url: string | null
+      custom_domain: string | null
+      domain_status: string | null
+      created_at: string
+      updated_at: string
+      user_id: string
+    }>(
+      'SELECT * FROM projects WHERE id = $1',
+      [id]
+    )
+
+    if (!project) {
+      return res.status(404).json({ error: 'Project not found' })
+    }
+
+    if (project.user_id !== userId) {
+      return res.status(403).json({ error: 'Access denied' })
+    }
+
+    // 取得對話
+    const conversations = await db.queryMany<{
+      id: string
+      messages: unknown[]
+      spec_complete: boolean
+      created_at: string
+      updated_at: string
+    }>(
+      'SELECT id, messages, spec_complete, created_at, updated_at FROM conversations WHERE project_id = $1 ORDER BY updated_at DESC',
+      [id]
+    )
+
+    // 取得部署
+    const deployments = await db.queryMany<{
+      id: string
+      url: string | null
+      status: string
+      created_at: string
+    }>(
+      'SELECT id, url, status, created_at FROM deployments WHERE project_id = $1 ORDER BY created_at DESC LIMIT 5',
+      [id]
+    )
+
+    // 取得生成記錄
+    const generations = await db.queryMany<{
+      id: string
+      status: string
+      attempt_count: number
+      created_at: string
+    }>(
+      'SELECT id, status, attempt_count, created_at FROM generations WHERE project_id = $1 ORDER BY created_at DESC LIMIT 5',
+      [id]
+    )
+
+    res.json({
+      project: {
+        id: project.id,
+        name: project.name,
+        description: project.description,
+        status: project.status,
+        vercelUrl: project.vercel_url,
+        customDomain: project.custom_domain,
+        domainStatus: project.domain_status,
+        createdAt: project.created_at,
+        updatedAt: project.updated_at,
+      },
+      conversations: conversations.map(c => ({
+        id: c.id,
+        messages: c.messages,
+        specComplete: c.spec_complete,
+        createdAt: c.created_at,
+        updatedAt: c.updated_at,
+      })),
+      deployments: deployments.map(d => ({
+        id: d.id,
+        url: d.url,
+        status: d.status,
+        createdAt: d.created_at,
+      })),
+      generations: generations.map(g => ({
+        id: g.id,
+        status: g.status,
+        attemptCount: g.attempt_count,
+        createdAt: g.created_at,
+      })),
+    })
+  } catch (error) {
+    console.error('[Project] 取得專案詳情失敗:', error)
+    res.status(500).json({ error: 'Failed to get project detail' })
+  }
+})
+
+/**
+ * GET /api/project/:id/latest-generation
+ * 取得專案最新的生成記錄
+ */
+router.get('/:id/latest-generation', requireAuth, async (req, res) => {
+  try {
+    const { id } = req.params
+    const userId = req.user!.id
+
+    // 驗證專案擁有權
+    const project = await db.queryOne<{ user_id: string }>(
+      'SELECT user_id FROM projects WHERE id = $1',
+      [id]
+    )
+
+    if (!project || project.user_id !== userId) {
+      return res.status(404).json({ error: 'Project not found' })
+    }
+
+    const generation = await db.queryOne<{
+      id: string
+      generated_code_url: string | null
+      status: string
+      attempt_count: number
+      created_at: string
+    }>(
+      'SELECT id, generated_code_url, status, attempt_count, created_at FROM generations WHERE project_id = $1 ORDER BY created_at DESC LIMIT 1',
+      [id]
+    )
+
+    res.json({
+      generation: generation ? {
+        id: generation.id,
+        generatedCodeUrl: generation.generated_code_url,
+        status: generation.status,
+        attemptCount: generation.attempt_count,
+        createdAt: generation.created_at,
+      } : null
+    })
+  } catch (error) {
+    console.error('[Project] 取得最新生成記錄失敗:', error)
+    res.status(500).json({ error: 'Failed to get latest generation' })
+  }
+})
+
+/**
  * DELETE /api/project/:id
  * 刪除專案
  */

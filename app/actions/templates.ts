@@ -1,6 +1,5 @@
 'use server'
 
-import { db } from '../lib/db'
 import {
   Template,
   TemplateCategory,
@@ -10,6 +9,8 @@ import {
   filterTemplatesByCategory,
   getFeaturedTemplates
 } from '../lib/templates'
+import * as vpsApi from '../lib/vps-api'
+import { getAuthToken } from '../lib/auth'
 
 // ============================================================
 // 類型定義
@@ -22,7 +23,7 @@ interface ActionResult<T = unknown> {
 }
 
 // ============================================================
-// 模板 Actions
+// 模板 Actions（透過 VPS API 存取資料庫）
 // ============================================================
 
 /**
@@ -37,26 +38,14 @@ export async function getTemplates(input?: {
   const { category = 'all', featuredOnly = false } = input || {}
 
   try {
-    // 嘗試從資料庫獲取
-    let query = db
-      .from('templates')
-      .select('*')
-      .eq('is_active', true)
-      .order('sort_order', { ascending: true })
+    const result = await vpsApi.getTemplates({
+      category: category === 'all' ? undefined : category,
+      featuredOnly,
+    })
 
-    if (category !== 'all') {
-      query = query.eq('category', category)
-    }
-
-    if (featuredOnly) {
-      query = query.eq('is_featured', true)
-    }
-
-    const { data, error } = await query
-
-    if (error) {
-      // 資料庫查詢失敗，fallback 到靜態資料
-      console.warn('Failed to fetch templates from DB, using static data:', error.message)
+    if (!result.success || !result.data) {
+      // Fallback 到靜態資料
+      console.warn('[Templates] VPS API 失敗，使用靜態資料:', result.error)
       let templates = INITIAL_TEMPLATES.filter(t => t.isActive)
 
       if (category !== 'all') {
@@ -73,21 +62,22 @@ export async function getTemplates(input?: {
       }
     }
 
-    // 轉換資料庫格式到應用格式
-    const templates: TemplateCardData[] = data.map((row: Record<string, unknown>) => ({
-      id: row.id as string,
-      name: row.name as string,
-      slug: row.slug as string,
-      category: row.category as TemplateCategory,
-      description: row.description as string,
-      thumbnailUrl: row.thumbnail_url as string,
-      tags: row.tags as string[],
-      isFeatured: row.is_featured as boolean
+    // 轉換為 TemplateCardData
+    const templates: TemplateCardData[] = result.data.templates.map(t => ({
+      id: t.id,
+      name: t.name,
+      slug: t.slug,
+      category: t.category as TemplateCategory,
+      description: t.description,
+      thumbnailUrl: t.thumbnailUrl,
+      tags: t.tags,
+      isFeatured: t.isFeatured
     }))
 
     return { success: true, data: templates }
-  } catch {
-    // Fallback to static data
+  } catch (err) {
+    // Fallback 到靜態資料
+    console.warn('[Templates] 異常，使用靜態資料:', err)
     let templates = INITIAL_TEMPLATES.filter(t => t.isActive)
 
     if (category !== 'all') {
@@ -112,14 +102,9 @@ export async function getTemplateById(
   templateId: string
 ): Promise<ActionResult<Template>> {
   try {
-    // 嘗試從資料庫獲取
-    const { data, error } = await db
-      .from('templates')
-      .select('*')
-      .eq('id', templateId)
-      .single()
+    const result = await vpsApi.getTemplateById({ templateId })
 
-    if (error) {
+    if (!result.success || !result.data) {
       // Fallback 到靜態資料
       const staticTemplate = INITIAL_TEMPLATES.find(t => t.id === templateId)
       if (staticTemplate) {
@@ -128,21 +113,21 @@ export async function getTemplateById(
       return { success: false, error: '模板不存在' }
     }
 
-    // 轉換資料庫格式
+    const t = result.data.template
     const template: Template = {
-      id: data.id,
-      name: data.name,
-      slug: data.slug,
-      category: data.category,
-      description: data.description,
-      thumbnailUrl: data.thumbnail_url,
-      previewImageUrl: data.preview_image_url,
-      tags: data.tags,
-      designDefaults: data.design_defaults,
-      pageStructure: data.page_structure,
-      isActive: data.is_active,
-      isFeatured: data.is_featured,
-      sortOrder: data.sort_order
+      id: t.id,
+      name: t.name,
+      slug: t.slug,
+      category: t.category as TemplateCategory,
+      description: t.description,
+      thumbnailUrl: t.thumbnailUrl,
+      previewImageUrl: t.previewImageUrl || t.thumbnailUrl, // fallback to thumbnail
+      tags: t.tags,
+      designDefaults: t.designDefaults as Template['designDefaults'],
+      pageStructure: t.pageStructure as Template['pageStructure'],
+      isActive: t.isActive,
+      isFeatured: t.isFeatured,
+      sortOrder: t.sortOrder
     }
 
     return { success: true, data: template }
@@ -163,13 +148,9 @@ export async function getTemplateBySlug(
   slug: string
 ): Promise<ActionResult<Template>> {
   try {
-    const { data, error } = await db
-      .from('templates')
-      .select('*')
-      .eq('slug', slug)
-      .single()
+    const result = await vpsApi.getTemplateBySlug({ slug })
 
-    if (error) {
+    if (!result.success || !result.data) {
       const staticTemplate = INITIAL_TEMPLATES.find(t => t.slug === slug)
       if (staticTemplate) {
         return { success: true, data: staticTemplate }
@@ -177,20 +158,21 @@ export async function getTemplateBySlug(
       return { success: false, error: '模板不存在' }
     }
 
+    const t = result.data.template
     const template: Template = {
-      id: data.id,
-      name: data.name,
-      slug: data.slug,
-      category: data.category,
-      description: data.description,
-      thumbnailUrl: data.thumbnail_url,
-      previewImageUrl: data.preview_image_url,
-      tags: data.tags,
-      designDefaults: data.design_defaults,
-      pageStructure: data.page_structure,
-      isActive: data.is_active,
-      isFeatured: data.is_featured,
-      sortOrder: data.sort_order
+      id: t.id,
+      name: t.name,
+      slug: t.slug,
+      category: t.category as TemplateCategory,
+      description: t.description,
+      thumbnailUrl: t.thumbnailUrl,
+      previewImageUrl: t.previewImageUrl || t.thumbnailUrl, // fallback to thumbnail
+      tags: t.tags,
+      designDefaults: t.designDefaults as Template['designDefaults'],
+      pageStructure: t.pageStructure as Template['pageStructure'],
+      isActive: t.isActive,
+      isFeatured: t.isFeatured,
+      sortOrder: t.sortOrder
     }
 
     return { success: true, data: template }
@@ -252,8 +234,13 @@ export async function getRecommendedTemplates(input: {
     .filter(([, score]) => score > 0)
     .map(([category]) => category as TemplateCategory)
 
-  // 獲取模板
-  let templates = INITIAL_TEMPLATES.filter(t => t.isActive)
+  // 獲取所有模板
+  const result = await getTemplates()
+  if (!result.success || !result.data) {
+    return { success: false, error: result.error || '獲取模板失敗' }
+  }
+
+  let templates = result.data
 
   // 如果有匹配的分類，優先顯示該分類的模板
   if (sortedCategories.length > 0) {
@@ -266,12 +253,12 @@ export async function getRecommendedTemplates(input: {
     templates = [...priorityTemplates, ...otherTemplates]
   } else {
     // 沒有明確匹配，顯示推薦模板
-    templates = getFeaturedTemplates(templates)
+    templates = templates.filter(t => t.isFeatured)
   }
 
   return {
     success: true,
-    data: templates.slice(0, maxResults).map(toTemplateCardData)
+    data: templates.slice(0, maxResults)
   }
 }
 
@@ -281,33 +268,36 @@ export async function getRecommendedTemplates(input: {
  */
 export async function initializeTemplates(): Promise<ActionResult<{ count: number }>> {
   try {
-    // 將靜態模板轉換為資料庫格式
-    const templateRows = INITIAL_TEMPLATES.map(t => ({
+    const token = await getAuthToken()
+
+    if (!token) {
+      return { success: false, error: '未登入' }
+    }
+
+    // 將靜態模板轉換為 API 格式
+    const templates = INITIAL_TEMPLATES.map(t => ({
       id: t.id,
       name: t.name,
       slug: t.slug,
       category: t.category,
       description: t.description,
-      thumbnail_url: t.thumbnailUrl,
-      preview_image_url: t.previewImageUrl,
+      thumbnailUrl: t.thumbnailUrl,
+      previewImageUrl: t.previewImageUrl,
       tags: t.tags,
-      design_defaults: t.designDefaults,
-      page_structure: t.pageStructure,
-      is_active: t.isActive,
-      is_featured: t.isFeatured,
-      sort_order: t.sortOrder
+      designDefaults: t.designDefaults,
+      pageStructure: t.pageStructure,
+      isActive: t.isActive,
+      isFeatured: t.isFeatured,
+      sortOrder: t.sortOrder
     }))
 
-    // Upsert（避免重複插入）
-    const { error } = await db
-      .from('templates')
-      .upsert(templateRows, { onConflict: 'id' })
+    const result = await vpsApi.initializeTemplates({ token, templates })
 
-    if (error) {
-      return { success: false, error: error.message }
+    if (!result.success) {
+      return { success: false, error: result.error }
     }
 
-    return { success: true, data: { count: templateRows.length } }
+    return { success: true, data: { count: result.data?.count || 0 } }
   } catch (err) {
     return { success: false, error: String(err) }
   }

@@ -5,8 +5,17 @@
  * 取代原有的 Inngest 觸發機制
  */
 
-// API 基礎 URL - 通過 Vercel API Route 代理，避免 Mixed Content 問題
-const API_BASE = '/api/vps'
+// API 基礎 URL
+// - 伺服器端（Server Actions/Components）：直接調用 VPS API
+// - 客戶端（瀏覽器）：通過 Vercel API Route 代理避免 CORS
+function getApiBase(): string {
+  // 客戶端: 通過 /api/vps 代理
+  if (typeof window !== 'undefined') {
+    return '/api/vps'
+  }
+  // 伺服器端: 直連 VPS API
+  return process.env.VPS_API_URL || 'http://54.238.4.117:8080'
+}
 
 // ============================================================
 // 類型定義
@@ -35,8 +44,14 @@ async function apiRequest<T>(
   endpoint: string,
   options: RequestInit = {}
 ): Promise<ApiResponse<T>> {
+  const baseUrl = getApiBase()
+  const fullUrl = `${baseUrl}${endpoint}`
+
+  // Debug log
+  console.log(`[VPS API] ${options.method || 'GET'} ${fullUrl} (base: ${baseUrl})`)
+
   try {
-    const response = await fetch(`${API_BASE}${endpoint}`, {
+    const response = await fetch(fullUrl, {
       ...options,
       headers: {
         'Content-Type': 'application/json',
@@ -673,6 +688,82 @@ export async function listAllConversations(input: {
 }
 
 // ============================================================
+// Templates API
+// ============================================================
+
+interface TemplateData {
+  id: string
+  name: string
+  slug: string
+  category: string
+  description: string
+  thumbnailUrl: string
+  previewImageUrl?: string | null
+  tags: string[]
+  designDefaults?: unknown
+  pageStructure?: unknown
+  isActive: boolean
+  isFeatured: boolean
+  sortOrder: number
+}
+
+/**
+ * 獲取模板列表
+ */
+export async function getTemplates(input?: {
+  category?: string
+  featuredOnly?: boolean
+}): Promise<ApiResponse<{ templates: TemplateData[] }>> {
+  const params = new URLSearchParams()
+  if (input?.category) params.set('category', input.category)
+  if (input?.featuredOnly) params.set('featuredOnly', 'true')
+
+  const query = params.toString() ? `?${params.toString()}` : ''
+
+  return apiRequest(`/api/templates${query}`, {
+    method: 'GET',
+  })
+}
+
+/**
+ * 根據 ID 獲取模板
+ */
+export async function getTemplateById(input: {
+  templateId: string
+}): Promise<ApiResponse<{ template: TemplateData }>> {
+  return apiRequest(`/api/templates/${input.templateId}`, {
+    method: 'GET',
+  })
+}
+
+/**
+ * 根據 slug 獲取模板
+ */
+export async function getTemplateBySlug(input: {
+  slug: string
+}): Promise<ApiResponse<{ template: TemplateData }>> {
+  return apiRequest(`/api/templates/slug/${input.slug}`, {
+    method: 'GET',
+  })
+}
+
+/**
+ * 初始化模板資料（管理員專用）
+ */
+export async function initializeTemplates(input: {
+  token: string
+  templates: TemplateData[]
+}): Promise<ApiResponse<{ success: boolean; count: number }>> {
+  return apiRequest('/api/templates/init', {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${input.token}`,
+    },
+    body: JSON.stringify({ templates: input.templates }),
+  })
+}
+
+// ============================================================
 // User API
 // ============================================================
 
@@ -737,6 +828,604 @@ export async function updateProject(input: {
 }
 
 // ============================================================
+// BDD Session API
+// ============================================================
+
+interface ClarifyItem {
+  id: string
+  question: string
+  category: string
+  context?: string
+  suggestions?: string[]
+  answer?: string
+  status: 'pending' | 'answered' | 'skipped'
+  createdAt: string
+  answeredAt?: string
+}
+
+interface BddSession {
+  id: string
+  projectId: string | null
+  conversationId: string
+  taskId: string | null
+  currentPhase: string
+  currentRound: number
+  currentQuestionIndex: number
+  totalDiscovered: number
+  totalResolved: number
+  consecutiveEmptyRounds: number
+  clarifyItems: ClarifyItem[]
+  stagingItems: ClarifyItem[]
+  resolvedItems: ClarifyItem[]
+  originalRequirements: string
+  projectContext: Record<string, unknown>
+  schemaSqlContent: string | null
+  entityMappingContent: string | null
+  featuresContent: string | null
+  actionsYmlContent: string | null
+  isaConfigContent: string | null
+  validationResult: unknown | null
+  createdAt: string
+  updatedAt: string
+}
+
+/**
+ * 創建 BDD Session
+ */
+export async function createBddSession(input: {
+  conversationId: string
+  projectId?: string
+  taskId?: string
+  originalRequirements: string
+  projectContext?: Record<string, unknown>
+  token?: string
+}): Promise<ApiResponse<{ sessionId: string }>> {
+  return apiRequest('/api/bdd/session', {
+    method: 'POST',
+    headers: input.token ? { Authorization: `Bearer ${input.token}` } : {},
+    body: JSON.stringify({
+      conversationId: input.conversationId,
+      projectId: input.projectId,
+      taskId: input.taskId,
+      originalRequirements: input.originalRequirements,
+      projectContext: input.projectContext,
+    }),
+  })
+}
+
+/**
+ * 獲取 BDD Session
+ */
+export async function getBddSession(input: {
+  sessionId?: string
+  conversationId?: string
+  projectId?: string
+  token?: string
+}): Promise<ApiResponse<{ session: BddSession | null }>> {
+  let endpoint: string
+  if (input.sessionId) {
+    endpoint = `/api/bdd/session/${input.sessionId}`
+  } else if (input.conversationId) {
+    endpoint = `/api/bdd/session/by-conversation/${input.conversationId}`
+  } else if (input.projectId) {
+    endpoint = `/api/bdd/session/by-project/${input.projectId}`
+  } else {
+    return { success: false, error: '需要 sessionId、conversationId 或 projectId' }
+  }
+
+  return apiRequest(endpoint, {
+    method: 'GET',
+    headers: input.token ? { Authorization: `Bearer ${input.token}` } : {},
+  })
+}
+
+/**
+ * 更新 BDD Session
+ */
+export async function updateBddSession(input: {
+  sessionId: string
+  updates: Partial<{
+    currentPhase: string
+    currentRound: number
+    currentQuestionIndex: number
+    totalDiscovered: number
+    totalResolved: number
+    consecutiveEmptyRounds: number
+    clarifyItems: ClarifyItem[]
+    stagingItems: ClarifyItem[]
+    resolvedItems: ClarifyItem[]
+    schemaSqlContent: string
+    entityMappingContent: string
+    featuresContent: string
+    actionsYmlContent: string
+    isaConfigContent: string
+    validationResult: unknown
+  }>
+  token?: string
+}): Promise<ApiResponse<{ session: BddSession }>> {
+  return apiRequest(`/api/bdd/session/${input.sessionId}`, {
+    method: 'PATCH',
+    headers: input.token ? { Authorization: `Bearer ${input.token}` } : {},
+    body: JSON.stringify(input.updates),
+  })
+}
+
+/**
+ * 回答釐清項目
+ */
+export async function answerClarifyItem(input: {
+  sessionId: string
+  itemId: string
+  answer: string
+  token?: string
+}): Promise<ApiResponse<{ success: boolean; item: ClarifyItem; remainingCount: number }>> {
+  return apiRequest(`/api/bdd/session/${input.sessionId}/answer`, {
+    method: 'POST',
+    headers: input.token ? { Authorization: `Bearer ${input.token}` } : {},
+    body: JSON.stringify({ itemId: input.itemId, answer: input.answer }),
+  })
+}
+
+/**
+ * 批次確認項目
+ */
+export async function confirmBatch(input: {
+  sessionId: string
+  itemIds: string[]
+  answers: Record<string, string>
+  token?: string
+}): Promise<ApiResponse<{ success: boolean; confirmedCount: number; remainingCount: number }>> {
+  return apiRequest(`/api/bdd/session/${input.sessionId}/confirm`, {
+    method: 'POST',
+    headers: input.token ? { Authorization: `Bearer ${input.token}` } : {},
+    body: JSON.stringify({ itemIds: input.itemIds, answers: input.answers }),
+  })
+}
+
+/**
+ * 撤銷回答
+ */
+export async function revertAnswer(input: {
+  sessionId: string
+  itemId: string
+  token?: string
+}): Promise<ApiResponse<{ success: boolean; item: ClarifyItem }>> {
+  return apiRequest(`/api/bdd/session/${input.sessionId}/revert`, {
+    method: 'POST',
+    headers: input.token ? { Authorization: `Bearer ${input.token}` } : {},
+    body: JSON.stringify({ itemId: input.itemId }),
+  })
+}
+
+/**
+ * 跳過項目
+ */
+export async function skipClarifyItem(input: {
+  sessionId: string
+  itemId: string
+  token?: string
+}): Promise<ApiResponse<{ success: boolean; item: ClarifyItem }>> {
+  return apiRequest(`/api/bdd/session/${input.sessionId}/skip`, {
+    method: 'POST',
+    headers: input.token ? { Authorization: `Bearer ${input.token}` } : {},
+    body: JSON.stringify({ itemId: input.itemId }),
+  })
+}
+
+/**
+ * 新增釐清項目
+ */
+export async function addClarifyItems(input: {
+  sessionId: string
+  items: Array<{
+    question: string
+    category: string
+    context?: string
+    suggestions?: string[]
+  }>
+  token?: string
+}): Promise<ApiResponse<{ success: boolean; addedCount: number; totalCount: number }>> {
+  return apiRequest(`/api/bdd/session/${input.sessionId}/items`, {
+    method: 'POST',
+    headers: input.token ? { Authorization: `Bearer ${input.token}` } : {},
+    body: JSON.stringify({ items: input.items }),
+  })
+}
+
+/**
+ * 獲取當前釐清項目
+ */
+export async function getCurrentClarifyItem(input: {
+  sessionId: string
+  token?: string
+}): Promise<ApiResponse<{
+  currentItem: ClarifyItem | null
+  currentIndex: number
+  totalPending: number
+  totalResolved: number
+}>> {
+  return apiRequest(`/api/bdd/session/${input.sessionId}/current`, {
+    method: 'GET',
+    headers: input.token ? { Authorization: `Bearer ${input.token}` } : {},
+  })
+}
+
+/**
+ * 獲取 BDD Session 進度
+ */
+export async function getBddSessionProgress(input: {
+  sessionId: string
+  token?: string
+}): Promise<ApiResponse<{
+  currentPhase: string
+  currentRound: number
+  totalDiscovered: number
+  totalResolved: number
+  pendingCount: number
+  skippedCount: number
+  consecutiveEmptyRounds: number
+}>> {
+  return apiRequest(`/api/bdd/session/${input.sessionId}/progress`, {
+    method: 'GET',
+    headers: input.token ? { Authorization: `Bearer ${input.token}` } : {},
+  })
+}
+
+// ============================================================
+// 專案詳情 API
+// ============================================================
+
+/**
+ * 獲取專案完整詳情
+ */
+export async function getProjectDetail(input: {
+  projectId: string
+  token: string
+}): Promise<ApiResponse<{
+  project: {
+    id: string
+    name: string
+    description: string | null
+    status: string
+    vercelUrl: string | null
+    customDomain: string | null
+    domainStatus: string | null
+    createdAt: string
+    updatedAt: string
+  }
+  conversations: Array<{
+    id: string
+    messages: unknown[]
+    specComplete: boolean
+    createdAt: string
+    updatedAt: string
+  }>
+  deployments: Array<{
+    id: string
+    url: string | null
+    status: string
+    createdAt: string
+  }>
+  generations: Array<{
+    id: string
+    status: string
+    attemptCount: number
+    createdAt: string
+  }>
+}>> {
+  return apiRequest(`/api/project/${input.projectId}/detail`, {
+    method: 'GET',
+    headers: {
+      Authorization: `Bearer ${input.token}`,
+    },
+  })
+}
+
+/**
+ * 獲取專案最新生成記錄
+ */
+export async function getLatestGeneration(input: {
+  projectId: string
+  token: string
+}): Promise<ApiResponse<{
+  generation: {
+    id: string
+    generatedCodeUrl: string | null
+    status: string
+    attemptCount: number
+    createdAt: string
+  } | null
+}>> {
+  return apiRequest(`/api/project/${input.projectId}/latest-generation`, {
+    method: 'GET',
+    headers: {
+      Authorization: `Bearer ${input.token}`,
+    },
+  })
+}
+
+// ============================================================
+// Operations API (綜合操作)
+// ============================================================
+
+/**
+ * 創建或更新生成記錄
+ */
+export async function createOrUpdateGeneration(input: {
+  projectId: string
+  status: string
+  attemptCount?: number
+  token: string
+}): Promise<ApiResponse<{ generationId: string; attemptCount: number }>> {
+  return apiRequest('/api/operations/generations', {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${input.token}` },
+    body: JSON.stringify({
+      projectId: input.projectId,
+      status: input.status,
+      attemptCount: input.attemptCount,
+    }),
+  })
+}
+
+/**
+ * 創建部署記錄
+ */
+export async function createDeployment(input: {
+  projectId: string
+  url?: string
+  status: string
+  organizationId?: string
+  token: string
+}): Promise<ApiResponse<{ deploymentId: string }>> {
+  return apiRequest('/api/operations/deployments', {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${input.token}` },
+    body: JSON.stringify({
+      projectId: input.projectId,
+      url: input.url,
+      status: input.status,
+      organizationId: input.organizationId,
+    }),
+  })
+}
+
+/**
+ * 更新部署記錄
+ */
+export async function updateDeployment(input: {
+  deploymentId: string
+  url?: string
+  status?: string
+  token: string
+}): Promise<ApiResponse<{ success: boolean }>> {
+  return apiRequest(`/api/operations/deployments/${input.deploymentId}`, {
+    method: 'PATCH',
+    headers: { Authorization: `Bearer ${input.token}` },
+    body: JSON.stringify({
+      url: input.url,
+      status: input.status,
+    }),
+  })
+}
+
+/**
+ * 創建任務
+ */
+export async function createTask(input: {
+  projectId: string
+  skillId?: string
+  taskInput?: Record<string, unknown>
+  priority?: number
+  token: string
+}): Promise<ApiResponse<{ taskId: string }>> {
+  return apiRequest('/api/operations/tasks', {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${input.token}` },
+    body: JSON.stringify({
+      projectId: input.projectId,
+      skillId: input.skillId,
+      input: input.taskInput,
+      priority: input.priority,
+    }),
+  })
+}
+
+/**
+ * 更新任務
+ */
+export async function updateTask(input: {
+  taskId: string
+  status?: string
+  output?: Record<string, unknown>
+  failedStep?: string
+  currentStep?: string
+  token: string
+}): Promise<ApiResponse<{ success: boolean }>> {
+  return apiRequest(`/api/operations/tasks/${input.taskId}`, {
+    method: 'PATCH',
+    headers: { Authorization: `Bearer ${input.token}` },
+    body: JSON.stringify({
+      status: input.status,
+      output: input.output,
+      failedStep: input.failedStep,
+      currentStep: input.currentStep,
+    }),
+  })
+}
+
+/**
+ * 獲取任務
+ */
+export async function getTask(input: {
+  taskId: string
+  token?: string
+}): Promise<ApiResponse<{
+  task: {
+    id: string
+    projectId: string
+    userId: string
+    skillId: string | null
+    input: Record<string, unknown>
+    output: Record<string, unknown>
+    priority: number
+    status: string
+    failedStep: string | null
+    currentStep: string | null
+    createdAt: string
+    updatedAt: string
+  }
+}>> {
+  return apiRequest(`/api/operations/tasks/${input.taskId}`, {
+    method: 'GET',
+    headers: input.token ? { Authorization: `Bearer ${input.token}` } : {},
+  })
+}
+
+/**
+ * 獲取對話消息（含任務狀態）
+ */
+export async function getConversationMessagesWithTask(input: {
+  conversationId: string
+  lastUpdatedAt?: string
+  token?: string
+}): Promise<ApiResponse<{
+  messages: Array<{
+    id: string
+    role: 'user' | 'assistant' | 'system'
+    content: string
+    timestamp: string
+    stage?: string
+    progress?: { current: number; total: number; step: string }
+  }>
+  specComplete: boolean
+  updatedAt: string
+  currentTaskId?: string
+  taskStatus?: string
+  bddSessionId?: string
+  bddPhase?: string
+  noChange?: boolean
+}>> {
+  const params = new URLSearchParams()
+  if (input.lastUpdatedAt) params.append('lastUpdatedAt', input.lastUpdatedAt)
+
+  return apiRequest(`/api/operations/conversations/${input.conversationId}/messages?${params}`, {
+    method: 'GET',
+    headers: input.token ? { Authorization: `Bearer ${input.token}` } : {},
+  })
+}
+
+/**
+ * 添加對話消息
+ */
+export async function addConversationMessage(input: {
+  conversationId: string
+  role: 'user' | 'assistant' | 'system'
+  content: string
+  stage?: string
+  progress?: { current: number; total: number; step: string }
+  token?: string
+}): Promise<ApiResponse<{ messageId: string }>> {
+  return apiRequest(`/api/operations/conversations/${input.conversationId}/messages`, {
+    method: 'POST',
+    headers: input.token ? { Authorization: `Bearer ${input.token}` } : {},
+    body: JSON.stringify({
+      role: input.role,
+      content: input.content,
+      stage: input.stage,
+      progress: input.progress,
+    }),
+  })
+}
+
+/**
+ * 取消訂閱
+ */
+export async function cancelSubscription(input: {
+  token: string
+}): Promise<ApiResponse<{ success: boolean }>> {
+  return apiRequest('/api/operations/subscription/cancel', {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${input.token}` },
+  })
+}
+
+/**
+ * 更新專案狀態
+ */
+export async function updateProjectStatus(input: {
+  projectId: string
+  status?: string
+  vercelUrl?: string
+  customDomain?: string
+  domainStatus?: string
+  token: string
+}): Promise<ApiResponse<{ success: boolean }>> {
+  return apiRequest(`/api/operations/projects/${input.projectId}/status`, {
+    method: 'PATCH',
+    headers: { Authorization: `Bearer ${input.token}` },
+    body: JSON.stringify({
+      status: input.status,
+      vercelUrl: input.vercelUrl,
+      customDomain: input.customDomain,
+      domainStatus: input.domainStatus,
+    }),
+  })
+}
+
+/**
+ * 創建通知
+ */
+export async function createNotification(input: {
+  userId: string
+  type: string
+  title: string
+  message: string
+  metadata?: Record<string, unknown>
+  token: string
+}): Promise<ApiResponse<{ notificationId: string }>> {
+  return apiRequest('/api/operations/notifications', {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${input.token}` },
+    body: JSON.stringify({
+      userId: input.userId,
+      type: input.type,
+      title: input.title,
+      message: input.message,
+      metadata: input.metadata,
+    }),
+  })
+}
+
+/**
+ * 生成程式碼
+ */
+export async function generateCode(input: {
+  projectId: string
+  token: string
+}): Promise<ApiResponse<{ generationId: string; attemptCount: number; status: string }>> {
+  return apiRequest('/api/operations/generate', {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${input.token}` },
+    body: JSON.stringify({ projectId: input.projectId }),
+  })
+}
+
+/**
+ * 部署專案
+ */
+export async function deployProjectVps(input: {
+  projectId: string
+  token: string
+}): Promise<ApiResponse<{ deploymentId: string; status: string }>> {
+  return apiRequest('/api/operations/deploy', {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${input.token}` },
+    body: JSON.stringify({ projectId: input.projectId }),
+  })
+}
+
+// ============================================================
 // 導出
 // ============================================================
 
@@ -763,4 +1452,35 @@ export const vpsApi = {
   getCurrentUserFromVps,
   migrateAnonymousAccount,
   updateProject,
+  // BDD Session
+  createBddSession,
+  getBddSession,
+  updateBddSession,
+  answerClarifyItem,
+  confirmBatch,
+  revertAnswer,
+  skipClarifyItem,
+  addClarifyItems,
+  getCurrentClarifyItem,
+  getBddSessionProgress,
+  // Project Detail
+  getProjectDetail,
+  getLatestGeneration,
+  // Operations
+  createOrUpdateGeneration,
+  createDeployment,
+  updateDeployment,
+  createTask,
+  updateTask,
+  getTask,
+  getConversationMessagesWithTask,
+  addConversationMessage,
+  cancelSubscription,
+  updateProjectStatus,
+  createNotification,
+  generateCode,
+  deployProjectVps,
 }
+
+// 導出類型
+export type { ClarifyItem, BddSession }

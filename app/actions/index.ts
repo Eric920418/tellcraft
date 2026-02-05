@@ -4,6 +4,7 @@ import { db, PLAN_MESSAGE_LIMITS, PLAN_PROJECT_LIMITS, PLAN_PRIORITY_WEIGHTS } f
 import { getCurrentUser, getAuthToken } from '../lib/auth'
 import { deployProject as deployProjectReal, generateNextJsTemplate } from './deploy'
 import * as vpsApi from '../lib/vps-api'
+import type { BddSession as VpsBddSession, ClarifyItem as VpsClarifyItem } from '../lib/vps-api'
 
 // ============================================================
 // 類型定義
@@ -34,73 +35,29 @@ export async function createProject(input: {
   name: string
   description?: string
 }): Promise<ActionResult<{ projectId: string; status: ProjectStatus }>> {
-  const { userId, name, description } = input
+  const { name, description } = input
 
-  // 查詢用戶
-  const { data: user, error: userError } = await db
-    .from('users')
-    .select('id, plan, subscription_status')
-    .eq('id', userId)
-    .single()
-
-  if (userError || !user) {
-    return { success: false, error: '用戶不存在' }
+  const token = await getAuthToken()
+  if (!token) {
+    return { success: false, error: '未登入' }
   }
 
-  // 前置：檢查訂閱狀態
-  if (user.subscription_status !== 'active') {
-    return { success: false, error: '訂閱狀態必須為 active' }
-  }
+  const result = await vpsApi.createProject({
+    name,
+    description,
+    token,
+  })
 
-  // 前置：檢查專案數量（使用 select('id') 減少開銷）
-  const { count } = await db
-    .from('projects')
-    .select('id', { count: 'exact', head: true })
-    .eq('user_id', userId)
-
-  const limit = PLAN_PROJECT_LIMITS[user.plan] || 1
-  if ((count || 0) >= limit) {
-    return { success: false, error: '專案數量已達上限' }
-  }
-
-  // 後置：處理名稱重複
-  let finalName = name
-  const { data: existingProjects } = await db
-    .from('projects')
-    .select('name')
-    .eq('user_id', userId)
-    .like('name', `${name}%`)
-
-  if (existingProjects && existingProjects.length > 0) {
-    const existingNames = new Set(existingProjects.map((p: any) => p.name))
-    if (existingNames.has(name)) {
-      let suffix = 2
-      while (existingNames.has(`${name} (${suffix})`)) {
-        suffix++
-      }
-      finalName = `${name} (${suffix})`
-    }
-  }
-
-  // 建立專案
-  const { data: project, error: createError } = await db
-    .from('projects')
-    .insert({
-      user_id: userId,
-      name: finalName,
-      description,
-      status: 'draft'
-    })
-    .select('id, status')
-    .single()
-
-  if (createError || !project) {
-    return { success: false, error: createError?.message || '建立專案失敗' }
+  if (!result.success || !result.data) {
+    return { success: false, error: result.error || '建立專案失敗' }
   }
 
   return {
     success: true,
-    data: { projectId: project.id, status: project.status }
+    data: {
+      projectId: result.data.project.id,
+      status: result.data.project.status as ProjectStatus
+    }
   }
 }
 
@@ -112,68 +69,47 @@ export async function createProject(input: {
 export async function sendMessage(input: {
   conversationId: string
   content: string
+  projectId?: string
 }): Promise<ActionResult<{ messageId: string }>> {
-  const { conversationId, content } = input
+  const { conversationId, content, projectId } = input
 
-  // 查詢對話及關聯的專案和用戶
-  const { data: conversation, error: convError } = await db
-    .from('conversations')
-    .select('id, project_id, projects(user_id, users(id, plan, message_count_this_period))')
-    .eq('id', conversationId)
-    .single()
+  // 如果沒有提供 projectId，使用 addConversationMessage API
+  const token = await getAuthToken()
 
-  if (convError || !conversation) {
-    return { success: false, error: '對話不存在' }
-  }
-
-  const project = conversation.projects as any
-  const user = project?.users as any
-
-  if (!user) {
-    return { success: false, error: '用戶不存在' }
-  }
-
-  // 前置：檢查對話配額
-  const limit = PLAN_MESSAGE_LIMITS[user.plan] || 50
-  if (user.message_count_this_period >= limit) {
-    return { success: false, error: '對話次數已達上限' }
-  }
-
-  // 更新對話內容
-  const { data: messages } = await db
-    .from('conversations')
-    .select('messages')
-    .eq('id', conversationId)
-    .single()
-
-  const currentMessages = messages?.messages || []
-  const messageId = crypto.randomUUID()
-  const newMessage = {
-    id: messageId,
-    role: 'user',
-    content,
-    timestamp: new Date().toISOString()
-  }
-
-  await db
-    .from('conversations')
-    .update({
-      messages: [...currentMessages, newMessage],
-      updated_at: new Date().toISOString()
+  if (!projectId) {
+    // 使用 operations API 直接添加消息
+    const result = await vpsApi.addConversationMessage({
+      conversationId,
+      role: 'user',
+      content,
+      token: token || undefined,
     })
-    .eq('id', conversationId)
 
-  // 後置：更新對話次數
-  await db
-    .from('users')
-    .update({
-      message_count_this_period: user.message_count_this_period + 1
-    })
-    .eq('id', user.id)
+    if (!result.success || !result.data) {
+      return { success: false, error: result.error || '發送訊息失敗' }
+    }
+
+    return {
+      success: true,
+      data: { messageId: result.data.messageId }
+    }
+  }
+
+  // 使用原有的 sendMessage API（會觸發 LLM）
+  const result = await vpsApi.sendMessage({
+    conversationId,
+    message: content,
+    projectId,
+    token: token || undefined,
+  })
+
+  if (!result.success || !result.data) {
+    return { success: false, error: result.error || '發送訊息失敗' }
+  }
 
   return {
     success: true,
-    data: { messageId }
+    data: { messageId: result.data.messageId }
   }
 }
 
@@ -188,93 +124,23 @@ export async function generateCode(input: {
 }): Promise<ActionResult<{ generationId: string; status: string }>> {
   const { projectId } = input
 
-  // 查詢專案和對話
-  const { data: project, error: projectError } = await db
-    .from('projects')
-    .select('id, status')
-    .eq('id', projectId)
-    .single()
-
-  if (projectError || !project) {
-    return { success: false, error: '專案不存在' }
+  const token = await getAuthToken()
+  if (!token) {
+    return { success: false, error: '未登入' }
   }
 
-  // 前置：檢查是否有對話且已完成釐清
-  const { data: conversation } = await db
-    .from('conversations')
-    .select('id, spec_complete')
-    .eq('project_id', projectId)
-    .single()
+  const result = await vpsApi.generateCode({ projectId, token })
 
-  if (!conversation) {
-    return { success: false, error: '沒有對話記錄' }
+  if (!result.success || !result.data) {
+    return { success: false, error: result.error || '生成程式碼失敗' }
   }
-
-  if (!conversation.spec_complete) {
-    return { success: false, error: 'BDD Spec 尚未完成' }
-  }
-
-  // 檢查是否有失敗的生成記錄
-  const { data: existingGeneration } = await db
-    .from('generations')
-    .select('id, attempt_count, status')
-    .eq('project_id', projectId)
-    .order('created_at', { ascending: false })
-    .limit(1)
-    .single()
-
-  // 自癒機制：3 次失敗後停止
-  if (existingGeneration?.status === 'failed' && existingGeneration.attempt_count >= 3) {
-    await db
-      .from('projects')
-      .update({ status: 'failed' })
-      .eq('id', projectId)
-    return { success: false, error: '生成失敗次數已達上限' }
-  }
-
-  // 建立或更新生成記錄
-  let generationId: string
-  let attemptCount: number
-
-  if (existingGeneration?.status === 'failed') {
-    // 重試現有生成
-    generationId = existingGeneration.id
-    attemptCount = existingGeneration.attempt_count + 1
-    await db
-      .from('generations')
-      .update({
-        status: 'success',
-        attempt_count: attemptCount
-      })
-      .eq('id', generationId)
-  } else {
-    // 建立新生成記錄
-    attemptCount = 1
-    const { data: newGeneration, error: genError } = await db
-      .from('generations')
-      .insert({
-        project_id: projectId,
-        status: 'success',
-        attempt_count: attemptCount
-      })
-      .select('id')
-      .single()
-
-    if (genError || !newGeneration) {
-      return { success: false, error: genError?.message || '建立生成記錄失敗' }
-    }
-    generationId = newGeneration.id
-  }
-
-  // 後置：更新專案狀態為 testing
-  await db
-    .from('projects')
-    .update({ status: 'testing', updated_at: new Date().toISOString() })
-    .eq('id', projectId)
 
   return {
     success: true,
-    data: { generationId, status: 'success' }
+    data: {
+      generationId: result.data.generationId,
+      status: result.data.status
+    }
   }
 }
 
@@ -282,89 +148,29 @@ export async function generateCode(input: {
  * 部署專案
  * - 前置：專案狀態必須為 testing
  * - 後置：部署成功後專案狀態變為 deployed
- * - 後置：主 Org 配額用盡時自動切換備用 Org
  */
 export async function deployProject(input: {
   projectId: string
 }): Promise<ActionResult<{ deploymentId: string; url?: string; status: string }>> {
   const { projectId } = input
 
-  // 查詢專案
-  const { data: project, error: projectError } = await db
-    .from('projects')
-    .select('id, status')
-    .eq('id', projectId)
-    .single()
-
-  if (projectError || !project) {
-    return { success: false, error: '專案不存在' }
+  const token = await getAuthToken()
+  if (!token) {
+    return { success: false, error: '未登入' }
   }
 
-  // 前置：檢查專案狀態
-  if (project.status !== 'testing') {
-    return { success: false, error: '專案狀態必須為 testing' }
+  const result = await vpsApi.deployProjectVps({ projectId, token })
+
+  if (!result.success || !result.data) {
+    return { success: false, error: result.error || '部署專案失敗' }
   }
-
-  // 查找可用的 Supabase Organization
-  const { data: orgs } = await db
-    .from('db_organizations')
-    .select('id, project_count, max_projects, is_primary')
-    .order('is_primary', { ascending: false })
-
-  const availableOrg = orgs?.find((org: any) => org.project_count < org.max_projects)
-
-  // 建立部署記錄
-  const deploymentId = crypto.randomUUID()
-
-  if (!availableOrg) {
-    // 所有 Org 都滿，標記為 pending
-    await db
-      .from('deployments')
-      .insert({
-        id: deploymentId,
-        project_id: projectId,
-        status: 'pending',
-        waiting_for_capacity: true
-      })
-
-    return {
-      success: true,
-      data: { deploymentId, status: 'pending' }
-    }
-  }
-
-  // 成功部署
-  const url = `https://${projectId.slice(0, 8)}.vercel.app`
-
-  await db
-    .from('deployments')
-    .insert({
-      id: deploymentId,
-      project_id: projectId,
-      status: 'success',
-      url
-    })
-
-  // 更新專案狀態和 Org 資訊
-  await db
-    .from('projects')
-    .update({
-      status: 'deployed',
-      db_org_id: availableOrg.id,
-      vercel_url: url,
-      updated_at: new Date().toISOString()
-    })
-    .eq('id', projectId)
-
-  // 更新 Org 計數
-  await db
-    .from('db_organizations')
-    .update({ project_count: availableOrg.project_count + 1 })
-    .eq('id', availableOrg.id)
 
   return {
     success: true,
-    data: { deploymentId, url, status: 'success' }
+    data: {
+      deploymentId: result.data.deploymentId,
+      status: result.data.status
+    }
   }
 }
 
@@ -1734,7 +1540,6 @@ export async function replyToConversation(input: {
  * 獲取用戶所有對話列表
  * - 用於顯示歷史對話選擇器
  * - 支援匿名用戶和已登入用戶
- * - 優化：使用 JOIN 減少請求次數
  */
 export async function getUserConversations(input: {
   userId: string
@@ -1751,65 +1556,30 @@ export async function getUserConversations(input: {
   }>
   hasMore: boolean
 }>> {
-  const { userId, limit = 10 } = input
-
-  // 使用 JOIN 一次查詢取得對話和專案名稱
-  // 注意：messages 欄位仍需載入以取得 lastMessage 和 count
-  // 未來可考慮在 DB 層添加 message_count 欄位來進一步優化
-  const { data: conversations, error: convError } = await db
-    .from('conversations')
-    .select(`
-      id,
-      project_id,
-      messages,
-      updated_at,
-      created_at,
-      projects!inner(name, user_id)
-    `)
-    .eq('projects.user_id', userId)
-    .order('updated_at', { ascending: false })
-    .limit(limit + 1)  // 多取一條用於判斷是否有更多
-
-  if (convError) {
-    return { success: false, error: convError.message }
-  }
-
-  if (!conversations || conversations.length === 0) {
-    return {
-      success: true,
-      data: {
-        conversations: [],
-        hasMore: false,
-      }
-    }
-  }
-
-  const hasMore = conversations.length > limit
-  const limitedConversations = conversations.slice(0, limit)
-
-  const formattedConversations = limitedConversations.map((conv: any) => {
-    const messages = conv.messages || []
-    const lastUserMessage = [...messages].reverse().find((m: { role: string }) => m.role === 'user')
-    // 取得 JOIN 的專案名稱（Supabase 返回的 projects 是單一物件，因為是 !inner join）
-    const project = conv.projects as unknown as { name: string } | null
-    const projectName = project?.name || '未命名專案'
-
-    return {
-      id: conv.id,
-      projectId: conv.project_id,
-      projectName,
-      lastMessage: lastUserMessage?.content?.slice(0, 100) || undefined,
-      messageCount: messages.length,
-      updatedAt: conv.updated_at,
-      createdAt: conv.created_at,
-    }
+  const token = await getAuthToken()
+  const result = await vpsApi.getUserConversations({
+    token: token || undefined,
   })
+
+  if (!result.success || !result.data) {
+    return { success: false, error: result.error || '獲取對話列表失敗' }
+  }
+
+  const conversations = result.data.conversations.map((c: any) => ({
+    id: c.id,
+    projectId: c.projectId,
+    projectName: c.projectName,
+    lastMessage: c.lastMessage || undefined,
+    messageCount: c.messageCount,
+    updatedAt: c.updatedAt,
+    createdAt: c.updatedAt, // API 可能沒有 createdAt，用 updatedAt 代替
+  }))
 
   return {
     success: true,
     data: {
-      conversations: formattedConversations,
-      hasMore,
+      conversations,
+      hasMore: false, // VPS API 目前不支援分頁
     }
   }
 }
@@ -2248,91 +2018,41 @@ export async function getProjectDetail(projectId: string): Promise<ActionResult<
     createdAt: string
   }>
 }>> {
-  const authUser = await getCurrentUser()
+  const token = await getAuthToken()
 
-  if (!authUser) {
+  if (!token) {
     return { success: false, error: '未登入' }
   }
 
-  // 查詢專案
-  const { data: project, error: projectError } = await db
-    .from('projects')
-    .select('id, name, description, status, vercel_url, custom_domain, domain_status, created_at, updated_at, user_id')
-    .eq('id', projectId)
-    .single()
+  const result = await vpsApi.getProjectDetail({ projectId, token })
 
-  if (projectError || !project) {
-    return { success: false, error: '專案不存在' }
+  if (!result.success || !result.data) {
+    return { success: false, error: result.error || '獲取專案詳情失敗' }
   }
 
-  // 驗證擁有權
-  if (project.user_id !== authUser.id) {
-    return { success: false, error: '無權訪問此專案' }
-  }
-
-  // 並行查詢對話、部署和生成記錄（減少往返時間）
-  const [convResult, deployResult, genResult] = await Promise.all([
-    db
-      .from('conversations')
-      .select('id, messages, spec_complete, created_at, updated_at')
-      .eq('project_id', projectId)
-      .order('updated_at', { ascending: false }),
-    db
-      .from('deployments')
-      .select('id, url, status, created_at')
-      .eq('project_id', projectId)
-      .order('created_at', { ascending: false })
-      .limit(10),
-    db
-      .from('generations')
-      .select('id, status, attempt_count, created_at')
-      .eq('project_id', projectId)
-      .order('created_at', { ascending: false })
-      .limit(10)
-  ])
-
-  const conversations = convResult.data
-  const deployments = deployResult.data
-  const generations = genResult.data
+  const { project, conversations, deployments, generations } = result.data
 
   return {
     success: true,
     data: {
       project: {
-        id: project.id,
-        name: project.name,
-        description: project.description,
+        ...project,
         status: project.status as ProjectStatus,
-        vercelUrl: project.vercel_url,
-        customDomain: project.custom_domain,
-        domainStatus: project.domain_status,
-        createdAt: project.created_at,
-        updatedAt: project.updated_at
       },
-      conversations: (conversations || []).map((c: any) => {
+      conversations: conversations.map((c: any) => {
         const messages = c.messages || []
         const lastUserMessage = [...messages].reverse().find((m: { role: string; content: string }) => m.role === 'user')
         return {
           id: c.id,
           messageCount: messages.length,
-          specComplete: c.spec_complete,
+          specComplete: c.specComplete,
           lastMessage: lastUserMessage?.content?.slice(0, 100) || null,
-          createdAt: c.created_at,
-          updatedAt: c.updated_at
+          createdAt: c.createdAt,
+          updatedAt: c.updatedAt
         }
       }),
-      deployments: (deployments || []).map((d: any) => ({
-        id: d.id,
-        url: d.url,
-        status: d.status,
-        createdAt: d.created_at
-      })),
-      generations: (generations || []).map((g: any) => ({
-        id: g.id,
-        status: g.status,
-        attemptCount: g.attempt_count,
-        createdAt: g.created_at
-      }))
+      deployments,
+      generations,
     }
   }
 }
@@ -2478,9 +2198,9 @@ type BddPhase =
 // BDD Session 資料結構
 interface BddSession {
   id: string
-  projectId: string
+  projectId: string | null
   conversationId: string
-  taskId?: string
+  taskId?: string | null
   currentPhase: BddPhase
   currentRound: number
   currentQuestionIndex: number
@@ -2490,14 +2210,14 @@ interface BddSession {
   clarifyItems: ClarifyItem[]
   stagingItems: ClarifyItem[]
   resolvedItems: ClarifyItem[]
-  originalRequirements?: string
-  projectContext?: string
-  schemaSqlContent?: string
-  entityMappingContent?: string
-  featuresContent?: Array<{ name: string; actionName?: string; content: string }>
-  actionsYmlContent?: string
-  isaConfigContent?: string
-  validationResult?: { passed: boolean; errors: string[]; warnings: string[] }
+  originalRequirements: string
+  projectContext: Record<string, unknown>
+  schemaSqlContent: string | null
+  entityMappingContent: string | null
+  featuresContent: string | null
+  actionsYmlContent: string | null
+  isaConfigContent: string | null
+  validationResult: unknown | null
   createdAt: string
   updatedAt: string
 }
@@ -2514,45 +2234,21 @@ export async function createBddSession(input: {
 }): Promise<ActionResult<{ sessionId: string }>> {
   const { projectId, conversationId, taskId, originalRequirements, projectContext } = input
 
-  // 查詢同一對話中有已解決項目的 session（用於繼承決策）
-  // 注意：不能只用 not null，因為空陣列 [] 也不是 null
-  // 需要找到有實際內容的 resolved_items
-  const { data: allSessions } = await db
-    .from('bdd_sessions')
-    .select('resolved_items')
-    .eq('conversation_id', conversationId)
-    .order('created_at', { ascending: false })
+  const token = await getAuthToken()
+  const result = await vpsApi.createBddSession({
+    conversationId,
+    projectId,
+    taskId,
+    originalRequirements,
+    projectContext: projectContext ? JSON.parse(projectContext) : undefined,
+    token: token || undefined,
+  })
 
-  // 找到第一個有內容的 resolved_items
-  const sessionWithItems = allSessions?.find(
-    (s: any) => Array.isArray(s.resolved_items) && s.resolved_items.length > 0
-  )
-
-  // 繼承之前的決策（如果有）
-  const inheritedResolvedItems = sessionWithItems?.resolved_items || []
-
-  console.log(`[BDD Session] 創建新 session，繼承 ${inheritedResolvedItems.length} 個之前的決策`)
-
-  const { data, error } = await db
-    .from('bdd_sessions')
-    .insert({
-      project_id: projectId,
-      conversation_id: conversationId,
-      task_id: taskId,
-      current_phase: 'prd_discovery',
-      original_requirements: originalRequirements,
-      project_context: projectContext,
-      // 繼承之前的決策，避免重複問已回答的問題
-      resolved_items: inheritedResolvedItems.length > 0 ? inheritedResolvedItems : [],
-    })
-    .select('id')
-    .single()
-
-  if (error || !data) {
-    return { success: false, error: error?.message || '創建 BDD Session 失敗' }
+  if (!result.success || !result.data) {
+    return { success: false, error: result.error || '創建 BDD Session 失敗' }
   }
 
-  return { success: true, data: { sessionId: data.id } }
+  return { success: true, data: { sessionId: result.data.sessionId } }
 }
 
 /**
@@ -2565,56 +2261,34 @@ export async function getBddSession(input: {
 }): Promise<ActionResult<BddSession | null>> {
   const { sessionId, conversationId, projectId } = input
 
-  let query = db.from('bdd_sessions').select('*')
+  const token = await getAuthToken()
+  const result = await vpsApi.getBddSession({
+    sessionId,
+    conversationId,
+    projectId,
+    token: token || undefined,
+  })
 
-  if (sessionId) {
-    query = query.eq('id', sessionId)
-  } else if (conversationId) {
-    query = query.eq('conversation_id', conversationId)
-  } else if (projectId) {
-    query = query.eq('project_id', projectId)
-  } else {
-    return { success: false, error: '必須提供 sessionId、conversationId 或 projectId' }
+  if (!result.success) {
+    return { success: false, error: result.error }
   }
 
-  const { data, error } = await query.order('created_at', { ascending: false }).limit(1).single()
-
-  if (error) {
-    if (error.code === 'PGRST116') {
-      // 沒有找到記錄
-      return { success: true, data: null }
-    }
-    return { success: false, error: error.message }
+  // 轉換 VPS API 返回的 session 為本地類型
+  const session = result.data?.session
+  if (!session) {
+    return { success: true, data: null }
   }
 
-  // 轉換 snake_case 到 camelCase
-  const session: BddSession = {
-    id: data.id,
-    projectId: data.project_id,
-    conversationId: data.conversation_id,
-    taskId: data.task_id,
-    currentPhase: data.current_phase,
-    currentRound: data.current_round,
-    currentQuestionIndex: data.current_question_index,
-    totalDiscovered: data.total_discovered,
-    totalResolved: data.total_resolved,
-    consecutiveEmptyRounds: data.consecutive_empty_rounds,
-    clarifyItems: data.clarify_items || [],
-    stagingItems: data.staging_items || [],
-    resolvedItems: data.resolved_items || [],
-    originalRequirements: data.original_requirements,
-    projectContext: data.project_context,
-    schemaSqlContent: data.schema_sql_content,
-    entityMappingContent: data.entity_mapping_content,
-    featuresContent: data.features_content,
-    actionsYmlContent: data.actions_yml_content,
-    isaConfigContent: data.isa_config_content,
-    validationResult: data.validation_result,
-    createdAt: data.created_at,
-    updatedAt: data.updated_at,
+  return {
+    success: true,
+    data: {
+      ...session,
+      currentPhase: session.currentPhase as BddPhase,
+      clarifyItems: session.clarifyItems as unknown as ClarifyItem[],
+      stagingItems: session.stagingItems as unknown as ClarifyItem[],
+      resolvedItems: session.resolvedItems as unknown as ClarifyItem[],
+    } as BddSession
   }
-
-  return { success: true, data: session }
 }
 
 /**
@@ -2642,31 +2316,15 @@ export async function updateBddSession(input: {
 }): Promise<ActionResult<null>> {
   const { sessionId, updates } = input
 
-  // 轉換 camelCase 到 snake_case
-  const dbUpdates: Record<string, unknown> = {}
-  if (updates.currentPhase !== undefined) dbUpdates.current_phase = updates.currentPhase
-  if (updates.currentRound !== undefined) dbUpdates.current_round = updates.currentRound
-  if (updates.currentQuestionIndex !== undefined) dbUpdates.current_question_index = updates.currentQuestionIndex
-  if (updates.totalDiscovered !== undefined) dbUpdates.total_discovered = updates.totalDiscovered
-  if (updates.totalResolved !== undefined) dbUpdates.total_resolved = updates.totalResolved
-  if (updates.consecutiveEmptyRounds !== undefined) dbUpdates.consecutive_empty_rounds = updates.consecutiveEmptyRounds
-  if (updates.clarifyItems !== undefined) dbUpdates.clarify_items = updates.clarifyItems
-  if (updates.stagingItems !== undefined) dbUpdates.staging_items = updates.stagingItems
-  if (updates.resolvedItems !== undefined) dbUpdates.resolved_items = updates.resolvedItems
-  if (updates.schemaSqlContent !== undefined) dbUpdates.schema_sql_content = updates.schemaSqlContent
-  if (updates.entityMappingContent !== undefined) dbUpdates.entity_mapping_content = updates.entityMappingContent
-  if (updates.featuresContent !== undefined) dbUpdates.features_content = updates.featuresContent
-  if (updates.actionsYmlContent !== undefined) dbUpdates.actions_yml_content = updates.actionsYmlContent
-  if (updates.isaConfigContent !== undefined) dbUpdates.isa_config_content = updates.isaConfigContent
-  if (updates.validationResult !== undefined) dbUpdates.validation_result = updates.validationResult
+  const token = await getAuthToken()
+  const result = await vpsApi.updateBddSession({
+    sessionId,
+    updates: updates as any,
+    token: token || undefined,
+  })
 
-  const { error } = await db
-    .from('bdd_sessions')
-    .update(dbUpdates)
-    .eq('id', sessionId)
-
-  if (error) {
-    return { success: false, error: error.message }
+  if (!result.success) {
+    return { success: false, error: result.error }
   }
 
   return { success: true, data: null }
