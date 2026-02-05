@@ -1,5 +1,6 @@
 import { recordLlmUsage } from '../db/client'
 import { ClarifyItem } from './bdd-session'
+import { LlmTrackingContext } from './classifier'
 import { GeneratedFeature } from './formulation'
 
 // Sonnet 定價 (每百萬 tokens)
@@ -108,7 +109,8 @@ export async function runSpecDiscovery(
   features: GeneratedFeature[],
   schemaSql: string,
   entityMapping: string,
-  existingItems?: ClarifyItem[]
+  existingItems?: ClarifyItem[],
+  trackingContext?: LlmTrackingContext
 ): Promise<SpecDiscoveryResult> {
   // 將 features 格式化為易讀的內容
   const featuresContent = features.map(f =>
@@ -228,6 +230,8 @@ ${existingQuestions ? `---
       outputTokens: response.outputTokens,
       costUsd,
       purpose: 'spec_discovery',
+      userId: trackingContext?.userId,
+      conversationId: trackingContext?.conversationId,
     }).catch(err => console.error('[SpecDiscovery] 記錄使用量失敗:', err))
   }
 

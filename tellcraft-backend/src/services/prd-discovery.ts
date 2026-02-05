@@ -1,5 +1,6 @@
 import { recordLlmUsage } from '../db/client'
 import { ClarifyItem } from './bdd-session'
+import { LlmTrackingContext } from './classifier'
 
 // Sonnet 定價 (每百萬 tokens)
 const SONNET_PRICING = { input: 3, output: 15 }
@@ -24,7 +25,7 @@ interface PrdDiscoveryResult {
  */
 export async function runPrdDiscovery(
   requirements: string,
-  conversationId?: string,
+  trackingContext?: LlmTrackingContext,
   existingItems?: ClarifyItem[]
 ): Promise<PrdDiscoveryResult> {
   const apiKey = process.env.ANTHROPIC_API_KEY
@@ -170,9 +171,11 @@ ${pendingQuestions.join('\n')}` : ''}
       outputTokens,
       costUsd,
       purpose: 'prd_discovery',
+      userId: trackingContext?.userId,
+      conversationId: trackingContext?.conversationId,
     }).catch(err => console.error('[PRD Discovery] 記錄 LLM 使用量失敗:', err))
 
-    console.log(`[PRD Discovery] LLM 回應完成 (tokens: ${inputTokens}/${outputTokens}, cost: $${costUsd.toFixed(4)})`)
+    console.log(`[PRD Discovery] LLM 回應完成 (tokens: ${inputTokens}/${outputTokens}, cost: $${costUsd.toFixed(4)}, conversation: ${trackingContext?.conversationId || 'none'})`)
 
     // 解析回應
     const content = data.content?.[0]?.text || ''

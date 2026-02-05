@@ -23,12 +23,19 @@ export interface ClassificationResult {
 // Intent Classifier
 // ============================================================
 
+// LLM 追蹤上下文（用於記錄使用量）
+export interface LlmTrackingContext {
+  userId?: string
+  conversationId?: string
+}
+
 /**
  * 使用 AI 判斷用戶意圖
  */
 export async function classifyIntent(
   message: string,
-  conversationHistory?: Array<{ role: 'user' | 'assistant'; content: string }>
+  conversationHistory?: Array<{ role: 'user' | 'assistant'; content: string }>,
+  trackingContext?: LlmTrackingContext
 ): Promise<ClassificationResult> {
   const apiKey = process.env.ANTHROPIC_API_KEY
 
@@ -113,8 +120,10 @@ ${skillDescriptions}
           outputTokens,
           costUsd: cost,
           purpose: 'intent_classification',
+          userId: trackingContext?.userId,
+          conversationId: trackingContext?.conversationId,
         })
-        console.log(`[Classifier] 已記錄使用量: ${inputTokens} in / ${outputTokens} out, $${cost.toFixed(6)}`)
+        console.log(`[Classifier] 已記錄使用量: ${inputTokens} in / ${outputTokens} out, $${cost.toFixed(6)} (conversation: ${trackingContext?.conversationId || 'none'})`)
       } catch (err) {
         console.error('[Classifier] 記錄使用量失敗:', err)
       }

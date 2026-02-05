@@ -300,11 +300,13 @@ export async function recordLlmUsage(data: {
   outputTokens: number
   costUsd: number
   purpose: string
+  userId?: string
+  conversationId?: string
 }) {
   return query(
-    `INSERT INTO llm_usage (model, input_tokens, output_tokens, cost_usd, purpose, created_at)
-     VALUES ($1, $2, $3, $4, $5, NOW())`,
-    [data.model, data.inputTokens, data.outputTokens, data.costUsd, data.purpose]
+    `INSERT INTO llm_usage (user_id, conversation_id, model, input_tokens, output_tokens, cost_usd, purpose, created_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())`,
+    [data.userId || null, data.conversationId || null, data.model, data.inputTokens, data.outputTokens, data.costUsd, data.purpose]
   )
 }
 

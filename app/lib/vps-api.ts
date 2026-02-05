@@ -1096,6 +1096,22 @@ export async function startProjectIteration(input: {
 }
 
 /**
+ * 刪除專案
+ * 級聯刪除相關的 BDD Sessions、Tasks、Conversations
+ */
+export async function deleteProject(input: {
+  projectId: string
+  token: string
+}): Promise<ApiResponse<{ success: boolean }>> {
+  return apiRequest(`/api/project/${input.projectId}`, {
+    method: 'DELETE',
+    headers: {
+      Authorization: `Bearer ${input.token}`,
+    },
+  })
+}
+
+/**
  * 獲取專案版本歷史
  */
 export async function getProjectVersions(input: {
@@ -1686,6 +1702,7 @@ export const vpsApi = {
   getLatestGeneration,
   // Project Iteration & Versioning
   startProjectIteration,
+  deleteProject,
   getProjectVersions,
   updateVersionLabel,
   rollbackVersion,

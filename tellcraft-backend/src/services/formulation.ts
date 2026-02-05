@@ -1,5 +1,6 @@
 import { recordLlmUsage } from '../db/client'
 import { ClarifyItem } from './bdd-session'
+import { LlmTrackingContext } from './classifier'
 
 // Sonnet 定價 (每百萬 tokens)
 const SONNET_PRICING = { input: 3, output: 15 }
@@ -97,7 +98,8 @@ async function callClaude(
 export async function generateSchemaSql(
   requirements: string,
   resolvedItems: ClarifyItem[],
-  projectContext?: string
+  projectContext?: string,
+  trackingContext?: LlmTrackingContext
 ): Promise<{
   success: boolean
   schemaSql?: string
@@ -168,6 +170,8 @@ ${decisions || '（無額外決策）'}`
       outputTokens: response.outputTokens,
       costUsd,
       purpose: 'formulation_schema',
+      userId: trackingContext?.userId,
+      conversationId: trackingContext?.conversationId,
     }).catch(err => console.error('[Formulation] 記錄使用量失敗:', err))
   }
 
@@ -200,7 +204,8 @@ export async function identifyFeatures(
   requirements: string,
   resolvedItems: ClarifyItem[],
   schemaSql: string,
-  projectContext?: string
+  projectContext?: string,
+  trackingContext?: LlmTrackingContext
 ): Promise<{
   success: boolean
   features?: FeatureInfo[]
@@ -281,6 +286,8 @@ ${decisions || '（無額外決策）'}`
       outputTokens: response.outputTokens,
       costUsd,
       purpose: 'formulation_identify_features',
+      userId: trackingContext?.userId,
+      conversationId: trackingContext?.conversationId,
     }).catch(err => console.error('[Formulation] 記錄使用量失敗:', err))
   }
 
@@ -314,7 +321,8 @@ export async function generateSingleFeature(
   resolvedItems: ClarifyItem[],
   schemaSql: string,
   entityMapping: string,
-  projectContext?: string
+  projectContext?: string,
+  trackingContext?: LlmTrackingContext
 ): Promise<{
   success: boolean
   feature?: GeneratedFeature
@@ -407,6 +415,8 @@ ${decisions || '（無額外決策）'}`
       outputTokens: response.outputTokens,
       costUsd,
       purpose: 'formulation_generate_feature',
+      userId: trackingContext?.userId,
+      conversationId: trackingContext?.conversationId,
     }).catch(err => console.error('[Formulation] 記錄使用量失敗:', err))
   }
 
@@ -436,7 +446,8 @@ export async function runFormulation(
   requirements: string,
   resolvedItems: ClarifyItem[],
   projectContext?: string,
-  onProgress?: (step: string, current: number, total: number, detail?: string) => Promise<void>
+  onProgress?: (step: string, current: number, total: number, detail?: string) => Promise<void>,
+  trackingContext?: LlmTrackingContext
 ): Promise<FormulationResult> {
   try {
     // Step 1: 生成 SQL Schema
@@ -444,7 +455,7 @@ export async function runFormulation(
       await onProgress('schema', 1, 3, '生成資料模型...')
     }
 
-    const schemaResult = await generateSchemaSql(requirements, resolvedItems, projectContext)
+    const schemaResult = await generateSchemaSql(requirements, resolvedItems, projectContext, trackingContext)
     if (!schemaResult.success || !schemaResult.schemaSql) {
       return { success: false, error: schemaResult.error || '生成 Schema 失敗' }
     }
@@ -458,7 +469,8 @@ export async function runFormulation(
       requirements,
       resolvedItems,
       schemaResult.schemaSql,
-      projectContext
+      projectContext,
+      trackingContext
     )
     if (!identifyResult.success || !identifyResult.features || identifyResult.features.length === 0) {
       return { success: false, error: identifyResult.error || '識別 Features 失敗' }
@@ -483,7 +495,8 @@ export async function runFormulation(
         resolvedItems,
         schemaResult.schemaSql,
         schemaResult.entityMapping || '',
-        projectContext
+        projectContext,
+        trackingContext
       )
 
       if (result.success && result.feature) {
@@ -530,7 +543,8 @@ export async function fixMultipleFeatures(
   features: FeatureFixInput[],
   resolvedItems: ClarifyItem[],
   schemaSql: string,
-  entityMapping: string
+  entityMapping: string,
+  trackingContext?: LlmTrackingContext
 ): Promise<{
   success: boolean
   fixedFeatures?: GeneratedFeature[]
@@ -615,6 +629,8 @@ ${decisions}` : ''}`
       outputTokens: response.outputTokens,
       costUsd,
       purpose: 'formulation_fix_features',
+      userId: trackingContext?.userId,
+      conversationId: trackingContext?.conversationId,
     }).catch(err => console.error('[Formulation] 記錄使用量失敗:', err))
   }
 

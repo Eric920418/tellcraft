@@ -7,7 +7,7 @@ import Link from 'next/link'
 import { StatusBadge, MiniStatsCard } from '../../../components/dashboard'
 import { VersionHistory } from '../../../components/dashboard/VersionHistory'
 import { getProjectDetail } from '../../../actions'
-import { startProjectIteration } from '../../../lib/vps-api'
+import { startProjectIteration, deleteProject } from '../../../lib/vps-api'
 import { useAuth } from '../../../hooks/useAuth'
 
 interface ProjectDetail {
@@ -74,6 +74,8 @@ export default function ProjectDetailPage() {
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [isIterating, setIsIterating] = useState(false)
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
+  const [isDeleting, setIsDeleting] = useState(false)
 
   const projectId = params.id as string
 
@@ -133,6 +135,34 @@ export default function ProjectDetailPage() {
   // 點擊對話卡片跳轉
   const handleConversationClick = (conversationId: string) => {
     router.push(`/?conversation=${conversationId}`)
+  }
+
+  // 刪除專案
+  const handleDeleteProject = async () => {
+    if (!token) {
+      setError('請先登入')
+      return
+    }
+
+    setIsDeleting(true)
+    try {
+      const result = await deleteProject({
+        projectId,
+        token,
+      })
+
+      if (result.success) {
+        router.push('/dashboard/projects')
+      } else {
+        setError(result.error || '刪除專案失敗')
+        setShowDeleteConfirm(false)
+      }
+    } catch (err) {
+      setError((err as Error).message)
+      setShowDeleteConfirm(false)
+    } finally {
+      setIsDeleting(false)
+    }
   }
 
   if (isLoading) {
@@ -503,6 +533,124 @@ export default function ProjectDetailPage() {
           </div>
         )}
       </motion.div>
+
+      {/* Danger Zone - 刪除專案 */}
+      <motion.div
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.4, delay: 0.5 }}
+        style={{
+          marginTop: 24,
+          padding: 24,
+          background: 'var(--white)',
+          border: '1px solid #FECACA',
+        }}
+      >
+        <h2 style={{ fontSize: 16, fontWeight: 500, marginBottom: 8, color: '#DC2626' }}>
+          危險區域
+        </h2>
+        <p style={{ fontSize: 13, color: 'var(--gray-500)', marginBottom: 16 }}>
+          刪除專案將會永久移除所有對話記錄、生成記錄和部署歷史，此操作無法復原。
+        </p>
+        <button
+          onClick={() => setShowDeleteConfirm(true)}
+          style={{
+            padding: '10px 20px',
+            fontSize: 14,
+            fontWeight: 500,
+            background: 'transparent',
+            color: '#DC2626',
+            border: '1px solid #DC2626',
+            cursor: 'pointer',
+            transition: 'background 0.15s, color 0.15s',
+          }}
+          onMouseEnter={(e) => {
+            e.currentTarget.style.background = '#DC2626'
+            e.currentTarget.style.color = 'white'
+          }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.background = 'transparent'
+            e.currentTarget.style.color = '#DC2626'
+          }}
+        >
+          刪除專案
+        </button>
+      </motion.div>
+
+      {/* 刪除確認彈窗 */}
+      {showDeleteConfirm && (
+        <div
+          style={{
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            background: 'rgba(0, 0, 0, 0.5)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 1000,
+          }}
+          onClick={() => !isDeleting && setShowDeleteConfirm(false)}
+        >
+          <motion.div
+            initial={{ opacity: 0, scale: 0.95 }}
+            animate={{ opacity: 1, scale: 1 }}
+            style={{
+              background: 'var(--white)',
+              padding: 32,
+              maxWidth: 400,
+              width: '90%',
+              boxShadow: '0 20px 40px rgba(0, 0, 0, 0.15)',
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 style={{ fontSize: 18, fontWeight: 500, marginBottom: 12 }}>
+              確定要刪除專案？
+            </h3>
+            <p style={{ fontSize: 14, color: 'var(--gray-500)', marginBottom: 8 }}>
+              專案「<strong>{project.name}</strong>」將被永久刪除，包含：
+            </p>
+            <ul style={{ fontSize: 13, color: 'var(--gray-500)', marginBottom: 24, paddingLeft: 20 }}>
+              <li>{conversations.length} 個對話記錄</li>
+              <li>{generations.length} 個生成記錄</li>
+              <li>{deployments.length} 個部署歷史</li>
+            </ul>
+            <div style={{ display: 'flex', gap: 12, justifyContent: 'flex-end' }}>
+              <button
+                onClick={() => setShowDeleteConfirm(false)}
+                disabled={isDeleting}
+                style={{
+                  padding: '10px 20px',
+                  fontSize: 14,
+                  background: 'transparent',
+                  border: '1px solid var(--border-color)',
+                  cursor: isDeleting ? 'not-allowed' : 'pointer',
+                  opacity: isDeleting ? 0.5 : 1,
+                }}
+              >
+                取消
+              </button>
+              <button
+                onClick={handleDeleteProject}
+                disabled={isDeleting}
+                style={{
+                  padding: '10px 20px',
+                  fontSize: 14,
+                  fontWeight: 500,
+                  background: isDeleting ? '#F87171' : '#DC2626',
+                  color: 'white',
+                  border: 'none',
+                  cursor: isDeleting ? 'not-allowed' : 'pointer',
+                }}
+              >
+                {isDeleting ? '刪除中...' : '確認刪除'}
+              </button>
+            </div>
+          </motion.div>
+        </div>
+      )}
     </div>
   )
 }

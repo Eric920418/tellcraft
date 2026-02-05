@@ -17,6 +17,29 @@ Tellcraft 是一個 AI 驅動的自動化開發平台。用戶只需描述需求
 - **Server Actions**：30+ 已實作
 - **詳情**：[`.clarify/overview.md`](.clarify/overview.md)
 
+### 修復 LLM Usage 按對話分組顯示「無對話」問題（2026-02-05）
+
+修復 `/dashboard/admin/usage` 頁面按「對話」分組時只顯示一項「無對話」的問題。
+
+**問題根因**：
+- `recordLlmUsage()` 函數只有 5 個參數（model, inputTokens, outputTokens, costUsd, purpose）
+- INSERT 語句未包含 `user_id` 和 `conversation_id` 欄位
+- 所有 LLM 使用記錄的 `user_id` 和 `conversation_id` 都是 NULL
+
+**修復方案**：
+| 修改檔案 | 說明 |
+|----------|------|
+| `tellcraft-backend/src/db/client.ts` | `recordLlmUsage()` 新增 `userId` 和 `conversationId` 可選參數 |
+| `tellcraft-backend/src/services/classifier.ts` | 新增 `LlmTrackingContext` interface，`classifyIntent()` 新增 `trackingContext` 參數 |
+| `tellcraft-backend/src/services/prd-discovery.ts` | `runPrdDiscovery()` 第二參數改為 `trackingContext` |
+| `tellcraft-backend/src/services/formulation.ts` | 所有函數新增 `trackingContext` 參數（`generateSchemaSql`, `identifyFeatures`, `generateSingleFeature`, `fixMultipleFeatures`, `runFormulation`）|
+| `tellcraft-backend/src/services/spec-discovery.ts` | `runSpecDiscovery()` 新增 `trackingContext` 參數 |
+| `tellcraft-backend/src/workers/orchestrator.ts` | 所有 LLM 服務調用傳入 `{ userId, conversationId }` |
+
+**效果**：新的 LLM 使用記錄會關聯到對話，管理員可以按對話查看 token 消耗。
+
+---
+
 ### 專案版本管理功能（2026-02-05）
 
 實現完整的專案版本管理功能，將「專案」從單純的對話容器改造成「可迭代的產品」：

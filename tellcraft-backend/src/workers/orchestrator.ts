@@ -146,7 +146,7 @@ async function handleProcessMessage(
     content: string
   }>).slice(-10) // 只取最近 10 條
 
-  const classification = await classifyIntent(message, history)
+  const classification = await classifyIntent(message, history, { userId, conversationId })
 
   // Step 4: 處理無法分類的情況
   let effectiveIntent = classification.intent
@@ -295,7 +295,7 @@ async function executeBddSpecSkill(input: BddSpecSkillInput) {
 
   // 調用 LLM 進行 PRD Discovery（動態生成釐清問題）
   console.log(`[Orchestrator] 調用 PRD Discovery 分析需求: ${message.slice(0, 100)}...`)
-  const discoveryResult = await runPrdDiscovery(message, conversationId)
+  const discoveryResult = await runPrdDiscovery(message, { userId, conversationId })
 
   if (!discoveryResult.success || !discoveryResult.items) {
     console.error('[Orchestrator] PRD Discovery 失敗:', discoveryResult.error)
@@ -730,7 +730,7 @@ async function completeClärifyPhase(
   // 調用 LLM 生成更多問題，傳入已回答的問題避免重複
   const discoveryResult = await runPrdDiscovery(
     originalRequirements,
-    conversationId,
+    { conversationId },  // 追蹤上下文
     resolvedItems  // 傳入已回答的問題
   )
 
@@ -823,7 +823,8 @@ async function finishClarifyAndStartFormulation(
         total,
         detail,
       })
-    }
+    },
+    { conversationId }  // 追蹤上下文
   )
 
   if (!result.success) {
@@ -974,7 +975,8 @@ async function startSpecDiscovery(
     features,
     schemaSql,
     entityMapping,
-    existingSpecItems
+    existingSpecItems,
+    { conversationId }  // 追蹤上下文
   )
 
   if (!discoveryResult.success) {
@@ -1163,7 +1165,8 @@ async function fixFeaturesAndComplete(
     featuresToFix,
     allResolvedItems,
     schemaSql,
-    entityMapping
+    entityMapping,
+    { conversationId }  // 追蹤上下文
   )
 
   if (!fixResult.success || !fixResult.fixedFeatures) {
