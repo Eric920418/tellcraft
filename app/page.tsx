@@ -1357,9 +1357,13 @@ function ChatSection({
           } : null)
         }
 
-        // 對話已完成，停止輪詢
+        // 對話已完成，停止輪詢並自動進入 UIUX 模式
         if (result.data.isComplete) {
           isPolling = false
+          // 3 秒後自動進入 UIUX 模式
+          setTimeout(() => {
+            setCurrentStage('uiux')
+          }, 3000)
           return
         }
       }

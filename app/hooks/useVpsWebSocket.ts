@@ -19,12 +19,20 @@ interface Message {
   progress?: { current: number; total: number; step: string }
 }
 
+interface AutoTransition {
+  from: string
+  to: string
+  delay: number
+  sessionId?: string
+}
+
 interface UseVpsWebSocketOptions {
   conversationId: string
   onMessage?: (message: Message) => void
   onConnect?: () => void
   onDisconnect?: () => void
   onError?: (error: Error) => void
+  onAutoTransition?: (transition: AutoTransition) => void
 }
 
 interface UseVpsWebSocketReturn {
@@ -39,7 +47,7 @@ interface UseVpsWebSocketReturn {
 // ============================================================
 
 export function useVpsWebSocket(options: UseVpsWebSocketOptions): UseVpsWebSocketReturn {
-  const { conversationId, onMessage, onConnect, onDisconnect, onError } = options
+  const { conversationId, onMessage, onConnect, onDisconnect, onError, onAutoTransition } = options
 
   const socketRef = useRef<Socket | null>(null)
   const [isConnected, setIsConnected] = useState(false)
@@ -86,6 +94,21 @@ export function useVpsWebSocket(options: UseVpsWebSocketOptions): UseVpsWebSocke
       onMessage?.(message)
     })
 
+    socket.on('auto_transition', (transition: AutoTransition) => {
+      console.log('[WebSocket] 收到自動轉場:', transition)
+      if (onAutoTransition) {
+        // 使用指定的延遲時間觸發轉場
+        setTimeout(() => {
+          onAutoTransition(transition)
+        }, transition.delay || 3000)
+      }
+    })
+
+    socket.on('progress', (progress: { stage: string; step: string; current: number; total: number; detail?: string }) => {
+      console.log('[WebSocket] 收到進度更新:', progress)
+      // 進度更新可以透過 onMessage 傳遞，或者新增專用回調
+    })
+
     return () => {
       if (socket.connected) {
         socket.emit('unsubscribe', conversationId)
@@ -93,7 +116,7 @@ export function useVpsWebSocket(options: UseVpsWebSocketOptions): UseVpsWebSocke
       socket.disconnect()
       socketRef.current = null
     }
-  }, [conversationId, onConnect, onDisconnect, onError, onMessage])
+  }, [conversationId, onConnect, onDisconnect, onError, onMessage, onAutoTransition])
 
   // 訂閱對話
   const subscribe = useCallback(() => {

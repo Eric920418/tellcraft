@@ -557,6 +557,7 @@ async function sendMessage(
     content: string
     stage?: string
     progress?: { current: number; total: number; step: string }
+    layoutHint?: 'default' | 'split' | 'full_preview'
   }
 ) {
   const message = {
@@ -566,6 +567,7 @@ async function sendMessage(
     timestamp: new Date().toISOString(),
     stage: options.stage,
     progress: options.progress,
+    layoutHint: options.layoutHint,
   }
 
   // 更新 DB
@@ -1236,6 +1238,13 @@ async function completeSpecPhase(
     content: `規格產出完成！\n\n已生成：\n- 資料庫 Schema\n- ${featureCount} 個功能規格 (Feature Files)\n\n你可以在專案詳情頁面查看完整規格。`,
     stage: 'spec_complete',
     progress: { current: 4, total: 4, step: '完成' },
+  })
+
+  // 發送 UIUX 開始消息，觸發前端切換到分屏模式（帶 3 秒延遲提示）
+  await sendMessage(conversationId, io, {
+    content: '正在進入設計模式...',
+    stage: 'uiux',
+    layoutHint: 'split',
   })
 
   // 更新對話為完成
