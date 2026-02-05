@@ -296,29 +296,9 @@ export default function AdminTemplatesPage() {
                 style={{ borderBottom: '1px solid var(--border-color)' }}
               >
                 <td style={{ padding: '16px' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                    <div
-                      style={{
-                        width: 48,
-                        height: 36,
-                        background: 'var(--gray-100)',
-                        borderRadius: 4,
-                        overflow: 'hidden',
-                      }}
-                    >
-                      {template.thumbnailUrl && (
-                        // eslint-disable-next-line @next/next/no-img-element
-                        <img
-                          src={template.thumbnailUrl}
-                          alt={template.name}
-                          style={{ width: '100%', height: '100%', objectFit: 'cover' }}
-                        />
-                      )}
-                    </div>
-                    <div>
-                      <div style={{ fontWeight: 500, marginBottom: 2 }}>{template.name}</div>
-                      <div style={{ fontSize: 12, color: 'var(--gray-500)' }}>{template.slug}</div>
-                    </div>
+                  <div>
+                    <div style={{ fontWeight: 500, marginBottom: 2 }}>{template.name}</div>
+                    <div style={{ fontSize: 12, color: 'var(--gray-500)' }}>{template.slug}</div>
                   </div>
                 </td>
                 <td style={{ padding: '16px' }}>
