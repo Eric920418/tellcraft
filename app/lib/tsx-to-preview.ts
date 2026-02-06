@@ -436,10 +436,14 @@ export function convertToPreviewHtml(
   const html = convertJsxSyntax(pageJsx)
 
   // 8. 清理 CSS
+  //    - @import "tailwindcss" 是 v4 語法，CDN 不認識 → 移除
+  //    - @tailwind base/components/utilities 是 v3 語法，CDN 全域已注入 → 移除
+  //    - @theme {} 是 v4 語法 → 轉成 :root {} 保留 CSS 變數
+  //    - @apply、@layer 保留給 CDN 處理（透過 type="text/tailwindcss"）
   const cleanStyles = styles
     .replace(/@import\s+["']tailwindcss["'];?/g, '')
     .replace(/@tailwind\s+\w+;?/g, '')
-    .replace(/@theme\s*\{[\s\S]*?\}/g, '')
+    .replace(/@theme\s*\{([\s\S]*?)\}/g, ':root {$1}')
 
   // 9. 字體
   const fontImports = extractFontInfo(mainPage.content, components)
@@ -458,14 +462,15 @@ export function convertToPreviewHtml(
   ${fontImports}
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-    ${cleanStyles}
     html, body { max-width: 100vw; overflow-x: hidden; }
     body { min-height: 100vh; width: 100%; overflow-wrap: break-word; word-wrap: break-word; }
     img, video, svg { max-width: 100%; height: auto; }
-    .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0,0,0,0); border: 0; }
     @media (prefers-reduced-motion: reduce) {
       *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
     }
+  </style>
+  <style type="text/tailwindcss">
+    ${cleanStyles}
   </style>
 </head>
 <body>
