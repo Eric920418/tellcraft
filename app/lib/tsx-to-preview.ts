@@ -94,43 +94,17 @@ function substituteProps(jsx: string, props: Record<string, string>): string {
 }
 
 /**
- * 移除未被 componentMap 處理的 React 組件標籤（PascalCase）
+ * 將未被 componentMap 處理的 PascalCase 組件標籤重命名為 <div>
+ * 保留所有屬性和 children，讓瀏覽器可以正常渲染
  * 使用深度計數器正確處理屬性中的 {}, =>, 字串等
  */
 function stripUnresolvedComponents(jsx: string): string {
-  // 迭代處理巢狀組件（外層包內層）
-  let prev = ''
-  let iterations = 0
-  while (prev !== jsx && iterations < 10) {
-    prev = jsx
-    jsx = stripOneLayerOfComponents(jsx)
-    iterations++
-  }
-
-  // 移除 React Fragment: <> ... </> 和 <Fragment> ... </Fragment>
-  jsx = jsx.replace(/<>\s*/g, '')
-  jsx = jsx.replace(/<\/>\s*/g, '')
-  jsx = jsx.replace(/<Fragment[^>]*>\s*/g, '')
-  jsx = jsx.replace(/<\/Fragment>\s*/g, '')
-  jsx = jsx.replace(/<React\.Fragment[^>]*>\s*/g, '')
-  jsx = jsx.replace(/<\/React\.Fragment>\s*/g, '')
-
-  return jsx
-}
-
-/**
- * 單層掃描：找到 PascalCase 開頭的 tag，用深度計數跳過屬性區，
- * 然後保留 children 或移除自閉合標籤
- */
-function stripOneLayerOfComponents(jsx: string): string {
   let result = ''
   let i = 0
 
   while (i < jsx.length) {
-    // 檢查是否是 PascalCase 開頭的 opening tag: <[A-Z]
+    // PascalCase opening tag: <[A-Z]
     if (jsx[i] === '<' && i + 1 < jsx.length && /[A-Z]/.test(jsx[i + 1])) {
-      // 讀取 tag name
-      const tagStart = i
       i++ // skip <
       let tagName = ''
       while (i < jsx.length && /[\w.]/.test(jsx[i])) {
@@ -138,36 +112,68 @@ function stripOneLayerOfComponents(jsx: string): string {
         i++
       }
 
-      // 跳過屬性區域（正確處理 {}, 字串, => 等）
-      i = skipTagAttributes(jsx, i)
-
-      // 是 self-closing /> 嗎?
-      if (i < jsx.length && jsx[i] === '/' && jsx[i + 1] === '>') {
-        i += 2 // 整個 self-closing 標籤被移除
+      // Fragment 特殊處理 — 直接移除 tag（保留 children）
+      if (tagName === 'Fragment' || tagName === 'React.Fragment') {
+        i = skipTagAttributes(jsx, i)
+        if (i < jsx.length && jsx[i] === '/') i += 2  // self-closing
+        else if (i < jsx.length && jsx[i] === '>') i++ // opening
         continue
       }
 
-      // 是 > (with children) 嗎?
+      // 讀取屬性區域的原始文字（保留給後續步驟處理）
+      const attrsStart = i
+      i = skipTagAttributes(jsx, i)
+      const attrsStr = jsx.substring(attrsStart, i)
+
+      // self-closing: <Component ... /> → <div ...></div>
+      if (i < jsx.length && jsx[i] === '/' && jsx[i + 1] === '>') {
+        i += 2
+        result += `<div${attrsStr}></div>`
+        continue
+      }
+
+      // opening: <Component ...> → <div ...>
       if (i < jsx.length && jsx[i] === '>') {
         i++ // skip >
-        // 找到配對的 </TagName>，保留 children
-        const closeTag = `</${tagName}>`
-        const children = extractChildrenUntilClose(jsx, i, closeTag)
-        if (children !== null) {
-          result += children.content
-          i = children.endIndex
-          continue
-        }
-        // 找不到 closing tag — 把 opening tag 丟棄，繼續
+        result += `<div${attrsStr}>`
         continue
       }
 
-      // 異常情況 — 原樣保留
-      result += jsx.substring(tagStart, i)
+      // 異常 — 輸出為 div
+      result += `<div${attrsStr}>`
       continue
     }
 
-    // 非 PascalCase tag — 原樣複製
+    // PascalCase closing tag: </[A-Z]
+    if (jsx[i] === '<' && jsx[i + 1] === '/' && i + 2 < jsx.length && /[A-Z]/.test(jsx[i + 2])) {
+      // 跳過整個 closing tag
+      let j = i + 2
+      while (j < jsx.length && jsx[j] !== '>') j++
+      if (j < jsx.length) j++ // skip >
+
+      // 檢查是否是 Fragment
+      const closeName = jsx.substring(i + 2, j - 1).trim()
+      if (closeName === 'Fragment' || closeName === 'React.Fragment') {
+        i = j
+        continue
+      }
+
+      result += '</div>'
+      i = j
+      continue
+    }
+
+    // <> Fragment shorthand
+    if (jsx[i] === '<' && jsx[i + 1] === '>') {
+      i += 2
+      continue
+    }
+    // </> Fragment shorthand closing
+    if (jsx[i] === '<' && jsx[i + 1] === '/' && jsx[i + 2] === '>') {
+      i += 3
+      continue
+    }
+
     result += jsx[i]
     i++
   }
@@ -242,66 +248,6 @@ function skipBracedExpression(jsx: string, start: number): number {
   return i
 }
 
-/**
- * 提取 children 直到遇到 closeTag，處理同名巢狀
- */
-function extractChildrenUntilClose(
-  jsx: string, start: number, closeTag: string
-): { content: string; endIndex: number } | null {
-  const tagName = closeTag.slice(2, -1) // extract name from </Name>
-  let depth = 1
-  let i = start
-
-  while (i < jsx.length && depth > 0) {
-    // 遇到同名 opening tag → depth++
-    if (jsx[i] === '<' && jsx.substring(i + 1).startsWith(tagName)) {
-      const afterName = i + 1 + tagName.length
-      if (afterName < jsx.length && /[\s/>]/.test(jsx[afterName])) {
-        // 確認不是 closing tag
-        if (jsx[i + 1] !== '/') {
-          depth++
-          i = afterName
-          // 跳過這個 tag 的屬性區
-          i = skipTagAttributes(jsx, i)
-          if (i < jsx.length && jsx[i] === '/') {
-            // self-closing — 不算深度增加
-            depth--
-            i += 2 // skip />
-          } else if (i < jsx.length && jsx[i] === '>') {
-            i++ // skip >
-          }
-          continue
-        }
-      }
-    }
-
-    // 遇到 closing tag </Name>
-    if (jsx.substring(i).startsWith(closeTag)) {
-      depth--
-      if (depth === 0) {
-        const content = jsx.substring(start, i)
-        return { content, endIndex: i + closeTag.length }
-      }
-      i += closeTag.length
-      continue
-    }
-
-    // 跳過 HTML/JSX tag 的屬性區（避免屬性中的 < > 干擾）
-    if (jsx[i] === '<' && i + 1 < jsx.length && /[a-zA-Z]/.test(jsx[i + 1])) {
-      i++ // skip <
-      while (i < jsx.length && /[\w.-]/.test(jsx[i])) i++ // skip tag name
-      i = skipTagAttributes(jsx, i)
-      if (i < jsx.length && (jsx[i] === '>' || (jsx[i] === '/' && jsx[i + 1] === '>'))) {
-        if (jsx[i] === '/') i += 2; else i++
-      }
-      continue
-    }
-
-    i++
-  }
-
-  return null // 找不到 closing tag
-}
 
 /**
  * 深度計數清除 tag 中所有動態屬性 attr={...}
