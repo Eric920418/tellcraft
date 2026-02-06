@@ -34,7 +34,7 @@ interface LlmTrackingContext {
   purpose?: string
 }
 
-// 簡化版 callClaude 實現
+// callClaude — 使用 streaming 避免長請求超時
 async function callClaude(
   systemPrompt: string,
   messages: Array<{ role: 'user' | 'assistant'; content: string }>,
@@ -47,7 +47,7 @@ async function callClaude(
   try {
     const anthropic = getAnthropicClient()
 
-    const response = await anthropic.messages.create({
+    const stream = anthropic.messages.stream({
       model: 'claude-sonnet-4-5-20250929',
       max_tokens: options?.maxTokens || 4096,
       temperature: options?.temperature ?? 0.2,
@@ -58,7 +58,9 @@ async function callClaude(
       })),
     })
 
-    const content = response.content[0]
+    const finalMessage = await stream.finalMessage()
+
+    const content = finalMessage.content[0]
     if (content.type === 'text') {
       return { success: true, content: content.text }
     }
