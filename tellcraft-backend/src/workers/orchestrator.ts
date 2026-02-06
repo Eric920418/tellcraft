@@ -323,28 +323,33 @@ async function handleContinueFlow(
     state.phase === 'uiux_quality_gate' ||
     state.phase === 'uiux_complete'
   ) {
+    // 全形字母轉半形（中文輸入法常見）
+    const normalizedMsg = message.replace(/[Ａ-Ｚａ-ｚ]/g, ch =>
+      String.fromCharCode(ch.charCodeAt(0) - 0xFEE0)
+    )
+
     // 檢查是否是模板選擇訊息
     if (message.includes('我選擇') && message.includes('模板')) {
       await handleTemplateSelection(conversationId, state, message, redis, io)
       return
     }
 
-    // 檢查是否是變體選擇訊息（支援多種自然語言表達）
+    // 檢查是否是變體選擇訊息（支援多種自然語言表達，含全形）
     if (
-      message.includes('選擇變體') ||
-      message.includes('合併') ||
-      message.match(/選擇?\s*[A-E]/i) ||
-      message.match(/我要\s*[A-E]/i) ||
-      message.match(/我選\s*[A-E]/i) ||
-      message.match(/^[A-E]$/i)
+      normalizedMsg.includes('選擇變體') ||
+      normalizedMsg.includes('合併') ||
+      normalizedMsg.match(/選擇?\s*[A-E]/i) ||
+      normalizedMsg.match(/我要\s*[A-E]/i) ||
+      normalizedMsg.match(/我選\s*[A-E]/i) ||
+      normalizedMsg.match(/^[A-E]$/i)
     ) {
-      await handleVariantSelection(conversationId, state, message, redis, io)
+      await handleVariantSelection(conversationId, state, normalizedMsg, redis, io)
       return
     }
 
     // variant_selection 階段：任何包含 A-E 的訊息都嘗試路由
-    if (state.phase === 'uiux_variant_selection' && message.match(/[A-E]/i)) {
-      await handleVariantSelection(conversationId, state, message, redis, io)
+    if (state.phase === 'uiux_variant_selection' && normalizedMsg.match(/[A-E]/i)) {
+      await handleVariantSelection(conversationId, state, normalizedMsg, redis, io)
       return
     }
 
