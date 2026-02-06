@@ -162,8 +162,10 @@ export default function PreviewPanel({
 
   const deviceWidth = getDeviceWidth(device)
 
-  // 監聽容器大小
+  // 監聽容器大小（使用 ResizeObserver 準確追蹤）
   useEffect(() => {
+    if (!containerRef.current) return
+
     const updateSize = () => {
       if (!containerRef.current) return
       // 編輯模式時預留側欄寬度
@@ -174,9 +176,12 @@ export default function PreviewPanel({
       })
     }
 
-    updateSize()
-    window.addEventListener('resize', updateSize)
-    return () => window.removeEventListener('resize', updateSize)
+    const observer = new ResizeObserver(() => {
+      updateSize()
+    })
+    observer.observe(containerRef.current)
+
+    return () => observer.disconnect()
   }, [editMode, selectedElement])
 
   // 只根據寬度計算縮放，讓模板填滿容器
@@ -271,7 +276,8 @@ export default function PreviewPanel({
       style={{
         display: 'flex',
         flexDirection: 'column',
-        height: '100%',
+        flex: 1,
+        minHeight: 0,
         overflow: 'hidden',
       }}
     >
