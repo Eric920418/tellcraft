@@ -67,6 +67,13 @@ Tellcraft 是一個 AI 驅動的自動化開發平台。用戶只需描述需求
 - `skill.md` Phase 3 流程圖沒有三階段生成 — 更新
 - Design Memory 範例用 Inter 字體 — 修正
 
+**第二輪審計（同日）**：
+- Font Loading 範例仍用 Inter 字體 — 改為 DM_Sans
+- Variants JSON 範例 fontFamily 仍用 Inter — 改為 DM Sans
+- Structure prompt 自相矛盾（禁 transition 又指定 transition-colors）— 移到 Animation prompt
+- `handleCodePhaseRedo` 重做時沒恢復上一階段代碼 — 加入 `uiuxStructureCode`/`uiuxAnimationCode` 快照機制
+- Variant D prompt 列舉 Modal/Inline/Drawer 泛型模式 — 改為 Anti-Default 風格
+
 ### UIUX 生成邏輯重構：5 變體選擇 + Design System（2026-02-05）
 
 重構 UIUX 生成邏輯，從「逐個獨立生成」改為「Design System 驅動的統一生成」，確保風格一致性。

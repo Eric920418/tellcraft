@@ -463,12 +463,12 @@ const VARIANT_AXES = {
     id: 'D' as const,
     name: 'Interaction',
     axis: 'interaction' as const,
-    description: '互動模式：Modal/Inline/Drawer',
-    prompt: `設計互動模式：
-- Modal：彈窗式操作，適合重要決策
-- Inline：行內操作，適合快速編輯
-- Drawer：側邊抽屜，適合詳情查看
-- Toast/Snackbar：輕量反饋`,
+    description: '探索獨特的互動模式和操作流程',
+    prompt: `探索能讓用戶「驚喜但合理」的互動模式：
+- 思考這個產品的核心操作是什麼，用最少步驟完成
+- 考慮非常規互動：gesture、long-press reveal、contextual toolbar、inline expansion
+- 反饋機制要有個性（不只是 toast — 考慮 inline confirmation、progress storytelling）
+- 通過 Swap Test 驗證：如果換個產品也用同樣互動，是否需要重新設計？`,
   },
   E: {
     id: 'E' as const,
