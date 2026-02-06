@@ -64,7 +64,8 @@
       "Bash(node -e:*)",
       "Bash(npx tsx:*)",
       "Bash(ssh:*)",
-      "Bash(rsync:*)"
+      "Bash(rsync:*)",
+      "Bash(open:*)"
     ]
   }
 }

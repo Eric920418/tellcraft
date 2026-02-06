@@ -12,7 +12,7 @@ Tellcraft 是一個 AI 驅動的自動化開發平台。用戶只需描述需求
 
 ## 當前開發進度
 
-- **狀態**：✅ Phase 1-9 + Server Actions + VPS Backend + 前端 Chat 串接 + 認證系統 + 訪客體驗改善 + 儀表板系統 + BDD Spec 完整修復 + 專案版本管理 + **UIUX 生成邏輯重構** + **Design Tier** + **專案自動命名** + **PreviewPanel iframe 重構** + **Quality Gate 品質檢查**
+- **狀態**：✅ Phase 1-9 + Server Actions + VPS Backend + 前端 Chat 串接 + 認證系統 + 訪客體驗改善 + 儀表板系統 + BDD Spec 完整修復 + 專案版本管理 + **UIUX 生成邏輯重構** + **Design Tier** + **專案自動命名** + **PreviewPanel iframe 重構** + **Quality Gate 品質檢查** + **Code Preview 即時渲染**
 - **釐清項目**：28 項全部解決
 - **Server Actions**：30+ 已實作
 - **詳情**：[`.clarify/overview.md`](.clarify/overview.md)
@@ -28,12 +28,29 @@ UIUX Implementation 三階段（Structure → Animation → RWD）完成後自�
 
 **自動修復**：發現 critical 問題時用 Haiku 自動修復，最多 3 輪，只修問題不改設計。
 
+**SEO 不在此 Skill 範圍內**：SEO（metadata export、semantic HTML、html lang 等）將獨立為單獨的 SEO Skill，不包含在 Quality Gate 中。
+
 **核心改動**：
 - `quality-gate.ts`：新增品質檢查 service（靜態分析 + LLM 修復）
 - `orchestrator.ts`：RWD 完成後觸發 `executeQualityGate()`，FlowState 新增 `uiuxQualityReport`
 - `registry.ts`：註冊 `quality-gate` skill
 - `QualityGateReport.tsx`：前端品質報告組件
 - `UiuxChatSection.tsx`：渲染 `quality_gate_report` richContent
+
+### Code Preview 即時渲染（2026-02-06）
+
+UIUX Implementation 階段生成的 React TSX 代碼，會自動轉換為 standalone HTML 並在右側預覽面板用 iframe 即時渲染（而非顯示原始碼）。支援切換「預覽」和「程式碼」分頁。
+
+**轉換邏輯** (`app/lib/tsx-to-preview.ts`)：
+1. 提取 main page 的 return JSX
+2. 內聯組件引用（Header、Card 等），支援 prop 替換
+3. 轉換 JSX → HTML（className→class、motion.X→X、移除動畫 props、event handlers）
+4. 注入 Tailwind CDN + generated CSS + Google Fonts
+5. 降級：轉換失敗時顯示提示並引導切換到程式碼分頁
+
+**核心改動**：
+- `app/lib/tsx-to-preview.ts`：新增 TSX → HTML 轉換工具
+- `app/page.tsx`：`renderPreviewPanel()` 檢測 `code_preview` richContent 後渲染 iframe 預覽 + 分頁切換
 
 ### 專案自動命名（2026-02-06）
 

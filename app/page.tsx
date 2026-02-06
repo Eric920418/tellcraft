@@ -29,6 +29,7 @@ import SpecGenerationView from './components/SpecGenerationView'
 import PreviewPanel from './components/uiux/PreviewPanel'
 import CodePreview from './components/uiux/CodePreview'
 import TemplatePicker from './components/uiux/TemplatePicker'
+import { convertToPreviewHtml } from './lib/tsx-to-preview'
 import { getTemplateById } from './actions/templates'
 import type { Template } from './lib/templates'
 
@@ -871,6 +872,7 @@ function ChatSection({
   // UIUX 分屏佈局相關狀態
   const [layoutMode, setLayoutMode] = useState<'default' | 'split'>('default')
   const [isLayoutTransitioning, setIsLayoutTransitioning] = useState(false)
+  const [previewTab, setPreviewTab] = useState<'preview' | 'code'>('preview')
   const layoutModeRef = useRef(layoutMode)
   const [selectedTemplateId, setSelectedTemplateId] = useState<string | null>(null)
   const [selectedTemplate, setSelectedTemplate] = useState<Template | null>(null)
@@ -2051,14 +2053,77 @@ function ChatSection({
     const codePreviewData = codePreviewMessage?.richContent?.data
 
     if (codePreviewData) {
+      const pagesData = (codePreviewData.pages || []) as { path: string; content: string; description: string }[]
+      const componentsData = (codePreviewData.components || []) as { path: string; content: string; description: string }[]
+      const stylesData = (codePreviewData.styles || '') as string
+      const tailwindConfigData = (codePreviewData.tailwindConfig || '') as string
+
       return (
         <div style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
-          <CodePreview
-            pages={codePreviewData.pages as { path: string; content: string; description: string }[]}
-            components={codePreviewData.components as { path: string; content: string; description: string }[]}
-            styles={codePreviewData.styles as string | undefined}
-            tailwindConfig={codePreviewData.tailwindConfig as string | undefined}
-          />
+          {/* Tab 切換列 */}
+          <div style={{
+            display: 'flex',
+            borderBottom: '1px solid var(--border-color)',
+            background: 'var(--white)',
+            flexShrink: 0,
+          }}>
+            <button
+              onClick={() => setPreviewTab('preview')}
+              style={{
+                flex: 1,
+                padding: '10px 16px',
+                fontSize: 13,
+                fontWeight: previewTab === 'preview' ? 600 : 400,
+                color: previewTab === 'preview' ? 'var(--black)' : 'var(--gray-500)',
+                background: 'none',
+                border: 'none',
+                borderBottom: previewTab === 'preview' ? '2px solid var(--black)' : '2px solid transparent',
+                cursor: 'pointer',
+                transition: 'color 0.15s',
+              }}
+            >
+              預覽
+            </button>
+            <button
+              onClick={() => setPreviewTab('code')}
+              style={{
+                flex: 1,
+                padding: '10px 16px',
+                fontSize: 13,
+                fontWeight: previewTab === 'code' ? 600 : 400,
+                color: previewTab === 'code' ? 'var(--black)' : 'var(--gray-500)',
+                background: 'none',
+                border: 'none',
+                borderBottom: previewTab === 'code' ? '2px solid var(--black)' : '2px solid transparent',
+                cursor: 'pointer',
+                transition: 'color 0.15s',
+              }}
+            >
+              程式碼
+            </button>
+          </div>
+
+          {/* 內容區 */}
+          {previewTab === 'preview' ? (
+            <iframe
+              srcDoc={convertToPreviewHtml(pagesData, componentsData, stylesData, tailwindConfigData)}
+              style={{
+                flex: 1,
+                width: '100%',
+                border: 'none',
+                background: '#fff',
+              }}
+              sandbox="allow-scripts"
+              title="設計預覽"
+            />
+          ) : (
+            <CodePreview
+              pages={pagesData}
+              components={componentsData}
+              styles={stylesData}
+              tailwindConfig={tailwindConfigData}
+            />
+          )}
         </div>
       )
     }
