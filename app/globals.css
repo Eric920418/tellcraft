@@ -728,3 +728,109 @@ textarea {
     padding-top: 76px !important;
   }
 }
+
+/* ============ Template Preview Interactivity ============ */
+
+/* 模板預覽容器 - 平滑滾動 */
+.template-preview-container {
+  scroll-behavior: smooth;
+}
+
+/* 模板內的連結和按鈕 hover 效果 */
+.template-preview-container a,
+.template-preview-container button {
+  transition: all 0.15s ease !important;
+}
+
+.template-preview-container a:hover {
+  opacity: 0.8;
+}
+
+/* 主要按鈕 hover - 深色背景 */
+.template-preview-container a[style*="background: #0f172a"]:hover,
+.template-preview-container a[style*="background: rgb(15, 23, 42)"]:hover,
+.template-preview-container button[style*="background: #0f172a"]:hover,
+.template-preview-container button[style*="background: rgb(15, 23, 42)"]:hover {
+  filter: brightness(1.2) !important;
+  transform: translateY(-1px);
+}
+
+/* 淺色/邊框按鈕 hover */
+.template-preview-container a[style*="border: 1px solid"]:hover,
+.template-preview-container button[style*="border: 1px solid"]:hover {
+  background: rgba(0, 0, 0, 0.03) !important;
+}
+
+/* 卡片 hover 效果 */
+.template-preview-container div[style*="border: 1px solid"][style*="border-radius"]:hover {
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08) !important;
+  transform: translateY(-2px);
+  transition: all 0.2s ease !important;
+}
+
+/* 導航連結 hover */
+.template-preview-container nav a:hover {
+  opacity: 1 !important;
+  color: #0f172a !important;
+}
+
+/* 輸入框 focus */
+.template-preview-container input:focus,
+.template-preview-container textarea:focus {
+  outline: 2px solid #0f172a !important;
+  outline-offset: 1px;
+}
+
+/* ============ Template Edit Mode ============ */
+
+/* 編輯模式容器 */
+.template-preview-container.edit-mode {
+  user-select: none;
+}
+
+/* 可編輯元素基礎樣式 */
+.template-preview-container.edit-mode [data-editable] {
+  cursor: pointer !important;
+  transition: outline 0.15s ease, box-shadow 0.15s ease !important;
+  position: relative;
+}
+
+/* hover 效果 - 虛線邊框 */
+.template-preview-container.edit-mode [data-editable]:hover {
+  outline: 2px dashed #94a3b8 !important;
+  outline-offset: 2px;
+}
+
+/* 選中效果 - 藍色實線邊框 */
+.template-preview-container.edit-mode [data-editable].selected {
+  outline: 2px solid #3b82f6 !important;
+  outline-offset: 2px;
+  box-shadow: 0 0 0 4px rgba(59, 130, 246, 0.1) !important;
+}
+
+/* 編輯模式下禁用連結跳轉 */
+.template-preview-container.edit-mode a[data-editable] {
+  pointer-events: auto !important;
+}
+
+/* 不同類型元素的視覺提示 */
+.template-preview-container.edit-mode [data-type="heading"]:hover::after,
+.template-preview-container.edit-mode [data-type="paragraph"]:hover::after,
+.template-preview-container.edit-mode [data-type="button"]:hover::after,
+.template-preview-container.edit-mode [data-type="label"]:hover::after,
+.template-preview-container.edit-mode [data-type="stat"]:hover::after {
+  content: attr(data-type);
+  position: absolute;
+  top: -20px;
+  left: 0;
+  padding: 2px 6px;
+  font-size: 10px;
+  font-weight: 500;
+  font-family: var(--font-mono);
+  background: #3b82f6;
+  color: white;
+  border-radius: 3px;
+  white-space: nowrap;
+  z-index: 10;
+  pointer-events: none;
+}

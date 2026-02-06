@@ -37,7 +37,19 @@ Tellcraft 是一個 AI 驅動的自動化開發平台。用戶只需描述需求
 
 **新的生成流程（三階段）**：
 ```
-用戶選擇模板
+BDD Spec 完成
+    ↓
+詢問：「你有自己的設計想法嗎？」
+    ↓
+┌─────────────────────────────┬────────────────────────┐
+│ A. 有想法                    │ B. 沒想法              │
+│    ↓                        │    ↓                   │
+│ 設計釐清（4 個問題）         │ 顯示模板選擇器         │
+│ - 產品感覺                   │                        │
+│ - 參考網站                   │                        │
+│ - 顏色偏好                   │                        │
+│ - 佈局風格                   │                        │
+└─────────────────────────────┴────────────────────────┘
     ↓
 生成 5 變體 → 用戶選擇/合併變體
     ↓
@@ -80,6 +92,37 @@ psql "$DATABASE_URL" -f migrations/add_uiux_columns.sql
 - `selected_variant_ids` - 用戶選擇的變體 ID
 - `final_design_system` - 最終合併的 Design System
 - `generated_pages` / `generated_components` / `generated_styles` - 生成的代碼
+
+---
+
+### 模板內容編輯功能（2026-02-06）
+
+新增模板編輯模式，讓用戶可以點擊模板中的元素直接修改內容和樣式。
+
+**功能**：
+- 點擊「編輯模式」按鈕進入編輯狀態
+- hover 元素顯示虛線邊框提示可編輯
+- 點擊元素顯示藍色實線邊框 + 右側 PropertyEditor
+- 支援修改：文字內容、顏色、字體大小、字重、間距、圓角
+- 即時預覽修改效果
+- 切換設備時保持編輯模式
+
+**修改文件**：
+| 文件 | 修改 |
+|------|------|
+| `PreviewPanel.tsx` | 添加編輯模式狀態、點擊選擇、側欄集成 |
+| `SaasPro.tsx` | 添加 `data-editable` 和 `data-type` 屬性 |
+| `SaasMinimal.tsx` | 同上 |
+| `LandingStartup.tsx` | 同上 |
+| `LandingCorporate.tsx` | 同上 |
+| `EcommerceModern.tsx` | 同上 |
+| `globals.css` | 編輯模式樣式（hover、選中邊框） |
+
+**技術實現**：
+- 為可編輯元素添加 `data-editable="element-id"` 和 `data-type="heading|paragraph|button|label"` 屬性
+- 點擊時提取元素的 computed styles 並傳給 PropertyEditor
+- 通過 DOM 直接修改實現即時預覽
+- 使用 Framer Motion 實現側欄滑入動畫
 
 ---
 

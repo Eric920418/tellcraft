@@ -11,8 +11,8 @@ import { getTemplates } from '../../actions/templates'
 // ============================================================
 
 interface TemplatePickerProps {
-  onSelect: (templateId: string) => void
-  onPreview?: (templateId: string) => void
+  onSelect?: (templateId: string) => void  // 選擇模板（可選，用於直接選擇）
+  onPreview?: (templateId: string) => void  // 預覽模板（點擊卡片觸發）
   selectedId?: string
   recommendedIds?: string[]  // 推薦的模板 ID 列表
   showCategories?: boolean

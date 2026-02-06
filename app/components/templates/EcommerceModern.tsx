@@ -26,7 +26,7 @@ export default function EcommerceModern({ containerWidth }: TemplateProps) {
   return (
     <div style={{ minHeight: '100%', background: colors.white, color: colors.slate900, fontFamily: 'system-ui, -apple-system, sans-serif' }}>
       {/* Announcement Bar */}
-      <div style={{ background: colors.slate900, color: colors.white, textAlign: 'center', padding: '8px 0', fontSize: 14 }}>
+      <div data-editable="announcement-bar" data-type="paragraph" style={{ background: colors.slate900, color: colors.white, textAlign: 'center', padding: '8px 0', fontSize: 14 }}>
         限時優惠：全館滿 $2000 免運費 | 新會員首購 9 折
       </div>
 
@@ -46,7 +46,7 @@ export default function EcommerceModern({ containerWidth }: TemplateProps) {
           alignItems: 'center',
           justifyContent: 'space-between',
         }}>
-          <a href="#" style={{ fontSize: 24, fontWeight: 700, letterSpacing: '-0.025em', textDecoration: 'none', color: 'inherit' }}>MONO</a>
+          <a href="#" data-editable="nav-logo" data-type="heading" style={{ fontSize: 24, fontWeight: 700, letterSpacing: '-0.025em', textDecoration: 'none', color: 'inherit' }}>MONO</a>
 
           {isDesktop && (
             <div style={{ display: 'flex', alignItems: 'center', gap: 32 }}>
@@ -100,14 +100,14 @@ export default function EcommerceModern({ containerWidth }: TemplateProps) {
         }}>
           <div style={{ maxWidth: 1280, margin: '0 auto', padding: '0 24px', width: '100%' }}>
             <div style={{ maxWidth: 512 }}>
-              <span style={{ fontSize: 14, fontWeight: 500, color: colors.slate500, textTransform: 'uppercase', letterSpacing: '0.05em' }}>2024 秋冬系列</span>
-              <h1 style={{ fontSize: isDesktop ? 48 : 36, fontWeight: 700, marginTop: 16, marginBottom: 24, lineHeight: 1.2 }}>
+              <span data-editable="hero-badge" data-type="label" style={{ fontSize: 14, fontWeight: 500, color: colors.slate500, textTransform: 'uppercase', letterSpacing: '0.05em' }}>2024 秋冬系列</span>
+              <h1 data-editable="hero-title" data-type="heading" style={{ fontSize: isDesktop ? 48 : 36, fontWeight: 700, marginTop: 16, marginBottom: 24, lineHeight: 1.2 }}>
                 極簡美學<br/>重新定義
               </h1>
-              <p style={{ fontSize: 18, color: colors.slate600, marginBottom: 32, lineHeight: 1.6 }}>
+              <p data-editable="hero-description" data-type="paragraph" style={{ fontSize: 18, color: colors.slate600, marginBottom: 32, lineHeight: 1.6 }}>
                 探索全新系列，以永恆的設計語言，打造屬於你的風格宣言。
               </p>
-              <a href="#" style={{
+              <a href="#" data-editable="hero-cta" data-type="button" style={{
                 display: 'inline-block',
                 padding: '16px 32px',
                 background: colors.slate900,
@@ -165,8 +165,8 @@ export default function EcommerceModern({ containerWidth }: TemplateProps) {
       <section style={{ padding: '64px 24px', background: colors.slate50 }}>
         <div style={{ maxWidth: 1280, margin: '0 auto' }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 48 }}>
-            <h2 style={{ fontSize: isDesktop ? 30 : 24, fontWeight: 700 }}>熱銷商品</h2>
-            <a href="#" style={{ color: colors.slate600, textDecoration: 'none' }}>查看全部 →</a>
+            <h2 data-editable="products-title" data-type="heading" style={{ fontSize: isDesktop ? 30 : 24, fontWeight: 700 }}>熱銷商品</h2>
+            <a href="#" data-editable="products-link" data-type="button" style={{ color: colors.slate600, textDecoration: 'none' }}>查看全部 →</a>
           </div>
 
           <div style={{
@@ -257,8 +257,8 @@ export default function EcommerceModern({ containerWidth }: TemplateProps) {
       {/* Newsletter */}
       <section style={{ padding: '64px 24px', background: colors.slate900, color: colors.white }}>
         <div style={{ maxWidth: 672, margin: '0 auto', textAlign: 'center' }}>
-          <h2 style={{ fontSize: isDesktop ? 30 : 24, fontWeight: 700, marginBottom: 16 }}>訂閱電子報</h2>
-          <p style={{ color: colors.slate300, marginBottom: 32 }}>
+          <h2 data-editable="newsletter-title" data-type="heading" style={{ fontSize: isDesktop ? 30 : 24, fontWeight: 700, marginBottom: 16 }}>訂閱電子報</h2>
+          <p data-editable="newsletter-description" data-type="paragraph" style={{ color: colors.slate300, marginBottom: 32 }}>
             搶先獲得新品資訊、獨家優惠與風格靈感
           </p>
           <form style={{
@@ -284,6 +284,7 @@ export default function EcommerceModern({ containerWidth }: TemplateProps) {
             />
             <button
               type="submit"
+              data-editable="newsletter-submit" data-type="button"
               style={{
                 padding: '12px 24px',
                 background: colors.white,
@@ -310,8 +311,8 @@ export default function EcommerceModern({ containerWidth }: TemplateProps) {
           gap: 32,
         }}>
           <div>
-            <h3 style={{ fontSize: 20, fontWeight: 700, marginBottom: 16 }}>MONO</h3>
-            <p style={{ color: colors.slate600, fontSize: 14 }}>極簡美學，永恆設計。</p>
+            <h3 data-editable="footer-logo" data-type="heading" style={{ fontSize: 20, fontWeight: 700, marginBottom: 16 }}>MONO</h3>
+            <p data-editable="footer-tagline" data-type="paragraph" style={{ color: colors.slate600, fontSize: 14 }}>極簡美學，永恆設計。</p>
           </div>
           <div>
             <h4 style={{ fontWeight: 600, marginBottom: 16 }}>購物指南</h4>

@@ -45,7 +45,7 @@ export default function LandingStartup({ containerWidth }: TemplateProps) {
           alignItems: 'center',
           justifyContent: 'space-between',
         }}>
-          <a href="#" style={{ fontSize: 20, fontWeight: 700, textDecoration: 'none', color: 'inherit' }}>LaunchPad</a>
+          <a href="#" data-editable="nav-logo" data-type="heading" style={{ fontSize: 20, fontWeight: 700, textDecoration: 'none', color: 'inherit' }}>LaunchPad</a>
           {isTablet && (
             <div style={{ display: 'flex', alignItems: 'center', gap: 32 }}>
               <a href="#features" style={{ color: colors.slate600, textDecoration: 'none' }}>功能</a>
@@ -55,7 +55,7 @@ export default function LandingStartup({ containerWidth }: TemplateProps) {
           )}
           <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
             <a href="#" style={{ color: colors.slate600, textDecoration: 'none' }}>登入</a>
-            <a href="#" style={{
+            <a href="#" data-editable="nav-cta" data-type="button" style={{
               padding: '8px 16px',
               background: colors.slate900,
               color: colors.white,
@@ -69,7 +69,7 @@ export default function LandingStartup({ containerWidth }: TemplateProps) {
       {/* Hero Section */}
       <section style={{ paddingTop: 128, paddingBottom: 80, paddingLeft: 24, paddingRight: 24 }}>
         <div style={{ maxWidth: 896, margin: '0 auto', textAlign: 'center' }}>
-          <span style={{
+          <span data-editable="hero-badge" data-type="label" style={{
             display: 'inline-block',
             padding: '6px 16px',
             background: colors.slate100,
@@ -81,7 +81,7 @@ export default function LandingStartup({ containerWidth }: TemplateProps) {
           }}>
             全新 2.0 版本已上線
           </span>
-          <h1 style={{
+          <h1 data-editable="hero-title" data-type="heading" style={{
             fontSize: isDesktop ? 60 : 36,
             fontWeight: 700,
             marginBottom: 24,
@@ -89,7 +89,7 @@ export default function LandingStartup({ containerWidth }: TemplateProps) {
           }}>
             打造你的下一個{isTablet && <br />}偉大產品
           </h1>
-          <p style={{
+          <p data-editable="hero-description" data-type="paragraph" style={{
             fontSize: 20,
             color: colors.slate600,
             marginBottom: 40,
@@ -107,7 +107,7 @@ export default function LandingStartup({ containerWidth }: TemplateProps) {
             justifyContent: 'center',
             gap: 16,
           }}>
-            <a href="#" style={{
+            <a href="#" data-editable="hero-cta-primary" data-type="button" style={{
               width: isTablet ? 'auto' : '100%',
               padding: '16px 32px',
               background: colors.slate900,
@@ -141,7 +141,7 @@ export default function LandingStartup({ containerWidth }: TemplateProps) {
               觀看演示
             </a>
           </div>
-          <p style={{ marginTop: 24, fontSize: 14, color: colors.slate500 }}>已有超過 10,000+ 團隊信任使用</p>
+          <p data-editable="hero-social-proof" data-type="paragraph" style={{ marginTop: 24, fontSize: 14, color: colors.slate500 }}>已有超過 10,000+ 團隊信任使用</p>
         </div>
       </section>
 
@@ -175,8 +175,8 @@ export default function LandingStartup({ containerWidth }: TemplateProps) {
       <section id="features" style={{ padding: '80px 24px' }}>
         <div style={{ maxWidth: 1152, margin: '0 auto' }}>
           <div style={{ textAlign: 'center', marginBottom: 64 }}>
-            <h2 style={{ fontSize: isDesktop ? 36 : 30, fontWeight: 700, marginBottom: 16 }}>專為效率而生</h2>
-            <p style={{ fontSize: 18, color: colors.slate600, maxWidth: 672, margin: '0 auto', lineHeight: 1.6 }}>
+            <h2 data-editable="features-title" data-type="heading" style={{ fontSize: isDesktop ? 36 : 30, fontWeight: 700, marginBottom: 16 }}>專為效率而生</h2>
+            <p data-editable="features-description" data-type="paragraph" style={{ fontSize: 18, color: colors.slate600, maxWidth: 672, margin: '0 auto', lineHeight: 1.6 }}>
               我們的平台提供了你需要的一切工具，幫助你快速驗證想法並推向市場
             </p>
           </div>
@@ -264,8 +264,8 @@ export default function LandingStartup({ containerWidth }: TemplateProps) {
       <section id="pricing" style={{ padding: '80px 24px', background: colors.slate50 }}>
         <div style={{ maxWidth: 1152, margin: '0 auto' }}>
           <div style={{ textAlign: 'center', marginBottom: 64 }}>
-            <h2 style={{ fontSize: isDesktop ? 36 : 30, fontWeight: 700, marginBottom: 16 }}>簡單透明的價格</h2>
-            <p style={{ fontSize: 18, color: colors.slate600 }}>無隱藏費用，隨時取消</p>
+            <h2 data-editable="pricing-title" data-type="heading" style={{ fontSize: isDesktop ? 36 : 30, fontWeight: 700, marginBottom: 16 }}>簡單透明的價格</h2>
+            <p data-editable="pricing-description" data-type="paragraph" style={{ fontSize: 18, color: colors.slate600 }}>無隱藏費用，隨時取消</p>
           </div>
 
           <div style={{
@@ -400,13 +400,13 @@ export default function LandingStartup({ containerWidth }: TemplateProps) {
       {/* CTA Section */}
       <section style={{ padding: '80px 24px' }}>
         <div style={{ maxWidth: 896, margin: '0 auto', textAlign: 'center' }}>
-          <h2 style={{ fontSize: isDesktop ? 36 : 30, fontWeight: 700, marginBottom: 24 }}>
+          <h2 data-editable="cta-title" data-type="heading" style={{ fontSize: isDesktop ? 36 : 30, fontWeight: 700, marginBottom: 24 }}>
             準備好開始了嗎？
           </h2>
-          <p style={{ fontSize: 18, color: colors.slate600, marginBottom: 40, lineHeight: 1.6 }}>
+          <p data-editable="cta-description" data-type="paragraph" style={{ fontSize: 18, color: colors.slate600, marginBottom: 40, lineHeight: 1.6 }}>
             加入超過 10,000 位創作者的行列，今天就開始打造你的產品
           </p>
-          <a href="#" style={{
+          <a href="#" data-editable="cta-button" data-type="button" style={{
             display: 'inline-block',
             padding: '16px 32px',
             background: colors.slate900,
@@ -432,7 +432,7 @@ export default function LandingStartup({ containerWidth }: TemplateProps) {
           justifyContent: 'space-between',
           gap: 24,
         }}>
-          <div style={{ fontSize: 20, fontWeight: 700 }}>LaunchPad</div>
+          <div data-editable="footer-logo" data-type="heading" style={{ fontSize: 20, fontWeight: 700 }}>LaunchPad</div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 32, fontSize: 14, color: colors.slate500 }}>
             <a href="#" style={{ color: 'inherit', textDecoration: 'none' }}>隱私政策</a>
             <a href="#" style={{ color: 'inherit', textDecoration: 'none' }}>服務條款</a>

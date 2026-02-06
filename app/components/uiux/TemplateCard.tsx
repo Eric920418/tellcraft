@@ -52,7 +52,7 @@ export default function TemplateCard({
       animate={{ opacity: 1, y: 0 }}
       whileHover={{ y: -4 }}
       transition={{ duration: 0.3, ease: [0.32, 0.72, 0, 1] }}
-      onClick={() => onSelect?.(template.id)}
+      onClick={() => onPreview?.(template.id)}
       style={{
         position: 'relative',
         borderRadius: 12,

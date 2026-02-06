@@ -31,7 +31,7 @@ export default function SaasMinimal({ containerWidth }: TemplateProps) {
             padding: 24,
           }}>
             <div style={{ marginBottom: 32 }}>
-              <h1 style={{ fontSize: 20, fontWeight: 600 }}>Dashboard</h1>
+              <h1 data-editable="sidebar-title" data-type="heading" style={{ fontSize: 20, fontWeight: 600 }}>Dashboard</h1>
             </div>
             <nav style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
               {[
@@ -77,10 +77,10 @@ export default function SaasMinimal({ containerWidth }: TemplateProps) {
             marginBottom: 32,
           }}>
             <div>
-              <h2 style={{ fontSize: 24, fontWeight: 600 }}>歡迎回來</h2>
-              <p style={{ color: colors.slate500 }}>這是您的業務概覽</p>
+              <h2 data-editable="page-title" data-type="heading" style={{ fontSize: 24, fontWeight: 600 }}>歡迎回來</h2>
+              <p data-editable="page-subtitle" data-type="paragraph" style={{ color: colors.slate500 }}>這是您的業務概覽</p>
             </div>
-            <button style={{
+            <button data-editable="header-cta" data-type="button" style={{
               padding: '8px 16px',
               background: colors.slate900,
               color: colors.white,
@@ -133,7 +133,7 @@ export default function SaasMinimal({ containerWidth }: TemplateProps) {
               border: `1px solid ${colors.slate200}`,
               borderRadius: 12,
             }}>
-              <h3 style={{ fontWeight: 600, marginBottom: 16 }}>收入趨勢</h3>
+              <h3 data-editable="chart-title" data-type="heading" style={{ fontWeight: 600, marginBottom: 16 }}>收入趨勢</h3>
               <div style={{
                 height: 256,
                 display: 'flex',
@@ -171,7 +171,7 @@ export default function SaasMinimal({ containerWidth }: TemplateProps) {
               border: `1px solid ${colors.slate200}`,
               borderRadius: 12,
             }}>
-              <h3 style={{ fontWeight: 600, marginBottom: 16 }}>最近活動</h3>
+              <h3 data-editable="activity-title" data-type="heading" style={{ fontWeight: 600, marginBottom: 16 }}>最近活動</h3>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
                 {[
                   { name: '王小明', action: '升級方案', time: '2 分鐘前' },

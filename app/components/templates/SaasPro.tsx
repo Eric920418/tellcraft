@@ -43,8 +43,8 @@ export default function SaasPro({ containerWidth }: TemplateProps) {
             flexDirection: 'column',
           }}>
             <div style={{ marginBottom: 32 }}>
-              <h1 style={{ fontSize: 20, fontWeight: 700 }}>Enterprise</h1>
-              <p style={{ color: colors.slate400, fontSize: 14 }}>企業管理平台</p>
+              <h1 data-editable="sidebar-title" data-type="heading" style={{ fontSize: 20, fontWeight: 700 }}>Enterprise</h1>
+              <p data-editable="sidebar-subtitle" data-type="paragraph" style={{ color: colors.slate400, fontSize: 14 }}>企業管理平台</p>
             </div>
 
             <nav style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 4 }}>
@@ -147,7 +147,7 @@ export default function SaasPro({ containerWidth }: TemplateProps) {
                   borderRadius: '50%',
                 }}></span>
               </button>
-              <button style={{
+              <button data-editable="header-cta" data-type="button" style={{
                 padding: '8px 16px',
                 background: colors.slate900,
                 color: colors.white,
@@ -164,8 +164,8 @@ export default function SaasPro({ containerWidth }: TemplateProps) {
           <div style={{ flex: 1, padding: 24, overflow: 'auto' }}>
             {/* Page Title */}
             <div style={{ marginBottom: 24 }}>
-              <h2 style={{ fontSize: 24, fontWeight: 700 }}>儀表板</h2>
-              <p style={{ color: colors.slate500 }}>業務績效一覽</p>
+              <h2 data-editable="page-title" data-type="heading" style={{ fontSize: 24, fontWeight: 700 }}>儀表板</h2>
+              <p data-editable="page-subtitle" data-type="paragraph" style={{ color: colors.slate500 }}>業務績效一覽</p>
             </div>
 
             {/* Stats Row */}
@@ -220,7 +220,7 @@ export default function SaasPro({ containerWidth }: TemplateProps) {
                 border: `1px solid ${colors.slate200}`,
               }}>
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 24 }}>
-                  <h3 style={{ fontWeight: 600 }}>營收趨勢</h3>
+                  <h3 data-editable="chart-title" data-type="heading" style={{ fontWeight: 600 }}>營收趨勢</h3>
                   <div style={{ display: 'flex', gap: 8 }}>
                     {['月', '季', '年'].map((period, i) => (
                       <button key={i} style={{
@@ -258,7 +258,7 @@ export default function SaasPro({ containerWidth }: TemplateProps) {
                 boxShadow: '0 1px 3px rgba(0,0,0,0.06)',
                 border: `1px solid ${colors.slate200}`,
               }}>
-                <h3 style={{ fontWeight: 600, marginBottom: 16 }}>最近訂單</h3>
+                <h3 data-editable="orders-title" data-type="heading" style={{ fontWeight: 600, marginBottom: 16 }}>最近訂單</h3>
                 <div style={{ display: 'flex', flexDirection: 'column' }}>
                   {[
                     { id: '#ORD-7829', plan: '企業方案', amount: '$4,500', status: '已完成', statusColor: colors.emerald600 },
@@ -284,7 +284,7 @@ export default function SaasPro({ containerWidth }: TemplateProps) {
                     </div>
                   ))}
                 </div>
-                <button style={{
+                <button data-editable="orders-cta" data-type="button" style={{
                   width: '100%',
                   marginTop: 16,
                   padding: 8,

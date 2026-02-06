@@ -1910,9 +1910,10 @@ function ChatSection({
                           style={{ marginTop: 16, width: '100%' }}
                         >
                           <TemplatePicker
-                            onSelect={handleTemplateSelect}
+                            onPreview={handleTemplateSelect}
                             selectedId={selectedTemplateId || undefined}
                             columns={layoutMode === 'split' ? 1 : 2}
+                            showCategories={false}
                           />
                         </motion.div>
                       )}

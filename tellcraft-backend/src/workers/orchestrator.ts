@@ -76,6 +76,9 @@ interface FlowState {
     components: GeneratedComponent[]
     styles: string
   }
+  // 設計釐清
+  uiuxDesignClarifyStep?: number // 當前釐清步驟（1-4）
+  uiuxDesignIdeas?: Array<{ step: string; answer: string }> // 用戶的設計想法
 }
 
 // PRD Discovery 限制
@@ -228,8 +231,20 @@ async function handleContinueFlow(
     return
   }
 
+  // 處理設計偏好回覆（A = 有想法，B = 沒想法看模板）
+  if (state.phase === 'uiux_design_preference') {
+    await handleDesignPreferenceReply(conversationId, state, message, redis, io)
+    return
+  }
+
+  // 處理設計釐清階段
+  if (state.phase === 'uiux_design_clarify') {
+    await handleDesignClarifyReply(conversationId, state, message, redis, io)
+    return
+  }
+
   // 特殊處理：UIUX 階段的訊息（不需要 waitingForReply）
-  if (state.phase === 'completed' || state.phase === 'uiux_template_selection') {
+  if (state.phase === 'uiux_template_selection' || state.phase === 'spec_completed') {
     // 檢查是否是模板選擇訊息
     if (message.includes('我選擇') && message.includes('模板')) {
       await handleTemplateSelection(conversationId, state, message, redis, io)
@@ -1284,7 +1299,7 @@ async function fixFeaturesAndComplete(
 }
 
 /**
- * 完成 Spec 階段，設為 completed
+ * 完成 Spec 階段，進入 UIUX 設計偏好詢問
  */
 async function completeSpecPhase(
   conversationId: string,
@@ -1292,80 +1307,31 @@ async function completeSpecPhase(
   redis: Redis,
   io: SocketIOServer
 ) {
-  // 更新 session 為 completed
+  // 更新 session 為 spec_completed（但還沒進入 UIUX）
   await updateBddSession({
     sessionId: state.sessionId!,
     updates: {
-      currentPhase: 'completed',
+      currentPhase: 'spec_completed',
     },
   })
 
-  // 發送最終完成消息
+  // 發送規格完成消息
   const session = await getBddSession({ sessionId: state.sessionId! })
   const featureCount = session.data?.featuresContent?.length || 0
 
   await sendMessage(conversationId, io, {
     content: `規格產出完成！\n\n已生成：\n- 資料庫 Schema\n- ${featureCount} 個功能規格 (Feature Files)\n\n你可以在專案詳情頁面查看完整規格。`,
     stage: 'spec_complete',
-    progress: { current: 4, total: 4, step: '完成' },
+    progress: { current: 4, total: 4, step: '規格完成' },
   })
 
-  // 獲取模板列表
-  const templatesResult = await db.query<{
-    id: string
-    name: string
-    slug: string
-    category: string
-    description: string
-    thumbnail_url: string
-    preview_image_url: string | null
-    tags: string[]
-    design_defaults: unknown
-    page_structure: unknown
-    is_featured: boolean
-    sort_order: number
-  }>('SELECT * FROM templates WHERE is_active = true ORDER BY sort_order ASC')
-
-  const templates = templatesResult.rows.map(row => ({
-    id: row.id,
-    name: row.name,
-    slug: row.slug,
-    category: row.category,
-    description: row.description,
-    thumbnailUrl: row.thumbnail_url,
-    previewImageUrl: row.preview_image_url,
-    tags: row.tags,
-    designDefaults: row.design_defaults,
-    pageStructure: row.page_structure,
-    isFeatured: row.is_featured,
-    sortOrder: row.sort_order,
-  }))
-
-  // 獲取推薦的模板 ID（featured 的模板）
-  const recommendedIds = templates.filter(t => t.isFeatured).map(t => t.id)
-
-  // 發送 UIUX 開始消息，觸發前端切換到分屏模式並顯示模板選擇器
-  await sendMessage(conversationId, io, {
-    content: '規格已完成！現在讓我們為您的產品選擇一個設計模板。\n\n請從下方選擇一個最符合您需求的模板，或直接告訴我您想要的設計風格。',
-    stage: 'uiux_template_picker',
-    layoutHint: 'split',
-    richContent: {
-      type: 'template_picker',
-      data: {
-        templates,
-        recommendedIds,
-        selectedTemplateId: null,
-      },
-    },
-  })
-
-  // 更新對話為完成
+  // 更新對話為 spec_complete
   await db.query(
     'UPDATE conversations SET spec_complete = true, updated_at = NOW() WHERE id = $1',
     [conversationId]
   )
 
-  // 完成任務
+  // 完成 BDD Spec 任務
   if (state.taskId) {
     await db.updateTask(state.taskId, {
       status: 'completed',
@@ -1373,12 +1339,18 @@ async function completeSpecPhase(
     })
   }
 
-  // 清理流程狀態
-  state.phase = 'completed'
-  state.waitingForReply = false
+  // 詢問用戶設計偏好
+  await sendMessage(conversationId, io, {
+    content: `接下來是 UI/UX 設計階段。\n\n你對產品的外觀有什麼想法嗎？\n\n**A.** 我有一些想法，想跟你討論\n**B.** 沒有特別的想法，給我看看模板`,
+    stage: 'uiux_design_preference',
+  })
+
+  // 更新狀態為等待設計偏好回覆
+  state.phase = 'uiux_design_preference'
+  state.waitingForReply = true
   await saveFlowState(redis, conversationId, state)
 
-  console.log('[Orchestrator] Spec 階段完成，規格最終完成')
+  console.log('[Orchestrator] Spec 階段完成，等待用戶設計偏好')
 }
 
 // ============================================================
@@ -2063,4 +2035,384 @@ async function handleConfirmTemplate(
     content: '請先選擇一個模板。',
     stage: 'uiux_prompt_template_selection',
   })
+}
+
+// ============================================================
+// 設計偏好詢問與釐清
+// ============================================================
+
+/**
+ * 處理設計偏好回覆
+ * A = 有想法，進入設計釐清
+ * B = 沒想法，顯示模板
+ */
+async function handleDesignPreferenceReply(
+  conversationId: string,
+  state: FlowState,
+  message: string,
+  redis: Redis,
+  io: SocketIOServer
+) {
+  const trimmed = message.trim().toUpperCase()
+
+  // 判斷用戶選擇
+  const hasIdeas = trimmed === 'A' ||
+    trimmed.startsWith('A.') ||
+    message.includes('有想法') ||
+    message.includes('想討論') ||
+    message.includes('我想要')
+
+  const noIdeas = trimmed === 'B' ||
+    trimmed.startsWith('B.') ||
+    message.includes('沒有') ||
+    message.includes('看模板') ||
+    message.includes('沒想法')
+
+  if (hasIdeas) {
+    // 進入設計釐清流程
+    await startDesignClarify(conversationId, state, redis, io)
+  } else if (noIdeas) {
+    // 顯示模板選擇器
+    await showTemplatePicker(conversationId, state, redis, io)
+  } else {
+    // 無法識別，視為有想法，把訊息當作第一個設計想法
+    await startDesignClarifyWithInitialIdea(conversationId, state, message, redis, io)
+  }
+}
+
+/**
+ * 開始設計釐清流程
+ */
+async function startDesignClarify(
+  conversationId: string,
+  state: FlowState,
+  redis: Redis,
+  io: SocketIOServer
+) {
+  await sendMessage(conversationId, io, {
+    content: `很好！讓我來了解你的設計想法。\n\n首先，請告訴我：\n\n**你希望產品給用戶什麼樣的感覺？**\n\n_例如：專業可靠、活潑有趣、簡約現代、溫暖親切..._`,
+    stage: 'uiux_design_clarify',
+  })
+
+  // 初始化設計釐清狀態
+  state.phase = 'uiux_design_clarify'
+  state.uiuxDesignClarifyStep = 1
+  state.uiuxDesignIdeas = []
+  state.waitingForReply = true
+  await saveFlowState(redis, conversationId, state)
+}
+
+/**
+ * 開始設計釐清流程，帶有初始想法
+ */
+async function startDesignClarifyWithInitialIdea(
+  conversationId: string,
+  state: FlowState,
+  initialIdea: string,
+  redis: Redis,
+  io: SocketIOServer
+) {
+  // 保存初始想法
+  state.phase = 'uiux_design_clarify'
+  state.uiuxDesignClarifyStep = 2
+  state.uiuxDesignIdeas = [{ step: 'initial', answer: initialIdea }]
+
+  await sendMessage(conversationId, io, {
+    content: `收到！「${initialIdea}」\n\n接下來，請告訴我：\n\n**你有沒有喜歡的網站或 App 可以參考？**\n\n_可以提供名稱或網址，例如：Notion、Stripe、Apple..._`,
+    stage: 'uiux_design_clarify',
+  })
+
+  state.waitingForReply = true
+  await saveFlowState(redis, conversationId, state)
+}
+
+/**
+ * 處理設計釐清回覆
+ */
+async function handleDesignClarifyReply(
+  conversationId: string,
+  state: FlowState,
+  message: string,
+  redis: Redis,
+  io: SocketIOServer
+) {
+  const step = state.uiuxDesignClarifyStep || 1
+  const ideas = state.uiuxDesignIdeas || []
+
+  // 設計釐清問題序列
+  const clarifyQuestions = [
+    {
+      step: 1,
+      key: 'feeling',
+      question: '你希望產品給用戶什麼樣的感覺？',
+      hint: '例如：專業可靠、活潑有趣、簡約現代、溫暖親切...',
+    },
+    {
+      step: 2,
+      key: 'reference',
+      question: '你有沒有喜歡的網站或 App 可以參考？',
+      hint: '可以提供名稱或網址，例如：Notion、Stripe、Apple...',
+    },
+    {
+      step: 3,
+      key: 'color',
+      question: '你對顏色有什麼偏好嗎？',
+      hint: '例如：藍色系、暖色調、黑白灰、品牌色是 #FF5733...',
+    },
+    {
+      step: 4,
+      key: 'layout',
+      question: '你偏好什麼樣的佈局風格？',
+      hint: '例如：簡潔留白、內容密集、卡片式、列表式...',
+    },
+  ]
+
+  // 保存當前回答
+  const currentQuestion = clarifyQuestions.find(q => q.step === step)
+  if (currentQuestion) {
+    ideas.push({ step: currentQuestion.key, answer: message.trim() })
+    state.uiuxDesignIdeas = ideas
+  }
+
+  // 檢查是否還有下一個問題
+  const nextQuestion = clarifyQuestions.find(q => q.step === step + 1)
+
+  if (nextQuestion) {
+    // 繼續下一個問題
+    await sendMessage(conversationId, io, {
+      content: `好的，收到！\n\n**${nextQuestion.question}**\n\n_${nextQuestion.hint}_`,
+      stage: 'uiux_design_clarify',
+    })
+
+    state.uiuxDesignClarifyStep = step + 1
+    state.waitingForReply = true
+    await saveFlowState(redis, conversationId, state)
+  } else {
+    // 釐清完成，生成設計方案
+    await completeDesignClarify(conversationId, state, redis, io)
+  }
+}
+
+/**
+ * 完成設計釐清，基於用戶想法生成設計變體
+ */
+async function completeDesignClarify(
+  conversationId: string,
+  state: FlowState,
+  redis: Redis,
+  io: SocketIOServer
+) {
+  const ideas = state.uiuxDesignIdeas || []
+
+  // 整理用戶的設計想法
+  const designBrief = ideas.map(i => `- ${i.step}: ${i.answer}`).join('\n')
+
+  await sendMessage(conversationId, io, {
+    content: `太好了！根據你的設計想法：\n\n${designBrief}\n\n正在為你生成 5 個設計方案...`,
+    stage: 'uiux_design_clarify_complete',
+    progress: { current: 1, total: 3, step: '分析設計需求' },
+  })
+
+  // 取得 BDD Session
+  if (!state.sessionId) {
+    console.error('[Orchestrator] 缺少 sessionId')
+    return
+  }
+
+  const session = await getBddSession({ sessionId: state.sessionId })
+  if (!session.success || !session.data) {
+    console.error('[Orchestrator] 無法取得 BDD Session')
+    return
+  }
+
+  // 構建設計需求摘要
+  const bddSpec = session.data.featuresContent
+    ? session.data.featuresContent.map(f => `- ${f.name}`).join('\n')
+    : ''
+
+  // 創建一個虛擬模板，基於用戶的設計想法
+  const customTemplate: TemplateData = {
+    id: 'custom',
+    name: 'Custom Design',
+    slug: 'custom',
+    category: inferCategoryFromIdeas(ideas),
+    description: designBrief,
+    designDefaults: inferDesignDefaultsFromIdeas(ideas),
+    pageStructure: { pages: ['home', 'dashboard'], components: [] },
+  }
+
+  // 生成設計變體
+  const productType = session.data.projectContext || '通用應用'
+  const variantsResult = await generateDesignVariants(
+    customTemplate,
+    bddSpec,
+    productType,
+    { conversationId }
+  )
+
+  if (!variantsResult.success || !variantsResult.variants) {
+    console.error('[Orchestrator] 生成設計變體失敗:', variantsResult.error)
+    await sendMessage(conversationId, io, {
+      content: `生成設計方案時發生錯誤。讓我們改用模板開始。`,
+      stage: 'error',
+    })
+    await showTemplatePicker(conversationId, state, redis, io)
+    return
+  }
+
+  const variants = variantsResult.variants
+  console.log(`[Orchestrator] 成功生成 ${variants.length} 個設計變體（基於用戶想法）`)
+
+  // 保存變體到 BDD Session
+  await updateBddSession({
+    sessionId: state.sessionId,
+    updates: {
+      designVariants: variants,
+      currentPhase: 'uiux_variant_selection',
+    },
+  })
+
+  // 更新狀態
+  state.phase = 'uiux_variant_selection'
+  state.uiuxVariants = variants
+  state.waitingForReply = true
+  await saveFlowState(redis, conversationId, state)
+
+  // 構建變體描述
+  const variantDescriptions = variants.map(v =>
+    `**${v.id}. ${v.name}**\n${v.description}\n關鍵特點：${v.keyFeatures.join('、')}`
+  ).join('\n\n')
+
+  // 發送變體選擇訊息
+  await sendMessage(conversationId, io, {
+    content: `根據你的設計想法，我生成了 5 個設計方案：\n\n${variantDescriptions}\n\n請選擇你喜歡的方向：\n- 輸入「選擇 A」直接使用某個方案\n- 輸入「合併 A+C」組合多個方案的特點`,
+    stage: 'uiux_variants_ready',
+    layoutHint: 'split',
+    richContent: {
+      type: 'variant_picker' as 'template_picker',
+      data: {
+        variants: variants,
+        selectedIds: [],
+        fromUserIdeas: true,
+      } as Record<string, unknown>,
+    },
+  })
+}
+
+/**
+ * 顯示模板選擇器
+ */
+async function showTemplatePicker(
+  conversationId: string,
+  state: FlowState,
+  redis: Redis,
+  io: SocketIOServer
+) {
+  // 獲取模板列表
+  const templatesResult = await db.query<{
+    id: string
+    name: string
+    slug: string
+    category: string
+    description: string
+    thumbnail_url: string
+    preview_image_url: string | null
+    tags: string[]
+    design_defaults: unknown
+    page_structure: unknown
+    is_featured: boolean
+    sort_order: number
+  }>('SELECT * FROM templates WHERE is_active = true ORDER BY sort_order ASC')
+
+  const templates = templatesResult.rows.map(row => ({
+    id: row.id,
+    name: row.name,
+    slug: row.slug,
+    category: row.category,
+    description: row.description,
+    thumbnailUrl: row.thumbnail_url,
+    previewImageUrl: row.preview_image_url,
+    tags: row.tags,
+    designDefaults: row.design_defaults,
+    pageStructure: row.page_structure,
+    isFeatured: row.is_featured,
+    sortOrder: row.sort_order,
+  }))
+
+  const recommendedIds = templates.filter(t => t.isFeatured).map(t => t.id)
+
+  await sendMessage(conversationId, io, {
+    content: '好的！請從下方選擇一個設計模板作為起點：',
+    stage: 'uiux_template_picker',
+    layoutHint: 'split',
+    richContent: {
+      type: 'template_picker',
+      data: {
+        templates,
+        recommendedIds,
+        selectedTemplateId: null,
+      },
+    },
+  })
+
+  state.phase = 'uiux_template_selection'
+  state.waitingForReply = false
+  await saveFlowState(redis, conversationId, state)
+}
+
+/**
+ * 從用戶想法推斷類別
+ */
+function inferCategoryFromIdeas(ideas: Array<{ step: string; answer: string }>): string {
+  const allText = ideas.map(i => i.answer).join(' ').toLowerCase()
+
+  if (allText.includes('dashboard') || allText.includes('後台') || allText.includes('管理')) {
+    return 'dashboard'
+  }
+  if (allText.includes('電商') || allText.includes('購物') || allText.includes('ecommerce')) {
+    return 'ecommerce'
+  }
+  if (allText.includes('landing') || allText.includes('行銷') || allText.includes('宣傳')) {
+    return 'landing'
+  }
+  if (allText.includes('saas') || allText.includes('工具') || allText.includes('平台')) {
+    return 'saas'
+  }
+
+  return 'general'
+}
+
+/**
+ * 從用戶想法推斷設計默認值
+ */
+function inferDesignDefaultsFromIdeas(ideas: Array<{ step: string; answer: string }>): TemplateData['designDefaults'] {
+  const defaults: TemplateData['designDefaults'] = {}
+
+  const colorIdea = ideas.find(i => i.step === 'color')
+  if (colorIdea) {
+    const answer = colorIdea.answer.toLowerCase()
+    if (answer.includes('藍') || answer.includes('blue')) {
+      defaults.colorScheme = 'blue'
+    } else if (answer.includes('綠') || answer.includes('green')) {
+      defaults.colorScheme = 'green'
+    } else if (answer.includes('紅') || answer.includes('red')) {
+      defaults.colorScheme = 'red'
+    } else if (answer.includes('黑') || answer.includes('dark') || answer.includes('暗')) {
+      defaults.colorScheme = 'dark'
+    } else if (answer.includes('暖')) {
+      defaults.colorScheme = 'warm'
+    }
+  }
+
+  const layoutIdea = ideas.find(i => i.step === 'layout')
+  if (layoutIdea) {
+    const answer = layoutIdea.answer.toLowerCase()
+    if (answer.includes('簡潔') || answer.includes('留白') || answer.includes('minimal')) {
+      defaults.spacing = 'spacious'
+    } else if (answer.includes('密集') || answer.includes('compact')) {
+      defaults.spacing = 'compact'
+    }
+  }
+
+  return defaults
 }

@@ -1,13 +1,14 @@
 'use client'
 
-import { useState, useRef, useEffect } from 'react'
+import { useState, useRef, useEffect, useCallback } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import DeviceSwitcher, { DeviceType, getDeviceWidth } from './DeviceSwitcher'
 import { TemplateComponents, isSupportedTemplate } from '../templates'
+import PropertyEditor from './PropertyEditor'
 
 // ============================================================
 // PreviewPanel - 預覽面板元件
-// 直接渲染模板組件，響應式即時生效
+// 直接渲染模板組件，響應式即時生效，支援元素編輯
 // ============================================================
 
 interface PreviewPanelProps {
@@ -18,13 +19,27 @@ interface PreviewPanelProps {
   error?: string                          // 錯誤訊息
 }
 
-// 元素資訊（用於互動編輯）- 保留介面兼容性
+// 元素資訊（用於互動編輯）
 export interface ElementInfo {
   id: string
   tagName: string
   text?: string
   styles: Record<string, string>
   rect: { x: number; y: number; width: number; height: number }
+}
+
+// 從 DOM 元素提取樣式
+function extractStyles(element: HTMLElement): Record<string, string> {
+  const computed = window.getComputedStyle(element)
+  return {
+    color: computed.color,
+    backgroundColor: computed.backgroundColor,
+    fontSize: computed.fontSize,
+    fontWeight: computed.fontWeight,
+    padding: computed.padding,
+    margin: computed.margin,
+    borderRadius: computed.borderRadius,
+  }
 }
 
 export default function PreviewPanel({
@@ -37,6 +52,12 @@ export default function PreviewPanel({
   const [device, setDevice] = useState<DeviceType>('desktop')
   const [containerSize, setContainerSize] = useState({ width: 0, height: 0 })
   const containerRef = useRef<HTMLDivElement>(null)
+  const previewContainerRef = useRef<HTMLDivElement>(null)
+
+  // 編輯模式狀態
+  const [editMode, setEditMode] = useState(false)
+  const [selectedElement, setSelectedElement] = useState<ElementInfo | null>(null)
+  const [elementOverrides, setElementOverrides] = useState<Record<string, Record<string, string>>>({})
 
   const deviceWidth = getDeviceWidth(device)
 
@@ -44,8 +65,10 @@ export default function PreviewPanel({
   useEffect(() => {
     const updateSize = () => {
       if (!containerRef.current) return
+      // 編輯模式時預留側欄寬度
+      const sidebarWidth = editMode && selectedElement ? 280 : 0
       setContainerSize({
-        width: containerRef.current.clientWidth - 48,  // padding
+        width: containerRef.current.clientWidth - 48 - sidebarWidth,
         height: containerRef.current.clientHeight - 48,
       })
     }
@@ -53,7 +76,7 @@ export default function PreviewPanel({
     updateSize()
     window.addEventListener('resize', updateSize)
     return () => window.removeEventListener('resize', updateSize)
-  }, [])
+  }, [editMode, selectedElement])
 
   // 只根據寬度計算縮放，讓模板填滿容器
   const scale = Math.min(containerSize.width / deviceWidth, 1)
@@ -65,6 +88,78 @@ export default function PreviewPanel({
   // 檢查模板是否支援直接渲染
   const canRenderDirectly = templateSlug && isSupportedTemplate(templateSlug)
   const TemplateComponent = canRenderDirectly ? TemplateComponents[templateSlug] : null
+
+  // 點擊處理函數
+  const handleContainerClick = useCallback((e: React.MouseEvent) => {
+    if (!editMode) return
+
+    // 找到最近的 data-editable 元素
+    const target = (e.target as HTMLElement).closest('[data-editable]') as HTMLElement | null
+    if (!target) {
+      setSelectedElement(null)
+      return
+    }
+
+    e.preventDefault()
+    e.stopPropagation()
+
+    // 提取元素資訊
+    const rect = target.getBoundingClientRect()
+    const elementInfo: ElementInfo = {
+      id: target.getAttribute('data-editable') || '',
+      tagName: target.tagName,
+      text: target.textContent || '',
+      styles: extractStyles(target),
+      rect: { x: rect.x, y: rect.y, width: rect.width, height: rect.height },
+    }
+
+    setSelectedElement(elementInfo)
+  }, [editMode])
+
+  // 更新元素內容和樣式
+  const handleElementUpdate = useCallback((elementId: string, changes: Record<string, string>) => {
+    setElementOverrides(prev => ({
+      ...prev,
+      [elementId]: { ...prev[elementId], ...changes }
+    }))
+
+    // 直接修改 DOM（即時預覽）
+    const el = previewContainerRef.current?.querySelector(`[data-editable="${elementId}"]`) as HTMLElement
+    if (el) {
+      if (changes.text !== undefined) {
+        el.textContent = changes.text
+      }
+      Object.entries(changes).forEach(([key, value]) => {
+        if (key !== 'text') {
+          el.style[key as any] = value
+        }
+      })
+    }
+
+    // 同步更新 selectedElement 的樣式
+    if (selectedElement && selectedElement.id === elementId) {
+      setSelectedElement(prev => prev ? {
+        ...prev,
+        text: changes.text !== undefined ? changes.text : prev.text,
+        styles: { ...prev.styles, ...changes }
+      } : null)
+    }
+  }, [selectedElement])
+
+  // 切換設備時重新載入
+  const handleDeviceChange = useCallback((newDevice: DeviceType) => {
+    setDevice(newDevice)
+    // 切換設備時保持編輯狀態但清除選中
+    setSelectedElement(null)
+  }, [])
+
+  // 退出編輯模式時清除選中
+  const handleToggleEditMode = useCallback(() => {
+    if (editMode) {
+      setSelectedElement(null)
+    }
+    setEditMode(!editMode)
+  }, [editMode])
 
   return (
     <div
@@ -86,7 +181,7 @@ export default function PreviewPanel({
           background: 'var(--white)',
         }}
       >
-        {/* 左側：模板名稱 */}
+        {/* 左側：模板名稱 + 編輯模式按鈕 */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
           {templateName && (
             <span
@@ -110,10 +205,38 @@ export default function PreviewPanel({
               {deviceWidth}px
             </span>
           )}
+          {/* 編輯模式按鈕 */}
+          {TemplateComponent && (
+            <motion.button
+              whileHover={{ scale: 1.02 }}
+              whileTap={{ scale: 0.98 }}
+              onClick={handleToggleEditMode}
+              style={{
+                marginLeft: 8,
+                padding: '6px 12px',
+                fontSize: 12,
+                fontWeight: 500,
+                background: editMode ? 'var(--black)' : 'var(--gray-100)',
+                color: editMode ? 'var(--white)' : 'var(--gray-600)',
+                border: 'none',
+                borderRadius: 6,
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                gap: 6,
+              }}
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7" />
+                <path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z" />
+              </svg>
+              {editMode ? '完成編輯' : '編輯模式'}
+            </motion.button>
+          )}
         </div>
 
         {/* 中間：設備切換器 */}
-        <DeviceSwitcher activeDevice={device} onDeviceChange={setDevice} />
+        <DeviceSwitcher activeDevice={device} onDeviceChange={handleDeviceChange} />
 
         {/* 右側：縮放比例 */}
         <div style={{ width: 80, textAlign: 'right' }}>
@@ -131,153 +254,199 @@ export default function PreviewPanel({
         </div>
       </div>
 
-      {/* 預覽區域 */}
-      <div
-        ref={containerRef}
-        style={{
-          flex: 1,
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          padding: 24,
-          overflow: 'hidden',
-          background: 'var(--gray-50)',
-        }}
-      >
-        <AnimatePresence mode="wait">
-          {isLoading && (
-            <motion.div
-              key="loading"
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              style={{
-                display: 'flex',
-                flexDirection: 'column',
-                alignItems: 'center',
-                gap: 16,
-                color: 'var(--gray-500)',
-              }}
-            >
+      {/* 主內容區域 */}
+      <div style={{ flex: 1, display: 'flex', overflow: 'hidden' }}>
+        {/* 預覽區域 */}
+        <div
+          ref={containerRef}
+          style={{
+            flex: 1,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: 24,
+            overflow: 'hidden',
+            background: 'var(--gray-50)',
+          }}
+        >
+          <AnimatePresence mode="wait">
+            {isLoading && (
               <motion.div
-                animate={{ rotate: 360 }}
-                transition={{ duration: 1, repeat: Infinity, ease: 'linear' }}
+                key="loading"
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
                 style={{
-                  width: 32,
-                  height: 32,
-                  borderRadius: '50%',
-                  border: '2px solid var(--gray-200)',
-                  borderTopColor: 'var(--gray-500)',
-                }}
-              />
-              <span style={{ fontSize: 14 }}>正在載入模板...</span>
-            </motion.div>
-          )}
-
-          {error && (
-            <motion.div
-              key="error"
-              initial={{ opacity: 0, y: 10 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0 }}
-              style={{
-                display: 'flex',
-                flexDirection: 'column',
-                alignItems: 'center',
-                gap: 12,
-                color: 'var(--gray-500)',
-                textAlign: 'center',
-              }}
-            >
-              <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
-                <circle cx="12" cy="12" r="10" />
-                <line x1="12" y1="8" x2="12" y2="12" />
-                <line x1="12" y1="16" x2="12" y2="16" strokeWidth="2" strokeLinecap="round" />
-              </svg>
-              <span style={{ fontSize: 14 }}>{error}</span>
-            </motion.div>
-          )}
-
-          {!isLoading && !error && TemplateComponent && (
-            <motion.div
-              key={`template-${templateSlug}-${device}`}
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              transition={{ duration: 0.2 }}
-              style={{
-                // 外層：縮放容器，填滿可用空間
-                width: deviceWidth * scale,
-                height: scaledHeight,
-                overflow: 'hidden',
-                borderRadius: 8,
-                boxShadow: '0 8px 32px rgba(0,0,0,0.12), 0 2px 8px rgba(0,0,0,0.08)',
-                background: 'var(--white)',
-              }}
-            >
-              {/* 內層：實際設備尺寸，使用 transform 縮放 */}
-              <div
-                style={{
-                  width: deviceWidth,
-                  height: innerHeight,
-                  transform: `scale(${scale})`,
-                  transformOrigin: 'top left',
-                  overflow: 'auto',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  alignItems: 'center',
+                  gap: 16,
+                  color: 'var(--gray-500)',
                 }}
               >
-                <TemplateComponent containerWidth={deviceWidth} />
-              </div>
-            </motion.div>
-          )}
+                <motion.div
+                  animate={{ rotate: 360 }}
+                  transition={{ duration: 1, repeat: Infinity, ease: 'linear' }}
+                  style={{
+                    width: 32,
+                    height: 32,
+                    borderRadius: '50%',
+                    border: '2px solid var(--gray-200)',
+                    borderTopColor: 'var(--gray-500)',
+                  }}
+                />
+                <span style={{ fontSize: 14 }}>正在載入模板...</span>
+              </motion.div>
+            )}
 
-          {!isLoading && !error && !TemplateComponent && previewImageUrl && (
-            <motion.div
-              key="image"
-              initial={{ opacity: 0, scale: 0.95 }}
-              animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.95 }}
-              transition={{ duration: 0.3 }}
-              style={{
-                maxWidth: '100%',
-                maxHeight: '100%',
-                borderRadius: 8,
-                boxShadow: '0 8px 32px rgba(0,0,0,0.12)',
-                overflow: 'hidden',
-              }}
-            >
-              <img
-                src={previewImageUrl}
-                alt={templateName || '預覽'}
+            {error && (
+              <motion.div
+                key="error"
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0 }}
+                style={{
+                  display: 'flex',
+                  flexDirection: 'column',
+                  alignItems: 'center',
+                  gap: 12,
+                  color: 'var(--gray-500)',
+                  textAlign: 'center',
+                }}
+              >
+                <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+                  <circle cx="12" cy="12" r="10" />
+                  <line x1="12" y1="8" x2="12" y2="12" />
+                  <line x1="12" y1="16" x2="12" y2="16" strokeWidth="2" strokeLinecap="round" />
+                </svg>
+                <span style={{ fontSize: 14 }}>{error}</span>
+              </motion.div>
+            )}
+
+            {!isLoading && !error && TemplateComponent && (
+              <motion.div
+                key={`template-${templateSlug}-${device}`}
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                transition={{ duration: 0.2 }}
+                style={{
+                  // 外層：縮放容器，填滿可用空間
+                  width: deviceWidth * scale,
+                  height: scaledHeight,
+                  overflow: 'hidden',
+                  borderRadius: 8,
+                  boxShadow: '0 8px 32px rgba(0,0,0,0.12), 0 2px 8px rgba(0,0,0,0.08)',
+                  background: 'var(--white)',
+                }}
+              >
+                {/* 編輯模式高亮樣式 */}
+                {editMode && (
+                  <style>{`
+                    .template-preview-container.edit-mode [data-editable] {
+                      cursor: pointer !important;
+                      transition: outline 0.15s ease !important;
+                    }
+                    .template-preview-container.edit-mode [data-editable]:hover {
+                      outline: 2px dashed var(--gray-400) !important;
+                      outline-offset: 2px;
+                    }
+                    .template-preview-container.edit-mode [data-editable="${selectedElement?.id}"] {
+                      outline: 2px solid #3b82f6 !important;
+                      outline-offset: 2px;
+                    }
+                  `}</style>
+                )}
+                {/* 內層：實際設備尺寸，使用 transform 縮放 */}
+                <div
+                  ref={previewContainerRef}
+                  className={`template-preview-container${editMode ? ' edit-mode' : ''}`}
+                  onClick={handleContainerClick}
+                  style={{
+                    width: deviceWidth,
+                    height: innerHeight,
+                    transform: `scale(${scale})`,
+                    transformOrigin: 'top left',
+                    overflow: 'auto',
+                  }}
+                >
+                  <TemplateComponent containerWidth={deviceWidth} />
+                </div>
+              </motion.div>
+            )}
+
+            {!isLoading && !error && !TemplateComponent && previewImageUrl && (
+              <motion.div
+                key="image"
+                initial={{ opacity: 0, scale: 0.95 }}
+                animate={{ opacity: 1, scale: 1 }}
+                exit={{ opacity: 0, scale: 0.95 }}
+                transition={{ duration: 0.3 }}
                 style={{
                   maxWidth: '100%',
                   maxHeight: '100%',
-                  display: 'block',
+                  borderRadius: 8,
+                  boxShadow: '0 8px 32px rgba(0,0,0,0.12)',
+                  overflow: 'hidden',
                 }}
-              />
-            </motion.div>
-          )}
+              >
+                <img
+                  src={previewImageUrl}
+                  alt={templateName || '預覽'}
+                  style={{
+                    maxWidth: '100%',
+                    maxHeight: '100%',
+                    display: 'block',
+                  }}
+                />
+              </motion.div>
+            )}
 
-          {!isLoading && !error && !TemplateComponent && !previewImageUrl && (
+            {!isLoading && !error && !TemplateComponent && !previewImageUrl && (
+              <motion.div
+                key="empty"
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                style={{
+                  display: 'flex',
+                  flexDirection: 'column',
+                  alignItems: 'center',
+                  gap: 16,
+                  color: 'var(--gray-400)',
+                  textAlign: 'center',
+                }}
+              >
+                <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+                  <rect x="3" y="3" width="18" height="18" rx="2" />
+                  <circle cx="8.5" cy="8.5" r="1.5" />
+                  <path d="M21 15l-5-5L5 21" />
+                </svg>
+                <span style={{ fontSize: 14 }}>選擇一個模板以預覽</span>
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </div>
+
+        {/* 編輯側欄 */}
+        <AnimatePresence>
+          {editMode && selectedElement && (
             <motion.div
-              key="empty"
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
+              initial={{ width: 0, opacity: 0 }}
+              animate={{ width: 280, opacity: 1 }}
+              exit={{ width: 0, opacity: 0 }}
+              transition={{ duration: 0.2 }}
               style={{
-                display: 'flex',
-                flexDirection: 'column',
-                alignItems: 'center',
-                gap: 16,
-                color: 'var(--gray-400)',
-                textAlign: 'center',
+                borderLeft: '1px solid var(--border-color)',
+                background: 'var(--white)',
+                overflow: 'hidden',
               }}
             >
-              <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
-                <rect x="3" y="3" width="18" height="18" rx="2" />
-                <circle cx="8.5" cy="8.5" r="1.5" />
-                <path d="M21 15l-5-5L5 21" />
-              </svg>
-              <span style={{ fontSize: 14 }}>選擇一個模板以預覽</span>
+              <PropertyEditor
+                element={selectedElement}
+                onUpdate={handleElementUpdate}
+                onClose={() => setSelectedElement(null)}
+              />
             </motion.div>
           )}
         </AnimatePresence>

@@ -33,7 +33,7 @@ export default function LandingCorporate({ containerWidth }: TemplateProps) {
           alignItems: 'center',
           justifyContent: 'space-between',
         }}>
-          <a href="#" style={{ fontSize: 24, fontWeight: 700, letterSpacing: '-0.025em', textDecoration: 'none', color: 'inherit' }}>Nexus Corp</a>
+          <a href="#" data-editable="nav-logo" data-type="heading" style={{ fontSize: 24, fontWeight: 700, letterSpacing: '-0.025em', textDecoration: 'none', color: 'inherit' }}>Nexus Corp</a>
           {isDesktop && (
             <div style={{ display: 'flex', alignItems: 'center', gap: 32 }}>
               <a href="#about" style={{ color: colors.slate600, textDecoration: 'none' }}>關於我們</a>
@@ -43,7 +43,7 @@ export default function LandingCorporate({ containerWidth }: TemplateProps) {
             </div>
           )}
           {isTablet && (
-            <a href="#contact" style={{
+            <a href="#contact" data-editable="nav-cta" data-type="button" style={{
               padding: '10px 20px',
               background: colors.slate900,
               color: colors.white,
@@ -67,14 +67,14 @@ export default function LandingCorporate({ containerWidth }: TemplateProps) {
           alignItems: 'center',
         }}>
           <div>
-            <h1 style={{ fontSize: isDesktop ? 48 : 36, fontWeight: 700, marginBottom: 24, lineHeight: 1.2 }}>
+            <h1 data-editable="hero-title" data-type="heading" style={{ fontSize: isDesktop ? 48 : 36, fontWeight: 700, marginBottom: 24, lineHeight: 1.2 }}>
               專業的企業解決方案<br/>值得信賴的合作夥伴
             </h1>
-            <p style={{ fontSize: 18, color: colors.slate600, marginBottom: 32, lineHeight: 1.6 }}>
+            <p data-editable="hero-description" data-type="paragraph" style={{ fontSize: 18, color: colors.slate600, marginBottom: 32, lineHeight: 1.6 }}>
               超過 20 年的行業經驗，我們為全球 500+ 企業提供數位轉型、策略諮詢與技術服務。讓我們幫助您的企業邁向下一個高峰。
             </p>
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 16 }}>
-              <a href="#contact" style={{
+              <a href="#contact" data-editable="hero-cta-primary" data-type="button" style={{
                 padding: '12px 24px',
                 background: colors.slate900,
                 color: colors.white,
@@ -84,7 +84,7 @@ export default function LandingCorporate({ containerWidth }: TemplateProps) {
               }}>
                 免費諮詢
               </a>
-              <a href="#services" style={{
+              <a href="#services" data-editable="hero-cta-secondary" data-type="button" style={{
                 padding: '12px 24px',
                 border: `1px solid ${colors.slate300}`,
                 fontWeight: 500,
@@ -131,8 +131,8 @@ export default function LandingCorporate({ containerWidth }: TemplateProps) {
       <section id="services" style={{ padding: '96px 24px' }}>
         <div style={{ maxWidth: 1280, margin: '0 auto' }}>
           <div style={{ maxWidth: 672, marginBottom: 64 }}>
-            <h2 style={{ fontSize: isDesktop ? 36 : 30, fontWeight: 700, marginBottom: 16 }}>全方位服務項目</h2>
-            <p style={{ fontSize: 18, color: colors.slate600, lineHeight: 1.6 }}>
+            <h2 data-editable="services-title" data-type="heading" style={{ fontSize: isDesktop ? 36 : 30, fontWeight: 700, marginBottom: 16 }}>全方位服務項目</h2>
+            <p data-editable="services-description" data-type="paragraph" style={{ fontSize: 18, color: colors.slate600, lineHeight: 1.6 }}>
               從策略規劃到執行落地，我們提供一站式的企業解決方案
             </p>
           </div>
@@ -177,8 +177,8 @@ export default function LandingCorporate({ containerWidth }: TemplateProps) {
       <section id="team" style={{ padding: '96px 24px', background: colors.slate50 }}>
         <div style={{ maxWidth: 1280, margin: '0 auto' }}>
           <div style={{ textAlign: 'center', marginBottom: 64 }}>
-            <h2 style={{ fontSize: isDesktop ? 36 : 30, fontWeight: 700, marginBottom: 16 }}>專業團隊</h2>
-            <p style={{ fontSize: 18, color: colors.slate600 }}>資深顧問團隊，平均擁有 15 年以上產業經驗</p>
+            <h2 data-editable="team-title" data-type="heading" style={{ fontSize: isDesktop ? 36 : 30, fontWeight: 700, marginBottom: 16 }}>專業團隊</h2>
+            <p data-editable="team-description" data-type="paragraph" style={{ fontSize: 18, color: colors.slate600 }}>資深顧問團隊，平均擁有 15 年以上產業經驗</p>
           </div>
 
           <div style={{
@@ -207,8 +207,8 @@ export default function LandingCorporate({ containerWidth }: TemplateProps) {
       <section id="contact" style={{ padding: '96px 24px' }}>
         <div style={{ maxWidth: 768, margin: '0 auto' }}>
           <div style={{ textAlign: 'center', marginBottom: 48 }}>
-            <h2 style={{ fontSize: isDesktop ? 36 : 30, fontWeight: 700, marginBottom: 16 }}>預約免費諮詢</h2>
-            <p style={{ fontSize: 18, color: colors.slate600 }}>
+            <h2 data-editable="contact-title" data-type="heading" style={{ fontSize: isDesktop ? 36 : 30, fontWeight: 700, marginBottom: 16 }}>預約免費諮詢</h2>
+            <p data-editable="contact-description" data-type="paragraph" style={{ fontSize: 18, color: colors.slate600 }}>
               留下您的聯繫方式，我們的顧問將在 24 小時內與您聯繫
             </p>
           </div>
@@ -304,6 +304,7 @@ export default function LandingCorporate({ containerWidth }: TemplateProps) {
             </div>
             <button
               type="submit"
+              data-editable="contact-submit" data-type="button"
               style={{
                 width: '100%',
                 padding: 16,
@@ -332,8 +333,8 @@ export default function LandingCorporate({ containerWidth }: TemplateProps) {
           gap: 32,
         }}>
           <div>
-            <h3 style={{ fontSize: 20, fontWeight: 700, marginBottom: 16 }}>Nexus Corp</h3>
-            <p style={{ color: colors.slate400, fontSize: 14, lineHeight: 1.6 }}>
+            <h3 data-editable="footer-logo" data-type="heading" style={{ fontSize: 20, fontWeight: 700, marginBottom: 16 }}>Nexus Corp</h3>
+            <p data-editable="footer-tagline" data-type="paragraph" style={{ color: colors.slate400, fontSize: 14, lineHeight: 1.6 }}>
               專業的企業解決方案，值得信賴的合作夥伴
             </p>
           </div>

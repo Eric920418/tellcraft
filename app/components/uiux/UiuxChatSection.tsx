@@ -262,7 +262,6 @@ export default function UiuxChatSection({
                 }}
               >
                 <TemplatePicker
-                  onSelect={handleTemplateSelect}
                   onPreview={handleTemplatePreview}
                   selectedId={selectedTemplateId || undefined}
                   recommendedIds={message.richContent.data.recommendedIds}
@@ -518,7 +517,10 @@ export default function UiuxChatSection({
                 <motion.button
                   whileHover={{ scale: 1.02 }}
                   whileTap={{ scale: 0.98 }}
-                  onClick={() => onSendMessage('確認使用這個模板')}
+                  onClick={() => {
+                    // 發送選擇訊息，使用模板名稱讓用戶更清楚
+                    onSendMessage(`我選擇「${selectedTemplate.name}」這個模板`)
+                  }}
                   style={{
                     padding: '8px 16px',
                     fontSize: 13,
@@ -530,7 +532,7 @@ export default function UiuxChatSection({
                     cursor: 'pointer',
                   }}
                 >
-                  確認使用
+                  使用此模板
                 </motion.button>
               </div>
             </motion.div>
