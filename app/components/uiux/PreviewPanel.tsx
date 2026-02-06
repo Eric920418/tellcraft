@@ -467,6 +467,7 @@ export default function PreviewPanel({
                 transition={{ duration: 0.2 }}
                 style={{
                   // 外層：縮放容器，填滿可用空間
+                  position: 'relative',
                   width: deviceWidth * scale,
                   height: scaledHeight,
                   overflow: 'hidden',
@@ -480,17 +481,49 @@ export default function PreviewPanel({
                   <style>{`
                     .template-preview-container.edit-mode [data-editable] {
                       cursor: pointer !important;
-                      transition: outline 0.15s ease !important;
+                      transition: all 0.15s ease !important;
+                      outline: 2px dashed transparent;
+                      outline-offset: 2px;
                     }
                     .template-preview-container.edit-mode [data-editable]:hover {
-                      outline: 2px dashed var(--gray-400) !important;
+                      outline: 2px dashed #94a3b8 !important;
                       outline-offset: 2px;
+                      background-color: rgba(59, 130, 246, 0.05) !important;
                     }
                     .template-preview-container.edit-mode [data-editable="${selectedElement?.id}"] {
                       outline: 2px solid #3b82f6 !important;
                       outline-offset: 2px;
+                      background-color: rgba(59, 130, 246, 0.08) !important;
                     }
                   `}</style>
+                )}
+                {/* 編輯模式提示 - 未選中元素時顯示 */}
+                {editMode && !selectedElement && (
+                  <div
+                    style={{
+                      position: 'absolute',
+                      top: 16,
+                      left: '50%',
+                      transform: 'translateX(-50%)',
+                      zIndex: 100,
+                      padding: '8px 16px',
+                      background: 'rgba(0, 0, 0, 0.8)',
+                      color: 'white',
+                      borderRadius: 8,
+                      fontSize: 13,
+                      fontWeight: 500,
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 8,
+                      boxShadow: '0 4px 12px rgba(0, 0, 0, 0.15)',
+                    }}
+                  >
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7" />
+                      <path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z" />
+                    </svg>
+                    點擊元素進行編輯
+                  </div>
                 )}
                 {/* 內層：實際設備尺寸，使用 transform 縮放 */}
                 <div
