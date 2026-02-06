@@ -2,7 +2,7 @@
 // Skill 註冊表
 // ============================================================
 
-export type SkillName = 'bdd-spec' | 'coder' | 'uiux' | 'deployer' | 'domain-manager' | 'domain-purchase' | 'domain-dns'
+export type SkillName = 'bdd-spec' | 'coder' | 'uiux' | 'deployer' | 'domain-manager' | 'domain-purchase' | 'domain-dns' | 'quality-gate'
 
 export interface SkillMetadata {
   name: SkillName
@@ -152,6 +152,28 @@ export const SKILL_REGISTRY: Record<SkillName, SkillMetadata> = {
     timeoutMs: 600000,
     inputSchema: {
       required: ['projectId', 'domain'],
+      optional: [],
+    },
+  },
+
+  'quality-gate': {
+    name: 'quality-gate',
+    displayName: '品質檢查',
+    description: `自動品質檢查（UIUX 完成後自動觸發）：
+      1. Accessibility (WCAG 2.2 AA) - 無障礙標準
+      2. Performance - 效能優化
+      3. SEO - 搜尋引擎優化
+      4. Code Quality - 程式碼品質
+      發現 critical 問題時自動用 LLM 修復（最多 3 輪）`,
+    triggerPatterns: [
+      '品質檢查', 'quality check', 'quality gate',
+      '品質報告', '檢查品質',
+    ],
+    minPlan: 'free',
+    costLevel: 'low',
+    timeoutMs: 180000, // 3 分鐘
+    inputSchema: {
+      required: ['projectId'],
       optional: [],
     },
   },

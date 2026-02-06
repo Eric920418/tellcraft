@@ -42,7 +42,7 @@ interface Message {
   // UIUX 模板系統擴展
   layoutHint?: 'default' | 'split' | 'full_preview'
   richContent?: {
-    type: 'template_picker' | 'design_preview' | 'code_preview'
+    type: 'template_picker' | 'design_preview' | 'code_preview' | 'quality_gate_report'
     data: Record<string, unknown>
   }
   // 樂觀更新標記：pending 表示尚未確認儲存到 DB

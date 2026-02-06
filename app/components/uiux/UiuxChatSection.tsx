@@ -9,6 +9,7 @@ import PreviewPanel from './PreviewPanel'
 import TemplatePicker from './TemplatePicker'
 import VariantPicker, { DesignVariant } from './VariantPicker'
 import CodePreview from './CodePreview'
+import QualityGateReport from './QualityGateReport'
 import type { Template, TemplateCardData } from '../../lib/templates'
 import { getTemplateById } from '../../actions/templates'
 
@@ -33,7 +34,7 @@ export interface UiuxMessage {
   progress?: { current: number; total: number; step: string }
   layoutHint?: 'default' | 'split' | 'full_preview'
   richContent?: {
-    type: 'template_picker' | 'design_preview' | 'code_preview' | 'variant_picker'
+    type: 'template_picker' | 'design_preview' | 'code_preview' | 'variant_picker' | 'quality_gate_report'
     data: {
       templates?: TemplateCardData[]
       recommendedIds?: string[]
@@ -282,6 +283,25 @@ export default function UiuxChatSection({
                   multiSelect={true}
                   maxSelections={2}
                 />
+              </motion.div>
+            )}
+
+            {/* Rich Content: Quality Gate Report */}
+            {message.richContent?.type === 'quality_gate_report' && message.richContent.data && (
+              <motion.div
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 0.2 }}
+                style={{
+                  marginTop: 12,
+                  width: '100%',
+                  padding: 16,
+                  background: 'var(--gray-50)',
+                  borderRadius: 8,
+                  border: '1px solid var(--border-color)',
+                }}
+              >
+                <QualityGateReport report={message.richContent.data as unknown as Parameters<typeof QualityGateReport>[0]['report']} />
               </motion.div>
             )}
 

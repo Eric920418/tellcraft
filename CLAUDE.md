@@ -66,6 +66,7 @@ npx ts-node bdd-spec/scripts/validate-feature.ts spec/features/      # 結構驗
 |-------|------|
 | `bdd-spec` | 需求釐清 + BDD 規格產出（5 階段：Discovery → Clarify → Formulation → Actions Design → ISA Config）|
 | `uiux` | 前端介面設計（3 階段：Design Discovery → Design Lab → Implementation）|
+| `quality-gate` | 自動品質檢查（UIUX Implementation 完成後自動觸發，檢查 A11y/Performance/SEO/Code Quality，critical 問題自動 LLM 修復） |
 | `deployer` | Vercel 部署 |
 | `domain-manager` | 網域管理入口 |
 
@@ -93,6 +94,18 @@ npx ts-node bdd-spec/scripts/validate-feature.ts spec/features/      # 結構驗
 - `synthesizeVariants()` - 變體合併（layout/interaction metadata）
 - `getCraftFoundations()` - 共用品質底線
 - `getStructureConstraints(tier)` / `getAnimationConstraints(tier)` / `getVariantPromptHint(tier)` - Tier 約束集
+
+#### Quality Gate（UIUX 完成後自動觸發）
+
+**流程**：RWD 完成 → 靜態品質檢查 → 有 critical 問題則 LLM 自動修復（最多 3 輪）→ 品質報告 → 完成
+
+**關鍵函數**（`tellcraft-backend/src/services/quality-gate.ts`）：
+- `runQualityGate(code, designTier)` - 執行 4 類靜態檢查，返回 QualityReport
+- `autoFixCriticalIssues(code, issues)` - 用 Haiku 修復 critical issues
+- `checkAccessibility()` - focus-visible、aria-label、form labels、img alt、heading hierarchy
+- `checkPerformance()` - 只動畫 transform/opacity、reduced-motion、no transition-all
+- `checkSEO()` - metadata export、semantic HTML、html lang
+- `checkCodeQuality()` - motion/react import、Tailwind v4 syntax、next/font、no h-screen
 
 ### 認證系統
 
@@ -145,6 +158,10 @@ bdd-spec/                  # BDD Skill 定義
 uiux-skill/                # UIUX Skill 定義
 ├── instructions/          # 3 階段執行指南（design-discovery → design-lab → implementation）
 └── rules/baseline-ui.md   # UI 技術約束 + Craft Foundations
+
+quality-gate-skill/        # Quality Gate Skill 定義
+├── skill.md               # Skill metadata + 流程概覽
+└── instructions/          # 01-quality-check.md（檢查規則 + 修復策略）
 ```
 
 ## BDD 規格格式（sdd.os ISA）

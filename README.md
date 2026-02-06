@@ -12,10 +12,29 @@ Tellcraft 是一個 AI 驅動的自動化開發平台。用戶只需描述需求
 
 ## 當前開發進度
 
-- **狀態**：✅ Phase 1-9 + Server Actions + VPS Backend + 前端 Chat 串接 + 認證系統 + 訪客體驗改善 + 儀表板系統 + BDD Spec 完整修復 + 專案版本管理 + **UIUX 生成邏輯重構** + **Design Tier** + **專案自動命名** + **PreviewPanel iframe 重構**
+- **狀態**：✅ Phase 1-9 + Server Actions + VPS Backend + 前端 Chat 串接 + 認證系統 + 訪客體驗改善 + 儀表板系統 + BDD Spec 完整修復 + 專案版本管理 + **UIUX 生成邏輯重構** + **Design Tier** + **專案自動命名** + **PreviewPanel iframe 重構** + **Quality Gate 品質檢查**
 - **釐清項目**：28 項全部解決
 - **Server Actions**：30+ 已實作
 - **詳情**：[`.clarify/overview.md`](.clarify/overview.md)
+
+### Quality Gate 品質檢查（2026-02-06）
+
+UIUX Implementation 三階段（Structure → Animation → RWD）完成後自動觸發品質檢查，不需用戶手動觸發。
+
+**檢查類別**：
+- **A11y**：focus-visible、aria-label、form labels、img alt、heading hierarchy
+- **Performance**：只動畫 transform/opacity、reduced-motion、no transition-all、animation duration
+- **SEO**：metadata export、semantic HTML、html lang
+- **Code Quality**：motion/react import、Tailwind v4 syntax、next/font、no h-screen、no emoji icons
+
+**自動修復**：發現 critical 問題時用 Haiku 自動修復，最多 3 輪，只修問題不改設計。
+
+**核心改動**：
+- `quality-gate.ts`：新增品質檢查 service（靜態分析 + LLM 修復）
+- `orchestrator.ts`：RWD 完成後觸發 `executeQualityGate()`，FlowState 新增 `uiuxQualityReport`
+- `registry.ts`：註冊 `quality-gate` skill
+- `QualityGateReport.tsx`：前端品質報告組件
+- `UiuxChatSection.tsx`：渲染 `quality_gate_report` richContent
 
 ### 專案自動命名（2026-02-06）
 
@@ -206,6 +225,15 @@ psql "$DATABASE_URL" -f tellcraft-backend/migrations/003_add_template_overrides.
 ```
 
 ---
+
+### 修復：UIUX variant 選擇後洩漏到 BDD 流程（2026-02-06）
+
+用戶選擇設計變體時（如「我要E」），訊息未被 variant selection regex 匹配，穿透 UIUX 階段 block，洩漏到 `processUserReply`（BDD 流程），導致錯誤進入規格生成。
+
+**修復**：
+- `orchestrator.ts`：擴展路由 regex（`我要/我選/選 [A-E]`、單字母、階段兜底）
+- `handleVariantSelection`：擴展解析 regex + 最終 fallback 提取
+- UIUX 階段 catch-all：未匹配的訊息回傳操作提示，不再洩漏到 BDD
 
 ### PreviewPanel 改用 iframe 渲染後端 HTML（2026-02-06）
 
@@ -1258,6 +1286,7 @@ Hero → 往下滾動 → 產品介紹（SEO 友好）→ Testimonials → CTA
 | `domain-manager` | ✅ 完成 | 網域管理入口，支援三種選擇 |
 | `domain-purchase` | ✅ 完成 | Porkbun 網域註冊 |
 | `domain-dns` | ✅ 完成 | Cloudflare Zone + Vercel 綁定 |
+| `quality-gate` | ✅ 完成 | UIUX Implementation 完成後自動觸發，靜態檢查 A11y/Performance/SEO/Code Quality，critical 問題用 LLM 自動修復（最多 3 輪） |
 
 ### BDD Spec Skill 完整流程
 
@@ -1461,6 +1490,11 @@ Phase 3: Implementation（三階段生成，約束隨 tier 變化）
     ↓ Stage 1: Structure（靜態桌面版，creative tier 允許漸層/多色/大膽佈局）
     ↓ Stage 2: Animations（motion/react 動畫，creative tier 允許更豐富動畫）
     ↓ Stage 3: RWD（響應式設計，失敗時 fallback 到 Stage 2）
+    ↓
+    Quality Gate（自動觸發）
+    ↓ 靜態檢查 A11y / Performance / SEO / Code Quality
+    ↓ 有 critical 問題 → LLM 自動修復（最多 3 輪）
+    ↓ 品質報告 → 完成
 ```
 
 **設計變體的 5 個設計軸**：

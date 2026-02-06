@@ -34,6 +34,7 @@ import {
   DesignSystem,
   GeneratedComponent,
 } from '../services/uiux-generation'
+import { runQualityGate, autoFixCriticalIssues, QualityReport } from '../services/quality-gate'
 
 // ============================================================
 // 類型定義
@@ -74,7 +75,7 @@ interface FlowState {
   uiuxTemplateId?: string      // 用戶選擇的模板 ID
   uiuxVariants?: DesignVariant[] // 生成的 5 個設計變體
   uiuxDesignSystem?: DesignSystem // 最終合併的 Design System
-  uiuxCodePhase?: 'structure' | 'animation' | 'rwd' | 'complete' // 當前代碼生成階段
+  uiuxCodePhase?: 'structure' | 'animation' | 'rwd' | 'quality_gate' | 'complete' // 當前代碼生成階段
   uiuxGeneratedCode?: {        // 已生成的代碼（跨階段保留）
     pages: GeneratedComponent[]
     components: GeneratedComponent[]
@@ -100,6 +101,8 @@ interface FlowState {
   uiuxPreparedTemplate?: TemplateData
   // Design Tier（功能型 vs 創意型）
   uiuxDesignTier?: DesignTier
+  // Quality Gate 報告
+  uiuxQualityReport?: QualityReport
 }
 
 // PRD Discovery 限制
@@ -317,6 +320,7 @@ async function handleContinueFlow(
     state.phase === 'uiux_variant_selection' ||
     state.phase === 'uiux_generating_variants' ||
     state.phase === 'uiux_code_generation' ||
+    state.phase === 'uiux_quality_gate' ||
     state.phase === 'uiux_complete'
   ) {
     // 檢查是否是模板選擇訊息
@@ -325,8 +329,21 @@ async function handleContinueFlow(
       return
     }
 
-    // 檢查是否是變體選擇訊息
-    if (message.includes('選擇變體') || message.includes('合併') || message.match(/選擇\s*[A-E]/i)) {
+    // 檢查是否是變體選擇訊息（支援多種自然語言表達）
+    if (
+      message.includes('選擇變體') ||
+      message.includes('合併') ||
+      message.match(/選擇?\s*[A-E]/i) ||
+      message.match(/我要\s*[A-E]/i) ||
+      message.match(/我選\s*[A-E]/i) ||
+      message.match(/^[A-E]$/i)
+    ) {
+      await handleVariantSelection(conversationId, state, message, redis, io)
+      return
+    }
+
+    // variant_selection 階段：任何包含 A-E 的訊息都嘗試路由
+    if (state.phase === 'uiux_variant_selection' && message.match(/[A-E]/i)) {
       await handleVariantSelection(conversationId, state, message, redis, io)
       return
     }
@@ -358,6 +375,28 @@ async function handleContinueFlow(
       await handleCodePhaseRedo(conversationId, state, redis, io)
       return
     }
+
+    // ── UIUX 階段 catch-all ──
+    // 如果到這裡還沒 return，表示訊息無法識別
+    // 絕對不能讓它洩漏到下方的 BDD processUserReply
+    console.log(`[Orchestrator] UIUX 階段未匹配的訊息: phase=${state.phase}, message="${message}"`)
+    if (state.phase === 'uiux_variant_selection') {
+      await sendMessage(conversationId, io, {
+        content: '請選擇您喜歡的設計方向。\n\n- 輸入「選擇 A」直接使用某個方案\n- 輸入「合併 A+C」組合多個方案的特點',
+        stage: 'info',
+      })
+    } else if (state.phase === 'uiux_code_generation') {
+      await sendMessage(conversationId, io, {
+        content: '正在進行程式碼生成階段。輸入「繼續」進行下一步，或「重新生成」重做當前階段。',
+        stage: 'info',
+      })
+    } else if (state.phase === 'uiux_template_selection') {
+      await sendMessage(conversationId, io, {
+        content: '請選擇一個模板，或描述您想要的設計風格。',
+        stage: 'info',
+      })
+    }
+    return
   }
 
   if (!state.waitingForReply) {
@@ -713,7 +752,7 @@ async function sendMessage(
     progress?: { current: number; total: number; step: string }
     layoutHint?: 'default' | 'split' | 'full_preview'
     richContent?: {
-      type: 'template_picker' | 'variant_picker' | 'design_preview' | 'code_preview'
+      type: 'template_picker' | 'variant_picker' | 'design_preview' | 'code_preview' | 'quality_gate_report'
       data: Record<string, unknown>
     }
   }
@@ -1506,10 +1545,11 @@ async function handleVariantSelection(
   io: SocketIOServer
 ) {
   // 解析用戶選擇
-  // 支援格式：「選擇 A」、「選擇變體 A」、「合併 A+C」、「合併 A 和 C」
+  // 支援格式：「選擇 A」、「選擇變體 A」、「我要 E」、「我選 B」、「A」、「合併 A+C」、「合併 A 和 C」
   let selectedIds: string[] = []
 
-  const singleMatch = message.match(/選擇\s*變體?\s*([A-E])/i)
+  const singleMatch = message.match(/(?:選擇\s*變體?|我要|我選|選)\s*([A-E])/i)
+    || message.match(/^([A-E])$/i)
   const mergeMatch = message.match(/合併\s*([A-E])\s*[+和與]\s*([A-E])/i)
   const multiMergeMatch = message.match(/合併\s*([A-E](?:\s*[+和與,]\s*[A-E])+)/i)
 
@@ -1521,6 +1561,12 @@ async function handleVariantSelection(
     const ids = multiMergeMatch[1].match(/[A-E]/gi)
     if (ids) {
       selectedIds = ids.map(id => id.toUpperCase())
+    }
+  } else {
+    // 最後嘗試：從訊息中提取任何 A-E 字母
+    const anyMatch = message.match(/[A-E]/i)
+    if (anyMatch) {
+      selectedIds = [anyMatch[0].toUpperCase()]
     }
   }
 
@@ -1816,19 +1862,105 @@ async function executeCodePhaseRwd(
   }
 
   state.uiuxGeneratedCode = generatedCode
+  state.uiuxCodePhase = 'quality_gate'
+  state.phase = 'uiux_quality_gate'
+  state.waitingForReply = false
+  await saveFlowState(redis, conversationId, state)
+
+  console.log('[Orchestrator] RWD 完成，觸發 Quality Gate')
+
+  // 觸發 Quality Gate
+  await executeQualityGate(conversationId, state, redis, io)
+}
+
+/**
+ * Quality Gate：自動品質檢查 + 修復
+ */
+async function executeQualityGate(
+  conversationId: string,
+  state: FlowState,
+  redis: Redis,
+  io: SocketIOServer
+) {
+  const { sessionId, uiuxDesignSystem, uiuxGeneratedCode } = state
+
+  if (!sessionId || !uiuxDesignSystem || !uiuxGeneratedCode) {
+    console.error('[Orchestrator] Quality Gate 缺少必要的狀態數據')
+    return
+  }
+
+  // 發送品質檢查進度訊息
+  await sendMessage(conversationId, io, {
+    content: '**品質檢查中...**\n\n正在檢查 A11y / Performance / SEO / Code Quality...',
+    stage: 'uiux_quality_gate_running',
+    progress: { current: 3, total: 3, step: '品質檢查' },
+  })
+
+  const MAX_FIX_ATTEMPTS = 3
+  let currentCode = { ...uiuxGeneratedCode }
+  let report = runQualityGate(currentCode, state.uiuxDesignTier)
+  let totalAutoFixed = 0
+
+  // 自動修復循環
+  for (let attempt = 0; attempt < MAX_FIX_ATTEMPTS && !report.passed; attempt++) {
+    const criticalIssues = [
+      ...report.categories.a11y.issues,
+      ...report.categories.performance.issues,
+      ...report.categories.seo.issues,
+      ...report.categories.code_quality.issues,
+    ].filter(i => i.severity === 'critical')
+
+    if (criticalIssues.length === 0) break
+
+    console.log(`[Orchestrator] Quality Gate 修復嘗試 ${attempt + 1}/${MAX_FIX_ATTEMPTS}，${criticalIssues.length} 個 critical issues`)
+
+    await sendMessage(conversationId, io, {
+      content: `發現 ${criticalIssues.length} 個 critical 問題，正在自動修復（第 ${attempt + 1} 輪）...`,
+      stage: 'uiux_quality_gate_fixing',
+    })
+
+    const fixedCode = await autoFixCriticalIssues(currentCode, criticalIssues)
+    if (!fixedCode) {
+      console.error('[Orchestrator] Quality Gate autoFix 失敗')
+      break
+    }
+
+    totalAutoFixed += criticalIssues.length
+    currentCode = fixedCode
+    report = runQualityGate(currentCode, state.uiuxDesignTier)
+  }
+
+  // 更新 autoFixed 計數
+  report.summary.autoFixed = totalAutoFixed
+
+  // 更新代碼和報告到 state
+  state.uiuxGeneratedCode = currentCode
+  state.uiuxQualityReport = report
   state.uiuxCodePhase = 'complete'
   state.phase = 'uiux_complete'
-  state.waitingForReply = false
   await saveFlowState(redis, conversationId, state)
 
   // 保存最終結果到 BDD Session
   await updateBddSession({
     sessionId,
     updates: {
-      generatedPages: generatedCode.pages,
-      generatedComponents: generatedCode.components,
-      generatedStyles: generatedCode.styles,
+      generatedPages: currentCode.pages,
+      generatedComponents: currentCode.components,
+      generatedStyles: currentCode.styles,
       currentPhase: 'uiux_complete',
+    },
+  })
+
+  // 發送品質報告
+  const passedText = report.passed ? '通過' : '未通過'
+  const fixedText = totalAutoFixed > 0 ? `\n已自動修復 ${totalAutoFixed} 個問題。` : ''
+
+  await sendMessage(conversationId, io, {
+    content: `**品質檢查${passedText}**\n\n共發現 ${report.summary.total} 個問題（Critical: ${report.summary.critical} / Warning: ${report.summary.warning} / Info: ${report.summary.info}）${fixedText}`,
+    stage: 'uiux_quality_gate_complete',
+    richContent: {
+      type: 'quality_gate_report',
+      data: report as unknown as Record<string, unknown>,
     },
   })
 
@@ -1836,27 +1968,27 @@ async function executeCodePhaseRwd(
   const tailwindConfig = generateTailwindConfig(uiuxDesignSystem)
 
   // 發送最終完成訊息
-  const pageCount = generatedCode.pages.length
-  const componentCount = generatedCode.components.length
+  const pageCount = currentCode.pages.length
+  const componentCount = currentCode.components.length
 
   await sendMessage(conversationId, io, {
-    content: `🎉 **程式碼生成完成！**\n\n已生成：\n- ${pageCount} 個頁面（含響應式）\n- ${componentCount} 個組件（含動畫）\n- 全域樣式 (globals.css)\n- Tailwind 配置\n\n所有代碼已包含：\n✅ 結構和基礎樣式\n✅ 動畫效果\n✅ 響應式設計\n\n您可以在預覽面板查看完整代碼並複製使用。`,
+    content: `**程式碼生成完成！**\n\n已生成：\n- ${pageCount} 個頁面（含響應式）\n- ${componentCount} 個組件（含動畫）\n- 全域樣式 (globals.css)\n- Tailwind 配置\n\n所有代碼已包含：\n- 結構和基礎樣式\n- 動畫效果\n- 響應式設計\n- 品質檢查${report.passed ? '通過' : ''}\n\n您可以在預覽面板查看完整代碼並複製使用。`,
     stage: 'uiux_generation_complete',
     progress: { current: 3, total: 3, step: '完成' },
     layoutHint: 'split',
     richContent: {
       type: 'code_preview',
       data: {
-        pages: generatedCode.pages,
-        components: generatedCode.components,
-        styles: generatedCode.styles,
+        pages: currentCode.pages,
+        components: currentCode.components,
+        styles: currentCode.styles,
         tailwindConfig,
         currentPhase: 'complete',
       } as Record<string, unknown>,
     },
   })
 
-  console.log(`[Orchestrator] UIUX 三階段生成完成: ${pageCount} pages, ${componentCount} components`)
+  console.log(`[Orchestrator] Quality Gate 完成: passed=${report.passed}, issues=${report.summary.total}, autoFixed=${totalAutoFixed}`)
 }
 
 /**
