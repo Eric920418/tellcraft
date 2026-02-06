@@ -65,7 +65,9 @@
       "Bash(npx tsx:*)",
       "Bash(ssh:*)",
       "Bash(rsync:*)",
-      "Bash(open:*)"
+      "Bash(open:*)",
+      "Bash(# Get the actual TSX code with aria-pressed from the LATEST code_preview \\(msg[85]\\) ssh -i ~/Desktop/LightsailDefaultKey-ap-northeast-1.pem -o StrictHostKeyChecking=no ubuntu@54.238.4.117 \"\"curl -s ''http://localhost:3100/api/conversation/2650a272-3991-4b72-be60-804ca1bf40c6/messages''\"\")",
+      "Bash(__NEW_LINE_0754ea82e4b52d06__ echo \"\")"
     ]
   }
 }
