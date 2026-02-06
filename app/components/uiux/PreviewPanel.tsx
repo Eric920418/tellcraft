@@ -39,8 +39,6 @@ export default function PreviewPanel({
   const containerRef = useRef<HTMLDivElement>(null)
 
   const deviceWidth = getDeviceWidth(device)
-  // 設備對應的視口高度（模擬實際設備）
-  const deviceHeight = device === 'mobile' ? 812 : device === 'tablet' ? 1024 : 900
 
   // 監聽容器大小
   useEffect(() => {
@@ -57,10 +55,12 @@ export default function PreviewPanel({
     return () => window.removeEventListener('resize', updateSize)
   }, [])
 
-  // 計算縮放比例，讓預覽框適合容器
-  const scaleX = containerSize.width / deviceWidth
-  const scaleY = containerSize.height / deviceHeight
-  const scale = Math.min(scaleX, scaleY, 1)
+  // 只根據寬度計算縮放，讓模板填滿容器
+  const scale = Math.min(containerSize.width / deviceWidth, 1)
+  // 縮放後的實際高度 = 容器高度
+  const scaledHeight = containerSize.height
+  // 內層實際高度 = 容器高度 / scale（反推原始高度）
+  const innerHeight = scaledHeight / scale
 
   // 檢查模板是否支援直接渲染
   const canRenderDirectly = templateSlug && isSupportedTemplate(templateSlug)
@@ -206,9 +206,9 @@ export default function PreviewPanel({
               exit={{ opacity: 0 }}
               transition={{ duration: 0.2 }}
               style={{
-                // 外層：縮放容器
+                // 外層：縮放容器，填滿可用空間
                 width: deviceWidth * scale,
-                height: deviceHeight * scale,
+                height: scaledHeight,
                 overflow: 'hidden',
                 borderRadius: 8,
                 boxShadow: '0 8px 32px rgba(0,0,0,0.12), 0 2px 8px rgba(0,0,0,0.08)',
@@ -219,7 +219,7 @@ export default function PreviewPanel({
               <div
                 style={{
                   width: deviceWidth,
-                  height: deviceHeight,
+                  height: innerHeight,
                   transform: `scale(${scale})`,
                   transformOrigin: 'top left',
                   overflow: 'auto',
