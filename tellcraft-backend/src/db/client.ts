@@ -292,10 +292,18 @@ export async function updateBddSession(
     generatedStyles: 'generated_styles',
   }
 
+  // PostgreSQL 原生陣列欄位（TEXT[]）— 不能 JSON.stringify，要讓 pg driver 處理
+  const pgArrayColumns = new Set(['selectedVariantIds'])
+
   for (const [key, value] of Object.entries(updates)) {
     const column = columnMap[key] || key
     setClauses.push(`${column} = $${paramIndex++}`)
-    params.push(typeof value === 'object' ? JSON.stringify(value) : value)
+    if (pgArrayColumns.has(key)) {
+      // 原生 PostgreSQL 陣列：直接傳 JS array，pg driver 會轉為 {E} 格式
+      params.push(value)
+    } else {
+      params.push(typeof value === 'object' ? JSON.stringify(value) : value)
+    }
   }
 
   setClauses.push(`updated_at = NOW()`)
