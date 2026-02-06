@@ -8,13 +8,13 @@ import { readFileSync, existsSync } from 'fs'
 import { join } from 'path'
 import { query, queryOne, closePool } from '../db/client'
 
-// 模板 slug 到文件名的映射
+// 模板 slug（資料庫）到文件名的映射
 const TEMPLATES: Record<string, string> = {
-  'saas-dashboard-minimal': 'saas-dashboard-minimal.html',
-  'saas-dashboard-professional': 'saas-dashboard-professional.html',
-  'startup-landing-page': 'startup-landing-page.html',
-  'corporate-website': 'corporate-website.html',
-  'modern-ecommerce': 'modern-ecommerce.html',
+  'saas-minimal': 'saas-dashboard-minimal.html',
+  'saas-pro': 'saas-dashboard-professional.html',
+  'landing-startup': 'startup-landing-page.html',
+  'landing-corporate': 'corporate-website.html',
+  'ecommerce-modern': 'modern-ecommerce.html',
 }
 
 const TEMPLATES_DIR = join(__dirname, '../data/template-previews')

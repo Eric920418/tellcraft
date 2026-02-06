@@ -169,6 +169,20 @@ psql "$DATABASE_URL" -f tellcraft-backend/migrations/003_add_template_overrides.
 
 ---
 
+### 模板預覽重新設計（2026-02-06）
+
+用 Opus 本地重寫 5 個模板預覽 HTML，遵守 baseline-ui.md 規則。每個模板有獨立色彩系統（CSS 變數）、自訂字型、Signature element、入場動畫、prefers-reduced-motion 支援、Skip Link 和 focus-visible。
+
+| 模板 | Tier | 字型 | 深度策略 | Signature |
+|------|------|------|----------|-----------|
+| saas-minimal | Functional | IBM Plex Sans | Borders-only | Sparkline 迷你折線圖 + 非對稱 metrics |
+| saas-pro | Functional (Dark) | JetBrains Mono + Inter | Subtle shadows | Terminal log viewer + bento grid |
+| landing-startup | Creative | Plus Jakarta Sans + Inter | Layered shadows | Diagonal clip-path hero + zigzag features + pricing tilt |
+| landing-corporate | Creative (穩重) | Noto Sans TC | Subtle shadows | Counter-up stats + accent underline + overlapping team cards |
+| ecommerce-modern | Functional | Inter + Playfair Display | Borders-only | Split 50/50 hero + hover quick-add overlay + masonry grid |
+
+**Bug 修正**：`init-template-previews.ts` slug 映射已修正，對齊資料庫實際 slug（saas-minimal、saas-pro、landing-startup、landing-corporate、ecommerce-modern）。
+
 ### 模板預覽：從 iframe 改為直接渲染（2026-02-05）
 
 將模板預覽從 iframe 改為 React 組件直接渲染，讓響應式即時生效，無需重新載入。
