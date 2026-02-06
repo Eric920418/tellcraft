@@ -38,6 +38,9 @@ UI 品質底線 - 所有產出的程式碼必須符合這些約束。
 | **MUST** 尊重 `safe-area-inset` | fixed 元素 |
 | **MUST** 錯誤顯示在操作發生處 | 就近顯示 |
 | **NEVER** 阻止 input/textarea paste | 使用者體驗 |
+| **MUST** focus ring 用 `focus-visible` | 不要用 `focus`（避免滑鼠點擊出 ring） |
+| **MUST** Modal/Drawer 加 `overscroll-behavior: contain` | 防止背景滾動穿透 |
+| **SHOULD** 互動元素加 `touch-action: manipulation` | 消除移動端 300ms 延遲 |
 
 ---
 
@@ -52,9 +55,10 @@ UI 品質底線 - 所有產出的程式碼必須符合這些約束。
 | **SHOULD** 入場用 `ease-out` | 自然 |
 | **NEVER** 互動反饋超過 200ms | 即時感 |
 | **MUST** 離屏時暫停循環動畫 | 效能 |
-| **SHOULD** 尊重 `prefers-reduced-motion` | 無障礙 |
+| **MUST** 尊重 `prefers-reduced-motion` | 無障礙 |
 | **NEVER** 自訂 easing curves | 除非明確要求 |
 | **SHOULD** 避免動畫大圖或全屏 | 效能 |
+| **NEVER** 使用 `transition-all` | 必須列出具體屬性（transition-colors、transition-opacity、transition-transform） |
 
 ---
 
@@ -76,6 +80,8 @@ UI 品質底線 - 所有產出的程式碼必須符合這些約束。
 |------|------|
 | **MUST** 使用固定 z-index scale | 不用任意 z-* |
 | **SHOULD** 方形元素用 `size-*` | 取代 `w-* h-*` |
+| **MUST** Flex 子元素加 `min-w-0` | 否則 truncate/line-clamp 不生效 |
+| **MUST** `<img>` 有 explicit width/height | 防止 CLS（或用 next/image fill） |
 
 ---
 
@@ -93,13 +99,29 @@ UI 品質底線 - 所有產出的程式碼必須符合這些約束。
 
 | 規則 | 說明 |
 |------|------|
-| **NEVER** 使用漸層 | 除非明確要求 |
-| **NEVER** 使用紫色或多色漸層 | AI slop 特徵 |
+| **NEVER** 使用漸層 | 除非明確要求或 creative tier |
+| **NEVER** 使用紫色或多色漸層 | AI slop 特徵（任何 tier 都禁止） |
 | **NEVER** 使用 glow 效果作為主要 affordance | 過度設計 |
 | **SHOULD** 使用 Tailwind 預設陰影 | 除非明確要求 |
 | **MUST** empty state 有一個明確的下一步 action | UX |
-| **SHOULD** 每個視圖限制一個 accent color | 聚焦 |
+| **SHOULD** 每個視圖限制一個 accent color | 聚焦（creative tier 可放寬到 3 個） |
 | **SHOULD** 優先使用現有 theme/color tokens | 一致性 |
+
+---
+
+## Craft Foundations（設計品質底線）
+
+| 規則 | 說明 |
+|------|------|
+| **MUST** Subtle Layering | 表面差異微妙但可辨識，邊框輕但不隱形 |
+| **MUST** 選定一種深度策略全局堅持 | borders-only / subtle shadows / layered shadows，不混合 |
+| **MUST** 顏色有語義來源 | foreground、background、border、brand、semantic，不用隨意 hex |
+| **MUST** 每個互動元素有完整狀態 | default/hover/active/focus/disabled |
+| **MUST** 數據有完整狀態 | loading/empty/error |
+| **SHOULD** 間距嚴格用 base unit 倍數 | 隨意間距是「沒有系統」的最明顯信號 |
+| **SHOULD** padding 對稱 | 除非有明確理由不對稱 |
+| **NEVER** 劇烈的表面色階跳躍 | gray-50 → gray-100 而不是 gray-100 → gray-300 |
+| **NEVER** 原生 select / date input | 無法 style，必須自建組件 |
 
 ---
 
@@ -112,8 +134,15 @@ UI 品質底線 - 所有產出的程式碼必須符合這些約束。
 - ❌ Glow effects 作為主要視覺元素
 - ❌ 過度使用 emoji 作為 icon
 - ❌ 無目的的動畫
-- ❌ 千篇一律的 card grid 佈局
+- ❌ 千篇一律的 card grid 佈局（sidebar + 同大小卡片矩陣）
 - ❌ Space Grotesk 每次都用
+- ❌ 刺眼的邊框（如果邊框是第一眼看到的東西，太強了）
+- ❌ 劇烈 drop shadow（陰影要微妙，不要搶注意力）
+- ❌ 小元素上大圓角
+- ❌ 純白卡片放在有色背景上（對比太硬）
+- ❌ 粗裝飾性邊框
+- ❌ 多個 accent color 稀釋焦點（functional tier）
+- ❌ icon-left + 大數字 + 小標籤 每個 metric 都一樣
 
 ---
 

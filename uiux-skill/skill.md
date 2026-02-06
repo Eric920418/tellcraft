@@ -11,7 +11,6 @@ description: |
   2. Design Lab - 生成多個設計變體供用戶選擇
   3. Implementation - 產出 Next.js + Tailwind CSS 前端程式碼
 
-  完成後自動觸發 quality-gate Skill 進行品質檢查。
   與 coder skill（後端 API）並行執行，確保前後端獨立開發不干涉。
 
 author: Tellcraft Team
@@ -57,8 +56,6 @@ output_format:
 - 確保 RWD 響應式設計（Mobile-first）
 
 ### 不解決的問題
-- ❌ 品質檢查（由 quality-gate skill 負責）
-- ❌ 問題修復（由 universal-fixer skill 負責）
 - ❌ 後端 API 開發（由 coder skill 負責）
 - ❌ 資料庫設計（由 bdd-spec skill 負責）
 - ❌ 部署（由 deployer skill 負責）
@@ -142,11 +139,6 @@ output_format:
         "selected_variant": { "type": "string" }
       }
     },
-    "next_skill": {
-      "type": "string",
-      "const": "quality-gate",
-      "description": "完成後自動觸發的下一個 Skill"
-    }
   },
   "required": ["status", "artifacts"]
 }
@@ -162,13 +154,16 @@ output_format:
 ┌─────────────────────────────────────────────────────────────────────┐
 │                    Phase 1: Design Discovery                         │
 │                                                                     │
-│    BDD 規格 ──▶ 提取前端需求 ──▶ 多輪問答釐清設計偏好                 │
+│    BDD 規格 ──▶ 提取前端需求 ──▶ 雙軌探索設計偏好                    │
 │                                                                     │
-│    ├─ 風格偏好（minimal/playful/professional/...）                   │
-│    ├─ 配色方向（暖色/冷色/品牌色）                                    │
-│    ├─ 參考網站                                                       │
-│    ├─ 目標用戶                                                       │
-│    └─ 技術約束                                                       │
+│    ├─ Path A（有想法）：4 步問答（感覺/參考/配色/佈局）              │
+│    └─ Path B（沒想法）：模板選擇器                                   │
+│                         │                                           │
+│                         ▼                                           │
+│              Design Brief 確認（AI 設計顧問）                        │
+│              ├─ 總結設計方向 + 專業建議                               │
+│              ├─ 推薦 Design Tier（functional/creative）              │
+│              └─ 用戶確認或調整（最多 3 輪，可切換 tier）             │
 │                                                                     │
 └─────────────────────────────────────────────────────────────────────┘
                                     │
@@ -202,12 +197,6 @@ output_format:
 │    └─ Base UI / Radix（無障礙組件）                                 │
 │                                                                     │
 └─────────────────────────────────────────────────────────────────────┘
-                                    │
-                                    ▼
-                    ┌───────────────────────────┐
-                    │  自動觸發 quality-gate    │
-                    │  Skill 進行品質檢查       │
-                    └───────────────────────────┘
 ```
 
 ---
@@ -222,11 +211,6 @@ output_format:
 
 **輔助規則文件**：
 - `rules/baseline-ui.md` - UI 技術約束（效能、無障礙底線）
-- `rules/design-principles.md` - 設計原則（typography、color、spacing）
-- `rules/tailwind-patterns.md` - Tailwind CSS 最佳實踐
-
-**後續 Skill**：
-- 完成後自動觸發 `quality-gate` Skill 進行品質檢查
 
 ---
 
@@ -255,17 +239,13 @@ output_format:
 | 組件已抽取 | 重複元素已組件化 |
 | RWD 已實作 | 有 sm/md/lg breakpoints |
 
-### 後續：Quality Gate Skill（硬性閘門）
-
-Implementation 完成後，自動觸發獨立的 `quality-gate` Skill 進行品質檢查。
-
-詳見：`quality-gate-skill/skill.md`
-
 ---
 
-## Design Memory（設計記憶）
+## Design Memory（設計記憶）- 規劃中
 
-持久化設計決策，供未來使用：
+> **狀態：尚未實作。** 設計記憶功能目前處於規劃階段，未來將支援持久化設計決策供跨會話使用。
+
+格式範例（供未來參考）：
 
 ```markdown
 # Design Memory - [Project Name]

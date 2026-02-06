@@ -169,12 +169,29 @@ Go with Variant B's structure. Apply Variant A's button styling.
 
 ---
 
-## 變體合併（Synthesize）
+## 變體選擇與合併（Synthesize）
+
+### 用戶選擇格式
+
+支援以下格式（正則匹配）：
+
+| 格式 | 範例 | 說明 |
+|------|------|------|
+| 單選 | `選擇變體 A`、`A`、`我要 A` | 直接使用 Variant A 的 Design System |
+| 合併 | `合併 A+C`、`A 和 C`、`結合 A、C` | 合併多個變體的特定面向 |
+| 帶說明合併 | `A 的配色 + B 的佈局` | 根據用戶描述合併 |
+
+### 合併邏輯
 
 如果用戶喜歡多個變體的不同部分：
 
 1. 創建新的混合變體（Variant F）
-2. 結合用戶指出的特定元素
+2. 根據每個變體的 `axis` 合併對應屬性：
+   - `hierarchy` → 合併 typography
+   - `density` → 合併 spacing
+   - `expressive` → 合併 accent color
+   - `layout` → 合併 pageStructure 偏好到 metadata
+   - `interaction` → 合併互動模式偏好到 metadata
 3. 更新 Design Lab 顯示 Variant F + 1-2 個原始變體比較
 4. 再次收集反饋
 

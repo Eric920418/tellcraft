@@ -12,10 +12,29 @@ Tellcraft 是一個 AI 驅動的自動化開發平台。用戶只需描述需求
 
 ## 當前開發進度
 
-- **狀態**：✅ Phase 1-9 + Server Actions + VPS Backend + 前端 Chat 串接 + 認證系統 + 訪客體驗改善 + 儀表板系統 + BDD Spec 完整修復 + 專案版本管理 + **UIUX 生成邏輯重構**
+- **狀態**：✅ Phase 1-9 + Server Actions + VPS Backend + 前端 Chat 串接 + 認證系統 + 訪客體驗改善 + 儀表板系統 + BDD Spec 完整修復 + 專案版本管理 + **UIUX 生成邏輯重構** + **Design Tier**
 - **釐清項目**：28 項全部解決
 - **Server Actions**：30+ 已實作
 - **詳情**：[`.clarify/overview.md`](.clarify/overview.md)
+
+### Design Tier：功能型 vs 創意型（2026-02-06）
+
+新增 Design Tier 概念，讓 AI 根據產品類型自動推薦「功能型」或「創意型」設計模式，生成函數根據 tier 切換不同約束集。
+
+**功能型（functional）**：dashboard/SaaS/後台，禁止漸層/glow/多色，動畫克制，標準佈局
+**創意型（creative）**：landing page/品牌官網/作品集，允許漸層、多色、獨特字體、大膽佈局、豐富動畫
+
+**核心改動**：
+- `uiux-generation.ts`：新增 `DesignTier` type + `getCraftFoundations()`（共用品質底線）+ `getStructureConstraints()`/`getAnimationConstraints()`/`getVariantPromptHint()` 約束集函數
+- `DesignBrief` 新增 `recommendedTier`/`tierReason`/`domainKeywords`/`signature` 欄位
+- 4 個生成函數（`generateDesignVariants`/`generateStructure`/`generateAnimations`/`generateRwd`）新增 `designTier` 參數
+- `orchestrator.ts`：FlowState 新增 `uiuxDesignTier`，Design Brief 展示 tier 推薦，調整時可切換 tier
+- `generateDesignBrief`：加入 Domain Exploration（產品世界探索）+ Signature Element 概念
+- `generateDesignVariants`：加入 Anti-Default 哲學（Swap Test、Infinite Expression）
+- `generateStructure`：注入 Professional UI 規則（icon 用 SVG 禁 emoji、cursor-pointer、對比度值、佈局細節）+ WCAG 無障礙基本功（lang 屬性、Skip Link、Heading 層級、aria-live）
+- `generateRwd`：注入 Pre-Delivery Checklist（排版/互動/對比度/佈局/效能/無障礙自檢清單）
+- Vercel Web Interface Guidelines 精華：禁 transition-all、focus-visible 取代 focus、overscroll-behavior contain、min-w-0、img width/height、touch-action manipulation
+- `baseline-ui.md`：新增 Craft Foundations 表格 + 補充禁止清單 + Interaction/Animation/Layout 規則補充
 
 ### UIUX 生成邏輯重構：5 變體選擇 + Design System（2026-02-05）
 
@@ -50,6 +69,10 @@ BDD Spec 完成
 │ - 顏色偏好                   │                        │
 │ - 佈局風格                   │                        │
 └─────────────────────────────┴────────────────────────┘
+    ↓
+Design Brief 確認（AI 設計顧問）
+    ↓ 總結設計方向 + 專業建議 + 推薦 Design Tier（functional/creative）
+    ↓ 用戶確認或調整（最多 3 輪，可切換 tier）
     ↓
 生成 5 變體 → 用戶選擇/合併變體
     ↓
@@ -1160,9 +1183,7 @@ Hero → 往下滾動 → 產品介紹（SEO 友好）→ Testimonials → CTA
 |-------|------|------|
 | `bdd-spec` | ✅ 完成 | 完整 5 階段流程：PRD Discovery/Clarify → Formulation → Spec Discovery/Clarify → Actions Design → ISA Config |
 | `coder` | ⏳ 開發中 | 後端 API 生成，待開發完成後與 uiux 並行執行 |
-| `uiux` | 🧪 可測試 | 3 階段前端設計流程（Design Discovery → Design Lab → Implementation）+ Supabase Storage 儲存 |
-| `quality-gate` | 📋 規劃中 | 獨立品質檢查 Skill（A11y/Performance/SEO），UIUX 完成後自動觸發，生成報告 |
-| `universal-fixer` | 📋 規劃中 | 萬用修復 Skill，讀取 Quality Gate 報告自動修復問題 |
+| `uiux` | 🧪 可測試 | 3 階段前端設計流程（Design Discovery → Design Lab → Implementation）+ 雙軌 Discovery（有想法→4步釐清 / 沒想法→模板選擇）+ Design Brief 確認（AI 設計顧問總結+建議+Design Tier推薦，最多3輪調整）+ Design Tier（functional/creative 約束集切換）+ Supabase Storage 儲存 |
 | `deployer` | ✅ 完成 | 整合 Vercel Deployments API，部署後自動詢問網域設定 |
 | `domain-manager` | ✅ 完成 | 網域管理入口，支援三種選擇 |
 | `domain-purchase` | ✅ 完成 | Porkbun 網域註冊 |
@@ -1332,127 +1353,45 @@ CREATE TABLE templates (
 
 ### UIUX Skill 完整流程
 
-UI/UX Skill 實現完整的 3 階段前端介面開發流程（Quality Gate 已獨立為單獨 Skill）：
+UI/UX Skill 實現完整的 3 階段前端介面開發流程：
 
 ```
 bdd-spec（規格確定）
          ↓
        uiux（前端）
          ↓
-   quality-gate（品質檢查）  ← 獨立 Skill，自動觸發
-         ↓
-   universal-fixer（萬用修復）← TODO: 未來開發
-         ↓
      deployer
 
 # TODO: coder 開發完成後改為並行執行：
-# bdd-spec → [coder + uiux 並行] → quality-gate → deployer
+# bdd-spec → [coder + uiux 並行] → deployer
 ```
 
 **UIUX 3 階段流程**：
 
 ```
-Phase 1: Design Discovery
-    ↓ 多輪問答釐清設計偏好
-    ↓ 產品類型、視覺風格、配色、Dark Mode
+Phase 1: Design Discovery（雙軌流程 + Brief 確認）
+    ↓ 詢問「你對外觀有想法嗎？」
+    ↓
+    ├─ Path A（有想法）→ 4 步釐清問卷
+    │    feeling → reference → color → layout
+    │    ↓ inferCategoryFromIdeas() + inferDesignDefaultsFromIdeas()
+    │    ↓ 建立虛擬 TemplateData
+    │
+    └─ Path B（沒想法）→ 模板選擇器
+         ↓ 用戶直接選擇模板
+    ↓
+    Design Brief 確認（AI 設計顧問總結 + 建議 + 推薦 Design Tier，最多 3 輪調整）
+    ↓ Design Tier: functional（功能型）或 creative（創意型）
 
 Phase 2: Design Lab
-    ↓ 生成 5 個設計變體（不同設計軸）
-    ↓ 用戶選擇或合併變體
+    ↓ 根據 Design Tier 切換約束集生成 5 個設計變體
+    ↓ 用戶選擇或合併變體（支援 "選擇變體 A" / "合併 A+C" 格式）
 
-Phase 3: Implementation
-    ↓ 產出 Next.js + Tailwind CSS 程式碼
-    ↓ SSR 優先、RWD、motion/react
-    ↓ 完成後自動觸發 quality-gate Skill
+Phase 3: Implementation（三階段生成，約束隨 tier 變化）
+    ↓ Stage 1: Structure（靜態桌面版，creative tier 允許漸層/多色/大膽佈局）
+    ↓ Stage 2: Animations（motion/react 動畫，creative tier 允許更豐富動畫）
+    ↓ Stage 3: RWD（響應式設計，失敗時 fallback 到 Stage 2）
 ```
-
-### Quality Gate Skill（獨立品質檢查）
-
-從 UIUX Skill 分離出來的獨立品質檢查 Skill，UIUX Implementation 完成後自動觸發。
-
-**觸發時機**：
-- UIUX Phase 3 Implementation 完成後自動觸發
-- 未來 Coder Skill 完成後也會觸發
-
-**檢查項目**：
-
-| 類別 | 全名 | 檢查內容 |
-|------|------|----------|
-| **A11y** | Accessibility（無障礙性）| WCAG 2.2 AA：色彩對比度 ≥ 4.5:1、Focus states、ARIA labels、鍵盤導航 |
-| **Performance** | 效能 | 只動畫 transform/opacity、微互動 ≤ 200ms、頁面轉場 ≤ 300ms、prefers-reduced-motion |
-| **SEO** | 搜尋引擎優化 | title/meta description、Open Graph tags、語義化 HTML、標題層級 |
-
-**輸出**：
-- 生成品質報告（JSON 格式）
-- 列出所有問題和嚴重程度
-- 自動觸發 `universal-fixer` Skill 進行修復（TODO）
-
-**報告格式**：
-```json
-{
-  "timestamp": "2026-02-05T12:00:00Z",
-  "projectId": "xxx",
-  "generationId": "xxx",
-  "summary": {
-    "total": 15,
-    "critical": 2,
-    "warning": 8,
-    "info": 5
-  },
-  "issues": [
-    {
-      "id": "a11y-001",
-      "category": "a11y",
-      "severity": "critical",
-      "rule": "color-contrast",
-      "message": "文字與背景對比度不足 (2.1:1 < 4.5:1)",
-      "file": "components/Button.tsx",
-      "line": 15,
-      "suggestion": "將文字顏色從 #999 改為 #666"
-    }
-  ]
-}
-```
-
-**相關檔案**（TODO 待建立）：
-- `quality-gate-skill/skill.md` - Skill 定義
-- `quality-gate-skill/instructions/` - 檢查規則
-- `quality-gate-skill/rules/` - 各類別檢查標準
-
-### Universal Fixer Skill（萬用修復，TODO）
-
-根據 Quality Gate 報告自動修復問題的 Skill。
-
-**功能**：
-- 讀取 Quality Gate 報告
-- 按嚴重程度排序問題
-- 逐一嘗試自動修復
-- 無法自動修復的問題提示用戶手動處理
-- 修復後重新觸發 Quality Gate 驗證
-
-**流程**：
-```
-Quality Gate 報告
-       ↓
-Universal Fixer 讀取報告
-       ↓
-按 critical → warning → info 順序處理
-       ↓
-┌─────────────────────────────┐
-│ 可自動修復？                 │
-│   是 → LLM 生成修復程式碼    │
-│   否 → 記錄到「需人工處理」  │
-└─────────────────────────────┘
-       ↓
-重新觸發 Quality Gate
-       ↓
-通過 → 進入 Deployer
-失敗 → 最多重試 3 次，仍失敗則提示用戶
-```
-
-**相關檔案**（TODO 待建立）：
-- `universal-fixer-skill/skill.md` - Skill 定義
-- `universal-fixer-skill/instructions/` - 修復策略
 
 **設計變體的 5 個設計軸**：
 - **A: Hierarchy Focus** - 重新結構化內容層級
@@ -1463,7 +1402,7 @@ Universal Fixer 讀取報告
 
 **相關檔案**：
 - `uiux-skill/skill.md` - Skill 定義
-- `uiux-skill/instructions/` - 4 階段執行指南
+- `uiux-skill/instructions/` - 3 階段執行指南
 - `uiux-skill/rules/baseline-ui.md` - UI 技術約束
 - `app/actions/storage.ts` - Supabase Storage 整合
 
@@ -1794,14 +1733,12 @@ bdd-spec/              # BDD Skill 定義
 
 uiux-skill/            # UI/UX Skill 定義
 ├── skill.md           # Skill 元數據
-├── instructions/      # 4 階段執行指南
-│   ├── 01-design-discovery.md
-│   ├── 02-design-lab.md
-│   ├── 03-implementation.md
-│   └── 04-quality-gate.md
-├── rules/             # UI 規範
-│   └── baseline-ui.md
-└── resources/         # 模板和範例
+├── instructions/      # 3 階段執行指南
+│   ├── 01-design-discovery.md  # 雙軌流程（有想法→4步釐清 / 沒想法→模板選擇）
+│   ├── 02-design-lab.md        # 5 變體生成 + 選擇合併
+│   └── 03-implementation.md    # 三階段程式碼生成（Structure → Animation → RWD）
+└── rules/             # UI 規範
+    └── baseline-ui.md
 
 prompts/               # BDD Skill（Claude Code 用）
 ```

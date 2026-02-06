@@ -34,7 +34,7 @@ export function InteractiveButton() { ... }
 
 ### Styling: Tailwind CSS
 
-遵循 `rules/tailwind-patterns.md`：
+Tailwind CSS utility-first 原則：
 
 ```tsx
 // ✅ 正確：utility-first
@@ -63,7 +63,7 @@ Breakpoints:
 ### Animation: motion/react
 
 ```tsx
-import { motion } from 'framer-motion';
+import { motion } from 'motion/react';
 
 <motion.button
   whileHover={{ scale: 1.02 }}
@@ -76,7 +76,7 @@ import { motion } from 'framer-motion';
 - 只動畫 `transform` 和 `opacity`
 - 微互動 ≤ 200ms
 - 頁面轉場 ≤ 300ms
-- 必須處理 `prefers-reduced-motion`
+- **MUST** 處理 `prefers-reduced-motion`
 
 ### Components: Accessible Primitives
 
@@ -365,4 +365,4 @@ export const metadata: Metadata = {
 
 ## 下一步
 
-進入 Phase 4: Quality Gate，進行自動化品質檢查。
+Implementation 完成後，UIUX Skill 流程結束。產出的程式碼可供部署。

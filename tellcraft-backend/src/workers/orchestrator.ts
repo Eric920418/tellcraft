@@ -25,7 +25,11 @@ import {
   generateAnimations,
   generateRwd,
   generateTailwindConfig,
+  generateDesignBrief,
+  adjustDesignBrief,
   DesignVariant,
+  DesignBrief,
+  DesignTier,
   TemplateData,
   DesignSystem,
   GeneratedComponent,
@@ -79,6 +83,13 @@ interface FlowState {
   // 設計釐清
   uiuxDesignClarifyStep?: number // 當前釐清步驟（1-4）
   uiuxDesignIdeas?: Array<{ step: string; answer: string }> // 用戶的設計想法
+  // Design Brief 確認
+  uiuxDesignBriefRound?: number
+  uiuxDesignBrief?: DesignBrief
+  uiuxDesignBriefHistory?: Array<{ role: 'assistant' | 'user'; content: string }>
+  uiuxPreparedTemplate?: TemplateData
+  // Design Tier（功能型 vs 創意型）
+  uiuxDesignTier?: DesignTier
 }
 
 // PRD Discovery 限制
@@ -86,6 +97,11 @@ const PRD_DISCOVERY_LIMITS = {
   MAX_ROUNDS: 3,              // 最多 3 輪
   MAX_TOTAL_QUESTIONS: 15,    // 累計最多 15 題
   QUESTIONS_PER_ROUND: 5,     // 每輪最多 5 題
+}
+
+// Design Brief 確認限制
+const DESIGN_BRIEF_LIMITS = {
+  MAX_ROUNDS: 3,
 }
 
 // Spec Discovery 限制
@@ -240,6 +256,12 @@ async function handleContinueFlow(
   // 處理設計釐清階段
   if (state.phase === 'uiux_design_clarify') {
     await handleDesignClarifyReply(conversationId, state, message, redis, io)
+    return
+  }
+
+  // 處理 Design Brief 確認階段
+  if (state.phase === 'uiux_design_brief_confirm') {
+    await handleDesignBriefReply(conversationId, state, message, redis, io)
     return
   }
 
@@ -1416,98 +1438,8 @@ async function handleTemplateSelection(
     pageStructure: templateResult.page_structure as TemplateData['pageStructure'],
   }
 
-  // 取得 BDD Session
-  if (!state.sessionId) {
-    console.error('[Orchestrator] 缺少 sessionId')
-    return
-  }
-
-  const session = await getBddSession({ sessionId: state.sessionId })
-  if (!session.success || !session.data) {
-    console.error('[Orchestrator] 無法取得 BDD Session')
-    return
-  }
-
-  // 構建 BDD 規格摘要
-  const bddSpec = session.data.featuresContent
-    ? session.data.featuresContent.map(f => `- ${f.name}`).join('\n')
-    : ''
-
-  // 發送生成中訊息
-  await sendMessage(conversationId, io, {
-    content: `很好！您選擇了「${template.name}」模板。\n\n正在為您生成 5 個設計變體...`,
-    stage: 'uiux_variants_generating',
-    progress: { current: 1, total: 3, step: '生成設計變體' },
-  })
-
-  // 更新狀態
-  state.phase = 'uiux_generating_variants'
-  state.uiuxTemplateId = template.id
-  await saveFlowState(redis, conversationId, state)
-
-  // 更新 BDD Session
-  await updateBddSession({
-    sessionId: state.sessionId,
-    updates: {
-      uiuxTemplateId: template.id,
-      currentPhase: 'uiux_generating_variants',
-    },
-  })
-
-  // 生成 5 個設計變體
-  const productType = session.data.projectContext || '通用應用'
-  const variantsResult = await generateDesignVariants(
-    template,
-    bddSpec,
-    productType,
-    { conversationId }
-  )
-
-  if (!variantsResult.success || !variantsResult.variants) {
-    console.error('[Orchestrator] 生成設計變體失敗:', variantsResult.error)
-    await sendMessage(conversationId, io, {
-      content: `生成設計變體時發生錯誤：${variantsResult.error}。請稍後再試。`,
-      stage: 'error',
-    })
-    return
-  }
-
-  const variants = variantsResult.variants
-  console.log(`[Orchestrator] 成功生成 ${variants.length} 個設計變體`)
-
-  // 保存變體到 BDD Session
-  await updateBddSession({
-    sessionId: state.sessionId,
-    updates: {
-      designVariants: variants,
-      currentPhase: 'uiux_variant_selection',
-    },
-  })
-
-  // 更新狀態
-  state.phase = 'uiux_variant_selection'
-  state.uiuxVariants = variants
-  state.waitingForReply = true
-  await saveFlowState(redis, conversationId, state)
-
-  // 構建變體描述
-  const variantDescriptions = variants.map(v =>
-    `**${v.id}. ${v.name}**\n${v.description}\n關鍵特點：${v.keyFeatures.join('、')}`
-  ).join('\n\n')
-
-  // 發送變體選擇訊息
-  await sendMessage(conversationId, io, {
-    content: `設計變體已生成完成！\n\n${variantDescriptions}\n\n請選擇您喜歡的設計方向：\n- 輸入「選擇 A」直接使用某個變體\n- 輸入「合併 A+C」組合多個變體的特點`,
-    stage: 'uiux_variants_ready',
-    layoutHint: 'split',
-    richContent: {
-      type: 'variant_picker' as 'template_picker', // 暫時使用 template_picker 類型，後續擴展
-      data: {
-        variants: variants,
-        selectedIds: [],
-      } as Record<string, unknown>,
-    },
-  })
+  // 進入 Design Brief 確認環節
+  await startDesignBriefConfirm(conversationId, state, template, 'template', redis, io)
 }
 
 /**
@@ -1640,6 +1572,7 @@ async function executeCodePhaseStructure(
     pages,
     template,
     bddSpec,
+    state.uiuxDesignTier,
     { conversationId }
   )
 
@@ -1725,6 +1658,7 @@ async function executeCodePhaseAnimation(
   const animationResult = await generateAnimations(
     uiuxDesignSystem,
     uiuxGeneratedCode,
+    state.uiuxDesignTier,
     { conversationId }
   )
 
@@ -1807,6 +1741,7 @@ async function executeCodePhaseRwd(
   const rwdResult = await generateRwd(
     uiuxDesignSystem,
     uiuxGeneratedCode,
+    state.uiuxDesignTier,
     { conversationId }
   )
 
@@ -2208,9 +2143,8 @@ async function completeDesignClarify(
   const designBrief = ideas.map(i => `- ${i.step}: ${i.answer}`).join('\n')
 
   await sendMessage(conversationId, io, {
-    content: `太好了！根據你的設計想法：\n\n${designBrief}\n\n正在為你生成 5 個設計方案...`,
+    content: `太好了！收到你的設計想法：\n\n${designBrief}\n\n讓我整理一下方向...`,
     stage: 'uiux_design_clarify_complete',
-    progress: { current: 1, total: 3, step: '分析設計需求' },
   })
 
   // 取得 BDD Session
@@ -2241,27 +2175,332 @@ async function completeDesignClarify(
     pageStructure: { pages: ['home', 'dashboard'], components: [] },
   }
 
-  // 生成設計變體
+  // 進入 Design Brief 確認環節
+  await startDesignBriefConfirm(conversationId, state, customTemplate, 'ideas', redis, io)
+}
+
+// ============================================================
+// Design Brief 確認環節
+// ============================================================
+
+/**
+ * 啟動 Design Brief 確認
+ * Path A 和 Path B 的匯流入口
+ */
+async function startDesignBriefConfirm(
+  conversationId: string,
+  state: FlowState,
+  template: TemplateData,
+  sourceType: 'ideas' | 'template',
+  redis: Redis,
+  io: SocketIOServer
+) {
+  // 保存模板到 state
+  state.uiuxPreparedTemplate = template
+
+  // 發送分析中訊息
+  await sendMessage(conversationId, io, {
+    content: sourceType === 'ideas'
+      ? '好的，讓我整理一下你的設計想法...'
+      : `好的，讓我分析一下「${template.name}」模板的設計方向...`,
+    stage: 'uiux_design_brief_generating',
+  })
+
+  // 取得 BDD Session
+  if (!state.sessionId) {
+    console.error('[Orchestrator] 缺少 sessionId')
+    await proceedToVariantGeneration(conversationId, state, redis, io)
+    return
+  }
+
+  const session = await getBddSession({ sessionId: state.sessionId })
+  if (!session.success || !session.data) {
+    console.error('[Orchestrator] 無法取得 BDD Session')
+    await proceedToVariantGeneration(conversationId, state, redis, io)
+    return
+  }
+
+  const bddSpec = session.data.featuresContent
+    ? session.data.featuresContent.map(f => `- ${f.name}`).join('\n')
+    : ''
   const productType = session.data.projectContext || '通用應用'
-  const variantsResult = await generateDesignVariants(
-    customTemplate,
+
+  // 呼叫 LLM 生成 Design Brief
+  const briefResult = await generateDesignBrief(
+    template,
     bddSpec,
     productType,
+    sourceType === 'ideas' ? (state.uiuxDesignIdeas || null) : null,
+    sourceType,
+    { conversationId }
+  )
+
+  if (!briefResult.success || !briefResult.brief) {
+    // 降級：跳過 brief，直接生成變體
+    console.warn('[Orchestrator] Design Brief 生成失敗，降級直接生成變體:', briefResult.error)
+    await proceedToVariantGeneration(conversationId, state, redis, io)
+    return
+  }
+
+  // 保存 brief 到 state（含 tier）
+  state.uiuxDesignBrief = briefResult.brief
+  state.uiuxDesignTier = briefResult.brief.recommendedTier
+  state.uiuxDesignBriefRound = 1
+  state.uiuxDesignBriefHistory = [
+    { role: 'assistant', content: briefResult.displayText || '' },
+  ]
+  state.phase = 'uiux_design_brief_confirm'
+  state.waitingForReply = true
+  await saveFlowState(redis, conversationId, state)
+
+  // 構建展示訊息
+  const brief = briefResult.brief
+  const tierLabel = brief.recommendedTier === 'creative' ? '創意型' : '功能型'
+  const tierDesc = brief.recommendedTier === 'creative'
+    ? '允許漸層背景、獨特字體、豐富動畫效果、大膽佈局'
+    : '注重功能清晰度、保守配色、克制的動畫、標準佈局'
+
+  const displayText = briefResult.displayText || `## 設計方向確認
+
+**設計模式**：${tierLabel}（推薦）
+_${brief.tierReason || tierDesc}_
+
+根據你的${sourceType === 'ideas' ? '想法' : '選擇'}，我整理了以下方向：
+
+**風格定位**：${brief.styleSummary}
+**色彩方向**：${brief.colorDirection}
+**佈局建議**：${brief.layoutSuggestion}
+**參考分析**：${brief.referenceAnalysis}
+
+**專業建議**：
+${brief.professionalRecommendations.map(r => `- ${r}`).join('\n')}`
+
+  await sendMessage(conversationId, io, {
+    content: `${displayText}\n\n---\n\n如果沒有要調整的，我就開始生成設計方案了？\n也可以告訴我想調整的部分，例如：「顏色想暖一點」、「佈局改卡片式」、「我想要更有創意的設計」`,
+    stage: 'uiux_design_brief_confirm',
+  })
+
+  console.log('[Orchestrator] Design Brief 已生成，等待用戶確認')
+}
+
+/**
+ * 處理 Design Brief 確認回覆
+ * 用戶可以確認、調整（最多 3 輪）
+ */
+async function handleDesignBriefReply(
+  conversationId: string,
+  state: FlowState,
+  message: string,
+  redis: Redis,
+  io: SocketIOServer
+) {
+  const msg = message.trim().toLowerCase()
+
+  // 判斷是否確認
+  const confirmPatterns = /^(好|可以|沒問題|確認|ok|y|yes|沒有|就這樣|開始|proceed|go|沒有要調整|不用調整|直接開始|開始生成)$/i
+  if (confirmPatterns.test(msg) || msg.includes('沒有要調整') || msg.includes('開始生成') || msg.includes('就這樣')) {
+    console.log('[Orchestrator] 用戶確認 Design Brief，進入變體生成')
+    await proceedToVariantGeneration(conversationId, state, redis, io)
+    return
+  }
+
+  // 調整判斷
+  const round = state.uiuxDesignBriefRound || 1
+  if (round >= DESIGN_BRIEF_LIMITS.MAX_ROUNDS) {
+    // 已達上限，自動 proceed
+    console.log('[Orchestrator] Design Brief 調整已達 3 輪上限，自動進入變體生成')
+    await sendMessage(conversationId, io, {
+      content: '已經調整了幾輪了，讓我根據目前的方向開始生成設計方案吧！',
+      stage: 'uiux_design_brief_confirm',
+    })
+    await proceedToVariantGeneration(conversationId, state, redis, io)
+    return
+  }
+
+  // 呼叫 LLM 調整 brief
+  if (!state.uiuxDesignBrief || !state.uiuxPreparedTemplate) {
+    console.error('[Orchestrator] 缺少 Design Brief 或模板資訊')
+    await proceedToVariantGeneration(conversationId, state, redis, io)
+    return
+  }
+
+  await sendMessage(conversationId, io, {
+    content: '收到，讓我調整一下...',
+    stage: 'uiux_design_brief_adjusting',
+  })
+
+  // 取得 productType
+  let productType = '通用應用'
+  if (state.sessionId) {
+    const session = await getBddSession({ sessionId: state.sessionId })
+    if (session.success && session.data) {
+      productType = session.data.projectContext || '通用應用'
+    }
+  }
+
+  // 更新對話歷史
+  const history = state.uiuxDesignBriefHistory || []
+  history.push({ role: 'user', content: message })
+
+  const adjustResult = await adjustDesignBrief(
+    state.uiuxDesignBrief,
+    message,
+    history,
+    state.uiuxPreparedTemplate,
+    productType,
+    { conversationId }
+  )
+
+  if (!adjustResult.success || !adjustResult.brief) {
+    console.warn('[Orchestrator] 調整 Design Brief 失敗:', adjustResult.error)
+    await sendMessage(conversationId, io, {
+      content: `調整時遇到問題，讓我直接用目前的方向開始生成吧。`,
+      stage: 'uiux_design_brief_confirm',
+    })
+    await proceedToVariantGeneration(conversationId, state, redis, io)
+    return
+  }
+
+  // 更新 state（含 tier 同步）
+  state.uiuxDesignBrief = adjustResult.brief
+  state.uiuxDesignTier = adjustResult.brief.recommendedTier
+  state.uiuxDesignBriefRound = round + 1
+  history.push({ role: 'assistant', content: adjustResult.displayText || '' })
+  state.uiuxDesignBriefHistory = history
+  state.waitingForReply = true
+  await saveFlowState(redis, conversationId, state)
+
+  // 發送更新後的 brief
+  const brief = adjustResult.brief
+  const displayText = adjustResult.displayText || `## 設計方向（已更新）
+
+**風格定位**：${brief.styleSummary}
+**色彩方向**：${brief.colorDirection}
+**佈局建議**：${brief.layoutSuggestion}
+**參考分析**：${brief.referenceAnalysis}
+
+**專業建議**：
+${brief.professionalRecommendations.map(r => `- ${r}`).join('\n')}`
+
+  const promptSuffix = round + 1 >= DESIGN_BRIEF_LIMITS.MAX_ROUNDS
+    ? '\n\n已更新！接下來我就開始生成設計方案了。'
+    : '\n\n已更新！還有要調整的嗎？沒有的話我就開始了！'
+
+  await sendMessage(conversationId, io, {
+    content: `${displayText}${promptSuffix}`,
+    stage: 'uiux_design_brief_confirm',
+  })
+
+  console.log(`[Orchestrator] Design Brief 已調整（第 ${round + 1} 輪）`)
+}
+
+/**
+ * 進入變體生成（公共邏輯）
+ * Design Brief 確認後或降級時調用
+ */
+async function proceedToVariantGeneration(
+  conversationId: string,
+  state: FlowState,
+  redis: Redis,
+  io: SocketIOServer
+) {
+  const template = state.uiuxPreparedTemplate
+  if (!template) {
+    console.error('[Orchestrator] proceedToVariantGeneration: 缺少 uiuxPreparedTemplate')
+    await sendMessage(conversationId, io, {
+      content: '發生錯誤：缺少模板資訊。請重新選擇設計方向。',
+      stage: 'error',
+    })
+    return
+  }
+
+  // 將 Design Brief 注入模板 description（增強 prompt）
+  if (state.uiuxDesignBrief) {
+    const brief = state.uiuxDesignBrief
+    const briefEnhancement = [
+      `風格定位：${brief.styleSummary}`,
+      `色彩方向：${brief.colorDirection}`,
+      `佈局建議：${brief.layoutSuggestion}`,
+      `參考分析：${brief.referenceAnalysis}`,
+      ...brief.professionalRecommendations.map(r => `建議：${r}`),
+      ...(brief.domainKeywords?.length ? [`Domain 關鍵概念：${brief.domainKeywords.join('、')}`] : []),
+      ...(brief.signature ? [`Signature Element：${brief.signature}`] : []),
+    ].join('\n')
+    template.description = template.description
+      ? `${template.description}\n\n## AI 設計顧問建議\n${briefEnhancement}`
+      : `## AI 設計顧問建議\n${briefEnhancement}`
+  }
+
+  const sourceType = state.uiuxDesignBrief?.sourceType || 'template'
+
+  // 發送生成中訊息
+  await sendMessage(conversationId, io, {
+    content: '正在為你生成 5 個設計方案...',
+    stage: 'uiux_variants_generating',
+    progress: { current: 1, total: 3, step: '生成設計變體' },
+  })
+
+  // 取得 BDD Session
+  if (!state.sessionId) {
+    console.error('[Orchestrator] proceedToVariantGeneration: 缺少 sessionId')
+    return
+  }
+
+  const session = await getBddSession({ sessionId: state.sessionId })
+  if (!session.success || !session.data) {
+    console.error('[Orchestrator] proceedToVariantGeneration: 無法取得 BDD Session')
+    return
+  }
+
+  const bddSpec = session.data.featuresContent
+    ? session.data.featuresContent.map(f => `- ${f.name}`).join('\n')
+    : ''
+  const productType = session.data.projectContext || '通用應用'
+
+  // 更新狀態
+  state.phase = 'uiux_generating_variants'
+  state.uiuxTemplateId = template.id
+  await saveFlowState(redis, conversationId, state)
+
+  // 更新 BDD Session
+  await updateBddSession({
+    sessionId: state.sessionId,
+    updates: {
+      uiuxTemplateId: template.id,
+      currentPhase: 'uiux_generating_variants',
+    },
+  })
+
+  // 生成 5 個設計變體
+  const variantsResult = await generateDesignVariants(
+    template,
+    bddSpec,
+    productType,
+    state.uiuxDesignTier,
     { conversationId }
   )
 
   if (!variantsResult.success || !variantsResult.variants) {
     console.error('[Orchestrator] 生成設計變體失敗:', variantsResult.error)
-    await sendMessage(conversationId, io, {
-      content: `生成設計方案時發生錯誤。讓我們改用模板開始。`,
-      stage: 'error',
-    })
-    await showTemplatePicker(conversationId, state, redis, io)
+    if (sourceType === 'ideas') {
+      // Path A fallback：切換到模板選擇
+      await sendMessage(conversationId, io, {
+        content: '生成設計方案時發生錯誤。讓我們改用模板開始。',
+        stage: 'error',
+      })
+      await showTemplatePicker(conversationId, state, redis, io)
+    } else {
+      // Path B：顯示錯誤
+      await sendMessage(conversationId, io, {
+        content: `生成設計變體時發生錯誤：${variantsResult.error}。請稍後再試。`,
+        stage: 'error',
+      })
+    }
     return
   }
 
   const variants = variantsResult.variants
-  console.log(`[Orchestrator] 成功生成 ${variants.length} 個設計變體（基於用戶想法）`)
+  console.log(`[Orchestrator] 成功生成 ${variants.length} 個設計變體`)
 
   // 保存變體到 BDD Session
   await updateBddSession({
@@ -2283,9 +2522,13 @@ async function completeDesignClarify(
     `**${v.id}. ${v.name}**\n${v.description}\n關鍵特點：${v.keyFeatures.join('、')}`
   ).join('\n\n')
 
+  const prefix = sourceType === 'ideas'
+    ? '根據你的設計想法，我生成了 5 個設計方案'
+    : '設計變體已生成完成'
+
   // 發送變體選擇訊息
   await sendMessage(conversationId, io, {
-    content: `根據你的設計想法，我生成了 5 個設計方案：\n\n${variantDescriptions}\n\n請選擇你喜歡的方向：\n- 輸入「選擇 A」直接使用某個方案\n- 輸入「合併 A+C」組合多個方案的特點`,
+    content: `${prefix}！\n\n${variantDescriptions}\n\n請選擇你喜歡的方向：\n- 輸入「選擇 A」直接使用某個方案\n- 輸入「合併 A+C」組合多個方案的特點`,
     stage: 'uiux_variants_ready',
     layoutHint: 'split',
     richContent: {
@@ -2293,7 +2536,7 @@ async function completeDesignClarify(
       data: {
         variants: variants,
         selectedIds: [],
-        fromUserIdeas: true,
+        fromUserIdeas: sourceType === 'ideas',
       } as Record<string, unknown>,
     },
   })

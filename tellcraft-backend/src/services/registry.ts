@@ -65,11 +65,10 @@ export const SKILL_REGISTRY: Record<SkillName, SkillMetadata> = {
   'uiux': {
     name: 'uiux',
     displayName: 'UI/UX 介面設計',
-    description: `AI 驅動的完整前端介面開發：
-      1. Design Discovery - 探索用戶偏好與設計方向
+    description: `AI 驅動的完整前端介面開發（3 階段）：
+      1. Design Discovery - 探索用戶偏好與設計方向（雙軌：有想法→4步釐清 / 沒想法→模板選擇）
       2. Design Lab - 生成多個設計變體供用戶選擇
-      3. Implementation - 產出 Next.js + Tailwind CSS 前端程式碼
-      4. Quality Gate - 無障礙、效能、SEO 品質檢查`,
+      3. Implementation - 產出 Next.js + Tailwind CSS 前端程式碼`,
     triggerPatterns: [
       '設計', '介面', 'UI', 'UX', '前端', '頁面', '畫面',
       'landing page', 'dashboard', '後台', '管理介面',
