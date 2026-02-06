@@ -27,6 +27,7 @@ import ProjectReminder from './components/ProjectReminder'
 import SplitLayout from './components/uiux/SplitLayout'
 import SpecGenerationView from './components/SpecGenerationView'
 import PreviewPanel from './components/uiux/PreviewPanel'
+import CodePreview from './components/uiux/CodePreview'
 import TemplatePicker from './components/uiux/TemplatePicker'
 import { getTemplateById } from './actions/templates'
 import type { Template } from './lib/templates'
@@ -2044,7 +2045,25 @@ function ChatSection({
   )
 
   // 預覽面板渲染函數（用於 SplitLayout）
-  const renderPreviewPanel = () => (
+  const renderPreviewPanel = () => {
+    // 檢查是否有 code_preview 訊息（Implementation 階段生成的程式碼）
+    const codePreviewMessage = [...messages].reverse().find(m => m.richContent?.type === 'code_preview')
+    const codePreviewData = codePreviewMessage?.richContent?.data
+
+    if (codePreviewData) {
+      return (
+        <div style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
+          <CodePreview
+            pages={codePreviewData.pages as { path: string; content: string; description: string }[]}
+            components={codePreviewData.components as { path: string; content: string; description: string }[]}
+            styles={codePreviewData.styles as string | undefined}
+            tailwindConfig={codePreviewData.tailwindConfig as string | undefined}
+          />
+        </div>
+      )
+    }
+
+    return (
     <div style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
       <PreviewPanel
         templateSlug={selectedTemplate?.slug}
@@ -2095,7 +2114,8 @@ function ChatSection({
         </motion.div>
       )}
     </div>
-  )
+    )
+  }
 
   // 檢查是否在 formulation 階段（顯示全屏等待畫面）
   const lastMessage = messages[messages.length - 1]

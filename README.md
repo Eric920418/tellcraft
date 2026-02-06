@@ -24,7 +24,6 @@ UIUX Implementation 三階段（Structure → Animation → RWD）完成後自�
 **檢查類別**：
 - **A11y**：focus-visible、aria-label、form labels、img alt、heading hierarchy
 - **Performance**：只動畫 transform/opacity、reduced-motion、no transition-all、animation duration
-- **SEO**：metadata export、semantic HTML、html lang
 - **Code Quality**：motion/react import、Tailwind v4 syntax、next/font、no h-screen、no emoji icons
 
 **自動修復**：發現 critical 問題時用 Haiku 自動修復，最多 3 輪，只修問題不改設計。
@@ -1286,7 +1285,7 @@ Hero → 往下滾動 → 產品介紹（SEO 友好）→ Testimonials → CTA
 | `domain-manager` | ✅ 完成 | 網域管理入口，支援三種選擇 |
 | `domain-purchase` | ✅ 完成 | Porkbun 網域註冊 |
 | `domain-dns` | ✅ 完成 | Cloudflare Zone + Vercel 綁定 |
-| `quality-gate` | ✅ 完成 | UIUX Implementation 完成後自動觸發，靜態檢查 A11y/Performance/SEO/Code Quality，critical 問題用 LLM 自動修復（最多 3 輪） |
+| `quality-gate` | ✅ 完成 | UIUX Implementation 完成後自動觸發，靜態檢查 A11y/Performance/Code Quality，critical 問題用 LLM 自動修復（最多 3 輪） |
 
 ### BDD Spec Skill 完整流程
 

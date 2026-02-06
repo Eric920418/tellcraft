@@ -24,7 +24,6 @@ interface QualityReport {
   categories: {
     a11y: { passed: boolean; issues: QualityIssue[] }
     performance: { passed: boolean; issues: QualityIssue[] }
-    seo: { passed: boolean; issues: QualityIssue[] }
     code_quality: { passed: boolean; issues: QualityIssue[] }
   }
 }
@@ -42,7 +41,6 @@ const SEVERITY_STYLES: Record<string, { bg: string; text: string; label: string 
 const CATEGORY_LABELS: Record<string, string> = {
   a11y: 'Accessibility',
   performance: 'Performance',
-  seo: 'SEO',
   code_quality: 'Code Quality',
 }
 

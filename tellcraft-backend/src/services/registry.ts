@@ -162,8 +162,7 @@ export const SKILL_REGISTRY: Record<SkillName, SkillMetadata> = {
     description: `自動品質檢查（UIUX 完成後自動觸發）：
       1. Accessibility (WCAG 2.2 AA) - 無障礙標準
       2. Performance - 效能優化
-      3. SEO - 搜尋引擎優化
-      4. Code Quality - 程式碼品質
+      3. Code Quality - 程式碼品質
       發現 critical 問題時自動用 LLM 修復（最多 3 輪）`,
     triggerPatterns: [
       '品質檢查', 'quality check', 'quality gate',

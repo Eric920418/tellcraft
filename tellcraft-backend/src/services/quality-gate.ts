@@ -1,6 +1,6 @@
 /**
  * Quality Gate Service
- * 自動化品質檢查：A11y / Performance / SEO / Code Quality
+ * 自動化品質檢查：A11y / Performance / Code Quality
  * 基於 regex/字串匹配的靜態分析，發現 critical 問題時用 LLM 自動修復
  */
 
@@ -11,7 +11,7 @@ import { GeneratedComponent } from './uiux-generation'
 // 型別定義
 // ============================================================
 
-export type QualityCategory = 'a11y' | 'performance' | 'seo' | 'code_quality'
+export type QualityCategory = 'a11y' | 'performance' | 'code_quality'
 export type Severity = 'critical' | 'warning' | 'info'
 
 export interface QualityIssue {
@@ -38,7 +38,6 @@ export interface QualityReport {
   categories: {
     a11y: { passed: boolean; issues: QualityIssue[] }
     performance: { passed: boolean; issues: QualityIssue[] }
-    seo: { passed: boolean; issues: QualityIssue[] }
     code_quality: { passed: boolean; issues: QualityIssue[] }
   }
 }
@@ -295,73 +294,7 @@ function checkPerformance(code: GeneratedCode): QualityIssue[] {
 }
 
 // ============================================================
-// Checker 3: SEO
-// ============================================================
-
-function checkSEO(code: GeneratedCode): QualityIssue[] {
-  const issues: QualityIssue[] = []
-  let issueCounter = 0
-
-  // 檢查頁面是否有 metadata export
-  for (const page of code.pages) {
-    if (!page.content.includes('export const metadata') && !page.content.includes('export function generateMetadata')) {
-      // 只在 layout 或 page 級別檢查
-      if (page.path.includes('layout.tsx') || page.path.includes('layout.ts')) {
-        issues.push({
-          id: `seo-${++issueCounter}`,
-          category: 'seo',
-          severity: 'critical',
-          rule: 'metadata',
-          message: 'Layout 缺少 metadata export（title / description）',
-          file: page.path,
-          suggestion: '加入 export const metadata = { title: "...", description: "..." }',
-        })
-      }
-    }
-  }
-
-  // 檢查是否使用語意化 HTML
-  const allFiles = [...code.pages, ...code.components]
-  const semanticTags = ['<main', '<section', '<nav', '<article', '<header', '<footer', '<aside']
-
-  // 頁面級別應有 main/section
-  for (const page of code.pages) {
-    const hasSemanticTag = semanticTags.some(tag => page.content.includes(tag))
-    if (!hasSemanticTag) {
-      issues.push({
-        id: `seo-${++issueCounter}`,
-        category: 'seo',
-        severity: 'warning',
-        rule: 'semantic-html',
-        message: '頁面缺少語意化 HTML 標籤（main / section / nav）',
-        file: page.path,
-        suggestion: '使用 <main>、<section>、<nav> 等語意化標籤',
-      })
-    }
-  }
-
-  // 檢查 html lang
-  for (const file of allFiles) {
-    if (file.path.includes('layout')) {
-      if (file.content.includes('<html') && !file.content.match(/<html[^>]*lang=/)) {
-        issues.push({
-          id: `seo-${++issueCounter}`,
-          category: 'seo',
-          severity: 'warning',
-          rule: 'html-lang',
-          message: '<html> 缺少 lang 屬性',
-          file: file.path,
-          suggestion: '加入 lang="zh-TW" 或 lang="en"',
-        })
-      }
-    }
-  }
-
-  return issues
-}
-
-// ============================================================
-// Checker 4: Code Quality
+// Checker 3: Code Quality
 // ============================================================
 
 function checkCodeQuality(code: GeneratedCode, _designTier?: DesignTier): QualityIssue[] {
@@ -505,13 +438,12 @@ function checkCodeQuality(code: GeneratedCode, _designTier?: DesignTier): Qualit
 // ============================================================
 
 export function runQualityGate(code: GeneratedCode, designTier?: DesignTier): QualityReport {
-  // 並行執行 4 個 checker
+  // 並行執行 3 個 checker
   const a11yIssues = checkAccessibility(code)
   const perfIssues = checkPerformance(code)
-  const seoIssues = checkSEO(code)
   const cqIssues = checkCodeQuality(code, designTier)
 
-  const allIssues = [...a11yIssues, ...perfIssues, ...seoIssues, ...cqIssues]
+  const allIssues = [...a11yIssues, ...perfIssues, ...cqIssues]
 
   const critical = allIssues.filter(i => i.severity === 'critical').length
   const warning = allIssues.filter(i => i.severity === 'warning').length
@@ -535,10 +467,6 @@ export function runQualityGate(code: GeneratedCode, designTier?: DesignTier): Qu
       performance: {
         passed: perfIssues.filter(i => i.severity === 'critical').length === 0,
         issues: perfIssues,
-      },
-      seo: {
-        passed: seoIssues.filter(i => i.severity === 'critical').length === 0,
-        issues: seoIssues,
       },
       code_quality: {
         passed: cqIssues.filter(i => i.severity === 'critical').length === 0,

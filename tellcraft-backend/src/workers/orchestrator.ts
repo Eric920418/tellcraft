@@ -1911,7 +1911,6 @@ async function executeQualityGate(
     const criticalIssues = [
       ...report.categories.a11y.issues,
       ...report.categories.performance.issues,
-      ...report.categories.seo.issues,
       ...report.categories.code_quality.issues,
     ].filter(i => i.severity === 'critical')
 
