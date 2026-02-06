@@ -94,7 +94,7 @@ UIUX Implementation 階段生成的 React TSX 代碼，自動轉換為 standalon
 - `executeCodePhaseStructure` 優先使用 `state.uiuxPreparedTemplate`（包含用戶設計偏好 + 正確頁面結構）
 - `getTemplateAndBddSpec` fallback 從 `['home', 'about']` 改為 `['home']`，並返回 `originalRequirements`
 - `generateStructure` 新增 `productContext` 參數，注入：產品描述、設計偏好（feeling/reference/color/layout）、Design Brief
-- userMessage 加入「頁面必須忠於產品本質」原則，引導 LLM 從 BDD 規格推導前端需求
+- **BDD 規格驅動頁面推導**：頁面列表僅作為起始建議，LLM 從 Feature Files 自行推導最終頁面結構（增刪合併重命名皆可），不再硬編頁面規則
 
 ### UIUX Skill 全面審計與修復（2026-02-06）
 

@@ -1027,30 +1027,36 @@ ${brief.signature ? `- Signature Element：${brief.signature}` : ''}
 `
     : ''
 
-  const userMessage = `請生成以下頁面和共用組件的靜態桌面版：
+  const userMessage = `請根據以下資訊生成靜態桌面版前端代碼。
 
 ${productSection}
 ${designSection}
 ${briefSection}
-## 頁面列表
-${pages.map(p => `- ${p}`).join('\n')}
+${bddSpec ? `## BDD 規格（核心依據）
+以下是產品的 BDD Feature Files，描述了所有功能和業務規則。
+**你必須從這些 Feature 推導出前端需要哪些頁面、哪些 UI 元素、哪些操作流程。**
 
-## 模板資訊
+${bddSpec}` : ''}
+
+## 頁面規劃策略
+以下頁面列表僅作為起始建議：${pages.map(p => `${p}`).join(', ')}
+
+**你應該根據 BDD 規格自行判斷最終的頁面結構：**
+- 從 Feature Files 中找出所有用戶操作場景，歸納出需要哪些頁面
+- 每個頁面要能承載對應的 Feature 功能（表單、列表、統計等）
+- 可以增加、移除、合併、重新命名頁面 — 只要能完整覆蓋 BDD 規格描述的功能
+- Header/Footer 的導航連結要對應你最終決定的頁面結構
+- 頁面中使用有意義的模擬數據（和產品領域相關，不要用 Lorem ipsum）
+
+## 模板資訊（設計風格參考）
 - 名稱：${template.name}
 - 類別：${template.category}
 - 描述：${template.description}
 
-${bddSpec ? `## BDD 規格（後端 API 規格，請從中推導前端需要的頁面功能和 UI 元素）\n${bddSpec}` : ''}
-
-## 重要原則
-- **頁面必須忠於產品本質**：如果是記帳 app 就做記帳功能，不要加「關於」、「團隊」等無關頁面
-- **Header 導航只放實際功能頁面**，不要放「首頁」「關於」等行銷型連結
-- **內容要有意義的模擬數據**，不要只放 placeholder
-
 ## 需要生成的內容
-1. 每個頁面的 page.tsx（靜態結構）
-2. 共用的 Layout 組件（Header, Footer — 只包含與產品功能相關的導航）
-3. 常用 UI 組件（Button, Card, Input 等）
+1. 每個頁面的 page.tsx（靜態結構，根據 BDD 規格決定具體內容）
+2. 共用的 Layout 組件（Header, Footer — 導航項對應實際頁面）
+3. 頁面所需的 UI 組件（根據功能需求決定，不要為了生成而生成）
 4. globals.css（包含 CSS variables）
 
 請確保所有組件使用一致的 Design System。這是第一階段，動畫和響應式會在後續階段添加。`

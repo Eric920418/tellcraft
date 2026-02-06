@@ -359,7 +359,7 @@ export function convertToPreviewHtml(
   pages: GeneratedFile[],
   components: GeneratedFile[],
   styles: string,
-  _tailwindConfig?: string
+  tailwindConfig?: string
 ): string {
   // 1. 建立 component map: name → JSX
   const componentMap = new Map<string, string>()
@@ -444,18 +444,24 @@ export function convertToPreviewHtml(
   // 9. 字體
   const fontImports = extractFontInfo(mainPage.content, components)
 
-  // 10. 組裝 HTML
+  // 10. 提取 Tailwind CDN 配置（從完整 TS config 中提取 theme.extend）
+  const tailwindCdnConfig = tailwindConfig ? extractTailwindCdnConfig(tailwindConfig) : ''
+
+  // 11. 組裝 HTML
   return `<!DOCTYPE html>
 <html lang="zh-TW">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <script src="https://cdn.tailwindcss.com"></script>
+  ${tailwindCdnConfig}
   ${fontImports}
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
     ${cleanStyles}
-    body { min-height: 100vh; }
+    html, body { max-width: 100vw; overflow-x: hidden; }
+    body { min-height: 100vh; width: 100%; overflow-wrap: break-word; word-wrap: break-word; }
+    img, video, svg { max-width: 100%; height: auto; }
     .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0,0,0,0); border: 0; }
     @media (prefers-reduced-motion: reduce) {
       *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
@@ -495,6 +501,47 @@ function extractFontInfo(mainContent: string, components: GeneratedFile[]): stri
 
   const primaryFont = fonts[0].replace(/\+/g, ' ')
   return `${fontLinks}\n  <style>body { font-family: '${primaryFont}', system-ui, sans-serif; }</style>`
+}
+
+/**
+ * 從完整 Tailwind TS config 中提取 theme.extend 用於 CDN 配置
+ * 輸入: `import type ... const config: Config = { ... theme: { extend: { ... } } ... }`
+ * 輸出: `<script>tailwind.config = { theme: { extend: { ... } } }</script>`
+ */
+function extractTailwindCdnConfig(configContent: string): string {
+  // 找 theme: { extend: { 的位置
+  const extendMatch = configContent.match(/extend:\s*\{/)
+  if (!extendMatch || extendMatch.index === undefined) return ''
+
+  const start = extendMatch.index + extendMatch[0].length
+  let depth = 1
+  let i = start
+
+  while (i < configContent.length && depth > 0) {
+    if (configContent[i] === '{') depth++
+    else if (configContent[i] === '}') depth--
+    if (depth > 0) i++
+  }
+
+  const extendBody = configContent.substring(start, i).trim()
+  if (!extendBody) return ''
+
+  // 轉成合法 JS 物件: 移除 TypeScript 語法、處理 trailing comma
+  let jsObj = extendBody
+    // 移除 TypeScript as 語法
+    .replace(/\s+as\s+\w+/g, '')
+    // 移除行尾 // 註解
+    .replace(/\/\/.*$/gm, '')
+
+  return `<script>
+  tailwind.config = {
+    theme: {
+      extend: {
+        ${jsObj}
+      }
+    }
+  }
+  </script>`
 }
 
 /**
