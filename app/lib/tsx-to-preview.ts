@@ -599,6 +599,114 @@ function convertJsxSyntax(jsx: string): string {
 }
 
 /**
+ * 內聯組件：用深度計數找到 <CompName ...> 和 </CompName>，
+ * 將組件體替換進去。處理 self-closing 和 with-children 兩種情況。
+ */
+function inlineComponent(jsx: string, compName: string, compJsx: string): string {
+  let result = ''
+  let i = 0
+  const openTag = `<${compName}`
+  const closeTag = `</${compName}>`
+
+  // 判斷組件體是否複雜（不能簡單替換 {children}）
+  const isComplexBody = /children\.\s*(map|filter|forEach|find)/.test(compJsx) ||
+    /Array\.isArray\s*\(\s*children/.test(compJsx)
+
+  while (i < jsx.length) {
+    // 尋找 <CompName
+    const pos = jsx.indexOf(openTag, i)
+    if (pos === -1) {
+      result += jsx.substring(i)
+      break
+    }
+
+    // 確認是完整的 tag name（不是 <CompNameExtra）
+    const charAfter = jsx[pos + openTag.length]
+    if (charAfter && /[\w.]/.test(charAfter)) {
+      result += jsx.substring(i, pos + openTag.length)
+      i = pos + openTag.length
+      continue
+    }
+
+    // 複製 tag 之前的內容
+    result += jsx.substring(i, pos)
+
+    // 跳過屬性區域
+    let j = pos + openTag.length
+    j = skipTagAttributes(jsx, j)
+
+    // Self-closing: <CompName ... />
+    if (j < jsx.length && jsx[j] === '/' && jsx[j + 1] === '>') {
+      // 提取 props 字串
+      const propsStr = jsx.substring(pos + openTag.length, j).trim()
+      const props = propsStr ? extractPropsFromUsage(propsStr) : {}
+      result += substituteProps(compJsx, props)
+      i = j + 2
+      continue
+    }
+
+    // Opening tag: <CompName ...>
+    if (j < jsx.length && jsx[j] === '>') {
+      j++ // skip >
+      // 找配對的 </CompName>，處理同名巢狀
+      let depth = 1
+      let k = j
+      while (k < jsx.length && depth > 0) {
+        if (jsx.substring(k).startsWith(closeTag)) {
+          depth--
+          if (depth === 0) break
+          k += closeTag.length
+          continue
+        }
+        if (jsx.substring(k).startsWith(openTag)) {
+          const after = jsx[k + openTag.length]
+          if (after && /[\s/>]/.test(after)) {
+            depth++
+            k += openTag.length
+            k = skipTagAttributes(jsx, k)
+            if (k < jsx.length && jsx[k] === '/') { depth--; k += 2 }
+            else if (k < jsx.length && jsx[k] === '>') k++
+            continue
+          }
+        }
+        // 跳過其他 tag 的屬性區（避免 > 干擾）
+        if (jsx[k] === '<' && k + 1 < jsx.length && /[a-zA-Z]/.test(jsx[k + 1])) {
+          k++
+          while (k < jsx.length && /[\w.-]/.test(jsx[k])) k++
+          k = skipTagAttributes(jsx, k)
+          if (k < jsx.length && (jsx[k] === '>' || (jsx[k] === '/' && jsx[k + 1] === '>'))) {
+            if (jsx[k] === '/') k += 2; else k++
+          }
+          continue
+        }
+        k++
+      }
+
+      const rawChildren = jsx.substring(j, k)
+
+      if (isComplexBody) {
+        // 複雜組件（children.map 等）→ 直接保留 children
+        result += rawChildren
+      } else {
+        // 簡單包裝器 → 替換 {children}
+        let body = compJsx.replace(/\{children\}/g, rawChildren)
+        body = body.replace(/\{props\.children\}/g, rawChildren)
+        result += body
+      }
+
+      i = k + closeTag.length
+      continue
+    }
+
+    // 異常 — 原樣保留
+    result += jsx.substring(pos, j)
+    i = j
+  }
+
+  return result
+}
+
+/**
  * 主函數：將生成的 TSX 代碼轉換為可渲染的 standalone HTML
  */
 export function convertToPreviewHtml(
@@ -635,22 +743,15 @@ export function convertToPreviewHtml(
     return buildFallbackHtml('無法解析頁面結構', styles)
   }
 
-  // 4. 內聯組件引用
-  for (const [compName, compJsx] of componentMap) {
-    // Self-closing: <Component prop="value" />
-    const selfClosingRegex = new RegExp(`<${compName}(\\s[^>]*)?\\/\\s*>`, 'g')
-    pageJsx = pageJsx.replace(selfClosingRegex, (_fullMatch, propsStr) => {
-      const props = propsStr ? extractPropsFromUsage(propsStr) : {}
-      return substituteProps(compJsx, props)
-    })
-
-    // With children: <Component>...</Component>
-    const withChildrenRegex = new RegExp(`<${compName}[^>]*>([\\s\\S]*?)<\\/${compName}>`, 'g')
-    pageJsx = pageJsx.replace(withChildrenRegex, (_fullMatch, children) => {
-      let result = compJsx.replace(/\{children\}/g, children)
-      result = result.replace(/\{props\.children\}/g, children)
-      return result
-    })
+  // 4. 內聯組件引用（多輪處理巢狀組件）
+  for (let pass = 0; pass < 3; pass++) {
+    let changed = false
+    for (const [compName, compJsx] of componentMap) {
+      const before = pageJsx
+      pageJsx = inlineComponent(pageJsx, compName, compJsx)
+      if (pageJsx !== before) changed = true
+    }
+    if (!changed) break
   }
 
   // 5. Layout 組件處理
@@ -664,11 +765,7 @@ export function convertToPreviewHtml(
       layoutJsx = layoutJsx.replace(/\{props\.children\}/g, pageJsx)
 
       for (const [compName, compJsx] of componentMap) {
-        const selfClosingRegex = new RegExp(`<${compName}(\\s[^>]*)?\\/\\s*>`, 'g')
-        layoutJsx = layoutJsx.replace(selfClosingRegex, (_, propsStr) => {
-          const props = propsStr ? extractPropsFromUsage(propsStr) : {}
-          return substituteProps(compJsx, props)
-        })
+        layoutJsx = inlineComponent(layoutJsx, compName, compJsx)
       }
 
       pageJsx = layoutJsx
