@@ -826,6 +826,81 @@ router.post('/:id/iterate', requireAuth, async (req, res) => {
 })
 
 /**
+ * GET /api/project/:id/template-overrides
+ * 取得專案的模板客製化
+ */
+router.get('/:id/template-overrides', requireAuth, async (req, res) => {
+  try {
+    const { id } = req.params
+    const userId = req.user!.id
+
+    const project = await db.queryOne<{
+      user_id: string
+      template_overrides: Record<string, Record<string, string>> | null
+    }>(
+      'SELECT user_id, template_overrides FROM projects WHERE id = $1',
+      [id]
+    )
+
+    if (!project) {
+      return res.status(404).json({ error: 'Project not found' })
+    }
+
+    if (project.user_id !== userId) {
+      return res.status(403).json({ error: 'Access denied' })
+    }
+
+    res.json({
+      overrides: project.template_overrides || {}
+    })
+  } catch (error) {
+    console.error('[Project] 取得模板客製化失敗:', error)
+    res.status(500).json({ error: 'Failed to get template overrides' })
+  }
+})
+
+/**
+ * PUT /api/project/:id/template-overrides
+ * 更新專案的模板客製化
+ */
+router.put('/:id/template-overrides', requireAuth, async (req, res) => {
+  try {
+    const { id } = req.params
+    const userId = req.user!.id
+    const { overrides } = req.body as { overrides: Record<string, Record<string, string>> }
+
+    if (!overrides || typeof overrides !== 'object') {
+      return res.status(400).json({ error: 'Invalid overrides format' })
+    }
+
+    // 驗證專案擁有權
+    const project = await db.queryOne<{ user_id: string }>(
+      'SELECT user_id FROM projects WHERE id = $1',
+      [id]
+    )
+
+    if (!project) {
+      return res.status(404).json({ error: 'Project not found' })
+    }
+
+    if (project.user_id !== userId) {
+      return res.status(403).json({ error: 'Access denied' })
+    }
+
+    // 更新 template_overrides
+    await db.query(
+      `UPDATE projects SET template_overrides = $1, updated_at = NOW() WHERE id = $2`,
+      [JSON.stringify(overrides), id]
+    )
+
+    res.json({ success: true })
+  } catch (error) {
+    console.error('[Project] 更新模板客製化失敗:', error)
+    res.status(500).json({ error: 'Failed to update template overrides' })
+  }
+})
+
+/**
  * DELETE /api/project/:id
  * 刪除專案
  */

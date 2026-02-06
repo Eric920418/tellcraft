@@ -1625,6 +1625,58 @@ function ChatSection({
     }
   }
 
+  // 發送指定內容的訊息（用於按鈕觸發）
+  const handleSendMessage = async (content: string) => {
+    if (!sessionInfo || !content.trim() || isTyping) return
+
+    // 樂觀更新
+    const userMessage: Message = {
+      id: crypto.randomUUID(),
+      role: 'user',
+      content: content.trim(),
+      timestamp: new Date(),
+      pending: true
+    }
+    isNearBottomRef.current = true
+    isProgrammaticScrollRef.current = true
+
+    setMessages(prev => [...prev, userMessage])
+    setIsTyping(true)
+
+    setTimeout(() => {
+      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+      setTimeout(() => {
+        isProgrammaticScrollRef.current = false
+      }, 500)
+    }, 50)
+
+    const token = getAuthToken()
+    if (sessionInfo.currentTaskId) {
+      const result = await vpsReplyToConversation({
+        conversationId: sessionInfo.conversationId,
+        projectId: sessionInfo.projectId,
+        taskId: sessionInfo.currentTaskId,
+        message: content.trim(),
+        token: token || undefined,
+      })
+      if (!result.success) {
+        setError(result.error || '發送失敗')
+        setIsTyping(false)
+      }
+    } else {
+      const result = await vpsSendMessage({
+        conversationId: sessionInfo.conversationId,
+        message: content.trim(),
+        projectId: sessionInfo.projectId,
+        token: token || undefined,
+      })
+      if (!result.success) {
+        setError(result.error || '發送失敗')
+        setIsTyping(false)
+      }
+    }
+  }
+
   const stages = [
     { key: 'discovery', title: '需求探索' },
     { key: 'clarify', title: '細節釐清' },
@@ -2051,12 +2103,56 @@ function ChatSection({
 
   // 預覽面板渲染函數（用於 SplitLayout）
   const renderPreviewPanel = () => (
-    <PreviewPanel
-      templateSlug={selectedTemplate?.slug}
-      previewImageUrl={selectedTemplate?.previewImageUrl}
-      templateName={selectedTemplate?.name}
-      isLoading={!selectedTemplate && !!selectedTemplateId}
-    />
+    <div style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
+      <PreviewPanel
+        templateSlug={selectedTemplate?.slug}
+        previewImageUrl={selectedTemplate?.previewImageUrl}
+        templateName={selectedTemplate?.name}
+        isLoading={!selectedTemplate && !!selectedTemplateId}
+        projectId={sessionInfo?.projectId}
+      />
+      {/* 底部操作按鈕 */}
+      {selectedTemplate && (
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          style={{
+            padding: 16,
+            borderTop: '1px solid var(--border-color)',
+            background: 'var(--white)',
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+          }}
+        >
+          <div>
+            <div style={{ fontSize: 14, fontWeight: 500 }}>
+              {selectedTemplate.name}
+            </div>
+            <div style={{ fontSize: 12, color: 'var(--gray-500)' }}>
+              {selectedTemplate.description?.substring(0, 50)}...
+            </div>
+          </div>
+          <motion.button
+            whileHover={{ scale: 1.02 }}
+            whileTap={{ scale: 0.98 }}
+            onClick={() => handleSendMessage(`我選擇「${selectedTemplate.name}」這個模板`)}
+            style={{
+              padding: '8px 16px',
+              fontSize: 13,
+              fontWeight: 500,
+              background: 'var(--black)',
+              color: 'var(--white)',
+              border: 'none',
+              borderRadius: 6,
+              cursor: 'pointer',
+            }}
+          >
+            使用此模板
+          </motion.button>
+        </motion.div>
+      )}
+    </div>
   )
 
   // 檢查是否在 formulation 階段（顯示全屏等待畫面）

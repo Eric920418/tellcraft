@@ -688,6 +688,42 @@ export async function listAllConversations(input: {
 }
 
 // ============================================================
+// Template Overrides API (專案級模板客製化)
+// ============================================================
+
+/**
+ * 獲取專案的模板客製化
+ */
+export async function getTemplateOverrides(input: {
+  projectId: string
+  token: string
+}): Promise<ApiResponse<{ overrides: Record<string, Record<string, string>> }>> {
+  return apiRequest(`/api/project/${input.projectId}/template-overrides`, {
+    method: 'GET',
+    headers: {
+      Authorization: `Bearer ${input.token}`,
+    },
+  })
+}
+
+/**
+ * 保存專案的模板客製化
+ */
+export async function saveTemplateOverrides(input: {
+  projectId: string
+  overrides: Record<string, Record<string, string>>
+  token: string
+}): Promise<ApiResponse<{ success: boolean }>> {
+  return apiRequest(`/api/project/${input.projectId}/template-overrides`, {
+    method: 'PUT',
+    headers: {
+      Authorization: `Bearer ${input.token}`,
+    },
+    body: JSON.stringify({ overrides: input.overrides }),
+  })
+}
+
+// ============================================================
 // Templates API
 // ============================================================
 
@@ -1728,6 +1764,9 @@ export const vpsApi = {
   getCurrentUserFromVps,
   migrateAnonymousAccount,
   updateProject,
+  // Template Overrides
+  getTemplateOverrides,
+  saveTemplateOverrides,
   // BDD Session
   createBddSession,
   getBddSession,

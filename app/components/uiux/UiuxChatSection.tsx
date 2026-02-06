@@ -489,6 +489,7 @@ export default function UiuxChatSection({
             previewImageUrl={selectedTemplate?.previewImageUrl}
             templateName={selectedTemplate?.name}
             isLoading={selectedTemplateId !== null && !selectedTemplate}
+            projectId={_sessionInfo?.projectId}
           />
 
           {/* 底部操作按鈕 */}

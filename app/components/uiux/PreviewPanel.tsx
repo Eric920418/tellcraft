@@ -5,6 +5,8 @@ import { motion, AnimatePresence } from 'framer-motion'
 import DeviceSwitcher, { DeviceType, getDeviceWidth } from './DeviceSwitcher'
 import { TemplateComponents, isSupportedTemplate } from '../templates'
 import PropertyEditor from './PropertyEditor'
+import { useAuth } from '../../hooks/useAuth'
+import { getTemplateOverrides, saveTemplateOverrides } from '../../lib/vps-api'
 
 // ============================================================
 // PreviewPanel - 預覽面板元件
@@ -17,6 +19,34 @@ interface PreviewPanelProps {
   templateName?: string                   // 模板名稱
   isLoading?: boolean                     // 是否正在載入
   error?: string                          // 錯誤訊息
+  projectId?: string                      // 專案 ID（用於持久化編輯）
+}
+
+// Debounce hook
+function useDebounce<T extends (...args: Parameters<T>) => void>(
+  callback: T,
+  delay: number
+): T {
+  const timeoutRef = useRef<NodeJS.Timeout | null>(null)
+
+  const debouncedCallback = useCallback((...args: Parameters<T>) => {
+    if (timeoutRef.current) {
+      clearTimeout(timeoutRef.current)
+    }
+    timeoutRef.current = setTimeout(() => {
+      callback(...args)
+    }, delay)
+  }, [callback, delay]) as T
+
+  useEffect(() => {
+    return () => {
+      if (timeoutRef.current) {
+        clearTimeout(timeoutRef.current)
+      }
+    }
+  }, [])
+
+  return debouncedCallback
 }
 
 // 元素資訊（用於互動編輯）
@@ -48,16 +78,87 @@ export default function PreviewPanel({
   templateName,
   isLoading = false,
   error,
+  projectId,
 }: PreviewPanelProps) {
   const [device, setDevice] = useState<DeviceType>('desktop')
   const [containerSize, setContainerSize] = useState({ width: 0, height: 0 })
   const containerRef = useRef<HTMLDivElement>(null)
   const previewContainerRef = useRef<HTMLDivElement>(null)
 
+  // 認證狀態
+  const { token, isAuthenticated } = useAuth()
+
   // 編輯模式狀態
   const [editMode, setEditMode] = useState(false)
   const [selectedElement, setSelectedElement] = useState<ElementInfo | null>(null)
   const [elementOverrides, setElementOverrides] = useState<Record<string, Record<string, string>>>({})
+  const [isSaving, setIsSaving] = useState(false)
+  const [saveError, setSaveError] = useState<string | null>(null)
+  const [overridesLoaded, setOverridesLoaded] = useState(false)
+
+  // 載入已保存的 overrides
+  useEffect(() => {
+    if (!projectId || !token || !isAuthenticated) {
+      setOverridesLoaded(true)
+      return
+    }
+
+    const loadOverrides = async () => {
+      try {
+        const result = await getTemplateOverrides({ projectId, token })
+        if (result.success && result.data?.overrides) {
+          setElementOverrides(result.data.overrides)
+        }
+      } catch (err) {
+        console.error('[PreviewPanel] 載入 template overrides 失敗:', err)
+      } finally {
+        setOverridesLoaded(true)
+      }
+    }
+
+    loadOverrides()
+  }, [projectId, token, isAuthenticated])
+
+  // 應用已載入的 overrides 到 DOM
+  useEffect(() => {
+    if (!overridesLoaded || !previewContainerRef.current) return
+
+    Object.entries(elementOverrides).forEach(([elementId, changes]) => {
+      const el = previewContainerRef.current?.querySelector(`[data-editable="${elementId}"]`) as HTMLElement
+      if (el) {
+        if (changes.text !== undefined) {
+          el.textContent = changes.text
+        }
+        Object.entries(changes).forEach(([key, value]) => {
+          if (key !== 'text') {
+            el.style[key as any] = value
+          }
+        })
+      }
+    })
+  }, [overridesLoaded, elementOverrides, device]) // device 變化時重新應用
+
+  // 保存到後端（debounced）
+  const saveToBackend = useCallback(async (overrides: Record<string, Record<string, string>>) => {
+    if (!projectId || !token || !isAuthenticated) return
+
+    setIsSaving(true)
+    setSaveError(null)
+
+    try {
+      const result = await saveTemplateOverrides({ projectId, overrides, token })
+      if (!result.success) {
+        setSaveError(result.error || '保存失敗')
+      }
+    } catch (err) {
+      console.error('[PreviewPanel] 保存 template overrides 失敗:', err)
+      setSaveError('保存失敗')
+    } finally {
+      setIsSaving(false)
+    }
+  }, [projectId, token, isAuthenticated])
+
+  const debouncedSave = useDebounce(saveToBackend, 1000)
 
   const deviceWidth = getDeviceWidth(device)
 
@@ -118,10 +219,11 @@ export default function PreviewPanel({
 
   // 更新元素內容和樣式
   const handleElementUpdate = useCallback((elementId: string, changes: Record<string, string>) => {
-    setElementOverrides(prev => ({
-      ...prev,
-      [elementId]: { ...prev[elementId], ...changes }
-    }))
+    const newOverrides = {
+      ...elementOverrides,
+      [elementId]: { ...elementOverrides[elementId], ...changes }
+    }
+    setElementOverrides(newOverrides)
 
     // 直接修改 DOM（即時預覽）
     const el = previewContainerRef.current?.querySelector(`[data-editable="${elementId}"]`) as HTMLElement
@@ -144,7 +246,10 @@ export default function PreviewPanel({
         styles: { ...prev.styles, ...changes }
       } : null)
     }
-  }, [selectedElement])
+
+    // 自動保存到後端
+    debouncedSave(newOverrides)
+  }, [selectedElement, elementOverrides, debouncedSave])
 
   // 切換設備時重新載入
   const handleDeviceChange = useCallback((newDevice: DeviceType) => {
@@ -238,19 +343,49 @@ export default function PreviewPanel({
         {/* 中間：設備切換器 */}
         <DeviceSwitcher activeDevice={device} onDeviceChange={handleDeviceChange} />
 
-        {/* 右側：縮放比例 */}
-        <div style={{ width: 80, textAlign: 'right' }}>
-          {scale < 1 && (
-            <span
-              style={{
-                fontSize: 11,
-                color: 'var(--gray-400)',
-                fontFamily: 'var(--font-mono)',
-              }}
-            >
-              {Math.round(scale * 100)}%
-            </span>
+        {/* 右側：保存狀態 + 縮放比例 */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          {/* 保存狀態指示器 */}
+          {editMode && projectId && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              {isSaving && (
+                <>
+                  <motion.div
+                    animate={{ rotate: 360 }}
+                    transition={{ duration: 1, repeat: Infinity, ease: 'linear' }}
+                    style={{
+                      width: 12,
+                      height: 12,
+                      borderRadius: '50%',
+                      border: '1.5px solid var(--gray-300)',
+                      borderTopColor: 'var(--gray-500)',
+                    }}
+                  />
+                  <span style={{ fontSize: 11, color: 'var(--gray-400)' }}>保存中...</span>
+                </>
+              )}
+              {!isSaving && saveError && (
+                <span style={{ fontSize: 11, color: '#ef4444' }}>{saveError}</span>
+              )}
+              {!isSaving && !saveError && Object.keys(elementOverrides).length > 0 && (
+                <span style={{ fontSize: 11, color: 'var(--gray-400)' }}>已保存</span>
+              )}
+            </div>
           )}
+          {/* 縮放比例 */}
+          <div style={{ width: 50, textAlign: 'right' }}>
+            {scale < 1 && (
+              <span
+                style={{
+                  fontSize: 11,
+                  color: 'var(--gray-400)',
+                  fontFamily: 'var(--font-mono)',
+                }}
+              >
+                {Math.round(scale * 100)}%
+              </span>
+            )}
+          </div>
         </div>
       </div>
 

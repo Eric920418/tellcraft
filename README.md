@@ -95,9 +95,9 @@ psql "$DATABASE_URL" -f migrations/add_uiux_columns.sql
 
 ---
 
-### 模板內容編輯功能（2026-02-06）
+### 模板內容編輯功能 + 專案級持久化（2026-02-06）
 
-新增模板編輯模式，讓用戶可以點擊模板中的元素直接修改內容和樣式。
+新增模板編輯模式，讓用戶可以點擊模板中的元素直接修改內容和樣式，並**自動保存到專案**。
 
 **功能**：
 - 點擊「編輯模式」按鈕進入編輯狀態
@@ -105,12 +105,30 @@ psql "$DATABASE_URL" -f migrations/add_uiux_columns.sql
 - 點擊元素顯示藍色實線邊框 + 右側 PropertyEditor
 - 支援修改：文字內容、顏色、字體大小、字重、間距、圓角
 - 即時預覽修改效果
-- 切換設備時保持編輯模式
+- **自動保存**：編輯後 1 秒自動保存到後端（debounced）
+- **專案級客製化**：每個專案的編輯結果獨立存儲，不影響公共模板
 
-**修改文件**：
+**架構**：
+```
+用戶編輯 → 即時預覽 → debounce 1s → 保存到 projects.template_overrides
+                                            ↓
+下次載入 ← 讀取 template_overrides ← 應用到 DOM
+```
+
+**數據庫遷移**（需執行）：
+```bash
+psql "$DATABASE_URL" -f tellcraft-backend/migrations/003_add_template_overrides.sql
+```
+
+**新增/修改文件**：
 | 文件 | 修改 |
 |------|------|
-| `PreviewPanel.tsx` | 添加編輯模式狀態、點擊選擇、側欄集成 |
+| `003_add_template_overrides.sql` | **新增** projects.template_overrides JSONB 欄位 |
+| `tellcraft-backend/src/routes/project.ts` | 添加 GET/PUT /api/project/:id/template-overrides |
+| `app/lib/vps-api.ts` | 添加 getTemplateOverrides / saveTemplateOverrides 函數 |
+| `PreviewPanel.tsx` | 添加 projectId prop、載入/保存邏輯、保存狀態指示器 |
+| `UiuxChatSection.tsx` | 傳遞 projectId 給 PreviewPanel |
+| `app/page.tsx` | 傳遞 projectId 給 PreviewPanel |
 | `SaasPro.tsx` | 添加 `data-editable` 和 `data-type` 屬性 |
 | `SaasMinimal.tsx` | 同上 |
 | `LandingStartup.tsx` | 同上 |
@@ -118,11 +136,13 @@ psql "$DATABASE_URL" -f migrations/add_uiux_columns.sql
 | `EcommerceModern.tsx` | 同上 |
 | `globals.css` | 編輯模式樣式（hover、選中邊框） |
 
-**技術實現**：
-- 為可編輯元素添加 `data-editable="element-id"` 和 `data-type="heading|paragraph|button|label"` 屬性
-- 點擊時提取元素的 computed styles 並傳給 PropertyEditor
-- 通過 DOM 直接修改實現即時預覽
-- 使用 Framer Motion 實現側欄滑入動畫
+**數據格式**（projects.template_overrides）：
+```json
+{
+  "hero-title": { "text": "我的標題", "fontSize": "48px", "color": "#ff0000" },
+  "hero-cta": { "text": "立即購買", "backgroundColor": "#ff5500" }
+}
+```
 
 ---
 
