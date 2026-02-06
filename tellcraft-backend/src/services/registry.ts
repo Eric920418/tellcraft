@@ -87,10 +87,10 @@ export const SKILL_REGISTRY: Record<SkillName, SkillMetadata> = {
   'deployer': {
     name: 'deployer',
     displayName: '自動部署',
-    description: '部署到 Vercel 和 Supabase',
+    description: '將 UIUX 生成的前端代碼包裝成 Next.js 專案並部署到 Vercel',
     triggerPatterns: [
       '部署', 'deploy', '上線', '發布',
-      'vercel', 'supabase',
+      'vercel',
     ],
     minPlan: 'free',
     costLevel: 'low',

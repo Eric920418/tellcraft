@@ -10,6 +10,9 @@ import TemplatePicker from './TemplatePicker'
 import VariantPicker, { DesignVariant } from './VariantPicker'
 import CodePreview from './CodePreview'
 import QualityGateReport from './QualityGateReport'
+import DeployConfirm from '../deployer/DeployConfirm'
+import DeployProgress from '../deployer/DeployProgress'
+import DeployResult from '../deployer/DeployResult'
 import type { Template, TemplateCardData } from '../../lib/templates'
 import { getTemplateById } from '../../actions/templates'
 
@@ -34,7 +37,7 @@ export interface UiuxMessage {
   progress?: { current: number; total: number; step: string }
   layoutHint?: 'default' | 'split' | 'full_preview'
   richContent?: {
-    type: 'template_picker' | 'design_preview' | 'code_preview' | 'variant_picker' | 'quality_gate_report'
+    type: 'template_picker' | 'design_preview' | 'code_preview' | 'variant_picker' | 'quality_gate_report' | 'deploy_confirm' | 'deploy_progress' | 'deploy_result'
     data: {
       templates?: TemplateCardData[]
       recommendedIds?: string[]
@@ -48,6 +51,15 @@ export interface UiuxMessage {
       components?: GeneratedComponent[]
       styles?: string
       tailwindConfig?: string
+      // Deployer 數據
+      projectName?: string
+      fileCount?: number
+      estimatedUrl?: string
+      deploymentUrl?: string
+      success?: boolean
+      error?: string
+      percent?: number
+      step?: string
     }
   }
 }
@@ -357,6 +369,21 @@ export default function UiuxChatSection({
                   在右側預覽面板查看完整程式碼
                 </div>
               </motion.div>
+            )}
+
+            {/* Rich Content: Deploy Confirm */}
+            {message.richContent?.type === 'deploy_confirm' && (
+              <DeployConfirm data={message.richContent.data} onSendMessage={onSendMessage} />
+            )}
+
+            {/* Rich Content: Deploy Progress */}
+            {message.richContent?.type === 'deploy_progress' && (
+              <DeployProgress data={message.richContent.data} />
+            )}
+
+            {/* Rich Content: Deploy Result */}
+            {message.richContent?.type === 'deploy_result' && (
+              <DeployResult data={message.richContent.data} />
             )}
           </motion.div>
         ))}

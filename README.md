@@ -1298,7 +1298,7 @@ Hero → 往下滾動 → 產品介紹（SEO 友好）→ Testimonials → CTA
 | `bdd-spec` | ✅ 完成 | 完整 5 階段流程：PRD Discovery/Clarify → Formulation → Spec Discovery/Clarify → Actions Design → ISA Config |
 | `coder` | ⏳ 開發中 | 後端 API 生成，待開發完成後與 uiux 並行執行 |
 | `uiux` | 🧪 可測試 | 3 階段前端設計流程（Design Discovery → Design Lab → Implementation）+ 雙軌 Discovery（有想法→4步釐清 / 沒想法→模板選擇）+ Design Brief 確認（AI 設計顧問總結+建議+Design Tier推薦，最多3輪調整）+ Design Tier（functional/creative 約束集切換）+ Supabase Storage 儲存 |
-| `deployer` | ✅ 完成 | 整合 Vercel Deployments API，部署後自動詢問網域設定 |
+| `deployer` | ✅ 完成 | UIUX 完成後用戶觸發，將生成代碼包裝成 Next.js 部署到 Vercel（VPS 後端 deployer.ts + 前端 DeployConfirm/Progress/Result 元件）|
 | `domain-manager` | ✅ 完成 | 網域管理入口，支援三種選擇 |
 | `domain-purchase` | ✅ 完成 | Porkbun 網域註冊 |
 | `domain-dns` | ✅ 完成 | Cloudflare Zone + Vercel 綁定 |

@@ -1,3 +1,5 @@
+// @deprecated — Vercel API 呼叫已移至 VPS 後端 tellcraft-backend/src/services/deployer.ts
+// 此檔案暫保留以避免影響其他引用，後續清理時可刪除
 'use server'
 
 const VERCEL_API = 'https://api.vercel.com'

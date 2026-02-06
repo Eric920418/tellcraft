@@ -24,10 +24,8 @@ function extractComponentName(content: string): string | null {
  * 從 TSX 提取 return (...) 中的 JSX
  */
 function extractReturnJsx(content: string): string {
-  // 嘗試找到 return ( 並匹配括號
   const returnMatch = content.match(/return\s*\(/)
   if (!returnMatch || returnMatch.index === undefined) {
-    // 嘗試 return <...
     const simpleReturn = content.match(/return\s*(<[\s\S]+?)(?:\n\}|$)/)
     return simpleReturn ? simpleReturn[1].trim() : ''
   }
@@ -47,11 +45,9 @@ function extractReturnJsx(content: string): string {
 
 /**
  * 從 props 表達式中提取值
- * e.g., title="Hello" → { title: "Hello" }
  */
 function extractPropsFromUsage(usage: string): Record<string, string> {
   const props: Record<string, string> = {}
-  // 匹配 prop="value" 或 prop={'value'} 或 prop={`value`}
   const propRegex = /(\w+)=(?:"([^"]*)"|'([^']*)'|\{[`'"]([^`'"]*)[`'"]\})/g
   let match
   while ((match = propRegex.exec(usage)) !== null) {
@@ -62,16 +58,99 @@ function extractPropsFromUsage(usage: string): Record<string, string> {
 
 /**
  * 在組件的 JSX 中替換 prop 引用
- * e.g., {title} → 實際值
  */
 function substituteProps(jsx: string, props: Record<string, string>): string {
   let result = jsx
   for (const [key, value] of Object.entries(props)) {
-    // 替換 {key} 和 {props.key}
     result = result.replace(new RegExp(`\\{${key}\\}`, 'g'), value)
     result = result.replace(new RegExp(`\\{props\\.${key}\\}`, 'g'), value)
   }
   return result
+}
+
+/**
+ * 深度計數式 JSX 表達式移除器
+ * 正確處理嵌套 {}, map(), 三元運算、template literals
+ *
+ * 策略：在 HTML tag 內容區域（不在 attribute 中）遇到 { 就開始計數，
+ * 直到找到配對的 } 才停止。整個 {...} 區塊被移除。
+ */
+function stripJsxExpressions(html: string): string {
+  let result = ''
+  let i = 0
+
+  while (i < html.length) {
+    // 如果在 tag 的屬性區域 <tag ... > 內，保留 {} 的內容（如 style）
+    if (html[i] === '<' && html[i + 1] !== '/') {
+      // 進入 opening tag — 原樣複製到 > 結束
+      const tagEnd = findTagEnd(html, i)
+      result += html.substring(i, tagEnd + 1)
+      i = tagEnd + 1
+      continue
+    }
+
+    // 如果在 closing tag
+    if (html[i] === '<' && html[i + 1] === '/') {
+      const closeEnd = html.indexOf('>', i)
+      if (closeEnd >= 0) {
+        result += html.substring(i, closeEnd + 1)
+        i = closeEnd + 1
+      } else {
+        result += html[i]
+        i++
+      }
+      continue
+    }
+
+    // 在 tag 內容區域遇到 { — 跳過整個表達式
+    if (html[i] === '{') {
+      let depth = 1
+      i++ // skip opening {
+      while (i < html.length && depth > 0) {
+        if (html[i] === '{') depth++
+        else if (html[i] === '}') depth--
+        // 跳過字串內的 {}
+        else if (html[i] === '"' || html[i] === "'" || html[i] === '`') {
+          const quote = html[i]
+          i++
+          while (i < html.length && html[i] !== quote) {
+            if (html[i] === '\\') i++ // skip escaped chars
+            i++
+          }
+        }
+        i++
+      }
+      continue
+    }
+
+    result += html[i]
+    i++
+  }
+
+  return result
+}
+
+/**
+ * 找 opening tag 的結束位置（處理屬性中的引號）
+ */
+function findTagEnd(html: string, start: number): number {
+  let i = start + 1 // skip <
+  while (i < html.length) {
+    if (html[i] === '>') return i
+    // 跳過引號字串
+    if (html[i] === '"') {
+      i++
+      while (i < html.length && html[i] !== '"') i++
+    }
+    if (html[i] === "'") {
+      i++
+      while (i < html.length && html[i] !== "'") i++
+    }
+    // self-closing tag
+    if (html[i] === '/' && html[i + 1] === '>') return i + 1
+    i++
+  }
+  return html.length - 1
 }
 
 /**
@@ -83,44 +162,20 @@ function convertJsxSyntax(jsx: string): string {
   // 1. className → class
   html = html.replace(/className=/g, 'class=')
 
-  // 2. motion.X → X (motion/react 動畫包裝)
+  // 2. motion.X → X
   html = html.replace(/<motion\.(\w+)/g, '<$1')
   html = html.replace(/<\/motion\.(\w+)>/g, '</$1>')
 
-  // 3. 移除 motion 專有 props（單行和多行）
-  const motionProps = [
-    'initial', 'animate', 'exit', 'transition', 'whileHover',
-    'whileTap', 'whileInView', 'viewport', 'variants', 'layout',
-    'layoutId', 'onAnimationComplete',
-  ]
-  for (const prop of motionProps) {
-    // 多行 prop: prop={{ ... }}
-    html = html.replace(new RegExp(`\\s+${prop}=\\{\\{[\\s\\S]*?\\}\\}`, 'g'), '')
-    // 單行 prop: prop={...}
-    html = html.replace(new RegExp(`\\s+${prop}=\\{[^}]*\\}`, 'g'), '')
-    // 字串 prop: prop="..."
-    html = html.replace(new RegExp(`\\s+${prop}="[^"]*"`, 'g'), '')
-  }
+  // 3. 移除 motion/React/event 屬性 — 用 tag-aware 方式
+  // 先處理屬性中的 {{...}} (多行)
+  html = html.replace(/\s+(initial|animate|exit|transition|whileHover|whileTap|whileInView|viewport|variants|layout|layoutId|onAnimationComplete|onClick|onChange|onSubmit|onBlur|onFocus|onKeyDown|onKeyUp|onMouseEnter|onMouseLeave|key|ref|dangerouslySetInnerHTML)=\{\{[\s\S]*?\}\}/g, '')
+  // 再處理 ={...} (單行)
+  html = html.replace(/\s+(initial|animate|exit|transition|whileHover|whileTap|whileInView|viewport|variants|layout|layoutId|onAnimationComplete|onClick|onChange|onSubmit|onBlur|onFocus|onKeyDown|onKeyUp|onMouseEnter|onMouseLeave|key|ref|dangerouslySetInnerHTML)=\{[^}]*\}/g, '')
+  // 再處理 ="..."
+  html = html.replace(/\s+(initial|animate|exit|transition|whileHover|whileTap|whileInView|viewport|variants|layout|layoutId|onAnimationComplete)="[^"]*"/g, '')
 
-  // 4. 移除 JSX 註解 {/* ... */}
-  html = html.replace(/\{\/\*[\s\S]*?\*\/\}/g, '')
-
-  // 5. 移除 React 事件處理器
-  const eventProps = ['onClick', 'onChange', 'onSubmit', 'onBlur', 'onFocus', 'onKeyDown', 'onKeyUp', 'onMouseEnter', 'onMouseLeave']
-  for (const prop of eventProps) {
-    html = html.replace(new RegExp(`\\s+${prop}=\\{[^}]*\\}`, 'g'), '')
-    // 多行 arrow function
-    html = html.replace(new RegExp(`\\s+${prop}=\\{\\([^)]*\\)\\s*=>\\s*\\{[\\s\\S]*?\\}\\}`, 'g'), '')
-  }
-
-  // 6. 移除 React-specific props
-  html = html.replace(/\s+key=\{[^}]*\}/g, '')
-  html = html.replace(/\s+ref=\{[^}]*\}/g, '')
-  html = html.replace(/\s+dangerouslySetInnerHTML=\{[^}]*\}/g, '')
-
-  // 7. style={{ ... }} → inline style string
+  // 4. style={{ }} → inline style
   html = html.replace(/style=\{\{([\s\S]*?)\}\}/g, (_match, styleContent: string) => {
-    // Convert JS style object to CSS string
     const cssString = styleContent
       .split(',')
       .map((s: string) => s.trim())
@@ -137,18 +192,36 @@ function convertJsxSyntax(jsx: string): string {
     return `style="${cssString}"`
   })
 
-  // 8. 處理條件渲染 {condition && <...>} — 保留 JSX 部分
-  html = html.replace(/\{[^{}]*&&\s*(\([\s\S]*?\))\}/g, '$1')
-  html = html.replace(/\{[^{}]*&&\s*(<[\s\S]*?>[\s\S]*?<\/\w+>)\}/g, '$1')
+  // 5. 移除 JSX 註解
+  html = html.replace(/\{\/\*[\s\S]*?\*\/\}/g, '')
 
-  // 9. 移除剩餘的 JSX 表達式 {...} — 但保留 HTML 屬性值
-  // 只移除 tag 內容中的表達式，不移除屬性中的
-  html = html.replace(/>(\s*)\{[^<}]+\}(\s*)</g, '>$1$2<')
+  // 6. 移除動態屬性值 prop={expression} — 整個屬性移除
+  // 但保留 class="..." href="..." 等靜態屬性
+  html = html.replace(/\s+\w+=\{[^}]*\}/g, (match) => {
+    // 保留 class, href, src, alt, id 等靜態屬性（它們用 "" 不用 {}）
+    // 這裡匹配到的都是動態屬性，直接移除
+    return ''
+  })
 
-  // 10. 清理空白屬性和多餘空格
+  // 7. 深度計數式移除所有 tag 內容區域的 {...}
+  html = stripJsxExpressions(html)
+
+  // 8. SVG camelCase → kebab-case (strokeWidth → stroke-width, etc.)
+  html = html.replace(/strokeWidth=/g, 'stroke-width=')
+  html = html.replace(/strokeLinecap=/g, 'stroke-linecap=')
+  html = html.replace(/strokeLinejoin=/g, 'stroke-linejoin=')
+  html = html.replace(/fillRule=/g, 'fill-rule=')
+  html = html.replace(/clipRule=/g, 'clip-rule=')
+  html = html.replace(/viewBox=/g, 'viewBox=')
+
+  // 9. 清理殘留的 () 和多餘空白
+  // 移除孤立的括號（map/filter 表達式殘留）
+  html = html.replace(/\(\s*\)/g, '')
+  html = html.replace(/^\s*\)\s*$/gm, '')
+  html = html.replace(/^\s*\(\s*$/gm, '')
   html = html.replace(/\s{2,}/g, ' ')
 
-  // 11. 移除 TypeScript as 表達式
+  // 10. 移除 TypeScript as
   html = html.replace(/\s+as\s+\w+/g, '')
 
   return html
@@ -175,7 +248,7 @@ export function convertToPreviewHtml(
     }
   }
 
-  // 2. 找到主頁面（優先 app/page.tsx）
+  // 2. 找到主頁面
   const mainPage = pages.find(p =>
     p.path === 'app/page.tsx' ||
     p.path === 'app/(main)/page.tsx'
@@ -191,12 +264,11 @@ export function convertToPreviewHtml(
     return buildFallbackHtml('無法解析頁面結構', styles)
   }
 
-  // 4. 解析並內聯組件引用
-  // 支援 self-closing: <Header /> 和 with-children: <Header>...</Header>
+  // 4. 內聯組件引用
   for (const [compName, compJsx] of componentMap) {
-    // Self-closing with props: <Component prop="value" />
+    // Self-closing: <Component prop="value" />
     const selfClosingRegex = new RegExp(`<${compName}(\\s[^>]*)?\\/\\s*>`, 'g')
-    pageJsx = pageJsx.replace(selfClosingRegex, (fullMatch, propsStr) => {
+    pageJsx = pageJsx.replace(selfClosingRegex, (_fullMatch, propsStr) => {
       const props = propsStr ? extractPropsFromUsage(propsStr) : {}
       return substituteProps(compJsx, props)
     })
@@ -204,26 +276,22 @@ export function convertToPreviewHtml(
     // With children: <Component>...</Component>
     const withChildrenRegex = new RegExp(`<${compName}[^>]*>([\\s\\S]*?)<\\/${compName}>`, 'g')
     pageJsx = pageJsx.replace(withChildrenRegex, (_fullMatch, children) => {
-      // Replace {children} in component JSX with actual children
       let result = compJsx.replace(/\{children\}/g, children)
       result = result.replace(/\{props\.children\}/g, children)
       return result
     })
   }
 
-  // 5. 找 layout 組件（可能包含 Header/Footer wrapper）
+  // 5. Layout 組件處理
   const layoutComp = components.find(c =>
     c.path.includes('layout.tsx') || c.path.includes('layout.ts')
   )
-  let layoutJsx = ''
   if (layoutComp) {
-    layoutJsx = extractReturnJsx(layoutComp.content)
+    let layoutJsx = extractReturnJsx(layoutComp.content)
     if (layoutJsx) {
-      // 把 {children} 替換為主頁面內容
       layoutJsx = layoutJsx.replace(/\{children\}/g, pageJsx)
       layoutJsx = layoutJsx.replace(/\{props\.children\}/g, pageJsx)
 
-      // 如果 layout 內也引用了組件（Header, Footer），也要內聯
       for (const [compName, compJsx] of componentMap) {
         const selfClosingRegex = new RegExp(`<${compName}(\\s[^>]*)?\\/\\s*>`, 'g')
         layoutJsx = layoutJsx.replace(selfClosingRegex, (_, propsStr) => {
@@ -236,19 +304,19 @@ export function convertToPreviewHtml(
     }
   }
 
-  // 6. 轉換 JSX 語法為 HTML
+  // 6. 轉換 JSX → HTML
   const html = convertJsxSyntax(pageJsx)
 
-  // 7. 提取 CSS variables 和自訂樣式
+  // 7. 清理 CSS
   const cleanStyles = styles
     .replace(/@import\s+["']tailwindcss["'];?/g, '')
     .replace(/@tailwind\s+\w+;?/g, '')
-    .replace(/@theme\s*\{[\s\S]*?\}/g, '') // Tailwind v4 @theme block
+    .replace(/@theme\s*\{[\s\S]*?\}/g, '')
 
-  // 8. 從 TSX 內容中提取字體資訊（如果使用 next/font）
+  // 8. 字體
   const fontImports = extractFontInfo(mainPage.content, components)
 
-  // 9. 組裝完整 HTML
+  // 9. 組裝 HTML
   return `<!DOCTYPE html>
 <html lang="zh-TW">
 <head>
@@ -257,17 +325,10 @@ export function convertToPreviewHtml(
   <script src="https://cdn.tailwindcss.com"></script>
   ${fontImports}
   <style>
-    /* Reset */
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-
-    /* Generated CSS */
     ${cleanStyles}
-
-    /* Preview adjustments */
     body { min-height: 100vh; }
     .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0,0,0,0); border: 0; }
-
-    /* Reduced motion */
     @media (prefers-reduced-motion: reduce) {
       *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
     }
@@ -280,26 +341,23 @@ export function convertToPreviewHtml(
 }
 
 /**
- * 從生成的程式碼提取字體資訊，轉換為 Google Fonts link
+ * 從生成的程式碼提取字體資訊
  */
 function extractFontInfo(mainContent: string, components: GeneratedFile[]): string {
   const allContent = mainContent + components.map(c => c.content).join('\n')
 
-  // 匹配 next/font/google import 的字體名稱
   const fontMatches = allContent.matchAll(/import\s*\{\s*(\w+(?:\s*,\s*\w+)*)\s*\}\s*from\s*['"]next\/font\/google['"]/g)
   const fonts: string[] = []
 
   for (const match of fontMatches) {
     const fontNames = match[1].split(',').map(f => f.trim())
     for (const font of fontNames) {
-      // 轉換 camelCase 到 URL format: PlusJakartaSans → Plus+Jakarta+Sans
       const urlFont = font.replace(/([a-z])([A-Z])/g, '$1+$2').replace(/_/g, '+')
       fonts.push(urlFont)
     }
   }
 
   if (fonts.length === 0) {
-    // 預設使用 Inter
     return '<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">\n  <style>body { font-family: Inter, system-ui, sans-serif; }</style>'
   }
 
@@ -307,13 +365,12 @@ function extractFontInfo(mainContent: string, components: GeneratedFile[]): stri
     `<link href="https://fonts.googleapis.com/css2?family=${f}:wght@300;400;500;600;700&display=swap" rel="stylesheet">`
   ).join('\n  ')
 
-  // 第一個字體作為 body 預設
   const primaryFont = fonts[0].replace(/\+/g, ' ')
   return `${fontLinks}\n  <style>body { font-family: '${primaryFont}', system-ui, sans-serif; }</style>`
 }
 
 /**
- * Fallback HTML — 解析失敗時的降級
+ * Fallback HTML
  */
 function buildFallbackHtml(reason: string, styles: string): string {
   const cleanStyles = styles
@@ -330,9 +387,8 @@ function buildFallbackHtml(reason: string, styles: string): string {
 </head>
 <body class="flex items-center justify-center min-h-screen bg-gray-50">
   <div class="text-center p-8">
-    <div class="text-4xl mb-4">🔧</div>
     <p class="text-gray-500">${reason}</p>
-    <p class="text-gray-400 text-sm mt-2">請切換到「程式碼」分頁查看原始碼</p>
+    <p class="text-gray-400 text-sm mt-2">預覽生成失敗，請稍後再試</p>
   </div>
 </body>
 </html>`

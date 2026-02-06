@@ -35,6 +35,7 @@ import {
   GeneratedComponent,
 } from '../services/uiux-generation'
 import { runQualityGate, autoFixCriticalIssues, QualityReport } from '../services/quality-gate'
+import { prepareDeployment, executeDeployment, DeployPreCheckResult } from '../services/deployer'
 
 // ============================================================
 // 類型定義
@@ -103,6 +104,8 @@ interface FlowState {
   uiuxDesignTier?: DesignTier
   // Quality Gate 報告
   uiuxQualityReport?: QualityReport
+  // Deployer 專用
+  deployerPreCheck?: DeployPreCheckResult
 }
 
 // PRD Discovery 限制
@@ -265,7 +268,11 @@ async function handleProcessMessage(
         io,
       })
       break
-    // 其他 Skills 可以後續添加
+    case 'deployer':
+      await executeDeployerSkill({
+        taskId, projectId, conversationId, userId, message, redis, io,
+      })
+      break
     default:
       await sendMessage(conversationId, io, {
         content: `Skill "${skillName}" 尚未在 VPS 後端實現。`,
@@ -310,6 +317,33 @@ async function handleContinueFlow(
   // 處理 Design Brief 確認階段
   if (state.phase === 'uiux_design_brief_confirm') {
     await handleDesignBriefReply(conversationId, state, message, redis, io)
+    return
+  }
+
+  // 處理 Deployer 階段
+  if (state.phase === 'deployer_confirm') {
+    const confirmKeywords = ['確認', '部署', '好', 'Y', 'y', 'yes']
+    const cancelKeywords = ['取消', '不要', 'cancel', 'N', 'n']
+    if (confirmKeywords.some(kw => message === kw || message.includes(kw))) {
+      await handleDeployExecute(conversationId, state, data.projectId, redis, io)
+    } else if (cancelKeywords.some(kw => message === kw || message.includes(kw))) {
+      await sendMessage(conversationId, io, {
+        content: '已取消部署。',
+        stage: 'deployer_cancelled',
+      })
+      state.phase = 'uiux_complete' // 回到 UIUX 完成狀態
+      await saveFlowState(redis, conversationId, state)
+    }
+    return
+  }
+  if (state.phase === 'deployer_deploying' || state.phase === 'deployer_complete') {
+    // 部署中或已完成不接受訊息
+    if (state.phase === 'deployer_deploying') {
+      await sendMessage(conversationId, io, {
+        content: '正在部署中，請稍候...',
+        stage: 'info',
+      })
+    }
     return
   }
 
@@ -379,6 +413,23 @@ async function handleContinueFlow(
     )) {
       await handleCodePhaseRedo(conversationId, state, redis, io)
       return
+    }
+
+    // ── UIUX 完成後檢查是否要部署 ──
+    if (state.phase === 'uiux_complete') {
+      const deployKeywords = ['部署', 'deploy', '上線', '發布']
+      if (deployKeywords.some(kw => message.includes(kw))) {
+        await executeDeployerSkill({
+          taskId: state.taskId || '',
+          projectId: data.projectId,
+          conversationId,
+          userId,
+          message,
+          redis,
+          io,
+        })
+        return
+      }
     }
 
     // ── UIUX 階段 catch-all ──
@@ -757,7 +808,7 @@ async function sendMessage(
     progress?: { current: number; total: number; step: string }
     layoutHint?: 'default' | 'split' | 'full_preview'
     richContent?: {
-      type: 'template_picker' | 'variant_picker' | 'design_preview' | 'code_preview' | 'quality_gate_report'
+      type: 'template_picker' | 'variant_picker' | 'design_preview' | 'code_preview' | 'quality_gate_report' | 'deploy_confirm' | 'deploy_progress' | 'deploy_result'
       data: Record<string, unknown>
     }
   }
@@ -2850,4 +2901,160 @@ function inferDesignDefaultsFromIdeas(ideas: Array<{ step: string; answer: strin
   }
 
   return defaults
+}
+
+// ============================================================
+// Deployer Skill
+// ============================================================
+
+interface DeployerSkillInput {
+  taskId: string
+  projectId: string
+  conversationId: string
+  userId: string
+  message: string
+  redis: Redis
+  io: SocketIOServer
+}
+
+async function executeDeployerSkill(input: DeployerSkillInput) {
+  const { projectId, conversationId, userId, redis, io } = input
+
+  await sendMessage(conversationId, io, {
+    content: '收到！正在檢查部署條件...',
+    stage: 'deployer_checking',
+    progress: { current: 0, total: 3, step: '檢查部署條件' },
+  })
+
+  // 執行部署前檢查
+  const preCheck = await prepareDeployment(projectId, userId)
+
+  if (!preCheck.ready) {
+    await sendMessage(conversationId, io, {
+      content: `無法部署：${preCheck.error}`,
+      stage: 'deployer_error',
+    })
+    return
+  }
+
+  // 取得流程狀態
+  let state = await getFlowState(redis, conversationId)
+  if (!state) {
+    state = {
+      phase: 'deployer_confirm',
+      currentRound: 0,
+      questionIndex: 0,
+      batchCount: 0,
+      waitingForReply: true,
+      totalQuestionsAsked: 0,
+      deployerPreCheck: preCheck,
+    }
+  } else {
+    state.phase = 'deployer_confirm'
+    state.waitingForReply = true
+    state.deployerPreCheck = preCheck
+  }
+  await saveFlowState(redis, conversationId, state)
+
+  // 發送部署確認
+  await sendMessage(conversationId, io, {
+    content: `**部署準備就緒！**\n\n- 專案名稱：${preCheck.projectName}\n- 檔案數量：${preCheck.fileCount} 個\n- 預計網址：${preCheck.estimatedUrl}\n\n確認要部署嗎？`,
+    stage: 'deployer_confirm',
+    richContent: {
+      type: 'deploy_confirm',
+      data: {
+        projectName: preCheck.projectName,
+        fileCount: preCheck.fileCount,
+        estimatedUrl: preCheck.estimatedUrl,
+      } as Record<string, unknown>,
+    },
+  })
+}
+
+async function handleDeployExecute(
+  conversationId: string,
+  state: FlowState,
+  projectId: string,
+  redis: Redis,
+  io: SocketIOServer
+) {
+  const preCheck = state.deployerPreCheck
+
+  if (!preCheck?.code) {
+    await sendMessage(conversationId, io, {
+      content: '部署資料遺失，請重新嘗試。',
+      stage: 'deployer_error',
+    })
+    return
+  }
+
+  state.phase = 'deployer_deploying'
+  state.waitingForReply = false
+  await saveFlowState(redis, conversationId, state)
+
+  await sendMessage(conversationId, io, {
+    content: '開始部署...',
+    stage: 'deployer_deploying',
+    richContent: {
+      type: 'deploy_progress',
+      data: {
+        percent: 0,
+        step: '準備中...',
+      } as Record<string, unknown>,
+    },
+  })
+
+  // 執行部署，帶進度回調
+  const result = await executeDeployment(
+    projectId,
+    preCheck.code,
+    preCheck.tailwindConfig || '',
+    async (progress) => {
+      await sendMessage(conversationId, io, {
+        content: `部署中... ${progress.step}`,
+        stage: 'deployer_progress',
+        progress: { current: progress.percent, total: 100, step: progress.step },
+        richContent: {
+          type: 'deploy_progress',
+          data: {
+            percent: progress.percent,
+            step: progress.step,
+          } as Record<string, unknown>,
+        },
+      })
+    }
+  )
+
+  if (result.success) {
+    state.phase = 'deployer_complete'
+    await saveFlowState(redis, conversationId, state)
+
+    await sendMessage(conversationId, io, {
+      content: `**部署成功！**\n\n您的網站已上線：${result.deploymentUrl}`,
+      stage: 'deployer_complete',
+      richContent: {
+        type: 'deploy_result',
+        data: {
+          deploymentUrl: result.deploymentUrl,
+          vercelDeploymentId: result.vercelDeploymentId,
+          success: true,
+        } as Record<string, unknown>,
+      },
+    })
+  } else {
+    state.phase = 'deployer_failed'
+    await saveFlowState(redis, conversationId, state)
+
+    await sendMessage(conversationId, io, {
+      content: `**部署失敗**\n\n${result.error}`,
+      stage: 'deployer_error',
+      richContent: {
+        type: 'deploy_result',
+        data: {
+          error: result.error,
+          success: false,
+        } as Record<string, unknown>,
+      },
+    })
+  }
 }

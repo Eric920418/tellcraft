@@ -67,7 +67,7 @@ npx ts-node bdd-spec/scripts/validate-feature.ts spec/features/      # 結構驗
 | `bdd-spec` | 需求釐清 + BDD 規格產出（5 階段：Discovery → Clarify → Formulation → Actions Design → ISA Config）|
 | `uiux` | 前端介面設計（3 階段：Design Discovery → Design Lab → Implementation）|
 | `quality-gate` | 自動品質檢查（UIUX Implementation 完成後自動觸發，檢查 A11y/Performance/Code Quality，critical 問題自動 LLM 修復） |
-| `deployer` | Vercel 部署 |
+| `deployer` | 將 UIUX 生成的代碼包裝成 Next.js 部署到 Vercel（UIUX 完成後用戶說「部署」觸發）|
 | `domain-manager` | 網域管理入口 |
 
 #### UIUX Skill 架構細節
@@ -105,6 +105,22 @@ npx ts-node bdd-spec/scripts/validate-feature.ts spec/features/      # 結構驗
 - `checkAccessibility()` - focus-visible、aria-label、form labels、img alt、heading hierarchy
 - `checkPerformance()` - 只動畫 transform/opacity、reduced-motion、no transition-all
 - `checkCodeQuality()` - motion/react import、Tailwind v4 syntax、next/font、no h-screen
+
+#### Deployer Skill（UIUX 完成後用戶觸發）
+
+**觸發方式**：用戶在 `uiux_complete` 階段說「部署」→ classifier 分類為 deployer 或 handleContinueFlow 直接匹配。
+
+**流程**：prepareDeployment（前檢查）→ 用戶確認 → executeDeployment（wrapInNextJs → createVercelProject → deployFiles → waitForReady → 更新 DB）
+
+**關鍵函數**（`tellcraft-backend/src/services/deployer.ts`）：
+- `prepareDeployment(projectId, userId)` - 驗證專案、代碼、環境變數
+- `executeDeployment(projectId, code, tailwindConfig, onProgress)` - 執行部署
+- `wrapInNextJs(code, projectName, tailwindConfig)` - UIUX 代碼 → 完整 Next.js 專案
+
+**前端元件**（`app/components/deployer/`）：
+- `DeployConfirm.tsx` - 部署確認卡片（顯示專案名、檔案數、預計 URL）
+- `DeployProgress.tsx` - 部署進度條
+- `DeployResult.tsx` - 部署結果（成功顯示 URL / 失敗顯示錯誤）
 
 ### 認證系統
 
