@@ -189,6 +189,41 @@ async function handleProcessMessage(
 
   const classification = await classifyIntent(message, history, { userId, conversationId })
 
+  // Step 3.5: 自動更新專案名稱（只在首次訊息時）
+  if (classification.suggestedProjectName) {
+    try {
+      // 只更新仍是日期格式的專案名稱（避免覆蓋用戶手動命名）
+      const project = await db.queryOne<{ name: string }>(
+        'SELECT name FROM projects WHERE id = $1',
+        [projectId]
+      )
+      if (project && /^專案\s/.test(project.name)) {
+        const newName = classification.suggestedProjectName.slice(0, 50)
+        // 處理名稱衝突：加上數字後綴
+        const existing = await db.query<{ name: string }>(
+          'SELECT name FROM projects WHERE user_id = $1 AND name LIKE $2 AND id != $3',
+          [userId, `${newName}%`, projectId]
+        )
+        let finalName = newName
+        if (existing.rows.some(r => r.name === newName)) {
+          const existingSet = new Set(existing.rows.map(r => r.name))
+          let suffix = 2
+          while (existingSet.has(finalName)) {
+            finalName = `${newName} (${suffix})`
+            suffix++
+          }
+        }
+        await db.query(
+          'UPDATE projects SET name = $1, updated_at = NOW() WHERE id = $2',
+          [finalName, projectId]
+        )
+        console.log(`[Orchestrator] 自動命名專案: "${project.name}" → "${finalName}"`)
+      }
+    } catch (err) {
+      console.error('[Orchestrator] 自動命名失敗（不影響流程）:', err)
+    }
+  }
+
   // Step 4: 處理無法分類的情況
   let effectiveIntent = classification.intent
   if (classification.intent === 'clarification_needed' || classification.intent === 'unknown') {

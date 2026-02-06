@@ -13,6 +13,7 @@ export interface ClassificationResult {
   confidence: number  // 0-1
   reasoning: string
   suggestedSkills?: SkillName[]
+  suggestedProjectName?: string
   extractedEntities?: {
     projectType?: string
     features?: string[]
@@ -61,11 +62,19 @@ ${skillDescriptions}
 6. 如果用戶說「設定 DNS」、「綁定 DNS」、「自有網域」、「已有網域」，是 domain-dns
 7. 如果無法確定，返回 clarification_needed
 
+## 專案命名規則:
+根據用戶的描述，生成一個簡短的專案名稱（suggestedProjectName）。
+- 用中文，最多 20 個字
+- 只需要核心概念，例如「寵物電商平台」、「健身課程預約系統」、「個人作品集網站」
+- 不要加「專案」二字
+- 如果用戶意圖不是建立專案（例如部署、網域），則不需要填
+
 ## 輸出格式（JSON）:
 {
   "intent": "bdd-spec" | "coder" | "deployer" | "domain-manager" | "domain-purchase" | "domain-dns" | "unknown" | "clarification_needed",
   "confidence": 0.0-1.0,
   "reasoning": "判斷理由",
+  "suggestedProjectName": "簡短專案名稱（如有）",
   "extractedEntities": {
     "projectType": "提取的專案類型（如有）",
     "features": ["提取的功能需求"]
@@ -145,6 +154,7 @@ ${skillDescriptions}
       intent: parsed.intent || 'unknown',
       confidence: parsed.confidence || 0.5,
       reasoning: parsed.reasoning || '',
+      suggestedProjectName: parsed.suggestedProjectName || undefined,
       extractedEntities: parsed.extractedEntities,
     }
   } catch (error) {
@@ -240,11 +250,13 @@ function ruleBasedClassification(message: string): ClassificationResult {
   const matchedPatterns = bddPatterns.filter(p => lowerMessage.includes(p.toLowerCase()))
 
   if (matchedPatterns.length > 0) {
+    const entities = extractEntitiesFromMessage(message)
     return {
       intent: 'bdd-spec',
       confidence: Math.min(0.5 + matchedPatterns.length * 0.1, 0.9),
       reasoning: `訊息匹配 BDD 規格關鍵詞: ${matchedPatterns.join(', ')}`,
-      extractedEntities: extractEntitiesFromMessage(message),
+      suggestedProjectName: deriveProjectName(message, entities),
+      extractedEntities: entities,
     }
   }
 
@@ -255,6 +267,40 @@ function ruleBasedClassification(message: string): ClassificationResult {
     reasoning: '無法從訊息中確定意圖',
     suggestedSkills: ['bdd-spec', 'coder', 'deployer'],
   }
+}
+
+// ============================================================
+// 專案名稱推導（Rule-based fallback）
+// ============================================================
+
+function deriveProjectName(
+  message: string,
+  entities?: ClassificationResult['extractedEntities']
+): string | undefined {
+  // 優先用 extractedEntities 的 projectType
+  if (entities?.projectType) {
+    const name = entities.projectType.replace(/^(一個|一套|一組)/, '').trim()
+    if (name.length >= 2 && name.length <= 20) return name
+  }
+
+  // 嘗試從訊息中提取「XX 系統/平台/網站/App」
+  const patterns = [
+    /(?:建立|做|開發|建構|打造|設計|想要)(?:一個|一套)?\s*(.{2,15}?)(?:系統|平台|應用|網站|App|app|頁面|官網)/,
+    /(.{2,15}?)(?:管理系統|管理平台|預約系統|電商平台|購物網站)/,
+  ]
+
+  for (const pattern of patterns) {
+    const match = message.match(pattern)
+    if (match?.[1]) {
+      const extracted = match[1].trim()
+      // 取完整匹配（含系統/平台等後綴）
+      const full = match[0].replace(/^(?:建立|做|開發|建構|打造|設計|想要)(?:一個|一套)?\s*/, '').trim()
+      if (full.length >= 2 && full.length <= 20) return full
+      if (extracted.length >= 2 && extracted.length <= 20) return extracted
+    }
+  }
+
+  return undefined
 }
 
 // ============================================================

@@ -12,10 +12,18 @@ Tellcraft 是一個 AI 驅動的自動化開發平台。用戶只需描述需求
 
 ## 當前開發進度
 
-- **狀態**：✅ Phase 1-9 + Server Actions + VPS Backend + 前端 Chat 串接 + 認證系統 + 訪客體驗改善 + 儀表板系統 + BDD Spec 完整修復 + 專案版本管理 + **UIUX 生成邏輯重構** + **Design Tier**
+- **狀態**：✅ Phase 1-9 + Server Actions + VPS Backend + 前端 Chat 串接 + 認證系統 + 訪客體驗改善 + 儀表板系統 + BDD Spec 完整修復 + 專案版本管理 + **UIUX 生成邏輯重構** + **Design Tier** + **專案自動命名**
 - **釐清項目**：28 項全部解決
 - **Server Actions**：30+ 已實作
 - **詳情**：[`.clarify/overview.md`](.clarify/overview.md)
+
+### 專案自動命名（2026-02-06）
+
+專案不再用「專案 2/6/2025」這種日期格式命名。Classifier 分類意圖時同步生成語義化專案名稱（如「寵物電商平台」、「健身預約系統」），Orchestrator 收到後自動更新 project name。
+
+**核心改動**：
+- `classifier.ts`：`ClassificationResult` 新增 `suggestedProjectName`，Haiku prompt 加入專案命名規則，rule-based fallback 也加入 `deriveProjectName()` 函數
+- `orchestrator.ts`：`handleProcessMessage()` Step 3.5 — 分類後自動更新專案名稱（只更新仍為日期格式的名稱，處理名稱衝突）
 
 ### Design Tier：功能型 vs 創意型（2026-02-06）
 
