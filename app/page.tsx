@@ -27,6 +27,7 @@ import ProjectReminder from './components/ProjectReminder'
 import SplitLayout from './components/uiux/SplitLayout'
 import SpecGenerationView from './components/SpecGenerationView'
 import PreviewPanel from './components/uiux/PreviewPanel'
+import DeviceSwitcher, { type DeviceType, getDeviceWidth } from './components/uiux/DeviceSwitcher'
 import TemplatePicker from './components/uiux/TemplatePicker'
 import { convertToPreviewHtml } from './lib/tsx-to-preview'
 import { getTemplateById } from './actions/templates'
@@ -814,6 +815,8 @@ function ChatSection({
   const inputRef = useRef<HTMLTextAreaElement>(null)
   const typingTimerRef = useRef<NodeJS.Timeout | null>(null)
   const isComposingRef = useRef(false)  // 追蹤 IME 輸入法狀態
+  const codePreviewContainerRef = useRef<HTMLDivElement>(null)
+  const [codePreviewContainerWidth, setCodePreviewContainerWidth] = useState(0)
 
   // 打字指示器：立即顯示 "..."，10 秒後顯示完整提示
   useEffect(() => {
@@ -874,6 +877,18 @@ function ChatSection({
   const layoutModeRef = useRef(layoutMode)
   const [selectedTemplateId, setSelectedTemplateId] = useState<string | null>(null)
   const [selectedTemplate, setSelectedTemplate] = useState<Template | null>(null)
+  const [codePreviewDevice, setCodePreviewDevice] = useState<DeviceType>('desktop')
+
+  // Code Preview 容器尺寸追蹤（用於 iframe 縮放）
+  useEffect(() => {
+    const el = codePreviewContainerRef.current
+    if (!el) return
+    const observer = new ResizeObserver(() => {
+      setCodePreviewContainerWidth(el.clientWidth - 48) // 扣除 padding
+    })
+    observer.observe(el)
+    return () => observer.disconnect()
+  }, [])
 
   // 監聽訊息的 layoutHint 或 UIUX 相關 stage，切換佈局模式
   useEffect(() => {
@@ -2055,20 +2070,67 @@ function ChatSection({
       const componentsData = (codePreviewData.components || []) as { path: string; content: string; description: string }[]
       const stylesData = (codePreviewData.styles || '') as string
       const tailwindConfigData = (codePreviewData.tailwindConfig || '') as string
+      const deviceWidth = getDeviceWidth(codePreviewDevice)
+      const scale = codePreviewContainerWidth > 0 ? Math.min(codePreviewContainerWidth / deviceWidth, 1) : 1
 
       return (
         <div style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
-          <iframe
-            srcDoc={convertToPreviewHtml(pagesData, componentsData, stylesData, tailwindConfigData)}
+          {/* 工具列：設備切換器 */}
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              padding: '12px 16px',
+              borderBottom: '1px solid var(--border-color)',
+              background: 'var(--white)',
+            }}
+          >
+            <span style={{ fontSize: 14, fontWeight: 500, color: 'var(--black)' }}>設計預覽</span>
+            <DeviceSwitcher activeDevice={codePreviewDevice} onDeviceChange={setCodePreviewDevice} />
+            <span style={{ fontSize: 11, color: 'var(--gray-400)', fontFamily: 'var(--font-mono)', width: 50, textAlign: 'right' }}>
+              {scale < 1 ? `${Math.round(scale * 100)}%` : ''}
+            </span>
+          </div>
+          {/* 預覽區域 */}
+          <div
+            ref={codePreviewContainerRef}
             style={{
               flex: 1,
-              width: '100%',
-              border: 'none',
-              background: '#fff',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              padding: 24,
+              overflow: 'hidden',
+              background: 'var(--gray-50)',
             }}
-            sandbox="allow-scripts"
-            title="設計預覽"
-          />
+          >
+            <div
+              style={{
+                width: deviceWidth * scale,
+                height: `calc(100% - 0px)`,
+                borderRadius: 8,
+                boxShadow: '0 8px 32px rgba(0,0,0,0.12), 0 2px 8px rgba(0,0,0,0.08)',
+                background: '#fff',
+                overflow: 'hidden',
+                position: 'relative',
+              }}
+            >
+              <iframe
+                srcDoc={convertToPreviewHtml(pagesData, componentsData, stylesData, tailwindConfigData)}
+                style={{
+                  width: deviceWidth,
+                  height: `${100 / scale}%`,
+                  transform: `scale(${scale})`,
+                  transformOrigin: 'top left',
+                  border: 'none',
+                  display: 'block',
+                }}
+                sandbox="allow-scripts"
+                title="設計預覽"
+              />
+            </div>
+          </div>
         </div>
       )
     }

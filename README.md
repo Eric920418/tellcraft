@@ -39,18 +39,20 @@ UIUX Implementation 三階段（Structure → Animation → RWD）完成後自�
 
 ### Code Preview 即時渲染（2026-02-06）
 
-UIUX Implementation 階段生成的 React TSX 代碼，會自動轉換為 standalone HTML 並在右側預覽面板用 iframe 即時渲染（而非顯示原始碼）。支援切換「預覽」和「程式碼」分頁。
+UIUX Implementation 階段生成的 React TSX 代碼，自動轉換為 standalone HTML 並在右側預覽面板用 iframe 即時渲染。支援桌面/平板/手機三種裝置切換，自動縮放適配容器寬度。
 
 **轉換邏輯** (`app/lib/tsx-to-preview.ts`)：
-1. 提取 main page 的 return JSX
+1. 提取 main page 的 return JSX（字串/註解感知的括號配對）
 2. 內聯組件引用（Header、Card 等），支援 prop 替換
-3. 轉換 JSX → HTML（className→class、motion.X→X、移除動畫 props、event handlers）
-4. 注入 Tailwind CDN + generated CSS + Google Fonts
-5. 降級：轉換失敗時顯示提示並引導切換到程式碼分頁
+3. 移除未解析的 PascalCase React 組件 + Fragment
+4. 轉換 JSX → HTML（className→class、motion.X→X、移除動畫/事件 props）
+5. 深度計數式 `{...}` 表達式移除（處理巢狀 map/ternary/template literals）
+6. 最終文字內容淨化（移除 `)}`, `=>`, `&&` 等 JS 語法殘留）
+7. 注入 Tailwind CDN + generated CSS + Google Fonts
 
 **核心改動**：
-- `app/lib/tsx-to-preview.ts`：新增 TSX → HTML 轉換工具
-- `app/page.tsx`：`renderPreviewPanel()` 檢測 `code_preview` richContent 後渲染 iframe 預覽 + 分頁切換
+- `app/lib/tsx-to-preview.ts`：TSX → HTML 轉換工具（多層防禦：組件移除 → 表達式移除 → 文字淨化）
+- `app/page.tsx`：`renderPreviewPanel()` 檢測 `code_preview` richContent，含 DeviceSwitcher + 自動縮放 iframe
 
 ### 專案自動命名（2026-02-06）
 
@@ -78,6 +80,21 @@ UIUX Implementation 階段生成的 React TSX 代碼，會自動轉換為 standa
 - `generateRwd`：注入 Pre-Delivery Checklist（排版/互動/對比度/佈局/效能/無障礙自檢清單）
 - Vercel Web Interface Guidelines 精華：禁 transition-all、focus-visible 取代 focus、overscroll-behavior contain、min-w-0、img width/height、touch-action manipulation
 - `baseline-ui.md`：新增 Craft Foundations 表格 + 補充禁止清單 + Interaction/Animation/Layout 規則補充
+
+### 修復 generateStructure 缺少產品上下文（2026-02-06）
+
+**問題**：生成的頁面與產品毫無關聯（記帳 app 出現「關於」頁面、像 landing page 不像 app）。
+
+**根因**：
+1. `getTemplateAndBddSpec()` 忽略 FlowState 的 `uiuxPreparedTemplate`，fallback 寫死 `['home', 'about']`
+2. `generateStructure` 的 userMessage 不含產品描述、用戶設計偏好、Design Brief
+3. BDD 規格是後端 API 格式，prompt 沒引導 LLM 推導前端需求
+
+**修復**：
+- `executeCodePhaseStructure` 優先使用 `state.uiuxPreparedTemplate`（包含用戶設計偏好 + 正確頁面結構）
+- `getTemplateAndBddSpec` fallback 從 `['home', 'about']` 改為 `['home']`，並返回 `originalRequirements`
+- `generateStructure` 新增 `productContext` 參數，注入：產品描述、設計偏好（feeling/reference/color/layout）、Design Brief
+- userMessage 加入「頁面必須忠於產品本質」原則，引導 LLM 從 BDD 規格推導前端需求
 
 ### UIUX Skill 全面審計與修復（2026-02-06）
 
@@ -188,6 +205,18 @@ psql "$DATABASE_URL" -f migrations/add_uiux_columns.sql
 - `selected_variant_ids` - 用戶選擇的變體 ID
 - `final_design_system` - 最終合併的 Design System
 - `generated_pages` / `generated_components` / `generated_styles` - 生成的代碼
+
+**project_files 表**（獨立代碼存儲，支援多 Skill 來源）：
+```bash
+psql "$DATABASE_URL" -f migrations/004_add_project_files.sql
+```
+
+- 每個 Skill 生成的檔案獨立存儲，一檔一行
+- `skill_source`: `uiux` / `code` / `merge`（未來 Code Skill 和合併用）
+- `file_type`: `page` / `component` / `style` / `config`
+- UPSERT on `(project_id, skill_source, file_path)` — 每階段更新同一檔案
+- Deployer 優先從 `project_files` 讀取，舊專案 fallback 到 `bdd_sessions`
+- API: `GET /api/project/:id/files?skill_source=uiux`
 
 ---
 

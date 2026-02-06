@@ -60,6 +60,7 @@ interface ContinueFlowData {
 // 流程狀態（存儲在 Redis 中）
 interface FlowState {
   phase: string
+  projectId?: string           // 關聯的專案 ID（用於 project_files 寫入）
   currentRound: number
   questionIndex: number
   batchCount: number
@@ -524,6 +525,7 @@ async function executeBddSpecSkill(input: BddSpecSkillInput) {
   // 初始化流程狀態
   const state: FlowState = {
     phase: 'prd_discovery',
+    projectId,
     currentRound: 1,
     questionIndex: 0,
     batchCount: 0,
@@ -1717,7 +1719,10 @@ async function executeCodePhaseStructure(
   })
 
   // 取得模板和 BDD 規格
-  const { template, bddSpec } = await getTemplateAndBddSpec(sessionId)
+  const { template: dbTemplate, bddSpec, originalRequirements } = await getTemplateAndBddSpec(sessionId)
+
+  // 優先使用 FlowState 中的 uiuxPreparedTemplate（包含用戶的設計偏好和正確的頁面結構）
+  const template = state.uiuxPreparedTemplate || dbTemplate
 
   // 生成結構
   const pages = template.pageStructure.pages || ['home']
@@ -1727,6 +1732,11 @@ async function executeCodePhaseStructure(
     template,
     bddSpec,
     state.uiuxDesignTier,
+    {
+      originalRequirements,
+      designIdeas: state.uiuxDesignIdeas,
+      designBrief: state.uiuxDesignBrief,
+    },
     { conversationId }
   )
 
@@ -1761,6 +1771,12 @@ async function executeCodePhaseStructure(
       generatedStyles: generatedCode.styles,
     },
   })
+
+  // 同步寫入 project_files（獨立存儲）
+  if (state.projectId) {
+    await db.upsertProjectFiles(state.projectId, 'uiux',
+      generatedCodeToFileRows(generatedCode, state.uiuxDesignSystem))
+  }
 
   // 發送完成訊息，等待用戶確認
   const pageCount = generatedCode.pages.length
@@ -1848,6 +1864,12 @@ async function executeCodePhaseAnimation(
       generatedStyles: generatedCode.styles,
     },
   })
+
+  // 同步寫入 project_files（獨立存儲）
+  if (state.projectId) {
+    await db.upsertProjectFiles(state.projectId, 'uiux',
+      generatedCodeToFileRows(generatedCode, state.uiuxDesignSystem))
+  }
 
   // 發送完成訊息
   await sendMessage(conversationId, io, {
@@ -2006,6 +2028,12 @@ async function executeQualityGate(
     },
   })
 
+  // 同步寫入 project_files（獨立存儲）
+  if (state.projectId) {
+    await db.upsertProjectFiles(state.projectId, 'uiux',
+      generatedCodeToFileRows(currentCode, state.uiuxDesignSystem))
+  }
+
   // 發送品質報告
   const passedText = report.passed ? '通過' : '未通過'
   const fixedText = totalAutoFixed > 0 ? `\n已自動修復 ${totalAutoFixed} 個問題。` : ''
@@ -2127,6 +2155,7 @@ async function handleCodePhaseRedo(
 async function getTemplateAndBddSpec(sessionId: string): Promise<{
   template: TemplateData
   bddSpec: string
+  originalRequirements: string
 }> {
   const session = await getBddSession({ sessionId })
   if (!session.success || !session.data) {
@@ -2138,9 +2167,10 @@ async function getTemplateAndBddSpec(sessionId: string): Promise<{
         category: 'general',
         description: '預設模板',
         designDefaults: {},
-        pageStructure: { pages: ['home', 'about'], components: [] },
+        pageStructure: { pages: ['home'], components: [] },
       },
       bddSpec: '',
+      originalRequirements: '',
     }
   }
 
@@ -2151,7 +2181,7 @@ async function getTemplateAndBddSpec(sessionId: string): Promise<{
     category: 'general',
     description: '預設模板',
     designDefaults: {},
-    pageStructure: { pages: ['home', 'about'], components: [] },
+    pageStructure: { pages: ['home'], components: [] },
   }
 
   if (session.data.uiuxTemplateId) {
@@ -2186,7 +2216,7 @@ async function getTemplateAndBddSpec(sessionId: string): Promise<{
     ? session.data.featuresContent.map(f => f.content).join('\n\n---\n\n')
     : ''
 
-  return { template, bddSpec }
+  return { template, bddSpec, originalRequirements: session.data.originalRequirements || '' }
 }
 
 /**
@@ -3057,4 +3087,30 @@ async function handleDeployExecute(
       },
     })
   }
+}
+
+// ============================================================
+// Helper：生成代碼轉 project_files 行
+// ============================================================
+
+function generatedCodeToFileRows(
+  code: { pages: GeneratedComponent[]; components: GeneratedComponent[]; styles: string },
+  designSystem?: DesignSystem
+): { filePath: string; content: string; description?: string; fileType: string }[] {
+  const rows: { filePath: string; content: string; description?: string; fileType: string }[] = []
+
+  for (const page of code.pages) {
+    rows.push({ filePath: page.path, content: page.content, description: page.description, fileType: 'page' })
+  }
+  for (const comp of code.components) {
+    rows.push({ filePath: comp.path, content: comp.content, description: comp.description, fileType: 'component' })
+  }
+  if (code.styles) {
+    rows.push({ filePath: 'app/globals.css', content: code.styles, fileType: 'style' })
+  }
+  if (designSystem) {
+    rows.push({ filePath: 'tailwind.config.ts', content: generateTailwindConfig(designSystem), fileType: 'config' })
+  }
+
+  return rows
 }

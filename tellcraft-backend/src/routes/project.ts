@@ -901,6 +901,51 @@ router.put('/:id/template-overrides', requireAuth, async (req, res) => {
 })
 
 /**
+ * GET /api/project/:id/files
+ * 取得專案的生成檔案（支持 skill_source 過濾）
+ */
+router.get('/:id/files', requireAuth, async (req, res) => {
+  try {
+    const { id } = req.params
+    const userId = req.user!.id
+    const { skill_source } = req.query as { skill_source?: string }
+
+    // 驗證專案擁有權
+    const project = await db.queryOne<{ user_id: string }>(
+      'SELECT user_id FROM projects WHERE id = $1',
+      [id]
+    )
+
+    if (!project) {
+      return res.status(404).json({ error: 'Project not found' })
+    }
+
+    if (project.user_id !== userId) {
+      return res.status(403).json({ error: 'Access denied' })
+    }
+
+    const files = await db.getProjectFiles(id, skill_source)
+
+    res.json({
+      files: files.map(f => ({
+        id: f.id,
+        filePath: f.file_path,
+        skillSource: f.skill_source,
+        fileType: f.file_type,
+        content: f.content,
+        description: f.description,
+        createdAt: f.created_at,
+        updatedAt: f.updated_at,
+      })),
+      total: files.length,
+    })
+  } catch (error) {
+    console.error('[Project] 取得專案檔案失敗:', error)
+    res.status(500).json({ error: 'Failed to get project files' })
+  }
+})
+
+/**
  * DELETE /api/project/:id
  * 刪除專案
  */
@@ -917,6 +962,11 @@ router.delete('/:id', requireAuth, async (req, res) => {
 
     // 使用事務刪除相關資料
     await db.transaction(async (client) => {
+      // 刪除 Project Files
+      await client.query(
+        'DELETE FROM project_files WHERE project_id = $1',
+        [id]
+      )
       // 刪除 BDD Sessions
       await client.query(
         'DELETE FROM bdd_sessions WHERE project_id = $1',

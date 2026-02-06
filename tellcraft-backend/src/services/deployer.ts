@@ -87,37 +87,67 @@ export async function prepareDeployment(
     return { ready: false, error: '您沒有權限部署此專案。' }
   }
 
-  // 3. 從 bdd_sessions 取得生成的代碼
-  const session = await db.queryOne<{
-    generated_pages: GeneratedComponent[] | null
-    generated_components: GeneratedComponent[] | null
-    generated_styles: string | null
-    final_design_system: unknown | null
-  }>(
-    `SELECT generated_pages, generated_components, generated_styles, final_design_system
-     FROM bdd_sessions
-     WHERE project_id = $1
-     ORDER BY updated_at DESC
-     LIMIT 1`,
-    [projectId]
-  )
-
-  if (!session || !session.generated_pages || session.generated_pages.length === 0) {
-    return { ready: false, error: '此專案尚未完成 UIUX 設計，沒有可部署的代碼。' }
-  }
-
-  const code: GeneratedCode = {
-    pages: session.generated_pages,
-    components: session.generated_components || [],
-    styles: session.generated_styles || '',
-  }
-
-  // 生成 tailwind config（如果有 design system）
+  // 3. 優先從 project_files 取得生成的代碼
+  let code: GeneratedCode | null = null
   let tailwindConfig = ''
-  if (session.final_design_system) {
-    const ds = session.final_design_system as { tailwindExtend?: Record<string, unknown> }
-    if (ds.tailwindExtend) {
-      tailwindConfig = JSON.stringify(ds.tailwindExtend, null, 2)
+
+  const projectFiles = await db.getProjectFiles(projectId, 'uiux')
+
+  if (projectFiles.length > 0) {
+    // 從 project_files 重建 GeneratedCode
+    const pages: GeneratedComponent[] = []
+    const components: GeneratedComponent[] = []
+    let styles = ''
+
+    for (const f of projectFiles) {
+      if (f.file_type === 'page') {
+        pages.push({ path: f.file_path, content: f.content, description: f.description || '' })
+      } else if (f.file_type === 'component') {
+        components.push({ path: f.file_path, content: f.content, description: f.description || '' })
+      } else if (f.file_type === 'style') {
+        styles = f.content
+      } else if (f.file_type === 'config' && f.file_path === 'tailwind.config.ts') {
+        tailwindConfig = f.content
+      }
+    }
+
+    if (pages.length > 0) {
+      code = { pages, components, styles }
+    }
+  }
+
+  // Fallback：從 bdd_sessions 讀取（舊專案相容）
+  if (!code) {
+    const session = await db.queryOne<{
+      generated_pages: GeneratedComponent[] | null
+      generated_components: GeneratedComponent[] | null
+      generated_styles: string | null
+      final_design_system: unknown | null
+    }>(
+      `SELECT generated_pages, generated_components, generated_styles, final_design_system
+       FROM bdd_sessions
+       WHERE project_id = $1
+       ORDER BY updated_at DESC
+       LIMIT 1`,
+      [projectId]
+    )
+
+    if (!session || !session.generated_pages || session.generated_pages.length === 0) {
+      return { ready: false, error: '此專案尚未完成 UIUX 設計，沒有可部署的代碼。' }
+    }
+
+    code = {
+      pages: session.generated_pages,
+      components: session.generated_components || [],
+      styles: session.generated_styles || '',
+    }
+
+    // 從舊的 design system 生成 tailwind config
+    if (session.final_design_system) {
+      const ds = session.final_design_system as { tailwindExtend?: Record<string, unknown> }
+      if (ds.tailwindExtend) {
+        tailwindConfig = JSON.stringify(ds.tailwindExtend, null, 2)
+      }
     }
   }
 
@@ -294,9 +324,11 @@ ${code.styles}
 
   // tailwind.config.ts（如果有自訂設定）
   if (tailwindConfig) {
+    // 判斷是完整檔案（從 project_files 來）還是 JSON 片段（舊格式 fallback）
+    const isFullFile = tailwindConfig.includes('import type') || tailwindConfig.includes('export default')
     files.push({
       file: 'tailwind.config.ts',
-      data: `import type { Config } from 'tailwindcss'
+      data: isFullFile ? tailwindConfig : `import type { Config } from 'tailwindcss'
 
 const config: Config = {
   content: [

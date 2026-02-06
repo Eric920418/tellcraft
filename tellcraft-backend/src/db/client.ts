@@ -315,6 +315,92 @@ export async function updateBddSession(
   )
 }
 
+// ============================================================
+// Project Files（多 Skill 代碼存儲）
+// ============================================================
+
+export interface ProjectFile {
+  id: string
+  project_id: string
+  skill_source: string
+  file_path: string
+  content: string
+  description: string | null
+  file_type: string
+  created_at: string
+  updated_at: string
+}
+
+/**
+ * 批量 UPSERT 專案檔案
+ */
+export async function upsertProjectFiles(
+  projectId: string,
+  skillSource: string,
+  files: { filePath: string; content: string; description?: string; fileType: string }[]
+) {
+  if (files.length === 0) return
+
+  // 用事務批量 UPSERT
+  return transaction(async (client) => {
+    for (const file of files) {
+      await client.query(
+        `INSERT INTO project_files (project_id, skill_source, file_path, content, description, file_type, created_at, updated_at)
+         VALUES ($1, $2, $3, $4, $5, $6, NOW(), NOW())
+         ON CONFLICT (project_id, skill_source, file_path)
+         DO UPDATE SET content = $4, description = $5, file_type = $6, updated_at = NOW()`,
+        [projectId, skillSource, file.filePath, file.content, file.description || null, file.fileType]
+      )
+    }
+  })
+}
+
+/**
+ * 查詢專案檔案（可選 skillSource 過濾）
+ */
+export async function getProjectFiles(
+  projectId: string,
+  skillSource?: string
+): Promise<ProjectFile[]> {
+  if (skillSource) {
+    return queryMany<ProjectFile>(
+      'SELECT * FROM project_files WHERE project_id = $1 AND skill_source = $2 ORDER BY file_path',
+      [projectId, skillSource]
+    )
+  }
+  return queryMany<ProjectFile>(
+    'SELECT * FROM project_files WHERE project_id = $1 ORDER BY skill_source, file_path',
+    [projectId]
+  )
+}
+
+/**
+ * 查詢單一專案檔案
+ */
+export async function getProjectFile(
+  projectId: string,
+  skillSource: string,
+  filePath: string
+): Promise<ProjectFile | null> {
+  return queryOne<ProjectFile>(
+    'SELECT * FROM project_files WHERE project_id = $1 AND skill_source = $2 AND file_path = $3',
+    [projectId, skillSource, filePath]
+  )
+}
+
+/**
+ * 按 skill 刪除專案檔案
+ */
+export async function deleteProjectFiles(
+  projectId: string,
+  skillSource: string
+) {
+  return query(
+    'DELETE FROM project_files WHERE project_id = $1 AND skill_source = $2',
+    [projectId, skillSource]
+  )
+}
+
 /**
  * 記錄 LLM 使用量
  */

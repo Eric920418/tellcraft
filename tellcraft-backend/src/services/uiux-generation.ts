@@ -888,6 +888,11 @@ export async function generateStructure(
   template: TemplateData,
   bddSpec?: string,
   designTier?: DesignTier,
+  productContext?: {
+    originalRequirements?: string
+    designIdeas?: Array<{ step: string; answer: string }>
+    designBrief?: DesignBrief
+  },
   trackingContext?: LlmTrackingContext
 ): Promise<GenerationResult> {
   const tier = designTier || 'functional'
@@ -1000,8 +1005,33 @@ const font = DM_Sans({ subsets: ['latin'], variable: '--font-sans' })
 
 `
 
+  // 構建產品上下文
+  const productDesc = productContext?.originalRequirements || ''
+  const designIdeas = productContext?.designIdeas || []
+  const brief = productContext?.designBrief
+
+  const productSection = productDesc
+    ? `## 產品描述（最重要！頁面結構和內容必須完全符合這個產品）\n${productDesc}\n`
+    : ''
+
+  const designSection = designIdeas.length > 0
+    ? `## 用戶設計偏好\n${designIdeas.map(i => `- ${i.step}：${i.answer}`).join('\n')}\n`
+    : ''
+
+  const briefSection = brief
+    ? `## 設計方向（AI 設計顧問確認）
+- 風格：${brief.styleSummary}
+- 色彩方向：${brief.colorDirection}
+- 佈局建議：${brief.layoutSuggestion}
+${brief.signature ? `- Signature Element：${brief.signature}` : ''}
+`
+    : ''
+
   const userMessage = `請生成以下頁面和共用組件的靜態桌面版：
 
+${productSection}
+${designSection}
+${briefSection}
 ## 頁面列表
 ${pages.map(p => `- ${p}`).join('\n')}
 
@@ -1010,12 +1040,17 @@ ${pages.map(p => `- ${p}`).join('\n')}
 - 類別：${template.category}
 - 描述：${template.description}
 
-${bddSpec ? `## BDD 規格\n${bddSpec}` : ''}
+${bddSpec ? `## BDD 規格（後端 API 規格，請從中推導前端需要的頁面功能和 UI 元素）\n${bddSpec}` : ''}
+
+## 重要原則
+- **頁面必須忠於產品本質**：如果是記帳 app 就做記帳功能，不要加「關於」、「團隊」等無關頁面
+- **Header 導航只放實際功能頁面**，不要放「首頁」「關於」等行銷型連結
+- **內容要有意義的模擬數據**，不要只放 placeholder
 
 ## 需要生成的內容
 1. 每個頁面的 page.tsx（靜態結構）
-2. 共用的 Layout 組件（Header, Footer）
-3. 常用 UI 組件（Button, Card, Input）
+2. 共用的 Layout 組件（Header, Footer — 只包含與產品功能相關的導航）
+3. 常用 UI 組件（Button, Card, Input 等）
 4. globals.css（包含 CSS variables）
 
 請確保所有組件使用一致的 Design System。這是第一階段，動畫和響應式會在後續階段添加。`
@@ -1331,7 +1366,7 @@ export async function generateAllCode(
   console.log('[UIUX] generateAllCode: 使用三階段生成流程')
 
   // 階段 1：結構
-  const structureResult = await generateStructure(designSystem, pages, template, bddSpec, designTier, trackingContext)
+  const structureResult = await generateStructure(designSystem, pages, template, bddSpec, designTier, undefined, trackingContext)
   if (!structureResult.success) {
     return structureResult
   }

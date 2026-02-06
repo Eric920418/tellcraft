@@ -22,6 +22,7 @@ function extractComponentName(content: string): string | null {
 
 /**
  * 從 TSX 提取 return (...) 中的 JSX
+ * 正確處理字串和註解中的括號
  */
 function extractReturnJsx(content: string): string {
   const returnMatch = content.match(/return\s*\(/)
@@ -35,6 +36,30 @@ function extractReturnJsx(content: string): string {
   let i = start
 
   while (i < content.length && depth > 0) {
+    // 跳過字串（避免字串中的括號干擾深度計數）
+    if (content[i] === '"' || content[i] === "'" || content[i] === '`') {
+      const quote = content[i]
+      i++
+      while (i < content.length && content[i] !== quote) {
+        if (content[i] === '\\') i++
+        i++
+      }
+      i++
+      continue
+    }
+    // 跳過單行註解
+    if (content[i] === '/' && content[i + 1] === '/') {
+      while (i < content.length && content[i] !== '\n') i++
+      continue
+    }
+    // 跳過多行註解
+    if (content[i] === '/' && content[i + 1] === '*') {
+      i += 2
+      while (i < content.length && !(content[i] === '*' && content[i + 1] === '/')) i++
+      i += 2
+      continue
+    }
+
     if (content[i] === '(') depth++
     if (content[i] === ')') depth--
     i++
@@ -66,6 +91,35 @@ function substituteProps(jsx: string, props: Record<string, string>): string {
     result = result.replace(new RegExp(`\\{props\\.${key}\\}`, 'g'), value)
   }
   return result
+}
+
+/**
+ * 移除未被 componentMap 處理的 React 組件標籤（PascalCase）
+ * 這些不是有效 HTML，會造成渲染殘留
+ */
+function stripUnresolvedComponents(jsx: string): string {
+  // 1. 移除自閉合: <ComponentName ... />
+  jsx = jsx.replace(/<[A-Z]\w*(?:\s[^>]*)?\s*\/\s*>/g, '')
+
+  // 2. 移除帶 children 的 PascalCase 組件（保留 children）
+  //    迭代處理巢狀情況
+  let prev = ''
+  let iterations = 0
+  while (prev !== jsx && iterations < 10) {
+    prev = jsx
+    jsx = jsx.replace(/<([A-Z]\w*)[^>]*>([\s\S]*?)<\/\1>/g, '$2')
+    iterations++
+  }
+
+  // 3. 移除 React Fragment: <> ... </> 和 <Fragment> ... </Fragment>
+  jsx = jsx.replace(/<>\s*/g, '')
+  jsx = jsx.replace(/<\/>\s*/g, '')
+  jsx = jsx.replace(/<Fragment[^>]*>\s*/g, '')
+  jsx = jsx.replace(/<\/Fragment>\s*/g, '')
+  jsx = jsx.replace(/<React\.Fragment[^>]*>\s*/g, '')
+  jsx = jsx.replace(/<\/React\.Fragment>\s*/g, '')
+
+  return jsx
 }
 
 /**
@@ -118,8 +172,9 @@ function stripJsxExpressions(html: string): string {
             i++
           }
         }
-        i++
+        if (depth > 0) i++
       }
+      if (i < html.length) i++ // skip closing }
       continue
     }
 
@@ -146,11 +201,83 @@ function findTagEnd(html: string, start: number): number {
       i++
       while (i < html.length && html[i] !== "'") i++
     }
+    // 跳過 JSX 表達式屬性 attr={...}
+    if (html[i] === '{') {
+      let depth = 1
+      i++
+      while (i < html.length && depth > 0) {
+        if (html[i] === '{') depth++
+        else if (html[i] === '}') depth--
+        else if (html[i] === '"' || html[i] === "'" || html[i] === '`') {
+          const q = html[i]
+          i++
+          while (i < html.length && html[i] !== q) {
+            if (html[i] === '\\') i++
+            i++
+          }
+        }
+        i++
+      }
+      continue
+    }
     // self-closing tag
     if (html[i] === '/' && html[i + 1] === '>') return i + 1
     i++
   }
   return html.length - 1
+}
+
+/**
+ * 清理 tag 之間文字內容中的 JS 語法殘留
+ * 只處理 > 和 < 之間的文字，不動 tag 屬性
+ */
+function sanitizeTextContent(html: string): string {
+  // 用 split/rejoin 的方式分離 tag 和文字
+  const parts: string[] = []
+  let i = 0
+
+  while (i < html.length) {
+    if (html[i] === '<') {
+      // 找 tag 結束
+      const end = findTagEnd(html, i)
+      parts.push(html.substring(i, end + 1))
+      i = end + 1
+    } else {
+      // 文字內容區域 — 收集到下一個 < 為止
+      let textEnd = html.indexOf('<', i)
+      if (textEnd === -1) textEnd = html.length
+      const text = html.substring(i, textEnd)
+
+      // 清理 JS 語法殘留
+      let clean = text
+      // 移除括號組合: ))} )} }) () 等
+      clean = clean.replace(/\)\s*\)\s*\}/g, '')
+      clean = clean.replace(/\)\s*\}/g, '')
+      clean = clean.replace(/\}\s*\)/g, '')
+      clean = clean.replace(/\(\s*\)/g, '')
+      // 移除孤立的 ) 或 ( 在文字首尾
+      clean = clean.replace(/^\s*[\)\}]+\s*/g, '')
+      clean = clean.replace(/\s*[\(\{]+\s*$/g, '')
+      // 移除 => && ||
+      clean = clean.replace(/\s*=>\s*/g, '')
+      clean = clean.replace(/\s*&&\s*/g, ' ')
+      clean = clean.replace(/\s*\|\|\s*/g, ' ')
+      // 移除孤立的 ? (三元殘留，但不移除 ? 在文字末尾如「什麼？」)
+      clean = clean.replace(/^\s*\?\s+/g, '')
+      clean = clean.replace(/\s+\?\s*$/g, '')
+      // 移除 .map( .filter( .forEach( 等殘留
+      clean = clean.replace(/\.\s*(map|filter|forEach|reduce|find|some|every|flatMap|sort)\s*\(/g, '')
+      // 移除殘留的 /> （來自已清除的組件標籤）
+      clean = clean.replace(/\/>/g, '')
+      // 清理多餘空白
+      clean = clean.replace(/\s{2,}/g, ' ')
+
+      parts.push(clean)
+      i = textEnd
+    }
+  }
+
+  return parts.join('')
 }
 
 /**
@@ -166,10 +293,10 @@ function convertJsxSyntax(jsx: string): string {
   html = html.replace(/<motion\.(\w+)/g, '<$1')
   html = html.replace(/<\/motion\.(\w+)>/g, '</$1>')
 
-  // 3. 移除 motion/React/event 屬性 — 用 tag-aware 方式
+  // 3. 移除 motion/React/event 屬性
   // 先處理屬性中的 {{...}} (多行)
   html = html.replace(/\s+(initial|animate|exit|transition|whileHover|whileTap|whileInView|viewport|variants|layout|layoutId|onAnimationComplete|onClick|onChange|onSubmit|onBlur|onFocus|onKeyDown|onKeyUp|onMouseEnter|onMouseLeave|key|ref|dangerouslySetInnerHTML)=\{\{[\s\S]*?\}\}/g, '')
-  // 再處理 ={...} (單行)
+  // 再處理 ={...} (深度計數)
   html = html.replace(/\s+(initial|animate|exit|transition|whileHover|whileTap|whileInView|viewport|variants|layout|layoutId|onAnimationComplete|onClick|onChange|onSubmit|onBlur|onFocus|onKeyDown|onKeyUp|onMouseEnter|onMouseLeave|key|ref|dangerouslySetInnerHTML)=\{[^}]*\}/g, '')
   // 再處理 ="..."
   html = html.replace(/\s+(initial|animate|exit|transition|whileHover|whileTap|whileInView|viewport|variants|layout|layoutId|onAnimationComplete)="[^"]*"/g, '')
@@ -195,18 +322,13 @@ function convertJsxSyntax(jsx: string): string {
   // 5. 移除 JSX 註解
   html = html.replace(/\{\/\*[\s\S]*?\*\/\}/g, '')
 
-  // 6. 移除動態屬性值 prop={expression} — 整個屬性移除
-  // 但保留 class="..." href="..." 等靜態屬性
-  html = html.replace(/\s+\w+=\{[^}]*\}/g, (match) => {
-    // 保留 class, href, src, alt, id 等靜態屬性（它們用 "" 不用 {}）
-    // 這裡匹配到的都是動態屬性，直接移除
-    return ''
-  })
+  // 6. 移除動態屬性值 prop={expression}
+  html = html.replace(/\s+\w+=\{[^}]*\}/g, () => '')
 
   // 7. 深度計數式移除所有 tag 內容區域的 {...}
   html = stripJsxExpressions(html)
 
-  // 8. SVG camelCase → kebab-case (strokeWidth → stroke-width, etc.)
+  // 8. SVG camelCase → kebab-case
   html = html.replace(/strokeWidth=/g, 'stroke-width=')
   html = html.replace(/strokeLinecap=/g, 'stroke-linecap=')
   html = html.replace(/strokeLinejoin=/g, 'stroke-linejoin=')
@@ -214,15 +336,18 @@ function convertJsxSyntax(jsx: string): string {
   html = html.replace(/clipRule=/g, 'clip-rule=')
   html = html.replace(/viewBox=/g, 'viewBox=')
 
-  // 9. 清理殘留的 () 和多餘空白
-  // 移除孤立的括號（map/filter 表達式殘留）
-  html = html.replace(/\(\s*\)/g, '')
-  html = html.replace(/^\s*\)\s*$/gm, '')
-  html = html.replace(/^\s*\(\s*$/gm, '')
-  html = html.replace(/\s{2,}/g, ' ')
+  // 9. htmlFor → for
+  html = html.replace(/htmlFor=/g, 'for=')
 
   // 10. 移除 TypeScript as
   html = html.replace(/\s+as\s+\w+/g, '')
+
+  // 11. 最終文字內容淨化 — 移除所有 JS 語法殘留
+  html = sanitizeTextContent(html)
+
+  // 12. 清理多餘空白和空行
+  html = html.replace(/\n\s*\n\s*\n/g, '\n')
+  html = html.replace(/\s{2,}/g, ' ')
 
   return html
 }
@@ -304,19 +429,22 @@ export function convertToPreviewHtml(
     }
   }
 
-  // 6. 轉換 JSX → HTML
+  // 6. 移除未解析的 React 組件標籤（PascalCase）
+  pageJsx = stripUnresolvedComponents(pageJsx)
+
+  // 7. 轉換 JSX → HTML（包含表達式移除 + 文字淨化）
   const html = convertJsxSyntax(pageJsx)
 
-  // 7. 清理 CSS
+  // 8. 清理 CSS
   const cleanStyles = styles
     .replace(/@import\s+["']tailwindcss["'];?/g, '')
     .replace(/@tailwind\s+\w+;?/g, '')
     .replace(/@theme\s*\{[\s\S]*?\}/g, '')
 
-  // 8. 字體
+  // 9. 字體
   const fontImports = extractFontInfo(mainPage.content, components)
 
-  // 9. 組裝 HTML
+  // 10. 組裝 HTML
   return `<!DOCTYPE html>
 <html lang="zh-TW">
 <head>

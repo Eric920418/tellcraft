@@ -140,6 +140,16 @@ npx ts-node bdd-spec/scripts/validate-feature.ts spec/features/      # 結構驗
 Vercel Server Actions → app/lib/vps-api.ts → VPS Express API → PostgreSQL
 ```
 
+### 生成代碼存儲：project_files 表
+
+各 Skill 生成的代碼獨立存儲在 `project_files` 表（一檔一行），支援多 Skill 來源：
+- `skill_source`: `uiux` / `code`（未來）/ `merge`（未來合併用）
+- `file_type`: `page` / `component` / `style` / `config`
+- UPSERT on `(project_id, skill_source, file_path)`
+- Orchestrator 每個生成階段（Structure/Animation/RWD+QG）自動寫入
+- Deployer 優先從 `project_files` 讀取，舊專案 fallback 到 `bdd_sessions`
+- API: `GET /api/project/:id/files?skill_source=uiux`
+
 ## 專案結構
 
 ```
