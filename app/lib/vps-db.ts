@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import { Pool, type PoolClient } from 'pg'
 
 // VPS PostgreSQL 連線配置
@@ -360,7 +361,7 @@ class QueryBuilder {
     const data = rows.map((row: any) => {
       if (this.countMode === 'exact' && row.full_count !== undefined) {
         count = parseInt(row.full_count, 10)
-        const { full_count, ...rest } = row
+        const { full_count: _fc, ...rest } = row
         return rest
       }
       return row

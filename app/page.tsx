@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useRef, useEffect, useCallback, Suspense, useMemo, useDeferredValue } from 'react'
+import { useState, useRef, useEffect, useCallback, Suspense, useDeferredValue } from 'react'
 import { useSearchParams } from 'next/navigation'
 import { motion, AnimatePresence, useInView } from 'framer-motion'
 import ReactMarkdown from 'react-markdown'
@@ -12,10 +12,9 @@ import CardSwap, { Card } from './components/CardSwap'
 import TextType from './components/TextType'
 import { AnimatedThemeToggler } from './components/AnimatedThemeToggler'
 import GlowButton from './components/GlowButton'
-import { signOut } from './actions'
+// signOut moved to VPS auth flow
 import {
   initializeSession as vpsInitializeSession,
-  getUserConversations as vpsGetUserConversations,
   getConversationMessages as vpsGetConversationMessages,
   replyToConversation as vpsReplyToConversation,
   sendMessage as vpsSendMessage,
@@ -30,7 +29,7 @@ import SpecGenerationView from './components/SpecGenerationView'
 import PreviewPanel from './components/uiux/PreviewPanel'
 import TemplatePicker from './components/uiux/TemplatePicker'
 import { getTemplateById } from './actions/templates'
-import type { Template, TemplateCardData } from './lib/templates'
+import type { Template } from './lib/templates'
 
 // ============ Types ============
 interface Message {
@@ -142,63 +141,6 @@ function ScrollIndicator({ visible }: { visible: boolean }) {
         </motion.div>
       )}
     </AnimatePresence>
-  )
-}
-
-// ============ Feature Card ============
-function FeatureCard({
-  number,
-  title,
-  description,
-  delay = 0
-}: {
-  number: string
-  title: string
-  description: string
-  delay?: number
-}) {
-  const ref = useRef(null)
-  const isInView = useInView(ref, { once: true, margin: '-100px' })
-
-  return (
-    <motion.div
-      ref={ref}
-      initial={{ opacity: 0, y: 40 }}
-      animate={isInView ? { opacity: 1, y: 0 } : {}}
-      transition={{ duration: 0.7, delay, ease: [0.25, 0.46, 0.45, 0.94] }}
-      style={{
-        padding: '40px 0',
-        borderBottom: '1px solid var(--border-color)',
-      }}
-    >
-      <div style={{ display: 'flex', gap: 40 }}>
-        <span style={{
-          fontFamily: 'var(--font-mono)',
-          fontSize: 13,
-          color: 'var(--gray-400)',
-        }}>
-          {number}
-        </span>
-        <div style={{ flex: 1 }}>
-          <h3 style={{
-            fontSize: 20,
-            fontWeight: 500,
-            marginBottom: 12,
-            letterSpacing: '-0.02em',
-          }}>
-            {title}
-          </h3>
-          <p style={{
-            fontSize: 15,
-            color: 'var(--gray-500)',
-            lineHeight: 1.7,
-            maxWidth: 480,
-          }}>
-            {description}
-          </p>
-        </div>
-      </div>
-    </motion.div>
   )
 }
 
@@ -914,7 +856,7 @@ function ChatSection({
   // 對話選擇器相關狀態
   const [showConversationPicker, setShowConversationPicker] = useState(false)
   const [conversations, setConversations] = useState<ConversationItem[]>([])
-  const [isLoadingConversations, setIsLoadingConversations] = useState(false)
+  const [isLoadingConversations, _setIsLoadingConversations] = useState(false)
 
   // 登入提示相關狀態
   const [loginPromptConfig, setLoginPromptConfig] = useState<{
@@ -1270,7 +1212,7 @@ function ChatSection({
               // 2. AI 進度訊息只保留最新的
 
               // 先處理 pending 訊息的替換
-              let updatedPrev = [...filteredPrev]
+              const updatedPrev = [...filteredPrev]
               const newMessagesToAdd: Message[] = []
 
               for (const newMsg of uniqueNewMessages) {
@@ -2361,6 +2303,7 @@ function ChatSection({
                 {(auth.isAuthenticated || sessionInfo?.isAuthenticated) ? (
                   <>
                     {(auth.user?.avatarUrl || sessionInfo?.user?.avatarUrl) && (
+                      /* eslint-disable-next-line @next/next/no-img-element */
                       <img
                         src={auth.user?.avatarUrl || sessionInfo?.user?.avatarUrl}
                         alt=""
@@ -3678,6 +3621,7 @@ function HomeContent() {
           // 已登入 - 顯示用戶資訊
           <div className="landing-user-info" style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
             {auth.user.avatarUrl && (
+              /* eslint-disable-next-line @next/next/no-img-element */
               <img
                 src={auth.user.avatarUrl}
                 alt=""

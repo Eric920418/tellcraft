@@ -424,7 +424,7 @@ export async function runPrdDiscovery(
   projectContext?: string,
   existingItems?: ClarifyItem[],
   trackingContext?: LlmTrackingContext,
-  options?: { isFirstRound?: boolean }
+  _options?: { isFirstRound?: boolean }
 ): Promise<{
   success: boolean
   items?: ClarifyItem[]
@@ -548,7 +548,7 @@ ${pendingQuestions.join('\n')}` : ''}
       return { success: false, error: '無法解析 LLM 回應' }
     }
 
-    let jsonStr = jsonMatch[1] || jsonMatch[0]
+    const jsonStr = jsonMatch[1] || jsonMatch[0]
 
     // 嘗試解析 JSON，如果失敗則嘗試修復截斷的 JSON
     // eslint-disable-next-line @typescript-eslint/no-explicit-any

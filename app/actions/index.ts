@@ -4,7 +4,7 @@
 import { getCurrentUser, getAuthToken } from '../lib/auth'
 import { deployProject as deployProjectReal, generateNextJsTemplate } from './deploy'
 import * as vpsApi from '../lib/vps-api'
-import type { BddSession as VpsBddSession, ClarifyItem as VpsClarifyItem } from '../lib/vps-api'
+// VPS API types imported as needed
 
 // ============================================================
 // 類型定義
@@ -221,7 +221,7 @@ export async function cancelSubscription(input: {
   userId: string
   action?: 'cancel' | 'resubscribe'
 }): Promise<ActionResult<{ userId: string; status: SubscriptionStatus }>> {
-  const { userId, action = 'cancel' } = input
+  const { action = 'cancel' } = input
 
   const token = await getAuthToken()
   if (!token) {
@@ -558,62 +558,6 @@ export async function configureWebhook(input: {
 // Chat 串接 VPS Backend Actions
 // ============================================================
 
-const VPS_API_URL = process.env.VPS_API_URL || 'http://54.238.4.117:8080'
-
-/**
- * 呼叫 VPS API 觸發訊息處理（取代 Inngest）
- */
-async function triggerVpsMessage(input: {
-  projectId: string
-  conversationId: string
-  userId: string
-  message: string
-}): Promise<void> {
-  const response = await fetch(`${VPS_API_URL}/api/conversation/${input.conversationId}/message`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      projectId: input.projectId,
-      userId: input.userId,
-      message: input.message,
-    }),
-  })
-
-  if (!response.ok) {
-    const error = await response.text()
-    throw new Error(`VPS API error: ${error}`)
-  }
-}
-
-/**
- * 呼叫 VPS API 觸發回覆處理（取代 Inngest）
- */
-async function triggerVpsReply(input: {
-  projectId: string
-  conversationId: string
-  userId: string
-  taskId: string
-  message: string
-  specConfirmed?: boolean
-}): Promise<void> {
-  const response = await fetch(`${VPS_API_URL}/api/conversation/${input.conversationId}/reply`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      projectId: input.projectId,
-      userId: input.userId,
-      taskId: input.taskId,
-      message: input.message,
-      specConfirmed: input.specConfirmed,
-    }),
-  })
-
-  if (!response.ok) {
-    const error = await response.text()
-    throw new Error(`VPS API error: ${error}`)
-  }
-}
-
 /**
  * 初始化會話
  * - 創建或獲取匿名用戶
@@ -910,7 +854,7 @@ export async function replyToConversation(input: {
  * - 用於顯示歷史對話選擇器
  * - 支援匿名用戶和已登入用戶
  */
-export async function getUserConversations(input: {
+export async function getUserConversations(_input: {
   userId: string
   limit?: number
 }): Promise<ActionResult<{
@@ -934,14 +878,14 @@ export async function getUserConversations(input: {
     return { success: false, error: result.error || '獲取對話列表失敗' }
   }
 
-  const conversations = result.data.conversations.map((c: any) => ({
-    id: c.id,
-    projectId: c.projectId,
-    projectName: c.projectName,
-    lastMessage: c.lastMessage || undefined,
-    messageCount: c.messageCount,
-    updatedAt: c.updatedAt,
-    createdAt: c.updatedAt, // API 可能沒有 createdAt，用 updatedAt 代替
+  const conversations = result.data.conversations.map((c: Record<string, unknown>) => ({
+    id: c.id as string,
+    projectId: c.projectId as string,
+    projectName: c.projectName as string,
+    lastMessage: (c.lastMessage as string) || undefined,
+    messageCount: c.messageCount as number,
+    updatedAt: c.updatedAt as string,
+    createdAt: c.updatedAt as string, // API 可能沒有 createdAt，用 updatedAt 代替
   }))
 
   return {
@@ -1248,16 +1192,16 @@ export async function getProjectDetail(projectId: string): Promise<ActionResult<
         ...project,
         status: project.status as ProjectStatus,
       },
-      conversations: conversations.map((c: any) => {
-        const messages = c.messages || []
-        const lastUserMessage = [...messages].reverse().find((m: { role: string; content: string }) => m.role === 'user')
+      conversations: conversations.map((c: Record<string, unknown>) => {
+        const messages = (c.messages as Array<{ role: string; content: string }>) || []
+        const lastUserMessage = [...messages].reverse().find((m) => m.role === 'user')
         return {
-          id: c.id,
+          id: c.id as string,
           messageCount: messages.length,
-          specComplete: c.specComplete,
+          specComplete: c.specComplete as boolean,
           lastMessage: lastUserMessage?.content?.slice(0, 100) || null,
-          createdAt: c.createdAt,
-          updatedAt: c.updatedAt
+          createdAt: c.createdAt as string,
+          updatedAt: c.updatedAt as string
         }
       }),
       deployments,
@@ -1514,7 +1458,7 @@ export async function updateBddSession(input: {
   const token = await getAuthToken()
   const result = await vpsApi.updateBddSession({
     sessionId,
-    updates: updates as any,
+    updates: updates as Parameters<typeof vpsApi.updateBddSession>[0]['updates'],
     token: token || undefined,
   })
 
@@ -1750,7 +1694,7 @@ export async function addClarifyItems(input: {
     ]
     const normalized = text
       .toLowerCase()
-      .replace(/[，。？！、：；""''（）\[\]【】\s,.?!:;"'()\[\]\s]/g, ' ')
+      .replace(/[，。？！、：；""''（）[\]【】\s,.?!:;"'()[\]\s]/g, ' ')
       .split(/\s+/)
       .filter(word => word.length >= 2 && !stopWords.includes(word))
 

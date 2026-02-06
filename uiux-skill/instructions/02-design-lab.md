@@ -2,232 +2,191 @@
 
 ## 目標
 
-根據 Design Brief 生成 5 個有意義差異的設計變體，讓用戶比較選擇。
+根據 Design Brief 生成 5 個有意義差異的設計變體（Design System JSON），讓用戶比較選擇或合併。
 
 ---
 
 ## 輸入
 
-- Design Brief（來自 Phase 1）
+- Design Brief（來自 Phase 1，含 Design Tier）
 - BDD 規格（如有）
-- 專案現有的設計 tokens（從 tailwind.config 提取）
+- 模板資訊（TemplateData）
+- `uiuxDesignTier`：`'functional' | 'creative'`
+
+---
+
+## 執行流程
+
+### Step 2.1: 變體生成
+
+`proceedToVariantGeneration()` 調用 `generateDesignVariants()`，一次 LLM 調用生成 5 個 Design System：
+
+```
+proceedToVariantGeneration()
+  ↓ 注入 Design Brief 到 template.description
+  ↓ 傳入 state.uiuxDesignTier
+  ↓
+generateDesignVariants(template, bddSpec, productType, designTier)
+  ↓ 根據 tier 調整 VARIANT_AXES（getVariantAxes）
+  ↓ 注入 Anti-Default 哲學、Signature Element
+  ↓ temperature: 0.4
+  ↓
+返回 5 個 DesignVariant（各含完整 DesignSystem JSON）
+```
+
+### Step 2.2: 變體展示
+
+通過 WebSocket 推送變體給前端，使用 `richContent` 顯示：
+
+```typescript
+await sendMessage(conversationId, io, {
+  content: '設計變體已生成完成！\n\n{variantDescriptions}',
+  stage: 'uiux_variants_ready',
+  layoutHint: 'split',
+  richContent: {
+    type: 'variant_picker',
+    data: {
+      variants,          // 5 個 DesignVariant
+      selectedIds: [],
+      fromUserIdeas: sourceType === 'ideas',
+    },
+  },
+})
+```
+
+每個變體包含：
+- `id`：A-E
+- `name`：變體名稱
+- `axis`：設計軸
+- `description`：設計方向描述
+- `previewDescription`：預覽效果描述
+- `keyFeatures`：關鍵特點列表
+- `designSystem`：完整 Design System（colors、typography、spacing、borderRadius、CSS variables）
+
+### Step 2.3: 用戶選擇或合併
+
+用戶通過文字訊息選擇，`handleVariantSelection()` 解析：
+
+| 格式 | 範例 | 說明 |
+|------|------|------|
+| 單選 | `選擇 A`、`選擇變體 A`、`A` | 直接使用 Variant A 的 Design System |
+| 合併 | `合併 A+C`、`A 和 C` | 合併多個變體的特定面向 |
+
+### Step 2.4: 變體合併（Synthesize）
+
+`synthesizeVariants()` 根據每個變體的 `axis` 決定合併策略：
+
+| Axis | 合併內容 |
+|------|---------|
+| `hierarchy` | typography |
+| `density` | spacing |
+| `expressive` | accent color |
+| `layout` | 佈局偏好（存入 metadata.layoutPreference） |
+| `interaction` | 互動模式（存入 metadata.interactionModel） |
+
+單選時直接使用該變體的 Design System，多選時以第一個為基礎合併其他。
 
 ---
 
 ## 設計軸
 
-每個變體必須探索不同的設計軸，**不是微調差異**：
+5 個變體必須探索不同的設計軸，**不是微調差異**：
 
 ### Variant A: Information Hierarchy Focus
 - 重新結構化內容層級
 - 應用 Gestalt proximity — 相關項目靠近
 - 每個視圖只有一個主要 action
-- 使用現有 typography scale 創造清晰層次
+- 使用 typography scale 創造清晰層次
 
 ### Variant B: Layout Model Exploration
-- 嘗試不同佈局方式（card vs list vs table vs split-pane）
-- 考慮每個 breakpoint 的響應行為
-- 使用專案現有的 grid/layout 系統
+- 探索根本不同的空間組織方式
+- 不只是 card/list/table 三選一，而是思考數據特性最適合什麼呈現
+- 考慮非對稱佈局、分割面板、timeline、地圖式等
 
 ### Variant C: Density Variation
-- 如果 brief 說 "comfortable"，試試更 compact 版本
-- 如果 brief 說 "compact"，試試更 spacious 版本
+- 調整信息密度（compact / comfortable / spacious）
 - 展示權衡：更多可見數據 vs 更易掃描
+- 根據目標用戶選擇合適的密度
 
 ### Variant D: Interaction Model
-- 不同互動模式（modal vs inline vs panel vs drawer）
+- 探索不同互動模式（modal / inline / panel / drawer）
 - 應用反饋模式：immediate → progress → completion
 - 實作所有需要的狀態（loading、error、empty、disabled）
 
 ### Variant E: Expressive Direction
-- 推動用戶在問答中描述的品牌方向
-- 探索專案現有設計 tokens 的不同使用方式
-- 應用有意義的 motion（hover、focus、transitions）
+- 推動品牌方向的視覺表現力
+- Creative tier 時特別大膽（漸層、獨特字體、不對稱佈局）
+- 每個變體必須有 Signature Element
 
 ---
 
-## 變體生成規範
+## Anti-Default 原則
 
-### 視覺風格推論
+注入到 `generateDesignVariants()` 的 prompt 中：
 
-**⚠️ 不使用預定義風格。從專案中提取視覺語言：**
-
-1. **如果偵測到 Tailwind**，讀取 `tailwind.config.js`：
-   ```javascript
-   theme.colors      // 色彩
-   theme.spacing     // 間距
-   theme.borderRadius // 圓角
-   theme.fontFamily  // 字體
-   theme.boxShadow   // 陰影
-   ```
-
-2. **如果存在 CSS Variables**，讀取 `globals.css`：
-   ```css
-   :root {
-     --color-*     /* 色彩 tokens */
-     --spacing-*   /* 間距 tokens */
-     --radius-*    /* 圓角 tokens */
-   }
-   ```
-
-3. **掃描現有組件**了解模式：
-   - 找 2-3 個現有 buttons → 記錄樣式模式
-   - 找 2-3 個現有 cards → 記錄 padding、borders、shadows
-   - 找現有 forms → 記錄 input 樣式、label 位置
-
-### 程式碼品質規範
-
-遵循 `rules/baseline-ui.md` 的技術約束：
-
-- **Components**: 使用無障礙 primitives（Base UI / React Aria / Radix）
-- **Animation**: 只動畫 `transform`/`opacity`、≤200ms、尊重 `prefers-reduced-motion`
-- **Typography**: `text-balance` 標題、`text-pretty` 內文
-- **Layout**: 固定 `z-index` scale
-- **States**: 每個互動元素都需要 default/hover/focus/active/disabled 狀態
-
-### 變體頁面結構
-
-```tsx
-// .claude-design/lab/page.tsx
-
-import { FeedbackOverlay } from './FeedbackOverlay';
-import { VariantA, VariantB, VariantC, VariantD, VariantE } from './variants';
-
-export default function DesignLabPage() {
-  return (
-    <div className="min-h-screen bg-background">
-      {/* Header - Design Brief 摘要 */}
-      <header className="p-6 border-b">
-        <h1>Design Lab: [Target Name]</h1>
-        <p>Style: {brief.style} | User: {brief.persona}</p>
-      </header>
-
-      {/* Variant Grid */}
-      <main className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8 p-6">
-        <div data-variant="A">
-          <h2>Variant A: Hierarchy Focus</h2>
-          <VariantA />
-        </div>
-        <div data-variant="B">
-          <h2>Variant B: Layout Model</h2>
-          <VariantB />
-        </div>
-        <div data-variant="C">
-          <h2>Variant C: Density</h2>
-          <VariantC />
-        </div>
-        <div data-variant="D">
-          <h2>Variant D: Interaction</h2>
-          <VariantD />
-        </div>
-        <div data-variant="E">
-          <h2>Variant E: Expressive</h2>
-          <VariantE />
-        </div>
-      </main>
-
-      {/* Feedback Overlay - CRITICAL */}
-      <FeedbackOverlay targetName="ComponentName" />
-    </div>
-  );
-}
-```
+- **The Swap Test**：如果把字體換成 Inter，佈局換成 sidebar + card grid，設計感沒有不同 — 那沒有做設計
+- **Infinite Expression**：同一個模式有無限種表達方式
+- **Signature Element**：每個變體必須有一個只屬於這個產品的視覺/結構/互動元素
 
 ---
 
-## 用戶反饋收集
+## Design Tier 影響
 
-### 互動式反饋（主要方式）
-
-Design Lab 包含 Figma 風格的反饋覆蓋層：
-
-1. 點擊 "Add Feedback" 按鈕
-2. 點擊任何元素添加評論
-3. 填寫 "Overall Direction" 欄位
-4. 點擊 "Submit All Feedback"
-5. 複製文字貼到終端機
-
-### 反饋格式
-
-```markdown
-## Design Lab Feedback
-
-**Target:** ComponentName
-**Comments:** 3
-
-### Variant A
-1. **Button** (`[data-testid='submit']`)
-   "Make this more prominent"
-
-### Variant B
-1. **Card** (`.product-card`)
-   "Love this layout"
-
-### Overall Direction
-Go with Variant B's structure. Apply Variant A's button styling.
-```
+| 行為 | Functional | Creative |
+|------|-----------|----------|
+| Variant E prompt | 標準表現力 | 大膽視覺（漸層、不對稱、獨特字體） |
+| 約束提示 | 禁止漸層/glow/多色 | 允許漸層（禁紫色多色）、多色 |
+| Signature 要求 | token 命名、展示方式、導航模式 | 視覺效果、互動體驗、空間組織 |
 
 ---
 
-## 變體選擇與合併（Synthesize）
+## 降級策略
 
-### 用戶選擇格式
-
-支援以下格式（正則匹配）：
-
-| 格式 | 範例 | 說明 |
-|------|------|------|
-| 單選 | `選擇變體 A`、`A`、`我要 A` | 直接使用 Variant A 的 Design System |
-| 合併 | `合併 A+C`、`A 和 C`、`結合 A、C` | 合併多個變體的特定面向 |
-| 帶說明合併 | `A 的配色 + B 的佈局` | 根據用戶描述合併 |
-
-### 合併邏輯
-
-如果用戶喜歡多個變體的不同部分：
-
-1. 創建新的混合變體（Variant F）
-2. 根據每個變體的 `axis` 合併對應屬性：
-   - `hierarchy` → 合併 typography
-   - `density` → 合併 spacing
-   - `expressive` → 合併 accent color
-   - `layout` → 合併 pageStructure 偏好到 metadata
-   - `interaction` → 合併互動模式偏好到 metadata
-3. 更新 Design Lab 顯示 Variant F + 1-2 個原始變體比較
-4. 再次收集反饋
-
-支援多輪合併，直到用戶滿意。
+| 異常 | 處理 |
+|------|------|
+| Path A（有想法）變體生成失敗 | 切換到 Path B 模板選擇 |
+| Path B（模板）變體生成失敗 | 顯示錯誤，請用戶重試 |
+| 變體數量不是 5 個 | 返回錯誤 |
+| JSON 解析失敗 | 返回錯誤 |
 
 ---
 
 ## 輸出
 
-確定設計方向後，產出：
+確定設計方向後，產出最終 `DesignSystem`：
 
-```json
+```typescript
 {
-  "selectedVariant": "F",
-  "synthesizedFrom": ["B", "A"],
-  "designDecisions": {
-    "layout": "Variant B's card grid",
-    "buttons": "Variant A's prominent CTAs",
-    "colors": "Original brand palette",
-    "spacing": "Comfortable density"
+  cssVariables: string        // :root { --color-primary: ...; }
+  tailwindExtend: { ... }     // Tailwind theme extend
+  typography: { ... }         // 字體和 scale
+  colorPalette: { ... }       // 完整色彩定義
+  spacing: { ... }            // 間距系統
+  borderRadius: { ... }       // 圓角系統
+  metadata?: {                // 合併時的額外資訊
+    layoutPreference?: string
+    interactionModel?: string
   }
 }
 ```
 
 ---
 
-## 清理
+## 狀態更新
 
-**⚠️ 重要**：流程結束時必須清理臨時檔案：
+| 步驟 | FlowState.phase |
+|------|----------------|
+| 開始生成 | `uiux_generating_variants` |
+| 變體就緒 | `uiux_variant_selection` |
+| 用戶選擇後 | `uiux_code_generation` |
 
-- 刪除 `.claude-design/` 目錄
-- 刪除 `app/__design_lab/` 路由
-- 刪除 `app/__design_preview/` 路由
+FlowState 相關欄位：
+- `uiuxVariants`：生成的 5 個 DesignVariant
+- `uiuxDesignSystem`：最終合併的 DesignSystem
+- `uiuxDesignTier`：影響生成約束
 
 ---
 
 ## 下一步
 
-進入 Phase 3: Implementation，根據確定的設計產出程式碼。
+進入 Phase 3: Implementation，使用最終 DesignSystem 進行三階段代碼生成（Structure → Animation → RWD）。

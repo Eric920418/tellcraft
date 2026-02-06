@@ -35,7 +35,7 @@ interface TemplateCardProps {
 export default function TemplateCard({
   template,
   isSelected = false,
-  onSelect,
+  onSelect: _onSelect,
   onPreview
 }: TemplateCardProps) {
   const [imageError, setImageError] = useState(true) // 預設不顯示圖片，因為我們還沒有真正的縮圖

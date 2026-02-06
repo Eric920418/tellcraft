@@ -80,6 +80,16 @@ interface FlowState {
     components: GeneratedComponent[]
     styles: string
   }
+  uiuxStructureCode?: {        // Structure 階段快照（供 redo 時回溯）
+    pages: GeneratedComponent[]
+    components: GeneratedComponent[]
+    styles: string
+  }
+  uiuxAnimationCode?: {        // Animation 階段快照（供 redo 時回溯）
+    pages: GeneratedComponent[]
+    components: GeneratedComponent[]
+    styles: string
+  }
   // 設計釐清
   uiuxDesignClarifyStep?: number // 當前釐清步驟（1-4）
   uiuxDesignIdeas?: Array<{ step: string; answer: string }> // 用戶的設計想法
@@ -301,7 +311,14 @@ async function handleContinueFlow(
   }
 
   // 特殊處理：UIUX 階段的訊息（不需要 waitingForReply）
-  if (state.phase === 'uiux_template_selection' || state.phase === 'spec_completed') {
+  if (
+    state.phase === 'uiux_template_selection' ||
+    state.phase === 'spec_completed' ||
+    state.phase === 'uiux_variant_selection' ||
+    state.phase === 'uiux_generating_variants' ||
+    state.phase === 'uiux_code_generation' ||
+    state.phase === 'uiux_complete'
+  ) {
     // 檢查是否是模板選擇訊息
     if (message.includes('我選擇') && message.includes('模板')) {
       await handleTemplateSelection(conversationId, state, message, redis, io)
@@ -696,7 +713,7 @@ async function sendMessage(
     progress?: { current: number; total: number; step: string }
     layoutHint?: 'default' | 'split' | 'full_preview'
     richContent?: {
-      type: 'template_picker' | 'design_preview' | 'code_preview'
+      type: 'template_picker' | 'variant_picker' | 'design_preview' | 'code_preview'
       data: Record<string, unknown>
     }
   }
@@ -1628,6 +1645,7 @@ async function executeCodePhaseStructure(
   }
 
   state.uiuxGeneratedCode = generatedCode
+  state.uiuxStructureCode = generatedCode  // 保存快照供 redo 時回溯
   state.uiuxCodePhase = 'structure'
   state.waitingForReply = true
   await saveFlowState(redis, conversationId, state)
@@ -1652,7 +1670,7 @@ async function executeCodePhaseStructure(
     progress: { current: 1, total: 3, step: '結構完成' },
     layoutHint: 'split',
     richContent: {
-      type: 'code_preview' as 'template_picker',
+      type: 'code_preview',
       data: {
         pages: generatedCode.pages,
         components: generatedCode.components,
@@ -1714,6 +1732,7 @@ async function executeCodePhaseAnimation(
   }
 
   state.uiuxGeneratedCode = generatedCode
+  state.uiuxAnimationCode = generatedCode  // 保存快照供 redo 時回溯
   state.uiuxCodePhase = 'animation'
   state.waitingForReply = true
   await saveFlowState(redis, conversationId, state)
@@ -1735,7 +1754,7 @@ async function executeCodePhaseAnimation(
     progress: { current: 2, total: 3, step: '動畫完成' },
     layoutHint: 'split',
     richContent: {
-      type: 'code_preview' as 'template_picker',
+      type: 'code_preview',
       data: {
         pages: generatedCode.pages,
         components: generatedCode.components,
@@ -1826,7 +1845,7 @@ async function executeCodePhaseRwd(
     progress: { current: 3, total: 3, step: '完成' },
     layoutHint: 'split',
     richContent: {
-      type: 'code_preview' as 'template_picker',
+      type: 'code_preview',
       data: {
         pages: generatedCode.pages,
         components: generatedCode.components,
@@ -1890,9 +1909,11 @@ async function handleCodePhaseRedo(
 
   console.log(`[Orchestrator] 重做當前階段: ${uiuxCodePhase}`)
 
-  // 如果要重做動畫或響應式，需要先恢復上一階段的代碼
-  if (uiuxCodePhase === 'animation' || uiuxCodePhase === 'rwd') {
-    // 從 session 重新讀取代碼（這裡簡化處理，直接重做當前階段）
+  // 恢復上一階段的代碼快照，確保 redo 是在乾淨的基礎上重做
+  if (uiuxCodePhase === 'animation' && state.uiuxStructureCode) {
+    state.uiuxGeneratedCode = state.uiuxStructureCode
+  } else if (uiuxCodePhase === 'rwd' && state.uiuxAnimationCode) {
+    state.uiuxGeneratedCode = state.uiuxAnimationCode
   }
 
   switch (uiuxCodePhase) {
@@ -2567,7 +2588,7 @@ async function proceedToVariantGeneration(
     stage: 'uiux_variants_ready',
     layoutHint: 'split',
     richContent: {
-      type: 'variant_picker' as 'template_picker',
+      type: 'variant_picker',
       data: {
         variants: variants,
         selectedIds: [],

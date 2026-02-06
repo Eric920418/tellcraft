@@ -64,10 +64,35 @@ npx ts-node bdd-spec/scripts/validate-feature.ts spec/features/      # 結構驗
 
 | Skill | 用途 |
 |-------|------|
-| `bdd-spec` | 需求釐清 + BDD 規格產出（5 階段：PRD Discovery → Clarify → Formulation → Spec Discovery → Actions Design）|
-| `uiux` | 前端介面設計（4 階段：Design Discovery → Design Lab → Implementation → Quality Gate）|
+| `bdd-spec` | 需求釐清 + BDD 規格產出（5 階段：Discovery → Clarify → Formulation → Actions Design → ISA Config）|
+| `uiux` | 前端介面設計（3 階段：Design Discovery → Design Lab → Implementation）|
 | `deployer` | Vercel 部署 |
 | `domain-manager` | 網域管理入口 |
+
+#### UIUX Skill 架構細節
+
+**Design Discovery 雙軌流程**：
+- Path A（有想法）：4 步問卷 feeling → reference → color → layout
+- Path B（沒想法）：模板選擇器
+
+**Design Brief 確認**（Discovery → Design Lab 之間）：AI 設計顧問總結設計方向、推薦 Design Tier，用戶可確認或調整（最多 3 輪）。
+
+**Design Tier（功能型 vs 創意型）**：
+- `DesignTier = 'functional' | 'creative'`
+- functional：dashboard/SaaS/後台，禁漸層/glow/多色，動畫克制
+- creative：landing page/品牌官網，允許漸層、多色、獨特字體、大膽佈局
+
+**Implementation 三階段生成**：`generateStructure()` → `generateAnimations()` → `generateRwd()`（每階段可確認或重做，Stage 2/3 有 fallback）
+
+**關鍵函數**（`tellcraft-backend/src/services/uiux-generation.ts`）：
+- `generateDesignBrief()` - Domain Exploration + Signature Element
+- `generateDesignVariants()` - 5 變體 + Anti-Default 哲學
+- `generateStructure()` - 靜態桌面版 + Professional UI Rules
+- `generateAnimations()` - 動畫增強
+- `generateRwd()` - 響應式 + Pre-Delivery Checklist
+- `synthesizeVariants()` - 變體合併（layout/interaction metadata）
+- `getCraftFoundations()` - 共用品質底線
+- `getStructureConstraints(tier)` / `getAnimationConstraints(tier)` / `getVariantPromptHint(tier)` - Tier 約束集
 
 ### 認證系統
 
@@ -94,16 +119,17 @@ app/                       # Next.js 前端（Vercel）
 ├── actions/               # Server Actions（index.ts, admin.ts, storage.ts）
 ├── hooks/                 # useAuth.ts, useVpsWebSocket.ts
 ├── lib/                   # vps-api.ts, llm.ts, supabase/
-├── components/            # UI 元件（reactbits 風格動效）
+├── components/            # UI 元件（uiux/ 下有 VariantPicker, CodePreview, PreviewPanel 等）
 ├── dashboard/             # 用戶/管理員儀表板
 └── auth/                  # OAuth 登入
 
 tellcraft-backend/         # Express 後端（VPS）
 ├── src/
 │   ├── index.ts           # Express + Socket.io + BullMQ 入口
-│   ├── routes/            # auth.ts, conversation.ts, project.ts, health.ts
-│   ├── workers/           # orchestrator.ts
-│   └── services/          # classifier.ts, registry.ts, bdd-session.ts
+│   ├── routes/            # auth, conversation, project, templates, dashboard, session 等
+│   ├── workers/           # orchestrator.ts（BullMQ Worker，核心流程引擎）
+│   └── services/          # classifier, registry, bdd-session, uiux-generation,
+│                          # prd-discovery, formulation, spec-discovery
 └── ecosystem.config.js    # PM2 配置
 
 spec/                      # BDD 規格產出
@@ -112,13 +138,13 @@ spec/                      # BDD 規格產出
 └── actions/actions.yml
 
 bdd-spec/                  # BDD Skill 定義
-├── instructions/          # 5 階段執行指南
-├── rules/                 # 格式規範
+├── instructions/          # 5 階段執行指南（discovery → clarify → formulation → actions-design → isa-config）
+├── rules/                 # formulation-rules.md
 └── scripts/               # 驗證腳本（lint-gherkin-format.ts, validate-feature.ts）
 
 uiux-skill/                # UIUX Skill 定義
-├── instructions/          # 4 階段執行指南
-└── rules/baseline-ui.md   # UI 技術約束
+├── instructions/          # 3 階段執行指南（design-discovery → design-lab → implementation）
+└── rules/baseline-ui.md   # UI 技術約束 + Craft Foundations
 ```
 
 ## BDD 規格格式（sdd.os ISA）
@@ -138,6 +164,13 @@ uiux-skill/                # UIUX Skill 定義
 - E005: Rule 缺少前置/後置標註
 - E006: When 步驟格式錯誤
 - E008: 沒有 Example
+
+## 重要注意事項
+
+- **`app/components/templates/` 已廢棄**：React 模板組件不再使用，PreviewPanel 改用 iframe + 後端 HTML 渲染
+- **動畫庫是 `motion/react`**，不是 `framer-motion`（import path 已遷移）
+- **`uiux-generation.ts` 使用模組級 Anthropic 單例**
+- **文檔與實作同步**：修改後端流程時必須同步更新 `uiux-skill/instructions/` 和此文件
 
 ## 核心原則
 

@@ -2,367 +2,277 @@
 
 ## 目標
 
-根據確定的設計方向，產出 Next.js + Tailwind CSS 前端程式碼。
+根據 Phase 2 確定的 DesignSystem，分三階段漸進式生成 Next.js + Tailwind CSS 前端程式碼。每個階段生成後用戶可預覽、確認或重做。
 
 ---
 
 ## 輸入
 
-- 確定的設計方向（來自 Phase 2）
-- Design Brief
+- `DesignSystem`（來自 Phase 2 的最終設計系統）
+- `DesignTier`（`'functional' | 'creative'`）
+- 模板資訊（TemplateData，含 pageStructure）
 - BDD 規格（如有）
-- 專案現有的組件和樣式
 
 ---
 
-## 技術規範
+## 三階段生成流程
 
-### Framework: Next.js App Router
-
-```tsx
-// 優先使用 Server Components
-// app/page.tsx
-export default function HomePage() {
-  return <main>...</main>;
-}
-
-// 只在需要互動時使用 Client Components
-// components/InteractiveButton.tsx
-'use client';
-export function InteractiveButton() { ... }
+```
+Phase 2 完成
+  ↓ state.phase = 'uiux_code_generation'
+  ↓ state.uiuxCodePhase = 'structure'
+  ↓
+executeCodePhaseStructure()
+  ↓ generateStructure(designSystem, pages, template, bddSpec, designTier)
+  ↓ parseGeneratedFiles() 解析 LLM 輸出
+  ↓ WebSocket 推送 code_preview + 等待用戶確認
+  ↓
+用戶：「繼續」→ executeCodePhaseAnimation()
+用戶：「重新生成」→ 重做 Structure
+  ↓
+executeCodePhaseAnimation()
+  ↓ generateAnimations(designSystem, existingCode, designTier)
+  ↓ 在現有代碼基礎上添加動畫
+  ↓ WebSocket 推送 code_preview + 等待用戶確認
+  ↓
+用戶：「繼續」→ executeCodePhaseRwd()
+用戶：「重新生成」→ 重做 Animation
+  ↓
+executeCodePhaseRwd()
+  ↓ generateRwd(designSystem, existingCode, designTier)
+  ↓ 在現有代碼基礎上添加響應式設計
+  ↓ state.phase = 'uiux_complete'
+  ↓ 生成完成
 ```
 
-### Styling: Tailwind CSS
+---
 
-Tailwind CSS utility-first 原則：
+## Stage 1: Structure（結構生成）
 
-```tsx
-// ✅ 正確：utility-first
-<button className="bg-blue-500 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded">
+**函數**：`generateStructure(designSystem, pages, template, bddSpec?, designTier?)`
 
-// ❌ 錯誤：自定義 CSS
-<button className={styles.button}>
+**輸入**：
+- DesignSystem（CSS variables、Tailwind extend、色彩、字體、間距）
+- 頁面清單（來自 template.pageStructure.pages）
+- 模板資訊和 BDD 規格
+
+**生成內容**：
+- 靜態桌面版頁面結構
+- 基礎組件
+- 全域樣式（CSS variables + Tailwind config）
+- Design tokens 應用
+
+**Prompt 注入規則**：
+- Professional UI Rules（SVG icon、cursor-pointer、對比度、佈局細節）
+- 無障礙基本功（html lang、Skip Link、Heading 層級、aria-live）
+- 根據 designTier 注入 `getStructureConstraints(tier)`
+- Craft Foundations（`getCraftFoundations()`）
+
+**輸出格式**（LLM 回傳）：
+```
+\`\`\`tsx:app/page.tsx
+// 頁面代碼
+\`\`\`
+
+\`\`\`tsx:components/ui/Card.tsx
+// 組件代碼
+\`\`\`
+
+\`\`\`css:styles/globals.css
+// 全域樣式
+\`\`\`
 ```
 
-### Responsive: Mobile-first
+`parseGeneratedFiles()` 解析規則：
+- `tsx:` 開頭 → 路徑含 `/page.tsx` 歸入 pages，否則歸入 components
+- `css:` 開頭 → 歸入 styles
 
-```tsx
-// Mobile-first breakpoints
-<div className="w-full md:w-1/2 lg:w-1/3">
-  {/* Mobile: 100%, Tablet: 50%, Desktop: 33% */}
-</div>
+**用戶確認**：
+- ✅ 繼續 → 進入 Stage 2
+- 🔄 重新生成 → 重做 Structure
+
+---
+
+## Stage 2: Animation（動畫增強）
+
+**函數**：`generateAnimations(designSystem, existingCode, designTier?)`
+
+**輸入**：
+- DesignSystem
+- Stage 1 生成的完整代碼（pages + components + styles）
+
+**生成內容**：
+- 頁面入場動畫
+- 按鈕 hover/tap 效果
+- 卡片懸浮效果
+- Loading 動畫
+- 狀態轉換動畫
+
+**Prompt 注入規則**：
+- 根據 designTier 注入 `getAnimationConstraints(tier)`
+  - functional：動畫克制，只用 fade + subtle scale
+  - creative：允許 spring physics、stagger reveal、scroll-trigger
+- 必須遵守 baseline-ui 動畫規則（只 transform/opacity、≤200ms 互動反饋）
+
+**Fallback**：
+- 動畫生成失敗時，保留 Stage 1 代碼不變（頁面和組件 fallback 到 existingCode）
+
+**用戶確認**：
+- ✅ 繼續 → 進入 Stage 3
+- 🔄 重新生成 → 重做 Animation
+
+---
+
+## Stage 3: RWD（響應式設計）
+
+**函數**：`generateRwd(designSystem, existingCode, designTier?)`
+
+**輸入**：
+- DesignSystem
+- Stage 2 生成的完整代碼（含動畫）
+
+**生成內容**：
+- Mobile-first 響應式佈局
+- 漢堡選單
+- 觸控優化
+- Breakpoint 適配
+
+**Prompt 注入規則**：
+- Pre-Delivery Checklist（排版/互動/對比度/佈局/效能/無障礙自檢）
+- 根據 designTier 注入約束
+
+**Fallback**：
+- RWD 生成失敗時，保留 Stage 2 代碼不變
+
+**完成後**：
+- `state.uiuxCodePhase = 'complete'`
+- `state.phase = 'uiux_complete'`
+- 最終代碼保存到 BDD Session
+
+---
+
+## 技術約束
+
+### Stack
+
+| 技術 | 用法 |
+|------|------|
+| Next.js App Router | Server Components 優先，互動時才用 `'use client'` |
+| Tailwind CSS | Utility-first，使用 DesignSystem 的 CSS variables |
+| `motion/react` | JavaScript 動畫（**不是** framer-motion） |
+| `tw-animate-css` | 入場和微互動動畫 |
+| `cn` utility | clsx + tailwind-merge |
+| Base UI / Radix / React Aria | 無障礙 primitives（不混用） |
+
+### 代碼檔案格式
+
+LLM 必須使用 ```` ```tsx:路徑 ```` 和 ```` ```css:路徑 ```` 格式輸出代碼：
+
+```
+\`\`\`tsx:app/page.tsx
+export default function HomePage() { ... }
+\`\`\`
+
+\`\`\`tsx:app/layout.tsx
+export default function RootLayout({ children }) { ... }
+\`\`\`
+
+\`\`\`css:styles/globals.css
+@import "tailwindcss";
+/* ... */
+\`\`\`
 ```
 
-Breakpoints:
+### Responsive Breakpoints
+
+Mobile-first：
 - `sm:` 640px+
 - `md:` 768px+
 - `lg:` 1024px+
 - `xl:` 1280px+
 - `2xl:` 1536px+
 
-### Animation: motion/react
+---
 
-```tsx
-import { motion } from 'motion/react';
+## Design Tier 影響
 
-<motion.button
-  whileHover={{ scale: 1.02 }}
-  whileTap={{ scale: 0.98 }}
-  transition={{ type: "spring", stiffness: 400, damping: 17 }}
->
-```
-
-約束：
-- 只動畫 `transform` 和 `opacity`
-- 微互動 ≤ 200ms
-- 頁面轉場 ≤ 300ms
-- **MUST** 處理 `prefers-reduced-motion`
-
-### Components: Accessible Primitives
-
-使用無障礙組件庫（優先順序）：
-1. 專案現有的組件
-2. Base UI
-3. Radix
-4. React Aria
-
-```tsx
-// ✅ 使用 Base UI
-import { Button } from '@base-ui-components/react';
-
-// ❌ 不要自己實作鍵盤/focus 行為
-<div onClick={...} onKeyDown={...}>
-```
+| 行為 | Functional | Creative |
+|------|-----------|----------|
+| Structure 約束 | 禁止漸層/glow/多色 | 允許漸層（禁紫色多色）、多色點綴 |
+| Animation 約束 | 克制，只 fade + subtle scale | 豐富：spring、stagger、scroll-trigger |
+| 佈局 | 標準 grid/flex | 不對稱、overlap、grid-breaking OK |
+| 字體 | 標準（禁 Inter/Roboto/Arial） | 獨特有個性的字體搭配 |
+| RWD | 標準響應式 | 可以有表現力的 breakpoint 變化 |
 
 ---
 
-## 程式碼結構
+## 降級策略
 
-### 頁面結構
-
-```
-app/
-├── page.tsx                    # 首頁
-├── layout.tsx                  # 共用 layout
-├── (auth)/
-│   ├── login/page.tsx
-│   └── register/page.tsx
-├── dashboard/
-│   ├── page.tsx
-│   └── layout.tsx
-└── [feature]/
-    └── page.tsx
-```
-
-### 組件結構
-
-```
-components/
-├── ui/                         # 基礎 UI 組件
-│   ├── Button.tsx
-│   ├── Card.tsx
-│   ├── Input.tsx
-│   └── index.ts
-├── forms/                      # 表單組件
-│   ├── LoginForm.tsx
-│   └── SearchForm.tsx
-├── layout/                     # 佈局組件
-│   ├── Header.tsx
-│   ├── Sidebar.tsx
-│   └── Footer.tsx
-└── [feature]/                  # 功能特定組件
-    └── FeatureCard.tsx
-```
-
-### 樣式結構
-
-```
-styles/
-├── globals.css                 # 全域樣式
-└── tokens.css                  # Design tokens (CSS variables)
-```
+| 異常 | 處理 |
+|------|------|
+| Stage 1 失敗 | 顯示錯誤，流程終止 |
+| Stage 2 失敗 | 顯示錯誤，用戶可重試或跳到 Stage 3 |
+| Stage 3 失敗 | 顯示錯誤，用戶可重試，代碼保留 Stage 2 狀態 |
+| `parseGeneratedFiles()` 解析不到檔案 | Fallback 到上一階段代碼 |
 
 ---
 
-## 實作清單
+## 狀態更新
 
-### 1. 全域樣式
+| 步驟 | FlowState.phase | uiuxCodePhase |
+|------|----------------|---------------|
+| 開始 Structure | `uiux_code_generation` | `structure` |
+| Structure 完成 | `uiux_code_generation` | `structure`（waitingForReply） |
+| 開始 Animation | `uiux_code_generation` | `animation` |
+| Animation 完成 | `uiux_code_generation` | `animation`（waitingForReply） |
+| 開始 RWD | `uiux_code_generation` | `rwd` |
+| RWD 完成 | `uiux_complete` | `complete` |
 
-```css
-/* styles/globals.css */
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+FlowState 相關欄位：
+- `uiuxCodePhase`：`'structure' | 'animation' | 'rwd' | 'complete'`
+- `uiuxGeneratedCode`：`{ pages, components, styles }` 每階段累積
+- `uiuxDesignSystem`：Phase 2 的最終設計系統
+- `uiuxDesignTier`：影響生成約束
 
-@layer base {
-  :root {
-    /* Design tokens from Phase 2 */
-    --color-primary: theme('colors.blue.500');
-    --color-background: theme('colors.white');
-    --color-foreground: theme('colors.slate.900');
+---
 
-    /* Spacing scale */
-    --spacing-base: 4px;
+## WebSocket 訊息格式
 
-    /* Typography */
-    --font-sans: 'Inter', system-ui, sans-serif;
-  }
+每階段完成後推送：
 
-  .dark {
-    --color-background: theme('colors.slate.900');
-    --color-foreground: theme('colors.slate.50');
-  }
-}
-
-/* Reduced motion support */
-@media (prefers-reduced-motion: reduce) {
-  *, *::before, *::after {
-    animation-duration: 0.01ms !important;
-    animation-iteration-count: 1 !important;
-    transition-duration: 0.01ms !important;
-  }
-}
-```
-
-### 2. Layout 組件
-
-```tsx
-// components/layout/RootLayout.tsx
-export function RootLayout({ children }: { children: React.ReactNode }) {
-  return (
-    <div className="min-h-dvh flex flex-col">
-      <Header />
-      <main className="flex-1">{children}</main>
-      <Footer />
-    </div>
-  );
-}
-```
-
-注意：
-- 使用 `min-h-dvh` 而非 `min-h-screen`
-- 使用 `safe-area-inset` 處理 fixed 元素
-
-### 3. 互動組件
-
-每個互動組件必須有完整狀態：
-
-```tsx
-// components/ui/Button.tsx
-interface ButtonProps {
-  variant?: 'primary' | 'secondary' | 'ghost';
-  size?: 'sm' | 'md' | 'lg';
-  loading?: boolean;
-  disabled?: boolean;
-}
-
-export function Button({
-  variant = 'primary',
-  size = 'md',
-  loading,
-  disabled,
-  children,
-  ...props
-}: ButtonProps) {
-  return (
-    <button
-      className={cn(
-        // Base
-        "inline-flex items-center justify-center font-medium rounded-lg transition-colors",
-        "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2",
-        // Variant
-        variant === 'primary' && "bg-primary text-white hover:bg-primary/90",
-        variant === 'secondary' && "bg-secondary text-secondary-foreground hover:bg-secondary/80",
-        variant === 'ghost' && "hover:bg-accent hover:text-accent-foreground",
-        // Size
-        size === 'sm' && "h-8 px-3 text-sm",
-        size === 'md' && "h-10 px-4",
-        size === 'lg' && "h-12 px-6 text-lg",
-        // States
-        (disabled || loading) && "opacity-50 cursor-not-allowed",
-      )}
-      disabled={disabled || loading}
-      {...props}
-    >
-      {loading && <Spinner className="mr-2 h-4 w-4" />}
-      {children}
-    </button>
-  );
-}
-```
-
-### 4. 表單處理
-
-```tsx
-// 使用 Server Actions
-'use server';
-
-export async function submitForm(formData: FormData) {
-  // 驗證
-  // 處理
-  // 重新驗證
-}
-```
-
-```tsx
-// 表單組件
-<form action={submitForm}>
-  <Input
-    name="email"
-    aria-describedby="email-error"
-    aria-invalid={hasError}
-  />
-  {hasError && (
-    <span id="email-error" role="alert" className="text-destructive text-sm">
-      {errorMessage}
-    </span>
-  )}
-</form>
-```
-
-### 5. Metadata
-
-```tsx
-// app/layout.tsx
-export const metadata: Metadata = {
-  title: {
-    template: '%s | Site Name',
-    default: 'Site Name',
+```typescript
+await sendMessage(conversationId, io, {
+  content: '**階段 N/3 完成：...**\n\n...\n\n✅ **繼續** - ...\n🔄 **重新生成** - ...',
+  stage: 'uiux_structure_complete' | 'uiux_animation_complete' | 'uiux_rwd_complete',
+  progress: { current: N, total: 3, step: '...' },
+  layoutHint: 'split',
+  richContent: {
+    type: 'code_preview',
+    data: {
+      pages,           // GeneratedComponent[]
+      components,      // GeneratedComponent[]
+      styles,          // string
+      tailwindConfig,  // 從 DesignSystem 生成
+      currentPhase,    // 'structure' | 'animation' | 'rwd'
+    },
   },
-  description: 'Site description',
-  openGraph: {
-    title: 'Site Name',
-    description: 'Site description',
-    url: 'https://example.com',
-    siteName: 'Site Name',
-    images: [
-      {
-        url: '/og-image.png',
-        width: 1200,
-        height: 630,
-      },
-    ],
-    type: 'website',
-  },
-};
+})
 ```
 
----
-
-## 自我檢查
-
-實作完成後，在提交前自我檢查：
-
-### 視覺品質
-- [ ] 沒有使用 emoji 作為 icon（使用 SVG）
-- [ ] 所有可點擊元素有 `cursor-pointer`
-- [ ] Hover 狀態提供清晰視覺反饋
-- [ ] Light/Dark mode 對比度足夠
-
-### 互動
-- [ ] 所有互動元素可鍵盤操作
-- [ ] Focus states 可見
-- [ ] Transitions smooth（150-300ms）
-
-### RWD
-- [ ] 375px（Mobile）正常顯示
-- [ ] 768px（Tablet）正常顯示
-- [ ] 1024px（Desktop）正常顯示
-- [ ] 1440px（Large）正常顯示
-- [ ] 沒有水平捲動
-
-### 無障礙
-- [ ] 所有圖片有 alt text
-- [ ] 表單輸入有 labels
-- [ ] 顏色不是唯一指標
-- [ ] `prefers-reduced-motion` 有處理
+用戶回覆解析（`handleContinueFlow`）：
+- `繼續` / `下一步` / `好` / `可以` / `Y` → `handleCodePhaseConfirm()`
+- `重新生成` / `重做` → `handleCodePhaseRedo()`
 
 ---
 
 ## 輸出
 
-產出檔案清單：
+最終產出保存到 BDD Session：
 
-```json
+```typescript
 {
-  "pages": [
-    "app/page.tsx",
-    "app/dashboard/page.tsx",
-    "app/[feature]/page.tsx"
-  ],
-  "components": [
-    "components/ui/Button.tsx",
-    "components/ui/Card.tsx",
-    "components/layout/Header.tsx"
-  ],
-  "styles": [
-    "styles/globals.css"
-  ]
+  generatedPages: GeneratedComponent[]     // { path: string, content: string }[]
+  generatedComponents: GeneratedComponent[] // { path: string, content: string }[]
+  generatedStyles: string                   // 全域 CSS
 }
 ```
-
----
-
-## 下一步
-
-Implementation 完成後，UIUX Skill 流程結束。產出的程式碼可供部署。

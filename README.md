@@ -12,7 +12,7 @@ Tellcraft 是一個 AI 驅動的自動化開發平台。用戶只需描述需求
 
 ## 當前開發進度
 
-- **狀態**：✅ Phase 1-9 + Server Actions + VPS Backend + 前端 Chat 串接 + 認證系統 + 訪客體驗改善 + 儀表板系統 + BDD Spec 完整修復 + 專案版本管理 + **UIUX 生成邏輯重構** + **Design Tier** + **專案自動命名**
+- **狀態**：✅ Phase 1-9 + Server Actions + VPS Backend + 前端 Chat 串接 + 認證系統 + 訪客體驗改善 + 儀表板系統 + BDD Spec 完整修復 + 專案版本管理 + **UIUX 生成邏輯重構** + **Design Tier** + **專案自動命名** + **PreviewPanel iframe 重構**
 - **釐清項目**：28 項全部解決
 - **Server Actions**：30+ 已實作
 - **詳情**：[`.clarify/overview.md`](.clarify/overview.md)
@@ -43,6 +43,29 @@ Tellcraft 是一個 AI 驅動的自動化開發平台。用戶只需描述需求
 - `generateRwd`：注入 Pre-Delivery Checklist（排版/互動/對比度/佈局/效能/無障礙自檢清單）
 - Vercel Web Interface Guidelines 精華：禁 transition-all、focus-visible 取代 focus、overscroll-behavior contain、min-w-0、img width/height、touch-action manipulation
 - `baseline-ui.md`：新增 Craft Foundations 表格 + 補充禁止清單 + Interaction/Animation/Layout 規則補充
+
+### UIUX Skill 全面審計與修復（2026-02-06）
+
+全面檢查 UIUX Skill 的文檔與程式碼一致性，修復 12 項問題：
+
+**Critical/High**：
+- **phase routing bug**：`handleContinueFlow` 缺少 `uiux_variant_selection`、`uiux_generating_variants`、`uiux_code_generation`、`uiux_complete` 四個 phase，導致變體選擇和代碼生成確認流程完全斷裂
+- **adjustDesignBrief 丟失資料**：brief 調整後 `domainKeywords` 和 `signature` 欄位丟失，LLM 也看不到這些欄位
+- **02-design-lab.md 完全過時**：描述的是不存在的本地文件系統工作流，重寫為 WebSocket + variant picker 正確流程
+- **03-implementation.md 完全過時**：缺少三階段生成說明、Tailwind v3 語法、Inter 字體範例、弱自檢清單，全部重寫
+
+**Medium**：
+- `generateRwd()` 接受 `designTier` 但未使用 — 加入 tier-aware RWD 提示
+- `richContent.type` union 缺少 `variant_picker`/`code_preview`，用 `as 'template_picker'` hack — 擴充 type 並移除 hack
+- Variant B prompt 只列 Card/List/Table 三種泛型佈局 — 改為 Anti-Default 風格
+- `parseGeneratedFiles()` 只處理 `.tsx` — 加入 `.ts` 支援（utility、types）
+- Fallback CSS 用 Tailwind v3 語法 — 更新為 `@import "tailwindcss"`
+- `generateStructure()` 無障礙規則重複 4 處 — 合併去重
+- 缺少 font loading 策略 — 加入 next/font 規則
+
+**Low**：
+- `skill.md` Phase 3 流程圖沒有三階段生成 — 更新
+- Design Memory 範例用 Inter 字體 — 修正
 
 ### UIUX 生成邏輯重構：5 變體選擇 + Design System（2026-02-05）
 
@@ -176,6 +199,24 @@ psql "$DATABASE_URL" -f tellcraft-backend/migrations/003_add_template_overrides.
 ```
 
 ---
+
+### PreviewPanel 改用 iframe 渲染後端 HTML（2026-02-06）
+
+將 PreviewPanel 從 React 組件直接渲染改回 iframe 模式，但這次是載入後端高品質 HTML（透過 `/api/templates/preview/{slug}` → VPS API）。
+
+**為什麼改回 iframe**：之前用 React 組件渲染，但那些組件是舊的 slate 灰階版本，且與後端重新設計的 HTML 脫節。改用 iframe 直接載入後端 HTML，確保用戶看到的就是最新設計。
+
+**編輯能力保留**：
+- 注入編輯橋接腳本（`EDIT_BRIDGE_SCRIPT`），透過 `postMessage` 雙向通訊
+- 自動標記可編輯元素（`h1-h6`, `p`, `button`, `a`, `span` 等），無需手動加 `data-editable`
+- 編輯結果存為 per-project overrides（只有該用戶看得到，其他人看原版）
+- PropertyEditor 側欄不變，支援文字、顏色、字體、間距等屬性編輯
+
+**核心改動**：
+- `PreviewPanel.tsx`：移除 `TemplateComponents` / `isSupportedTemplate` 引用，改用 `fetch` + `iframe srcdoc` 渲染
+- `app/components/templates/` 目錄現為死代碼（React 模板組件不再被引用）
+- 訊息前綴 `tc_` 避免與其他 postMessage 來源衝突
+- iframe `key` 不含 device，避免切換裝置時 iframe 重載
 
 ### 模板預覽重新設計（2026-02-06）
 

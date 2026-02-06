@@ -187,14 +187,21 @@ output_format:
 ┌─────────────────────────────────────────────────────────────────────┐
 │                    Phase 3: Implementation                           │
 │                                                                     │
-│    確定設計 ──▶ 產出 Next.js + Tailwind CSS 程式碼                   │
+│    三階段漸進式生成（每階段可預覽、確認或重做）：                       │
 │                                                                     │
-│    技術規範：                                                        │
-│    ├─ SSR 優先（Server Components）                                 │
-│    ├─ Tailwind CSS（utility-first）                                 │
-│    ├─ RWD（Mobile-first breakpoints）                               │
-│    ├─ motion/react（動畫）                                          │
-│    └─ Base UI / Radix（無障礙組件）                                 │
+│    Stage 1: Structure（結構）                                       │
+│    ├─ 靜態桌面版頁面 + 組件 + 全域樣式                               │
+│    └─ 用戶確認 → 繼續 / 重做                                        │
+│              ↓                                                      │
+│    Stage 2: Animation（動畫）                                       │
+│    ├─ 入場動畫、hover/tap、狀態轉換                                  │
+│    └─ 用戶確認 → 繼續 / 重做                                        │
+│              ↓                                                      │
+│    Stage 3: RWD（響應式設計）                                        │
+│    ├─ Mobile-first、漢堡選單、觸控優化                               │
+│    └─ 完成 → uiux_complete                                          │
+│                                                                     │
+│    技術：Next.js App Router + Tailwind CSS + motion/react            │
 │                                                                     │
 └─────────────────────────────────────────────────────────────────────┘
 ```
@@ -261,9 +268,9 @@ output_format:
 - **Text**: #0F172A
 
 ## Typography
-- **Heading**: Inter, font-bold
-- **Body**: Inter, font-normal
-- **Mono**: Fira Code
+- **Heading**: DM Sans, font-bold
+- **Body**: DM Sans, font-normal
+- **Mono**: JetBrains Mono
 
 ## Spacing Scale
 - Base: 4px

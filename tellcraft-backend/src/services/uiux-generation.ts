@@ -441,12 +441,12 @@ const VARIANT_AXES = {
     id: 'B' as const,
     name: 'Layout Model',
     axis: 'layout' as const,
-    description: '探索不同佈局模型：Card/List/Table',
-    prompt: `探索不同的佈局呈現方式：
-- 卡片式佈局（Card Grid）
-- 列表式佈局（List View）
-- 表格式佈局（Table View）
-選擇最適合數據特性的佈局模型`,
+    description: '探索根本不同的空間組織方式',
+    prompt: `探索根本不同的空間組織方式（不只是 Card/List/Table 三選一）：
+- 思考數據的本質特性最適合什麼呈現方式
+- 考慮非對稱佈局、分割面板、timeline、地圖式等非常規方案
+- 不要從「常見佈局」出發，而是從「這些數據怎麼被理解」出發
+- 佈局本身就是設計決策，不是預設模板的選擇`,
   },
   C: {
     id: 'C' as const,
@@ -541,7 +541,7 @@ ${Object.values(axes).map(v => `- **${v.id}. ${v.name}**：${v.description}\n  $
           "fontFamily": {}
         },
         "typography": {
-          "fontFamily": "Inter, system-ui, sans-serif",
+          "fontFamily": "DM Sans, system-ui, sans-serif",
           "scale": { "xs": "0.75rem", "sm": "0.875rem", "base": "1rem", "lg": "1.125rem", "xl": "1.25rem" }
         },
         "colorPalette": {
@@ -789,15 +789,17 @@ function parseGeneratedFiles(content: string, designSystem: DesignSystem): {
   components: GeneratedComponent[]
   styles: string
 } {
-  const fileRegex = /```tsx:([^\n]+)\n([\s\S]*?)```/g
+  const tsxRegex = /```tsx:([^\n]+)\n([\s\S]*?)```/g
+  const tsRegex = /```ts:([^\n]+)\n([\s\S]*?)```/g
   const cssRegex = /```css:([^\n]+)\n([\s\S]*?)```/g
 
   const pages: GeneratedComponent[] = []
   const components: GeneratedComponent[] = []
   let styles = ''
 
+  // 解析 .tsx 檔案
   let match
-  while ((match = fileRegex.exec(content)) !== null) {
+  while ((match = tsxRegex.exec(content)) !== null) {
     const path = match[1].trim()
     const fileContent = match[2].trim()
 
@@ -812,6 +814,26 @@ function parseGeneratedFiles(content: string, designSystem: DesignSystem): {
         path,
         content: fileContent,
         description: `組件: ${path.split('/').pop()?.replace('.tsx', '')}`,
+      })
+    }
+  }
+
+  // 解析 .ts 檔案（utility、types、configs）
+  while ((match = tsRegex.exec(content)) !== null) {
+    const path = match[1].trim()
+    const fileContent = match[2].trim()
+
+    if (path.includes('/page.ts')) {
+      pages.push({
+        path,
+        content: fileContent,
+        description: `頁面: ${path.split('/').slice(-2, -1)[0]}`,
+      })
+    } else {
+      components.push({
+        path,
+        content: fileContent,
+        description: `工具: ${path.split('/').pop()?.replace('.ts', '')}`,
       })
     }
   }
@@ -835,32 +857,14 @@ function parseGeneratedFiles(content: string, designSystem: DesignSystem): {
 
   // 如果還是沒有，生成一個基礎的 globals.css
   if (!styles) {
-    styles = `@tailwind base;
-@tailwind components;
-@tailwind utilities;
+    styles = `@import "tailwindcss";
 
 ${designSystem.cssVariables}
 
-@layer base {
-  body {
-    font-family: var(--font-family);
-    background-color: var(--color-background);
-    color: var(--color-foreground);
-  }
-}
-
-@layer components {
-  .btn-primary {
-    @apply bg-[var(--color-primary)] text-white px-4 py-2 rounded-[var(--radius-md)] transition-opacity hover:opacity-90;
-  }
-
-  .btn-secondary {
-    @apply bg-[var(--color-secondary)] text-white px-4 py-2 rounded-[var(--radius-md)] transition-opacity hover:opacity-90;
-  }
-
-  .card {
-    @apply bg-white border border-[var(--color-border)] rounded-[var(--radius-lg)] p-4;
-  }
+body {
+  font-family: var(--font-family);
+  background-color: var(--color-background);
+  color: var(--color-foreground);
 }`
   }
 
@@ -906,7 +910,6 @@ ${getStructureConstraints(tier)}
 
 ## 組件規則
 - 有鍵盤/focus 行為的組件使用 Radix 或 React Aria
-- icon-only buttons 必須有 aria-label
 - 破壞性操作用 AlertDialog 確認
 - loading state 用 skeleton
 
@@ -930,6 +933,8 @@ ${getStructureConstraints(tier)}
 - 不跳過 heading level（h1→h2→h3）
 - 列表用 ul/ol + li
 - 表格的表頭用 th
+- layout.tsx 的 <html> 必須有 lang 屬性（如 lang="zh-TW" 或 lang="en"）
+- 頁面第一個元素必須是 Skip Link：<a href="#main" className="sr-only focus:not-sr-only ...">跳到主要內容</a>，main 內容區加 id="main"
 
 ### Forms（High）
 - 錯誤訊息用 aria-describedby 關聯到欄位
@@ -942,14 +947,28 @@ ${getStructureConstraints(tier)}
 - 關閉 dialog 時 restore focus 到 trigger
 - dialog 開啟時設 initial focus
 
+### Dynamic Content（High）
+- 動態狀態訊息（toast、表單提交結果、載入完成）必須用 aria-live="polite" 或 role="status"
+- 錯誤訊息用 role="alert"
+
 ## Metadata 規則（Next.js）
 - 每個 page.tsx 必須 export metadata（title + description）
 - root layout.tsx 必須設 default metadata 作為 fallback
-- html 標籤設定 lang 屬性
 - 使用 Next.js Metadata API（export const metadata 或 generateMetadata）
 - title 格式統一，例如「頁面名稱 | 產品名稱」
 - 不要在 layout 和 page 重複定義相同的 metadata
 - 不需要處理 OG/canonical/structured data（部署時再加）
+
+## Font Loading 規則
+- 必須使用 next/font 載入字體（Google Fonts 或 local）
+- 在 layout.tsx import，透過 className 或 CSS variable 全局應用
+- 禁止使用 <link> 標籤或 @import 載入 Google Fonts（會阻塞渲染）
+- 範例：
+\`\`\`tsx
+import { DM_Sans } from 'next/font/google'
+const font = DM_Sans({ subsets: ['latin'], variable: '--font-sans' })
+<html className={font.variable}>
+\`\`\`
 
 ## Professional UI 規則（常被忽略但影響品質的細節）
 
@@ -960,9 +979,7 @@ ${getStructureConstraints(tier)}
 
 ### 互動與游標
 - 所有可點擊元素必須有 cursor-pointer（按鈕、卡片、連結）
-- hover 狀態用 color/opacity transition，不要用 scale transform（會 shift layout）
-- transition 統一用 transition-colors duration-200
-- 禁止 transition-all — 必須列出具體屬性（transition-colors、transition-opacity、transition-transform）
+- 本階段不加 transition/animation — 動畫階段會處理。但結構要正確標記互動元素
 - Focus ring 用 focus-visible: 不要用 focus:（避免滑鼠點擊也出 ring）
 - Modal、Drawer、Sheet 必須加 overscroll-behavior: contain（防止背景滾動穿透）
 
@@ -979,11 +996,7 @@ ${getStructureConstraints(tier)}
 - Flex 子元素要加 min-w-0 — 否則 truncate/line-clamp 在 flex 容器裡不生效
 - <img> 必須有 explicit width + height 屬性（或用 next/image 的 fill）防止 CLS
 
-### 無障礙基本功
-- layout.tsx 的 <html> 必須有 lang 屬性（如 lang="zh-TW" 或 lang="en"）
-- 頁面第一個元素必須是 Skip Link：<a href="#main" className="sr-only focus:not-sr-only ...">跳到主要內容</a>，main 內容區加 id="main"
-- Heading 層級不能跳：h1 → h2 → h3，禁止 h1 → h3 或頁面沒有 h1
-- 動態狀態訊息（toast、表單提交結果、載入完成）必須用 aria-live="polite" 或 role="status"，錯誤用 role="alert"`
+`
 
   const userMessage = `請生成以下頁面和共用組件的靜態桌面版：
 
@@ -1093,6 +1106,11 @@ ${getAnimationConstraints(tier)}
 - 禁止大面積或連續 blur 動畫
 - 優先用 opacity + translate 取代 blur
 
+## Transition 規則
+- hover 狀態用 color/opacity transition，不要用 scale transform（會 shift layout）
+- transition 統一用 transition-colors duration-200
+- 禁止 transition-all — 必須列出具體屬性（transition-colors、transition-opacity、transition-transform）
+
 ## 禁止
 - 不要修改現有的結構和樣式
 - 不要添加響應式設計
@@ -1156,9 +1174,24 @@ export async function generateRwd(
   designTier?: DesignTier,
   trackingContext?: LlmTrackingContext
 ): Promise<GenerationResult> {
+  const tier = designTier || 'functional'
+
+  const rwdTierHint = tier === 'creative'
+    ? `## Design Tier: Creative（創意型 RWD）
+- 移動端可以保留表現力（漸層背景、獨特字體仍然適用）
+- 斷點切換可以有設計巧思（不只是堆疊，可以重新編排佈局）
+- 移動端 hero section 可以有不同的視覺表現
+- 仍然必須遵守觸控目標 44px 和可讀性規則`
+    : `## Design Tier: Functional（功能型 RWD）
+- 移動端注重資訊效率和操作便利
+- 斷點切換以堆疊和簡化為主
+- 保持乾淨、功能優先的移動端體驗`
+
   const systemPrompt = `你是一位專業的響應式設計專家。在現有代碼基礎上添加完整的響應式設計。
 
 ${buildDesignSystemPrompt(designSystem)}
+
+${rwdTierHint}
 
 ## 本階段任務：響應式設計（RWD）
 這是第三階段，需要：
@@ -1703,6 +1736,8 @@ ${productType}
 - 參考分析：${currentBrief.referenceAnalysis}
 - 專業建議：${currentBrief.professionalRecommendations.map((r, i) => `${i + 1}. ${r}`).join('\n')}
 - 設計模式：${currentBrief.recommendedTier === 'creative' ? '創意型' : '功能型'}
+${currentBrief.domainKeywords?.length ? `- Domain 關鍵概念：${currentBrief.domainKeywords.join('、')}` : ''}
+${currentBrief.signature ? `- Signature Element：${currentBrief.signature}` : ''}
 
 ## 規則
 1. 只修改用戶要求調整的部分，保留其他不變
@@ -1727,6 +1762,8 @@ ${productType}
   "professionalRecommendations": ["更新後的建議1", "建議2", "建議3"],
   "recommendedTier": "functional 或 creative（根據用戶調整意見決定）",
   "tierReason": "推薦原因",
+  "domainKeywords": ["保留或更新的 domain 關鍵概念"],
+  "signature": "保留或更新的 signature element 描述",
   "displayText": "更新後的完整 markdown 展示文本（包含 tier 說明）"
 }
 \`\`\``
@@ -1772,6 +1809,8 @@ ${productType}
       sourceType: currentBrief.sourceType,
       recommendedTier,
       tierReason: parsed.tierReason || currentBrief.tierReason,
+      domainKeywords: parsed.domainKeywords || currentBrief.domainKeywords,
+      signature: parsed.signature || currentBrief.signature,
     }
 
     return {

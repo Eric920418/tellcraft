@@ -17,7 +17,7 @@ export const db = {
     admin: {
       createUser: async (options: { email: string; email_confirm?: boolean; user_metadata?: Record<string, unknown> }) => {
         const id = crypto.randomUUID()
-        const { data, error } = await from('users').insert({
+        const { error } = await from('users').insert({
           id,
           email: options.email,
           plan: 'free',

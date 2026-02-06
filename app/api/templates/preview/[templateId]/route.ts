@@ -206,7 +206,7 @@ const TEMPLATE_PREVIEWS: Record<string, string> = {
     <div class="bg-gray-900 p-6 rounded-xl border border-gray-800 mb-8">
       <h2 class="text-lg font-semibold mb-4">流量監控</h2>
       <div class="h-48 flex items-end justify-between gap-1 px-4">
-        ${Array.from({length: 24}, (_, i) => {
+        ${Array.from({length: 24}, (_) => {
           const height = 20 + Math.random() * 70
           return `<div class="w-full bg-gradient-to-t from-violet-600 to-purple-400 rounded-t opacity-80" style="height: ${height}%"></div>`
         }).join('')}

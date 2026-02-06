@@ -107,13 +107,6 @@ export default function UiuxChatSection({
     loadTemplate()
   }, [selectedTemplateId])
 
-  // 處理模板選擇
-  const handleTemplateSelect = useCallback((templateId: string) => {
-    setSelectedTemplateId(templateId)
-    // 發送選擇訊息給 AI
-    onSendMessage(`我選擇「${templateId}」這個模板`)
-  }, [onSendMessage])
-
   // 處理模板預覽
   const handleTemplatePreview = useCallback((templateId: string) => {
     setSelectedTemplateId(templateId)
