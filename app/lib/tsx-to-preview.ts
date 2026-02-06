@@ -291,6 +291,12 @@ function stripDynamicAttributes(html: string): string {
         continue
       }
 
+      // JSX spread: {...props} — 整個跳過
+      if (html[i] === '{') {
+        i = skipBracedExpression(html, i)
+        continue
+      }
+
       // 屬性開始：找屬性名
       const attrStart = i
       while (i < html.length && !/[\s=/>]/.test(html[i])) {
@@ -368,10 +374,10 @@ function stripDynamicAttributes(html: string): string {
 }
 
 /**
- * 判斷是否為 React 專用屬性（在 HTML 中無意義）
+ * 判斷是否為 React/Motion 專用屬性（在 HTML 中無意義，應移除）
  */
 function isReactOnlyAttr(name: string): boolean {
-  return /^(key|ref|dangerouslySetInnerHTML|suppressHydrationWarning)$/.test(name)
+  return /^(key|ref|dangerouslySetInnerHTML|suppressHydrationWarning|initial|animate|exit|whileHover|whileTap|whileFocus|whileInView|whileDrag|variants|transition|layout|layoutId|onAnimationStart|onAnimationComplete|enableHover)$/.test(name)
 }
 
 /**
@@ -685,8 +691,14 @@ function inlineComponent(jsx: string, compName: string, compJsx: string): string
       const rawChildren = jsx.substring(j, k)
 
       if (isComplexBody) {
-        // 複雜組件（children.map 等）→ 直接保留 children
-        result += rawChildren
+        // 複雜組件（children.map 等）→ 用 <div> 包裝保留原始 className
+        const propsStr = jsx.substring(pos + openTag.length, j - 1)
+        const classMatch = propsStr.match(/className="([^"]*)"/)
+        if (classMatch) {
+          result += `<div className="${classMatch[1]}">${rawChildren}</div>`
+        } else {
+          result += rawChildren
+        }
       } else {
         // 簡單包裝器 → 替換 {children}
         let body = compJsx.replace(/\{children\}/g, rawChildren)
