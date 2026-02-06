@@ -123,6 +123,131 @@ function stripUnresolvedComponents(jsx: string): string {
 }
 
 /**
+ * 深度計數清除 tag 中所有動態屬性 attr={...}
+ * 保留 attr="string" 和 attr='string' 屬性
+ * 正確處理 aria-*, data-*, on*, 巢狀 {} 等
+ */
+function stripDynamicAttributes(html: string): string {
+  let result = ''
+  let i = 0
+
+  while (i < html.length) {
+    // 非 tag 區域 — 直接複製
+    if (html[i] !== '<' || html[i + 1] === '/') {
+      result += html[i]
+      i++
+      continue
+    }
+
+    // 進入 opening tag: <tagName attr1="..." attr2={...} >
+    result += '<'
+    i++ // skip <
+
+    // 複製 tag name
+    while (i < html.length && !/[\s/>]/.test(html[i])) {
+      result += html[i]
+      i++
+    }
+
+    // 處理屬性區域直到 > 或 />
+    while (i < html.length && html[i] !== '>') {
+      // self-closing />
+      if (html[i] === '/' && html[i + 1] === '>') {
+        result += '/>'
+        i += 2
+        break
+      }
+
+      // 空白 — 累積但先不輸出（只在保留的屬性前輸出）
+      if (/\s/.test(html[i])) {
+        i++
+        continue
+      }
+
+      // 屬性開始：找屬性名
+      const attrStart = i
+      while (i < html.length && !/[\s=/>]/.test(html[i])) {
+        i++
+      }
+      const attrName = html.substring(attrStart, i)
+
+      // 跳過空白
+      while (i < html.length && /\s/.test(html[i])) i++
+
+      // 沒有 = ：boolean 屬性
+      if (html[i] !== '=') {
+        // 保留純 HTML boolean 屬性（disabled, checked 等），跳過 React 專用的
+        if (!isReactOnlyAttr(attrName)) {
+          result += ' ' + attrName
+        }
+        continue
+      }
+
+      i++ // skip =
+      while (i < html.length && /\s/.test(html[i])) i++ // skip whitespace after =
+
+      // 值是字串 "..." 或 '...'
+      if (html[i] === '"' || html[i] === "'") {
+        const quote = html[i]
+        let valueEnd = i + 1
+        while (valueEnd < html.length && html[valueEnd] !== quote) {
+          if (html[valueEnd] === '\\') valueEnd++
+          valueEnd++
+        }
+        valueEnd++ // include closing quote
+
+        const value = html.substring(i, valueEnd)
+        if (!isReactOnlyAttr(attrName)) {
+          result += ' ' + attrName + '=' + value
+        }
+        i = valueEnd
+        continue
+      }
+
+      // 值是 JSX 表達式 {...} — 用深度計數跳過
+      if (html[i] === '{') {
+        let depth = 1
+        i++ // skip {
+        while (i < html.length && depth > 0) {
+          if (html[i] === '{') depth++
+          else if (html[i] === '}') depth--
+          else if (html[i] === '"' || html[i] === "'" || html[i] === '`') {
+            const q = html[i]
+            i++
+            while (i < html.length && html[i] !== q) {
+              if (html[i] === '\\') i++
+              i++
+            }
+          }
+          if (depth > 0) i++
+        }
+        if (i < html.length) i++ // skip closing }
+        // 動態屬性 — 不輸出（跳過）
+        continue
+      }
+
+      // 其他值（bare value）— 跳過
+      while (i < html.length && !/[\s>]/.test(html[i])) i++
+    }
+
+    // 輸出 tag 結尾 >
+    if (i < html.length && html[i] === '>') {
+      result += '>'
+      i++
+    }
+  }
+
+  return result
+}
+
+/**
+ * 判斷是否為 React 專用屬性（在 HTML 中無意義）
+ */
+function isReactOnlyAttr(name: string): boolean {
+  return /^(key|ref|dangerouslySetInnerHTML|suppressHydrationWarning)$/.test(name)
+}
+
+/**
  * 深度計數式 JSX 表達式移除器
  * 正確處理嵌套 {}, map(), 三元運算、template literals
  *
@@ -293,15 +418,7 @@ function convertJsxSyntax(jsx: string): string {
   html = html.replace(/<motion\.(\w+)/g, '<$1')
   html = html.replace(/<\/motion\.(\w+)>/g, '</$1>')
 
-  // 3. 移除 motion/React/event 屬性
-  // 先處理屬性中的 {{...}} (多行)
-  html = html.replace(/\s+(initial|animate|exit|transition|whileHover|whileTap|whileInView|viewport|variants|layout|layoutId|onAnimationComplete|onClick|onChange|onSubmit|onBlur|onFocus|onKeyDown|onKeyUp|onMouseEnter|onMouseLeave|key|ref|dangerouslySetInnerHTML)=\{\{[\s\S]*?\}\}/g, '')
-  // 再處理 ={...} (深度計數)
-  html = html.replace(/\s+(initial|animate|exit|transition|whileHover|whileTap|whileInView|viewport|variants|layout|layoutId|onAnimationComplete|onClick|onChange|onSubmit|onBlur|onFocus|onKeyDown|onKeyUp|onMouseEnter|onMouseLeave|key|ref|dangerouslySetInnerHTML)=\{[^}]*\}/g, '')
-  // 再處理 ="..."
-  html = html.replace(/\s+(initial|animate|exit|transition|whileHover|whileTap|whileInView|viewport|variants|layout|layoutId|onAnimationComplete)="[^"]*"/g, '')
-
-  // 4. style={{ }} → inline style
+  // 3. style={{ }} → inline style（在清除動態屬性之前保留 style）
   html = html.replace(/style=\{\{([\s\S]*?)\}\}/g, (_match, styleContent: string) => {
     const cssString = styleContent
       .split(',')
@@ -319,16 +436,18 @@ function convertJsxSyntax(jsx: string): string {
     return `style="${cssString}"`
   })
 
-  // 5. 移除 JSX 註解
+  // 4. 移除 JSX 註解
   html = html.replace(/\{\/\*[\s\S]*?\*\/\}/g, '')
 
-  // 6. 移除動態屬性值 prop={expression}
-  html = html.replace(/\s+\w+=\{[^}]*\}/g, () => '')
+  // 5. 深度計數清除所有動態屬性 attr={...}
+  //    保留 class="..." style="..." 等字串屬性
+  //    處理 aria-*, data-*, on*, motion 屬性、巢狀 {} 表達式
+  html = stripDynamicAttributes(html)
 
-  // 7. 深度計數式移除所有 tag 內容區域的 {...}
+  // 6. 深度計數式移除所有 tag 內容區域的 {...}
   html = stripJsxExpressions(html)
 
-  // 8. SVG camelCase → kebab-case
+  // 7. SVG camelCase → kebab-case
   html = html.replace(/strokeWidth=/g, 'stroke-width=')
   html = html.replace(/strokeLinecap=/g, 'stroke-linecap=')
   html = html.replace(/strokeLinejoin=/g, 'stroke-linejoin=')
@@ -336,16 +455,16 @@ function convertJsxSyntax(jsx: string): string {
   html = html.replace(/clipRule=/g, 'clip-rule=')
   html = html.replace(/viewBox=/g, 'viewBox=')
 
-  // 9. htmlFor → for
+  // 8. htmlFor → for
   html = html.replace(/htmlFor=/g, 'for=')
 
-  // 10. 移除 TypeScript as
+  // 9. 移除 TypeScript as
   html = html.replace(/\s+as\s+\w+/g, '')
 
-  // 11. 最終文字內容淨化 — 移除所有 JS 語法殘留
+  // 10. 最終文字內容淨化 — 移除所有 JS 語法殘留
   html = sanitizeTextContent(html)
 
-  // 12. 清理多餘空白和空行
+  // 11. 清理多餘空白和空行
   html = html.replace(/\n\s*\n\s*\n/g, '\n')
   html = html.replace(/\s{2,}/g, ' ')
 
