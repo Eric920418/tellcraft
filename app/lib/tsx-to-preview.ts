@@ -69,11 +69,13 @@ function extractReturnJsx(content: string): string {
 }
 
 /**
- * 從 props 表達式中提取值
+ * 從 props 表達式中提取靜態字串值
+ * 支援 attr="value" / attr='value' / attr={"value"} / attr={'value'}
+ * 支援 aria-*, data-* 等連字號屬性名
  */
 function extractPropsFromUsage(usage: string): Record<string, string> {
   const props: Record<string, string> = {}
-  const propRegex = /(\w+)=(?:"([^"]*)"|'([^']*)'|\{[`'"]([^`'"]*)[`'"]\})/g
+  const propRegex = /([\w-]+)=(?:"([^"]*)"|'([^']*)'|\{[`'"]([^`'"]*)[`'"]\})/g
   let match
   while ((match = propRegex.exec(usage)) !== null) {
     props[match[1]] = match[2] || match[3] || match[4] || ''
@@ -83,14 +85,37 @@ function extractPropsFromUsage(usage: string): Record<string, string> {
 
 /**
  * 在組件的 JSX 中替換 prop 引用
+ * 屬性值位置 (=) 加引號，文字內容位置不加
  */
 function substituteProps(jsx: string, props: Record<string, string>): string {
   let result = jsx
   for (const [key, value] of Object.entries(props)) {
+    // 屬性值：={propName} → ="value" （保留引號讓 stripDynamicAttributes 不會刪除）
+    result = result.replace(new RegExp(`=\\{${key}\\}`, 'g'), `="${value}"`)
+    result = result.replace(new RegExp(`=\\{props\\.${key}\\}`, 'g'), `="${value}"`)
+    // 文字內容：{propName} → value（無引號）
     result = result.replace(new RegExp(`\\{${key}\\}`, 'g'), value)
     result = result.replace(new RegExp(`\\{props\\.${key}\\}`, 'g'), value)
   }
   return result
+}
+
+/**
+ * 從組件函數簽名提取預設 prop 值
+ * e.g., function Comp({ className = 'card', type = 'submit' }) → { className: 'card', type: 'submit' }
+ */
+function extractDefaultProps(content: string): Record<string, string> {
+  const defaults: Record<string, string> = {}
+  // 匹配解構參數：({ key1 = 'val1', key2 = "val2" })
+  const paramMatch = content.match(/\(\s*\{([^}]*)\}/)
+  if (!paramMatch) return defaults
+  const params = paramMatch[1]
+  const defaultRegex = /(\w+)\s*=\s*['"]([^'"]*)['"]/g
+  let match
+  while ((match = defaultRegex.exec(params)) !== null) {
+    defaults[match[1]] = match[2]
+  }
+  return defaults
 }
 
 /**
@@ -608,7 +633,7 @@ function convertJsxSyntax(jsx: string): string {
  * 內聯組件：用深度計數找到 <CompName ...> 和 </CompName>，
  * 將組件體替換進去。處理 self-closing 和 with-children 兩種情況。
  */
-function inlineComponent(jsx: string, compName: string, compJsx: string): string {
+function inlineComponent(jsx: string, compName: string, compJsx: string, defaults: Record<string, string> = {}): string {
   let result = ''
   let i = 0
   const openTag = `<${compName}`
@@ -643,10 +668,19 @@ function inlineComponent(jsx: string, compName: string, compJsx: string): string
 
     // Self-closing: <CompName ... />
     if (j < jsx.length && jsx[j] === '/' && jsx[j + 1] === '>') {
-      // 提取 props 字串
       const propsStr = jsx.substring(pos + openTag.length, j).trim()
-      const props = propsStr ? extractPropsFromUsage(propsStr) : {}
-      result += substituteProps(compJsx, props)
+      const explicitProps = propsStr ? extractPropsFromUsage(propsStr) : {}
+      const mergedProps = { ...defaults, ...explicitProps }
+      let body = substituteProps(compJsx, mergedProps)
+      // 用顯式字串 props 替換 {...spread}（排除已通過 substituteProps 處理的）
+      const bodyPropNames = new Set([...compJsx.matchAll(/\{(\w+)\}/g)].map(m => m[1]))
+      body = body.replace(/\{\.\.\.(\w+)\}/g, () =>
+        Object.entries(explicitProps)
+          .filter(([k]) => k !== 'children' && !bodyPropNames.has(k))
+          .map(([k, v]) => `${k}="${v}"`)
+          .join(' ')
+      )
+      result += body
       i = j + 2
       continue
     }
@@ -691,17 +725,30 @@ function inlineComponent(jsx: string, compName: string, compJsx: string): string
       const rawChildren = jsx.substring(j, k)
 
       if (isComplexBody) {
-        // 複雜組件（children.map 等）→ 用 <div> 包裝保留原始 className
+        // 複雜組件（children.map 等）→ 用 <div> 包裝保留 className
         const propsStr = jsx.substring(pos + openTag.length, j - 1)
         const classMatch = propsStr.match(/className="([^"]*)"/)
-        if (classMatch) {
-          result += `<div className="${classMatch[1]}">${rawChildren}</div>`
+        const className = classMatch ? classMatch[1] : (defaults.className || '')
+        if (className) {
+          result += `<div className="${className}">${rawChildren}</div>`
         } else {
           result += rawChildren
         }
       } else {
-        // 簡單包裝器 → 替換 {children}
-        let body = compJsx.replace(/\{children\}/g, rawChildren)
+        // 簡單包裝器 → 替換 props + {children}
+        const propsStr = jsx.substring(pos + openTag.length, j - 1)
+        const explicitProps = propsStr ? extractPropsFromUsage(propsStr) : {}
+        const mergedProps = { ...defaults, ...explicitProps }
+        let body = substituteProps(compJsx, mergedProps)
+        // 用顯式字串 props 替換 {...spread}
+        const bodyPropNames = new Set([...compJsx.matchAll(/\{(\w+)\}/g)].map(m => m[1]))
+        body = body.replace(/\{\.\.\.(\w+)\}/g, () =>
+          Object.entries(explicitProps)
+            .filter(([k]) => k !== 'children' && !bodyPropNames.has(k))
+            .map(([k, v]) => `${k}="${v}"`)
+            .join(' ')
+        )
+        body = body.replace(/\{children\}/g, rawChildren)
         body = body.replace(/\{props\.children\}/g, rawChildren)
         result += body
       }
@@ -727,14 +774,16 @@ export function convertToPreviewHtml(
   styles: string,
   tailwindConfig?: string
 ): string {
-  // 1. 建立 component map: name → JSX
+  // 1. 建立 component map: name → JSX + 預設 props
   const componentMap = new Map<string, string>()
+  const componentDefaults = new Map<string, Record<string, string>>()
   for (const comp of components) {
     const name = extractComponentName(comp.content)
     if (name) {
       const jsx = extractReturnJsx(comp.content)
       if (jsx) {
         componentMap.set(name, jsx)
+        componentDefaults.set(name, extractDefaultProps(comp.content))
       }
     }
   }
@@ -755,12 +804,12 @@ export function convertToPreviewHtml(
     return buildFallbackHtml('無法解析頁面結構', styles)
   }
 
-  // 4. 內聯組件引用（多輪處理巢狀組件）
+  // 4. 內聯組件引用（多輪處理巢狀組件，帶預設 props）
   for (let pass = 0; pass < 3; pass++) {
     let changed = false
     for (const [compName, compJsx] of componentMap) {
       const before = pageJsx
-      pageJsx = inlineComponent(pageJsx, compName, compJsx)
+      pageJsx = inlineComponent(pageJsx, compName, compJsx, componentDefaults.get(compName) || {})
       if (pageJsx !== before) changed = true
     }
     if (!changed) break
@@ -777,7 +826,7 @@ export function convertToPreviewHtml(
       layoutJsx = layoutJsx.replace(/\{props\.children\}/g, pageJsx)
 
       for (const [compName, compJsx] of componentMap) {
-        layoutJsx = inlineComponent(layoutJsx, compName, compJsx)
+        layoutJsx = inlineComponent(layoutJsx, compName, compJsx, componentDefaults.get(compName) || {})
       }
 
       pageJsx = layoutJsx
@@ -800,8 +849,8 @@ export function convertToPreviewHtml(
     .replace(/@tailwind\s+\w+;?/g, '')
     .replace(/@theme\s*\{([\s\S]*?)\}/g, ':root {$1}')
 
-  // 9. 字體
-  const fontImports = extractFontInfo(mainPage.content, components)
+  // 9. 字體（也檢查 CSS 中的 font-family 宣告）
+  const fontImports = extractFontInfo(mainPage.content, components, styles)
 
   // 10. 提取 Tailwind CDN 配置（從完整 TS config 中提取 theme.extend）
   const tailwindCdnConfig = tailwindConfig ? extractTailwindCdnConfig(tailwindConfig) : ''
@@ -836,8 +885,9 @@ export function convertToPreviewHtml(
 
 /**
  * 從生成的程式碼提取字體資訊
+ * 優先從 next/font/google import 提取，fallback 到 CSS font-family 宣告
  */
-function extractFontInfo(mainContent: string, components: GeneratedFile[]): string {
+function extractFontInfo(mainContent: string, components: GeneratedFile[], styles?: string): string {
   const allContent = mainContent + components.map(c => c.content).join('\n')
 
   const fontMatches = allContent.matchAll(/import\s*\{\s*(\w+(?:\s*,\s*\w+)*)\s*\}\s*from\s*['"]next\/font\/google['"]/g)
@@ -848,6 +898,14 @@ function extractFontInfo(mainContent: string, components: GeneratedFile[]): stri
     for (const font of fontNames) {
       const urlFont = font.replace(/([a-z])([A-Z])/g, '$1+$2').replace(/_/g, '+')
       fonts.push(urlFont)
+    }
+  }
+
+  // Fallback: 從 CSS 的 font-family 宣告中提取字體名
+  if (fonts.length === 0 && styles) {
+    const cssFontMatch = styles.match(/font-family:\s*'([^']+)'/)
+    if (cssFontMatch) {
+      fonts.push(cssFontMatch[1].replace(/\s+/g, '+'))
     }
   }
 
