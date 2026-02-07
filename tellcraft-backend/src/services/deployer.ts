@@ -441,7 +441,14 @@ export default function RootLayout({
     for (const varName of fontVarNames) {
       const googleName = FONT_LOOKUP[varName] || 'Geist' // fallback 安全字體
       imports.push(`import { ${googleName} } from 'next/font/google'`)
-      exports.push(`export const ${varName} = ${googleName}({ subsets: ['latin'], display: 'swap' })`)
+      // 檢查代碼是否使用了 .variable（CSS variable 模式）
+      const usesVariable = allContent.includes(`${varName}.variable`)
+      const cssVarName = `--font-${varName.replace(/([A-Z])/g, '-$1').toLowerCase()}`
+      if (usesVariable) {
+        exports.push(`export const ${varName} = ${googleName}({ subsets: ['latin'], display: 'swap', variable: '${cssVarName}' })`)
+      } else {
+        exports.push(`export const ${varName} = ${googleName}({ subsets: ['latin'], display: 'swap' })`)
+      }
     }
 
     // 去重 import（多個變數可能 fallback 到同一字體）
@@ -452,26 +459,28 @@ export default function RootLayout({
     })
   }
 
-  // 合併所有 pages 內容到 GeneratedUI 組件
-  // 主頁面用第一個 page，其他 pages 作為額外組件
-  const mainPage = code.pages[0]
+  // 頁面處理 — 找出首頁和其他路由頁面
+  // 首頁：path 為 app/page.tsx、page.tsx 或 home.tsx 等
+  const mainPageIndex = code.pages.findIndex(p => {
+    const clean = p.path.replace(/^(app\/|pages\/)?/, '')
+    return clean === 'page.tsx' || clean === 'page.ts' || clean === 'index.tsx' || clean === 'index.ts'
+  })
+  const mainPage = mainPageIndex >= 0 ? code.pages[mainPageIndex] : code.pages[0]
+  const otherPages = code.pages.filter((_, i) => i !== (mainPageIndex >= 0 ? mainPageIndex : 0))
 
   if (mainPage) {
-    // 直接用第一個 page 作為主頁面
     files.push({
       file: 'app/page.tsx',
       data: mainPage.content,
     })
 
-    // 其他 pages 放到各自路徑
-    for (let i = 1; i < code.pages.length; i++) {
-      const page = code.pages[i]
+    for (const page of otherPages) {
       let pagePath = page.path
-        .replace(/^(app\/|pages\/)?/, '')     // 去掉 app/ 或 pages/ 前綴
-        .replace(/\/page\.(tsx|ts|jsx|js)$/, '') // 去掉尾部 /page.tsx
-        .replace(/\.(tsx|ts|jsx|js)$/, '')       // 去掉副檔名
-      // 如果 path 就是 page (首頁)，跳過（已由 mainPage 處理）
-      if (!pagePath || pagePath === 'page') continue
+        .replace(/^(app\/|pages\/)?/, '')        // 去掉 app/ 或 pages/ 前綴
+        .replace(/\/page\.(tsx|ts|jsx|js)$/, '')  // 去掉尾部 /page.tsx
+        .replace(/\.(tsx|ts|jsx|js)$/, '')        // 去掉副檔名
+      // 如果 path 就是 page / index（首頁），跳過
+      if (!pagePath || pagePath === 'page' || pagePath === 'index') continue
       files.push({
         file: `app/${pagePath}/page.tsx`,
         data: page.content,
