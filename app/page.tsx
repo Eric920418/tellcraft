@@ -2070,8 +2070,10 @@ function ChatSection({
       const componentsData = (codePreviewData.components || []) as { path: string; content: string; description: string }[]
       const stylesData = (codePreviewData.styles || '') as string
       const tailwindConfigData = (codePreviewData.tailwindConfig || '') as string
-      const deviceWidth = getDeviceWidth(codePreviewDevice)
-      const scale = codePreviewContainerWidth > 0 ? Math.min(codePreviewContainerWidth / deviceWidth, 1) : 1
+      // 響應式渲染：iframe 寬度 = 容器實際寬度（或裝置限制寬度），RWD 自然觸發
+      const containerW = codePreviewContainerWidth > 0 ? codePreviewContainerWidth : 800
+      const maxDeviceWidth = getDeviceWidth(codePreviewDevice)
+      const iframeWidth = codePreviewDevice === 'desktop' ? containerW : Math.min(maxDeviceWidth, containerW)
 
       return (
         <div style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
@@ -2089,7 +2091,7 @@ function ChatSection({
             <span style={{ fontSize: 14, fontWeight: 500, color: 'var(--black)' }}>設計預覽</span>
             <DeviceSwitcher activeDevice={codePreviewDevice} onDeviceChange={setCodePreviewDevice} />
             <span style={{ fontSize: 11, color: 'var(--gray-400)', fontFamily: 'var(--font-mono)', width: 50, textAlign: 'right' }}>
-              {scale < 1 ? `${Math.round(scale * 100)}%` : ''}
+              {iframeWidth}px
             </span>
           </div>
           {/* 預覽區域 */}
@@ -2098,31 +2100,27 @@ function ChatSection({
             style={{
               flex: 1,
               display: 'flex',
-              alignItems: 'center',
               justifyContent: 'center',
               padding: 24,
-              overflow: 'hidden',
+              overflow: 'auto',
               background: 'var(--gray-50)',
             }}
           >
             <div
               style={{
-                width: deviceWidth * scale,
-                height: `calc(100% - 0px)`,
+                width: iframeWidth,
+                height: '100%',
                 borderRadius: 8,
                 boxShadow: '0 8px 32px rgba(0,0,0,0.12), 0 2px 8px rgba(0,0,0,0.08)',
                 background: '#fff',
                 overflow: 'hidden',
-                position: 'relative',
               }}
             >
               <iframe
                 srcDoc={convertToPreviewHtml(pagesData, componentsData, stylesData, tailwindConfigData)}
                 style={{
-                  width: deviceWidth,
-                  height: `${100 / scale}%`,
-                  transform: `scale(${scale})`,
-                  transformOrigin: 'top left',
+                  width: '100%',
+                  height: '100%',
                   border: 'none',
                   display: 'block',
                 }}
