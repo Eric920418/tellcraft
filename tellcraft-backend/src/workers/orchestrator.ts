@@ -1890,7 +1890,7 @@ async function executeFullCodePipeline(
   const finalComponentCount = currentCode.components.length
 
   await sendMessage(conversationId, io, {
-    content: `**程式碼生成完成！**\n\n已生成：\n- ${finalPageCount} 個頁面（含響應式）\n- ${finalComponentCount} 個組件（含動畫）\n- 全域樣式 (globals.css)\n- Tailwind 配置\n\n所有代碼已包含：\n- 結構和基礎樣式\n- 動畫效果\n- 響應式設計\n- 品質檢查${report.passed ? '通過' : ''}\n\n您可以在預覽面板查看完整代碼。`,
+    content: `**程式碼生成完成！**\n\n已生成：\n- ${finalPageCount} 個頁面（含響應式）\n- ${finalComponentCount} 個組件（含動畫）\n- 全域樣式 (globals.css)\n- Tailwind 配置\n\n品質檢查${report.passed ? '通過' : '完成'}${totalAutoFixed > 0 ? `，已自動修復 ${totalAutoFixed} 個問題` : ''}\n\n---\n\n🚀 輸入「**部署**」即可將網站部署上線`,
     stage: 'uiux_generation_complete',
     progress: { current: 3, total: 3, step: '完成' },
     layoutHint: 'split',
@@ -2269,7 +2269,7 @@ async function executeQualityGate(
   const componentCount = currentCode.components.length
 
   await sendMessage(conversationId, io, {
-    content: `**程式碼生成完成！**\n\n已生成：\n- ${pageCount} 個頁面（含響應式）\n- ${componentCount} 個組件（含動畫）\n- 全域樣式 (globals.css)\n- Tailwind 配置\n\n所有代碼已包含：\n- 結構和基礎樣式\n- 動畫效果\n- 響應式設計\n- 品質檢查${report.passed ? '通過' : ''}\n\n您可以在預覽面板查看完整代碼並複製使用。`,
+    content: `**程式碼生成完成！**\n\n已生成：\n- ${pageCount} 個頁面（含響應式）\n- ${componentCount} 個組件（含動畫）\n- 全域樣式 (globals.css)\n- Tailwind 配置\n\n品質檢查${report.passed ? '通過' : '完成'}${totalAutoFixed > 0 ? `，已自動修復 ${totalAutoFixed} 個問題` : ''}\n\n---\n\n🚀 輸入「**部署**」即可將網站部署上線`,
     stage: 'uiux_generation_complete',
     progress: { current: 3, total: 3, step: '完成' },
     layoutHint: 'split',
