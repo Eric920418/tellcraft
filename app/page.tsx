@@ -39,7 +39,7 @@ interface Message {
   role: 'user' | 'assistant' | 'system'
   content: string
   timestamp: Date
-  stage?: 'init' | 'init_progress' | 'discovery' | 'clarify' | 'prd_discovery_complete' | 'formulation_start' | 'formulation_progress' | 'formulation' | 'uiux' | 'uiux_template_picker' | 'generating' | 'deploying' | 'complete'
+  stage?: 'init' | 'init_progress' | 'discovery' | 'clarify' | 'prd_discovery_complete' | 'formulation_start' | 'formulation_progress' | 'formulation' | 'uiux' | 'uiux_template_picker' | 'generating' | 'deploying' | 'complete' | 'prefilter_rejected' | 'meta_response'
   progress?: { current: number; total: number; step: string }
   // UIUX 模板系統擴展
   layoutHint?: 'default' | 'split' | 'full_preview'
@@ -1674,6 +1674,9 @@ function ChatSection({
     if (backendStage === 'completed' ||
         backendStage === 'complete' ||
         backendStage.includes('deploy')) return 'complete'
+
+    // Prefilter 攔截和 Meta 回覆不推進進度條
+    if (backendStage === 'prefilter_rejected' || backendStage === 'meta_response') return 'discovery'
 
     // 預設返回 clarify（大多數對話都在釐清階段）
     return 'clarify'

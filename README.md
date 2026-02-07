@@ -67,6 +67,32 @@ UIUX Implementation 階段生成的 React TSX 代碼，自動轉換為 standalon
 - 模式：`grid-cols-3` → `grid-cols-1 md:grid-cols-3`、`text-3xl` → `text-xl md:text-3xl` 等
 - 用 `(?<!:)` 負向後查避免雙重處理已有前綴的 class
 
+### Classifier 分層防禦 + 智慧引導（2026-02-08）
+
+Classifier 升級為三層防禦架構，避免非正常輸入白白消耗 LLM Token：
+
+**Layer 1 — Prefilter（零 LLM 成本）**：`tellcraft-backend/src/services/prefilter.ts`
+- 空消息/純空白 → 拒絕
+- 消息長度 > 5000 字 → 拒絕
+- Prompt injection 模式偵測（regex）→ 拒絕
+- 用戶級 Rate Limiting（Redis，60 秒 10 條上限）→ 冷卻提示
+- Route 層（`conversation.ts`）也有基本 trim + 長度驗證
+
+**Layer 2 — Meta Intent 分類（Haiku 分類，模板回覆）**：`classifier.ts`
+- `onboarding`：打招呼、問平台功能 → 歡迎引導
+- `chitchat`：閒聊、無關對話 → 友善引導回產品
+- `abuse`：亂打字、垃圾訊息 → 簡潔引導
+- `unknown` / `clarification_needed` → 範例引導（不再盲入 bdd-spec）
+
+**Layer 3 — Skill Intent（正常流程）**：行為不變
+- `bdd-spec` / `deployer` / `uiux` / `domain-*` → 建 task → 執行 Skill
+
+**核心改動**：
+- `prefilter.ts`（新建）：`prefilterMessage(message, userId, redis)` 前置過濾
+- `classifier.ts`：新增 `MetaIntent` type、`isSkillIntent()` helper、Haiku prompt 擴展、`ruleBasedClassification()` 加入 meta-intent 偵測
+- `conversation.ts`：`POST /:id/message` 和 `POST /:id/reply` 加入 trim + 長度驗證
+- `orchestrator.ts`：`handleProcessMessage()` 重構執行順序（prefilter → classify → meta/skill 分流），meta-intent 不建 task 直接模板回覆；`handleContinueFlow()` 頂部加 prefilter
+
 ### 專案自動命名（2026-02-06）
 
 專案不再用「專案 2/6/2025」這種日期格式命名。Classifier 分類意圖時同步生成語義化專案名稱（如「寵物電商平台」、「健身預約系統」），Orchestrator 收到後自動更新 project name。
@@ -1130,7 +1156,8 @@ tellcraft-backend/
 │   ├── workers/           # BullMQ Workers
 │   │   └── orchestrator.ts
 │   ├── services/          # 業務邏輯
-│   │   ├── classifier.ts
+│   │   ├── prefilter.ts   # 前置過濾（零 LLM 成本防禦）
+│   │   ├── classifier.ts  # 意圖分類（含 Meta Intent）
 │   │   ├── registry.ts
 │   │   └── bdd-session.ts
 │   ├── middleware/        # 中間件

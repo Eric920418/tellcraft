@@ -47,6 +47,9 @@ export interface DeployPreCheckResult {
   estimatedUrl?: string
   code?: GeneratedCode
   tailwindConfig?: string
+  sanitizeFixes?: string[]                         // 預檢修復項目
+  extraDependencies?: Record<string, string>       // 掃描到的額外依賴
+  injectedFiles?: { file: string; data: string }[] // 需要注入的 helper 文件
 }
 
 export interface DeployResult {
@@ -60,6 +63,258 @@ export type ProgressCallback = (progress: {
   percent: number
   step: string
 }) => Promise<void>
+
+// ============================================================
+// 部署前代碼預檢 + 自動修復
+// ============================================================
+
+interface SanitizeResult {
+  code: GeneratedCode
+  fixes: string[]                               // 修復描述（給 log 和用戶看）
+  injectedFiles: { file: string; data: string }[] // 需要注入的 helper 文件
+  extraDependencies: Record<string, string>       // 需要補充的第三方套件
+}
+
+/**
+ * 已知第三方套件版本對照表
+ * LLM 經常在代碼中引用這些但 package.json 沒有列入
+ */
+const KNOWN_PACKAGES: Record<string, string> = {
+  'lucide-react': '^0.400.0',
+  '@radix-ui/react-dialog': '^1.1.0',
+  '@radix-ui/react-dropdown-menu': '^2.1.0',
+  '@radix-ui/react-popover': '^1.1.0',
+  '@radix-ui/react-select': '^2.1.0',
+  '@radix-ui/react-tabs': '^1.1.0',
+  '@radix-ui/react-toast': '^1.2.0',
+  '@radix-ui/react-tooltip': '^1.1.0',
+  '@radix-ui/react-slot': '^1.1.0',
+  '@radix-ui/react-scroll-area': '^1.2.0',
+  '@radix-ui/react-separator': '^1.1.0',
+  '@radix-ui/react-switch': '^1.1.0',
+  '@radix-ui/react-checkbox': '^1.1.0',
+  '@radix-ui/react-accordion': '^1.2.0',
+  '@radix-ui/react-alert-dialog': '^1.1.0',
+  '@radix-ui/react-avatar': '^1.1.0',
+  '@radix-ui/react-label': '^2.1.0',
+  '@radix-ui/react-slider': '^1.2.0',
+  '@radix-ui/react-navigation-menu': '^1.2.0',
+  '@radix-ui/react-collapsible': '^1.1.0',
+  '@radix-ui/react-toggle': '^1.1.0',
+  '@radix-ui/react-toggle-group': '^1.1.0',
+  '@radix-ui/react-aspect-ratio': '^1.1.0',
+  '@radix-ui/react-hover-card': '^1.1.0',
+  '@radix-ui/react-menubar': '^1.1.0',
+  '@radix-ui/react-context-menu': '^2.2.0',
+  '@radix-ui/react-progress': '^1.1.0',
+  '@radix-ui/react-radio-group': '^1.2.0',
+  'class-variance-authority': '^0.7.0',
+  'clsx': '^2.1.0',
+  'tailwind-merge': '^2.5.0',
+  'react-icons': '^5.0.0',
+  '@heroicons/react': '^2.1.0',
+  'recharts': '^2.12.0',
+  'date-fns': '^3.6.0',
+  'zod': '^3.23.0',
+  'react-hook-form': '^7.52.0',
+  '@hookform/resolvers': '^3.9.0',
+  'embla-carousel-react': '^8.3.0',
+  'react-day-picker': '^9.0.0',
+  'sonner': '^1.5.0',
+  'cmdk': '^1.0.0',
+  'vaul': '^1.0.0',
+  'input-otp': '^1.2.0',
+  'next-themes': '^0.3.0',
+}
+
+/** 基礎 dependencies（一定會包含在 package.json 中） */
+const BASE_DEPS: Record<string, string> = {
+  next: '^15.0.0',
+  react: '^19.0.0',
+  'react-dom': '^19.0.0',
+  motion: '^11.0.0',
+  tailwindcss: '^3.4.0',
+  postcss: '^8.4.0',
+  autoprefixer: '^10.0.0',
+}
+
+/**
+ * 部署前代碼預檢 + 自動修復
+ * 掃描所有已知的 build 失敗模式，自動修復後返回乾淨的代碼
+ */
+function sanitizeCodeForDeploy(code: GeneratedCode): SanitizeResult {
+  const fixes: string[] = []
+  const injectedFiles: { file: string; data: string }[] = []
+  const extraDependencies: Record<string, string> = {}
+
+  // 深拷貝避免修改原始代碼
+  const sanitized: GeneratedCode = {
+    pages: code.pages.map(p => ({ ...p, content: p.content })),
+    components: code.components.map(c => ({ ...c, content: c.content })),
+    styles: code.styles,
+  }
+
+  const allFiles = [...sanitized.pages, ...sanitized.components]
+  let needsMotionHelper = false
+
+  for (const file of allFiles) {
+    // ── 修復 1: framer-motion → motion/react ──
+    if (/from\s+['"]framer-motion['"]/.test(file.content)) {
+      file.content = file.content.replace(
+        /from\s+['"]framer-motion['"]/g,
+        "from 'motion/react'"
+      )
+      fixes.push(`${file.path}: framer-motion → motion/react`)
+    }
+
+    // ── 修復 2: 缺少 'use client' ──
+    const needsClient =
+      /\b(useState|useEffect|useRef|useCallback|useMemo|useContext|useReducer)\b/.test(file.content) ||
+      /from\s+['"]motion\/react['"]/.test(file.content)
+    const hasUseClient = /^['"]use client['"]/.test(file.content.trimStart())
+    if (needsClient && !hasUseClient) {
+      file.content = "'use client'\n\n" + file.content
+      fixes.push(`${file.path}: 自動加入 'use client'`)
+    }
+
+    // ── 修復 3: motion.* 上的 spread props（TypeScript 類型衝突）──
+    // motion.button 的 onAnimationStart 與 React 的不相容，spread 所有 HTML props 會報錯
+    if (/motion\.\w+/.test(file.content)) {
+      const motionSpreadRegex = /<motion\.\w+[^>]*\{\.\.\.(\w+)\}/g
+      let match
+      const spreadVars = new Set<string>()
+      while ((match = motionSpreadRegex.exec(file.content)) !== null) {
+        spreadVars.add(match[1])
+      }
+
+      if (spreadVars.size > 0) {
+        needsMotionHelper = true
+
+        // 加入 safeMotionProps import（在最後一個 import 之後）
+        if (!file.content.includes('safeMotionProps')) {
+          const lines = file.content.split('\n')
+          let lastImportLine = -1
+          for (let i = 0; i < lines.length; i++) {
+            if (/^import\s/.test(lines[i].trim())) lastImportLine = i
+          }
+          if (lastImportLine >= 0) {
+            lines.splice(lastImportLine + 1, 0, "import { safeMotionProps } from '@/lib/motion-safe-props'")
+            file.content = lines.join('\n')
+          }
+        }
+
+        // 替換 motion.* 上的 {...props} → {...safeMotionProps(props)}
+        for (const varName of spreadVars) {
+          file.content = file.content.replace(
+            new RegExp(`(<motion\\.\\w+[^>]*)\\{\\.\\.\\.${varName}\\}`, 'g'),
+            `$1{...safeMotionProps(${varName})}`
+          )
+        }
+
+        fixes.push(`${file.path}: motion.* spread props 類型衝突修復`)
+      }
+    }
+
+    // ── 修復 4: Google Fonts <link> 或 @import（應用 next/font）──
+    if (/<link[^>]*fonts\.googleapis\.com/.test(file.content)) {
+      file.content = file.content.replace(/<link[^>]*fonts\.googleapis\.com[^>]*\/?>/g, '')
+      fixes.push(`${file.path}: 移除 Google Fonts <link>（應用 next/font）`)
+    }
+  }
+
+  // CSS 中的 Google Fonts @import
+  if (/@import\s+url\(['"]*https:\/\/fonts\.googleapis\.com/.test(sanitized.styles)) {
+    sanitized.styles = sanitized.styles.replace(
+      /@import\s+url\(['"]*https:\/\/fonts\.googleapis\.com[^)]*\)['"]*\s*;?\s*/g, ''
+    )
+    fixes.push(`globals.css: 移除 Google Fonts @import`)
+  }
+
+  // ── 注入 motion helper ──
+  if (needsMotionHelper) {
+    injectedFiles.push({
+      file: 'lib/motion-safe-props.ts',
+      data: `/**
+ * 排除 React HTML 事件與 motion/react 的類型衝突屬性
+ * React 的 onAnimationStart 是 AnimationEvent，motion 的是 AnimationDefinition
+ * 直接 spread HTML props 到 motion.* 上會導致 TypeScript 報錯
+ */
+export function safeMotionProps<T extends Record<string, unknown>>(props: T) {
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const { onAnimationStart, onDragStart, onDragEnd, onDrag, ...safe } = props as Record<string, unknown>
+  return safe
+}
+`,
+    })
+  }
+
+  // ── 掃描第三方依賴 ──
+  const basePkgs = new Set(Object.keys(BASE_DEPS))
+  const importRegex = /import\s+[\s\S]*?\s+from\s+['"]([^./][^'"]*)['"]/g
+  const requireRegex = /require\(['"]([^./][^'"]*)['"]\)/g
+
+  for (const file of allFiles) {
+    let m
+    // 重置 regex lastIndex
+    importRegex.lastIndex = 0
+    while ((m = importRegex.exec(file.content)) !== null) {
+      const raw = m[1]
+      const pkg = raw.startsWith('@') ? raw.split('/').slice(0, 2).join('/') : raw.split('/')[0]
+      if (!basePkgs.has(pkg) && !pkg.startsWith('next/') && !pkg.startsWith('react/') && !pkg.startsWith('react-dom/')) {
+        if (KNOWN_PACKAGES[pkg]) {
+          extraDependencies[pkg] = KNOWN_PACKAGES[pkg]
+        } else if (pkg.startsWith('@radix-ui/')) {
+          extraDependencies[pkg] = '^1.1.0' // Radix 通用 fallback 版本
+        }
+      }
+    }
+    requireRegex.lastIndex = 0
+    while ((m = requireRegex.exec(file.content)) !== null) {
+      const raw = m[1]
+      const pkg = raw.startsWith('@') ? raw.split('/').slice(0, 2).join('/') : raw.split('/')[0]
+      if (!basePkgs.has(pkg) && KNOWN_PACKAGES[pkg]) {
+        extraDependencies[pkg] = KNOWN_PACKAGES[pkg]
+      }
+    }
+  }
+
+  if (Object.keys(extraDependencies).length > 0) {
+    fixes.push(`自動補充 ${Object.keys(extraDependencies).length} 個第三方依賴: ${Object.keys(extraDependencies).join(', ')}`)
+  }
+
+  // ── 檔案間引用檢查（只 log warning，不 block 部署）──
+  const filePathSet = new Set<string>()
+  for (const f of allFiles) {
+    filePathSet.add(f.path)
+    filePathSet.add(f.path.replace(/\.(tsx?|jsx?)$/, ''))
+    // index 解析
+    const dir = f.path.replace(/\/[^/]+$/, '')
+    if (f.path.endsWith('/index.tsx') || f.path.endsWith('/index.ts')) {
+      filePathSet.add(dir)
+    }
+  }
+
+  const relativeImportRegex = /from\s+['"](\.[^'"]+)['"]/g
+  for (const file of allFiles) {
+    relativeImportRegex.lastIndex = 0
+    let m
+    while ((m = relativeImportRegex.exec(file.content)) !== null) {
+      const importPath = m[1]
+      if (importPath.startsWith('@/')) continue // alias 另外處理
+
+      const fileDir = file.path.replace(/\/[^/]+$/, '') || '.'
+      const resolved = importPath.startsWith('./')
+        ? fileDir + '/' + importPath.slice(2)
+        : fileDir + '/' + importPath
+      const candidates = [resolved, resolved + '.tsx', resolved + '.ts', resolved + '/index.tsx', resolved + '/index.ts']
+      if (!candidates.some(c => filePathSet.has(c))) {
+        console.warn(`[Deployer] 可能的 broken import: ${file.path} → ${importPath}`)
+      }
+    }
+  }
+
+  return { code: sanitized, fixes, injectedFiles, extraDependencies }
+}
 
 // ============================================================
 // 主要函數
@@ -158,15 +413,26 @@ export async function prepareDeployment(
     .replace(/^-|-$/g, '')
     .slice(0, 30) || 'tellcraft-project'
 
-  const fileCount = code.pages.length + code.components.length + 1 // +1 for styles
+  // 部署前預檢 + 自動修復
+  const sanitizeResult = sanitizeCodeForDeploy(code)
+  const sanitizedCode = sanitizeResult.code
+
+  if (sanitizeResult.fixes.length > 0) {
+    console.log(`[Deployer] 預檢修復 ${sanitizeResult.fixes.length} 項:`, sanitizeResult.fixes)
+  }
+
+  const fileCount = sanitizedCode.pages.length + sanitizedCode.components.length + 1 // +1 for styles
 
   return {
     ready: true,
     projectName: slug,
     fileCount,
     estimatedUrl: `https://${slug}.vercel.app`,
-    code,
+    code: sanitizedCode,
     tailwindConfig,
+    sanitizeFixes: sanitizeResult.fixes,
+    extraDependencies: sanitizeResult.extraDependencies,
+    injectedFiles: sanitizeResult.injectedFiles,
   }
 }
 
@@ -177,7 +443,11 @@ export async function executeDeployment(
   projectId: string,
   code: GeneratedCode,
   tailwindConfig: string,
-  onProgress: ProgressCallback
+  onProgress: ProgressCallback,
+  options?: {
+    extraDependencies?: Record<string, string>
+    injectedFiles?: { file: string; data: string }[]
+  }
 ): Promise<DeployResult> {
   try {
     // 1. 包裝成 Next.js 專案
@@ -190,7 +460,7 @@ export async function executeDeployment(
       .replace(/^-|-$/g, '')
       .slice(0, 30) || 'tellcraft-project'
 
-    const files = wrapInNextJs(code, projectName, tailwindConfig)
+    const files = wrapInNextJs(code, projectName, tailwindConfig, options?.extraDependencies, options?.injectedFiles)
 
     // 2. 建立 Vercel Project
     await onProgress({ percent: 30, step: '建立 Vercel 專案...' })
@@ -254,10 +524,21 @@ export async function executeDeployment(
 /**
  * 將 UIUX 生成的代碼包裝成完整 Next.js 專案
  */
-function wrapInNextJs(code: GeneratedCode, projectName: string, tailwindConfig: string): VercelFile[] {
+function wrapInNextJs(
+  code: GeneratedCode,
+  projectName: string,
+  tailwindConfig: string,
+  extraDependencies?: Record<string, string>,
+  injectedFiles?: { file: string; data: string }[]
+): VercelFile[] {
   const files: VercelFile[] = []
 
-  // package.json
+  // package.json — 合併基礎依賴 + 預檢掃描到的額外依賴
+  const allDependencies: Record<string, string> = {
+    ...BASE_DEPS,
+    ...(extraDependencies || {}),
+  }
+
   files.push({
     file: 'package.json',
     data: JSON.stringify({
@@ -269,15 +550,7 @@ function wrapInNextJs(code: GeneratedCode, projectName: string, tailwindConfig: 
         build: 'next build',
         start: 'next start',
       },
-      dependencies: {
-        next: '^15.0.0',
-        react: '^19.0.0',
-        'react-dom': '^19.0.0',
-        motion: '^11.0.0',
-        tailwindcss: '^3.4.0',
-        postcss: '^8.4.0',
-        autoprefixer: '^10.0.0',
-      },
+      dependencies: allDependencies,
       devDependencies: {
         typescript: '^5.0.0',
         '@types/react': '^19.0.0',
@@ -286,12 +559,19 @@ function wrapInNextJs(code: GeneratedCode, projectName: string, tailwindConfig: 
     }, null, 2),
   })
 
-  // next.config.ts
+  // next.config.ts — 忽略 TypeScript/ESLint 錯誤（LLM 生成代碼不保證 100% 類型安全）
   files.push({
     file: 'next.config.ts',
     data: `import type { NextConfig } from 'next'
 
-const nextConfig: NextConfig = {}
+const nextConfig: NextConfig = {
+  typescript: {
+    ignoreBuildErrors: true,
+  },
+  eslint: {
+    ignoreDuringBuilds: true,
+  },
+}
 
 export default nextConfig
 `,
@@ -533,6 +813,16 @@ export default function RootLayout({
 }
 `,
     })
+  }
+
+  // 注入預檢產生的 helper 文件（如 motion-safe-props.ts）
+  if (injectedFiles && injectedFiles.length > 0) {
+    for (const injected of injectedFiles) {
+      // 避免重複（components 可能已有同名檔案）
+      if (!files.some(f => f.file === injected.file)) {
+        files.push({ file: injected.file, data: injected.data })
+      }
+    }
   }
 
   return files

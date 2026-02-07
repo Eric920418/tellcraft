@@ -38,6 +38,15 @@ router.post('/:id/message', optionalAuth, async (req, res) => {
       return res.status(400).json({ error: 'Missing message or projectId' })
     }
 
+    // 輸入驗證：非空 + 長度限制
+    const trimmedMessage = typeof message === 'string' ? message.trim() : ''
+    if (!trimmedMessage) {
+      return res.status(400).json({ error: '訊息不能為空' })
+    }
+    if (trimmedMessage.length > 5000) {
+      return res.status(400).json({ error: `訊息過長（${trimmedMessage.length} 字），上限 5000 字` })
+    }
+
     // 取得對話
     const conversation = await db.getConversation(conversationId)
     if (!conversation) {
@@ -109,6 +118,15 @@ router.post('/:id/reply', optionalAuth, async (req, res) => {
 
     if (!message || !projectId) {
       return res.status(400).json({ error: 'Missing message or projectId' })
+    }
+
+    // 輸入驗證：非空 + 長度限制
+    const trimmedReply = typeof message === 'string' ? message.trim() : ''
+    if (!trimmedReply) {
+      return res.status(400).json({ error: '訊息不能為空' })
+    }
+    if (trimmedReply.length > 5000) {
+      return res.status(400).json({ error: `訊息過長（${trimmedReply.length} 字），上限 5000 字` })
     }
 
     // 取得對話

@@ -3,8 +3,9 @@ import { Server as SocketIOServer } from 'socket.io'
 import Redis from 'ioredis'
 import crypto from 'crypto'
 import * as db from '../db/client'
-import { classifyIntent, ClassificationResult } from '../services/classifier'
+import { classifyIntent, ClassificationResult, isSkillIntent, MetaIntent } from '../services/classifier'
 import { getSkillMetadata, SkillName } from '../services/registry'
+import { prefilterMessage } from '../services/prefilter'
 import {
   createBddSession,
   getBddSession,
@@ -139,6 +140,40 @@ const SPEC_DISCOVERY_LIMITS = {
 }
 
 // ============================================================
+// Meta Intent 模板回覆（零 LLM Token 成本）
+// ============================================================
+
+const META_RESPONSES: Record<MetaIntent | 'unknown' | 'clarification_needed', string> = {
+  onboarding: `👋 歡迎使用 Tellcraft！
+
+我可以幫你：
+• **設計網站** — 描述你想要的產品，我會引導你完成從構思到上線的全流程
+• **部署上線** — 設計完成後一鍵部署到網路
+
+試試看告訴我：「我想做一個餐廳官網」或「幫我設計一個作品集網站」`,
+
+  chitchat: `我是 Tellcraft 的 AI 開發助手，專門幫你把想法變成真正的網站。😊
+
+有什麼產品或網站想法嗎？告訴我你想建立什麼，我們就開始吧！`,
+
+  abuse: `請描述您想建立的產品或功能，我才能幫助您。
+
+例如：「我想做一個餐廳官網」、「幫我設計一個作品集網站」`,
+
+  unknown: `我不太確定您想做什麼。您可以試試：
+
+• 描述想建立的產品：「我想做一個線上課程平台」
+• 設計網站介面：「幫我設計一個餐廳官網」
+• 部署已完成的專案：「部署上線」`,
+
+  clarification_needed: `我不太確定您想做什麼。您可以試試：
+
+• 描述想建立的產品：「我想做一個線上課程平台」
+• 設計網站介面：「幫我設計一個餐廳官網」
+• 部署已完成的專案：「部署上線」`,
+}
+
+// ============================================================
 // Worker 工廠
 // ============================================================
 
@@ -188,7 +223,40 @@ async function handleProcessMessage(
 ) {
   const { projectId, conversationId, userId, message } = data
 
-  // Step 1: 創建任務記錄
+  // Step 1: Prefilter（零 LLM 成本防禦）
+  const prefilterResult = await prefilterMessage(message, userId, redis)
+  if (!prefilterResult.allowed) {
+    console.log(`[Orchestrator] Prefilter 攔截: reason=${prefilterResult.reason}, userId=${userId}`)
+    await sendMessage(conversationId, io, {
+      content: prefilterResult.errorMessage || '無法處理此訊息。',
+      stage: 'prefilter_rejected',
+    })
+    return { taskId: null, skill: null }
+  }
+
+  // Step 2: Intent Classification
+  const conversation = await db.getConversation(conversationId)
+  const history = ((conversation?.messages || []) as Array<{
+    role: 'user' | 'assistant'
+    content: string
+  }>).slice(-10)
+
+  const classification = await classifyIntent(message, history, { userId, conversationId })
+
+  // Step 3: Meta Intent → 模板回覆（不建 task，零 Token 成本）
+  if (!isSkillIntent(classification.intent)) {
+    console.log(`[Orchestrator] Meta intent: ${classification.intent}, 模板回覆`)
+    const responseKey = classification.intent as keyof typeof META_RESPONSES
+    await sendMessage(conversationId, io, {
+      content: META_RESPONSES[responseKey] || META_RESPONSES.clarification_needed,
+      stage: 'meta_response',
+    })
+    return { taskId: null, skill: null }
+  }
+
+  // ── 以下為 Skill Intent 流程 ──
+
+  // Step 4: 創建任務記錄
   const taskId = await db.createTask({
     projectId,
     userId,
@@ -200,33 +268,22 @@ async function handleProcessMessage(
     throw new Error('創建任務失敗')
   }
 
-  // Step 2: 發送即時回應
+  // Step 5: 發送即時回應
   await sendMessage(conversationId, io, {
     content: '收到！讓我先了解一下你的需求，稍後會有幾個問題想確認。',
     stage: 'init_progress',
     progress: { current: 0, total: 3, step: '準備分析' },
   })
 
-  // Step 3: Intent Classification
-  const conversation = await db.getConversation(conversationId)
-  const history = ((conversation?.messages || []) as Array<{
-    role: 'user' | 'assistant'
-    content: string
-  }>).slice(-10) // 只取最近 10 條
-
-  const classification = await classifyIntent(message, history, { userId, conversationId })
-
-  // Step 3.5: 自動更新專案名稱（只在首次訊息時）
+  // Step 5.5: 自動更新專案名稱（只在首次訊息時）
   if (classification.suggestedProjectName) {
     try {
-      // 只更新仍是日期格式的專案名稱（避免覆蓋用戶手動命名）
       const project = await db.queryOne<{ name: string }>(
         'SELECT name FROM projects WHERE id = $1',
         [projectId]
       )
       if (project && /^專案\s/.test(project.name)) {
         const newName = classification.suggestedProjectName.slice(0, 50)
-        // 處理名稱衝突：加上數字後綴
         const existing = await db.query<{ name: string }>(
           'SELECT name FROM projects WHERE user_id = $1 AND name LIKE $2 AND id != $3',
           [userId, `${newName}%`, projectId]
@@ -251,21 +308,13 @@ async function handleProcessMessage(
     }
   }
 
-  // Step 4: 處理無法分類的情況
-  let effectiveIntent = classification.intent
-  if (classification.intent === 'clarification_needed' || classification.intent === 'unknown') {
-    effectiveIntent = 'bdd-spec'
-    console.log('[Orchestrator] 無法確定意圖，預設進入 bdd-spec')
-  }
-
-  // Step 5: 更新任務
-  const skillName = effectiveIntent as SkillName
+  // Step 6: 更新任務 + 執行 Skill
+  const skillName = classification.intent as SkillName
   await db.updateTask(taskId, {
     status: 'executing',
     plan: { skill: skillName, classification },
   })
 
-  // Step 6: 執行 Skill
   switch (skillName) {
     case 'bdd-spec':
       await executeBddSpecSkill({
@@ -304,6 +353,17 @@ async function handleContinueFlow(
   io: SocketIOServer
 ) {
   const { projectId, conversationId, userId, message } = data
+
+  // Prefilter（rate limit + 長度檢查，不影響 phase routing）
+  const prefilterResult = await prefilterMessage(message, userId, redis)
+  if (!prefilterResult.allowed) {
+    console.log(`[Orchestrator] ContinueFlow prefilter 攔截: reason=${prefilterResult.reason}`)
+    await sendMessage(conversationId, io, {
+      content: prefilterResult.errorMessage || '無法處理此訊息。',
+      stage: 'prefilter_rejected',
+    })
+    return
+  }
 
   // 取得當前流程狀態（優先 Redis，備用 PostgreSQL）
   const state = await getFlowState(redis, conversationId)
@@ -3271,9 +3331,17 @@ async function executeDeployerSkill(input: DeployerSkillInput) {
   }
   await saveFlowState(redis, conversationId, state)
 
+  // 顯示預檢修復結果（如果有修復項）
+  const fixes = preCheck.sanitizeFixes || []
+  let confirmContent = `**部署準備就緒！**\n\n- 專案名稱：${preCheck.projectName}\n- 檔案數量：${preCheck.fileCount} 個\n- 預計網址：${preCheck.estimatedUrl}`
+  if (fixes.length > 0) {
+    confirmContent += `\n\n**預檢自動修復了 ${fixes.length} 項問題：**\n${fixes.map(f => `- ${f}`).join('\n')}`
+  }
+  confirmContent += '\n\n確認要部署嗎？'
+
   // 發送部署確認
   await sendMessage(conversationId, io, {
-    content: `**部署準備就緒！**\n\n- 專案名稱：${preCheck.projectName}\n- 檔案數量：${preCheck.fileCount} 個\n- 預計網址：${preCheck.estimatedUrl}\n\n確認要部署嗎？`,
+    content: confirmContent,
     stage: 'deployer_confirm',
     richContent: {
       type: 'deploy_confirm',
@@ -3281,6 +3349,7 @@ async function executeDeployerSkill(input: DeployerSkillInput) {
         projectName: preCheck.projectName,
         fileCount: preCheck.fileCount,
         estimatedUrl: preCheck.estimatedUrl,
+        sanitizeFixes: fixes,
       } as Record<string, unknown>,
     },
   })
@@ -3319,26 +3388,36 @@ async function handleDeployExecute(
     },
   })
 
-  // 執行部署，帶進度回調
-  const result = await executeDeployment(
-    projectId,
-    preCheck.code,
-    preCheck.tailwindConfig || '',
-    async (progress) => {
-      await sendMessage(conversationId, io, {
-        content: `部署中... ${progress.step}`,
-        stage: 'deployer_progress',
-        progress: { current: progress.percent, total: 100, step: progress.step },
-        richContent: {
-          type: 'deploy_progress',
-          data: {
-            percent: progress.percent,
-            step: progress.step,
-          } as Record<string, unknown>,
-        },
-      })
-    }
-  )
+  // 執行部署，帶進度回調（try/catch 防止 state 卡死在 deployer_deploying）
+  let result: { success: boolean; deploymentUrl?: string; vercelDeploymentId?: string; error?: string }
+  try {
+    result = await executeDeployment(
+      projectId,
+      preCheck.code,
+      preCheck.tailwindConfig || '',
+      async (progress) => {
+        await sendMessage(conversationId, io, {
+          content: `部署中... ${progress.step}`,
+          stage: 'deployer_progress',
+          progress: { current: progress.percent, total: 100, step: progress.step },
+          richContent: {
+            type: 'deploy_progress',
+            data: {
+              percent: progress.percent,
+              step: progress.step,
+            } as Record<string, unknown>,
+          },
+        })
+      },
+      {
+        extraDependencies: preCheck.extraDependencies,
+        injectedFiles: preCheck.injectedFiles,
+      }
+    )
+  } catch (err) {
+    console.error('[Orchestrator] handleDeployExecute 異常:', err)
+    result = { success: false, error: `部署過程異常：${err instanceof Error ? err.message : String(err)}` }
+  }
 
   if (result.success) {
     state.phase = 'deployer_complete'
