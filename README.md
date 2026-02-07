@@ -12,7 +12,7 @@ Tellcraft 是一個 AI 驅動的自動化開發平台。用戶只需描述需求
 
 ## 當前開發進度
 
-- **狀態**：✅ Phase 1-9 + Server Actions + VPS Backend + 前端 Chat 串接 + 認證系統 + 訪客體驗改善 + 儀表板系統 + BDD Spec 完整修復 + 專案版本管理 + **UIUX 生成邏輯重構** + **Design Tier** + **專案自動命名** + **PreviewPanel iframe 重構** + **Quality Gate 品質檢查** + **Code Preview 即時渲染**
+- **狀態**：✅ Phase 1-9 + Server Actions + VPS Backend + 前端 Chat 串接 + 認證系統 + 訪客體驗改善 + 儀表板系統 + BDD Spec 完整修復 + 專案版本管理 + **UIUX 生成邏輯重構** + **Design Tier** + **專案自動命名** + **PreviewPanel iframe 重構** + **Quality Gate 品質檢查** + **Code Preview 即時渲染** + **串流實時預覽**
 - **釐清項目**：28 項全部解決
 - **Server Actions**：30+ 已實作
 - **詳情**：[`.clarify/overview.md`](.clarify/overview.md)
@@ -66,6 +66,30 @@ UIUX Implementation 階段生成的 React TSX 代碼，自動轉換為 standalon
 - 前端：`addBasicResponsive()`（`tsx-to-preview.ts`）— 在 `convertToPreviewHtml()` 步驟 6-7 間檢測注入
 - 模式：`grid-cols-3` → `grid-cols-1 md:grid-cols-3`、`text-3xl` → `text-xl md:text-3xl` 等
 - 用 `(?<!:)` 負向後查避免雙重處理已有前綴的 class
+
+### 串流實時預覽（2026-02-08）
+
+UIUX 代碼生成時，右側預覽面板不再等完整生成後才顯示，而是利用 LLM 串流逐步解析已完成的 code block，即時推送到前端渲染。用戶可以看到網頁從 header 逐步被構建出來。
+
+**實現原理**：
+- `callClaude()` 新增 `onTextDelta` 回調，`stream.on('text')` 累積文字
+- `parseCompletedFileBlocks()` 只匹配已閉合的 code block（有 ``` 結尾）
+- Throttle 雙條件觸發：新區塊完成 + 時間間隔 >= 1500ms（避免 iframe 重載過頻）
+- 後端透過 Socket.io `preview_update` 事件直推前端（不存 DB）
+- 前端收到 `preview_update` → `convertToPreviewHtmlSafe()` 容錯轉換 → `injectStreamingAnimation()` fade-in 動畫
+- 最終 `code_preview` 訊息到達後清除 streaming state，恢復完整預覽
+
+**視覺效果**：
+- 生成中顯示 phase 標籤（結構生成中... / 動畫增強中... / 響應式適配中...）+ pulse dot
+- 元素漸入 stagger 動畫
+- 完成後恢復 DeviceSwitcher
+
+**核心改動**：
+- `tellcraft-backend/src/services/uiux-generation.ts`：`callClaude` 加 `onTextDelta`、新增 `parseCompletedFileBlocks`、三函數加 `onPartialCode`
+- `tellcraft-backend/src/workers/orchestrator.ts`：6 處生成調用傳入 `makeStreamingCallback`
+- `app/hooks/useVpsWebSocket.ts`：新增 `StreamingPreview` type + `onPreviewUpdate` 回調
+- `app/lib/tsx-to-preview.ts`：新增 `convertToPreviewHtmlSafe` + `injectStreamingAnimation`
+- `app/page.tsx`：streaming WebSocket 連接 + `streamingPreview` state + `renderPreviewPanel` 優先用 streaming
 
 ### Classifier 分層防禦 + 智慧引導（2026-02-08）
 
@@ -1367,7 +1391,7 @@ Hero → 往下滾動 → 產品介紹（SEO 友好）→ Testimonials → CTA
 | `bdd-spec` | ✅ 完成 | 完整 5 階段流程：PRD Discovery/Clarify → Formulation → Spec Discovery/Clarify → Actions Design → ISA Config |
 | `coder` | ⏳ 開發中 | 後端 API 生成，待開發完成後與 uiux 並行執行 |
 | `uiux` | 🧪 可測試 | 3 階段前端設計流程（Design Discovery → Design Lab → Implementation）+ 雙軌 Discovery（有想法→4步釐清 / 沒想法→模板選擇）+ Design Brief 確認（AI 設計顧問總結+建議+Design Tier推薦，最多3輪調整）+ Design Tier（functional/creative 約束集切換）+ Supabase Storage 儲存 |
-| `deployer` | ✅ 完成 | UIUX 完成後用戶觸發，將生成代碼包裝成 Next.js 部署到 Vercel。支援對話內迭代（部署後可直接修改設計再重新部署，循環不限次）和 Vercel 部署回滾（查看部署歷史、選版本回滾）|
+| `deployer` | ✅ 完成 | UIUX 完成後用戶觸發，將生成代碼包裝成 Next.js 部署到 Vercel。部署前自動預檢修復（framer-motion→motion/react、缺少 'use client'、motion spread props 類型衝突、Google Fonts 移除、自動掃描補充第三方依賴、檔案間引用檢查）+ 本地 Build 驗證（VPS 上建臨時 Next.js 專案跑 `next build`，失敗則 LLM Haiku 自動修復代碼，最多 3 輪，全失敗才降級 `ignoreBuildErrors` 部署）。支援對話內迭代（部署後可直接修改設計再重新部署，循環不限次）和 Vercel 部署回滾（查看部署歷史、選版本回滾）|
 | `domain-manager` | ✅ 完成 | 網域管理入口，支援三種選擇 |
 | `domain-purchase` | ✅ 完成 | Porkbun 網域註冊 |
 | `domain-dns` | ✅ 完成 | Cloudflare Zone + Vercel 綁定 |

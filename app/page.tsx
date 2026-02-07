@@ -29,7 +29,9 @@ import SpecGenerationView from './components/SpecGenerationView'
 import PreviewPanel from './components/uiux/PreviewPanel'
 import DeviceSwitcher, { type DeviceType, getDeviceWidth } from './components/uiux/DeviceSwitcher'
 import TemplatePicker from './components/uiux/TemplatePicker'
-import { convertToPreviewHtml } from './lib/tsx-to-preview'
+import { convertToPreviewHtml, convertToPreviewHtmlSafe, injectStreamingAnimation } from './lib/tsx-to-preview'
+import { io, Socket } from 'socket.io-client'
+import type { StreamingPreview } from './hooks/useVpsWebSocket'
 import { getTemplateById } from './actions/templates'
 import type { Template } from './lib/templates'
 
@@ -879,6 +881,10 @@ function ChatSection({
   const [selectedTemplate, setSelectedTemplate] = useState<Template | null>(null)
   const [codePreviewDevice, setCodePreviewDevice] = useState<DeviceType>('desktop')
 
+  // Streaming preview（實時串流預覽）
+  const [streamingPreview, setStreamingPreview] = useState<StreamingPreview | null>(null)
+  const streamingSocketRef = useRef<Socket | null>(null)
+
   // Code Preview 容器尺寸追蹤（用於 iframe 縮放）
   useEffect(() => {
     const el = codePreviewContainerRef.current
@@ -889,6 +895,41 @@ function ChatSection({
     observer.observe(el)
     return () => observer.disconnect()
   }, [])
+
+  // Streaming Preview WebSocket — 直接監聽 preview_update 事件
+  useEffect(() => {
+    const convId = sessionInfo?.conversationId
+    if (!convId) return
+
+    const wsUrl = process.env.NEXT_PUBLIC_VPS_WS_URL || 'http://54.238.4.117:8080'
+    const socket = io(wsUrl, {
+      transports: ['websocket', 'polling'],
+      autoConnect: true,
+      reconnection: true,
+      reconnectionAttempts: 3,
+    })
+    streamingSocketRef.current = socket
+
+    socket.on('connect', () => {
+      socket.emit('subscribe', convId)
+    })
+
+    socket.on('preview_update', (preview: StreamingPreview) => {
+      setStreamingPreview(preview)
+      // 收到串流預覽時自動切換到 split 佈局
+      if (layoutModeRef.current !== 'split') {
+        setLayoutMode('split')
+      }
+    })
+
+    return () => {
+      if (socket.connected) {
+        socket.emit('unsubscribe', convId)
+      }
+      socket.disconnect()
+      streamingSocketRef.current = null
+    }
+  }, [sessionInfo?.conversationId])
 
   // 監聽訊息的 layoutHint 或 UIUX 相關 stage，切換佈局模式
   useEffect(() => {
@@ -1188,6 +1229,12 @@ function ChatSection({
             layoutHint: m.layoutHint as Message['layoutHint'],
             richContent: m.richContent as Message['richContent'],
           }))
+
+          // 收到 code_preview 消息時清除 streaming preview（最終版已到達）
+          const hasCodePreview = formattedMessages.some(m => m.richContent?.type === 'code_preview')
+          if (hasCodePreview) {
+            setStreamingPreview(null)
+          }
 
           // 找出最新的 AI 消息 stage（在 setMessages 外部計算，確保狀態更新正確）
           const latestAiMessageWithStage = [...formattedMessages]
@@ -2068,19 +2115,65 @@ function ChatSection({
     const codePreviewMessage = [...messages].reverse().find(m => m.richContent?.type === 'code_preview')
     const codePreviewData = codePreviewMessage?.richContent?.data
 
-    if (codePreviewData) {
-      const pagesData = (codePreviewData.pages || []) as { path: string; content: string; description: string }[]
-      const componentsData = (codePreviewData.components || []) as { path: string; content: string; description: string }[]
-      const stylesData = (codePreviewData.styles || '') as string
-      const tailwindConfigData = (codePreviewData.tailwindConfig || '') as string
+    // 優先使用 streaming preview（實時串流），fallback 到最終的 code_preview
+    const activeData = streamingPreview || codePreviewData
+    const isStreaming = !!streamingPreview
+
+    if (activeData) {
+      const pagesData = (activeData.pages || []) as { path: string; content: string; description: string }[]
+      const componentsData = (activeData.components || []) as { path: string; content: string; description: string }[]
+      const stylesData = (activeData.styles || '') as string
+      const tailwindConfigData = (activeData.tailwindConfig || '') as string
       // 響應式渲染：iframe 寬度 = 容器實際寬度（或裝置限制寬度），RWD 自然觸發
       const containerW = codePreviewContainerWidth > 0 ? codePreviewContainerWidth : 800
       const maxDeviceWidth = getDeviceWidth(codePreviewDevice)
       const iframeWidth = codePreviewDevice === 'desktop' ? containerW : Math.min(maxDeviceWidth, containerW)
 
+      // Streaming 時使用 safe wrapper（partial code 可能導致轉換失敗）
+      const previewHtml = isStreaming
+        ? (() => {
+            const html = convertToPreviewHtmlSafe(pagesData, componentsData, stylesData, tailwindConfigData)
+            return html ? injectStreamingAnimation(html) : null
+          })()
+        : convertToPreviewHtml(pagesData, componentsData, stylesData, tailwindConfigData)
+
+      // Streaming 但轉換失敗 → 等待更多內容
+      if (isStreaming && !previewHtml) {
+        return (
+          <div style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                padding: '12px 16px',
+                borderBottom: '1px solid var(--border-color)',
+                background: 'var(--white)',
+                gap: 8,
+              }}
+            >
+              <span style={{
+                width: 8, height: 8, borderRadius: '50%',
+                background: 'var(--accent)', animation: 'pulse 1.5s ease-in-out infinite',
+              }} />
+              <span style={{ fontSize: 14, fontWeight: 500, color: 'var(--black)' }}>
+                {streamingPreview?.phase === 'structure' ? '結構生成中...' : streamingPreview?.phase === 'animation' ? '動畫增強中...' : '響應式適配中...'}
+              </span>
+            </div>
+            <div ref={codePreviewContainerRef} style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--gray-50)' }}>
+              <p style={{ color: 'var(--gray-400)', fontSize: 14 }}>等待代碼生成中...</p>
+            </div>
+            <style>{`@keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }`}</style>
+          </div>
+        )
+      }
+
+      const phaseLabel = isStreaming
+        ? (streamingPreview?.phase === 'structure' ? '結構生成中...' : streamingPreview?.phase === 'animation' ? '動畫增強中...' : '響應式適配中...')
+        : null
+
       return (
         <div style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
-          {/* 工具列：設備切換器 */}
+          {/* 工具列 */}
           <div
             style={{
               display: 'flex',
@@ -2091,8 +2184,18 @@ function ChatSection({
               background: 'var(--white)',
             }}
           >
-            <span style={{ fontSize: 14, fontWeight: 500, color: 'var(--black)' }}>設計預覽</span>
-            <DeviceSwitcher activeDevice={codePreviewDevice} onDeviceChange={setCodePreviewDevice} />
+            {isStreaming ? (
+              <span style={{ fontSize: 14, fontWeight: 500, color: 'var(--black)', display: 'flex', alignItems: 'center', gap: 8 }}>
+                <span style={{
+                  width: 8, height: 8, borderRadius: '50%',
+                  background: 'var(--accent)', animation: 'pulse 1.5s ease-in-out infinite',
+                }} />
+                {phaseLabel}
+              </span>
+            ) : (
+              <span style={{ fontSize: 14, fontWeight: 500, color: 'var(--black)' }}>設計預覽</span>
+            )}
+            {!isStreaming && <DeviceSwitcher activeDevice={codePreviewDevice} onDeviceChange={setCodePreviewDevice} />}
             <span style={{ fontSize: 11, color: 'var(--gray-400)', fontFamily: 'var(--font-mono)', width: 50, textAlign: 'right' }}>
               {iframeWidth}px
             </span>
@@ -2120,7 +2223,7 @@ function ChatSection({
               }}
             >
               <iframe
-                srcDoc={convertToPreviewHtml(pagesData, componentsData, stylesData, tailwindConfigData)}
+                srcDoc={previewHtml || ''}
                 style={{
                   width: '100%',
                   height: '100%',
@@ -2132,6 +2235,7 @@ function ChatSection({
               />
             </div>
           </div>
+          {isStreaming && <style>{`@keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }`}</style>}
         </div>
       )
     }

@@ -85,12 +85,16 @@ npx ts-node bdd-spec/scripts/validate-feature.ts spec/features/      # 結構驗
 
 **Implementation 三階段生成**：`generateStructure()` → `generateAnimations()` → `generateRwd()`（每階段可確認或重做，Stage 2/3 有 fallback）
 
+**串流實時預覽**：三個生成函數都支援 `onPartialCode` callback，LLM 串流期間每完成一個 code block 就透過 Socket.io `preview_update` 事件推送給前端。前端用 `convertToPreviewHtmlSafe()` 容錯轉換 + `injectStreamingAnimation()` fade-in，用戶能看到網頁漸進式構建。Throttle 雙條件：新區塊 + >= 1500ms。
+
 **關鍵函數**（`tellcraft-backend/src/services/uiux-generation.ts`）：
 - `generateDesignBrief()` - Domain Exploration + Signature Element
 - `generateDesignVariants()` - 5 變體 + Anti-Default 哲學
-- `generateStructure()` - 靜態桌面版 + Professional UI Rules
-- `generateAnimations()` - 動畫增強
-- `generateRwd()` - 響應式 + Pre-Delivery Checklist
+- `generateStructure()` - 靜態桌面版 + Professional UI Rules（支援 streaming）
+- `generateAnimations()` - 動畫增強（支援 streaming）
+- `generateRwd()` - 響應式 + Pre-Delivery Checklist（支援 streaming）
+- `parseCompletedFileBlocks()` - 串流解析已閉合 code block（for streaming preview）
+- `buildStreamingHandler()` - Throttled streaming callback builder
 - `synthesizeVariants()` - 變體合併（layout/interaction metadata）
 - `getCraftFoundations()` - 共用品質底線
 - `getStructureConstraints(tier)` / `getAnimationConstraints(tier)` / `getVariantPromptHint(tier)` - Tier 約束集
@@ -110,7 +114,23 @@ npx ts-node bdd-spec/scripts/validate-feature.ts spec/features/      # 結構驗
 
 **觸發方式**：用戶在 `uiux_complete` 階段說「部署」→ classifier 分類為 deployer 或 handleContinueFlow 直接匹配。
 
-**流程**：prepareDeployment（前檢查）→ 用戶確認 → executeDeployment（wrapInNextJs → createVercelProject → deployFiles → waitForReady → 更新 DB）
+**流程**：prepareDeployment（前檢查 + sanitize）→ 用戶確認（顯示修復項）→ executeDeployment（verifyBuildLocally → createVercelProject → deployFiles → waitForReady → 更新 DB）
+
+**部署前預檢（`sanitizeCodeForDeploy()`）**：
+- `framer-motion` → `motion/react` import 修正
+- 缺少 `'use client'` 自動補充（偵測 hooks/motion 使用）
+- `motion.*` spread props TypeScript 類型衝突修復（注入 `safeMotionProps` helper）
+- Google Fonts `<link>` / `@import` 移除（應用 next/font）
+- 自動掃描第三方 import → 補充 `KNOWN_PACKAGES` 對應版本到 package.json
+- 檔案間相對引用檢查（broken import warning）
+
+**本地 Build 驗證（`verifyBuildLocally()`）**：
+- 在 VPS 上建立 `/tmp/tellcraft-build-xxx/` 臨時 Next.js 專案
+- 執行 `npm install` + `next build`（`NODE_OPTIONS=--max-old-space-size=1536`）
+- Build 失敗 → `parseBuildErrors()` 解析（TS error / module not found / syntax）→ `fixBuildErrors()` 用 Haiku LLM 修復
+- 最多 3 輪修復，全失敗降級 `ignoreBuildErrors` 部署
+- npm install 失敗時自動解析並移除壞依賴重試
+- `wrapInNextJs()` 已移除 `ignoreBuildErrors: true`，只在降級時由 `wrapInNextJsWithIgnoreErrors()` 恢復
 
 **對話內迭代**（部署後持續修改）：
 - `deployer_complete` 階段不再靜默吞訊息
@@ -123,9 +143,14 @@ npx ts-node bdd-spec/scripts/validate-feature.ts spec/features/      # 結構驗
 - 用戶選版本 → `handleRollbackSelection()` → `rollbackToDeployment()` → Vercel Promote/Alias API
 
 **關鍵函數**（`tellcraft-backend/src/services/deployer.ts`）：
-- `prepareDeployment(projectId, userId)` - 驗證專案、代碼、環境變數
-- `executeDeployment(projectId, code, tailwindConfig, onProgress)` - 執行部署
-- `wrapInNextJs(code, projectName, tailwindConfig)` - UIUX 代碼 → 完整 Next.js 專案
+- `sanitizeCodeForDeploy(code)` - 部署前預檢 + 自動修復（6 類問題）
+- `verifyBuildLocally(code, projectName, tailwindConfig, ...)` - 本地 build 驗證 + LLM 自動修復迴圈（最多 3 輪）
+- `parseBuildErrors(output)` - 解析 next build 輸出中的 TS/module/syntax 錯誤
+- `fixBuildErrors(code, errors, buildOutput, deps)` - Haiku LLM 修復 build 錯誤
+- `prepareDeployment(projectId, userId)` - 驗證專案、代碼、環境變數 + 呼叫 sanitize
+- `executeDeployment(projectId, code, tailwindConfig, onProgress, options?)` - 執行部署（含 build 驗證）
+- `wrapInNextJs(code, projectName, tailwindConfig, extraDeps?, injectedFiles?)` - UIUX 代碼 → 完整 Next.js 專案
+- `wrapInNextJsWithIgnoreErrors(...)` - 降級用：恢復 ignoreBuildErrors: true
 - `listProjectDeployments(projectId)` - 查詢部署歷史
 - `rollbackToDeployment(projectName, deploymentId)` - Vercel 回滾
 

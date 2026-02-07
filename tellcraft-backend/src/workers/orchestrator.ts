@@ -35,6 +35,7 @@ import {
   TemplateData,
   DesignSystem,
   GeneratedComponent,
+  PartialCodeCallback,
 } from '../services/uiux-generation'
 import { runQualityGate, autoFixCriticalIssues, QualityReport } from '../services/quality-gate'
 import { prepareDeployment, executeDeployment, DeployPreCheckResult, listProjectDeployments, rollbackToDeployment, DeploymentRecord } from '../services/deployer'
@@ -939,6 +940,27 @@ async function deleteFlowState(redis: Redis, conversationId: string) {
       console.error('[Orchestrator] PostgreSQL 刪除失敗:', err)
     }),
   ])
+}
+
+/**
+ * 建構 streaming preview callback — 將 partial code 透過 WebSocket 推送給前端
+ * 注意：preview_update 不經 sendMessage/DB，是臨時性高頻事件
+ */
+function makeStreamingCallback(
+  conversationId: string,
+  io: SocketIOServer,
+  phase: 'structure' | 'animation' | 'rwd',
+  tailwindConfig: string
+): PartialCodeCallback {
+  return (partialCode) => {
+    io.to(`conversation:${conversationId}`).emit('preview_update', {
+      pages: partialCode.pages,
+      components: partialCode.components,
+      styles: partialCode.styles,
+      tailwindConfig,
+      phase,
+    })
+  }
 }
 
 async function sendMessage(
@@ -1862,6 +1884,7 @@ async function executeFullCodePipeline(
   const { template: dbTemplate, bddSpec, originalRequirements } = await getTemplateAndBddSpec(sessionId)
   const template = state.uiuxPreparedTemplate || dbTemplate
   const pages = template.pageStructure.pages || ['home']
+  const twConfig = generateTailwindConfig(uiuxDesignSystem)
 
   const structureResult = await generateStructure(
     uiuxDesignSystem,
@@ -1874,7 +1897,8 @@ async function executeFullCodePipeline(
       designIdeas: state.uiuxDesignIdeas,
       designBrief: state.uiuxDesignBrief,
     },
-    { conversationId }
+    { conversationId },
+    makeStreamingCallback(conversationId, io, 'structure', twConfig)
   )
 
   if (!structureResult.success) {
@@ -1913,7 +1937,8 @@ async function executeFullCodePipeline(
     uiuxDesignSystem,
     currentCode,
     state.uiuxDesignTier,
-    { conversationId }
+    { conversationId },
+    makeStreamingCallback(conversationId, io, 'animation', twConfig)
   )
 
   if (animationResult.success) {
@@ -1947,7 +1972,8 @@ async function executeFullCodePipeline(
     uiuxDesignSystem,
     currentCode,
     state.uiuxDesignTier,
-    { conversationId }
+    { conversationId },
+    makeStreamingCallback(conversationId, io, 'rwd', twConfig)
   )
 
   if (rwdResult.success) {
@@ -2071,6 +2097,7 @@ async function executeCodePhaseStructure(
 
   // 生成結構
   const pages = template.pageStructure.pages || ['home']
+  const twCfg = generateTailwindConfig(uiuxDesignSystem)
   const structureResult = await generateStructure(
     uiuxDesignSystem,
     pages,
@@ -2082,7 +2109,8 @@ async function executeCodePhaseStructure(
       designIdeas: state.uiuxDesignIdeas,
       designBrief: state.uiuxDesignBrief,
     },
-    { conversationId }
+    { conversationId },
+    makeStreamingCallback(conversationId, io, 'structure', twCfg)
   )
 
   if (!structureResult.success) {
@@ -2171,11 +2199,13 @@ async function executeCodePhaseAnimation(
   })
 
   // 生成動畫
+  const animTwCfg = generateTailwindConfig(uiuxDesignSystem)
   const animationResult = await generateAnimations(
     uiuxDesignSystem,
     uiuxGeneratedCode,
     state.uiuxDesignTier,
-    { conversationId }
+    { conversationId },
+    makeStreamingCallback(conversationId, io, 'animation', animTwCfg)
   )
 
   if (!animationResult.success) {
@@ -2261,11 +2291,13 @@ async function executeCodePhaseRwd(
   })
 
   // 生成響應式設計
+  const rwdTwCfg = generateTailwindConfig(uiuxDesignSystem)
   const rwdResult = await generateRwd(
     uiuxDesignSystem,
     uiuxGeneratedCode,
     state.uiuxDesignTier,
-    { conversationId }
+    { conversationId },
+    makeStreamingCallback(conversationId, io, 'rwd', rwdTwCfg)
   )
 
   if (!rwdResult.success) {

@@ -1065,3 +1065,40 @@ function buildFallbackHtml(reason: string, styles: string): string {
 </body>
 </html>`
 }
+
+/**
+ * Safe wrapper for convertToPreviewHtml — partial code 可能導致轉換失敗
+ * 返回 null 表示轉換失敗（前端應跳過此次渲染）
+ */
+export function convertToPreviewHtmlSafe(
+  pages: GeneratedFile[],
+  components: GeneratedFile[],
+  styles: string,
+  tailwindConfig?: string
+): string | null {
+  try {
+    if (pages.length === 0) return null
+    return convertToPreviewHtml(pages, components, styles, tailwindConfig)
+  } catch {
+    return null
+  }
+}
+
+/**
+ * 注入 streaming fade-in 動畫 — body 直接子元素漸入 + stagger
+ */
+export function injectStreamingAnimation(html: string): string {
+  const css = `<style>
+    body > * { animation: streamFadeIn 0.6s ease-out both; }
+    body > *:nth-child(1) { animation-delay: 0s; }
+    body > *:nth-child(2) { animation-delay: 0.1s; }
+    body > *:nth-child(3) { animation-delay: 0.15s; }
+    body > *:nth-child(4) { animation-delay: 0.2s; }
+    body > *:nth-child(5) { animation-delay: 0.25s; }
+    @keyframes streamFadeIn {
+      from { opacity: 0; transform: translateY(12px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+  </style>`
+  return html.replace('</head>', css + '</head>')
+}

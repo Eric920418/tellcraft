@@ -26,6 +26,14 @@ interface AutoTransition {
   sessionId?: string
 }
 
+export interface StreamingPreview {
+  pages: { path: string; content: string; description: string }[]
+  components: { path: string; content: string; description: string }[]
+  styles: string
+  tailwindConfig: string
+  phase: 'structure' | 'animation' | 'rwd'
+}
+
 interface UseVpsWebSocketOptions {
   conversationId: string
   onMessage?: (message: Message) => void
@@ -33,6 +41,7 @@ interface UseVpsWebSocketOptions {
   onDisconnect?: () => void
   onError?: (error: Error) => void
   onAutoTransition?: (transition: AutoTransition) => void
+  onPreviewUpdate?: (preview: StreamingPreview) => void
 }
 
 interface UseVpsWebSocketReturn {
@@ -47,7 +56,7 @@ interface UseVpsWebSocketReturn {
 // ============================================================
 
 export function useVpsWebSocket(options: UseVpsWebSocketOptions): UseVpsWebSocketReturn {
-  const { conversationId, onMessage, onConnect, onDisconnect, onError, onAutoTransition } = options
+  const { conversationId, onMessage, onConnect, onDisconnect, onError, onAutoTransition, onPreviewUpdate } = options
 
   const socketRef = useRef<Socket | null>(null)
   const [isConnected, setIsConnected] = useState(false)
@@ -109,6 +118,10 @@ export function useVpsWebSocket(options: UseVpsWebSocketOptions): UseVpsWebSocke
       // 進度更新可以透過 onMessage 傳遞，或者新增專用回調
     })
 
+    socket.on('preview_update', (preview: StreamingPreview) => {
+      onPreviewUpdate?.(preview)
+    })
+
     return () => {
       if (socket.connected) {
         socket.emit('unsubscribe', conversationId)
@@ -116,7 +129,7 @@ export function useVpsWebSocket(options: UseVpsWebSocketOptions): UseVpsWebSocke
       socket.disconnect()
       socketRef.current = null
     }
-  }, [conversationId, onConnect, onDisconnect, onError, onMessage, onAutoTransition])
+  }, [conversationId, onConnect, onDisconnect, onError, onMessage, onAutoTransition, onPreviewUpdate])
 
   // 訂閱對話
   const subscribe = useCallback(() => {

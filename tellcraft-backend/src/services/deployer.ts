@@ -2,7 +2,15 @@
 // Deployer Service — UIUX 生成代碼 → Next.js → Vercel 部署
 // ============================================================
 
+import { execFile } from 'child_process'
+import { promisify } from 'util'
+import * as os from 'os'
+import * as path from 'path'
+import * as fsPromises from 'fs/promises'
+import Anthropic from '@anthropic-ai/sdk'
 import * as db from '../db/client'
+
+const execFileAsync = promisify(execFile)
 
 const VERCEL_API = 'https://api.vercel.com'
 
@@ -63,6 +71,34 @@ export type ProgressCallback = (progress: {
   percent: number
   step: string
 }) => Promise<void>
+
+// ============================================================
+// Anthropic Client（複用 quality-gate.ts 的模式）
+// ============================================================
+
+let anthropicClient: Anthropic | null = null
+
+function getAnthropicClient(): Anthropic {
+  if (!anthropicClient) {
+    const apiKey = process.env.CLAUDE_API_KEY || process.env.ANTHROPIC_API_KEY
+    if (!apiKey) {
+      throw new Error('缺少 CLAUDE_API_KEY 或 ANTHROPIC_API_KEY')
+    }
+    anthropicClient = new Anthropic({ apiKey })
+  }
+  return anthropicClient
+}
+
+// ============================================================
+// 本地 Build 驗證 — 類型定義
+// ============================================================
+
+interface BuildError {
+  type: 'typescript' | 'module_not_found' | 'syntax' | 'unknown'
+  message: string
+  file?: string
+  line?: number
+}
 
 // ============================================================
 // 部署前代碼預檢 + 自動修復
@@ -450,8 +486,8 @@ export async function executeDeployment(
   }
 ): Promise<DeployResult> {
   try {
-    // 1. 包裝成 Next.js 專案
-    await onProgress({ percent: 10, step: '打包 Next.js 專案...' })
+    // 1. 取得專案名稱
+    await onProgress({ percent: 5, step: '準備部署...' })
     const project = await db.getProject(projectId)
     const projectName = project?.name
       ?.toLowerCase()
@@ -460,25 +496,42 @@ export async function executeDeployment(
       .replace(/^-|-$/g, '')
       .slice(0, 30) || 'tellcraft-project'
 
-    const files = wrapInNextJs(code, projectName, tailwindConfig, options?.extraDependencies, options?.injectedFiles)
+    // 2. 本地 Build 驗證（5-40%）
+    const buildResult = await verifyBuildLocally(
+      code,
+      projectName,
+      tailwindConfig,
+      options?.extraDependencies,
+      options?.injectedFiles,
+      onProgress
+    )
 
-    // 2. 建立 Vercel Project
-    await onProgress({ percent: 30, step: '建立 Vercel 專案...' })
+    const files = buildResult.files
+
+    if (buildResult.fixes.length > 0) {
+      console.log(`[Deployer] Build 驗證修復: ${buildResult.fixes.join('; ')}`)
+    }
+    if (!buildResult.buildVerified) {
+      console.warn('[Deployer] Build 驗證未通過，使用降級部署')
+    }
+
+    // 3. 建立 Vercel Project（50%）
+    await onProgress({ percent: 50, step: '建立 Vercel 專案...' })
     const vercelProject = await createVercelProject(projectName)
     if (!vercelProject) {
       // 已存在的話繼續部署
       console.log(`[Deployer] Vercel project "${projectName}" 可能已存在，繼續部署`)
     }
 
-    // 3. 部署檔案
-    await onProgress({ percent: 60, step: '上傳並部署到 Vercel...' })
+    // 4. 部署檔案（70%）
+    await onProgress({ percent: 70, step: '上傳並部署到 Vercel...' })
     const deployment = await deployFilesToVercel(projectName, files)
     if (!deployment) {
       return { success: false, error: '部署到 Vercel 失敗，請稍後再試。' }
     }
 
-    // 4. 等待部署就緒
-    await onProgress({ percent: 85, step: '等待部署完成...' })
+    // 5. 等待部署就緒（90%）
+    await onProgress({ percent: 90, step: '等待部署完成...' })
     const readyDeployment = await waitForDeploymentReady(deployment.id)
 
     const deploymentUrl = `https://${deployment.url}`
@@ -488,7 +541,7 @@ export async function executeDeployment(
       return { success: false, error: 'Vercel 建置失敗，請檢查代碼。', vercelDeploymentId: deployment.id }
     }
 
-    // 5. 更新 DB
+    // 6. 更新 DB（95-100%）
     await onProgress({ percent: 95, step: '更新專案狀態...' })
 
     // 寫入 deployments 表
@@ -559,15 +612,13 @@ function wrapInNextJs(
     }, null, 2),
   })
 
-  // next.config.ts — 忽略 TypeScript/ESLint 錯誤（LLM 生成代碼不保證 100% 類型安全）
+  // next.config.ts — ESLint 錯誤忽略（LLM 生成代碼 lint 不保證通過）
+  // TypeScript 錯誤由本地 build 驗證修復，不再用 ignoreBuildErrors
   files.push({
     file: 'next.config.ts',
     data: `import type { NextConfig } from 'next'
 
 const nextConfig: NextConfig = {
-  typescript: {
-    ignoreBuildErrors: true,
-  },
   eslint: {
     ignoreDuringBuilds: true,
   },
@@ -1056,5 +1107,513 @@ export async function rollbackToDeployment(
   } catch (err) {
     console.error('[Deployer] 回滾錯誤:', err)
     return { success: false, error: `回滾失敗：${err instanceof Error ? err.message : String(err)}` }
+  }
+}
+
+// ============================================================
+// 本地 Build 驗證 — 部署前 next build + LLM 自動修復
+// ============================================================
+
+/** 源碼檔案副檔名（retry 時只重寫這些） */
+const SOURCE_EXTENSIONS = ['.tsx', '.ts', '.jsx', '.js', '.css']
+
+/** 判斷是否是源碼檔案（非 config/package.json） */
+function isSourceFile(filePath: string): boolean {
+  return SOURCE_EXTENSIONS.some(ext => filePath.endsWith(ext))
+}
+
+/**
+ * 將 VercelFile[] 完整寫入磁碟目錄
+ */
+async function writeFilesToTempDir(dir: string, files: VercelFile[]): Promise<void> {
+  for (const f of files) {
+    const fullPath = path.join(dir, f.file)
+    await fsPromises.mkdir(path.dirname(fullPath), { recursive: true })
+    await fsPromises.writeFile(fullPath, f.data, 'utf-8')
+  }
+}
+
+/**
+ * 只重寫源碼檔案（node_modules、config、package.json 保留）
+ */
+async function writeSourceFilesOnly(dir: string, files: VercelFile[]): Promise<void> {
+  for (const f of files) {
+    if (isSourceFile(f.file)) {
+      const fullPath = path.join(dir, f.file)
+      await fsPromises.mkdir(path.dirname(fullPath), { recursive: true })
+      await fsPromises.writeFile(fullPath, f.data, 'utf-8')
+    }
+  }
+}
+
+/**
+ * 執行 npm install（timeout 120s）
+ */
+async function runNpmInstall(dir: string): Promise<{ success: boolean; output: string }> {
+  try {
+    const { stdout, stderr } = await execFileAsync('npm', ['install', '--no-audit', '--no-fund'], {
+      cwd: dir,
+      timeout: 120_000,
+      env: { ...process.env, NODE_ENV: 'development' },
+    })
+    return { success: true, output: stdout + '\n' + stderr }
+  } catch (err: unknown) {
+    const error = err as { stdout?: string; stderr?: string; message?: string }
+    return { success: false, output: (error.stdout || '') + '\n' + (error.stderr || '') + '\n' + (error.message || '') }
+  }
+}
+
+/**
+ * 執行 next build（timeout 180s，限制記憶體 1536MB）
+ */
+async function runNextBuild(dir: string): Promise<{ success: boolean; output: string }> {
+  try {
+    const { stdout, stderr } = await execFileAsync(
+      path.join(dir, 'node_modules', '.bin', 'next'),
+      ['build'],
+      {
+        cwd: dir,
+        timeout: 180_000,
+        env: {
+          ...process.env,
+          NODE_OPTIONS: '--max-old-space-size=1536',
+          NODE_ENV: 'production',
+        },
+        maxBuffer: 10 * 1024 * 1024, // 10MB
+      }
+    )
+    return { success: true, output: stdout + '\n' + stderr }
+  } catch (err: unknown) {
+    const error = err as { stdout?: string; stderr?: string; message?: string }
+    return { success: false, output: (error.stdout || '') + '\n' + (error.stderr || '') + '\n' + (error.message || '') }
+  }
+}
+
+/**
+ * 解析 next build 輸出中的錯誤
+ *
+ * Next.js build 錯誤格式：
+ *   ./app/page.tsx
+ *   12:5  Type error: Property 'foo' does not exist on type 'X'.
+ *
+ *   Module not found: Can't resolve 'some-package'
+ *
+ *   SyntaxError: Unexpected token ...
+ */
+function parseBuildErrors(output: string): BuildError[] {
+  const errors: BuildError[] = []
+  const seen = new Set<string>()
+
+  // Pattern 1: TypeScript errors — ./path 後跟 line:col Type error: ...
+  const tsErrorRegex = /\.\/([^\n]+)\n\s*(\d+):(\d+)\s+Type error:\s*(.+)/g
+  let match
+  while ((match = tsErrorRegex.exec(output)) !== null) {
+    const key = `ts:${match[1]}:${match[2]}:${match[4]}`
+    if (!seen.has(key)) {
+      seen.add(key)
+      errors.push({
+        type: 'typescript',
+        file: match[1],
+        line: parseInt(match[2]),
+        message: match[4].trim(),
+      })
+    }
+  }
+
+  // Pattern 2: Module not found
+  const moduleRegex = /Module not found:\s*Can't resolve\s*['"]([^'"]+)['"]/g
+  while ((match = moduleRegex.exec(output)) !== null) {
+    const key = `module:${match[1]}`
+    if (!seen.has(key)) {
+      seen.add(key)
+      errors.push({
+        type: 'module_not_found',
+        message: `Module not found: Can't resolve '${match[1]}'`,
+      })
+    }
+  }
+
+  // Pattern 3: Syntax errors
+  const syntaxRegex = /SyntaxError:\s*(.+)/g
+  while ((match = syntaxRegex.exec(output)) !== null) {
+    const key = `syntax:${match[1]}`
+    if (!seen.has(key)) {
+      seen.add(key)
+      errors.push({
+        type: 'syntax',
+        message: match[1].trim(),
+      })
+    }
+  }
+
+  // Pattern 4: Build error 格式 — "Build error occurred" + Error message
+  const buildErrorRegex = /Error:\s*(.+)/g
+  while ((match = buildErrorRegex.exec(output)) !== null) {
+    const msg = match[1].trim()
+    // 避免重複（已被上面的 pattern 捕捉）
+    const isDup = errors.some(e => msg.includes(e.message) || e.message.includes(msg))
+    if (!isDup) {
+      const key = `unknown:${msg}`
+      if (!seen.has(key)) {
+        seen.add(key)
+        errors.push({
+          type: 'unknown',
+          message: msg,
+        })
+      }
+    }
+  }
+
+  return errors
+}
+
+/**
+ * 解析 npm install 錯誤中的壞依賴
+ * 回傳需要移除的套件名稱
+ */
+function parseInstallErrors(output: string): string[] {
+  const badPkgs: string[] = []
+  // npm ERR! 404 Not Found - GET https://registry.npmjs.org/some-package
+  const notFoundRegex = /npm ERR!.*404.*registry\.npmjs\.org\/([^\s/]+)/g
+  let match
+  while ((match = notFoundRegex.exec(output)) !== null) {
+    badPkgs.push(match[1])
+  }
+  // npm ERR! Could not resolve dependency
+  const resolveRegex = /Could not resolve dependency.*\n.*peer\s+(\S+)@/g
+  while ((match = resolveRegex.exec(output)) !== null) {
+    badPkgs.push(match[1])
+  }
+  return [...new Set(badPkgs)]
+}
+
+/**
+ * 用 LLM (Haiku) 修復 build 錯誤
+ * 回傳修復後的代碼和可能的新依賴
+ */
+async function fixBuildErrors(
+  code: GeneratedCode,
+  errors: BuildError[],
+  buildOutput: string,
+  currentDeps: Record<string, string>
+): Promise<{ code: GeneratedCode; newDependencies: Record<string, string> } | null> {
+  const client = getAnthropicClient()
+
+  // 組合所有代碼供 LLM 修復
+  const codeBlocks: string[] = []
+  for (const page of code.pages) {
+    codeBlocks.push(`\`\`\`tsx:${page.path}\n${page.content}\n\`\`\``)
+  }
+  for (const comp of code.components) {
+    const ext = comp.path.endsWith('.ts') ? 'ts' : 'tsx'
+    codeBlocks.push(`\`\`\`${ext}:${comp.path}\n${comp.content}\n\`\`\``)
+  }
+  if (code.styles) {
+    codeBlocks.push(`\`\`\`css:globals.css\n${code.styles}\n\`\`\``)
+  }
+
+  const errorList = errors.map(e => {
+    let desc = `- [${e.type}] ${e.message}`
+    if (e.file) desc += ` (${e.file}${e.line ? `:${e.line}` : ''})`
+    return desc
+  }).join('\n')
+
+  // 取 build output 最後 2000 字元作為上下文
+  const outputTail = buildOutput.length > 2000
+    ? '...\n' + buildOutput.slice(-2000)
+    : buildOutput
+
+  const depsList = Object.entries(currentDeps).map(([k, v]) => `  "${k}": "${v}"`).join(',\n')
+
+  const prompt = `你是 Next.js build 錯誤修復專家。以下代碼在 \`next build\` 時出錯，請修復。
+
+## 規則
+1. **只修復 build 錯誤**，不要改變任何設計、佈局、功能或樣式
+2. 保持所有現有代碼結構不變
+3. 動畫庫用 \`motion/react\`（不是 framer-motion）
+4. 路徑別名用 \`@/\`（對應專案根目錄）
+5. 輸出修復後的完整檔案（\`\`\`tsx:path 或 \`\`\`css:path 或 \`\`\`ts:path 格式）
+6. 如果需要新增第三方依賴，在最後附上 \`\`\`json:NEW_DEPENDENCIES 區塊，格式如 {"package-name": "^version"}
+7. 如果錯誤是找不到模組，先確認是否拼寫錯誤或可用其他方式實現，最後才新增依賴
+
+## Build 錯誤
+${errorList}
+
+## Build 輸出（尾部）
+\`\`\`
+${outputTail}
+\`\`\`
+
+## 當前 package.json dependencies
+\`\`\`json
+{
+${depsList}
+}
+\`\`\`
+
+## 原始代碼
+${codeBlocks.join('\n\n')}
+
+請輸出修復後的所有需要改動的檔案。未改動的檔案不需要輸出。`
+
+  try {
+    const response = await client.messages.create({
+      model: 'claude-haiku-4-5-20251001',
+      max_tokens: 16000,
+      messages: [{ role: 'user', content: prompt }],
+    })
+
+    const content = response.content
+      .filter(block => block.type === 'text')
+      .map(block => block.text)
+      .join('\n')
+
+    // 解析修復後的檔案（複用 quality-gate 的模式）
+    const fixedCode = parseLLMFixedFiles(content, code)
+
+    // 解析新依賴
+    const newDependencies: Record<string, string> = {}
+    const depsMatch = content.match(/```json:NEW_DEPENDENCIES\n([\s\S]*?)```/)
+    if (depsMatch) {
+      try {
+        const parsed = JSON.parse(depsMatch[1].trim())
+        for (const [pkg, ver] of Object.entries(parsed)) {
+          if (typeof ver === 'string') {
+            newDependencies[pkg] = ver
+          }
+        }
+      } catch {
+        // 解析失敗忽略
+      }
+    }
+
+    return { code: fixedCode, newDependencies }
+  } catch (error) {
+    console.error('[Deployer] fixBuildErrors LLM 呼叫失敗:', error)
+    return null
+  }
+}
+
+/**
+ * 解析 LLM 修復結果，合併回原始代碼結構
+ */
+function parseLLMFixedFiles(content: string, originalCode: GeneratedCode): GeneratedCode {
+  const fileRegex = /```(?:tsx|ts|jsx|js|css):([^\n]+)\n([\s\S]*?)```/g
+
+  const fixedPages = new Map<string, string>()
+  const fixedComponents = new Map<string, string>()
+  let fixedStyles = ''
+
+  let match
+  while ((match = fileRegex.exec(content)) !== null) {
+    const filePath = match[1].trim()
+    const fileContent = match[2].trim()
+
+    if (filePath === 'globals.css' || filePath.endsWith('.css')) {
+      fixedStyles = fileContent
+    } else if (originalCode.pages.some(p => p.path === filePath)) {
+      fixedPages.set(filePath, fileContent)
+    } else {
+      fixedComponents.set(filePath, fileContent)
+    }
+  }
+
+  return {
+    pages: originalCode.pages.map(p => ({
+      ...p,
+      content: fixedPages.get(p.path) || p.content,
+    })),
+    components: originalCode.components.map(c => ({
+      ...c,
+      content: fixedComponents.get(c.path) || c.content,
+    })),
+    styles: fixedStyles || originalCode.styles,
+  }
+}
+
+/**
+ * 降級用：呼叫 wrapInNextJs 後恢復 ignoreBuildErrors: true
+ */
+function wrapInNextJsWithIgnoreErrors(
+  code: GeneratedCode,
+  projectName: string,
+  tailwindConfig: string,
+  extraDependencies?: Record<string, string>,
+  injectedFiles?: { file: string; data: string }[]
+): VercelFile[] {
+  const files = wrapInNextJs(code, projectName, tailwindConfig, extraDependencies, injectedFiles)
+
+  // 替換 next.config.ts，加回 ignoreBuildErrors: true
+  const configIdx = files.findIndex(f => f.file === 'next.config.ts')
+  if (configIdx >= 0) {
+    files[configIdx].data = `import type { NextConfig } from 'next'
+
+const nextConfig: NextConfig = {
+  typescript: {
+    ignoreBuildErrors: true,
+  },
+  eslint: {
+    ignoreDuringBuilds: true,
+  },
+}
+
+export default nextConfig
+`
+  }
+
+  return files
+}
+
+/**
+ * 本地 Build 驗證主函數
+ *
+ * 建臨時 Next.js 專案 → npm install → next build → 失敗則 LLM 修復 → 重試（最多 3 輪）
+ * 全失敗則降級為 ignoreBuildErrors 部署
+ */
+async function verifyBuildLocally(
+  code: GeneratedCode,
+  projectName: string,
+  tailwindConfig: string,
+  extraDependencies?: Record<string, string>,
+  injectedFiles?: { file: string; data: string }[],
+  onProgress?: ProgressCallback
+): Promise<{ files: VercelFile[]; buildVerified: boolean; fixes: string[] }> {
+  const MAX_ATTEMPTS = 3
+  const tmpDir = path.join(os.tmpdir(), `tellcraft-build-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`)
+  const fixes: string[] = []
+
+  let currentCode = code
+  let currentExtraDeps = { ...(extraDependencies || {}) }
+
+  try {
+    await fsPromises.mkdir(tmpDir, { recursive: true })
+
+    for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+      const files = wrapInNextJs(currentCode, projectName, tailwindConfig, currentExtraDeps, injectedFiles)
+
+      if (attempt === 1) {
+        // 首次：寫入所有檔案 + npm install
+        await onProgress?.({ percent: 5, step: '構建驗證：寫入臨時專案...' })
+        await writeFilesToTempDir(tmpDir, files)
+
+        await onProgress?.({ percent: 10, step: '構建驗證：安裝依賴...' })
+        let installResult = await runNpmInstall(tmpDir)
+
+        if (!installResult.success) {
+          // 嘗試解析並移除壞依賴
+          const badPkgs = parseInstallErrors(installResult.output)
+          if (badPkgs.length > 0) {
+            console.log(`[Deployer] npm install 失敗，移除壞依賴: ${badPkgs.join(', ')}`)
+            fixes.push(`移除無法安裝的依賴: ${badPkgs.join(', ')}`)
+            for (const pkg of badPkgs) {
+              delete currentExtraDeps[pkg]
+            }
+            // 重寫 package.json
+            const fixedFiles = wrapInNextJs(currentCode, projectName, tailwindConfig, currentExtraDeps, injectedFiles)
+            const pkgFile = fixedFiles.find(f => f.file === 'package.json')
+            if (pkgFile) {
+              await fsPromises.writeFile(path.join(tmpDir, 'package.json'), pkgFile.data, 'utf-8')
+            }
+            installResult = await runNpmInstall(tmpDir)
+          }
+
+          if (!installResult.success) {
+            console.error('[Deployer] npm install 最終失敗，降級部署')
+            fixes.push('npm install 失敗，降級為 ignoreBuildErrors 部署')
+            return {
+              files: wrapInNextJsWithIgnoreErrors(currentCode, projectName, tailwindConfig, currentExtraDeps, injectedFiles),
+              buildVerified: false,
+              fixes,
+            }
+          }
+        }
+      } else {
+        // 重試：只重寫源碼（保留 node_modules）
+        await onProgress?.({ percent: 10 + attempt * 8, step: `構建驗證：第 ${attempt} 次修復後重新構建...` })
+        await writeSourceFilesOnly(tmpDir, files)
+
+        // 如果有新依賴需要安裝
+        if (Object.keys(currentExtraDeps).length > 0) {
+          const pkgFile = files.find(f => f.file === 'package.json')
+          if (pkgFile) {
+            await fsPromises.writeFile(path.join(tmpDir, 'package.json'), pkgFile.data, 'utf-8')
+          }
+          await runNpmInstall(tmpDir)
+        }
+      }
+
+      // 執行 next build
+      await onProgress?.({ percent: 15 + attempt * 8, step: `構建驗證：執行 next build（第 ${attempt} 次）...` })
+      const buildResult = await runNextBuild(tmpDir)
+
+      if (buildResult.success) {
+        console.log(`[Deployer] Build 驗證通過（第 ${attempt} 次）`)
+        if (attempt > 1) {
+          fixes.push(`第 ${attempt} 次構建通過（AI 自動修復成功）`)
+        }
+        await onProgress?.({ percent: 40, step: '構建驗證通過！' })
+        return {
+          files: wrapInNextJs(currentCode, projectName, tailwindConfig, currentExtraDeps, injectedFiles),
+          buildVerified: true,
+          fixes,
+        }
+      }
+
+      // Build 失敗 — 解析錯誤
+      console.log(`[Deployer] Build 失敗（第 ${attempt} 次），解析錯誤...`)
+      const buildErrors = parseBuildErrors(buildResult.output)
+      console.log(`[Deployer] 發現 ${buildErrors.length} 個 build 錯誤:`, buildErrors.map(e => e.message))
+
+      if (buildErrors.length === 0) {
+        console.warn('[Deployer] Build 失敗但無法解析錯誤，降級部署')
+        fixes.push('Build 失敗但無法解析錯誤類型')
+        break
+      }
+
+      if (attempt < MAX_ATTEMPTS) {
+        // LLM 修復
+        await onProgress?.({ percent: 20 + attempt * 8, step: `AI 修復構建錯誤（第 ${attempt} 次）...` })
+
+        const allDeps = { ...BASE_DEPS, ...currentExtraDeps }
+        const fixResult = await fixBuildErrors(currentCode, buildErrors, buildResult.output, allDeps)
+
+        if (!fixResult) {
+          console.warn('[Deployer] LLM 修復失敗，繼續下一輪')
+          fixes.push(`第 ${attempt} 次 AI 修復失敗`)
+          continue
+        }
+
+        currentCode = fixResult.code
+        if (Object.keys(fixResult.newDependencies).length > 0) {
+          currentExtraDeps = { ...currentExtraDeps, ...fixResult.newDependencies }
+          fixes.push(`AI 新增依賴: ${Object.keys(fixResult.newDependencies).join(', ')}`)
+        }
+        fixes.push(`第 ${attempt} 次 AI 修復了 ${buildErrors.length} 個錯誤`)
+      }
+    }
+
+    // 3 次都失敗 → 降級
+    console.warn('[Deployer] 3 次 build 都失敗，降級為 ignoreBuildErrors 部署')
+    fixes.push('3 次構建驗證都失敗，降級為忽略構建錯誤部署')
+    return {
+      files: wrapInNextJsWithIgnoreErrors(currentCode, projectName, tailwindConfig, currentExtraDeps, injectedFiles),
+      buildVerified: false,
+      fixes,
+    }
+  } catch (err) {
+    console.error('[Deployer] verifyBuildLocally 異常:', err)
+    fixes.push(`構建驗證異常：${err instanceof Error ? err.message : String(err)}`)
+    return {
+      files: wrapInNextJsWithIgnoreErrors(currentCode, projectName, tailwindConfig, currentExtraDeps, injectedFiles),
+      buildVerified: false,
+      fixes,
+    }
+  } finally {
+    // 清理臨時目錄
+    try {
+      await fsPromises.rm(tmpDir, { recursive: true, force: true })
+    } catch {
+      // 清理失敗不影響主流程
+    }
   }
 }

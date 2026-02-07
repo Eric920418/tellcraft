@@ -42,7 +42,8 @@ async function callClaude(
     maxTokens?: number
     temperature?: number
   },
-  _trackingContext?: LlmTrackingContext
+  _trackingContext?: LlmTrackingContext,
+  onTextDelta?: (accumulatedText: string) => void
 ): Promise<{ success: boolean; content?: string; error?: string }> {
   try {
     const anthropic = getAnthropicClient()
@@ -57,6 +58,14 @@ async function callClaude(
         content: m.content,
       })),
     })
+
+    if (onTextDelta) {
+      let accumulated = ''
+      stream.on('text', (text) => {
+        accumulated += text
+        onTextDelta(accumulated)
+      })
+    }
 
     const finalMessage = await stream.finalMessage()
 
@@ -933,9 +942,104 @@ body {
   return { pages, components, styles }
 }
 
+/**
+ * 解析串流中已閉合的 code block（用於實時預覽）
+ * 只匹配有 ``` 結尾的完整 code block，未完成的不計入
+ */
+function parseCompletedFileBlocks(accumulatedText: string): {
+  pages: GeneratedComponent[]
+  components: GeneratedComponent[]
+  styles: string
+  completedBlockCount: number
+} {
+  const tsxRegex = /```tsx:([^\n]+)\n([\s\S]*?)```/g
+  const tsRegex = /```ts:([^\n]+)\n([\s\S]*?)```/g
+  const cssRegex = /```css:([^\n]+)\n([\s\S]*?)```/g
+
+  const pages: GeneratedComponent[] = []
+  const components: GeneratedComponent[] = []
+  let styles = ''
+  let completedBlockCount = 0
+
+  let match
+  while ((match = tsxRegex.exec(accumulatedText)) !== null) {
+    completedBlockCount++
+    const path = match[1].trim()
+    const fileContent = match[2].trim()
+
+    if (path.includes('/page.tsx') || path.includes('/page.ts')) {
+      pages.push({ path, content: fileContent, description: `頁面: ${path.split('/').slice(-2, -1)[0]}` })
+    } else {
+      components.push({ path, content: fileContent, description: `組件: ${path.split('/').pop()?.replace('.tsx', '')}` })
+    }
+  }
+
+  while ((match = tsRegex.exec(accumulatedText)) !== null) {
+    completedBlockCount++
+    const path = match[1].trim()
+    const fileContent = match[2].trim()
+
+    if (path.includes('/page.ts')) {
+      pages.push({ path, content: fileContent, description: `頁面: ${path.split('/').slice(-2, -1)[0]}` })
+    } else {
+      components.push({ path, content: fileContent, description: `工具: ${path.split('/').pop()?.replace('.ts', '')}` })
+    }
+  }
+
+  while ((match = cssRegex.exec(accumulatedText)) !== null) {
+    completedBlockCount++
+    const path = match[1].trim()
+    const fileContent = match[2].trim()
+
+    if (path.includes('globals.css') || path.includes('global.css')) {
+      styles = fileContent
+    }
+  }
+
+  // 嘗試無路徑的 css block
+  if (!styles) {
+    const cssMatch = accumulatedText.match(/```css\n([\s\S]*?)```/)
+    if (cssMatch) {
+      completedBlockCount++
+      styles = cssMatch[1].trim()
+    }
+  }
+
+  return { pages, components, styles, completedBlockCount }
+}
+
 // ============================================================
 // 三階段程式碼生成
 // ============================================================
+
+// Streaming partial code callback type
+export type PartialCodeCallback = (partial: {
+  pages: GeneratedComponent[]
+  components: GeneratedComponent[]
+  styles: string
+}) => void
+
+/**
+ * 建構 throttled text delta handler（雙條件：新區塊 + 時間間隔）
+ */
+function buildStreamingHandler(
+  onPartialCode: PartialCodeCallback | undefined
+): ((accumulated: string) => void) | undefined {
+  if (!onPartialCode) return undefined
+
+  let lastBlockCount = 0
+  let lastEmitTime = 0
+
+  return (accumulated: string) => {
+    const parsed = parseCompletedFileBlocks(accumulated)
+    const now = Date.now()
+    if (parsed.completedBlockCount > lastBlockCount && now - lastEmitTime >= 1500) {
+      lastBlockCount = parsed.completedBlockCount
+      lastEmitTime = now
+      onPartialCode({ pages: parsed.pages, components: parsed.components, styles: parsed.styles })
+    }
+  }
+}
 
 /**
  * 階段 1：生成結構（Structure）
@@ -953,7 +1057,8 @@ export async function generateStructure(
     designIdeas?: Array<{ step: string; answer: string }>
     designBrief?: DesignBrief
   },
-  trackingContext?: LlmTrackingContext
+  trackingContext?: LlmTrackingContext,
+  onPartialCode?: PartialCodeCallback
 ): Promise<GenerationResult> {
   const tier = designTier || 'functional'
 
@@ -1125,7 +1230,8 @@ ${bddSpec}` : ''}
     systemPrompt,
     [{ role: 'user', content: userMessage }],
     { maxTokens: 32768, temperature: 0.2 },
-    { ...trackingContext, purpose: 'generate_structure' }
+    { ...trackingContext, purpose: 'generate_structure' },
+    buildStreamingHandler(onPartialCode)
   )
 
   if (!response.success || !response.content) {
@@ -1154,7 +1260,8 @@ export async function generateAnimations(
     styles: string
   },
   designTier?: DesignTier,
-  trackingContext?: LlmTrackingContext
+  trackingContext?: LlmTrackingContext,
+  onPartialCode?: PartialCodeCallback
 ): Promise<GenerationResult> {
   const tier = designTier || 'functional'
 
@@ -1243,7 +1350,8 @@ ${existingCodeStr}
     systemPrompt,
     [{ role: 'user', content: userMessage }],
     { maxTokens: 32768, temperature: 0.2 },
-    { ...trackingContext, purpose: 'generate_animations' }
+    { ...trackingContext, purpose: 'generate_animations' },
+    buildStreamingHandler(onPartialCode)
   )
 
   if (!response.success || !response.content) {
@@ -1275,7 +1383,8 @@ export async function generateRwd(
     styles: string
   },
   designTier?: DesignTier,
-  trackingContext?: LlmTrackingContext
+  trackingContext?: LlmTrackingContext,
+  onPartialCode?: PartialCodeCallback
 ): Promise<GenerationResult> {
   const tier = designTier || 'functional'
 
@@ -1396,7 +1505,8 @@ ${existingCodeStr}
     systemPrompt,
     [{ role: 'user', content: userMessage }],
     { maxTokens: 32768, temperature: 0.2 },
-    { ...trackingContext, purpose: 'generate_rwd' }
+    { ...trackingContext, purpose: 'generate_rwd' },
+    buildStreamingHandler(onPartialCode)
   )
 
   if (!response.success || !response.content) {
