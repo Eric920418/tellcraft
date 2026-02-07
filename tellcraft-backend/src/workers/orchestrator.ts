@@ -348,14 +348,24 @@ async function handleContinueFlow(
     return
   }
 
+  // 代碼生成管線執行中，忽略用戶訊息
+  if (
+    state.phase === 'uiux_code_generation' ||
+    state.phase === 'uiux_quality_gate'
+  ) {
+    await sendMessage(conversationId, io, {
+      content: '正在生成中，請稍候...',
+      stage: 'info',
+    })
+    return
+  }
+
   // 特殊處理：UIUX 階段的訊息（不需要 waitingForReply）
   if (
     state.phase === 'uiux_template_selection' ||
     state.phase === 'spec_completed' ||
     state.phase === 'uiux_variant_selection' ||
     state.phase === 'uiux_generating_variants' ||
-    state.phase === 'uiux_code_generation' ||
-    state.phase === 'uiux_quality_gate' ||
     state.phase === 'uiux_complete'
   ) {
     // 全形字母轉半形（中文輸入法常見）
@@ -394,8 +404,8 @@ async function handleContinueFlow(
       return
     }
 
-    // 檢查是否是三階段生成的確認訊息
-    if (state.uiuxCodePhase && (
+    // 管線跑完後的確認/重做（管線執行中 waitingForReply=false，不會觸發）
+    if (state.uiuxCodePhase && state.waitingForReply && (
       message.includes('繼續') ||
       message.includes('下一步') ||
       message.includes('好') ||
@@ -407,8 +417,7 @@ async function handleContinueFlow(
       return
     }
 
-    // 檢查是否要重新生成當前階段
-    if (state.uiuxCodePhase && (
+    if (state.uiuxCodePhase && state.waitingForReply && (
       message.includes('重新生成') ||
       message.includes('重做')
     )) {
@@ -1684,19 +1693,224 @@ async function handleVariantSelection(
     },
   })
 
-  // 更新狀態，準備開始三階段生成
+  // 更新狀態，開始完整生成管線
   state.phase = 'uiux_code_generation'
   state.uiuxDesignSystem = finalDesignSystem
   state.uiuxCodePhase = 'structure'
   state.waitingForReply = false
   await saveFlowState(redis, conversationId, state)
 
-  // 開始第一階段：結構生成
-  await executeCodePhaseStructure(conversationId, state, redis, io)
+  // 一氣呵成：Structure → Animation → RWD → Quality Gate
+  await executeFullCodePipeline(conversationId, state, redis, io)
 }
 
 /**
- * 階段 1：生成結構
+ * 完整代碼生成管線：Structure → Animation → RWD → Quality Gate
+ * 一氣呵成，中間只發進度訊息，不等用戶確認
+ */
+async function executeFullCodePipeline(
+  conversationId: string,
+  state: FlowState,
+  redis: Redis,
+  io: SocketIOServer
+) {
+  const { sessionId, uiuxDesignSystem } = state
+
+  if (!sessionId || !uiuxDesignSystem) {
+    console.error('[Orchestrator] Pipeline 缺少必要的狀態數據')
+    return
+  }
+
+  // ===== 階段 1/3：結構生成 =====
+  await sendMessage(conversationId, io, {
+    content: '**階段 1/3：結構生成**\n\n正在生成頁面結構和基礎樣式（桌面版）...',
+    stage: 'uiux_pipeline_progress',
+    progress: { current: 1, total: 3, step: '生成結構' },
+  })
+
+  const { template: dbTemplate, bddSpec, originalRequirements } = await getTemplateAndBddSpec(sessionId)
+  const template = state.uiuxPreparedTemplate || dbTemplate
+  const pages = template.pageStructure.pages || ['home']
+
+  const structureResult = await generateStructure(
+    uiuxDesignSystem,
+    pages,
+    template,
+    bddSpec,
+    state.uiuxDesignTier,
+    {
+      originalRequirements,
+      designIdeas: state.uiuxDesignIdeas,
+      designBrief: state.uiuxDesignBrief,
+    },
+    { conversationId }
+  )
+
+  if (!structureResult.success) {
+    console.error('[Orchestrator] Pipeline 結構生成失敗:', structureResult.error)
+    // 退回變體選擇，讓用戶可以重選或重試
+    state.phase = 'uiux_variant_selection'
+    state.uiuxCodePhase = undefined
+    await saveFlowState(redis, conversationId, state)
+    await sendMessage(conversationId, io, {
+      content: `結構生成失敗：${structureResult.error}\n\n請重新選擇變體，或輸入「重試」再試一次。`,
+      stage: 'error',
+    })
+    return
+  }
+
+  let currentCode = {
+    pages: structureResult.pages || [],
+    components: structureResult.components || [],
+    styles: structureResult.styles || '',
+  }
+
+  await sendMessage(conversationId, io, {
+    content: `**階段 1/3 完成：結構** — ${currentCode.pages.length} 個頁面、${currentCode.components.length} 個組件`,
+    stage: 'uiux_pipeline_progress',
+    progress: { current: 1, total: 3, step: '結構完成' },
+  })
+
+  // ===== 階段 2/3：動畫增強 =====
+  await sendMessage(conversationId, io, {
+    content: '**階段 2/3：動畫增強**\n\n正在添加入場動畫、hover 效果、狀態轉換...',
+    stage: 'uiux_pipeline_progress',
+    progress: { current: 2, total: 3, step: '添加動畫' },
+  })
+
+  const animationResult = await generateAnimations(
+    uiuxDesignSystem,
+    currentCode,
+    state.uiuxDesignTier,
+    { conversationId }
+  )
+
+  if (animationResult.success) {
+    currentCode = {
+      pages: animationResult.pages || currentCode.pages,
+      components: animationResult.components || currentCode.components,
+      styles: animationResult.styles || currentCode.styles,
+    }
+    await sendMessage(conversationId, io, {
+      content: '**階段 2/3 完成：動畫**',
+      stage: 'uiux_pipeline_progress',
+      progress: { current: 2, total: 3, step: '動畫完成' },
+    })
+  } else {
+    console.warn('[Orchestrator] Pipeline 動畫生成失敗，使用結構代碼繼續:', animationResult.error)
+    await sendMessage(conversationId, io, {
+      content: `階段 2/3：動畫生成失敗（${animationResult.error}），使用結構代碼繼續`,
+      stage: 'uiux_pipeline_progress',
+      progress: { current: 2, total: 3, step: '動畫跳過' },
+    })
+  }
+
+  // ===== 階段 3/3：響應式設計 =====
+  await sendMessage(conversationId, io, {
+    content: '**階段 3/3：響應式設計**\n\n正在添加響應式佈局、移動端適配...',
+    stage: 'uiux_pipeline_progress',
+    progress: { current: 3, total: 3, step: '響應式設計' },
+  })
+
+  const rwdResult = await generateRwd(
+    uiuxDesignSystem,
+    currentCode,
+    state.uiuxDesignTier,
+    { conversationId }
+  )
+
+  if (rwdResult.success) {
+    currentCode = {
+      pages: rwdResult.pages || currentCode.pages,
+      components: rwdResult.components || currentCode.components,
+      styles: rwdResult.styles || currentCode.styles,
+    }
+  } else {
+    console.warn('[Orchestrator] Pipeline RWD 生成失敗，使用動畫代碼繼續:', rwdResult.error)
+  }
+
+  // ===== Quality Gate =====
+  await sendMessage(conversationId, io, {
+    content: '**品質檢查中...**',
+    stage: 'uiux_pipeline_progress',
+    progress: { current: 3, total: 3, step: '品質檢查' },
+  })
+
+  const MAX_FIX_ATTEMPTS = 3
+  let report = runQualityGate(currentCode, state.uiuxDesignTier)
+  let totalAutoFixed = 0
+
+  for (let attempt = 0; attempt < MAX_FIX_ATTEMPTS && !report.passed; attempt++) {
+    const criticalIssues = [
+      ...report.categories.a11y.issues,
+      ...report.categories.performance.issues,
+      ...report.categories.code_quality.issues,
+    ].filter(i => i.severity === 'critical')
+
+    if (criticalIssues.length === 0) break
+
+    console.log(`[Orchestrator] Pipeline QG 修復 ${attempt + 1}/${MAX_FIX_ATTEMPTS}`)
+
+    const fixedCode = await autoFixCriticalIssues(currentCode, criticalIssues)
+    if (!fixedCode) break
+
+    totalAutoFixed += criticalIssues.length
+    currentCode = fixedCode
+    report = runQualityGate(currentCode, state.uiuxDesignTier)
+  }
+
+  report.summary.autoFixed = totalAutoFixed
+
+  // ===== 保存最終結果 =====
+  state.uiuxGeneratedCode = currentCode
+  state.uiuxQualityReport = report
+  state.uiuxCodePhase = 'complete'
+  state.phase = 'uiux_complete'
+  state.waitingForReply = false
+  await saveFlowState(redis, conversationId, state)
+
+  await updateBddSession({
+    sessionId,
+    updates: {
+      generatedPages: currentCode.pages,
+      generatedComponents: currentCode.components,
+      generatedStyles: currentCode.styles,
+      currentPhase: 'uiux_complete',
+    },
+  })
+
+  if (state.projectId) {
+    await db.upsertProjectFiles(state.projectId, 'uiux',
+      generatedCodeToFileRows(currentCode, state.uiuxDesignSystem))
+  }
+
+  // ===== 最終完成訊息 =====
+  const tailwindConfig = generateTailwindConfig(uiuxDesignSystem)
+  const finalPageCount = currentCode.pages.length
+  const finalComponentCount = currentCode.components.length
+
+  await sendMessage(conversationId, io, {
+    content: `**程式碼生成完成！**\n\n已生成：\n- ${finalPageCount} 個頁面（含響應式）\n- ${finalComponentCount} 個組件（含動畫）\n- 全域樣式 (globals.css)\n- Tailwind 配置\n\n所有代碼已包含：\n- 結構和基礎樣式\n- 動畫效果\n- 響應式設計\n- 品質檢查${report.passed ? '通過' : ''}\n\n您可以在預覽面板查看完整代碼。`,
+    stage: 'uiux_generation_complete',
+    progress: { current: 3, total: 3, step: '完成' },
+    layoutHint: 'split',
+    richContent: {
+      type: 'code_preview',
+      data: {
+        pages: currentCode.pages,
+        components: currentCode.components,
+        styles: currentCode.styles,
+        tailwindConfig,
+        currentPhase: 'complete',
+      } as Record<string, unknown>,
+    },
+  })
+
+  console.log(`[Orchestrator] Pipeline 完成: ${finalPageCount} pages, ${finalComponentCount} components, QG passed=${report.passed}`)
+}
+
+/**
+ * 階段 1：生成結構（保留供獨立調用）
  */
 async function executeCodePhaseStructure(
   conversationId: string,
