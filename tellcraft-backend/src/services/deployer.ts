@@ -163,6 +163,27 @@ const KNOWN_PACKAGES: Record<string, string> = {
   'next-themes': '^0.3.0',
 }
 
+/**
+ * 將專案名稱轉換為 Vercel 合法的 project slug
+ * Vercel 規則：只允許 a-z、0-9、連字號，最長 100 字元
+ */
+function toVercelSlug(name: string, projectId?: string): string {
+  const slug = name
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, '-')  // 非英數字母（含中文）全部轉連字號
+    .replace(/-+/g, '-')          // 多個連字號合併
+    .replace(/^-|-$/g, '')        // 去頭尾連字號
+    .slice(0, 30)
+
+  if (slug.length >= 3) return slug
+
+  // 專案名全是中文或特殊字元 → 用 projectId 前 8 碼
+  if (projectId) {
+    return `tc-${projectId.replace(/-/g, '').slice(0, 8)}`
+  }
+  return 'tellcraft-project'
+}
+
 /** 基礎 dependencies（一定會包含在 package.json 中） */
 const BASE_DEPS: Record<string, string> = {
   next: '^15.0.0',
@@ -442,12 +463,7 @@ export async function prepareDeployment(
     }
   }
 
-  const slug = project.name
-    .toLowerCase()
-    .replace(/[^a-z0-9\u4e00-\u9fff]/g, '-')
-    .replace(/-+/g, '-')
-    .replace(/^-|-$/g, '')
-    .slice(0, 30) || 'tellcraft-project'
+  const slug = toVercelSlug(project.name, projectId)
 
   // 部署前預檢 + 自動修復
   const sanitizeResult = sanitizeCodeForDeploy(code)
@@ -489,12 +505,7 @@ export async function executeDeployment(
     // 1. 取得專案名稱
     await onProgress({ percent: 5, step: '準備部署...' })
     const project = await db.getProject(projectId)
-    const projectName = project?.name
-      ?.toLowerCase()
-      .replace(/[^a-z0-9]/g, '-')
-      .replace(/-+/g, '-')
-      .replace(/^-|-$/g, '')
-      .slice(0, 30) || 'tellcraft-project'
+    const projectName = toVercelSlug(project?.name || '', projectId)
 
     // 2. 本地 Build 驗證（5-40%）
     const buildResult = await verifyBuildLocally(
