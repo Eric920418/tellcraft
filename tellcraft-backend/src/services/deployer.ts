@@ -732,19 +732,18 @@ export default config
   }
 
   // 生成的 components — 智慧路徑處理
+  // 這些頂層目錄直接放根目錄，不加 components/ 前綴
+  const ROOT_LEVEL_DIRS = ['app/', 'lib/', 'hooks/', 'utils/', 'types/', 'context/', 'stores/', 'data/', 'config/']
   let hasCustomLayout = false
   for (const comp of code.components) {
     const cleanPath = comp.path.replace(/^(components\/)?/, '')
 
-    // app/ 開頭的檔案放到 app/（不是 components/app/）
-    if (cleanPath.startsWith('app/')) {
-      if (cleanPath === 'app/layout.tsx' || cleanPath === 'app/layout.ts') {
-        hasCustomLayout = true
-      }
-      files.push({ file: cleanPath, data: comp.content })
+    if (cleanPath === 'app/layout.tsx' || cleanPath === 'app/layout.ts') {
+      hasCustomLayout = true
     }
-    // lib/ 開頭的檔案放到 lib/（不是 components/lib/）
-    else if (cleanPath.startsWith('lib/')) {
+
+    // 頂層目錄放到對應位置（不加 components/ 前綴）
+    if (ROOT_LEVEL_DIRS.some(dir => cleanPath.startsWith(dir))) {
       files.push({ file: cleanPath, data: comp.content })
     }
     // 其他才放到 components/
