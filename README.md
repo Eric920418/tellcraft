@@ -54,6 +54,19 @@ UIUX Implementation 階段生成的 React TSX 代碼，自動轉換為 standalon
 - `app/lib/tsx-to-preview.ts`：TSX → HTML 轉換工具（多層防禦：組件移除 → 表達式移除 → 文字淨化）
 - `app/page.tsx`：`renderPreviewPanel()` 檢測 `code_preview` richContent，含 DeviceSwitcher + 自動縮放 iframe
 
+**組件 Default Props 提取（2026-02-06）**：
+生成的 React 組件（如 `AnimatedCard`、`AnimatedButton`）在函數簽名中帶有預設值（`{ className = 'card' }`），轉換器必須正確提取這些預設值並在內聯時替換，否則 `className={className}` 會被動態表達式移除邏輯清掉，導致元素失去樣式。
+- `extractDefaultProps()`：解析組件函數簽名中的預設值
+- `substituteProps()`：屬性值加引號（`="${value}"`），文字內容不加
+- `{...props}` spread 解析：展開 usage 上的 string-valued props
+
+**RWD 響應式安全網（2026-02-06）**：
+`generateRwd()` LLM 經常不產出 Tailwind 響應式前綴（sm:/md:/lg:），導致預覽始終顯示桌面版佈局。前後端雙層安全網自動注入基本響應式 class：
+- 後端：`ensureResponsiveClasses()`（`uiux-generation.ts`）— 在 `generateRwd()` 解析後檢測，無響應式 class 時注入
+- 前端：`addBasicResponsive()`（`tsx-to-preview.ts`）— 在 `convertToPreviewHtml()` 步驟 6-7 間檢測注入
+- 模式：`grid-cols-3` → `grid-cols-1 md:grid-cols-3`、`text-3xl` → `text-xl md:text-3xl` 等
+- 用 `(?<!:)` 負向後查避免雙重處理已有前綴的 class
+
 ### 專案自動命名（2026-02-06）
 
 專案不再用「專案 2/6/2025」這種日期格式命名。Classifier 分類意圖時同步生成語義化專案名稱（如「寵物電商平台」、「健身預約系統」），Orchestrator 收到後自動更新 project name。
