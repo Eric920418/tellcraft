@@ -351,10 +351,33 @@ export default config
     })
   }
 
-  // app/layout.tsx
-  files.push({
-    file: 'app/layout.tsx',
-    data: `import type { Metadata } from 'next'
+  // 生成的 components — 智慧路徑處理
+  let hasCustomLayout = false
+  for (const comp of code.components) {
+    const cleanPath = comp.path.replace(/^(components\/)?/, '')
+
+    // app/ 開頭的檔案放到 app/（不是 components/app/）
+    if (cleanPath.startsWith('app/')) {
+      if (cleanPath === 'app/layout.tsx' || cleanPath === 'app/layout.ts') {
+        hasCustomLayout = true
+      }
+      files.push({ file: cleanPath, data: comp.content })
+    }
+    // lib/ 開頭的檔案放到 lib/（不是 components/lib/）
+    else if (cleanPath.startsWith('lib/')) {
+      files.push({ file: cleanPath, data: comp.content })
+    }
+    // 其他才放到 components/
+    else {
+      files.push({ file: `components/${cleanPath}`, data: comp.content })
+    }
+  }
+
+  // app/layout.tsx — 如果 LLM 沒生成自訂的，用預設
+  if (!hasCustomLayout) {
+    files.push({
+      file: 'app/layout.tsx',
+      data: `import type { Metadata } from 'next'
 import './globals.css'
 
 export const metadata: Metadata = {
@@ -374,13 +397,58 @@ export default function RootLayout({
   )
 }
 `,
-  })
+    })
+  }
 
-  // 生成的 components
-  for (const comp of code.components) {
+  // 自動補齊 lib/fonts.ts — LLM 經常引用但不一定有生成
+  const allContent = [...code.pages, ...code.components].map(f => f.content).join('\n')
+  const existingFilePaths = files.map(f => f.file)
+  if (
+    allContent.includes('@/lib/fonts') &&
+    !existingFilePaths.includes('lib/fonts.ts') &&
+    !existingFilePaths.includes('lib/fonts.tsx')
+  ) {
+    // 從引用處提取變數名稱
+    const fontImports = allContent.match(/import\s*\{([^}]+)\}\s*from\s*['"]@\/lib\/fonts['"]/g) || []
+    const fontVarNames = new Set<string>()
+    for (const imp of fontImports) {
+      const match = imp.match(/\{([^}]+)\}/)
+      if (match) {
+        match[1].split(',').map(s => s.trim()).filter(Boolean).forEach(n => fontVarNames.add(n))
+      }
+    }
+
+    // camelCase 變數名 → next/font/google import 名 對照表
+    const FONT_LOOKUP: Record<string, string> = {
+      dmSans: 'DM_Sans', dmMono: 'DM_Mono', dmSerifDisplay: 'DM_Serif_Display',
+      inter: 'Inter', geist: 'Geist', geistMono: 'Geist_Mono',
+      notoSansTC: 'Noto_Sans_TC', notoSerifTC: 'Noto_Serif_TC',
+      notoSansSC: 'Noto_Sans_SC', notoSansJP: 'Noto_Sans_JP',
+      poppins: 'Poppins', roboto: 'Roboto', robotoMono: 'Roboto_Mono',
+      lato: 'Lato', openSans: 'Open_Sans', montserrat: 'Montserrat',
+      raleway: 'Raleway', playfairDisplay: 'Playfair_Display',
+      merriweather: 'Merriweather', sourceSans3: 'Source_Sans_3',
+      sourceCodePro: 'Source_Code_Pro', jetBrainsMono: 'JetBrains_Mono',
+      ibmPlexSans: 'IBM_Plex_Sans', ibmPlexMono: 'IBM_Plex_Mono',
+      spaceGrotesk: 'Space_Grotesk', spaceMono: 'Space_Mono',
+      workSans: 'Work_Sans', manrope: 'Manrope', outfit: 'Outfit',
+      sora: 'Sora', cabin: 'Cabin', nunito: 'Nunito', rubik: 'Rubik',
+      figtree: 'Figtree', plusJakartaSans: 'Plus_Jakarta_Sans',
+    }
+
+    const imports: string[] = []
+    const exports: string[] = []
+    for (const varName of fontVarNames) {
+      const googleName = FONT_LOOKUP[varName] || 'Geist' // fallback 安全字體
+      imports.push(`import { ${googleName} } from 'next/font/google'`)
+      exports.push(`export const ${varName} = ${googleName}({ subsets: ['latin'], display: 'swap' })`)
+    }
+
+    // 去重 import（多個變數可能 fallback 到同一字體）
+    const uniqueImports = [...new Set(imports)]
     files.push({
-      file: `components/${comp.path.replace(/^(components\/)?/, '')}`,
-      data: comp.content,
+      file: 'lib/fonts.ts',
+      data: uniqueImports.join('\n') + '\n\n' + exports.join('\n'),
     })
   }
 
@@ -398,9 +466,12 @@ export default function RootLayout({
     // 其他 pages 放到各自路徑
     for (let i = 1; i < code.pages.length; i++) {
       const page = code.pages[i]
-      const pagePath = page.path
-        .replace(/^(pages\/)?/, '')
-        .replace(/\.(tsx|ts|jsx|js)$/, '')
+      let pagePath = page.path
+        .replace(/^(app\/|pages\/)?/, '')     // 去掉 app/ 或 pages/ 前綴
+        .replace(/\/page\.(tsx|ts|jsx|js)$/, '') // 去掉尾部 /page.tsx
+        .replace(/\.(tsx|ts|jsx|js)$/, '')       // 去掉副檔名
+      // 如果 path 就是 page (首頁)，跳過（已由 mainPage 處理）
+      if (!pagePath || pagePath === 'page') continue
       files.push({
         file: `app/${pagePath}/page.tsx`,
         data: page.content,
