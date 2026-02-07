@@ -385,14 +385,29 @@ async function handleContinueFlow(
     return
   }
 
-  // 部署完成後：支援回滾和迭代修改
+  // 部署完成後：支援重新部署、回滾和迭代修改
   if (state.phase === 'deployer_complete') {
+    // 重新部署
+    const deployKeywords = ['部署', 'deploy', '上線', '發布', '再部署']
+    if (deployKeywords.some(kw => message.includes(kw))) {
+      await executeDeployerSkill({
+        taskId: state.taskId || '',
+        projectId: data.projectId,
+        conversationId,
+        userId,
+        message,
+        redis,
+        io,
+      })
+      return
+    }
+    // 回滾
     const rollbackKeywords = ['回滾', 'rollback', '回到上一版', '還原']
     if (rollbackKeywords.some(kw => message.includes(kw))) {
       await handleDeployRollback(conversationId, state, data.projectId, redis, io)
       return
     }
-    // 任何其他訊息 → 視為修改請求，進入迭代
+    // 其他訊息 → 視為修改請求，進入迭代
     await handleDesignIteration(conversationId, state, message, data.projectId, redis, io)
     return
   }
