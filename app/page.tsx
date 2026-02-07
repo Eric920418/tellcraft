@@ -2101,17 +2101,17 @@ function ChatSection({
               flex: 1,
               display: 'flex',
               justifyContent: 'center',
-              padding: 24,
+              padding: codePreviewDevice === 'desktop' ? 0 : 24,
               overflow: 'auto',
               background: 'var(--gray-50)',
             }}
           >
             <div
               style={{
-                width: iframeWidth,
+                width: codePreviewDevice === 'desktop' ? '100%' : iframeWidth,
                 height: '100%',
-                borderRadius: 8,
-                boxShadow: '0 8px 32px rgba(0,0,0,0.12), 0 2px 8px rgba(0,0,0,0.08)',
+                borderRadius: codePreviewDevice === 'desktop' ? 0 : 8,
+                boxShadow: codePreviewDevice === 'desktop' ? 'none' : '0 8px 32px rgba(0,0,0,0.12), 0 2px 8px rgba(0,0,0,0.08)',
                 background: '#fff',
                 overflow: 'hidden',
               }}
