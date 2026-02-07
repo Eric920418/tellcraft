@@ -784,6 +784,66 @@ ${JSON.stringify(designSystem.borderRadius, null, 2)}
 }
 
 /**
+ * Safety net: 如果代碼沒有 Tailwind 響應式前綴，自動注入基本 Mobile-first 模式
+ * 只在代碼完全沒有 sm:/md:/lg: 時觸發（避免干擾已有 RWD 的代碼）
+ */
+function ensureResponsiveClasses(
+  pages: GeneratedComponent[],
+  components: GeneratedComponent[]
+): { pages: GeneratedComponent[]; components: GeneratedComponent[] } {
+  const allContent = [...pages, ...components].map(c => c.content).join('\n')
+  if (/\b(sm|md|lg|xl):/.test(allContent)) return { pages, components }
+
+  console.log('[ensureResponsiveClasses] No responsive classes detected, injecting basic responsive patterns')
+
+  const transform = (content: string): string => {
+    // Grid columns — mobile-first: 1 col → md breakpoint
+    content = content.replace(/(?<!:)\bgrid-cols-(\d+)\b/g, (_match, n) => {
+      const num = parseInt(n)
+      if (num <= 1) return _match
+      if (num <= 3) return `grid-cols-1 md:grid-cols-${n}`
+      return `grid-cols-1 sm:grid-cols-2 md:grid-cols-${n}`
+    })
+
+    // Text sizes (combined single-pass to avoid double-replacement)
+    content = content.replace(/(?<!:)\btext-(2xl|3xl|4xl|5xl)\b/g, (_match, size) => {
+      const map: Record<string, string> = {
+        '2xl': 'text-lg md:text-2xl',
+        '3xl': 'text-xl md:text-3xl',
+        '4xl': 'text-2xl md:text-4xl',
+        '5xl': 'text-3xl md:text-5xl',
+      }
+      return map[size] || _match
+    })
+
+    // Gap
+    content = content.replace(/(?<!:)\bgap-(6|8)\b/g, (_match, n) => {
+      const map: Record<string, string> = { '6': 'gap-3 md:gap-6', '8': 'gap-4 md:gap-8' }
+      return map[n] || _match
+    })
+
+    // Horizontal padding
+    content = content.replace(/(?<!:)\bpx-(6|8)\b/g, (_match, n) => {
+      const map: Record<string, string> = { '6': 'px-4 md:px-6', '8': 'px-4 md:px-8' }
+      return map[n] || _match
+    })
+
+    // Vertical padding
+    content = content.replace(/(?<!:)\bpy-(8|10|12)\b/g, (_match, n) => {
+      const map: Record<string, string> = { '8': 'py-4 md:py-8', '10': 'py-6 md:py-10', '12': 'py-6 md:py-12' }
+      return map[n] || _match
+    })
+
+    return content
+  }
+
+  return {
+    pages: pages.map(p => ({ ...p, content: transform(p.content) })),
+    components: components.map(c => ({ ...c, content: transform(c.content) })),
+  }
+}
+
+/**
  * 解析 LLM 輸出的檔案
  */
 function parseGeneratedFiles(content: string, designSystem: DesignSystem): {
@@ -1343,15 +1403,19 @@ ${existingCodeStr}
     return { success: false, error: response.error || '無法生成響應式代碼' }
   }
 
-  const { pages, components, styles } = parseGeneratedFiles(response.content, designSystem)
+  const { pages: parsedPages, components: parsedComps, styles: parsedStyles } = parseGeneratedFiles(response.content, designSystem)
 
-  // 如果沒有解析到新的 styles，保留原有的
-  const finalStyles = styles || existingCode.styles
+  const finalPages = parsedPages.length > 0 ? parsedPages : existingCode.pages
+  const finalComps = parsedComps.length > 0 ? parsedComps : existingCode.components
+  const finalStyles = parsedStyles || existingCode.styles
+
+  // Safety net: 如果 LLM 沒有產出響應式 class，自動注入基本響應式模式
+  const responsiveCode = ensureResponsiveClasses(finalPages, finalComps)
 
   return {
     success: true,
-    pages: pages.length > 0 ? pages : existingCode.pages,
-    components: components.length > 0 ? components : existingCode.components,
+    pages: responsiveCode.pages,
+    components: responsiveCode.components,
     styles: finalStyles,
   }
 }

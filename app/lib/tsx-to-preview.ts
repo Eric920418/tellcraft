@@ -564,6 +564,51 @@ function sanitizeTextContent(html: string): string {
 }
 
 /**
+ * Safety net: 自動注入基本 Tailwind 響應式前綴
+ * 只在代碼完全沒有 sm:/md:/lg: 時觸發
+ */
+function addBasicResponsive(jsx: string): string {
+  // Grid columns — mobile-first
+  jsx = jsx.replace(/(?<!:)\bgrid-cols-(\d+)\b/g, (_match, n) => {
+    const num = parseInt(n)
+    if (num <= 1) return _match
+    if (num <= 3) return `grid-cols-1 md:grid-cols-${n}`
+    return `grid-cols-1 sm:grid-cols-2 md:grid-cols-${n}`
+  })
+
+  // Text sizes (single-pass to avoid double-replacement)
+  jsx = jsx.replace(/(?<!:)\btext-(2xl|3xl|4xl|5xl)\b/g, (_match, size) => {
+    const map: Record<string, string> = {
+      '2xl': 'text-lg md:text-2xl',
+      '3xl': 'text-xl md:text-3xl',
+      '4xl': 'text-2xl md:text-4xl',
+      '5xl': 'text-3xl md:text-5xl',
+    }
+    return map[size] || _match
+  })
+
+  // Gap
+  jsx = jsx.replace(/(?<!:)\bgap-(6|8)\b/g, (_match, n) => {
+    const map: Record<string, string> = { '6': 'gap-3 md:gap-6', '8': 'gap-4 md:gap-8' }
+    return map[n] || _match
+  })
+
+  // Horizontal padding
+  jsx = jsx.replace(/(?<!:)\bpx-(6|8)\b/g, (_match, n) => {
+    const map: Record<string, string> = { '6': 'px-4 md:px-6', '8': 'px-4 md:px-8' }
+    return map[n] || _match
+  })
+
+  // Vertical padding
+  jsx = jsx.replace(/(?<!:)\bpy-(8|10|12)\b/g, (_match, n) => {
+    const map: Record<string, string> = { '8': 'py-4 md:py-8', '10': 'py-6 md:py-10', '12': 'py-6 md:py-12' }
+    return map[n] || _match
+  })
+
+  return jsx
+}
+
+/**
  * 核心：將 JSX 語法轉換為 HTML
  */
 function convertJsxSyntax(jsx: string): string {
@@ -835,6 +880,11 @@ export function convertToPreviewHtml(
 
   // 6. 移除未解析的 React 組件標籤（PascalCase）
   pageJsx = stripUnresolvedComponents(pageJsx)
+
+  // 6.5. Safety net: 如果代碼沒有響應式 class，自動注入基本 Mobile-first 模式
+  if (!/\b(sm|md|lg|xl):/.test(pageJsx)) {
+    pageJsx = addBasicResponsive(pageJsx)
+  }
 
   // 7. 轉換 JSX → HTML（包含表達式移除 + 文字淨化）
   const html = convertJsxSyntax(pageJsx)
