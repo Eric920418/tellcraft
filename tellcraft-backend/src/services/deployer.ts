@@ -1389,15 +1389,17 @@ ${codeBlocks.join('\n\n')}
 對於缺失的 @/ 模組，**必須生成完整的新檔案**。`
 
   try {
-    const response = await client.messages.create({
+    // 使用 streaming 避免 Anthropic SDK 的非串流超時限制
+    const stream = client.messages.stream({
       model: 'claude-haiku-4-5-20251001',
       max_tokens: 24000,
       messages: [{ role: 'user', content: prompt }],
     })
+    const response = await stream.finalMessage()
 
     const content = response.content
       .filter(block => block.type === 'text')
-      .map(block => block.text)
+      .map(block => (block as { type: 'text'; text: string }).text)
       .join('\n')
 
     // 解析修復後的檔案（複用 quality-gate 的模式）
