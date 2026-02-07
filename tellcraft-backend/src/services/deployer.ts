@@ -1260,7 +1260,21 @@ function parseBuildErrors(output: string): BuildError[] {
     }
   }
 
-  // Pattern 4: Build error 格式 — "Build error occurred" + Error message
+  // Pattern 4: Next.js ⨯ 前綴的錯誤（如 ⨯ ./app/page.tsx）
+  const nextjsErrorRegex = /⨯\s+(.+)/g
+  while ((match = nextjsErrorRegex.exec(output)) !== null) {
+    const msg = match[1].trim()
+    const isDup = errors.some(e => msg.includes(e.message) || e.message.includes(msg))
+    if (!isDup) {
+      const key = `nextjs:${msg}`
+      if (!seen.has(key)) {
+        seen.add(key)
+        errors.push({ type: 'unknown', message: msg })
+      }
+    }
+  }
+
+  // Pattern 5: Generic Error: 格式
   const buildErrorRegex = /Error:\s*(.+)/g
   while ((match = buildErrorRegex.exec(output)) !== null) {
     const msg = match[1].trim()
@@ -1270,11 +1284,24 @@ function parseBuildErrors(output: string): BuildError[] {
       const key = `unknown:${msg}`
       if (!seen.has(key)) {
         seen.add(key)
-        errors.push({
-          type: 'unknown',
-          message: msg,
-        })
+        errors.push({ type: 'unknown', message: msg })
       }
+    }
+  }
+
+  // Pattern 6: TypeScript 錯誤的替代格式（不帶 "Type error:" 前綴）
+  // e.g., "./components/foo.tsx (12,5): error TS2304: Cannot find name 'xxx'"
+  const tsAltRegex = /\.\/([^\s(]+)\s*\((\d+),\d+\):\s*error\s+TS\d+:\s*(.+)/g
+  while ((match = tsAltRegex.exec(output)) !== null) {
+    const key = `tsalt:${match[1]}:${match[2]}:${match[3]}`
+    if (!seen.has(key)) {
+      seen.add(key)
+      errors.push({
+        type: 'typescript',
+        file: match[1],
+        line: parseInt(match[2]),
+        message: match[3].trim(),
+      })
     }
   }
 
@@ -1622,7 +1649,9 @@ async function verifyBuildLocally(
       console.log(`[Deployer] 發現 ${buildErrors.length} 個 build 錯誤:`, buildErrors.map(e => e.message))
 
       if (buildErrors.length === 0) {
-        console.warn('[Deployer] Build 失敗但無法解析錯誤，降級部署')
+        // 印出 build output 尾部以便診斷未知錯誤格式
+        const outputTail = buildResult.output.slice(-1500)
+        console.warn('[Deployer] Build 失敗但無法解析錯誤，build output 尾部:\n', outputTail)
         fixes.push('Build 失敗但無法解析錯誤類型')
         break
       }
