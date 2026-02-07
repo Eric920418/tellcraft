@@ -29,7 +29,7 @@ npx ts-node bdd-spec/scripts/validate-feature.ts spec/features/      # 結構驗
 # 選項：--json, --strict, --fix
 
 # VPS 部署（SSH 到 VPS 後執行）
-~/deploy.sh               # 自動 git pull + build + pm2 restart
+git pull && pnpm build && pm2 restart tellcraft-backend
 ```
 
 ## 系統架構
@@ -56,9 +56,12 @@ npx ts-node bdd-spec/scripts/validate-feature.ts spec/features/      # 結構驗
 | **Orchestrator** | `tellcraft-backend/src/workers/orchestrator.ts` | BullMQ Worker，處理用戶請求 |
 | **Classifier** | `tellcraft-backend/src/services/classifier.ts` | AI 意圖分類，決定使用哪個 Skill |
 | **Registry** | `tellcraft-backend/src/services/registry.ts` | Skill 註冊表 |
-| **Server Actions** | `app/actions/index.ts` | 30+ 前端 Actions |
+| **Prefilter** | `tellcraft-backend/src/services/prefilter.ts` | Layer 1 前置過濾（Rate Limit、Prompt Injection、長度上限 5000 字） |
+| **Server Actions** | `app/actions/index.ts` | 38 個前端 Server Actions |
 | **VPS API Client** | `app/lib/vps-api.ts` | 前端呼叫 VPS 的 HTTP 客戶端 |
 | **WebSocket Hook** | `app/hooks/useVpsWebSocket.ts` | 即時訊息推送 |
+| **TSX→HTML 轉換器** | `app/lib/tsx-to-preview.ts` | UIUX 預覽核心，TSX 轉瀏覽器可渲染 HTML |
+| **Auth Middleware** | `tellcraft-backend/src/middleware/auth.ts` | `requireAuth`、`optionalAuth`、`requirePlan()` |
 
 ### Skill 系統
 
@@ -68,7 +71,31 @@ npx ts-node bdd-spec/scripts/validate-feature.ts spec/features/      # 結構驗
 | `uiux` | 前端介面設計（3 階段：Design Discovery → Design Lab → Implementation）|
 | `quality-gate` | 自動品質檢查（UIUX Implementation 完成後自動觸發，檢查 A11y/Performance/Code Quality，critical 問題自動 LLM 修復） |
 | `deployer` | 將 UIUX 生成的代碼包裝成 Next.js 部署到 Vercel（UIUX 完成後用戶說「部署」觸發）|
-| `domain-manager` | 網域管理入口 |
+| `domain-manager` | 網域管理入口（含 `domain-purchase`、`domain-dns` 子 Skill，已註冊但功能有限）|
+
+### Orchestrator Phase 狀態機
+
+Orchestrator 使用 `FlowState.phase` 控制對話流程，所有 phase 必須在 `handleContinueFlow` 中有對應路由：
+
+| Phase | 說明 |
+|-------|------|
+| `spec_clarify` | BDD 需求釐清中 |
+| `spec_completed` | BDD 規格完成 |
+| `uiux_design_preference` | UIUX Discovery Path A 問卷 |
+| `uiux_design_clarify` | UIUX Discovery 補充釐清 |
+| `uiux_design_brief_confirm` | Design Brief AI 顧問確認 |
+| `uiux_template_selection` | UIUX Discovery Path B 模板選擇 |
+| `uiux_variant_selection` | Design Lab 變體選擇 |
+| `uiux_generating_variants` | 變體生成中（攔截用戶輸入） |
+| `uiux_code_generation` | Implementation 代碼生成確認/重做 |
+| `uiux_quality_gate` | Quality Gate 執行中 |
+| `uiux_complete` | UIUX 完成（可迭代或觸發部署） |
+| `uiux_iterating` | 迭代修改中（攔截用戶輸入） |
+| `deployer_confirm` | 部署確認等待中 |
+| `deployer_deploying` | 部署執行中 |
+| `deployer_failed` | 部署失敗 |
+| `deployer_complete` | 部署完成（可迭代/回滾/重新部署） |
+| `deployer_rollback_select` | 等待用戶選擇回滾版本 |
 
 #### UIUX Skill 架構細節
 
@@ -197,7 +224,7 @@ Vercel Server Actions → app/lib/vps-api.ts → VPS Express API → PostgreSQL
 app/                       # Next.js 前端（Vercel）
 ├── actions/               # Server Actions（index.ts, admin.ts, storage.ts）
 ├── hooks/                 # useAuth.ts, useVpsWebSocket.ts
-├── lib/                   # vps-api.ts, llm.ts, supabase/
+├── lib/                   # vps-api.ts, llm.ts, tsx-to-preview.ts, supabase/
 ├── components/            # UI 元件（uiux/ 下有 VariantPicker, CodePreview, PreviewPanel 等）
 ├── dashboard/             # 用戶/管理員儀表板
 └── auth/                  # OAuth 登入
@@ -207,8 +234,9 @@ tellcraft-backend/         # Express 後端（VPS）
 │   ├── index.ts           # Express + Socket.io + BullMQ 入口
 │   ├── routes/            # auth, conversation, project, templates, dashboard, session 等
 │   ├── workers/           # orchestrator.ts（BullMQ Worker，核心流程引擎）
-│   └── services/          # classifier, registry, bdd-session, uiux-generation,
-│                          # prd-discovery, formulation, spec-discovery
+│   ├── middleware/         # auth.ts（requireAuth, optionalAuth, requirePlan）
+│   └── services/          # classifier, registry, prefilter, bdd-session, uiux-generation,
+│                          # quality-gate, deployer, prd-discovery, formulation, spec-discovery
 └── ecosystem.config.js    # PM2 配置
 
 spec/                      # BDD 規格產出
@@ -254,6 +282,8 @@ quality-gate-skill/        # Quality Gate Skill 定義
 - **動畫庫是 `motion/react`**，不是 `framer-motion`（import path 已遷移）
 - **`uiux-generation.ts` 使用模組級 Anthropic 單例**
 - **文檔與實作同步**：修改後端流程時必須同步更新 `uiux-skill/instructions/` 和此文件
+- **Classifier 三層防禦**：Layer 1 Prefilter（Rate Limit + Injection 偵測）→ Layer 2 Meta Intent（`onboarding`/`chitchat`/`abuse`/`unknown` 模板回覆）→ Layer 3 Skill 分類
+- **新增 phase 必須同步**：`handleContinueFlow` 路由 + `FlowState` 型別 + 前端 richContent type union
 
 ## 核心原則
 

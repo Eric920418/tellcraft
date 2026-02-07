@@ -1231,15 +1231,19 @@ function parseBuildErrors(output: string): BuildError[] {
     }
   }
 
-  // Pattern 2: Module not found
+  // Pattern 2: Module not found — 同時嘗試捕捉來源檔案
   const moduleRegex = /Module not found:\s*Can't resolve\s*['"]([^'"]+)['"]/g
   while ((match = moduleRegex.exec(output)) !== null) {
     const key = `module:${match[1]}`
     if (!seen.has(key)) {
       seen.add(key)
+      // 回溯找來源檔案（Next.js 格式：./app/page.tsx 在錯誤行之前）
+      const preceding = output.slice(Math.max(0, match.index - 300), match.index)
+      const fileMatch = preceding.match(/\.\/([^\n]+?\.(?:tsx?|jsx?|css))\s*$/m)
       errors.push({
         type: 'module_not_found',
         message: `Module not found: Can't resolve '${match[1]}'`,
+        file: fileMatch ? fileMatch[1].trim() : undefined,
       })
     }
   }
@@ -1325,7 +1329,14 @@ async function fixBuildErrors(
 
   const errorList = errors.map(e => {
     let desc = `- [${e.type}] ${e.message}`
-    if (e.file) desc += ` (${e.file}${e.line ? `:${e.line}` : ''})`
+    if (e.file) desc += ` (in ${e.file}${e.line ? `:${e.line}` : ''})`
+    // 標記內部模組 vs 外部模組
+    if (e.type === 'module_not_found') {
+      const moduleName = e.message.match(/Can't resolve '([^']+)'/)?.[1] || ''
+      if (moduleName.startsWith('@/') || moduleName.startsWith('./') || moduleName.startsWith('../')) {
+        desc += ' ← **專案內部檔案缺失，需要生成此檔案**'
+      }
+    }
     return desc
   }).join('\n')
 
@@ -1344,8 +1355,17 @@ async function fixBuildErrors(
 3. 動畫庫用 \`motion/react\`（不是 framer-motion）
 4. 路徑別名用 \`@/\`（對應專案根目錄）
 5. 輸出修復後的完整檔案（\`\`\`tsx:path 或 \`\`\`css:path 或 \`\`\`ts:path 格式）
-6. 如果需要新增第三方依賴，在最後附上 \`\`\`json:NEW_DEPENDENCIES 區塊，格式如 {"package-name": "^version"}
-7. 如果錯誤是找不到模組，先確認是否拼寫錯誤或可用其他方式實現，最後才新增依賴
+6. 如果需要新增第三方 npm 依賴，在最後附上 \`\`\`json:NEW_DEPENDENCIES 區塊，格式如 {"package-name": "^version"}
+7. 如果錯誤是找不到**第三方 npm 模組**，先確認是否拼寫錯誤或可用其他方式實現，最後才新增依賴
+8. **如果錯誤是找不到 \`@/\` 開頭的專案內部模組**（如 \`@/components/xxx\`、\`@/lib/xxx\`）：
+   - 這些是專案內部檔案，**不是** npm 套件，不要加到 NEW_DEPENDENCIES
+   - 你必須**生成缺失的組件/工具檔案**
+   - 根據 import 語句在其他檔案中的使用方式（props、調用方式）推斷該組件的功能和介面
+   - 路徑映射：\`@/components/xxx\` → 輸出 \`\`\`tsx:components/xxx.tsx\`\`\`
+   - 路徑映射：\`@/lib/xxx\` → 輸出 \`\`\`ts:lib/xxx.ts\`\`\`
+   - 動畫相關組件使用 \`motion/react\`（不是 framer-motion）
+   - export 方式必須與 import 語句一致（named export 或 default export）
+   - 組件必須包含 \`'use client'\` 如果使用了 hooks 或 motion
 
 ## Build 錯誤
 ${errorList}
@@ -1365,12 +1385,13 @@ ${depsList}
 ## 原始代碼
 ${codeBlocks.join('\n\n')}
 
-請輸出修復後的所有需要改動的檔案。未改動的檔案不需要輸出。`
+請輸出所有需要**修改或新建**的檔案。未改動的現有檔案不需要輸出。
+對於缺失的 @/ 模組，**必須生成完整的新檔案**。`
 
   try {
     const response = await client.messages.create({
       model: 'claude-haiku-4-5-20251001',
-      max_tokens: 16000,
+      max_tokens: 24000,
       messages: [{ role: 'user', content: prompt }],
     })
 
@@ -1429,7 +1450,7 @@ function parseLLMFixedFiles(content: string, originalCode: GeneratedCode): Gener
     }
   }
 
-  return {
+  const result: GeneratedCode = {
     pages: originalCode.pages.map(p => ({
       ...p,
       content: fixedPages.get(p.path) || p.content,
@@ -1440,6 +1461,30 @@ function parseLLMFixedFiles(content: string, originalCode: GeneratedCode): Gener
     })),
     styles: fixedStyles || originalCode.styles,
   }
+
+  // 添加 LLM 生成的新檔案（缺失的組件/工具）
+  for (const [filePath, fileContent] of fixedComponents) {
+    if (!originalCode.components.some(c => c.path === filePath)) {
+      console.log(`[Deployer] parseLLMFixedFiles 新增缺失組件: ${filePath}`)
+      result.components.push({
+        path: filePath,
+        content: fileContent,
+        description: `Auto-generated to fix build error: ${filePath}`,
+      })
+    }
+  }
+  for (const [filePath, fileContent] of fixedPages) {
+    if (!originalCode.pages.some(p => p.path === filePath)) {
+      console.log(`[Deployer] parseLLMFixedFiles 新增缺失頁面: ${filePath}`)
+      result.pages.push({
+        path: filePath,
+        content: fileContent,
+        description: `Auto-generated to fix build error: ${filePath}`,
+      })
+    }
+  }
+
+  return result
 }
 
 /**

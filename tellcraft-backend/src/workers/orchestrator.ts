@@ -396,7 +396,7 @@ async function handleContinueFlow(
 
   // 處理 Deployer 階段
   if (state.phase === 'deployer_confirm') {
-    const confirmKeywords = ['確認', '部署', '好', 'Y', 'y', 'yes']
+    const confirmKeywords = ['確認', '確定', '部署', '好', '好的', '是', '對', 'Y', 'y', 'yes', 'ok']
     const cancelKeywords = ['取消', '不要', 'cancel', 'N', 'n']
     if (confirmKeywords.some(kw => message === kw || message.includes(kw))) {
       await handleDeployExecute(conversationId, state, data.projectId, redis, io)
