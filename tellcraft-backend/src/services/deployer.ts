@@ -276,6 +276,11 @@ function wrapInNextJs(code: GeneratedCode, projectName: string, tailwindConfig: 
         motion: '^11.0.0',
         tailwindcss: '^4.0.0',
       },
+      devDependencies: {
+        typescript: '^5.0.0',
+        '@types/react': '^19.0.0',
+        '@types/node': '^22.0.0',
+      },
     }, null, 2),
   })
 
