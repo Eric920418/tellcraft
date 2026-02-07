@@ -29,7 +29,7 @@ const devices: { type: DeviceType; label: string; icon: React.ReactNode; width: 
   {
     type: 'tablet',
     label: '平板',
-    width: 768,
+    width: 640,
     icon: (
       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
         <rect x="4" y="2" width="16" height="20" rx="2" />

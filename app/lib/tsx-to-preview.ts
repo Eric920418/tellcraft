@@ -922,6 +922,35 @@ export function convertToPreviewHtml(
     @media (prefers-reduced-motion: reduce) {
       *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
     }
+    /* Responsive fallback — 不依賴 Tailwind CDN 動態生成 */
+    .grid { display: grid; }
+    .grid-cols-1 { grid-template-columns: repeat(1, minmax(0, 1fr)); }
+    .gap-3 { gap: 0.75rem; }
+    .gap-4 { gap: 1rem; }
+    .px-4 { padding-left: 1rem; padding-right: 1rem; }
+    .py-4 { padding-top: 1rem; padding-bottom: 1rem; }
+    .py-6 { padding-top: 1.5rem; padding-bottom: 1.5rem; }
+    .text-lg { font-size: 1.125rem; line-height: 1.75rem; }
+    .text-xl { font-size: 1.25rem; line-height: 1.75rem; }
+    @media (min-width: 640px) {
+      .sm\\:grid-cols-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    }
+    @media (min-width: 768px) {
+      .md\\:grid-cols-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .md\\:grid-cols-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+      .md\\:grid-cols-4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+      .md\\:text-2xl { font-size: 1.5rem; line-height: 2rem; }
+      .md\\:text-3xl { font-size: 1.875rem; line-height: 2.25rem; }
+      .md\\:text-4xl { font-size: 2.25rem; line-height: 2.5rem; }
+      .md\\:text-5xl { font-size: 3rem; line-height: 1; }
+      .md\\:gap-6 { gap: 1.5rem; }
+      .md\\:gap-8 { gap: 2rem; }
+      .md\\:px-6 { padding-left: 1.5rem; padding-right: 1.5rem; }
+      .md\\:px-8 { padding-left: 2rem; padding-right: 2rem; }
+      .md\\:py-8 { padding-top: 2rem; padding-bottom: 2rem; }
+      .md\\:py-10 { padding-top: 2.5rem; padding-bottom: 2.5rem; }
+      .md\\:py-12 { padding-top: 3rem; padding-bottom: 3rem; }
+    }
   </style>
   <style type="text/tailwindcss">
     ${cleanStyles}
