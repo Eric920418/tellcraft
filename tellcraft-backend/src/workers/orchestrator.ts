@@ -110,6 +110,8 @@ interface FlowState {
   uiuxQualityReport?: QualityReport
   // Deployer 專用
   deployerPreCheck?: DeployPreCheckResult
+  // 代碼生成時間戳（用於死鎖偵測）
+  uiuxCodeGenerationStartedAt?: number // Date.now() 開始生成的時間
   // 對話內迭代
   iterationCount?: number              // 迭代次數
   uiuxPreIterationCode?: {             // 迭代前快照（供撤銷）
@@ -437,8 +439,22 @@ async function handleContinueFlow(
     return
   }
 
-  // 迭代修改進行中，攔截並行訊息
+  // 迭代修改進行中
   if (state.phase === 'uiux_iterating') {
+    // 死鎖偵測（同代碼生成）
+    const ITERATION_TIMEOUT_MS = 5 * 60 * 1000
+    const iterStartedAt = state.uiuxCodeGenerationStartedAt || 0
+    if (iterStartedAt > 0 && Date.now() - iterStartedAt > ITERATION_TIMEOUT_MS) {
+      console.warn('[Orchestrator] 迭代修改超時，自動恢復到 uiux_complete')
+      state.phase = 'uiux_complete'
+      state.uiuxCodeGenerationStartedAt = undefined
+      await saveFlowState(redis, conversationId, state)
+      await sendMessage(conversationId, io, {
+        content: '修改中斷了，請重新描述你想調整的內容。',
+        stage: 'uiux_complete',
+      })
+      return
+    }
     await sendMessage(conversationId, io, {
       content: '正在修改設計中，請稍候...',
       stage: 'info',
@@ -479,11 +495,55 @@ async function handleContinueFlow(
     return
   }
 
-  // 代碼生成管線執行中，忽略用戶訊息
+  // 代碼生成管線執行中
   if (
     state.phase === 'uiux_code_generation' ||
     state.phase === 'uiux_quality_gate'
   ) {
+    // 死鎖偵測：如果生成已超過 10 分鐘，判定為中斷（如 server 重啟），自動恢復
+    const GENERATION_TIMEOUT_MS = 10 * 60 * 1000
+    const startedAt = state.uiuxCodeGenerationStartedAt || 0
+    const elapsed = Date.now() - startedAt
+
+    if (startedAt > 0 && elapsed > GENERATION_TIMEOUT_MS) {
+      console.warn(`[Orchestrator] 代碼生成超時 (${Math.round(elapsed / 1000)}s)，偵測到死鎖，嘗試恢復`)
+
+      // 檢查是否有已存檔的代碼可以恢復
+      const hasCode = state.uiuxGeneratedCode &&
+        (state.uiuxGeneratedCode.pages.length > 0 || state.uiuxGeneratedCode.components.length > 0)
+
+      if (hasCode) {
+        // 有中途存檔 → 直接跳到完成狀態，讓用戶可以部署或繼續修改
+        console.log('[Orchestrator] 從中途存檔恢復，跳到 uiux_complete')
+        state.phase = 'uiux_complete'
+        state.uiuxCodePhase = 'complete'
+        state.uiuxCodeGenerationStartedAt = undefined
+        state.waitingForReply = false
+        await saveFlowState(redis, conversationId, state)
+
+        const pageCount = state.uiuxGeneratedCode!.pages.length
+        const compCount = state.uiuxGeneratedCode!.components.length
+
+        await sendMessage(conversationId, io, {
+          content: `代碼生成在中途被中斷了，但已恢復之前的進度（${pageCount} 個頁面、${compCount} 個組件）。\n\n你可以：\n- 輸入「**部署**」直接部署現有代碼\n- 或描述想調整的地方，我來修改`,
+          stage: 'uiux_complete',
+        })
+      } else {
+        // 沒有存檔 → 回到變體選擇重新生成
+        state.phase = 'uiux_variant_selection'
+        state.uiuxCodePhase = undefined
+        state.uiuxCodeGenerationStartedAt = undefined
+        state.waitingForReply = true
+        await saveFlowState(redis, conversationId, state)
+
+        await sendMessage(conversationId, io, {
+          content: '代碼生成被中斷了（可能因為伺服器重啟）。請重新選擇設計方案以繼續。\n\n例如輸入「選擇 E」重新開始。',
+          stage: 'uiux_variants_ready',
+        })
+      }
+      return
+    }
+
     await sendMessage(conversationId, io, {
       content: '正在生成中，請稍候...',
       stage: 'info',
@@ -1851,6 +1911,7 @@ async function handleVariantSelection(
   state.uiuxDesignSystem = finalDesignSystem
   state.uiuxCodePhase = 'structure'
   state.waitingForReply = false
+  state.uiuxCodeGenerationStartedAt = Date.now()
   await saveFlowState(redis, conversationId, state)
 
   // 一氣呵成：Structure → Animation → RWD → Quality Gate
@@ -1920,6 +1981,24 @@ async function executeFullCodePipeline(
     styles: structureResult.styles || '',
   }
 
+  // ── Structure 中途存檔（防止後續階段中斷丟失進度）──
+  state.uiuxGeneratedCode = currentCode
+  state.uiuxStructureCode = currentCode
+  state.uiuxCodePhase = 'animation'
+  await saveFlowState(redis, conversationId, state)
+  await updateBddSession({
+    sessionId,
+    updates: {
+      generatedPages: currentCode.pages,
+      generatedComponents: currentCode.components,
+      generatedStyles: currentCode.styles,
+    },
+  })
+  if (state.projectId) {
+    await db.upsertProjectFiles(state.projectId, 'uiux',
+      generatedCodeToFileRows(currentCode, state.uiuxDesignSystem))
+  }
+
   // ===== 階段 2/3：動畫 =====
   const animationResult = await generateAnimations(
     uiuxDesignSystem,
@@ -1937,6 +2016,24 @@ async function executeFullCodePipeline(
     }
   } else {
     console.warn('[Orchestrator] Pipeline 動畫生成失敗，使用結構代碼繼續:', animationResult.error)
+  }
+
+  // ── Animation 中途存檔 ──
+  state.uiuxGeneratedCode = currentCode
+  state.uiuxAnimationCode = currentCode
+  state.uiuxCodePhase = 'rwd'
+  await saveFlowState(redis, conversationId, state)
+  await updateBddSession({
+    sessionId,
+    updates: {
+      generatedPages: currentCode.pages,
+      generatedComponents: currentCode.components,
+      generatedStyles: currentCode.styles,
+    },
+  })
+  if (state.projectId) {
+    await db.upsertProjectFiles(state.projectId, 'uiux',
+      generatedCodeToFileRows(currentCode, state.uiuxDesignSystem))
   }
 
   // ===== 階段 3/3：響應式 =====
@@ -3468,6 +3565,7 @@ async function handleDesignIteration(
 ) {
   // 1. 設定 iterating phase 防止並行訊息
   state.phase = 'uiux_iterating'
+  state.uiuxCodeGenerationStartedAt = Date.now()
   await saveFlowState(redis, conversationId, state)
 
   await sendMessage(conversationId, io, {
