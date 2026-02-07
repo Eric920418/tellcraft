@@ -27,6 +27,7 @@ import {
   generateTailwindConfig,
   generateDesignBrief,
   adjustDesignBrief,
+  refineCode,
   DesignVariant,
   DesignBrief,
   DesignTier,
@@ -35,7 +36,7 @@ import {
   GeneratedComponent,
 } from '../services/uiux-generation'
 import { runQualityGate, autoFixCriticalIssues, QualityReport } from '../services/quality-gate'
-import { prepareDeployment, executeDeployment, DeployPreCheckResult } from '../services/deployer'
+import { prepareDeployment, executeDeployment, DeployPreCheckResult, listProjectDeployments, rollbackToDeployment, DeploymentRecord } from '../services/deployer'
 
 // ============================================================
 // 類型定義
@@ -107,6 +108,15 @@ interface FlowState {
   uiuxQualityReport?: QualityReport
   // Deployer 專用
   deployerPreCheck?: DeployPreCheckResult
+  // 對話內迭代
+  iterationCount?: number              // 迭代次數
+  uiuxPreIterationCode?: {             // 迭代前快照（供撤銷）
+    pages: GeneratedComponent[]
+    components: GeneratedComponent[]
+    styles: string
+  }
+  // 回滾
+  rollbackDeployments?: DeploymentRecord[]  // 可選的回滾版本列表
 }
 
 // PRD Discovery 限制
@@ -358,14 +368,38 @@ async function handleContinueFlow(
     // 不 return，讓訊息繼續往下路由
   }
 
-  if (state.phase === 'deployer_deploying' || state.phase === 'deployer_complete') {
-    // 部署中或已完成不接受訊息
-    if (state.phase === 'deployer_deploying') {
-      await sendMessage(conversationId, io, {
-        content: '正在部署中，請稍候...',
-        stage: 'info',
-      })
+  if (state.phase === 'deployer_deploying') {
+    await sendMessage(conversationId, io, {
+      content: '正在部署中，請稍候...',
+      stage: 'info',
+    })
+    return
+  }
+
+  // 迭代修改進行中，攔截並行訊息
+  if (state.phase === 'uiux_iterating') {
+    await sendMessage(conversationId, io, {
+      content: '正在修改設計中，請稍候...',
+      stage: 'info',
+    })
+    return
+  }
+
+  // 部署完成後：支援回滾和迭代修改
+  if (state.phase === 'deployer_complete') {
+    const rollbackKeywords = ['回滾', 'rollback', '回到上一版', '還原']
+    if (rollbackKeywords.some(kw => message.includes(kw))) {
+      await handleDeployRollback(conversationId, state, data.projectId, redis, io)
+      return
     }
+    // 任何其他訊息 → 視為修改請求，進入迭代
+    await handleDesignIteration(conversationId, state, message, data.projectId, redis, io)
+    return
+  }
+
+  // 回滾版本選擇階段
+  if (state.phase === 'deployer_rollback_select') {
+    await handleRollbackSelection(conversationId, state, message, data.projectId, redis, io)
     return
   }
 
@@ -459,6 +493,12 @@ async function handleContinueFlow(
           redis,
           io,
         })
+        return
+      }
+
+      // 有生成代碼 → 任何非 deploy/variant/confirm 的訊息都視為修改請求
+      if (state.uiuxGeneratedCode && state.uiuxCodePhase === 'complete') {
+        await handleDesignIteration(conversationId, state, message, data.projectId, redis, io)
         return
       }
     }
@@ -835,7 +875,7 @@ async function sendMessage(
     progress?: { current: number; total: number; step: string }
     layoutHint?: 'default' | 'split' | 'full_preview'
     richContent?: {
-      type: 'template_picker' | 'variant_picker' | 'design_preview' | 'code_preview' | 'quality_gate_report' | 'deploy_confirm' | 'deploy_progress' | 'deploy_result'
+      type: 'template_picker' | 'variant_picker' | 'design_preview' | 'code_preview' | 'quality_gate_report' | 'deploy_confirm' | 'deploy_progress' | 'deploy_result' | 'deployment_history'
       data: Record<string, unknown>
     }
   }
@@ -3290,7 +3330,7 @@ async function handleDeployExecute(
     await saveFlowState(redis, conversationId, state)
 
     await sendMessage(conversationId, io, {
-      content: `**部署成功！**\n\n您的網站已上線：${result.deploymentUrl}`,
+      content: `**部署成功！**\n\n您的網站已上線：${result.deploymentUrl}\n\n---\n\n直接輸入修改建議即可迭代設計（如「把標題改大」「換個配色」）\n輸入「**回滾**」可恢復到之前的版本`,
       stage: 'deployer_complete',
       richContent: {
         type: 'deploy_result',
@@ -3315,6 +3355,286 @@ async function handleDeployExecute(
           success: false,
         } as Record<string, unknown>,
       },
+    })
+  }
+}
+
+// ============================================================
+// 對話內迭代：修改設計
+// ============================================================
+
+async function handleDesignIteration(
+  conversationId: string,
+  state: FlowState,
+  userFeedback: string,
+  projectId: string,
+  redis: Redis,
+  io: SocketIOServer
+) {
+  // 1. 設定 iterating phase 防止並行訊息
+  state.phase = 'uiux_iterating'
+  await saveFlowState(redis, conversationId, state)
+
+  await sendMessage(conversationId, io, {
+    content: '正在根據您的建議修改設計...',
+    stage: 'uiux_iterating',
+    progress: { current: 1, total: 2, step: '修改中' },
+  })
+
+  // 2. 取得現有代碼
+  let currentCode = state.uiuxGeneratedCode
+  if (!currentCode && state.projectId) {
+    // 從 project_files 讀取
+    const projectFiles = await db.getProjectFiles(state.projectId, 'uiux')
+    if (projectFiles.length > 0) {
+      const pages: GeneratedComponent[] = []
+      const components: GeneratedComponent[] = []
+      let styles = ''
+      for (const f of projectFiles) {
+        if (f.file_type === 'page') {
+          pages.push({ path: f.file_path, content: f.content, description: f.description || '' })
+        } else if (f.file_type === 'component') {
+          components.push({ path: f.file_path, content: f.content, description: f.description || '' })
+        } else if (f.file_type === 'style') {
+          styles = f.content
+        }
+      }
+      currentCode = { pages, components, styles }
+    }
+  }
+
+  if (!currentCode) {
+    await sendMessage(conversationId, io, {
+      content: '找不到可修改的代碼，請先完成設計生成。',
+      stage: 'error',
+    })
+    state.phase = 'uiux_complete'
+    await saveFlowState(redis, conversationId, state)
+    return
+  }
+
+  // 3. 保存迭代前快照
+  state.uiuxPreIterationCode = JSON.parse(JSON.stringify(currentCode))
+
+  // 4. 呼叫 refineCode
+  const result = await refineCode(
+    currentCode,
+    userFeedback,
+    {
+      designSystem: state.uiuxDesignSystem,
+      designTier: state.uiuxDesignTier,
+      designBrief: state.uiuxDesignBrief,
+    },
+    { conversationId, purpose: 'design_iteration' }
+  )
+
+  if (!result.success || !result.pages) {
+    await sendMessage(conversationId, io, {
+      content: `修改失敗：${result.error || '未知錯誤'}。請嘗試其他描述方式。`,
+      stage: 'error',
+    })
+    state.phase = state.deployerPreCheck ? 'deployer_complete' : 'uiux_complete'
+    await saveFlowState(redis, conversationId, state)
+    return
+  }
+
+  // 5. 更新代碼
+  const updatedCode = {
+    pages: result.pages,
+    components: result.components || currentCode.components,
+    styles: result.styles || currentCode.styles,
+  }
+  state.uiuxGeneratedCode = updatedCode
+  state.iterationCount = (state.iterationCount || 0) + 1
+
+  // 6. 保存到 project_files
+  const pid = state.projectId || projectId
+  if (pid) {
+    await db.upsertProjectFiles(pid, 'uiux',
+      generatedCodeToFileRows(updatedCode, state.uiuxDesignSystem))
+  }
+
+  // 7. 發送預覽
+  const tailwindConfig = state.uiuxDesignSystem
+    ? generateTailwindConfig(state.uiuxDesignSystem)
+    : ''
+
+  await sendMessage(conversationId, io, {
+    content: `**設計已更新！** (第 ${state.iterationCount} 次迭代)\n\n請在預覽面板查看修改效果。\n\n---\n\n輸入「**部署**」重新上線，或繼續提供修改建議。`,
+    stage: 'uiux_iteration_complete',
+    layoutHint: 'split',
+    richContent: {
+      type: 'code_preview',
+      data: {
+        pages: updatedCode.pages,
+        components: updatedCode.components,
+        styles: updatedCode.styles,
+        tailwindConfig,
+        currentPhase: 'complete',
+      } as Record<string, unknown>,
+    },
+  })
+
+  // 8. 回到 uiux_complete 等待下一步
+  state.phase = 'uiux_complete'
+  state.uiuxCodePhase = 'complete'
+  state.waitingForReply = false
+  await saveFlowState(redis, conversationId, state)
+}
+
+// ============================================================
+// 部署回滾
+// ============================================================
+
+async function handleDeployRollback(
+  conversationId: string,
+  state: FlowState,
+  projectId: string,
+  redis: Redis,
+  io: SocketIOServer
+) {
+  const pid = state.projectId || projectId
+
+  // 查詢部署歷史
+  const deployments = await listProjectDeployments(pid)
+
+  if (deployments.length <= 1) {
+    await sendMessage(conversationId, io, {
+      content: '目前只有一個部署版本，無法回滾。',
+      stage: 'info',
+    })
+    return
+  }
+
+  // 保存部署列表到 state，等待用戶選擇
+  state.rollbackDeployments = deployments
+  state.phase = 'deployer_rollback_select'
+  await saveFlowState(redis, conversationId, state)
+
+  // 格式化歷史列表
+  const historyText = deployments.map((d, i) => {
+    const date = new Date(d.created_at).toLocaleString('zh-TW')
+    const label = i === 0 ? '（目前版本）' : ''
+    return `${i + 1}. ${date} ${label}\n   ${d.url}`
+  }).join('\n\n')
+
+  await sendMessage(conversationId, io, {
+    content: `**部署歷史**\n\n${historyText}\n\n---\n\n輸入版本編號回滾（如「2」表示回到第 2 個版本），或輸入「取消」。`,
+    stage: 'deployer_rollback_select',
+    richContent: {
+      type: 'deployment_history',
+      data: {
+        deployments: deployments.map((d, i) => ({
+          index: i + 1,
+          id: d.id,
+          vercelDeploymentId: d.vercel_deployment_id,
+          url: d.url,
+          createdAt: d.created_at,
+          isCurrent: i === 0,
+        })),
+      } as Record<string, unknown>,
+    },
+  })
+}
+
+async function handleRollbackSelection(
+  conversationId: string,
+  state: FlowState,
+  message: string,
+  projectId: string,
+  redis: Redis,
+  io: SocketIOServer
+) {
+  const cancelKeywords = ['取消', 'cancel', '算了']
+  if (cancelKeywords.some(kw => message.includes(kw))) {
+    state.phase = 'deployer_complete'
+    state.rollbackDeployments = undefined
+    await saveFlowState(redis, conversationId, state)
+    await sendMessage(conversationId, io, {
+      content: '已取消回滾。',
+      stage: 'info',
+    })
+    return
+  }
+
+  // 解析版本編號
+  const numMatch = message.match(/(\d+)/)
+  if (!numMatch) {
+    await sendMessage(conversationId, io, {
+      content: '請輸入版本編號（如「2」），或輸入「取消」。',
+      stage: 'info',
+    })
+    return
+  }
+
+  const index = parseInt(numMatch[1]) - 1
+  const deployments = state.rollbackDeployments || []
+  if (index < 0 || index >= deployments.length) {
+    await sendMessage(conversationId, io, {
+      content: `請輸入 1 到 ${deployments.length} 之間的版本編號。`,
+      stage: 'info',
+    })
+    return
+  }
+
+  if (index === 0) {
+    await sendMessage(conversationId, io, {
+      content: '版本 1 就是目前的版本，無需回滾。',
+      stage: 'info',
+    })
+    return
+  }
+
+  const target = deployments[index]
+
+  await sendMessage(conversationId, io, {
+    content: `正在回滾到版本 ${index + 1}...`,
+    stage: 'deployer_rolling_back',
+    progress: { current: 1, total: 2, step: '回滾中' },
+  })
+
+  // 取得 project name
+  const project = await db.getProject(state.projectId || projectId)
+  const projectName = project?.name
+    ?.toLowerCase()
+    .replace(/[^a-z0-9]/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/^-|-$/g, '')
+    .slice(0, 30) || 'tellcraft-project'
+
+  const result = await rollbackToDeployment(projectName, target.vercel_deployment_id)
+
+  if (result.success) {
+    // 記錄回滾到 DB
+    await db.query(
+      `INSERT INTO deployments (project_id, vercel_deployment_id, url, status)
+       VALUES ($1, $2, $3, 'success')`,
+      [state.projectId || projectId, target.vercel_deployment_id, target.url]
+    )
+
+    state.phase = 'deployer_complete'
+    state.rollbackDeployments = undefined
+    await saveFlowState(redis, conversationId, state)
+
+    await sendMessage(conversationId, io, {
+      content: `**回滾成功！**\n\n已恢復到版本 ${index + 1}：${target.url}\n\n---\n\n直接輸入修改建議即可迭代設計\n輸入「**回滾**」可再次查看部署歷史`,
+      stage: 'deployer_complete',
+      richContent: {
+        type: 'deploy_result',
+        data: {
+          deploymentUrl: target.url,
+          success: true,
+        } as Record<string, unknown>,
+      },
+    })
+  } else {
+    state.phase = 'deployer_complete'
+    state.rollbackDeployments = undefined
+    await saveFlowState(redis, conversationId, state)
+
+    await sendMessage(conversationId, io, {
+      content: `**回滾失敗**\n\n${result.error}\n\n請稍後再試，或輸入修改建議直接修改設計。`,
+      stage: 'deployer_error',
     })
   }
 }

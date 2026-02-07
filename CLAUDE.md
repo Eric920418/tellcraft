@@ -112,15 +112,31 @@ npx ts-node bdd-spec/scripts/validate-feature.ts spec/features/      # 結構驗
 
 **流程**：prepareDeployment（前檢查）→ 用戶確認 → executeDeployment（wrapInNextJs → createVercelProject → deployFiles → waitForReady → 更新 DB）
 
+**對話內迭代**（部署後持續修改）：
+- `deployer_complete` 階段不再靜默吞訊息
+- 用戶輸入修改建議 → `handleDesignIteration()` → `refineCode()` 修改代碼 → 預覽 → `uiux_complete`
+- 用戶再說「部署」→ 重新部署，循環不限次
+- `uiux_complete` 階段有代碼時，非部署訊息也路由到迭代
+
+**部署回滾**：
+- 用戶說「回滾」→ `handleDeployRollback()` → 顯示部署歷史 → `deployer_rollback_select`
+- 用戶選版本 → `handleRollbackSelection()` → `rollbackToDeployment()` → Vercel Promote/Alias API
+
 **關鍵函數**（`tellcraft-backend/src/services/deployer.ts`）：
 - `prepareDeployment(projectId, userId)` - 驗證專案、代碼、環境變數
 - `executeDeployment(projectId, code, tailwindConfig, onProgress)` - 執行部署
 - `wrapInNextJs(code, projectName, tailwindConfig)` - UIUX 代碼 → 完整 Next.js 專案
+- `listProjectDeployments(projectId)` - 查詢部署歷史
+- `rollbackToDeployment(projectName, deploymentId)` - Vercel 回滾
+
+**關鍵函數**（`tellcraft-backend/src/services/uiux-generation.ts`）：
+- `refineCode(currentCode, userFeedback, designContext)` - 基於用戶反饋修改現有代碼
 
 **前端元件**（`app/components/deployer/`）：
 - `DeployConfirm.tsx` - 部署確認卡片（顯示專案名、檔案數、預計 URL）
 - `DeployProgress.tsx` - 部署進度條
-- `DeployResult.tsx` - 部署結果（成功顯示 URL / 失敗顯示錯誤）
+- `DeployResult.tsx` - 部署結果（成功顯示 URL / 失敗顯示錯誤 + 迭代提示）
+- `DeploymentHistory.tsx` - 部署歷史列表 + 回滾按鈕
 
 ### 認證系統
 

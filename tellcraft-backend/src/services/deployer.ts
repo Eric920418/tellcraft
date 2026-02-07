@@ -274,7 +274,9 @@ function wrapInNextJs(code: GeneratedCode, projectName: string, tailwindConfig: 
         react: '^19.0.0',
         'react-dom': '^19.0.0',
         motion: '^11.0.0',
-        tailwindcss: '^4.0.0',
+        tailwindcss: '^3.4.0',
+        postcss: '^8.4.0',
+        autoprefixer: '^10.0.0',
       },
       devDependencies: {
         typescript: '^5.0.0',
@@ -292,6 +294,18 @@ function wrapInNextJs(code: GeneratedCode, projectName: string, tailwindConfig: 
 const nextConfig: NextConfig = {}
 
 export default nextConfig
+`,
+  })
+
+  // postcss.config.js（Tailwind v3 必需）
+  files.push({
+    file: 'postcss.config.js',
+    data: `module.exports = {
+  plugins: {
+    tailwindcss: {},
+    autoprefixer: {},
+  },
+}
 `,
   })
 
@@ -320,16 +334,18 @@ export default nextConfig
     }, null, 2),
   })
 
-  // app/globals.css — Tailwind v4 + 生成的 styles
-  const globalsCss = `@import "tailwindcss";
-
-${code.styles}
-`
+  // app/globals.css — Tailwind v3
+  // 確保有 @tailwind 指令（LLM 可能已包含，也可能沒有）
+  let stylesContent = code.styles
+    .replace(/@import\s*["']tailwindcss["']\s*;?\s*/g, '') // 移除 v4 語法
+  const hasTailwindDirectives = stylesContent.includes('@tailwind base')
+  const globalsCss = hasTailwindDirectives
+    ? stylesContent
+    : `@tailwind base;\n@tailwind components;\n@tailwind utilities;\n\n${stylesContent}`
   files.push({ file: 'app/globals.css', data: globalsCss })
 
-  // tailwind.config.ts（如果有自訂設定）
+  // tailwind.config.ts（Tailwind v3 必需 content 路徑）
   if (tailwindConfig) {
-    // 判斷是完整檔案（從 project_files 來）還是 JSON 片段（舊格式 fallback）
     const isFullFile = tailwindConfig.includes('import type') || tailwindConfig.includes('export default')
     files.push({
       file: 'tailwind.config.ts',
@@ -339,9 +355,31 @@ const config: Config = {
   content: [
     './app/**/*.{js,ts,jsx,tsx,mdx}',
     './components/**/*.{js,ts,jsx,tsx,mdx}',
+    './lib/**/*.{js,ts,jsx,tsx}',
   ],
   theme: {
     extend: ${tailwindConfig},
+  },
+  plugins: [],
+}
+
+export default config
+`,
+    })
+  } else {
+    // 即使沒有自訂設定也要生成 config（v3 需要 content 路徑掃描 class）
+    files.push({
+      file: 'tailwind.config.ts',
+      data: `import type { Config } from 'tailwindcss'
+
+const config: Config = {
+  content: [
+    './app/**/*.{js,ts,jsx,tsx,mdx}',
+    './components/**/*.{js,ts,jsx,tsx,mdx}',
+    './lib/**/*.{js,ts,jsx,tsx}',
+  ],
+  theme: {
+    extend: {},
   },
   plugins: [],
 }
@@ -624,4 +662,109 @@ async function waitForDeploymentReady(deploymentId: string, maxWaitMs = 300000):
   }
 
   return null
+}
+
+// ============================================================
+// 部署歷史 & 回滾
+// ============================================================
+
+export interface DeploymentRecord {
+  id: string
+  vercel_deployment_id: string
+  url: string
+  status: string
+  created_at: string
+}
+
+/**
+ * 查詢專案的部署歷史（從 DB）
+ */
+export async function listProjectDeployments(
+  projectId: string
+): Promise<DeploymentRecord[]> {
+  const result = await db.queryMany<DeploymentRecord>(
+    `SELECT id, vercel_deployment_id, url, status, created_at
+     FROM deployments
+     WHERE project_id = $1 AND status = 'success'
+     ORDER BY created_at DESC
+     LIMIT 10`,
+    [projectId]
+  )
+  return result
+}
+
+/**
+ * 回滾到指定的部署版本
+ * 原理：用 Vercel API 將指定的 deployment promote 為 production
+ */
+export async function rollbackToDeployment(
+  projectName: string,
+  targetDeploymentId: string
+): Promise<{ success: boolean; url?: string; error?: string }> {
+  const token = process.env.VERCEL_ACCESS_TOKEN
+  if (!token) {
+    return { success: false, error: '缺少 VERCEL_ACCESS_TOKEN' }
+  }
+
+  const teamId = process.env.VERCEL_TEAM_ID
+  const params = new URLSearchParams()
+  if (teamId) params.append('teamId', teamId)
+
+  try {
+    // 先取得目標 deployment 的詳情確認存在
+    const detailRes = await fetch(`${VERCEL_API}/v13/deployments/${targetDeploymentId}?${params}`, {
+      headers: { 'Authorization': `Bearer ${token}` },
+    })
+
+    if (!detailRes.ok) {
+      return { success: false, error: '找不到指定的部署版本' }
+    }
+
+    const detail = await detailRes.json() as { url: string; readyState: string }
+    if (detail.readyState !== 'READY') {
+      return { success: false, error: '指定的部署版本狀態異常' }
+    }
+
+    // 用 Vercel Promote API 將此 deployment 設為當前版本
+    // POST /v10/projects/{projectName}/promote/{deploymentId}
+    const promoteRes = await fetch(
+      `${VERCEL_API}/v10/projects/${encodeURIComponent(projectName)}/promote/${targetDeploymentId}?${params}`,
+      {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+      }
+    )
+
+    if (!promoteRes.ok) {
+      const errText = await promoteRes.text()
+      console.error('[Deployer] Promote 失敗:', errText)
+
+      // Fallback：嘗試用 aliases API 將 production alias 指向目標 deployment
+      const aliasRes = await fetch(`${VERCEL_API}/v2/deployments/${targetDeploymentId}/aliases?${params}`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ alias: `${projectName}.vercel.app` }),
+      })
+
+      if (!aliasRes.ok) {
+        const aliasErr = await aliasRes.text()
+        console.error('[Deployer] Alias fallback 失敗:', aliasErr)
+        return { success: false, error: '回滾失敗，請稍後再試。' }
+      }
+    }
+
+    return {
+      success: true,
+      url: `https://${detail.url}`,
+    }
+  } catch (err) {
+    console.error('[Deployer] 回滾錯誤:', err)
+    return { success: false, error: `回滾失敗：${err instanceof Error ? err.message : String(err)}` }
+  }
 }

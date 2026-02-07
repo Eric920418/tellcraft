@@ -13,6 +13,7 @@ import QualityGateReport from './QualityGateReport'
 import DeployConfirm from '../deployer/DeployConfirm'
 import DeployProgress from '../deployer/DeployProgress'
 import DeployResult from '../deployer/DeployResult'
+import DeploymentHistory from '../deployer/DeploymentHistory'
 import type { Template, TemplateCardData } from '../../lib/templates'
 import { getTemplateById } from '../../actions/templates'
 
@@ -37,7 +38,7 @@ export interface UiuxMessage {
   progress?: { current: number; total: number; step: string }
   layoutHint?: 'default' | 'split' | 'full_preview'
   richContent?: {
-    type: 'template_picker' | 'design_preview' | 'code_preview' | 'variant_picker' | 'quality_gate_report' | 'deploy_confirm' | 'deploy_progress' | 'deploy_result'
+    type: 'template_picker' | 'design_preview' | 'code_preview' | 'variant_picker' | 'quality_gate_report' | 'deploy_confirm' | 'deploy_progress' | 'deploy_result' | 'deployment_history'
     data: {
       templates?: TemplateCardData[]
       recommendedIds?: string[]
@@ -384,6 +385,11 @@ export default function UiuxChatSection({
             {/* Rich Content: Deploy Result */}
             {message.richContent?.type === 'deploy_result' && (
               <DeployResult data={message.richContent.data} />
+            )}
+
+            {/* Rich Content: Deployment History (Rollback) */}
+            {message.richContent?.type === 'deployment_history' && (
+              <DeploymentHistory data={message.richContent.data as Parameters<typeof DeploymentHistory>[0]['data']} onSendMessage={onSendMessage} />
             )}
           </motion.div>
         ))}

@@ -42,6 +42,9 @@ export default function DeployResult({ data }: DeployResultProps) {
             前往網站 →
           </a>
         )}
+        <div style={{ marginTop: 12, fontSize: 12, color: '#166534', lineHeight: 1.6 }}>
+          直接輸入修改建議即可迭代設計 | 輸入「回滾」恢復舊版本
+        </div>
       </div>
     )
   }

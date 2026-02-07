@@ -1929,3 +1929,162 @@ ${currentBrief.signature ? `- Signature Element：${currentBrief.signature}` : '
     return { success: false, error: `解析調整後設計方向時發生錯誤: ${err}` }
   }
 }
+
+// ============================================================
+// 對話內迭代：基於現有代碼 + 用戶反饋修改設計
+// ============================================================
+
+/**
+ * 根據用戶反饋修改現有代碼
+ * 只修改必要的檔案，保持其他部分不變
+ */
+export async function refineCode(
+  currentCode: {
+    pages: GeneratedComponent[]
+    components: GeneratedComponent[]
+    styles: string
+  },
+  userFeedback: string,
+  designContext: {
+    designSystem?: DesignSystem
+    designTier?: DesignTier
+    designBrief?: DesignBrief
+  },
+  trackingContext?: LlmTrackingContext
+): Promise<GenerationResult> {
+  const tier = designContext.designTier || 'functional'
+
+  // 組合所有現有代碼
+  const codeBlocks: string[] = []
+  for (const page of currentCode.pages) {
+    codeBlocks.push(`\`\`\`tsx:${page.path}\n${page.content}\n\`\`\``)
+  }
+  for (const comp of currentCode.components) {
+    codeBlocks.push(`\`\`\`tsx:${comp.path}\n${comp.content}\n\`\`\``)
+  }
+  if (currentCode.styles) {
+    codeBlocks.push(`\`\`\`css:globals.css\n${currentCode.styles}\n\`\`\``)
+  }
+
+  const designSystemSection = designContext.designSystem
+    ? buildDesignSystemPrompt(designContext.designSystem)
+    : ''
+
+  const briefSection = designContext.designBrief
+    ? `## 設計方向
+- 風格：${designContext.designBrief.styleSummary}
+- 色彩：${designContext.designBrief.colorDirection}
+- 佈局：${designContext.designBrief.layoutSuggestion}
+${designContext.designBrief.signature ? `- Signature：${designContext.designBrief.signature}` : ''}`
+    : ''
+
+  const systemPrompt = `你是一位專業的前端設計師和開發者。用戶對已完成的設計有修改意見，請根據反饋修改代碼。
+
+${designSystemSection}
+
+${briefSection}
+
+${getStructureConstraints(tier)}
+
+## 修改規則（Critical）
+1. **只修改用戶要求的部分**，不要改動不相關的檔案或代碼
+2. 保持現有的功能、動畫效果、響應式設計完好
+3. 保持現有的組件結構和檔案組織
+4. 動畫庫用 motion/react（不是 framer-motion）
+5. 字體載入用 next/font（禁止 <link> 或 @import Google Fonts）
+6. 使用 Tailwind CSS classes
+7. 保持無障礙功能（aria-label、focus-visible 等）
+
+## 輸出格式
+只輸出**被修改的檔案**，使用以下格式：
+
+\`\`\`tsx:path/to/modified-file.tsx
+// 完整的修改後代碼
+\`\`\`
+
+\`\`\`css:globals.css
+/* 如果需要修改樣式 */
+\`\`\`
+
+未修改的檔案不需要輸出。`
+
+  const userMessage = `## 用戶的修改要求
+${userFeedback}
+
+## 現有代碼
+${codeBlocks.join('\n\n')}
+
+請根據用戶要求修改代碼，只輸出被修改的檔案。`
+
+  const response = await callClaude(
+    systemPrompt,
+    [{ role: 'user', content: userMessage }],
+    { maxTokens: 32768, temperature: 0.2 },
+    { ...trackingContext, purpose: 'refine_code' }
+  )
+
+  if (!response.success || !response.content) {
+    return { success: false, error: response.error || '無法修改代碼' }
+  }
+
+  // 解析修改後的檔案，合併回原始代碼
+  const tsxRegex = /```tsx:([^\n]+)\n([\s\S]*?)```/g
+  const cssRegex = /```css:([^\n]+)\n([\s\S]*?)```/g
+
+  const modifiedPages = new Map<string, string>()
+  const modifiedComponents = new Map<string, string>()
+  let modifiedStyles = ''
+
+  let match
+  while ((match = tsxRegex.exec(response.content)) !== null) {
+    const path = match[1].trim()
+    const fileContent = match[2].trim()
+
+    if (currentCode.pages.some(p => p.path === path)) {
+      modifiedPages.set(path, fileContent)
+    } else if (currentCode.components.some(c => c.path === path)) {
+      modifiedComponents.set(path, fileContent)
+    } else {
+      // 新增的檔案，根據路徑判斷類型
+      if (path.includes('/page.tsx') || path.includes('/page.ts')) {
+        modifiedPages.set(path, fileContent)
+      } else {
+        modifiedComponents.set(path, fileContent)
+      }
+    }
+  }
+
+  while ((match = cssRegex.exec(response.content)) !== null) {
+    modifiedStyles = match[2].trim()
+  }
+
+  // 合併：被修改的檔案用新版本，未修改的保留原版
+  const mergedPages = currentCode.pages.map(p => ({
+    ...p,
+    content: modifiedPages.get(p.path) || p.content,
+  }))
+  // 加入新增的頁面
+  for (const [path, content] of modifiedPages) {
+    if (!currentCode.pages.some(p => p.path === path)) {
+      mergedPages.push({ path, content, description: `頁面: ${path}` })
+    }
+  }
+
+  const mergedComponents = currentCode.components.map(c => ({
+    ...c,
+    content: modifiedComponents.get(c.path) || c.content,
+  }))
+  // 加入新增的組件
+  for (const [path, content] of modifiedComponents) {
+    if (!currentCode.components.some(c => c.path === path)) {
+      mergedComponents.push({ path, content, description: `組件: ${path}` })
+    }
+  }
+
+  return {
+    success: true,
+    pages: mergedPages,
+    components: mergedComponents,
+    styles: modifiedStyles || currentCode.styles,
+  }
+}
