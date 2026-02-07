@@ -1712,14 +1712,21 @@ function ChatSection({
         backendStage.includes('actions') ||
         backendStage.includes('isa')) return 'formulation'
 
-    // 程式生成階段
+    // 程式生成階段（含 UIUX pipeline）
     if (backendStage === 'generating' ||
         backendStage.includes('code') ||
-        backendStage.includes('build')) return 'generating'
+        backendStage.includes('build') ||
+        backendStage.includes('uiux_pipeline') ||
+        backendStage.includes('uiux_structure') ||
+        backendStage.includes('uiux_animation') ||
+        backendStage.includes('uiux_rwd') ||
+        backendStage.includes('uiux_quality_gate') ||
+        backendStage.includes('uiux_iterating')) return 'generating'
 
     // 完成/部署階段
     if (backendStage === 'completed' ||
         backendStage === 'complete' ||
+        backendStage === 'uiux_complete' ||
         backendStage.includes('deploy')) return 'complete'
 
     // Prefilter 攔截和 Meta 回覆不推進進度條
@@ -2236,6 +2243,59 @@ function ChatSection({
             </div>
           </div>
           {isStreaming && <style>{`@keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }`}</style>}
+        </div>
+      )
+    }
+
+    // 偵測是否正在生成代碼（有 pipeline/generating stage 訊息）
+    const generatingStages = ['uiux_pipeline_progress', 'uiux_structure_generating', 'uiux_animation_generating', 'uiux_rwd_generating', 'uiux_quality_gate_running', 'uiux_quality_gate_fixing']
+    const lastMsg = [...messages].reverse().find(m => m.role === 'assistant' && m.stage)
+    const isGenerating = lastMsg && generatingStages.includes(lastMsg.stage || '')
+
+    if (isGenerating) {
+      // 從 progress 推斷當前階段
+      const progress = lastMsg?.progress
+      const step = progress?.step || '生成中'
+      const phaseNum = progress?.current || 0
+      const totalPhases = progress?.total || 3
+
+      return (
+        <div style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
+          {/* 頂部 bar */}
+          <div style={{
+            display: 'flex', alignItems: 'center', padding: '12px 16px',
+            borderBottom: '1px solid var(--border-color)', background: 'var(--white)', gap: 8,
+          }}>
+            <span style={{
+              width: 8, height: 8, borderRadius: '50%',
+              background: 'var(--accent)', animation: 'pulse 1.5s ease-in-out infinite',
+            }} />
+            <span style={{ fontSize: 14, fontWeight: 500, color: 'var(--black)' }}>
+              設計預覽 — {step}
+            </span>
+          </div>
+          {/* 中央等待區 */}
+          <div ref={codePreviewContainerRef} style={{
+            flex: 1, display: 'flex', flexDirection: 'column',
+            alignItems: 'center', justifyContent: 'center', background: 'var(--gray-50)', gap: 16,
+          }}>
+            {/* 進度條 */}
+            <div style={{ width: 200, height: 4, borderRadius: 2, background: 'var(--gray-200)', overflow: 'hidden' }}>
+              <div style={{
+                width: `${(phaseNum / totalPhases) * 100}%`,
+                height: '100%', borderRadius: 2,
+                background: 'var(--accent)',
+                transition: 'width 0.5s ease',
+              }} />
+            </div>
+            <p style={{ color: 'var(--gray-500)', fontSize: 14, margin: 0 }}>
+              階段 {phaseNum}/{totalPhases}：{step}
+            </p>
+            <p style={{ color: 'var(--gray-400)', fontSize: 12, margin: 0 }}>
+              生成完成後將自動顯示預覽
+            </p>
+          </div>
+          <style>{`@keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }`}</style>
         </div>
       )
     }

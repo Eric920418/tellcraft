@@ -1674,7 +1674,7 @@ async function completeSpecPhase(
 
   // 詢問用戶設計偏好
   await sendMessage(conversationId, io, {
-    content: `接下來是 UI/UX 設計階段。\n\n你對產品的外觀有什麼想法嗎？\n\n**A.** 我有一些想法，想跟你討論\n**B.** 沒有特別的想法，給我看看模板`,
+    content: `接下來是 UI/UX 設計階段。\n\n你對產品的外觀有什麼想法嗎？\n\n**A.** 我有一些想法，想跟你討論\n\n**B.** 沒有特別的想法，給我看看模板`,
     stage: 'uiux_design_preference',
   })
 
@@ -2947,8 +2947,8 @@ async function handleDesignBriefReply(
   const msg = message.trim().toLowerCase()
 
   // 判斷是否確認
-  const confirmPatterns = /^(好|可以|沒問題|確認|ok|y|yes|沒有|就這樣|開始|proceed|go|沒有要調整|不用調整|直接開始|開始生成)$/i
-  if (confirmPatterns.test(msg) || msg.includes('沒有要調整') || msg.includes('開始生成') || msg.includes('就這樣')) {
+  const confirmPatterns = /^(好|好的|可以|沒問題|確認|是|是的|對|嗯|ok|y|yes|沒有|就這樣|開始|proceed|go|沒有要調整|不用調整|直接開始|開始生成|不用了|可以了|很好|讚|棒|符合)$/i
+  if (confirmPatterns.test(msg) || msg.includes('沒有要調整') || msg.includes('開始生成') || msg.includes('就這樣') || msg.includes('符合期待') || msg.includes('沒問題')) {
     console.log('[Orchestrator] 用戶確認 Design Brief，進入變體生成')
     await proceedToVariantGeneration(conversationId, state, redis, io)
     return
@@ -3085,7 +3085,7 @@ async function proceedToVariantGeneration(
 
   // 發送生成中訊息
   await sendMessage(conversationId, io, {
-    content: '正在為你生成 5 個設計方案...',
+    content: '設計方向已確認！接下來我會基於這個方向，生成 5 種不同風格的具體設計方案讓你挑選...',
     stage: 'uiux_variants_generating',
     progress: { current: 1, total: 3, step: '生成設計變體' },
   })
@@ -3173,8 +3173,8 @@ async function proceedToVariantGeneration(
   ).join('\n\n')
 
   const prefix = sourceType === 'ideas'
-    ? '根據你的設計想法，我生成了 5 個設計方案'
-    : '設計變體已生成完成'
+    ? '以下是 5 種不同的設計方案，都基於你確認的設計方向，但各有不同的切入角度'
+    : '以下是 5 種不同的設計方案，各有不同的切入角度'
 
   // 發送變體選擇訊息
   await sendMessage(conversationId, io, {
