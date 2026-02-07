@@ -337,6 +337,27 @@ async function handleContinueFlow(
     }
     return
   }
+  // 部署失敗後允許重試
+  if (state.phase === 'deployer_failed') {
+    const deployKeywords = ['部署', 'deploy', '上線', '發布', '重試']
+    if (deployKeywords.some(kw => message.includes(kw))) {
+      await executeDeployerSkill({
+        taskId: state.taskId || '',
+        projectId: data.projectId,
+        conversationId,
+        userId,
+        message,
+        redis,
+        io,
+      })
+      return
+    }
+    // 非部署相關訊息，回到 uiux_complete 讓其他功能可用
+    state.phase = 'uiux_complete'
+    await saveFlowState(redis, conversationId, state)
+    // 不 return，讓訊息繼續往下路由
+  }
+
   if (state.phase === 'deployer_deploying' || state.phase === 'deployer_complete') {
     // 部署中或已完成不接受訊息
     if (state.phase === 'deployer_deploying') {
@@ -449,11 +470,6 @@ async function handleContinueFlow(
     if (state.phase === 'uiux_variant_selection') {
       await sendMessage(conversationId, io, {
         content: '請選擇您喜歡的設計方向。\n\n- 輸入「選擇 A」直接使用某個方案\n- 輸入「合併 A+C」組合多個方案的特點',
-        stage: 'info',
-      })
-    } else if (state.phase === 'uiux_code_generation') {
-      await sendMessage(conversationId, io, {
-        content: '正在進行程式碼生成階段。輸入「繼續」進行下一步，或「重新生成」重做當前階段。',
         stage: 'info',
       })
     } else if (state.phase === 'uiux_template_selection') {
@@ -3290,7 +3306,7 @@ async function handleDeployExecute(
     await saveFlowState(redis, conversationId, state)
 
     await sendMessage(conversationId, io, {
-      content: `**部署失敗**\n\n${result.error}`,
+      content: `**部署失敗**\n\n${result.error}\n\n輸入「**部署**」可重新嘗試。`,
       stage: 'deployer_error',
       richContent: {
         type: 'deploy_result',
