@@ -1874,11 +1874,11 @@ async function executeFullCodePipeline(
     return
   }
 
-  // ===== 階段 1/3：結構生成 =====
+  // ===== 發送一條生成中訊息（不洗版）=====
   await sendMessage(conversationId, io, {
-    content: '**階段 1/3：結構生成**\n\n正在生成頁面結構和基礎樣式（桌面版）...',
+    content: '正在生成設計中，請稍候...',
     stage: 'uiux_pipeline_progress',
-    progress: { current: 1, total: 3, step: '生成結構' },
+    progress: { current: 1, total: 3, step: '生成中' },
   })
 
   const { template: dbTemplate, bddSpec, originalRequirements } = await getTemplateAndBddSpec(sessionId)
@@ -1886,6 +1886,7 @@ async function executeFullCodePipeline(
   const pages = template.pageStructure.pages || ['home']
   const twConfig = generateTailwindConfig(uiuxDesignSystem)
 
+  // ===== 階段 1/3：結構 =====
   const structureResult = await generateStructure(
     uiuxDesignSystem,
     pages,
@@ -1903,12 +1904,11 @@ async function executeFullCodePipeline(
 
   if (!structureResult.success) {
     console.error('[Orchestrator] Pipeline 結構生成失敗:', structureResult.error)
-    // 退回變體選擇，讓用戶可以重選或重試
     state.phase = 'uiux_variant_selection'
     state.uiuxCodePhase = undefined
     await saveFlowState(redis, conversationId, state)
     await sendMessage(conversationId, io, {
-      content: `結構生成失敗：${structureResult.error}\n\n請重新選擇變體，或輸入「重試」再試一次。`,
+      content: `生成失敗：${structureResult.error}\n\n請重新選擇變體，或輸入「重試」再試一次。`,
       stage: 'error',
     })
     return
@@ -1920,19 +1920,7 @@ async function executeFullCodePipeline(
     styles: structureResult.styles || '',
   }
 
-  await sendMessage(conversationId, io, {
-    content: `**階段 1/3 完成：結構** — ${currentCode.pages.length} 個頁面、${currentCode.components.length} 個組件`,
-    stage: 'uiux_pipeline_progress',
-    progress: { current: 1, total: 3, step: '結構完成' },
-  })
-
-  // ===== 階段 2/3：動畫增強 =====
-  await sendMessage(conversationId, io, {
-    content: '**階段 2/3：動畫增強**\n\n正在添加入場動畫、hover 效果、狀態轉換...',
-    stage: 'uiux_pipeline_progress',
-    progress: { current: 2, total: 3, step: '添加動畫' },
-  })
-
+  // ===== 階段 2/3：動畫 =====
   const animationResult = await generateAnimations(
     uiuxDesignSystem,
     currentCode,
@@ -1947,27 +1935,11 @@ async function executeFullCodePipeline(
       components: animationResult.components || currentCode.components,
       styles: animationResult.styles || currentCode.styles,
     }
-    await sendMessage(conversationId, io, {
-      content: '**階段 2/3 完成：動畫**',
-      stage: 'uiux_pipeline_progress',
-      progress: { current: 2, total: 3, step: '動畫完成' },
-    })
   } else {
     console.warn('[Orchestrator] Pipeline 動畫生成失敗，使用結構代碼繼續:', animationResult.error)
-    await sendMessage(conversationId, io, {
-      content: `階段 2/3：動畫生成失敗（${animationResult.error}），使用結構代碼繼續`,
-      stage: 'uiux_pipeline_progress',
-      progress: { current: 2, total: 3, step: '動畫跳過' },
-    })
   }
 
-  // ===== 階段 3/3：響應式設計 =====
-  await sendMessage(conversationId, io, {
-    content: '**階段 3/3：響應式設計**\n\n正在添加響應式佈局、移動端適配...',
-    stage: 'uiux_pipeline_progress',
-    progress: { current: 3, total: 3, step: '響應式設計' },
-  })
-
+  // ===== 階段 3/3：響應式 =====
   const rwdResult = await generateRwd(
     uiuxDesignSystem,
     currentCode,
@@ -1986,13 +1958,7 @@ async function executeFullCodePipeline(
     console.warn('[Orchestrator] Pipeline RWD 生成失敗，使用動畫代碼繼續:', rwdResult.error)
   }
 
-  // ===== Quality Gate =====
-  await sendMessage(conversationId, io, {
-    content: '**品質檢查中...**',
-    stage: 'uiux_pipeline_progress',
-    progress: { current: 3, total: 3, step: '品質檢查' },
-  })
-
+  // ===== Quality Gate（靜默執行）=====
   const MAX_FIX_ATTEMPTS = 3
   let report = runQualityGate(currentCode, state.uiuxDesignTier)
   let totalAutoFixed = 0
@@ -2047,7 +2013,7 @@ async function executeFullCodePipeline(
   const finalComponentCount = currentCode.components.length
 
   await sendMessage(conversationId, io, {
-    content: `**程式碼生成完成！**\n\n已生成：\n- ${finalPageCount} 個頁面（含響應式）\n- ${finalComponentCount} 個組件（含動畫）\n- 全域樣式 (globals.css)\n- Tailwind 配置\n\n品質檢查${report.passed ? '通過' : '完成'}${totalAutoFixed > 0 ? `，已自動修復 ${totalAutoFixed} 個問題` : ''}\n\n---\n\n🚀 輸入「**部署**」即可將網站部署上線`,
+    content: `設計完成！共 ${finalPageCount} 個頁面、${finalComponentCount} 個組件。輸入「**部署**」即可上線。`,
     stage: 'uiux_generation_complete',
     progress: { current: 3, total: 3, step: '完成' },
     layoutHint: 'split',
@@ -3112,13 +3078,16 @@ async function proceedToVariantGeneration(
   state.uiuxTemplateId = template.id
   await saveFlowState(redis, conversationId, state)
 
-  // 更新 BDD Session
+  // 更新 BDD Session（template.id = 'custom' 時不寫入 UUID 欄位）
+  const sessionUpdates: Record<string, unknown> = {
+    currentPhase: 'uiux_generating_variants',
+  }
+  if (template.id !== 'custom') {
+    sessionUpdates.uiuxTemplateId = template.id
+  }
   await updateBddSession({
     sessionId: state.sessionId,
-    updates: {
-      uiuxTemplateId: template.id,
-      currentPhase: 'uiux_generating_variants',
-    },
+    updates: sessionUpdates,
   })
 
   // 生成 5 個設計變體
