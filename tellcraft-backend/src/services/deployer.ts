@@ -65,6 +65,7 @@ export interface DeployResult {
   deploymentUrl?: string
   vercelDeploymentId?: string
   error?: string
+  deployedCode?: GeneratedCode  // build 修復後實際部署的代碼（用於同步回 DB/FlowState）
 }
 
 export type ProgressCallback = (progress: {
@@ -568,12 +569,32 @@ export async function executeDeployment(
       [projectId]
     )
 
+    // 7. 將 build 修復後的代碼同步回 project_files（確保預覽和部署一致）
+    const deployedCode = buildResult.finalCode
+    try {
+      const fileRows: { filePath: string; content: string; description?: string; fileType: string }[] = []
+      for (const p of deployedCode.pages) {
+        fileRows.push({ filePath: p.path, content: p.content, description: p.description, fileType: 'page' })
+      }
+      for (const c of deployedCode.components) {
+        fileRows.push({ filePath: c.path, content: c.content, description: c.description, fileType: 'component' })
+      }
+      if (deployedCode.styles) {
+        fileRows.push({ filePath: 'globals.css', content: deployedCode.styles, fileType: 'style' })
+      }
+      await db.upsertProjectFiles(projectId, 'uiux', fileRows)
+      console.log(`[Deployer] 已同步 build 修復後的代碼到 project_files（${fileRows.length} 個檔案）`)
+    } catch (syncErr) {
+      console.error('[Deployer] 同步代碼到 project_files 失敗（不影響部署）:', syncErr)
+    }
+
     await onProgress({ percent: 100, step: '部署完成！' })
 
     return {
       success: true,
       deploymentUrl,
       vercelDeploymentId: deployment.id,
+      deployedCode,
     }
   } catch (err) {
     console.error('[Deployer] 部署失敗:', err)
@@ -1561,7 +1582,7 @@ async function verifyBuildLocally(
   extraDependencies?: Record<string, string>,
   injectedFiles?: { file: string; data: string }[],
   onProgress?: ProgressCallback
-): Promise<{ files: VercelFile[]; buildVerified: boolean; fixes: string[] }> {
+): Promise<{ files: VercelFile[]; buildVerified: boolean; fixes: string[]; finalCode: GeneratedCode }> {
   const MAX_ATTEMPTS = 3
   const tmpDir = path.join(os.tmpdir(), `tellcraft-build-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`)
   const fixes: string[] = []
@@ -1608,6 +1629,7 @@ async function verifyBuildLocally(
               files: wrapInNextJsWithIgnoreErrors(currentCode, projectName, tailwindConfig, currentExtraDeps, injectedFiles),
               buildVerified: false,
               fixes,
+              finalCode: currentCode,
             }
           }
         }
@@ -1640,6 +1662,7 @@ async function verifyBuildLocally(
           files: wrapInNextJs(currentCode, projectName, tailwindConfig, currentExtraDeps, injectedFiles),
           buildVerified: true,
           fixes,
+          finalCode: currentCode,
         }
       }
 
@@ -1685,14 +1708,16 @@ async function verifyBuildLocally(
       files: wrapInNextJsWithIgnoreErrors(currentCode, projectName, tailwindConfig, currentExtraDeps, injectedFiles),
       buildVerified: false,
       fixes,
+      finalCode: currentCode,
     }
   } catch (err) {
     console.error('[Deployer] verifyBuildLocally 異常:', err)
     fixes.push(`構建驗證異常：${err instanceof Error ? err.message : String(err)}`)
     return {
-      files: wrapInNextJsWithIgnoreErrors(currentCode, projectName, tailwindConfig, currentExtraDeps, injectedFiles),
+      files: wrapInNextJsWithIgnoreErrors(code, projectName, tailwindConfig, extraDependencies, injectedFiles),
       buildVerified: false,
       fixes,
+      finalCode: code,
     }
   } finally {
     // 清理臨時目錄

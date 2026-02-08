@@ -1013,7 +1013,10 @@ function makeStreamingCallback(
   tailwindConfig: string
 ): PartialCodeCallback {
   return (partialCode) => {
-    io.to(`conversation:${conversationId}`).emit('preview_update', {
+    const room = `conversation:${conversationId}`
+    const socketsInRoom = io.sockets.adapter.rooms.get(room)
+    console.log(`[StreamingPreview] emit preview_update → room=${room}, phase=${phase}, pages=${partialCode.pages.length}, comps=${partialCode.components.length}, sockets=${socketsInRoom?.size ?? 0}`)
+    io.to(room).emit('preview_update', {
       pages: partialCode.pages,
       components: partialCode.components,
       styles: partialCode.styles,
@@ -3487,7 +3490,7 @@ async function handleDeployExecute(
   })
 
   // 執行部署，帶進度回調（try/catch 防止 state 卡死在 deployer_deploying）
-  let result: { success: boolean; deploymentUrl?: string; vercelDeploymentId?: string; error?: string }
+  let result: { success: boolean; deploymentUrl?: string; vercelDeploymentId?: string; error?: string; deployedCode?: unknown }
   try {
     result = await executeDeployment(
       projectId,
@@ -3518,8 +3521,37 @@ async function handleDeployExecute(
   }
 
   if (result.success) {
+    // 同步 build 修復後的代碼到 FlowState（確保預覽和部署一致）
+    if (result.deployedCode) {
+      const deployedCode = result.deployedCode as {
+        pages: GeneratedComponent[]
+        components: GeneratedComponent[]
+        styles: string
+      }
+      state.uiuxGeneratedCode = deployedCode
+      console.log(`[Orchestrator] 已同步 build 修復後代碼到 FlowState（pages: ${deployedCode.pages?.length}, components: ${deployedCode.components?.length}）`)
+    }
+
     state.phase = 'deployer_complete'
     await saveFlowState(redis, conversationId, state)
+
+    // 如果代碼被修復過，發送更新的 code_preview 讓前端預覽同步
+    if (result.deployedCode) {
+      const deployedCode = result.deployedCode as { pages: unknown[]; components: unknown[]; styles: string }
+      await sendMessage(conversationId, io, {
+        content: '',
+        stage: 'deployer_code_sync',
+        richContent: {
+          type: 'code_preview',
+          data: {
+            pages: deployedCode.pages,
+            components: deployedCode.components,
+            styles: deployedCode.styles,
+            currentPhase: 'complete',
+          } as Record<string, unknown>,
+        },
+      })
+    }
 
     await sendMessage(conversationId, io, {
       content: `**部署成功！**\n\n您的網站已上線：${result.deploymentUrl}\n\n---\n\n直接輸入修改建議即可迭代設計（如「把標題改大」「換個配色」）\n輸入「**回滾**」可恢復到之前的版本`,
