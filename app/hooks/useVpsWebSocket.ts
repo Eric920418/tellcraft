@@ -17,6 +17,7 @@ interface Message {
   timestamp: string
   stage?: string
   progress?: { current: number; total: number; step: string }
+  quickReplies?: { label: string; value: string; style?: string }[]
 }
 
 interface AutoTransition {

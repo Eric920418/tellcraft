@@ -417,9 +417,22 @@ async function handleContinueFlow(
     }
     return
   }
-  // 部署失敗後允許重試
+  // 部署失敗後允許重試或返回修改
   if (state.phase === 'deployer_failed') {
     const deployKeywords = ['部署', 'deploy', '上線', '發布', '重試']
+    const returnKeywords = ['返回修改', '返回', '回去修改', '回到修改']
+    if (returnKeywords.some(kw => message.includes(kw))) {
+      state.phase = 'uiux_complete'
+      await saveFlowState(redis, conversationId, state)
+      await sendMessage(conversationId, io, {
+        content: '已返回設計修改模式。直接輸入修改建議即可調整設計，完成後再部署。',
+        stage: 'info',
+        quickReplies: [
+          { label: '部署上線', value: '部署', style: 'primary' },
+        ],
+      })
+      return
+    }
     if (deployKeywords.some(kw => message.includes(kw))) {
       await executeDeployerSkill({
         taskId: state.taskId || '',
@@ -1045,6 +1058,7 @@ async function sendMessage(
       type: 'template_picker' | 'variant_picker' | 'design_preview' | 'code_preview' | 'quality_gate_report' | 'deploy_confirm' | 'deploy_progress' | 'deploy_result' | 'deployment_history'
       data: Record<string, unknown>
     }
+    quickReplies?: { label: string; value: string; style?: 'primary' | 'secondary' | 'ghost' }[]
   }
 ) {
   const message = {
@@ -1056,6 +1070,7 @@ async function sendMessage(
     progress: options.progress,
     layoutHint: options.layoutHint,
     richContent: options.richContent,
+    quickReplies: options.quickReplies,
   }
 
   // 更新 DB
@@ -1094,9 +1109,30 @@ async function sendClarifyQuestion(
     text += '\n\n_（或直接輸入您的答案）_'
   }
 
+  // 構建 quick replies
+  const quickReplies: { label: string; value: string; style?: 'primary' | 'secondary' | 'ghost' }[] = []
+  if (item.options && item.options.length > 0) {
+    item.options.forEach((opt, j) => {
+      const letter = String.fromCharCode(65 + j)
+      let label = ''
+      if (typeof opt === 'string') {
+        const match = opt.match(/^([A-Z])\.\s*(.*)$/)
+        label = match ? `${match[1]}. ${match[2]}` : `${letter}. ${opt}`
+      } else {
+        label = `${letter}. ${opt.description || opt.label || ''}`
+      }
+      quickReplies.push({ label, value: letter, style: 'ghost' })
+    })
+  }
+  quickReplies.push({ label: '跳過此題', value: '跳過', style: 'secondary' })
+  if (index > 0) {
+    quickReplies.push({ label: '完成釐清', value: '完成釐清', style: 'secondary' })
+  }
+
   await sendMessage(conversationId, io, {
     content: text,
     stage: 'clarify_question',
+    quickReplies,
   })
 }
 
@@ -1171,6 +1207,9 @@ async function sendBatchConfirmation(
   await sendMessage(conversationId, io, {
     content: confirmText,
     stage: 'batch_confirm',
+    quickReplies: [
+      { label: '確認全部 (Y)', value: 'Y', style: 'primary' },
+    ],
   })
 
   state.waitingForReply = true
@@ -1746,6 +1785,10 @@ async function completeSpecPhase(
   await sendMessage(conversationId, io, {
     content: `接下來是 UI/UX 設計階段。\n\n你對產品的外觀有什麼想法嗎？\n\n**A.** 我有一些想法，想跟你討論\n\n**B.** 沒有特別的想法，給我看看模板`,
     stage: 'uiux_design_preference',
+    quickReplies: [
+      { label: '我有想法，想跟你討論', value: 'A', style: 'primary' },
+      { label: '沒有想法，給我看看模板', value: 'B', style: 'secondary' },
+    ],
   })
 
   // 更新狀態為等待設計偏好回覆
@@ -2158,6 +2201,9 @@ async function executeFullCodePipeline(
         currentPhase: 'complete',
       } as Record<string, unknown>,
     },
+    quickReplies: [
+      { label: '部署上線', value: '部署', style: 'primary' },
+    ],
   })
 
   console.log(`[Orchestrator] Pipeline 完成: ${finalPageCount} pages, ${finalComponentCount} components, QG passed=${report.passed}`)
@@ -3040,6 +3086,10 @@ ${brief.professionalRecommendations.map(r => `- ${r}`).join('\n')}`
   await sendMessage(conversationId, io, {
     content: `${displayText}\n\n---\n\n如果沒有要調整的，我就開始生成設計方案了？\n也可以告訴我想調整的部分，例如：「顏色想暖一點」、「佈局改卡片式」、「我想要更有創意的設計」`,
     stage: 'uiux_design_brief_confirm',
+    quickReplies: [
+      { label: '確認，開始生成', value: '確認', style: 'primary' },
+      { label: '我想調整', value: '我想調整', style: 'secondary' },
+    ],
   })
 
   console.log('[Orchestrator] Design Brief 已生成，等待用戶確認')
@@ -3610,13 +3660,17 @@ async function handleDeployExecute(
           success: true,
         } as Record<string, unknown>,
       },
+      quickReplies: [
+        { label: '重新部署', value: '部署', style: 'secondary' },
+        { label: '回滾版本', value: '回滾', style: 'secondary' },
+      ],
     })
   } else {
     state.phase = 'deployer_failed'
     await saveFlowState(redis, conversationId, state)
 
     await sendMessage(conversationId, io, {
-      content: `**部署失敗**\n\n${result.error}\n\n輸入「**部署**」可重新嘗試。`,
+      content: `**部署失敗**\n\n${result.error}\n\n輸入「**部署**」可重新嘗試，或「**返回修改**」回到設計修改。`,
       stage: 'deployer_error',
       richContent: {
         type: 'deploy_result',
@@ -3625,6 +3679,10 @@ async function handleDeployExecute(
           success: false,
         } as Record<string, unknown>,
       },
+      quickReplies: [
+        { label: '重試部署', value: '部署', style: 'primary' },
+        { label: '返回修改', value: '返回修改', style: 'secondary' },
+      ],
     })
   }
 }
@@ -3745,6 +3803,9 @@ async function handleDesignIteration(
         currentPhase: 'complete',
       } as Record<string, unknown>,
     },
+    quickReplies: [
+      { label: '部署上線', value: '部署', style: 'primary' },
+    ],
   })
 
   // 8. 回到 uiux_complete 等待下一步

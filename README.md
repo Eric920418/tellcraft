@@ -1536,6 +1536,7 @@ isa_config_content TEXT
 - `InteractivePreview.tsx` - 互動預覽（postMessage 通訊）
 - `PropertyEditor.tsx` - 屬性編輯器（文字/顏色/間距）
 - `UiuxChatSection.tsx` - UIUX 階段聊天介面
+- `QuickReplies.tsx`（`app/components/`）- 可點擊快速回覆按鈕（primary/secondary/ghost 三種樣式）
 
 **訊息結構擴展**：
 ```typescript
@@ -1546,6 +1547,8 @@ interface Message {
     type: 'template_picker' | 'design_preview' | 'code_preview'
     data: Record<string, unknown>
   }
+  // Quick Reply 可點擊選項（只渲染在最後一條助手訊息上）
+  quickReplies?: { label: string; value: string; style?: 'primary' | 'secondary' | 'ghost' }[]
 }
 ```
 

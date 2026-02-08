@@ -14,6 +14,7 @@ import DeployConfirm from '../deployer/DeployConfirm'
 import DeployProgress from '../deployer/DeployProgress'
 import DeployResult from '../deployer/DeployResult'
 import DeploymentHistory from '../deployer/DeploymentHistory'
+import QuickReplies from '../QuickReplies'
 import type { Template, TemplateCardData } from '../../lib/templates'
 import { getTemplateById } from '../../actions/templates'
 
@@ -37,6 +38,7 @@ export interface UiuxMessage {
   stage?: string
   progress?: { current: number; total: number; step: string }
   layoutHint?: 'default' | 'split' | 'full_preview'
+  quickReplies?: { label: string; value: string; style?: 'primary' | 'secondary' | 'ghost' }[]
   richContent?: {
     type: 'template_picker' | 'design_preview' | 'code_preview' | 'variant_picker' | 'quality_gate_report' | 'deploy_confirm' | 'deploy_progress' | 'deploy_result' | 'deployment_history'
     data: {
@@ -210,7 +212,7 @@ export default function UiuxChatSection({
           padding: 16,
         }}
       >
-        {messages.map((message) => (
+        {messages.map((message, index) => (
           <motion.div
             key={message.id}
             initial={{ opacity: 0, y: 10 }}
@@ -390,6 +392,15 @@ export default function UiuxChatSection({
             {/* Rich Content: Deployment History (Rollback) */}
             {message.richContent?.type === 'deployment_history' && (
               <DeploymentHistory data={message.richContent.data as Parameters<typeof DeploymentHistory>[0]['data']} onSendMessage={onSendMessage} />
+            )}
+
+            {/* Quick Replies */}
+            {message.role === 'assistant' &&
+             message.quickReplies &&
+             message.quickReplies.length > 0 &&
+             index === messages.length - 1 &&
+             !isTyping && (
+              <QuickReplies replies={message.quickReplies} onSelect={onSendMessage} />
             )}
           </motion.div>
         ))}

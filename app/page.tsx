@@ -29,6 +29,7 @@ import SpecGenerationView from './components/SpecGenerationView'
 import PreviewPanel from './components/uiux/PreviewPanel'
 import DeviceSwitcher, { type DeviceType, getDeviceWidth } from './components/uiux/DeviceSwitcher'
 import TemplatePicker from './components/uiux/TemplatePicker'
+import QuickReplies from './components/QuickReplies'
 import { convertToPreviewHtml, convertToPreviewHtmlSafe, injectStreamingAnimation } from './lib/tsx-to-preview'
 import { io, Socket } from 'socket.io-client'
 import type { StreamingPreview } from './hooks/useVpsWebSocket'
@@ -49,6 +50,8 @@ interface Message {
     type: 'template_picker' | 'design_preview' | 'code_preview' | 'quality_gate_report'
     data: Record<string, unknown>
   }
+  // Quick Reply 可點擊選項
+  quickReplies?: { label: string; value: string; style?: 'primary' | 'secondary' | 'ghost' }[]
   // 樂觀更新標記：pending 表示尚未確認儲存到 DB
   pending?: boolean
 }
@@ -1234,6 +1237,7 @@ function ChatSection({
             // UIUX 模板系統欄位
             layoutHint: m.layoutHint as Message['layoutHint'],
             richContent: m.richContent as Message['richContent'],
+            quickReplies: m.quickReplies,
           }))
 
           // 收到 code_preview 消息時清除 streaming preview（最終版已到達）
@@ -1989,6 +1993,15 @@ function ChatSection({
                             showCategories={false}
                           />
                         </motion.div>
+                      )}
+
+                      {/* Quick Replies */}
+                      {message.role === 'assistant' &&
+                       message.quickReplies &&
+                       message.quickReplies.length > 0 &&
+                       index === displayMessages.length - 1 &&
+                       typingStage === 'none' && (
+                        <QuickReplies replies={message.quickReplies} onSelect={handleSendMessage} />
                       )}
                     </>
                   )}
