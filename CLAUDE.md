@@ -61,6 +61,7 @@ git pull && pnpm build && pm2 restart tellcraft-backend
 | **VPS API Client** | `app/lib/vps-api.ts` | 前端呼叫 VPS 的 HTTP 客戶端 |
 | **WebSocket Hook** | `app/hooks/useVpsWebSocket.ts` | 即時訊息推送 |
 | **TSX→HTML 轉換器** | `app/lib/tsx-to-preview.ts` | UIUX 預覽核心，TSX 轉瀏覽器可渲染 HTML |
+| **BDD→UI 翻譯** | `tellcraft-backend/src/services/bdd-to-ui-spec.ts` | ISA BDD spec → 前端 UI 需求規格（頁面/操作/欄位） |
 | **Auth Middleware** | `tellcraft-backend/src/middleware/auth.ts` | `requireAuth`、`optionalAuth`、`requirePlan()` |
 
 ### Skill 系統
@@ -112,19 +113,29 @@ Orchestrator 使用 `FlowState.phase` 控制對話流程，所有 phase 必須�
 
 **Implementation 三階段生成**：`generateStructure()` → `generateAnimations()` → `generateRwd()`（每階段可確認或重做，Stage 2/3 有 fallback）
 
+**BDD→UI 翻譯**：Pipeline 開始前，`translateBddToUISpec()` 用 Haiku 將 ISA BDD spec 翻譯為結構化 `UIRequirementsSpec`（頁面/操作/欄位）。翻譯結果快取在 `FlowState.uiuxUISpec`，失敗時降級用原始 bddSpec。
+
+**Variant 創意概念**：用戶選擇 variant 後，`extractVariantConcept()` 從 `DesignVariant` 提取 `VariantConcept`（name/description/keyFeatures/signatureElement）存入 `FlowState.uiuxVariantConcept`。所有生成函數收到此概念並注入 prompt，確保創意方向貫穿整個設計。
+
 **串流實時預覽**：三個生成函數都支援 `onPartialCode` callback，LLM 串流期間每完成一個 code block 就透過 Socket.io `preview_update` 事件推送給前端。前端用 `convertToPreviewHtmlSafe()` 容錯轉換 + `injectStreamingAnimation()` fade-in，用戶能看到網頁漸進式構建。Throttle 雙條件：新區塊 + >= 1500ms。
 
 **關鍵函數**（`tellcraft-backend/src/services/uiux-generation.ts`）：
 - `generateDesignBrief()` - Domain Exploration + Signature Element
-- `generateDesignVariants()` - 5 變體 + Anti-Default 哲學
-- `generateStructure()` - 靜態桌面版 + Professional UI Rules（支援 streaming）
-- `generateAnimations()` - 動畫增強（支援 streaming）
-- `generateRwd()` - 響應式 + Pre-Delivery Checklist（支援 streaming）
+- `generateDesignVariants()` - 5 變體 + Anti-Default 哲學（含 `signatureElement`）
+- `generateStructure()` - 靜態桌面版 + Professional UI Rules（支援 streaming）；`productContext` 含 `uiSpec`（BDD 翻譯）和 `variantConcept`（創意概念）
+- `generateAnimations()` - 動畫增強（支援 streaming）；可選 `variantConcept` 參數
+- `generateRwd()` - 響應式 + Pre-Delivery Checklist（支援 streaming）；可選 `variantConcept` 參數
+- `refineCode()` - 迭代修改；`designContext` 含 `variantConcept`
+- `extractVariantConcept()` - 從選中 variant 提取創意概念（name/description/keyFeatures/signatureElement）
 - `parseCompletedFileBlocks()` - 串流解析已閉合 code block（for streaming preview）
 - `buildStreamingHandler()` - Throttled streaming callback builder
 - `synthesizeVariants()` - 變體合併（layout/interaction metadata）
 - `getCraftFoundations()` - 共用品質底線
 - `getStructureConstraints(tier)` / `getAnimationConstraints(tier)` / `getVariantPromptHint(tier)` - Tier 約束集
+
+**關鍵函數**（`tellcraft-backend/src/services/bdd-to-ui-spec.ts`）：
+- `translateBddToUISpec(bddSpec, originalRequirements)` - 用 Haiku 將 ISA BDD spec 翻譯為 `UIRequirementsSpec`（頁面/操作/欄位結構）
+- `formatUISpecForPrompt(spec)` - 將 `UIRequirementsSpec` 格式化為 prompt section
 
 #### Quality Gate（UIUX 完成後自動觸發）
 

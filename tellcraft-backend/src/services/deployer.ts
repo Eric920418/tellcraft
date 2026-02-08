@@ -15,6 +15,40 @@ const execFileAsync = promisify(execFile)
 const VERCEL_API = 'https://api.vercel.com'
 
 // ============================================================
+// 部署並發限流器（防止同時跑太多 npm install + next build）
+// ============================================================
+
+const DEPLOY_MAX_CONCURRENT = parseInt(process.env.DEPLOY_MAX_CONCURRENT || '3', 10)
+let deployActiveCount = 0
+const deployWaitQueue: Array<() => void> = []
+
+async function acquireDeploySlot(): Promise<void> {
+  if (deployActiveCount < DEPLOY_MAX_CONCURRENT) {
+    deployActiveCount++
+    return
+  }
+  return new Promise<void>((resolve) => {
+    deployWaitQueue.push(() => {
+      deployActiveCount++
+      resolve()
+    })
+  })
+}
+
+function releaseDeploySlot(): void {
+  deployActiveCount--
+  if (deployWaitQueue.length > 0) {
+    const next = deployWaitQueue.shift()!
+    next()
+  }
+}
+
+/** 取得部署並發狀態（供監控用） */
+export function getDeployConcurrencyStats() {
+  return { active: deployActiveCount, queued: deployWaitQueue.length, max: DEPLOY_MAX_CONCURRENT }
+}
+
+// ============================================================
 // 類型定義
 // ============================================================
 
@@ -1590,6 +1624,8 @@ async function verifyBuildLocally(
   let currentCode = code
   let currentExtraDeps = { ...(extraDependencies || {}) }
 
+  // 限制同時執行的 build 數量（npm install + next build 非常吃資源）
+  await acquireDeploySlot()
   try {
     await fsPromises.mkdir(tmpDir, { recursive: true })
 
@@ -1720,6 +1756,7 @@ async function verifyBuildLocally(
       finalCode: code,
     }
   } finally {
+    releaseDeploySlot()
     // 清理臨時目錄
     try {
       await fsPromises.rm(tmpDir, { recursive: true, force: true })

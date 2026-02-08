@@ -911,10 +911,16 @@ function ChatSection({
     streamingSocketRef.current = socket
 
     socket.on('connect', () => {
+      console.log(`[StreamingPreview] WebSocket connected: ${socket.id}, subscribing to ${convId}`)
       socket.emit('subscribe', convId)
     })
 
+    socket.on('connect_error', (err: Error) => {
+      console.error(`[StreamingPreview] WebSocket connect error:`, err.message)
+    })
+
     socket.on('preview_update', (preview: StreamingPreview) => {
+      console.log(`[StreamingPreview] received: phase=${preview.phase}, pages=${preview.pages?.length}, comps=${preview.components?.length}`)
       setStreamingPreview(preview)
       // 收到串流預覽時自動切換到 split 佈局
       if (layoutModeRef.current !== 'split') {

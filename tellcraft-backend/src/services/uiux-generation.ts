@@ -5,6 +5,7 @@
 
 // LLM 函數需要從後端獨立實現
 import Anthropic from '@anthropic-ai/sdk'
+import { formatUISpecForPrompt, UIRequirementsSpec } from './bdd-to-ui-spec'
 
 // 模組級 Anthropic 單例（避免每次 callClaude 都 new）
 let anthropicClient: Anthropic | null = null
@@ -1161,7 +1162,7 @@ export async function generateStructure(
     originalRequirements?: string
     designIdeas?: Array<{ step: string; answer: string }>
     designBrief?: DesignBrief
-    uiSpec?: import('./bdd-to-ui-spec').UIRequirementsSpec
+    uiSpec?: UIRequirementsSpec
     variantConcept?: VariantConcept
   },
   trackingContext?: LlmTrackingContext,
@@ -1318,7 +1319,6 @@ ${brief.signature ? `- Signature Element：${brief.signature}` : ''}
   // UI 需求規格（BDD 翻譯後）優先於原始 BDD spec
   let requirementsSection = ''
   if (uiSpec) {
-    const { formatUISpecForPrompt } = require('./bdd-to-ui-spec')
     requirementsSection = formatUISpecForPrompt(uiSpec)
   } else if (bddSpec) {
     requirementsSection = `## BDD 規格（核心依據）

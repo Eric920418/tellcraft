@@ -12,10 +12,25 @@ Tellcraft 是一個 AI 驅動的自動化開發平台。用戶只需描述需求
 
 ## 當前開發進度
 
-- **狀態**：✅ Phase 1-9 + Server Actions + VPS Backend + 前端 Chat 串接 + 認證系統 + 訪客體驗改善 + 儀表板系統 + BDD Spec 完整修復 + 專案版本管理 + **UIUX 生成邏輯重構** + **Design Tier** + **專案自動命名** + **PreviewPanel iframe 重構** + **Quality Gate 品質檢查** + **Code Preview 即時渲染** + **串流實時預覽**
+- **狀態**：✅ Phase 1-9 + Server Actions + VPS Backend + 前端 Chat 串接 + 認證系統 + 訪客體驗改善 + 儀表板系統 + BDD Spec 完整修復 + 專案版本管理 + **UIUX 生成邏輯重構** + **Design Tier** + **專案自動命名** + **PreviewPanel iframe 重構** + **Quality Gate 品質檢查** + **Code Preview 即時渲染** + **串流實時預覽** + **BDD→UI 翻譯 + Variant 創意概念**
 - **釐清項目**：28 項全部解決
 - **Server Actions**：30+ 已實作
 - **詳情**：[`.clarify/overview.md`](.clarify/overview.md)
+
+### BDD→UI 翻譯 + Variant 創意概念（2026-02-08）
+
+解決兩個根本問題：(1) Variant 創意概念在生成過程中丟失；(2) ISA 格式的 BDD spec 不適合前端 LLM 消費。
+
+**BDD→UI 翻譯**：Pipeline 開始前，用 Haiku 將 BDD Feature Files 翻譯為結構化的 `UIRequirementsSpec`（頁面/操作/欄位），取代原始 BDD spec 注入生成 prompt。翻譯結果快取在 FlowState，失敗時自動降級。
+
+**Variant 創意概念**：用戶選擇 variant 後，從 `DesignVariant` 提取 `VariantConcept`（name/description/keyFeatures/signatureElement），注入所有生成函數的 prompt（Structure/Animation/RWD/Refine），確保創意方向貫穿整個設計。
+
+**新增文件**：
+- `tellcraft-backend/src/services/bdd-to-ui-spec.ts` — BDD→UI 翻譯 service
+
+**修改文件**：
+- `tellcraft-backend/src/services/uiux-generation.ts` — 新增 `VariantConcept` 類型 + `extractVariantConcept()`；`generateStructure/Animations/Rwd/refineCode` 支援概念注入
+- `tellcraft-backend/src/workers/orchestrator.ts` — FlowState 新增 `uiuxUISpec`/`uiuxVariantConcept`；Pipeline 整合翻譯 + 概念傳遞
 
 ### Quality Gate 品質檢查（2026-02-06）
 
@@ -1718,18 +1733,33 @@ DNS 設定流程（domain-dns）：
 | 長時間 LLM 任務 | 超時失敗 | 正常完成 |
 | 調試 | 困難 | PM2 + 日誌 |
 
-### 並發處理策略
+### 並發處理策略（2026-02-08 優化）
 
-```typescript
-// BullMQ 並發控制
-const worker = new Worker('orchestrator', processor, {
-  concurrency: 50,  // 同時最多處理 50 個請求
-})
+**多層限流架構**：
+```
+用戶請求 → BullMQ Worker (concurrency: 20) → LLM Semaphore (max: 10) → Anthropic API
+                                             → Deploy Semaphore (max: 3) → npm install + next build
 ```
 
-- **BullMQ**：自動排隊、重試機制
-- **Redis**：狀態管理、隊列儲存
-- **LLM API**：多 Key 輪換分散 rate limit
+| 層級 | 配置 | 環境變數 | 用途 |
+|------|------|----------|------|
+| Worker 並發 | 20 | `WORKER_CONCURRENCY` | BullMQ 同時處理的 Job 數 |
+| LLM 限流 | 10 | `LLM_MAX_CONCURRENT` | 同時進行的 Anthropic API 呼叫 |
+| 部署限流 | 3 | `DEPLOY_MAX_CONCURRENT` | 同時執行的 npm install + next build |
+| DB 連接池 | 50 | `DB_POOL_MAX` | PostgreSQL 最大連接數 |
+
+**基礎設施配置**：
+- PM2 `max_memory_restart: 4G`（防 OOM）
+- Express body limit `50mb`（大型代碼傳輸）
+- Socket.io `pingTimeout: 60s`、`maxHttpBufferSize: 5MB`
+- Redis 重連策略（指數退避，上限 2s）
+
+**監控端點**：
+- `GET /health/stats` — 記憶體、LLM/Deploy 並發、DB 連接池、/tmp build 目錄數
+- `POST /health/cleanup-tmp` — 手動清理超過 30 分鐘的孤兒 build 目錄
+- 啟動時 + 每 10 分鐘自動清理 /tmp 孤兒 build 目錄
+
+**預估容量**：安全並發 30-40 人，峰值 50 人（需 4 核 8GB+ VPS）
 
 ### 多租戶架構（Multi-Tenant SaaS）
 

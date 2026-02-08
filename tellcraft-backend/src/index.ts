@@ -5,6 +5,9 @@ import { Server as SocketIOServer } from 'socket.io'
 import { Queue } from 'bullmq'
 import Redis from 'ioredis'
 import cors from 'cors'
+import * as os from 'os'
+import * as path from 'path'
+import * as fsPromises from 'fs/promises'
 
 import { testConnection, closePool } from './db/client'
 import { createOrchestratorWorker } from './workers/orchestrator'
@@ -40,7 +43,7 @@ app.use(cors({
   credentials: true,
 }))
 
-app.use(express.json())
+app.use(express.json({ limit: '50mb' }))
 
 // ============================================================
 // Socket.io
@@ -52,6 +55,10 @@ const io = new SocketIOServer(server, {
     credentials: true,
   },
   transports: ['websocket', 'polling'],
+  pingTimeout: 60000,
+  pingInterval: 25000,
+  maxHttpBufferSize: 5e6,
+  connectTimeout: 30000,
 })
 
 io.on('connection', (socket) => {
@@ -80,6 +87,10 @@ io.on('connection', (socket) => {
 
 const redis = new Redis(REDIS_URL, {
   maxRetriesPerRequest: null, // BullMQ 要求
+  retryStrategy: (times) => Math.min(times * 50, 2000),
+  enableReadyCheck: true,
+  keepAlive: 30000,
+  connectTimeout: 10000,
 })
 
 redis.on('connect', () => {
@@ -145,6 +156,37 @@ app.use((err: Error, _req: express.Request, res: express.Response, _next: expres
 })
 
 // ============================================================
+// /tmp 孤兒 build 目錄清理
+// ============================================================
+
+async function cleanupOrphanBuildDirs() {
+  try {
+    const tmpDir = os.tmpdir()
+    const entries = await fsPromises.readdir(tmpDir)
+    const buildDirs = entries.filter(e => e.startsWith('tellcraft-build-'))
+    const thirtyMinAgo = Date.now() - 30 * 60 * 1000
+    let cleaned = 0
+
+    for (const dir of buildDirs) {
+      try {
+        const fullPath = path.join(tmpDir, dir)
+        const stat = await fsPromises.stat(fullPath)
+        if (stat.mtimeMs < thirtyMinAgo) {
+          await fsPromises.rm(fullPath, { recursive: true, force: true })
+          cleaned++
+        }
+      } catch { /* skip */ }
+    }
+
+    if (cleaned > 0) {
+      console.log(`[清理] 移除 ${cleaned} 個過期的 build 臨時目錄`)
+    }
+  } catch (err) {
+    console.error('[清理] 清理臨時目錄失敗:', err)
+  }
+}
+
+// ============================================================
 // 啟動服務器
 // ============================================================
 
@@ -159,6 +201,12 @@ async function start() {
     console.error('[啟動] 資料庫連接失敗，退出')
     process.exit(1)
   }
+
+  // 啟動時清理殘留 build 目錄
+  await cleanupOrphanBuildDirs()
+
+  // 每 10 分鐘定時清理
+  setInterval(cleanupOrphanBuildDirs, 10 * 60 * 1000)
 
   // 啟動服務器
   server.listen(PORT, '0.0.0.0', () => {

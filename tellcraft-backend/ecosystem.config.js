@@ -6,7 +6,7 @@ module.exports = {
       instances: 1, // 單實例（BullMQ Worker 需要）
       autorestart: true,
       watch: false,
-      max_memory_restart: '1G',
+      max_memory_restart: '4G',
       env: {
         NODE_ENV: 'production',
         PORT: 3100,

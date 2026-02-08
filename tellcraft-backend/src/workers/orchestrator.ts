@@ -22,6 +22,7 @@ import { runSpecDiscovery, specIssuesToClarifyItems, SpecIssue } from '../servic
 import {
   generateDesignVariants,
   synthesizeVariants,
+  extractVariantConcept,
   generateStructure,
   generateAnimations,
   generateRwd,
@@ -36,7 +37,9 @@ import {
   DesignSystem,
   GeneratedComponent,
   PartialCodeCallback,
+  VariantConcept,
 } from '../services/uiux-generation'
+import { translateBddToUISpec, UIRequirementsSpec } from '../services/bdd-to-ui-spec'
 import { runQualityGate, autoFixCriticalIssues, QualityReport } from '../services/quality-gate'
 import { prepareDeployment, executeDeployment, DeployPreCheckResult, listProjectDeployments, rollbackToDeployment, DeploymentRecord } from '../services/deployer'
 
@@ -121,6 +124,10 @@ interface FlowState {
   }
   // 回滾
   rollbackDeployments?: DeploymentRecord[]  // 可選的回滾版本列表
+  // BDD→UI 翻譯結果快取
+  uiuxUISpec?: UIRequirementsSpec
+  // 選中 variant 的創意概念
+  uiuxVariantConcept?: VariantConcept
 }
 
 // PRD Discovery 限制
@@ -200,7 +207,7 @@ export function createOrchestratorWorker(
     },
     {
       connection: redis,
-      concurrency: 50,
+      concurrency: parseInt(process.env.WORKER_CONCURRENCY || '20', 10),
     }
   )
 
@@ -1899,6 +1906,11 @@ async function handleVariantSelection(
   // 合併變體生成最終 Design System
   const finalDesignSystem = synthesizeVariants(selectedIds, variants)
 
+  // 提取選中 variant 的創意概念
+  const variantConcept = extractVariantConcept(selectedIds, variants)
+  state.uiuxVariantConcept = variantConcept
+  console.log(`[Orchestrator] 變體創意概念: ${variantConcept.name}${variantConcept.signatureElement ? ` (Signature: ${variantConcept.signatureElement})` : ''}`)
+
   // 保存到 BDD Session
   await updateBddSession({
     sessionId: state.sessionId,
@@ -1950,6 +1962,21 @@ async function executeFullCodePipeline(
   const pages = template.pageStructure.pages || ['home']
   const twConfig = generateTailwindConfig(uiuxDesignSystem)
 
+  // ===== BDD→UI 翻譯（有快取跳過）=====
+  let uiSpec = state.uiuxUISpec
+  if (!uiSpec && bddSpec) {
+    console.log('[Orchestrator] Pipeline 開始 BDD→UI 翻譯...')
+    const translateResult = await translateBddToUISpec(bddSpec, originalRequirements, { conversationId })
+    if (translateResult.success && translateResult.spec) {
+      uiSpec = translateResult.spec
+      state.uiuxUISpec = uiSpec
+      await saveFlowState(redis, conversationId, state)
+      console.log(`[Orchestrator] BDD→UI 翻譯完成: ${uiSpec.pages.length} 頁面`)
+    } else {
+      console.warn('[Orchestrator] BDD→UI 翻譯失敗，降級用原始 bddSpec:', translateResult.error)
+    }
+  }
+
   // ===== 階段 1/3：結構 =====
   const structureResult = await generateStructure(
     uiuxDesignSystem,
@@ -1961,6 +1988,8 @@ async function executeFullCodePipeline(
       originalRequirements,
       designIdeas: state.uiuxDesignIdeas,
       designBrief: state.uiuxDesignBrief,
+      uiSpec,
+      variantConcept: state.uiuxVariantConcept,
     },
     { conversationId },
     makeStreamingCallback(conversationId, io, 'structure', twConfig)
@@ -2008,7 +2037,8 @@ async function executeFullCodePipeline(
     currentCode,
     state.uiuxDesignTier,
     { conversationId },
-    makeStreamingCallback(conversationId, io, 'animation', twConfig)
+    makeStreamingCallback(conversationId, io, 'animation', twConfig),
+    state.uiuxVariantConcept
   )
 
   if (animationResult.success) {
@@ -2045,7 +2075,8 @@ async function executeFullCodePipeline(
     currentCode,
     state.uiuxDesignTier,
     { conversationId },
-    makeStreamingCallback(conversationId, io, 'rwd', twConfig)
+    makeStreamingCallback(conversationId, io, 'rwd', twConfig),
+    state.uiuxVariantConcept
   )
 
   if (rwdResult.success) {
@@ -2161,6 +2192,17 @@ async function executeCodePhaseStructure(
   // 優先使用 FlowState 中的 uiuxPreparedTemplate（包含用戶的設計偏好和正確的頁面結構）
   const template = state.uiuxPreparedTemplate || dbTemplate
 
+  // BDD→UI 翻譯（有快取跳過）
+  let structUISpec = state.uiuxUISpec
+  if (!structUISpec && bddSpec) {
+    const translateResult = await translateBddToUISpec(bddSpec, originalRequirements, { conversationId })
+    if (translateResult.success && translateResult.spec) {
+      structUISpec = translateResult.spec
+      state.uiuxUISpec = structUISpec
+      await saveFlowState(redis, conversationId, state)
+    }
+  }
+
   // 生成結構
   const pages = template.pageStructure.pages || ['home']
   const twCfg = generateTailwindConfig(uiuxDesignSystem)
@@ -2174,6 +2216,8 @@ async function executeCodePhaseStructure(
       originalRequirements,
       designIdeas: state.uiuxDesignIdeas,
       designBrief: state.uiuxDesignBrief,
+      uiSpec: structUISpec,
+      variantConcept: state.uiuxVariantConcept,
     },
     { conversationId },
     makeStreamingCallback(conversationId, io, 'structure', twCfg)
@@ -2271,7 +2315,8 @@ async function executeCodePhaseAnimation(
     uiuxGeneratedCode,
     state.uiuxDesignTier,
     { conversationId },
-    makeStreamingCallback(conversationId, io, 'animation', animTwCfg)
+    makeStreamingCallback(conversationId, io, 'animation', animTwCfg),
+    state.uiuxVariantConcept
   )
 
   if (!animationResult.success) {
@@ -2363,7 +2408,8 @@ async function executeCodePhaseRwd(
     uiuxGeneratedCode,
     state.uiuxDesignTier,
     { conversationId },
-    makeStreamingCallback(conversationId, io, 'rwd', rwdTwCfg)
+    makeStreamingCallback(conversationId, io, 'rwd', rwdTwCfg),
+    state.uiuxVariantConcept
   )
 
   if (!rwdResult.success) {
@@ -3649,6 +3695,7 @@ async function handleDesignIteration(
       designSystem: state.uiuxDesignSystem,
       designTier: state.uiuxDesignTier,
       designBrief: state.uiuxDesignBrief,
+      variantConcept: state.uiuxVariantConcept,
     },
     { conversationId, purpose: 'design_iteration' }
   )
