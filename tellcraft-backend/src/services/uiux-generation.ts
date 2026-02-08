@@ -20,6 +20,40 @@ function getAnthropicClient(): Anthropic {
   return anthropicClient
 }
 
+// ============================================================
+// LLM 並發限流器（Semaphore）
+// ============================================================
+
+const LLM_MAX_CONCURRENT = parseInt(process.env.LLM_MAX_CONCURRENT || '10', 10)
+let llmActiveCount = 0
+const llmWaitQueue: Array<() => void> = []
+
+async function acquireLlmSlot(): Promise<void> {
+  if (llmActiveCount < LLM_MAX_CONCURRENT) {
+    llmActiveCount++
+    return
+  }
+  return new Promise<void>((resolve) => {
+    llmWaitQueue.push(() => {
+      llmActiveCount++
+      resolve()
+    })
+  })
+}
+
+function releaseLlmSlot(): void {
+  llmActiveCount--
+  if (llmWaitQueue.length > 0) {
+    const next = llmWaitQueue.shift()!
+    next()
+  }
+}
+
+/** 取得 LLM 並發狀態（供監控用） */
+export function getLlmConcurrencyStats() {
+  return { active: llmActiveCount, queued: llmWaitQueue.length, max: LLM_MAX_CONCURRENT }
+}
+
 // GeneratedComponent 本地定義
 export interface GeneratedComponent {
   path: string
@@ -45,6 +79,7 @@ async function callClaude(
   _trackingContext?: LlmTrackingContext,
   onTextDelta?: (accumulatedText: string) => void
 ): Promise<{ success: boolean; content?: string; error?: string }> {
+  await acquireLlmSlot()
   try {
     const anthropic = getAnthropicClient()
 
@@ -61,8 +96,13 @@ async function callClaude(
 
     if (onTextDelta) {
       let accumulated = ''
+      let chunkCount = 0
       stream.on('text', (text) => {
         accumulated += text
+        chunkCount++
+        if (chunkCount % 50 === 1) {
+          console.log(`[callClaude] streaming chunk #${chunkCount}, accumulated ${accumulated.length} chars`)
+        }
         onTextDelta(accumulated)
       })
     }
@@ -77,6 +117,8 @@ async function callClaude(
     return { success: false, error: '無法取得回應內容' }
   } catch (err) {
     return { success: false, error: `呼叫 LLM 時發生錯誤: ${err}` }
+  } finally {
+    releaseLlmSlot()
   }
 }
 
@@ -386,6 +428,64 @@ export interface DesignVariant {
   designSystem: DesignSystem
   previewDescription: string // 用於描述預覽效果
   keyFeatures: string[] // 這個變體的關鍵特點
+  signatureElement?: string // 此變體最獨特的視覺/結構元素
+}
+
+/**
+ * 選中的 Variant 創意概念
+ * 從 DesignVariant 中提取，傳遞給生成函數作為設計靈魂
+ */
+export interface VariantConcept {
+  name: string
+  description: string
+  keyFeatures: string[]
+  previewDescription: string
+  signatureElement?: string
+  sourceVariantIds: string[]
+}
+
+/**
+ * 從選中的變體中提取創意概念
+ * 單選：直接提取。多選：以第一個為主，附加其他 variant 的 keyFeatures
+ */
+export function extractVariantConcept(
+  selectedIds: string[],
+  allVariants: DesignVariant[]
+): VariantConcept {
+  const selected = selectedIds
+    .map(id => allVariants.find(v => v.id === id))
+    .filter((v): v is DesignVariant => !!v)
+
+  if (selected.length === 0) {
+    return {
+      name: 'Default',
+      description: '',
+      keyFeatures: [],
+      previewDescription: '',
+      sourceVariantIds: selectedIds,
+    }
+  }
+
+  const primary = selected[0]
+  const mergedFeatures = [...primary.keyFeatures]
+
+  // 多選時附加其他 variant 的 keyFeatures（去重）
+  for (let i = 1; i < selected.length; i++) {
+    for (const feature of selected[i].keyFeatures) {
+      if (!mergedFeatures.includes(feature)) {
+        mergedFeatures.push(feature)
+      }
+    }
+  }
+
+  return {
+    name: primary.name,
+    description: primary.description,
+    keyFeatures: mergedFeatures,
+    previewDescription: primary.previewDescription,
+    signatureElement: primary.signatureElement,
+    sourceVariantIds: selectedIds,
+  }
 }
 
 /**
@@ -543,6 +643,7 @@ ${Object.values(axes).map(v => `- **${v.id}. ${v.name}**：${v.description}\n  $
       "description": "簡短描述這個變體的設計方向",
       "previewDescription": "描述預覽效果（2-3 句話）",
       "keyFeatures": ["特點1", "特點2", "特點3"],
+      "signatureElement": "此變體最獨特的視覺/結構元素（必須具體到可直接實作，例如「花園隱喻的支出樹狀圖」）",
       "designSystem": {
         "cssVariables": ":root { --color-primary: #...; --color-secondary: #...; }",
         "tailwindExtend": {
@@ -1033,10 +1134,14 @@ function buildStreamingHandler(
   return (accumulated: string) => {
     const parsed = parseCompletedFileBlocks(accumulated)
     const now = Date.now()
-    if (parsed.completedBlockCount > lastBlockCount && now - lastEmitTime >= 1500) {
-      lastBlockCount = parsed.completedBlockCount
-      lastEmitTime = now
-      onPartialCode({ pages: parsed.pages, components: parsed.components, styles: parsed.styles })
+    if (parsed.completedBlockCount > lastBlockCount) {
+      console.log(`[StreamingPreview] 新區塊完成: ${parsed.completedBlockCount} blocks, ${parsed.pages.length} pages, ${parsed.components.length} components, timeSinceLastEmit=${now - lastEmitTime}ms`)
+      if (now - lastEmitTime >= 1500) {
+        lastBlockCount = parsed.completedBlockCount
+        lastEmitTime = now
+        console.log(`[StreamingPreview] >>> EMIT preview_update: ${parsed.pages.length} pages, ${parsed.components.length} components`)
+        onPartialCode({ pages: parsed.pages, components: parsed.components, styles: parsed.styles })
+      }
     }
   }
 }
@@ -1056,6 +1161,8 @@ export async function generateStructure(
     originalRequirements?: string
     designIdeas?: Array<{ step: string; answer: string }>
     designBrief?: DesignBrief
+    uiSpec?: import('./bdd-to-ui-spec').UIRequirementsSpec
+    variantConcept?: VariantConcept
   },
   trackingContext?: LlmTrackingContext,
   onPartialCode?: PartialCodeCallback
@@ -1174,9 +1281,25 @@ const font = DM_Sans({ subsets: ['latin'], variable: '--font-sans' })
   const productDesc = productContext?.originalRequirements || ''
   const designIdeas = productContext?.designIdeas || []
   const brief = productContext?.designBrief
+  const variantConcept = productContext?.variantConcept
+  const uiSpec = productContext?.uiSpec
 
   const productSection = productDesc
     ? `## 產品描述（最重要！頁面結構和內容必須完全符合這個產品）\n${productDesc}\n`
+    : ''
+
+  // 創意概念 section — 放在最頂部，最高優先級
+  const conceptSection = variantConcept
+    ? `## 設計創意概念（最高優先 — 整個設計的靈魂）
+「${variantConcept.name}」— ${variantConcept.description}
+核心特點：${variantConcept.keyFeatures.join('、')}
+預覽效果：${variantConcept.previewDescription}
+${variantConcept.signatureElement ? `Signature Element：${variantConcept.signatureElement}` : ''}
+
+**重要**：這個創意概念定義了整個設計的視覺語言和體驗方向。
+所有頁面結構、視覺元素、互動模式都必須服務於這個概念。
+不要生成一個「普通的」UI 然後貼上概念的標籤 — 概念必須滲透到每個設計決策中。
+`
     : ''
 
   const designSection = designIdeas.length > 0
@@ -1192,26 +1315,36 @@ ${brief.signature ? `- Signature Element：${brief.signature}` : ''}
 `
     : ''
 
-  const userMessage = `請根據以下資訊生成靜態桌面版前端代碼。
-
-${productSection}
-${designSection}
-${briefSection}
-${bddSpec ? `## BDD 規格（核心依據）
+  // UI 需求規格（BDD 翻譯後）優先於原始 BDD spec
+  let requirementsSection = ''
+  if (uiSpec) {
+    const { formatUISpecForPrompt } = require('./bdd-to-ui-spec')
+    requirementsSection = formatUISpecForPrompt(uiSpec)
+  } else if (bddSpec) {
+    requirementsSection = `## BDD 規格（核心依據）
 以下是產品的 BDD Feature Files，描述了所有功能和業務規則。
 **你必須從這些 Feature 推導出前端需要哪些頁面、哪些 UI 元素、哪些操作流程。**
 
-${bddSpec}` : ''}
+${bddSpec}`
+  }
+
+  const userMessage = `請根據以下資訊生成靜態桌面版前端代碼。
+
+${conceptSection}
+${productSection}
+${designSection}
+${briefSection}
+${requirementsSection}
 
 ## 頁面規劃策略
 以下頁面列表僅作為起始建議：${pages.map(p => `${p}`).join(', ')}
 
-**你應該根據 BDD 規格自行判斷最終的頁面結構：**
-- 從 Feature Files 中找出所有用戶操作場景，歸納出需要哪些頁面
-- 每個頁面要能承載對應的 Feature 功能（表單、列表、統計等）
-- 可以增加、移除、合併、重新命名頁面 — 只要能完整覆蓋 BDD 規格描述的功能
+**你應該根據需求規格自行判斷最終的頁面結構：**
+- 歸納出需要哪些頁面，每個頁面承載什麼功能
+- 可以增加、移除、合併、重新命名頁面 — 只要能完整覆蓋功能需求
 - Header/Footer 的導航連結要對應你最終決定的頁面結構
 - 頁面中使用有意義的模擬數據（和產品領域相關，不要用 Lorem ipsum）
+${variantConcept ? `- 每個頁面都必須體現「${variantConcept.name}」的創意概念，不是只有首頁` : ''}
 
 ## 模板資訊（設計風格參考）
 - 名稱：${template.name}
@@ -1219,10 +1352,20 @@ ${bddSpec}` : ''}
 - 描述：${template.description}
 
 ## 需要生成的內容
-1. 每個頁面的 page.tsx（靜態結構，根據 BDD 規格決定具體內容）
+1. 每個頁面的 page.tsx（靜態結構，根據需求規格決定具體內容）
 2. 共用的 Layout 組件（Header, Footer — 導航項對應實際頁面）
 3. 頁面所需的 UI 組件（根據功能需求決定，不要為了生成而生成）
 4. globals.css（包含 CSS variables）
+
+## ⚠️ 自給自足規則（Critical — 違反會導致 build 失敗）
+**每個 import 語句引用的檔案，你都必須在輸出中生成對應檔案。** 禁止引用不存在的內部模組。
+
+- ❌ 禁止：寫了 import { FadeIn } from '@/components/animations/FadeIn' 但沒有輸出 FadeIn 檔案
+- ✅ 正確：要嘛生成對應的組件檔案，要嘛不使用這個 import
+- 如果你想拆分組件到多個檔案，**每個被引用的檔案都必須在輸出中**
+- 簡單功能直接寫在同一個檔案裡，不要過度拆分到不存在的檔案
+- 第三方套件（react, next, motion/react, @heroicons/react 等）可以自由 import
+- 自檢：掃描你所有輸出的 import 語句，確認每個 @/ 或 ./ 開頭的路徑都有對應的輸出檔案
 
 請確保所有組件使用一致的 Design System。這是第一階段，動畫和響應式會在後續階段添加。`
 
@@ -1261,7 +1404,8 @@ export async function generateAnimations(
   },
   designTier?: DesignTier,
   trackingContext?: LlmTrackingContext,
-  onPartialCode?: PartialCodeCallback
+  onPartialCode?: PartialCodeCallback,
+  variantConcept?: VariantConcept
 ): Promise<GenerationResult> {
   const tier = designTier || 'functional'
 
@@ -1332,8 +1476,12 @@ ${getAnimationConstraints(tier)}
     `\`\`\`css:globals.css\n${existingCode.styles}\n\`\`\``,
   ].join('\n\n')
 
-  const userMessage = `請在以下代碼基礎上添加動畫效果：
+  const conceptReminder = variantConcept
+    ? `\n## 設計概念提醒\n動畫風格必須服務於「${variantConcept.name}」的設計概念。${variantConcept.signatureElement ? `Signature Element「${variantConcept.signatureElement}」的動畫尤其重要。` : ''}\n`
+    : ''
 
+  const userMessage = `請在以下代碼基礎上添加動畫效果：
+${conceptReminder}
 ## 現有代碼
 ${existingCodeStr}
 
@@ -1343,6 +1491,8 @@ ${existingCodeStr}
 3. 卡片 hover 提升效果
 4. Loading skeleton 動畫
 5. 表單輸入 focus 動畫
+
+⚠️ 自給自足規則：如果你新增了 import 引用內部模組（@/ 或 ./），你必須同時輸出該檔案。禁止引用不存在的內部模組。
 
 請輸出完整的修改後代碼，保持相同的檔案路徑格式。`
 
@@ -1384,7 +1534,8 @@ export async function generateRwd(
   },
   designTier?: DesignTier,
   trackingContext?: LlmTrackingContext,
-  onPartialCode?: PartialCodeCallback
+  onPartialCode?: PartialCodeCallback,
+  variantConcept?: VariantConcept
 ): Promise<GenerationResult> {
   const tier = designTier || 'functional'
 
@@ -1486,8 +1637,12 @@ xl: 1280px
     `\`\`\`css:globals.css\n${existingCode.styles}\n\`\`\``,
   ].join('\n\n')
 
-  const userMessage = `請在以下代碼基礎上添加響應式設計：
+  const rwdConceptReminder = variantConcept
+    ? `\n## 設計概念提醒\n移動端適配時保持「${variantConcept.name}」的設計概念完整性，不要在小螢幕上退化為通用佈局。\n`
+    : ''
 
+  const userMessage = `請在以下代碼基礎上添加響應式設計：
+${rwdConceptReminder}
 ## 現有代碼
 ${existingCodeStr}
 
@@ -1498,6 +1653,8 @@ ${existingCodeStr}
 4. 表單輸入移動端優化
 5. 卡片堆疊佈局
 6. 字體和間距響應式調整
+
+⚠️ 自給自足規則：如果你新增了 import 引用內部模組（@/ 或 ./），你必須同時輸出該檔案。禁止引用不存在的內部模組。
 
 請輸出完整的修改後代碼，保持相同的檔案路徑格式。`
 
@@ -2059,6 +2216,7 @@ export async function refineCode(
     designSystem?: DesignSystem
     designTier?: DesignTier
     designBrief?: DesignBrief
+    variantConcept?: VariantConcept
   },
   trackingContext?: LlmTrackingContext
 ): Promise<GenerationResult> {
@@ -2088,11 +2246,20 @@ export async function refineCode(
 ${designContext.designBrief.signature ? `- Signature：${designContext.designBrief.signature}` : ''}`
     : ''
 
+  const refineConceptSection = designContext.variantConcept
+    ? `## 設計概念（修改時不可丟失）
+「${designContext.variantConcept.name}」— ${designContext.variantConcept.description}
+${designContext.variantConcept.signatureElement ? `Signature Element：${designContext.variantConcept.signatureElement}` : ''}
+修改代碼時必須保持這個創意概念的完整性。`
+    : ''
+
   const systemPrompt = `你是一位專業的前端設計師和開發者。用戶對已完成的設計有修改意見，請根據反饋修改代碼。
 
 ${designSystemSection}
 
 ${briefSection}
+
+${refineConceptSection}
 
 ${getStructureConstraints(tier)}
 
