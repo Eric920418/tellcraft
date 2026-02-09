@@ -325,18 +325,11 @@ function sanitizeCodeForDeploy(code: GeneratedCode): SanitizeResult {
     fixes.push(`globals.css: 移除 Google Fonts @import`)
   }
 
-  // ── 修復 5: Tailwind v4 CSS 語法 → v3 相容 ──
-  if (/@theme\s*\{/.test(sanitized.styles) || /@import\s*["']tailwindcss/.test(sanitized.styles)) {
-    // @import "tailwindcss" 移除
-    sanitized.styles = sanitized.styles.replace(/@import\s*["']tailwindcss(?:\/[^"']*)?["']\s*;?\s*/g, '')
-    // @theme {} → :root {}
-    sanitized.styles = sanitized.styles.replace(/@theme\s*\{([^}]*(?:\{[^}]*\}[^}]*)*)\}/g, (_m, inner: string) => {
-      const trimmed = inner.trim()
-      return trimmed.length > 0 ? `:root {\n${trimmed}\n}` : ''
-    })
-    // @utility/@variant/@custom-variant 移除
-    sanitized.styles = sanitized.styles.replace(/@(?:utility|variant|custom-variant)\s+[\w-]+\s*\{[^}]*(?:\{[^}]*\}[^}]*)*\}/g, '')
-    fixes.push(`globals.css: 移除 Tailwind v4 語法（@theme/@import tailwindcss）`)
+  // ── 修復 5: Tailwind v4 CSS 語法 → v3 相容（@theme→:root, @apply font-custom→CSS, etc）──
+  const beforeClean = sanitized.styles
+  sanitized.styles = cleanTailwindV4Syntax(sanitized.styles)
+  if (sanitized.styles !== beforeClean) {
+    fixes.push(`globals.css: 清理 Tailwind v4 語法（@theme/@import/@apply font-*）`)
   }
 
   // ── 注入 motion helper ──
@@ -749,21 +742,8 @@ export default nextConfig
   })
 
   // app/globals.css — Tailwind v3
-  // 確保有 @tailwind 指令（LLM 可能已包含，也可能沒有）
-  let stylesContent = code.styles
-    .replace(/@import\s*["']tailwindcss["']\s*;?\s*/g, '') // 移除 v4 @import 語法
-    .replace(/@import\s*["']tailwindcss\/[^"']*["']\s*;?\s*/g, '') // 移除 v4 子路徑 @import（如 tailwindcss/theme）
-
-  // 移除 Tailwind v4 的 @theme {} 區塊 → 轉換為 :root {}（保留 CSS 自訂屬性）
-  stylesContent = stylesContent.replace(/@theme\s*\{([^}]*(?:\{[^}]*\}[^}]*)*)\}/g, (_match, inner: string) => {
-    const trimmed = inner.trim()
-    if (trimmed.length === 0) return ''
-    // @theme 裡面的自訂屬性（--color-xxx: ...）轉到 :root
-    return `:root {\n${trimmed}\n}`
-  })
-
-  // 移除其他 Tailwind v4 指令（@utility, @variant, @custom-variant）
-  stylesContent = stylesContent.replace(/@(?:utility|variant|custom-variant)\s+[\w-]+\s*\{[^}]*(?:\{[^}]*\}[^}]*)*\}/g, '')
+  // 統一清理 Tailwind v4 語法 + 非標準 @apply font-* 轉換
+  let stylesContent = cleanTailwindV4Syntax(code.styles)
 
   const hasTailwindDirectives = stylesContent.includes('@tailwind base')
   const globalsCss = hasTailwindDirectives
@@ -1463,6 +1443,34 @@ function parseBuildErrors(output: string): BuildError[] {
 }
 
 /**
+ * 清理 CSS 中的 Tailwind v4 語法（可重複調用）
+ * - @import "tailwindcss" 移除
+ * - @theme {} → :root {}
+ * - @utility/@variant/@custom-variant 移除
+ * - @apply font-{custom} → font-family: var(--font-{custom})（非標準 Tailwind font utility）
+ */
+function cleanTailwindV4Syntax(styles: string): string {
+  let result = styles
+  // @import "tailwindcss" 及子路徑
+  result = result.replace(/@import\s*["']tailwindcss(?:\/[^"']*)?["']\s*;?\s*/g, '')
+  // @theme {} → :root {}
+  result = result.replace(/@theme\s*\{([^}]*(?:\{[^}]*\}[^}]*)*)\}/g, (_m, inner: string) => {
+    const trimmed = inner.trim()
+    return trimmed.length > 0 ? `:root {\n${trimmed}\n}` : ''
+  })
+  // @utility/@variant/@custom-variant 移除
+  result = result.replace(/@(?:utility|variant|custom-variant)\s+[\w-]+\s*\{[^}]*(?:\{[^}]*\}[^}]*)*\}/g, '')
+  // @apply font-{name}：非標準 Tailwind font utility 轉為直接 CSS
+  // 標準 Tailwind font utilities: font-sans, font-serif, font-mono
+  const standardFonts = new Set(['sans', 'serif', 'mono'])
+  result = result.replace(/@apply\s+font-([\w-]+)\s*;/g, (match, fontName: string) => {
+    if (standardFonts.has(fontName)) return match // 保留標準 Tailwind utility
+    return `font-family: var(--font-${fontName}, inherit);`
+  })
+  return result
+}
+
+/**
  * 解析 npm install 錯誤中的壞依賴
  * 回傳需要移除的套件名稱
  */
@@ -1836,6 +1844,10 @@ async function verifyBuildLocally(
         }
 
         currentCode = fixResult.code
+        // LLM 可能在修復中重新引入 Tailwind v4 語法，每次修復後再清理一遍
+        if (currentCode.styles) {
+          currentCode.styles = cleanTailwindV4Syntax(currentCode.styles)
+        }
         if (Object.keys(fixResult.newDependencies).length > 0) {
           currentExtraDeps = { ...currentExtraDeps, ...fixResult.newDependencies }
           fixes.push(`AI 新增依賴: ${Object.keys(fixResult.newDependencies).join(', ')}`)
