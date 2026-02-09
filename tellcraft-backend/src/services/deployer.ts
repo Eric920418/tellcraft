@@ -972,19 +972,58 @@ async function createVercelProject(name: string): Promise<VercelProject | null> 
 
     if (!response.ok) {
       const errorText = await response.text()
-      // 409 表示已存在，不算錯誤
+      // 409 表示已存在，需要確保 Deployment Protection 已關閉
       if (response.status === 409) {
-        console.log(`[Deployer] Vercel project "${name}" 已存在`)
+        console.log(`[Deployer] Vercel project "${name}" 已存在，確保公開存取`)
+        await disableDeploymentProtection(name)
         return null
       }
       console.error(`[Deployer] 建立 Vercel Project 失敗: ${errorText}`)
       return null
     }
 
+    // 新建專案後關閉 Deployment Protection
+    await disableDeploymentProtection(name)
+
     return await response.json() as VercelProject
   } catch (err) {
     console.error('[Deployer] 建立 Vercel Project 錯誤:', err)
     return null
+  }
+}
+
+/**
+ * 關閉 Vercel 專案的 Deployment Protection，讓所有人都能訪問
+ */
+async function disableDeploymentProtection(projectName: string): Promise<void> {
+  const token = process.env.VERCEL_ACCESS_TOKEN!
+  const teamId = process.env.VERCEL_TEAM_ID
+
+  const params = new URLSearchParams()
+  if (teamId) params.append('teamId', teamId)
+
+  try {
+    const response = await fetch(`${VERCEL_API}/v9/projects/${encodeURIComponent(projectName)}?${params}`, {
+      method: 'PATCH',
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        ssoProtection: null,
+        passwordProtection: null,
+        vercelAuthentication: { deploymentType: 'none' },
+      }),
+    })
+
+    if (!response.ok) {
+      const errorText = await response.text()
+      console.warn(`[Deployer] 關閉 Deployment Protection 失敗: ${errorText}`)
+    } else {
+      console.log(`[Deployer] 已關閉 "${projectName}" 的 Deployment Protection`)
+    }
+  } catch (err) {
+    console.warn('[Deployer] 關閉 Deployment Protection 異常:', err)
   }
 }
 

@@ -3964,11 +3964,10 @@ async function handleDeployExecute(
     state.phase = 'deployer_complete'
     await saveFlowState(redis, conversationId, state)
 
-    // 如果代碼被修復過，發送更新的 code_preview 讓前端預覽同步
+    // 如果代碼被修復過，透過 Socket.io 直推預覽更新（不寫對話訊息，避免空氣泡）
     if (result.deployedCode) {
       const deployedCode = result.deployedCode as { pages: unknown[]; components: unknown[]; styles: string }
-      await sendMessage(conversationId, io, {
-        content: '',
+      io?.emit(`message:${conversationId}`, {
         stage: 'deployer_code_sync',
         richContent: {
           type: 'code_preview',
@@ -3977,7 +3976,7 @@ async function handleDeployExecute(
             components: deployedCode.components,
             styles: deployedCode.styles,
             currentPhase: 'complete',
-          } as Record<string, unknown>,
+          },
         },
       })
     }

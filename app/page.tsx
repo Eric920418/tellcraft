@@ -696,50 +696,6 @@ function HeroSection({
           }}
           style={{ position: 'relative' }}
         >
-          {/* Mode Toggle */}
-          <div style={{
-            display: 'flex',
-            gap: 6,
-            marginBottom: 10,
-            padding: '2px',
-            background: 'var(--gray-100)',
-            borderRadius: 8,
-            width: 'fit-content',
-          }}>
-            <button
-              onClick={() => onBuildModeChange('fast')}
-              style={{
-                padding: '6px 14px',
-                fontSize: 13,
-                fontWeight: 500,
-                background: buildMode === 'fast' ? 'var(--black)' : 'transparent',
-                color: buildMode === 'fast' ? 'var(--white)' : 'var(--gray-500)',
-                border: 'none',
-                borderRadius: 6,
-                cursor: 'pointer',
-                transition: 'all 0.2s ease',
-              }}
-            >
-              Fast Mode
-            </button>
-            <button
-              onClick={() => onBuildModeChange('fine')}
-              style={{
-                padding: '6px 14px',
-                fontSize: 13,
-                fontWeight: 500,
-                background: buildMode === 'fine' ? 'var(--black)' : 'transparent',
-                color: buildMode === 'fine' ? 'var(--white)' : 'var(--gray-500)',
-                border: 'none',
-                borderRadius: 6,
-                cursor: 'pointer',
-                transition: 'all 0.2s ease',
-              }}
-            >
-              Fine Mode
-            </button>
-          </div>
-
           <motion.div
             animate={{
               boxShadow: isFocused
@@ -770,14 +726,58 @@ function HeroSection({
               }}
             />
             <div style={{
-              padding: '12px 24px',
+              padding: '10px 16px 10px 10px',
               borderTop: '1px solid var(--border-color)',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'space-between',
+              gap: 8,
               background: 'var(--gray-50)',
             }}>
-              <span style={{ fontSize: 12, color: 'var(--gray-400)' }}>
+              {/* Mode Toggle */}
+              <div style={{
+                display: 'flex',
+                padding: '2px',
+                background: 'var(--gray-200)',
+                borderRadius: 6,
+                flexShrink: 0,
+              }}>
+                <button
+                  onClick={() => onBuildModeChange('fast')}
+                  style={{
+                    padding: '4px 10px',
+                    fontSize: 12,
+                    fontWeight: 500,
+                    background: buildMode === 'fast' ? 'var(--black)' : 'transparent',
+                    color: buildMode === 'fast' ? 'var(--white)' : 'var(--gray-500)',
+                    border: 'none',
+                    borderRadius: 4,
+                    cursor: 'pointer',
+                    transition: 'all 0.2s ease',
+                    whiteSpace: 'nowrap',
+                  }}
+                >
+                  快速
+                </button>
+                <button
+                  onClick={() => onBuildModeChange('fine')}
+                  style={{
+                    padding: '4px 10px',
+                    fontSize: 12,
+                    fontWeight: 500,
+                    background: buildMode === 'fine' ? 'var(--black)' : 'transparent',
+                    color: buildMode === 'fine' ? 'var(--white)' : 'var(--gray-500)',
+                    border: 'none',
+                    borderRadius: 4,
+                    cursor: 'pointer',
+                    transition: 'all 0.2s ease',
+                    whiteSpace: 'nowrap',
+                  }}
+                >
+                  精細
+                </button>
+              </div>
+              <span style={{ fontSize: 12, color: 'var(--gray-400)', flex: 1, textAlign: 'center' }}>
                 {buildMode === 'fast' ? '一句話描述，60 秒出結果' : '描述你的想法，AI 深度釐清'}
               </span>
               <motion.button
@@ -794,6 +794,7 @@ function HeroSection({
                   border: 'none',
                   cursor: inputValue.trim() && !isTransitioning ? 'pointer' : 'not-allowed',
                   transition: 'all 0.2s ease',
+                  flexShrink: 0,
                 }}
               >
                 {isTransitioning ? '...' : '開始'}
@@ -1406,17 +1407,68 @@ function ChatSection({
     }
   }, [sessionInfo?.conversationId, lastTimestamp, lastUpdatedAt])
 
+  // 可靠的滾動到底部函數（用 scrollTop 取代 scrollIntoView 避免競態）
+  const scrollToBottom = useCallback((instant?: boolean) => {
+    const container = chatScrollRef.current
+    if (!container) return
+    isProgrammaticScrollRef.current = true
+    if (instant) {
+      container.scrollTop = container.scrollHeight
+      // 延遲一幀再重置，確保 scroll event 不干擾
+      requestAnimationFrame(() => {
+        isProgrammaticScrollRef.current = false
+      })
+    } else {
+      container.scrollTo({ top: container.scrollHeight, behavior: 'smooth' })
+      // smooth scroll 完成後重置（用 scroll event idle 檢測代替固定 timeout）
+      let scrollTimer: NodeJS.Timeout | null = null
+      const onScrollEnd = () => {
+        if (scrollTimer) clearTimeout(scrollTimer)
+        scrollTimer = setTimeout(() => {
+          isProgrammaticScrollRef.current = false
+          container.removeEventListener('scroll', onScrollEnd)
+        }, 80)
+      }
+      container.addEventListener('scroll', onScrollEnd)
+      // 安全兜底：最多 1.5 秒後強制重置
+      setTimeout(() => {
+        isProgrammaticScrollRef.current = false
+        container.removeEventListener('scroll', onScrollEnd)
+      }, 1500)
+    }
+  }, [])
+
   // 滾動到底部（只在用戶處於底部附近時才自動滾動）
   useEffect(() => {
     if (isNearBottomRef.current) {
-      isProgrammaticScrollRef.current = true
-      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
-      // 滾動動畫完成後重置 flag
-      setTimeout(() => {
-        isProgrammaticScrollRef.current = false
-      }, 500)
+      scrollToBottom()
     }
-  }, [messages, typingStage])
+  }, [messages, typingStage, scrollToBottom])
+
+  // 監聽聊天容器內容高度變化（motion 動畫、richContent 延遲渲染）自動補滾
+  useEffect(() => {
+    const container = chatScrollRef.current
+    if (!container) return
+    const observer = new ResizeObserver(() => {
+      if (isNearBottomRef.current) {
+        // 內容高度變了且用戶在底部附近 → 補滾到底
+        const distFromBottom = container.scrollHeight - container.scrollTop - container.clientHeight
+        if (distFromBottom > 2) {
+          isProgrammaticScrollRef.current = true
+          container.scrollTop = container.scrollHeight
+          requestAnimationFrame(() => {
+            isProgrammaticScrollRef.current = false
+          })
+        }
+      }
+    })
+    // 觀察內容容器（chatScrollRef 的第一個子元素）
+    const content = container.firstElementChild
+    if (content) {
+      observer.observe(content)
+    }
+    return () => observer.disconnect()
+  }, [])
 
   // 處理滾動事件，判斷用戶是否在底部附近
   const handleChatScroll = useCallback(() => {
@@ -1426,8 +1478,8 @@ function ChatSection({
     const container = chatScrollRef.current
     if (!container) return
 
-    // 檢查是否在底部附近（距離底部 100px 以內）
-    const threshold = 100
+    // 閾值放寬到 150px（部署消息等大組件插入時距離會瞬間變大）
+    const threshold = 150
     const distanceFromBottom = container.scrollHeight - container.scrollTop - container.clientHeight
     isNearBottomRef.current = distanceFromBottom < threshold
   }, [])
@@ -1605,19 +1657,14 @@ function ChatSection({
     }
     // 用戶發送訊息後強制滾動到底部
     isNearBottomRef.current = true
-    isProgrammaticScrollRef.current = true
 
     setMessages(prev => [...prev, userMessage])
     setIsTyping(true)
 
-    // 延遲滾動，確保 DOM 已更新
-    setTimeout(() => {
-      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
-      // 滾動動畫完成後重置 flag
-      setTimeout(() => {
-        isProgrammaticScrollRef.current = false
-      }, 500)
-    }, 50)
+    // 延遲一幀讓 React 渲染完成後再滾動
+    requestAnimationFrame(() => {
+      scrollToBottom()
+    })
 
     // 判斷是首次消息還是多輪對話回覆
     const token = getAuthToken()
@@ -1674,17 +1721,13 @@ function ChatSection({
       pending: true
     }
     isNearBottomRef.current = true
-    isProgrammaticScrollRef.current = true
 
     setMessages(prev => [...prev, userMessage])
     setIsTyping(true)
 
-    setTimeout(() => {
-      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
-      setTimeout(() => {
-        isProgrammaticScrollRef.current = false
-      }, 500)
-    }, 50)
+    requestAnimationFrame(() => {
+      scrollToBottom()
+    })
 
     const token = getAuthToken()
     if (sessionInfo.currentTaskId) {
