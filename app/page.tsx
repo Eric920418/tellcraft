@@ -31,7 +31,6 @@ import DeviceSwitcher, { type DeviceType, getDeviceWidth } from './components/ui
 import TemplatePicker from './components/uiux/TemplatePicker'
 import QuickReplies from './components/QuickReplies'
 import { convertToPreviewHtml, convertToPreviewHtmlSafe, injectStreamingAnimation } from './lib/tsx-to-preview'
-import { io, Socket } from 'socket.io-client'
 import type { StreamingPreview } from './hooks/useVpsWebSocket'
 import { getTemplateById } from './actions/templates'
 import type { Template } from './lib/templates'
@@ -42,7 +41,7 @@ interface Message {
   role: 'user' | 'assistant' | 'system'
   content: string
   timestamp: Date
-  stage?: 'init' | 'init_progress' | 'discovery' | 'clarify' | 'prd_discovery_complete' | 'formulation_start' | 'formulation_progress' | 'formulation' | 'uiux' | 'uiux_template_picker' | 'generating' | 'deploying' | 'complete' | 'prefilter_rejected' | 'meta_response'
+  stage?: 'init' | 'init_progress' | 'discovery' | 'clarify' | 'prd_discovery_complete' | 'formulation_start' | 'formulation_progress' | 'formulation' | 'uiux' | 'uiux_template_picker' | 'generating' | 'deploying' | 'complete' | 'prefilter_rejected' | 'meta_response' | 'fast_generating'
   progress?: { current: number; total: number; step: string }
   // UIUX 模板系統擴展
   layoutHint?: 'default' | 'split' | 'full_preview'
@@ -569,12 +568,16 @@ function HeroSection({
   onStartChat,
   inputValue,
   onInputChange,
-  isChatActive
+  isChatActive,
+  buildMode,
+  onBuildModeChange
 }: {
   onStartChat: () => void
   inputValue: string
   onInputChange: (value: string) => void
   isChatActive: boolean
+  buildMode: 'fast' | 'fine'
+  onBuildModeChange: (mode: 'fast' | 'fine') => void
 }) {
   const [isFocused, setIsFocused] = useState(false)
   const [isTransitioning, setIsTransitioning] = useState(false)
@@ -693,6 +696,50 @@ function HeroSection({
           }}
           style={{ position: 'relative' }}
         >
+          {/* Mode Toggle */}
+          <div style={{
+            display: 'flex',
+            gap: 6,
+            marginBottom: 10,
+            padding: '2px',
+            background: 'var(--gray-100)',
+            borderRadius: 8,
+            width: 'fit-content',
+          }}>
+            <button
+              onClick={() => onBuildModeChange('fast')}
+              style={{
+                padding: '6px 14px',
+                fontSize: 13,
+                fontWeight: 500,
+                background: buildMode === 'fast' ? 'var(--black)' : 'transparent',
+                color: buildMode === 'fast' ? 'var(--white)' : 'var(--gray-500)',
+                border: 'none',
+                borderRadius: 6,
+                cursor: 'pointer',
+                transition: 'all 0.2s ease',
+              }}
+            >
+              Fast Mode
+            </button>
+            <button
+              onClick={() => onBuildModeChange('fine')}
+              style={{
+                padding: '6px 14px',
+                fontSize: 13,
+                fontWeight: 500,
+                background: buildMode === 'fine' ? 'var(--black)' : 'transparent',
+                color: buildMode === 'fine' ? 'var(--white)' : 'var(--gray-500)',
+                border: 'none',
+                borderRadius: 6,
+                cursor: 'pointer',
+                transition: 'all 0.2s ease',
+              }}
+            >
+              Fine Mode
+            </button>
+          </div>
+
           <motion.div
             animate={{
               boxShadow: isFocused
@@ -731,7 +778,7 @@ function HeroSection({
               background: 'var(--gray-50)',
             }}>
               <span style={{ fontSize: 12, color: 'var(--gray-400)' }}>
-                描述你的想法，點擊按鈕開始
+                {buildMode === 'fast' ? '一句話描述，60 秒出結果' : '描述你的想法，AI 深度釐清'}
               </span>
               <motion.button
                 whileHover={{ scale: 1.02 }}
@@ -790,12 +837,14 @@ function ChatSection({
   isActive,
   initialMessage,
   resumeConversationId,
-  onBack
+  onBack,
+  buildMode
 }: {
   isActive: boolean
   initialMessage: string
   resumeConversationId?: string | null
   onBack: () => void
+  buildMode?: 'fast' | 'fine'
 }) {
   const [messages, setMessages] = useState<Message[]>([])
   const [input, setInput] = useState('')
@@ -884,9 +933,8 @@ function ChatSection({
   const [selectedTemplate, setSelectedTemplate] = useState<Template | null>(null)
   const [codePreviewDevice, setCodePreviewDevice] = useState<DeviceType>('desktop')
 
-  // Streaming preview（實時串流預覽）
+  // Streaming preview（實時串流預覽，透過 HTTP 輪詢從 Redis 取得）
   const [streamingPreview, setStreamingPreview] = useState<StreamingPreview | null>(null)
-  const streamingSocketRef = useRef<Socket | null>(null)
 
   // Code Preview 容器尺寸追蹤（用於 iframe 縮放）
   useEffect(() => {
@@ -898,47 +946,6 @@ function ChatSection({
     observer.observe(el)
     return () => observer.disconnect()
   }, [])
-
-  // Streaming Preview WebSocket — 直接監聽 preview_update 事件
-  useEffect(() => {
-    const convId = sessionInfo?.conversationId
-    if (!convId) return
-
-    const wsUrl = process.env.NEXT_PUBLIC_VPS_WS_URL || 'http://54.238.4.117:8080'
-    const socket = io(wsUrl, {
-      transports: ['websocket', 'polling'],
-      autoConnect: true,
-      reconnection: true,
-      reconnectionAttempts: 3,
-    })
-    streamingSocketRef.current = socket
-
-    socket.on('connect', () => {
-      console.log(`[StreamingPreview] WebSocket connected: ${socket.id}, subscribing to ${convId}`)
-      socket.emit('subscribe', convId)
-    })
-
-    socket.on('connect_error', (err: Error) => {
-      console.error(`[StreamingPreview] WebSocket connect error:`, err.message)
-    })
-
-    socket.on('preview_update', (preview: StreamingPreview) => {
-      console.log(`[StreamingPreview] received: phase=${preview.phase}, pages=${preview.pages?.length}, comps=${preview.components?.length}`)
-      setStreamingPreview(preview)
-      // 收到串流預覽時自動切換到 split 佈局
-      if (layoutModeRef.current !== 'split') {
-        setLayoutMode('split')
-      }
-    })
-
-    return () => {
-      if (socket.connected) {
-        socket.emit('unsubscribe', convId)
-      }
-      socket.disconnect()
-      streamingSocketRef.current = null
-    }
-  }, [sessionInfo?.conversationId])
 
   // 監聽訊息的 layoutHint 或 UIUX 相關 stage，切換佈局模式
   useEffect(() => {
@@ -1126,9 +1133,11 @@ function ChatSection({
         const previewMsg: Message = {
           id: 'preview-analyzing',
           role: 'assistant',
-          content: '正在分析您的需求，請稍候...',
+          content: buildMode === 'fast'
+            ? '正在生成您的網站，預計 60-90 秒...'
+            : '正在分析您的需求，請稍候...',
           timestamp: new Date(),
-          stage: 'clarify'
+          stage: buildMode === 'fast' ? 'fast_generating' : 'clarify'
         }
 
         setMessages([userMsg, previewMsg])
@@ -1141,6 +1150,7 @@ function ChatSection({
           conversationId: session.conversationId,
           message: initialMessage,
           projectId: session.projectId,
+          mode: buildMode,
           token: token || undefined
         })
 
@@ -1217,6 +1227,17 @@ function ChatSection({
         if (result.data.updatedAt) {
           currentUpdatedAt = result.data.updatedAt
           setLastUpdatedAt(result.data.updatedAt)
+        }
+
+        // 處理 streaming preview（從 Redis 透過 HTTP 輪詢取得）
+        if (result.data.streamingPreview) {
+          setStreamingPreview(result.data.streamingPreview as StreamingPreview)
+          // 串流期間加快輪詢
+          pollInterval = 1500
+          // 自動切換到 split 佈局
+          if (layoutModeRef.current !== 'split') {
+            setLayoutMode('split')
+          }
         }
 
         const newMessages = result.data.messages
@@ -3722,6 +3743,7 @@ function HomeContent() {
   const [initialMessage, setInitialMessage] = useState('')
   const [resumeConversationId, setResumeConversationId] = useState<string | null>(null)
   const [anonymousId, setAnonymousId] = useState<string | undefined>(undefined)
+  const [buildMode, setBuildMode] = useState<'fast' | 'fine'>('fast')
 
   // VPS JWT Auth Hook
   const auth = useAuth()
@@ -3935,6 +3957,8 @@ function HomeContent() {
         inputValue={heroInput}
         onInputChange={setHeroInput}
         isChatActive={isChatActive}
+        buildMode={buildMode}
+        onBuildModeChange={setBuildMode}
       />
 
       {/* Chat Overlay */}
@@ -3943,6 +3967,7 @@ function HomeContent() {
         initialMessage={initialMessage}
         resumeConversationId={resumeConversationId}
         onBack={handleBackToHome}
+        buildMode={buildMode}
       />
 
       {/* SEO Content Sections */}

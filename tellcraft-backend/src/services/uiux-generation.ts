@@ -70,7 +70,7 @@ interface LlmTrackingContext {
 }
 
 // callClaude — 使用 streaming 避免長請求超時
-async function callClaude(
+export async function callClaude(
   systemPrompt: string,
   messages: Array<{ role: 'user' | 'assistant'; content: string }>,
   options?: {
@@ -136,7 +136,7 @@ export type DesignTier = 'functional' | 'creative'
 /**
  * 共用的 Craft Foundations — 不分 tier，所有生成都必須遵守
  */
-function getCraftFoundations(): string {
+export function getCraftFoundations(): string {
   return `## Craft Foundations（設計品質底線）
 
 ### Subtle Layering（微層次 — 最重要的品質指標）
@@ -198,7 +198,7 @@ function getCraftFoundations(): string {
 /**
  * 根據 tier 返回結構生成階段的約束文本
  */
-function getStructureConstraints(tier: DesignTier): string {
+export function getStructureConstraints(tier: DesignTier): string {
   const craft = getCraftFoundations()
 
   if (tier === 'creative') {
@@ -265,7 +265,7 @@ function getStructureConstraints(tier: DesignTier): string {
 /**
  * 根據 tier 返回動畫生成階段的約束文本
  */
-function getAnimationConstraints(tier: DesignTier): string {
+export function getAnimationConstraints(tier: DesignTier): string {
   if (tier === 'creative') {
     return `## 動畫風格（Creative Tier — 創意型）
 允許更豐富的動畫表現，但必須遵守效能規則：
@@ -898,7 +898,7 @@ ${JSON.stringify(designSystem.borderRadius, null, 2)}
  * Safety net: 如果代碼沒有 Tailwind 響應式前綴，自動注入基本 Mobile-first 模式
  * 只在代碼完全沒有 sm:/md:/lg: 時觸發（避免干擾已有 RWD 的代碼）
  */
-function ensureResponsiveClasses(
+export function ensureResponsiveClasses(
   pages: GeneratedComponent[],
   components: GeneratedComponent[]
 ): { pages: GeneratedComponent[]; components: GeneratedComponent[] } {
@@ -957,7 +957,7 @@ function ensureResponsiveClasses(
 /**
  * 解析 LLM 輸出的檔案
  */
-function parseGeneratedFiles(content: string, designSystem: DesignSystem): {
+export function parseGeneratedFiles(content: string, designSystem: DesignSystem): {
   pages: GeneratedComponent[]
   components: GeneratedComponent[]
   styles: string
@@ -1124,7 +1124,7 @@ export type PartialCodeCallback = (partial: {
 /**
  * 建構 throttled text delta handler（雙條件：新區塊 + 時間間隔）
  */
-function buildStreamingHandler(
+export function buildStreamingHandler(
   onPartialCode: PartialCodeCallback | undefined
 ): ((accumulated: string) => void) | undefined {
   if (!onPartialCode) return undefined

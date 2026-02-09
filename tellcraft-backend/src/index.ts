@@ -11,7 +11,7 @@ import * as fsPromises from 'fs/promises'
 
 import { testConnection, closePool } from './db/client'
 import { createOrchestratorWorker } from './workers/orchestrator'
-import conversationRoutes, { setOrchestratorQueue } from './routes/conversation'
+import conversationRoutes, { setOrchestratorQueue, setRedisClient } from './routes/conversation'
 import projectRoutes from './routes/project'
 import healthRoutes from './routes/health'
 import authRoutes from './routes/auth'
@@ -122,6 +122,7 @@ const orchestratorQueue = new Queue('orchestrator', {
 
 // 設置隊列到路由
 setOrchestratorQueue(orchestratorQueue)
+setRedisClient(redis)
 
 // 創建 Worker
 const orchestratorWorker = createOrchestratorWorker(redis, io)

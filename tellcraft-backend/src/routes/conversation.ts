@@ -1,5 +1,6 @@
 import { Router, type Router as RouterType } from 'express'
 import { Queue } from 'bullmq'
+import Redis from 'ioredis'
 import crypto from 'crypto'
 import { requireAuth, optionalAuth } from '../middleware/auth'
 import * as db from '../db/client'
@@ -8,9 +9,14 @@ const router: RouterType = Router()
 
 // BullMQ 隊列（在 index.ts 中初始化後傳入）
 let orchestratorQueue: Queue
+let redisClient: Redis
 
 export function setOrchestratorQueue(queue: Queue) {
   orchestratorQueue = queue
+}
+
+export function setRedisClient(redis: Redis) {
+  redisClient = redis
 }
 
 // ============================================================
@@ -27,7 +33,7 @@ export function setOrchestratorQueue(queue: Queue) {
 router.post('/:id/message', optionalAuth, async (req, res) => {
   try {
     const { id: conversationId } = req.params
-    const { message, projectId, userId: bodyUserId } = req.body
+    const { message, projectId, userId: bodyUserId, mode } = req.body
     const userId = req.user?.id || bodyUserId
 
     if (!userId) {
@@ -80,6 +86,7 @@ router.post('/:id/message', optionalAuth, async (req, res) => {
       conversationId,
       userId,
       message,
+      mode,
     }, {
       attempts: 3,
       backoff: {
@@ -189,9 +196,22 @@ router.get('/:id/messages', optionalAuth, async (req, res) => {
       return res.status(404).json({ error: 'Conversation not found' })
     }
 
-    // 輕量檢查：比較 updated_at
-    if (lastUpdatedAt && conversation.updated_at === lastUpdatedAt) {
-      // 沒有新消息
+    // 讀取 streaming preview（如果有的話）
+    let streamingPreview = null
+    if (redisClient) {
+      try {
+        const previewJson = await redisClient.get(`streaming:preview:${conversationId}`)
+        if (previewJson) {
+          streamingPreview = JSON.parse(previewJson)
+        }
+      } catch {
+        // Redis 讀取失敗不阻塞
+      }
+    }
+
+    // 輕量檢查：比較 updated_at（但如果有 streaming preview 仍然要返回）
+    if (lastUpdatedAt && conversation.updated_at === lastUpdatedAt && !streamingPreview) {
+      // 沒有新消息也沒有 streaming preview
       return res.json({
         messages: [],
         updatedAt: conversation.updated_at,
@@ -231,6 +251,7 @@ router.get('/:id/messages', optionalAuth, async (req, res) => {
       currentTaskId: activeTask?.id || activeSessionId,
       taskStatus: activeTask?.status || activePhase,
       isComplete: conversation.spec_complete && !activeTask && !activeSessionId,
+      streamingPreview,
     })
   } catch (error) {
     console.error('[Conversation] 取得消息失敗:', error)

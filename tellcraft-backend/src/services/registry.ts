@@ -2,7 +2,7 @@
 // Skill 註冊表
 // ============================================================
 
-export type SkillName = 'bdd-spec' | 'coder' | 'uiux' | 'deployer' | 'domain-manager' | 'domain-purchase' | 'domain-dns' | 'quality-gate'
+export type SkillName = 'bdd-spec' | 'coder' | 'uiux' | 'deployer' | 'domain-manager' | 'domain-purchase' | 'domain-dns' | 'quality-gate' | 'fast-build'
 
 export interface SkillMetadata {
   name: SkillName
@@ -171,6 +171,22 @@ export const SKILL_REGISTRY: Record<SkillName, SkillMetadata> = {
     minPlan: 'free',
     costLevel: 'low',
     timeoutMs: 180000, // 3 分鐘
+    inputSchema: {
+      required: ['projectId'],
+      optional: [],
+    },
+  },
+
+  'fast-build': {
+    name: 'fast-build',
+    displayName: '快速建站',
+    description: '一句話描述需求，AI 直接生成完整網站。跳過需求釐清和設計探索，60-90 秒出結果。',
+    triggerPatterns: [
+      '快速', '直接做', '馬上',
+    ],
+    minPlan: 'free',
+    costLevel: 'medium',
+    timeoutMs: 300000, // 5 分鐘
     inputSchema: {
       required: ['projectId'],
       optional: [],

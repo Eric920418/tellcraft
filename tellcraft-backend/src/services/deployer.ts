@@ -27,11 +27,14 @@ async function acquireDeploySlot(): Promise<void> {
     deployActiveCount++
     return
   }
-  return new Promise<void>((resolve) => {
-    deployWaitQueue.push(() => {
-      deployActiveCount++
-      resolve()
-    })
+  return new Promise<void>((resolve, reject) => {
+    const timer = setTimeout(() => {
+      const idx = deployWaitQueue.indexOf(cb)
+      if (idx >= 0) deployWaitQueue.splice(idx, 1)
+      reject(new Error('Deploy slot acquisition timeout (5min)'))
+    }, 300_000)
+    const cb = () => { clearTimeout(timer); deployActiveCount++; resolve() }
+    deployWaitQueue.push(cb)
   })
 }
 
@@ -202,7 +205,7 @@ const KNOWN_PACKAGES: Record<string, string> = {
  * 將專案名稱轉換為 Vercel 合法的 project slug
  * Vercel 規則：只允許 a-z、0-9、連字號，最長 100 字元
  */
-function toVercelSlug(name: string, projectId?: string): string {
+export function toVercelSlug(name: string, projectId?: string): string {
   const slug = name
     .toLowerCase()
     .replace(/[^a-z0-9]/g, '-')  // 非英數字母（含中文）全部轉連字號
@@ -1012,6 +1015,7 @@ async function deployFilesToVercel(projectName: string, files: VercelFile[]): Pr
       body: JSON.stringify({
         name: projectName,
         files: vercelFiles,
+        target: 'production',
         projectSettings: {
           framework: 'nextjs',
         },
@@ -1623,10 +1627,12 @@ async function verifyBuildLocally(
 
   let currentCode = code
   let currentExtraDeps = { ...(extraDependencies || {}) }
+  let slotAcquired = false
 
   // 限制同時執行的 build 數量（npm install + next build 非常吃資源）
-  await acquireDeploySlot()
   try {
+    await acquireDeploySlot()
+    slotAcquired = true
     await fsPromises.mkdir(tmpDir, { recursive: true })
 
     for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
@@ -1756,12 +1762,12 @@ async function verifyBuildLocally(
       finalCode: code,
     }
   } finally {
-    releaseDeploySlot()
+    if (slotAcquired) releaseDeploySlot()
     // 清理臨時目錄
     try {
       await fsPromises.rm(tmpDir, { recursive: true, force: true })
-    } catch {
-      // 清理失敗不影響主流程
+    } catch (cleanupErr) {
+      console.error(`[Deployer] 清理臨時目錄失敗: ${tmpDir}`, cleanupErr)
     }
   }
 }

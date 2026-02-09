@@ -12,10 +12,37 @@ Tellcraft 是一個 AI 驅動的自動化開發平台。用戶只需描述需求
 
 ## 當前開發進度
 
-- **狀態**：✅ Phase 1-9 + Server Actions + VPS Backend + 前端 Chat 串接 + 認證系統 + 訪客體驗改善 + 儀表板系統 + BDD Spec 完整修復 + 專案版本管理 + **UIUX 生成邏輯重構** + **Design Tier** + **專案自動命名** + **PreviewPanel iframe 重構** + **Quality Gate 品質檢查** + **Code Preview 即時渲染** + **串流實時預覽** + **BDD→UI 翻譯 + Variant 創意概念**
+- **狀態**：✅ Phase 1-9 + Server Actions + VPS Backend + 前端 Chat 串接 + 認證系統 + 訪客體驗改善 + 儀表板系統 + BDD Spec 完整修復 + 專案版本管理 + **UIUX 生成邏輯重構** + **Design Tier** + **專案自動命名** + **PreviewPanel iframe 重構** + **Quality Gate 品質檢查** + **Code Preview 即時渲染** + **串流實時預覽** + **BDD→UI 翻譯 + Variant 創意概念** + **Fast Mode 快速建站**
 - **釐清項目**：28 項全部解決
 - **Server Actions**：30+ 已實作
 - **詳情**：[`.clarify/overview.md`](.clarify/overview.md)
+
+### Fast Mode 快速建站（2026-02-09）
+
+新增「快速模式」，用戶輸入一句話描述 → 跳過 BDD/Design Discovery/Brief/Variants → 直接 3 階段自動生成（Structure → Animation → RWD）→ 60-90 秒內看到完整預覽。
+
+**流程**：
+```
+用戶描述 → detectDesignTier（規則式）→ 默認 DesignSystem → Structure(streaming) → Animation(streaming) → RWD(streaming) → 靜態 QG → Preview
+3 次 LLM | 0 次用戶交互 | 60-90 秒
+```
+
+**設計決策**：
+- 完全不修改精細模式（fine mode）的任何邏輯
+- 只新增 1 個 phase：`fast_generating`，完成後 → `uiux_complete`，複用所有迭代/部署/回滾
+- `mode === 'fast'` 時跳過 Classifier，零額外 LLM 成本
+- 前端 HeroSection 新增 Fast/Fine 模式切換器
+
+**新增文件**：
+- `tellcraft-backend/src/services/fast-build-generation.ts` — tier 偵測、產品推斷、默認 DesignSystem
+
+**修改文件**：
+- `tellcraft-backend/src/services/uiux-generation.ts` — 7 個 private 函數改為 export
+- `tellcraft-backend/src/services/registry.ts` — 新增 `fast-build` skill
+- `tellcraft-backend/src/workers/orchestrator.ts` — `executeFastBuildSkill` + `fast_generating` phase
+- `tellcraft-backend/src/routes/conversation.ts` — API 接受 `mode` 參數
+- `app/lib/vps-api.ts` — `sendMessage` 新增 `mode` 參數
+- `app/page.tsx` — HeroSection 模式切換器 + ChatSection 傳遞 mode
 
 ### BDD→UI 翻譯 + Variant 創意概念（2026-02-08）
 
@@ -90,9 +117,11 @@ UIUX 代碼生成時，右側預覽面板不再等完整生成後才顯示，而
 - `callClaude()` 新增 `onTextDelta` 回調，`stream.on('text')` 累積文字
 - `parseCompletedFileBlocks()` 只匹配已閉合的 code block（有 ``` 結尾）
 - Throttle 雙條件觸發：新區塊完成 + 時間間隔 >= 1500ms（避免 iframe 重載過頻）
-- 後端透過 Socket.io `preview_update` 事件直推前端（不存 DB）
-- 前端收到 `preview_update` → `convertToPreviewHtmlSafe()` 容錯轉換 → `injectStreamingAnimation()` fade-in 動畫
+- 後端 `makeStreamingCallback` 將 partial preview 存入 Redis（key: `streaming:preview:{conversationId}`，TTL 30s）
+- 前端透過現有的 HTTP 輪詢（`GET /api/conversation/:id/messages`）取得 `streamingPreview` 欄位
+- 串流期間輪詢間隔自動降至 1.5s（正常 3-15s），確保即時性
 - 最終 `code_preview` 訊息到達後清除 streaming state，恢復完整預覽
+- 注意：不使用 WebSocket 直連（Mixed Content 問題：HTTPS 頁面無法連接 ws:// 端點）
 
 **視覺效果**：
 - 生成中顯示 phase 標籤（結構生成中... / 動畫增強中... / 響應式適配中...）+ pulse dot
@@ -101,10 +130,10 @@ UIUX 代碼生成時，右側預覽面板不再等完整生成後才顯示，而
 
 **核心改動**：
 - `tellcraft-backend/src/services/uiux-generation.ts`：`callClaude` 加 `onTextDelta`、新增 `parseCompletedFileBlocks`、三函數加 `onPartialCode`
-- `tellcraft-backend/src/workers/orchestrator.ts`：6 處生成調用傳入 `makeStreamingCallback`
-- `app/hooks/useVpsWebSocket.ts`：新增 `StreamingPreview` type + `onPreviewUpdate` 回調
+- `tellcraft-backend/src/workers/orchestrator.ts`：`makeStreamingCallback` 存 Redis + emit Socket.io
+- `tellcraft-backend/src/routes/conversation.ts`：messages 端點返回 `streamingPreview`（從 Redis 讀取）
 - `app/lib/tsx-to-preview.ts`：新增 `convertToPreviewHtmlSafe` + `injectStreamingAnimation`
-- `app/page.tsx`：streaming WebSocket 連接 + `streamingPreview` state + `renderPreviewPanel` 優先用 streaming
+- `app/page.tsx`：透過 HTTP 輪詢取得 streaming preview（不再用獨立 WebSocket 連接）
 
 ### Classifier 分層防禦 + 智慧引導（2026-02-08）
 

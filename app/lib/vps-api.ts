@@ -92,6 +92,7 @@ export async function sendMessage(input: {
   conversationId: string
   message: string
   projectId: string
+  mode?: 'fast' | 'fine'
   token?: string
 }): Promise<ApiResponse<{ messageId: string; jobId: string }>> {
   return apiRequest(`/api/conversation/${input.conversationId}/message`, {
@@ -102,6 +103,7 @@ export async function sendMessage(input: {
     body: JSON.stringify({
       message: input.message,
       projectId: input.projectId,
+      mode: input.mode,
     }),
   })
 }
@@ -145,6 +147,13 @@ export async function getConversationMessages(input: {
   currentTaskId?: string
   taskStatus?: string
   isComplete?: boolean
+  streamingPreview?: {
+    pages: { path: string; content: string; description: string }[]
+    components: { path: string; content: string; description: string }[]
+    styles: string
+    tailwindConfig: string
+    phase: 'structure' | 'animation' | 'rwd'
+  } | null
 }>> {
   const params = new URLSearchParams()
   if (input.lastUpdatedAt) {

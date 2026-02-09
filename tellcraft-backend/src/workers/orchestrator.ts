@@ -41,7 +41,9 @@ import {
 } from '../services/uiux-generation'
 import { translateBddToUISpec, UIRequirementsSpec } from '../services/bdd-to-ui-spec'
 import { runQualityGate, autoFixCriticalIssues, QualityReport } from '../services/quality-gate'
-import { prepareDeployment, executeDeployment, DeployPreCheckResult, listProjectDeployments, rollbackToDeployment, DeploymentRecord } from '../services/deployer'
+import { prepareDeployment, executeDeployment, DeployPreCheckResult, listProjectDeployments, rollbackToDeployment, DeploymentRecord, toVercelSlug } from '../services/deployer'
+import { detectDesignTier, inferProductType, inferPages, buildDefaultDesignSystem, buildMinimalTemplate } from '../services/fast-build-generation'
+import { ensureResponsiveClasses } from '../services/uiux-generation'
 
 // ============================================================
 // 類型定義
@@ -52,6 +54,7 @@ interface ProcessMessageData {
   conversationId: string
   userId: string
   message: string
+  mode?: 'fast' | 'fine'
 }
 
 interface ContinueFlowData {
@@ -128,6 +131,9 @@ interface FlowState {
   uiuxUISpec?: UIRequirementsSpec
   // 選中 variant 的創意概念
   uiuxVariantConcept?: VariantConcept
+  // 快速模式
+  fastMode?: boolean
+  fastModeProductType?: string
 }
 
 // PRD Discovery 限制
@@ -231,7 +237,7 @@ async function handleProcessMessage(
   redis: Redis,
   io: SocketIOServer
 ) {
-  const { projectId, conversationId, userId, message } = data
+  const { projectId, conversationId, userId, message, mode } = data
 
   // Step 1: Prefilter（零 LLM 成本防禦）
   const prefilterResult = await prefilterMessage(message, userId, redis)
@@ -242,6 +248,46 @@ async function handleProcessMessage(
       stage: 'prefilter_rejected',
     })
     return { taskId: null, skill: null }
+  }
+
+  // Step 1.5: Fast Mode 快速路由（跳過 classifier，零 LLM 成本）
+  if (mode === 'fast') {
+    const taskId = await db.createTask({
+      projectId,
+      userId,
+      goal: message,
+      status: 'planning',
+    })
+    if (!taskId) throw new Error('創建任務失敗')
+
+    // 自動命名專案
+    try {
+      const project = await db.queryOne<{ name: string }>(
+        'SELECT name FROM projects WHERE id = $1',
+        [projectId]
+      )
+      if (project && /^專案\s/.test(project.name)) {
+        // 從描述取前 25 字作為名稱
+        const autoName = message.slice(0, 25).replace(/\n/g, ' ').trim() || '快速建站'
+        await db.query(
+          'UPDATE projects SET name = $1, updated_at = NOW() WHERE id = $2',
+          [autoName, projectId]
+        )
+        console.log(`[Orchestrator] 快速模式自動命名: "${project.name}" → "${autoName}"`)
+      }
+    } catch (err) {
+      console.error('[Orchestrator] 快速模式自動命名失敗（不影響流程）:', err)
+    }
+
+    await db.updateTask(taskId, {
+      status: 'executing',
+      plan: { skill: 'fast-build' },
+    })
+
+    await executeFastBuildSkill({
+      taskId, projectId, conversationId, userId, message, redis, io,
+    })
+    return { taskId, skill: 'fast-build' as SkillName }
   }
 
   // Step 2: Intent Classification
@@ -403,25 +449,39 @@ async function handleContinueFlow(
 
   // 處理 Deployer 階段
   if (state.phase === 'deployer_confirm') {
+    const trimmed = message.trim()
+    const cancelKeywords = ['取消', '不要', '不要部署', 'cancel', 'N', 'n']
     const confirmKeywords = ['確認', '確定', '部署', '好', '好的', '是', '對', 'Y', 'y', 'yes', 'ok']
-    const cancelKeywords = ['取消', '不要', 'cancel', 'N', 'n']
-    if (confirmKeywords.some(kw => message === kw || message.includes(kw))) {
-      await handleDeployExecute(conversationId, state, data.projectId, redis, io)
-    } else if (cancelKeywords.some(kw => message === kw || message.includes(kw))) {
+    // 取消優先檢查，避免「不要部署」被 confirm 的「部署」攔截
+    if (cancelKeywords.includes(trimmed)) {
       await sendMessage(conversationId, io, {
         content: '已取消部署。',
         stage: 'deployer_cancelled',
       })
       state.phase = 'uiux_complete' // 回到 UIUX 完成狀態
+      state.deployerPreCheck = undefined
       await saveFlowState(redis, conversationId, state)
+    } else if (confirmKeywords.includes(trimmed)) {
+      await handleDeployExecute(conversationId, state, data.projectId, redis, io)
+    } else {
+      await sendMessage(conversationId, io, {
+        content: '請輸入「確認」開始部署，或輸入「取消」返回修改。',
+        stage: 'info',
+        quickReplies: [
+          { label: '確認部署', value: '確認', style: 'primary' },
+          { label: '取消', value: '取消', style: 'secondary' },
+        ],
+      })
     }
     return
   }
   // 部署失敗後允許重試或返回修改
   if (state.phase === 'deployer_failed') {
-    const deployKeywords = ['部署', 'deploy', '上線', '發布', '重試']
+    const trimmed = message.trim()
     const returnKeywords = ['返回修改', '返回', '回去修改', '回到修改']
-    if (returnKeywords.some(kw => message.includes(kw))) {
+    const deployKeywords = ['部署', 'deploy', '上線', '發布', '重試', '重新部署']
+    // 返回優先檢查
+    if (returnKeywords.includes(trimmed)) {
       state.phase = 'uiux_complete'
       await saveFlowState(redis, conversationId, state)
       await sendMessage(conversationId, io, {
@@ -433,7 +493,7 @@ async function handleContinueFlow(
       })
       return
     }
-    if (deployKeywords.some(kw => message.includes(kw))) {
+    if (deployKeywords.includes(trimmed)) {
       await executeDeployerSkill({
         taskId: state.taskId || '',
         projectId: data.projectId,
@@ -445,15 +505,30 @@ async function handleContinueFlow(
       })
       return
     }
-    // 非部署相關訊息，回到 uiux_complete 讓其他功能可用
-    state.phase = 'uiux_complete'
-    await saveFlowState(redis, conversationId, state)
-    // 不 return，讓訊息繼續往下路由
+    // 無法識別 → 提示用戶可選操作
+    await sendMessage(conversationId, io, {
+      content: '部署失敗後，您可以輸入「重試」重新部署，或輸入「返回」回到修改模式。',
+      stage: 'info',
+      quickReplies: [
+        { label: '重試部署', value: '重試', style: 'primary' },
+        { label: '返回修改', value: '返回修改', style: 'secondary' },
+      ],
+    })
+    return
   }
 
   if (state.phase === 'deployer_deploying') {
     await sendMessage(conversationId, io, {
       content: '正在部署中，請稍候...',
+      stage: 'info',
+    })
+    return
+  }
+
+  // 快速模式生成中（攔截用戶輸入）
+  if (state.phase === 'fast_generating') {
+    await sendMessage(conversationId, io, {
+      content: '正在生成中，請稍候... 預計 60-90 秒完成。',
       stage: 'info',
     })
     return
@@ -484,9 +559,10 @@ async function handleContinueFlow(
 
   // 部署完成後：支援重新部署、回滾和迭代修改
   if (state.phase === 'deployer_complete') {
-    // 重新部署
-    const deployKeywords = ['部署', 'deploy', '上線', '發布', '再部署']
-    if (deployKeywords.some(kw => message.includes(kw))) {
+    const trimmed = message.trim()
+    // 重新部署（精確匹配，避免含「部署」的修改請求被誤攔）
+    const deployKeywords = ['部署', 'deploy', '上線', '發布', '再部署', '重新部署']
+    if (deployKeywords.includes(trimmed)) {
       await executeDeployerSkill({
         taskId: state.taskId || '',
         projectId: data.projectId,
@@ -498,9 +574,9 @@ async function handleContinueFlow(
       })
       return
     }
-    // 回滾
+    // 回滾（精確匹配）
     const rollbackKeywords = ['回滾', 'rollback', '回到上一版', '還原']
-    if (rollbackKeywords.some(kw => message.includes(kw))) {
+    if (rollbackKeywords.includes(trimmed)) {
       await handleDeployRollback(conversationId, state, data.projectId, redis, io)
       return
     }
@@ -664,9 +740,21 @@ async function handleContinueFlow(
     // 絕對不能讓它洩漏到下方的 BDD processUserReply
     console.log(`[Orchestrator] UIUX 階段未匹配的訊息: phase=${state.phase}, message="${message}"`)
     if (state.phase === 'uiux_variant_selection') {
+      const vrIds = (state.uiuxVariants || []).map(v => ({
+        label: `選擇 ${v.id}`,
+        value: `選擇 ${v.id}`,
+        style: 'ghost' as const,
+      }))
       await sendMessage(conversationId, io, {
         content: '請選擇您喜歡的設計方向。\n\n- 輸入「選擇 A」直接使用某個方案\n- 輸入「合併 A+C」組合多個方案的特點',
         stage: 'info',
+        quickReplies: vrIds.length > 0 ? vrIds : [
+          { label: '選擇 A', value: '選擇 A', style: 'ghost' as const },
+          { label: '選擇 B', value: '選擇 B', style: 'ghost' as const },
+          { label: '選擇 C', value: '選擇 C', style: 'ghost' as const },
+          { label: '選擇 D', value: '選擇 D', style: 'ghost' as const },
+          { label: '選擇 E', value: '選擇 E', style: 'ghost' as const },
+        ],
       })
     } else if (state.phase === 'uiux_template_selection') {
       await sendMessage(conversationId, io, {
@@ -1029,20 +1117,28 @@ async function deleteFlowState(redis: Redis, conversationId: string) {
 function makeStreamingCallback(
   conversationId: string,
   io: SocketIOServer,
+  redis: Redis,
   phase: 'structure' | 'animation' | 'rwd',
   tailwindConfig: string
 ): PartialCodeCallback {
   return (partialCode) => {
-    const room = `conversation:${conversationId}`
-    const socketsInRoom = io.sockets.adapter.rooms.get(room)
-    console.log(`[StreamingPreview] emit preview_update → room=${room}, phase=${phase}, pages=${partialCode.pages.length}, comps=${partialCode.components.length}, sockets=${socketsInRoom?.size ?? 0}`)
-    io.to(room).emit('preview_update', {
+    const previewData = {
       pages: partialCode.pages,
       components: partialCode.components,
       styles: partialCode.styles,
       tailwindConfig,
       phase,
+    }
+
+    // 存入 Redis，前端透過 HTTP 輪詢取得（解決 Mixed Content 問題）
+    const redisKey = `streaming:preview:${conversationId}`
+    redis.set(redisKey, JSON.stringify(previewData), 'EX', 30).catch(err => {
+      console.error('[StreamingPreview] Redis write failed:', err)
     })
+
+    // 同時透過 Socket.io 推送（供未來 WSS 或本地開發使用）
+    const room = `conversation:${conversationId}`
+    io.to(room).emit('preview_update', previewData)
   }
 }
 
@@ -1994,6 +2090,209 @@ async function handleVariantSelection(
   await executeFullCodePipeline(conversationId, state, redis, io)
 }
 
+// ============================================================
+// 快速建站 Skill
+// ============================================================
+
+async function executeFastBuildSkill(params: {
+  taskId: string
+  projectId: string
+  conversationId: string
+  userId: string
+  message: string
+  redis: Redis
+  io: SocketIOServer
+}) {
+  const { taskId, projectId, conversationId, userId, message, redis, io } = params
+
+  // ── 描述品質檢查 ──
+  if (message.trim().length < 10) {
+    await sendMessage(conversationId, io, {
+      content: '描述太短了，請多說一點你想要什麼樣的網站。\n\n例如：「幫我做一個咖啡店的官網，需要首頁、菜單頁和聯繫我們」',
+      stage: 'fast_need_more_info',
+    })
+    return
+  }
+
+  // ── 推斷設計參數（零 LLM 成本）──
+  const tier = detectDesignTier(message)
+  const productType = inferProductType(message)
+  const pages = inferPages(message, productType)
+  const designSystem = buildDefaultDesignSystem(tier)
+  const template = buildMinimalTemplate(message, productType)
+
+  console.log(`[FastBuild] tier=${tier}, type=${productType}, pages=[${pages.join(',')}]`)
+
+  // ── 設定 FlowState ──
+  const state: FlowState = {
+    phase: 'fast_generating',
+    projectId,
+    currentRound: 0,
+    questionIndex: 0,
+    batchCount: 0,
+    taskId,
+    waitingForReply: false,
+    totalQuestionsAsked: 0,
+    uiuxDesignSystem: designSystem,
+    uiuxDesignTier: tier,
+    uiuxCodePhase: 'structure',
+    uiuxCodeGenerationStartedAt: Date.now(),
+    fastMode: true,
+    fastModeProductType: productType,
+  }
+  await saveFlowState(redis, conversationId, state)
+
+  // ── 發送進度消息 ──
+  await sendMessage(conversationId, io, {
+    content: `正在快速生成您的${productType === 'landing' ? '網站' : productType}，預計 60-90 秒...`,
+    stage: 'fast_generating',
+    progress: { current: 1, total: 3, step: '生成結構' },
+  })
+
+  const twConfig = generateTailwindConfig(designSystem)
+
+  // ===== 階段 1/3：結構 =====
+  const structureResult = await generateStructure(
+    designSystem,
+    pages,
+    template,
+    undefined, // 無 bddSpec
+    tier,
+    {
+      originalRequirements: message,
+    },
+    { userId, conversationId, purpose: 'fast-build-structure' },
+    makeStreamingCallback(conversationId, io, redis, 'structure', twConfig)
+  )
+
+  if (!structureResult.success) {
+    console.error('[FastBuild] 結構生成失敗:', structureResult.error)
+    state.phase = 'uiux_complete' // 允許用戶重試
+    state.uiuxCodeGenerationStartedAt = undefined
+    await saveFlowState(redis, conversationId, state)
+    await sendMessage(conversationId, io, {
+      content: `生成失敗：${structureResult.error}\n\n請嘗試重新描述你的需求。`,
+      stage: 'error',
+    })
+    return
+  }
+
+  let currentCode = {
+    pages: structureResult.pages || [],
+    components: structureResult.components || [],
+    styles: structureResult.styles || '',
+  }
+
+  // ── Structure 中途存檔 ──
+  state.uiuxGeneratedCode = currentCode
+  state.uiuxStructureCode = currentCode
+  state.uiuxCodePhase = 'animation'
+  await saveFlowState(redis, conversationId, state)
+  if (projectId) {
+    await db.upsertProjectFiles(projectId, 'uiux',
+      generatedCodeToFileRows(currentCode, designSystem))
+  }
+
+  // ===== 階段 2/3：動畫 =====
+  const animationResult = await generateAnimations(
+    designSystem,
+    currentCode,
+    tier,
+    { userId, conversationId, purpose: 'fast-build-animation' },
+    makeStreamingCallback(conversationId, io, redis, 'animation', twConfig),
+  )
+
+  if (animationResult.success) {
+    currentCode = {
+      pages: animationResult.pages || currentCode.pages,
+      components: animationResult.components || currentCode.components,
+      styles: animationResult.styles || currentCode.styles,
+    }
+  } else {
+    console.warn('[FastBuild] 動畫生成失敗，使用結構代碼繼續:', animationResult.error)
+  }
+
+  // ── Animation 中途存檔 ──
+  state.uiuxGeneratedCode = currentCode
+  state.uiuxAnimationCode = currentCode
+  state.uiuxCodePhase = 'rwd'
+  await saveFlowState(redis, conversationId, state)
+  if (projectId) {
+    await db.upsertProjectFiles(projectId, 'uiux',
+      generatedCodeToFileRows(currentCode, designSystem))
+  }
+
+  // ===== 階段 3/3：響應式 =====
+  const rwdResult = await generateRwd(
+    designSystem,
+    currentCode,
+    tier,
+    { userId, conversationId, purpose: 'fast-build-rwd' },
+    makeStreamingCallback(conversationId, io, redis, 'rwd', twConfig),
+  )
+
+  if (rwdResult.success) {
+    currentCode = {
+      pages: rwdResult.pages || currentCode.pages,
+      components: rwdResult.components || currentCode.components,
+      styles: rwdResult.styles || currentCode.styles,
+    }
+  } else {
+    console.warn('[FastBuild] RWD 生成失敗，套用 ensureResponsiveClasses:', rwdResult.error)
+    const fixed = ensureResponsiveClasses(currentCode.pages, currentCode.components)
+    currentCode.pages = fixed.pages
+    currentCode.components = fixed.components
+  }
+
+  // ===== Quality Gate（只跑靜態檢查，不做 LLM 修復）=====
+  const report = runQualityGate(currentCode, tier)
+  console.log(`[FastBuild] QG: passed=${report.passed}, critical=${report.summary.critical}, warning=${report.summary.warning}`)
+
+  // ===== 保存最終結果 =====
+  state.uiuxGeneratedCode = currentCode
+  state.uiuxQualityReport = report
+  state.uiuxCodePhase = 'complete'
+  state.phase = 'uiux_complete'
+  state.waitingForReply = false
+  state.uiuxCodeGenerationStartedAt = undefined
+  await saveFlowState(redis, conversationId, state)
+
+  if (projectId) {
+    await db.upsertProjectFiles(projectId, 'uiux',
+      generatedCodeToFileRows(currentCode, designSystem))
+  }
+
+  // ===== 清除 streaming preview =====
+  await redis.del(`streaming:preview:${conversationId}`).catch(() => {})
+
+  // ===== 完成訊息 =====
+  const finalPageCount = currentCode.pages.length
+  const finalComponentCount = currentCode.components.length
+
+  await sendMessage(conversationId, io, {
+    content: `快速生成完成！共 ${finalPageCount} 個頁面、${finalComponentCount} 個組件。\n\n你可以：\n- 直接說想修改的地方，AI 會幫你調整\n- 輸入「**部署**」即可上線`,
+    stage: 'uiux_generation_complete',
+    progress: { current: 3, total: 3, step: '完成' },
+    layoutHint: 'split',
+    richContent: {
+      type: 'code_preview',
+      data: {
+        pages: currentCode.pages,
+        components: currentCode.components,
+        styles: currentCode.styles,
+        tailwindConfig: twConfig,
+        currentPhase: 'complete',
+      } as Record<string, unknown>,
+    },
+    quickReplies: [
+      { label: '部署上線', value: '部署', style: 'primary' },
+    ],
+  })
+
+  await db.updateTask(taskId, { status: 'completed' })
+  console.log(`[FastBuild] 完成: ${finalPageCount} pages, ${finalComponentCount} components`)
+}
+
 /**
  * 完整代碼生成管線：Structure → Animation → RWD → Quality Gate
  * 一氣呵成，中間只發進度訊息，不等用戶確認
@@ -2053,7 +2352,7 @@ async function executeFullCodePipeline(
       variantConcept: state.uiuxVariantConcept,
     },
     { conversationId },
-    makeStreamingCallback(conversationId, io, 'structure', twConfig)
+    makeStreamingCallback(conversationId, io, redis, 'structure', twConfig)
   )
 
   if (!structureResult.success) {
@@ -2098,7 +2397,7 @@ async function executeFullCodePipeline(
     currentCode,
     state.uiuxDesignTier,
     { conversationId },
-    makeStreamingCallback(conversationId, io, 'animation', twConfig),
+    makeStreamingCallback(conversationId, io, redis, 'animation', twConfig),
     state.uiuxVariantConcept
   )
 
@@ -2136,7 +2435,7 @@ async function executeFullCodePipeline(
     currentCode,
     state.uiuxDesignTier,
     { conversationId },
-    makeStreamingCallback(conversationId, io, 'rwd', twConfig),
+    makeStreamingCallback(conversationId, io, redis, 'rwd', twConfig),
     state.uiuxVariantConcept
   )
 
@@ -2198,6 +2497,9 @@ async function executeFullCodePipeline(
     await db.upsertProjectFiles(state.projectId, 'uiux',
       generatedCodeToFileRows(currentCode, state.uiuxDesignSystem))
   }
+
+  // ===== 清除 streaming preview =====
+  await redis.del(`streaming:preview:${conversationId}`).catch(() => {})
 
   // ===== 最終完成訊息 =====
   const tailwindConfig = generateTailwindConfig(uiuxDesignSystem)
@@ -2284,7 +2586,7 @@ async function executeCodePhaseStructure(
       variantConcept: state.uiuxVariantConcept,
     },
     { conversationId },
-    makeStreamingCallback(conversationId, io, 'structure', twCfg)
+    makeStreamingCallback(conversationId, io, redis, 'structure', twCfg)
   )
 
   if (!structureResult.success) {
@@ -2324,6 +2626,9 @@ async function executeCodePhaseStructure(
     await db.upsertProjectFiles(state.projectId, 'uiux',
       generatedCodeToFileRows(generatedCode, state.uiuxDesignSystem))
   }
+
+  // 清除 streaming preview
+  await redis.del(`streaming:preview:${conversationId}`).catch(() => {})
 
   // 發送完成訊息，等待用戶確認
   const pageCount = generatedCode.pages.length
@@ -2379,7 +2684,7 @@ async function executeCodePhaseAnimation(
     uiuxGeneratedCode,
     state.uiuxDesignTier,
     { conversationId },
-    makeStreamingCallback(conversationId, io, 'animation', animTwCfg),
+    makeStreamingCallback(conversationId, io, redis, 'animation', animTwCfg),
     state.uiuxVariantConcept
   )
 
@@ -2420,6 +2725,9 @@ async function executeCodePhaseAnimation(
     await db.upsertProjectFiles(state.projectId, 'uiux',
       generatedCodeToFileRows(generatedCode, state.uiuxDesignSystem))
   }
+
+  // 清除 streaming preview
+  await redis.del(`streaming:preview:${conversationId}`).catch(() => {})
 
   // 發送完成訊息
   await sendMessage(conversationId, io, {
@@ -2472,7 +2780,7 @@ async function executeCodePhaseRwd(
     uiuxGeneratedCode,
     state.uiuxDesignTier,
     { conversationId },
-    makeStreamingCallback(conversationId, io, 'rwd', rwdTwCfg),
+    makeStreamingCallback(conversationId, io, redis, 'rwd', rwdTwCfg),
     state.uiuxVariantConcept
   )
 
@@ -2788,6 +3096,13 @@ async function handleConfirmTemplate(
     await sendMessage(conversationId, io, {
       content: '請選擇您喜歡的設計方向，或輸入「選擇 A」直接使用該變體。',
       stage: 'uiux_prompt_variant_selection',
+      quickReplies: [
+        { label: '選擇 A', value: '選擇 A', style: 'ghost' },
+        { label: '選擇 B', value: '選擇 B', style: 'ghost' },
+        { label: '選擇 C', value: '選擇 C', style: 'ghost' },
+        { label: '選擇 D', value: '選擇 D', style: 'ghost' },
+        { label: '選擇 E', value: '選擇 E', style: 'ghost' },
+      ],
     })
     return
   }
@@ -3360,6 +3675,11 @@ async function proceedToVariantGeneration(
     : '以下是 5 種不同的設計方案，各有不同的切入角度'
 
   // 發送變體選擇訊息
+  const variantReplies = variants.map(v => ({
+    label: `選擇 ${v.id}`,
+    value: `選擇 ${v.id}`,
+    style: 'ghost' as const,
+  }))
   await sendMessage(conversationId, io, {
     content: `${prefix}！\n\n${variantDescriptions}\n\n請選擇你喜歡的方向：\n- 輸入「選擇 A」直接使用某個方案\n- 輸入「合併 A+C」組合多個方案的特點`,
     stage: 'uiux_variants_ready',
@@ -3372,6 +3692,7 @@ async function proceedToVariantGeneration(
         fromUserIdeas: sourceType === 'ideas',
       } as Record<string, unknown>,
     },
+    quickReplies: variantReplies,
   })
 }
 
@@ -3611,17 +3932,10 @@ async function handleDeployExecute(
       preCheck.code,
       preCheck.tailwindConfig || '',
       async (progress) => {
-        await sendMessage(conversationId, io, {
-          content: `部署中... ${progress.step}`,
-          stage: 'deployer_progress',
-          progress: { current: progress.percent, total: 100, step: progress.step },
-          richContent: {
-            type: 'deploy_progress',
-            data: {
-              percent: progress.percent,
-              step: progress.step,
-            } as Record<string, unknown>,
-          },
+        // 進度只透過 Socket.io 即時推送，不寫入對話訊息（避免洗版）
+        io?.emit(`deploy:progress:${conversationId}`, {
+          percent: progress.percent,
+          step: progress.step,
         })
       },
       {
@@ -3646,6 +3960,7 @@ async function handleDeployExecute(
       console.log(`[Orchestrator] 已同步 build 修復後代碼到 FlowState（pages: ${deployedCode.pages?.length}, components: ${deployedCode.components?.length}）`)
     }
 
+    state.deployerPreCheck = undefined
     state.phase = 'deployer_complete'
     await saveFlowState(redis, conversationId, state)
 
@@ -3781,7 +4096,7 @@ async function handleDesignIteration(
       content: `修改失敗：${result.error || '未知錯誤'}。請嘗試其他描述方式。`,
       stage: 'error',
     })
-    state.phase = state.deployerPreCheck ? 'deployer_complete' : 'uiux_complete'
+    state.phase = 'uiux_complete'
     await saveFlowState(redis, conversationId, state)
     return
   }
@@ -3944,14 +4259,9 @@ async function handleRollbackSelection(
     progress: { current: 1, total: 2, step: '回滾中' },
   })
 
-  // 取得 project name
+  // 取得 project name（使用 deployer 的 toVercelSlug 確保一致）
   const project = await db.getProject(state.projectId || projectId)
-  const projectName = project?.name
-    ?.toLowerCase()
-    .replace(/[^a-z0-9]/g, '-')
-    .replace(/-+/g, '-')
-    .replace(/^-|-$/g, '')
-    .slice(0, 30) || 'tellcraft-project'
+  const projectName = toVercelSlug(project?.name || '', state.projectId || projectId)
 
   const result = await rollbackToDeployment(projectName, target.vercel_deployment_id)
 

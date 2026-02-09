@@ -60,9 +60,10 @@ git pull && pnpm build && pm2 restart tellcraft-backend
 | **UIUX Generation** | `tellcraft-backend/src/services/uiux-generation.ts` | 設計生成核心（Brief/Variants/Structure/Animation/RWD/Refine） |
 | **Quality Gate** | `tellcraft-backend/src/services/quality-gate.ts` | A11y/Performance/CodeQuality 靜態檢查 + LLM 自動修復 |
 | **Deployer** | `tellcraft-backend/src/services/deployer.ts` | sanitize → build 驗證 → Vercel 部署 → 回滾 |
+| **Fast Build** | `tellcraft-backend/src/services/fast-build-generation.ts` | 快速模式輔助：tier 偵測、產品推斷、默認 DesignSystem（零 LLM） |
 | **TSX→HTML** | `app/lib/tsx-to-preview.ts` | UIUX 預覽核心，TSX 轉瀏覽器可渲染 HTML（iframe） |
 | **VPS API Client** | `app/lib/vps-api.ts` | 前端呼叫 VPS 的 HTTP 客戶端 |
-| **WebSocket Hook** | `app/hooks/useVpsWebSocket.ts` | 即時訊息推送 + 串流預覽 |
+| **WebSocket Hook** | `app/hooks/useVpsWebSocket.ts` | 即時訊息推送（型別定義） |
 
 ### Skill 系統
 
@@ -72,6 +73,7 @@ git pull && pnpm build && pm2 restart tellcraft-backend
 | `uiux` | 前端介面設計（3 階段：Design Discovery → Design Lab → Implementation）|
 | `quality-gate` | UIUX RWD 完成後**自動觸發**，critical 問題 LLM 自動修復（最多 3 輪）|
 | `deployer` | UIUX 代碼 → Next.js → Vercel 部署（用戶說「部署」觸發），支援迭代 + 回滾 |
+| `fast-build` | 快速建站：一句話 → 跳過 BDD/Discovery → 直接 Structure → Animation → RWD → 靜態 QG → Preview |
 
 ### Orchestrator Phase 狀態機
 
@@ -88,6 +90,7 @@ git pull && pnpm build && pm2 restart tellcraft-backend
 | `uiux_code_generation` | Implementation 確認/重做（Structure → Animation → RWD） |
 | `uiux_quality_gate` | Quality Gate 執行中 |
 | `uiux_complete` / `uiux_iterating` | UIUX 完成（可迭代或部署）/ 迭代修改中 |
+| `fast_generating` | 快速模式生成中（攔截用戶輸入，完成後 → `uiux_complete`） |
 | `deployer_confirm` / `deployer_deploying` / `deployer_failed` / `deployer_complete` | 部署流程 |
 | `deployer_rollback_select` | 等待用戶選擇回滾版本 |
 
@@ -102,6 +105,21 @@ Discovery（Path A 問卷 / Path B 模板）
   → Quality Gate 自動觸發
   → 迭代修改（refineCode）↔ 部署（deployer）↔ 回滾
 ```
+
+### Fast Build Pipeline（快速模式）
+
+```
+用戶描述（mode=fast）→ 跳過 Classifier
+  → detectDesignTier（規則式）→ inferProductType → buildDefaultDesignSystem
+  → generateStructure(streaming) → generateAnimations(streaming) → generateRwd(streaming)
+  → runQualityGate（靜態檢查，不做 LLM 修復）
+  → phase='uiux_complete'（複用所有迭代/部署/回滾邏輯）
+  3 次 LLM | 0 次用戶交互 | 60-90 秒
+```
+
+- **FlowState 擴展**：`fastMode?: boolean`、`fastModeProductType?: string`
+- **ProcessMessageData**：`mode?: 'fast' | 'fine'`，前端 HeroSection 切換
+- **完成後完全複用**：`handleDesignIteration`、`executeDeployerSkill`、`handleDeployRollback`
 
 - **Design Tier**：`functional`（dashboard/SaaS，禁漸層/glow）vs `creative`（landing page，允許大膽設計）
 - **串流預覽**：生成時 Socket.io `preview_update` 即時推送，前端 `convertToPreviewHtmlSafe()` 容錯渲染
