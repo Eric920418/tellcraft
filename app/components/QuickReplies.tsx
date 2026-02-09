@@ -21,13 +21,13 @@ const styles: Record<string, React.CSSProperties> = {
     border: '1px solid var(--gray-900)',
   },
   secondary: {
-    background: '#fff',
-    color: 'var(--gray-900)',
+    background: 'var(--background)',
+    color: 'var(--foreground)',
     border: '1px solid var(--gray-300)',
   },
   ghost: {
-    background: '#fff',
-    color: 'var(--gray-600)',
+    background: 'var(--background)',
+    color: 'var(--foreground)',
     border: '1px solid var(--gray-200)',
   },
 }

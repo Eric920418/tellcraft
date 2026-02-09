@@ -1124,7 +1124,6 @@ async function sendClarifyQuestion(
       quickReplies.push({ label, value: letter, style: 'ghost' })
     })
   }
-  quickReplies.push({ label: '跳過此題', value: '跳過', style: 'secondary' })
   if (index > 0) {
     quickReplies.push({ label: '完成釐清', value: '完成釐清', style: 'secondary' })
   }

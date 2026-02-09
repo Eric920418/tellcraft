@@ -47,22 +47,22 @@ git pull && pnpm build && pm2 restart tellcraft-backend
                             └─────────────────────────────────────┘
 ```
 
+前端**不直連資料庫**：`Vercel Server Actions → app/lib/vps-api.ts → VPS Express API → PostgreSQL`
+
 **為什麼用 VPS**：Vercel Serverless 超時限制（10-60 秒）無法處理長時間 LLM 任務。
 
 ### 核心模組
 
 | 模組 | 路徑 | 職責 |
 |------|------|------|
-| **Orchestrator** | `tellcraft-backend/src/workers/orchestrator.ts` | BullMQ Worker，處理用戶請求 |
-| **Classifier** | `tellcraft-backend/src/services/classifier.ts` | AI 意圖分類，決定使用哪個 Skill |
-| **Registry** | `tellcraft-backend/src/services/registry.ts` | Skill 註冊表 |
-| **Prefilter** | `tellcraft-backend/src/services/prefilter.ts` | Layer 1 前置過濾（Rate Limit、Prompt Injection、長度上限 5000 字） |
-| **Server Actions** | `app/actions/index.ts` | 38 個前端 Server Actions |
+| **Orchestrator** | `tellcraft-backend/src/workers/orchestrator.ts` | BullMQ Worker，核心流程引擎，`FlowState.phase` 狀態機 |
+| **Classifier** | `tellcraft-backend/src/services/classifier.ts` | 三層防禦：Prefilter → Meta Intent → Skill 分類 |
+| **UIUX Generation** | `tellcraft-backend/src/services/uiux-generation.ts` | 設計生成核心（Brief/Variants/Structure/Animation/RWD/Refine） |
+| **Quality Gate** | `tellcraft-backend/src/services/quality-gate.ts` | A11y/Performance/CodeQuality 靜態檢查 + LLM 自動修復 |
+| **Deployer** | `tellcraft-backend/src/services/deployer.ts` | sanitize → build 驗證 → Vercel 部署 → 回滾 |
+| **TSX→HTML** | `app/lib/tsx-to-preview.ts` | UIUX 預覽核心，TSX 轉瀏覽器可渲染 HTML（iframe） |
 | **VPS API Client** | `app/lib/vps-api.ts` | 前端呼叫 VPS 的 HTTP 客戶端 |
-| **WebSocket Hook** | `app/hooks/useVpsWebSocket.ts` | 即時訊息推送 |
-| **TSX→HTML 轉換器** | `app/lib/tsx-to-preview.ts` | UIUX 預覽核心，TSX 轉瀏覽器可渲染 HTML |
-| **BDD→UI 翻譯** | `tellcraft-backend/src/services/bdd-to-ui-spec.ts` | ISA BDD spec → 前端 UI 需求規格（頁面/操作/欄位） |
-| **Auth Middleware** | `tellcraft-backend/src/middleware/auth.ts` | `requireAuth`、`optionalAuth`、`requirePlan()` |
+| **WebSocket Hook** | `app/hooks/useVpsWebSocket.ts` | 即時訊息推送 + 串流預覽 |
 
 ### Skill 系統
 
@@ -70,204 +70,59 @@ git pull && pnpm build && pm2 restart tellcraft-backend
 |-------|------|
 | `bdd-spec` | 需求釐清 + BDD 規格產出（5 階段：Discovery → Clarify → Formulation → Actions Design → ISA Config）|
 | `uiux` | 前端介面設計（3 階段：Design Discovery → Design Lab → Implementation）|
-| `quality-gate` | 自動品質檢查（UIUX Implementation 完成後自動觸發，檢查 A11y/Performance/Code Quality，critical 問題自動 LLM 修復） |
-| `deployer` | 將 UIUX 生成的代碼包裝成 Next.js 部署到 Vercel（UIUX 完成後用戶說「部署」觸發）|
-| `domain-manager` | 網域管理入口（含 `domain-purchase`、`domain-dns` 子 Skill，已註冊但功能有限）|
+| `quality-gate` | UIUX RWD 完成後**自動觸發**，critical 問題 LLM 自動修復（最多 3 輪）|
+| `deployer` | UIUX 代碼 → Next.js → Vercel 部署（用戶說「部署」觸發），支援迭代 + 回滾 |
 
 ### Orchestrator Phase 狀態機
 
-Orchestrator 使用 `FlowState.phase` 控制對話流程，所有 phase 必須在 `handleContinueFlow` 中有對應路由：
+所有 phase 必須在 `handleContinueFlow` 中有對應路由：
 
 | Phase | 說明 |
 |-------|------|
-| `spec_clarify` | BDD 需求釐清中 |
-| `spec_completed` | BDD 規格完成 |
-| `uiux_design_preference` | UIUX Discovery Path A 問卷 |
-| `uiux_design_clarify` | UIUX Discovery 補充釐清 |
-| `uiux_design_brief_confirm` | Design Brief AI 顧問確認 |
-| `uiux_template_selection` | UIUX Discovery Path B 模板選擇 |
-| `uiux_variant_selection` | Design Lab 變體選擇 |
-| `uiux_generating_variants` | 變體生成中（攔截用戶輸入） |
-| `uiux_code_generation` | Implementation 代碼生成確認/重做 |
+| `spec_clarify` / `spec_completed` | BDD 需求釐清 / 完成 |
+| `uiux_design_preference` | Discovery Path A 問卷（feeling → reference → color → layout） |
+| `uiux_design_clarify` | Discovery 補充釐清 |
+| `uiux_design_brief_confirm` | Design Brief AI 顧問確認（推薦 Design Tier） |
+| `uiux_template_selection` | Discovery Path B 模板選擇 |
+| `uiux_variant_selection` / `uiux_generating_variants` | Design Lab 變體選擇 / 生成中 |
+| `uiux_code_generation` | Implementation 確認/重做（Structure → Animation → RWD） |
 | `uiux_quality_gate` | Quality Gate 執行中 |
-| `uiux_complete` | UIUX 完成（可迭代或觸發部署） |
-| `uiux_iterating` | 迭代修改中（攔截用戶輸入） |
-| `deployer_confirm` | 部署確認等待中 |
-| `deployer_deploying` | 部署執行中 |
-| `deployer_failed` | 部署失敗 |
-| `deployer_complete` | 部署完成（可迭代/回滾/重新部署） |
+| `uiux_complete` / `uiux_iterating` | UIUX 完成（可迭代或部署）/ 迭代修改中 |
+| `deployer_confirm` / `deployer_deploying` / `deployer_failed` / `deployer_complete` | 部署流程 |
 | `deployer_rollback_select` | 等待用戶選擇回滾版本 |
 
-#### UIUX Skill 架構細節
+### UIUX Pipeline 概覽
 
-**Design Discovery 雙軌流程**：
-- Path A（有想法）：4 步問卷 feeling → reference → color → layout
-- Path B（沒想法）：模板選擇器
+```
+Discovery（Path A 問卷 / Path B 模板）
+  → Design Brief 確認（AI 顧問 + Design Tier 推薦，最多 3 輪）
+  → BDD→UI 翻譯（Haiku，快取在 FlowState.uiuxUISpec）
+  → 5 變體生成 + 用戶選擇 → extractVariantConcept()
+  → Implementation: generateStructure() → generateAnimations() → generateRwd()
+  → Quality Gate 自動觸發
+  → 迭代修改（refineCode）↔ 部署（deployer）↔ 回滾
+```
 
-**Design Brief 確認**（Discovery → Design Lab 之間）：AI 設計顧問總結設計方向、推薦 Design Tier，用戶可確認或調整（最多 3 輪）。
+- **Design Tier**：`functional`（dashboard/SaaS，禁漸層/glow）vs `creative`（landing page，允許大膽設計）
+- **串流預覽**：生成時 Socket.io `preview_update` 即時推送，前端 `convertToPreviewHtmlSafe()` 容錯渲染
+- **Variant 概念**：`VariantConcept` 注入所有生成 prompt，確保創意方向一致
 
-**Design Tier（功能型 vs 創意型）**：
-- `DesignTier = 'functional' | 'creative'`
-- functional：dashboard/SaaS/後台，禁漸層/glow/多色，動畫克制
-- creative：landing page/品牌官網，允許漸層、多色、獨特字體、大膽佈局
+### Deployer Pipeline
 
-**Implementation 三階段生成**：`generateStructure()` → `generateAnimations()` → `generateRwd()`（每階段可確認或重做，Stage 2/3 有 fallback）
-
-**BDD→UI 翻譯**：Pipeline 開始前，`translateBddToUISpec()` 用 Haiku 將 ISA BDD spec 翻譯為結構化 `UIRequirementsSpec`（頁面/操作/欄位）。翻譯結果快取在 `FlowState.uiuxUISpec`，失敗時降級用原始 bddSpec。
-
-**Variant 創意概念**：用戶選擇 variant 後，`extractVariantConcept()` 從 `DesignVariant` 提取 `VariantConcept`（name/description/keyFeatures/signatureElement）存入 `FlowState.uiuxVariantConcept`。所有生成函數收到此概念並注入 prompt，確保創意方向貫穿整個設計。
-
-**串流實時預覽**：三個生成函數都支援 `onPartialCode` callback，LLM 串流期間每完成一個 code block 就透過 Socket.io `preview_update` 事件推送給前端。前端用 `convertToPreviewHtmlSafe()` 容錯轉換 + `injectStreamingAnimation()` fade-in，用戶能看到網頁漸進式構建。Throttle 雙條件：新區塊 + >= 1500ms。
-
-**關鍵函數**（`tellcraft-backend/src/services/uiux-generation.ts`）：
-- `generateDesignBrief()` - Domain Exploration + Signature Element
-- `generateDesignVariants()` - 5 變體 + Anti-Default 哲學（含 `signatureElement`）
-- `generateStructure()` - 靜態桌面版 + Professional UI Rules（支援 streaming）；`productContext` 含 `uiSpec`（BDD 翻譯）和 `variantConcept`（創意概念）
-- `generateAnimations()` - 動畫增強（支援 streaming）；可選 `variantConcept` 參數
-- `generateRwd()` - 響應式 + Pre-Delivery Checklist（支援 streaming）；可選 `variantConcept` 參數
-- `refineCode()` - 迭代修改；`designContext` 含 `variantConcept`
-- `extractVariantConcept()` - 從選中 variant 提取創意概念（name/description/keyFeatures/signatureElement）
-- `parseCompletedFileBlocks()` - 串流解析已閉合 code block（for streaming preview）
-- `buildStreamingHandler()` - Throttled streaming callback builder
-- `synthesizeVariants()` - 變體合併（layout/interaction metadata）
-- `getCraftFoundations()` - 共用品質底線
-- `getStructureConstraints(tier)` / `getAnimationConstraints(tier)` / `getVariantPromptHint(tier)` - Tier 約束集
-
-**關鍵函數**（`tellcraft-backend/src/services/bdd-to-ui-spec.ts`）：
-- `translateBddToUISpec(bddSpec, originalRequirements)` - 用 Haiku 將 ISA BDD spec 翻譯為 `UIRequirementsSpec`（頁面/操作/欄位結構）
-- `formatUISpecForPrompt(spec)` - 將 `UIRequirementsSpec` 格式化為 prompt section
-
-#### Quality Gate（UIUX 完成後自動觸發）
-
-**流程**：RWD 完成 → 靜態品質檢查 → 有 critical 問題則 LLM 自動修復（最多 3 輪）→ 品質報告 → 完成
-
-**關鍵函數**（`tellcraft-backend/src/services/quality-gate.ts`）：
-- `runQualityGate(code, designTier)` - 執行 3 類靜態檢查，返回 QualityReport
-- `autoFixCriticalIssues(code, issues)` - 用 Haiku 修復 critical issues
-- `checkAccessibility()` - focus-visible、aria-label、form labels、img alt、heading hierarchy
-- `checkPerformance()` - 只動畫 transform/opacity、reduced-motion、no transition-all
-- `checkCodeQuality()` - motion/react import、Tailwind v4 syntax、next/font、no h-screen
-
-#### Deployer Skill（UIUX 完成後用戶觸發）
-
-**觸發方式**：用戶在 `uiux_complete` 階段說「部署」→ classifier 分類為 deployer 或 handleContinueFlow 直接匹配。
-
-**流程**：prepareDeployment（前檢查 + sanitize）→ 用戶確認（顯示修復項）→ executeDeployment（verifyBuildLocally → createVercelProject → deployFiles → waitForReady → 更新 DB）
-
-**部署前預檢（`sanitizeCodeForDeploy()`）**：
-- `framer-motion` → `motion/react` import 修正
-- 缺少 `'use client'` 自動補充（偵測 hooks/motion 使用）
-- `motion.*` spread props TypeScript 類型衝突修復（注入 `safeMotionProps` helper）
-- Google Fonts `<link>` / `@import` 移除（應用 next/font）
-- 自動掃描第三方 import → 補充 `KNOWN_PACKAGES` 對應版本到 package.json
-- 檔案間相對引用檢查（broken import warning）
-
-**本地 Build 驗證（`verifyBuildLocally()`）**：
-- 在 VPS 上建立 `/tmp/tellcraft-build-xxx/` 臨時 Next.js 專案
-- 執行 `npm install` + `next build`（`NODE_OPTIONS=--max-old-space-size=1536`）
-- Build 失敗 → `parseBuildErrors()` 解析（TS error / module not found / syntax）→ `fixBuildErrors()` 用 Haiku LLM 修復
-- 最多 3 輪修復，全失敗降級 `ignoreBuildErrors` 部署
-- npm install 失敗時自動解析並移除壞依賴重試
-- `wrapInNextJs()` 已移除 `ignoreBuildErrors: true`，只在降級時由 `wrapInNextJsWithIgnoreErrors()` 恢復
-
-**對話內迭代**（部署後持續修改）：
-- `deployer_complete` 階段不再靜默吞訊息
-- 用戶輸入修改建議 → `handleDesignIteration()` → `refineCode()` 修改代碼 → 預覽 → `uiux_complete`
-- 用戶再說「部署」→ 重新部署，循環不限次
-- `uiux_complete` 階段有代碼時，非部署訊息也路由到迭代
-
-**部署回滾**：
-- 用戶說「回滾」→ `handleDeployRollback()` → 顯示部署歷史 → `deployer_rollback_select`
-- 用戶選版本 → `handleRollbackSelection()` → `rollbackToDeployment()` → Vercel Promote/Alias API
-
-**關鍵函數**（`tellcraft-backend/src/services/deployer.ts`）：
-- `sanitizeCodeForDeploy(code)` - 部署前預檢 + 自動修復（6 類問題）
-- `verifyBuildLocally(code, projectName, tailwindConfig, ...)` - 本地 build 驗證 + LLM 自動修復迴圈（最多 3 輪）
-- `parseBuildErrors(output)` - 解析 next build 輸出中的 TS/module/syntax 錯誤
-- `fixBuildErrors(code, errors, buildOutput, deps)` - Haiku LLM 修復 build 錯誤
-- `prepareDeployment(projectId, userId)` - 驗證專案、代碼、環境變數 + 呼叫 sanitize
-- `executeDeployment(projectId, code, tailwindConfig, onProgress, options?)` - 執行部署（含 build 驗證）
-- `wrapInNextJs(code, projectName, tailwindConfig, extraDeps?, injectedFiles?)` - UIUX 代碼 → 完整 Next.js 專案
-- `wrapInNextJsWithIgnoreErrors(...)` - 降級用：恢復 ignoreBuildErrors: true
-- `listProjectDeployments(projectId)` - 查詢部署歷史
-- `rollbackToDeployment(projectName, deploymentId)` - Vercel 回滾
-
-**關鍵函數**（`tellcraft-backend/src/services/uiux-generation.ts`）：
-- `refineCode(currentCode, userFeedback, designContext)` - 基於用戶反饋修改現有代碼
-
-**前端元件**（`app/components/deployer/`）：
-- `DeployConfirm.tsx` - 部署確認卡片（顯示專案名、檔案數、預計 URL）
-- `DeployProgress.tsx` - 部署進度條
-- `DeployResult.tsx` - 部署結果（成功顯示 URL / 失敗顯示錯誤 + 迭代提示）
-- `DeploymentHistory.tsx` - 部署歷史列表 + 回滾按鈕
+```
+sanitizeCodeForDeploy（6 類自動修復）
+  → verifyBuildLocally（VPS /tmp 建臨時 Next.js，build 失敗 LLM 修復最多 3 輪）
+  → Vercel 部署
+  → 部署後可迭代（refineCode → 重新部署）或回滾（Vercel Promote API）
+```
 
 ### 認證系統
 
-```
-登入頁 → Vercel Proxy → VPS OAuth → JWT Token → localStorage + Cookie
-```
+`登入頁 → Vercel Proxy → VPS OAuth → JWT Token → localStorage（前端 hook）+ Cookie（middleware）`
 
-- `app/hooks/useAuth.ts` - Client-side JWT auth hook
-- `app/api/auth/google/`, `app/api/auth/line/` - OAuth Vercel proxy
-- `tellcraft-backend/src/routes/auth.ts` - VPS OAuth 處理
-- **雙軌儲存**：localStorage 供前端 hook 使用，Cookie 供 middleware/Server Components 使用
+### 代碼存儲：project_files 表
 
-### 資料流：前端 → VPS
-
-前端**不直連資料庫**，所有資料操作通過 VPS HTTP API：
-```
-Vercel Server Actions → app/lib/vps-api.ts → VPS Express API → PostgreSQL
-```
-
-### 生成代碼存儲：project_files 表
-
-各 Skill 生成的代碼獨立存儲在 `project_files` 表（一檔一行），支援多 Skill 來源：
-- `skill_source`: `uiux` / `code`（未來）/ `merge`（未來合併用）
-- `file_type`: `page` / `component` / `style` / `config`
-- UPSERT on `(project_id, skill_source, file_path)`
-- Orchestrator 每個生成階段（Structure/Animation/RWD+QG）自動寫入
-- Deployer 優先從 `project_files` 讀取，舊專案 fallback 到 `bdd_sessions`
-- API: `GET /api/project/:id/files?skill_source=uiux`
-
-## 專案結構
-
-```
-app/                       # Next.js 前端（Vercel）
-├── actions/               # Server Actions（index.ts, admin.ts, storage.ts）
-├── hooks/                 # useAuth.ts, useVpsWebSocket.ts
-├── lib/                   # vps-api.ts, llm.ts, tsx-to-preview.ts, supabase/
-├── components/            # UI 元件（uiux/ 下有 VariantPicker, CodePreview, PreviewPanel 等）
-├── dashboard/             # 用戶/管理員儀表板
-└── auth/                  # OAuth 登入
-
-tellcraft-backend/         # Express 後端（VPS）
-├── src/
-│   ├── index.ts           # Express + Socket.io + BullMQ 入口
-│   ├── routes/            # auth, conversation, project, templates, dashboard, session 等
-│   ├── workers/           # orchestrator.ts（BullMQ Worker，核心流程引擎）
-│   ├── middleware/         # auth.ts（requireAuth, optionalAuth, requirePlan）
-│   └── services/          # classifier, registry, prefilter, bdd-session, uiux-generation,
-│                          # quality-gate, deployer, prd-discovery, formulation, spec-discovery
-└── ecosystem.config.js    # PM2 配置
-
-spec/                      # BDD 規格產出
-├── data/schema.sql
-├── features/*.feature     # Feature Files
-└── actions/actions.yml
-
-bdd-spec/                  # BDD Skill 定義
-├── instructions/          # 5 階段執行指南（discovery → clarify → formulation → actions-design → isa-config）
-├── rules/                 # formulation-rules.md
-└── scripts/               # 驗證腳本（lint-gherkin-format.ts, validate-feature.ts）
-
-uiux-skill/                # UIUX Skill 定義
-├── instructions/          # 3 階段執行指南（design-discovery → design-lab → implementation）
-└── rules/baseline-ui.md   # UI 技術約束 + Craft Foundations
-
-quality-gate-skill/        # Quality Gate Skill 定義
-├── skill.md               # Skill metadata + 流程概覽
-└── instructions/          # 01-quality-check.md（檢查規則 + 修復策略）
-```
+`(project_id, skill_source, file_path)` 唯一索引，UPSERT。`skill_source`: uiux/code/merge。Deployer 優先讀此表，fallback `bdd_sessions`。
 
 ## BDD 規格格式（sdd.os ISA）
 
@@ -278,23 +133,20 @@ quality-gate-skill/        # Quality Gate Skill 定義
 | 操作失敗 | `操作失敗` |
 | Entity 驗證 | `存在一個{entity}, with table:` |
 
-**驗證錯誤代碼**：
-- E001: 缺少 Action 註解
-- E002: 缺少 Summary 註解
-- E003: 缺少 Feature 宣告
-- E004: Summary 與 Feature 名稱不一致
-- E005: Rule 缺少前置/後置標註
-- E006: When 步驟格式錯誤
-- E008: 沒有 Example
+驗證錯誤代碼：E001 缺 Action 註解、E002 缺 Summary、E003 缺 Feature、E004 Summary 不一致、E005 Rule 缺標註、E006 When 格式錯、E008 沒 Example
 
-## 重要注意事項
+## 防雷清單（不看必踩）
 
-- **`app/components/templates/` 已廢棄**：React 模板組件不再使用，PreviewPanel 改用 iframe + 後端 HTML 渲染
-- **動畫庫是 `motion/react`**，不是 `framer-motion`（import path 已遷移）
-- **`uiux-generation.ts` 使用模組級 Anthropic 單例**
-- **文檔與實作同步**：修改後端流程時必須同步更新 `uiux-skill/instructions/` 和此文件
-- **Classifier 三層防禦**：Layer 1 Prefilter（Rate Limit + Injection 偵測）→ Layer 2 Meta Intent（`onboarding`/`chitchat`/`abuse`/`unknown` 模板回覆）→ Layer 3 Skill 分類
-- **新增 phase 必須同步**：`handleContinueFlow` 路由 + `FlowState` 型別 + 前端 richContent type union
+- **新增 phase 必須三處同步**：`handleContinueFlow` 路由 + `FlowState` 型別 + 前端 `richContent.type` union
+- **動畫庫是 `motion/react`**，不是 `framer-motion`
+- **字體只能用 `next/font`**，禁止 `<link>` / `@import` Google Fonts
+- **Tailwind v4**：用 `@import "tailwindcss"`，不是 v3 的 `@tailwind`
+- **`app/components/templates/` 已廢棄**，PreviewPanel 用 iframe + 後端 HTML
+- **deployer_complete 路由順序**：先檢查「部署」→ 再檢查「回滾」→ 最後才是迭代修改
+- **文檔與實作同步**：改後端流程 → 同步更新 `uiux-skill/instructions/` + 此文件
+- **`handleCodePhaseRedo` 需要快照**：`uiuxStructureCode`/`uiuxAnimationCode`，否則 redo 在已修改代碼上重做
+- **`verifyBuildLocally` 的修復結果必須同步回 DB**：否則預覽和部署代碼分岔
+- **Anthropic SDK v0.72+**：大 `max_tokens` 必須用 `messages.stream()` + `await stream.finalMessage()`
 
 ## 核心原則
 
@@ -303,26 +155,8 @@ quality-gate-skill/        # Quality Gate Skill 定義
 3. **自我修復**：驗證失敗時進入修正迴圈（最多 3 次）
 4. **不直連資料庫**：前端透過 VPS API 操作資料，禁止 `accept-data-loss`
 
-## 關鍵 LLM 函數（app/lib/llm.ts）
-
-| 函數 | 用途 |
-|------|------|
-| `runPrdDiscovery` | PRD Discovery（使用 A1-D2 檢查清單）|
-| `filterDuplicateQuestions` | 語意去重（用 Haiku 判斷相似度）|
-| `generateSchemaSql` | 產出 SQL Schema |
-| `generateFeatureFiles` | 產出 Feature Files |
-| `fixMultipleFeatures` | 批量修復 Feature 格式 |
-| `validateFeatureContent` | 驗證 Feature 格式（本地 Regex，不調用 LLM）|
-
 ## 環境變數
 
-前端（`.env.local`）：
-- `VPS_API_URL`, `NEXT_PUBLIC_VPS_API_URL`, `NEXT_PUBLIC_VPS_WS_URL` - VPS 後端位址
-- `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY` - Supabase
+前端（`.env.local`）：`VPS_API_URL`, `NEXT_PUBLIC_VPS_API_URL`, `NEXT_PUBLIC_VPS_WS_URL`, `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`
 
-後端（`tellcraft-backend/.env`）：
-- `DATABASE_URL`, `REDIS_URL` - 資料庫連線
-- `JWT_SECRET` - JWT 簽名密鑰
-- `ANTHROPIC_API_KEY` - Claude API
-- `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` - Google OAuth
-- `LINE_CHANNEL_ID`, `LINE_CHANNEL_SECRET` - LINE OAuth
+後端（`tellcraft-backend/.env`）：`DATABASE_URL`, `REDIS_URL`, `JWT_SECRET`, `ANTHROPIC_API_KEY`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `LINE_CHANNEL_ID`, `LINE_CHANNEL_SECRET`
