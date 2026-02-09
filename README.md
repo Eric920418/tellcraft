@@ -1435,7 +1435,7 @@ Hero → 往下滾動 → 產品介紹（SEO 友好）→ Testimonials → CTA
 | `bdd-spec` | ✅ 完成 | 完整 5 階段流程：PRD Discovery/Clarify → Formulation → Spec Discovery/Clarify → Actions Design → ISA Config |
 | `coder` | ⏳ 開發中 | 後端 API 生成，待開發完成後與 uiux 並行執行 |
 | `uiux` | 🧪 可測試 | 3 階段前端設計流程（Design Discovery → Design Lab → Implementation）+ 雙軌 Discovery（有想法→4步釐清 / 沒想法→模板選擇）+ Design Brief 確認（AI 設計顧問總結+建議+Design Tier推薦，最多3輪調整）+ Design Tier（functional/creative 約束集切換）+ Supabase Storage 儲存 |
-| `deployer` | ✅ 完成 | UIUX 完成後用戶觸發，將生成代碼包裝成 Next.js 部署到 Vercel。部署前自動預檢修復（framer-motion→motion/react、缺少 'use client'、motion spread props 類型衝突、Google Fonts 移除、自動掃描補充第三方依賴、檔案間引用檢查）+ 本地 Build 驗證（VPS 上建臨時 Next.js 專案跑 `next build`，失敗則 LLM Haiku 自動修復代碼——支援生成缺失的 @/ 內部組件檔案，最多 3 輪，全失敗才降級 `ignoreBuildErrors` 部署）。支援對話內迭代（部署後可直接修改設計再重新部署，循環不限次）和 Vercel 部署回滾（查看部署歷史、選版本回滾）|
+| `deployer` | ✅ 完成 | UIUX 完成後用戶觸發，將生成代碼包裝成 Next.js 部署到 Vercel。部署前自動預檢修復（framer-motion→motion/react、缺少 'use client'、motion spread props 類型衝突、Google Fonts 移除、Tailwind v4→v3 CSS 語法轉換（@theme→:root、@import tailwindcss 移除）、自動掃描補充第三方依賴、檔案間引用檢查）+ 本地 Build 驗證（VPS 上建臨時 Next.js 專案跑 `next build`，失敗則 LLM Haiku 自動修復代碼——支援生成缺失的 @/ 內部組件檔案和 CSS/webpack 錯誤修復，最多 3 輪，全失敗才降級 `ignoreBuildErrors` 部署）。支援對話內迭代（部署後可直接修改設計再重新部署，循環不限次）和 Vercel 部署回滾（查看部署歷史、選版本回滾）|
 | `domain-manager` | ✅ 完成 | 網域管理入口，支援三種選擇 |
 | `domain-purchase` | ✅ 完成 | Porkbun 網域註冊 |
 | `domain-dns` | ✅ 完成 | Cloudflare Zone + Vercel 綁定 |

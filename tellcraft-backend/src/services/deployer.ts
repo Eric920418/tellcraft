@@ -325,6 +325,20 @@ function sanitizeCodeForDeploy(code: GeneratedCode): SanitizeResult {
     fixes.push(`globals.css: 移除 Google Fonts @import`)
   }
 
+  // ── 修復 5: Tailwind v4 CSS 語法 → v3 相容 ──
+  if (/@theme\s*\{/.test(sanitized.styles) || /@import\s*["']tailwindcss/.test(sanitized.styles)) {
+    // @import "tailwindcss" 移除
+    sanitized.styles = sanitized.styles.replace(/@import\s*["']tailwindcss(?:\/[^"']*)?["']\s*;?\s*/g, '')
+    // @theme {} → :root {}
+    sanitized.styles = sanitized.styles.replace(/@theme\s*\{([^}]*(?:\{[^}]*\}[^}]*)*)\}/g, (_m, inner: string) => {
+      const trimmed = inner.trim()
+      return trimmed.length > 0 ? `:root {\n${trimmed}\n}` : ''
+    })
+    // @utility/@variant/@custom-variant 移除
+    sanitized.styles = sanitized.styles.replace(/@(?:utility|variant|custom-variant)\s+[\w-]+\s*\{[^}]*(?:\{[^}]*\}[^}]*)*\}/g, '')
+    fixes.push(`globals.css: 移除 Tailwind v4 語法（@theme/@import tailwindcss）`)
+  }
+
   // ── 注入 motion helper ──
   if (needsMotionHelper) {
     injectedFiles.push({
@@ -737,7 +751,20 @@ export default nextConfig
   // app/globals.css — Tailwind v3
   // 確保有 @tailwind 指令（LLM 可能已包含，也可能沒有）
   let stylesContent = code.styles
-    .replace(/@import\s*["']tailwindcss["']\s*;?\s*/g, '') // 移除 v4 語法
+    .replace(/@import\s*["']tailwindcss["']\s*;?\s*/g, '') // 移除 v4 @import 語法
+    .replace(/@import\s*["']tailwindcss\/[^"']*["']\s*;?\s*/g, '') // 移除 v4 子路徑 @import（如 tailwindcss/theme）
+
+  // 移除 Tailwind v4 的 @theme {} 區塊 → 轉換為 :root {}（保留 CSS 自訂屬性）
+  stylesContent = stylesContent.replace(/@theme\s*\{([^}]*(?:\{[^}]*\}[^}]*)*)\}/g, (_match, inner: string) => {
+    const trimmed = inner.trim()
+    if (trimmed.length === 0) return ''
+    // @theme 裡面的自訂屬性（--color-xxx: ...）轉到 :root
+    return `:root {\n${trimmed}\n}`
+  })
+
+  // 移除其他 Tailwind v4 指令（@utility, @variant, @custom-variant）
+  stylesContent = stylesContent.replace(/@(?:utility|variant|custom-variant)\s+[\w-]+\s*\{[^}]*(?:\{[^}]*\}[^}]*)*\}/g, '')
+
   const hasTailwindDirectives = stylesContent.includes('@tailwind base')
   const globalsCss = hasTailwindDirectives
     ? stylesContent
@@ -1402,6 +1429,36 @@ function parseBuildErrors(output: string): BuildError[] {
     }
   }
 
+  // Pattern 7: Webpack CSS/PostCSS 錯誤
+  // "Import trace for requested module:\n./app/globals.css" + "Build failed because of webpack errors"
+  if (output.includes('Build failed because of webpack errors')) {
+    // 嘗試從 Import trace 提取出問題 CSS 檔案
+    const cssTraceRegex = /Import trace for requested module:\s*\n\s*\.\/([^\n]+\.css)/g
+    while ((match = cssTraceRegex.exec(output)) !== null) {
+      const cssFile = match[1].trim()
+      const key = `webpack-css:${cssFile}`
+      if (!seen.has(key)) {
+        seen.add(key)
+        errors.push({
+          type: 'syntax',
+          file: cssFile,
+          message: `CSS/PostCSS 處理失敗: ${cssFile}（可能包含不支援的 Tailwind v4 語法如 @theme, @utility）`,
+        })
+      }
+    }
+    // 如果沒抓到具體檔案，至少報一個 webpack 錯誤
+    if (!errors.some(e => e.message.includes('CSS/PostCSS'))) {
+      const key = 'webpack:generic'
+      if (!seen.has(key)) {
+        seen.add(key)
+        errors.push({
+          type: 'syntax',
+          message: 'Build failed because of webpack errors（CSS 處理失敗）',
+        })
+      }
+    }
+  }
+
   return errors
 }
 
@@ -1489,6 +1546,12 @@ async function fixBuildErrors(
    - 動畫相關組件使用 \`motion/react\`（不是 framer-motion）
    - export 方式必須與 import 語句一致（named export 或 default export）
    - 組件必須包含 \`'use client'\` 如果使用了 hooks 或 motion
+9. **如果錯誤是 CSS/PostCSS 處理失敗**（webpack errors related to globals.css）：
+   - 移除所有 Tailwind v4 語法：\`@theme {}\`、\`@import "tailwindcss"\`、\`@utility\`、\`@variant\`
+   - 將 \`@theme { --color-xxx: ...; }\` 轉換為 \`:root { --color-xxx: ...; }\`
+   - 確保使用 Tailwind v3 指令：\`@tailwind base;\`、\`@tailwind components;\`、\`@tailwind utilities;\`
+   - \`@apply\` 語法可以保留（Tailwind v3 支援）
+   - 移除任何不合法的 CSS 語法
 
 ## Build 錯誤
 ${errorList}
