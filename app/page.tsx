@@ -1407,68 +1407,52 @@ function ChatSection({
     }
   }, [sessionInfo?.conversationId, lastTimestamp, lastUpdatedAt])
 
-  // 可靠的滾動到底部函數（用 scrollTop 取代 scrollIntoView 避免競態）
-  const scrollToBottom = useCallback((instant?: boolean) => {
+  // 直接滾動到底部（instant，不用 smooth，避免動畫期間目標過時）
+  const scrollToBottom = useCallback(() => {
     const container = chatScrollRef.current
     if (!container) return
     isProgrammaticScrollRef.current = true
-    if (instant) {
-      container.scrollTop = container.scrollHeight
-      // 延遲一幀再重置，確保 scroll event 不干擾
-      requestAnimationFrame(() => {
-        isProgrammaticScrollRef.current = false
-      })
-    } else {
-      container.scrollTo({ top: container.scrollHeight, behavior: 'smooth' })
-      // smooth scroll 完成後重置（用 scroll event idle 檢測代替固定 timeout）
-      let scrollTimer: NodeJS.Timeout | null = null
-      const onScrollEnd = () => {
-        if (scrollTimer) clearTimeout(scrollTimer)
-        scrollTimer = setTimeout(() => {
-          isProgrammaticScrollRef.current = false
-          container.removeEventListener('scroll', onScrollEnd)
-        }, 80)
-      }
-      container.addEventListener('scroll', onScrollEnd)
-      // 安全兜底：最多 1.5 秒後強制重置
-      setTimeout(() => {
-        isProgrammaticScrollRef.current = false
-        container.removeEventListener('scroll', onScrollEnd)
-      }, 1500)
-    }
+    container.scrollTop = container.scrollHeight
+    // 延遲重置 flag，避免 scroll event 誤判
+    setTimeout(() => {
+      isProgrammaticScrollRef.current = false
+    }, 50)
   }, [])
 
-  // 滾動到底部（只在用戶處於底部附近時才自動滾動）
+  // 消息變化時滾動到底部
   useEffect(() => {
     if (isNearBottomRef.current) {
+      // 立即滾一次
       scrollToBottom()
+      // 100ms 後再補滾一次（等 React 完成渲染 + markdown 解析）
+      const t1 = setTimeout(() => scrollToBottom(), 100)
+      // 350ms 後最後補滾（等 motion 動畫展開完成）
+      const t2 = setTimeout(() => scrollToBottom(), 350)
+      return () => { clearTimeout(t1); clearTimeout(t2) }
     }
   }, [messages, typingStage, scrollToBottom])
 
-  // 監聽聊天容器內容高度變化（motion 動畫、richContent 延遲渲染）自動補滾
+  // 監聽聊天內容高度變化（motion 動畫、richContent 異步渲染）自動補滾
   useEffect(() => {
     const container = chatScrollRef.current
     if (!container) return
-    const observer = new ResizeObserver(() => {
+    let rafId: number
+    const observer = new MutationObserver(() => {
       if (isNearBottomRef.current) {
-        // 內容高度變了且用戶在底部附近 → 補滾到底
-        const distFromBottom = container.scrollHeight - container.scrollTop - container.clientHeight
-        if (distFromBottom > 2) {
-          isProgrammaticScrollRef.current = true
-          container.scrollTop = container.scrollHeight
-          requestAnimationFrame(() => {
-            isProgrammaticScrollRef.current = false
-          })
-        }
+        cancelAnimationFrame(rafId)
+        rafId = requestAnimationFrame(() => {
+          const dist = container.scrollHeight - container.scrollTop - container.clientHeight
+          if (dist > 1) {
+            isProgrammaticScrollRef.current = true
+            container.scrollTop = container.scrollHeight
+            setTimeout(() => { isProgrammaticScrollRef.current = false }, 50)
+          }
+        })
       }
     })
-    // 觀察內容容器（chatScrollRef 的第一個子元素）
-    const content = container.firstElementChild
-    if (content) {
-      observer.observe(content)
-    }
-    return () => observer.disconnect()
-  }, [])
+    observer.observe(container, { childList: true, subtree: true, attributes: true, attributeFilter: ['style'] })
+    return () => { observer.disconnect(); cancelAnimationFrame(rafId) }
+  }, [messages]) // messages 變化時重新掛載 observer，確保 container 存在
 
   // 處理滾動事件，判斷用戶是否在底部附近
   const handleChatScroll = useCallback(() => {
@@ -1478,7 +1462,7 @@ function ChatSection({
     const container = chatScrollRef.current
     if (!container) return
 
-    // 閾值放寬到 150px（部署消息等大組件插入時距離會瞬間變大）
+    // 閾值 150px（部署消息等大組件插入時距離會瞬間變大）
     const threshold = 150
     const distanceFromBottom = container.scrollHeight - container.scrollTop - container.clientHeight
     isNearBottomRef.current = distanceFromBottom < threshold

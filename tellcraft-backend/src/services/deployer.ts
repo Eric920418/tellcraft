@@ -1012,7 +1012,6 @@ async function disableDeploymentProtection(projectName: string): Promise<void> {
       body: JSON.stringify({
         ssoProtection: null,
         passwordProtection: null,
-        vercelAuthentication: { deploymentType: 'none' },
       }),
     })
 
