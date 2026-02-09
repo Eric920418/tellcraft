@@ -16,24 +16,24 @@ interface QuickRepliesProps {
 
 const styles: Record<string, React.CSSProperties> = {
   primary: {
-    background: 'var(--gray-900)',
-    color: '#fff',
-    border: '1px solid var(--gray-900)',
+    background: 'var(--black)',
+    color: 'var(--white)',
+    border: '1px solid var(--black)',
   },
   secondary: {
-    background: 'var(--background)',
-    color: 'var(--foreground)',
+    background: 'var(--white)',
+    color: 'var(--text-primary)',
     border: '1px solid var(--gray-300)',
   },
   ghost: {
-    background: 'var(--background)',
-    color: 'var(--foreground)',
+    background: 'var(--white)',
+    color: 'var(--text-primary)',
     border: '1px solid var(--gray-200)',
   },
 }
 
 const hoverStyles: Record<string, React.CSSProperties> = {
-  primary: { background: 'var(--gray-800)' },
+  primary: { background: 'var(--gray-600)' },
   secondary: { background: 'var(--gray-50)' },
   ghost: { background: 'var(--gray-50)' },
 }
@@ -55,10 +55,10 @@ export default function QuickReplies({ replies, onSelect, disabled }: QuickRepli
             disabled={disabled}
             style={{
               ...styles[variant],
-              padding: '8px 14px',
+              padding: variant === 'primary' ? '10px 20px' : '8px 14px',
               borderRadius: 4,
-              fontSize: 13,
-              fontWeight: 500,
+              fontSize: variant === 'primary' ? 14 : 13,
+              fontWeight: variant === 'primary' ? 600 : 500,
               cursor: disabled ? 'not-allowed' : 'pointer',
               opacity: disabled ? 0.5 : 1,
               maxWidth: 320,

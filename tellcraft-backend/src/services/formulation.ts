@@ -179,6 +179,7 @@ ${decisions || '（無額外決策）'}`
     const jsonMatch = response.content?.match(/```json\s*([\s\S]*?)\s*```/) ||
                       response.content?.match(/\{[\s\S]*\}/)
     if (!jsonMatch) {
+      console.error('[Formulation] Schema LLM 回應無法解析為 JSON，原始回應前 500 字:', response.content?.substring(0, 500))
       return { success: false, error: '無法解析 LLM 回應' }
     }
 
@@ -192,6 +193,7 @@ ${decisions || '（無額外決策）'}`
       entityMapping: parsed.entityMapping,
     }
   } catch (err) {
+    console.error('[Formulation] Schema JSON 解析失敗:', err, '原始回應前 500 字:', response.content?.substring(0, 500))
     return { success: false, error: `解析回應時發生錯誤: ${err}` }
   }
 }
@@ -295,6 +297,7 @@ ${decisions || '（無額外決策）'}`
     const jsonMatch = response.content?.match(/```json\s*([\s\S]*?)\s*```/) ||
                       response.content?.match(/\{[\s\S]*\}/)
     if (!jsonMatch) {
+      console.error('[Formulation] Features LLM 回應無法解析為 JSON，原始回應前 500 字:', response.content?.substring(0, 500))
       return { success: false, error: '無法解析 LLM 回應' }
     }
 
@@ -638,6 +641,7 @@ ${decisions}` : ''}`
     const jsonMatch = response.content?.match(/```json\s*([\s\S]*?)\s*```/) ||
                       response.content?.match(/\{[\s\S]*\}/)
     if (!jsonMatch) {
+      console.error('[Formulation] Fix LLM 回應無法解析為 JSON，原始回應前 500 字:', response.content?.substring(0, 500))
       return { success: false, error: '無法解析 LLM 回應' }
     }
 

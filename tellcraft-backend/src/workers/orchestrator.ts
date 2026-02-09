@@ -1337,28 +1337,47 @@ async function finishClarifyAndStartFormulation(
 
   console.log(`[Orchestrator] 開始 Formulation，共 ${allResolvedItems.length} 個釐清項目`)
 
-  // 執行 Formulation
-  const result = await runFormulation(
+  // 執行 Formulation（失敗自動重試 1 次）
+  const formulationProgressCallback = async (step: string, current: number, total: number, detail?: string) => {
+    io.to(`conversation:${conversationId}`).emit('progress', {
+      stage: 'formulation',
+      step,
+      current,
+      total,
+      detail,
+    })
+  }
+
+  let result = await runFormulation(
     session.data.originalRequirements,
     allResolvedItems,
     session.data.projectContext || undefined,
-    async (step, current, total, detail) => {
-      // 推送進度更新
-      io.to(`conversation:${conversationId}`).emit('progress', {
-        stage: 'formulation',
-        step,
-        current,
-        total,
-        detail,
-      })
-    },
-    { conversationId }  // 追蹤上下文
+    formulationProgressCallback,
+    { conversationId }
   )
+
+  // LLM 偶發性回應格式錯誤時自動重試 1 次
+  if (!result.success && result.error?.includes('無法解析 LLM 回應')) {
+    console.warn('[Orchestrator] Formulation 解析失敗，自動重試...')
+    result = await runFormulation(
+      session.data.originalRequirements,
+      allResolvedItems,
+      session.data.projectContext || undefined,
+      formulationProgressCallback,
+      { conversationId }
+    )
+  }
 
   if (!result.success) {
     console.error('[Orchestrator] Formulation 失敗:', result.error)
+
+    // 回退 phase 到 spec_clarify，讓用戶可以重試
+    state.phase = 'spec_clarify'
+    state.waitingForReply = true
+    await saveFlowState(redis, conversationId, state)
+
     await sendMessage(conversationId, io, {
-      content: `規格產出失敗：${result.error}`,
+      content: `規格產出失敗：${result.error}\n\n請輸入「重試」重新產出規格，或繼續描述需求。`,
       stage: 'error',
     })
 
