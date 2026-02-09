@@ -61,7 +61,7 @@ git pull && pnpm build && pm2 restart tellcraft-backend
 | **Quality Gate** | `tellcraft-backend/src/services/quality-gate.ts` | A11y/Performance/CodeQuality 靜態檢查 + LLM 自動修復 |
 | **Deployer** | `tellcraft-backend/src/services/deployer.ts` | sanitize → build 驗證 → Vercel 部署 → 回滾 |
 | **Fast Build** | `tellcraft-backend/src/services/fast-build-generation.ts` | 快速模式輔助：tier 偵測、產品推斷、默認 DesignSystem（零 LLM） |
-| **TSX→HTML** | `app/lib/tsx-to-preview.ts` | UIUX 預覽核心，TSX 轉瀏覽器可渲染 HTML（iframe） |
+| **Sandpack 預覽** | `app/lib/sandpack-utils.ts` + `app/components/uiux/SandpackPreview.tsx` | UIUX 預覽核心，Sandpack 真實 React 渲染（取代 regex TSX→HTML） |
 | **VPS API Client** | `app/lib/vps-api.ts` | 前端呼叫 VPS 的 HTTP 客戶端 |
 | **WebSocket Hook** | `app/hooks/useVpsWebSocket.ts` | 即時訊息推送（型別定義） |
 
@@ -122,7 +122,7 @@ Discovery（Path A 問卷 / Path B 模板）
 - **完成後完全複用**：`handleDesignIteration`、`executeDeployerSkill`、`handleDeployRollback`
 
 - **Design Tier**：`functional`（dashboard/SaaS，禁漸層/glow）vs `creative`（landing page，允許大膽設計）
-- **串流預覽**：生成時 Socket.io `preview_update` 即時推送，前端 `convertToPreviewHtmlSafe()` 容錯渲染
+- **串流預覽**：生成時 Socket.io `preview_update` 即時推送，前端 Sandpack 增量更新（`useSandpack().sandpack.updateFile()`）
 - **Variant 概念**：`VariantConcept` 注入所有生成 prompt，確保創意方向一致
 
 ### Deployer Pipeline

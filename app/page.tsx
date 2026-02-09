@@ -30,8 +30,13 @@ import PreviewPanel from './components/uiux/PreviewPanel'
 import DeviceSwitcher, { type DeviceType, getDeviceWidth } from './components/uiux/DeviceSwitcher'
 import TemplatePicker from './components/uiux/TemplatePicker'
 import QuickReplies from './components/QuickReplies'
-import { convertToPreviewHtml, convertToPreviewHtmlSafe, injectStreamingAnimation } from './lib/tsx-to-preview'
 import type { StreamingPreview } from './hooks/useVpsWebSocket'
+import dynamic from 'next/dynamic'
+
+const SandpackPreviewComponent = dynamic(
+  () => import('./components/uiux/SandpackPreview'),
+  { ssr: false, loading: () => <div style={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--gray-50)' }}><p style={{ color: 'var(--gray-400)', fontSize: 14 }}>載入預覽環境...</p></div> }
+)
 import { getTemplateById } from './actions/templates'
 import type { Template } from './lib/templates'
 
@@ -2198,21 +2203,13 @@ function ChatSection({
       const componentsData = (activeData.components || []) as { path: string; content: string; description: string }[]
       const stylesData = (activeData.styles || '') as string
       const tailwindConfigData = (activeData.tailwindConfig || '') as string
-      // 響應式渲染：iframe 寬度 = 容器實際寬度（或裝置限制寬度），RWD 自然觸發
+      // 響應式渲染：容器寬度用於設備切換的外層限制
       const containerW = codePreviewContainerWidth > 0 ? codePreviewContainerWidth : 800
       const maxDeviceWidth = getDeviceWidth(codePreviewDevice)
-      const iframeWidth = codePreviewDevice === 'desktop' ? containerW : Math.min(maxDeviceWidth, containerW)
+      const previewWidth = codePreviewDevice === 'desktop' ? containerW : Math.min(maxDeviceWidth, containerW)
 
-      // Streaming 時使用 safe wrapper（partial code 可能導致轉換失敗）
-      const previewHtml = isStreaming
-        ? (() => {
-            const html = convertToPreviewHtmlSafe(pagesData, componentsData, stylesData, tailwindConfigData)
-            return html ? injectStreamingAnimation(html) : null
-          })()
-        : convertToPreviewHtml(pagesData, componentsData, stylesData, tailwindConfigData)
-
-      // Streaming 但轉換失敗 → 等待更多內容
-      if (isStreaming && !previewHtml) {
+      // Streaming 但還沒有任何頁面檔案 → 等待更多內容
+      if (isStreaming && pagesData.length === 0) {
         return (
           <div style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
             <div
@@ -2271,10 +2268,10 @@ function ChatSection({
             )}
             {!isStreaming && <DeviceSwitcher activeDevice={codePreviewDevice} onDeviceChange={setCodePreviewDevice} />}
             <span style={{ fontSize: 11, color: 'var(--gray-400)', fontFamily: 'var(--font-mono)', width: 50, textAlign: 'right' }}>
-              {iframeWidth}px
+              {previewWidth}px
             </span>
           </div>
-          {/* 預覽區域 */}
+          {/* Sandpack 預覽區域 */}
           <div
             ref={codePreviewContainerRef}
             style={{
@@ -2288,7 +2285,7 @@ function ChatSection({
           >
             <div
               style={{
-                width: codePreviewDevice === 'desktop' ? '100%' : iframeWidth,
+                width: codePreviewDevice === 'desktop' ? '100%' : previewWidth,
                 height: '100%',
                 borderRadius: codePreviewDevice === 'desktop' ? 0 : 8,
                 boxShadow: codePreviewDevice === 'desktop' ? 'none' : '0 8px 32px rgba(0,0,0,0.12), 0 2px 8px rgba(0,0,0,0.08)',
@@ -2296,16 +2293,12 @@ function ChatSection({
                 overflow: 'hidden',
               }}
             >
-              <iframe
-                srcDoc={previewHtml || ''}
-                style={{
-                  width: '100%',
-                  height: '100%',
-                  border: 'none',
-                  display: 'block',
-                }}
-                sandbox="allow-scripts"
-                title="設計預覽"
+              <SandpackPreviewComponent
+                pages={pagesData}
+                components={componentsData}
+                styles={stylesData}
+                tailwindConfig={tailwindConfigData}
+                isStreaming={isStreaming}
               />
             </div>
           </div>

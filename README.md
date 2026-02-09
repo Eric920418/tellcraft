@@ -81,33 +81,24 @@ UIUX Implementation 三階段（Structure → Animation → RWD）完成後自�
 
 ### Code Preview 即時渲染（2026-02-06）
 
-UIUX Implementation 階段生成的 React TSX 代碼，自動轉換為 standalone HTML 並在右側預覽面板用 iframe 即時渲染。支援桌面/平板/手機三種裝置切換，自動縮放適配容器寬度。
+UIUX Implementation 階段生成的 React TSX 代碼，透過 Sandpack（`@codesandbox/sandpack-react`）在瀏覽器內用真實 React bundler 渲染。支援桌面/平板/手機三種裝置切換。
 
-**轉換邏輯** (`app/lib/tsx-to-preview.ts`)：
-1. 提取 main page 的 return JSX（字串/註解感知的括號配對）
-2. 內聯組件引用（Header、Card 等），支援 prop 替換
-3. 移除未解析的 PascalCase React 組件 + Fragment
-4. 轉換 JSX → HTML（className→class、motion.X→X、移除動畫/事件 props）
-5. 深度計數式 `{...}` 表達式移除（處理巢狀 map/ternary/template literals）
-6. 最終文字內容淨化（移除 `)}`, `=>`, `&&` 等 JS 語法殘留）
-7. 注入 Tailwind CDN + generated CSS + Google Fonts
+**Sandpack 預覽架構**（取代原有 1105 行 regex TSX→HTML 轉換器）：
+- `app/lib/sandpack-utils.ts`：檔案路徑映射 + import 重寫 + Next.js shim + 依賴掃描 + 差異比對
+- `app/components/uiux/SandpackPreview.tsx`：Sandpack wrapper，支援 streaming 增量更新（`useSandpack().sandpack.updateFile()`）
+- `app/page.tsx`：`renderPreviewPanel()` 使用 `dynamic(() => import(...), { ssr: false })` 懶載入 Sandpack
 
-**核心改動**：
-- `app/lib/tsx-to-preview.ts`：TSX → HTML 轉換工具（多層防禦：組件移除 → 表達式移除 → 文字淨化）
-- `app/page.tsx`：`renderPreviewPanel()` 檢測 `code_preview` richContent，含 DeviceSwitcher + 自動縮放 iframe
-
-**組件 Default Props 提取（2026-02-06）**：
-生成的 React 組件（如 `AnimatedCard`、`AnimatedButton`）在函數簽名中帶有預設值（`{ className = 'card' }`），轉換器必須正確提取這些預設值並在內聯時替換，否則 `className={className}` 會被動態表達式移除邏輯清掉，導致元素失去樣式。
-- `extractDefaultProps()`：解析組件函數簽名中的預設值
-- `substituteProps()`：屬性值加引號（`="${value}"`），文字內容不加
-- `{...props}` spread 解析：展開 usage 上的 string-valued props
+**比起舊 regex 轉換器的改進**：
+- 動畫真實渲染（motion/react 在 Sandpack 內真正執行）
+- 事件處理正確綁定（onClick、useState 等不再被 strip）
+- 組件模組解析精確（Sandpack 原生模組系統，不需 regex 內聯）
+- 錯誤可見（Sandpack 顯示具體編譯錯誤，不再靜默失敗）
 
 **RWD 響應式安全網（2026-02-06）**：
-`generateRwd()` LLM 經常不產出 Tailwind 響應式前綴（sm:/md:/lg:），導致預覽始終顯示桌面版佈局。前後端雙層安全網自動注入基本響應式 class：
+`generateRwd()` LLM 經常不產出 Tailwind 響應式前綴（sm:/md:/lg:），後端安全網自動注入基本響應式 class：
 - 後端：`ensureResponsiveClasses()`（`uiux-generation.ts`）— 在 `generateRwd()` 解析後檢測，無響應式 class 時注入
-- 前端：`addBasicResponsive()`（`tsx-to-preview.ts`）— 在 `convertToPreviewHtml()` 步驟 6-7 間檢測注入
+- 預覽端：Sandpack 使用 Tailwind CDN JIT，響應式 class 自動生效
 - 模式：`grid-cols-3` → `grid-cols-1 md:grid-cols-3`、`text-3xl` → `text-xl md:text-3xl` 等
-- 用 `(?<!:)` 負向後查避免雙重處理已有前綴的 class
 
 ### 串流實時預覽（2026-02-08）
 
@@ -132,7 +123,7 @@ UIUX 代碼生成時，右側預覽面板不再等完整生成後才顯示，而
 - `tellcraft-backend/src/services/uiux-generation.ts`：`callClaude` 加 `onTextDelta`、新增 `parseCompletedFileBlocks`、三函數加 `onPartialCode`
 - `tellcraft-backend/src/workers/orchestrator.ts`：`makeStreamingCallback` 存 Redis + emit Socket.io
 - `tellcraft-backend/src/routes/conversation.ts`：messages 端點返回 `streamingPreview`（從 Redis 讀取）
-- `app/lib/tsx-to-preview.ts`：新增 `convertToPreviewHtmlSafe` + `injectStreamingAnimation`
+- `app/components/uiux/SandpackPreview.tsx`：Sandpack 增量更新（`useSandpack().sandpack.updateFile()`），取代舊 regex 轉換器
 - `app/page.tsx`：透過 HTTP 輪詢取得 streaming preview（不再用獨立 WebSocket 連接）
 
 ### Classifier 分層防禦 + 智慧引導（2026-02-08）
