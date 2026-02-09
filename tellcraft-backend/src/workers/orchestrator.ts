@@ -1220,10 +1220,6 @@ async function sendClarifyQuestion(
       quickReplies.push({ label, value: letter, style: 'ghost' })
     })
   }
-  if (index > 0) {
-    quickReplies.push({ label: '完成釐清', value: '完成釐清', style: 'secondary' })
-  }
-
   await sendMessage(conversationId, io, {
     content: text,
     stage: 'clarify_question',
