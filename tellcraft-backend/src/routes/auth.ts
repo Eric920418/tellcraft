@@ -273,15 +273,14 @@ router.post('/google/exchange', async (req, res) => {
       return res.status(400).json({ error: 'Missing redirectUri' })
     }
 
-    // 解析 state
+    // 驗證 state 簽名（CSRF 防護）
     let returnTo = '/'
     if (state && typeof state === 'string') {
-      try {
-        const stateData = JSON.parse(Buffer.from(state, 'base64').toString())
-        returnTo = stateData.returnTo || '/'
-      } catch {
-        // ignore
+      const stateData = verifyState(state)
+      if (!stateData) {
+        return res.status(400).json({ error: 'invalid_state' })
       }
+      returnTo = (stateData.returnTo as string) || '/'
     }
 
     // 換取 access token（使用 Vercel 提供的 redirectUri）
@@ -492,15 +491,14 @@ router.post('/line/exchange', async (req, res) => {
       return res.status(400).json({ error: 'Missing redirectUri' })
     }
 
-    // 解析 state
+    // 驗證 state 簽名（CSRF 防護）
     let returnTo = '/'
     if (state && typeof state === 'string') {
-      try {
-        const stateData = JSON.parse(Buffer.from(state, 'base64').toString())
-        returnTo = stateData.returnTo || '/'
-      } catch {
-        // ignore
+      const stateData = verifyState(state)
+      if (!stateData) {
+        return res.status(400).json({ error: 'invalid_state' })
       }
+      returnTo = (stateData.returnTo as string) || '/'
     }
 
     // 換取 access token（使用 Vercel 提供的 redirectUri）
