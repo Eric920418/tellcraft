@@ -202,6 +202,17 @@ function rewriteImports(content: string, filePath: string): string {
     "from 'motion/react'"
   )
 
+  // globals.css → styles.css（因為 app/globals.css 映射到 /styles.css）
+  result = result.replace(
+    /import\s+['"]\.\/globals\.css['"]\s*;?\s*\n?/g,
+    ''  // 移除，因為 entry /index.tsx 已經 import './styles.css'
+  )
+
+  // 移除所有剩餘的 next / next/* import（type import、bare import 等）
+  // 已經由 shim 處理的（next/image, next/link, next/navigation）在上面已轉換
+  result = result.replace(/import\s+(?:type\s+)?\{[^}]*\}\s*from\s*['"]next['"]\s*;?\s*\n?/g, '')
+  result = result.replace(/import\s+(?:type\s+)?\w+\s+from\s*['"]next['"]\s*;?\s*\n?/g, '')
+
   // @/ alias → 相對路徑
   // 計算當前檔案的目錄深度來決定相對路徑前綴
   const depth = filePath.split('/').length - 1
@@ -211,8 +222,9 @@ function rewriteImports(content: string, filePath: string): string {
     (_, p) => `from '${prefix}${p}'`
   )
 
-  // 移除其他 next/* import（next/head, next/script 等）
-  result = result.replace(/import\s+.*\s+from\s+['"]next\/(?:head|script|dynamic)['"]\s*;?\s*\n?/g, '')
+  // 移除所有未被 shim 處理的 next/* import（next/head, next/script, next/dynamic 等）
+  // shim 已處理：next/image, next/link, next/navigation, next/font/google
+  result = result.replace(/import\s+(?:type\s+)?.*\s+from\s+['"]next\/(?!image|link|navigation|font)[^'"]*['"]\s*;?\s*\n?/g, '')
 
   return result
 }
