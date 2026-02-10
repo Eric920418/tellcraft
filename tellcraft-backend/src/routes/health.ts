@@ -5,6 +5,7 @@ import * as fsPromises from 'fs/promises'
 import { testConnection, pool } from '../db/client'
 import { getLlmConcurrencyStats } from '../services/uiux-generation'
 import { getDeployConcurrencyStats } from '../services/deployer'
+import { requireAdmin } from '../middleware/auth'
 
 const router: RouterType = Router()
 
@@ -80,7 +81,7 @@ router.get('/stats', async (_req, res) => {
  * POST /health/cleanup-tmp
  * 手動清理孤兒 build 目錄（超過 30 分鐘的）
  */
-router.post('/cleanup-tmp', async (_req, res) => {
+router.post('/cleanup-tmp', requireAdmin, async (_req, res) => {
   try {
     const tmpDir = os.tmpdir()
     const entries = await fsPromises.readdir(tmpDir)

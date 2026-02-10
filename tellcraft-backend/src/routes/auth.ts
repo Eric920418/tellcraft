@@ -1,12 +1,23 @@
 import { Router, type Router as RouterType } from 'express'
 import jwt from 'jsonwebtoken'
+import crypto from 'crypto'
+import Redis from 'ioredis'
 import * as db from '../db/client'
 
 const router: RouterType = Router()
 
 // JWT 配置
-const JWT_SECRET = process.env.JWT_SECRET || 'tellcraft-jwt-secret-change-in-production'
+if (!process.env.JWT_SECRET) {
+  throw new Error('CRITICAL: JWT_SECRET environment variable is not set!')
+}
+const JWT_SECRET: string = process.env.JWT_SECRET
 const JWT_EXPIRES_IN = '7d'
+
+// Redis client（由 index.ts 注入，用於 token 黑名單）
+let redisClient: Redis | null = null
+export function setAuthRedisClient(redis: Redis) {
+  redisClient = redis
+}
 
 // OAuth 配置
 const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID
@@ -16,6 +27,49 @@ const LINE_CHANNEL_SECRET = process.env.LINE_CHANNEL_SECRET
 
 const APP_URL = process.env.APP_URL || 'https://tellcraft.com'
 const API_URL = process.env.API_URL || 'http://54.238.4.117:8080'
+
+// Callback Host 白名單
+const ALLOWED_CALLBACK_HOSTS = (process.env.ALLOWED_CALLBACK_HOSTS || 'https://tellcraft.com').split(',').map(h => h.trim())
+
+function isAllowedCallbackHost(host: string): boolean {
+  return ALLOWED_CALLBACK_HOSTS.some(allowed => host === allowed)
+}
+
+// OAuth State 簽名（防 CSRF）
+function signState(data: Record<string, unknown>): string {
+  const payload = Buffer.from(JSON.stringify(data)).toString('base64')
+  const signature = crypto.createHmac('sha256', JWT_SECRET).update(payload).digest('hex')
+  return `${payload}.${signature}`
+}
+
+function verifyState(state: string): Record<string, unknown> | null {
+  const parts = state.split('.')
+  if (parts.length !== 2) return null
+  const [payload, signature] = parts
+  const expected = crypto.createHmac('sha256', JWT_SECRET).update(payload).digest('hex')
+  // timingSafeEqual 防時序攻擊
+  if (!crypto.timingSafeEqual(Buffer.from(signature, 'hex'), Buffer.from(expected, 'hex'))) {
+    return null
+  }
+  try {
+    return JSON.parse(Buffer.from(payload, 'base64').toString())
+  } catch {
+    return null
+  }
+}
+
+// Token 黑名單
+async function blacklistToken(token: string): Promise<void> {
+  if (!redisClient) return
+  // TTL = 7 天（匹配 JWT 過期時間）
+  await redisClient.set(`token:blacklist:${token}`, '1', 'EX', 7 * 24 * 60 * 60)
+}
+
+async function isTokenBlacklisted(token: string): Promise<boolean> {
+  if (!redisClient) return false
+  const result = await redisClient.get(`token:blacklist:${token}`)
+  return result === '1'
+}
 
 // ============================================================
 // 輔助函數
@@ -95,17 +149,21 @@ router.get('/google', (req, res) => {
     return res.status(500).json({ error: 'Google OAuth not configured' })
   }
 
-  // 如果有 callbackHost，使用 Vercel 作為 callback（解決 Google 不允許 IP 的問題）
+  // 如果有 callbackHost，驗證白名單
   const callbackHost = req.query.callbackHost as string | undefined
+  if (callbackHost && !isAllowedCallbackHost(callbackHost)) {
+    return res.status(400).json({ error: 'Invalid callback host' })
+  }
+
   const redirectUri = callbackHost
     ? `${callbackHost}/api/auth/google/callback`
     : `${API_URL}/auth/google/callback`
 
   const scope = encodeURIComponent('openid email profile')
-  const state = Buffer.from(JSON.stringify({
+  const state = signState({
     returnTo: req.query.returnTo || '/',
     callbackHost: callbackHost || null,
-  })).toString('base64')
+  })
 
   const authUrl = `https://accounts.google.com/o/oauth2/v2/auth?` +
     `client_id=${GOOGLE_CLIENT_ID}` +
@@ -131,15 +189,16 @@ router.get('/google/callback', async (req, res) => {
       return res.redirect(`${APP_URL}/auth/login?error=missing_code`)
     }
 
-    // 解析 state
+    // 驗證 state 簽名
     let returnTo = '/'
     if (state && typeof state === 'string') {
-      try {
-        const stateData = JSON.parse(Buffer.from(state, 'base64').toString())
-        returnTo = stateData.returnTo || '/'
-      } catch {
-        // ignore
+      const stateData = verifyState(state)
+      if (!stateData) {
+        return res.redirect(`${APP_URL}/auth/login?error=invalid_state`)
       }
+      returnTo = (stateData.returnTo as string) || '/'
+    } else {
+      return res.redirect(`${APP_URL}/auth/login?error=missing_state`)
     }
 
     // 換取 access token
@@ -190,8 +249,8 @@ router.get('/google/callback', async (req, res) => {
     // 生成 JWT
     const token = generateToken(user)
 
-    // 重定向到前端，帶上 token
-    res.redirect(`${APP_URL}/auth/callback?token=${token}&returnTo=${encodeURIComponent(returnTo)}`)
+    // 重定向到前端，用 hash fragment（不進 server log / Referer）
+    res.redirect(`${APP_URL}/auth/callback#token=${token}&returnTo=${encodeURIComponent(returnTo)}`)
   } catch (error) {
     console.error('[Auth] Google callback error:', error)
     res.redirect(`${APP_URL}/auth/login?error=callback_failed`)
@@ -296,17 +355,21 @@ router.get('/line', (req, res) => {
     return res.status(500).json({ error: 'LINE OAuth not configured' })
   }
 
-  // 如果有 callbackHost，使用 Vercel 作為 callback
+  // 如果有 callbackHost，驗證白名單
   const callbackHost = req.query.callbackHost as string | undefined
+  if (callbackHost && !isAllowedCallbackHost(callbackHost)) {
+    return res.status(400).json({ error: 'Invalid callback host' })
+  }
+
   const redirectUri = callbackHost
     ? `${callbackHost}/api/auth/line/callback`
     : `${API_URL}/auth/line/callback`
 
   const scope = encodeURIComponent('profile openid email')
-  const state = Buffer.from(JSON.stringify({
+  const state = signState({
     returnTo: req.query.returnTo || '/',
     callbackHost: callbackHost || null,
-  })).toString('base64')
+  })
 
   const authUrl = `https://access.line.me/oauth2/v2.1/authorize?` +
     `response_type=code` +
@@ -330,15 +393,16 @@ router.get('/line/callback', async (req, res) => {
       return res.redirect(`${APP_URL}/auth/login?error=missing_code`)
     }
 
-    // 解析 state
+    // 驗證 state 簽名
     let returnTo = '/'
     if (state && typeof state === 'string') {
-      try {
-        const stateData = JSON.parse(Buffer.from(state, 'base64').toString())
-        returnTo = stateData.returnTo || '/'
-      } catch {
-        // ignore
+      const stateData = verifyState(state)
+      if (!stateData) {
+        return res.redirect(`${APP_URL}/auth/login?error=invalid_state`)
       }
+      returnTo = (stateData.returnTo as string) || '/'
+    } else {
+      return res.redirect(`${APP_URL}/auth/login?error=missing_state`)
     }
 
     // 換取 access token
@@ -404,8 +468,8 @@ router.get('/line/callback', async (req, res) => {
     // 生成 JWT
     const token = generateToken(user)
 
-    // 重定向到前端，帶上 token
-    res.redirect(`${APP_URL}/auth/callback?token=${token}&returnTo=${encodeURIComponent(returnTo)}`)
+    // 重定向到前端，用 hash fragment（不進 server log / Referer）
+    res.redirect(`${APP_URL}/auth/callback#token=${token}&returnTo=${encodeURIComponent(returnTo)}`)
   } catch (error) {
     console.error('[Auth] LINE callback error:', error)
     res.redirect(`${APP_URL}/auth/login?error=callback_failed`)
@@ -528,6 +592,11 @@ router.get('/me', async (req, res) => {
 
     const token = authHeader.replace('Bearer ', '')
 
+    // 黑名單檢查
+    if (await isTokenBlacklisted(token)) {
+      return res.status(401).json({ error: 'Token has been revoked' })
+    }
+
     try {
       const payload = jwt.verify(token, JWT_SECRET) as { sub: string; email: string; name?: string }
 
@@ -580,12 +649,26 @@ router.post('/refresh', async (req, res) => {
 
     const token = authHeader.replace('Bearer ', '')
 
+    // 黑名單檢查
+    if (await isTokenBlacklisted(token)) {
+      return res.status(401).json({ error: 'Token has been revoked' })
+    }
+
     try {
       // 即使 token 過期也嘗試解析（ignoreExpiration）
       const payload = jwt.verify(token, JWT_SECRET, { ignoreExpiration: true }) as {
         sub: string
         email: string
         name?: string
+        iat?: number
+      }
+
+      // 最大年齡限制：超過 24 小時的 token 不可刷新
+      if (payload.iat) {
+        const tokenAge = Math.floor(Date.now() / 1000) - payload.iat
+        if (tokenAge > 24 * 60 * 60) {
+          return res.status(401).json({ error: 'Token too old to refresh, please re-login' })
+        }
       }
 
       // 查詢用戶確認存在
@@ -620,10 +703,18 @@ router.post('/refresh', async (req, res) => {
  * POST /auth/logout
  * 登出（純 JWT 模式下主要是前端清除 token）
  */
-router.post('/logout', (_req, res) => {
-  // 純 JWT 模式下，登出主要由前端清除 token
-  // 如果需要 token 黑名單，可以在這裡實作
-  res.json({ success: true })
+router.post('/logout', async (req, res) => {
+  try {
+    const authHeader = req.headers.authorization
+    if (authHeader?.startsWith('Bearer ')) {
+      const token = authHeader.replace('Bearer ', '')
+      await blacklistToken(token)
+    }
+    res.json({ success: true })
+  } catch (error) {
+    console.error('[Auth] logout error:', error)
+    res.json({ success: true }) // 登出不應失敗
+  }
 })
 
 export default router

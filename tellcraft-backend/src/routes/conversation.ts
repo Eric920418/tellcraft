@@ -59,6 +59,26 @@ router.post('/:id/message', optionalAuth, async (req, res) => {
       return res.status(404).json({ error: 'Conversation not found' })
     }
 
+    // 所有權驗證
+    const project = await db.queryOne<{ user_id: string }>(
+      'SELECT user_id FROM projects WHERE id = $1',
+      [conversation.project_id]
+    )
+    if (project && project.user_id !== userId) {
+      // 檢查匿名用戶
+      const ownerUser = await db.queryOne<{ email: string }>(
+        'SELECT email FROM users WHERE id = $1',
+        [project.user_id]
+      )
+      const callerUser = await db.queryOne<{ email: string }>(
+        'SELECT email FROM users WHERE id = $1',
+        [userId]
+      )
+      if (ownerUser?.email !== callerUser?.email) {
+        return res.status(403).json({ error: 'Access denied' })
+      }
+    }
+
     // 新增用戶消息到 DB
     const messageId = crypto.randomUUID()
     const newMessage = {
@@ -142,6 +162,25 @@ router.post('/:id/reply', optionalAuth, async (req, res) => {
       return res.status(404).json({ error: 'Conversation not found' })
     }
 
+    // 所有權驗證
+    const project = await db.queryOne<{ user_id: string }>(
+      'SELECT user_id FROM projects WHERE id = $1',
+      [conversation.project_id]
+    )
+    if (project && project.user_id !== userId) {
+      const ownerUser = await db.queryOne<{ email: string }>(
+        'SELECT email FROM users WHERE id = $1',
+        [project.user_id]
+      )
+      const callerUser = await db.queryOne<{ email: string }>(
+        'SELECT email FROM users WHERE id = $1',
+        [userId]
+      )
+      if (ownerUser?.email !== callerUser?.email) {
+        return res.status(403).json({ error: 'Access denied' })
+      }
+    }
+
     // 新增用戶消息到 DB
     const messageId = crypto.randomUUID()
     const newMessage = {
@@ -185,7 +224,7 @@ router.post('/:id/reply', optionalAuth, async (req, res) => {
  * GET /api/conversation/:id/messages
  * 取得對話消息（輪詢用）
  */
-router.get('/:id/messages', optionalAuth, async (req, res) => {
+router.get('/:id/messages', requireAuth, async (req, res) => {
   try {
     const { id: conversationId } = req.params
     const { lastUpdatedAt } = req.query
@@ -194,6 +233,15 @@ router.get('/:id/messages', optionalAuth, async (req, res) => {
     const conversation = await db.getConversation(conversationId)
     if (!conversation) {
       return res.status(404).json({ error: 'Conversation not found' })
+    }
+
+    // 所有權驗證
+    const project = await db.queryOne<{ user_id: string }>(
+      'SELECT user_id FROM projects WHERE id = $1',
+      [conversation.project_id]
+    )
+    if (project && req.user && project.user_id !== req.user.id) {
+      return res.status(403).json({ error: 'Access denied' })
     }
 
     // 讀取 streaming preview（如果有的話）

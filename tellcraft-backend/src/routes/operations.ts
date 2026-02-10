@@ -4,7 +4,7 @@
  */
 import { Router, Request, Response } from 'express'
 import { query, queryOne, queryMany, transaction } from '../db/client'
-import { optionalAuth, requireAuth } from '../middleware/auth'
+import { requireAuth } from '../middleware/auth'
 import crypto from 'crypto'
 
 const router: Router = Router()
@@ -68,7 +68,7 @@ router.post('/generations', requireAuth, async (req: Request, res: Response) => 
  * GET /api/operations/generations/:projectId/latest
  * 獲取專案最新生成記錄
  */
-router.get('/generations/:projectId/latest', optionalAuth, async (req: Request, res: Response) => {
+router.get('/generations/:projectId/latest', requireAuth, async (req: Request, res: Response) => {
   try {
     const { projectId } = req.params
 
@@ -251,7 +251,7 @@ router.patch('/tasks/:id', requireAuth, async (req: Request, res: Response) => {
  * GET /api/operations/tasks/:id
  * 獲取任務詳情
  */
-router.get('/tasks/:id', optionalAuth, async (req: Request, res: Response) => {
+router.get('/tasks/:id', requireAuth, async (req: Request, res: Response) => {
   try {
     const { id } = req.params
 
@@ -524,7 +524,7 @@ router.post('/tasks/:id/retry', requireAuth, async (req: Request, res: Response)
  * GET /api/operations/conversations/:id/messages
  * 獲取對話消息（含任務狀態）
  */
-router.get('/conversations/:id/messages', optionalAuth, async (req: Request, res: Response) => {
+router.get('/conversations/:id/messages', requireAuth, async (req: Request, res: Response) => {
   try {
     const { id } = req.params
     const { lastUpdatedAt } = req.query as { lastUpdatedAt?: string }
@@ -594,7 +594,7 @@ router.get('/conversations/:id/messages', optionalAuth, async (req: Request, res
  * POST /api/operations/conversations/:id/messages
  * 添加對話消息
  */
-router.post('/conversations/:id/messages', optionalAuth, async (req: Request, res: Response) => {
+router.post('/conversations/:id/messages', requireAuth, async (req: Request, res: Response) => {
   try {
     const { id } = req.params
     const { role, content, stage, progress } = req.body

@@ -2,6 +2,18 @@ import { NextRequest, NextResponse } from 'next/server'
 
 const VPS_API_URL = process.env.VPS_API_URL || 'http://54.238.4.117:8080'
 
+// 路徑驗證白名單
+const ALLOWED_PATH_PREFIXES = ['/api/', '/auth/', '/health']
+
+function validateProxyPath(targetPath: string): boolean {
+  // 拒絕路徑遍歷
+  if (targetPath.includes('..') || targetPath.includes('//')) {
+    return false
+  }
+  // 白名單路徑前綴
+  return ALLOWED_PATH_PREFIXES.some(prefix => targetPath.startsWith(prefix))
+}
+
 /**
  * VPS API 代理
  * 解決 Mixed Content 問題（HTTPS -> HTTP）
@@ -13,6 +25,10 @@ export async function GET(
 ) {
   const { path } = await params
   const targetPath = '/' + path.join('/')
+
+  if (!validateProxyPath(targetPath)) {
+    return NextResponse.json({ error: 'Invalid proxy path' }, { status: 400 })
+  }
   const url = new URL(request.url)
   const queryString = url.search
 
@@ -40,6 +56,10 @@ export async function POST(
   const { path } = await params
   const targetPath = '/' + path.join('/')
 
+  if (!validateProxyPath(targetPath)) {
+    return NextResponse.json({ error: 'Invalid proxy path' }, { status: 400 })
+  }
+
   try {
     const body = await request.json()
     const response = await fetch(`${VPS_API_URL}${targetPath}`, {
@@ -66,6 +86,10 @@ export async function PUT(
   const { path } = await params
   const targetPath = '/' + path.join('/')
 
+  if (!validateProxyPath(targetPath)) {
+    return NextResponse.json({ error: 'Invalid proxy path' }, { status: 400 })
+  }
+
   try {
     const body = await request.json()
     const response = await fetch(`${VPS_API_URL}${targetPath}`, {
@@ -91,6 +115,10 @@ export async function DELETE(
 ) {
   const { path } = await params
   const targetPath = '/' + path.join('/')
+
+  if (!validateProxyPath(targetPath)) {
+    return NextResponse.json({ error: 'Invalid proxy path' }, { status: 400 })
+  }
 
   try {
     const response = await fetch(`${VPS_API_URL}${targetPath}`, {

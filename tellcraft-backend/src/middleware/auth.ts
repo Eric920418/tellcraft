@@ -1,9 +1,25 @@
 import { Request, Response, NextFunction } from 'express'
 import jwt from 'jsonwebtoken'
-import { getUser } from '../db/client'
+import Redis from 'ioredis'
+import { getUser, queryOne } from '../db/client'
 
 // JWT 配置
-const JWT_SECRET = process.env.JWT_SECRET || 'tellcraft-jwt-secret-change-in-production'
+if (!process.env.JWT_SECRET) {
+  throw new Error('CRITICAL: JWT_SECRET environment variable is not set!')
+}
+const JWT_SECRET: string = process.env.JWT_SECRET
+
+// Redis client（由 index.ts 注入，用於 token 黑名單）
+let redisClient: Redis | null = null
+export function setMiddlewareRedisClient(redis: Redis) {
+  redisClient = redis
+}
+
+async function isTokenBlacklisted(token: string): Promise<boolean> {
+  if (!redisClient) return false
+  const result = await redisClient.get(`token:blacklist:${token}`)
+  return result === '1'
+}
 
 // ============================================================
 // 類型擴展
@@ -65,6 +81,12 @@ export async function requireAuth(
     }
 
     const token = authHeader.replace('Bearer ', '')
+
+    // 黑名單檢查
+    if (await isTokenBlacklisted(token)) {
+      res.status(401).json({ error: 'Token has been revoked' })
+      return
+    }
 
     // 驗證 JWT
     const payload = verifyToken(token)
@@ -176,4 +198,39 @@ export function requirePlan(...allowedPlans: string[]) {
 
     next()
   }
+}
+
+/**
+ * 管理員認證中間件
+ * 先驗證 JWT，再查 DB is_admin
+ */
+export async function requireAdmin(
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  // 先跑 requireAuth
+  await requireAuth(req, res, async () => {
+    try {
+      if (!req.user) {
+        res.status(401).json({ error: 'Authentication required' })
+        return
+      }
+
+      const adminCheck = await queryOne<{ is_admin: boolean }>(
+        'SELECT is_admin FROM users WHERE id = $1',
+        [req.user.id]
+      )
+
+      if (!adminCheck?.is_admin) {
+        res.status(403).json({ error: '無管理員權限' })
+        return
+      }
+
+      next()
+    } catch (error) {
+      console.error('[Auth] requireAdmin error:', error)
+      res.status(500).json({ error: 'Admin check failed' })
+    }
+  })
 }

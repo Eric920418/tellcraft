@@ -240,26 +240,9 @@ router.post('/initialize', optionalAuth, async (req: Request, res: Response) => 
  * GET /api/session/conversations
  * 獲取用戶的對話列表
  */
-router.get('/conversations', optionalAuth, async (req: Request, res: Response) => {
+router.get('/conversations', requireAuth, async (req: Request, res: Response) => {
   try {
-    const { anonymousId } = req.query as { anonymousId?: string }
-
-    let userId: string | undefined
-
-    if (req.user) {
-      userId = req.user.id
-    } else if (anonymousId) {
-      const anonEmail = `anon_${anonymousId}@tellcraft.local`
-      const user = await queryOne<{ id: string }>(
-        'SELECT id FROM users WHERE email = $1',
-        [anonEmail]
-      )
-      userId = user?.id
-    }
-
-    if (!userId) {
-      return res.json({ conversations: [] })
-    }
+    const userId = req.user!.id
 
     const result = await query<{
       id: string
@@ -299,26 +282,9 @@ router.get('/conversations', optionalAuth, async (req: Request, res: Response) =
  * GET /api/session/project-reminder
  * 獲取專案提醒（橫幅顯示）
  */
-router.get('/project-reminder', optionalAuth, async (req: Request, res: Response) => {
+router.get('/project-reminder', requireAuth, async (req: Request, res: Response) => {
   try {
-    const { anonymousId } = req.query as { anonymousId?: string }
-
-    let userId: string | undefined
-
-    if (req.user) {
-      userId = req.user.id
-    } else if (anonymousId) {
-      const anonEmail = `anon_${anonymousId}@tellcraft.local`
-      const user = await queryOne<{ id: string }>(
-        'SELECT id FROM users WHERE email = $1',
-        [anonEmail]
-      )
-      userId = user?.id
-    }
-
-    if (!userId) {
-      return res.json({ reminder: null })
-    }
+    const userId = req.user!.id
 
     // 查找最近的專案
     const project = await queryOne<{

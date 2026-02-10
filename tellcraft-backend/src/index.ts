@@ -5,6 +5,9 @@ import { Server as SocketIOServer } from 'socket.io'
 import { Queue } from 'bullmq'
 import Redis from 'ioredis'
 import cors from 'cors'
+import helmet from 'helmet'
+import rateLimit from 'express-rate-limit'
+import jwt from 'jsonwebtoken'
 import * as os from 'os'
 import * as path from 'path'
 import * as fsPromises from 'fs/promises'
@@ -21,6 +24,8 @@ import userRoutes from './routes/user'
 import templatesRoutes from './routes/templates'
 import bddRoutes from './routes/bdd'
 import operationsRoutes from './routes/operations'
+import { setAuthRedisClient } from './routes/auth'
+import { setMiddlewareRedisClient } from './middleware/auth'
 
 // ============================================================
 // 環境變數
@@ -37,10 +42,25 @@ const CORS_ORIGIN = process.env.CORS_ORIGIN || 'https://tellcraft.com'
 const app = express()
 const server = createServer(app)
 
+// 安全標頭
+app.use(helmet({
+  contentSecurityPolicy: false,
+  crossOriginEmbedderPolicy: false,
+}))
+
 // CORS 配置
 app.use(cors({
   origin: CORS_ORIGIN.split(','),
   credentials: true,
+}))
+
+// 全域 Rate Limiting
+app.use(rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 分鐘
+  max: 300,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many requests, please try again later' },
 }))
 
 app.use(express.json({ limit: '50mb' }))
@@ -61,13 +81,89 @@ const io = new SocketIOServer(server, {
   connectTimeout: 30000,
 })
 
-io.on('connection', (socket) => {
-  console.log(`[Socket] 連接: ${socket.id}`)
+// Socket.io 認證中間件
+const JWT_SECRET = process.env.JWT_SECRET
+if (!JWT_SECRET) {
+  throw new Error('CRITICAL: JWT_SECRET environment variable is not set!')
+}
 
-  // 訂閱對話
-  socket.on('subscribe', (conversationId: string) => {
-    socket.join(`conversation:${conversationId}`)
-    console.log(`[Socket] ${socket.id} 訂閱對話: ${conversationId}`)
+io.use((socket, next) => {
+  const token = socket.handshake.auth?.token
+  const anonymousId = socket.handshake.auth?.anonymousId
+
+  if (token) {
+    try {
+      const payload = jwt.verify(token, JWT_SECRET) as { sub: string }
+      socket.data.userId = payload.sub
+      return next()
+    } catch {
+      return next(new Error('Invalid token'))
+    }
+  }
+
+  if (anonymousId && typeof anonymousId === 'string') {
+    socket.data.anonymousId = anonymousId
+    return next()
+  }
+
+  return next(new Error('Authentication required'))
+})
+
+io.on('connection', (socket) => {
+  console.log(`[Socket] 連接: ${socket.id} (user: ${socket.data.userId || 'anon:' + socket.data.anonymousId})`)
+
+  // 訂閱對話（含所有權驗證）
+  socket.on('subscribe', async (conversationId: string) => {
+    try {
+      // 查 conversation → project → user_id
+      const conv = await import('./db/client').then(db =>
+        db.queryOne<{ project_id: string }>(
+          'SELECT project_id FROM conversations WHERE id = $1',
+          [conversationId]
+        )
+      )
+      if (!conv) {
+        socket.emit('error', { message: 'Conversation not found' })
+        return
+      }
+
+      const project = await import('./db/client').then(db =>
+        db.queryOne<{ user_id: string }>(
+          'SELECT user_id FROM projects WHERE id = $1',
+          [conv.project_id]
+        )
+      )
+      if (!project) {
+        socket.emit('error', { message: 'Project not found' })
+        return
+      }
+
+      // 驗證所有權
+      if (socket.data.userId) {
+        if (project.user_id !== socket.data.userId) {
+          socket.emit('error', { message: 'Access denied' })
+          return
+        }
+      } else if (socket.data.anonymousId) {
+        // 匿名用戶：查 user email 是否匹配 anonymousId
+        const user = await import('./db/client').then(db =>
+          db.queryOne<{ email: string }>(
+            'SELECT email FROM users WHERE id = $1',
+            [project.user_id]
+          )
+        )
+        if (!user || user.email !== `anon_${socket.data.anonymousId}@tellcraft.local`) {
+          socket.emit('error', { message: 'Access denied' })
+          return
+        }
+      }
+
+      socket.join(`conversation:${conversationId}`)
+      console.log(`[Socket] ${socket.id} 訂閱對話: ${conversationId}`)
+    } catch (err) {
+      console.error('[Socket] subscribe error:', err)
+      socket.emit('error', { message: 'Subscribe failed' })
+    }
   })
 
   // 取消訂閱
@@ -124,6 +220,10 @@ const orchestratorQueue = new Queue('orchestrator', {
 setOrchestratorQueue(orchestratorQueue)
 setRedisClient(redis)
 
+// 設置 Redis 到認證模組（用於 token 黑名單）
+setAuthRedisClient(redis)
+setMiddlewareRedisClient(redis)
+
 // 創建 Worker
 const orchestratorWorker = createOrchestratorWorker(redis, io)
 
@@ -132,7 +232,16 @@ const orchestratorWorker = createOrchestratorWorker(redis, io)
 // ============================================================
 
 app.use('/health', healthRoutes)
-app.use('/auth', authRoutes)
+
+// 認證端點 stricter rate limiting
+const authRateLimit = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 20,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many auth requests, please try again later' },
+})
+app.use('/auth', authRateLimit, authRoutes)
 app.use('/api/conversation', conversationRoutes)
 app.use('/api/project', projectRoutes)
 app.use('/api/dashboard', dashboardRoutes)

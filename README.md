@@ -1428,16 +1428,29 @@ Hero → 往下滾動 → 產品介紹（SEO 友好）→ Testimonials → CTA
 
 ### Skill 整合狀態
 
-| Skill | 狀態 | 說明 |
-|-------|------|------|
-| `bdd-spec` | ✅ 完成 | 完整 5 階段流程：PRD Discovery/Clarify → Formulation → Spec Discovery/Clarify → Actions Design → ISA Config |
-| `coder` | ⏳ 開發中 | 後端 API 生成，待開發完成後與 uiux 並行執行 |
-| `uiux` | 🧪 可測試 | 3 階段前端設計流程（Design Discovery → Design Lab → Implementation）+ 雙軌 Discovery（有想法→4步釐清 / 沒想法→模板選擇）+ Design Brief 確認（AI 設計顧問總結+建議+Design Tier推薦，最多3輪調整）+ Design Tier（functional/creative 約束集切換）+ Supabase Storage 儲存 |
-| `deployer` | ✅ 完成 | UIUX 完成後用戶觸發，將生成代碼包裝成 Next.js 部署到 Vercel。部署前自動預檢修復（framer-motion→motion/react、缺少 'use client'、motion spread props 類型衝突、Google Fonts 移除、Tailwind v4→v3 CSS 語法轉換（@theme→:root、@import tailwindcss 移除）、自動掃描補充第三方依賴、檔案間引用檢查）+ Tailwind content 路徑完整覆蓋所有目錄（app/components/lib/hooks/utils/types/context/stores/data/config，避免 class purge）+ 本地 Build 驗證（VPS 上建臨時 Next.js 專案跑 `next build`，失敗則 LLM Haiku 自動修復代碼——支援生成缺失的 @/ 內部組件檔案和 CSS/webpack 錯誤修復，最多 3 輪，全失敗才降級 `ignoreBuildErrors` 部署）。支援對話內迭代（部署後可直接修改設計再重新部署，循環不限次）和 Vercel 部署回滾（查看部署歷史、選版本回滾）|
-| `domain-manager` | ✅ 完成 | 網域管理入口，支援三種選擇 |
-| `domain-purchase` | ✅ 完成 | Porkbun 網域註冊 |
-| `domain-dns` | ✅ 完成 | Cloudflare Zone + Vercel 綁定 |
-| `quality-gate` | ✅ 完成 | UIUX Implementation 完成後自動觸發，靜態檢查 A11y/Performance/Code Quality，critical 問題用 LLM 自動修復（最多 3 輪） |
+| Skill | 狀態 | 觸發方式 | LLM 模型 | 說明 |
+|-------|------|---------|---------|------|
+| `bdd-spec` | ✅ 完成 | Classifier 直接觸發 | Sonnet | 完整 5 階段：PRD Discovery/Clarify → Formulation → Spec Discovery/Clarify（上限 30 題，6 輪） |
+| `uiux` | ✅ 完成 | BDD 完成後狀態機自動進入 | Sonnet | 3 階段：Design Discovery → Design Lab → Implementation。雙軌 Discovery + Design Brief 確認 + Design Tier + Variant 概念注入 |
+| `quality-gate` | ✅ 完成 | UIUX RWD 完成後自動觸發 | Haiku（修復） | 靜態檢查 A11y/Performance/Code Quality，critical 問題 LLM 自動修復（最多 3 輪） |
+| `fast-build` | ✅ 完成 | 前端 mode=fast 跳過 Classifier | Sonnet（3 次） | 一句話 → 規則式推斷 → Structure → Animation → RWD → 靜態 QG → 60-90 秒出結果 |
+| `deployer` | ✅ 完成 | Classifier 直接觸發 | Haiku（build 修復） | sanitize 預檢 + 本地 Build 驗證（最多 3 輪 LLM 修復）+ Vercel 部署 + 對話內迭代 + 版本回滾 |
+| `coder` | ❌ 未實作 | Classifier 能識別但無處理邏輯 | — | 僅 Registry 定義，orchestrator 回「尚未實現」 |
+| `domain-manager` | ⚠️ 前端獨立 | Classifier 能識別但未接入 Orchestrator | — | 前端 Server Actions 有完整實作（`app/actions/domain.ts`），但未整合到 Orchestrator 狀態機 |
+| `domain-purchase` | ⚠️ 前端獨立 | 同上 | — | Porkbun API 整合在 `app/actions/porkbun.ts`，未接入 Orchestrator |
+| `domain-dns` | ⚠️ 前端獨立 | 同上 | — | Cloudflare API 整合在 `app/actions/cloudflare.ts`，未接入 Orchestrator |
+
+### 內部 Service 層
+
+| Service | LLM 模型 | 調用者 | 職責 |
+|---------|---------|--------|------|
+| `classifier.ts` | Haiku | 每條新訊息 | 意圖分類（規則式 + LLM）。設計類關鍵詞自動導向 bdd-spec |
+| `prefilter.ts` | 無 | 每條訊息（最先） | 空訊息/長度/Prompt Injection/Rate Limit 檢查 |
+| `bdd-to-ui-spec.ts` | Haiku | UIUX Pipeline 內部 | ISA BDD Feature Files → `UIRequirementsSpec`（結構化 UI 需求），快取在 FlowState |
+| `prd-discovery.ts` | Sonnet | bdd-spec Skill | PRD 需求發掘（多輪） |
+| `spec-discovery.ts` | Sonnet | bdd-spec Skill | 規格品質檢查（S1-S6 六類問題） |
+| `formulation.ts` | Sonnet（5 次） | bdd-spec Skill | 生成 Schema + Features + EntityMapping + Actions + ISA |
+| `fast-build-generation.ts` | 無 | fast-build Skill | 規則式 tier 偵測/產品推斷/預設 DesignSystem（零 LLM） |
 
 ### BDD Spec Skill 完整流程
 
@@ -1447,7 +1460,7 @@ BDD Spec Skill 實現完整的 5 階段規格產出流程，使用 `bdd_sessions
 Phase 1: PRD Discovery + Clarify（多輪動態釐清）
     ↓ 使用 A1-A6, B1-B5, C1-C2, D1-D2 檢查清單掃描
     ↓ 每輪最多 5 題，每 5 題批量確認（支援反悔修改）
-    ↓ 回答後 LLM 根據答案動態生成追問（最多 3 輪 / 15 題）
+    ↓ 回答後 LLM 根據答案動態生成追問（最多 6 輪 / 30 題）
     ↓ 無新問題或達到上限後進入下一階段
 
 Phase 2: Formulation（一個 API = 一個 Feature）
@@ -1911,6 +1924,24 @@ pnpm dev
 - 前端：http://localhost:3000
 - 後端：http://localhost:3100
 - 測試頁面：http://localhost:3000/test
+
+## 安全設置
+
+### 必要環境變數
+- **`JWT_SECRET`**（前後端皆需）：JWT 簽名金鑰，啟動時未設置會直接報錯。**禁止使用 fallback 值**。
+- **`ALLOWED_CALLBACK_HOSTS`**（後端）：OAuth callback 白名單，逗號分隔（預設 `https://tellcraft.com`）
+
+### 安全機制
+- **Helmet + CORS**：所有 HTTP 回應自動加入安全標頭
+- **Rate Limiting**：全域 300 req/15min，認證端點 20 req/15min
+- **Socket.io 認證**：連接時驗證 JWT token 或 anonymousId，subscribe 時驗證對話所有權
+- **OAuth State 簽名**：HMAC-SHA256 防 CSRF，token 透過 URL hash fragment 傳遞（不進 server log）
+- **Token 黑名單**：登出後 token 加入 Redis 黑名單（7 天 TTL），所有認證端點檢查
+- **Token Refresh 限制**：超過 24 小時的 token 不可刷新
+- **IDOR 防護**：conversation/session API 加入所有權驗證，BDD/operations 強制登入
+- **requireAdmin 中間件**：admin 路由統一走 DB `is_admin` 查詢，SQL ORDER BY 使用白名單映射
+- **路徑遍歷防護**：deployer `writeFilesToTempDir` 驗證 `path.resolve` 不逃逸；VPS proxy 白名單路徑前綴
+- **匿名用戶範圍**：只允許 session/initialize + 發送消息，其餘操作需登入
 
 ## UI 元件
 

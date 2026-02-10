@@ -13,9 +13,25 @@ function AuthCallbackContent() {
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
-    const token = searchParams.get('token')
-    const returnTo = searchParams.get('returnTo') || '/'
-    const errorParam = searchParams.get('error')
+    // 優先從 hash fragment 讀（更安全），fallback 到 query param（向後相容）
+    let token: string | null = null
+    let returnTo = '/'
+    let errorParam: string | null = null
+
+    // 嘗試解析 hash fragment
+    if (typeof window !== 'undefined' && window.location.hash) {
+      const hashParams = new URLSearchParams(window.location.hash.substring(1))
+      token = hashParams.get('token')
+      returnTo = hashParams.get('returnTo') || '/'
+    }
+
+    // Fallback 到 query params
+    if (!token) {
+      token = searchParams.get('token')
+      returnTo = searchParams.get('returnTo') || returnTo || '/'
+    }
+
+    errorParam = searchParams.get('error')
 
     if (errorParam) {
       setError(getErrorMessage(errorParam))
@@ -25,6 +41,11 @@ function AuthCallbackContent() {
     if (!token) {
       setError('未收到認證 token')
       return
+    }
+
+    // 清除 hash fragment（避免 token 留在 URL 中）
+    if (window.location.hash) {
+      window.history.replaceState(null, '', window.location.pathname)
     }
 
     // 儲存 token 到 localStorage（供 useAuth hook 使用）

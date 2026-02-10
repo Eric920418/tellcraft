@@ -4,7 +4,7 @@
  */
 import { Router, Request, Response } from 'express'
 import { query, queryOne } from '../db/client'
-import { optionalAuth, requireAuth } from '../middleware/auth'
+import { requireAuth } from '../middleware/auth'
 import crypto from 'crypto'
 
 const router: Router = Router()
@@ -88,7 +88,7 @@ function rowToSession(row: any): BddSession {
  * POST /api/bdd/session
  * 創建 BDD Session
  */
-router.post('/session', optionalAuth, async (req: Request, res: Response) => {
+router.post('/session', requireAuth, async (req: Request, res: Response) => {
   try {
     const {
       conversationId,
@@ -152,7 +152,7 @@ router.post('/session', optionalAuth, async (req: Request, res: Response) => {
  * GET /api/bdd/session/:id
  * 獲取 BDD Session
  */
-router.get('/session/:id', optionalAuth, async (req: Request, res: Response) => {
+router.get('/session/:id', requireAuth, async (req: Request, res: Response) => {
   try {
     const { id } = req.params
 
@@ -176,7 +176,7 @@ router.get('/session/:id', optionalAuth, async (req: Request, res: Response) => 
  * GET /api/bdd/session/by-conversation/:conversationId
  * 根據對話 ID 獲取 BDD Session
  */
-router.get('/session/by-conversation/:conversationId', optionalAuth, async (req: Request, res: Response) => {
+router.get('/session/by-conversation/:conversationId', requireAuth, async (req: Request, res: Response) => {
   try {
     const { conversationId } = req.params
 
@@ -202,7 +202,7 @@ router.get('/session/by-conversation/:conversationId', optionalAuth, async (req:
  * GET /api/bdd/session/by-project/:projectId
  * 根據專案 ID 獲取 BDD Session
  */
-router.get('/session/by-project/:projectId', optionalAuth, async (req: Request, res: Response) => {
+router.get('/session/by-project/:projectId', requireAuth, async (req: Request, res: Response) => {
   try {
     const { projectId } = req.params
 
@@ -228,7 +228,7 @@ router.get('/session/by-project/:projectId', optionalAuth, async (req: Request, 
  * PATCH /api/bdd/session/:id
  * 更新 BDD Session
  */
-router.patch('/session/:id', optionalAuth, async (req: Request, res: Response) => {
+router.patch('/session/:id', requireAuth, async (req: Request, res: Response) => {
   try {
     const { id } = req.params
     const updates = req.body as Partial<{
@@ -308,7 +308,7 @@ router.patch('/session/:id', optionalAuth, async (req: Request, res: Response) =
  * POST /api/bdd/session/:id/answer
  * 回答釐清項目
  */
-router.post('/session/:id/answer', optionalAuth, async (req: Request, res: Response) => {
+router.post('/session/:id/answer', requireAuth, async (req: Request, res: Response) => {
   try {
     const { id } = req.params
     const { itemId, answer } = req.body as { itemId: string; answer: string }
@@ -364,7 +364,7 @@ router.post('/session/:id/answer', optionalAuth, async (req: Request, res: Respo
  * POST /api/bdd/session/:id/confirm
  * 批次確認項目
  */
-router.post('/session/:id/confirm', optionalAuth, async (req: Request, res: Response) => {
+router.post('/session/:id/confirm', requireAuth, async (req: Request, res: Response) => {
   try {
     const { id } = req.params
     const { itemIds, answers } = req.body as { itemIds: string[]; answers: Record<string, string> }
@@ -419,7 +419,7 @@ router.post('/session/:id/confirm', optionalAuth, async (req: Request, res: Resp
  * POST /api/bdd/session/:id/revert
  * 撤銷回答
  */
-router.post('/session/:id/revert', optionalAuth, async (req: Request, res: Response) => {
+router.post('/session/:id/revert', requireAuth, async (req: Request, res: Response) => {
   try {
     const { id } = req.params
     const { itemId } = req.body as { itemId: string }
@@ -474,7 +474,7 @@ router.post('/session/:id/revert', optionalAuth, async (req: Request, res: Respo
  * POST /api/bdd/session/:id/skip
  * 跳過項目
  */
-router.post('/session/:id/skip', optionalAuth, async (req: Request, res: Response) => {
+router.post('/session/:id/skip', requireAuth, async (req: Request, res: Response) => {
   try {
     const { id } = req.params
     const { itemId } = req.body as { itemId: string }
@@ -519,7 +519,7 @@ router.post('/session/:id/skip', optionalAuth, async (req: Request, res: Respons
  * POST /api/bdd/session/:id/items
  * 新增釐清項目
  */
-router.post('/session/:id/items', optionalAuth, async (req: Request, res: Response) => {
+router.post('/session/:id/items', requireAuth, async (req: Request, res: Response) => {
   try {
     const { id } = req.params
     const { items } = req.body as { items: Omit<ClarifyItem, 'id' | 'status' | 'createdAt'>[] }
@@ -568,7 +568,7 @@ router.post('/session/:id/items', optionalAuth, async (req: Request, res: Respon
  * GET /api/bdd/session/:id/current
  * 獲取當前釐清項目
  */
-router.get('/session/:id/current', optionalAuth, async (req: Request, res: Response) => {
+router.get('/session/:id/current', requireAuth, async (req: Request, res: Response) => {
   try {
     const { id } = req.params
 
@@ -599,7 +599,7 @@ router.get('/session/:id/current', optionalAuth, async (req: Request, res: Respo
  * GET /api/bdd/session/:id/progress
  * 獲取進度
  */
-router.get('/session/:id/progress', optionalAuth, async (req: Request, res: Response) => {
+router.get('/session/:id/progress', requireAuth, async (req: Request, res: Response) => {
   try {
     const { id } = req.params
 

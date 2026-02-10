@@ -1263,11 +1263,27 @@ function isSourceFile(filePath: string): boolean {
 }
 
 /**
+ * 路徑遍歷防護：確保解析後的路徑在目標目錄內
+ */
+function validateFilePath(dir: string, filePath: string): string {
+  // 拒絕含 .. 的路徑
+  if (filePath.includes('..')) {
+    throw new Error(`Path traversal detected: ${filePath}`)
+  }
+  const resolvedDir = path.resolve(dir)
+  const resolvedPath = path.resolve(dir, filePath)
+  if (!resolvedPath.startsWith(resolvedDir + path.sep) && resolvedPath !== resolvedDir) {
+    throw new Error(`Path traversal detected: ${filePath} resolves outside ${dir}`)
+  }
+  return resolvedPath
+}
+
+/**
  * 將 VercelFile[] 完整寫入磁碟目錄
  */
 async function writeFilesToTempDir(dir: string, files: VercelFile[]): Promise<void> {
   for (const f of files) {
-    const fullPath = path.join(dir, f.file)
+    const fullPath = validateFilePath(dir, f.file)
     await fsPromises.mkdir(path.dirname(fullPath), { recursive: true })
     await fsPromises.writeFile(fullPath, f.data, 'utf-8')
   }
@@ -1279,7 +1295,7 @@ async function writeFilesToTempDir(dir: string, files: VercelFile[]): Promise<vo
 async function writeSourceFilesOnly(dir: string, files: VercelFile[]): Promise<void> {
   for (const f of files) {
     if (isSourceFile(f.file)) {
-      const fullPath = path.join(dir, f.file)
+      const fullPath = validateFilePath(dir, f.file)
       await fsPromises.mkdir(path.dirname(fullPath), { recursive: true })
       await fsPromises.writeFile(fullPath, f.data, 'utf-8')
     }

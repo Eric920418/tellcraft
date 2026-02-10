@@ -4,7 +4,7 @@
  */
 import { Router, Request, Response } from 'express'
 import { query, queryOne } from '../db/client'
-import { requireAuth } from '../middleware/auth'
+import { requireAuth, requireAdmin } from '../middleware/auth'
 
 const router: Router = Router()
 
@@ -122,18 +122,8 @@ router.get('/stats', requireAuth, async (req, res) => {
  * GET /api/dashboard/admin/stats
  * 管理員統計數據
  */
-router.get('/admin/stats', requireAuth, async (req, res) => {
+router.get('/admin/stats', requireAdmin, async (req, res) => {
   try {
-    // 檢查是否為管理員
-    const adminCheck = await queryOne<{ is_admin: boolean }>(
-      'SELECT is_admin FROM users WHERE id = $1',
-      [req.user!.id]
-    )
-
-    if (!adminCheck?.is_admin) {
-      return res.status(403).json({ error: '無管理員權限' })
-    }
-
     const [
       usersCount,
       projectsCount,
@@ -182,18 +172,8 @@ router.get('/admin/stats', requireAuth, async (req, res) => {
  * GET /api/dashboard/admin/usage
  * LLM 用量統計
  */
-router.get('/admin/usage', requireAuth, async (req, res) => {
+router.get('/admin/usage', requireAdmin, async (req, res) => {
   try {
-    // 檢查是否為管理員
-    const adminCheck = await queryOne<{ is_admin: boolean }>(
-      'SELECT is_admin FROM users WHERE id = $1',
-      [req.user!.id]
-    )
-
-    if (!adminCheck?.is_admin) {
-      return res.status(403).json({ error: '無管理員權限' })
-    }
-
     const { startDate, endDate, groupBy = 'day' } = req.query as {
       startDate?: string
       endDate?: string
@@ -296,18 +276,8 @@ router.get('/admin/usage', requireAuth, async (req, res) => {
  * GET /api/dashboard/admin/users
  * 獲取所有用戶列表（管理員專用）
  */
-router.get('/admin/users', requireAuth, async (req, res) => {
+router.get('/admin/users', requireAdmin, async (req, res) => {
   try {
-    // 檢查是否為管理員
-    const adminCheck = await queryOne<{ is_admin: boolean }>(
-      'SELECT is_admin FROM users WHERE id = $1',
-      [req.user!.id]
-    )
-
-    if (!adminCheck?.is_admin) {
-      return res.status(403).json({ error: '無管理員權限' })
-    }
-
     const { page = '1', pageSize = '20', sortBy = 'created_at', sortOrder = 'desc', search } = req.query as {
       page?: string
       pageSize?: string
@@ -368,7 +338,7 @@ router.get('/admin/users', requireAuth, async (req, res) => {
        LEFT JOIN projects p ON p.user_id = u.id
        ${whereClause}
        GROUP BY u.id
-       ORDER BY ${sortField === 'project_count' ? 'project_count' : 'u.' + sortField} ${order}
+       ORDER BY ${sortField === 'project_count' ? 'project_count' : `u.${sortField}`} ${order}
        LIMIT $${params.length + 1} OFFSET $${params.length + 2}`,
       [...params, limit, offset]
     )
@@ -396,18 +366,8 @@ router.get('/admin/users', requireAuth, async (req, res) => {
  * GET /api/dashboard/admin/logs
  * 獲取審計日誌（管理員專用）
  */
-router.get('/admin/logs', requireAuth, async (req, res) => {
+router.get('/admin/logs', requireAdmin, async (req, res) => {
   try {
-    // 檢查是否為管理員
-    const adminCheck = await queryOne<{ is_admin: boolean }>(
-      'SELECT is_admin FROM users WHERE id = $1',
-      [req.user!.id]
-    )
-
-    if (!adminCheck?.is_admin) {
-      return res.status(403).json({ error: '無管理員權限' })
-    }
-
     const { page = '1', pageSize = '50', action, startDate, endDate } = req.query as {
       page?: string
       pageSize?: string
@@ -494,18 +454,8 @@ router.get('/admin/logs', requireAuth, async (req, res) => {
  * GET /api/dashboard/admin/users/:userId
  * 獲取單一用戶詳情
  */
-router.get('/admin/users/:userId', requireAuth, async (req, res) => {
+router.get('/admin/users/:userId', requireAdmin, async (req, res) => {
   try {
-    // 檢查是否為管理員
-    const adminCheck = await queryOne<{ is_admin: boolean }>(
-      'SELECT is_admin FROM users WHERE id = $1',
-      [req.user!.id]
-    )
-
-    if (!adminCheck?.is_admin) {
-      return res.status(403).json({ error: '無管理員權限' })
-    }
-
     const { userId } = req.params
 
     // 獲取用戶基本資料
@@ -611,18 +561,8 @@ router.get('/admin/users/:userId', requireAuth, async (req, res) => {
  * GET /api/dashboard/admin/projects
  * 獲取所有專案列表（管理員專用）
  */
-router.get('/admin/projects', requireAuth, async (req, res) => {
+router.get('/admin/projects', requireAdmin, async (req, res) => {
   try {
-    // 檢查是否為管理員
-    const adminCheck = await queryOne<{ is_admin: boolean }>(
-      'SELECT is_admin FROM users WHERE id = $1',
-      [req.user!.id]
-    )
-
-    if (!adminCheck?.is_admin) {
-      return res.status(403).json({ error: '無管理員權限' })
-    }
-
     const { page = '1', pageSize = '20', sortBy = 'created_at', sortOrder = 'desc', search, status, userId } = req.query as {
       page?: string
       pageSize?: string
@@ -705,6 +645,7 @@ router.get('/admin/projects', requireAuth, async (req, res) => {
        GROUP BY p.id, u.email
        ORDER BY p.${sortField} ${order}
        LIMIT $${paramIndex} OFFSET $${paramIndex + 1}`,
+      // Note: sortField comes from allowedSortFields whitelist, order from ternary - no SQL injection
       [...params, limit, offset]
     )
 
@@ -731,18 +672,8 @@ router.get('/admin/projects', requireAuth, async (req, res) => {
  * GET /api/dashboard/admin/conversations
  * 獲取所有對話列表（管理員專用）
  */
-router.get('/admin/conversations', requireAuth, async (req, res) => {
+router.get('/admin/conversations', requireAdmin, async (req, res) => {
   try {
-    // 檢查是否為管理員
-    const adminCheck = await queryOne<{ is_admin: boolean }>(
-      'SELECT is_admin FROM users WHERE id = $1',
-      [req.user!.id]
-    )
-
-    if (!adminCheck?.is_admin) {
-      return res.status(403).json({ error: '無管理員權限' })
-    }
-
     const { page = '1', pageSize = '20', sortBy = 'updated_at', sortOrder = 'desc', projectId } = req.query as {
       page?: string
       pageSize?: string
@@ -808,6 +739,7 @@ router.get('/admin/conversations', requireAuth, async (req, res) => {
        ${whereClause}
        ORDER BY c.${sortField} ${order}
        LIMIT $${paramIndex} OFFSET $${paramIndex + 1}`,
+      // Note: sortField from allowedSortFields whitelist, order from ternary - no SQL injection
       [...params, limit, offset]
     )
 
@@ -834,18 +766,8 @@ router.get('/admin/conversations', requireAuth, async (req, res) => {
  * POST /api/dashboard/admin/users/:userId/admin
  * 設置用戶管理員狀態
  */
-router.post('/admin/users/:userId/admin', requireAuth, async (req, res) => {
+router.post('/admin/users/:userId/admin', requireAdmin, async (req, res) => {
   try {
-    // 檢查是否為管理員
-    const adminCheck = await queryOne<{ is_admin: boolean }>(
-      'SELECT is_admin FROM users WHERE id = $1',
-      [req.user!.id]
-    )
-
-    if (!adminCheck?.is_admin) {
-      return res.status(403).json({ error: '無管理員權限' })
-    }
-
     const { userId } = req.params
     const { isAdmin } = req.body as { isAdmin: boolean }
 

@@ -2,8 +2,12 @@ import { cookies } from 'next/headers'
 import { jwtVerify } from 'jose'
 
 const JWT_SECRET = new TextEncoder().encode(
-  process.env.JWT_SECRET || 'tellcraft-jwt-secret-change-in-production'
+  process.env.JWT_SECRET || ''
 )
+
+if (!process.env.JWT_SECRET) {
+  console.error('[Auth] CRITICAL: JWT_SECRET environment variable is not set!')
+}
 
 export interface AuthUser {
   id: string

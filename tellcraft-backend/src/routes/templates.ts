@@ -7,7 +7,7 @@ import { readFileSync, existsSync } from 'fs'
 import { join } from 'path'
 import Anthropic from '@anthropic-ai/sdk'
 import { query, queryOne } from '../db/client'
-import { requireAuth } from '../middleware/auth'
+import { requireAuth, requireAdmin } from '../middleware/auth'
 
 const router: Router = Router()
 
@@ -515,18 +515,8 @@ router.get('/slug/:slug', async (req, res) => {
  * POST /api/templates/init
  * 初始化模板資料（管理員專用）
  */
-router.post('/init', requireAuth, async (req, res) => {
+router.post('/init', requireAdmin, async (req, res) => {
   try {
-    // 檢查是否為管理員
-    const adminCheck = await queryOne<{ is_admin: boolean }>(
-      'SELECT is_admin FROM users WHERE id = $1',
-      [req.user!.id]
-    )
-
-    if (!adminCheck?.is_admin) {
-      return res.status(403).json({ error: '無管理員權限' })
-    }
-
     const { templates } = req.body as {
       templates: Array<{
         id: string
@@ -598,18 +588,8 @@ router.post('/init', requireAuth, async (req, res) => {
  * GET /api/templates/admin/list
  * 管理員專用：獲取所有模板（包含預覽狀態）
  */
-router.get('/admin/list', requireAuth, async (req, res) => {
+router.get('/admin/list', requireAdmin, async (req, res) => {
   try {
-    // 檢查是否為管理員
-    const adminCheck = await queryOne<{ is_admin: boolean }>(
-      'SELECT is_admin FROM users WHERE id = $1',
-      [req.user!.id]
-    )
-
-    if (!adminCheck?.is_admin) {
-      return res.status(403).json({ error: '無管理員權限' })
-    }
-
     // 獲取所有模板和預覽狀態
     const result = await query<{
       id: string

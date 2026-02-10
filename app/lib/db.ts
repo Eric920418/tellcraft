@@ -1,74 +1,61 @@
 /**
- * 資料庫連接層
- * 連接 VPS PostgreSQL (54.238.4.117:5432)
+ * 資料庫連接層（已廢棄）
+ * 前端不直連資料庫，所有操作透過 VPS HTTP API
+ * 保留 exports 以避免破壞引用鏈
  */
-import vpsDb, {
-  from,
-  query,
-  queryOne,
-  transaction,
-  getClient,
-} from './vps-db'
 
-// VPS PostgreSQL 資料庫客戶端
+// Stub functions - 所有 DB 操作已遷移到 VPS 後端
+/* eslint-disable @typescript-eslint/no-explicit-any */
+function notImplemented(method: string): any {
+  throw new Error(`[DB] ${method} is deprecated. Use VPS API instead.`)
+}
+
+const chainable: any = new Proxy({}, {
+  get: (_target, prop) => {
+    if (typeof prop === 'string') {
+      return (..._args: any[]) => chainable
+    }
+    return undefined
+  },
+})
+
+const from = (_table: string): any => chainable
+
+const query = (..._args: any[]): any => notImplemented('query')
+const queryOne = (..._args: any[]): any => notImplemented('queryOne')
+const transaction = (..._args: any[]): any => notImplemented('transaction')
+const getClient = (..._args: any[]): any => notImplemented('getClient')
+
 export const db = {
   from,
   auth: {
     admin: {
-      createUser: async (options: { email: string; email_confirm?: boolean; user_metadata?: Record<string, unknown> }) => {
-        const id = crypto.randomUUID()
-        const { error } = await from('users').insert({
-          id,
-          email: options.email,
-          plan: 'free',
-          subscription_status: 'active',
-          message_count_this_period: 0,
-          created_at: new Date().toISOString(),
-        })
-
-        if (error) {
-          return { data: null, error }
-        }
-        return { data: { user: { id, email: options.email } }, error: null }
-      },
-      listUsers: async () => {
-        const { data, error } = await from('users').select('*')
-        if (error) {
-          return { data: null, error }
-        }
-        return { data: { users: data || [] }, error: null }
-      },
+      createUser: async () => notImplemented('auth.admin.createUser'),
+      listUsers: async () => notImplemented('auth.admin.listUsers'),
     },
   },
-  // Storage stub - TODO: 實作 VPS 檔案存儲
   storage: {
     listBuckets: async (): Promise<{ data: { name: string }[] | null; error: { message: string } | null }> => {
-      console.warn('[Storage] VPS storage not implemented - listBuckets')
+      console.warn('[Storage] VPS storage not implemented')
       return { data: [], error: null }
     },
-    createBucket: async (_name: string, _options?: Record<string, unknown>): Promise<{ data: unknown; error: { message: string } | null }> => {
-      console.warn('[Storage] VPS storage not implemented - createBucket')
+    createBucket: async (..._args: any[]): Promise<{ data: unknown; error: { message: string } | null }> => {
       return { data: null, error: null }
     },
-    from: (bucket: string) => ({
-      upload: async (path: string, _file: unknown, _options?: Record<string, unknown>): Promise<{ data: { path: string } | null; error: { message: string } | null }> => {
-        console.warn(`[Storage] VPS storage not implemented - upload to ${bucket}/${path}`)
-        return { data: { path }, error: null }
+    from: (_bucket: string) => ({
+      upload: async (..._args: any[]): Promise<{ data: { path: string } | null; error: { message: string } | null }> => {
+        return { data: { path: '' }, error: null }
       },
-      download: async (path: string): Promise<{ data: Blob | null; error: { message: string } | null }> => {
-        console.warn(`[Storage] VPS storage not implemented - download ${bucket}/${path}`)
+      download: async (..._args: any[]): Promise<{ data: Blob | null; error: { message: string } | null }> => {
         return { data: null, error: { message: 'Storage not implemented' } }
       },
-      remove: async (paths: string[]): Promise<{ data: unknown; error: { message: string } | null }> => {
-        console.warn(`[Storage] VPS storage not implemented - remove ${paths.join(', ')}`)
+      remove: async (..._args: any[]): Promise<{ data: unknown; error: { message: string } | null }> => {
         return { data: null, error: null }
       },
-      createSignedUrl: async (path: string, _expiresIn: number): Promise<{ data: { signedUrl: string } | null; error: { message: string } | null }> => {
-        console.warn(`[Storage] VPS storage not implemented - createSignedUrl ${path}`)
+      createSignedUrl: async (..._args: any[]): Promise<{ data: { signedUrl: string } | null; error: { message: string } | null }> => {
         return { data: { signedUrl: '' }, error: null }
       },
-      getPublicUrl: (path: string): { data: { publicUrl: string } } => {
-        console.warn(`[Storage] VPS storage not implemented - getPublicUrl ${path}`)
+      getPublicUrl: (..._args: any[]): { data: { publicUrl: string } } => {
         return { data: { publicUrl: '' } }
       },
     }),
@@ -101,4 +88,4 @@ export const PLAN_PRIORITY_WEIGHTS: Record<string, number> = {
   business: 30
 }
 
-export default vpsDb
+export default db

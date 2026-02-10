@@ -65,6 +65,10 @@ export function useVpsWebSocket(options: UseVpsWebSocketOptions): UseVpsWebSocke
 
   // 初始化 Socket 連接
   useEffect(() => {
+    // 取得認證資訊
+    const token = typeof window !== 'undefined' ? localStorage.getItem('auth_token') : null
+    const anonymousId = typeof window !== 'undefined' ? localStorage.getItem('anonymous_id') : null
+
     const socket = io(WS_URL, {
       transports: ['websocket', 'polling'],
       autoConnect: true,
@@ -72,6 +76,10 @@ export function useVpsWebSocket(options: UseVpsWebSocketOptions): UseVpsWebSocke
       reconnectionAttempts: 5,
       reconnectionDelay: 1000,
       reconnectionDelayMax: 5000,
+      auth: {
+        token: token || undefined,
+        anonymousId: !token ? (anonymousId || undefined) : undefined,
+      },
     })
 
     socketRef.current = socket
@@ -164,11 +172,18 @@ let globalSocket: Socket | null = null
 
 export function getGlobalSocket(): Socket {
   if (!globalSocket) {
+    const token = typeof window !== 'undefined' ? localStorage.getItem('auth_token') : null
+    const anonymousId = typeof window !== 'undefined' ? localStorage.getItem('anonymous_id') : null
+
     globalSocket = io(WS_URL, {
       transports: ['websocket', 'polling'],
       autoConnect: true,
       reconnection: true,
       reconnectionAttempts: 5,
+      auth: {
+        token: token || undefined,
+        anonymousId: !token ? (anonymousId || undefined) : undefined,
+      },
     })
   }
   return globalSocket
