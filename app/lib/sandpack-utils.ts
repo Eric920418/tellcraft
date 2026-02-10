@@ -230,6 +230,24 @@ function rewriteImports(content: string, filePath: string): string {
 }
 
 /**
+ * 清理 Layout 中的 <html>/<head>/<body> 標籤
+ * Next.js root layout 包含這些標籤，但 Sandpack 在 <div id="root"> 中渲染，
+ * <html> 嵌套在 <div> 裡是非法 HTML
+ */
+function stripLayoutDocumentTags(content: string): string {
+  let result = content
+  // <html lang="..."> → <div>，</html> → </div>
+  result = result.replace(/<html[^>]*>/g, '<div>')
+  result = result.replace(/<\/html>/g, '</div>')
+  // 完整移除 <head>...</head>（Layout 的 head 由 /public/index.html 處理）
+  result = result.replace(/<head[\s\S]*?<\/head>/g, '')
+  // <body className="..."> → <div className="...">，</body> → </div>
+  result = result.replace(/<body([^>]*)>/g, '<div$1>')
+  result = result.replace(/<\/body>/g, '</div>')
+  return result
+}
+
+/**
  * 將生成的檔案路徑映射到 Sandpack 路徑
  */
 function mapToSandpackPath(originalPath: string): string {
@@ -356,7 +374,11 @@ export function buildSandpackSetup(
   // 2. 映射組件/layout 檔案
   for (const comp of components) {
     const sandpackPath = mapToSandpackPath(comp.path)
-    const rewritten = rewriteImports(comp.content, sandpackPath.slice(1))
+    let rewritten = rewriteImports(comp.content, sandpackPath.slice(1))
+    // Layout 檔案：移除 <html>/<head>/<body>（Sandpack 在 <div> 中渲染）
+    if (sandpackPath === '/Layout.tsx') {
+      rewritten = stripLayoutDocumentTags(rewritten)
+    }
     files[sandpackPath] = rewritten
     allContents.push(comp.content)
   }
