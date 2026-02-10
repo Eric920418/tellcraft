@@ -4,6 +4,7 @@
  */
 
 import Anthropic from '@anthropic-ai/sdk'
+import { recordLlmUsage } from '../db/client'
 
 // ============================================================
 // 類型定義
@@ -158,6 +159,24 @@ ${bddSpec}
     })
 
     const finalMessage = await stream.finalMessage()
+
+    // 記錄 LLM 用量（Haiku: input $0.8/M, output $4/M）
+    const usage = finalMessage.usage
+    if (usage) {
+      const inputTokens = usage.input_tokens || 0
+      const outputTokens = usage.output_tokens || 0
+      const cost = (inputTokens * 0.8 + outputTokens * 4) / 1_000_000
+      recordLlmUsage({
+        model: 'claude-haiku-4-5-20251001',
+        inputTokens,
+        outputTokens,
+        costUsd: cost,
+        purpose: 'bdd_to_ui_translation',
+        userId: trackingContext?.userId,
+        conversationId: trackingContext?.conversationId,
+      }).catch(err => console.error('[BDD→UI] recordLlmUsage failed:', err))
+    }
+
     const content = finalMessage.content[0]
 
     if (content.type !== 'text') {

@@ -70,7 +70,8 @@
       "Bash(__NEW_LINE_0754ea82e4b52d06__ echo \"\")",
       "Bash(npm audit:*)",
       "Bash(pnpm audit:*)",
-      "WebFetch(domain:tc-7e31593c-acmfrarp6-erics-projects-57e51613.vercel.app)"
+      "WebFetch(domain:tc-7e31593c-acmfrarp6-erics-projects-57e51613.vercel.app)",
+      "Bash(vercel:*)"
     ]
   }
 }

@@ -134,6 +134,8 @@ interface FlowState {
   // 快速模式
   fastMode?: boolean
   fastModeProductType?: string
+  // 用戶 ID（供內部函數取得 trackingContext）
+  userId?: string
 }
 
 // PRD Discovery 限制
@@ -441,6 +443,11 @@ async function handleContinueFlow(
   if (!state) {
     console.log('[Orchestrator] 沒有找到流程狀態，可能是新對話')
     return
+  }
+
+  // 確保 userId 保存在 state 中（供內部函數取得 trackingContext）
+  if (userId && !state.userId) {
+    state.userId = userId
   }
 
   // 處理設計偏好回覆（A = 有想法，B = 沒想法看模板）
@@ -856,6 +863,7 @@ async function executeBddSpecSkill(input: BddSpecSkillInput) {
     taskId,
     waitingForReply: false,
     totalQuestionsAsked: 0,
+    userId,
   }
 
   await saveFlowState(redis, conversationId, state)
@@ -2149,6 +2157,7 @@ async function executeFastBuildSkill(params: {
     uiuxCodeGenerationStartedAt: Date.now(),
     fastMode: true,
     fastModeProductType: productType,
+    userId,
   }
   await saveFlowState(redis, conversationId, state)
 
@@ -2336,7 +2345,7 @@ async function executeFullCodePipeline(
   let uiSpec = state.uiuxUISpec
   if (!uiSpec && bddSpec) {
     console.log('[Orchestrator] Pipeline 開始 BDD→UI 翻譯...')
-    const translateResult = await translateBddToUISpec(bddSpec, originalRequirements, { conversationId })
+    const translateResult = await translateBddToUISpec(bddSpec, originalRequirements, { userId: state.userId, conversationId })
     if (translateResult.success && translateResult.spec) {
       uiSpec = translateResult.spec
       state.uiuxUISpec = uiSpec
@@ -2361,7 +2370,7 @@ async function executeFullCodePipeline(
       uiSpec,
       variantConcept: state.uiuxVariantConcept,
     },
-    { conversationId },
+    { userId: state.userId, conversationId, purpose: 'uiux_structure' },
     makeStreamingCallback(conversationId, io, redis, 'structure', twConfig)
   )
 
@@ -2406,7 +2415,7 @@ async function executeFullCodePipeline(
     uiuxDesignSystem,
     currentCode,
     state.uiuxDesignTier,
-    { conversationId },
+    { userId: state.userId, conversationId, purpose: 'uiux_animation' },
     makeStreamingCallback(conversationId, io, redis, 'animation', twConfig),
     state.uiuxVariantConcept
   )
@@ -2444,7 +2453,7 @@ async function executeFullCodePipeline(
     uiuxDesignSystem,
     currentCode,
     state.uiuxDesignTier,
-    { conversationId },
+    { userId: state.userId, conversationId, purpose: 'uiux_rwd' },
     makeStreamingCallback(conversationId, io, redis, 'rwd', twConfig),
     state.uiuxVariantConcept
   )
@@ -2475,7 +2484,7 @@ async function executeFullCodePipeline(
 
     console.log(`[Orchestrator] Pipeline QG 修復 ${attempt + 1}/${MAX_FIX_ATTEMPTS}`)
 
-    const fixedCode = await autoFixCriticalIssues(currentCode, criticalIssues)
+    const fixedCode = await autoFixCriticalIssues(currentCode, criticalIssues, { userId: state.userId, conversationId })
     if (!fixedCode) break
 
     totalAutoFixed += criticalIssues.length
@@ -2571,7 +2580,7 @@ async function executeCodePhaseStructure(
   // BDD→UI 翻譯（有快取跳過）
   let structUISpec = state.uiuxUISpec
   if (!structUISpec && bddSpec) {
-    const translateResult = await translateBddToUISpec(bddSpec, originalRequirements, { conversationId })
+    const translateResult = await translateBddToUISpec(bddSpec, originalRequirements, { userId: state.userId, conversationId })
     if (translateResult.success && translateResult.spec) {
       structUISpec = translateResult.spec
       state.uiuxUISpec = structUISpec
@@ -2595,7 +2604,7 @@ async function executeCodePhaseStructure(
       uiSpec: structUISpec,
       variantConcept: state.uiuxVariantConcept,
     },
-    { conversationId },
+    { userId: state.userId, conversationId, purpose: 'uiux_structure' },
     makeStreamingCallback(conversationId, io, redis, 'structure', twCfg)
   )
 
@@ -2693,7 +2702,7 @@ async function executeCodePhaseAnimation(
     uiuxDesignSystem,
     uiuxGeneratedCode,
     state.uiuxDesignTier,
-    { conversationId },
+    { userId: state.userId, conversationId, purpose: 'uiux_animation' },
     makeStreamingCallback(conversationId, io, redis, 'animation', animTwCfg),
     state.uiuxVariantConcept
   )
@@ -2789,7 +2798,7 @@ async function executeCodePhaseRwd(
     uiuxDesignSystem,
     uiuxGeneratedCode,
     state.uiuxDesignTier,
-    { conversationId },
+    { userId: state.userId, conversationId, purpose: 'uiux_rwd' },
     makeStreamingCallback(conversationId, io, redis, 'rwd', rwdTwCfg),
     state.uiuxVariantConcept
   )
@@ -2867,7 +2876,7 @@ async function executeQualityGate(
       stage: 'uiux_quality_gate_fixing',
     })
 
-    const fixedCode = await autoFixCriticalIssues(currentCode, criticalIssues)
+    const fixedCode = await autoFixCriticalIssues(currentCode, criticalIssues, { userId: state.userId, conversationId })
     if (!fixedCode) {
       console.error('[Orchestrator] Quality Gate autoFix 失敗')
       break
@@ -3383,7 +3392,7 @@ async function startDesignBriefConfirm(
     productType,
     sourceType === 'ideas' ? (state.uiuxDesignIdeas || null) : null,
     sourceType,
-    { conversationId }
+    { userId: state.userId, conversationId, purpose: 'uiux_brief' }
   )
 
   if (!briefResult.success || !briefResult.brief) {
@@ -3503,7 +3512,7 @@ async function handleDesignBriefReply(
     history,
     state.uiuxPreparedTemplate,
     productType,
-    { conversationId }
+    { userId: state.userId, conversationId, purpose: 'uiux_brief' }
   )
 
   if (!adjustResult.success || !adjustResult.brief) {
@@ -3635,7 +3644,7 @@ async function proceedToVariantGeneration(
     bddSpec,
     productType,
     state.uiuxDesignTier,
-    { conversationId }
+    { userId: state.userId, conversationId, purpose: 'uiux_variants' }
   )
 
   if (!variantsResult.success || !variantsResult.variants) {
@@ -3869,11 +3878,13 @@ async function executeDeployerSkill(input: DeployerSkillInput) {
       waitingForReply: true,
       totalQuestionsAsked: 0,
       deployerPreCheck: preCheck,
+      userId,
     }
   } else {
     state.phase = 'deployer_confirm'
     state.waitingForReply = true
     state.deployerPreCheck = preCheck
+    if (!state.userId) state.userId = userId
   }
   await saveFlowState(redis, conversationId, state)
 
@@ -3945,7 +3956,8 @@ async function handleDeployExecute(
       {
         extraDependencies: preCheck.extraDependencies,
         injectedFiles: preCheck.injectedFiles,
-      }
+      },
+      { userId: state.userId, conversationId }
     )
   } catch (err) {
     console.error('[Orchestrator] handleDeployExecute 異常:', err)
@@ -4091,7 +4103,7 @@ async function handleDesignIteration(
       designBrief: state.uiuxDesignBrief,
       variantConcept: state.uiuxVariantConcept,
     },
-    { conversationId, purpose: 'design_iteration' }
+    { userId: state.userId, conversationId, purpose: 'uiux_refine' }
   )
 
   if (!result.success || !result.pages) {

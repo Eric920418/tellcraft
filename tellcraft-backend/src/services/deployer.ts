@@ -544,7 +544,8 @@ export async function executeDeployment(
   options?: {
     extraDependencies?: Record<string, string>
     injectedFiles?: { file: string; data: string }[]
-  }
+  },
+  trackingContext?: { userId?: string; conversationId?: string }
 ): Promise<DeployResult> {
   try {
     // 1. 取得專案名稱
@@ -559,7 +560,8 @@ export async function executeDeployment(
       tailwindConfig,
       options?.extraDependencies,
       options?.injectedFiles,
-      onProgress
+      onProgress,
+      trackingContext
     )
 
     const files = buildResult.files
@@ -1540,7 +1542,8 @@ async function fixBuildErrors(
   code: GeneratedCode,
   errors: BuildError[],
   buildOutput: string,
-  currentDeps: Record<string, string>
+  currentDeps: Record<string, string>,
+  trackingContext?: { userId?: string; conversationId?: string }
 ): Promise<{ code: GeneratedCode; newDependencies: Record<string, string> } | null> {
   const client = getAnthropicClient()
 
@@ -1632,6 +1635,23 @@ ${codeBlocks.join('\n\n')}
       messages: [{ role: 'user', content: prompt }],
     })
     const response = await stream.finalMessage()
+
+    // 記錄 LLM 用量（Haiku: input $0.8/M, output $4/M）
+    const usage = response.usage
+    if (usage) {
+      const inputTokens = usage.input_tokens || 0
+      const outputTokens = usage.output_tokens || 0
+      const cost = (inputTokens * 0.8 + outputTokens * 4) / 1_000_000
+      db.recordLlmUsage({
+        model: 'claude-haiku-4-5-20251001',
+        inputTokens,
+        outputTokens,
+        costUsd: cost,
+        purpose: 'deploy_build_fix',
+        userId: trackingContext?.userId,
+        conversationId: trackingContext?.conversationId,
+      }).catch(err => console.error('[Deployer] recordLlmUsage failed:', err))
+    }
 
     const content = response.content
       .filter(block => block.type === 'text')
@@ -1770,7 +1790,8 @@ async function verifyBuildLocally(
   tailwindConfig: string,
   extraDependencies?: Record<string, string>,
   injectedFiles?: { file: string; data: string }[],
-  onProgress?: ProgressCallback
+  onProgress?: ProgressCallback,
+  trackingContext?: { userId?: string; conversationId?: string }
 ): Promise<{ files: VercelFile[]; buildVerified: boolean; fixes: string[]; finalCode: GeneratedCode }> {
   const MAX_ATTEMPTS = 3
   const tmpDir = path.join(os.tmpdir(), `tellcraft-build-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`)
@@ -1877,7 +1898,7 @@ async function verifyBuildLocally(
         await onProgress?.({ percent: 20 + attempt * 8, step: `AI 修復構建錯誤（第 ${attempt} 次）...` })
 
         const allDeps = { ...BASE_DEPS, ...currentExtraDeps }
-        const fixResult = await fixBuildErrors(currentCode, buildErrors, buildResult.output, allDeps)
+        const fixResult = await fixBuildErrors(currentCode, buildErrors, buildResult.output, allDeps, trackingContext)
 
         if (!fixResult) {
           console.warn('[Deployer] LLM 修復失敗，繼續下一輪')

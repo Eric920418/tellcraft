@@ -6,6 +6,7 @@
 // LLM 函數需要從後端獨立實現
 import Anthropic from '@anthropic-ai/sdk'
 import { formatUISpecForPrompt, UIRequirementsSpec } from './bdd-to-ui-spec'
+import { recordLlmUsage } from '../db/client'
 
 // 模組級 Anthropic 單例（避免每次 callClaude 都 new）
 let anthropicClient: Anthropic | null = null
@@ -77,7 +78,7 @@ export async function callClaude(
     maxTokens?: number
     temperature?: number
   },
-  _trackingContext?: LlmTrackingContext,
+  trackingContext?: LlmTrackingContext,
   onTextDelta?: (accumulatedText: string) => void
 ): Promise<{ success: boolean; content?: string; error?: string }> {
   await acquireLlmSlot()
@@ -109,6 +110,23 @@ export async function callClaude(
     }
 
     const finalMessage = await stream.finalMessage()
+
+    // 記錄 LLM 用量（Sonnet: input $3/M, output $15/M）
+    const usage = finalMessage.usage
+    if (usage) {
+      const inputTokens = usage.input_tokens || 0
+      const outputTokens = usage.output_tokens || 0
+      const cost = (inputTokens * 3 + outputTokens * 15) / 1_000_000
+      recordLlmUsage({
+        model: 'claude-sonnet-4-5-20250929',
+        inputTokens,
+        outputTokens,
+        costUsd: cost,
+        purpose: trackingContext?.purpose || 'uiux_generation',
+        userId: trackingContext?.userId,
+        conversationId: trackingContext?.conversationId,
+      }).catch(err => console.error('[UIUX] recordLlmUsage failed:', err))
+    }
 
     const content = finalMessage.content[0]
     if (content.type === 'text') {

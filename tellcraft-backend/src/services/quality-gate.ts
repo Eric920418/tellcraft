@@ -6,6 +6,7 @@
 
 import Anthropic from '@anthropic-ai/sdk'
 import { GeneratedComponent } from './uiux-generation'
+import { recordLlmUsage } from '../db/client'
 
 // ============================================================
 // 型別定義
@@ -482,7 +483,8 @@ export function runQualityGate(code: GeneratedCode, designTier?: DesignTier): Qu
 
 export async function autoFixCriticalIssues(
   code: GeneratedCode,
-  issues: QualityIssue[]
+  issues: QualityIssue[],
+  trackingContext?: { userId?: string; conversationId?: string }
 ): Promise<GeneratedCode | null> {
   const client = getAnthropicClient()
 
@@ -521,11 +523,29 @@ ${codeBlocks.join('\n\n')}
 請輸出修復後的所有檔案（保持相同的 \`\`\`tsx:filepath 格式）。`
 
   try {
-    const response = await client.messages.create({
+    const stream = client.messages.stream({
       model: 'claude-haiku-4-5-20251001',
       max_tokens: 16000,
       messages: [{ role: 'user', content: prompt }],
     })
+    const response = await stream.finalMessage()
+
+    // 記錄 LLM 用量（Haiku: input $0.8/M, output $4/M）
+    const usage = response.usage
+    if (usage) {
+      const inputTokens = usage.input_tokens || 0
+      const outputTokens = usage.output_tokens || 0
+      const cost = (inputTokens * 0.8 + outputTokens * 4) / 1_000_000
+      recordLlmUsage({
+        model: 'claude-haiku-4-5-20251001',
+        inputTokens,
+        outputTokens,
+        costUsd: cost,
+        purpose: 'quality_gate_autofix',
+        userId: trackingContext?.userId,
+        conversationId: trackingContext?.conversationId,
+      }).catch(err => console.error('[QualityGate] recordLlmUsage failed:', err))
+    }
 
     const content = response.content
       .filter(block => block.type === 'text')
