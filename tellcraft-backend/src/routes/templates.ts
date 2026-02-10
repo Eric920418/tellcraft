@@ -11,6 +11,9 @@ import { requireAuth, requireAdmin } from '../middleware/auth'
 
 const router: Router = Router()
 
+// UUID 格式檢測
+const isUUID = (s: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s)
+
 // Anthropic client
 const anthropic = new Anthropic({
   apiKey: process.env.ANTHROPIC_API_KEY,
@@ -101,9 +104,13 @@ router.get('/', async (req, res) => {
  */
 router.get('/preview/:id', async (req, res) => {
   try {
-    const { id } = req.params
+    const identifier = req.params.id
 
-    // 1. 獲取模板
+    // 1. 獲取模板（支援 UUID 或 slug）
+    const templateQuery = isUUID(identifier)
+      ? 'SELECT id, name, slug, category, description, design_defaults, page_structure FROM templates WHERE id = $1'
+      : 'SELECT id, name, slug, category, description, design_defaults, page_structure FROM templates WHERE slug = $1'
+
     const template = await queryOne<{
       id: string
       name: string
@@ -123,14 +130,14 @@ router.get('/preview/:id', async (req, res) => {
         pages: string[]
         components: string[]
       }
-    }>(
-      'SELECT id, name, slug, category, description, design_defaults, page_structure FROM templates WHERE id = $1',
-      [id]
-    )
+    }>(templateQuery, [identifier])
 
     if (!template) {
       return res.status(404).send('<html><body><h1>模板不存在</h1></body></html>')
     }
+
+    // 用實際 UUID 做後續查詢（identifier 可能是 slug）
+    const templateId = template.id
 
     // 2. 優先檢查預生成文件（零 LLM 消耗）
     const pregeneratedFile = PREGENERATED_TEMPLATES[template.slug]
@@ -148,7 +155,7 @@ router.get('/preview/:id', async (req, res) => {
     // 3. 檢查數據庫緩存（永久有效）
     const cached = await queryOne<{ html_content: string; version: number }>(
       'SELECT html_content, version FROM template_previews WHERE template_id = $1',
-      [id]
+      [templateId]
     )
 
     if (cached) {
@@ -235,7 +242,7 @@ router.get('/preview/:id', async (req, res) => {
          html_content = $2,
          version = template_previews.version + 1,
          updated_at = NOW()`,
-      [id, htmlContent]
+      [templateId, htmlContent]
     )
 
     // 6. 返回 HTML
