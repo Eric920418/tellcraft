@@ -15,6 +15,24 @@ function validateProxyPath(targetPath: string): boolean {
 }
 
 /**
+ * 安全解析 VPS 回應：JSON 優先，非 JSON 回傳錯誤物件
+ */
+async function safeParseResponse(response: Response): Promise<{ data: unknown; status: number }> {
+  const text = await response.text()
+  try {
+    const data = JSON.parse(text)
+    return { data, status: response.status }
+  } catch {
+    // VPS 返回非 JSON（nginx 錯誤頁、HTML 等）
+    console.error(`[VPS Proxy] Non-JSON response (${response.status}): ${text.substring(0, 200)}`)
+    return {
+      data: { error: 'VPS 後端無回應或返回錯誤', statusCode: response.status },
+      status: response.status >= 400 ? response.status : 502,
+    }
+  }
+}
+
+/**
  * VPS API 代理
  * 解決 Mixed Content 問題（HTTPS -> HTTP）
  * 所有 /api/vps/* 請求會被轉發到 VPS 後端
@@ -41,8 +59,8 @@ export async function GET(
       },
     })
 
-    const data = await response.json()
-    return NextResponse.json(data, { status: response.status })
+    const { data, status } = await safeParseResponse(response)
+    return NextResponse.json(data, { status })
   } catch (error) {
     console.error('[VPS Proxy] GET error:', error)
     return NextResponse.json({ error: 'VPS connection failed' }, { status: 502 })
@@ -71,8 +89,8 @@ export async function POST(
       body: JSON.stringify(body),
     })
 
-    const data = await response.json()
-    return NextResponse.json(data, { status: response.status })
+    const { data, status } = await safeParseResponse(response)
+    return NextResponse.json(data, { status })
   } catch (error) {
     console.error('[VPS Proxy] POST error:', error)
     return NextResponse.json({ error: 'VPS connection failed' }, { status: 502 })
@@ -101,8 +119,8 @@ export async function PUT(
       body: JSON.stringify(body),
     })
 
-    const data = await response.json()
-    return NextResponse.json(data, { status: response.status })
+    const { data, status } = await safeParseResponse(response)
+    return NextResponse.json(data, { status })
   } catch (error) {
     console.error('[VPS Proxy] PUT error:', error)
     return NextResponse.json({ error: 'VPS connection failed' }, { status: 502 })
@@ -129,8 +147,8 @@ export async function DELETE(
       },
     })
 
-    const data = await response.json()
-    return NextResponse.json(data, { status: response.status })
+    const { data, status } = await safeParseResponse(response)
+    return NextResponse.json(data, { status })
   } catch (error) {
     console.error('[VPS Proxy] DELETE error:', error)
     return NextResponse.json({ error: 'VPS connection failed' }, { status: 502 })
