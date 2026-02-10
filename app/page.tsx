@@ -1156,6 +1156,7 @@ function ChatSection({
           conversationId: session.conversationId,
           message: initialMessage,
           projectId: session.projectId,
+          userId: session.userId,
           mode: buildMode,
           token: token || undefined
         })
@@ -1662,6 +1663,7 @@ function ChatSection({
       const result = await vpsReplyToConversation({
         conversationId: sessionInfo.conversationId,
         projectId: sessionInfo.projectId,
+        userId: sessionInfo.userId,
         taskId: sessionInfo.currentTaskId,
         message: content,
         token: token || undefined
@@ -1682,6 +1684,7 @@ function ChatSection({
         conversationId: sessionInfo.conversationId,
         message: content,
         projectId: sessionInfo.projectId,
+        userId: sessionInfo.userId,
         token: token || undefined
       })
 
@@ -1723,6 +1726,7 @@ function ChatSection({
       const result = await vpsReplyToConversation({
         conversationId: sessionInfo.conversationId,
         projectId: sessionInfo.projectId,
+        userId: sessionInfo.userId,
         taskId: sessionInfo.currentTaskId,
         message: content.trim(),
         token: token || undefined,
@@ -1736,6 +1740,7 @@ function ChatSection({
         conversationId: sessionInfo.conversationId,
         message: content.trim(),
         projectId: sessionInfo.projectId,
+        userId: sessionInfo.userId,
         token: token || undefined,
       })
       if (!result.success) {

@@ -14,9 +14,9 @@ export interface GeneratedFile {
 // ============================================================
 // 已知依賴映射（與 deployer.ts KNOWN_PACKAGES 同步）
 // ============================================================
+// 套件名 → 版本（只用真正的 npm 套件名，不含子路徑）
 const SANDPACK_KNOWN_DEPS: Record<string, string> = {
-  'motion/react': 'latest',
-  'framer-motion': 'latest',
+  'motion': 'latest',
   'lucide-react': 'latest',
   'class-variance-authority': 'latest',
   'clsx': 'latest',
@@ -34,7 +34,6 @@ const SANDPACK_KNOWN_DEPS: Record<string, string> = {
   'cmdk': 'latest',
   'vaul': 'latest',
   'input-otp': 'latest',
-  'next-themes': 'latest',
   '@radix-ui/react-dialog': 'latest',
   '@radix-ui/react-dropdown-menu': 'latest',
   '@radix-ui/react-popover': 'latest',
@@ -69,6 +68,7 @@ const BUILTIN_PACKAGES = new Set([
   'react', 'react-dom', 'react/jsx-runtime',
   'next', 'next/font', 'next/font/google', 'next/image', 'next/link',
   'next/navigation', 'next/router', 'next/head', 'next/script',
+  'next-themes', // shim 處理，不需要安裝
 ])
 
 // ============================================================
@@ -247,7 +247,8 @@ function scanDependencies(files: Record<string, string>): Record<string, string>
     importRegex.lastIndex = 0
     while ((m = importRegex.exec(content)) !== null) {
       const raw = m[1]
-      // 提取套件名：@scope/name 或 name
+      // 提取套件名：@scope/name 或 name（去掉子路徑）
+      // 例：'motion/react' → 'motion'，'@radix-ui/react-dialog' → '@radix-ui/react-dialog'
       const pkg = raw.startsWith('@')
         ? raw.split('/').slice(0, 2).join('/')
         : raw.split('/')[0]
@@ -255,9 +256,9 @@ function scanDependencies(files: Record<string, string>): Record<string, string>
       if (BUILTIN_PACKAGES.has(pkg) || BUILTIN_PACKAGES.has(raw)) continue
       if (pkg.startsWith('./') || pkg.startsWith('../')) continue
 
-      if (SANDPACK_KNOWN_DEPS[raw]) {
-        deps[raw] = SANDPACK_KNOWN_DEPS[raw]
-      } else if (SANDPACK_KNOWN_DEPS[pkg]) {
+      // 始終用套件名（pkg）作為 key，而不是完整 import path（raw）
+      // 這樣 'motion/react' 正確映射到 'motion' 套件
+      if (SANDPACK_KNOWN_DEPS[pkg]) {
         deps[pkg] = SANDPACK_KNOWN_DEPS[pkg]
       }
     }
@@ -425,18 +426,9 @@ export function buildSandpackSetup(
 </body>
 </html>`
 
-  // 10. 掃描依賴
-  const scannedDeps = scanDependencies(files)
-  // 預設始終包含常用依賴
-  const dependencies: Record<string, string> = {
-    'react': '^18.2.0',
-    'react-dom': '^18.2.0',
-    'motion': 'latest',
-    ...scannedDeps,
-  }
-
-  // 移除 shim 處理的套件（不需要實際安裝）
-  delete dependencies['next-themes']
+  // 10. 掃描依賴（只加代碼實際 import 的套件）
+  // react / react-dom 由 template="react-ts" 提供，不需要重複指定
+  const dependencies = scanDependencies(files)
 
   return { files: files as SandpackFiles, dependencies }
 }

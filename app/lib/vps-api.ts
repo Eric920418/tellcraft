@@ -92,6 +92,7 @@ export async function sendMessage(input: {
   conversationId: string
   message: string
   projectId: string
+  userId?: string
   mode?: 'fast' | 'fine'
   token?: string
 }): Promise<ApiResponse<{ messageId: string; jobId: string }>> {
@@ -103,6 +104,7 @@ export async function sendMessage(input: {
     body: JSON.stringify({
       message: input.message,
       projectId: input.projectId,
+      userId: input.userId,
       mode: input.mode,
     }),
   })
@@ -115,6 +117,7 @@ export async function replyToConversation(input: {
   conversationId: string
   message: string
   projectId: string
+  userId?: string
   taskId?: string
   specConfirmed?: boolean
   token?: string
@@ -127,6 +130,7 @@ export async function replyToConversation(input: {
     body: JSON.stringify({
       message: input.message,
       projectId: input.projectId,
+      userId: input.userId,
       taskId: input.taskId,
       specConfirmed: input.specConfirmed,
     }),
