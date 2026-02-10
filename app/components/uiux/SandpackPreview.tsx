@@ -74,32 +74,51 @@ export default function SandpackPreview({
   const providerKey = depsKey
 
   return (
-    <SandpackProvider
-      key={providerKey}
-      template="react-ts"
-      files={setup.files}
-      customSetup={{
-        dependencies: setup.dependencies,
-      }}
-      options={{
-        externalResources: [
-          'https://cdn.tailwindcss.com',
-        ],
-        // streaming 時使用較長的重新整理延遲，避免頻繁 rebundle
-        bundlerTimeOut: isStreaming ? 30000 : 20000,
-      }}
-    >
-      {/* 增量更新子元件 */}
-      {!needsProviderRebuild && <SandpackFileUpdater files={setup.files} />}
-      <SandpackPreviewPane
-        showRefreshButton={false}
-        showOpenInCodeSandbox={false}
-        style={{
-          height: '100%',
-          width: '100%',
-          flex: 1,
+    <div className="sp-fullheight-wrapper">
+      {/* 強制 Sandpack 內部所有容器和 iframe 填滿高度 */}
+      <style>{`
+        .sp-fullheight-wrapper {
+          height: 100%;
+          width: 100%;
+          display: flex;
+          flex-direction: column;
+        }
+        .sp-fullheight-wrapper .sp-stack {
+          height: 100% !important;
+          flex: 1 !important;
+        }
+        .sp-fullheight-wrapper .sp-preview-container {
+          height: 100% !important;
+          flex: 1 !important;
+        }
+        .sp-fullheight-wrapper .sp-preview-iframe {
+          height: 100% !important;
+        }
+        .sp-fullheight-wrapper .sp-preview-actions {
+          display: none !important;
+        }
+      `}</style>
+      <SandpackProvider
+        key={providerKey}
+        template="react-ts"
+        files={setup.files}
+        customSetup={{
+          dependencies: setup.dependencies,
         }}
-      />
-    </SandpackProvider>
+        options={{
+          externalResources: [
+            'https://cdn.tailwindcss.com',
+          ],
+          bundlerTimeOut: isStreaming ? 30000 : 20000,
+        }}
+      >
+        {!needsProviderRebuild && <SandpackFileUpdater files={setup.files} />}
+        <SandpackPreviewPane
+          showRefreshButton={false}
+          showOpenInCodeSandbox={false}
+          style={{ height: '100%', flex: 1 }}
+        />
+      </SandpackProvider>
+    </div>
   )
 }
