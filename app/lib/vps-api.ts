@@ -60,9 +60,9 @@ async function apiRequest<T>(
     })
 
     const text = await response.text()
-    let data: Record<string, unknown>
+    let data: T
     try {
-      data = JSON.parse(text)
+      data = JSON.parse(text) as T
     } catch {
       console.error(`[VPS API] Non-JSON response (${response.status}): ${text.substring(0, 200)}`)
       return {
@@ -74,7 +74,7 @@ async function apiRequest<T>(
     if (!response.ok) {
       return {
         success: false,
-        error: (data.error as string) || `HTTP ${response.status}`,
+        error: ((data as Record<string, unknown>).error as string) || `HTTP ${response.status}`,
       }
     }
 
