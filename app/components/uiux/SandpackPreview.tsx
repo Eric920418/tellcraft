@@ -74,29 +74,22 @@ export default function SandpackPreview({
   const providerKey = depsKey
 
   return (
-    <div className="sp-fullheight-wrapper">
-      {/* 強制 Sandpack 內部所有容器和 iframe 填滿高度 */}
+    <div
+      style={{
+        height: '100%',
+        width: '100%',
+        display: 'flex',
+        flexDirection: 'column',
+        // 覆蓋 Sandpack 的預設高度 CSS 變數
+        '--sp-layout-height': '100%',
+      } as React.CSSProperties}
+    >
+      {/* 強制 Sandpack 所有內部層級填滿容器 */}
       <style>{`
-        .sp-fullheight-wrapper {
-          height: 100%;
-          width: 100%;
-          display: flex;
-          flex-direction: column;
-        }
-        .sp-fullheight-wrapper .sp-stack {
-          height: 100% !important;
-          flex: 1 !important;
-        }
-        .sp-fullheight-wrapper .sp-preview-container {
-          height: 100% !important;
-          flex: 1 !important;
-        }
-        .sp-fullheight-wrapper .sp-preview-iframe {
-          height: 100% !important;
-        }
-        .sp-fullheight-wrapper .sp-preview-actions {
-          display: none !important;
-        }
+        div[class*="sp-"] { height: 100% !important; }
+        iframe[class*="sp-"] { height: 100% !important; }
+        div[class*="sp-preview"] { display: flex !important; flex-direction: column !important; flex: 1 !important; }
+        .sp-preview-actions { display: none !important; }
       `}</style>
       <SandpackProvider
         key={providerKey}
@@ -116,7 +109,12 @@ export default function SandpackPreview({
         <SandpackPreviewPane
           showRefreshButton={false}
           showOpenInCodeSandbox={false}
-          style={{ height: '100%', flex: 1 }}
+          style={{
+            height: '100%',
+            flex: 1,
+            display: 'flex',
+            flexDirection: 'column',
+          }}
         />
       </SandpackProvider>
     </div>
