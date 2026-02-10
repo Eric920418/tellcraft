@@ -94,6 +94,13 @@ UIUX Implementation 階段生成的 React TSX 代碼，透過 Sandpack（`@codes
 - 組件模組解析精確（Sandpack 原生模組系統，不需 regex 內聯）
 - 錯誤可見（Sandpack 顯示具體編譯錯誤，不再靜默失敗）
 
+**Tailwind Config 策略（2026-02-10）**：
+`generateTailwindConfig()` 使用**硬編碼值**（不依賴 CSS 變數），確保 Tailwind v3 編譯輸出的 CSS 是自給自足的：
+- `borderRadius.full: '9999px'`（而非 `'var(--radius-full)'`），避免 CSS 變數遺失導致圓角消失
+- `colors.primary: '#2563eb'`（而非 `'var(--color-primary)'`），同理
+- 三處 `content` 路徑（`generateTailwindConfig`、`wrapInNextJs` 有/無 config 分支）全部同步為 10 個目錄
+- Deployer 安全網：`wrapInNextJs` 檢測舊 config 中的 `var(--radius-` 引用，若 styles 缺少定義則注入 fallback `:root {}`
+
 **RWD 響應式安全網（2026-02-06）**：
 `generateRwd()` LLM 經常不產出 Tailwind 響應式前綴（sm:/md:/lg:），後端安全網自動注入基本響應式 class：
 - 後端：`ensureResponsiveClasses()`（`uiux-generation.ts`）— 在 `generateRwd()` 解析後檢測，無響應式 class 時注入

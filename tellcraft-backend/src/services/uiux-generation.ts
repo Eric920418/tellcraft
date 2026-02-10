@@ -890,7 +890,8 @@ ${JSON.stringify(designSystem.borderRadius, null, 2)}
 
 ## 顏色使用規則
 - 只使用 Design System 定義的顏色
-- 使用 CSS variables：bg-[var(--color-primary)] 或自訂 Tailwind
+- 使用 Tailwind 自訂顏色 utility：bg-primary, text-foreground, border-border 等（已在 tailwind.config 中配置）
+- 禁止使用 bg-[var(--color-primary)] 這種 arbitrary value 語法
 - 禁止使用 Tailwind 默認顏色（bg-blue-500 等）`
 }
 
@@ -1861,32 +1862,39 @@ export function generateTailwindConfig(designSystem: DesignSystem): string {
 
 const config: Config = {
   content: [
-    './pages/**/*.{js,ts,jsx,tsx,mdx}',
-    './components/**/*.{js,ts,jsx,tsx,mdx}',
     './app/**/*.{js,ts,jsx,tsx,mdx}',
+    './components/**/*.{js,ts,jsx,tsx,mdx}',
+    './lib/**/*.{js,ts,jsx,tsx}',
+    './hooks/**/*.{js,ts,jsx,tsx}',
+    './utils/**/*.{js,ts,jsx,tsx}',
+    './types/**/*.{js,ts,jsx,tsx}',
+    './context/**/*.{js,ts,jsx,tsx}',
+    './stores/**/*.{js,ts,jsx,tsx}',
+    './data/**/*.{js,ts,jsx,tsx}',
+    './config/**/*.{js,ts,jsx,tsx}',
   ],
   theme: {
     extend: {
       colors: {
-        primary: 'var(--color-primary)',
-        secondary: 'var(--color-secondary)',
-        accent: 'var(--color-accent)',
-        background: 'var(--color-background)',
-        foreground: 'var(--color-foreground)',
-        muted: 'var(--color-muted)',
-        border: 'var(--color-border)',
-        ${designSystem.colorPalette.destructive ? "destructive: 'var(--color-destructive)'," : ''}
-        ${designSystem.colorPalette.success ? "success: 'var(--color-success)'," : ''}
+        primary: '${designSystem.colorPalette.primary}',
+        secondary: '${designSystem.colorPalette.secondary}',
+        accent: '${designSystem.colorPalette.accent}',
+        background: '${designSystem.colorPalette.background}',
+        foreground: '${designSystem.colorPalette.foreground}',
+        muted: '${designSystem.colorPalette.muted}',
+        border: '${designSystem.colorPalette.border}',
+        ${designSystem.colorPalette.destructive ? `destructive: '${designSystem.colorPalette.destructive}',` : ''}
+        ${designSystem.colorPalette.success ? `success: '${designSystem.colorPalette.success}',` : ''}
       },
       fontFamily: {
         sans: ['${designSystem.typography.fontFamily.split(',')[0].trim()}', 'system-ui', 'sans-serif'],
       },
       borderRadius: {
-        none: 'var(--radius-none)',
-        sm: 'var(--radius-sm)',
-        md: 'var(--radius-md)',
-        lg: 'var(--radius-lg)',
-        full: 'var(--radius-full)',
+        none: '${designSystem.borderRadius.none}',
+        sm: '${designSystem.borderRadius.sm}',
+        md: '${designSystem.borderRadius.md}',
+        lg: '${designSystem.borderRadius.lg}',
+        full: '${designSystem.borderRadius.full}',
       },
       spacing: {
         ${Object.entries(designSystem.spacing.scale).map(([k, v]) => `'${k}': '${v}'`).join(',\n        ')}

@@ -159,7 +159,8 @@ sanitizeCodeForDeploy（6 類自動修復）
 - **動畫庫是 `motion/react`**，不是 `framer-motion`
 - **字體只能用 `next/font`**，禁止 `<link>` / `@import` Google Fonts
 - **Tailwind v4**：用 `@import "tailwindcss"`，不是 v3 的 `@tailwind`
-- **`app/components/templates/` 已廢棄**，PreviewPanel 用 iframe + 後端 HTML
+- **Tailwind config 禁止 CSS 變數引用**：`generateTailwindConfig()` 必須用硬編碼值（`'9999px'` 非 `'var(--radius-full)'`），否則部署後 CSS 變數可能遺失導致樣式失效
+- **`app/components/templates/` 已廢棄**，PreviewPanel 用 Sandpack 渲染
 - **deployer_complete 路由順序**：先檢查「部署」→ 再檢查「回滾」→ 最後才是迭代修改
 - **文檔與實作同步**：改後端流程 → 同步更新 `uiux-skill/instructions/` + 此文件
 - **`handleCodePhaseRedo` 需要快照**：`uiuxStructureCode`/`uiuxAnimationCode`，否則 redo 在已修改代碼上重做

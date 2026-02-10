@@ -745,6 +745,18 @@ export default nextConfig
   // 統一清理 Tailwind v4 語法 + 非標準 @apply font-* 轉換
   let stylesContent = cleanTailwindV4Syntax(code.styles)
 
+  // 安全網：如果 tailwind config 引用了 CSS 變數但 styles 中缺少定義，注入 fallback
+  // 舊 project_files 中的 tailwind config 可能仍用 var(--radius-*) / var(--color-*)
+  if (tailwindConfig.includes('var(--radius-') && !stylesContent.includes('--radius-')) {
+    const fallbackRadiusVars = `\n/* Fallback radius variables */\n:root {\n  --radius-none: 0;\n  --radius-sm: 0.125rem;\n  --radius-md: 0.375rem;\n  --radius-lg: 0.5rem;\n  --radius-full: 9999px;\n}\n`
+    stylesContent = stylesContent + fallbackRadiusVars
+  }
+  if (tailwindConfig.includes('var(--color-') && !stylesContent.includes('--color-primary')) {
+    // 顏色變數通常由 LLM 生成在 globals.css 中，若缺失則使用中性灰作 fallback
+    const fallbackColorVars = `\n/* Fallback color variables */\n:root {\n  --color-primary: #2563eb;\n  --color-secondary: #4f46e5;\n  --color-accent: #06b6d4;\n  --color-background: #ffffff;\n  --color-foreground: #0f172a;\n  --color-muted: #f1f5f9;\n  --color-border: #e2e8f0;\n}\n`
+    stylesContent = stylesContent + fallbackColorVars
+  }
+
   const hasTailwindDirectives = stylesContent.includes('@tailwind base')
   const globalsCss = hasTailwindDirectives
     ? stylesContent

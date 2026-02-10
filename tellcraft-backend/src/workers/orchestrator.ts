@@ -138,8 +138,8 @@ interface FlowState {
 
 // PRD Discovery 限制
 const PRD_DISCOVERY_LIMITS = {
-  MAX_ROUNDS: 3,              // 最多 3 輪
-  MAX_TOTAL_QUESTIONS: 15,    // 累計最多 15 題
+  MAX_ROUNDS: 6,              // 最多 6 輪
+  MAX_TOTAL_QUESTIONS: 30,    // 累計最多 30 題
   QUESTIONS_PER_ROUND: 5,     // 每輪最多 5 題
 }
 
@@ -373,6 +373,20 @@ async function handleProcessMessage(
 
   switch (skillName) {
     case 'bdd-spec':
+      await executeBddSpecSkill({
+        taskId,
+        projectId,
+        conversationId,
+        userId,
+        message,
+        extractedEntities: classification.extractedEntities,
+        redis,
+        io,
+      })
+      break
+    case 'uiux':
+      // 安全網：UIUX 不應由 Classifier 直接觸發，設計流程從 BDD 需求釐清進入
+      console.warn(`[Orchestrator] Classifier 返回 "uiux"，重導向到 bdd-spec`)
       await executeBddSpecSkill({
         taskId,
         projectId,
@@ -3863,13 +3877,7 @@ async function executeDeployerSkill(input: DeployerSkillInput) {
   }
   await saveFlowState(redis, conversationId, state)
 
-  // 顯示預檢修復結果（如果有修復項）
-  const fixes = preCheck.sanitizeFixes || []
-  let confirmContent = `**部署準備就緒！**\n\n- 專案名稱：${preCheck.projectName}\n- 檔案數量：${preCheck.fileCount} 個\n- 預計網址：${preCheck.estimatedUrl}`
-  if (fixes.length > 0) {
-    confirmContent += `\n\n**預檢自動修復了 ${fixes.length} 項問題：**\n${fixes.map(f => `- ${f}`).join('\n')}`
-  }
-  confirmContent += '\n\n確認要部署嗎？'
+  const confirmContent = '**部署準備就緒！** 確認要部署嗎？'
 
   // 發送部署確認
   await sendMessage(conversationId, io, {
@@ -3881,7 +3889,7 @@ async function executeDeployerSkill(input: DeployerSkillInput) {
         projectName: preCheck.projectName,
         fileCount: preCheck.fileCount,
         estimatedUrl: preCheck.estimatedUrl,
-        sanitizeFixes: fixes,
+        sanitizeFixes: preCheck.sanitizeFixes || [],
       } as Record<string, unknown>,
     },
   })

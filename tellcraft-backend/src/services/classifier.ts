@@ -77,17 +77,20 @@ ${skillDescriptions}
 2. 如果訊息是閒聊、與建立產品無關 → chitchat
 3. 如果訊息是辱罵、亂打字、無意義字串 → abuse
 4. 如果用戶描述的是「想要建立什麼系統/功能」→ bdd-spec
-5. 如果用戶明確說「生成程式碼」或「實作」，而且已經有規格 → coder
-6. 如果用戶說「部署」或「上線」→ deployer
-7. 如果用戶說「網域」、「domain」、「自訂網址」（一般性）→ domain-manager
-8. 如果用戶明確說「買網域」、「購買網域」、「註冊網域」→ domain-purchase
-9. 如果用戶說「設定 DNS」、「綁定 DNS」、「自有網域」、「已有網域」→ domain-dns
-10. 如果無法確定 → clarification_needed
+5. 如果用戶提到設計、介面、UI/UX、視覺、landing page 等設計相關需求 → bdd-spec（設計流程從需求釐清開始）
+6. 如果用戶明確說「生成程式碼」或「實作」，而且已經有規格 → coder
+7. 如果用戶說「部署」或「上線」→ deployer
+8. 如果用戶說「網域」、「domain」、「自訂網址」（一般性）→ domain-manager
+9. 如果用戶明確說「買網域」、「購買網域」、「註冊網域」→ domain-purchase
+10. 如果用戶說「設定 DNS」、「綁定 DNS」、「自有網域」、「已有網域」→ domain-dns
+11. 如果無法確定 → clarification_needed
 
 ## 短消息判斷範例:
 - 「嗨」→ onboarding
 - 「哈囉你好」→ onboarding
 - 「幫我做一個購物網站」→ bdd-spec
+- 「幫我設計介面」→ bdd-spec（設計需求先走需求釐清）
+- 「做一個 landing page」→ bdd-spec
 - 「今天天氣」→ chitchat
 - 「aaa」→ abuse
 - 「我想做餐廳官網」→ bdd-spec
@@ -323,6 +326,20 @@ function ruleBasedClassification(message: string): ClassificationResult {
       intent: 'coder',
       confidence: 0.7,
       reasoning: '訊息包含程式碼生成相關關鍵詞',
+    }
+  }
+
+  // UIUX 設計相關（UIUX 流程從 BDD 需求釐清進入，設計類需求先走 BDD）
+  const uiuxPatterns = SKILL_REGISTRY['uiux'].triggerPatterns
+  const matchedUiuxPatterns = uiuxPatterns.filter(p => lowerMessage.includes(p.toLowerCase()))
+  if (matchedUiuxPatterns.length > 0) {
+    const entities = extractEntitiesFromMessage(message)
+    return {
+      intent: 'bdd-spec',
+      confidence: Math.min(0.5 + matchedUiuxPatterns.length * 0.1, 0.9),
+      reasoning: `設計類需求（匹配: ${matchedUiuxPatterns.join(', ')}），先進入需求釐清`,
+      suggestedProjectName: deriveProjectName(message, entities),
+      extractedEntities: entities,
     }
   }
 

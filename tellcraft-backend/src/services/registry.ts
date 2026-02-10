@@ -229,11 +229,16 @@ export function canUserUseSkill(
   return userPlanIndex >= requiredPlanIndex
 }
 
+// 內部 Skill：由狀態機或特殊模式觸發，不應出現在 Classifier 候選列表中
+const INTERNAL_SKILLS: Set<SkillName> = new Set(['uiux', 'quality-gate', 'fast-build'])
+
 /**
  * 建立 Skill Registry 的文字描述（供 AI 分類用）
+ * 過濾掉內部 Skill（uiux/quality-gate/fast-build），避免 LLM 誤分類
  */
 export function getSkillDescriptionsForClassifier(): string {
   return Object.values(SKILL_REGISTRY)
+    .filter(skill => !INTERNAL_SKILLS.has(skill.name))
     .map(skill => `
 [${skill.name}]
 名稱: ${skill.displayName}

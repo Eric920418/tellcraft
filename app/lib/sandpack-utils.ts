@@ -317,7 +317,7 @@ function extractTailwindCdnConfig(configContent: string): string {
   const extendBody = configContent.substring(start, i).trim()
   if (!extendBody) return ''
 
-  let jsObj = extendBody
+  const jsObj = extendBody
     .replace(/\s+as\s+\w+/g, '')
     .replace(/\/\/.*$/gm, '')
 
