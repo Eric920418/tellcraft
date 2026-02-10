@@ -153,6 +153,12 @@ function extractGoogleFonts(content: string): {
 function rewriteImports(content: string, filePath: string): string {
   let result = content
 
+  // 計算當前檔案到根目錄的相對路徑前綴（所有路徑重寫都需要）
+  // 例：components/layout/Header.tsx → depth=2 → prefix='../../'
+  //     App.tsx → depth=0 → prefix='./'
+  const depth = filePath.split('/').length - 1
+  const prefix = depth > 0 ? '../'.repeat(depth) : './'
+
   // 移除 'use client' / 'use server'
   result = result.replace(/^['"]use client['"];?\s*\n?/m, '')
   result = result.replace(/^['"]use server['"];?\s*\n?/m, '')
@@ -167,33 +173,32 @@ function rewriteImports(content: string, filePath: string): string {
   }
   // 替換成員訪問（font.className → ''）
   for (const [member, replacement] of fontInfo.memberReplacements) {
-    // 處理 className={font.className} 和模板字串 `${font.className}`
     const escaped = member.replace(/\./g, '\\.')
     result = result.replace(new RegExp(escaped, 'g'), replacement)
   }
 
-  // next/image → shim
+  // next/image → shim（路徑根據檔案深度計算）
   result = result.replace(
     /import\s+(\w+)\s+from\s+['"]next\/image['"]/g,
-    "import $1 from './shims/NextImage'"
+    `import $1 from '${prefix}shims/NextImage'`
   )
 
   // next/link → shim
   result = result.replace(
     /import\s+(\w+)\s+from\s+['"]next\/link['"]/g,
-    "import $1 from './shims/NextLink'"
+    `import $1 from '${prefix}shims/NextLink'`
   )
 
   // next/navigation → shim
   result = result.replace(
     /import\s*\{([^}]*)\}\s*from\s*['"]next\/navigation['"]/g,
-    "import {$1} from './shims/NextNavigation'"
+    `import {$1} from '${prefix}shims/NextNavigation'`
   )
 
   // next-themes → shim
   result = result.replace(
     /import\s*\{([^}]*)\}\s*from\s*['"]next-themes['"]/g,
-    "import {$1} from './shims/NextThemes'"
+    `import {$1} from '${prefix}shims/NextThemes'`
   )
 
   // framer-motion → motion/react（安全網）
@@ -202,28 +207,23 @@ function rewriteImports(content: string, filePath: string): string {
     "from 'motion/react'"
   )
 
-  // globals.css → styles.css（因為 app/globals.css 映射到 /styles.css）
+  // globals.css → 移除（entry /index.tsx 已經 import './styles.css'）
   result = result.replace(
     /import\s+['"]\.\/globals\.css['"]\s*;?\s*\n?/g,
-    ''  // 移除，因為 entry /index.tsx 已經 import './styles.css'
+    ''
   )
 
-  // 移除所有剩餘的 next / next/* import（type import、bare import 等）
-  // 已經由 shim 處理的（next/image, next/link, next/navigation）在上面已轉換
+  // 移除所有剩餘的 bare 'next' import（type import 等）
   result = result.replace(/import\s+(?:type\s+)?\{[^}]*\}\s*from\s*['"]next['"]\s*;?\s*\n?/g, '')
   result = result.replace(/import\s+(?:type\s+)?\w+\s+from\s*['"]next['"]\s*;?\s*\n?/g, '')
 
   // @/ alias → 相對路徑
-  // 計算當前檔案的目錄深度來決定相對路徑前綴
-  const depth = filePath.split('/').length - 1
-  const prefix = depth > 0 ? '../'.repeat(depth) : './'
   result = result.replace(
     /from\s+['"]@\/([^'"]+)['"]/g,
     (_, p) => `from '${prefix}${p}'`
   )
 
   // 移除所有未被 shim 處理的 next/* import（next/head, next/script, next/dynamic 等）
-  // shim 已處理：next/image, next/link, next/navigation, next/font/google
   result = result.replace(/import\s+(?:type\s+)?.*\s+from\s+['"]next\/(?!image|link|navigation|font)[^'"]*['"]\s*;?\s*\n?/g, '')
 
   return result
