@@ -71,7 +71,9 @@
       "Bash(npm audit:*)",
       "Bash(pnpm audit:*)",
       "WebFetch(domain:tc-7e31593c-acmfrarp6-erics-projects-57e51613.vercel.app)",
-      "Bash(vercel:*)"
+      "Bash(vercel:*)",
+      "Bash(find:*)",
+      "Bash(scp:*)"
     ]
   }
 }
