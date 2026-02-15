@@ -1,0 +1,91 @@
+// ============================================================
+// FlowState 型別定義（從 orchestrator.ts 抽出）
+// ============================================================
+
+import type { DesignVariant, DesignBrief, DesignTier, DesignSystem, GeneratedComponent, VariantConcept } from '../services/uiux-generation'
+import type { SpecIssue } from '../services/spec-discovery'
+import type { QualityReport } from '../services/quality-gate'
+import type { DeployPreCheckResult, DeploymentRecord } from '../services/deployer'
+import type { UIRequirementsSpec } from '../services/bdd-to-ui-spec'
+
+// ============================================================
+// 迭代歷史
+// ============================================================
+
+export interface IterationHistoryEntry {
+  timestamp: number
+  feedback: string       // 用戶原始反饋
+  filesChanged: string[] // 被修改的檔案路徑
+}
+
+// ============================================================
+// Generated Code 結構（被多處引用）
+// ============================================================
+
+export interface GeneratedCode {
+  pages: GeneratedComponent[]
+  components: GeneratedComponent[]
+  styles: string
+}
+
+// ============================================================
+// FlowState
+// ============================================================
+
+export interface FlowState {
+  phase: string
+  projectId?: string           // 關聯的專案 ID（用於 project_files 寫入）
+  currentRound: number
+  questionIndex: number
+  batchCount: number
+  sessionId?: string
+  taskId?: string
+  waitingForReply: boolean
+  currentItemId?: string
+  totalQuestionsAsked: number  // 累計已問問題數
+  // Spec Discovery 專用
+  specRound?: number           // Spec Discovery 輪數
+  specTotalQuestions?: number  // Spec Discovery 累計問題數
+  specIssues?: SpecIssue[]     // 當前輪次發現的問題（用於修復）
+  // UIUX 專用
+  uiuxTemplateId?: string      // 用戶選擇的模板 ID
+  uiuxVariants?: DesignVariant[] // 生成的 5 個設計變體
+  uiuxDesignSystem?: DesignSystem // 最終合併的 Design System
+  uiuxCodePhase?: 'structure' | 'animation' | 'rwd' | 'quality_gate' | 'complete' // 當前代碼生成階段
+  uiuxGeneratedCode?: GeneratedCode // 已生成的代碼（跨階段保留）
+  uiuxStructureCode?: GeneratedCode // Structure 階段快照（供 redo 時回溯）
+  uiuxAnimationCode?: GeneratedCode // Animation 階段快照（供 redo 時回溯）
+  // 設計釐清
+  uiuxDesignClarifyStep?: number // 當前釐清步驟（1-4）
+  uiuxDesignIdeas?: Array<{ step: string; answer: string }> // 用戶的設計想法
+  // Design Brief 確認
+  uiuxDesignBriefRound?: number
+  uiuxDesignBrief?: DesignBrief
+  uiuxDesignBriefHistory?: Array<{ role: 'assistant' | 'user'; content: string }>
+  uiuxPreparedTemplate?: import('../services/uiux-generation').TemplateData
+  // Design Tier（功能型 vs 創意型）
+  uiuxDesignTier?: DesignTier
+  // Quality Gate 報告
+  uiuxQualityReport?: QualityReport
+  // Deployer 專用
+  deployerPreCheck?: DeployPreCheckResult
+  // 代碼生成時間戳（用於死鎖偵測）
+  uiuxCodeGenerationStartedAt?: number // Date.now() 開始生成的時間
+  // 對話內迭代
+  iterationCount?: number              // 迭代次數
+  uiuxPreIterationCode?: GeneratedCode // 迭代前快照（供撤銷）
+  iterationHistory?: IterationHistoryEntry[] // 迭代歷史摘要
+  // 回滾
+  rollbackDeployments?: DeploymentRecord[]  // 可選的回滾版本列表
+  // BDD→UI 翻譯結果快取
+  uiuxUISpec?: UIRequirementsSpec
+  // 選中 variant 的創意概念
+  uiuxVariantConcept?: VariantConcept
+  // 快速模式
+  fastMode?: boolean
+  fastModeProductType?: string
+  // 智能模板匹配
+  matchedTemplateIds?: string[] // 匹配的模板 ID（分數排序）
+  // 用戶 ID（供內部函數取得 trackingContext）
+  userId?: string
+}

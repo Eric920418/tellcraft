@@ -17,6 +17,29 @@ Tellcraft 是一個 AI 驅動的自動化開發平台。用戶只需描述需求
 - **Server Actions**：30+ 已實作
 - **詳情**：[`.clarify/overview.md`](.clarify/overview.md)
 
+### 迭代更新 Skill 拆分 + 撤銷功能（2026-02-16）
+
+將迭代修改/回滾邏輯從 orchestrator.ts 獨立為 `iteration-skill.ts`，並新增撤銷功能。
+
+**架構改動**：
+- **`types/flow-state.ts`**（新建）：FlowState 介面 + `IterationHistoryEntry` + `GeneratedCode` 型別
+- **`workers/orchestrator-utils.ts`**（新建）：`sendMessage`/`saveFlowState`/`getFlowState`/`deleteFlowState`/`makeStreamingCallback`/`generatedCodeToFileRows` 共用函數
+- **`services/iteration-skill.ts`**（新建）：`executeIteration`（迭代修改）、`executeUndoIteration`（撤銷）、`executeRollbackQuery`（回滾查詢）、`executeRollbackSelection`（回滾選擇）
+- **`services/registry.ts`**（修改）：新增 `'iteration'` SkillName + INTERNAL_SKILLS
+- **`workers/orchestrator.ts`**（修改）：刪除 ~550 行，路由簡化為 `hasDeployIntent`/`hasRollbackIntent`/`hasUndoIntent` helper + 對應 Skill 呼叫
+
+**新功能**：
+- **撤銷上一次迭代**：關鍵字「撤銷/undo/復原/上一步/還原修改」觸發，恢復 `uiuxPreIterationCode` 快照（只能撤銷一步）
+- **迭代歷史**：每次迭代記錄 `{ timestamp, feedback, filesChanged }` 到 FlowState（最多 20 條）
+- **撤銷按鈕**：迭代完成後 quickReplies 動態顯示「撤銷修改」ghost 按鈕（僅當有快照時）
+
+| 指標 | 改動前 | 改動後 |
+|------|--------|--------|
+| orchestrator.ts 行數 | 4475 | 3926 |
+| 迭代邏輯位置 | 散佈 orchestrator 3 函數 + 5 分支 | 集中 `iteration-skill.ts` |
+| sendMessage 可用性 | orchestrator 私有 | `orchestrator-utils.ts` 全域共用 |
+| 撤銷功能 | 數據存了但沒觸發路徑 | 完整支援 |
+
 ### 智能模板匹配系統（2026-02-15）
 
 BDD 規格完成後，自動分析需求並匹配合適的設計模板，取代固定顯示全部模板的舊邏輯。
@@ -1257,12 +1280,16 @@ tellcraft-backend/
 │   │   ├── conversation.ts
 │   │   ├── project.ts
 │   │   └── health.ts
+│   ├── types/             # 共用型別
+│   │   └── flow-state.ts  # FlowState 介面 + IterationHistoryEntry
 │   ├── workers/           # BullMQ Workers
-│   │   └── orchestrator.ts
+│   │   ├── orchestrator.ts
+│   │   └── orchestrator-utils.ts  # 共用基礎設施（sendMessage/saveFlowState 等）
 │   ├── services/          # 業務邏輯
 │   │   ├── prefilter.ts   # 前置過濾（零 LLM 成本防禦）
 │   │   ├── classifier.ts  # 意圖分類（含 Meta Intent）
 │   │   ├── registry.ts
+│   │   ├── iteration-skill.ts  # 迭代修改 + 撤銷 + 回滾
 │   │   └── bdd-session.ts
 │   ├── middleware/        # 中間件
 │   │   └── auth.ts

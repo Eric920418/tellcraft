@@ -2,7 +2,7 @@
 // Skill 註冊表
 // ============================================================
 
-export type SkillName = 'bdd-spec' | 'coder' | 'uiux' | 'deployer' | 'domain-manager' | 'domain-purchase' | 'domain-dns' | 'quality-gate' | 'fast-build'
+export type SkillName = 'bdd-spec' | 'coder' | 'uiux' | 'deployer' | 'domain-manager' | 'domain-purchase' | 'domain-dns' | 'quality-gate' | 'fast-build' | 'iteration'
 
 export interface SkillMetadata {
   name: SkillName
@@ -192,6 +192,22 @@ export const SKILL_REGISTRY: Record<SkillName, SkillMetadata> = {
       optional: [],
     },
   },
+
+  'iteration': {
+    name: 'iteration',
+    displayName: '迭代修改',
+    description: '修改已生成的 UIUX 設計、撤銷和版本回滾',
+    triggerPatterns: [
+      '修改', '調整', '撤銷', '回滾',
+    ],
+    minPlan: 'free',
+    costLevel: 'medium',
+    timeoutMs: 300000, // 5 分鐘
+    inputSchema: {
+      required: ['projectId'],
+      optional: [],
+    },
+  },
 }
 
 // ============================================================
@@ -230,7 +246,7 @@ export function canUserUseSkill(
 }
 
 // 內部 Skill：由狀態機或特殊模式觸發，不應出現在 Classifier 候選列表中
-const INTERNAL_SKILLS: Set<SkillName> = new Set(['uiux', 'quality-gate', 'fast-build'])
+const INTERNAL_SKILLS: Set<SkillName> = new Set(['uiux', 'quality-gate', 'fast-build', 'iteration'])
 
 /**
  * 建立 Skill Registry 的文字描述（供 AI 分類用）

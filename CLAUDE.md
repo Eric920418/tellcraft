@@ -56,10 +56,13 @@ git pull && pnpm build && pm2 restart tellcraft-backend
 | 模組 | 路徑 | 職責 |
 |------|------|------|
 | **Orchestrator** | `tellcraft-backend/src/workers/orchestrator.ts` | BullMQ Worker，核心流程引擎，`FlowState.phase` 狀態機 |
+| **Orchestrator Utils** | `tellcraft-backend/src/workers/orchestrator-utils.ts` | 共用基礎設施：sendMessage/saveFlowState/getFlowState 等 |
+| **FlowState 型別** | `tellcraft-backend/src/types/flow-state.ts` | FlowState 介面 + 子型別（避免循環 import） |
 | **Classifier** | `tellcraft-backend/src/services/classifier.ts` | 三層防禦：Prefilter → Meta Intent → Skill 分類 |
 | **UIUX Generation** | `tellcraft-backend/src/services/uiux-generation.ts` | 設計生成核心（Brief/Variants/Structure/Animation/RWD/Refine） |
 | **Quality Gate** | `tellcraft-backend/src/services/quality-gate.ts` | A11y/Performance/CodeQuality 靜態檢查 + LLM 自動修復 |
 | **Deployer** | `tellcraft-backend/src/services/deployer.ts` | sanitize → build 驗證 → Vercel 部署 → 回滾 |
+| **Iteration Skill** | `tellcraft-backend/src/services/iteration-skill.ts` | 迭代修改 + 撤銷 + 版本回滾（從 orchestrator 抽出） |
 | **Fast Build** | `tellcraft-backend/src/services/fast-build-generation.ts` | 快速模式輔助：tier 偵測、產品推斷、默認 DesignSystem（零 LLM） |
 | **Template Matcher** | `tellcraft-backend/src/services/template-matcher.ts` | 三層評分智能匹配（關鍵詞 40 + Category 30 + UISpec 30，零 LLM） |
 | **Sandpack 預覽** | `app/lib/sandpack-utils.ts` + `app/components/uiux/SandpackPreview.tsx` | UIUX 預覽核心，Sandpack 真實 React 渲染（取代 regex TSX→HTML） |
@@ -73,7 +76,8 @@ git pull && pnpm build && pm2 restart tellcraft-backend
 | `bdd-spec` | 需求釐清 + BDD 規格產出（5 階段：Discovery → Clarify → Formulation → Actions Design → ISA Config）|
 | `uiux` | 前端介面設計（3 階段：Design Discovery → Design Lab → Implementation）|
 | `quality-gate` | UIUX RWD 完成後**自動觸發**，critical 問題 LLM 自動修復（最多 3 輪）|
-| `deployer` | UIUX 代碼 → Next.js → Vercel 部署（用戶說「部署」觸發），支援迭代 + 回滾 |
+| `deployer` | UIUX 代碼 → Next.js → Vercel 部署（用戶說「部署」觸發） |
+| `iteration` | 迭代修改 + 撤銷上一步 + 版本回滾（`uiux_complete`/`deployer_complete` 自動路由） |
 | `fast-build` | 快速建站：一句話 → 跳過 BDD/Discovery → 直接 Structure → Animation → RWD → 靜態 QG → Preview |
 
 ### Orchestrator Phase 狀態機
