@@ -5,7 +5,6 @@
 import { Router } from 'express'
 import { readFileSync, existsSync } from 'fs'
 import { join } from 'path'
-import Anthropic from '@anthropic-ai/sdk'
 import { query, queryOne } from '../db/client'
 import { requireAuth, requireAdmin } from '../middleware/auth'
 
@@ -13,11 +12,6 @@ const router: Router = Router()
 
 // UUID 格式檢測
 const isUUID = (s: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s)
-
-// Anthropic client
-const anthropic = new Anthropic({
-  apiKey: process.env.ANTHROPIC_API_KEY,
-})
 
 // 預生成模板映射（模板 slug -> 文件名）
 const PREGENERATED_TEMPLATES: Record<string, string> = {
@@ -171,90 +165,33 @@ router.get('/preview/:id', async (req, res) => {
       return res.send(cached.html_content)
     }
 
-    // 4. 調用 LLM 生成 HTML（最後手段，應避免）
-    console.log(`[Templates] ⚠️ LLM 生成模板預覽: ${template.name} (建議添加預生成文件)`)
+    // 4. 無快取 → 返回佔位頁面（禁止 LLM fallback，所有預覽必須預先生成）
+    console.log(`[Templates] ⚠️ 模板無預覽快取: ${template.name} (slug: ${template.slug})`)
 
     const designDefaults = template.design_defaults
-    const pageStructure = template.page_structure
+    const placeholderHtml = `<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>${template.name} - 預覽</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="${designDefaults.colorMode === 'dark' ? 'bg-gray-900 text-white' : 'bg-gray-50 text-gray-800'} min-h-screen flex items-center justify-center">
+  <div class="text-center max-w-md px-6">
+    <div class="w-16 h-16 rounded-2xl ${designDefaults.colorMode === 'dark' ? 'bg-white/10' : 'bg-gray-200'} flex items-center justify-center mx-auto mb-6">
+      <svg class="w-8 h-8 ${designDefaults.colorMode === 'dark' ? 'text-white/40' : 'text-gray-400'}" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>
+    </div>
+    <h2 class="text-xl font-semibold mb-2">${template.name}</h2>
+    <p class="${designDefaults.colorMode === 'dark' ? 'text-gray-400' : 'text-gray-500'} text-sm">${template.description}</p>
+    <p class="${designDefaults.colorMode === 'dark' ? 'text-gray-600' : 'text-gray-300'} text-xs mt-4">預覽尚未生成</p>
+  </div>
+</body>
+</html>`
 
-    const prompt = `你是一個專業的前端開發者。根據以下設計規格，生成一個完整的 HTML 頁面預覽。
-
-## 模板資訊
-- 名稱：${template.name}
-- 類別：${template.category}
-- 描述：${template.description}
-
-## 設計規格
-- 風格：${designDefaults.style}
-- 色彩模式：${designDefaults.colorMode}
-- 主色調：${designDefaults.primaryColor}
-- 強調色：${designDefaults.accentColor}
-- 字體：${designDefaults.fontFamily}
-- 圓角：${designDefaults.borderRadius}
-- 間距：${designDefaults.spacing}
-
-## 頁面結構
-- 頁面：${pageStructure.pages.join(', ')}
-- 組件：${pageStructure.components.join(', ')}
-
-## 要求
-1. 生成一個完整的 HTML 文件，使用 Tailwind CSS CDN
-2. 頁面應該展示模板的主要視覺風格和佈局
-3. 使用指定的顏色、字體和間距
-4. 包含指定的組件（如 header, sidebar, stats-card 等）
-5. 頁面要有真實的假資料（Lorem ipsum 或合理的範例數據）
-6. 響應式設計，但優先桌面版
-7. ${designDefaults.colorMode === 'dark' ? '使用深色背景' : '使用淺色背景'}
-
-## 輸出格式
-直接輸出完整的 HTML 代碼，不要包含 \`\`\`html 標記。從 <!DOCTYPE html> 開始。`
-
-    const response = await anthropic.messages.create({
-      model: 'claude-sonnet-4-20250514',
-      max_tokens: 8000,
-      messages: [
-        {
-          role: 'user',
-          content: prompt,
-        },
-      ],
-    })
-
-    let htmlContent = ''
-    for (const block of response.content) {
-      if (block.type === 'text') {
-        htmlContent += block.text
-      }
-    }
-
-    // 清理可能的 markdown 標記
-    htmlContent = htmlContent.trim()
-    if (htmlContent.startsWith('```html')) {
-      htmlContent = htmlContent.slice(7)
-    }
-    if (htmlContent.startsWith('```')) {
-      htmlContent = htmlContent.slice(3)
-    }
-    if (htmlContent.endsWith('```')) {
-      htmlContent = htmlContent.slice(0, -3)
-    }
-    htmlContent = htmlContent.trim()
-
-    // 5. 緩存到數據庫（初次生成，version = 1）
-    await query(
-      `INSERT INTO template_previews (template_id, html_content, version, updated_at)
-       VALUES ($1, $2, 1, NOW())
-       ON CONFLICT (template_id) DO UPDATE SET
-         html_content = $2,
-         version = template_previews.version + 1,
-         updated_at = NOW()`,
-      [templateId, htmlContent]
-    )
-
-    // 6. 返回 HTML
     res.setHeader('Content-Type', 'text/html; charset=utf-8')
-    res.setHeader('X-Cache', 'MISS')
-    res.send(htmlContent)
+    res.setHeader('X-Cache', 'NONE')
+    res.send(placeholderHtml)
 
   } catch (error) {
     console.error('[Templates] 生成預覽失敗:', error)
@@ -324,90 +261,13 @@ router.post('/preview/:id/regenerate', requireAuth, async (req, res) => {
     )
     const newVersion = (currentVersion?.version || 0) + 1
 
-    // 3. 調用 LLM 生成新版本
-    console.log(`[Templates] 重新生成模板預覽: ${template.name} (v${newVersion})`)
+    // 3. 禁止 LLM 生成 — 模板預覽必須透過 DB 手動插入（使用 Claude Code 生成 SQL）
+    console.log(`[Templates] ⚠️ regenerate 已禁用 LLM: ${template.name} (v${newVersion})`)
 
-    const designDefaults = template.design_defaults
-    const pageStructure = template.page_structure
-
-    const prompt = `你是一個專業的前端開發者。根據以下設計規格，生成一個完整的 HTML 頁面預覽。
-
-## 模板資訊
-- 名稱：${template.name}
-- 類別：${template.category}
-- 描述：${template.description}
-
-## 設計規格
-- 風格：${designDefaults.style}
-- 色彩模式：${designDefaults.colorMode}
-- 主色調：${designDefaults.primaryColor}
-- 強調色：${designDefaults.accentColor}
-- 字體：${designDefaults.fontFamily}
-- 圓角：${designDefaults.borderRadius}
-- 間距：${designDefaults.spacing}
-
-## 頁面結構
-- 頁面：${pageStructure.pages.join(', ')}
-- 組件：${pageStructure.components.join(', ')}
-
-## 要求
-1. 生成一個完整的 HTML 文件，使用 Tailwind CSS CDN
-2. 頁面應該展示模板的主要視覺風格和佈局
-3. 使用指定的顏色、字體和間距
-4. 包含指定的組件（如 header, sidebar, stats-card 等）
-5. 頁面要有真實的假資料（Lorem ipsum 或合理的範例數據）
-6. 響應式設計，但優先桌面版
-7. ${designDefaults.colorMode === 'dark' ? '使用深色背景' : '使用淺色背景'}
-
-## 輸出格式
-直接輸出完整的 HTML 代碼，不要包含 \`\`\`html 標記。從 <!DOCTYPE html> 開始。`
-
-    const response = await anthropic.messages.create({
-      model: 'claude-sonnet-4-20250514',
-      max_tokens: 8000,
-      messages: [
-        {
-          role: 'user',
-          content: prompt,
-        },
-      ],
-    })
-
-    let htmlContent = ''
-    for (const block of response.content) {
-      if (block.type === 'text') {
-        htmlContent += block.text
-      }
-    }
-
-    // 清理可能的 markdown 標記
-    htmlContent = htmlContent.trim()
-    if (htmlContent.startsWith('```html')) {
-      htmlContent = htmlContent.slice(7)
-    }
-    if (htmlContent.startsWith('```')) {
-      htmlContent = htmlContent.slice(3)
-    }
-    if (htmlContent.endsWith('```')) {
-      htmlContent = htmlContent.slice(0, -3)
-    }
-    htmlContent = htmlContent.trim()
-
-    // 4. 更新緩存
-    await query(
-      `INSERT INTO template_previews (template_id, html_content, version, updated_at)
-       VALUES ($1, $2, $3, NOW())
-       ON CONFLICT (template_id) DO UPDATE SET
-         html_content = $2,
-         version = $3,
-         updated_at = NOW()`,
-      [id, htmlContent, newVersion]
-    )
-
-    res.json({
-      success: true,
-      version: newVersion,
-      message: `模板預覽已重新生成 (v${newVersion})`,
+    return res.status(403).json({
+      error: '模板預覽 LLM 生成已禁用。請透過 Claude Code 生成 HTML 後直接插入 template_previews 表。',
+      slug: template.slug,
+      currentVersion: currentVersion?.version || 0,
     })
 
   } catch (error) {
