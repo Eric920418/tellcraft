@@ -67,6 +67,9 @@ router.get('/', async (req, res) => {
       thumbnail_url: string
       preview_image_url: string | null
       tags: string[]
+      industry: string[]
+      use_cases: string[]
+      component_types: string[]
       design_defaults: unknown
       page_structure: unknown
       is_active: boolean
@@ -83,6 +86,9 @@ router.get('/', async (req, res) => {
       thumbnailUrl: row.thumbnail_url,
       previewImageUrl: row.preview_image_url,
       tags: row.tags,
+      industry: row.industry || [],
+      useCases: row.use_cases || [],
+      componentTypes: row.component_types || [],
       designDefaults: row.design_defaults,
       pageStructure: row.page_structure,
       isActive: row.is_active,

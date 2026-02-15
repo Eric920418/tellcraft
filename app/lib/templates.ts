@@ -4,6 +4,7 @@
 
 // 模板分類
 export type TemplateCategory = 'saas' | 'landing' | 'ecommerce' | 'content'
+  | 'portfolio' | 'dashboard' | 'blog' | 'event'
 
 // 設計風格
 export type DesignStyle = 'minimal' | 'modern' | 'professional' | 'playful' | 'elegant'
@@ -246,7 +247,11 @@ export const CATEGORY_LABELS: Record<TemplateCategory, string> = {
   saas: 'SaaS 應用',
   landing: 'Landing Page',
   ecommerce: '電商',
-  content: '內容網站'
+  content: '內容網站',
+  portfolio: '作品集',
+  dashboard: '控制台',
+  blog: '部落格',
+  event: '活動',
 }
 
 /**
@@ -256,5 +261,9 @@ export const CATEGORY_ICONS: Record<TemplateCategory, string> = {
   saas: '📊',
   landing: '🚀',
   ecommerce: '🛒',
-  content: '📝'
+  content: '📝',
+  portfolio: '🎨',
+  dashboard: '📈',
+  blog: '✍️',
+  event: '🎪',
 }

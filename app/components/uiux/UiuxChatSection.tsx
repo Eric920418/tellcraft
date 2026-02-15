@@ -44,6 +44,7 @@ export interface UiuxMessage {
     data: {
       templates?: TemplateCardData[]
       recommendedIds?: string[]
+      filteredMode?: boolean
       previewUrl?: string
       selectedTemplateId?: string
       // 變體選擇器數據
@@ -274,8 +275,9 @@ export default function UiuxChatSection({
                   onPreview={handleTemplatePreview}
                   selectedId={selectedTemplateId || undefined}
                   recommendedIds={message.richContent.data.recommendedIds}
+                  initialTemplates={message.richContent.data.templates}
                   columns={1}
-                  showCategories={false}
+                  showCategories={!message.richContent.data.filteredMode}
                 />
               </motion.div>
             )}

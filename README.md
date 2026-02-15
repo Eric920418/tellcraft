@@ -12,10 +12,41 @@ Tellcraft 是一個 AI 驅動的自動化開發平台。用戶只需描述需求
 
 ## 當前開發進度
 
-- **狀態**：✅ Phase 1-9 + Server Actions + VPS Backend + 前端 Chat 串接 + 認證系統 + 訪客體驗改善 + 儀表板系統 + BDD Spec 完整修復 + 專案版本管理 + **UIUX 生成邏輯重構** + **Design Tier** + **專案自動命名** + **PreviewPanel iframe 重構** + **Quality Gate 品質檢查** + **Code Preview 即時渲染** + **串流實時預覽** + **BDD→UI 翻譯 + Variant 創意概念** + **Fast Mode 快速建站**
+- **狀態**：✅ Phase 1-9 + Server Actions + VPS Backend + 前端 Chat 串接 + 認證系統 + 訪客體驗改善 + 儀表板系統 + BDD Spec 完整修復 + 專案版本管理 + **UIUX 生成邏輯重構** + **Design Tier** + **專案自動命名** + **PreviewPanel iframe 重構** + **Quality Gate 品質檢查** + **Code Preview 即時渲染** + **串流實時預覽** + **BDD→UI 翻譯 + Variant 創意概念** + **Fast Mode 快速建站** + **智能模板匹配**
 - **釐清項目**：28 項全部解決
 - **Server Actions**：30+ 已實作
 - **詳情**：[`.clarify/overview.md`](.clarify/overview.md)
+
+### 智能模板匹配系統（2026-02-15）
+
+BDD 規格完成後，自動分析需求並匹配合適的設計模板，取代固定顯示全部模板的舊邏輯。
+
+**核心改動**：
+- **DB 擴展**：`template_category` ENUM 從 4→8（新增 portfolio/dashboard/blog/event），模板新增 `industry[]`/`use_cases[]`/`component_types[]` 匹配維度 + GIN 索引
+- **三層評分引擎**（`template-matcher.ts`，零 LLM 成本）：
+  - Layer 1: 關鍵詞匹配（40 分）— 需求文本 vs 模板 industry/use_cases/tags
+  - Layer 2: Category 匹配（30 分）— `inferProductType()` → category 映射
+  - Layer 3: UISpec 匹配（30 分）— 頁面/元件重疊度（可選）
+- **條件路由**：有匹配 → 顯示「討論式設計 / 使用模板(N個推薦)」；無匹配 → 只顯示「開始設計」
+- **篩選顯示**：`showTemplatePicker()` 只查詢匹配的模板 ID，按分數排序
+- **前端 Bug 修復**：`TemplatePicker.tsx` 新增 `initialTemplates` prop，後端已傳入篩選結果時不再呼叫 API 重新載入全部
+
+| 檔案 | 動作 |
+|------|------|
+| `migrations/005_expand_templates.sql` | 新建 — ENUM 擴展 + 新欄位 + GIN 索引 |
+| `template-matcher.ts` | 新建 — 三層匹配引擎 |
+| `scripts/seed-templates-v2.sql` | 新建 — 更新現有模板 + 後續模板骨架 |
+| `orchestrator.ts` | 修改 — FlowState.matchedTemplateIds + completeSpecPhase 匹配 + showTemplatePicker 篩選 |
+| `TemplatePicker.tsx` | 修改 — initialTemplates prop + 動態分類選項 |
+| `UiuxChatSection.tsx` | 修改 — 傳遞 initialTemplates + filteredMode |
+| `templates.ts` | 修改 — TemplateCategory 擴展 8 個 + CATEGORY_LABELS/ICONS |
+| `templates route` | 修改 — API 返回 industry/useCases/componentTypes |
+
+```bash
+# 部署步驟
+psql "$DATABASE_URL" -f tellcraft-backend/migrations/005_expand_templates.sql
+psql "$DATABASE_URL" -f tellcraft-backend/scripts/seed-templates-v2.sql
+```
 
 ### Fast Mode 快速建站（2026-02-09）
 
@@ -705,10 +736,17 @@ Round 3: 如果還有新問題，最後一輪
 | LLM 返回 0 題 | - | 需求已足夠清楚 |
 | 用戶輸入「完成釐清」| - | 主動結束 |
 
-**防重複機制**：
-- `existingItems` 傳入已回答問題，prompt 中標記「不要再問」
-- LLM prompt 強調「邏輯推論」：根據答案排除不可能的情況
-- LLM prompt 強調「理解隱含意義」：用戶答案可能隱含排除某些功能
+**三層去重機制**（2026-02-14 新增）：
+
+| 層級 | 實現 | 成本 | Fallback |
+|------|------|------|----------|
+| L1 Bug Fix | `existingItems` 現在包含 `resolvedItems` + `clarifyItems`（待答），修復舊版只傳 resolved 的漏洞 | 0 | - |
+| L2 Decision Summary | `generateDecisionSummary()` 用 Haiku 將已答 Q&A 壓縮為結構化主題摘要，注入 PRD Discovery prompt 最前方 | ~$0.003/輪 | 返回 null，不注入 |
+| L3 Post-generation Dedup | `deduplicateQuestions()` 用 Haiku 對新生成問題做語意去重，過濾與既有問題重複的 | ~$0.001/輪 | 返回原始問題 |
+
+- 相關檔案：`clarify-dedup.ts`（L2+L3）、`prd-discovery.ts`（L2 注入）、`orchestrator.ts`（調用整合）
+- 每輪額外成本 ~$0.004（vs Sonnet ~$0.05/輪，忽略不計）
+- 三層全部降級安全：任一失敗退化為修復前的行為
 
 ---
 
@@ -1447,7 +1485,8 @@ Hero → 往下滾動 → 產品介紹（SEO 友好）→ Testimonials → CTA
 | `classifier.ts` | Haiku | 每條新訊息 | 意圖分類（規則式 + LLM）。設計類關鍵詞自動導向 bdd-spec |
 | `prefilter.ts` | 無 | 每條訊息（最先） | 空訊息/長度/Prompt Injection/Rate Limit 檢查 |
 | `bdd-to-ui-spec.ts` | Haiku | UIUX Pipeline 內部 | ISA BDD Feature Files → `UIRequirementsSpec`（結構化 UI 需求），快取在 FlowState |
-| `prd-discovery.ts` | Sonnet | bdd-spec Skill | PRD 需求發掘（多輪） |
+| `prd-discovery.ts` | Sonnet | bdd-spec Skill | PRD 需求發掘（多輪），接受 DecisionSummary 注入 |
+| `clarify-dedup.ts` | Haiku（2 次） | bdd-spec Skill | Decision Summary 生成 + Post-generation 語意去重 |
 | `spec-discovery.ts` | Sonnet | bdd-spec Skill | 規格品質檢查（S1-S6 六類問題） |
 | `formulation.ts` | Sonnet（5 次） | bdd-spec Skill | 生成 Schema + Features + EntityMapping + Actions + ISA |
 | `fast-build-generation.ts` | 無 | fast-build Skill | 規則式 tier 偵測/產品推斷/預設 DesignSystem（零 LLM） |

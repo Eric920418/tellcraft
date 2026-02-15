@@ -61,6 +61,7 @@ git pull && pnpm build && pm2 restart tellcraft-backend
 | **Quality Gate** | `tellcraft-backend/src/services/quality-gate.ts` | A11y/Performance/CodeQuality 靜態檢查 + LLM 自動修復 |
 | **Deployer** | `tellcraft-backend/src/services/deployer.ts` | sanitize → build 驗證 → Vercel 部署 → 回滾 |
 | **Fast Build** | `tellcraft-backend/src/services/fast-build-generation.ts` | 快速模式輔助：tier 偵測、產品推斷、默認 DesignSystem（零 LLM） |
+| **Template Matcher** | `tellcraft-backend/src/services/template-matcher.ts` | 三層評分智能匹配（關鍵詞 40 + Category 30 + UISpec 30，零 LLM） |
 | **Sandpack 預覽** | `app/lib/sandpack-utils.ts` + `app/components/uiux/SandpackPreview.tsx` | UIUX 預覽核心，Sandpack 真實 React 渲染（取代 regex TSX→HTML） |
 | **VPS API Client** | `app/lib/vps-api.ts` | 前端呼叫 VPS 的 HTTP 客戶端 |
 | **WebSocket Hook** | `app/hooks/useVpsWebSocket.ts` | 即時訊息推送（型別定義） |
@@ -97,7 +98,10 @@ git pull && pnpm build && pm2 restart tellcraft-backend
 ### UIUX Pipeline 概覽
 
 ```
-Discovery（Path A 問卷 / Path B 模板）
+BDD 完成 → matchTemplates()（零 LLM，三層評分）
+  ├─ 有匹配 → "討論式設計 / 使用模板(N個推薦)"
+  └─ 無匹配 → "開始設計"（不顯示模板按鈕）
+Discovery（Path A 問卷 / Path B 篩選後模板）
   → Design Brief 確認（AI 顧問 + Design Tier 推薦，最多 3 輪）
   → BDD→UI 翻譯（Haiku，快取在 FlowState.uiuxUISpec）
   → 5 變體生成 + 用戶選擇 → extractVariantConcept()

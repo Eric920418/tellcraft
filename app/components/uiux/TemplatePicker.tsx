@@ -15,6 +15,7 @@ interface TemplatePickerProps {
   onPreview?: (templateId: string) => void  // 預覽模板（點擊卡片觸發）
   selectedId?: string
   recommendedIds?: string[]  // 推薦的模板 ID 列表
+  initialTemplates?: TemplateCardData[]  // 後端傳入的篩選模板（優先使用，不呼叫 API）
   showCategories?: boolean
   columns?: 1 | 2 | 3
 }
@@ -26,6 +27,7 @@ export default function TemplatePicker({
   onPreview,
   selectedId,
   recommendedIds,
+  initialTemplates,
   showCategories = true,
   columns = 2
 }: TemplatePickerProps) {
@@ -35,8 +37,15 @@ export default function TemplatePicker({
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
-  // 載入模板
+  // 載入模板（優先使用後端傳入的篩選結果）
   useEffect(() => {
+    if (initialTemplates && initialTemplates.length > 0) {
+      setTemplates(initialTemplates)
+      setFilteredTemplates(initialTemplates)
+      setIsLoading(false)
+      return
+    }
+
     const loadTemplates = async () => {
       setIsLoading(true)
       setError(null)
@@ -54,7 +63,7 @@ export default function TemplatePicker({
     }
 
     loadTemplates()
-  }, [])
+  }, [initialTemplates])
 
   // 過濾模板
   useEffect(() => {
@@ -75,13 +84,15 @@ export default function TemplatePicker({
     setFilteredTemplates(filtered)
   }, [templates, activeCategory, recommendedIds])
 
-  // 分類選項
+  // 動態生成分類選項（只顯示模板中實際存在的分類）
+  const existingCategories = [...new Set(templates.map(t => t.category))]
   const categories: { value: FilterCategory; label: string; icon?: string }[] = [
     { value: 'all', label: '全部' },
-    { value: 'saas', label: CATEGORY_LABELS.saas, icon: CATEGORY_ICONS.saas },
-    { value: 'landing', label: CATEGORY_LABELS.landing, icon: CATEGORY_ICONS.landing },
-    { value: 'ecommerce', label: CATEGORY_LABELS.ecommerce, icon: CATEGORY_ICONS.ecommerce },
-    { value: 'content', label: CATEGORY_LABELS.content, icon: CATEGORY_ICONS.content },
+    ...existingCategories.map(cat => ({
+      value: cat as FilterCategory,
+      label: CATEGORY_LABELS[cat as TemplateCategory] || cat,
+      icon: CATEGORY_ICONS[cat as TemplateCategory],
+    })),
   ]
 
   if (isLoading) {

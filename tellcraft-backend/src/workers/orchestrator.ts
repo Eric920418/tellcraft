@@ -17,6 +17,7 @@ import {
   ClarifyItem,
 } from '../services/bdd-session'
 import { runPrdDiscovery } from '../services/prd-discovery'
+import { generateDecisionSummary, deduplicateQuestions } from '../services/clarify-dedup'
 import { runFormulation, fixMultipleFeatures, GeneratedFeature, FeatureFixInput } from '../services/formulation'
 import { runSpecDiscovery, specIssuesToClarifyItems, SpecIssue } from '../services/spec-discovery'
 import {
@@ -44,6 +45,7 @@ import { runQualityGate, autoFixCriticalIssues, QualityReport } from '../service
 import { prepareDeployment, executeDeployment, DeployPreCheckResult, listProjectDeployments, rollbackToDeployment, DeploymentRecord, toVercelSlug } from '../services/deployer'
 import { detectDesignTier, inferProductType, inferPages, buildDefaultDesignSystem, buildMinimalTemplate } from '../services/fast-build-generation'
 import { ensureResponsiveClasses } from '../services/uiux-generation'
+import { matchTemplates } from '../services/template-matcher'
 
 // ============================================================
 // 類型定義
@@ -134,6 +136,8 @@ interface FlowState {
   // 快速模式
   fastMode?: boolean
   fastModeProductType?: string
+  // 智能模板匹配
+  matchedTemplateIds?: string[] // 匹配的模板 ID（分數排序）
   // 用戶 ID（供內部函數取得 trackingContext）
   userId?: string
 }
@@ -1344,6 +1348,8 @@ async function completeClärifyPhase(
   }
 
   const resolvedItems = session.data.resolvedItems || []
+  const pendingClarifyItems = session.data.clarifyItems || []
+  const allExistingItems = [...resolvedItems, ...pendingClarifyItems]
   const totalAnswered = resolvedItems.length
 
   // 檢查是否達到終止條件
@@ -1369,11 +1375,17 @@ async function completeClärifyPhase(
   // 取得原始需求
   const originalRequirements = session.data.originalRequirements || ''
 
-  // 調用 LLM 生成更多問題，傳入已回答的問題避免重複
+  // L2：生成 Decision Summary（>= 5 題才值得摘要）
+  const decisionSummary = resolvedItems.length >= 5
+    ? await generateDecisionSummary(resolvedItems, { conversationId })
+    : null
+
+  // 調用 LLM 生成更多問題，傳入已回答+待答的問題避免重複
   const discoveryResult = await runPrdDiscovery(
     originalRequirements,
-    { conversationId },  // 追蹤上下文
-    resolvedItems  // 傳入已回答的問題
+    { conversationId },
+    allExistingItems,
+    decisionSummary
   )
 
   if (!discoveryResult.success || !discoveryResult.items || discoveryResult.items.length === 0) {
@@ -1387,9 +1399,24 @@ async function completeClärifyPhase(
     return
   }
 
-  // 有新問題，繼續釐清
-  const newItems = discoveryResult.items
-  console.log(`[Orchestrator] 第 ${state.currentRound + 1} 輪生成 ${newItems.length} 個新問題`)
+  // L3：Post-generation 去重
+  let newItems = discoveryResult.items
+  if (newItems.length > 0 && allExistingItems.length > 0) {
+    newItems = await deduplicateQuestions(newItems, allExistingItems, { conversationId })
+  }
+
+  // 去重後全部被移除 → 直接進 Formulation
+  if (newItems.length === 0) {
+    console.log(`[Orchestrator] 第 ${state.currentRound + 1} 輪問題全部去重，進入 Formulation`)
+    await sendMessage(conversationId, io, {
+      content: `需求已經足夠清楚了！`,
+      stage: 'prd_discovery_complete',
+    })
+    await finishClarifyAndStartFormulation(conversationId, state, redis, io)
+    return
+  }
+
+  console.log(`[Orchestrator] 第 ${state.currentRound + 1} 輪生成 ${newItems.length} 個新問題（去重後）`)
 
   // 添加新問題到 session
   await addClarifyItems({ sessionId: state.sessionId!, items: newItems })
@@ -1913,22 +1940,53 @@ async function completeSpecPhase(
     })
   }
 
-  // 詢問用戶設計偏好
-  await sendMessage(conversationId, io, {
-    content: `接下來是 UI/UX 設計階段。\n\n你對產品的外觀有什麼想法嗎？\n\n**A.** 我有一些想法，想跟你討論\n\n**B.** 沒有特別的想法，給我看看模板`,
-    stage: 'uiux_design_preference',
-    quickReplies: [
-      { label: '我有想法，想跟你討論', value: 'A', style: 'primary' },
-      { label: '沒有想法，給我看看模板', value: 'B', style: 'secondary' },
-    ],
-  })
+  // 智能模板匹配：分析需求，判斷有無適合模板
+  const originalRequirements = session.data?.originalRequirements || ''
+  let bddSpec = ''
+  if (session.data?.featuresContent) {
+    bddSpec = session.data.featuresContent.map((f: { content?: string }) => f.content || '').join('\n')
+  }
+
+  let matchedCount = 0
+  try {
+    const matchResults = await matchTemplates({ originalRequirements, bddSpec })
+    if (matchResults.length > 0) {
+      state.matchedTemplateIds = matchResults.map(r => r.templateId)
+      matchedCount = matchResults.length
+      console.log(`[Orchestrator] 模板匹配完成：${matchedCount} 個匹配`)
+    }
+  } catch (err) {
+    console.warn('[Orchestrator] 模板匹配失敗，降級為無匹配:', err)
+  }
+
+  // 根據匹配結果條件路由
+  if (matchedCount > 0) {
+    // 有匹配模板：顯示 A/B 兩個選項
+    await sendMessage(conversationId, io, {
+      content: `接下來是 UI/UX 設計階段。\n\n你對產品的外觀有什麼想法嗎？\n\n**A.** 我有一些想法，想跟你討論\n\n**B.** 沒有特別的想法，給我看看模板（${matchedCount} 個推薦）`,
+      stage: 'uiux_design_preference',
+      quickReplies: [
+        { label: '我有想法，想跟你討論', value: 'A', style: 'primary' },
+        { label: `使用模板（${matchedCount}個推薦）`, value: 'B', style: 'secondary' },
+      ],
+    })
+  } else {
+    // 無匹配模板：只顯示討論式設計
+    await sendMessage(conversationId, io, {
+      content: `接下來是 UI/UX 設計階段。\n\n讓我們一起討論你想要的設計風格吧！`,
+      stage: 'uiux_design_preference',
+      quickReplies: [
+        { label: '開始設計', value: 'A', style: 'primary' },
+      ],
+    })
+  }
 
   // 更新狀態為等待設計偏好回覆
   state.phase = 'uiux_design_preference'
   state.waitingForReply = true
   await saveFlowState(redis, conversationId, state)
 
-  console.log('[Orchestrator] Spec 階段完成，等待用戶設計偏好')
+  console.log(`[Orchestrator] Spec 階段完成，等待用戶設計偏好（匹配模板：${matchedCount} 個）`)
 }
 
 // ============================================================
@@ -3724,21 +3782,50 @@ async function showTemplatePicker(
   redis: Redis,
   io: SocketIOServer
 ) {
-  // 獲取模板列表
-  const templatesResult = await db.query<{
-    id: string
-    name: string
-    slug: string
-    category: string
-    description: string
-    thumbnail_url: string
-    preview_image_url: string | null
-    tags: string[]
-    design_defaults: unknown
-    page_structure: unknown
-    is_featured: boolean
-    sort_order: number
-  }>('SELECT * FROM templates WHERE is_active = true ORDER BY sort_order ASC')
+  // 是否有智能匹配結果
+  const hasMatchedIds = state.matchedTemplateIds && state.matchedTemplateIds.length > 0
+  const filteredMode = hasMatchedIds
+
+  let templatesResult
+  if (hasMatchedIds) {
+    // 只查詢匹配的模板，按匹配順序排列
+    const ids = state.matchedTemplateIds!
+    const placeholders = ids.map((_, i) => `$${i + 1}`).join(', ')
+    templatesResult = await db.query<{
+      id: string
+      name: string
+      slug: string
+      category: string
+      description: string
+      thumbnail_url: string
+      preview_image_url: string | null
+      tags: string[]
+      design_defaults: unknown
+      page_structure: unknown
+      is_featured: boolean
+      sort_order: number
+    }>(`SELECT * FROM templates WHERE id IN (${placeholders}) AND is_active = true`, ids)
+
+    // 按匹配順序排列（保持 matchedTemplateIds 的分數排序）
+    const orderMap = new Map(ids.map((id, idx) => [id, idx]))
+    templatesResult.rows.sort((a, b) => (orderMap.get(a.id) ?? 99) - (orderMap.get(b.id) ?? 99))
+  } else {
+    // fallback：全部模板
+    templatesResult = await db.query<{
+      id: string
+      name: string
+      slug: string
+      category: string
+      description: string
+      thumbnail_url: string
+      preview_image_url: string | null
+      tags: string[]
+      design_defaults: unknown
+      page_structure: unknown
+      is_featured: boolean
+      sort_order: number
+    }>('SELECT * FROM templates WHERE is_active = true ORDER BY sort_order ASC')
+  }
 
   const templates = templatesResult.rows.map(row => ({
     id: row.id,
@@ -3757,8 +3844,12 @@ async function showTemplatePicker(
 
   const recommendedIds = templates.filter(t => t.isFeatured).map(t => t.id)
 
+  const content = filteredMode
+    ? `根據你的需求，推薦了 ${templates.length} 個最合適的模板：`
+    : '好的！請從下方選擇一個設計模板作為起點：'
+
   await sendMessage(conversationId, io, {
-    content: '好的！請從下方選擇一個設計模板作為起點：',
+    content,
     stage: 'uiux_template_picker',
     layoutHint: 'split',
     richContent: {
@@ -3767,6 +3858,7 @@ async function showTemplatePicker(
         templates,
         recommendedIds,
         selectedTemplateId: null,
+        filteredMode,
       },
     },
   })

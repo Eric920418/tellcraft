@@ -1,6 +1,7 @@
 import { recordLlmUsage } from '../db/client'
 import { ClarifyItem } from './bdd-session'
 import { LlmTrackingContext } from './classifier'
+import { DecisionSummary } from './clarify-dedup'
 
 // Sonnet 定價 (每百萬 tokens)
 const SONNET_PRICING = { input: 3, output: 15 }
@@ -26,7 +27,8 @@ interface PrdDiscoveryResult {
 export async function runPrdDiscovery(
   requirements: string,
   trackingContext?: LlmTrackingContext,
-  existingItems?: ClarifyItem[]
+  existingItems?: ClarifyItem[],
+  decisionSummary?: DecisionSummary | null
 ): Promise<PrdDiscoveryResult> {
   const apiKey = process.env.ANTHROPIC_API_KEY
 
@@ -113,6 +115,15 @@ export async function runPrdDiscovery(
 - **最多列出 5 個問題**（小批量，確保問題間有邏輯連貫性）
 - **這 5 個問題之間也不能語意重複**（例如「資料存哪裡」和「如何儲存」是重複的）
 - 按優先級排序：High → Medium → Low
+${decisionSummary ? `
+
+## ⛔ 已決策主題摘要（嚴禁再問相關問題）
+
+${decisionSummary.coveredTopics.map(t => `- **${t.topic}** [${t.checklistAreas.join(',')}]: ${t.decision}`).join('\n')}
+${decisionSummary.excludedFeatures.length > 0 ? `
+
+**已排除功能**（禁止詢問）：
+${decisionSummary.excludedFeatures.map(f => `- ${f}`).join('\n')}` : ''}` : ''}
 ${existingQA.length ? `
 
 **已經釐清的問題**（這些主題已經確認，不要再問）：
