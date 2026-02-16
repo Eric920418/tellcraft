@@ -3,8 +3,6 @@
  * 提供模板資料的 CRUD 操作
  */
 import { Router } from 'express'
-import { readFileSync, existsSync } from 'fs'
-import { join } from 'path'
 import { query, queryOne } from '../db/client'
 import { requireAuth, requireAdmin } from '../middleware/auth'
 
@@ -12,18 +10,6 @@ const router: Router = Router()
 
 // UUID 格式檢測
 const isUUID = (s: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s)
-
-// 預生成模板映射（模板 slug -> 文件名）
-const PREGENERATED_TEMPLATES: Record<string, string> = {
-  'saas-minimal': 'saas-dashboard-minimal.html',
-  'saas-pro': 'saas-dashboard-professional.html',
-  'landing-startup': 'startup-landing-page.html',
-  'landing-corporate': 'corporate-website.html',
-  'ecommerce-modern': 'modern-ecommerce.html',
-}
-
-// 預生成模板目錄
-const TEMPLATES_DIR = join(__dirname, '../data/template-previews')
 
 /**
  * GET /api/templates
@@ -100,7 +86,7 @@ router.get('/', async (req, res) => {
 /**
  * GET /api/templates/preview/:id
  * 生成模板預覽 HTML（用於 iframe）
- * 優先順序：1. 預生成文件 2. 數據庫緩存 3. LLM 動態生成
+ * 來源：DB 快取（template_previews 表），無快取返回佔位頁面
  */
 router.get('/preview/:id', async (req, res) => {
   try {
@@ -139,20 +125,7 @@ router.get('/preview/:id', async (req, res) => {
     // 用實際 UUID 做後續查詢（identifier 可能是 slug）
     const templateId = template.id
 
-    // 2. 優先檢查預生成文件（零 LLM 消耗）
-    const pregeneratedFile = PREGENERATED_TEMPLATES[template.slug]
-    if (pregeneratedFile) {
-      const filePath = join(TEMPLATES_DIR, pregeneratedFile)
-      if (existsSync(filePath)) {
-        console.log(`[Templates] 使用預生成模板: ${template.slug}`)
-        const htmlContent = readFileSync(filePath, 'utf-8')
-        res.setHeader('Content-Type', 'text/html; charset=utf-8')
-        res.setHeader('X-Cache', 'PREGENERATED')
-        return res.send(htmlContent)
-      }
-    }
-
-    // 3. 檢查數據庫緩存（永久有效）
+    // 2. 檢查數據庫緩存
     const cached = await queryOne<{ html_content: string; version: number }>(
       'SELECT html_content, version FROM template_previews WHERE template_id = $1',
       [templateId]
@@ -165,8 +138,8 @@ router.get('/preview/:id', async (req, res) => {
       return res.send(cached.html_content)
     }
 
-    // 4. 無快取 → 返回佔位頁面（禁止 LLM fallback，所有預覽必須預先生成）
-    console.log(`[Templates] ⚠️ 模板無預覽快取: ${template.name} (slug: ${template.slug})`)
+    // 3. 無快取 → 返回佔位頁面
+    console.log(`[Templates] 模板無預覽快取: ${template.name} (slug: ${template.slug})`)
 
     const designDefaults = template.design_defaults
     const placeholderHtml = `<!DOCTYPE html>
@@ -479,14 +452,11 @@ router.get('/admin/list', requireAdmin, async (req, res) => {
       created_at: Date
       preview_version: number | null
       preview_updated_at: Date | null
-      has_pregenerated: boolean
     }>(
       `SELECT
         t.*,
         tp.version as preview_version,
-        tp.updated_at as preview_updated_at,
-        CASE WHEN t.slug IN ('saas-minimal', 'saas-pro', 'landing-startup', 'landing-corporate', 'ecommerce-modern')
-          THEN true ELSE false END as has_pregenerated
+        tp.updated_at as preview_updated_at
       FROM templates t
       LEFT JOIN template_previews tp ON t.id = tp.template_id
       ORDER BY t.sort_order ASC`
@@ -508,8 +478,7 @@ router.get('/admin/list', requireAdmin, async (req, res) => {
       preview: {
         version: row.preview_version,
         updatedAt: row.preview_updated_at,
-        hasPregenerated: row.has_pregenerated,
-        status: row.has_pregenerated ? 'pregenerated' : (row.preview_version ? 'cached' : 'none')
+        status: row.preview_version ? 'cached' : 'none'
       }
     }))
 

@@ -5,11 +5,9 @@
   "main": "dist/index.js",
   "scripts": {
     "dev": "tsx watch src/index.ts",
-    "build": "tsc && npm run copy-assets",
-    "copy-assets": "mkdir -p dist/data/template-previews && cp -r src/data/template-previews/* dist/data/template-previews/",
+    "build": "tsc",
     "start": "node dist/index.js",
-    "typecheck": "tsc --noEmit",
-    "init-previews": "tsx src/scripts/init-template-previews.ts"
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.72.1",

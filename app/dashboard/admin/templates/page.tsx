@@ -8,8 +8,7 @@ import { getAdminTemplates } from '../../../lib/vps-api'
 interface TemplatePreview {
   version: number | null
   updatedAt: string | null
-  hasPregenerated: boolean
-  status: 'pregenerated' | 'cached' | 'none'
+  status: 'cached' | 'none'
 }
 
 interface AdminTemplate {
@@ -70,53 +69,36 @@ export default function AdminTemplatesPage() {
   }, [fetchTemplates])
 
   const getStatusBadge = (preview: TemplatePreview) => {
-    switch (preview.status) {
-      case 'pregenerated':
-        return (
-          <span
-            style={{
-              padding: '4px 8px',
-              fontSize: 11,
-              fontWeight: 500,
-              background: '#DCFCE7',
-              color: '#16A34A',
-              borderRadius: 4,
-            }}
-          >
-            預生成
-          </span>
-        )
-      case 'cached':
-        return (
-          <span
-            style={{
-              padding: '4px 8px',
-              fontSize: 11,
-              fontWeight: 500,
-              background: '#DBEAFE',
-              color: '#2563EB',
-              borderRadius: 4,
-            }}
-          >
-            已緩存 v{preview.version}
-          </span>
-        )
-      default:
-        return (
-          <span
-            style={{
-              padding: '4px 8px',
-              fontSize: 11,
-              fontWeight: 500,
-              background: '#FEE2E2',
-              color: '#DC2626',
-              borderRadius: 4,
-            }}
-          >
-            無預覽
-          </span>
-        )
+    if (preview.status === 'cached') {
+      return (
+        <span
+          style={{
+            padding: '4px 8px',
+            fontSize: 11,
+            fontWeight: 500,
+            background: '#DBEAFE',
+            color: '#2563EB',
+            borderRadius: 4,
+          }}
+        >
+          已緩存 v{preview.version}
+        </span>
+      )
     }
+    return (
+      <span
+        style={{
+          padding: '4px 8px',
+          fontSize: 11,
+          fontWeight: 500,
+          background: '#FEE2E2',
+          color: '#DC2626',
+          borderRadius: 4,
+        }}
+      >
+        無預覽
+      </span>
+    )
   }
 
   if (isLoading) {
@@ -176,7 +158,7 @@ export default function AdminTemplatesPage() {
         transition={{ duration: 0.4, delay: 0.1 }}
         style={{
           display: 'grid',
-          gridTemplateColumns: 'repeat(4, 1fr)',
+          gridTemplateColumns: 'repeat(3, 1fr)',
           gap: 16,
           marginBottom: 32,
         }}
@@ -193,20 +175,6 @@ export default function AdminTemplatesPage() {
           </div>
           <div style={{ fontSize: 28, fontWeight: 300, fontFamily: 'var(--font-mono)' }}>
             {templates.length}
-          </div>
-        </div>
-        <div
-          style={{
-            padding: 20,
-            background: 'var(--white)',
-            border: '1px solid var(--border-color)',
-          }}
-        >
-          <div style={{ fontSize: 11, color: 'var(--gray-400)', marginBottom: 8, textTransform: 'uppercase' }}>
-            預生成
-          </div>
-          <div style={{ fontSize: 28, fontWeight: 300, fontFamily: 'var(--font-mono)', color: '#16A34A' }}>
-            {templates.filter(t => t.preview.status === 'pregenerated').length}
           </div>
         </div>
         <div

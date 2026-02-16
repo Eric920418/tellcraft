@@ -77,7 +77,7 @@ psql "$DATABASE_URL" -f tellcraft-backend/scripts/seed-templates-v2.sql
 
 **流程**：
 ```
-用戶描述 → detectDesignTier（規則式）→ 默認 DesignSystem → Structure(streaming) → Animation(streaming) → RWD(streaming) → 靜態 QG → Preview
+用戶描述 → detectDesignTier（規則式）→ 默認 DesignSystem → inferInteractionHint → Structure+Interaction(streaming) → Animation(streaming) → RWD(streaming) → 靜態 QG → Preview
 3 次 LLM | 0 次用戶交互 | 60-90 秒
 ```
 
@@ -325,7 +325,7 @@ Design Brief 確認（AI 設計顧問）
     ↓
 生成 5 變體 → 用戶選擇/合併變體
     ↓
-階段 1: generateStructure() - 靜態桌面版（HTML 結構、基礎 CSS）
+階段 1: generateStructure() - 桌面版結構+互動（HTML 結構、基礎 CSS、完整互動邏輯）
     ↓ 用戶確認
 階段 2: generateAnimations() - 動畫增強（入場動畫、hover、狀態轉換）
     ↓ 用戶確認
@@ -469,82 +469,22 @@ psql "$DATABASE_URL" -f tellcraft-backend/migrations/003_add_template_overrides.
 | landing-corporate | Creative (穩重) | Noto Sans TC | Subtle shadows | Counter-up stats + accent underline + overlapping team cards |
 | ecommerce-modern | Functional | Inter + Playfair Display | Borders-only | Split 50/50 hero + hover quick-add overlay + masonry grid |
 
-**Bug 修正**：`init-template-previews.ts` slug 映射已修正，對齊資料庫實際 slug（saas-minimal、saas-pro、landing-startup、landing-corporate、ecommerce-modern）。
+### 模板預覽系統統一為 DB-only（2026-02-16）
 
-### 模板預覽：從 iframe 改為直接渲染（2026-02-05）
+移除舊的「預生成」機制（磁碟 HTML 檔 + 前端內嵌 HTML），統一所有模板預覽為 DB `template_previews` 表。
 
-將模板預覽從 iframe 改為 React 組件直接渲染，讓響應式即時生效，無需重新載入。
+**刪除**：
+- `tellcraft-backend/src/data/template-previews/` 目錄（5 個 HTML 檔）
+- `tellcraft-backend/src/scripts/init-template-previews.ts` 同步腳本
+- 前端 `route.ts` 內嵌 ~560 行 HTML（簡化為純 VPS 代理）
+- `package.json` 的 `copy-assets` 和 `init-previews` scripts
 
-**問題**：
-| 問題 | 原因 |
-|------|------|
-| 響應式需重新載入 | iframe 是獨立文檔，切換設備需 reload |
-| HTTPS/HTTP 混合 | VPS API 是 HTTP，Vercel 是 HTTPS |
-| 載入慢 | iframe 需要額外的 HTTP 請求 |
+**簡化**：
+- 後端 preview endpoint 移除磁碟文件檢查，直接查 DB
+- Admin list 移除 `has_pregenerated` 欄位，status 只有 `cached` / `none`
+- 前端 Admin 頁面移除「預生成」綠色徽章
 
-**方案**：將 5 個 HTML 模板轉換為 React 組件，根據 `containerWidth` prop 實現響應式。
-
-**新增組件**：
-```
-app/components/templates/
-├── SaasMinimal.tsx         # SaaS Dashboard - 極簡
-├── SaasPro.tsx             # SaaS Dashboard - 專業
-├── LandingStartup.tsx      # Startup Landing Page
-├── LandingCorporate.tsx    # Corporate Website
-├── EcommerceModern.tsx     # Modern E-commerce
-└── index.ts                # TemplateComponents 映射
-```
-
-**修改文件**：
-| 文件 | 修改 |
-|------|------|
-| `PreviewPanel.tsx` | 移除 iframe，根據 `templateSlug` 渲染組件 |
-| `UiuxChatSection.tsx` | `previewUrl` → `templateSlug` |
-| `app/page.tsx` | 同上 |
-
-**效果**：
-- 切換設備（桌面/平板/手機）時預覽即時更新，無需重新載入
-- 消除 HTTPS/HTTP 混合內容問題
-- 響應式斷點：桌面 ≥1024px / 平板 ≥768px / 手機 <768px
-
----
-
-### 模板預覽系統優化（2026-02-05）
-
-實現預生成模板 HTML 預覽，減少 LLM API 消耗並提供管理員後台。
-
-**預生成模板**：
-
-| 模板 | 狀態 |
-|------|------|
-| SaaS Dashboard - 極簡 | ✅ 預生成（零 LLM 消耗）|
-| SaaS Dashboard - 專業 | ✅ 預生成（零 LLM 消耗）|
-| Startup Landing Page | ✅ 預生成（零 LLM 消耗）|
-| Corporate Website | ✅ 預生成（零 LLM 消耗）|
-| Modern E-commerce | ✅ 預生成（零 LLM 消耗）|
-
-**預覽優先順序**：
-1. 預生成文件（`src/data/template-previews/*.html`）
-2. 數據庫緩存（`template_previews` 表）
-3. LLM 動態生成（最後手段）
-
-**管理員後台**：
-- 新增 `/dashboard/admin/templates` 模板管理頁面
-- 顯示預覽狀態（預生成/已緩存/無預覽）
-- 支援預覽模板和重新生成
-
-**新增檔案**：
-- `tellcraft-backend/src/data/template-previews/*.html` - 5 個預生成模板
-- `tellcraft-backend/src/scripts/init-template-previews.ts` - 同步腳本
-- `app/dashboard/admin/templates/page.tsx` - 管理頁面
-
-**VPS 部署**：
-```bash
-cd /var/www/tellcraft-backend
-git pull origin main
-pnpm install && pnpm build
-pm2 restart tellcraft-backend
-```
+**現狀**：所有 35 個模板預覽統一存在 `template_previews` 表，透過 Claude Code 生成 SQL 更新。
 
 ---
 
@@ -1498,7 +1438,7 @@ Hero → 往下滾動 → 產品介紹（SEO 友好）→ Testimonials → CTA
 | `bdd-spec` | ✅ 完成 | Classifier 直接觸發 | Sonnet | 完整 5 階段：PRD Discovery/Clarify → Formulation → Spec Discovery/Clarify（上限 30 題，6 輪） |
 | `uiux` | ✅ 完成 | BDD 完成後狀態機自動進入 | Sonnet | 3 階段：Design Discovery → Design Lab → Implementation。雙軌 Discovery + Design Brief 確認 + Design Tier + Variant 概念注入 |
 | `quality-gate` | ✅ 完成 | UIUX RWD 完成後自動觸發 | Haiku（修復） | 靜態檢查 A11y/Performance/Code Quality，critical 問題 LLM 自動修復（最多 3 輪） |
-| `fast-build` | ✅ 完成 | 前端 mode=fast 跳過 Classifier | Sonnet（3 次） | 一句話 → 規則式推斷 → Structure → Animation → RWD → 靜態 QG → 60-90 秒出結果 |
+| `fast-build` | ✅ 完成 | 前端 mode=fast 跳過 Classifier | Sonnet（3 次） | 一句話 → 規則式推斷 → inferInteractionHint → Structure+Interaction → Animation → RWD → 靜態 QG → 60-90 秒出結果 |
 | `deployer` | ✅ 完成 | Classifier 直接觸發 | Haiku（build 修復） | sanitize 預檢 + 本地 Build 驗證（最多 3 輪 LLM 修復）+ Vercel 部署 + 對話內迭代 + 版本回滾 |
 | `coder` | ❌ 未實作 | Classifier 能識別但無處理邏輯 | — | 僅 Registry 定義，orchestrator 回「尚未實現」 |
 | `domain-manager` | ⚠️ 前端獨立 | Classifier 能識別但未接入 Orchestrator | — | 前端 Server Actions 有完整實作（`app/actions/domain.ts`），但未整合到 Orchestrator 狀態機 |
@@ -1720,7 +1660,7 @@ Phase 2: Design Lab
     ↓ 用戶選擇或合併變體（支援 "選擇變體 A" / "合併 A+C" 格式）
 
 Phase 3: Implementation（三階段生成，約束隨 tier 變化）
-    ↓ Stage 1: Structure（靜態桌面版，creative tier 允許漸層/多色/大膽佈局）
+    ↓ Stage 1: Structure+Interaction（桌面版結構+完整互動，creative tier 允許漸層/多色/大膽佈局）
     ↓ Stage 2: Animations（motion/react 動畫，creative tier 允許更豐富動畫）
     ↓ Stage 3: RWD（響應式設計，失敗時 fallback 到 Stage 2）
     ↓

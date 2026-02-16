@@ -1167,8 +1167,8 @@ export function buildStreamingHandler(
 }
 
 /**
- * 階段 1：生成結構（Structure）
- * 生成靜態的桌面版本，包含 HTML 結構、基礎 CSS、組件骨架
+ * 階段 1：生成結構與互動（Structure + Interaction）
+ * 生成桌面版本，包含 HTML 結構、基礎 CSS、組件骨架、完整互動邏輯
  * 不包含動畫和響應式設計
  */
 export async function generateStructure(
@@ -1183,27 +1183,62 @@ export async function generateStructure(
     designBrief?: DesignBrief
     uiSpec?: UIRequirementsSpec
     variantConcept?: VariantConcept
+    interactionHint?: string
   },
   trackingContext?: LlmTrackingContext,
   onPartialCode?: PartialCodeCallback
 ): Promise<GenerationResult> {
   const tier = designTier || 'functional'
 
-  const systemPrompt = `你是一位專業的前端開發者。根據提供的 Design System 生成靜態的桌面版前端代碼。
+  const systemPrompt = `你是一位專業的前端開發者。根據提供的 Design System 生成桌面版前端代碼，包含完整的互動功能。
 
 ${buildDesignSystemPrompt(designSystem)}
 
-## 本階段任務：結構生成（Structure）
-這是第一階段，只需要生成：
+## 本階段任務：結構與互動生成（Structure + Interaction）
+這是第一階段，需要生成：
 1. 完整的 HTML 結構
 2. 基礎 CSS 樣式（顏色、字體、間距、圓角）
-3. 組件的靜態版本
+3. 可交互的組件（含 state 管理和事件處理）
 
 ## 本階段禁止
 - 不要添加任何動畫效果（transition, animation, motion）
 - 不要添加響應式設計（md:, lg:, @media）
-- 不要使用 'use client' 除非絕對必要
 - 假設寬度為 1280px 桌面版
+
+## 'use client' 使用規則
+- 需要 useState/useEffect/useRef/事件處理的組件**必須**加 'use client'
+- 純展示組件（無 state、無事件處理）**不要**加 'use client'
+- layout.tsx 和純 metadata 的 page.tsx **不要**加 'use client'
+
+## 互動完整性規則（Critical — 按鈕必須有功能）
+每個 UI 操作都必須有完整的互動實作，不能只是靜態佔位：
+
+### create 類操作（新增/建立/記錄）
+- 必須有觸發按鈕 → 打開 Modal/Dialog（用 useState 控制開關）
+- Modal 內必須有完整表單（所有欄位、驗證、提交按鈕）
+- 提交後：加入列表/表格 + 關閉 Modal + 清空表單
+- 使用 Radix Dialog 或原生 dialog 實作
+
+### delete 類操作（刪除/移除）
+- 必須有觸發按鈕 → 打開 AlertDialog 確認
+- 確認後：從列表移除該項目
+- 使用 Radix AlertDialog 實作
+
+### update 類操作（修改/編輯）
+- 點擊編輯按鈕 → 打開預填資料的 Modal
+- 修改後提交 → 更新列表中的對應項目
+
+### filter 類操作（搜尋/篩選）
+- 搜尋框/篩選器用 useState 控制
+- 輸入時即時過濾列表（用 useMemo 或 filter）
+
+### view 類操作（查看/瀏覽）
+- 點擊展開詳情面板、或導航到詳情頁
+
+### 資料管理模式
+- 使用 useState 管理列表資料（初始值為有意義的模擬數據）
+- CRUD 操作直接操作 state（前端 demo，不需要 API）
+- 例如：\`const [items, setItems] = useState(initialData)\`
 
 ${getStructureConstraints(tier)}
 
@@ -1347,14 +1382,20 @@ ${brief.signature ? `- Signature Element：${brief.signature}` : ''}
 ${bddSpec}`
   }
 
-  const userMessage = `請根據以下資訊生成靜態桌面版前端代碼。
+  // Fast Build 互動提示（無 BDD/uiSpec 時的補充指引）
+  const interactionHint = productContext?.interactionHint
+  const interactionSection = interactionHint && !uiSpec
+    ? `## 互動功能提示（根據產品類型推斷）\n${interactionHint}\n`
+    : ''
+
+  const userMessage = `請根據以下資訊生成桌面版前端代碼，包含完整互動功能。
 
 ${conceptSection}
 ${productSection}
 ${designSection}
 ${briefSection}
 ${requirementsSection}
-
+${interactionSection}
 ## 頁面規劃策略
 以下頁面列表僅作為起始建議：${pages.map(p => `${p}`).join(', ')}
 
@@ -1371,7 +1412,7 @@ ${variantConcept ? `- 每個頁面都必須體現「${variantConcept.name}」的
 - 描述：${template.description}
 
 ## 需要生成的內容
-1. 每個頁面的 page.tsx（靜態結構，根據需求規格決定具體內容）
+1. 每個頁面的 page.tsx（完整互動結構，根據需求規格決定具體內容）
 2. 共用的 Layout 組件（Header, Footer — 導航項對應實際頁面）
 3. 頁面所需的 UI 組件（根據功能需求決定，不要為了生成而生成）
 4. globals.css（包含 CSS variables）
@@ -1386,7 +1427,7 @@ ${variantConcept ? `- 每個頁面都必須體現「${variantConcept.name}」的
 - 第三方套件（react, next, motion/react, @heroicons/react 等）可以自由 import
 - 自檢：掃描你所有輸出的 import 語句，確認每個 @/ 或 ./ 開頭的路徑都有對應的輸出檔案
 
-請確保所有組件使用一致的 Design System。這是第一階段，動畫和響應式會在後續階段添加。`
+請確保所有組件使用一致的 Design System。互動功能必須完整可用（Modal 能開關、表單能提交、列表能增刪）。動畫和響應式會在後續階段添加。`
 
   const response = await callClaude(
     systemPrompt,
@@ -1486,6 +1527,8 @@ ${getAnimationConstraints(tier)}
 
 ## 禁止
 - 不要修改現有的結構和樣式
+- 不要修改現有的互動邏輯（Modal 開關、表單 state、事件處理、useState）
+- 不要移除任何 'use client' 聲明
 - 不要添加響應式設計
 - 不要使用 CSS animation（使用 motion/react）`
 
@@ -1605,6 +1648,8 @@ xl: 1280px
 
 ## 禁止
 - 不要移除現有的動畫效果
+- 不要修改現有的互動邏輯（Modal 開關、表單 state、事件處理、useState）
+- 不要移除任何 'use client' 聲明
 - 不要改變現有的桌面版佈局
 - 不要使用 display: none 隱藏重要內容（用 sr-only）
 - 不要破壞無障礙功能
@@ -2297,6 +2342,7 @@ ${getStructureConstraints(tier)}
 5. 字體載入用 next/font（禁止 <link> 或 @import Google Fonts）
 6. 使用 Tailwind CSS classes
 7. 保持無障礙功能（aria-label、focus-visible 等）
+8. 保持現有的互動功能完好（Modal/Dialog 開關、表單 state、事件處理），不要移除 'use client'
 
 ## 輸出格式
 只輸出**被修改的檔案**，使用以下格式：

@@ -830,8 +830,7 @@ interface AdminTemplateData extends TemplateData {
   preview: {
     version: number | null
     updatedAt: string | null
-    hasPregenerated: boolean
-    status: 'pregenerated' | 'cached' | 'none'
+    status: 'cached' | 'none'
   }
 }
 

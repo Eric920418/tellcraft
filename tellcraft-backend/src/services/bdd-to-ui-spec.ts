@@ -208,31 +208,52 @@ ${bddSpec}
 }
 
 /**
- * 將 UIRequirementsSpec 格式化為 prompt section
+ * 根據 action type 生成互動實作指引
+ */
+function getInteractionDescription(action: UIAction): string {
+  const fieldList = action.fields && action.fields.length > 0
+    ? action.fields.map(f => `${f.label}(${f.type}${f.required ? ', 必填' : ''})`).join('、')
+    : ''
+
+  switch (action.type) {
+    case 'create':
+      return `「${action.name}」按鈕 → 打開 Modal（useState 控制） → 表單欄位：${fieldList || '根據實體推斷'} → 提交後加入列表 + 關閉 Modal + 清空表單`
+    case 'delete':
+      return `「${action.name}」按鈕 → AlertDialog 確認「確定要刪除嗎？」 → 確認後從列表移除該項目`
+    case 'update':
+      return `「${action.name}」按鈕 → 打開預填資料的 Modal → 欄位：${fieldList || '與 create 相同'} → 提交後更新列表中對應項目 + 關閉 Modal`
+    case 'filter':
+      return `搜尋框/篩選器 → useState 管理搜尋詞 → useMemo 即時過濾列表`
+    case 'view':
+      return `點擊項目 → 展開詳情面板或導航到詳情頁`
+    default:
+      return `「${action.name}」— 需要完整互動實作`
+  }
+}
+
+/**
+ * 將 UIRequirementsSpec 格式化為 prompt section（含互動實作指引）
  */
 export function formatUISpecForPrompt(spec: UIRequirementsSpec): string {
   const lines: string[] = [
-    `## 前端需求規格（已從 BDD 翻譯）`,
+    `## 前端需求規格（已從 BDD 翻譯 — 含互動實作指引）`,
     `產品：${spec.productName} — ${spec.productSummary}`,
     '',
-    '### 頁面規劃',
+    '### 頁面規劃與互動需求',
   ]
 
   for (const page of spec.pages) {
-    lines.push(`- **${page.name}** (${page.route}): ${page.purpose}`)
-
-    if (page.actions.length > 0) {
-      lines.push(`  操作：${page.actions.map(a => `${a.name}(${a.type}${a.confirmRequired ? ', 需確認' : ''})`).join('、')}`)
-    }
+    lines.push(`\n#### ${page.name} (${page.route})`)
+    lines.push(`用途：${page.purpose}`)
 
     if (page.dataDisplays.length > 0) {
-      lines.push(`  展示：${page.dataDisplays.map(d => `${d.name}(${d.type}${d.columns ? ': ' + d.columns.join('/') : ''})`).join('、')}`)
+      lines.push(`資料展示：${page.dataDisplays.map(d => `${d.name}(${d.type}${d.columns ? ': ' + d.columns.join('/') : ''})`).join('、')}`)
     }
 
-    // 列出操作的欄位細節
-    for (const action of page.actions) {
-      if (action.fields && action.fields.length > 0) {
-        lines.push(`  「${action.name}」欄位：${action.fields.map(f => `${f.label}(${f.type}${f.required ? ', 必填' : ''})`).join('、')}`)
+    if (page.actions.length > 0) {
+      lines.push(`\n**互動操作（每個都必須完整實作）：**`)
+      for (const action of page.actions) {
+        lines.push(`- ${getInteractionDescription(action)}`)
       }
     }
   }
@@ -242,7 +263,7 @@ export function formatUISpecForPrompt(spec: UIRequirementsSpec): string {
   }
 
   if (spec.entities.length > 0) {
-    lines.push('', '### 實體與欄位')
+    lines.push('', '### 實體與欄位（用 useState 管理，初始值為模擬數據）')
     for (const entity of spec.entities) {
       lines.push(`- **${entity.name}**：${entity.fields.join('、')}`)
     }

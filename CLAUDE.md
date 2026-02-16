@@ -78,7 +78,7 @@ git pull && pnpm build && pm2 restart tellcraft-backend
 | `quality-gate` | UIUX RWD 完成後**自動觸發**，critical 問題 LLM 自動修復（最多 3 輪）|
 | `deployer` | UIUX 代碼 → Next.js → Vercel 部署（用戶說「部署」觸發） |
 | `iteration` | 迭代修改 + 撤銷上一步 + 版本回滾（`uiux_complete`/`deployer_complete` 自動路由） |
-| `fast-build` | 快速建站：一句話 → 跳過 BDD/Discovery → 直接 Structure → Animation → RWD → 靜態 QG → Preview |
+| `fast-build` | 快速建站：一句話 → 跳過 BDD/Discovery → inferInteractionHint → Structure+Interaction → Animation → RWD → 靜態 QG → Preview |
 
 ### Orchestrator Phase 狀態機
 
@@ -92,7 +92,7 @@ git pull && pnpm build && pm2 restart tellcraft-backend
 | `uiux_design_brief_confirm` | Design Brief AI 顧問確認（推薦 Design Tier） |
 | `uiux_template_selection` | Discovery Path B 模板選擇 |
 | `uiux_variant_selection` / `uiux_generating_variants` | Design Lab 變體選擇 / 生成中 |
-| `uiux_code_generation` | Implementation 確認/重做（Structure → Animation → RWD） |
+| `uiux_code_generation` | Implementation 確認/重做（Structure+Interaction → Animation → RWD） |
 | `uiux_quality_gate` | Quality Gate 執行中 |
 | `uiux_complete` / `uiux_iterating` | UIUX 完成（可迭代或部署）/ 迭代修改中 |
 | `fast_generating` | 快速模式生成中（攔截用戶輸入，完成後 → `uiux_complete`） |
@@ -109,7 +109,7 @@ Discovery（Path A 問卷 / Path B 篩選後模板）
   → Design Brief 確認（AI 顧問 + Design Tier 推薦，最多 3 輪）
   → BDD→UI 翻譯（Haiku，快取在 FlowState.uiuxUISpec）
   → 5 變體生成 + 用戶選擇 → extractVariantConcept()
-  → Implementation: generateStructure() → generateAnimations() → generateRwd()
+  → Implementation: generateStructure(+Interaction) → generateAnimations() → generateRwd()
   → Quality Gate 自動觸發
   → 迭代修改（refineCode）↔ 部署（deployer）↔ 回滾
 ```
@@ -118,8 +118,8 @@ Discovery（Path A 問卷 / Path B 篩選後模板）
 
 ```
 用戶描述（mode=fast）→ 跳過 Classifier
-  → detectDesignTier（規則式）→ inferProductType → buildDefaultDesignSystem
-  → generateStructure(streaming) → generateAnimations(streaming) → generateRwd(streaming)
+  → detectDesignTier（規則式）→ inferProductType → buildDefaultDesignSystem → inferInteractionHint
+  → generateStructure(+Interaction, streaming) → generateAnimations(streaming) → generateRwd(streaming)
   → runQualityGate（靜態檢查，不做 LLM 修復）
   → phase='uiux_complete'（複用所有迭代/部署/回滾邏輯）
   3 次 LLM | 0 次用戶交互 | 60-90 秒

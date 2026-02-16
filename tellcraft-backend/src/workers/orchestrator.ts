@@ -39,7 +39,7 @@ import {
 import { translateBddToUISpec } from '../services/bdd-to-ui-spec'
 import { runQualityGate, autoFixCriticalIssues, QualityReport } from '../services/quality-gate'
 import { prepareDeployment, executeDeployment } from '../services/deployer'
-import { detectDesignTier, inferProductType, inferPages, buildDefaultDesignSystem, buildMinimalTemplate } from '../services/fast-build-generation'
+import { detectDesignTier, inferProductType, inferPages, buildDefaultDesignSystem, buildMinimalTemplate, inferInteractionHint } from '../services/fast-build-generation'
 import { ensureResponsiveClasses } from '../services/uiux-generation'
 import { matchTemplates } from '../services/template-matcher'
 import { executeIteration, executeUndoIteration, executeRollbackQuery, executeRollbackSelection } from '../services/iteration-skill'
@@ -2027,6 +2027,7 @@ async function executeFastBuildSkill(params: {
   const twConfig = generateTailwindConfig(designSystem)
 
   // ===== 階段 1/3：結構 =====
+  const interactionHint = inferInteractionHint(productType)
   const structureResult = await generateStructure(
     designSystem,
     pages,
@@ -2035,6 +2036,7 @@ async function executeFastBuildSkill(params: {
     tier,
     {
       originalRequirements: message,
+      interactionHint,
     },
     { userId, conversationId, purpose: 'fast-build-structure' },
     makeStreamingCallback(conversationId, io, redis, 'structure', twConfig)
