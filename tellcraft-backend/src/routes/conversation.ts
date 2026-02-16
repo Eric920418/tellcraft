@@ -224,7 +224,7 @@ router.post('/:id/reply', optionalAuth, async (req, res) => {
  * GET /api/conversation/:id/messages
  * 取得對話消息（輪詢用）
  */
-router.get('/:id/messages', requireAuth, async (req, res) => {
+router.get('/:id/messages', optionalAuth, async (req, res) => {
   try {
     const { id: conversationId } = req.params
     const { lastUpdatedAt } = req.query

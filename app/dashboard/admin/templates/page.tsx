@@ -5,12 +5,6 @@ import { useRouter } from 'next/navigation'
 import { motion } from 'framer-motion'
 import { getAdminTemplates } from '../../../lib/vps-api'
 
-interface TemplatePreview {
-  version: number | null
-  updatedAt: string | null
-  status: 'cached' | 'none'
-}
-
 interface AdminTemplate {
   id: string
   name: string
@@ -24,7 +18,6 @@ interface AdminTemplate {
   isFeatured: boolean
   sortOrder: number
   createdAt: string
-  preview: TemplatePreview
 }
 
 function getAuthToken(): string | null {
@@ -67,39 +60,6 @@ export default function AdminTemplatesPage() {
   useEffect(() => {
     fetchTemplates()
   }, [fetchTemplates])
-
-  const getStatusBadge = (preview: TemplatePreview) => {
-    if (preview.status === 'cached') {
-      return (
-        <span
-          style={{
-            padding: '4px 8px',
-            fontSize: 11,
-            fontWeight: 500,
-            background: '#DBEAFE',
-            color: '#2563EB',
-            borderRadius: 4,
-          }}
-        >
-          已緩存 v{preview.version}
-        </span>
-      )
-    }
-    return (
-      <span
-        style={{
-          padding: '4px 8px',
-          fontSize: 11,
-          fontWeight: 500,
-          background: '#FEE2E2',
-          color: '#DC2626',
-          borderRadius: 4,
-        }}
-      >
-        無預覽
-      </span>
-    )
-  }
 
   if (isLoading) {
     return (
@@ -156,18 +116,14 @@ export default function AdminTemplatesPage() {
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.4, delay: 0.1 }}
-        style={{
-          display: 'grid',
-          gridTemplateColumns: 'repeat(3, 1fr)',
-          gap: 16,
-          marginBottom: 32,
-        }}
+        style={{ marginBottom: 32 }}
       >
         <div
           style={{
             padding: 20,
             background: 'var(--white)',
             border: '1px solid var(--border-color)',
+            display: 'inline-block',
           }}
         >
           <div style={{ fontSize: 11, color: 'var(--gray-400)', marginBottom: 8, textTransform: 'uppercase' }}>
@@ -175,34 +131,6 @@ export default function AdminTemplatesPage() {
           </div>
           <div style={{ fontSize: 28, fontWeight: 300, fontFamily: 'var(--font-mono)' }}>
             {templates.length}
-          </div>
-        </div>
-        <div
-          style={{
-            padding: 20,
-            background: 'var(--white)',
-            border: '1px solid var(--border-color)',
-          }}
-        >
-          <div style={{ fontSize: 11, color: 'var(--gray-400)', marginBottom: 8, textTransform: 'uppercase' }}>
-            已緩存
-          </div>
-          <div style={{ fontSize: 28, fontWeight: 300, fontFamily: 'var(--font-mono)', color: '#2563EB' }}>
-            {templates.filter(t => t.preview.status === 'cached').length}
-          </div>
-        </div>
-        <div
-          style={{
-            padding: 20,
-            background: 'var(--white)',
-            border: '1px solid var(--border-color)',
-          }}
-        >
-          <div style={{ fontSize: 11, color: 'var(--gray-400)', marginBottom: 8, textTransform: 'uppercase' }}>
-            無預覽
-          </div>
-          <div style={{ fontSize: 28, fontWeight: 300, fontFamily: 'var(--font-mono)', color: '#DC2626' }}>
-            {templates.filter(t => t.preview.status === 'none').length}
           </div>
         </div>
       </motion.div>
@@ -225,9 +153,6 @@ export default function AdminTemplatesPage() {
               </th>
               <th style={{ padding: '12px 16px', textAlign: 'left', fontSize: 12, fontWeight: 500, color: 'var(--gray-500)' }}>
                 類別
-              </th>
-              <th style={{ padding: '12px 16px', textAlign: 'left', fontSize: 12, fontWeight: 500, color: 'var(--gray-500)' }}>
-                預覽狀態
               </th>
               <th style={{ padding: '12px 16px', textAlign: 'left', fontSize: 12, fontWeight: 500, color: 'var(--gray-500)' }}>
                 狀態
@@ -263,14 +188,6 @@ export default function AdminTemplatesPage() {
                   >
                     {template.category}
                   </span>
-                </td>
-                <td style={{ padding: '16px' }}>
-                  {getStatusBadge(template.preview)}
-                  {template.preview.updatedAt && (
-                    <div style={{ fontSize: 11, color: 'var(--gray-400)', marginTop: 4 }}>
-                      {new Date(template.preview.updatedAt).toLocaleString('zh-TW')}
-                    </div>
-                  )}
                 </td>
                 <td style={{ padding: '16px' }}>
                   <div style={{ display: 'flex', gap: 8 }}>
