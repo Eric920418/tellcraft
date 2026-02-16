@@ -42,6 +42,14 @@ export default function AdminUsagePage() {
   const [groupBy, setGroupBy] = useState<GroupBy>('day')
   // 使用函數初始化確保在客戶端計算，避免 SSR hydration 問題
   const [dateRange, setDateRange] = useState(getDefaultDateRange)
+  const [tablePage, setTablePage] = useState(0)
+  const TABLE_PAGE_SIZE = 20
+  const CHART_MAX_ITEMS = 20
+
+  // 切換 groupBy 時重置分頁
+  useEffect(() => {
+    setTablePage(0)
+  }, [groupBy])
 
   useEffect(() => {
     const fetchData = async () => {
@@ -78,6 +86,42 @@ export default function AdminUsagePage() {
     fetchData()
   }, [dateRange, groupBy, router])
 
+  // 準備圖表數據（使用 useMemo 避免不必要的重新計算）
+  // 數據量大時只取 Top N（按 count 排序）
+  const chartData = useMemo(() => {
+    const items = usage?.breakdown || []
+    const sorted = items.length > CHART_MAX_ITEMS
+      ? [...items].sort((a, b) => b.count - a.count).slice(0, CHART_MAX_ITEMS)
+      : items
+    return sorted.map((d) => ({
+      label: groupBy === 'conversation'
+        ? d.key.slice(0, 8)
+        : d.key.length > 10 ? d.key.slice(5) : d.key,
+      value: d.count,
+    }))
+  }, [usage?.breakdown, groupBy])
+
+  const costChartData = useMemo(() => {
+    const items = usage?.breakdown || []
+    const sorted = items.length > CHART_MAX_ITEMS
+      ? [...items].sort((a, b) => b.cost - a.cost).slice(0, CHART_MAX_ITEMS)
+      : items
+    return sorted.map((d) => ({
+      label: groupBy === 'conversation'
+        ? d.key.slice(0, 8)
+        : d.key.length > 10 ? d.key.slice(5) : d.key,
+      value: d.cost,
+    }))
+  }, [usage?.breakdown, groupBy])
+
+  // 表格分頁
+  const totalRows = usage?.breakdown.length || 0
+  const totalPages = Math.ceil(totalRows / TABLE_PAGE_SIZE)
+  const pagedBreakdown = useMemo(() => {
+    const start = tablePage * TABLE_PAGE_SIZE
+    return usage?.breakdown.slice(start, start + TABLE_PAGE_SIZE) || []
+  }, [usage?.breakdown, tablePage])
+
   if (error) {
     return (
       <div
@@ -92,21 +136,6 @@ export default function AdminUsagePage() {
       </div>
     )
   }
-
-  // 準備圖表數據（使用 useMemo 避免不必要的重新計算）
-  const chartData = useMemo(() =>
-    usage?.breakdown.map((d) => ({
-      label: d.key.length > 10 ? d.key.slice(5) : d.key, // 縮短日期顯示
-      value: d.count,
-    })) || []
-  , [usage?.breakdown])
-
-  const costChartData = useMemo(() =>
-    usage?.breakdown.map((d) => ({
-      label: d.key.length > 10 ? d.key.slice(5) : d.key,
-      value: d.cost,
-    })) || []
-  , [usage?.breakdown])
 
   return (
     <div>
@@ -232,7 +261,14 @@ export default function AdminUsagePage() {
             border: '1px solid var(--border-color)',
           }}
         >
-          <h2 style={{ fontSize: 16, fontWeight: 500, marginBottom: 20 }}>使用次數</h2>
+          <h2 style={{ fontSize: 16, fontWeight: 500, marginBottom: 20 }}>
+            使用次數
+            {(usage?.breakdown.length || 0) > CHART_MAX_ITEMS && (
+              <span style={{ fontSize: 12, color: 'var(--gray-400)', fontWeight: 400, marginLeft: 8 }}>
+                Top {CHART_MAX_ITEMS} / {usage?.breakdown.length}
+              </span>
+            )}
+          </h2>
           {isLoading ? (
             <div style={{ padding: '40px 0', textAlign: 'center', color: 'var(--gray-400)' }}>
               載入中...
@@ -254,7 +290,14 @@ export default function AdminUsagePage() {
             border: '1px solid var(--border-color)',
           }}
         >
-          <h2 style={{ fontSize: 16, fontWeight: 500, marginBottom: 20 }}>成本趨勢</h2>
+          <h2 style={{ fontSize: 16, fontWeight: 500, marginBottom: 20 }}>
+            成本趨勢
+            {(usage?.breakdown.length || 0) > CHART_MAX_ITEMS && (
+              <span style={{ fontSize: 12, color: 'var(--gray-400)', fontWeight: 400, marginLeft: 8 }}>
+                Top {CHART_MAX_ITEMS} / {usage?.breakdown.length}
+              </span>
+            )}
+          </h2>
           {isLoading ? (
             <div style={{ padding: '40px 0', textAlign: 'center', color: 'var(--gray-400)' }}>
               載入中...
@@ -280,75 +323,130 @@ export default function AdminUsagePage() {
           border: '1px solid var(--border-color)',
         }}
       >
-        <h2 style={{ fontSize: 16, fontWeight: 500, marginBottom: 20 }}>詳細分解</h2>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
+          <h2 style={{ fontSize: 16, fontWeight: 500 }}>詳細分解</h2>
+          {totalRows > 0 && (
+            <span style={{ fontSize: 12, color: 'var(--gray-400)' }}>
+              共 {totalRows} 筆
+            </span>
+          )}
+        </div>
         {isLoading ? (
           <div style={{ padding: '40px 0', textAlign: 'center', color: 'var(--gray-400)' }}>
             載入中...
           </div>
-        ) : usage?.breakdown.length === 0 ? (
+        ) : totalRows === 0 ? (
           <div style={{ padding: '40px 0', textAlign: 'center', color: 'var(--gray-400)' }}>
             暫無數據
           </div>
         ) : (
-          <div style={{ overflow: 'auto' }}>
-            <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-              <thead>
-                <tr style={{ borderBottom: '1px solid var(--border-color)' }}>
-                  <th style={{ padding: '12px 16px', textAlign: 'left', fontSize: 12, color: 'var(--gray-500)', fontWeight: 500 }}>
-                    {groupBy === 'model' ? '模型' : groupBy === 'conversation' ? '對話 ID' : '日期'}
-                  </th>
-                  <th style={{ padding: '12px 16px', textAlign: 'right', fontSize: 12, color: 'var(--gray-500)', fontWeight: 500 }}>
-                    次數
-                  </th>
-                  <th style={{ padding: '12px 16px', textAlign: 'right', fontSize: 12, color: 'var(--gray-500)', fontWeight: 500 }}>
-                    輸入 Tokens
-                  </th>
-                  <th style={{ padding: '12px 16px', textAlign: 'right', fontSize: 12, color: 'var(--gray-500)', fontWeight: 500 }}>
-                    輸出 Tokens
-                  </th>
-                  <th style={{ padding: '12px 16px', textAlign: 'right', fontSize: 12, color: 'var(--gray-500)', fontWeight: 500 }}>
-                    成本
-                  </th>
-                </tr>
-              </thead>
-              <tbody>
-                {usage?.breakdown.map((row) => (
-                  <tr key={row.key} style={{ borderBottom: '1px solid var(--border-color)' }}>
-                    <td style={{ padding: '14px 16px', fontSize: 14 }}>
-                      {groupBy === 'conversation' && row.key !== '(無對話)' ? (
-                        <a
-                          href={`/dashboard/conversations/${row.key}`}
-                          style={{
-                            color: 'var(--blue-600)',
-                            textDecoration: 'none',
-                            fontFamily: 'var(--font-mono)',
-                            fontSize: 12,
-                          }}
-                          title={row.key}
-                        >
-                          {row.key.slice(0, 8)}...
-                        </a>
-                      ) : (
-                        row.key
-                      )}
-                    </td>
-                    <td style={{ padding: '14px 16px', fontSize: 14, textAlign: 'right', fontFamily: 'var(--font-mono)' }}>
-                      {row.count.toLocaleString()}
-                    </td>
-                    <td style={{ padding: '14px 16px', fontSize: 14, textAlign: 'right', fontFamily: 'var(--font-mono)' }}>
-                      {row.inputTokens.toLocaleString()}
-                    </td>
-                    <td style={{ padding: '14px 16px', fontSize: 14, textAlign: 'right', fontFamily: 'var(--font-mono)' }}>
-                      {row.outputTokens.toLocaleString()}
-                    </td>
-                    <td style={{ padding: '14px 16px', fontSize: 14, textAlign: 'right', fontFamily: 'var(--font-mono)' }}>
-                      ${row.cost.toFixed(4)}
-                    </td>
+          <>
+            <div style={{ overflowX: 'auto' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                <thead>
+                  <tr style={{ borderBottom: '1px solid var(--border-color)' }}>
+                    <th style={{ padding: '12px 16px', textAlign: 'left', fontSize: 12, color: 'var(--gray-500)', fontWeight: 500 }}>
+                      {groupBy === 'model' ? '模型' : groupBy === 'conversation' ? '對話 ID' : '日期'}
+                    </th>
+                    <th style={{ padding: '12px 16px', textAlign: 'right', fontSize: 12, color: 'var(--gray-500)', fontWeight: 500 }}>
+                      次數
+                    </th>
+                    <th style={{ padding: '12px 16px', textAlign: 'right', fontSize: 12, color: 'var(--gray-500)', fontWeight: 500 }}>
+                      輸入 Tokens
+                    </th>
+                    <th style={{ padding: '12px 16px', textAlign: 'right', fontSize: 12, color: 'var(--gray-500)', fontWeight: 500 }}>
+                      輸出 Tokens
+                    </th>
+                    <th style={{ padding: '12px 16px', textAlign: 'right', fontSize: 12, color: 'var(--gray-500)', fontWeight: 500 }}>
+                      成本
+                    </th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+                </thead>
+                <tbody>
+                  {pagedBreakdown.map((row) => (
+                    <tr key={row.key} style={{ borderBottom: '1px solid var(--border-color)' }}>
+                      <td style={{ padding: '14px 16px', fontSize: 14 }}>
+                        {groupBy === 'conversation' && row.key !== '(無對話)' ? (
+                          <a
+                            href={`/dashboard/conversations/${row.key}`}
+                            style={{
+                              color: 'var(--blue-600)',
+                              textDecoration: 'none',
+                              fontFamily: 'var(--font-mono)',
+                              fontSize: 12,
+                            }}
+                            title={row.key}
+                          >
+                            {row.key.slice(0, 8)}...
+                          </a>
+                        ) : (
+                          row.key
+                        )}
+                      </td>
+                      <td style={{ padding: '14px 16px', fontSize: 14, textAlign: 'right', fontFamily: 'var(--font-mono)' }}>
+                        {row.count.toLocaleString()}
+                      </td>
+                      <td style={{ padding: '14px 16px', fontSize: 14, textAlign: 'right', fontFamily: 'var(--font-mono)' }}>
+                        {row.inputTokens.toLocaleString()}
+                      </td>
+                      <td style={{ padding: '14px 16px', fontSize: 14, textAlign: 'right', fontFamily: 'var(--font-mono)' }}>
+                        {row.outputTokens.toLocaleString()}
+                      </td>
+                      <td style={{ padding: '14px 16px', fontSize: 14, textAlign: 'right', fontFamily: 'var(--font-mono)' }}>
+                        ${row.cost.toFixed(4)}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            {/* 分頁控制 */}
+            {totalPages > 1 && (
+              <div
+                style={{
+                  display: 'flex',
+                  justifyContent: 'center',
+                  alignItems: 'center',
+                  gap: 8,
+                  paddingTop: 16,
+                  marginTop: 16,
+                  borderTop: '1px solid var(--border-color)',
+                }}
+              >
+                <button
+                  onClick={() => setTablePage((p) => Math.max(0, p - 1))}
+                  disabled={tablePage === 0}
+                  style={{
+                    padding: '6px 12px',
+                    fontSize: 13,
+                    background: 'var(--white)',
+                    border: '1px solid var(--border-color)',
+                    color: tablePage === 0 ? 'var(--gray-300)' : 'var(--gray-600)',
+                    cursor: tablePage === 0 ? 'default' : 'pointer',
+                  }}
+                >
+                  ←
+                </button>
+                <span style={{ fontSize: 13, color: 'var(--gray-500)', minWidth: 80, textAlign: 'center' }}>
+                  {tablePage + 1} / {totalPages}
+                </span>
+                <button
+                  onClick={() => setTablePage((p) => Math.min(totalPages - 1, p + 1))}
+                  disabled={tablePage >= totalPages - 1}
+                  style={{
+                    padding: '6px 12px',
+                    fontSize: 13,
+                    background: 'var(--white)',
+                    border: '1px solid var(--border-color)',
+                    color: tablePage >= totalPages - 1 ? 'var(--gray-300)' : 'var(--gray-600)',
+                    cursor: tablePage >= totalPages - 1 ? 'default' : 'pointer',
+                  }}
+                >
+                  →
+                </button>
+              </div>
+            )}
+          </>
         )}
       </motion.div>
     </div>
