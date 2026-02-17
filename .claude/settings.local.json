@@ -73,7 +73,8 @@
       "WebFetch(domain:tc-7e31593c-acmfrarp6-erics-projects-57e51613.vercel.app)",
       "Bash(vercel:*)",
       "Bash(find:*)",
-      "Bash(scp:*)"
+      "Bash(scp:*)",
+      "Bash(done)"
     ]
   }
 }
