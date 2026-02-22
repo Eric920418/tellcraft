@@ -152,7 +152,7 @@ ${pendingQuestions.join('\n')}` : ''}
         'anthropic-version': '2023-06-01',
       },
       body: JSON.stringify({
-        model: 'claude-sonnet-4-5-20250929',
+        model: 'claude-sonnet-4-6',
         max_tokens: 8192,
         temperature: 0.2,  // 降低溫度，減少隨機性，避免重複問題
         system: systemPrompt,
@@ -177,7 +177,7 @@ ${pendingQuestions.join('\n')}` : ''}
     const costUsd = (inputTokens * SONNET_PRICING.input + outputTokens * SONNET_PRICING.output) / 1000000
 
     await recordLlmUsage({
-      model: 'claude-sonnet-4-5-20250929',
+      model: 'claude-sonnet-4-6',
       inputTokens,
       outputTokens,
       costUsd,

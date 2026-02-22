@@ -94,8 +94,34 @@ const DEFAULT_PAGES: Record<string, string[]> = {
 export function inferPages(description: string, productType: string): string[] {
   // 先嘗試從描述中提取明確提到的頁面
   const pageKeywords = ['首頁', '關於', '聯繫', '菜單', '作品', '價格', '功能', '文章', '產品', '服務', '團隊', '常見問題', 'FAQ']
+  const negativePatterns = ['不要', '不需要', '不用', '沒有', '去掉', '移除']
+  // 子句分隔符（中英文標點）
+  const clauseSeparators = /[，。,\.、；;！!？?]/
   const lower = description.toLowerCase()
-  const mentioned = pageKeywords.filter(k => lower.includes(k.toLowerCase()))
+  const mentioned = pageKeywords.filter(k => {
+    const kLower = k.toLowerCase()
+    // 掃描所有出現位置，只要有任何一個未被否定就保留
+    let searchFrom = 0
+    while (true) {
+      const idx = lower.indexOf(kLower, searchFrom)
+      if (idx === -1) return false
+      // 取關鍵詞所在的子句（用標點分段）
+      let clauseStart = 0
+      for (let i = idx - 1; i >= 0; i--) {
+        if (clauseSeparators.test(lower[i])) { clauseStart = i + 1; break }
+      }
+      let clauseEnd = lower.length
+      for (let i = idx + kLower.length; i < lower.length; i++) {
+        if (clauseSeparators.test(lower[i])) { clauseEnd = i; break }
+      }
+      const clause = lower.slice(clauseStart, clauseEnd)
+      // 在整個子句內檢查否定詞（同時覆蓋前置和後置）
+      if (!negativePatterns.some(neg => clause.includes(neg))) {
+        return true // 這個出現位置沒有否定 → 保留
+      }
+      searchFrom = idx + 1
+    }
+  })
 
   if (mentioned.length >= 2) {
     return mentioned

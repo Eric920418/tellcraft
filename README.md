@@ -828,7 +828,7 @@ Round 3: 如果還有新問題，最後一輪
     → 告訴 LLM: "建立訂單 輸出 orderId，查詢訂單 輸入 orderId..."
 ```
 
-**問題根因**：Claude Sonnet 4.5 max output 是 8192 tokens，一次生成所有 Features 會被截斷導致 JSON 解析失敗。
+**問題根因**：Claude Sonnet 4.6 max output 是 8192 tokens，一次生成所有 Features 會被截斷導致 JSON 解析失敗。
 
 ---
 

@@ -86,7 +86,7 @@ export async function callClaude(
     const anthropic = getAnthropicClient()
 
     const stream = anthropic.messages.stream({
-      model: 'claude-sonnet-4-5-20250929',
+      model: 'claude-sonnet-4-6',
       max_tokens: options?.maxTokens || 4096,
       temperature: options?.temperature ?? 0.2,
       system: systemPrompt,
@@ -118,7 +118,7 @@ export async function callClaude(
       const outputTokens = usage.output_tokens || 0
       const cost = (inputTokens * 3 + outputTokens * 15) / 1_000_000
       recordLlmUsage({
-        model: 'claude-sonnet-4-5-20250929',
+        model: 'claude-sonnet-4-6',
         inputTokens,
         outputTokens,
         costUsd: cost,

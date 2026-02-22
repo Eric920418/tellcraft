@@ -9,9 +9,8 @@ const ANTHROPIC_API = 'https://api.anthropic.com/v1/messages'
 
 // Claude 定價 (每百萬 tokens，美元)
 const MODEL_PRICING: Record<string, { input: number; output: number }> = {
-  'claude-sonnet-4-5-20250929': { input: 3, output: 15 },  // 最新 Sonnet 4.5
-  'claude-opus-4-5-20250514': { input: 15, output: 75 },   // Opus 4.5
-  'claude-haiku-4-5-20251001': { input: 0.8, output: 4 },
+  'claude-sonnet-4-6': { input: 3, output: 15 },            // Sonnet 4.6
+  'claude-haiku-4-5-20251001': { input: 1, output: 5 },     // Haiku 4.5
 }
 
 interface Message {
@@ -166,7 +165,7 @@ export async function callClaude(
     return { success: false, error: '缺少 ANTHROPIC_API_KEY' }
   }
 
-  const model = options?.model || 'claude-sonnet-4-5-20250929'
+  const model = options?.model || 'claude-sonnet-4-6'
   const maxRetries = 3
   const baseDelay = 30000 // 30 秒基礎等待時間
 
@@ -222,7 +221,7 @@ export async function callClaude(
       // 計算 token 使用量和成本
       const inputTokens = data.usage?.input_tokens || 0
       const outputTokens = data.usage?.output_tokens || 0
-      const pricing = MODEL_PRICING[model] || MODEL_PRICING['claude-sonnet-4-5-20250929']
+      const pricing = MODEL_PRICING[model] || MODEL_PRICING['claude-sonnet-4-6']
       const cost = (inputTokens * pricing.input + outputTokens * pricing.output) / 1_000_000
 
       // 記錄使用量

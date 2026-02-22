@@ -200,7 +200,22 @@ async function handleProcessMessage(
     return { taskId: null, skill: null }
   }
 
+  // Step 1.2: FlowState 檢查（已有流程的用戶訊息應走 continue-flow）
+  // 使用反向邏輯：只要有 FlowState 且 phase 不是 'idle'，就轉發
+  // 避免手動維護 phase 白名單（容易漏掉 BDD 中間 phase 導致並行衝突）
+  const existingState = await getFlowState(redis, conversationId)
+  if (existingState && existingState.phase !== 'idle') {
+    console.log(`[Orchestrator] 已有 FlowState (phase=${existingState.phase})，轉發到 continue-flow`)
+    return handleContinueFlow({
+      projectId, conversationId, userId,
+      taskId: existingState.taskId,
+      message,
+    }, redis, io)
+  }
+
   // Step 1.5: Fast Mode 快速路由（跳過 classifier，零 LLM 成本）
+  // 注意：Fix 1 的 FlowState 檢查已涵蓋 fast_generating 的冪等保護，
+  // 不需要在此重複讀取 FlowState
   if (mode === 'fast') {
     const taskId = await db.createTask({
       projectId,
@@ -487,8 +502,52 @@ async function handleContinueFlow(
     return
   }
 
-  // 快速模式生成中（攔截用戶輸入）
+  // 快速模式生成中（攔截用戶輸入 + 死鎖偵測）
   if (state.phase === 'fast_generating') {
+    const FAST_BUILD_TIMEOUT_MS = 10 * 60 * 1000
+    const startedAt = state.uiuxCodeGenerationStartedAt || 0
+    if (startedAt > 0 && Date.now() - startedAt > FAST_BUILD_TIMEOUT_MS) {
+      console.warn('[Orchestrator] Fast Build 超時，嘗試恢復')
+      const hasCode = state.uiuxGeneratedCode &&
+        (state.uiuxGeneratedCode.pages.length > 0 || state.uiuxGeneratedCode.components.length > 0)
+      if (hasCode) {
+        state.phase = 'uiux_complete'
+        state.uiuxCodePhase = 'complete'
+        state.uiuxCodeGenerationStartedAt = undefined
+        state.waitingForReply = false
+        await saveFlowState(redis, conversationId, state)
+        const pageCount = state.uiuxGeneratedCode!.pages.length
+        const compCount = state.uiuxGeneratedCode!.components.length
+        const twConfig = state.uiuxDesignSystem ? generateTailwindConfig(state.uiuxDesignSystem) : ''
+        await sendMessage(conversationId, io, {
+          content: `快速生成中斷了，但已恢復之前的進度（${pageCount} 個頁面、${compCount} 個組件）。\n\n你可以：\n- 輸入「**部署**」部署現有代碼\n- 或描述想調整的地方`,
+          stage: 'uiux_complete',
+          layoutHint: 'split',
+          richContent: {
+            type: 'code_preview',
+            data: {
+              pages: state.uiuxGeneratedCode!.pages,
+              components: state.uiuxGeneratedCode!.components,
+              styles: state.uiuxGeneratedCode!.styles,
+              tailwindConfig: twConfig,
+              currentPhase: 'complete',
+            } as Record<string, unknown>,
+          },
+          quickReplies: [
+            { label: '部署上線', value: '部署', style: 'primary' },
+          ],
+        })
+      } else {
+        state.phase = 'idle'
+        state.uiuxCodeGenerationStartedAt = undefined
+        await saveFlowState(redis, conversationId, state)
+        await sendMessage(conversationId, io, {
+          content: '快速生成中斷了，請重新描述你想要什麼樣的網站。',
+          stage: 'error',
+        })
+      }
+      return
+    }
     await sendMessage(conversationId, io, {
       content: '正在生成中，請稍候... 預計 60-90 秒完成。',
       stage: 'info',
@@ -726,6 +785,15 @@ async function handleContinueFlow(
     } else if (state.phase === 'uiux_template_selection') {
       await sendMessage(conversationId, io, {
         content: '請選擇一個模板，或描述您想要的設計風格。',
+        stage: 'info',
+      })
+    } else if (state.phase === 'uiux_complete' && (!state.uiuxGeneratedCode || state.uiuxCodePhase !== 'complete')) {
+      // 異常狀態：uiux_complete 但無代碼（例如 structure 失敗後殘留）
+      console.warn('[Orchestrator] uiux_complete 但無生成代碼，重置為 idle')
+      state.phase = 'idle'
+      await saveFlowState(redis, conversationId, state)
+      await sendMessage(conversationId, io, {
+        content: '目前沒有已生成的設計，請描述你想要什麼樣的網站，我來幫你生成。',
         stage: 'info',
       })
     }
@@ -1988,6 +2056,7 @@ async function executeFastBuildSkill(params: {
     return
   }
 
+  try {
   // ── 推斷設計參數（零 LLM 成本）──
   const tier = detectDesignTier(message)
   const productType = inferProductType(message)
@@ -2044,7 +2113,7 @@ async function executeFastBuildSkill(params: {
 
   if (!structureResult.success) {
     console.error('[FastBuild] 結構生成失敗:', structureResult.error)
-    state.phase = 'uiux_complete' // 允許用戶重試
+    state.phase = 'idle'
     state.uiuxCodeGenerationStartedAt = undefined
     await saveFlowState(redis, conversationId, state)
     await sendMessage(conversationId, io, {
@@ -2071,6 +2140,12 @@ async function executeFastBuildSkill(params: {
   }
 
   // ===== 階段 2/3：動畫 =====
+  await sendMessage(conversationId, io, {
+    content: '結構生成完成，正在添加動畫效果...',
+    stage: 'fast_generating',
+    progress: { current: 2, total: 3, step: '添加動畫' },
+  })
+
   const animationResult = await generateAnimations(
     designSystem,
     currentCode,
@@ -2100,6 +2175,11 @@ async function executeFastBuildSkill(params: {
   }
 
   // ===== 階段 3/3：響應式 =====
+  await sendMessage(conversationId, io, {
+    content: '動畫添加完成，正在優化響應式佈局...',
+    stage: 'fast_generating',
+    progress: { current: 3, total: 3, step: '響應式優化' },
+  })
   const rwdResult = await generateRwd(
     designSystem,
     currentCode,
@@ -2168,6 +2248,32 @@ async function executeFastBuildSkill(params: {
 
   await db.updateTask(taskId, { status: 'completed' })
   console.log(`[FastBuild] 完成: ${finalPageCount} pages, ${finalComponentCount} components`)
+
+  } catch (err) {
+    console.error('[FastBuild] 未預期錯誤:', err)
+    // 嘗試恢復 FlowState
+    try {
+      const state = await getFlowState(redis, conversationId)
+      if (state) {
+        const hasCode = state.uiuxGeneratedCode &&
+          (state.uiuxGeneratedCode.pages.length > 0 || state.uiuxGeneratedCode.components.length > 0)
+        state.phase = hasCode ? 'uiux_complete' : 'idle'
+        state.uiuxCodeGenerationStartedAt = undefined
+        if (hasCode) state.uiuxCodePhase = 'complete'
+        await saveFlowState(redis, conversationId, state)
+      }
+    } catch (recoveryErr) {
+      console.error('[FastBuild] 恢復 FlowState 也失敗:', recoveryErr)
+    }
+    await sendMessage(conversationId, io, {
+      content: `生成過程中出現錯誤：${err instanceof Error ? err.message : '未知錯誤'}\n\n請重新描述你的需求再試一次。`,
+      stage: 'error',
+    }).catch(msgErr => {
+      console.error('[FastBuild] 發送錯誤訊息失敗:', msgErr)
+    })
+    await db.updateTask(taskId, { status: 'failed' }).catch(() => {})
+    // 不再 throw → 阻止 BullMQ 重試
+  }
 }
 
 /**

@@ -69,7 +69,7 @@ async function callClaude(
         'anthropic-version': '2023-06-01',
       },
       body: JSON.stringify({
-        model: 'claude-sonnet-4-5-20250929',
+        model: 'claude-sonnet-4-6',
         max_tokens: options.maxTokens || 8192,
         temperature: options.temperature || 0.2,
         system: systemPrompt,
@@ -225,7 +225,7 @@ ${existingQuestions ? `---
   if (response.inputTokens && response.outputTokens) {
     const costUsd = (response.inputTokens * SONNET_PRICING.input + response.outputTokens * SONNET_PRICING.output) / 1000000
     await recordLlmUsage({
-      model: 'claude-sonnet-4-5-20250929',
+      model: 'claude-sonnet-4-6',
       inputTokens: response.inputTokens,
       outputTokens: response.outputTokens,
       costUsd,
