@@ -153,6 +153,8 @@ UIUX Implementation 階段生成的 React TSX 代碼，透過 Sandpack（`@codes
 - 未知依賴 fallback：`scanDependencies()` 對不在已知列表的套件使用 `'latest'`（不再靜默丟棄）
 - **deployer_code_sync 持久化**：部署端 build 修復後的代碼現在寫入 DB（之前只透過 Socket 推送，重開對話會丟失）
 - **消息格式化修復**：`hasHistory` 自動恢復和對話列表切換兩個路徑補上了 `richContent`/`layoutHint`/`quickReplies` 映射
+- **IntersectionObserver polyfill**：Sandpack iframe 中 `IntersectionObserver` 不正確觸發，導致 motion/react `whileInView` 元素停在 `opacity:0` 初始狀態。注入 polyfill 強制所有 `observe()` 立即回報元素可見
+- **Tailwind CDN config JS 注入**：config 從 HTML `<script>` 改為 `index.tsx` JS 中設定（Sandpack 不一定執行自訂 HTML script），移除 `externalResources` 避免雙重載入
 
 **比起舊 regex 轉換器的改進**：
 - 動畫真實渲染（motion/react 在 Sandpack 內真正執行）

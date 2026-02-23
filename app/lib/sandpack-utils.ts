@@ -105,6 +105,39 @@ export function ThemeProvider({ children }) { return React.createElement(React.F
 export function useTheme() { return { theme: 'light', setTheme: () => {}, resolvedTheme: 'light', themes: ['light', 'dark'] }; }
 `
 
+// IntersectionObserver polyfill：讓 motion/react 的 whileInView 在 Sandpack iframe 中立即觸發
+// 部署端（真實瀏覽器）IntersectionObserver 正常運作，但 Sandpack iframe 的 viewport
+// 不會正確觸發 intersection，導致所有 whileInView 元素停在 initial 狀態（opacity:0）
+const INTERSECTION_OBSERVER_POLYFILL = `
+;(function() {
+  if (typeof window === 'undefined') return;
+  window.IntersectionObserver = class IntersectionObserverShim {
+    constructor(cb) { this._cb = cb; this._els = []; }
+    observe(el) {
+      this._els.push(el);
+      var self = this;
+      requestAnimationFrame(function() {
+        self._cb([{
+          target: el,
+          isIntersecting: true,
+          intersectionRatio: 1,
+          boundingClientRect: el.getBoundingClientRect(),
+          intersectionRect: el.getBoundingClientRect(),
+          rootBounds: null,
+          time: performance.now()
+        }], self);
+      });
+    }
+    unobserve() {}
+    disconnect() {}
+    takeRecords() { return []; }
+    get root() { return null; }
+    get rootMargin() { return '0px'; }
+    get thresholds() { return [0]; }
+  };
+})();
+`
+
 // ============================================================
 // 核心函數
 // ============================================================
@@ -464,6 +497,7 @@ export function buildSandpackSetup(
   files['/shims/NextLink.jsx'] = NEXT_LINK_SHIM
   files['/shims/NextNavigation.js'] = NEXT_NAVIGATION_SHIM
   files['/shims/NextThemes.jsx'] = NEXT_THEMES_SHIM
+  files['/polyfills.js'] = INTERSECTION_OBSERVER_POLYFILL
 
   // 7. lib/fonts.ts shim 自動生成（與部署端 FONT_LOOKUP 對齊）
   // 如果代碼引用了 @/lib/fonts 但沒有生成 lib/fonts.ts，自動產生空 shim
@@ -502,11 +536,21 @@ export function buildSandpackSetup(
   const hasApp = '/App.tsx' in files
 
   // 10. Entry file: /index.tsx
+  // 關鍵：Tailwind CDN config 必須在 JS 中設定，不能依賴 HTML script 標籤
+  // 因為 Sandpack react-ts template 不一定執行自訂 HTML 中的 script
   const entryImports = []
   const entryBody = []
+  // polyfill 必須在 React/motion 之前載入，確保 IntersectionObserver 被覆蓋
+  entryImports.push("import './polyfills'")
   entryImports.push("import React from 'react'")
   entryImports.push("import { createRoot } from 'react-dom/client'")
   entryImports.push("import './styles.css'")
+
+  // 注入 Tailwind CDN config 到 JS（在 React render 之前執行）
+  if (tailwindCdnScript) {
+    entryBody.push(`// Tailwind CDN config（從 tailwind.config.ts 提取）`)
+    entryBody.push(`if (typeof window !== 'undefined' && (window as any).tailwind) { ${tailwindCdnScript} }`)
+  }
 
   if (hasLayout && hasApp) {
     entryImports.push("import Layout from './Layout'")
@@ -525,14 +569,13 @@ export function buildSandpackSetup(
 
   files['/index.tsx'] = entryImports.join('\n') + '\n\n' + entryBody.join('\n') + '\n'
 
-  // 11. index.html
+  // 11. index.html（Tailwind CDN 在此載入，config 在 index.tsx JS 中設定）
   files['/public/index.html'] = `<!DOCTYPE html>
 <html lang="zh-TW">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <script src="https://cdn.tailwindcss.com"></script>
-  ${tailwindCdnScript ? `<script>${tailwindCdnScript}</script>` : ''}
   ${fontLinksHtml}
   <style>
     body { font-family: '${primaryFont}', system-ui, sans-serif; margin: 0; }
