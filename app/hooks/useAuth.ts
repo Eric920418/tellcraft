@@ -72,14 +72,21 @@ export function useAuth() {
         return
       }
 
-      const data = await response.json() as { user: AuthUser }
+      const data = await response.json() as { user: AuthUser; refreshedToken?: string }
+
+      // 如果 admin 狀態有變更，後端會返回刷新的 token
+      const activeToken = data.refreshedToken || token
+      if (data.refreshedToken) {
+        console.log('[useAuth] Admin status changed, updating token')
+        localStorage.setItem('auth_token', data.refreshedToken)
+      }
 
       // 同步 cookie（確保 middleware 和 Server Components 也能驗證）
-      // 這是異步的，不阻塞 UI
+      // 使用最新的 token（可能是刷新過的）
       fetch('/api/auth/set-cookie', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ token }),
+        body: JSON.stringify({ token: activeToken }),
       }).catch(() => {
         // 忽略錯誤，不影響客戶端認證狀態
       })
@@ -88,7 +95,7 @@ export function useAuth() {
         isLoading: false,
         isAuthenticated: true,
         user: data.user,
-        token,
+        token: activeToken,
       })
     } catch (error) {
       console.error('[Auth] Failed to verify token:', error)

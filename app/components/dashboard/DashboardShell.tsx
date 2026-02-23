@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import Sidebar from './Sidebar'
+import { useAuth } from '../../hooks/useAuth'
 
 interface UserInfo {
   userId: string
@@ -18,6 +19,10 @@ export function DashboardShell({
   user: UserInfo
   children: React.ReactNode
 }) {
+  const { user: authUser } = useAuth()
+  // 優先使用 useAuth() 的即時數據（從 DB 讀取），fallback 到 JWT 解析的靜態值
+  const effectiveIsAdmin = authUser?.isAdmin ?? user.isAdmin
+
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false)
   const [overlayVisible, setOverlayVisible] = useState(false)
 
@@ -64,7 +69,7 @@ export function DashboardShell({
       />
 
       <Sidebar
-        isAdmin={user.isAdmin}
+        isAdmin={effectiveIsAdmin}
         user={{
           email: user.email,
           name: user.name,

@@ -965,6 +965,9 @@ JWT_SECRET=your-secret-key
 
 **已修復問題（2026-02-03）**：
 - **Header 登入後不更新**：`/auth/callback` 使用 `router.replace()` 客戶端導航，不會觸發頁面重新載入，導致 `useAuth` hook 無法讀取新存的 token。修復：改用 `window.location.href` 強制頁面重新載入。
+
+**已修復問題（2026-02-23）**：
+- **設為管理員後看不到管理選單**：JWT token 在登入時嵌入 `isAdmin`，管理員透過 admin panel 修改其他用戶的 `is_admin` 後，該用戶的 JWT 仍是舊的。修復：`/api/auth/me` 偵測 DB 與 JWT 的 admin 狀態差異，自動返回刷新的 token；`useAuth()` 收到後更新 localStorage + cookie；`DashboardShell` 用 `useAuth()` 即時覆蓋 server 端 JWT 解析的靜態值。
 - **Dashboard 要求重新登入**：middleware 和 Server Components 無法讀取 localStorage。修復：登入時同時設置 httpOnly cookie，middleware 和 layout 改用 cookie 驗證。
 
 **認證雙軌機制**：

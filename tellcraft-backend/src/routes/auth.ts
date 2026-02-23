@@ -596,7 +596,7 @@ router.get('/me', async (req, res) => {
     }
 
     try {
-      const payload = jwt.verify(token, JWT_SECRET) as { sub: string; email: string; name?: string }
+      const payload = jwt.verify(token, JWT_SECRET) as { sub: string; email: string; name?: string; isAdmin?: boolean }
 
       // 查詢完整用戶資訊
       const user = await db.queryOne<{
@@ -615,7 +615,10 @@ router.get('/me', async (req, res) => {
         return res.status(401).json({ error: 'User not found' })
       }
 
-      res.json({
+      const responseData: {
+        user: { id: string; email: string; name: string | null; avatarUrl: string | null; plan: string; isAdmin: boolean }
+        refreshedToken?: string
+      } = {
         user: {
           id: user.id,
           email: user.email,
@@ -624,7 +627,20 @@ router.get('/me', async (req, res) => {
           plan: user.plan,
           isAdmin: user.is_admin,
         }
-      })
+      }
+
+      // admin 狀態在 DB 中改變（例如被其他管理員設為管理）→ 自動刷新 token
+      if (Boolean(payload.isAdmin) !== Boolean(user.is_admin)) {
+        console.log(`[Auth] Admin status changed for user ${user.id}: JWT=${payload.isAdmin} → DB=${user.is_admin}, issuing refreshed token`)
+        responseData.refreshedToken = generateToken({
+          id: user.id,
+          email: user.email,
+          name: user.name || undefined,
+          isAdmin: user.is_admin,
+        })
+      }
+
+      res.json(responseData)
     } catch {
       return res.status(401).json({ error: 'Invalid token' })
     }

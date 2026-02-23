@@ -30,6 +30,12 @@ npx ts-node bdd-spec/scripts/validate-feature.ts spec/features/      # 結構驗
 
 # VPS 部署（SSH 到 VPS 後執行）
 git pull && pnpm build && pm2 restart tellcraft-backend
+
+# VPS 除錯（SSH）
+pm2 logs tellcraft-backend --lines 100   # 查看即時日誌
+pm2 status                                # 進程狀態
+pm2 describe tellcraft-backend            # 詳細資訊（記憶體/重啟次數）
+# 日誌檔案：/var/log/tellcraft/out.log、/var/log/tellcraft/error.log
 ```
 
 ## 系統架構
@@ -53,21 +59,31 @@ git pull && pnpm build && pm2 restart tellcraft-backend
 
 ### 核心模組
 
+**後端（`tellcraft-backend/src/`）**
+
 | 模組 | 路徑 | 職責 |
 |------|------|------|
-| **Orchestrator** | `tellcraft-backend/src/workers/orchestrator.ts` | BullMQ Worker，核心流程引擎，`FlowState.phase` 狀態機 |
-| **Orchestrator Utils** | `tellcraft-backend/src/workers/orchestrator-utils.ts` | 共用基礎設施：sendMessage/saveFlowState/getFlowState 等 |
-| **FlowState 型別** | `tellcraft-backend/src/types/flow-state.ts` | FlowState 介面 + 子型別（避免循環 import） |
-| **Classifier** | `tellcraft-backend/src/services/classifier.ts` | 三層防禦：Prefilter → Meta Intent → Skill 分類 |
-| **UIUX Generation** | `tellcraft-backend/src/services/uiux-generation.ts` | 設計生成核心（Brief/Variants/Structure/Animation/RWD/Refine） |
-| **Quality Gate** | `tellcraft-backend/src/services/quality-gate.ts` | A11y/Performance/CodeQuality 靜態檢查 + LLM 自動修復 |
-| **Deployer** | `tellcraft-backend/src/services/deployer.ts` | sanitize → build 驗證 → Vercel 部署 → 回滾 |
-| **Iteration Skill** | `tellcraft-backend/src/services/iteration-skill.ts` | 迭代修改 + 撤銷 + 版本回滾（從 orchestrator 抽出） |
-| **Fast Build** | `tellcraft-backend/src/services/fast-build-generation.ts` | 快速模式輔助：tier 偵測、產品推斷、默認 DesignSystem（零 LLM） |
-| **Template Matcher** | `tellcraft-backend/src/services/template-matcher.ts` | 三層評分智能匹配（關鍵詞 40 + Category 30 + UISpec 30，零 LLM） |
-| **Sandpack 預覽** | `app/lib/sandpack-utils.ts` + `app/components/uiux/SandpackPreview.tsx` | UIUX 預覽核心，Sandpack 真實 React 渲染（取代 regex TSX→HTML） |
-| **VPS API Client** | `app/lib/vps-api.ts` | 前端呼叫 VPS 的 HTTP 客戶端 |
-| **WebSocket Hook** | `app/hooks/useVpsWebSocket.ts` | 即時訊息推送（型別定義） |
+| **Orchestrator** | `workers/orchestrator.ts`（~3900 行） | BullMQ Worker，核心流程引擎，`FlowState.phase` 狀態機 |
+| **Orchestrator Utils** | `workers/orchestrator-utils.ts` | 共用基礎設施：sendMessage/saveFlowState/getFlowState 等 |
+| **FlowState 型別** | `types/flow-state.ts` | FlowState 介面 + 子型別（避免循環 import） |
+| **Classifier** | `services/classifier.ts` | 三層防禦：Prefilter → Meta Intent → Skill 分類 |
+| **UIUX Generation** | `services/uiux-generation.ts` | 設計生成核心（Brief/Variants/Structure/Animation/RWD/Refine） |
+| **Quality Gate** | `services/quality-gate.ts` | A11y/Performance/CodeQuality 靜態檢查 + LLM 自動修復 |
+| **Deployer** | `services/deployer.ts` | sanitize → build 驗證 → Vercel 部署 → 回滾 |
+| **Iteration Skill** | `services/iteration-skill.ts` | 迭代修改 + 撤銷 + 版本回滾（從 orchestrator 抽出） |
+| **Fast Build** | `services/fast-build-generation.ts` | 快速模式輔助：tier 偵測、產品推斷、默認 DesignSystem（零 LLM） |
+| **Template Matcher** | `services/template-matcher.ts` | 三層評分智能匹配（關鍵詞 40 + Category 30 + UISpec 30，零 LLM） |
+
+**前端（`app/`）— 大檔案優先閱讀**
+
+| 模組 | 路徑 | 行數 | 職責 |
+|------|------|------|------|
+| **主頁面** | `app/page.tsx` | ~4000 | 對話 UI 主體、所有 richContent 渲染、狀態管理 |
+| **LLM 工具** | `app/lib/llm.ts` | ~2200 | LLM 呼叫封裝、prompt 工具 |
+| **VPS API Client** | `app/lib/vps-api.ts` | ~1900 | 前端呼叫 VPS 的 HTTP 客戶端 |
+| **Server Actions** | `app/actions/index.ts` | ~1800 | 對話/訊息/專案等 Server Actions 入口 |
+| **Sandpack 預覽** | `app/lib/sandpack-utils.ts` + `app/components/uiux/SandpackPreview.tsx` | | UIUX 預覽核心，Sandpack 真實 React 渲染 |
+| **WebSocket Hook** | `app/hooks/useVpsWebSocket.ts` | | 即時訊息推送（型別定義） |
 
 ### Skill 系統
 
@@ -125,10 +141,6 @@ Discovery（Path A 問卷 / Path B 篩選後模板）
   3 次 LLM | 0 次用戶交互 | 60-90 秒
 ```
 
-- **FlowState 擴展**：`fastMode?: boolean`、`fastModeProductType?: string`
-- **ProcessMessageData**：`mode?: 'fast' | 'fine'`，前端 HeroSection 切換
-- **完成後完全複用**：`handleDesignIteration`、`executeDeployerSkill`、`handleDeployRollback`
-
 - **Design Tier**：`functional`（dashboard/SaaS，禁漸層/glow）vs `creative`（landing page，允許大膽設計）
 - **串流預覽**：生成時 Socket.io `preview_update` 即時推送，前端 Sandpack 增量更新（`useSandpack().sandpack.updateFile()`）
 - **Variant 概念**：`VariantConcept` 注入所有生成 prompt，確保創意方向一致
@@ -142,6 +154,22 @@ sanitizeCodeForDeploy（6 類自動修復）
   → 部署後可迭代（refineCode → 重新部署）或回滾（Vercel Promote API）
 ```
 
+### 後端 API 路由（`tellcraft-backend/src/routes/`）
+
+| 路由檔案 | 掛載路徑 | 核心端點 |
+|----------|----------|----------|
+| `conversation.ts` | `/api/conversations` | `POST /:id/message`（發訊息）、`POST /:id/reply`（回覆）、`GET /:id/messages` |
+| `project.ts` | `/api/projects` | CRUD + `GET /:id/files`（代碼檔案）+ `GET /:id/versions` + `POST /:id/iterate` |
+| `session.ts` | `/api/session` | `POST /initialize`（建立對話）、`GET /conversations`（歷史列表） |
+| `bdd.ts` | `/api/bdd` | BDD session CRUD + `/answer` + `/confirm` + `/revert` + `/skip` |
+| `templates.ts` | `/api/templates` | 模板列表/詳情/預覽/管理 |
+| `operations.ts` | `/api/operations` | 生成/部署/任務/訂閱 等複合操作（最大的路由檔案） |
+| `dashboard.ts` | `/api/dashboard` | 用戶統計 + Admin 管理（users/projects/logs） |
+| `auth.ts` | `/api/auth` | Google/LINE OAuth + `/me` + `/refresh` + `/logout` |
+| `health.ts` | `/api/health` | 健康檢查 + Redis/DB 狀態 + `/cleanup-tmp` |
+
+前端 Proxy：`app/api/vps/[...path]/route.ts` 將 `/api/vps/*` 轉發到 VPS 後端。
+
 ### 認證系統
 
 `登入頁 → Vercel Proxy → VPS OAuth → JWT Token → localStorage（前端 hook）+ Cookie（middleware）`
@@ -149,6 +177,19 @@ sanitizeCodeForDeploy（6 類自動修復）
 ### 代碼存儲：project_files 表
 
 `(project_id, skill_source, file_path)` 唯一索引，UPSERT。`skill_source`: uiux/code/merge。Deployer 優先讀此表，fallback `bdd_sessions`。
+
+### 資料庫 Migration（`tellcraft-backend/migrations/`）
+
+| 檔案 | 內容 |
+|------|------|
+| `001_initial_schema.sql` | 基礎表結構（users/projects/conversations/messages 等） |
+| `002_add_auth_columns.sql` | 認證欄位 |
+| `003_add_template_overrides.sql` | 模板覆蓋設定 |
+| `004_add_project_files.sql` | project_files 代碼存儲表 |
+| `005_expand_templates.sql` | 模板分類擴展 + industry/use_cases/component_types + GIN 索引 |
+| `add_uiux_columns.sql` | UIUX 相關欄位 |
+
+新增 migration 後在 VPS 執行：`psql "$DATABASE_URL" -f tellcraft-backend/migrations/xxx.sql`
 
 ## BDD 規格格式（sdd.os ISA）
 
