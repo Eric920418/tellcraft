@@ -74,7 +74,8 @@
       "Bash(vercel:*)",
       "Bash(find:*)",
       "Bash(scp:*)",
-      "Bash(done)"
+      "Bash(done)",
+      "mcp__claude_ai_Vercel__web_fetch_vercel_url"
     ]
   }
 }
