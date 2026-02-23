@@ -308,9 +308,8 @@ function scanDependencies(files: Record<string, string>): Record<string, string>
 
       // 始終用套件名（pkg）作為 key，而不是完整 import path（raw）
       // 這樣 'motion/react' 正確映射到 'motion' 套件
-      if (SANDPACK_KNOWN_DEPS[pkg]) {
-        deps[pkg] = SANDPACK_KNOWN_DEPS[pkg]
-      }
+      // 已知套件用固定版本，未知套件 fallback 到 'latest'（與部署端 sanitizeCodeForDeploy 一致）
+      deps[pkg] = SANDPACK_KNOWN_DEPS[pkg] || 'latest'
     }
   }
 

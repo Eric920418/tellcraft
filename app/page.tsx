@@ -1197,7 +1197,10 @@ function ChatSection({
             content: m.content,
             timestamp: new Date(m.timestamp),
             stage: m.stage as Message['stage'],
-            progress: m.progress as Message['progress']
+            progress: m.progress as Message['progress'],
+            layoutHint: (m as unknown as Record<string, unknown>).layoutHint as Message['layoutHint'],
+            richContent: (m as unknown as Record<string, unknown>).richContent as Message['richContent'],
+            quickReplies: (m as unknown as Record<string, unknown>).quickReplies as Message['quickReplies'],
           }))
           setMessages(historyMessages)
 
@@ -1567,7 +1570,10 @@ function ChatSection({
         content: m.content,
         timestamp: new Date(m.timestamp),
         stage: m.stage as Message['stage'],
-            progress: m.progress as Message['progress']
+        progress: m.progress as Message['progress'],
+        layoutHint: (m as unknown as Record<string, unknown>).layoutHint as Message['layoutHint'],
+        richContent: (m as unknown as Record<string, unknown>).richContent as Message['richContent'],
+        quickReplies: (m as unknown as Record<string, unknown>).quickReplies as Message['quickReplies'],
       }))
       setMessages(formattedMessages)
 

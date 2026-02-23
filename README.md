@@ -150,6 +150,9 @@ UIUX Implementation 階段生成的 React TSX 代碼，透過 Sandpack（`@codes
 - Layout `<head>` 內 `<style>` 標籤保留：移除 `<head>` 前先提取 `<style>` 內容（CSS 變數、動畫 keyframes）
 - Google Fonts `<link>` JSX 清理：移除 JSX 中殘留的 `<link href="fonts.googleapis.com">`（Sandpack 由 index.html CDN 處理）
 - 依賴版本鎖定：`SANDPACK_KNOWN_DEPS` 版本號與部署端 `KNOWN_PACKAGES` 對齊（`motion: '^11.0.0'` 而非 `'latest'`）
+- 未知依賴 fallback：`scanDependencies()` 對不在已知列表的套件使用 `'latest'`（不再靜默丟棄）
+- **deployer_code_sync 持久化**：部署端 build 修復後的代碼現在寫入 DB（之前只透過 Socket 推送，重開對話會丟失）
+- **消息格式化修復**：`hasHistory` 自動恢復和對話列表切換兩個路徑補上了 `richContent`/`layoutHint`/`quickReplies` 映射
 
 **比起舊 regex 轉換器的改進**：
 - 動畫真實渲染（motion/react 在 Sandpack 內真正執行）

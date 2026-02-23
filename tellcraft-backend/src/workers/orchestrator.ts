@@ -3978,19 +3978,22 @@ async function handleDeployExecute(
     state.phase = 'deployer_complete'
     await saveFlowState(redis, conversationId, state)
 
-    // 如果代碼被修復過，透過 Socket.io 直推預覽更新（不寫對話訊息，避免空氣泡）
+    // 如果代碼被修復過，更新 code_preview 到 DB（重新打開對話時才能看到修復後的版本）
     if (result.deployedCode) {
       const deployedCode = result.deployedCode as { pages: unknown[]; components: unknown[]; styles: string }
-      io?.emit(`message:${conversationId}`, {
+      await sendMessage(conversationId, io, {
+        content: '',
         stage: 'deployer_code_sync',
+        layoutHint: 'split',
         richContent: {
           type: 'code_preview',
           data: {
             pages: deployedCode.pages,
             components: deployedCode.components,
             styles: deployedCode.styles,
+            tailwindConfig: preCheck.tailwindConfig || '',
             currentPhase: 'complete',
-          },
+          } as Record<string, unknown>,
         },
       })
     }
