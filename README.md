@@ -142,6 +142,15 @@ UIUX Implementation 階段生成的 React TSX 代碼，透過 Sandpack（`@codes
 - `app/components/uiux/SandpackPreview.tsx`：Sandpack wrapper，支援 streaming 增量更新（`useSandpack().sandpack.updateFile()`）
 - `app/page.tsx`：`renderPreviewPanel()` 使用 `dynamic(() => import(...), { ssr: false })` 懶載入 Sandpack
 
+**Sandpack vs Vercel 部署一致性修復（2026-02-23）**：
+預覽和部署是兩條不同管線（Sandpack CDN vs Next.js build），以下機制確保兩端行為一致：
+- `cleanTailwindV4Syntax()`：與部署端 `deployer.ts` 對齊的 Tailwind v4→v3 轉換（支援巢狀 `@theme {}`、`@custom-variant`、`@apply font-*`）
+- CSS 變數 fallback 安全網：tailwindConfig 引用 `var(--radius-*)` / `var(--color-*)` 時自動注入 `:root {}` fallback
+- `lib/fonts.ts` shim 自動生成：代碼引用 `@/lib/fonts` 但未生成該檔案時，自動產生空 shim（字體由 CDN `<link>` 注入）
+- Layout `<head>` 內 `<style>` 標籤保留：移除 `<head>` 前先提取 `<style>` 內容（CSS 變數、動畫 keyframes）
+- Google Fonts `<link>` JSX 清理：移除 JSX 中殘留的 `<link href="fonts.googleapis.com">`（Sandpack 由 index.html CDN 處理）
+- 依賴版本鎖定：`SANDPACK_KNOWN_DEPS` 版本號與部署端 `KNOWN_PACKAGES` 對齊（`motion: '^11.0.0'` 而非 `'latest'`）
+
 **比起舊 regex 轉換器的改進**：
 - 動畫真實渲染（motion/react 在 Sandpack 內真正執行）
 - 事件處理正確綁定（onClick、useState 等不再被 strip）
@@ -154,6 +163,7 @@ UIUX Implementation 階段生成的 React TSX 代碼，透過 Sandpack（`@codes
 - `colors.primary: '#2563eb'`（而非 `'var(--color-primary)'`），同理
 - 三處 `content` 路徑（`generateTailwindConfig`、`wrapInNextJs` 有/無 config 分支）全部同步為 10 個目錄
 - Deployer 安全網：`wrapInNextJs` 檢測舊 config 中的 `var(--radius-` 引用，若 styles 缺少定義則注入 fallback `:root {}`
+- **Sandpack 端同步**：`sandpack-utils.ts` 也有相同的 CSS 變數 fallback 邏輯
 
 **RWD 響應式安全網（2026-02-06）**：
 `generateRwd()` LLM 經常不產出 Tailwind 響應式前綴（sm:/md:/lg:），後端安全網自動注入基本響應式 class：

@@ -15,52 +15,53 @@ export interface GeneratedFile {
 // 已知依賴映射（與 deployer.ts KNOWN_PACKAGES 同步）
 // ============================================================
 // 套件名 → 版本（只用真正的 npm 套件名，不含子路徑）
+// 版本號與 deployer.ts KNOWN_PACKAGES 對齊，避免預覽/部署行為差異
 const SANDPACK_KNOWN_DEPS: Record<string, string> = {
-  'motion': 'latest',
-  'lucide-react': 'latest',
-  'class-variance-authority': 'latest',
-  'clsx': 'latest',
-  'tailwind-merge': 'latest',
-  'react-icons': 'latest',
-  '@heroicons/react': 'latest',
-  'recharts': 'latest',
-  'date-fns': 'latest',
-  'zod': 'latest',
-  'react-hook-form': 'latest',
-  '@hookform/resolvers': 'latest',
-  'embla-carousel-react': 'latest',
-  'react-day-picker': 'latest',
-  'sonner': 'latest',
-  'cmdk': 'latest',
-  'vaul': 'latest',
-  'input-otp': 'latest',
-  '@radix-ui/react-dialog': 'latest',
-  '@radix-ui/react-dropdown-menu': 'latest',
-  '@radix-ui/react-popover': 'latest',
-  '@radix-ui/react-select': 'latest',
-  '@radix-ui/react-tabs': 'latest',
-  '@radix-ui/react-toast': 'latest',
-  '@radix-ui/react-tooltip': 'latest',
-  '@radix-ui/react-slot': 'latest',
-  '@radix-ui/react-scroll-area': 'latest',
-  '@radix-ui/react-separator': 'latest',
-  '@radix-ui/react-switch': 'latest',
-  '@radix-ui/react-checkbox': 'latest',
-  '@radix-ui/react-accordion': 'latest',
-  '@radix-ui/react-alert-dialog': 'latest',
-  '@radix-ui/react-avatar': 'latest',
-  '@radix-ui/react-label': 'latest',
-  '@radix-ui/react-slider': 'latest',
-  '@radix-ui/react-navigation-menu': 'latest',
-  '@radix-ui/react-collapsible': 'latest',
-  '@radix-ui/react-toggle': 'latest',
-  '@radix-ui/react-toggle-group': 'latest',
-  '@radix-ui/react-aspect-ratio': 'latest',
-  '@radix-ui/react-hover-card': 'latest',
-  '@radix-ui/react-menubar': 'latest',
-  '@radix-ui/react-context-menu': 'latest',
-  '@radix-ui/react-progress': 'latest',
-  '@radix-ui/react-radio-group': 'latest',
+  'motion': '^11.0.0',
+  'lucide-react': '^0.400.0',
+  'class-variance-authority': '^0.7.0',
+  'clsx': '^2.1.0',
+  'tailwind-merge': '^2.5.0',
+  'react-icons': '^5.0.0',
+  '@heroicons/react': '^2.1.0',
+  'recharts': '^2.12.0',
+  'date-fns': '^3.6.0',
+  'zod': '^3.23.0',
+  'react-hook-form': '^7.52.0',
+  '@hookform/resolvers': '^3.9.0',
+  'embla-carousel-react': '^8.3.0',
+  'react-day-picker': '^9.0.0',
+  'sonner': '^1.5.0',
+  'cmdk': '^1.0.0',
+  'vaul': '^1.0.0',
+  'input-otp': '^1.2.0',
+  '@radix-ui/react-dialog': '^1.1.0',
+  '@radix-ui/react-dropdown-menu': '^2.1.0',
+  '@radix-ui/react-popover': '^1.1.0',
+  '@radix-ui/react-select': '^2.1.0',
+  '@radix-ui/react-tabs': '^1.1.0',
+  '@radix-ui/react-toast': '^1.2.0',
+  '@radix-ui/react-tooltip': '^1.1.0',
+  '@radix-ui/react-slot': '^1.1.0',
+  '@radix-ui/react-scroll-area': '^1.2.0',
+  '@radix-ui/react-separator': '^1.1.0',
+  '@radix-ui/react-switch': '^1.1.0',
+  '@radix-ui/react-checkbox': '^1.1.0',
+  '@radix-ui/react-accordion': '^1.2.0',
+  '@radix-ui/react-alert-dialog': '^1.1.0',
+  '@radix-ui/react-avatar': '^1.1.0',
+  '@radix-ui/react-label': '^2.1.0',
+  '@radix-ui/react-slider': '^1.2.0',
+  '@radix-ui/react-navigation-menu': '^1.2.0',
+  '@radix-ui/react-collapsible': '^1.1.0',
+  '@radix-ui/react-toggle': '^1.1.0',
+  '@radix-ui/react-toggle-group': '^1.1.0',
+  '@radix-ui/react-aspect-ratio': '^1.1.0',
+  '@radix-ui/react-hover-card': '^1.1.0',
+  '@radix-ui/react-menubar': '^1.1.0',
+  '@radix-ui/react-context-menu': '^2.2.0',
+  '@radix-ui/react-progress': '^1.1.0',
+  '@radix-ui/react-radio-group': '^1.2.0',
 }
 
 // 不需要安裝的套件（React 內建 / Sandpack 自帶 / shim 處理）
@@ -207,6 +208,9 @@ function rewriteImports(content: string, filePath: string): string {
     "from 'motion/react'"
   )
 
+  // 移除 JSX 中殘留的 Google Fonts <link>（Sandpack 由 index.html CDN 注入字體）
+  result = result.replace(/<link[^>]*fonts\.googleapis\.com[^>]*\/?>/g, '')
+
   // globals.css → 移除（entry /index.tsx 已經 import './styles.css'）
   result = result.replace(
     /import\s+['"]\.\/globals\.css['"]\s*;?\s*\n?/g,
@@ -239,8 +243,24 @@ function stripLayoutDocumentTags(content: string): string {
   // <html lang="..."> → <div>，</html> → </div>
   result = result.replace(/<html[^>]*>/g, '<div>')
   result = result.replace(/<\/html>/g, '</div>')
-  // 完整移除 <head>...</head>（Layout 的 head 由 /public/index.html 處理）
-  result = result.replace(/<head[\s\S]*?<\/head>/g, '')
+  // 移除 <head>...</head>，但保留其中的 <style> 標籤內容
+  // LLM 可能在 <head> 裡寫 CSS 變數、動畫 keyframes 等
+  let extractedStyles = ''
+  result = result.replace(/<head[\s\S]*?<\/head>/g, (headBlock) => {
+    const styleRegex = /<style[^>]*>([\s\S]*?)<\/style>/g
+    let sm
+    while ((sm = styleRegex.exec(headBlock)) !== null) {
+      extractedStyles += sm[1] + '\n'
+    }
+    return ''
+  })
+  // 將提取的 style 內容以 <style> 標籤注入到 body 開頭（Sandpack 支援內嵌 style）
+  if (extractedStyles.trim()) {
+    result = result.replace(
+      /(<div[^>]*>)/, // 第一個 <div>（原 <body>）
+      `$1\n<style>{\`${extractedStyles.trim()}\`}</style>`
+    )
+  }
   // <body className="..."> → <div className="...">，</body> → </div>
   result = result.replace(/<body([^>]*)>/g, '<div$1>')
   result = result.replace(/<\/body>/g, '</div>')
@@ -331,6 +351,36 @@ function extractTailwindCdnConfig(configContent: string): string {
 }
 
 /**
+ * 清理 Tailwind v4 語法（與部署端 deployer.ts cleanTailwindV4Syntax 對齊）
+ * - @theme { nested {} } → :root { nested {} }（支援巢狀大括號）
+ * - @import "tailwindcss" → 移除
+ * - @tailwind base/components/utilities → 移除
+ * - @utility / @variant / @custom-variant → 移除
+ * - @apply font-custom → font-family: var(--font-custom, inherit)
+ */
+function cleanTailwindV4Syntax(styles: string): string {
+  let result = styles
+  // @import "tailwindcss" 及子路徑
+  result = result.replace(/@import\s*["']tailwindcss(?:\/[^"']*)?["']\s*;?\s*/g, '')
+  // @tailwind base/components/utilities
+  result = result.replace(/@tailwind\s+\w+\s*;?\s*/g, '')
+  // @theme {} → :root {}（支援巢狀大括號，與部署端正則一致）
+  result = result.replace(/@theme\s*\{([^}]*(?:\{[^}]*\}[^}]*)*)\}/g, (_m, inner: string) => {
+    const trimmed = inner.trim()
+    return trimmed.length > 0 ? `:root {\n${trimmed}\n}` : ''
+  })
+  // @utility/@variant/@custom-variant 移除（支援巢狀大括號）
+  result = result.replace(/@(?:utility|variant|custom-variant)\s+[\w-]+\s*\{[^}]*(?:\{[^}]*\}[^}]*)*\}/g, '')
+  // @apply font-{name}：非標準 Tailwind font utility 轉為直接 CSS
+  const standardFonts = new Set(['sans', 'serif', 'mono'])
+  result = result.replace(/@apply\s+font-([\w-]+)\s*;/g, (match, fontName: string) => {
+    if (standardFonts.has(fontName)) return match
+    return `font-family: var(--font-${fontName}, inherit);`
+  })
+  return result
+}
+
+/**
  * 收集所有檔案中的 Google Fonts 名稱
  */
 function collectGoogleFonts(allContent: string): string[] {
@@ -395,30 +445,64 @@ export function buildSandpackSetup(
 
   const primaryFont = googleFonts.length > 0 ? googleFonts[0] : 'Inter'
 
-  // 4. 清理 CSS
-  const cleanStyles = styles
-    .replace(/@import\s+["']tailwindcss["'];?/g, '')
-    .replace(/@tailwind\s+\w+;?/g, '')
-    .replace(/@theme\s*\{([\s\S]*?)\}/g, ':root {$1}')
-    .replace(/@utility\s+[\w-]+\s*\{[\s\S]*?\}/g, '')
-    .replace(/@variant\s+[\w-]+\s*\{[\s\S]*?\}/g, '')
+  // 4. 清理 CSS（使用與部署端對齊的 cleanTailwindV4Syntax）
+  let cleanStyles = cleanTailwindV4Syntax(styles)
+
+  // 5. CSS 變數 fallback 安全網（與部署端 deployer.ts L750-760 對齊）
+  if (tailwindConfig) {
+    if (tailwindConfig.includes('var(--radius-') && !cleanStyles.includes('--radius-')) {
+      cleanStyles += `\n/* Fallback radius variables */\n:root {\n  --radius-none: 0;\n  --radius-sm: 0.125rem;\n  --radius-md: 0.375rem;\n  --radius-lg: 0.5rem;\n  --radius-full: 9999px;\n}\n`
+    }
+    if (tailwindConfig.includes('var(--color-') && !cleanStyles.includes('--color-primary')) {
+      cleanStyles += `\n/* Fallback color variables */\n:root {\n  --color-primary: #2563eb;\n  --color-secondary: #4f46e5;\n  --color-accent: #06b6d4;\n  --color-background: #ffffff;\n  --color-foreground: #0f172a;\n  --color-muted: #f1f5f9;\n  --color-border: #e2e8f0;\n}\n`
+    }
+  }
 
   files['/styles.css'] = cleanStyles
 
-  // 5. Shim 檔案
+  // 6. Shim 檔案
   files['/shims/NextImage.jsx'] = NEXT_IMAGE_SHIM
   files['/shims/NextLink.jsx'] = NEXT_LINK_SHIM
   files['/shims/NextNavigation.js'] = NEXT_NAVIGATION_SHIM
   files['/shims/NextThemes.jsx'] = NEXT_THEMES_SHIM
 
-  // 6. Tailwind CDN 配置
+  // 7. lib/fonts.ts shim 自動生成（與部署端 FONT_LOOKUP 對齊）
+  // 如果代碼引用了 @/lib/fonts 但沒有生成 lib/fonts.ts，自動產生空 shim
+  const hasFontsFile = '/lib/fonts.ts' in files || '/lib/fonts.tsx' in files
+  if (!hasFontsFile) {
+    const fontsImportRegex = /from\s+['"](?:@\/lib\/fonts|\.\.?\/(?:\.\.\/)*lib\/fonts)['"]/
+    const allFileContents = Object.values(files).filter((v): v is string => typeof v === 'string')
+    const needsFontShim = allFileContents.some(c => fontsImportRegex.test(c))
+    if (needsFontShim) {
+      // 掃描所有 import { xxx, yyy } from '@/lib/fonts' 提取變數名
+      const fontVarNames = new Set<string>()
+      const namedImportRegex = /import\s*\{([^}]*)\}\s*from\s*['"](?:@\/lib\/fonts|\.\.?\/(?:\.\.\/)*lib\/fonts)['"]/g
+      for (const content of allFileContents) {
+        let fm
+        namedImportRegex.lastIndex = 0
+        while ((fm = namedImportRegex.exec(content)) !== null) {
+          fm[1].split(',').map(s => s.trim()).filter(Boolean).forEach(n => fontVarNames.add(n))
+        }
+      }
+      // 生成 shim：每個變數 export { className: '', variable: '' }
+      // 字體本身透過 Google Fonts CDN <link> 在 index.html 注入
+      const shimLines = Array.from(fontVarNames).map(
+        name => `export const ${name} = { className: '', variable: '', style: { fontFamily: '' } }`
+      )
+      files['/lib/fonts.ts'] = shimLines.length > 0
+        ? shimLines.join('\n') + '\n'
+        : "export const inter = { className: '', variable: '', style: { fontFamily: '' } }\n"
+    }
+  }
+
+  // 8. Tailwind CDN 配置
   const tailwindCdnScript = tailwindConfig ? extractTailwindCdnConfig(tailwindConfig) : ''
 
-  // 7. 構建 Layout 包裹邏輯
+  // 9. 構建 Layout 包裹邏輯
   const hasLayout = '/Layout.tsx' in files
   const hasApp = '/App.tsx' in files
 
-  // 8. Entry file: /index.tsx
+  // 10. Entry file: /index.tsx
   const entryImports = []
   const entryBody = []
   entryImports.push("import React from 'react'")
@@ -442,7 +526,7 @@ export function buildSandpackSetup(
 
   files['/index.tsx'] = entryImports.join('\n') + '\n\n' + entryBody.join('\n') + '\n'
 
-  // 9. index.html
+  // 11. index.html
   files['/public/index.html'] = `<!DOCTYPE html>
 <html lang="zh-TW">
 <head>
@@ -460,7 +544,7 @@ export function buildSandpackSetup(
 </body>
 </html>`
 
-  // 10. 掃描依賴（只加代碼實際 import 的套件）
+  // 12. 掃描依賴（只加代碼實際 import 的套件）
   // react / react-dom 由 template="react-ts" 提供，不需要重複指定
   const dependencies = scanDependencies(files)
 

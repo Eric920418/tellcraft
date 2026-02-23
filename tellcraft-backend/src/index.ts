@@ -42,6 +42,9 @@ const CORS_ORIGIN = process.env.CORS_ORIGIN || 'https://tellcraft.com'
 const app = express()
 const server = createServer(app)
 
+// 信任 Vercel proxy 的 X-Forwarded-For header，按真實用戶 IP 做 rate limiting
+app.set('trust proxy', 1)
+
 // 安全標頭
 app.use(helmet({
   contentSecurityPolicy: false,
@@ -54,10 +57,10 @@ app.use(cors({
   credentials: true,
 }))
 
-// 全域 Rate Limiting
+// 全域 Rate Limiting（per real client IP via X-Forwarded-For）
 app.use(rateLimit({
   windowMs: 15 * 60 * 1000, // 15 分鐘
-  max: 300,
+  max: 500,
   standardHeaders: true,
   legacyHeaders: false,
   message: { error: 'Too many requests, please try again later' },
@@ -233,10 +236,10 @@ const orchestratorWorker = createOrchestratorWorker(redis, io)
 
 app.use('/health', healthRoutes)
 
-// 認證端點 stricter rate limiting
+// 認證端點 rate limiting（/me 每次頁面載入都會呼叫，需要較寬鬆的限制）
 const authRateLimit = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 20,
+  max: 100,
   standardHeaders: true,
   legacyHeaders: false,
   message: { error: 'Too many auth requests, please try again later' },
