@@ -99,7 +99,7 @@ export default function SandpackPreview({
           dependencies: setup.dependencies,
         }}
         options={{
-          // Tailwind CDN 已在 /public/index.html 載入，不需要 externalResources 重複載入
+          externalResources: ['https://cdn.tailwindcss.com'],
           bundlerTimeOut: isStreaming ? 30000 : 20000,
         }}
       >

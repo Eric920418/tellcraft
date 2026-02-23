@@ -569,13 +569,13 @@ export function buildSandpackSetup(
 
   files['/index.tsx'] = entryImports.join('\n') + '\n\n' + entryBody.join('\n') + '\n'
 
-  // 11. index.html（Tailwind CDN 在此載入，config 在 index.tsx JS 中設定）
+  // 11. index.html（Tailwind CDN 由 SandpackProvider externalResources 載入，config 在 index.tsx JS 中設定）
+  // 注意：Sandpack 不執行自訂 HTML 中的 <script> 標籤，所有外部腳本必須透過 externalResources
   files['/public/index.html'] = `<!DOCTYPE html>
 <html lang="zh-TW">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <script src="https://cdn.tailwindcss.com"></script>
   ${fontLinksHtml}
   <style>
     body { font-family: '${primaryFont}', system-ui, sans-serif; margin: 0; }
