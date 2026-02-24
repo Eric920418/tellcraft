@@ -1646,7 +1646,14 @@ async function fixBuildErrors(
    - 動畫相關組件使用 \`motion/react\`（不是 framer-motion）
    - export 方式必須與 import 語句一致（named export 或 default export）
    - 組件必須包含 \`'use client'\` 如果使用了 hooks 或 motion
-9. **如果錯誤是 CSS/PostCSS 處理失敗**（webpack errors related to globals.css）：
+9. **Next.js 15 的 params/searchParams 必須是 async**：
+   - 如果看到 \`Type '{ params: { id: string; }; }' does not satisfy the constraint 'PageProps'\` 或 \`'params' are incompatible\` 或 \`Promise<any>\` 相關錯誤
+   - 這是 Next.js 15 的 breaking change：page/layout 組件的 \`params\` 和 \`searchParams\` 現在是 \`Promise\` 類型
+   - 修復方式：\`export default async function Page({ params }: { params: Promise<{ id: string }> }) { const { id } = await params; ... }\`
+   - 同理 \`searchParams\` 也要改成 \`Promise<{ ... }>\`，解構時用 \`await searchParams\`
+   - 函式必須標記 \`async\`
+   - **不要用舊寫法** \`{ params: { id: string } }\`
+10. **如果錯誤是 CSS/PostCSS 處理失敗**（webpack errors related to globals.css）：
    - 移除所有 Tailwind v4 語法：\`@theme {}\`、\`@import "tailwindcss"\`、\`@utility\`、\`@variant\`
    - 將 \`@theme { --color-xxx: ...; }\` 轉換為 \`:root { --color-xxx: ...; }\`
    - 確保使用 Tailwind v3 指令：\`@tailwind base;\`、\`@tailwind components;\`、\`@tailwind utilities;\`

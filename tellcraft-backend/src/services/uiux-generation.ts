@@ -1149,7 +1149,7 @@ export function buildStreamingHandler(
   if (!onPartialCode) return undefined
 
   let lastBlockCount = 0
-  let lastEmitTime = 0
+  let lastEmitTime = Date.now()
 
   return (accumulated: string) => {
     const parsed = parseCompletedFileBlocks(accumulated)

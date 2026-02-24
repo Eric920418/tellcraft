@@ -162,6 +162,11 @@ UIUX Implementation 階段生成的 React TSX 代碼，透過 Sandpack（`@codes
 - 組件模組解析精確（Sandpack 原生模組系統，不需 regex 內聯）
 - 錯誤可見（Sandpack 顯示具體編譯錯誤，不再靜默失敗）
 
+**Deployer Next.js 15 Async Params 修復（2026-02-24）**：
+- `sanitizeCodeForDeploy` 新增修復 6：自動偵測 page/layout 中的同步 `params: { id: string }` 寫法，轉換為 `params: Promise<{ id: string }>`，函式加 `async`，插入 `const { id } = await params`
+- `fixBuildErrors` prompt 新增規則 9：教 LLM 識別 `PageProps` 類型衝突並使用 Next.js 15 的 async params 寫法修復
+- `buildStreamingHandler` 的 `lastEmitTime` 初始化從 `0` 改為 `Date.now()`，修復首次 emit 時 `timeSinceLastEmit` 顯示為 56 年的計時器 bug
+
 **Tailwind Config 策略（2026-02-10）**：
 `generateTailwindConfig()` 使用**硬編碼值**（不依賴 CSS 變數），確保 Tailwind v3 編譯輸出的 CSS 是自給自足的：
 - `borderRadius.full: '9999px'`（而非 `'var(--radius-full)'`），避免 CSS 變數遺失導致圓角消失

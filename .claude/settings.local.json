@@ -76,7 +76,10 @@
       "Bash(scp:*)",
       "Bash(done)",
       "mcp__claude_ai_Vercel__web_fetch_vercel_url",
-      "Bash(ssh-add:*)"
+      "Bash(ssh-add:*)",
+      "WebFetch(domain:www.remotion.dev)",
+      "Bash(gh repo:*)",
+      "Bash(gh api:*)"
     ]
   }
 }
