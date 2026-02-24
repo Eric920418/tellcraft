@@ -111,6 +111,7 @@ pm2 describe tellcraft-backend            # 詳細資訊（記憶體/重啟次�
 | `uiux_code_generation` | Implementation 確認/重做（Structure+Interaction → Animation → RWD） |
 | `uiux_quality_gate` | Quality Gate 執行中 |
 | `uiux_complete` / `uiux_iterating` | UIUX 完成（可迭代或部署）/ 迭代修改中 |
+| `fast_need_more_info` | 快速模式描述太短，等待用戶補充（補充後清除 FlowState 重新執行） |
 | `fast_generating` | 快速模式生成中（攔截用戶輸入，完成後 → `uiux_complete`） |
 | `deployer_deploying` / `deployer_failed` / `deployer_complete` | 部署流程（用戶說「部署」直接執行，無二次確認） |
 | `deployer_rollback_select` | 等待用戶選擇回滾版本 |
@@ -215,6 +216,7 @@ sanitizeCodeForDeploy（6 類自動修復）
 - **`handleCodePhaseRedo` 需要快照**：`uiuxStructureCode`/`uiuxAnimationCode`，否則 redo 在已修改代碼上重做
 - **`verifyBuildLocally` 的修復結果必須同步回 DB**：否則預覽和部署代碼分岔
 - **Anthropic SDK v0.72+**：大 `max_tokens` 必須用 `messages.stream()` + `await stream.finalMessage()`
+- **Skill 函數提前 return 必須保存 FlowState**：否則 `handleContinueFlow` 找不到 state → 用戶對話永久卡死
 
 ## 核心原則
 

@@ -601,8 +601,12 @@ function HeroSection({
   const [isTransitioning, setIsTransitioning] = useState(false)
   const inputRef = useRef<HTMLTextAreaElement>(null)
 
+  const trimmedInput = inputValue.trim()
+  const isFastModeTooShort = buildMode === 'fast' && trimmedInput.length > 0 && trimmedInput.length < 15
+  const canSubmit = trimmedInput.length > 0 && !isFastModeTooShort && !isTransitioning
+
   const handleStartClick = () => {
-    if (!inputValue.trim()) return
+    if (!canSubmit) return
     setIsTransitioning(true)
     // 延遲調用以讓退場動畫開始
     setTimeout(() => {
@@ -729,7 +733,9 @@ function HeroSection({
               onChange={(e) => onInputChange(e.target.value)}
               onFocus={() => setIsFocused(true)}
               onBlur={() => setIsFocused(false)}
-              placeholder="例如：一個線上訂餐系統..."
+              placeholder={buildMode === 'fast'
+                ? '描述你想要的網站，例如：一個咖啡店官網，需要首頁展示品牌故事、菜單頁、線上預約和聯繫我們'
+                : '描述你的想法，AI 會幫你深入釐清細節...'}
               rows={3}
               style={{
                 width: '100%',
@@ -795,22 +801,24 @@ function HeroSection({
                   精細
                 </button>
               </div>
-              <span style={{ fontSize: 12, color: 'var(--gray-400)', flex: 1, textAlign: 'center' }}>
-                {buildMode === 'fast' ? '一句話描述，60 秒出結果' : '描述你的想法，AI 深度釐清'}
+              <span style={{ fontSize: 12, color: isFastModeTooShort ? 'var(--red-500, #ef4444)' : 'var(--gray-400)', flex: 1, textAlign: 'center', transition: 'color 0.2s ease' }}>
+                {isFastModeTooShort
+                  ? '請描述更多細節，讓 AI 更好地理解你的需求'
+                  : buildMode === 'fast' ? '描述越詳細，生成效果越好' : '描述你的想法，AI 深度釐清'}
               </span>
               <motion.button
-                whileHover={{ scale: 1.02 }}
-                whileTap={{ scale: 0.96 }}
+                whileHover={{ scale: canSubmit ? 1.02 : 1 }}
+                whileTap={{ scale: canSubmit ? 0.96 : 1 }}
                 onClick={handleStartClick}
-                disabled={!inputValue.trim() || isTransitioning}
+                disabled={!canSubmit}
                 style={{
                   padding: '8px 20px',
                   fontSize: 13,
                   fontWeight: 500,
-                  background: inputValue.trim() ? 'var(--black)' : 'var(--gray-200)',
-                  color: inputValue.trim() ? 'var(--white)' : 'var(--gray-400)',
+                  background: canSubmit ? 'var(--black)' : 'var(--gray-200)',
+                  color: canSubmit ? 'var(--white)' : 'var(--gray-400)',
                   border: 'none',
-                  cursor: inputValue.trim() && !isTransitioning ? 'pointer' : 'not-allowed',
+                  cursor: canSubmit ? 'pointer' : 'not-allowed',
                   transition: 'all 0.2s ease',
                   flexShrink: 0,
                 }}

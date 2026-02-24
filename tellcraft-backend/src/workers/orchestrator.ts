@@ -44,7 +44,7 @@ import { ensureResponsiveClasses } from '../services/uiux-generation'
 import { matchTemplates } from '../services/template-matcher'
 import { executeIteration, executeUndoIteration, executeRollbackQuery, executeRollbackSelection } from '../services/iteration-skill'
 import type { FlowState } from '../types/flow-state'
-import { sendMessage, saveFlowState, getFlowState, makeStreamingCallback, generatedCodeToFileRows } from './orchestrator-utils'
+import { sendMessage, saveFlowState, getFlowState, deleteFlowState, makeStreamingCallback, generatedCodeToFileRows } from './orchestrator-utils'
 
 // ============================================================
 // 類型定義
@@ -404,7 +404,11 @@ async function handleContinueFlow(
   const state = await getFlowState(redis, conversationId)
 
   if (!state) {
-    console.log('[Orchestrator] 沒有找到流程狀態，可能是新對話')
+    console.log('[Orchestrator] 沒有找到流程狀態，可能是新對話或狀態已過期')
+    await sendMessage(conversationId, io, {
+      content: '此對話的流程狀態已過期，請開始新的對話。',
+      stage: 'error',
+    })
     return
   }
 
@@ -470,6 +474,21 @@ async function handleContinueFlow(
     await sendMessage(conversationId, io, {
       content: '正在部署中，請稍候...',
       stage: 'info',
+    })
+    return
+  }
+
+  // 快速模式描述太短，用戶補充後重新執行
+  if (state.phase === 'fast_need_more_info') {
+    await deleteFlowState(redis, conversationId)
+    await executeFastBuildSkill({
+      taskId: state.taskId || data.taskId || '',
+      projectId,
+      conversationId,
+      userId,
+      message,
+      redis,
+      io,
     })
     return
   }
@@ -2019,10 +2038,24 @@ async function executeFastBuildSkill(params: {
 }) {
   const { taskId, projectId, conversationId, userId, message, redis, io } = params
 
-  // ── 描述品質檢查 ──
+  // ── 描述品質檢查（前端已攔截 < 15 字，這是後端安全網）──
   if (message.trim().length < 10) {
+    const waitState: FlowState = {
+      phase: 'fast_need_more_info',
+      projectId,
+      taskId,
+      userId,
+      currentRound: 0,
+      questionIndex: 0,
+      batchCount: 0,
+      waitingForReply: true,
+      totalQuestionsAsked: 0,
+      fastMode: true,
+    }
+    await saveFlowState(redis, conversationId, waitState)
+
     await sendMessage(conversationId, io, {
-      content: '描述太短了，請多說一點你想要什麼樣的網站。\n\n例如：「幫我做一個咖啡店的官網，需要首頁、菜單頁和聯繫我們」',
+      content: '描述太短了，請多說一點你想要什麼樣的網站。\n\n例如：「幫我做一個咖啡店的官網，需要首頁展示品牌故事、菜單頁、線上預約和聯繫我們」',
       stage: 'fast_need_more_info',
     })
     return

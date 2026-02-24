@@ -82,6 +82,7 @@ export interface FlowState {
   // 選中 variant 的創意概念
   uiuxVariantConcept?: VariantConcept
   // 快速模式
+  // phase: 'fast_need_more_info'（描述太短，等待補充）、'fast_generating'（生成中）
   fastMode?: boolean
   fastModeProductType?: string
   // 智能模板匹配

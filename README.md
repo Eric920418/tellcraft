@@ -83,9 +83,9 @@ psql "$DATABASE_URL" -f tellcraft-backend/scripts/seed-templates-v2.sql
 
 **設計決策**：
 - 完全不修改精細模式（fine mode）的任何邏輯
-- 只新增 1 個 phase：`fast_generating`，完成後 → `uiux_complete`，複用所有迭代/部署/回滾
+- 2 個 phase：`fast_need_more_info`（描述太短等待補充）+ `fast_generating`（生成中），完成後 → `uiux_complete`，複用所有迭代/部署/回滾
 - `mode === 'fast'` 時跳過 Classifier，零額外 LLM 成本
-- 前端 HeroSection 新增 Fast/Fine 模式切換器
+- 前端 HeroSection 新增 Fast/Fine 模式切換器 + Fast mode 最低 15 字前端驗證
 
 **新增文件**：
 - `tellcraft-backend/src/services/fast-build-generation.ts` — tier 偵測、產品推斷、默認 DesignSystem

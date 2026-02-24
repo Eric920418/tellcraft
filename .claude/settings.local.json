@@ -79,7 +79,12 @@
       "Bash(ssh-add:*)",
       "WebFetch(domain:www.remotion.dev)",
       "Bash(gh repo:*)",
-      "Bash(gh api:*)"
+      "Bash(gh api:*)",
+      "Bash(echo   \\(not found\\):*)",
+      "Bash(echo === $pkg ===:*)",
+      "Bash(gh release:*)",
+      "Bash(gh issue:*)",
+      "Bash(gh pr:*)"
     ]
   }
 }
