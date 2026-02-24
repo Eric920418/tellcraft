@@ -103,4 +103,6 @@ export interface FlowState {
   changeImpact?: ImpactAnalysis   // 變更影響分析結果
   // 連續空輪計數（連續兩輪無新問題才終止 Discovery）
   consecutiveEmptyRounds?: number
+  // 動態 Discovery 上限（根據需求複雜度自動調整）
+  discoveryLimits?: { maxRounds: number; maxTotalQuestions: number }
 }

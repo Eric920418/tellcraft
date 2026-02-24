@@ -77,11 +77,50 @@ interface ContinueFlowData {
   specConfirmed?: boolean
 }
 
-// PRD Discovery 限制
+// PRD Discovery 限制（預設值，實際由 computeDiscoveryLimits 動態調整）
 const PRD_DISCOVERY_LIMITS = {
-  MAX_ROUNDS: 6,              // 最多 6 輪
-  MAX_TOTAL_QUESTIONS: 30,    // 累計最多 30 題
+  MAX_ROUNDS: 10,             // 最多 10 輪
+  MAX_TOTAL_QUESTIONS: 50,    // 累計最多 50 題
   QUESTIONS_PER_ROUND: 5,     // 每輪最多 5 題
+}
+
+/**
+ * 根據需求複雜度動態調整 Discovery 上限
+ * 規則式，零 LLM
+ */
+function computeDiscoveryLimits(requirements: string, hasEsDocument?: boolean): { maxRounds: number; maxTotalQuestions: number } {
+  const len = requirements.length
+  // 計算複雜度指標：實體數量（中文名詞出現次數）、功能動詞、條列項
+  const bulletCount = (requirements.match(/^[\s]*[-•*\d.]+/gm) || []).length
+  const featureKeywords = (requirements.match(/功能|模組|頁面|API|角色|報表|通知|權限|流程/g) || []).length
+
+  if (len < 100 && bulletCount < 3 && featureKeywords < 2) {
+    // 簡短需求：「做一個花店網站」
+    return { maxRounds: 2, maxTotalQuestions: 10 }
+  }
+  if (len < 300 && bulletCount < 5 && featureKeywords < 4) {
+    // 中等需求
+    return { maxRounds: 4, maxTotalQuestions: 20 }
+  }
+  if (len < 800 || (bulletCount < 10 && featureKeywords < 8)) {
+    // 較複雜需求
+    return { maxRounds: 6, maxTotalQuestions: 30 }
+  }
+  if (hasEsDocument || len >= 1500 || featureKeywords >= 12) {
+    // 非常複雜的系統（有 ES 文檔或超長 PRD）
+    return { maxRounds: 10, maxTotalQuestions: 50 }
+  }
+  // 複雜需求
+  return { maxRounds: 8, maxTotalQuestions: 40 }
+}
+
+/** 取得 state 中的動態上限，fallback 到預設值 */
+function getDiscoveryLimits(state: FlowState) {
+  return {
+    MAX_ROUNDS: state.discoveryLimits?.maxRounds ?? PRD_DISCOVERY_LIMITS.MAX_ROUNDS,
+    MAX_TOTAL_QUESTIONS: state.discoveryLimits?.maxTotalQuestions ?? PRD_DISCOVERY_LIMITS.MAX_TOTAL_QUESTIONS,
+    QUESTIONS_PER_ROUND: PRD_DISCOVERY_LIMITS.QUESTIONS_PER_ROUND,
+  }
 }
 
 // Design Brief 確認限制
@@ -834,6 +873,8 @@ async function handleContinueFlow(
 
       const rolledBackCount = history.length - chosenIndex
       state.phase = 'spec_completed'
+      // BDD 規格已回滾 → 清除 UIUX 翻譯快取，強制重新翻譯
+      state.uiuxUISpec = undefined
       await saveFlowState(redis, conversationId, state)
 
       await sendMessage(conversationId, io, {
@@ -1003,6 +1044,8 @@ async function handleContinueFlow(
 
       state.phase = 'spec_completed'
       state.changeImpact = undefined
+      // BDD 規格已變更 → 清除 UIUX 翻譯快取，強制下次重新翻譯
+      state.uiuxUISpec = undefined
       await saveFlowState(redis, conversationId, state)
 
       await sendMessage(conversationId, io, {
@@ -1647,6 +1690,12 @@ async function startPrdDiscoveryWithES(
     ? `${originalRequirements}\n\n---\n## Event Storming 分析結果\n${esDocument}`
     : originalRequirements
 
+  // 有 ES 文檔時重新計算動態上限（複雜度更高）
+  if (esDocument && !state.discoveryLimits) {
+    state.discoveryLimits = computeDiscoveryLimits(originalRequirements, true)
+    console.log(`[Orchestrator] ES 後重算 Discovery 上限: maxRounds=${state.discoveryLimits.maxRounds}, maxQuestions=${state.discoveryLimits.maxTotalQuestions}`)
+  }
+
   state.phase = 'prd_discovery'
   state.esKnowledgeMap = undefined // 清除 ES 狀態節省 Redis 空間
   await saveFlowState(redis, conversationId, state)
@@ -1685,7 +1734,7 @@ async function startPrdDiscoveryWithES(
       answered: 0,
       totalQuestions: discoveryItems.length,
       round: 1,
-      maxRounds: PRD_DISCOVERY_LIMITS.MAX_ROUNDS,
+      maxRounds: getDiscoveryLimits(state).MAX_ROUNDS,
     })
 
     state.phase = 'prd_clarify'
@@ -1737,6 +1786,10 @@ async function executeBddSpecSkill(input: BddSpecSkillInput) {
 
   const sessionId = sessionResult.data.sessionId
 
+  // 根據需求複雜度動態計算 Discovery 上限
+  const discoveryLimits = computeDiscoveryLimits(message)
+  console.log(`[Orchestrator] Discovery 動態上限: maxRounds=${discoveryLimits.maxRounds}, maxQuestions=${discoveryLimits.maxTotalQuestions} (需求長度=${message.length})`)
+
   // 初始化流程狀態
   const state: FlowState = {
     phase: 'prd_discovery',
@@ -1749,6 +1802,7 @@ async function executeBddSpecSkill(input: BddSpecSkillInput) {
     waitingForReply: false,
     totalQuestionsAsked: 0,
     userId,
+    discoveryLimits,
   }
 
   await saveFlowState(redis, conversationId, state)
@@ -1835,7 +1889,7 @@ async function executeBddSpecSkill(input: BddSpecSkillInput) {
       answered: 0,
       totalQuestions: discoveryItems.length,
       round: 1,
-      maxRounds: PRD_DISCOVERY_LIMITS.MAX_ROUNDS,
+      maxRounds: getDiscoveryLimits(state).MAX_ROUNDS,
     })
 
     // 更新狀態為等待回覆
@@ -2209,7 +2263,7 @@ async function continueToNextQuestion(
     answered: resolvedCount,
     totalQuestions: total,
     round: state.currentRound || 1,
-    maxRounds: PRD_DISCOVERY_LIMITS.MAX_ROUNDS,
+    maxRounds: getDiscoveryLimits(state).MAX_ROUNDS,
   })
 
   state.currentItemId = nextItem.id
@@ -2277,12 +2331,13 @@ async function completeClärifyPhase(
   const totalAnswered = resolvedItems.length
 
   // 檢查是否達到終止條件
+  const limits = getDiscoveryLimits(state)
   const shouldStop =
-    state.currentRound >= PRD_DISCOVERY_LIMITS.MAX_ROUNDS ||
-    totalAnswered >= PRD_DISCOVERY_LIMITS.MAX_TOTAL_QUESTIONS
+    state.currentRound >= limits.MAX_ROUNDS ||
+    totalAnswered >= limits.MAX_TOTAL_QUESTIONS
 
   if (shouldStop) {
-    console.log(`[Orchestrator] 達到終止條件 (輪數: ${state.currentRound}, 問題數: ${totalAnswered})，進入 Formulation`)
+    console.log(`[Orchestrator] 達到終止條件 (輪數: ${state.currentRound}/${limits.MAX_ROUNDS}, 問題數: ${totalAnswered}/${limits.MAX_TOTAL_QUESTIONS})，進入 Formulation`)
     await finishClarifyAndStartFormulation(conversationId, state, redis, io)
     return
   }
@@ -2293,7 +2348,7 @@ async function completeClärifyPhase(
   await sendMessage(conversationId, io, {
     content: `好的，讓我根據您的回答再確認一些細節...`,
     stage: 'prd_discovery_continue',
-    progress: { current: state.currentRound + 1, total: PRD_DISCOVERY_LIMITS.MAX_ROUNDS, step: `第 ${state.currentRound + 1} 輪釐清` },
+    progress: { current: state.currentRound + 1, total: limits.MAX_ROUNDS, step: `第 ${state.currentRound + 1} 輪釐清` },
   })
 
   // 取得原始需求
@@ -2401,7 +2456,7 @@ async function completeClärifyPhase(
     answered: totalAnswered,
     totalQuestions,
     round: state.currentRound,
-    maxRounds: PRD_DISCOVERY_LIMITS.MAX_ROUNDS,
+    maxRounds: getDiscoveryLimits(state).MAX_ROUNDS,
   })
 
   state.currentItemId = newItems[0].id
