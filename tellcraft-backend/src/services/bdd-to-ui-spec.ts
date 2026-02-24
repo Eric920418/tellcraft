@@ -150,59 +150,83 @@ ${bddSpec}
 
 請翻譯為前端 UI 需求規格 JSON。`
 
-    const stream = anthropic.messages.stream({
-      model: 'claude-haiku-4-5-20251001',
-      max_tokens: 4096,
-      temperature: 0.1,
-      system: systemPrompt,
-      messages: [{ role: 'user', content: userMessage }],
-    })
+    const RETRY_MAX = 3
+    const RETRY_BASE_DELAY_MS = 2000
+    let lastError: unknown = null
 
-    const finalMessage = await stream.finalMessage()
+    for (let attempt = 1; attempt <= RETRY_MAX; attempt++) {
+      try {
+        const stream = anthropic.messages.stream({
+          model: 'claude-haiku-4-5-20251001',
+          max_tokens: 4096,
+          temperature: 0.1,
+          system: systemPrompt,
+          messages: [{ role: 'user', content: userMessage }],
+        })
 
-    // 記錄 LLM 用量（Haiku: input $0.8/M, output $4/M）
-    const usage = finalMessage.usage
-    if (usage) {
-      const inputTokens = usage.input_tokens || 0
-      const outputTokens = usage.output_tokens || 0
-      const cost = (inputTokens * 0.8 + outputTokens * 4) / 1_000_000
-      recordLlmUsage({
-        model: 'claude-haiku-4-5-20251001',
-        inputTokens,
-        outputTokens,
-        costUsd: cost,
-        purpose: 'bdd_to_ui_translation',
-        userId: trackingContext?.userId,
-        conversationId: trackingContext?.conversationId,
-      }).catch(err => console.error('[BDD→UI] recordLlmUsage failed:', err))
+        const finalMessage = await stream.finalMessage()
+
+        // 記錄 LLM 用量（Haiku: input $0.8/M, output $4/M）
+        const usage = finalMessage.usage
+        if (usage) {
+          const inputTokens = usage.input_tokens || 0
+          const outputTokens = usage.output_tokens || 0
+          const cost = (inputTokens * 0.8 + outputTokens * 4) / 1_000_000
+          recordLlmUsage({
+            model: 'claude-haiku-4-5-20251001',
+            inputTokens,
+            outputTokens,
+            costUsd: cost,
+            purpose: 'bdd_to_ui_translation',
+            userId: trackingContext?.userId,
+            conversationId: trackingContext?.conversationId,
+          }).catch(err => console.error('[BDD→UI] recordLlmUsage failed:', err))
+        }
+
+        const content = finalMessage.content[0]
+
+        if (content.type !== 'text') {
+          return { success: false, error: 'LLM 回應格式錯誤' }
+        }
+
+        // 解析 JSON（可能包在 code block 裡）
+        let jsonStr = content.text.trim()
+        const codeBlockMatch = jsonStr.match(/```(?:json)?\s*\n?([\s\S]*?)```/)
+        if (codeBlockMatch) {
+          jsonStr = codeBlockMatch[1].trim()
+        }
+
+        const spec = JSON.parse(jsonStr) as UIRequirementsSpec
+
+        // 基本驗證
+        if (!spec.pages || !Array.isArray(spec.pages) || spec.pages.length === 0) {
+          return { success: false, error: '翻譯結果缺少頁面定義' }
+        }
+
+        console.log(`[BDD→UI] 翻譯完成: ${spec.pages.length} 頁面, ${spec.entities?.length || 0} 實體`,
+          trackingContext?.conversationId ? `(conv: ${trackingContext.conversationId})` : '')
+
+        return { success: true, spec }
+      } catch (innerErr) {
+        lastError = innerErr
+        const errMsg = String(innerErr)
+        const isRetryable = errMsg.includes('overloaded_error') || errMsg.includes('529') ||
+          errMsg.includes('rate_limit_error') || errMsg.includes('503') ||
+          errMsg.includes('ECONNRESET') || errMsg.includes('ETIMEDOUT')
+        if (attempt < RETRY_MAX && isRetryable) {
+          const delay = RETRY_BASE_DELAY_MS * Math.pow(2, attempt - 1)
+          console.warn(`[BDD→UI] 暫時性錯誤 (attempt ${attempt}/${RETRY_MAX})，${delay}ms 後重試:`, errMsg.slice(0, 150))
+          await new Promise(resolve => setTimeout(resolve, delay))
+          continue
+        }
+        break
+      }
     }
 
-    const content = finalMessage.content[0]
-
-    if (content.type !== 'text') {
-      return { success: false, error: 'LLM 回應格式錯誤' }
-    }
-
-    // 解析 JSON（可能包在 code block 裡）
-    let jsonStr = content.text.trim()
-    const codeBlockMatch = jsonStr.match(/```(?:json)?\s*\n?([\s\S]*?)```/)
-    if (codeBlockMatch) {
-      jsonStr = codeBlockMatch[1].trim()
-    }
-
-    const spec = JSON.parse(jsonStr) as UIRequirementsSpec
-
-    // 基本驗證
-    if (!spec.pages || !Array.isArray(spec.pages) || spec.pages.length === 0) {
-      return { success: false, error: '翻譯結果缺少頁面定義' }
-    }
-
-    console.log(`[BDD→UI] 翻譯完成: ${spec.pages.length} 頁面, ${spec.entities?.length || 0} 實體`,
-      trackingContext?.conversationId ? `(conv: ${trackingContext.conversationId})` : '')
-
-    return { success: true, spec }
+    console.error('[BDD→UI] 翻譯失敗:', lastError)
+    return { success: false, error: `BDD→UI 翻譯失敗: ${lastError}` }
   } catch (err) {
-    console.error('[BDD→UI] 翻譯失敗:', err)
+    console.error('[BDD→UI] 翻譯初始化失敗:', err)
     return { success: false, error: `BDD→UI 翻譯失敗: ${err}` }
   }
 }

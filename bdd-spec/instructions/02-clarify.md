@@ -7,7 +7,7 @@ description: |
 
 目標：依據 Discovery 階段產出的釐清項目，透過互動式問答流程逐一釐清，並將釐清結果即時整合回規格檔案中。
 
-**注意**：本流程產出的 Gherkin 採用 **sdd.os ISA** 格式，詳見 [`formulation-rules.md`](./formulation-rules.md)。
+**注意**：本流程產出的 Gherkin 採用 **sdd.os ISA** 格式，詳見 [`formulation-rules.md`](../rules/formulation-rules.md)。
 
 # 執行步驟
 
@@ -231,7 +231,7 @@ description: |
 
 ### 3.0 遵循規格表達規則
 
-**所有**規格檔案的更新都必須依照 [`formulation-rules.md`](./formulation-rules.md) 中的規範執行，包括：
+**所有**規格檔案的更新都必須依照 [`formulation-rules.md`](../rules/formulation-rules.md) 中的規範執行，包括：
 - **核心原則**：無腦補或任意假設原則
 - **資料模型萃取規則**：實體、屬性、關係的萃取與標註方式
 - **功能模型萃取規則**：Feature、Rule、Example 的萃取與描述方式
@@ -265,7 +265,7 @@ description: |
 
 ### 3.2 更新原則
 
-- **遵循表達規則**：所有更新必須符合 [`formulation-rules.md`](./formulation-rules.md) 的規範
+- **遵循表達規則**：所有更新必須符合 [`formulation-rules.md`](../rules/formulation-rules.md) 的規範
 - **取代而非累加**：若釐清使先前的含糊敘述失效，直接取代，不保留矛盾內容
 - **保留格式**：維持原有的標題階層、區段順序、縮排風格
 - **精煉可測試**：插入的釐清內容保持精煉且可驗證，避免敘事漂移
@@ -275,7 +275,7 @@ description: |
 ### 3.3 整合步驟
 每一步都必須扎實做到，不可跳步驟。
 1. **定位目標區段**：根據釐清項目的「定位」欄位，找到需更新的實體/屬性/功能/規則
-2. **套用釐清**：將答案轉換為對應的 SQL Schema 或 Gherkin 語法，**必須依照 [`formulation-rules.md`](./formulation-rules.md) 的規範執行**
+2. **套用釐清**：將答案轉換為對應的 SQL Schema 或 Gherkin 語法，**必須依照 [`formulation-rules.md`](../rules/formulation-rules.md) 的規範執行**
 3. **驗證語法**：確保更新後的內容符合 SQL 或 Gherkin 格式
 4. **檢查一致性**：確保無矛盾陳述、術語統一
 5. **儲存規格檔**：原子性覆寫對應的規格檔

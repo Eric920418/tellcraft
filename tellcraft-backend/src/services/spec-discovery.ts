@@ -44,6 +44,18 @@ const SPEC_CHECK_CATEGORIES: Record<string, string> = {
 // LLM 調用輔助函數
 // ============================================================
 
+const RETRY_MAX = 3
+const RETRY_BASE_DELAY_MS = 2000
+
+function isRetryableStatus(status: number): boolean {
+  return status === 429 || status === 529 || status === 503
+}
+
+function isRetryableFetchError(err: unknown): boolean {
+  const msg = String(err)
+  return msg.includes('ECONNRESET') || msg.includes('ETIMEDOUT') || msg.includes('fetch failed')
+}
+
 async function callClaude(
   systemPrompt: string,
   userMessage: string,
@@ -61,45 +73,62 @@ async function callClaude(
     return { success: false, error: 'ANTHROPIC_API_KEY not configured' }
   }
 
-  try {
-    const response = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': apiKey,
-        'anthropic-version': '2023-06-01',
-      },
-      body: JSON.stringify({
-        model: 'claude-sonnet-4-6',
-        max_tokens: options.maxTokens || 8192,
-        temperature: options.temperature || 0.2,
-        system: systemPrompt,
-        messages: [{ role: 'user', content: userMessage }],
-      }),
-    })
+  let lastError: string = 'Unknown error'
 
-    if (!response.ok) {
-      const errorText = await response.text()
-      return { success: false, error: `API error: ${response.status} - ${errorText}` }
-    }
+  for (let attempt = 1; attempt <= RETRY_MAX; attempt++) {
+    try {
+      const response = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-api-key': apiKey,
+          'anthropic-version': '2023-06-01',
+        },
+        body: JSON.stringify({
+          model: 'claude-sonnet-4-6',
+          max_tokens: options.maxTokens || 8192,
+          temperature: options.temperature || 0.2,
+          system: systemPrompt,
+          messages: [{ role: 'user', content: userMessage }],
+        }),
+      })
 
-    const data = await response.json() as {
-      usage?: { input_tokens: number; output_tokens: number }
-      content?: Array<{ text: string }>
-    }
+      if (!response.ok) {
+        const errorText = await response.text()
+        if (attempt < RETRY_MAX && isRetryableStatus(response.status)) {
+          const delay = RETRY_BASE_DELAY_MS * Math.pow(2, attempt - 1)
+          console.warn(`[spec-discovery callClaude] HTTP ${response.status} (attempt ${attempt}/${RETRY_MAX})，${delay}ms 後重試`)
+          await new Promise(resolve => setTimeout(resolve, delay))
+          continue
+        }
+        lastError = `API error: ${response.status} - ${errorText}`
+        break
+      }
 
-    return {
-      success: true,
-      content: data.content?.[0]?.text || '',
-      inputTokens: data.usage?.input_tokens || 0,
-      outputTokens: data.usage?.output_tokens || 0,
-    }
-  } catch (error) {
-    return {
-      success: false,
-      error: error instanceof Error ? error.message : 'Unknown error',
+      const data = await response.json() as {
+        usage?: { input_tokens: number; output_tokens: number }
+        content?: Array<{ text: string }>
+      }
+
+      return {
+        success: true,
+        content: data.content?.[0]?.text || '',
+        inputTokens: data.usage?.input_tokens || 0,
+        outputTokens: data.usage?.output_tokens || 0,
+      }
+    } catch (error) {
+      lastError = error instanceof Error ? error.message : 'Unknown error'
+      if (attempt < RETRY_MAX && isRetryableFetchError(error)) {
+        const delay = RETRY_BASE_DELAY_MS * Math.pow(2, attempt - 1)
+        console.warn(`[spec-discovery callClaude] 網路錯誤 (attempt ${attempt}/${RETRY_MAX})，${delay}ms 後重試:`, lastError.slice(0, 100))
+        await new Promise(resolve => setTimeout(resolve, delay))
+        continue
+      }
+      break
     }
   }
+
+  return { success: false, error: lastError }
 }
 
 // ============================================================

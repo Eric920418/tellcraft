@@ -454,7 +454,7 @@ Agent 本質上是無狀態的（Stateless），但迭代式釐清需要跨輪�
 
 ### overview.md 格式
 
-詳見 [`instructions/02-clarify.md`](instructions/02-clarify.md) 的「狀態追蹤」章節。
+詳見 [`instructions/02-clarify.md`](bdd-spec/instructions/02-clarify.md) 的「狀態追蹤」章節。
 
 ---
 
@@ -464,19 +464,19 @@ Agent 本質上是無狀態的（Stateless），但迭代式釐清需要跨輪�
 
 | 階段 | Instruction 文件 | 加載時機 | 必要性 |
 |------|-----------------|----------|--------|
-| 0. ES 探索 | `instructions/00-event-storming.md` | 從零開始建構業務全貌時 | **可選** |
-| 1. 發現 | `instructions/01-discovery.md` | 開始分析需求時 | 必要 |
-| 2. 釐清 | `instructions/02-clarify.md` | 發現歧義需釐清時 | 必要 |
-| 3. 規格表達 | `instructions/03-formulation.md` | 產出規格時 | 必要 |
-| 4. Actions 設計 | `instructions/04-actions-design.md` | 設計 Server Actions 時 | 必要 |
-| 5. ISA 配置 | `instructions/05-isa-config.md` | 產出 sdd.os 配置時 | 必要 |
-| 6. 需求變更 | `instructions/06-change-management.md` | 用戶提出需求變更時 | **按需** |
+| 0. ES 探索 | `bdd-spec/instructions/00-event-storming.md` | 從零開始建構業務全貌時 | **可選** |
+| 1. 發現 | `bdd-spec/instructions/01-discovery.md` | 開始分析需求時 | 必要 |
+| 2. 釐清 | `bdd-spec/instructions/02-clarify.md` | 發現歧義需釐清時 | 必要 |
+| 3. 規格表達 | `bdd-spec/instructions/03-formulation.md` | 產出規格時 | 必要 |
+| 4. Actions 設計 | `bdd-spec/instructions/04-actions-design.md` | 設計 Server Actions 時 | 必要 |
+| 5. ISA 配置 | `bdd-spec/instructions/05-isa-config.md` | 產出 sdd.os 配置時 | 必要 |
+| 6. 需求變更 | `bdd-spec/instructions/06-change-management.md` | 用戶提出需求變更時 | **按需** |
 
 **輔助規則文件**：
-- `rules/formulation-rules.md` - sdd.os ISA Gherkin 格式規範（四類規則分類法）（在 Formulation 階段加載）
+- `bdd-spec/rules/formulation-rules.md` - sdd.os ISA Gherkin 格式規範（四類規則分類法）（在 Formulation 階段加載）
 
 **可調參數文件**：
-- `arguments-template.yml` - 可調參數配置（DFS_BANDWIDTH、MAX_ES_ITEMS 等）
+- `bdd-spec/arguments-template.yml` - 可調參數配置（DFS_BANDWIDTH、MAX_ES_ITEMS 等）
 
 **階段說明**：
 - **階段 0**：從零開始的業務探索（可選）
@@ -492,8 +492,8 @@ Agent 本質上是無狀態的（Stateless），但迭代式釐清需要跨輪�
 
 | 腳本 | 用途 | 調用時機 | 強制性 |
 |------|------|----------|--------|
-| `scripts/lint-gherkin-format.ts` | 確保步驟 100% 符合 ISA Regex | Formulation 完成後（第一步） | **必要** |
-| `scripts/validate-feature.ts` | 驗證 Gherkin 語法與結構完整性 | lint 通過後（第二步） | **必要** |
+| `bdd-spec/scripts/lint-gherkin-format.ts` | 確保步驟 100% 符合 ISA Regex | Formulation 完成後（第一步） | **必要** |
+| `bdd-spec/scripts/validate-feature.ts` | 驗證 Gherkin 語法與結構完整性 | lint 通過後（第二步） | **必要** |
 
 ### 腳本調用規範
 
@@ -501,10 +501,10 @@ Agent 本質上是無狀態的（Stateless），但迭代式釐清需要跨輪�
 
 ```bash
 # 第一步：ISA Format Lint（確保 Regex 相容）
-npx ts-node scripts/lint-gherkin-format.ts spec/features/
+npx ts-node bdd-spec/scripts/lint-gherkin-format.ts spec/features/
 
 # 第二步：結構驗證（確保完整性）
-npx ts-node scripts/validate-feature.ts spec/features/
+npx ts-node bdd-spec/scripts/validate-feature.ts spec/features/
 ```
 
 ### 自我修復迴圈
@@ -521,10 +521,10 @@ npx ts-node scripts/validate-feature.ts spec/features/
 
 | 資源 | 用途 | 加載時機 |
 |------|------|----------|
-| `resources/templates/feature.template` | Feature File 模板（四類規則） | 撰寫 Feature 時 |
-| `resources/templates/actions.template.yml` | actions.yml 模板 | Actions 設計時 |
-| `resources/templates/isa-config.template.yml` | isa_codegen.yml 模板 | ISA 配置時 |
-| `resources/examples/` | 完整範例參考 | 需要參考時 |
+| `bdd-spec/resources/templates/feature.template` | Feature File 模板（四類規則） | 撰寫 Feature 時 |
+| `bdd-spec/resources/templates/actions.template.yml` | actions.yml 模板 | Actions 設計時 |
+| `bdd-spec/resources/templates/isa-config.template.yml` | isa_codegen.yml 模板 | ISA 配置時 |
+| `bdd-spec/resources/examples/` | 完整範例參考 | 需要參考時 |
 
 ---
 
@@ -562,7 +562,7 @@ npx ts-node scripts/validate-feature.ts spec/features/
 
 ### Formulation 階段（硬性閘門）
 
-**⚠️ 以下檢查由 `scripts/validate-feature.ts` 強制執行**：
+**⚠️ 以下檢查由 `bdd-spec/scripts/validate-feature.ts` 強制執行**：
 
 | 檢查項目 | 腳本驗證 |
 |----------|----------|

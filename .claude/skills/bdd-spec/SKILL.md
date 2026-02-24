@@ -1,6 +1,6 @@
 ---
 name: bdd-spec
-description: BDD 規格驅動開發。從自然語言需求識別歧義、迭代釐清、產出 Feature Files 和 Schema。
+description: BDD 規格驅動開發（v2.0.0）。支援 Event Storming、需求釐清（提案優先）、四類規則 Feature Files、Actions 設計、ISA 配置、需求變更管理。
 argument-hint: "[需求文件路徑或需求描述]"
 ---
 
@@ -10,25 +10,54 @@ argument-hint: "[需求文件路徑或需求描述]"
 
 ```yaml
 name: bdd-spec-formulation
-version: 1.0.0
+version: 2.0.0
 description: |
-  專注於需求釐清與規格撰寫：
-  1. 從自然語言需求文檔識別歧義與遺漏（Discovery）
-  2. 與用戶迭代式釐清問題（Clarify）
-  3. 產出完整的 BDD 規格：ERM + sdd.os ISA Feature Files
+  專注於需求釐清與規格撰寫，支援從零開始或基於既有需求：
+  1. Event Storming 探索：從原始想法建構業務全貌（Phase 0，可選）
+  2. 從自然語言需求文檔識別歧義與遺漏（Discovery）
+  3. 與用戶迭代式釐清問題，支援「提案優先」模式（Clarify）
+  4. 產出完整的 BDD 規格：SQL Schema + sdd.os ISA Feature Files（四類規則）
+  5. 設計 Server Actions 規格
+  6. 產出 sdd.os ISA 配置
 
-  採用 sdd.os ISA Gherkin 格式，產出的 Feature Files 可直接與 sdd.os 工具整合。
+  採用 sdd.os ISA Gherkin 格式（四類規則分類法），
+  產出的 Feature Files 可直接與 sdd.os 工具整合。
 
   ⚠️ 本 Skill 不負責應用程式開發，僅專注於規格產出。
 
 author: AI x BDD Team
 output_format:
-  - sdd.os ISA Gherkin (Server Actions 版)
+  - sdd.os ISA Gherkin (Server Actions 版, 四類規則)
   - SQL Schema
   - Entity Mapping YAML
   - Actions Spec YAML
   - ISA Config YAML
+  - Event Storming Spec (es.md)
 ```
+
+---
+
+## Level 0: 參數解析
+
+啟動時讀取 `bdd-spec/arguments-template.yml`，取得所有可調參數。在後續 Instruction 文件中遇到 `${VARIABLE_NAME}` 時，替換為實際值。
+
+### 參數默認值表
+
+| 參數名 | 默認值 | 說明 |
+|--------|--------|------|
+| `DFS_BANDWIDTH` | 1 | ES 階段每批同時深入處理的 Command/Read Model 數量 |
+| `MAX_ES_ITEMS` | 20 | Commands + Read Models 的總數上限 |
+| `MAX_QUESTIONS_PER_ROUND` | 10 | 每回合最多提問數（Sub-question 不計入） |
+| `BATCH_CONFIRM_INTERVAL` | 5 | Clarify 階段 Staging Area 每幾題做一次確認 |
+| `SPECS_ROOT_DIR` | spec | 所有規格產出物的根目錄 |
+| `ES_SPEC_PATH` | spec/es.md | Event Storming 規格檔案路徑 |
+| `FEATURE_SPECS_DIR` | spec/features | Feature 檔案的存放目錄 |
+| `DATA_SPECS_DIR` | spec/data | 資料模型檔案的存放目錄 |
+| `ACTIONS_SPECS_DIR` | spec/actions | Actions 規格的存放目錄 |
+| `CLARIFY_DIR` | .clarify | 釐清項目根目錄 |
+| `DISCOVERY_SCAN_MODE` | full | Discovery 掃描模式（full / focused） |
+| `ENABLE_DRAFT_BATCH_MODE` | true | 是否啟用草稿批量生成模式 |
+| `MAX_DRAFT_BATCH_SIZE` | 10 | 草稿批量生成的最大項目數 |
 
 ---
 
@@ -43,6 +72,8 @@ output_format:
 | 規格釐清 | 「這份規格有什麼歧義需要釐清？」 |
 | 發現問題 | 「檢查這份需求有沒有遺漏或矛盾」 |
 | BDD 建模 | 「用 BDD 方式整理這個功能的業務規則」 |
+| 從零開始探索 | 「我有一個想法，幫我用 Event Storming 整理」 |
+| 需求變更 | 「我想增加/修改/移除某個功能」 |
 
 **不適用於**：
 - 「幫我開發這個應用」→ 應轉交開發類 Skill
@@ -53,13 +84,15 @@ output_format:
 ## Scope（邊界定義）
 
 ### 解決的問題
-- 從自然語言需求萃取結構化規格（ERM、Gherkin Feature）
+- 從原始想法透過 Event Storming 建構業務全貌
+- 從自然語言需求萃取結構化規格（SQL Schema、Gherkin Feature）
 - 識別規格歧義與遺漏，產生釐清項目
-- 與用戶迭代式釐清，直到規格完整
-- 產出符合 sdd.os ISA 格式的 Feature Files（Server Actions 版）
+- 與用戶迭代式釐清，支援「提案優先」模式減少提問輪數
+- 產出符合 sdd.os ISA 格式的 Feature Files（Server Actions 版，四類規則分類）
 - 產出 SQL Schema（schema.sql）和 Entity Mapping（entity_to_table_mapping.yml）
 - 設計 Server Actions 規格（actions.yml）
 - 產出 sdd.os ISA 配置檔案（isa_codegen.yml）
+- 協調需求變更的跨規格影響分析與連鎖更新
 
 ### 不解決的問題
 - ❌ 應用程式開發（前端、後端、Server Actions 實作）
@@ -87,7 +120,7 @@ output_format:
       "properties": {
         "text": {
           "type": "string",
-          "description": "自然語言需求描述"
+          "description": "自然語言需求描述（raw idea）"
         },
         "file_path": {
           "type": "string",
@@ -114,6 +147,10 @@ output_format:
       "type": "object",
       "description": "已存在的規格（用於釐清或擴充）",
       "properties": {
+        "es_spec": {
+          "type": "string",
+          "description": "${ES_SPEC_PATH} 路徑（Event Storming 規格）"
+        },
         "schema_sql": {
           "type": "string",
           "description": "spec/data/schema.sql 路徑"
@@ -130,13 +167,17 @@ output_format:
     },
     "mode": {
       "type": "string",
-      "enum": ["full", "discovery", "formulation", "actions-design"],
+      "enum": ["full", "event-storming", "discovery", "formulation", "actions-design", "change"],
       "default": "full",
-      "description": "執行模式：full=完整流程, discovery=僅發現歧義, formulation=僅規格表達, actions-design=僅Actions設計"
+      "description": "執行模式：full=完整流程, event-storming=僅ES探索, discovery=僅發現歧義, formulation=僅規格表達, actions-design=僅Actions設計, change=需求變更"
     },
     "project_context": {
       "type": "string",
       "description": "專案背景資訊，如「電商後台」、「訂單管理系統」"
+    },
+    "change_request": {
+      "type": "string",
+      "description": "需求變更描述（僅 mode=change 時使用）"
     }
   },
   "required": ["project_path", "requirements"]
@@ -161,6 +202,10 @@ output_format:
       "type": "object",
       "description": "產出的檔案",
       "properties": {
+        "es_spec": {
+          "type": "string",
+          "description": "${ES_SPEC_PATH} 路徑（Event Storming 規格）"
+        },
         "schema_sql": {
           "type": "string",
           "description": "spec/data/schema.sql 路徑"
@@ -200,6 +245,10 @@ output_format:
         "resolved": {
           "type": "integer",
           "description": "已解決的問題數"
+        },
+        "resolved_by_proposal": {
+          "type": "integer",
+          "description": "透過提案模式解決的問題數"
         },
         "open": {
           "type": "integer",
@@ -242,22 +291,35 @@ output_format:
 
 ## Workflow Overview（流程概覽）
 
-### 階段流程圖（雙循環架構）
+### 階段流程圖（完整六階段架構）
 
 ```
 ┌─────────────────────────────────────────────────────────────────────┐
-│                    Phase 1: 需求釐清（針對 PRD）                      │
+│              Phase 0: Event Storming 探索（可選）                     │
+│              ⚠️ 從零開始時建議執行                                    │
 │                                                                     │
-│    PRD ──▶ Discovery ──▶ Clarify ──▶ (循環直到連續 2 輪無新問題)     │
+│    Raw Idea ──▶ ES 探索（DFS 策略）──▶ ${ES_SPEC_PATH}             │
+│              ──▶ 提案優先模式減少提問                                │
 │                                                                     │
 └─────────────────────────────────────────────────────────────────────┘
                                     │
                                     ▼
 ┌─────────────────────────────────────────────────────────────────────┐
-│                    Phase 2: 規格產出（初版）                          │
+│                    Phase 1: 需求釐清（針對 PRD / ES）                 │
 │                                                                     │
-│    Formulation ──▶ spec/data/schema.sql                             │
-│                 ──▶ spec/features/*.feature（初版）                  │
+│    PRD/ES ──▶ Discovery ──▶ Clarify ──▶ (循環直到連續 2 輪無新問題)  │
+│          ──▶ 四類規則分類 + 提案優先模式                             │
+│                                                                     │
+└─────────────────────────────────────────────────────────────────────┘
+                                    │
+                                    ▼
+┌─────────────────────────────────────────────────────────────────────┐
+│                    Phase 2: 規格產出（初版 / 草稿批量生成）            │
+│                                                                     │
+│    Formulation（三關注點分離）                                       │
+│    ├─ 行為探索 ──▶ spec/features/*.feature（四類規則）               │
+│    ├─ 實體推導 ──▶ spec/data/schema.sql + mapping                  │
+│    └─ 草稿批量生成模式（ES clear 時）                                │
 │                                                                     │
 └─────────────────────────────────────────────────────────────────────┘
                                     │
@@ -280,6 +342,7 @@ output_format:
 │                    Phase 4: Actions 設計                             │
 │                                                                     │
 │    Feature Files ──▶ 分析 Action/Rules ──▶ spec/actions/actions.yml │
+│              ──▶ 四類規則 + type 欄位                                │
 │                                                                     │
 └─────────────────────────────────────────────────────────────────────┘
                                     │
@@ -296,6 +359,11 @@ output_format:
                           │   規格完成！     │
                           │   可交付開發     │
                           └─────────────────┘
+
+                    ┌─────────────────────────┐
+                    │  Phase 6: 需求變更（隨時）│
+                    │  影響分析 → 連鎖更新     │
+                    └─────────────────────────┘
 ```
 
 ### ⚠️ 關鍵原則：雙循環迭代
@@ -305,26 +373,28 @@ output_format:
 PRD → Discovery → Clarify → Formulation → 完成 ❌
 ```
 
-**正確做法**（完整 5 階段流程）：
+**正確做法**（完整流程）：
 ```
-PRD → Discovery → Clarify → Formulation（初版 spec）
-                                ↓
+[Raw Idea → ES 探索（可選）]
+                ↓
+PRD/ES → Discovery → Clarify → Formulation（初版 spec / 草稿批量生成）
+                                    ↓
                     spec → Discovery → Clarify → 修正 spec
-                                ↓
+                                    ↓
                     （循環直到 spec 夠詳細）
-                                ↓
+                                    ↓
                     Actions Design → actions.yml
-                                ↓
+                                    ↓
                     ISA Config → isa_codegen.yml ✅
 ```
 
 ### 迭代釐清機制詳解
 
-#### Phase 1: 需求釐清（針對 PRD）
+#### Phase 1: 需求釐清（針對 PRD / ES）
 
 | 輪次 | Discovery 特徵 | Clarify 特徵 |
 |------|---------------|-------------|
-| 第 1 輪 | 找出表面明顯的歧義 | 釐清基礎定義與術語 |
+| 第 1 輪 | 找出表面明顯的歧義 | 釐清基礎定義與術語（提案優先） |
 | 第 2 輪 | 根據釐清結果發現更深層問題 | 釐清邏輯關係與邊界條件 |
 | 第 3+ 輪 | 發現跨功能的矛盾或遺漏 | 確認整體一致性 |
 
@@ -332,10 +402,11 @@ PRD → Discovery → Clarify → Formulation（初版 spec）
 
 | 檢查項目 | 說明 |
 |----------|------|
-| 規則完整性 | 每個功能的前置/後置條件是否都有 Rule？ |
+| 四類規則完整性 | 每個功能的前置（狀態）/前置（參數）/後置（回應）/後置（狀態）是否都有 Rule？ |
 | Example 覆蓋度 | 每條 Rule 是否有足夠的 Example 覆蓋邊界？ |
 | 邊界條件 | 數值邊界、狀態邊界、組合邊界是否涵蓋？ |
 | 錯誤處理 | 異常情況是否都有對應的 Rule + Example？ |
+| Rule 命名 | 是否遵循嚴格句型：`<四類前綴> - <主詞> 必須/應 <單一條件>` |
 
 **迭代終止條件**（兩個 Phase 都適用）：
 - `.clarify/overview.md` 中 Open 項目數為 0
@@ -348,6 +419,7 @@ round: 3
 statistics:
   total_discovered: 15
   resolved: 12
+  resolved_by_proposal: 5  # 提案模式解決
   open: 3
   deferred: 0
 
@@ -355,6 +427,7 @@ history:
   - round: 1
     discovered: 5
     resolved: 5
+    proposal_rate: 60%  # 60% 透過提案解決
   - round: 2
     discovered: 7
     resolved: 7
@@ -374,8 +447,14 @@ Agent 本質上是無狀態的（Stateless），但迭代式釐清需要跨輪�
 ```
 .clarify/
 ├── overview.md           # 📌 主狀態檔 - 每輪必讀必更新
-├── current-round.md      # 當前輪次的釐清項目（工作區）
+├── data/                 # 待處理的資料模型釐清項目
+├── features/             # 待處理的功能模型釐清項目
+├── staging/              # 暫存區（已回答但未批量確認）
+│   ├── data/
+│   └── features/
 └── resolved/             # 已解決項目歸檔
+    ├── data/
+    ├── features/
     ├── round-1.md
     ├── round-2.md
     └── ...
@@ -386,9 +465,9 @@ Agent 本質上是無狀態的（Stateless），但迭代式釐清需要跨輪�
 | 時機 | 操作 | 說明 |
 |------|------|------|
 | 輪次開始 | **讀取** `.clarify/overview.md` | 恢復上下文，了解已解決/待解決項目 |
-| 發現新問題 | **追加** 到 `current-round.md` | 記錄本輪發現的問題 |
-| 用戶回覆 | **更新** `current-round.md` 狀態 | 標記為 Resolved |
-| 輪次結束 | **歸檔** + **更新** `overview.md` | 移動到 `resolved/`，更新統計 |
+| 發現新問題 | **建立** 釐清項目檔案 | 記錄本輪發現的問題 |
+| 用戶回覆 | **更新** 釐清項目狀態 | 標記為 Reviewing → Confirmed |
+| 批量確認 | **歸檔** + **更新** `overview.md` | 移動到 `resolved/`，更新統計 |
 
 ### Context 恢復機制
 
@@ -405,7 +484,7 @@ Agent 本質上是無狀態的（Stateless），但迭代式釐清需要跨輪�
 
 ### overview.md 格式
 
-詳見 `prompts/instructions/02-clarify.md` 的「狀態追蹤」章節。
+詳見 [`instructions/02-clarify.md`](bdd-spec/instructions/02-clarify.md) 的「狀態追蹤」章節。
 
 ---
 
@@ -415,18 +494,25 @@ Agent 本質上是無狀態的（Stateless），但迭代式釐清需要跨輪�
 
 | 階段 | Instruction 文件 | 加載時機 | 必要性 |
 |------|-----------------|----------|--------|
-| 1. 發現 | `prompts/instructions/01-discovery.md` | 開始分析需求時 | 必要 |
-| 2. 釐清 | `prompts/instructions/02-clarify.md` | 發現歧義需釐清時 | 必要 |
-| 3. 規格表達 | `prompts/instructions/03-formulation.md` | 產出規格時 | 必要 |
-| 4. Actions 設計 | `prompts/instructions/04-actions-design.md` | 設計 Server Actions 時 | 必要 |
-| 5. ISA 配置 | `prompts/instructions/05-isa-config.md` | 產出 sdd.os 配置時 | 必要 |
+| 0. ES 探索 | `bdd-spec/instructions/00-event-storming.md` | 從零開始建構業務全貌時 | **可選** |
+| 1. 發現 | `bdd-spec/instructions/01-discovery.md` | 開始分析需求時 | 必要 |
+| 2. 釐清 | `bdd-spec/instructions/02-clarify.md` | 發現歧義需釐清時 | 必要 |
+| 3. 規格表達 | `bdd-spec/instructions/03-formulation.md` | 產出規格時 | 必要 |
+| 4. Actions 設計 | `bdd-spec/instructions/04-actions-design.md` | 設計 Server Actions 時 | 必要 |
+| 5. ISA 配置 | `bdd-spec/instructions/05-isa-config.md` | 產出 sdd.os 配置時 | 必要 |
+| 6. 需求變更 | `bdd-spec/instructions/06-change-management.md` | 用戶提出需求變更時 | **按需** |
 
 **輔助規則文件**：
-- `prompts/rules/formulation-rules.md` - sdd.os ISA Gherkin 格式規範（在 Formulation 階段加載）
+- `bdd-spec/rules/formulation-rules.md` - sdd.os ISA Gherkin 格式規範（四類規則分類法）（在 Formulation 階段加載）
+
+**可調參數文件**：
+- `bdd-spec/arguments-template.yml` - 可調參數配置（DFS_BANDWIDTH、MAX_ES_ITEMS 等）
 
 **階段說明**：
+- **階段 0**：從零開始的業務探索（可選）
 - **階段 1-3**：需求釐清與規格產出
 - **階段 4-5**：規格轉換為開發規格（actions.yml + isa_codegen.yml）
+- **階段 6**：需求變更的跨規格協調
 
 ---
 
@@ -436,8 +522,8 @@ Agent 本質上是無狀態的（Stateless），但迭代式釐清需要跨輪�
 
 | 腳本 | 用途 | 調用時機 | 強制性 |
 |------|------|----------|--------|
-| `prompts/scripts/lint-gherkin-format.ts` | 確保步驟 100% 符合 ISA Regex | Formulation 完成後（第一步） | **必要** |
-| `prompts/scripts/validate-feature.ts` | 驗證 Gherkin 語法與結構完整性 | lint 通過後（第二步） | **必要** |
+| `bdd-spec/scripts/lint-gherkin-format.ts` | 確保步驟 100% 符合 ISA Regex | Formulation 完成後（第一步） | **必要** |
+| `bdd-spec/scripts/validate-feature.ts` | 驗證 Gherkin 語法與結構完整性 | lint 通過後（第二步） | **必要** |
 
 ### 腳本調用規範
 
@@ -445,10 +531,10 @@ Agent 本質上是無狀態的（Stateless），但迭代式釐清需要跨輪�
 
 ```bash
 # 第一步：ISA Format Lint（確保 Regex 相容）
-npx ts-node prompts/scripts/lint-gherkin-format.ts spec/features/
+npx ts-node bdd-spec/scripts/lint-gherkin-format.ts spec/features/
 
 # 第二步：結構驗證（確保完整性）
-npx ts-node prompts/scripts/validate-feature.ts spec/features/
+npx ts-node bdd-spec/scripts/validate-feature.ts spec/features/
 ```
 
 ### 自我修復迴圈
@@ -465,10 +551,10 @@ npx ts-node prompts/scripts/validate-feature.ts spec/features/
 
 | 資源 | 用途 | 加載時機 |
 |------|------|----------|
-| `prompts/resources/templates/feature.template` | Feature File 模板 | 撰寫 Feature 時 |
-| `prompts/resources/templates/actions.template.yml` | actions.yml 模板 | Actions 設計時 |
-| `prompts/resources/templates/isa-config.template.yml` | isa_codegen.yml 模板 | ISA 配置時 |
-| `prompts/resources/examples/` | 完整範例參考 | 需要參考時 |
+| `bdd-spec/resources/templates/feature.template` | Feature File 模板（四類規則） | 撰寫 Feature 時 |
+| `bdd-spec/resources/templates/actions.template.yml` | actions.yml 模板 | Actions 設計時 |
+| `bdd-spec/resources/templates/isa-config.template.yml` | isa_codegen.yml 模板 | ISA 配置時 |
+| `bdd-spec/resources/examples/` | 完整範例參考 | 需要參考時 |
 
 ---
 
@@ -480,12 +566,21 @@ npx ts-node prompts/scripts/validate-feature.ts spec/features/
 | 規格存在矛盾 | 標記衝突點，列出選項，請用戶決定 |
 | 技術限制 | 明確說明限制，提供替代方案 |
 | Feature 無法對應 Action | 檢查 summary 一致性，若不一致則修正 |
+| 需求變更級聯影響 | 執行影響分析，列出所有受影響項目，用戶確認後才執行 |
 
 ---
 
 ## Quality Gates（品質閘門）
 
 每個階段完成後，必須通過對應的品質檢查。**硬性閘門由腳本強制執行，軟性閘門由模型自檢**。
+
+### Phase 0: Event Storming 探索（軟性閘門）
+
+| 檢查項目 | 驗證方式 |
+|----------|----------|
+| 所有 Commands / Read Models 已 clear | 檢查知識地圖，無 `(待澄清)` 標記 |
+| Aggregates 已推導完成 | 每個 Aggregate 有屬性表 |
+| 四類 Rules 已初步識別 | 每個 Command / Read Model 有至少一條 Rule |
 
 ### Phase 1: 迭代式釐清（軟性閘門）
 
@@ -497,14 +592,14 @@ npx ts-node prompts/scripts/validate-feature.ts spec/features/
 
 ### Formulation 階段（硬性閘門）
 
-**⚠️ 以下檢查由 `prompts/scripts/validate-feature.ts` 強制執行**：
+**⚠️ 以下檢查由 `bdd-spec/scripts/validate-feature.ts` 強制執行**：
 
 | 檢查項目 | 腳本驗證 |
 |----------|----------|
 | 所有 Feature 有 `# Action:` 註解 | ✅ 自動檢查 |
 | 所有 Feature 有 `# Summary:` 註解 | ✅ 自動檢查 |
 | Summary 與 Feature 名稱一致 | ✅ 自動檢查 |
-| 所有 Rule 標註 `前置` 或 `後置` | ✅ 自動檢查 |
+| 所有 Rule 標註四類之一 | ✅ 自動檢查 |
 | When 步驟格式正確 | ✅ 自動檢查 |
 | Then 步驟格式正確 | ✅ 自動檢查 |
 | 至少有一個 Example | ✅ 自動檢查 |
@@ -514,14 +609,18 @@ npx ts-node prompts/scripts/validate-feature.ts spec/features/
 Formulation 完成
        │
        ▼
-執行 validate-feature.ts
+執行 lint-gherkin-format.ts
        │
-       ├── exit 0 ──▶ 通過，進入下一階段
+       ├── exit 0 ──▶ 執行 validate-feature.ts
+       │                    │
+       │                    ├── exit 0 ──▶ 通過，進入下一階段
+       │                    │
+       │                    └── exit 1 ──▶ 進入修正模式
        │
        └── exit 1 ──▶ 進入修正模式
                             │
                             ▼
-                      修正錯誤後重新驗證
+                      修正錯誤後重新驗證（最多 3 次）
 ```
 
 ### Actions Design 階段（軟性閘門）
@@ -530,7 +629,7 @@ Formulation 完成
 |----------|----------|
 | 每個 Feature 有對應 Action | 模型自檢 |
 | Action summary 與 Feature 名稱一致 | 模型自檢 |
-| rules 欄位完整 | 模型自檢 |
+| rules 欄位完整（含四類 type 欄位） | 模型自檢 |
 | Types 與 schema.sql 一致 | 模型自檢 |
 
 ### ISA Config 階段（軟性閘門）
@@ -549,6 +648,7 @@ Formulation 完成
 ```
 Level 0 (Always Loaded)
 └── SKILL.md (本文件) - 元數據、觸發條件、Schema
+└── bdd-spec/arguments-template.yml - 可調參數
 
 Level 1 (On Skill Activation)
 └── 當前執行階段的 instruction 文件

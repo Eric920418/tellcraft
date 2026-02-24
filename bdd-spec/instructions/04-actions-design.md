@@ -10,7 +10,7 @@ description: 分析 sdd.os ISA Feature Files 中的功能與規則，設計對�
 
 **核心目標：建立 Server Action 與 Feature File 之間的明確關聯，確保每個 Action 都可追溯到對應的業務規則。**
 
-**注意**：本流程的輸入為 **sdd.os ISA Gherkin (Server Actions 版)** 格式的 Feature Files，詳見 [`formulation-rules.md`](./formulation-rules.md)。
+**注意**：本流程的輸入為 **sdd.os ISA Gherkin (Server Actions 版)** 格式的 Feature Files，詳見 [`formulation-rules.md`](../rules/formulation-rules.md)。
 
 ---
 

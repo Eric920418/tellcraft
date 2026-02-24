@@ -136,7 +136,7 @@ export async function executeIteration(input: {
 
     if (!result.success || !result.pages) {
       await sendMessage(conversationId, io, {
-        content: `修改失敗：${result.error || '未知錯誤'}。請嘗試其他描述方式。`,
+        content: `修改失敗：${result.error || '未知錯誤，請稍後重試。'}`,
         stage: 'error',
       })
       state.phase = 'uiux_complete'

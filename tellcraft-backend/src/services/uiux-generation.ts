@@ -70,7 +70,39 @@ interface LlmTrackingContext {
   purpose?: string
 }
 
-// callClaude — 使用 streaming 避免長請求超時
+// 判斷是否為可重試的暫時性錯誤
+function isRetryableError(err: unknown): boolean {
+  const msg = String(err)
+  return msg.includes('overloaded_error') ||
+    msg.includes('rate_limit_error') ||
+    msg.includes('529') ||
+    msg.includes('503') ||
+    msg.includes('ECONNRESET') ||
+    msg.includes('ETIMEDOUT')
+}
+
+// 將 LLM 錯誤轉換為用戶可讀訊息
+function humanizeError(err: unknown): string {
+  const msg = String(err)
+  if (msg.includes('overloaded_error') || msg.includes('529')) {
+    return 'AI 伺服器目前繁忙，已自動重試但仍無法處理。請稍等 1-2 分鐘後再試。'
+  }
+  if (msg.includes('rate_limit_error') || msg.includes('429')) {
+    return 'AI 請求過於頻繁，請稍等片刻再試。'
+  }
+  if (msg.includes('ECONNRESET') || msg.includes('ETIMEDOUT') || msg.includes('503')) {
+    return 'AI 伺服器連線中斷，請稍後重試。'
+  }
+  if (msg.includes('authentication') || msg.includes('401')) {
+    return 'AI 服務認證失敗，請聯繫管理員。'
+  }
+  return 'AI 處理時發生錯誤，請稍後重試。如持續失敗，請嘗試其他描述方式。'
+}
+
+// callClaude — 使用 streaming 避免長請求超時，含自動重試
+const RETRY_MAX = 3
+const RETRY_BASE_DELAY_MS = 2000
+
 export async function callClaude(
   systemPrompt: string,
   messages: Array<{ role: 'user' | 'assistant'; content: string }>,
@@ -84,58 +116,72 @@ export async function callClaude(
   await acquireLlmSlot()
   try {
     const anthropic = getAnthropicClient()
+    let lastError: unknown = null
 
-    const stream = anthropic.messages.stream({
-      model: 'claude-sonnet-4-6',
-      max_tokens: options?.maxTokens || 4096,
-      temperature: options?.temperature ?? 0.2,
-      system: systemPrompt,
-      messages: messages.map(m => ({
-        role: m.role,
-        content: m.content,
-      })),
-    })
+    for (let attempt = 1; attempt <= RETRY_MAX; attempt++) {
+      try {
+        const stream = anthropic.messages.stream({
+          model: 'claude-sonnet-4-6',
+          max_tokens: options?.maxTokens || 4096,
+          temperature: options?.temperature ?? 0.2,
+          system: systemPrompt,
+          messages: messages.map(m => ({
+            role: m.role,
+            content: m.content,
+          })),
+        })
 
-    if (onTextDelta) {
-      let accumulated = ''
-      let chunkCount = 0
-      stream.on('text', (text) => {
-        accumulated += text
-        chunkCount++
-        if (chunkCount % 50 === 1) {
-          console.log(`[callClaude] streaming chunk #${chunkCount}, accumulated ${accumulated.length} chars`)
+        if (onTextDelta) {
+          let accumulated = ''
+          let chunkCount = 0
+          stream.on('text', (text) => {
+            accumulated += text
+            chunkCount++
+            if (chunkCount % 50 === 1) {
+              console.log(`[callClaude] streaming chunk #${chunkCount}, accumulated ${accumulated.length} chars`)
+            }
+            onTextDelta(accumulated)
+          })
         }
-        onTextDelta(accumulated)
-      })
+
+        const finalMessage = await stream.finalMessage()
+
+        // 記錄 LLM 用量（Sonnet: input $3/M, output $15/M）
+        const usage = finalMessage.usage
+        if (usage) {
+          const inputTokens = usage.input_tokens || 0
+          const outputTokens = usage.output_tokens || 0
+          const cost = (inputTokens * 3 + outputTokens * 15) / 1_000_000
+          recordLlmUsage({
+            model: 'claude-sonnet-4-6',
+            inputTokens,
+            outputTokens,
+            costUsd: cost,
+            purpose: trackingContext?.purpose || 'uiux_generation',
+            userId: trackingContext?.userId,
+            conversationId: trackingContext?.conversationId,
+          }).catch(err => console.error('[UIUX] recordLlmUsage failed:', err))
+        }
+
+        const content = finalMessage.content[0]
+        if (content.type === 'text') {
+          return { success: true, content: content.text }
+        }
+
+        return { success: false, error: '無法取得回應內容' }
+      } catch (err) {
+        lastError = err
+        if (attempt < RETRY_MAX && isRetryableError(err)) {
+          const delay = RETRY_BASE_DELAY_MS * Math.pow(2, attempt - 1) // 2s, 4s, 8s
+          console.warn(`[callClaude] 暫時性錯誤 (attempt ${attempt}/${RETRY_MAX})，${delay}ms 後重試:`, String(err).slice(0, 150))
+          await new Promise(resolve => setTimeout(resolve, delay))
+          continue
+        }
+        break
+      }
     }
 
-    const finalMessage = await stream.finalMessage()
-
-    // 記錄 LLM 用量（Sonnet: input $3/M, output $15/M）
-    const usage = finalMessage.usage
-    if (usage) {
-      const inputTokens = usage.input_tokens || 0
-      const outputTokens = usage.output_tokens || 0
-      const cost = (inputTokens * 3 + outputTokens * 15) / 1_000_000
-      recordLlmUsage({
-        model: 'claude-sonnet-4-6',
-        inputTokens,
-        outputTokens,
-        costUsd: cost,
-        purpose: trackingContext?.purpose || 'uiux_generation',
-        userId: trackingContext?.userId,
-        conversationId: trackingContext?.conversationId,
-      }).catch(err => console.error('[UIUX] recordLlmUsage failed:', err))
-    }
-
-    const content = finalMessage.content[0]
-    if (content.type === 'text') {
-      return { success: true, content: content.text }
-    }
-
-    return { success: false, error: '無法取得回應內容' }
-  } catch (err) {
-    return { success: false, error: `呼叫 LLM 時發生錯誤: ${err}` }
+    return { success: false, error: humanizeError(lastError) }
   } finally {
     releaseLlmSlot()
   }

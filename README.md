@@ -12,10 +12,40 @@ Tellcraft 是一個 AI 驅動的自動化開發平台。用戶只需描述需求
 
 ## 當前開發進度
 
-- **狀態**：✅ Phase 1-9 + Server Actions + VPS Backend + 前端 Chat 串接 + 認證系統 + 訪客體驗改善 + 儀表板系統 + BDD Spec 完整修復 + 專案版本管理 + **UIUX 生成邏輯重構** + **Design Tier** + **專案自動命名** + **PreviewPanel iframe 重構** + **Quality Gate 品質檢查** + **Code Preview 即時渲染** + **串流實時預覽** + **BDD→UI 翻譯 + Variant 創意概念** + **Fast Mode 快速建站** + **智能模板匹配** + **Fast Build 藍圖進度** + **BDD Q&A 3D 蓋房子動畫** + **對話回退 + 錯誤恢復**
+- **狀態**：✅ Phase 1-9 + Server Actions + VPS Backend + 前端 Chat 串接 + 認證系統 + 訪客體驗改善 + 儀表板系統 + BDD Spec 完整修復 + 專案版本管理 + **UIUX 生成邏輯重構** + **Design Tier** + **專案自動命名** + **PreviewPanel iframe 重構** + **Quality Gate 品質檢查** + **Code Preview 即時渲染** + **串流實時預覽** + **BDD→UI 翻譯 + Variant 創意概念** + **Fast Mode 快速建站** + **智能模板匹配** + **Fast Build 藍圖進度** + **BDD Q&A 3D 蓋房子動畫** + **對話回退 + 錯誤恢復** + **BDD Spec Skill v2.0.0 同步** + **LLM 自動重試 + 錯誤訊息人性化**
 - **釐清項目**：28 項全部解決
 - **Server Actions**：30+ 已實作
 - **詳情**：[`.clarify/overview.md`](.clarify/overview.md)
+
+### LLM 自動重試 + 錯誤訊息人性化（2026-02-24）
+
+所有 `callClaude()` 函數新增自動重試機制，解決 Anthropic API 暫時性過載（`overloaded_error`）導致用戶操作失敗的問題。
+
+**修復項目**：
+- **`uiux-generation.ts` callClaude**：`overloaded_error` / `rate_limit_error` / 網路錯誤自動重試最多 3 次（指數退避 2s→4s→8s）
+- **`spec-discovery.ts` callClaude**：同上重試機制（HTTP fetch 版本，檢查 status 429/529/503）
+- **`formulation.ts` callClaude**：同上重試機制
+- **`bdd-to-ui-spec.ts` translateBddToUISpec**：同上重試機制（Haiku SDK stream 版本）
+- **錯誤訊息人性化**：`humanizeError()` 將原始 JSON 錯誤轉為用戶可讀的中文提示（如「AI 伺服器目前繁忙，請稍等 1-2 分鐘後再試」）
+- **`iteration-skill.ts`**：迭代失敗訊息直接使用 `callClaude` 返回的人性化錯誤
+
+**核心改動**：
+- `tellcraft-backend/src/services/uiux-generation.ts`：`isRetryableError()` + `humanizeError()` + callClaude retry loop
+- `tellcraft-backend/src/services/spec-discovery.ts`：`isRetryableStatus()` + `isRetryableFetchError()` + retry loop
+- `tellcraft-backend/src/services/formulation.ts`：同上
+- `tellcraft-backend/src/services/bdd-to-ui-spec.ts`：retry loop 包裹 stream 調用
+- `tellcraft-backend/src/services/iteration-skill.ts`：移除冗餘的錯誤前綴
+
+### BDD Spec Skill v2.0.0 同步（2026-02-24）
+
+將 `.claude/skills/bdd-spec/SKILL.md` 從 v1.0.0 完全改寫為 v2.0.0，同步 `bdd-spec/skill.md` 的所有新功能。
+
+**修復項目**：
+- **SKILL.md 完全改寫**：新增 Event Storming（Phase 0）、四類規則分類、提案優先模式、草稿批量生成、需求變更管理（Phase 6）、Staging Area 機制
+- **參數解析指示**：新增 Level 0 參數解析區塊，指示 Claude 讀取 `bdd-spec/arguments-template.yml` 並替換 `${VARIABLE_NAME}`
+- **路徑前綴修正**：`bdd-spec/skill.md` 和 `SKILL.md` 中所有 `instructions/`、`scripts/`、`rules/`、`resources/` 路徑加上 `bdd-spec/` 前綴（約 20 處）
+- **壞連結修復**：`02-clarify.md`、`03-formulation.md`、`04-actions-design.md` 中 7 處 `./formulation-rules.md` → `../rules/formulation-rules.md`
+- **清理過期檔案**：刪除 `bdd-spec/dev/` 目錄（do-implement.md + now-implement-system.md）
 
 ### 對話回退 + 錯誤恢復（2026-02-24）
 

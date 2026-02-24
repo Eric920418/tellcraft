@@ -187,7 +187,7 @@
 
 ### 4. 輸出規格檔案
 
-依照 [`formulation-rules.md`](./formulation-rules.md) 中的「輸出格式規範」執行：
+依照 [`formulation-rules.md`](../rules/formulation-rules.md) 中的「輸出格式規範」執行：
 
 **資料模型輸出**：
 - `spec/data/schema.sql` - SQL DDL 定義
@@ -258,7 +258,7 @@ Feature: 功能名稱
 
 ## 核心原則
 
-**詳見 [`formulation-rules.md`](./formulation-rules.md)**，關鍵原則包括：
+**詳見 [`formulation-rules.md`](../rules/formulation-rules.md)**，關鍵原則包括：
 
 ### 通用原則
 - **無腦補或任意假設原則**：嚴格遵守原始規格文本
