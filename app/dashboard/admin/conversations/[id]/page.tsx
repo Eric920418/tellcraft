@@ -440,8 +440,10 @@ export default function AdminConversationViewerPage() {
             }}
           >
             {messages.map((message, index) => {
-              // 進度條邏輯
-              const showProgressBar = message.role === 'assistant' && (
+              // 進度條只在最後一條訊息且正在活躍處理時顯示
+              // 歷史訊息的 stage 已完成，不需要顯示進度條
+              const isLastMessage = index === messages.length - 1
+              const isProgressStage = (
                 message.stage === 'init_progress' ||
                 message.stage === 'formulation_start' ||
                 message.stage === 'formulation_progress' ||
@@ -454,6 +456,7 @@ export default function AdminConversationViewerPage() {
                 message.stage === 'fast_generating' ||
                 message.stage === 'deployer_deploying'
               )
+              const showProgressBar = isLastMessage && message.role === 'assistant' && isProgressStage
 
               return (
                 <div
@@ -529,7 +532,7 @@ export default function AdminConversationViewerPage() {
                                   </span>
                                 )}
                               </div>
-                              <div style={{ height: 3, background: 'var(--gray-100)', overflow: 'hidden' }}>
+                              <div style={{ height: 3, background: 'var(--gray-100)', overflow: 'hidden', position: 'relative' }}>
                                 {message.progress ? (
                                   <div style={{
                                     width: `${(message.progress.current / message.progress.total) * 100}%`,
