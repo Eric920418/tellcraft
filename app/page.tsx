@@ -30,13 +30,15 @@ import PreviewPanel from './components/uiux/PreviewPanel'
 import DeviceSwitcher, { type DeviceType, getDeviceWidth } from './components/uiux/DeviceSwitcher'
 import TemplatePicker from './components/uiux/TemplatePicker'
 import QuickReplies from './components/QuickReplies'
-import type { StreamingPreview } from './hooks/useVpsWebSocket'
+import type { StreamingPreview, FastBuildChunks } from './hooks/useVpsWebSocket'
 import dynamic from 'next/dynamic'
 
 const SandpackPreviewComponent = dynamic(
   () => import('./components/uiux/SandpackPreview'),
   { ssr: false, loading: () => <div style={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--gray-50)' }}><p style={{ color: 'var(--gray-400)', fontSize: 14 }}>載入預覽環境...</p></div> }
 )
+import FastBuildProgress from './components/FastBuildProgress'
+import { BuildingScene, BuildingFallback } from './components/building-scene'
 import { getTemplateById } from './actions/templates'
 import type { Template } from './lib/templates'
 
@@ -48,6 +50,7 @@ interface Message {
   timestamp: Date
   stage?: 'init' | 'init_progress' | 'discovery' | 'clarify' | 'prd_discovery_complete' | 'formulation_start' | 'formulation_progress' | 'formulation' | 'uiux' | 'uiux_template_picker' | 'generating' | 'deploying' | 'complete' | 'prefilter_rejected' | 'meta_response'
     | 'fast_generating' | 'fast_need_more_info'
+    | 'prd_discovery_analyzing' | 'prd_discovery_generating' | 'prd_discovery_deduping'
     | 'info' | 'error'
     | 'prd_discovery_continue' | 'clarify_question' | 'clarify_revert' | 'batch_confirm' | 'batch_confirmed'
     | 'formulation_complete' | 'spec_discovery_continue' | 'spec_discovery_complete' | 'spec_discovery_error'
@@ -64,7 +67,7 @@ interface Message {
   // UIUX 模板系統擴展
   layoutHint?: 'default' | 'split' | 'full_preview'
   richContent?: {
-    type: 'template_picker' | 'variant_picker' | 'design_preview' | 'code_preview' | 'quality_gate_report' | 'deploy_progress' | 'deploy_result' | 'deployment_history'
+    type: 'template_picker' | 'variant_picker' | 'design_preview' | 'code_preview' | 'quality_gate_report' | 'deploy_progress' | 'deploy_result' | 'deployment_history' | 'fast_build_progress' | 'building_progress'
     data: Record<string, unknown>
   }
   // Quick Reply 可點擊選項
@@ -962,6 +965,8 @@ function ChatSection({
 
   // Streaming preview（實時串流預覽，透過 HTTP 輪詢從 Redis 取得）
   const [streamingPreview, setStreamingPreview] = useState<StreamingPreview | null>(null)
+  // Fast Build chunk 計數（用於 FastBuildProgress 子進度更新）
+  const [fastBuildChunks, setFastBuildChunks] = useState(0)
 
   // Code Preview 容器尺寸追蹤（用於 iframe 縮放）
   useEffect(() => {
@@ -989,6 +994,16 @@ function ChatSection({
         m.richContent?.type === 'template_picker'
       )
       if (hasUiuxMessage) {
+        targetMode = 'split'
+      }
+
+      // 方法 3: BDD Q&A 釐清階段自動切 split mode（顯示 3D 蓋房子）
+      const hasClarifyMessage = messages.some(m =>
+        m.stage === 'clarify_question' ||
+        m.stage === 'prd_discovery_complete' ||
+        m.stage === 'prd_discovery_continue'
+      )
+      if (hasClarifyMessage && !hasUiuxMessage) {
         targetMode = 'split'
       }
     }
@@ -1263,6 +1278,9 @@ function ChatSection({
         // 處理 streaming preview（從 Redis 透過 HTTP 輪詢取得）
         if (result.data.streamingPreview) {
           setStreamingPreview(result.data.streamingPreview as StreamingPreview)
+          // 更新 chunk 計數（根據檔案數量估算）
+          const sp = result.data.streamingPreview as StreamingPreview
+          setFastBuildChunks((sp.pages?.length || 0) + (sp.components?.length || 0))
           // 串流期間加快輪詢
           pollInterval = 1500
           // 自動切換到 split 佈局
@@ -1296,6 +1314,7 @@ function ChatSection({
           const hasCodePreview = formattedMessages.some(m => m.richContent?.type === 'code_preview')
           if (hasCodePreview) {
             setStreamingPreview(null)
+            setFastBuildChunks(0)
           }
 
           // 找出最新的 AI 消息 stage（在 setMessages 外部計算，確保狀態更新正確）
@@ -1900,7 +1919,7 @@ function ChatSection({
               const lastMessageStage = lastMessage?.stage || ''
 
               // 只有當最後一條訊息是進度訊息時才顯示進度條
-              const isShowingProgress = ['init_progress', 'formulation_start', 'formulation_progress'].includes(lastMessageStage)
+              const isShowingProgress = ['init_progress', 'formulation_start', 'formulation_progress', 'fast_generating'].includes(lastMessageStage)
 
               // 分屏模式下只顯示 UIUX 相關的消息（隱藏之前的釐清歷史）
               const uiuxStartIndex = messages.findIndex(m =>
@@ -2222,6 +2241,81 @@ function ChatSection({
 
   // 預覽面板渲染函數（用於 SplitLayout）
   const renderPreviewPanel = () => {
+    // ── BDD Q&A 蓋房子場景 ──
+    const latestMsg = messages[messages.length - 1]
+    const isBddClarify = latestMsg?.stage === 'clarify_question'
+      || latestMsg?.stage === 'prd_discovery_continue'
+      || latestMsg?.stage === 'prd_discovery_complete'
+      || latestMsg?.stage === 'prd_discovery_analyzing'
+      || latestMsg?.stage === 'prd_discovery_generating'
+      || latestMsg?.stage === 'prd_discovery_deduping'
+      || latestMsg?.stage === 'batch_confirm'
+      || latestMsg?.stage === 'batch_confirmed'
+
+    // 檢查是否已進入 UIUX 階段（不再顯示蓋房子）
+    const hasUiuxStage = messages.some(m => m.stage?.startsWith('uiux') || m.richContent?.type === 'code_preview')
+
+    if (isBddClarify && !hasUiuxStage) {
+      // 提取建築進度
+      const buildingMsg = [...messages].reverse().find(m => m.richContent?.type === 'building_progress')
+      const buildingData = buildingMsg?.richContent?.data as { current?: number; total?: number; round?: number } | undefined
+      const bddProgress = buildingData?.current ?? 0
+      const bddTotal = buildingData?.total ?? 30
+      const bddRound = buildingData?.round ?? 1
+      const isLLMWorking = latestMsg?.stage === 'prd_discovery_analyzing'
+        || latestMsg?.stage === 'prd_discovery_generating'
+        || latestMsg?.stage === 'prd_discovery_deduping'
+        || latestMsg?.stage === 'prd_discovery_continue'
+      const isQAComplete = latestMsg?.stage === 'prd_discovery_complete'
+        || latestMsg?.stage === 'formulation_start'
+
+      return (
+        <div style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
+          <div style={{
+            padding: '12px 16px',
+            borderBottom: '1px solid var(--border-color)',
+            background: 'var(--white)',
+            fontSize: 14,
+            fontWeight: 500,
+            color: 'var(--black)',
+            display: 'flex',
+            alignItems: 'center',
+            gap: 8,
+          }}>
+            <span style={{ fontSize: 16 }}>🏠</span>
+            需求建構進度
+          </div>
+          <div style={{ flex: 1 }}>
+            <BuildingScene
+              progress={bddProgress}
+              totalQuestions={bddTotal}
+              round={bddRound}
+              isWorking={isLLMWorking}
+              isComplete={isQAComplete}
+            />
+          </div>
+        </div>
+      )
+    }
+
+    // ── Fast Build 藍圖進度 ──
+    const isFastBuilding = latestMsg?.stage === 'fast_generating'
+    const fastBuildMsg = [...messages].reverse().find(m => m.richContent?.type === 'fast_build_progress')
+
+    if (isFastBuilding && !streamingPreview) {
+      const fbData = fastBuildMsg?.richContent?.data as { phase?: string; progress?: { current: number; total: number; step: string } } | undefined
+      const fbPhase = (fbData?.phase || 'structure') as 'structure' | 'animation' | 'rwd' | 'quality_gate' | 'complete'
+      const fbProgress = fbData?.progress || { current: 1, total: 3, step: '生成結構' }
+
+      return (
+        <FastBuildProgress
+          phase={fbPhase}
+          progress={fbProgress}
+          streamingChunks={fastBuildChunks}
+        />
+      )
+    }
+
     // 檢查是否有 code_preview 訊息（Implementation 階段生成的程式碼）
     const codePreviewMessage = [...messages].reverse().find(m => m.richContent?.type === 'code_preview')
     const codePreviewData = codePreviewMessage?.richContent?.data
@@ -2240,33 +2334,16 @@ function ChatSection({
       const maxDeviceWidth = getDeviceWidth(codePreviewDevice)
       const previewWidth = codePreviewDevice === 'desktop' ? containerW : Math.min(maxDeviceWidth, containerW)
 
-      // Streaming 但還沒有任何頁面檔案 → 等待更多內容
+      // Streaming 但還沒有任何頁面檔案 → 顯示藍圖進度
       if (isStreaming && pagesData.length === 0) {
+        const spPhase = streamingPreview?.phase || 'structure'
+        const phaseMap: Record<string, number> = { structure: 1, animation: 2, rwd: 3 }
         return (
-          <div style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
-            <div
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                padding: '12px 16px',
-                borderBottom: '1px solid var(--border-color)',
-                background: 'var(--white)',
-                gap: 8,
-              }}
-            >
-              <span style={{
-                width: 8, height: 8, borderRadius: '50%',
-                background: 'var(--accent)', animation: 'pulse 1.5s ease-in-out infinite',
-              }} />
-              <span style={{ fontSize: 14, fontWeight: 500, color: 'var(--black)' }}>
-                {streamingPreview?.phase === 'structure' ? '結構生成中...' : streamingPreview?.phase === 'animation' ? '動畫增強中...' : '響應式適配中...'}
-              </span>
-            </div>
-            <div ref={codePreviewContainerRef} style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--gray-50)' }}>
-              <p style={{ color: 'var(--gray-400)', fontSize: 14 }}>等待代碼生成中...</p>
-            </div>
-            <style>{`@keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }`}</style>
-          </div>
+          <FastBuildProgress
+            phase={spPhase as 'structure' | 'animation' | 'rwd'}
+            progress={{ current: phaseMap[spPhase] || 1, total: 3, step: spPhase === 'structure' ? '生成結構' : spPhase === 'animation' ? '添加動畫' : '響應式優化' }}
+            streamingChunks={fastBuildChunks}
+          />
         )
       }
 

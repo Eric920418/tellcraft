@@ -84,6 +84,8 @@ pm2 describe tellcraft-backend            # 詳細資訊（記憶體/重啟次�
 | **Server Actions** | `app/actions/index.ts` | ~1800 | 對話/訊息/專案等 Server Actions 入口 |
 | **Sandpack 預覽** | `app/lib/sandpack-utils.ts` + `app/components/uiux/SandpackPreview.tsx` | | UIUX 預覽核心，Sandpack 真實 React 渲染 |
 | **WebSocket Hook** | `app/hooks/useVpsWebSocket.ts` | | 即時訊息推送（型別定義） |
+| **Fast Build 進度** | `app/components/FastBuildProgress.tsx` | | 工程藍圖風三階段進度元件（motion/react） |
+| **3D 蓋房子** | `app/components/building-scene/` | | Three.js 低多邊形 3D 場景 + GSAP timeline（BDD Q&A 視覺回饋） |
 
 ### Skill 系統
 

@@ -84,7 +84,9 @@
       "Bash(echo === $pkg ===:*)",
       "Bash(gh release:*)",
       "Bash(gh issue:*)",
-      "Bash(gh pr:*)"
+      "Bash(gh pr:*)",
+      "Bash(tail:*)",
+      "Bash(npx eslint:*)"
     ]
   }
 }

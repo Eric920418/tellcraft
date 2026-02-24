@@ -912,7 +912,12 @@ async function executeBddSpecSkill(input: BddSpecSkillInput) {
       stage: 'prd_discovery_complete',
     })
 
-    await sendClarifyQuestion(conversationId, io, discoveryItems[0], 0, discoveryItems.length)
+    await sendClarifyQuestion(conversationId, io, discoveryItems[0], 0, discoveryItems.length, {
+      answered: 0,
+      totalQuestions: discoveryItems.length,
+      round: 1,
+      maxRounds: PRD_DISCOVERY_LIMITS.MAX_ROUNDS,
+    })
 
     // 更新狀態為等待回覆
     state.phase = 'prd_clarify'
@@ -1068,7 +1073,8 @@ async function sendClarifyQuestion(
   io: SocketIOServer,
   item: ClarifyItem,
   index: number,
-  total: number
+  total: number,
+  globalProgress?: { answered: number; totalQuestions: number; round: number; maxRounds: number }
 ) {
   let text = `（${index + 1}/${total}）\n\n${item.whiteTextQuestion || item.question}`
 
@@ -1103,10 +1109,23 @@ async function sendClarifyQuestion(
       quickReplies.push({ label, value: letter, style: 'ghost' })
     })
   }
+
+  // 計算建築進度（用於 3D 蓋房子動畫）
+  const buildingProgress = globalProgress ? {
+    current: globalProgress.answered + 1,
+    total: globalProgress.totalQuestions,
+    round: globalProgress.round,
+    maxRounds: globalProgress.maxRounds,
+  } : undefined
+
   await sendMessage(conversationId, io, {
     content: text,
     stage: 'clarify_question',
     quickReplies,
+    richContent: buildingProgress ? {
+      type: 'building_progress' as 'building_progress',
+      data: buildingProgress as unknown as Record<string, unknown>,
+    } : undefined,
   })
 }
 
@@ -1141,9 +1160,15 @@ async function continueToNextQuestion(
   // 發送下一個問題
   const total = updatedSession.data.clarifyItems.length + updatedSession.data.stagingItems.length + updatedSession.data.resolvedItems.length
   const current = updatedSession.data.resolvedItems.length + updatedSession.data.stagingItems.length + 1
+  const resolvedCount = updatedSession.data.resolvedItems.length + updatedSession.data.stagingItems.length
 
   const nextItem = pendingItems[0]
-  await sendClarifyQuestion(conversationId, io, nextItem, current - 1, total)
+  await sendClarifyQuestion(conversationId, io, nextItem, current - 1, total, {
+    answered: resolvedCount,
+    totalQuestions: total,
+    round: state.currentRound || 1,
+    maxRounds: PRD_DISCOVERY_LIMITS.MAX_ROUNDS,
+  })
 
   state.currentItemId = nextItem.id
   state.waitingForReply = true
@@ -1232,10 +1257,22 @@ async function completeClärifyPhase(
   // 取得原始需求
   const originalRequirements = session.data.originalRequirements || ''
 
+  // ① 分析回答
+  await sendMessage(conversationId, io, {
+    content: '正在分析你的回答，整理已決策的方向...',
+    stage: 'prd_discovery_analyzing',
+  })
+
   // L2：生成 Decision Summary（>= 5 題才值得摘要）
   const decisionSummary = resolvedItems.length >= 5
     ? await generateDecisionSummary(resolvedItems, { conversationId })
     : null
+
+  // ② 準備問題
+  await sendMessage(conversationId, io, {
+    content: '根據已知資訊，準備下一批需要確認的細節...',
+    stage: 'prd_discovery_generating',
+  })
 
   // 調用 LLM 生成更多問題，傳入已回答+待答的問題避免重複
   const discoveryResult = await runPrdDiscovery(
@@ -1255,6 +1292,12 @@ async function completeClärifyPhase(
     await finishClarifyAndStartFormulation(conversationId, state, redis, io)
     return
   }
+
+  // ③ 去重檢查
+  await sendMessage(conversationId, io, {
+    content: '檢查問題是否重複...',
+    stage: 'prd_discovery_deduping',
+  })
 
   // L3：Post-generation 去重
   let newItems = discoveryResult.items
@@ -1285,7 +1328,12 @@ async function completeClärifyPhase(
 
   // 發送第一個新問題
   const totalQuestions = totalAnswered + newItems.length
-  await sendClarifyQuestion(conversationId, io, newItems[0], totalAnswered, totalQuestions)
+  await sendClarifyQuestion(conversationId, io, newItems[0], totalAnswered, totalQuestions, {
+    answered: totalAnswered,
+    totalQuestions,
+    round: state.currentRound,
+    maxRounds: PRD_DISCOVERY_LIMITS.MAX_ROUNDS,
+  })
 
   state.currentItemId = newItems[0].id
   state.waitingForReply = true
@@ -2096,6 +2144,10 @@ async function executeFastBuildSkill(params: {
     content: `正在快速生成您的${productType === 'landing' ? '網站' : productType}，預計 60-90 秒...`,
     stage: 'fast_generating',
     progress: { current: 1, total: 3, step: '生成結構' },
+    richContent: {
+      type: 'fast_build_progress' as 'fast_build_progress',
+      data: { phase: 'structure', progress: { current: 1, total: 3, step: '生成結構' } } as unknown as Record<string, unknown>,
+    },
   })
 
   const twConfig = generateTailwindConfig(designSystem)
@@ -2149,6 +2201,10 @@ async function executeFastBuildSkill(params: {
     content: '結構生成完成，正在添加動畫效果...',
     stage: 'fast_generating',
     progress: { current: 2, total: 3, step: '添加動畫' },
+    richContent: {
+      type: 'fast_build_progress' as 'fast_build_progress',
+      data: { phase: 'animation', progress: { current: 2, total: 3, step: '添加動畫' } } as unknown as Record<string, unknown>,
+    },
   })
 
   const animationResult = await generateAnimations(
@@ -2184,6 +2240,10 @@ async function executeFastBuildSkill(params: {
     content: '動畫添加完成，正在優化響應式佈局...',
     stage: 'fast_generating',
     progress: { current: 3, total: 3, step: '響應式優化' },
+    richContent: {
+      type: 'fast_build_progress' as 'fast_build_progress',
+      data: { phase: 'rwd', progress: { current: 3, total: 3, step: '響應式優化' } } as unknown as Record<string, unknown>,
+    },
   })
   const rwdResult = await generateRwd(
     designSystem,

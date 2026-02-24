@@ -12,10 +12,33 @@ Tellcraft 是一個 AI 驅動的自動化開發平台。用戶只需描述需求
 
 ## 當前開發進度
 
-- **狀態**：✅ Phase 1-9 + Server Actions + VPS Backend + 前端 Chat 串接 + 認證系統 + 訪客體驗改善 + 儀表板系統 + BDD Spec 完整修復 + 專案版本管理 + **UIUX 生成邏輯重構** + **Design Tier** + **專案自動命名** + **PreviewPanel iframe 重構** + **Quality Gate 品質檢查** + **Code Preview 即時渲染** + **串流實時預覽** + **BDD→UI 翻譯 + Variant 創意概念** + **Fast Mode 快速建站** + **智能模板匹配**
+- **狀態**：✅ Phase 1-9 + Server Actions + VPS Backend + 前端 Chat 串接 + 認證系統 + 訪客體驗改善 + 儀表板系統 + BDD Spec 完整修復 + 專案版本管理 + **UIUX 生成邏輯重構** + **Design Tier** + **專案自動命名** + **PreviewPanel iframe 重構** + **Quality Gate 品質檢查** + **Code Preview 即時渲染** + **串流實時預覽** + **BDD→UI 翻譯 + Variant 創意概念** + **Fast Mode 快速建站** + **智能模板匹配** + **Fast Build 藍圖進度** + **BDD Q&A 3D 蓋房子動畫**
 - **釐清項目**：28 項全部解決
 - **Server Actions**：30+ 已實作
 - **詳情**：[`.clarify/overview.md`](.clarify/overview.md)
+
+### Fast Build 藍圖進度 + BDD Q&A 3D 蓋房子動畫（2026-02-24）
+
+解決兩個 UX 死角：Fast Build 60-90 秒等待期間和 BDD Q&A 最多 30 題的疲勞感。
+
+**Fast Build 工程藍圖進度**：
+- **`app/components/FastBuildProgress.tsx`**（新建）：三階段視覺進度元件（骨架→動效→適配），motion/react 動畫
+- 後端 `orchestrator.ts`：3 條階段消息帶 `richContent.type = 'fast_build_progress'`
+- `orchestrator-utils.ts`：`makeStreamingCallback` 增加 chunk 計數 + `fast_build_chunks` Socket.io 事件
+- `app/page.tsx`：預覽面板在 `fast_generating` 階段渲染 `<FastBuildProgress />`，streaming 等待也用藍圖進度取代靜態文字
+
+**BDD Q&A 3D 蓋房子動畫**：
+- **`app/components/building-scene/`**（新建目錄）：
+  - `BuildingScene.tsx`：Three.js（@react-three/fiber + drei）低多邊形 isometric 房屋場景
+  - `buildingTimeline.ts`：GSAP timeline，30 題對應 6 輪建造階段（地基→牆體→門窗→內裝→屋頂→完工）
+  - `BuildingFallback.tsx`：WebGL 不支援時的 2D motion/react fallback
+  - `index.ts`：Dynamic import 包裝（SSR: false）
+- 後端 `sendClarifyQuestion`：新增 `globalProgress` 參數（answered/total/round/maxRounds），發送 `building_progress` richContent
+- 後端 `completeClärifyPhase`：拆分 3 條中間進度消息（analyzing/generating/deduping），3D 場景播放施工動畫
+- `app/page.tsx`：BDD Q&A 自動切 split mode，右側預覽面板渲染 3D 場景
+- `app/hooks/useVpsWebSocket.ts`：新增 `FastBuildChunks` 類型 + `fast_build_chunks` 事件監聽
+
+**新增依賴**：`three` `@react-three/fiber` `@react-three/drei` `gsap` `@types/three`
 
 ### 迭代更新 Skill 拆分 + 撤銷功能（2026-02-16）
 

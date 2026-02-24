@@ -101,7 +101,7 @@ export async function sendMessage(
     progress?: { current: number; total: number; step: string }
     layoutHint?: 'default' | 'split' | 'full_preview'
     richContent?: {
-      type: 'template_picker' | 'variant_picker' | 'design_preview' | 'code_preview' | 'quality_gate_report' | 'deploy_progress' | 'deploy_result' | 'deployment_history'
+      type: 'template_picker' | 'variant_picker' | 'design_preview' | 'code_preview' | 'quality_gate_report' | 'deploy_progress' | 'deploy_result' | 'deployment_history' | 'fast_build_progress' | 'building_progress'
       data: Record<string, unknown>
     }
     quickReplies?: { label: string; value: string; style?: 'primary' | 'secondary' | 'ghost' }[]
@@ -145,7 +145,11 @@ export function makeStreamingCallback(
   phase: 'structure' | 'animation' | 'rwd',
   tailwindConfig: string
 ): PartialCodeCallback {
+  let chunkCount = 0
+
   return (partialCode) => {
+    chunkCount++
+
     const previewData = {
       pages: partialCode.pages,
       components: partialCode.components,
@@ -163,6 +167,9 @@ export function makeStreamingCallback(
     // 同時透過 Socket.io 推送（供未來 WSS 或本地開發使用）
     const room = `conversation:${conversationId}`
     io.to(room).emit('preview_update', previewData)
+
+    // 發送 chunk 計數給前端（用於 FastBuildProgress 子進度更新）
+    io.to(room).emit('fast_build_chunks', { phase, chunkCount })
   }
 }
 

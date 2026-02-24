@@ -35,6 +35,11 @@ export interface StreamingPreview {
   phase: 'structure' | 'animation' | 'rwd'
 }
 
+export interface FastBuildChunks {
+  phase: 'structure' | 'animation' | 'rwd'
+  chunkCount: number
+}
+
 interface UseVpsWebSocketOptions {
   conversationId: string
   onMessage?: (message: Message) => void
@@ -43,6 +48,7 @@ interface UseVpsWebSocketOptions {
   onError?: (error: Error) => void
   onAutoTransition?: (transition: AutoTransition) => void
   onPreviewUpdate?: (preview: StreamingPreview) => void
+  onFastBuildChunks?: (chunks: FastBuildChunks) => void
 }
 
 interface UseVpsWebSocketReturn {
@@ -57,7 +63,7 @@ interface UseVpsWebSocketReturn {
 // ============================================================
 
 export function useVpsWebSocket(options: UseVpsWebSocketOptions): UseVpsWebSocketReturn {
-  const { conversationId, onMessage, onConnect, onDisconnect, onError, onAutoTransition, onPreviewUpdate } = options
+  const { conversationId, onMessage, onConnect, onDisconnect, onError, onAutoTransition, onPreviewUpdate, onFastBuildChunks } = options
 
   const socketRef = useRef<Socket | null>(null)
   const [isConnected, setIsConnected] = useState(false)
@@ -131,6 +137,10 @@ export function useVpsWebSocket(options: UseVpsWebSocketOptions): UseVpsWebSocke
       onPreviewUpdate?.(preview)
     })
 
+    socket.on('fast_build_chunks', (chunks: FastBuildChunks) => {
+      onFastBuildChunks?.(chunks)
+    })
+
     return () => {
       if (socket.connected) {
         socket.emit('unsubscribe', conversationId)
@@ -138,7 +148,7 @@ export function useVpsWebSocket(options: UseVpsWebSocketOptions): UseVpsWebSocke
       socket.disconnect()
       socketRef.current = null
     }
-  }, [conversationId, onConnect, onDisconnect, onError, onMessage, onAutoTransition, onPreviewUpdate])
+  }, [conversationId, onConnect, onDisconnect, onError, onMessage, onAutoTransition, onPreviewUpdate, onFastBuildChunks])
 
   // 訂閱對話
   const subscribe = useCallback(() => {
