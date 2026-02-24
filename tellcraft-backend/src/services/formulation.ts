@@ -345,17 +345,49 @@ export async function generateSingleFeature(
 
 ## sdd.os ISA 格式規範
 
-### When 步驟格式
+### Given 步驟格式（資料準備）
+- 資料準備：\`準備一個{entity}, with table:\`
+- **簡單 Invariant**（如 price >= 0）→ 直接用 \`準備一個{entity}, with table:\` 設定資料
+- **複雜 Invariant**（跨屬性計算、狀態流轉）→ 用 \`{summary}, call table:\` 透過 Action 設定
+
+### When 步驟格式（Action 呼叫）
 - Action 呼叫：\`{summary}, call table:\`
+
+### Then 步驟格式（回應驗證）
 - 成功回應：\`{summary}成功, with table:\`
 - 操作失敗：\`操作失敗\`
-
-### Then 步驟格式
 - Entity 驗證：\`存在一個{entity}, with table:\`
 
 ### 必要註解
 - \`@Action(ActionName)\`：標註這是哪個 Action
 - \`# Summary: xxx\`：Action 的一句話說明
+
+## 四類規則分類法（關鍵 ⚠️）
+
+每條 Rule **必須**標註四類之一，不可使用舊的 @Pre/@Post：
+
+| 類型 | 說明 | 失敗的 Then |
+|------|------|------------|
+| \`前置（狀態）\` | 系統既有狀態約束（如庫存>0） | \`Then 操作失敗\` |
+| \`前置（參數）\` | 輸入參數約束（如數量>0、必填） | \`Then 操作失敗\` |
+| \`後置（回應）\` | 回傳資料預期（查詢類功能用） | \`Then {summary}成功, with table:\` |
+| \`後置（狀態）\` | 資料庫狀態變化（命令類功能用） | \`Then {summary}成功, with table:\` + Entity 驗證 |
+
+### Rule 命名句型（嚴格遵守）
+
+\`\`\`
+Rule: <四類前綴> - <主詞> 必須/應 <單一條件>
+\`\`\`
+
+正確範例：
+- \`Rule: 前置（狀態）- 商品庫存必須充足\`
+- \`Rule: 前置（參數）- 必要參數必須提供\`
+- \`Rule: 後置（狀態）- 訂單總額應為所有品項小計加總\`
+- \`Rule: 後置（回應）- 查詢結果應包含訂單明細\`
+
+### 每個 Feature 至少必須有
+- 至少 1 條「前置（參數）」Rule（必要參數檢查）
+- 至少 1 條「後置」Rule（回應或狀態）
 
 ## 輸出格式
 直接輸出完整的 .feature 檔案內容，不需要 JSON 包裝。
@@ -365,8 +397,29 @@ export async function generateSingleFeature(
 # Summary: ${featureInfo.description}
 Feature: ${featureInfo.name}
 
-  @Pre
-  Rule: 前置條件規則
+  Background:
+    Given 準備一個{entity}, with table:
+      | 欄位 | 值 |
+
+  # ========== 前置條件 ==========
+
+  Rule: 前置（狀態）- 規則描述
+
+    Example: 情境說明
+      When {summary}, call table:
+        | 欄位 | 值 |
+      Then 操作失敗
+
+  Rule: 前置（參數）- 規則描述
+
+    Example: 情境說明
+      When {summary}, call table:
+        | 欄位 | 值 |
+      Then 操作失敗
+
+  # ========== 後置條件 ==========
+
+  Rule: 後置（狀態）- 規則描述
 
     Example: 情境說明
       When {summary}, call table:
@@ -378,10 +431,13 @@ Feature: ${featureInfo.name}
 \`\`\`
 
 ## 規則
-- 每條 Rule 標註 @Pre（前置）或 @Post（後置）
+- 每條 Rule 標註四類之一（前置（狀態）/前置（參數）/後置（回應）/後置（狀態）），**禁止使用舊的 @Pre/@Post**
+- Rule 命名遵循嚴格句型：\`<四類前綴> - <主詞> 必須/應 <單一條件>\`
+- 每條 Rule 只驗證一件事（原子化）
 - 每條 Rule 至少有一個 Example
 - 邊界條件要有對應的 Example
-- 使用 Entity Mapping 中的中文實體名`
+- 使用 Entity Mapping 中的中文實體名
+- DataTable 使用具體的測試資料（如 Alice、P001、50），禁止模糊描述`
 
   const userMessage = `${projectContext ? `專案背景：${projectContext}\n\n` : ''}需求描述：
 ${requirements}
@@ -567,17 +623,28 @@ export async function fixMultipleFeatures(
 
 ## sdd.os ISA 格式規範
 1. 檔案開頭必須有 \`@Action(ActionName)\` 和 \`# Summary:\` 註解
-2. 每個 Rule 必須標註 \`@Pre\` 或 \`@Post\`
-3. When 格式：\`{summary}, call table:\`
-4. Then 成功格式：\`{summary}成功, with table:\`
-5. Then 失敗格式：\`操作失敗\`
-6. Entity 驗證格式：\`存在一個{entity}, with table:\`
+2. 每個 Rule 必須標註**四類之一**：\`前置（狀態）\`、\`前置（參數）\`、\`後置（回應）\`、\`後置（狀態）\`
+3. **禁止使用舊的 @Pre/@Post**，必須使用四類前綴
+4. Rule 命名句型：\`<四類前綴> - <主詞> 必須/應 <單一條件>\`
+5. When 格式：\`{summary}, call table:\`
+6. Then 成功格式：\`{summary}成功, with table:\`
+7. Then 失敗格式：\`操作失敗\`
+8. Entity 驗證格式：\`存在一個{entity}, with table:\`
+9. Given 資料準備：\`準備一個{entity}, with table:\`
+
+## 四類規則分類
+- **前置（狀態）**：系統既有狀態約束（如庫存>0）
+- **前置（參數）**：輸入參數約束（如數量>0、必填欄位）
+- **後置（回應）**：API 回傳資料預期（查詢類功能）
+- **後置（狀態）**：資料庫狀態變化（命令類功能）
 
 ## 重要約束
 修復時必須嚴格遵守：
 1. 用戶在釐清階段做出的所有決策
 2. Schema 定義的欄位名稱和類型
 3. Entity Mapping 中的實體命名
+4. 若原有 @Pre → 改為「前置（狀態）」或「前置（參數）」（根據內容判斷）
+5. 若原有 @Post → 改為「後置（回應）」或「後置（狀態）」（根據內容判斷）
 
 ## 輸出格式
 請以 JSON 格式輸出修正後的內容：

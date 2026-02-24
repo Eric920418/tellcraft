@@ -37,26 +37,27 @@ Tellcraft 是一個 AI 驅動的自動化開發平台。用戶只需描述需求
 
 ### Fast Build 藍圖進度 + BDD Q&A 3D 蓋房子動畫（2026-02-24）
 
-解決兩個 UX 死角：Fast Build 60-90 秒等待期間和 BDD Q&A 最多 30 題的疲勞感。
+解決兩個 UX 死角：Fast Build 60-90 秒等待期間和 BDD Q&A 最多 30 題的疲勞感。**已用 Remotion 重構動畫驅動層**。
 
-**Fast Build 工程藍圖進度**：
-- **`app/components/FastBuildProgress.tsx`**（新建）：三階段視覺進度元件（骨架→動效→適配），motion/react 動畫
-- 後端 `orchestrator.ts`：3 條階段消息帶 `richContent.type = 'fast_build_progress'`
-- `orchestrator-utils.ts`：`makeStreamingCallback` 增加 chunk 計數 + `fast_build_chunks` Socket.io 事件
-- `app/page.tsx`：預覽面板在 `fast_generating` 階段渲染 `<FastBuildProgress />`，streaming 等待也用藍圖進度取代靜態文字
+**Remotion 改造**（取代 motion/react + GSAP）：
+- **`app/components/remotion/`**（新建目錄）：所有 Remotion composition
+  - `shared/springs.ts`：共用 spring 預設（smooth/snappy/bouncy/heavy/precise）
+  - `shared/utils.ts`：delayedSpring/pulse/loopValue/clampInterpolate helpers
+  - `fast-build/`：FastBuildComposition + BlueprintGrid + PhaseNode + ConnectingLine + ProgressBar + StepText + constants
+  - `building-scene/`：BuildingComposition（ThreeCanvas）+ BuildingMeshes + FrameDrivenAnimations + CameraController + Particles + BuildingFallback2D + constants
+- **`app/components/FastBuildPlayer.tsx`**（取代 FastBuildProgress.tsx）：`@remotion/player` Player 包裝器，phase 變化時 seekTo 目標幀
+- **`app/components/building-scene/BuildingPlayer.tsx`**（取代 BuildingScene.tsx）：`@remotion/player` Player 包裝器，progress 變化時 seekTo(progress*30)
+- **`app/components/building-scene/index.ts`**（修改）：導出 BuildingPlayer（dynamic import，SSR: false）
+- 動畫全部由 `useCurrentFrame()` + `spring()` + `interpolate()` 驅動，禁用 CSS transition / useFrame / GSAP
+- 3D 場景用 `@remotion/three` 的 `<ThreeCanvas>` 取代原生 R3F `<Canvas>`
+- 刪除舊檔案：FastBuildProgress.tsx、BuildingScene.tsx、buildingTimeline.ts、BuildingFallback.tsx
+- 後端不動：orchestrator.ts、orchestrator-utils.ts 的消息格式完全不變
 
-**BDD Q&A 3D 蓋房子動畫**：
-- **`app/components/building-scene/`**（新建目錄）：
-  - `BuildingScene.tsx`：Three.js（@react-three/fiber + drei）低多邊形 isometric 房屋場景
-  - `buildingTimeline.ts`：GSAP timeline，30 題對應 6 輪建造階段（地基→牆體→門窗→內裝→屋頂→完工）
-  - `BuildingFallback.tsx`：WebGL 不支援時的 2D motion/react fallback
-  - `index.ts`：Dynamic import 包裝（SSR: false）
-- 後端 `sendClarifyQuestion`：新增 `globalProgress` 參數（answered/total/round/maxRounds），發送 `building_progress` richContent
-- 後端 `completeClärifyPhase`：拆分 3 條中間進度消息（analyzing/generating/deduping），3D 場景播放施工動畫
-- `app/page.tsx`：BDD Q&A 自動切 split mode，右側預覽面板渲染 3D 場景
-- `app/hooks/useVpsWebSocket.ts`：新增 `FastBuildChunks` 類型 + `fast_build_chunks` 事件監聽
+**Fast Build 幀佈局**（300 幀 @ 30fps = 10 秒）：idle[0-30] → Phase1 Structure[30-130] → Phase2 Animation[130-230] → Phase3 RWD[230-300]
 
-**新增依賴**：`three` `@react-three/fiber` `@react-three/drei` `gsap` `@types/three`
+**Building Scene 幀佈局**（900 幀 @ 30fps = 30 秒，每題 30 幀）：地基[0-149] → 牆體[150-299] → 門窗[300-449] → 內裝[450-599] → 屋頂[600-749] → 完工[750-899]
+
+**新增依賴**：`remotion` `@remotion/player` `@remotion/three` `@remotion/transitions`（保留 `three` `@react-three/fiber` `@react-three/drei` `gsap` `framer-motion`）
 
 ### 迭代更新 Skill 拆分 + 撤銷功能（2026-02-16）
 

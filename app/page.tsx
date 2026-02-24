@@ -37,8 +37,11 @@ const SandpackPreviewComponent = dynamic(
   () => import('./components/uiux/SandpackPreview'),
   { ssr: false, loading: () => <div style={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--gray-50)' }}><p style={{ color: 'var(--gray-400)', fontSize: 14 }}>載入預覽環境...</p></div> }
 )
-import FastBuildProgress from './components/FastBuildProgress'
-import { BuildingScene, BuildingFallback } from './components/building-scene'
+const FastBuildPlayer = dynamic(
+  () => import('./components/FastBuildPlayer'),
+  { ssr: false, loading: () => null }
+)
+import { BuildingPlayer } from './components/building-scene'
 import { getTemplateById } from './actions/templates'
 import type { Template } from './lib/templates'
 
@@ -2286,7 +2289,7 @@ function ChatSection({
             需求建構進度
           </div>
           <div style={{ flex: 1 }}>
-            <BuildingScene
+            <BuildingPlayer
               progress={bddProgress}
               totalQuestions={bddTotal}
               round={bddRound}
@@ -2308,7 +2311,7 @@ function ChatSection({
       const fbProgress = fbData?.progress || { current: 1, total: 3, step: '生成結構' }
 
       return (
-        <FastBuildProgress
+        <FastBuildPlayer
           phase={fbPhase}
           progress={fbProgress}
           streamingChunks={fastBuildChunks}
@@ -2339,7 +2342,7 @@ function ChatSection({
         const spPhase = streamingPreview?.phase || 'structure'
         const phaseMap: Record<string, number> = { structure: 1, animation: 2, rwd: 3 }
         return (
-          <FastBuildProgress
+          <FastBuildPlayer
             phase={spPhase as 'structure' | 'animation' | 'rwd'}
             progress={{ current: phaseMap[spPhase] || 1, total: 3, step: spPhase === 'structure' ? '生成結構' : spPhase === 'animation' ? '添加動畫' : '響應式優化' }}
             streamingChunks={fastBuildChunks}

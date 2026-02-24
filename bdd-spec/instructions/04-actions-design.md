@@ -33,7 +33,7 @@ description: 分析 sdd.os ISA Feature Files 中的功能與規則，設計對�
 讀取 `spec/features/` 目錄下的所有 `.feature` 檔案，識別：
 - 檔案開頭的 Action 註解（`# Action: functionName` 和 `# Summary:`）
 - 每個 Feature 的名稱（對應 Action summary）
-- 每個 Feature 涵蓋的所有 Rules（標註前置/後置）
+- 每個 Feature 涵蓋的所有 Rules（標註四類之一：前置（狀態）/前置（參數）/後置（回應）/後置（狀態））
 - 每個 Rule 的 Examples（sdd.os ISA 格式的 Given-When-Then）
 
 #### 1.2 從 Feature 註解識別 Action
@@ -143,9 +143,11 @@ actions:
     # === Feature 關聯（核心） ===
     featureFile: spec/features/建立訂單.feature
     rules:
-      - rule: 後置 - 訂單總額為所有品項小計加總
+      - rule: 後置（狀態）- 訂單總額應為所有品項小計加總
+        type: 後置（狀態）
         step: "Then 建立訂單成功, with table:"
-      - rule: 前置 - 建立訂單前必須檢查庫存
+      - rule: 前置（狀態）- 建立訂單前商品庫存必須充足
+        type: 前置（狀態）
         step: "Then 操作失敗"
 
     # === 參數與回傳值 ===
@@ -168,13 +170,14 @@ actions:
         type: ActionError
 ```
 
-#### 3.3 rules 欄位格式規範（sdd.os ISA - Server Actions 版）
+#### 3.3 rules 欄位格式規範（sdd.os ISA - Server Actions 版，四類規則）
 
 每個 `rules` 項目必須包含：
 
 | 欄位 | 說明 | 範例 |
 |------|------|------|
-| `rule` | Rule 的中文描述（與 Feature File 中的 Rule 名稱一致，含前置/後置標註） | `後置 - 訂單總額為所有品項小計加總` |
+| `rule` | Rule 的中文描述（與 Feature File 中的 Rule 名稱一致，含四類前綴標註） | `後置（狀態）- 訂單總額應為所有品項小計加總` |
+| `type` | 規則類型（四類之一） | `前置（狀態）` / `前置（參數）` / `後置（回應）` / `後置（狀態）` |
 | `step` | 對應的 sdd.os ISA step statement | `Then 建立訂單成功, with table:` |
 
 **step statement 格式要求（sdd.os ISA - Server Actions 版）**：
@@ -196,11 +199,14 @@ actions:
 
     featureFile: spec/features/建立訂單.feature
     rules:
-      - rule: 後置 - 訂單總額為所有品項小計加總
+      - rule: 後置（狀態）- 訂單總額應為所有品項小計加總
+        type: 後置（狀態）
         step: "Then 建立訂單成功, with table:"
-      - rule: 前置 - 建立訂單前必須檢查庫存
+      - rule: 前置（狀態）- 建立訂單前商品庫存必須充足
+        type: 前置（狀態）
         step: "Then 操作失敗"
-      - rule: 前置 - 訂單必須包含至少一個品項
+      - rule: 前置（參數）- 訂單必須包含至少一個品項
+        type: 前置（參數）
         step: "Then 操作失敗"
 
     input:
@@ -247,9 +253,11 @@ actions:
 
     featureFile: spec/features/查詢訂單.feature
     rules:
-      - rule: 後置 - 可根據訂單編號查詢訂單詳情
+      - rule: 後置（回應）- 查詢結果應包含訂單詳情
+        type: 後置（回應）
         step: "Then 查詢訂單成功, with table:"
-      - rule: 前置 - 訂單必須存在
+      - rule: 前置（狀態）- 訂單必須存在
+        type: 前置（狀態）
         step: "Then 操作失敗"
 
     input:
@@ -406,7 +414,7 @@ spec/
 ### 設計階段規則
 1. **嚴格對應 Feature**：每個 Action 必須有明確的 Feature 對應，不設計 Feature 中未提及的 Action
 2. **summary 一致**：Action 的 `summary` 必須與 Feature 名稱一致（sdd.os ISA 的核心要求）
-3. **保持可追溯性**：rules 必須完整記錄所有相關的業務規則（含前置/後置標註）
+3. **保持可追溯性**：rules 必須完整記錄所有相關的業務規則（含四類前綴標註）
 4. **術語一致**：Action 名稱、參數、類型名稱與 SQL Schema/Feature 術語保持一致
 
 ### 禁止事項
@@ -448,8 +456,9 @@ spec/features/     actions.yml                        + 測試程式碼
 - [ ] 每個 Feature File 至少有一個對應的 Action
 - [ ] 每個 Action 都有 `featureFile` 欄位
 - [ ] 每個 Action 的 `summary` 與 Feature 名稱一致
-- [ ] 每個 Action 都有 `rules` 欄位，列出所有相關 Rules（含前置/後置標註）
+- [ ] 每個 Action 都有 `rules` 欄位，列出所有相關 Rules（含四類前綴標註 + type 欄位）
 - [ ] rules 中的 step 使用 sdd.os ISA 格式（Server Actions 版）
+- [ ] rules 中的 type 欄位為四類之一（前置（狀態）/前置（參數）/後置（回應）/後置（狀態））
 
 **Types 完整性：**
 - [ ] 所有 SQL Schema 實體都有對應的 Type 定義

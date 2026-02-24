@@ -1,5 +1,8 @@
 ---
-description: 根據 .clarify/ 資料夾中的釐清項目，與使用者進行互動式釐清，並將答案即時更新回對應的規格模型檔案（spec/data/ 或 spec/features/）。採用 sdd.os ISA Gherkin 格式。
+description: |
+  根據 .clarify/ 資料夾中的釐清項目，與使用者進行互動式釐清，並將答案即時更新回
+  對應的規格模型檔案（spec/data/ 或 spec/features/）。採用 sdd.os ISA Gherkin 格式。
+  支援「提案優先」模式：AI 先根據上下文提案答案，用戶確認或糾正。
 ---
 
 目標：依據 Discovery 階段產出的釐清項目，透過互動式問答流程逐一釐清，並將釐清結果即時整合回規格檔案中。
@@ -12,7 +15,7 @@ description: 根據 .clarify/ 資料夾中的釐清項目，與使用者進行�
 
 1. **讀取釐清策略**：載入 `.clarify/overview.md`，取得：
    - 釐清項目總數與分佈
-   - 建議的釐清順序（由核心至延伸）
+   - 建議的釐清順序（由核心至延伸，DFS 聚焦）
    - 優先級分佈與依賴關係
 
 2. **載入釐清項目**：依照 `overview.md` 建議的順序，讀取所有釐清項目檔案（`.clarify/data/*.md` 和 `.clarify/features/*.md`）
@@ -24,6 +27,8 @@ description: 根據 .clarify/ 資料夾中的釐清項目，與使用者進行�
    - 保持原始格式與結構，供後續增量更新使用
    - **建立術語對照表**：提取所有繁體中文術語（實體名稱、屬性 COMMENT、Feature 名稱、步驟用詞），供翻譯時參照
 
+4. **載入 ES 規格**（若存在）：讀取 `${ES_SPEC_PATH}`，作為「提案優先」模式的上下文基礎。
+
 ## 1. 建立釐清佇列
 
 根據 `overview.md` 的建議順序，建立優先化的釐清佇列：
@@ -31,9 +36,10 @@ description: 根據 .clarify/ 資料夾中的釐清項目，與使用者進行�
 ### 排序原則
 
 1. **核心優先**：優先處理 High 優先級項目
-2. **由核心至延伸**：先處理核心實體與功能，再處理邊界條件與細節
-3. **平衡分佈**：在資料模型與功能模型間交替進行，避免連續處理同類問題
-4. **依賴關係**：若項目 B 依賴項目 A 的釐清結果，確保 A 先於 B
+2. **DFS 聚焦**：同一 Feature / Entity 的釐清項目連續處理，避免跳躍
+3. **由核心至延伸**：先處理核心實體與功能，再處理邊界條件與細節
+4. **平衡分佈**：在資料模型與功能模型間交替進行，避免連續處理同類問題
+5. **依賴關係**：若項目 B 依賴項目 A 的釐清結果，確保 A 先於 B
 
 ### 佇列管理
 
@@ -44,13 +50,64 @@ description: 根據 .clarify/ 資料夾中的釐清項目，與使用者進行�
 
 ## 2. 逐題提問循環（互動式）
 
-### 2.1 提問流程
+### 2.0 提案優先模式（Propose First, Ask Later）
+
+**核心改進**：對於有足夠上下文的釐清項目，AI 不直接提問，而是**先提案答案**讓用戶確認。
+
+#### 提案判定規則
+
+在提出每個釐清項目前，先評估是否適合使用提案模式：
+
+| 條件 | 模式 | 說明 |
+|------|------|------|
+| ES 中有明確的 Rule 對應 | **提案模式** | 根據 ES 內容直接提案 |
+| 上下文可合理推斷答案 | **提案模式** | AI 提案 + 理由，用戶確認 |
+| 完全無法推斷 | **提問模式** | 使用傳統多選題提問 |
+
+#### 提案格式
+
+```
+---
+[釐清進度：第 X / 總 Y 題] [優先級：High/Medium/Low] [模式：提案]
+
+# 提案
+
+根據 <上下文來源>，我建議以下答案：
+
+**問題**：<白話翻譯版問題>
+**建議答案**：<AI 的提案答案>
+**理由**：<為什麼這樣建議>
+
+## 定位
+
+<ERM：哪個實體的哪個屬性？或是哪個關係？>
+<Feature：哪個功能的哪條規則？或是哪個 Example？>
+
+## 規格預覽
+
+<若接受此提案，規格將如何更新的預覽>
+
+請選擇：
+- **接受 (Y)** — 採用此建議並更新規格
+- **修改** — 大致同意但需調整（請說明）
+- **拒絕** — 不同意，請提供您的答案
+---
+```
+
+#### 提案規則
+
+- **提案必須有明確依據**：不可憑空猜測，必須指出推斷的依據（ES 規格、上下文線索等）
+- **接受視同 Resolved**：用戶接受提案 → 等同回答了問題，不計入提問額度
+- **修改視同 Sub-question**：用戶修改提案 → 不計入提問額度
+- **拒絕轉為提問**：用戶拒絕提案 → 退回傳統提問模式，計入提問額度
+
+### 2.1 提問流程（傳統模式）
 
 **一次只呈現一題**，格式如下：
 
 ```
 ---
-[釐清進度：第 X / 總 Y 題] [優先級：High/Medium/Low]
+[釐清進度：第 X / 總 Y 題] [優先級：High/Medium/Low] [模式：提問]
 
 # 問題
 
@@ -60,6 +117,10 @@ description: 根據 .clarify/ 資料夾中的釐清項目，與使用者進行�
 
 <ERM：哪個實體的哪個屬性？或是哪個關係？>
 <Feature：哪個功能的哪條規則？或是哪個 Example？>
+
+## 規則類型
+
+<前置（狀態）| 前置（參數）| 後置（回應）| 後置（狀態）| 資料模型 | 術語>
 
 ## 選項
 
@@ -129,7 +190,8 @@ description: 根據 .clarify/ 資料夾中的釐清項目，與使用者進行�
 使用者回答後：
 
 1. **驗證回答**：
-   - 檢查回答是否對應某選項（A/B/C/D/E）
+   - 提案模式：檢查是否為 Y/修改/拒絕
+   - 提問模式：檢查回答是否對應某選項（A/B/C/D/E）
    - 若為 Short，確認符合不超過 5~10 字的限制（沒這麼嚴格）
    - 若含糊或不明確，立即要求釐清（仍計入同一題，不前進到下一題）
 
@@ -155,10 +217,13 @@ description: 根據 .clarify/ 資料夾中的釐清項目，與使用者進行�
 
 ### 2.4 互動原則
 
+- **提案優先**：有足夠上下文時，先提案再確認，減少用戶認知負擔
 - **單一焦點**：每次只聚焦一個釐清項目，避免混淆
+- **DFS 聚焦**：連續處理同一 Feature / Entity 的釐清項目
 - **快速驗證**：若回答含糊，立即要求釐清，不要臆測
 - **進度透明**：每題都顯示進度（第 X / 總 Y 題）
 - **優先級可見**：每題都顯示優先級，讓使用者了解重要性
+- **規則類型可見**：每題都顯示所屬的規則類型（四類之一）
 
 ## 3. 立即整合（增量更新）
 
@@ -170,7 +235,8 @@ description: 根據 .clarify/ 資料夾中的釐清項目，與使用者進行�
 - **核心原則**：無腦補或任意假設原則
 - **資料模型萃取規則**：實體、屬性、關係的萃取與標註方式
 - **功能模型萃取規則**：Feature、Rule、Example 的萃取與描述方式
-- **輸出格式規範**：DBML 與 Gherkin Language 的格式要求
+- **四類規則分類**：正確分類為前置（狀態）/ 前置（參數）/ 後置（回應）/ 後置（狀態）
+- **輸出格式規範**：SQL Schema 與 Gherkin Language 的格式要求
 
 將釐清結果轉換為規格內容時，必須確保符合上述規則的所有要求。
 
@@ -185,7 +251,7 @@ description: 根據 .clarify/ 資料夾中的釐清項目，與使用者進行�
   - 新增狀態轉換規則
 
 - **功能模型釐清** → 更新 `spec/features/<功能名>.feature`（依照 `formulation-rules.md` 的 **sdd.os ISA Gherkin (Server Actions 版)** 格式規範）
-  - 新增或修改 Rule（必須標註 `前置` 或 `後置`）
+  - 新增或修改 Rule（必須標註四類之一：前置（狀態）/ 前置（參數）/ 後置（回應）/ 後置（狀態））
   - 新增或修改 Example（**sdd.os ISA 格式 - Server Actions 版**）：
     - When 步驟使用 `{summary}, call table:` 格式
     - Then 步驟使用 `{summary}成功, with table:` 或 `操作失敗`
@@ -209,8 +275,8 @@ description: 根據 .clarify/ 資料夾中的釐清項目，與使用者進行�
 ### 3.3 整合步驟
 每一步都必須扎實做到，不可跳步驟。
 1. **定位目標區段**：根據釐清項目的「定位」欄位，找到需更新的實體/屬性/功能/規則
-2. **套用釐清**：將答案轉換為對應的 DBML 或 Gherkin 語法，**必須依照 [`formulation-rules.md`](./formulation-rules.md) 的規範執行**
-3. **驗證語法**：確保更新後的內容符合 DBML 或 Gherkin 格式
+2. **套用釐清**：將答案轉換為對應的 SQL Schema 或 Gherkin 語法，**必須依照 [`formulation-rules.md`](./formulation-rules.md) 的規範執行**
+3. **驗證語法**：確保更新後的內容符合 SQL 或 Gherkin 格式
 4. **檢查一致性**：確保無矛盾陳述、術語統一
 5. **儲存規格檔**：原子性覆寫對應的規格檔
 6. **更新釐清項目狀態**：歸檔已處理的釐清項目（見 3.6）
@@ -242,7 +308,7 @@ CREATE TABLE menu_items (
 ) COMMENT '菜品實體';
 ```
 
-### 3.5 Gherkin 更新範例（sdd.os ISA - Server Actions 版）
+### 3.5 Gherkin 更新範例（sdd.os ISA - Server Actions 版，四類規則）
 
 Gherkin 格式詳見 [`../rules/formulation-rules.md`](../rules/formulation-rules.md)。
 
@@ -250,13 +316,14 @@ Gherkin 格式詳見 [`../rules/formulation-rules.md`](../rules/formulation-rule
 
 | 問題 | 將菜品加入訂單時，數量填 0 該怎麼處理？ |
 |------|---------------------------------------|
+| 規則類型 | 前置（參數） |
 | 答案 | B - 不允許加入，要顯示錯誤訊息 |
-| 更新 | 新增 `Rule: 前置 - 加入訂單時數量必須大於 0` 及對應 Example |
+| 更新 | 新增 `Rule: 前置（參數）- 加入訂單時數量必須大於 0` 及對應 Example |
 
 更新後新增的規則：
 ```gherkin
   #------------------------------------------------------------
-  Rule: 前置 - 加入訂單時數量必須大於 0
+  Rule: 前置（參數）- 加入訂單時數量必須大於 0
   #------------------------------------------------------------
 
     Example: 拒絕數量為 0 的菜品
@@ -278,8 +345,9 @@ Gherkin 格式詳見 [`../rules/formulation-rules.md`](../rules/formulation-rule
 ---
 # 解決記錄
 
-- **回答**：<使用者選擇的選項，如：A - 選項描述>
-- **更新的規格檔**：<spec/erm.dbml 或 spec/features/*.feature>
+- **模式**：<提案 | 提問>
+- **回答**：<使用者選擇的選項，如：A - 選項描述，或「接受提案」>
+- **更新的規格檔**：<spec/data/schema.sql 或 spec/features/*.feature>
 - **變更內容**：<簡述規格檔的變更內容>
 ```
 
@@ -288,8 +356,9 @@ Gherkin 格式詳見 [`../rules/formulation-rules.md`](../rules/formulation-rule
 ---
 # 解決記錄
 
-- **回答**：B - 訂單必須屬於某個使用者（User 1:N Order）
-- **更新的規格檔**：spec/erm.dbml
+- **模式**：提案
+- **回答**：接受提案 — 訂單必須屬於某個使用者（User 1:N Order）
+- **更新的規格檔**：spec/data/schema.sql
 - **變更內容**：在 Order 實體中新增 user_id 外鍵，建立 User 1:N Order 關係
 ```
 
@@ -330,14 +399,14 @@ Gherkin 格式詳見 [`../rules/formulation-rules.md`](../rules/formulation-rule
   - `spec/features/*.feature` 遵守 **sdd.os ISA Gherkin (Server Actions 版)** 語法：
     - 檔案開頭有 `# Action: functionName` 和 `# Summary:` 註解
     - 嚴格階層 Feature > Rule > Example
-    - 每個 Rule 都標註 `前置` 或 `後置`
+    - 每個 Rule 都標註四類之一（前置（狀態）/ 前置（參數）/ 後置（回應）/ 後置（狀態））
     - When 步驟使用 `{summary}, call table:` 格式
     - 成功 Then 使用 `{summary}成功, with table:` 格式
     - 失敗 Then 使用 `操作失敗`
     - Entity 驗證使用 `存在一個{entity}, with table:` 格式
 - [ ] 術語一致性：更新後的內容使用標準術語，Entity 名稱與 `entity_to_table_mapping.yml` 一致
 - [ ] 釐清項目狀態已更新：
-  - 釐清項目檔案底部已追加解決記錄（包含回答、更新的規格檔、變更內容）
+  - 釐清項目檔案底部已追加解決記錄（包含模式、回答、更新的規格檔、變更內容）
   - 該項目已從 `.clarify/overview.md` 中移除
   - 釐清項目檔案已移動至 `.clarify/resolved/` 對應資料夾
   - `overview.md` 的統計數字已更新
@@ -347,7 +416,7 @@ Gherkin 格式詳見 [`../rules/formulation-rules.md`](../rules/formulation-rule
 - [ ] 每個 Resolved 的釐清項目都對應一次規格更新
 - [ ] Feature 檔案中的 Step 句型一致（sdd.os ISA 格式 - Server Actions 版）
 - [ ] 所有 SQL Schema 的欄位都有 COMMENT 說明
-- [ ] 所有 Feature 的 Rule 都標註 `前置` 或 `後置`
+- [ ] 所有 Feature 的 Rule 都標註四類之一（前置（狀態）/ 前置（參數）/ 後置（回應）/ 後置（狀態））
 - [ ] 所有 Feature 的 Rule 都至少有一個 Example（或標記 #TODO）
 - [ ] 所有 Feature 都標註 `# Action: functionName` 和 `# Summary:`
 - [ ] 所有 When 步驟都使用 `{summary}, call table:` 格式
@@ -363,13 +432,15 @@ Gherkin 格式詳見 [`../rules/formulation-rules.md`](../rules/formulation-rule
 
 - 總釐清項目數：X 項
 - 已釐清（Resolved）：Y 項
+  - 透過提案模式解決：A 項
+  - 透過提問模式解決：B 項
 - 已跳過（Skipped）：Z 項
 - 延後處理（Deferred）：W 項
 
 ### 5.2 更新規格檔路徑
 
 列出所有更新過的規格檔案：
-- `spec/erm.dbml` - 更新 A, B, C 實體
+- `spec/data/schema.sql` - 更新 A, B, C 實體
 - `spec/features/將菜品加入訂單.feature` - 新增 2 條規則與 3 個例子
 - `spec/features/確認訂單.feature` - 更新 1 條規則與 2 個例子
 
@@ -379,7 +450,7 @@ Gherkin 格式詳見 [`../rules/formulation-rules.md`](../rules/formulation-rule
 
 ### 5.4 覆蓋度摘要表
 
-列出每個檢查分類（A1-A6, B1-B5, C1-C2, D1-D2）的最終狀態：
+列出每個檢查分類（A1-A6, B1-B5, C1-C2, D1-D2, E1-E3）的最終狀態：
 
 | 分類 | 狀態 | 說明 |
 |------|------|------|
@@ -388,6 +459,7 @@ Gherkin 格式詳見 [`../rules/formulation-rules.md`](../rules/formulation-rule
 | A3. 屬性值邊界條件 | Clear | 原已足夠 |
 | B1. 功能識別 | Resolved | 原為 Partial，已釐清折扣套用時機 |
 | B2. 規則完整性 | Deferred | 超出使用者終止點，剩餘 2 個 Low 優先級項目 |
+| E1. ES ↔ Feature 對應 | Clear | 所有 ES 項目都有對應 Feature |
 | ... | ... | ... |
 
 狀態說明：
@@ -399,7 +471,7 @@ Gherkin 格式詳見 [`../rules/formulation-rules.md`](../rules/formulation-rule
 ### 5.5 後續建議
 
 - 若所有 High 優先級項目都已 Resolved，建議進入下一階段（規劃或實作）
-- 若有 High 優先級項目為 Deferred，建議說明風險並建議再次執行 Formulation
+- 若有 High 優先級項目為 Deferred，建議說明風險並建議再次執行 Discovery + Clarify
 - 若有新發現的歧義（在釐清過程中浮現），建議再次執行 Discovery
 
 ## 6. 釐清項目檔案管理
@@ -451,7 +523,7 @@ Gherkin 格式詳見 [`../rules/formulation-rules.md`](../rules/formulation-rule
 
 ### 批量確認檢查點
 
-**每 5 題**或**階段結束時**，詢問用戶確認：
+**每 ${BATCH_CONFIRM_INTERVAL} 題**或**階段結束時**，詢問用戶確認：
 
 ```
 ---
@@ -459,13 +531,13 @@ Gherkin 格式詳見 [`../rules/formulation-rules.md`](../rules/formulation-rule
 
 以下 5 題已回答完成，請確認是否正確：
 
-| # | 問題摘要 | 您的回答 |
-|---|----------|----------|
-| 1 | 商品價格是否可為負數？ | B - 不可以 |
-| 2 | 訂單是否必須綁定用戶？ | A - 是 |
-| 3 | 庫存不足時如何處理？ | B - 拒絕下單 |
-| 4 | 取消訂單後是否恢復庫存？ | A - 是 |
-| 5 | 會員等級如何影響折扣？ | Short - 按等級打折 |
+| # | 問題摘要 | 模式 | 您的回答 |
+|---|----------|------|----------|
+| 1 | 商品價格是否可為負數？ | 提案 | 接受 — 不可以 |
+| 2 | 訂單是否必須綁定用戶？ | 提案 | 接受 — 是 |
+| 3 | 庫存不足時如何處理？ | 提問 | B - 拒絕下單 |
+| 4 | 取消訂單後是否恢復庫存？ | 提問 | A - 是 |
+| 5 | 會員等級如何影響折扣？ | 提問 | Short - 按等級打折 |
 
 請選擇：
 - **確認全部 (Y)** - 將以上答案確認並繼續下一批
@@ -499,9 +571,11 @@ statistics:
 items:
   - id: C-001
     status: resolved
+    mode: propose     # 提案模式解決
     resolved_at: round-1
   - id: C-002
-    status: reviewing      # 暫存中
+    status: reviewing
+    mode: ask          # 提問模式
     answered: "B - 不可以"
   - id: C-003
     status: pending
@@ -510,7 +584,7 @@ items:
 ### 批量歸檔時機
 
 執行批量歸檔的時機：
-1. 用戶確認一批（5 題）答案後
+1. 用戶確認一批（${BATCH_CONFIRM_INTERVAL} 題）答案後
 2. 釐清階段結束時（所有 reviewing 項目自動確認）
 3. 用戶明確輸入「確認全部」
 
@@ -521,20 +595,23 @@ items:
 
 # 行為規則
 
+- **提案優先**：有足夠上下文時，先提案再確認，大幅減少提問輪數
 - **嚴格依序**：按照 `overview.md` 建議的順序提問，不跳題
+- **DFS 聚焦**：同一 Feature / Entity 的釐清項目連續處理
 - **單題單焦點**：一次只呈現一題，等待回答後再進入下一題
 - **必先翻譯**：每題提問前，必須先執行白話翻譯，確保問題與選項符合翻譯準則
 - **術語精準**：翻譯時必須使用規格檔案中已有的繁體中文術語，嚴禁發明新詞
 - **術語對照**：每次翻譯前，從規格檔案中提取該領域的中文術語對照表
 - **立即整合**：每個答案接受後立即更新規格檔，不延遲
 - **Staging Area**：回答後項目進入 `staging/` 暫存區，標記為 `Reviewing`
-- **批量確認**：每 5 題或階段結束時，詢問用戶確認，允許反悔修改
+- **批量確認**：每 ${BATCH_CONFIRM_INTERVAL} 題或階段結束時，詢問用戶確認，允許反悔修改
 - **批量歸檔**：用戶確認後，才執行歸檔至 `.clarify/resolved/`
 - **快速驗證**：若回答含糊，立即要求釐清，不臆測使用者意圖
 - **尊重終止**：使用者隨時可終止，已處理的釐清項目標記為 Resolved，未處理的標記為 Deferred
 - **保留格式**：更新規格檔時保持原有格式與結構，不重新排序無關區段
 - **術語一致**：全文使用統一術語，必要時正規化先前的不一致用詞
 - **句型統一**：Feature 檔案中的 Step 定義保持 sdd.os ISA 句型一致
+- **四類規則分類**：Gherkin 中的 Rule 必須標註四類之一（前置（狀態）/ 前置（參數）/ 後置（回應）/ 後置（狀態））
 - **sdd.os ISA 格式（Server Actions 版）**：Gherkin 必須採用 sdd.os ISA 格式：
   - When 使用 `{summary}, call table:`
   - Then 使用 `{summary}成功, with table:` 或 `操作失敗`
@@ -548,4 +625,3 @@ items:
 2. **規格更新** → `spec/data/schema.sql`、`spec/data/entity_to_table_mapping.yml` 和 `spec/features/*.feature`
 3. **釐清項目歸檔**（自動）→ 即時更新 `.clarify/overview.md` 並移動項目至 `.clarify/resolved/`
 4. **完成報告** → 終端輸出或回覆訊息
-

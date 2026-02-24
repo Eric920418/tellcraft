@@ -83,9 +83,10 @@ export default function AdminConversationViewerPage() {
 
   const lastUpdatedAtRef = useRef<string | null>(null)
   const pollIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
-  const chatEndRef = useRef<HTMLDivElement>(null)
+  const chatScrollRef = useRef<HTMLDivElement>(null)
   const codePreviewContainerRef = useRef<HTMLDivElement>(null)
   const [containerWidth, setContainerWidth] = useState(800)
+  const prevMessageCountRef = useRef(0)
 
   // 載入訊息
   const fetchMessages = useCallback(async (isInitial = false) => {
@@ -124,7 +125,14 @@ export default function AdminConversationViewerPage() {
       lastUpdatedAtRef.current = data.updatedAt
     }
 
-    if (isInitial) setIsLoading(false)
+    if (isInitial) {
+      setIsLoading(false)
+      // 初次載入後直接跳到底部（不帶動畫）
+      requestAnimationFrame(() => {
+        const el = chatScrollRef.current
+        if (el) el.scrollTop = el.scrollHeight
+      })
+    }
   }, [conversationId, router])
 
   // 初始載入 + 輪詢
@@ -154,9 +162,15 @@ export default function AdminConversationViewerPage() {
     }
   }, [fetchMessages])
 
-  // 自動滾動到底部
+  // 自動滾動到底部（只滾聊天容器，不影響外層頁面）
   useEffect(() => {
-    chatEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+    const el = chatScrollRef.current
+    if (!el) return
+    const isNewMessage = messages.length > prevMessageCountRef.current
+    prevMessageCountRef.current = messages.length
+    if (isNewMessage) {
+      el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' })
+    }
   }, [messages])
 
   // 監測預覽容器寬度
@@ -419,9 +433,12 @@ export default function AdminConversationViewerPage() {
           overflow: 'hidden',
           minWidth: 0,
         }}>
-          <div style={{
-            flex: 1, overflow: 'auto', padding: '24px 20px',
-          }}>
+          <div
+            ref={chatScrollRef}
+            style={{
+              flex: 1, overflow: 'auto', padding: '24px 20px',
+            }}
+          >
             {messages.map((message, index) => {
               // 進度條邏輯
               const showProgressBar = message.role === 'assistant' && (
@@ -596,7 +613,6 @@ export default function AdminConversationViewerPage() {
                 </div>
               )
             })}
-            <div ref={chatEndRef} />
           </div>
 
           {/* 底部唯讀提示（取代輸入框） */}

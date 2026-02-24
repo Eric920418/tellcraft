@@ -14,7 +14,7 @@ export interface SpecIssue {
   id: string
   featureName: string
   actionName: string
-  category: 'S1' | 'S2' | 'S3' | 'S4' | 'S5' | 'S6'
+  category: 'S1' | 'S2' | 'S3' | 'S4' | 'S5' | 'S6' | 'S7'
   severity: 'high' | 'medium' | 'low'
   description: string
   question: string
@@ -29,14 +29,15 @@ export interface SpecDiscoveryResult {
   error?: string
 }
 
-// 檢查項目類別說明
-const SPEC_CHECK_CATEGORIES = {
-  S1: '規則完整性（前置/後置條件）',
+// 檢查項目類別說明（四類規則版）
+const SPEC_CHECK_CATEGORIES: Record<string, string> = {
+  S1: '四類規則完整性（前置（狀態）/前置（參數）/後置（回應）/後置（狀態））',
   S2: 'Example 覆蓋度',
   S3: '邊界條件覆蓋',
-  S4: '格式正確性（sdd.os ISA）',
+  S4: '格式正確性（sdd.os ISA + 四類前綴命名）',
   S5: '跨 Feature 一致性',
   S6: 'Schema 對應',
+  S7: 'Rule 原子化',
 }
 
 // ============================================================
@@ -128,35 +129,51 @@ export async function runSpecDiscovery(
 
 | 代碼 | 檢查項目 | 說明 |
 |------|----------|------|
-| S1 | 規則完整性 | 每個 Feature 是否有完整的前置(@Pre)和後置(@Post)條件規則 |
+| S1 | 四類規則完整性 | 每個 Feature 是否有完整的四類規則？（前置（狀態）、前置（參數）、後置（回應）、後置（狀態）） |
 | S2 | Example 覆蓋度 | 每條 Rule 是否有足夠的 Example 覆蓋正常和異常情況 |
 | S3 | 邊界條件覆蓋 | 是否有處理邊界值、空值、最大最小值等情況 |
-| S4 | 格式正確性 | 是否符合 sdd.os ISA 格式規範 |
+| S4 | 格式正確性 | 是否符合 sdd.os ISA 格式規範（四類前綴、命名句型） |
 | S5 | 跨 Feature 一致性 | 不同 Feature 之間的實體命名、狀態流轉是否一致 |
 | S6 | Schema 對應 | Feature 中使用的欄位是否與 Schema 定義一致 |
+| S7 | Rule 原子化 | 每條 Rule 是否只驗證一件事？是否有需要拆分的 Rule？ |
+
+### S1 四類規則完整性檢查細則
+- 每個 Feature 至少需要 1 條「前置（參數）」Rule（必要參數檢查）
+- 命令類功能至少需要 1 條「後置（狀態）」Rule
+- 查詢類功能至少需要 1 條「後置（回應）」Rule
+- **檢查是否有使用舊的 @Pre/@Post 而非四類前綴**
+
+### S4 格式正確性檢查細則
+- Rule 命名是否遵循句型：\`<四類前綴> - <主詞> 必須/應 <單一條件>\`
+- 是否有 Rule 使用了舊的 @Pre/@Post 標註
+- 是否有 Rule 缺少四類前綴
 
 ## sdd.os ISA 格式規範
 
+### Given 步驟格式
+- 資料準備：\`準備一個{entity}, with table:\`
+
 ### When 步驟格式
 - Action 呼叫：\`{summary}, call table:\`
-- 成功回應：\`{summary}成功, with table:\`
-- 操作失敗：\`操作失敗\`
 
 ### Then 步驟格式
+- 成功回應：\`{summary}成功, with table:\`
+- 操作失敗：\`操作失敗\`
 - Entity 驗證：\`存在一個{entity}, with table:\`
 
 ### 必要元素
 - \`@Action(ActionName)\` 註解
 - \`# Summary: xxx\` 註解
-- 每條 Rule 需標註 @Pre 或 @Post
+- 每條 Rule 標註四類之一（前置（狀態）/前置（參數）/後置（回應）/後置（狀態））
 
 ## 輸出規則
 
 1. **只回報真正需要確認的問題**：不要回報瑣碎或可以自行推斷的問題
 2. **問題要具體**：指出是哪個 Feature、哪條 Rule、什麼問題
-3. **提供選項**：如果是選擇題，提供 2-4 個選項
+3. **提供選項**：如果是選擇題，提供 2-4 個選項，對有信心的選項加「（建議）」
 4. **建議修復**：如果可以，提供建議的修復方式
 5. **避免重複**：不要重複已經問過的問題
+6. **格式問題可自動修復**：如果只是 @Pre/@Post → 四類前綴 的轉換，直接在 suggestedFix 中說明，不必問用戶
 
 ## 輸出格式
 

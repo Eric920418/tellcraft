@@ -20,6 +20,15 @@ importers:
       '@react-three/fiber':
         specifier: ^9.5.0
         version: 9.5.0(@types/react@19.2.10)(react-dom@19.2.4(react@19.2.4))(react@19.2.4)(three@0.182.0)
+      '@remotion/player':
+        specifier: ^4.0.428
+        version: 4.0.428(react-dom@19.2.4(react@19.2.4))(react@19.2.4)
+      '@remotion/three':
+        specifier: ^4.0.428
+        version: 4.0.428(@react-three/fiber@9.5.0(@types/react@19.2.10)(react-dom@19.2.4(react@19.2.4))(react@19.2.4)(three@0.182.0))(react-dom@19.2.4(react@19.2.4))(react@19.2.4)(remotion@4.0.428(react-dom@19.2.4(react@19.2.4))(react@19.2.4))(three@0.182.0)
+      '@remotion/transitions':
+        specifier: ^4.0.428
+        version: 4.0.428(react-dom@19.2.4(react@19.2.4))(react@19.2.4)
       '@supabase/ssr':
         specifier: ^0.8.0
         version: 0.8.0(@supabase/supabase-js@2.91.1)
@@ -65,6 +74,9 @@ importers:
       remark-gfm:
         specifier: ^4.0.1
         version: 4.0.1
+      remotion:
+        specifier: ^4.0.428
+        version: 4.0.428(react-dom@19.2.4(react@19.2.4))(react@19.2.4)
       socket.io-client:
         specifier: ^4.8.3
         version: 4.8.3
@@ -672,6 +684,36 @@ packages:
         optional: true
       react-native:
         optional: true
+
+  '@remotion/paths@4.0.428':
+    resolution: {integrity: sha512-FmJhubB50qviSFK5kxuZTnuRHn9ddJ4gAvJvwvm8/+IOhPzpcWaNiRU8vnAL9xqNTOWcRv+z0j5i+z6sGS/d9Q==}
+
+  '@remotion/player@4.0.428':
+    resolution: {integrity: sha512-DQYrHLk443EUjcNhzjPnYeJXen/edqjfszSDIF9nRr8lGnu2t/r77IBm8xvh/7iYp2NOpg/tapAVtO+XhITE/A==}
+    peerDependencies:
+      react: '>=16.8.0'
+      react-dom: '>=16.8.0'
+
+  '@remotion/shapes@4.0.428':
+    resolution: {integrity: sha512-Z8MrDA8SG0b9XzU19BNuYlKOQGu35F7IdgQWuHdJh+1VxqEy37l0wr4rnCR4+0DmbO9MaE0enSJGVILZ+ucxAw==}
+    peerDependencies:
+      react: '>=16.8.0'
+      react-dom: '>=16.8.0'
+
+  '@remotion/three@4.0.428':
+    resolution: {integrity: sha512-XpwjyrYaEm+ozxEi7tfT4xEHYJyuyjYkTxF7qMa0f+9MXvGhx+Yb+nruoRe5B+G3qOx9cfzVmWv52FHhxi8+tA==}
+    peerDependencies:
+      '@react-three/fiber': '>=8.0.0'
+      react: '>=16.8.0'
+      react-dom: '>=16.8.0'
+      remotion: 4.0.428
+      three: '>=0.137.0'
+
+  '@remotion/transitions@4.0.428':
+    resolution: {integrity: sha512-OpaX0RBk8grAkGRGCf6tecAx8dwHfY57m4MF+0B7+7j7cfzJvFGU91wOi6LPHtH6zhqynERNrfJ1CXOqXCtVcQ==}
+    peerDependencies:
+      react: '>=16.8.0'
+      react-dom: '>=16.8.0'
 
   '@socket.io/component-emitter@3.1.2':
     resolution: {integrity: sha512-9BCxFwvbGg/RsZK9tjXd8s4UcwR0MWeFQ1XEKIQVVvAGJyINdrqKMcTRyLoK8Rse1GjzLV9cwjWV1olXRWEXVA==}
@@ -1762,6 +1804,12 @@ packages:
   remark-stringify@11.0.0:
     resolution: {integrity: sha512-1OSmLd3awB/t8qdoEOMazZkNsfVTeY4fTsgzcQFdXNq8ToTN4ZGwrMnlda4K6smTFKD+GRV6O48i6Z4iKgPPpw==}
 
+  remotion@4.0.428:
+    resolution: {integrity: sha512-bkk/bKc6lR44iPSc+pYcPMGK8KpjQOr3lbLGIH9ZhC+2T5+7hc5NqztUNSb9gpcBaJ8x1Dc1vYcE4dtrc7XVNw==}
+    peerDependencies:
+      react: '>=16.8.0'
+      react-dom: '>=16.8.0'
+
   require-from-string@2.0.2:
     resolution: {integrity: sha512-Xf0nWe6RseziFMu+Ap9biiUbmplq6S9/p+7w7YXP/JBHhrUDDUhwa+vANyubuqfZWTveU//DYVGsDG7RKL/vEw==}
     engines: {node: '>=0.10.0'}
@@ -2588,6 +2636,36 @@ snapshots:
     transitivePeerDependencies:
       - '@types/react'
       - immer
+
+  '@remotion/paths@4.0.428': {}
+
+  '@remotion/player@4.0.428(react-dom@19.2.4(react@19.2.4))(react@19.2.4)':
+    dependencies:
+      react: 19.2.4
+      react-dom: 19.2.4(react@19.2.4)
+      remotion: 4.0.428(react-dom@19.2.4(react@19.2.4))(react@19.2.4)
+
+  '@remotion/shapes@4.0.428(react-dom@19.2.4(react@19.2.4))(react@19.2.4)':
+    dependencies:
+      '@remotion/paths': 4.0.428
+      react: 19.2.4
+      react-dom: 19.2.4(react@19.2.4)
+
+  '@remotion/three@4.0.428(@react-three/fiber@9.5.0(@types/react@19.2.10)(react-dom@19.2.4(react@19.2.4))(react@19.2.4)(three@0.182.0))(react-dom@19.2.4(react@19.2.4))(react@19.2.4)(remotion@4.0.428(react-dom@19.2.4(react@19.2.4))(react@19.2.4))(three@0.182.0)':
+    dependencies:
+      '@react-three/fiber': 9.5.0(@types/react@19.2.10)(react-dom@19.2.4(react@19.2.4))(react@19.2.4)(three@0.182.0)
+      react: 19.2.4
+      react-dom: 19.2.4(react@19.2.4)
+      remotion: 4.0.428(react-dom@19.2.4(react@19.2.4))(react@19.2.4)
+      three: 0.182.0
+
+  '@remotion/transitions@4.0.428(react-dom@19.2.4(react@19.2.4))(react@19.2.4)':
+    dependencies:
+      '@remotion/paths': 4.0.428
+      '@remotion/shapes': 4.0.428(react-dom@19.2.4(react@19.2.4))(react@19.2.4)
+      react: 19.2.4
+      react-dom: 19.2.4(react@19.2.4)
+      remotion: 4.0.428(react-dom@19.2.4(react@19.2.4))(react@19.2.4)
 
   '@socket.io/component-emitter@3.1.2': {}
 
@@ -3964,6 +4042,11 @@ snapshots:
       '@types/mdast': 4.0.4
       mdast-util-to-markdown: 2.1.2
       unified: 11.0.5
+
+  remotion@4.0.428(react-dom@19.2.4(react@19.2.4))(react@19.2.4):
+    dependencies:
+      react: 19.2.4
+      react-dom: 19.2.4(react@19.2.4)
 
   require-from-string@2.0.2: {}
 
