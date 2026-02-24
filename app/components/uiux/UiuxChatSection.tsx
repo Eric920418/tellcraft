@@ -10,7 +10,6 @@ import TemplatePicker from './TemplatePicker'
 import VariantPicker, { DesignVariant } from './VariantPicker'
 import CodePreview from './CodePreview'
 import QualityGateReport from './QualityGateReport'
-import DeployConfirm from '../deployer/DeployConfirm'
 import DeployProgress from '../deployer/DeployProgress'
 import DeployResult from '../deployer/DeployResult'
 import DeploymentHistory from '../deployer/DeploymentHistory'
@@ -40,7 +39,7 @@ export interface UiuxMessage {
   layoutHint?: 'default' | 'split' | 'full_preview'
   quickReplies?: { label: string; value: string; style?: 'primary' | 'secondary' | 'ghost' }[]
   richContent?: {
-    type: 'template_picker' | 'design_preview' | 'code_preview' | 'variant_picker' | 'quality_gate_report' | 'deploy_confirm' | 'deploy_progress' | 'deploy_result' | 'deployment_history'
+    type: 'template_picker' | 'design_preview' | 'code_preview' | 'variant_picker' | 'quality_gate_report' | 'deploy_progress' | 'deploy_result' | 'deployment_history'
     data: {
       templates?: TemplateCardData[]
       recommendedIds?: string[]
@@ -374,11 +373,6 @@ export default function UiuxChatSection({
                   在右側預覽面板查看完整程式碼
                 </div>
               </motion.div>
-            )}
-
-            {/* Rich Content: Deploy Confirm */}
-            {message.richContent?.type === 'deploy_confirm' && (
-              <DeployConfirm data={message.richContent.data} onSendMessage={onSendMessage} />
             )}
 
             {/* Rich Content: Deploy Progress */}

@@ -1,36 +1,34 @@
+-- Template Preview: landing-nonprofit (Nonprofit Landing Page) v3
+-- Swap Test: Hand-drawn SVG underlines + full-width impact strip + earth-tone palette = unmistakably humanitarian
+-- Signature: Hand-drawn wavy/sketchy SVG underlines under key text, like pen strokes
+
 INSERT INTO template_previews (template_id, html_content, version)
 VALUES (
   '2bd4de9e-b1e3-4179-99c4-48990a016488',
-  $HTML$
-<!DOCTYPE html>
-<html lang="zh-TW">
+  $HTML$<!DOCTYPE html>
+<html lang="en">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>綠芽基金會 GreenSprout</title>
+<title>Helping Hands — Together We Make a Difference</title>
 <script src="https://cdn.tailwindcss.com"></script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;500;600;700;800&family=Noto+Sans+TC:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Bitter:wght@400;500;600;700;800&family=Open+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
 <script>
 tailwind.config = {
   theme: {
     extend: {
-      colors: {
-        forest: '#1a6b3c',
-        'forest-dark': '#145530',
-        leaf: '#22c55e',
-        'leaf-light': '#86efac',
-        sun: '#f59e0b',
-        'sun-light': '#fcd34d',
-        earth: '#92400e',
-        warm: '#fef3c7',
-        cream: '#fefdf7',
-        sand: '#f5f0e8',
-        bark: '#44403c',
-        stone: '#78716c'
-      },
       fontFamily: {
-        sans: ['Nunito', 'Noto Sans TC', 'sans-serif']
+        display: ['Bitter', 'Georgia', 'serif'],
+        body: ['Open Sans', 'system-ui', 'sans-serif']
+      },
+      colors: {
+        earth: { DEFAULT: '#166534', light: '#1a7d40', dark: '#14532d' },
+        terra: { DEFAULT: '#c2410c', light: '#dc5a1a', dark: '#9a3412' },
+        sand: { DEFAULT: '#d4a574', light: '#e0be96', pale: '#f0e0cc' },
+        cream: { DEFAULT: '#fefce8', warm: '#fdf8db' },
+        bark: '#3e2c1c',
+        clay: '#8b6f47'
       }
     }
   }
@@ -39,514 +37,618 @@ tailwind.config = {
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
   html { scroll-behavior: smooth; }
-  body { font-family: 'Nunito', 'Noto Sans TC', sans-serif; background: #fefdf7; color: #44403c; }
+  body { font-family: 'Open Sans', system-ui, sans-serif; background: #fefce8; color: #3e2c1c; }
+  h1, h2, h3, h4, h5, h6 { font-family: 'Bitter', Georgia, serif; }
 
-  .fade-up { opacity: 0; transform: translateY(20px); transition: opacity 0.7s ease, transform 0.7s ease; }
+  /* Hand-drawn underline animation */
+  .hand-underline svg { opacity: 0; transition: opacity 0.4s ease; }
+  .hand-underline.drawn svg { opacity: 1; }
+  .hand-underline svg path {
+    stroke-dasharray: 300;
+    stroke-dashoffset: 300;
+  }
+  .hand-underline.drawn svg path {
+    animation: draw-line 1.2s ease-out forwards;
+  }
+  @keyframes draw-line {
+    to { stroke-dashoffset: 0; }
+  }
+
+  /* Fade up on scroll */
+  .fade-up { opacity: 0; transform: translateY(24px); transition: opacity 0.7s ease, transform 0.7s ease; }
   .fade-up.visible { opacity: 1; transform: translateY(0); }
 
-  /* Impact counter animation */
-  .impact-card { transition: all 0.3s ease; }
-  .impact-card:hover { transform: translateY(-4px); box-shadow: 0 12px 24px rgba(26,107,60,0.1); }
+  /* Counter numbers */
+  .counter-num { font-variant-numeric: tabular-nums; }
 
-  /* Story card */
-  .story-card { transition: all 0.3s ease; cursor: pointer; }
-  .story-card:hover { transform: translateY(-2px); box-shadow: 0 8px 20px rgba(0,0,0,0.08); }
+  /* Program card hand-drawn border */
+  .program-card {
+    position: relative;
+    transition: transform 0.3s ease, box-shadow 0.3s ease;
+  }
+  .program-card:hover { transform: translateY(-4px); box-shadow: 0 12px 32px rgba(22,101,52,0.1); }
+  .program-card::before {
+    content: '';
+    position: absolute;
+    inset: -3px;
+    border: 2px dashed #d4a574;
+    border-radius: 18px;
+    opacity: 0.5;
+    pointer-events: none;
+  }
 
-  /* Donation amount */
-  .amount-btn { transition: all 0.2s ease; }
-  .amount-btn:hover { border-color: #22c55e; color: #1a6b3c; }
-  .amount-btn.active { background: #1a6b3c; color: white; border-color: #1a6b3c; }
+  /* Donation amount button */
+  .amt-btn { transition: all 0.2s ease; cursor: pointer; }
+  .amt-btn:hover { border-color: #c2410c; background: #fdf8db; }
+  .amt-btn.active { background: #c2410c; color: white; border-color: #c2410c; }
 
-  /* Progress bar */
-  .progress-fill { transition: width 1.5s ease; }
+  /* Toggle button */
+  .freq-btn { transition: all 0.2s ease; cursor: pointer; }
+  .freq-btn.active { background: #166534; color: white; border-color: #166534; }
+
+  /* Progress bar fill */
+  .progress-fill { transition: width 2s cubic-bezier(0.4, 0, 0.2, 1); }
+
+  /* Story quote */
+  .story-quote { position: relative; }
+  .story-quote::before {
+    content: '\201C';
+    font-family: 'Bitter', Georgia, serif;
+    font-size: 6rem;
+    line-height: 1;
+    color: #d4a574;
+    opacity: 0.3;
+    position: absolute;
+    top: -24px;
+    left: -8px;
+  }
+
+  /* Organic blob background */
+  .organic-bg {
+    background-image: url("data:image/svg+xml,%3Csvg width='60' height='60' viewBox='0 0 60 60' xmlns='http://www.w3.org/2000/svg'%3E%3Cg fill='none' fill-rule='evenodd'%3E%3Cg fill='%23d4a574' fill-opacity='0.06'%3E%3Cpath d='M36 34v-4h-2v4h-4v2h4v4h2v-4h4v-2h-4zm0-30V0h-2v4h-4v2h4v4h2V6h4V4h-4zM6 34v-4H4v4H0v2h4v4h2v-4h4v-2H6zM6 4V0H4v4H0v2h4v4h2V6h4V4H6z'/%3E%3C/g%3E%3C/g%3E%3C/svg%3E");
+  }
 
   ::-webkit-scrollbar { width: 6px; }
-  ::-webkit-scrollbar-track { background: #fefdf7; }
-  ::-webkit-scrollbar-thumb { background: #d6d3d1; border-radius: 3px; }
+  ::-webkit-scrollbar-track { background: #fefce8; }
+  ::-webkit-scrollbar-thumb { background: #d4a574; border-radius: 3px; }
 </style>
 </head>
 <body>
 
 <!-- Nav -->
-<nav class="fixed top-0 w-full z-50 bg-cream/90 backdrop-blur-md border-b border-sand">
-  <div class="max-w-6xl mx-auto px-6 h-14 flex items-center justify-between">
-    <a href="#" class="flex items-center gap-2">
-      <div class="w-8 h-8 bg-forest rounded-full flex items-center justify-center">
-        <span class="text-sm">🌱</span>
-      </div>
-      <div>
-        <span class="text-sm font-bold text-forest">綠芽基金會</span>
-      </div>
+<nav class="fixed top-0 w-full z-50 bg-cream/95 backdrop-blur-md border-b border-sand/40">
+  <div class="max-w-6xl mx-auto px-6 h-16 flex items-center justify-between">
+    <a href="#" class="flex items-center gap-2.5">
+      <svg width="32" height="32" viewBox="0 0 32 32" fill="none">
+        <circle cx="16" cy="16" r="15" fill="#166534"/>
+        <path d="M10 20c0-4 3-8 6-10 3 2 6 6 6 10" stroke="#fefce8" stroke-width="2" stroke-linecap="round" fill="none"/>
+        <path d="M16 10v12" stroke="#fefce8" stroke-width="1.5" stroke-linecap="round"/>
+        <path d="M13 15c1.5 0 3 1 3 3" stroke="#fefce8" stroke-width="1.2" stroke-linecap="round" fill="none"/>
+        <path d="M19 14c-1.5 0.5-3 1.5-3 3.5" stroke="#fefce8" stroke-width="1.2" stroke-linecap="round" fill="none"/>
+      </svg>
+      <span class="font-display text-lg font-bold text-earth">Helping Hands</span>
     </a>
-    <div class="hidden md:flex items-center gap-6">
-      <a href="#impact" class="text-xs text-stone hover:text-forest transition-colors font-medium">影響力</a>
-      <a href="#stories" class="text-xs text-stone hover:text-forest transition-colors font-medium">故事</a>
-      <a href="#programs" class="text-xs text-stone hover:text-forest transition-colors font-medium">計畫</a>
-      <a href="#team" class="text-xs text-stone hover:text-forest transition-colors font-medium">團隊</a>
-      <button onclick="scrollToDonate()" class="px-5 py-2 bg-forest text-white text-xs font-bold rounded-full hover:bg-forest-dark transition-colors">
-        立即捐款 💚
+    <div class="hidden md:flex items-center gap-7">
+      <a href="#mission" class="text-sm text-clay hover:text-earth transition-colors font-medium">Our Mission</a>
+      <a href="#programs" class="text-sm text-clay hover:text-earth transition-colors font-medium">Programs</a>
+      <a href="#impact" class="text-sm text-clay hover:text-earth transition-colors font-medium">Impact</a>
+      <a href="#donate" class="text-sm text-clay hover:text-earth transition-colors font-medium">Donate</a>
+      <button onclick="scrollTo('#donate')" class="px-5 py-2.5 bg-terra text-white text-sm font-semibold rounded-full hover:bg-terra-dark transition-colors cursor-pointer">
+        Donate Now
       </button>
     </div>
-    <button onclick="toggleMenu()" class="md:hidden text-stone">
-      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 8h16M4 16h16"/></svg>
+    <button onclick="toggleMenu()" class="md:hidden text-clay cursor-pointer">
+      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
     </button>
   </div>
-  <div id="mobileMenu" class="hidden md:hidden bg-cream border-t border-sand">
+  <!-- Mobile menu -->
+  <div id="mobileMenu" class="hidden md:hidden bg-cream border-t border-sand/40">
     <div class="px-6 py-4 space-y-3">
-      <a href="#impact" onclick="toggleMenu()" class="block text-sm text-stone">影響力</a>
-      <a href="#stories" onclick="toggleMenu()" class="block text-sm text-stone">故事</a>
-      <a href="#programs" onclick="toggleMenu()" class="block text-sm text-stone">計畫</a>
-      <button onclick="scrollToDonate();toggleMenu()" class="w-full py-2 bg-forest text-white text-sm font-bold rounded-full">立即捐款 💚</button>
+      <a href="#mission" onclick="toggleMenu()" class="block text-sm text-clay font-medium">Our Mission</a>
+      <a href="#programs" onclick="toggleMenu()" class="block text-sm text-clay font-medium">Programs</a>
+      <a href="#impact" onclick="toggleMenu()" class="block text-sm text-clay font-medium">Impact</a>
+      <a href="#donate" onclick="toggleMenu()" class="block text-sm text-clay font-medium">Donate</a>
+      <button onclick="scrollTo('#donate');toggleMenu()" class="w-full py-2.5 bg-terra text-white text-sm font-semibold rounded-full cursor-pointer">Donate Now</button>
     </div>
   </div>
 </nav>
 
 <!-- Hero -->
-<section class="pt-14 relative overflow-hidden">
-  <div class="bg-gradient-to-b from-forest to-forest-dark text-white">
-    <div class="max-w-6xl mx-auto px-6 py-20 md:py-28">
-      <div class="max-w-2xl fade-up">
-        <div class="inline-flex items-center gap-2 px-3 py-1 bg-white/10 rounded-full mb-6 text-xs">
-          <span>🌍</span>
-          <span class="text-leaf-light">已幫助超過 12,000 名孩童</span>
-        </div>
-        <h1 class="text-4xl md:text-5xl font-extrabold leading-tight mb-6">
-          每一顆種子<br>都值得發芽的<span class="text-sun-light">機會</span>
-        </h1>
-        <p class="text-sm text-white/70 leading-relaxed max-w-lg mb-8">
-          綠芽基金會致力於偏鄉教育與環境保育。我們相信每個孩子都有權利獲得優質教育，每片土地都值得被守護。您的每一份支持，都是一顆改變世界的種子。
-        </p>
-        <div class="flex items-center gap-4">
-          <button onclick="scrollToDonate()" class="px-6 py-3 bg-sun text-earth text-sm font-bold rounded-full hover:bg-sun-light transition-colors">
-            捐款支持 →
-          </button>
-          <a href="#stories" class="text-sm text-white/70 hover:text-white transition-colors underline underline-offset-4">
-            聽他們的故事
-          </a>
-        </div>
+<section class="pt-16 relative overflow-hidden organic-bg">
+  <div class="max-w-6xl mx-auto px-6 py-24 md:py-32">
+    <div class="max-w-3xl fade-up">
+      <div class="inline-flex items-center gap-2 px-4 py-1.5 bg-earth/10 rounded-full mb-6">
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="#166534"><path d="M8 1.5c-1 2-4 4-4 6.5a4 4 0 108 0c0-2.5-3-4.5-4-6.5z"/></svg>
+        <span class="text-sm text-earth font-medium">Serving communities since 2009</span>
       </div>
-    </div>
-    <!-- Wave -->
-    <svg viewBox="0 0 1200 80" class="w-full block" preserveAspectRatio="none" style="margin-bottom:-1px"><path d="M0 40C200 80 400 0 600 40C800 80 1000 0 1200 40V80H0Z" fill="#fefdf7"/></svg>
-  </div>
-</section>
-
-<!-- Impact Stats -->
-<section id="impact" class="py-16 px-6">
-  <div class="max-w-6xl mx-auto">
-    <div class="text-center mb-12 fade-up">
-      <span class="text-xs text-forest font-bold uppercase tracking-widest">Our Impact</span>
-      <h2 class="text-3xl font-extrabold text-bark mt-2">我們的影響力</h2>
-    </div>
-
-    <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
-      <div class="impact-card bg-white rounded-2xl p-6 text-center border border-sand fade-up">
-        <div class="text-3xl mb-2">🎓</div>
-        <div class="text-3xl font-extrabold text-forest">12,400</div>
-        <div class="text-xs text-stone mt-1">受助孩童</div>
-      </div>
-      <div class="impact-card bg-white rounded-2xl p-6 text-center border border-sand fade-up">
-        <div class="text-3xl mb-2">🏫</div>
-        <div class="text-3xl font-extrabold text-forest">86</div>
-        <div class="text-xs text-stone mt-1">合作學校</div>
-      </div>
-      <div class="impact-card bg-white rounded-2xl p-6 text-center border border-sand fade-up">
-        <div class="text-3xl mb-2">🌳</div>
-        <div class="text-3xl font-extrabold text-forest">45,000</div>
-        <div class="text-xs text-stone mt-1">種植樹木</div>
-      </div>
-      <div class="impact-card bg-white rounded-2xl p-6 text-center border border-sand fade-up">
-        <div class="text-3xl mb-2">🤝</div>
-        <div class="text-3xl font-extrabold text-forest">3,200</div>
-        <div class="text-xs text-stone mt-1">志工夥伴</div>
-      </div>
-    </div>
-
-    <!-- Current campaign progress -->
-    <div class="mt-10 bg-white rounded-2xl p-6 border border-sand fade-up">
-      <div class="flex items-start justify-between mb-4">
-        <div>
-          <h3 class="font-bold text-bark">🎯 2026 年度募款目標</h3>
-          <p class="text-xs text-stone mt-1">「閱讀種子計畫」— 為 30 所偏鄉小學建立圖書角</p>
-        </div>
-        <div class="text-right">
-          <div class="text-xl font-extrabold text-forest">NT$ 3,240,000</div>
-          <div class="text-xs text-stone">目標 NT$ 5,000,000</div>
-        </div>
-      </div>
-      <div class="w-full h-3 bg-sand rounded-full overflow-hidden">
-        <div class="progress-fill h-full bg-gradient-to-r from-leaf to-forest rounded-full" style="width: 64.8%"></div>
-      </div>
-      <div class="flex items-center justify-between mt-2">
-        <span class="text-xs text-stone">已達成 64.8%</span>
-        <span class="text-xs text-sun font-bold">還差 NT$ 1,760,000</span>
+      <h1 class="font-display text-4xl md:text-6xl font-extrabold text-bark leading-tight mb-2">
+        Together, We Can
+      </h1>
+      <h1 class="font-display text-4xl md:text-6xl font-extrabold text-bark leading-tight mb-2">
+        <span class="relative inline-block hand-underline" id="heroUnderline">Change
+          <svg class="absolute -bottom-2 left-0 w-full" height="12" viewBox="0 0 200 12" fill="none" preserveAspectRatio="none">
+            <path d="M2 8 C30 2, 50 10, 80 5 C110 0, 140 9, 170 4 C185 2, 195 6, 198 5" stroke="#c2410c" stroke-width="3" stroke-linecap="round" fill="none"/>
+          </svg>
+        </span>
+        <span class="text-terra">10,000</span> Lives
+      </h1>
+      <h1 class="font-display text-4xl md:text-6xl font-extrabold text-bark leading-tight mb-8">
+        This Year
+      </h1>
+      <p class="text-base md:text-lg text-clay leading-relaxed max-w-xl mb-10 font-body">
+        Helping Hands empowers underprivileged communities through nutrition, education, housing, and outreach. Every dollar you give plants a seed of lasting change.
+      </p>
+      <div class="flex flex-wrap items-center gap-4">
+        <button onclick="scrollTo('#donate')" class="px-8 py-3.5 bg-terra text-white text-base font-bold rounded-full hover:bg-terra-dark transition-colors shadow-lg shadow-terra/20 cursor-pointer">
+          Donate Now
+        </button>
+        <a href="#mission" class="group px-8 py-3.5 border-2 border-earth text-earth text-base font-bold rounded-full hover:bg-earth hover:text-white transition-all cursor-pointer inline-flex items-center gap-2">
+          Learn More
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" class="group-hover:translate-x-1 transition-transform"><path d="M3 8h10M9 4l4 4-4 4"/></svg>
+        </a>
       </div>
     </div>
   </div>
+  <!-- Organic wave divider -->
+  <svg viewBox="0 0 1440 80" class="w-full block" preserveAspectRatio="none" style="margin-bottom:-1px">
+    <path d="M0 40 C120 70, 240 10, 360 40 C480 70, 600 10, 720 35 C840 60, 960 15, 1080 40 C1200 65, 1320 20, 1440 45 L1440 80 L0 80Z" fill="#c2410c"/>
+  </svg>
 </section>
 
-<!-- Stories -->
-<section id="stories" class="py-16 px-6 bg-sand">
-  <div class="max-w-6xl mx-auto">
-    <div class="text-center mb-12 fade-up">
-      <span class="text-xs text-forest font-bold uppercase tracking-widest">Stories</span>
-      <h2 class="text-3xl font-extrabold text-bark mt-2">他們的故事</h2>
-      <p class="text-sm text-stone mt-2 max-w-md mx-auto">每一份捐款背後，都有一個被改變的生命。</p>
+<!-- Impact Numbers Strip (SIGNATURE) -->
+<section id="impact" class="bg-terra relative overflow-hidden">
+  <!-- Subtle hand-drawn texture overlay -->
+  <div class="absolute inset-0 opacity-5" style="background-image: url('data:image/svg+xml,%3Csvg width=&quot;40&quot; height=&quot;40&quot; xmlns=&quot;http://www.w3.org/2000/svg&quot;%3E%3Cpath d=&quot;M0 20 Q10 15 20 20 Q30 25 40 20&quot; stroke=&quot;white&quot; fill=&quot;none&quot; stroke-width=&quot;0.5&quot;/%3E%3C/svg%3E'); background-size: 40px 40px;"></div>
+  <div class="max-w-6xl mx-auto px-6 py-16 md:py-20">
+    <div class="grid grid-cols-2 md:grid-cols-4 gap-8 md:gap-4 text-center text-white relative z-10">
+      <div class="fade-up">
+        <div class="text-4xl md:text-5xl font-display font-extrabold counter-num" data-target="45000">0</div>
+        <div class="mt-2 relative inline-block">
+          <span class="text-sm md:text-base font-medium text-white/80">Meals Served</span>
+          <svg class="absolute -bottom-1 left-0 w-full" height="6" viewBox="0 0 100 6" fill="none" preserveAspectRatio="none">
+            <path d="M2 4 C25 1, 50 5, 75 2 C88 1, 95 3, 98 3" stroke="rgba(255,255,255,0.3)" stroke-width="1.5" stroke-linecap="round" fill="none"/>
+          </svg>
+        </div>
+      </div>
+      <div class="fade-up">
+        <div class="text-4xl md:text-5xl font-display font-extrabold counter-num" data-target="12000">0</div>
+        <div class="mt-2 relative inline-block">
+          <span class="text-sm md:text-base font-medium text-white/80">Children Educated</span>
+          <svg class="absolute -bottom-1 left-0 w-full" height="6" viewBox="0 0 100 6" fill="none" preserveAspectRatio="none">
+            <path d="M2 3 C20 5, 45 1, 70 4 C85 5, 95 2, 98 3" stroke="rgba(255,255,255,0.3)" stroke-width="1.5" stroke-linecap="round" fill="none"/>
+          </svg>
+        </div>
+      </div>
+      <div class="fade-up">
+        <div class="text-4xl md:text-5xl font-display font-extrabold counter-num" data-target="8500">0</div>
+        <div class="mt-2 relative inline-block">
+          <span class="text-sm md:text-base font-medium text-white/80">Families Housed</span>
+          <svg class="absolute -bottom-1 left-0 w-full" height="6" viewBox="0 0 100 6" fill="none" preserveAspectRatio="none">
+            <path d="M2 4 C30 1, 55 5, 80 2 C90 1, 96 4, 98 3" stroke="rgba(255,255,255,0.3)" stroke-width="1.5" stroke-linecap="round" fill="none"/>
+          </svg>
+        </div>
+      </div>
+      <div class="fade-up">
+        <div class="text-4xl md:text-5xl font-display font-extrabold counter-num" data-target="200">0</div>
+        <div class="mt-2 relative inline-block">
+          <span class="text-sm md:text-base font-medium text-white/80">Communities Reached</span>
+          <svg class="absolute -bottom-1 left-0 w-full" height="6" viewBox="0 0 100 6" fill="none" preserveAspectRatio="none">
+            <path d="M2 3 C15 5, 40 1, 65 4 C80 5, 92 2, 98 3" stroke="rgba(255,255,255,0.3)" stroke-width="1.5" stroke-linecap="round" fill="none"/>
+          </svg>
+        </div>
+      </div>
     </div>
+  </div>
+  <!-- Bottom wave -->
+  <svg viewBox="0 0 1440 60" class="w-full block" preserveAspectRatio="none" style="margin-bottom:-1px">
+    <path d="M0 30 C180 55, 360 5, 540 30 C720 55, 900 5, 1080 25 C1260 45, 1380 15, 1440 30 L1440 60 L0 60Z" fill="#fefce8"/>
+  </svg>
+</section>
 
-    <div class="grid md:grid-cols-3 gap-5">
-      <div class="story-card bg-white rounded-2xl overflow-hidden fade-up" onclick="handleAction('閱讀小雨的故事')">
-        <div class="aspect-video bg-gradient-to-br from-leaf/20 to-sun/10 flex items-center justify-center">
-          <span class="text-5xl opacity-40">👧</span>
-        </div>
-        <div class="p-5">
-          <div class="text-xs text-sun font-bold mb-2">閱讀種子計畫</div>
-          <h3 class="font-bold text-bark mb-2">小雨的第一本書</h3>
-          <p class="text-xs text-stone leading-relaxed">「以前放學回家只能看電視，現在我最喜歡的事情是坐在圖書角看故事書。」來自花蓮偏鄉的小雨，因為「閱讀種子」計畫第一次擁有了自己的借書證。</p>
-          <a class="inline-block text-xs text-forest font-bold mt-3">閱讀全文 →</a>
-        </div>
-      </div>
-
-      <div class="story-card bg-white rounded-2xl overflow-hidden fade-up" onclick="handleAction('閱讀阿光的故事')">
-        <div class="aspect-video bg-gradient-to-br from-forest/10 to-leaf/10 flex items-center justify-center">
-          <span class="text-5xl opacity-40">👦</span>
-        </div>
-        <div class="p-5">
-          <div class="text-xs text-leaf font-bold mb-2">科學探索營</div>
-          <h3 class="font-bold text-bark mb-2">阿光的星空夢</h3>
-          <p class="text-xs text-stone leading-relaxed">在台東的科學營裡，阿光第一次用望遠鏡看到土星環。「原來課本上的東西是真的！」那天晚上，他決定以後要當天文學家。</p>
-          <a class="inline-block text-xs text-forest font-bold mt-3">閱讀全文 →</a>
-        </div>
-      </div>
-
-      <div class="story-card bg-white rounded-2xl overflow-hidden fade-up" onclick="handleAction('閱讀社區的故事')">
-        <div class="aspect-video bg-gradient-to-br from-earth/10 to-sun/10 flex items-center justify-center">
-          <span class="text-5xl opacity-40">🌳</span>
-        </div>
-        <div class="p-5">
-          <div class="text-xs text-forest font-bold mb-2">社區綠化計畫</div>
-          <h3 class="font-bold text-bark mb-2">從荒地到森林的旅程</h3>
-          <p class="text-xs text-stone leading-relaxed">三年前這裡還是一片廢棄的空地。現在，45 棵台灣原生種樹木在這裡扎了根，成為社區居民的「後花園」。</p>
-          <a class="inline-block text-xs text-forest font-bold mt-3">閱讀全文 →</a>
-        </div>
-      </div>
+<!-- Mission -->
+<section id="mission" class="py-20 px-6">
+  <div class="max-w-6xl mx-auto">
+    <div class="text-center mb-14 fade-up">
+      <span class="text-sm text-terra font-semibold uppercase tracking-widest font-body">Our Mission</span>
+      <h2 class="font-display text-3xl md:text-4xl font-extrabold text-bark mt-3">
+        Nourishing Lives, Building
+        <span class="relative inline-block hand-underline">Futures
+          <svg class="absolute -bottom-1 left-0 w-full" height="10" viewBox="0 0 160 10" fill="none" preserveAspectRatio="none">
+            <path d="M2 7 C40 2, 60 8, 100 4 C130 1, 150 6, 158 5" stroke="#d4a574" stroke-width="2.5" stroke-linecap="round" fill="none"/>
+          </svg>
+        </span>
+      </h2>
+      <p class="text-base text-clay mt-4 max-w-2xl mx-auto font-body leading-relaxed">We believe everyone deserves access to basic needs. Our programs address food insecurity, educational gaps, housing instability, and community isolation.</p>
     </div>
   </div>
 </section>
 
 <!-- Programs -->
-<section id="programs" class="py-16 px-6">
+<section id="programs" class="pb-20 px-6">
   <div class="max-w-6xl mx-auto">
-    <div class="text-center mb-12 fade-up">
-      <span class="text-xs text-forest font-bold uppercase tracking-widest">Programs</span>
-      <h2 class="text-3xl font-extrabold text-bark mt-2">進行中的計畫</h2>
+    <div class="grid md:grid-cols-3 gap-8">
+      <!-- Program 1 -->
+      <div class="program-card bg-white rounded-2xl p-7 fade-up">
+        <div class="w-14 h-14 bg-earth/10 rounded-xl flex items-center justify-center mb-5">
+          <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#166534" stroke-width="1.8" stroke-linecap="round"><path d="M12 2C8 6 4 10 4 14a8 8 0 0016 0c0-4-4-8-8-12z"/><path d="M12 22V12"/><path d="M8 16c2-1 4 1 4-4"/><path d="M16 15c-2-0.5-3 1-4-3"/></svg>
+        </div>
+        <h3 class="font-display text-xl font-bold text-bark mb-2">Community Nutrition</h3>
+        <p class="text-sm text-clay leading-relaxed mb-4 font-body">Our food banks and community kitchens serve hot meals daily, ensuring no family goes to bed hungry. We partner with local farms for fresh produce distribution.</p>
+        <a href="#" onclick="handleAction('Learn about Community Nutrition');return false" class="inline-flex items-center gap-1.5 text-sm text-terra font-semibold hover:gap-3 transition-all cursor-pointer">
+          Learn More
+          <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 8h10M9 4l4 4-4 4"/></svg>
+        </a>
+      </div>
+      <!-- Program 2 -->
+      <div class="program-card bg-white rounded-2xl p-7 fade-up">
+        <div class="w-14 h-14 bg-terra/10 rounded-xl flex items-center justify-center mb-5">
+          <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#c2410c" stroke-width="1.8" stroke-linecap="round"><path d="M4 19.5A2.5 2.5 0 016.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 014 19.5v-15A2.5 2.5 0 016.5 2z"/><path d="M8 7h8M8 11h5"/></svg>
+        </div>
+        <h3 class="font-display text-xl font-bold text-bark mb-2">Youth Education</h3>
+        <p class="text-sm text-clay leading-relaxed mb-4 font-body">After-school tutoring, scholarship programs, and mentorship initiatives give young people the tools they need to break the cycle of poverty through learning.</p>
+        <a href="#" onclick="handleAction('Learn about Youth Education');return false" class="inline-flex items-center gap-1.5 text-sm text-terra font-semibold hover:gap-3 transition-all cursor-pointer">
+          Learn More
+          <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 8h10M9 4l4 4-4 4"/></svg>
+        </a>
+      </div>
+      <!-- Program 3 -->
+      <div class="program-card bg-white rounded-2xl p-7 fade-up">
+        <div class="w-14 h-14 bg-sand/40 rounded-xl flex items-center justify-center mb-5">
+          <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#8b6f47" stroke-width="1.8" stroke-linecap="round"><path d="M3 21h18"/><path d="M5 21V7l7-4 7 4v14"/><path d="M9 21v-6h6v6"/><path d="M9 9h.01M15 9h.01M9 13h.01M15 13h.01"/></svg>
+        </div>
+        <h3 class="font-display text-xl font-bold text-bark mb-2">Family Housing</h3>
+        <p class="text-sm text-clay leading-relaxed mb-4 font-body">From emergency shelters to long-term transitional housing, we help families find stability. Our housing counselors provide ongoing support for sustainable independence.</p>
+        <a href="#" onclick="handleAction('Learn about Family Housing');return false" class="inline-flex items-center gap-1.5 text-sm text-terra font-semibold hover:gap-3 transition-all cursor-pointer">
+          Learn More
+          <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 8h10M9 4l4 4-4 4"/></svg>
+        </a>
+      </div>
     </div>
+  </div>
+</section>
 
-    <div class="grid md:grid-cols-2 gap-5">
-      <div class="bg-white rounded-2xl p-6 border border-sand fade-up hover:shadow-md transition-all">
-        <div class="flex items-start gap-4">
-          <div class="w-12 h-12 bg-leaf/10 rounded-xl flex items-center justify-center flex-shrink-0">
-            <span class="text-2xl">📚</span>
-          </div>
-          <div>
-            <h3 class="font-bold text-bark mb-1">閱讀種子計畫</h3>
-            <p class="text-xs text-stone leading-relaxed mb-3">為偏鄉小學建立圖書角、培訓閱讀志工、定期送書到校。目標：2026 年底前覆蓋 30 所學校。</p>
-            <div class="flex items-center gap-3">
-              <span class="px-2 py-0.5 bg-leaf/10 text-forest text-[10px] rounded-full font-bold">進行中</span>
-              <span class="text-[10px] text-stone">已完成 18/30 所</span>
-            </div>
-          </div>
-        </div>
+<!-- Beneficiary Story -->
+<section id="story" class="py-20 px-6 organic-bg relative">
+  <div class="absolute inset-0 bg-gradient-to-b from-sand-pale/60 to-cream/80"></div>
+  <div class="max-w-4xl mx-auto relative z-10 fade-up">
+    <div class="text-center mb-8">
+      <span class="text-sm text-terra font-semibold uppercase tracking-widest font-body">A Story of Hope</span>
+    </div>
+    <div class="bg-white rounded-3xl p-10 md:p-14 shadow-sm border border-sand/30">
+      <div class="story-quote pl-4 md:pl-8">
+        <p class="font-display text-xl md:text-2xl text-bark leading-relaxed italic">
+          When I lost my job, I didn't know how we would feed our kids. Helping Hands didn't just give us meals &mdash; they gave us hope. Now my children are in school, we have a roof over our heads, and I've completed a job training program. They saw us as
+          <span class="relative inline-block hand-underline not-italic font-bold text-terra">people
+            <svg class="absolute -bottom-1 left-0 w-full" height="8" viewBox="0 0 100 8" fill="none" preserveAspectRatio="none">
+              <path d="M2 5 C20 2, 40 7, 60 3 C75 1, 90 5, 98 4" stroke="#c2410c" stroke-width="2" stroke-linecap="round" fill="none"/>
+            </svg>
+          </span>, not just a statistic.
+        </p>
       </div>
-
-      <div class="bg-white rounded-2xl p-6 border border-sand fade-up hover:shadow-md transition-all">
-        <div class="flex items-start gap-4">
-          <div class="w-12 h-12 bg-sun/10 rounded-xl flex items-center justify-center flex-shrink-0">
-            <span class="text-2xl">🔬</span>
-          </div>
-          <div>
-            <h3 class="font-bold text-bark mb-1">科學探索營</h3>
-            <p class="text-xs text-stone leading-relaxed mb-3">寒暑假期間在偏鄉舉辦科學營，由大學生擔任講師。讓偏鄉孩子也能體驗動手做科學的樂趣。</p>
-            <div class="flex items-center gap-3">
-              <span class="px-2 py-0.5 bg-sun/10 text-earth text-[10px] rounded-full font-bold">招募中</span>
-              <span class="text-[10px] text-stone">2026 暑假梯次報名中</span>
-            </div>
-          </div>
+      <div class="mt-8 flex items-center gap-4 pl-4 md:pl-8">
+        <div class="w-14 h-14 rounded-full bg-gradient-to-br from-sand to-terra/20 flex items-center justify-center">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#c2410c" stroke-width="1.8"><circle cx="12" cy="8" r="4"/><path d="M5 20c0-4 3-7 7-7s7 3 7 7"/></svg>
         </div>
-      </div>
-
-      <div class="bg-white rounded-2xl p-6 border border-sand fade-up hover:shadow-md transition-all">
-        <div class="flex items-start gap-4">
-          <div class="w-12 h-12 bg-forest/10 rounded-xl flex items-center justify-center flex-shrink-0">
-            <span class="text-2xl">🌱</span>
-          </div>
-          <div>
-            <h3 class="font-bold text-bark mb-1">社區綠化計畫</h3>
-            <p class="text-xs text-stone leading-relaxed mb-3">與地方社區合作，在閒置空地種植台灣原生種樹木。2025 年已種下 12,000 棵，2026 年目標 20,000 棵。</p>
-            <div class="flex items-center gap-3">
-              <span class="px-2 py-0.5 bg-leaf/10 text-forest text-[10px] rounded-full font-bold">進行中</span>
-              <span class="text-[10px] text-stone">已種植 45,000 棵</span>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <div class="bg-white rounded-2xl p-6 border border-sand fade-up hover:shadow-md transition-all">
-        <div class="flex items-start gap-4">
-          <div class="w-12 h-12 bg-warm rounded-xl flex items-center justify-center flex-shrink-0">
-            <span class="text-2xl">🎨</span>
-          </div>
-          <div>
-            <h3 class="font-bold text-bark mb-1">藝術啟蒙計畫</h3>
-            <p class="text-xs text-stone leading-relaxed mb-3">邀請藝術家進駐偏鄉學校，帶領孩子透過繪畫、音樂、戲劇探索自我。每年服務 15 所學校。</p>
-            <div class="flex items-center gap-3">
-              <span class="px-2 py-0.5 bg-warm text-earth text-[10px] rounded-full font-bold">規劃中</span>
-              <span class="text-[10px] text-stone">2026 下半年啟動</span>
-            </div>
-          </div>
+        <div>
+          <div class="font-display font-bold text-bark text-lg">Maria Santos</div>
+          <div class="text-sm text-clay font-body">Single mother of three, Oakland, CA</div>
         </div>
       </div>
     </div>
   </div>
 </section>
 
-<!-- Team -->
-<section id="team" class="py-16 px-6 bg-sand">
-  <div class="max-w-6xl mx-auto">
-    <div class="text-center mb-12 fade-up">
-      <span class="text-xs text-forest font-bold uppercase tracking-widest">Team</span>
-      <h2 class="text-3xl font-extrabold text-bark mt-2">核心團隊</h2>
+<!-- Donation CTA -->
+<section id="donate" class="py-20 px-6">
+  <div class="max-w-2xl mx-auto fade-up">
+    <div class="text-center mb-10">
+      <span class="text-sm text-terra font-semibold uppercase tracking-widest font-body">Make a Difference</span>
+      <h2 class="font-display text-3xl md:text-4xl font-extrabold text-bark mt-3">
+        Your Generosity
+        <span class="relative inline-block hand-underline">Matters
+          <svg class="absolute -bottom-1 left-0 w-full" height="10" viewBox="0 0 140 10" fill="none" preserveAspectRatio="none">
+            <path d="M2 7 C35 2, 55 8, 90 4 C115 1, 130 6, 138 5" stroke="#c2410c" stroke-width="2.5" stroke-linecap="round" fill="none"/>
+          </svg>
+        </span>
+      </h2>
     </div>
 
-    <div class="grid grid-cols-2 md:grid-cols-4 gap-5">
-      <div class="text-center fade-up">
-        <div class="w-24 h-24 mx-auto rounded-full bg-gradient-to-br from-leaf/20 to-forest/10 flex items-center justify-center mb-3">
-          <span class="text-3xl">👩</span>
+    <div class="bg-white rounded-3xl p-8 md:p-10 border border-sand/40 shadow-sm">
+      <!-- Progress bar -->
+      <div class="mb-8 p-5 bg-cream rounded-2xl border border-sand/30">
+        <div class="flex items-center justify-between mb-3">
+          <span class="font-display font-bold text-bark text-base">Annual Campaign 2026</span>
+          <span class="text-sm text-terra font-bold font-body">72% funded</span>
         </div>
-        <h3 class="font-bold text-sm text-bark">林雅芳</h3>
-        <p class="text-xs text-forest">執行長</p>
-        <p class="text-[10px] text-stone mt-1">前教育部偏鄉計畫主持人</p>
-      </div>
-      <div class="text-center fade-up">
-        <div class="w-24 h-24 mx-auto rounded-full bg-gradient-to-br from-sun/20 to-warm flex items-center justify-center mb-3">
-          <span class="text-3xl">👨</span>
+        <div class="w-full h-3.5 bg-sand/40 rounded-full overflow-hidden">
+          <div class="progress-fill h-full bg-gradient-to-r from-terra to-terra-light rounded-full" id="progressBar" style="width: 0%"></div>
         </div>
-        <h3 class="font-bold text-sm text-bark">陳志遠</h3>
-        <p class="text-xs text-forest">計畫總監</p>
-        <p class="text-[10px] text-stone mt-1">15 年 NGO 計畫管理經驗</p>
-      </div>
-      <div class="text-center fade-up">
-        <div class="w-24 h-24 mx-auto rounded-full bg-gradient-to-br from-leaf/20 to-sun/10 flex items-center justify-center mb-3">
-          <span class="text-3xl">👩</span>
+        <div class="flex items-center justify-between mt-2">
+          <span class="text-xs text-clay font-body">$360,000 raised</span>
+          <span class="text-xs text-clay font-body">Goal: $500,000</span>
         </div>
-        <h3 class="font-bold text-sm text-bark">黃品萱</h3>
-        <p class="text-xs text-forest">募款主任</p>
-        <p class="text-[10px] text-stone mt-1">社會企業行銷專家</p>
-      </div>
-      <div class="text-center fade-up">
-        <div class="w-24 h-24 mx-auto rounded-full bg-gradient-to-br from-forest/10 to-leaf/20 flex items-center justify-center mb-3">
-          <span class="text-3xl">👨</span>
-        </div>
-        <h3 class="font-bold text-sm text-bark">張宏義</h3>
-        <p class="text-xs text-forest">環境顧問</p>
-        <p class="text-[10px] text-stone mt-1">台大森林系副教授</p>
-      </div>
-    </div>
-  </div>
-</section>
-
-<!-- Donation -->
-<section id="donate" class="py-16 px-6">
-  <div class="max-w-3xl mx-auto">
-    <div class="bg-white rounded-2xl p-8 border border-sand shadow-sm fade-up">
-      <div class="text-center mb-8">
-        <div class="text-4xl mb-3">💚</div>
-        <h2 class="text-2xl font-extrabold text-bark">您的支持，是改變的開始</h2>
-        <p class="text-sm text-stone mt-2">每一份捐款都 100% 投入計畫執行。我們承諾財務完全透明。</p>
       </div>
 
-      <!-- Amount selection -->
-      <div class="mb-6">
-        <div class="text-xs text-stone mb-3 font-bold">選擇金額</div>
-        <div class="grid grid-cols-4 gap-2 mb-3">
-          <button onclick="selectAmount(this, 300)" class="amount-btn py-3 border border-sand rounded-xl text-sm font-bold text-bark">$300</button>
-          <button onclick="selectAmount(this, 500)" class="amount-btn active py-3 border border-forest bg-forest text-white rounded-xl text-sm font-bold">$500</button>
-          <button onclick="selectAmount(this, 1000)" class="amount-btn py-3 border border-sand rounded-xl text-sm font-bold text-bark">$1,000</button>
-          <button onclick="selectAmount(this, 3000)" class="amount-btn py-3 border border-sand rounded-xl text-sm font-bold text-bark">$3,000</button>
-        </div>
-        <input type="number" placeholder="自訂金額" class="w-full px-4 py-3 bg-sand border border-sand rounded-xl text-sm focus:outline-none focus:border-forest focus:bg-white transition-all">
+      <!-- Frequency toggle -->
+      <div class="flex items-center gap-2 mb-6 p-1 bg-cream rounded-xl">
+        <button onclick="selectFreq(this, 'once')" class="freq-btn active flex-1 py-2.5 rounded-lg text-sm font-semibold font-body border border-transparent text-center">One-time</button>
+        <button onclick="selectFreq(this, 'monthly')" class="freq-btn flex-1 py-2.5 rounded-lg text-sm font-semibold font-body border border-transparent text-center text-clay">Monthly</button>
       </div>
+
+      <!-- Preset amounts -->
+      <div class="grid grid-cols-5 gap-2 mb-4">
+        <button onclick="selectAmount(this, 25)" class="amt-btn py-3 border-2 border-sand/60 rounded-xl text-sm font-bold text-bark font-display">$25</button>
+        <button onclick="selectAmount(this, 50)" class="amt-btn py-3 border-2 border-sand/60 rounded-xl text-sm font-bold text-bark font-display">$50</button>
+        <button onclick="selectAmount(this, 100)" class="amt-btn active py-3 border-2 rounded-xl text-sm font-bold font-display">$100</button>
+        <button onclick="selectAmount(this, 250)" class="amt-btn py-3 border-2 border-sand/60 rounded-xl text-sm font-bold text-bark font-display">$250</button>
+        <button onclick="selectAmount(this, 0)" class="amt-btn py-3 border-2 border-sand/60 rounded-xl text-xs font-bold text-bark font-body" id="customBtn">Custom</button>
+      </div>
+      <input type="number" id="customInput" placeholder="Enter custom amount" class="hidden w-full px-4 py-3 bg-cream border-2 border-sand/40 rounded-xl text-sm font-body focus:outline-none focus:border-terra transition-all mb-4">
 
       <!-- What your donation does -->
-      <div class="bg-sand rounded-xl p-4 mb-6">
-        <div class="text-xs text-stone mb-2 font-bold">您的 $500 可以：</div>
+      <div class="bg-cream/70 rounded-xl p-4 mb-6 border border-sand/20" id="impactInfo">
+        <div class="text-xs text-clay mb-2 font-bold font-body">Your $100 provides:</div>
         <div class="space-y-1.5">
-          <div class="flex items-center gap-2 text-xs text-bark">
-            <span class="text-leaf">✓</span> 為一位偏鄉學童購買 10 本課外讀物
+          <div class="flex items-center gap-2 text-sm text-bark font-body">
+            <svg width="14" height="14" viewBox="0 0 16 16" fill="#166534"><path d="M6.5 12L2 7.5l1.5-1.5L6.5 9 12.5 3 14 4.5z"/></svg>
+            40 nutritious meals for families in need
           </div>
-          <div class="flex items-center gap-2 text-xs text-bark">
-            <span class="text-leaf">✓</span> 種植 5 棵台灣原生種樹苗
+          <div class="flex items-center gap-2 text-sm text-bark font-body">
+            <svg width="14" height="14" viewBox="0 0 16 16" fill="#166534"><path d="M6.5 12L2 7.5l1.5-1.5L6.5 9 12.5 3 14 4.5z"/></svg>
+            School supplies for 3 children for a month
           </div>
-          <div class="flex items-center gap-2 text-xs text-bark">
-            <span class="text-leaf">✓</span> 支持科學營一位學員的材料費
+          <div class="flex items-center gap-2 text-sm text-bark font-body">
+            <svg width="14" height="14" viewBox="0 0 16 16" fill="#166534"><path d="M6.5 12L2 7.5l1.5-1.5L6.5 9 12.5 3 14 4.5z"/></svg>
+            2 nights of emergency shelter
           </div>
         </div>
       </div>
 
-      <!-- Frequency -->
-      <div class="flex items-center gap-2 mb-6">
-        <button onclick="selectFreq(this, '單次')" class="flex-1 py-2.5 border border-forest bg-forest text-white rounded-xl text-xs font-bold freq-btn active">單次捐款</button>
-        <button onclick="selectFreq(this, '每月')" class="flex-1 py-2.5 border border-sand text-bark rounded-xl text-xs font-bold freq-btn">每月定期</button>
-      </div>
-
-      <!-- Donor info -->
-      <div class="space-y-3 mb-6">
-        <div class="grid grid-cols-2 gap-3">
-          <input type="text" placeholder="姓名" class="px-4 py-2.5 bg-sand border border-sand rounded-xl text-sm focus:outline-none focus:border-forest focus:bg-white">
-          <input type="email" placeholder="Email" class="px-4 py-2.5 bg-sand border border-sand rounded-xl text-sm focus:outline-none focus:border-forest focus:bg-white">
-        </div>
-        <input type="tel" placeholder="電話（選填，用於寄送收據）" class="w-full px-4 py-2.5 bg-sand border border-sand rounded-xl text-sm focus:outline-none focus:border-forest focus:bg-white">
-      </div>
-
-      <button onclick="handleAction('捐款 NT$ 500')" class="w-full py-3.5 bg-forest text-white text-sm font-bold rounded-xl hover:bg-forest-dark transition-colors">
-        捐款 NT$ 500 💚
+      <button onclick="handleAction('Donate $100')" id="donateBtn" class="w-full py-4 bg-terra text-white text-base font-bold rounded-xl hover:bg-terra-dark transition-colors font-display shadow-lg shadow-terra/20 cursor-pointer">
+        Donate $100
       </button>
-      <div class="flex items-center justify-center gap-4 mt-4">
-        <span class="text-[10px] text-stone">🔒 安全加密付款</span>
-        <span class="text-[10px] text-stone">📧 可開立捐款收據</span>
+      <div class="flex items-center justify-center gap-6 mt-4">
+        <span class="text-xs text-clay font-body flex items-center gap-1.5">
+          <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="#8b6f47" stroke-width="1.5"><rect x="2" y="6" width="12" height="8" rx="2"/><path d="M5 6V4a3 3 0 016 0v2"/></svg>
+          Secure & encrypted
+        </span>
+        <span class="text-xs text-clay font-body flex items-center gap-1.5">
+          <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="#8b6f47" stroke-width="1.5"><path d="M13.5 5.5L6 13 2.5 9.5"/></svg>
+          Tax-deductible
+        </span>
       </div>
-    </div>
-  </div>
-</section>
-
-<!-- Partners -->
-<section class="py-12 px-6 bg-sand">
-  <div class="max-w-4xl mx-auto text-center fade-up">
-    <div class="text-xs text-stone mb-6">合作夥伴</div>
-    <div class="flex items-center justify-center gap-8 flex-wrap opacity-50">
-      <span class="text-sm font-bold text-bark">教育部</span>
-      <span class="text-sm font-bold text-bark">林務局</span>
-      <span class="text-sm font-bold text-bark">誠品基金會</span>
-      <span class="text-sm font-bold text-bark">Google.org</span>
-      <span class="text-sm font-bold text-bark">遠傳電信</span>
-    </div>
-  </div>
-</section>
-
-<!-- CTA -->
-<section class="py-16 px-6 bg-forest text-white text-center">
-  <div class="max-w-2xl mx-auto fade-up">
-    <h2 class="text-3xl font-extrabold mb-4">每一份力量都有意義</h2>
-    <p class="text-sm text-white/70 mb-8">不管是捐款、當志工、或只是分享我們的故事，<br>你都在為偏鄉的孩子種下一顆希望的種子。</p>
-    <div class="flex items-center justify-center gap-4">
-      <button onclick="scrollToDonate()" class="px-6 py-3 bg-sun text-earth text-sm font-bold rounded-full hover:bg-sun-light transition-colors">
-        立即捐款
-      </button>
-      <button onclick="handleAction('成為志工')" class="px-6 py-3 border border-white/30 text-white text-sm font-bold rounded-full hover:bg-white/10 transition-colors">
-        成為志工
-      </button>
     </div>
   </div>
 </section>
 
 <!-- Footer -->
-<footer class="py-10 px-6 border-t border-sand bg-cream">
+<footer class="bg-earth-dark text-white pt-16 pb-8 px-6">
   <div class="max-w-6xl mx-auto">
-    <div class="grid grid-cols-2 md:grid-cols-4 gap-8 mb-8">
+    <!-- Newsletter -->
+    <div class="text-center mb-14 pb-14 border-b border-white/10">
+      <h3 class="font-display text-2xl font-bold mb-3">Stay Connected</h3>
+      <p class="text-sm text-white/60 font-body mb-6 max-w-md mx-auto">Join our newsletter for stories of impact, volunteer opportunities, and ways you can help.</p>
+      <div class="flex max-w-md mx-auto gap-2">
+        <input type="email" placeholder="Your email address" class="flex-1 px-4 py-3 bg-white/10 border border-white/20 rounded-xl text-sm text-white placeholder-white/40 font-body focus:outline-none focus:border-white/40">
+        <button onclick="handleAction('Newsletter signup')" class="px-6 py-3 bg-terra text-white text-sm font-semibold rounded-xl hover:bg-terra-light transition-colors font-body cursor-pointer">Subscribe</button>
+      </div>
+    </div>
+
+    <div class="grid grid-cols-2 md:grid-cols-4 gap-8 mb-12">
       <div>
-        <div class="flex items-center gap-2 mb-3">
-          <span class="text-lg">🌱</span>
-          <span class="font-bold text-sm text-forest">綠芽基金會</span>
+        <div class="flex items-center gap-2 mb-4">
+          <svg width="24" height="24" viewBox="0 0 32 32" fill="none">
+            <circle cx="16" cy="16" r="15" fill="rgba(255,255,255,0.1)"/>
+            <path d="M10 20c0-4 3-8 6-10 3 2 6 6 6 10" stroke="white" stroke-width="2" stroke-linecap="round" fill="none"/>
+            <path d="M16 10v12" stroke="white" stroke-width="1.5" stroke-linecap="round"/>
+          </svg>
+          <span class="font-display text-base font-bold">Helping Hands</span>
         </div>
-        <p class="text-xs text-stone leading-relaxed">每一顆種子，都值得發芽的機會。</p>
-        <p class="text-[10px] text-stone mt-2">衛福部勸募許可字號<br>衛部救字第 1141234567 號</p>
+        <p class="text-xs text-white/50 font-body leading-relaxed">Together, building a world where every person has what they need to thrive.</p>
       </div>
       <div>
-        <h4 class="text-xs font-bold text-bark mb-3">關於我們</h4>
-        <div class="space-y-1.5">
-          <a onclick="handleAction('組織沿革')" class="block text-xs text-stone hover:text-forest cursor-pointer transition-colors">組織沿革</a>
-          <a onclick="handleAction('年度報告')" class="block text-xs text-stone hover:text-forest cursor-pointer transition-colors">年度報告</a>
-          <a onclick="handleAction('財務公開')" class="block text-xs text-stone hover:text-forest cursor-pointer transition-colors">財務公開</a>
+        <h4 class="font-display text-sm font-bold mb-4">Organization</h4>
+        <div class="space-y-2">
+          <a onclick="handleAction('About Us')" class="block text-xs text-white/50 hover:text-white/80 cursor-pointer transition-colors font-body">About Us</a>
+          <a onclick="handleAction('Our Team')" class="block text-xs text-white/50 hover:text-white/80 cursor-pointer transition-colors font-body">Our Team</a>
+          <a onclick="handleAction('Annual Report')" class="block text-xs text-white/50 hover:text-white/80 cursor-pointer transition-colors font-body">Annual Report</a>
+          <a onclick="handleAction('Financial Transparency')" class="block text-xs text-white/50 hover:text-white/80 cursor-pointer transition-colors font-body">Financials</a>
         </div>
       </div>
       <div>
-        <h4 class="text-xs font-bold text-bark mb-3">參與方式</h4>
-        <div class="space-y-1.5">
-          <a onclick="scrollToDonate()" class="block text-xs text-stone hover:text-forest cursor-pointer transition-colors">線上捐款</a>
-          <a onclick="handleAction('成為志工')" class="block text-xs text-stone hover:text-forest cursor-pointer transition-colors">志工報名</a>
-          <a onclick="handleAction('企業合作')" class="block text-xs text-stone hover:text-forest cursor-pointer transition-colors">企業合作</a>
+        <h4 class="font-display text-sm font-bold mb-4">Get Involved</h4>
+        <div class="space-y-2">
+          <a onclick="scrollTo('#donate')" class="block text-xs text-white/50 hover:text-white/80 cursor-pointer transition-colors font-body">Donate</a>
+          <a onclick="handleAction('Volunteer')" class="block text-xs text-white/50 hover:text-white/80 cursor-pointer transition-colors font-body">Volunteer</a>
+          <a onclick="handleAction('Corporate Partners')" class="block text-xs text-white/50 hover:text-white/80 cursor-pointer transition-colors font-body">Corporate Partners</a>
+          <a onclick="handleAction('Fundraise')" class="block text-xs text-white/50 hover:text-white/80 cursor-pointer transition-colors font-body">Fundraise for Us</a>
         </div>
       </div>
       <div>
-        <h4 class="text-xs font-bold text-bark mb-3">聯繫我們</h4>
-        <div class="space-y-1.5 text-xs text-stone">
-          <div>02-2345-6789</div>
-          <div>hello@greensprout.org.tw</div>
-          <div>台北市中正區和平東路一段 88 號 3 樓</div>
-          <div class="flex items-center gap-3 pt-2">
-            <a onclick="handleAction('Facebook')" class="cursor-pointer hover:text-forest transition-colors">FB</a>
-            <a onclick="handleAction('Instagram')" class="cursor-pointer hover:text-forest transition-colors">IG</a>
-            <a onclick="handleAction('YouTube')" class="cursor-pointer hover:text-forest transition-colors">YT</a>
-            <a onclick="handleAction('LINE')" class="cursor-pointer hover:text-forest transition-colors">LINE</a>
+        <h4 class="font-display text-sm font-bold mb-4">Contact</h4>
+        <div class="space-y-2 text-xs text-white/50 font-body">
+          <div>(415) 555-0192</div>
+          <div>hello@helpinghands.org</div>
+          <div>1847 Mission Street<br>San Francisco, CA 94103</div>
+          <div class="flex items-center gap-4 pt-3">
+            <a onclick="handleAction('Facebook')" class="cursor-pointer hover:text-white/80 transition-colors">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M24 12.073c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.99 4.388 10.954 10.125 11.854v-8.385H7.078v-3.47h3.047V9.43c0-3.007 1.792-4.669 4.533-4.669 1.312 0 2.686.235 2.686.235v2.953H15.83c-1.491 0-1.956.925-1.956 1.874v2.25h3.328l-.532 3.47h-2.796v8.385C19.612 23.027 24 18.062 24 12.073z"/></svg>
+            </a>
+            <a onclick="handleAction('Instagram')" class="cursor-pointer hover:text-white/80 transition-colors">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2.163c3.204 0 3.584.012 4.85.07 3.252.148 4.771 1.691 4.919 4.919.058 1.265.069 1.645.069 4.849 0 3.205-.012 3.584-.069 4.849-.149 3.225-1.664 4.771-4.919 4.919-1.266.058-1.644.07-4.85.07-3.204 0-3.584-.012-4.849-.07-3.26-.149-4.771-1.699-4.919-4.92-.058-1.265-.07-1.644-.07-4.849 0-3.204.013-3.583.07-4.849.149-3.227 1.664-4.771 4.919-4.919 1.266-.057 1.645-.069 4.849-.069zM12 0C8.741 0 8.333.014 7.053.072 2.695.272.273 2.69.073 7.052.014 8.333 0 8.741 0 12c0 3.259.014 3.668.072 4.948.2 4.358 2.618 6.78 6.98 6.98C8.333 23.986 8.741 24 12 24c3.259 0 3.668-.014 4.948-.072 4.354-.2 6.782-2.618 6.979-6.98.059-1.28.073-1.689.073-4.948 0-3.259-.014-3.667-.072-4.947-.196-4.354-2.617-6.78-6.979-6.98C15.668.014 15.259 0 12 0zm0 5.838a6.162 6.162 0 100 12.324 6.162 6.162 0 000-12.324zM12 16a4 4 0 110-8 4 4 0 010 8zm6.406-11.845a1.44 1.44 0 100 2.881 1.44 1.44 0 000-2.881z"/></svg>
+            </a>
+            <a onclick="handleAction('Twitter')" class="cursor-pointer hover:text-white/80 transition-colors">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"/></svg>
+            </a>
           </div>
         </div>
       </div>
     </div>
-    <div class="border-t border-sand pt-6 text-center">
-      <p class="text-[10px] text-stone">© 2018-2026 財團法人綠芽教育基金會. All rights reserved.</p>
+
+    <div class="border-t border-white/10 pt-6 flex flex-col md:flex-row items-center justify-between gap-4">
+      <p class="text-xs text-white/40 font-body">&copy; 2009&ndash;2026 Helping Hands Foundation. All rights reserved.</p>
+      <p class="text-xs text-white/40 font-body">EIN: 94-3218765 &middot; 501(c)(3) tax-exempt nonprofit</p>
     </div>
   </div>
 </footer>
 
 <!-- Toast -->
-<div id="toast" class="fixed bottom-6 left-1/2 -translate-x-1/2 bg-forest text-white px-5 py-3 rounded-xl text-xs font-bold shadow-lg opacity-0 pointer-events-none transition-all duration-300 translate-y-2 z-50 max-w-sm text-center"></div>
+<div id="toast" class="fixed bottom-6 left-1/2 -translate-x-1/2 bg-earth text-white px-6 py-3 rounded-xl text-sm font-semibold shadow-lg opacity-0 pointer-events-none transition-all duration-300 translate-y-2 z-50 max-w-sm text-center font-body"></div>
 
 <script>
-let selectedAmount = 500;
+/* ---- Amount & Frequency ---- */
+let selectedAmount = 100;
+let selectedFreq = 'once';
+
+const impactData = {
+  25:  ['10 nutritious meals for a family', 'School supplies for 1 child', '1 night of emergency shelter'],
+  50:  ['20 nutritious meals for families', 'School supplies for 2 children', 'After-school tutoring for 1 week'],
+  100: ['40 nutritious meals for families in need', 'School supplies for 3 children for a month', '2 nights of emergency shelter'],
+  250: ['100 meals across 3 community kitchens', 'Full semester of tutoring for 1 student', '1 week of transitional housing support']
+};
 
 function selectAmount(el, amt) {
-  selectedAmount = amt;
-  document.querySelectorAll('.amount-btn').forEach(b => {
-    b.classList.remove('active', 'bg-forest', 'text-white', 'border-forest');
-    b.classList.add('border-sand', 'text-bark');
+  document.querySelectorAll('.amt-btn').forEach(b => {
+    b.classList.remove('active');
+    b.classList.add('border-sand/60', 'text-bark');
   });
-  el.classList.add('active', 'bg-forest', 'text-white', 'border-forest');
-  el.classList.remove('border-sand', 'text-bark');
+  el.classList.add('active');
+  el.classList.remove('border-sand/60', 'text-bark');
+
+  const customInput = document.getElementById('customInput');
+  if (amt === 0) {
+    customInput.classList.remove('hidden');
+    customInput.focus();
+    selectedAmount = 0;
+    document.getElementById('donateBtn').textContent = 'Donate';
+    return;
+  }
+  customInput.classList.add('hidden');
+  selectedAmount = amt;
+  document.getElementById('donateBtn').textContent = 'Donate $' + amt;
+  updateImpact(amt);
 }
+
+function updateImpact(amt) {
+  const info = document.getElementById('impactInfo');
+  const items = impactData[amt];
+  if (!items) return;
+  info.innerHTML = '<div class="text-xs text-clay mb-2 font-bold font-body">Your $' + amt + ' provides:</div><div class="space-y-1.5">' +
+    items.map(i => '<div class="flex items-center gap-2 text-sm text-bark font-body"><svg width="14" height="14" viewBox="0 0 16 16" fill="#166534"><path d="M6.5 12L2 7.5l1.5-1.5L6.5 9 12.5 3 14 4.5z"/></svg>' + i + '</div>').join('') +
+    '</div>';
+}
+
+document.getElementById('customInput').addEventListener('input', function() {
+  const v = parseInt(this.value);
+  if (v > 0) {
+    selectedAmount = v;
+    document.getElementById('donateBtn').textContent = 'Donate $' + v.toLocaleString();
+  }
+});
 
 function selectFreq(el, freq) {
+  selectedFreq = freq;
   document.querySelectorAll('.freq-btn').forEach(b => {
-    b.classList.remove('active', 'bg-forest', 'text-white', 'border-forest');
-    b.classList.add('border-sand', 'text-bark');
+    b.classList.remove('active');
+    b.classList.add('text-clay');
   });
-  el.classList.add('active', 'bg-forest', 'text-white', 'border-forest');
-  el.classList.remove('border-sand', 'text-bark');
+  el.classList.add('active');
+  el.classList.remove('text-clay');
 }
 
-function scrollToDonate() {
-  document.getElementById('donate').scrollIntoView({ behavior: 'smooth' });
-}
-
+/* ---- Navigation ---- */
+function scrollTo(sel) { document.querySelector(sel).scrollIntoView({ behavior: 'smooth' }); }
 function toggleMenu() { document.getElementById('mobileMenu').classList.toggle('hidden'); }
 
+/* ---- Toast ---- */
 function showToast(msg) {
   const t = document.getElementById('toast');
   t.textContent = msg;
   t.style.opacity = '1'; t.style.transform = 'translate(-50%, 0)';
   setTimeout(() => { t.style.opacity = '0'; t.style.transform = 'translate(-50%, 8px)'; }, 2500);
 }
-function handleAction(a) { showToast(a + ' — 此為模板展示'); }
+function handleAction(a) { showToast(a + ' — this is a template preview'); }
 
-const obs = new IntersectionObserver(entries => {
-  entries.forEach(e => { if (e.isIntersecting) e.target.classList.add('visible'); });
+/* ---- Counter Animation ---- */
+function animateCounter(el) {
+  const target = parseInt(el.dataset.target);
+  const duration = 2000;
+  const start = performance.now();
+
+  function update(now) {
+    const elapsed = now - start;
+    const progress = Math.min(elapsed / duration, 1);
+    const eased = 1 - Math.pow(1 - progress, 3);
+    const current = Math.floor(eased * target);
+    el.textContent = current.toLocaleString();
+    if (progress < 1) requestAnimationFrame(update);
+  }
+  requestAnimationFrame(update);
+}
+
+/* ---- Hand-drawn Underline Animation ---- */
+function drawUnderlines() {
+  document.querySelectorAll('.hand-underline').forEach(el => {
+    el.classList.add('drawn');
+  });
+}
+
+/* ---- Progress Bar Animation ---- */
+function animateProgress() {
+  document.getElementById('progressBar').style.width = '72%';
+}
+
+/* ---- IntersectionObserver for all animations ---- */
+const fadeObs = new IntersectionObserver(entries => {
+  entries.forEach(e => {
+    if (e.isIntersecting) {
+      e.target.classList.add('visible');
+    }
+  });
 }, { threshold: 0.1 });
-document.querySelectorAll('.fade-up').forEach(el => obs.observe(el));
+document.querySelectorAll('.fade-up').forEach(el => fadeObs.observe(el));
+
+const counterObs = new IntersectionObserver(entries => {
+  entries.forEach(e => {
+    if (e.isIntersecting && !e.target.dataset.animated) {
+      e.target.dataset.animated = 'true';
+      animateCounter(e.target);
+    }
+  });
+}, { threshold: 0.3 });
+document.querySelectorAll('.counter-num').forEach(el => counterObs.observe(el));
+
+const progressObs = new IntersectionObserver(entries => {
+  entries.forEach(e => {
+    if (e.isIntersecting && !e.target.dataset.animated) {
+      e.target.dataset.animated = 'true';
+      animateProgress();
+    }
+  });
+}, { threshold: 0.3 });
+progressObs.observe(document.getElementById('progressBar'));
+
+/* ---- Hero underline draw on load ---- */
+window.addEventListener('load', () => {
+  setTimeout(drawUnderlines, 500);
+});
+
+/* ---- Activate hand-drawn underlines on scroll for non-hero ones ---- */
+const underlineObs = new IntersectionObserver(entries => {
+  entries.forEach(e => {
+    if (e.isIntersecting) {
+      e.target.classList.add('drawn');
+    }
+  });
+}, { threshold: 0.5 });
+document.querySelectorAll('.hand-underline:not(#heroUnderline)').forEach(el => underlineObs.observe(el));
 </script>
 
 </body>
-</html>
-  $HTML$,
-  1
+</html>$HTML$,
+  3
 )
-ON CONFLICT (template_id)
-DO UPDATE SET html_content = EXCLUDED.html_content, version = template_previews.version + 1, updated_at = NOW();
+ON CONFLICT (template_id) DO UPDATE SET
+  html_content = EXCLUDED.html_content,
+  version = EXCLUDED.version,
+  updated_at = NOW();

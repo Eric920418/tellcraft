@@ -431,34 +431,6 @@ async function handleContinueFlow(
     return
   }
 
-  // 處理 Deployer 階段
-  if (state.phase === 'deployer_confirm') {
-    const trimmed = message.trim()
-    const cancelKeywords = ['取消', '不要', '不要部署', 'cancel', 'N', 'n']
-    const confirmKeywords = ['確認', '確定', '部署', '好', '好的', '是', '對', 'Y', 'y', 'yes', 'ok']
-    // 取消優先檢查，避免「不要部署」被 confirm 的「部署」攔截
-    if (cancelKeywords.includes(trimmed)) {
-      await sendMessage(conversationId, io, {
-        content: '已取消部署。',
-        stage: 'deployer_cancelled',
-      })
-      state.phase = 'uiux_complete' // 回到 UIUX 完成狀態
-      state.deployerPreCheck = undefined
-      await saveFlowState(redis, conversationId, state)
-    } else if (confirmKeywords.includes(trimmed)) {
-      await handleDeployExecute(conversationId, state, data.projectId, redis, io)
-    } else {
-      await sendMessage(conversationId, io, {
-        content: '請輸入「確認」開始部署，或輸入「取消」返回修改。',
-        stage: 'info',
-        quickReplies: [
-          { label: '確認部署', value: '確認', style: 'primary' },
-          { label: '取消', value: '取消', style: 'secondary' },
-        ],
-      })
-    }
-    return
-  }
   // 部署失敗後允許重試、返回修改、或直接迭代
   if (state.phase === 'deployer_failed') {
     const trimmed = message.trim()
@@ -3869,39 +3841,23 @@ async function executeDeployerSkill(input: DeployerSkillInput) {
   let state = await getFlowState(redis, conversationId)
   if (!state) {
     state = {
-      phase: 'deployer_confirm',
+      phase: 'deployer_deploying',
       currentRound: 0,
       questionIndex: 0,
       batchCount: 0,
-      waitingForReply: true,
+      waitingForReply: false,
       totalQuestionsAsked: 0,
       deployerPreCheck: preCheck,
       userId,
     }
   } else {
-    state.phase = 'deployer_confirm'
-    state.waitingForReply = true
     state.deployerPreCheck = preCheck
     if (!state.userId) state.userId = userId
   }
   await saveFlowState(redis, conversationId, state)
 
-  const confirmContent = '**部署準備就緒！** 確認要部署嗎？'
-
-  // 發送部署確認
-  await sendMessage(conversationId, io, {
-    content: confirmContent,
-    stage: 'deployer_confirm',
-    richContent: {
-      type: 'deploy_confirm',
-      data: {
-        projectName: preCheck.projectName,
-        fileCount: preCheck.fileCount,
-        estimatedUrl: preCheck.estimatedUrl,
-        sanitizeFixes: preCheck.sanitizeFixes || [],
-      } as Record<string, unknown>,
-    },
-  })
+  // 用戶已明確要求部署，直接執行不再二次確認
+  await handleDeployExecute(conversationId, state, projectId, redis, io)
 }
 
 async function handleDeployExecute(

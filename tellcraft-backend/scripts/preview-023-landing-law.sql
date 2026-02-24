@@ -3,34 +3,38 @@ VALUES (
   '0a2f85be-5fd2-4a09-8bee-0c80b8935e92',
   $HTML$
 <!DOCTYPE html>
-<html lang="zh-TW">
+<html lang="en">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>正衡國際法律事務所</title>
+<title>Sterling & Associates | Attorneys at Law</title>
 <script src="https://cdn.tailwindcss.com"></script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;500;600;700&family=Inter:wght@300;400;500;600&family=Noto+Serif+TC:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=EB+Garamond:ital,wght@0,400;0,500;0,600;0,700;1,400;1,500&family=Source+Sans+3:wght@300;400;500;600;700&display=swap" rel="stylesheet">
 <script>
 tailwind.config = {
   theme: {
     extend: {
       colors: {
-        dark: '#0c1220',
-        surface: '#141e30',
-        card: '#1a2640',
-        border: '#2a3a55',
-        text: '#e8ecf2',
-        muted: '#8899b0',
-        dim: '#5a6a80',
-        gold: '#b8976a',
-        'gold-light': '#d4b88c',
-        'gold-soft': 'rgba(184,151,106,0.1)',
-        cream: '#f5f2ed'
+        leather: '#44240e',
+        'leather-light': '#5c3317',
+        gold: '#b8860b',
+        'gold-light': '#d4a017',
+        'gold-muted': '#a07608',
+        parchment: '#fdf6e3',
+        'parchment-dark': '#f5ead0',
+        charcoal: '#1c1917',
+        'warm-gray': '#44403c',
+        'warm-gray-light': '#78716c',
+        'warm-border': '#d6cfc7'
       },
       fontFamily: {
-        display: ['Cormorant Garamond', 'Noto Serif TC', 'serif'],
-        body: ['Inter', 'Noto Serif TC', 'sans-serif']
+        display: ['EB Garamond', 'Georgia', 'serif'],
+        body: ['Source Sans 3', 'system-ui', 'sans-serif']
+      },
+      maxWidth: {
+        'document': '672px'
       }
     }
   }
@@ -39,477 +43,512 @@ tailwind.config = {
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
   html { scroll-behavior: smooth; }
-  body { font-family: 'Inter', 'Noto Serif TC', sans-serif; background: #0c1220; color: #e8ecf2; }
+  body {
+    font-family: 'Source Sans 3', system-ui, sans-serif;
+    background: #fdf6e3;
+    color: #1c1917;
+  }
 
-  /* Service card */
-  .service-card { transition: all 0.3s ease; cursor: pointer; }
-  .service-card:hover { background: #1a2640; border-color: rgba(184,151,106,0.3); transform: translateY(-2px); }
-  .service-card:hover .s-icon { color: #b8976a; }
+  /* Parchment texture hint */
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background:
+      radial-gradient(ellipse at 20% 50%, rgba(68,36,14,0.03) 0%, transparent 50%),
+      radial-gradient(ellipse at 80% 20%, rgba(184,134,11,0.02) 0%, transparent 50%),
+      radial-gradient(ellipse at 50% 80%, rgba(68,36,14,0.02) 0%, transparent 50%);
+    pointer-events: none;
+    z-index: 0;
+  }
 
-  /* Team card */
-  .team-card { transition: all 0.3s ease; cursor: pointer; }
-  .team-card:hover { transform: translateY(-4px); }
-  .team-card:hover .team-overlay { opacity: 1; }
-  .team-overlay { opacity: 0; transition: opacity 0.3s ease; }
+  /* Gold horizontal rules */
+  .gold-rule {
+    border: none;
+    height: 1px;
+    background: linear-gradient(90deg, transparent, #b8860b, transparent);
+    margin: 0 auto;
+  }
 
-  /* FAQ */
-  .faq-item { transition: all 0.2s ease; }
-  .faq-item:hover { background: #1a2640; }
+  /* Practice area rows */
+  .practice-row {
+    border-left: 3px solid transparent;
+    transition: all 0.3s ease;
+    cursor: pointer;
+  }
+  .practice-row:hover {
+    border-left-color: #b8860b;
+    background: rgba(184,134,11,0.04);
+    padding-left: 1.5rem;
+  }
+  .practice-row:hover .practice-arrow {
+    opacity: 1;
+    transform: translateX(0);
+  }
+  .practice-arrow {
+    opacity: 0;
+    transform: translateX(-8px);
+    transition: all 0.3s ease;
+  }
 
-  .fade-up { opacity: 0; transform: translateY(20px); transition: opacity 0.7s ease, transform 0.7s ease; }
-  .fade-up.visible { opacity: 1; transform: translateY(0); }
+  /* Form focus */
+  .form-field:focus {
+    outline: none;
+    border-color: #b8860b;
+    box-shadow: 0 0 0 2px rgba(184,134,11,0.1);
+  }
 
-  ::-webkit-scrollbar { width: 5px; }
-  ::-webkit-scrollbar-track { background: #0c1220; }
-  ::-webkit-scrollbar-thumb { background: #2a3a55; border-radius: 3px; }
+  /* Scroll reveal */
+  .reveal {
+    opacity: 0;
+    transform: translateY(16px);
+    transition: opacity 0.7s ease, transform 0.7s ease;
+  }
+  .reveal.visible {
+    opacity: 1;
+    transform: translateY(0);
+  }
+
+  /* Mobile nav */
+  .nav-open { max-height: 280px; opacity: 1; }
+  .nav-closed { max-height: 0; opacity: 0; overflow: hidden; }
+  #mobileNav { transition: max-height 0.3s ease, opacity 0.3s ease; }
+
+  /* Quotation mark */
+  .quote-mark {
+    font-family: 'EB Garamond', Georgia, serif;
+    font-size: 6rem;
+    line-height: 1;
+    color: #b8860b;
+    opacity: 0.25;
+  }
+
+  /* Scale animation */
+  @keyframes balanceScale {
+    0%, 100% { transform: rotate(0deg); }
+    25% { transform: rotate(1.5deg); }
+    75% { transform: rotate(-1.5deg); }
+  }
+  .scale-balance {
+    animation: balanceScale 6s ease-in-out infinite;
+    transform-origin: 50% 18px;
+  }
+
+  /* Scrollbar */
+  ::-webkit-scrollbar { width: 6px; }
+  ::-webkit-scrollbar-track { background: #fdf6e3; }
+  ::-webkit-scrollbar-thumb { background: #d6cfc7; border-radius: 3px; }
+  ::-webkit-scrollbar-thumb:hover { background: #b8860b; }
 </style>
 </head>
-<body>
+<body class="relative">
 
 <!-- Nav -->
-<nav class="fixed top-0 w-full z-50 bg-dark/90 backdrop-blur-md border-b border-border/50">
-  <div class="max-w-6xl mx-auto px-6 h-16 flex items-center justify-between">
-    <a href="#" class="flex items-center gap-3">
-      <div class="flex items-center gap-0.5">
-        <div class="w-1 h-8 bg-gold"></div>
-        <div class="w-1 h-8 bg-gold/60 ml-0.5"></div>
+<nav class="fixed top-0 w-full z-50 bg-parchment/95 backdrop-blur-sm border-b border-warm-border">
+  <div class="max-w-document mx-auto px-6 h-16 flex items-center justify-between">
+    <a href="#" class="flex items-center gap-2">
+      <div class="w-5 h-5 flex items-center justify-center">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#b8860b" stroke-width="1.5" stroke-linecap="round">
+          <line x1="12" y1="3" x2="12" y2="7"/>
+          <line x1="4" y1="7" x2="20" y2="7"/>
+          <line x1="6" y1="7" x2="4" y2="14"/>
+          <line x1="18" y1="7" x2="20" y2="14"/>
+          <path d="M2 14 a3 3 0 0 0 5 0" fill="none"/>
+          <path d="M17 14 a3 3 0 0 0 5 0" fill="none"/>
+          <line x1="12" y1="7" x2="12" y2="21"/>
+          <line x1="8" y1="21" x2="16" y2="21"/>
+        </svg>
       </div>
-      <div>
-        <div class="font-display text-sm font-semibold tracking-wider text-text">正衡國際</div>
-        <div class="text-[8px] text-gold tracking-[0.2em] uppercase -mt-0.5">Justus & Partners</div>
-      </div>
+      <span class="font-display text-lg font-semibold text-leather tracking-wide">Sterling & Associates</span>
     </a>
     <div class="hidden md:flex items-center gap-8">
-      <a href="#services" class="text-xs text-muted hover:text-text transition-colors">業務領域</a>
-      <a href="#team" class="text-xs text-muted hover:text-text transition-colors">律師團隊</a>
-      <a href="#cases" class="text-xs text-muted hover:text-text transition-colors">成功案例</a>
-      <a href="#contact" class="text-xs text-muted hover:text-text transition-colors">聯繫我們</a>
-      <button onclick="handleAction('預約諮詢')" class="px-5 py-2 border border-gold text-gold text-xs hover:bg-gold hover:text-dark transition-all">
-        預約諮詢
+      <a href="#practice" class="font-body text-sm text-warm-gray-light hover:text-leather transition-colors">Practice Areas</a>
+      <a href="#attorneys" class="font-body text-sm text-warm-gray-light hover:text-leather transition-colors">Attorneys</a>
+      <a href="#results" class="font-body text-sm text-warm-gray-light hover:text-leather transition-colors">Results</a>
+      <a href="#contact" class="font-body text-sm text-warm-gray-light hover:text-leather transition-colors">Contact</a>
+      <button onclick="handleAction('Free Consultation')" class="px-5 py-2 bg-gold text-white text-sm font-body font-semibold hover:bg-gold-light transition-colors cursor-pointer">
+        Free Consultation
       </button>
     </div>
-    <button onclick="toggleMenu()" class="md:hidden text-muted">
-      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M4 8h16M4 16h16"/></svg>
+    <button onclick="toggleMobileNav()" class="md:hidden text-warm-gray">
+      <svg id="navIcon" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
     </button>
   </div>
-  <div id="mobileMenu" class="hidden md:hidden bg-dark border-t border-border">
-    <div class="px-6 py-4 space-y-3">
-      <a href="#services" onclick="toggleMenu()" class="block text-sm text-muted">業務領域</a>
-      <a href="#team" onclick="toggleMenu()" class="block text-sm text-muted">律師團隊</a>
-      <a href="#cases" onclick="toggleMenu()" class="block text-sm text-muted">成功案例</a>
-      <a href="#contact" onclick="toggleMenu()" class="block text-sm text-muted">聯繫我們</a>
+  <div id="mobileNav" class="nav-closed md:hidden bg-parchment border-t border-warm-border">
+    <div class="max-w-document mx-auto px-6 py-4 space-y-3">
+      <a href="#practice" onclick="toggleMobileNav()" class="block text-sm text-warm-gray hover:text-leather">Practice Areas</a>
+      <a href="#attorneys" onclick="toggleMobileNav()" class="block text-sm text-warm-gray hover:text-leather">Attorneys</a>
+      <a href="#results" onclick="toggleMobileNav()" class="block text-sm text-warm-gray hover:text-leather">Results</a>
+      <a href="#contact" onclick="toggleMobileNav()" class="block text-sm text-warm-gray hover:text-leather">Contact</a>
+      <button onclick="handleAction('Free Consultation'); toggleMobileNav();" class="w-full py-2.5 bg-gold text-white text-sm font-semibold cursor-pointer">Free Consultation</button>
     </div>
   </div>
 </nav>
 
 <!-- Hero -->
-<section class="pt-16 min-h-[85vh] flex items-center relative overflow-hidden">
-  <div class="absolute inset-0 bg-gradient-to-b from-dark via-surface/50 to-dark"></div>
-  <div class="absolute top-0 right-0 w-1/2 h-full bg-gradient-to-l from-gold/5 to-transparent"></div>
-  <div class="relative z-10 max-w-6xl mx-auto px-6 py-20 w-full">
-    <div class="max-w-2xl">
-      <div class="flex items-center gap-3 mb-8 fade-up">
-        <div class="w-12 h-px bg-gold"></div>
-        <span class="text-xs text-gold tracking-[0.2em] uppercase">Since 2005</span>
-      </div>
-      <h1 class="font-display text-4xl md:text-6xl font-semibold leading-tight mb-6 fade-up">
-        以法律守護<br>您的權益與<span class="text-gold italic">未來</span>
-      </h1>
-      <p class="text-sm text-muted max-w-lg leading-relaxed mb-10 fade-up">
-        正衡國際法律事務所，匯集 12 位資深律師，專精企業法務、智慧財產、跨境訴訟與家事法律。
-        近 20 年來，我們以嚴謹的態度和專業的能力，為客戶提供最可靠的法律服務。
-      </p>
-      <div class="flex items-center gap-4 fade-up">
-        <button onclick="handleAction('預約免費諮詢')" class="px-6 py-3 bg-gold text-dark text-sm font-medium hover:bg-gold-light transition-colors">
-          預約免費諮詢
-        </button>
-        <a href="#services" class="text-sm text-muted hover:text-text transition-colors border-b border-muted pb-0.5">
-          了解服務 →
-        </a>
-      </div>
+<section class="pt-24 pb-16 relative z-10">
+  <div class="max-w-document mx-auto px-6">
 
-      <!-- Stats -->
-      <div class="grid grid-cols-3 gap-8 mt-16 pt-8 border-t border-border fade-up">
+    <!-- Justice Scale SVG -->
+    <div class="flex justify-center mb-8 reveal">
+      <svg class="scale-balance" width="80" height="72" viewBox="0 0 80 72" fill="none" stroke="#b8860b" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round">
+        <!-- Pillar -->
+        <line x1="40" y1="18" x2="40" y2="62"/>
+        <!-- Base -->
+        <line x1="28" y1="62" x2="52" y2="62"/>
+        <line x1="32" y1="65" x2="48" y2="65"/>
+        <!-- Crown circle -->
+        <circle cx="40" cy="14" r="4" fill="none"/>
+        <!-- Beam -->
+        <line x1="10" y1="18" x2="70" y2="18" stroke-width="1.5"/>
+        <!-- Left chain -->
+        <line x1="10" y1="18" x2="6" y2="36"/>
+        <line x1="10" y1="18" x2="14" y2="36"/>
+        <!-- Left pan -->
+        <path d="M2 36 Q6 36 10 36 Q14 36 18 36" stroke-width="1"/>
+        <path d="M2 36 C2 42 10 44 10 44 C10 44 18 42 18 36" fill="rgba(184,134,11,0.08)"/>
+        <!-- Right chain -->
+        <line x1="70" y1="18" x2="66" y2="36"/>
+        <line x1="70" y1="18" x2="74" y2="36"/>
+        <!-- Right pan -->
+        <path d="M62 36 Q66 36 70 36 Q74 36 78 36" stroke-width="1"/>
+        <path d="M62 36 C62 42 70 44 70 44 C70 44 78 42 78 36" fill="rgba(184,134,11,0.08)"/>
+      </svg>
+    </div>
+
+    <hr class="gold-rule w-24 mb-8 reveal">
+
+    <h1 class="font-display text-4xl md:text-5xl font-semibold text-charcoal text-center leading-tight tracking-wide reveal">
+      Justice. Integrity. Results.
+    </h1>
+
+    <hr class="gold-rule w-24 mt-8 mb-8 reveal">
+
+    <p class="font-body text-base md:text-lg text-warm-gray text-center leading-relaxed max-w-lg mx-auto reveal">
+      For over 35 years, Sterling & Associates has provided distinguished legal counsel to individuals and businesses. Our commitment to principled advocacy has earned the trust of clients across the nation.
+    </p>
+
+    <div class="flex justify-center mt-8 reveal">
+      <button onclick="handleAction('Schedule Free Consultation')" class="px-8 py-3 bg-gold text-white font-body font-semibold text-sm hover:bg-gold-light transition-colors cursor-pointer tracking-wide">
+        Schedule a Free Consultation
+      </button>
+    </div>
+  </div>
+</section>
+
+<hr class="gold-rule w-full max-w-document mx-auto">
+
+<!-- Practice Areas -->
+<section id="practice" class="py-16 relative z-10">
+  <div class="max-w-document mx-auto px-6">
+    <p class="font-body text-xs text-gold tracking-[0.2em] uppercase text-center mb-2 reveal">Practice Areas</p>
+    <h2 class="font-display text-3xl font-semibold text-charcoal text-center mb-10 reveal">Areas of Expertise</h2>
+
+    <div class="space-y-0 reveal">
+      <!-- Corporate Law -->
+      <div class="practice-row py-5 px-4 border-b border-warm-border flex items-start justify-between gap-4" onclick="handleAction('Corporate Law')">
         <div>
-          <div class="text-3xl font-display font-bold text-gold">2,400+</div>
-          <div class="text-xs text-dim mt-1">處理案件</div>
+          <h3 class="font-display text-xl font-semibold text-leather mb-1">Corporate Law</h3>
+          <p class="font-body text-sm text-warm-gray-light leading-relaxed">Mergers & acquisitions, corporate governance, securities compliance, and business formation for enterprises of all sizes.</p>
+        </div>
+        <span class="practice-arrow text-gold mt-1 flex-shrink-0">&rarr;</span>
+      </div>
+
+      <!-- Litigation -->
+      <div class="practice-row py-5 px-4 border-b border-warm-border flex items-start justify-between gap-4" onclick="handleAction('Litigation')">
+        <div>
+          <h3 class="font-display text-xl font-semibold text-leather mb-1">Litigation</h3>
+          <p class="font-body text-sm text-warm-gray-light leading-relaxed">Complex commercial disputes, class actions, appellate advocacy, and alternative dispute resolution with a proven track record.</p>
+        </div>
+        <span class="practice-arrow text-gold mt-1 flex-shrink-0">&rarr;</span>
+      </div>
+
+      <!-- Real Estate -->
+      <div class="practice-row py-5 px-4 border-b border-warm-border flex items-start justify-between gap-4" onclick="handleAction('Real Estate')">
+        <div>
+          <h3 class="font-display text-xl font-semibold text-leather mb-1">Real Estate</h3>
+          <p class="font-body text-sm text-warm-gray-light leading-relaxed">Commercial and residential transactions, zoning and land use, construction law, and real estate investment structuring.</p>
+        </div>
+        <span class="practice-arrow text-gold mt-1 flex-shrink-0">&rarr;</span>
+      </div>
+
+      <!-- Estate Planning -->
+      <div class="practice-row py-5 px-4 border-b border-warm-border flex items-start justify-between gap-4" onclick="handleAction('Estate Planning')">
+        <div>
+          <h3 class="font-display text-xl font-semibold text-leather mb-1">Estate Planning</h3>
+          <p class="font-body text-sm text-warm-gray-light leading-relaxed">Wills and trusts, probate administration, wealth preservation strategies, and multigenerational asset protection planning.</p>
+        </div>
+        <span class="practice-arrow text-gold mt-1 flex-shrink-0">&rarr;</span>
+      </div>
+
+      <!-- Criminal Defense -->
+      <div class="practice-row py-5 px-4 border-b border-warm-border flex items-start justify-between gap-4" onclick="handleAction('Criminal Defense')">
+        <div>
+          <h3 class="font-display text-xl font-semibold text-leather mb-1">Criminal Defense</h3>
+          <p class="font-body text-sm text-warm-gray-light leading-relaxed">White-collar crime, federal investigations, DUI defense, and aggressive courtroom advocacy to protect your rights and freedom.</p>
+        </div>
+        <span class="practice-arrow text-gold mt-1 flex-shrink-0">&rarr;</span>
+      </div>
+    </div>
+  </div>
+</section>
+
+<hr class="gold-rule w-full max-w-document mx-auto">
+
+<!-- Results -->
+<section id="results" class="py-16 relative z-10">
+  <div class="max-w-document mx-auto px-6 text-center">
+    <p class="font-body text-xs text-gold tracking-[0.2em] uppercase mb-2 reveal">Track Record</p>
+    <h2 class="font-display text-3xl font-semibold text-charcoal mb-12 reveal">Results That Speak</h2>
+
+    <div class="space-y-10 reveal">
+      <div>
+        <div class="font-display text-5xl md:text-6xl font-bold text-leather">$150M+</div>
+        <div class="font-body text-sm text-warm-gray-light mt-2 tracking-wide uppercase">Recovered for Clients</div>
+        <hr class="gold-rule w-16 mt-4">
+      </div>
+
+      <div>
+        <div class="font-display text-5xl md:text-6xl font-bold text-leather">2,000+</div>
+        <div class="font-body text-sm text-warm-gray-light mt-2 tracking-wide uppercase">Cases Won</div>
+        <hr class="gold-rule w-16 mt-4">
+      </div>
+
+      <div>
+        <div class="font-display text-5xl md:text-6xl font-bold text-leather">35+</div>
+        <div class="font-body text-sm text-warm-gray-light mt-2 tracking-wide uppercase">Years of Experience</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<hr class="gold-rule w-full max-w-document mx-auto">
+
+<!-- Attorneys -->
+<section id="attorneys" class="py-16 relative z-10">
+  <div class="max-w-document mx-auto px-6">
+    <p class="font-body text-xs text-gold tracking-[0.2em] uppercase text-center mb-2 reveal">Our Team</p>
+    <h2 class="font-display text-3xl font-semibold text-charcoal text-center mb-10 reveal">Meet Our Attorneys</h2>
+
+    <div class="space-y-8">
+      <!-- Attorney 1 -->
+      <div class="flex items-start gap-6 reveal">
+        <div class="w-24 h-28 flex-shrink-0 bg-gradient-to-b from-leather/10 to-leather/5 border border-warm-border flex items-center justify-center">
+          <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="#44240e" stroke-width="1" opacity="0.4"><circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 4-6 8-6s8 2 8 6"/></svg>
         </div>
         <div>
-          <div class="text-3xl font-display font-bold text-gold">94%</div>
-          <div class="text-xs text-dim mt-1">勝訴率</div>
+          <h3 class="font-display text-xl font-semibold text-charcoal">Robert J. Sterling</h3>
+          <p class="font-body text-sm text-gold font-medium mb-2">Founding Partner</p>
+          <p class="font-body text-sm text-warm-gray-light leading-relaxed mb-1">Harvard Law School, J.D. | Georgetown University, B.A.</p>
+          <p class="font-body text-xs text-warm-gray-light">Admitted: New York State Bar, U.S. District Court (SDNY), U.S. Supreme Court</p>
+        </div>
+      </div>
+
+      <hr class="gold-rule w-12">
+
+      <!-- Attorney 2 -->
+      <div class="flex items-start gap-6 reveal">
+        <div class="w-24 h-28 flex-shrink-0 bg-gradient-to-b from-leather/10 to-leather/5 border border-warm-border flex items-center justify-center">
+          <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="#44240e" stroke-width="1" opacity="0.4"><circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 4-6 8-6s8 2 8 6"/></svg>
         </div>
         <div>
-          <div class="text-3xl font-display font-bold text-gold">19</div>
-          <div class="text-xs text-dim mt-1">年執業經驗</div>
+          <h3 class="font-display text-xl font-semibold text-charcoal">Catherine A. Monroe</h3>
+          <p class="font-body text-sm text-gold font-medium mb-2">Senior Partner, Litigation</p>
+          <p class="font-body text-sm text-warm-gray-light leading-relaxed mb-1">Yale Law School, J.D. | University of Virginia, B.A.</p>
+          <p class="font-body text-xs text-warm-gray-light">Admitted: New York State Bar, Connecticut Bar, U.S. Court of Appeals (2nd Circuit)</p>
+        </div>
+      </div>
+
+      <hr class="gold-rule w-12">
+
+      <!-- Attorney 3 -->
+      <div class="flex items-start gap-6 reveal">
+        <div class="w-24 h-28 flex-shrink-0 bg-gradient-to-b from-leather/10 to-leather/5 border border-warm-border flex items-center justify-center">
+          <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="#44240e" stroke-width="1" opacity="0.4"><circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 4-6 8-6s8 2 8 6"/></svg>
+        </div>
+        <div>
+          <h3 class="font-display text-xl font-semibold text-charcoal">William D. Chen</h3>
+          <p class="font-body text-sm text-gold font-medium mb-2">Partner, Corporate & Real Estate</p>
+          <p class="font-body text-sm text-warm-gray-light leading-relaxed mb-1">Columbia Law School, J.D. | NYU Stern, M.B.A.</p>
+          <p class="font-body text-xs text-warm-gray-light">Admitted: New York State Bar, New Jersey Bar, U.S. Tax Court</p>
         </div>
       </div>
     </div>
   </div>
 </section>
 
-<!-- Services -->
-<section id="services" class="py-20 px-6">
-  <div class="max-w-6xl mx-auto">
-    <div class="text-center mb-12 fade-up">
-      <div class="flex items-center justify-center gap-3 mb-3">
-        <div class="w-8 h-px bg-gold"></div>
-        <span class="text-xs text-gold tracking-[0.2em] uppercase">Practice Areas</span>
-        <div class="w-8 h-px bg-gold"></div>
-      </div>
-      <h2 class="font-display text-3xl font-semibold">業務領域</h2>
-    </div>
+<hr class="gold-rule w-full max-w-document mx-auto">
 
-    <div class="grid md:grid-cols-3 gap-4">
-      <div class="service-card border border-border rounded-lg p-6 fade-up" onclick="handleAction('企業法務')">
-        <div class="s-icon text-dim mb-4">
-          <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 21h18M3 10h18M5 6l7-3 7 3M4 10v11M20 10v11M8 14v3M12 14v3M16 14v3"/></svg>
-        </div>
-        <h3 class="font-display text-lg font-semibold mb-2">企業法務</h3>
-        <p class="text-xs text-muted leading-relaxed">公司設立、股東協議、合併收購、合規審查、上市輔導。為企業的每一個成長階段提供法律護航。</p>
-      </div>
-
-      <div class="service-card border border-border rounded-lg p-6 fade-up" onclick="handleAction('智慧財產')">
-        <div class="s-icon text-dim mb-4">
-          <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>
-        </div>
-        <h3 class="font-display text-lg font-semibold mb-2">智慧財產</h3>
-        <p class="text-xs text-muted leading-relaxed">專利申請、商標保護、著作權、營業秘密、技術授權。守護您的創新成果與品牌價值。</p>
-      </div>
-
-      <div class="service-card border border-border rounded-lg p-6 fade-up" onclick="handleAction('跨境訴訟')">
-        <div class="s-icon text-dim mb-4">
-          <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="10"/><path d="M2 12h20"/><path d="M12 2a15.3 15.3 0 014 10 15.3 15.3 0 01-4 10 15.3 15.3 0 01-4-10 15.3 15.3 0 014-10z"/></svg>
-        </div>
-        <h3 class="font-display text-lg font-semibold mb-2">跨境訴訟</h3>
-        <p class="text-xs text-muted leading-relaxed">國際商事仲裁、跨境爭端解決、外國判決承認與執行。與全球 15 國律師事務所合作。</p>
-      </div>
-
-      <div class="service-card border border-border rounded-lg p-6 fade-up" onclick="handleAction('家事法律')">
-        <div class="s-icon text-dim mb-4">
-          <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M20.84 4.61a5.5 5.5 0 00-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 00-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 000-7.78z"/></svg>
-        </div>
-        <h3 class="font-display text-lg font-semibold mb-2">家事法律</h3>
-        <p class="text-xs text-muted leading-relaxed">離婚協議、監護權、遺產繼承、財產分配。以同理心與專業，陪伴您度過人生轉折。</p>
-      </div>
-
-      <div class="service-card border border-border rounded-lg p-6 fade-up" onclick="handleAction('刑事辯護')">
-        <div class="s-icon text-dim mb-4">
-          <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
-        </div>
-        <h3 class="font-display text-lg font-semibold mb-2">刑事辯護</h3>
-        <p class="text-xs text-muted leading-relaxed">經濟犯罪、白領犯罪、毒品案件、交通事故。全力捍衛當事人的合法權益。</p>
-      </div>
-
-      <div class="service-card border border-border rounded-lg p-6 fade-up" onclick="handleAction('不動產法律')">
-        <div class="s-icon text-dim mb-4">
-          <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z"/><path d="M9 22V12h6v10"/></svg>
-        </div>
-        <h3 class="font-display text-lg font-semibold mb-2">不動產法律</h3>
-        <p class="text-xs text-muted leading-relaxed">買賣糾紛、土地開發、都更法律、租賃爭議。精通不動產法令的專業團隊。</p>
-      </div>
+<!-- Testimonial -->
+<section class="py-16 relative z-10">
+  <div class="max-w-document mx-auto px-6 text-center reveal">
+    <div class="quote-mark leading-none mb-[-1rem]">&ldquo;</div>
+    <blockquote class="font-display text-xl md:text-2xl italic text-charcoal leading-relaxed max-w-lg mx-auto">
+      Sterling & Associates fought for our company when everything was at stake. Their preparation was meticulous, their counsel was unwavering, and the result exceeded every expectation. They are not merely attorneys&mdash;they are advocates in the truest sense.
+    </blockquote>
+    <div class="mt-6">
+      <p class="font-body text-sm font-semibold text-leather">James Hartford</p>
+      <p class="font-body text-xs text-warm-gray-light">CEO, Hartford Industries &mdash; $42M Commercial Litigation</p>
     </div>
   </div>
 </section>
 
-<!-- Team -->
-<section id="team" class="py-20 px-6 bg-surface">
-  <div class="max-w-6xl mx-auto">
-    <div class="text-center mb-12 fade-up">
-      <div class="flex items-center justify-center gap-3 mb-3">
-        <div class="w-8 h-px bg-gold"></div>
-        <span class="text-xs text-gold tracking-[0.2em] uppercase">Our Team</span>
-        <div class="w-8 h-px bg-gold"></div>
-      </div>
-      <h2 class="font-display text-3xl font-semibold">律師團隊</h2>
-    </div>
-
-    <div class="grid grid-cols-2 md:grid-cols-4 gap-5">
-      <div class="team-card fade-up" onclick="handleAction('周正衡律師')">
-        <div class="aspect-[3/4] bg-gradient-to-b from-card to-dark rounded-lg relative overflow-hidden mb-3">
-          <div class="absolute inset-0 flex items-center justify-center"><span class="text-5xl opacity-15">👨‍⚖️</span></div>
-          <div class="team-overlay absolute inset-0 bg-gold/90 flex items-center justify-center rounded-lg">
-            <div class="text-center text-dark">
-              <div class="text-xs font-medium mb-1">台大法律 / 哈佛法學碩士</div>
-              <div class="text-xs">前台北地院法官</div>
-            </div>
-          </div>
-        </div>
-        <h3 class="font-display text-base font-semibold">周正衡</h3>
-        <p class="text-xs text-gold">所長 / 主持律師</p>
-        <p class="text-[10px] text-dim mt-0.5">企業法務・跨境訴訟</p>
-      </div>
-
-      <div class="team-card fade-up" onclick="handleAction('陳曉薇律師')">
-        <div class="aspect-[3/4] bg-gradient-to-b from-card to-dark rounded-lg relative overflow-hidden mb-3">
-          <div class="absolute inset-0 flex items-center justify-center"><span class="text-5xl opacity-15">👩‍⚖️</span></div>
-          <div class="team-overlay absolute inset-0 bg-gold/90 flex items-center justify-center rounded-lg">
-            <div class="text-center text-dark">
-              <div class="text-xs font-medium mb-1">政大法律 / 倫敦大學碩士</div>
-              <div class="text-xs">智財專利訴訟 300+ 件</div>
-            </div>
-          </div>
-        </div>
-        <h3 class="font-display text-base font-semibold">陳曉薇</h3>
-        <p class="text-xs text-gold">資深合夥人</p>
-        <p class="text-[10px] text-dim mt-0.5">智慧財產・技術授權</p>
-      </div>
-
-      <div class="team-card fade-up" onclick="handleAction('林哲瀚律師')">
-        <div class="aspect-[3/4] bg-gradient-to-b from-card to-dark rounded-lg relative overflow-hidden mb-3">
-          <div class="absolute inset-0 flex items-center justify-center"><span class="text-5xl opacity-15">👨‍💼</span></div>
-          <div class="team-overlay absolute inset-0 bg-gold/90 flex items-center justify-center rounded-lg">
-            <div class="text-center text-dark">
-              <div class="text-xs font-medium mb-1">成大法律 / 司法官特考</div>
-              <div class="text-xs">前檢察官 12 年資歷</div>
-            </div>
-          </div>
-        </div>
-        <h3 class="font-display text-base font-semibold">林哲瀚</h3>
-        <p class="text-xs text-gold">合夥人</p>
-        <p class="text-[10px] text-dim mt-0.5">刑事辯護・白領犯罪</p>
-      </div>
-
-      <div class="team-card fade-up" onclick="handleAction('許雅筑律師')">
-        <div class="aspect-[3/4] bg-gradient-to-b from-card to-dark rounded-lg relative overflow-hidden mb-3">
-          <div class="absolute inset-0 flex items-center justify-center"><span class="text-5xl opacity-15">👩‍💼</span></div>
-          <div class="team-overlay absolute inset-0 bg-gold/90 flex items-center justify-center rounded-lg">
-            <div class="text-center text-dark">
-              <div class="text-xs font-medium mb-1">北大法律 / 家事調解委員</div>
-              <div class="text-xs">家事案件處理 500+ 件</div>
-            </div>
-          </div>
-        </div>
-        <h3 class="font-display text-base font-semibold">許雅筑</h3>
-        <p class="text-xs text-gold">合夥人</p>
-        <p class="text-[10px] text-dim mt-0.5">家事法律・遺產繼承</p>
-      </div>
-    </div>
-  </div>
-</section>
-
-<!-- Cases -->
-<section id="cases" class="py-20 px-6">
-  <div class="max-w-6xl mx-auto">
-    <div class="text-center mb-12 fade-up">
-      <div class="flex items-center justify-center gap-3 mb-3">
-        <div class="w-8 h-px bg-gold"></div>
-        <span class="text-xs text-gold tracking-[0.2em] uppercase">Case Studies</span>
-        <div class="w-8 h-px bg-gold"></div>
-      </div>
-      <h2 class="font-display text-3xl font-semibold">成功案例</h2>
-    </div>
-
-    <div class="space-y-4">
-      <div class="border border-border rounded-lg p-6 hover:border-gold/30 transition-all cursor-pointer fade-up" onclick="handleAction('案例：跨國專利侵權')">
-        <div class="flex items-start justify-between gap-4">
-          <div>
-            <div class="flex items-center gap-2 mb-2">
-              <span class="px-2 py-0.5 bg-gold-soft text-gold text-[10px] rounded">智慧財產</span>
-              <span class="px-2 py-0.5 bg-gold-soft text-gold text-[10px] rounded">跨境訴訟</span>
-            </div>
-            <h3 class="font-display text-lg font-semibold mb-2">跨國科技公司專利侵權訴訟</h3>
-            <p class="text-xs text-muted leading-relaxed">代理台灣半導體公司對抗國際大廠的專利侵權指控，涉及金額達 NT$ 15 億。經過兩年半的訴訟，成功為客戶取得有利和解，獲得反授權。</p>
-          </div>
-          <div class="text-right flex-shrink-0 hidden md:block">
-            <div class="text-2xl font-display font-bold text-gold">勝訴</div>
-            <div class="text-[10px] text-dim">2024</div>
-          </div>
-        </div>
-      </div>
-
-      <div class="border border-border rounded-lg p-6 hover:border-gold/30 transition-all cursor-pointer fade-up" onclick="handleAction('案例：上市公司合併')">
-        <div class="flex items-start justify-between gap-4">
-          <div>
-            <div class="flex items-center gap-2 mb-2">
-              <span class="px-2 py-0.5 bg-gold-soft text-gold text-[10px] rounded">企業法務</span>
-            </div>
-            <h3 class="font-display text-lg font-semibold mb-2">上市公司跨境合併案</h3>
-            <p class="text-xs text-muted leading-relaxed">協助台灣上市電子公司完成對東南亞子公司的合併重組，涉及四國法律體系。在 8 個月內完成所有法律程序，無任何合規問題。</p>
-          </div>
-          <div class="text-right flex-shrink-0 hidden md:block">
-            <div class="text-2xl font-display font-bold text-gold">完成</div>
-            <div class="text-[10px] text-dim">2025</div>
-          </div>
-        </div>
-      </div>
-
-      <div class="border border-border rounded-lg p-6 hover:border-gold/30 transition-all cursor-pointer fade-up" onclick="handleAction('案例：遺產繼承糾紛')">
-        <div class="flex items-start justify-between gap-4">
-          <div>
-            <div class="flex items-center gap-2 mb-2">
-              <span class="px-2 py-0.5 bg-gold-soft text-gold text-[10px] rounded">家事法律</span>
-            </div>
-            <h3 class="font-display text-lg font-semibold mb-2">高額遺產繼承糾紛</h3>
-            <p class="text-xs text-muted leading-relaxed">代理委託人處理涉及 NT$ 8 億遺產的繼承爭議。透過調解與訴訟並行策略，在保護委託人權益的同時，維護了家族關係。</p>
-          </div>
-          <div class="text-right flex-shrink-0 hidden md:block">
-            <div class="text-2xl font-display font-bold text-gold">和解</div>
-            <div class="text-[10px] text-dim">2025</div>
-          </div>
-        </div>
-      </div>
-    </div>
-  </div>
-</section>
-
-<!-- Testimonials -->
-<section class="py-20 px-6 bg-surface">
-  <div class="max-w-4xl mx-auto">
-    <div class="text-center mb-12 fade-up">
-      <h2 class="font-display text-3xl font-semibold">客戶推薦</h2>
-    </div>
-    <div class="space-y-6">
-      <div class="border-l-2 border-gold pl-6 fade-up">
-        <p class="font-display text-lg italic leading-relaxed mb-4 text-text/90">
-          "周律師和他的團隊在我們面臨專利訴訟時展現了非凡的專業能力。他們不僅精通法律，更重要的是真正理解科技產業。這場勝利對公司的意義，遠超金錢所能衡量。"
-        </p>
-        <div class="text-xs text-muted">張總經理 · 某半導體公司</div>
-      </div>
-      <div class="border-l-2 border-gold/50 pl-6 fade-up">
-        <p class="font-display text-lg italic leading-relaxed mb-4 text-text/90">
-          "在人生最困難的時期，許律師不只提供了專業的法律建議，更給予了情感上的支持。她讓我相信法律可以是溫暖的。"
-        </p>
-        <div class="text-xs text-muted">王女士 · 家事案件委託人</div>
-      </div>
-    </div>
-  </div>
-</section>
+<hr class="gold-rule w-full max-w-document mx-auto">
 
 <!-- Contact -->
-<section id="contact" class="py-20 px-6">
-  <div class="max-w-5xl mx-auto grid md:grid-cols-2 gap-12">
-    <div class="fade-up">
-      <div class="flex items-center gap-3 mb-3">
-        <div class="w-8 h-px bg-gold"></div>
-        <span class="text-xs text-gold tracking-[0.2em] uppercase">Contact</span>
-      </div>
-      <h2 class="font-display text-3xl font-semibold mb-6">預約諮詢</h2>
-      <p class="text-sm text-muted leading-relaxed mb-8">
-        首次法律諮詢免費。請留下您的基本資訊與問題概述，我們將指派最適合的律師為您服務。
-      </p>
-      <div class="space-y-4">
-        <div class="flex items-center gap-3">
-          <div class="w-10 h-10 bg-gold-soft rounded flex items-center justify-center">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#b8976a" stroke-width="1.5"><path d="M22 16.92v3a2 2 0 01-2.18 2 19.79 19.79 0 01-8.63-3.07 19.5 19.5 0 01-6-6 19.79 19.79 0 01-3.07-8.67A2 2 0 014.11 2h3a2 2 0 012 1.72c.127.96.361 1.903.7 2.81a2 2 0 01-.45 2.11L8.09 9.91a16 16 0 006 6l1.27-1.27a2 2 0 012.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0122 16.92z"/></svg>
-          </div>
-          <div>
-            <div class="text-[10px] text-dim">電話</div>
-            <div class="text-sm">02-2700-6800</div>
-          </div>
-        </div>
-        <div class="flex items-center gap-3">
-          <div class="w-10 h-10 bg-gold-soft rounded flex items-center justify-center">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#b8976a" stroke-width="1.5"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><path d="M22 6l-10 7L2 6"/></svg>
-          </div>
-          <div>
-            <div class="text-[10px] text-dim">Email</div>
-            <div class="text-sm">contact@justus-law.tw</div>
-          </div>
-        </div>
-        <div class="flex items-center gap-3">
-          <div class="w-10 h-10 bg-gold-soft rounded flex items-center justify-center">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#b8976a" stroke-width="1.5"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
-          </div>
-          <div>
-            <div class="text-[10px] text-dim">營業時間</div>
-            <div class="text-sm">週一至週五 09:00-18:00</div>
-          </div>
-        </div>
-        <div class="flex items-center gap-3">
-          <div class="w-10 h-10 bg-gold-soft rounded flex items-center justify-center">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="#b8976a"><path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z"/></svg>
-          </div>
-          <div>
-            <div class="text-[10px] text-dim">地址</div>
-            <div class="text-sm">台北市中正區重慶南路一段 120 號 18 樓</div>
-          </div>
-        </div>
-      </div>
-    </div>
+<section id="contact" class="py-16 relative z-10">
+  <div class="max-w-document mx-auto px-6">
+    <p class="font-body text-xs text-gold tracking-[0.2em] uppercase text-center mb-2 reveal">Contact</p>
+    <h2 class="font-display text-3xl font-semibold text-charcoal text-center mb-3 reveal">Request a Consultation</h2>
+    <p class="font-body text-sm text-warm-gray-light text-center mb-10 reveal">Your initial consultation is complimentary and confidential.</p>
 
-    <!-- Form -->
-    <div class="bg-card border border-border rounded-lg p-6 fade-up">
-      <h3 class="font-display text-lg font-semibold mb-4">線上預約</h3>
-      <div class="space-y-4">
-        <div class="grid grid-cols-2 gap-3">
-          <div>
-            <label class="text-[10px] text-dim mb-1 block">姓名 *</label>
-            <input type="text" placeholder="您的姓名" class="w-full px-3 py-2.5 bg-dark border border-border rounded text-sm text-text focus:outline-none focus:border-gold/50">
-          </div>
-          <div>
-            <label class="text-[10px] text-dim mb-1 block">電話 *</label>
-            <input type="tel" placeholder="聯繫電話" class="w-full px-3 py-2.5 bg-dark border border-border rounded text-sm text-text focus:outline-none focus:border-gold/50">
-          </div>
-        </div>
-        <div>
-          <label class="text-[10px] text-dim mb-1 block">Email</label>
-          <input type="email" placeholder="your@email.com" class="w-full px-3 py-2.5 bg-dark border border-border rounded text-sm text-text focus:outline-none focus:border-gold/50">
-        </div>
-        <div>
-          <label class="text-[10px] text-dim mb-1 block">諮詢領域</label>
-          <select class="w-full px-3 py-2.5 bg-dark border border-border rounded text-sm text-muted focus:outline-none focus:border-gold/50">
-            <option>請選擇</option>
-            <option>企業法務</option>
-            <option>智慧財產</option>
-            <option>跨境訴訟</option>
-            <option>家事法律</option>
-            <option>刑事辯護</option>
-            <option>不動產法律</option>
-            <option>其他</option>
-          </select>
-        </div>
-        <div>
-          <label class="text-[10px] text-dim mb-1 block">問題概述</label>
-          <textarea rows="4" placeholder="請簡述您的法律問題..." class="w-full px-3 py-2.5 bg-dark border border-border rounded text-sm text-text resize-none focus:outline-none focus:border-gold/50"></textarea>
-        </div>
-        <button onclick="handleAction('送出預約')" class="w-full py-3 bg-gold text-dark text-sm font-semibold hover:bg-gold-light transition-colors">
-          送出預約
-        </button>
-        <p class="text-[10px] text-dim text-center">您的資訊受律師保密義務保護。</p>
+    <form id="contactForm" class="space-y-5 reveal" onsubmit="return validateForm(event)">
+      <div>
+        <label class="font-body text-xs font-semibold text-warm-gray uppercase tracking-wider block mb-1.5">Full Name <span class="text-gold">*</span></label>
+        <input id="fname" type="text" placeholder="Your full name" class="form-field w-full px-4 py-3 bg-white border border-warm-border font-body text-sm text-charcoal placeholder-warm-gray-light transition-colors">
+        <p id="fnameError" class="text-xs text-red-600 mt-1 hidden">Please enter your name.</p>
       </div>
-    </div>
+
+      <div>
+        <label class="font-body text-xs font-semibold text-warm-gray uppercase tracking-wider block mb-1.5">Email Address <span class="text-gold">*</span></label>
+        <input id="femail" type="email" placeholder="your@email.com" class="form-field w-full px-4 py-3 bg-white border border-warm-border font-body text-sm text-charcoal placeholder-warm-gray-light transition-colors">
+        <p id="femailError" class="text-xs text-red-600 mt-1 hidden">Please enter a valid email address.</p>
+      </div>
+
+      <div>
+        <label class="font-body text-xs font-semibold text-warm-gray uppercase tracking-wider block mb-1.5">Case Type</label>
+        <select id="fcasetype" class="form-field w-full px-4 py-3 bg-white border border-warm-border font-body text-sm text-charcoal transition-colors cursor-pointer">
+          <option value="">Select a practice area</option>
+          <option value="corporate">Corporate Law</option>
+          <option value="litigation">Litigation</option>
+          <option value="realestate">Real Estate</option>
+          <option value="estate">Estate Planning</option>
+          <option value="criminal">Criminal Defense</option>
+          <option value="other">Other</option>
+        </select>
+      </div>
+
+      <div>
+        <label class="font-body text-xs font-semibold text-warm-gray uppercase tracking-wider block mb-1.5">Message</label>
+        <textarea id="fmessage" rows="5" placeholder="Briefly describe your legal matter..." class="form-field w-full px-4 py-3 bg-white border border-warm-border font-body text-sm text-charcoal placeholder-warm-gray-light resize-none transition-colors"></textarea>
+      </div>
+
+      <button type="submit" class="w-full py-3.5 bg-gold text-white font-body font-semibold text-sm hover:bg-gold-light transition-colors cursor-pointer tracking-wide">
+        Request Consultation
+      </button>
+    </form>
   </div>
 </section>
 
+<hr class="gold-rule w-full max-w-document mx-auto">
+
 <!-- Footer -->
-<footer class="border-t border-border py-10 px-6">
-  <div class="max-w-6xl mx-auto flex flex-col md:flex-row justify-between items-center gap-4">
-    <div class="flex items-center gap-3">
-      <div class="flex items-center gap-0.5">
-        <div class="w-0.5 h-5 bg-gold"></div>
-        <div class="w-0.5 h-5 bg-gold/60 ml-0.5"></div>
-      </div>
-      <div>
-        <span class="text-xs font-medium">正衡國際法律事務所</span>
-        <span class="text-[9px] text-dim block">© 2005-2026 Justus & Partners. All rights reserved.</span>
-      </div>
+<footer class="py-12 relative z-10">
+  <div class="max-w-document mx-auto px-6">
+    <!-- Firm info -->
+    <div class="text-center mb-8">
+      <p class="font-display text-lg font-semibold text-leather tracking-wide mb-1">Sterling & Associates</p>
+      <p class="font-body text-xs text-warm-gray-light">Attorneys at Law</p>
     </div>
-    <div class="text-[10px] text-dim">律師公會會員字第 0012345 號</div>
+
+    <div class="text-center mb-8 space-y-1">
+      <p class="font-body text-sm text-warm-gray">One Liberty Plaza, Suite 3200</p>
+      <p class="font-body text-sm text-warm-gray">New York, NY 10006</p>
+      <p class="font-body text-sm text-warm-gray">(212) 555-0140 &middot; contact@sterlinglaw.com</p>
+    </div>
+
+    <hr class="gold-rule w-16 mb-8">
+
+    <!-- Legal disclaimer -->
+    <div class="text-center space-y-3">
+      <p class="font-body text-[11px] text-warm-gray-light leading-relaxed max-w-lg mx-auto">
+        Attorney Advertising. Prior results do not guarantee a similar outcome. This website is designed for general information only. The information presented at this site should not be construed as formal legal advice nor the formation of a lawyer/client relationship.
+      </p>
+      <p class="font-body text-[11px] text-warm-gray-light leading-relaxed max-w-lg mx-auto">
+        Sterling & Associates LLP is a New York limited liability partnership. Members of the firm are admitted to practice in New York, Connecticut, New Jersey, and various federal courts. Individual attorney qualifications available upon request.
+      </p>
+      <p class="font-body text-[11px] text-warm-gray-light mt-4">
+        &copy; 1991&ndash;2026 Sterling & Associates LLP. All rights reserved.
+      </p>
+    </div>
   </div>
 </footer>
 
 <!-- Toast -->
-<div id="toast" class="fixed bottom-6 left-1/2 -translate-x-1/2 bg-card border border-gold/20 text-text px-5 py-3 rounded text-xs shadow-lg opacity-0 pointer-events-none transition-all duration-300 translate-y-2 z-50 max-w-sm text-center"></div>
+<div id="toast" class="fixed bottom-6 left-1/2 -translate-x-1/2 bg-charcoal text-parchment px-6 py-3 text-sm font-body shadow-lg opacity-0 pointer-events-none transition-all duration-300 translate-y-2 z-50 max-w-sm text-center border border-gold/20"></div>
 
 <script>
-function toggleMenu() { document.getElementById('mobileMenu').classList.toggle('hidden'); }
-function showToast(msg) {
-  const t = document.getElementById('toast');
-  t.textContent = msg;
-  t.style.opacity = '1'; t.style.transform = 'translate(-50%, 0)';
-  setTimeout(() => { t.style.opacity = '0'; t.style.transform = 'translate(-50%, 8px)'; }, 2500);
+// Mobile nav toggle
+function toggleMobileNav() {
+  var nav = document.getElementById('mobileNav');
+  nav.classList.toggle('nav-open');
+  nav.classList.toggle('nav-closed');
 }
-function handleAction(a) { showToast(a + ' — 此為模板展示'); }
-const obs = new IntersectionObserver(entries => {
-  entries.forEach(e => { if (e.isIntersecting) e.target.classList.add('visible'); });
+
+// Toast
+function showToast(msg) {
+  var t = document.getElementById('toast');
+  t.textContent = msg;
+  t.style.opacity = '1';
+  t.style.transform = 'translate(-50%, 0)';
+  setTimeout(function() {
+    t.style.opacity = '0';
+    t.style.transform = 'translate(-50%, 8px)';
+  }, 2500);
+}
+
+function handleAction(action) {
+  showToast(action + ' \u2014 This is a template preview');
+}
+
+// Form validation
+function validateForm(e) {
+  e.preventDefault();
+  var valid = true;
+  var name = document.getElementById('fname');
+  var email = document.getElementById('femail');
+  var nameErr = document.getElementById('fnameError');
+  var emailErr = document.getElementById('femailError');
+
+  nameErr.classList.add('hidden');
+  emailErr.classList.add('hidden');
+
+  if (!name.value.trim()) {
+    nameErr.classList.remove('hidden');
+    valid = false;
+  }
+  if (!email.value.trim() || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.value)) {
+    emailErr.classList.remove('hidden');
+    valid = false;
+  }
+
+  if (valid) {
+    showToast('Consultation request submitted \u2014 Template preview');
+    document.getElementById('contactForm').reset();
+  }
+  return false;
+}
+
+// Scroll reveal
+var observer = new IntersectionObserver(function(entries) {
+  entries.forEach(function(entry) {
+    if (entry.isIntersecting) {
+      entry.target.classList.add('visible');
+    }
+  });
 }, { threshold: 0.1 });
-document.querySelectorAll('.fade-up').forEach(el => obs.observe(el));
+
+document.querySelectorAll('.reveal').forEach(function(el) {
+  observer.observe(el);
+});
 </script>
 
 </body>
 </html>
   $HTML$,
-  1
+  3
 )
-ON CONFLICT (template_id)
-DO UPDATE SET html_content = EXCLUDED.html_content, version = template_previews.version + 1, updated_at = NOW();
+ON CONFLICT (template_id) DO UPDATE SET
+  html_content = EXCLUDED.html_content,
+  version = EXCLUDED.version,
+  updated_at = NOW();

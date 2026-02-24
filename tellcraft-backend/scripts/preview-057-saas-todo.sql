@@ -6,597 +6,523 @@ VALUES (
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>專注待辦 FocusTodo</title>
+<title>TaskFlow</title>
 <script src="https://cdn.tailwindcss.com"></script>
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Karla:wght@400;500;600;700&display=swap" rel="stylesheet">
 <script>
-tailwind.config={theme:{extend:{colors:{primary:'#6366f1',primaryLight:'#818cf8',primaryDark:'#4f46e5',surface:'#f8fafc',sidebar:'#1e1b4b',sideHover:'#312e81',accent:'#f59e0b',success:'#10b981',danger:'#ef4444',muted:'#94a3b8'},fontFamily:{sans:['Inter','sans-serif']}}}}
+tailwind.config={theme:{extend:{colors:{orange:'#ea580c',orangeLight:'#fed7aa',orangeMuted:'#fdba74',paper:'#fdf8f3',paperDark:'#f5ebe0',charcoal:'#292524',charcoalMid:'#57534e',charcoalLight:'#a8a29e'},fontFamily:{karla:['Karla','sans-serif']}}}}
 </script>
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
-body{font-family:'Inter',sans-serif;background:#f8fafc;overflow:hidden;height:100vh}
-.sidebar-item{transition:all .2s}
-.sidebar-item:hover,.sidebar-item.active{background:rgba(255,255,255,.12);border-radius:8px}
-.task-item{transition:all .2s}
-.task-item:hover{box-shadow:0 2px 8px rgba(0,0,0,.06);transform:translateY(-1px)}
-.checkbox{width:20px;height:20px;border:2px solid #d1d5db;border-radius:6px;cursor:pointer;transition:all .2s;display:flex;align-items:center;justify-content:center;flex-shrink:0}
-.checkbox.checked{background:#6366f1;border-color:#6366f1}
-.checkbox.checked svg{display:block}
-.checkbox svg{display:none}
-.priority-high{color:#ef4444}
-.priority-medium{color:#f59e0b}
-.priority-low{color:#6366f1}
-.tag{font-size:11px;padding:2px 8px;border-radius:99px;font-weight:500}
-.progress-ring{transform:rotate(-90deg)}
-.fade-in{animation:fadeIn .3s ease}
-@keyframes fadeIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
-.modal-overlay{background:rgba(0,0,0,.4);backdrop-filter:blur(4px)}
-::-webkit-scrollbar{width:5px}
-::-webkit-scrollbar-thumb{background:#cbd5e1;border-radius:99px}
+body{font-family:'Karla',sans-serif;background:#fdf8f3;overflow:hidden;height:100vh}
+
+/* Checkbox */
+.task-check{width:22px;height:22px;border:2px solid #d6d3d1;border-radius:50%;cursor:pointer;display:flex;align-items:center;justify-content:center;flex-shrink:0;transition:all .3s cubic-bezier(.4,0,.2,1)}
+.task-check.done{border-color:#ea580c;background:#ea580c;transform:scale(1.1)}
+.task-check.done svg{opacity:1;stroke-dashoffset:0}
+.task-check svg{opacity:0;stroke-dashoffset:20;transition:all .35s cubic-bezier(.4,0,.2,1)}
+
+/* Strikethrough */
+.task-title{position:relative;display:inline;transition:color .3s}
+.task-title.struck{color:#a8a29e}
+.task-title.struck::after{content:'';position:absolute;left:0;top:50%;width:100%;height:1.5px;background:#a8a29e;animation:strikeAnim .3s ease forwards}
+@keyframes strikeAnim{from{width:0}to{width:100%}}
+
+/* Focus mode */
+.focusable{transition:filter .4s ease,opacity .4s ease}
+body.focus-active .focusable{filter:blur(3px);opacity:.25}
+body.focus-active .focusable.focus-target{filter:none;opacity:1;border-color:#ea580c;box-shadow:0 0 0 2px rgba(234,88,12,.15)}
+
+/* Priority tags */
+.pri-1{background:#fef2f2;color:#dc2626;border:1px solid #fecaca}
+.pri-2{background:#fff7ed;color:#ea580c;border:1px solid #fed7aa}
+.pri-3{background:#f5f5f4;color:#78716c;border:1px solid #e7e5e3}
+
+/* Filter tab */
+.filter-tab{cursor:pointer;transition:all .2s}
+.filter-tab.active{color:#ea580c;border-bottom:2px solid #ea580c}
+
+/* Completion arc animation */
+@keyframes arcFill{from{stroke-dashoffset:157}to{stroke-dashoffset:var(--arc-target)}}
+
+/* Scrollbar */
+::-webkit-scrollbar{width:4px}
+::-webkit-scrollbar-thumb{background:#d6d3d1;border-radius:99px}
+::-webkit-scrollbar-track{background:transparent}
+
+/* Subtask check */
+.sub-check{width:16px;height:16px;border:1.5px solid #d6d3d1;border-radius:4px;cursor:pointer;display:flex;align-items:center;justify-content:center;flex-shrink:0;transition:all .25s}
+.sub-check.done{border-color:#ea580c;background:#ea580c}
+.sub-check.done svg{opacity:1}
+.sub-check svg{opacity:0;transition:opacity .2s}
 </style>
 </head>
-<body>
-<div class="flex h-screen">
-  <!-- Sidebar -->
-  <aside class="w-60 bg-sidebar text-white flex flex-col flex-shrink-0">
-    <div class="p-5 flex items-center gap-3 border-b border-white/10">
-      <div class="w-9 h-9 rounded-xl bg-primary flex items-center justify-center">
-        <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path d="M9 12l2 2 4-4"/><circle cx="12" cy="12" r="10"/></svg>
-      </div>
-      <span class="font-bold text-lg tracking-tight">FocusTodo</span>
+<body class="font-karla text-charcoal">
+
+<!-- Top Bar -->
+<header class="h-14 bg-white border-b border-stone-200 flex items-center justify-between px-5 flex-shrink-0">
+  <div class="flex items-center gap-4">
+    <!-- Logo -->
+    <div class="flex items-center gap-2">
+      <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
+        <rect x="3" y="3" width="18" height="18" rx="4" fill="#ea580c"/>
+        <path d="M8 12.5l2.5 2.5 5.5-5.5" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+      <span class="font-bold text-lg tracking-tight">Task<span class="text-orange">Flow</span></span>
     </div>
 
-    <nav class="flex-1 p-3 space-y-1">
-      <div onclick="switchPage('inbox')" class="sidebar-item active flex items-center gap-3 px-3 py-2.5 cursor-pointer text-sm" data-page="inbox">
-        <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-        <span>收件匣</span>
-        <span class="ml-auto text-xs bg-white/20 px-2 py-0.5 rounded-full">12</span>
-      </div>
-      <div onclick="switchPage('today')" class="sidebar-item flex items-center gap-3 px-3 py-2.5 cursor-pointer text-sm" data-page="today">
-        <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
-        <span>今日任務</span>
-        <span class="ml-auto text-xs bg-accent/80 text-white px-2 py-0.5 rounded-full">5</span>
-      </div>
-      <div onclick="switchPage('projects')" class="sidebar-item flex items-center gap-3 px-3 py-2.5 cursor-pointer text-sm" data-page="projects">
-        <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z"/></svg>
-        <span>專案</span>
-      </div>
-      <div onclick="switchPage('stats')" class="sidebar-item flex items-center gap-3 px-3 py-2.5 cursor-pointer text-sm" data-page="stats">
-        <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
-        <span>統計</span>
-      </div>
-    </nav>
+    <!-- Completion Arc -->
+    <div class="flex items-center gap-2 ml-4">
+      <svg width="36" height="22" viewBox="0 0 36 22">
+        <path d="M 3 20 A 15 15 0 0 1 33 20" fill="none" stroke="#e7e5e3" stroke-width="3" stroke-linecap="round"/>
+        <path id="arcFill" d="M 3 20 A 15 15 0 0 1 33 20" fill="none" stroke="#ea580c" stroke-width="3" stroke-linecap="round"
+              stroke-dasharray="47.1" stroke-dashoffset="47.1" style="--arc-target:18.84;animation:arcFill 1.2s ease-out .5s forwards"/>
+      </svg>
+      <span class="text-xs text-charcoalMid font-medium">6/10</span>
+    </div>
+  </div>
 
-    <!-- Projects list -->
-    <div class="px-3 pb-3">
-      <div class="text-xs text-white/40 uppercase tracking-wider px-3 mb-2">專案</div>
-      <div class="space-y-1">
-        <div class="flex items-center gap-2 px-3 py-2 text-sm text-white/70 cursor-pointer hover:text-white/90 rounded-lg hover:bg-white/5">
-          <div class="w-2.5 h-2.5 rounded-full bg-primary"></div>產品設計
-        </div>
-        <div class="flex items-center gap-2 px-3 py-2 text-sm text-white/70 cursor-pointer hover:text-white/90 rounded-lg hover:bg-white/5">
-          <div class="w-2.5 h-2.5 rounded-full bg-success"></div>行銷企劃
-        </div>
-        <div class="flex items-center gap-2 px-3 py-2 text-sm text-white/70 cursor-pointer hover:text-white/90 rounded-lg hover:bg-white/5">
-          <div class="w-2.5 h-2.5 rounded-full bg-accent"></div>個人學習
-        </div>
-        <div class="flex items-center gap-2 px-3 py-2 text-sm text-white/70 cursor-pointer hover:text-white/90 rounded-lg hover:bg-white/5">
-          <div class="w-2.5 h-2.5 rounded-full bg-danger"></div>客戶支援
-        </div>
+  <div class="flex items-center gap-1">
+    <!-- Filter Tabs -->
+    <button class="filter-tab active text-sm font-medium px-3 py-1" onclick="setFilter(this)">Today</button>
+    <button class="filter-tab text-sm font-medium px-3 py-1 text-charcoalLight" onclick="setFilter(this)">This Week</button>
+    <button class="filter-tab text-sm font-medium px-3 py-1 text-charcoalLight" onclick="setFilter(this)">All</button>
+
+    <!-- Add button -->
+    <button class="ml-4 w-8 h-8 bg-orange text-white rounded-lg flex items-center justify-center cursor-pointer hover:bg-orange/90 transition">
+      <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+    </button>
+  </div>
+</header>
+
+<!-- Split Panel -->
+<div class="flex" style="height:calc(100vh - 56px)">
+
+  <!-- Left Panel: Task List (40%) -->
+  <div id="leftPanel" class="focusable w-2/5 border-r border-stone-200 bg-white flex flex-col overflow-hidden">
+    <!-- Section header -->
+    <div class="px-5 pt-4 pb-3 border-b border-stone-100">
+      <div class="flex items-center justify-between">
+        <h2 class="text-sm font-bold text-charcoal uppercase tracking-wide">Today</h2>
+        <span class="text-xs text-charcoalLight">6 tasks</span>
       </div>
     </div>
 
-    <div class="p-3 border-t border-white/10">
-      <div class="flex items-center gap-3 px-3 py-2">
-        <div class="w-8 h-8 rounded-full bg-primaryLight flex items-center justify-center text-xs font-bold">W</div>
-        <div class="text-sm">
-          <div class="font-medium">王小明</div>
-          <div class="text-xs text-white/50">Pro 方案</div>
+    <!-- Task List -->
+    <div class="flex-1 overflow-y-auto" id="taskList">
+      <!-- Pending tasks -->
+      <div class="task-item focusable px-5 py-3.5 border-b border-stone-100 flex items-center gap-3 cursor-pointer" data-task="0" onclick="selectTask(this)" ondblclick="toggleFocus(this)">
+        <div class="task-check" onclick="event.stopPropagation();toggleDone(this.parentElement)">
+          <svg width="12" height="12" fill="none" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg>
         </div>
-      </div>
-    </div>
-  </aside>
-
-  <!-- Main Content -->
-  <main class="flex-1 flex flex-col overflow-hidden">
-    <!-- Top Bar -->
-    <header class="h-14 bg-white border-b border-gray-100 flex items-center justify-between px-6 flex-shrink-0">
-      <div class="flex items-center gap-3">
-        <h1 class="font-semibold text-gray-900" id="pageTitle">收件匣</h1>
-      </div>
-      <div class="flex items-center gap-3">
-        <div class="relative">
-          <input type="text" placeholder="搜尋任務..." class="text-sm bg-gray-50 border border-gray-200 rounded-lg pl-9 pr-4 py-2 w-56 focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary">
-          <svg class="absolute left-3 top-2.5 text-gray-400" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-        </div>
-        <button onclick="openAddModal()" class="bg-primary text-white text-sm font-medium px-4 py-2 rounded-lg hover:bg-primaryDark transition flex items-center gap-1.5">
-          <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-          新增任務
-        </button>
-      </div>
-    </header>
-
-    <!-- Page: Inbox -->
-    <div id="page-inbox" class="flex-1 overflow-auto p-6 fade-in">
-      <!-- Filter tabs -->
-      <div class="flex items-center gap-2 mb-5">
-        <button class="text-sm font-medium px-3 py-1.5 rounded-lg bg-primary text-white">全部 (12)</button>
-        <button class="text-sm font-medium px-3 py-1.5 rounded-lg bg-gray-100 text-gray-600 hover:bg-gray-200 transition">高優先 (3)</button>
-        <button class="text-sm font-medium px-3 py-1.5 rounded-lg bg-gray-100 text-gray-600 hover:bg-gray-200 transition">已標記 (4)</button>
-        <div class="ml-auto flex items-center gap-2 text-sm text-gray-500">
-          <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><line x1="4" y1="21" x2="4" y2="14"/><line x1="4" y1="10" x2="4" y2="3"/><line x1="12" y1="21" x2="12" y2="12"/><line x1="12" y1="8" x2="12" y2="3"/><line x1="20" y1="21" x2="20" y2="16"/><line x1="20" y1="12" x2="20" y2="3"/></svg>
-          排序：優先級
+        <div class="flex-1 min-w-0">
+          <div class="flex items-center gap-2">
+            <span class="task-title text-sm font-medium text-charcoal">Redesign landing page hero section</span>
+          </div>
+          <div class="flex items-center gap-2 mt-1">
+            <span class="pri-1 text-[10px] font-semibold px-1.5 py-0.5 rounded">P1</span>
+            <span class="text-[11px] text-charcoalLight">Due 9:00 AM</span>
+          </div>
         </div>
       </div>
 
-      <!-- Task List -->
-      <div class="space-y-2">
-        <!-- High Priority -->
-        <div class="task-item bg-white rounded-xl p-4 border border-gray-100 flex items-start gap-3 cursor-pointer" onclick="toggleCheck(this)">
-          <div class="checkbox mt-0.5"><svg width="12" height="12" fill="none" stroke="white" stroke-width="3" viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg></div>
-          <div class="flex-1 min-w-0">
-            <div class="flex items-center gap-2 mb-1">
-              <span class="font-medium text-gray-900 text-sm">完成首頁 Hero Section 設計稿</span>
-              <svg class="priority-high flex-shrink-0" width="14" height="14" fill="currentColor" viewBox="0 0 24 24"><path d="M12 2L2 22h20L12 2zm0 4l7.5 14h-15L12 6z"/><path d="M11 10h2v5h-2zm0 6h2v2h-2z"/></svg>
-            </div>
-            <div class="flex items-center gap-2 flex-wrap">
-              <span class="tag bg-indigo-50 text-indigo-600">產品設計</span>
-              <span class="tag bg-red-50 text-red-600">緊急</span>
-              <span class="text-xs text-gray-400 ml-1">截止：今天</span>
-            </div>
-          </div>
-          <svg class="text-gray-300 flex-shrink-0 cursor-pointer hover:text-amber-400 transition" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+      <div class="task-item focusable px-5 py-3.5 border-b border-stone-100 flex items-center gap-3 cursor-pointer" data-task="1" onclick="selectTask(this)" ondblclick="toggleFocus(this)">
+        <div class="task-check" onclick="event.stopPropagation();toggleDone(this.parentElement)">
+          <svg width="12" height="12" fill="none" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg>
         </div>
-
-        <div class="task-item bg-white rounded-xl p-4 border border-gray-100 flex items-start gap-3 cursor-pointer" onclick="toggleCheck(this)">
-          <div class="checkbox mt-0.5"><svg width="12" height="12" fill="none" stroke="white" stroke-width="3" viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg></div>
-          <div class="flex-1 min-w-0">
-            <div class="flex items-center gap-2 mb-1">
-              <span class="font-medium text-gray-900 text-sm">撰寫 Q1 行銷報告</span>
-              <svg class="priority-high flex-shrink-0" width="14" height="14" fill="currentColor" viewBox="0 0 24 24"><path d="M12 2L2 22h20L12 2zm0 4l7.5 14h-15L12 6z"/><path d="M11 10h2v5h-2zm0 6h2v2h-2z"/></svg>
-            </div>
-            <div class="flex items-center gap-2 flex-wrap">
-              <span class="tag bg-emerald-50 text-emerald-600">行銷企劃</span>
-              <span class="text-xs text-gray-400 ml-1">截止：明天</span>
-            </div>
+        <div class="flex-1 min-w-0">
+          <div class="flex items-center gap-2">
+            <span class="task-title text-sm font-medium text-charcoal">Write API documentation for v2 endpoints</span>
           </div>
-          <svg class="text-amber-400 flex-shrink-0" width="16" height="16" fill="currentColor" viewBox="0 0 24 24"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
-        </div>
-
-        <div class="task-item bg-white rounded-xl p-4 border border-gray-100 flex items-start gap-3 cursor-pointer" onclick="toggleCheck(this)">
-          <div class="checkbox mt-0.5"><svg width="12" height="12" fill="none" stroke="white" stroke-width="3" viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg></div>
-          <div class="flex-1 min-w-0">
-            <div class="flex items-center gap-2 mb-1">
-              <span class="font-medium text-gray-900 text-sm">回覆客戶 A 的技術需求文件</span>
-              <svg class="priority-high flex-shrink-0" width="14" height="14" fill="currentColor" viewBox="0 0 24 24"><path d="M12 2L2 22h20L12 2zm0 4l7.5 14h-15L12 6z"/><path d="M11 10h2v5h-2zm0 6h2v2h-2z"/></svg>
-            </div>
-            <div class="flex items-center gap-2 flex-wrap">
-              <span class="tag bg-red-50 text-red-600">客戶支援</span>
-              <span class="tag bg-red-50 text-red-600">緊急</span>
-              <span class="text-xs text-gray-400 ml-1">截止：今天</span>
-            </div>
-          </div>
-          <svg class="text-gray-300 flex-shrink-0" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
-        </div>
-
-        <!-- Medium Priority -->
-        <div class="task-item bg-white rounded-xl p-4 border border-gray-100 flex items-start gap-3 cursor-pointer" onclick="toggleCheck(this)">
-          <div class="checkbox mt-0.5"><svg width="12" height="12" fill="none" stroke="white" stroke-width="3" viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg></div>
-          <div class="flex-1 min-w-0">
-            <div class="flex items-center gap-2 mb-1">
-              <span class="font-medium text-gray-900 text-sm">整理設計系統元件庫</span>
-              <svg class="priority-medium flex-shrink-0" width="14" height="14" fill="currentColor" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/></svg>
-            </div>
-            <div class="flex items-center gap-2 flex-wrap">
-              <span class="tag bg-indigo-50 text-indigo-600">產品設計</span>
-              <span class="text-xs text-gray-400 ml-1">截止：2/20</span>
-            </div>
-          </div>
-          <svg class="text-amber-400 flex-shrink-0" width="16" height="16" fill="currentColor" viewBox="0 0 24 24"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
-        </div>
-
-        <div class="task-item bg-white rounded-xl p-4 border border-gray-100 flex items-start gap-3 cursor-pointer" onclick="toggleCheck(this)">
-          <div class="checkbox mt-0.5"><svg width="12" height="12" fill="none" stroke="white" stroke-width="3" viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg></div>
-          <div class="flex-1 min-w-0">
-            <div class="flex items-center gap-2 mb-1">
-              <span class="font-medium text-gray-900 text-sm">準備週五團隊簡報內容</span>
-              <svg class="priority-medium flex-shrink-0" width="14" height="14" fill="currentColor" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/></svg>
-            </div>
-            <div class="flex items-center gap-2 flex-wrap">
-              <span class="tag bg-emerald-50 text-emerald-600">行銷企劃</span>
-              <span class="text-xs text-gray-400 ml-1">截止：2/21</span>
-            </div>
-          </div>
-          <svg class="text-gray-300 flex-shrink-0" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
-        </div>
-
-        <div class="task-item bg-white rounded-xl p-4 border border-gray-100 flex items-start gap-3 cursor-pointer" onclick="toggleCheck(this)">
-          <div class="checkbox mt-0.5"><svg width="12" height="12" fill="none" stroke="white" stroke-width="3" viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg></div>
-          <div class="flex-1 min-w-0">
-            <div class="flex items-center gap-2 mb-1">
-              <span class="font-medium text-gray-900 text-sm">閱讀《原子習慣》第 5-8 章</span>
-              <svg class="priority-low flex-shrink-0" width="14" height="14" fill="currentColor" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/></svg>
-            </div>
-            <div class="flex items-center gap-2 flex-wrap">
-              <span class="tag bg-amber-50 text-amber-600">個人學習</span>
-              <span class="text-xs text-gray-400 ml-1">截止：2/25</span>
-            </div>
-          </div>
-          <svg class="text-amber-400 flex-shrink-0" width="16" height="16" fill="currentColor" viewBox="0 0 24 24"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
-        </div>
-
-        <!-- Completed -->
-        <div class="task-item bg-white rounded-xl p-4 border border-gray-100 flex items-start gap-3 opacity-50 cursor-pointer" onclick="toggleCheck(this)">
-          <div class="checkbox checked mt-0.5"><svg width="12" height="12" fill="none" stroke="white" stroke-width="3" viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg></div>
-          <div class="flex-1 min-w-0">
-            <div class="flex items-center gap-2 mb-1">
-              <span class="font-medium text-gray-500 text-sm line-through">更新用戶訪談紀錄</span>
-            </div>
-            <div class="flex items-center gap-2 flex-wrap">
-              <span class="tag bg-indigo-50 text-indigo-400">產品設計</span>
-              <span class="text-xs text-gray-300">已完成</span>
-            </div>
+          <div class="flex items-center gap-2 mt-1">
+            <span class="pri-1 text-[10px] font-semibold px-1.5 py-0.5 rounded">P1</span>
+            <span class="text-[11px] text-charcoalLight">Due 11:00 AM</span>
           </div>
         </div>
+      </div>
 
-        <div class="task-item bg-white rounded-xl p-4 border border-gray-100 flex items-start gap-3 opacity-50 cursor-pointer" onclick="toggleCheck(this)">
-          <div class="checkbox checked mt-0.5"><svg width="12" height="12" fill="none" stroke="white" stroke-width="3" viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg></div>
-          <div class="flex-1 min-w-0">
-            <div class="flex items-center gap-2 mb-1">
-              <span class="font-medium text-gray-500 text-sm line-through">預約下週會議室</span>
-            </div>
-            <div class="flex items-center gap-2 flex-wrap">
-              <span class="tag bg-emerald-50 text-emerald-400">行銷企劃</span>
-              <span class="text-xs text-gray-300">已完成</span>
-            </div>
+      <div class="task-item focusable px-5 py-3.5 border-b border-stone-100 flex items-center gap-3 cursor-pointer bg-orange/[0.04]" data-task="2" onclick="selectTask(this)" ondblclick="toggleFocus(this)" id="activeTask">
+        <div class="task-check" onclick="event.stopPropagation();toggleDone(this.parentElement)">
+          <svg width="12" height="12" fill="none" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg>
+        </div>
+        <div class="flex-1 min-w-0">
+          <div class="flex items-center gap-2">
+            <span class="task-title text-sm font-medium text-charcoal">Review pull requests from design team</span>
+          </div>
+          <div class="flex items-center gap-2 mt-1">
+            <span class="pri-2 text-[10px] font-semibold px-1.5 py-0.5 rounded">P2</span>
+            <span class="text-[11px] text-charcoalLight">Due 2:00 PM</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="task-item focusable px-5 py-3.5 border-b border-stone-100 flex items-center gap-3 cursor-pointer" data-task="3" onclick="selectTask(this)" ondblclick="toggleFocus(this)">
+        <div class="task-check" onclick="event.stopPropagation();toggleDone(this.parentElement)">
+          <svg width="12" height="12" fill="none" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg>
+        </div>
+        <div class="flex-1 min-w-0">
+          <div class="flex items-center gap-2">
+            <span class="task-title text-sm font-medium text-charcoal">Prepare slide deck for Friday standup</span>
+          </div>
+          <div class="flex items-center gap-2 mt-1">
+            <span class="pri-2 text-[10px] font-semibold px-1.5 py-0.5 rounded">P2</span>
+            <span class="text-[11px] text-charcoalLight">Due 4:00 PM</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="task-item focusable px-5 py-3.5 border-b border-stone-100 flex items-center gap-3 cursor-pointer" data-task="4" onclick="selectTask(this)" ondblclick="toggleFocus(this)">
+        <div class="task-check" onclick="event.stopPropagation();toggleDone(this.parentElement)">
+          <svg width="12" height="12" fill="none" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg>
+        </div>
+        <div class="flex-1 min-w-0">
+          <div class="flex items-center gap-2">
+            <span class="task-title text-sm font-medium text-charcoal">Update user onboarding flow copy</span>
+          </div>
+          <div class="flex items-center gap-2 mt-1">
+            <span class="pri-3 text-[10px] font-semibold px-1.5 py-0.5 rounded">P3</span>
+            <span class="text-[11px] text-charcoalLight">Due 5:30 PM</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="task-item focusable px-5 py-3.5 border-b border-stone-100 flex items-center gap-3 cursor-pointer" data-task="5" onclick="selectTask(this)" ondblclick="toggleFocus(this)">
+        <div class="task-check" onclick="event.stopPropagation();toggleDone(this.parentElement)">
+          <svg width="12" height="12" fill="none" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg>
+        </div>
+        <div class="flex-1 min-w-0">
+          <div class="flex items-center gap-2">
+            <span class="task-title text-sm font-medium text-charcoal">Set up staging environment for QA</span>
+          </div>
+          <div class="flex items-center gap-2 mt-1">
+            <span class="pri-3 text-[10px] font-semibold px-1.5 py-0.5 rounded">P3</span>
+            <span class="text-[11px] text-charcoalLight">Due 6:00 PM</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Completed section -->
+      <div class="px-5 pt-4 pb-2">
+        <span class="text-[11px] font-semibold text-charcoalLight uppercase tracking-wider">Completed</span>
+      </div>
+
+      <div class="task-item focusable px-5 py-3 border-b border-stone-100 flex items-center gap-3 cursor-pointer opacity-50" data-task="6" onclick="selectTask(this)" ondblclick="toggleFocus(this)">
+        <div class="task-check done" onclick="event.stopPropagation();toggleDone(this.parentElement)">
+          <svg width="12" height="12" fill="none" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg>
+        </div>
+        <div class="flex-1 min-w-0">
+          <span class="task-title struck text-sm font-medium">Morning standup sync with team</span>
+          <div class="flex items-center gap-2 mt-1">
+            <span class="pri-3 text-[10px] font-semibold px-1.5 py-0.5 rounded">P3</span>
+            <span class="text-[11px] text-charcoalLight">9:00 AM</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="task-item focusable px-5 py-3 border-b border-stone-100 flex items-center gap-3 cursor-pointer opacity-50" data-task="7" onclick="selectTask(this)" ondblclick="toggleFocus(this)">
+        <div class="task-check done" onclick="event.stopPropagation();toggleDone(this.parentElement)">
+          <svg width="12" height="12" fill="none" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg>
+        </div>
+        <div class="flex-1 min-w-0">
+          <span class="task-title struck text-sm font-medium">Fix auth token refresh bug</span>
+          <div class="flex items-center gap-2 mt-1">
+            <span class="pri-1 text-[10px] font-semibold px-1.5 py-0.5 rounded">P1</span>
+            <span class="text-[11px] text-charcoalLight">8:30 AM</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="task-item focusable px-5 py-3 border-b border-stone-100 flex items-center gap-3 cursor-pointer opacity-50" data-task="8" onclick="selectTask(this)" ondblclick="toggleFocus(this)">
+        <div class="task-check done" onclick="event.stopPropagation();toggleDone(this.parentElement)">
+          <svg width="12" height="12" fill="none" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg>
+        </div>
+        <div class="flex-1 min-w-0">
+          <span class="task-title struck text-sm font-medium">Reply to client feedback email</span>
+          <div class="flex items-center gap-2 mt-1">
+            <span class="pri-2 text-[10px] font-semibold px-1.5 py-0.5 rounded">P2</span>
+            <span class="text-[11px] text-charcoalLight">10:15 AM</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="task-item focusable px-5 py-3 border-b border-stone-100 flex items-center gap-3 cursor-pointer opacity-50" data-task="9" onclick="selectTask(this)" ondblclick="toggleFocus(this)">
+        <div class="task-check done" onclick="event.stopPropagation();toggleDone(this.parentElement)">
+          <svg width="12" height="12" fill="none" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg>
+        </div>
+        <div class="flex-1 min-w-0">
+          <span class="task-title struck text-sm font-medium">Deploy hotfix to production</span>
+          <div class="flex items-center gap-2 mt-1">
+            <span class="pri-1 text-[10px] font-semibold px-1.5 py-0.5 rounded">P1</span>
+            <span class="text-[11px] text-charcoalLight">11:45 AM</span>
           </div>
         </div>
       </div>
     </div>
+  </div>
 
-    <!-- Page: Today -->
-    <div id="page-today" class="flex-1 overflow-auto p-6 fade-in hidden">
-      <div class="flex items-center gap-4 mb-6">
-        <div class="text-center">
-          <div class="text-3xl font-bold text-gray-900">16</div>
-          <div class="text-xs text-gray-500">二月 週日</div>
-        </div>
-        <div class="flex-1">
-          <div class="flex items-center gap-2 mb-1">
-            <span class="text-sm font-medium text-gray-700">今日進度</span>
-            <span class="text-sm text-primary font-bold">3/5</span>
-          </div>
-          <div class="w-full bg-gray-100 rounded-full h-2">
-            <div class="bg-primary rounded-full h-2 transition-all" style="width:60%"></div>
-          </div>
-        </div>
-      </div>
-
+  <!-- Right Panel: Task Detail (60%) -->
+  <div id="rightPanel" class="focusable w-3/5 bg-paper flex flex-col overflow-y-auto">
+    <div class="flex-1 px-8 py-6" id="detailContent">
+      <!-- Task Title -->
       <div class="mb-6">
-        <h3 class="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3">上午</h3>
+        <h1 class="text-2xl font-bold text-charcoal leading-tight mb-2" id="detailTitle">Review pull requests from design team</h1>
+        <div class="flex items-center gap-3">
+          <span class="pri-2 text-xs font-semibold px-2 py-0.5 rounded">P2</span>
+          <span class="text-xs text-charcoalLight">Due today at 2:00 PM</span>
+        </div>
+      </div>
+
+      <!-- Description -->
+      <div class="mb-6">
+        <label class="text-xs font-semibold text-charcoalMid uppercase tracking-wider mb-2 block">Description</label>
+        <div class="text-sm text-charcoalMid leading-relaxed bg-white border border-stone-200 rounded-lg p-4">
+          Go through the 3 open PRs from the design team. Check the component library updates, verify the new color tokens match the design system, and ensure responsive breakpoints are correct. Leave inline comments on any issues.
+        </div>
+      </div>
+
+      <!-- Subtasks -->
+      <div class="mb-6">
+        <label class="text-xs font-semibold text-charcoalMid uppercase tracking-wider mb-3 block">Subtasks</label>
         <div class="space-y-2">
-          <div class="bg-white rounded-xl p-4 border border-gray-100 flex items-center gap-3">
-            <div class="checkbox checked"><svg width="12" height="12" fill="none" stroke="white" stroke-width="3" viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg></div>
-            <div class="flex-1">
-              <span class="text-sm text-gray-400 line-through">晨會同步進度</span>
-              <div class="text-xs text-gray-300 mt-0.5">09:00 - 09:30</div>
+          <div class="flex items-center gap-3 bg-white border border-stone-200 rounded-lg px-4 py-3 cursor-pointer" onclick="toggleSub(this)">
+            <div class="sub-check done">
+              <svg width="10" height="10" fill="none" stroke="white" stroke-width="2.5" stroke-linecap="round" viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg>
             </div>
+            <span class="text-sm text-charcoalLight line-through">Review color token PR #247</span>
           </div>
-          <div class="bg-white rounded-xl p-4 border border-gray-100 flex items-center gap-3">
-            <div class="checkbox checked"><svg width="12" height="12" fill="none" stroke="white" stroke-width="3" viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg></div>
-            <div class="flex-1">
-              <span class="text-sm text-gray-400 line-through">回覆客戶 A 的技術需求</span>
-              <div class="text-xs text-gray-300 mt-0.5">10:00 - 11:00</div>
+          <div class="flex items-center gap-3 bg-white border border-stone-200 rounded-lg px-4 py-3 cursor-pointer" onclick="toggleSub(this)">
+            <div class="sub-check">
+              <svg width="10" height="10" fill="none" stroke="white" stroke-width="2.5" stroke-linecap="round" viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg>
             </div>
+            <span class="text-sm text-charcoal">Review component library PR #251</span>
           </div>
-          <div class="bg-white rounded-xl p-4 border border-gray-100 flex items-center gap-3">
-            <div class="checkbox checked"><svg width="12" height="12" fill="none" stroke="white" stroke-width="3" viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg></div>
-            <div class="flex-1">
-              <span class="text-sm text-gray-400 line-through">更新設計系統文件</span>
-              <div class="text-xs text-gray-300 mt-0.5">11:00 - 12:00</div>
+          <div class="flex items-center gap-3 bg-white border border-stone-200 rounded-lg px-4 py-3 cursor-pointer" onclick="toggleSub(this)">
+            <div class="sub-check">
+              <svg width="10" height="10" fill="none" stroke="white" stroke-width="2.5" stroke-linecap="round" viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg>
             </div>
+            <span class="text-sm text-charcoal">Check responsive breakpoints on PR #253</span>
           </div>
         </div>
       </div>
 
-      <div>
-        <h3 class="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3">下午</h3>
-        <div class="space-y-2">
-          <div class="bg-white rounded-xl p-4 border border-primary/30 flex items-center gap-3">
-            <div class="checkbox"><svg width="12" height="12" fill="none" stroke="white" stroke-width="3" viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg></div>
-            <div class="flex-1">
-              <span class="text-sm font-medium text-gray-900">完成首頁 Hero Section 設計稿</span>
-              <div class="flex items-center gap-2 mt-1">
-                <span class="tag bg-indigo-50 text-indigo-600">產品設計</span>
-                <span class="text-xs text-red-500">截止今天</span>
-              </div>
-            </div>
-            <svg class="priority-high" width="14" height="14" fill="currentColor" viewBox="0 0 24 24"><path d="M12 2L2 22h20L12 2z"/></svg>
-          </div>
-          <div class="bg-white rounded-xl p-4 border border-gray-100 flex items-center gap-3">
-            <div class="checkbox"><svg width="12" height="12" fill="none" stroke="white" stroke-width="3" viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg></div>
-            <div class="flex-1">
-              <span class="text-sm font-medium text-gray-900">撰寫 Q1 行銷報告初稿</span>
-              <div class="flex items-center gap-2 mt-1">
-                <span class="tag bg-emerald-50 text-emerald-600">行銷企劃</span>
-                <span class="text-xs text-gray-400">14:00 - 16:00</span>
-              </div>
-            </div>
-            <svg class="priority-high" width="14" height="14" fill="currentColor" viewBox="0 0 24 24"><path d="M12 2L2 22h20L12 2z"/></svg>
-          </div>
-        </div>
-      </div>
-    </div>
-
-    <!-- Page: Projects -->
-    <div id="page-projects" class="flex-1 overflow-auto p-6 fade-in hidden">
-      <div class="grid grid-cols-2 gap-4">
-        <div class="bg-white rounded-2xl p-5 border border-gray-100 hover:shadow-md transition cursor-pointer">
-          <div class="flex items-center gap-3 mb-4">
-            <div class="w-10 h-10 rounded-xl bg-indigo-100 flex items-center justify-center">
-              <svg width="20" height="20" fill="none" stroke="#6366f1" stroke-width="2" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
-            </div>
-            <div>
-              <h3 class="font-semibold text-gray-900">產品設計</h3>
-              <p class="text-xs text-gray-400">8 個任務</p>
-            </div>
-          </div>
-          <div class="flex items-center justify-between mb-2">
-            <span class="text-xs text-gray-500">完成進度</span>
-            <span class="text-xs font-bold text-primary">62%</span>
-          </div>
-          <div class="w-full bg-gray-100 rounded-full h-1.5">
-            <div class="bg-primary rounded-full h-1.5" style="width:62%"></div>
-          </div>
-          <div class="flex gap-1 mt-3">
-            <span class="tag bg-gray-100 text-gray-500">3 待辦</span>
-            <span class="tag bg-indigo-50 text-indigo-600">2 進行中</span>
-            <span class="tag bg-emerald-50 text-emerald-600">5 已完成</span>
-          </div>
-        </div>
-
-        <div class="bg-white rounded-2xl p-5 border border-gray-100 hover:shadow-md transition cursor-pointer">
-          <div class="flex items-center gap-3 mb-4">
-            <div class="w-10 h-10 rounded-xl bg-emerald-100 flex items-center justify-center">
-              <svg width="20" height="20" fill="none" stroke="#10b981" stroke-width="2" viewBox="0 0 24 24"><path d="M21 16V8a2 2 0 00-1-1.73l-7-4a2 2 0 00-2 0l-7 4A2 2 0 003 8v8a2 2 0 001 1.73l7 4a2 2 0 002 0l7-4A2 2 0 0021 16z"/></svg>
-            </div>
-            <div>
-              <h3 class="font-semibold text-gray-900">行銷企劃</h3>
-              <p class="text-xs text-gray-400">6 個任務</p>
-            </div>
-          </div>
-          <div class="flex items-center justify-between mb-2">
-            <span class="text-xs text-gray-500">完成進度</span>
-            <span class="text-xs font-bold text-success">83%</span>
-          </div>
-          <div class="w-full bg-gray-100 rounded-full h-1.5">
-            <div class="bg-success rounded-full h-1.5" style="width:83%"></div>
-          </div>
-          <div class="flex gap-1 mt-3">
-            <span class="tag bg-gray-100 text-gray-500">1 待辦</span>
-            <span class="tag bg-emerald-50 text-emerald-600">5 已完成</span>
-          </div>
-        </div>
-
-        <div class="bg-white rounded-2xl p-5 border border-gray-100 hover:shadow-md transition cursor-pointer">
-          <div class="flex items-center gap-3 mb-4">
-            <div class="w-10 h-10 rounded-xl bg-amber-100 flex items-center justify-center">
-              <svg width="20" height="20" fill="none" stroke="#f59e0b" stroke-width="2" viewBox="0 0 24 24"><path d="M2 3h6a4 4 0 014 4v14a3 3 0 00-3-3H2z"/><path d="M22 3h-6a4 4 0 00-4 4v14a3 3 0 013-3h7z"/></svg>
-            </div>
-            <div>
-              <h3 class="font-semibold text-gray-900">個人學習</h3>
-              <p class="text-xs text-gray-400">4 個任務</p>
-            </div>
-          </div>
-          <div class="flex items-center justify-between mb-2">
-            <span class="text-xs text-gray-500">完成進度</span>
-            <span class="text-xs font-bold text-accent">50%</span>
-          </div>
-          <div class="w-full bg-gray-100 rounded-full h-1.5">
-            <div class="bg-accent rounded-full h-1.5" style="width:50%"></div>
-          </div>
-          <div class="flex gap-1 mt-3">
-            <span class="tag bg-gray-100 text-gray-500">2 待辦</span>
-            <span class="tag bg-emerald-50 text-emerald-600">2 已完成</span>
-          </div>
-        </div>
-
-        <div class="bg-white rounded-2xl p-5 border border-gray-100 hover:shadow-md transition cursor-pointer">
-          <div class="flex items-center gap-3 mb-4">
-            <div class="w-10 h-10 rounded-xl bg-red-100 flex items-center justify-center">
-              <svg width="20" height="20" fill="none" stroke="#ef4444" stroke-width="2" viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 00-3-3.87"/><path d="M16 3.13a4 4 0 010 7.75"/></svg>
-            </div>
-            <div>
-              <h3 class="font-semibold text-gray-900">客戶支援</h3>
-              <p class="text-xs text-gray-400">5 個任務</p>
-            </div>
-          </div>
-          <div class="flex items-center justify-between mb-2">
-            <span class="text-xs text-gray-500">完成進度</span>
-            <span class="text-xs font-bold text-danger">40%</span>
-          </div>
-          <div class="w-full bg-gray-100 rounded-full h-1.5">
-            <div class="bg-danger rounded-full h-1.5" style="width:40%"></div>
-          </div>
-          <div class="flex gap-1 mt-3">
-            <span class="tag bg-gray-100 text-gray-500">2 待辦</span>
-            <span class="tag bg-indigo-50 text-indigo-600">1 進行中</span>
-            <span class="tag bg-emerald-50 text-emerald-600">2 已完成</span>
-          </div>
-        </div>
-      </div>
-    </div>
-
-    <!-- Page: Stats -->
-    <div id="page-stats" class="flex-1 overflow-auto p-6 fade-in hidden">
-      <div class="grid grid-cols-4 gap-4 mb-6">
-        <div class="bg-white rounded-2xl p-4 border border-gray-100 text-center">
-          <div class="text-3xl font-bold text-primary">156</div>
-          <div class="text-xs text-gray-500 mt-1">本月完成</div>
-        </div>
-        <div class="bg-white rounded-2xl p-4 border border-gray-100 text-center">
-          <div class="text-3xl font-bold text-success">12</div>
-          <div class="text-xs text-gray-500 mt-1">連續天數</div>
-        </div>
-        <div class="bg-white rounded-2xl p-4 border border-gray-100 text-center">
-          <div class="text-3xl font-bold text-accent">4.2</div>
-          <div class="text-xs text-gray-500 mt-1">日均完成</div>
-        </div>
-        <div class="bg-white rounded-2xl p-4 border border-gray-100 text-center">
-          <div class="text-3xl font-bold text-danger">89%</div>
-          <div class="text-xs text-gray-500 mt-1">準時率</div>
+      <!-- Tags -->
+      <div class="mb-6">
+        <label class="text-xs font-semibold text-charcoalMid uppercase tracking-wider mb-2 block">Tags</label>
+        <div class="flex items-center gap-2">
+          <span class="text-xs font-medium bg-orange/10 text-orange border border-orange/20 px-2.5 py-1 rounded-full">code-review</span>
+          <span class="text-xs font-medium bg-stone-100 text-charcoalMid border border-stone-200 px-2.5 py-1 rounded-full">design-system</span>
+          <span class="text-xs font-medium bg-stone-100 text-charcoalMid border border-stone-200 px-2.5 py-1 rounded-full">frontend</span>
         </div>
       </div>
 
-      <!-- Weekly Chart -->
-      <div class="bg-white rounded-2xl p-5 border border-gray-100 mb-6">
-        <h3 class="font-semibold text-gray-900 mb-4">本週完成趨勢</h3>
-        <div class="flex items-end gap-3 h-40">
-          <div class="flex-1 flex flex-col items-center gap-1">
-            <div class="w-full bg-primary/20 rounded-t-lg relative" style="height:60%"><div class="absolute inset-x-0 bottom-0 bg-primary rounded-t-lg" style="height:80%"></div></div>
-            <span class="text-xs text-gray-400">一</span>
+      <!-- Meta row -->
+      <div class="flex items-center gap-6 mb-6">
+        <div>
+          <label class="text-xs font-semibold text-charcoalMid uppercase tracking-wider mb-1.5 block">Due Date</label>
+          <div class="flex items-center gap-2 bg-white border border-stone-200 rounded-lg px-3 py-2">
+            <svg width="14" height="14" fill="none" stroke="#a8a29e" stroke-width="2" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+            <span class="text-sm text-charcoal">Today, 2:00 PM</span>
           </div>
-          <div class="flex-1 flex flex-col items-center gap-1">
-            <div class="w-full bg-primary/20 rounded-t-lg relative" style="height:80%"><div class="absolute inset-x-0 bottom-0 bg-primary rounded-t-lg" style="height:70%"></div></div>
-            <span class="text-xs text-gray-400">二</span>
-          </div>
-          <div class="flex-1 flex flex-col items-center gap-1">
-            <div class="w-full bg-primary/20 rounded-t-lg relative" style="height:45%"><div class="absolute inset-x-0 bottom-0 bg-primary rounded-t-lg" style="height:90%"></div></div>
-            <span class="text-xs text-gray-400">三</span>
-          </div>
-          <div class="flex-1 flex flex-col items-center gap-1">
-            <div class="w-full bg-primary/20 rounded-t-lg relative" style="height:90%"><div class="absolute inset-x-0 bottom-0 bg-primary rounded-t-lg" style="height:85%"></div></div>
-            <span class="text-xs text-gray-400">四</span>
-          </div>
-          <div class="flex-1 flex flex-col items-center gap-1">
-            <div class="w-full bg-primary/20 rounded-t-lg relative" style="height:70%"><div class="absolute inset-x-0 bottom-0 bg-primary rounded-t-lg" style="height:75%"></div></div>
-            <span class="text-xs text-gray-400">五</span>
-          </div>
-          <div class="flex-1 flex flex-col items-center gap-1">
-            <div class="w-full bg-primary/20 rounded-t-lg relative" style="height:40%"><div class="absolute inset-x-0 bottom-0 bg-primary rounded-t-lg" style="height:60%"></div></div>
-            <span class="text-xs text-gray-400">六</span>
-          </div>
-          <div class="flex-1 flex flex-col items-center gap-1">
-            <div class="w-full bg-primary/20 rounded-t-lg relative" style="height:30%"><div class="absolute inset-x-0 bottom-0 bg-primary rounded-t-lg" style="height:50%"></div></div>
-            <span class="text-xs text-gray-400">日</span>
+        </div>
+        <div>
+          <label class="text-xs font-semibold text-charcoalMid uppercase tracking-wider mb-1.5 block">Priority</label>
+          <div class="flex items-center gap-1.5 bg-white border border-stone-200 rounded-lg px-3 py-2">
+            <div class="w-2.5 h-2.5 rounded-full bg-orange"></div>
+            <span class="text-sm text-charcoal">Medium</span>
           </div>
         </div>
       </div>
 
-      <!-- Category breakdown -->
-      <div class="grid grid-cols-2 gap-4">
-        <div class="bg-white rounded-2xl p-5 border border-gray-100">
-          <h3 class="font-semibold text-gray-900 mb-4">專案分佈</h3>
-          <div class="flex justify-center mb-4">
-            <svg width="140" height="140" viewBox="0 0 140 140">
-              <circle cx="70" cy="70" r="54" fill="none" stroke="#e2e8f0" stroke-width="16"/>
-              <circle cx="70" cy="70" r="54" fill="none" stroke="#6366f1" stroke-width="16" stroke-dasharray="107 232" stroke-dashoffset="0" class="progress-ring"/>
-              <circle cx="70" cy="70" r="54" fill="none" stroke="#10b981" stroke-width="16" stroke-dasharray="85 254" stroke-dashoffset="-107" class="progress-ring"/>
-              <circle cx="70" cy="70" r="54" fill="none" stroke="#f59e0b" stroke-width="16" stroke-dasharray="68 271" stroke-dashoffset="-192" class="progress-ring"/>
-              <circle cx="70" cy="70" r="54" fill="none" stroke="#ef4444" stroke-width="16" stroke-dasharray="79 260" stroke-dashoffset="-260" class="progress-ring"/>
-            </svg>
-          </div>
-          <div class="space-y-2">
-            <div class="flex items-center justify-between text-sm"><div class="flex items-center gap-2"><div class="w-3 h-3 rounded-full bg-primary"></div>產品設計</div><span class="text-gray-500">32%</span></div>
-            <div class="flex items-center justify-between text-sm"><div class="flex items-center gap-2"><div class="w-3 h-3 rounded-full bg-success"></div>行銷企劃</div><span class="text-gray-500">25%</span></div>
-            <div class="flex items-center justify-between text-sm"><div class="flex items-center gap-2"><div class="w-3 h-3 rounded-full bg-accent"></div>個人學習</div><span class="text-gray-500">20%</span></div>
-            <div class="flex items-center justify-between text-sm"><div class="flex items-center gap-2"><div class="w-3 h-3 rounded-full bg-danger"></div>客戶支援</div><span class="text-gray-500">23%</span></div>
-          </div>
-        </div>
-
-        <div class="bg-white rounded-2xl p-5 border border-gray-100">
-          <h3 class="font-semibold text-gray-900 mb-4">效率指標</h3>
-          <div class="space-y-4">
-            <div>
-              <div class="flex justify-between text-sm mb-1"><span class="text-gray-600">準時完成率</span><span class="font-bold text-primary">89%</span></div>
-              <div class="w-full bg-gray-100 rounded-full h-2"><div class="bg-primary rounded-full h-2" style="width:89%"></div></div>
-            </div>
-            <div>
-              <div class="flex justify-between text-sm mb-1"><span class="text-gray-600">高優先處理速度</span><span class="font-bold text-success">92%</span></div>
-              <div class="w-full bg-gray-100 rounded-full h-2"><div class="bg-success rounded-full h-2" style="width:92%"></div></div>
-            </div>
-            <div>
-              <div class="flex justify-between text-sm mb-1"><span class="text-gray-600">專案推進率</span><span class="font-bold text-accent">76%</span></div>
-              <div class="w-full bg-gray-100 rounded-full h-2"><div class="bg-accent rounded-full h-2" style="width:76%"></div></div>
-            </div>
-            <div>
-              <div class="flex justify-between text-sm mb-1"><span class="text-gray-600">每日目標達成</span><span class="font-bold text-danger">68%</span></div>
-              <div class="w-full bg-gray-100 rounded-full h-2"><div class="bg-danger rounded-full h-2" style="width:68%"></div></div>
-            </div>
-          </div>
+      <!-- Notes -->
+      <div class="mb-8">
+        <label class="text-xs font-semibold text-charcoalMid uppercase tracking-wider mb-2 block">Notes</label>
+        <div class="text-sm text-charcoalMid leading-relaxed bg-white border border-stone-200 rounded-lg p-4 min-h-[80px]">
+          Sarah mentioned the button component has a new variant. Double-check it works with both light and dark themes. Also ask about the icon set update timeline.
         </div>
       </div>
-    </div>
-  </main>
-</div>
 
-<!-- Add Task Modal -->
-<div id="addModal" class="fixed inset-0 z-50 hidden items-center justify-center modal-overlay">
-  <div class="bg-white rounded-2xl w-full max-w-md mx-4 p-6 shadow-2xl">
-    <div class="flex items-center justify-between mb-5">
-      <h2 class="font-bold text-lg text-gray-900">新增任務</h2>
-      <button onclick="closeAddModal()" class="text-gray-400 hover:text-gray-600 transition">
-        <svg width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+      <!-- Mark Complete Button -->
+      <button class="bg-orange text-white font-semibold px-6 py-3 rounded-lg cursor-pointer hover:bg-orange/90 transition flex items-center gap-2" onclick="completeActive()">
+        <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg>
+        Mark Complete
       </button>
-    </div>
-    <div class="space-y-4">
-      <input type="text" placeholder="任務名稱" class="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary">
-      <textarea placeholder="任務描述（選填）" rows="3" class="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary resize-none"></textarea>
-      <div class="grid grid-cols-2 gap-3">
-        <div>
-          <label class="text-xs text-gray-500 mb-1 block">優先級</label>
-          <select class="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20">
-            <option>高</option><option selected>中</option><option>低</option>
-          </select>
-        </div>
-        <div>
-          <label class="text-xs text-gray-500 mb-1 block">專案</label>
-          <select class="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20">
-            <option>產品設計</option><option>行銷企劃</option><option>個人學習</option><option>客戶支援</option>
-          </select>
-        </div>
-      </div>
-      <div class="grid grid-cols-2 gap-3">
-        <div>
-          <label class="text-xs text-gray-500 mb-1 block">截止日期</label>
-          <input type="date" class="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20">
-        </div>
-        <div>
-          <label class="text-xs text-gray-500 mb-1 block">標籤</label>
-          <input type="text" placeholder="輸入標籤" class="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20">
-        </div>
-      </div>
-      <button onclick="closeAddModal()" class="w-full bg-primary text-white font-medium py-3 rounded-xl hover:bg-primaryDark transition">建立任務</button>
     </div>
   </div>
 </div>
 
 <script>
-function switchPage(page){
-  document.querySelectorAll('[id^="page-"]').forEach(p=>p.classList.add('hidden'));
-  document.getElementById('page-'+page).classList.remove('hidden');
-  document.querySelectorAll('.sidebar-item').forEach(i=>i.classList.remove('active'));
-  document.querySelector('[data-page="'+page+'"]').classList.add('active');
-  const titles={inbox:'收件匣',today:'今日任務',projects:'專案',stats:'統計'};
-  document.getElementById('pageTitle').textContent=titles[page]||page;
+// Task data for detail panel
+const tasks=[
+  {title:'Redesign landing page hero section',pri:'P1',priClass:'pri-1',due:'Today, 9:00 AM',priLabel:'High',desc:'Overhaul the hero section with new brand illustrations, updated copy from marketing, and the animated gradient background. Must be mobile-first and pass Lighthouse accessibility audit.',subs:['Gather new brand assets from design drive','Update hero copy with marketing-approved text','Implement animated gradient background'],tags:['design','frontend','brand'],notes:'Check with Maya about the illustration delivery date. The gradient should use the new warm orange palette, not the old blue.'},
+  {title:'Write API documentation for v2 endpoints',pri:'P1',priClass:'pri-1',due:'Today, 11:00 AM',priLabel:'High',desc:'Document all 12 new v2 REST endpoints including request/response schemas, authentication requirements, rate limits, and error codes. Use the OpenAPI 3.0 spec format.',subs:['Document authentication endpoints','Document resource CRUD endpoints','Add rate limit and error code tables'],tags:['documentation','api','backend'],notes:'Use the same format as v1 docs. James has the Postman collection with example responses.'},
+  {title:'Review pull requests from design team',pri:'P2',priClass:'pri-2',due:'Today, 2:00 PM',priLabel:'Medium',desc:'Go through the 3 open PRs from the design team. Check the component library updates, verify the new color tokens match the design system, and ensure responsive breakpoints are correct. Leave inline comments on any issues.',subs:['Review color token PR #247','Review component library PR #251','Check responsive breakpoints on PR #253'],tags:['code-review','design-system','frontend'],notes:'Sarah mentioned the button component has a new variant. Double-check it works with both light and dark themes. Also ask about the icon set update timeline.'},
+  {title:'Prepare slide deck for Friday standup',pri:'P2',priClass:'pri-2',due:'Today, 4:00 PM',priLabel:'Medium',desc:'Create a 10-slide presentation covering this sprint achievements, blockers, and next sprint priorities. Include the burndown chart and velocity metrics.',subs:['Pull metrics from Jira dashboard','Draft achievement highlights','Add blocker summary and action items'],tags:['presentation','team','sprint'],notes:'Use the company slide template. Tom wants to see the customer feedback stats included this time.'},
+  {title:'Update user onboarding flow copy',pri:'P3',priClass:'pri-3',due:'Today, 5:30 PM',priLabel:'Low',desc:'Revise the 5-step onboarding wizard text based on the latest UX research findings. Focus on reducing cognitive load and improving completion rates.',subs:['Rewrite welcome screen copy','Simplify step 3 instructions','Add contextual help tooltips'],tags:['ux-writing','onboarding'],notes:'The UX research report is in Notion. Key finding: users drop off at step 3 because the instructions are too technical.'},
+  {title:'Set up staging environment for QA',pri:'P3',priClass:'pri-3',due:'Today, 6:00 PM',priLabel:'Low',desc:'Provision a fresh staging server, deploy the latest release candidate, seed the test database with fixtures, and share access credentials with the QA team.',subs:['Provision staging server','Deploy RC build','Seed test data and share credentials'],tags:['devops','qa','infrastructure'],notes:'Use the new Docker compose setup. QA needs access by end of day for the regression test cycle starting tomorrow.'},
+  {title:'Morning standup sync with team',pri:'P3',priClass:'pri-3',due:'9:00 AM',priLabel:'Low',desc:'Daily 15-minute sync. Share blockers, align on priorities.',subs:[],tags:['meeting'],notes:''},
+  {title:'Fix auth token refresh bug',pri:'P1',priClass:'pri-1',due:'8:30 AM',priLabel:'High',desc:'The refresh token was not rotating properly causing session drops after 30 minutes.',subs:['Identify root cause','Apply fix','Write regression test'],tags:['bugfix','auth'],notes:'Root cause was a race condition in the token rotation middleware.'},
+  {title:'Reply to client feedback email',pri:'P2',priClass:'pri-2',due:'10:15 AM',priLabel:'Medium',desc:'Addressed the 3 concerns raised in the feedback and proposed next steps.',subs:['Draft response','Get approval from PM'],tags:['client','communication'],notes:'Client was happy with the turnaround.'},
+  {title:'Deploy hotfix to production',pri:'P1',priClass:'pri-1',due:'11:45 AM',priLabel:'High',desc:'Emergency deploy to fix the auth token issue affecting all users.',subs:['Run pre-deploy checks','Deploy to production','Monitor error rates'],tags:['deployment','hotfix'],notes:'Rollback plan documented in the incident channel.'}
+];
+
+let selectedIdx=2;
+
+function selectTask(el){
+  // Remove previous selection highlight
+  document.querySelectorAll('.task-item').forEach(t=>{
+    t.classList.remove('bg-orange/[0.04]');
+    t.removeAttribute('id');
+  });
+  el.classList.add('bg-orange/[0.04]');
+  el.id='activeTask';
+  const idx=parseInt(el.dataset.task);
+  selectedIdx=idx;
+  renderDetail(idx);
 }
-function toggleCheck(el){
-  const cb=el.querySelector('.checkbox');
-  cb.classList.toggle('checked');
-  el.classList.toggle('opacity-50');
-  const text=el.querySelector('.font-medium');
-  if(text)text.classList.toggle('line-through');
-  if(text)text.classList.toggle('text-gray-500');
-  if(text)text.classList.toggle('text-gray-900');
+
+function renderDetail(idx){
+  const t=tasks[idx];
+  const subsHtml=t.subs.map((s,i)=>{
+    const done=i===0&&idx===2;
+    return `<div class="flex items-center gap-3 bg-white border border-stone-200 rounded-lg px-4 py-3 cursor-pointer" onclick="toggleSub(this)">
+      <div class="sub-check${done?' done':''}"><svg width="10" height="10" fill="none" stroke="white" stroke-width="2.5" stroke-linecap="round" viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg></div>
+      <span class="text-sm ${done?'text-charcoalLight line-through':'text-charcoal'}">${s}</span>
+    </div>`;
+  }).join('');
+  const tagsHtml=t.tags.map((tg,i)=>{
+    const isFirst=i===0;
+    return `<span class="text-xs font-medium ${isFirst?'bg-orange/10 text-orange border-orange/20':'bg-stone-100 text-charcoalMid border-stone-200'} border px-2.5 py-1 rounded-full">${tg}</span>`;
+  }).join('');
+  document.getElementById('detailContent').innerHTML=`
+    <div class="mb-6">
+      <h1 class="text-2xl font-bold text-charcoal leading-tight mb-2">${t.title}</h1>
+      <div class="flex items-center gap-3">
+        <span class="${t.priClass} text-xs font-semibold px-2 py-0.5 rounded">${t.pri}</span>
+        <span class="text-xs text-charcoalLight">Due ${t.due}</span>
+      </div>
+    </div>
+    <div class="mb-6">
+      <label class="text-xs font-semibold text-charcoalMid uppercase tracking-wider mb-2 block">Description</label>
+      <div class="text-sm text-charcoalMid leading-relaxed bg-white border border-stone-200 rounded-lg p-4">${t.desc}</div>
+    </div>
+    ${t.subs.length?`<div class="mb-6">
+      <label class="text-xs font-semibold text-charcoalMid uppercase tracking-wider mb-3 block">Subtasks</label>
+      <div class="space-y-2">${subsHtml}</div>
+    </div>`:''}
+    <div class="mb-6">
+      <label class="text-xs font-semibold text-charcoalMid uppercase tracking-wider mb-2 block">Tags</label>
+      <div class="flex items-center gap-2 flex-wrap">${tagsHtml}</div>
+    </div>
+    <div class="flex items-center gap-6 mb-6">
+      <div>
+        <label class="text-xs font-semibold text-charcoalMid uppercase tracking-wider mb-1.5 block">Due Date</label>
+        <div class="flex items-center gap-2 bg-white border border-stone-200 rounded-lg px-3 py-2">
+          <svg width="14" height="14" fill="none" stroke="#a8a29e" stroke-width="2" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+          <span class="text-sm text-charcoal">${t.due}</span>
+        </div>
+      </div>
+      <div>
+        <label class="text-xs font-semibold text-charcoalMid uppercase tracking-wider mb-1.5 block">Priority</label>
+        <div class="flex items-center gap-1.5 bg-white border border-stone-200 rounded-lg px-3 py-2">
+          <div class="w-2.5 h-2.5 rounded-full ${t.pri==='P1'?'bg-red-500':t.pri==='P2'?'bg-orange':'bg-charcoalLight'}"></div>
+          <span class="text-sm text-charcoal">${t.priLabel}</span>
+        </div>
+      </div>
+    </div>
+    ${t.notes?`<div class="mb-8">
+      <label class="text-xs font-semibold text-charcoalMid uppercase tracking-wider mb-2 block">Notes</label>
+      <div class="text-sm text-charcoalMid leading-relaxed bg-white border border-stone-200 rounded-lg p-4 min-h-[80px]">${t.notes}</div>
+    </div>`:''}
+    <button class="bg-orange text-white font-semibold px-6 py-3 rounded-lg cursor-pointer hover:bg-orange/90 transition flex items-center gap-2" onclick="completeActive()">
+      <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg>
+      Mark Complete
+    </button>
+  `;
 }
-function openAddModal(){document.getElementById('addModal').classList.remove('hidden');document.getElementById('addModal').classList.add('flex')}
-function closeAddModal(){document.getElementById('addModal').classList.add('hidden');document.getElementById('addModal').classList.remove('flex')}
+
+// Checkbox toggle
+function toggleDone(taskEl){
+  const cb=taskEl.querySelector('.task-check');
+  const title=taskEl.querySelector('.task-title');
+  const isDone=cb.classList.contains('done');
+  if(isDone){
+    cb.classList.remove('done');
+    taskEl.classList.remove('opacity-50');
+    if(title){title.classList.remove('struck')}
+  }else{
+    cb.classList.add('done');
+    taskEl.classList.add('opacity-50');
+    if(title){title.classList.add('struck')}
+  }
+}
+
+// Focus mode: double-click
+let focusEl=null;
+function toggleFocus(el){
+  if(focusEl===el){
+    // Exit focus
+    document.body.classList.remove('focus-active');
+    el.classList.remove('focus-target');
+    document.getElementById('rightPanel').classList.remove('focus-target');
+    focusEl=null;
+  }else{
+    // Enter focus
+    if(focusEl){
+      focusEl.classList.remove('focus-target');
+    }
+    document.body.classList.add('focus-active');
+    el.classList.add('focus-target');
+    // Also keep right panel visible for the focused task
+    document.getElementById('rightPanel').classList.add('focus-target');
+    focusEl=el;
+    // Also select the task
+    selectTask(el);
+  }
+}
+
+// Exit focus on Escape
+document.addEventListener('keydown',function(e){
+  if(e.key==='Escape'&&focusEl){
+    document.body.classList.remove('focus-active');
+    focusEl.classList.remove('focus-target');
+    document.getElementById('rightPanel').classList.remove('focus-target');
+    focusEl=null;
+  }
+});
+
+// Subtask toggle
+function toggleSub(el){
+  const cb=el.querySelector('.sub-check');
+  const text=el.querySelector('span');
+  cb.classList.toggle('done');
+  text.classList.toggle('line-through');
+  text.classList.toggle('text-charcoalLight');
+  text.classList.toggle('text-charcoal');
+}
+
+// Filter tabs
+function setFilter(btn){
+  document.querySelectorAll('.filter-tab').forEach(t=>{
+    t.classList.remove('active');
+    t.classList.add('text-charcoalLight');
+  });
+  btn.classList.add('active');
+  btn.classList.remove('text-charcoalLight');
+}
+
+// Complete active task
+function completeActive(){
+  const el=document.getElementById('activeTask');
+  if(el){
+    toggleDone(el);
+  }
+}
 </script>
 </body>
 </html>$HTML$,
-  1
+  3
 )
 ON CONFLICT (template_id) DO UPDATE SET
   html_content = EXCLUDED.html_content,
-  version = template_previews.version + 1,
+  version = EXCLUDED.version,
   updated_at = NOW();

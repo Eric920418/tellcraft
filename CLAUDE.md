@@ -112,7 +112,7 @@ pm2 describe tellcraft-backend            # 詳細資訊（記憶體/重啟次�
 | `uiux_quality_gate` | Quality Gate 執行中 |
 | `uiux_complete` / `uiux_iterating` | UIUX 完成（可迭代或部署）/ 迭代修改中 |
 | `fast_generating` | 快速模式生成中（攔截用戶輸入，完成後 → `uiux_complete`） |
-| `deployer_confirm` / `deployer_deploying` / `deployer_failed` / `deployer_complete` | 部署流程 |
+| `deployer_deploying` / `deployer_failed` / `deployer_complete` | 部署流程（用戶說「部署」直接執行，無二次確認） |
 | `deployer_rollback_select` | 等待用戶選擇回滾版本 |
 
 ### UIUX Pipeline 概覽

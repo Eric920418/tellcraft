@@ -59,12 +59,12 @@ interface Message {
     | 'uiux_structure_generating' | 'uiux_structure_complete' | 'uiux_animation_generating' | 'uiux_animation_complete' | 'uiux_rwd_generating'
     | 'uiux_quality_gate_running' | 'uiux_quality_gate_fixing' | 'uiux_quality_gate_complete'
     | 'uiux_complete' | 'uiux_iterating' | 'uiux_iteration_complete'
-    | 'deployer_checking' | 'deployer_confirm' | 'deployer_deploying' | 'deployer_code_sync' | 'deployer_complete' | 'deployer_error' | 'deployer_cancelled' | 'deployer_rolling_back' | 'deployer_rollback_select'
+    | 'deployer_checking' | 'deployer_deploying' | 'deployer_code_sync' | 'deployer_complete' | 'deployer_error' | 'deployer_cancelled' | 'deployer_rolling_back' | 'deployer_rollback_select'
   progress?: { current: number; total: number; step: string }
   // UIUX 模板系統擴展
   layoutHint?: 'default' | 'split' | 'full_preview'
   richContent?: {
-    type: 'template_picker' | 'variant_picker' | 'design_preview' | 'code_preview' | 'quality_gate_report' | 'deploy_confirm' | 'deploy_progress' | 'deploy_result' | 'deployment_history'
+    type: 'template_picker' | 'variant_picker' | 'design_preview' | 'code_preview' | 'quality_gate_report' | 'deploy_progress' | 'deploy_result' | 'deployment_history'
     data: Record<string, unknown>
   }
   // Quick Reply 可點擊選項

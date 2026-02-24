@@ -7,295 +7,556 @@ VALUES (
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Metrix — 智能數據分析平台</title>
+<title>Pulse — SaaS Analytics Dashboard</title>
 <script src="https://cdn.tailwindcss.com"></script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=Noto+Sans+TC:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&display=swap" rel="stylesheet">
 <script>
-tailwind.config={theme:{extend:{colors:{surface:'#0b0f1a',card:'#111827',elevated:'#1f2937',border:'#374151',text:'#f9fafb',muted:'#9ca3af',dim:'#6b7280',primary:'#818cf8',secondary:'#a78bfa',accent:'#c084fc',cyan:'#22d3ee',pink:'#f472b6'},fontFamily:{sans:['Inter','Noto Sans TC','sans-serif']}}}}
+tailwind.config = {
+  theme: {
+    extend: {
+      fontFamily: { sans: ['DM Sans', 'sans-serif'] },
+      colors: {
+        teal: { 50:'#f0fdfa', 100:'#ccfbf1', 200:'#99f6e4', 300:'#5eead4', 400:'#2dd4bf', 500:'#14b8a6', 600:'#0d9488', 700:'#0f766e', 800:'#115e59', 900:'#134e4a' },
+        slate: { 50:'#f8fafc', 100:'#f1f5f9', 200:'#e2e8f0', 300:'#cbd5e1', 400:'#94a3b8', 500:'#64748b', 600:'#475569', 700:'#334155', 800:'#1e293b', 900:'#0f172a' }
+      }
+    }
+  }
+}
 </script>
 <style>
-*{margin:0;padding:0;box-sizing:border-box}
-html{scroll-behavior:smooth}
-body{font-family:'Inter','Noto Sans TC',sans-serif;background:#0b0f1a;color:#f9fafb}
-.grad-text{background:linear-gradient(135deg,#818cf8,#c084fc,#f472b6);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text}
-.grad-bg{background:linear-gradient(135deg,#818cf8,#a78bfa,#c084fc)}
-.grad-border{border-image:linear-gradient(135deg,#818cf8,#c084fc) 1}
-.glow-card{transition:all .3s ease}.glow-card:hover{border-color:rgba(129,140,248,.3);box-shadow:0 0 30px rgba(129,140,248,.08)}
-.feature-card{transition:all .3s ease}.feature-card:hover{transform:translateY(-4px);border-color:rgba(129,140,248,.3)}
-.price-card{transition:all .3s ease}.price-card:hover{transform:translateY(-4px)}
-.price-card.featured{border-color:rgba(129,140,248,.4);background:linear-gradient(180deg,rgba(129,140,248,.05),transparent)}
-.fade-up{opacity:0;transform:translateY(20px);transition:opacity .7s ease,transform .7s ease}
-.fade-up.visible{opacity:1;transform:translateY(0)}
-.hero-mesh{position:relative;overflow:hidden}
-.hero-mesh::before{content:'';position:absolute;top:-50%;left:-50%;width:200%;height:200%;background:radial-gradient(circle at 30% 30%,rgba(129,140,248,.12) 0%,transparent 50%),radial-gradient(circle at 70% 70%,rgba(192,132,252,.08) 0%,transparent 50%);animation:float 20s ease-in-out infinite}
-@keyframes float{0%,100%{transform:translate(0,0)}50%{transform:translate(2%,-2%)}}
-::-webkit-scrollbar{width:5px}::-webkit-scrollbar-track{background:#0b0f1a}::-webkit-scrollbar-thumb{background:#374151;border-radius:3px}
+* { margin:0; padding:0; box-sizing:border-box }
+body { font-family:'DM Sans',sans-serif; background:#f8fafc; color:#0f172a }
+
+/* Layered shadow depth strategy */
+.layer-shadow { box-shadow: 0 1px 2px rgba(0,0,0,0.04), 0 4px 12px rgba(0,0,0,0.06), 0 12px 28px rgba(0,0,0,0.04); }
+.layer-shadow-sm { box-shadow: 0 1px 2px rgba(0,0,0,0.04), 0 2px 8px rgba(0,0,0,0.05); }
+.layer-shadow-lg { box-shadow: 0 1px 3px rgba(0,0,0,0.05), 0 8px 20px rgba(0,0,0,0.08), 0 20px 44px rgba(0,0,0,0.06); }
+
+/* Pulse dot animation */
+@keyframes pulse-dot {
+  0%, 100% { transform: scale(1); opacity: 1; }
+  50% { transform: scale(1.8); opacity: 0.3; }
+}
+@keyframes pulse-ring {
+  0% { transform: scale(1); opacity: 0.6; }
+  100% { transform: scale(2.5); opacity: 0; }
+}
+.pulse-dot { position: relative; }
+.pulse-dot::before {
+  content: '';
+  position: absolute;
+  top: 50%; left: 50%;
+  width: 8px; height: 8px;
+  margin: -4px 0 0 -4px;
+  background: #0d9488;
+  border-radius: 50%;
+  animation: pulse-dot 2s ease-in-out infinite;
+}
+.pulse-dot::after {
+  content: '';
+  position: absolute;
+  top: 50%; left: 50%;
+  width: 8px; height: 8px;
+  margin: -4px 0 0 -4px;
+  border: 2px solid #0d9488;
+  border-radius: 50%;
+  animation: pulse-ring 2s ease-out infinite;
+}
+
+/* SVG ring animation */
+@keyframes ring-fill {
+  from { stroke-dashoffset: var(--circumference); }
+  to { stroke-dashoffset: var(--target-offset); }
+}
+.ring-animate {
+  animation: ring-fill 1.5s cubic-bezier(0.4, 0, 0.2, 1) forwards;
+}
+
+/* Filter pill */
+.filter-pill {
+  transition: all 0.2s ease;
+  cursor: pointer;
+  user-select: none;
+}
+.filter-pill:hover { background: #f0fdfa; border-color: #0d9488; color: #0d9488; }
+.filter-pill.active { background: #f0fdfa; border-color: #0d9488; color: #0d9488; }
+
+/* Funnel bar animation */
+@keyframes funnel-grow {
+  from { width: 0; }
+  to { width: var(--target-width); }
+}
+.funnel-bar { animation: funnel-grow 1s cubic-bezier(0.4, 0, 0.2, 1) forwards; }
+
+/* Fade in */
+.fade-in { opacity: 0; transform: translateY(12px); transition: opacity 0.6s ease, transform 0.6s ease; }
+.fade-in.visible { opacity: 1; transform: translateY(0); }
+
+/* Activity dot */
+.activity-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+
+/* Live toggle */
+.live-toggle { position: relative; width: 36px; height: 20px; border-radius: 10px; cursor: pointer; transition: background 0.3s; }
+.live-toggle .knob { position: absolute; top: 2px; left: 2px; width: 16px; height: 16px; border-radius: 50%; background: white; transition: transform 0.3s; box-shadow: 0 1px 3px rgba(0,0,0,0.15); }
+.live-toggle.on { background: #0d9488; }
+.live-toggle.on .knob { transform: translateX(16px); }
+.live-toggle.off { background: #cbd5e1; }
 </style>
 </head>
 <body>
 
-<!-- Nav -->
-<nav class="fixed top-0 w-full z-50 bg-surface/80 backdrop-blur-md border-b border-border/50">
-<div class="max-w-6xl mx-auto px-6 h-14 flex items-center justify-between">
-<div class="flex items-center gap-8">
-<a href="#" class="flex items-center gap-2"><div class="w-7 h-7 grad-bg rounded-lg flex items-center justify-center"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2"><path d="M18 20V10M12 20V4M6 20v-6"/></svg></div><span class="font-bold text-sm">Metrix</span></a>
-<div class="hidden md:flex items-center gap-6">
-<a href="#features" class="text-xs text-muted hover:text-text transition-colors">功能</a>
-<a href="#pricing" class="text-xs text-muted hover:text-text transition-colors">價格</a>
-<a href="#testimonials" class="text-xs text-muted hover:text-text transition-colors">客戶</a>
-<a onclick="handleAction('文件')" class="cursor-pointer text-xs text-muted hover:text-text transition-colors">文件</a>
-</div>
-</div>
-<div class="flex items-center gap-3">
-<button onclick="handleAction('登入')" class="text-xs text-muted hover:text-text transition-colors hidden md:block">登入</button>
-<button onclick="handleAction('免費試用')" class="px-4 py-1.5 grad-bg text-white text-xs font-semibold rounded-lg hover:opacity-90 transition-opacity">免費試用</button>
-</div>
-</div>
-</nav>
+<!-- Top Bar -->
+<header class="bg-white border-b border-slate-200 px-6 py-3 flex items-center justify-between layer-shadow-sm sticky top-0 z-50">
+  <div class="flex items-center gap-3">
+    <div class="w-8 h-8 bg-teal-600 rounded-lg flex items-center justify-center">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5" stroke-linecap="round"><circle cx="12" cy="12" r="3"/><path d="M12 2v4m0 12v4m-10-10h4m12 0h4"/><path d="M4.93 4.93l2.83 2.83m8.48 8.48l2.83 2.83m-14.14 0l2.83-2.83m8.48-8.48l2.83-2.83"/></svg>
+    </div>
+    <span class="text-lg font-bold text-slate-900">Pulse</span>
+    <span class="text-sm text-slate-400 font-medium hidden sm:inline ml-1">SaaS Analytics</span>
+  </div>
+  <div class="flex items-center gap-4">
+    <button onclick="handleAction('Notifications')" class="relative cursor-pointer text-slate-400 hover:text-slate-600 transition-colors">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 8A6 6 0 006 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 01-3.46 0"/></svg>
+      <span class="absolute -top-1 -right-1 w-2 h-2 bg-red-500 rounded-full"></span>
+    </button>
+    <div onclick="handleAction('Profile')" class="w-8 h-8 bg-teal-100 rounded-full flex items-center justify-center cursor-pointer">
+      <span class="text-xs font-bold text-teal-700">JC</span>
+    </div>
+  </div>
+</header>
 
-<!-- Hero -->
-<section class="hero-mesh pt-14 min-h-screen flex items-center">
-<div class="relative z-10 max-w-6xl mx-auto px-6 py-20 text-center">
-<div class="inline-flex items-center gap-2 px-3 py-1 bg-primary/10 border border-primary/20 rounded-full mb-6 fade-up">
-<span class="w-1.5 h-1.5 bg-cyan rounded-full animate-pulse"></span>
-<span class="text-xs text-primary">全新 AI 洞察引擎已上線</span>
-</div>
-<h1 class="text-4xl md:text-6xl font-extrabold leading-tight mb-6 fade-up">
-讓數據為你<br><span class="grad-text">說出故事</span>
-</h1>
-<p class="text-sm md:text-base text-muted max-w-xl mx-auto mb-10 leading-relaxed fade-up">
-Metrix 是下一代數據分析平台。連接你的資料源，AI 自動發現趨勢、異常和機會。不需要寫 SQL，不需要等報表。
-</p>
-<div class="flex items-center justify-center gap-3 mb-16 fade-up">
-<button onclick="handleAction('免費試用 14 天')" class="px-6 py-3 grad-bg text-white text-sm font-semibold rounded-xl hover:opacity-90 transition-opacity">免費試用 14 天 →</button>
-<button onclick="handleAction('觀看 Demo')" class="px-6 py-3 border border-border text-muted text-sm rounded-xl hover:border-primary/50 hover:text-text transition-all">
-<span class="inline-flex items-center gap-2">▶ 觀看 Demo</span>
-</button>
-</div>
-
-<!-- Product mock -->
-<div class="max-w-4xl mx-auto fade-up">
-<div class="bg-card border border-border rounded-2xl overflow-hidden shadow-2xl shadow-primary/5">
-<!-- Mock toolbar -->
-<div class="flex items-center gap-2 px-4 py-3 bg-elevated border-b border-border">
-<div class="flex gap-1.5"><span class="w-3 h-3 rounded-full bg-red-500/60"></span><span class="w-3 h-3 rounded-full bg-yellow-500/60"></span><span class="w-3 h-3 rounded-full bg-green-500/60"></span></div>
-<div class="flex-1 flex justify-center"><div class="px-8 py-1 bg-surface rounded text-[10px] text-dim">app.metrix.io/dashboard</div></div>
-</div>
-<!-- Mock dashboard -->
-<div class="p-6 grid grid-cols-4 gap-4">
-<div class="bg-surface rounded-xl p-4 border border-border/50">
-<div class="text-[10px] text-dim mb-1">月營收</div>
-<div class="text-lg font-bold">$284.5K</div>
-<div class="text-[10px] text-green-400">↑ 12.3%</div>
-</div>
-<div class="bg-surface rounded-xl p-4 border border-border/50">
-<div class="text-[10px] text-dim mb-1">活躍用戶</div>
-<div class="text-lg font-bold">45.2K</div>
-<div class="text-[10px] text-green-400">↑ 8.7%</div>
-</div>
-<div class="bg-surface rounded-xl p-4 border border-border/50">
-<div class="text-[10px] text-dim mb-1">轉換率</div>
-<div class="text-lg font-bold">3.24%</div>
-<div class="text-[10px] text-red-400">↓ 0.5%</div>
-</div>
-<div class="bg-surface rounded-xl p-4 border border-border/50">
-<div class="text-[10px] text-dim mb-1">NPS</div>
-<div class="text-lg font-bold">72</div>
-<div class="text-[10px] text-green-400">↑ 4</div>
-</div>
-<!-- Chart area -->
-<div class="col-span-4 bg-surface rounded-xl p-4 border border-border/50 h-32 flex items-end gap-1">
-<div class="flex-1 bg-primary/20 rounded-t" style="height:40%"></div>
-<div class="flex-1 bg-primary/30 rounded-t" style="height:55%"></div>
-<div class="flex-1 bg-primary/20 rounded-t" style="height:45%"></div>
-<div class="flex-1 bg-primary/40 rounded-t" style="height:65%"></div>
-<div class="flex-1 bg-primary/30 rounded-t" style="height:50%"></div>
-<div class="flex-1 bg-primary/50 rounded-t" style="height:75%"></div>
-<div class="flex-1 bg-primary/40 rounded-t" style="height:60%"></div>
-<div class="flex-1 bg-primary/60 rounded-t" style="height:85%"></div>
-<div class="flex-1 bg-primary/50 rounded-t" style="height:70%"></div>
-<div class="flex-1 bg-primary/70 rounded-t" style="height:90%"></div>
-<div class="flex-1 bg-primary/60 rounded-t" style="height:80%"></div>
-<div class="flex-1 bg-primary rounded-t" style="height:95%"></div>
-</div>
-</div>
-</div>
+<!-- Filter Bar (KEY DIFFERENTIATOR) -->
+<div class="bg-white border-b border-slate-100 px-6 py-3 flex items-center gap-3 flex-wrap layer-shadow-sm">
+  <div class="filter-pill active inline-flex items-center gap-2 px-4 py-2 border border-slate-200 rounded-full text-sm font-medium text-slate-600" onclick="toggleFilter(this)">
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></svg>
+    Last 30 Days
+    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M6 9l6 6 6-6"/></svg>
+  </div>
+  <div class="filter-pill inline-flex items-center gap-2 px-4 py-2 border border-slate-200 rounded-full text-sm font-medium text-slate-600" onclick="toggleFilter(this)">
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
+    All Channels
+    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M6 9l6 6 6-6"/></svg>
+  </div>
+  <div class="filter-pill inline-flex items-center gap-2 px-4 py-2 border border-slate-200 rounded-full text-sm font-medium text-slate-600" onclick="toggleFilter(this)">
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M2 12h20M12 2a15.3 15.3 0 014 10 15.3 15.3 0 01-4 10 15.3 15.3 0 01-4-10 15.3 15.3 0 014-10"/></svg>
+    All Regions
+    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M6 9l6 6 6-6"/></svg>
+  </div>
+  <div class="filter-pill inline-flex items-center gap-2 px-4 py-2 border border-slate-200 rounded-full text-sm font-medium text-slate-600" onclick="toggleFilter(this)">
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="5" y="2" width="14" height="20" rx="2"/><path d="M12 18h.01"/></svg>
+    All Devices
+    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M6 9l6 6 6-6"/></svg>
+  </div>
+  <div class="ml-auto flex items-center gap-2">
+    <div class="flex items-center gap-2 px-3 py-1.5 rounded-full bg-teal-50 border border-teal-200">
+      <span class="relative w-2 h-2">
+        <span class="absolute inset-0 bg-teal-500 rounded-full animate-ping opacity-60"></span>
+        <span class="absolute inset-0 bg-teal-500 rounded-full"></span>
+      </span>
+      <span class="text-xs font-semibold text-teal-700">Live</span>
+    </div>
+    <div id="liveToggle" class="live-toggle on" onclick="toggleLive()">
+      <div class="knob"></div>
+    </div>
+  </div>
 </div>
 
-<!-- Logos -->
-<div class="mt-14 fade-up">
-<p class="text-xs text-dim mb-4">超過 2,000 家企業信任</p>
-<div class="flex items-center justify-center gap-8 flex-wrap opacity-40">
-<span class="text-sm font-bold">Shopify</span>
-<span class="text-sm font-bold">Stripe</span>
-<span class="text-sm font-bold">Notion</span>
-<span class="text-sm font-bold">Linear</span>
-<span class="text-sm font-bold">Vercel</span>
-</div>
-</div>
-</div>
-</section>
+<main class="max-w-7xl mx-auto px-6 py-8">
 
-<!-- Features -->
-<section id="features" class="py-20 px-6">
-<div class="max-w-6xl mx-auto">
-<div class="text-center mb-12 fade-up">
-<span class="text-xs text-primary font-semibold uppercase tracking-widest">Features</span>
-<h2 class="text-3xl font-extrabold mt-2">為什麼選擇 Metrix</h2>
-<p class="text-sm text-muted mt-2 max-w-md mx-auto">從資料連接到洞察產出，一站搞定。</p>
-</div>
-<div class="grid md:grid-cols-3 gap-4">
-<div class="feature-card bg-card border border-border rounded-2xl p-6 fade-up">
-<div class="w-10 h-10 bg-primary/10 rounded-xl flex items-center justify-center mb-4"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#818cf8" stroke-width="2"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg></div>
-<h3 class="font-bold mb-2">AI 自動洞察</h3>
-<p class="text-xs text-muted leading-relaxed">不用問問題，AI 主動發現數據中的趨勢、異常和機會，每天推送個人化報告。</p>
-</div>
-<div class="feature-card bg-card border border-border rounded-2xl p-6 fade-up">
-<div class="w-10 h-10 bg-secondary/10 rounded-xl flex items-center justify-center mb-4"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#a78bfa" stroke-width="2"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg></div>
-<h3 class="font-bold mb-2">200+ 資料源</h3>
-<p class="text-xs text-muted leading-relaxed">一鍵連接 Google Analytics、Stripe、Shopify、PostgreSQL 等 200+ 資料源，5 分鐘內開始分析。</p>
-</div>
-<div class="feature-card bg-card border border-border rounded-2xl p-6 fade-up">
-<div class="w-10 h-10 bg-cyan/10 rounded-xl flex items-center justify-center mb-4"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#22d3ee" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 21V9"/></svg></div>
-<h3 class="font-bold mb-2">拖拉式儀表板</h3>
-<p class="text-xs text-muted leading-relaxed">直覺的視覺化建構工具。拖拉圖表、設定篩選器、即時協作。不需要工程師介入。</p>
-</div>
-<div class="feature-card bg-card border border-border rounded-2xl p-6 fade-up">
-<div class="w-10 h-10 bg-pink/10 rounded-xl flex items-center justify-center mb-4"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#f472b6" stroke-width="2"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 00-3-3.87M16 3.13a4 4 0 010 7.75"/></svg></div>
-<h3 class="font-bold mb-2">團隊協作</h3>
-<p class="text-xs text-muted leading-relaxed">分享儀表板、標註數據、設定告警。讓整個團隊都能用數據做決策。</p>
-</div>
-<div class="feature-card bg-card border border-border rounded-2xl p-6 fade-up">
-<div class="w-10 h-10 bg-green-500/10 rounded-xl flex items-center justify-center mb-4"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#22c55e" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg></div>
-<h3 class="font-bold mb-2">企業級安全</h3>
-<p class="text-xs text-muted leading-relaxed">SOC 2 Type II 認證、端對端加密、RBAC 權限控制。你的數據只屬於你。</p>
-</div>
-<div class="feature-card bg-card border border-border rounded-2xl p-6 fade-up">
-<div class="w-10 h-10 bg-amber-500/10 rounded-xl flex items-center justify-center mb-4"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#f59e0b" stroke-width="2"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><path d="M22 6l-10 7L2 6"/></svg></div>
-<h3 class="font-bold mb-2">排程報表</h3>
-<p class="text-xs text-muted leading-relaxed">設定每日 / 每週自動報表，推送到 Email、Slack 或 LINE。再也不用手動截圖。</p>
-</div>
-</div>
-</div>
-</section>
+  <!-- KPI Ring Section -->
+  <section class="mb-8 fade-in">
+    <div class="flex items-center gap-2 mb-5">
+      <h2 class="text-lg font-bold text-slate-800">Key Metrics</h2>
+      <span class="text-xs text-slate-400 font-medium">vs. previous period</span>
+    </div>
+    <div class="grid grid-cols-2 lg:grid-cols-4 gap-5">
 
-<!-- Pricing -->
-<section id="pricing" class="py-20 px-6 bg-card/50">
-<div class="max-w-5xl mx-auto">
-<div class="text-center mb-12 fade-up">
-<span class="text-xs text-primary font-semibold uppercase tracking-widest">Pricing</span>
-<h2 class="text-3xl font-extrabold mt-2">簡單透明的價格</h2>
-<p class="text-sm text-muted mt-2">14 天免費試用，不需要信用卡。</p>
-</div>
-<div class="grid md:grid-cols-3 gap-5">
-<div class="price-card bg-card border border-border rounded-2xl p-6 fade-up">
-<div class="text-xs text-muted mb-4 uppercase tracking-wider">Starter</div>
-<div class="flex items-baseline gap-1 mb-1"><span class="text-3xl font-extrabold">$29</span><span class="text-sm text-dim">/月</span></div>
-<p class="text-xs text-dim mb-6">適合個人和小團隊</p>
-<ul class="space-y-2 mb-8 text-xs text-muted">
-<li class="flex items-center gap-2"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#818cf8" stroke-width="2"><path d="M20 6L9 17l-5-5"/></svg>5 個資料源</li>
-<li class="flex items-center gap-2"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#818cf8" stroke-width="2"><path d="M20 6L9 17l-5-5"/></svg>10 個儀表板</li>
-<li class="flex items-center gap-2"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#818cf8" stroke-width="2"><path d="M20 6L9 17l-5-5"/></svg>基礎 AI 洞察</li>
-<li class="flex items-center gap-2"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#818cf8" stroke-width="2"><path d="M20 6L9 17l-5-5"/></svg>3 位成員</li>
-</ul>
-<button onclick="handleAction('Starter 方案')" class="w-full py-2.5 border border-border text-muted rounded-xl text-sm hover:border-primary hover:text-text transition-all">開始試用</button>
-</div>
+      <!-- MRR Ring -->
+      <div class="bg-white rounded-2xl p-6 layer-shadow flex flex-col items-center">
+        <div class="relative w-32 h-32 mb-3">
+          <svg viewBox="0 0 120 120" class="w-full h-full -rotate-90">
+            <circle cx="60" cy="60" r="52" fill="none" stroke="#e2e8f0" stroke-width="8"/>
+            <circle cx="60" cy="60" r="52" fill="none" stroke="#0d9488" stroke-width="8"
+              stroke-linecap="round"
+              stroke-dasharray="326.73"
+              stroke-dashoffset="326.73"
+              class="ring-animate"
+              style="--circumference:326.73;--target-offset:71.88"/>
+          </svg>
+          <div class="absolute inset-0 flex flex-col items-center justify-center">
+            <span class="text-2xl font-bold text-slate-900">$48.2k</span>
+            <span class="text-xs text-teal-600 font-semibold">78%</span>
+          </div>
+        </div>
+        <div class="text-sm font-semibold text-slate-700">MRR</div>
+        <div class="text-xs text-slate-400 mt-0.5">of $62k target</div>
+        <div class="flex items-center gap-1 mt-2">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#0d9488" stroke-width="2.5"><path d="M18 15l-6-6-6 6"/></svg>
+          <span class="text-xs font-semibold text-teal-600">+12.3%</span>
+        </div>
+      </div>
 
-<div class="price-card featured bg-card border border-primary/30 rounded-2xl p-6 relative fade-up">
-<div class="absolute -top-3 left-1/2 -translate-x-1/2 px-3 py-0.5 grad-bg text-white text-[10px] font-bold rounded-full">推薦</div>
-<div class="text-xs text-primary mb-4 uppercase tracking-wider">Pro</div>
-<div class="flex items-baseline gap-1 mb-1"><span class="text-3xl font-extrabold grad-text">$79</span><span class="text-sm text-dim">/月</span></div>
-<p class="text-xs text-dim mb-6">適合成長中的團隊</p>
-<ul class="space-y-2 mb-8 text-xs text-muted">
-<li class="flex items-center gap-2"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#818cf8" stroke-width="2"><path d="M20 6L9 17l-5-5"/></svg>無限資料源</li>
-<li class="flex items-center gap-2"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#818cf8" stroke-width="2"><path d="M20 6L9 17l-5-5"/></svg>無限儀表板</li>
-<li class="flex items-center gap-2"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#818cf8" stroke-width="2"><path d="M20 6L9 17l-5-5"/></svg>進階 AI 洞察 + 預測</li>
-<li class="flex items-center gap-2"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#818cf8" stroke-width="2"><path d="M20 6L9 17l-5-5"/></svg>15 位成員</li>
-<li class="flex items-center gap-2"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#818cf8" stroke-width="2"><path d="M20 6L9 17l-5-5"/></svg>排程報表 + Slack</li>
-</ul>
-<button onclick="handleAction('Pro 方案')" class="w-full py-2.5 grad-bg text-white rounded-xl text-sm font-semibold hover:opacity-90 transition-opacity">開始試用</button>
-</div>
+      <!-- Churn Rate Ring -->
+      <div class="bg-white rounded-2xl p-6 layer-shadow flex flex-col items-center">
+        <div class="relative w-32 h-32 mb-3">
+          <svg viewBox="0 0 120 120" class="w-full h-full -rotate-90">
+            <circle cx="60" cy="60" r="52" fill="none" stroke="#e2e8f0" stroke-width="8"/>
+            <circle cx="60" cy="60" r="52" fill="none" stroke="#22c55e" stroke-width="8"
+              stroke-linecap="round"
+              stroke-dasharray="326.73"
+              stroke-dashoffset="326.73"
+              class="ring-animate"
+              style="--circumference:326.73;--target-offset:49.01"/>
+          </svg>
+          <div class="absolute inset-0 flex flex-col items-center justify-center">
+            <span class="text-2xl font-bold text-slate-900">2.1%</span>
+            <span class="text-xs text-green-600 font-semibold">85%</span>
+          </div>
+        </div>
+        <div class="text-sm font-semibold text-slate-700">Churn Rate</div>
+        <div class="text-xs text-slate-400 mt-0.5">85% healthy</div>
+        <div class="flex items-center gap-1 mt-2">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#22c55e" stroke-width="2.5"><path d="M18 15l-6-6-6 6"/></svg>
+          <span class="text-xs font-semibold text-green-600">-0.4%</span>
+        </div>
+      </div>
 
-<div class="price-card bg-card border border-border rounded-2xl p-6 fade-up">
-<div class="text-xs text-muted mb-4 uppercase tracking-wider">Enterprise</div>
-<div class="flex items-baseline gap-1 mb-1"><span class="text-3xl font-extrabold">客製</span></div>
-<p class="text-xs text-dim mb-6">適合大型企業</p>
-<ul class="space-y-2 mb-8 text-xs text-muted">
-<li class="flex items-center gap-2"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#818cf8" stroke-width="2"><path d="M20 6L9 17l-5-5"/></svg>所有 Pro 功能</li>
-<li class="flex items-center gap-2"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#818cf8" stroke-width="2"><path d="M20 6L9 17l-5-5"/></svg>SSO / SAML</li>
-<li class="flex items-center gap-2"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#818cf8" stroke-width="2"><path d="M20 6L9 17l-5-5"/></svg>專屬客戶經理</li>
-<li class="flex items-center gap-2"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#818cf8" stroke-width="2"><path d="M20 6L9 17l-5-5"/></svg>SLA 99.9%</li>
-<li class="flex items-center gap-2"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#818cf8" stroke-width="2"><path d="M20 6L9 17l-5-5"/></svg>自建部署選項</li>
-</ul>
-<button onclick="handleAction('Enterprise 方案')" class="w-full py-2.5 border border-border text-muted rounded-xl text-sm hover:border-primary hover:text-text transition-all">聯繫銷售</button>
-</div>
-</div>
-</div>
-</section>
+      <!-- NPS Score Ring -->
+      <div class="bg-white rounded-2xl p-6 layer-shadow flex flex-col items-center">
+        <div class="relative w-32 h-32 mb-3">
+          <svg viewBox="0 0 120 120" class="w-full h-full -rotate-90">
+            <circle cx="60" cy="60" r="52" fill="none" stroke="#e2e8f0" stroke-width="8"/>
+            <circle cx="60" cy="60" r="52" fill="none" stroke="#f59e0b" stroke-width="8"
+              stroke-linecap="round"
+              stroke-dasharray="326.73"
+              stroke-dashoffset="326.73"
+              class="ring-animate"
+              style="--circumference:326.73;--target-offset:32.67"/>
+          </svg>
+          <div class="absolute inset-0 flex flex-col items-center justify-center">
+            <span class="text-2xl font-bold text-slate-900">72</span>
+            <span class="text-xs text-amber-600 font-semibold">90%</span>
+          </div>
+        </div>
+        <div class="text-sm font-semibold text-slate-700">NPS Score</div>
+        <div class="text-xs text-slate-400 mt-0.5">90th percentile</div>
+        <div class="flex items-center gap-1 mt-2">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#f59e0b" stroke-width="2.5"><path d="M18 15l-6-6-6 6"/></svg>
+          <span class="text-xs font-semibold text-amber-600">+6 pts</span>
+        </div>
+      </div>
 
-<!-- Testimonials -->
-<section id="testimonials" class="py-20 px-6">
-<div class="max-w-5xl mx-auto">
-<div class="text-center mb-12 fade-up">
-<h2 class="text-3xl font-extrabold">客戶怎麼說</h2>
-</div>
-<div class="grid md:grid-cols-3 gap-4">
-<div class="glow-card bg-card border border-border rounded-2xl p-5 fade-up">
-<div class="flex items-center gap-1 text-yellow-400 mb-3 text-xs">★★★★★</div>
-<p class="text-xs text-muted leading-relaxed mb-4">"以前每週花 4 小時做報表，現在 Metrix 的 AI 自動幫我做好，而且洞察比我手動分析的還準確。"</p>
-<div class="flex items-center gap-2"><div class="w-7 h-7 rounded-full bg-primary/20 flex items-center justify-center text-[10px] font-bold text-primary">K</div><div><div class="text-xs font-semibold">Kevin Lin</div><div class="text-[10px] text-dim">數據分析師 @ PChome</div></div></div>
-</div>
-<div class="glow-card bg-card border border-border rounded-2xl p-5 fade-up">
-<div class="flex items-center gap-1 text-yellow-400 mb-3 text-xs">★★★★★</div>
-<p class="text-xs text-muted leading-relaxed mb-4">"團隊裡不會 SQL 的 PM 也能自己建儀表板了。Metrix 真正實現了『數據民主化』。"</p>
-<div class="flex items-center gap-2"><div class="w-7 h-7 rounded-full bg-secondary/20 flex items-center justify-center text-[10px] font-bold text-secondary">S</div><div><div class="text-xs font-semibold">Sarah Wu</div><div class="text-[10px] text-dim">VP of Product @ 91APP</div></div></div>
-</div>
-<div class="glow-card bg-card border border-border rounded-2xl p-5 fade-up">
-<div class="flex items-center gap-1 text-yellow-400 mb-3 text-xs">★★★★★</div>
-<p class="text-xs text-muted leading-relaxed mb-4">"從 Tableau 遷移到 Metrix，成本降了 60%，速度反而快了。AI 預測功能是殺手級應用。"</p>
-<div class="flex items-center gap-2"><div class="w-7 h-7 rounded-full bg-cyan/20 flex items-center justify-center text-[10px] font-bold text-cyan">J</div><div><div class="text-xs font-semibold">Jason Chen</div><div class="text-[10px] text-dim">CTO @ 新創公司</div></div></div>
-</div>
-</div>
-</div>
-</section>
+      <!-- Active Users Ring -->
+      <div class="bg-white rounded-2xl p-6 layer-shadow flex flex-col items-center">
+        <div class="relative w-32 h-32 mb-3">
+          <svg viewBox="0 0 120 120" class="w-full h-full -rotate-90">
+            <circle cx="60" cy="60" r="52" fill="none" stroke="#e2e8f0" stroke-width="8"/>
+            <circle cx="60" cy="60" r="52" fill="none" stroke="#0d9488" stroke-width="8"
+              stroke-linecap="round"
+              stroke-dasharray="326.73"
+              stroke-dashoffset="326.73"
+              class="ring-animate"
+              style="--circumference:326.73;--target-offset:114.35"/>
+          </svg>
+          <div class="absolute inset-0 flex flex-col items-center justify-center">
+            <span class="text-2xl font-bold text-slate-900">12.4k</span>
+            <span class="text-xs text-teal-600 font-semibold">65%</span>
+          </div>
+        </div>
+        <div class="text-sm font-semibold text-slate-700">Active Users</div>
+        <div class="text-xs text-slate-400 mt-0.5">65% growth target</div>
+        <div class="flex items-center gap-1 mt-2">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#0d9488" stroke-width="2.5"><path d="M18 15l-6-6-6 6"/></svg>
+          <span class="text-xs font-semibold text-teal-600">+23.1%</span>
+        </div>
+      </div>
 
-<!-- CTA -->
-<section class="py-20 px-6 relative overflow-hidden">
-<div class="absolute inset-0 bg-gradient-to-br from-primary/10 via-secondary/5 to-accent/10"></div>
-<div class="relative z-10 max-w-2xl mx-auto text-center fade-up">
-<h2 class="text-3xl font-extrabold mb-4">準備好讓數據說話了嗎？</h2>
-<p class="text-sm text-muted mb-8">14 天免費試用，不需要信用卡。5 分鐘內連接你的第一個資料源。</p>
-<button onclick="handleAction('開始免費試用')" class="px-8 py-3.5 grad-bg text-white text-sm font-bold rounded-xl hover:opacity-90 transition-opacity">開始免費試用 →</button>
-</div>
-</section>
+    </div>
+  </section>
 
-<!-- Footer -->
-<footer class="border-t border-border py-10 px-6">
-<div class="max-w-6xl mx-auto flex flex-col md:flex-row justify-between items-start gap-8">
-<div>
-<div class="flex items-center gap-2 mb-3"><div class="w-6 h-6 grad-bg rounded-md flex items-center justify-center"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2"><path d="M18 20V10M12 20V4M6 20v-6"/></svg></div><span class="font-bold text-sm">Metrix</span></div>
-<p class="text-xs text-dim max-w-xs">下一代數據分析平台。讓每個人都能用數據做出更好的決策。</p>
-</div>
-<div class="grid grid-cols-3 gap-10">
-<div><h4 class="text-xs font-semibold mb-3">產品</h4><div class="space-y-1.5"><a onclick="handleAction('功能')" class="block text-xs text-dim hover:text-text cursor-pointer transition-colors">功能</a><a onclick="handleAction('價格')" class="block text-xs text-dim hover:text-text cursor-pointer transition-colors">價格</a><a onclick="handleAction('整合')" class="block text-xs text-dim hover:text-text cursor-pointer transition-colors">整合</a><a onclick="handleAction('Changelog')" class="block text-xs text-dim hover:text-text cursor-pointer transition-colors">Changelog</a></div></div>
-<div><h4 class="text-xs font-semibold mb-3">資源</h4><div class="space-y-1.5"><a onclick="handleAction('文件')" class="block text-xs text-dim hover:text-text cursor-pointer transition-colors">文件</a><a onclick="handleAction('API')" class="block text-xs text-dim hover:text-text cursor-pointer transition-colors">API</a><a onclick="handleAction('Blog')" class="block text-xs text-dim hover:text-text cursor-pointer transition-colors">Blog</a></div></div>
-<div><h4 class="text-xs font-semibold mb-3">公司</h4><div class="space-y-1.5"><a onclick="handleAction('關於我們')" class="block text-xs text-dim hover:text-text cursor-pointer transition-colors">關於我們</a><a onclick="handleAction('隱私權')" class="block text-xs text-dim hover:text-text cursor-pointer transition-colors">隱私權</a><a onclick="handleAction('聯繫')" class="block text-xs text-dim hover:text-text cursor-pointer transition-colors">聯繫</a></div></div>
-</div>
-</div>
-<div class="max-w-6xl mx-auto border-t border-border mt-8 pt-6 text-center"><p class="text-[10px] text-dim">© 2024-2026 Metrix Inc. All rights reserved.</p></div>
-</footer>
+  <!-- Middle Section: Chart + Funnel -->
+  <section class="grid lg:grid-cols-2 gap-6 mb-8">
 
-<div id="toast" class="fixed bottom-6 left-1/2 -translate-x-1/2 bg-card border border-primary/20 text-text px-5 py-3 rounded-xl text-xs shadow-lg opacity-0 pointer-events-none transition-all duration-300 translate-y-2 z-50 max-w-sm text-center"></div>
+    <!-- Line Chart (Live Traffic) -->
+    <div class="bg-white rounded-2xl p-6 layer-shadow fade-in">
+      <div class="flex items-center justify-between mb-5">
+        <div class="flex items-center gap-2">
+          <h3 class="text-sm font-bold text-slate-800">Live Traffic</h3>
+          <span class="relative w-2 h-2 pulse-dot"></span>
+        </div>
+        <div class="flex items-center gap-2 text-xs text-slate-400">
+          <span class="flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-teal-500"></span>Sessions</span>
+          <span class="flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-teal-300"></span>Page Views</span>
+        </div>
+      </div>
+      <div class="relative h-48">
+        <svg viewBox="0 0 500 180" class="w-full h-full" preserveAspectRatio="none">
+          <!-- Grid lines -->
+          <line x1="0" y1="45" x2="500" y2="45" stroke="#f1f5f9" stroke-width="1"/>
+          <line x1="0" y1="90" x2="500" y2="90" stroke="#f1f5f9" stroke-width="1"/>
+          <line x1="0" y1="135" x2="500" y2="135" stroke="#f1f5f9" stroke-width="1"/>
+
+          <!-- Area fill - Sessions -->
+          <path d="M0,140 L35,130 L70,120 L105,115 L140,100 L175,90 L210,95 L245,70 L280,60 L315,55 L350,40 L385,45 L420,30 L455,35 L500,20 L500,180 L0,180 Z" fill="url(#tealGrad)" opacity="0.15"/>
+          <!-- Line - Sessions -->
+          <path d="M0,140 L35,130 L70,120 L105,115 L140,100 L175,90 L210,95 L245,70 L280,60 L315,55 L350,40 L385,45 L420,30 L455,35 L500,20" fill="none" stroke="#0d9488" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+
+          <!-- Area fill - Page Views -->
+          <path d="M0,155 L35,150 L70,145 L105,140 L140,130 L175,125 L210,130 L245,110 L280,100 L315,95 L350,80 L385,85 L420,70 L455,75 L500,60 L500,180 L0,180 Z" fill="url(#tealGrad2)" opacity="0.08"/>
+          <!-- Line - Page Views -->
+          <path d="M0,155 L35,150 L70,145 L105,140 L140,130 L175,125 L210,130 L245,110 L280,100 L315,95 L350,80 L385,85 L420,70 L455,75 L500,60" fill="none" stroke="#5eead4" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" stroke-dasharray="6,4"/>
+
+          <!-- Pulse dot at end of line -->
+          <circle cx="500" cy="20" r="4" fill="#0d9488"/>
+          <circle cx="500" cy="20" r="4" fill="#0d9488" opacity="0.4">
+            <animate attributeName="r" values="4;10;4" dur="2s" repeatCount="indefinite"/>
+            <animate attributeName="opacity" values="0.4;0;0.4" dur="2s" repeatCount="indefinite"/>
+          </circle>
+
+          <defs>
+            <linearGradient id="tealGrad" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stop-color="#0d9488" stop-opacity="0.4"/>
+              <stop offset="100%" stop-color="#0d9488" stop-opacity="0"/>
+            </linearGradient>
+            <linearGradient id="tealGrad2" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stop-color="#5eead4" stop-opacity="0.3"/>
+              <stop offset="100%" stop-color="#5eead4" stop-opacity="0"/>
+            </linearGradient>
+          </defs>
+        </svg>
+        <!-- Y-axis labels -->
+        <div class="absolute left-0 top-0 h-full flex flex-col justify-between text-[10px] text-slate-400 py-1">
+          <span>3k</span><span>2k</span><span>1k</span><span>0</span>
+        </div>
+      </div>
+      <div class="flex justify-between mt-3 text-[10px] text-slate-400 px-4">
+        <span>00:00</span><span>04:00</span><span>08:00</span><span>12:00</span><span>16:00</span><span>20:00</span><span>Now</span>
+      </div>
+      <div class="flex items-center gap-4 mt-4 pt-4 border-t border-slate-100">
+        <div class="flex items-center gap-1.5">
+          <span class="relative w-2 h-2">
+            <span class="absolute inset-0 bg-teal-500 rounded-full animate-ping opacity-50"></span>
+            <span class="absolute inset-0 bg-teal-500 rounded-full"></span>
+          </span>
+          <span class="text-xs text-slate-500">Active now:</span>
+          <span class="text-xs font-bold text-slate-800">847</span>
+        </div>
+        <div class="flex items-center gap-1.5">
+          <span class="text-xs text-slate-500">Peak today:</span>
+          <span class="text-xs font-bold text-slate-800">2,341</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Conversion Funnel -->
+    <div class="bg-white rounded-2xl p-6 layer-shadow fade-in">
+      <div class="flex items-center justify-between mb-5">
+        <h3 class="text-sm font-bold text-slate-800">Conversion Funnel</h3>
+        <span class="text-xs text-slate-400 font-medium">Last 30 days</span>
+      </div>
+      <div class="space-y-4">
+        <!-- Visitors -->
+        <div class="flex items-center gap-4">
+          <div class="w-20 text-right">
+            <div class="text-xs font-bold text-slate-800">42,847</div>
+            <div class="text-[10px] text-slate-400">Visitors</div>
+          </div>
+          <div class="flex-1 h-10 bg-slate-50 rounded-lg overflow-hidden relative">
+            <div class="h-full bg-teal-600 rounded-lg funnel-bar" style="--target-width:100%;width:100%"></div>
+            <span class="absolute right-3 top-1/2 -translate-y-1/2 text-xs font-bold text-white">100%</span>
+          </div>
+        </div>
+        <!-- Signups -->
+        <div class="flex items-center gap-4">
+          <div class="w-20 text-right">
+            <div class="text-xs font-bold text-slate-800">6,428</div>
+            <div class="text-[10px] text-slate-400">Signups</div>
+          </div>
+          <div class="flex-1 h-10 bg-slate-50 rounded-lg overflow-hidden relative">
+            <div class="h-full bg-teal-500 rounded-lg funnel-bar" style="--target-width:62%;width:62%"></div>
+            <span class="absolute right-3 top-1/2 -translate-y-1/2 text-xs font-bold text-slate-600">15.0%</span>
+          </div>
+        </div>
+        <!-- Activated -->
+        <div class="flex items-center gap-4">
+          <div class="w-20 text-right">
+            <div class="text-xs font-bold text-slate-800">2,571</div>
+            <div class="text-[10px] text-slate-400">Activated</div>
+          </div>
+          <div class="flex-1 h-10 bg-slate-50 rounded-lg overflow-hidden relative">
+            <div class="h-full bg-teal-400 rounded-lg funnel-bar" style="--target-width:38%;width:38%"></div>
+            <span class="absolute right-3 top-1/2 -translate-y-1/2 text-xs font-bold text-slate-600">6.0%</span>
+          </div>
+        </div>
+        <!-- Paying -->
+        <div class="flex items-center gap-4">
+          <div class="w-20 text-right">
+            <div class="text-xs font-bold text-slate-800">847</div>
+            <div class="text-[10px] text-slate-400">Paying</div>
+          </div>
+          <div class="flex-1 h-10 bg-slate-50 rounded-lg overflow-hidden relative">
+            <div class="h-full bg-teal-300 rounded-lg funnel-bar" style="--target-width:18%;width:18%"></div>
+            <span class="absolute right-3 top-1/2 -translate-y-1/2 text-xs font-bold text-slate-600">2.0%</span>
+          </div>
+        </div>
+      </div>
+      <!-- Funnel summary -->
+      <div class="mt-5 pt-4 border-t border-slate-100 flex items-center justify-between">
+        <div class="flex items-center gap-2">
+          <div class="w-8 h-8 bg-teal-50 rounded-lg flex items-center justify-center">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#0d9488" stroke-width="2"><path d="M22 2L15 22l-4-9-9-4z"/></svg>
+          </div>
+          <div>
+            <div class="text-xs font-bold text-slate-800">2.0% Overall CVR</div>
+            <div class="text-[10px] text-teal-600 font-medium">+0.3% vs last month</div>
+          </div>
+        </div>
+        <button onclick="handleAction('View full funnel')" class="text-xs text-teal-600 hover:text-teal-700 font-semibold cursor-pointer">Details &rarr;</button>
+      </div>
+    </div>
+
+  </section>
+
+  <!-- Activity Feed -->
+  <section class="bg-white rounded-2xl p-6 layer-shadow fade-in">
+    <div class="flex items-center justify-between mb-5">
+      <div class="flex items-center gap-2">
+        <h3 class="text-sm font-bold text-slate-800">Activity Feed</h3>
+        <span class="relative w-2 h-2 pulse-dot"></span>
+      </div>
+      <button onclick="handleAction('View all activity')" class="text-xs text-teal-600 hover:text-teal-700 font-semibold cursor-pointer">View all</button>
+    </div>
+    <div class="relative">
+      <!-- Timeline line -->
+      <div class="absolute left-[3px] top-2 bottom-2 w-px bg-slate-200"></div>
+
+      <div class="space-y-5">
+        <!-- Item 1 -->
+        <div class="flex gap-4 items-start pl-6 relative">
+          <div class="activity-dot bg-teal-500 absolute left-0 top-1.5"></div>
+          <div class="flex-1">
+            <div class="flex items-center gap-2">
+              <span class="text-xs font-semibold text-slate-800">New enterprise signup</span>
+              <span class="relative w-1.5 h-1.5">
+                <span class="absolute inset-0 bg-teal-500 rounded-full animate-ping opacity-50"></span>
+                <span class="absolute inset-0 bg-teal-500 rounded-full"></span>
+              </span>
+            </div>
+            <p class="text-[11px] text-slate-500 mt-0.5">Acme Corp upgraded to Enterprise plan ($2,400/yr)</p>
+          </div>
+          <span class="text-[10px] text-slate-400 whitespace-nowrap">2 min ago</span>
+        </div>
+
+        <!-- Item 2 -->
+        <div class="flex gap-4 items-start pl-6 relative">
+          <div class="activity-dot bg-green-500 absolute left-0 top-1.5"></div>
+          <div class="flex-1">
+            <span class="text-xs font-semibold text-slate-800">MRR milestone reached</span>
+            <p class="text-[11px] text-slate-500 mt-0.5">Monthly recurring revenue exceeded $48k target</p>
+          </div>
+          <span class="text-[10px] text-slate-400 whitespace-nowrap">18 min ago</span>
+        </div>
+
+        <!-- Item 3 -->
+        <div class="flex gap-4 items-start pl-6 relative">
+          <div class="activity-dot bg-amber-500 absolute left-0 top-1.5"></div>
+          <div class="flex-1">
+            <span class="text-xs font-semibold text-slate-800">Churn alert</span>
+            <p class="text-[11px] text-slate-500 mt-0.5">3 accounts flagged as at-risk (inactive &gt; 14 days)</p>
+          </div>
+          <span class="text-[10px] text-slate-400 whitespace-nowrap">45 min ago</span>
+        </div>
+
+        <!-- Item 4 -->
+        <div class="flex gap-4 items-start pl-6 relative">
+          <div class="activity-dot bg-teal-400 absolute left-0 top-1.5"></div>
+          <div class="flex-1">
+            <span class="text-xs font-semibold text-slate-800">Campaign performance update</span>
+            <p class="text-[11px] text-slate-500 mt-0.5">Q1 email campaign: 24.7% open rate, 3.2% CTR</p>
+          </div>
+          <span class="text-[10px] text-slate-400 whitespace-nowrap">1 hr ago</span>
+        </div>
+
+        <!-- Item 5 -->
+        <div class="flex gap-4 items-start pl-6 relative">
+          <div class="activity-dot bg-slate-400 absolute left-0 top-1.5"></div>
+          <div class="flex-1">
+            <span class="text-xs font-semibold text-slate-800">Weekly report generated</span>
+            <p class="text-[11px] text-slate-500 mt-0.5">Automated analytics report sent to 12 team members</p>
+          </div>
+          <span class="text-[10px] text-slate-400 whitespace-nowrap">3 hrs ago</span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+</main>
+
+<!-- Toast -->
+<div id="toast" class="fixed bottom-6 left-1/2 -translate-x-1/2 bg-white border border-teal-200 text-slate-800 px-5 py-3 rounded-xl text-xs layer-shadow-lg opacity-0 pointer-events-none transition-all duration-300 translate-y-2 z-50 max-w-sm text-center"></div>
+
 <script>
-function showToast(m){const t=document.getElementById('toast');t.textContent=m;t.style.opacity='1';t.style.transform='translate(-50%,0)';setTimeout(()=>{t.style.opacity='0';t.style.transform='translate(-50%,8px)'},2500)}
-function handleAction(a){showToast(a+' — 此為模板展示')}
-const obs=new IntersectionObserver(e=>{e.forEach(el=>{if(el.isIntersecting)el.target.classList.add('visible')})},{threshold:.1});document.querySelectorAll('.fade-up').forEach(el=>obs.observe(el))
+// Toast
+function showToast(m) {
+  const t = document.getElementById('toast');
+  t.textContent = m;
+  t.style.opacity = '1';
+  t.style.transform = 'translate(-50%, 0)';
+  setTimeout(() => {
+    t.style.opacity = '0';
+    t.style.transform = 'translate(-50%, 8px)';
+  }, 2500);
+}
+
+function handleAction(a) {
+  showToast(a + ' \u2014 \u6b64\u70ba\u6a21\u677f\u5c55\u793a');
+}
+
+// Filter pill toggle
+function toggleFilter(el) {
+  document.querySelectorAll('.filter-pill').forEach(p => p.classList.remove('active'));
+  el.classList.add('active');
+  showToast('\u7be9\u9078\u5df2\u66f4\u65b0');
+}
+
+// Live toggle
+function toggleLive() {
+  const t = document.getElementById('liveToggle');
+  t.classList.toggle('on');
+  t.classList.toggle('off');
+  showToast(t.classList.contains('on') ? 'Live mode ON' : 'Live mode OFF');
+}
+
+// Fade-in on scroll
+const fadeObs = new IntersectionObserver(entries => {
+  entries.forEach(e => {
+    if (e.isIntersecting) e.target.classList.add('visible');
+  });
+}, { threshold: 0.1 });
+document.querySelectorAll('.fade-in').forEach(el => fadeObs.observe(el));
+
+// Ring animation on scroll (re-trigger)
+const ringObs = new IntersectionObserver(entries => {
+  entries.forEach(e => {
+    if (e.isIntersecting) {
+      e.target.querySelectorAll('.ring-animate').forEach(ring => {
+        ring.style.animation = 'none';
+        ring.offsetHeight; // force reflow
+        ring.style.animation = '';
+      });
+    }
+  });
+}, { threshold: 0.3 });
+document.querySelectorAll('.grid.grid-cols-2').forEach(el => ringObs.observe(el));
 </script>
+
 </body>
 </html>
   $HTML$,
-  1
+  3
 )
-ON CONFLICT (template_id)
-DO UPDATE SET html_content = EXCLUDED.html_content, version = template_previews.version + 1, updated_at = NOW();
+ON CONFLICT (template_id) DO UPDATE SET
+  html_content = EXCLUDED.html_content,
+  version = EXCLUDED.version,
+  updated_at = NOW();

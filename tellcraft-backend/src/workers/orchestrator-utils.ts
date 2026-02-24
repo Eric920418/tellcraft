@@ -101,7 +101,7 @@ export async function sendMessage(
     progress?: { current: number; total: number; step: string }
     layoutHint?: 'default' | 'split' | 'full_preview'
     richContent?: {
-      type: 'template_picker' | 'variant_picker' | 'design_preview' | 'code_preview' | 'quality_gate_report' | 'deploy_confirm' | 'deploy_progress' | 'deploy_result' | 'deployment_history'
+      type: 'template_picker' | 'variant_picker' | 'design_preview' | 'code_preview' | 'quality_gate_report' | 'deploy_progress' | 'deploy_result' | 'deployment_history'
       data: Record<string, unknown>
     }
     quickReplies?: { label: string; value: string; style?: 'primary' | 'secondary' | 'ghost' }[]

@@ -6,263 +6,350 @@ VALUES (
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>雲筆記 NoteFlow</title>
+<title>My Notes</title>
 <script src="https://cdn.tailwindcss.com"></script>
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Lora:wght@400;500;600;700&family=Source+Sans+3:wght@300;400;500;600;700&display=swap" rel="stylesheet">
 <script>
-tailwind.config={theme:{extend:{colors:{primary:'#0ea5e9',primaryLight:'#38bdf8',primaryDark:'#0284c7',surface:'#f0f9ff',sidebar:'#0f172a',sideHover:'#1e293b',accent:'#f59e0b',success:'#10b981',danger:'#ef4444',muted:'#64748b'},fontFamily:{sans:['Inter','sans-serif']}}}}
+tailwind.config={theme:{extend:{colors:{brown:{50:'#fdf8f0',100:'#f5ead6',200:'#e8d5b0',300:'#d4b896',400:'#b8946a',500:'#96704a',600:'#78350f',700:'#633012',800:'#4a2410',900:'#361a0c'},paper:'#faf9f6',paperDark:'#f5f3ef',paperBorder:'#e8e4dd',warmGray:{50:'#faf9f7',100:'#f0eee9',200:'#e2dfd8',300:'#ccc8be',400:'#a8a196',500:'#8a8279',600:'#6b6459',700:'#524d44',800:'#3d3831',900:'#2a2622'}},fontFamily:{serif:['Lora','Georgia','serif'],sans:['Source Sans 3','system-ui','sans-serif']}}}}
 </script>
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
-body{font-family:'Inter',sans-serif;background:#f8fafc;overflow:hidden;height:100vh}
-.sidebar-item{transition:all .2s}
-.sidebar-item:hover,.sidebar-item.active{background:rgba(255,255,255,.08);border-radius:6px}
-.folder-item{transition:all .15s}
-.folder-item:hover{background:#f1f5f9}
-.note-item{transition:all .15s;border-left:3px solid transparent}
-.note-item:hover,.note-item.active{background:#f0f9ff;border-left-color:#0ea5e9}
-.editor-content{line-height:1.8}
-.editor-content h1{font-size:28px;font-weight:700;margin-bottom:12px;color:#0f172a}
-.editor-content h2{font-size:20px;font-weight:600;margin-top:24px;margin-bottom:8px;color:#1e293b}
-.editor-content p{color:#475569;margin-bottom:8px}
-.editor-content ul{padding-left:20px;margin-bottom:12px}
-.editor-content li{color:#475569;margin-bottom:4px}
-.editor-content code{background:#f1f5f9;padding:2px 6px;border-radius:4px;font-size:13px;color:#0ea5e9}
-.editor-content blockquote{border-left:3px solid #0ea5e9;padding-left:16px;color:#64748b;font-style:italic;margin:12px 0}
-.toolbar-btn{width:32px;height:32px;display:flex;align-items:center;justify-content:center;border-radius:6px;cursor:pointer;transition:all .15s;color:#64748b}
-.toolbar-btn:hover{background:#f1f5f9;color:#0f172a}
-.toolbar-btn.active{background:#e0f2fe;color:#0ea5e9}
-.tag-chip{font-size:11px;padding:2px 8px;border-radius:99px;cursor:pointer;transition:all .15s}
-.fade-in{animation:fadeIn .2s ease}
-@keyframes fadeIn{from{opacity:0}to{opacity:1}}
-::-webkit-scrollbar{width:4px}
-::-webkit-scrollbar-thumb{background:#cbd5e1;border-radius:99px}
+body{font-family:'Source Sans 3',sans-serif;background:#faf9f6;overflow:hidden;height:100vh;color:#3d3831}
+
+/* Sidebar */
+.tree-item{display:flex;align-items:center;gap:6px;padding:4px 8px;border-radius:4px;cursor:pointer;transition:background .15s;font-size:14px;color:#6b6459;user-select:none}
+.tree-item:hover{background:#f0eee9}
+.tree-item.active{background:#f5ead6;color:#78350f;font-weight:600}
+.tree-toggle{width:16px;height:16px;display:flex;align-items:center;justify-content:center;flex-shrink:0;transition:transform .15s}
+.tree-toggle.open{transform:rotate(90deg)}
+.tree-children{overflow:hidden;transition:max-height .2s ease}
+.tree-children.collapsed{max-height:0}
+.tree-children.expanded{max-height:500px}
+
+/* Editor */
+.editor-title{font-family:'Lora',Georgia,serif;font-size:32px;font-weight:700;color:#2a2622;line-height:1.3;outline:none;border:none;width:100%}
+.editor-title::placeholder{color:#ccc8be}
+.editor-block{position:relative;font-family:'Lora',Georgia,serif;line-height:1.8;color:#3d3831}
+.editor-block h2{font-family:'Lora',Georgia,serif;font-size:20px;font-weight:600;color:#2a2622;margin-bottom:6px}
+.editor-block p{margin-bottom:4px;font-size:15.5px}
+.editor-block ul{padding-left:24px;margin-bottom:4px;font-size:15.5px}
+.editor-block ul li{margin-bottom:3px;color:#524d44}
+.editor-block ul li::marker{color:#b8946a}
+
+/* Block insert cursor */
+.block-divider{position:relative;height:2px;margin:2px 0;opacity:0;transition:opacity .2s}
+.block-divider:hover,.block-divider.visible{opacity:1}
+.block-divider::before{content:'';position:absolute;top:50%;left:0;right:0;height:1px;background:#e8e4dd;transform:translateY(-50%)}
+.block-insert-btn{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:24px;height:24px;border-radius:50%;background:#faf9f6;border:1px solid #d4b896;display:flex;align-items:center;justify-content:center;cursor:pointer;z-index:2;transition:all .2s;color:#96704a}
+.block-insert-btn:hover{background:#78350f;border-color:#78350f;color:#fff}
+.block-divider:hover .block-insert-btn,.block-divider.visible .block-insert-btn{animation:pulseGlow 2s ease-in-out infinite}
+@keyframes pulseGlow{0%,100%{box-shadow:0 0 0 0 rgba(120,53,15,.15)}50%{box-shadow:0 0 0 8px rgba(120,53,15,.0)}}
+
+/* Table */
+.note-table{width:100%;border-collapse:collapse;font-family:'Source Sans 3',sans-serif;font-size:14px;margin:4px 0}
+.note-table th{text-align:left;padding:8px 12px;font-weight:600;color:#78350f;background:#fdf8f0;border:1px solid #e8e4dd;font-size:13px}
+.note-table td{padding:8px 12px;border:1px solid #e8e4dd;color:#524d44}
+
+/* Toggle/callout block */
+.toggle-block{border:1px solid #e8e4dd;border-radius:6px;overflow:hidden}
+.toggle-header{display:flex;align-items:center;gap:8px;padding:10px 14px;cursor:pointer;font-weight:600;color:#2a2622;font-size:15px;font-family:'Source Sans 3',sans-serif;transition:background .15s}
+.toggle-header:hover{background:#f5f3ef}
+.toggle-arrow{transition:transform .2s;flex-shrink:0}
+.toggle-arrow.open{transform:rotate(90deg)}
+.toggle-content{padding:0 14px 12px 36px;font-family:'Lora',Georgia,serif;font-size:14.5px;line-height:1.7;color:#524d44;display:none}
+.toggle-content.open{display:block}
+
+/* Word count bar */
+.word-bar{height:3px;background:#e8e4dd;border-radius:99px;overflow:hidden;width:120px}
+.word-bar-fill{height:100%;background:#b8946a;border-radius:99px;transition:width .3s}
+
+/* Breadcrumb */
+.breadcrumb{font-family:'Source Sans 3',sans-serif;font-size:13px;color:#a8a196;display:flex;align-items:center;gap:4px}
+.breadcrumb span.crumb{cursor:pointer;transition:color .15s}
+.breadcrumb span.crumb:hover{color:#78350f}
+
+/* Scrollbar */
+::-webkit-scrollbar{width:5px}
+::-webkit-scrollbar-thumb{background:#ccc8be;border-radius:99px}
+::-webkit-scrollbar-track{background:transparent}
 </style>
 </head>
 <body>
 <div class="flex h-screen">
-  <!-- Sidebar -->
-  <aside class="w-56 bg-sidebar text-white flex flex-col flex-shrink-0">
-    <div class="p-4 flex items-center gap-2.5 border-b border-white/10">
-      <div class="w-8 h-8 rounded-lg bg-primary flex items-center justify-center">
-        <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
-      </div>
-      <span class="font-bold text-base">NoteFlow</span>
-    </div>
 
-    <div class="p-3">
-      <button class="w-full bg-primary/20 text-primary border border-primary/30 text-sm font-medium px-3 py-2 rounded-lg hover:bg-primary/30 transition flex items-center justify-center gap-1.5">
-        <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-        新增筆記
-      </button>
-    </div>
-
-    <div class="px-3 mb-2">
-      <div class="relative">
-        <input type="text" placeholder="搜尋筆記..." class="w-full bg-white/5 border border-white/10 rounded-lg pl-8 pr-3 py-1.5 text-xs text-white placeholder-white/30 focus:outline-none focus:border-primary/50">
-        <svg class="absolute left-2.5 top-2 text-white/30" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+  <!-- Left Sidebar: Page Tree -->
+  <aside class="w-60 bg-paper border-r border-paperBorder flex flex-col flex-shrink-0" style="border-right:1px solid #e8e4dd">
+    <!-- Workspace name -->
+    <div class="px-3 pt-4 pb-3 flex items-center justify-between" style="border-bottom:1px solid #e8e4dd">
+      <div class="flex items-center gap-2 cursor-pointer group">
+        <div class="w-6 h-6 rounded bg-brown-600 flex items-center justify-center flex-shrink-0">
+          <span class="text-white text-xs font-bold" style="font-family:'Source Sans 3',sans-serif">M</span>
+        </div>
+        <span class="font-semibold text-sm text-warmGray-800" style="font-family:'Source Sans 3',sans-serif">My Notes</span>
+        <svg class="text-warmGray-400 group-hover:text-warmGray-600 transition-colors" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9"/></svg>
       </div>
     </div>
 
-    <nav class="px-3 space-y-0.5 mb-3">
-      <div class="sidebar-item active flex items-center gap-2.5 px-2.5 py-2 cursor-pointer text-sm">
-        <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/></svg>
-        <span>全部筆記</span>
-        <span class="ml-auto text-xs text-white/30">24</span>
+    <!-- Page tree -->
+    <nav class="flex-1 overflow-auto px-2 py-3 space-y-0.5">
+      <!-- Getting Started (page) -->
+      <div class="tree-item" onclick="selectPage(this,'getting-started')">
+        <span class="tree-toggle" style="visibility:hidden"></span>
+        <svg width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24" class="flex-shrink-0" style="color:#a8a196"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+        <span>Getting Started</span>
       </div>
-      <div class="sidebar-item flex items-center gap-2.5 px-2.5 py-2 cursor-pointer text-sm">
-        <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
-        <span>收藏</span>
-        <span class="ml-auto text-xs text-white/30">6</span>
+
+      <!-- Projects (folder, expanded) -->
+      <div>
+        <div class="tree-item" onclick="toggleFolder(this)">
+          <span class="tree-toggle open"><svg width="10" height="10" fill="currentColor" viewBox="0 0 10 10"><polygon points="3,1 8,5 3,9"/></svg></span>
+          <svg width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24" class="flex-shrink-0" style="color:#b8946a"><path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z"/></svg>
+          <span>Projects</span>
+        </div>
+        <div class="tree-children expanded" style="padding-left:16px">
+          <div class="tree-item" onclick="selectPage(this,'project-alpha')" style="padding-left:12px">
+            <span class="tree-toggle" style="visibility:hidden"></span>
+            <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24" class="flex-shrink-0" style="color:#a8a196"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+            <span>Project Alpha</span>
+          </div>
+          <div class="tree-item active" onclick="selectPage(this,'q1-planning')" style="padding-left:12px">
+            <span class="tree-toggle" style="visibility:hidden"></span>
+            <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24" class="flex-shrink-0" style="color:#a8a196"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+            <span style="font-weight:600">Q1 Planning</span>
+          </div>
+          <div class="tree-item" onclick="selectPage(this,'meeting-notes')" style="padding-left:12px">
+            <span class="tree-toggle" style="visibility:hidden"></span>
+            <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24" class="flex-shrink-0" style="color:#a8a196"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+            <span>Meeting Notes</span>
+          </div>
+        </div>
       </div>
-      <div class="sidebar-item flex items-center gap-2.5 px-2.5 py-2 cursor-pointer text-sm">
-        <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/></svg>
-        <span>垃圾桶</span>
+
+      <!-- Personal (folder, collapsed) -->
+      <div>
+        <div class="tree-item" onclick="toggleFolder(this)">
+          <span class="tree-toggle"><svg width="10" height="10" fill="currentColor" viewBox="0 0 10 10"><polygon points="3,1 8,5 3,9"/></svg></span>
+          <svg width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24" class="flex-shrink-0" style="color:#b8946a"><path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z"/></svg>
+          <span>Personal</span>
+        </div>
+        <div class="tree-children collapsed" style="padding-left:16px">
+          <div class="tree-item" onclick="selectPage(this,'reading-list')" style="padding-left:12px">
+            <span class="tree-toggle" style="visibility:hidden"></span>
+            <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24" class="flex-shrink-0" style="color:#a8a196"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+            <span>Reading List</span>
+          </div>
+          <div class="tree-item" onclick="selectPage(this,'ideas')" style="padding-left:12px">
+            <span class="tree-toggle" style="visibility:hidden"></span>
+            <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24" class="flex-shrink-0" style="color:#a8a196"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+            <span>Ideas</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Quick Notes (page) -->
+      <div class="tree-item" onclick="selectPage(this,'quick-notes')">
+        <span class="tree-toggle" style="visibility:hidden"></span>
+        <svg width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24" class="flex-shrink-0" style="color:#a8a196"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+        <span>Quick Notes</span>
       </div>
     </nav>
 
-    <div class="px-3 flex-1 overflow-auto">
-      <div class="text-xs text-white/30 uppercase tracking-wider px-2.5 mb-2">資料夾</div>
-      <div class="space-y-0.5">
-        <div class="sidebar-item flex items-center gap-2 px-2.5 py-1.5 cursor-pointer text-sm">
-          <svg width="14" height="14" fill="none" stroke="#0ea5e9" stroke-width="2" viewBox="0 0 24 24"><path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z"/></svg>
-          <span class="text-white/70">工作筆記</span>
-          <span class="ml-auto text-xs text-white/20">8</span>
-        </div>
-        <div class="sidebar-item flex items-center gap-2 px-2.5 py-1.5 cursor-pointer text-sm">
-          <svg width="14" height="14" fill="none" stroke="#10b981" stroke-width="2" viewBox="0 0 24 24"><path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z"/></svg>
-          <span class="text-white/70">學習紀錄</span>
-          <span class="ml-auto text-xs text-white/20">6</span>
-        </div>
-        <div class="sidebar-item flex items-center gap-2 px-2.5 py-1.5 cursor-pointer text-sm">
-          <svg width="14" height="14" fill="none" stroke="#f59e0b" stroke-width="2" viewBox="0 0 24 24"><path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z"/></svg>
-          <span class="text-white/70">靈感收集</span>
-          <span class="ml-auto text-xs text-white/20">5</span>
-        </div>
-        <div class="sidebar-item flex items-center gap-2 px-2.5 py-1.5 cursor-pointer text-sm">
-          <svg width="14" height="14" fill="none" stroke="#f43f5e" stroke-width="2" viewBox="0 0 24 24"><path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z"/></svg>
-          <span class="text-white/70">個人日記</span>
-          <span class="ml-auto text-xs text-white/20">5</span>
-        </div>
-      </div>
-
-      <div class="text-xs text-white/30 uppercase tracking-wider px-2.5 mt-4 mb-2">標籤</div>
-      <div class="flex flex-wrap gap-1.5 px-2">
-        <span class="tag-chip bg-sky-500/20 text-sky-300">#設計</span>
-        <span class="tag-chip bg-emerald-500/20 text-emerald-300">#技術</span>
-        <span class="tag-chip bg-amber-500/20 text-amber-300">#想法</span>
-        <span class="tag-chip bg-rose-500/20 text-rose-300">#重要</span>
-        <span class="tag-chip bg-violet-500/20 text-violet-300">#會議</span>
-      </div>
+    <!-- New Page button -->
+    <div class="px-3 pb-3" style="border-top:1px solid #e8e4dd;padding-top:12px">
+      <button class="w-full flex items-center justify-center gap-1.5 px-3 py-2 rounded-md text-sm font-medium transition-colors" style="font-family:'Source Sans 3',sans-serif;color:#78350f;background:#fdf8f0;border:1px solid #e8e4dd" onmouseover="this.style.background='#f5ead6'" onmouseout="this.style.background='#fdf8f0'">
+        <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+        New Page
+      </button>
     </div>
   </aside>
 
-  <!-- Note List Panel -->
-  <div class="w-64 bg-white border-r border-gray-100 flex flex-col flex-shrink-0">
-    <div class="p-3 border-b border-gray-100">
-      <div class="flex items-center justify-between">
-        <span class="font-semibold text-gray-900 text-sm">全部筆記</span>
-        <div class="flex gap-1">
-          <div class="toolbar-btn"><svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><line x1="4" y1="21" x2="4" y2="14"/><line x1="4" y1="10" x2="4" y2="3"/><line x1="12" y1="21" x2="12" y2="12"/><line x1="12" y1="8" x2="12" y2="3"/><line x1="20" y1="21" x2="20" y2="16"/><line x1="20" y1="12" x2="20" y2="3"/></svg></div>
-        </div>
-      </div>
-    </div>
-    <div class="flex-1 overflow-auto">
-      <div class="note-item active p-3 cursor-pointer border-b border-gray-50">
-        <div class="font-medium text-sm text-gray-900 mb-1 truncate">產品設計原則筆記</div>
-        <div class="text-xs text-gray-400 mb-1.5 line-clamp-2">好的設計不是添加更多功能，而是在繁雜中找到簡潔...</div>
-        <div class="flex items-center gap-1.5">
-          <span class="tag-chip bg-sky-50 text-sky-600">#設計</span>
-          <span class="text-xs text-gray-300">今天 14:30</span>
-        </div>
-      </div>
-      <div class="note-item p-3 cursor-pointer border-b border-gray-50">
-        <div class="font-medium text-sm text-gray-900 mb-1 truncate">React 19 新特性整理</div>
-        <div class="text-xs text-gray-400 mb-1.5 line-clamp-2">Actions, useOptimistic, use() hook...</div>
-        <div class="flex items-center gap-1.5">
-          <span class="tag-chip bg-emerald-50 text-emerald-600">#技術</span>
-          <span class="text-xs text-gray-300">今天 10:15</span>
-        </div>
-      </div>
-      <div class="note-item p-3 cursor-pointer border-b border-gray-50">
-        <div class="font-medium text-sm text-gray-900 mb-1 truncate">週會記錄 02/14</div>
-        <div class="text-xs text-gray-400 mb-1.5 line-clamp-2">Q1 目標回顧，行銷策略調整...</div>
-        <div class="flex items-center gap-1.5">
-          <span class="tag-chip bg-violet-50 text-violet-600">#會議</span>
-          <span class="text-xs text-gray-300">2/14</span>
-        </div>
-      </div>
-      <div class="note-item p-3 cursor-pointer border-b border-gray-50">
-        <div class="font-medium text-sm text-gray-900 mb-1 truncate">SaaS 定價策略研究</div>
-        <div class="text-xs text-gray-400 mb-1.5 line-clamp-2">三種常見定價模型：免費增值、分級訂閱...</div>
-        <div class="flex items-center gap-1.5">
-          <span class="tag-chip bg-rose-50 text-rose-600">#重要</span>
-          <span class="text-xs text-gray-300">2/13</span>
-        </div>
-      </div>
-      <div class="note-item p-3 cursor-pointer border-b border-gray-50">
-        <div class="font-medium text-sm text-gray-900 mb-1 truncate">App 介面靈感</div>
-        <div class="text-xs text-gray-400 mb-1.5 line-clamp-2">漸層色卡片、圓角大按鈕、微互動...</div>
-        <div class="flex items-center gap-1.5">
-          <span class="tag-chip bg-amber-50 text-amber-600">#想法</span>
-          <span class="text-xs text-gray-300">2/12</span>
-        </div>
-      </div>
-      <div class="note-item p-3 cursor-pointer border-b border-gray-50">
-        <div class="font-medium text-sm text-gray-900 mb-1 truncate">TypeScript 泛型深入</div>
-        <div class="text-xs text-gray-400 mb-1.5 line-clamp-2">Conditional types, mapped types, infer...</div>
-        <div class="flex items-center gap-1.5">
-          <span class="tag-chip bg-emerald-50 text-emerald-600">#技術</span>
-          <span class="text-xs text-gray-300">2/10</span>
-        </div>
-      </div>
-      <div class="note-item p-3 cursor-pointer border-b border-gray-50">
-        <div class="font-medium text-sm text-gray-900 mb-1 truncate">個人年度目標 2026</div>
-        <div class="text-xs text-gray-400 mb-1.5 line-clamp-2">技能提升、健康管理、閱讀 24 本書...</div>
-        <div class="flex items-center gap-1.5">
-          <span class="tag-chip bg-rose-50 text-rose-600">#重要</span>
-          <span class="text-xs text-gray-300">1/1</span>
-        </div>
-      </div>
-    </div>
-  </div>
+  <!-- Editor Area -->
+  <main class="flex-1 flex flex-col overflow-hidden" style="background:#faf9f6">
 
-  <!-- Editor -->
-  <main class="flex-1 flex flex-col overflow-hidden bg-white">
-    <!-- Editor Toolbar -->
-    <div class="h-12 border-b border-gray-100 flex items-center px-4 gap-1 flex-shrink-0">
-      <div class="toolbar-btn active" title="粗體"><svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="3" viewBox="0 0 24 24"><path d="M6 4h8a4 4 0 014 4 4 4 0 01-4 4H6z"/><path d="M6 12h9a4 4 0 014 4 4 4 0 01-4 4H6z"/></svg></div>
-      <div class="toolbar-btn" title="斜體"><svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><line x1="19" y1="4" x2="10" y2="4"/><line x1="14" y1="20" x2="5" y2="20"/><line x1="15" y1="4" x2="9" y2="20"/></svg></div>
-      <div class="toolbar-btn" title="底線"><svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M6 3v7a6 6 0 006 6 6 6 0 006-6V3"/><line x1="4" y1="21" x2="20" y2="21"/></svg></div>
-      <div class="w-px h-5 bg-gray-200 mx-1"></div>
-      <div class="toolbar-btn" title="標題"><span class="text-xs font-bold">H1</span></div>
-      <div class="toolbar-btn" title="標題"><span class="text-xs font-bold">H2</span></div>
-      <div class="w-px h-5 bg-gray-200 mx-1"></div>
-      <div class="toolbar-btn" title="列表"><svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg></div>
-      <div class="toolbar-btn" title="引用"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M6 17h3l2-4V7H5v6h3zm8 0h3l2-4V7h-6v6h3z"/></svg></div>
-      <div class="toolbar-btn" title="程式碼"><svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg></div>
-      <div class="ml-auto flex items-center gap-2">
-        <span class="text-xs text-gray-400">最後編輯：今天 14:30</span>
-        <svg class="text-amber-400 cursor-pointer" width="16" height="16" fill="currentColor" viewBox="0 0 24 24"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
-        <div class="toolbar-btn"><svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/><circle cx="5" cy="12" r="1"/></svg></div>
+    <!-- Breadcrumb bar -->
+    <div class="px-10 pt-6 pb-0">
+      <div class="breadcrumb">
+        <span class="crumb">Projects</span>
+        <svg width="10" height="10" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><polyline points="9 18 15 12 9 6"/></svg>
+        <span class="crumb" style="color:#78350f;font-weight:500">Q1 Planning</span>
       </div>
     </div>
 
-    <!-- Editor Body -->
-    <div class="flex-1 overflow-auto p-8 max-w-3xl">
-      <div class="flex items-center gap-2 mb-4">
-        <span class="tag-chip bg-sky-50 text-sky-600 cursor-pointer">#設計</span>
-        <span class="tag-chip bg-rose-50 text-rose-600 cursor-pointer">#重要</span>
-        <span class="tag-chip bg-gray-100 text-gray-400 cursor-pointer">+ 標籤</span>
-      </div>
-      <div class="editor-content" contenteditable="true">
-        <h1>產品設計原則筆記</h1>
-        <p>好的設計不是添加更多功能，而是在繁雜中找到簡潔。以下是我整理的核心設計原則：</p>
+    <!-- Editor content -->
+    <div class="flex-1 overflow-auto px-10 py-6" id="editor-scroll">
+      <div style="max-width:680px">
 
-        <h2>1. 以使用者為中心</h2>
-        <p>所有設計決策都應該從使用者的需求出發。透過<code>使用者研究</code>和<code>原型測試</code>來驗證假設。</p>
-        <ul>
-          <li>建立用戶畫像（Persona）</li>
-          <li>繪製使用者旅程地圖</li>
-          <li>進行 A/B 測試驗證</li>
-        </ul>
+        <!-- Title -->
+        <div class="editor-title" style="margin-bottom:24px">Q1 Planning 2024</div>
 
-        <h2>2. 簡潔即力量</h2>
-        <blockquote>Perfection is achieved, not when there is nothing more to add, but when there is nothing left to take away. — Antoine de Saint-Exupéry</blockquote>
-        <p>每一個功能都要問：<strong>這真的必要嗎？</strong> 減少認知負擔是提升體驗的最佳方式。</p>
+        <!-- Block: H2 Objectives -->
+        <div class="editor-block" style="margin-bottom:4px">
+          <h2>Objectives</h2>
+        </div>
 
-        <h2>3. 一致性</h2>
-        <p>保持視覺語言和互動模式的一致性。建立<code>Design System</code>是規模化的關鍵：</p>
-        <ul>
-          <li>色彩系統：主色、語義色、中性色</li>
-          <li>字體層級：H1-H6、Body、Caption</li>
-          <li>間距系統：4px 基準倍數</li>
-          <li>元件庫：按鈕、輸入框、卡片、Modal</li>
-        </ul>
+        <!-- Block: Bullet list -->
+        <div class="editor-block" style="margin-bottom:4px">
+          <ul>
+            <li>Launch the redesigned dashboard to 100% of users by end of February</li>
+            <li>Reduce average page load time below 1.2 seconds across all key flows</li>
+            <li>Ship mobile-responsive editor and achieve 30% mobile engagement lift</li>
+          </ul>
+        </div>
 
-        <h2>4. 回饋與引導</h2>
-        <p>使用者的每一個操作都應該得到即時的回饋。載入狀態、成功提示、錯誤訊息缺一不可。</p>
+        <!-- SIGNATURE: Block insert cursor (visible for demo) -->
+        <div class="block-divider visible" id="signature-divider">
+          <div class="block-insert-btn">
+            <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+          </div>
+        </div>
+
+        <!-- Block: H2 Timeline -->
+        <div class="editor-block" style="margin-bottom:4px">
+          <h2>Timeline</h2>
+        </div>
+
+        <!-- Block: Table -->
+        <div class="editor-block" style="margin-bottom:6px">
+          <table class="note-table">
+            <thead>
+              <tr>
+                <th style="width:30%">Phase</th>
+                <th style="width:35%">Dates</th>
+                <th style="width:35%">Owner</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>Research & Scoping</td>
+                <td>Jan 8 &ndash; Jan 19</td>
+                <td>Emily Chen</td>
+              </tr>
+              <tr>
+                <td>Design & Prototype</td>
+                <td>Jan 22 &ndash; Feb 9</td>
+                <td>Marcus Lee</td>
+              </tr>
+              <tr>
+                <td>Implementation</td>
+                <td>Feb 12 &ndash; Mar 15</td>
+                <td>Dev Team</td>
+              </tr>
+              <tr>
+                <td>QA & Launch</td>
+                <td>Mar 18 &ndash; Mar 29</td>
+                <td>Sarah Kim</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <!-- Hidden block divider (shows on hover) -->
+        <div class="block-divider" onmouseenter="this.classList.add('visible')" onmouseleave="this.classList.remove('visible')">
+          <div class="block-insert-btn">
+            <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+          </div>
+        </div>
+
+        <!-- Block: Toggle/callout -->
+        <div class="editor-block" style="margin-bottom:6px">
+          <div class="toggle-block">
+            <div class="toggle-header" onclick="toggleExpand(this)">
+              <span class="toggle-arrow open"><svg width="10" height="10" fill="currentColor" viewBox="0 0 10 10"><polygon points="3,1 8,5 3,9"/></svg></span>
+              <span style="font-size:16px;margin-right:2px">&#128204;</span>
+              <span>Key Decisions</span>
+            </div>
+            <div class="toggle-content open">
+              <p style="margin-bottom:6px">Agreed to prioritize mobile editor over desktop feature parity for Q1. The mobile user base has grown 47% since Q3, and current mobile experience is significantly behind.</p>
+              <p>Budget allocated: $45K for external design review. Timeline risk: dependency on API team for the new real-time sync endpoint (ETA Feb 2).</p>
+            </div>
+          </div>
+        </div>
+
+        <!-- Hidden block divider -->
+        <div class="block-divider" onmouseenter="this.classList.add('visible')" onmouseleave="this.classList.remove('visible')">
+          <div class="block-insert-btn">
+            <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+          </div>
+        </div>
+
+        <!-- Block: Paragraph -->
+        <div class="editor-block" style="margin-bottom:4px">
+          <p>Next sync is scheduled for January 15th. Bring updated wireframes and the competitor analysis doc. Stakeholder review will happen on the 19th&mdash;make sure the prototype is interactive by then.</p>
+        </div>
+
+        <!-- Final block divider -->
+        <div class="block-divider" onmouseenter="this.classList.add('visible')" onmouseleave="this.classList.remove('visible')">
+          <div class="block-insert-btn">
+            <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+          </div>
+        </div>
+
       </div>
     </div>
 
-    <!-- Bottom status bar -->
-    <div class="h-8 bg-gray-50 border-t border-gray-100 flex items-center justify-between px-4 text-xs text-gray-400 flex-shrink-0">
-      <div class="flex items-center gap-4">
-        <span>字數：462</span>
-        <span>閱讀時間：約 2 分鐘</span>
+    <!-- Word Count Bar -->
+    <div class="flex items-center justify-between px-10 flex-shrink-0" style="height:36px;border-top:1px solid #e8e4dd;background:#f5f3ef;font-family:'Source Sans 3',sans-serif">
+      <div class="flex items-center gap-5 text-xs" style="color:#8a8279">
+        <span>342 words</span>
+        <span>&bull;</span>
+        <span>1,847 characters</span>
+        <span>&bull;</span>
+        <span>Last edited 2h ago</span>
       </div>
       <div class="flex items-center gap-3">
-        <span>資料夾：工作筆記</span>
-        <span class="flex items-center gap-1"><svg width="10" height="10" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M19 21H5a2 2 0 01-2-2V5a2 2 0 012-2h11l5 5v11a2 2 0 01-2 2z"/></svg>已自動儲存</span>
+        <div class="word-bar">
+          <div class="word-bar-fill" style="width:34%"></div>
+        </div>
+        <span class="text-xs" style="color:#a8a196">342 / 1000</span>
       </div>
     </div>
+
   </main>
 </div>
+
+<script>
+// Tree item selection
+function selectPage(el, id) {
+  document.querySelectorAll('.tree-item').forEach(function(item) {
+    item.classList.remove('active');
+  });
+  el.classList.add('active');
+}
+
+// Folder toggle
+function toggleFolder(el) {
+  var toggle = el.querySelector('.tree-toggle');
+  var children = el.parentElement.querySelector('.tree-children');
+  if (!children) return;
+  if (children.classList.contains('expanded')) {
+    children.classList.remove('expanded');
+    children.classList.add('collapsed');
+    toggle.classList.remove('open');
+  } else {
+    children.classList.remove('collapsed');
+    children.classList.add('expanded');
+    toggle.classList.add('open');
+  }
+}
+
+// Toggle/callout expand/collapse
+function toggleExpand(header) {
+  var arrow = header.querySelector('.toggle-arrow');
+  var content = header.nextElementSibling;
+  if (content.classList.contains('open')) {
+    content.classList.remove('open');
+    arrow.classList.remove('open');
+  } else {
+    content.classList.add('open');
+    arrow.classList.add('open');
+  }
+}
+</script>
 </body>
 </html>$HTML$,
-  1
+  3
 )
 ON CONFLICT (template_id) DO UPDATE SET
   html_content = EXCLUDED.html_content,
-  version = template_previews.version + 1,
+  version = EXCLUDED.version,
   updated_at = NOW();

@@ -2,269 +2,410 @@ INSERT INTO template_previews (template_id, html_content, version)
 VALUES (
   '97e687f2-ebb3-4f98-bbe9-12c142c9ce70',
   $HTML$<!DOCTYPE html>
-<html lang="zh-TW">
+<html lang="en">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>進銷存 StockPulse</title>
+<title>StockHub - Inventory Dashboard</title>
 <script src="https://cdn.tailwindcss.com"></script>
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
 <script>
-tailwind.config={theme:{extend:{colors:{primary:'#0284c7',primaryLight:'#38bdf8',primaryDark:'#0369a1',surface:'#f0f9ff',sidebar:'#0c1222',accent:'#f59e0b',success:'#10b981',danger:'#ef4444',warning:'#f97316',muted:'#64748b'},fontFamily:{sans:['Inter','sans-serif']}}}}
+tailwind.config={theme:{extend:{colors:{amber600:'#d97706',amber500:'#f59e0b',amber100:'#fef3c7',amber50:'#fffbeb',green600:'#16a34a',green100:'#dcfce7',green50:'#f0fdf4',red600:'#dc2626',red100:'#fee2e2',red50:'#fef2f2',gray900:'#111827',gray800:'#1f2937',gray700:'#374151',gray600:'#4b5563',gray500:'#6b7280',gray400:'#9ca3af',gray300:'#d1d5db',gray200:'#e5e7eb',gray100:'#f3f4f6',gray50:'#f9fafb'},fontFamily:{sans:['"IBM Plex Sans"','sans-serif'],mono:['"IBM Plex Mono"','monospace']}}}}
 </script>
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
-body{font-family:'Inter',sans-serif;background:#f8fafc;overflow:hidden;height:100vh}
-.sidebar-item{transition:all .2s}
-.sidebar-item:hover,.sidebar-item.active{background:rgba(255,255,255,.1);border-radius:8px}
-.stock-low{background:#fef2f2;border-left:3px solid #ef4444}
-.stock-ok{border-left:3px solid transparent}
-.table-row{transition:all .15s}
-.table-row:hover{background:#f0f9ff}
-.fade-in{animation:fadeIn .3s ease}
-@keyframes fadeIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
-.modal-overlay{background:rgba(0,0,0,.4);backdrop-filter:blur(4px)}
-::-webkit-scrollbar{width:5px}
-::-webkit-scrollbar-thumb{background:#7dd3fc;border-radius:99px}
+body{font-family:'IBM Plex Sans',sans-serif;background:#f3f4f6;overflow-x:hidden;min-height:100vh}
+@keyframes pulse-border{0%,100%{border-left-color:#d97706}50%{border-left-color:transparent}}
+.low-stock-row{border-left:4px solid #d97706;animation:pulse-border 2s ease-in-out infinite}
+.normal-row{border-left:4px solid transparent}
+.out-stock-row{border-left:4px solid #dc2626}
+tr.hoverable:hover{background:#f9fafb}
+tr.hoverable:hover .row-actions{opacity:1}
+.row-actions{opacity:0;transition:opacity .15s}
+.editable-cell{cursor:pointer;position:relative}
+.editable-cell:hover{background:#fffbeb}
+.edit-input{width:64px;padding:2px 6px;border:2px solid #d97706;border-radius:4px;font-size:14px;font-family:'IBM Plex Sans',sans-serif;outline:none;text-align:center}
+.badge{display:inline-flex;align-items:center;padding:2px 10px;border-radius:9999px;font-size:12px;font-weight:500;line-height:1.5}
+.badge-in-stock{background:#dcfce7;color:#16a34a}
+.badge-low-stock{background:#fef3c7;color:#d97706}
+.badge-out-of-stock{background:#fee2e2;color:#dc2626}
+.sort-header{cursor:pointer;user-select:none;transition:color .15s}
+.sort-header:hover{color:#111827}
+.alert-pulse{animation:alert-glow 2s ease-in-out infinite}
+@keyframes alert-glow{0%,100%{box-shadow:0 0 0 0 rgba(217,119,6,0.4)}50%{box-shadow:0 0 0 6px rgba(217,119,6,0)}}
+::-webkit-scrollbar{width:6px;height:6px}
+::-webkit-scrollbar-thumb{background:#d1d5db;border-radius:99px}
+::-webkit-scrollbar-thumb:hover{background:#9ca3af}
 </style>
 </head>
 <body>
-<div class="flex h-screen">
-  <aside class="w-56 bg-sidebar text-white flex flex-col flex-shrink-0">
-    <div class="p-4 flex items-center gap-2.5 border-b border-white/10">
-      <div class="w-8 h-8 rounded-lg bg-primary flex items-center justify-center">
-        <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M21 16V8a2 2 0 00-1-1.73l-7-4a2 2 0 00-2 0l-7 4A2 2 0 003 8v8a2 2 0 001 1.73l7 4a2 2 0 002 0l7-4A2 2 0 0021 16z"/><polyline points="3.27 6.96 12 12.01 20.73 6.96"/><line x1="12" y1="22.08" x2="12" y2="12"/></svg>
-      </div>
-      <span class="font-bold text-base">StockPulse</span>
-    </div>
-    <nav class="flex-1 p-3 space-y-1">
-      <div onclick="switchPage('dashboard')" class="sidebar-item active flex items-center gap-3 px-3 py-2.5 cursor-pointer text-sm" data-page="dashboard">
-        <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
-        <span>儀表板</span>
-      </div>
-      <div onclick="switchPage('products')" class="sidebar-item flex items-center gap-3 px-3 py-2.5 cursor-pointer text-sm" data-page="products">
-        <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M21 16V8a2 2 0 00-1-1.73l-7-4a2 2 0 00-2 0l-7 4A2 2 0 003 8v8a2 2 0 001 1.73l7 4a2 2 0 002 0l7-4A2 2 0 0021 16z"/></svg>
-        <span>商品列表</span>
-        <span class="ml-auto text-xs bg-white/20 px-2 py-0.5 rounded-full">148</span>
-      </div>
-      <div onclick="switchPage('records')" class="sidebar-item flex items-center gap-3 px-3 py-2.5 cursor-pointer text-sm" data-page="records">
-        <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
-        <span>進出庫紀錄</span>
-      </div>
-      <div onclick="switchPage('suppliers')" class="sidebar-item flex items-center gap-3 px-3 py-2.5 cursor-pointer text-sm" data-page="suppliers">
-        <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><rect x="1" y="3" width="15" height="13"/><polygon points="16 8 20 8 23 11 23 16 16 16 16 8"/><circle cx="5.5" cy="18.5" r="2.5"/><circle cx="18.5" cy="18.5" r="2.5"/></svg>
-        <span>供應商</span>
-      </div>
-    </nav>
-    <div class="p-3 border-t border-white/10">
-      <div class="bg-danger/20 border border-danger/30 rounded-xl p-3">
-        <div class="flex items-center gap-2 text-xs text-danger font-medium mb-1">
-          <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
-          低庫存警示
-        </div>
-        <div class="text-xs text-white/60">5 項商品低於安全庫存</div>
-      </div>
-    </div>
-  </aside>
 
-  <main class="flex-1 flex flex-col overflow-hidden">
-    <header class="h-14 bg-white border-b border-gray-100 flex items-center justify-between px-6 flex-shrink-0">
-      <h1 class="font-semibold text-gray-900" id="pageTitle">儀表板</h1>
+<!-- Top Bar -->
+<header class="bg-white border-b border-gray-200 sticky top-0 z-30">
+  <div class="max-w-[1400px] mx-auto px-6 h-14 flex items-center justify-between">
+    <div class="flex items-center gap-3">
       <div class="flex items-center gap-2">
-        <button onclick="openStockModal('in')" class="bg-success text-white text-sm font-medium px-3 py-2 rounded-lg hover:bg-success/90 transition flex items-center gap-1">
-          <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-          進貨
-        </button>
-        <button onclick="openStockModal('out')" class="bg-warning text-white text-sm font-medium px-3 py-2 rounded-lg hover:bg-warning/90 transition flex items-center gap-1">
-          <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><line x1="5" y1="12" x2="19" y2="12"/></svg>
-          出庫
-        </button>
-      </div>
-    </header>
-
-    <!-- Dashboard -->
-    <div id="page-dashboard" class="flex-1 overflow-auto p-6 fade-in">
-      <div class="grid grid-cols-4 gap-4 mb-6">
-        <div class="bg-white rounded-2xl p-4 border border-gray-100">
-          <div class="text-xs text-gray-500 mb-1">商品總數</div>
-          <div class="text-2xl font-bold text-gray-900">148</div>
-          <div class="text-xs text-gray-400 mt-1">12 個分類</div>
+        <div class="w-8 h-8 bg-gray-900 rounded-lg flex items-center justify-center">
+          <svg width="18" height="18" fill="none" stroke="white" stroke-width="2" viewBox="0 0 24 24"><path d="M21 16V8a2 2 0 00-1-1.73l-7-4a2 2 0 00-2 0l-7 4A2 2 0 003 8v8a2 2 0 001 1.73l7 4a2 2 0 002 0l7-4A2 2 0 0021 16z"/><polyline points="3.27 6.96 12 12.01 20.73 6.96"/><line x1="12" y1="22.08" x2="12" y2="12"/></svg>
         </div>
-        <div class="bg-white rounded-2xl p-4 border border-gray-100">
-          <div class="text-xs text-gray-500 mb-1">庫存總值</div>
-          <div class="text-2xl font-bold text-primary">$2.4M</div>
-          <div class="text-xs text-success mt-1">↑ 8% vs 上月</div>
-        </div>
-        <div class="bg-white rounded-2xl p-4 border border-gray-100">
-          <div class="text-xs text-gray-500 mb-1">本月進貨</div>
-          <div class="text-2xl font-bold text-success">$580K</div>
-          <div class="text-xs text-gray-400 mt-1">42 筆訂單</div>
-        </div>
-        <div class="bg-white rounded-2xl p-4 border border-gray-100">
-          <div class="text-xs text-gray-500 mb-1">低庫存</div>
-          <div class="text-2xl font-bold text-danger">5</div>
-          <div class="text-xs text-danger mt-1">需要補貨</div>
-        </div>
-      </div>
-
-      <div class="grid grid-cols-3 gap-4 mb-6">
-        <div class="col-span-2 bg-white rounded-2xl p-5 border border-gray-100">
-          <h3 class="font-semibold text-gray-900 mb-4">進出庫趨勢</h3>
-          <div class="flex items-end gap-3 h-36">
-            <div class="flex-1 flex flex-col items-center gap-1"><div class="w-full flex gap-0.5 justify-center" style="height:120px"><div class="w-4 bg-success/30 rounded-t self-end" style="height:60%"></div><div class="w-4 bg-warning/30 rounded-t self-end" style="height:45%"></div></div><span class="text-xs text-gray-400">W1</span></div>
-            <div class="flex-1 flex flex-col items-center gap-1"><div class="w-full flex gap-0.5 justify-center" style="height:120px"><div class="w-4 bg-success/30 rounded-t self-end" style="height:80%"></div><div class="w-4 bg-warning/30 rounded-t self-end" style="height:55%"></div></div><span class="text-xs text-gray-400">W2</span></div>
-            <div class="flex-1 flex flex-col items-center gap-1"><div class="w-full flex gap-0.5 justify-center" style="height:120px"><div class="w-4 bg-success rounded-t self-end" style="height:70%"></div><div class="w-4 bg-warning rounded-t self-end" style="height:65%"></div></div><span class="text-xs text-gray-400">W3</span></div>
-            <div class="flex-1 flex flex-col items-center gap-1"><div class="w-full flex gap-0.5 justify-center" style="height:120px"><div class="w-4 bg-success/20 rounded-t self-end" style="height:50%"></div><div class="w-4 bg-warning/20 rounded-t self-end" style="height:40%"></div></div><span class="text-xs text-gray-400">W4</span></div>
-          </div>
-          <div class="flex justify-center gap-6 mt-3"><div class="flex items-center gap-1.5 text-xs text-gray-500"><div class="w-3 h-3 rounded bg-success"></div>進貨</div><div class="flex items-center gap-1.5 text-xs text-gray-500"><div class="w-3 h-3 rounded bg-warning"></div>出庫</div></div>
-        </div>
-        <div class="bg-white rounded-2xl p-5 border border-gray-100">
-          <h3 class="font-semibold text-gray-900 mb-3">分類庫存</h3>
-          <div class="space-y-2.5">
-            <div><div class="flex justify-between text-sm mb-1"><span>電子零件</span><span class="font-bold">38%</span></div><div class="w-full bg-gray-100 rounded-full h-2"><div class="bg-primary rounded-full h-2" style="width:38%"></div></div></div>
-            <div><div class="flex justify-between text-sm mb-1"><span>包裝材料</span><span class="font-bold">25%</span></div><div class="w-full bg-gray-100 rounded-full h-2"><div class="bg-success rounded-full h-2" style="width:25%"></div></div></div>
-            <div><div class="flex justify-between text-sm mb-1"><span>五金配件</span><span class="font-bold">20%</span></div><div class="w-full bg-gray-100 rounded-full h-2"><div class="bg-accent rounded-full h-2" style="width:20%"></div></div></div>
-            <div><div class="flex justify-between text-sm mb-1"><span>辦公用品</span><span class="font-bold">12%</span></div><div class="w-full bg-gray-100 rounded-full h-2"><div class="bg-warning rounded-full h-2" style="width:12%"></div></div></div>
-            <div><div class="flex justify-between text-sm mb-1"><span>其他</span><span class="font-bold">5%</span></div><div class="w-full bg-gray-100 rounded-full h-2"><div class="bg-gray-400 rounded-full h-2" style="width:5%"></div></div></div>
-          </div>
-        </div>
-      </div>
-
-      <!-- Low stock alerts -->
-      <div class="bg-white rounded-2xl border border-gray-100">
-        <div class="p-4 border-b border-gray-100 flex items-center gap-2">
-          <svg class="text-danger" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
-          <h3 class="font-semibold text-danger">低庫存警示</h3>
-        </div>
-        <table class="w-full">
-          <thead><tr class="text-xs text-gray-400 border-b border-gray-50"><th class="text-left px-4 py-2.5 font-medium">商品</th><th class="text-left px-4 py-2.5 font-medium">分類</th><th class="text-right px-4 py-2.5 font-medium">現有庫存</th><th class="text-right px-4 py-2.5 font-medium">安全庫存</th><th class="text-right px-4 py-2.5 font-medium">缺口</th><th class="text-center px-4 py-2.5 font-medium">操作</th></tr></thead>
-          <tbody>
-            <tr class="stock-low border-b border-gray-50"><td class="px-4 py-3 text-sm font-medium text-gray-900">USB-C 連接器 (Type A)</td><td class="px-4 py-3 text-sm text-gray-500">電子零件</td><td class="px-4 py-3 text-sm text-right text-danger font-bold">23</td><td class="px-4 py-3 text-sm text-right text-gray-400">100</td><td class="px-4 py-3 text-sm text-right text-danger font-bold">-77</td><td class="px-4 py-3 text-center"><button class="text-xs bg-primary text-white px-3 py-1 rounded-lg hover:bg-primaryDark transition">補貨</button></td></tr>
-            <tr class="stock-low border-b border-gray-50"><td class="px-4 py-3 text-sm font-medium text-gray-900">M3 不鏽鋼螺絲</td><td class="px-4 py-3 text-sm text-gray-500">五金配件</td><td class="px-4 py-3 text-sm text-right text-danger font-bold">45</td><td class="px-4 py-3 text-sm text-right text-gray-400">200</td><td class="px-4 py-3 text-sm text-right text-danger font-bold">-155</td><td class="px-4 py-3 text-center"><button class="text-xs bg-primary text-white px-3 py-1 rounded-lg hover:bg-primaryDark transition">補貨</button></td></tr>
-            <tr class="stock-low border-b border-gray-50"><td class="px-4 py-3 text-sm font-medium text-gray-900">氣泡緩衝袋 25x30</td><td class="px-4 py-3 text-sm text-gray-500">包裝材料</td><td class="px-4 py-3 text-sm text-right text-danger font-bold">80</td><td class="px-4 py-3 text-sm text-right text-gray-400">500</td><td class="px-4 py-3 text-sm text-right text-danger font-bold">-420</td><td class="px-4 py-3 text-center"><button class="text-xs bg-primary text-white px-3 py-1 rounded-lg hover:bg-primaryDark transition">補貨</button></td></tr>
-            <tr class="stock-low border-b border-gray-50"><td class="px-4 py-3 text-sm font-medium text-gray-900">A4 影印紙 (箱)</td><td class="px-4 py-3 text-sm text-gray-500">辦公用品</td><td class="px-4 py-3 text-sm text-right text-danger font-bold">3</td><td class="px-4 py-3 text-sm text-right text-gray-400">10</td><td class="px-4 py-3 text-sm text-right text-danger font-bold">-7</td><td class="px-4 py-3 text-center"><button class="text-xs bg-primary text-white px-3 py-1 rounded-lg hover:bg-primaryDark transition">補貨</button></td></tr>
-            <tr class="stock-low"><td class="px-4 py-3 text-sm font-medium text-gray-900">LED 指示燈 3mm 紅</td><td class="px-4 py-3 text-sm text-gray-500">電子零件</td><td class="px-4 py-3 text-sm text-right text-danger font-bold">150</td><td class="px-4 py-3 text-sm text-right text-gray-400">500</td><td class="px-4 py-3 text-sm text-right text-danger font-bold">-350</td><td class="px-4 py-3 text-center"><button class="text-xs bg-primary text-white px-3 py-1 rounded-lg hover:bg-primaryDark transition">補貨</button></td></tr>
-          </tbody>
-        </table>
+        <span class="font-bold text-gray-900 text-lg tracking-tight">StockHub</span>
       </div>
     </div>
-
-    <!-- Products -->
-    <div id="page-products" class="flex-1 overflow-auto p-6 fade-in hidden">
-      <div class="flex items-center gap-2 mb-4">
-        <div class="relative flex-1 max-w-xs"><input type="text" placeholder="搜尋商品..." class="w-full text-sm bg-gray-50 border border-gray-200 rounded-lg pl-9 pr-4 py-2 focus:outline-none focus:border-primary"><svg class="absolute left-3 top-2.5 text-gray-400" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg></div>
-        <select class="text-sm border border-gray-200 rounded-lg px-3 py-2 focus:outline-none"><option>全部分類</option><option>電子零件</option><option>包裝材料</option><option>五金配件</option><option>辦公用品</option></select>
+    <div class="flex items-center gap-3">
+      <div class="relative">
+        <svg class="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+        <input id="searchInput" type="text" placeholder="Search SKU or product..." class="w-72 text-sm bg-gray-50 border border-gray-200 rounded-lg pl-10 pr-4 py-2 focus:outline-none focus:border-amber-500 focus:ring-1 focus:ring-amber-500/30 transition" oninput="filterTable()">
       </div>
-      <div class="bg-white rounded-2xl border border-gray-100">
-        <table class="w-full">
-          <thead><tr class="text-xs text-gray-400 border-b border-gray-100"><th class="text-left px-4 py-3 font-medium">商品名稱</th><th class="text-left px-4 py-3 font-medium">SKU</th><th class="text-left px-4 py-3 font-medium">分類</th><th class="text-right px-4 py-3 font-medium">單價</th><th class="text-right px-4 py-3 font-medium">庫存</th><th class="text-right px-4 py-3 font-medium">庫存值</th><th class="text-center px-4 py-3 font-medium">狀態</th></tr></thead>
-          <tbody>
-            <tr class="table-row border-b border-gray-50"><td class="px-4 py-3 text-sm font-medium">10K 電阻 1/4W</td><td class="px-4 py-3 text-xs text-gray-400 font-mono">EL-R10K</td><td class="px-4 py-3 text-sm text-gray-500">電子零件</td><td class="px-4 py-3 text-sm text-right">$0.5</td><td class="px-4 py-3 text-sm text-right font-medium">12,000</td><td class="px-4 py-3 text-sm text-right">$6,000</td><td class="px-4 py-3 text-center"><span class="text-xs bg-green-50 text-green-600 px-2 py-0.5 rounded-full">充足</span></td></tr>
-            <tr class="table-row border-b border-gray-50"><td class="px-4 py-3 text-sm font-medium">USB-C 連接器 (Type A)</td><td class="px-4 py-3 text-xs text-gray-400 font-mono">EL-USBC-A</td><td class="px-4 py-3 text-sm text-gray-500">電子零件</td><td class="px-4 py-3 text-sm text-right">$12</td><td class="px-4 py-3 text-sm text-right font-medium text-danger">23</td><td class="px-4 py-3 text-sm text-right">$276</td><td class="px-4 py-3 text-center"><span class="text-xs bg-red-50 text-red-600 px-2 py-0.5 rounded-full">低庫存</span></td></tr>
-            <tr class="table-row border-b border-gray-50"><td class="px-4 py-3 text-sm font-medium">瓦楞紙箱 30x20x15</td><td class="px-4 py-3 text-xs text-gray-400 font-mono">PK-BOX-M</td><td class="px-4 py-3 text-sm text-gray-500">包裝材料</td><td class="px-4 py-3 text-sm text-right">$15</td><td class="px-4 py-3 text-sm text-right font-medium">850</td><td class="px-4 py-3 text-sm text-right">$12,750</td><td class="px-4 py-3 text-center"><span class="text-xs bg-green-50 text-green-600 px-2 py-0.5 rounded-full">充足</span></td></tr>
-            <tr class="table-row border-b border-gray-50"><td class="px-4 py-3 text-sm font-medium">M3 不鏽鋼螺絲</td><td class="px-4 py-3 text-xs text-gray-400 font-mono">HW-M3-SS</td><td class="px-4 py-3 text-sm text-gray-500">五金配件</td><td class="px-4 py-3 text-sm text-right">$0.8</td><td class="px-4 py-3 text-sm text-right font-medium text-danger">45</td><td class="px-4 py-3 text-sm text-right">$36</td><td class="px-4 py-3 text-center"><span class="text-xs bg-red-50 text-red-600 px-2 py-0.5 rounded-full">低庫存</span></td></tr>
-            <tr class="table-row border-b border-gray-50"><td class="px-4 py-3 text-sm font-medium">標籤貼紙 50x30mm</td><td class="px-4 py-3 text-xs text-gray-400 font-mono">PK-LBL-S</td><td class="px-4 py-3 text-sm text-gray-500">包裝材料</td><td class="px-4 py-3 text-sm text-right">$3</td><td class="px-4 py-3 text-sm text-right font-medium">2,400</td><td class="px-4 py-3 text-sm text-right">$7,200</td><td class="px-4 py-3 text-center"><span class="text-xs bg-green-50 text-green-600 px-2 py-0.5 rounded-full">充足</span></td></tr>
-            <tr class="table-row"><td class="px-4 py-3 text-sm font-medium">防靜電手環</td><td class="px-4 py-3 text-xs text-gray-400 font-mono">HW-ESD-W</td><td class="px-4 py-3 text-sm text-gray-500">五金配件</td><td class="px-4 py-3 text-sm text-right">$85</td><td class="px-4 py-3 text-sm text-right font-medium">120</td><td class="px-4 py-3 text-sm text-right">$10,200</td><td class="px-4 py-3 text-center"><span class="text-xs bg-green-50 text-green-600 px-2 py-0.5 rounded-full">充足</span></td></tr>
-          </tbody>
-        </table>
+      <button onclick="openAddModal()" class="bg-gray-900 text-white text-sm font-medium px-4 py-2 rounded-lg hover:bg-gray-800 transition flex items-center gap-1.5">
+        <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+        Add Product
+      </button>
+      <button class="bg-white text-gray-700 text-sm font-medium px-4 py-2 rounded-lg border border-gray-200 hover:bg-gray-50 transition flex items-center gap-1.5">
+        <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+        Export CSV
+      </button>
+      <div class="alert-pulse bg-amber-50 border border-amber-200 text-amber-700 text-sm font-medium px-3 py-1.5 rounded-full flex items-center gap-1.5 cursor-pointer" onclick="filterLowStock()">
+        <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+        Low Stock (7)
       </div>
     </div>
+  </div>
+</header>
 
-    <!-- Records -->
-    <div id="page-records" class="flex-1 overflow-auto p-6 fade-in hidden">
-      <div class="flex items-center gap-2 mb-4">
-        <button class="text-sm font-medium px-3 py-1.5 rounded-lg bg-primary text-white">全部</button>
-        <button class="text-sm font-medium px-3 py-1.5 rounded-lg bg-gray-100 text-gray-600">進貨</button>
-        <button class="text-sm font-medium px-3 py-1.5 rounded-lg bg-gray-100 text-gray-600">出庫</button>
-        <button class="text-sm font-medium px-3 py-1.5 rounded-lg bg-gray-100 text-gray-600">退貨</button>
-      </div>
-      <div class="bg-white rounded-2xl border border-gray-100">
-        <table class="w-full">
-          <thead><tr class="text-xs text-gray-400 border-b border-gray-100"><th class="text-left px-4 py-3 font-medium">日期</th><th class="text-center px-4 py-3 font-medium">類型</th><th class="text-left px-4 py-3 font-medium">商品</th><th class="text-right px-4 py-3 font-medium">數量</th><th class="text-left px-4 py-3 font-medium">來源/去向</th><th class="text-left px-4 py-3 font-medium">經手人</th></tr></thead>
-          <tbody>
-            <tr class="border-b border-gray-50 hover:bg-gray-50 transition"><td class="px-4 py-3 text-sm text-gray-500">2/16 14:30</td><td class="px-4 py-3 text-center"><span class="text-xs bg-orange-50 text-orange-600 px-2.5 py-1 rounded-full font-medium">出庫</span></td><td class="px-4 py-3 text-sm font-medium">瓦楞紙箱 30x20x15</td><td class="px-4 py-3 text-sm text-right font-medium text-warning">-50</td><td class="px-4 py-3 text-sm text-gray-500">訂單 #2026-0458</td><td class="px-4 py-3 text-sm text-gray-400">王倉管</td></tr>
-            <tr class="border-b border-gray-50 hover:bg-gray-50 transition"><td class="px-4 py-3 text-sm text-gray-500">2/16 10:15</td><td class="px-4 py-3 text-center"><span class="text-xs bg-green-50 text-green-600 px-2.5 py-1 rounded-full font-medium">進貨</span></td><td class="px-4 py-3 text-sm font-medium">10K 電阻 1/4W</td><td class="px-4 py-3 text-sm text-right font-medium text-success">+5,000</td><td class="px-4 py-3 text-sm text-gray-500">大同電子</td><td class="px-4 py-3 text-sm text-gray-400">李倉管</td></tr>
-            <tr class="border-b border-gray-50 hover:bg-gray-50 transition"><td class="px-4 py-3 text-sm text-gray-500">2/15 16:00</td><td class="px-4 py-3 text-center"><span class="text-xs bg-orange-50 text-orange-600 px-2.5 py-1 rounded-full font-medium">出庫</span></td><td class="px-4 py-3 text-sm font-medium">防靜電手環</td><td class="px-4 py-3 text-sm text-right font-medium text-warning">-10</td><td class="px-4 py-3 text-sm text-gray-500">產線 B</td><td class="px-4 py-3 text-sm text-gray-400">王倉管</td></tr>
-            <tr class="border-b border-gray-50 hover:bg-gray-50 transition"><td class="px-4 py-3 text-sm text-gray-500">2/15 09:30</td><td class="px-4 py-3 text-center"><span class="text-xs bg-blue-50 text-blue-600 px-2.5 py-1 rounded-full font-medium">退貨</span></td><td class="px-4 py-3 text-sm font-medium">USB-C 連接器 (Type A)</td><td class="px-4 py-3 text-sm text-right font-medium text-primary">+3</td><td class="px-4 py-3 text-sm text-gray-500">品檢退回</td><td class="px-4 py-3 text-sm text-gray-400">陳品管</td></tr>
-            <tr class="hover:bg-gray-50 transition"><td class="px-4 py-3 text-sm text-gray-500">2/14 14:00</td><td class="px-4 py-3 text-center"><span class="text-xs bg-green-50 text-green-600 px-2.5 py-1 rounded-full font-medium">進貨</span></td><td class="px-4 py-3 text-sm font-medium">標籤貼紙 50x30mm</td><td class="px-4 py-3 text-sm text-right font-medium text-success">+1,000</td><td class="px-4 py-3 text-sm text-gray-500">宏達包材</td><td class="px-4 py-3 text-sm text-gray-400">李倉管</td></tr>
-          </tbody>
-        </table>
-      </div>
+<!-- Quick Stats Strip -->
+<div class="bg-white border-b border-gray-200">
+  <div class="max-w-[1400px] mx-auto px-6 py-2.5 flex items-center gap-8">
+    <div class="flex items-center gap-2 text-sm">
+      <div class="w-2 h-2 rounded-full bg-gray-400"></div>
+      <span class="text-gray-500">Total Products</span>
+      <span class="font-semibold text-gray-900">342</span>
     </div>
-
-    <!-- Suppliers -->
-    <div id="page-suppliers" class="flex-1 overflow-auto p-6 fade-in hidden">
-      <div class="grid grid-cols-3 gap-4">
-        <div class="bg-white rounded-2xl p-5 border border-gray-100 hover:shadow-md transition cursor-pointer">
-          <div class="flex items-center gap-3 mb-3"><div class="w-10 h-10 rounded-xl bg-blue-100 flex items-center justify-center text-lg font-bold text-blue-600">大</div><div><h4 class="font-semibold text-sm">大同電子</h4><p class="text-xs text-gray-400">電子零件</p></div></div>
-          <div class="text-xs text-gray-500 mb-2">供應 42 項商品</div>
-          <div class="flex justify-between text-sm"><span class="text-gray-500">本月訂單</span><span class="font-bold text-primary">$185,000</span></div>
-        </div>
-        <div class="bg-white rounded-2xl p-5 border border-gray-100 hover:shadow-md transition cursor-pointer">
-          <div class="flex items-center gap-3 mb-3"><div class="w-10 h-10 rounded-xl bg-amber-100 flex items-center justify-center text-lg font-bold text-amber-600">宏</div><div><h4 class="font-semibold text-sm">宏達包材</h4><p class="text-xs text-gray-400">包裝材料</p></div></div>
-          <div class="text-xs text-gray-500 mb-2">供應 28 項商品</div>
-          <div class="flex justify-between text-sm"><span class="text-gray-500">本月訂單</span><span class="font-bold text-primary">$92,000</span></div>
-        </div>
-        <div class="bg-white rounded-2xl p-5 border border-gray-100 hover:shadow-md transition cursor-pointer">
-          <div class="flex items-center gap-3 mb-3"><div class="w-10 h-10 rounded-xl bg-emerald-100 flex items-center justify-center text-lg font-bold text-emerald-600">永</div><div><h4 class="font-semibold text-sm">永豐五金</h4><p class="text-xs text-gray-400">五金配件</p></div></div>
-          <div class="text-xs text-gray-500 mb-2">供應 35 項商品</div>
-          <div class="flex justify-between text-sm"><span class="text-gray-500">本月訂單</span><span class="font-bold text-primary">$68,500</span></div>
-        </div>
-      </div>
+    <div class="flex items-center gap-2 text-sm">
+      <div class="w-2 h-2 rounded-full bg-green-500"></div>
+      <span class="text-gray-500">In Stock</span>
+      <span class="font-semibold text-green-700">285</span>
     </div>
-  </main>
+    <div class="flex items-center gap-2 text-sm">
+      <div class="w-2 h-2 rounded-full bg-amber-500"></div>
+      <span class="text-gray-500">Low Stock</span>
+      <span class="font-semibold text-amber-700">42</span>
+    </div>
+    <div class="flex items-center gap-2 text-sm">
+      <div class="w-2 h-2 rounded-full bg-red-500"></div>
+      <span class="text-gray-500">Out of Stock</span>
+      <span class="font-semibold text-red-600">15</span>
+    </div>
+  </div>
 </div>
 
-<!-- Stock Modal -->
-<div id="stockModal" class="fixed inset-0 z-50 hidden items-center justify-center modal-overlay">
-  <div class="bg-white rounded-2xl w-full max-w-md mx-4 p-6 shadow-2xl">
+<!-- Main Inventory Table -->
+<div class="max-w-[1400px] mx-auto px-6 py-5">
+  <div class="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
+    <table class="w-full table-fixed" id="inventoryTable">
+      <colgroup>
+        <col class="w-[44px]">
+        <col class="w-[110px]">
+        <col class="w-[200px]">
+        <col class="w-[120px]">
+        <col class="w-[80px]">
+        <col class="w-[90px]">
+        <col class="w-[120px]">
+        <col class="w-[110px]">
+        <col class="w-[120px]">
+        <col class="w-[90px]">
+      </colgroup>
+      <thead>
+        <tr class="bg-gray-50 border-b border-gray-200 text-xs text-gray-500 uppercase tracking-wider">
+          <th class="px-3 py-3 text-center"><input type="checkbox" id="selectAll" onclick="toggleSelectAll()" class="rounded border-gray-300 cursor-pointer"></th>
+          <th class="px-3 py-3 text-left font-semibold sort-header" onclick="sortTable('sku')">SKU <span class="text-gray-300 ml-0.5">&#9650;&#9660;</span></th>
+          <th class="px-3 py-3 text-left font-semibold sort-header" onclick="sortTable('name')">Product Name <span class="text-gray-300 ml-0.5">&#9650;&#9660;</span></th>
+          <th class="px-3 py-3 text-left font-semibold sort-header" onclick="sortTable('category')">Category</th>
+          <th class="px-3 py-3 text-right font-semibold sort-header" onclick="sortTable('qty')">Qty <span class="text-gray-300 ml-0.5">&#9650;&#9660;</span></th>
+          <th class="px-3 py-3 text-right font-semibold">Min Stock</th>
+          <th class="px-3 py-3 text-center font-semibold">Status</th>
+          <th class="px-3 py-3 text-left font-semibold">Location</th>
+          <th class="px-3 py-3 text-left font-semibold">Last Updated</th>
+          <th class="px-3 py-3 text-center font-semibold">Actions</th>
+        </tr>
+      </thead>
+      <tbody id="tableBody">
+        <!-- Row 1: In Stock -->
+        <tr class="hoverable normal-row border-b border-gray-100 transition-colors" data-sku="SKU-001" data-name="Widget A" data-category="Electronics" data-qty="245" data-min="50" data-status="in-stock">
+          <td class="px-3 py-3 text-center"><input type="checkbox" class="row-check rounded border-gray-300 cursor-pointer"></td>
+          <td class="px-3 py-3 text-sm font-mono font-medium text-gray-700">SKU-001</td>
+          <td class="px-3 py-3 text-sm font-medium text-gray-900">Widget A</td>
+          <td class="px-3 py-3 text-sm text-gray-500">Electronics</td>
+          <td class="px-3 py-3 text-sm text-right font-medium editable-cell" onclick="startEdit(this, 245)">245</td>
+          <td class="px-3 py-3 text-sm text-right text-gray-400">50</td>
+          <td class="px-3 py-3 text-center"><span class="badge badge-in-stock">In Stock</span></td>
+          <td class="px-3 py-3 text-sm text-gray-500">Aisle 3, Shelf B</td>
+          <td class="px-3 py-3 text-sm text-gray-400">Feb 24, 2026</td>
+          <td class="px-3 py-3 text-center"><div class="row-actions flex items-center justify-center gap-1"><button class="p-1 rounded hover:bg-gray-100 text-gray-400 hover:text-gray-600 transition" title="Edit"><svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg></button><button class="p-1 rounded hover:bg-red-50 text-gray-400 hover:text-red-500 transition" title="Delete"><svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/></svg></button></div></td>
+        </tr>
+        <!-- Row 2: LOW STOCK - PULSING -->
+        <tr class="hoverable low-stock-row border-b border-gray-100 bg-amber-50/40 transition-colors" data-sku="SKU-002" data-name="Gadget B" data-category="Electronics" data-qty="3" data-min="10" data-status="low-stock">
+          <td class="px-3 py-3 text-center"><input type="checkbox" class="row-check rounded border-gray-300 cursor-pointer"></td>
+          <td class="px-3 py-3 text-sm font-mono font-medium text-amber-700">SKU-002</td>
+          <td class="px-3 py-3 text-sm font-medium text-gray-900">Gadget B</td>
+          <td class="px-3 py-3 text-sm text-gray-500">Electronics</td>
+          <td class="px-3 py-3 text-sm text-right font-bold text-amber-700 editable-cell" onclick="startEdit(this, 3)">3</td>
+          <td class="px-3 py-3 text-sm text-right text-gray-400">10</td>
+          <td class="px-3 py-3 text-center"><span class="badge badge-low-stock font-bold">LOW STOCK</span></td>
+          <td class="px-3 py-3 text-sm text-gray-500">Aisle 1, Shelf A</td>
+          <td class="px-3 py-3 text-sm text-gray-400">Feb 23, 2026</td>
+          <td class="px-3 py-3 text-center"><div class="row-actions flex items-center justify-center gap-1"><button class="p-1 rounded hover:bg-gray-100 text-gray-400 hover:text-gray-600 transition" title="Edit"><svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg></button><button class="p-1 rounded hover:bg-red-50 text-gray-400 hover:text-red-500 transition" title="Delete"><svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/></svg></button></div></td>
+        </tr>
+        <!-- Row 3: OUT OF STOCK -->
+        <tr class="hoverable out-stock-row border-b border-gray-100 bg-red-50/30 transition-colors" data-sku="SKU-003" data-name="Part C" data-category="Hardware" data-qty="0" data-min="25" data-status="out-of-stock">
+          <td class="px-3 py-3 text-center"><input type="checkbox" class="row-check rounded border-gray-300 cursor-pointer"></td>
+          <td class="px-3 py-3 text-sm font-mono font-medium text-red-600">SKU-003</td>
+          <td class="px-3 py-3 text-sm font-medium text-gray-900">Part C</td>
+          <td class="px-3 py-3 text-sm text-gray-500">Hardware</td>
+          <td class="px-3 py-3 text-sm text-right font-bold text-red-600 editable-cell" onclick="startEdit(this, 0)">0</td>
+          <td class="px-3 py-3 text-sm text-right text-gray-400">25</td>
+          <td class="px-3 py-3 text-center"><span class="badge badge-out-of-stock font-bold">OUT OF STOCK</span></td>
+          <td class="px-3 py-3 text-sm text-gray-500">Aisle 5, Shelf D</td>
+          <td class="px-3 py-3 text-sm text-gray-400">Feb 20, 2026</td>
+          <td class="px-3 py-3 text-center"><div class="row-actions flex items-center justify-center gap-1"><button class="p-1 rounded hover:bg-gray-100 text-gray-400 hover:text-gray-600 transition" title="Edit"><svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg></button><button class="p-1 rounded hover:bg-red-50 text-gray-400 hover:text-red-500 transition" title="Delete"><svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/></svg></button></div></td>
+        </tr>
+        <!-- Row 4: In Stock -->
+        <tr class="hoverable normal-row border-b border-gray-100 transition-colors" data-sku="SKU-004" data-name="Connector D" data-category="Electronics" data-qty="180" data-min="30" data-status="in-stock">
+          <td class="px-3 py-3 text-center"><input type="checkbox" class="row-check rounded border-gray-300 cursor-pointer"></td>
+          <td class="px-3 py-3 text-sm font-mono font-medium text-gray-700">SKU-004</td>
+          <td class="px-3 py-3 text-sm font-medium text-gray-900">Connector D</td>
+          <td class="px-3 py-3 text-sm text-gray-500">Electronics</td>
+          <td class="px-3 py-3 text-sm text-right font-medium editable-cell" onclick="startEdit(this, 180)">180</td>
+          <td class="px-3 py-3 text-sm text-right text-gray-400">30</td>
+          <td class="px-3 py-3 text-center"><span class="badge badge-in-stock">In Stock</span></td>
+          <td class="px-3 py-3 text-sm text-gray-500">Aisle 2, Shelf C</td>
+          <td class="px-3 py-3 text-sm text-gray-400">Feb 22, 2026</td>
+          <td class="px-3 py-3 text-center"><div class="row-actions flex items-center justify-center gap-1"><button class="p-1 rounded hover:bg-gray-100 text-gray-400 hover:text-gray-600 transition" title="Edit"><svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg></button><button class="p-1 rounded hover:bg-red-50 text-gray-400 hover:text-red-500 transition" title="Delete"><svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/></svg></button></div></td>
+        </tr>
+        <!-- Row 5: LOW STOCK - PULSING -->
+        <tr class="hoverable low-stock-row border-b border-gray-100 bg-amber-50/40 transition-colors" data-sku="SKU-005" data-name="Bearing E" data-category="Hardware" data-qty="8" data-min="20" data-status="low-stock">
+          <td class="px-3 py-3 text-center"><input type="checkbox" class="row-check rounded border-gray-300 cursor-pointer"></td>
+          <td class="px-3 py-3 text-sm font-mono font-medium text-amber-700">SKU-005</td>
+          <td class="px-3 py-3 text-sm font-medium text-gray-900">Bearing E</td>
+          <td class="px-3 py-3 text-sm text-gray-500">Hardware</td>
+          <td class="px-3 py-3 text-sm text-right font-bold text-amber-700 editable-cell" onclick="startEdit(this, 8)">8</td>
+          <td class="px-3 py-3 text-sm text-right text-gray-400">20</td>
+          <td class="px-3 py-3 text-center"><span class="badge badge-low-stock font-bold">LOW STOCK</span></td>
+          <td class="px-3 py-3 text-sm text-gray-500">Aisle 7, Shelf A</td>
+          <td class="px-3 py-3 text-sm text-gray-400">Feb 21, 2026</td>
+          <td class="px-3 py-3 text-center"><div class="row-actions flex items-center justify-center gap-1"><button class="p-1 rounded hover:bg-gray-100 text-gray-400 hover:text-gray-600 transition" title="Edit"><svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg></button><button class="p-1 rounded hover:bg-red-50 text-gray-400 hover:text-red-500 transition" title="Delete"><svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/></svg></button></div></td>
+        </tr>
+        <!-- Row 6: In Stock -->
+        <tr class="hoverable normal-row border-b border-gray-100 transition-colors" data-sku="SKU-006" data-name="Cable Assembly F" data-category="Electronics" data-qty="520" data-min="100" data-status="in-stock">
+          <td class="px-3 py-3 text-center"><input type="checkbox" class="row-check rounded border-gray-300 cursor-pointer"></td>
+          <td class="px-3 py-3 text-sm font-mono font-medium text-gray-700">SKU-006</td>
+          <td class="px-3 py-3 text-sm font-medium text-gray-900">Cable Assembly F</td>
+          <td class="px-3 py-3 text-sm text-gray-500">Electronics</td>
+          <td class="px-3 py-3 text-sm text-right font-medium editable-cell" onclick="startEdit(this, 520)">520</td>
+          <td class="px-3 py-3 text-sm text-right text-gray-400">100</td>
+          <td class="px-3 py-3 text-center"><span class="badge badge-in-stock">In Stock</span></td>
+          <td class="px-3 py-3 text-sm text-gray-500">Aisle 3, Shelf A</td>
+          <td class="px-3 py-3 text-sm text-gray-400">Feb 24, 2026</td>
+          <td class="px-3 py-3 text-center"><div class="row-actions flex items-center justify-center gap-1"><button class="p-1 rounded hover:bg-gray-100 text-gray-400 hover:text-gray-600 transition" title="Edit"><svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg></button><button class="p-1 rounded hover:bg-red-50 text-gray-400 hover:text-red-500 transition" title="Delete"><svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/></svg></button></div></td>
+        </tr>
+        <!-- Row 7: LOW STOCK - PULSING -->
+        <tr class="hoverable low-stock-row border-b border-gray-100 bg-amber-50/40 transition-colors" data-sku="SKU-007" data-name="Gasket G" data-category="Industrial" data-qty="5" data-min="15" data-status="low-stock">
+          <td class="px-3 py-3 text-center"><input type="checkbox" class="row-check rounded border-gray-300 cursor-pointer"></td>
+          <td class="px-3 py-3 text-sm font-mono font-medium text-amber-700">SKU-007</td>
+          <td class="px-3 py-3 text-sm font-medium text-gray-900">Gasket G</td>
+          <td class="px-3 py-3 text-sm text-gray-500">Industrial</td>
+          <td class="px-3 py-3 text-sm text-right font-bold text-amber-700 editable-cell" onclick="startEdit(this, 5)">5</td>
+          <td class="px-3 py-3 text-sm text-right text-gray-400">15</td>
+          <td class="px-3 py-3 text-center"><span class="badge badge-low-stock font-bold">LOW STOCK</span></td>
+          <td class="px-3 py-3 text-sm text-gray-500">Aisle 9, Shelf B</td>
+          <td class="px-3 py-3 text-sm text-gray-400">Feb 19, 2026</td>
+          <td class="px-3 py-3 text-center"><div class="row-actions flex items-center justify-center gap-1"><button class="p-1 rounded hover:bg-gray-100 text-gray-400 hover:text-gray-600 transition" title="Edit"><svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg></button><button class="p-1 rounded hover:bg-red-50 text-gray-400 hover:text-red-500 transition" title="Delete"><svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/></svg></button></div></td>
+        </tr>
+        <!-- Row 8: In Stock -->
+        <tr class="hoverable normal-row border-b border-gray-100 transition-colors" data-sku="SKU-008" data-name="Valve H" data-category="Industrial" data-qty="92" data-min="20" data-status="in-stock">
+          <td class="px-3 py-3 text-center"><input type="checkbox" class="row-check rounded border-gray-300 cursor-pointer"></td>
+          <td class="px-3 py-3 text-sm font-mono font-medium text-gray-700">SKU-008</td>
+          <td class="px-3 py-3 text-sm font-medium text-gray-900">Valve H</td>
+          <td class="px-3 py-3 text-sm text-gray-500">Industrial</td>
+          <td class="px-3 py-3 text-sm text-right font-medium editable-cell" onclick="startEdit(this, 92)">92</td>
+          <td class="px-3 py-3 text-sm text-right text-gray-400">20</td>
+          <td class="px-3 py-3 text-center"><span class="badge badge-in-stock">In Stock</span></td>
+          <td class="px-3 py-3 text-sm text-gray-500">Aisle 6, Shelf C</td>
+          <td class="px-3 py-3 text-sm text-gray-400">Feb 23, 2026</td>
+          <td class="px-3 py-3 text-center"><div class="row-actions flex items-center justify-center gap-1"><button class="p-1 rounded hover:bg-gray-100 text-gray-400 hover:text-gray-600 transition" title="Edit"><svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg></button><button class="p-1 rounded hover:bg-red-50 text-gray-400 hover:text-red-500 transition" title="Delete"><svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/></svg></button></div></td>
+        </tr>
+        <!-- Row 9: In Stock -->
+        <tr class="hoverable normal-row border-b border-gray-100 transition-colors" data-sku="SKU-009" data-name="Mounting Bracket J" data-category="Hardware" data-qty="340" data-min="50" data-status="in-stock">
+          <td class="px-3 py-3 text-center"><input type="checkbox" class="row-check rounded border-gray-300 cursor-pointer"></td>
+          <td class="px-3 py-3 text-sm font-mono font-medium text-gray-700">SKU-009</td>
+          <td class="px-3 py-3 text-sm font-medium text-gray-900">Mounting Bracket J</td>
+          <td class="px-3 py-3 text-sm text-gray-500">Hardware</td>
+          <td class="px-3 py-3 text-sm text-right font-medium editable-cell" onclick="startEdit(this, 340)">340</td>
+          <td class="px-3 py-3 text-sm text-right text-gray-400">50</td>
+          <td class="px-3 py-3 text-center"><span class="badge badge-in-stock">In Stock</span></td>
+          <td class="px-3 py-3 text-sm text-gray-500">Aisle 4, Shelf B</td>
+          <td class="px-3 py-3 text-sm text-gray-400">Feb 24, 2026</td>
+          <td class="px-3 py-3 text-center"><div class="row-actions flex items-center justify-center gap-1"><button class="p-1 rounded hover:bg-gray-100 text-gray-400 hover:text-gray-600 transition" title="Edit"><svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg></button><button class="p-1 rounded hover:bg-red-50 text-gray-400 hover:text-red-500 transition" title="Delete"><svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/></svg></button></div></td>
+        </tr>
+        <!-- Row 10: OUT OF STOCK -->
+        <tr class="hoverable out-stock-row bg-red-50/30 transition-colors" data-sku="SKU-010" data-name="Sensor Module K" data-category="Electronics" data-qty="0" data-min="10" data-status="out-of-stock">
+          <td class="px-3 py-3 text-center"><input type="checkbox" class="row-check rounded border-gray-300 cursor-pointer"></td>
+          <td class="px-3 py-3 text-sm font-mono font-medium text-red-600">SKU-010</td>
+          <td class="px-3 py-3 text-sm font-medium text-gray-900">Sensor Module K</td>
+          <td class="px-3 py-3 text-sm text-gray-500">Electronics</td>
+          <td class="px-3 py-3 text-sm text-right font-bold text-red-600 editable-cell" onclick="startEdit(this, 0)">0</td>
+          <td class="px-3 py-3 text-sm text-right text-gray-400">10</td>
+          <td class="px-3 py-3 text-center"><span class="badge badge-out-of-stock font-bold">OUT OF STOCK</span></td>
+          <td class="px-3 py-3 text-sm text-gray-500">Aisle 1, Shelf D</td>
+          <td class="px-3 py-3 text-sm text-gray-400">Feb 18, 2026</td>
+          <td class="px-3 py-3 text-center"><div class="row-actions flex items-center justify-center gap-1"><button class="p-1 rounded hover:bg-gray-100 text-gray-400 hover:text-gray-600 transition" title="Edit"><svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg></button><button class="p-1 rounded hover:bg-red-50 text-gray-400 hover:text-red-500 transition" title="Delete"><svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/></svg></button></div></td>
+        </tr>
+      </tbody>
+    </table>
+
+    <!-- Table Footer -->
+    <div class="px-4 py-3 bg-gray-50 border-t border-gray-200 flex items-center justify-between">
+      <span class="text-sm text-gray-500">Showing <span class="font-medium text-gray-700">1-10</span> of <span class="font-medium text-gray-700">342</span> products</span>
+      <div class="flex items-center gap-1">
+        <button class="px-3 py-1.5 text-sm text-gray-400 bg-white border border-gray-200 rounded-lg cursor-not-allowed" disabled>&laquo; Prev</button>
+        <button class="px-3 py-1.5 text-sm text-white bg-gray-900 border border-gray-900 rounded-lg font-medium">1</button>
+        <button class="px-3 py-1.5 text-sm text-gray-600 bg-white border border-gray-200 rounded-lg hover:bg-gray-50 transition">2</button>
+        <button class="px-3 py-1.5 text-sm text-gray-600 bg-white border border-gray-200 rounded-lg hover:bg-gray-50 transition">3</button>
+        <span class="px-2 text-gray-400">...</span>
+        <button class="px-3 py-1.5 text-sm text-gray-600 bg-white border border-gray-200 rounded-lg hover:bg-gray-50 transition">35</button>
+        <button class="px-3 py-1.5 text-sm text-gray-600 bg-white border border-gray-200 rounded-lg hover:bg-gray-50 transition">Next &raquo;</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Add Product Modal -->
+<div id="addModal" class="fixed inset-0 z-50 hidden items-center justify-center" style="background:rgba(0,0,0,.4);backdrop-filter:blur(4px)">
+  <div class="bg-white rounded-xl w-full max-w-md mx-4 p-6 shadow-2xl">
     <div class="flex items-center justify-between mb-5">
-      <h2 class="font-bold text-lg text-gray-900" id="stockModalTitle">進貨登記</h2>
-      <button onclick="closeStockModal()" class="text-gray-400 hover:text-gray-600"><svg width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
+      <h2 class="font-bold text-lg text-gray-900">Add New Product</h2>
+      <button onclick="closeAddModal()" class="text-gray-400 hover:text-gray-600 transition"><svg width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
     </div>
     <div class="space-y-4">
-      <div><label class="text-xs text-gray-500 mb-1 block">商品</label><select class="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20"><option>USB-C 連接器 (Type A)</option><option>M3 不鏽鋼螺絲</option><option>10K 電阻 1/4W</option></select></div>
       <div class="grid grid-cols-2 gap-3">
-        <div><label class="text-xs text-gray-500 mb-1 block">數量</label><input type="number" value="100" class="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20"></div>
-        <div><label class="text-xs text-gray-500 mb-1 block" id="stockSourceLabel">供應商</label><select class="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20"><option>大同電子</option><option>宏達包材</option><option>永豐五金</option></select></div>
+        <div><label class="text-xs text-gray-500 mb-1 block font-medium">SKU</label><input type="text" placeholder="SKU-011" class="w-full border border-gray-200 rounded-lg px-3 py-2.5 text-sm font-mono focus:outline-none focus:border-amber-500 focus:ring-1 focus:ring-amber-500/30"></div>
+        <div><label class="text-xs text-gray-500 mb-1 block font-medium">Category</label><select class="w-full border border-gray-200 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:border-amber-500 focus:ring-1 focus:ring-amber-500/30"><option>Electronics</option><option>Hardware</option><option>Industrial</option><option>Packaging</option></select></div>
       </div>
-      <textarea placeholder="備註" rows="2" class="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 resize-none"></textarea>
-      <button onclick="closeStockModal()" id="stockSubmitBtn" class="w-full bg-success text-white font-medium py-3 rounded-xl hover:bg-success/90 transition">確認進貨</button>
+      <div><label class="text-xs text-gray-500 mb-1 block font-medium">Product Name</label><input type="text" placeholder="Enter product name" class="w-full border border-gray-200 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:border-amber-500 focus:ring-1 focus:ring-amber-500/30"></div>
+      <div class="grid grid-cols-3 gap-3">
+        <div><label class="text-xs text-gray-500 mb-1 block font-medium">Quantity</label><input type="number" value="0" class="w-full border border-gray-200 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:border-amber-500 focus:ring-1 focus:ring-amber-500/30"></div>
+        <div><label class="text-xs text-gray-500 mb-1 block font-medium">Min Stock</label><input type="number" value="10" class="w-full border border-gray-200 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:border-amber-500 focus:ring-1 focus:ring-amber-500/30"></div>
+        <div><label class="text-xs text-gray-500 mb-1 block font-medium">Location</label><input type="text" placeholder="Aisle-Shelf" class="w-full border border-gray-200 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:border-amber-500 focus:ring-1 focus:ring-amber-500/30"></div>
+      </div>
+      <button onclick="closeAddModal()" class="w-full bg-gray-900 text-white font-medium py-2.5 rounded-lg hover:bg-gray-800 transition">Add Product</button>
     </div>
   </div>
 </div>
 
 <script>
-function switchPage(page){
-  document.querySelectorAll('[id^="page-"]').forEach(p=>p.classList.add('hidden'));
-  document.getElementById('page-'+page).classList.remove('hidden');
-  document.querySelectorAll('.sidebar-item').forEach(i=>i.classList.remove('active'));
-  document.querySelector('[data-page="'+page+'"]').classList.add('active');
-  const titles={dashboard:'儀表板',products:'商品列表',records:'進出庫紀錄',suppliers:'供應商'};
-  document.getElementById('pageTitle').textContent=titles[page]||page;
+// Select All checkbox
+function toggleSelectAll(){
+  var c=document.getElementById('selectAll').checked;
+  document.querySelectorAll('.row-check').forEach(function(cb){cb.checked=c});
 }
-function openStockModal(type){
-  document.getElementById('stockModal').classList.remove('hidden');
-  document.getElementById('stockModal').classList.add('flex');
-  if(type==='in'){
-    document.getElementById('stockModalTitle').textContent='進貨登記';
-    document.getElementById('stockSourceLabel').textContent='供應商';
-    document.getElementById('stockSubmitBtn').textContent='確認進貨';
-    document.getElementById('stockSubmitBtn').className='w-full bg-success text-white font-medium py-3 rounded-xl hover:bg-success/90 transition';
+
+// Inline edit on quantity cell click
+var activeEdit=null;
+function startEdit(cell,val){
+  if(activeEdit){cancelEdit()}
+  activeEdit={cell:cell,original:cell.innerHTML};
+  var inp=document.createElement('input');
+  inp.type='number';inp.value=val;inp.className='edit-input';
+  inp.onblur=function(){finishEdit(cell,inp.value)};
+  inp.onkeydown=function(e){if(e.key==='Enter'){finishEdit(cell,inp.value)}if(e.key==='Escape'){cancelEdit()}};
+  cell.innerHTML='';cell.appendChild(inp);inp.focus();inp.select();
+}
+function finishEdit(cell,val){
+  var n=parseInt(val)||0;
+  var row=cell.closest('tr');
+  var min=parseInt(row.getAttribute('data-min'))||0;
+  cell.textContent=n;
+  row.setAttribute('data-qty',n);
+  // Update status
+  if(n===0){
+    row.setAttribute('data-status','out-of-stock');
+    row.className='hoverable out-stock-row border-b border-gray-100 bg-red-50/30 transition-colors';
+    cell.className='px-3 py-3 text-sm text-right font-bold text-red-600 editable-cell';
+    cell.setAttribute('onclick','startEdit(this,'+n+')');
+    row.querySelector('.badge').className='badge badge-out-of-stock font-bold';
+    row.querySelector('.badge').textContent='OUT OF STOCK';
+    row.querySelector('td:nth-child(2)').className='px-3 py-3 text-sm font-mono font-medium text-red-600';
+  }else if(n<min){
+    row.setAttribute('data-status','low-stock');
+    row.className='hoverable low-stock-row border-b border-gray-100 bg-amber-50/40 transition-colors';
+    cell.className='px-3 py-3 text-sm text-right font-bold text-amber-700 editable-cell';
+    cell.setAttribute('onclick','startEdit(this,'+n+')');
+    row.querySelector('.badge').className='badge badge-low-stock font-bold';
+    row.querySelector('.badge').textContent='LOW STOCK';
+    row.querySelector('td:nth-child(2)').className='px-3 py-3 text-sm font-mono font-medium text-amber-700';
   }else{
-    document.getElementById('stockModalTitle').textContent='出庫登記';
-    document.getElementById('stockSourceLabel').textContent='去向';
-    document.getElementById('stockSubmitBtn').textContent='確認出庫';
-    document.getElementById('stockSubmitBtn').className='w-full bg-warning text-white font-medium py-3 rounded-xl hover:bg-warning/90 transition';
+    row.setAttribute('data-status','in-stock');
+    row.className='hoverable normal-row border-b border-gray-100 transition-colors';
+    cell.className='px-3 py-3 text-sm text-right font-medium editable-cell';
+    cell.setAttribute('onclick','startEdit(this,'+n+')');
+    row.querySelector('.badge').className='badge badge-in-stock';
+    row.querySelector('.badge').textContent='In Stock';
+    row.querySelector('td:nth-child(2)').className='px-3 py-3 text-sm font-mono font-medium text-gray-700';
   }
+  activeEdit=null;
 }
-function closeStockModal(){document.getElementById('stockModal').classList.add('hidden');document.getElementById('stockModal').classList.remove('flex')}
+function cancelEdit(){
+  if(activeEdit){activeEdit.cell.innerHTML=activeEdit.original;activeEdit=null}
+}
+
+// Sort table by column
+var sortDir={};
+function sortTable(col){
+  var tbody=document.getElementById('tableBody');
+  var rows=Array.from(tbody.querySelectorAll('tr'));
+  sortDir[col]=!sortDir[col];
+  var dir=sortDir[col]?1:-1;
+  rows.sort(function(a,b){
+    var va=a.getAttribute('data-'+col)||'';
+    var vb=b.getAttribute('data-'+col)||'';
+    if(col==='qty'){return(parseInt(va)-parseInt(vb))*dir}
+    return va.localeCompare(vb)*dir;
+  });
+  rows.forEach(function(r){tbody.appendChild(r)});
+}
+
+// Search / filter
+function filterTable(){
+  var q=document.getElementById('searchInput').value.toLowerCase();
+  document.querySelectorAll('#tableBody tr').forEach(function(r){
+    var sku=(r.getAttribute('data-sku')||'').toLowerCase();
+    var name=(r.getAttribute('data-name')||'').toLowerCase();
+    r.style.display=(sku.indexOf(q)>-1||name.indexOf(q)>-1)?'':'none';
+  });
+}
+
+// Filter low stock only
+var lowStockFilter=false;
+function filterLowStock(){
+  lowStockFilter=!lowStockFilter;
+  document.querySelectorAll('#tableBody tr').forEach(function(r){
+    if(lowStockFilter){
+      var s=r.getAttribute('data-status');
+      r.style.display=(s==='low-stock'||s==='out-of-stock')?'':'none';
+    }else{
+      r.style.display='';
+    }
+  });
+}
+
+// Modal
+function openAddModal(){document.getElementById('addModal').classList.remove('hidden');document.getElementById('addModal').classList.add('flex')}
+function closeAddModal(){document.getElementById('addModal').classList.add('hidden');document.getElementById('addModal').classList.remove('flex')}
 </script>
 </body>
 </html>$HTML$,
-  1
+  3
 )
 ON CONFLICT (template_id) DO UPDATE SET
   html_content = EXCLUDED.html_content,
-  version = template_previews.version + 1,
+  version = EXCLUDED.version,
   updated_at = NOW();

@@ -2,335 +2,648 @@ INSERT INTO template_previews (template_id, html_content, version)
 VALUES (
   '7b0195c0-0876-4ce0-8ca1-0807ffb2a0f0',
   $HTML$<!DOCTYPE html>
-<html lang="zh-TW">
+<html lang="en">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>預約管家 BookEasy</title>
+<title>BookIt - Smart Scheduling</title>
 <script src="https://cdn.tailwindcss.com"></script>
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&display=swap" rel="stylesheet">
 <script>
-tailwind.config={theme:{extend:{colors:{primary:'#7c3aed',primaryLight:'#a78bfa',primaryDark:'#6d28d9',surface:'#f5f3ff',sidebar:'#1e1033',accent:'#f59e0b',success:'#10b981',danger:'#ef4444',sky:'#0ea5e9',rose:'#f43f5e'},fontFamily:{sans:['Inter','sans-serif']}}}}
+tailwind.config={theme:{extend:{colors:{coral:'#e11d48',coralLight:'#fff1f2',coralMid:'#fecdd3',cream:'#fffbeb',creamDark:'#fef3c7',avail:'#16a34a',availLight:'#dcfce7',availBorder:'#86efac',past:'#9ca3af',pastLight:'#f3f4f6',pastBorder:'#d1d5db',surface:'#fefce8'},fontFamily:{sans:['Poppins','sans-serif']}}}}
 </script>
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
-body{font-family:'Inter',sans-serif;background:#f8fafc;overflow:hidden;height:100vh}
-.sidebar-item{transition:all .2s}
-.sidebar-item:hover,.sidebar-item.active{background:rgba(255,255,255,.1);border-radius:8px}
-.time-slot{transition:all .15s;cursor:pointer}
-.time-slot:hover{border-color:#7c3aed;background:#f5f3ff}
-.time-slot.booked{background:#fee2e2;border-color:#fca5a5;opacity:.6;cursor:not-allowed}
-.time-slot.selected{background:#7c3aed;color:white;border-color:#7c3aed}
-.booking-card{transition:all .2s}
-.booking-card:hover{box-shadow:0 2px 8px rgba(0,0,0,.06)}
-.status-confirmed{background:#dcfce7;color:#16a34a}
-.status-pending{background:#fef3c7;color:#d97706}
-.status-cancelled{background:#fee2e2;color:#dc2626}
-.fade-in{animation:fadeIn .3s ease}
-@keyframes fadeIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
-.modal-overlay{background:rgba(0,0,0,.4);backdrop-filter:blur(4px)}
-::-webkit-scrollbar{width:5px}
-::-webkit-scrollbar-thumb{background:#c4b5fd;border-radius:99px}
+body{font-family:'Poppins',sans-serif;background:#fffdf7;overflow:hidden;height:100vh}
+.service-pill{transition:all .2s;cursor:pointer;user-select:none}
+.service-pill:hover{transform:translateY(-1px);box-shadow:0 2px 8px rgba(225,29,72,.15)}
+.service-pill.active{background:#e11d48;color:white;border-color:#e11d48}
+.timeline-slot{transition:all .15s;cursor:pointer;position:relative}
+.timeline-slot:hover{filter:brightness(0.95);transform:scaleY(1.02)}
+.timeline-slot.selected{outline:2px solid #e11d48;outline-offset:1px;z-index:5}
+.staff-row{position:relative}
+.time-cursor{position:absolute;top:0;bottom:0;width:2px;border-left:2px dashed #e11d48;z-index:20;pointer-events:none;transition:left .3s ease}
+.time-cursor::before{content:'';position:absolute;top:-4px;left:-5px;width:10px;height:10px;background:#e11d48;border-radius:50%}
+.time-cursor::after{content:'Now';position:absolute;top:-22px;left:50%;transform:translateX(-50%);font-size:10px;font-weight:600;color:#e11d48;white-space:nowrap;background:white;padding:1px 6px;border-radius:4px;border:1px solid #fecdd3}
+.sidebar-card{animation:slideIn .3s ease}
+@keyframes slideIn{from{opacity:0;transform:translateX(12px)}to{opacity:1;transform:translateX(0)}}
+.hour-label{font-variant-numeric:tabular-nums}
+::-webkit-scrollbar{width:6px;height:6px}
+::-webkit-scrollbar-thumb{background:#fecdd3;border-radius:99px}
+::-webkit-scrollbar-thumb:hover{background:#e11d48}
+.booked-block{border-left:3px solid #e11d48}
+.available-block{border:1.5px dashed #86efac}
+.past-block{border-left:3px solid #d1d5db}
+.past-block .block-text{text-decoration:line-through;opacity:.5}
 </style>
 </head>
 <body>
-<div class="flex h-screen">
-  <aside class="w-56 bg-sidebar text-white flex flex-col flex-shrink-0">
-    <div class="p-4 flex items-center gap-2.5 border-b border-white/10">
-      <div class="w-8 h-8 rounded-lg bg-primary flex items-center justify-center">
-        <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
-      </div>
-      <span class="font-bold text-base">BookEasy</span>
-    </div>
-    <nav class="flex-1 p-3 space-y-1">
-      <div onclick="switchPage('dashboard')" class="sidebar-item active flex items-center gap-3 px-3 py-2.5 cursor-pointer text-sm" data-page="dashboard">
-        <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
-        <span>儀表板</span>
-      </div>
-      <div onclick="switchPage('calendar')" class="sidebar-item flex items-center gap-3 px-3 py-2.5 cursor-pointer text-sm" data-page="calendar">
-        <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/></svg>
-        <span>預約日曆</span>
-      </div>
-      <div onclick="switchPage('clients')" class="sidebar-item flex items-center gap-3 px-3 py-2.5 cursor-pointer text-sm" data-page="clients">
-        <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/></svg>
-        <span>客戶名單</span>
-        <span class="ml-auto text-xs bg-white/20 px-2 py-0.5 rounded-full">86</span>
-      </div>
-      <div onclick="switchPage('services')" class="sidebar-item flex items-center gap-3 px-3 py-2.5 cursor-pointer text-sm" data-page="services">
-        <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-2 2 2 2 0 01-2-2v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83 0 2 2 0 010-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 01-2-2 2 2 0 012-2h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 010-2.83 2 2 0 012.83 0l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 012-2 2 2 0 012 2v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 0 2 2 0 010 2.83l-.06.06a1.65 1.65 0 00-.33 1.82V9a1.65 1.65 0 001.51 1H21a2 2 0 012 2 2 2 0 01-2 2h-.09a1.65 1.65 0 00-1.51 1z"/></svg>
-        <span>服務項目</span>
-      </div>
-    </nav>
-    <div class="p-3 border-t border-white/10">
-      <div class="flex items-center gap-3 px-3 py-2">
-        <div class="w-8 h-8 rounded-full bg-primaryLight flex items-center justify-center text-xs font-bold">美</div>
-        <div class="text-sm"><div class="font-medium">美麗髮廊</div><div class="text-xs text-white/50">專業版</div></div>
-      </div>
-    </div>
-  </aside>
+<div class="flex flex-col h-screen">
 
-  <main class="flex-1 flex flex-col overflow-hidden">
-    <header class="h-14 bg-white border-b border-gray-100 flex items-center justify-between px-6 flex-shrink-0">
-      <h1 class="font-semibold text-gray-900" id="pageTitle">儀表板</h1>
-      <button onclick="openBookingModal()" class="bg-primary text-white text-sm font-medium px-4 py-2 rounded-lg hover:bg-primaryDark transition flex items-center gap-1.5">
-        <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-        新增預約
+  <!-- Top Bar -->
+  <header class="h-14 bg-white border-b border-amber-100 flex items-center justify-between px-5 flex-shrink-0">
+    <div class="flex items-center gap-3">
+      <div class="w-8 h-8 rounded-lg bg-coral flex items-center justify-center">
+        <svg width="16" height="16" fill="none" stroke="white" stroke-width="2" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+      </div>
+      <span class="font-bold text-lg text-gray-900 tracking-tight">BookIt</span>
+    </div>
+    <div class="flex items-center gap-2">
+      <button onclick="shiftDate(-1)" class="w-8 h-8 rounded-lg border border-amber-200 bg-cream flex items-center justify-center text-gray-500 hover:bg-creamDark transition cursor-pointer">
+        <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><polyline points="15 18 9 12 15 6"/></svg>
       </button>
-    </header>
-
-    <!-- Dashboard -->
-    <div id="page-dashboard" class="flex-1 overflow-auto p-6 fade-in">
-      <div class="grid grid-cols-4 gap-4 mb-6">
-        <div class="bg-white rounded-2xl p-4 border border-gray-100">
-          <div class="text-xs text-gray-500 mb-1">今日預約</div>
-          <div class="text-2xl font-bold text-primary">8</div>
-          <div class="text-xs text-success mt-1">3 個已完成</div>
-        </div>
-        <div class="bg-white rounded-2xl p-4 border border-gray-100">
-          <div class="text-xs text-gray-500 mb-1">本週預約</div>
-          <div class="text-2xl font-bold text-gray-900">32</div>
-          <div class="text-xs text-primary mt-1">↑ 8% vs 上週</div>
-        </div>
-        <div class="bg-white rounded-2xl p-4 border border-gray-100">
-          <div class="text-xs text-gray-500 mb-1">本月營收</div>
-          <div class="text-2xl font-bold text-success">$186K</div>
-          <div class="text-xs text-success mt-1">↑ 12%</div>
-        </div>
-        <div class="bg-white rounded-2xl p-4 border border-gray-100">
-          <div class="text-xs text-gray-500 mb-1">取消率</div>
-          <div class="text-2xl font-bold text-accent">4.2%</div>
-          <div class="text-xs text-success mt-1">↓ 低於平均</div>
-        </div>
-      </div>
-
-      <!-- Today's Schedule -->
-      <div class="bg-white rounded-2xl border border-gray-100 mb-6">
-        <div class="p-4 border-b border-gray-100"><h3 class="font-semibold text-gray-900">今日預約排程</h3></div>
-        <div class="divide-y divide-gray-50">
-          <div class="booking-card flex items-center gap-4 px-4 py-3">
-            <div class="text-center w-16"><div class="text-sm font-bold text-primary">09:00</div><div class="text-xs text-gray-400">1hr</div></div>
-            <div class="w-1 h-10 rounded-full bg-success"></div>
-            <div class="flex-1"><div class="font-medium text-sm text-gray-900">林小姐</div><div class="text-xs text-gray-400">剪髮 + 染髮</div></div>
-            <div class="text-xs text-gray-400">設計師：Amy</div>
-            <span class="status-confirmed text-xs px-2.5 py-1 rounded-full font-medium">已完成</span>
-          </div>
-          <div class="booking-card flex items-center gap-4 px-4 py-3">
-            <div class="text-center w-16"><div class="text-sm font-bold text-primary">10:30</div><div class="text-xs text-gray-400">1.5hr</div></div>
-            <div class="w-1 h-10 rounded-full bg-success"></div>
-            <div class="flex-1"><div class="font-medium text-sm text-gray-900">王太太</div><div class="text-xs text-gray-400">燙髮 + 護髮</div></div>
-            <div class="text-xs text-gray-400">設計師：Kevin</div>
-            <span class="status-confirmed text-xs px-2.5 py-1 rounded-full font-medium">已完成</span>
-          </div>
-          <div class="booking-card flex items-center gap-4 px-4 py-3">
-            <div class="text-center w-16"><div class="text-sm font-bold text-primary">11:00</div><div class="text-xs text-gray-400">45min</div></div>
-            <div class="w-1 h-10 rounded-full bg-success"></div>
-            <div class="flex-1"><div class="font-medium text-sm text-gray-900">陳先生</div><div class="text-xs text-gray-400">男士剪髮</div></div>
-            <div class="text-xs text-gray-400">設計師：Amy</div>
-            <span class="status-confirmed text-xs px-2.5 py-1 rounded-full font-medium">已完成</span>
-          </div>
-          <div class="booking-card flex items-center gap-4 px-4 py-3 bg-primary/5">
-            <div class="text-center w-16"><div class="text-sm font-bold text-primary">14:00</div><div class="text-xs text-gray-400">2hr</div></div>
-            <div class="w-1 h-10 rounded-full bg-primary animate-pulse"></div>
-            <div class="flex-1"><div class="font-medium text-sm text-gray-900">張小姐</div><div class="text-xs text-gray-400">染髮 + 護髮 + 造型</div></div>
-            <div class="text-xs text-gray-400">設計師：Mia</div>
-            <span class="text-xs bg-primary/10 text-primary px-2.5 py-1 rounded-full font-medium">進行中</span>
-          </div>
-          <div class="booking-card flex items-center gap-4 px-4 py-3">
-            <div class="text-center w-16"><div class="text-sm font-bold text-gray-400">15:30</div><div class="text-xs text-gray-300">1hr</div></div>
-            <div class="w-1 h-10 rounded-full bg-gray-200"></div>
-            <div class="flex-1"><div class="font-medium text-sm text-gray-600">吳小姐</div><div class="text-xs text-gray-400">剪髮 + 洗頭</div></div>
-            <div class="text-xs text-gray-400">設計師：Amy</div>
-            <span class="status-pending text-xs px-2.5 py-1 rounded-full font-medium">待確認</span>
-          </div>
-          <div class="booking-card flex items-center gap-4 px-4 py-3">
-            <div class="text-center w-16"><div class="text-sm font-bold text-gray-400">16:00</div><div class="text-xs text-gray-300">1.5hr</div></div>
-            <div class="w-1 h-10 rounded-full bg-gray-200"></div>
-            <div class="flex-1"><div class="font-medium text-sm text-gray-600">李先生</div><div class="text-xs text-gray-400">染髮</div></div>
-            <div class="text-xs text-gray-400">設計師：Kevin</div>
-            <span class="status-confirmed text-xs px-2.5 py-1 rounded-full font-medium">已確認</span>
-          </div>
-        </div>
+      <button onclick="goToday()" class="px-4 py-1.5 text-sm font-semibold text-coral bg-coralLight rounded-lg hover:bg-coralMid transition cursor-pointer" id="dateLabel">Today, Feb 24</button>
+      <button onclick="shiftDate(1)" class="w-8 h-8 rounded-lg border border-amber-200 bg-cream flex items-center justify-center text-gray-500 hover:bg-creamDark transition cursor-pointer">
+        <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><polyline points="9 18 15 12 9 6"/></svg>
+      </button>
+      <div class="ml-3 flex bg-cream rounded-lg border border-amber-200 p-0.5">
+        <button onclick="setView('day')" id="viewDay" class="px-3 py-1 text-xs font-semibold rounded-md bg-coral text-white transition cursor-pointer">Day</button>
+        <button onclick="setView('week')" id="viewWeek" class="px-3 py-1 text-xs font-semibold rounded-md text-gray-500 hover:text-gray-700 transition cursor-pointer">Week</button>
       </div>
     </div>
+    <button onclick="openNewBooking()" class="bg-coral text-white text-sm font-semibold px-4 py-2 rounded-lg hover:bg-rose-700 transition flex items-center gap-1.5 cursor-pointer shadow-sm shadow-coral/20">
+      <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+      +New Booking
+    </button>
+  </header>
 
-    <!-- Calendar -->
-    <div id="page-calendar" class="flex-1 overflow-auto p-6 fade-in hidden">
-      <div class="bg-white rounded-2xl p-5 border border-gray-100">
-        <div class="flex items-center justify-between mb-4">
-          <h3 class="font-semibold text-gray-900">2026 年 2 月 第三週</h3>
-          <div class="flex items-center gap-2 text-sm">
-            <button class="text-gray-400 hover:text-gray-600">◀</button>
-            <span class="font-medium">2/16 - 2/22</span>
-            <button class="text-gray-400 hover:text-gray-600">▶</button>
-          </div>
-        </div>
-        <div class="grid grid-cols-8 gap-px bg-gray-100 rounded-xl overflow-hidden">
-          <div class="bg-gray-50 p-2"></div>
-          <div class="bg-gray-50 p-2 text-center"><div class="text-xs text-gray-400">週一</div><div class="text-sm font-bold text-primary">16</div></div>
-          <div class="bg-gray-50 p-2 text-center"><div class="text-xs text-gray-400">週二</div><div class="text-sm font-medium">17</div></div>
-          <div class="bg-gray-50 p-2 text-center"><div class="text-xs text-gray-400">週三</div><div class="text-sm font-medium">18</div></div>
-          <div class="bg-gray-50 p-2 text-center"><div class="text-xs text-gray-400">週四</div><div class="text-sm font-medium">19</div></div>
-          <div class="bg-gray-50 p-2 text-center"><div class="text-xs text-gray-400">週五</div><div class="text-sm font-medium">20</div></div>
-          <div class="bg-gray-50 p-2 text-center"><div class="text-xs text-gray-400">週六</div><div class="text-sm font-medium">21</div></div>
-          <div class="bg-gray-50 p-2 text-center"><div class="text-xs text-gray-400">週日</div><div class="text-sm font-medium">22</div></div>
-
-          <div class="bg-white p-1.5 text-xs text-gray-400 text-right">09:00</div>
-          <div class="bg-white p-1"><div class="bg-purple-100 text-purple-700 text-xs p-1 rounded truncate">林小姐 剪染</div></div>
-          <div class="bg-white p-1"><div class="bg-blue-100 text-blue-700 text-xs p-1 rounded truncate">黃太太 護髮</div></div>
-          <div class="bg-white p-1"></div>
-          <div class="bg-white p-1"><div class="bg-emerald-100 text-emerald-700 text-xs p-1 rounded truncate">趙先生 剪髮</div></div>
-          <div class="bg-white p-1"><div class="bg-purple-100 text-purple-700 text-xs p-1 rounded truncate">周小姐 燙髮</div></div>
-          <div class="bg-white p-1"><div class="bg-amber-100 text-amber-700 text-xs p-1 rounded truncate">預約滿</div></div>
-          <div class="bg-gray-50 p-1 text-center text-xs text-gray-300">休息</div>
-
-          <div class="bg-white p-1.5 text-xs text-gray-400 text-right">11:00</div>
-          <div class="bg-white p-1"><div class="bg-emerald-100 text-emerald-700 text-xs p-1 rounded truncate">陳先生 剪髮</div></div>
-          <div class="bg-white p-1"></div>
-          <div class="bg-white p-1"><div class="bg-purple-100 text-purple-700 text-xs p-1 rounded truncate">劉小姐 染髮</div></div>
-          <div class="bg-white p-1"><div class="bg-blue-100 text-blue-700 text-xs p-1 rounded truncate">蔡太太 護理</div></div>
-          <div class="bg-white p-1"><div class="bg-emerald-100 text-emerald-700 text-xs p-1 rounded truncate">孫先生 剪髮</div></div>
-          <div class="bg-white p-1"><div class="bg-purple-100 text-purple-700 text-xs p-1 rounded truncate">鄭小姐 造型</div></div>
-          <div class="bg-gray-50 p-1"></div>
-
-          <div class="bg-white p-1.5 text-xs text-gray-400 text-right">14:00</div>
-          <div class="bg-white p-1"><div class="bg-rose-100 text-rose-700 text-xs p-1 rounded truncate">張小姐 染護造</div></div>
-          <div class="bg-white p-1"><div class="bg-purple-100 text-purple-700 text-xs p-1 rounded truncate">楊太太 燙髮</div></div>
-          <div class="bg-white p-1"><div class="bg-emerald-100 text-emerald-700 text-xs p-1 rounded truncate">許先生 剪髮</div></div>
-          <div class="bg-white p-1"></div>
-          <div class="bg-white p-1"><div class="bg-rose-100 text-rose-700 text-xs p-1 rounded truncate">何小姐 染護</div></div>
-          <div class="bg-white p-1"><div class="bg-amber-100 text-amber-700 text-xs p-1 rounded truncate">預約滿</div></div>
-          <div class="bg-gray-50 p-1"></div>
-
-          <div class="bg-white p-1.5 text-xs text-gray-400 text-right">16:00</div>
-          <div class="bg-white p-1"><div class="bg-blue-100 text-blue-700 text-xs p-1 rounded truncate">李先生 染髮</div></div>
-          <div class="bg-white p-1"></div>
-          <div class="bg-white p-1"><div class="bg-purple-100 text-purple-700 text-xs p-1 rounded truncate">吳小姐 燙髮</div></div>
-          <div class="bg-white p-1"><div class="bg-emerald-100 text-emerald-700 text-xs p-1 rounded truncate">朱先生 剪髮</div></div>
-          <div class="bg-white p-1"></div>
-          <div class="bg-white p-1"><div class="bg-purple-100 text-purple-700 text-xs p-1 rounded truncate">馬小姐 護髮</div></div>
-          <div class="bg-gray-50 p-1"></div>
-        </div>
-      </div>
+  <!-- Service Selector -->
+  <div class="h-12 bg-white border-b border-amber-100 flex items-center gap-2 px-5 flex-shrink-0 overflow-x-auto">
+    <span class="text-xs text-gray-400 font-medium mr-1 flex-shrink-0">Services:</span>
+    <div class="service-pill active rounded-full px-4 py-1.5 text-xs font-semibold border border-coral bg-coral text-white" onclick="toggleService(this,'all')">All</div>
+    <div class="service-pill rounded-full px-4 py-1.5 text-xs font-medium border border-amber-200 bg-cream text-gray-700" onclick="toggleService(this,'haircut')">
+      <span class="inline-block w-2 h-2 rounded-full bg-coral mr-1.5"></span>Haircut (30m)
     </div>
-
-    <!-- Clients -->
-    <div id="page-clients" class="flex-1 overflow-auto p-6 fade-in hidden">
-      <div class="bg-white rounded-2xl border border-gray-100">
-        <div class="p-4 border-b border-gray-100 flex items-center justify-between">
-          <div class="flex items-center gap-3">
-            <h3 class="font-semibold text-gray-900">客戶名單</h3>
-            <div class="relative"><input type="text" placeholder="搜尋客戶..." class="text-sm bg-gray-50 border border-gray-200 rounded-lg pl-8 pr-3 py-1.5 w-48 focus:outline-none focus:border-primary"><svg class="absolute left-2.5 top-2 text-gray-400" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg></div>
-          </div>
-          <span class="text-sm text-gray-400">共 86 位客戶</span>
-        </div>
-        <table class="w-full">
-          <thead><tr class="text-xs text-gray-400 border-b border-gray-50"><th class="text-left px-4 py-2.5 font-medium">客戶</th><th class="text-left px-4 py-2.5 font-medium">電話</th><th class="text-center px-4 py-2.5 font-medium">預約次數</th><th class="text-left px-4 py-2.5 font-medium">上次預約</th><th class="text-right px-4 py-2.5 font-medium">累計消費</th><th class="text-center px-4 py-2.5 font-medium">等級</th></tr></thead>
-          <tbody>
-            <tr class="border-b border-gray-50 hover:bg-gray-50 transition"><td class="px-4 py-3"><div class="flex items-center gap-2"><div class="w-8 h-8 rounded-full bg-purple-100 flex items-center justify-center text-xs font-bold text-purple-600">林</div><span class="text-sm font-medium">林小姐</span></div></td><td class="px-4 py-3 text-sm text-gray-500">0912-***-789</td><td class="px-4 py-3 text-sm text-center font-medium">24</td><td class="px-4 py-3 text-sm text-gray-400">今天</td><td class="px-4 py-3 text-sm text-right font-medium">$42,800</td><td class="px-4 py-3 text-center"><span class="text-xs bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full">VIP</span></td></tr>
-            <tr class="border-b border-gray-50 hover:bg-gray-50 transition"><td class="px-4 py-3"><div class="flex items-center gap-2"><div class="w-8 h-8 rounded-full bg-emerald-100 flex items-center justify-center text-xs font-bold text-emerald-600">王</div><span class="text-sm font-medium">王太太</span></div></td><td class="px-4 py-3 text-sm text-gray-500">0923-***-456</td><td class="px-4 py-3 text-sm text-center font-medium">18</td><td class="px-4 py-3 text-sm text-gray-400">今天</td><td class="px-4 py-3 text-sm text-right font-medium">$36,200</td><td class="px-4 py-3 text-center"><span class="text-xs bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full">VIP</span></td></tr>
-            <tr class="border-b border-gray-50 hover:bg-gray-50 transition"><td class="px-4 py-3"><div class="flex items-center gap-2"><div class="w-8 h-8 rounded-full bg-blue-100 flex items-center justify-center text-xs font-bold text-blue-600">張</div><span class="text-sm font-medium">張小姐</span></div></td><td class="px-4 py-3 text-sm text-gray-500">0935-***-123</td><td class="px-4 py-3 text-sm text-center font-medium">12</td><td class="px-4 py-3 text-sm text-gray-400">今天</td><td class="px-4 py-3 text-sm text-right font-medium">$28,500</td><td class="px-4 py-3 text-center"><span class="text-xs bg-purple-100 text-purple-700 px-2 py-0.5 rounded-full">金卡</span></td></tr>
-            <tr class="border-b border-gray-50 hover:bg-gray-50 transition"><td class="px-4 py-3"><div class="flex items-center gap-2"><div class="w-8 h-8 rounded-full bg-rose-100 flex items-center justify-center text-xs font-bold text-rose-600">陳</div><span class="text-sm font-medium">陳先生</span></div></td><td class="px-4 py-3 text-sm text-gray-500">0987-***-654</td><td class="px-4 py-3 text-sm text-center font-medium">8</td><td class="px-4 py-3 text-sm text-gray-400">今天</td><td class="px-4 py-3 text-sm text-right font-medium">$12,000</td><td class="px-4 py-3 text-center"><span class="text-xs bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full">一般</span></td></tr>
-            <tr class="hover:bg-gray-50 transition"><td class="px-4 py-3"><div class="flex items-center gap-2"><div class="w-8 h-8 rounded-full bg-amber-100 flex items-center justify-center text-xs font-bold text-amber-600">吳</div><span class="text-sm font-medium">吳小姐</span></div></td><td class="px-4 py-3 text-sm text-gray-500">0956-***-321</td><td class="px-4 py-3 text-sm text-center font-medium">5</td><td class="px-4 py-3 text-sm text-gray-400">2/14</td><td class="px-4 py-3 text-sm text-right font-medium">$8,500</td><td class="px-4 py-3 text-center"><span class="text-xs bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full">一般</span></td></tr>
-          </tbody>
-        </table>
-      </div>
+    <div class="service-pill rounded-full px-4 py-1.5 text-xs font-medium border border-amber-200 bg-cream text-gray-700" onclick="toggleService(this,'color')">
+      <span class="inline-block w-2 h-2 rounded-full bg-amber-500 mr-1.5"></span>Color (60m)
     </div>
-
-    <!-- Services -->
-    <div id="page-services" class="flex-1 overflow-auto p-6 fade-in hidden">
-      <div class="grid grid-cols-3 gap-4">
-        <div class="bg-white rounded-2xl p-5 border border-gray-100 hover:shadow-md transition">
-          <div class="flex items-center justify-between mb-3"><span class="text-2xl">✂️</span><span class="text-xs bg-primary/10 text-primary px-2 py-0.5 rounded-full">熱門</span></div>
-          <h4 class="font-semibold text-gray-900 mb-1">剪髮</h4>
-          <p class="text-xs text-gray-400 mb-3">含洗頭 + 造型吹整</p>
-          <div class="flex items-center justify-between"><span class="text-lg font-bold text-primary">$500</span><span class="text-xs text-gray-400">約 45 分鐘</span></div>
-        </div>
-        <div class="bg-white rounded-2xl p-5 border border-gray-100 hover:shadow-md transition">
-          <div class="flex items-center justify-between mb-3"><span class="text-2xl">🎨</span><span class="text-xs bg-rose/10 text-rose px-2 py-0.5 rounded-full">高人氣</span></div>
-          <h4 class="font-semibold text-gray-900 mb-1">染髮</h4>
-          <p class="text-xs text-gray-400 mb-3">單色 / 漸層 / 挑染</p>
-          <div class="flex items-center justify-between"><span class="text-lg font-bold text-primary">$2,500 起</span><span class="text-xs text-gray-400">約 2 小時</span></div>
-        </div>
-        <div class="bg-white rounded-2xl p-5 border border-gray-100 hover:shadow-md transition">
-          <div class="flex items-center justify-between mb-3"><span class="text-2xl">💫</span></div>
-          <h4 class="font-semibold text-gray-900 mb-1">燙髮</h4>
-          <p class="text-xs text-gray-400 mb-3">溫塑燙 / 冷燙 / 離子燙</p>
-          <div class="flex items-center justify-between"><span class="text-lg font-bold text-primary">$3,000 起</span><span class="text-xs text-gray-400">約 2.5 小時</span></div>
-        </div>
-        <div class="bg-white rounded-2xl p-5 border border-gray-100 hover:shadow-md transition">
-          <div class="flex items-center justify-between mb-3"><span class="text-2xl">💆</span></div>
-          <h4 class="font-semibold text-gray-900 mb-1">護髮</h4>
-          <p class="text-xs text-gray-400 mb-3">深層修護 / 角蛋白 / 結構護理</p>
-          <div class="flex items-center justify-between"><span class="text-lg font-bold text-primary">$1,500 起</span><span class="text-xs text-gray-400">約 1 小時</span></div>
-        </div>
-        <div class="bg-white rounded-2xl p-5 border border-gray-100 hover:shadow-md transition">
-          <div class="flex items-center justify-between mb-3"><span class="text-2xl">👔</span></div>
-          <h4 class="font-semibold text-gray-900 mb-1">男士剪髮</h4>
-          <p class="text-xs text-gray-400 mb-3">剪髮 + 修容 + 造型</p>
-          <div class="flex items-center justify-between"><span class="text-lg font-bold text-primary">$400</span><span class="text-xs text-gray-400">約 30 分鐘</span></div>
-        </div>
-        <div class="bg-white rounded-2xl p-5 border border-gray-100 hover:shadow-md transition">
-          <div class="flex items-center justify-between mb-3"><span class="text-2xl">👰</span></div>
-          <h4 class="font-semibold text-gray-900 mb-1">特殊造型</h4>
-          <p class="text-xs text-gray-400 mb-3">婚禮 / 活動 / 拍攝造型</p>
-          <div class="flex items-center justify-between"><span class="text-lg font-bold text-primary">$3,500 起</span><span class="text-xs text-gray-400">約 2 小時</span></div>
-        </div>
-      </div>
+    <div class="service-pill rounded-full px-4 py-1.5 text-xs font-medium border border-amber-200 bg-cream text-gray-700" onclick="toggleService(this,'styling')">
+      <span class="inline-block w-2 h-2 rounded-full bg-violet-500 mr-1.5"></span>Styling (45m)
     </div>
-  </main>
-</div>
-
-<!-- Booking Modal -->
-<div id="bookingModal" class="fixed inset-0 z-50 hidden items-center justify-center modal-overlay">
-  <div class="bg-white rounded-2xl w-full max-w-md mx-4 p-6 shadow-2xl">
-    <div class="flex items-center justify-between mb-5">
-      <h2 class="font-bold text-lg text-gray-900">新增預約</h2>
-      <button onclick="closeBookingModal()" class="text-gray-400 hover:text-gray-600"><svg width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
-    </div>
-    <div class="space-y-4">
-      <input type="text" placeholder="客戶姓名或電話" class="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20">
-      <div><label class="text-xs text-gray-500 mb-1 block">服務項目</label><select class="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20"><option>剪髮 - $500</option><option>染髮 - $2,500起</option><option>燙髮 - $3,000起</option><option>護髮 - $1,500起</option></select></div>
-      <div class="grid grid-cols-2 gap-3">
-        <div><label class="text-xs text-gray-500 mb-1 block">日期</label><input type="date" class="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20"></div>
-        <div><label class="text-xs text-gray-500 mb-1 block">設計師</label><select class="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20"><option>Amy</option><option>Kevin</option><option>Mia</option></select></div>
-      </div>
-      <div>
-        <label class="text-xs text-gray-500 mb-2 block">選擇時段</label>
-        <div class="grid grid-cols-4 gap-2">
-          <div class="time-slot border border-gray-200 rounded-lg text-center py-2 text-sm" onclick="selectSlot(this)">09:00</div>
-          <div class="time-slot booked border border-gray-200 rounded-lg text-center py-2 text-sm">10:00</div>
-          <div class="time-slot border border-gray-200 rounded-lg text-center py-2 text-sm" onclick="selectSlot(this)">11:00</div>
-          <div class="time-slot booked border border-gray-200 rounded-lg text-center py-2 text-sm">13:00</div>
-          <div class="time-slot border border-gray-200 rounded-lg text-center py-2 text-sm" onclick="selectSlot(this)">14:00</div>
-          <div class="time-slot border border-gray-200 rounded-lg text-center py-2 text-sm" onclick="selectSlot(this)">15:00</div>
-          <div class="time-slot border border-gray-200 rounded-lg text-center py-2 text-sm" onclick="selectSlot(this)">16:00</div>
-          <div class="time-slot border border-gray-200 rounded-lg text-center py-2 text-sm" onclick="selectSlot(this)">17:00</div>
-        </div>
-      </div>
-      <div class="flex items-center gap-2"><input type="checkbox" checked class="accent-primary"><label class="text-sm text-gray-600">發送預約確認簡訊</label></div>
-      <button onclick="closeBookingModal()" class="w-full bg-primary text-white font-medium py-3 rounded-xl hover:bg-primaryDark transition">確認預約</button>
+    <div class="service-pill rounded-full px-4 py-1.5 text-xs font-medium border border-amber-200 bg-cream text-gray-700" onclick="toggleService(this,'massage')">
+      <span class="inline-block w-2 h-2 rounded-full bg-teal-500 mr-1.5"></span>Massage (90m)
     </div>
   </div>
+
+  <!-- Main Content: Timeline + Sidebar -->
+  <div class="flex flex-1 overflow-hidden">
+
+    <!-- Timeline Area -->
+    <div class="flex-1 overflow-auto bg-gradient-to-b from-cream/30 to-white" id="timelineArea">
+      <div class="min-w-[900px] p-4">
+
+        <!-- Hour Headers -->
+        <div class="flex mb-1" style="margin-left:80px">
+          <div class="flex-1 grid" style="grid-template-columns: repeat(18, 1fr)">
+            <div class="hour-label text-[10px] text-gray-400 font-medium text-center border-l border-amber-100 pl-1">9 AM</div>
+            <div class="hour-label text-[10px] text-gray-400 font-medium text-center border-l border-amber-100/50 pl-1">9:30</div>
+            <div class="hour-label text-[10px] text-gray-400 font-medium text-center border-l border-amber-100 pl-1">10 AM</div>
+            <div class="hour-label text-[10px] text-gray-400 font-medium text-center border-l border-amber-100/50 pl-1">10:30</div>
+            <div class="hour-label text-[10px] text-gray-400 font-medium text-center border-l border-amber-100 pl-1">11 AM</div>
+            <div class="hour-label text-[10px] text-gray-400 font-medium text-center border-l border-amber-100/50 pl-1">11:30</div>
+            <div class="hour-label text-[10px] text-gray-400 font-medium text-center border-l border-amber-100 pl-1">12 PM</div>
+            <div class="hour-label text-[10px] text-gray-400 font-medium text-center border-l border-amber-100/50 pl-1">12:30</div>
+            <div class="hour-label text-[10px] text-gray-400 font-medium text-center border-l border-amber-100 pl-1">1 PM</div>
+            <div class="hour-label text-[10px] text-gray-400 font-medium text-center border-l border-amber-100/50 pl-1">1:30</div>
+            <div class="hour-label text-[10px] text-gray-400 font-medium text-center border-l border-amber-100 pl-1">2 PM</div>
+            <div class="hour-label text-[10px] text-gray-400 font-medium text-center border-l border-amber-100/50 pl-1">2:30</div>
+            <div class="hour-label text-[10px] text-gray-400 font-medium text-center border-l border-amber-100 pl-1">3 PM</div>
+            <div class="hour-label text-[10px] text-gray-400 font-medium text-center border-l border-amber-100/50 pl-1">3:30</div>
+            <div class="hour-label text-[10px] text-gray-400 font-medium text-center border-l border-amber-100 pl-1">4 PM</div>
+            <div class="hour-label text-[10px] text-gray-400 font-medium text-center border-l border-amber-100/50 pl-1">4:30</div>
+            <div class="hour-label text-[10px] text-gray-400 font-medium text-center border-l border-amber-100 pl-1">5 PM</div>
+            <div class="hour-label text-[10px] text-gray-400 font-medium text-center border-l border-amber-100/50 pl-1">5:30</div>
+          </div>
+        </div>
+
+        <!-- Staff Rows Container (relative for cursor) -->
+        <div class="relative" id="staffContainer">
+
+          <!-- Time Cursor -->
+          <div class="time-cursor" id="timeCursor" style="left:calc(80px + 55.56%)"></div>
+
+          <!-- Staff Row: Sarah -->
+          <div class="staff-row flex items-stretch mb-2">
+            <div class="w-[80px] flex-shrink-0 flex items-center gap-2 pr-2">
+              <div class="w-8 h-8 rounded-full bg-coralLight flex items-center justify-center text-xs font-bold text-coral">S</div>
+              <div>
+                <div class="text-xs font-semibold text-gray-800 leading-tight">Sarah</div>
+                <div class="text-[10px] text-gray-400">Senior</div>
+              </div>
+            </div>
+            <div class="flex-1 relative bg-white rounded-xl border border-amber-100 overflow-hidden" style="height:72px">
+              <div class="absolute inset-0 grid" style="grid-template-columns: repeat(18, 1fr)">
+                <div class="border-l border-amber-50"></div><div class="border-l border-amber-50/50"></div>
+                <div class="border-l border-amber-50"></div><div class="border-l border-amber-50/50"></div>
+                <div class="border-l border-amber-50"></div><div class="border-l border-amber-50/50"></div>
+                <div class="border-l border-amber-50"></div><div class="border-l border-amber-50/50"></div>
+                <div class="border-l border-amber-50"></div><div class="border-l border-amber-50/50"></div>
+                <div class="border-l border-amber-50"></div><div class="border-l border-amber-50/50"></div>
+                <div class="border-l border-amber-50"></div><div class="border-l border-amber-50/50"></div>
+                <div class="border-l border-amber-50"></div><div class="border-l border-amber-50/50"></div>
+                <div class="border-l border-amber-50"></div><div class="border-l border-amber-50/50"></div>
+              </div>
+              <!-- Past: 9:00-9:30 Haircut - Emma W. -->
+              <div class="past-block timeline-slot absolute top-1.5 bottom-1.5 bg-pastLight rounded-lg px-2 py-1 flex flex-col justify-center" style="left:0%;width:5.56%" data-booking="sarah-1" onclick="selectBooking(this)">
+                <div class="block-text text-[9px] font-medium text-past truncate">Emma</div>
+                <div class="block-text text-[8px] text-past truncate">Haircut</div>
+              </div>
+              <!-- Past: 9:30-10:30 Color - Diana P. -->
+              <div class="past-block timeline-slot absolute top-1.5 bottom-1.5 bg-pastLight rounded-lg px-2 py-1 flex flex-col justify-center" style="left:5.56%;width:11.11%" data-booking="sarah-2" onclick="selectBooking(this)">
+                <div class="block-text text-[10px] font-medium text-past truncate">Diana P.</div>
+                <div class="block-text text-[8px] text-past truncate">Color</div>
+              </div>
+              <!-- Past: 10:30-11:00 Available (past) -->
+              <div class="past-block timeline-slot absolute top-2 bottom-2 rounded-lg border-dashed" style="left:16.67%;width:5.56%;border:1.5px dashed #d1d5db">
+              </div>
+              <!-- Past: 11:00-11:45 Styling - Maya K. -->
+              <div class="past-block timeline-slot absolute top-1.5 bottom-1.5 bg-pastLight rounded-lg px-2 py-1 flex flex-col justify-center" style="left:22.22%;width:8.33%" data-booking="sarah-3" onclick="selectBooking(this)">
+                <div class="block-text text-[10px] font-medium text-past truncate">Maya K.</div>
+                <div class="block-text text-[8px] text-past truncate">Styling</div>
+              </div>
+              <!-- Past: 12:00-1:00 Lunch -->
+              <div class="absolute top-2 bottom-2 bg-gray-50 rounded-lg flex items-center justify-center" style="left:33.33%;width:11.11%">
+                <span class="text-[9px] text-gray-300 font-medium">Lunch</span>
+              </div>
+              <!-- Booked: 1:00-2:30 Massage - Olivia R. (CURRENT - overlaps now) -->
+              <div class="booked-block timeline-slot absolute top-1.5 bottom-1.5 bg-coralLight rounded-lg px-2 py-1 flex flex-col justify-center shadow-sm" style="left:44.44%;width:16.67%" data-booking="sarah-4" onclick="selectBooking(this)">
+                <div class="text-[10px] font-semibold text-coral truncate">Olivia R.</div>
+                <div class="text-[8px] text-coral/70 truncate">Massage - 90m</div>
+                <div class="absolute top-1 right-1.5 w-1.5 h-1.5 rounded-full bg-coral animate-pulse"></div>
+              </div>
+              <!-- Available: 2:30-3:00 -->
+              <div class="available-block timeline-slot absolute top-2 bottom-2 bg-availLight/40 rounded-lg flex items-center justify-center" style="left:61.11%;width:5.56%" data-avail="sarah-a1" onclick="selectAvail(this)">
+                <span class="text-[9px] text-avail font-medium">Open</span>
+              </div>
+              <!-- Booked: 3:00-4:00 Color - Sophia L. -->
+              <div class="booked-block timeline-slot absolute top-1.5 bottom-1.5 bg-coralLight rounded-lg px-2 py-1 flex flex-col justify-center" style="left:66.67%;width:11.11%" data-booking="sarah-5" onclick="selectBooking(this)">
+                <div class="text-[10px] font-semibold text-coral truncate">Sophia L.</div>
+                <div class="text-[8px] text-coral/70 truncate">Color - 60m</div>
+              </div>
+              <!-- Available: 4:00-5:00 -->
+              <div class="available-block timeline-slot absolute top-2 bottom-2 bg-availLight/40 rounded-lg flex items-center justify-center" style="left:77.78%;width:11.11%" data-avail="sarah-a2" onclick="selectAvail(this)">
+                <span class="text-[9px] text-avail font-medium">Open</span>
+              </div>
+              <!-- Booked: 5:00-5:30 Haircut - Zoe T. -->
+              <div class="booked-block timeline-slot absolute top-1.5 bottom-1.5 bg-coralLight rounded-lg px-2 py-1 flex flex-col justify-center" style="left:88.89%;width:5.56%" data-booking="sarah-6" onclick="selectBooking(this)">
+                <div class="text-[9px] font-semibold text-coral truncate">Zoe T.</div>
+                <div class="text-[8px] text-coral/70 truncate">Haircut</div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Staff Row: Mike -->
+          <div class="staff-row flex items-stretch mb-2">
+            <div class="w-[80px] flex-shrink-0 flex items-center gap-2 pr-2">
+              <div class="w-8 h-8 rounded-full bg-blue-50 flex items-center justify-center text-xs font-bold text-blue-600">M</div>
+              <div>
+                <div class="text-xs font-semibold text-gray-800 leading-tight">Mike</div>
+                <div class="text-[10px] text-gray-400">Stylist</div>
+              </div>
+            </div>
+            <div class="flex-1 relative bg-white rounded-xl border border-amber-100 overflow-hidden" style="height:72px">
+              <div class="absolute inset-0 grid" style="grid-template-columns: repeat(18, 1fr)">
+                <div class="border-l border-amber-50"></div><div class="border-l border-amber-50/50"></div>
+                <div class="border-l border-amber-50"></div><div class="border-l border-amber-50/50"></div>
+                <div class="border-l border-amber-50"></div><div class="border-l border-amber-50/50"></div>
+                <div class="border-l border-amber-50"></div><div class="border-l border-amber-50/50"></div>
+                <div class="border-l border-amber-50"></div><div class="border-l border-amber-50/50"></div>
+                <div class="border-l border-amber-50"></div><div class="border-l border-amber-50/50"></div>
+                <div class="border-l border-amber-50"></div><div class="border-l border-amber-50/50"></div>
+                <div class="border-l border-amber-50"></div><div class="border-l border-amber-50/50"></div>
+                <div class="border-l border-amber-50"></div><div class="border-l border-amber-50/50"></div>
+              </div>
+              <!-- Past: 9:00-10:00 Color - Jake M. -->
+              <div class="past-block timeline-slot absolute top-1.5 bottom-1.5 bg-pastLight rounded-lg px-2 py-1 flex flex-col justify-center" style="left:0%;width:11.11%" data-booking="mike-1" onclick="selectBooking(this)">
+                <div class="block-text text-[10px] font-medium text-past truncate">Jake M.</div>
+                <div class="block-text text-[8px] text-past truncate">Color</div>
+              </div>
+              <!-- Past: 10:00-10:30 Haircut - Tom R. -->
+              <div class="past-block timeline-slot absolute top-1.5 bottom-1.5 bg-pastLight rounded-lg px-2 py-1 flex flex-col justify-center" style="left:11.11%;width:5.56%" data-booking="mike-2" onclick="selectBooking(this)">
+                <div class="block-text text-[9px] font-medium text-past truncate">Tom</div>
+                <div class="block-text text-[8px] text-past truncate">Haircut</div>
+              </div>
+              <!-- Past: 10:30-12:00 Massage - Noah S. -->
+              <div class="past-block timeline-slot absolute top-1.5 bottom-1.5 bg-pastLight rounded-lg px-2 py-1 flex flex-col justify-center" style="left:16.67%;width:16.67%" data-booking="mike-3" onclick="selectBooking(this)">
+                <div class="block-text text-[10px] font-medium text-past truncate">Noah S.</div>
+                <div class="block-text text-[8px] text-past truncate">Massage - 90m</div>
+              </div>
+              <!-- Past: 12:00-1:00 Lunch -->
+              <div class="absolute top-2 bottom-2 bg-gray-50 rounded-lg flex items-center justify-center" style="left:33.33%;width:11.11%">
+                <span class="text-[9px] text-gray-300 font-medium">Lunch</span>
+              </div>
+              <!-- Booked: 1:00-1:45 Styling - Liam B. -->
+              <div class="booked-block timeline-slot absolute top-1.5 bottom-1.5 bg-coralLight rounded-lg px-2 py-1 flex flex-col justify-center" style="left:44.44%;width:8.33%" data-booking="mike-4" onclick="selectBooking(this)">
+                <div class="text-[10px] font-semibold text-coral truncate">Liam B.</div>
+                <div class="text-[8px] text-coral/70 truncate">Styling - 45m</div>
+              </div>
+              <!-- Booked: 2:00-2:30 Haircut - Ryan D. (current) -->
+              <div class="booked-block timeline-slot absolute top-1.5 bottom-1.5 bg-coralLight rounded-lg px-2 py-1 flex flex-col justify-center shadow-sm" style="left:55.56%;width:5.56%" data-booking="mike-5" onclick="selectBooking(this)">
+                <div class="text-[9px] font-semibold text-coral truncate">Ryan D.</div>
+                <div class="text-[8px] text-coral/70 truncate">Haircut</div>
+                <div class="absolute top-1 right-1.5 w-1.5 h-1.5 rounded-full bg-coral animate-pulse"></div>
+              </div>
+              <!-- Available: 2:30-3:30 -->
+              <div class="available-block timeline-slot absolute top-2 bottom-2 bg-availLight/40 rounded-lg flex items-center justify-center" style="left:61.11%;width:11.11%" data-avail="mike-a1" onclick="selectAvail(this)">
+                <span class="text-[9px] text-avail font-medium">Open - 60m</span>
+              </div>
+              <!-- Booked: 3:30-5:00 Massage - Ethan K. -->
+              <div class="booked-block timeline-slot absolute top-1.5 bottom-1.5 bg-coralLight rounded-lg px-2 py-1 flex flex-col justify-center" style="left:72.22%;width:16.67%" data-booking="mike-6" onclick="selectBooking(this)">
+                <div class="text-[10px] font-semibold text-coral truncate">Ethan K.</div>
+                <div class="text-[8px] text-coral/70 truncate">Massage - 90m</div>
+              </div>
+              <!-- Available: 5:00-6:00 -->
+              <div class="available-block timeline-slot absolute top-2 bottom-2 bg-availLight/40 rounded-lg flex items-center justify-center" style="left:88.89%;width:11.11%" data-avail="mike-a2" onclick="selectAvail(this)">
+                <span class="text-[9px] text-avail font-medium">Open</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Staff Row: Lisa -->
+          <div class="staff-row flex items-stretch mb-2">
+            <div class="w-[80px] flex-shrink-0 flex items-center gap-2 pr-2">
+              <div class="w-8 h-8 rounded-full bg-violet-50 flex items-center justify-center text-xs font-bold text-violet-600">L</div>
+              <div>
+                <div class="text-xs font-semibold text-gray-800 leading-tight">Lisa</div>
+                <div class="text-[10px] text-gray-400">Junior</div>
+              </div>
+            </div>
+            <div class="flex-1 relative bg-white rounded-xl border border-amber-100 overflow-hidden" style="height:72px">
+              <div class="absolute inset-0 grid" style="grid-template-columns: repeat(18, 1fr)">
+                <div class="border-l border-amber-50"></div><div class="border-l border-amber-50/50"></div>
+                <div class="border-l border-amber-50"></div><div class="border-l border-amber-50/50"></div>
+                <div class="border-l border-amber-50"></div><div class="border-l border-amber-50/50"></div>
+                <div class="border-l border-amber-50"></div><div class="border-l border-amber-50/50"></div>
+                <div class="border-l border-amber-50"></div><div class="border-l border-amber-50/50"></div>
+                <div class="border-l border-amber-50"></div><div class="border-l border-amber-50/50"></div>
+                <div class="border-l border-amber-50"></div><div class="border-l border-amber-50/50"></div>
+                <div class="border-l border-amber-50"></div><div class="border-l border-amber-50/50"></div>
+                <div class="border-l border-amber-50"></div><div class="border-l border-amber-50/50"></div>
+              </div>
+              <!-- Past: 9:00-9:45 Styling - Anna L. -->
+              <div class="past-block timeline-slot absolute top-1.5 bottom-1.5 bg-pastLight rounded-lg px-2 py-1 flex flex-col justify-center" style="left:0%;width:8.33%" data-booking="lisa-1" onclick="selectBooking(this)">
+                <div class="block-text text-[10px] font-medium text-past truncate">Anna L.</div>
+                <div class="block-text text-[8px] text-past truncate">Styling</div>
+              </div>
+              <!-- Past: 10:00-10:30 Available (past) -->
+              <div class="past-block timeline-slot absolute top-2 bottom-2 rounded-lg" style="left:11.11%;width:5.56%;border:1.5px dashed #d1d5db">
+              </div>
+              <!-- Past: 10:30-11:30 Color - Bella F. -->
+              <div class="past-block timeline-slot absolute top-1.5 bottom-1.5 bg-pastLight rounded-lg px-2 py-1 flex flex-col justify-center" style="left:16.67%;width:11.11%" data-booking="lisa-2" onclick="selectBooking(this)">
+                <div class="block-text text-[10px] font-medium text-past truncate">Bella F.</div>
+                <div class="block-text text-[8px] text-past truncate">Color - 60m</div>
+              </div>
+              <!-- Past: 11:30-12:00 Haircut - Chloe G. -->
+              <div class="past-block timeline-slot absolute top-1.5 bottom-1.5 bg-pastLight rounded-lg px-2 py-1 flex flex-col justify-center" style="left:27.78%;width:5.56%" data-booking="lisa-3" onclick="selectBooking(this)">
+                <div class="block-text text-[9px] font-medium text-past truncate">Chloe</div>
+                <div class="block-text text-[8px] text-past truncate">Haircut</div>
+              </div>
+              <!-- Past: 12:00-1:00 Lunch -->
+              <div class="absolute top-2 bottom-2 bg-gray-50 rounded-lg flex items-center justify-center" style="left:33.33%;width:11.11%">
+                <span class="text-[9px] text-gray-300 font-medium">Lunch</span>
+              </div>
+              <!-- Booked: 1:00-2:00 Color - Mia H. -->
+              <div class="booked-block timeline-slot absolute top-1.5 bottom-1.5 bg-coralLight rounded-lg px-2 py-1 flex flex-col justify-center" style="left:44.44%;width:11.11%" data-booking="lisa-4" onclick="selectBooking(this)">
+                <div class="text-[10px] font-semibold text-coral truncate">Mia H.</div>
+                <div class="text-[8px] text-coral/70 truncate">Color - 60m</div>
+              </div>
+              <!-- Available: 2:00-2:30 -->
+              <div class="available-block timeline-slot absolute top-2 bottom-2 bg-availLight/40 rounded-lg flex items-center justify-center" style="left:55.56%;width:5.56%" data-avail="lisa-a1" onclick="selectAvail(this)">
+                <span class="text-[9px] text-avail font-medium">Open</span>
+              </div>
+              <!-- Booked: 2:30-3:15 Styling - Ivy N. (current) -->
+              <div class="booked-block timeline-slot absolute top-1.5 bottom-1.5 bg-coralLight rounded-lg px-2 py-1 flex flex-col justify-center shadow-sm" style="left:61.11%;width:8.33%" data-booking="lisa-5" onclick="selectBooking(this)">
+                <div class="text-[10px] font-semibold text-coral truncate">Ivy N.</div>
+                <div class="text-[8px] text-coral/70 truncate">Styling - 45m</div>
+                <div class="absolute top-1 right-1.5 w-1.5 h-1.5 rounded-full bg-coral animate-pulse"></div>
+              </div>
+              <!-- Available: 3:30-4:00 -->
+              <div class="available-block timeline-slot absolute top-2 bottom-2 bg-availLight/40 rounded-lg flex items-center justify-center" style="left:72.22%;width:5.56%" data-avail="lisa-a2" onclick="selectAvail(this)">
+                <span class="text-[9px] text-avail font-medium">Open</span>
+              </div>
+              <!-- Booked: 4:00-5:30 Massage - Ruby W. -->
+              <div class="booked-block timeline-slot absolute top-1.5 bottom-1.5 bg-coralLight rounded-lg px-2 py-1 flex flex-col justify-center" style="left:77.78%;width:16.67%" data-booking="lisa-6" onclick="selectBooking(this)">
+                <div class="text-[10px] font-semibold text-coral truncate">Ruby W.</div>
+                <div class="text-[8px] text-coral/70 truncate">Massage - 90m</div>
+              </div>
+              <!-- Available: 5:30-6:00 -->
+              <div class="available-block timeline-slot absolute top-2 bottom-2 bg-availLight/40 rounded-lg flex items-center justify-center" style="left:94.44%;width:5.56%" data-avail="lisa-a3" onclick="selectAvail(this)">
+                <span class="text-[9px] text-avail font-medium">Open</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Staff Row: Alex -->
+          <div class="staff-row flex items-stretch mb-2">
+            <div class="w-[80px] flex-shrink-0 flex items-center gap-2 pr-2">
+              <div class="w-8 h-8 rounded-full bg-emerald-50 flex items-center justify-center text-xs font-bold text-emerald-600">A</div>
+              <div>
+                <div class="text-xs font-semibold text-gray-800 leading-tight">Alex</div>
+                <div class="text-[10px] text-gray-400">Colorist</div>
+              </div>
+            </div>
+            <div class="flex-1 relative bg-white rounded-xl border border-amber-100 overflow-hidden" style="height:72px">
+              <div class="absolute inset-0 grid" style="grid-template-columns: repeat(18, 1fr)">
+                <div class="border-l border-amber-50"></div><div class="border-l border-amber-50/50"></div>
+                <div class="border-l border-amber-50"></div><div class="border-l border-amber-50/50"></div>
+                <div class="border-l border-amber-50"></div><div class="border-l border-amber-50/50"></div>
+                <div class="border-l border-amber-50"></div><div class="border-l border-amber-50/50"></div>
+                <div class="border-l border-amber-50"></div><div class="border-l border-amber-50/50"></div>
+                <div class="border-l border-amber-50"></div><div class="border-l border-amber-50/50"></div>
+                <div class="border-l border-amber-50"></div><div class="border-l border-amber-50/50"></div>
+                <div class="border-l border-amber-50"></div><div class="border-l border-amber-50/50"></div>
+                <div class="border-l border-amber-50"></div><div class="border-l border-amber-50/50"></div>
+              </div>
+              <!-- Past: 9:00-10:00 Color - Grace P. -->
+              <div class="past-block timeline-slot absolute top-1.5 bottom-1.5 bg-pastLight rounded-lg px-2 py-1 flex flex-col justify-center" style="left:0%;width:11.11%" data-booking="alex-1" onclick="selectBooking(this)">
+                <div class="block-text text-[10px] font-medium text-past truncate">Grace P.</div>
+                <div class="block-text text-[8px] text-past truncate">Color - 60m</div>
+              </div>
+              <!-- Past: 10:00-11:30 Massage - Hana Q. -->
+              <div class="past-block timeline-slot absolute top-1.5 bottom-1.5 bg-pastLight rounded-lg px-2 py-1 flex flex-col justify-center" style="left:11.11%;width:16.67%" data-booking="alex-2" onclick="selectBooking(this)">
+                <div class="block-text text-[10px] font-medium text-past truncate">Hana Q.</div>
+                <div class="block-text text-[8px] text-past truncate">Massage - 90m</div>
+              </div>
+              <!-- Past: 11:30-12:00 Available (past) -->
+              <div class="past-block timeline-slot absolute top-2 bottom-2 rounded-lg" style="left:27.78%;width:5.56%;border:1.5px dashed #d1d5db">
+              </div>
+              <!-- Past: 12:00-1:00 Lunch -->
+              <div class="absolute top-2 bottom-2 bg-gray-50 rounded-lg flex items-center justify-center" style="left:33.33%;width:11.11%">
+                <span class="text-[9px] text-gray-300 font-medium">Lunch</span>
+              </div>
+              <!-- Booked: 1:00-1:30 Haircut - Leo J. -->
+              <div class="booked-block timeline-slot absolute top-1.5 bottom-1.5 bg-coralLight rounded-lg px-2 py-1 flex flex-col justify-center" style="left:44.44%;width:5.56%" data-booking="alex-3" onclick="selectBooking(this)">
+                <div class="text-[9px] font-semibold text-coral truncate">Leo J.</div>
+                <div class="text-[8px] text-coral/70 truncate">Haircut</div>
+              </div>
+              <!-- Available: 1:30-2:30 -->
+              <div class="available-block timeline-slot absolute top-2 bottom-2 bg-availLight/40 rounded-lg flex items-center justify-center" style="left:50%;width:11.11%" data-avail="alex-a1" onclick="selectAvail(this)">
+                <span class="text-[9px] text-avail font-medium">Open - 60m</span>
+              </div>
+              <!-- Booked: 2:30-3:30 Color - Nora C. (current) -->
+              <div class="booked-block timeline-slot absolute top-1.5 bottom-1.5 bg-coralLight rounded-lg px-2 py-1 flex flex-col justify-center shadow-sm" style="left:61.11%;width:11.11%" data-booking="alex-4" onclick="selectBooking(this)">
+                <div class="text-[10px] font-semibold text-coral truncate">Nora C.</div>
+                <div class="text-[8px] text-coral/70 truncate">Color - 60m</div>
+                <div class="absolute top-1 right-1.5 w-1.5 h-1.5 rounded-full bg-coral animate-pulse"></div>
+              </div>
+              <!-- Available: 3:30-4:30 -->
+              <div class="available-block timeline-slot absolute top-2 bottom-2 bg-availLight/40 rounded-lg flex items-center justify-center" style="left:72.22%;width:11.11%" data-avail="alex-a2" onclick="selectAvail(this)">
+                <span class="text-[9px] text-avail font-medium">Open - 60m</span>
+              </div>
+              <!-- Booked: 4:30-5:15 Styling - Quinn E. -->
+              <div class="booked-block timeline-slot absolute top-1.5 bottom-1.5 bg-coralLight rounded-lg px-2 py-1 flex flex-col justify-center" style="left:83.33%;width:8.33%" data-booking="alex-5" onclick="selectBooking(this)">
+                <div class="text-[10px] font-semibold text-coral truncate">Quinn E.</div>
+                <div class="text-[8px] text-coral/70 truncate">Styling - 45m</div>
+              </div>
+              <!-- Available: 5:15-6:00 -->
+              <div class="available-block timeline-slot absolute top-2 bottom-2 bg-availLight/40 rounded-lg flex items-center justify-center" style="left:91.67%;width:8.33%" data-avail="alex-a3" onclick="selectAvail(this)">
+                <span class="text-[9px] text-avail font-medium">Open</span>
+              </div>
+            </div>
+          </div>
+
+        </div><!-- /staffContainer -->
+
+        <!-- Legend -->
+        <div class="flex items-center gap-5 mt-3 ml-[80px]">
+          <div class="flex items-center gap-1.5">
+            <div class="w-3 h-3 rounded-sm bg-coralLight border-l-2 border-coral"></div>
+            <span class="text-[10px] text-gray-500">Booked</span>
+          </div>
+          <div class="flex items-center gap-1.5">
+            <div class="w-3 h-3 rounded-sm bg-availLight/60 border border-dashed border-availBorder"></div>
+            <span class="text-[10px] text-gray-500">Available</span>
+          </div>
+          <div class="flex items-center gap-1.5">
+            <div class="w-3 h-3 rounded-sm bg-pastLight border-l-2 border-pastBorder"></div>
+            <span class="text-[10px] text-gray-500">Past</span>
+          </div>
+          <div class="flex items-center gap-1.5">
+            <div class="w-3 h-0.5 border-t-2 border-dashed border-coral"></div>
+            <span class="text-[10px] text-gray-500">Now</span>
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+    <!-- Right Sidebar: Booking Details -->
+    <div class="w-[240px] bg-white border-l border-amber-100 flex flex-col flex-shrink-0 overflow-auto" id="detailSidebar">
+      <!-- Default state -->
+      <div id="sidebarDefault" class="flex-1 flex flex-col items-center justify-center px-4 text-center">
+        <div class="w-12 h-12 rounded-full bg-cream flex items-center justify-center mb-3">
+          <svg width="20" height="20" fill="none" stroke="#e11d48" stroke-width="1.5" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+        </div>
+        <p class="text-xs text-gray-400 leading-relaxed">Click a booking to see details, or click an open slot to create a new one.</p>
+      </div>
+
+      <!-- Booking detail (hidden by default) -->
+      <div id="sidebarDetail" class="hidden flex-1 flex flex-col">
+        <div class="p-4 border-b border-amber-100">
+          <div class="flex items-center justify-between mb-3">
+            <span class="text-[10px] font-semibold px-2 py-0.5 rounded-full" id="detailStatus">In Progress</span>
+            <button onclick="closeSidebar()" class="text-gray-300 hover:text-gray-500 cursor-pointer">
+              <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+            </button>
+          </div>
+          <h3 class="font-bold text-gray-900 text-sm mb-0.5" id="detailClient">Olivia R.</h3>
+          <p class="text-[10px] text-gray-400" id="detailPhone">+1 (555) 234-5678</p>
+        </div>
+        <div class="p-4 space-y-3 flex-1">
+          <div>
+            <div class="text-[10px] text-gray-400 mb-0.5">Service</div>
+            <div class="text-xs font-semibold text-gray-800" id="detailService">Massage</div>
+          </div>
+          <div class="flex gap-3">
+            <div>
+              <div class="text-[10px] text-gray-400 mb-0.5">Time</div>
+              <div class="text-xs font-semibold text-gray-800" id="detailTime">1:00 - 2:30 PM</div>
+            </div>
+            <div>
+              <div class="text-[10px] text-gray-400 mb-0.5">Duration</div>
+              <div class="text-xs font-semibold text-gray-800" id="detailDuration">90 min</div>
+            </div>
+          </div>
+          <div>
+            <div class="text-[10px] text-gray-400 mb-0.5">Staff</div>
+            <div class="text-xs font-semibold text-gray-800" id="detailStaff">Sarah</div>
+          </div>
+          <div>
+            <div class="text-[10px] text-gray-400 mb-0.5">Price</div>
+            <div class="text-lg font-bold text-coral" id="detailPrice">$120</div>
+          </div>
+          <div class="pt-2 border-t border-amber-100">
+            <div class="text-[10px] text-gray-400 mb-1.5">Notes</div>
+            <div class="text-[11px] text-gray-600 bg-cream rounded-lg p-2.5 leading-relaxed" id="detailNotes">Prefers medium pressure. Allergic to lavender oil.</div>
+          </div>
+        </div>
+        <div class="p-3 border-t border-amber-100 flex gap-2">
+          <button class="flex-1 text-[11px] font-semibold text-coral border border-coral rounded-lg py-2 hover:bg-coralLight transition cursor-pointer">Reschedule</button>
+          <button class="flex-1 text-[11px] font-semibold text-white bg-coral rounded-lg py-2 hover:bg-rose-700 transition cursor-pointer">Check In</button>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- Bottom Stats -->
+  <div class="h-10 bg-white border-t border-amber-100 flex items-center justify-center gap-6 px-5 flex-shrink-0">
+    <div class="flex items-center gap-1.5">
+      <div class="w-2 h-2 rounded-full bg-coral"></div>
+      <span class="text-[11px] text-gray-600"><span class="font-semibold text-gray-800">8</span> bookings</span>
+    </div>
+    <div class="w-px h-4 bg-amber-200"></div>
+    <div class="flex items-center gap-1.5">
+      <div class="w-2 h-2 rounded-full bg-avail"></div>
+      <span class="text-[11px] text-gray-600"><span class="font-semibold text-gray-800">2</span> available</span>
+    </div>
+    <div class="w-px h-4 bg-amber-200"></div>
+    <div class="flex items-center gap-1.5">
+      <svg width="12" height="12" fill="none" stroke="#e11d48" stroke-width="2" viewBox="0 0 24 24"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 000 7h5a3.5 3.5 0 010 7H6"/></svg>
+      <span class="text-[11px] text-gray-600"><span class="font-bold text-coral">$1,240</span> revenue</span>
+    </div>
+    <div class="w-px h-4 bg-amber-200"></div>
+    <div class="flex items-center gap-1.5">
+      <svg width="12" height="12" fill="none" stroke="#9ca3af" stroke-width="2" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+      <span class="text-[11px] text-gray-400">Updated just now</span>
+    </div>
+  </div>
+
 </div>
 
 <script>
-function switchPage(page){
-  document.querySelectorAll('[id^="page-"]').forEach(p=>p.classList.add('hidden'));
-  document.getElementById('page-'+page).classList.remove('hidden');
-  document.querySelectorAll('.sidebar-item').forEach(i=>i.classList.remove('active'));
-  document.querySelector('[data-page="'+page+'"]').classList.add('active');
-  const titles={dashboard:'儀表板',calendar:'預約日曆',clients:'客戶名單',services:'服務項目'};
-  document.getElementById('pageTitle').textContent=titles[page]||page;
+// Booking data for sidebar
+const bookings={
+  'sarah-1':{client:'Emma W.',phone:'+1 (555) 111-2233',service:'Haircut',time:'9:00 - 9:30 AM',duration:'30 min',staff:'Sarah',price:'$35',status:'completed',statusColor:'bg-gray-100 text-gray-500',notes:'Regular client. Prefers layers.'},
+  'sarah-2':{client:'Diana P.',phone:'+1 (555) 222-3344',service:'Color',time:'9:30 - 10:30 AM',duration:'60 min',staff:'Sarah',price:'$95',status:'completed',statusColor:'bg-gray-100 text-gray-500',notes:'Balayage touch-up, warm tones.'},
+  'sarah-3':{client:'Maya K.',phone:'+1 (555) 333-4455',service:'Styling',time:'11:00 - 11:45 AM',duration:'45 min',staff:'Sarah',price:'$65',status:'completed',statusColor:'bg-gray-100 text-gray-500',notes:'Updo for evening event.'},
+  'sarah-4':{client:'Olivia R.',phone:'+1 (555) 234-5678',service:'Massage',time:'1:00 - 2:30 PM',duration:'90 min',staff:'Sarah',price:'$120',status:'In Progress',statusColor:'bg-coralLight text-coral',notes:'Prefers medium pressure. Allergic to lavender oil.'},
+  'sarah-5':{client:'Sophia L.',phone:'+1 (555) 444-5566',service:'Color',time:'3:00 - 4:00 PM',duration:'60 min',staff:'Sarah',price:'$95',status:'Confirmed',statusColor:'bg-availLight text-avail',notes:'Full highlights, cool blonde.'},
+  'sarah-6':{client:'Zoe T.',phone:'+1 (555) 555-6677',service:'Haircut',time:'5:00 - 5:30 PM',duration:'30 min',staff:'Sarah',price:'$35',status:'Confirmed',statusColor:'bg-availLight text-avail',notes:'Trim only, no wash needed.'},
+  'mike-1':{client:'Jake M.',phone:'+1 (555) 666-7788',service:'Color',time:'9:00 - 10:00 AM',duration:'60 min',staff:'Mike',price:'$95',status:'completed',statusColor:'bg-gray-100 text-gray-500',notes:'Grey coverage. Natural brown.'},
+  'mike-2':{client:'Tom R.',phone:'+1 (555) 777-8899',service:'Haircut',time:'10:00 - 10:30 AM',duration:'30 min',staff:'Mike',price:'$35',status:'completed',statusColor:'bg-gray-100 text-gray-500',notes:'Fade, medium length top.'},
+  'mike-3':{client:'Noah S.',phone:'+1 (555) 888-9900',service:'Massage',time:'10:30 - 12:00 PM',duration:'90 min',staff:'Mike',price:'$120',status:'completed',statusColor:'bg-gray-100 text-gray-500',notes:'Deep tissue. Focus on shoulders.'},
+  'mike-4':{client:'Liam B.',phone:'+1 (555) 999-0011',service:'Styling',time:'1:00 - 1:45 PM',duration:'45 min',staff:'Mike',price:'$65',status:'Confirmed',statusColor:'bg-availLight text-avail',notes:'Blowout for photoshoot.'},
+  'mike-5':{client:'Ryan D.',phone:'+1 (555) 101-2233',service:'Haircut',time:'2:00 - 2:30 PM',duration:'30 min',staff:'Mike',price:'$35',status:'In Progress',statusColor:'bg-coralLight text-coral',notes:'Buzz cut, #3 guard.'},
+  'mike-6':{client:'Ethan K.',phone:'+1 (555) 112-3344',service:'Massage',time:'3:30 - 5:00 PM',duration:'90 min',staff:'Mike',price:'$120',status:'Confirmed',statusColor:'bg-availLight text-avail',notes:'First visit. Consultation needed.'},
+  'lisa-1':{client:'Anna L.',phone:'+1 (555) 123-4455',service:'Styling',time:'9:00 - 9:45 AM',duration:'45 min',staff:'Lisa',price:'$65',status:'completed',statusColor:'bg-gray-100 text-gray-500',notes:'Beach waves, heat protectant.'},
+  'lisa-2':{client:'Bella F.',phone:'+1 (555) 134-5566',service:'Color',time:'10:30 - 11:30 AM',duration:'60 min',staff:'Lisa',price:'$95',status:'completed',statusColor:'bg-gray-100 text-gray-500',notes:'Ombre, dark roots to light ends.'},
+  'lisa-3':{client:'Chloe G.',phone:'+1 (555) 145-6677',service:'Haircut',time:'11:30 - 12:00 PM',duration:'30 min',staff:'Lisa',price:'$35',status:'completed',statusColor:'bg-gray-100 text-gray-500',notes:'Bob cut. Keep length above shoulders.'},
+  'lisa-4':{client:'Mia H.',phone:'+1 (555) 156-7788',service:'Color',time:'1:00 - 2:00 PM',duration:'60 min',staff:'Lisa',price:'$95',status:'Confirmed',statusColor:'bg-availLight text-avail',notes:'Vivid red, full head.'},
+  'lisa-5':{client:'Ivy N.',phone:'+1 (555) 167-8899',service:'Styling',time:'2:30 - 3:15 PM',duration:'45 min',staff:'Lisa',price:'$65',status:'In Progress',statusColor:'bg-coralLight text-coral',notes:'Half-up half-down for dinner.'},
+  'lisa-6':{client:'Ruby W.',phone:'+1 (555) 178-9900',service:'Massage',time:'4:00 - 5:30 PM',duration:'90 min',staff:'Lisa',price:'$120',status:'Confirmed',statusColor:'bg-availLight text-avail',notes:'Relaxation massage. Light pressure.'},
+  'alex-1':{client:'Grace P.',phone:'+1 (555) 189-0011',service:'Color',time:'9:00 - 10:00 AM',duration:'60 min',staff:'Alex',price:'$95',status:'completed',statusColor:'bg-gray-100 text-gray-500',notes:'Platinum blonde touchup.'},
+  'alex-2':{client:'Hana Q.',phone:'+1 (555) 190-1122',service:'Massage',time:'10:00 - 11:30 AM',duration:'90 min',staff:'Alex',price:'$120',status:'completed',statusColor:'bg-gray-100 text-gray-500',notes:'Sports massage. Athletic recovery.'},
+  'alex-3':{client:'Leo J.',phone:'+1 (555) 201-2233',service:'Haircut',time:'1:00 - 1:30 PM',duration:'30 min',staff:'Alex',price:'$35',status:'Confirmed',statusColor:'bg-availLight text-avail',notes:'Classic taper. Side part.'},
+  'alex-4':{client:'Nora C.',phone:'+1 (555) 212-3344',service:'Color',time:'2:30 - 3:30 PM',duration:'60 min',staff:'Alex',price:'$95',status:'In Progress',statusColor:'bg-coralLight text-coral',notes:'Pastel pink highlights.'},
+  'alex-5':{client:'Quinn E.',phone:'+1 (555) 223-4455',service:'Styling',time:'4:30 - 5:15 PM',duration:'45 min',staff:'Alex',price:'$65',status:'Confirmed',statusColor:'bg-availLight text-avail',notes:'Sleek straight blowout.'}
+};
+
+// Select a booked slot
+function selectBooking(el){
+  document.querySelectorAll('.timeline-slot').forEach(s=>s.classList.remove('selected'));
+  el.classList.add('selected');
+  const id=el.dataset.booking;
+  const b=bookings[id];
+  if(!b)return;
+  document.getElementById('sidebarDefault').classList.add('hidden');
+  const det=document.getElementById('sidebarDetail');
+  det.classList.remove('hidden');
+  det.querySelector('.sidebar-card')?.remove();
+  document.getElementById('detailClient').textContent=b.client;
+  document.getElementById('detailPhone').textContent=b.phone;
+  document.getElementById('detailService').textContent=b.service;
+  document.getElementById('detailTime').textContent=b.time;
+  document.getElementById('detailDuration').textContent=b.duration;
+  document.getElementById('detailStaff').textContent=b.staff;
+  document.getElementById('detailPrice').textContent=b.price;
+  document.getElementById('detailNotes').textContent=b.notes;
+  const st=document.getElementById('detailStatus');
+  st.textContent=b.status;
+  st.className='text-[10px] font-semibold px-2 py-0.5 rounded-full '+b.statusColor;
 }
-function selectSlot(el){document.querySelectorAll('.time-slot:not(.booked)').forEach(s=>s.classList.remove('selected'));el.classList.add('selected')}
-function openBookingModal(){document.getElementById('bookingModal').classList.remove('hidden');document.getElementById('bookingModal').classList.add('flex')}
-function closeBookingModal(){document.getElementById('bookingModal').classList.add('hidden');document.getElementById('bookingModal').classList.remove('flex')}
+
+// Select available slot
+function selectAvail(el){
+  document.querySelectorAll('.timeline-slot').forEach(s=>s.classList.remove('selected'));
+  el.classList.add('selected');
+  document.getElementById('sidebarDefault').classList.add('hidden');
+  const det=document.getElementById('sidebarDetail');
+  det.classList.remove('hidden');
+  document.getElementById('detailClient').textContent='New Booking';
+  document.getElementById('detailPhone').textContent='Click +New Booking';
+  document.getElementById('detailService').textContent='Select a service';
+  document.getElementById('detailTime').textContent='Available';
+  document.getElementById('detailDuration').textContent='-';
+  document.getElementById('detailStaff').textContent='-';
+  document.getElementById('detailPrice').textContent='-';
+  document.getElementById('detailNotes').textContent='This slot is open for booking.';
+  const st=document.getElementById('detailStatus');
+  st.textContent='Available';
+  st.className='text-[10px] font-semibold px-2 py-0.5 rounded-full bg-availLight text-avail';
+}
+
+function closeSidebar(){
+  document.querySelectorAll('.timeline-slot').forEach(s=>s.classList.remove('selected'));
+  document.getElementById('sidebarDetail').classList.add('hidden');
+  document.getElementById('sidebarDefault').classList.remove('hidden');
+}
+
+// Service pill toggle
+function toggleService(el,type){
+  document.querySelectorAll('.service-pill').forEach(p=>{
+    p.classList.remove('active');
+    p.style.background='';p.style.color='';p.style.borderColor='';
+  });
+  el.classList.add('active');
+}
+
+// View toggle
+function setView(v){
+  const d=document.getElementById('viewDay'),w=document.getElementById('viewWeek');
+  if(v==='day'){d.className='px-3 py-1 text-xs font-semibold rounded-md bg-coral text-white transition cursor-pointer';w.className='px-3 py-1 text-xs font-semibold rounded-md text-gray-500 hover:text-gray-700 transition cursor-pointer';}
+  else{w.className='px-3 py-1 text-xs font-semibold rounded-md bg-coral text-white transition cursor-pointer';d.className='px-3 py-1 text-xs font-semibold rounded-md text-gray-500 hover:text-gray-700 transition cursor-pointer';}
+}
+
+// Date navigation (visual only)
+let dayOffset=0;
+const days=['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+const months=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+function updateDateLabel(){
+  const d=new Date(2026,1,24);
+  d.setDate(d.getDate()+dayOffset);
+  const label=dayOffset===0?'Today, ':days[d.getDay()]+', ';
+  document.getElementById('dateLabel').textContent=label+months[d.getMonth()]+' '+d.getDate();
+}
+function shiftDate(dir){dayOffset+=dir;updateDateLabel();}
+function goToday(){dayOffset=0;updateDateLabel();}
+
+function openNewBooking(){
+  alert('New booking form would open here');
+}
+
+// Animate time cursor position (simulated at 2:30 PM = 55.56% of 9-to-6 range)
+// 2:30 PM = 5.5 hours from 9 AM. 9 hours total. 5.5/9 = 61.11%
+// But visually we show half-hours: 18 slots. 2:30 = slot 11 of 18 = 61.11%
+function updateCursor(){
+  const cursor=document.getElementById('timeCursor');
+  // Simulate: 2:30 PM position
+  const pct=61.11;
+  cursor.style.left='calc(80px + '+pct+'%)';
+}
+
+// Auto-select Sarah's current booking on load
+window.addEventListener('DOMContentLoaded',function(){
+  updateCursor();
+  const defaultSlot=document.querySelector('[data-booking="sarah-4"]');
+  if(defaultSlot) selectBooking(defaultSlot);
+});
 </script>
 </body>
 </html>$HTML$,
-  1
+  3
 )
 ON CONFLICT (template_id) DO UPDATE SET
   html_content = EXCLUDED.html_content,
-  version = template_previews.version + 1,
+  version = EXCLUDED.version,
   updated_at = NOW();

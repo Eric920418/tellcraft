@@ -3,358 +3,640 @@ VALUES (
   '6b55a394-e05f-4ed9-b601-7b921c8c0981',
   $HTML$
 <!DOCTYPE html>
-<html lang="zh-TW">
+<html lang="en">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>TaskFlow — 專案管理平台</title>
+<title>Website Redesign — Project Board</title>
 <script src="https://cdn.tailwindcss.com"></script>
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Noto+Sans+TC:wght@400;500;700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 <script>
 tailwind.config = {
   theme: {
     extend: {
       colors: {
-        pm: { 50:'#faf5ff', 100:'#f3e8ff', 200:'#e9d5ff', 300:'#d8b4fe', 400:'#c084fc', 500:'#a855f7', 600:'#9333ea', 700:'#7e22ce', 800:'#6b21a8', 900:'#581c87' },
-        board: { 50:'#f8fafc', 100:'#f1f5f9', 200:'#e2e8f0', 300:'#cbd5e1', 400:'#94a3b8', 500:'#64748b', 600:'#475569', 700:'#334155', 800:'#1e293b', 900:'#0f172a', 950:'#020617' }
+        ocean: { 50:'#f0f9ff', 100:'#e0f2fe', 200:'#bae6fd', 300:'#7dd3fc', 400:'#38bdf8', 500:'#0ea5e9', 600:'#0284c7', 700:'#0369a1', 800:'#075985', 900:'#0c4a6e' },
+        stone: { 50:'#fafaf9', 100:'#f5f5f4', 200:'#e7e5e3', 300:'#d6d3d1', 400:'#a8a29e', 500:'#78716c', 600:'#57534e', 700:'#44403c', 800:'#292524', 900:'#1c1917' },
+        slate: { 50:'#f8fafc', 100:'#f1f5f9', 200:'#e2e8f0', 300:'#cbd5e1', 400:'#94a3b8', 500:'#64748b', 600:'#475569', 700:'#334155', 800:'#1e293b', 900:'#0f172a' }
       },
-      fontFamily: { inter:['Inter','Noto Sans TC','sans-serif'] }
+      fontFamily: { jakarta: ['Plus Jakarta Sans', 'sans-serif'] }
     }
   }
 }
 </script>
 <style>
-  * { font-family: 'Inter', 'Noto Sans TC', sans-serif; }
-  .sidebar-link.active { background: rgba(168,85,247,0.1); color: #a855f7; border-right: 3px solid #a855f7; }
-  .kanban-card { cursor: grab; }
-  .kanban-card:active { cursor: grabbing; }
-  .reveal { opacity:0; transform:translateY(16px); transition:all 0.4s ease; }
-  .reveal.visible { opacity:1; transform:translateY(0); }
+* { margin: 0; padding: 0; box-sizing: border-box; font-family: 'Plus Jakarta Sans', sans-serif; }
+
+/* Drag handle wiggle animation */
+@keyframes wiggle {
+  0%, 100% { transform: rotate(0deg); }
+  20% { transform: rotate(-2deg); }
+  40% { transform: rotate(2deg); }
+  60% { transform: rotate(-1.5deg); }
+  80% { transform: rotate(1.5deg); }
+}
+
+@keyframes wiggle-pulse {
+  0%, 100% { opacity: 0.3; transform: rotate(0deg) scale(1); }
+  25% { opacity: 0.7; transform: rotate(-2deg) scale(1.05); }
+  50% { opacity: 0.5; transform: rotate(2deg) scale(1); }
+  75% { opacity: 0.7; transform: rotate(-1.5deg) scale(1.05); }
+}
+
+.drag-handle {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  opacity: 0.25;
+  transition: opacity 0.2s ease;
+  cursor: grab;
+  padding: 4px 2px;
+  flex-shrink: 0;
+}
+.drag-handle:active { cursor: grabbing; }
+
+.drag-handle .dot-row {
+  display: flex;
+  gap: 3px;
+}
+
+.drag-handle .dot {
+  width: 3px;
+  height: 3px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.task-card:hover .drag-handle {
+  opacity: 0.7;
+  animation: wiggle-pulse 0.8s ease-in-out infinite;
+}
+
+.task-card {
+  cursor: grab;
+  transition: border-color 0.15s ease;
+}
+.task-card:active { cursor: grabbing; }
+
+/* Column collapse */
+.column-body.collapsed {
+  max-height: 0;
+  overflow: hidden;
+  opacity: 0;
+  margin-top: 0;
+}
+.column-body {
+  max-height: 2000px;
+  opacity: 1;
+  transition: max-height 0.35s ease, opacity 0.25s ease, margin-top 0.25s ease;
+}
+
+.chevron-icon {
+  transition: transform 0.25s ease;
+}
+.chevron-icon.rotated {
+  transform: rotate(-90deg);
+}
+
+/* Progress ring */
+.progress-ring-bg { stroke: #e7e5e3; }
+.progress-ring-fill { transition: stroke-dashoffset 0.3s ease; stroke-linecap: round; }
+
+/* Fade in cards */
+.task-card { animation: fadeSlideIn 0.3s ease forwards; opacity: 0; }
+@keyframes fadeSlideIn {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.task-card:nth-child(1) { animation-delay: 0.05s; }
+.task-card:nth-child(2) { animation-delay: 0.1s; }
+.task-card:nth-child(3) { animation-delay: 0.15s; }
+.task-card:nth-child(4) { animation-delay: 0.2s; }
+
+/* Done column cards */
+.done-card { opacity: 0.55; }
+.done-card:hover { opacity: 0.75; }
 </style>
 </head>
-<body class="bg-board-950 text-board-200">
+<body class="bg-stone-50 text-slate-800 min-h-screen flex flex-col">
 
-<div class="flex h-screen overflow-hidden">
-  <!-- Sidebar -->
-  <aside class="w-60 bg-board-900 border-r border-board-800 flex flex-col flex-shrink-0 hidden md:flex">
-    <div class="p-5 border-b border-board-800">
-      <div class="flex items-center gap-2.5">
-        <div class="w-8 h-8 bg-pm-500 rounded-lg flex items-center justify-center">
-          <svg class="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/></svg>
+<!-- Top Bar -->
+<header class="h-14 bg-white border-b border-stone-200 flex items-center px-5 gap-4 flex-shrink-0">
+  <div class="flex items-center gap-3">
+    <div class="w-7 h-7 bg-ocean-700 rounded-lg flex items-center justify-center">
+      <svg class="w-4 h-4 text-white" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M9 17V7m0 10a2 2 0 01-2 2H5a2 2 0 01-2-2V7a2 2 0 012-2h2a2 2 0 012 2m0 10a2 2 0 002 2h2a2 2 0 002-2M9 7a2 2 0 012-2h2a2 2 0 012 2m0 10V7"/></svg>
+    </div>
+    <h1 class="font-bold text-slate-900 text-sm tracking-tight">Website Redesign</h1>
+  </div>
+
+  <!-- Progress Overview -->
+  <div class="flex items-center gap-2 ml-2">
+    <div class="flex items-center gap-1.5 bg-ocean-50 border border-ocean-200 rounded-full px-3 py-1">
+      <svg class="w-0 h-0 absolute">
+        <defs>
+          <circle id="header-ring-bg" cx="10" cy="10" r="7" fill="none" stroke="#bae6fd" stroke-width="2.5"/>
+        </defs>
+      </svg>
+      <svg width="20" height="20" viewBox="0 0 20 20" class="flex-shrink-0">
+        <circle cx="10" cy="10" r="7" fill="none" stroke="#bae6fd" stroke-width="2.5"/>
+        <circle cx="10" cy="10" r="7" fill="none" stroke="#0369a1" stroke-width="2.5" stroke-linecap="round"
+          stroke-dasharray="43.98" stroke-dashoffset="14.07" transform="rotate(-90 10 10)"/>
+      </svg>
+      <span class="text-xs font-semibold text-ocean-800">68%</span>
+      <span class="text-xs text-ocean-600 hidden sm:inline">complete</span>
+    </div>
+  </div>
+
+  <div class="flex-1"></div>
+
+  <!-- Team Avatars -->
+  <div class="flex items-center gap-3">
+    <div class="flex -space-x-2">
+      <div class="w-7 h-7 rounded-full bg-ocean-700 border-2 border-white flex items-center justify-center text-[10px] text-white font-bold" title="Alex M.">AM</div>
+      <div class="w-7 h-7 rounded-full bg-amber-500 border-2 border-white flex items-center justify-center text-[10px] text-white font-bold" title="Sara K.">SK</div>
+      <div class="w-7 h-7 rounded-full bg-emerald-600 border-2 border-white flex items-center justify-center text-[10px] text-white font-bold" title="Jordan P.">JP</div>
+      <div class="w-7 h-7 rounded-full bg-rose-500 border-2 border-white flex items-center justify-center text-[10px] text-white font-bold" title="Taylor W.">TW</div>
+    </div>
+
+    <button onclick="showToast('Task added!')" class="bg-ocean-700 hover:bg-ocean-800 text-white text-xs font-semibold px-3.5 py-1.5 rounded-lg transition-colors flex items-center gap-1.5 cursor-pointer">
+      <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4v16m8-8H4"/></svg>
+      Add Task
+    </button>
+  </div>
+</header>
+
+<!-- Kanban Board -->
+<div class="flex-1 overflow-auto p-5">
+  <div class="flex gap-4 h-full min-h-[calc(100vh-76px)]">
+
+    <!-- Column: To Do -->
+    <div class="flex-shrink-0 w-72 flex flex-col">
+      <div class="flex items-center justify-between mb-3 px-1">
+        <div class="flex items-center gap-2">
+          <button onclick="toggleColumn(this, 'col-todo')" class="flex items-center gap-2 cursor-pointer hover:opacity-80">
+            <svg class="w-4 h-4 text-slate-400 chevron-icon" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M19 9l-7 7-7-7"/></svg>
+            <div class="w-2.5 h-2.5 rounded-full bg-slate-400"></div>
+            <h3 class="text-sm font-bold text-slate-700 tracking-tight">To Do</h3>
+          </button>
+          <span class="text-[11px] font-semibold text-slate-500 bg-slate-100 border border-slate-200 w-5 h-5 rounded-full flex items-center justify-center">4</span>
         </div>
-        <span class="font-bold text-white">TaskFlow</span>
+      </div>
+      <div id="col-todo" class="column-body space-y-2.5 flex-1">
+
+        <!-- Card: Design homepage mockup -->
+        <div class="task-card bg-white border border-stone-200 rounded-lg p-3 flex gap-2.5 hover:border-ocean-300">
+          <div class="drag-handle text-slate-400 mt-1">
+            <div class="dot-row"><span class="dot"></span><span class="dot"></span></div>
+            <div class="dot-row"><span class="dot"></span><span class="dot"></span></div>
+            <div class="dot-row"><span class="dot"></span><span class="dot"></span></div>
+          </div>
+          <div class="flex-1 min-w-0">
+            <div class="flex items-center gap-1.5 mb-1.5">
+              <span class="w-2 h-2 rounded-full bg-rose-500 flex-shrink-0" title="High"></span>
+              <span class="text-[10px] font-medium text-rose-600">High</span>
+            </div>
+            <p class="text-sm font-semibold text-slate-800 mb-2 leading-snug">Design homepage mockup</p>
+            <div class="flex items-center justify-between">
+              <div class="flex items-center gap-1.5">
+                <svg class="w-3 h-3 text-slate-400" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>
+                <span class="text-[10px] text-slate-500">Jan 20</span>
+              </div>
+              <div class="flex items-center gap-2">
+                <div class="w-5 h-5 rounded-full bg-ocean-700 flex items-center justify-center text-[8px] text-white font-bold">AM</div>
+                <!-- Progress ring 0% -->
+                <svg width="32" height="32" viewBox="0 0 32 32">
+                  <circle cx="16" cy="16" r="12" fill="none" stroke="#e7e5e3" stroke-width="3"/>
+                  <circle cx="16" cy="16" r="12" fill="none" stroke="#cbd5e1" stroke-width="3" stroke-linecap="round"
+                    stroke-dasharray="75.4" stroke-dashoffset="75.4" transform="rotate(-90 16 16)"/>
+                  <text x="16" y="17" text-anchor="middle" dominant-baseline="middle" class="text-[8px] font-bold fill-slate-400">0%</text>
+                </svg>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Card: Write API docs -->
+        <div class="task-card bg-white border border-stone-200 rounded-lg p-3 flex gap-2.5 hover:border-ocean-300">
+          <div class="drag-handle text-slate-400 mt-1">
+            <div class="dot-row"><span class="dot"></span><span class="dot"></span></div>
+            <div class="dot-row"><span class="dot"></span><span class="dot"></span></div>
+            <div class="dot-row"><span class="dot"></span><span class="dot"></span></div>
+          </div>
+          <div class="flex-1 min-w-0">
+            <div class="flex items-center gap-1.5 mb-1.5">
+              <span class="w-2 h-2 rounded-full bg-amber-500 flex-shrink-0" title="Medium"></span>
+              <span class="text-[10px] font-medium text-amber-600">Medium</span>
+            </div>
+            <p class="text-sm font-semibold text-slate-800 mb-2 leading-snug">Write API docs</p>
+            <div class="flex items-center justify-between">
+              <div class="flex items-center gap-1.5">
+                <svg class="w-3 h-3 text-slate-400" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>
+                <span class="text-[10px] text-slate-500">Jan 22</span>
+              </div>
+              <div class="flex items-center gap-2">
+                <div class="w-5 h-5 rounded-full bg-amber-500 flex items-center justify-center text-[8px] text-white font-bold">SK</div>
+                <!-- Progress ring 15% -->
+                <svg width="32" height="32" viewBox="0 0 32 32">
+                  <circle cx="16" cy="16" r="12" fill="none" stroke="#e7e5e3" stroke-width="3"/>
+                  <circle cx="16" cy="16" r="12" fill="none" stroke="#0369a1" stroke-width="3" stroke-linecap="round"
+                    stroke-dasharray="75.4" stroke-dashoffset="64.09" transform="rotate(-90 16 16)"/>
+                  <text x="16" y="17" text-anchor="middle" dominant-baseline="middle" class="text-[8px] font-bold fill-ocean-700">15</text>
+                </svg>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Card: Set up CI/CD pipeline -->
+        <div class="task-card bg-white border border-stone-200 rounded-lg p-3 flex gap-2.5 hover:border-ocean-300">
+          <div class="drag-handle text-slate-400 mt-1">
+            <div class="dot-row"><span class="dot"></span><span class="dot"></span></div>
+            <div class="dot-row"><span class="dot"></span><span class="dot"></span></div>
+            <div class="dot-row"><span class="dot"></span><span class="dot"></span></div>
+          </div>
+          <div class="flex-1 min-w-0">
+            <div class="flex items-center gap-1.5 mb-1.5">
+              <span class="w-2 h-2 rounded-full bg-slate-400 flex-shrink-0" title="Low"></span>
+              <span class="text-[10px] font-medium text-slate-500">Low</span>
+            </div>
+            <p class="text-sm font-semibold text-slate-800 mb-2 leading-snug">Set up CI/CD pipeline</p>
+            <div class="flex items-center justify-between">
+              <div class="flex items-center gap-1.5">
+                <svg class="w-3 h-3 text-slate-400" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>
+                <span class="text-[10px] text-slate-500">Jan 25</span>
+              </div>
+              <div class="flex items-center gap-2">
+                <div class="w-5 h-5 rounded-full bg-emerald-600 flex items-center justify-center text-[8px] text-white font-bold">JP</div>
+                <!-- Progress ring 0% -->
+                <svg width="32" height="32" viewBox="0 0 32 32">
+                  <circle cx="16" cy="16" r="12" fill="none" stroke="#e7e5e3" stroke-width="3"/>
+                  <circle cx="16" cy="16" r="12" fill="none" stroke="#cbd5e1" stroke-width="3" stroke-linecap="round"
+                    stroke-dasharray="75.4" stroke-dashoffset="75.4" transform="rotate(-90 16 16)"/>
+                  <text x="16" y="17" text-anchor="middle" dominant-baseline="middle" class="text-[8px] font-bold fill-slate-400">0%</text>
+                </svg>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Card: Create style guide -->
+        <div class="task-card bg-white border border-stone-200 rounded-lg p-3 flex gap-2.5 hover:border-ocean-300">
+          <div class="drag-handle text-slate-400 mt-1">
+            <div class="dot-row"><span class="dot"></span><span class="dot"></span></div>
+            <div class="dot-row"><span class="dot"></span><span class="dot"></span></div>
+            <div class="dot-row"><span class="dot"></span><span class="dot"></span></div>
+          </div>
+          <div class="flex-1 min-w-0">
+            <div class="flex items-center gap-1.5 mb-1.5">
+              <span class="w-2 h-2 rounded-full bg-amber-500 flex-shrink-0" title="Medium"></span>
+              <span class="text-[10px] font-medium text-amber-600">Medium</span>
+            </div>
+            <p class="text-sm font-semibold text-slate-800 mb-2 leading-snug">Create style guide</p>
+            <div class="flex items-center justify-between">
+              <div class="flex items-center gap-1.5">
+                <svg class="w-3 h-3 text-slate-400" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>
+                <span class="text-[10px] text-slate-500">Jan 24</span>
+              </div>
+              <div class="flex items-center gap-2">
+                <div class="w-5 h-5 rounded-full bg-rose-500 flex items-center justify-center text-[8px] text-white font-bold">TW</div>
+                <!-- Progress ring 0% -->
+                <svg width="32" height="32" viewBox="0 0 32 32">
+                  <circle cx="16" cy="16" r="12" fill="none" stroke="#e7e5e3" stroke-width="3"/>
+                  <circle cx="16" cy="16" r="12" fill="none" stroke="#cbd5e1" stroke-width="3" stroke-linecap="round"
+                    stroke-dasharray="75.4" stroke-dashoffset="75.4" transform="rotate(-90 16 16)"/>
+                  <text x="16" y="17" text-anchor="middle" dominant-baseline="middle" class="text-[8px] font-bold fill-slate-400">0%</text>
+                </svg>
+              </div>
+            </div>
+          </div>
+        </div>
+
       </div>
     </div>
-    <nav class="flex-1 py-4">
-      <div class="px-3 mb-2 text-[10px] tracking-wider uppercase text-board-500 font-medium">主選單</div>
-      <a href="#" onclick="switchPage('board')" class="sidebar-link active flex items-center gap-3 px-5 py-2.5 text-sm font-medium text-board-400 hover:bg-board-800 transition-colors">
-        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 17V7m0 10a2 2 0 01-2 2H5a2 2 0 01-2-2V7a2 2 0 012-2h2a2 2 0 012 2m0 10a2 2 0 002 2h2a2 2 0 002-2M9 7a2 2 0 012-2h2a2 2 0 012 2m0 10V7"/></svg>
-        看板
-      </a>
-      <a href="#" onclick="switchPage('timeline')" class="sidebar-link flex items-center gap-3 px-5 py-2.5 text-sm font-medium text-board-400 hover:bg-board-800 transition-colors">
-        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>
-        時間軸
-      </a>
-      <a href="#" onclick="switchPage('members')" class="sidebar-link flex items-center gap-3 px-5 py-2.5 text-sm font-medium text-board-400 hover:bg-board-800 transition-colors">
-        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z"/></svg>
-        成員
-      </a>
-      <a href="#" onclick="switchPage('settings')" class="sidebar-link flex items-center gap-3 px-5 py-2.5 text-sm font-medium text-board-400 hover:bg-board-800 transition-colors">
-        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
-        設定
-      </a>
-      <div class="px-3 mt-6 mb-2 text-[10px] tracking-wider uppercase text-board-500 font-medium">專案</div>
-      <a href="#" class="flex items-center gap-3 px-5 py-2 text-sm text-board-400 hover:bg-board-800 transition-colors">
-        <span class="w-2 h-2 rounded-full bg-pm-500"></span>Tellcraft 官網重構
-      </a>
-      <a href="#" class="flex items-center gap-3 px-5 py-2 text-sm text-board-400 hover:bg-board-800 transition-colors">
-        <span class="w-2 h-2 rounded-full bg-blue-500"></span>App 2.0 開發
-      </a>
-      <a href="#" class="flex items-center gap-3 px-5 py-2 text-sm text-board-400 hover:bg-board-800 transition-colors">
-        <span class="w-2 h-2 rounded-full bg-green-500"></span>行銷活動 Q1
-      </a>
-    </nav>
-    <div class="p-4 border-t border-board-800">
-      <div class="flex items-center gap-3">
-        <div class="w-8 h-8 rounded-full bg-pm-500 flex items-center justify-center text-white text-xs font-bold">EC</div>
-        <div class="flex-1 min-w-0">
-          <p class="text-sm font-medium text-board-200 truncate">Eric Chen</p>
-          <p class="text-xs text-board-500">Admin</p>
+
+    <!-- Column: In Progress -->
+    <div class="flex-shrink-0 w-72 flex flex-col">
+      <div class="flex items-center justify-between mb-3 px-1">
+        <div class="flex items-center gap-2">
+          <button onclick="toggleColumn(this, 'col-progress')" class="flex items-center gap-2 cursor-pointer hover:opacity-80">
+            <svg class="w-4 h-4 text-slate-400 chevron-icon" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M19 9l-7 7-7-7"/></svg>
+            <div class="w-2.5 h-2.5 rounded-full bg-ocean-600"></div>
+            <h3 class="text-sm font-bold text-slate-700 tracking-tight">In Progress</h3>
+          </button>
+          <span class="text-[11px] font-semibold text-ocean-700 bg-ocean-50 border border-ocean-200 w-5 h-5 rounded-full flex items-center justify-center">3</span>
         </div>
+      </div>
+      <div id="col-progress" class="column-body space-y-2.5 flex-1">
+
+        <!-- Card: Build auth system -->
+        <div class="task-card bg-white border border-stone-200 rounded-lg p-3 flex gap-2.5 hover:border-ocean-300">
+          <div class="drag-handle text-slate-400 mt-1">
+            <div class="dot-row"><span class="dot"></span><span class="dot"></span></div>
+            <div class="dot-row"><span class="dot"></span><span class="dot"></span></div>
+            <div class="dot-row"><span class="dot"></span><span class="dot"></span></div>
+          </div>
+          <div class="flex-1 min-w-0">
+            <div class="flex items-center gap-1.5 mb-1.5">
+              <span class="w-2 h-2 rounded-full bg-rose-500 flex-shrink-0" title="High"></span>
+              <span class="text-[10px] font-medium text-rose-600">High</span>
+            </div>
+            <p class="text-sm font-semibold text-slate-800 mb-2 leading-snug">Build auth system</p>
+            <div class="flex items-center justify-between">
+              <div class="flex items-center gap-1.5">
+                <svg class="w-3 h-3 text-slate-400" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>
+                <span class="text-[10px] text-slate-500">Jan 18</span>
+              </div>
+              <div class="flex items-center gap-2">
+                <div class="w-5 h-5 rounded-full bg-emerald-600 flex items-center justify-center text-[8px] text-white font-bold">JP</div>
+                <!-- Progress ring 65% -->
+                <svg width="32" height="32" viewBox="0 0 32 32">
+                  <circle cx="16" cy="16" r="12" fill="none" stroke="#e7e5e3" stroke-width="3"/>
+                  <circle cx="16" cy="16" r="12" fill="none" stroke="#0369a1" stroke-width="3" stroke-linecap="round"
+                    stroke-dasharray="75.4" stroke-dashoffset="26.39" transform="rotate(-90 16 16)"/>
+                  <text x="16" y="17" text-anchor="middle" dominant-baseline="middle" class="text-[8px] font-bold fill-ocean-700">65</text>
+                </svg>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Card: Database migration -->
+        <div class="task-card bg-white border border-stone-200 rounded-lg p-3 flex gap-2.5 hover:border-ocean-300">
+          <div class="drag-handle text-slate-400 mt-1">
+            <div class="dot-row"><span class="dot"></span><span class="dot"></span></div>
+            <div class="dot-row"><span class="dot"></span><span class="dot"></span></div>
+            <div class="dot-row"><span class="dot"></span><span class="dot"></span></div>
+          </div>
+          <div class="flex-1 min-w-0">
+            <div class="flex items-center gap-1.5 mb-1.5">
+              <span class="w-2 h-2 rounded-full bg-amber-500 flex-shrink-0" title="Medium"></span>
+              <span class="text-[10px] font-medium text-amber-600">Medium</span>
+            </div>
+            <p class="text-sm font-semibold text-slate-800 mb-2 leading-snug">Database migration</p>
+            <div class="flex items-center justify-between">
+              <div class="flex items-center gap-1.5">
+                <svg class="w-3 h-3 text-slate-400" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>
+                <span class="text-[10px] text-slate-500">Jan 21</span>
+              </div>
+              <div class="flex items-center gap-2">
+                <div class="w-5 h-5 rounded-full bg-ocean-700 flex items-center justify-center text-[8px] text-white font-bold">AM</div>
+                <!-- Progress ring 40% -->
+                <svg width="32" height="32" viewBox="0 0 32 32">
+                  <circle cx="16" cy="16" r="12" fill="none" stroke="#e7e5e3" stroke-width="3"/>
+                  <circle cx="16" cy="16" r="12" fill="none" stroke="#0369a1" stroke-width="3" stroke-linecap="round"
+                    stroke-dasharray="75.4" stroke-dashoffset="45.24" transform="rotate(-90 16 16)"/>
+                  <text x="16" y="17" text-anchor="middle" dominant-baseline="middle" class="text-[8px] font-bold fill-ocean-700">40</text>
+                </svg>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Card: Integrate payment gateway -->
+        <div class="task-card bg-white border border-stone-200 rounded-lg p-3 flex gap-2.5 hover:border-ocean-300">
+          <div class="drag-handle text-slate-400 mt-1">
+            <div class="dot-row"><span class="dot"></span><span class="dot"></span></div>
+            <div class="dot-row"><span class="dot"></span><span class="dot"></span></div>
+            <div class="dot-row"><span class="dot"></span><span class="dot"></span></div>
+          </div>
+          <div class="flex-1 min-w-0">
+            <div class="flex items-center gap-1.5 mb-1.5">
+              <span class="w-2 h-2 rounded-full bg-rose-500 flex-shrink-0" title="High"></span>
+              <span class="text-[10px] font-medium text-rose-600">High</span>
+            </div>
+            <p class="text-sm font-semibold text-slate-800 mb-2 leading-snug">Integrate payment gateway</p>
+            <div class="flex items-center justify-between">
+              <div class="flex items-center gap-1.5">
+                <svg class="w-3 h-3 text-slate-400" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>
+                <span class="text-[10px] text-slate-500">Jan 19</span>
+              </div>
+              <div class="flex items-center gap-2">
+                <div class="w-5 h-5 rounded-full bg-amber-500 flex items-center justify-center text-[8px] text-white font-bold">SK</div>
+                <!-- Progress ring 25% -->
+                <svg width="32" height="32" viewBox="0 0 32 32">
+                  <circle cx="16" cy="16" r="12" fill="none" stroke="#e7e5e3" stroke-width="3"/>
+                  <circle cx="16" cy="16" r="12" fill="none" stroke="#0369a1" stroke-width="3" stroke-linecap="round"
+                    stroke-dasharray="75.4" stroke-dashoffset="56.55" transform="rotate(-90 16 16)"/>
+                  <text x="16" y="17" text-anchor="middle" dominant-baseline="middle" class="text-[8px] font-bold fill-ocean-700">25</text>
+                </svg>
+              </div>
+            </div>
+          </div>
+        </div>
+
       </div>
     </div>
-  </aside>
 
-  <!-- Main Content -->
-  <main class="flex-1 flex flex-col overflow-hidden">
-    <!-- Top Bar -->
-    <header class="h-14 bg-board-900 border-b border-board-800 flex items-center px-6 gap-4 flex-shrink-0">
-      <button onclick="document.querySelector('aside').classList.toggle('hidden')" class="md:hidden text-board-400">
-        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"/></svg>
-      </button>
-      <h1 class="font-semibold text-white text-sm">Tellcraft 官網重構</h1>
-      <div class="flex items-center gap-1 ml-2">
-        <span class="px-2 py-0.5 bg-pm-500/20 text-pm-400 text-[10px] rounded-full font-medium">進行中</span>
-        <span class="px-2 py-0.5 bg-board-800 text-board-400 text-[10px] rounded-full font-medium">Sprint 4</span>
-      </div>
-      <div class="flex-1"></div>
-      <div class="flex items-center gap-3">
-        <div class="flex -space-x-2">
-          <div class="w-7 h-7 rounded-full bg-pm-500 border-2 border-board-900 flex items-center justify-center text-[10px] text-white font-bold">EC</div>
-          <div class="w-7 h-7 rounded-full bg-blue-500 border-2 border-board-900 flex items-center justify-center text-[10px] text-white font-bold">JL</div>
-          <div class="w-7 h-7 rounded-full bg-green-500 border-2 border-board-900 flex items-center justify-center text-[10px] text-white font-bold">AW</div>
-          <div class="w-7 h-7 rounded-full bg-orange-500 border-2 border-board-900 flex items-center justify-center text-[10px] text-white font-bold">SL</div>
-        </div>
-        <button onclick="showToast('搜尋功能 Coming Soon')" class="text-board-400 hover:text-board-200">
-          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
-        </button>
-        <button onclick="showToast('篩選功能 Coming Soon')" class="text-board-400 hover:text-board-200">
-          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z"/></svg>
-        </button>
-      </div>
-    </header>
-
-    <!-- Page Content -->
-    <div class="flex-1 overflow-auto">
-      <!-- Board Page -->
-      <div id="page-board" class="p-6 h-full">
-        <div class="flex gap-5 h-full overflow-x-auto pb-4">
-          <!-- Column: Backlog -->
-          <div class="flex-shrink-0 w-72">
-            <div class="flex items-center justify-between mb-3">
-              <div class="flex items-center gap-2"><span class="w-2.5 h-2.5 rounded-full bg-board-400"></span><h3 class="text-sm font-semibold text-board-300">待辦</h3><span class="text-xs text-board-500 bg-board-800 px-1.5 rounded">4</span></div>
-              <button onclick="showToast('新增任務')" class="text-board-500 hover:text-board-300 text-lg">+</button>
-            </div>
-            <div class="space-y-2.5">
-              <div class="kanban-card bg-board-800 rounded-lg p-3.5 border border-board-700 hover:border-pm-500/30 transition-colors">
-                <div class="flex items-center gap-1.5 mb-2"><span class="px-1.5 py-0.5 bg-red-500/20 text-red-400 text-[10px] rounded font-medium">Bug</span><span class="px-1.5 py-0.5 bg-orange-500/20 text-orange-400 text-[10px] rounded font-medium">高</span></div>
-                <p class="text-sm font-medium mb-2">修復部署後 CSS 遺失問題</p>
-                <div class="flex items-center justify-between"><div class="w-5 h-5 rounded-full bg-pm-500 flex items-center justify-center text-[8px] text-white font-bold">EC</div><span class="text-[10px] text-board-500">2/15</span></div>
-              </div>
-              <div class="kanban-card bg-board-800 rounded-lg p-3.5 border border-board-700 hover:border-pm-500/30 transition-colors">
-                <div class="flex items-center gap-1.5 mb-2"><span class="px-1.5 py-0.5 bg-pm-500/20 text-pm-400 text-[10px] rounded font-medium">Feature</span></div>
-                <p class="text-sm font-medium mb-2">新增深色模式切換</p>
-                <div class="flex items-center justify-between"><div class="w-5 h-5 rounded-full bg-blue-500 flex items-center justify-center text-[8px] text-white font-bold">JL</div><span class="text-[10px] text-board-500">2/18</span></div>
-              </div>
-              <div class="kanban-card bg-board-800 rounded-lg p-3.5 border border-board-700 hover:border-pm-500/30 transition-colors">
-                <div class="flex items-center gap-1.5 mb-2"><span class="px-1.5 py-0.5 bg-blue-500/20 text-blue-400 text-[10px] rounded font-medium">Design</span></div>
-                <p class="text-sm font-medium mb-2">About 頁面 UI 設計</p>
-                <div class="flex items-center justify-between"><div class="w-5 h-5 rounded-full bg-green-500 flex items-center justify-center text-[8px] text-white font-bold">AW</div><span class="text-[10px] text-board-500">2/20</span></div>
-              </div>
-              <div class="kanban-card bg-board-800 rounded-lg p-3.5 border border-board-700 hover:border-pm-500/30 transition-colors">
-                <div class="flex items-center gap-1.5 mb-2"><span class="px-1.5 py-0.5 bg-green-500/20 text-green-400 text-[10px] rounded font-medium">Chore</span></div>
-                <p class="text-sm font-medium mb-2">升級 Next.js 到 v16</p>
-                <div class="flex items-center justify-between"><div class="w-5 h-5 rounded-full bg-orange-500 flex items-center justify-center text-[8px] text-white font-bold">SL</div><span class="text-[10px] text-board-500">2/22</span></div>
-              </div>
-            </div>
-          </div>
-          <!-- Column: In Progress -->
-          <div class="flex-shrink-0 w-72">
-            <div class="flex items-center justify-between mb-3">
-              <div class="flex items-center gap-2"><span class="w-2.5 h-2.5 rounded-full bg-pm-500"></span><h3 class="text-sm font-semibold text-board-300">進行中</h3><span class="text-xs text-board-500 bg-board-800 px-1.5 rounded">3</span></div>
-              <button onclick="showToast('新增任務')" class="text-board-500 hover:text-board-300 text-lg">+</button>
-            </div>
-            <div class="space-y-2.5">
-              <div class="kanban-card bg-board-800 rounded-lg p-3.5 border border-pm-500/30">
-                <div class="flex items-center gap-1.5 mb-2"><span class="px-1.5 py-0.5 bg-pm-500/20 text-pm-400 text-[10px] rounded font-medium">Feature</span><span class="px-1.5 py-0.5 bg-red-500/20 text-red-400 text-[10px] rounded font-medium">高</span></div>
-                <p class="text-sm font-medium mb-2">模板預覽系統重構</p>
-                <div class="w-full bg-board-700 rounded-full h-1.5 mb-2"><div class="bg-pm-500 h-1.5 rounded-full" style="width:72%"></div></div>
-                <div class="flex items-center justify-between"><div class="w-5 h-5 rounded-full bg-pm-500 flex items-center justify-center text-[8px] text-white font-bold">EC</div><span class="text-[10px] text-board-500">72%</span></div>
-              </div>
-              <div class="kanban-card bg-board-800 rounded-lg p-3.5 border border-pm-500/30">
-                <div class="flex items-center gap-1.5 mb-2"><span class="px-1.5 py-0.5 bg-blue-500/20 text-blue-400 text-[10px] rounded font-medium">Design</span></div>
-                <p class="text-sm font-medium mb-2">首頁 Hero Section 重新設計</p>
-                <div class="w-full bg-board-700 rounded-full h-1.5 mb-2"><div class="bg-blue-500 h-1.5 rounded-full" style="width:45%"></div></div>
-                <div class="flex items-center justify-between"><div class="w-5 h-5 rounded-full bg-green-500 flex items-center justify-center text-[8px] text-white font-bold">AW</div><span class="text-[10px] text-board-500">45%</span></div>
-              </div>
-              <div class="kanban-card bg-board-800 rounded-lg p-3.5 border border-pm-500/30">
-                <div class="flex items-center gap-1.5 mb-2"><span class="px-1.5 py-0.5 bg-green-500/20 text-green-400 text-[10px] rounded font-medium">Test</span></div>
-                <p class="text-sm font-medium mb-2">E2E 測試覆蓋率提升</p>
-                <div class="w-full bg-board-700 rounded-full h-1.5 mb-2"><div class="bg-green-500 h-1.5 rounded-full" style="width:30%"></div></div>
-                <div class="flex items-center justify-between"><div class="w-5 h-5 rounded-full bg-orange-500 flex items-center justify-center text-[8px] text-white font-bold">SL</div><span class="text-[10px] text-board-500">30%</span></div>
-              </div>
-            </div>
-          </div>
-          <!-- Column: Review -->
-          <div class="flex-shrink-0 w-72">
-            <div class="flex items-center justify-between mb-3">
-              <div class="flex items-center gap-2"><span class="w-2.5 h-2.5 rounded-full bg-amber-500"></span><h3 class="text-sm font-semibold text-board-300">審核中</h3><span class="text-xs text-board-500 bg-board-800 px-1.5 rounded">2</span></div>
-            </div>
-            <div class="space-y-2.5">
-              <div class="kanban-card bg-board-800 rounded-lg p-3.5 border border-amber-500/30">
-                <div class="flex items-center gap-1.5 mb-2"><span class="px-1.5 py-0.5 bg-pm-500/20 text-pm-400 text-[10px] rounded font-medium">Feature</span></div>
-                <p class="text-sm font-medium mb-2">使用者認證 OAuth 整合</p>
-                <div class="flex items-center gap-1 mb-2"><span class="text-amber-400 text-xs">⏳</span><span class="text-[10px] text-board-500">等待 Code Review</span></div>
-                <div class="flex items-center justify-between"><div class="w-5 h-5 rounded-full bg-blue-500 flex items-center justify-center text-[8px] text-white font-bold">JL</div><span class="text-[10px] text-board-500">PR #47</span></div>
-              </div>
-              <div class="kanban-card bg-board-800 rounded-lg p-3.5 border border-amber-500/30">
-                <div class="flex items-center gap-1.5 mb-2"><span class="px-1.5 py-0.5 bg-blue-500/20 text-blue-400 text-[10px] rounded font-medium">Design</span></div>
-                <p class="text-sm font-medium mb-2">Pricing 頁面 UI</p>
-                <div class="flex items-center gap-1 mb-2"><span class="text-amber-400 text-xs">⏳</span><span class="text-[10px] text-board-500">等待客戶確認</span></div>
-                <div class="flex items-center justify-between"><div class="w-5 h-5 rounded-full bg-green-500 flex items-center justify-center text-[8px] text-white font-bold">AW</div><span class="text-[10px] text-board-500">Figma</span></div>
-              </div>
-            </div>
-          </div>
-          <!-- Column: Done -->
-          <div class="flex-shrink-0 w-72">
-            <div class="flex items-center justify-between mb-3">
-              <div class="flex items-center gap-2"><span class="w-2.5 h-2.5 rounded-full bg-green-500"></span><h3 class="text-sm font-semibold text-board-300">完成</h3><span class="text-xs text-board-500 bg-board-800 px-1.5 rounded">5</span></div>
-            </div>
-            <div class="space-y-2.5">
-              <div class="kanban-card bg-board-800 rounded-lg p-3.5 border border-board-700 opacity-70">
-                <p class="text-sm font-medium mb-2 line-through text-board-400">資料庫 Schema 設計</p>
-                <div class="flex items-center justify-between"><div class="w-5 h-5 rounded-full bg-pm-500 flex items-center justify-center text-[8px] text-white font-bold">EC</div><span class="text-[10px] text-green-500">✓ 完成</span></div>
-              </div>
-              <div class="kanban-card bg-board-800 rounded-lg p-3.5 border border-board-700 opacity-70">
-                <p class="text-sm font-medium mb-2 line-through text-board-400">API 路由架構</p>
-                <div class="flex items-center justify-between"><div class="w-5 h-5 rounded-full bg-blue-500 flex items-center justify-center text-[8px] text-white font-bold">JL</div><span class="text-[10px] text-green-500">✓ 完成</span></div>
-              </div>
-              <div class="kanban-card bg-board-800 rounded-lg p-3.5 border border-board-700 opacity-70">
-                <p class="text-sm font-medium mb-2 line-through text-board-400">Design System 建立</p>
-                <div class="flex items-center justify-between"><div class="w-5 h-5 rounded-full bg-green-500 flex items-center justify-center text-[8px] text-white font-bold">AW</div><span class="text-[10px] text-green-500">✓ 完成</span></div>
-              </div>
-            </div>
-          </div>
+    <!-- Column: Review -->
+    <div class="flex-shrink-0 w-72 flex flex-col">
+      <div class="flex items-center justify-between mb-3 px-1">
+        <div class="flex items-center gap-2">
+          <button onclick="toggleColumn(this, 'col-review')" class="flex items-center gap-2 cursor-pointer hover:opacity-80">
+            <svg class="w-4 h-4 text-slate-400 chevron-icon" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M19 9l-7 7-7-7"/></svg>
+            <div class="w-2.5 h-2.5 rounded-full bg-amber-500"></div>
+            <h3 class="text-sm font-bold text-slate-700 tracking-tight">Review</h3>
+          </button>
+          <span class="text-[11px] font-semibold text-amber-700 bg-amber-50 border border-amber-200 w-5 h-5 rounded-full flex items-center justify-center">2</span>
         </div>
       </div>
+      <div id="col-review" class="column-body space-y-2.5 flex-1">
 
-      <!-- Timeline Page -->
-      <div id="page-timeline" class="p-6 hidden">
-        <h2 class="text-lg font-semibold text-white mb-6">Sprint 4 時間軸</h2>
-        <div class="space-y-1 overflow-x-auto">
-          <div class="flex items-center gap-3 text-xs text-board-500 mb-2 min-w-[600px]">
-            <div class="w-40"></div>
-            <div class="flex-1 grid grid-cols-14 gap-0">
-              <span>2/3</span><span>2/4</span><span>2/5</span><span>2/6</span><span>2/7</span><span>2/10</span><span>2/11</span><span>2/12</span><span>2/13</span><span>2/14</span><span>2/17</span><span>2/18</span><span>2/19</span><span>2/20</span>
+        <!-- Card: Landing page -->
+        <div class="task-card bg-white border border-stone-200 rounded-lg p-3 flex gap-2.5 hover:border-amber-300">
+          <div class="drag-handle text-slate-400 mt-1">
+            <div class="dot-row"><span class="dot"></span><span class="dot"></span></div>
+            <div class="dot-row"><span class="dot"></span><span class="dot"></span></div>
+            <div class="dot-row"><span class="dot"></span><span class="dot"></span></div>
+          </div>
+          <div class="flex-1 min-w-0">
+            <div class="flex items-center gap-1.5 mb-1.5">
+              <span class="w-2 h-2 rounded-full bg-amber-500 flex-shrink-0" title="Medium"></span>
+              <span class="text-[10px] font-medium text-amber-600">Medium</span>
+            </div>
+            <p class="text-sm font-semibold text-slate-800 mb-2 leading-snug">Landing page</p>
+            <div class="flex items-center justify-between">
+              <div class="flex items-center gap-1.5">
+                <svg class="w-3 h-3 text-slate-400" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>
+                <span class="text-[10px] text-slate-500">Jan 16</span>
+              </div>
+              <div class="flex items-center gap-2">
+                <div class="w-5 h-5 rounded-full bg-rose-500 flex items-center justify-center text-[8px] text-white font-bold">TW</div>
+                <!-- Progress ring 90% -->
+                <svg width="32" height="32" viewBox="0 0 32 32">
+                  <circle cx="16" cy="16" r="12" fill="none" stroke="#e7e5e3" stroke-width="3"/>
+                  <circle cx="16" cy="16" r="12" fill="none" stroke="#f59e0b" stroke-width="3" stroke-linecap="round"
+                    stroke-dasharray="75.4" stroke-dashoffset="7.54" transform="rotate(-90 16 16)"/>
+                  <text x="16" y="17" text-anchor="middle" dominant-baseline="middle" class="text-[8px] font-bold fill-amber-600">90</text>
+                </svg>
+              </div>
             </div>
           </div>
-          <div class="flex items-center gap-3 min-w-[600px]">
-            <div class="w-40 text-sm truncate">模板預覽系統</div>
-            <div class="flex-1 relative h-7"><div class="absolute top-1 left-[5%] w-[55%] h-5 bg-pm-500/30 rounded border border-pm-500/50"><div class="h-full bg-pm-500/60 rounded" style="width:72%"></div></div></div>
-          </div>
-          <div class="flex items-center gap-3 min-w-[600px]">
-            <div class="w-40 text-sm truncate">Hero Section 設計</div>
-            <div class="flex-1 relative h-7"><div class="absolute top-1 left-[15%] w-[40%] h-5 bg-blue-500/30 rounded border border-blue-500/50"><div class="h-full bg-blue-500/60 rounded" style="width:45%"></div></div></div>
-          </div>
-          <div class="flex items-center gap-3 min-w-[600px]">
-            <div class="w-40 text-sm truncate">OAuth 整合</div>
-            <div class="flex-1 relative h-7"><div class="absolute top-1 left-[0%] w-[50%] h-5 bg-green-500/30 rounded border border-green-500/50"><div class="h-full bg-green-500/60 rounded" style="width:100%"></div></div></div>
-          </div>
-          <div class="flex items-center gap-3 min-w-[600px]">
-            <div class="w-40 text-sm truncate">E2E 測試</div>
-            <div class="flex-1 relative h-7"><div class="absolute top-1 left-[25%] w-[45%] h-5 bg-orange-500/30 rounded border border-orange-500/50"><div class="h-full bg-orange-500/60 rounded" style="width:30%"></div></div></div>
-          </div>
-          <div class="flex items-center gap-3 min-w-[600px]">
-            <div class="w-40 text-sm truncate">深色模式</div>
-            <div class="flex-1 relative h-7"><div class="absolute top-1 left-[50%] w-[35%] h-5 bg-board-600/30 rounded border border-board-500/50 border-dashed"></div></div>
-          </div>
         </div>
-        <div class="mt-8 grid sm:grid-cols-3 gap-4">
-          <div class="bg-board-800 rounded-lg p-4 border border-board-700">
-            <p class="text-xs text-board-500 mb-1">Sprint 進度</p>
-            <p class="text-2xl font-bold text-white">64%</p>
-            <div class="w-full bg-board-700 rounded-full h-2 mt-2"><div class="bg-pm-500 h-2 rounded-full" style="width:64%"></div></div>
-          </div>
-          <div class="bg-board-800 rounded-lg p-4 border border-board-700">
-            <p class="text-xs text-board-500 mb-1">剩餘天數</p>
-            <p class="text-2xl font-bold text-white">6 天</p>
-            <p class="text-xs text-board-500 mt-2">截止 2/20</p>
-          </div>
-          <div class="bg-board-800 rounded-lg p-4 border border-board-700">
-            <p class="text-xs text-board-500 mb-1">完成任務</p>
-            <p class="text-2xl font-bold text-white">5 / 14</p>
-            <p class="text-xs text-board-500 mt-2">9 個待完成</p>
-          </div>
-        </div>
-      </div>
 
-      <!-- Members Page -->
-      <div id="page-members" class="p-6 hidden">
-        <h2 class="text-lg font-semibold text-white mb-6">團隊成員</h2>
-        <div class="grid sm:grid-cols-2 lg:grid-cols-4 gap-4">
-          <div class="bg-board-800 rounded-xl p-5 border border-board-700 text-center">
-            <div class="w-14 h-14 mx-auto rounded-full bg-pm-500 flex items-center justify-center text-white font-bold text-lg mb-3">EC</div>
-            <h4 class="font-semibold text-white">Eric Chen</h4>
-            <p class="text-xs text-board-400 mt-0.5">全端工程師 · Admin</p>
-            <div class="flex justify-center gap-2 mt-3">
-              <span class="px-2 py-0.5 bg-board-700 text-board-300 text-[10px] rounded-full">3 進行中</span>
-              <span class="px-2 py-0.5 bg-green-500/20 text-green-400 text-[10px] rounded-full">2 完成</span>
-            </div>
+        <!-- Card: Unit tests -->
+        <div class="task-card bg-white border border-stone-200 rounded-lg p-3 flex gap-2.5 hover:border-amber-300">
+          <div class="drag-handle text-slate-400 mt-1">
+            <div class="dot-row"><span class="dot"></span><span class="dot"></span></div>
+            <div class="dot-row"><span class="dot"></span><span class="dot"></span></div>
+            <div class="dot-row"><span class="dot"></span><span class="dot"></span></div>
           </div>
-          <div class="bg-board-800 rounded-xl p-5 border border-board-700 text-center">
-            <div class="w-14 h-14 mx-auto rounded-full bg-blue-500 flex items-center justify-center text-white font-bold text-lg mb-3">JL</div>
-            <h4 class="font-semibold text-white">Jimmy Lin</h4>
-            <p class="text-xs text-board-400 mt-0.5">後端工程師</p>
-            <div class="flex justify-center gap-2 mt-3">
-              <span class="px-2 py-0.5 bg-board-700 text-board-300 text-[10px] rounded-full">2 進行中</span>
-              <span class="px-2 py-0.5 bg-green-500/20 text-green-400 text-[10px] rounded-full">1 完成</span>
+          <div class="flex-1 min-w-0">
+            <div class="flex items-center gap-1.5 mb-1.5">
+              <span class="w-2 h-2 rounded-full bg-rose-500 flex-shrink-0" title="High"></span>
+              <span class="text-[10px] font-medium text-rose-600">High</span>
             </div>
-          </div>
-          <div class="bg-board-800 rounded-xl p-5 border border-board-700 text-center">
-            <div class="w-14 h-14 mx-auto rounded-full bg-green-500 flex items-center justify-center text-white font-bold text-lg mb-3">AW</div>
-            <h4 class="font-semibold text-white">Amy Wang</h4>
-            <p class="text-xs text-board-400 mt-0.5">UI/UX 設計師</p>
-            <div class="flex justify-center gap-2 mt-3">
-              <span class="px-2 py-0.5 bg-board-700 text-board-300 text-[10px] rounded-full">2 進行中</span>
-              <span class="px-2 py-0.5 bg-green-500/20 text-green-400 text-[10px] rounded-full">1 完成</span>
-            </div>
-          </div>
-          <div class="bg-board-800 rounded-xl p-5 border border-board-700 text-center">
-            <div class="w-14 h-14 mx-auto rounded-full bg-orange-500 flex items-center justify-center text-white font-bold text-lg mb-3">SL</div>
-            <h4 class="font-semibold text-white">Sandy Liu</h4>
-            <p class="text-xs text-board-400 mt-0.5">QA 工程師</p>
-            <div class="flex justify-center gap-2 mt-3">
-              <span class="px-2 py-0.5 bg-board-700 text-board-300 text-[10px] rounded-full">2 進行中</span>
-              <span class="px-2 py-0.5 bg-green-500/20 text-green-400 text-[10px] rounded-full">1 完成</span>
+            <p class="text-sm font-semibold text-slate-800 mb-2 leading-snug">Unit tests</p>
+            <div class="flex items-center justify-between">
+              <div class="flex items-center gap-1.5">
+                <svg class="w-3 h-3 text-slate-400" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>
+                <span class="text-[10px] text-slate-500">Jan 17</span>
+              </div>
+              <div class="flex items-center gap-2">
+                <div class="w-5 h-5 rounded-full bg-emerald-600 flex items-center justify-center text-[8px] text-white font-bold">JP</div>
+                <!-- Progress ring 85% -->
+                <svg width="32" height="32" viewBox="0 0 32 32">
+                  <circle cx="16" cy="16" r="12" fill="none" stroke="#e7e5e3" stroke-width="3"/>
+                  <circle cx="16" cy="16" r="12" fill="none" stroke="#f59e0b" stroke-width="3" stroke-linecap="round"
+                    stroke-dasharray="75.4" stroke-dashoffset="11.31" transform="rotate(-90 16 16)"/>
+                  <text x="16" y="17" text-anchor="middle" dominant-baseline="middle" class="text-[8px] font-bold fill-amber-600">85</text>
+                </svg>
+              </div>
             </div>
           </div>
         </div>
-      </div>
 
-      <!-- Settings Page -->
-      <div id="page-settings" class="p-6 hidden">
-        <h2 class="text-lg font-semibold text-white mb-6">專案設定</h2>
-        <div class="max-w-xl space-y-5">
-          <div class="bg-board-800 rounded-xl p-5 border border-board-700">
-            <h3 class="font-semibold text-white mb-3">一般設定</h3>
-            <div class="space-y-3">
-              <div><label class="text-xs text-board-400 mb-1 block">專案名稱</label><input type="text" value="Tellcraft 官網重構" class="w-full bg-board-700 border border-board-600 rounded-lg px-3 py-2 text-sm text-board-200 focus:border-pm-500 outline-none"></div>
-              <div><label class="text-xs text-board-400 mb-1 block">說明</label><textarea rows="2" class="w-full bg-board-700 border border-board-600 rounded-lg px-3 py-2 text-sm text-board-200 focus:border-pm-500 outline-none resize-none">重構 Tellcraft 官方網站，改善效能與使用者體驗。</textarea></div>
-            </div>
-          </div>
-          <div class="bg-board-800 rounded-xl p-5 border border-board-700">
-            <h3 class="font-semibold text-white mb-3">通知設定</h3>
-            <div class="space-y-3">
-              <label class="flex items-center justify-between cursor-pointer"><span class="text-sm">任務指派通知</span><div class="w-10 h-5 bg-pm-500 rounded-full relative"><div class="w-4 h-4 bg-white rounded-full absolute top-0.5 right-0.5"></div></div></label>
-              <label class="flex items-center justify-between cursor-pointer"><span class="text-sm">截止日提醒</span><div class="w-10 h-5 bg-pm-500 rounded-full relative"><div class="w-4 h-4 bg-white rounded-full absolute top-0.5 right-0.5"></div></div></label>
-              <label class="flex items-center justify-between cursor-pointer"><span class="text-sm">每日摘要</span><div class="w-10 h-5 bg-board-600 rounded-full relative"><div class="w-4 h-4 bg-board-400 rounded-full absolute top-0.5 left-0.5"></div></div></label>
-            </div>
-          </div>
-          <button onclick="showToast('設定已儲存 ✓')" class="bg-pm-500 text-white px-6 py-2.5 rounded-lg text-sm font-semibold hover:bg-pm-600 transition-colors">儲存變更</button>
-        </div>
       </div>
     </div>
-  </main>
+
+    <!-- Column: Done -->
+    <div class="flex-shrink-0 w-72 flex flex-col">
+      <div class="flex items-center justify-between mb-3 px-1">
+        <div class="flex items-center gap-2">
+          <button onclick="toggleColumn(this, 'col-done')" class="flex items-center gap-2 cursor-pointer hover:opacity-80">
+            <svg class="w-4 h-4 text-slate-400 chevron-icon" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M19 9l-7 7-7-7"/></svg>
+            <div class="w-2.5 h-2.5 rounded-full bg-emerald-500"></div>
+            <h3 class="text-sm font-bold text-slate-700 tracking-tight">Done</h3>
+          </button>
+          <span class="text-[11px] font-semibold text-emerald-700 bg-emerald-50 border border-emerald-200 w-5 h-5 rounded-full flex items-center justify-center">3</span>
+        </div>
+      </div>
+      <div id="col-done" class="column-body space-y-2.5 flex-1">
+
+        <!-- Card: Project kickoff doc -->
+        <div class="task-card done-card bg-white border border-stone-200 rounded-lg p-3 flex gap-2.5">
+          <div class="drag-handle text-slate-300 mt-1">
+            <div class="dot-row"><span class="dot"></span><span class="dot"></span></div>
+            <div class="dot-row"><span class="dot"></span><span class="dot"></span></div>
+            <div class="dot-row"><span class="dot"></span><span class="dot"></span></div>
+          </div>
+          <div class="flex-1 min-w-0">
+            <p class="text-sm font-semibold text-slate-500 mb-2 leading-snug line-through">Project kickoff doc</p>
+            <div class="flex items-center justify-between">
+              <div class="flex items-center gap-1.5">
+                <svg class="w-3 h-3 text-emerald-400" fill="currentColor" viewBox="0 0 24 24"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41L9 16.17z"/></svg>
+                <span class="text-[10px] text-emerald-500 font-medium">Completed</span>
+              </div>
+              <div class="flex items-center gap-2">
+                <div class="w-5 h-5 rounded-full bg-ocean-700 flex items-center justify-center text-[8px] text-white font-bold">AM</div>
+                <!-- Progress ring 100% -->
+                <svg width="32" height="32" viewBox="0 0 32 32">
+                  <circle cx="16" cy="16" r="12" fill="none" stroke="#d1fae5" stroke-width="3"/>
+                  <circle cx="16" cy="16" r="12" fill="none" stroke="#10b981" stroke-width="3" stroke-linecap="round"
+                    stroke-dasharray="75.4" stroke-dashoffset="0" transform="rotate(-90 16 16)"/>
+                  <svg x="10" y="10" width="12" height="12" viewBox="0 0 24 24" fill="#10b981"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41L9 16.17z"/></svg>
+                </svg>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Card: Wireframes v1 -->
+        <div class="task-card done-card bg-white border border-stone-200 rounded-lg p-3 flex gap-2.5">
+          <div class="drag-handle text-slate-300 mt-1">
+            <div class="dot-row"><span class="dot"></span><span class="dot"></span></div>
+            <div class="dot-row"><span class="dot"></span><span class="dot"></span></div>
+            <div class="dot-row"><span class="dot"></span><span class="dot"></span></div>
+          </div>
+          <div class="flex-1 min-w-0">
+            <p class="text-sm font-semibold text-slate-500 mb-2 leading-snug line-through">Wireframes v1</p>
+            <div class="flex items-center justify-between">
+              <div class="flex items-center gap-1.5">
+                <svg class="w-3 h-3 text-emerald-400" fill="currentColor" viewBox="0 0 24 24"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41L9 16.17z"/></svg>
+                <span class="text-[10px] text-emerald-500 font-medium">Completed</span>
+              </div>
+              <div class="flex items-center gap-2">
+                <div class="w-5 h-5 rounded-full bg-rose-500 flex items-center justify-center text-[8px] text-white font-bold">TW</div>
+                <!-- Progress ring 100% -->
+                <svg width="32" height="32" viewBox="0 0 32 32">
+                  <circle cx="16" cy="16" r="12" fill="none" stroke="#d1fae5" stroke-width="3"/>
+                  <circle cx="16" cy="16" r="12" fill="none" stroke="#10b981" stroke-width="3" stroke-linecap="round"
+                    stroke-dasharray="75.4" stroke-dashoffset="0" transform="rotate(-90 16 16)"/>
+                  <svg x="10" y="10" width="12" height="12" viewBox="0 0 24 24" fill="#10b981"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41L9 16.17z"/></svg>
+                </svg>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Card: Tech stack decision -->
+        <div class="task-card done-card bg-white border border-stone-200 rounded-lg p-3 flex gap-2.5">
+          <div class="drag-handle text-slate-300 mt-1">
+            <div class="dot-row"><span class="dot"></span><span class="dot"></span></div>
+            <div class="dot-row"><span class="dot"></span><span class="dot"></span></div>
+            <div class="dot-row"><span class="dot"></span><span class="dot"></span></div>
+          </div>
+          <div class="flex-1 min-w-0">
+            <p class="text-sm font-semibold text-slate-500 mb-2 leading-snug line-through">Tech stack decision</p>
+            <div class="flex items-center justify-between">
+              <div class="flex items-center gap-1.5">
+                <svg class="w-3 h-3 text-emerald-400" fill="currentColor" viewBox="0 0 24 24"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41L9 16.17z"/></svg>
+                <span class="text-[10px] text-emerald-500 font-medium">Completed</span>
+              </div>
+              <div class="flex items-center gap-2">
+                <div class="w-5 h-5 rounded-full bg-amber-500 flex items-center justify-center text-[8px] text-white font-bold">SK</div>
+                <!-- Progress ring 100% -->
+                <svg width="32" height="32" viewBox="0 0 32 32">
+                  <circle cx="16" cy="16" r="12" fill="none" stroke="#d1fae5" stroke-width="3"/>
+                  <circle cx="16" cy="16" r="12" fill="none" stroke="#10b981" stroke-width="3" stroke-linecap="round"
+                    stroke-dasharray="75.4" stroke-dashoffset="0" transform="rotate(-90 16 16)"/>
+                  <svg x="10" y="10" width="12" height="12" viewBox="0 0 24 24" fill="#10b981"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41L9 16.17z"/></svg>
+                </svg>
+              </div>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+  </div>
 </div>
 
 <!-- Toast -->
-<div id="toast" class="fixed bottom-6 right-6 z-[70] bg-pm-500 text-white px-5 py-2.5 rounded-lg shadow-2xl text-sm font-medium translate-y-20 opacity-0 transition-all duration-300 pointer-events-none"></div>
+<div id="toast" class="fixed bottom-5 right-5 z-50 bg-ocean-700 text-white px-5 py-2.5 rounded-lg text-sm font-semibold translate-y-16 opacity-0 transition-all duration-300 pointer-events-none border border-ocean-600"></div>
 
 <script>
-function showToast(msg){const t=document.getElementById('toast');t.textContent=msg;t.classList.remove('translate-y-20','opacity-0');setTimeout(()=>t.classList.add('translate-y-20','opacity-0'),2500);}
-function switchPage(page){
-  document.querySelectorAll('[id^="page-"]').forEach(p=>p.classList.add('hidden'));
-  document.getElementById('page-'+page).classList.remove('hidden');
-  document.querySelectorAll('.sidebar-link').forEach(l=>l.classList.remove('active'));
-  event.target.closest('.sidebar-link').classList.add('active');
+function showToast(msg) {
+  var t = document.getElementById('toast');
+  t.textContent = msg;
+  t.classList.remove('translate-y-16', 'opacity-0');
+  setTimeout(function() { t.classList.add('translate-y-16', 'opacity-0'); }, 2200);
+}
+
+function toggleColumn(btn, colId) {
+  var col = document.getElementById(colId);
+  var chevron = btn.querySelector('.chevron-icon');
+  col.classList.toggle('collapsed');
+  chevron.classList.toggle('rotated');
 }
 </script>
+
 </body>
 </html>
 $HTML$,
-  1
+  3
 )
 ON CONFLICT (template_id) DO UPDATE SET
   html_content = EXCLUDED.html_content,
-  version = template_previews.version + 1,
+  version = EXCLUDED.version,
   updated_at = NOW();

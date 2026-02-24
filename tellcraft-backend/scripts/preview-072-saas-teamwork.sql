@@ -3,304 +3,569 @@ VALUES (
   '416c7690-2144-4247-b077-4fcd1d3ed1ea',
   $HTML$
 <!DOCTYPE html>
-<html lang="zh-TW">
+<html lang="en">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>團隊協作 TeamSync</title>
+<title>TeamSpace - Activity Feed</title>
 <script src="https://cdn.tailwindcss.com"></script>
-<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 <script>
 tailwind.config = {
   theme: {
     extend: {
-      fontFamily: { jakarta: ['Plus Jakarta Sans', 'sans-serif'] },
+      fontFamily: { nunito: ['Nunito', 'sans-serif'] },
       colors: {
-        sync: { 50:'#eff6ff', 100:'#dbeafe', 200:'#bfdbfe', 400:'#60a5fa', 500:'#3b82f6', 600:'#2563eb', 700:'#1d4ed8' },
-        mint: { 400:'#34d399', 500:'#10b981' }
+        brand: { 50:'#eff6ff', 100:'#dbeafe', 200:'#bfdbfe', 300:'#93c5fd', 400:'#60a5fa', 500:'#3b82f6', 600:'#2563eb', 700:'#1d4ed8' },
+        success: { 50:'#f0fdf4', 100:'#dcfce7', 500:'#22c55e', 600:'#16a34a' },
+        mention: { 50:'#fffbeb', 100:'#fef3c7', 500:'#f59e0b', 600:'#d97706' }
       }
     }
   }
 }
 </script>
 <style>
-* { font-family: 'Plus Jakarta Sans', sans-serif; }
+* { font-family: 'Nunito', sans-serif; margin: 0; padding: 0; box-sizing: border-box; }
 body { background: #f8fafc; }
-.sidebar-item { transition: all 0.2s; }
-.sidebar-item:hover, .sidebar-item.active { background: rgba(59,130,246,0.08); color: #2563eb; }
-.kanban-card { transition: all 0.2s; cursor: grab; }
-.kanban-card:hover { transform: translateY(-2px); box-shadow: 0 4px 12px rgba(0,0,0,0.08); }
-.avatar-stack .avatar { margin-left: -6px; border: 2px solid white; }
-.avatar-stack .avatar:first-child { margin-left: 0; }
+
+/* Typing indicator bounce */
+@keyframes bounce-dot {
+  0%, 60%, 100% { transform: translateY(0); }
+  30% { transform: translateY(-6px); }
+}
+.typing-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #94a3b8;
+  display: inline-block;
+  animation: bounce-dot 1.4s infinite ease-in-out;
+}
+.typing-dot:nth-child(2) { animation-delay: 0.2s; }
+.typing-dot:nth-child(3) { animation-delay: 0.4s; }
+
+/* Channel list */
+.channel-item { transition: all 0.15s ease; cursor: pointer; }
+.channel-item:hover { background: rgba(37, 99, 235, 0.06); }
+.channel-item.active { background: rgba(37, 99, 235, 0.1); color: #2563eb; font-weight: 700; }
+
+/* Feed entry */
+.feed-entry { transition: all 0.15s ease; }
+.feed-entry:hover { background: #f8fafc; }
+
+/* Reaction button */
+.reaction-btn { transition: all 0.15s ease; cursor: pointer; user-select: none; }
+.reaction-btn:hover { background: #e2e8f0; transform: scale(1.1); }
+.reaction-btn.reacted { background: #dbeafe; }
+
+/* Online dot pulse */
+@keyframes pulse-online {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(34, 197, 94, 0.4); }
+  50% { box-shadow: 0 0 0 4px rgba(34, 197, 94, 0); }
+}
+.online-dot { animation: pulse-online 2s infinite; }
+
+/* Scrollbar */
+.custom-scroll::-webkit-scrollbar { width: 4px; }
+.custom-scroll::-webkit-scrollbar-track { background: transparent; }
+.custom-scroll::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 2px; }
+.custom-scroll::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+
+/* Notification badge bounce */
+@keyframes badge-bounce {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.15); }
+}
+.badge-notify { animation: badge-bounce 2s infinite; }
 </style>
 </head>
-<body class="min-h-screen flex">
+<body class="min-h-screen flex font-nunito">
 
-<!-- Sidebar -->
-<aside class="w-60 bg-white border-r border-gray-100 flex flex-col min-h-screen">
-  <div class="p-5 border-b border-gray-50">
-    <div class="flex items-center gap-2">
-      <div class="w-8 h-8 rounded-lg bg-sync-500 flex items-center justify-center">
-        <svg class="w-4 h-4 text-white" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 00-3-3.87M16 3.13a4 4 0 010 7.75"/></svg>
+<!-- LEFT SIDEBAR (200px) -->
+<aside class="w-[200px] bg-white border-r border-gray-100 flex flex-col min-h-screen flex-shrink-0">
+  <!-- Workspace header -->
+  <div class="p-4 border-b border-gray-50">
+    <div class="flex items-center gap-2.5">
+      <div class="w-8 h-8 rounded-lg bg-brand-600 flex items-center justify-center">
+        <svg class="w-4 h-4 text-white" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M7 8h10M7 12h4m1 8l-4-4H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-3l-4 4z"/></svg>
       </div>
-      <span class="font-bold text-gray-800">TeamSync</span>
+      <div>
+        <div class="text-sm font-bold text-gray-800">TeamSpace</div>
+        <div class="text-[10px] text-gray-400">Product Team</div>
+      </div>
     </div>
-    <div class="mt-3 text-xs text-gray-400">Tellcraft 團隊 · 12 位成員</div>
   </div>
-  <nav class="flex-1 p-3 space-y-0.5">
-    <div class="sidebar-item active flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium cursor-pointer" onclick="switchPage('board')">
-      <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
-      看板
+
+  <!-- Channels -->
+  <nav class="flex-1 py-3 custom-scroll overflow-y-auto">
+    <div class="px-3 mb-1">
+      <div class="text-[10px] font-bold text-gray-400 uppercase tracking-wider px-2">Channels</div>
     </div>
-    <div class="sidebar-item flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium text-gray-500 cursor-pointer" onclick="switchPage('timeline')">
-      <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><line x1="4" y1="21" x2="4" y2="14"/><line x1="4" y1="10" x2="4" y2="3"/><line x1="12" y1="21" x2="12" y2="12"/><line x1="12" y1="8" x2="12" y2="3"/><line x1="20" y1="21" x2="20" y2="16"/><line x1="20" y1="12" x2="20" y2="3"/></svg>
-      甘特圖
-    </div>
-    <div class="sidebar-item flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium text-gray-500 cursor-pointer" onclick="switchPage('files')">
-      <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><path d="M14 2v6h6M16 13H8M16 17H8M10 9H8"/></svg>
-      文件
-    </div>
-    <div class="sidebar-item flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium text-gray-500 cursor-pointer" onclick="switchPage('chat')">
-      <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/></svg>
-      聊天
-      <span class="ml-auto text-[10px] bg-red-500 text-white w-4 h-4 rounded-full flex items-center justify-center">3</span>
-    </div>
-    <div class="mt-4 pt-3 border-t border-gray-50">
-      <div class="text-[10px] text-gray-400 uppercase tracking-wider px-3 mb-2">專案</div>
-      <div class="sidebar-item flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm text-gray-500 cursor-pointer">
-        <span class="w-2 h-2 rounded-full bg-sync-500"></span>官網改版
+    <div class="px-2 space-y-0.5" id="channel-list">
+      <div class="channel-item active flex items-center gap-2 px-2 py-1.5 rounded-md text-[13px]" data-channel="general" onclick="selectChannel(this)">
+        <span class="text-gray-400">#</span>
+        <span class="flex-1">general</span>
+        <span class="bg-brand-600 text-white text-[10px] font-bold w-4 h-4 rounded-full flex items-center justify-center">2</span>
       </div>
-      <div class="sidebar-item flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm text-gray-500 cursor-pointer">
-        <span class="w-2 h-2 rounded-full bg-mint-500"></span>App v2.0
+      <div class="channel-item flex items-center gap-2 px-2 py-1.5 rounded-md text-[13px] text-gray-500" data-channel="engineering" onclick="selectChannel(this)">
+        <span class="text-gray-400">#</span>
+        <span>engineering</span>
       </div>
-      <div class="sidebar-item flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm text-gray-500 cursor-pointer">
-        <span class="w-2 h-2 rounded-full bg-amber-500"></span>行銷活動
+      <div class="channel-item flex items-center gap-2 px-2 py-1.5 rounded-md text-[13px] text-gray-500" data-channel="design" onclick="selectChannel(this)">
+        <span class="text-gray-400">#</span>
+        <span>design</span>
+      </div>
+      <div class="channel-item flex items-center gap-2 px-2 py-1.5 rounded-md text-[13px] text-gray-500" data-channel="random" onclick="selectChannel(this)">
+        <span class="text-gray-400">#</span>
+        <span>random</span>
+      </div>
+    </div>
+
+    <!-- Direct Messages -->
+    <div class="px-3 mt-4 mb-1">
+      <div class="text-[10px] font-bold text-gray-400 uppercase tracking-wider px-2">Direct Messages</div>
+    </div>
+    <div class="px-2 space-y-0.5">
+      <div class="channel-item flex items-center gap-2 px-2 py-1.5 rounded-md text-[13px] text-gray-500 cursor-pointer">
+        <span class="relative flex-shrink-0">
+          <span class="w-5 h-5 rounded-full bg-pink-100 text-pink-600 text-[9px] flex items-center justify-center font-bold">S</span>
+          <span class="absolute -bottom-0.5 -right-0.5 w-2 h-2 rounded-full bg-success-500 border border-white online-dot"></span>
+        </span>
+        <span>Sarah Chen</span>
+      </div>
+      <div class="channel-item flex items-center gap-2 px-2 py-1.5 rounded-md text-[13px] text-gray-500 cursor-pointer">
+        <span class="relative flex-shrink-0">
+          <span class="w-5 h-5 rounded-full bg-blue-100 text-blue-600 text-[9px] flex items-center justify-center font-bold">M</span>
+          <span class="absolute -bottom-0.5 -right-0.5 w-2 h-2 rounded-full bg-success-500 border border-white online-dot"></span>
+        </span>
+        <span>Mike Ross</span>
+      </div>
+      <div class="channel-item flex items-center gap-2 px-2 py-1.5 rounded-md text-[13px] text-gray-500 cursor-pointer">
+        <span class="relative flex-shrink-0">
+          <span class="w-5 h-5 rounded-full bg-amber-100 text-amber-600 text-[9px] flex items-center justify-center font-bold">L</span>
+          <span class="absolute -bottom-0.5 -right-0.5 w-2 h-2 rounded-full bg-gray-300 border border-white"></span>
+        </span>
+        <span class="text-gray-400">Lisa Park</span>
       </div>
     </div>
   </nav>
-  <div class="p-4 border-t border-gray-50">
-    <div class="flex items-center gap-3">
-      <div class="w-8 h-8 rounded-full bg-sync-100 flex items-center justify-center text-sync-600 text-sm font-semibold">E</div>
-      <div class="text-sm"><div class="font-medium text-gray-700">Eric</div><div class="text-xs text-gray-400">管理員</div></div>
-    </div>
-  </div>
 </aside>
 
-<!-- Main -->
-<main class="flex-1 overflow-auto">
-  <!-- Board Page -->
-  <div id="page-board" class="page p-6">
-    <div class="flex items-center justify-between mb-6">
-      <div>
-        <h1 class="text-xl font-bold text-gray-800">官網改版</h1>
-        <p class="text-sm text-gray-400 mt-0.5">Sprint 4 · 2/10 - 2/23</p>
+<!-- CENTER: Top bar + Activity Feed -->
+<div class="flex-1 flex flex-col min-h-screen">
+  <!-- TOP BAR -->
+  <header class="h-14 bg-white border-b border-gray-100 flex items-center justify-between px-5 flex-shrink-0">
+    <div class="flex items-center gap-3">
+      <span class="text-[13px] font-bold text-gray-800"># general</span>
+      <span class="text-[11px] text-gray-400">Team updates and activity</span>
+    </div>
+    <div class="flex items-center gap-3">
+      <!-- Search -->
+      <div class="flex items-center gap-2 bg-gray-50 rounded-lg px-3 py-1.5 w-48">
+        <svg class="w-3.5 h-3.5 text-gray-400" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg>
+        <input type="text" placeholder="Search..." class="bg-transparent text-[12px] text-gray-600 outline-none w-full placeholder-gray-400" id="search-input">
       </div>
-      <div class="flex items-center gap-3">
-        <div class="avatar-stack flex">
-          <div class="avatar w-7 h-7 rounded-full bg-blue-100 text-blue-600 text-xs flex items-center justify-center font-medium">E</div>
-          <div class="avatar w-7 h-7 rounded-full bg-pink-100 text-pink-600 text-xs flex items-center justify-center font-medium">L</div>
-          <div class="avatar w-7 h-7 rounded-full bg-green-100 text-green-600 text-xs flex items-center justify-center font-medium">W</div>
-          <div class="avatar w-7 h-7 rounded-full bg-gray-100 text-gray-500 text-xs flex items-center justify-center font-medium">+3</div>
+      <!-- Notification bell -->
+      <button class="relative p-1.5 rounded-lg hover:bg-gray-50 transition" onclick="toggleNotifications()">
+        <svg class="w-5 h-5 text-gray-500" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24"><path d="M18 8A6 6 0 006 8c0 7-3 9-3 9h18s-3-2-3-9M13.73 21a2 2 0 01-3.46 0"/></svg>
+        <span class="absolute -top-0.5 -right-0.5 bg-red-500 text-white text-[9px] font-bold w-4 h-4 rounded-full flex items-center justify-center badge-notify">3</span>
+      </button>
+      <!-- User avatar -->
+      <div class="w-8 h-8 rounded-full bg-brand-100 text-brand-600 text-sm flex items-center justify-center font-bold cursor-pointer hover:ring-2 hover:ring-brand-200 transition">
+        Y
+      </div>
+    </div>
+  </header>
+
+  <!-- ACTIVITY FEED (Main View) -->
+  <div class="flex-1 flex overflow-hidden">
+    <div class="flex-1 flex flex-col">
+      <!-- Feed entries -->
+      <div class="flex-1 overflow-y-auto custom-scroll px-5 py-4 space-y-1" id="activity-feed">
+
+        <!-- Entry 1: Task completed (green) -->
+        <div class="feed-entry flex items-start gap-3 px-3 py-3 rounded-lg group">
+          <div class="w-9 h-9 rounded-full bg-pink-100 text-pink-600 text-sm flex items-center justify-center font-bold flex-shrink-0">S</div>
+          <div class="flex-1 min-w-0">
+            <div class="flex items-center gap-2 flex-wrap">
+              <span class="text-[13px] font-bold text-gray-800">Sarah Chen</span>
+              <span class="text-[13px] text-gray-500">completed</span>
+              <span class="inline-flex items-center gap-1 bg-success-50 text-success-600 text-[12px] font-semibold px-2 py-0.5 rounded-full">
+                <svg class="w-3 h-3" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/></svg>
+                API Documentation
+              </span>
+            </div>
+            <div class="text-[11px] text-gray-400 mt-0.5">2 min ago</div>
+            <!-- Reactions -->
+            <div class="flex items-center gap-1.5 mt-2 opacity-0 group-hover:opacity-100 transition-opacity">
+              <span class="reaction-btn text-[12px] px-1.5 py-0.5 rounded-md bg-gray-100" onclick="toggleReaction(this)">&#128077;</span>
+              <span class="reaction-btn text-[12px] px-1.5 py-0.5 rounded-md bg-gray-100" onclick="toggleReaction(this)">&#10084;&#65039;</span>
+            </div>
+          </div>
         </div>
-        <button class="bg-sync-500 hover:bg-sync-600 text-white px-4 py-2 rounded-lg text-sm font-medium transition">+ 新任務</button>
+
+        <!-- Entry 2: File shared (blue) -->
+        <div class="feed-entry flex items-start gap-3 px-3 py-3 rounded-lg group">
+          <div class="w-9 h-9 rounded-full bg-blue-100 text-blue-600 text-sm flex items-center justify-center font-bold flex-shrink-0">M</div>
+          <div class="flex-1 min-w-0">
+            <div class="flex items-center gap-2 flex-wrap">
+              <span class="text-[13px] font-bold text-gray-800">Mike Ross</span>
+              <span class="text-[13px] text-gray-500">shared a file</span>
+            </div>
+            <!-- File card -->
+            <div class="mt-2 inline-flex items-center gap-2.5 bg-brand-50 border border-brand-100 rounded-lg px-3 py-2 cursor-pointer hover:bg-brand-100 transition">
+              <svg class="w-5 h-5 text-brand-500 flex-shrink-0" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><path d="M14 2v6h6"/><path d="M16 13H8M16 17H8M10 9H8"/></svg>
+              <div>
+                <div class="text-[12px] font-semibold text-brand-700">Q1_report.pdf</div>
+                <div class="text-[10px] text-brand-400">2.4 MB</div>
+              </div>
+            </div>
+            <div class="text-[11px] text-gray-400 mt-1">15 min ago</div>
+            <div class="flex items-center gap-1.5 mt-2 opacity-0 group-hover:opacity-100 transition-opacity">
+              <span class="reaction-btn text-[12px] px-1.5 py-0.5 rounded-md bg-gray-100" onclick="toggleReaction(this)">&#128077;</span>
+              <span class="reaction-btn text-[12px] px-1.5 py-0.5 rounded-md bg-gray-100" onclick="toggleReaction(this)">&#10084;&#65039;</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Entry 3: Comment with preview -->
+        <div class="feed-entry flex items-start gap-3 px-3 py-3 rounded-lg group">
+          <div class="w-9 h-9 rounded-full bg-purple-100 text-purple-600 text-sm flex items-center justify-center font-bold flex-shrink-0">L</div>
+          <div class="flex-1 min-w-0">
+            <div class="flex items-center gap-2 flex-wrap">
+              <span class="text-[13px] font-bold text-gray-800">Lisa Park</span>
+              <span class="text-[13px] text-gray-500">commented on</span>
+              <span class="text-[13px] font-semibold text-brand-600 cursor-pointer hover:underline">Homepage Design</span>
+            </div>
+            <!-- Comment preview -->
+            <div class="mt-2 bg-gray-50 border-l-2 border-brand-300 rounded-r-lg px-3 py-2">
+              <p class="text-[12px] text-gray-600 leading-relaxed">The hero section looks great! Can we try a more subtle gradient for the CTA button? I think it would feel more cohesive with the overall palette.</p>
+            </div>
+            <div class="text-[11px] text-gray-400 mt-1">1h ago</div>
+            <div class="flex items-center gap-1.5 mt-2 opacity-0 group-hover:opacity-100 transition-opacity">
+              <span class="reaction-btn text-[12px] px-1.5 py-0.5 rounded-md bg-gray-100" onclick="toggleReaction(this)">&#128077;</span>
+              <span class="reaction-btn text-[12px] px-1.5 py-0.5 rounded-md bg-gray-100" onclick="toggleReaction(this)">&#10084;&#65039;</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Entry 4: System message - calendar event -->
+        <div class="feed-entry flex items-start gap-3 px-3 py-3 rounded-lg">
+          <div class="w-9 h-9 rounded-full bg-gray-100 flex items-center justify-center flex-shrink-0">
+            <svg class="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></svg>
+          </div>
+          <div class="flex-1 min-w-0">
+            <div class="flex items-center gap-2">
+              <span class="text-[13px] text-gray-500">Team standup starts in <span class="font-semibold text-gray-700">30 minutes</span></span>
+            </div>
+            <div class="mt-1.5 inline-flex items-center gap-2 bg-gray-50 border border-gray-200 rounded-lg px-2.5 py-1.5 text-[11px] text-gray-500">
+              <svg class="w-3 h-3" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
+              Today at 2:00 PM &middot; Zoom
+            </div>
+            <div class="text-[11px] text-gray-400 mt-1">System</div>
+          </div>
+        </div>
+
+        <!-- Entry 5: @mention (amber) -->
+        <div class="feed-entry flex items-start gap-3 px-3 py-3 rounded-lg bg-mention-50/40 group">
+          <div class="w-9 h-9 rounded-full bg-green-100 text-green-600 text-sm flex items-center justify-center font-bold flex-shrink-0">A</div>
+          <div class="flex-1 min-w-0">
+            <div class="flex items-center gap-2 flex-wrap">
+              <span class="text-[13px] font-bold text-gray-800">Alex Kim</span>
+              <span class="text-[13px] text-gray-500">mentioned you in</span>
+              <span class="text-[13px] font-semibold text-brand-600 cursor-pointer hover:underline">#design</span>
+              <span class="inline-flex items-center gap-1 bg-mention-100 text-mention-600 text-[10px] font-bold px-1.5 py-0.5 rounded-full">
+                @mention
+              </span>
+            </div>
+            <div class="mt-2 bg-white border border-mention-200 rounded-lg px-3 py-2">
+              <p class="text-[12px] text-gray-600"><span class="text-mention-600 font-semibold">@you</span> Can you review the updated wireframes for the settings page? I pushed the latest version.</p>
+            </div>
+            <div class="text-[11px] text-gray-400 mt-1">2h ago</div>
+            <div class="flex items-center gap-1.5 mt-2 opacity-0 group-hover:opacity-100 transition-opacity">
+              <span class="reaction-btn text-[12px] px-1.5 py-0.5 rounded-md bg-gray-100" onclick="toggleReaction(this)">&#128077;</span>
+              <span class="reaction-btn text-[12px] px-1.5 py-0.5 rounded-md bg-gray-100" onclick="toggleReaction(this)">&#10084;&#65039;</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Entry 6: Another completion -->
+        <div class="feed-entry flex items-start gap-3 px-3 py-3 rounded-lg group">
+          <div class="w-9 h-9 rounded-full bg-blue-100 text-blue-600 text-sm flex items-center justify-center font-bold flex-shrink-0">M</div>
+          <div class="flex-1 min-w-0">
+            <div class="flex items-center gap-2 flex-wrap">
+              <span class="text-[13px] font-bold text-gray-800">Mike Ross</span>
+              <span class="text-[13px] text-gray-500">pushed 3 commits to</span>
+              <span class="inline-flex items-center gap-1 bg-gray-100 text-gray-600 text-[12px] font-mono px-2 py-0.5 rounded">
+                feat/auth-flow
+              </span>
+            </div>
+            <div class="text-[11px] text-gray-400 mt-0.5">3h ago</div>
+            <div class="flex items-center gap-1.5 mt-2 opacity-0 group-hover:opacity-100 transition-opacity">
+              <span class="reaction-btn text-[12px] px-1.5 py-0.5 rounded-md bg-gray-100" onclick="toggleReaction(this)">&#128077;</span>
+              <span class="reaction-btn text-[12px] px-1.5 py-0.5 rounded-md bg-gray-100" onclick="toggleReaction(this)">&#10084;&#65039;</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- TYPING INDICATOR (Signature Element) -->
+        <div class="flex items-center gap-3 px-3 py-2" id="typing-indicator">
+          <div class="w-9 h-9 rounded-full bg-pink-100 text-pink-600 text-sm flex items-center justify-center font-bold flex-shrink-0">S</div>
+          <div class="flex items-center gap-2 bg-gray-100 rounded-2xl px-4 py-2.5">
+            <span class="text-[12px] text-gray-500 font-medium">Sarah is typing</span>
+            <span class="flex items-center gap-1 ml-0.5">
+              <span class="typing-dot"></span>
+              <span class="typing-dot"></span>
+              <span class="typing-dot"></span>
+            </span>
+          </div>
+        </div>
+
+      </div>
+
+      <!-- MESSAGE INPUT (Bottom bar) -->
+      <div class="border-t border-gray-100 bg-white px-5 py-3 flex-shrink-0">
+        <div class="flex items-center gap-2 bg-gray-50 rounded-xl px-3 py-2 focus-within:ring-2 focus-within:ring-brand-200 transition">
+          <!-- Attach -->
+          <button class="p-1.5 rounded-lg hover:bg-gray-200 transition text-gray-400 hover:text-gray-600" title="Attach file">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48"/></svg>
+          </button>
+          <!-- Text input -->
+          <input type="text" placeholder="Message #general..." class="flex-1 bg-transparent text-[13px] text-gray-700 outline-none placeholder-gray-400" id="message-input">
+          <!-- Emoji -->
+          <button class="p-1.5 rounded-lg hover:bg-gray-200 transition text-gray-400 hover:text-gray-600" title="Add emoji">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M8 14s1.5 2 4 2 4-2 4-2M9 9h.01M15 9h.01"/></svg>
+          </button>
+          <!-- Send -->
+          <button class="bg-brand-600 hover:bg-brand-700 text-white p-1.5 rounded-lg transition" id="send-btn" title="Send message">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z"/></svg>
+          </button>
+        </div>
       </div>
     </div>
 
-    <!-- Kanban Board -->
-    <div class="grid grid-cols-4 gap-4">
-      <!-- To Do -->
-      <div class="bg-gray-50 rounded-xl p-3">
-        <div class="flex items-center justify-between mb-3 px-1">
-          <div class="flex items-center gap-2"><span class="w-2 h-2 rounded-full bg-gray-400"></span><span class="text-sm font-semibold text-gray-600">待處理</span><span class="text-xs text-gray-400 ml-1">4</span></div>
+    <!-- RIGHT SIDEBAR (240px) -->
+    <aside class="w-[240px] bg-white border-l border-gray-100 flex-shrink-0 overflow-y-auto custom-scroll py-4">
+      <!-- Team Members Online -->
+      <div class="px-4 mb-5">
+        <div class="flex items-center justify-between mb-3">
+          <span class="text-[11px] font-bold text-gray-400 uppercase tracking-wider">Team Members</span>
+          <span class="text-[11px] text-gray-400">5 / 8 online</span>
         </div>
+        <div class="space-y-2.5">
+          <div class="flex items-center gap-2.5">
+            <span class="relative flex-shrink-0">
+              <span class="w-7 h-7 rounded-full bg-pink-100 text-pink-600 text-[10px] flex items-center justify-center font-bold">S</span>
+              <span class="absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full bg-success-500 border-2 border-white online-dot"></span>
+            </span>
+            <div><div class="text-[12px] font-semibold text-gray-700">Sarah Chen</div><div class="text-[10px] text-gray-400">Design Lead</div></div>
+          </div>
+          <div class="flex items-center gap-2.5">
+            <span class="relative flex-shrink-0">
+              <span class="w-7 h-7 rounded-full bg-blue-100 text-blue-600 text-[10px] flex items-center justify-center font-bold">M</span>
+              <span class="absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full bg-success-500 border-2 border-white online-dot"></span>
+            </span>
+            <div><div class="text-[12px] font-semibold text-gray-700">Mike Ross</div><div class="text-[10px] text-gray-400">Frontend Dev</div></div>
+          </div>
+          <div class="flex items-center gap-2.5">
+            <span class="relative flex-shrink-0">
+              <span class="w-7 h-7 rounded-full bg-green-100 text-green-600 text-[10px] flex items-center justify-center font-bold">A</span>
+              <span class="absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full bg-success-500 border-2 border-white online-dot"></span>
+            </span>
+            <div><div class="text-[12px] font-semibold text-gray-700">Alex Kim</div><div class="text-[10px] text-gray-400">UX Designer</div></div>
+          </div>
+          <div class="flex items-center gap-2.5">
+            <span class="relative flex-shrink-0">
+              <span class="w-7 h-7 rounded-full bg-amber-100 text-amber-600 text-[10px] flex items-center justify-center font-bold">J</span>
+              <span class="absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full bg-success-500 border-2 border-white online-dot"></span>
+            </span>
+            <div><div class="text-[12px] font-semibold text-gray-700">Jordan Lee</div><div class="text-[10px] text-gray-400">Backend Dev</div></div>
+          </div>
+          <div class="flex items-center gap-2.5">
+            <span class="relative flex-shrink-0">
+              <span class="w-7 h-7 rounded-full bg-brand-100 text-brand-600 text-[10px] flex items-center justify-center font-bold">Y</span>
+              <span class="absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full bg-success-500 border-2 border-white online-dot"></span>
+            </span>
+            <div><div class="text-[12px] font-semibold text-gray-700">You</div><div class="text-[10px] text-gray-400">Product Manager</div></div>
+          </div>
+          <!-- Offline members -->
+          <div class="flex items-center gap-2.5 opacity-50">
+            <span class="relative flex-shrink-0">
+              <span class="w-7 h-7 rounded-full bg-purple-100 text-purple-600 text-[10px] flex items-center justify-center font-bold">L</span>
+              <span class="absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full bg-gray-300 border-2 border-white"></span>
+            </span>
+            <div><div class="text-[12px] font-semibold text-gray-700">Lisa Park</div><div class="text-[10px] text-gray-400">Copywriter</div></div>
+          </div>
+          <div class="flex items-center gap-2.5 opacity-50">
+            <span class="relative flex-shrink-0">
+              <span class="w-7 h-7 rounded-full bg-red-100 text-red-600 text-[10px] flex items-center justify-center font-bold">R</span>
+              <span class="absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full bg-gray-300 border-2 border-white"></span>
+            </span>
+            <div><div class="text-[12px] font-semibold text-gray-700">Rachel Wu</div><div class="text-[10px] text-gray-400">QA Engineer</div></div>
+          </div>
+          <div class="flex items-center gap-2.5 opacity-50">
+            <span class="relative flex-shrink-0">
+              <span class="w-7 h-7 rounded-full bg-teal-100 text-teal-600 text-[10px] flex items-center justify-center font-bold">D</span>
+              <span class="absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full bg-gray-300 border-2 border-white"></span>
+            </span>
+            <div><div class="text-[12px] font-semibold text-gray-700">David Cheng</div><div class="text-[10px] text-gray-400">DevOps</div></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Divider -->
+      <div class="border-t border-gray-50 mx-4 mb-4"></div>
+
+      <!-- Pinned Items -->
+      <div class="px-4 mb-5">
+        <div class="text-[11px] font-bold text-gray-400 uppercase tracking-wider mb-3">Pinned</div>
         <div class="space-y-2">
-          <div class="kanban-card bg-white rounded-lg p-3 border border-gray-100">
-            <div class="flex items-center gap-1 mb-2"><span class="text-[10px] bg-red-100 text-red-600 px-1.5 py-0.5 rounded font-medium">高</span><span class="text-[10px] bg-blue-50 text-blue-500 px-1.5 py-0.5 rounded">前端</span></div>
-            <div class="text-sm font-medium text-gray-700">首頁 Hero 動畫效果</div>
-            <div class="flex items-center justify-between mt-2">
-              <div class="w-5 h-5 rounded-full bg-blue-100 text-blue-600 text-[10px] flex items-center justify-center font-medium">E</div>
-              <span class="text-[10px] text-gray-400">02/18</span>
+          <div class="flex items-start gap-2 p-2 rounded-lg hover:bg-gray-50 transition cursor-pointer">
+            <svg class="w-4 h-4 text-amber-500 flex-shrink-0 mt-0.5" fill="currentColor" viewBox="0 0 24 24"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg>
+            <div>
+              <div class="text-[12px] font-semibold text-gray-700 leading-tight">Sprint Goals v4</div>
+              <div class="text-[10px] text-gray-400">Pinned by Sarah &middot; 3d ago</div>
             </div>
           </div>
-          <div class="kanban-card bg-white rounded-lg p-3 border border-gray-100">
-            <div class="flex items-center gap-1 mb-2"><span class="text-[10px] bg-amber-100 text-amber-600 px-1.5 py-0.5 rounded font-medium">中</span><span class="text-[10px] bg-green-50 text-green-500 px-1.5 py-0.5 rounded">後端</span></div>
-            <div class="text-sm font-medium text-gray-700">API 文檔更新</div>
-            <div class="flex items-center justify-between mt-2">
-              <div class="w-5 h-5 rounded-full bg-green-100 text-green-600 text-[10px] flex items-center justify-center font-medium">W</div>
-              <span class="text-[10px] text-gray-400">02/20</span>
-            </div>
-          </div>
-          <div class="kanban-card bg-white rounded-lg p-3 border border-gray-100">
-            <div class="flex items-center gap-1 mb-2"><span class="text-[10px] bg-gray-100 text-gray-500 px-1.5 py-0.5 rounded font-medium">低</span><span class="text-[10px] bg-purple-50 text-purple-500 px-1.5 py-0.5 rounded">設計</span></div>
-            <div class="text-sm font-medium text-gray-700">Dark Mode 配色方案</div>
-            <div class="flex items-center justify-between mt-2">
-              <div class="w-5 h-5 rounded-full bg-pink-100 text-pink-600 text-[10px] flex items-center justify-center font-medium">L</div>
-              <span class="text-[10px] text-gray-400">02/22</span>
+          <div class="flex items-start gap-2 p-2 rounded-lg hover:bg-gray-50 transition cursor-pointer">
+            <svg class="w-4 h-4 text-amber-500 flex-shrink-0 mt-0.5" fill="currentColor" viewBox="0 0 24 24"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg>
+            <div>
+              <div class="text-[12px] font-semibold text-gray-700 leading-tight">Design System Link</div>
+              <div class="text-[10px] text-gray-400">Pinned by Alex &middot; 1w ago</div>
             </div>
           </div>
         </div>
       </div>
 
-      <!-- In Progress -->
-      <div class="bg-blue-50/50 rounded-xl p-3">
-        <div class="flex items-center justify-between mb-3 px-1">
-          <div class="flex items-center gap-2"><span class="w-2 h-2 rounded-full bg-sync-500"></span><span class="text-sm font-semibold text-gray-600">進行中</span><span class="text-xs text-gray-400 ml-1">3</span></div>
-        </div>
+      <!-- Divider -->
+      <div class="border-t border-gray-50 mx-4 mb-4"></div>
+
+      <!-- Recent Files -->
+      <div class="px-4">
+        <div class="text-[11px] font-bold text-gray-400 uppercase tracking-wider mb-3">Recent Files</div>
         <div class="space-y-2">
-          <div class="kanban-card bg-white rounded-lg p-3 border border-blue-100">
-            <div class="flex items-center gap-1 mb-2"><span class="text-[10px] bg-red-100 text-red-600 px-1.5 py-0.5 rounded font-medium">高</span><span class="text-[10px] bg-blue-50 text-blue-500 px-1.5 py-0.5 rounded">前端</span></div>
-            <div class="text-sm font-medium text-gray-700">商品列表元件重構</div>
-            <div class="w-full h-1 bg-gray-100 rounded-full mt-2 mb-1"><div class="h-full w-3/5 bg-sync-500 rounded-full"></div></div>
-            <div class="flex items-center justify-between">
-              <div class="w-5 h-5 rounded-full bg-blue-100 text-blue-600 text-[10px] flex items-center justify-center font-medium">E</div>
-              <span class="text-[10px] text-gray-400">60%</span>
+          <div class="flex items-center gap-2.5 p-2 rounded-lg hover:bg-gray-50 transition cursor-pointer">
+            <svg class="w-4 h-4 text-brand-500 flex-shrink-0" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><path d="M14 2v6h6"/></svg>
+            <div class="min-w-0">
+              <div class="text-[12px] font-semibold text-gray-700 truncate">Q1_report.pdf</div>
+              <div class="text-[10px] text-gray-400">Mike &middot; 15m ago</div>
             </div>
           </div>
-          <div class="kanban-card bg-white rounded-lg p-3 border border-blue-100">
-            <div class="flex items-center gap-1 mb-2"><span class="text-[10px] bg-red-100 text-red-600 px-1.5 py-0.5 rounded font-medium">高</span><span class="text-[10px] bg-green-50 text-green-500 px-1.5 py-0.5 rounded">後端</span></div>
-            <div class="text-sm font-medium text-gray-700">搜尋功能 Elasticsearch</div>
-            <div class="w-full h-1 bg-gray-100 rounded-full mt-2 mb-1"><div class="h-full w-2/5 bg-sync-500 rounded-full"></div></div>
-            <div class="flex items-center justify-between">
-              <div class="w-5 h-5 rounded-full bg-green-100 text-green-600 text-[10px] flex items-center justify-center font-medium">W</div>
-              <span class="text-[10px] text-gray-400">40%</span>
+          <div class="flex items-center gap-2.5 p-2 rounded-lg hover:bg-gray-50 transition cursor-pointer">
+            <svg class="w-4 h-4 text-purple-500 flex-shrink-0" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg>
+            <div class="min-w-0">
+              <div class="text-[12px] font-semibold text-gray-700 truncate">homepage-v3.fig</div>
+              <div class="text-[10px] text-gray-400">Sarah &middot; 1h ago</div>
             </div>
           </div>
-        </div>
-      </div>
-
-      <!-- Review -->
-      <div class="bg-amber-50/50 rounded-xl p-3">
-        <div class="flex items-center justify-between mb-3 px-1">
-          <div class="flex items-center gap-2"><span class="w-2 h-2 rounded-full bg-amber-500"></span><span class="text-sm font-semibold text-gray-600">審查中</span><span class="text-xs text-gray-400 ml-1">2</span></div>
-        </div>
-        <div class="space-y-2">
-          <div class="kanban-card bg-white rounded-lg p-3 border border-amber-100">
-            <div class="flex items-center gap-1 mb-2"><span class="text-[10px] bg-amber-100 text-amber-600 px-1.5 py-0.5 rounded font-medium">中</span><span class="text-[10px] bg-blue-50 text-blue-500 px-1.5 py-0.5 rounded">前端</span></div>
-            <div class="text-sm font-medium text-gray-700">RWD 斷點修正</div>
-            <div class="flex items-center justify-between mt-2">
-              <div class="w-5 h-5 rounded-full bg-pink-100 text-pink-600 text-[10px] flex items-center justify-center font-medium">L</div>
-              <span class="text-[10px] text-amber-500">等待 Review</span>
-            </div>
-          </div>
-          <div class="kanban-card bg-white rounded-lg p-3 border border-amber-100">
-            <div class="flex items-center gap-1 mb-2"><span class="text-[10px] bg-red-100 text-red-600 px-1.5 py-0.5 rounded font-medium">高</span><span class="text-[10px] bg-purple-50 text-purple-500 px-1.5 py-0.5 rounded">設計</span></div>
-            <div class="text-sm font-medium text-gray-700">結帳流程 UX 優化</div>
-            <div class="flex items-center justify-between mt-2">
-              <div class="w-5 h-5 rounded-full bg-pink-100 text-pink-600 text-[10px] flex items-center justify-center font-medium">L</div>
-              <span class="text-[10px] text-amber-500">2 筆評論</span>
+          <div class="flex items-center gap-2.5 p-2 rounded-lg hover:bg-gray-50 transition cursor-pointer">
+            <svg class="w-4 h-4 text-green-500 flex-shrink-0" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><path d="M14 2v6h6M8 13h2v4H8z M14 11h2v6h-2z"/></svg>
+            <div class="min-w-0">
+              <div class="text-[12px] font-semibold text-gray-700 truncate">metrics-feb.xlsx</div>
+              <div class="text-[10px] text-gray-400">Jordan &middot; 4h ago</div>
             </div>
           </div>
         </div>
       </div>
-
-      <!-- Done -->
-      <div class="bg-green-50/50 rounded-xl p-3">
-        <div class="flex items-center justify-between mb-3 px-1">
-          <div class="flex items-center gap-2"><span class="w-2 h-2 rounded-full bg-mint-500"></span><span class="text-sm font-semibold text-gray-600">完成</span><span class="text-xs text-gray-400 ml-1">5</span></div>
-        </div>
-        <div class="space-y-2">
-          <div class="kanban-card bg-white rounded-lg p-3 border border-green-100 opacity-70">
-            <div class="text-sm font-medium text-gray-500 line-through">登入頁面改版</div>
-            <div class="flex items-center justify-between mt-2">
-              <div class="w-5 h-5 rounded-full bg-blue-100 text-blue-600 text-[10px] flex items-center justify-center font-medium">E</div>
-              <span class="text-[10px] text-mint-500">✓ 02/14</span>
-            </div>
-          </div>
-          <div class="kanban-card bg-white rounded-lg p-3 border border-green-100 opacity-70">
-            <div class="text-sm font-medium text-gray-500 line-through">SEO Meta Tags</div>
-            <div class="flex items-center justify-between mt-2">
-              <div class="w-5 h-5 rounded-full bg-green-100 text-green-600 text-[10px] flex items-center justify-center font-medium">W</div>
-              <span class="text-[10px] text-mint-500">✓ 02/13</span>
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
+    </aside>
   </div>
-
-  <!-- Timeline Page -->
-  <div id="page-timeline" class="page hidden p-6">
-    <h1 class="text-xl font-bold text-gray-800 mb-6">甘特圖</h1>
-    <div class="bg-white rounded-xl border border-gray-100 p-5">
-      <div class="flex items-center gap-4 mb-4 text-xs text-gray-400">
-        <span class="w-32 font-medium text-gray-600">任務</span>
-        <div class="flex-1 grid grid-cols-14 gap-0">
-          <span>10</span><span>11</span><span>12</span><span>13</span><span>14</span><span>15</span><span>16</span><span>17</span><span>18</span><span>19</span><span>20</span><span>21</span><span>22</span><span>23</span>
-        </div>
-      </div>
-      <div class="space-y-3">
-        <div class="flex items-center gap-4"><span class="w-32 text-sm text-gray-600 truncate">登入頁面改版</span><div class="flex-1 h-6 relative"><div class="absolute left-0 h-full bg-mint-500/20 border border-mint-500/40 rounded" style="width:28%;left:0"></div></div></div>
-        <div class="flex items-center gap-4"><span class="w-32 text-sm text-gray-600 truncate">SEO Meta Tags</span><div class="flex-1 h-6 relative"><div class="absolute h-full bg-mint-500/20 border border-mint-500/40 rounded" style="width:21%;left:7%"></div></div></div>
-        <div class="flex items-center gap-4"><span class="w-32 text-sm text-gray-600 truncate">商品列表重構</span><div class="flex-1 h-6 relative"><div class="absolute h-full bg-sync-500/20 border border-sync-500/40 rounded" style="width:42%;left:14%"></div></div></div>
-        <div class="flex items-center gap-4"><span class="w-32 text-sm text-gray-600 truncate">搜尋 ES 整合</span><div class="flex-1 h-6 relative"><div class="absolute h-full bg-sync-500/20 border border-sync-500/40 rounded" style="width:35%;left:21%"></div></div></div>
-        <div class="flex items-center gap-4"><span class="w-32 text-sm text-gray-600 truncate">RWD 斷點修正</span><div class="flex-1 h-6 relative"><div class="absolute h-full bg-amber-400/20 border border-amber-400/40 rounded" style="width:28%;left:28%"></div></div></div>
-        <div class="flex items-center gap-4"><span class="w-32 text-sm text-gray-600 truncate">Hero 動畫效果</span><div class="flex-1 h-6 relative"><div class="absolute h-full bg-gray-300/30 border border-gray-300 rounded border-dashed" style="width:21%;left:57%"></div></div></div>
-      </div>
-    </div>
-  </div>
-
-  <!-- Files Page -->
-  <div id="page-files" class="page hidden p-6">
-    <h1 class="text-xl font-bold text-gray-800 mb-6">共享文件</h1>
-    <div class="grid grid-cols-4 gap-4">
-      <div class="bg-white rounded-xl p-4 border border-gray-100 hover:border-sync-200 transition cursor-pointer text-center">
-        <div class="text-4xl mb-2">📄</div>
-        <div class="text-sm font-medium text-gray-700 truncate">PRD 需求文件.pdf</div>
-        <div class="text-xs text-gray-400 mt-1">Eric · 2 天前</div>
-      </div>
-      <div class="bg-white rounded-xl p-4 border border-gray-100 hover:border-sync-200 transition cursor-pointer text-center">
-        <div class="text-4xl mb-2">🎨</div>
-        <div class="text-sm font-medium text-gray-700 truncate">UI 設計稿.fig</div>
-        <div class="text-xs text-gray-400 mt-1">Lisa · 3 天前</div>
-      </div>
-      <div class="bg-white rounded-xl p-4 border border-gray-100 hover:border-sync-200 transition cursor-pointer text-center">
-        <div class="text-4xl mb-2">📊</div>
-        <div class="text-sm font-medium text-gray-700 truncate">Sprint 回顧.xlsx</div>
-        <div class="text-xs text-gray-400 mt-1">Wang · 1 天前</div>
-      </div>
-      <div class="bg-white rounded-xl p-4 border border-gray-100 hover:border-sync-200 transition cursor-pointer text-center">
-        <div class="text-4xl mb-2">📝</div>
-        <div class="text-sm font-medium text-gray-700 truncate">API 文件.md</div>
-        <div class="text-xs text-gray-400 mt-1">Wang · 5 小時前</div>
-      </div>
-    </div>
-  </div>
-
-  <!-- Chat Page -->
-  <div id="page-chat" class="page hidden p-6">
-    <h1 class="text-xl font-bold text-gray-800 mb-6">團隊聊天</h1>
-    <div class="bg-white rounded-xl border border-gray-100 h-[500px] flex flex-col">
-      <div class="flex-1 p-4 space-y-4 overflow-auto">
-        <div class="flex gap-3"><div class="w-7 h-7 rounded-full bg-pink-100 text-pink-600 text-xs flex items-center justify-center font-medium flex-shrink-0">L</div><div><div class="text-xs text-gray-400">Lisa · 10:32</div><div class="bg-gray-50 rounded-lg rounded-tl-none px-3 py-2 text-sm text-gray-700 mt-1 max-w-md">結帳流程的 UX 稿已經更新了，大家看看有沒有問題 🎨</div></div></div>
-        <div class="flex gap-3"><div class="w-7 h-7 rounded-full bg-green-100 text-green-600 text-xs flex items-center justify-center font-medium flex-shrink-0">W</div><div><div class="text-xs text-gray-400">Wang · 10:45</div><div class="bg-gray-50 rounded-lg rounded-tl-none px-3 py-2 text-sm text-gray-700 mt-1 max-w-md">收到，搜尋 API 那邊 Elasticsearch 的 mapping 已經設定好了，今天會完成 indexing 邏輯</div></div></div>
-        <div class="flex gap-3 justify-end"><div class="text-right"><div class="text-xs text-gray-400">Eric · 11:02</div><div class="bg-sync-500 text-white rounded-lg rounded-tr-none px-3 py-2 text-sm mt-1 max-w-md">太好了！我這邊商品列表元件快完成了，預計今天下午可以 PR</div></div><div class="w-7 h-7 rounded-full bg-blue-100 text-blue-600 text-xs flex items-center justify-center font-medium flex-shrink-0">E</div></div>
-      </div>
-      <div class="border-t border-gray-100 p-3 flex gap-2">
-        <input type="text" placeholder="輸入訊息..." class="flex-1 text-sm bg-gray-50 rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-sync-300">
-        <button class="bg-sync-500 hover:bg-sync-600 text-white px-4 py-2 rounded-lg text-sm font-medium transition">發送</button>
-      </div>
-    </div>
-  </div>
-</main>
+</div>
 
 <script>
-function switchPage(page) {
-  document.querySelectorAll('.page').forEach(p => p.classList.add('hidden'));
-  document.getElementById('page-' + page).classList.remove('hidden');
-  document.querySelectorAll('.sidebar-item').forEach(item => {
+// Channel selection
+function selectChannel(el) {
+  document.querySelectorAll('.channel-item').forEach(function(item) {
     item.classList.remove('active');
-    item.classList.add('text-gray-500');
   });
-  event.currentTarget.classList.add('active');
-  event.currentTarget.classList.remove('text-gray-500');
+  el.classList.add('active');
+  var channelName = el.getAttribute('data-channel') || el.textContent.trim();
+  var headerLabel = document.querySelector('header .text-\\[13px\\].font-bold');
+  if (headerLabel && el.getAttribute('data-channel')) {
+    headerLabel.textContent = '# ' + el.getAttribute('data-channel');
+  }
+}
+
+// Reaction toggle
+function toggleReaction(btn) {
+  btn.classList.toggle('reacted');
+  if (btn.classList.contains('reacted')) {
+    var count = btn.getAttribute('data-count');
+    if (!count) {
+      btn.setAttribute('data-count', '1');
+      btn.innerHTML = btn.innerHTML.trim() + ' <span class="text-[10px] text-gray-500">1</span>';
+    }
+  } else {
+    var span = btn.querySelector('span');
+    if (span) span.remove();
+    btn.removeAttribute('data-count');
+  }
+}
+
+// Notification toggle
+function toggleNotifications() {
+  var badge = document.querySelector('.badge-notify');
+  if (badge) {
+    badge.style.display = badge.style.display === 'none' ? 'flex' : 'none';
+  }
+}
+
+// Message input focus effect
+var messageInput = document.getElementById('message-input');
+if (messageInput) {
+  messageInput.addEventListener('keydown', function(e) {
+    if (e.key === 'Enter' && this.value.trim()) {
+      addFeedEntry(this.value.trim());
+      this.value = '';
+    }
+  });
+}
+
+// Send button
+var sendBtn = document.getElementById('send-btn');
+if (sendBtn) {
+  sendBtn.addEventListener('click', function() {
+    var input = document.getElementById('message-input');
+    if (input && input.value.trim()) {
+      addFeedEntry(input.value.trim());
+      input.value = '';
+    }
+  });
+}
+
+// Add new feed entry
+function addFeedEntry(text) {
+  var feed = document.getElementById('activity-feed');
+  var typing = document.getElementById('typing-indicator');
+  var entry = document.createElement('div');
+  entry.className = 'feed-entry flex items-start gap-3 px-3 py-3 rounded-lg group';
+  entry.innerHTML = '<div class="w-9 h-9 rounded-full bg-brand-100 text-brand-600 text-sm flex items-center justify-center font-bold flex-shrink-0">Y</div>' +
+    '<div class="flex-1 min-w-0">' +
+    '<div class="flex items-center gap-2"><span class="text-[13px] font-bold text-gray-800">You</span><span class="text-[13px] text-gray-500">posted</span></div>' +
+    '<div class="mt-1 text-[13px] text-gray-700">' + text + '</div>' +
+    '<div class="text-[11px] text-gray-400 mt-0.5">Just now</div>' +
+    '</div>';
+  feed.insertBefore(entry, typing);
+  entry.scrollIntoView({ behavior: 'smooth', block: 'end' });
+}
+
+// Search input filter
+var searchInput = document.getElementById('search-input');
+if (searchInput) {
+  searchInput.addEventListener('input', function() {
+    var query = this.value.toLowerCase();
+    document.querySelectorAll('.feed-entry').forEach(function(entry) {
+      var text = entry.textContent.toLowerCase();
+      entry.style.display = text.includes(query) ? '' : 'none';
+    });
+  });
 }
 </script>
 </body>
 </html>
-  $HTML$,
-  1
+$HTML$,
+  3
 )
 ON CONFLICT (template_id) DO UPDATE SET
   html_content = EXCLUDED.html_content,
-  version = template_previews.version + 1,
+  version = EXCLUDED.version,
   updated_at = NOW();
