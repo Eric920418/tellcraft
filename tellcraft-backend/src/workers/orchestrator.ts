@@ -105,6 +105,30 @@ function hasUndoIntent(msg: string): boolean {
   return ['撤銷', 'undo', '復原', '上一步', '還原修改'].some(k => msg.includes(k))
 }
 
+function hasGoBackIntent(msg: string): boolean {
+  // 排除「返回修改」（deployer_failed 已有專門處理）
+  if (msg.includes('返回修改') || msg.includes('回去修改')) return false
+  const keywords = ['返回', '回去', '上一步', '重新選擇', '重選', '重來', '回到上一步', 'go back']
+  return keywords.some(k => msg.includes(k))
+}
+
+// ── 回退映射表：當前 phase → 回退目標 phase ──
+const PHASE_BACKTRACK_MAP: Record<string, string> = {
+  'uiux_design_clarify':       'uiux_design_preference',
+  'uiux_template_selection':   'uiux_design_preference',
+  'uiux_design_brief_confirm': 'uiux_design_preference',
+  'uiux_variant_selection':    'uiux_design_brief_confirm',
+}
+
+// ── Phase 中文標籤 ──
+const PHASE_LABELS: Record<string, string> = {
+  'uiux_design_preference':    '設計偏好選擇',
+  'uiux_design_clarify':       '設計問卷',
+  'uiux_template_selection':   '模板選擇',
+  'uiux_design_brief_confirm': '設計方向確認',
+  'uiux_variant_selection':    '方案選擇',
+}
+
 // ============================================================
 // Meta Intent 模板回覆（零 LLM Token 成本）
 // ============================================================
@@ -379,6 +403,126 @@ async function handleProcessMessage(
 }
 
 // ============================================================
+// 回退 + 錯誤恢復
+// ============================================================
+
+async function resendDesignPreference(conversationId: string, state: FlowState, io: SocketIOServer) {
+  const matchedCount = state.matchedTemplateIds?.length || 0
+  if (matchedCount > 0) {
+    await sendMessage(conversationId, io, {
+      content: `已返回重新選擇。\n\n你對產品的外觀有什麼想法嗎？\n\n**A.** 我有一些想法，想跟你討論\n\n**B.** 沒有特別的想法，給我看看模板（${matchedCount} 個推薦）`,
+      stage: 'uiux_design_preference',
+      quickReplies: [
+        { label: '我有想法，想跟你討論', value: 'A', style: 'primary' },
+        { label: `使用模板（${matchedCount}個推薦）`, value: 'B', style: 'secondary' },
+      ],
+    })
+  } else {
+    await sendMessage(conversationId, io, {
+      content: `已返回。讓我們重新討論你想要的設計風格吧！`,
+      stage: 'uiux_design_preference',
+      quickReplies: [
+        { label: '開始設計', value: 'A', style: 'primary' },
+      ],
+    })
+  }
+}
+
+async function resendDesignBriefConfirm(conversationId: string, state: FlowState, io: SocketIOServer) {
+  if (!state.uiuxDesignBrief) {
+    // brief 不存在（不應發生），降級回偏好選擇
+    state.phase = 'uiux_design_preference'
+    await resendDesignPreference(conversationId, state, io)
+    return
+  }
+  const brief = state.uiuxDesignBrief
+  const tierLabel = brief.recommendedTier === 'creative' ? '創意型' : '功能型'
+  await sendMessage(conversationId, io, {
+    content: `已返回設計方向確認。\n\n**設計模式**：${tierLabel}\n**風格定位**：${brief.styleSummary}\n**色彩方向**：${brief.colorDirection}\n**佈局建議**：${brief.layoutSuggestion}\n\n確認這個方向開始生成？或告訴我想調整的部分。`,
+    stage: 'uiux_design_brief_confirm',
+    quickReplies: [
+      { label: '確認，開始生成', value: '確認', style: 'primary' },
+      { label: '我想調整', value: '我想調整', style: 'secondary' },
+      { label: '← 重新選擇設計方向', value: '__go_back__', style: 'ghost' },
+    ],
+  })
+}
+
+async function handleGoBack(
+  conversationId: string,
+  state: FlowState,
+  redis: Redis,
+  io: SocketIOServer
+): Promise<boolean> {
+  const targetPhase = PHASE_BACKTRACK_MAP[state.phase]
+  if (!targetPhase) return false
+
+  console.log(`[Orchestrator] 回退: ${state.phase} → ${targetPhase}`)
+
+  // 根據目標 phase 清理下游欄位
+  if (targetPhase === 'uiux_design_preference') {
+    state.uiuxDesignClarifyStep = undefined
+    state.uiuxDesignIdeas = undefined
+    state.uiuxDesignBrief = undefined
+    state.uiuxDesignBriefRound = undefined
+    state.uiuxDesignBriefHistory = undefined
+    state.uiuxDesignTier = undefined
+    state.uiuxPreparedTemplate = undefined
+    state.uiuxVariants = undefined
+    state.uiuxVariantConcept = undefined
+    state.uiuxTemplateId = undefined
+  } else if (targetPhase === 'uiux_design_brief_confirm') {
+    // 保留 brief，只清除變體
+    state.uiuxVariants = undefined
+    state.uiuxVariantConcept = undefined
+  }
+
+  state.phase = targetPhase
+  state.waitingForReply = true
+  await saveFlowState(redis, conversationId, state)
+
+  // 重新發送目標 phase 的選項消息
+  if (targetPhase === 'uiux_design_preference') {
+    await resendDesignPreference(conversationId, state, io)
+  } else if (targetPhase === 'uiux_design_brief_confirm') {
+    await resendDesignBriefConfirm(conversationId, state, io)
+  }
+
+  return true
+}
+
+async function handlePhaseError(
+  conversationId: string,
+  state: FlowState,
+  error: unknown,
+  redis: Redis,
+  io: SocketIOServer
+) {
+  const errorMsg = error instanceof Error ? error.message : String(error)
+  console.error(`[Orchestrator] Phase handler 錯誤 (phase=${state.phase}):`, errorMsg)
+
+  const targetPhase = PHASE_BACKTRACK_MAP[state.phase]
+  const targetLabel = targetPhase ? PHASE_LABELS[targetPhase] : null
+
+  const quickReplies: { label: string; value: string; style: 'primary' | 'secondary' | 'ghost' }[] = [
+    { label: '重試', value: '__retry__', style: 'primary' },
+  ]
+  if (targetLabel) {
+    quickReplies.push({ label: `← 返回${targetLabel}`, value: '__go_back__', style: 'ghost' })
+  }
+
+  await sendMessage(conversationId, io, {
+    content: `處理時發生錯誤：${errorMsg}\n\n你可以重新輸入回覆來重試，或點擊下方按鈕。`,
+    stage: 'error',
+    quickReplies,
+  })
+
+  // 保持當前 phase 不變，設為等待回覆
+  state.waitingForReply = true
+  await saveFlowState(redis, conversationId, state)
+}
+
+// ============================================================
 // 處理用戶回覆（繼續流程）
 // ============================================================
 
@@ -417,21 +561,53 @@ async function handleContinueFlow(
     state.userId = userId
   }
 
+  // ── 通用回退/重試檢測（在所有 phase 路由之前）──
+  const trimmedMsg = message.trim()
+  if (
+    (hasGoBackIntent(trimmedMsg) || trimmedMsg === '__go_back__') &&
+    PHASE_BACKTRACK_MAP[state.phase]
+  ) {
+    const handled = await handleGoBack(conversationId, state, redis, io)
+    if (handled) return
+  }
+  if (trimmedMsg === '__retry__') {
+    // 重試 = 提示用戶重新輸入，保持當前 phase
+    state.waitingForReply = true
+    await saveFlowState(redis, conversationId, state)
+    await sendMessage(conversationId, io, {
+      content: '請重新輸入你的回覆。',
+      stage: state.phase,
+    })
+    return
+  }
+
   // 處理設計偏好回覆（A = 有想法，B = 沒想法看模板）
   if (state.phase === 'uiux_design_preference') {
-    await handleDesignPreferenceReply(conversationId, state, message, redis, io)
+    try {
+      await handleDesignPreferenceReply(conversationId, state, message, redis, io)
+    } catch (err) {
+      await handlePhaseError(conversationId, state, err, redis, io)
+    }
     return
   }
 
   // 處理設計釐清階段
   if (state.phase === 'uiux_design_clarify') {
-    await handleDesignClarifyReply(conversationId, state, message, redis, io)
+    try {
+      await handleDesignClarifyReply(conversationId, state, message, redis, io)
+    } catch (err) {
+      await handlePhaseError(conversationId, state, err, redis, io)
+    }
     return
   }
 
   // 處理 Design Brief 確認階段
   if (state.phase === 'uiux_design_brief_confirm') {
-    await handleDesignBriefReply(conversationId, state, message, redis, io)
+    try {
+      await handleDesignBriefReply(conversationId, state, message, redis, io)
+    } catch (err) {
+      await handlePhaseError(conversationId, state, err, redis, io)
+    }
     return
   }
 
@@ -675,7 +851,11 @@ async function handleContinueFlow(
 
     // 檢查是否是模板選擇訊息
     if (message.includes('我選擇') && message.includes('模板')) {
-      await handleTemplateSelection(conversationId, state, message, redis, io)
+      try {
+        await handleTemplateSelection(conversationId, state, message, redis, io)
+      } catch (err) {
+        await handlePhaseError(conversationId, state, err, redis, io)
+      }
       return
     }
 
@@ -688,13 +868,21 @@ async function handleContinueFlow(
       normalizedMsg.match(/我選\s*[A-E]/i) ||
       normalizedMsg.match(/^[A-E]$/i)
     ) {
-      await handleVariantSelection(conversationId, state, normalizedMsg, redis, io)
+      try {
+        await handleVariantSelection(conversationId, state, normalizedMsg, redis, io)
+      } catch (err) {
+        await handlePhaseError(conversationId, state, err, redis, io)
+      }
       return
     }
 
     // variant_selection 階段：任何包含 A-E 的訊息都嘗試路由
     if (state.phase === 'uiux_variant_selection' && normalizedMsg.match(/[A-E]/i)) {
-      await handleVariantSelection(conversationId, state, normalizedMsg, redis, io)
+      try {
+        await handleVariantSelection(conversationId, state, normalizedMsg, redis, io)
+      } catch (err) {
+        await handlePhaseError(conversationId, state, err, redis, io)
+      }
       return
     }
 
@@ -1888,6 +2076,7 @@ async function completeSpecPhase(
 
   // 更新狀態為等待設計偏好回覆
   state.phase = 'uiux_design_preference'
+  state.lastStablePhase = 'uiux_design_preference'
   state.waitingForReply = true
   await saveFlowState(redis, conversationId, state)
 
@@ -3216,10 +3405,14 @@ async function startDesignClarify(
   await sendMessage(conversationId, io, {
     content: `很好！讓我來了解你的設計想法。\n\n首先，請告訴我：\n\n**你希望產品給用戶什麼樣的感覺？**\n\n_例如：專業可靠、活潑有趣、簡約現代、溫暖親切..._`,
     stage: 'uiux_design_clarify',
+    quickReplies: [
+      { label: '← 返回重選', value: '__go_back__', style: 'ghost' },
+    ],
   })
 
   // 初始化設計釐清狀態
   state.phase = 'uiux_design_clarify'
+  state.lastStablePhase = 'uiux_design_clarify'
   state.uiuxDesignClarifyStep = 1
   state.uiuxDesignIdeas = []
   state.waitingForReply = true
@@ -3244,6 +3437,9 @@ async function startDesignClarifyWithInitialIdea(
   await sendMessage(conversationId, io, {
     content: `收到！「${initialIdea}」\n\n接下來，請告訴我：\n\n**你有沒有喜歡的網站或 App 可以參考？**\n\n_可以提供名稱或網址，例如：Notion、Stripe、Apple..._`,
     stage: 'uiux_design_clarify',
+    quickReplies: [
+      { label: '← 返回重選', value: '__go_back__', style: 'ghost' },
+    ],
   })
 
   state.waitingForReply = true
@@ -3306,6 +3502,9 @@ async function handleDesignClarifyReply(
     await sendMessage(conversationId, io, {
       content: `好的，收到！\n\n**${nextQuestion.question}**\n\n_${nextQuestion.hint}_`,
       stage: 'uiux_design_clarify',
+      quickReplies: [
+        { label: '← 重來', value: '__go_back__', style: 'ghost' },
+      ],
     })
 
     state.uiuxDesignClarifyStep = step + 1
@@ -3439,6 +3638,7 @@ async function startDesignBriefConfirm(
     { role: 'assistant', content: briefResult.displayText || '' },
   ]
   state.phase = 'uiux_design_brief_confirm'
+  state.lastStablePhase = 'uiux_design_brief_confirm'
   state.waitingForReply = true
   await saveFlowState(redis, conversationId, state)
 
@@ -3470,6 +3670,7 @@ ${brief.professionalRecommendations.map(r => `- ${r}`).join('\n')}`
     quickReplies: [
       { label: '確認，開始生成', value: '確認', style: 'primary' },
       { label: '我想調整', value: '我想調整', style: 'secondary' },
+      { label: '← 重新選擇設計方向', value: '__go_back__', style: 'ghost' },
     ],
   })
 
@@ -3582,6 +3783,10 @@ ${brief.professionalRecommendations.map(r => `- ${r}`).join('\n')}`
   await sendMessage(conversationId, io, {
     content: `${displayText}${promptSuffix}`,
     stage: 'uiux_design_brief_confirm',
+    quickReplies: [
+      { label: '確認，開始生成', value: '確認', style: 'primary' },
+      { label: '← 重新選擇設計方向', value: '__go_back__', style: 'ghost' },
+    ],
   })
 
   console.log(`[Orchestrator] Design Brief 已調整（第 ${round + 1} 輪）`)
@@ -3709,6 +3914,7 @@ async function proceedToVariantGeneration(
 
   // 更新狀態
   state.phase = 'uiux_variant_selection'
+  state.lastStablePhase = 'uiux_variant_selection'
   state.uiuxVariants = variants
   state.waitingForReply = true
   await saveFlowState(redis, conversationId, state)
@@ -3723,11 +3929,12 @@ async function proceedToVariantGeneration(
     : '以下是 5 種不同的設計方案，各有不同的切入角度'
 
   // 發送變體選擇訊息
-  const variantReplies = variants.map(v => ({
+  const variantReplies: { label: string; value: string; style: 'primary' | 'secondary' | 'ghost' }[] = variants.map(v => ({
     label: `選擇 ${v.id}`,
     value: `選擇 ${v.id}`,
     style: 'ghost' as const,
   }))
+  variantReplies.push({ label: '← 返回設計方向', value: '__go_back__', style: 'ghost' })
   await sendMessage(conversationId, io, {
     content: `${prefix}！\n\n${variantDescriptions}\n\n請選擇你喜歡的方向：\n- 輸入「選擇 A」直接使用某個方案\n- 輸入「合併 A+C」組合多個方案的特點`,
     stage: 'uiux_variants_ready',
@@ -3832,9 +4039,13 @@ async function showTemplatePicker(
         filteredMode,
       },
     },
+    quickReplies: [
+      { label: '← 返回', value: '__go_back__', style: 'ghost' },
+    ],
   })
 
   state.phase = 'uiux_template_selection'
+  state.lastStablePhase = 'uiux_template_selection'
   state.waitingForReply = false
   await saveFlowState(redis, conversationId, state)
 }

@@ -194,6 +194,11 @@ sanitizeCodeForDeploy（6 類自動修復）
 
 新增 migration 後在 VPS 執行：`psql "$DATABASE_URL" -f tellcraft-backend/migrations/xxx.sql`
 
+### CI/CD
+
+- **VPS 後端自動部署**：push 到 `main` 分支 → GitHub Actions SSH 到 VPS → `git reset --hard origin/main` → `pnpm install --frozen-lockfile` → `pnpm build` → `pm2 restart tellcraft-backend`（`.github/workflows/deploy-vps.yml`）
+- **前端自動部署**：push 到 `main` → Vercel 自動偵測 Next.js 並部署
+
 ## BDD 規格格式（sdd.os ISA）
 
 | 步驟類型 | 格式 |

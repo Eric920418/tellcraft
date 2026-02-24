@@ -89,4 +89,6 @@ export interface FlowState {
   matchedTemplateIds?: string[] // 匹配的模板 ID（分數排序）
   // 用戶 ID（供內部函數取得 trackingContext）
   userId?: string
+  // 回退機制
+  lastStablePhase?: string     // 上一個穩定決策點的 phase（用於錯誤恢復）
 }

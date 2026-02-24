@@ -12,10 +12,28 @@ Tellcraft 是一個 AI 驅動的自動化開發平台。用戶只需描述需求
 
 ## 當前開發進度
 
-- **狀態**：✅ Phase 1-9 + Server Actions + VPS Backend + 前端 Chat 串接 + 認證系統 + 訪客體驗改善 + 儀表板系統 + BDD Spec 完整修復 + 專案版本管理 + **UIUX 生成邏輯重構** + **Design Tier** + **專案自動命名** + **PreviewPanel iframe 重構** + **Quality Gate 品質檢查** + **Code Preview 即時渲染** + **串流實時預覽** + **BDD→UI 翻譯 + Variant 創意概念** + **Fast Mode 快速建站** + **智能模板匹配** + **Fast Build 藍圖進度** + **BDD Q&A 3D 蓋房子動畫**
+- **狀態**：✅ Phase 1-9 + Server Actions + VPS Backend + 前端 Chat 串接 + 認證系統 + 訪客體驗改善 + 儀表板系統 + BDD Spec 完整修復 + 專案版本管理 + **UIUX 生成邏輯重構** + **Design Tier** + **專案自動命名** + **PreviewPanel iframe 重構** + **Quality Gate 品質檢查** + **Code Preview 即時渲染** + **串流實時預覽** + **BDD→UI 翻譯 + Variant 創意概念** + **Fast Mode 快速建站** + **智能模板匹配** + **Fast Build 藍圖進度** + **BDD Q&A 3D 蓋房子動畫** + **對話回退 + 錯誤恢復**
 - **釐清項目**：28 項全部解決
 - **Server Actions**：30+ 已實作
 - **詳情**：[`.clarify/overview.md`](.clarify/overview.md)
+
+### 對話回退 + 錯誤恢復（2026-02-24）
+
+解決 UIUX 設計流程中「點錯無法回頭」和「錯誤後卡死」兩個問題。
+
+**決策點回退**：
+- `PHASE_BACKTRACK_MAP`：定義 4 條回退路徑（design_clarify/template_selection/brief_confirm → design_preference，variant_selection → brief_confirm）
+- `handleGoBack()`：通用回退函數，清理下游 FlowState 欄位 + 重發目標 phase 選項消息
+- `hasGoBackIntent()`：關鍵字檢測（返回/重選/重來/go back，排除「返回修改」）
+- 所有設計階段消息末尾追加 ghost 樣式「← 返回」quickReply 按鈕
+- `__go_back__` 特殊值由 `handleContinueFlow` 入口統一攔截
+
+**錯誤恢復**：
+- 5 個 phase handler（design_preference/design_clarify/brief_confirm/template_selection/variant_selection）包 try-catch
+- `handlePhaseError()`：捕獲後顯示錯誤訊息 + 「重試」/「返回」按鈕，保持當前 phase 不變
+- `__retry__` 特殊值提示用戶重新輸入
+
+**FlowState 新欄位**：`lastStablePhase`（記錄穩定決策點，供未來擴展）
 
 ### Fast Build 藍圖進度 + BDD Q&A 3D 蓋房子動畫（2026-02-24）
 
