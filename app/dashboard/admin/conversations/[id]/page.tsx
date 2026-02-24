@@ -347,7 +347,12 @@ export default function AdminConversationViewerPage() {
   // ============================================================
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: 'calc(100vh - 64px)' }}>
+    <div style={{
+      display: 'flex', flexDirection: 'column',
+      height: 'calc(100vh)',
+      margin: -32,
+      overflow: 'hidden',
+    }}>
       {/* Admin Banner */}
       <div style={{
         padding: '10px 20px',
@@ -412,6 +417,7 @@ export default function AdminConversationViewerPage() {
           display: 'flex', flexDirection: 'column',
           borderRight: needsSplitLayout ? '1px solid var(--border-color)' : 'none',
           overflow: 'hidden',
+          minWidth: 0,
         }}>
           <div style={{
             flex: 1, overflow: 'auto', padding: '24px 20px',
@@ -463,6 +469,9 @@ export default function AdminConversationViewerPage() {
                         borderColor: message.role === 'user' ? 'var(--black)' : 'var(--border-color)',
                         maxWidth: '90%',
                         fontSize: 14, lineHeight: 1.75,
+                        overflowWrap: 'break-word',
+                        wordBreak: 'break-word',
+                        overflow: 'hidden',
                       }}>
                         {message.role === 'user' ? (
                           <span style={{ whiteSpace: 'pre-wrap' }}>{message.content}</span>
@@ -606,7 +615,7 @@ export default function AdminConversationViewerPage() {
 
         {/* Preview Panel（有預覽內容時顯示） */}
         {needsSplitLayout && (
-          <div style={{ flex: '0 0 55%', overflow: 'hidden' }}>
+          <div style={{ flex: '0 0 55%', overflow: 'hidden', minWidth: 0 }}>
             {renderPreviewPanel()}
           </div>
         )}
