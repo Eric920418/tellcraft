@@ -12,10 +12,25 @@ Tellcraft 是一個 AI 驅動的自動化開發平台。用戶只需描述需求
 
 ## 當前開發進度
 
-- **狀態**：✅ Phase 1-9 + Server Actions + VPS Backend + 前端 Chat 串接 + 認證系統 + 訪客體驗改善 + 儀表板系統 + BDD Spec 完整修復 + 專案版本管理 + **UIUX 生成邏輯重構** + **Design Tier** + **專案自動命名** + **PreviewPanel iframe 重構** + **Quality Gate 品質檢查** + **Code Preview 即時渲染** + **串流實時預覽** + **BDD→UI 翻譯 + Variant 創意概念** + **Fast Mode 快速建站** + **智能模板匹配** + **Fast Build 藍圖進度** + **BDD Q&A 3D 蓋房子動畫** + **對話回退 + 錯誤恢復** + **BDD Spec Skill v2.0.0 同步** + **LLM 自動重試 + 錯誤訊息人性化**
+- **狀態**：✅ Phase 1-9 + Server Actions + VPS Backend + 前端 Chat 串接 + 認證系統 + 訪客體驗改善 + 儀表板系統 + BDD Spec 完整修復 + 專案版本管理 + **UIUX 生成邏輯重構** + **Design Tier** + **專案自動命名** + **PreviewPanel iframe 重構** + **Quality Gate 品質檢查** + **Code Preview 即時渲染** + **串流實時預覽** + **BDD→UI 翻譯 + Variant 創意概念** + **Fast Mode 快速建站** + **智能模板匹配** + **Fast Build 藍圖進度** + **BDD Q&A 3D 蓋房子動畫** + **對話回退 + 錯誤恢復** + **BDD Spec Skill v2.0.0 同步** + **LLM 自動重試 + 錯誤訊息人性化** + **BDD Phase 4/5 後端補完**
 - **釐清項目**：28 項全部解決
 - **Server Actions**：30+ 已實作
 - **詳情**：[`.clarify/overview.md`](.clarify/overview.md)
+
+### BDD Phase 4/5 後端補完（2026-02-24）
+
+BDD Skill 後端 Phase 4（Actions Design）和 Phase 5（ISA Config）補完，加上驗證腳本整合，使 BDD 規格完成後自動生成 actions.yml 和 isa_codegen.yml。
+
+**新增檔案**：
+- `tellcraft-backend/src/services/feature-validation.ts` — Feature Files 驗證 + 自動修復迴圈（child_process 調用 `bdd-spec/scripts/` 腳本，最多 3 輪 LLM 修復）
+- `tellcraft-backend/src/services/actions-design.ts` — Phase 4：LLM 驅動（Sonnet）從 Feature Files + Schema 生成 actions.yml（含 YAML 解析 + summary 一致性驗證 + 1 次修復重試）
+- `tellcraft-backend/src/services/isa-config.ts` — Phase 5：100% 規則式生成 ISA Config（零 LLM），掃描 5 種步驟模式 → executor 映射模板 + 覆蓋率驗證
+
+**修改檔案**：
+- `tellcraft-backend/src/workers/orchestrator.ts` — `completeSpecPhase()` 插入 3 步自動執行（驗證 → Actions Design → ISA Config），進度消息顯示，完成消息列出實際產出物
+- `app/page.tsx` — Message.stage union 新增 `spec_validating` / `spec_actions_design` / `spec_isa_config`
+
+**降級策略**：Phase 4/5 是增值產出，不是 UIUX 前置條件。任何步驟失敗都降級跳過，絕不阻塞 UIUX 流程。
 
 ### LLM 自動重試 + 錯誤訊息人性化（2026-02-24）
 

@@ -43,6 +43,9 @@ import { detectDesignTier, inferProductType, inferPages, buildDefaultDesignSyste
 import { ensureResponsiveClasses } from '../services/uiux-generation'
 import { matchTemplates } from '../services/template-matcher'
 import { executeIteration, executeUndoIteration, executeRollbackQuery, executeRollbackSelection } from '../services/iteration-skill'
+import { generateActionsYml } from '../services/actions-design'
+import { generateIsaConfig } from '../services/isa-config'
+import { validateAndFixFeatures } from '../services/feature-validation'
 import type { FlowState } from '../types/flow-state'
 import { sendMessage, saveFlowState, getFlowState, deleteFlowState, makeStreamingCallback, generatedCodeToFileRows } from './orchestrator-utils'
 
@@ -2023,7 +2026,130 @@ async function completeSpecPhase(
   redis: Redis,
   io: SocketIOServer
 ) {
-  // 更新 session 為 spec_completed（但還沒進入 UIUX）
+  // 取得 session 資料（Phase 4/5 需要）
+  const session = await getBddSession({ sessionId: state.sessionId! })
+  const rawFeatures = session.data?.featuresContent || []
+  // FeatureFile.actionName 是可選的，補上空字串
+  const features: Array<{ name: string; actionName: string; content: string }> = rawFeatures.map(
+    (f: { name: string; actionName?: string; content: string }) => ({
+      name: f.name,
+      actionName: f.actionName || '',
+      content: f.content,
+    })
+  )
+  const schemaSql: string = session.data?.schemaSqlContent || ''
+  const entityMapping: string = session.data?.entityMappingContent || ''
+  const featureCount = features.length
+
+  // 構建 LLM tracking context
+  const trackingContext = state.userId
+    ? { userId: state.userId, conversationId }
+    : undefined
+
+  // ============================================================
+  // Phase 4/5 自動執行（驗證 + Actions Design + ISA Config）
+  // 全部包在 try/catch 中，任何異常都降級跳過，絕不阻塞 UIUX 流程
+  // ============================================================
+  let generatedActionsYml: string | null = null
+  let generatedIsaConfig: string | null = null
+
+  try {
+    // Step 1/3: Feature 驗證 + 自動修復
+    if (features.length > 0 && schemaSql) {
+      await sendMessage(conversationId, io, {
+        content: '正在驗證功能規格格式...',
+        stage: 'spec_validating',
+        progress: { current: 1, total: 3, step: '規格驗證' },
+      })
+
+      const resolvedItems = session.data?.resolvedItems || []
+      const validationResult = await validateAndFixFeatures(
+        features, schemaSql, entityMapping, resolvedItems, trackingContext
+      )
+
+      // 將 FeatureValidationResult 轉為 BddSession.validationResult 格式
+      const dbValidationResult = {
+        passed: validationResult.validationResult.lintPassed && validationResult.validationResult.validatePassed,
+        errors: validationResult.validationResult.errors,
+        warnings: [] as string[],
+      }
+
+      // 如有修復 → 更新 DB
+      if (validationResult.fixRounds > 0) {
+        await updateBddSession({
+          sessionId: state.sessionId!,
+          updates: {
+            featuresContent: validationResult.fixedFeatures,
+            validationResult: dbValidationResult,
+          },
+        })
+        // 更新本地引用
+        features.splice(0, features.length, ...validationResult.fixedFeatures)
+        console.log(`[Orchestrator] Feature 驗證修復完成，${validationResult.fixRounds} 輪`)
+      } else {
+        // 無需修復，只記錄驗證結果
+        await updateBddSession({
+          sessionId: state.sessionId!,
+          updates: { validationResult: dbValidationResult },
+        })
+      }
+    }
+
+    // Step 2/3: Phase 4 Actions Design
+    if (features.length > 0 && schemaSql) {
+      await sendMessage(conversationId, io, {
+        content: '正在設計 Server Actions 規格...',
+        stage: 'spec_actions_design',
+        progress: { current: 2, total: 3, step: 'Actions Design' },
+      })
+
+      const actionsResult = await generateActionsYml(
+        { features, schemaSql, entityMapping },
+        trackingContext
+      )
+
+      if (actionsResult.success && actionsResult.actionsYml) {
+        generatedActionsYml = actionsResult.actionsYml
+        await updateBddSession({
+          sessionId: state.sessionId!,
+          updates: { actionsYmlContent: actionsResult.actionsYml },
+        })
+        console.log('[Orchestrator] Actions Design 完成')
+      } else {
+        console.warn('[Orchestrator] Actions Design 失敗，降級跳過:', actionsResult.error)
+      }
+    }
+
+    // Step 3/3: Phase 5 ISA Config
+    if (features.length > 0) {
+      await sendMessage(conversationId, io, {
+        content: '正在生成 ISA 配置...',
+        stage: 'spec_isa_config',
+        progress: { current: 3, total: 3, step: 'ISA Config' },
+      })
+
+      const isaResult = generateIsaConfig({
+        features,
+        entityMapping,
+        actionsYml: generatedActionsYml || '',
+      })
+
+      if (isaResult.success && isaResult.isaConfigYml) {
+        generatedIsaConfig = isaResult.isaConfigYml
+        await updateBddSession({
+          sessionId: state.sessionId!,
+          updates: { isaConfigContent: isaResult.isaConfigYml },
+        })
+        console.log('[Orchestrator] ISA Config 完成')
+      } else {
+        console.warn('[Orchestrator] ISA Config 失敗，降級跳過:', isaResult.error)
+      }
+    }
+  } catch (err) {
+    console.error('[Orchestrator] Phase 4/5 自動執行異常，降級跳過:', err)
+  }
+
+  // 更新 session 為 spec_completed
   await updateBddSession({
     sessionId: state.sessionId!,
     updates: {
@@ -2031,12 +2157,15 @@ async function completeSpecPhase(
     },
   })
 
-  // 發送規格完成消息
-  const session = await getBddSession({ sessionId: state.sessionId! })
-  const featureCount = session.data?.featuresContent?.length || 0
+  // 發送規格完成消息（列出實際產出物）
+  const outputs: string[] = []
+  if (schemaSql) outputs.push('資料庫 Schema')
+  if (featureCount > 0) outputs.push(`${featureCount} 個功能規格 (Feature Files)`)
+  if (generatedActionsYml) outputs.push('Server Actions 規格 (actions.yml)')
+  if (generatedIsaConfig) outputs.push('ISA 配置 (isa_codegen.yml)')
 
   await sendMessage(conversationId, io, {
-    content: `規格產出完成！\n\n已生成：\n- 資料庫 Schema\n- ${featureCount} 個功能規格 (Feature Files)\n\n你可以在專案詳情頁面查看完整規格。`,
+    content: `規格產出完成！\n\n已生成：\n${outputs.map(o => `- ${o}`).join('\n')}\n\n你可以在專案詳情頁面查看完整規格。`,
     stage: 'spec_complete',
     progress: { current: 4, total: 4, step: '規格完成' },
   })
