@@ -207,6 +207,8 @@ export async function updateBddSession(input: {
     generatedPages: GeneratedComponent[]
     generatedComponents: GeneratedComponent[]
     generatedStyles: string
+    // Event Storming
+    esDocumentContent: string
   }>
 }): Promise<{ success: boolean; error?: string }> {
   try {

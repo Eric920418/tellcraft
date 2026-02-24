@@ -7,6 +7,7 @@ import type { SpecIssue } from '../services/spec-discovery'
 import type { QualityReport } from '../services/quality-gate'
 import type { DeployPreCheckResult, DeploymentRecord } from '../services/deployer'
 import type { UIRequirementsSpec } from '../services/bdd-to-ui-spec'
+import type { ESKnowledgeMap } from '../services/event-storming'
 
 // ============================================================
 // 迭代歷史
@@ -91,4 +92,6 @@ export interface FlowState {
   userId?: string
   // 回退機制
   lastStablePhase?: string     // 上一個穩定決策點的 phase（用於錯誤恢復）
+  // Event Storming（Phase 0）
+  esKnowledgeMap?: ESKnowledgeMap  // ES 知識地圖
 }

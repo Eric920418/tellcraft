@@ -53,6 +53,7 @@ interface Message {
   timestamp: Date
   stage?: 'init' | 'init_progress' | 'discovery' | 'clarify' | 'prd_discovery_complete' | 'formulation_start' | 'formulation_progress' | 'formulation' | 'uiux' | 'uiux_template_picker' | 'generating' | 'deploying' | 'complete' | 'prefilter_rejected' | 'meta_response'
     | 'fast_generating' | 'fast_need_more_info'
+    | 'es_init' | 'es_explore'
     | 'prd_discovery_analyzing' | 'prd_discovery_generating' | 'prd_discovery_deduping'
     | 'info' | 'error'
     | 'prd_discovery_continue' | 'clarify_question' | 'clarify_revert' | 'batch_confirm' | 'batch_confirmed'

@@ -43,6 +43,11 @@ import { detectDesignTier, inferProductType, inferPages, buildDefaultDesignSyste
 import { ensureResponsiveClasses } from '../services/uiux-generation'
 import { matchTemplates } from '../services/template-matcher'
 import { executeIteration, executeUndoIteration, executeRollbackQuery, executeRollbackSelection } from '../services/iteration-skill'
+import {
+  shouldRunEventStorming, initEventStorming, handleInitConfirm,
+  exploreNextItem, handleESAnswer, generateESDocument,
+} from '../services/event-storming'
+import type { ESKnowledgeMap } from '../services/event-storming'
 import { generateActionsYml } from '../services/actions-design'
 import { generateIsaConfig } from '../services/isa-config'
 import { validateAndFixFeatures } from '../services/feature-validation'
@@ -584,6 +589,18 @@ async function handleContinueFlow(
     return
   }
 
+  // ── Event Storming 初始確認 ──
+  if (state.phase === 'es_init') {
+    await handleESInitReply(conversationId, state, message, redis, io)
+    return
+  }
+
+  // ── Event Storming DFS 探索中 ──
+  if (state.phase === 'es_explore') {
+    await handleESExploreReply(conversationId, state, message, redis, io)
+    return
+  }
+
   // 處理設計偏好回覆（A = 有想法，B = 沒想法看模板）
   if (state.phase === 'uiux_design_preference') {
     try {
@@ -1012,6 +1029,283 @@ async function handleContinueFlow(
 }
 
 // ============================================================
+// Event Storming Handlers（Phase 0）
+// ============================================================
+
+/**
+ * 用戶確認初始清單後，開始 DFS 探索；或跳過 ES 直接進 Discovery
+ */
+async function handleESInitReply(
+  conversationId: string,
+  state: FlowState,
+  message: string,
+  redis: Redis,
+  io: SocketIOServer
+) {
+  const trimmed = message.trim()
+  const trackingContext = { userId: state.userId, conversationId }
+
+  // 跳過 ES
+  if (trimmed === '__skip_es__') {
+    await skipESAndStartDiscovery(conversationId, state, redis, io)
+    return
+  }
+
+  if (!state.esKnowledgeMap) {
+    console.error('[Orchestrator] ES init reply 但沒有 esKnowledgeMap')
+    await skipESAndStartDiscovery(conversationId, state, redis, io)
+    return
+  }
+
+  const confirmResult = handleInitConfirm(trimmed, state.esKnowledgeMap)
+
+  if (confirmResult.type === 'batch_complete') {
+    // 用戶確認，開始 DFS 探索
+    state.phase = 'es_explore'
+    state.esKnowledgeMap = confirmResult.knowledgeMap
+    await saveFlowState(redis, conversationId, state)
+
+    await sendMessage(conversationId, io, {
+      content: confirmResult.content,
+      stage: 'es_explore',
+    })
+
+    // 開始探索第一個項目
+    const exploreResult = await exploreNextItem(state.esKnowledgeMap, trackingContext)
+    state.esKnowledgeMap = exploreResult.knowledgeMap
+    await saveFlowState(redis, conversationId, state)
+
+    if (exploreResult.type === 'all_complete') {
+      await handleESComplete(conversationId, state, exploreResult, redis, io)
+    } else {
+      await sendMessage(conversationId, io, {
+        content: exploreResult.content,
+        stage: 'es_explore',
+        quickReplies: exploreResult.quickReplies,
+      })
+    }
+  } else {
+    // 用戶有修改意見，讓 LLM 重新分析
+    await sendMessage(conversationId, io, {
+      content: '好的，讓我根據你的反饋重新調整清單...',
+      stage: 'es_init',
+    })
+
+    const session = await getBddSession({ sessionId: state.sessionId! })
+    const originalRequirements = session?.data?.originalRequirements || ''
+
+    const reInitResult = await initEventStorming(
+      `${originalRequirements}\n\n用戶補充/修正：${trimmed}`,
+      trackingContext
+    )
+
+    if (reInitResult.success && reInitResult.knowledgeMap && reInitResult.displayText) {
+      state.esKnowledgeMap = reInitResult.knowledgeMap
+      state.waitingForReply = true
+      await saveFlowState(redis, conversationId, state)
+
+      await sendMessage(conversationId, io, {
+        content: reInitResult.displayText,
+        stage: 'es_init',
+        quickReplies: [
+          { label: '確認', value: '確認', style: 'primary' },
+          { label: '跳過 ES，直接釐清', value: '__skip_es__', style: 'ghost' },
+        ],
+      })
+    } else {
+      console.warn('[Orchestrator] ES 重新初始化失敗，跳過 ES')
+      await skipESAndStartDiscovery(conversationId, state, redis, io)
+    }
+  }
+}
+
+/**
+ * DFS 探索中處理用戶回答
+ */
+async function handleESExploreReply(
+  conversationId: string,
+  state: FlowState,
+  message: string,
+  redis: Redis,
+  io: SocketIOServer
+) {
+  const trimmed = message.trim()
+  const trackingContext = { userId: state.userId, conversationId }
+
+  // 跳過 ES
+  if (trimmed === '__skip_es__') {
+    await skipESAndStartDiscovery(conversationId, state, redis, io)
+    return
+  }
+
+  if (!state.esKnowledgeMap) {
+    console.error('[Orchestrator] ES explore reply 但沒有 esKnowledgeMap')
+    await skipESAndStartDiscovery(conversationId, state, redis, io)
+    return
+  }
+
+  const answerResult = await handleESAnswer(trimmed, state.esKnowledgeMap, trackingContext)
+  state.esKnowledgeMap = answerResult.knowledgeMap
+  await saveFlowState(redis, conversationId, state)
+
+  if (answerResult.type === 'all_complete') {
+    await handleESComplete(conversationId, state, answerResult, redis, io)
+  } else if (answerResult.type === 'batch_complete') {
+    // 當前項目完成，繼續探索下一個
+    const nextResult = await exploreNextItem(state.esKnowledgeMap, trackingContext)
+    state.esKnowledgeMap = nextResult.knowledgeMap
+    await saveFlowState(redis, conversationId, state)
+
+    if (nextResult.type === 'all_complete') {
+      await handleESComplete(conversationId, state, nextResult, redis, io)
+    } else {
+      await sendMessage(conversationId, io, {
+        content: nextResult.content,
+        stage: 'es_explore',
+        quickReplies: nextResult.quickReplies,
+      })
+    }
+  } else {
+    // proposal / question / sub_question — 繼續等待回答
+    await sendMessage(conversationId, io, {
+      content: answerResult.content,
+      stage: 'es_explore',
+      quickReplies: answerResult.quickReplies,
+    })
+  }
+}
+
+/**
+ * ES 全部完成，保存文檔並銜接 PRD Discovery
+ */
+async function handleESComplete(
+  conversationId: string,
+  state: FlowState,
+  result: { esDocument?: string; content: string; knowledgeMap: ESKnowledgeMap },
+  redis: Redis,
+  io: SocketIOServer
+) {
+  const esDocument = result.esDocument || generateESDocument(result.knowledgeMap)
+
+  // 保存 ES 文檔到 BDD Session
+  if (state.sessionId) {
+    await updateBddSession({
+      sessionId: state.sessionId,
+      updates: { esDocumentContent: esDocument },
+    }).catch(err => console.error('[Orchestrator] 保存 ES 文檔失敗:', err))
+  }
+
+  await sendMessage(conversationId, io, {
+    content: result.content,
+    stage: 'es_explore',
+  })
+
+  // 銜接 Phase 1: PRD Discovery（將 ES 文檔作為補充輸入）
+  await startPrdDiscoveryWithES(conversationId, state, esDocument, redis, io)
+}
+
+/**
+ * 跳過 ES，直接進入 PRD Discovery
+ */
+async function skipESAndStartDiscovery(
+  conversationId: string,
+  state: FlowState,
+  redis: Redis,
+  io: SocketIOServer
+) {
+  // 如果有部分 ES 結果，生成文檔保存
+  let esDocument: string | undefined
+  if (state.esKnowledgeMap) {
+    esDocument = generateESDocument(state.esKnowledgeMap)
+    if (state.sessionId) {
+      await updateBddSession({
+        sessionId: state.sessionId,
+        updates: { esDocumentContent: esDocument },
+      }).catch(err => console.error('[Orchestrator] 保存部分 ES 文檔失敗:', err))
+    }
+  }
+
+  await sendMessage(conversationId, io, {
+    content: '好的，跳過 Event Storming，直接進入需求釐清。',
+    stage: 'info',
+  })
+
+  await startPrdDiscoveryWithES(conversationId, state, esDocument, redis, io)
+}
+
+/**
+ * 啟動 PRD Discovery（可選帶 ES 文檔）
+ */
+async function startPrdDiscoveryWithES(
+  conversationId: string,
+  state: FlowState,
+  esDocument: string | undefined,
+  redis: Redis,
+  io: SocketIOServer
+) {
+  const session = await getBddSession({ sessionId: state.sessionId! })
+  const originalRequirements = session?.data?.originalRequirements || ''
+  const trackingContext = { userId: state.userId, conversationId }
+
+  // 組合需求：原始需求 + ES 文檔
+  const enrichedRequirements = esDocument
+    ? `${originalRequirements}\n\n---\n## Event Storming 分析結果\n${esDocument}`
+    : originalRequirements
+
+  state.phase = 'prd_discovery'
+  state.esKnowledgeMap = undefined // 清除 ES 狀態節省 Redis 空間
+  await saveFlowState(redis, conversationId, state)
+
+  await sendMessage(conversationId, io, {
+    content: '正在分析需求細節...',
+    stage: 'init_progress',
+    progress: { current: 2, total: 3, step: '分析需求細節' },
+  })
+
+  console.log(`[Orchestrator] 調用 PRD Discovery（${esDocument ? '含 ES 文檔' : '無 ES'}）`)
+  const discoveryResult = await runPrdDiscovery(enrichedRequirements, trackingContext)
+
+  if (!discoveryResult.success || !discoveryResult.items) {
+    console.error('[Orchestrator] PRD Discovery 失敗:', discoveryResult.error)
+    await sendMessage(conversationId, io, {
+      content: `分析需求時發生問題：${discoveryResult.error || '未知錯誤'}。請重新描述您的需求。`,
+      stage: 'error',
+    })
+    return
+  }
+
+  const discoveryItems: ClarifyItem[] = discoveryResult.items
+  console.log(`[Orchestrator] PRD Discovery 生成 ${discoveryItems.length} 個釐清問題`)
+
+  await addClarifyItems({ sessionId: state.sessionId!, items: discoveryItems })
+  await updateBddSession({ sessionId: state.sessionId!, updates: { currentPhase: 'prd_clarify' } })
+
+  if (discoveryItems.length > 0) {
+    await sendMessage(conversationId, io, {
+      content: '我有一些問題需要跟您確認，讓我們開始吧！',
+      stage: 'prd_discovery_complete',
+    })
+
+    await sendClarifyQuestion(conversationId, io, discoveryItems[0], 0, discoveryItems.length, {
+      answered: 0,
+      totalQuestions: discoveryItems.length,
+      round: 1,
+      maxRounds: PRD_DISCOVERY_LIMITS.MAX_ROUNDS,
+    })
+
+    state.phase = 'prd_clarify'
+    state.waitingForReply = true
+    state.currentItemId = discoveryItems[0].id
+    await saveFlowState(redis, conversationId, state)
+  } else {
+    await sendMessage(conversationId, io, {
+      content: '需求很清楚，正在產出規格...',
+      stage: 'prd_discovery_complete',
+    })
+  }
+}
+
+// ============================================================
 // BDD Spec Skill
 // ============================================================
 
@@ -1063,6 +1357,45 @@ async function executeBddSpecSkill(input: BddSpecSkillInput) {
   }
 
   await saveFlowState(redis, conversationId, state)
+
+  // ── Phase 0: Event Storming 偵測 ──
+  try {
+    const esCheck = await shouldRunEventStorming(message, { userId, conversationId })
+    console.log(`[Orchestrator] Event Storming 偵測: needed=${esCheck.needed}, reasoning=${esCheck.reasoning}`)
+
+    if (esCheck.needed) {
+      await sendMessage(conversationId, io, {
+        content: '你的需求看起來比較複雜，讓我先用 Event Storming 來梳理整體結構。',
+        stage: 'es_init',
+        progress: { current: 1, total: 3, step: '分析系統結構' },
+      })
+
+      const esResult = await initEventStorming(message, { userId, conversationId })
+
+      if (esResult.success && esResult.knowledgeMap && esResult.displayText) {
+        state.phase = 'es_init'
+        state.esKnowledgeMap = esResult.knowledgeMap
+        state.waitingForReply = true
+        await saveFlowState(redis, conversationId, state)
+
+        await sendMessage(conversationId, io, {
+          content: esResult.displayText,
+          stage: 'es_init',
+          quickReplies: [
+            { label: '確認', value: '確認', style: 'primary' },
+            { label: '跳過 ES，直接釐清', value: '__skip_es__', style: 'ghost' },
+          ],
+        })
+        return // 等待用戶確認初始清單
+      } else {
+        console.warn('[Orchestrator] Event Storming 初始化失敗，跳過 ES:', esResult.error)
+        // 降級：繼續原有流程
+      }
+    }
+  } catch (esError) {
+    console.warn('[Orchestrator] Event Storming 偵測異常，跳過:', esError)
+    // 降級：繼續原有流程
+  }
 
   // Phase 1.1: PRD Discovery
   await sendMessage(conversationId, io, {

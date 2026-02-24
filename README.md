@@ -12,10 +12,29 @@ Tellcraft 是一個 AI 驅動的自動化開發平台。用戶只需描述需求
 
 ## 當前開發進度
 
-- **狀態**：✅ Phase 1-9 + Server Actions + VPS Backend + 前端 Chat 串接 + 認證系統 + 訪客體驗改善 + 儀表板系統 + BDD Spec 完整修復 + 專案版本管理 + **UIUX 生成邏輯重構** + **Design Tier** + **專案自動命名** + **PreviewPanel iframe 重構** + **Quality Gate 品質檢查** + **Code Preview 即時渲染** + **串流實時預覽** + **BDD→UI 翻譯 + Variant 創意概念** + **Fast Mode 快速建站** + **智能模板匹配** + **Fast Build 藍圖進度** + **BDD Q&A 3D 蓋房子動畫** + **對話回退 + 錯誤恢復** + **BDD Spec Skill v2.0.0 同步** + **LLM 自動重試 + 錯誤訊息人性化** + **BDD Phase 4/5 後端補完**
+- **狀態**：✅ Phase 1-9 + Server Actions + VPS Backend + 前端 Chat 串接 + 認證系統 + 訪客體驗改善 + 儀表板系統 + BDD Spec 完整修復 + 專案版本管理 + **UIUX 生成邏輯重構** + **Design Tier** + **專案自動命名** + **PreviewPanel iframe 重構** + **Quality Gate 品質檢查** + **Code Preview 即時渲染** + **串流實時預覽** + **BDD→UI 翻譯 + Variant 創意概念** + **Fast Mode 快速建站** + **智能模板匹配** + **Fast Build 藍圖進度** + **BDD Q&A 3D 蓋房子動畫** + **對話回退 + 錯誤恢復** + **BDD Spec Skill v2.0.0 同步** + **LLM 自動重試 + 錯誤訊息人性化** + **BDD Phase 4/5 後端補完** + **Phase 0 Event Storming**
 - **釐清項目**：28 項全部解決
 - **Server Actions**：30+ 已實作
 - **詳情**：[`.clarify/overview.md`](.clarify/overview.md)
+
+### Phase 0 Event Storming（2026-02-24）
+
+BDD Skill 新增前置的 Event Storming 階段，對複雜業務需求自動啟動 DFS 結構化探索，產出 Commands/ReadModels/Actors/Aggregates/Rules 知識地圖，作為後續 PRD Discovery 的高品質輸入。
+
+**新增檔案**：
+- `tellcraft-backend/src/services/event-storming.ts` — ES 核心服務（型別定義 + 7 個公開函數），全部使用 Haiku，~$0.002/次
+- `tellcraft-backend/migrations/006_add_es_document.sql` — bdd_sessions 新增 es_document_content 欄位
+
+**修改檔案**：
+- `tellcraft-backend/src/workers/orchestrator.ts` — `executeBddSpecSkill()` 入口新增 ES 偵測 + `handleContinueFlow()` 新增 `es_init`/`es_explore` phase 路由 + 6 個 ES handler 函數
+- `tellcraft-backend/src/types/flow-state.ts` — FlowState 新增 `esKnowledgeMap` 欄位
+- `tellcraft-backend/src/db/client.ts` — columnMap + getBddSession SELECT 新增 es_document_content
+- `tellcraft-backend/src/services/bdd-session.ts` — updateBddSession 型別新增 esDocumentContent
+- `app/page.tsx` — Message.stage union 新增 `es_init` | `es_explore`
+
+**狀態機流轉**：`executeBddSpecSkill → shouldRunEventStorming? → YES: es_init → es_explore（DFS 循環）→ all_complete → prd_discovery | NO: prd_discovery`
+
+**降級策略**：ES 是增值前置階段，任何 LLM 失敗都跳過 ES 直接進 Discovery，不阻塞後續流程。用戶可隨時「跳過 ES，直接釐清」。
 
 ### BDD Phase 4/5 後端補完（2026-02-24）
 
