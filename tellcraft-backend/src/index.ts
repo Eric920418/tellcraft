@@ -18,7 +18,7 @@ import conversationRoutes, { setOrchestratorQueue, setRedisClient } from './rout
 import projectRoutes from './routes/project'
 import healthRoutes from './routes/health'
 import authRoutes from './routes/auth'
-import dashboardRoutes from './routes/dashboard'
+import dashboardRoutes, { setDashboardRedisClient } from './routes/dashboard'
 import sessionRoutes from './routes/session'
 import userRoutes from './routes/user'
 import templatesRoutes from './routes/templates'
@@ -226,6 +226,7 @@ setRedisClient(redis)
 // 設置 Redis 到認證模組（用於 token 黑名單）
 setAuthRedisClient(redis)
 setMiddlewareRedisClient(redis)
+setDashboardRedisClient(redis)
 
 // 創建 Worker
 const orchestratorWorker = createOrchestratorWorker(redis, io)

@@ -560,6 +560,40 @@ export async function getUserDetail(input: {
 }
 
 /**
+ * 管理員查看任意對話的訊息（唯讀）
+ */
+export async function getAdminConversationMessages(input: {
+  conversationId: string
+  lastUpdatedAt?: string
+  token: string
+}): Promise<ApiResponse<{
+  messages: Message[]
+  updatedAt: string
+  hasChanges: boolean
+  currentTaskId?: string
+  streamingPreview?: {
+    pages: { path: string; content: string; description: string }[]
+    components: { path: string; content: string; description: string }[]
+    styles: string
+    tailwindConfig: string
+    phase: 'structure' | 'animation' | 'rwd'
+  } | null
+  user: { email: string; name: string | null }
+  project: { name: string; status: string }
+}>> {
+  const params = new URLSearchParams()
+  if (input.lastUpdatedAt) params.set('lastUpdatedAt', input.lastUpdatedAt)
+  const query = params.toString() ? `?${params.toString()}` : ''
+
+  return apiRequest(`/api/dashboard/admin/conversations/${input.conversationId}/messages${query}`, {
+    method: 'GET',
+    headers: {
+      Authorization: `Bearer ${input.token}`,
+    },
+  })
+}
+
+/**
  * 獲取審計日誌（管理員專用）
  */
 export async function getAuditLogs(input: {
@@ -1780,6 +1814,7 @@ export const vpsApi = {
   listAllUsers,
   setUserAdmin,
   getUserDetail,
+  getAdminConversationMessages,
   getAuditLogs,
   listAllProjects,
   listAllConversations,

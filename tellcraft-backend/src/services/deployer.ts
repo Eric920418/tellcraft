@@ -315,6 +315,53 @@ function sanitizeCodeForDeploy(code: GeneratedCode): SanitizeResult {
       file.content = file.content.replace(/<link[^>]*fonts\.googleapis\.com[^>]*\/?>/g, '')
       fixes.push(`${file.path}: 移除 Google Fonts <link>（應用 next/font）`)
     }
+
+    // ── 修復 6: Next.js 15 async params/searchParams ──
+    // Next.js 15 要求 page/layout 的 params 和 searchParams 為 Promise 類型
+    // 檢測 `{ params: { xxx: string } }` 舊式同步寫法並自動轉換
+    if (/\bparams\s*:\s*\{/.test(file.content) && !/params\s*:\s*Promise/.test(file.content)) {
+      // 匹配: function Page({ params }: { params: { id: string } })
+      // 或:    function Page(props: { params: { id: string } })
+      const syncParamsPattern = /(\bparams\s*:\s*)(\{[^}]+\})/g
+      if (syncParamsPattern.test(file.content)) {
+        // 先標記，避免 regex 匹配到其他 params（如 searchParams）
+        const isPageOrLayout = /export\s+(default\s+)?(async\s+)?function\s+\w*\s*\(/.test(file.content)
+          && (file.path.includes('page') || file.path.includes('layout'))
+        if (isPageOrLayout) {
+          // 將 params: { id: string } → params: Promise<{ id: string }>
+          file.content = file.content.replace(
+            /(\bparams\s*:\s*)(\{[^}]+\})/g,
+            '$1Promise<$2>'
+          )
+          // 如果函式不是 async，加上 async
+          if (!/export\s+(default\s+)?async\s+function/.test(file.content)) {
+            file.content = file.content.replace(
+              /export\s+(default\s+)?function/,
+              'export $1async function'
+            )
+          }
+          // 在函式體開頭解構 await params
+          // 找到函式的 { 並在下一行插入 await
+          const paramNames = file.content.match(/params\s*:\s*Promise<\{([^}]+)\}>/)
+          if (paramNames) {
+            const fields = paramNames[1].split(',').map(f => f.split(':')[0].trim()).filter(Boolean)
+            if (fields.length > 0) {
+              // 替換直接使用 params.xxx 為解構
+              const destructure = `  const { ${fields.join(', ')} } = await params`
+              // 找函式體開頭（第一個 { 後的換行）
+              const funcBodyMatch = file.content.match(/(export\s+(?:default\s+)?async\s+function\s+\w*\s*\([^)]*\)\s*\{)\s*\n/)
+              if (funcBodyMatch) {
+                file.content = file.content.replace(
+                  funcBodyMatch[0],
+                  funcBodyMatch[1] + '\n' + destructure + '\n'
+                )
+              }
+            }
+          }
+          fixes.push(`${file.path}: Next.js 15 async params 修復`)
+        }
+      }
+    }
   }
 
   // CSS 中的 Google Fonts @import

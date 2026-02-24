@@ -5,8 +5,16 @@
 import { Router, Request, Response } from 'express'
 import { query, queryOne } from '../db/client'
 import { requireAuth, requireAdmin } from '../middleware/auth'
+import type Redis from 'ioredis'
 
 const router: Router = Router()
+
+// Redis client（在 index.ts 中注入）
+let redisClient: Redis | null = null
+
+export function setDashboardRedisClient(redis: Redis) {
+  redisClient = redis
+}
 
 // 方案配額限制
 const PLAN_MESSAGE_LIMITS: Record<string, number> = {
@@ -785,6 +793,115 @@ router.post('/admin/users/:userId/admin', requireAdmin, async (req, res) => {
   } catch (error) {
     console.error('[Dashboard] 設置管理員狀態失敗:', error)
     res.status(500).json({ error: '設置管理員狀態失敗' })
+  }
+})
+
+/**
+ * GET /api/dashboard/admin/conversations/:conversationId/messages
+ * 管理員查看任意對話的訊息（唯讀）
+ */
+router.get('/admin/conversations/:conversationId/messages', requireAdmin, async (req, res) => {
+  try {
+    const { conversationId } = req.params
+    const { lastUpdatedAt } = req.query as { lastUpdatedAt?: string }
+
+    // 查詢對話 + 關聯的專案和用戶資訊
+    const conversation = await queryOne<{
+      id: string
+      messages: unknown[]
+      updated_at: string
+      project_id: string
+      spec_complete: boolean
+    }>(
+      'SELECT id, messages, updated_at, project_id, spec_complete FROM conversations WHERE id = $1',
+      [conversationId]
+    )
+
+    if (!conversation) {
+      return res.status(404).json({ error: '對話不存在' })
+    }
+
+    // 讀取 streaming preview（如果有的話）
+    let streamingPreview = null
+    if (redisClient) {
+      try {
+        const previewJson = await redisClient.get(`streaming:preview:${conversationId}`)
+        if (previewJson) {
+          streamingPreview = JSON.parse(previewJson)
+        }
+      } catch {
+        // Redis 讀取失敗不阻塞
+      }
+    }
+
+    // 輕量檢查：比較 updated_at
+    if (lastUpdatedAt && conversation.updated_at === lastUpdatedAt && !streamingPreview) {
+      return res.json({
+        messages: [],
+        updatedAt: conversation.updated_at,
+        hasChanges: false,
+      })
+    }
+
+    // 查詢專案 + 用戶資訊
+    const projectInfo = await queryOne<{
+      name: string
+      status: string
+      user_id: string
+    }>(
+      'SELECT name, status, user_id FROM projects WHERE id = $1',
+      [conversation.project_id]
+    )
+
+    let userInfo: { email: string; name: string | null } = { email: '', name: null }
+    if (projectInfo) {
+      const user = await queryOne<{ email: string; name: string | null }>(
+        'SELECT email, name FROM users WHERE id = $1',
+        [projectInfo.user_id]
+      )
+      if (user) {
+        userInfo = user
+      }
+    }
+
+    // 查詢當前活躍的 task
+    const activeTask = await queryOne<{ id: string; status: string }>(
+      `SELECT id, status FROM tasks
+       WHERE project_id = $1
+       AND status IN ('planning', 'executing', 'pending_approval', 'waiting_approval')
+       ORDER BY created_at DESC LIMIT 1`,
+      [conversation.project_id]
+    )
+
+    // 如果沒有活躍 task，檢查 bdd_sessions
+    let activeSessionId: string | undefined
+    if (!activeTask) {
+      const bddSession = await queryOne<{ id: string }>(
+        `SELECT id FROM bdd_sessions
+         WHERE conversation_id = $1 AND current_phase != 'completed'
+         ORDER BY created_at DESC LIMIT 1`,
+        [conversationId]
+      )
+      if (bddSession) {
+        activeSessionId = bddSession.id
+      }
+    }
+
+    res.json({
+      messages: conversation.messages,
+      updatedAt: conversation.updated_at,
+      hasChanges: true,
+      currentTaskId: activeTask?.id || activeSessionId,
+      streamingPreview,
+      user: userInfo,
+      project: {
+        name: projectInfo?.name || '',
+        status: projectInfo?.status || '',
+      },
+    })
+  } catch (error) {
+    console.error('[Dashboard] 獲取對話訊息失敗:', error)
+    res.status(500).json({ error: '獲取對話訊息失敗' })
   }
 })
 

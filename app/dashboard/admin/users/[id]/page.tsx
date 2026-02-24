@@ -357,15 +357,22 @@ export default function AdminUserDetailPage() {
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
             {recentConversations.map((conv) => (
-              <div
+              <Link
                 key={conv.id}
+                href={`/dashboard/admin/conversations/${conv.id}?userId=${userId}`}
                 style={{
                   padding: '14px 16px',
                   border: '1px solid var(--border-color)',
                   display: 'flex',
                   justifyContent: 'space-between',
                   alignItems: 'center',
+                  textDecoration: 'none',
+                  color: 'inherit',
+                  cursor: 'pointer',
+                  transition: 'background 0.15s ease',
                 }}
+                onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.background = 'var(--gray-50)' }}
+                onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = 'transparent' }}
               >
                 <div>
                   <div style={{ fontWeight: 500 }}>{conv.projectName}</div>
@@ -373,10 +380,15 @@ export default function AdminUserDetailPage() {
                     {conv.messageCount} 則訊息
                   </div>
                 </div>
-                <span style={{ fontSize: 12, color: 'var(--gray-400)' }}>
-                  {new Date(conv.updatedAt).toLocaleDateString('zh-TW')}
-                </span>
-              </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <span style={{ fontSize: 12, color: 'var(--gray-400)' }}>
+                    {new Date(conv.updatedAt).toLocaleDateString('zh-TW')}
+                  </span>
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--gray-400)" strokeWidth="1.5">
+                    <path d="M9 18l6-6-6-6" />
+                  </svg>
+                </div>
+              </Link>
             ))}
           </div>
         )}

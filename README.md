@@ -739,7 +739,7 @@ Round 3: 如果還有新問題，最後一輪
 | `app/actions/admin.ts` | 移除 `import { db }`，改用 `vps-api.ts` 函數 |
 | `app/lib/auth.ts` | 新增 `getAuthToken()` 函數取得 JWT Token |
 | `app/lib/vps-api.ts` | 新增 `listAllProjects`, `listAllConversations` |
-| `tellcraft-backend/src/routes/dashboard.ts` | 新增 `GET /api/dashboard/admin/projects`, `GET /api/dashboard/admin/conversations` |
+| `tellcraft-backend/src/routes/dashboard.ts` | 新增 `GET /api/dashboard/admin/projects`, `GET /api/dashboard/admin/conversations`, `GET /api/dashboard/admin/conversations/:id/messages` |
 
 **Stage 2-3：User 和 Project 函數部分遷移** 🔄
 
@@ -1144,6 +1144,7 @@ CREATE INDEX IF NOT EXISTS idx_llm_usage_user_created
 /dashboard/admin/users/[id]   # 用戶詳情
 /dashboard/admin/usage        # LLM 用量統計
 /dashboard/admin/logs         # 審計日誌
+/dashboard/admin/conversations/[id]  # 對話檢視器（唯讀，從用戶詳情進入）
 ```
 
 **權限控制**：
