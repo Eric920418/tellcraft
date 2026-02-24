@@ -1266,13 +1266,30 @@ async function sendClarifyQuestion(
 ) {
   let text = `（${index + 1}/${total}）\n\n${item.whiteTextQuestion || item.question}`
 
+  // 檢測是否有「（建議）」選項 → 提案模式
+  let hasProposal = false
   if (item.options && item.options.length > 0) {
+    hasProposal = item.options.some(opt => {
+      const optStr = typeof opt === 'string' ? opt : (opt.description || opt.label || '')
+      return optStr.includes('（建議）')
+    })
+  }
+
+  if (hasProposal) {
+    text += '\n\n💡 _以下有一個建議選項，若您同意可直接確認：_\n\n'
+  } else {
     text += '\n\n'
+  }
+
+  if (item.options && item.options.length > 0) {
     text += item.options.map((opt, j) => {
       if (typeof opt === 'string') {
         const match = opt.match(/^([A-Z])\.\s*(.*)$/)
         if (match) {
-          return `**${match[1]}.** ${match[2]}`
+          // 如果包含「（建議）」，加粗標記
+          const isProposal = match[2].includes('（建議）')
+          const display = isProposal ? `${match[2]}  ✅` : match[2]
+          return `**${match[1]}.** ${display}`
         }
         return `**${String.fromCharCode(65 + j)}.** ${opt}`
       } else {
@@ -1288,13 +1305,18 @@ async function sendClarifyQuestion(
     item.options.forEach((opt, j) => {
       const letter = String.fromCharCode(65 + j)
       let label = ''
+      let optStr = ''
       if (typeof opt === 'string') {
         const match = opt.match(/^([A-Z])\.\s*(.*)$/)
         label = match ? `${match[1]}. ${match[2]}` : `${letter}. ${opt}`
+        optStr = match ? match[2] : opt
       } else {
         label = `${letter}. ${opt.description || opt.label || ''}`
+        optStr = opt.description || opt.label || ''
       }
-      quickReplies.push({ label, value: letter, style: 'ghost' })
+      // 建議選項使用 primary 樣式，讓用戶更容易點擊
+      const isProposal = optStr.includes('（建議）')
+      quickReplies.push({ label, value: letter, style: isProposal ? 'primary' : 'ghost' })
     })
   }
 
