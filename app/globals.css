@@ -231,8 +231,8 @@ textarea {
 
 /* Selection */
 ::selection {
-  background: var(--black);
-  color: var(--white);
+  background: #3b82f6;
+  color: #ffffff;
 }
 
 /* Hero Title */
