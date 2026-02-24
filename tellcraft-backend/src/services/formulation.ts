@@ -374,6 +374,16 @@ export async function generateSingleFeature(
 
 ## sdd.os ISA 格式規範
 
+### ⚠️ 無腦補原則（最高優先）
+**嚴格遵守需求和釐清決策，不擅自假設任何功能、欄位或行為。** 如果需求沒提到的東西，就不要加。
+
+### Given 設定方式選擇指引
+| 判定條件 | 選擇 | 範例 |
+|----------|------|------|
+| 簡單 Invariant（單一欄位約束） | Choice A: 直接用 \`準備一個{entity}, with table:\` | price >= 0、status = 'active' |
+| 複雜 Invariant（跨屬性計算） | Choice B: 用 \`{summary}, call table:\` 透過 Action 設定 | 總額 = 單價 × 數量 |
+| 狀態流轉（需前置 Action 建立狀態） | Choice B: 用 Action 設定 | 訂單需先經過「建立」才能「取消」 |
+
 ### Given 步驟格式（資料準備）
 - 資料準備：\`準備一個{entity}, with table:\`
 - **簡單 Invariant**（如 price >= 0）→ 直接用 \`準備一個{entity}, with table:\` 設定資料
@@ -387,8 +397,8 @@ export async function generateSingleFeature(
 - 操作失敗：\`操作失敗\`
 - Entity 驗證：\`存在一個{entity}, with table:\`
 
-### 必要註解
-- \`@Action(ActionName)\`：標註這是哪個 Action
+### 必要 Header（檔案開頭）
+- \`# Action: actionName\`：標註這是哪個 Action（camelCase 或 snake_case）
 - \`# Summary: xxx\`：Action 的一句話說明
 
 ## 四類規則分類法（關鍵 ⚠️）
@@ -414,6 +424,11 @@ Rule: <四類前綴> - <主詞> 必須/應 <單一條件>
 - \`Rule: 後置（狀態）- 訂單總額應為所有品項小計加總\`
 - \`Rule: 後置（回應）- 查詢結果應包含訂單明細\`
 
+### Rule 原子化判定
+- 包含「且」「和」「並且」→ **必須拆分**為多條 Rule
+- 包含「或」→ 保留為單條（or 條件）
+- 混合前後置條件 → **必須拆分**（前置一條、後置一條）
+
 ### 每個 Feature 至少必須有
 - 至少 1 條「前置（參數）」Rule（必要參數檢查）
 - 至少 1 條「後置」Rule（回應或狀態）
@@ -422,7 +437,7 @@ Rule: <四類前綴> - <主詞> 必須/應 <單一條件>
 直接輸出完整的 .feature 檔案內容，不需要 JSON 包裝。
 
 \`\`\`gherkin
-@Action(${featureInfo.actionName})
+# Action: ${featureInfo.actionName}
 # Summary: ${featureInfo.description}
 Feature: ${featureInfo.name}
 
@@ -460,13 +475,15 @@ Feature: ${featureInfo.name}
 \`\`\`
 
 ## 規則
+- 檔案開頭必須用 \`# Action: actionName\` 而非 \`@Action()\`
 - 每條 Rule 標註四類之一（前置（狀態）/前置（參數）/後置（回應）/後置（狀態）），**禁止使用舊的 @Pre/@Post**
 - Rule 命名遵循嚴格句型：\`<四類前綴> - <主詞> 必須/應 <單一條件>\`
-- 每條 Rule 只驗證一件事（原子化）
+- 每條 Rule 只驗證一件事（原子化）— 包含「且/和/並且」必須拆分
 - 每條 Rule 至少有一個 Example
 - 邊界條件要有對應的 Example
 - 使用 Entity Mapping 中的中文實體名
-- DataTable 使用具體的測試資料（如 Alice、P001、50），禁止模糊描述`
+- DataTable 使用具體的測試資料（如 Alice、P001、50），禁止模糊描述
+- **無腦補原則**：嚴格按需求和決策來，不擅自添加需求中沒提到的欄位或功能`
 
   const userMessage = `${projectContext ? `專案背景：${projectContext}\n\n` : ''}需求描述：
 ${requirements}
@@ -651,7 +668,7 @@ export async function fixMultipleFeatures(
   const systemPrompt = `你是一位 sdd.os ISA Gherkin 專家。請根據用戶反饋修正以下 Feature Files。
 
 ## sdd.os ISA 格式規範
-1. 檔案開頭必須有 \`@Action(ActionName)\` 和 \`# Summary:\` 註解
+1. 檔案開頭必須有 \`# Action: actionName\` 和 \`# Summary:\` 註解
 2. 每個 Rule 必須標註**四類之一**：\`前置（狀態）\`、\`前置（參數）\`、\`後置（回應）\`、\`後置（狀態）\`
 3. **禁止使用舊的 @Pre/@Post**，必須使用四類前綴
 4. Rule 命名句型：\`<四類前綴> - <主詞> 必須/應 <單一條件>\`
@@ -750,6 +767,136 @@ ${decisions}` : ''}`
       fixedFeatures: parsed.features || [],
     }
   } catch (err) {
+    return { success: false, error: `解析回應時發生錯誤: ${err}` }
+  }
+}
+
+// ============================================================
+// Draft Batch Mode（ES → 一次性草稿生成）
+// ============================================================
+
+export interface DraftBatchResult {
+  success: boolean
+  schemaSql?: string
+  entityMapping?: string
+  features?: GeneratedFeature[]
+  uncertainItems?: string[]
+  error?: string
+}
+
+/**
+ * ES 完成後，一次性生成所有 Feature + Schema + Actions 草稿
+ * 用戶審閱確認後再進入 Spec Discovery
+ */
+export async function generateDraftBatch(
+  esDocumentContent: string,
+  requirements: string,
+  resolvedItems: ClarifyItem[],
+  projectContext?: string,
+  trackingContext?: LlmTrackingContext
+): Promise<DraftBatchResult> {
+  const decisions = resolvedItems
+    .filter(item => item.status === 'answered' && item.answer)
+    .map(item => `Q: ${item.whiteTextQuestion || item.question}\nA: ${item.answer}`)
+    .join('\n\n')
+
+  const systemPrompt = `你是一位資深的 BDD 分析師和資料庫架構師。根據 Event Storming 分析結果和需求，一次性產出完整的規格草稿。
+
+## 任務
+1. 分析 ES 文檔中所有 clear 的 Commands 和 ReadModels
+2. 生成 SQL Schema（每個 Aggregate 對應一個 Table）
+3. 生成 Entity Mapping（中文↔英文）
+4. 為每個 clear 的 Command/ReadModel 生成一個 Feature File
+5. 標記不確定的項目（ES 中標記為「待澄清」的）
+
+## sdd.os ISA 格式規範
+- 檔案開頭：\`# Action: actionName\` + \`# Summary: xxx\`
+- Given：\`準備一個{entity}, with table:\`
+- When：\`{summary}, call table:\`
+- Then 成功：\`{summary}成功, with table:\`
+- Then 失敗：\`操作失敗\`
+- Entity 驗證：\`存在一個{entity}, with table:\`
+- Rule 四類前綴：前置（狀態）/前置（參數）/後置（回應）/後置（狀態）
+- Rule 命名：\`<四類前綴> - <主詞> 必須/應 <單一條件>\`
+
+## 無腦補原則
+嚴格按 ES 分析結果和需求來，不擅自假設。
+
+## 輸出格式
+\`\`\`json
+{
+  "schemaSql": "完整的 SQL DDL",
+  "entityMapping": "YAML 格式",
+  "features": [
+    {
+      "name": "功能中文名稱",
+      "actionName": "create_xxx",
+      "content": "完整的 .feature 檔案內容"
+    }
+  ],
+  "uncertainItems": ["待澄清項目1的描述", "待澄清項目2的描述"]
+}
+\`\`\``
+
+  const userMessage = `${projectContext ? `專案背景：${projectContext}\n\n` : ''}需求描述：
+${requirements}
+
+---
+
+## Event Storming 分析結果
+${esDocumentContent}
+
+---
+
+釐清決策：
+${decisions || '（無額外決策）'}`
+
+  console.log('[Formulation] Draft Batch: 開始一次性生成草稿...')
+  const response = await callClaude(systemPrompt, userMessage, { maxTokens: 16384 })
+
+  if (!response.success) {
+    return { success: false, error: response.error }
+  }
+
+  // 記錄使用量
+  if (response.inputTokens && response.outputTokens) {
+    const costUsd = (response.inputTokens * SONNET_PRICING.input + response.outputTokens * SONNET_PRICING.output) / 1000000
+    await recordLlmUsage({
+      model: 'claude-sonnet-4-6',
+      inputTokens: response.inputTokens,
+      outputTokens: response.outputTokens,
+      costUsd,
+      purpose: 'formulation_draft_batch',
+      userId: trackingContext?.userId,
+      conversationId: trackingContext?.conversationId,
+    }).catch(err => console.error('[Formulation] 記錄使用量失敗:', err))
+  }
+
+  try {
+    const jsonMatch = response.content?.match(/```json\s*([\s\S]*?)\s*```/) ||
+                      response.content?.match(/\{[\s\S]*\}/)
+    if (!jsonMatch) {
+      console.error('[Formulation] Draft Batch LLM 回應無法解析為 JSON')
+      return { success: false, error: '無法解析 LLM 回應' }
+    }
+
+    const jsonStr = jsonMatch[1] || jsonMatch[0]
+    const parsed = JSON.parse(jsonStr)
+
+    const features = (parsed.features || []) as GeneratedFeature[]
+    const uncertainItems = (parsed.uncertainItems || []) as string[]
+
+    console.log(`[Formulation] Draft Batch 完成：${features.length} 個 Features，${uncertainItems.length} 個待澄清項目`)
+
+    return {
+      success: true,
+      schemaSql: parsed.schemaSql,
+      entityMapping: parsed.entityMapping,
+      features,
+      uncertainItems,
+    }
+  } catch (err) {
+    console.error('[Formulation] Draft Batch JSON 解析失敗:', err)
     return { success: false, error: `解析回應時發生錯誤: ${err}` }
   }
 }

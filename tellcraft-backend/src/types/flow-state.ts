@@ -8,6 +8,7 @@ import type { QualityReport } from '../services/quality-gate'
 import type { DeployPreCheckResult, DeploymentRecord } from '../services/deployer'
 import type { UIRequirementsSpec } from '../services/bdd-to-ui-spec'
 import type { ESKnowledgeMap } from '../services/event-storming'
+import type { ImpactAnalysis } from '../services/change-management'
 
 // ============================================================
 // 迭代歷史
@@ -94,4 +95,12 @@ export interface FlowState {
   lastStablePhase?: string     // 上一個穩定決策點的 phase（用於錯誤恢復）
   // Event Storming（Phase 0）
   esKnowledgeMap?: ESKnowledgeMap  // ES 知識地圖
+  // Clarify 批次整合
+  partialSpecContext?: string      // 部分規格摘要（注入後續 Discovery）
+  // Draft Batch Mode
+  formulationDraftUncertainItems?: string[]  // 草稿中不確定的項目
+  // Change Management
+  changeImpact?: ImpactAnalysis   // 變更影響分析結果
+  // 連續空輪計數（連續兩輪無新問題才終止 Discovery）
+  consecutiveEmptyRounds?: number
 }

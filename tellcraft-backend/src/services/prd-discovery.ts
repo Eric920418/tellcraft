@@ -28,7 +28,9 @@ export async function runPrdDiscovery(
   requirements: string,
   trackingContext?: LlmTrackingContext,
   existingItems?: ClarifyItem[],
-  decisionSummary?: DecisionSummary | null
+  decisionSummary?: DecisionSummary | null,
+  esDocumentContent?: string,
+  partialSpecContext?: string
 ): Promise<PrdDiscoveryResult> {
   const apiKey = process.env.ANTHROPIC_API_KEY
 
@@ -77,6 +79,14 @@ export async function runPrdDiscovery(
 ### D. 其他品質檢查
 - **D1. 待決事項**：是否存在 TODO 或未決議事項？
 - **D2. 模糊描述**：是否存在未量化的形容詞？
+${esDocumentContent ? `
+### E. ES 一致性檢查（Event Storming 文檔存在時）
+- **E1. ES ↔ Feature 對應**：每個 ES Command/ReadModel 是否有對應功能？名稱是否一致？
+- **E2. ES ↔ Entity 對應**：每個 ES Aggregate 是否有對應實體？屬性是否一致？
+- **E3. ES Rules ↔ Feature Rules**：ES 四類規則（Invariant/前置/後置/約束）是否都出現在對應功能中？
+
+ES 文檔內容：
+${esDocumentContent}` : ''}
 
 ## 四類規則分類說明
 
@@ -88,11 +98,14 @@ export async function runPrdDiscovery(
 | 後置（回應） | API 回傳資料的預期 | 查詢結果應包含訂單明細 |
 | 後置（狀態） | 資料庫中狀態的變化 | 庫存應減少對應數量 |
 
-## 提案優先原則
+## 提案模式
 
-對於可以從上下文合理推斷答案的問題，**在選項中加上一個「建議」標記**：
-- 如果你有足夠信心推斷答案，在最可能的選項後加 「（建議）」
-- 這讓用戶可以快速確認而非從頭思考
+對於你有高信心推薦答案的問題（例如：業界標準做法、唯一合理選擇），
+設定該題的 mode 為 "propose"，在 proposedAnswer 填入建議答案，confidence 為 "high"。
+用戶只需確認或否決，不需自己選擇。
+
+對於有一定信心但非唯一選擇的問題，保持 mode 為 "ask"，
+但在最可能的選項後加 「（建議）」讓用戶快速確認。
 
 ## 輸出要求
 
@@ -107,11 +120,14 @@ export async function runPrdDiscovery(
       "whiteTextQuestion": "白話翻譯版問題（讓非技術人員也能理解）",
       "category": "data" | "feature" | "terminology",
       "priority": "high" | "medium" | "low",
-      "checklistItem": "A1" | "A2" | ... | "D2",
+      "checklistItem": "A1" | "A2" | ... | "D2" | "E1" | "E2" | "E3",
       "ruleType": "前置（狀態）" | "前置（參數）" | "後置（回應）" | "後置（狀態）" | null,
       "location": "實體/功能名稱",
       "impact": "影響範圍說明",
-      "options": ["A. 選項描述", "B. 選項描述（建議）", "C. 選項描述"]
+      "options": ["A. 選項描述", "B. 選項描述（建議）", "C. 選項描述"],
+      "mode": "ask" | "propose",
+      "proposedAnswer": "建議的答案（propose 模式必填）",
+      "confidence": "high" | "medium"
     }
   ],
   "coverageSummary": {
@@ -123,7 +139,8 @@ export async function runPrdDiscovery(
 
 ## 優先級規則
 - **A1（實體完整性）** 的 Missing → **強制 High**
-- **A4（跨屬性不變條件）** 的 Missing → **強制 High**
+- **A4（跨屬性不變條件）** 的 Missing → **強制 High**${esDocumentContent ? `
+- **E1/E2/E3（ES 一致性）** 的 Missing → **強制 High**` : ''}
 - High：阻礙核心功能定義或資料建模
 - Medium：影響邊界條件或測試完整性
 - Low：優化或細節調整
@@ -159,7 +176,11 @@ ${pendingQuestions.join('\n')}` : ''}
 1. **不重複**：不要問與已釐清問題語意相似的問題，也不要問這一批問題中互相重複的問題
 2. **邏輯推論**：根據已有答案推論哪些功能/情況已被排除，不要問邏輯上不可能存在的問題
 3. **理解隱含意義**：用戶的回答可能隱含排除了某些功能，仔細分析答案的完整含義
-4. **尊重用戶明確排除的功能**：如果用戶說「不需要 X」「不要 Y」，就不要問任何關於 X 或 Y 的問題`
+4. **尊重用戶明確排除的功能**：如果用戶說「不需要 X」「不要 Y」，就不要問任何關於 X 或 Y 的問題
+${partialSpecContext ? `
+## 已產出的部分規格摘要
+${partialSpecContext}
+以上是根據已回答問題推導的部分規格，請據此避免重複問題，並深入未覆蓋的領域。` : ''}`
 
   const userMessage = `需求描述：\n${requirements}`
 
@@ -230,6 +251,9 @@ ${pendingQuestions.join('\n')}` : ''}
       priority?: string
       checklistItem?: string
       options?: Array<string | { label: string; description: string }>
+      mode?: 'ask' | 'propose'
+      proposedAnswer?: string
+      confidence?: 'high' | 'medium'
     }) => ({
       id: item.id || crypto.randomUUID(),
       question: item.question,
@@ -240,6 +264,12 @@ ${pendingQuestions.join('\n')}` : ''}
       options: (item.options || []).map((opt: string | { label: string; description: string }) =>
         typeof opt === 'string' ? opt : `${opt.label}. ${opt.description}`
       ),
+      // 提案模式欄位
+      ...(item.mode === 'propose' ? {
+        mode: 'propose' as const,
+        proposedAnswer: item.proposedAnswer,
+        confidence: item.confidence || 'high',
+      } : {}),
     }))
 
     console.log(`[PRD Discovery] 生成 ${items.length} 個釐清問題`)

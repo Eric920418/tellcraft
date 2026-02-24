@@ -13,11 +13,12 @@ import {
   answerClarifyItem,
   confirmBatch,
   revertAnswer,
+  revertResolvedItem,
   ClarifyItem,
 } from '../services/bdd-session'
 import { runPrdDiscovery } from '../services/prd-discovery'
-import { generateDecisionSummary, deduplicateQuestions } from '../services/clarify-dedup'
-import { runFormulation, fixMultipleFeatures, GeneratedFeature, FeatureFixInput } from '../services/formulation'
+import { generateDecisionSummary, deduplicateQuestions, generatePartialSpecContext } from '../services/clarify-dedup'
+import { runFormulation, fixMultipleFeatures, generateDraftBatch, GeneratedFeature, FeatureFixInput } from '../services/formulation'
 import { runSpecDiscovery, specIssuesToClarifyItems } from '../services/spec-discovery'
 import {
   generateDesignVariants,
@@ -51,6 +52,7 @@ import type { ESKnowledgeMap } from '../services/event-storming'
 import { generateActionsYml } from '../services/actions-design'
 import { generateIsaConfig } from '../services/isa-config'
 import { validateAndFixFeatures } from '../services/feature-validation'
+import { analyzeChangeImpact, executeChange, verifyConsistency, rollbackChange, ImpactAnalysis } from '../services/change-management'
 import type { FlowState } from '../types/flow-state'
 import { sendMessage, saveFlowState, getFlowState, deleteFlowState, makeStreamingCallback, generatedCodeToFileRows } from './orchestrator-utils'
 
@@ -117,6 +119,16 @@ function hasGoBackIntent(msg: string): boolean {
   // 排除「返回修改」（deployer_failed 已有專門處理）
   if (msg.includes('返回修改') || msg.includes('回去修改')) return false
   const keywords = ['返回', '回去', '上一步', '重新選擇', '重選', '重來', '回到上一步', 'go back']
+  return keywords.some(k => msg.includes(k))
+}
+
+function hasChangeIntent(msg: string): boolean {
+  const keywords = ['修改規格', '新增功能', '刪除功能', '變更需求', '調整規格', '改需求', '修改需求', '增加功能', '移除功能', '改規格']
+  return keywords.some(k => msg.includes(k))
+}
+
+function hasRollbackSpecIntent(msg: string): boolean {
+  const keywords = ['撤銷變更', '回滾規格', '恢復規格', '取消變更', '還原規格']
   return keywords.some(k => msg.includes(k))
 }
 
@@ -689,6 +701,336 @@ async function handleContinueFlow(
     return
   }
 
+  // Draft Batch 草稿審閱
+  if (state.phase === 'formulation_draft_review') {
+    const trimmed = message.trim()
+    const isConfirm = trimmed === '確認' || trimmed.includes('確認') || trimmed.includes('繼續') || trimmed === 'Y' || trimmed === 'y'
+
+    if (isConfirm) {
+      // 用戶確認草稿，進入 Spec Discovery
+      await sendMessage(conversationId, io, {
+        content: '草稿已確認！正在進行品質檢查...',
+        stage: 'formulation_complete',
+        progress: { current: 3, total: 4, step: '品質檢查' },
+      })
+
+      const session = await getBddSession({ sessionId: state.sessionId! })
+      const features = (session.data?.featuresContent || []).map(
+        (f: { name: string; actionName?: string; content: string }) => ({
+          name: f.name,
+          actionName: f.actionName || '',
+          content: f.content,
+        })
+      )
+      const schemaSql = session.data?.schemaSqlContent || ''
+      const entityMapping = session.data?.entityMappingContent || ''
+
+      state.phase = 'spec_discovery'
+      state.formulationDraftUncertainItems = undefined
+      await saveFlowState(redis, conversationId, state)
+
+      await startSpecDiscovery(conversationId, state, features, schemaSql, entityMapping, redis, io)
+    } else {
+      // 用戶提出修改意見，用 LLM 修改草稿後重新展示
+      await sendMessage(conversationId, io, {
+        content: '正在根據你的反饋修改草稿...',
+        stage: 'formulation_start',
+      })
+
+      const session = await getBddSession({ sessionId: state.sessionId! })
+      const existingFeatures = (session.data?.featuresContent || []) as Array<{ name: string; actionName: string; content: string }>
+
+      // 用 fixMultipleFeatures 修改
+      const fixInputs: FeatureFixInput[] = existingFeatures.map(f => ({
+        name: f.name,
+        actionName: f.actionName || '',
+        content: f.content,
+        issues: [trimmed],
+      }))
+
+      const fixResult = await fixMultipleFeatures(
+        fixInputs,
+        session.data?.resolvedItems || [],
+        session.data?.schemaSqlContent || '',
+        session.data?.entityMappingContent || '',
+        { conversationId }
+      )
+
+      if (fixResult.success && fixResult.fixedFeatures) {
+        await updateBddSession({
+          sessionId: state.sessionId!,
+          updates: { featuresContent: fixResult.fixedFeatures },
+        })
+
+        const featureNames = fixResult.fixedFeatures.map(f => `- ${f.name} (${f.actionName})`).join('\n')
+        await sendMessage(conversationId, io, {
+          content: `草稿已修改！\n\n${featureNames}\n\n請確認是否符合預期，或繼續提出修改意見。`,
+          stage: 'formulation_complete',
+          quickReplies: [
+            { label: '確認草稿，繼續', value: '確認', style: 'primary' as const },
+            { label: '需要調整', value: '調整', style: 'ghost' as const },
+          ],
+        })
+      } else {
+        await sendMessage(conversationId, io, {
+          content: `修改失敗：${fixResult.error}\n\n請重新描述修改意見，或輸入「確認」跳過修改繼續流程。`,
+          stage: 'error',
+          quickReplies: [
+            { label: '確認草稿，繼續', value: '確認', style: 'primary' as const },
+          ],
+        })
+      }
+    }
+    return
+  }
+
+  // 規格回滾選擇
+  if (state.phase === 'spec_rollback_select') {
+    const trimmed = message.trim()
+    if (trimmed === '取消' || trimmed.includes('取消')) {
+      state.phase = 'spec_completed'
+      await saveFlowState(redis, conversationId, state)
+      await sendMessage(conversationId, io, {
+        content: '已取消回滾。',
+        stage: 'spec_complete',
+      })
+      return
+    }
+
+    const indexMatch = trimmed.match(/^(\d+)$/)
+    if (indexMatch) {
+      const chosenIndex = parseInt(indexMatch[1], 10) - 1
+      const session = await getBddSession({ sessionId: state.sessionId! })
+      if (!session.success || !session.data) {
+        state.phase = 'spec_completed'
+        await saveFlowState(redis, conversationId, state)
+        return
+      }
+      const history = session.data.changeHistory || []
+      if (chosenIndex < 0 || chosenIndex >= history.length) {
+        await sendMessage(conversationId, io, {
+          content: `⚠️ 無效的編號，請輸入 1-${history.length} 之間的數字。`,
+          stage: 'error',
+        })
+        return
+      }
+
+      const entry = history[chosenIndex]
+      await sendMessage(conversationId, io, {
+        content: `正在回滾變更「${entry.description}」及其之後的所有變更...`,
+        stage: 'spec_validating',
+      })
+
+      const result = await rollbackChange(state.sessionId!, entry.id)
+      if (!result.success) {
+        await sendMessage(conversationId, io, {
+          content: `回滾失敗：${result.error}`,
+          stage: 'error',
+        })
+        state.phase = 'spec_completed'
+        await saveFlowState(redis, conversationId, state)
+        return
+      }
+
+      const rolledBackCount = history.length - chosenIndex
+      state.phase = 'spec_completed'
+      await saveFlowState(redis, conversationId, state)
+
+      await sendMessage(conversationId, io, {
+        content: `規格已回滾！已還原 ${rolledBackCount} 筆變更。\n\n- ${result.rolledBackSpecs?.features.length || 0} 個 Feature Files\n\n你可以繼續進行 UI/UX 設計，或描述其他需要修改的地方。`,
+        stage: 'spec_complete',
+      })
+      return
+    }
+
+    await sendMessage(conversationId, io, {
+      content: '請輸入要回滾的變更編號（如「1」），或輸入「取消」放棄。',
+      stage: 'info',
+    })
+    return
+  }
+
+  // 變更確認
+  if (state.phase === 'spec_change_confirm') {
+    const trimmed = message.trim()
+    const isConfirm = trimmed === '確認' || trimmed.includes('確認') || trimmed.includes('執行') || trimmed === 'Y' || trimmed === 'y'
+    const isCancel = trimmed === '取消' || trimmed.includes('取消') || trimmed === 'N' || trimmed === 'n'
+
+    if (isCancel) {
+      state.phase = 'spec_completed'
+      state.changeImpact = undefined
+      await saveFlowState(redis, conversationId, state)
+      await sendMessage(conversationId, io, {
+        content: '已取消變更。你可以繼續進行 UI/UX 設計，或描述其他需要修改的地方。',
+        stage: 'spec_complete',
+      })
+      return
+    }
+
+    if (isConfirm && state.changeImpact) {
+      await sendMessage(conversationId, io, {
+        content: '正在執行變更...',
+        stage: 'spec_validating',
+      })
+
+      // 取得現有規格
+      const session = await getBddSession({ sessionId: state.sessionId! })
+      if (!session.success || !session.data) {
+        await sendMessage(conversationId, io, {
+          content: '無法取得規格資料，請重試。',
+          stage: 'error',
+        })
+        state.phase = 'spec_completed'
+        state.changeImpact = undefined
+        await saveFlowState(redis, conversationId, state)
+        return
+      }
+
+      const existingSpecs = {
+        esDocument: session.data.esDocumentContent,
+        features: (session.data.featuresContent || []) as GeneratedFeature[],
+        schemaSql: session.data.schemaSqlContent || '',
+        entityMapping: session.data.entityMappingContent || '',
+        actionsYml: session.data.actionsYmlContent,
+      }
+
+      const changeResult = await executeChange(
+        state.changeImpact,
+        state.changeImpact.description,
+        existingSpecs,
+        { conversationId }
+      )
+
+      if (!changeResult.success || !changeResult.updatedSpecs) {
+        await sendMessage(conversationId, io, {
+          content: `變更執行失敗：${changeResult.error}\n\n規格保持不變。`,
+          stage: 'error',
+        })
+        state.phase = 'spec_completed'
+        state.changeImpact = undefined
+        await saveFlowState(redis, conversationId, state)
+        return
+      }
+
+      // 一致性驗證
+      const updatedFeatures = changeResult.updatedSpecs.features || existingSpecs.features
+      const updatedSchemaSql = changeResult.updatedSpecs.schemaSql || existingSpecs.schemaSql
+      const updatedEntityMapping = changeResult.updatedSpecs.entityMapping || existingSpecs.entityMapping
+
+      const consistency = verifyConsistency({
+        features: updatedFeatures,
+        schemaSql: updatedSchemaSql,
+        entityMapping: updatedEntityMapping,
+      })
+
+      // 記錄變更歷史（變更前快照）
+      const affectedLayersList: string[] = []
+      if (state.changeImpact.affectedLayers.features?.length) {
+        affectedLayersList.push(...state.changeImpact.affectedLayers.features.map(f => `features:${f}`))
+      }
+      if (state.changeImpact.affectedLayers.schema?.length) {
+        affectedLayersList.push(...state.changeImpact.affectedLayers.schema.map(s => `schema:${s}`))
+      }
+      if (state.changeImpact.affectedLayers.actions?.length) {
+        affectedLayersList.push(...state.changeImpact.affectedLayers.actions.map(a => `actions:${a}`))
+      }
+
+      const historyEntry: import('../services/bdd-session').ChangeHistoryEntry = {
+        id: crypto.randomUUID(),
+        timestamp: Date.now(),
+        description: state.changeImpact.description,
+        changeType: state.changeImpact.changeType,
+        affectedLayers: affectedLayersList,
+        previousSnapshot: {
+          features: existingSpecs.features as import('../services/bdd-session').FeatureFile[],
+          schemaSql: existingSpecs.schemaSql,
+          entityMapping: existingSpecs.entityMapping,
+          actionsYml: existingSpecs.actionsYml || undefined,
+          isaConfig: session.data.isaConfigContent || undefined,
+        },
+      }
+
+      const existingHistory = session.data.changeHistory || []
+      const updatedHistory = [...existingHistory, historyEntry]
+
+      // 更新 DB
+      const dbUpdates: Record<string, unknown> = {}
+      if (changeResult.updatedSpecs.features) dbUpdates.featuresContent = changeResult.updatedSpecs.features
+      if (changeResult.updatedSpecs.schemaSql) dbUpdates.schemaSqlContent = changeResult.updatedSpecs.schemaSql
+      if (changeResult.updatedSpecs.entityMapping) dbUpdates.entityMappingContent = changeResult.updatedSpecs.entityMapping
+      dbUpdates.changeHistory = updatedHistory
+
+      if (Object.keys(dbUpdates).length > 0) {
+        await updateBddSession({
+          sessionId: state.sessionId!,
+          updates: dbUpdates,
+        })
+      }
+
+      // 重新生成 Actions + ISA（如影響到）
+      const trackingContext = { conversationId }
+      if (state.changeImpact.affectedLayers.actions?.length || state.changeImpact.affectedLayers.isa) {
+        const actionsResult = await generateActionsYml(
+          { features: updatedFeatures, schemaSql: updatedSchemaSql, entityMapping: updatedEntityMapping },
+          trackingContext
+        )
+        if (actionsResult.success && actionsResult.actionsYml) {
+          await updateBddSession({
+            sessionId: state.sessionId!,
+            updates: { actionsYmlContent: actionsResult.actionsYml },
+          })
+        }
+
+        const isaResult = generateIsaConfig({
+          features: updatedFeatures,
+          entityMapping: updatedEntityMapping,
+          actionsYml: actionsResult.actionsYml || '',
+        })
+        if (isaResult.success && isaResult.isaConfigYml) {
+          await updateBddSession({
+            sessionId: state.sessionId!,
+            updates: { isaConfigContent: isaResult.isaConfigYml },
+          })
+        }
+      }
+
+      let resultMsg = `規格變更完成！\n\n- ${updatedFeatures.length} 個 Feature Files`
+      if (changeResult.updatedSpecs.schemaSql) resultMsg += '\n- Schema 已更新'
+      if (!consistency.passed) {
+        resultMsg += `\n\n⚠️ 一致性檢查發現 ${consistency.issues.length} 個問題：\n${consistency.issues.map(i => `- ${i}`).join('\n')}`
+      }
+      resultMsg += '\n\n你可以繼續進行 UI/UX 設計，或描述更多修改。'
+
+      state.phase = 'spec_completed'
+      state.changeImpact = undefined
+      await saveFlowState(redis, conversationId, state)
+
+      await sendMessage(conversationId, io, {
+        content: resultMsg,
+        stage: 'spec_complete',
+      })
+    } else {
+      await sendMessage(conversationId, io, {
+        content: '請輸入「確認」執行變更，或「取消」放棄。',
+        stage: 'info',
+        quickReplies: [
+          { label: '確認執行', value: '確認', style: 'primary' as const },
+          { label: '取消', value: '取消', style: 'ghost' as const },
+        ],
+      })
+    }
+    return
+  }
+
+  // 變更分析中（攔截用戶輸入）
+  if (state.phase === 'spec_change_analyzing') {
+    await sendMessage(conversationId, io, {
+      content: '正在分析變更影響，請稍候...',
+      stage: 'info',
+    })
+    return
+  }
+
   // 快速模式生成中（攔截用戶輸入 + 死鎖偵測）
   if (state.phase === 'fast_generating') {
     const FAST_BUILD_TIMEOUT_MS = 10 * 60 * 1000
@@ -868,6 +1210,59 @@ async function handleContinueFlow(
     const normalizedMsg = message.replace(/[Ａ-Ｚａ-ｚ]/g, ch =>
       String.fromCharCode(ch.charCodeAt(0) - 0xFEE0)
     )
+
+    // ── spec_completed：檢測需求變更意圖 ──
+    if (state.phase === 'spec_completed' && hasChangeIntent(trimmedMsg)) {
+      await handleSpecChange(conversationId, state, trimmedMsg, redis, io)
+      return
+    }
+
+    // ── spec_completed：查看變更歷史 ──
+    if (state.phase === 'spec_completed' && trimmedMsg.includes('變更歷史')) {
+      const session = await getBddSession({ sessionId: state.sessionId! })
+      if (!session.success || !session.data) return
+      const history = session.data.changeHistory || []
+      if (history.length === 0) {
+        await sendMessage(conversationId, io, { content: '目前沒有變更歷史。', stage: 'info' })
+      } else {
+        let text = `**變更歷史**（${history.length} 筆）\n\n`
+        history.forEach((entry, i) => {
+          const time = new Date(entry.timestamp).toLocaleString('zh-TW')
+          text += `**${i + 1}.** [${entry.changeType}] ${entry.description}\n   ${time} | 影響：${entry.affectedLayers.join(', ')}\n\n`
+        })
+        text += '_輸入「撤銷變更」可回滾到某個版本_'
+        await sendMessage(conversationId, io, { content: text, stage: 'info' })
+      }
+      return
+    }
+
+    // ── spec_completed：撤銷變更（回滾規格）──
+    if (state.phase === 'spec_completed' && hasRollbackSpecIntent(trimmedMsg)) {
+      const session = await getBddSession({ sessionId: state.sessionId! })
+      if (!session.success || !session.data) return
+      const history = session.data.changeHistory || []
+      if (history.length === 0) {
+        await sendMessage(conversationId, io, { content: '目前沒有變更歷史可回滾。', stage: 'info' })
+        return
+      }
+      let text = `**選擇要回滾到的版本**\n\n回滾會還原該筆變更及其之後的所有變更。\n\n`
+      history.forEach((entry, i) => {
+        const time = new Date(entry.timestamp).toLocaleString('zh-TW')
+        text += `**${i + 1}.** [${entry.changeType}] ${entry.description}\n   ${time}\n\n`
+      })
+      text += '_輸入編號（如「1」）選擇要回滾的變更，或輸入「取消」放棄。_'
+      state.phase = 'spec_rollback_select'
+      await saveFlowState(redis, conversationId, state)
+      await sendMessage(conversationId, io, {
+        content: text,
+        stage: 'spec_rollback_select',
+        quickReplies: [
+          ...history.map((_, i) => ({ label: `回滾 #${i + 1}`, value: String(i + 1), style: 'ghost' as const })),
+          { label: '取消', value: '取消', style: 'ghost' as const },
+        ],
+      })
+      return
+    }
 
     // 檢查是否是模板選擇訊息
     if (message.includes('我選擇') && message.includes('模板')) {
@@ -1263,7 +1658,7 @@ async function startPrdDiscoveryWithES(
   })
 
   console.log(`[Orchestrator] 調用 PRD Discovery（${esDocument ? '含 ES 文檔' : '無 ES'}）`)
-  const discoveryResult = await runPrdDiscovery(enrichedRequirements, trackingContext)
+  const discoveryResult = await runPrdDiscovery(enrichedRequirements, trackingContext, undefined, undefined, esDocument || undefined)
 
   if (!discoveryResult.success || !discoveryResult.items) {
     console.error('[Orchestrator] PRD Discovery 失敗:', discoveryResult.error)
@@ -1522,6 +1917,41 @@ async function processUserReply(input: ProcessReplyInput) {
     return
   }
 
+  // 處理「反悔/重答」已確認問題
+  const revertMatch = userMessage.match(/^(?:反悔|重答)\s*(.+)$/i)
+  if (revertMatch) {
+    const keyword = revertMatch[1].trim()
+    // 搜尋 resolved + staging 中匹配關鍵字的項目
+    const allItems = [...(session.resolvedItems || []), ...(session.stagingItems || [])]
+    const matchedItem = allItems.find(item =>
+      (item.whiteTextQuestion || item.question).includes(keyword) ||
+      item.question.includes(keyword)
+    )
+    if (matchedItem) {
+      const isResolved = (session.resolvedItems || []).some(i => i.id === matchedItem.id)
+      if (isResolved) {
+        await revertResolvedItem({ sessionId: session.id, itemId: matchedItem.id })
+      } else {
+        await revertAnswer({ sessionId: session.id, itemId: matchedItem.id })
+      }
+      await sendMessage(conversationId, io, {
+        content: `好的，讓我們重新回答這個問題：`,
+        stage: 'clarify_revert',
+      })
+      await sendClarifyQuestion(conversationId, io, { ...matchedItem, status: 'pending', answer: undefined }, 0, 1)
+      state.currentItemId = matchedItem.id
+      state.waitingForReply = true
+      await saveFlowState(redis, conversationId, state)
+      return
+    } else {
+      await sendMessage(conversationId, io, {
+        content: `找不到包含「${keyword}」的問題。請嘗試更精確的關鍵字。`,
+        stage: 'error',
+      })
+      return
+    }
+  }
+
   // 處理「修改 N」指令
   const modifyMatch = userMessage.match(/^修改\s*(\d+)$/i)
   if (modifyMatch) {
@@ -1556,6 +1986,41 @@ async function processUserReply(input: ProcessReplyInput) {
   if (state.currentItemId) {
     const currentItem = session.clarifyItems.find(i => i.id === state.currentItemId)
     if (currentItem) {
+      // ── 提案模式回覆處理 ──
+      if (userMessage === '__accept_proposal__' || userMessage === '同意') {
+        if (currentItem.mode === 'propose' && currentItem.proposedAnswer) {
+          // 自動填入 proposedAnswer 作為答案
+          await answerClarifyItem({
+            sessionId: session.id,
+            itemId: currentItem.id,
+            answer: currentItem.proposedAnswer,
+          })
+          // 繼續流程（跳過下方驗證）
+          state.questionIndex++
+          state.batchCount++
+          const BATCH_SIZE = 5
+          if (state.batchCount >= BATCH_SIZE) {
+            await sendBatchConfirmation(conversationId, state, redis, io)
+            return
+          }
+          await continueToNextQuestion(conversationId, state, session, redis, io)
+          return
+        }
+      }
+
+      if (userMessage === '__reject_proposal__' || userMessage === '不同意') {
+        if (currentItem.mode === 'propose') {
+          // 切換為 ask 模式，重新發送問題
+          await sendMessage(conversationId, io, {
+            content: '好的，請告訴我您的看法，或從以下選項中選擇：',
+            stage: 'clarify_question',
+          })
+          // 以 ask 模式重發
+          await sendClarifyQuestion(conversationId, io, { ...currentItem, mode: 'ask' }, state.questionIndex, session.clarifyItems.length + session.stagingItems.length + session.resolvedItems.length)
+          return
+        }
+      }
+
       const validation = validateAnswer(currentItem, userMessage)
 
       if (!validation.valid) {
@@ -1602,7 +2067,40 @@ async function sendClarifyQuestion(
 ) {
   let text = `（${index + 1}/${total}）\n\n${item.whiteTextQuestion || item.question}`
 
-  // 檢測是否有「（建議）」選項 → 提案模式
+  // ── 提案模式（propose）：AI 直接建議答案，用戶只需確認/否決 ──
+  if (item.mode === 'propose' && item.proposedAnswer) {
+    text += `\n\n**AI 建議**：${item.proposedAnswer}`
+    if (item.confidence === 'high') {
+      text += '\n\n_（高信心建議，同意請直接確認）_'
+    }
+
+    const quickReplies: { label: string; value: string; style?: 'primary' | 'secondary' | 'ghost' }[] = [
+      { label: '同意', value: '__accept_proposal__', style: 'primary' },
+      { label: '不同意', value: '__reject_proposal__', style: 'ghost' },
+    ]
+
+    // 計算建築進度
+    const buildingProgress = globalProgress ? {
+      current: globalProgress.answered + 1,
+      total: globalProgress.totalQuestions,
+      round: globalProgress.round,
+      maxRounds: globalProgress.maxRounds,
+    } : undefined
+
+    await sendMessage(conversationId, io, {
+      content: text,
+      stage: 'clarify_question',
+      quickReplies,
+      richContent: buildingProgress ? {
+        type: 'building_progress' as 'building_progress',
+        data: buildingProgress as unknown as Record<string, unknown>,
+      } : undefined,
+    })
+    return
+  }
+
+  // ── 普通問答模式（ask）──
+  // 檢測是否有「（建議）」選項
   let hasProposal = false
   if (item.options && item.options.length > 0) {
     hasProposal = item.options.some(opt => {
@@ -1612,7 +2110,7 @@ async function sendClarifyQuestion(
   }
 
   if (hasProposal) {
-    text += '\n\n💡 _以下有一個建議選項，若您同意可直接確認：_\n\n'
+    text += '\n\n_以下有一個建議選項，若您同意可直接確認：_\n\n'
   } else {
     text += '\n\n'
   }
@@ -1622,7 +2120,6 @@ async function sendClarifyQuestion(
       if (typeof opt === 'string') {
         const match = opt.match(/^([A-Z])\.\s*(.*)$/)
         if (match) {
-          // 如果包含「（建議）」，加粗標記
           const isProposal = match[2].includes('（建議）')
           const display = isProposal ? `${match[2]}  ✅` : match[2]
           return `**${match[1]}.** ${display}`
@@ -1650,7 +2147,6 @@ async function sendClarifyQuestion(
         label = `${letter}. ${opt.description || opt.label || ''}`
         optStr = opt.description || opt.label || ''
       }
-      // 建議選項使用 primary 樣式，讓用戶更容易點擊
       const isProposal = optStr.includes('（建議）')
       quickReplies.push({ label, value: letter, style: isProposal ? 'primary' : 'ghost' })
     })
@@ -1814,53 +2310,80 @@ async function completeClärifyPhase(
     ? await generateDecisionSummary(resolvedItems, { conversationId })
     : null
 
-  // ② 準備問題
+  // ② 生成 Partial Spec Context（>= 5 題才值得摘要）
+  if (resolvedItems.length >= 5 && !state.partialSpecContext) {
+    const partialContext = await generatePartialSpecContext(
+      originalRequirements,
+      resolvedItems,
+      { conversationId }
+    )
+    if (partialContext) {
+      state.partialSpecContext = partialContext
+      await saveFlowState(redis, conversationId, state)
+    }
+  }
+
+  // ③ 準備問題
   await sendMessage(conversationId, io, {
     content: '根據已知資訊，準備下一批需要確認的細節...',
     stage: 'prd_discovery_generating',
   })
 
   // 調用 LLM 生成更多問題，傳入已回答+待答的問題避免重複
+  const esDocumentContent = session.data.esDocumentContent || undefined
   const discoveryResult = await runPrdDiscovery(
     originalRequirements,
     { conversationId },
     allExistingItems,
-    decisionSummary
+    decisionSummary,
+    esDocumentContent,
+    state.partialSpecContext
   )
 
-  if (!discoveryResult.success || !discoveryResult.items || discoveryResult.items.length === 0) {
-    // 沒有更多問題了，進入 Formulation
-    console.log(`[Orchestrator] 第 ${state.currentRound + 1} 輪沒有新問題，進入 Formulation`)
+  // ── 連續空輪終止邏輯（規格要求連續兩輪無新問題才終止）──
+  let newItems = discoveryResult.items || []
+
+  // 去重檢查（有結果時）
+  if (newItems.length > 0) {
     await sendMessage(conversationId, io, {
-      content: `需求已經足夠清楚了！`,
-      stage: 'prd_discovery_complete',
+      content: '檢查問題是否重複...',
+      stage: 'prd_discovery_deduping',
     })
-    await finishClarifyAndStartFormulation(conversationId, state, redis, io)
+    if (allExistingItems.length > 0) {
+      newItems = await deduplicateQuestions(newItems, allExistingItems, { conversationId })
+    }
+  }
+
+  if (!discoveryResult.success || newItems.length === 0) {
+    // 本輪無新問題（或去重後為空）
+    state.consecutiveEmptyRounds = (state.consecutiveEmptyRounds || 0) + 1
+
+    if (state.consecutiveEmptyRounds >= 2) {
+      // 連續兩輪空 → 正式終止
+      console.log(`[Orchestrator] 連續 ${state.consecutiveEmptyRounds} 輪無新問題，進入 Formulation`)
+      await sendMessage(conversationId, io, {
+        content: `需求已經足夠清楚了！`,
+        stage: 'prd_discovery_complete',
+      })
+      await finishClarifyAndStartFormulation(conversationId, state, redis, io)
+      return
+    }
+
+    // 第一輪空 → 再跑一輪確認
+    console.log(`[Orchestrator] 第 ${state.currentRound + 1} 輪無新問題（第 ${state.consecutiveEmptyRounds} 次），再確認一輪`)
+    state.currentRound++
+    await saveFlowState(redis, conversationId, state)
+    await sendMessage(conversationId, io, {
+      content: '本輪沒有發現新問題，再進行一輪確認...',
+      stage: 'prd_discovery_continue',
+    })
+    // 遞歸再跑一輪 Discovery
+    await completeClärifyPhase(conversationId, state, redis, io)
     return
   }
 
-  // ③ 去重檢查
-  await sendMessage(conversationId, io, {
-    content: '檢查問題是否重複...',
-    stage: 'prd_discovery_deduping',
-  })
-
-  // L3：Post-generation 去重
-  let newItems = discoveryResult.items
-  if (newItems.length > 0 && allExistingItems.length > 0) {
-    newItems = await deduplicateQuestions(newItems, allExistingItems, { conversationId })
-  }
-
-  // 去重後全部被移除 → 直接進 Formulation
-  if (newItems.length === 0) {
-    console.log(`[Orchestrator] 第 ${state.currentRound + 1} 輪問題全部去重，進入 Formulation`)
-    await sendMessage(conversationId, io, {
-      content: `需求已經足夠清楚了！`,
-      stage: 'prd_discovery_complete',
-    })
-    await finishClarifyAndStartFormulation(conversationId, state, redis, io)
-    return
-  }
+  // 有新問題 → 重置空輪計數器
+  state.consecutiveEmptyRounds = 0
 
   console.log(`[Orchestrator] 第 ${state.currentRound + 1} 輪生成 ${newItems.length} 個新問題（去重後）`)
 
@@ -1928,6 +2451,69 @@ async function finishClarifyAndStartFormulation(
   ].filter(item => item.answer)
 
   console.log(`[Orchestrator] 開始 Formulation，共 ${allResolvedItems.length} 個釐清項目`)
+
+  // 如果有 ES 文檔，嘗試 Draft Batch Mode
+  const esDocumentContent = session.data.esDocumentContent
+  if (esDocumentContent) {
+    console.log('[Orchestrator] 偵測到 ES 文檔，嘗試 Draft Batch 生成...')
+    await sendMessage(conversationId, io, {
+      content: '根據 Event Storming 分析結果，正在一次性生成規格草稿...',
+      stage: 'formulation_start',
+    })
+
+    const draftResult = await generateDraftBatch(
+      esDocumentContent,
+      session.data.originalRequirements,
+      allResolvedItems,
+      session.data.projectContext || undefined,
+      { conversationId }
+    )
+
+    if (draftResult.success && draftResult.features && draftResult.features.length > 0) {
+      // 保存草稿到 session
+      await updateBddSession({
+        sessionId: state.sessionId!,
+        updates: {
+          currentPhase: 'formulation_draft_review',
+          schemaSqlContent: draftResult.schemaSql,
+          entityMappingContent: draftResult.entityMapping,
+          featuresContent: draftResult.features,
+        },
+      })
+
+      // 保存不確定項目
+      if (draftResult.uncertainItems && draftResult.uncertainItems.length > 0) {
+        state.formulationDraftUncertainItems = draftResult.uncertainItems
+      }
+
+      // 構建展示消息
+      const featureNames = draftResult.features.map(f => `- ${f.name} (${f.actionName})`).join('\n')
+      let draftMsg = `規格草稿已生成！\n\n**資料模型**：已建立 SQL Schema\n**功能規格**：${draftResult.features.length} 個 Feature Files\n${featureNames}`
+
+      if (draftResult.uncertainItems && draftResult.uncertainItems.length > 0) {
+        draftMsg += `\n\n**待澄清項目**：\n${draftResult.uncertainItems.map(item => `- ${item}`).join('\n')}`
+      }
+
+      draftMsg += '\n\n請確認草稿是否符合預期，或提出修改意見。'
+
+      await sendMessage(conversationId, io, {
+        content: draftMsg,
+        stage: 'formulation_complete',
+        quickReplies: [
+          { label: '確認草稿，繼續', value: '確認', style: 'primary' as const },
+          { label: '需要調整', value: '調整', style: 'ghost' as const },
+        ],
+      })
+
+      state.phase = 'formulation_draft_review'
+      state.waitingForReply = true
+      await saveFlowState(redis, conversationId, state)
+      return
+    } else {
+      console.warn('[Orchestrator] Draft Batch 失敗，fallback 到逐個生成:', draftResult.error)
+      // fallback 到原有流程
+    }
+  }
 
   // 執行 Formulation（失敗自動重試 1 次）
   const formulationProgressCallback = async (step: string, current: number, total: number, detail?: string) => {
@@ -2353,6 +2939,87 @@ async function fixFeaturesAndComplete(
 /**
  * 完成 Spec 階段，進入 UIUX 設計偏好詢問
  */
+// ============================================================
+// Change Management
+// ============================================================
+
+async function handleSpecChange(
+  conversationId: string,
+  state: FlowState,
+  changeDescription: string,
+  redis: Redis,
+  io: SocketIOServer
+) {
+  state.phase = 'spec_change_analyzing'
+  await saveFlowState(redis, conversationId, state)
+
+  await sendMessage(conversationId, io, {
+    content: '正在分析變更影響...',
+    stage: 'spec_validating',
+  })
+
+  // 取得現有規格
+  const session = await getBddSession({ sessionId: state.sessionId! })
+  if (!session.success || !session.data) {
+    state.phase = 'spec_completed'
+    await saveFlowState(redis, conversationId, state)
+    await sendMessage(conversationId, io, {
+      content: '無法取得規格資料，請重試。',
+      stage: 'error',
+    })
+    return
+  }
+
+  const existingSpecs = {
+    esDocument: session.data.esDocumentContent,
+    features: (session.data.featuresContent || []) as GeneratedFeature[],
+    schemaSql: session.data.schemaSqlContent || '',
+    entityMapping: session.data.entityMappingContent || '',
+    actionsYml: session.data.actionsYmlContent,
+  }
+
+  const impactResult = await analyzeChangeImpact(
+    changeDescription,
+    existingSpecs,
+    { conversationId }
+  )
+
+  if (!impactResult.success || !impactResult.impact) {
+    state.phase = 'spec_completed'
+    await saveFlowState(redis, conversationId, state)
+    await sendMessage(conversationId, io, {
+      content: `無法分析變更影響：${impactResult.error}\n\n建議重新開始 BDD 流程，或嘗試更具體地描述變更。`,
+      stage: 'error',
+    })
+    return
+  }
+
+  // 展示影響分析，等待確認
+  state.phase = 'spec_change_confirm'
+  state.changeImpact = impactResult.impact
+  await saveFlowState(redis, conversationId, state)
+
+  const affectedSummary: string[] = []
+  if (impactResult.impact.affectedLayers.features?.length) {
+    affectedSummary.push(`Feature Files: ${impactResult.impact.affectedLayers.features.join(', ')}`)
+  }
+  if (impactResult.impact.affectedLayers.schema?.length) {
+    affectedSummary.push(`Schema Tables: ${impactResult.impact.affectedLayers.schema.join(', ')}`)
+  }
+  if (impactResult.impact.affectedLayers.actions?.length) {
+    affectedSummary.push(`Actions: ${impactResult.impact.affectedLayers.actions.join(', ')}`)
+  }
+
+  await sendMessage(conversationId, io, {
+    content: `**變更影響分析**\n\n${impactResult.impact.displayText}\n\n**受影響範圍**：\n${affectedSummary.map(s => `- ${s}`).join('\n')}\n\n確認要執行這個變更嗎？`,
+    stage: 'spec_complete',
+    quickReplies: [
+      { label: '確認執行', value: '確認', style: 'primary' as const },
+      { label: '取消', value: '取消', style: 'ghost' as const },
+    ],
+  })
+}
+
 async function completeSpecPhase(
   conversationId: string,
   state: FlowState,

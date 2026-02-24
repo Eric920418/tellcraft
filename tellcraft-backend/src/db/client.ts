@@ -232,6 +232,8 @@ export async function getBddSession(sessionId: string) {
     generated_styles: string | null
     // Event Storming
     es_document_content: string | null
+    // 變更歷史
+    change_history: unknown[] | null
   }>(
     `SELECT * FROM bdd_sessions WHERE id = $1`,
     [sessionId]
@@ -294,6 +296,8 @@ export async function updateBddSession(
     generatedStyles: 'generated_styles',
     // Event Storming
     esDocumentContent: 'es_document_content',
+    // 變更歷史
+    changeHistory: 'change_history',
   }
 
   // PostgreSQL 原生陣列欄位（TEXT[]）— 不能 JSON.stringify，要讓 pg driver 處理

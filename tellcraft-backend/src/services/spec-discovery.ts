@@ -164,7 +164,7 @@ export async function runSpecDiscovery(
 | S4 | 格式正確性 | 是否符合 sdd.os ISA 格式規範（四類前綴、命名句型） |
 | S5 | 跨 Feature 一致性 | 不同 Feature 之間的實體命名、狀態流轉是否一致 |
 | S6 | Schema 對應 | Feature 中使用的欄位是否與 Schema 定義一致 |
-| S7 | Rule 原子化 | 每條 Rule 是否只驗證一件事？是否有需要拆分的 Rule？ |
+| S7 | Rule 原子化 | 每條 Rule 是否只驗證一件事？包含「且/和/並且」的 Rule 必須拆分。混合前後置條件的 Rule 也必須拆分。 |
 
 ### S1 四類規則完整性檢查細則
 - 每個 Feature 至少需要 1 條「前置（參數）」Rule（必要參數檢查）
@@ -173,6 +173,7 @@ export async function runSpecDiscovery(
 - **檢查是否有使用舊的 @Pre/@Post 而非四類前綴**
 
 ### S4 格式正確性檢查細則
+- 檔案開頭是否使用 \`# Action: actionName\` 格式（而非舊的 \`@Action()\`）
 - Rule 命名是否遵循句型：\`<四類前綴> - <主詞> 必須/應 <單一條件>\`
 - 是否有 Rule 使用了舊的 @Pre/@Post 標註
 - 是否有 Rule 缺少四類前綴
@@ -191,7 +192,7 @@ export async function runSpecDiscovery(
 - Entity 驗證：\`存在一個{entity}, with table:\`
 
 ### 必要元素
-- \`@Action(ActionName)\` 註解
+- \`# Action: actionName\` 標頭（不是舊的 \`@Action()\`）
 - \`# Summary: xxx\` 註解
 - 每條 Rule 標註四類之一（前置（狀態）/前置（參數）/後置（回應）/後置（狀態））
 

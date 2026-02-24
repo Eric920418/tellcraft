@@ -13,6 +13,10 @@ export interface ClarifyItem {
   status: 'pending' | 'answered' | 'skipped'
   answer?: string
   options?: Array<string | { label: string; description?: string }>
+  // 提案模式
+  mode?: 'ask' | 'propose'          // 默認 'ask'
+  proposedAnswer?: string            // propose 模式的建議答案
+  confidence?: 'high' | 'medium'     // 建議信心度
 }
 
 export interface BddSession {
@@ -37,6 +41,10 @@ export interface BddSession {
     errors: string[]
     warnings: string[]
   } | null
+  // Event Storming
+  esDocumentContent: string | null
+  // 變更歷史
+  changeHistory: ChangeHistoryEntry[] | null
   // UIUX 生成相關欄位
   uiuxTemplateId: string | null
   designVariants: DesignVariant[] | null
@@ -108,6 +116,21 @@ export interface FeatureFile {
   content: string
 }
 
+export interface ChangeHistoryEntry {
+  id: string                      // UUID
+  timestamp: number               // Date.now()
+  description: string             // 用戶的變更描述
+  changeType: 'add' | 'modify' | 'delete'
+  affectedLayers: string[]        // ['features:login', 'schema:users']
+  previousSnapshot: {             // 變更前快照（供回滾）
+    features?: FeatureFile[]
+    schemaSql?: string
+    entityMapping?: string
+    actionsYml?: string
+    isaConfig?: string
+  }
+}
+
 // ============================================================
 // BDD Session 操作
 // ============================================================
@@ -173,6 +196,10 @@ export async function getBddSession(input: {
       generatedPages: (session.generated_pages || null) as GeneratedComponent[] | null,
       generatedComponents: (session.generated_components || null) as GeneratedComponent[] | null,
       generatedStyles: session.generated_styles || null,
+      // Event Storming
+      esDocumentContent: session.es_document_content || null,
+      // 變更歷史
+      changeHistory: (session.change_history || null) as ChangeHistoryEntry[] | null,
     }
 
     return { success: true, data }
@@ -209,6 +236,8 @@ export async function updateBddSession(input: {
     generatedStyles: string
     // Event Storming
     esDocumentContent: string
+    // 變更歷史
+    changeHistory: ChangeHistoryEntry[]
   }>
 }): Promise<{ success: boolean; error?: string }> {
   try {
@@ -320,6 +349,50 @@ export async function confirmBatch(input: {
     return { success: true }
   } catch (error) {
     console.error('[BddSession] 確認批次失敗:', error)
+    return { success: false, error: String(error) }
+  }
+}
+
+/**
+ * 反悔已確認項目（resolved → clarifyItems）
+ */
+export async function revertResolvedItem(input: {
+  sessionId: string
+  itemId: string
+}): Promise<{ success: boolean; error?: string }> {
+  try {
+    const session = await db.getBddSession(input.sessionId)
+    if (!session) {
+      return { success: false, error: 'Session 不存在' }
+    }
+
+    const clarifyItems = (session.clarify_items || []) as ClarifyItem[]
+    const resolvedItems = (session.resolved_items || []) as ClarifyItem[]
+
+    const itemIndex = resolvedItems.findIndex(item => item.id === input.itemId)
+    if (itemIndex === -1) {
+      return { success: false, error: '項目不存在於已確認列表' }
+    }
+
+    const item = resolvedItems[itemIndex]
+    const revertedItem: ClarifyItem = {
+      ...item,
+      status: 'pending',
+      answer: undefined,
+    }
+
+    // 從 resolvedItems 移除，加入 clarifyItems
+    resolvedItems.splice(itemIndex, 1)
+    clarifyItems.push(revertedItem)
+
+    await db.updateBddSession(input.sessionId, {
+      clarifyItems,
+      resolvedItems,
+    })
+
+    return { success: true }
+  } catch (error) {
+    console.error('[BddSession] 反悔已確認項目失敗:', error)
     return { success: false, error: String(error) }
   }
 }

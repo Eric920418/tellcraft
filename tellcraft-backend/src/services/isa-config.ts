@@ -91,14 +91,116 @@ function scanStepPatterns(features: Array<{ content: string }>): Map<string, Ste
 }
 
 // ============================================================
+// 動態約束派生
+// ============================================================
+
+interface DerivedConstraints {
+  entityNames: string[]           // Feature 中出現的所有 entity
+  tableNames: string[]            // entity mapping 中的 table
+  columnsByTable: Record<string, string[]> // Feature DataTable headers
+  hasStatePrecondition: boolean   // 是否有「前置（狀態）」Rule
+}
+
+function deriveConstraints(
+  features: Array<{ name: string; content: string }>,
+  entityMapping: string
+): DerivedConstraints {
+  const entityNames = new Set<string>()
+  const columnsByTable: Record<string, string[]> = {}
+  let hasStatePrecondition = false
+
+  // 從 entity mapping 提取 entity→table 對應
+  const entityToTable = new Map<string, string>()
+  for (const line of entityMapping.split('\n')) {
+    const match = line.match(/[-\s]*(.+?):\s*(\w+)/)
+    if (match && match[1] && match[2] && match[1] !== 'entity_to_table_mapping') {
+      entityToTable.set(match[1].trim(), match[2].trim().toLowerCase())
+    }
+  }
+
+  for (const feature of features) {
+    const lines = feature.content.split('\n')
+
+    // 掃描 entity 名稱
+    for (const line of lines) {
+      const setupMatch = line.match(/準備一個([\u4e00-\u9fffa-zA-Z]+),/)
+      if (setupMatch) entityNames.add(setupMatch[1])
+      const validateMatch = line.match(/存在一個([\u4e00-\u9fffa-zA-Z]+),/)
+      if (validateMatch) entityNames.add(validateMatch[1])
+    }
+
+    // 掃描 DataTable headers（| col1 | col2 | 格式的第一行）
+    let prevLineIsStep = false
+    for (const line of lines) {
+      const trimmed = line.trim()
+      if (/^\s*(Given|When|Then|And|But)\s+/.test(trimmed)) {
+        prevLineIsStep = true
+        continue
+      }
+      if (prevLineIsStep && trimmed.startsWith('|')) {
+        // 提取 header columns
+        const cols = trimmed.split('|').map(c => c.trim()).filter(Boolean)
+        // 嘗試關聯到 entity → table
+        // 用上一步的 entity 推斷
+        for (const [entity, table] of entityToTable.entries()) {
+          if (feature.content.includes(entity)) {
+            if (!columnsByTable[table]) columnsByTable[table] = []
+            for (const col of cols) {
+              if (col && !columnsByTable[table].includes(col)) {
+                columnsByTable[table].push(col)
+              }
+            }
+          }
+        }
+        prevLineIsStep = false
+      } else {
+        prevLineIsStep = false
+      }
+    }
+
+    // 檢查是否有「前置（狀態）」Rule
+    if (feature.content.includes('前置（狀態）')) {
+      hasStatePrecondition = true
+    }
+  }
+
+  const tableNames = [...entityToTable.values()]
+
+  return {
+    entityNames: [...entityNames],
+    tableNames,
+    columnsByTable,
+    hasStatePrecondition,
+  }
+}
+
+// ============================================================
 // 生成 ISA Config Instructions
 // ============================================================
 
-function buildInstructions(detectedPatterns: Map<string, StepPattern>): IsaInstruction[] {
+function buildInstructions(detectedPatterns: Map<string, StepPattern>, derived?: DerivedConstraints): IsaInstruction[] {
   const instructions: IsaInstruction[] = []
 
   // 1. Entity Setup (Given)
   if (detectedPatterns.get('entity_setup')!.count > 0) {
+    const entityConstraints = [
+      '<entity> must be a valid entity defined in entity_to_table_mapping.yml',
+      'All column headers in the DataTable must be valid schema fields',
+    ]
+    // 動態列出實際使用的 entity 和 table
+    if (derived && derived.entityNames.length > 0) {
+      entityConstraints.push(`Valid entities: ${derived.entityNames.join(', ')}`)
+    }
+    if (derived && derived.tableNames.length > 0) {
+      entityConstraints.push(`Valid tables: ${derived.tableNames.join(', ')}`)
+    }
+    if (derived) {
+      for (const [table, cols] of Object.entries(derived.columnsByTable)) {
+        if (cols.length > 0) {
+          entityConstraints.push(`Table '${table}' known columns: ${cols.join(', ')}`)
+        }
+      }
+    }
     instructions.push({
       name: 'Entity setup',
       format: '^準備一個(?P<entity>[\\u4e00-\\u9fffa-zA-Z]+), with table:$',
@@ -107,10 +209,7 @@ function buildInstructions(detectedPatterns: Map<string, StepPattern>): IsaInstr
         type: 'plugin',
         plugin_python_path: EXECUTOR_PATHS.supabase_setup,
       },
-      constraints: [
-        '<entity> must be a valid entity defined in entity_to_table_mapping.yml',
-        'All column headers in the DataTable must be valid schema fields',
-      ],
+      constraints: entityConstraints,
       subpackage: 'given',
       situation: 'to prepare test data in the database before Server Action calls',
     })
@@ -118,6 +217,10 @@ function buildInstructions(detectedPatterns: Map<string, StepPattern>): IsaInstr
 
   // 2. Action Call (When)
   if (detectedPatterns.get('action_call')!.count > 0) {
+    const actionConstraints: string[] = []
+    if (derived && derived.tableNames.length > 0) {
+      actionConstraints.push(`All call table column headers must be defined in schema. Known tables: ${derived.tableNames.join(', ')}`)
+    }
     instructions.push({
       name: 'Action call',
       format: '^(?P<summary>.+?), call table:$',
@@ -126,6 +229,7 @@ function buildInstructions(detectedPatterns: Map<string, StepPattern>): IsaInstr
         type: 'plugin',
         plugin_python_path: EXECUTOR_PATHS.cucumberjs_server_action,
       },
+      ...(actionConstraints.length > 0 ? { constraints: actionConstraints } : {}),
       subpackage: 'action',
       situation: 'to invoke the Server Action with the given parameters',
     })
@@ -167,6 +271,17 @@ function buildInstructions(detectedPatterns: Map<string, StepPattern>): IsaInstr
 
   // 5. Entity Validate (Then)
   if (detectedPatterns.get('entity_validate')!.count > 0) {
+    const validateConstraints = [
+      '<entity> must be a valid entity defined in entity_to_table_mapping.yml',
+      'the entity\'s properties defined in the DataTable must match the entity spec',
+      'All column headers in the DataTable must be valid schema structure paths',
+    ]
+    if (derived && derived.entityNames.length > 0) {
+      validateConstraints.push(`Valid entities: ${derived.entityNames.join(', ')}`)
+    }
+    if (derived && derived.tableNames.length > 0) {
+      validateConstraints.push(`Valid tables: ${derived.tableNames.join(', ')}`)
+    }
     instructions.push({
       name: 'Entity validate',
       format: '^存在一個(?P<entity>[\\u4e00-\\u9fffa-zA-Z]+), with table:$',
@@ -175,11 +290,7 @@ function buildInstructions(detectedPatterns: Map<string, StepPattern>): IsaInstr
         type: 'plugin',
         plugin_python_path: EXECUTOR_PATHS.supabase_entity,
       },
-      constraints: [
-        '<entity> must be a valid entity defined in entity_to_table_mapping.yml',
-        'the entity\'s properties defined in the DataTable must match the entity spec',
-        'All column headers in the DataTable must be valid schema structure paths',
-      ],
+      constraints: validateConstraints,
       subpackage: 'then',
       situation: 'to validate the entity in the database with the given parameters',
     })
@@ -273,8 +384,12 @@ export function generateIsaConfig(
       .join(', ')
     console.log(`[IsaConfig] 掃描完成：${patternSummary}`)
 
+    // Step 1.5: 動態派生約束
+    const derived = deriveConstraints(features, input.entityMapping)
+    console.log(`[IsaConfig] 動態約束：${derived.entityNames.length} entities, ${derived.tableNames.length} tables, statePrecondition=${derived.hasStatePrecondition}`)
+
     // Step 2: 生成 instructions
-    const instructions = buildInstructions(detectedPatterns)
+    const instructions = buildInstructions(detectedPatterns, derived)
 
     if (instructions.length === 0) {
       return { success: false, error: '沒有偵測到任何 ISA 步驟模式' }

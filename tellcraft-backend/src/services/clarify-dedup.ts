@@ -143,6 +143,82 @@ export async function generateDecisionSummary(
 }
 
 // ============================================================
+// Partial Spec Context 生成
+// ============================================================
+
+/**
+ * 每個 batch 確認後，用 Haiku 生成部分規格摘要
+ * 注入後續 PRD Discovery 讓下一輪有更好的上下文
+ * 成本：~$0.002/次
+ */
+export async function generatePartialSpecContext(
+  requirements: string,
+  resolvedItems: ClarifyItem[],
+  trackingContext?: { userId?: string; conversationId?: string }
+): Promise<string | null> {
+  if (resolvedItems.length === 0) return null
+
+  try {
+    const anthropic = getAnthropicClient()
+
+    const qaList = resolvedItems
+      .filter(item => item.answer)
+      .map((item, i) => `${i + 1}. Q: ${item.whiteTextQuestion || item.question}\n   A: ${item.answer}`)
+      .join('\n')
+
+    const systemPrompt = `你是一位需求分析助手。根據需求描述和已回答的 Q&A，推導出目前已確定的部分規格摘要。
+
+## 任務
+產出精簡的部分規格摘要，包含：
+1. 已確認的實體列表（名稱 + 關鍵屬性）
+2. 已確認的業務規則
+3. 已排除的功能或情況
+4. 尚未覆蓋的領域（基於需求描述推斷）
+
+## 規則
+- 每一項都用一句話說明
+- 保持精簡（最多 300 字）
+- 只列出有足夠信心的推論
+- 直接輸出文字摘要，不需要 JSON`
+
+    const stream = anthropic.messages.stream({
+      model: 'claude-haiku-4-5-20251001',
+      max_tokens: 1024,
+      temperature: 0.1,
+      system: systemPrompt,
+      messages: [{ role: 'user', content: `需求描述：\n${requirements}\n\n已回答的 Q&A：\n${qaList}` }],
+    })
+
+    const finalMessage = await stream.finalMessage()
+
+    // 記錄 LLM 用量
+    const usage = finalMessage.usage
+    if (usage) {
+      const cost = (usage.input_tokens * HAIKU_PRICING.input + usage.output_tokens * HAIKU_PRICING.output) / 1_000_000
+      recordLlmUsage({
+        model: 'claude-haiku-4-5-20251001',
+        inputTokens: usage.input_tokens,
+        outputTokens: usage.output_tokens,
+        costUsd: cost,
+        purpose: 'clarify_partial_spec_context',
+        userId: trackingContext?.userId,
+        conversationId: trackingContext?.conversationId,
+      }).catch(err => console.error('[ClarifyDedup] recordLlmUsage failed:', err))
+
+      console.log(`[ClarifyDedup] Partial Spec Context 生成完成 (tokens: ${usage.input_tokens}/${usage.output_tokens}, cost: $${cost.toFixed(4)})`)
+    }
+
+    const content = finalMessage.content[0]
+    if (content.type !== 'text') return null
+
+    return content.text.trim()
+  } catch (err) {
+    console.error('[ClarifyDedup] generatePartialSpecContext 失敗（降級跳過）:', err)
+    return null
+  }
+}
+
+// ============================================================
 // Post-generation 去重
 // ============================================================
 

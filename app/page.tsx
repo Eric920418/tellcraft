@@ -60,6 +60,8 @@ interface Message {
     | 'formulation_complete' | 'spec_discovery_continue' | 'spec_discovery_complete' | 'spec_discovery_error'
     | 'spec_fix_start' | 'spec_fix_complete' | 'spec_fix_error'
     | 'spec_validating' | 'spec_actions_design' | 'spec_isa_config' | 'spec_complete'
+    | 'spec_change_analyzing' | 'spec_change_confirm' | 'spec_rollback_select'
+    | 'formulation_draft_review'
     | 'uiux_design_preference' | 'uiux_design_clarify' | 'uiux_design_clarify_complete'
     | 'uiux_design_brief_generating' | 'uiux_design_brief_confirm' | 'uiux_design_brief_adjusting'
     | 'uiux_prompt_template_selection' | 'uiux_prompt_variant_selection' | 'uiux_variants_generating' | 'uiux_variants_ready'

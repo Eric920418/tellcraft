@@ -12,10 +12,73 @@ Tellcraft 是一個 AI 驅動的自動化開發平台。用戶只需描述需求
 
 ## 當前開發進度
 
-- **狀態**：✅ Phase 1-9 + Server Actions + VPS Backend + 前端 Chat 串接 + 認證系統 + 訪客體驗改善 + 儀表板系統 + BDD Spec 完整修復 + 專案版本管理 + **UIUX 生成邏輯重構** + **Design Tier** + **專案自動命名** + **PreviewPanel iframe 重構** + **Quality Gate 品質檢查** + **Code Preview 即時渲染** + **串流實時預覽** + **BDD→UI 翻譯 + Variant 創意概念** + **Fast Mode 快速建站** + **智能模板匹配** + **Fast Build 藍圖進度** + **BDD Q&A 3D 蓋房子動畫** + **對話回退 + 錯誤恢復** + **BDD Spec Skill v2.0.0 同步** + **LLM 自動重試 + 錯誤訊息人性化** + **BDD Phase 4/5 後端補完** + **Phase 0 Event Storming**
+- **狀態**：✅ Phase 1-9 + Server Actions + VPS Backend + 前端 Chat 串接 + 認證系統 + 訪客體驗改善 + 儀表板系統 + BDD Spec 完整修復 + 專案版本管理 + **UIUX 生成邏輯重構** + **Design Tier** + **專案自動命名** + **PreviewPanel iframe 重構** + **Quality Gate 品質檢查** + **Code Preview 即時渲染** + **串流實時預覽** + **BDD→UI 翻譯 + Variant 創意概念** + **Fast Mode 快速建站** + **智能模板匹配** + **Fast Build 藍圖進度** + **BDD Q&A 3D 蓋房子動畫** + **對話回退 + 錯誤恢復** + **BDD Spec Skill v2.0.0 同步** + **LLM 自動重試 + 錯誤訊息人性化** + **BDD Phase 4/5 後端補完** + **Phase 0 Event Storming** + **BDD Skill 差距補完** + **BDD Skill P1-P3 補完**
 - **釐清項目**：28 項全部解決
 - **Server Actions**：30+ 已實作
 - **詳情**：[`.clarify/overview.md`](.clarify/overview.md)
+
+### BDD Skill P1-P3 補完（2026-02-25）
+
+BDD Skill 剩餘 6 個項目全部補完，與 `bdd-spec/` 規格 100% 對齊：
+
+**P1.1: 提案優先模式**
+- `bdd-session.ts` — `ClarifyItem` 新增 `mode`/`proposedAnswer`/`confidence` 欄位
+- `prd-discovery.ts` — Discovery prompt 支援 `mode: "propose"` 輸出，LLM 高信心時自動提案
+- `orchestrator.ts` — `sendClarifyQuestion()` 根據 `item.mode` 分支：propose 模式顯示「AI 建議」+ 同意/不同意按鈕；`__accept_proposal__` 自動填入答案，`__reject_proposal__` 切回 ask 模式
+
+**P1.2: 單題反悔增強**
+- `bdd-session.ts` — 新增 `revertResolvedItem()`（resolved → clarifyItems）
+- `orchestrator.ts` — spec_clarify handler 新增「反悔/重答 {關鍵字}」意圖偵測，搜尋 resolved + staging 匹配項目並重發
+
+**P2.3: 連續空輪終止**
+- `flow-state.ts` — 新增 `consecutiveEmptyRounds` 欄位
+- `orchestrator.ts` — `completeClärifyPhase()` 改為連續兩輪無新問題才終止 Discovery（避免單輪偶發空結果過早結束）
+
+**P2.4: ISA constraints 動態化**
+- `isa-config.ts` — 新增 `deriveConstraints()`：從 Feature Files 掃描 entity/table/column，動態構建 constraints
+- `buildInstructions()` — Entity Setup/Validate/Action Call 的 constraints 從硬編碼改為列舉實際使用的 entity、table、column
+
+**P3.5: 變更歷史追蹤**
+- `bdd-session.ts` — 新增 `ChangeHistoryEntry` 類型 + `BddSession.changeHistory` 欄位
+- `orchestrator.ts` — `spec_change_confirm` 執行變更後記錄 `ChangeHistoryEntry`（含變更前快照）
+- `migrations/007_add_change_history.sql` — `bdd_sessions` 新增 `change_history JSONB` 欄位
+- `spec_completed` phase 新增「變更歷史」查看
+
+**P3.6: Rollback 支持**
+- `change-management.ts` — 新增 `rollbackChange()`：利用 `previousSnapshot` 還原規格，級聯移除後續變更
+- `orchestrator.ts` — 新增 `hasRollbackSpecIntent()` + `spec_rollback_select` phase handler
+- `page.tsx` — Message.stage union 新增 `'spec_rollback_select'`
+
+### BDD Skill 差距補完（2026-02-24）
+
+後端 BDD Skill 與 `bdd-spec/` 規格定義對齊，補完 5 個主要差距：
+
+**Gap 1: ES 一致性檢查 E1-E3**
+- `prd-discovery.ts` — `runPrdDiscovery()` 新增 `esDocumentContent` 參數，有 ES 文檔時動態注入 E1-E3 檢查（ES↔Feature/Entity/Rules 一致性），優先級強制 High
+
+**Gap 2: Formulation Rules 強化**
+- `formulation.ts` — `generateSingleFeature()` prompt 新增 Given 設定方式選擇指引（Choice A/B）、Rule 原子化判定（且→拆分）、無腦補原則強制聲明；`@Action()` → `# Action:` header 格式
+- `spec-discovery.ts` — S4 檢查新增 `# Action:` header 格式驗證，S7 新增「且/和/並且」文字掃描
+- `fixMultipleFeatures()` prompt 同步更新 `# Action:` 格式
+
+**Gap 3: Draft Batch Mode**
+- `formulation.ts` — 新增 `generateDraftBatch()` 函數，ES 有 clear 項目時一次性生成所有 Feature + Schema 草稿
+- `orchestrator.ts` — `finishClarifyAndStartFormulation()` 偵測 ES 文檔 → Draft Batch → `formulation_draft_review` phase → 用戶審閱確認/修改
+- 新增 phase: `formulation_draft_review`
+
+**Gap 4: Clarify 批次整合**
+- `clarify-dedup.ts` — 新增 `generatePartialSpecContext()` 函數（Haiku，~$0.002/次），每 batch 確認後生成部分規格摘要
+- `prd-discovery.ts` — `runPrdDiscovery()` 新增 `partialSpecContext` 注入後續 LLM，避免重複問題
+- `orchestrator.ts` — `completeClärifyPhase()` 在下一輪 Discovery 前生成 partialSpecContext 並存入 FlowState
+
+**Gap 5: Change Management**
+- `change-management.ts` — **新增檔案**，3 個核心函數：`analyzeChangeImpact()`（Haiku 分析影響）、`executeChange()`（Sonnet 修改規格）、`verifyConsistency()`（規則式一致性驗證）
+- `orchestrator.ts` — `spec_completed` phase 新增 `hasChangeIntent()` 偵測 + `handleSpecChange()` handler + `spec_change_analyzing`/`spec_change_confirm` phase 路由
+- 變更後自動重新生成 Actions + ISA Config
+
+**型別更新**：
+- `flow-state.ts` — 新增 `partialSpecContext`、`formulationDraftUncertainItems`、`changeImpact` 欄位
+- `app/page.tsx` — Message.stage union 新增 `spec_change_analyzing` | `spec_change_confirm` | `formulation_draft_review`
 
 ### Phase 0 Event Storming（2026-02-24）
 
