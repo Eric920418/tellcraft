@@ -12,10 +12,35 @@ Tellcraft 是一個 AI 驅動的自動化開發平台。用戶只需描述需求
 
 ## 當前開發進度
 
-- **狀態**：✅ Phase 1-9 + Server Actions + VPS Backend + 前端 Chat 串接 + 認證系統 + 訪客體驗改善 + 儀表板系統 + BDD Spec 完整修復 + 專案版本管理 + **UIUX 生成邏輯重構** + **Design Tier** + **專案自動命名** + **PreviewPanel iframe 重構** + **Quality Gate 品質檢查** + **Code Preview 即時渲染** + **串流實時預覽** + **BDD→UI 翻譯 + Variant 創意概念** + **Fast Mode 快速建站** + **智能模板匹配** + **Fast Build 藍圖進度** + **BDD Q&A 3D 蓋房子動畫** + **對話回退 + 錯誤恢復** + **BDD Spec Skill v2.0.0 同步** + **LLM 自動重試 + 錯誤訊息人性化** + **BDD Phase 4/5 後端補完** + **Phase 0 Event Storming** + **BDD Skill 差距補完** + **BDD Skill P1-P3 補完**
+- **狀態**：✅ Phase 1-9 + Server Actions + VPS Backend + 前端 Chat 串接 + 認證系統 + 訪客體驗改善 + 儀表板系統 + BDD Spec 完整修復 + 專案版本管理 + **UIUX 生成邏輯重構** + **Design Tier** + **專案自動命名** + **PreviewPanel iframe 重構** + **Quality Gate 品質檢查** + **Code Preview 即時渲染** + **串流實時預覽** + **BDD→UI 翻譯 + Variant 創意概念** + **Fast Mode 快速建站** + **智能模板匹配** + **Fast Build 藍圖進度** + **BDD Q&A 3D 蓋房子動畫** + **對話回退 + 錯誤恢復** + **BDD Spec Skill v2.0.0 同步** + **LLM 自動重試 + 錯誤訊息人性化** + **BDD Phase 4/5 後端補完** + **Phase 0 Event Storming** + **BDD Skill 差距補完** + **BDD Skill P1-P3 補完** + **BDD→UIUX 翻譯品質升級**
 - **釐清項目**：28 項全部解決
 - **Server Actions**：30+ 已實作
 - **詳情**：[`.clarify/overview.md`](.clarify/overview.md)
+
+### BDD→UIUX 翻譯品質升級（2026-02-25）
+
+BDD→UIUX 翻譯管線品質全面提升，解決互動規格斷裂和翻譯降級問題：
+
+**1. Action Types 擴展（bdd-to-ui-spec.ts）**
+- `UIAction.type` 新增 6 種：`toggle`/`batch`/`sort`/`export`/`navigate`/`upload`
+- `getInteractionDescription()` 每個新 type 都有完整互動實作指引（開關、多選、排序、下載、多步驟、拖放上傳）
+- 翻譯 prompt Action Type 映射新增對應中文關鍵字
+
+**2. UIRequirementsSpec 擴展（bdd-to-ui-spec.ts）**
+- 新增 `userFlows`：多步驟用戶操作流程（name/steps/triggerPage）
+- 新增 `stateHints`：頁面級/全域狀態管理提示（name/scope/description）
+- `formatUISpecForPrompt()` 新增對應 section（步驟流程 + 狀態管理提示）
+- 翻譯 prompt 新增規則 9-12 + DataDisplay Type 映射
+
+**3. 翻譯失敗智能降級（uiux-generation.ts）**
+- fallback 不再只用裸 bddSpec，額外注入 8 條通用互動指引（含新增的 toggle/batch）
+- 確保正常 BDD 流程翻譯失敗時仍有互動指引
+
+**4. Animation/RWD 互動上下文注入**
+- 新增 `buildUISpecSummary()` 輕量摘要函數（產品名/頁面數/操作類型/展示類型/用戶流程）
+- `generateAnimations()` 新增 `uiSpecSummary` 參數 → Modal/表單/列表動畫提醒
+- `generateRwd()` 新增 `uiSpecSummary` 參數 → 表格卡片化/表單全寬/步驟指示器提醒
+- orchestrator 3 處 pipeline（Fast Build/正常/步進）全部傳入摘要
 
 ### BDD Skill P1-P3 補完（2026-02-25）
 

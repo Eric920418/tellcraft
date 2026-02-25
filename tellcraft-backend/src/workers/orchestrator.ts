@@ -37,7 +37,7 @@ import {
   GeneratedComponent,
   VariantConcept,
 } from '../services/uiux-generation'
-import { translateBddToUISpec } from '../services/bdd-to-ui-spec'
+import { translateBddToUISpec, buildUISpecSummary } from '../services/bdd-to-ui-spec'
 import { runQualityGate, autoFixCriticalIssues, QualityReport } from '../services/quality-gate'
 import { prepareDeployment, executeDeployment } from '../services/deployer'
 import { detectDesignTier, inferProductType, inferPages, buildDefaultDesignSystem, buildMinimalTemplate, inferInteractionHint } from '../services/fast-build-generation'
@@ -3602,12 +3602,15 @@ async function executeFastBuildSkill(params: {
     },
   })
 
+  const fastUiSpecSummary = state.uiuxUISpec ? buildUISpecSummary(state.uiuxUISpec) : undefined
   const animationResult = await generateAnimations(
     designSystem,
     currentCode,
     tier,
     { userId, conversationId, purpose: 'fast-build-animation' },
     makeStreamingCallback(conversationId, io, redis, 'animation', twConfig),
+    undefined, // variantConcept
+    fastUiSpecSummary,
   )
 
   if (animationResult.success) {
@@ -3646,6 +3649,8 @@ async function executeFastBuildSkill(params: {
     tier,
     { userId, conversationId, purpose: 'fast-build-rwd' },
     makeStreamingCallback(conversationId, io, redis, 'rwd', twConfig),
+    undefined, // variantConcept
+    fastUiSpecSummary,
   )
 
   if (rwdResult.success) {
@@ -3835,13 +3840,15 @@ async function executeFullCodePipeline(
   }
 
   // ===== 階段 2/3：動畫 =====
+  const pipelineUiSpecSummary = state.uiuxUISpec ? buildUISpecSummary(state.uiuxUISpec) : undefined
   const animationResult = await generateAnimations(
     uiuxDesignSystem,
     currentCode,
     state.uiuxDesignTier,
     { userId: state.userId, conversationId, purpose: 'uiux_animation' },
     makeStreamingCallback(conversationId, io, redis, 'animation', twConfig),
-    state.uiuxVariantConcept
+    state.uiuxVariantConcept,
+    pipelineUiSpecSummary
   )
 
   if (animationResult.success) {
@@ -3879,7 +3886,8 @@ async function executeFullCodePipeline(
     state.uiuxDesignTier,
     { userId: state.userId, conversationId, purpose: 'uiux_rwd' },
     makeStreamingCallback(conversationId, io, redis, 'rwd', twConfig),
-    state.uiuxVariantConcept
+    state.uiuxVariantConcept,
+    pipelineUiSpecSummary
   )
 
   if (rwdResult.success) {
@@ -4122,13 +4130,15 @@ async function executeCodePhaseAnimation(
 
   // 生成動畫
   const animTwCfg = generateTailwindConfig(uiuxDesignSystem)
+  const stepUiSpecSummary = state.uiuxUISpec ? buildUISpecSummary(state.uiuxUISpec) : undefined
   const animationResult = await generateAnimations(
     uiuxDesignSystem,
     uiuxGeneratedCode,
     state.uiuxDesignTier,
     { userId: state.userId, conversationId, purpose: 'uiux_animation' },
     makeStreamingCallback(conversationId, io, redis, 'animation', animTwCfg),
-    state.uiuxVariantConcept
+    state.uiuxVariantConcept,
+    stepUiSpecSummary
   )
 
   if (!animationResult.success) {
@@ -4218,13 +4228,15 @@ async function executeCodePhaseRwd(
 
   // 生成響應式設計
   const rwdTwCfg = generateTailwindConfig(uiuxDesignSystem)
+  const rwdStepUiSpecSummary = state.uiuxUISpec ? buildUISpecSummary(state.uiuxUISpec) : undefined
   const rwdResult = await generateRwd(
     uiuxDesignSystem,
     uiuxGeneratedCode,
     state.uiuxDesignTier,
     { userId: state.userId, conversationId, purpose: 'uiux_rwd' },
     makeStreamingCallback(conversationId, io, redis, 'rwd', rwdTwCfg),
-    state.uiuxVariantConcept
+    state.uiuxVariantConcept,
+    rwdStepUiSpecSummary
   )
 
   if (!rwdResult.success) {

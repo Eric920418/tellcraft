@@ -12,7 +12,7 @@ import { recordLlmUsage } from '../db/client'
 
 export interface UIAction {
   name: string
-  type: 'create' | 'update' | 'delete' | 'view' | 'filter'
+  type: 'create' | 'update' | 'delete' | 'view' | 'filter' | 'toggle' | 'batch' | 'sort' | 'export' | 'navigate' | 'upload'
   confirmRequired: boolean
   fields?: Array<{
     name: string
@@ -43,6 +43,16 @@ export interface UIRequirementsSpec {
   pages: UIPage[]
   navigation: string[]
   entities: Array<{ name: string; fields: string[] }>
+  userFlows?: Array<{
+    name: string          // e.g. "訂單建立流程"
+    steps: string[]       // e.g. ["選擇商品", "填寫地址", "確認付款", "完成"]
+    triggerPage: string   // 起始頁面
+  }>
+  stateHints?: Array<{
+    name: string          // e.g. "購物車"
+    scope: 'page' | 'global'  // 頁面級 vs 全域
+    description: string   // e.g. "多頁面共享的購物車項目列表"
+  }>
 }
 
 interface TranslateResult {
@@ -99,6 +109,17 @@ export async function translateBddToUISpec(
 6. "存在一個{entity}" → 資料展示元件（表格/卡片/列表）
 7. Rule 的前置/後置標註 → 頁面歸屬和上下文
 8. 多個相關 Feature 可以合併到同一頁面
+9. 多步驟流程（例如：建立→審核→執行）→ userFlows 陣列
+10. 跨頁面共享的資料（例如：購物車在多頁面可見）→ stateHints with scope='global'
+11. 具有「前置（狀態）」Rule 的 Feature → 表示有條件邏輯，需要在 UI 中反映（disabled button/warning）
+12. 同一 entity 在多個 Feature 中出現 → 可能需要 dashboard 式的統一管理頁面
+
+## DataDisplay Type 映射
+- Feature 中有多欄位 entity + 列表展示 → table
+- 少量項目（<10）或視覺化展示 → cards
+- 統計數字（總數/金額/百分比）→ stat_card
+- 時間序列/趨勢數據 → chart
+- 簡單清單（無多欄位）→ list
 
 ## Action Type 映射
 - "新增/建立/記錄/添加" → create
@@ -106,6 +127,12 @@ export async function translateBddToUISpec(
 - "刪除/移除" → delete（confirmRequired: true）
 - "查詢/搜尋/篩選" → filter
 - "查看/瀏覽" → view
+- "啟用/停用/開關/切換/上架/下架" → toggle
+- "批量/全選/多選" → batch（confirmRequired: true）
+- "排序/排列" → sort
+- "匯出/下載/導出/列印" → export
+- "下一步/上一步/流程/步驟" → navigate
+- "上傳/匯入/拖放" → upload
 
 ## 輸出格式
 嚴格輸出 JSON，不要有其他文字：
@@ -139,6 +166,12 @@ export async function translateBddToUISpec(
   "navigation": ["頁面1", "頁面2"],
   "entities": [
     { "name": "EntityName", "fields": ["field1", "field2"] }
+  ],
+  "userFlows": [
+    { "name": "流程名稱", "steps": ["步驟1", "步驟2"], "triggerPage": "起始頁面" }
+  ],
+  "stateHints": [
+    { "name": "狀態名", "scope": "page|global", "description": "描述" }
   ]
 }`
 
@@ -250,6 +283,18 @@ function getInteractionDescription(action: UIAction): string {
       return `搜尋框/篩選器 → useState 管理搜尋詞 → useMemo 即時過濾列表`
     case 'view':
       return `點擊項目 → 展開詳情面板或導航到詳情頁`
+    case 'toggle':
+      return `「${action.name}」開關/按鈕 → useState boolean 控制 → 即時切換狀態 + 視覺反饋（switch 或 badge 狀態變色）`
+    case 'batch':
+      return `勾選框多選 → useState<Set> 管理選中 ID → 全選/取消 → 批量操作按鈕（disabled when empty）→ 確認對話框 → 批量處理`
+    case 'sort':
+      return `表頭點擊排序 → useState 管理 sortKey+sortOrder → 圖示反映排序方向（↑↓）→ useMemo 排序後資料`
+    case 'export':
+      return `「${action.name}」按鈕 → 觸發下載（模擬：生成 CSV/JSON blob → URL.createObjectURL → <a download>）`
+    case 'navigate':
+      return `「${action.name}」→ 多步驟表單/流程（useState step 控制） → 上一步/下一步 → 完成時提交`
+    case 'upload':
+      return `「${action.name}」→ input[type=file] + 拖放區域（onDragOver/onDrop）→ FileReader 預覽 → 上傳進度條（模擬）`
     default:
       return `「${action.name}」— 需要完整互動實作`
   }
@@ -293,5 +338,40 @@ export function formatUISpecForPrompt(spec: UIRequirementsSpec): string {
     }
   }
 
+  // 用戶流程
+  if (spec.userFlows && spec.userFlows.length > 0) {
+    lines.push('', '### 用戶操作流程（需要完整實作步驟控制）')
+    for (const flow of spec.userFlows) {
+      lines.push(`- **${flow.name}**（從 ${flow.triggerPage} 開始）：${flow.steps.join(' → ')}`)
+    }
+  }
+
+  // 狀態管理提示
+  if (spec.stateHints && spec.stateHints.length > 0) {
+    lines.push('', '### 狀態管理提示')
+    for (const hint of spec.stateHints) {
+      lines.push(`- **${hint.name}**（${hint.scope === 'global' ? '全域' : '頁面級'}）：${hint.description}`)
+    }
+  }
+
+  return lines.join('\n')
+}
+
+/**
+ * 生成 uiSpec 的輕量摘要（供 Animation/RWD 階段注入）
+ */
+export function buildUISpecSummary(spec: UIRequirementsSpec): string {
+  const actionTypes = new Set<string>()
+  const displayTypes = new Set<string>()
+  for (const page of spec.pages) {
+    for (const action of page.actions) actionTypes.add(action.type)
+    for (const display of page.dataDisplays) displayTypes.add(display.type)
+  }
+  const lines = [`產品：${spec.productName}，${spec.pages.length} 個頁面`]
+  if (actionTypes.size > 0) lines.push(`互動操作：${[...actionTypes].join('、')}`)
+  if (displayTypes.size > 0) lines.push(`資料展示：${[...displayTypes].join('、')}`)
+  if (spec.userFlows && spec.userFlows.length > 0) {
+    lines.push(`用戶流程：${spec.userFlows.map(f => f.name).join('、')}`)
+  }
   return lines.join('\n')
 }

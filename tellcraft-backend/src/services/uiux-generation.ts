@@ -1421,11 +1421,23 @@ ${brief.signature ? `- Signature Element：${brief.signature}` : ''}
   if (uiSpec) {
     requirementsSection = formatUISpecForPrompt(uiSpec)
   } else if (bddSpec) {
+    // 翻譯失敗降級：仍然注入通用互動指引
     requirementsSection = `## BDD 規格（核心依據）
 以下是產品的 BDD Feature Files，描述了所有功能和業務規則。
 **你必須從這些 Feature 推導出前端需要哪些頁面、哪些 UI 元素、哪些操作流程。**
 
-${bddSpec}`
+${bddSpec}
+
+## 互動實作指引（Critical — 翻譯降級模式）
+雖然 BDD 沒有被結構化翻譯，你仍必須實作完整互動：
+- 每個「新增/建立」Action → Modal 表單 + useState + 列表更新
+- 每個「刪除/移除」Action → 確認對話框 + 列表移除
+- 每個「修改/更新」Action → 預填表單 Modal + 更新
+- 每個「查詢/篩選」Action → 搜尋框 + useMemo 過濾
+- 每個「查看」Action → 詳情面板或展開
+- 每個「啟用/停用」Action → useState boolean + 開關切換
+- 每個「批量」操作 → 多選勾選框 + 批量操作按鈕
+- 所有列表必須有模擬數據（不是空的）`
   }
 
   // Fast Build 互動提示（無 BDD/uiSpec 時的補充指引）
@@ -1511,7 +1523,8 @@ export async function generateAnimations(
   designTier?: DesignTier,
   trackingContext?: LlmTrackingContext,
   onPartialCode?: PartialCodeCallback,
-  variantConcept?: VariantConcept
+  variantConcept?: VariantConcept,
+  uiSpecSummary?: string
 ): Promise<GenerationResult> {
   const tier = designTier || 'functional'
 
@@ -1588,8 +1601,12 @@ ${getAnimationConstraints(tier)}
     ? `\n## 設計概念提醒\n動畫風格必須服務於「${variantConcept.name}」的設計概念。${variantConcept.signatureElement ? `Signature Element「${variantConcept.signatureElement}」的動畫尤其重要。` : ''}\n`
     : ''
 
+  const uiSpecHint = uiSpecSummary
+    ? `\n## 互動上下文（供動畫決策參考）\n${uiSpecSummary}\n注意：Modal 開關、表單提交、列表增刪 等互動都需要對應的動畫（enter/exit/success）。\n`
+    : ''
+
   const userMessage = `請在以下代碼基礎上添加動畫效果：
-${conceptReminder}
+${conceptReminder}${uiSpecHint}
 ## 現有代碼
 ${existingCodeStr}
 
@@ -1643,7 +1660,8 @@ export async function generateRwd(
   designTier?: DesignTier,
   trackingContext?: LlmTrackingContext,
   onPartialCode?: PartialCodeCallback,
-  variantConcept?: VariantConcept
+  variantConcept?: VariantConcept,
+  uiSpecSummary?: string
 ): Promise<GenerationResult> {
   const tier = designTier || 'functional'
 
@@ -1751,8 +1769,12 @@ xl: 1280px
     ? `\n## 設計概念提醒\n移動端適配時保持「${variantConcept.name}」的設計概念完整性，不要在小螢幕上退化為通用佈局。\n`
     : ''
 
+  const rwdUiSpecHint = uiSpecSummary
+    ? `\n## 互動上下文（供響應式決策參考）\n${uiSpecSummary}\n注意：表格在移動端需要橫向滾動或卡片化；表單需要全寬；多步驟流程需要移動端友好的步驟指示器。\n`
+    : ''
+
   const userMessage = `請在以下代碼基礎上添加響應式設計：
-${rwdConceptReminder}
+${rwdConceptReminder}${rwdUiSpecHint}
 ## 現有代碼
 ${existingCodeStr}
 
