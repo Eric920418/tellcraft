@@ -1,6 +1,7 @@
 import { Router, type Router as RouterType } from 'express'
 import { requireAuth, requireActiveSubscription } from '../middleware/auth'
 import * as db from '../db/client'
+import { toVercelSlug, deleteVercelProject } from '../services/deployer'
 
 const router: RouterType = Router()
 
@@ -960,8 +961,27 @@ router.delete('/:id', requireAuth, async (req, res) => {
       return res.status(404).json({ error: 'Project not found' })
     }
 
+    // 刪除 Vercel 上的專案（在 DB 事務之前執行，失敗不阻擋刪除）
+    if (project.status === 'deployed') {
+      const vercelSlug = toVercelSlug(project.name, id)
+      const vercelResult = await deleteVercelProject(vercelSlug)
+      if (!vercelResult.success) {
+        console.warn(`[Project] 刪除 Vercel 專案失敗（不阻擋刪除）: ${vercelResult.error}`)
+      }
+    }
+
     // 使用事務刪除相關資料
     await db.transaction(async (client) => {
+      // 刪除 Deployments
+      await client.query(
+        'DELETE FROM deployments WHERE project_id = $1',
+        [id]
+      )
+      // 刪除 Generations
+      await client.query(
+        'DELETE FROM generations WHERE project_id = $1',
+        [id]
+      )
       // 刪除 Project Files
       await client.query(
         'DELETE FROM project_files WHERE project_id = $1',

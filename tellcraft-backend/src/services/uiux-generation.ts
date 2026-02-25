@@ -1230,6 +1230,7 @@ export async function generateStructure(
     uiSpec?: UIRequirementsSpec
     variantConcept?: VariantConcept
     interactionHint?: string
+    templateStyleHint?: string
   },
   trackingContext?: LlmTrackingContext,
   onPartialCode?: PartialCodeCallback
@@ -1446,12 +1447,22 @@ ${bddSpec}
     ? `## 互動功能提示（根據產品類型推斷）\n${interactionHint}\n`
     : ''
 
+  // 模板風格參考（Fast Build 自動匹配）
+  const templateStyleHint = productContext?.templateStyleHint
+  const templateStyleSection = templateStyleHint
+    ? `## 設計風格參考（來自高匹配模板）
+${templateStyleHint}
+注意：這只是參考方向，你應結合用戶需求做出獨特設計，不要複製模板。
+`
+    : ''
+
   const userMessage = `請根據以下資訊生成桌面版前端代碼，包含完整互動功能。
 
 ${conceptSection}
 ${productSection}
 ${designSection}
 ${briefSection}
+${templateStyleSection}
 ${requirementsSection}
 ${interactionSection}
 ## 頁面規劃策略

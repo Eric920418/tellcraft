@@ -493,6 +493,7 @@ export async function listAllUsers(input: {
     projectCount: number
     messageCount: number
     createdAt: string
+    provider: string | null
   }>
   total: number
   page: number
@@ -586,48 +587,6 @@ export async function getAdminConversationMessages(input: {
   const query = params.toString() ? `?${params.toString()}` : ''
 
   return apiRequest(`/api/dashboard/admin/conversations/${input.conversationId}/messages${query}`, {
-    method: 'GET',
-    headers: {
-      Authorization: `Bearer ${input.token}`,
-    },
-  })
-}
-
-/**
- * 獲取審計日誌（管理員專用）
- */
-export async function getAuditLogs(input: {
-  token: string
-  page?: number
-  pageSize?: number
-  action?: string
-  startDate?: string
-  endDate?: string
-}): Promise<ApiResponse<{
-  items: Array<{
-    id: string
-    userId: string | null
-    userEmail: string | null
-    action: string
-    entityType: string | null
-    entityId: string | null
-    metadata: Record<string, unknown> | null
-    createdAt: string
-  }>
-  total: number
-  page: number
-  pageSize: number
-}>> {
-  const params = new URLSearchParams()
-  if (input.page) params.set('page', input.page.toString())
-  if (input.pageSize) params.set('pageSize', input.pageSize.toString())
-  if (input.action) params.set('action', input.action)
-  if (input.startDate) params.set('startDate', input.startDate)
-  if (input.endDate) params.set('endDate', input.endDate)
-
-  const query = params.toString() ? `?${params.toString()}` : ''
-
-  return apiRequest(`/api/dashboard/admin/logs${query}`, {
     method: 'GET',
     headers: {
       Authorization: `Bearer ${input.token}`,
@@ -1815,7 +1774,6 @@ export const vpsApi = {
   setUserAdmin,
   getUserDetail,
   getAdminConversationMessages,
-  getAuditLogs,
   listAllProjects,
   listAllConversations,
   getCurrentUserFromVps,

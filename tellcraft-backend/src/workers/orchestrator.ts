@@ -40,7 +40,7 @@ import {
 import { translateBddToUISpec, buildUISpecSummary } from '../services/bdd-to-ui-spec'
 import { runQualityGate, autoFixCriticalIssues, QualityReport } from '../services/quality-gate'
 import { prepareDeployment, executeDeployment } from '../services/deployer'
-import { detectDesignTier, inferProductType, inferPages, buildDefaultDesignSystem, buildMinimalTemplate, inferInteractionHint } from '../services/fast-build-generation'
+import { detectDesignTier, inferProductType, inferPages, buildDefaultDesignSystem, buildMinimalTemplate, inferInteractionHint, getTemplateStyleHint } from '../services/fast-build-generation'
 import { ensureResponsiveClasses } from '../services/uiux-generation'
 import { matchTemplates } from '../services/template-matcher'
 import { executeIteration, executeUndoIteration, executeRollbackQuery, executeRollbackSelection } from '../services/iteration-skill'
@@ -3521,10 +3521,19 @@ async function executeFastBuildSkill(params: {
   const tier = detectDesignTier(message)
   const productType = inferProductType(message)
   const pages = inferPages(message, productType)
-  const designSystem = buildDefaultDesignSystem(tier)
+  const designSystem = buildDefaultDesignSystem(tier, productType)
   const template = buildMinimalTemplate(message, productType)
 
   console.log(`[FastBuild] tier=${tier}, type=${productType}, pages=[${pages.join(',')}]`)
+
+  // ── 模板風格提示（降級跳過，不影響主流程）──
+  let templateStyleHint: string | null = null
+  try {
+    templateStyleHint = await getTemplateStyleHint(message, productType)
+    if (templateStyleHint) console.log(`[FastBuild] 匹配到模板風格提示`)
+  } catch (e) {
+    console.warn('[FastBuild] 模板風格提示查詢失敗，降級跳過:', e)
+  }
 
   // ── 設定 FlowState ──
   const state: FlowState = {
@@ -3570,6 +3579,7 @@ async function executeFastBuildSkill(params: {
     {
       originalRequirements: message,
       interactionHint,
+      templateStyleHint: templateStyleHint || undefined,
     },
     { userId, conversationId, purpose: 'fast-build-structure' },
     makeStreamingCallback(conversationId, io, redis, 'structure', twConfig)
@@ -3678,9 +3688,31 @@ async function executeFastBuildSkill(params: {
     currentCode.components = fixed.components
   }
 
-  // ===== Quality Gate（只跑靜態檢查，不做 LLM 修復）=====
-  const report = runQualityGate(currentCode, tier)
+  // ===== Quality Gate（靜態檢查 + 1 輪輕量 LLM 修復）=====
+  let report = runQualityGate(currentCode, tier)
   console.log(`[FastBuild] QG: passed=${report.passed}, critical=${report.summary.critical}, warning=${report.summary.warning}`)
+
+  if (!report.passed) {
+    const criticalIssues = [
+      ...report.categories.a11y.issues,
+      ...report.categories.performance.issues,
+      ...report.categories.code_quality.issues,
+    ].filter(i => i.severity === 'critical')
+
+    if (criticalIssues.length > 0) {
+      console.log(`[FastBuild] QG 有 ${criticalIssues.length} 個 critical，嘗試 1 輪修復`)
+      try {
+        const fixed = await autoFixCriticalIssues(currentCode, criticalIssues, { userId, conversationId })
+        if (fixed) {
+          currentCode = fixed
+          report = runQualityGate(currentCode, tier)
+          console.log(`[FastBuild] QG 修復後: passed=${report.passed}, critical=${report.summary.critical}`)
+        }
+      } catch (qgErr) {
+        console.warn('[FastBuild] QG 修復失敗，跳過:', qgErr)
+      }
+    }
+  }
 
   // ===== 保存最終結果 =====
   state.uiuxGeneratedCode = currentCode

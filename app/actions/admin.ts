@@ -298,55 +298,6 @@ export async function getLLMUsageStats(params: {
 }
 
 /**
- * 取得審計日誌
- */
-export async function getAuditLogs(params: PaginationParams & {
-  userId?: string
-  action?: string
-  entityType?: string
-  startDate?: string
-  endDate?: string
-} = {}): Promise<ActionResult<PaginatedResult<{
-  id: string
-  userId: string | null
-  userEmail: string | null
-  action: string
-  entityType: string | null
-  entityId: string | null
-  metadata: Record<string, unknown> | null
-  createdAt: string
-}>>> {
-  try {
-    const token = await requireToken()
-    const result = await vpsApi.getAuditLogs({
-      token,
-      page: params.page,
-      pageSize: params.pageSize,
-      action: params.action,
-      startDate: params.startDate,
-      endDate: params.endDate,
-    })
-
-    if (!result.success || !result.data) {
-      return { success: false, error: result.error }
-    }
-
-    return {
-      success: true,
-      data: {
-        items: result.data.items,
-        total: result.data.total,
-        page: result.data.page,
-        pageSize: result.data.pageSize,
-        totalPages: Math.ceil(result.data.total / result.data.pageSize),
-      }
-    }
-  } catch (error) {
-    return { success: false, error: (error as Error).message }
-  }
-}
-
-/**
  * 設定/取消用戶管理員權限
  */
 export async function setUserAdmin(input: {
@@ -374,18 +325,3 @@ export async function setUserAdmin(input: {
   }
 }
 
-/**
- * 記錄審計日誌（內部使用）
- * 注意：這個函數需要透過 VPS API 實現，目前暫時保留為空操作
- */
-export async function logAuditEvent(input: {
-  userId?: string
-  action: string
-  entityType?: string
-  entityId?: string
-  metadata?: Record<string, unknown>
-}): Promise<void> {
-  // TODO: 等 VPS API 新增後實現
-  // 審計日誌應該由 VPS 後端自動記錄
-  console.log('[Audit] Event logged (no-op):', input.action)
-}

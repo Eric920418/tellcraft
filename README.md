@@ -12,10 +12,24 @@ Tellcraft 是一個 AI 驅動的自動化開發平台。用戶只需描述需求
 
 ## 當前開發進度
 
-- **狀態**：✅ Phase 1-9 + Server Actions + VPS Backend + 前端 Chat 串接 + 認證系統 + 訪客體驗改善 + 儀表板系統 + BDD Spec 完整修復 + 專案版本管理 + **UIUX 生成邏輯重構** + **Design Tier** + **專案自動命名** + **PreviewPanel iframe 重構** + **Quality Gate 品質檢查** + **Code Preview 即時渲染** + **串流實時預覽** + **BDD→UI 翻譯 + Variant 創意概念** + **Fast Mode 快速建站** + **智能模板匹配** + **Fast Build 藍圖進度** + **BDD Q&A 3D 蓋房子動畫** + **對話回退 + 錯誤恢復** + **BDD Spec Skill v2.0.0 同步** + **LLM 自動重試 + 錯誤訊息人性化** + **BDD Phase 4/5 後端補完** + **Phase 0 Event Storming** + **BDD Skill 差距補完** + **BDD Skill P1-P3 補完** + **BDD→UIUX 翻譯品質升級** + **BDD Skill 方法論升級**
+- **狀態**：✅ Phase 1-9 + Server Actions + VPS Backend + 前端 Chat 串接 + 認證系統 + 訪客體驗改善 + 儀表板系統 + BDD Spec 完整修復 + 專案版本管理 + **UIUX 生成邏輯重構** + **Design Tier** + **專案自動命名** + **PreviewPanel iframe 重構** + **Quality Gate 品質檢查** + **Code Preview 即時渲染** + **串流實時預覽** + **BDD→UI 翻譯 + Variant 創意概念** + **Fast Mode 快速建站** + **智能模板匹配** + **Fast Build 藍圖進度** + **BDD Q&A 3D 蓋房子動畫** + **對話回退 + 錯誤恢復** + **BDD Spec Skill v2.0.0 同步** + **LLM 自動重試 + 錯誤訊息人性化** + **BDD Phase 4/5 後端補完** + **Phase 0 Event Storming** + **BDD Skill 差距補完** + **BDD Skill P1-P3 補完** + **BDD→UIUX 翻譯品質升級** + **BDD Skill 方法論升級** + **Fast Build 全面升級**
 - **釐清項目**：28 項全部解決
 - **Server Actions**：30+ 已實作
 - **詳情**：[`.clarify/overview.md`](.clarify/overview.md)
+
+### Fast Build 全面升級（2026-02-25）
+
+快速模式（一句話建站）5 個瓶頸全面解決：
+
+| # | 改動 | 效果 |
+|---|------|------|
+| 1 | **產品類型 10→25 種** | 新增 fitness/healthcare/education/realestate/travel/agency/salon/legal/finance/nonprofit/retail/hotel/wedding/music/photography，每種附專屬 interactionHint + DEFAULT_PAGES |
+| 2 | **detectDesignTier 加權匹配** | 關鍵字分強(3)/中(2)/弱(1)信號，新增 ~20 產業關鍵字，比純計數更準確 |
+| 3 | **產業別配色系統** | 22 套產業配色（餐廳暖棕/醫療淺綠/法律深藍/沙龍粉紅/旅遊青色...），取代只有藍灰/靛紫兩套的時代 |
+| 4 | **模板整合** | Fast Build 自動查詢最佳匹配模板，將風格提示注入 Structure prompt（零用戶交互） |
+| 5 | **QG 輕量 LLM 修復** | 靜態 QG 發現 critical 問題後嘗試 1 輪 Haiku autoFix，修不好就帶著走 |
+
+**改動檔案**：`fast-build-generation.ts`（產品類型/加權Tier/產業配色/模板提示）、`orchestrator.ts`（模板注入+QG修復）、`uiux-generation.ts`（templateStyleHint prompt 注入）
 
 ### BDD Skill 方法論全面升級（2026-02-25）
 
@@ -990,7 +1004,6 @@ Round 3: 如果還有新問題，最後一輪
 - `listAllConversations()` → `vpsApi.listAllConversations()` ✅
 - `getUserDetail()` → `vpsApi.getUserDetail()` ✅
 - `getLLMUsageStats()` → `vpsApi.getLLMUsageStats()` ✅
-- `getAuditLogs()` → `vpsApi.getAuditLogs()` ✅
 - `setUserAdmin()` → `vpsApi.setUserAdmin()` ✅
 - `getCurrentUserAction()` → `vpsApi.getCurrentUserFromVps()` ✅
 - `migrateAnonymousAccount()` → `vpsApi.migrateAnonymousAccount()` ✅
@@ -1330,7 +1343,6 @@ JWT_SECRET=your-secret-key
 - 用戶管理（列表、搜尋、排序、設定管理員權限）
 - 用戶詳情（專案、對話、LLM 成本）
 - LLM 用量統計（按日/週/月/模型/對話分組、成本追蹤，預設查詢最近 30 天）
-- 審計日誌（操作記錄、篩選）
 
 **Supabase 流量優化**（2025-01）：
 - 輪詢機制：智慧退避（3-15秒），有新消息重置為 3 秒
@@ -1377,7 +1389,6 @@ CREATE INDEX IF NOT EXISTS idx_llm_usage_user_created
 /dashboard/admin/users        # 用戶管理
 /dashboard/admin/users/[id]   # 用戶詳情
 /dashboard/admin/usage        # LLM 用量統計
-/dashboard/admin/logs         # 審計日誌
 /dashboard/admin/conversations/[id]  # 對話檢視器（唯讀，從用戶詳情進入）
 ```
 
@@ -1390,11 +1401,6 @@ CREATE INDEX IF NOT EXISTS idx_llm_usage_user_created
 ```sql
 -- users 表新增欄位
 is_admin BOOLEAN DEFAULT FALSE
-
--- 新增審計日誌表
-CREATE TABLE audit_logs (
-  id, user_id, action, entity_type, entity_id, metadata, created_at
-)
 
 -- 新增 LLM 用量追蹤表
 CREATE TABLE llm_usage (
@@ -1412,9 +1418,7 @@ CREATE TABLE llm_usage (
   - `listAllConversations` - 對話列表
   - `getUserDetail` - 用戶詳情
   - `getLLMUsageStats` - LLM 用量統計
-  - `getAuditLogs` - 審計日誌查詢
   - `setUserAdmin` - 設定管理員權限
-  - `logAuditEvent` - 記錄審計日誌
 - 用戶 Actions（`app/actions/index.ts` 新增）：
   - `getUserStats` - 個人統計
   - `getUserProjects` - 我的專案列表
@@ -2270,8 +2274,7 @@ app/
 │   └── admin/         # 管理員頁面
 │       ├── page.tsx   # 管理員總覽
 │       ├── users/     # 用戶管理
-│       ├── usage/     # LLM 用量
-│       └── logs/      # 審計日誌
+│       └── usage/     # LLM 用量
 ├── auth/
 │   ├── login/         # 登入頁面
 │   ├── callback/      # OAuth callback

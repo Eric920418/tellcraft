@@ -217,25 +217,6 @@ export default function AdminDashboardPage() {
             </div>
           </motion.div>
         </Link>
-        <Link href="/dashboard/admin/logs" style={{ textDecoration: 'none' }}>
-          <motion.div
-            whileHover={{ y: -2 }}
-            style={{
-              padding: 24,
-              background: 'var(--white)',
-              border: '1px solid var(--border-color)',
-              cursor: 'pointer',
-            }}
-          >
-            <div style={{ fontSize: 20, marginBottom: 8 }}>≡</div>
-            <div style={{ fontSize: 16, fontWeight: 500, marginBottom: 4, color: 'var(--black)' }}>
-              審計日誌
-            </div>
-            <div style={{ fontSize: 13, color: 'var(--gray-500)' }}>
-              查看操作記錄
-            </div>
-          </motion.div>
-        </Link>
         <Link href="/dashboard/admin/templates" style={{ textDecoration: 'none' }}>
           <motion.div
             whileHover={{ y: -2 }}

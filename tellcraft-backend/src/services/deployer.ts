@@ -1300,6 +1300,53 @@ export async function rollbackToDeployment(
 }
 
 // ============================================================
+// 刪除 Vercel 專案
+// ============================================================
+
+/**
+ * 刪除 Vercel 上的專案（用於用戶刪除專案時一併清理）
+ */
+export async function deleteVercelProject(
+  projectName: string
+): Promise<{ success: boolean; error?: string }> {
+  const token = process.env.VERCEL_ACCESS_TOKEN
+  if (!token) {
+    return { success: false, error: '缺少 VERCEL_ACCESS_TOKEN' }
+  }
+
+  const teamId = process.env.VERCEL_TEAM_ID
+  const params = new URLSearchParams()
+  if (teamId) params.append('teamId', teamId)
+
+  try {
+    const response = await fetch(
+      `${VERCEL_API}/v9/projects/${encodeURIComponent(projectName)}?${params}`,
+      {
+        method: 'DELETE',
+        headers: { 'Authorization': `Bearer ${token}` },
+      }
+    )
+
+    if (response.status === 204 || response.status === 200) {
+      console.log(`[Deployer] 已刪除 Vercel 專案: ${projectName}`)
+      return { success: true }
+    }
+
+    if (response.status === 404) {
+      console.log(`[Deployer] Vercel 專案 "${projectName}" 不存在，跳過刪除`)
+      return { success: true }
+    }
+
+    const errorText = await response.text()
+    console.error(`[Deployer] 刪除 Vercel 專案失敗 (${response.status}): ${errorText}`)
+    return { success: false, error: `Vercel API 錯誤: ${response.status}` }
+  } catch (err) {
+    console.error('[Deployer] 刪除 Vercel 專案異常:', err)
+    return { success: false, error: err instanceof Error ? err.message : String(err) }
+  }
+}
+
+// ============================================================
 // 本地 Build 驗證 — 部署前 next build + LLM 自動修復
 // ============================================================
 

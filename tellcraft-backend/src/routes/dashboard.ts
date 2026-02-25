@@ -337,10 +337,11 @@ router.get('/admin/users', requireAdmin, async (req, res) => {
       message_count_this_period: number
       created_at: string
       project_count: string
+      provider: string | null
     }>(
       `SELECT
         u.id, u.email, u.name, u.plan, u.subscription_status, u.is_admin,
-        u.message_count_this_period, u.created_at,
+        u.message_count_this_period, u.created_at, u.provider,
         COUNT(p.id) as project_count
        FROM users u
        LEFT JOIN projects p ON p.user_id = u.id
@@ -360,101 +361,14 @@ router.get('/admin/users', requireAdmin, async (req, res) => {
       isAdmin: u.is_admin,
       projectCount: parseInt(u.project_count, 10),
       messageCount: u.message_count_this_period,
-      createdAt: u.created_at
+      createdAt: u.created_at,
+      provider: u.provider || null
     }))
 
     res.json({ items, total, page: pageNum, pageSize: limit })
   } catch (error) {
     console.error('[Dashboard] 獲取用戶列表失敗:', error)
     res.status(500).json({ error: '獲取用戶列表失敗' })
-  }
-})
-
-/**
- * GET /api/dashboard/admin/logs
- * 獲取審計日誌（管理員專用）
- */
-router.get('/admin/logs', requireAdmin, async (req, res) => {
-  try {
-    const { page = '1', pageSize = '50', action, startDate, endDate } = req.query as {
-      page?: string
-      pageSize?: string
-      action?: string
-      startDate?: string
-      endDate?: string
-    }
-
-    const pageNum = parseInt(page, 10)
-    const limit = parseInt(pageSize, 10)
-    const offset = (pageNum - 1) * limit
-
-    // 構建 WHERE 條件
-    const conditions: string[] = []
-    const params: (string | number)[] = []
-    let paramIndex = 1
-
-    if (action) {
-      conditions.push(`al.action = $${paramIndex}`)
-      params.push(action)
-      paramIndex++
-    }
-
-    if (startDate) {
-      conditions.push(`al.created_at >= $${paramIndex}`)
-      params.push(startDate)
-      paramIndex++
-    }
-
-    if (endDate) {
-      conditions.push(`al.created_at <= $${paramIndex}::date + interval '1 day'`)
-      params.push(endDate)
-      paramIndex++
-    }
-
-    const whereClause = conditions.length > 0 ? 'WHERE ' + conditions.join(' AND ') : ''
-
-    // 查詢總數
-    const countResult = await queryOne<{ count: string }>(
-      `SELECT COUNT(*) as count FROM audit_logs al ${whereClause}`,
-      params
-    )
-    const total = parseInt(countResult?.count || '0', 10)
-
-    // 查詢日誌列表
-    const logsResult = await query<{
-      id: string
-      user_id: string | null
-      action: string
-      entity_type: string | null
-      entity_id: string | null
-      metadata: any
-      created_at: string
-      user_email: string | null
-    }>(
-      `SELECT al.id, al.user_id, al.action, al.entity_type, al.entity_id, al.metadata, al.created_at, u.email as user_email
-       FROM audit_logs al
-       LEFT JOIN users u ON al.user_id = u.id
-       ${whereClause}
-       ORDER BY al.created_at DESC
-       LIMIT $${paramIndex} OFFSET $${paramIndex + 1}`,
-      [...params, limit, offset]
-    )
-
-    const items = logsResult.rows.map(log => ({
-      id: log.id,
-      userId: log.user_id,
-      userEmail: log.user_email,
-      action: log.action,
-      entityType: log.entity_type,
-      entityId: log.entity_id,
-      metadata: log.metadata,
-      createdAt: log.created_at
-    }))
-
-    res.json({ items, total, page: pageNum, pageSize: limit })
-  } catch (error) {
-    console.error('[Dashboard] 獲取審計日誌失敗:', error)
-    res.status(500).json({ error: '獲取審計日誌失敗' })
   }
 })
 

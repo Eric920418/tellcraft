@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState, useRef, useCallback } from 'react'
+import { useEffect, useState, useRef, useCallback, useMemo } from 'react'
 import { useRouter } from 'next/navigation'
 import { motion } from 'framer-motion'
 import { DataTable, StatusBadge, SearchInput, type Column } from '../../../components/dashboard'
@@ -22,7 +22,10 @@ interface User {
   projectCount: number
   messageCount: number
   createdAt: string
+  provider: string | null
 }
+
+type ProviderTab = 'all' | 'google' | 'line' | 'guest'
 
 const planLabels: Record<string, string> = {
   free: 'Free',
@@ -43,41 +46,42 @@ const statusLabels: Record<string, string> = {
   cancelled: '取消',
 }
 
+const providerTabs: { key: ProviderTab; label: string }[] = [
+  { key: 'all', label: '全部' },
+  { key: 'google', label: 'Google 登入' },
+  { key: 'line', label: 'LINE 登入' },
+  { key: 'guest', label: '訪客' },
+]
+
 export default function AdminUsersPage() {
   const router = useRouter()
-  const [users, setUsers] = useState<User[]>([])
+  const [allUsers, setAllUsers] = useState<User[]>([])
   const [total, setTotal] = useState(0)
-  const [page, setPage] = useState(1)
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
-  const [searchInput, setSearchInput] = useState('')  // 輸入框的值（即時更新）
-  const [searchQuery, setSearchQuery] = useState('')  // 實際查詢的值（debounced）
+  const [searchInput, setSearchInput] = useState('')
+  const [searchQuery, setSearchQuery] = useState('')
   const [sortBy, setSortBy] = useState('created_at')
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc')
+  const [activeTab, setActiveTab] = useState<ProviderTab>('all')
   const debounceTimerRef = useRef<NodeJS.Timeout | null>(null)
 
-  const pageSize = 20
+  // 一次載入全部用戶（不分頁查後端），前端做分類 + 分頁
+  // 用戶量不大的情況下這樣最簡單，避免後端也要加 provider filter
+  const pageSize = 500
 
-  // Debounced search - 用戶停止輸入 300ms 後才查詢
+  // Debounced search
   const handleSearchChange = useCallback((value: string) => {
     setSearchInput(value)
-
-    if (debounceTimerRef.current) {
-      clearTimeout(debounceTimerRef.current)
-    }
-
+    if (debounceTimerRef.current) clearTimeout(debounceTimerRef.current)
     debounceTimerRef.current = setTimeout(() => {
       setSearchQuery(value)
-      setPage(1)  // 重置頁碼
     }, 300)
   }, [])
 
-  // 清理 timer
   useEffect(() => {
     return () => {
-      if (debounceTimerRef.current) {
-        clearTimeout(debounceTimerRef.current)
-      }
+      if (debounceTimerRef.current) clearTimeout(debounceTimerRef.current)
     }
   }, [])
 
@@ -92,7 +96,7 @@ export default function AdminUsersPage() {
       setIsLoading(true)
       const result = await listAllUsers({
         token,
-        page,
+        page: 1,
         pageSize,
         sortBy,
         sortOrder,
@@ -110,14 +114,43 @@ export default function AdminUsersPage() {
       }
 
       if (result.data) {
-        setUsers(result.data.items)
+        setAllUsers(result.data.items)
         setTotal(result.data.total)
       }
       setIsLoading(false)
     }
 
     fetchUsers()
-  }, [page, sortBy, sortOrder, searchQuery, router])
+  }, [sortBy, sortOrder, searchQuery, router])
+
+  // 按 provider 分類
+  const categorizedUsers = useMemo(() => {
+    const google: User[] = []
+    const line: User[] = []
+    const guest: User[] = []
+
+    for (const u of allUsers) {
+      if (u.provider === 'google') google.push(u)
+      else if (u.provider === 'line') line.push(u)
+      else guest.push(u)
+    }
+
+    return { google, line, guest }
+  }, [allUsers])
+
+  const displayUsers = useMemo(() => {
+    if (activeTab === 'all') return allUsers
+    if (activeTab === 'google') return categorizedUsers.google
+    if (activeTab === 'line') return categorizedUsers.line
+    return categorizedUsers.guest
+  }, [activeTab, allUsers, categorizedUsers])
+
+  const tabCounts = useMemo(() => ({
+    all: allUsers.length,
+    google: categorizedUsers.google.length,
+    line: categorizedUsers.line.length,
+    guest: categorizedUsers.guest.length,
+  }), [allUsers, categorizedUsers])
 
   const handleToggleAdmin = async (userId: string, currentIsAdmin: boolean) => {
     const token = getAuthToken()
@@ -128,8 +161,7 @@ export default function AdminUsersPage() {
 
     const result = await setUserAdmin({ token, userId, isAdmin: !currentIsAdmin })
     if (result.success) {
-      // 更新本地狀態
-      setUsers((prev) =>
+      setAllUsers((prev) =>
         prev.map((u) => (u.id === userId ? { ...u, isAdmin: !currentIsAdmin } : u))
       )
     } else {
@@ -178,9 +210,31 @@ export default function AdminUsersPage() {
       ),
     },
     {
+      key: 'provider',
+      header: '登入方式',
+      width: '100px',
+      render: (user: User) => (
+        <span
+          style={{
+            fontSize: 11,
+            padding: '2px 8px',
+            borderRadius: 3,
+            fontWeight: 500,
+            ...(user.provider === 'google'
+              ? { background: '#E8F0FE', color: '#1A73E8' }
+              : user.provider === 'line'
+                ? { background: '#E6F9E6', color: '#06C755' }
+                : { background: 'var(--gray-100)', color: 'var(--gray-500)' }),
+          }}
+        >
+          {user.provider === 'google' ? 'Google' : user.provider === 'line' ? 'LINE' : '訪客'}
+        </span>
+      ),
+    },
+    {
       key: 'plan',
       header: '方案',
-      width: '100px',
+      width: '80px',
       sortable: true,
       render: (user: User) => (
         <span
@@ -197,7 +251,7 @@ export default function AdminUsersPage() {
     {
       key: 'subscriptionStatus',
       header: '狀態',
-      width: '100px',
+      width: '80px',
       render: (user: User) => (
         <StatusBadge
           status={statusLabels[user.subscriptionStatus] || user.subscriptionStatus}
@@ -208,7 +262,7 @@ export default function AdminUsersPage() {
     {
       key: 'projectCount',
       header: '專案',
-      width: '80px',
+      width: '60px',
       sortable: true,
       render: (user: User) => (
         <span style={{ fontFamily: 'var(--font-mono)' }}>{user.projectCount}</span>
@@ -217,7 +271,7 @@ export default function AdminUsersPage() {
     {
       key: 'messageCount',
       header: '訊息',
-      width: '80px',
+      width: '60px',
       render: (user: User) => (
         <span style={{ fontFamily: 'var(--font-mono)' }}>{user.messageCount}</span>
       ),
@@ -225,7 +279,7 @@ export default function AdminUsersPage() {
     {
       key: 'createdAt',
       header: '註冊日期',
-      width: '120px',
+      width: '100px',
       sortable: true,
       render: (user: User) => (
         <span style={{ fontSize: 12, color: 'var(--gray-400)' }}>
@@ -299,18 +353,52 @@ export default function AdminUsersPage() {
         </p>
       </motion.div>
 
-      {/* Search */}
+      {/* Search + Tabs */}
       <motion.div
         initial={{ opacity: 0, y: 10 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.4, delay: 0.1 }}
-        style={{ marginBottom: 20, width: 320 }}
+        style={{ marginBottom: 20, display: 'flex', alignItems: 'center', gap: 20, flexWrap: 'wrap' }}
       >
-        <SearchInput
-          value={searchInput}
-          onChange={handleSearchChange}
-          placeholder="搜尋 Email 或名稱..."
-        />
+        <div style={{ width: 280 }}>
+          <SearchInput
+            value={searchInput}
+            onChange={handleSearchChange}
+            placeholder="搜尋 Email 或名稱..."
+          />
+        </div>
+
+        {/* Provider Tabs */}
+        <div style={{ display: 'flex', gap: 4 }}>
+          {providerTabs.map((tab) => (
+            <button
+              key={tab.key}
+              onClick={() => setActiveTab(tab.key)}
+              style={{
+                padding: '6px 14px',
+                fontSize: 13,
+                fontWeight: activeTab === tab.key ? 600 : 400,
+                background: activeTab === tab.key ? 'var(--black)' : 'transparent',
+                color: activeTab === tab.key ? 'var(--white)' : 'var(--gray-500)',
+                border: activeTab === tab.key ? 'none' : '1px solid var(--gray-200)',
+                borderRadius: 4,
+                cursor: 'pointer',
+                transition: 'all 0.15s ease',
+              }}
+            >
+              {tab.label}
+              <span
+                style={{
+                  marginLeft: 6,
+                  fontSize: 11,
+                  opacity: 0.7,
+                }}
+              >
+                {tabCounts[tab.key]}
+              </span>
+            </button>
+          ))}
+        </div>
       </motion.div>
 
       {/* Table */}
@@ -321,18 +409,12 @@ export default function AdminUsersPage() {
       >
         <DataTable
           columns={columns}
-          data={users}
+          data={displayUsers}
           keyField="id"
           isLoading={isLoading}
           emptyMessage="沒有用戶"
           onRowClick={(user) => {
             router.push(`/dashboard/admin/users/${user.id}`)
-          }}
-          pagination={{
-            page,
-            pageSize,
-            total,
-            onPageChange: setPage,
           }}
           sortConfig={{
             sortBy,
