@@ -12,10 +12,44 @@ Tellcraft 是一個 AI 驅動的自動化開發平台。用戶只需描述需求
 
 ## 當前開發進度
 
-- **狀態**：✅ Phase 1-9 + Server Actions + VPS Backend + 前端 Chat 串接 + 認證系統 + 訪客體驗改善 + 儀表板系統 + BDD Spec 完整修復 + 專案版本管理 + **UIUX 生成邏輯重構** + **Design Tier** + **專案自動命名** + **PreviewPanel iframe 重構** + **Quality Gate 品質檢查** + **Code Preview 即時渲染** + **串流實時預覽** + **BDD→UI 翻譯 + Variant 創意概念** + **Fast Mode 快速建站** + **智能模板匹配** + **Fast Build 藍圖進度** + **BDD Q&A 3D 蓋房子動畫** + **對話回退 + 錯誤恢復** + **BDD Spec Skill v2.0.0 同步** + **LLM 自動重試 + 錯誤訊息人性化** + **BDD Phase 4/5 後端補完** + **Phase 0 Event Storming** + **BDD Skill 差距補完** + **BDD Skill P1-P3 補完** + **BDD→UIUX 翻譯品質升級** + **BDD Skill 方法論升級** + **Fast Build 全面升級**
+- **狀態**：✅ Phase 1-9 + Server Actions + VPS Backend + 前端 Chat 串接 + 認證系統 + 訪客體驗改善 + 儀表板系統 + BDD Spec 完整修復 + 專案版本管理 + **UIUX 生成邏輯重構** + **Design Tier** + **專案自動命名** + **PreviewPanel iframe 重構** + **Quality Gate 品質檢查** + **Code Preview 即時渲染** + **串流實時預覽** + **BDD→UI 翻譯 + Variant 創意概念** + **Fast Mode 快速建站** + **智能模板匹配** + **Fast Build 藍圖進度** + **BDD Q&A 3D 蓋房子動畫** + **對話回退 + 錯誤恢復** + **BDD Spec Skill v2.0.0 同步** + **LLM 自動重試 + 錯誤訊息人性化** + **BDD Phase 4/5 後端補完** + **Phase 0 Event Storming** + **BDD Skill 差距補完** + **BDD Skill P1-P3 補完** + **BDD→UIUX 翻譯品質升級** + **BDD Skill 方法論升級** + **Fast Build 全面升級** + **Fast Build 佈局模式** + **Fast Build 品質升級**
 - **釐清項目**：28 項全部解決
 - **Server Actions**：30+ 已實作
 - **詳情**：[`.clarify/overview.md`](.clarify/overview.md)
+
+### Fast Build 品質升級（2026-02-25）
+
+13 項修復，全面提升快速模式生成品質：
+
+| # | 問題 | 修復 |
+|---|------|------|
+| 1 | displayFont 死碼（8 個產業白設標題字體） | `buildDesignSystemPrompt` + `generateTailwindConfig` 動態輸出 display/mono 字體 |
+| 2 | 進度消息顯示英文 productType | 新增 `PRODUCT_TYPE_LABELS`（26 個中文標籤） |
+| 3 | 模板風格提示可能跨類別誤導 | `getTemplateStyleHint` 過濾弱匹配+類別不符 |
+| 4 | Animation/RWD 缺乏互動上下文 | `interactionHint` 作為 fallback 注入 `uiSpecSummary` |
+| 5 | SaaS 應用被當成官網生成 | `inferLayoutMode` 支援描述文分析 app 信號 |
+| 6 | 6 個高頻類型無專屬配色 | 新增 blog/dashboard/event/landing/personal/saas 配色 |
+| 7 | Creative tier 溫度太保守 | Structure/Animation creative 溫度 0.2→0.35 |
+| 8 | QG 只跑 1 輪修復 | 改為 2 輪迴圈 |
+| 9 | 完成訊息缺 QG 摘要 | 加入 critical/warning 計數 |
+| 10 | inferPages 頁面關鍵字不足 | 新增聯絡/新聞/下載/支援/幫助/會員/儀表板等 |
+| 11 | Creative 英文關鍵字覆蓋低 | 新增 branding/gallery/fashion/lifestyle/showcase/design |
+| 12 | FlowState 缺原始描述 | 新增 `fastModeOriginalMessage` |
+| 13 | 前後端長度閾值不一致 | 後端 10→15 對齊前端 |
+
+### Fast Build 佈局模式：App vs Website（2026-02-25）
+
+用戶做「工具」（計算機、看板、TODO、轉換器）時，系統不再生成 Header/Footer/Hero 的形象網頁佈局：
+
+| # | 改動 | 效果 |
+|---|------|------|
+| 1 | **新增 `tool` 產品類型** | 關鍵字涵蓋計算機/轉換器/看板/TODO/編輯器/計時器/記帳/追蹤器/產生器/白板等，附專屬 interactionHint + 單頁 DEFAULT_PAGES |
+| 2 | **`LayoutMode = 'app' \| 'website'`** | `inferLayoutMode()` 規則式推斷：dashboard/tool → app，其餘 → website |
+| 3 | **Structure prompt 條件分支** | app 模式：不生成 Header/Footer/Hero，主功能區佔滿螢幕；website 模式不變 |
+| 4 | **RWD prompt 條件分支** | app 模式：側邊欄折疊為底部導航，無漢堡選單；website 模式不變 |
+| 5 | **FlowState 持久化** | `fastModeLayoutMode` 欄位供迭代時參考 |
+
+**改動檔案**：`fast-build-generation.ts`（tool 類型 + LayoutMode + inferLayoutMode）、`uiux-generation.ts`（Structure/RWD prompt 分支）、`orchestrator.ts`（推斷 + 傳遞 layoutMode）、`flow-state.ts`（新欄位）
 
 ### Fast Build 全面升級（2026-02-25）
 

@@ -37,6 +37,9 @@ const WEIGHTED_FUNCTIONAL: Array<{ keyword: string; weight: number }> = [
   { keyword: '專案管理', weight: 1 }, { keyword: 'project management', weight: 1 },
   { keyword: '看板', weight: 1 }, { keyword: 'kanban', weight: 1 },
   { keyword: '教育', weight: 1 }, { keyword: '學校', weight: 1 },
+  { keyword: '計算機', weight: 1 }, { keyword: '轉換器', weight: 1 },
+  { keyword: '編輯器', weight: 1 }, { keyword: '計時器', weight: 1 },
+  { keyword: '記帳', weight: 1 },
 ]
 
 const WEIGHTED_CREATIVE: Array<{ keyword: string; weight: number }> = [
@@ -53,8 +56,11 @@ const WEIGHTED_CREATIVE: Array<{ keyword: string; weight: number }> = [
   { keyword: '美容', weight: 2 }, { keyword: '沙龍', weight: 2 },
   { keyword: '健身', weight: 2 }, { keyword: '瑜伽', weight: 2 },
   { keyword: '民宿', weight: 2 }, { keyword: '飯店', weight: 2 },
+  { keyword: 'branding', weight: 2 }, { keyword: 'gallery', weight: 2 },
+  { keyword: 'fashion', weight: 2 }, { keyword: 'lifestyle', weight: 2 },
   // 弱信號（權重 1）
   { keyword: '展示', weight: 1 }, { keyword: 'studio', weight: 1 },
+  { keyword: 'showcase', weight: 1 }, { keyword: 'design', weight: 1 },
   { keyword: '工作室', weight: 1 }, { keyword: 'blog', weight: 1 },
   { keyword: '部落格', weight: 1 }, { keyword: '個人網站', weight: 1 },
   { keyword: '獨特', weight: 1 }, { keyword: '潮流', weight: 1 },
@@ -104,11 +110,24 @@ const PRODUCT_TYPE_RULES: Array<{ keywords: string[]; type: string }> = [
   { keywords: ['非營利', '公益', 'ngo', '慈善'], type: 'nonprofit' },
   { keywords: ['零售', '門市', '實體店', '百貨'], type: 'retail' },
   { keywords: ['教育', '課程', '培訓', '學校', '線上學習'], type: 'education' },
+  // ── 工具型產品（放在泛用類型前面，避免被 saas 搶走）──
+  {
+    keywords: [
+      '計算機', 'calculator', '轉換器', 'converter',
+      '看板', 'kanban', 'todo', '待辦', '清單', 'checklist',
+      '編輯器', 'editor', '筆記', 'note',
+      '計時器', 'timer', '碼表', 'stopwatch', '倒數',
+      '記帳', '追蹤器', 'tracker', '記錄器',
+      '產生器', 'generator', '密碼', 'color picker',
+      '白板', 'whiteboard', '畫板',
+    ],
+    type: 'tool',
+  },
   // ── 泛用類型 ──
   { keywords: ['portfolio', '作品集', '設計師'], type: 'portfolio' },
   { keywords: ['blog', '部落格', '文章'], type: 'blog' },
   { keywords: ['dashboard', '後台', '管理', 'admin'], type: 'dashboard' },
-  { keywords: ['saas', '平台', '工具', '系統'], type: 'saas' },
+  { keywords: ['saas', '平台', '系統'], type: 'saas' },
   { keywords: ['電商', '商店', '購物', 'shop', 'store', 'ecommerce'], type: 'ecommerce' },
   { keywords: ['landing', '官網', '品牌', '公司', '企業'], type: 'landing' },
   { keywords: ['活動', 'event', '派對'], type: 'event' },
@@ -154,6 +173,7 @@ const DEFAULT_PAGES: Record<string, string[]> = {
   photography: ['首頁', '作品集', '方案', '聯繫'],
   portfolio: ['首頁', '作品集', '關於我', '聯繫'],
   blog: ['首頁', '文章列表', '關於'],
+  tool: ['主頁面'],
   dashboard: ['Dashboard'],
   saas: ['首頁', '功能介紹', '價格', '聯繫'],
   ecommerce: ['首頁', '產品列表', '關於', '聯繫'],
@@ -167,7 +187,7 @@ const DEFAULT_PAGES: Record<string, string[]> = {
  */
 export function inferPages(description: string, productType: string): string[] {
   // 先嘗試從描述中提取明確提到的頁面
-  const pageKeywords = ['首頁', '關於', '聯繫', '菜單', '作品', '價格', '功能', '文章', '產品', '服務', '團隊', '常見問題', 'FAQ', '課表', '教練', '醫師', '科別', '物件', '行程', '案例', '預約', '門市', '房型', '設施', '訂房', '捐款', '演出', '方案', '師資', '課程']
+  const pageKeywords = ['首頁', '關於', '聯繫', '菜單', '作品', '價格', '功能', '文章', '產品', '服務', '團隊', '常見問題', 'FAQ', '課表', '教練', '醫師', '科別', '物件', '行程', '案例', '預約', '門市', '房型', '設施', '訂房', '捐款', '演出', '方案', '師資', '課程', '聯絡', '新聞', '最新消息', '下載', '支援', '幫助', '會員', '儀表板']
   const negativePatterns = ['不要', '不需要', '不用', '沒有', '去掉', '移除']
   // 子句分隔符（中英文標點）
   const clauseSeparators = /[，。,\.、；;！!？?]/
@@ -314,11 +334,53 @@ const INDUSTRY_COLOR_PALETTES: Record<string, IndustryPalette> = {
     background: '#fef2f2', foreground: '#1c1917', muted: '#fee2e2', border: '#fecaca',
     fontFamily: 'Outfit',
   },
+  // 工具型 — 清爽功能導向
+  tool: {
+    primary: '#3b82f6', secondary: '#64748b', accent: '#10b981',
+    background: '#ffffff', foreground: '#0f172a', muted: '#f8fafc', border: '#e2e8f0',
+    fontFamily: 'DM Sans',
+  },
   // 代理/行銷 — 現代感
   agency: {
     primary: '#6366f1', secondary: '#4f46e5', accent: '#818cf8',
     background: '#fafafa', foreground: '#18181b', muted: '#f4f4f5', border: '#e4e4e7',
     fontFamily: 'Outfit', displayFont: 'Sora',
+  },
+  // 部落格 — 閱讀導向
+  blog: {
+    primary: '#18181b', secondary: '#3f3f46', accent: '#6366f1',
+    background: '#fafafa', foreground: '#18181b', muted: '#f4f4f5', border: '#e4e4e7',
+    fontFamily: 'DM Sans', displayFont: 'Lora',
+  },
+  // 管理後台 — 功能導向
+  dashboard: {
+    primary: '#3b82f6', secondary: '#64748b', accent: '#10b981',
+    background: '#ffffff', foreground: '#0f172a', muted: '#f1f5f9', border: '#e2e8f0',
+    fontFamily: 'DM Sans',
+  },
+  // 活動 — 紫色+金色活力
+  event: {
+    primary: '#7c3aed', secondary: '#6d28d9', accent: '#f59e0b',
+    background: '#faf5ff', foreground: '#1e1b4b', muted: '#f3e8ff', border: '#e9d5ff',
+    fontFamily: 'Outfit', displayFont: 'Sora',
+  },
+  // Landing — 現代靛+金
+  landing: {
+    primary: '#6366f1', secondary: '#4f46e5', accent: '#f59e0b',
+    background: '#fafafa', foreground: '#18181b', muted: '#f4f4f5', border: '#e4e4e7',
+    fontFamily: 'Outfit', displayFont: 'Sora',
+  },
+  // 個人網站 — 暖色調
+  personal: {
+    primary: '#18181b', secondary: '#3f3f46', accent: '#f59e0b',
+    background: '#fafafa', foreground: '#18181b', muted: '#f4f4f5', border: '#e4e4e7',
+    fontFamily: 'Outfit',
+  },
+  // SaaS — 科技感
+  saas: {
+    primary: '#6366f1', secondary: '#4f46e5', accent: '#06b6d4',
+    background: '#fafafa', foreground: '#18181b', muted: '#f4f4f5', border: '#e4e4e7',
+    fontFamily: 'DM Sans',
   },
 }
 
@@ -459,6 +521,12 @@ const INTERACTION_HINTS: Record<string, string> = {
 - 聯繫頁：聯繫表單（姓名、Email、訊息），提交後顯示成功提示`,
   blog: `- 文章列表：搜尋框即時過濾文章、分類標籤篩選
 - 文章頁：目錄導航（滾動到對應章節）`,
+  tool: `- 主功能區域佔滿螢幕，直接呈現核心操作界面
+- 輸入區域：根據工具類型提供輸入欄位（文字框/數字輸入/選擇器）
+- 操作按鈕：清除/重置/計算/轉換等核心動作
+- 結果展示：即時顯示結果，支援複製到剪貼簿
+- 本地狀態管理：用 useState 管理所有資料，支援新增/刪除/修改
+- 如適用：拖拽排序（看板類）、勾選完成（待辦類）、即時預覽（編輯器類）`,
   dashboard: `- 資料表格：搜尋篩選 + 排序
 - 新增資料：按鈕 → Modal 表單 → 提交加入列表
 - 刪除資料：按鈕 → AlertDialog 確認 → 移除
@@ -486,6 +554,40 @@ const INTERACTION_HINTS: Record<string, string> = {
  */
 export function inferInteractionHint(productType: string): string {
   return INTERACTION_HINTS[productType] || INTERACTION_HINTS['landing'] || ''
+}
+
+// ============================================================
+// 產品類型中文標籤（用於面向用戶的消息）
+// ============================================================
+
+export const PRODUCT_TYPE_LABELS: Record<string, string> = {
+  restaurant: '餐廳網站', cafe: '咖啡廳網站', fitness: '健身網站',
+  healthcare: '醫療網站', education: '教育網站', realestate: '房地產網站',
+  travel: '旅遊網站', agency: '代理公司網站', salon: '美容沙龍網站',
+  legal: '法律事務所網站', finance: '金融網站', nonprofit: '公益網站',
+  retail: '零售網站', hotel: '飯店網站', wedding: '婚禮網站',
+  music: '音樂網站', photography: '攝影網站', portfolio: '作品集',
+  blog: '部落格', tool: '工具應用', dashboard: '管理後台',
+  saas: 'SaaS 平台', ecommerce: '電商網站', landing: '網站',
+  event: '活動網站', personal: '個人網站',
+}
+
+// ============================================================
+// 佈局模式推斷（App vs Website）
+// ============================================================
+
+export type LayoutMode = 'app' | 'website'
+
+const APP_PRODUCT_TYPES = new Set(['dashboard', 'tool'])
+const APP_SIGNALS = ['app', '應用', '工具', '管理', '後台', 'admin', 'dashboard', 'trello', 'notion', 'jira']
+
+export function inferLayoutMode(productType: string, description?: string): LayoutMode {
+  if (APP_PRODUCT_TYPES.has(productType)) return 'app'
+  if (productType === 'saas' && description) {
+    const lower = description.toLowerCase()
+    if (APP_SIGNALS.some(s => lower.includes(s))) return 'app'
+  }
+  return 'website'
 }
 
 // ============================================================
@@ -535,6 +637,9 @@ export async function getTemplateStyleHint(
     [best.templateId]
   )
   if (!template) return null
+
+  // 弱匹配 + 類別不符 → 風格提示可能誤導
+  if (best.score < 60 && template.category !== productType) return null
 
   const parts: string[] = [`參考模板：「${template.name}」（${template.category}）`]
   if (template.description) parts.push(`描述：${template.description}`)

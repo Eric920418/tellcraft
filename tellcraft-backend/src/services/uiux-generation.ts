@@ -930,7 +930,10 @@ ${designSystem.cssVariables}
 - Border: ${designSystem.colorPalette.border}
 
 ### 字體規範
-- Font Family: ${designSystem.typography.fontFamily}
+- 主要字體 (font-sans): ${designSystem.typography.fontFamily}
+${designSystem.tailwindExtend.fontFamily?.display ? `- 標題字體 (font-display): ${(designSystem.tailwindExtend.fontFamily.display as string[])[0]}\n` : ''}\
+${designSystem.tailwindExtend.fontFamily?.mono ? `- 等寬字體 (font-mono): ${(designSystem.tailwindExtend.fontFamily.mono as string[])[0]}\n` : ''}\
+- 使用方式：正文用 font-sans${designSystem.tailwindExtend.fontFamily?.display ? '，標題/大字用 font-display' : ''}${designSystem.tailwindExtend.fontFamily?.mono ? '，程式碼用 font-mono' : ''}
 - Scale: ${JSON.stringify(designSystem.typography.scale)}
 
 ### 間距規範
@@ -1231,6 +1234,7 @@ export async function generateStructure(
     variantConcept?: VariantConcept
     interactionHint?: string
     templateStyleHint?: string
+    layoutMode?: 'app' | 'website'
   },
   trackingContext?: LlmTrackingContext,
   onPartialCode?: PartialCodeCallback
@@ -1468,11 +1472,17 @@ ${interactionSection}
 ## 頁面規劃策略
 以下頁面列表僅作為起始建議：${pages.map(p => `${p}`).join(', ')}
 
-**你應該根據需求規格自行判斷最終的頁面結構：**
+${productContext?.layoutMode === 'app'
+? `**工具型/應用型產品 — 頁面以功能為導向：**
+- 工具型產品通常只有 1-3 個功能頁面，不需要行銷頁面（Hero/CTA/Testimonials）
+- 主頁面直接呈現核心功能界面，佔滿螢幕
+- 不要生成形象官網的 Header/Footer/Hero Section
+- 頁面中使用有意義的模擬數據（和工具功能相關）`
+: `**你應該根據需求規格自行判斷最終的頁面結構：**
 - 歸納出需要哪些頁面，每個頁面承載什麼功能
 - 可以增加、移除、合併、重新命名頁面 — 只要能完整覆蓋功能需求
 - Header/Footer 的導航連結要對應你最終決定的頁面結構
-- 頁面中使用有意義的模擬數據（和產品領域相關，不要用 Lorem ipsum）
+- 頁面中使用有意義的模擬數據（和產品領域相關，不要用 Lorem ipsum）`}
 ${variantConcept ? `- 每個頁面都必須體現「${variantConcept.name}」的創意概念，不是只有首頁` : ''}
 
 ## 模板資訊（設計風格參考）
@@ -1481,10 +1491,15 @@ ${variantConcept ? `- 每個頁面都必須體現「${variantConcept.name}」的
 - 描述：${template.description}
 
 ## 需要生成的內容
-1. 每個頁面的 page.tsx（完整互動結構，根據需求規格決定具體內容）
+${productContext?.layoutMode === 'app'
+? `1. 功能頁面的 page.tsx（完整互動功能，佔滿螢幕）
+2. App Shell Layout（如需側邊欄導航；單頁工具只需基本 layout，無 Header/Footer/Hero）
+3. 功能所需的 UI 組件
+4. globals.css（包含 CSS variables）`
+: `1. 每個頁面的 page.tsx（完整互動結構，根據需求規格決定具體內容）
 2. 共用的 Layout 組件（Header, Footer — 導航項對應實際頁面）
 3. 頁面所需的 UI 組件（根據功能需求決定，不要為了生成而生成）
-4. globals.css（包含 CSS variables）
+4. globals.css（包含 CSS variables）`}
 
 ## ⚠️ 自給自足規則（Critical — 違反會導致 build 失敗）
 **每個 import 語句引用的檔案，你都必須在輸出中生成對應檔案。** 禁止引用不存在的內部模組。
@@ -1501,7 +1516,7 @@ ${variantConcept ? `- 每個頁面都必須體現「${variantConcept.name}」的
   const response = await callClaude(
     systemPrompt,
     [{ role: 'user', content: userMessage }],
-    { maxTokens: 32768, temperature: 0.2 },
+    { maxTokens: 32768, temperature: designTier === 'creative' ? 0.35 : 0.2 },
     { ...trackingContext, purpose: 'generate_structure' },
     buildStreamingHandler(onPartialCode)
   )
@@ -1635,7 +1650,7 @@ ${existingCodeStr}
   const response = await callClaude(
     systemPrompt,
     [{ role: 'user', content: userMessage }],
-    { maxTokens: 32768, temperature: 0.2 },
+    { maxTokens: 32768, temperature: tier === 'creative' ? 0.35 : 0.2 },
     { ...trackingContext, purpose: 'generate_animations' },
     buildStreamingHandler(onPartialCode)
   )
@@ -1672,7 +1687,8 @@ export async function generateRwd(
   trackingContext?: LlmTrackingContext,
   onPartialCode?: PartialCodeCallback,
   variantConcept?: VariantConcept,
-  uiSpecSummary?: string
+  uiSpecSummary?: string,
+  layoutMode?: 'app' | 'website'
 ): Promise<GenerationResult> {
   const tier = designTier || 'functional'
 
@@ -1697,7 +1713,7 @@ ${rwdTierHint}
 這是第三階段，需要：
 1. 添加移動端佈局（< 768px）
 2. 添加平板佈局（768px - 1024px）
-3. 添加移動端導航（漢堡選單）
+3. ${layoutMode === 'app' ? '側邊欄移動端折疊（底部導航或抽屜）' : '添加移動端導航（漢堡選單）'}
 4. 添加觸控優化
 
 ## Tailwind 響應式斷點
@@ -1716,10 +1732,15 @@ xl: 1280px
 - 移動端字體可讀性（最小 16px）
 - 圖片使用 responsive srcset
 
-## 移動端導航
+${layoutMode === 'app'
+? `## 應用型移動端導航
+- 如有側邊欄：移動端折疊為底部導航欄或抽屜式導航
+- 單頁工具不需要額外導航組件
+- 功能面板在移動端改為垂直堆疊`
+: `## 移動端導航
 - 提供漢堡選單（使用 Radix Dialog 或 Sheet）
 - 選單打開時鎖定背景滾動
-- 支援鍵盤導航和 ESC 關閉
+- 支援鍵盤導航和 ESC 關閉`}
 
 ## 禁止
 - 不要移除現有的動畫效果
@@ -1753,7 +1774,7 @@ xl: 1280px
 
 ### 佈局完整性
 - [ ] 固定元素尊重 safe-area-inset
-- [ ] 移動端導航可用且可關閉（ESC + 點擊外部）
+- [ ] ${layoutMode === 'app' ? '應用界面移動端可操作且功能完整' : '移動端導航可用且可關閉（ESC + 點擊外部）'}
 - [ ] 表單移動端 inputmode 正確（email/tel/numeric）
 - [ ] 圖片有 explicit width/height 或 aspect-ratio 防止 CLS
 - [ ] Flex 子元素有 min-w-0（truncate 才能生效）
@@ -1790,7 +1811,7 @@ ${rwdConceptReminder}${rwdUiSpecHint}
 ${existingCodeStr}
 
 ## 需要添加的響應式功能
-1. Header 移動端漢堡選單
+1. ${layoutMode === 'app' ? '功能面板響應式堆疊（側邊欄折疊或底部導航）' : 'Header 移動端漢堡選單'}
 2. 網格佈局響應式調整（4列→2列→1列）
 3. 側邊欄折疊或變成底部導航
 4. 表單輸入移動端優化
@@ -2029,7 +2050,12 @@ const config: Config = {
         ${designSystem.colorPalette.success ? `success: '${designSystem.colorPalette.success}',` : ''}
       },
       fontFamily: {
-        sans: ['${designSystem.typography.fontFamily.split(',')[0].trim()}', 'system-ui', 'sans-serif'],
+        ${(designSystem.tailwindExtend.fontFamily && Object.keys(designSystem.tailwindExtend.fontFamily).length > 0)
+          ? Object.entries(designSystem.tailwindExtend.fontFamily).map(
+              ([key, fonts]) => `${key}: [${(fonts as string[]).map(f => `'${f}'`).join(', ')}]`
+            ).join(',\n        ')
+          : `sans: ['${designSystem.typography.fontFamily.split(',')[0].trim()}', 'system-ui', 'sans-serif']`
+        },
       },
       borderRadius: {
         none: '${designSystem.borderRadius.none}',

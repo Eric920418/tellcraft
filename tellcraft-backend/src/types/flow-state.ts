@@ -87,6 +87,8 @@ export interface FlowState {
   // phase: 'fast_need_more_info'（描述太短，等待補充）、'fast_generating'（生成中）
   fastMode?: boolean
   fastModeProductType?: string
+  fastModeOriginalMessage?: string  // 原始描述（供迭代時提供上下文）
+  fastModeLayoutMode?: 'app' | 'website'
   // 智能模板匹配
   matchedTemplateIds?: string[] // 匹配的模板 ID（分數排序）
   // 用戶 ID（供內部函數取得 trackingContext）

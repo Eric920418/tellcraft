@@ -40,7 +40,7 @@ import {
 import { translateBddToUISpec, buildUISpecSummary } from '../services/bdd-to-ui-spec'
 import { runQualityGate, autoFixCriticalIssues, QualityReport } from '../services/quality-gate'
 import { prepareDeployment, executeDeployment } from '../services/deployer'
-import { detectDesignTier, inferProductType, inferPages, buildDefaultDesignSystem, buildMinimalTemplate, inferInteractionHint, getTemplateStyleHint } from '../services/fast-build-generation'
+import { detectDesignTier, inferProductType, inferPages, buildDefaultDesignSystem, buildMinimalTemplate, inferInteractionHint, getTemplateStyleHint, inferLayoutMode, PRODUCT_TYPE_LABELS } from '../services/fast-build-generation'
 import { ensureResponsiveClasses } from '../services/uiux-generation'
 import { matchTemplates } from '../services/template-matcher'
 import { executeIteration, executeUndoIteration, executeRollbackQuery, executeRollbackSelection } from '../services/iteration-skill'
@@ -3494,7 +3494,7 @@ async function executeFastBuildSkill(params: {
   const { taskId, projectId, conversationId, userId, message, redis, io } = params
 
   // ── 描述品質檢查（前端已攔截 < 15 字，這是後端安全網）──
-  if (message.trim().length < 10) {
+  if (message.trim().length < 15) {  // 與前端一致（app/page.tsx L615）
     const waitState: FlowState = {
       phase: 'fast_need_more_info',
       projectId,
@@ -3524,7 +3524,8 @@ async function executeFastBuildSkill(params: {
   const designSystem = buildDefaultDesignSystem(tier, productType)
   const template = buildMinimalTemplate(message, productType)
 
-  console.log(`[FastBuild] tier=${tier}, type=${productType}, pages=[${pages.join(',')}]`)
+  const layoutMode = inferLayoutMode(productType, message)
+  console.log(`[FastBuild] tier=${tier}, type=${productType}, layout=${layoutMode}, pages=[${pages.join(',')}]`)
 
   // ── 模板風格提示（降級跳過，不影響主流程）──
   let templateStyleHint: string | null = null
@@ -3551,13 +3552,15 @@ async function executeFastBuildSkill(params: {
     uiuxCodeGenerationStartedAt: Date.now(),
     fastMode: true,
     fastModeProductType: productType,
+    fastModeLayoutMode: layoutMode,
+    fastModeOriginalMessage: message,
     userId,
   }
   await saveFlowState(redis, conversationId, state)
 
   // ── 發送進度消息 ──
   await sendMessage(conversationId, io, {
-    content: `正在快速生成您的${productType === 'landing' ? '網站' : productType}，預計 60-90 秒...`,
+    content: `正在快速生成您的${PRODUCT_TYPE_LABELS[productType] || '網站'}，預計 60-90 秒...`,
     stage: 'fast_generating',
     progress: { current: 1, total: 3, step: '生成結構' },
     richContent: {
@@ -3580,6 +3583,7 @@ async function executeFastBuildSkill(params: {
       originalRequirements: message,
       interactionHint,
       templateStyleHint: templateStyleHint || undefined,
+      layoutMode,
     },
     { userId, conversationId, purpose: 'fast-build-structure' },
     makeStreamingCallback(conversationId, io, redis, 'structure', twConfig)
@@ -3624,7 +3628,8 @@ async function executeFastBuildSkill(params: {
     },
   })
 
-  const fastUiSpecSummary = state.uiuxUISpec ? buildUISpecSummary(state.uiuxUISpec) : undefined
+  const fastUiSpecSummary = state.uiuxUISpec ? buildUISpecSummary(state.uiuxUISpec)
+    : (interactionHint ? `產品互動概覽：\n${interactionHint}` : undefined)
   const animationResult = await generateAnimations(
     designSystem,
     currentCode,
@@ -3673,6 +3678,7 @@ async function executeFastBuildSkill(params: {
     makeStreamingCallback(conversationId, io, redis, 'rwd', twConfig),
     undefined, // variantConcept
     fastUiSpecSummary,
+    layoutMode,
   )
 
   if (rwdResult.success) {
@@ -3688,29 +3694,29 @@ async function executeFastBuildSkill(params: {
     currentCode.components = fixed.components
   }
 
-  // ===== Quality Gate（靜態檢查 + 1 輪輕量 LLM 修復）=====
+  // ===== Quality Gate（靜態檢查 + 最多 2 輪 LLM 修復）=====
   let report = runQualityGate(currentCode, tier)
   console.log(`[FastBuild] QG: passed=${report.passed}, critical=${report.summary.critical}, warning=${report.summary.warning}`)
 
-  if (!report.passed) {
+  const FAST_QG_MAX_ATTEMPTS = 2
+  for (let attempt = 0; attempt < FAST_QG_MAX_ATTEMPTS && !report.passed; attempt++) {
     const criticalIssues = [
       ...report.categories.a11y.issues,
       ...report.categories.performance.issues,
       ...report.categories.code_quality.issues,
     ].filter(i => i.severity === 'critical')
+    if (criticalIssues.length === 0) break
 
-    if (criticalIssues.length > 0) {
-      console.log(`[FastBuild] QG 有 ${criticalIssues.length} 個 critical，嘗試 1 輪修復`)
-      try {
-        const fixed = await autoFixCriticalIssues(currentCode, criticalIssues, { userId, conversationId })
-        if (fixed) {
-          currentCode = fixed
-          report = runQualityGate(currentCode, tier)
-          console.log(`[FastBuild] QG 修復後: passed=${report.passed}, critical=${report.summary.critical}`)
-        }
-      } catch (qgErr) {
-        console.warn('[FastBuild] QG 修復失敗，跳過:', qgErr)
-      }
+    console.log(`[FastBuild] QG 第 ${attempt + 1} 輪修復：${criticalIssues.length} 個 critical`)
+    try {
+      const fixed = await autoFixCriticalIssues(currentCode, criticalIssues, { userId, conversationId })
+      if (!fixed) break
+      currentCode = fixed
+      report = runQualityGate(currentCode, tier)
+      console.log(`[FastBuild] QG 修復後: passed=${report.passed}, critical=${report.summary.critical}`)
+    } catch (qgErr) {
+      console.warn('[FastBuild] QG 修復失敗，跳過:', qgErr)
+      break
     }
   }
 
@@ -3735,8 +3741,14 @@ async function executeFastBuildSkill(params: {
   const finalPageCount = currentCode.pages.length
   const finalComponentCount = currentCode.components.length
 
+  const qgText = report.passed && report.summary.warning === 0
+    ? ''
+    : report.passed
+      ? `\n品質檢查通過（${report.summary.warning} 個建議項）。`
+      : `\n品質檢查：${report.summary.critical} 個問題、${report.summary.warning} 個建議。`
+
   await sendMessage(conversationId, io, {
-    content: `快速生成完成！共 ${finalPageCount} 個頁面、${finalComponentCount} 個組件。\n\n你可以：\n- 直接說想修改的地方，AI 會幫你調整\n- 輸入「**部署**」即可上線`,
+    content: `快速生成完成！共 ${finalPageCount} 個頁面、${finalComponentCount} 個組件。${qgText}\n\n你可以：\n- 直接說想修改的地方，AI 會幫你調整\n- 輸入「**部署**」即可上線`,
     stage: 'uiux_generation_complete',
     progress: { current: 3, total: 3, step: '完成' },
     layoutHint: 'split',
