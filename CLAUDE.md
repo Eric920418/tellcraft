@@ -57,6 +57,11 @@ pm2 describe tellcraft-backend            # 詳細資訊（記憶體/重啟次�
 
 **為什麼用 VPS**：Vercel Serverless 超時限制（10-60 秒）無法處理長時間 LLM 任務。
 
+**注意事項**：
+- 前端路徑別名 `@/*` 映射到 `./*`（tsconfig.json paths），後端無路徑別名
+- 前後端 TypeScript 完全隔離（tsconfig exclude `tellcraft-backend/` 和 `prompts/`）
+- 前端 package.json name 為 `ai-genesis`（歷史遺留），專案實際名稱是 `tellcraft`
+
 ### 核心模組
 
 **後端（`tellcraft-backend/src/`）**
