@@ -489,4 +489,60 @@ router.get('/admin/list', requireAdmin, async (req, res) => {
   }
 })
 
+/**
+ * PUT /api/templates/preview/:id
+ * 直接更新模板預覽 HTML（Admin only）
+ * 用於 Claude Code 批量推送本地生成的預覽
+ */
+router.put('/preview/:id', requireAdmin, async (req, res) => {
+  try {
+    const { id } = req.params
+    const { html_content } = req.body
+
+    if (!id || !isUUID(id)) {
+      return res.status(400).json({ error: '無效的模板 ID' })
+    }
+
+    if (!html_content || typeof html_content !== 'string' || html_content.length < 100) {
+      return res.status(400).json({ error: 'html_content 必須是至少 100 字元的字串' })
+    }
+
+    // 檢查模板存在
+    const template = await queryOne<{ id: string; slug: string }>(
+      'SELECT id, slug FROM templates WHERE id = $1',
+      [id]
+    )
+    if (!template) {
+      return res.status(404).json({ error: '模板不存在' })
+    }
+
+    // Upsert preview
+    await query(
+      `INSERT INTO template_previews (template_id, html_content, version)
+       VALUES ($1, $2, 1)
+       ON CONFLICT (template_id) DO UPDATE SET
+         html_content = EXCLUDED.html_content,
+         version = template_previews.version + 1,
+         updated_at = NOW()`,
+      [id, html_content]
+    )
+
+    // 取回新版本號
+    const updated = await queryOne<{ version: number }>(
+      'SELECT version FROM template_previews WHERE template_id = $1',
+      [id]
+    )
+
+    res.json({
+      success: true,
+      slug: template.slug,
+      version: updated?.version || 1,
+      htmlLength: html_content.length,
+    })
+  } catch (error) {
+    console.error('[Templates] 更新預覽失敗:', error)
+    res.status(500).json({ error: '更新預覽失敗' })
+  }
+})
+
 export default router
