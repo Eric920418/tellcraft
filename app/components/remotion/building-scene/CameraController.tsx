@@ -1,30 +1,30 @@
 // ============================================================
-// 幀驅動相機控制（替代 OrbitControls + useFrame）
+// 幀驅動相機控制 + 天空漸變環繞
 // ============================================================
 
 import { useCurrentFrame, useVideoConfig } from 'remotion'
 import { useThree } from '@react-three/fiber'
 import { useEffect } from 'react'
-import { useAnimationValues } from './FrameDrivenAnimations'
+import { useCastleAnimationValues } from './FrameDrivenAnimations'
+
+const BASE_RADIUS = 11
 
 export default function CameraController() {
   const frame = useCurrentFrame()
   const { fps } = useVideoConfig()
   const { camera } = useThree()
-  const values = useAnimationValues(frame, fps)
+  const v = useCastleAnimationValues(frame, fps)
 
-  // 每幀更新相機位置
   useEffect(() => {
-    camera.position.y = values.cameraY
+    const angle = v.cameraOrbitAngle
+    const radius = BASE_RADIUS
 
-    // 完工後緩慢旋轉
-    if (values.celebrationRotation > 0) {
-      const angle = values.celebrationRotation
-      const radius = Math.sqrt(camera.position.x ** 2 + camera.position.z ** 2)
-      camera.position.x = Math.cos(angle) * radius
-      camera.position.z = Math.sin(angle) * radius
-      camera.lookAt(0, 1, 0)
-    }
+    camera.position.x = Math.cos(angle) * radius
+    camera.position.y = v.cameraY
+    camera.position.z = Math.sin(angle) * radius
+
+    // 永遠看向城堡中心（略偏上）
+    camera.lookAt(0, 1.5, 0)
   })
 
   return null

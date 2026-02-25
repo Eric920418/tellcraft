@@ -1,12 +1,14 @@
 // ============================================================
-// Building Scene 主 Composition：ThreeCanvas + 3D 場景
+// 城堡 Building Scene 主 Composition：ThreeCanvas + 天空 + 3D 場景
 // ============================================================
 
-import { useCurrentFrame, useVideoConfig, interpolate } from 'remotion'
+import { useCurrentFrame, useVideoConfig } from 'remotion'
 import { ThreeCanvas } from '@remotion/three'
 import BuildingMeshes from './BuildingMeshes'
 import CameraController from './CameraController'
-import { ROUND_LABELS, ROUND_COLORS, TOTAL_FRAMES } from './constants'
+import CastleSky from './CastleSky'
+import { useCastleAnimationValues } from './FrameDrivenAnimations'
+import { ROUND_LABELS, ROUND_COLORS } from './constants'
 
 interface BuildingCompositionProps {
   isWorking?: boolean
@@ -22,24 +24,32 @@ export default function BuildingComposition({
   totalQuestions = 30,
 }: BuildingCompositionProps) {
   const frame = useCurrentFrame()
-  const { width, height } = useVideoConfig()
+  const { width, height, fps } = useVideoConfig()
+  const v = useCastleAnimationValues(frame, fps)
 
   const percent = totalQuestions > 0 ? Math.round((progress / totalQuestions) * 100) : 0
-
-  // 根據幀推算當前輪次（用於 overlay 顯示）
   const frameRound = Math.min(6, Math.floor(frame / 150) + 1)
   const displayRound = round > 0 ? round : frameRound
 
+  // 天空背景色（作為 canvas 底色）
+  const bgR = Math.round(v.skyBottomRGB[0])
+  const bgG = Math.round(v.skyBottomRGB[1])
+  const bgB = Math.round(v.skyBottomRGB[2])
+
   return (
-    <div style={{ width: '100%', height: '100%', position: 'relative', background: '#f8fafc' }}>
+    <div style={{ width: '100%', height: '100%', position: 'relative', background: `rgb(${bgR},${bgG},${bgB})` }}>
       <ThreeCanvas
         width={width}
         height={height}
-        camera={{ position: [8, 10, 8], fov: 35 }}
+        camera={{ position: [11, 12, 11], fov: 30 }}
       >
-        <ambientLight intensity={0.5} />
-        <directionalLight position={[5, 8, 5]} intensity={0.8} />
-        <directionalLight position={[-3, 4, -3]} intensity={0.3} />
+        {/* 天空半球 */}
+        <CastleSky topRGB={v.skyTopRGB} bottomRGB={v.skyBottomRGB} />
+
+        {/* 動態光照 */}
+        <ambientLight intensity={v.ambientIntensity} />
+        <directionalLight position={[8, 12, 6]} intensity={v.sunIntensity} castShadow={false} />
+        <directionalLight position={[-4, 6, -4]} intensity={v.sunIntensity * 0.3} />
 
         <BuildingMeshes isWorking={isWorking} />
         <CameraController />
@@ -48,7 +58,7 @@ export default function BuildingComposition({
       {/* UI Overlay */}
       <div style={{
         position: 'absolute',
-        bottom: 20,
+        bottom: 16,
         left: 0,
         right: 0,
         display: 'flex',
@@ -62,10 +72,9 @@ export default function BuildingComposition({
           display: 'flex',
           gap: 4,
           padding: '6px 12px',
-          background: 'rgba(255,255,255,0.9)',
+          background: 'rgba(0,0,0,0.35)',
           borderRadius: 20,
           backdropFilter: 'blur(8px)',
-          border: '1px solid var(--border-color)',
         }}>
           {ROUND_LABELS.map((label, i) => (
             <span key={label} style={{
@@ -73,7 +82,7 @@ export default function BuildingComposition({
               padding: '2px 8px',
               borderRadius: 10,
               background: i < displayRound ? ROUND_COLORS[i] : 'transparent',
-              color: i < displayRound ? 'white' : '#94a3b8',
+              color: i < displayRound ? 'white' : 'rgba(255,255,255,0.4)',
               fontWeight: i === displayRound - 1 ? 600 : 400,
             }}>
               {label}
@@ -84,8 +93,8 @@ export default function BuildingComposition({
         {/* 進度文字 */}
         <div style={{
           fontSize: 12,
-          color: '#64748b',
-          background: 'rgba(255,255,255,0.8)',
+          color: 'rgba(255,255,255,0.85)',
+          background: 'rgba(0,0,0,0.3)',
           padding: '4px 12px',
           borderRadius: 12,
           backdropFilter: 'blur(4px)',

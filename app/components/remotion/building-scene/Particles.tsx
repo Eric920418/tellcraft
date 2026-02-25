@@ -1,62 +1,82 @@
 // ============================================================
-// 施工粒子（幀驅動，替代 useFrame）
+// 施工火花 + 完工煙火（幀驅動）
 // ============================================================
 
 import { useMemo } from 'react'
-import { useCurrentFrame, useVideoConfig } from 'remotion'
-import * as THREE from 'three'
 import { COLORS } from './constants'
 
-const PARTICLE_COUNT = 30
+const SPARK_COUNT = 40
+const FIREWORK_COUNT = 60
+const FIREWORK_COLORS = [COLORS.fireworkRed, COLORS.fireworkGold, COLORS.fireworkBlue]
 
-export default function Particles({ visible }: { visible: boolean }) {
-  const frame = useCurrentFrame()
-  const { fps } = useVideoConfig()
+interface ParticlesProps {
+  visible: boolean
+  isFireworks?: boolean
+  frame: number
+}
 
-  const basePositions = useMemo(() => {
-    const arr = new Float32Array(PARTICLE_COUNT * 3)
-    for (let i = 0; i < PARTICLE_COUNT; i++) {
-      arr[i * 3] = (Math.random() - 0.5) * 6
-      arr[i * 3 + 1] = Math.random() * 4
-      arr[i * 3 + 2] = (Math.random() - 0.5) * 6
-    }
-    return arr
-  }, [])
+export default function Particles({ visible, isFireworks, frame }: ParticlesProps) {
+  // 施工火花種子
+  const sparkSeeds = useMemo(() =>
+    Array.from({ length: SPARK_COUNT }, (_, i) => ({
+      angle: (i / SPARK_COUNT) * Math.PI * 2,
+      radius: 0.5 + Math.random() * 2.5,
+      speed: 0.3 + Math.random() * 0.4,
+      yOffset: Math.random() * 3,
+      phase: Math.random() * Math.PI * 2,
+    })),
+  [])
 
-  // 每幀計算粒子位置（確定性，基於 frame）
-  const positions = useMemo(() => {
-    const arr = new Float32Array(PARTICLE_COUNT * 3)
-    const speed = 0.5 / fps
-    for (let i = 0; i < PARTICLE_COUNT; i++) {
-      arr[i * 3] = basePositions[i * 3]
-      const baseY = basePositions[i * 3 + 1]
-      const y = (baseY + frame * speed) % 4
-      arr[i * 3 + 1] = y
-      arr[i * 3 + 2] = basePositions[i * 3 + 2]
-    }
-    return arr
-  }, [frame, fps, basePositions])
+  // 煙火種子
+  const fireworkSeeds = useMemo(() =>
+    Array.from({ length: FIREWORK_COUNT }, (_, i) => ({
+      theta: Math.random() * Math.PI * 2,
+      phi: Math.random() * Math.PI,
+      speed: 1.5 + Math.random() * 2.5,
+      colorIndex: i % 3,
+    })),
+  [])
 
-  const rotation = (frame * 0.1) / fps
-
-  if (!visible) return null
+  if (!visible && !isFireworks) return null
 
   return (
-    <points rotation={[0, rotation, 0]}>
-      <bufferGeometry>
-        <bufferAttribute
-          attach="attributes-position"
-          args={[positions, 3]}
-          count={PARTICLE_COUNT}
-        />
-      </bufferGeometry>
-      <pointsMaterial
-        color={COLORS.blueprint}
-        size={0.05}
-        transparent
-        opacity={0.6}
-        sizeAttenuation
-      />
-    </points>
+    <group>
+      {/* 施工火花（金色） */}
+      {visible && !isFireworks && sparkSeeds.map((seed, i) => {
+        const t = (frame * seed.speed * 0.03 + seed.phase) % (Math.PI * 2)
+        const x = Math.cos(seed.angle + t * 0.5) * seed.radius
+        const y = (seed.yOffset + frame * 0.02) % 4
+        const z = Math.sin(seed.angle + t * 0.5) * seed.radius
+        const opacity = 0.3 + Math.sin(t) * 0.3
+
+        return (
+          <mesh key={`spark${i}`} position={[x, y, z]}>
+            <sphereGeometry args={[0.03, 4, 4]} />
+            <meshBasicMaterial color={COLORS.sparkGold} transparent opacity={opacity} />
+          </mesh>
+        )
+      })}
+
+      {/* 完工煙火 */}
+      {isFireworks && fireworkSeeds.map((seed, i) => {
+        const fireworkFrame = Math.max(0, frame - 880)
+        const expand = Math.min(fireworkFrame * 0.08, 1) * seed.speed
+        const x = Math.sin(seed.phi) * Math.cos(seed.theta) * expand
+        const y = 5 + Math.cos(seed.phi) * expand - fireworkFrame * 0.01
+        const z = Math.sin(seed.phi) * Math.sin(seed.theta) * expand
+        const opacity = Math.max(0, 1 - fireworkFrame * 0.03)
+
+        return (
+          <mesh key={`fw${i}`} position={[x, y, z]}>
+            <sphereGeometry args={[0.06, 4, 4]} />
+            <meshBasicMaterial
+              color={FIREWORK_COLORS[seed.colorIndex]}
+              transparent
+              opacity={opacity}
+            />
+          </mesh>
+        )
+      })}
+    </group>
   )
 }

@@ -3,11 +3,10 @@
 import { useRef, useEffect, useMemo } from 'react'
 import { Player, type PlayerRef } from '@remotion/player'
 import FastBuildComposition from './remotion/fast-build/FastBuildComposition'
-import { FPS, TOTAL_FRAMES } from './remotion/fast-build/constants'
+import { FPS, TOTAL_FRAMES, PHASE_TARGET_FRAME, PHASE_LENGTHS } from './remotion/fast-build/constants'
 
 // ============================================================
-// Fast Build Player 包裝器
-// Props interface 與 FastBuildProgress 完全相同
+// Fast Build Player 包裝器（3D 工廠流水線）
 // ============================================================
 
 interface FastBuildPlayerProps {
@@ -16,40 +15,36 @@ interface FastBuildPlayerProps {
   streamingChunks?: number
 }
 
-// phase → 目標幀映射
-const PHASE_TARGET_FRAME: Record<string, number> = {
-  structure: 30,
-  animation: 130,
-  rwd: 230,
-  quality_gate: 280,
-  complete: 295,
-}
-
-export default function FastBuildPlayer({ phase }: FastBuildPlayerProps) {
+export default function FastBuildPlayer({ phase, streamingChunks }: FastBuildPlayerProps) {
   const playerRef = useRef<PlayerRef>(null)
 
   useEffect(() => {
     const player = playerRef.current
     if (!player) return
 
-    const targetFrame = PHASE_TARGET_FRAME[phase] ?? 0
-    player.seekTo(targetFrame)
-    player.play()
-  }, [phase])
+    const baseFrame = PHASE_TARGET_FRAME[phase] ?? 0
+    const phaseLength = PHASE_LENGTHS[phase] ?? 100
 
-  // Player component style
+    // streamingChunks 驅動微進度（佔該階段 80%）
+    const microProgress = streamingChunks ? Math.min(streamingChunks / 50, 1) : 0
+    const targetFrame = baseFrame + Math.floor(microProgress * phaseLength * 0.8)
+
+    player.seekTo(Math.min(targetFrame, TOTAL_FRAMES - 1))
+    player.play()
+  }, [phase, streamingChunks])
+
   const style = useMemo(() => ({
     width: '100%',
     height: '100%',
   }), [])
 
   return (
-    <div style={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#f0f4f8' }}>
+    <div style={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#0f172a' }}>
       <Player
         ref={playerRef}
         component={FastBuildComposition}
-        compositionWidth={640}
-        compositionHeight={480}
+        compositionWidth={800}
+        compositionHeight={600}
         durationInFrames={TOTAL_FRAMES}
         fps={FPS}
         style={style}

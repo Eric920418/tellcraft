@@ -15,6 +15,7 @@ interface BuildingPlayerProps {
   progress: number       // 已回答的題數 (0-30)
   totalQuestions: number  // 總題數
   round: number          // 當前輪次 (1-6)
+  maxRounds?: number     // 最大輪次（用於動態調整）
   isWorking?: boolean    // LLM 正在工作
   isComplete?: boolean   // Q&A 結束
 }
@@ -23,6 +24,7 @@ export default function BuildingPlayer({
   progress,
   totalQuestions,
   round,
+  maxRounds: _maxRounds = 6,
   isWorking,
   isComplete,
 }: BuildingPlayerProps) {

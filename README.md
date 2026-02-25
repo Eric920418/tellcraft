@@ -17,6 +17,34 @@ Tellcraft 是一個 AI 驅動的自動化開發平台。用戶只需描述需求
 - **Server Actions**：30+ 已實作
 - **詳情**：[`.clarify/overview.md`](.clarify/overview.md)
 
+### 動畫大升級：低多邊形城堡 + 3D 工廠流水線（2026-02-25）
+
+BDD Q&A 場景從「簡易房屋」升級為「低多邊形城堡」（65+ mesh），Fast Build 從 2D 進度條升級為「3D 工廠流水線」（~39 mesh）。
+
+**城堡場景（BDD Q&A）**：
+- 6 輪建造：地基+護城河 → 城牆+城垛 → 4 角塔+箭孔 → 吊橋+城門+庭院+水井 → 塔頂+旗幟 → 窗戶發光+樹木+煙火慶祝
+- 藍圖→實體雙層過渡：`BlueprintMesh` 通用元件（wireframe → solid material）
+- 天空漸變：`CastleSky` 半球（黎明深藍→白天天藍→黃昏金橙），光照強度同步
+- 旗幟飄動：`sin(frame * 0.15)` 驅動
+- 施工火花 40 粒子 + 完工煙火 60 粒子（3 色球形擴散）
+- 相機環繞 + Y 軸下降
+
+**工廠流水線（Fast Build）**：
+- 傳送帶 + 20 滾筒 + 4 支撐腿
+- 3 工位：機械臂活塞（Structure）→ 噴嘴+刷子噴塗（Animation）→ 夾具+壓板縮放測試（RWD）
+- 產品材質 4 階段：灰白原料→藍色線框→紫色實體→金色成品
+- 展示台 + 聚光燈 + 旋轉展示
+- `streamingChunks` 微進度：chunk 更新驅動工廠動畫（佔該階段 80%）
+- 跟隨產品的相機控制
+
+**改動檔案**：
+- 完全重寫（城堡 7 檔）：`constants.ts`、`FrameDrivenAnimations.ts`、`BuildingMeshes.tsx`、`CameraController.tsx`、`Particles.tsx`、`BuildingFallback2D.tsx`、`BuildingComposition.tsx`
+- 新增（城堡 2 檔）：`BlueprintMesh.tsx`、`CastleSky.tsx`
+- 刪除（Fast Build 5 檔）：`BlueprintGrid.tsx`、`PhaseNode.tsx`、`ConnectingLine.tsx`、`ProgressBar.tsx`、`StepText.tsx`
+- 完全重寫（Fast Build 2 檔）：`constants.ts`、`FastBuildComposition.tsx`
+- 新增（Fast Build 8 檔）：`FrameDrivenAnimations.ts`、`ConveyorBelt.tsx`、`Station1Structure.tsx`、`Station2Animation.tsx`、`Station3Rwd.tsx`、`Product.tsx`、`DisplayPedestal.tsx`、`FactoryParticles.tsx`、`FactoryCameraController.tsx`
+- 微調：`shared/springs.ts`（+EXTRA_HEAVY）、`BuildingPlayer.tsx`（+maxRounds）、`FastBuildPlayer.tsx`（3D+streamingChunks 微進度）、`page.tsx`（傳 maxRounds）
+
 ### Fast Build 品質升級（2026-02-25）
 
 13 項修復，全面提升快速模式生成品質：

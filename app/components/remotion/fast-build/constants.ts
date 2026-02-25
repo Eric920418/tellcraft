@@ -1,80 +1,97 @@
 // ============================================================
-// Fast Build Composition 常數
+// 3D 工廠流水線常數
 // ============================================================
 
 export const FPS = 30
 export const TOTAL_FRAMES = 300 // 10 秒
 
-// 顏色
-export const BLUEPRINT_BG = '#f0f4f8'
-export const GRID_COLOR = 'rgba(59, 130, 246, 0.08)'
-export const SCAN_COLOR = 'rgba(59, 130, 246, 0.15)'
-export const ACCENT = '#3b82f6'
-export const ACCENT_GLOW = 'rgba(59, 130, 246, 0.3)'
-export const NODE_BG = '#ffffff'
-export const NODE_BORDER = '#e2e8f0'
-export const NODE_ACTIVE_BORDER = ACCENT
-export const COMPLETED_BG = ACCENT
-export const PENDING_TEXT = '#94a3b8'
-export const PARTICLE_COLOR = ACCENT
-export const SHIMMER_COLOR = 'rgba(255, 255, 255, 0.4)'
+// ── 顏色 ──
+export const FACTORY_COLORS = {
+  // 場景
+  floor: '#475569',
+  floorGrid: '#64748b',
 
-// 階段資訊
-export const PHASES = [
-  { key: 'structure', label: '骨架', index: 0 },
-  { key: 'animation', label: '動效', index: 1 },
-  { key: 'rwd', label: '適配', index: 2 },
-] as const
+  // 傳送帶
+  beltDark: '#334155',
+  beltLight: '#475569',
+  roller: '#94a3b8',
+  frame: '#64748b',
 
-// 幀佈局
-export const PHASE_FRAMES = {
-  idle: { start: 0, end: 30 },
-  phase1: { start: 30, end: 130 },
-  phase2: { start: 130, end: 230 },
-  phase3: { start: 230, end: 300 },
+  // 工位
+  stationBase: '#334155',
+  stationAccent: '#3b82f6',
+
+  // 工位 1 機械臂
+  arm: '#94a3b8',
+  armTop: '#3b82f6',
+  piston: '#60a5fa',
+
+  // 工位 2 噴嘴 + 刷子
+  nozzle: '#c084fc',
+  brush: '#a78bfa',
+
+  // 工位 3 夾具
+  clamp: '#f59e0b',
+  plate: '#fbbf24',
+
+  // 產品材質 4 階段
+  rawMaterial: '#e2e8f0',
+  wireframe: '#60a5fa',
+  solidSurface: '#c084fc',
+  finalProduct: '#fbbf24',
+
+  // 展示
+  pedestal: '#1e293b',
+  spotlight: '#fef3c7',
+
+  // 粒子
+  spark: '#60a5fa',
+  paintDrop: '#c084fc',
+  glow: '#fbbf24',
 } as const
 
-// 節點 spring 激活幀
-export const NODE_ACTIVATE_FRAMES = [30, 140, 240] as const
-// checkmark 完成幀
-export const NODE_COMPLETE_FRAMES = [130, 230, 280] as const
-// 連接線粒子開始幀
-export const LINE_START_FRAMES = [45, 155] as const
+// ── 幀佈局 ──
+export const PHASE_FRAMES = {
+  idle: { start: 0, end: 29 },
+  phase1: { start: 30, end: 129 },
+  phase2: { start: 130, end: 229 },
+  phase3: { start: 230, end: 299 },
+} as const
 
-// 進度條目標百分比
-export const PROGRESS_TARGETS = [
-  { frame: 30, percent: 0 },
-  { frame: 130, percent: 33 },
-  { frame: 230, percent: 66 },
-  { frame: 300, percent: 100 },
-] as const
+// ── 工位 X 座標 ──
+export const STATION_X = {
+  start: -8,
+  station1: -4,
+  station2: 0,
+  station3: 4,
+  display: 7,
+} as const
 
-// 步驟文字
-export const STEP_TEXTS: Record<string, string[]> = {
-  structure: [
-    '正在搭建頁面結構...',
-    '正在生成 Hero Section...',
-    '正在處理導航欄...',
-    '正在構建內容區塊...',
-    '正在添加互動元素...',
-  ],
-  animation: [
-    '正在添加入場動畫...',
-    '正在設定滾動效果...',
-    '正在處理過渡動畫...',
-    '正在增強視覺回饋...',
-  ],
-  rwd: [
-    '正在優化手機版佈局...',
-    '正在調整平板斷點...',
-    '正在確保文字可讀性...',
-    '正在測試響應式間距...',
-  ],
-  quality_gate: ['正在執行品質檢查...'],
-  complete: ['生成完成！'],
+// ── 傳送帶參數 ──
+export const BELT = {
+  y: 0.6,
+  width: 1.2,
+  length: 18,
+  rollerCount: 20,
+  rollerRadius: 0.08,
+  rollerSpacing: 0.9,
+} as const
+
+// ── 產品基線 Y ──
+export const PRODUCT_BASE_Y = 0.88
+
+// ── phase 目標幀（供 FastBuildPlayer seekTo） ──
+export const PHASE_TARGET_FRAME: Record<string, number> = {
+  structure: 30,
+  animation: 130,
+  rwd: 230,
+  quality_gate: 280,
+  complete: 295,
 }
 
-// 佈局
-export const NODE_SIZE = 64
-export const NODE_GAP = 48
-export const NODE_RADIUS = 16
+// ── phase 長度（供微進度計算） ──
+export const PHASE_LENGTHS: Record<string, number> = {
+  structure: 100,
+  animation: 100,
+  rwd: 70,
+}

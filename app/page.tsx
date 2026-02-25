@@ -2265,7 +2265,7 @@ function ChatSection({
     if (isBddClarify && !hasUiuxStage) {
       // 提取建築進度
       const buildingMsg = [...messages].reverse().find(m => m.richContent?.type === 'building_progress')
-      const buildingData = buildingMsg?.richContent?.data as { current?: number; total?: number; round?: number } | undefined
+      const buildingData = buildingMsg?.richContent?.data as { current?: number; total?: number; round?: number; maxRounds?: number } | undefined
       const bddProgress = buildingData?.current ?? 0
       const bddTotal = buildingData?.total ?? 30
       const bddRound = buildingData?.round ?? 1
@@ -2297,6 +2297,7 @@ function ChatSection({
               progress={bddProgress}
               totalQuestions={bddTotal}
               round={bddRound}
+              maxRounds={buildingData?.maxRounds ?? 6}
               isWorking={isLLMWorking}
               isComplete={isQAComplete}
             />
