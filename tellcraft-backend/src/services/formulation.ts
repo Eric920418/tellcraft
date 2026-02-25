@@ -482,8 +482,37 @@ Feature: ${featureInfo.name}
 - 每條 Rule 至少有一個 Example
 - 邊界條件要有對應的 Example
 - 使用 Entity Mapping 中的中文實體名
-- DataTable 使用具體的測試資料（如 Alice、P001、50），禁止模糊描述
-- **無腦補原則**：嚴格按需求和決策來，不擅自添加需求中沒提到的欄位或功能`
+- DataTable 命名慣例：
+  - Actor（人物）用 name 當 Key：\`| name | Alice |\`，不用 \`| userId | 1 |\`
+  - 資源/物件用語義 ID：\`| productId | P001 |\`、\`| orderId | ORD-001 |\`
+  - 欄位名用 camelCase（\`totalAmount\`、\`memberLevel\`）
+  - JSON 值整體用雙引號：\`[{"productId":"P001","quantity":2}]\`
+  - 布林值用 true/false，列舉值用原始大寫（如 PENDING、ACTIVE）
+  - 禁止模糊描述（如「某商品」「一些數量」），必須用具體值
+- **無腦補原則**：嚴格按需求和決策來，不擅自添加需求中沒提到的欄位或功能
+
+## Scenario Outline（合併同模式的參數驗證）
+當多個 Example 共享同一驗證模式（例如「缺少必要參數 → 失敗」），**可以考慮**使用 Scenario Outline 合併：
+
+\`\`\`gherkin
+  Rule: 前置（參數）- 必要參數必須提供
+
+    Scenario Outline: 缺少 <缺少參數> 時操作失敗
+      When {summary}, call table:
+        | 欄位1 | 欄位2  |
+        | <值1> | <值2>  |
+      Then 操作失敗
+
+      Examples:
+        | 缺少參數 | 值1 | 值2 |
+        | 參數A   |     | 有效值 |
+        | 參數B   | 有效值 |     |
+\`\`\`
+
+**判斷原則**：
+- 適用：多個缺少必要參數的情境（模式完全相同，只是缺少的欄位不同）
+- 不適用：有領域特定約束的規則（如「數量>0」「金額≥最低消費」）→ 各自獨立 Rule
+- 不適用：成功路徑（後置規則）→ 通常各有不同驗證邏輯`
 
   const userMessage = `${projectContext ? `專案背景：${projectContext}\n\n` : ''}需求描述：
 ${requirements}

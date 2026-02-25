@@ -220,6 +220,7 @@ export async function getBddSession(sessionId: string) {
     entity_mapping_content: string | null
     features_content: unknown[] | null
     actions_yml_content: string | null
+    open_api_spec_content: string | null
     isa_config_content: string | null
     validation_result: unknown | null
     // UIUX 欄位
@@ -284,6 +285,7 @@ export async function updateBddSession(
     entityMappingContent: 'entity_mapping_content',
     featuresContent: 'features_content',
     actionsYmlContent: 'actions_yml_content',
+    openApiSpecContent: 'open_api_spec_content',
     isaConfigContent: 'isa_config_content',
     validationResult: 'validation_result',
     // UIUX 欄位映射

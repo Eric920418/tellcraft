@@ -61,6 +61,27 @@ function getAuthToken(): string | null {
   return localStorage.getItem('auth_token')
 }
 
+// 內部控制指令 → 人類可讀標籤
+const INTERNAL_COMMANDS: Record<string, string> = {
+  '__retry__': '重試',
+  '__go_back__': '返回上一步',
+  '__skip_es__': '跳過 ES',
+  '__accept_proposal__': '同意',
+  '__reject_proposal__': '不同意',
+}
+
+function formatMessageContent(content: string): { display: string; isInternal: boolean } {
+  const trimmed = content.trim()
+  if (INTERNAL_COMMANDS[trimmed]) {
+    return { display: INTERNAL_COMMANDS[trimmed], isInternal: true }
+  }
+  // 捕捉其他 __xxx__ 格式
+  if (/^__[a-z_]+__$/.test(trimmed)) {
+    return { display: trimmed.replace(/__/g, '').replace(/_/g, ' '), isInternal: true }
+  }
+  return { display: content, isInternal: false }
+}
+
 // ============================================================
 // Admin Conversation Viewer
 // ============================================================

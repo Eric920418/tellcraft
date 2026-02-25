@@ -17,6 +17,17 @@ Tellcraft 是一個 AI 驅動的自動化開發平台。用戶只需描述需求
 - **Server Actions**：30+ 已實作
 - **詳情**：[`.clarify/overview.md`](.clarify/overview.md)
 
+### 模板選擇 UUID 類型修復 + LLM 自動重試（2026-02-25）
+
+**模板選擇 `operator does not exist: character varying = uuid` 修復**：
+- 用戶選擇模板時傳入名稱（如「球鞋共和國 SneakerRep」），`WHERE id = $1` 將 varchar 與 uuid 比較導致 PostgreSQL 報錯
+- `orchestrator.ts` 三處 templates 查詢加上 `id::text` cast
+
+**LLM 自動重試 + 錯誤訊息人性化**：
+- 所有 `callClaude()` 函數新增自動重試（3 次，指數退避 2s→4s→8s），覆蓋 `overloaded_error` / `rate_limit_error` / 網路錯誤
+- `humanizeError()` 將原始 JSON 錯誤轉為用戶可讀中文提示
+- 涵蓋 `uiux-generation.ts`、`spec-discovery.ts`、`formulation.ts`、`bdd-to-ui-spec.ts` 四處 callClaude
+
 ### BDD→UIUX 翻譯品質升級（2026-02-25）
 
 BDD→UIUX 翻譯管線品質全面提升，解決互動規格斷裂和翻譯降級問題：

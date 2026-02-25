@@ -83,9 +83,10 @@ const PATTERNS = {
   summaryAnnotation: /^#\s*Summary:\s*(.+)\s*$/m,
   featureDeclaration: /^Feature:\s*(.+)\s*$/m,
   ruleDeclaration: /^\s*Rule:\s*(.+)\s*$/gm,
-  ruleWithPrePost: /^\s*Rule:\s*(前置|後置)\s*-\s*(.+)\s*$/,
+  ruleWithPrePost: /^\s*Rule:\s*(前置（狀態）|前置（參數）|後置（回應）|後置（狀態）)\s*-\s*(.+)\s*$/,
   exampleDeclaration: /^\s*Example:\s*(.+)\s*$/gm,
-  scenarioDeclaration: /^\s*Scenario:\s*(.+)\s*$/gm,
+  scenarioDeclaration: /^\s*Scenario(?:\s+Outline)?:\s*(.+)\s*$/gm,
+  examplesTable: /^\s*Examples:\s*$/gm,
   whenStep: /^\s*When\s+(.+)\s*$/gm,
   whenCallTable: /^\s*When\s+(.+),\s*call\s+table:\s*$/,
   thenStep: /^\s*Then\s+(.+)\s*$/gm,
@@ -186,7 +187,7 @@ function validateFeatureFile(filePath: string): ValidationResult {
         code: ERROR_CODES.RULE_MISSING_PRE_POST,
         message: `Rule 缺少前置/後置標註: "${ruleContent}"`,
         line: ruleLine.lineNum,
-        suggestion: '格式應為: Rule: 前置 - 規則描述 或 Rule: 後置 - 規則描述',
+        suggestion: '格式應為: Rule: 前置（狀態）/前置（參數）/後置（回應）/後置（狀態） - 規則描述',
       })
     }
 
@@ -252,6 +253,30 @@ function validateFeatureFile(filePath: string): ValidationResult {
       suggestion: '每個 Rule 至少需要一個 Example',
     })
   }
+
+  // 8b. 檢查 Scenario Outline 是否有對應的 Examples 表格
+  lines.forEach((line, index) => {
+    if (/^\s*Scenario\s+Outline:/.test(line)) {
+      // 向下搜尋同一 Rule 下是否有 Examples:
+      let foundExamples = false
+      for (let j = index + 1; j < lines.length; j++) {
+        if (/^\s*Rule:/.test(lines[j]) || /^\s*Scenario(?:\s+Outline)?:/.test(lines[j]) || /^\s*Example:/.test(lines[j])) {
+          break // 已進入下一個 Rule/Scenario/Example，停止搜尋
+        }
+        if (/^\s*Examples:\s*$/.test(lines[j])) {
+          foundExamples = true
+          break
+        }
+      }
+      if (!foundExamples) {
+        result.warnings.push({
+          code: 'W006',
+          message: `Scenario Outline 缺少 Examples 表格`,
+          line: index + 1,
+        })
+      }
+    }
+  })
 
   // 9. 檢查每個 Rule 是否有對應的 Example
   // （這需要更複雜的解析邏輯，目前簡化處理）

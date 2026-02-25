@@ -385,6 +385,7 @@ export function verifyConsistency(
     features: GeneratedFeature[]
     schemaSql: string
     entityMapping: string
+    actionsYml?: string
   }
 ): { passed: boolean; issues: string[] } {
   const issues: string[] = []
@@ -426,6 +427,90 @@ export function verifyConsistency(
     }
   }
 
+  // 檢查 4: When DataTable 欄位應在 Schema 中有對應 column
+  const schemaColumns = extractSchemaColumns(specs.schemaSql)
+  for (const feature of specs.features) {
+    const whenTableFields = extractWhenTableFields(feature.content)
+    for (const field of whenTableFields) {
+      // 透過 entity mapping 找到可能的 table
+      const relatedTables = entityMappingPairs.map(p => p.english)
+      const fieldExistsInAnyTable = relatedTables.some(table =>
+        schemaColumns[table]?.includes(field.toLowerCase())
+      )
+      // 僅對看起來像 column 名的欄位檢查（排除 items/data 等 JSON 欄位）
+      if (!fieldExistsInAnyTable && !isLikelyJsonOrCompositeField(field)) {
+        // 降級為警告而非錯誤 — 可能是前端專用欄位
+        issues.push(`Feature "${feature.name}" 的 When DataTable 欄位 "${field}" 在 Schema 中找不到對應 column（可能為 JSON/組合欄位）`)
+      }
+    }
+  }
+
+  // 檢查 5: actions.yml ↔ Feature 一致性（若有提供 actionsYml）
+  if (specs.actionsYml) {
+    try {
+      const { validateActionsYml } = require('./actions-design')
+      const validation = validateActionsYml(
+        specs.actionsYml,
+        specs.features.map(f => ({ name: f.name, actionName: f.actionName }))
+      )
+      if (!validation.valid) {
+        for (const err of validation.errors) {
+          issues.push(`actions.yml 一致性: ${err}`)
+        }
+      }
+    } catch {
+      // actions-design 模組不可用時跳過
+    }
+  }
+
+  // 檢查 6: Schema 中每個 table 至少被一個 Feature 引用
+  const allReferencedEntities = new Set<string>()
+  for (const feature of specs.features) {
+    const entityRefs = feature.content.match(/準備一個(\S+),/g) || []
+    for (const ref of entityRefs) {
+      const entityName = ref.replace('準備一個', '').replace(',', '').trim()
+      const mapped = entityMappingPairs.find(p => p.chinese === entityName)
+      if (mapped) allReferencedEntities.add(mapped.english)
+    }
+    const existRefs = feature.content.match(/存在一個(\S+),/g) || []
+    for (const ref of existRefs) {
+      const entityName = ref.replace('存在一個', '').replace(',', '').trim()
+      const mapped = entityMappingPairs.find(p => p.chinese === entityName)
+      if (mapped) allReferencedEntities.add(mapped.english)
+    }
+  }
+  for (const table of schemaTableNames) {
+    if (!allReferencedEntities.has(table)) {
+      issues.push(`Schema table "${table}" 未被任何 Feature 引用（可能是遺漏的 Feature 或多餘的 Table）`)
+    }
+  }
+
+  // 檢查 7: Feature 中的 Rule 前綴格式正確（四類子類型）
+  const validRulePrefix = /^\s*Rule:\s*(前置（狀態）|前置（參數）|後置（回應）|後置（狀態）)\s*-\s*.+$/
+  for (const feature of specs.features) {
+    const lines = feature.content.split('\n')
+    for (const line of lines) {
+      if (/^\s*Rule:/.test(line) && !validRulePrefix.test(line)) {
+        issues.push(`Feature "${feature.name}" 的 Rule 格式不正確: "${line.trim()}"（應使用四類前綴：前置（狀態）/前置（參數）/後置（回應）/後置（狀態））`)
+      }
+    }
+  }
+
+  // 檢查 8: Entity Mapping 雙向完整性
+  // Schema 每個 table → entity mapping 有對應
+  for (const table of schemaTableNames) {
+    const hasMappingEntry = entityMappingPairs.some(p => p.english === table)
+    if (!hasMappingEntry) {
+      issues.push(`Schema table "${table}" 在 Entity Mapping 中沒有對應條目`)
+    }
+  }
+  // Entity mapping 每個 entry → Schema 有對應 table
+  for (const pair of entityMappingPairs) {
+    if (!schemaTableNames.includes(pair.english)) {
+      issues.push(`Entity Mapping "${pair.chinese}: ${pair.english}" 在 Schema 中找不到對應 table`)
+    }
+  }
+
   return {
     passed: issues.length === 0,
     issues,
@@ -455,4 +540,63 @@ function extractEntityMapping(entityMapping: string): Array<{ chinese: string; e
     }
   }
   return pairs
+}
+
+function extractSchemaColumns(schemaSql: string): Record<string, string[]> {
+  const columns: Record<string, string[]> = {}
+  // 匹配 CREATE TABLE xxx ( ... ) 中的欄位
+  const tableBlocks = schemaSql.match(/CREATE\s+TABLE\s+(\w+)\s*\(([\s\S]*?)\);/gi) || []
+  for (const block of tableBlocks) {
+    const nameMatch = block.match(/CREATE\s+TABLE\s+(\w+)/i)
+    if (!nameMatch) continue
+    const tableName = nameMatch[1].toLowerCase()
+    const body = block.match(/\(([\s\S]*)\)/)?.[1] || ''
+    const colNames: string[] = []
+    for (const line of body.split('\n')) {
+      const trimmed = line.trim()
+      // 跳過約束行
+      if (/^(PRIMARY|UNIQUE|FOREIGN|CHECK|CONSTRAINT|INDEX)/i.test(trimmed)) continue
+      if (!trimmed || trimmed === ')') continue
+      const colMatch = trimmed.match(/^(\w+)\s+/)
+      if (colMatch) {
+        colNames.push(colMatch[1].toLowerCase())
+      }
+    }
+    columns[tableName] = colNames
+  }
+  return columns
+}
+
+function extractWhenTableFields(featureContent: string): string[] {
+  const fields: string[] = []
+  const lines = featureContent.split('\n')
+  let inWhenTable = false
+  let isHeaderRow = false
+
+  for (const line of lines) {
+    if (/^\s*When\s+.+,\s*call\s+table:\s*$/.test(line)) {
+      inWhenTable = true
+      isHeaderRow = true
+      continue
+    }
+    if (inWhenTable && /^\s*\|/.test(line)) {
+      if (isHeaderRow) {
+        // 提取 header 欄位名
+        const cells = line.split('|').map(c => c.trim()).filter(Boolean)
+        fields.push(...cells)
+        isHeaderRow = false
+      }
+      continue
+    }
+    if (inWhenTable && !/^\s*\|/.test(line)) {
+      inWhenTable = false
+    }
+  }
+  return [...new Set(fields)] // 去重
+}
+
+function isLikelyJsonOrCompositeField(field: string): boolean {
+  // JSON 陣列欄位（如 items）、複合欄位通常不直接對應 column
+  const jsonLikeFields = ['items', 'data', 'metadata', 'config', 'options', 'tags', 'permissions', 'settings']
+  return jsonLikeFields.includes(field.toLowerCase())
 }

@@ -962,6 +962,7 @@ async function handleContinueFlow(
         features: updatedFeatures,
         schemaSql: updatedSchemaSql,
         entityMapping: updatedEntityMapping,
+        actionsYml: existingSpecs.actionsYml || undefined,
       })
 
       // 記錄變更歷史（變更前快照）
@@ -1016,9 +1017,13 @@ async function handleContinueFlow(
           trackingContext
         )
         if (actionsResult.success && actionsResult.actionsYml) {
+          const changeUpdates: Record<string, string> = { actionsYmlContent: actionsResult.actionsYml }
+          if (actionsResult.openApiSpec) {
+            changeUpdates.openApiSpecContent = actionsResult.openApiSpec
+          }
           await updateBddSession({
             sessionId: state.sessionId!,
-            updates: { actionsYmlContent: actionsResult.actionsYml },
+            updates: changeUpdates,
           })
         }
 
@@ -3106,6 +3111,7 @@ async function completeSpecPhase(
   // 全部包在 try/catch 中，任何異常都降級跳過，絕不阻塞 UIUX 流程
   // ============================================================
   let generatedActionsYml: string | null = null
+  let generatedOpenApiSpec: string | null = null
   let generatedIsaConfig: string | null = null
 
   try {
@@ -3165,11 +3171,16 @@ async function completeSpecPhase(
 
       if (actionsResult.success && actionsResult.actionsYml) {
         generatedActionsYml = actionsResult.actionsYml
+        generatedOpenApiSpec = actionsResult.openApiSpec || null
+        const sessionUpdates: Record<string, string> = { actionsYmlContent: actionsResult.actionsYml }
+        if (actionsResult.openApiSpec) {
+          sessionUpdates.openApiSpecContent = actionsResult.openApiSpec
+        }
         await updateBddSession({
           sessionId: state.sessionId!,
-          updates: { actionsYmlContent: actionsResult.actionsYml },
+          updates: sessionUpdates,
         })
-        console.log('[Orchestrator] Actions Design 完成')
+        console.log('[Orchestrator] Actions Design 完成' + (actionsResult.openApiSpec ? ' (含 OpenAPI 3.0)' : ''))
       } else {
         console.warn('[Orchestrator] Actions Design 失敗，降級跳過:', actionsResult.error)
       }
@@ -3217,6 +3228,7 @@ async function completeSpecPhase(
   if (schemaSql) outputs.push('資料庫 Schema')
   if (featureCount > 0) outputs.push(`${featureCount} 個功能規格 (Feature Files)`)
   if (generatedActionsYml) outputs.push('Server Actions 規格 (actions.yml)')
+  if (generatedOpenApiSpec) outputs.push('OpenAPI 3.0 規格 (openapi.yml)')
   if (generatedIsaConfig) outputs.push('ISA 配置 (isa_codegen.yml)')
 
   await sendMessage(conversationId, io, {
@@ -3330,7 +3342,7 @@ async function handleTemplateSelection(
   }>(
     `SELECT id, name, slug, category, description, design_defaults, page_structure
      FROM templates
-     WHERE id = $1 OR slug = $1 OR name = $1`,
+     WHERE id::text = $1 OR slug = $1 OR name = $1`,
     [templateIdOrName]
   )
 
@@ -4511,7 +4523,7 @@ async function getTemplateAndBddSpec(sessionId: string): Promise<{
       page_structure: unknown
     }>(
       `SELECT id, name, slug, category, description, design_defaults, page_structure
-       FROM templates WHERE id = $1`,
+       FROM templates WHERE id::text = $1`,
       [session.data.uiuxTemplateId]
     )
 
@@ -5200,7 +5212,7 @@ async function showTemplatePicker(
       page_structure: unknown
       is_featured: boolean
       sort_order: number
-    }>(`SELECT * FROM templates WHERE id IN (${placeholders}) AND is_active = true`, ids)
+    }>(`SELECT * FROM templates WHERE id::text IN (${placeholders}) AND is_active = true`, ids)
 
     // 按匹配順序排列（保持 matchedTemplateIds 的分數排序）
     const orderMap = new Map(ids.map((id, idx) => [id, idx]))

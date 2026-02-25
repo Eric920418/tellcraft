@@ -175,6 +175,11 @@ function determineExpectedPattern(keyword: string, content: string): typeof ISA_
 }
 
 function lintStep(lineNum: number, keyword: string, content: string): LintError | null {
+  // Scenario Outline 佔位符（<xxx>）— 跳過 lint（實際值在 Examples 表格中）
+  if (/<[^>]+>/.test(content)) {
+    return null
+  }
+
   const pattern = determineExpectedPattern(keyword, content)
 
   if (!pattern) {

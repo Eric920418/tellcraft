@@ -35,6 +35,7 @@ export interface BddSession {
   entityMappingContent: string | null
   featuresContent: FeatureFile[] | null
   actionsYmlContent: string | null
+  openApiSpecContent: string | null
   isaConfigContent: string | null
   validationResult: {
     passed: boolean
@@ -186,6 +187,7 @@ export async function getBddSession(input: {
       entityMappingContent: session.entity_mapping_content,
       featuresContent: session.features_content as FeatureFile[] | null,
       actionsYmlContent: session.actions_yml_content,
+      openApiSpecContent: session.open_api_spec_content || null,
       isaConfigContent: session.isa_config_content,
       validationResult: session.validation_result as BddSession['validationResult'],
       // UIUX 欄位
@@ -224,6 +226,7 @@ export async function updateBddSession(input: {
     entityMappingContent: string
     featuresContent: FeatureFile[]
     actionsYmlContent: string
+    openApiSpecContent: string
     isaConfigContent: string
     validationResult: { passed: boolean; errors: string[]; warnings: string[] }
     // UIUX 欄位

@@ -289,7 +289,7 @@ types:
 export async function generateActionsYml(
   input: ActionsDesignInput,
   trackingContext?: LlmTrackingContext
-): Promise<{ success: boolean; actionsYml?: string; error?: string }> {
+): Promise<{ success: boolean; actionsYml?: string; openApiSpec?: string; error?: string }> {
   const { features, schemaSql, entityMapping, projectName } = input
 
   if (features.length === 0) {
@@ -393,5 +393,238 @@ ${actionsYml}
   }
 
   console.log(`[ActionsDesign] 生成完成，${features.length} 個 Actions`)
-  return { success: true, actionsYml }
+
+  // 自動生成 OpenAPI 3.0 spec
+  let openApiSpec: string | undefined
+  try {
+    openApiSpec = convertToOpenAPI(actionsYml, projectName)
+    console.log('[ActionsDesign] OpenAPI 3.0 spec 生成完成')
+  } catch (err) {
+    console.warn('[ActionsDesign] OpenAPI 生成失敗，降級跳過:', err)
+  }
+
+  return { success: true, actionsYml, openApiSpec }
+}
+
+// ============================================================
+// OpenAPI 3.0 轉換（機械映射，零 LLM）
+// ============================================================
+
+/**
+ * 將 actions.yml 轉換為 OpenAPI 3.0 YAML
+ * 機械映射，零 LLM：
+ * - Command Action → POST /api/{actionName}
+ * - Query Action → GET /api/{actionName}
+ * - rules 中 前置（參數）→ 400 response
+ * - rules 中 前置（狀態）→ 409 response
+ * - types → components/schemas
+ */
+export function convertToOpenAPI(actionsYml: string, projectName?: string): string {
+  const parsed = yaml.load(actionsYml) as ActionsYmlStructure
+  if (!parsed || !parsed.actions) {
+    throw new Error('actions.yml 解析失敗或缺少 actions')
+  }
+
+  const openapi: Record<string, unknown> = {
+    openapi: '3.0.3',
+    info: {
+      title: `${projectName || parsed.project?.name || 'API'} - Server Actions`,
+      version: '1.0.0',
+      description: `由 Tellcraft BDD Spec 自動生成的 API 規格`,
+    },
+    paths: {} as Record<string, unknown>,
+    components: {
+      schemas: {} as Record<string, unknown>,
+    },
+  }
+
+  const paths = openapi.paths as Record<string, unknown>
+  const schemas = (openapi.components as Record<string, unknown>).schemas as Record<string, unknown>
+
+  // 轉換 types → components/schemas
+  if (parsed.types) {
+    for (const [typeName, typeDef] of Object.entries(parsed.types)) {
+      const def = typeDef as Record<string, unknown>
+      const schemaObj: Record<string, unknown> = {
+        type: 'object',
+        description: (def.description as string) || typeName,
+      }
+      if (def.properties) {
+        const props: Record<string, unknown> = {}
+        for (const [propName, propDef] of Object.entries(def.properties as Record<string, unknown>)) {
+          const p = propDef as Record<string, unknown>
+          props[propName] = mapTypeToOpenAPI(p.type as string)
+        }
+        schemaObj.properties = props
+      }
+      if (def.required && Array.isArray(def.required)) {
+        schemaObj.required = def.required
+      }
+      schemas[typeName] = schemaObj
+    }
+  }
+
+  // 轉換 actions → paths
+  for (const action of parsed.actions) {
+    const isQuery = isQueryAction(action)
+    const method = isQuery ? 'get' : 'post'
+    const pathKey = `/api/${action.name}`
+
+    // 分析 rules 判斷錯誤回應
+    const has400 = action.rules?.some(r => r.type === '前置（參數）')
+    const has409 = action.rules?.some(r => r.type === '前置（狀態）')
+
+    const operation: Record<string, unknown> = {
+      summary: action.summary || action.name,
+      operationId: action.name,
+      tags: [projectName || 'Actions'],
+    }
+
+    if (action.rules && action.rules.length > 0) {
+      operation.description = action.rules.map(r => `- [${r.type}] ${r.rule}`).join('\n')
+    }
+
+    // Request body / parameters
+    if (!isQuery && action.input) {
+      const inputType = (action.input as Record<string, unknown>).type as string | undefined
+      if (inputType && schemas[inputType]) {
+        operation.requestBody = {
+          required: true,
+          content: {
+            'application/json': {
+              schema: { $ref: `#/components/schemas/${inputType}` },
+            },
+          },
+        }
+      } else if ((action.input as Record<string, unknown>).properties) {
+        const reqSchema = buildInlineSchema(action.input as Record<string, unknown>)
+        operation.requestBody = {
+          required: true,
+          content: {
+            'application/json': { schema: reqSchema },
+          },
+        }
+      }
+    } else if (isQuery && action.input) {
+      const inputProps = (action.input as Record<string, unknown>).properties as Record<string, unknown> | undefined
+      if (inputProps) {
+        operation.parameters = Object.entries(inputProps).map(([name, def]) => {
+          const d = def as Record<string, unknown>
+          return {
+            name,
+            in: 'query',
+            required: d.required === true,
+            schema: mapTypeToOpenAPI(d.type as string),
+          }
+        })
+      }
+    }
+
+    // Responses
+    const responses: Record<string, unknown> = {}
+
+    // 200 成功
+    const outputSuccess = action.output ? (action.output as Record<string, unknown>).success as Record<string, unknown> | undefined : undefined
+    if (outputSuccess?.type && schemas[outputSuccess.type as string]) {
+      responses['200'] = {
+        description: '操作成功',
+        content: {
+          'application/json': {
+            schema: { $ref: `#/components/schemas/${outputSuccess.type}` },
+          },
+        },
+      }
+    } else {
+      responses['200'] = { description: '操作成功' }
+    }
+
+    // 400 參數錯誤
+    if (has400) {
+      const paramRules = action.rules!.filter(r => r.type === '前置（參數）')
+      responses['400'] = {
+        description: `參數驗證失敗: ${paramRules.map(r => r.rule).join('; ')}`,
+        content: {
+          'application/json': {
+            schema: {
+              type: 'object',
+              properties: {
+                error: { type: 'string' },
+                code: { type: 'string', example: 'VALIDATION_ERROR' },
+              },
+            },
+          },
+        },
+      }
+    }
+
+    // 409 狀態衝突
+    if (has409) {
+      const stateRules = action.rules!.filter(r => r.type === '前置（狀態）')
+      responses['409'] = {
+        description: `狀態衝突: ${stateRules.map(r => r.rule).join('; ')}`,
+        content: {
+          'application/json': {
+            schema: {
+              type: 'object',
+              properties: {
+                error: { type: 'string' },
+                code: { type: 'string', example: 'CONFLICT' },
+              },
+            },
+          },
+        },
+      }
+    }
+
+    operation.responses = responses
+    paths[pathKey] = { [method]: operation }
+  }
+
+  return yaml.dump(openapi, { indent: 2, lineWidth: 120, noRefs: true })
+}
+
+// ============================================================
+// OpenAPI 轉換輔助函數
+// ============================================================
+
+function isQueryAction(action: ActionEntry): boolean {
+  // 後置（回應）型 = 查詢類；後置（狀態）型 = 命令類
+  if (!action.rules || action.rules.length === 0) return false
+  const hasResponseRule = action.rules.some(r => r.type === '後置（回應）')
+  const hasStateRule = action.rules.some(r => r.type === '後置（狀態）')
+  // 只有回應沒有狀態變化 → 查詢
+  return hasResponseRule && !hasStateRule
+}
+
+function mapTypeToOpenAPI(tsType: string | undefined): Record<string, unknown> {
+  if (!tsType) return { type: 'string' }
+  const t = tsType.toLowerCase().trim()
+  if (t === 'string') return { type: 'string' }
+  if (t === 'number') return { type: 'number' }
+  if (t === 'boolean') return { type: 'boolean' }
+  if (t === 'string (iso 8601)') return { type: 'string', format: 'date-time' }
+  if (t.startsWith('string')) return { type: 'string' }
+  if (t.includes('[]')) {
+    const itemType = t.replace('[]', '').trim()
+    return { type: 'array', items: mapTypeToOpenAPI(itemType) }
+  }
+  // 可能是自訂 type → $ref
+  return { $ref: `#/components/schemas/${tsType}` }
+}
+
+function buildInlineSchema(input: Record<string, unknown>): Record<string, unknown> {
+  const schema: Record<string, unknown> = { type: 'object' }
+  const properties = input.properties as Record<string, unknown> | undefined
+  if (properties) {
+    const props: Record<string, unknown> = {}
+    const required: string[] = []
+    for (const [name, def] of Object.entries(properties)) {
+      const d = def as Record<string, unknown>
+      props[name] = mapTypeToOpenAPI(d.type as string)
+      if (d.required === true) required.push(name)
+    }
+    schema.properties = props
+    if (required.length > 0) schema.required = required
+  }
+  return schema
 }
