@@ -12,10 +12,34 @@ Tellcraft 是一個 AI 驅動的自動化開發平台。用戶只需描述需求
 
 ## 當前開發進度
 
-- **狀態**：✅ Phase 1-9 + Server Actions + VPS Backend + 前端 Chat 串接 + 認證系統 + 訪客體驗改善 + 儀表板系統 + BDD Spec 完整修復 + 專案版本管理 + **UIUX 生成邏輯重構** + **Design Tier** + **專案自動命名** + **PreviewPanel iframe 重構** + **Quality Gate 品質檢查** + **Code Preview 即時渲染** + **串流實時預覽** + **BDD→UI 翻譯 + Variant 創意概念** + **Fast Mode 快速建站** + **智能模板匹配** + **Fast Build 藍圖進度** + **BDD Q&A 3D 蓋房子動畫** + **對話回退 + 錯誤恢復** + **BDD Spec Skill v2.0.0 同步** + **LLM 自動重試 + 錯誤訊息人性化** + **BDD Phase 4/5 後端補完** + **Phase 0 Event Storming** + **BDD Skill 差距補完** + **BDD Skill P1-P3 補完** + **BDD→UIUX 翻譯品質升級**
+- **狀態**：✅ Phase 1-9 + Server Actions + VPS Backend + 前端 Chat 串接 + 認證系統 + 訪客體驗改善 + 儀表板系統 + BDD Spec 完整修復 + 專案版本管理 + **UIUX 生成邏輯重構** + **Design Tier** + **專案自動命名** + **PreviewPanel iframe 重構** + **Quality Gate 品質檢查** + **Code Preview 即時渲染** + **串流實時預覽** + **BDD→UI 翻譯 + Variant 創意概念** + **Fast Mode 快速建站** + **智能模板匹配** + **Fast Build 藍圖進度** + **BDD Q&A 3D 蓋房子動畫** + **對話回退 + 錯誤恢復** + **BDD Spec Skill v2.0.0 同步** + **LLM 自動重試 + 錯誤訊息人性化** + **BDD Phase 4/5 後端補完** + **Phase 0 Event Storming** + **BDD Skill 差距補完** + **BDD Skill P1-P3 補完** + **BDD→UIUX 翻譯品質升級** + **BDD Skill 方法論升級**
 - **釐清項目**：28 項全部解決
 - **Server Actions**：30+ 已實作
 - **詳情**：[`.clarify/overview.md`](.clarify/overview.md)
+
+### BDD Skill 方法論全面升級（2026-02-25）
+
+與老師教材對比後，BDD Skill 方法論全面提升：
+
+**1. Scenario Outline 支援**
+- `formulation.ts` prompt 新增 Scenario Outline 指引（合併同模式參數驗證）+ 判斷原則
+- `validate-feature.ts` 支援 `Scenario Outline:` 識別 + `Examples:` 表格存在性檢查（W006 警告）
+- `lint-gherkin-format.ts` 跳過含 `<placeholder>` 的 Scenario Outline 步驟
+
+**2. DataTable 命名慣例**
+- `formulation.ts` prompt 新增 6 條 DataTable Key 命名規則（Actor 用 name、資源用語義 ID、camelCase、JSON 雙引號等）
+
+**3. Rule 四類子類型嚴格化**
+- `validate-feature.ts` ruleWithPrePost regex 從寬鬆的 `前置|後置` 改為嚴格匹配四類：`前置（狀態）/前置（參數）/後置（回應）/後置（狀態）`
+- `example-feature.feature` 4 條 Rule 更新為四類格式
+
+**4. 跨產出物一致性驗證（change-management.ts）**
+- 原 3 項 → 8 項檢查，新增：When DataTable 欄位↔Schema column、actions.yml↔Feature 一致性、孤立 Schema table 檢測、Rule 格式正確性、Entity Mapping 雙向完整性
+
+**5. OpenAPI 3.0 並行輸出（actions-design.ts）**
+- 新增 `convertToOpenAPI()` 機械映射（零 LLM）：Command→POST、Query→GET、前置（參數）→400、前置（狀態）→409、types→schemas
+- `generateActionsYml()` 自動生成 OpenAPI spec 並存入 BDD session
+- 新增 migration `008_add_openapi_spec.sql`
 
 ### 模板選擇 UUID 類型修復 + LLM 自動重試（2026-02-25）
 

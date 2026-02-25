@@ -479,6 +479,9 @@ export default function AdminConversationViewerPage() {
               )
               const showProgressBar = isLastMessage && message.role === 'assistant' && isProgressStage
 
+              // 處理內部指令訊息
+              const msgFormatted = message.role === 'user' ? formatMessageContent(message.content) : null
+
               return (
                 <div
                   key={message.id || index}
@@ -502,6 +505,20 @@ export default function AdminConversationViewerPage() {
                       }}>
                         {message.role === 'user' ? (userInfo.name || userInfo.email || '用戶') : '泰爾'}
                       </div>
+                      {/* 內部指令：顯示為小標籤 */}
+                      {msgFormatted?.isInternal ? (
+                        <div style={{
+                          padding: '6px 12px',
+                          fontSize: 12,
+                          color: 'var(--gray-500)',
+                          background: 'var(--gray-100)',
+                          border: '1px dashed var(--gray-300)',
+                          fontStyle: 'italic',
+                        }}>
+                          [ {msgFormatted.display} ]
+                        </div>
+                      ) : (
+                      <>
                       <div style={{
                         padding: '14px 18px',
                         background: message.role === 'user' ? 'var(--black)' : 'var(--gray-50)',
@@ -631,6 +648,8 @@ export default function AdminConversationViewerPage() {
                             </span>
                           ))}
                         </div>
+                      )}
+                      </>
                       )}
                     </>
                   )}
