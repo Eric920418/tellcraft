@@ -12,7 +12,7 @@ Tellcraft 是一個 AI 驅動的自動化開發平台。用戶只需描述需求
 
 ## 當前開發進度
 
-- **狀態**：✅ Phase 1-9 + Server Actions + VPS Backend + 前端 Chat 串接 + 認證系統 + 訪客體驗改善 + 儀表板系統 + BDD Spec 完整修復 + 專案版本管理 + **UIUX 生成邏輯重構** + **Design Tier** + **專案自動命名** + **PreviewPanel iframe 重構** + **Quality Gate 品質檢查** + **Code Preview 即時渲染** + **串流實時預覽** + **BDD→UI 翻譯 + Variant 創意概念** + **Fast Mode 快速建站** + **智能模板匹配** + **Fast Build 藍圖進度** + **BDD Q&A 3D 蓋房子動畫** + **對話回退 + 錯誤恢復** + **BDD Spec Skill v2.0.0 同步** + **LLM 自動重試 + 錯誤訊息人性化** + **BDD Phase 4/5 後端補完** + **Phase 0 Event Storming** + **BDD Skill 差距補完** + **BDD Skill P1-P3 補完** + **BDD→UIUX 翻譯品質升級** + **BDD Skill 方法論升級** + **Fast Build 全面升級** + **Fast Build 佈局模式** + **Fast Build 品質升級**
+- **狀態**：✅ Phase 1-9 + Server Actions + VPS Backend + 前端 Chat 串接 + 認證系統 + 訪客體驗改善 + 儀表板系統 + BDD Spec 完整修復 + 專案版本管理 + **UIUX 生成邏輯重構** + **Design Tier** + **專案自動命名** + **PreviewPanel iframe 重構** + **Quality Gate 品質檢查** + **Code Preview 即時渲染** + **串流實時預覽** + **BDD→UI 翻譯 + Variant 創意概念** + **Fast Mode 快速建站** + **智能模板匹配** + **Fast Build 藍圖進度** + **BDD Q&A 3D 蓋房子動畫** + **對話回退 + 錯誤恢復** + **BDD Spec Skill v2.0.0 同步** + **LLM 自動重試 + 錯誤訊息人性化** + **BDD Phase 4/5 後端補完** + **Phase 0 Event Storming** + **BDD Skill 差距補完** + **BDD Skill P1-P3 補完** + **BDD→UIUX 翻譯品質升級** + **BDD Skill 方法論升級** + **Fast Build 全面升級** + **Fast Build 佈局模式** + **Fast Build 品質升級** + **動畫大升級：城堡+工廠**
 - **釐清項目**：28 項全部解決
 - **Server Actions**：30+ 已實作
 - **詳情**：[`.clarify/overview.md`](.clarify/overview.md)
@@ -304,16 +304,15 @@ BDD Skill 後端 Phase 4（Actions Design）和 Phase 5（ISA Config）補完，
 
 **Remotion 改造**（取代 motion/react + GSAP）：
 - **`app/components/remotion/`**（新建目錄）：所有 Remotion composition
-  - `shared/springs.ts`：共用 spring 預設（smooth/snappy/bouncy/heavy/precise）
+  - `shared/springs.ts`：共用 spring 預設（smooth/snappy/bouncy/heavy/extra_heavy/precise）
   - `shared/utils.ts`：delayedSpring/pulse/loopValue/clampInterpolate helpers
-  - `fast-build/`：FastBuildComposition + BlueprintGrid + PhaseNode + ConnectingLine + ProgressBar + StepText + constants
-  - `building-scene/`：BuildingComposition（ThreeCanvas）+ BuildingMeshes + FrameDrivenAnimations + CameraController + Particles + BuildingFallback2D + constants
-- **`app/components/FastBuildPlayer.tsx`**（取代 FastBuildProgress.tsx）：`@remotion/player` Player 包裝器，phase 變化時 seekTo 目標幀
-- **`app/components/building-scene/BuildingPlayer.tsx`**（取代 BuildingScene.tsx）：`@remotion/player` Player 包裝器，progress 變化時 seekTo(progress*30)
-- **`app/components/building-scene/index.ts`**（修改）：導出 BuildingPlayer（dynamic import，SSR: false）
+  - `fast-build/`：3D 工廠流水線（ThreeCanvas + ConveyorBelt + Station1/2/3 + Product + DisplayPedestal + FactoryParticles + FactoryCameraController）
+  - `building-scene/`：低多邊形城堡（ThreeCanvas + BlueprintMesh + CastleSky + 65+ mesh BuildingMeshes + CameraController + Particles + BuildingFallback2D）
+- **`app/components/FastBuildPlayer.tsx`**：3D 工廠 Player，streamingChunks 驅動微進度
+- **`app/components/building-scene/BuildingPlayer.tsx`**：城堡 Player，maxRounds prop
+- **`app/components/building-scene/index.ts`**：導出 BuildingPlayer（dynamic import，SSR: false）
 - 動畫全部由 `useCurrentFrame()` + `spring()` + `interpolate()` 驅動，禁用 CSS transition / useFrame / GSAP
 - 3D 場景用 `@remotion/three` 的 `<ThreeCanvas>` 取代原生 R3F `<Canvas>`
-- 刪除舊檔案：FastBuildProgress.tsx、BuildingScene.tsx、buildingTimeline.ts、BuildingFallback.tsx
 - 後端不動：orchestrator.ts、orchestrator-utils.ts 的消息格式完全不變
 
 **Fast Build 幀佈局**（300 幀 @ 30fps = 10 秒）：idle[0-30] → Phase1 Structure[30-130] → Phase2 Animation[130-230] → Phase3 RWD[230-300]
