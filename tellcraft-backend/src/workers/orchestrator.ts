@@ -1716,6 +1716,8 @@ async function startPrdDiscoveryWithES(
 
   if (!discoveryResult.success || !discoveryResult.items) {
     console.error('[Orchestrator] PRD Discovery 失敗:', discoveryResult.error)
+    // 刪除 FlowState，讓用戶重新輸入時走 handleProcessMessage 重新開始
+    await deleteFlowState(redis, conversationId)
     await sendMessage(conversationId, io, {
       content: `分析需求時發生問題：${discoveryResult.error || '未知錯誤'}。請重新描述您的需求。`,
       stage: 'error',
@@ -1864,6 +1866,8 @@ async function executeBddSpecSkill(input: BddSpecSkillInput) {
 
   if (!discoveryResult.success || !discoveryResult.items) {
     console.error('[Orchestrator] PRD Discovery 失敗:', discoveryResult.error)
+    // 刪除 FlowState，讓用戶重新輸入時走 handleProcessMessage 重新開始
+    await deleteFlowState(redis, conversationId)
     await sendMessage(conversationId, io, {
       content: `分析需求時發生問題：${discoveryResult.error || '未知錯誤'}。請重新描述您的需求。`,
       stage: 'error',

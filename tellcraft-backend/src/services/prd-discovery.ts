@@ -187,26 +187,62 @@ ${partialSpecContext}
   try {
     console.log('[PRD Discovery] 調用 LLM 分析需求...')
 
-    const response = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': apiKey,
-        'anthropic-version': '2023-06-01',
-      },
-      body: JSON.stringify({
-        model: 'claude-sonnet-4-6',
-        max_tokens: 8192,
-        temperature: 0.2,  // 降低溫度，減少隨機性，避免重複問題
-        system: systemPrompt,
-        messages: [{ role: 'user', content: userMessage }],
-      }),
-    })
+    const RETRY_MAX = 3
+    const RETRY_BASE_DELAY_MS = 2000
+    let response: Response | null = null
 
-    if (!response.ok) {
-      const errorText = await response.text()
-      console.error('[PRD Discovery] API 請求失敗:', response.status, errorText)
-      return { success: false, error: `API error: ${response.status}` }
+    for (let attempt = 1; attempt <= RETRY_MAX; attempt++) {
+      try {
+        response = await fetch('https://api.anthropic.com/v1/messages', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'x-api-key': apiKey,
+            'anthropic-version': '2023-06-01',
+          },
+          body: JSON.stringify({
+            model: 'claude-sonnet-4-6',
+            max_tokens: 8192,
+            temperature: 0.2,
+            system: systemPrompt,
+            messages: [{ role: 'user', content: userMessage }],
+          }),
+        })
+
+        if (response.ok) break
+
+        const isRetryable = response.status === 429 || response.status === 529 || response.status === 503
+        if (attempt < RETRY_MAX && isRetryable) {
+          const delay = RETRY_BASE_DELAY_MS * Math.pow(2, attempt - 1)
+          console.warn(`[PRD Discovery] HTTP ${response.status} (attempt ${attempt}/${RETRY_MAX})，${delay}ms 後重試`)
+          await new Promise(resolve => setTimeout(resolve, delay))
+          continue
+        }
+        break
+      } catch (fetchErr) {
+        const errMsg = String(fetchErr)
+        const isRetryable = errMsg.includes('ECONNRESET') || errMsg.includes('ETIMEDOUT') || errMsg.includes('fetch failed')
+        if (attempt < RETRY_MAX && isRetryable) {
+          const delay = RETRY_BASE_DELAY_MS * Math.pow(2, attempt - 1)
+          console.warn(`[PRD Discovery] 網路錯誤 (attempt ${attempt}/${RETRY_MAX})，${delay}ms 後重試:`, errMsg.slice(0, 100))
+          await new Promise(resolve => setTimeout(resolve, delay))
+          continue
+        }
+        throw fetchErr
+      }
+    }
+
+    if (!response || !response.ok) {
+      const errorText = response ? await response.text() : 'No response'
+      const status = response?.status || 0
+      console.error('[PRD Discovery] API 請求失敗:', status, errorText)
+      if (status === 529 || status === 503) {
+        return { success: false, error: 'AI 伺服器目前繁忙，已自動重試但仍無法處理。請稍等 1-2 分鐘後再試。' }
+      }
+      if (status === 429) {
+        return { success: false, error: 'AI 請求過於頻繁，請稍等片刻再試。' }
+      }
+      return { success: false, error: `API error: ${status}` }
     }
 
     const data = await response.json() as {

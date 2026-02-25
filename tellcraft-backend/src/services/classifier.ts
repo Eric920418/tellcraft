@@ -119,27 +119,52 @@ ${skillDescriptions}
       { role: 'user' as const, content: message }
     ]
 
-    const response = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': apiKey,
-        'anthropic-version': '2023-06-01',
-      },
-      body: JSON.stringify({
-        model: 'claude-haiku-4-5-20251001',
-        max_tokens: 500,
-        system: systemPrompt,
-        messages: messages.map(m => ({
-          role: m.role,
-          content: m.content,
-        })),
-      }),
-    })
+    const RETRY_MAX = 3
+    const RETRY_BASE_DELAY_MS = 2000
+    let response: Response | null = null
 
-    if (!response.ok) {
-      const errorText = await response.text()
-      console.error('[Classifier] API 錯誤:', errorText)
+    for (let attempt = 1; attempt <= RETRY_MAX; attempt++) {
+      try {
+        response = await fetch('https://api.anthropic.com/v1/messages', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'x-api-key': apiKey,
+            'anthropic-version': '2023-06-01',
+          },
+          body: JSON.stringify({
+            model: 'claude-haiku-4-5-20251001',
+            max_tokens: 500,
+            system: systemPrompt,
+            messages: messages.map(m => ({
+              role: m.role,
+              content: m.content,
+            })),
+          }),
+        })
+        if (response.ok) break
+        const isRetryable = response.status === 429 || response.status === 529 || response.status === 503
+        if (attempt < RETRY_MAX && isRetryable) {
+          const delay = RETRY_BASE_DELAY_MS * Math.pow(2, attempt - 1)
+          console.warn(`[Classifier] HTTP ${response.status} (attempt ${attempt}/${RETRY_MAX})，${delay}ms 後重試`)
+          await new Promise(resolve => setTimeout(resolve, delay))
+          continue
+        }
+        break
+      } catch (fetchErr) {
+        const errMsg = String(fetchErr)
+        if (attempt < RETRY_MAX && (errMsg.includes('ECONNRESET') || errMsg.includes('ETIMEDOUT'))) {
+          const delay = RETRY_BASE_DELAY_MS * Math.pow(2, attempt - 1)
+          console.warn(`[Classifier] 網路錯誤 (attempt ${attempt}/${RETRY_MAX})，${delay}ms 後重試`)
+          await new Promise(resolve => setTimeout(resolve, delay))
+          continue
+        }
+        throw fetchErr
+      }
+    }
+
+    if (!response || !response.ok) {
+      console.error('[Classifier] API 錯誤 (重試後仍失敗):', response?.status)
       return ruleBasedClassification(message)
     }
 
