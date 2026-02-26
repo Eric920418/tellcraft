@@ -1896,9 +1896,9 @@ function ChatSection({
 
     // 判斷是首次消息還是多輪對話回覆
     const token = getAuthToken()
+    let result
     if (sessionInfo.currentTaskId) {
-      // 多輪對話回覆
-      const result = await vpsReplyToConversation({
+      result = await vpsReplyToConversation({
         conversationId: sessionInfo.conversationId,
         projectId: sessionInfo.projectId,
         userId: sessionInfo.userId,
@@ -1906,35 +1906,26 @@ function ChatSection({
         message: content,
         token: token || undefined
       })
-
-      if (!result.success) {
-        setError(result.error || '發送失敗')
-        setIsTyping(false)
-      } else if (result.data?.messageId) {
-        // 更新樂觀訊息的 ID 為實際的 DB ID，避免重複顯示
-        setMessages(prev => prev.map(m =>
-          m.id === userMessage.id ? { ...m, id: result.data!.messageId } : m
-        ))
-      }
     } else {
-      // 首次消息
-      const result = await vpsSendMessage({
+      result = await vpsSendMessage({
         conversationId: sessionInfo.conversationId,
         message: content,
         projectId: sessionInfo.projectId,
         userId: sessionInfo.userId,
         token: token || undefined
       })
+    }
 
-      if (!result.success) {
-        setError(result.error || '發送失敗')
-        setIsTyping(false)
-      } else if (result.data?.messageId) {
-        // 更新樂觀訊息的 ID 為實際的 DB ID，避免重複顯示
-        setMessages(prev => prev.map(m =>
-          m.id === userMessage.id ? { ...m, id: result.data!.messageId } : m
-        ))
-      }
+    if (!result.success) {
+      // 發送失敗：移除樂觀消息，避免幽靈訊息
+      setMessages(prev => prev.filter(m => m.id !== userMessage.id))
+      setError(result.error || '發送失敗')
+      setIsTyping(false)
+    } else if (result.data?.messageId) {
+      // 更新樂觀訊息的 ID 為實際的 DB ID，避免重複顯示
+      setMessages(prev => prev.map(m =>
+        m.id === userMessage.id ? { ...m, id: result.data!.messageId } : m
+      ))
     }
   }
 
@@ -1962,8 +1953,9 @@ function ChatSection({
     })
 
     const token = getAuthToken()
+    let result
     if (sessionInfo.currentTaskId) {
-      const result = await vpsReplyToConversation({
+      result = await vpsReplyToConversation({
         conversationId: sessionInfo.conversationId,
         projectId: sessionInfo.projectId,
         userId: sessionInfo.userId,
@@ -1971,22 +1963,21 @@ function ChatSection({
         message: content.trim(),
         token: token || undefined,
       })
-      if (!result.success) {
-        setError(result.error || '發送失敗')
-        setIsTyping(false)
-      }
     } else {
-      const result = await vpsSendMessage({
+      result = await vpsSendMessage({
         conversationId: sessionInfo.conversationId,
         message: content.trim(),
         projectId: sessionInfo.projectId,
         userId: sessionInfo.userId,
         token: token || undefined,
       })
-      if (!result.success) {
-        setError(result.error || '發送失敗')
-        setIsTyping(false)
-      }
+    }
+
+    if (!result.success) {
+      // 發送失敗：移除樂觀消息，避免幽靈訊息
+      setMessages(prev => prev.filter(m => m.id !== userMessage.id))
+      setError(result.error || '發送失敗')
+      setIsTyping(false)
     }
   }
 

@@ -50,7 +50,7 @@ async function apiRequest<T>(
   // Debug log
   console.log(`[VPS API] ${options.method || 'GET'} ${fullUrl} (base: ${baseUrl})`)
 
-  try {
+  const doFetch = async (): Promise<ApiResponse<T>> => {
     const response = await fetch(fullUrl, {
       ...options,
       headers: {
@@ -72,6 +72,15 @@ async function apiRequest<T>(
     }
 
     if (!response.ok) {
+      // 429 限速：提取 retryAfter 供重試用
+      if (response.status === 429) {
+        const retryAfter = (data as Record<string, unknown>).retryAfter as number | undefined
+        return {
+          success: false,
+          error: ((data as Record<string, unknown>).error as string) || '請求過於頻繁',
+          retryAfter,
+        } as ApiResponse<T>
+      }
       return {
         success: false,
         error: ((data as Record<string, unknown>).error as string) || `HTTP ${response.status}`,
@@ -82,6 +91,20 @@ async function apiRequest<T>(
       success: true,
       data,
     }
+  }
+
+  try {
+    const result = await doFetch()
+
+    // 429 自動重試一次
+    if (!result.success && (result as { retryAfter?: number }).retryAfter) {
+      const waitMs = ((result as { retryAfter?: number }).retryAfter || 3) * 1000
+      console.warn(`[VPS API] 429 限速，${waitMs}ms 後自動重試`)
+      await new Promise(resolve => setTimeout(resolve, waitMs))
+      return doFetch()
+    }
+
+    return result
   } catch (error) {
     console.error('[VPS API] 請求失敗:', error)
     return {
