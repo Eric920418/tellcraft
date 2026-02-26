@@ -622,8 +622,8 @@ function HeroSection({
   const inputRef = useRef<HTMLTextAreaElement>(null)
 
   const trimmedInput = inputValue.trim()
-  const isFastModeTooShort = buildMode === 'fast' && trimmedInput.length > 0 && trimmedInput.length < 15
-  const canSubmit = trimmedInput.length > 0 && !isFastModeTooShort && !isTransitioning
+  const isFastModeShortWarning = buildMode === 'fast' && trimmedInput.length > 0 && trimmedInput.length < 15
+  const canSubmit = trimmedInput.length > 0 && !isTransitioning
 
   const handleStartClick = () => {
     if (!canSubmit) return
@@ -821,9 +821,9 @@ function HeroSection({
                   精細
                 </button>
               </div>
-              <span style={{ fontSize: 12, color: isFastModeTooShort ? 'var(--red-500, #ef4444)' : 'var(--gray-400)', flex: 1, textAlign: 'center', transition: 'color 0.2s ease' }}>
-                {isFastModeTooShort
-                  ? '請描述更多細節，讓 AI 更好地理解你的需求'
+              <span style={{ fontSize: 12, color: isFastModeShortWarning ? 'var(--amber-500, #f59e0b)' : 'var(--gray-400)', flex: 1, textAlign: 'center', transition: 'color 0.2s ease' }}>
+                {isFastModeShortWarning
+                  ? '描述太短，生成效果可能不理想'
                   : buildMode === 'fast' ? '描述越詳細，生成效果越好' : '描述你的想法，AI 深度釐清'}
               </span>
               <motion.button

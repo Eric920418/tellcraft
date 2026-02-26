@@ -3552,29 +3552,6 @@ async function executeFastBuildSkill(params: {
 }) {
   const { taskId, projectId, conversationId, userId, message, redis, io } = params
 
-  // ── 描述品質檢查（前端已攔截 < 15 字，這是後端安全網）──
-  if (message.trim().length < 15) {  // 與前端一致（app/page.tsx L615）
-    const waitState: FlowState = {
-      phase: 'fast_need_more_info',
-      projectId,
-      taskId,
-      userId,
-      currentRound: 0,
-      questionIndex: 0,
-      batchCount: 0,
-      waitingForReply: true,
-      totalQuestionsAsked: 0,
-      fastMode: true,
-    }
-    await saveFlowState(redis, conversationId, waitState)
-
-    await sendMessage(conversationId, io, {
-      content: '描述太短了，請多說一點你想要什麼樣的網站。\n\n例如：「幫我做一個咖啡店的官網，需要首頁展示品牌故事、菜單頁、線上預約和聯繫我們」',
-      stage: 'fast_need_more_info',
-    })
-    return
-  }
-
   try {
   // ── 推斷設計參數（零 LLM 成本）──
   const tier = detectDesignTier(message)
