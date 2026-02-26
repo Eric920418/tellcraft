@@ -149,8 +149,8 @@ export function useCraftAnimation(frame: number, fps: number): CraftAnimationVal
   // 熔爐
   // ══════════════════════════════════════
 
-  const furnaceGlow = clamp(frame, [0, 60, 225, 450, 675], [0.3, 0.5, 1.5, 2.5, 3.0])
-  const coalEmissive = clamp(frame, [0, 60, 225, 450], [0.2, 0.3, 1.2, 2.0])
+  const furnaceGlow = clamp(frame, [0, 60, 225, 450, 675], [0.5, 1.0, 2.0, 3.0, 4.0])
+  const coalEmissive = clamp(frame, [0, 60, 225, 450], [0.5, 0.8, 1.8, 3.0])
 
   // 風箱鼓風時增強
   const bellowsBoost = bellowsActive ? Math.max(0, Math.sin((frame % (BELLOWS_CYCLES[phase] ?? 90)) / (BELLOWS_CYCLES[phase] ?? 90) * Math.PI * 2)) * 0.5 : 0
@@ -203,10 +203,10 @@ export function useCraftAnimation(frame: number, fps: number): CraftAnimationVal
   // 光源
   // ══════════════════════════════════════
 
-  const ambientIntensity = clamp(frame, [0, 225, 675, 850], [0.08, 0.12, 0.2, 0.35])
-  const mainLightIntensity = clamp(frame, [0, 225, 675, 850], [0.3, 0.5, 0.8, 1.2])
-  const spotLightIntensity = clamp(frame, [0, 225, 450, 675], [0.2, 0.5, 1.0, 1.5])
-  const pointLightIntensity = clamp(frame, [60, 225, 450, 675, 850], [0, 0.5, 1.5, 3.0, 5.0])
+  const ambientIntensity = clamp(frame, [0, 225, 675, 850], [0.15, 0.25, 0.4, 0.6])
+  const mainLightIntensity = clamp(frame, [0, 225, 675, 850], [0.6, 0.8, 1.2, 1.8])
+  const spotLightIntensity = clamp(frame, [0, 225, 450, 675], [0.5, 1.0, 1.5, 2.0])
+  const pointLightIntensity = clamp(frame, [60, 225, 450, 675, 850], [0, 1.0, 2.5, 4.0, 6.0])
 
   // ══════════════════════════════════════
   // Bloom

@@ -1,13 +1,15 @@
 // ============================================================
 // "The Craft" v2 Remotion Composition
-// 鍛造車間：ThreeCanvas + 暖色光源 + SpotLight + Bloom + Vignette
+// 鍛造車間：HemisphereLight + Fog + Shadows + Bloom + ToneMapping
 // ============================================================
 
 import { useCurrentFrame, useVideoConfig } from 'remotion'
 import { ThreeCanvas } from '@remotion/three'
 import { useThree } from '@react-three/fiber'
-import { useEffect, useMemo, Suspense } from 'react'
-import { EffectComposer, Bloom, Vignette } from '@react-three/postprocessing'
+import { useEffect, useMemo, useRef, Suspense } from 'react'
+import * as THREE from 'three'
+import { EffectComposer, Bloom, Vignette, Noise, ToneMapping } from '@react-three/postprocessing'
+import { ToneMappingMode } from 'postprocessing'
 import CraftScene from './CraftScene'
 import { useCraftAnimation } from './FrameDrivenAnimations'
 import { COLORS, CAMERA_CONFIG } from './constants'
@@ -24,13 +26,57 @@ interface CraftCompositionProps {
   seed?: number
 }
 
+// ── 禁用 Renderer 內建 ToneMapping（由 EffectComposer 統一處理）──
+
+function RendererSetup() {
+  const { gl } = useThree()
+  useEffect(() => {
+    gl.toneMapping = THREE.NoToneMapping
+    gl.shadowMap.enabled = true
+    gl.shadowMap.type = THREE.PCFSoftShadowMap
+  }, [gl])
+  return null
+}
+
+// ── SpotLight 需要 target Object3D ──
+
+function WorkAreaSpotLight({ intensity }: { intensity: number }) {
+  const spotRef = useRef<THREE.SpotLight>(null)
+  const { scene } = useThree()
+
+  useEffect(() => {
+    if (!spotRef.current) return
+    const target = new THREE.Object3D()
+    target.position.set(0, 0.7, 0)
+    scene.add(target)
+    spotRef.current.target = target
+    return () => { scene.remove(target) }
+  }, [scene])
+
+  return (
+    <spotLight
+      ref={spotRef}
+      position={[0.5, 5, 1.5]}
+      angle={Math.PI / 5}
+      penumbra={0.8}
+      intensity={intensity}
+      color="#FFA060"
+      decay={2}
+      castShadow
+      shadow-mapSize-width={512}
+      shadow-mapSize-height={512}
+      shadow-bias={-0.002}
+    />
+  )
+}
+
 // ── 幀驅動相機 ──
 
 function CraftCamera({ v }: { v: ReturnType<typeof useCraftAnimation> }) {
   const { camera } = useThree()
 
   useEffect(() => {
-    const angle = v.cameraOrbitAngle + 0.8 // 從右前方 45° 開始
+    const angle = v.cameraOrbitAngle + 0.8
     camera.position.x = Math.cos(angle) * v.cameraRadius
     camera.position.y = v.cameraY
     camera.position.z = Math.sin(angle) * v.cameraRadius
@@ -48,11 +94,13 @@ function PostProcessing({ bloomIntensity }: { bloomIntensity: number }) {
       <EffectComposer>
         <Bloom
           intensity={bloomIntensity}
-          luminanceThreshold={0.4}
-          luminanceSmoothing={0.9}
+          luminanceThreshold={0.9}
+          luminanceSmoothing={0.4}
           mipmapBlur
         />
-        <Vignette eskil={false} offset={0.1} darkness={0.6} />
+        <Noise opacity={0.03} />
+        <Vignette eskil={false} offset={0.15} darkness={0.8} />
+        <ToneMapping mode={ToneMappingMode.AGX} />
       </EffectComposer>
     </Suspense>
   )
@@ -80,34 +128,48 @@ export default function CraftComposition({ seed = 0 }: CraftCompositionProps) {
         height={height}
         camera={{ position: [6, 3.5, 6], fov: CAMERA_CONFIG.initialFov }}
       >
+        <RendererSetup />
+
+        {/* 霧氣（增加深度感和氛圍） */}
+        <fogExp2 attach="fog" args={[COLORS.bgDark, 0.06]} />
+
         {/* 暗色鍛爐背景球 */}
         <CraftBackground />
 
-        {/* 暖色照明系統 */}
-        <ambientLight intensity={v.ambientIntensity} color="#FFF5E1" />
+        {/* ── 照明系統 ── */}
 
-        {/* 主光：從右上方打在鐵砧上 */}
+        {/* HemisphereLight（天空暖黃 + 地面深褐，取代 ambientLight） */}
+        <hemisphereLight
+          args={['#FFF0D4', '#3A1F0E', v.ambientIntensity * 1.5]}
+        />
+
+        {/* 主光：從右上方打在鐵砧上（投射陰影） */}
         <directionalLight
           position={[4, 6, 3]}
           intensity={v.mainLightIntensity}
           color="#FFD4A0"
+          castShadow
+          shadow-mapSize-width={1024}
+          shadow-mapSize-height={1024}
+          shadow-bias={-0.001}
         />
 
-        {/* 上方聚光燈：打在工作區 */}
-        <spotLight
-          position={[0, 5, 1]}
-          angle={0.4}
-          penumbra={0.5}
-          intensity={v.spotLightIntensity}
-          color="#FFA060"
-          target-position={[0, 0.7, 0]}
-        />
+        {/* 上方聚光燈：聚焦在工作區（正確設定 target） */}
+        <WorkAreaSpotLight intensity={v.spotLightIntensity} />
 
-        {/* 冷色補光（左後方，增加立體感） */}
+        {/* 冷色 Rim Light（左後方，增加深度分離） */}
         <directionalLight
-          position={[-3, 2, -4]}
-          intensity={0.1}
-          color="#8FAADC"
+          position={[-4, 2, -5]}
+          intensity={0.12}
+          color="#6B8CAE"
+        />
+
+        {/* 地面反射補光（從下方微弱暖色反彈） */}
+        <pointLight
+          position={[0, -0.3, 0]}
+          intensity={0.06}
+          distance={3}
+          color="#FF8C42"
         />
 
         {/* 工件位置點光源（隨工件發光增強） */}
@@ -115,14 +177,16 @@ export default function CraftComposition({ seed = 0 }: CraftCompositionProps) {
           position={[0, 0.7 + v.workpieceRise, 0]}
           intensity={v.pointLightIntensity}
           distance={8}
+          decay={2}
           color={palette.coreEmissive}
         />
 
-        {/* 熔爐內部點光源 */}
+        {/* 熔爐內部點光源（強烈暖光） */}
         <pointLight
-          position={[0, 0.35, -1.5]}
-          intensity={v.furnaceGlow * 0.5}
-          distance={4}
+          position={[0, 0.4, -1.5]}
+          intensity={v.furnaceGlow * 0.8}
+          distance={5}
+          decay={2}
           color="#FF4500"
         />
 
@@ -149,7 +213,7 @@ export default function CraftComposition({ seed = 0 }: CraftCompositionProps) {
 
 function CraftBackground() {
   const bgGeo = useMemo(() => {
-    const geo = new (require('three').SphereGeometry)(50, 16, 12)
+    const geo = new THREE.SphereGeometry(50, 16, 12)
     geo.scale(-1, 1, -1)
     return geo
   }, [])
