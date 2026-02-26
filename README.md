@@ -17,7 +17,7 @@ Tellcraft 是一個 AI 驅動的自動化開發平台。用戶只需描述需求
 | **資料庫** | PostgreSQL（VPS 本地） | 低延遲，自主控制 |
 | **佇列/狀態** | Redis | BullMQ 任務佇列 + 串流狀態 |
 | **LLM** | Claude Sonnet / Haiku | Anthropic SDK |
-| **動畫** | motion/react + Remotion + Three.js | 3D 場景 + 串流動畫 |
+| **動畫** | motion/react + Remotion + Three.js | "The Craft" 工藝鍛造 + 串流動畫 |
 | **樣式** | Tailwind CSS v4 | `@import "tailwindcss"` 語法 |
 | **預覽** | Sandpack（@codesandbox） | 瀏覽器內真實 React 渲染 |
 | **部署** | Vercel API | 代碼 → Next.js → Vercel 自動部署 |
@@ -214,7 +214,7 @@ change_history   -- JSONB，變更歷史追蹤
 | **部署** | sanitize 6 類預檢、本地 build 驗證（3 輪 LLM 修復）、Vercel 部署、版本回滾 |
 | **迭代** | 對話內迭代修改、撤銷上一步、部署歷史回滾、迭代歷史追蹤 |
 | **預覽** | Sandpack 真實 React 渲染、串流增量更新、裝置切換、編輯模式、圖片上傳 |
-| **動畫** | 3D 軟體鍛造場景（BDD Q&A）、3D 工廠流水線（Fast Build）、Remotion 驅動 |
+| **動畫** | "The Craft" 工藝鍛造場景（BDD Q&A，seed 驅動每專案不同）、3D 工廠流水線（Fast Build）、Remotion 驅動 |
 | **認證** | Google/LINE OAuth、JWT 雙軌（localStorage + Cookie）、訪客→帳號合併 |
 | **儀表板** | 用戶統計、專案管理、版本歷史、管理員面板、LLM 用量追蹤 |
 | **防護** | 三層防刷（前端冷卻 + API 限速 + Worker 鎖）、Classifier 三層防禦、LLM 自動重試 |
@@ -239,7 +239,8 @@ app/
 │   ├── uiux/             # UIUX 元件（SandpackPreview/PreviewPanel/TemplatePicker/PropertyEditor）
 │   ├── dashboard/        # 儀表板元件
 │   ├── remotion/         # Remotion 動畫（fast-build/ + building-scene/）
-│   ├── building-scene/   # 3D 場景（BuildingPlayer + AppMeshes + GhostMesh）
+│   ├── building-scene/   # 3D 場景入口（dynamic import）
+│   ├── BddAnimationPanel.tsx  # "The Craft" 工藝鍛造動畫面板（三層架構 + 幀管理）
 │   └── FastBuildPlayer.tsx # 3D 工廠 Player
 ├── dashboard/            # 儀表板頁面（/dashboard, /dashboard/admin）
 ├── auth/                 # 認證（login/callback/post-login）
@@ -362,6 +363,16 @@ psql "$DATABASE_URL" -f tellcraft-backend/migrations/xxx.sql
 <details>
 <summary><h2>開發更新紀錄（點擊展開）</h2></summary>
 
+### "The Craft" 工藝鍛造動畫（2026-02-27）
+
+BDD Q&A 動畫從「軟體介面鍛造」重設計為「工藝鍛造」主題，品牌連結 Tellcraft = Tell + Craft：
+- **三層視覺架構**：Layer 1 Remotion+Three.js 3D 鍛造場景 / Layer 2 CSS 餘燼粒子（永遠飄動） / Layer 3 回答瞬間火花脈衝 / Layer 0 進度指示器
+- **4 個鍛造階段**：原料（暗銅）→ 鍛造（熔金）→ 塑形（白金）→ 成品（金色光暈），核心從球體變形為多面體
+- **Seed 驅動**：每個專案產出不同鍛造作品（形狀/配色/碎片分布/能量線/軌道環），conversationId hash 驅動
+- **新檔案**：`BddAnimationPanel.tsx`、`CraftComposition.tsx`、`CraftScene.tsx`、`procedural.ts`
+- **重寫**：`constants.ts`（暖色工藝配色）、`FrameDrivenAnimations.ts`（`CraftAnimationValues` + `useCraftAnimation()`）
+- **暖色工藝感**：銅/金/琥珀/火花橙，取代冷色科技藍
+
 ### SandpackPreview 編輯模式（2026-02-26）
 
 想法模式和快速模式生成的 SandpackPreview 現在也支援即時編輯（文字/顏色/間距/圖片），與模板模式 PreviewPanel 一致。
@@ -396,9 +407,7 @@ psql "$DATABASE_URL" -f tellcraft-backend/migrations/xxx.sql
 
 ### BDD 3D 動畫重設計（2026-02-26）
 
-BDD Q&A 場景從「低多邊形城堡」重設計為「軟體介面鍛造」主題：
-- 6 輪建構：浮動平台 → 導航列+側邊欄 → 卡片+按鈕 → 數據管道 → 色彩填入 → 功能圖標+慶祝粒子
-- `GhostMesh`（opacity + emissive + clearcoat）、`SceneBackground`（深色科技風）、`RoundedBox` 圓角幾何
+BDD Q&A 場景從「低多邊形城堡」重設計為「軟體介面鍛造」主題（已被 2026-02-27 "The Craft" 取代）。
 
 ### 防刷訊息：三層防護（2026-02-26）
 

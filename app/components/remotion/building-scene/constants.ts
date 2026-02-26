@@ -1,102 +1,96 @@
 // ============================================================
-// App Building Scene 常數 — 軟體介面鍛造主題
+// "The Craft" 工藝鍛造常數
 // ============================================================
 
 export const FPS = 30
-export const TOTAL_FRAMES = 900 // 30 秒，每題 30 幀
+export const TOTAL_FRAMES = 900 // 30 秒
 
-// ── 色彩系統（深色科技風）──
+// ── 鍛造色彩系統（暖色工藝風）──
 export const COLORS = {
-  // 背景
-  bgDark: '#0f1117',
-  bgGradientTop: '#1a1d2e',
-  bgGradientBottom: '#0a0b10',
+  // 背景（暗色鍛爐空間）
+  bgDark: '#1a0e08',
+  bgGradientTop: '#2a1810',
+  bgGradientBottom: '#0d0704',
 
-  // 平台
-  platform: '#1e2030',
-  platformEdge: '#2a2d45',
-  gridGlow: '#3b82f6',
+  // 核心（熔爐）
+  coreDimEmissive: '#6B3A2A',     // Phase 1 微弱
+  coreHotEmissive: '#FF6B35',     // Phase 2 熔融
+  coreBrightEmissive: '#FFB347',  // Phase 3 白熱
+  coreGoldEmissive: '#FFD700',    // Phase 4 金色
 
-  // UI 元件
-  componentLight: '#e8eaed',
-  componentMedium: '#c4c7cc',
-  componentDark: '#6b7280',
+  // 原料碎片
+  fragmentDark: '#5A3D2B',
+  fragmentGlow: '#8B5E3C',
 
-  // 強調色
-  accentBlue: '#3b82f6',
-  accentGold: '#f5a623',
-  navAccent: '#818cf8',
+  // 能量線
+  energyOrange: '#FF6B35',
+  energyGold: '#FFB347',
 
-  // 數據流
-  dataLine: '#60a5fa',
-  dataNode: '#34d399',
+  // 軌道環
+  ringPlatinum: '#E8D5B7',
+  ringGold: '#FFD700',
 
-  // 粒子
-  sparkBlue: '#93c5fd',
-  celebGold: '#fbbf24',
-  celebBlue: '#60a5fa',
-  celebGreen: '#34d399',
+  // 火花 / 餘燼
+  sparkOrange: '#FF8C42',
+  sparkGold: '#FFD700',
+  emberAmber: '#D4740E',
+  emberDim: '#8B4513',
+
+  // 慶祝
+  celebGold: '#FFD700',
+  celebWhite: '#FFF8DC',
 } as const
 
-// ── 6 輪建構階段（每輪 5 題 = 150 幀）──
-export const ROUNDS = [
-  { name: '基座', startQ: 1, endQ: 5, startFrame: 0, endFrame: 149 },
-  { name: '框架', startQ: 6, endQ: 10, startFrame: 150, endFrame: 299 },
-  { name: '元件', startQ: 11, endQ: 15, startFrame: 300, endFrame: 449 },
-  { name: '數據', startQ: 16, endQ: 20, startFrame: 450, endFrame: 599 },
-  { name: '視覺', startQ: 21, endQ: 25, startFrame: 600, endFrame: 749 },
-  { name: '上線', startQ: 26, endQ: 30, startFrame: 750, endFrame: 899 },
+// ── 4 個鍛造階段 ──
+export const CRAFT_PHASES = [
+  { name: '原料', nameEn: 'Raw', startPercent: 0, endPercent: 25 },
+  { name: '鍛造', nameEn: 'Forge', startPercent: 25, endPercent: 50 },
+  { name: '塑形', nameEn: 'Shape', startPercent: 50, endPercent: 75 },
+  { name: '成品', nameEn: 'Complete', startPercent: 75, endPercent: 100 },
 ] as const
 
-export const ROUND_LABELS = ['基座', '框架', '元件', '數據', '視覺', '上線'] as const
-export const ROUND_COLORS = ['#3b82f6', '#6366f1', '#8b5cf6', '#34d399', '#f59e0b', '#22c55e'] as const
+export const PHASE_LABELS = ['原料', '鍛造', '塑形', '成品'] as const
+export const PHASE_COLORS = ['#6B3A2A', '#FF6B35', '#FFB347', '#FFD700'] as const
 
-// ── R1 基座：平台 + 支撐柱位置 ──
-export const PILLAR_POSITIONS: [number, number, number][] = [
-  [-3.5, -0.4, -2.0],
-  [3.5, -0.4, -2.0],
-  [-3.5, -0.4, 2.0],
-  [3.5, -0.4, 2.0],
-]
+// ── 幀範圍映射 ──
+// Phase 0 (Raw):      0-224
+// Phase 1 (Forge):    225-449
+// Phase 2 (Shape):    450-674
+// Phase 3 (Complete): 675-899
+export const PHASE_FRAME_RANGES = [
+  { start: 0, end: 224 },
+  { start: 225, end: 449 },
+  { start: 450, end: 674 },
+  { start: 675, end: 899 },
+] as const
 
-// ── R2 框架配置 ──
-export const FRAME_CONFIG = {
-  navBar: { pos: [0, 2.2, 0] as [number, number, number], size: [7.5, 0.4, 0.15] as [number, number, number] },
-  sidebar: { pos: [-3.0, 0.5, 0] as [number, number, number], size: [1.5, 3.0, 0.15] as [number, number, number] },
-  content: { pos: [0.75, 0.5, 0] as [number, number, number], size: [5.5, 3.0, 0.1] as [number, number, number] },
-  footer: { pos: [0, -1.3, 0] as [number, number, number], size: [7.5, 0.3, 0.15] as [number, number, number] },
+// ── 原料碎片幾何 ──
+export const FRAGMENT_BASE_SIZE = 0.2
+export const FRAGMENT_COUNT = 30 // 最多 30 個碎片
+
+// ── 能量線 ──
+export const ENERGY_LINE_SEGMENTS = 32
+export const ENERGY_LINE_RADIUS = 0.03
+
+// ── 軌道環 ──
+export const RING_TUBE_RADIUS = 0.02
+
+// ── 相機 ──
+export const CAMERA_CONFIG = {
+  initialY: 7,
+  finalY: 5,
+  initialRadius: 8,
+  finalRadius: 12,
+  orbitSpeed: 0.0026, // 0.15°/frame ≈ 0.0026 rad/frame
+  initialFov: 35,
 } as const
 
-// ── R3 元件位置 ──
-export const CARD_POSITIONS: [number, number, number][] = [
-  [-0.7, 1.0, 0.08],
-  [0.9, 1.0, 0.08],
-  [2.5, 1.0, 0.08],
-]
+// ── 進度指示器 ──
+export const PROGRESS_STATUS = {
+  working: 'AI 正在鍛造中...',
+  idle: '',
+} as const
 
-export const BUTTON_POSITIONS: [number, number, number][] = [
-  [0.2, -0.4, 0.08],
-  [1.2, -0.4, 0.08],
-]
-
-export const SEARCH_BAR_POS: [number, number, number] = [0.75, 1.85, 0.08]
-
-// ── R4 數據連線端點（3 條管道）──
-export const DATA_LINE_ENDPOINTS: { from: [number, number, number]; to: [number, number, number] }[] = [
-  { from: [-0.7, 0.3, 0.15], to: [0.9, 0.3, 0.15] },
-  { from: [0.9, 0.3, 0.15], to: [2.5, 0.3, 0.15] },
-  { from: [-3.0, 0.5, 0.1], to: [-0.7, 1.0, 0.15] },
-]
-
-export const DATA_NODE_POSITIONS: [number, number, number][] = [
-  [0.1, 0.3, 0.2],
-  [1.7, 0.3, 0.2],
-  [-1.85, 0.75, 0.15],
-]
-
-// ── R6 功能圖標位置 ──
-export const FEATURE_ICON_POSITIONS: [number, number, number][] = [
-  [-0.7, 1.8, 0.15],
-  [0.9, 1.8, 0.15],
-  [2.5, 1.8, 0.15],
-]
+// ── 舊介面相容（BuildingPlayer overlay 仍引用）──
+export const ROUND_LABELS = PHASE_LABELS
+export const ROUND_COLORS = PHASE_COLORS

@@ -2501,6 +2501,7 @@ function ChatSection({
             maxRounds={buildingData?.maxRounds ?? 6}
             isWorking={isLLMWorking}
             isComplete={isQAComplete}
+            conversationId={sessionInfo?.conversationId}
           />
         </div>
       )

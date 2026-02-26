@@ -1,11 +1,11 @@
 // ============================================================
-// Dynamic import 包裝：Remotion 3D Player + 2D fallback
+// Dynamic import 包裝："The Craft" 鍛造動畫面板
 // ============================================================
 
 import dynamic from 'next/dynamic'
 
 export const BuildingPlayer = dynamic(
-  () => import('./BuildingPlayer'),
+  () => import('../BddAnimationPanel'),
   {
     ssr: false,
     loading: () => null,

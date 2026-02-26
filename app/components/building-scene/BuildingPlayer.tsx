@@ -1,3 +1,4 @@
+// @ts-nocheck — 已被 BddAnimationPanel.tsx 取代，保留作後續清理參考
 'use client'
 
 import { useRef, useEffect, useState, useMemo, useCallback } from 'react'

@@ -1,10 +1,14 @@
 // ============================================================
-// App 幀驅動動畫值：軟體介面鍛造主題
+// "The Craft" 幀驅動動畫值
+// 鍛造主題：核心成長 + 原料碎片吸入 + 能量線 + 軌道環 + 慶祝
 // ============================================================
 
 import { spring, interpolate } from 'remotion'
 import type { SpringConfig } from 'remotion'
-import { BOUNCY, SNAPPY, HEAVY, SMOOTH, EXTRA_HEAVY } from '../shared/springs'
+import { SMOOTH, HEAVY, EXTRA_HEAVY } from '../shared/springs'
+import { TOTAL_FRAMES } from './constants'
+
+// ── Spring 工具 ──
 
 function safeSpring(frame: number, fps: number, delay: number, config?: SpringConfig): number {
   const f = frame - delay
@@ -12,242 +16,206 @@ function safeSpring(frame: number, fps: number, delay: number, config?: SpringCo
   return spring({ frame: f, fps, config })
 }
 
-export interface AppAnimationValues {
-  // R1: 基座
-  platformScale: number
-  platformGlowOpacity: number
-  pillarScaleY: number[]
-  gridOpacity: number
-
-  // R2: 框架
-  navBarScaleX: number
-  sidebarScaleY: number
-  contentAreaScale: number
-  footerScaleX: number
-  frameShakeY: number
-
-  // R3: 元件
-  cardScale: number[]
-  buttonScale: number[]
-  searchBarScaleX: number
-
-  // R4: 數據層
-  dataLineProgress: number[]
-  dataNodeScale: number[]
-  apiIconScale: number
-
-  // R5: 視覺
-  colorFillProgress: number
-  glossProgress: number
-  lightBoost: number
-
-  // R6: 上線
-  iconScale: number[]
-  launchPulse: number
-  celebrationActive: boolean
-
-  // 全局
-  ghostToSolid: number
-  cameraY: number
-  cameraOrbitAngle: number
-  ambientIntensity: number
-  mainLightIntensity: number
-  celebrationRotation: number
+function clampInterpolate(
+  input: number,
+  inputRange: readonly number[],
+  outputRange: readonly number[],
+): number {
+  return interpolate(input, inputRange as number[], outputRange as number[], {
+    extrapolateLeft: 'clamp',
+    extrapolateRight: 'clamp',
+  })
 }
 
-export function useAppAnimationValues(frame: number, fps: number): AppAnimationValues {
+// ── 動畫值介面 ──
+
+export interface CraftAnimationValues {
+  // Phase（0-3）
+  phase: number
+
+  // 核心
+  coreScale: number
+  coreEmissiveIntensity: number
+  coreRoughness: number
+  coreClearcoat: number
+  coreRotationSpeed: number
+  /** 核心幾何混合：0=球體 → 1=多面體 */
+  coreMorphProgress: number
+
+  // 原料碎片
+  /** 每個碎片的吸入進度 0→1（1=已被吸入核心） */
+  fragmentAbsorb: number[]
+  /** 整體漂浮 → 被吸入軌道的過渡 0→1 */
+  fragmentOrbitProgress: number
+
+  // 能量線
+  /** 每條能量線的繪製進度 0→1 */
+  energyLineProgress: number[]
+  /** 脈衝強度 0→1 */
+  energyPulseIntensity: number
+
+  // 軌道環
+  /** 已出現的環數 0-3 */
+  ringCount: number
+  /** 每個環的 spring 出場 */
+  ringScale: number[]
+  /** 環透明度 */
+  ringOpacity: number
+
+  // 光源
+  ambientIntensity: number
+  mainLightIntensity: number
+  fillLightIntensity: number
+  pointLightIntensity: number
+
+  // 相機
+  cameraY: number
+  cameraRadius: number
+  cameraOrbitAngle: number
+
+  // 慶祝
+  celebrationActive: boolean
+  celebrationProgress: number
+
+  // 整體進度 0→1
+  overallProgress: number
+}
+
+// ── 主 Hook ──
+
+export function useCraftAnimation(
+  frame: number,
+  fps: number,
+  fragmentCount: number = 30,
+): CraftAnimationValues {
+  // 整體進度
+  const overallProgress = clampInterpolate(frame, [0, TOTAL_FRAMES - 1], [0, 1])
+
+  // Phase 判定
+  const phase = frame < 225 ? 0 : frame < 450 ? 1 : frame < 675 ? 2 : 3
+
   // ══════════════════════════════════════
-  // Round 1: 基座（q1-q5 → frame 0-149）
+  // 核心
   // ══════════════════════════════════════
 
-  // q1: 圓角平台浮現
-  const platformScale = safeSpring(frame, fps, 0, EXTRA_HEAVY)
+  // Phase 1 緩慢出現 → Phase 4 完整大小
+  const coreScale = clampInterpolate(frame, [0, 100, 225, 675, 850], [0, 0.4, 0.6, 0.85, 1.0])
 
-  // q2: 平台底部光暈
-  const glowSpring = safeSpring(frame, fps, 30, SMOOTH)
-  const platformGlowOpacity = interpolate(glowSpring, [0, 1], [0, 0.6])
+  // emissive 強度：微弱 → 熾熱
+  const coreEmissiveIntensity = clampInterpolate(frame, [0, 225, 450, 675, 850], [0.2, 0.5, 0.9, 1.2, 1.5])
 
-  // q3-q4: 4 個角落支撐柱
-  const pillarScaleY = [0, 1, 2, 3].map(i => {
-    const delay = 60 + i * 20
-    return safeSpring(frame, fps, delay, SNAPPY)
-  })
+  // 粗糙度：非常粗糙 → 光滑
+  const coreRoughness = clampInterpolate(frame, [0, 450, 675, 850], [0.9, 0.6, 0.3, 0.1])
 
-  // q5: 底部網格線
-  const gridOpacity = safeSpring(frame, fps, 120, SMOOTH)
+  // clearcoat：Phase 3 開始反射
+  const coreClearcoat = clampInterpolate(frame, [450, 675, 850], [0, 0.4, 0.8])
+
+  // 旋轉速度：越轉越快
+  const coreRotationSpeed = clampInterpolate(frame, [0, 225, 450, 850], [0.001, 0.002, 0.003, 0.005])
+
+  // 球體 → 多面體
+  const coreMorphProgress = clampInterpolate(frame, [225, 675], [0, 1])
 
   // ══════════════════════════════════════
-  // Round 2: 框架（q6-q10 → frame 150-299）
+  // 原料碎片
   // ══════════════════════════════════════
 
-  // q6: 頂部導航列
-  const navBarScaleX = safeSpring(frame, fps, 150, HEAVY)
-
-  // q7: 側邊欄
-  const sidebarScaleY = safeSpring(frame, fps, 180, HEAVY)
-
-  // q8: 主內容區域
-  const contentAreaScale = safeSpring(frame, fps, 210, HEAVY)
-
-  // q9: 底部欄
-  const footerScaleX = safeSpring(frame, fps, 240, SNAPPY)
-
-  // q10: 框架完成微震
-  let frameShakeY = 0
-  if (frame >= 270 && frame <= 295) {
-    const t = frame - 270
-    frameShakeY = interpolate(t, [0, 5, 10, 15, 20, 25], [0, 0.06, -0.04, 0.02, -0.01, 0], {
-      extrapolateLeft: 'clamp',
-      extrapolateRight: 'clamp',
-    })
+  // 每個碎片在自己的 delay frame 被吸入
+  const framesPerFragment = fragmentCount > 0 ? Math.floor(TOTAL_FRAMES * 0.6 / fragmentCount) : 30
+  const fragmentAbsorb: number[] = []
+  for (let i = 0; i < fragmentCount; i++) {
+    const absorbStart = i * framesPerFragment
+    const absorbEnd = absorbStart + 45 // 1.5 秒吸入動畫
+    fragmentAbsorb.push(clampInterpolate(frame, [absorbStart, absorbEnd], [0, 1]))
   }
 
-  // ══════════════════════════════════════
-  // Round 3: 元件（q11-q15 → frame 300-449）
-  // ══════════════════════════════════════
-
-  // q11-q13: 3 張卡片
-  const cardScale = [0, 1, 2].map(i => {
-    const delay = 300 + i * 30
-    return safeSpring(frame, fps, delay, BOUNCY)
-  })
-
-  // q14: 按鈕組
-  const buttonScale = [0, 1].map(i => {
-    const delay = 390 + i * 15
-    return safeSpring(frame, fps, delay, BOUNCY)
-  })
-
-  // q15: 搜尋框
-  const searchBarScaleX = safeSpring(frame, fps, 420, SNAPPY)
+  // 自由漂浮 → 被吸入軌道
+  const fragmentOrbitProgress = clampInterpolate(frame, [225, 450], [0, 1])
 
   // ══════════════════════════════════════
-  // Round 4: 數據層（q16-q20 → frame 450-599）
+  // 能量線
   // ══════════════════════════════════════
 
-  // q16-q18: 3 條連線
-  const dataLineProgress = [0, 1, 2].map(i => {
-    const delay = 450 + i * 40
-    const p = safeSpring(frame, fps, delay, SMOOTH)
-    return interpolate(p, [0, 1], [0, 1])
-  })
-
-  // q19: 3 個數據節點
-  const dataNodeScale = [0, 1, 2].map(i => {
-    const delay = 540 + i * 15
-    return safeSpring(frame, fps, delay, BOUNCY)
-  })
-
-  // q20: API 圖標
-  const apiIconScale = safeSpring(frame, fps, 580, BOUNCY)
-
-  // ══════════════════════════════════════
-  // Round 5: 視覺（q21-q25 → frame 600-749）
-  // ══════════════════════════════════════
-
-  // q21-q25: 全局材質變化（漸進式）
-  const colorFillProgress = interpolate(frame, [600, 749], [0, 1], {
-    extrapolateLeft: 'clamp',
-    extrapolateRight: 'clamp',
-  })
-
-  const glossProgress = interpolate(frame, [630, 749], [0, 1], {
-    extrapolateLeft: 'clamp',
-    extrapolateRight: 'clamp',
-  })
-
-  const lightBoost = interpolate(frame, [600, 749], [0, 0.4], {
-    extrapolateLeft: 'clamp',
-    extrapolateRight: 'clamp',
-  })
-
-  // ══════════════════════════════════════
-  // Round 6: 上線（q26-q30 → frame 750-899）
-  // ══════════════════════════════════════
-
-  // q26-q28: 功能圖標
-  const iconScale = [0, 1, 2].map(i => {
-    const delay = 750 + i * 25
-    return safeSpring(frame, fps, delay, BOUNCY)
-  })
-
-  // q29: 發光脈衝
-  let launchPulse = 0
-  if (frame >= 870) {
-    launchPulse = interpolate(
-      Math.sin((frame - 870) * 0.15),
-      [-1, 1],
-      [0.2, 1],
-    )
+  // 6 條能量線，Phase 2 開始出現
+  const energyLineProgress: number[] = []
+  for (let i = 0; i < 6; i++) {
+    const lineDelay = 225 + i * 40
+    energyLineProgress.push(safeSpring(frame, fps, lineDelay, HEAVY))
   }
 
-  // q30: 慶祝粒子
-  const celebrationActive = frame >= 880
+  // 脈衝強度（Phase 2+）
+  const basePulse = clampInterpolate(frame, [225, 350], [0, 1])
+  const pulseWave = Math.sin(frame * 0.08) * 0.3 + 0.7
+  const energyPulseIntensity = basePulse * pulseWave
 
   // ══════════════════════════════════════
-  // 全局
+  // 軌道環
   // ══════════════════════════════════════
 
-  // 幽靈→實體（跨整個 850 幀）
-  const ghostToSolid = interpolate(frame, [0, 850], [0, 1], {
-    extrapolateLeft: 'clamp',
-    extrapolateRight: 'clamp',
-  })
+  // 環逐漸出現（Phase 2: 2 環, Phase 3: 3 環）
+  const ringCount = frame < 450 ? (frame < 350 ? 0 : frame < 400 ? 1 : 2) : 3
 
-  // 相機 Y（俯瞰→平視）
-  const camProgress = interpolate(frame, [0, 899], [0, 1], {
-    extrapolateLeft: 'clamp',
-    extrapolateRight: 'clamp',
-  })
-  const cameraY = interpolate(camProgress, [0, 0.5, 1], [10, 7, 5.5])
+  const ringScale = [
+    safeSpring(frame, fps, 350, EXTRA_HEAVY),
+    safeSpring(frame, fps, 400, EXTRA_HEAVY),
+    safeSpring(frame, fps, 500, EXTRA_HEAVY),
+  ]
 
-  // 完工後緩速環繞
-  const cameraOrbitAngle = frame >= 880
-    ? (frame - 880) * 0.005
-    : 0
+  const ringOpacity = clampInterpolate(frame, [350, 400, 675, 850], [0, 0.3, 0.5, 0.7])
 
-  // 完工慶祝旋轉
-  const celebrationRotation = frame >= 880
-    ? (frame - 880) * 0.003
-    : 0
+  // ══════════════════════════════════════
+  // 光源
+  // ══════════════════════════════════════
 
-  // 光照
-  const ambientIntensity = interpolate(frame, [0, 300, 600, 899], [0.3, 0.4, 0.6, 0.8], {
-    extrapolateLeft: 'clamp',
-    extrapolateRight: 'clamp',
-  })
-  const mainLightIntensity = interpolate(frame, [0, 300, 600, 899], [0.5, 0.7, 1.0, 1.2], {
-    extrapolateLeft: 'clamp',
-    extrapolateRight: 'clamp',
-  })
+  const ambientIntensity = clampInterpolate(frame, [0, 225, 675, 850], [0.15, 0.25, 0.4, 0.6])
+  const mainLightIntensity = clampInterpolate(frame, [0, 225, 675, 850], [0.4, 0.6, 0.9, 1.2])
+  const fillLightIntensity = clampInterpolate(frame, [0, 225, 675], [0.1, 0.15, 0.2])
+  const pointLightIntensity = clampInterpolate(frame, [0, 225, 450, 675, 850], [0.3, 0.6, 1.0, 1.5, 2.0])
+
+  // ══════════════════════════════════════
+  // 相機
+  // ══════════════════════════════════════
+
+  // Y：略微下降（仰角減少）
+  const cameraY = clampInterpolate(frame, [0, TOTAL_FRAMES - 1], [7, 5])
+
+  // 半徑：特寫 → 遠景
+  const cameraRadius = clampInterpolate(frame, [0, TOTAL_FRAMES - 1], [8, 12])
+
+  // 持續緩慢軌道旋轉
+  const cameraOrbitAngle = frame * 0.0026
+
+  // ══════════════════════════════════════
+  // 慶祝
+  // ══════════════════════════════════════
+
+  const celebrationActive = frame >= 850
+  const celebrationProgress = clampInterpolate(frame, [850, TOTAL_FRAMES - 1], [0, 1])
 
   return {
-    platformScale,
-    platformGlowOpacity,
-    pillarScaleY,
-    gridOpacity,
-    navBarScaleX,
-    sidebarScaleY,
-    contentAreaScale,
-    footerScaleX,
-    frameShakeY,
-    cardScale,
-    buttonScale,
-    searchBarScaleX,
-    dataLineProgress,
-    dataNodeScale,
-    apiIconScale,
-    colorFillProgress,
-    glossProgress,
-    lightBoost,
-    iconScale,
-    launchPulse,
-    celebrationActive,
-    ghostToSolid,
-    cameraY,
-    cameraOrbitAngle,
+    phase,
+    coreScale,
+    coreEmissiveIntensity,
+    coreRoughness,
+    coreClearcoat,
+    coreRotationSpeed,
+    coreMorphProgress,
+    fragmentAbsorb,
+    fragmentOrbitProgress,
+    energyLineProgress,
+    energyPulseIntensity,
+    ringCount,
+    ringScale,
+    ringOpacity,
     ambientIntensity,
     mainLightIntensity,
-    celebrationRotation,
+    fillLightIntensity,
+    pointLightIntensity,
+    cameraY,
+    cameraRadius,
+    cameraOrbitAngle,
+    celebrationActive,
+    celebrationProgress,
+    overallProgress,
   }
 }
