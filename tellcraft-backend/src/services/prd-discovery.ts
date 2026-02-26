@@ -269,15 +269,22 @@ ${partialSpecContext}
 
     // 解析回應
     const content = data.content?.[0]?.text || ''
-    const jsonMatch = content.match(/```json\s*([\s\S]*?)\s*```/) || content.match(/\{[\s\S]*\}/)
+    const jsonMatch = content.match(/```json\s*([\s\S]*?)\s*```/) || content.match(/```\s*([\s\S]*?)\s*```/) || content.match(/\{[\s\S]*\}/)
 
     if (!jsonMatch) {
-      console.error('[PRD Discovery] 無法解析 LLM 回應')
-      return { success: false, error: '無法解析 LLM 回應' }
+      console.error('[PRD Discovery] 無法解析 LLM 回應，原始內容:', content.slice(0, 500))
+      return { success: false, error: 'AI 回應格式異常，請重新描述您的需求。' }
     }
 
     const jsonStr = jsonMatch[1] || jsonMatch[0]
-    const parsed = JSON.parse(jsonStr)
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    let parsed: any
+    try {
+      parsed = JSON.parse(jsonStr)
+    } catch (parseErr) {
+      console.error('[PRD Discovery] JSON 解析失敗，原始內容:', jsonStr.slice(0, 500))
+      return { success: false, error: 'AI 回應格式異常，請重新描述您的需求。' }
+    }
 
     // 轉換格式（符合 bdd-session.ts 的 ClarifyItem 類型）
     const items: ClarifyItem[] = (parsed.items || []).map((item: {
