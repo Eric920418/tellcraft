@@ -83,6 +83,14 @@ interface Message {
   pending?: boolean
 }
 
+// 內部指令 → 用戶可讀的顯示文字
+const INTERNAL_COMMAND_LABELS: Record<string, string> = {
+  '__go_back__': '← 上一步',
+  '__retry__': '重試',
+  '__accept_proposal__': '同意',
+  '__reject_proposal__': '不同意',
+}
+
 // ============ Animated Text Components ============
 function BlurRevealText({
   text,
@@ -1381,8 +1389,9 @@ function ChatSection({
               for (const newMsg of uniqueNewMessages) {
                 if (newMsg.role === 'user') {
                   // 找是否有 pending 的用戶訊息有相同內容
+                  const dbLabel = INTERNAL_COMMAND_LABELS[newMsg.content] || newMsg.content
                   const pendingIndex = updatedPrev.findIndex(m =>
-                    m.role === 'user' && m.pending && m.content === newMsg.content
+                    m.role === 'user' && m.pending && (m.content === newMsg.content || m.content === dbLabel)
                   )
                   if (pendingIndex !== -1) {
                     // 用 DB 訊息替換 pending 訊息
@@ -1788,10 +1797,11 @@ function ChatSection({
     startSendCooldown()
 
     // 樂觀更新
+    const displayContent = INTERNAL_COMMAND_LABELS[content.trim()] || content.trim()
     const userMessage: Message = {
       id: crypto.randomUUID(),
       role: 'user',
-      content: content.trim(),
+      content: displayContent,
       timestamp: new Date(),
       pending: true
     }
@@ -1999,7 +2009,7 @@ function ChatSection({
                         transition={{ duration: 1.2, repeat: Infinity }}
                         style={{ width: 6, height: 6, background: 'var(--black)', display: 'inline-block' }}
                       />
-                      {message.content}
+                      {INTERNAL_COMMAND_LABELS[message.content] || message.content}
                     </div>
                   ) : (
                     <>
@@ -2023,7 +2033,7 @@ function ChatSection({
                         lineHeight: 1.75,
                       }}>
                         {message.role === 'user' ? (
-                          <span style={{ whiteSpace: 'pre-wrap' }}>{message.content}</span>
+                          <span style={{ whiteSpace: 'pre-wrap' }}>{INTERNAL_COMMAND_LABELS[message.content] || message.content}</span>
                         ) : (
                           <div className="markdown-content">
                             <ReactMarkdown remarkPlugins={[remarkGfm]}>
@@ -2314,59 +2324,43 @@ function ChatSection({
   // 預覽面板渲染函數（用於 SplitLayout）
   const renderPreviewPanel = () => {
     // ── BDD Q&A 蓋房子場景 ──
+    // 用 messages.some() 判斷是否在 BDD 階段，避免用戶回答後 latestMsg 沒 stage 導致動畫消失
+    const BDD_STAGES = new Set([
+      'clarify_question', 'prd_discovery_continue', 'prd_discovery_complete',
+      'prd_discovery_analyzing', 'prd_discovery_generating', 'prd_discovery_deduping',
+      'batch_confirm', 'batch_confirmed',
+    ])
+    const hasBddStage = messages.some(m => m.stage && BDD_STAGES.has(m.stage))
     const latestMsg = messages[messages.length - 1]
-    const isBddClarify = latestMsg?.stage === 'clarify_question'
-      || latestMsg?.stage === 'prd_discovery_continue'
-      || latestMsg?.stage === 'prd_discovery_complete'
-      || latestMsg?.stage === 'prd_discovery_analyzing'
-      || latestMsg?.stage === 'prd_discovery_generating'
-      || latestMsg?.stage === 'prd_discovery_deduping'
-      || latestMsg?.stage === 'batch_confirm'
-      || latestMsg?.stage === 'batch_confirmed'
 
     // 檢查是否已進入 UIUX 階段（不再顯示蓋房子）
     const hasUiuxStage = messages.some(m => m.stage?.startsWith('uiux') || m.richContent?.type === 'code_preview')
 
-    if (isBddClarify && !hasUiuxStage) {
+    if (hasBddStage && !hasUiuxStage) {
       // 提取建築進度
       const buildingMsg = [...messages].reverse().find(m => m.richContent?.type === 'building_progress')
       const buildingData = buildingMsg?.richContent?.data as { current?: number; total?: number; round?: number; maxRounds?: number } | undefined
       const bddProgress = buildingData?.current ?? 0
       const bddTotal = buildingData?.total ?? 30
       const bddRound = buildingData?.round ?? 1
-      const isLLMWorking = latestMsg?.stage === 'prd_discovery_analyzing'
-        || latestMsg?.stage === 'prd_discovery_generating'
-        || latestMsg?.stage === 'prd_discovery_deduping'
-        || latestMsg?.stage === 'prd_discovery_continue'
-      const isQAComplete = latestMsg?.stage === 'prd_discovery_complete'
-        || latestMsg?.stage === 'formulation_start'
+      const latestAssistantMsg = [...messages].reverse().find(m => m.role === 'assistant' && m.stage)
+      const isLLMWorking = latestAssistantMsg?.stage === 'prd_discovery_analyzing'
+        || latestAssistantMsg?.stage === 'prd_discovery_generating'
+        || latestAssistantMsg?.stage === 'prd_discovery_deduping'
+        || latestAssistantMsg?.stage === 'prd_discovery_continue'
+      const isQAComplete = latestAssistantMsg?.stage === 'prd_discovery_complete'
+        || latestAssistantMsg?.stage === 'formulation_start'
 
       return (
-        <div style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
-          <div style={{
-            padding: '12px 16px',
-            borderBottom: '1px solid var(--border-color)',
-            background: 'var(--white)',
-            fontSize: 14,
-            fontWeight: 500,
-            color: 'var(--black)',
-            display: 'flex',
-            alignItems: 'center',
-            gap: 8,
-          }}>
-            <span style={{ fontSize: 16 }}>🏠</span>
-            需求建構進度
-          </div>
-          <div style={{ flex: 1 }}>
-            <BuildingPlayer
-              progress={bddProgress}
-              totalQuestions={bddTotal}
-              round={bddRound}
-              maxRounds={buildingData?.maxRounds ?? 6}
-              isWorking={isLLMWorking}
-              isComplete={isQAComplete}
-            />
-          </div>
+        <div style={{ height: '100%' }}>
+          <BuildingPlayer
+            progress={bddProgress}
+            totalQuestions={bddTotal}
+            round={bddRound}
+            maxRounds={buildingData?.maxRounds ?? 6}
+            isWorking={isLLMWorking}
+            isComplete={isQAComplete}
+          />
         </div>
       )
     }
@@ -2622,9 +2616,9 @@ function ChatSection({
     const isBddSplitMode = messages.some(m =>
       m.stage === 'clarify_question' || m.stage === 'prd_discovery_continue' || m.stage === 'prd_discovery_complete'
     ) && !messages.some(m => m.stage?.startsWith('uiux') || m.richContent?.type === 'code_preview')
-    const bddChatWidth = isBddSplitMode ? 560 : 420
-    const bddMinChatWidth = isBddSplitMode ? 480 : 320
-    const bddMaxChatWidth = isBddSplitMode ? 720 : 600
+    const bddChatWidth = isBddSplitMode ? 680 : 420
+    const bddMinChatWidth = isBddSplitMode ? 560 : 320
+    const bddMaxChatWidth = isBddSplitMode ? 880 : 600
 
     return (
       <motion.div

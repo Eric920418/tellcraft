@@ -17,6 +17,20 @@ Tellcraft 是一個 AI 驅動的自動化開發平台。用戶只需描述需求
 - **Server Actions**：30+ 已實作
 - **詳情**：[`.clarify/overview.md`](.clarify/overview.md)
 
+### BuildingPlayer 播放控制修復 + BDD 面板穩定性（2026-02-26）
+
+**問題**：
+1. 城堡動畫掛載即 `autoPlay` 一次播完 900 幀，用戶還沒回答就看到完整城堡
+2. 用戶回答問題後右側面板閃爍變成「選擇一個模板以預覽」（`isBddClarify` 只看 `latestMsg`，用戶消息沒 stage → fallthrough）
+3. BDD 聊天窗口太窄，動畫不是滿高
+
+**修復**：
+- **BuildingPlayer.tsx**：移除 `autoPlay`，改用 `frameupdate` 事件監聽 + `targetFrameRef` 控制播放。每答一題播放 30 幀後暫停，全部完成後 loop 煙火。頁面刷新直接 seekTo 已完成幀
+- **page.tsx `renderPreviewPanel()`**：`isBddClarify` 改為 `hasBddStage`（`messages.some()` 判斷），不再只看最後一條消息。`isLLMWorking`/`isQAComplete` 改查最後一條 assistant 消息。移除「需求建構進度」header，動畫滿高
+- **page.tsx 佈局**：BDD 聊天面板加寬（560→680 預設，480→560 最小，720→880 最大）
+
+**改動檔案**：`app/components/building-scene/BuildingPlayer.tsx`、`app/page.tsx`
+
 ### 防刷訊息：三層防護（2026-02-26）
 
 防止用戶快速連發訊息導致 BullMQ 多 job 並行 → FlowState 競爭 → 對話卡死。
