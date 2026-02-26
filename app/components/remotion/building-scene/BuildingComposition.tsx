@@ -1,14 +1,14 @@
 // ============================================================
-// 城堡 Building Scene 主 Composition：ThreeCanvas + 天空 + 3D 場景
-// UI overlay 已移至 BuildingPlayer 外層（直接用 React props，不依賴 Remotion inputProps）
+// App Building Scene 主 Composition：ThreeCanvas + 深色背景 + 3D 場景
 // ============================================================
 
 import { useCurrentFrame, useVideoConfig } from 'remotion'
 import { ThreeCanvas } from '@remotion/three'
-import BuildingMeshes from './BuildingMeshes'
+import AppMeshes from './AppMeshes'
 import CameraController from './CameraController'
-import CastleSky from './CastleSky'
-import { useCastleAnimationValues } from './FrameDrivenAnimations'
+import SceneBackground from './SceneBackground'
+import { useAppAnimationValues } from './FrameDrivenAnimations'
+import { COLORS } from './constants'
 
 interface BuildingCompositionProps {
   isWorking?: boolean
@@ -22,29 +22,39 @@ export default function BuildingComposition({
 }: BuildingCompositionProps) {
   const frame = useCurrentFrame()
   const { width, height, fps } = useVideoConfig()
-  const v = useCastleAnimationValues(frame, fps)
-
-  // 天空背景色（作為 canvas 底色）
-  const bgR = Math.round(v.skyBottomRGB[0])
-  const bgG = Math.round(v.skyBottomRGB[1])
-  const bgB = Math.round(v.skyBottomRGB[2])
+  const v = useAppAnimationValues(frame, fps)
 
   return (
-    <div style={{ width: '100%', height: '100%', position: 'relative', background: `rgb(${bgR},${bgG},${bgB})` }}>
+    <div style={{ width: '100%', height: '100%', position: 'relative', background: COLORS.bgDark }}>
       <ThreeCanvas
         width={width}
         height={height}
-        camera={{ position: [14, 14, 14], fov: 40 }}
+        camera={{ position: [10, 10, 10], fov: 35 }}
       >
-        {/* 天空半球 */}
-        <CastleSky topRGB={v.skyTopRGB} bottomRGB={v.skyBottomRGB} />
+        {/* 深色科技風背景 */}
+        <SceneBackground progress={v.ghostToSolid} />
 
-        {/* 動態光照 */}
+        {/* 柔和 3 點光源 */}
         <ambientLight intensity={v.ambientIntensity} />
-        <directionalLight position={[8, 12, 6]} intensity={v.sunIntensity} castShadow={false} />
-        <directionalLight position={[-4, 6, -4]} intensity={v.sunIntensity * 0.3} />
+        <directionalLight
+          position={[6, 10, 5]}
+          intensity={v.mainLightIntensity}
+          castShadow={false}
+          color="#f0f0ff"
+        />
+        <directionalLight
+          position={[-4, 5, -3]}
+          intensity={v.mainLightIntensity * 0.25}
+          color="#a0b0ff"
+        />
+        <pointLight
+          position={[0, -1, 4]}
+          intensity={v.lightBoost}
+          distance={15}
+          color={COLORS.accentBlue}
+        />
 
-        <BuildingMeshes isWorking={isWorking} />
+        <AppMeshes isWorking={isWorking} />
         <CameraController />
       </ThreeCanvas>
     </div>
