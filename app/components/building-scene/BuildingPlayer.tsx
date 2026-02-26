@@ -9,6 +9,7 @@ import { FPS, TOTAL_FRAMES } from '../remotion/building-scene/constants'
 // ============================================================
 // Building Player 包裝器
 // 動畫跟隨用戶回答逐步推進：每答一題播放 30 幀後暫停
+// compositionWidth/Height 動態匹配容器，消除 letterbox 黑邊
 // ============================================================
 
 interface BuildingPlayerProps {
@@ -29,7 +30,10 @@ export default function BuildingPlayer({
   isComplete,
 }: BuildingPlayerProps) {
   const playerRef = useRef<PlayerRef>(null)
+  const containerRef = useRef<HTMLDivElement>(null)
   const [webglOk, setWebglOk] = useState(true)
+  // 動態容器尺寸（消除 letterbox 黑邊）
+  const [containerSize, setContainerSize] = useState<{ w: number; h: number } | null>(null)
 
   // 用 ref 追蹤目標幀和完成狀態，避免 state 重渲染延遲
   const targetFrameRef = useRef(0)
@@ -45,6 +49,22 @@ export default function BuildingPlayer({
     } catch {
       setWebglOk(false)
     }
+  }, [])
+
+  // 偵測容器尺寸，讓 compositionWidth/Height 完美匹配
+  useEffect(() => {
+    const el = containerRef.current
+    if (!el) return
+    const update = () => {
+      const { width, height } = el.getBoundingClientRect()
+      if (width > 0 && height > 0) {
+        setContainerSize({ w: Math.round(width), h: Math.round(height) })
+      }
+    }
+    update()
+    const ro = new ResizeObserver(update)
+    ro.observe(el)
+    return () => ro.disconnect()
   }, [])
 
   // frameupdate 回調：到達目標幀時暫停
@@ -67,7 +87,7 @@ export default function BuildingPlayer({
     return () => {
       player.removeEventListener('frameupdate', handleFrameUpdate)
     }
-  }, [handleFrameUpdate, webglOk])
+  }, [handleFrameUpdate, webglOk, containerSize])
 
   // progress 變化：計算目標幀並播放
   useEffect(() => {
@@ -123,16 +143,42 @@ export default function BuildingPlayer({
     height: '100%',
   }), [])
 
+  const compW = containerSize?.w ?? 1280
+  const compH = containerSize?.h ?? 720
+
   if (!webglOk) {
     // 2D Remotion fallback（同樣邏輯：不 autoPlay，由 frameupdate 控制）
     return (
-      <div style={{ height: '100%', overflow: 'hidden' }}>
+      <div ref={containerRef} style={{ height: '100%', width: '100%', overflow: 'hidden' }}>
+        {containerSize && (
+          <Player
+            ref={playerRef}
+            component={BuildingFallback2D}
+            inputProps={{ round, progress, totalQuestions, isWorking }}
+            compositionWidth={compW}
+            compositionHeight={compH}
+            durationInFrames={TOTAL_FRAMES}
+            fps={FPS}
+            style={style}
+            loop={!!isComplete}
+            controls={false}
+            showVolumeControls={false}
+            clickToPlay={false}
+          />
+        )}
+      </div>
+    )
+  }
+
+  return (
+    <div ref={containerRef} style={{ height: '100%', width: '100%', position: 'relative', overflow: 'hidden' }}>
+      {containerSize && (
         <Player
           ref={playerRef}
-          component={BuildingFallback2D}
-          inputProps={{ round, progress, totalQuestions, isWorking }}
-          compositionWidth={1280}
-          compositionHeight={720}
+          component={BuildingComposition}
+          inputProps={inputProps}
+          compositionWidth={compW}
+          compositionHeight={compH}
           durationInFrames={TOTAL_FRAMES}
           fps={FPS}
           style={style}
@@ -141,26 +187,7 @@ export default function BuildingPlayer({
           showVolumeControls={false}
           clickToPlay={false}
         />
-      </div>
-    )
-  }
-
-  return (
-    <div style={{ height: '100%', position: 'relative', overflow: 'hidden' }}>
-      <Player
-        ref={playerRef}
-        component={BuildingComposition}
-        inputProps={inputProps}
-        compositionWidth={1280}
-        compositionHeight={720}
-        durationInFrames={TOTAL_FRAMES}
-        fps={FPS}
-        style={style}
-        loop={!!isComplete}
-        controls={false}
-        showVolumeControls={false}
-        clickToPlay={false}
-      />
+      )}
     </div>
   )
 }
