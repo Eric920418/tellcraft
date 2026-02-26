@@ -30,7 +30,7 @@ interface BddAnimationPanelProps {
 
 // ── 餘燼粒子配置 ──
 
-const EMBER_COUNT = 18
+const EMBER_COUNT = 8
 const EMBER_COLORS = ['#D4740E', '#FF8C42', '#8B4513', '#FFB347', '#FF6B35']
 
 function generateEmbers() {

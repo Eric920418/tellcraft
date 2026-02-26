@@ -363,15 +363,28 @@ psql "$DATABASE_URL" -f tellcraft-backend/migrations/xxx.sql
 <details>
 <summary><h2>開發更新紀錄（點擊展開）</h2></summary>
 
-### "The Craft" 工藝鍛造動畫（2026-02-27）
+### "The Craft" 鍛造車間 v2（2026-02-27）
 
-BDD Q&A 動畫從「軟體介面鍛造」重設計為「工藝鍛造」主題，品牌連結 Tellcraft = Tell + Craft：
-- **三層視覺架構**：Layer 1 Remotion+Three.js 3D 鍛造場景 / Layer 2 CSS 餘燼粒子（永遠飄動） / Layer 3 回答瞬間火花脈衝 / Layer 0 進度指示器
-- **4 個鍛造階段**：原料（暗銅）→ 鍛造（熔金）→ 塑形（白金）→ 成品（金色光暈），核心從球體變形為多面體
-- **Seed 驅動**：每個專案產出不同鍛造作品（形狀/配色/碎片分布/能量線/軌道環），conversationId hash 驅動
-- **新檔案**：`BddAnimationPanel.tsx`、`CraftComposition.tsx`、`CraftScene.tsx`、`procedural.ts`
-- **重寫**：`constants.ts`（暖色工藝配色）、`FrameDrivenAnimations.ts`（`CraftAnimationValues` + `useCraftAnimation()`）
-- **暖色工藝感**：銅/金/琥珀/火花橙，取代冷色科技藍
+BDD Q&A 動畫從抽象粒子球重設計為**真實鍛造車間**場景，用戶能看到錘子敲打、鐵砧、熔爐火光：
+
+**場景物件**（全部基礎幾何組合，低多邊形工藝美學）：
+- **鐵砧**（場景中心）：木墩底座 + 鋼質砧體 + 砧角
+- **錘子**（核心動畫）：把手 + 錘頭 + 鉚釘，pivot 旋轉擺動敲打
+- **熔爐**（後方）：磚紅爐體 + 黑色爐口 + emissive 煤炭 + 煙囪
+- **風箱**（熔爐左側）：上下板 + 皮革褶皺 + 金屬噴嘴，週期性鼓風
+- **工件→寶石**：Phase 1 粗糙八面體 → Phase 2 發光熱塊 → Phase 3 多面體 → Phase 4 升起旋轉展示
+- **火花粒子**：錘子觸底瞬間從工件位置拋物線爆散
+- **環境餘燼**：熔爐附近緩慢上飄
+
+**4 階段動畫時序**（900 frames @ 30fps）：
+- Phase 1 原料（0-224）：風箱慢呼吸，錘子輕敲（50幀/次），少量火花
+- Phase 2 鍛造（225-449）：風箱加速，錘子重擊（35幀/次），大量火花，工件發紅
+- Phase 3 塑形（450-674）：錘子快敲（25幀/次），工件變形為多面體，光環出現
+- Phase 4 成品（675-899）：錘子停止，工件升起旋轉，金色 Bloom 光暈慶祝
+
+**Post-Processing**：`@react-three/postprocessing`（Bloom + Vignette）
+
+**Seed 驅動**：每個 conversationId 產出不同寶石形狀/配色/煤炭分布/火花軌跡
 
 ### SandpackPreview 編輯模式（2026-02-26）
 

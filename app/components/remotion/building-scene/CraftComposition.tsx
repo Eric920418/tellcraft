@@ -1,21 +1,23 @@
 // ============================================================
-// "The Craft" Remotion Composition
-// ThreeCanvas + 暖色光源 + CraftCamera + CraftScene
+// "The Craft" v2 Remotion Composition
+// 鍛造車間：ThreeCanvas + 暖色光源 + SpotLight + Bloom + Vignette
 // ============================================================
 
 import { useCurrentFrame, useVideoConfig } from 'remotion'
 import { ThreeCanvas } from '@remotion/three'
 import { useThree } from '@react-three/fiber'
-import { useEffect, useMemo } from 'react'
+import { useEffect, useMemo, Suspense } from 'react'
+import { EffectComposer, Bloom, Vignette } from '@react-three/postprocessing'
 import CraftScene from './CraftScene'
 import { useCraftAnimation } from './FrameDrivenAnimations'
 import { COLORS, CAMERA_CONFIG } from './constants'
 import {
   selectCoreShape,
   selectPalette,
-  generateFragments,
-  generateEnergyLines,
   generateOrbitRings,
+  generateSparkSeeds,
+  generateCoals,
+  generateAmbientEmbers,
 } from './procedural'
 
 interface CraftCompositionProps {
@@ -28,15 +30,35 @@ function CraftCamera({ v }: { v: ReturnType<typeof useCraftAnimation> }) {
   const { camera } = useThree()
 
   useEffect(() => {
-    const angle = v.cameraOrbitAngle - 0.3
+    const angle = v.cameraOrbitAngle + 0.8 // 從右前方 45° 開始
     camera.position.x = Math.cos(angle) * v.cameraRadius
     camera.position.y = v.cameraY
     camera.position.z = Math.sin(angle) * v.cameraRadius
-    camera.lookAt(0, 0, 0)
+    camera.lookAt(0, v.cameraLookAtY, 0)
   })
 
   return null
 }
+
+// ── Post Processing ──
+
+function PostProcessing({ bloomIntensity }: { bloomIntensity: number }) {
+  return (
+    <Suspense fallback={null}>
+      <EffectComposer>
+        <Bloom
+          intensity={bloomIntensity}
+          luminanceThreshold={0.4}
+          luminanceSmoothing={0.9}
+          mipmapBlur
+        />
+        <Vignette eskil={false} offset={0.1} darkness={0.6} />
+      </EffectComposer>
+    </Suspense>
+  )
+}
+
+// ── Main Composition ──
 
 export default function CraftComposition({ seed = 0 }: CraftCompositionProps) {
   const frame = useCurrentFrame()
@@ -46,37 +68,62 @@ export default function CraftComposition({ seed = 0 }: CraftCompositionProps) {
   // Seed-driven procedural data
   const coreShape = useMemo(() => selectCoreShape(seed), [seed])
   const palette = useMemo(() => selectPalette(seed), [seed])
-  const fragments = useMemo(() => generateFragments(seed, 30), [seed])
-  const energyLines = useMemo(() => generateEnergyLines(seed), [seed])
   const orbitRings = useMemo(() => generateOrbitRings(seed), [seed])
+  const sparkSeeds = useMemo(() => generateSparkSeeds(seed, 25), [seed])
+  const coals = useMemo(() => generateCoals(seed), [seed])
+  const ambientEmbers = useMemo(() => generateAmbientEmbers(seed), [seed])
 
   return (
     <div style={{ width: '100%', height: '100%', position: 'relative', background: COLORS.bgDark }}>
       <ThreeCanvas
         width={width}
         height={height}
-        camera={{ position: [8, 7, 8], fov: CAMERA_CONFIG.initialFov }}
+        camera={{ position: [6, 3.5, 6], fov: CAMERA_CONFIG.initialFov }}
       >
         {/* 暗色鍛爐背景球 */}
         <CraftBackground />
 
-        {/* 暖色 3 點照明 */}
+        {/* 暖色照明系統 */}
         <ambientLight intensity={v.ambientIntensity} color="#FFF5E1" />
+
+        {/* 主光：從右上方打在鐵砧上 */}
         <directionalLight
-          position={[5, 8, 3]}
+          position={[4, 6, 3]}
           intensity={v.mainLightIntensity}
           color="#FFD4A0"
         />
+
+        {/* 上方聚光燈：打在工作區 */}
+        <spotLight
+          position={[0, 5, 1]}
+          angle={0.4}
+          penumbra={0.5}
+          intensity={v.spotLightIntensity}
+          color="#FFA060"
+          target-position={[0, 0.7, 0]}
+        />
+
+        {/* 冷色補光（左後方，增加立體感） */}
         <directionalLight
-          position={[-4, 3, -5]}
-          intensity={v.fillLightIntensity}
+          position={[-3, 2, -4]}
+          intensity={0.1}
           color="#8FAADC"
         />
+
+        {/* 工件位置點光源（隨工件發光增強） */}
         <pointLight
-          position={[0, 0, 0]}
+          position={[0, 0.7 + v.workpieceRise, 0]}
           intensity={v.pointLightIntensity}
-          distance={15}
+          distance={8}
           color={palette.coreEmissive}
+        />
+
+        {/* 熔爐內部點光源 */}
+        <pointLight
+          position={[0, 0.35, -1.5]}
+          intensity={v.furnaceGlow * 0.5}
+          distance={4}
+          color="#FF4500"
         />
 
         <CraftScene
@@ -84,10 +131,13 @@ export default function CraftComposition({ seed = 0 }: CraftCompositionProps) {
           frame={frame}
           coreShape={coreShape}
           palette={palette}
-          fragments={fragments}
-          energyLines={energyLines}
           orbitRings={orbitRings}
+          sparkSeeds={sparkSeeds}
+          coals={coals}
+          ambientEmbers={ambientEmbers}
         />
+
+        <PostProcessing bloomIntensity={v.bloomIntensity} />
 
         <CraftCamera v={v} />
       </ThreeCanvas>
