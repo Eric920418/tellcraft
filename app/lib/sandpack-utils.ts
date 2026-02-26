@@ -115,25 +115,37 @@ export function useTheme() { return { theme: 'light', setTheme: () => {}, resolv
 //   3. 用 MutationObserver + setTimeout(300ms) 延遲 tag（等 React 渲染完成）
 //   4. observer 只監聽 childList（避免 attribute 變化觸發死循環）
 const SANDPACK_EDIT_BRIDGE = `
+// ES module side-effect：Sandpack bundler（esbuild）會在 import 時執行一次
+// window 檢查是防 SSR 的安全網，__tcEditBridgeInitialized 防 HMR 重複初始化
 if (typeof window !== 'undefined' && !window.__tcEditBridgeInitialized) {
   window.__tcEditBridgeInitialized = true;
 
   var editMode = false;
   var selectedId = null;
-  // 全局計數器：避免 MutationObserver 重新 tag 時 id 衝突
-  // （每次呼叫 tag*() 時，已有 data-editable 的元素會被 skip，
-  //   但新增的動態元素從 local count=0 重新計數會與舊元素碰撞）
-  var globalCounts = {};
 
-  // 自動標記可編輯元素（文字類）
+  // bridge 內部持久化的編輯覆蓋：{ [elementId]: { text?, color?, ... } }
+  // React re-render 後 MutationObserver 會自動重新套用
+  var storedOverrides = {};
+
+  // ── 標記函數 ──────────────────────────────────────
+  // 策略：每次全量清除 → 從 DOM 順序重新分配 ID（確保 React 替換節點後 ID 一致）
+
+  function clearAllTags() {
+    var tagged = document.querySelectorAll('[data-editable]');
+    tagged.forEach(function(el) {
+      el.removeAttribute('data-editable');
+      el.removeAttribute('data-editable-type');
+    });
+  }
+
   function tagEditableElements() {
     var selectors = 'h1, h2, h3, h4, h5, h6, p, button, a, span, li, label, figcaption, blockquote, dt, dd';
     var elements = document.querySelectorAll(selectors);
+    var counts = {};
 
     elements.forEach(function(el) {
       var text = (el.textContent || '').trim();
       if (!text || el.closest('script, style, noscript, svg')) return;
-      if (el.getAttribute('data-editable')) return;
       if (el.tagName === 'A' || el.tagName === 'BUTTON' || el.tagName === 'LI') {
         // 保留，即使有子元素
       } else if (el.children.length > 0) {
@@ -142,47 +154,50 @@ if (typeof window !== 'undefined' && !window.__tcEditBridgeInitialized) {
       }
 
       var tag = el.tagName.toLowerCase();
-      globalCounts[tag] = (globalCounts[tag] || 0);
-      el.setAttribute('data-editable', tag + '-' + globalCounts[tag]);
+      counts[tag] = (counts[tag] || 0);
+      var id = tag + '-' + counts[tag];
+      el.setAttribute('data-editable', id);
       el.setAttribute('data-editable-type', 'text');
-      el.setAttribute('data-original-text', el.textContent || '');
-      globalCounts[tag]++;
+      // 只在首次標記時記錄原始文字（避免覆蓋用戶已編輯的 original）
+      if (!el.hasAttribute('data-original-text')) {
+        el.setAttribute('data-original-text', el.textContent || '');
+      }
+      counts[tag]++;
     });
   }
 
-  // 標記容器元素
   function tagContainerElements() {
     var selectors = 'section, header, footer, nav, main, article, aside, div.hero, div.card, div.container';
     var elements = document.querySelectorAll(selectors);
+    var counts = {};
 
     elements.forEach(function(el) {
       if (el.closest('script, style, noscript, svg')) return;
-      if (el.getAttribute('data-editable')) return;
       if (!el.textContent || !el.textContent.trim()) return;
 
       var tag = el.tagName.toLowerCase();
       var key = 'container-' + tag;
-      globalCounts[key] = (globalCounts[key] || 0);
-      el.setAttribute('data-editable', key + '-' + globalCounts[key]);
+      counts[key] = (counts[key] || 0);
+      el.setAttribute('data-editable', key + '-' + counts[key]);
       el.setAttribute('data-editable-type', 'container');
-      globalCounts[key]++;
+      counts[key]++;
     });
   }
 
-  // 標記圖片元素
   function tagImageElements() {
     var images = document.querySelectorAll('img');
+    var count = 0;
 
     images.forEach(function(el) {
       if (el.closest('script, style, noscript, svg')) return;
-      if (el.getAttribute('data-editable')) return;
 
-      globalCounts['img'] = (globalCounts['img'] || 0);
-      el.setAttribute('data-editable', 'img-' + globalCounts['img']);
+      el.setAttribute('data-editable', 'img-' + count);
       el.setAttribute('data-editable-type', 'image');
-      el.setAttribute('data-original-src', el.src || '');
-      el.setAttribute('data-original-alt', el.alt || '');
-      globalCounts['img']++;
+      if (!el.hasAttribute('data-original-src')) {
+        el.setAttribute('data-original-src', el.src || '');
+        el.setAttribute('data-original-alt', el.alt || '');
+      }
+      count++;
     });
   }
 

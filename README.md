@@ -73,20 +73,135 @@ npx ts-node bdd-spec/scripts/validate-feature.ts spec/features/
 
 ## Skill 系統
 
-| Skill | 用途 | LLM |
-|-------|------|-----|
-| `bdd-spec` | 需求釐清 + BDD 規格產出（Event Storming → Discovery → Formulation → Actions → ISA） | Sonnet |
-| `uiux` | 前端介面設計（Design Discovery → Design Lab → Implementation） | Sonnet |
-| `fast-build` | 一句話快速建站，跳過 BDD/Discovery，60-90 秒出結果 | Sonnet ×3 |
-| `quality-gate` | UIUX RWD 完成後自動觸發，靜態檢查 + LLM 自動修復 | Haiku |
-| `deployer` | 代碼 → sanitize → 本地 build 驗證 → Vercel 部署 → 回滾 | Haiku（修復） |
-| `iteration` | 迭代修改 + 撤銷上一步 + 版本回滾 | Sonnet |
+| Skill | 用途 | LLM | 狀態 |
+|-------|------|-----|------|
+| `bdd-spec` | 需求釐清 + BDD 規格產出（ES → Discovery → Formulation → Actions → ISA） | Sonnet | 完成 |
+| `uiux` | 前端介面設計（Design Discovery → Design Lab → Implementation） | Sonnet | 完成 |
+| `fast-build` | 一句話快速建站，跳過 BDD/Discovery，60-90 秒出結果 | Sonnet ×3 | 完成 |
+| `quality-gate` | UIUX RWD 完成後自動觸發，靜態檢查 + LLM 自動修復 | Haiku | 完成 |
+| `deployer` | 代碼 → sanitize → 本地 build 驗證 → Vercel 部署 → 回滾 | Haiku（修復） | 完成 |
+| `iteration` | 迭代修改 + 撤銷上一步 + 版本回滾 | Sonnet | 完成 |
+| `coder` | 後端代碼生成 | — | **未實作**，Registry 有定義 |
+| `domain-manager` | 網域管理 | — | **前端獨立**，`app/actions/domain.ts` 未接入 Orchestrator |
+| `domain-purchase` | 網域購買（Porkbun） | — | **前端獨立**，`app/actions/porkbun.ts` |
+| `domain-dns` | DNS 管理（Cloudflare） | — | **前端獨立**，`app/actions/cloudflare.ts` |
+
+### 內部服務層
+
+| Service | LLM | 調用者 | 職責 |
+|---------|-----|--------|------|
+| `classifier.ts` | Haiku | 每條新訊息 | 意圖分類（規則式 + LLM） |
+| `prefilter.ts` | 無 | 每條訊息（最先） | 空訊息/長度/Injection/Rate Limit |
+| `bdd-to-ui-spec.ts` | Haiku | UIUX Pipeline | BDD Feature Files → UIRequirementsSpec |
+| `prd-discovery.ts` | Sonnet | bdd-spec | PRD 需求發掘（多輪） |
+| `clarify-dedup.ts` | Haiku ×2 | bdd-spec | Decision Summary + 語意去重 |
+| `spec-discovery.ts` | Sonnet | bdd-spec | 規格品質檢查（S1-S6） |
+| `formulation.ts` | Sonnet ×5 | bdd-spec | Schema + Features + EntityMapping + Actions + ISA |
+| `event-storming.ts` | Haiku | bdd-spec | Event Storming DFS 探索 |
+| `fast-build-generation.ts` | 無 | fast-build | 規則式 tier/產品/DesignSystem（零 LLM） |
+| `template-matcher.ts` | 無 | orchestrator | 三層評分匹配（零 LLM） |
 
 ### 兩種模式
 
 **精細模式（Fine）**：BDD 完成 → 模板匹配 → Discovery → Brief 確認 → 5 變體 → Structure → Animation → RWD → QG
 
 **快速模式（Fast）**：一句話描述 → 規則式推斷（tier/產品類型/配色/佈局） → Structure → Animation → RWD → 靜態 QG
+
+## BDD Spec 流程
+
+```
+Phase 0: Event Storming（可選，複雜需求自動啟動）
+    ↓ DFS 探索 → Commands/ReadModels/Actors/Aggregates/Rules
+
+Phase 1: PRD Discovery + Clarify（多輪動態釐清）
+    ↓ 檢查清單掃描：A1-A6（領域模型）、B1-B5（功能模型）、C1-C2（術語一致）、D1-D2（品質）
+    ↓ 每輪最多 5 題，每 5 題批量確認（支援反悔），最多 6 輪 / 30 題
+    ↓ 三層去重：L1 Bug Fix + L2 Decision Summary(Haiku) + L3 Post-gen Dedup(Haiku)
+
+Phase 2: Formulation（一個 API = 一個 Feature）
+    ↓ 產出 schema.sql + entity_to_table_mapping.yml + feature files
+    ↓ 驗證腳本（lint + validate）+ 自癒修復（最多 3 次）
+
+Phase 3: Spec Discovery + Clarify
+    ↓ S1-S6 品質審查（規則完整性/Example 覆蓋/邊界條件/格式/跨 Feature 一致/Schema 對應）
+    ↓ 最多 2 輪 / 10 題
+
+Phase 4: Actions Design → actions.yml（Sonnet LLM）
+Phase 5: ISA Config → isa_codegen.yml（100% 規則式，零 LLM）
+Phase 6: Change Management（需求變更 → 影響分析 → 執行修改 → 一致性驗證）
+```
+
+**bdd_sessions 核心欄位**：
+```
+current_phase    -- prd_discovery / prd_clarify / formulation / spec_discovery / spec_clarify / actions_design / isa_config / completed
+current_round    -- 當前輪次
+clarify_items    -- JSONB，待處理 [{ id, question, category, priority, status, mode, proposedAnswer }]
+staging_items    -- JSONB，暫存區（待確認）
+resolved_items   -- JSONB，已解決
+schema_sql_content / entity_mapping_content / features_content / actions_yml_content / isa_config_content
+es_document_content  -- Event Storming 知識地圖
+change_history   -- JSONB，變更歷史追蹤
+```
+
+## 認證系統
+
+### OAuth 流程（以 Google 為例）
+
+```
+1. 用戶點擊「Google 登入」
+2. → Vercel /api/auth/google（proxy）
+3. → VPS /auth/google（設定 callbackHost）
+4. → Google OAuth 授權頁
+5. → Vercel /api/auth/google/callback（接收 code）
+6. → VPS /auth/google/exchange（用 code 換 JWT）
+7. → Vercel /auth/callback（存 token）
+8. → 首頁（useAuth hook 驗證）
+```
+
+**為什麼用 Vercel Proxy**：Google OAuth 不允許 IP callback URI + HTTPS→HTTP Mixed Content 被瀏覽器阻擋。
+
+### JWT 雙軌機制
+
+| 儲存位置 | 用途 | 讀取者 |
+|----------|------|--------|
+| `localStorage` (`auth_token`) | 客戶端認證 | `useAuth()` hook |
+| `Cookie` (`auth_token`, httpOnly) | 伺服器端認證 | Middleware + Server Components |
+
+- 登入時**同時**設置 localStorage 和 Cookie
+- `/api/auth/me` 偵測 DB 與 JWT 的 admin 狀態差異 → 自動返回刷新的 token
+- 訪客→登入帳號合併：`/auth/post-login` → `migrateAnonymousAccount` → 專案/對話遷移
+
+### OAuth Console 設定
+
+**Google Cloud Console**：APIs & Services → Credentials → OAuth 2.0 → Redirect URI：`https://tellcraft.com/api/auth/google/callback`
+
+**LINE Developers Console**：Channel → LINE Login Settings → Callback URL：`https://tellcraft.com/api/auth/line/callback`
+
+### 儀表板路由
+
+```
+/dashboard                          # 用戶首頁（統計/專案/對話）
+/dashboard/projects                 # 我的專案
+/dashboard/projects/[id]            # 專案詳情（對話歷史/部署記錄/版本）
+/dashboard/conversations            # 我的對話
+/dashboard/admin                    # 管理員總覽（需 is_admin）
+/dashboard/admin/users              # 用戶管理
+/dashboard/admin/users/[id]         # 用戶詳情
+/dashboard/admin/usage              # LLM 用量統計
+/dashboard/admin/conversations/[id] # 對話檢視器（唯讀）
+```
+
+權限：Middleware 攔截未登入 `/dashboard` + 非管理員 `/dashboard/admin`，Server Actions `requireAdmin()` 二次驗證。
+
+## BullMQ 任務模式
+
+| 功能 | 實現方式 |
+|------|----------|
+| 執行步驟 | 直接 `await fn()` |
+| 等待用戶回覆 | 保存 FlowState 到 Redis → Job 結束 → 用戶回覆時建新 Job → `handleContinueFlow` 恢復 |
+| 任務觸發 | `queue.add('process-message', { conversationId, message, ... })` |
+| 自動重試 | `attempts: 3` 配置 |
+| 對話互斥 | `conversation-lock.ts` Redis `SET NX EX`（TTL 300s），同一對話同時只有 1 個 Job |
 
 ## 已完成功能
 
@@ -170,17 +285,69 @@ spec/                     # BDD 規格產出（features/ + data/ + actions/）
 - **前端**：push `main` → Vercel 自動偵測 Next.js 並部署
 - **後端**：push `main` → GitHub Actions SSH 到 VPS → `pnpm install` → `pnpm build` → `pm2 restart`
 
-### VPS 手動部署
+### VPS 首次設定
 
 ```bash
-# SSH 到 VPS 後
+# 1. SSH 到 VPS
+ssh -i ~/Desktop/LightsailDefaultKey-ap-northeast-1.pem ubuntu@54.238.4.117
+
+# 2. Clone repo
+git clone git@github.com:Eric920418/tellcraft.git ~/tellcraft-repo
+
+# 3. 配置環境變數
+cp ~/tellcraft-repo/tellcraft-backend/.env.example ~/tellcraft-repo/tellcraft-backend/.env
+# 編輯 .env 填入 DATABASE_URL, REDIS_URL, JWT_SECRET, ANTHROPIC_API_KEY 等
+
+# 4. 安裝依賴並 build
+cd ~/tellcraft-repo/tellcraft-backend
+pnpm install && pnpm build
+
+# 5. 配置 Nginx
+sudo cp nginx/tellcraft.conf /etc/nginx/sites-available/tellcraft
+sudo ln -s /etc/nginx/sites-available/tellcraft /etc/nginx/sites-enabled/
+sudo nginx -t && sudo systemctl reload nginx
+
+# 6. 上傳目錄（圖片上傳功能）
+mkdir -p /var/www/uploads/tellcraft
+
+# 7. 啟動服務
+pm2 start ecosystem.config.js
+pm2 save
+```
+
+### VPS 日常部署
+
+```bash
+# 方法 1：SSH 到 VPS 後執行
 cd ~/tellcraft-repo && git pull origin main
 cd tellcraft-backend && pnpm install && pnpm build
 pm2 restart tellcraft-backend
 
-# 除錯
+# 方法 2：本地直接執行（deploy.sh）
+ssh -i ~/Desktop/LightsailDefaultKey-ap-northeast-1.pem ubuntu@54.238.4.117 '~/deploy.sh'
+```
+
+**deploy.sh**：
+```bash
+#!/bin/bash
+set -e
+cd ~/tellcraft-repo && git pull origin main
+cd tellcraft-backend && pnpm install && pnpm build
+pm2 restart tellcraft-backend
+curl -s http://localhost:8080/health
+```
+
+### 驗證
+
+```bash
+# 健康檢查
+curl http://54.238.4.117:8080/health
+# 預期: {"status":"ok","services":{"database":"connected","redis":"connected"}}
+
+# 即時日誌
 pm2 logs tellcraft-backend --lines 100
 pm2 status
+# 日誌檔案：/var/log/tellcraft/out.log、/var/log/tellcraft/error.log
 ```
 
 ### DB Migration
