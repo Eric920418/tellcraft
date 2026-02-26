@@ -105,6 +105,318 @@ export function ThemeProvider({ children }) { return React.createElement(React.F
 export function useTheme() { return { theme: 'light', setTheme: () => {}, resolvedTheme: 'light', themes: ['light', 'dark'] }; }
 `
 
+// ============================================================
+// 編輯橋接腳本（Sandpack 版）
+// ============================================================
+// 從 PreviewPanel 的 EDIT_BRIDGE_SCRIPT 改寫為 JS 模組格式
+// 關鍵差異：
+//   1. 純 JS（無 <script> 包裹）—— 作為 Sandpack 檔案注入
+//   2. 防重複初始化（window.__tcEditBridgeInitialized）
+//   3. 用 MutationObserver + setTimeout(300ms) 延遲 tag（等 React 渲染完成）
+//   4. observer 只監聽 childList（避免 attribute 變化觸發死循環）
+const SANDPACK_EDIT_BRIDGE = `
+if (typeof window !== 'undefined' && !window.__tcEditBridgeInitialized) {
+  window.__tcEditBridgeInitialized = true;
+
+  var editMode = false;
+  var selectedId = null;
+
+  // 自動標記可編輯元素（文字類）
+  function tagEditableElements() {
+    var selectors = 'h1, h2, h3, h4, h5, h6, p, button, a, span, li, label, figcaption, blockquote, dt, dd';
+    var elements = document.querySelectorAll(selectors);
+    var counts = {};
+
+    elements.forEach(function(el) {
+      var text = (el.textContent || '').trim();
+      if (!text || el.closest('script, style, noscript, svg')) return;
+      if (el.getAttribute('data-editable')) return;
+      if (el.tagName === 'A' || el.tagName === 'BUTTON' || el.tagName === 'LI') {
+        // 保留，即使有子元素
+      } else if (el.children.length > 0) {
+        var hasEditableChild = el.querySelector('h1,h2,h3,h4,h5,h6,p,button,a,span');
+        if (hasEditableChild && el.tagName !== 'P') return;
+      }
+
+      var tag = el.tagName.toLowerCase();
+      counts[tag] = (counts[tag] || 0);
+      el.setAttribute('data-editable', tag + '-' + counts[tag]);
+      el.setAttribute('data-editable-type', 'text');
+      el.setAttribute('data-original-text', el.textContent || '');
+      counts[tag]++;
+    });
+  }
+
+  // 標記容器元素
+  function tagContainerElements() {
+    var selectors = 'section, header, footer, nav, main, article, aside, div.hero, div.card, div.container';
+    var elements = document.querySelectorAll(selectors);
+    var counts = {};
+
+    elements.forEach(function(el) {
+      if (el.closest('script, style, noscript, svg')) return;
+      if (el.getAttribute('data-editable')) return;
+      if (!el.textContent || !el.textContent.trim()) return;
+
+      var tag = el.tagName.toLowerCase();
+      var key = 'container-' + tag;
+      counts[key] = (counts[key] || 0);
+      el.setAttribute('data-editable', key + '-' + counts[key]);
+      el.setAttribute('data-editable-type', 'container');
+      counts[key]++;
+    });
+  }
+
+  // 標記圖片元素
+  function tagImageElements() {
+    var images = document.querySelectorAll('img');
+    var count = 0;
+
+    images.forEach(function(el) {
+      if (el.closest('script, style, noscript, svg')) return;
+      if (el.getAttribute('data-editable')) return;
+
+      el.setAttribute('data-editable', 'img-' + count);
+      el.setAttribute('data-editable-type', 'image');
+      el.setAttribute('data-original-src', el.src || '');
+      el.setAttribute('data-original-alt', el.alt || '');
+      count++;
+    });
+  }
+
+  // 計算元素路徑 breadcrumb
+  function getElementPath(el) {
+    var parts = [];
+    var current = el;
+    while (current && current !== document.body && parts.length < 5) {
+      var tag = current.tagName.toLowerCase();
+      if (current.id) {
+        parts.unshift(tag + '#' + current.id);
+        break;
+      } else if (current.className && typeof current.className === 'string') {
+        var cls = current.className.split(' ').filter(function(c) { return c && !c.startsWith('data-') && c.length < 20; }).slice(0, 2).join('.');
+        parts.unshift(cls ? tag + '.' + cls : tag);
+      } else {
+        parts.unshift(tag);
+      }
+      current = current.parentElement;
+    }
+    return parts.join(' > ');
+  }
+
+  // 提取計算樣式
+  function extractStyles(el) {
+    var cs = window.getComputedStyle(el);
+    var type = el.getAttribute('data-editable-type') || 'text';
+    var base = {
+      color: cs.color,
+      backgroundColor: cs.backgroundColor,
+      fontSize: cs.fontSize,
+      fontWeight: cs.fontWeight,
+      padding: cs.padding,
+      margin: cs.margin,
+      borderRadius: cs.borderRadius
+    };
+
+    if (type === 'text') {
+      base.textAlign = cs.textAlign;
+      base.lineHeight = cs.lineHeight;
+      base.letterSpacing = cs.letterSpacing;
+    }
+
+    if (type === 'container') {
+      base.textAlign = cs.textAlign;
+      base.lineHeight = cs.lineHeight;
+      base.borderWidth = cs.borderWidth;
+      base.borderColor = cs.borderColor;
+      base.borderStyle = cs.borderStyle;
+      base.boxShadow = cs.boxShadow;
+      base.opacity = cs.opacity;
+    }
+
+    if (type === 'image') {
+      base.objectFit = cs.objectFit;
+      base.imgSrc = el.src || '';
+      base.imgAlt = el.alt || '';
+    }
+
+    return base;
+  }
+
+  // 注入編輯模式高亮樣式
+  var styleEl = document.createElement('style');
+  styleEl.id = 'edit-bridge-styles';
+  styleEl.textContent = '';
+  document.head.appendChild(styleEl);
+
+  function updateEditStyles() {
+    if (!editMode) {
+      styleEl.textContent = '';
+      return;
+    }
+    styleEl.textContent =
+      '[data-editable] {' +
+        'cursor: pointer !important;' +
+        'outline: 2px dashed transparent;' +
+        'outline-offset: 2px;' +
+        'transition: outline-color 0.15s ease;' +
+      '}' +
+      '[data-editable]:hover {' +
+        'outline-color: #94a3b8 !important;' +
+      '}' +
+      '[data-editable-type="container"]:hover {' +
+        'outline-color: #f59e0b !important;' +
+      '}' +
+      '[data-editable-type="image"]:hover {' +
+        'outline-color: #10b981 !important;' +
+      '}' +
+      (selectedId
+        ? '[data-editable="' + selectedId + '"] { outline: 2px solid #3b82f6 !important; outline-offset: 2px; }'
+        : '');
+  }
+
+  // 點擊處理
+  document.addEventListener('click', function(e) {
+    if (!editMode) return;
+
+    var target = e.target.closest('[data-editable]');
+    if (!target) {
+      selectedId = null;
+      updateEditStyles();
+      window.parent.postMessage({ type: 'tc_elementDeselected' }, '*');
+      return;
+    }
+
+    e.preventDefault();
+    e.stopPropagation();
+
+    var id = target.getAttribute('data-editable');
+    selectedId = id;
+    updateEditStyles();
+
+    var rect = target.getBoundingClientRect();
+    var editableType = target.getAttribute('data-editable-type') || 'text';
+    window.parent.postMessage({
+      type: 'tc_elementSelected',
+      data: {
+        id: id,
+        tagName: target.tagName,
+        text: editableType !== 'image' ? (target.textContent || '') : undefined,
+        styles: extractStyles(target),
+        rect: { x: rect.x, y: rect.y, width: rect.width, height: rect.height },
+        editableType: editableType,
+        path: getElementPath(target)
+      }
+    }, '*');
+  }, true);
+
+  // 接收父視窗指令
+  window.addEventListener('message', function(e) {
+    var msg = e.data;
+    if (!msg || !msg.type) return;
+
+    if (msg.type === 'tc_setEditMode') {
+      editMode = msg.enabled;
+      if (!editMode) selectedId = null;
+      updateEditStyles();
+    }
+
+    if (msg.type === 'tc_applyUpdate') {
+      var el = document.querySelector('[data-editable="' + msg.elementId + '"]');
+      if (!el) return;
+      var changes = msg.changes;
+      if (changes.text !== undefined) {
+        el.textContent = changes.text;
+      }
+      if (changes.imgSrc !== undefined && el.tagName === 'IMG') {
+        el.src = changes.imgSrc;
+      }
+      if (changes.imgAlt !== undefined && el.tagName === 'IMG') {
+        el.alt = changes.imgAlt;
+      }
+      Object.keys(changes).forEach(function(key) {
+        if (key !== 'text' && key !== 'imgSrc' && key !== 'imgAlt') {
+          el.style[key] = changes[key];
+        }
+      });
+    }
+
+    if (msg.type === 'tc_applyOverrides') {
+      var overrides = msg.overrides;
+      Object.keys(overrides).forEach(function(elementId) {
+        var el = document.querySelector('[data-editable="' + elementId + '"]');
+        if (!el) return;
+        var changes = overrides[elementId];
+        if (changes.text !== undefined) {
+          el.textContent = changes.text;
+        }
+        if (changes.imgSrc !== undefined && el.tagName === 'IMG') {
+          el.src = changes.imgSrc;
+        }
+        if (changes.imgAlt !== undefined && el.tagName === 'IMG') {
+          el.alt = changes.imgAlt;
+        }
+        Object.keys(changes).forEach(function(key) {
+          if (key !== 'text' && key !== 'imgSrc' && key !== 'imgAlt') {
+            el.style[key] = changes[key];
+          }
+        });
+      });
+    }
+
+    if (msg.type === 'tc_resetElement') {
+      var el = document.querySelector('[data-editable="' + msg.elementId + '"]');
+      if (!el) return;
+      var origText = el.getAttribute('data-original-text');
+      if (origText !== null) {
+        el.textContent = origText;
+      }
+      if (el.tagName === 'IMG') {
+        var origSrc = el.getAttribute('data-original-src');
+        var origAlt = el.getAttribute('data-original-alt');
+        if (origSrc !== null) el.src = origSrc;
+        if (origAlt !== null) el.alt = origAlt;
+      }
+      el.removeAttribute('style');
+    }
+
+    if (msg.type === 'tc_deselectElement') {
+      selectedId = null;
+      updateEditStyles();
+    }
+  });
+
+  // MutationObserver：React 渲染完成後自動標記元素
+  // 只監聽 childList（不監聽 attributes，避免 tag 設定 data-editable 觸發死循環）
+  function tagAllElements() {
+    tagEditableElements();
+    tagContainerElements();
+    tagImageElements();
+  }
+
+  var tagTimeout = null;
+  var observer = new MutationObserver(function() {
+    if (tagTimeout) clearTimeout(tagTimeout);
+    tagTimeout = setTimeout(function() {
+      tagAllElements();
+    }, 300);
+  });
+
+  // 初始標記 + 啟動 observer
+  function init() {
+    tagAllElements();
+    observer.observe(document.body, { childList: true, subtree: true });
+    window.parent.postMessage({ type: 'tc_iframeReady' }, '*');
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', init);
+  } else {
+    setTimeout(init, 100);
+  }
+}
+`
+
 // IntersectionObserver polyfill：讓 motion/react 的 whileInView 在 Sandpack iframe 中立即觸發
 // 部署端（真實瀏覽器）IntersectionObserver 正常運作，但 Sandpack iframe 的 viewport
 // 不會正確觸發 intersection，導致所有 whileInView 元素停在 initial 狀態（opacity:0）
