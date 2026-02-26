@@ -1468,7 +1468,9 @@ function ChatSection({
           setMessages(prev => {
             // 如果收到真正的 AI 回覆，移除預告消息
             const hasRealAiMessage = formattedMessages.some(m => m.role === 'assistant')
-            const filteredPrev = hasRealAiMessage
+            // 只在確實有 preview-analyzing 時才過濾，避免產生不必要的新陣列引用
+            const hasPreview = hasRealAiMessage && prev.some(m => m.id === 'preview-analyzing')
+            const filteredPrev = hasPreview
               ? prev.filter(m => m.id !== 'preview-analyzing')
               : prev
 
@@ -1477,20 +1479,6 @@ function ChatSection({
             const uniqueNewMessages = formattedMessages.filter(m => !existingIds.has(m.id))
 
             if (uniqueNewMessages.length > 0) {
-              // 如果有新的 AI 消息（非進度訊息），停止 typing
-              // 進度訊息（init_progress, formulation_start, formulation_progress）不應該停止打字指示器
-              const hasNonProgressAiMessage = uniqueNewMessages.some(m =>
-                m.role === 'assistant' &&
-                !['init_progress', 'formulation_start', 'formulation_progress'].includes(m.stage || '')
-              )
-              if (hasNonProgressAiMessage) {
-                setIsTyping(false)
-              }
-
-              // 合併訊息：
-              // 1. 用 DB 訊息替換 pending 的樂觀訊息（相同內容）
-              // 2. AI 進度訊息只保留最新的
-
               // 先處理 pending 訊息的替換
               const updatedPrev = [...filteredPrev]
               const newMessagesToAdd: Message[] = []
@@ -1503,15 +1491,35 @@ function ChatSection({
                     m.role === 'user' && m.pending && (m.content === newMsg.content || m.content === dbLabel)
                   )
                   if (pendingIndex !== -1) {
-                    // 用 DB 訊息替換 pending 訊息
                     updatedPrev[pendingIndex] = newMsg
                   } else {
-                    // 沒有對應的 pending 訊息，加入新訊息
                     newMessagesToAdd.push(newMsg)
                   }
                 } else {
+                  // 防止「殭屍」進度消息：被合併掉的舊進度消息每次輪詢都從後端回來
+                  // 只加入比現有進度更高的消息
+                  if (newMsg.progress) {
+                    const existingProgress = updatedPrev.find(m => m.content === newMsg.content && m.progress)
+                    if (existingProgress?.progress && newMsg.progress.current <= existingProgress.progress.current) {
+                      continue // 舊進度，不加入
+                    }
+                  }
                   newMessagesToAdd.push(newMsg)
                 }
+              }
+
+              // 如果過濾後沒有真正要加的新訊息，也沒有 pending 替換，走穩定路徑
+              if (newMessagesToAdd.length === 0 && updatedPrev.every((m, i) => m === filteredPrev[i])) {
+                return hasPreview ? filteredPrev : prev
+              }
+
+              // 如果有新的 AI 消息（非進度訊息），停止 typing
+              const hasNonProgressAiMessage = newMessagesToAdd.some(m =>
+                m.role === 'assistant' &&
+                !['init_progress', 'formulation_start', 'formulation_progress'].includes(m.stage || '')
+              )
+              if (hasNonProgressAiMessage) {
+                setIsTyping(false)
               }
 
               // 合併剩餘的新訊息
@@ -1526,23 +1534,24 @@ function ChatSection({
                   continue
                 }
 
-                // AI 進度訊息：相同內容只保留最新的進度值
+                // AI 進度訊息：相同內容只保留進度值最高的
                 if (msg.progress) {
                   const key = msg.content
                   const existing = progressMap.get(key)
                   if (existing) {
-                    // 進度值沒變時保留舊對象引用，避免不必要的 re-render
                     const oldP = existing.msg.progress
                     const newP = msg.progress
-                    if (oldP && newP && oldP.current === newP.current && oldP.total === newP.total && oldP.step === newP.step) {
-                      continue
+                    if (oldP && newP) {
+                      if (newP.current > oldP.current || newP.step !== oldP.step) {
+                        result[existing.index] = msg
+                        progressMap.set(key, { index: existing.index, msg })
+                      }
+                      // 相同或更低進度：跳過
                     }
-                    result[existing.index] = msg
-                    progressMap.set(key, { index: existing.index, msg })
-                  } else {
-                    progressMap.set(key, { index: result.length, msg })
-                    result.push(msg)
+                    continue
                   }
+                  progressMap.set(key, { index: result.length, msg })
+                  result.push(msg)
                   continue
                 }
 
@@ -1550,8 +1559,28 @@ function ChatSection({
                 result.push(msg)
               }
 
+              // 最終防護：如果合併結果和 prev 完全相同，返回 prev 避免 re-render
+              if (result.length === prev.length) {
+                let changed = false
+                for (let i = 0; i < result.length; i++) {
+                  if (result[i] === prev[i]) continue
+                  const a = result[i], b = prev[i]
+                  if (a.id === b.id && a.content === b.content && a.role === b.role &&
+                      a.stage === b.stage &&
+                      a.progress?.current === b.progress?.current &&
+                      a.progress?.total === b.progress?.total &&
+                      a.progress?.step === b.progress?.step) {
+                    result[i] = prev[i] // 內容相同，保留舊引用
+                  } else {
+                    changed = true
+                  }
+                }
+                if (!changed) return prev
+              }
+
               return result
             }
+            // 沒有新消息：filteredPrev 等於 prev 時返回同一引用，不觸發 re-render
             return filteredPrev
           })
 
