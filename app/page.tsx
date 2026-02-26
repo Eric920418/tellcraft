@@ -888,6 +888,8 @@ function ChatSection({
   // 延遲更新按鈕狀態，優化 INP
   const deferredInput = useDeferredValue(input)
   const [isTyping, setIsTyping] = useState(false)
+  const [sendCooldown, setSendCooldown] = useState(false)
+  const cooldownTimerRef = useRef<NodeJS.Timeout | null>(null)
   const [typingStage, setTypingStage] = useState<'none' | 'dots' | 'message'>('none')
   const [currentStage, setCurrentStage] = useState<Message['stage']>('discovery')
   const [sessionInfo, setSessionInfo] = useState<SessionInfo | null>(null)
@@ -1287,13 +1289,23 @@ function ChatSection({
           setStreamingPreview(result.data.streamingPreview as StreamingPreview)
           // 更新 chunk 計數（根據檔案數量估算）
           const sp = result.data.streamingPreview as StreamingPreview
-          setFastBuildChunks((sp.pages?.length || 0) + (sp.components?.length || 0))
+          const newChunks = (sp.pages?.length || 0) + (sp.components?.length || 0)
+          setFastBuildChunks(prev => prev !== newChunks ? newChunks : prev)
           // 串流期間加快輪詢
           pollInterval = 1500
           // 自動切換到 split 佈局
           if (layoutModeRef.current !== 'split') {
             setLayoutMode('split')
           }
+        }
+
+        // 沒有變化時跳過消息處理，只維持輪詢
+        if (result.data.hasChanges === false) {
+          pollInterval = Math.min(pollInterval * 1.5, MAX_INTERVAL)
+          if (isPolling) {
+            timeoutId = setTimeout(poll, pollInterval)
+          }
+          return
         }
 
         const newMessages = result.data.messages
@@ -1401,6 +1413,12 @@ function ChatSection({
                   const key = msg.content
                   const existing = progressMap.get(key)
                   if (existing) {
+                    // 進度值沒變時保留舊對象引用，避免不必要的 re-render
+                    const oldP = existing.msg.progress
+                    const newP = msg.progress
+                    if (oldP && newP && oldP.current === newP.current && oldP.total === newP.total && oldP.step === newP.step) {
+                      continue
+                    }
                     result[existing.index] = msg
                     progressMap.set(key, { index: existing.index, msg })
                   } else {
@@ -1679,8 +1697,19 @@ function ChatSection({
     }
   }
 
+  const startSendCooldown = useCallback((ms = 2000) => {
+    setSendCooldown(true)
+    if (cooldownTimerRef.current) clearTimeout(cooldownTimerRef.current)
+    cooldownTimerRef.current = setTimeout(() => setSendCooldown(false), ms)
+  }, [])
+
+  useEffect(() => () => {
+    if (cooldownTimerRef.current) clearTimeout(cooldownTimerRef.current)
+  }, [])
+
   const handleSend = async () => {
-    if (!sessionInfo || !input.trim() || isTyping) return
+    if (!sessionInfo || !input.trim() || isTyping || sendCooldown) return
+    startSendCooldown()
 
     const content = input.trim()
     setInput('')
@@ -1755,7 +1784,8 @@ function ChatSection({
 
   // 發送指定內容的訊息（用於按鈕觸發）
   const handleSendMessage = async (content: string) => {
-    if (!sessionInfo || !content.trim() || isTyping) return
+    if (!sessionInfo || !content.trim() || isTyping || sendCooldown) return
+    startSendCooldown()
 
     // 樂觀更新
     const userMessage: Message = {
@@ -2062,7 +2092,8 @@ function ChatSection({
                                 {message.progress ? (
                                   // 真實進度條
                                   <motion.div
-                                    initial={{ width: 0 }}
+                                    key={`progress-bar-${message.id}`}
+                                    initial={false}
                                     animate={{ width: `${(message.progress.current / message.progress.total) * 100}%` }}
                                     transition={{ duration: 0.5, ease: 'easeOut' }}
                                     style={{
@@ -2193,7 +2224,7 @@ function ChatSection({
                   if (isComposingRef.current) return
                   if (e.key === 'Enter' && !e.shiftKey) {
                     e.preventDefault()
-                    if (input.trim() && !isTyping && !isInitializing && sessionInfo) {
+                    if (input.trim() && !isTyping && !sendCooldown && !isInitializing && sessionInfo) {
                       handleSend()
                     }
                   }
@@ -2223,16 +2254,16 @@ function ChatSection({
                 whileHover={{ scale: 1.02 }}
                 whileTap={{ scale: 0.98 }}
                 onClick={handleSend}
-                disabled={!deferredInput.trim() || isTyping || isInitializing || !sessionInfo}
+                disabled={!deferredInput.trim() || isTyping || sendCooldown || isInitializing || !sessionInfo}
                 style={{
                   padding: layoutMode === 'split' ? '0 20px' : '0 28px',
                   height: layoutMode === 'split' ? 40 : 48,
                   fontSize: layoutMode === 'split' ? 13 : 14,
                   fontWeight: 500,
                   border: '1px solid var(--black)',
-                  background: !deferredInput.trim() || isTyping || isInitializing || !sessionInfo ? 'var(--gray-100)' : 'var(--black)',
-                  color: !deferredInput.trim() || isTyping || isInitializing || !sessionInfo ? 'var(--gray-400)' : 'var(--white)',
-                  cursor: !deferredInput.trim() || isTyping || isInitializing || !sessionInfo ? 'not-allowed' : 'pointer',
+                  background: !deferredInput.trim() || isTyping || sendCooldown || isInitializing || !sessionInfo ? 'var(--gray-100)' : 'var(--black)',
+                  color: !deferredInput.trim() || isTyping || sendCooldown || isInitializing || !sessionInfo ? 'var(--gray-400)' : 'var(--white)',
+                  cursor: !deferredInput.trim() || isTyping || sendCooldown || isInitializing || !sessionInfo ? 'not-allowed' : 'pointer',
                   transition: 'all 0.2s ease',
                   flexShrink: 0,
                 }}
@@ -2553,6 +2584,14 @@ function ChatSection({
 
   // 分屏佈局模式
   if (layoutMode === 'split' && isActive) {
+    // BDD 階段（有釐清但還沒進 UIUX）需要更寬的對話面板
+    const isBddSplitMode = messages.some(m =>
+      m.stage === 'clarify_question' || m.stage === 'prd_discovery_continue' || m.stage === 'prd_discovery_complete'
+    ) && !messages.some(m => m.stage?.startsWith('uiux') || m.richContent?.type === 'code_preview')
+    const bddChatWidth = isBddSplitMode ? 560 : 420
+    const bddMinChatWidth = isBddSplitMode ? 480 : 320
+    const bddMaxChatWidth = isBddSplitMode ? 720 : 600
+
     return (
       <motion.div
         key="split-layout"
@@ -2567,6 +2606,9 @@ function ChatSection({
         }}
       >
         <SplitLayout
+          defaultChatWidth={bddChatWidth}
+          minChatWidth={bddMinChatWidth}
+          maxChatWidth={bddMaxChatWidth}
           chatPanel={
             <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
               {/* Split Layout Header */}

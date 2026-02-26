@@ -67,13 +67,13 @@ export default function BuildingPlayer({
   if (!webglOk) {
     // 2D Remotion fallback
     return (
-      <div style={{ height: '100%' }}>
+      <div style={{ height: '100%', overflow: 'hidden' }}>
         <Player
           ref={playerRef}
           component={BuildingFallback2D}
           inputProps={{ round, progress, totalQuestions, isWorking }}
-          compositionWidth={640}
-          compositionHeight={480}
+          compositionWidth={1280}
+          compositionHeight={720}
           durationInFrames={TOTAL_FRAMES}
           fps={FPS}
           style={style}
@@ -88,13 +88,13 @@ export default function BuildingPlayer({
   }
 
   return (
-    <div style={{ height: '100%', position: 'relative', background: '#f8fafc' }}>
+    <div style={{ height: '100%', position: 'relative', overflow: 'hidden' }}>
       <Player
         ref={playerRef}
         component={BuildingComposition}
         inputProps={inputProps}
-        compositionWidth={800}
-        compositionHeight={600}
+        compositionWidth={1280}
+        compositionHeight={720}
         durationInFrames={TOTAL_FRAMES}
         fps={FPS}
         style={style}

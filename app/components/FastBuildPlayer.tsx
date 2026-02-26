@@ -39,12 +39,12 @@ export default function FastBuildPlayer({ phase, streamingChunks }: FastBuildPla
   }), [])
 
   return (
-    <div style={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#0f172a' }}>
+    <div style={{ height: '100%', overflow: 'hidden', background: '#0f172a' }}>
       <Player
         ref={playerRef}
         component={FastBuildComposition}
-        compositionWidth={800}
-        compositionHeight={600}
+        compositionWidth={1280}
+        compositionHeight={720}
         durationInFrames={TOTAL_FRAMES}
         fps={FPS}
         style={style}

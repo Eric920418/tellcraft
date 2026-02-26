@@ -20,6 +20,43 @@ export function setRedisClient(redis: Redis) {
 }
 
 // ============================================================
+// 每對話限速（5 秒窗口最多 1 條）
+// ============================================================
+
+const RATE_LIMIT_WINDOW_SECONDS = 5
+const RATE_LIMIT_MAX_REQUESTS = 1
+
+/**
+ * Lua script: INCR + EXPIRE 原子操作
+ * 返回 { allowed, retryAfter }
+ */
+async function checkConversationRateLimit(conversationId: string): Promise<{ allowed: boolean; retryAfter: number }> {
+  if (!redisClient) return { allowed: true, retryAfter: 0 } // Redis 不可用時降級放行
+
+  try {
+    const key = `rate-limit:conv:${conversationId}`
+    const script = `
+      local current = redis.call("INCR", KEYS[1])
+      if current == 1 then
+        redis.call("EXPIRE", KEYS[1], ARGV[1])
+      end
+      return current
+    `
+    const count = await redisClient.eval(script, 1, key, RATE_LIMIT_WINDOW_SECONDS) as number
+
+    if (count > RATE_LIMIT_MAX_REQUESTS) {
+      const ttl = await redisClient.ttl(key)
+      return { allowed: false, retryAfter: Math.max(ttl, 1) }
+    }
+
+    return { allowed: true, retryAfter: 0 }
+  } catch (err) {
+    console.warn('[RateLimit] Redis 錯誤，降級放行:', err)
+    return { allowed: true, retryAfter: 0 } // 降級放行
+  }
+}
+
+// ============================================================
 // 對話 API
 // ============================================================
 
@@ -77,6 +114,15 @@ router.post('/:id/message', optionalAuth, async (req, res) => {
       if (ownerUser?.email !== callerUser?.email) {
         return res.status(403).json({ error: 'Access denied' })
       }
+    }
+
+    // 限速檢查（5 秒窗口最多 1 條）
+    const rateLimit = await checkConversationRateLimit(conversationId)
+    if (!rateLimit.allowed) {
+      return res.status(429).json({
+        error: `請求過於頻繁，請 ${rateLimit.retryAfter} 秒後再試`,
+        retryAfter: rateLimit.retryAfter,
+      })
     }
 
     // 新增用戶消息到 DB
@@ -179,6 +225,15 @@ router.post('/:id/reply', optionalAuth, async (req, res) => {
       if (ownerUser?.email !== callerUser?.email) {
         return res.status(403).json({ error: 'Access denied' })
       }
+    }
+
+    // 限速檢查（5 秒窗口最多 1 條）
+    const replyRateLimit = await checkConversationRateLimit(conversationId)
+    if (!replyRateLimit.allowed) {
+      return res.status(429).json({
+        error: `請求過於頻繁，請 ${replyRateLimit.retryAfter} 秒後再試`,
+        retryAfter: replyRateLimit.retryAfter,
+      })
     }
 
     // 新增用戶消息到 DB

@@ -1,6 +1,7 @@
 import { Job, Worker } from 'bullmq'
 import { Server as SocketIOServer } from 'socket.io'
 import Redis from 'ioredis'
+import { withConversationLock } from '../services/conversation-lock'
 import * as db from '../db/client'
 import { classifyIntent, ClassificationResult, isSkillIntent, MetaIntent } from '../services/classifier'
 import { SkillName } from '../services/registry'
@@ -235,14 +236,31 @@ export function createOrchestratorWorker(
     async (job: Job) => {
       console.log(`[Orchestrator] 處理 Job: ${job.name} (${job.id})`)
 
-      switch (job.name) {
-        case 'process-message':
-          return handleProcessMessage(job.data as ProcessMessageData, redis, io)
-        case 'continue-flow':
-          return handleContinueFlow(job.data as ContinueFlowData, redis, io)
-        default:
-          throw new Error(`未知的 Job 類型: ${job.name}`)
+      const data = job.data as ProcessMessageData | ContinueFlowData
+      const { conversationId } = data
+
+      const lockResult = await withConversationLock(redis, conversationId, async () => {
+        switch (job.name) {
+          case 'process-message':
+            return handleProcessMessage(data as ProcessMessageData, redis, io)
+          case 'continue-flow':
+            return handleContinueFlow(data as ContinueFlowData, redis, io)
+          default:
+            throw new Error(`未知的 Job 類型: ${job.name}`)
+        }
+      })
+
+      if (lockResult.locked) {
+        console.warn(`[Orchestrator] 對話 ${conversationId} 已鎖定，跳過 Job ${job.id}`)
+        // 透過 Socket.io 提示用戶（不寫 DB，避免污染對話歷史）
+        io.to(conversationId).emit('system_notice', {
+          type: 'busy',
+          message: '正在處理中，請稍候再試',
+        })
+        return
       }
+
+      return lockResult.result
     },
     {
       connection: redis,

@@ -12,10 +12,22 @@ Tellcraft 是一個 AI 驅動的自動化開發平台。用戶只需描述需求
 
 ## 當前開發進度
 
-- **狀態**：✅ Phase 1-9 + Server Actions + VPS Backend + 前端 Chat 串接 + 認證系統 + 訪客體驗改善 + 儀表板系統 + BDD Spec 完整修復 + 專案版本管理 + **UIUX 生成邏輯重構** + **Design Tier** + **專案自動命名** + **PreviewPanel iframe 重構** + **Quality Gate 品質檢查** + **Code Preview 即時渲染** + **串流實時預覽** + **BDD→UI 翻譯 + Variant 創意概念** + **Fast Mode 快速建站** + **智能模板匹配** + **Fast Build 藍圖進度** + **BDD Q&A 3D 蓋房子動畫** + **對話回退 + 錯誤恢復** + **BDD Spec Skill v2.0.0 同步** + **LLM 自動重試 + 錯誤訊息人性化** + **BDD Phase 4/5 後端補完** + **Phase 0 Event Storming** + **BDD Skill 差距補完** + **BDD Skill P1-P3 補完** + **BDD→UIUX 翻譯品質升級** + **BDD Skill 方法論升級** + **Fast Build 全面升級** + **Fast Build 佈局模式** + **Fast Build 品質升級** + **動畫大升級：城堡+工廠**
+- **狀態**：✅ Phase 1-9 + Server Actions + VPS Backend + 前端 Chat 串接 + 認證系統 + 訪客體驗改善 + 儀表板系統 + BDD Spec 完整修復 + 專案版本管理 + **UIUX 生成邏輯重構** + **Design Tier** + **專案自動命名** + **PreviewPanel iframe 重構** + **Quality Gate 品質檢查** + **Code Preview 即時渲染** + **串流實時預覽** + **BDD→UI 翻譯 + Variant 創意概念** + **Fast Mode 快速建站** + **智能模板匹配** + **Fast Build 藍圖進度** + **BDD Q&A 3D 蓋房子動畫** + **對話回退 + 錯誤恢復** + **BDD Spec Skill v2.0.0 同步** + **LLM 自動重試 + 錯誤訊息人性化** + **BDD Phase 4/5 後端補完** + **Phase 0 Event Storming** + **BDD Skill 差距補完** + **BDD Skill P1-P3 補完** + **BDD→UIUX 翻譯品質升級** + **BDD Skill 方法論升級** + **Fast Build 全面升級** + **Fast Build 佈局模式** + **Fast Build 品質升級** + **動畫大升級：城堡+工廠** + **防刷訊息三層防護**
 - **釐清項目**：28 項全部解決
 - **Server Actions**：30+ 已實作
 - **詳情**：[`.clarify/overview.md`](.clarify/overview.md)
+
+### 防刷訊息：三層防護（2026-02-26）
+
+防止用戶快速連發訊息導致 BullMQ 多 job 並行 → FlowState 競爭 → 對話卡死。
+
+**三層防護**：
+1. **前端 2 秒冷卻**（`app/page.tsx`）：`sendCooldown` state + `startSendCooldown()` 函數，攔截 `handleSend`/`handleSendMessage`/Enter 鍵/按鈕 4 處守衛
+2. **後端 API 限速**（`conversation.ts`）：Redis Lua INCR+EXPIRE，5 秒窗口每對話最多 1 條，超頻回 429 + 中文提示（Redis 不可用時降級放行）
+3. **Worker 對話鎖**（`conversation-lock.ts`）：Redis `SET NX EX` 互斥鎖（TTL 300s），同一對話同時只有一個 job 執行。鎖衝突時 Socket.io emit `system_notice`（不寫 DB），`console.warn` 紀錄
+
+**新增檔案**：`tellcraft-backend/src/services/conversation-lock.ts`（~65 行）
+**修改檔案**：`app/page.tsx`、`tellcraft-backend/src/workers/orchestrator.ts`、`tellcraft-backend/src/routes/conversation.ts`
 
 ### 動畫大升級：低多邊形城堡 + 3D 工廠流水線（2026-02-25）
 
