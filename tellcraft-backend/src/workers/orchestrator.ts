@@ -96,12 +96,12 @@ function computeDiscoveryLimits(requirements: string, hasEsDocument?: boolean): 
   const featureKeywords = (requirements.match(/功能|模組|頁面|API|角色|報表|通知|權限|流程/g) || []).length
 
   if (len < 100 && bulletCount < 3 && featureKeywords < 2) {
-    // 簡短需求：「做一個花店網站」
-    return { maxRounds: 2, maxTotalQuestions: 10 }
+    // 簡短需求：「做一個花店網站」— 短描述不代表簡單，給足夠空間釐清
+    return { maxRounds: 3, maxTotalQuestions: 15 }
   }
   if (len < 300 && bulletCount < 5 && featureKeywords < 4) {
     // 中等需求
-    return { maxRounds: 4, maxTotalQuestions: 20 }
+    return { maxRounds: 4, maxTotalQuestions: 25 }
   }
   if (len < 800 || (bulletCount < 10 && featureKeywords < 8)) {
     // 較複雜需求

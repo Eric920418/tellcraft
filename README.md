@@ -115,7 +115,7 @@ Phase 0: Event Storming（可選，複雜需求自動啟動）
 
 Phase 1: PRD Discovery + Clarify（多輪動態釐清）
     ↓ 檢查清單掃描：A1-A6（領域模型）、B1-B5（功能模型）、C1-C2（術語一致）、D1-D2（品質）
-    ↓ 每輪最多 5 題，每 5 題批量確認（支援反悔），最多 6 輪 / 30 題
+    ↓ 每輪最多 5 題，每 5 題批量確認（支援反悔），動態上限 3-10 輪 / 15-50 題
     ↓ 三層去重：L1 Bug Fix + L2 Decision Summary(Haiku) + L3 Post-gen Dedup(Haiku)
 
 Phase 2: Formulation（一個 API = 一個 Feature）
