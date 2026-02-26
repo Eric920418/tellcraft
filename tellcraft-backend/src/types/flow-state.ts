@@ -91,6 +91,8 @@ export interface FlowState {
   fastModeLayoutMode?: 'app' | 'website'
   // 智能模板匹配
   matchedTemplateIds?: string[] // 匹配的模板 ID（分數排序）
+  // 模板編輯覆蓋（用戶在 PreviewPanel 中的自訂修改）
+  templateOverrides?: Record<string, Record<string, string>>
   // 用戶 ID（供內部函數取得 trackingContext）
   userId?: string
   // 回退機制

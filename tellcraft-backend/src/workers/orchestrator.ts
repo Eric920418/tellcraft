@@ -3410,6 +3410,19 @@ async function handleTemplateSelection(
     pageStructure: templateResult.page_structure as TemplateData['pageStructure'],
   }
 
+  // 讀取用戶在 PreviewPanel 中的 template overrides
+  if (state.projectId) {
+    const overridesResult = await db.queryOne<{ template_overrides: Record<string, Record<string, string>> | null }>(
+      `SELECT template_overrides FROM projects WHERE id = $1`,
+      [state.projectId]
+    )
+    if (overridesResult?.template_overrides && Object.keys(overridesResult.template_overrides).length > 0) {
+      state.templateOverrides = overridesResult.template_overrides
+      await saveFlowState(redis, conversationId, state)
+      console.log(`[Orchestrator] 載入 template overrides: ${Object.keys(overridesResult.template_overrides).length} 個元素`)
+    }
+  }
+
   // 進入 Design Brief 確認環節
   await startDesignBriefConfirm(conversationId, state, template, 'template', redis, io)
 }
@@ -3900,6 +3913,7 @@ async function executeFullCodePipeline(
       designBrief: state.uiuxDesignBrief,
       uiSpec,
       variantConcept: state.uiuxVariantConcept,
+      templateOverrides: state.templateOverrides,
     },
     { userId: state.userId, conversationId, purpose: 'uiux_structure' },
     makeStreamingCallback(conversationId, io, redis, 'structure', twConfig)

@@ -34,7 +34,7 @@ export default function BuildingComposition({
       <ThreeCanvas
         width={width}
         height={height}
-        camera={{ position: [11, 12, 11], fov: 30 }}
+        camera={{ position: [14, 14, 14], fov: 40 }}
       >
         {/* 天空半球 */}
         <CastleSky topRGB={v.skyTopRGB} bottomRGB={v.skyBottomRGB} />

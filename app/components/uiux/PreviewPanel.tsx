@@ -55,10 +55,12 @@ export interface ElementInfo {
   text?: string
   styles: Record<string, string>
   rect: { x: number; y: number; width: number; height: number }
+  editableType?: 'text' | 'container' | 'image'
+  path?: string
 }
 
 // 編輯橋接腳本 — 注入到 iframe 內部
-// 負責：自動標記可編輯元素、處理點擊、接收父視窗的更新指令
+// 負責：自動標記可編輯元素（文字/容器/圖片）、處理點擊、接收父視窗的更新指令
 const EDIT_BRIDGE_SCRIPT = `
 <script>
 (function() {
@@ -75,11 +77,9 @@ const EDIT_BRIDGE_SCRIPT = `
       var text = (el.textContent || '').trim();
       if (!text || el.closest('script, style, noscript, svg')) return;
       if (el.getAttribute('data-editable')) return;
-      // 跳過只是包裹其他可編輯元素的容器
       if (el.tagName === 'A' || el.tagName === 'BUTTON' || el.tagName === 'LI') {
-        // 這些保留，即使有子元素
+        // 保留，即使有子元素
       } else if (el.children.length > 0) {
-        // 對於 span/p 等，只標記沒有子可編輯元素的
         var hasEditableChild = el.querySelector('h1,h2,h3,h4,h5,h6,p,button,a,span');
         if (hasEditableChild && el.tagName !== 'P') return;
       }
@@ -87,14 +87,75 @@ const EDIT_BRIDGE_SCRIPT = `
       var tag = el.tagName.toLowerCase();
       counts[tag] = (counts[tag] || 0);
       el.setAttribute('data-editable', tag + '-' + counts[tag]);
+      el.setAttribute('data-editable-type', 'text');
+      el.setAttribute('data-original-text', el.textContent || '');
       counts[tag]++;
     });
   }
 
-  // 提取計算樣式
+  // 標記容器元素
+  function tagContainerElements() {
+    var selectors = 'section, header, footer, nav, main, article, aside, div.hero, div.card, div.container';
+    var elements = document.querySelectorAll(selectors);
+    var counts = {};
+
+    elements.forEach(function(el) {
+      if (el.closest('script, style, noscript, svg')) return;
+      if (el.getAttribute('data-editable')) return;
+      // 只標記有實質內容的容器
+      if (!el.textContent || !el.textContent.trim()) return;
+
+      var tag = el.tagName.toLowerCase();
+      var key = 'container-' + tag;
+      counts[key] = (counts[key] || 0);
+      el.setAttribute('data-editable', key + '-' + counts[key]);
+      el.setAttribute('data-editable-type', 'container');
+      counts[key]++;
+    });
+  }
+
+  // 標記圖片元素
+  function tagImageElements() {
+    var images = document.querySelectorAll('img');
+    var count = 0;
+
+    images.forEach(function(el) {
+      if (el.closest('script, style, noscript, svg')) return;
+      if (el.getAttribute('data-editable')) return;
+
+      el.setAttribute('data-editable', 'img-' + count);
+      el.setAttribute('data-editable-type', 'image');
+      el.setAttribute('data-original-src', el.src || '');
+      el.setAttribute('data-original-alt', el.alt || '');
+      count++;
+    });
+  }
+
+  // 計算元素路徑 breadcrumb
+  function getElementPath(el) {
+    var parts = [];
+    var current = el;
+    while (current && current !== document.body && parts.length < 5) {
+      var tag = current.tagName.toLowerCase();
+      if (current.id) {
+        parts.unshift(tag + '#' + current.id);
+        break;
+      } else if (current.className && typeof current.className === 'string') {
+        var cls = current.className.split(' ').filter(function(c) { return c && !c.startsWith('data-') && c.length < 20; }).slice(0, 2).join('.');
+        parts.unshift(cls ? tag + '.' + cls : tag);
+      } else {
+        parts.unshift(tag);
+      }
+      current = current.parentElement;
+    }
+    return parts.join(' > ');
+  }
+
+  // 提取計算樣式（根據 editable type 返回不同屬性集）
   function extractStyles(el) {
     var cs = window.getComputedStyle(el);
-    return {
+    var type = el.getAttribute('data-editable-type') || 'text';
+    var base = {
       color: cs.color,
       backgroundColor: cs.backgroundColor,
       fontSize: cs.fontSize,
@@ -103,6 +164,30 @@ const EDIT_BRIDGE_SCRIPT = `
       margin: cs.margin,
       borderRadius: cs.borderRadius
     };
+
+    if (type === 'text') {
+      base.textAlign = cs.textAlign;
+      base.lineHeight = cs.lineHeight;
+      base.letterSpacing = cs.letterSpacing;
+    }
+
+    if (type === 'container') {
+      base.textAlign = cs.textAlign;
+      base.lineHeight = cs.lineHeight;
+      base.borderWidth = cs.borderWidth;
+      base.borderColor = cs.borderColor;
+      base.borderStyle = cs.borderStyle;
+      base.boxShadow = cs.boxShadow;
+      base.opacity = cs.opacity;
+    }
+
+    if (type === 'image') {
+      base.objectFit = cs.objectFit;
+      base.imgSrc = el.src || '';
+      base.imgAlt = el.alt || '';
+    }
+
+    return base;
   }
 
   // 注入編輯模式的即時高亮樣式
@@ -125,6 +210,12 @@ const EDIT_BRIDGE_SCRIPT = `
       '}' +
       '[data-editable]:hover {' +
         'outline-color: #94a3b8 !important;' +
+      '}' +
+      '[data-editable-type="container"]:hover {' +
+        'outline-color: #f59e0b !important;' +
+      '}' +
+      '[data-editable-type="image"]:hover {' +
+        'outline-color: #10b981 !important;' +
       '}' +
       (selectedId
         ? '[data-editable="' + selectedId + '"] { outline: 2px solid #3b82f6 !important; outline-offset: 2px; }'
@@ -151,14 +242,17 @@ const EDIT_BRIDGE_SCRIPT = `
     updateEditStyles();
 
     var rect = target.getBoundingClientRect();
+    var editableType = target.getAttribute('data-editable-type') || 'text';
     window.parent.postMessage({
       type: 'tc_elementSelected',
       data: {
         id: id,
         tagName: target.tagName,
-        text: target.textContent || '',
+        text: editableType !== 'image' ? (target.textContent || '') : undefined,
         styles: extractStyles(target),
-        rect: { x: rect.x, y: rect.y, width: rect.width, height: rect.height }
+        rect: { x: rect.x, y: rect.y, width: rect.width, height: rect.height },
+        editableType: editableType,
+        path: getElementPath(target)
       }
     }, '*');
   }, true);
@@ -181,8 +275,14 @@ const EDIT_BRIDGE_SCRIPT = `
       if (changes.text !== undefined) {
         el.textContent = changes.text;
       }
+      if (changes.imgSrc !== undefined && el.tagName === 'IMG') {
+        el.src = changes.imgSrc;
+      }
+      if (changes.imgAlt !== undefined && el.tagName === 'IMG') {
+        el.alt = changes.imgAlt;
+      }
       Object.keys(changes).forEach(function(key) {
-        if (key !== 'text') {
+        if (key !== 'text' && key !== 'imgSrc' && key !== 'imgAlt') {
           el.style[key] = changes[key];
         }
       });
@@ -197,12 +297,37 @@ const EDIT_BRIDGE_SCRIPT = `
         if (changes.text !== undefined) {
           el.textContent = changes.text;
         }
+        if (changes.imgSrc !== undefined && el.tagName === 'IMG') {
+          el.src = changes.imgSrc;
+        }
+        if (changes.imgAlt !== undefined && el.tagName === 'IMG') {
+          el.alt = changes.imgAlt;
+        }
         Object.keys(changes).forEach(function(key) {
-          if (key !== 'text') {
+          if (key !== 'text' && key !== 'imgSrc' && key !== 'imgAlt') {
             el.style[key] = changes[key];
           }
         });
       });
+    }
+
+    if (msg.type === 'tc_resetElement') {
+      var el = document.querySelector('[data-editable="' + msg.elementId + '"]');
+      if (!el) return;
+      // 恢復原始文字
+      var origText = el.getAttribute('data-original-text');
+      if (origText !== null) {
+        el.textContent = origText;
+      }
+      // 恢復原始圖片
+      if (el.tagName === 'IMG') {
+        var origSrc = el.getAttribute('data-original-src');
+        var origAlt = el.getAttribute('data-original-alt');
+        if (origSrc !== null) el.src = origSrc;
+        if (origAlt !== null) el.alt = origAlt;
+      }
+      // 清除所有 inline styles
+      el.removeAttribute('style');
     }
 
     if (msg.type === 'tc_deselectElement') {
@@ -214,6 +339,8 @@ const EDIT_BRIDGE_SCRIPT = `
   // DOM 載入後標記元素並通知父視窗
   function onReady() {
     tagEditableElements();
+    tagContainerElements();
+    tagImageElements();
     window.parent.postMessage({ type: 'tc_iframeReady' }, '*');
   }
 
@@ -255,6 +382,10 @@ export default function PreviewPanel({
   const [isSaving, setIsSaving] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
   const [overridesLoaded, setOverridesLoaded] = useState(false)
+
+  // Undo/Redo 歷史
+  const [overrideHistory, setOverrideHistory] = useState<Record<string, Record<string, string>>[]>([{}])
+  const [historyIndex, setHistoryIndex] = useState(0)
 
   // ── 載入後端 HTML ────────────────────────────────
   useEffect(() => {
@@ -416,6 +547,13 @@ export default function PreviewPanel({
     }
     setElementOverrides(newOverrides)
 
+    // 推入 Undo/Redo 歷史（截斷 redo 分支）
+    setOverrideHistory(prev => {
+      const truncated = prev.slice(0, historyIndex + 1)
+      return [...truncated, JSON.parse(JSON.stringify(newOverrides))]
+    })
+    setHistoryIndex(prev => prev + 1)
+
     // 通知 iframe 即時更新 DOM
     if (iframeRef.current?.contentWindow) {
       iframeRef.current.contentWindow.postMessage({
@@ -436,7 +574,78 @@ export default function PreviewPanel({
 
     // 自動保存到後端
     debouncedSave(newOverrides)
-  }, [selectedElement, elementOverrides, debouncedSave])
+  }, [selectedElement, elementOverrides, historyIndex, debouncedSave])
+
+  // ── Undo/Redo ────────────────────────────────────
+  const canUndo = historyIndex > 0
+  const canRedo = historyIndex < overrideHistory.length - 1
+
+  const applyHistoryState = useCallback((overrides: Record<string, Record<string, string>>) => {
+    setElementOverrides(overrides)
+    if (iframeRef.current?.contentWindow) {
+      iframeRef.current.contentWindow.postMessage({
+        type: 'tc_applyOverrides',
+        overrides,
+      }, '*')
+    }
+    debouncedSave(overrides)
+  }, [debouncedSave])
+
+  const handleUndo = useCallback(() => {
+    if (!canUndo) return
+    const newIndex = historyIndex - 1
+    setHistoryIndex(newIndex)
+    applyHistoryState(overrideHistory[newIndex])
+  }, [canUndo, historyIndex, overrideHistory, applyHistoryState])
+
+  const handleRedo = useCallback(() => {
+    if (!canRedo) return
+    const newIndex = historyIndex + 1
+    setHistoryIndex(newIndex)
+    applyHistoryState(overrideHistory[newIndex])
+  }, [canRedo, historyIndex, overrideHistory, applyHistoryState])
+
+  // ── 重置單一元素 ────────────────────────────────
+  const handleResetElement = useCallback((elementId: string) => {
+    const newOverrides = { ...elementOverrides }
+    delete newOverrides[elementId]
+    setElementOverrides(newOverrides)
+
+    // 推入歷史
+    setOverrideHistory(prev => {
+      const truncated = prev.slice(0, historyIndex + 1)
+      return [...truncated, JSON.parse(JSON.stringify(newOverrides))]
+    })
+    setHistoryIndex(prev => prev + 1)
+
+    // 通知 iframe 重置元素
+    if (iframeRef.current?.contentWindow) {
+      iframeRef.current.contentWindow.postMessage({
+        type: 'tc_resetElement',
+        elementId,
+      }, '*')
+    }
+
+    setSelectedElement(null)
+    debouncedSave(newOverrides)
+  }, [elementOverrides, historyIndex, debouncedSave])
+
+  // ── 鍵盤快捷鍵（Cmd+Z / Cmd+Shift+Z）────────────
+  useEffect(() => {
+    if (!editMode) return
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === 'z') {
+        e.preventDefault()
+        if (e.shiftKey) {
+          handleRedo()
+        } else {
+          handleUndo()
+        }
+      }
+    }
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [editMode, handleUndo, handleRedo])
 
   // ── 切換設備 ────────────────────────────────────
   const handleDeviceChange = useCallback((newDevice: DeviceType) => {
@@ -505,31 +714,80 @@ export default function PreviewPanel({
           )}
           {/* 編輯模式按鈕 — 有 HTML 內容時顯示 */}
           {htmlContent && (
-            <motion.button
-              whileHover={{ scale: 1.02 }}
-              whileTap={{ scale: 0.98 }}
-              onClick={handleToggleEditMode}
-              style={{
-                marginLeft: 8,
-                padding: '6px 12px',
-                fontSize: 12,
-                fontWeight: 500,
-                background: editMode ? 'var(--black)' : 'var(--gray-100)',
-                color: editMode ? 'var(--white)' : 'var(--gray-600)',
-                border: 'none',
-                borderRadius: 6,
-                cursor: 'pointer',
-                display: 'flex',
-                alignItems: 'center',
-                gap: 6,
-              }}
-            >
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
-                <path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7" />
-                <path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z" />
-              </svg>
-              {editMode ? '完成編輯' : '編輯模式'}
-            </motion.button>
+            <>
+              <motion.button
+                whileHover={{ scale: 1.02 }}
+                whileTap={{ scale: 0.98 }}
+                onClick={handleToggleEditMode}
+                style={{
+                  marginLeft: 8,
+                  padding: '6px 12px',
+                  fontSize: 12,
+                  fontWeight: 500,
+                  background: editMode ? 'var(--black)' : 'var(--gray-100)',
+                  color: editMode ? 'var(--white)' : 'var(--gray-600)',
+                  border: 'none',
+                  borderRadius: 6,
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 6,
+                }}
+              >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+                  <path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7" />
+                  <path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z" />
+                </svg>
+                {editMode ? '完成編輯' : '編輯模式'}
+              </motion.button>
+              {/* Undo/Redo 按鈕 — 編輯模式時顯示 */}
+              {editMode && (
+                <div style={{ display: 'flex', gap: 2, marginLeft: 4 }}>
+                  <motion.button
+                    whileHover={canUndo ? { scale: 1.1 } : undefined}
+                    whileTap={canUndo ? { scale: 0.9 } : undefined}
+                    onClick={handleUndo}
+                    disabled={!canUndo}
+                    title="復原 (Cmd+Z)"
+                    style={{
+                      padding: 6,
+                      background: 'none',
+                      border: 'none',
+                      cursor: canUndo ? 'pointer' : 'default',
+                      opacity: canUndo ? 1 : 0.3,
+                      display: 'flex',
+                      alignItems: 'center',
+                    }}
+                  >
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--gray-600)" strokeWidth="2" aria-hidden="true">
+                      <path d="M3 10h10a5 5 0 015 5v2" />
+                      <polyline points="7,14 3,10 7,6" />
+                    </svg>
+                  </motion.button>
+                  <motion.button
+                    whileHover={canRedo ? { scale: 1.1 } : undefined}
+                    whileTap={canRedo ? { scale: 0.9 } : undefined}
+                    onClick={handleRedo}
+                    disabled={!canRedo}
+                    title="重做 (Cmd+Shift+Z)"
+                    style={{
+                      padding: 6,
+                      background: 'none',
+                      border: 'none',
+                      cursor: canRedo ? 'pointer' : 'default',
+                      opacity: canRedo ? 1 : 0.3,
+                      display: 'flex',
+                      alignItems: 'center',
+                    }}
+                  >
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--gray-600)" strokeWidth="2" aria-hidden="true">
+                      <path d="M21 10H11a5 5 0 00-5 5v2" />
+                      <polyline points="17,14 21,10 17,6" />
+                    </svg>
+                  </motion.button>
+                </div>
+              )}
+            </>
           )}
         </div>
 
@@ -788,6 +1046,7 @@ export default function PreviewPanel({
                 element={selectedElement}
                 onUpdate={handleElementUpdate}
                 onClose={() => setSelectedElement(null)}
+                onReset={handleResetElement}
               />
             </motion.div>
           )}

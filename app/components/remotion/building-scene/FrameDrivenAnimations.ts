@@ -251,7 +251,7 @@ export function useCastleAnimationValues(frame: number, fps: number): CastleAnim
     extrapolateLeft: 'clamp',
     extrapolateRight: 'clamp',
   })
-  const cameraY = interpolate(camProgress, [0, 0.5, 1], [12, 8, 6])
+  const cameraY = interpolate(camProgress, [0, 0.5, 1], [14, 10, 8])
 
   // 相機環繞角度（完工後慢轉）
   const cameraOrbitAngle = frame >= 880

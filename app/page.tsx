@@ -2141,8 +2141,10 @@ function ChatSection({
                           <TemplatePicker
                             onPreview={handleTemplateSelect}
                             selectedId={selectedTemplateId || undefined}
+                            recommendedIds={message.richContent?.data?.recommendedIds}
+                            initialTemplates={message.richContent?.data?.templates}
                             columns={layoutMode === 'split' ? 1 : 2}
-                            showCategories={false}
+                            showCategories={!message.richContent?.data?.filteredMode}
                           />
                         </motion.div>
                       )}
@@ -2269,7 +2271,7 @@ function ChatSection({
                 if (!hasInput && hasConversation) {
                   return (
                     <motion.button
-                      whileHover={isBusy ? {} : { scale: 1.02 }}
+                      whileHover={isBusy ? {} : { scale: 1.02, backgroundColor: 'var(--gray-100)' }}
                       whileTap={isBusy ? {} : { scale: 0.98 }}
                       onClick={() => { if (!isBusy) handleSendMessage('__go_back__') }}
                       disabled={isBusy}

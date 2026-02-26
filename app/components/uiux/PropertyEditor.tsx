@@ -18,6 +18,25 @@ interface PropertyEditorProps {
 // 可編輯的 CSS 屬性
 type EditableProperty = 'color' | 'backgroundColor' | 'fontSize' | 'fontWeight' | 'padding' | 'margin' | 'borderRadius'
 
+// rgb()/rgba() → hex 轉換
+function rgbToHex(value: string): string {
+  if (value.startsWith('#')) return value
+  const match = value.match(/rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)/)
+  if (!match) return '#000000'
+  const r = parseInt(match[1])
+  const g = parseInt(match[2])
+  const b = parseInt(match[3])
+  return '#' + [r, g, b].map(c => c.toString(16).padStart(2, '0')).join('')
+}
+
+// 解析 padding/margin shorthand（如 "16px 24px"、"8px 16px 8px 16px"）
+function parseSpacingValue(value: string): number {
+  if (!value) return 0
+  // 取第一個數值作為代表值
+  const match = value.match(/(\d+(?:\.\d+)?)/)
+  return match ? parseFloat(match[1]) : 0
+}
+
 const PROPERTY_LABELS: Record<EditableProperty, string> = {
   color: '文字顏色',
   backgroundColor: '背景顏色',
@@ -201,7 +220,7 @@ export default function PropertyEditor({ element, onUpdate, onClose }: PropertyE
           <PropertyGroup title="間距">
             <NumberInput
               label={PROPERTY_LABELS.padding}
-              value={parseInt(editedStyles.padding) || 0}
+              value={parseSpacingValue(editedStyles.padding)}
               unit="px"
               min={0}
               max={100}
@@ -209,7 +228,7 @@ export default function PropertyEditor({ element, onUpdate, onClose }: PropertyE
             />
             <NumberInput
               label={PROPERTY_LABELS.margin}
-              value={parseInt(editedStyles.margin) || 0}
+              value={parseSpacingValue(editedStyles.margin)}
               unit="px"
               min={0}
               max={100}
@@ -273,7 +292,7 @@ function ColorInput({
       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
         <input
           type="color"
-          value={value.startsWith('#') ? value : '#000000'}
+          value={rgbToHex(value)}
           onChange={(e) => onChange(e.target.value)}
           style={{
             width: 24,

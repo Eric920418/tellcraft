@@ -1235,6 +1235,7 @@ export async function generateStructure(
     interactionHint?: string
     templateStyleHint?: string
     layoutMode?: 'app' | 'website'
+    templateOverrides?: Record<string, Record<string, string>>
   },
   trackingContext?: LlmTrackingContext,
   onPartialCode?: PartialCodeCallback
@@ -1460,12 +1461,59 @@ ${templateStyleHint}
 `
     : ''
 
+  // 用戶模板編輯覆蓋（PreviewPanel 中的自訂修改）
+  const overrides = productContext?.templateOverrides
+  let overridesSection = ''
+  if (overrides && Object.keys(overrides).length > 0) {
+    const textChanges: string[] = []
+    const colorChanges: string[] = []
+    const fontChanges: string[] = []
+    const spacingChanges: string[] = []
+
+    for (const [elementId, changes] of Object.entries(overrides)) {
+      // elementId 格式: "h1-0", "p-2", "button-1" → 轉為自然語言
+      const match = elementId.match(/^([a-z]+\d?)-(\d+)$/)
+      const tagName = match ? match[1].toUpperCase() : elementId
+      const index = match ? parseInt(match[2]) + 1 : 0
+      const desc = index > 0 ? `第 ${index} 個 ${tagName} 元素` : `${tagName} 元素`
+
+      for (const [prop, value] of Object.entries(changes)) {
+        if (prop === 'text') {
+          textChanges.push(`- ${desc}的文字改為：「${value}」`)
+        } else if (prop === 'color' || prop === 'backgroundColor') {
+          const propLabel = prop === 'color' ? '文字顏色' : '背景顏色'
+          colorChanges.push(`- ${desc}的${propLabel}改為 ${value}`)
+        } else if (prop === 'fontSize' || prop === 'fontWeight') {
+          const propLabel = prop === 'fontSize' ? '字體大小' : '字重'
+          fontChanges.push(`- ${desc}的${propLabel}改為 ${value}`)
+        } else {
+          spacingChanges.push(`- ${desc}的 ${prop} 改為 ${value}`)
+        }
+      }
+    }
+
+    const sections: string[] = []
+    if (textChanges.length) sections.push(`### 文字客製化\n${textChanges.join('\n')}`)
+    if (colorChanges.length) sections.push(`### 色彩客製化\n${colorChanges.join('\n')}`)
+    if (fontChanges.length) sections.push(`### 字體客製化\n${fontChanges.join('\n')}`)
+    if (spacingChanges.length) sections.push(`### 間距/樣式客製化\n${spacingChanges.join('\n')}`)
+
+    overridesSection = `## 用戶自訂修改（必須遵守 — 用戶在模板預覽中明確指定的修改）
+以下修改是用戶在模板編輯模式中親自調整的，代碼生成時必須完整保留這些自訂內容。
+
+${sections.join('\n\n')}
+
+**注意**：這些修改是用戶的明確意圖，優先級高於模板預設值和 Design System。
+`
+  }
+
   const userMessage = `請根據以下資訊生成桌面版前端代碼，包含完整互動功能。
 
 ${conceptSection}
 ${productSection}
 ${designSection}
 ${briefSection}
+${overridesSection}
 ${templateStyleSection}
 ${requirementsSection}
 ${interactionSection}

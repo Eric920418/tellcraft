@@ -7,7 +7,7 @@ import { useThree } from '@react-three/fiber'
 import { useEffect } from 'react'
 import { useCastleAnimationValues } from './FrameDrivenAnimations'
 
-const BASE_RADIUS = 11
+const BASE_RADIUS = 14
 
 export default function CameraController() {
   const frame = useCurrentFrame()
