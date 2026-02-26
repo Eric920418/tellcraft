@@ -5,7 +5,7 @@
 import { useCurrentFrame, useVideoConfig, spring, interpolate, AbsoluteFill } from 'remotion'
 import { BOUNCY, SNAPPY, SMOOTH, HEAVY } from '../shared/springs'
 import { pulse } from '../shared/utils'
-import { ROUND_LABELS, ROUND_COLORS } from './constants'
+// ROUND_LABELS, ROUND_COLORS 已移至 BuildingPlayer 外層 overlay
 
 interface BuildingFallback2DProps {
   round?: number
@@ -23,7 +23,6 @@ export default function BuildingFallback2D({
   const frame = useCurrentFrame()
   const { fps } = useVideoConfig()
 
-  const percent = totalQuestions > 0 ? Math.round((progress / totalQuestions) * 100) : 0
   const layers = Math.ceil((progress / totalQuestions) * 6)
 
   // Layer 1: 地基 + 護城河
@@ -49,7 +48,8 @@ export default function BuildingFallback2D({
   const glowPulse = layers >= 6 ? pulse(frame, 0.08, 0.4, 1) : 0
   const treeScale = layers >= 6 ? spring({ frame: Math.max(0, frame - 60), fps, config: BOUNCY }) : 0
 
-  const workingOpacity = isWorking ? pulse(frame, 0.07, 0.5, 1) : 0
+  // workingOpacity 已移至 BuildingPlayer 外層 overlay
+  void isWorking
 
   // 天空漸變背景
   const skyProgress = interpolate(layers, [0, 6], [0, 1], { extrapolateLeft: 'clamp', extrapolateRight: 'clamp' })
@@ -264,61 +264,7 @@ export default function BuildingFallback2D({
         )}
       </div>
 
-      {/* 輪次指示 */}
-      <div style={{ display: 'flex', gap: 6, alignItems: 'center', zIndex: 1 }}>
-        {ROUND_LABELS.map((label, i) => (
-          <div key={label} style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-            <div style={{
-              width: 8,
-              height: 8,
-              borderRadius: '50%',
-              background: i < round ? ROUND_COLORS[i] : 'rgba(255,255,255,0.3)',
-            }} />
-            <span style={{
-              fontSize: 11,
-              color: i < round ? 'rgba(255,255,255,0.9)' : 'rgba(255,255,255,0.4)',
-              fontWeight: i === round - 1 ? 600 : 400,
-            }}>
-              {label}
-            </span>
-          </div>
-        ))}
-      </div>
-
-      {/* 進度文字 */}
-      <div style={{ textAlign: 'center', zIndex: 1 }}>
-        <p style={{ fontSize: 13, color: 'rgba(255,255,255,0.7)', margin: 0 }}>
-          {progress}/{totalQuestions} 題完成
-        </p>
-        {isWorking && (
-          <p style={{
-            fontSize: 12,
-            color: '#93c5fd',
-            margin: '4px 0 0',
-            opacity: workingOpacity,
-          }}>
-            AI 分析中...
-          </p>
-        )}
-      </div>
-
-      {/* 底部進度條 */}
-      <div style={{
-        width: '100%',
-        maxWidth: 280,
-        height: 4,
-        borderRadius: 2,
-        background: 'rgba(255,255,255,0.15)',
-        overflow: 'hidden',
-        zIndex: 1,
-      }}>
-        <div style={{
-          height: '100%',
-          borderRadius: 2,
-          background: '#60a5fa',
-          width: `${percent}%`,
-        }} />
-      </div>
+      {/* 進度 overlay 已移至 BuildingPlayer 外層（直接用 React props，即時更新） */}
     </AbsoluteFill>
   )
 }

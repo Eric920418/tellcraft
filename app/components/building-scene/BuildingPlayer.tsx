@@ -4,12 +4,13 @@ import { useRef, useEffect, useState, useMemo, useCallback } from 'react'
 import { Player, type PlayerRef } from '@remotion/player'
 import BuildingComposition from '../remotion/building-scene/BuildingComposition'
 import BuildingFallback2D from '../remotion/building-scene/BuildingFallback2D'
-import { FPS, TOTAL_FRAMES } from '../remotion/building-scene/constants'
+import { FPS, TOTAL_FRAMES, ROUND_LABELS, ROUND_COLORS } from '../remotion/building-scene/constants'
 
 // ============================================================
 // Building Player 包裝器
 // 動畫跟隨用戶回答逐步推進：每答一題播放 30 幀後暫停
 // compositionWidth/Height 動態匹配容器，消除 letterbox 黑邊
+// 進度 overlay 在此層渲染（直接用 React props，即時更新）
 // ============================================================
 
 interface BuildingPlayerProps {
@@ -74,7 +75,7 @@ export default function BuildingPlayer({
     }
   }, [])
 
-  // 註冊 frameupdate 事件監聽器
+  // 註冊 frameupdate 事件監聯器
   useEffect(() => {
     const player = playerRef.current
     if (!player) return
@@ -146,10 +147,65 @@ export default function BuildingPlayer({
   const compW = containerSize?.w ?? 1280
   const compH = containerSize?.h ?? 720
 
+  // 進度計算（直接用 React props，即時更新）
+  const percent = totalQuestions > 0 ? Math.round((progress / totalQuestions) * 100) : 0
+
+  // 進度 overlay（在 Player 外層，不依賴 Remotion inputProps）
+  const progressOverlay = (
+    <div style={{
+      position: 'absolute',
+      bottom: 16,
+      left: 0,
+      right: 0,
+      display: 'flex',
+      flexDirection: 'column',
+      alignItems: 'center',
+      gap: 8,
+      pointerEvents: 'none',
+      zIndex: 10,
+    }}>
+      {/* 輪次標籤 */}
+      <div style={{
+        display: 'flex',
+        gap: 4,
+        padding: '6px 12px',
+        background: 'rgba(0,0,0,0.35)',
+        borderRadius: 20,
+        backdropFilter: 'blur(8px)',
+      }}>
+        {ROUND_LABELS.map((label, i) => (
+          <span key={label} style={{
+            fontSize: 11,
+            padding: '2px 8px',
+            borderRadius: 10,
+            background: i < round ? ROUND_COLORS[i] : 'transparent',
+            color: i < round ? 'white' : 'rgba(255,255,255,0.4)',
+            fontWeight: i === round - 1 ? 600 : 400,
+          }}>
+            {label}
+          </span>
+        ))}
+      </div>
+
+      {/* 進度文字 */}
+      <div style={{
+        fontSize: 12,
+        color: 'rgba(255,255,255,0.85)',
+        background: 'rgba(0,0,0,0.3)',
+        padding: '4px 12px',
+        borderRadius: 12,
+        backdropFilter: 'blur(4px)',
+      }}>
+        {progress}/{totalQuestions} 題完成 · {percent}%
+        {isWorking && ' · AI 分析中...'}
+      </div>
+    </div>
+  )
+
   if (!webglOk) {
     // 2D Remotion fallback（同樣邏輯：不 autoPlay，由 frameupdate 控制）
     return (
-      <div ref={containerRef} style={{ height: '100%', width: '100%', overflow: 'hidden' }}>
+      <div ref={containerRef} style={{ height: '100%', width: '100%', position: 'relative', overflow: 'hidden' }}>
         {containerSize && (
           <Player
             ref={playerRef}
@@ -166,6 +222,7 @@ export default function BuildingPlayer({
             clickToPlay={false}
           />
         )}
+        {progressOverlay}
       </div>
     )
   }
@@ -188,6 +245,7 @@ export default function BuildingPlayer({
           clickToPlay={false}
         />
       )}
+      {progressOverlay}
     </div>
   )
 }

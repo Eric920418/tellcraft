@@ -2261,26 +2261,27 @@ function ChatSection({
                 onBlur={(e) => e.currentTarget.style.borderColor = 'var(--border-color)'}
               />
               {(() => {
-                const lastMsg = messages[messages.length - 1]
-                const backtrackStages = ['clarify_question', 'clarify_revert', 'uiux_design_clarify', 'uiux_design_preference', 'uiux_template_picker', 'uiux_design_brief_confirm', 'uiux_variants_ready']
-                const canGoBack = !isTyping && !sendCooldown && !isInitializing && sessionInfo && lastMsg?.role === 'assistant' && backtrackStages.includes(lastMsg?.stage || '')
-                const showGoBack = !deferredInput.trim() && canGoBack
+                const hasInput = !!deferredInput.trim()
+                const hasConversation = messages.length > 0 && sessionInfo
+                const isBusy = isTyping || sendCooldown || isInitializing || !sessionInfo
 
-                if (showGoBack) {
+                // 沒打字 + 有對話 → 上一步按鈕
+                if (!hasInput && hasConversation) {
                   return (
                     <motion.button
-                      whileHover={{ scale: 1.02 }}
-                      whileTap={{ scale: 0.98 }}
-                      onClick={() => handleSendMessage('__go_back__')}
+                      whileHover={isBusy ? {} : { scale: 1.02 }}
+                      whileTap={isBusy ? {} : { scale: 0.98 }}
+                      onClick={() => { if (!isBusy) handleSendMessage('__go_back__') }}
+                      disabled={isBusy}
                       style={{
                         padding: layoutMode === 'split' ? '0 16px' : '0 20px',
                         height: layoutMode === 'split' ? 40 : 48,
                         fontSize: layoutMode === 'split' ? 13 : 14,
                         fontWeight: 500,
                         border: '1px solid var(--border-color)',
-                        background: 'var(--white)',
-                        color: 'var(--gray-600)',
-                        cursor: 'pointer',
+                        background: isBusy ? 'var(--gray-100)' : 'var(--white)',
+                        color: isBusy ? 'var(--gray-300)' : 'var(--gray-600)',
+                        cursor: isBusy ? 'not-allowed' : 'pointer',
                         transition: 'all 0.2s ease',
                         flexShrink: 0,
                       }}
@@ -2290,22 +2291,22 @@ function ChatSection({
                   )
                 }
 
-                const isDisabled = !deferredInput.trim() || isTyping || sendCooldown || isInitializing || !sessionInfo
+                // 有打字 → 送出按鈕
                 return (
                   <motion.button
-                    whileHover={{ scale: 1.02 }}
-                    whileTap={{ scale: 0.98 }}
+                    whileHover={isBusy ? {} : { scale: 1.02 }}
+                    whileTap={isBusy ? {} : { scale: 0.98 }}
                     onClick={handleSend}
-                    disabled={isDisabled}
+                    disabled={!hasInput || isBusy}
                     style={{
                       padding: layoutMode === 'split' ? '0 20px' : '0 28px',
                       height: layoutMode === 'split' ? 40 : 48,
                       fontSize: layoutMode === 'split' ? 13 : 14,
                       fontWeight: 500,
                       border: '1px solid var(--black)',
-                      background: isDisabled ? 'var(--gray-100)' : 'var(--black)',
-                      color: isDisabled ? 'var(--gray-400)' : 'var(--white)',
-                      cursor: isDisabled ? 'not-allowed' : 'pointer',
+                      background: !hasInput || isBusy ? 'var(--gray-100)' : 'var(--black)',
+                      color: !hasInput || isBusy ? 'var(--gray-400)' : 'var(--white)',
+                      cursor: !hasInput || isBusy ? 'not-allowed' : 'pointer',
                       transition: 'all 0.2s ease',
                       flexShrink: 0,
                     }}
@@ -2616,9 +2617,9 @@ function ChatSection({
     const isBddSplitMode = messages.some(m =>
       m.stage === 'clarify_question' || m.stage === 'prd_discovery_continue' || m.stage === 'prd_discovery_complete'
     ) && !messages.some(m => m.stage?.startsWith('uiux') || m.richContent?.type === 'code_preview')
-    const bddChatWidth = isBddSplitMode ? 680 : 420
-    const bddMinChatWidth = isBddSplitMode ? 560 : 320
-    const bddMaxChatWidth = isBddSplitMode ? 880 : 600
+    const bddChatWidth = isBddSplitMode ? 780 : 420
+    const bddMinChatWidth = isBddSplitMode ? 640 : 320
+    const bddMaxChatWidth = isBddSplitMode ? 1100 : 600
 
     return (
       <motion.div

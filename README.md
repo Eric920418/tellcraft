@@ -23,13 +23,15 @@ Tellcraft 是一個 AI 驅動的自動化開發平台。用戶只需描述需求
 1. 城堡動畫掛載即 `autoPlay` 一次播完 900 幀，用戶還沒回答就看到完整城堡
 2. 用戶回答問題後右側面板閃爍變成「選擇一個模板以預覽」（`isBddClarify` 只看 `latestMsg`，用戶消息沒 stage → fallthrough）
 3. BDD 聊天窗口太窄，動畫不是滿高
+4. 進度文字（N/M 題完成）卡在固定值不更新（overlay 在 Remotion Composition 內部，依賴 inputProps）
+5. 上下黑邊（Remotion Player 固定 16:9 在高容器中 letterbox）
 
 **修復**：
-- **BuildingPlayer.tsx**：移除 `autoPlay`，改用 `frameupdate` 事件監聽 + `targetFrameRef` 控制播放。每答一題播放 30 幀後暫停，全部完成後 loop 煙火。頁面刷新直接 seekTo 已完成幀
-- **page.tsx `renderPreviewPanel()`**：`isBddClarify` 改為 `hasBddStage`（`messages.some()` 判斷），不再只看最後一條消息。`isLLMWorking`/`isQAComplete` 改查最後一條 assistant 消息。移除「需求建構進度」header，動畫滿高
-- **page.tsx 佈局**：BDD 聊天面板加寬（560→680 預設，480→560 最小，720→880 最大）
+- **BuildingPlayer.tsx**：移除 `autoPlay`，改用 `frameupdate` + `targetFrameRef` 控制。`ResizeObserver` 動態 compositionWidth/Height 消除黑邊。進度 overlay 移到 Player 外層用 React props 即時更新
+- **BuildingComposition.tsx / BuildingFallback2D.tsx**：移除內部 UI overlay，只保留場景
+- **page.tsx**：`hasBddStage`（`messages.some()`）取代 `latestMsg` 判斷。BDD 聊天加寬至 55%
 
-**改動檔案**：`app/components/building-scene/BuildingPlayer.tsx`、`app/page.tsx`
+**改動檔案**：`BuildingPlayer.tsx`、`BuildingComposition.tsx`、`BuildingFallback2D.tsx`、`page.tsx`
 
 ### 防刷訊息：三層防護（2026-02-26）
 
