@@ -25,9 +25,9 @@ interface SandpackPreviewProps {
   // 編輯模式 props
   editMode?: boolean
   onElementSelected?: (element: ElementInfo | null) => void
-  pendingUpdate?: { elementId: string; changes: Record<string, string>; ts: number } | null
-  pendingReset?: { elementId: string; ts: number } | null
-  pendingOverrides?: { overrides: Record<string, Record<string, string>>; ts: number } | null
+  pendingUpdate?: { elementId: string; changes: Record<string, string>; seq: number } | null
+  pendingReset?: { elementId: string; seq: number } | null
+  pendingOverrides?: { overrides: Record<string, Record<string, string>>; seq: number } | null
 }
 
 /**
@@ -109,6 +109,10 @@ export default function SandpackPreview({
   const effectiveEditMode = editMode && !isStreaming
 
   // ── 同步 editMode 到 iframe ──
+  // 用 ref 追蹤最新值，避免 message listener 中的 stale closure
+  const effectiveEditModeRef = useRef(effectiveEditMode)
+  effectiveEditModeRef.current = effectiveEditMode
+
   useEffect(() => {
     if (!iframeRef.current?.contentWindow) return
     iframeRef.current.contentWindow.postMessage({
@@ -117,7 +121,8 @@ export default function SandpackPreview({
     }, '*')
   }, [effectiveEditMode])
 
-  // ── 監聽 iframe postMessage ──
+  // ── 監聯 iframe postMessage ──
+  // 所有回調都用 ref，listener 只掛一次，避免 stale closure + 重新訂閱間隙
   const onElementSelectedRef = useRef(onElementSelected)
   onElementSelectedRef.current = onElementSelected
 
@@ -127,12 +132,18 @@ export default function SandpackPreview({
       if (!msg || typeof msg.type !== 'string' || !msg.type.startsWith('tc_')) return
 
       if (msg.type === 'tc_iframeReady') {
-        // HMR 重建後重新同步 editMode
-        if (iframeRef.current?.contentWindow) {
-          iframeRef.current.contentWindow.postMessage({
+        // 用 e.source（即 iframe contentWindow），避免 iframeRef 尚未被 polling 填入
+        const source = e.source as Window | null
+        if (source) {
+          source.postMessage({
             type: 'tc_setEditMode',
-            enabled: effectiveEditMode,
+            enabled: effectiveEditModeRef.current,
           }, '*')
+        }
+        // 同時更新 iframeRef（補足 polling 的時間差）
+        if (containerRef.current) {
+          const iframe = containerRef.current.querySelector('iframe')
+          if (iframe) iframeRef.current = iframe
         }
       }
 
@@ -147,7 +158,7 @@ export default function SandpackPreview({
 
     window.addEventListener('message', handleMessage)
     return () => window.removeEventListener('message', handleMessage)
-  }, [effectiveEditMode])
+  }, []) // 只掛一次，內部全用 ref 取最新值
 
   // ── pendingUpdate → postMessage tc_applyUpdate ──
   useEffect(() => {

@@ -993,9 +993,10 @@ function ChatSection({
   const [codePreviewOverrides, setCodePreviewOverrides] = useState<Record<string, Record<string, string>>>({})
   const [codePreviewOverrideHistory, setCodePreviewOverrideHistory] = useState<Record<string, Record<string, string>>[]>([{}])
   const [codePreviewHistoryIndex, setCodePreviewHistoryIndex] = useState(0)
-  const [codePreviewPendingUpdate, setCodePreviewPendingUpdate] = useState<{ elementId: string; changes: Record<string, string>; ts: number } | null>(null)
-  const [codePreviewPendingReset, setCodePreviewPendingReset] = useState<{ elementId: string; ts: number } | null>(null)
-  const [codePreviewPendingOverrides, setCodePreviewPendingOverrides] = useState<{ overrides: Record<string, Record<string, string>>; ts: number } | null>(null)
+  const codePreviewSeqRef = useRef(0) // 遞增計數器（取代 Date.now()，避免同毫秒批次更新不觸發 effect）
+  const [codePreviewPendingUpdate, setCodePreviewPendingUpdate] = useState<{ elementId: string; changes: Record<string, string>; seq: number } | null>(null)
+  const [codePreviewPendingReset, setCodePreviewPendingReset] = useState<{ elementId: string; seq: number } | null>(null)
+  const [codePreviewPendingOverrides, setCodePreviewPendingOverrides] = useState<{ overrides: Record<string, Record<string, string>>; seq: number } | null>(null)
 
   // Code Preview 容器尺寸追蹤（用於 iframe 縮放）
   useEffect(() => {
@@ -1024,7 +1025,7 @@ function ChatSection({
     setCodePreviewHistoryIndex(prev => prev + 1)
 
     // 設置 pendingUpdate → SandpackPreview → postMessage
-    setCodePreviewPendingUpdate({ elementId, changes, ts: Date.now() })
+    setCodePreviewPendingUpdate({ elementId, changes, seq: ++codePreviewSeqRef.current })
 
     // 同步 selectedElement 狀態
     if (codePreviewSelectedElement && codePreviewSelectedElement.id === elementId) {
@@ -1047,7 +1048,7 @@ function ChatSection({
     })
     setCodePreviewHistoryIndex(prev => prev + 1)
 
-    setCodePreviewPendingReset({ elementId, ts: Date.now() })
+    setCodePreviewPendingReset({ elementId, seq: ++codePreviewSeqRef.current })
     setCodePreviewSelectedElement(null)
   }, [codePreviewOverrides, codePreviewHistoryIndex])
 
@@ -1061,7 +1062,7 @@ function ChatSection({
     const overrides = codePreviewOverrideHistory[newIndex]
     setCodePreviewOverrides(overrides)
     // 全量覆蓋 iframe DOM（undo 需要重建整個狀態）
-    setCodePreviewPendingOverrides({ overrides, ts: Date.now() })
+    setCodePreviewPendingOverrides({ overrides, seq: ++codePreviewSeqRef.current })
   }, [codePreviewCanUndo, codePreviewHistoryIndex, codePreviewOverrideHistory])
 
   const handleCodePreviewRedo = useCallback(() => {
@@ -1070,7 +1071,7 @@ function ChatSection({
     setCodePreviewHistoryIndex(newIndex)
     const overrides = codePreviewOverrideHistory[newIndex]
     setCodePreviewOverrides(overrides)
-    setCodePreviewPendingOverrides({ overrides, ts: Date.now() })
+    setCodePreviewPendingOverrides({ overrides, seq: ++codePreviewSeqRef.current })
   }, [codePreviewCanRedo, codePreviewHistoryIndex, codePreviewOverrideHistory])
 
   // Code Preview 圖片上傳（複用 ChatSection 的 auth hook）

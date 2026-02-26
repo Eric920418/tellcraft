@@ -120,12 +120,15 @@ if (typeof window !== 'undefined' && !window.__tcEditBridgeInitialized) {
 
   var editMode = false;
   var selectedId = null;
+  // 全局計數器：避免 MutationObserver 重新 tag 時 id 衝突
+  // （每次呼叫 tag*() 時，已有 data-editable 的元素會被 skip，
+  //   但新增的動態元素從 local count=0 重新計數會與舊元素碰撞）
+  var globalCounts = {};
 
   // 自動標記可編輯元素（文字類）
   function tagEditableElements() {
     var selectors = 'h1, h2, h3, h4, h5, h6, p, button, a, span, li, label, figcaption, blockquote, dt, dd';
     var elements = document.querySelectorAll(selectors);
-    var counts = {};
 
     elements.forEach(function(el) {
       var text = (el.textContent || '').trim();
@@ -139,11 +142,11 @@ if (typeof window !== 'undefined' && !window.__tcEditBridgeInitialized) {
       }
 
       var tag = el.tagName.toLowerCase();
-      counts[tag] = (counts[tag] || 0);
-      el.setAttribute('data-editable', tag + '-' + counts[tag]);
+      globalCounts[tag] = (globalCounts[tag] || 0);
+      el.setAttribute('data-editable', tag + '-' + globalCounts[tag]);
       el.setAttribute('data-editable-type', 'text');
       el.setAttribute('data-original-text', el.textContent || '');
-      counts[tag]++;
+      globalCounts[tag]++;
     });
   }
 
@@ -151,7 +154,6 @@ if (typeof window !== 'undefined' && !window.__tcEditBridgeInitialized) {
   function tagContainerElements() {
     var selectors = 'section, header, footer, nav, main, article, aside, div.hero, div.card, div.container';
     var elements = document.querySelectorAll(selectors);
-    var counts = {};
 
     elements.forEach(function(el) {
       if (el.closest('script, style, noscript, svg')) return;
@@ -160,27 +162,27 @@ if (typeof window !== 'undefined' && !window.__tcEditBridgeInitialized) {
 
       var tag = el.tagName.toLowerCase();
       var key = 'container-' + tag;
-      counts[key] = (counts[key] || 0);
-      el.setAttribute('data-editable', key + '-' + counts[key]);
+      globalCounts[key] = (globalCounts[key] || 0);
+      el.setAttribute('data-editable', key + '-' + globalCounts[key]);
       el.setAttribute('data-editable-type', 'container');
-      counts[key]++;
+      globalCounts[key]++;
     });
   }
 
   // 標記圖片元素
   function tagImageElements() {
     var images = document.querySelectorAll('img');
-    var count = 0;
 
     images.forEach(function(el) {
       if (el.closest('script, style, noscript, svg')) return;
       if (el.getAttribute('data-editable')) return;
 
-      el.setAttribute('data-editable', 'img-' + count);
+      globalCounts['img'] = (globalCounts['img'] || 0);
+      el.setAttribute('data-editable', 'img-' + globalCounts['img']);
       el.setAttribute('data-editable-type', 'image');
       el.setAttribute('data-original-src', el.src || '');
       el.setAttribute('data-original-alt', el.alt || '');
-      count++;
+      globalCounts['img']++;
     });
   }
 
