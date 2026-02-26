@@ -488,8 +488,11 @@ textarea {
     display: none;
   }
 
-  /* 隱藏用戶名稱 */
-  .chat-header .user-name {
+  /* 隱藏用戶名稱、儀表板按鈕、主題切換、頭像 */
+  .chat-header .user-name,
+  .chat-header .header-dashboard-btn,
+  .chat-header .header-theme-toggle,
+  .chat-header .header-avatar {
     display: none;
   }
 

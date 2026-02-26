@@ -2810,7 +2810,7 @@ function ChatSection({
             {/* 右側：主題切換 + 用戶資訊 */}
             <div style={{ display: 'flex', alignItems: 'center', gap: 16, flexShrink: 0 }}>
               {/* 主題切換 */}
-              <AnimatedThemeToggler />
+              <span className="header-theme-toggle"><AnimatedThemeToggler /></span>
               {/* 用戶資訊 - 優先使用 VPS auth 狀態 */}
               <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
                 {(auth.isAuthenticated || sessionInfo?.isAuthenticated) ? (
@@ -2818,6 +2818,7 @@ function ChatSection({
                     {(auth.user?.avatarUrl || sessionInfo?.user?.avatarUrl) && (
                       /* eslint-disable-next-line @next/next/no-img-element */
                       <img
+                        className="header-avatar"
                         src={auth.user?.avatarUrl || sessionInfo?.user?.avatarUrl}
                         alt=""
                         style={{
@@ -2831,9 +2832,11 @@ function ChatSection({
                     <span className="user-name" style={{ fontSize: 13, color: 'var(--gray-600)' }}>
                       {auth.user?.name || sessionInfo?.user?.name || auth.user?.email?.split('@')[0] || sessionInfo?.user?.email?.split('@')[0] || '用戶'}
                     </span>
-                    <GlowButton onClick={handleDashboard} variant="outline" size="sm">
-                      儀表板
-                    </GlowButton>
+                    <span className="header-dashboard-btn">
+                      <GlowButton onClick={handleDashboard} variant="outline" size="sm">
+                        儀表板
+                      </GlowButton>
+                    </span>
                   </>
                 ) : (
                   <GlowButton onClick={handleLogin} variant="outline" size="sm">

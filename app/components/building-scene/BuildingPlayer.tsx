@@ -91,6 +91,7 @@ export default function BuildingPlayer({
   }, [handleFrameUpdate, webglOk, containerSize])
 
   // progress 變化：計算目標幀並播放
+  // containerSize 在依賴中確保 Player 渲染後 effect 重跑（頁面刷新時 Player 晚於 progress 出現）
   useEffect(() => {
     const player = playerRef.current
     if (!player) return
@@ -117,7 +118,7 @@ export default function BuildingPlayer({
     }
 
     prevProgressRef.current = progress
-  }, [progress])
+  }, [progress, containerSize])
 
   // isComplete 變化：完成時解除暫停限制，讓動畫播完 + loop
   useEffect(() => {
@@ -130,7 +131,7 @@ export default function BuildingPlayer({
       targetFrameRef.current = TOTAL_FRAMES - 1
       player.play()
     }
-  }, [isComplete])
+  }, [isComplete, containerSize])
 
   const inputProps = useMemo(() => ({
     isWorking,
