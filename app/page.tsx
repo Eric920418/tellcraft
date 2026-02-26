@@ -2753,6 +2753,8 @@ function ChatSection({
                 <span className="back-text">返回</span>
               </button>
               <div className="header-divider" style={{ width: 1, height: 24, background: 'var(--border-color)' }} />
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src="/logo.png" alt="Tellcraft" width={24} height={24} style={{ borderRadius: 4 }} />
               <span className="header-logo" style={{ fontSize: 15, fontWeight: 500, letterSpacing: '-0.01em' }}>
                 Tellcraft
               </span>
@@ -3895,7 +3897,11 @@ function Footer() {
           marginBottom: 48,
         }}>
           <div>
-            <div style={{ fontSize: 16, fontWeight: 500, marginBottom: 16 }}>Tellcraft</div>
+            <div style={{ fontSize: 16, fontWeight: 500, marginBottom: 16, display: 'flex', alignItems: 'center', gap: 8 }}>
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src="/logo.png" alt="Tellcraft" width={24} height={24} style={{ borderRadius: 4 }} />
+              <span>Tellcraft</span>
+            </div>
             <p style={{ fontSize: 13, color: 'var(--gray-500)', lineHeight: 1.6 }}>
               AI 驅動的自動化開發平台。<br />
               用對話打造你的軟體產品。

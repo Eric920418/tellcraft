@@ -2383,6 +2383,8 @@ import { SpecGenerationView } from '@/app/components/SpecGenerationView'
 
 ```
 app/
+├── icon.png           # Favicon（192x192，Next.js App Router 自動載入）
+├── apple-icon.png     # Apple Touch Icon（180x180）
 ├── actions/           # Server Actions（API 封裝）
 │   ├── index.ts       # 核心 + Chat + Auth Actions
 │   └── admin.ts       # 管理員 Actions

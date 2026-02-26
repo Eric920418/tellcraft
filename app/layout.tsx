@@ -5,6 +5,9 @@ import './globals.css'
 export const metadata: Metadata = {
   title: 'Tellcraft',
   description: 'Tellcraft - AI-driven automation platform for developers 泰爾工藝 用對話打造你的軟體產品',
+  openGraph: {
+    images: ['/logo.png'],
+  },
 }
 
 export default function RootLayout({

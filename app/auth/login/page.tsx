@@ -59,6 +59,8 @@ function LoginContent() {
       >
         {/* Header */}
         <div style={{ textAlign: 'center', marginBottom: 40 }}>
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src="/logo.png" alt="Tellcraft" width={48} height={48} style={{ borderRadius: 8, marginBottom: 16 }} />
           <h1
             style={{
               fontSize: 24,

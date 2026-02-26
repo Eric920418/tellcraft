@@ -86,7 +86,8 @@
       "Bash(gh issue:*)",
       "Bash(gh pr:*)",
       "Bash(tail:*)",
-      "Bash(npx eslint:*)"
+      "Bash(npx eslint:*)",
+      "Bash(sips:*)"
     ]
   }
 }

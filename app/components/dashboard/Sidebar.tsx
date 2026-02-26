@@ -66,6 +66,9 @@ export default function Sidebar({ isAdmin = false, user, className = '' }: Sideb
         <Link
           href="/"
           style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 8,
             fontSize: 18,
             fontWeight: 600,
             letterSpacing: '-0.02em',
@@ -73,6 +76,8 @@ export default function Sidebar({ isAdmin = false, user, className = '' }: Sideb
             textDecoration: 'none',
           }}
         >
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src="/logo.png" alt="Tellcraft" width={24} height={24} style={{ borderRadius: 4 }} />
           Tellcraft
         </Link>
       </div>
