@@ -260,6 +260,42 @@ if (typeof window !== 'undefined' && !window.__tcEditBridgeInitialized) {
     return base;
   }
 
+  // 套用 changes 到單一元素（共用邏輯）
+  function applyChangesToElement(el, changes) {
+    if (changes.text !== undefined) {
+      el.textContent = changes.text;
+    }
+    if (changes.imgSrc !== undefined && el.tagName === 'IMG') {
+      el.src = changes.imgSrc;
+    }
+    if (changes.imgAlt !== undefined && el.tagName === 'IMG') {
+      el.alt = changes.imgAlt;
+    }
+    Object.keys(changes).forEach(function(key) {
+      if (key !== 'text' && key !== 'imgSrc' && key !== 'imgAlt') {
+        el.style[key] = changes[key];
+      }
+    });
+  }
+
+  // 重新套用所有已儲存的覆蓋（React re-render 後呼叫）
+  function reapplyStoredOverrides() {
+    Object.keys(storedOverrides).forEach(function(elementId) {
+      var el = document.querySelector('[data-editable="' + elementId + '"]');
+      if (!el) return;
+      applyChangesToElement(el, storedOverrides[elementId]);
+    });
+  }
+
+  // fullRetag：清除 → 重新標記 → 重新套用覆蓋
+  function fullRetag() {
+    clearAllTags();
+    tagEditableElements();
+    tagContainerElements();
+    tagImageElements();
+    reapplyStoredOverrides();
+  }
+
   // 注入編輯模式高亮樣式
   var styleEl = document.createElement('style');
   styleEl.id = 'edit-bridge-styles';
@@ -342,48 +378,46 @@ if (typeof window !== 'undefined' && !window.__tcEditBridgeInitialized) {
       var el = document.querySelector('[data-editable="' + msg.elementId + '"]');
       if (!el) return;
       var changes = msg.changes;
-      if (changes.text !== undefined) {
-        el.textContent = changes.text;
-      }
-      if (changes.imgSrc !== undefined && el.tagName === 'IMG') {
-        el.src = changes.imgSrc;
-      }
-      if (changes.imgAlt !== undefined && el.tagName === 'IMG') {
-        el.alt = changes.imgAlt;
-      }
-      Object.keys(changes).forEach(function(key) {
-        if (key !== 'text' && key !== 'imgSrc' && key !== 'imgAlt') {
-          el.style[key] = changes[key];
-        }
+      // 存入 storedOverrides（合併到已有的覆蓋）
+      if (!storedOverrides[msg.elementId]) storedOverrides[msg.elementId] = {};
+      Object.keys(changes).forEach(function(k) {
+        storedOverrides[msg.elementId][k] = changes[k];
       });
+      applyChangesToElement(el, changes);
     }
 
     if (msg.type === 'tc_applyOverrides') {
+      // undo/redo：全量替換 storedOverrides，先重置所有元素再套用
       var overrides = msg.overrides;
-      Object.keys(overrides).forEach(function(elementId) {
+      // 重置舊 overrides 中的元素
+      Object.keys(storedOverrides).forEach(function(elementId) {
         var el = document.querySelector('[data-editable="' + elementId + '"]');
         if (!el) return;
-        var changes = overrides[elementId];
-        if (changes.text !== undefined) {
-          el.textContent = changes.text;
+        var origText = el.getAttribute('data-original-text');
+        if (origText !== null) el.textContent = origText;
+        if (el.tagName === 'IMG') {
+          var origSrc = el.getAttribute('data-original-src');
+          var origAlt = el.getAttribute('data-original-alt');
+          if (origSrc !== null) el.src = origSrc;
+          if (origAlt !== null) el.alt = origAlt;
         }
-        if (changes.imgSrc !== undefined && el.tagName === 'IMG') {
-          el.src = changes.imgSrc;
-        }
-        if (changes.imgAlt !== undefined && el.tagName === 'IMG') {
-          el.alt = changes.imgAlt;
-        }
-        Object.keys(changes).forEach(function(key) {
-          if (key !== 'text' && key !== 'imgSrc' && key !== 'imgAlt') {
-            el.style[key] = changes[key];
-          }
-        });
+        el.removeAttribute('style');
+      });
+      // 替換並套用新 overrides
+      storedOverrides = {};
+      Object.keys(overrides).forEach(function(elementId) {
+        storedOverrides[elementId] = overrides[elementId];
+        var el = document.querySelector('[data-editable="' + elementId + '"]');
+        if (!el) return;
+        applyChangesToElement(el, overrides[elementId]);
       });
     }
 
     if (msg.type === 'tc_resetElement') {
       var el = document.querySelector('[data-editable="' + msg.elementId + '"]');
       if (!el) return;
+      // 從 storedOverrides 中移除
+      delete storedOverrides[msg.elementId];
       var origText = el.getAttribute('data-original-text');
       if (origText !== null) {
         el.textContent = origText;
@@ -403,25 +437,19 @@ if (typeof window !== 'undefined' && !window.__tcEditBridgeInitialized) {
     }
   });
 
-  // MutationObserver：React 渲染完成後自動標記元素
+  // MutationObserver：React 渲染完成後自動重新標記 + 重新套用覆蓋
   // 只監聽 childList（不監聽 attributes，避免 tag 設定 data-editable 觸發死循環）
-  function tagAllElements() {
-    tagEditableElements();
-    tagContainerElements();
-    tagImageElements();
-  }
-
   var tagTimeout = null;
   var observer = new MutationObserver(function() {
     if (tagTimeout) clearTimeout(tagTimeout);
     tagTimeout = setTimeout(function() {
-      tagAllElements();
+      fullRetag();
     }, 300);
   });
 
   // 初始標記 + 啟動 observer
   function init() {
-    tagAllElements();
+    fullRetag();
     observer.observe(document.body, { childList: true, subtree: true });
     window.parent.postMessage({ type: 'tc_iframeReady' }, '*');
   }

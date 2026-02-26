@@ -74,17 +74,8 @@ export default function SandpackPreview({
     [pages, components, styles, tailwindConfig]
   )
 
-  // 追蹤依賴是否改變（依賴改變需要重建 Provider）
-  const depsKeyRef = useRef('')
-  const depsKey = JSON.stringify(setup.dependencies)
-  const needsProviderRebuild = depsKeyRef.current !== '' && depsKeyRef.current !== depsKey
-
-  useEffect(() => {
-    depsKeyRef.current = depsKey
-  }, [depsKey])
-
-  // 用依賴的 key 作為 Provider 的 key，確保依賴變化時重建
-  const providerKey = depsKey
+  // 用依賴的 JSON 作為 Provider 的 key，確保依賴變化時重建
+  const providerKey = JSON.stringify(setup.dependencies)
 
   // ── iframe ref 取得（Sandpack 自管理 iframe，需要用 querySelector 找到） ──
   const containerRef = useRef<HTMLDivElement>(null)
@@ -219,7 +210,7 @@ export default function SandpackPreview({
           bundlerTimeOut: isStreaming ? 30000 : 20000,
         }}
       >
-        {!needsProviderRebuild && <SandpackFileUpdater files={setup.files} />}
+        <SandpackFileUpdater files={setup.files} />
         <SandpackPreviewPane
           showRefreshButton={false}
           showOpenInCodeSandbox={false}
