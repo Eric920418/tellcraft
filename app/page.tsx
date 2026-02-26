@@ -2250,26 +2250,60 @@ function ChatSection({
                 onFocus={(e) => e.currentTarget.style.borderColor = 'var(--black)'}
                 onBlur={(e) => e.currentTarget.style.borderColor = 'var(--border-color)'}
               />
-              <motion.button
-                whileHover={{ scale: 1.02 }}
-                whileTap={{ scale: 0.98 }}
-                onClick={handleSend}
-                disabled={!deferredInput.trim() || isTyping || sendCooldown || isInitializing || !sessionInfo}
-                style={{
-                  padding: layoutMode === 'split' ? '0 20px' : '0 28px',
-                  height: layoutMode === 'split' ? 40 : 48,
-                  fontSize: layoutMode === 'split' ? 13 : 14,
-                  fontWeight: 500,
-                  border: '1px solid var(--black)',
-                  background: !deferredInput.trim() || isTyping || sendCooldown || isInitializing || !sessionInfo ? 'var(--gray-100)' : 'var(--black)',
-                  color: !deferredInput.trim() || isTyping || sendCooldown || isInitializing || !sessionInfo ? 'var(--gray-400)' : 'var(--white)',
-                  cursor: !deferredInput.trim() || isTyping || sendCooldown || isInitializing || !sessionInfo ? 'not-allowed' : 'pointer',
-                  transition: 'all 0.2s ease',
-                  flexShrink: 0,
-                }}
-              >
-                送出
-              </motion.button>
+              {(() => {
+                const lastMsg = messages[messages.length - 1]
+                const backtrackStages = ['clarify_question', 'clarify_revert', 'uiux_design_clarify', 'uiux_design_preference', 'uiux_template_picker', 'uiux_design_brief_confirm', 'uiux_variants_ready']
+                const canGoBack = !isTyping && !sendCooldown && !isInitializing && sessionInfo && lastMsg?.role === 'assistant' && backtrackStages.includes(lastMsg?.stage || '')
+                const showGoBack = !deferredInput.trim() && canGoBack
+
+                if (showGoBack) {
+                  return (
+                    <motion.button
+                      whileHover={{ scale: 1.02 }}
+                      whileTap={{ scale: 0.98 }}
+                      onClick={() => handleSendMessage('__go_back__')}
+                      style={{
+                        padding: layoutMode === 'split' ? '0 16px' : '0 20px',
+                        height: layoutMode === 'split' ? 40 : 48,
+                        fontSize: layoutMode === 'split' ? 13 : 14,
+                        fontWeight: 500,
+                        border: '1px solid var(--border-color)',
+                        background: 'var(--white)',
+                        color: 'var(--gray-600)',
+                        cursor: 'pointer',
+                        transition: 'all 0.2s ease',
+                        flexShrink: 0,
+                      }}
+                    >
+                      ← 上一步
+                    </motion.button>
+                  )
+                }
+
+                const isDisabled = !deferredInput.trim() || isTyping || sendCooldown || isInitializing || !sessionInfo
+                return (
+                  <motion.button
+                    whileHover={{ scale: 1.02 }}
+                    whileTap={{ scale: 0.98 }}
+                    onClick={handleSend}
+                    disabled={isDisabled}
+                    style={{
+                      padding: layoutMode === 'split' ? '0 20px' : '0 28px',
+                      height: layoutMode === 'split' ? 40 : 48,
+                      fontSize: layoutMode === 'split' ? 13 : 14,
+                      fontWeight: 500,
+                      border: '1px solid var(--black)',
+                      background: isDisabled ? 'var(--gray-100)' : 'var(--black)',
+                      color: isDisabled ? 'var(--gray-400)' : 'var(--white)',
+                      cursor: isDisabled ? 'not-allowed' : 'pointer',
+                      transition: 'all 0.2s ease',
+                      flexShrink: 0,
+                    }}
+                  >
+                    送出
+                  </motion.button>
+                )
+              })()}
             </div>
           </div>
         </motion.div>

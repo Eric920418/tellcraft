@@ -310,6 +310,11 @@ BDD Skill 後端 Phase 4（Actions Design）和 Phase 5（ISA Config）補完，
 
 **FlowState 新欄位**：`lastStablePhase`（記錄穩定決策點，供未來擴展）
 
+**空輸入回退按鈕**：
+- `app/page.tsx`：送出按鈕在輸入框為空時自動切換為「← 上一步」（ghost 樣式），點擊發送 `__go_back__`
+- 觸發條件：最新消息 stage 在 backtrackStages 中（clarify_question/uiux_design_clarify/uiux_template_picker 等 7 個 stage）
+- BDD 釐清 `__go_back__`：`processUserReply` 新增處理，revert 最後一個 staging 問題並重發
+
 ### Fast Build 藍圖進度 + BDD Q&A 3D 蓋房子動畫（2026-02-24）
 
 解決兩個 UX 死角：Fast Build 60-90 秒等待期間和 BDD Q&A 最多 30 題的疲勞感。**已用 Remotion 重構動畫驅動層**。

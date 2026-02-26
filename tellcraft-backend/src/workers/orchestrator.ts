@@ -1985,6 +1985,30 @@ async function processUserReply(input: ProcessReplyInput) {
     return
   }
 
+  // 處理回上一題
+  if (userMessage === '__go_back__') {
+    const stagingItems = session.stagingItems || []
+    if (stagingItems.length > 0) {
+      // 回退最後一個已回答的問題
+      const lastItem = stagingItems[stagingItems.length - 1]
+      await revertAnswer({ sessionId: session.id, itemId: lastItem.id })
+      await sendMessage(conversationId, io, {
+        content: `好的，讓我們重新回答上一個問題：`,
+        stage: 'clarify_revert',
+      })
+      await sendClarifyQuestion(conversationId, io, lastItem, stagingItems.length - 1, stagingItems.length)
+      state.currentItemId = lastItem.id
+      state.waitingForReply = true
+      await saveFlowState(redis, conversationId, state)
+    } else {
+      await sendMessage(conversationId, io, {
+        content: '目前沒有可以返回的問題。',
+        stage: 'info',
+      })
+    }
+    return
+  }
+
   // 處理批量確認回覆
   if (userMessage.toUpperCase() === 'Y' || userMessage === '確認' || userMessage === '確認全部') {
     // 用戶確認批次
