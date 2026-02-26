@@ -8,6 +8,7 @@ import {
 } from '@codesandbox/sandpack-react'
 import type { SandpackFiles } from '@codesandbox/sandpack-react'
 import { buildSandpackSetup, diffSandpackFiles } from '@/app/lib/sandpack-utils'
+import type { ElementInfo } from './PreviewPanel'
 
 interface GeneratedFile {
   path: string
@@ -21,6 +22,12 @@ interface SandpackPreviewProps {
   styles: string
   tailwindConfig?: string
   isStreaming?: boolean
+  // 編輯模式 props
+  editMode?: boolean
+  onElementSelected?: (element: ElementInfo | null) => void
+  pendingUpdate?: { elementId: string; changes: Record<string, string>; ts: number } | null
+  pendingReset?: { elementId: string; ts: number } | null
+  pendingOverrides?: { overrides: Record<string, Record<string, string>>; ts: number } | null
 }
 
 /**
@@ -47,6 +54,7 @@ function SandpackFileUpdater({ files }: { files: SandpackFiles }) {
 /**
  * Sandpack 預覽元件
  * 用真實的 React bundler 替代 regex TSX→HTML 轉換
+ * 支援即時編輯模式（透過 postMessage 與 edit-bridge.js 通訊）
  */
 export default function SandpackPreview({
   pages,
@@ -54,6 +62,11 @@ export default function SandpackPreview({
   styles,
   tailwindConfig,
   isStreaming,
+  editMode,
+  onElementSelected,
+  pendingUpdate,
+  pendingReset,
+  pendingOverrides,
 }: SandpackPreviewProps) {
   // 構建 Sandpack 設定
   const setup = useMemo(
@@ -73,8 +86,100 @@ export default function SandpackPreview({
   // 用依賴的 key 作為 Provider 的 key，確保依賴變化時重建
   const providerKey = depsKey
 
+  // ── iframe ref 取得（Sandpack 自管理 iframe，需要用 querySelector 找到） ──
+  const containerRef = useRef<HTMLDivElement>(null)
+  const iframeRef = useRef<HTMLIFrameElement | null>(null)
+
+  // 定期嘗試取得 Sandpack iframe（初始化 + HMR 後可能重建）
+  useEffect(() => {
+    const findIframe = () => {
+      if (!containerRef.current) return
+      const iframe = containerRef.current.querySelector('iframe')
+      if (iframe && iframe !== iframeRef.current) {
+        iframeRef.current = iframe
+      }
+    }
+
+    findIframe()
+    const interval = setInterval(findIframe, 500)
+    return () => clearInterval(interval)
+  }, [providerKey])
+
+  // ── 串流期間強制關閉編輯模式 ──
+  const effectiveEditMode = editMode && !isStreaming
+
+  // ── 同步 editMode 到 iframe ──
+  useEffect(() => {
+    if (!iframeRef.current?.contentWindow) return
+    iframeRef.current.contentWindow.postMessage({
+      type: 'tc_setEditMode',
+      enabled: effectiveEditMode,
+    }, '*')
+  }, [effectiveEditMode])
+
+  // ── 監聽 iframe postMessage ──
+  const onElementSelectedRef = useRef(onElementSelected)
+  onElementSelectedRef.current = onElementSelected
+
+  useEffect(() => {
+    const handleMessage = (e: MessageEvent) => {
+      const msg = e.data
+      if (!msg || typeof msg.type !== 'string' || !msg.type.startsWith('tc_')) return
+
+      if (msg.type === 'tc_iframeReady') {
+        // HMR 重建後重新同步 editMode
+        if (iframeRef.current?.contentWindow) {
+          iframeRef.current.contentWindow.postMessage({
+            type: 'tc_setEditMode',
+            enabled: effectiveEditMode,
+          }, '*')
+        }
+      }
+
+      if (msg.type === 'tc_elementSelected') {
+        onElementSelectedRef.current?.(msg.data as ElementInfo)
+      }
+
+      if (msg.type === 'tc_elementDeselected') {
+        onElementSelectedRef.current?.(null)
+      }
+    }
+
+    window.addEventListener('message', handleMessage)
+    return () => window.removeEventListener('message', handleMessage)
+  }, [effectiveEditMode])
+
+  // ── pendingUpdate → postMessage tc_applyUpdate ──
+  useEffect(() => {
+    if (!pendingUpdate || !iframeRef.current?.contentWindow) return
+    iframeRef.current.contentWindow.postMessage({
+      type: 'tc_applyUpdate',
+      elementId: pendingUpdate.elementId,
+      changes: pendingUpdate.changes,
+    }, '*')
+  }, [pendingUpdate])
+
+  // ── pendingReset → postMessage tc_resetElement ──
+  useEffect(() => {
+    if (!pendingReset || !iframeRef.current?.contentWindow) return
+    iframeRef.current.contentWindow.postMessage({
+      type: 'tc_resetElement',
+      elementId: pendingReset.elementId,
+    }, '*')
+  }, [pendingReset])
+
+  // ── pendingOverrides → postMessage tc_applyOverrides（undo/redo 全量覆蓋）──
+  useEffect(() => {
+    if (!pendingOverrides || !iframeRef.current?.contentWindow) return
+    iframeRef.current.contentWindow.postMessage({
+      type: 'tc_applyOverrides',
+      overrides: pendingOverrides.overrides,
+    }, '*')
+  }, [pendingOverrides])
+
   return (
     <div
+      ref={containerRef}
       style={{
         height: '100%',
         width: '100%',

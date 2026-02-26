@@ -18,6 +18,7 @@ import {
   getConversationMessages as vpsGetConversationMessages,
   replyToConversation as vpsReplyToConversation,
   sendMessage as vpsSendMessage,
+  uploadImage,
 } from './lib/vps-api'
 import { getAuthToken } from './hooks/useAuth'
 import ConversationPicker from './components/ConversationPicker'
@@ -26,7 +27,8 @@ import { useAuth } from './hooks/useAuth'
 import ProjectReminder from './components/ProjectReminder'
 import SplitLayout from './components/uiux/SplitLayout'
 import SpecGenerationView from './components/SpecGenerationView'
-import PreviewPanel from './components/uiux/PreviewPanel'
+import PreviewPanel, { type ElementInfo } from './components/uiux/PreviewPanel'
+import PropertyEditor from './components/uiux/PropertyEditor'
 import DeviceSwitcher, { type DeviceType, getDeviceWidth } from './components/uiux/DeviceSwitcher'
 import TemplatePicker from './components/uiux/TemplatePicker'
 import QuickReplies from './components/QuickReplies'
@@ -985,6 +987,16 @@ function ChatSection({
   // Fast Build chunk 計數（用於 FastBuildProgress 子進度更新）
   const [fastBuildChunks, setFastBuildChunks] = useState(0)
 
+  // Code Preview 編輯模式狀態
+  const [codePreviewEditMode, setCodePreviewEditMode] = useState(false)
+  const [codePreviewSelectedElement, setCodePreviewSelectedElement] = useState<ElementInfo | null>(null)
+  const [codePreviewOverrides, setCodePreviewOverrides] = useState<Record<string, Record<string, string>>>({})
+  const [codePreviewOverrideHistory, setCodePreviewOverrideHistory] = useState<Record<string, Record<string, string>>[]>([{}])
+  const [codePreviewHistoryIndex, setCodePreviewHistoryIndex] = useState(0)
+  const [codePreviewPendingUpdate, setCodePreviewPendingUpdate] = useState<{ elementId: string; changes: Record<string, string>; ts: number } | null>(null)
+  const [codePreviewPendingReset, setCodePreviewPendingReset] = useState<{ elementId: string; ts: number } | null>(null)
+  const [codePreviewPendingOverrides, setCodePreviewPendingOverrides] = useState<{ overrides: Record<string, Record<string, string>>; ts: number } | null>(null)
+
   // Code Preview 容器尺寸追蹤（用於 iframe 縮放）
   useEffect(() => {
     const el = codePreviewContainerRef.current
@@ -995,6 +1007,96 @@ function ChatSection({
     observer.observe(el)
     return () => observer.disconnect()
   }, [])
+
+  // ── Code Preview 編輯模式 handlers ──────────────────
+  const handleCodePreviewElementUpdate = useCallback((elementId: string, changes: Record<string, string>) => {
+    const newOverrides = {
+      ...codePreviewOverrides,
+      [elementId]: { ...codePreviewOverrides[elementId], ...changes }
+    }
+    setCodePreviewOverrides(newOverrides)
+
+    // 推入 Undo/Redo 歷史（截斷 redo 分支）
+    setCodePreviewOverrideHistory(prev => {
+      const truncated = prev.slice(0, codePreviewHistoryIndex + 1)
+      return [...truncated, JSON.parse(JSON.stringify(newOverrides))]
+    })
+    setCodePreviewHistoryIndex(prev => prev + 1)
+
+    // 設置 pendingUpdate → SandpackPreview → postMessage
+    setCodePreviewPendingUpdate({ elementId, changes, ts: Date.now() })
+
+    // 同步 selectedElement 狀態
+    if (codePreviewSelectedElement && codePreviewSelectedElement.id === elementId) {
+      setCodePreviewSelectedElement(prev => prev ? {
+        ...prev,
+        text: changes.text !== undefined ? changes.text : prev.text,
+        styles: { ...prev.styles, ...changes }
+      } : null)
+    }
+  }, [codePreviewOverrides, codePreviewHistoryIndex, codePreviewSelectedElement])
+
+  const handleCodePreviewResetElement = useCallback((elementId: string) => {
+    const newOverrides = { ...codePreviewOverrides }
+    delete newOverrides[elementId]
+    setCodePreviewOverrides(newOverrides)
+
+    setCodePreviewOverrideHistory(prev => {
+      const truncated = prev.slice(0, codePreviewHistoryIndex + 1)
+      return [...truncated, JSON.parse(JSON.stringify(newOverrides))]
+    })
+    setCodePreviewHistoryIndex(prev => prev + 1)
+
+    setCodePreviewPendingReset({ elementId, ts: Date.now() })
+    setCodePreviewSelectedElement(null)
+  }, [codePreviewOverrides, codePreviewHistoryIndex])
+
+  const codePreviewCanUndo = codePreviewHistoryIndex > 0
+  const codePreviewCanRedo = codePreviewHistoryIndex < codePreviewOverrideHistory.length - 1
+
+  const handleCodePreviewUndo = useCallback(() => {
+    if (!codePreviewCanUndo) return
+    const newIndex = codePreviewHistoryIndex - 1
+    setCodePreviewHistoryIndex(newIndex)
+    const overrides = codePreviewOverrideHistory[newIndex]
+    setCodePreviewOverrides(overrides)
+    // 全量覆蓋 iframe DOM（undo 需要重建整個狀態）
+    setCodePreviewPendingOverrides({ overrides, ts: Date.now() })
+  }, [codePreviewCanUndo, codePreviewHistoryIndex, codePreviewOverrideHistory])
+
+  const handleCodePreviewRedo = useCallback(() => {
+    if (!codePreviewCanRedo) return
+    const newIndex = codePreviewHistoryIndex + 1
+    setCodePreviewHistoryIndex(newIndex)
+    const overrides = codePreviewOverrideHistory[newIndex]
+    setCodePreviewOverrides(overrides)
+    setCodePreviewPendingOverrides({ overrides, ts: Date.now() })
+  }, [codePreviewCanRedo, codePreviewHistoryIndex, codePreviewOverrideHistory])
+
+  // Code Preview 圖片上傳（複用 ChatSection 的 auth hook）
+  const handleCodePreviewUploadImage = useCallback(async (file: File): Promise<string | null> => {
+    if (!auth.token || !auth.isAuthenticated) return null
+    const result = await uploadImage({ file, token: auth.token, onProgress: () => {} })
+    if (result.success && result.data?.url) return result.data.url
+    return null
+  }, [auth.token, auth.isAuthenticated])
+
+  // Code Preview 編輯模式鍵盤快捷鍵
+  useEffect(() => {
+    if (!codePreviewEditMode) return
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === 'z') {
+        e.preventDefault()
+        if (e.shiftKey) {
+          handleCodePreviewRedo()
+        } else {
+          handleCodePreviewUndo()
+        }
+      }
+    }
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [codePreviewEditMode, handleCodePreviewUndo, handleCodePreviewRedo])
 
   // 監聯訊息的 layoutHint 或 UIUX 相關 stage，切換佈局模式
   // 手機（<768px）不進 split mode，避免爆版
@@ -1571,6 +1673,15 @@ function ChatSection({
       setConversations([])
       setLoginPromptConfig(null)
       setIsInitializing(true)  // 重置為 true，下次進入時直接顯示初始化中
+      // 重置編輯模式相關狀態
+      setCodePreviewEditMode(false)
+      setCodePreviewSelectedElement(null)
+      setCodePreviewOverrides({})
+      setCodePreviewOverrideHistory([{}])
+      setCodePreviewHistoryIndex(0)
+      setCodePreviewPendingUpdate(null)
+      setCodePreviewPendingReset(null)
+      setCodePreviewPendingOverrides(null)
     }
   }, [isActive])
 
@@ -2440,52 +2551,178 @@ function ChatSection({
               background: 'var(--white)',
             }}
           >
-            {isStreaming ? (
-              <span style={{ fontSize: 14, fontWeight: 500, color: 'var(--black)', display: 'flex', alignItems: 'center', gap: 8 }}>
-                <span style={{
-                  width: 8, height: 8, borderRadius: '50%',
-                  background: 'var(--accent)', animation: 'pulse 1.5s ease-in-out infinite',
-                }} />
-                {phaseLabel}
+            {/* 左側：標題 + 編輯按鈕 + Undo/Redo */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              {isStreaming ? (
+                <span style={{ fontSize: 14, fontWeight: 500, color: 'var(--black)', display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <span style={{
+                    width: 8, height: 8, borderRadius: '50%',
+                    background: 'var(--accent)', animation: 'pulse 1.5s ease-in-out infinite',
+                  }} />
+                  {phaseLabel}
+                </span>
+              ) : (
+                <>
+                  <span style={{ fontSize: 14, fontWeight: 500, color: 'var(--black)' }}>設計預覽</span>
+                  {/* 編輯模式切換按鈕 */}
+                  <button
+                    onClick={() => {
+                      if (codePreviewEditMode) {
+                        setCodePreviewEditMode(false)
+                        setCodePreviewSelectedElement(null)
+                      } else {
+                        setCodePreviewEditMode(true)
+                      }
+                    }}
+                    style={{
+                      display: 'flex', alignItems: 'center', gap: 4,
+                      padding: '4px 10px', borderRadius: 6,
+                      border: '1px solid var(--border-color)',
+                      background: codePreviewEditMode ? 'var(--black)' : 'var(--white)',
+                      color: codePreviewEditMode ? 'var(--white)' : 'var(--gray-600)',
+                      fontSize: 12, fontWeight: 500, cursor: 'pointer',
+                      transition: 'all 0.15s ease',
+                    }}
+                    title={codePreviewEditMode ? '退出編輯模式' : '進入編輯模式'}
+                  >
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M17 3a2.85 2.85 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z" />
+                      <path d="m15 5 4 4" />
+                    </svg>
+                    編輯
+                  </button>
+                  {/* Undo/Redo 按鈕（僅編輯模式時顯示） */}
+                  {codePreviewEditMode && (
+                    <>
+                      <button
+                        onClick={handleCodePreviewUndo}
+                        disabled={!codePreviewCanUndo}
+                        style={{
+                          display: 'flex', alignItems: 'center', justifyContent: 'center',
+                          width: 28, height: 28, borderRadius: 6,
+                          border: '1px solid var(--border-color)',
+                          background: 'var(--white)', cursor: codePreviewCanUndo ? 'pointer' : 'default',
+                          opacity: codePreviewCanUndo ? 1 : 0.35,
+                          transition: 'opacity 0.15s',
+                        }}
+                        title="撤銷 (⌘Z)"
+                      >
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--gray-600)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                          <path d="M3 7v6h6" /><path d="M21 17a9 9 0 0 0-9-9 9 9 0 0 0-6 2.3L3 13" />
+                        </svg>
+                      </button>
+                      <button
+                        onClick={handleCodePreviewRedo}
+                        disabled={!codePreviewCanRedo}
+                        style={{
+                          display: 'flex', alignItems: 'center', justifyContent: 'center',
+                          width: 28, height: 28, borderRadius: 6,
+                          border: '1px solid var(--border-color)',
+                          background: 'var(--white)', cursor: codePreviewCanRedo ? 'pointer' : 'default',
+                          opacity: codePreviewCanRedo ? 1 : 0.35,
+                          transition: 'opacity 0.15s',
+                        }}
+                        title="重做 (⌘⇧Z)"
+                      >
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--gray-600)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                          <path d="M21 7v6h-6" /><path d="M3 17a9 9 0 0 1 9-9 9 9 0 0 1 6 2.3L21 13" />
+                        </svg>
+                      </button>
+                    </>
+                  )}
+                </>
+              )}
+            </div>
+            {/* 右側：DeviceSwitcher + 寬度 */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              {!isStreaming && <DeviceSwitcher activeDevice={codePreviewDevice} onDeviceChange={(d) => { setCodePreviewDevice(d); setCodePreviewSelectedElement(null) }} />}
+              <span style={{ fontSize: 11, color: 'var(--gray-400)', fontFamily: 'var(--font-mono)', width: 50, textAlign: 'right' }}>
+                {previewWidth}px
               </span>
-            ) : (
-              <span style={{ fontSize: 14, fontWeight: 500, color: 'var(--black)' }}>設計預覽</span>
-            )}
-            {!isStreaming && <DeviceSwitcher activeDevice={codePreviewDevice} onDeviceChange={setCodePreviewDevice} />}
-            <span style={{ fontSize: 11, color: 'var(--gray-400)', fontFamily: 'var(--font-mono)', width: 50, textAlign: 'right' }}>
-              {previewWidth}px
-            </span>
+            </div>
           </div>
-          {/* Sandpack 預覽區域 */}
-          <div
-            ref={codePreviewContainerRef}
-            style={{
-              flex: 1,
-              display: 'flex',
-              justifyContent: 'center',
-              padding: codePreviewDevice === 'desktop' ? 0 : 24,
-              overflow: 'auto',
-              background: 'var(--gray-50)',
-            }}
-          >
+          {/* 主內容區域：預覽 + PropertyEditor 側邊欄 */}
+          <div style={{ flex: 1, display: 'flex', overflow: 'hidden' }}>
+            {/* 預覽區域 */}
             <div
+              ref={codePreviewContainerRef}
               style={{
-                width: codePreviewDevice === 'desktop' ? '100%' : previewWidth,
-                height: '100%',
-                borderRadius: codePreviewDevice === 'desktop' ? 0 : 8,
-                boxShadow: codePreviewDevice === 'desktop' ? 'none' : '0 8px 32px rgba(0,0,0,0.12), 0 2px 8px rgba(0,0,0,0.08)',
-                background: '#fff',
-                overflow: 'hidden',
+                flex: 1,
+                display: 'flex',
+                justifyContent: 'center',
+                padding: codePreviewDevice === 'desktop' ? 0 : 24,
+                overflow: 'auto',
+                background: 'var(--gray-50)',
+                position: 'relative',
               }}
             >
-              <SandpackPreviewComponent
-                pages={pagesData}
-                components={componentsData}
-                styles={stylesData}
-                tailwindConfig={tailwindConfigData}
-                isStreaming={isStreaming}
-              />
+              <div
+                style={{
+                  width: codePreviewDevice === 'desktop' ? '100%' : previewWidth,
+                  height: '100%',
+                  borderRadius: codePreviewDevice === 'desktop' ? 0 : 8,
+                  boxShadow: codePreviewDevice === 'desktop' ? 'none' : '0 8px 32px rgba(0,0,0,0.12), 0 2px 8px rgba(0,0,0,0.08)',
+                  background: '#fff',
+                  overflow: 'hidden',
+                }}
+              >
+                <SandpackPreviewComponent
+                  pages={pagesData}
+                  components={componentsData}
+                  styles={stylesData}
+                  tailwindConfig={tailwindConfigData}
+                  isStreaming={isStreaming}
+                  editMode={codePreviewEditMode}
+                  onElementSelected={setCodePreviewSelectedElement}
+                  pendingUpdate={codePreviewPendingUpdate}
+                  pendingReset={codePreviewPendingReset}
+                  pendingOverrides={codePreviewPendingOverrides}
+                />
+              </div>
+              {/* 編輯模式提示浮層 */}
+              {codePreviewEditMode && !codePreviewSelectedElement && !isStreaming && (
+                <div style={{
+                  position: 'absolute', bottom: 16, left: '50%', transform: 'translateX(-50%)',
+                  padding: '8px 16px', borderRadius: 8,
+                  background: 'rgba(0,0,0,0.75)', color: '#fff',
+                  fontSize: 13, fontWeight: 500, pointerEvents: 'none',
+                  display: 'flex', alignItems: 'center', gap: 6,
+                  boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
+                }}>
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <circle cx="12" cy="12" r="10" /><path d="m15 9-6 6" /><path d="m9 9 6 6" />
+                  </svg>
+                  點擊元素進行編輯
+                </div>
+              )}
             </div>
+            {/* PropertyEditor 側邊欄 */}
+            <AnimatePresence>
+              {codePreviewEditMode && codePreviewSelectedElement && (
+                <motion.div
+                  initial={{ width: 0, opacity: 0 }}
+                  animate={{ width: 280, opacity: 1 }}
+                  exit={{ width: 0, opacity: 0 }}
+                  transition={{ duration: 0.2, ease: 'easeInOut' }}
+                  style={{
+                    overflow: 'hidden',
+                    borderLeft: '1px solid var(--border-color)',
+                    background: 'var(--white)',
+                    flexShrink: 0,
+                  }}
+                >
+                  <div style={{ width: 280, height: '100%', overflow: 'auto' }}>
+                    <PropertyEditor
+                      element={codePreviewSelectedElement}
+                      onUpdate={handleCodePreviewElementUpdate}
+                      onClose={() => setCodePreviewSelectedElement(null)}
+                      onReset={handleCodePreviewResetElement}
+                      onUploadImage={handleCodePreviewUploadImage}
+                    />
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
           </div>
           {isStreaming && <style>{`@keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }`}</style>}
         </div>

@@ -983,6 +983,9 @@ export function buildSandpackSetup(
   // 解決 LLM 生成時 A 檔案已完成但 B 檔案尚未生成，A import B 導致 Sandpack 報錯
   generateMissingModuleStubs(files)
 
+  // 8.5. 注入編輯橋接腳本（支援 Sandpack 內即時編輯）
+  files['/lib/edit-bridge.js'] = SANDPACK_EDIT_BRIDGE
+
   // 9. Tailwind CDN 配置
   const tailwindCdnScript = tailwindConfig ? extractTailwindCdnConfig(tailwindConfig) : ''
 
@@ -997,6 +1000,8 @@ export function buildSandpackSetup(
   const entryBody = []
   // polyfill 必須在 React/motion 之前載入，確保 IntersectionObserver 被覆蓋
   entryImports.push("import './polyfills'")
+  // 編輯橋接腳本（在 React render 後透過 MutationObserver 自動標記可編輯元素）
+  entryImports.push("import './lib/edit-bridge'")
   entryImports.push("import React from 'react'")
   entryImports.push("import { createRoot } from 'react-dom/client'")
   entryImports.push("import './styles.css'")

@@ -12,10 +12,31 @@ Tellcraft 是一個 AI 驅動的自動化開發平台。用戶只需描述需求
 
 ## 當前開發進度
 
-- **狀態**：✅ Phase 1-9 + Server Actions + VPS Backend + 前端 Chat 串接 + 認證系統 + 訪客體驗改善 + 儀表板系統 + BDD Spec 完整修復 + 專案版本管理 + **UIUX 生成邏輯重構** + **Design Tier** + **專案自動命名** + **PreviewPanel iframe 重構** + **Quality Gate 品質檢查** + **Code Preview 即時渲染** + **串流實時預覽** + **BDD→UI 翻譯 + Variant 創意概念** + **Fast Mode 快速建站** + **智能模板匹配** + **Fast Build 藍圖進度** + **BDD Q&A 3D 蓋房子動畫** + **對話回退 + 錯誤恢復** + **BDD Spec Skill v2.0.0 同步** + **LLM 自動重試 + 錯誤訊息人性化** + **BDD Phase 4/5 後端補完** + **Phase 0 Event Storming** + **BDD Skill 差距補完** + **BDD Skill P1-P3 補完** + **BDD→UIUX 翻譯品質升級** + **BDD Skill 方法論升級** + **Fast Build 全面升級** + **Fast Build 佈局模式** + **Fast Build 品質升級** + **動畫大升級：城堡+工廠** + **防刷訊息三層防護** + **模板編輯模式修復與增強** + **模板編輯圖片上傳** + **BDD 3D 動畫重設計**
+- **狀態**：✅ Phase 1-9 + Server Actions + VPS Backend + 前端 Chat 串接 + 認證系統 + 訪客體驗改善 + 儀表板系統 + BDD Spec 完整修復 + 專案版本管理 + **UIUX 生成邏輯重構** + **Design Tier** + **專案自動命名** + **PreviewPanel iframe 重構** + **Quality Gate 品質檢查** + **Code Preview 即時渲染** + **串流實時預覽** + **BDD→UI 翻譯 + Variant 創意概念** + **Fast Mode 快速建站** + **智能模板匹配** + **Fast Build 藍圖進度** + **BDD Q&A 3D 蓋房子動畫** + **對話回退 + 錯誤恢復** + **BDD Spec Skill v2.0.0 同步** + **LLM 自動重試 + 錯誤訊息人性化** + **BDD Phase 4/5 後端補完** + **Phase 0 Event Storming** + **BDD Skill 差距補完** + **BDD Skill P1-P3 補完** + **BDD→UIUX 翻譯品質升級** + **BDD Skill 方法論升級** + **Fast Build 全面升級** + **Fast Build 佈局模式** + **Fast Build 品質升級** + **動畫大升級：城堡+工廠** + **防刷訊息三層防護** + **模板編輯模式修復與增強** + **模板編輯圖片上傳** + **BDD 3D 動畫重設計** + **SandpackPreview 編輯模式**
 - **釐清項目**：28 項全部解決
 - **Server Actions**：30+ 已實作
 - **詳情**：[`.clarify/overview.md`](.clarify/overview.md)
+
+### SandpackPreview 編輯模式（2026-02-26）
+
+想法模式和快速模式生成的 SandpackPreview 現在也支援即時編輯（文字/顏色/間距/圖片），與模板模式 PreviewPanel 一致。
+
+**核心機制**：
+- 編輯橋接腳本（`SANDPACK_EDIT_BRIDGE`）作為 Sandpack 檔案（`/lib/edit-bridge.js`）注入，而非 `<script>` 標籤
+- 用 `MutationObserver` + `setTimeout(300ms)` 延遲標記（等 React 渲染完成），observer 只監聽 `childList`（避免 attribute 死循環）
+- `window.__tcEditBridgeInitialized` 防重複初始化
+- 透過 `postMessage` 與父視窗雙向通訊（`tc_setEditMode`/`tc_elementSelected`/`tc_applyUpdate`/`tc_resetElement`/`tc_applyOverrides`）
+
+**前端**：
+- `SandpackPreview.tsx`：新增 `editMode`/`onElementSelected`/`pendingUpdate`/`pendingReset`/`pendingOverrides` props，用 `setInterval(500ms)` + `querySelector('iframe')` 取得 Sandpack 管理的 iframe ref
+- `page.tsx`：code_preview 工具列新增編輯模式按鈕 + Undo/Redo，右側 `PropertyEditor` sidebar（280px），鍵盤快捷鍵 `⌘Z`/`⌘⇧Z`
+- 串流期間自動禁用編輯模式，切換對話時重置所有編輯狀態
+
+**限制**：
+- DOM overrides 為臨時性質（ephemeral），HMR/源碼更新後丟失
+- 不持久化到後端（後續可加 FlowState 存儲）
+
+**修改檔案**：`sandpack-utils.ts`、`SandpackPreview.tsx`、`page.tsx`
 
 ### 模板編輯圖片上傳（2026-02-26）
 
