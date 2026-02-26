@@ -302,7 +302,7 @@ ${schemaSql}
 ${decisions || '（無額外決策）'}`
 
   console.log('[Formulation] 識別 Features...')
-  const response = await callClaude(systemPrompt, userMessage, { maxTokens: 4096 })
+  const response = await callClaude(systemPrompt, userMessage, { maxTokens: 8192 })
 
   if (!response.success) {
     return { success: false, error: response.error }

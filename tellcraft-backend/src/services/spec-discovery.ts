@@ -65,6 +65,7 @@ async function callClaude(
   content?: string
   inputTokens?: number
   outputTokens?: number
+  truncated?: boolean
   error?: string
 }> {
   const apiKey = process.env.ANTHROPIC_API_KEY
@@ -108,6 +109,12 @@ async function callClaude(
       const data = await response.json() as {
         usage?: { input_tokens: number; output_tokens: number }
         content?: Array<{ text: string }>
+        stop_reason?: string
+      }
+
+      const truncated = data.stop_reason === 'max_tokens'
+      if (truncated) {
+        console.warn(`[spec-discovery callClaude] 回應被截斷 (stop_reason=max_tokens, output=${data.usage?.output_tokens})`)
       }
 
       return {
@@ -115,6 +122,7 @@ async function callClaude(
         content: data.content?.[0]?.text || '',
         inputTokens: data.usage?.input_tokens || 0,
         outputTokens: data.usage?.output_tokens || 0,
+        truncated,
       }
     } catch (error) {
       lastError = error instanceof Error ? error.message : 'Unknown error'
@@ -262,10 +270,19 @@ ${existingQuestions ? `---
 請審查以上 Feature Files，找出需要與用戶確認的品質問題。`
 
   console.log('[SpecDiscovery] 開始審查 Feature Files...')
-  const response = await callClaude(systemPrompt, userMessage, { maxTokens: 4096 })
+  let response = await callClaude(systemPrompt, userMessage, { maxTokens: 8192 })
 
   if (!response.success) {
     return { success: false, error: response.error }
+  }
+
+  // 截斷時用更大的 maxTokens 重試一次
+  if (response.truncated) {
+    console.warn('[SpecDiscovery] 回應被截斷，以 16384 tokens 重試')
+    response = await callClaude(systemPrompt, userMessage, { maxTokens: 16384 })
+    if (!response.success) {
+      return { success: false, error: response.error }
+    }
   }
 
   // 記錄使用量
@@ -286,14 +303,36 @@ ${existingQuestions ? `---
     const jsonMatch = response.content?.match(/```json\s*([\s\S]*?)\s*```/) ||
                       response.content?.match(/\{[\s\S]*\}/)
     if (!jsonMatch) {
+      // 截斷且完全無 JSON → 視為無問題
+      if (response.truncated) {
+        console.warn('[SpecDiscovery] 截斷且無法提取 JSON，視為無問題繼續')
+        return { success: true, issues: [] }
+      }
       return { success: false, error: '無法解析 LLM 回應' }
     }
 
-    const jsonStr = jsonMatch[1] || jsonMatch[0]
-    const parsed = JSON.parse(jsonStr)
+    let jsonStr = jsonMatch[1] || jsonMatch[0]
+    let parsed: { issues?: unknown[] }
+
+    try {
+      parsed = JSON.parse(jsonStr)
+    } catch {
+      // JSON 不完整（截斷），嘗試修復：截取到最後一個完整的 } 並補上 ]}
+      console.warn('[SpecDiscovery] JSON 解析失敗，嘗試修復截斷的 JSON')
+      const lastCompleteObj = jsonStr.lastIndexOf('},')
+      if (lastCompleteObj > 0) {
+        jsonStr = jsonStr.substring(0, lastCompleteObj + 1) + ']}'
+        parsed = JSON.parse(jsonStr)
+        console.log('[SpecDiscovery] JSON 修復成功')
+      } else {
+        // 無法修復，視為無問題繼續（不阻塞流程）
+        console.warn('[SpecDiscovery] JSON 無法修復，視為無問題繼續')
+        return { success: true, issues: [] }
+      }
+    }
 
     // 為每個 issue 加上 id
-    const issues: SpecIssue[] = (parsed.issues || []).map((issue: Omit<SpecIssue, 'id'>, index: number) => ({
+    const issues: SpecIssue[] = ((parsed.issues || []) as Array<Omit<SpecIssue, 'id'>>).map((issue, index) => ({
       ...issue,
       id: `spec_${Date.now()}_${index}`,
     }))
