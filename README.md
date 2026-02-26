@@ -12,10 +12,31 @@ Tellcraft 是一個 AI 驅動的自動化開發平台。用戶只需描述需求
 
 ## 當前開發進度
 
-- **狀態**：✅ Phase 1-9 + Server Actions + VPS Backend + 前端 Chat 串接 + 認證系統 + 訪客體驗改善 + 儀表板系統 + BDD Spec 完整修復 + 專案版本管理 + **UIUX 生成邏輯重構** + **Design Tier** + **專案自動命名** + **PreviewPanel iframe 重構** + **Quality Gate 品質檢查** + **Code Preview 即時渲染** + **串流實時預覽** + **BDD→UI 翻譯 + Variant 創意概念** + **Fast Mode 快速建站** + **智能模板匹配** + **Fast Build 藍圖進度** + **BDD Q&A 3D 蓋房子動畫** + **對話回退 + 錯誤恢復** + **BDD Spec Skill v2.0.0 同步** + **LLM 自動重試 + 錯誤訊息人性化** + **BDD Phase 4/5 後端補完** + **Phase 0 Event Storming** + **BDD Skill 差距補完** + **BDD Skill P1-P3 補完** + **BDD→UIUX 翻譯品質升級** + **BDD Skill 方法論升級** + **Fast Build 全面升級** + **Fast Build 佈局模式** + **Fast Build 品質升級** + **動畫大升級：城堡+工廠** + **防刷訊息三層防護**
+- **狀態**：✅ Phase 1-9 + Server Actions + VPS Backend + 前端 Chat 串接 + 認證系統 + 訪客體驗改善 + 儀表板系統 + BDD Spec 完整修復 + 專案版本管理 + **UIUX 生成邏輯重構** + **Design Tier** + **專案自動命名** + **PreviewPanel iframe 重構** + **Quality Gate 品質檢查** + **Code Preview 即時渲染** + **串流實時預覽** + **BDD→UI 翻譯 + Variant 創意概念** + **Fast Mode 快速建站** + **智能模板匹配** + **Fast Build 藍圖進度** + **BDD Q&A 3D 蓋房子動畫** + **對話回退 + 錯誤恢復** + **BDD Spec Skill v2.0.0 同步** + **LLM 自動重試 + 錯誤訊息人性化** + **BDD Phase 4/5 後端補完** + **Phase 0 Event Storming** + **BDD Skill 差距補完** + **BDD Skill P1-P3 補完** + **BDD→UIUX 翻譯品質升級** + **BDD Skill 方法論升級** + **Fast Build 全面升級** + **Fast Build 佈局模式** + **Fast Build 品質升級** + **動畫大升級：城堡+工廠** + **防刷訊息三層防護** + **模板編輯模式修復與增強**
 - **釐清項目**：28 項全部解決
 - **Server Actions**：30+ 已實作
 - **詳情**：[`.clarify/overview.md`](.clarify/overview.md)
+
+### 模板編輯模式修復與增強（2026-02-26）
+
+**致命 Bug 修復**：
+1. **template_overrides 注入代碼生成**：用戶在 PreviewPanel 編輯的文字/顏色/字體修改現在會正確傳入 `generateStructure()` prompt，確保生成代碼保留用戶自訂內容
+   - `FlowState.templateOverrides` 新欄位
+   - `handleTemplateSelection()` 從 DB 讀取 `projects.template_overrides`
+   - `uiux-generation.ts` 構建 overrides prompt section（分類歸納：文字/色彩/字體/間距客製化）
+2. **TemplatePicker props 修復**：補上 `recommendedIds`、`initialTemplates`、`showCategories` 等缺失 props
+3. **ColorInput rgb() 修復**：新增 `rgbToHex()` 工具函數，color picker 正確顯示 rgb 格式的當前顏色
+4. **padding/margin shorthand 解析**：新增 `parseSpacingValue()` 處理 `16px 24px` 格式
+
+**編輯器增強**：
+1. **擴展可編輯元素類型**：新增 container（section/header/footer/nav/main/article）和 image（img）元素支援
+2. **擴展屬性面板**：根據 `editableType` 動態顯示屬性組（排版/邊框/效果/圖片），新增 TextAlignSelect/BorderEditor/ShadowPresetSelect/OpacitySlider/ImageEditor
+3. **Undo/Redo 系統**：overrideHistory + historyIndex，工具列按鈕 + Cmd+Z/Cmd+Shift+Z 快捷鍵
+4. **元素路徑 Breadcrumb**：PropertyEditor 標題下方顯示元素 DOM 路徑（如 `section > div > h1`）
+5. **單元素重置按鈕**：PropertyEditor 底部「重置此元素」按鈕，恢復原始文字/樣式
+6. **EDIT_BRIDGE_SCRIPT**：容器用橙色虛線高亮、圖片用綠色、`data-original-text/src/alt` 保存原始狀態、`tc_resetElement` handler
+
+**修改檔案**：`flow-state.ts`、`orchestrator.ts`、`uiux-generation.ts`、`page.tsx`、`PreviewPanel.tsx`、`PropertyEditor.tsx`
 
 ### BuildingPlayer 播放控制修復 + BDD 面板穩定性（2026-02-26）
 

@@ -996,32 +996,38 @@ function ChatSection({
     return () => observer.disconnect()
   }, [])
 
-  // 監聽訊息的 layoutHint 或 UIUX 相關 stage，切換佈局模式
+  // 監聯訊息的 layoutHint 或 UIUX 相關 stage，切換佈局模式
+  // 手機（<768px）不進 split mode，避免爆版
   useEffect(() => {
+    const isMobile = typeof window !== 'undefined' && window.innerWidth < 768
+
     let targetMode: 'default' | 'split' = 'default'
 
-    // 方法 1: 根據 layoutHint
-    const lastHintMessage = [...messages].reverse().find(m => m.layoutHint)
-    if (lastHintMessage?.layoutHint) {
-      targetMode = lastHintMessage.layoutHint === 'split' ? 'split' : 'default'
-    } else {
-      // 方法 2: 根據 UIUX 相關的 stage（處理直接跳轉或頁面刷新的情況）
-      const hasUiuxMessage = messages.some(m =>
-        m.stage?.startsWith('uiux') ||
-        m.richContent?.type === 'template_picker'
-      )
-      if (hasUiuxMessage) {
-        targetMode = 'split'
-      }
+    // 手機上永遠保持 default（單欄），不顯示動畫/預覽面板
+    if (!isMobile) {
+      // 方法 1: 根據 layoutHint
+      const lastHintMessage = [...messages].reverse().find(m => m.layoutHint)
+      if (lastHintMessage?.layoutHint) {
+        targetMode = lastHintMessage.layoutHint === 'split' ? 'split' : 'default'
+      } else {
+        // 方法 2: 根據 UIUX 相關的 stage（處理直接跳轉或頁面刷新的情況）
+        const hasUiuxMessage = messages.some(m =>
+          m.stage?.startsWith('uiux') ||
+          m.richContent?.type === 'template_picker'
+        )
+        if (hasUiuxMessage) {
+          targetMode = 'split'
+        }
 
-      // 方法 3: BDD Q&A 釐清階段自動切 split mode（顯示 3D 蓋房子）
-      const hasClarifyMessage = messages.some(m =>
-        m.stage === 'clarify_question' ||
-        m.stage === 'prd_discovery_complete' ||
-        m.stage === 'prd_discovery_continue'
-      )
-      if (hasClarifyMessage && !hasUiuxMessage) {
-        targetMode = 'split'
+        // 方法 3: BDD Q&A 釐清階段自動切 split mode（顯示 3D 蓋房子）
+        const hasClarifyMessage = messages.some(m =>
+          m.stage === 'clarify_question' ||
+          m.stage === 'prd_discovery_complete' ||
+          m.stage === 'prd_discovery_continue'
+        )
+        if (hasClarifyMessage && !hasUiuxMessage) {
+          targetMode = 'split'
+        }
       }
     }
 
@@ -1301,8 +1307,8 @@ function ChatSection({
           setFastBuildChunks(prev => prev !== newChunks ? newChunks : prev)
           // 串流期間加快輪詢
           pollInterval = 1500
-          // 自動切換到 split 佈局
-          if (layoutModeRef.current !== 'split') {
+          // 自動切換到 split 佈局（手機不切）
+          if (layoutModeRef.current !== 'split' && window.innerWidth >= 768) {
             setLayoutMode('split')
           }
         }
@@ -2141,8 +2147,8 @@ function ChatSection({
                           <TemplatePicker
                             onPreview={handleTemplateSelect}
                             selectedId={selectedTemplateId || undefined}
-                            recommendedIds={message.richContent?.data?.recommendedIds}
-                            initialTemplates={message.richContent?.data?.templates}
+                            recommendedIds={message.richContent?.data?.recommendedIds as string[] | undefined}
+                            initialTemplates={message.richContent?.data?.templates as import('./lib/templates').TemplateCardData[] | undefined}
                             columns={layoutMode === 'split' ? 1 : 2}
                             showCategories={!message.richContent?.data?.filteredMode}
                           />
@@ -2671,7 +2677,7 @@ function ChatSection({
                   返回
                 </button>
                 <div style={{ width: 1, height: 20, background: 'var(--border-color)' }} />
-                <span style={{ fontSize: 14, fontWeight: 500 }}>UIUX 設計</span>
+                <span style={{ fontSize: 14, fontWeight: 500 }}>{isBddSplitMode ? '需求釐清' : 'UIUX 設計'}</span>
               </div>
               {renderChatContent()}
             </div>
