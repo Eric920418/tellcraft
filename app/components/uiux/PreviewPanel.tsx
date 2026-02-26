@@ -5,7 +5,7 @@ import { motion, AnimatePresence } from 'framer-motion'
 import DeviceSwitcher, { DeviceType, getDeviceWidth } from './DeviceSwitcher'
 import PropertyEditor from './PropertyEditor'
 import { useAuth } from '../../hooks/useAuth'
-import { getTemplateOverrides, saveTemplateOverrides } from '../../lib/vps-api'
+import { getTemplateOverrides, saveTemplateOverrides, uploadImage } from '../../lib/vps-api'
 
 // ============================================================
 // PreviewPanel - 預覽面板元件
@@ -630,6 +630,24 @@ export default function PreviewPanel({
     debouncedSave(newOverrides)
   }, [elementOverrides, historyIndex, debouncedSave])
 
+  // ── 圖片上傳 ────────────────────────────────────
+  const handleUploadImage = useCallback(async (file: File): Promise<string | null> => {
+    if (!token || !isAuthenticated) return null
+
+    const result = await uploadImage({
+      file,
+      token,
+      onProgress: () => {}, // PropertyEditor 內部自行管理進度
+    })
+
+    if (result.success && result.data?.url) {
+      return result.data.url
+    }
+
+    console.error('[PreviewPanel] 圖片上傳失敗:', result.error)
+    return null
+  }, [token, isAuthenticated])
+
   // ── 鍵盤快捷鍵（Cmd+Z / Cmd+Shift+Z）────────────
   useEffect(() => {
     if (!editMode) return
@@ -1047,6 +1065,7 @@ export default function PreviewPanel({
                 onUpdate={handleElementUpdate}
                 onClose={() => setSelectedElement(null)}
                 onReset={handleResetElement}
+                onUploadImage={isAuthenticated ? handleUploadImage : undefined}
               />
             </motion.div>
           )}

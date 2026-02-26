@@ -24,6 +24,7 @@ import userRoutes from './routes/user'
 import templatesRoutes from './routes/templates'
 import bddRoutes from './routes/bdd'
 import operationsRoutes from './routes/operations'
+import uploadRoutes from './routes/upload'
 import { setAuthRedisClient } from './routes/auth'
 import { setMiddlewareRedisClient } from './middleware/auth'
 
@@ -254,6 +255,7 @@ app.use('/api/user', userRoutes)
 app.use('/api/templates', templatesRoutes)
 app.use('/api/bdd', bddRoutes)
 app.use('/api/operations', operationsRoutes)
+app.use('/api/upload', uploadRoutes)
 
 // 404 處理
 app.use((_req, res) => {

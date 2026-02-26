@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import type { ElementInfo } from './PreviewPanel'
 
@@ -14,6 +14,7 @@ interface PropertyEditorProps {
   onUpdate: (elementId: string, changes: Record<string, string>) => void
   onClose: () => void
   onReset?: (elementId: string) => void
+  onUploadImage?: (file: File) => Promise<string | null>
 }
 
 // rgb()/rgba() → hex 轉換
@@ -73,7 +74,7 @@ const OBJECT_FIT_OPTIONS = [
   { value: 'none', label: 'None' },
 ]
 
-export default function PropertyEditor({ element, onUpdate, onClose, onReset }: PropertyEditorProps) {
+export default function PropertyEditor({ element, onUpdate, onClose, onReset, onUploadImage }: PropertyEditorProps) {
   const [editedStyles, setEditedStyles] = useState<Record<string, string>>({})
   const [editedText, setEditedText] = useState('')
 
@@ -375,11 +376,10 @@ export default function PropertyEditor({ element, onUpdate, onClose, onReset }: 
           {/* ── 圖片屬性（image 才顯示）── */}
           {isImage && (
             <PropertyGroup title="圖片">
-              <TextFieldInput
-                label="圖片 URL"
+              <ImageUrlInput
                 value={editedStyles.imgSrc || ''}
-                placeholder="https://..."
                 onChange={(v) => updateStyle('imgSrc', v)}
+                onUpload={onUploadImage}
               />
               <TextFieldInput
                 label="Alt 文字"
@@ -734,6 +734,266 @@ function TextFieldInput({
           borderRadius: 4,
         }}
       />
+    </div>
+  )
+}
+
+// ============================================================
+// ImageUrlInput — 圖片 URL 輸入 + 上傳 + 拖放
+// ============================================================
+
+const ACCEPTED_IMAGE_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'image/gif', 'image/svg+xml']
+const MAX_IMAGE_SIZE = 5 * 1024 * 1024 // 5MB
+
+function ImageUrlInput({
+  value,
+  onChange,
+  onUpload,
+}: {
+  value: string
+  onChange: (url: string) => void
+  onUpload?: (file: File) => Promise<string | null>
+}) {
+  const fileInputRef = useRef<HTMLInputElement>(null)
+  const [uploading, setUploading] = useState(false)
+  const [uploadProgress, setUploadProgress] = useState(0)
+  const [uploadError, setUploadError] = useState<string | null>(null)
+  const [isDragOver, setIsDragOver] = useState(false)
+
+  const validateFile = useCallback((file: File): string | null => {
+    if (!ACCEPTED_IMAGE_TYPES.includes(file.type)) {
+      return `不支援的檔案類型: ${file.type}。僅支援 JPG, PNG, WebP, GIF, SVG`
+    }
+    if (file.size > MAX_IMAGE_SIZE) {
+      return `檔案大小 ${(file.size / 1024 / 1024).toFixed(1)}MB 超過 5MB 限制`
+    }
+    return null
+  }, [])
+
+  const handleUpload = useCallback(async (file: File) => {
+    if (!onUpload) return
+
+    const error = validateFile(file)
+    if (error) {
+      setUploadError(error)
+      return
+    }
+
+    setUploading(true)
+    setUploadProgress(0)
+    setUploadError(null)
+
+    try {
+      const url = await onUpload(file)
+      if (url) {
+        onChange(url)
+      }
+    } catch {
+      setUploadError('上傳失敗')
+    } finally {
+      setUploading(false)
+      setUploadProgress(0)
+    }
+  }, [onUpload, onChange, validateFile])
+
+  const handleDragOver = useCallback((e: React.DragEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+    setIsDragOver(true)
+  }, [])
+
+  const handleDragLeave = useCallback((e: React.DragEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+    setIsDragOver(false)
+  }, [])
+
+  const handleDrop = useCallback((e: React.DragEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+    setIsDragOver(false)
+
+    const file = e.dataTransfer.files[0]
+    if (file) handleUpload(file)
+  }, [handleUpload])
+
+  const handleFileSelect = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (file) handleUpload(file)
+    // 清空 value 讓同一檔案可重複選取
+    e.target.value = ''
+  }, [handleUpload])
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+      {/* URL 輸入 + 上傳按鈕 */}
+      <span style={{ fontSize: 12, color: 'var(--gray-600)' }}>圖片來源</span>
+      <div style={{ display: 'flex', gap: 4 }}>
+        <input
+          type="text"
+          value={value}
+          placeholder="https://..."
+          onChange={(e) => onChange(e.target.value)}
+          style={{
+            flex: 1,
+            padding: '6px 8px',
+            fontSize: 12,
+            fontFamily: 'var(--font-mono)',
+            border: '1px solid var(--border-color)',
+            borderRadius: 4,
+            minWidth: 0,
+          }}
+        />
+        {onUpload && (
+          <motion.button
+            whileHover={{ scale: 1.05 }}
+            whileTap={{ scale: 0.95 }}
+            onClick={() => fileInputRef.current?.click()}
+            disabled={uploading}
+            style={{
+              padding: '6px 10px',
+              fontSize: 11,
+              fontWeight: 500,
+              background: 'var(--gray-100)',
+              color: 'var(--gray-600)',
+              border: '1px solid var(--gray-200)',
+              borderRadius: 4,
+              cursor: uploading ? 'wait' : 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              gap: 4,
+              whiteSpace: 'nowrap',
+              opacity: uploading ? 0.6 : 1,
+            }}
+          >
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+              <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4" />
+              <polyline points="17 8 12 3 7 8" />
+              <line x1="12" y1="3" x2="12" y2="15" />
+            </svg>
+            上傳
+          </motion.button>
+        )}
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept="image/jpeg,image/png,image/webp,image/gif,image/svg+xml"
+          onChange={handleFileSelect}
+          style={{ display: 'none' }}
+        />
+      </div>
+
+      {/* 拖放區域 */}
+      {onUpload && !uploading && (
+        <div
+          onDragOver={handleDragOver}
+          onDragLeave={handleDragLeave}
+          onDrop={handleDrop}
+          onClick={() => fileInputRef.current?.click()}
+          style={{
+            padding: '12px 8px',
+            border: `2px dashed ${isDragOver ? '#3b82f6' : 'var(--gray-200)'}`,
+            borderRadius: 6,
+            background: isDragOver ? 'rgba(59, 130, 246, 0.05)' : 'var(--gray-50)',
+            textAlign: 'center',
+            cursor: 'pointer',
+            transition: 'all 0.15s ease',
+          }}
+        >
+          <svg
+            width="20"
+            height="20"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke={isDragOver ? '#3b82f6' : 'var(--gray-400)'}
+            strokeWidth="1.5"
+            style={{ margin: '0 auto 4px' }}
+            aria-hidden="true"
+          >
+            <rect x="3" y="3" width="18" height="18" rx="2" />
+            <circle cx="8.5" cy="8.5" r="1.5" />
+            <path d="M21 15l-5-5L5 21" />
+          </svg>
+          <div style={{ fontSize: 11, color: isDragOver ? '#3b82f6' : 'var(--gray-400)' }}>
+            拖放圖片到這裡
+          </div>
+          <div style={{ fontSize: 10, color: 'var(--gray-300)', marginTop: 2 }}>
+            JPG, PNG, WebP, GIF, SVG &middot; 5MB
+          </div>
+        </div>
+      )}
+
+      {/* 上傳進度條 */}
+      {uploading && (
+        <div style={{ padding: '8px 0' }}>
+          <div
+            style={{
+              height: 4,
+              background: 'var(--gray-100)',
+              borderRadius: 2,
+              overflow: 'hidden',
+            }}
+          >
+            <motion.div
+              initial={{ width: 0 }}
+              animate={{ width: `${uploadProgress || 10}%` }}
+              transition={{ duration: 0.3 }}
+              style={{
+                height: '100%',
+                background: '#3b82f6',
+                borderRadius: 2,
+              }}
+            />
+          </div>
+          <div style={{ fontSize: 11, color: 'var(--gray-400)', marginTop: 4, textAlign: 'center' }}>
+            上傳中... {uploadProgress > 0 ? `${uploadProgress}%` : ''}
+          </div>
+        </div>
+      )}
+
+      {/* 錯誤提示 */}
+      {uploadError && (
+        <div
+          style={{
+            padding: '6px 8px',
+            fontSize: 11,
+            color: '#dc2626',
+            background: '#fef2f2',
+            borderRadius: 4,
+            border: '1px solid #fecaca',
+          }}
+        >
+          {uploadError}
+        </div>
+      )}
+
+      {/* 縮圖預覽 */}
+      {value && !uploading && (
+        <div
+          style={{
+            width: '100%',
+            height: 60,
+            borderRadius: 4,
+            overflow: 'hidden',
+            border: '1px solid var(--gray-200)',
+            background: 'var(--gray-50)',
+          }}
+        >
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={value}
+            alt="預覽"
+            style={{
+              width: '100%',
+              height: '100%',
+              objectFit: 'cover',
+            }}
+            onError={(e) => {
+              (e.target as HTMLImageElement).style.display = 'none'
+            }}
+          />
+        </div>
+      )}
     </div>
   )
 }

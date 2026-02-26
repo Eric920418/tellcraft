@@ -1903,5 +1903,83 @@ export async function configureWebhook(input: {
   })
 }
 
+// ============================================================
+// 圖片上傳
+// ============================================================
+
+/**
+ * 上傳圖片到 VPS
+ * 不走 apiRequest（它硬編碼 JSON Content-Type），直接用 FormData
+ */
+export function uploadImage(input: {
+  file: File
+  token: string
+  onProgress?: (percent: number) => void
+}): Promise<ApiResponse<{ url: string; filename: string; size: number }>> {
+  const baseUrl = getApiBase()
+  const url = `${baseUrl}/api/upload/image`
+
+  const formData = new FormData()
+  formData.append('image', input.file)
+
+  // 有 onProgress → 用 XMLHttpRequest 支援上傳進度
+  if (input.onProgress) {
+    return new Promise((resolve) => {
+      const xhr = new XMLHttpRequest()
+
+      xhr.upload.addEventListener('progress', (e) => {
+        if (e.lengthComputable) {
+          input.onProgress!(Math.round((e.loaded / e.total) * 100))
+        }
+      })
+
+      xhr.addEventListener('load', () => {
+        try {
+          const data = JSON.parse(xhr.responseText)
+          if (xhr.status >= 200 && xhr.status < 300 && data.success) {
+            resolve({ success: true, data })
+          } else {
+            resolve({ success: false, error: data.error || `上傳失敗 (${xhr.status})` })
+          }
+        } catch {
+          resolve({ success: false, error: `上傳失敗 (${xhr.status})` })
+        }
+      })
+
+      xhr.addEventListener('error', () => {
+        resolve({ success: false, error: '網路錯誤，上傳失敗' })
+      })
+
+      xhr.addEventListener('abort', () => {
+        resolve({ success: false, error: '上傳已取消' })
+      })
+
+      xhr.open('POST', url)
+      xhr.setRequestHeader('Authorization', `Bearer ${input.token}`)
+      // 不設 Content-Type，讓瀏覽器自動帶 boundary
+      xhr.send(formData)
+    })
+  }
+
+  // 無 onProgress → 用 fetch
+  return fetch(url, {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${input.token}`,
+    },
+    body: formData,
+  })
+    .then(async (res) => {
+      const data = await res.json()
+      if (res.ok && data.success) {
+        return { success: true as const, data }
+      }
+      return { success: false as const, error: data.error || `上傳失敗 (${res.status})` }
+    })
+    .catch(() => {
+      return { success: false as const, error: '網路錯誤，上傳失敗' }
+    })
+}
+
 // 導出類型
 export type { ClarifyItem, BddSession }

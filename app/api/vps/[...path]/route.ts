@@ -79,15 +79,34 @@ export async function POST(
   }
 
   try {
-    const body = await request.json()
-    const response = await fetch(`${VPS_API_URL}${targetPath}`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': request.headers.get('authorization') || '',
-      },
-      body: JSON.stringify(body),
-    })
+    const contentType = request.headers.get('content-type') || ''
+    const isMultipart = contentType.includes('multipart/form-data')
+
+    let response: Response
+
+    if (isMultipart) {
+      // FormData：透傳原始 body + Content-Type（保留 boundary）
+      const rawBody = await request.arrayBuffer()
+      response = await fetch(`${VPS_API_URL}${targetPath}`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': contentType,
+          'Authorization': request.headers.get('authorization') || '',
+        },
+        body: rawBody,
+      })
+    } else {
+      // JSON：保持原邏輯
+      const body = await request.json()
+      response = await fetch(`${VPS_API_URL}${targetPath}`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': request.headers.get('authorization') || '',
+        },
+        body: JSON.stringify(body),
+      })
+    }
 
     const { data, status } = await safeParseResponse(response)
     return NextResponse.json(data, { status })
