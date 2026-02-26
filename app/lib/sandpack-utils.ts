@@ -433,6 +433,145 @@ function collectGoogleFonts(allContent: string): string[] {
   return fonts
 }
 
+// ============================================================
+// 缺失模塊 Stub 生成（串流預覽安全網）
+// ============================================================
+
+/**
+ * 解析相對路徑（從 fromDir 出發解析 importPath）
+ * 例：fromDir='/components', importPath='../components/Header' → '/components/Header'
+ */
+function resolveRelativePath(fromDir: string, importPath: string): string {
+  const parts = fromDir.split('/').filter(Boolean)
+  for (const segment of importPath.split('/')) {
+    if (segment === '.') continue
+    if (segment === '..') { parts.pop() }
+    else { parts.push(segment) }
+  }
+  return '/' + parts.join('/')
+}
+
+/**
+ * 掃描所有檔案的相對 import，為缺失的內部模塊生成 stub 佔位組件
+ * 解決串流預覽時，部分檔案尚未生成導致 Sandpack 報 "Could not find module" 的問題
+ *
+ * 原理：A.tsx import B.tsx，但 B.tsx 還在 LLM 生成中 → 注入空 stub → Sandpack 不報錯
+ * 當 B.tsx 真正生成後，streaming 增量更新會用真實內容覆蓋 stub
+ */
+function generateMissingModuleStubs(files: Record<string, string>): void {
+  const existingPaths = new Set(Object.keys(files))
+
+  // 收集缺失模塊：resolved path → 需要的 export 名稱
+  const missingModules = new Map<string, Set<string>>()
+
+  // 匹配 import 語句（已經過 rewriteImports，@/ 已轉為相對路徑）
+  const importRegex = /import\s+([\w{},\s*]+)\s+from\s+['"](\.[^'"]+)['"]/g
+  const reExportRegex = /export\s+\{([^}]*)\}\s+from\s+['"](\.[^'"]+)['"]/g
+
+  const SKIP_PATHS = new Set(['/shims/', '/polyfills.js', '/public/', '/styles.css'])
+
+  for (const [filePath, content] of Object.entries(files)) {
+    // 跳過 shim、polyfill、HTML、CSS 等非源碼檔案
+    if (SKIP_PATHS.has(filePath) || Array.from(SKIP_PATHS).some(p => filePath.startsWith(p))) continue
+    if (typeof content !== 'string') continue
+
+    const fileDir = filePath.substring(0, filePath.lastIndexOf('/')) || '/'
+
+    for (const regex of [importRegex, reExportRegex]) {
+      regex.lastIndex = 0
+      let match
+      while ((match = regex.exec(content)) !== null) {
+        const importClause = match[1]
+        const importPath = match[2]
+
+        // 跳過 CSS import
+        if (importPath.endsWith('.css')) continue
+
+        const resolved = resolveRelativePath(fileDir, importPath)
+
+        // 檢查是否已存在（嘗試多種副檔名）
+        const extensions = ['.tsx', '.ts', '.jsx', '.js', '/index.tsx', '/index.ts']
+        const hasExtension = /\.\w+$/.test(resolved)
+
+        let found = false
+        if (hasExtension) {
+          found = existingPaths.has(resolved)
+        } else {
+          found = extensions.some(ext => existingPaths.has(resolved + ext))
+        }
+
+        if (!found) {
+          const stubPath = hasExtension ? resolved : resolved + '.tsx'
+          if (!missingModules.has(stubPath)) {
+            missingModules.set(stubPath, new Set())
+          }
+
+          const names = missingModules.get(stubPath)!
+
+          // 解析 default import（排除 `import type X`）
+          const defaultMatch = importClause.match(/^(\w+)/)
+          if (defaultMatch && defaultMatch[1] !== 'type' && !importClause.trimStart().startsWith('{')) {
+            names.add('__default__')
+          }
+
+          // 解析 named imports（排除 `type Xxx`）
+          const namedMatch = importClause.match(/\{([^}]*)\}/)
+          if (namedMatch) {
+            namedMatch[1].split(',')
+              .map(s => s.trim())
+              .filter(s => s && !s.startsWith('type '))
+              .map(s => s.split(/\s+as\s+/)[0].trim())
+              .filter(Boolean)
+              .forEach(n => names.add(n))
+          }
+        }
+      }
+    }
+  }
+
+  // 生成 stub 檔案
+  for (const [stubPath, names] of missingModules) {
+    if (existingPaths.has(stubPath)) continue
+
+    const fileName = stubPath.split('/').pop()?.replace(/\.\w+$/, '') || 'Stub'
+    const hasDefault = names.has('__default__')
+    names.delete('__default__')
+
+    const lines: string[] = [
+      `// [Sandpack Stub] 此檔案為串流預覽自動生成的佔位模塊`,
+      `// 真實內容生成後會自動覆蓋`,
+    ]
+
+    // Named exports
+    for (const name of names) {
+      if (/^[A-Z]/.test(name)) {
+        // PascalCase → React component stub
+        lines.push(`export function ${name}() { return null; }`)
+      } else {
+        // camelCase / data → 空陣列（安全用於 .map / .filter / .length）
+        lines.push(`export const ${name} = [];`)
+      }
+    }
+
+    // Default export
+    if (hasDefault) {
+      if (/^[A-Z]/.test(fileName)) {
+        lines.push(`export default function ${fileName}() { return null; }`)
+      } else {
+        lines.push(`export default {};`)
+      }
+    }
+
+    // 如果沒有任何 export 被偵測到，至少提供 default export
+    if (!hasDefault && names.size === 0) {
+      lines.push(`export default function ${fileName}() { return null; }`)
+    }
+
+    files[stubPath] = lines.join('\n') + '\n'
+    existingPaths.add(stubPath)
+  }
+}
+
 /**
  * 主函數：將生成的 TSX/CSS 轉為 Sandpack 設定
  */
@@ -528,14 +667,18 @@ export function buildSandpackSetup(
     }
   }
 
-  // 8. Tailwind CDN 配置
+  // 8. 缺失內部模塊 stub 生成（串流預覽安全網）
+  // 解決 LLM 生成時 A 檔案已完成但 B 檔案尚未生成，A import B 導致 Sandpack 報錯
+  generateMissingModuleStubs(files)
+
+  // 9. Tailwind CDN 配置
   const tailwindCdnScript = tailwindConfig ? extractTailwindCdnConfig(tailwindConfig) : ''
 
-  // 9. 構建 Layout 包裹邏輯
+  // 10. 構建 Layout 包裹邏輯
   const hasLayout = '/Layout.tsx' in files
   const hasApp = '/App.tsx' in files
 
-  // 10. Entry file: /index.tsx
+  // 11. Entry file: /index.tsx
   // 關鍵：Tailwind CDN config 必須在 JS 中設定，不能依賴 HTML script 標籤
   // 因為 Sandpack react-ts template 不一定執行自訂 HTML 中的 script
   const entryImports = []
@@ -569,7 +712,7 @@ export function buildSandpackSetup(
 
   files['/index.tsx'] = entryImports.join('\n') + '\n\n' + entryBody.join('\n') + '\n'
 
-  // 11. index.html（Tailwind CDN 由 SandpackProvider externalResources 載入，config 在 index.tsx JS 中設定）
+  // 12. index.html（Tailwind CDN 由 SandpackProvider externalResources 載入，config 在 index.tsx JS 中設定）
   // 注意：Sandpack 不執行自訂 HTML 中的 <script> 標籤，所有外部腳本必須透過 externalResources
   files['/public/index.html'] = `<!DOCTYPE html>
 <html lang="zh-TW">
@@ -586,7 +729,7 @@ export function buildSandpackSetup(
 </body>
 </html>`
 
-  // 12. 掃描依賴（只加代碼實際 import 的套件）
+  // 13. 掃描依賴（只加代碼實際 import 的套件）
   // react / react-dom 由 template="react-ts" 提供，不需要重複指定
   const dependencies = scanDependencies(files)
 
