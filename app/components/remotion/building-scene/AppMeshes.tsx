@@ -133,11 +133,16 @@ export default function AppMeshes({ isWorking }: AppMeshesProps) {
         </group>
       ))}
 
-      {/* 底部網格線 */}
+      {/* 底部光暈平面（取代 gridHelper，更微妙） */}
       {v.gridOpacity > 0.01 && (
-        <group position={[0, -0.69, 0]} rotation={[-Math.PI / 2, 0, 0]}>
-          <gridHelper args={[10, 20, COLORS.gridGlow, COLORS.gridGlow]} />
-        </group>
+        <mesh position={[0, -0.7, 0]} rotation={[-Math.PI / 2, 0, 0]}>
+          <circleGeometry args={[5, 32]} />
+          <meshBasicMaterial
+            color={COLORS.gridGlow}
+            transparent
+            opacity={v.gridOpacity * 0.06}
+          />
+        </mesh>
       )}
 
       {/* ════════════ R2: 框架 ════════════ */}

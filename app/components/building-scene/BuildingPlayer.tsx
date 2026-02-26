@@ -104,7 +104,9 @@ export default function BuildingPlayer({
       return
     }
 
-    const newTarget = Math.min(progress * 30, TOTAL_FRAMES - 1)
+    // 歸一化幀映射：按 progress/totalQuestions 比例分配整個 900 幀
+    const ratio = totalQuestions > 0 ? progress / totalQuestions : 0
+    const newTarget = Math.min(Math.floor(ratio * TOTAL_FRAMES), TOTAL_FRAMES - 1)
     targetFrameRef.current = newTarget
 
     // 頁面刷新/重新載入時 progress 已經有值但 prevProgress 是 0
@@ -118,7 +120,7 @@ export default function BuildingPlayer({
     }
 
     prevProgressRef.current = progress
-  }, [progress, containerSize])
+  }, [progress, totalQuestions, containerSize])
 
   // isComplete 變化：完成時解除暫停限制，讓動畫播完 + loop
   useEffect(() => {
@@ -151,6 +153,9 @@ export default function BuildingPlayer({
   // 進度計算（直接用 React props，即時更新）
   const percent = totalQuestions > 0 ? Math.round((progress / totalQuestions) * 100) : 0
 
+  // 基於進度比例映射到 6 輪視覺顯示（後端 round/maxRounds 可能不是 6）
+  const visualRound = Math.min(6, Math.ceil((progress / Math.max(1, totalQuestions)) * 6))
+
   // 進度 overlay（在 Player 外層，不依賴 Remotion inputProps）
   const progressOverlay = (
     <div style={{
@@ -179,9 +184,9 @@ export default function BuildingPlayer({
             fontSize: 11,
             padding: '2px 8px',
             borderRadius: 10,
-            background: i < round ? ROUND_COLORS[i] : 'transparent',
-            color: i < round ? 'white' : 'rgba(255,255,255,0.4)',
-            fontWeight: i === round - 1 ? 600 : 400,
+            background: i < visualRound ? ROUND_COLORS[i] : 'transparent',
+            color: i < visualRound ? 'white' : 'rgba(255,255,255,0.4)',
+            fontWeight: i === visualRound - 1 ? 600 : 400,
           }}>
             {label}
           </span>
