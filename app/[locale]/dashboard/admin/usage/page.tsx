@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useState, useMemo } from 'react'
-import { useRouter } from 'next/navigation'
+import { useRouter } from '@/i18n/navigation'
 import { motion } from 'framer-motion'
 import { StatsCard, BarChart, LineChart, DateRangePicker } from '@/app/components/dashboard'
 import { getLLMUsageStats } from '@/app/lib/vps-api'

@@ -1,20 +1,20 @@
 'use client'
 
 import { useState, useRef, useEffect, useCallback } from 'react'
-import { useParams, useSearchParams, useRouter } from 'next/navigation'
+import { useParams, useSearchParams } from 'next/navigation'
+import { Link, useRouter } from '@/i18n/navigation'
 import { motion } from 'framer-motion'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
-import Link from 'next/link'
 import dynamic from 'next/dynamic'
-import DeviceSwitcher, { type DeviceType, getDeviceWidth } from '../../../../components/uiux/DeviceSwitcher'
-import QualityGateReport from '../../../../components/uiux/QualityGateReport'
-import DeployResult from '../../../../components/deployer/DeployResult'
-import DeploymentHistory from '../../../../components/deployer/DeploymentHistory'
-import { getAdminConversationMessages } from '../../../../lib/vps-api'
+import DeviceSwitcher, { type DeviceType, getDeviceWidth } from '@/app/components/uiux/DeviceSwitcher'
+import QualityGateReport from '@/app/components/uiux/QualityGateReport'
+import DeployResult from '@/app/components/deployer/DeployResult'
+import DeploymentHistory from '@/app/components/deployer/DeploymentHistory'
+import { getAdminConversationMessages } from '@/app/lib/vps-api'
 
 const SandpackPreviewComponent = dynamic(
-  () => import('../../../../components/uiux/SandpackPreview'),
+  () => import('@/app/components/uiux/SandpackPreview'),
   {
     ssr: false,
     loading: () => (

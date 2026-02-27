@@ -1,9 +1,8 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { useRouter } from 'next/navigation'
 import { motion } from 'framer-motion'
-import Link from 'next/link'
+import { Link, useRouter } from '@/i18n/navigation'
 import { DataTable, StatusBadge, SearchInput, type Column } from '@/app/components/dashboard'
 import { getProjects } from '@/app/lib/vps-api'
 

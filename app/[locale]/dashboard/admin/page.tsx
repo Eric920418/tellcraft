@@ -1,9 +1,8 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { useRouter } from 'next/navigation'
 import { motion } from 'framer-motion'
-import Link from 'next/link'
+import { Link, useRouter } from '@/i18n/navigation'
 import { StatsCard, BarChart } from '@/app/components/dashboard'
 import { getAdminStats, getLLMUsageStats } from '@/app/lib/vps-api'
 

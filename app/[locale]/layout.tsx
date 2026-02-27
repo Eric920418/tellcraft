@@ -1,18 +1,10 @@
 import type { Metadata } from 'next'
 import { NextIntlClientProvider, hasLocale } from 'next-intl'
-import { setRequestLocale } from 'next-intl/server'
+import { getTranslations, setRequestLocale } from 'next-intl/server'
 import { notFound } from 'next/navigation'
 import { routing } from '@/i18n/routing'
 import { ThemeProvider } from '@/app/components/ThemeProvider'
 import '@/app/globals.css'
-
-export const metadata: Metadata = {
-  title: 'Tellcraft',
-  description: 'Tellcraft - AI-driven automation platform for developers 泰爾工藝 用對話打造你的軟體產品',
-  openGraph: {
-    images: ['/logo.png'],
-  },
-}
 
 type Props = {
   children: React.ReactNode
@@ -21,6 +13,25 @@ type Props = {
 
 export function generateStaticParams() {
   return routing.locales.map((locale) => ({ locale }))
+}
+
+export async function generateMetadata({ params }: Props): Promise<Metadata> {
+  const { locale } = await params
+  const t = await getTranslations({ locale, namespace: 'metadata' })
+
+  return {
+    title: t('title'),
+    description: t('description'),
+    openGraph: {
+      images: ['/logo.png'],
+    },
+    alternates: {
+      languages: {
+        'zh-TW': '/',
+        'en': '/en',
+      },
+    },
+  }
 }
 
 export default async function LocaleLayout({ children, params }: Props) {

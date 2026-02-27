@@ -1,7 +1,7 @@
 'use client'
 
 import { useState } from 'react'
-import Link from 'next/link'
+import { Link } from '@/i18n/navigation'
 import { testDeploymentConfig, generateNextJsTemplate } from '@/app/actions/deploy'
 import { listProjects } from '@/app/actions/supabase'
 import { listVercelProjects } from '@/app/actions/vercel'

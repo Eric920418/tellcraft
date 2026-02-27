@@ -2,7 +2,7 @@
 
 import { useState, useEffect, Suspense } from 'react'
 import { useSearchParams } from 'next/navigation'
-import Link from 'next/link'
+import { Link } from '@/i18n/navigation'
 import { motion } from 'framer-motion'
 
 function LoginContent() {

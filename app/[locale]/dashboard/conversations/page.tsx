@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { useRouter } from 'next/navigation'
+import { useRouter } from '@/i18n/navigation'
 import { motion } from 'framer-motion'
 import { DataTable, type Column } from '@/app/components/dashboard'
 import { getUserConversations } from '@/app/lib/vps-api'

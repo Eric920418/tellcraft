@@ -1,14 +1,14 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { useParams, useRouter } from 'next/navigation'
+import { useParams } from 'next/navigation'
 import { motion } from 'framer-motion'
-import Link from 'next/link'
-import { StatusBadge, MiniStatsCard } from '../../../components/dashboard'
-import { VersionHistory } from '../../../components/dashboard/VersionHistory'
-import { getProjectDetail } from '../../../actions'
-import { startProjectIteration, deleteProject } from '../../../lib/vps-api'
-import { useAuth } from '../../../hooks/useAuth'
+import { Link, useRouter } from '@/i18n/navigation'
+import { StatusBadge, MiniStatsCard } from '@/app/components/dashboard'
+import { VersionHistory } from '@/app/components/dashboard/VersionHistory'
+import { getProjectDetail } from '@/app/actions'
+import { startProjectIteration, deleteProject } from '@/app/lib/vps-api'
+import { useAuth } from '@/app/hooks/useAuth'
 
 interface ProjectDetail {
   project: {
