@@ -1,22 +1,26 @@
 'use client'
 
 // ============================================================
-// "The Craft" BDD 動畫面板
-// 三層視覺架構：
-//   Layer 1: Remotion Player（Three.js 鍛造場景）
-//   Layer 2: CSS Ambient Overlay（餘燼粒子，永遠飄動）
-//   Layer 3: Feedback Pulse（回答瞬間火花爆發）
-//   Layer 0: Progress Bar（底部進度指示）
+// BDD 需求藍圖面板
+// 即時展示 BDD 釐清的結構化 Q&A 歷史記錄
+// 按分類整理，帶入場動畫的需求文件視覺化
 // ============================================================
 
-import { useRef, useEffect, useState, useMemo, useCallback } from 'react'
-import { Player, type PlayerRef } from '@remotion/player'
-import CraftComposition from './remotion/building-scene/CraftComposition'
-import BuildingFallback2D from './remotion/building-scene/BuildingFallback2D'
-import { FPS, TOTAL_FRAMES, PHASE_LABELS, PHASE_COLORS, PROGRESS_STATUS } from './remotion/building-scene/constants'
-import { hashString } from './remotion/building-scene/procedural'
+import { useRef, useEffect, useState, useCallback, useMemo } from 'react'
+import { motion, AnimatePresence } from 'framer-motion'
+import { getBddSession } from '../actions'
 
-// ── Props ──
+// ── Types ──
+
+interface ClarifyItemData {
+  id: string
+  question: string
+  whiteTextQuestion?: string
+  category: string
+  answer?: string
+  status: string
+  answeredAt?: string
+}
 
 interface BddAnimationPanelProps {
   progress: number
@@ -28,20 +32,240 @@ interface BddAnimationPanelProps {
   conversationId?: string
 }
 
-// ── 餘燼粒子配置 ──
+// ── 色彩方案 ──
 
-const EMBER_COUNT = 8
-const EMBER_COLORS = ['#D4740E', '#FF8C42', '#8B4513', '#FFB347', '#FF6B35']
+const COLORS = {
+  bg: '#0D1117',
+  card: '#161B22',
+  border: '#30363D',
+  categoryTitle: '#58A6FF',
+  questionText: '#8B949E',
+  answerText: '#E6EDF3',
+  progressGreen: '#238636',
+  progressGreenEnd: '#2EA043',
+  highlight: '#FFA657',
+  roundLabel: '#F0883E',
+  aiWorking: '#BC8CFF',
+  headerText: '#E6EDF3',
+  subText: '#484F58',
+  completeBorder: '#2EA043',
+} as const
 
-function generateEmbers() {
-  return Array.from({ length: EMBER_COUNT }, (_, i) => ({
-    left: `${5 + (i * 73 + 17) % 90}%`,
-    size: 2 + (i % 3),
-    duration: 4 + (i % 7),
-    delay: (i * 0.6) % 6,
-    color: EMBER_COLORS[i % EMBER_COLORS.length],
-    drift: ((i * 37) % 20) - 10, // -10 to +10 px 水平漂移
-  }))
+// ── 分類標籤映射 ──
+
+const CATEGORY_LABELS: Record<string, string> = {
+  data: '資料模型',
+  feature: '功能需求',
+  terminology: '術語定義',
+  architecture: '技術架構',
+  design: '設計偏好',
+  business: '業務邏輯',
+  integration: '外部整合',
+  security: '安全需求',
+  performance: '效能需求',
+}
+
+function getCategoryLabel(category: string): string {
+  return CATEGORY_LABELS[category] || category
+}
+
+// ── 自訂 Hook：取得 BDD Session 資料 ──
+
+function useBddSessionData(conversationId: string | undefined, progress: number) {
+  const [items, setItems] = useState<ClarifyItemData[]>([])
+  const [error, setError] = useState<string | null>(null)
+  const fetchingRef = useRef(false)
+  const prevItemCountRef = useRef(0)
+
+  const fetchData = useCallback(async () => {
+    if (!conversationId || fetchingRef.current) return
+    fetchingRef.current = true
+
+    try {
+      const result = await getBddSession({ conversationId })
+      if (result.success && result.data) {
+        const session = result.data as {
+          resolvedItems?: ClarifyItemData[]
+          stagingItems?: ClarifyItemData[]
+        }
+        const resolved = session.resolvedItems || []
+        const staging = session.stagingItems || []
+        const allItems = [...resolved, ...staging]
+        setItems(allItems)
+        setError(null)
+      }
+    } catch (err) {
+      console.error('[BddPanel] Failed to fetch BDD session:', err)
+      setError('無法載入需求資料')
+    } finally {
+      fetchingRef.current = false
+    }
+  }, [conversationId])
+
+  // progress 變化時 refetch
+  useEffect(() => {
+    fetchData()
+  }, [fetchData, progress])
+
+  // 偵測新增條目
+  const hasNewItems = items.length > prevItemCountRef.current
+  useEffect(() => {
+    prevItemCountRef.current = items.length
+  }, [items.length])
+
+  return { items, error, hasNewItems }
+}
+
+// ── 分類分組 ──
+
+function groupByCategory(items: ClarifyItemData[]): Map<string, ClarifyItemData[]> {
+  const groups = new Map<string, ClarifyItemData[]>()
+  for (const item of items) {
+    const cat = item.category || 'other'
+    if (!groups.has(cat)) {
+      groups.set(cat, [])
+    }
+    groups.get(cat)!.push(item)
+  }
+  return groups
+}
+
+// ── QAEntry 元件 ──
+
+function QAEntry({ item, isLatest }: { item: ClarifyItemData; isLatest: boolean }) {
+  const question = item.whiteTextQuestion || item.question
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 8 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.2, ease: 'easeOut' }}
+      style={{
+        padding: '8px 12px',
+        borderLeft: `2px solid ${isLatest ? COLORS.highlight : 'transparent'}`,
+        marginBottom: 4,
+        transition: 'border-color 1s ease-out',
+      }}
+    >
+      <div style={{
+        fontSize: 12,
+        color: COLORS.questionText,
+        lineHeight: 1.5,
+        fontFamily: 'ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace',
+      }}>
+        Q: {question}
+      </div>
+      {item.answer && (
+        <div style={{
+          fontSize: 13,
+          color: COLORS.answerText,
+          lineHeight: 1.5,
+          marginTop: 2,
+          fontFamily: 'ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace',
+        }}>
+          → {item.answer}
+        </div>
+      )}
+    </motion.div>
+  )
+}
+
+// ── CategorySection 元件 ──
+
+function CategorySection({
+  category,
+  items,
+  isLatestCategory,
+  lastItemId,
+}: {
+  category: string
+  items: ClarifyItemData[]
+  isLatestCategory: boolean
+  lastItemId: string | null
+}) {
+  const [collapsed, setCollapsed] = useState(false)
+  const answeredCount = items.filter(i => i.answer).length
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 12 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.3, ease: 'easeOut' }}
+      style={{
+        marginBottom: 12,
+        border: `1px solid ${isLatestCategory ? COLORS.categoryTitle + '40' : COLORS.border}`,
+        borderRadius: 8,
+        overflow: 'hidden',
+        background: COLORS.card,
+        boxShadow: isLatestCategory ? `0 0 12px ${COLORS.categoryTitle}15` : 'none',
+        transition: 'border-color 1s ease-out, box-shadow 1s ease-out',
+      }}
+    >
+      {/* 分類標題 */}
+      <div
+        onClick={() => setCollapsed(!collapsed)}
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          padding: '8px 12px',
+          cursor: 'pointer',
+          userSelect: 'none',
+          borderBottom: collapsed ? 'none' : `1px solid ${COLORS.border}`,
+        }}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <span style={{
+            color: COLORS.subText,
+            fontSize: 10,
+            transform: collapsed ? 'rotate(-90deg)' : 'rotate(0deg)',
+            transition: 'transform 0.2s',
+            display: 'inline-block',
+          }}>
+            ▼
+          </span>
+          <span style={{
+            color: COLORS.categoryTitle,
+            fontSize: 13,
+            fontWeight: 600,
+            fontFamily: 'ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace',
+          }}>
+            {getCategoryLabel(category)}
+          </span>
+        </div>
+        <span style={{
+          fontSize: 11,
+          color: COLORS.subText,
+          fontFamily: 'ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace',
+        }}>
+          {answeredCount} 題
+        </span>
+      </div>
+
+      {/* Q&A 列表 */}
+      <AnimatePresence>
+        {!collapsed && (
+          <motion.div
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: 'auto', opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            transition={{ duration: 0.2 }}
+            style={{ overflow: 'hidden' }}
+          >
+            <div style={{ padding: '4px 0' }}>
+              {items.map(item => (
+                <QAEntry
+                  key={item.id}
+                  item={item}
+                  isLatest={item.id === lastItemId}
+                />
+              ))}
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </motion.div>
+  )
 }
 
 // ── Main Component ──
@@ -49,363 +273,283 @@ function generateEmbers() {
 export default function BddAnimationPanel({
   progress,
   totalQuestions,
-  round: _round,
-  maxRounds: _maxRounds = 6,
+  round,
+  maxRounds = 6,
   isWorking,
   isComplete,
   conversationId,
 }: BddAnimationPanelProps) {
-  const playerRef = useRef<PlayerRef>(null)
-  const containerRef = useRef<HTMLDivElement>(null)
-  const [webglOk, setWebglOk] = useState(true)
-  const [containerSize, setContainerSize] = useState<{ w: number; h: number } | null>(null)
-  const [showPulse, setShowPulse] = useState(false)
-  const prevProgressRef = useRef(0)
-  const targetFrameRef = useRef(0)
-  const isCompleteRef = useRef(false)
+  const scrollRef = useRef<HTMLDivElement>(null)
+  const bottomRef = useRef<HTMLDivElement>(null)
+  const { items, error } = useBddSessionData(conversationId, progress)
 
-  // Seed（專案專屬）
-  const seed = useMemo(() => hashString(conversationId || 'default'), [conversationId])
+  // 分組
+  const grouped = useMemo(() => groupByCategory(items), [items])
+  const categoryKeys = useMemo(() => Array.from(grouped.keys()), [grouped])
 
-  // 餘燼配置（穩定不重算）
-  const embers = useMemo(() => generateEmbers(), [])
+  // 最新條目 ID + 最新分類
+  const lastItemId = items.length > 0 ? items[items.length - 1].id : null
+  const lastCategory = items.length > 0 ? (items[items.length - 1].category || 'other') : null
 
-  // WebGL 檢測
-  useEffect(() => {
-    try {
-      const canvas = document.createElement('canvas')
-      const gl = canvas.getContext('webgl') || canvas.getContext('experimental-webgl')
-      if (!gl) setWebglOk(false)
-    } catch {
-      setWebglOk(false)
-    }
-  }, [])
-
-  // 容器尺寸偵測
-  useEffect(() => {
-    const el = containerRef.current
-    if (!el) return
-    const update = () => {
-      const { width, height } = el.getBoundingClientRect()
-      if (width > 0 && height > 0) {
-        setContainerSize({ w: Math.round(width), h: Math.round(height) })
-      }
-    }
-    update()
-    const ro = new ResizeObserver(update)
-    ro.observe(el)
-    return () => ro.disconnect()
-  }, [])
-
-  // 幀控制回調
-  const handleFrameUpdate = useCallback((e: { detail: { frame: number } }) => {
-    if (e.detail.frame >= targetFrameRef.current && !isCompleteRef.current) {
-      playerRef.current?.pause()
-    }
-  }, [])
-
-  // 註冊 frameupdate
-  useEffect(() => {
-    const player = playerRef.current
-    if (!player) return
-    player.addEventListener('frameupdate', handleFrameUpdate)
-    player.seekTo(0)
-    player.pause()
-    return () => {
-      player.removeEventListener('frameupdate', handleFrameUpdate)
-    }
-  }, [handleFrameUpdate, webglOk, containerSize])
-
-  // progress 變化 → 推進幀 + 觸發火花脈衝
-  useEffect(() => {
-    const player = playerRef.current
-    if (!player) return
-
-    if (progress <= 0) {
-      targetFrameRef.current = 0
-      player.seekTo(0)
-      player.pause()
-      prevProgressRef.current = 0
-      return
-    }
-
-    const ratio = totalQuestions > 0 ? progress / totalQuestions : 0
-    const newTarget = Math.min(Math.floor(ratio * TOTAL_FRAMES), TOTAL_FRAMES - 1)
-    targetFrameRef.current = newTarget
-
-    if (prevProgressRef.current === 0 && progress > 1) {
-      player.seekTo(newTarget)
-      player.pause()
-    } else {
-      player.play()
-      // 觸發火花脈衝（progress 真的變了才觸發）
-      if (progress > prevProgressRef.current) {
-        setShowPulse(true)
-        setTimeout(() => setShowPulse(false), 700)
-      }
-    }
-
-    prevProgressRef.current = progress
-  }, [progress, totalQuestions, containerSize])
-
-  // isComplete → 解除暫停
-  useEffect(() => {
-    const player = playerRef.current
-    if (!player) return
-    isCompleteRef.current = !!isComplete
-    if (isComplete) {
-      targetFrameRef.current = TOTAL_FRAMES - 1
-      player.play()
-    }
-  }, [isComplete, containerSize])
-
-  // Remotion inputProps
-  const inputProps = useMemo(() => ({ seed }), [seed])
-
-  const style = useMemo(() => ({ width: '100%', height: '100%' }), [])
-
-  const compW = containerSize?.w ?? 1280
-  const compH = containerSize?.h ?? 720
+  // 進度
   const percent = totalQuestions > 0 ? Math.round((progress / totalQuestions) * 100) : 0
-  const currentPhase = percent < 25 ? 0 : percent < 50 ? 1 : percent < 75 ? 2 : 3
+
+  // 自動捲動到底部
+  useEffect(() => {
+    if (bottomRef.current) {
+      bottomRef.current.scrollIntoView({ behavior: 'smooth', block: 'end' })
+    }
+  }, [items.length])
 
   return (
-    <div
-      ref={containerRef}
-      style={{
-        height: '100%',
-        width: '100%',
-        position: 'relative',
-        overflow: 'hidden',
-        background: '#1a0e08',
-      }}
-    >
-      {/* Layer 1: Remotion Player */}
-      {containerSize && (
-        webglOk ? (
-          <Player
-            ref={playerRef}
-            component={CraftComposition}
-            inputProps={inputProps}
-            compositionWidth={compW}
-            compositionHeight={compH}
-            durationInFrames={TOTAL_FRAMES}
-            fps={FPS}
-            style={style}
-            loop={!!isComplete}
-            controls={false}
-            showVolumeControls={false}
-            clickToPlay={false}
-          />
-        ) : (
-          <Player
-            ref={playerRef}
-            component={BuildingFallback2D}
-            inputProps={{ round: _round, progress, totalQuestions, isWorking }}
-            compositionWidth={compW}
-            compositionHeight={compH}
-            durationInFrames={TOTAL_FRAMES}
-            fps={FPS}
-            style={style}
-            loop={!!isComplete}
-            controls={false}
-            showVolumeControls={false}
-            clickToPlay={false}
-          />
-        )
-      )}
-
-      {/* Layer 2: Ambient Overlay — 餘燼粒子（CSS 純動畫，永遠飄動） */}
+    <div style={{
+      height: '100%',
+      width: '100%',
+      display: 'flex',
+      flexDirection: 'column',
+      background: COLORS.bg,
+      color: COLORS.headerText,
+      fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif',
+      overflow: 'hidden',
+    }}>
+      {/* ── Header ── */}
       <div style={{
-        position: 'absolute',
-        inset: 0,
-        pointerEvents: 'none',
-        zIndex: 5,
-        overflow: 'hidden',
+        padding: '14px 16px 10px',
+        borderBottom: `1px solid ${COLORS.border}`,
+        flexShrink: 0,
       }}>
-        {embers.map((ember, i) => (
-          <div
-            key={i}
-            style={{
-              position: 'absolute',
-              bottom: '-5%',
-              left: ember.left,
-              width: ember.size,
-              height: ember.size,
-              borderRadius: '50%',
-              background: ember.color,
-              boxShadow: `0 0 ${ember.size + 2}px ${ember.color}`,
-              opacity: 0,
-              animation: `craft-ember ${ember.duration}s ${ember.delay}s infinite ease-out`,
-            }}
-          />
-        ))}
-        {/* 背景微呼吸（暗銅漸層） */}
+        {/* 標題行 */}
         <div style={{
-          position: 'absolute',
-          inset: 0,
-          background: 'radial-gradient(ellipse at center, transparent 30%, rgba(107,58,42,0.08) 70%)',
-          animation: 'craft-breathe 6s infinite ease-in-out',
-        }} />
-      </div>
-
-      {/* Layer 3: Feedback Pulse — 回答瞬間火花 */}
-      {showPulse && (
-        <div style={{
-          position: 'absolute',
-          inset: 0,
-          pointerEvents: 'none',
-          zIndex: 8,
           display: 'flex',
           alignItems: 'center',
-          justifyContent: 'center',
+          justifyContent: 'space-between',
+          marginBottom: 8,
         }}>
-          {/* 中心光暈擴散 */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <span style={{
+              width: 8,
+              height: 8,
+              borderRadius: '50%',
+              background: isComplete ? COLORS.completeBorder : COLORS.categoryTitle,
+              display: 'inline-block',
+              boxShadow: isComplete ? `0 0 6px ${COLORS.completeBorder}` : 'none',
+            }} />
+            <span style={{
+              fontSize: 14,
+              fontWeight: 700,
+              letterSpacing: 0.5,
+              fontFamily: 'ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace',
+            }}>
+              需求藍圖
+            </span>
+          </div>
+          <span style={{
+            fontSize: 12,
+            color: COLORS.roundLabel,
+            fontWeight: 600,
+            fontFamily: 'ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace',
+          }}>
+            R{round}/{maxRounds}
+          </span>
+        </div>
+
+        {/* 進度條 */}
+        <div style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 10,
+        }}>
           <div style={{
-            width: 80,
-            height: 80,
-            borderRadius: '50%',
-            background: 'radial-gradient(circle, rgba(255,215,0,0.5) 0%, rgba(255,107,53,0.2) 50%, transparent 70%)',
-            animation: 'craft-spark 0.7s ease-out forwards',
-          }} />
-          {/* 散射火花碎片 */}
-          {[0, 1, 2, 3, 4].map(i => (
-            <div
-              key={i}
+            flex: 1,
+            height: 4,
+            background: COLORS.border,
+            borderRadius: 2,
+            overflow: 'hidden',
+          }}>
+            <motion.div
+              initial={{ width: 0 }}
+              animate={{ width: `${Math.min(percent, 100)}%` }}
+              transition={{ duration: 0.5, ease: 'easeOut' }}
               style={{
-                position: 'absolute',
-                width: 4,
-                height: 4,
-                borderRadius: '50%',
-                background: PHASE_COLORS[currentPhase] || '#FFD700',
-                boxShadow: `0 0 6px ${PHASE_COLORS[currentPhase] || '#FFD700'}`,
-                animation: `craft-spark-particle-${i} 0.6s ease-out forwards`,
+                height: '100%',
+                borderRadius: 2,
+                background: isComplete
+                  ? COLORS.completeBorder
+                  : `linear-gradient(90deg, ${COLORS.progressGreen}, ${COLORS.progressGreenEnd})`,
+                boxShadow: isComplete ? `0 0 8px ${COLORS.completeBorder}60` : 'none',
               }}
             />
-          ))}
-        </div>
-      )}
-
-      {/* Layer 0: 進度指示器 */}
-      <div style={{
-        position: 'absolute',
-        bottom: 16,
-        left: 0,
-        right: 0,
-        display: 'flex',
-        flexDirection: 'column',
-        alignItems: 'center',
-        gap: 8,
-        pointerEvents: 'none',
-        zIndex: 10,
-      }}>
-        {/* 4 階段標籤 */}
-        <div style={{
-          display: 'flex',
-          gap: 4,
-          alignItems: 'center',
-          padding: '6px 14px',
-          background: 'rgba(26,14,8,0.7)',
-          borderRadius: 20,
-          backdropFilter: 'blur(8px)',
-          border: '1px solid rgba(255,107,53,0.15)',
-        }}>
-          {PHASE_LABELS.map((label, i) => {
-            const isActive = i <= currentPhase
-            const isCurrent = i === currentPhase
-            return (
-              <span key={label} style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                {i > 0 && (
-                  <span style={{
-                    display: 'inline-block',
-                    width: 16,
-                    height: 1,
-                    background: isActive ? PHASE_COLORS[i] : 'rgba(255,255,255,0.15)',
-                    transition: 'background 0.5s',
-                  }} />
-                )}
-                <span style={{
-                  fontSize: 11,
-                  padding: '2px 8px',
-                  borderRadius: 10,
-                  background: isCurrent
-                    ? PHASE_COLORS[i]
-                    : isActive
-                      ? `${PHASE_COLORS[i]}33`
-                      : 'transparent',
-                  color: isActive ? '#FFF8DC' : 'rgba(255,255,255,0.35)',
-                  fontWeight: isCurrent ? 600 : 400,
-                  transition: 'all 0.5s',
-                  whiteSpace: 'nowrap',
-                }}>
-                  {isActive && i < currentPhase ? '\u25CF' : isCurrent ? '\u25CF' : '\u25CB'} {label}
-                </span>
-              </span>
-            )
-          })}
-        </div>
-
-        {/* 進度文字 */}
-        <div style={{
-          fontSize: 12,
-          color: 'rgba(255,248,220,0.85)',
-          background: 'rgba(26,14,8,0.6)',
-          padding: '4px 14px',
-          borderRadius: 12,
-          backdropFilter: 'blur(4px)',
-          border: '1px solid rgba(255,107,53,0.1)',
-        }}>
-          {progress}/{totalQuestions} · {percent}%
-          {isWorking && (
-            <span style={{ animation: 'craft-working-pulse 1.5s infinite ease-in-out' }}>
-              {' · '}{PROGRESS_STATUS.working}
-            </span>
-          )}
+          </div>
+          <span style={{
+            fontSize: 11,
+            color: COLORS.subText,
+            fontFamily: 'ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace',
+            whiteSpace: 'nowrap',
+          }}>
+            {progress}/{totalQuestions}
+          </span>
         </div>
       </div>
 
-      {/* CSS 動畫定義 */}
-      <style>{`
-        @keyframes craft-ember {
-          0% { transform: translateY(0) translateX(0); opacity: 0; }
-          10% { opacity: 0.25; }
-          50% { transform: translateY(-40vh) translateX(var(--drift, 8px)); opacity: 0.3; }
-          100% { transform: translateY(-80vh) translateX(var(--drift, 8px)); opacity: 0; }
-        }
-        @keyframes craft-breathe {
-          0%, 100% { opacity: 0.3; }
-          50% { opacity: 0.6; }
-        }
-        @keyframes craft-spark {
-          0% { transform: scale(0.3); opacity: 0.8; filter: blur(0px); }
-          50% { transform: scale(1.8); opacity: 0.4; filter: blur(2px); }
-          100% { transform: scale(3); opacity: 0; filter: blur(5px); }
-        }
-        @keyframes craft-spark-particle-0 {
-          0% { transform: translate(0,0) scale(1); opacity: 0.9; }
-          100% { transform: translate(40px,-30px) scale(0.3); opacity: 0; }
-        }
-        @keyframes craft-spark-particle-1 {
-          0% { transform: translate(0,0) scale(1); opacity: 0.9; }
-          100% { transform: translate(-35px,-40px) scale(0.3); opacity: 0; }
-        }
-        @keyframes craft-spark-particle-2 {
-          0% { transform: translate(0,0) scale(1); opacity: 0.9; }
-          100% { transform: translate(25px,35px) scale(0.3); opacity: 0; }
-        }
-        @keyframes craft-spark-particle-3 {
-          0% { transform: translate(0,0) scale(1); opacity: 0.9; }
-          100% { transform: translate(-45px,20px) scale(0.3); opacity: 0; }
-        }
-        @keyframes craft-spark-particle-4 {
-          0% { transform: translate(0,0) scale(1); opacity: 0.9; }
-          100% { transform: translate(10px,-50px) scale(0.3); opacity: 0; }
-        }
-        @keyframes craft-working-pulse {
-          0%, 100% { opacity: 0.5; }
-          50% { opacity: 1; }
-        }
-      `}</style>
+      {/* ── Content ── */}
+      <div
+        ref={scrollRef}
+        style={{
+          flex: 1,
+          overflowY: 'auto',
+          padding: '12px 12px 4px',
+          scrollbarWidth: 'thin',
+          scrollbarColor: `${COLORS.border} transparent`,
+        }}
+      >
+        {/* 錯誤提示 */}
+        {error && (
+          <div style={{
+            padding: '8px 12px',
+            marginBottom: 12,
+            borderRadius: 6,
+            background: '#3d1f1f',
+            border: '1px solid #6e3630',
+            fontSize: 12,
+            color: '#f59e9e',
+          }}>
+            {error}
+          </div>
+        )}
+
+        {/* 空狀態 */}
+        {items.length === 0 && !error && (
+          <div style={{
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            justifyContent: 'center',
+            height: '60%',
+            gap: 12,
+            color: COLORS.subText,
+          }}>
+            <div style={{
+              width: 40,
+              height: 40,
+              borderRadius: 8,
+              border: `2px dashed ${COLORS.border}`,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              fontSize: 18,
+            }}>
+              ◇
+            </div>
+            <span style={{
+              fontSize: 13,
+              fontFamily: 'ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace',
+            }}>
+              等待需求釐清開始...
+            </span>
+          </div>
+        )}
+
+        {/* 分類區塊 */}
+        <AnimatePresence>
+          {categoryKeys.map(cat => (
+            <CategorySection
+              key={cat}
+              category={cat}
+              items={grouped.get(cat)!}
+              isLatestCategory={cat === lastCategory}
+              lastItemId={lastItemId}
+            />
+          ))}
+        </AnimatePresence>
+
+        {/* 滾動錨點 */}
+        <div ref={bottomRef} />
+      </div>
+
+      {/* ── Footer 狀態指示器 ── */}
+      <div style={{
+        padding: '8px 16px',
+        borderTop: `1px solid ${COLORS.border}`,
+        flexShrink: 0,
+        display: 'flex',
+        alignItems: 'center',
+        gap: 8,
+        minHeight: 32,
+      }}>
+        {isWorking && (
+          <>
+            <motion.span
+              animate={{ opacity: [0.4, 1, 0.4] }}
+              transition={{ duration: 1.5, repeat: Infinity, ease: 'easeInOut' }}
+              style={{
+                width: 6,
+                height: 6,
+                borderRadius: '50%',
+                background: COLORS.aiWorking,
+                display: 'inline-block',
+                boxShadow: `0 0 6px ${COLORS.aiWorking}80`,
+              }}
+            />
+            <span style={{
+              fontSize: 12,
+              color: COLORS.aiWorking,
+              fontFamily: 'ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace',
+            }}>
+              AI 正在分析中...
+            </span>
+          </>
+        )}
+
+        {isComplete && !isWorking && (
+          <>
+            <span style={{
+              width: 6,
+              height: 6,
+              borderRadius: '50%',
+              background: COLORS.completeBorder,
+              display: 'inline-block',
+              boxShadow: `0 0 6px ${COLORS.completeBorder}80`,
+            }} />
+            <span style={{
+              fontSize: 12,
+              color: COLORS.completeBorder,
+              fontFamily: 'ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace',
+            }}>
+              需求釐清完成
+            </span>
+          </>
+        )}
+
+        {!isWorking && !isComplete && items.length > 0 && (
+          <span style={{
+            fontSize: 11,
+            color: COLORS.subText,
+            fontFamily: 'ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace',
+          }}>
+            已收集 {items.filter(i => i.answer).length} 項需求
+          </span>
+        )}
+      </div>
+
+      {/* ── 完成慶祝效果 ── */}
+      <AnimatePresence>
+        {isComplete && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.5 }}
+            style={{
+              position: 'absolute',
+              inset: 0,
+              pointerEvents: 'none',
+              border: `2px solid ${COLORS.completeBorder}`,
+              borderRadius: 0,
+              boxShadow: `inset 0 0 20px ${COLORS.completeBorder}15`,
+            }}
+          />
+        )}
+      </AnimatePresence>
     </div>
   )
 }

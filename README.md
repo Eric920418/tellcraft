@@ -17,7 +17,7 @@ Tellcraft 是一個 AI 驅動的自動化開發平台。用戶只需描述需求
 | **資料庫** | PostgreSQL（VPS 本地） | 低延遲，自主控制 |
 | **佇列/狀態** | Redis | BullMQ 任務佇列 + 串流狀態 |
 | **LLM** | Claude Sonnet / Haiku | Anthropic SDK |
-| **動畫** | motion/react + Remotion + Three.js | "The Craft" 工藝鍛造 + 串流動畫 |
+| **動畫** | motion/react + Remotion | 需求藍圖面板 + 串流動畫 |
 | **樣式** | Tailwind CSS v4 | `@import "tailwindcss"` 語法 |
 | **預覽** | Sandpack（@codesandbox） | 瀏覽器內真實 React 渲染 |
 | **部署** | Vercel API | 代碼 → Next.js → Vercel 自動部署 |
@@ -214,7 +214,7 @@ change_history   -- JSONB，變更歷史追蹤
 | **部署** | sanitize 6 類預檢、本地 build 驗證（3 輪 LLM 修復）、Vercel 部署、版本回滾 |
 | **迭代** | 對話內迭代修改、撤銷上一步、部署歷史回滾、迭代歷史追蹤 |
 | **預覽** | Sandpack 真實 React 渲染、串流增量更新、裝置切換、編輯模式、圖片上傳 |
-| **動畫** | "The Craft" 工藝鍛造場景（BDD Q&A，seed 驅動每專案不同）、3D 工廠流水線（Fast Build）、Remotion 驅動 |
+| **動畫** | BDD 需求藍圖面板（即時 Q&A 歷史視覺化）、3D 工廠流水線（Fast Build）、Remotion 驅動 |
 | **認證** | Google/LINE OAuth、JWT 雙軌（localStorage + Cookie）、訪客→帳號合併 |
 | **儀表板** | 用戶統計、專案管理、版本歷史、管理員面板、LLM 用量追蹤 |
 | **防護** | 三層防刷（前端冷卻 + API 限速 + Worker 鎖）、Classifier 三層防禦、LLM 自動重試 |
@@ -240,7 +240,7 @@ app/
 │   ├── dashboard/        # 儀表板元件
 │   ├── remotion/         # Remotion 動畫（fast-build/ + building-scene/）
 │   ├── building-scene/   # 3D 場景入口（dynamic import）
-│   ├── BddAnimationPanel.tsx  # "The Craft" 工藝鍛造動畫面板（三層架構 + 幀管理）
+│   ├── BddAnimationPanel.tsx  # BDD 需求藍圖面板（文字歷史紀錄 + 分類 Q&A）
 │   └── FastBuildPlayer.tsx # 3D 工廠 Player
 ├── dashboard/            # 儀表板頁面（/dashboard, /dashboard/admin）
 ├── auth/                 # 認證（login/callback/post-login）
@@ -363,28 +363,18 @@ psql "$DATABASE_URL" -f tellcraft-backend/migrations/xxx.sql
 <details>
 <summary><h2>開發更新紀錄（點擊展開）</h2></summary>
 
-### "The Craft" 鍛造車間 v2（2026-02-27）
+### BDD 需求藍圖面板（2026-02-27）
 
-BDD Q&A 動畫從抽象粒子球重設計為**真實鍛造車間**場景，用戶能看到錘子敲打、鐵砧、熔爐火光：
+BDD Q&A 動畫面板從 3D 鍛造車間場景改為**純 React 文字歷史紀錄面板**：
 
-**場景物件**（全部基礎幾何組合，低多邊形工藝美學）：
-- **鐵砧**（場景中心）：木墩底座 + 鋼質砧體 + 砧角
-- **錘子**（核心動畫）：把手 + 錘頭 + 鉚釘，pivot 旋轉擺動敲打
-- **熔爐**（後方）：磚紅爐體 + 黑色爐口 + emissive 煤炭 + 煙囪
-- **風箱**（熔爐左側）：上下板 + 皮革褶皺 + 金屬噴嘴，週期性鼓風
-- **工件→寶石**：Phase 1 粗糙八面體 → Phase 2 發光熱塊 → Phase 3 多面體 → Phase 4 升起旋轉展示
-- **火花粒子**：錘子觸底瞬間從工件位置拋物線爆散
-- **環境餘燼**：熔爐附近緩慢上飄
-
-**4 階段動畫時序**（900 frames @ 30fps）：
-- Phase 1 原料（0-224）：風箱慢呼吸，錘子輕敲（50幀/次），少量火花
-- Phase 2 鍛造（225-449）：風箱加速，錘子重擊（35幀/次），大量火花，工件發紅
-- Phase 3 塑形（450-674）：錘子快敲（25幀/次），工件變形為多面體，光環出現
-- Phase 4 成品（675-899）：錘子停止，工件升起旋轉，金色 Bloom 光暈慶祝
-
-**Post-Processing**：`@react-three/postprocessing`（Bloom + Vignette）
-
-**Seed 驅動**：每個 conversationId 產出不同寶石形狀/配色/煤炭分布/火花軌跡
+- **即時 Q&A 展示**：呼叫 `getBddSession` API 取得結構化資料，按分類（功能需求/資料模型/術語定義）自動分組
+- **深色主題**：GitHub Dark 風格配色（#0D1117 背景 + monospace 字體），呈現「在建構規格」的意象
+- **進度追蹤**：頂部進度條 + 輪次標籤（R{n}/{max}），底部 AI 工作狀態指示器
+- **入場動畫**：分類區塊 slideDown + fadeIn，Q&A 條目 fadeIn + slideUp，最新條目橙色高亮
+- **完成效果**：進度條滿格 + 綠色邊框光暈
+- **可折疊分類**：點擊分類標題展開/收合，每個分類顯示已答題數
+- **自動捲動**：新條目出現時自動捲動到底部
+- **移除依賴**：不再使用 Remotion Player、Three.js、@react-three/postprocessing
 
 ### SandpackPreview 編輯模式（2026-02-26）
 
