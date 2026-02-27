@@ -126,7 +126,7 @@ Phase 2: Formulation（需求驅動 + 智能分組）
 
 Phase 3: Spec Discovery + Clarify
     ↓ S1-S6 品質審查（規則完整性/Example 覆蓋/邊界條件/格式/跨 Feature 一致/Schema 對應）
-    ↓ 最多 2 輪 / 10 題
+    ↓ 最多 2 輪 / 10 題，超額時按嚴重度截斷（不跳過）
 
 Phase 4: Actions Design → actions.yml（Sonnet LLM）
 Phase 5: ISA Config → isa_codegen.yml（100% 規則式，零 LLM）

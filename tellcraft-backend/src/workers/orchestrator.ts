@@ -3042,32 +3042,34 @@ async function startSpecDiscovery(
     return
   }
 
-  const issues = discoveryResult.issues || []
+  let issues = discoveryResult.issues || []
   console.log(`[Orchestrator] Spec Discovery 發現 ${issues.length} 個問題`)
 
-  // 檢查終止條件
-  const specTotalQuestions = (state.specTotalQuestions || 0) + issues.length
-  const shouldStop =
-    state.specRound! >= SPEC_DISCOVERY_LIMITS.MAX_ROUNDS ||
-    specTotalQuestions >= SPEC_DISCOVERY_LIMITS.MAX_TOTAL_QUESTIONS
-
-  if (issues.length === 0 || shouldStop) {
-    if (issues.length === 0) {
-      console.log('[Orchestrator] Spec Discovery 沒有發現問題，規格品質良好')
-      await sendMessage(conversationId, io, {
-        content: '規格品質檢查通過！',
-        stage: 'spec_discovery_complete',
-      })
-    } else {
-      console.log(`[Orchestrator] 達到 Spec Discovery 終止條件 (輪數: ${state.specRound}, 問題數: ${specTotalQuestions})`)
-      await sendMessage(conversationId, io, {
-        content: '品質檢查完成。',
-        stage: 'spec_discovery_complete',
-      })
-    }
+  // 沒有問題 → 直接完成
+  if (issues.length === 0) {
+    console.log('[Orchestrator] Spec Discovery 沒有發現問題，規格品質良好')
+    await sendMessage(conversationId, io, {
+      content: '規格品質檢查通過！',
+      stage: 'spec_discovery_complete',
+    })
     await completeSpecPhase(conversationId, state, redis, io)
     return
   }
+
+  // 有問題：計算剩餘配額，截斷到可呈現的數量
+  const previousQuestions = state.specTotalQuestions || 0
+  const remainingQuota = Math.max(SPEC_DISCOVERY_LIMITS.MAX_TOTAL_QUESTIONS - previousQuestions, SPEC_DISCOVERY_LIMITS.QUESTIONS_PER_ROUND)
+
+  if (issues.length > remainingQuota) {
+    console.log(`[Orchestrator] 問題數 ${issues.length} 超過剩餘配額 ${remainingQuota}，截斷至 ${remainingQuota} 個（按嚴重度排序）`)
+    // 按 severity 排序：high > medium > low
+    const severityOrder: Record<string, number> = { high: 0, medium: 1, low: 2 }
+    issues = [...issues]
+      .sort((a, b) => (severityOrder[a.severity] ?? 9) - (severityOrder[b.severity] ?? 9))
+      .slice(0, remainingQuota)
+  }
+
+  const specTotalQuestions = previousQuestions + issues.length
 
   // 有問題需要確認，保存問題並進入 Spec Clarify
   state.specIssues = issues

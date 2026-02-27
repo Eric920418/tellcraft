@@ -2260,14 +2260,27 @@ ${sourceType === 'ideas'
   }
 
   try {
-    const jsonMatch = response.content.match(/```json\s*([\s\S]*?)\s*```/) ||
-                      response.content.match(/\{[\s\S]*"styleSummary"[\s\S]*\}/)
+    // 多種 JSON 提取策略（LLM 回傳格式不穩定）
+    const jsonMatch = response.content.match(/```json\s*([\s\S]*?)\s*```/) ||     // ```json ... ```
+                      response.content.match(/```\s*([\s\S]*?)\s*```/) ||          // ``` ... ```（無語言標記）
+                      response.content.match(/(\{[\s\S]*"styleSummary"[\s\S]*\})/) // 裸 JSON
     if (!jsonMatch) {
+      console.error('[UIUX] Design Brief JSON 提取失敗，LLM 原始回應:', response.content.substring(0, 500))
       return { success: false, error: '無法解析設計方向摘要' }
     }
 
     const jsonStr = jsonMatch[1] || jsonMatch[0]
-    const parsed = JSON.parse(jsonStr)
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    let parsed: any
+    try {
+      parsed = JSON.parse(jsonStr)
+    } catch {
+      // JSON 解析失敗：嘗試清理常見格式問題（尾隨逗號、控制字符）
+      const cleaned = jsonStr
+        .replace(/,\s*([}\]])/g, '$1')       // 移除尾隨逗號
+        .replace(/[\x00-\x1f\x7f]/g, ' ')   // 移除控制字符
+      parsed = JSON.parse(cleaned)
+    }
 
     // 推斷 tier（LLM 回傳 + fallback）
     let recommendedTier: DesignTier = 'functional'
