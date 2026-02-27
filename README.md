@@ -414,6 +414,17 @@ BDD Q&A 動畫面板從 3D 鍛造車間場景改為**純 React 文字歷史紀�
 2. 擴展可編輯元素類型：container（section/header/footer/nav/main/article）+ image
 3. Undo/Redo 系統 + 元素路徑 Breadcrumb + 單元素重置
 
+### 編輯模式屬性擴展（2026-02-27）
+
+擴展 PropertyEditor 可編輯屬性，從表面屬性（顏色/間距）擴展到完整的佈局排版控制：
+
+- **容器佈局**：display（block/flex/inline-flex/grid/inline/none）、flex 方向/主軸對齊/交叉軸對齊/gap/換行、overflow
+- **尺寸**（container + image）：width/maxWidth/height，支援任意 CSS 值（auto/100%/300px）
+- **文字裝飾**：textDecoration（none/underline/line-through）、textTransform（none/uppercase/lowercase/capitalize）
+- **條件顯示**：flex 相關屬性只在 display=flex/inline-flex 時展開
+- **儲存描述**：CSS 屬性自動映射中文標籤（如 `flexDirection` → `Flex 方向`），提升 LLM 理解精確度
+- 修改檔案：`PropertyEditor.tsx`、`sandpack-utils.ts`（SANDPACK_EDIT_BRIDGE）、`PreviewPanel.tsx`（EDIT_BRIDGE_SCRIPT）、`page.tsx`（handleCodePreviewSave）
+
 ### BDD 3D 動畫重設計（2026-02-26）
 
 BDD Q&A 場景從「低多邊形城堡」重設計為「軟體介面鍛造」主題（已被 2026-02-27 "The Craft" 取代）。

@@ -2030,6 +2030,37 @@ function ChatSection({
         index = match ? parseInt(match[2]) + 1 : 1
       }
 
+      const CSS_LABELS: Record<string, string> = {
+        display: '顯示模式',
+        flexDirection: 'Flex 方向',
+        justifyContent: '主軸對齊',
+        alignItems: '交叉軸對齊',
+        gap: '子元素間距',
+        flexWrap: '換行方式',
+        overflow: '溢出處理',
+        width: '寬度',
+        maxWidth: '最大寬度',
+        height: '高度',
+        textDecoration: '文字裝飾',
+        textTransform: '文字大小寫',
+        color: '文字顏色',
+        backgroundColor: '背景顏色',
+        fontSize: '字體大小',
+        fontWeight: '字重',
+        textAlign: '文字對齊',
+        lineHeight: '行高',
+        letterSpacing: '字距',
+        padding: '內距',
+        margin: '外距',
+        borderRadius: '圓角',
+        borderStyle: '邊框樣式',
+        borderWidth: '邊框寬度',
+        borderColor: '邊框顏色',
+        boxShadow: '陰影',
+        opacity: '透明度',
+        objectFit: '圖片填充模式',
+      }
+
       const prefix = `第 ${index} 個 <${tag}>`
       Object.entries(changes).forEach(([prop, value]) => {
         if (prop === 'text') {
@@ -2039,7 +2070,8 @@ function ChatSection({
         } else if (prop === 'imgAlt') {
           lines.push(`- ${prefix}：alt 改為「${value}」`)
         } else {
-          lines.push(`- ${prefix}：CSS ${prop} 改為 ${value}`)
+          const label = CSS_LABELS[prop] || prop
+          lines.push(`- ${prefix}：${label}（${prop}）改為 ${value}`)
         }
       })
     })

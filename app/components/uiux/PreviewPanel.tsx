@@ -169,6 +169,8 @@ const EDIT_BRIDGE_SCRIPT = `
       base.textAlign = cs.textAlign;
       base.lineHeight = cs.lineHeight;
       base.letterSpacing = cs.letterSpacing;
+      base.textDecoration = cs.textDecoration;
+      base.textTransform = cs.textTransform;
     }
 
     if (type === 'container') {
@@ -179,12 +181,24 @@ const EDIT_BRIDGE_SCRIPT = `
       base.borderStyle = cs.borderStyle;
       base.boxShadow = cs.boxShadow;
       base.opacity = cs.opacity;
+      base.display = cs.display;
+      base.flexDirection = cs.flexDirection;
+      base.justifyContent = cs.justifyContent;
+      base.alignItems = cs.alignItems;
+      base.gap = cs.gap;
+      base.flexWrap = cs.flexWrap;
+      base.overflow = cs.overflow;
+      base.width = cs.width;
+      base.maxWidth = cs.maxWidth;
+      base.height = cs.height;
     }
 
     if (type === 'image') {
       base.objectFit = cs.objectFit;
       base.imgSrc = el.src || '';
       base.imgAlt = el.alt || '';
+      base.width = cs.width;
+      base.height = cs.height;
     }
 
     return base;

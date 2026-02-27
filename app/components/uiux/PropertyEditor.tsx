@@ -74,6 +74,65 @@ const OBJECT_FIT_OPTIONS = [
   { value: 'none', label: 'None' },
 ]
 
+const DISPLAY_OPTIONS = [
+  { value: 'block', label: 'Block' },
+  { value: 'flex', label: 'Flex' },
+  { value: 'inline-flex', label: 'Inline Flex' },
+  { value: 'grid', label: 'Grid' },
+  { value: 'inline', label: 'Inline' },
+  { value: 'none', label: 'None' },
+]
+
+const FLEX_DIRECTION_OPTIONS = [
+  { value: 'row', label: '水平 →' },
+  { value: 'column', label: '垂直 ↓' },
+  { value: 'row-reverse', label: '水平 ←' },
+  { value: 'column-reverse', label: '垂直 ↑' },
+]
+
+const JUSTIFY_OPTIONS = [
+  { value: 'flex-start', label: 'Start' },
+  { value: 'center', label: 'Center' },
+  { value: 'flex-end', label: 'End' },
+  { value: 'space-between', label: 'Between' },
+  { value: 'space-around', label: 'Around' },
+  { value: 'space-evenly', label: 'Evenly' },
+]
+
+const ALIGN_ITEMS_OPTIONS = [
+  { value: 'flex-start', label: 'Start' },
+  { value: 'center', label: 'Center' },
+  { value: 'flex-end', label: 'End' },
+  { value: 'stretch', label: 'Stretch' },
+  { value: 'baseline', label: 'Baseline' },
+]
+
+const FLEX_WRAP_OPTIONS = [
+  { value: 'nowrap', label: 'No Wrap' },
+  { value: 'wrap', label: 'Wrap' },
+  { value: 'wrap-reverse', label: 'Wrap Rev' },
+]
+
+const OVERFLOW_OPTIONS = [
+  { value: 'visible', label: 'Visible' },
+  { value: 'hidden', label: 'Hidden' },
+  { value: 'auto', label: 'Auto' },
+  { value: 'scroll', label: 'Scroll' },
+]
+
+const TEXT_DECORATION_OPTIONS = [
+  { value: 'none', label: 'None' },
+  { value: 'underline', label: 'Underline' },
+  { value: 'line-through', label: 'Strikethrough' },
+]
+
+const TEXT_TRANSFORM_OPTIONS = [
+  { value: 'none', label: 'None' },
+  { value: 'uppercase', label: 'ABC' },
+  { value: 'lowercase', label: 'abc' },
+  { value: 'capitalize', label: 'Abc' },
+]
+
 export default function PropertyEditor({ element, onUpdate, onClose, onReset, onUploadImage }: PropertyEditorProps) {
   const [editedStyles, setEditedStyles] = useState<Record<string, string>>({})
   const [editedText, setEditedText] = useState('')
@@ -238,6 +297,86 @@ export default function PropertyEditor({ element, onUpdate, onClose, onReset, on
             </div>
           )}
 
+          {/* ── 佈局屬性（container 才顯示）── */}
+          {isContainer && (
+            <PropertyGroup title="佈局">
+              <SelectInput
+                label="Display"
+                value={editedStyles.display || 'block'}
+                options={DISPLAY_OPTIONS}
+                onChange={(v) => updateStyle('display', v)}
+              />
+              {(editedStyles.display === 'flex' || editedStyles.display === 'inline-flex') && (
+                <>
+                  <SelectInput
+                    label="方向"
+                    value={editedStyles.flexDirection || 'row'}
+                    options={FLEX_DIRECTION_OPTIONS}
+                    onChange={(v) => updateStyle('flexDirection', v)}
+                  />
+                  <SelectInput
+                    label="主軸對齊"
+                    value={editedStyles.justifyContent || 'flex-start'}
+                    options={JUSTIFY_OPTIONS}
+                    onChange={(v) => updateStyle('justifyContent', v)}
+                  />
+                  <SelectInput
+                    label="交叉軸對齊"
+                    value={editedStyles.alignItems || 'stretch'}
+                    options={ALIGN_ITEMS_OPTIONS}
+                    onChange={(v) => updateStyle('alignItems', v)}
+                  />
+                  <NumberInput
+                    label="間距 (Gap)"
+                    value={parseInt(editedStyles.gap) || 0}
+                    unit="px"
+                    min={0}
+                    max={80}
+                    onChange={(v) => updateStyle('gap', `${v}px`)}
+                  />
+                  <SelectInput
+                    label="換行"
+                    value={editedStyles.flexWrap || 'nowrap'}
+                    options={FLEX_WRAP_OPTIONS}
+                    onChange={(v) => updateStyle('flexWrap', v)}
+                  />
+                </>
+              )}
+              <SelectInput
+                label="溢出"
+                value={editedStyles.overflow || 'visible'}
+                options={OVERFLOW_OPTIONS}
+                onChange={(v) => updateStyle('overflow', v)}
+              />
+            </PropertyGroup>
+          )}
+
+          {/* ── 尺寸屬性（container + image）── */}
+          {(isContainer || isImage) && (
+            <PropertyGroup title="尺寸">
+              <TextFieldInput
+                label="寬度"
+                value={editedStyles.width || 'auto'}
+                placeholder="auto / 100% / 300px"
+                onChange={(v) => updateStyle('width', v)}
+              />
+              {isContainer && (
+                <TextFieldInput
+                  label="最大寬度"
+                  value={editedStyles.maxWidth || 'none'}
+                  placeholder="none / 100% / 1200px"
+                  onChange={(v) => updateStyle('maxWidth', v)}
+                />
+              )}
+              <TextFieldInput
+                label="高度"
+                value={editedStyles.height || 'auto'}
+                placeholder="auto / 100% / 400px"
+                onChange={(v) => updateStyle('height', v)}
+              />
+            </PropertyGroup>
+          )}
+
           {/* ── 顏色屬性（text + container）── */}
           {(isText || isContainer) && (
             <PropertyGroup title="顏色">
@@ -299,6 +438,22 @@ export default function PropertyEditor({ element, onUpdate, onClose, onReset, on
                   min={-3}
                   max={10}
                   onChange={(v) => updateStyle('letterSpacing', `${v}px`)}
+                />
+              )}
+              {isText && (
+                <SelectInput
+                  label="裝飾線"
+                  value={(editedStyles.textDecoration || 'none').split(' ')[0]}
+                  options={TEXT_DECORATION_OPTIONS}
+                  onChange={(v) => updateStyle('textDecoration', v)}
+                />
+              )}
+              {isText && (
+                <SelectInput
+                  label="大小寫"
+                  value={editedStyles.textTransform || 'none'}
+                  options={TEXT_TRANSFORM_OPTIONS}
+                  onChange={(v) => updateStyle('textTransform', v)}
                 />
               )}
             </PropertyGroup>
