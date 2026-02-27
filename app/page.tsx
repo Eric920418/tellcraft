@@ -2884,9 +2884,11 @@ function ChatSection({
     const isBddSplitMode = messages.some(m =>
       m.stage === 'clarify_question' || m.stage === 'prd_discovery_continue' || m.stage === 'prd_discovery_complete'
     ) && !messages.some(m => m.stage?.startsWith('uiux') || m.richContent?.type === 'code_preview')
-    const bddChatWidth = isBddSplitMode ? 780 : 420
-    const bddMinChatWidth = isBddSplitMode ? 640 : 320
-    const bddMaxChatWidth = isBddSplitMode ? 1100 : 600
+    // BDD 模式：聊天佔 80%，需求藍圖動畫佔 20%
+    const screenWidth = typeof window !== 'undefined' ? window.innerWidth : 1920
+    const bddChatWidth = isBddSplitMode ? Math.round(screenWidth * 0.8) : 420
+    const bddMinChatWidth = isBddSplitMode ? Math.round(screenWidth * 0.7) : 320
+    const bddMaxChatWidth = isBddSplitMode ? Math.round(screenWidth * 0.9) : 600
 
     return (
       <motion.div
