@@ -1156,7 +1156,7 @@ async function handleContinueFlow(
   if (state.phase === 'fast_generating') {
     const FAST_BUILD_TIMEOUT_MS = 10 * 60 * 1000
     const startedAt = state.uiuxCodeGenerationStartedAt || 0
-    if (startedAt > 0 && Date.now() - startedAt > FAST_BUILD_TIMEOUT_MS) {
+    if (startedAt === 0 || Date.now() - startedAt > FAST_BUILD_TIMEOUT_MS) {
       console.warn('[Orchestrator] Fast Build 超時，嘗試恢復')
       const hasCode = state.uiuxGeneratedCode &&
         (state.uiuxGeneratedCode.pages.length > 0 || state.uiuxGeneratedCode.components.length > 0)
@@ -1273,27 +1273,36 @@ async function handleContinueFlow(
     const startedAt = state.uiuxCodeGenerationStartedAt || 0
     const elapsed = Date.now() - startedAt
 
-    if (startedAt > 0 && elapsed > GENERATION_TIMEOUT_MS) {
-      console.warn(`[Orchestrator] 代碼生成超時 (${Math.round(elapsed / 1000)}s)，偵測到死鎖，嘗試恢復`)
+    const isTimedOut = startedAt === 0 || elapsed > GENERATION_TIMEOUT_MS
+
+    if (isTimedOut) {
+      console.warn(`[Orchestrator] 代碼生成超時 (${startedAt === 0 ? 'legacy' : Math.round(elapsed / 1000) + 's'})，偵測到中斷，自動恢復`)
 
       // 檢查是否有已存檔的代碼可以恢復
       const hasCode = state.uiuxGeneratedCode &&
         (state.uiuxGeneratedCode.pages.length > 0 || state.uiuxGeneratedCode.components.length > 0)
+      const resumePhase = state.uiuxCodePhase || 'structure'
 
-      if (hasCode) {
-        // 有中途存檔 → 直接跳到完成狀態，讓用戶可以部署或繼續修改
-        console.log('[Orchestrator] 從中途存檔恢復，跳到 uiux_complete')
+      if (hasCode && resumePhase !== 'structure' && resumePhase !== 'complete') {
+        // 有中途存檔且未完成 → 自動恢復管線（從中斷點繼續）
+        console.log(`[Orchestrator] 從 ${resumePhase} 階段自動恢復管線`)
+        state.uiuxCodeGenerationStartedAt = Date.now()
+        state.waitingForReply = false
+        await saveFlowState(redis, conversationId, state)
+
+        // 直接呼叫管線，它會根據 uiuxCodePhase 跳過已完成的階段
+        await executeFullCodePipeline(conversationId, state, redis, io)
+      } else if (hasCode && resumePhase === 'complete') {
+        // 所有階段都完成了但沒走到最後收尾 → 直接進入 uiux_complete
+        console.log('[Orchestrator] 代碼已全部生成，進入完成狀態')
         state.phase = 'uiux_complete'
         state.uiuxCodePhase = 'complete'
         state.uiuxCodeGenerationStartedAt = undefined
         state.waitingForReply = false
         await saveFlowState(redis, conversationId, state)
 
-        const pageCount = state.uiuxGeneratedCode!.pages.length
-        const compCount = state.uiuxGeneratedCode!.components.length
-
         await sendMessage(conversationId, io, {
-          content: `代碼生成在中途被中斷了，但已恢復之前的進度（${pageCount} 個頁面、${compCount} 個組件）。\n\n你可以：\n- 輸入「**部署**」直接部署現有代碼\n- 或描述想調整的地方，我來修改`,
+          content: '代碼生成已恢復完成！\n\n你可以：\n- 輸入「**部署**」部署上線\n- 或描述想調整的地方，我來修改',
           stage: 'uiux_complete',
         })
       } else {
@@ -4073,17 +4082,33 @@ async function executeFullCodePipeline(
     return
   }
 
-  // ===== 發送一條生成中訊息（不洗版）=====
-  await sendMessage(conversationId, io, {
-    content: '正在生成設計中，請稍候...',
-    stage: 'uiux_pipeline_progress',
-    progress: { current: 1, total: 3, step: '生成中' },
-  })
-
   const { template: dbTemplate, bddSpec, originalRequirements } = await getTemplateAndBddSpec(sessionId)
   const template = state.uiuxPreparedTemplate || dbTemplate
   const pages = template.pageStructure.pages || ['home']
   const twConfig = generateTailwindConfig(uiuxDesignSystem)
+
+  // ===== Resume 支援：根據 uiuxCodePhase 跳過已完成階段 =====
+  const PHASE_ORDER: Record<string, number> = { structure: 0, animation: 1, rwd: 2, quality_gate: 3, complete: 4 }
+  const resumePhase = state.uiuxCodePhase || 'structure'
+  const resumeIndex = PHASE_ORDER[resumePhase] ?? 0
+  let currentCode = state.uiuxGeneratedCode || { pages: [], components: [], styles: '' }
+
+  if (resumeIndex > 0 && (currentCode.pages.length > 0 || currentCode.components.length > 0)) {
+    const pageCount = currentCode.pages.length
+    const compCount = currentCode.components.length
+    console.log(`[Orchestrator] Pipeline 從 ${resumePhase} 階段恢復（已有 ${pageCount} 頁 ${compCount} 組件）`)
+    await sendMessage(conversationId, io, {
+      content: `正在從中斷點恢復生成（已完成 ${pageCount} 個頁面），繼續處理中...`,
+      stage: 'uiux_pipeline_progress',
+      progress: { current: resumeIndex, total: 3, step: '恢復生成' },
+    })
+  } else {
+    await sendMessage(conversationId, io, {
+      content: '正在生成設計中，請稍候...',
+      stage: 'uiux_pipeline_progress',
+      progress: { current: 1, total: 3, step: '生成中' },
+    })
+  }
 
   // ===== BDD→UI 翻譯（有快取跳過）=====
   let uiSpec = state.uiuxUISpec
@@ -4100,99 +4125,105 @@ async function executeFullCodePipeline(
     }
   }
 
-  // ===== 階段 1/3：結構 =====
-  const structureResult = await generateStructure(
-    uiuxDesignSystem,
-    pages,
-    template,
-    bddSpec,
-    state.uiuxDesignTier,
-    {
-      originalRequirements,
-      designIdeas: state.uiuxDesignIdeas,
-      designBrief: state.uiuxDesignBrief,
-      uiSpec,
-      variantConcept: state.uiuxVariantConcept,
-      templateOverrides: state.templateOverrides,
-    },
-    { userId: state.userId, conversationId, purpose: 'uiux_structure' },
-    makeStreamingCallback(conversationId, io, redis, 'structure', twConfig)
-  )
+  // ===== 階段 1/3：結構（尚未完成時才執行）=====
+  if (resumeIndex <= 0) {
+    const structureResult = await generateStructure(
+      uiuxDesignSystem,
+      pages,
+      template,
+      bddSpec,
+      state.uiuxDesignTier,
+      {
+        originalRequirements,
+        designIdeas: state.uiuxDesignIdeas,
+        designBrief: state.uiuxDesignBrief,
+        uiSpec,
+        variantConcept: state.uiuxVariantConcept,
+        templateOverrides: state.templateOverrides,
+      },
+      { userId: state.userId, conversationId, purpose: 'uiux_structure' },
+      makeStreamingCallback(conversationId, io, redis, 'structure', twConfig)
+    )
 
-  if (!structureResult.success) {
-    console.error('[Orchestrator] Pipeline 結構生成失敗:', structureResult.error)
-    state.phase = 'uiux_variant_selection'
-    state.uiuxCodePhase = undefined
-    await saveFlowState(redis, conversationId, state)
-    await sendMessage(conversationId, io, {
-      content: `生成失敗：${structureResult.error}\n\n請重新選擇變體，或輸入「重試」再試一次。`,
-      stage: 'error',
-    })
-    return
-  }
-
-  let currentCode = {
-    pages: structureResult.pages || [],
-    components: structureResult.components || [],
-    styles: structureResult.styles || '',
-  }
-
-  // ── Structure 中途存檔（防止後續階段中斷丟失進度）──
-  state.uiuxGeneratedCode = currentCode
-  state.uiuxStructureCode = currentCode
-  state.uiuxCodePhase = 'animation'
-  await saveFlowState(redis, conversationId, state)
-  await updateBddSession({
-    sessionId,
-    updates: {
-      generatedPages: currentCode.pages,
-      generatedComponents: currentCode.components,
-      generatedStyles: currentCode.styles,
-    },
-  })
-  if (state.projectId) {
-    await db.upsertProjectFiles(state.projectId, 'uiux',
-      generatedCodeToFileRows(currentCode, state.uiuxDesignSystem))
-  }
-
-  // ===== 階段 2/3：動畫 =====
-  const pipelineUiSpecSummary = state.uiuxUISpec ? buildUISpecSummary(state.uiuxUISpec) : undefined
-  const animationResult = await generateAnimations(
-    uiuxDesignSystem,
-    currentCode,
-    state.uiuxDesignTier,
-    { userId: state.userId, conversationId, purpose: 'uiux_animation' },
-    makeStreamingCallback(conversationId, io, redis, 'animation', twConfig),
-    state.uiuxVariantConcept,
-    pipelineUiSpecSummary
-  )
-
-  if (animationResult.success) {
-    currentCode = {
-      pages: animationResult.pages || currentCode.pages,
-      components: animationResult.components || currentCode.components,
-      styles: animationResult.styles || currentCode.styles,
+    if (!structureResult.success) {
+      console.error('[Orchestrator] Pipeline 結構生成失敗:', structureResult.error)
+      state.phase = 'uiux_variant_selection'
+      state.uiuxCodePhase = undefined
+      await saveFlowState(redis, conversationId, state)
+      await sendMessage(conversationId, io, {
+        content: `生成失敗：${structureResult.error}\n\n請重新選擇變體，或輸入「重試」再試一次。`,
+        stage: 'error',
+      })
+      return
     }
-  } else {
-    console.warn('[Orchestrator] Pipeline 動畫生成失敗，使用結構代碼繼續:', animationResult.error)
+
+    currentCode = {
+      pages: structureResult.pages || [],
+      components: structureResult.components || [],
+      styles: structureResult.styles || '',
+    }
+
+    // ── Structure 中途存檔（防止後續階段中斷丟失進度）──
+    state.uiuxGeneratedCode = currentCode
+    state.uiuxStructureCode = currentCode
+    state.uiuxCodePhase = 'animation'
+    await saveFlowState(redis, conversationId, state)
+    await updateBddSession({
+      sessionId,
+      updates: {
+        generatedPages: currentCode.pages,
+        generatedComponents: currentCode.components,
+        generatedStyles: currentCode.styles,
+      },
+    })
+    if (state.projectId) {
+      await db.upsertProjectFiles(state.projectId, 'uiux',
+        generatedCodeToFileRows(currentCode, state.uiuxDesignSystem))
+    }
   }
 
-  // ── Animation 中途存檔 ──
-  state.uiuxGeneratedCode = currentCode
-  state.uiuxAnimationCode = currentCode
-  state.uiuxCodePhase = 'rwd'
-  await saveFlowState(redis, conversationId, state)
-  await updateBddSession({
-    sessionId,
-    updates: {
-      generatedPages: currentCode.pages,
-      generatedComponents: currentCode.components,
-      generatedStyles: currentCode.styles,
-    },
-  })
-  if (state.projectId) {
-    await db.upsertProjectFiles(state.projectId, 'uiux',
-      generatedCodeToFileRows(currentCode, state.uiuxDesignSystem))
+  // UISpec 摘要（Animation + RWD 共用）
+  const pipelineUiSpecSummary = state.uiuxUISpec ? buildUISpecSummary(state.uiuxUISpec) : undefined
+
+  // ===== 階段 2/3：動畫（animation 尚未完成時才執行）=====
+  if (resumeIndex <= 1) {
+    const animationResult = await generateAnimations(
+      uiuxDesignSystem,
+      currentCode,
+      state.uiuxDesignTier,
+      { userId: state.userId, conversationId, purpose: 'uiux_animation' },
+      makeStreamingCallback(conversationId, io, redis, 'animation', twConfig),
+      state.uiuxVariantConcept,
+      pipelineUiSpecSummary
+    )
+
+    if (animationResult.success) {
+      currentCode = {
+        pages: animationResult.pages || currentCode.pages,
+        components: animationResult.components || currentCode.components,
+        styles: animationResult.styles || currentCode.styles,
+      }
+    } else {
+      console.warn('[Orchestrator] Pipeline 動畫生成失敗，使用結構代碼繼續:', animationResult.error)
+    }
+
+    // ── Animation 中途存檔 ──
+    state.uiuxGeneratedCode = currentCode
+    state.uiuxAnimationCode = currentCode
+    state.uiuxCodePhase = 'rwd'
+    await saveFlowState(redis, conversationId, state)
+    await updateBddSession({
+      sessionId,
+      updates: {
+        generatedPages: currentCode.pages,
+        generatedComponents: currentCode.components,
+        generatedStyles: currentCode.styles,
+      },
+    })
+    if (state.projectId) {
+      await db.upsertProjectFiles(state.projectId, 'uiux',
+        generatedCodeToFileRows(currentCode, state.uiuxDesignSystem))
+    }
   }
 
   // ===== 階段 3/3：響應式 =====
