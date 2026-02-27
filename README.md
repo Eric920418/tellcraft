@@ -49,7 +49,7 @@ npx ts-node bdd-spec/scripts/validate-feature.ts spec/features/
 `VPS_API_URL` `NEXT_PUBLIC_VPS_API_URL` `NEXT_PUBLIC_VPS_WS_URL` `NEXT_PUBLIC_SUPABASE_URL` `NEXT_PUBLIC_SUPABASE_ANON_KEY`
 
 **後端**（`tellcraft-backend/.env`）：
-`DATABASE_URL` `REDIS_URL` `JWT_SECRET` `ANTHROPIC_API_KEY` `GOOGLE_CLIENT_ID` `GOOGLE_CLIENT_SECRET` `LINE_CHANNEL_ID` `LINE_CHANNEL_SECRET` `UPLOAD_DIR` `UPLOAD_BASE_URL`
+`DATABASE_URL` `REDIS_URL` `JWT_SECRET` `ANTHROPIC_API_KEY` `GOOGLE_CLIENT_ID` `GOOGLE_CLIENT_SECRET` `LINE_CHANNEL_ID` `LINE_CHANNEL_SECRET` `LINE_MESSAGING_CHANNEL_ACCESS_TOKEN` `UPLOAD_DIR` `UPLOAD_BASE_URL`
 
 ## 系統架構
 
@@ -100,6 +100,7 @@ npx ts-node bdd-spec/scripts/validate-feature.ts spec/features/
 | `event-storming.ts` | Haiku | bdd-spec | Event Storming DFS 探索 |
 | `fast-build-generation.ts` | 無 | fast-build | 規則式 tier/產品/DesignSystem（零 LLM） |
 | `template-matcher.ts` | 無 | orchestrator | 三層評分匹配（零 LLM） |
+| `line-notify.ts` | 無 | orchestrator-utils | LINE 推播通知（stage 白名單過濾） |
 
 ### 兩種模式
 
@@ -220,6 +221,7 @@ change_history   -- JSONB，變更歷史追蹤
 | **認證** | Google/LINE OAuth、JWT 雙軌（localStorage + Cookie）、訪客→帳號合併 |
 | **儀表板** | 用戶統計、專案管理、版本歷史、管理員面板、LLM 用量追蹤 |
 | **防護** | 三層防刷（前端冷卻 + API 限速 + Worker 鎖）、Classifier 三層防禦、LLM 自動重試 |
+| **通知** | LINE 推播通知（BDD 完成/UIUX 生成完成/部署成功失敗），離線用戶也能收到 |
 | **UX** | 對話回退、錯誤恢復、自動恢復對話、專案自動命名、Markdown 渲染 |
 
 ## 專案結構
@@ -265,6 +267,7 @@ tellcraft-backend/
 │   │   ├── iteration-skill.ts    # 迭代 + 撤銷 + 回滾
 │   │   ├── fast-build-generation.ts # 快速模式（規則式，零 LLM）
 │   │   ├── template-matcher.ts   # 智能模板匹配（零 LLM）
+│   │   ├── line-notify.ts        # LINE 推播通知
 │   │   ├── classifier.ts         # 三層分類防禦
 │   │   ├── bdd-to-ui-spec.ts     # BDD→UI 翻譯
 │   │   ├── event-storming.ts     # Event Storming
@@ -364,6 +367,17 @@ psql "$DATABASE_URL" -f tellcraft-backend/migrations/xxx.sql
 
 <details>
 <summary><h2>開發更新紀錄（點擊展開）</h2></summary>
+
+### LINE 推播通知（2026-02-27）
+
+LINE 用戶在關鍵里程碑完成時收到 LINE 推播通知，離線用戶也能即時知道任務進度。
+
+- **推播服務**：`line-notify.ts` 封裝 LINE Messaging API，模組級單例，未配置 token 時靜默跳過
+- **Stage 白名單**：`spec_complete`（BDD 完成）、`uiux_generation_complete`（UIUX/Fast Build 完成）、`deployer_complete`（部署成功）、`deployer_error`（部署失敗）
+- **觸發點**：`sendMessage()` 末尾 fire-and-forget 調用，不阻塞 WebSocket 推送
+- **用戶查找**：`conversations → projects → users` 三表 JOIN，只查 `provider='line'` 的用戶
+- **加好友機制**：LINE 授權 URL 加 `bot_prompt=aggressive`，登入時提示加好友（天然 opt-in）
+- **前置條件**：需在 LINE Developers Console 建立 Messaging API Channel（與 Login Channel 同 Provider），設定 `LINE_MESSAGING_CHANNEL_ACCESS_TOKEN` 環境變數
 
 ### BDD 需求藍圖面板（2026-02-27）
 

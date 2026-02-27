@@ -375,7 +375,8 @@ router.get('/line', (req, res) => {
     `&client_id=${LINE_CHANNEL_ID}` +
     `&redirect_uri=${encodeURIComponent(redirectUri)}` +
     `&state=${state}` +
-    `&scope=${scope}`
+    `&scope=${scope}` +
+    `&bot_prompt=aggressive`
 
   res.redirect(authUrl)
 })

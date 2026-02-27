@@ -481,6 +481,25 @@ export async function cleanupExpiredFlowStates() {
 }
 
 // ============================================================
+// LINE 推播查詢
+// ============================================================
+
+/**
+ * 透過 conversationId 查找 LINE 用戶的 provider_id（LINE userId）
+ * conversations → projects → users（provider='line'）
+ */
+export async function getLineUserIdByConversation(conversationId: string): Promise<string | null> {
+  const result = await queryOne<{ provider_id: string }>(
+    `SELECT u.provider_id FROM conversations c
+     JOIN projects p ON c.project_id = p.id
+     JOIN users u ON p.user_id = u.id
+     WHERE c.id = $1 AND u.provider = 'line' AND u.provider_id IS NOT NULL`,
+    [conversationId]
+  )
+  return result?.provider_id ?? null
+}
+
+// ============================================================
 // 連接管理
 // ============================================================
 
