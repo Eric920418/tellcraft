@@ -3,6 +3,7 @@
 import { useEffect, useState, useCallback } from 'react'
 import { useRouter } from '@/i18n/navigation'
 import { motion } from 'framer-motion'
+import { useTranslations } from 'next-intl'
 import { getAdminTemplates } from '@/app/lib/vps-api'
 
 interface AdminTemplate {
@@ -27,6 +28,8 @@ function getAuthToken(): string | null {
 
 export default function AdminTemplatesPage() {
   const router = useRouter()
+  const t = useTranslations('dashboard.templates')
+  const tc = useTranslations('common')
   const [templates, setTemplates] = useState<AdminTemplate[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -46,7 +49,7 @@ export default function AdminTemplatesPage() {
         router.push('/dashboard')
         return
       }
-      setError(result.error || '載入失敗')
+      setError(result.error || tc('loadFailed'))
       setIsLoading(false)
       return
     }
@@ -64,7 +67,7 @@ export default function AdminTemplatesPage() {
   if (isLoading) {
     return (
       <div style={{ padding: '40px 0', textAlign: 'center', color: 'var(--gray-500)' }}>
-        載入中...
+        {tc('loading')}
       </div>
     )
   }
@@ -104,10 +107,10 @@ export default function AdminTemplatesPage() {
             marginBottom: 8,
           }}
         >
-          模板管理
+          {t('title')}
         </h1>
         <p style={{ fontSize: 14, color: 'var(--gray-500)' }}>
-          管理 UIUX 設計模板和預覽
+          {t('subtitle')}
         </p>
       </motion.div>
 
@@ -127,7 +130,7 @@ export default function AdminTemplatesPage() {
           }}
         >
           <div style={{ fontSize: 11, color: 'var(--gray-400)', marginBottom: 8, textTransform: 'uppercase' }}>
-            總模板數
+            {t('totalTemplates')}
           </div>
           <div style={{ fontSize: 28, fontWeight: 300, fontFamily: 'var(--font-mono)' }}>
             {templates.length}
@@ -149,16 +152,16 @@ export default function AdminTemplatesPage() {
           <thead>
             <tr style={{ borderBottom: '1px solid var(--border-color)' }}>
               <th style={{ padding: '12px 16px', textAlign: 'left', fontSize: 12, fontWeight: 500, color: 'var(--gray-500)' }}>
-                模板
+                {t('templateColumn')}
               </th>
               <th style={{ padding: '12px 16px', textAlign: 'left', fontSize: 12, fontWeight: 500, color: 'var(--gray-500)' }}>
-                類別
+                {t('category')}
               </th>
               <th style={{ padding: '12px 16px', textAlign: 'left', fontSize: 12, fontWeight: 500, color: 'var(--gray-500)' }}>
-                狀態
+                {t('status')}
               </th>
               <th style={{ padding: '12px 16px', textAlign: 'right', fontSize: 12, fontWeight: 500, color: 'var(--gray-500)' }}>
-                操作
+                {t('actions')}
               </th>
             </tr>
           </thead>
@@ -201,7 +204,7 @@ export default function AdminTemplatesPage() {
                           borderRadius: 4,
                         }}
                       >
-                        啟用
+                        {t('enabled')}
                       </span>
                     )}
                     {template.isFeatured && (
@@ -214,7 +217,7 @@ export default function AdminTemplatesPage() {
                           borderRadius: 4,
                         }}
                       >
-                        精選
+                        {t('featured')}
                       </span>
                     )}
                   </div>
@@ -231,7 +234,7 @@ export default function AdminTemplatesPage() {
                       cursor: 'pointer',
                     }}
                   >
-                    {previewingId === template.id ? '關閉' : '預覽'}
+                    {previewingId === template.id ? t('closePreview') : t('preview')}
                   </button>
                 </td>
               </motion.tr>
@@ -282,7 +285,7 @@ export default function AdminTemplatesPage() {
               }}
             >
               <span style={{ fontWeight: 500 }}>
-                {templates.find(t => t.id === previewingId)?.name} 預覽
+                {t('previewTitle', { name: templates.find(tpl => tpl.id === previewingId)?.name || '' })}
               </span>
               <button
                 onClick={() => setPreviewingId(null)}
@@ -295,7 +298,7 @@ export default function AdminTemplatesPage() {
                   cursor: 'pointer',
                 }}
               >
-                關閉
+                {t('closePreview')}
               </button>
             </div>
             <iframe

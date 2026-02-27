@@ -547,6 +547,7 @@ export default function PropertyEditor({ element, onUpdate, onClose, onReset, on
                 uploadFailedLabel={t('uploadFailed')}
                 unsupportedTypeLabel={(type: string) => t('unsupportedFileType', { type })}
                 fileSizeExceededLabel={(size: string) => t('fileSizeExceeded', { size })}
+                previewAltLabel={t('previewAlt')}
               />
               <TextFieldInput
                 label={t('labelAltText')}
@@ -929,6 +930,7 @@ function ImageUrlInput({
   uploadFailedLabel,
   unsupportedTypeLabel,
   fileSizeExceededLabel,
+  previewAltLabel,
 }: {
   label: string
   value: string
@@ -940,6 +942,7 @@ function ImageUrlInput({
   uploadFailedLabel: string
   unsupportedTypeLabel: (type: string) => string
   fileSizeExceededLabel: (size: string) => string
+  previewAltLabel: string
 }) {
   const fileInputRef = useRef<HTMLInputElement>(null)
   const [uploading, setUploading] = useState(false)
@@ -1058,7 +1061,7 @@ function ImageUrlInput({
               <polyline points="17 8 12 3 7 8" />
               <line x1="12" y1="3" x2="12" y2="15" />
             </svg>
-            上傳
+            {uploadLabel}
           </motion.button>
         )}
         <input
@@ -1102,7 +1105,7 @@ function ImageUrlInput({
             <path d="M21 15l-5-5L5 21" />
           </svg>
           <div style={{ fontSize: 11, color: isDragOver ? '#3b82f6' : 'var(--gray-400)' }}>
-            拖放圖片到這裡
+            {dragLabel}
           </div>
           <div style={{ fontSize: 10, color: 'var(--gray-300)', marginTop: 2 }}>
             JPG, PNG, WebP, GIF, SVG &middot; 5MB
@@ -1133,7 +1136,7 @@ function ImageUrlInput({
             />
           </div>
           <div style={{ fontSize: 11, color: 'var(--gray-400)', marginTop: 4, textAlign: 'center' }}>
-            上傳中... {uploadProgress > 0 ? `${uploadProgress}%` : ''}
+            {uploadingLabel} {uploadProgress > 0 ? `${uploadProgress}%` : ''}
           </div>
         </div>
       )}
@@ -1169,7 +1172,7 @@ function ImageUrlInput({
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
             src={value}
-            alt="預覽"
+            alt={previewAltLabel}
             style={{
               width: '100%',
               height: '100%',

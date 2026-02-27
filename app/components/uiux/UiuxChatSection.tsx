@@ -2,6 +2,7 @@
 
 import { useState, useRef, useEffect, useCallback } from 'react'
 import { motion } from 'framer-motion'
+import { useTranslations } from 'next-intl'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import SplitLayout from './SplitLayout'
@@ -86,6 +87,7 @@ export default function UiuxChatSection({
   onSendMessage,
   onBack
 }: UiuxChatSectionProps) {
+  const t = useTranslations('uiux')
   const [input, setInput] = useState('')
   const [selectedTemplateId, setSelectedTemplateId] = useState<string | null>(null)
   const [selectedTemplate, setSelectedTemplate] = useState<Template | null>(null)
@@ -132,9 +134,9 @@ export default function UiuxChatSection({
   // 處理變體選擇
   const handleVariantSelect = useCallback((selectedIds: string[]) => {
     if (selectedIds.length === 1) {
-      onSendMessage(`選擇變體 ${selectedIds[0]}`)
+      onSendMessage(t('selectVariantMessage', { id: selectedIds[0] }))
     } else {
-      onSendMessage(`合併 ${selectedIds.join('+')}`)
+      onSendMessage(t('mergeVariantsMessage', { ids: selectedIds.join('+') }))
     }
   }, [onSendMessage])
 
@@ -199,9 +201,9 @@ export default function UiuxChatSection({
           }}
         >
           <span>←</span>
-          返回
+          {t('backButton')}
         </button>
-        <span style={{ fontSize: 14, fontWeight: 500 }}>UIUX 設計</span>
+        <span style={{ fontSize: 14, fontWeight: 500 }}>{t('uiuxDesignTitle')}</span>
       </div>
 
       {/* Messages */}
@@ -234,7 +236,7 @@ export default function UiuxChatSection({
                 letterSpacing: '0.05em',
               }}
             >
-              {message.role === 'user' ? '你' : '泰爾'}
+              {message.role === 'user' ? t('senderYou') : t('senderAssistant')}
             </div>
 
             <div
@@ -337,7 +339,7 @@ export default function UiuxChatSection({
                 }}
               >
                 <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 8 }}>
-                  生成的程式碼
+                  {t('generatedCode')}
                 </div>
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
                   {message.richContent.data.pages?.map((page) => (
@@ -370,7 +372,7 @@ export default function UiuxChatSection({
                   ))}
                 </div>
                 <div style={{ fontSize: 11, color: 'var(--gray-500)', marginTop: 8 }}>
-                  在右側預覽面板查看完整程式碼
+                  {t('viewCodeInPreview')}
                 </div>
               </motion.div>
             )}
@@ -417,7 +419,7 @@ export default function UiuxChatSection({
                 letterSpacing: '0.05em',
               }}
             >
-              泰爾
+              {t('senderAssistant')}
             </div>
             <div
               style={{
@@ -478,7 +480,7 @@ export default function UiuxChatSection({
                 }
               }
             }}
-            placeholder="輸入訊息..."
+            placeholder={t('inputPlaceholder')}
             rows={1}
             disabled={isTyping}
             style={{
@@ -513,7 +515,7 @@ export default function UiuxChatSection({
               cursor: !input.trim() || isTyping ? 'not-allowed' : 'pointer',
             }}
           >
-            送出
+            {t('sendButton')}
           </motion.button>
         </div>
       </div>
@@ -573,7 +575,7 @@ export default function UiuxChatSection({
                   whileTap={{ scale: 0.98 }}
                   onClick={() => {
                     // 發送選擇訊息，使用模板名稱讓用戶更清楚
-                    onSendMessage(`我選擇「${selectedTemplate.name}」這個模板`)
+                    onSendMessage(t('selectTemplateMessage', { name: selectedTemplate.name }))
                   }}
                   style={{
                     padding: '8px 16px',
@@ -586,7 +588,7 @@ export default function UiuxChatSection({
                     cursor: 'pointer',
                   }}
                 >
-                  使用此模板
+                  {t('useTemplate')}
                 </motion.button>
               </div>
             </motion.div>

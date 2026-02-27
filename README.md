@@ -257,7 +257,7 @@ Dashboard 帳號設定 → /api/auth/link/google（從 cookie 讀 JWT → 提取
 | **動畫** | BDD 需求藍圖面板（即時 Q&A 歷史視覺化）、3D 工廠流水線（Fast Build）、Remotion 驅動 |
 | **認證** | Google/LINE OAuth、JWT 雙軌（localStorage + Cookie）、訪客→帳號合併、帳號綁定（雙登入）、auth 頁面 i18n（next-intl） |
 | **儀表板** | 用戶統計、專案管理、版本歷史、管理員面板、LLM 用量追蹤、Dashboard 元件 i18n（next-intl） |
-| **i18n** | next-intl 多語系（zh/en）、UI 元件全量翻譯（LoginPrompt/ConversationPicker/ProjectReminder/SpecGeneration/BddPanel/Deploy 系列/BuildingPlayer）、useLocalePath hook |
+| **i18n** | next-intl 多語系（zh/en）、UI 元件全量翻譯（LoginPrompt/ConversationPicker/ProjectReminder/SpecGeneration/BddPanel/Deploy 系列/BuildingPlayer/UIUX 全系列元件）、useLocalePath hook |
 | **防護** | 三層防刷（前端冷卻 + API 限速 + Worker 鎖）、Classifier 三層防禦、LLM 自動重試 |
 | **通知** | LINE 推播通知（BDD 完成/UIUX 生成完成/部署成功失敗），離線用戶也能收到 |
 | **LINE Bot** | LINE 對話內完整 Fast Build 體驗（描述需求→生成→部署），Flex Message 卡片 + Quick Reply |
@@ -409,6 +409,16 @@ psql "$DATABASE_URL" -f tellcraft-backend/migrations/xxx.sql
 
 <details>
 <summary><h2>開發更新紀錄（點擊展開）</h2></summary>
+
+### UIUX 元件 i18n 國際化（2026-02-27）
+
+UIUX 全系列 12 個元件完成 `next-intl` 國際化，所有硬編碼中文字串替換為 `useTranslations('uiux')` 呼叫。
+
+- **已處理元件**：DeviceSwitcher、TemplateCard、QualityGateReport、TemplatePicker、VariantPicker、CodePreview、InteractivePreview、PreviewPanel、PropertyEditor、UiuxChatSection（SplitLayout/SandpackPreview 無中文字串）
+- **翻譯鍵**：`uiux` 命名空間新增 ~110 個鍵值（zh.json + en.json 同步）
+- **模組級常數處理**：`FLEX_DIRECTION_OPTIONS` 等含中文 label 的常數改為 `labelKey` 引用，組件內 `t(labelKey)` 解析
+- **子元件 i18n**：不能使用 hook 的子元件（TextAlignSelect/ShadowPresetSelect/OpacitySlider/ImageUrlInput）透過 props 傳入翻譯文字
+- **插值參數**：`totalFiles`/`maxVariantsMerge`/`selectedCount`/`selectVariantMessage`/`mergeVariantsMessage`/`selectTemplateMessage` 等使用 `t('key', { param })` 格式
 
 ### LINE Bot 深度整合（2026-02-27）
 

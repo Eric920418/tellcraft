@@ -197,13 +197,13 @@ export default function AdminUsagePage() {
           delay={0.05}
         />
         <StatsCard
-          title="輸入 Tokens"
+          title={t('inputTokens')}
           value={usage?.totalInputTokens || 0}
           icon="→"
           delay={0.1}
         />
         <StatsCard
-          title="輸出 Tokens"
+          title={t('outputTokens')}
           value={usage?.totalOutputTokens || 0}
           icon="←"
           delay={0.15}
@@ -234,11 +234,11 @@ export default function AdminUsagePage() {
                 cursor: 'pointer',
               }}
             >
-              {g === 'day' && '按日'}
-              {g === 'week' && '按週'}
-              {g === 'month' && '按月'}
-              {g === 'model' && '按模型'}
-              {g === 'conversation' && '按對話'}
+              {g === 'day' && t('byDay')}
+              {g === 'week' && t('byWeek')}
+              {g === 'month' && t('byMonth')}
+              {g === 'model' && t('byModel')}
+              {g === 'conversation' && t('byConversation')}
             </motion.button>
           ))}
         </div>
@@ -265,7 +265,7 @@ export default function AdminUsagePage() {
           }}
         >
           <h2 style={{ fontSize: 16, fontWeight: 500, marginBottom: 20 }}>
-            使用次數
+            {t('usageCount')}
             {(usage?.breakdown.length || 0) > CHART_MAX_ITEMS && (
               <span style={{ fontSize: 12, color: 'var(--gray-400)', fontWeight: 400, marginLeft: 8 }}>
                 Top {CHART_MAX_ITEMS} / {usage?.breakdown.length}
@@ -274,13 +274,13 @@ export default function AdminUsagePage() {
           </h2>
           {isLoading ? (
             <div style={{ padding: '40px 0', textAlign: 'center', color: 'var(--gray-400)' }}>
-              載入中...
+              {tc('loading')}
             </div>
           ) : chartData.length > 0 ? (
             <BarChart data={chartData} height={200} />
           ) : (
             <div style={{ padding: '40px 0', textAlign: 'center', color: 'var(--gray-400)' }}>
-              暫無數據
+              {tc('noData')}
             </div>
           )}
         </div>
@@ -294,7 +294,7 @@ export default function AdminUsagePage() {
           }}
         >
           <h2 style={{ fontSize: 16, fontWeight: 500, marginBottom: 20 }}>
-            成本趨勢
+            {t('costTrend')}
             {(usage?.breakdown.length || 0) > CHART_MAX_ITEMS && (
               <span style={{ fontSize: 12, color: 'var(--gray-400)', fontWeight: 400, marginLeft: 8 }}>
                 Top {CHART_MAX_ITEMS} / {usage?.breakdown.length}
@@ -303,13 +303,13 @@ export default function AdminUsagePage() {
           </h2>
           {isLoading ? (
             <div style={{ padding: '40px 0', textAlign: 'center', color: 'var(--gray-400)' }}>
-              載入中...
+              {tc('loading')}
             </div>
           ) : costChartData.length > 0 ? (
             <LineChart data={costChartData} height={200} />
           ) : (
             <div style={{ padding: '40px 0', textAlign: 'center', color: 'var(--gray-400)' }}>
-              暫無數據
+              {tc('noData')}
             </div>
           )}
         </div>
@@ -327,10 +327,10 @@ export default function AdminUsagePage() {
         }}
       >
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
-          <h2 style={{ fontSize: 16, fontWeight: 500 }}>詳細分解</h2>
+          <h2 style={{ fontSize: 16, fontWeight: 500 }}>{t('detailedBreakdown')}</h2>
           {totalRows > 0 && (
             <span style={{ fontSize: 12, color: 'var(--gray-400)' }}>
-              共 {totalRows} 筆
+              {t('totalRows', { count: totalRows })}
             </span>
           )}
         </div>
@@ -349,19 +349,19 @@ export default function AdminUsagePage() {
                 <thead>
                   <tr style={{ borderBottom: '1px solid var(--border-color)' }}>
                     <th style={{ padding: '12px 16px', textAlign: 'left', fontSize: 12, color: 'var(--gray-500)', fontWeight: 500 }}>
-                      {groupBy === 'model' ? '模型' : groupBy === 'conversation' ? '對話 ID' : '日期'}
+                      {groupBy === 'model' ? t('columnModel') : groupBy === 'conversation' ? t('columnConversationId') : t('columnDate')}
                     </th>
                     <th style={{ padding: '12px 16px', textAlign: 'right', fontSize: 12, color: 'var(--gray-500)', fontWeight: 500 }}>
-                      次數
+                      {t('columnCount')}
                     </th>
                     <th style={{ padding: '12px 16px', textAlign: 'right', fontSize: 12, color: 'var(--gray-500)', fontWeight: 500 }}>
-                      輸入 Tokens
+                      {t('inputTokens')}
                     </th>
                     <th style={{ padding: '12px 16px', textAlign: 'right', fontSize: 12, color: 'var(--gray-500)', fontWeight: 500 }}>
-                      輸出 Tokens
+                      {t('outputTokens')}
                     </th>
                     <th style={{ padding: '12px 16px', textAlign: 'right', fontSize: 12, color: 'var(--gray-500)', fontWeight: 500 }}>
-                      成本
+                      {t('columnCost')}
                     </th>
                   </tr>
                 </thead>
@@ -369,7 +369,7 @@ export default function AdminUsagePage() {
                   {pagedBreakdown.map((row) => (
                     <tr key={row.key} style={{ borderBottom: '1px solid var(--border-color)' }}>
                       <td style={{ padding: '14px 16px', fontSize: 14 }}>
-                        {groupBy === 'conversation' && row.key !== '(無對話)' ? (
+                        {groupBy === 'conversation' && row.key !== t('noConversation') ? (
                           <a
                             href={`/dashboard/conversations/${row.key}`}
                             style={{

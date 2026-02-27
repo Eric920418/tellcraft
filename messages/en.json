@@ -445,7 +445,10 @@
       "filterAll": "All",
       "userNotExists": "User not found",
       "messagesCount": "{count} messages",
-      "recentConversations": "Recent Conversations"
+      "recentConversations": "Recent Conversations",
+      "userDetail": "User Detail",
+      "conversation": "Conversation",
+      "readonlyMode": "Read-only"
     },
     "usage": {
       "title": "LLM Usage Statistics",

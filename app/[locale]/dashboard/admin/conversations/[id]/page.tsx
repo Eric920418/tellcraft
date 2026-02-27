@@ -4,6 +4,7 @@ import { useState, useRef, useEffect, useCallback } from 'react'
 import { useParams, useSearchParams } from 'next/navigation'
 import { Link, useRouter } from '@/i18n/navigation'
 import { motion } from 'framer-motion'
+import { useTranslations } from 'next-intl'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import dynamic from 'next/dynamic'
@@ -19,7 +20,7 @@ const SandpackPreviewComponent = dynamic(
     ssr: false,
     loading: () => (
       <div style={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--gray-50)' }}>
-        <p style={{ color: 'var(--gray-400)', fontSize: 14 }}>載入預覽環境...</p>
+        <p style={{ color: 'var(--gray-400)', fontSize: 14 }}>Loading preview...</p>
       </div>
     ),
   }
@@ -62,13 +63,8 @@ function getAuthToken(): string | null {
 }
 
 // 內部控制指令 → 人類可讀標籤
-const INTERNAL_COMMANDS: Record<string, string> = {
-  '__retry__': '重試',
-  '__go_back__': '返回上一步',
-  '__skip_es__': '跳過 ES',
-  '__accept_proposal__': '同意',
-  '__reject_proposal__': '不同意',
-}
+// Will be populated inside the component with translations
+let INTERNAL_COMMANDS: Record<string, string> = {}
 
 function formatMessageContent(content: string): { display: string; isInternal: boolean } {
   const trimmed = content.trim()
@@ -90,6 +86,21 @@ export default function AdminConversationViewerPage() {
   const params = useParams()
   const searchParams = useSearchParams()
   const router = useRouter()
+  const t = useTranslations('preview')
+  const tc = useTranslations('common')
+  const tn = useTranslations('nav')
+  const tChat = useTranslations('chat')
+  const tCmd = useTranslations('command')
+  const ta = useTranslations('dashboard.admin')
+
+  // Initialize INTERNAL_COMMANDS with translations
+  INTERNAL_COMMANDS = {
+    '__retry__': tCmd('retry'),
+    '__go_back__': tCmd('goBack'),
+    '__skip_es__': tCmd('skipEs'),
+    '__accept_proposal__': tCmd('accept'),
+    '__reject_proposal__': tCmd('reject'),
+  }
 
   const conversationId = params.id as string
   const userId = searchParams.get('userId')
@@ -125,7 +136,7 @@ export default function AdminConversationViewerPage() {
 
     if (!result.success) {
       if (isInitial) {
-        setError(result.error || '載入失敗')
+        setError(result.error || tc('loadFailed'))
         setIsLoading(false)
       }
       return
@@ -229,7 +240,7 @@ export default function AdminConversationViewerPage() {
   if (isLoading) {
     return (
       <div style={{ padding: '40px 0', textAlign: 'center', color: 'var(--gray-500)' }}>
-        載入中...
+        {tc('loading')}
       </div>
     )
   }
@@ -240,7 +251,7 @@ export default function AdminConversationViewerPage() {
         {error}
         <div style={{ marginTop: 16 }}>
           <Link href={userId ? `/dashboard/admin/users/${userId}` : '/dashboard/admin/users'} style={{ color: '#DC2626' }}>
-            ← 返回
+            {tc('back')}
           </Link>
         </div>
       </div>
@@ -269,11 +280,11 @@ export default function AdminConversationViewerPage() {
             <div style={{ display: 'flex', alignItems: 'center', padding: '12px 16px', borderBottom: '1px solid var(--border-color)', background: 'var(--white)', gap: 8 }}>
               <span style={{ width: 8, height: 8, borderRadius: '50%', background: 'var(--accent)', animation: 'pulse 1.5s ease-in-out infinite' }} />
               <span style={{ fontSize: 14, fontWeight: 500, color: 'var(--black)' }}>
-                {streamingPreview?.phase === 'structure' ? '結構生成中...' : streamingPreview?.phase === 'animation' ? '動畫增強中...' : '響應式適配中...'}
+                {streamingPreview?.phase === 'structure' ? t('streamingStructure') : streamingPreview?.phase === 'animation' ? t('streamingAnimation') : t('streamingRwd')}
               </span>
             </div>
             <div ref={codePreviewContainerRef} style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--gray-50)' }}>
-              <p style={{ color: 'var(--gray-400)', fontSize: 14 }}>等待代碼生成中...</p>
+              <p style={{ color: 'var(--gray-400)', fontSize: 14 }}>{t('waitingCode')}</p>
             </div>
             <style>{`@keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }`}</style>
           </div>
@@ -281,7 +292,7 @@ export default function AdminConversationViewerPage() {
       }
 
       const phaseLabel = isStreaming
-        ? (streamingPreview?.phase === 'structure' ? '結構生成中...' : streamingPreview?.phase === 'animation' ? '動畫增強中...' : '響應式適配中...')
+        ? (streamingPreview?.phase === 'structure' ? t('streamingStructure') : streamingPreview?.phase === 'animation' ? t('streamingAnimation') : t('streamingRwd'))
         : null
 
       return (
@@ -294,7 +305,7 @@ export default function AdminConversationViewerPage() {
                 {phaseLabel}
               </span>
             ) : (
-              <span style={{ fontSize: 14, fontWeight: 500, color: 'var(--black)' }}>設計預覽</span>
+              <span style={{ fontSize: 14, fontWeight: 500, color: 'var(--black)' }}>{t('title')}</span>
             )}
             {!isStreaming && <DeviceSwitcher activeDevice={codePreviewDevice} onDeviceChange={setCodePreviewDevice} />}
             <span style={{ fontSize: 11, color: 'var(--gray-400)', fontFamily: 'var(--font-mono)', width: 50, textAlign: 'right' }}>
@@ -334,7 +345,7 @@ export default function AdminConversationViewerPage() {
     // 正在生成中，顯示進度
     if (isGenerating && lastAssistantMsg) {
       const progress = lastAssistantMsg.progress
-      const step = progress?.step || '生成中'
+      const step = progress?.step || t('generating')
       const phaseNum = progress?.current || 0
       const totalPhases = progress?.total || 3
 
@@ -342,14 +353,14 @@ export default function AdminConversationViewerPage() {
         <div style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
           <div style={{ display: 'flex', alignItems: 'center', padding: '12px 16px', borderBottom: '1px solid var(--border-color)', background: 'var(--white)', gap: 8 }}>
             <span style={{ width: 8, height: 8, borderRadius: '50%', background: 'var(--accent)', animation: 'pulse 1.5s ease-in-out infinite' }} />
-            <span style={{ fontSize: 14, fontWeight: 500, color: 'var(--black)' }}>設計預覽 — {step}</span>
+            <span style={{ fontSize: 14, fontWeight: 500, color: 'var(--black)' }}>{t('titleWithStep', { step })}</span>
           </div>
           <div ref={codePreviewContainerRef} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', background: 'var(--gray-50)', gap: 16 }}>
             <div style={{ width: 200, height: 4, borderRadius: 2, background: 'var(--gray-200)', overflow: 'hidden' }}>
               <div style={{ width: `${(phaseNum / totalPhases) * 100}%`, height: '100%', borderRadius: 2, background: 'var(--accent)', transition: 'width 0.5s ease' }} />
             </div>
-            <p style={{ color: 'var(--gray-500)', fontSize: 14, margin: 0 }}>階段 {phaseNum}/{totalPhases}：{step}</p>
-            <p style={{ color: 'var(--gray-400)', fontSize: 12, margin: 0 }}>生成完成後將自動顯示預覽</p>
+            <p style={{ color: 'var(--gray-500)', fontSize: 14, margin: 0 }}>{t('phaseProgress', { phaseNum, totalPhases, step })}</p>
+            <p style={{ color: 'var(--gray-400)', fontSize: 12, margin: 0 }}>{t('waitingMessage')}</p>
           </div>
           <style>{`@keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }`}</style>
         </div>
@@ -365,7 +376,7 @@ export default function AdminConversationViewerPage() {
             <line x1="8" y1="21" x2="16" y2="21" />
             <line x1="12" y1="17" x2="12" y2="21" />
           </svg>
-          <p style={{ color: 'var(--gray-400)', fontSize: 14, marginTop: 12 }}>尚無預覽內容</p>
+          <p style={{ color: 'var(--gray-400)', fontSize: 14, marginTop: 12 }}>{t('noPreview')}</p>
         </div>
       </div>
     )
@@ -403,12 +414,14 @@ export default function AdminConversationViewerPage() {
             fontSize: 11, fontWeight: 600, padding: '2px 8px',
             background: '#fbbf24', color: '#78350f', letterSpacing: '0.05em',
           }}>
-            唯讀模式
+            {ta('readonlyMode')}
           </span>
-          <span style={{ fontSize: 13, color: '#92400e' }}>
-            正在查看 <strong>{userInfo.name || userInfo.email}</strong> 的對話
-            {projectInfo.name && <> — {projectInfo.name}</>}
-          </span>
+          <span style={{ fontSize: 13, color: '#92400e' }}
+            dangerouslySetInnerHTML={{
+              __html: t('viewingConversation', { name: userInfo.name || userInfo.email }) +
+                (projectInfo.name ? ` — ${projectInfo.name}` : '')
+            }}
+          />
         </div>
         <Link
           href={userId ? `/dashboard/admin/users/${userId}` : '/dashboard/admin/users'}
@@ -418,7 +431,7 @@ export default function AdminConversationViewerPage() {
             background: 'transparent', cursor: 'pointer',
           }}
         >
-          ← 返回
+          {tc('back')}
         </Link>
       </div>
 
@@ -431,17 +444,17 @@ export default function AdminConversationViewerPage() {
         background: 'var(--white)',
         flexShrink: 0,
       }}>
-        <Link href="/dashboard/admin/users" style={{ color: 'var(--gray-400)', textDecoration: 'none' }}>用戶管理</Link>
+        <Link href="/dashboard/admin/users" style={{ color: 'var(--gray-400)', textDecoration: 'none' }}>{tn('adminUsers')}</Link>
         {' / '}
         {userId && (
           <>
             <Link href={`/dashboard/admin/users/${userId}`} style={{ color: 'var(--gray-400)', textDecoration: 'none' }}>
-              {userInfo.name || userInfo.email || '用戶詳情'}
+              {userInfo.name || userInfo.email || ta('userDetail')}
             </Link>
             {' / '}
           </>
         )}
-        <span style={{ color: 'var(--gray-600)' }}>對話</span>
+        <span style={{ color: 'var(--gray-600)' }}>{ta('conversation')}</span>
       </div>
 
       {/* Main Content */}
@@ -503,7 +516,7 @@ export default function AdminConversationViewerPage() {
                         fontSize: 11, color: 'var(--gray-400)', marginBottom: 8,
                         textTransform: 'uppercase', letterSpacing: '0.05em',
                       }}>
-                        {message.role === 'user' ? (userInfo.name || userInfo.email || '用戶') : '泰爾'}
+                        {message.role === 'user' ? (userInfo.name || userInfo.email || tChat('defaultUserName')) : tChat('senderAssistant')}
                       </div>
                       {/* 內部指令：顯示為小標籤 */}
                       {msgFormatted?.isInternal ? (
@@ -562,7 +575,7 @@ export default function AdminConversationViewerPage() {
                             <div style={{ flex: 1 }}>
                               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
                                 <span style={{ fontSize: 12, color: 'var(--gray-500)' }}>
-                                  {message.progress?.step || '處理中...'}
+                                  {message.progress?.step || tChat('processing')}
                                 </span>
                                 {message.progress && (
                                   <span style={{ fontSize: 11, color: 'var(--gray-400)' }}>
@@ -599,7 +612,7 @@ export default function AdminConversationViewerPage() {
                       {/* Rich Content: Code Preview Summary */}
                       {message.richContent?.type === 'code_preview' && (
                         <div style={{ marginTop: 12, width: '100%', padding: 16, background: 'var(--gray-50)', borderRadius: 8, border: '1px solid var(--border-color)' }}>
-                          <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 8 }}>生成的程式碼</div>
+                          <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 8 }}>{t('generatedCode')}</div>
                           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
                             {(message.richContent.data.pages as { path: string }[] | undefined)?.map((page) => (
                               <span key={page.path} style={{ padding: '4px 8px', fontSize: 11, background: 'var(--white)', border: '1px solid var(--border-color)', borderRadius: 4 }}>
@@ -613,7 +626,7 @@ export default function AdminConversationViewerPage() {
                             ))}
                           </div>
                           <div style={{ fontSize: 11, color: 'var(--gray-500)', marginTop: 8 }}>
-                            在右側預覽面板查看完整程式碼
+                            {t('viewInPreview')}
                           </div>
                         </div>
                       )}
@@ -668,7 +681,7 @@ export default function AdminConversationViewerPage() {
             textAlign: 'center',
             flexShrink: 0,
           }}>
-            唯讀模式 — 無法發送訊息
+            {t('readonlyHint')}
           </div>
         </div>
 

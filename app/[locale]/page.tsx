@@ -2417,7 +2417,7 @@ function ChatSection({
                             onPreview={handleTemplateSelect}
                             selectedId={selectedTemplateId || undefined}
                             recommendedIds={message.richContent?.data?.recommendedIds as string[] | undefined}
-                            initialTemplates={message.richContent?.data?.templates as import('./lib/templates').TemplateCardData[] | undefined}
+                            initialTemplates={message.richContent?.data?.templates as import('../lib/templates').TemplateCardData[] | undefined}
                             columns={layoutMode === 'split' ? 1 : 2}
                             showCategories={!message.richContent?.data?.filteredMode}
                           />

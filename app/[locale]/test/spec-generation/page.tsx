@@ -1,7 +1,7 @@
 'use client'
 
 import { useState } from 'react'
-import { SpecGenerationView } from '../../components/SpecGenerationView'
+import { SpecGenerationView } from '../../../components/SpecGenerationView'
 
 export default function TestSpecGenerationPage() {
   const [isVisible, setIsVisible] = useState(true)
