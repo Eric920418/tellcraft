@@ -46,10 +46,10 @@ npx ts-node bdd-spec/scripts/validate-feature.ts spec/features/
 ### 環境變數
 
 **前端**（`.env.local`）：
-`VPS_API_URL` `NEXT_PUBLIC_VPS_API_URL` `NEXT_PUBLIC_VPS_WS_URL` `NEXT_PUBLIC_SUPABASE_URL` `NEXT_PUBLIC_SUPABASE_ANON_KEY`
+`VPS_API_URL` `NEXT_PUBLIC_VPS_API_URL` `NEXT_PUBLIC_VPS_WS_URL` `NEXT_PUBLIC_SUPABASE_URL` `NEXT_PUBLIC_SUPABASE_ANON_KEY` `NEXT_PUBLIC_LIFF_ID`
 
 **後端**（`tellcraft-backend/.env`）：
-`DATABASE_URL` `REDIS_URL` `JWT_SECRET` `ANTHROPIC_API_KEY` `GOOGLE_CLIENT_ID` `GOOGLE_CLIENT_SECRET` `LINE_CHANNEL_ID` `LINE_CHANNEL_SECRET` `LINE_MESSAGING_CHANNEL_ACCESS_TOKEN` `UPLOAD_DIR` `UPLOAD_BASE_URL`
+`DATABASE_URL` `REDIS_URL` `JWT_SECRET` `ANTHROPIC_API_KEY` `GOOGLE_CLIENT_ID` `GOOGLE_CLIENT_SECRET` `LINE_CHANNEL_ID` `LINE_CHANNEL_SECRET` `LINE_MESSAGING_CHANNEL_ACCESS_TOKEN` `LIFF_ID` `UPLOAD_DIR` `UPLOAD_BASE_URL`
 
 ## 系統架構
 
@@ -179,6 +179,11 @@ change_history   -- JSONB，變更歷史追蹤
 **Google Cloud Console**：APIs & Services → Credentials → OAuth 2.0 → Redirect URI：`https://tellcraft.com/api/auth/google/callback`
 
 **LINE Developers Console**：Channel → LINE Login Settings → Callback URL：`https://tellcraft.com/api/auth/line/callback`
+
+**LINE LIFF 設定**（LINE Login Channel → LIFF）：
+1. Add LIFF App → Name: `Tellcraft`, Size: **Full**, Endpoint URL: `https://tellcraft.com/liff`
+2. Scope: 勾選 `openid`、`profile`，Bot link feature: **On (Aggressive)**
+3. 複製 LIFF ID（格式 `2006xxxxxx-xxxxxxxx`），填入前端 `NEXT_PUBLIC_LIFF_ID` + 後端 `LIFF_ID`
 
 ### 儀表板路由
 
@@ -367,6 +372,18 @@ psql "$DATABASE_URL" -f tellcraft-backend/migrations/xxx.sql
 
 <details>
 <summary><h2>開發更新紀錄（點擊展開）</h2></summary>
+
+### LINE LIFF 整合 + 推播升級（2026-02-27）
+
+LINE 推播通知升級為 **Flex Message 卡片 + LIFF 深度連結**，用戶點推播 → LINE 內直接打開正確對話（無需重新登入）。
+
+- **LIFF 入口頁**：`app/liff/page.tsx` — `liff.init()` → `liff.getIDToken()` → 後端驗證 → JWT → 跳轉主頁面恢復對話
+- **後端 LIFF 驗證**：`POST /auth/liff/verify` — LINE `/oauth2/v2.1/verify` 驗證 ID Token → `findOrCreateUser` → JWT
+- **Flex Message 推播**：`line-notify.ts` 升級為卡片式推播（Header 標題+顏色 / Body 內容 / Footer 按鈕）
+- **LIFF 深度連結**：按鈕 URL = `https://liff.line.me/{liffId}?conversationId=xxx`，LINE 內自動開啟 LIFF 頁面
+- **降級機制**：`LIFF_ID` 未設定時，按鈕退回 `https://tellcraft.com/?conversation=xxx`
+- **Stage 配色**：spec_complete 綠 / uiux_generation_complete 藍 / deployer_complete LINE 綠 / deployer_error 紅
+- **環境變數**：前端 `NEXT_PUBLIC_LIFF_ID`、後端 `LIFF_ID`（同一個 LIFF App ID）
 
 ### LINE 推播通知（2026-02-27）
 

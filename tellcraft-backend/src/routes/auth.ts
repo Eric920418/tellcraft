@@ -575,6 +575,73 @@ router.post('/line/exchange', async (req, res) => {
 })
 
 // ============================================================
+// LINE LIFF 驗證（LINE 內建瀏覽器自動認證）
+// ============================================================
+
+/**
+ * POST /auth/liff/verify
+ * LIFF 入口頁面呼叫：用 LINE ID Token 驗證用戶身份，返回 JWT
+ * - LINE /oauth2/v2.1/verify 驗證 ID Token
+ * - findOrCreateUser 複用現有邏輯
+ */
+router.post('/liff/verify', async (req, res) => {
+  try {
+    const { idToken } = req.body
+
+    if (!idToken || typeof idToken !== 'string') {
+      return res.status(400).json({ error: 'Missing idToken' })
+    }
+
+    if (!LINE_CHANNEL_ID) {
+      return res.status(500).json({ error: 'LINE Login not configured' })
+    }
+
+    // 用 LINE API 驗證 ID Token（必須用 application/x-www-form-urlencoded）
+    const verifyResponse = await fetch('https://api.line.me/oauth2/v2.1/verify', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        id_token: idToken,
+        client_id: LINE_CHANNEL_ID,
+      }),
+    })
+
+    if (!verifyResponse.ok) {
+      const errorText = await verifyResponse.text()
+      console.error('[Auth] LIFF verify error:', errorText)
+      return res.status(401).json({ error: 'ID Token 驗證失敗' })
+    }
+
+    const lineProfile = await verifyResponse.json() as {
+      sub: string       // LINE userId
+      name?: string
+      picture?: string
+      email?: string
+    }
+
+    // email fallback 和 /auth/line/callback 一致
+    const email = lineProfile.email || `${lineProfile.sub}@line.tellcraft.app`
+
+    // 複用現有 findOrCreateUser
+    const user = await findOrCreateUser({
+      provider: 'line',
+      providerId: lineProfile.sub,
+      email,
+      name: lineProfile.name,
+      avatarUrl: lineProfile.picture,
+    })
+
+    const token = generateToken(user)
+
+    console.log(`[Auth] LIFF verify success: userId=${lineProfile.sub}, isNew=${user.isNew}`)
+    res.json({ token })
+  } catch (error) {
+    console.error('[Auth] LIFF verify error:', error)
+    res.status(500).json({ error: 'LIFF 驗證失敗' })
+  }
+})
+
+// ============================================================
 // Token 相關
 // ============================================================
 

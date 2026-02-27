@@ -15,6 +15,7 @@
   "dependencies": {
     "@codesandbox/sandpack-react": "^2.20.0",
     "@gsap/react": "^2.1.2",
+    "@line/liff": "^2.27.3",
     "@react-three/drei": "^10.7.7",
     "@react-three/fiber": "^9.5.0",
     "@react-three/postprocessing": "^3.0.4",

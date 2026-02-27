@@ -1,9 +1,10 @@
 // ============================================================
 // LINE 推播通知服務
-// 在關鍵里程碑完成時，透過 LINE Messaging API 推送通知給用戶
+// 在關鍵里程碑完成時，透過 LINE Messaging API 推送 Flex Message 通知給用戶
 // ============================================================
 
 import { messagingApi } from '@line/bot-sdk'
+import type { FlexBubble, FlexMessage } from '@line/bot-sdk/lib/messaging-api/model/models'
 import * as db from '../db/client'
 
 // 模組級單例：未配置 token 時整個模組靜默跳過
@@ -13,13 +14,19 @@ const client = process.env.LINE_MESSAGING_CHANNEL_ACCESS_TOKEN
     })
   : null
 
+// LIFF ID（用於組裝深度連結，未設定時降級為普通 URL）
+const LIFF_ID = process.env.LIFF_ID
+
+// 每個 stage 的顯示配置
+const STAGE_CONFIG: Record<string, { title: string; emoji: string; color: string }> = {
+  spec_complete:            { title: 'BDD 規格完成',    emoji: '\u{1F4CB}', color: '#4CAF50' },
+  uiux_generation_complete: { title: '介面設計完成',    emoji: '\u{1F3A8}', color: '#2196F3' },
+  deployer_complete:        { title: '部署成功',        emoji: '\u{1F680}', color: '#06C755' },
+  deployer_error:           { title: '部署失敗',        emoji: '\u{26A0}\u{FE0F}',  color: '#F44336' },
+}
+
 // 需要推播的 stage 白名單
-const NOTIFY_STAGES = new Set([
-  'spec_complete',            // BDD 規格完成
-  'uiux_generation_complete', // UIUX / Fast Build 生成完成
-  'deployer_complete',        // 部署成功
-  'deployer_error',           // 部署失敗
-])
+const NOTIFY_STAGES = new Set(Object.keys(STAGE_CONFIG))
 
 /**
  * 根據 conversationId 查找 LINE 用戶並推播通知
@@ -42,11 +49,11 @@ export async function sendLineNotifyIfNeeded(
     const lineUserId = await db.getLineUserIdByConversation(conversationId)
     if (!lineUserId) return
 
-    const message = formatNotifyMessage(content)
+    const message = buildFlexMessage(conversationId, stage, content)
 
     await client.pushMessage({
       to: lineUserId,
-      messages: [{ type: 'text', text: message }],
+      messages: [message],
     })
 
     console.log(`[LINE Notify] 推播成功: conversation=${conversationId}, stage=${stage}`)
@@ -57,18 +64,89 @@ export async function sendLineNotifyIfNeeded(
 }
 
 /**
- * 格式化推播訊息：去 markdown、截斷、附連結
+ * 組裝 LIFF 深度連結 URL
+ * LIFF_ID 已設定 → liff.line.me 連結（LINE 內自動開啟）
+ * LIFF_ID 未設定 → 降級為 tellcraft.com 普通連結
  */
-function formatNotifyMessage(content: string): string {
-  // 去除 markdown 粗體符號
-  let text = content.replace(/\*\*/g, '')
+function buildActionUrl(conversationId: string): string {
+  if (LIFF_ID) {
+    return `https://liff.line.me/${LIFF_ID}?conversationId=${conversationId}`
+  }
+  return `https://tellcraft.com/?conversation=${conversationId}`
+}
 
-  // 截斷過長內容（LINE 文字訊息上限 5000 字元，保留空間給連結）
-  const MAX_LENGTH = 300
-  if (text.length > MAX_LENGTH) {
-    text = text.substring(0, MAX_LENGTH) + '...'
+/**
+ * 建構 Flex Message 卡片
+ * Header: stage 標題 + emoji
+ * Body: 通知內容（截斷 200 字）
+ * Footer: 「查看詳情」按鈕（LIFF 深度連結）
+ */
+function buildFlexMessage(conversationId: string, stage: string, content: string): FlexMessage {
+  const config = STAGE_CONFIG[stage] || { title: '通知', emoji: '\u{1F514}', color: '#666666' }
+
+  // 去除 markdown 粗體符號、截斷
+  let bodyText = content.replace(/\*\*/g, '')
+  if (bodyText.length > 200) {
+    bodyText = bodyText.substring(0, 200) + '...'
   }
 
-  // 附上平台連結
-  return `${text}\n\n🔗 回到 Tellcraft 查看：https://tellcraft.com`
+  const actionUrl = buildActionUrl(conversationId)
+
+  const bubble: FlexBubble = {
+    type: 'bubble',
+    size: 'kilo',
+    header: {
+      type: 'box',
+      layout: 'vertical',
+      contents: [
+        {
+          type: 'text',
+          text: `${config.emoji} ${config.title}`,
+          weight: 'bold',
+          size: 'lg',
+          color: '#FFFFFF',
+        },
+      ],
+      backgroundColor: config.color,
+      paddingAll: '16px',
+    },
+    body: {
+      type: 'box',
+      layout: 'vertical',
+      contents: [
+        {
+          type: 'text',
+          text: bodyText,
+          wrap: true,
+          size: 'sm',
+          color: '#555555',
+        },
+      ],
+      paddingAll: '16px',
+    },
+    footer: {
+      type: 'box',
+      layout: 'vertical',
+      contents: [
+        {
+          type: 'button',
+          action: {
+            type: 'uri',
+            label: '查看詳情',
+            uri: actionUrl,
+          },
+          style: 'primary',
+          color: config.color,
+          height: 'sm',
+        },
+      ],
+      paddingAll: '12px',
+    },
+  }
+
+  return {
+    type: 'flex',
+    altText: `${config.emoji} ${config.title}: ${bodyText.substring(0, 60)}`,
+    contents: bubble,
+  }
 }
