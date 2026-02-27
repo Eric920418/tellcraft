@@ -1101,8 +1101,10 @@ async function handleContinueFlow(
   if (state.phase === 'formulation' && !state.waitingForReply) {
     const FORMULATION_TIMEOUT_MS = 15 * 60 * 1000 // 15 分鐘
     const startedAt = state.formulationStartedAt || 0
-    if (startedAt > 0 && Date.now() - startedAt > FORMULATION_TIMEOUT_MS) {
-      console.warn('[Orchestrator] Formulation 超時，嘗試恢復')
+    // startedAt === 0 代表舊對話（沒有此欄位），視為已超時（肯定沒有活躍的生成任務）
+    const isTimedOut = startedAt === 0 || (Date.now() - startedAt > FORMULATION_TIMEOUT_MS)
+    if (isTimedOut) {
+      console.warn(`[Orchestrator] Formulation 超時或無時間戳 (startedAt=${startedAt})，嘗試恢復`)
       const hasCheckpoint = state.formulationSchemaSql && state.formulationIdentifiedFeatures && state.formulationIdentifiedFeatures.length > 0
       if (hasCheckpoint) {
         console.log(`[Orchestrator] 從 checkpoint 恢復 Formulation（已完成 ${state.formulationCompletedNames?.length || 0}/${state.formulationTotalExpected || '?'}）`)
@@ -1132,8 +1134,10 @@ async function handleContinueFlow(
   if (state.phase === 'spec_discovery' && !state.waitingForReply) {
     const SPEC_DISCOVERY_TIMEOUT_MS = 5 * 60 * 1000 // 5 分鐘
     const startedAt = state.formulationStartedAt || 0 // 複用同一個時間戳
-    if (startedAt > 0 && Date.now() - startedAt > SPEC_DISCOVERY_TIMEOUT_MS) {
-      console.warn('[Orchestrator] Spec Discovery 超時，視為完成並進入下一階段')
+    // startedAt === 0 代表舊對話，視為已超時
+    const isTimedOut = startedAt === 0 || (Date.now() - startedAt > SPEC_DISCOVERY_TIMEOUT_MS)
+    if (isTimedOut) {
+      console.warn(`[Orchestrator] Spec Discovery 超時或無時間戳，視為完成並進入下一階段`)
       await sendMessage(conversationId, io, {
         content: '品質檢查超時，已略過。進入下一階段...',
         stage: 'spec_discovery_complete',
