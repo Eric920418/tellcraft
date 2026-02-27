@@ -2,15 +2,21 @@
 
 import React, { useState, useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
+import { useTranslations } from 'next-intl'
 
 // 階段定義（對應 orchestrator 的 formulation 流程）
-const STAGES = [
-  { id: 'prepare', label: '準備生成', description: '彙整釐清決策' },
-  { id: 'schema', label: '產出資料庫結構', description: '設計實體與關聯' },
-  { id: 'features', label: '生成功能規格', description: '產出 Feature Files' },
-  { id: 'validate', label: '驗證規格格式', description: '檢查語法與完整性' },
-  { id: 'complete', label: '完成', description: '規格產出成功' },
-]
+const STAGE_IDS = ['prepare', 'schema', 'features', 'validate', 'complete'] as const
+
+function useStages() {
+  const t = useTranslations('specGeneration')
+  return [
+    { id: 'prepare', label: t('stagePrepareLabel'), description: t('stagePrepareDesc') },
+    { id: 'schema', label: t('stageSchemaLabel'), description: t('stageSchemaDesc') },
+    { id: 'features', label: t('stageFeaturesLabel'), description: t('stageFeaturesDesc') },
+    { id: 'validate', label: t('stageValidateLabel'), description: t('stageValidateDesc') },
+    { id: 'complete', label: t('stageCompleteLabel'), description: t('stageCompleteDesc') },
+  ]
+}
 
 interface SpecGenerationViewProps {
   currentStage?: number // 0-4，對應 STAGES 索引
@@ -19,7 +25,7 @@ interface SpecGenerationViewProps {
 
 // 進度指示器
 function StageIndicator({ stage, index, isActive, isPast }: {
-  stage: typeof STAGES[0]
+  stage: { id: string; label: string; description: string }
   index: number
   isActive: boolean
   isPast: boolean
@@ -114,7 +120,8 @@ function StageIndicator({ stage, index, isActive, isPast }: {
 
 // 動態標題
 function AnimatedTitle() {
-  const words = ['分析', '整理', '建構', '生成']
+  const t = useTranslations('specGeneration')
+  const words = [t('wordAnalyze'), t('wordOrganize'), t('wordConstruct'), t('wordGenerate')]
   const [currentWord, setCurrentWord] = useState(0)
 
   useEffect(() => {
@@ -134,7 +141,7 @@ function AnimatedTitle() {
       color: 'var(--text-primary)',
       letterSpacing: '-0.02em',
     }}>
-      <span style={{ opacity: 0.6 }}>AI 正在</span>
+      <span style={{ opacity: 0.6 }}>{t('aiPrefix')}</span>
       <span style={{
         position: 'relative',
         display: 'inline-block',
@@ -155,18 +162,15 @@ function AnimatedTitle() {
           </motion.span>
         </AnimatePresence>
       </span>
-      <span style={{ opacity: 0.6 }}>中</span>
+      <span style={{ opacity: 0.6 }}>{t('aiSuffix')}</span>
     </div>
   )
 }
 
 // 底部提示
 function BottomHint() {
-  const hints = [
-    '規格文件是程式碼的藍圖',
-    '每個細節都會被記錄',
-    '確保沒有任何歧義',
-  ]
+  const t = useTranslations('specGeneration')
+  const hints = [t('hintBlueprint'), t('hintRecorded'), t('hintNoAmbiguity')]
   const [currentHint, setCurrentHint] = useState(0)
 
   useEffect(() => {
@@ -254,6 +258,7 @@ function CornerFrame() {
 }
 
 export function SpecGenerationView({ currentStage = 0, onComplete }: SpecGenerationViewProps) {
+  const stages = useStages()
   const [internalStage, setInternalStage] = useState(currentStage)
 
   // Demo 模式：自動推進階段
@@ -261,7 +266,7 @@ export function SpecGenerationView({ currentStage = 0, onComplete }: SpecGenerat
     if (currentStage === undefined) {
       const interval = setInterval(() => {
         setInternalStage((prev) => {
-          if (prev >= STAGES.length - 1) {
+          if (prev >= STAGE_IDS.length - 1) {
             onComplete?.()
             return prev
           }
@@ -322,7 +327,7 @@ export function SpecGenerationView({ currentStage = 0, onComplete }: SpecGenerat
               fontFamily: 'var(--font-mono)',
               color: 'var(--text-muted)',
             }}>
-              {internalStage + 1}/{STAGES.length}
+              {internalStage + 1}/{stages.length}
             </span>
           </div>
           <div style={{
@@ -339,7 +344,7 @@ export function SpecGenerationView({ currentStage = 0, onComplete }: SpecGenerat
                 background: 'var(--black)',
               }}
               animate={{
-                width: `${((internalStage + 1) / STAGES.length) * 100}%`,
+                width: `${((internalStage + 1) / stages.length) * 100}%`,
               }}
               transition={{ duration: 0.5, ease: 'easeOut' }}
             />
@@ -352,7 +357,7 @@ export function SpecGenerationView({ currentStage = 0, onComplete }: SpecGenerat
           flexDirection: 'column',
           width: '100%',
         }}>
-          {STAGES.map((stage, index) => (
+          {stages.map((stage, index) => (
             <StageIndicator
               key={stage.id}
               stage={stage}

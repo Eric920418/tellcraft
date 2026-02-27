@@ -2,7 +2,9 @@
 
 import { useState, useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
+import { useTranslations } from 'next-intl'
 import { getProjectReminder } from '../actions'
+import { useLocalePath } from '@/app/hooks/useLocalePath'
 
 // Apple 風格緩動
 const smoothEasing: [number, number, number, number] = [0.32, 0.72, 0, 1]
@@ -24,6 +26,8 @@ interface Reminder {
 }
 
 export default function ProjectReminder({ anonymousId, onContinue, onDismiss }: ProjectReminderProps) {
+  const t = useTranslations('projectReminder')
+  const localePath = useLocalePath()
   const [reminder, setReminder] = useState<Reminder | null>(null)
   const [isVisible, setIsVisible] = useState(false)
   const [isDismissed, setIsDismissed] = useState(false)
@@ -65,7 +69,7 @@ export default function ProjectReminder({ anonymousId, onContinue, onDismiss }: 
     } else if (reminder.type === 'completed' && reminder.url) {
       window.open(reminder.url, '_blank')
     } else {
-      window.location.href = `/dashboard/projects/${reminder.projectId}`
+      window.location.href = localePath(`/dashboard/projects/${reminder.projectId}`)
     }
   }
 
@@ -74,8 +78,8 @@ export default function ProjectReminder({ anonymousId, onContinue, onDismiss }: 
   // 根據類型設定內容
   const content = {
     in_progress: {
-      label: '進行中',
-      action: '繼續',
+      label: t('inProgress'),
+      action: t('continue'),
       icon: (
         <motion.div
           animate={{ rotate: 360 }}
@@ -89,8 +93,8 @@ export default function ProjectReminder({ anonymousId, onContinue, onDismiss }: 
       )
     },
     completed: {
-      label: '已上線',
-      action: '查看',
+      label: t('completed'),
+      action: t('view'),
       icon: (
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
           <polyline points="20,6 9,17 4,12" />
@@ -98,8 +102,8 @@ export default function ProjectReminder({ anonymousId, onContinue, onDismiss }: 
       )
     },
     failed: {
-      label: '需處理',
-      action: '查看',
+      label: t('needsAttention'),
+      action: t('view'),
       icon: (
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
           <circle cx="12" cy="12" r="10" />
@@ -202,7 +206,7 @@ export default function ProjectReminder({ anonymousId, onContinue, onDismiss }: 
                   color: 'var(--gray-500)',
                 }}
               >
-                點擊{action}你的專案
+                {t('clickAction', { action })}
               </div>
             </div>
 

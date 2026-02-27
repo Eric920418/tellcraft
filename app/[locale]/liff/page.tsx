@@ -2,11 +2,13 @@
 
 import { useEffect, useState } from 'react'
 import { useTranslations } from 'next-intl'
+import { useLocalePath } from '@/app/hooks/useLocalePath'
 
 const LIFF_ID = process.env.NEXT_PUBLIC_LIFF_ID
 
 export default function LiffPage() {
   const t = useTranslations('liff')
+  const localePath = useLocalePath()
   const [error, setError] = useState<string | null>(null)
   const [status, setStatus] = useState(t('initStatus'))
 
@@ -82,7 +84,7 @@ export default function LiffPage() {
         ? `/?conversation=${conversationId}`
         : '/'
       // 用 window.location.href 確保完整重載，觸發 useAuth 驗證
-      window.location.href = targetUrl
+      window.location.href = localePath(targetUrl)
     } catch (err) {
       console.error('[LIFF] Init error:', err)
       setError(err instanceof Error ? err.message : t('loginError'))

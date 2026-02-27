@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
+import { useTranslations } from 'next-intl'
 import TemplateCard from './TemplateCard'
 import { TemplateCardData, TemplateCategory, CATEGORY_LABELS, CATEGORY_ICONS } from '../../lib/templates'
 import { getTemplates } from '../../actions/templates'
@@ -31,6 +32,7 @@ export default function TemplatePicker({
   showCategories = true,
   columns = 2
 }: TemplatePickerProps) {
+  const t = useTranslations('uiux')
   const [templates, setTemplates] = useState<TemplateCardData[]>([])
   const [filteredTemplates, setFilteredTemplates] = useState<TemplateCardData[]>([])
   const [activeCategory, setActiveCategory] = useState<FilterCategory>('all')
@@ -56,7 +58,7 @@ export default function TemplatePicker({
         setTemplates(result.data)
         setFilteredTemplates(result.data)
       } else {
-        setError(result.error || '載入模板失敗')
+        setError(result.error || t('loadTemplateFailed'))
       }
 
       setIsLoading(false)
@@ -87,7 +89,7 @@ export default function TemplatePicker({
   // 動態生成分類選項（只顯示模板中實際存在的分類）
   const existingCategories = [...new Set(templates.map(t => t.category))]
   const categories: { value: FilterCategory; label: string; icon?: string }[] = [
-    { value: 'all', label: '全部' },
+    { value: 'all', label: t('filterAll') },
     ...existingCategories.map(cat => ({
       value: cat as FilterCategory,
       label: CATEGORY_LABELS[cat as TemplateCategory] || cat,
@@ -215,7 +217,7 @@ export default function TemplatePicker({
             color: 'var(--gray-400)',
           }}
         >
-          <p>沒有符合條件的模板</p>
+          <p>{t('noMatchingTemplates')}</p>
         </div>
       )}
     </div>

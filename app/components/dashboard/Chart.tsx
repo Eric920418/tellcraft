@@ -359,7 +359,7 @@ export function DonutChart({
         >
           {total.toLocaleString()}
         </span>
-        <span style={{ fontSize: 11, color: 'var(--gray-400)' }}>總計</span>
+        <span style={{ fontSize: 11, color: 'var(--gray-400)' }}>{t('total')}</span>
       </div>
     </div>
   )

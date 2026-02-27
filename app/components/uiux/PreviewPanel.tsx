@@ -2,6 +2,7 @@
 
 import { useState, useRef, useEffect, useCallback } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
+import { useTranslations } from 'next-intl'
 import DeviceSwitcher, { DeviceType, getDeviceWidth } from './DeviceSwitcher'
 import PropertyEditor from './PropertyEditor'
 import { useAuth } from '../../hooks/useAuth'
@@ -375,6 +376,7 @@ export default function PreviewPanel({
   error,
   projectId,
 }: PreviewPanelProps) {
+  const t = useTranslations('uiux')
   const [device, setDevice] = useState<DeviceType>('desktop')
   const [containerSize, setContainerSize] = useState({ width: 0, height: 0 })
   const containerRef = useRef<HTMLDivElement>(null)
@@ -414,7 +416,7 @@ export default function PreviewPanel({
 
     fetch(`/api/templates/preview/${templateSlug}`)
       .then(res => {
-        if (!res.ok) throw new Error('模板載入失敗')
+        if (!res.ok) throw new Error(t('templateLoadFailed'))
         return res.text()
       })
       .then(html => {
@@ -424,7 +426,7 @@ export default function PreviewPanel({
       })
       .catch(err => {
         console.error('[PreviewPanel] 載入 HTML 失敗:', err)
-        setHtmlError(err.message || '模板載入失敗')
+        setHtmlError(err.message || t('templateLoadFailed'))
       })
       .finally(() => {
         setHtmlLoading(false)
@@ -517,11 +519,11 @@ export default function PreviewPanel({
     try {
       const result = await saveTemplateOverrides({ projectId, overrides, token })
       if (!result.success) {
-        setSaveError(result.error || '保存失敗')
+        setSaveError(result.error || t('saveFailed'))
       }
     } catch (err) {
       console.error('[PreviewPanel] 保存 template overrides 失敗:', err)
-      setSaveError('保存失敗')
+      setSaveError(t('saveFailed'))
     } finally {
       setIsSaving(false)
     }
@@ -770,7 +772,7 @@ export default function PreviewPanel({
                   <path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7" />
                   <path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z" />
                 </svg>
-                {editMode ? '完成編輯' : '編輯模式'}
+                {editMode ? t('finishEditing') : t('editMode')}
               </motion.button>
               {/* Undo/Redo 按鈕 — 編輯模式時顯示 */}
               {editMode && (
@@ -780,7 +782,7 @@ export default function PreviewPanel({
                     whileTap={canUndo ? { scale: 0.9 } : undefined}
                     onClick={handleUndo}
                     disabled={!canUndo}
-                    title="復原 (Cmd+Z)"
+                    title={t('undoTitle')}
                     style={{
                       padding: 6,
                       background: 'none',
@@ -801,7 +803,7 @@ export default function PreviewPanel({
                     whileTap={canRedo ? { scale: 0.9 } : undefined}
                     onClick={handleRedo}
                     disabled={!canRedo}
-                    title="重做 (Cmd+Shift+Z)"
+                    title={t('redoTitle')}
                     style={{
                       padding: 6,
                       background: 'none',
@@ -844,14 +846,14 @@ export default function PreviewPanel({
                       borderTopColor: 'var(--gray-500)',
                     }}
                   />
-                  <span style={{ fontSize: 11, color: 'var(--gray-400)' }}>保存中...</span>
+                  <span style={{ fontSize: 11, color: 'var(--gray-400)' }}>{t('saving')}</span>
                 </>
               )}
               {!isSaving && saveError && (
                 <span style={{ fontSize: 11, color: '#ef4444' }}>{saveError}</span>
               )}
               {!isSaving && !saveError && Object.keys(elementOverrides).length > 0 && (
-                <span style={{ fontSize: 11, color: 'var(--gray-400)' }}>已保存</span>
+                <span style={{ fontSize: 11, color: 'var(--gray-400)' }}>{t('saved')}</span>
               )}
             </div>
           )}
@@ -913,7 +915,7 @@ export default function PreviewPanel({
                     borderTopColor: 'var(--gray-500)',
                   }}
                 />
-                <span style={{ fontSize: 14 }}>正在載入模板...</span>
+                <span style={{ fontSize: 14 }}>{t('loadingTemplate')}</span>
               </motion.div>
             )}
 
@@ -985,7 +987,7 @@ export default function PreviewPanel({
                       <path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7" />
                       <path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z" />
                     </svg>
-                    點擊元素進行編輯
+                    {t('clickToEdit')}
                   </div>
                 )}
                 {/* iframe */}
@@ -1001,7 +1003,7 @@ export default function PreviewPanel({
                     display: 'block',
                   }}
                   sandbox="allow-scripts allow-same-origin"
-                  title={templateName || '模板預覽'}
+                  title={templateName || t('templatePreview')}
                 />
               </motion.div>
             )}
@@ -1024,7 +1026,7 @@ export default function PreviewPanel({
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img
                   src={previewImageUrl}
-                  alt={templateName || '預覽'}
+                  alt={templateName || t('previewAlt')}
                   style={{
                     maxWidth: '100%',
                     maxHeight: '100%',
@@ -1054,7 +1056,7 @@ export default function PreviewPanel({
                   <circle cx="8.5" cy="8.5" r="1.5" />
                   <path d="M21 15l-5-5L5 21" />
                 </svg>
-                <span style={{ fontSize: 14 }}>選擇一個模板以預覽</span>
+                <span style={{ fontSize: 14 }}>{t('selectTemplateToPreview')}</span>
               </motion.div>
             )}
           </AnimatePresence>

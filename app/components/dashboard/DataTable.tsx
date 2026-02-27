@@ -2,6 +2,7 @@
 
 import { motion, AnimatePresence } from 'framer-motion'
 import { useState } from 'react'
+import { useTranslations } from 'next-intl'
 
 export interface Column<T> {
   key: keyof T | string
@@ -36,12 +37,14 @@ export default function DataTable<T extends object>({
   data,
   keyField,
   isLoading = false,
-  emptyMessage = '沒有資料',
+  emptyMessage,
   onRowClick,
   pagination,
   sortConfig,
 }: DataTableProps<T>) {
+  const t = useTranslations('dashboard')
   const [hoveredRow, setHoveredRow] = useState<string | null>(null)
+  const resolvedEmptyMessage = emptyMessage ?? t('noData')
 
   const totalPages = pagination ? Math.ceil(pagination.total / pagination.pageSize) : 1
 
@@ -113,7 +116,7 @@ export default function DataTable<T extends object>({
                 transition={{ duration: 1.5, repeat: Infinity }}
                 style={{ fontSize: 14 }}
               >
-                載入中...
+                {t('loadingData')}
               </motion.div>
             </motion.div>
           ) : data.length === 0 ? (
@@ -127,7 +130,7 @@ export default function DataTable<T extends object>({
                 fontSize: 14,
               }}
             >
-              {emptyMessage}
+              {resolvedEmptyMessage}
             </motion.div>
           ) : (
             data.map((item, index) => {
@@ -187,7 +190,7 @@ export default function DataTable<T extends object>({
           }}
         >
           <span style={{ fontSize: 13, color: 'var(--gray-500)' }}>
-            共 {pagination.total} 筆，第 {pagination.page} / {totalPages} 頁
+            {t('paginationInfo', { total: pagination.total, page: pagination.page, totalPages })}
           </span>
 
           <div style={{ display: 'flex', gap: 8 }}>
@@ -195,7 +198,7 @@ export default function DataTable<T extends object>({
               onClick={() => pagination.onPageChange(pagination.page - 1)}
               disabled={pagination.page <= 1}
             >
-              上一頁
+              {t('previousPage')}
             </PaginationButton>
 
             {/* Page numbers */}
@@ -218,7 +221,7 @@ export default function DataTable<T extends object>({
               onClick={() => pagination.onPageChange(pagination.page + 1)}
               disabled={pagination.page >= totalPages}
             >
-              下一頁
+              {t('nextPage')}
             </PaginationButton>
           </div>
         </div>
@@ -323,19 +326,21 @@ export function StatusBadge({
 export function SearchInput({
   value,
   onChange,
-  placeholder = '搜尋...',
+  placeholder,
 }: {
   value: string
   onChange: (value: string) => void
   placeholder?: string
 }) {
+  const t = useTranslations('dashboard')
+  const resolvedPlaceholder = placeholder ?? t('searchDefault')
   return (
     <div style={{ position: 'relative' }}>
       <input
         type="text"
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        placeholder={placeholder}
+        placeholder={resolvedPlaceholder}
         style={{
           width: '100%',
           padding: '10px 12px 10px 36px',

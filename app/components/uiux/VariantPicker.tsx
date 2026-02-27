@@ -2,6 +2,7 @@
 
 import { useState, useCallback } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
+import { useTranslations } from 'next-intl'
 
 // ============================================================
 // VariantPicker - 設計變體選擇器
@@ -58,6 +59,7 @@ export default function VariantPicker({
   multiSelect = true,
   maxSelections = 2,
 }: VariantPickerProps) {
+  const t = useTranslations('uiux')
   const [selected, setSelected] = useState<string[]>(selectedIds)
   const [hoveredId, setHoveredId] = useState<string | null>(null)
 
@@ -120,12 +122,12 @@ export default function VariantPicker({
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <div>
           <h3 style={{ fontSize: 14, fontWeight: 600, margin: 0 }}>
-            選擇設計方向
+            {t('chooseDesignDirection')}
           </h3>
           <p style={{ fontSize: 12, color: 'var(--gray-500)', margin: '4px 0 0' }}>
             {multiSelect
-              ? `最多選擇 ${maxSelections} 個變體進行合併`
-              : '選擇一個變體'}
+              ? t('maxVariantsMerge', { max: maxSelections })
+              : t('selectOneVariant')}
           </p>
         </div>
         {selected.length > 0 && (
@@ -141,7 +143,7 @@ export default function VariantPicker({
               fontSize: 12,
             }}
           >
-            已選擇 {selected.length}
+            {t('selectedCount', { count: selected.length })}
           </div>
         )}
       </div>
@@ -300,7 +302,7 @@ export default function VariantPicker({
                     style={{ marginTop: 12, paddingTop: 12, borderTop: '1px solid var(--border-color)' }}
                   >
                     <div style={{ fontSize: 10, color: 'var(--gray-500)', marginBottom: 6 }}>
-                      顏色預覽
+                      {t('colorPreview')}
                     </div>
                     <div style={{ display: 'flex', gap: 4 }}>
                       {Object.entries(variant.designSystem.colorPalette).slice(0, 5).map(([name, color]) => (
@@ -328,9 +330,9 @@ export default function VariantPicker({
       {/* 確認按鈕 */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 8 }}>
         <div style={{ fontSize: 12, color: 'var(--gray-500)' }}>
-          {selected.length === 0 && '請選擇至少一個變體'}
-          {selected.length === 1 && `將使用變體 ${selected[0]}`}
-          {selected.length > 1 && `將合併變體 ${selected.join(' + ')}`}
+          {selected.length === 0 && t('selectAtLeastOne')}
+          {selected.length === 1 && t('willUseVariant', { id: selected[0] })}
+          {selected.length > 1 && t('willMergeVariants', { ids: selected.join(' + ') })}
         </div>
         <motion.button
           whileHover={{ scale: 1.02 }}
@@ -348,7 +350,7 @@ export default function VariantPicker({
             cursor: selected.length === 0 ? 'not-allowed' : 'pointer',
           }}
         >
-          {selected.length <= 1 ? '確認選擇' : '確認合併'}
+          {selected.length <= 1 ? t('confirmSelection') : t('confirmMerge')}
         </motion.button>
       </div>
     </div>

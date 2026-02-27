@@ -1,6 +1,7 @@
 'use client'
 
 import { motion } from 'framer-motion'
+import { useTranslations } from 'next-intl'
 
 // ============================================================
 // DeviceSwitcher - 設備切換器元件
@@ -13,10 +14,15 @@ interface DeviceSwitcherProps {
   onDeviceChange: (device: DeviceType) => void
 }
 
-const devices: { type: DeviceType; label: string; icon: React.ReactNode; width: number }[] = [
+const DEVICE_LABEL_KEYS: Record<DeviceType, string> = {
+  desktop: 'deviceDesktop',
+  tablet: 'deviceTablet',
+  mobile: 'deviceMobile',
+}
+
+const devices: { type: DeviceType; icon: React.ReactNode; width: number }[] = [
   {
     type: 'desktop',
-    label: '桌面',
     width: 1440,
     icon: (
       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
@@ -28,7 +34,6 @@ const devices: { type: DeviceType; label: string; icon: React.ReactNode; width: 
   },
   {
     type: 'tablet',
-    label: '平板',
     width: 640,
     icon: (
       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
@@ -39,7 +44,6 @@ const devices: { type: DeviceType; label: string; icon: React.ReactNode; width: 
   },
   {
     type: 'mobile',
-    label: '手機',
     width: 375,
     icon: (
       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
@@ -55,6 +59,7 @@ export function getDeviceWidth(device: DeviceType): number {
 }
 
 export default function DeviceSwitcher({ activeDevice, onDeviceChange }: DeviceSwitcherProps) {
+  const t = useTranslations('uiux')
   return (
     <div
       style={{
@@ -106,7 +111,7 @@ export default function DeviceSwitcher({ activeDevice, onDeviceChange }: DeviceS
             {device.icon}
           </span>
           <span style={{ position: 'relative', zIndex: 1 }}>
-            {device.label}
+            {t(DEVICE_LABEL_KEYS[device.type])}
           </span>
         </motion.button>
       ))}

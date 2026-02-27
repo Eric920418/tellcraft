@@ -1,5 +1,7 @@
 'use client'
 
+import { useTranslations } from 'next-intl'
+
 interface QualityIssue {
   id: string
   category: string
@@ -45,6 +47,7 @@ const CATEGORY_LABELS: Record<string, string> = {
 }
 
 export default function QualityGateReport({ report }: QualityGateReportProps) {
+  const t = useTranslations('uiux')
   return (
     <div style={{ width: '100%', fontSize: 13 }}>
       {/* Status Banner */}
@@ -62,7 +65,7 @@ export default function QualityGateReport({ report }: QualityGateReportProps) {
       >
         <span style={{ fontSize: 16 }}>{report.passed ? '\u2705' : '\u274C'}</span>
         <span style={{ fontWeight: 600, color: report.passed ? '#16a34a' : '#dc2626' }}>
-          {report.passed ? '品質檢查通過' : '品質檢查未通過'}
+          {report.passed ? t('qualityPassed') : t('qualityFailed')}
         </span>
       </div>
 
@@ -76,12 +79,12 @@ export default function QualityGateReport({ report }: QualityGateReportProps) {
         }}
       >
         {[
-          { label: '總計', value: report.summary.total, color: '#6b7280' },
+          { label: t('summaryTotal'), value: report.summary.total, color: '#6b7280' },
           { label: 'Critical', value: report.summary.critical, color: '#dc2626' },
           { label: 'Warning', value: report.summary.warning, color: '#d97706' },
           { label: 'Info', value: report.summary.info, color: '#2563eb' },
           ...(report.summary.autoFixed > 0
-            ? [{ label: '已修復', value: report.summary.autoFixed, color: '#16a34a' }]
+            ? [{ label: t('summaryFixed'), value: report.summary.autoFixed, color: '#16a34a' }]
             : []),
         ].map((stat) => (
           <div
@@ -188,7 +191,7 @@ export default function QualityGateReport({ report }: QualityGateReportProps) {
 
             {cat.issues.length === 0 && (
               <div style={{ padding: '8px 12px', fontSize: 12, color: '#9ca3af' }}>
-                沒有發現問題
+                {t('noIssuesFound')}
               </div>
             )}
           </div>

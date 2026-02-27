@@ -2,6 +2,7 @@
 
 import { motion, AnimatePresence } from 'framer-motion'
 import { useState } from 'react'
+import { useTranslations } from 'next-intl'
 
 interface Conversation {
   id: string
@@ -20,7 +21,7 @@ interface ConversationPickerProps {
   isLoading?: boolean
 }
 
-function formatRelativeTime(dateString: string): string {
+function formatRelativeTime(dateString: string, t: (key: string, values?: Record<string, string | number | Date>) => string): string {
   const date = new Date(dateString)
   const now = new Date()
   const diffMs = now.getTime() - date.getTime()
@@ -28,11 +29,11 @@ function formatRelativeTime(dateString: string): string {
   const diffHours = Math.floor(diffMs / 3600000)
   const diffDays = Math.floor(diffMs / 86400000)
 
-  if (diffMins < 1) return '剛剛'
-  if (diffMins < 60) return `${diffMins} 分鐘前`
-  if (diffHours < 24) return `${diffHours} 小時前`
-  if (diffDays < 7) return `${diffDays} 天前`
-  return date.toLocaleDateString('zh-TW')
+  if (diffMins < 1) return t('timeJustNow')
+  if (diffMins < 60) return t('timeMinutesAgo', { count: diffMins })
+  if (diffHours < 24) return t('timeHoursAgo', { count: diffHours })
+  if (diffDays < 7) return t('timeDaysAgo', { count: diffDays })
+  return date.toLocaleDateString()
 }
 
 export default function ConversationPicker({
@@ -41,6 +42,8 @@ export default function ConversationPicker({
   onStartNewConversation,
   isLoading = false,
 }: ConversationPickerProps) {
+  const t = useTranslations('conversationPicker')
+  const tc = useTranslations('common')
   const [hoveredId, setHoveredId] = useState<string | null>(null)
 
   if (isLoading) {
@@ -58,7 +61,7 @@ export default function ConversationPicker({
           transition={{ duration: 1.5, repeat: Infinity }}
           style={{ fontSize: 14 }}
         >
-          載入中...
+          {tc('loading')}
         </motion.div>
       </div>
     )
@@ -83,14 +86,14 @@ export default function ConversationPicker({
           letterSpacing: '-0.02em',
           marginBottom: 12,
         }}>
-          歡迎回來
+          {t('welcomeBack')}
         </h2>
         <p style={{
           fontSize: 15,
           color: 'var(--gray-500)',
           lineHeight: 1.6,
         }}>
-          選擇繼續之前的對話，或開始新的對話
+          {t('welcomeBackSubtitle')}
         </p>
       </div>
 
@@ -116,7 +119,7 @@ export default function ConversationPicker({
         }}
       >
         <span style={{ fontSize: 20 }}>+</span>
-        開始新對話
+        {t('newConversation')}
       </motion.button>
 
       {/* Divider */}
@@ -128,7 +131,7 @@ export default function ConversationPicker({
       }}>
         <div style={{ flex: 1, height: 1, background: 'var(--border-color)' }} />
         <span style={{ fontSize: 12, color: 'var(--gray-400)', textTransform: 'uppercase', letterSpacing: '0.1em' }}>
-          或繼續之前的對話
+          {t('orContinuePrevious')}
         </span>
         <div style={{ flex: 1, height: 1, background: 'var(--border-color)' }} />
       </div>
@@ -174,7 +177,7 @@ export default function ConversationPicker({
                   color: 'var(--gray-400)',
                   fontFamily: 'var(--font-mono)',
                 }}>
-                  {formatRelativeTime(conv.updatedAt)}
+                  {formatRelativeTime(conv.updatedAt, t)}
                 </span>
               </div>
 
@@ -205,7 +208,7 @@ export default function ConversationPicker({
                   gap: 4,
                 }}>
                   <span style={{ opacity: 0.7 }}>💬</span>
-                  {conv.messageCount} 則訊息
+                  {t('messagesCount', { count: conv.messageCount })}
                 </span>
               </div>
             </motion.button>
@@ -220,7 +223,7 @@ export default function ConversationPicker({
           padding: '40px 20px',
           color: 'var(--gray-500)',
         }}>
-          <p style={{ fontSize: 14 }}>沒有歷史對話</p>
+          <p style={{ fontSize: 14 }}>{t('noHistory')}</p>
         </div>
       )}
     </motion.div>

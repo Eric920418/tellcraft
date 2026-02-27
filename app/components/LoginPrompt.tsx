@@ -2,6 +2,7 @@
 
 import { motion, AnimatePresence } from 'framer-motion'
 import { useState, useEffect } from 'react'
+import { useTranslations } from 'next-intl'
 
 interface LoginPromptProps {
   variant: 'subtle' | 'emphasized'
@@ -65,6 +66,7 @@ export default function LoginPrompt({
   onDismiss,
   autoHideAfter = 0,
 }: LoginPromptProps) {
+  const t = useTranslations('login')
   const [isVisible, setIsVisible] = useState(true)
 
   useEffect(() => {
@@ -123,7 +125,7 @@ export default function LoginPrompt({
                   cursor: 'pointer',
                 }}
               >
-                登入
+                {t('loginButton')}
               </motion.button>
               <motion.button
                 whileHover={{ scale: 1.02 }}
@@ -138,7 +140,7 @@ export default function LoginPrompt({
                   cursor: 'pointer',
                 }}
               >
-                稍後
+                {t('laterButton')}
               </motion.button>
             </div>
           </motion.div>
@@ -252,7 +254,7 @@ export default function LoginPrompt({
                   cursor: 'pointer',
                 }}
               >
-                登入以保存進度
+                {t('saveProgressButton')}
               </motion.button>
 
               <motion.button
@@ -269,7 +271,7 @@ export default function LoginPrompt({
                   cursor: 'pointer',
                 }}
               >
-                稍後再說
+                {t('laterFull')}
               </motion.button>
             </div>
           </motion.div>

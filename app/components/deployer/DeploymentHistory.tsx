@@ -1,5 +1,7 @@
 'use client'
 
+import { useTranslations } from 'next-intl'
+
 interface DeploymentItem {
   index: number
   id: string
@@ -17,6 +19,7 @@ interface DeploymentHistoryProps {
 }
 
 export default function DeploymentHistory({ data, onSendMessage }: DeploymentHistoryProps) {
+  const t = useTranslations('deploy')
   const deployments = data.deployments || []
 
   if (deployments.length === 0) {
@@ -34,7 +37,7 @@ export default function DeploymentHistory({ data, onSendMessage }: DeploymentHis
       }}
     >
       <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 12, color: '#1e293b' }}>
-        部署歷史
+        {t('deploymentHistory')}
       </div>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
         {deployments.map((d) => (
@@ -52,15 +55,15 @@ export default function DeploymentHistory({ data, onSendMessage }: DeploymentHis
           >
             <div>
               <div style={{ fontSize: 13, fontWeight: 500, color: '#1e293b' }}>
-                版本 {d.index}
+                {t('version', { index: d.index })}
                 {d.isCurrent && (
                   <span style={{ marginLeft: 8, fontSize: 11, color: '#166534', fontWeight: 600 }}>
-                    目前版本
+                    {t('currentVersion')}
                   </span>
                 )}
               </div>
               <div style={{ fontSize: 12, color: '#64748b', marginTop: 2 }}>
-                {new Date(d.createdAt).toLocaleString('zh-TW')}
+                {new Date(d.createdAt).toLocaleString()}
               </div>
             </div>
             {!d.isCurrent && onSendMessage && (
@@ -77,7 +80,7 @@ export default function DeploymentHistory({ data, onSendMessage }: DeploymentHis
                   cursor: 'pointer',
                 }}
               >
-                回滾到此版本
+                {t('rollbackTo')}
               </button>
             )}
           </div>

@@ -2,6 +2,7 @@
 
 import { useState } from 'react'
 import { motion } from 'framer-motion'
+import { useTranslations } from 'next-intl'
 import { TemplateCardData, CATEGORY_LABELS, CATEGORY_ICONS } from '../../lib/templates'
 
 // ============================================================
@@ -38,6 +39,7 @@ export default function TemplateCard({
   onSelect: _onSelect,
   onPreview
 }: TemplateCardProps) {
+  const t = useTranslations('uiux')
   const [imageError, setImageError] = useState(true) // 預設不顯示圖片，因為我們還沒有真正的縮圖
 
   // 使用 iframe 縮圖預覽
@@ -144,7 +146,7 @@ export default function TemplateCard({
               borderRadius: 4,
             }}
           >
-            推薦
+            {t('featured')}
           </motion.div>
         )}
 
@@ -177,7 +179,7 @@ export default function TemplateCard({
             <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
             <circle cx="12" cy="12" r="3" />
           </svg>
-          預覽
+          {t('previewButton')}
         </motion.button>
 
         {/* 選中指示器 */}

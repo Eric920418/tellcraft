@@ -1,5 +1,7 @@
 'use client'
 
+import { useTranslations } from 'next-intl'
+
 interface DeployProgressProps {
   data: {
     percent?: number
@@ -8,8 +10,9 @@ interface DeployProgressProps {
 }
 
 export default function DeployProgress({ data }: DeployProgressProps) {
+  const t = useTranslations('deploy')
   const percent = data.percent || 0
-  const step = data.step || '準備中...'
+  const step = data.step || t('preparing')
 
   return (
     <div
@@ -22,7 +25,7 @@ export default function DeployProgress({ data }: DeployProgressProps) {
       }}
     >
       <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 12 }}>
-        正在部署
+        {t('deployingTitle')}
       </div>
 
       {/* 進度條 */}

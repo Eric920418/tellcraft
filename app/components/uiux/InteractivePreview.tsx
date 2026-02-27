@@ -2,6 +2,7 @@
 
 import { useState, useRef, useEffect, useCallback } from 'react'
 import { motion } from 'framer-motion'
+import { useTranslations } from 'next-intl'
 import DeviceSwitcher, { DeviceType, getDeviceWidth } from './DeviceSwitcher'
 import PropertyEditor from './PropertyEditor'
 import type { ElementInfo } from './PreviewPanel'
@@ -41,6 +42,7 @@ export default function InteractivePreview({
   onElementUpdate,
   onSaveChanges
 }: InteractivePreviewProps) {
+  const t = useTranslations('uiux')
   const [device, setDevice] = useState<DeviceType>('desktop')
   const [zoom, setZoom] = useState(1)
   const [iframeLoaded, setIframeLoaded] = useState(false)
@@ -207,7 +209,7 @@ export default function InteractivePreview({
                 borderRadius: 4,
               }}
             >
-              未儲存
+              {t('unsaved')}
             </motion.span>
           )}
         </div>
@@ -239,7 +241,7 @@ export default function InteractivePreview({
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
               <path d="M3 3l7.07 16.97 2.51-7.39 7.39-2.51L3 3z" />
             </svg>
-            {isSelectionMode ? '選擇中' : '選擇'}
+            {isSelectionMode ? t('selecting') : t('select')}
           </motion.button>
 
           {/* 儲存按鈕 */}
@@ -262,7 +264,7 @@ export default function InteractivePreview({
                   cursor: 'pointer',
                 }}
               >
-                儲存變更
+                {t('saveChanges')}
               </motion.button>
               <motion.button
                 initial={{ opacity: 0, scale: 0.9 }}
@@ -281,7 +283,7 @@ export default function InteractivePreview({
                   cursor: 'pointer',
                 }}
               >
-                重置
+                {t('reset')}
               </motion.button>
             </>
           )}
@@ -339,7 +341,7 @@ export default function InteractivePreview({
                   pointerEvents: 'none',
                 }}
               >
-                點擊元素以編輯
+                {t('clickToEditElement')}
               </motion.div>
             )}
 

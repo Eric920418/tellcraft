@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react'
 import { useParams } from 'next/navigation'
 import { motion } from 'framer-motion'
 import { Link, useRouter } from '@/i18n/navigation'
+import { useTranslations } from 'next-intl'
 import { StatusBadge, MiniStatsCard } from '@/app/components/dashboard'
 import { getUserDetail, setUserAdmin } from '@/app/lib/vps-api'
 
@@ -55,23 +56,31 @@ const statusVariants: Record<string, 'default' | 'success' | 'warning' | 'error'
   failed: 'error',
 }
 
-const statusLabels: Record<string, string> = {
-  active: '正常',
-  suspended: '暫停',
-  cancelled: '取消',
-  draft: '草稿',
-  generating: '生成中',
-  testing: '測試中',
-  deployed: '已上線',
-  failed: '失敗',
+const statusLabelKeys: Record<string, string> = {
+  active: 'statusActive',
+  suspended: 'statusSuspended',
+  cancelled: 'statusCancelled',
+  draft: 'statusDraft',
+  generating: 'statusGenerating',
+  testing: 'statusTesting',
+  deployed: 'statusDeployed',
+  failed: 'statusFailed',
 }
 
 export default function AdminUserDetailPage() {
   const params = useParams()
   const router = useRouter()
+  const t = useTranslations('dashboard')
+  const ta = useTranslations('dashboard.admin')
+  const tc = useTranslations('common')
   const [data, setData] = useState<UserDetail | null>(null)
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+
+  const getStatusLabel = (status: string) => {
+    const key = statusLabelKeys[status]
+    return key ? t(key) : status
+  }
 
   const userId = params.id as string
 
@@ -90,7 +99,7 @@ export default function AdminUserDetailPage() {
           router.push('/dashboard')
           return
         }
-        setError(result.error || '載入失敗')
+        setError(result.error || tc('loadFailed'))
         setIsLoading(false)
         return
       }
@@ -108,7 +117,7 @@ export default function AdminUserDetailPage() {
     if (!data) return
     const token = getAuthToken()
     if (!token) {
-      alert('請重新登入')
+      alert(tc('pleaseRelogin'))
       return
     }
 
@@ -123,14 +132,14 @@ export default function AdminUserDetailPage() {
         user: { ...data.user, isAdmin: !data.user.isAdmin },
       })
     } else {
-      alert(result.error || '操作失敗')
+      alert(result.error || tc('operationFailed'))
     }
   }
 
   if (isLoading) {
     return (
       <div style={{ padding: '40px 0', textAlign: 'center', color: 'var(--gray-500)' }}>
-        載入中...
+        {tc('loading')}
       </div>
     )
   }
@@ -145,10 +154,10 @@ export default function AdminUserDetailPage() {
           color: '#DC2626',
         }}
       >
-        {error || '用戶不存在'}
+        {error || ta('userNotExists')}
         <div style={{ marginTop: 16 }}>
           <Link href="/dashboard/admin/users" style={{ color: '#DC2626' }}>
-            ← 返回用戶列表
+            {t('backToUsers')}
           </Link>
         </div>
       </div>
@@ -173,7 +182,7 @@ export default function AdminUserDetailPage() {
             textDecoration: 'none',
           }}
         >
-          ← 返回用戶列表
+          {t('backToUsers')}
         </Link>
       </motion.div>
 
@@ -201,7 +210,7 @@ export default function AdminUserDetailPage() {
               {user.name || user.email.split('@')[0]}
             </h1>
             <StatusBadge
-              status={statusLabels[user.subscriptionStatus] || user.subscriptionStatus}
+              status={getStatusLabel(user.subscriptionStatus)}
               variant={statusVariants[user.subscriptionStatus] || 'default'}
             />
             {user.isAdmin && (
@@ -233,7 +242,7 @@ export default function AdminUserDetailPage() {
             cursor: 'pointer',
           }}
         >
-          {user.isAdmin ? '移除管理員權限' : '設為管理員'}
+          {user.isAdmin ? ta('removeAdminFull') : ta('setAdminFull')}
         </motion.button>
       </motion.div>
 
@@ -256,7 +265,7 @@ export default function AdminUserDetailPage() {
             border: '1px solid var(--border-color)',
           }}
         >
-          <MiniStatsCard label="專案" value={stats.totalProjects} />
+          <MiniStatsCard label={t('projectsLabel')} value={stats.totalProjects} />
         </div>
         <div
           style={{
@@ -265,7 +274,7 @@ export default function AdminUserDetailPage() {
             border: '1px solid var(--border-color)',
           }}
         >
-          <MiniStatsCard label="對話" value={stats.totalConversations} />
+          <MiniStatsCard label={t('conversationsLabel')} value={stats.totalConversations} />
         </div>
         <div
           style={{
@@ -274,7 +283,7 @@ export default function AdminUserDetailPage() {
             border: '1px solid var(--border-color)',
           }}
         >
-          <MiniStatsCard label="部署" value={stats.totalDeployments} />
+          <MiniStatsCard label={t('deploymentsLabel')} value={stats.totalDeployments} />
         </div>
         <div
           style={{
@@ -283,7 +292,7 @@ export default function AdminUserDetailPage() {
             border: '1px solid var(--border-color)',
           }}
         >
-          <MiniStatsCard label="LLM 成本" value={`$${stats.totalLLMCost.toFixed(2)}`} />
+          <MiniStatsCard label={t('llmCost')} value={`$${stats.totalLLMCost.toFixed(2)}`} />
         </div>
         <div
           style={{
@@ -292,7 +301,7 @@ export default function AdminUserDetailPage() {
             border: '1px solid var(--border-color)',
           }}
         >
-          <MiniStatsCard label="方案" value={user.plan.toUpperCase()} />
+          <MiniStatsCard label={t('plan')} value={user.plan.toUpperCase()} />
         </div>
       </motion.div>
 
@@ -308,9 +317,9 @@ export default function AdminUserDetailPage() {
           marginBottom: 24,
         }}
       >
-        <h2 style={{ fontSize: 16, fontWeight: 500, marginBottom: 20 }}>專案</h2>
+        <h2 style={{ fontSize: 16, fontWeight: 500, marginBottom: 20 }}>{t('projectsLabel')}</h2>
         {projects.length === 0 ? (
-          <p style={{ color: 'var(--gray-400)', fontSize: 14 }}>沒有專案</p>
+          <p style={{ color: 'var(--gray-400)', fontSize: 14 }}>{t('noProjects')}</p>
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
             {projects.map((project) => (
@@ -327,7 +336,7 @@ export default function AdminUserDetailPage() {
                 <div style={{ fontWeight: 500 }}>{project.name}</div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
                   <StatusBadge
-                    status={statusLabels[project.status] || project.status}
+                    status={getStatusLabel(project.status)}
                     variant={statusVariants[project.status] || 'default'}
                   />
                   <span style={{ fontSize: 12, color: 'var(--gray-400)' }}>
@@ -351,9 +360,9 @@ export default function AdminUserDetailPage() {
           border: '1px solid var(--border-color)',
         }}
       >
-        <h2 style={{ fontSize: 16, fontWeight: 500, marginBottom: 20 }}>最近對話</h2>
+        <h2 style={{ fontSize: 16, fontWeight: 500, marginBottom: 20 }}>{ta('recentConversations')}</h2>
         {recentConversations.length === 0 ? (
-          <p style={{ color: 'var(--gray-400)', fontSize: 14 }}>沒有對話記錄</p>
+          <p style={{ color: 'var(--gray-400)', fontSize: 14 }}>{t('noConversations')}</p>
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
             {recentConversations.map((conv) => (
@@ -377,7 +386,7 @@ export default function AdminUserDetailPage() {
                 <div>
                   <div style={{ fontWeight: 500 }}>{conv.projectName}</div>
                   <div style={{ fontSize: 12, color: 'var(--gray-400)', marginTop: 2 }}>
-                    {conv.messageCount} 則訊息
+                    {ta('messagesCount', { count: conv.messageCount })}
                   </div>
                 </div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>

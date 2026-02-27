@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react'
 import { useSearchParams } from 'next/navigation'
 import { useRouter } from '@/i18n/navigation'
 import { motion } from 'framer-motion'
+import { useTranslations } from 'next-intl'
 
 function getAuthToken(): string | null {
   if (typeof window === 'undefined') return null
@@ -29,6 +30,8 @@ const ALL_PROVIDERS = ['google', 'line']
 export default function AccountPage() {
   const router = useRouter()
   const searchParams = useSearchParams()
+  const t = useTranslations('dashboard.account')
+  const tc = useTranslations('common')
   const [providers, setProviders] = useState<ProviderInfo[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [unlinking, setUnlinking] = useState<string | null>(null)
@@ -42,19 +45,19 @@ export default function AccountPage() {
 
     if (linked) {
       const config = PROVIDER_CONFIG[linked]
-      showToast(`${config?.label || linked} 帳號綁定成功`, 'success')
+      showToast(t('linkSuccess', { provider: config?.label || linked }), 'success')
       // 清除 URL 參數
       window.history.replaceState({}, '', '/dashboard/account')
       // 重新載入資料
       fetchProviders()
     } else if (error) {
       const errorMessages: Record<string, string> = {
-        PROVIDER_ALREADY_LINKED: '此帳號已綁定到其他用戶',
-        PROVIDER_ALREADY_BOUND: '你已經綁定過此類型的帳號',
-        LAST_PROVIDER: '無法解除最後一個登入方式',
-        link_failed: '綁定失敗，請稍後再試',
+        PROVIDER_ALREADY_LINKED: t('errorProviderAlreadyLinked'),
+        PROVIDER_ALREADY_BOUND: t('errorProviderAlreadyBound'),
+        LAST_PROVIDER: t('errorLastProvider'),
+        link_failed: t('errorLinkFailed'),
       }
-      showToast(errorMessages[error] || `錯誤：${error}`, 'error')
+      showToast(errorMessages[error] || t('errorGeneric', { error }), 'error')
       window.history.replaceState({}, '', '/dashboard/account')
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -105,7 +108,7 @@ export default function AccountPage() {
     if (!token) return
 
     const config = PROVIDER_CONFIG[provider]
-    if (!confirm(`確定要解除 ${config?.label || provider} 帳號的綁定嗎？`)) return
+    if (!confirm(t('confirmUnlink', { provider: config?.label || provider }))) return
 
     setUnlinking(provider)
     try {
@@ -117,16 +120,16 @@ export default function AccountPage() {
       const data = await res.json()
 
       if (res.ok && data.success) {
-        showToast(`已解除 ${config?.label} 綁定`, 'success')
+        showToast(t('unlinkSuccess', { provider: config?.label }), 'success')
         setProviders(prev => prev.filter(p => p.provider !== provider))
       } else {
         const errorMessages: Record<string, string> = {
-          LAST_PROVIDER: '無法解除最後一個登入方式',
+          LAST_PROVIDER: t('errorLastProvider'),
         }
-        showToast(errorMessages[data.error] || '解除綁定失敗', 'error')
+        showToast(errorMessages[data.error] || t('unlinkFailed'), 'error')
       }
     } catch {
-      showToast('網路錯誤，請稍後再試', 'error')
+      showToast(t('networkError'), 'error')
     } finally {
       setUnlinking(null)
     }
@@ -138,7 +141,7 @@ export default function AccountPage() {
   if (isLoading) {
     return (
       <div style={{ padding: 40, textAlign: 'center', color: 'var(--gray-400)' }}>
-        載入中...
+        {tc('loading')}
       </div>
     )
   }
@@ -171,10 +174,10 @@ export default function AccountPage() {
 
       {/* 頁面標題 */}
       <h1 style={{ fontSize: 24, fontWeight: 600, marginBottom: 8, letterSpacing: '-0.02em' }}>
-        帳號設定
+        {t('title')}
       </h1>
       <p style={{ fontSize: 14, color: 'var(--gray-500)', marginBottom: 32 }}>
-        管理你的登入方式和帳號資訊
+        {t('subtitle')}
       </p>
 
       {/* 用戶資訊 */}
@@ -185,7 +188,7 @@ export default function AccountPage() {
         marginBottom: 24,
         background: 'var(--white)',
       }}>
-        <h2 style={{ fontSize: 16, fontWeight: 600, marginBottom: 16 }}>基本資訊</h2>
+        <h2 style={{ fontSize: 16, fontWeight: 600, marginBottom: 16 }}>{t('basicInfo')}</h2>
         <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
           {user?.avatarUrl ? (
             /* eslint-disable-next-line @next/next/no-img-element */
@@ -204,7 +207,7 @@ export default function AccountPage() {
             </div>
           )}
           <div>
-            <div style={{ fontSize: 16, fontWeight: 500 }}>{user?.name || '未設定名稱'}</div>
+            <div style={{ fontSize: 16, fontWeight: 500 }}>{user?.name || t('noNameSet')}</div>
             <div style={{ fontSize: 14, color: 'var(--gray-500)', marginTop: 2 }}>{user?.email}</div>
           </div>
         </div>
@@ -218,10 +221,10 @@ export default function AccountPage() {
         marginBottom: 24,
         background: 'var(--white)',
       }}>
-        <h2 style={{ fontSize: 16, fontWeight: 600, marginBottom: 16 }}>已綁定的登入方式</h2>
+        <h2 style={{ fontSize: 16, fontWeight: 600, marginBottom: 16 }}>{t('linkedLoginMethods')}</h2>
 
         {providers.length === 0 ? (
-          <p style={{ fontSize: 14, color: 'var(--gray-400)' }}>尚無綁定的登入方式</p>
+          <p style={{ fontSize: 14, color: 'var(--gray-400)' }}>{t('noLinkedMethods')}</p>
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
             {providers.map(p => {
@@ -258,7 +261,7 @@ export default function AccountPage() {
                           marginLeft: 8, fontSize: 11, color: 'var(--gray-400)',
                           padding: '1px 6px', background: 'var(--gray-100)', borderRadius: 4,
                         }}>
-                          主要
+                          {t('primary')}
                         </span>
                       )}
                     </div>
@@ -266,7 +269,7 @@ export default function AccountPage() {
                       {p.email || '—'}
                       {p.linkedAt && (
                         <span style={{ marginLeft: 8 }}>
-                          綁定於 {new Date(p.linkedAt).toLocaleDateString('zh-TW')}
+                          {t('linkedAt', { date: new Date(p.linkedAt).toLocaleDateString() })}
                         </span>
                       )}
                     </div>
@@ -289,7 +292,7 @@ export default function AccountPage() {
                         transition: 'all 0.15s ease',
                       }}
                     >
-                      {unlinking === p.provider ? '解除中...' : '解除綁定'}
+                      {unlinking === p.provider ? t('unlinking') : t('unlinkAccount')}
                     </button>
                   )}
                 </div>
@@ -307,9 +310,9 @@ export default function AccountPage() {
           borderRadius: 12,
           background: 'var(--white)',
         }}>
-          <h2 style={{ fontSize: 16, fontWeight: 600, marginBottom: 16 }}>綁定其他登入方式</h2>
+          <h2 style={{ fontSize: 16, fontWeight: 600, marginBottom: 16 }}>{t('linkOtherMethods')}</h2>
           <p style={{ fontSize: 13, color: 'var(--gray-500)', marginBottom: 16 }}>
-            綁定後可以用任一方式登入同一帳戶
+            {t('linkOtherHint')}
           </p>
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
@@ -349,9 +352,9 @@ export default function AccountPage() {
                     {config.icon}
                   </div>
                   <div style={{ flex: 1 }}>
-                    <div style={{ fontSize: 14, fontWeight: 500 }}>綁定 {config.label}</div>
+                    <div style={{ fontSize: 14, fontWeight: 500 }}>{t('linkProvider', { provider: config.label })}</div>
                     <div style={{ fontSize: 12, color: 'var(--gray-500)' }}>
-                      使用 {config.label} 帳號登入此帳戶
+                      {t('linkProviderHint', { provider: config.label })}
                     </div>
                   </div>
                   <span style={{ fontSize: 18, color: 'var(--gray-300)' }}>+</span>

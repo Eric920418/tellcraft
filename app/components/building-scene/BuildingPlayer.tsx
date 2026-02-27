@@ -2,6 +2,7 @@
 'use client'
 
 import { useRef, useEffect, useState, useMemo, useCallback } from 'react'
+import { useTranslations } from 'next-intl'
 import { Player, type PlayerRef } from '@remotion/player'
 import BuildingComposition from '../remotion/building-scene/BuildingComposition'
 import BuildingFallback2D from '../remotion/building-scene/BuildingFallback2D'
@@ -31,6 +32,7 @@ export default function BuildingPlayer({
   isWorking,
   isComplete,
 }: BuildingPlayerProps) {
+  const t = useTranslations('buildingPlayer')
   const playerRef = useRef<PlayerRef>(null)
   const containerRef = useRef<HTMLDivElement>(null)
   const [webglOk, setWebglOk] = useState(true)
@@ -203,8 +205,8 @@ export default function BuildingPlayer({
         borderRadius: 12,
         backdropFilter: 'blur(4px)',
       }}>
-        {progress}/{totalQuestions} 題完成 · {percent}%
-        {isWorking && ' · AI 分析中...'}
+        {t('questionsComplete', { progress, total: totalQuestions, percent })}
+        {isWorking && t('aiAnalyzing')}
       </div>
     </div>
   )

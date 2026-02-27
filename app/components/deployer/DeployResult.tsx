@@ -1,5 +1,7 @@
 'use client'
 
+import { useTranslations } from 'next-intl'
+
 interface DeployResultProps {
   data: {
     success?: boolean
@@ -9,6 +11,7 @@ interface DeployResultProps {
 }
 
 export default function DeployResult({ data }: DeployResultProps) {
+  const t = useTranslations('deploy')
   if (data.success) {
     return (
       <div
@@ -21,7 +24,7 @@ export default function DeployResult({ data }: DeployResultProps) {
         }}
       >
         <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 8, color: '#166534' }}>
-          部署成功
+          {t('deploySuccess')}
         </div>
         {data.deploymentUrl && (
           <a
@@ -39,11 +42,11 @@ export default function DeployResult({ data }: DeployResultProps) {
               textDecoration: 'none',
             }}
           >
-            前往網站 →
+            {t('visitSiteArrow')}
           </a>
         )}
         <div style={{ marginTop: 12, fontSize: 12, color: '#166534', lineHeight: 1.6 }}>
-          直接輸入修改建議即可迭代設計 | 輸入「回滾」恢復舊版本
+          {t('iterationHint')}
         </div>
       </div>
     )
@@ -60,10 +63,10 @@ export default function DeployResult({ data }: DeployResultProps) {
       }}
     >
       <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 8, color: '#991b1b' }}>
-        部署失敗
+        {t('deployFailed')}
       </div>
       <div style={{ fontSize: 13, color: '#991b1b' }}>
-        {data.error || '未知錯誤'}
+        {data.error || t('unknownError')}
       </div>
     </div>
   )

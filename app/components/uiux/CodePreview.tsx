@@ -2,6 +2,7 @@
 
 import { useState, useMemo } from 'react'
 import { motion } from 'framer-motion'
+import { useTranslations } from 'next-intl'
 
 // ============================================================
 // CodePreview - 程式碼預覽組件
@@ -83,6 +84,7 @@ export default function CodePreview({
   styles,
   tailwindConfig,
 }: CodePreviewProps) {
+  const t = useTranslations('uiux')
   const [activeTab, setActiveTab] = useState<'pages' | 'components' | 'styles' | 'config'>('pages')
   const [selectedFile, setSelectedFile] = useState<string | null>(null)
   const [copiedFile, setCopiedFile] = useState<string | null>(null)
@@ -153,7 +155,7 @@ export default function CodePreview({
           fontSize: 14,
         }}
       >
-        沒有生成的程式碼
+        {t('noGeneratedCode')}
       </div>
     )
   }
@@ -169,10 +171,10 @@ export default function CodePreview({
         }}
       >
         {[
-          { key: 'pages' as const, label: '頁面', count: pages.length },
-          { key: 'components' as const, label: '組件', count: components.length },
-          { key: 'styles' as const, label: '樣式', count: styles ? 1 : 0 },
-          { key: 'config' as const, label: '配置', count: tailwindConfig ? 1 : 0 },
+          { key: 'pages' as const, label: t('tabPages'), count: pages.length },
+          { key: 'components' as const, label: t('tabComponents'), count: components.length },
+          { key: 'styles' as const, label: t('tabStyles'), count: styles ? 1 : 0 },
+          { key: 'config' as const, label: t('tabConfig'), count: tailwindConfig ? 1 : 0 },
         ].filter(tab => tab.count > 0).map(tab => (
           <button
             key={tab.key}
@@ -278,7 +280,7 @@ export default function CodePreview({
                     cursor: 'pointer',
                   }}
                 >
-                  {copiedFile === selectedContent.path ? '已複製' : '複製'}
+                  {copiedFile === selectedContent.path ? t('copied') : t('copy')}
                 </motion.button>
               </div>
 
@@ -323,7 +325,7 @@ export default function CodePreview({
         }}
       >
         <span style={{ fontSize: 12, color: 'var(--gray-500)' }}>
-          共 {allFiles.length} 個文件
+          {t('totalFiles', { count: allFiles.length })}
         </span>
         <motion.button
           whileHover={{ scale: 1.02 }}
@@ -350,7 +352,7 @@ export default function CodePreview({
             cursor: 'pointer',
           }}
         >
-          {copiedFile === 'all' ? '已複製全部' : '複製全部文件'}
+          {copiedFile === 'all' ? t('allCopied') : t('copyAll')}
         </motion.button>
       </div>
     </div>

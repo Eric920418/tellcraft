@@ -41,21 +41,17 @@ const statusVariants: Record<string, 'default' | 'success' | 'warning' | 'error'
   cancelled: 'error',
 }
 
-const statusLabels: Record<string, string> = {
-  active: '正常',
-  suspended: '暫停',
-  cancelled: '取消',
+const statusLabelKeys: Record<string, string> = {
+  active: 'statusActive',
+  suspended: 'statusSuspended',
+  cancelled: 'statusCancelled',
 }
-
-const providerTabs: { key: ProviderTab; label: string }[] = [
-  { key: 'all', label: '全部' },
-  { key: 'google', label: 'Google 登入' },
-  { key: 'line', label: 'LINE 登入' },
-  { key: 'guest', label: '訪客' },
-]
 
 export default function AdminUsersPage() {
   const router = useRouter()
+  const t = useTranslations('dashboard')
+  const ta = useTranslations('dashboard.admin')
+  const tc = useTranslations('common')
   const [allUsers, setAllUsers] = useState<User[]>([])
   const [total, setTotal] = useState(0)
   const [isLoading, setIsLoading] = useState(true)
@@ -66,6 +62,18 @@ export default function AdminUsersPage() {
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc')
   const [activeTab, setActiveTab] = useState<ProviderTab>('all')
   const debounceTimerRef = useRef<NodeJS.Timeout | null>(null)
+
+  const getStatusLabel = (status: string) => {
+    const key = statusLabelKeys[status]
+    return key ? t(key) : status
+  }
+
+  const providerTabs: { key: ProviderTab; label: string }[] = [
+    { key: 'all', label: ta('filterAll') },
+    { key: 'google', label: ta('providerGoogle') },
+    { key: 'line', label: ta('providerLine') },
+    { key: 'guest', label: ta('providerGuest') },
+  ]
 
   // 一次載入全部用戶（不分頁查後端），前端做分類 + 分頁
   // 用戶量不大的情況下這樣最簡單，避免後端也要加 provider filter
@@ -109,7 +117,7 @@ export default function AdminUsersPage() {
           router.push('/dashboard')
           return
         }
-        setError(result.error || '載入失敗')
+        setError(result.error || tc('loadFailed'))
         setIsLoading(false)
         return
       }
@@ -156,7 +164,7 @@ export default function AdminUsersPage() {
   const handleToggleAdmin = async (userId: string, currentIsAdmin: boolean) => {
     const token = getAuthToken()
     if (!token) {
-      alert('請重新登入')
+      alert(tc('pleaseRelogin'))
       return
     }
 
@@ -166,7 +174,7 @@ export default function AdminUsersPage() {
         prev.map((u) => (u.id === userId ? { ...u, isAdmin: !currentIsAdmin } : u))
       )
     } else {
-      alert(result.error || '操作失敗')
+      alert(result.error || tc('operationFailed'))
     }
   }
 
@@ -212,7 +220,7 @@ export default function AdminUsersPage() {
     },
     {
       key: 'provider',
-      header: '登入方式',
+      header: ta('loginProvider'),
       width: '100px',
       render: (user: User) => (
         <span
@@ -228,13 +236,13 @@ export default function AdminUsersPage() {
                 : { background: 'var(--gray-100)', color: 'var(--gray-500)' }),
           }}
         >
-          {user.provider === 'google' ? 'Google' : user.provider === 'line' ? 'LINE' : '訪客'}
+          {user.provider === 'google' ? 'Google' : user.provider === 'line' ? 'LINE' : ta('providerGuest')}
         </span>
       ),
     },
     {
       key: 'plan',
-      header: '方案',
+      header: ta('planColumn'),
       width: '80px',
       sortable: true,
       render: (user: User) => (
@@ -251,18 +259,18 @@ export default function AdminUsersPage() {
     },
     {
       key: 'subscriptionStatus',
-      header: '狀態',
+      header: ta('statusColumn'),
       width: '80px',
       render: (user: User) => (
         <StatusBadge
-          status={statusLabels[user.subscriptionStatus] || user.subscriptionStatus}
+          status={getStatusLabel(user.subscriptionStatus)}
           variant={statusVariants[user.subscriptionStatus] || 'default'}
         />
       ),
     },
     {
       key: 'projectCount',
-      header: '專案',
+      header: ta('projectsColumn'),
       width: '60px',
       sortable: true,
       render: (user: User) => (
@@ -271,7 +279,7 @@ export default function AdminUsersPage() {
     },
     {
       key: 'messageCount',
-      header: '訊息',
+      header: ta('messagesColumn'),
       width: '60px',
       render: (user: User) => (
         <span style={{ fontFamily: 'var(--font-mono)' }}>{user.messageCount}</span>
@@ -279,7 +287,7 @@ export default function AdminUsersPage() {
     },
     {
       key: 'createdAt',
-      header: '註冊日期',
+      header: ta('registeredAt'),
       width: '100px',
       sortable: true,
       render: (user: User) => (
@@ -309,7 +317,7 @@ export default function AdminUsersPage() {
             cursor: 'pointer',
           }}
         >
-          {user.isAdmin ? '移除管理' : '設為管理'}
+          {user.isAdmin ? ta('removeAdmin') : ta('setAdmin')}
         </motion.button>
       ),
     },
@@ -347,10 +355,10 @@ export default function AdminUsersPage() {
             marginBottom: 8,
           }}
         >
-          用戶管理
+          {ta('userManagement')}
         </h1>
         <p style={{ fontSize: 14, color: 'var(--gray-500)' }}>
-          共 {total} 位用戶
+          {ta('totalCount', { count: total })}
         </p>
       </motion.div>
 
@@ -365,7 +373,7 @@ export default function AdminUsersPage() {
           <SearchInput
             value={searchInput}
             onChange={handleSearchChange}
-            placeholder="搜尋 Email 或名稱..."
+            placeholder={t('searchPlaceholder')}
           />
         </div>
 
@@ -413,7 +421,7 @@ export default function AdminUsersPage() {
           data={displayUsers}
           keyField="id"
           isLoading={isLoading}
-          emptyMessage="沒有用戶"
+          emptyMessage={t('noUsers')}
           onRowClick={(user) => {
             router.push(`/dashboard/admin/users/${user.id}`)
           }}

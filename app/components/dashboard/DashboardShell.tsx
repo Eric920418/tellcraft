@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
+import { useTranslations } from 'next-intl'
 import Sidebar from './Sidebar'
 import { useAuth } from '../../hooks/useAuth'
 
@@ -20,6 +21,7 @@ export function DashboardShell({
   children: React.ReactNode
 }) {
   const { user: authUser } = useAuth()
+  const t = useTranslations('dashboard')
   // 優先使用 useAuth() 的即時數據（從 DB 讀取），fallback 到 JWT 解析的靜態值
   const effectiveIsAdmin = authUser?.isAdmin ?? user.isAdmin
 
@@ -51,7 +53,7 @@ export function DashboardShell({
       <button
         className={`mobile-menu-toggle ${isMobileMenuOpen ? 'is-open' : ''}`}
         onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
-        aria-label={isMobileMenuOpen ? '關閉選單' : '開啟選單'}
+        aria-label={isMobileMenuOpen ? t('closeMenu') : t('openMenu')}
         aria-expanded={isMobileMenuOpen}
       >
         <div className="hamburger-lines">

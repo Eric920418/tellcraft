@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react'
 import { useParams } from 'next/navigation'
 import { motion } from 'framer-motion'
 import { Link, useRouter } from '@/i18n/navigation'
+import { useTranslations } from 'next-intl'
 import { StatusBadge, MiniStatsCard } from '@/app/components/dashboard'
 import { VersionHistory } from '@/app/components/dashboard/VersionHistory'
 import { getProjectDetail } from '@/app/actions'
@@ -55,20 +56,22 @@ const statusVariants: Record<string, 'default' | 'success' | 'warning' | 'error'
   success: 'success',
 }
 
-const statusLabels: Record<string, string> = {
-  draft: '草稿',
-  generating: '生成中',
-  testing: '測試中',
-  deployed: '已上線',
-  failed: '失敗',
-  pending: '等待中',
-  running: '執行中',
-  success: '成功',
+const statusLabelKeys: Record<string, string> = {
+  draft: 'statusDraft',
+  generating: 'statusGenerating',
+  testing: 'statusTesting',
+  deployed: 'statusDeployed',
+  failed: 'statusFailed',
+  pending: 'statusPending',
+  running: 'statusRunning',
+  success: 'statusSuccess',
 }
 
 export default function ProjectDetailPage() {
   const params = useParams()
   const router = useRouter()
+  const t = useTranslations('dashboard')
+  const tc = useTranslations('common')
   const { token } = useAuth()
   const [data, setData] = useState<ProjectDetail | null>(null)
   const [isLoading, setIsLoading] = useState(true)
@@ -76,6 +79,11 @@ export default function ProjectDetailPage() {
   const [isIterating, setIsIterating] = useState(false)
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
   const [isDeleting, setIsDeleting] = useState(false)
+
+  const getStatusLabel = (status: string) => {
+    const key = statusLabelKeys[status]
+    return key ? t(key) : status
+  }
 
   const projectId = params.id as string
 
@@ -86,7 +94,7 @@ export default function ProjectDetailPage() {
       if (result.success && result.data) {
         setData(result.data)
       } else {
-        setError(result.error || '載入失敗')
+        setError(result.error || tc('loadFailed'))
       }
       setIsLoading(false)
     }
@@ -109,7 +117,7 @@ export default function ProjectDetailPage() {
   // 開始新迭代
   const handleStartIteration = async () => {
     if (!token) {
-      setError('請先登入')
+      setError(t('loginFirst'))
       return
     }
 
@@ -123,7 +131,7 @@ export default function ProjectDetailPage() {
       if (result.success && result.data) {
         router.push(`/?conversation=${result.data.conversationId}`)
       } else {
-        setError(result.error || '開始新迭代失敗')
+        setError(result.error || t('startIterationFailed'))
       }
     } catch (err) {
       setError((err as Error).message)
@@ -140,7 +148,7 @@ export default function ProjectDetailPage() {
   // 刪除專案
   const handleDeleteProject = async () => {
     if (!token) {
-      setError('請先登入')
+      setError(t('loginFirst'))
       return
     }
 
@@ -154,7 +162,7 @@ export default function ProjectDetailPage() {
       if (result.success) {
         router.push('/dashboard/projects')
       } else {
-        setError(result.error || '刪除專案失敗')
+        setError(result.error || t('deleteProjectFailed'))
         setShowDeleteConfirm(false)
       }
     } catch (err) {
@@ -168,7 +176,7 @@ export default function ProjectDetailPage() {
   if (isLoading) {
     return (
       <div style={{ padding: '40px 0', textAlign: 'center', color: 'var(--gray-500)' }}>
-        載入中...
+        {tc('loading')}
       </div>
     )
   }
@@ -183,10 +191,10 @@ export default function ProjectDetailPage() {
           color: '#DC2626',
         }}
       >
-        {error || '專案不存在'}
+        {error || t('projectNotExists')}
         <div style={{ marginTop: 16 }}>
           <Link href="/dashboard/projects" style={{ color: '#DC2626' }}>
-            ← 返回專案列表
+            {t('backToProjects')}
           </Link>
         </div>
       </div>
@@ -211,7 +219,7 @@ export default function ProjectDetailPage() {
             textDecoration: 'none',
           }}
         >
-          ← 返回專案列表
+          {t('backToProjects')}
         </Link>
       </motion.div>
 
@@ -239,7 +247,7 @@ export default function ProjectDetailPage() {
               {project.name}
             </h1>
             <StatusBadge
-              status={statusLabels[project.status] || project.status}
+              status={getStatusLabel(project.status)}
               variant={statusVariants[project.status] || 'default'}
             />
           </div>
@@ -265,7 +273,7 @@ export default function ProjectDetailPage() {
                 cursor: 'pointer',
               }}
             >
-              繼續對話 →
+              {t('continueConversation')}
             </button>
           )}
 
@@ -287,7 +295,7 @@ export default function ProjectDetailPage() {
                 cursor: isIterating ? 'not-allowed' : 'pointer',
               }}
             >
-              {isIterating ? '處理中...' : '新增迭代 +'}
+              {isIterating ? t('processingIteration') : t('newIteration')}
             </button>
           )}
 
@@ -310,7 +318,7 @@ export default function ProjectDetailPage() {
                 border: '1px solid var(--border-color)',
               }}
             >
-              訪問網站 ↗
+              {t('visitSite')}
             </a>
           )}
         </div>
@@ -335,7 +343,7 @@ export default function ProjectDetailPage() {
             border: '1px solid var(--border-color)',
           }}
         >
-          <MiniStatsCard label="對話" value={conversations.length} />
+          <MiniStatsCard label={t('conversationsLabel')} value={conversations.length} />
         </div>
         <div
           style={{
@@ -344,7 +352,7 @@ export default function ProjectDetailPage() {
             border: '1px solid var(--border-color)',
           }}
         >
-          <MiniStatsCard label="部署" value={deployments.length} />
+          <MiniStatsCard label={t('deploymentsLabel')} value={deployments.length} />
         </div>
         <div
           style={{
@@ -353,7 +361,7 @@ export default function ProjectDetailPage() {
             border: '1px solid var(--border-color)',
           }}
         >
-          <MiniStatsCard label="生成" value={generations.length} />
+          <MiniStatsCard label={t('generationsLabel')} value={generations.length} />
         </div>
         <div
           style={{
@@ -363,8 +371,8 @@ export default function ProjectDetailPage() {
           }}
         >
           <MiniStatsCard
-            label="創建日期"
-            value={new Date(project.createdAt).toLocaleDateString('zh-TW')}
+            label={t('createdDate')}
+            value={new Date(project.createdAt).toLocaleDateString()}
           />
         </div>
       </motion.div>
@@ -381,9 +389,9 @@ export default function ProjectDetailPage() {
           marginBottom: 24,
         }}
       >
-        <h2 style={{ fontSize: 16, fontWeight: 500, marginBottom: 20 }}>對話記錄</h2>
+        <h2 style={{ fontSize: 16, fontWeight: 500, marginBottom: 20 }}>{t('conversationRecords')}</h2>
         {conversations.length === 0 ? (
-          <p style={{ color: 'var(--gray-400)', fontSize: 14 }}>沒有對話記錄</p>
+          <p style={{ color: 'var(--gray-400)', fontSize: 14 }}>{t('noConversations')}</p>
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
             {conversations.map((conv, index) => (
@@ -410,7 +418,7 @@ export default function ProjectDetailPage() {
               >
                 <div>
                   <div style={{ fontSize: 14, fontWeight: 500, marginBottom: 4 }}>
-                    對話 #{conversations.length - index}
+                    {t('conversationNumber', { num: conversations.length - index })}
                     {!conv.specComplete && (
                       <span style={{
                         marginLeft: 8,
@@ -420,12 +428,12 @@ export default function ProjectDetailPage() {
                         color: 'var(--yellow-700)',
                         borderRadius: 4,
                       }}>
-                        進行中
+                        {t('inProgress')}
                       </span>
                     )}
                   </div>
                   <div style={{ fontSize: 12, color: 'var(--gray-400)' }}>
-                    {conv.messageCount} 則訊息
+                    {t('messages')} {conv.messageCount}
                   </div>
                   {conv.lastMessage && (
                     <div
@@ -469,7 +477,7 @@ export default function ProjectDetailPage() {
             marginBottom: 24,
           }}
         >
-          <h2 style={{ fontSize: 16, fontWeight: 500, marginBottom: 20 }}>版本歷史</h2>
+          <h2 style={{ fontSize: 16, fontWeight: 500, marginBottom: 20 }}>{t('versionHistory')}</h2>
           <VersionHistory
             projectId={projectId}
             token={token}
@@ -489,9 +497,9 @@ export default function ProjectDetailPage() {
           border: '1px solid var(--border-color)',
         }}
       >
-        <h2 style={{ fontSize: 16, fontWeight: 500, marginBottom: 20 }}>部署歷史</h2>
+        <h2 style={{ fontSize: 16, fontWeight: 500, marginBottom: 20 }}>{t('deploymentHistory')}</h2>
         {deployments.length === 0 ? (
-          <p style={{ color: 'var(--gray-400)', fontSize: 14 }}>沒有部署記錄</p>
+          <p style={{ color: 'var(--gray-400)', fontSize: 14 }}>{t('noDeployments')}</p>
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
             {deployments.map((deploy, _index) => (
@@ -507,7 +515,7 @@ export default function ProjectDetailPage() {
               >
                 <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
                   <StatusBadge
-                    status={statusLabels[deploy.status] || deploy.status}
+                    status={getStatusLabel(deploy.status)}
                     variant={statusVariants[deploy.status] || 'default'}
                   />
                   {deploy.url && (
@@ -547,10 +555,10 @@ export default function ProjectDetailPage() {
         }}
       >
         <h2 style={{ fontSize: 16, fontWeight: 500, marginBottom: 8, color: '#DC2626' }}>
-          危險區域
+          {t('dangerZone')}
         </h2>
         <p style={{ fontSize: 13, color: 'var(--gray-500)', marginBottom: 16 }}>
-          刪除專案將會永久移除所有對話記錄、生成記錄和部署歷史，此操作無法復原。
+          {t('deleteProjectWarning')}
         </p>
         <button
           onClick={() => setShowDeleteConfirm(true)}
@@ -573,7 +581,7 @@ export default function ProjectDetailPage() {
             e.currentTarget.style.color = '#DC2626'
           }}
         >
-          刪除專案
+          {t('deleteProject')}
         </button>
       </motion.div>
 
@@ -607,15 +615,15 @@ export default function ProjectDetailPage() {
             onClick={(e) => e.stopPropagation()}
           >
             <h3 style={{ fontSize: 18, fontWeight: 500, marginBottom: 12 }}>
-              確定要刪除專案？
+              {t('confirmDeleteTitle')}
             </h3>
             <p style={{ fontSize: 14, color: 'var(--gray-500)', marginBottom: 8 }}>
-              專案「<strong>{project.name}</strong>」將被永久刪除，包含：
+              {t('confirmDeleteBody', { name: project.name })}
             </p>
             <ul style={{ fontSize: 13, color: 'var(--gray-500)', marginBottom: 24, paddingLeft: 20 }}>
-              <li>{conversations.length} 個對話記錄</li>
-              <li>{generations.length} 個生成記錄</li>
-              <li>{deployments.length} 個部署歷史</li>
+              <li>{t('deleteItemConversations', { count: conversations.length })}</li>
+              <li>{t('deleteItemGenerations', { count: generations.length })}</li>
+              <li>{t('deleteItemDeployments', { count: deployments.length })}</li>
             </ul>
             <div style={{ display: 'flex', gap: 12, justifyContent: 'flex-end' }}>
               <button
@@ -630,7 +638,7 @@ export default function ProjectDetailPage() {
                   opacity: isDeleting ? 0.5 : 1,
                 }}
               >
-                取消
+                {tc('cancel')}
               </button>
               <button
                 onClick={handleDeleteProject}
@@ -645,7 +653,7 @@ export default function ProjectDetailPage() {
                   cursor: isDeleting ? 'not-allowed' : 'pointer',
                 }}
               >
-                {isDeleting ? '刪除中...' : '確認刪除'}
+                {isDeleting ? t('deleting') : t('confirmDelete')}
               </button>
             </div>
           </motion.div>

@@ -8,6 +8,7 @@
 
 import { useRef, useEffect, useState, useCallback, useMemo } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
+import { useTranslations } from 'next-intl'
 import { getBddSession } from '../actions'
 
 // ── Types ──
@@ -53,20 +54,21 @@ const COLORS = {
 
 // ── 分類標籤映射 ──
 
-const CATEGORY_LABELS: Record<string, string> = {
-  data: '資料模型',
-  feature: '功能需求',
-  terminology: '術語定義',
-  architecture: '技術架構',
-  design: '設計偏好',
-  business: '業務邏輯',
-  integration: '外部整合',
-  security: '安全需求',
-  performance: '效能需求',
+const CATEGORY_KEY_MAP: Record<string, string> = {
+  data: 'categoryData',
+  feature: 'categoryFeature',
+  terminology: 'categoryTerminology',
+  architecture: 'categoryArchitecture',
+  design: 'categoryDesign',
+  business: 'categoryBusiness',
+  integration: 'categoryIntegration',
+  security: 'categorySecurity',
+  performance: 'categoryPerformance',
 }
 
-function getCategoryLabel(category: string): string {
-  return CATEGORY_LABELS[category] || category
+function getCategoryLabel(category: string, t: (key: string) => string): string {
+  const key = CATEGORY_KEY_MAP[category]
+  return key ? t(key) : category
 }
 
 // ── 自訂 Hook：取得 BDD Session 資料 ──
@@ -96,7 +98,7 @@ function useBddSessionData(conversationId: string | undefined, progress: number)
       }
     } catch (err) {
       console.error('[BddPanel] Failed to fetch BDD session:', err)
-      setError('無法載入需求資料')
+      setError('loadError')
     } finally {
       fetchingRef.current = false
     }
@@ -183,6 +185,7 @@ function CategorySection({
   isLatestCategory: boolean
   lastItemId: string | null
 }) {
+  const t = useTranslations('bddPanel')
   const [collapsed, setCollapsed] = useState(false)
   const answeredCount = items.filter(i => i.answer).length
 
@@ -230,7 +233,7 @@ function CategorySection({
             fontWeight: 600,
             fontFamily: 'ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace',
           }}>
-            {getCategoryLabel(category)}
+            {getCategoryLabel(category, t)}
           </span>
         </div>
         <span style={{
@@ -238,7 +241,7 @@ function CategorySection({
           color: COLORS.subText,
           fontFamily: 'ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace',
         }}>
-          {answeredCount} 題
+          {t('questionsCount', { count: answeredCount })}
         </span>
       </div>
 
@@ -279,6 +282,7 @@ export default function BddAnimationPanel({
   isComplete,
   conversationId,
 }: BddAnimationPanelProps) {
+  const t = useTranslations('bddPanel')
   const scrollRef = useRef<HTMLDivElement>(null)
   const bottomRef = useRef<HTMLDivElement>(null)
   const { items, error } = useBddSessionData(conversationId, progress)
@@ -340,7 +344,7 @@ export default function BddAnimationPanel({
               letterSpacing: 0.5,
               fontFamily: 'ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace',
             }}>
-              需求藍圖
+              {t('title')}
             </span>
           </div>
           <span style={{
@@ -413,7 +417,7 @@ export default function BddAnimationPanel({
             fontSize: 12,
             color: '#f59e9e',
           }}>
-            {error}
+            {t(error)}
           </div>
         )}
 
@@ -444,7 +448,7 @@ export default function BddAnimationPanel({
               fontSize: 13,
               fontFamily: 'ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace',
             }}>
-              等待需求釐清開始...
+              {t('waitingStart')}
             </span>
           </div>
         )}
@@ -495,7 +499,7 @@ export default function BddAnimationPanel({
               color: COLORS.aiWorking,
               fontFamily: 'ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace',
             }}>
-              AI 正在分析中...
+              {t('aiAnalyzing')}
             </span>
           </>
         )}
@@ -515,7 +519,7 @@ export default function BddAnimationPanel({
               color: COLORS.completeBorder,
               fontFamily: 'ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace',
             }}>
-              需求釐清完成
+              {t('clarifyComplete')}
             </span>
           </>
         )}
@@ -526,7 +530,7 @@ export default function BddAnimationPanel({
             color: COLORS.subText,
             fontFamily: 'ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace',
           }}>
-            已收集 {items.filter(i => i.answer).length} 項需求
+            {t('collectedCount', { count: items.filter(i => i.answer).length })}
           </span>
         )}
       </div>

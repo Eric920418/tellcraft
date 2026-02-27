@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
+import { useTranslations, useLocale } from 'next-intl'
 import { getProjectVersions, updateVersionLabel, rollbackVersion, compareVersions } from '../../lib/vps-api'
 
 interface Version {
@@ -28,14 +29,17 @@ const statusColors: Record<string, { bg: string; text: string }> = {
   failed: { bg: 'var(--red-100)', text: 'var(--red-700)' },
 }
 
-const statusLabels: Record<string, string> = {
-  pending: '等待中',
-  running: '執行中',
-  success: '成功',
-  failed: '失敗',
+const statusKeyMap: Record<string, string> = {
+  pending: 'statusPending',
+  running: 'statusRunning',
+  success: 'statusSuccess',
+  failed: 'statusFailed',
 }
 
 export function VersionHistory({ projectId, token, onError }: VersionHistoryProps) {
+  const t = useTranslations('dashboard')
+  const tc = useTranslations('common')
+  const locale = useLocale()
   const [versions, setVersions] = useState<Version[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [editingLabel, setEditingLabel] = useState<number | null>(null)
@@ -57,7 +61,7 @@ export function VersionHistory({ projectId, token, onError }: VersionHistoryProp
       if (result.success && result.data) {
         setVersions(result.data.versions)
       } else {
-        onError?.(result.error || '載入版本歷史失敗')
+        onError?.(result.error || t('versionLoadFailed'))
       }
       setIsLoading(false)
     }
@@ -86,7 +90,7 @@ export function VersionHistory({ projectId, token, onError }: VersionHistoryProp
           : v
       ))
     } else {
-      onError?.(result.error || '更新標籤失敗')
+      onError?.(result.error || t('versionUpdateLabelFailed'))
     }
 
     setEditingLabel(null)
@@ -112,7 +116,7 @@ export function VersionHistory({ projectId, token, onError }: VersionHistoryProp
       setDiffData(result.data)
       setShowDiffModal(true)
     } else {
-      onError?.(result.error || '版本對比失敗')
+      onError?.(result.error || t('versionCompareFailed'))
     }
   }
 
@@ -129,7 +133,7 @@ export function VersionHistory({ projectId, token, onError }: VersionHistoryProp
       }
       alert(result.data.message)
     } else {
-      onError?.(result.error || '回滾失敗')
+      onError?.(result.error || t('versionRollbackFailed'))
     }
 
     setIsRollingBack(false)
@@ -139,7 +143,7 @@ export function VersionHistory({ projectId, token, onError }: VersionHistoryProp
   if (isLoading) {
     return (
       <div style={{ padding: 24, textAlign: 'center', color: 'var(--gray-400)' }}>
-        載入版本歷史...
+        {t('versionLoading')}
       </div>
     )
   }
@@ -147,7 +151,7 @@ export function VersionHistory({ projectId, token, onError }: VersionHistoryProp
   if (versions.length === 0) {
     return (
       <div style={{ padding: 24, textAlign: 'center', color: 'var(--gray-400)' }}>
-        尚無版本記錄
+        {t('versionNoRecords')}
       </div>
     )
   }
@@ -170,7 +174,7 @@ export function VersionHistory({ projectId, token, onError }: VersionHistoryProp
           }}
         >
           <span style={{ fontSize: 14, color: 'var(--blue-700)' }}>
-            已選擇 v{selectedForCompare[0]} 和 v{selectedForCompare[1]}
+            {t('versionSelected', { v1: selectedForCompare[0], v2: selectedForCompare[1] })}
           </span>
           <div style={{ display: 'flex', gap: 8 }}>
             <button
@@ -184,7 +188,7 @@ export function VersionHistory({ projectId, token, onError }: VersionHistoryProp
                 cursor: 'pointer',
               }}
             >
-              取消
+              {tc('cancel')}
             </button>
             <button
               onClick={handleCompare}
@@ -197,7 +201,7 @@ export function VersionHistory({ projectId, token, onError }: VersionHistoryProp
                 cursor: 'pointer',
               }}
             >
-              對比版本
+              {t('versionCompare')}
             </button>
           </div>
         </motion.div>
@@ -251,7 +255,7 @@ export function VersionHistory({ projectId, token, onError }: VersionHistoryProp
                           type="text"
                           value={labelValue}
                           onChange={(e) => setLabelValue(e.target.value)}
-                          placeholder="版本標籤"
+                          placeholder={t('versionLabelPlaceholder')}
                           style={{
                             padding: '4px 8px',
                             fontSize: 12,
@@ -275,7 +279,7 @@ export function VersionHistory({ projectId, token, onError }: VersionHistoryProp
                             cursor: 'pointer',
                           }}
                         >
-                          儲存
+                          {tc('save')}
                         </button>
                       </div>
                     ) : (
@@ -290,7 +294,7 @@ export function VersionHistory({ projectId, token, onError }: VersionHistoryProp
                           borderRadius: 4,
                         }}
                       >
-                        {version.versionLabel || '+ 標籤'}
+                        {version.versionLabel || t('versionAddLabel')}
                       </span>
                     )}
                     <span
@@ -302,7 +306,7 @@ export function VersionHistory({ projectId, token, onError }: VersionHistoryProp
                         color: statusColors[version.status]?.text || 'var(--gray-600)',
                       }}
                     >
-                      {statusLabels[version.status] || version.status}
+                      {statusKeyMap[version.status] ? t(statusKeyMap[version.status]) : version.status}
                     </span>
                   </div>
 
@@ -315,7 +319,7 @@ export function VersionHistory({ projectId, token, onError }: VersionHistoryProp
 
                   {/* 時間 */}
                   <span style={{ fontSize: 12, color: 'var(--gray-400)' }}>
-                    {new Date(version.createdAt).toLocaleString('zh-TW')}
+                    {new Date(version.createdAt).toLocaleString(locale === 'zh' ? 'zh-TW' : 'en-US')}
                   </span>
                 </div>
 
@@ -337,7 +341,7 @@ export function VersionHistory({ projectId, token, onError }: VersionHistoryProp
                       cursor: 'pointer',
                     }}
                   >
-                    {selectedForCompare.includes(version.versionNumber) ? '已選' : '對比'}
+                    {selectedForCompare.includes(version.versionNumber) ? t('versionCompareSelected') : t('versionCompareSelect')}
                   </button>
 
                   {/* 回滾按鈕 */}
@@ -353,7 +357,7 @@ export function VersionHistory({ projectId, token, onError }: VersionHistoryProp
                         cursor: 'pointer',
                       }}
                     >
-                      回滾
+                      {t('versionRollback')}
                     </button>
                   )}
                 </div>
@@ -394,13 +398,13 @@ export function VersionHistory({ projectId, token, onError }: VersionHistoryProp
               }}
             >
               <h3 style={{ fontSize: 18, fontWeight: 600, marginBottom: 16 }}>
-                確認回滾
+                {t('versionRollbackConfirmTitle')}
               </h3>
               <p style={{ fontSize: 14, color: 'var(--gray-600)', marginBottom: 8 }}>
-                你即將回滾到版本 v{showRollbackConfirm}。
+                {t('versionRollbackConfirmMessage', { version: showRollbackConfirm })}
               </p>
               <p style={{ fontSize: 13, color: 'var(--orange-600)', marginBottom: 24 }}>
-                注意：回滾會創建一個新版本，且可能影響生產數據。請確認你已備份重要資料。
+                {t('versionRollbackWarning')}
               </p>
               <div style={{ display: 'flex', gap: 12, justifyContent: 'flex-end' }}>
                 <button
@@ -413,7 +417,7 @@ export function VersionHistory({ projectId, token, onError }: VersionHistoryProp
                     cursor: 'pointer',
                   }}
                 >
-                  取消
+                  {tc('cancel')}
                 </button>
                 <button
                   onClick={() => handleRollback(showRollbackConfirm)}
@@ -427,7 +431,7 @@ export function VersionHistory({ projectId, token, onError }: VersionHistoryProp
                     cursor: isRollingBack ? 'not-allowed' : 'pointer',
                   }}
                 >
-                  {isRollingBack ? '處理中...' : '確認回滾'}
+                  {isRollingBack ? t('versionRollingBack') : t('versionConfirmRollback')}
                 </button>
               </div>
             </motion.div>
@@ -469,7 +473,7 @@ export function VersionHistory({ projectId, token, onError }: VersionHistoryProp
             >
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
                 <h3 style={{ fontSize: 18, fontWeight: 600 }}>
-                  版本對比：v{selectedForCompare[0]} vs v{selectedForCompare[1]}
+                  {t('versionDiffTitle', { v1: selectedForCompare[0], v2: selectedForCompare[1] })}
                 </h3>
                 <button
                   onClick={() => setShowDiffModal(false)}
@@ -489,7 +493,7 @@ export function VersionHistory({ projectId, token, onError }: VersionHistoryProp
               {/* Schema 差異 */}
               {diffData.schemaDiff && (
                 <div style={{ marginBottom: 24 }}>
-                  <h4 style={{ fontSize: 14, fontWeight: 600, marginBottom: 12 }}>Schema 變更</h4>
+                  <h4 style={{ fontSize: 14, fontWeight: 600, marginBottom: 12 }}>{t('versionSchemaChanges')}</h4>
                   <pre style={{
                     fontSize: 12,
                     fontFamily: 'monospace',
@@ -525,7 +529,7 @@ export function VersionHistory({ projectId, token, onError }: VersionHistoryProp
               {/* Features 差異 */}
               {diffData.featuresDiff.length > 0 && (
                 <div>
-                  <h4 style={{ fontSize: 14, fontWeight: 600, marginBottom: 12 }}>Feature Files 變更</h4>
+                  <h4 style={{ fontSize: 14, fontWeight: 600, marginBottom: 12 }}>{t('versionFeatureChanges')}</h4>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                     {diffData.featuresDiff.map((feature, i) => (
                       <div
@@ -551,7 +555,7 @@ export function VersionHistory({ projectId, token, onError }: VersionHistoryProp
                                 ? 'var(--red-700)'
                                 : 'var(--yellow-700)',
                           }}>
-                            {feature.status === 'added' ? '新增' : feature.status === 'removed' ? '刪除' : '修改'}
+                            {feature.status === 'added' ? t('versionFeatureAdded') : feature.status === 'removed' ? t('versionFeatureRemoved') : t('versionFeatureModified')}
                           </span>
                           <span style={{ fontSize: 13, fontWeight: 500 }}>{feature.name}</span>
                         </div>

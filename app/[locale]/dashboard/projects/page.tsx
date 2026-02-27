@@ -3,8 +3,10 @@
 import { useEffect, useState } from 'react'
 import { motion } from 'framer-motion'
 import { Link, useRouter } from '@/i18n/navigation'
+import { useTranslations } from 'next-intl'
 import { DataTable, StatusBadge, SearchInput, type Column } from '@/app/components/dashboard'
 import { getProjects } from '@/app/lib/vps-api'
+import { useLocalePath } from '@/app/hooks/useLocalePath'
 
 // 從 localStorage 獲取 token
 function getAuthToken(): string | null {
@@ -32,16 +34,18 @@ const statusVariants: Record<string, 'default' | 'success' | 'warning' | 'error'
   failed: 'error',
 }
 
-const statusLabels: Record<string, string> = {
-  draft: '草稿',
-  generating: '生成中',
-  testing: '測試中',
-  deployed: '已上線',
-  failed: '失敗',
+const statusLabelKeys: Record<string, string> = {
+  draft: 'statusDraft',
+  generating: 'statusGenerating',
+  testing: 'statusTesting',
+  deployed: 'statusDeployed',
+  failed: 'statusFailed',
 }
 
 export default function ProjectsPage() {
   const router = useRouter()
+  const t = useTranslations('dashboard')
+  const localePath = useLocalePath()
   const [projects, setProjects] = useState<Project[]>([])
   const [total, setTotal] = useState(0)
   const [page, setPage] = useState(1)
@@ -78,10 +82,15 @@ export default function ProjectsPage() {
     fetchProjects()
   }, [page, statusFilter, search, router])
 
+  const getStatusLabel = (status: string) => {
+    const key = statusLabelKeys[status]
+    return key ? t(key) : status
+  }
+
   const columns: Column<Project>[] = [
     {
       key: 'name',
-      header: '專案名稱',
+      header: t('projectName'),
       width: '2fr',
       render: (project: Project) => (
         <div>
@@ -97,18 +106,18 @@ export default function ProjectsPage() {
     },
     {
       key: 'status',
-      header: '狀態',
+      header: t('statusLabel'),
       width: '120px',
       render: (project: Project) => (
         <StatusBadge
-          status={statusLabels[project.status] || project.status}
+          status={getStatusLabel(project.status)}
           variant={statusVariants[project.status] || 'default'}
         />
       ),
     },
     {
       key: 'conversationCount',
-      header: '對話',
+      header: t('conversationsHeader'),
       width: '80px',
       render: (project: Project) => (
         <span style={{ fontFamily: 'var(--font-mono)' }}>{project.conversationCount}</span>
@@ -116,7 +125,7 @@ export default function ProjectsPage() {
     },
     {
       key: 'url',
-      header: '網址',
+      header: t('urlHeader'),
       width: '1.5fr',
       render: (project: Project) => {
         const url = project.customDomain || project.vercelUrl
@@ -140,7 +149,7 @@ export default function ProjectsPage() {
     },
     {
       key: 'updatedAt',
-      header: '更新時間',
+      header: t('updatedAt'),
       width: '140px',
       render: (project: Project) => (
         <span style={{ fontSize: 12, color: 'var(--gray-400)' }}>
@@ -173,10 +182,10 @@ export default function ProjectsPage() {
               marginBottom: 8,
             }}
           >
-            我的專案
+            {t('myProjects')}
           </h1>
           <p style={{ fontSize: 14, color: 'var(--gray-500)' }}>
-            管理你的所有專案
+            {t('manageProjects')}
           </p>
         </div>
         <Link
@@ -193,7 +202,7 @@ export default function ProjectsPage() {
             textDecoration: 'none',
           }}
         >
-          <span>+</span> 新專案
+          <span>+</span> {t('newProject')}
         </Link>
       </motion.div>
 
@@ -212,7 +221,7 @@ export default function ProjectsPage() {
           <SearchInput
             value={search}
             onChange={setSearch}
-            placeholder="搜尋專案..."
+            placeholder={t('searchProjects')}
           />
         </div>
         <select
@@ -227,12 +236,12 @@ export default function ProjectsPage() {
             cursor: 'pointer',
           }}
         >
-          <option value="">所有狀態</option>
-          <option value="draft">草稿</option>
-          <option value="generating">生成中</option>
-          <option value="testing">測試中</option>
-          <option value="deployed">已上線</option>
-          <option value="failed">失敗</option>
+          <option value="">{t('allStatus')}</option>
+          <option value="draft">{t('statusDraft')}</option>
+          <option value="generating">{t('statusGenerating')}</option>
+          <option value="testing">{t('statusTesting')}</option>
+          <option value="deployed">{t('statusDeployed')}</option>
+          <option value="failed">{t('statusFailed')}</option>
         </select>
       </motion.div>
 
@@ -247,9 +256,9 @@ export default function ProjectsPage() {
           data={projects}
           keyField="id"
           isLoading={isLoading}
-          emptyMessage="還沒有專案"
+          emptyMessage={t('noProjectsYet')}
           onRowClick={(project) => {
-            window.location.href = `/dashboard/projects/${project.id}`
+            window.location.href = localePath(`/dashboard/projects/${project.id}`)
           }}
           pagination={{
             page,

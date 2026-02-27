@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
+import { useTranslations } from 'next-intl'
 import type { ElementInfo } from './PreviewPanel'
 
 // ============================================================
@@ -83,11 +84,11 @@ const DISPLAY_OPTIONS = [
   { value: 'none', label: 'None' },
 ]
 
-const FLEX_DIRECTION_OPTIONS = [
-  { value: 'row', label: '水平 →' },
-  { value: 'column', label: '垂直 ↓' },
-  { value: 'row-reverse', label: '水平 ←' },
-  { value: 'column-reverse', label: '垂直 ↑' },
+const FLEX_DIRECTION_OPTION_KEYS: { value: string; labelKey: string }[] = [
+  { value: 'row', labelKey: 'flexDirectionRow' },
+  { value: 'column', labelKey: 'flexDirectionColumn' },
+  { value: 'row-reverse', labelKey: 'flexDirectionRowReverse' },
+  { value: 'column-reverse', labelKey: 'flexDirectionColumnReverse' },
 ]
 
 const JUSTIFY_OPTIONS = [
@@ -134,6 +135,7 @@ const TEXT_TRANSFORM_OPTIONS = [
 ]
 
 export default function PropertyEditor({ element, onUpdate, onClose, onReset, onUploadImage }: PropertyEditorProps) {
+  const t = useTranslations('uiux')
   const [editedStyles, setEditedStyles] = useState<Record<string, string>>({})
   const [editedText, setEditedText] = useState('')
 
@@ -213,7 +215,7 @@ export default function PropertyEditor({ element, onUpdate, onClose, onReset, on
               {element.tagName.toLowerCase()}
             </span>
             <span style={{ fontSize: 13, fontWeight: 500, color: 'var(--black)' }}>
-              {isText ? '文字' : isContainer ? '容器' : '圖片'}
+              {isText ? t('elementText') : isContainer ? t('elementContainer') : t('elementImage')}
             </span>
           </div>
           <motion.button
@@ -278,7 +280,7 @@ export default function PropertyEditor({ element, onUpdate, onClose, onReset, on
                   marginBottom: 6,
                 }}
               >
-                文字內容
+                {t('textContent')}
               </label>
               <textarea
                 value={editedText}
@@ -299,7 +301,7 @@ export default function PropertyEditor({ element, onUpdate, onClose, onReset, on
 
           {/* ── 佈局屬性（container 才顯示）── */}
           {isContainer && (
-            <PropertyGroup title="佈局">
+            <PropertyGroup title={t('groupLayout')}>
               <SelectInput
                 label="Display"
                 value={editedStyles.display || 'block'}
@@ -309,25 +311,25 @@ export default function PropertyEditor({ element, onUpdate, onClose, onReset, on
               {(editedStyles.display === 'flex' || editedStyles.display === 'inline-flex') && (
                 <>
                   <SelectInput
-                    label="方向"
+                    label={t('labelDirection')}
                     value={editedStyles.flexDirection || 'row'}
-                    options={FLEX_DIRECTION_OPTIONS}
+                    options={FLEX_DIRECTION_OPTION_KEYS.map(o => ({ value: o.value, label: t(o.labelKey) }))}
                     onChange={(v) => updateStyle('flexDirection', v)}
                   />
                   <SelectInput
-                    label="主軸對齊"
+                    label={t('labelJustifyContent')}
                     value={editedStyles.justifyContent || 'flex-start'}
                     options={JUSTIFY_OPTIONS}
                     onChange={(v) => updateStyle('justifyContent', v)}
                   />
                   <SelectInput
-                    label="交叉軸對齊"
+                    label={t('labelAlignItems')}
                     value={editedStyles.alignItems || 'stretch'}
                     options={ALIGN_ITEMS_OPTIONS}
                     onChange={(v) => updateStyle('alignItems', v)}
                   />
                   <NumberInput
-                    label="間距 (Gap)"
+                    label={t('labelGap')}
                     value={parseInt(editedStyles.gap) || 0}
                     unit="px"
                     min={0}
@@ -335,7 +337,7 @@ export default function PropertyEditor({ element, onUpdate, onClose, onReset, on
                     onChange={(v) => updateStyle('gap', `${v}px`)}
                   />
                   <SelectInput
-                    label="換行"
+                    label={t('labelFlexWrap')}
                     value={editedStyles.flexWrap || 'nowrap'}
                     options={FLEX_WRAP_OPTIONS}
                     onChange={(v) => updateStyle('flexWrap', v)}
@@ -343,7 +345,7 @@ export default function PropertyEditor({ element, onUpdate, onClose, onReset, on
                 </>
               )}
               <SelectInput
-                label="溢出"
+                label={t('labelOverflow')}
                 value={editedStyles.overflow || 'visible'}
                 options={OVERFLOW_OPTIONS}
                 onChange={(v) => updateStyle('overflow', v)}
@@ -353,23 +355,23 @@ export default function PropertyEditor({ element, onUpdate, onClose, onReset, on
 
           {/* ── 尺寸屬性（container + image）── */}
           {(isContainer || isImage) && (
-            <PropertyGroup title="尺寸">
+            <PropertyGroup title={t('groupSize')}>
               <TextFieldInput
-                label="寬度"
+                label={t('labelWidth')}
                 value={editedStyles.width || 'auto'}
                 placeholder="auto / 100% / 300px"
                 onChange={(v) => updateStyle('width', v)}
               />
               {isContainer && (
                 <TextFieldInput
-                  label="最大寬度"
+                  label={t('labelMaxWidth')}
                   value={editedStyles.maxWidth || 'none'}
                   placeholder="none / 100% / 1200px"
                   onChange={(v) => updateStyle('maxWidth', v)}
                 />
               )}
               <TextFieldInput
-                label="高度"
+                label={t('labelHeight')}
                 value={editedStyles.height || 'auto'}
                 placeholder="auto / 100% / 400px"
                 onChange={(v) => updateStyle('height', v)}
@@ -379,14 +381,14 @@ export default function PropertyEditor({ element, onUpdate, onClose, onReset, on
 
           {/* ── 顏色屬性（text + container）── */}
           {(isText || isContainer) && (
-            <PropertyGroup title="顏色">
+            <PropertyGroup title={t('groupColor')}>
               <ColorInput
-                label="文字顏色"
+                label={t('labelTextColor')}
                 value={editedStyles.color || '#000000'}
                 onChange={(v) => updateStyle('color', v)}
               />
               <ColorInput
-                label="背景顏色"
+                label={t('labelBgColor')}
                 value={editedStyles.backgroundColor || 'transparent'}
                 onChange={(v) => updateStyle('backgroundColor', v)}
               />
@@ -395,9 +397,9 @@ export default function PropertyEditor({ element, onUpdate, onClose, onReset, on
 
           {/* ── 字體屬性（text 才顯示）── */}
           {isText && (
-            <PropertyGroup title="字體">
+            <PropertyGroup title={t('groupFont')}>
               <NumberInput
-                label="字體大小"
+                label={t('labelFontSize')}
                 value={parseInt(editedStyles.fontSize) || 16}
                 unit="px"
                 min={10}
@@ -405,7 +407,7 @@ export default function PropertyEditor({ element, onUpdate, onClose, onReset, on
                 onChange={(v) => updateStyle('fontSize', `${v}px`)}
               />
               <SelectInput
-                label="字重"
+                label={t('labelFontWeight')}
                 value={editedStyles.fontWeight || '400'}
                 options={FONT_WEIGHT_OPTIONS}
                 onChange={(v) => updateStyle('fontWeight', v)}
@@ -415,14 +417,15 @@ export default function PropertyEditor({ element, onUpdate, onClose, onReset, on
 
           {/* ── 排版屬性（text + container）── */}
           {(isText || isContainer) && (
-            <PropertyGroup title="排版">
+            <PropertyGroup title={t('groupTypography')}>
               <TextAlignSelect
+                label={t('labelTextAlign')}
                 value={editedStyles.textAlign || 'left'}
                 onChange={(v) => updateStyle('textAlign', v)}
               />
               {isText && (
                 <NumberInput
-                  label="行高"
+                  label={t('labelLineHeight')}
                   value={parseSpacingValue(editedStyles.lineHeight)}
                   unit="px"
                   min={12}
@@ -432,7 +435,7 @@ export default function PropertyEditor({ element, onUpdate, onClose, onReset, on
               )}
               {isText && (
                 <NumberInput
-                  label="字距"
+                  label={t('labelLetterSpacing')}
                   value={parseSpacingValue(editedStyles.letterSpacing)}
                   unit="px"
                   min={-3}
@@ -442,7 +445,7 @@ export default function PropertyEditor({ element, onUpdate, onClose, onReset, on
               )}
               {isText && (
                 <SelectInput
-                  label="裝飾線"
+                  label={t('labelTextDecoration')}
                   value={(editedStyles.textDecoration || 'none').split(' ')[0]}
                   options={TEXT_DECORATION_OPTIONS}
                   onChange={(v) => updateStyle('textDecoration', v)}
@@ -450,7 +453,7 @@ export default function PropertyEditor({ element, onUpdate, onClose, onReset, on
               )}
               {isText && (
                 <SelectInput
-                  label="大小寫"
+                  label={t('labelTextTransform')}
                   value={editedStyles.textTransform || 'none'}
                   options={TEXT_TRANSFORM_OPTIONS}
                   onChange={(v) => updateStyle('textTransform', v)}
@@ -460,9 +463,9 @@ export default function PropertyEditor({ element, onUpdate, onClose, onReset, on
           )}
 
           {/* ── 間距屬性（所有類型）── */}
-          <PropertyGroup title="間距">
+          <PropertyGroup title={t('groupSpacing')}>
             <NumberInput
-              label="內距"
+              label={t('labelPadding')}
               value={parseSpacingValue(editedStyles.padding)}
               unit="px"
               min={0}
@@ -470,7 +473,7 @@ export default function PropertyEditor({ element, onUpdate, onClose, onReset, on
               onChange={(v) => updateStyle('padding', `${v}px`)}
             />
             <NumberInput
-              label="外距"
+              label={t('labelMargin')}
               value={parseSpacingValue(editedStyles.margin)}
               unit="px"
               min={0}
@@ -478,7 +481,7 @@ export default function PropertyEditor({ element, onUpdate, onClose, onReset, on
               onChange={(v) => updateStyle('margin', `${v}px`)}
             />
             <NumberInput
-              label="圓角"
+              label={t('labelBorderRadius')}
               value={parseInt(editedStyles.borderRadius) || 0}
               unit="px"
               min={0}
@@ -488,9 +491,9 @@ export default function PropertyEditor({ element, onUpdate, onClose, onReset, on
           </PropertyGroup>
 
           {/* ── 邊框屬性（text + container + image）── */}
-          <PropertyGroup title="邊框">
+          <PropertyGroup title={t('groupBorder')}>
             <SelectInput
-              label="樣式"
+              label={t('labelBorderStyle')}
               value={editedStyles.borderStyle || 'none'}
               options={BORDER_STYLE_OPTIONS}
               onChange={(v) => updateStyle('borderStyle', v)}
@@ -498,7 +501,7 @@ export default function PropertyEditor({ element, onUpdate, onClose, onReset, on
             {editedStyles.borderStyle && editedStyles.borderStyle !== 'none' && (
               <>
                 <NumberInput
-                  label="寬度"
+                  label={t('labelBorderWidth')}
                   value={parseSpacingValue(editedStyles.borderWidth)}
                   unit="px"
                   min={0}
@@ -506,7 +509,7 @@ export default function PropertyEditor({ element, onUpdate, onClose, onReset, on
                   onChange={(v) => updateStyle('borderWidth', `${v}px`)}
                 />
                 <ColorInput
-                  label="顏色"
+                  label={t('labelBorderColor')}
                   value={editedStyles.borderColor || '#000000'}
                   onChange={(v) => updateStyle('borderColor', v)}
                 />
@@ -516,12 +519,14 @@ export default function PropertyEditor({ element, onUpdate, onClose, onReset, on
 
           {/* ── 效果屬性（text + container + image）── */}
           {(isText || isContainer || isImage) && (
-            <PropertyGroup title="效果">
+            <PropertyGroup title={t('groupEffects')}>
               <ShadowPresetSelect
+                label={t('labelShadow')}
                 value={editedStyles.boxShadow || 'none'}
                 onChange={(v) => updateStyle('boxShadow', v)}
               />
               <OpacitySlider
+                label={t('labelOpacity')}
                 value={editedStyles.opacity ? parseFloat(editedStyles.opacity) : 1}
                 onChange={(v) => updateStyle('opacity', String(v))}
               />
@@ -530,20 +535,27 @@ export default function PropertyEditor({ element, onUpdate, onClose, onReset, on
 
           {/* ── 圖片屬性（image 才顯示）── */}
           {isImage && (
-            <PropertyGroup title="圖片">
+            <PropertyGroup title={t('groupImage')}>
               <ImageUrlInput
+                label={t('labelImageSource')}
                 value={editedStyles.imgSrc || ''}
                 onChange={(v) => updateStyle('imgSrc', v)}
                 onUpload={onUploadImage}
+                dragLabel={t('dragImageHere')}
+                uploadLabel={t('upload')}
+                uploadingLabel={t('uploading')}
+                uploadFailedLabel={t('uploadFailed')}
+                unsupportedTypeLabel={(type: string) => t('unsupportedFileType', { type })}
+                fileSizeExceededLabel={(size: string) => t('fileSizeExceeded', { size })}
               />
               <TextFieldInput
-                label="Alt 文字"
+                label={t('labelAltText')}
                 value={editedStyles.imgAlt || ''}
-                placeholder="圖片描述"
+                placeholder={t('placeholderImageDesc')}
                 onChange={(v) => updateStyle('imgAlt', v)}
               />
               <SelectInput
-                label="填充模式"
+                label={t('labelObjectFit')}
                 value={editedStyles.objectFit || 'cover'}
                 options={OBJECT_FIT_OPTIONS}
                 onChange={(v) => updateStyle('objectFit', v)}
@@ -585,7 +597,7 @@ export default function PropertyEditor({ element, onUpdate, onClose, onReset, on
                 <path d="M3 12a9 9 0 109-9" />
                 <polyline points="3,3 3,9 9,9" style={{ transform: 'translate(-1px, -3px)' }} />
               </svg>
-              重置此元素
+              {t('resetElement')}
             </motion.button>
           </div>
         )}
@@ -749,15 +761,17 @@ function SelectInput({
 }
 
 function TextAlignSelect({
+  label,
   value,
   onChange
 }: {
+  label: string
   value: string
   onChange: (value: string) => void
 }) {
   return (
     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-      <span style={{ fontSize: 12, color: 'var(--gray-600)' }}>對齊</span>
+      <span style={{ fontSize: 12, color: 'var(--gray-600)' }}>{label}</span>
       <div style={{ display: 'flex', gap: 2 }}>
         {TEXT_ALIGN_OPTIONS.map((opt) => (
           <button
@@ -785,9 +799,11 @@ function TextAlignSelect({
 }
 
 function ShadowPresetSelect({
+  label,
   value,
   onChange
 }: {
+  label: string
   value: string
   onChange: (value: string) => void
 }) {
@@ -796,7 +812,7 @@ function ShadowPresetSelect({
 
   return (
     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-      <span style={{ fontSize: 12, color: 'var(--gray-600)' }}>陰影</span>
+      <span style={{ fontSize: 12, color: 'var(--gray-600)' }}>{label}</span>
       <div style={{ display: 'flex', gap: 3 }}>
         {SHADOW_PRESETS.map((preset) => (
           <button
@@ -822,9 +838,11 @@ function ShadowPresetSelect({
 }
 
 function OpacitySlider({
+  label,
   value,
   onChange
 }: {
+  label: string
   value: number
   onChange: (value: number) => void
 }) {
@@ -832,7 +850,7 @@ function OpacitySlider({
 
   return (
     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-      <span style={{ fontSize: 12, color: 'var(--gray-600)' }}>透明度</span>
+      <span style={{ fontSize: 12, color: 'var(--gray-600)' }}>{label}</span>
       <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
         <input
           type="range"
@@ -901,13 +919,27 @@ const ACCEPTED_IMAGE_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'image/gi
 const MAX_IMAGE_SIZE = 5 * 1024 * 1024 // 5MB
 
 function ImageUrlInput({
+  label,
   value,
   onChange,
   onUpload,
+  dragLabel,
+  uploadLabel,
+  uploadingLabel,
+  uploadFailedLabel,
+  unsupportedTypeLabel,
+  fileSizeExceededLabel,
 }: {
+  label: string
   value: string
   onChange: (url: string) => void
   onUpload?: (file: File) => Promise<string | null>
+  dragLabel: string
+  uploadLabel: string
+  uploadingLabel: string
+  uploadFailedLabel: string
+  unsupportedTypeLabel: (type: string) => string
+  fileSizeExceededLabel: (size: string) => string
 }) {
   const fileInputRef = useRef<HTMLInputElement>(null)
   const [uploading, setUploading] = useState(false)
@@ -917,13 +949,13 @@ function ImageUrlInput({
 
   const validateFile = useCallback((file: File): string | null => {
     if (!ACCEPTED_IMAGE_TYPES.includes(file.type)) {
-      return `不支援的檔案類型: ${file.type}。僅支援 JPG, PNG, WebP, GIF, SVG`
+      return unsupportedTypeLabel(file.type)
     }
     if (file.size > MAX_IMAGE_SIZE) {
-      return `檔案大小 ${(file.size / 1024 / 1024).toFixed(1)}MB 超過 5MB 限制`
+      return fileSizeExceededLabel((file.size / 1024 / 1024).toFixed(1))
     }
     return null
-  }, [])
+  }, [unsupportedTypeLabel, fileSizeExceededLabel])
 
   const handleUpload = useCallback(async (file: File) => {
     if (!onUpload) return
@@ -944,7 +976,7 @@ function ImageUrlInput({
         onChange(url)
       }
     } catch {
-      setUploadError('上傳失敗')
+      setUploadError(uploadFailedLabel)
     } finally {
       setUploading(false)
       setUploadProgress(0)
@@ -982,7 +1014,7 @@ function ImageUrlInput({
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
       {/* URL 輸入 + 上傳按鈕 */}
-      <span style={{ fontSize: 12, color: 'var(--gray-600)' }}>圖片來源</span>
+      <span style={{ fontSize: 12, color: 'var(--gray-600)' }}>{label}</span>
       <div style={{ display: 'flex', gap: 4 }}>
         <input
           type="text"

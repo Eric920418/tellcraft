@@ -178,7 +178,7 @@ export function AnimatedThemeToggler({
       ref={buttonRef}
       onClick={toggleTheme}
       style={buttonStyle}
-      aria-label={isDark ? '切換至淺色模式' : '切換至深色模式'}
+      aria-label={isDark ? 'Switch to light mode' : 'Switch to dark mode'}
       onMouseEnter={() => setIsHovered(true)}
       onMouseLeave={() => setIsHovered(false)}
       {...props}

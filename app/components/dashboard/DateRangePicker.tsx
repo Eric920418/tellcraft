@@ -2,6 +2,7 @@
 
 import { motion, AnimatePresence } from 'framer-motion'
 import { useState, useRef, useEffect } from 'react'
+import { useTranslations, useLocale } from 'next-intl'
 
 interface DateRangePickerProps {
   value: { start: string; end: string }
@@ -13,21 +14,21 @@ interface DateRangePickerProps {
 }
 
 // 靜態預設值（不含日期，避免 SSR/客戶端不一致）
-const PRESET_LABELS = ['今天', '最近 7 天', '最近 30 天', '最近 90 天', '今年'] as const
+const PRESET_KEYS = ['dateToday', 'dateLast7Days', 'dateLast30Days', 'dateLast90Days', 'dateThisYear'] as const
 
 // 計算預設時間範圍的日期值（只在客戶端調用）
-function calculatePresetValue(label: string): { start: string; end: string } {
+function calculatePresetValue(key: string): { start: string; end: string } {
   const today = new Date().toISOString().split('T')[0]
-  switch (label) {
-    case '今天':
+  switch (key) {
+    case 'dateToday':
       return { start: today, end: today }
-    case '最近 7 天':
+    case 'dateLast7Days':
       return { start: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0], end: today }
-    case '最近 30 天':
+    case 'dateLast30Days':
       return { start: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0], end: today }
-    case '最近 90 天':
+    case 'dateLast90Days':
       return { start: new Date(Date.now() - 90 * 24 * 60 * 60 * 1000).toISOString().split('T')[0], end: today }
-    case '今年':
+    case 'dateThisYear':
       return { start: `${new Date().getFullYear()}-01-01`, end: today }
     default:
       return { start: today, end: today }
@@ -39,6 +40,8 @@ export default function DateRangePicker({
   onChange,
   presets: customPresets,
 }: DateRangePickerProps) {
+  const t = useTranslations('dashboard')
+  const locale = useLocale()
   const [isOpen, setIsOpen] = useState(false)
   const [customStart, setCustomStart] = useState(value.start)
   const [customEnd, setCustomEnd] = useState(value.end)
@@ -58,7 +61,7 @@ export default function DateRangePicker({
 
   const formatDisplayDate = (dateStr: string) => {
     const date = new Date(dateStr)
-    return date.toLocaleDateString('zh-TW', {
+    return date.toLocaleDateString(locale === 'zh' ? 'zh-TW' : 'en-US', {
       year: 'numeric',
       month: 'short',
       day: 'numeric',
@@ -145,7 +148,7 @@ export default function DateRangePicker({
                   marginBottom: 8,
                 }}
               >
-                快速選擇
+                {t('quickSelect')}
               </div>
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
                 {customPresets ? (
@@ -171,12 +174,12 @@ export default function DateRangePicker({
                     )
                   })
                 ) : (
-                  PRESET_LABELS.map((label) => {
-                    const presetValue = calculatePresetValue(label)
+                  PRESET_KEYS.map((key) => {
+                    const presetValue = calculatePresetValue(key)
                     const isSelected = value.start === presetValue.start && value.end === presetValue.end
                     return (
                       <motion.button
-                        key={label}
+                        key={key}
                         whileHover={{ scale: 1.02 }}
                         whileTap={{ scale: 0.98 }}
                         onClick={() => handlePresetClick(presetValue)}
@@ -189,7 +192,7 @@ export default function DateRangePicker({
                           cursor: 'pointer',
                         }}
                       >
-                        {label}
+                        {t(key)}
                       </motion.button>
                     )
                   })
@@ -208,7 +211,7 @@ export default function DateRangePicker({
                   marginBottom: 8,
                 }}
               >
-                自訂範圍
+                {t('customRange')}
               </div>
               <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
                 <input
@@ -224,7 +227,7 @@ export default function DateRangePicker({
                     background: 'var(--white)',
                   }}
                 />
-                <span style={{ alignSelf: 'center', color: 'var(--gray-400)' }}>至</span>
+                <span style={{ alignSelf: 'center', color: 'var(--gray-400)' }}>{t('dateTo')}</span>
                 <input
                   type="date"
                   value={customEnd}
@@ -264,7 +267,7 @@ export default function DateRangePicker({
                       : 'pointer',
                 }}
               >
-                套用
+                {t('dateApply')}
               </motion.button>
             </div>
           </motion.div>

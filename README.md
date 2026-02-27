@@ -256,7 +256,8 @@ Dashboard 帳號設定 → /api/auth/link/google（從 cookie 讀 JWT → 提取
 | **預覽** | Sandpack 真實 React 渲染、串流增量更新、裝置切換、編輯模式、圖片上傳 |
 | **動畫** | BDD 需求藍圖面板（即時 Q&A 歷史視覺化）、3D 工廠流水線（Fast Build）、Remotion 驅動 |
 | **認證** | Google/LINE OAuth、JWT 雙軌（localStorage + Cookie）、訪客→帳號合併、帳號綁定（雙登入）、auth 頁面 i18n（next-intl） |
-| **儀表板** | 用戶統計、專案管理、版本歷史、管理員面板、LLM 用量追蹤 |
+| **儀表板** | 用戶統計、專案管理、版本歷史、管理員面板、LLM 用量追蹤、Dashboard 元件 i18n（next-intl） |
+| **i18n** | next-intl 多語系（zh/en）、UI 元件全量翻譯（LoginPrompt/ConversationPicker/ProjectReminder/SpecGeneration/BddPanel/Deploy 系列/BuildingPlayer）、useLocalePath hook |
 | **防護** | 三層防刷（前端冷卻 + API 限速 + Worker 鎖）、Classifier 三層防禦、LLM 自動重試 |
 | **通知** | LINE 推播通知（BDD 完成/UIUX 生成完成/部署成功失敗），離線用戶也能收到 |
 | **LINE Bot** | LINE 對話內完整 Fast Build 體驗（描述需求→生成→部署），Flex Message 卡片 + Quick Reply |

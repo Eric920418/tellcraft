@@ -4,6 +4,7 @@ import { useState, useRef, useEffect, useCallback, Suspense, useDeferredValue } 
 import { useSearchParams } from 'next/navigation'
 import { motion, AnimatePresence, useInView } from 'framer-motion'
 import { useTranslations } from 'next-intl'
+import { useLocalePath } from '@/app/hooks/useLocalePath'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import RotatingText from '@/app/components/RotatingText'
@@ -12,6 +13,7 @@ import CardSwap, { Card } from '@/app/components/CardSwap'
 // import GridDistortion from '@/app/components/GridDistortion'
 import TextType from '@/app/components/TextType'
 import { AnimatedThemeToggler } from '@/app/components/AnimatedThemeToggler'
+import LocaleSwitcher from '@/app/components/LocaleSwitcher'
 import GlowButton from '@/app/components/GlowButton'
 // signOut moved to VPS auth flow
 import {
@@ -86,12 +88,12 @@ interface Message {
   pending?: boolean
 }
 
-// 內部指令 → 用戶可讀的顯示文字
-const INTERNAL_COMMAND_LABELS: Record<string, string> = {
-  '__go_back__': '← 上一步',
-  '__retry__': '重試',
-  '__accept_proposal__': '同意',
-  '__reject_proposal__': '不同意',
+// INTERNAL_COMMAND_LABELS keys → command namespace keys
+const COMMAND_KEYS: Record<string, string> = {
+  '__go_back__': 'goBack',
+  '__retry__': 'retry',
+  '__accept_proposal__': 'accept',
+  '__reject_proposal__': 'reject',
 }
 
 // ============ Animated Text Components ============
@@ -826,8 +828,8 @@ function HeroSection({
               </div>
               <span style={{ fontSize: 12, color: isFastModeShortWarning ? 'var(--amber-500, #f59e0b)' : 'var(--gray-400)', flex: 1, textAlign: 'center', transition: 'color 0.2s ease' }}>
                 {isFastModeShortWarning
-                  ? '描述太短，生成效果可能不理想'
-                  : buildMode === 'fast' ? '描述越詳細，生成效果越好' : '描述你的想法，AI 深度釐清'}
+                  ? tHero('shortWarning')
+                  : buildMode === 'fast' ? tHero('fastHint') : tHero('fineHint')}
               </span>
               <motion.button
                 whileHover={{ scale: canSubmit ? 1.02 : 1 }}
@@ -846,7 +848,7 @@ function HeroSection({
                   flexShrink: 0,
                 }}
               >
-                {isTransitioning ? '...' : '開始'}
+                {isTransitioning ? '...' : tHero('startButton')}
               </motion.button>
             </div>
           </motion.div>
@@ -896,6 +898,18 @@ function ChatSection({
   onBack: () => void
   buildMode?: 'fast' | 'fine'
 }) {
+  const tChat = useTranslations('chat')
+  const tPreview = useTranslations('preview')
+  const tStage = useTranslations('stage')
+  const tCssLabel = useTranslations('cssLabel')
+  const tCodePreview = useTranslations('codePreview')
+  const tLogin = useTranslations('login')
+  const tCommand = useTranslations('command')
+  const localePath = useLocalePath()
+  const getCommandLabel = useCallback((content: string) => {
+    const key = COMMAND_KEYS[content.trim()]
+    return key ? tCommand(key) : content.trim()
+  }, [tCommand])
   const [messages, setMessages] = useState<Message[]>([])
   const [input, setInput] = useState('')
   // 延遲更新按鈕狀態，優化 INP
@@ -1264,7 +1278,7 @@ function ChatSection({
       })
 
       if (!result.success || !result.data) {
-        setError(result.error || '初始化失敗')
+        setError(result.error || tChat('initError'))
         setIsInitializing(false)
         return
       }
@@ -1334,8 +1348,8 @@ function ChatSection({
           id: 'preview-analyzing',
           role: 'assistant',
           content: buildMode === 'fast'
-            ? '正在生成您的網站，預計 60-90 秒...'
-            : '正在分析您的需求，請稍候...',
+            ? tChat('fastBuildPreview')
+            : tChat('analyzePreview'),
           timestamp: new Date(),
           stage: buildMode === 'fast' ? 'fast_generating' : 'clarify'
         }
@@ -1356,7 +1370,7 @@ function ChatSection({
         })
 
         if (!sendResult.success) {
-          setError(sendResult.error || '發送消息失敗')
+          setError(sendResult.error || tChat('sendError'))
         } else if (sendResult.data?.messageId) {
           // 更新樂觀訊息的 ID 為實際的 DB ID，避免重複顯示
           setMessages(prev => prev.map(m =>
@@ -1518,7 +1532,7 @@ function ChatSection({
               for (const newMsg of uniqueNewMessages) {
                 if (newMsg.role === 'user') {
                   // 找是否有 pending 的用戶訊息有相同內容
-                  const dbLabel = INTERNAL_COMMAND_LABELS[newMsg.content] || newMsg.content
+                  const dbLabel = getCommandLabel(newMsg.content)
                   const pendingIndex = updatedPrev.findIndex(m =>
                     m.role === 'user' && m.pending && (m.content === newMsg.content || m.content === dbLabel)
                   )
@@ -1759,7 +1773,7 @@ function ChatSection({
         setLoginPromptConfig({
           show: true,
           variant: 'subtle',
-          message: '登入後可隨時恢復這個對話',
+          message: tLogin('subtleAfterRounds'),
           promptId
         })
       }
@@ -1772,7 +1786,7 @@ function ChatSection({
         setLoginPromptConfig({
           show: true,
           variant: 'subtle',
-          message: '登入後可在任何裝置查看生成進度',
+          message: tLogin('subtleGenerating'),
           promptId
         })
       }
@@ -1785,8 +1799,8 @@ function ChatSection({
         setLoginPromptConfig({
           show: true,
           variant: 'emphasized',
-          message: '你的網站已上線',
-          subMessage: '登入以管理和更新你的網站，並在任何裝置訪問。',
+          message: tLogin('emphasizedTitle'),
+          subMessage: tLogin('emphasizedSubMessage'),
           promptId
         })
       }
@@ -1845,9 +1859,9 @@ function ChatSection({
     // 將 anonymousId 傳到登入頁面
     const anonymousId = localStorage.getItem('tellcraft_anonymous_id')
     if (anonymousId) {
-      window.location.href = `/auth/login?anonymousId=${encodeURIComponent(anonymousId)}`
+      window.location.href = localePath(`/auth/login?anonymousId=${encodeURIComponent(anonymousId)}`)
     } else {
-      window.location.href = '/auth/login'
+      window.location.href = localePath('/auth/login')
     }
   }
 
@@ -1855,7 +1869,7 @@ function ChatSection({
   const handleDashboard = async () => {
     const token = localStorage.getItem('auth_token')
     if (!token) {
-      window.location.href = '/auth/login?next=/dashboard'
+      window.location.href = localePath('/auth/login?next=/dashboard')
       return
     }
 
@@ -1867,13 +1881,13 @@ function ChatSection({
       })
 
       if (res.ok) {
-        window.location.href = '/dashboard'
+        window.location.href = localePath('/dashboard')
       } else {
         localStorage.removeItem('auth_token')
-        window.location.href = '/auth/login?next=/dashboard'
+        window.location.href = localePath('/auth/login?next=/dashboard')
       }
     } catch {
-      window.location.href = '/dashboard'
+      window.location.href = localePath('/dashboard')
     }
   }
 
@@ -1951,7 +1965,7 @@ function ChatSection({
     if (!result.success) {
       // 發送失敗：移除樂觀消息，避免幽靈訊息
       setMessages(prev => prev.filter(m => m.id !== userMessage.id))
-      setError(result.error || '發送失敗')
+      setError(result.error || tChat('sendFailed'))
       setIsTyping(false)
     } else if (result.data?.messageId) {
       // 更新樂觀訊息的 ID 為實際的 DB ID，避免重複顯示
@@ -1967,7 +1981,7 @@ function ChatSection({
     startSendCooldown()
 
     // 樂觀更新
-    const displayContent = INTERNAL_COMMAND_LABELS[content.trim()] || content.trim()
+    const displayContent = getCommandLabel(content)
     const userMessage: Message = {
       id: crypto.randomUUID(),
       role: 'user',
@@ -2008,7 +2022,7 @@ function ChatSection({
     if (!result.success) {
       // 發送失敗：移除樂觀消息，避免幽靈訊息
       setMessages(prev => prev.filter(m => m.id !== userMessage.id))
-      setError(result.error || '發送失敗')
+      setError(result.error || tChat('sendFailed'))
       setIsTyping(false)
     }
   }
@@ -2034,59 +2048,59 @@ function ChatSection({
       }
 
       const CSS_LABELS: Record<string, string> = {
-        display: '顯示模式',
-        flexDirection: 'Flex 方向',
-        justifyContent: '主軸對齊',
-        alignItems: '交叉軸對齊',
-        gap: '子元素間距',
-        flexWrap: '換行方式',
-        overflow: '溢出處理',
-        width: '寬度',
-        maxWidth: '最大寬度',
-        height: '高度',
-        textDecoration: '文字裝飾',
-        textTransform: '文字大小寫',
-        color: '文字顏色',
-        backgroundColor: '背景顏色',
-        fontSize: '字體大小',
-        fontWeight: '字重',
-        textAlign: '文字對齊',
-        lineHeight: '行高',
-        letterSpacing: '字距',
-        padding: '內距',
-        margin: '外距',
-        borderRadius: '圓角',
-        borderStyle: '邊框樣式',
-        borderWidth: '邊框寬度',
-        borderColor: '邊框顏色',
-        boxShadow: '陰影',
-        opacity: '透明度',
-        objectFit: '圖片填充模式',
+        display: tCssLabel('display'),
+        flexDirection: tCssLabel('flexDirection'),
+        justifyContent: tCssLabel('justifyContent'),
+        alignItems: tCssLabel('alignItems'),
+        gap: tCssLabel('gap'),
+        flexWrap: tCssLabel('flexWrap'),
+        overflow: tCssLabel('overflow'),
+        width: tCssLabel('width'),
+        maxWidth: tCssLabel('maxWidth'),
+        height: tCssLabel('height'),
+        textDecoration: tCssLabel('textDecoration'),
+        textTransform: tCssLabel('textTransform'),
+        color: tCssLabel('color'),
+        backgroundColor: tCssLabel('backgroundColor'),
+        fontSize: tCssLabel('fontSize'),
+        fontWeight: tCssLabel('fontWeight'),
+        textAlign: tCssLabel('textAlign'),
+        lineHeight: tCssLabel('lineHeight'),
+        letterSpacing: tCssLabel('letterSpacing'),
+        padding: tCssLabel('padding'),
+        margin: tCssLabel('margin'),
+        borderRadius: tCssLabel('borderRadius'),
+        borderStyle: tCssLabel('borderStyle'),
+        borderWidth: tCssLabel('borderWidth'),
+        borderColor: tCssLabel('borderColor'),
+        boxShadow: tCssLabel('boxShadow'),
+        opacity: tCssLabel('opacity'),
+        objectFit: tCssLabel('objectFit'),
       }
 
-      const prefix = `第 ${index} 個 <${tag}>`
+      const prefix = `#${index} <${tag}>`
       Object.entries(changes).forEach(([prop, value]) => {
         if (prop === 'text') {
-          lines.push(`- ${prefix}：文字改為「${value}」`)
+          lines.push(`- ${prefix}: ${tCodePreview('textChanged', { value })}`)
         } else if (prop === 'imgSrc') {
-          lines.push(`- ${prefix}：圖片 src 改為 ${value}`)
+          lines.push(`- ${prefix}: ${tCodePreview('imgSrcChanged', { value })}`)
         } else if (prop === 'imgAlt') {
-          lines.push(`- ${prefix}：alt 改為「${value}」`)
+          lines.push(`- ${prefix}: ${tCodePreview('imgAltChanged', { value })}`)
         } else {
           const label = CSS_LABELS[prop] || prop
-          lines.push(`- ${prefix}：${label}（${prop}）改為 ${value}`)
+          lines.push(`- ${prefix}: ${tCodePreview('styleChanged', { label, prop, value })}`)
         }
       })
     })
 
     const message = [
-      '請將以下視覺編輯修改套用到源碼中：',
+      tCodePreview('saveMessage'),
       '',
       ...lines,
       '',
-      '注意：元素序號是按頁面中同類標籤出現的順序（從 1 開始）。',
-      '請直接修改 JSX 源碼中對應元素。文字直接替換 JSX 內容。',
-      '樣式修改優先用 Tailwind CSS class，無法用 class 時用 inline style。',
+      tCodePreview('saveNote1'),
+      tCodePreview('saveNote2'),
+      tCodePreview('saveNote3'),
     ].join('\n')
 
     // 清除編輯狀態 + localStorage
@@ -2105,11 +2119,11 @@ function ChatSection({
   }
 
   const stages = [
-    { key: 'discovery', title: '需求探索' },
-    { key: 'clarify', title: '細節釐清' },
-    { key: 'formulation', title: '規格確認' },
-    { key: 'generating', title: '程式生成' },
-    { key: 'complete', title: '已上線' },
+    { key: 'discovery', title: tStage('discovery') },
+    { key: 'clarify', title: tStage('clarify') },
+    { key: 'formulation', title: tStage('formulation') },
+    { key: 'generating', title: tStage('generating') },
+    { key: 'complete', title: tStage('complete') },
   ]
 
   // 將後端 stage 值映射到前端顯示的 stage
@@ -2216,7 +2230,7 @@ function ChatSection({
                   fontSize: 14,
                 }}
               >
-                正在初始化...
+                {tChat('initializing')}
               </motion.div>
             )}
 
@@ -2270,7 +2284,7 @@ function ChatSection({
                         transition={{ duration: 1.2, repeat: Infinity }}
                         style={{ width: 6, height: 6, background: 'var(--black)', display: 'inline-block' }}
                       />
-                      {INTERNAL_COMMAND_LABELS[message.content] || message.content}
+                      {getCommandLabel(message.content)}
                     </div>
                   ) : (
                     <>
@@ -2281,7 +2295,7 @@ function ChatSection({
                         textTransform: 'uppercase',
                         letterSpacing: '0.05em'
                       }}>
-                        {message.role === 'user' ? '你' : '泰爾'}
+                        {message.role === 'user' ? tChat('senderYou') : tChat('senderAssistant')}
                       </div>
                       <div style={{
                         padding: layoutMode === 'split' ? '12px 16px' : '18px 22px',
@@ -2294,7 +2308,7 @@ function ChatSection({
                         lineHeight: 1.75,
                       }}>
                         {message.role === 'user' ? (
-                          <span style={{ whiteSpace: 'pre-wrap' }}>{INTERNAL_COMMAND_LABELS[message.content] || message.content}</span>
+                          <span style={{ whiteSpace: 'pre-wrap' }}>{getCommandLabel(message.content)}</span>
                         ) : (
                           <div className="markdown-content">
                             <ReactMarkdown remarkPlugins={[remarkGfm]}>
@@ -2346,7 +2360,7 @@ function ChatSection({
                                 marginBottom: 6,
                               }}>
                                 <span style={{ fontSize: 12, color: 'var(--gray-500)' }}>
-                                  {message.progress?.step || (message.stage === 'init_progress' ? '正在分析需求...' : '正在產出規格文件...')}
+                                  {message.progress?.step || (message.stage === 'init_progress' ? tChat('analyzingProgress') : tChat('formulationProgress'))}
                                 </span>
                                 {message.progress && (
                                   <span style={{ fontSize: 11, color: 'var(--gray-400)' }}>
@@ -2439,7 +2453,7 @@ function ChatSection({
                   marginBottom: 8,
                   textTransform: 'uppercase',
                   letterSpacing: '0.05em'
-                }}>泰爾</div>
+                }}>{tChat('typingIndicatorName')}</div>
                 <div style={{
                   padding: layoutMode === 'split' ? '12px 16px' : '18px 22px',
                   background: 'var(--gray-50)',
@@ -2502,7 +2516,7 @@ function ChatSection({
                     }
                   }
                 }}
-                placeholder={layoutMode === 'split' ? '輸入訊息...' : '輸入訊息...（Shift+Enter 換行）'}
+                placeholder={layoutMode === 'split' ? tChat('inputPlaceholderShort') : tChat('inputPlaceholder')}
                 rows={1}
                 disabled={isInitializing || !sessionInfo}
                 style={{
@@ -2549,7 +2563,7 @@ function ChatSection({
                         flexShrink: 0,
                       }}
                     >
-                      ← 上一步
+                      {tChat('goBackButton')}
                     </motion.button>
                   )
                 }
@@ -2574,7 +2588,7 @@ function ChatSection({
                       flexShrink: 0,
                     }}
                   >
-                    送出
+                    {tChat('sendButton')}
                   </motion.button>
                 )
               })()}
@@ -2637,7 +2651,7 @@ function ChatSection({
     if (isFastBuilding && !streamingPreview) {
       const fbData = fastBuildMsg?.richContent?.data as { phase?: string; progress?: { current: number; total: number; step: string } } | undefined
       const fbPhase = (fbData?.phase || 'structure') as 'structure' | 'animation' | 'rwd' | 'quality_gate' | 'complete'
-      const fbProgress = fbData?.progress || { current: 1, total: 3, step: '生成結構' }
+      const fbProgress = fbData?.progress || { current: 1, total: 3, step: tPreview('phaseStructure') }
 
       return (
         <FastBuildPlayer
@@ -2673,14 +2687,14 @@ function ChatSection({
         return (
           <FastBuildPlayer
             phase={spPhase as 'structure' | 'animation' | 'rwd'}
-            progress={{ current: phaseMap[spPhase] || 1, total: 3, step: spPhase === 'structure' ? '生成結構' : spPhase === 'animation' ? '添加動畫' : '響應式優化' }}
+            progress={{ current: phaseMap[spPhase] || 1, total: 3, step: spPhase === 'structure' ? tPreview('phaseStructure') : spPhase === 'animation' ? tPreview('phaseAnimation') : tPreview('phaseRwd') }}
             streamingChunks={fastBuildChunks}
           />
         )
       }
 
       const phaseLabel = isStreaming
-        ? (streamingPreview?.phase === 'structure' ? '結構生成中...' : streamingPreview?.phase === 'animation' ? '動畫增強中...' : '響應式適配中...')
+        ? (streamingPreview?.phase === 'structure' ? tPreview('streamingStructure') : streamingPreview?.phase === 'animation' ? tPreview('streamingAnimation') : tPreview('streamingRwd'))
         : null
 
       return (
@@ -2708,7 +2722,7 @@ function ChatSection({
                 </span>
               ) : (
                 <>
-                  <span style={{ fontSize: 14, fontWeight: 500, color: 'var(--black)' }}>設計預覽</span>
+                  <span style={{ fontSize: 14, fontWeight: 500, color: 'var(--black)' }}>{tPreview('title')}</span>
                   {/* 編輯模式切換按鈕 */}
                   <button
                     onClick={() => {
@@ -2728,13 +2742,13 @@ function ChatSection({
                       fontSize: 12, fontWeight: 500, cursor: 'pointer',
                       transition: 'all 0.15s ease',
                     }}
-                    title={codePreviewEditMode ? '退出編輯模式' : '進入編輯模式'}
+                    title={codePreviewEditMode ? tPreview('exitEditTitle') : tPreview('enterEditTitle')}
                   >
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                       <path d="M17 3a2.85 2.85 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z" />
                       <path d="m15 5 4 4" />
                     </svg>
-                    編輯
+                    {tPreview('editButton')}
                   </button>
                   {/* Undo/Redo 按鈕（僅編輯模式時顯示） */}
                   {codePreviewEditMode && (
@@ -2750,7 +2764,7 @@ function ChatSection({
                           opacity: codePreviewCanUndo ? 1 : 0.35,
                           transition: 'opacity 0.15s',
                         }}
-                        title="撤銷 (⌘Z)"
+                        title={tPreview('undoTitle')}
                       >
                         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--gray-600)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                           <path d="M3 7v6h6" /><path d="M21 17a9 9 0 0 0-9-9 9 9 0 0 0-6 2.3L3 13" />
@@ -2767,7 +2781,7 @@ function ChatSection({
                           opacity: codePreviewCanRedo ? 1 : 0.35,
                           transition: 'opacity 0.15s',
                         }}
-                        title="重做 (⌘⇧Z)"
+                        title={tPreview('redoTitle')}
                       >
                         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--gray-600)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                           <path d="M21 7v6h-6" /><path d="M3 17a9 9 0 0 1 9-9 9 9 0 0 1 6 2.3L21 13" />
@@ -2788,14 +2802,14 @@ function ChatSection({
                           opacity: Object.keys(codePreviewOverrides).length > 0 && !isTyping ? 1 : 0.5,
                           transition: 'all 0.15s ease',
                         }}
-                        title="儲存修改到源碼"
+                        title={tPreview('saveTitle')}
                       >
                         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                           <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z" />
                           <polyline points="17 21 17 13 7 13 7 21" />
                           <polyline points="7 3 7 8 15 8" />
                         </svg>
-                        儲存
+                        {tPreview('saveButton')}
                       </button>
                     </>
                   )}
@@ -2862,7 +2876,7 @@ function ChatSection({
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                     <circle cx="12" cy="12" r="10" /><path d="m15 9-6 6" /><path d="m9 9 6 6" />
                   </svg>
-                  點擊元素進行編輯
+                  {tPreview('editHint')}
                 </div>
               )}
             </div>
@@ -2907,7 +2921,7 @@ function ChatSection({
     if (isGenerating) {
       // 從 progress 推斷當前階段
       const progress = lastMsg?.progress
-      const step = progress?.step || '生成中'
+      const step = progress?.step || tPreview('generating')
       const phaseNum = progress?.current || 0
       const totalPhases = progress?.total || 3
 
@@ -2923,7 +2937,7 @@ function ChatSection({
               background: 'var(--accent)', animation: 'pulse 1.5s ease-in-out infinite',
             }} />
             <span style={{ fontSize: 14, fontWeight: 500, color: 'var(--black)' }}>
-              設計預覽 — {step}
+              {tPreview('titleWithStep', { step })}
             </span>
           </div>
           {/* 中央等待區 */}
@@ -2941,10 +2955,10 @@ function ChatSection({
               }} />
             </div>
             <p style={{ color: 'var(--gray-500)', fontSize: 14, margin: 0 }}>
-              階段 {phaseNum}/{totalPhases}：{step}
+              {tPreview('phaseProgress', { phaseNum, totalPhases, step })}
             </p>
             <p style={{ color: 'var(--gray-400)', fontSize: 12, margin: 0 }}>
-              生成完成後將自動顯示預覽
+              {tPreview('waitingMessage')}
             </p>
           </div>
           <style>{`@keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }`}</style>
@@ -2986,7 +3000,7 @@ function ChatSection({
           <motion.button
             whileHover={{ scale: 1.02 }}
             whileTap={{ scale: 0.98 }}
-            onClick={() => handleSendMessage(`我選擇「${selectedTemplate.name}」這個模板`)}
+            onClick={() => handleSendMessage(tPreview('selectTemplateMessage', { name: selectedTemplate.name }))}
             style={{
               padding: '8px 16px',
               fontSize: 13,
@@ -2998,7 +3012,7 @@ function ChatSection({
               cursor: 'pointer',
             }}
           >
-            使用此模板
+            {tPreview('useTemplateButton')}
           </motion.button>
         </motion.div>
       )}
@@ -3083,10 +3097,10 @@ function ChatSection({
                   }}
                 >
                   <span>←</span>
-                  返回
+                  {tChat('headerBackButton')}
                 </button>
                 <div style={{ width: 1, height: 20, background: 'var(--border-color)' }} />
-                <span style={{ fontSize: 14, fontWeight: 500 }}>{isBddSplitMode ? '需求釐清' : 'UIUX 設計'}</span>
+                <span style={{ fontSize: 14, fontWeight: 500 }}>{isBddSplitMode ? tChat('bddSplitTitle') : tChat('uiuxSplitTitle')}</span>
               </div>
               {renderChatContent()}
             </div>
@@ -3159,7 +3173,7 @@ function ChatSection({
                 }}
               >
                 <span className="back-arrow" style={{ fontSize: 18 }}>←</span>
-                <span className="back-text">返回</span>
+                <span className="back-text">{tChat('backButton')}</span>
               </button>
               <div className="header-divider" style={{ width: 1, height: 24, background: 'var(--border-color)' }} />
               {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -3214,14 +3228,14 @@ function ChatSection({
               </div>
               {/* 當前階段名稱 */}
               <span className="progress-stage-label">
-                {stages[currentStageIndex]?.title || '準備中'}
+                {stages[currentStageIndex]?.title || tChat('preparing')}
               </span>
             </div>
 
             {/* 右側：主題切換 + 用戶資訊 */}
             <div style={{ display: 'flex', alignItems: 'center', gap: 16, flexShrink: 0 }}>
               {/* 主題切換 */}
-              <span className="header-theme-toggle"><AnimatedThemeToggler /></span>
+              <span className="header-theme-toggle" style={{ display: 'flex', alignItems: 'center', gap: 8 }}><AnimatedThemeToggler /><LocaleSwitcher /></span>
               {/* 用戶資訊 - 優先使用 VPS auth 狀態 */}
               <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
                 {(auth.isAuthenticated || sessionInfo?.isAuthenticated) ? (
@@ -3241,17 +3255,17 @@ function ChatSection({
                       />
                     )}
                     <span className="user-name" style={{ fontSize: 13, color: 'var(--gray-600)' }}>
-                      {auth.user?.name || sessionInfo?.user?.name || auth.user?.email?.split('@')[0] || sessionInfo?.user?.email?.split('@')[0] || '用戶'}
+                      {auth.user?.name || sessionInfo?.user?.name || auth.user?.email?.split('@')[0] || sessionInfo?.user?.email?.split('@')[0] || tChat('defaultUserName')}
                     </span>
                     <span className="header-dashboard-btn">
                       <GlowButton onClick={handleDashboard} variant="outline" size="sm">
-                        儀表板
+                        {tChat('dashboardButton')}
                       </GlowButton>
                     </span>
                   </>
                 ) : (
                   <GlowButton onClick={handleLogin} variant="outline" size="sm">
-                    登入
+                    {tChat('loginButton')}
                   </GlowButton>
                 )}
               </div>
@@ -3669,16 +3683,17 @@ function StatsSection() {
 
 // ============ Features Comparison Section (SEO) ============
 function ComparisonSection() {
+  const t = useTranslations('comparison')
   const ref = useRef(null)
   const isInView = useInView(ref, { once: true, margin: '-100px' })
 
   const comparisons = [
-    { feature: '需要程式基礎', traditional: '必須', tellcraft: '不需要' },
-    { feature: '開發週期', traditional: '數週至數月', tellcraft: '數小時至數天' },
-    { feature: '需求變更成本', traditional: '高（需重新開發）', tellcraft: '低（對話即可修改）' },
-    { feature: '團隊規模', traditional: '需多人協作', tellcraft: '一人即可' },
-    { feature: '維護成本', traditional: '持續投入人力', tellcraft: '低成本年費' },
-    { feature: '程式碼擁有權', traditional: '視合約而定', tellcraft: '100% 擁有' },
+    { feature: t('feature1'), traditional: t('traditional1'), tellcraft: t('tellcraft1') },
+    { feature: t('feature2'), traditional: t('traditional2'), tellcraft: t('tellcraft2') },
+    { feature: t('feature3'), traditional: t('traditional3'), tellcraft: t('tellcraft3') },
+    { feature: t('feature4'), traditional: t('traditional4'), tellcraft: t('tellcraft4') },
+    { feature: t('feature5'), traditional: t('traditional5'), tellcraft: t('tellcraft5') },
+    { feature: t('feature6'), traditional: t('traditional6'), tellcraft: t('tellcraft6') },
   ]
 
   return (
@@ -3705,10 +3720,10 @@ function ComparisonSection() {
             letterSpacing: '-0.03em',
             marginBottom: 16,
           }}>
-            傳統開發 vs Tellcraft
+            {t('heading')}
           </h2>
           <p style={{ fontSize: 16, color: 'var(--gray-500)' }}>
-            為什麼越來越多人選擇 AI 驅動開發
+            {t('subtitle')}
           </p>
         </motion.div>
 
@@ -3730,8 +3745,8 @@ function ComparisonSection() {
             textTransform: 'uppercase',
             letterSpacing: '0.05em',
           }}>
-            <span>項目</span>
-            <span style={{ textAlign: 'center' }}>傳統開發</span>
+            <span>{t('columnFeature')}</span>
+            <span style={{ textAlign: 'center' }}>{t('columnTraditional')}</span>
             <span style={{ textAlign: 'center', color: 'var(--black)' }}>Tellcraft</span>
           </div>
           {comparisons.map((row, i) => (
@@ -3759,38 +3774,15 @@ function ComparisonSection() {
 
 // ============ Showcase Section ============
 function ShowcaseSection() {
+  const t = useTranslations('showcase')
   const ref = useRef(null)
   const isInView = useInView(ref, { once: true, margin: '-100px' })
 
   const showcases = [
-    {
-      title: '線上訂餐平台',
-      category: '電商',
-      description: '完整的餐廳訂餐系統，包含菜單管理、購物車、金流串接、訂單追蹤。',
-      stats: '3 天完成',
-      color: '#f5f5f5'
-    },
-    {
-      title: 'SaaS 訂閱管理',
-      category: 'B2B',
-      description: '訂閱制軟體的用戶管理後台，支援方案切換、帳單管理、用量統計。',
-      stats: '5 天完成',
-      color: '#fafafa'
-    },
-    {
-      title: '活動報名系統',
-      category: '服務',
-      description: '支援多場次、名額限制、候補機制、自動發送確認信。',
-      stats: '2 天完成',
-      color: '#f8f8f8'
-    },
-    {
-      title: '會員制電商',
-      category: '電商',
-      description: '分級會員制度、點數累積、專屬優惠、推薦獎勵機制。',
-      stats: '4 天完成',
-      color: '#f5f5f5'
-    }
+    { title: t('item1Title'), category: t('item1Category'), description: t('item1Desc'), stats: t('item1Stats'), color: '#f5f5f5' },
+    { title: t('item2Title'), category: t('item2Category'), description: t('item2Desc'), stats: t('item2Stats'), color: '#fafafa' },
+    { title: t('item3Title'), category: t('item3Category'), description: t('item3Desc'), stats: t('item3Stats'), color: '#f8f8f8' },
+    { title: t('item4Title'), category: t('item4Category'), description: t('item4Desc'), stats: t('item4Stats'), color: '#f5f5f5' },
   ]
 
   return (
@@ -3825,9 +3817,9 @@ function ShowcaseSection() {
               lineHeight: 1.3,
               marginBottom: 24,
             }}>
-              <BlurRevealText text="用戶實際打造的" delay={0} />
+              <BlurRevealText text={t('heading1')} delay={0} />
               <br />
-              <BlurRevealText text="各種應用" delay={0.15} />
+              <BlurRevealText text={t('heading2')} delay={0.15} />
             </h2>
             <p style={{
               fontSize: 16,
@@ -3836,8 +3828,7 @@ function ShowcaseSection() {
               marginBottom: 32,
               maxWidth: 400,
             }}>
-              這些都是真實用戶透過對話完成的專案。
-              從電商平台到 SaaS 系統，各種類型都能實現。
+              {t('description')}
             </p>
             <div className="showcase-stats" style={{
               display: 'flex',
@@ -3854,7 +3845,7 @@ function ShowcaseSection() {
                 }}>
                   <AnimatedCounter target={50} suffix="+" />
                 </div>
-                <div style={{ fontSize: 13, color: 'var(--gray-500)' }}>專案上線</div>
+                <div style={{ fontSize: 13, color: 'var(--gray-500)' }}>{t('statsProjects')}</div>
               </div>
               <div>
                 <div style={{
@@ -3863,9 +3854,9 @@ function ShowcaseSection() {
                   fontFamily: 'var(--font-mono)',
                   letterSpacing: '-0.02em',
                 }}>
-                  <AnimatedCounter target={12} suffix="種" />
+                  <AnimatedCounter target={12} suffix={t('suffixTypes')} />
                 </div>
-                <div style={{ fontSize: 13, color: 'var(--gray-500)' }}>產業類型</div>
+                <div style={{ fontSize: 13, color: 'var(--gray-500)' }}>{t('statsIndustries')}</div>
               </div>
             </div>
           </motion.div>
@@ -3951,7 +3942,7 @@ function ShowcaseSection() {
                       fontSize: 13,
                       color: 'var(--gray-400)',
                     }}>
-                      Hover 暫停 · 點擊查看詳情
+                      {t('cardHint')}
                     </div>
                   </div>
                 </Card>
@@ -3966,43 +3957,20 @@ function ShowcaseSection() {
 
 // ============ FAQ Section (SEO Critical) ============
 function FAQSection() {
+  const t = useTranslations('faq')
   const ref = useRef(null)
   const isInView = useInView(ref, { once: true, margin: '-100px' })
   const [openIndex, setOpenIndex] = useState<number | null>(0)
 
   const faqs = [
-    {
-      question: 'Tellcraft 適合沒有程式基礎的人嗎？',
-      answer: '完全適合。Tellcraft 的核心理念就是讓任何人都能用對話完成軟體開發。你只需要清楚描述你想要什麼功能，AI 會處理所有技術細節。整個過程就像跟朋友聊天一樣自然。'
-    },
-    {
-      question: '生成的程式碼品質如何？可以自己修改嗎？',
-      answer: 'Tellcraft 生成的程式碼遵循業界最佳實踐，使用 Next.js、React、TypeScript 等主流技術棧。你擁有 100% 的程式碼所有權，可以隨時匯出完整原始碼，自行修改或交給工程師維護。'
-    },
-    {
-      question: '如果我的需求很複雜怎麼辦？',
-      answer: 'AI 會透過多輪對話逐步釐清你的需求。即使是複雜的系統，也會被拆解成可執行的小規格。如果某個需求超出目前能力範圍，AI 會明確告知並建議替代方案。'
-    },
-    {
-      question: '網站上線後，我可以修改嗎？',
-      answer: '當然可以。你可以隨時回來用對話描述修改需求，AI 會理解現有系統架構並做出精準變更。小幅修改通常只需要幾句對話就能完成。'
-    },
-    {
-      question: '資料安全嗎？你們會存取我的用戶資料嗎？',
-      answer: '你的應用程式資料儲存在獨立的資料庫中，Tellcraft 不會存取或分析你的用戶資料。我們只處理開發過程中的對話內容，且所有通訊都經過加密。'
-    },
-    {
-      question: '如果我想停用服務，我的網站會怎樣？',
-      answer: '你可以隨時匯出完整的原始碼和資料庫，自行部署到其他平台。我們不會鎖定你的資料或程式碼。取消訂閱後，會有 30 天的緩衝期讓你完成遷移。'
-    },
-    {
-      question: 'Tellcraft 跟其他無代碼工具有什麼不同？',
-      answer: '傳統無代碼工具限制在預設的模板和功能中。Tellcraft 則是真正生成客製化程式碼，沒有功能天花板。你得到的是完整的應用程式，而不是受限於平台的半成品。'
-    },
-    {
-      question: '支援哪些類型的網站或應用程式？',
-      answer: '目前支援 Web 應用程式，包含：電商網站、SaaS 平台、管理後台、會員系統、預約系統等。暫不支援手機原生 App，但可以建置手機友善的網頁應用。'
-    }
+    { question: t('q1'), answer: t('a1') },
+    { question: t('q2'), answer: t('a2') },
+    { question: t('q3'), answer: t('a3') },
+    { question: t('q4'), answer: t('a4') },
+    { question: t('q5'), answer: t('a5') },
+    { question: t('q6'), answer: t('a6') },
+    { question: t('q7'), answer: t('a7') },
+    { question: t('q8'), answer: t('a8') },
   ]
 
   return (
@@ -4082,7 +4050,7 @@ function FAQSection() {
                 lineHeight: 1.1,
               }}
             >
-              常見問題
+              {t('heading')}
             </motion.h2>
             <motion.p
               initial={{ opacity: 0, y: 20 }}
@@ -4094,7 +4062,7 @@ function FAQSection() {
                 maxWidth: 400,
               }}
             >
-              還有疑問？直接在上方輸入框詢問 AI
+              {t('subtitle')}
             </motion.p>
           </div>
         </div>
@@ -4143,25 +4111,11 @@ function FAQSection() {
 
 // ============ Testimonial Section ============
 function TestimonialSection() {
+  const t = useTranslations('testimonial')
   const quotes = [
-    {
-      text: '以前要花幾週開發的功能，現在對話幾輪就完成了。省下的時間可以專注在業務拓展。',
-      author: '林先生',
-      role: '新創團隊創辦人',
-      company: '食品電商'
-    },
-    {
-      text: '終於不用再跟工程師解釋需求了，AI 比人更懂我在說什麼。修改也很快，幾句話就搞定。',
-      author: '陳小姐',
-      role: '品牌營運總監',
-      company: '服飾品牌'
-    },
-    {
-      text: '原本只是想做個簡單的網站，結果做出了完整的 SaaS 系統。現在每月有穩定的訂閱收入。',
-      author: '王先生',
-      role: '獨立開發者',
-      company: '線上課程平台'
-    }
+    { text: t('quote1'), author: t('author1'), role: t('role1'), company: t('company1') },
+    { text: t('quote2'), author: t('author2'), role: t('role2'), company: t('company2') },
+    { text: t('quote3'), author: t('author3'), role: t('role3'), company: t('company3') },
   ]
 
   const [current, setCurrent] = useState(0)
@@ -4243,6 +4197,7 @@ function TestimonialSection() {
 
 // ============ CTA Section ============
 function CTASection({ onStartChat }: { onStartChat: () => void }) {
+  const t = useTranslations('cta')
   const ref = useRef(null)
   const isInView = useInView(ref, { once: true, margin: '-100px' })
 
@@ -4261,7 +4216,7 @@ function CTASection({ onStartChat }: { onStartChat: () => void }) {
           lineHeight: 1.3,
           marginBottom: 24,
         }}>
-          準備好開始了嗎？
+          {t('heading')}
         </h2>
         <p style={{
           fontSize: 16,
@@ -4269,8 +4224,8 @@ function CTASection({ onStartChat }: { onStartChat: () => void }) {
           lineHeight: 1.7,
           marginBottom: 40,
         }}>
-          不需要信用卡，不需要技術背景。<br />
-          現在就告訴 AI 你想做什麼。
+          {t('line1')}<br />
+          {t('line2')}
         </p>
         <motion.button
           whileHover={{ scale: 1.02 }}
@@ -4290,7 +4245,7 @@ function CTASection({ onStartChat }: { onStartChat: () => void }) {
             transition: 'all 0.2s ease',
           }}
         >
-          開始對話
+          {t('button')}
         </motion.button>
       </motion.div>
     </section>
@@ -4299,6 +4254,7 @@ function CTASection({ onStartChat }: { onStartChat: () => void }) {
 
 // ============ Footer (SEO) ============
 function Footer() {
+  const t = useTranslations('footer')
   return (
     <footer style={{ padding: '64px 24px 48px', borderTop: '1px solid var(--border-color)', background: 'var(--gray-50)' }}>
       <div style={{ maxWidth: 1000, margin: '0 auto' }}>
@@ -4315,38 +4271,38 @@ function Footer() {
               <span>Tellcraft</span>
             </div>
             <p style={{ fontSize: 13, color: 'var(--gray-500)', lineHeight: 1.6 }}>
-              AI 驅動的自動化開發平台。<br />
-              用對話打造你的軟體產品。
+              {t('description1')}<br />
+              {t('description2')}
             </p>
           </div>
           <div>
             <div style={{ fontSize: 12, fontWeight: 500, marginBottom: 16, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--gray-400)' }}>
-              產品
+              {t('navProduct')}
             </div>
             <nav style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-              <a href="#how-it-works" style={{ fontSize: 14, color: 'var(--gray-600)', textDecoration: 'none' }}>功能介紹</a>
-              <a href="#use-cases" style={{ fontSize: 14, color: 'var(--gray-600)', textDecoration: 'none' }}>使用場景</a>
-              <a href="#faq" style={{ fontSize: 14, color: 'var(--gray-600)', textDecoration: 'none' }}>常見問題</a>
+              <a href="#how-it-works" style={{ fontSize: 14, color: 'var(--gray-600)', textDecoration: 'none' }}>{t('linkFeatures')}</a>
+              <a href="#use-cases" style={{ fontSize: 14, color: 'var(--gray-600)', textDecoration: 'none' }}>{t('linkUseCases')}</a>
+              <a href="#faq" style={{ fontSize: 14, color: 'var(--gray-600)', textDecoration: 'none' }}>{t('linkFaq')}</a>
             </nav>
           </div>
           <div>
             <div style={{ fontSize: 12, fontWeight: 500, marginBottom: 16, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--gray-400)' }}>
-              資源
+              {t('navResources')}
             </div>
             <nav style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-              <a href="#" style={{ fontSize: 14, color: 'var(--gray-600)', textDecoration: 'none' }}>使用文件</a>
-              <a href="#" style={{ fontSize: 14, color: 'var(--gray-600)', textDecoration: 'none' }}>API 文件</a>
-              <a href="#" style={{ fontSize: 14, color: 'var(--gray-600)', textDecoration: 'none' }}>部落格</a>
+              <a href="#" style={{ fontSize: 14, color: 'var(--gray-600)', textDecoration: 'none' }}>{t('linkDocs')}</a>
+              <a href="#" style={{ fontSize: 14, color: 'var(--gray-600)', textDecoration: 'none' }}>{t('linkApi')}</a>
+              <a href="#" style={{ fontSize: 14, color: 'var(--gray-600)', textDecoration: 'none' }}>{t('linkBlog')}</a>
             </nav>
           </div>
           <div>
             <div style={{ fontSize: 12, fontWeight: 500, marginBottom: 16, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--gray-400)' }}>
-              關於
+              {t('navAbout')}
             </div>
             <nav style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-              <a href="#" style={{ fontSize: 14, color: 'var(--gray-600)', textDecoration: 'none' }}>隱私權政策</a>
-              <a href="#" style={{ fontSize: 14, color: 'var(--gray-600)', textDecoration: 'none' }}>服務條款</a>
-              <a href="#" style={{ fontSize: 14, color: 'var(--gray-600)', textDecoration: 'none' }}>聯絡我們</a>
+              <a href="#" style={{ fontSize: 14, color: 'var(--gray-600)', textDecoration: 'none' }}>{t('linkPrivacy')}</a>
+              <a href="#" style={{ fontSize: 14, color: 'var(--gray-600)', textDecoration: 'none' }}>{t('linkTerms')}</a>
+              <a href="#" style={{ fontSize: 14, color: 'var(--gray-600)', textDecoration: 'none' }}>{t('linkContact')}</a>
             </nav>
           </div>
         </div>
@@ -4374,6 +4330,10 @@ function Footer() {
 
 // ============ Main Component ============
 function HomeContent() {
+  const tChat = useTranslations('chat')
+  const tAuth = useTranslations('auth')
+  const tCommon = useTranslations('common')
+  const localePath = useLocalePath()
   const searchParams = useSearchParams()
   const [isChatActive, setIsChatActive] = useState(false)
   const [heroInput, setHeroInput] = useState('')
@@ -4448,7 +4408,7 @@ function HomeContent() {
   const handleDashboard = async () => {
     const token = localStorage.getItem('auth_token')
     if (!token) {
-      window.location.href = '/auth/login?next=/dashboard'
+      window.location.href = localePath('/auth/login?next=/dashboard')
       return
     }
 
@@ -4460,15 +4420,15 @@ function HomeContent() {
       })
 
       if (res.ok) {
-        window.location.href = '/dashboard'
+        window.location.href = localePath('/dashboard')
       } else {
         // Token 無效，清除並重新登入
         localStorage.removeItem('auth_token')
-        window.location.href = '/auth/login?next=/dashboard'
+        window.location.href = localePath('/auth/login?next=/dashboard')
       }
     } catch {
       // 網路錯誤，直接嘗試跳轉（讓 middleware 處理）
-      window.location.href = '/dashboard'
+      window.location.href = localePath('/dashboard')
     }
   }
 
@@ -4524,9 +4484,13 @@ function HomeContent() {
               top: 20,
               left: 20,
               zIndex: 1000,
+              display: 'flex',
+              alignItems: 'center',
+              gap: 8,
             }}
           >
             <AnimatedThemeToggler />
+            <LocaleSwitcher />
           </motion.div>
         )}
       </AnimatePresence>
@@ -4569,19 +4533,19 @@ function HomeContent() {
               />
             )}
             <span className="landing-user-name" style={{ fontSize: 14, color: 'var(--gray-600)' }}>
-              {auth.user.name || auth.user.email?.split('@')[0] || '用戶'}
+              {auth.user.name || auth.user.email?.split('@')[0] || tChat('defaultUserName')}
             </span>
             <GlowButton onClick={handleDashboard} variant="outline" size="sm">
-              儀表板
+              {tAuth('dashboardButton')}
             </GlowButton>
             <GlowButton onClick={handleSignOut} variant="outline" size="sm">
-              登出
+              {tAuth('logoutButton')}
             </GlowButton>
           </div>
         ) : (
           // 未登入 - 顯示登入按鈕
           <GlowButton href="/auth/login" variant="outline" size="sm">
-            登入
+            {tAuth('loginButton')}
           </GlowButton>
         )}
           </motion.div>
@@ -4631,7 +4595,7 @@ export default function Home() {
         alignItems: 'center',
         justifyContent: 'center'
       }}>
-        載入中...
+        Loading...
       </div>
     }>
       <HomeContent />

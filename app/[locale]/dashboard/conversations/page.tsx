@@ -3,8 +3,10 @@
 import { useEffect, useState } from 'react'
 import { useRouter } from '@/i18n/navigation'
 import { motion } from 'framer-motion'
+import { useTranslations } from 'next-intl'
 import { DataTable, type Column } from '@/app/components/dashboard'
 import { getUserConversations } from '@/app/lib/vps-api'
+import { useLocalePath } from '@/app/hooks/useLocalePath'
 
 // 從 localStorage 獲取 token
 function getAuthToken(): string | null {
@@ -24,6 +26,9 @@ interface Conversation {
 
 export default function ConversationsPage() {
   const router = useRouter()
+  const t = useTranslations('dashboard')
+  const tc = useTranslations('common')
+  const localePath = useLocalePath()
   const [conversations, setConversations] = useState<Conversation[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -41,7 +46,7 @@ export default function ConversationsPage() {
       if (result.success && result.data) {
         setConversations(result.data.conversations)
       } else {
-        setError(result.error || '載入失敗')
+        setError(result.error || tc('loadFailed'))
       }
       setIsLoading(false)
     }
@@ -52,7 +57,7 @@ export default function ConversationsPage() {
   const columns: Column<Conversation>[] = [
     {
       key: 'projectName',
-      header: '專案',
+      header: t('projectHeader'),
       width: '200px',
       render: (conv: Conversation) => (
         <span style={{ fontWeight: 500 }}>{conv.projectName}</span>
@@ -60,7 +65,7 @@ export default function ConversationsPage() {
     },
     {
       key: 'lastMessage',
-      header: '最後訊息',
+      header: t('lastMessage'),
       width: '2fr',
       render: (conv: Conversation) =>
         conv.lastMessage ? (
@@ -74,7 +79,7 @@ export default function ConversationsPage() {
     },
     {
       key: 'messageCount',
-      header: '訊息數',
+      header: t('messageCountHeader'),
       width: '80px',
       render: (conv: Conversation) => (
         <span style={{ fontFamily: 'var(--font-mono)' }}>{conv.messageCount}</span>
@@ -82,11 +87,11 @@ export default function ConversationsPage() {
     },
     {
       key: 'updatedAt',
-      header: '更新時間',
+      header: t('updatedAt'),
       width: '140px',
       render: (conv: Conversation) => (
         <span style={{ fontSize: 12, color: 'var(--gray-400)' }}>
-          {formatRelativeTime(conv.updatedAt)}
+          {formatRelativeTime(conv.updatedAt, t)}
         </span>
       ),
     },
@@ -124,10 +129,10 @@ export default function ConversationsPage() {
             marginBottom: 8,
           }}
         >
-          我的對話
+          {t('myConversations')}
         </h1>
         <p style={{ fontSize: 14, color: 'var(--gray-500)' }}>
-          查看所有與 AI 的對話記錄
+          {t('conversationsSubtitle')}
         </p>
       </motion.div>
 
@@ -142,10 +147,10 @@ export default function ConversationsPage() {
           data={conversations}
           keyField="id"
           isLoading={isLoading}
-          emptyMessage="還沒有對話記錄"
+          emptyMessage={t('noConversationsYet')}
           onRowClick={(conv) => {
             // 跳轉到首頁並帶上對話 ID，讓首頁載入該對話
-            window.location.href = `/?conversation=${conv.id}`
+            window.location.href = localePath(`/?conversation=${conv.id}`)
           }}
         />
       </motion.div>
@@ -153,7 +158,7 @@ export default function ConversationsPage() {
   )
 }
 
-function formatRelativeTime(dateString: string): string {
+function formatRelativeTime(dateString: string, t: (key: string, values?: Record<string, string | number | Date>) => string): string {
   const date = new Date(dateString)
   const now = new Date()
   const diffMs = now.getTime() - date.getTime()
@@ -161,9 +166,9 @@ function formatRelativeTime(dateString: string): string {
   const diffHours = Math.floor(diffMs / 3600000)
   const diffDays = Math.floor(diffMs / 86400000)
 
-  if (diffMins < 1) return '剛剛'
-  if (diffMins < 60) return `${diffMins} 分鐘前`
-  if (diffHours < 24) return `${diffHours} 小時前`
-  if (diffDays < 7) return `${diffDays} 天前`
-  return date.toLocaleDateString('zh-TW')
+  if (diffMins < 1) return t('timeJustNow')
+  if (diffMins < 60) return t('timeMinutesAgo', { count: diffMins })
+  if (diffHours < 24) return t('timeHoursAgo', { count: diffHours })
+  if (diffDays < 7) return t('timeDaysAgo', { count: diffDays })
+  return date.toLocaleDateString()
 }

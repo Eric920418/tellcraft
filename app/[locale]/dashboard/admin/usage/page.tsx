@@ -3,6 +3,7 @@
 import { useEffect, useState, useMemo } from 'react'
 import { useRouter } from '@/i18n/navigation'
 import { motion } from 'framer-motion'
+import { useTranslations } from 'next-intl'
 import { StatsCard, BarChart, LineChart, DateRangePicker } from '@/app/components/dashboard'
 import { getLLMUsageStats } from '@/app/lib/vps-api'
 
@@ -36,6 +37,8 @@ function getAuthToken(): string | null {
 
 export default function AdminUsagePage() {
   const router = useRouter()
+  const t = useTranslations('dashboard.usage')
+  const tc = useTranslations('common')
   const [usage, setUsage] = useState<LLMUsage | null>(null)
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -72,7 +75,7 @@ export default function AdminUsagePage() {
           router.push('/dashboard')
           return
         }
-        setError(result.error || '載入失敗')
+        setError(result.error || tc('loadFailed'))
         setIsLoading(false)
         return
       }
@@ -160,10 +163,10 @@ export default function AdminUsagePage() {
               marginBottom: 8,
             }}
           >
-            LLM 用量統計
+            {t('title')}
           </h1>
           <p style={{ fontSize: 14, color: 'var(--gray-500)' }}>
-            監控 API 使用量和成本
+            {t('subtitle')}
           </p>
         </div>
         <DateRangePicker value={dateRange} onChange={setDateRange} />
@@ -182,13 +185,13 @@ export default function AdminUsagePage() {
         }}
       >
         <StatsCard
-          title="總成本"
+          title={t('totalCost')}
           value={`$${(usage?.totalCost || 0).toFixed(2)}`}
           icon="$"
           delay={0}
         />
         <StatsCard
-          title="總呼叫次數"
+          title={t('totalCalls')}
           value={usage?.breakdown.reduce((sum, d) => sum + d.count, 0) || 0}
           icon="◈"
           delay={0.05}
