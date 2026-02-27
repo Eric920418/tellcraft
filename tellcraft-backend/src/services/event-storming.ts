@@ -465,7 +465,7 @@ ${clearedContext || '（尚無已澄清項目）'}
   },
   "suggestedParams": ["參數1", "參數2"],
   "question": "需要確認的問題",
-  "questionOptions": ["選項A", "選項B（建議）"]
+  "questionOptions": ["選項內容（不要加 A/B/C 前綴）", "另一選項（建議）"]
 }`
 
   const userMsg = isCommand
@@ -523,8 +523,13 @@ ${clearedContext || '（尚無已澄清項目）'}
 
   // 組裝展示文字
   const progress = getProgressText(knowledgeMap)
-  const optionsList = (parsed.questionOptions || []).map((opt, i) => `  ${String.fromCharCode(65 + i)}. ${opt}`).join('\n')
+  // 移除 LLM 可能已帶的選項標籤（如 "A. " "A) " "A: "）避免 "A. A." 重複
+  const optionsList = (parsed.questionOptions || []).map((opt, i) => {
+    const cleaned = opt.replace(/^[A-Da-d][.):\s]+\s*/, '').trim()
+    return `  ${String.fromCharCode(65 + i)}. ${cleaned}`
+  }).join('\n')
 
+  // 參數/回傳欄位已存入 knowledgeMap（cmd.params / rm.returnFields），不顯示給用戶
   const content = `${progress}
 
 **${isCommand ? '命令' : '查詢'}：${nextItem.name}**
@@ -533,7 +538,6 @@ ${clearedContext || '（尚無已澄清項目）'}
 - **做什麼**：${parsed.proposal.what || '—'}
 - **為什麼**：${parsed.proposal.why || '—'}
 - **何時觸發**：${parsed.proposal.when || '—'}
-- **${isCommand ? '參數' : '回傳欄位'}**：${(parsed.suggestedParams || []).join('、') || '—'}
 
 ${parsed.question || '以上提案是否正確？'}
 ${optionsList}`
@@ -541,7 +545,8 @@ ${optionsList}`
   const quickReplies: Array<{ label: string; value: string; style?: 'primary' | 'secondary' | 'ghost' }> = []
   if (parsed.questionOptions?.length) {
     parsed.questionOptions.forEach((opt, i) => {
-      quickReplies.push({ label: `${String.fromCharCode(65 + i)}. ${opt.replace('（建議）', '').trim()}`, value: opt })
+      const cleanedOpt = opt.replace(/^[A-Da-d][.):\s]+\s*/, '').trim()
+      quickReplies.push({ label: `${String.fromCharCode(65 + i)}. ${cleanedOpt.replace('（建議）', '').trim()}`, value: cleanedOpt })
     })
   }
   quickReplies.push({ label: '確認提案', value: '確認', style: 'primary' })
