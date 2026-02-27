@@ -229,6 +229,8 @@ sanitizeCodeForDeploy（6 類自動修復）
 - **`verifyBuildLocally` 的修復結果必須同步回 DB**：否則預覽和部署代碼分岔
 - **Anthropic SDK v0.72+**：大 `max_tokens` 必須用 `messages.stream()` + `await stream.finalMessage()`
 - **Skill 函數提前 return 必須保存 FlowState**：否則 `handleContinueFlow` 找不到 state → 用戶對話永久卡死
+- **Formulation phase 必須設 `formulationStartedAt`**：否則中斷後無法觸發超時恢復。`formulation` phase + `waitingForReply=false` 代表正在生成中，handleContinueFlow 會攔截用戶輸入 + 15 分鐘超時偵測
+- **Formulation checkpoint 每 3 個 feature 保存一次**：中斷恢復時跳過已完成的 feature，成功後必須清理所有 `formulation*` 暫存欄位
 
 ## 核心原則
 

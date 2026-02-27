@@ -103,6 +103,13 @@ export interface FlowState {
   partialSpecContext?: string      // 部分規格摘要（注入後續 Discovery）
   // Draft Batch Mode
   formulationDraftUncertainItems?: string[]  // 草稿中不確定的項目
+  // Formulation 斷點續傳
+  formulationStartedAt?: number                 // 開始時間（超時偵測）
+  formulationSchemaSql?: string                 // Step 1 結果
+  formulationEntityMapping?: string             // Step 1 結果
+  formulationIdentifiedFeatures?: import('../services/formulation').FeatureInfo[] // Step 2 結果
+  formulationCompletedNames?: string[]          // 已完成的 actionName 列表
+  formulationTotalExpected?: number             // 預期總數
   // Change Management
   changeImpact?: ImpactAnalysis   // 變更影響分析結果
   // 連續空輪計數（連續兩輪無新問題才終止 Discovery）

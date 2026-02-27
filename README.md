@@ -118,8 +118,10 @@ Phase 1: PRD Discovery + Clarify（多輪動態釐清）
     ↓ 每輪最多 5 題，每 5 題批量確認（支援反悔），動態上限 3-10 輪 / 15-50 題
     ↓ 三層去重：L1 Bug Fix + L2 Decision Summary(Haiku) + L3 Post-gen Dedup(Haiku)
 
-Phase 2: Formulation（一個 API = 一個 Feature）
+Phase 2: Formulation（需求驅動 + 智能分組）
+    ↓ 同一實體 CRUD 合併為 1 個 Feature，狀態轉換/跨實體保持獨立
     ↓ 產出 schema.sql + entity_to_table_mapping.yml + feature files
+    ↓ Checkpoint 每 3 個 feature 保存，中斷後可恢復（15 分鐘超時偵測）
     ↓ 驗證腳本（lint + validate）+ 自癒修復（最多 3 次）
 
 Phase 3: Spec Discovery + Clarify
@@ -387,11 +389,15 @@ BDD Q&A 動畫面板從 3D 鍛造車間場景改為**純 React 文字歷史紀�
 - `postMessage` 雙向通訊（`tc_setEditMode`/`tc_elementSelected`/`tc_applyUpdate`/`tc_resetElement`/`tc_applyOverrides`）
 
 **前端**：
-- `SandpackPreview.tsx`：新增 `editMode`/`onElementSelected`/`pendingUpdate`/`pendingReset`/`pendingOverrides` props，用 `setInterval(500ms)` + `querySelector('iframe')` 取得 Sandpack 管理的 iframe ref
-- `page.tsx`：code_preview 工具列新增編輯模式按鈕 + Undo/Redo，右側 `PropertyEditor` sidebar（280px），鍵盤快捷鍵 `⌘Z`/`⌘⇧Z`
+- `SandpackPreview.tsx`：新增 `editMode`/`onElementSelected`/`pendingUpdate`/`pendingReset`/`pendingOverrides`/`overrides` props，用 `setInterval(500ms)` + `querySelector('iframe')` 取得 Sandpack 管理的 iframe ref
+- `page.tsx`：code_preview 工具列新增編輯模式按鈕 + Undo/Redo + 儲存按鈕，右側 `PropertyEditor` sidebar（280px），鍵盤快捷鍵 `⌘Z`/`⌘⇧Z`
 - 串流期間自動禁用編輯模式，切換對話時重置所有編輯狀態
 
-**限制**：DOM overrides 為臨時性質（ephemeral），HMR/源碼更新後丟失
+**持久化 + 儲存到源碼（2026-02-27）**：
+- `storedOverrides`：bridge 內部持久化，React re-render 後 MutationObserver 自動 `fullRetag()`（clearAllTags → 重新標記 → reapplyStoredOverrides）
+- `localStorage`：overrides 存入 `tc-edit-overrides-{conversationId}`，頁面重整後自動恢復
+- `tc_iframeReady`：iframe 重建時自動重發 `tc_applyOverrides`，延遲 500ms 等 bridge tag 完元素
+- 「儲存」按鈕：將 DOM overrides 轉為自然語言修改描述，發送為迭代修改消息（走現有 iteration 路由），LLM 修改源碼後永久保存
 
 ### 模板編輯圖片上傳（2026-02-26）
 

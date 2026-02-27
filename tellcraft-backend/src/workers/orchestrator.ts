@@ -19,7 +19,7 @@ import {
 } from '../services/bdd-session'
 import { runPrdDiscovery } from '../services/prd-discovery'
 import { generateDecisionSummary, deduplicateQuestions, generatePartialSpecContext } from '../services/clarify-dedup'
-import { runFormulation, fixMultipleFeatures, generateDraftBatch, GeneratedFeature, FeatureFixInput } from '../services/formulation'
+import { runFormulation, fixMultipleFeatures, generateDraftBatch, GeneratedFeature, FeatureFixInput, FormulationCheckpoint } from '../services/formulation'
 import { runSpecDiscovery, specIssuesToClarifyItems } from '../services/spec-discovery'
 import {
   generateDesignVariants,
@@ -1094,6 +1094,57 @@ async function handleContinueFlow(
       content: '正在分析變更影響，請稍候...',
       stage: 'info',
     })
+    return
+  }
+
+  // Formulation 生成中（攔截用戶輸入 + 死鎖偵測）
+  if (state.phase === 'formulation' && !state.waitingForReply) {
+    const FORMULATION_TIMEOUT_MS = 15 * 60 * 1000 // 15 分鐘
+    const startedAt = state.formulationStartedAt || 0
+    if (startedAt > 0 && Date.now() - startedAt > FORMULATION_TIMEOUT_MS) {
+      console.warn('[Orchestrator] Formulation 超時，嘗試恢復')
+      const hasCheckpoint = state.formulationSchemaSql && state.formulationIdentifiedFeatures && state.formulationIdentifiedFeatures.length > 0
+      if (hasCheckpoint) {
+        console.log(`[Orchestrator] 從 checkpoint 恢復 Formulation（已完成 ${state.formulationCompletedNames?.length || 0}/${state.formulationTotalExpected || '?'}）`)
+        await sendMessage(conversationId, io, {
+          content: `規格生成中斷了，正在從上次進度恢復（已完成 ${state.formulationCompletedNames?.length || 0}/${state.formulationTotalExpected || '?'} 個功能）...`,
+          stage: 'formulation_start',
+        })
+        await resumeFormulation(conversationId, state, redis, io)
+      } else {
+        console.log('[Orchestrator] 無 checkpoint，重新開始 Formulation')
+        await sendMessage(conversationId, io, {
+          content: '規格生成中斷了，正在重新開始...',
+          stage: 'formulation_start',
+        })
+        await restartFormulation(conversationId, state, redis, io)
+      }
+    } else {
+      await sendMessage(conversationId, io, {
+        content: '正在產出規格文件，請稍候...',
+        stage: 'info',
+      })
+    }
+    return
+  }
+
+  // Spec Discovery 生成中（攔截用戶輸入 + 死鎖偵測）
+  if (state.phase === 'spec_discovery' && !state.waitingForReply) {
+    const SPEC_DISCOVERY_TIMEOUT_MS = 5 * 60 * 1000 // 5 分鐘
+    const startedAt = state.formulationStartedAt || 0 // 複用同一個時間戳
+    if (startedAt > 0 && Date.now() - startedAt > SPEC_DISCOVERY_TIMEOUT_MS) {
+      console.warn('[Orchestrator] Spec Discovery 超時，視為完成並進入下一階段')
+      await sendMessage(conversationId, io, {
+        content: '品質檢查超時，已略過。進入下一階段...',
+        stage: 'spec_discovery_complete',
+      })
+      await completeSpecPhase(conversationId, state, redis, io)
+    } else {
+      await sendMessage(conversationId, io, {
+        content: '正在進行品質檢查，請稍候...',
+        stage: 'info',
+      })
+    }
     return
   }
 
@@ -2515,6 +2566,150 @@ async function completeClärifyPhase(
   await saveFlowState(redis, conversationId, state)
 }
 
+// ============================================================
+// Formulation 恢復函數
+// ============================================================
+
+async function resumeFormulation(
+  conversationId: string,
+  state: FlowState,
+  redis: Redis,
+  io: SocketIOServer
+) {
+  try {
+    // 從 FlowState 讀取 checkpoint
+    const resumeFrom = {
+      schemaSql: state.formulationSchemaSql!,
+      entityMapping: state.formulationEntityMapping || '',
+      identifiedFeatures: state.formulationIdentifiedFeatures!,
+      completedNames: state.formulationCompletedNames || [],
+    }
+
+    // 重設開始時間
+    state.formulationStartedAt = Date.now()
+    await saveFlowState(redis, conversationId, state)
+
+    // 取得 BDD Session
+    const session = await getBddSession({ sessionId: state.sessionId! })
+    if (!session.success || !session.data) {
+      throw new Error('無法取得 BDD Session')
+    }
+
+    const allResolvedItems = [
+      ...(session.data.stagingItems || []),
+      ...(session.data.resolvedItems || []),
+    ].filter(item => item.answer)
+
+    // 構建 checkpoint callback
+    const checkpointCallback = async (checkpoint: FormulationCheckpoint) => {
+      state.formulationSchemaSql = checkpoint.schemaSql
+      state.formulationEntityMapping = checkpoint.entityMapping
+      state.formulationIdentifiedFeatures = checkpoint.identifiedFeatures
+      state.formulationCompletedNames = checkpoint.completedNames
+      state.formulationTotalExpected = checkpoint.totalExpected
+      await saveFlowState(redis, conversationId, state)
+    }
+
+    const progressCallback = async (step: string, current: number, total: number, detail?: string) => {
+      io.to(`conversation:${conversationId}`).emit('progress', {
+        stage: 'formulation',
+        step,
+        current,
+        total,
+        detail,
+      })
+    }
+
+    const result = await runFormulation(
+      session.data.originalRequirements,
+      allResolvedItems,
+      session.data.projectContext || undefined,
+      progressCallback,
+      { conversationId },
+      { onCheckpoint: checkpointCallback, resumeFrom }
+    )
+
+    if (!result.success) {
+      throw new Error(result.error || '恢復 Formulation 失敗')
+    }
+
+    // 合併已存在的 features（checkpoint 中已完成的）+ 新生成的
+    const existingFeatures = (session.data.featuresContent || []) as GeneratedFeature[]
+    const existingNames = new Set(existingFeatures.map(f => f.actionName))
+    const newFeatures = (result.features || []).filter(f => !existingNames.has(f.actionName))
+    const allFeatures = [...existingFeatures, ...newFeatures]
+
+    // 保存到 BDD Session
+    await updateBddSession({
+      sessionId: state.sessionId!,
+      updates: {
+        currentPhase: 'spec_discovery',
+        schemaSqlContent: result.schemaSql || resumeFrom.schemaSql,
+        entityMappingContent: result.entityMapping || resumeFrom.entityMapping,
+        featuresContent: allFeatures,
+      },
+    })
+
+    // 清理 formulation 暫存欄位
+    state.formulationStartedAt = undefined
+    state.formulationSchemaSql = undefined
+    state.formulationEntityMapping = undefined
+    state.formulationIdentifiedFeatures = undefined
+    state.formulationCompletedNames = undefined
+    state.formulationTotalExpected = undefined
+
+    const featureCount = allFeatures.length
+    await sendMessage(conversationId, io, {
+      content: `規格恢復完成！\n\n已生成：\n- 資料庫 Schema\n- ${featureCount} 個功能規格 (Feature Files)\n\n正在進行品質檢查...`,
+      stage: 'formulation_complete',
+      progress: { current: 3, total: 4, step: '品質檢查' },
+    })
+
+    await startSpecDiscovery(
+      conversationId, state, allFeatures,
+      result.schemaSql || resumeFrom.schemaSql,
+      result.entityMapping || resumeFrom.entityMapping,
+      redis, io
+    )
+  } catch (error) {
+    console.error('[Orchestrator] resumeFormulation 失敗:', error)
+    // 回退到 spec_clarify，讓用戶可以重試
+    state.phase = 'spec_clarify'
+    state.waitingForReply = true
+    state.formulationStartedAt = undefined
+    state.formulationSchemaSql = undefined
+    state.formulationEntityMapping = undefined
+    state.formulationIdentifiedFeatures = undefined
+    state.formulationCompletedNames = undefined
+    state.formulationTotalExpected = undefined
+    await saveFlowState(redis, conversationId, state)
+
+    await sendMessage(conversationId, io, {
+      content: `規格恢復失敗：${error instanceof Error ? error.message : '未知錯誤'}\n\n請輸入「重試」重新產出規格。`,
+      stage: 'error',
+    })
+  }
+}
+
+async function restartFormulation(
+  conversationId: string,
+  state: FlowState,
+  redis: Redis,
+  io: SocketIOServer
+) {
+  // 清理所有 formulation 暫存欄位
+  state.formulationStartedAt = undefined
+  state.formulationSchemaSql = undefined
+  state.formulationEntityMapping = undefined
+  state.formulationIdentifiedFeatures = undefined
+  state.formulationCompletedNames = undefined
+  state.formulationTotalExpected = undefined
+  await saveFlowState(redis, conversationId, state)
+
+  // 複用 finishClarifyAndStartFormulation 的邏輯
+  await finishClarifyAndStartFormulation(conversationId, state, redis, io)
+}
+
 async function finishClarifyAndStartFormulation(
   conversationId: string,
   state: FlowState,
@@ -2528,6 +2723,7 @@ async function finishClarifyAndStartFormulation(
 
   state.phase = 'formulation'
   state.waitingForReply = false
+  state.formulationStartedAt = Date.now()
   await saveFlowState(redis, conversationId, state)
 
   // 取得 BDD Session 資料
@@ -2632,12 +2828,23 @@ async function finishClarifyAndStartFormulation(
     })
   }
 
+  // Checkpoint callback：每 3 個 feature 保存進度到 FlowState
+  const checkpointCallback = async (checkpoint: FormulationCheckpoint) => {
+    state.formulationSchemaSql = checkpoint.schemaSql
+    state.formulationEntityMapping = checkpoint.entityMapping
+    state.formulationIdentifiedFeatures = checkpoint.identifiedFeatures
+    state.formulationCompletedNames = checkpoint.completedNames
+    state.formulationTotalExpected = checkpoint.totalExpected
+    await saveFlowState(redis, conversationId, state)
+  }
+
   let result = await runFormulation(
     session.data.originalRequirements,
     allResolvedItems,
     session.data.projectContext || undefined,
     formulationProgressCallback,
-    { conversationId }
+    { conversationId },
+    { onCheckpoint: checkpointCallback }
   )
 
   // LLM 偶發性回應格式錯誤時自動重試 1 次
@@ -2648,7 +2855,8 @@ async function finishClarifyAndStartFormulation(
       allResolvedItems,
       session.data.projectContext || undefined,
       formulationProgressCallback,
-      { conversationId }
+      { conversationId },
+      { onCheckpoint: checkpointCallback }
     )
   }
 
@@ -2658,6 +2866,7 @@ async function finishClarifyAndStartFormulation(
     // 回退 phase 到 spec_clarify，讓用戶可以重試
     state.phase = 'spec_clarify'
     state.waitingForReply = true
+    state.formulationStartedAt = undefined
     await saveFlowState(redis, conversationId, state)
 
     await sendMessage(conversationId, io, {
@@ -2671,6 +2880,14 @@ async function finishClarifyAndStartFormulation(
     }
     return
   }
+
+  // 清理 formulation 暫存欄位
+  state.formulationStartedAt = undefined
+  state.formulationSchemaSql = undefined
+  state.formulationEntityMapping = undefined
+  state.formulationIdentifiedFeatures = undefined
+  state.formulationCompletedNames = undefined
+  state.formulationTotalExpected = undefined
 
   // 保存生成的內容到 BDD Session（注意：這裡不設為 completed，因為還要進入 Spec Discovery）
   await updateBddSession({

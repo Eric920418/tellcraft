@@ -249,23 +249,29 @@ export async function identifyFeatures(
 
   const systemPrompt = `你是一位資深的 BDD 分析師。根據需求和 Schema，識別所有需要的功能（Feature）。
 
-## 核心原則：一個 API = 一個 Feature
+## 核心原則：需求驅動 + 智能分組
 
-**每個 Feature 必須對應到一個獨立的 API endpoint**，遵循 RESTful 設計原則：
+**只為需求描述或釐清決策中明確提到的操作生成 Feature**，不因 Schema 有 table 就自動補全所有 CRUD。
 
+### 智能合併規則
+| 情境 | 處理方式 | 範例 |
+|------|----------|------|
+| 同一實體的標準 CRUD（建立/查詢/更新/刪除） | **合併為 1 個 Feature**，包含多個 Action block | manage_order（含 create/get/list/update/delete） |
+| 狀態轉換（有獨立業務邏輯） | **保持獨立** | cancel_order、complete_order |
+| 跨實體操作 | **保持獨立** | add_order_item（涉及 order + product） |
+| 簡單查詢/列表 | **合併到對應實體的 CRUD Feature** | list_orders 併入 manage_order |
+
+### actionName 格式
 | 操作類型 | actionName 格式 | 範例 |
 |----------|-----------------|------|
-| 建立 | create_{entity} | create_order |
-| 查詢單筆 | get_{entity} | get_order |
-| 查詢列表 | list_{entities} | list_orders |
-| 更新 | update_{entity} | update_order |
-| 刪除 | delete_{entity} | delete_order |
-| 狀態轉換 | {action}_{entity} | cancel_order, complete_order |
+| CRUD 合併 | manage_{entity} | manage_order |
+| 狀態轉換 | {action}_{entity} | cancel_order, approve_order |
+| 跨實體操作 | {action}_{target} | add_order_item |
 
 ## 任務
-1. 分析需求和資料模型（Schema 中的每個主要 Table 通常需要 CRUD 操作）
-2. 識別所有使用者與系統的交互點
-3. 為每個 **獨立的 API 操作** 建立一個 Feature
+1. 從需求和釐清決策中提取**明確提到的操作**（不要腦補 Schema 有但需求沒提的操作）
+2. 同一實體的標準 CRUD 合併為一個 Feature
+3. 狀態轉換和跨實體操作保持獨立
 
 ## 輸出格式
 \`\`\`json
@@ -273,18 +279,18 @@ export async function identifyFeatures(
   "features": [
     {
       "name": "功能中文名稱",
-      "actionName": "create_xxx",
-      "description": "簡短描述這個功能做什麼"
+      "actionName": "manage_xxx 或 action_xxx",
+      "description": "簡短描述這個功能做什麼（合併的 Feature 說明包含哪些操作）"
     }
   ]
 }
 \`\`\`
 
 ## 命名規則
-- actionName 使用 snake_case，格式：動詞_名詞（如 create_order, update_user_profile）
-- 功能名稱要精確描述交互，不要太抽象
-- **禁止合併**：不要把多個 API 合併成一個「管理 XX」的 Feature
-- **適度拆分**：狀態轉換如果業務邏輯不同（如「取消訂單」vs「完成訂單」），應該拆成獨立 Feature`
+- actionName 使用 snake_case
+- 合併的 CRUD Feature 用 \`manage_{entity}\`
+- 獨立操作用 \`動詞_名詞\`（如 cancel_order, approve_request）
+- 功能名稱要精確描述交互，不要太抽象`
 
   const userMessage = `${projectContext ? `專案背景：${projectContext}\n\n` : ''}需求描述：
 ${requirements}
@@ -576,81 +582,150 @@ ${decisions || '（無額外決策）'}`
 // 完整的 Formulation 流程
 // ============================================================
 
+export interface FormulationCheckpoint {
+  schemaSql: string
+  entityMapping: string
+  identifiedFeatures: FeatureInfo[]
+  completedNames: string[]
+  totalExpected: number
+}
+
+export interface FormulationOptions {
+  onCheckpoint?: (checkpoint: FormulationCheckpoint) => Promise<void>
+  resumeFrom?: {
+    schemaSql: string
+    entityMapping: string
+    identifiedFeatures: FeatureInfo[]
+    completedNames: string[]
+  }
+}
+
 export async function runFormulation(
   requirements: string,
   resolvedItems: ClarifyItem[],
   projectContext?: string,
   onProgress?: (step: string, current: number, total: number, detail?: string) => Promise<void>,
-  trackingContext?: LlmTrackingContext
+  trackingContext?: LlmTrackingContext,
+  options?: FormulationOptions
 ): Promise<FormulationResult> {
   try {
-    // Step 1: 生成 SQL Schema
-    if (onProgress) {
-      await onProgress('schema', 1, 3, '生成資料模型...')
-    }
+    let schemaSql: string
+    let entityMapping: string
+    let featureList: FeatureInfo[]
 
-    const schemaResult = await generateSchemaSql(requirements, resolvedItems, projectContext, trackingContext)
-    if (!schemaResult.success || !schemaResult.schemaSql) {
-      return { success: false, error: schemaResult.error || '生成 Schema 失敗' }
-    }
+    if (options?.resumeFrom) {
+      // ── 從 checkpoint 恢復，跳過 Step 1 和 Step 2 ──
+      console.log(`[Formulation] 從 checkpoint 恢復，已完成 ${options.resumeFrom.completedNames.length} 個 Features`)
+      schemaSql = options.resumeFrom.schemaSql
+      entityMapping = options.resumeFrom.entityMapping
+      featureList = options.resumeFrom.identifiedFeatures
+    } else {
+      // Step 1: 生成 SQL Schema
+      if (onProgress) {
+        await onProgress('schema', 1, 3, '生成資料模型...')
+      }
 
-    // Step 2: 識別 Features
-    if (onProgress) {
-      await onProgress('identify', 2, 3, '識別功能模組...')
-    }
+      const schemaResult = await generateSchemaSql(requirements, resolvedItems, projectContext, trackingContext)
+      if (!schemaResult.success || !schemaResult.schemaSql) {
+        return { success: false, error: schemaResult.error || '生成 Schema 失敗' }
+      }
+      schemaSql = schemaResult.schemaSql
+      entityMapping = schemaResult.entityMapping || ''
 
-    const identifyResult = await identifyFeatures(
-      requirements,
-      resolvedItems,
-      schemaResult.schemaSql,
-      projectContext,
-      trackingContext
-    )
-    if (!identifyResult.success || !identifyResult.features || identifyResult.features.length === 0) {
-      return { success: false, error: identifyResult.error || '識別 Features 失敗' }
+      // Step 2: 識別 Features
+      if (onProgress) {
+        await onProgress('identify', 2, 3, '識別功能模組...')
+      }
+
+      const identifyResult = await identifyFeatures(
+        requirements,
+        resolvedItems,
+        schemaSql,
+        projectContext,
+        trackingContext
+      )
+      if (!identifyResult.success || !identifyResult.features || identifyResult.features.length === 0) {
+        return { success: false, error: identifyResult.error || '識別 Features 失敗' }
+      }
+      featureList = identifyResult.features
+
+      // Step 1&2 完成，保存 checkpoint
+      if (options?.onCheckpoint) {
+        await options.onCheckpoint({
+          schemaSql,
+          entityMapping,
+          identifiedFeatures: featureList,
+          completedNames: [],
+          totalExpected: featureList.length,
+        })
+      }
     }
 
     // Step 3: 逐個生成 Features
     if (onProgress) {
-      await onProgress('features', 3, 3, `生成 ${identifyResult.features.length} 個功能規格...`)
+      await onProgress('features', 3, 3, `生成 ${featureList.length} 個功能規格...`)
     }
 
+    const completedNamesSet = new Set(options?.resumeFrom?.completedNames || [])
     const generatedFeatures: GeneratedFeature[] = []
-    for (let i = 0; i < identifyResult.features.length; i++) {
-      const featureInfo = identifyResult.features[i]
+    let sinceLastCheckpoint = 0
+
+    for (let i = 0; i < featureList.length; i++) {
+      const featureInfo = featureList[i]
+
+      // 跳過已完成的 feature（恢復模式）
+      if (completedNamesSet.has(featureInfo.actionName)) {
+        console.log(`[Formulation] 跳過已完成: ${featureInfo.actionName}`)
+        continue
+      }
 
       if (onProgress) {
-        await onProgress('feature', i + 1, identifyResult.features.length, featureInfo.name)
+        await onProgress('feature', i + 1, featureList.length, featureInfo.name)
       }
 
       const result = await generateSingleFeature(
         featureInfo,
         requirements,
         resolvedItems,
-        schemaResult.schemaSql,
-        schemaResult.entityMapping || '',
+        schemaSql,
+        entityMapping,
         projectContext,
         trackingContext
       )
 
       if (result.success && result.feature) {
         generatedFeatures.push(result.feature)
+        completedNamesSet.add(featureInfo.actionName)
+        sinceLastCheckpoint++
+
+        // 每 3 個 feature 保存一次 checkpoint
+        if (sinceLastCheckpoint >= 3 && options?.onCheckpoint) {
+          sinceLastCheckpoint = 0
+          await options.onCheckpoint({
+            schemaSql,
+            entityMapping,
+            identifiedFeatures: featureList,
+            completedNames: Array.from(completedNamesSet),
+            totalExpected: featureList.length,
+          })
+          console.log(`[Formulation] Checkpoint 保存：${completedNamesSet.size}/${featureList.length}`)
+        }
       } else {
         console.error(`[Formulation] 生成 Feature "${featureInfo.name}" 失敗:`, result.error)
         // 繼續生成其他 Features
       }
     }
 
-    if (generatedFeatures.length === 0) {
+    if (generatedFeatures.length === 0 && completedNamesSet.size === 0) {
       return { success: false, error: '沒有成功生成任何 Feature' }
     }
 
-    console.log(`[Formulation] 完成！生成了 ${generatedFeatures.length} 個 Features`)
+    console.log(`[Formulation] 完成！生成了 ${generatedFeatures.length} 個 Features（總計 ${completedNamesSet.size} 個）`)
 
     return {
       success: true,
-      schemaSql: schemaResult.schemaSql,
-      entityMapping: schemaResult.entityMapping,
+      schemaSql,
+      entityMapping,
       features: generatedFeatures,
     }
   } catch (error) {

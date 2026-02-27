@@ -1099,6 +1099,35 @@ function ChatSection({
     return () => window.removeEventListener('keydown', handleKeyDown)
   }, [codePreviewEditMode, handleCodePreviewUndo, handleCodePreviewRedo])
 
+  // ── Code Preview Overrides 持久化（localStorage）──
+  // 寫入：overrides 變化時存入 localStorage（sessionInfo 為 null 時跳過，避免清除已儲存的資料）
+  useEffect(() => {
+    if (!sessionInfo?.conversationId) return
+    const key = `tc-edit-overrides-${sessionInfo.conversationId}`
+    if (Object.keys(codePreviewOverrides).length > 0) {
+      localStorage.setItem(key, JSON.stringify(codePreviewOverrides))
+    } else {
+      localStorage.removeItem(key)
+    }
+  }, [codePreviewOverrides, sessionInfo?.conversationId])
+
+  // 讀取：conversationId 變化時（含頁面重整後初始化）從 localStorage 恢復
+  useEffect(() => {
+    if (!sessionInfo?.conversationId) return
+    const key = `tc-edit-overrides-${sessionInfo.conversationId}`
+    const saved = localStorage.getItem(key)
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved)
+        if (parsed && typeof parsed === 'object' && Object.keys(parsed).length > 0) {
+          setCodePreviewOverrides(parsed)
+          setCodePreviewOverrideHistory([{}, parsed])
+          setCodePreviewHistoryIndex(1)
+        }
+      } catch { /* 忽略損壞的資料 */ }
+    }
+  }, [sessionInfo?.conversationId]) // eslint-disable-line -- 只在 conversationId 變化時執行（不要加 overrides）
+
   // 監聯訊息的 layoutHint 或 UIUX 相關 stage，切換佈局模式
   // 手機（<768px）不進 split mode，避免爆版
   useEffect(() => {
@@ -1981,6 +2010,65 @@ function ChatSection({
     }
   }
 
+  // ── 「儲存修改」：將 DOM 覆蓋轉為迭代修改消息，寫回源碼 ──
+  const handleCodePreviewSave = async () => {
+    if (Object.keys(codePreviewOverrides).length === 0 || !sessionInfo) return
+
+    // 構建修改描述
+    const lines: string[] = []
+    Object.entries(codePreviewOverrides).forEach(([elementId, changes]) => {
+      // 解析 elementId 格式：h1-0, p-2, container-section-0, img-0
+      let tag: string
+      let index: number
+      if (elementId.startsWith('container-')) {
+        const parts = elementId.split('-')
+        index = parseInt(parts[parts.length - 1]) + 1
+        tag = parts.slice(1, -1).join('-')
+      } else {
+        const match = elementId.match(/^(.+)-(\d+)$/)
+        tag = match ? match[1] : elementId
+        index = match ? parseInt(match[2]) + 1 : 1
+      }
+
+      const prefix = `第 ${index} 個 <${tag}>`
+      Object.entries(changes).forEach(([prop, value]) => {
+        if (prop === 'text') {
+          lines.push(`- ${prefix}：文字改為「${value}」`)
+        } else if (prop === 'imgSrc') {
+          lines.push(`- ${prefix}：圖片 src 改為 ${value}`)
+        } else if (prop === 'imgAlt') {
+          lines.push(`- ${prefix}：alt 改為「${value}」`)
+        } else {
+          lines.push(`- ${prefix}：CSS ${prop} 改為 ${value}`)
+        }
+      })
+    })
+
+    const message = [
+      '請將以下視覺編輯修改套用到源碼中：',
+      '',
+      ...lines,
+      '',
+      '注意：元素序號是按頁面中同類標籤出現的順序（從 1 開始）。',
+      '請直接修改 JSX 源碼中對應元素。文字直接替換 JSX 內容。',
+      '樣式修改優先用 Tailwind CSS class，無法用 class 時用 inline style。',
+    ].join('\n')
+
+    // 清除編輯狀態 + localStorage
+    setCodePreviewEditMode(false)
+    setCodePreviewSelectedElement(null)
+    setCodePreviewOverrides({})
+    setCodePreviewOverrideHistory([{}])
+    setCodePreviewHistoryIndex(0)
+    setCodePreviewPendingUpdate(null)
+    setCodePreviewPendingReset(null)
+    setCodePreviewPendingOverrides(null)
+    localStorage.removeItem(`tc-edit-overrides-${sessionInfo.conversationId}`)
+
+    // 發送迭代修改消息（走正常的 iteration 路由）
+    await handleSendMessage(message)
+  }
+
   const stages = [
     { key: 'discovery', title: '需求探索' },
     { key: 'clarify', title: '細節釐清' },
@@ -2650,6 +2738,30 @@ function ChatSection({
                           <path d="M21 7v6h-6" /><path d="M3 17a9 9 0 0 1 9-9 9 9 0 0 1 6 2.3L21 13" />
                         </svg>
                       </button>
+                      {/* 儲存修改按鈕 */}
+                      <button
+                        onClick={handleCodePreviewSave}
+                        disabled={Object.keys(codePreviewOverrides).length === 0 || isTyping}
+                        style={{
+                          display: 'flex', alignItems: 'center', gap: 4,
+                          padding: '4px 10px', borderRadius: 6,
+                          border: '1px solid var(--border-color)',
+                          background: Object.keys(codePreviewOverrides).length > 0 && !isTyping ? 'var(--accent)' : 'var(--white)',
+                          color: Object.keys(codePreviewOverrides).length > 0 && !isTyping ? '#fff' : 'var(--gray-400)',
+                          fontSize: 12, fontWeight: 500,
+                          cursor: Object.keys(codePreviewOverrides).length > 0 && !isTyping ? 'pointer' : 'default',
+                          opacity: Object.keys(codePreviewOverrides).length > 0 && !isTyping ? 1 : 0.5,
+                          transition: 'all 0.15s ease',
+                        }}
+                        title="儲存修改到源碼"
+                      >
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                          <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z" />
+                          <polyline points="17 21 17 13 7 13 7 21" />
+                          <polyline points="7 3 7 8 15 8" />
+                        </svg>
+                        儲存
+                      </button>
                     </>
                   )}
                 </>
@@ -2699,6 +2811,7 @@ function ChatSection({
                   pendingUpdate={codePreviewPendingUpdate}
                   pendingReset={codePreviewPendingReset}
                   pendingOverrides={codePreviewPendingOverrides}
+                  overrides={codePreviewOverrides}
                 />
               </div>
               {/* 編輯模式提示浮層 */}

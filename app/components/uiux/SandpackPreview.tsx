@@ -28,6 +28,8 @@ interface SandpackPreviewProps {
   pendingUpdate?: { elementId: string; changes: Record<string, string>; seq: number } | null
   pendingReset?: { elementId: string; seq: number } | null
   pendingOverrides?: { overrides: Record<string, Record<string, string>>; seq: number } | null
+  // 全量 overrides（用於 iframe 重建時自動恢復）
+  overrides?: Record<string, Record<string, string>>
 }
 
 /**
@@ -67,6 +69,7 @@ export default function SandpackPreview({
   pendingUpdate,
   pendingReset,
   pendingOverrides,
+  overrides,
 }: SandpackPreviewProps) {
   // 構建 Sandpack 設定
   const setup = useMemo(
@@ -117,6 +120,9 @@ export default function SandpackPreview({
   const onElementSelectedRef = useRef(onElementSelected)
   onElementSelectedRef.current = onElementSelected
 
+  const overridesRef = useRef(overrides)
+  overridesRef.current = overrides
+
   useEffect(() => {
     const handleMessage = (e: MessageEvent) => {
       const msg = e.data
@@ -130,6 +136,17 @@ export default function SandpackPreview({
             type: 'tc_setEditMode',
             enabled: effectiveEditModeRef.current,
           }, '*')
+          // iframe 重建後自動恢復已有的 overrides
+          const currentOverrides = overridesRef.current
+          if (currentOverrides && Object.keys(currentOverrides).length > 0) {
+            // 延遲 500ms 等 bridge tag 完元素後再套用
+            setTimeout(() => {
+              source.postMessage({
+                type: 'tc_applyOverrides',
+                overrides: currentOverrides,
+              }, '*')
+            }, 500)
+          }
         }
         // 同時更新 iframeRef（補足 polling 的時間差）
         if (containerRef.current) {
