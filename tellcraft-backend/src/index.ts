@@ -25,6 +25,9 @@ import templatesRoutes from './routes/templates'
 import bddRoutes from './routes/bdd'
 import operationsRoutes from './routes/operations'
 import uploadRoutes from './routes/upload'
+import lineBotRoutes from './routes/line-bot'
+import { initLineBotHandler } from './services/line-bot-handler'
+import { messagingApi as lineMessagingApi } from '@line/bot-sdk'
 import { setAuthRedisClient } from './routes/auth'
 import { setMiddlewareRedisClient } from './middleware/auth'
 
@@ -66,6 +69,10 @@ app.use(rateLimit({
   legacyHeaders: false,
   message: { error: 'Too many requests, please try again later' },
 }))
+
+// LINE Webhook 路由必須在 express.json() 之前註冊（簽名驗證需要 raw body）
+app.use('/api/line/webhook', express.raw({ type: 'application/json' }))
+app.use('/api/line/webhook', lineBotRoutes)
 
 app.use(express.json({ limit: '50mb' }))
 
@@ -223,6 +230,18 @@ const orchestratorQueue = new Queue('orchestrator', {
 // 設置隊列到路由
 setOrchestratorQueue(orchestratorQueue)
 setRedisClient(redis)
+
+// 初始化 LINE Bot Handler（注入 Messaging Client + 隊列）
+if (process.env.LINE_MESSAGING_CHANNEL_ACCESS_TOKEN) {
+  const lineMessagingClient = new lineMessagingApi.MessagingApiClient({
+    channelAccessToken: process.env.LINE_MESSAGING_CHANNEL_ACCESS_TOKEN,
+  })
+  initLineBotHandler({
+    messagingClient: lineMessagingClient,
+    orchestratorQueue,
+  })
+  console.log('[LINE Bot] Handler 已初始化')
+}
 
 // 設置 Redis 到認證模組（用於 token 黑名單）
 setAuthRedisClient(redis)

@@ -1,0 +1,512 @@
+// ============================================================
+// LINE Bot 業務邏輯
+// 處理 Follow / Text / Postback 事件
+// ============================================================
+
+import { messagingApi } from '@line/bot-sdk'
+import type { Message, FlexBubble, FlexMessage, TextMessage } from '@line/bot-sdk/lib/messaging-api/model/models'
+import { Queue } from 'bullmq'
+import crypto from 'crypto'
+import * as db from '../db/client'
+
+// ============================================================
+// 依賴注入（由 index.ts 初始化時設置）
+// ============================================================
+
+let messagingClient: messagingApi.MessagingApiClient | null = null
+let orchestratorQueue: Queue | null = null
+
+export function initLineBotHandler(deps: {
+  messagingClient: messagingApi.MessagingApiClient
+  orchestratorQueue: Queue
+}) {
+  messagingClient = deps.messagingClient
+  orchestratorQueue = deps.orchestratorQueue
+}
+
+// ============================================================
+// PostbackAction data 格式
+// ============================================================
+
+interface PostbackData {
+  a: 'reply' | 'select_template' | 'select_variant' | 'deploy' | 'rollback' | 'undo' | 'start' | 'projects' | 'help'
+  v?: string    // value
+  c?: string    // conversationId（前 8 字）
+  m?: string    // mode: 'f' | 'n'
+}
+
+// ============================================================
+// Follow Event（加好友）
+// ============================================================
+
+export async function handleFollow(userId: string, replyToken: string): Promise<void> {
+  if (!messagingClient) return
+
+  const welcomeText = [
+    '歡迎使用 Tellcraft！',
+    'AI 驅動的自動開發平台',
+    '',
+    '描述你想做的產品，AI 幫你從 0 到上線',
+    '',
+    '試試說：「幫我做一個咖啡廳官網」',
+  ].join('\n')
+
+  const messages: Message[] = [{
+    type: 'text',
+    text: welcomeText,
+    quickReply: {
+      items: [
+        {
+          type: 'action',
+          action: {
+            type: 'postback',
+            label: '\u{26A1} 快速建站',
+            data: JSON.stringify({ a: 'start', m: 'f' }),
+            displayText: '快速建站',
+          },
+        },
+        {
+          type: 'action',
+          action: {
+            type: 'postback',
+            label: '\u{2753} 使用說明',
+            data: JSON.stringify({ a: 'help' }),
+            displayText: '使用說明',
+          },
+        },
+      ],
+    },
+  }]
+
+  await messagingClient.replyMessage({ replyToken, messages })
+
+  // 註冊用戶（如果不存在）
+  await findOrCreateLineUser(userId)
+}
+
+// ============================================================
+// Text Message（用戶發文字消息）
+// ============================================================
+
+export async function handleTextMessage(
+  userId: string,
+  text: string,
+  replyToken: string
+): Promise<void> {
+  if (!messagingClient || !orchestratorQueue) return
+
+  // 1. 即時回覆確認
+  await messagingClient.replyMessage({
+    replyToken,
+    messages: [{
+      type: 'text',
+      text: '收到！正在處理... \u{26A1}',
+    }],
+  })
+
+  // 2. 找或建對話
+  const { userId: systemUserId, conversationId, projectId, mode } = await getOrCreateConversation(userId)
+
+  // 3. 寫入用戶消息到 DB
+  const conversation = await db.getConversation(conversationId)
+  if (conversation) {
+    const messageId = crypto.randomUUID()
+    const newMessage = {
+      id: messageId,
+      role: 'user',
+      content: text,
+      timestamp: new Date().toISOString(),
+    }
+    const messages = [...(conversation.messages as unknown[]), newMessage]
+    await db.updateConversationMessages(conversationId, messages)
+  }
+
+  // 4. 投入 BullMQ
+  await orchestratorQueue.add('process-message', {
+    projectId,
+    conversationId,
+    userId: systemUserId,
+    message: text,
+    mode: mode === 'fast' ? 'fast' : 'fine',
+    messageSource: 'line',
+  }, {
+    attempts: 3,
+    backoff: { type: 'exponential', delay: 2000 },
+  })
+}
+
+// ============================================================
+// Postback Event（按鈕回調）
+// ============================================================
+
+export async function handlePostback(
+  userId: string,
+  dataStr: string,
+  replyToken: string
+): Promise<void> {
+  if (!messagingClient) return
+
+  let data: PostbackData
+  try {
+    data = JSON.parse(dataStr)
+  } catch {
+    console.warn('[LINE Bot] Invalid postback data:', dataStr)
+    return
+  }
+
+  switch (data.a) {
+    case 'start':
+      await handleStartProject(userId, data.m === 'f' ? 'fast' : 'fine', replyToken)
+      break
+    case 'help':
+      await handleHelp(replyToken)
+      break
+    case 'projects':
+      await handleProjectList(userId, replyToken)
+      break
+    case 'reply':
+      if (data.v) {
+        await handleQuickReply(userId, data.v, replyToken)
+      }
+      break
+    case 'select_template':
+      if (data.v) {
+        await handleQuickReply(userId, data.v, replyToken)
+      }
+      break
+    case 'select_variant':
+      if (data.v) {
+        await handleQuickReply(userId, data.v, replyToken)
+      }
+      break
+    case 'deploy':
+      await handleQuickReply(userId, '部署上線', replyToken)
+      break
+    case 'rollback':
+      if (data.v) {
+        await handleQuickReply(userId, data.v, replyToken)
+      }
+      break
+    case 'undo':
+      await handleQuickReply(userId, '撤銷修改', replyToken)
+      break
+    default:
+      console.warn('[LINE Bot] Unknown postback action:', data.a)
+  }
+}
+
+// ============================================================
+// 內部處理函數
+// ============================================================
+
+async function handleStartProject(userId: string, mode: 'fast' | 'fine', replyToken: string): Promise<void> {
+  if (!messagingClient) return
+
+  if (mode === 'fine') {
+    // Fine 模式引導到 LIFF
+    const LIFF_ID = process.env.LIFF_ID
+    const liffUrl = LIFF_ID
+      ? `https://liff.line.me/${LIFF_ID}`
+      : 'https://tellcraft.com'
+
+    await messagingClient.replyMessage({
+      replyToken,
+      messages: [{
+        type: 'text',
+        text: '精細設計需要更豐富的視覺交互（模板選擇/設計對比），建議在網頁上操作以獲得最佳體驗 \u{1F447}',
+        quickReply: {
+          items: [{
+            type: 'action',
+            action: {
+              type: 'uri',
+              label: '\u{1F310} 打開 Tellcraft',
+              uri: liffUrl,
+            },
+          }],
+        },
+      }],
+    })
+    return
+  }
+
+  // Fast 模式：清除舊的活躍對話映射（下次 handleTextMessage 時會建新的）
+  await db.deleteLineActiveConversation(userId)
+
+  await messagingClient.replyMessage({
+    replyToken,
+    messages: [{
+      type: 'text',
+      text: '好的！請描述你想做的產品，例如：\n\n「幫我做一個花店官網」\n「做一個咖啡廳的預約網站」\n「做一個個人作品集」',
+    }],
+  })
+}
+
+async function handleHelp(replyToken: string): Promise<void> {
+  if (!messagingClient) return
+
+  const helpText = [
+    '\u{2753} Tellcraft 使用說明',
+    '',
+    '\u{26A1} 快速建站',
+    '直接發一句話描述你的產品，AI 自動生成網站',
+    '例如：「幫我做一個咖啡廳官網」',
+    '',
+    '\u{270F}\u{FE0F} 修改設計',
+    '生成後直接說修改需求',
+    '例如：「把標題改成紅色」',
+    '',
+    '\u{1F680} 部署上線',
+    '滿意後點「部署上線」，網站即刻上線',
+    '',
+    '\u{23EA} 回滾版本',
+    '不滿意可以回到之前的版本',
+    '',
+    '\u{1F4F1} 查看預覽',
+    '點「查看預覽」在手機上預覽網站效果',
+  ].join('\n')
+
+  await messagingClient.replyMessage({
+    replyToken,
+    messages: [{
+      type: 'text',
+      text: helpText,
+      quickReply: {
+        items: [
+          {
+            type: 'action',
+            action: {
+              type: 'postback',
+              label: '\u{26A1} 開始建站',
+              data: JSON.stringify({ a: 'start', m: 'f' }),
+              displayText: '開始建站',
+            },
+          },
+        ],
+      },
+    }],
+  })
+}
+
+async function handleProjectList(userId: string, replyToken: string): Promise<void> {
+  if (!messagingClient) return
+
+  const systemUser = await db.findUserByLineId(userId)
+  if (!systemUser) {
+    await messagingClient.replyMessage({
+      replyToken,
+      messages: [{ type: 'text', text: '你還沒有任何專案，試試發一句話描述你的產品！' }],
+    })
+    return
+  }
+
+  const projects = await db.queryMany<{
+    id: string
+    name: string
+    status: string
+    vercel_url: string | null
+    updated_at: string
+  }>(
+    `SELECT id, name, status, vercel_url, updated_at FROM projects
+     WHERE user_id = $1 ORDER BY updated_at DESC LIMIT 5`,
+    [systemUser.id]
+  )
+
+  if (projects.length === 0) {
+    await messagingClient.replyMessage({
+      replyToken,
+      messages: [{ type: 'text', text: '你還沒有任何專案，試試發一句話描述你的產品！' }],
+    })
+    return
+  }
+
+  const LIFF_ID = process.env.LIFF_ID
+  const projectList = projects.map((p, i) => {
+    const status = p.status === 'deployed' ? '\u{2705}' : p.status === 'generating' ? '\u{23F3}' : '\u{1F4DD}'
+    const url = p.vercel_url ? `\n${p.vercel_url}` : ''
+    return `${i + 1}. ${status} ${p.name}${url}`
+  }).join('\n\n')
+
+  const msg: TextMessage = {
+    type: 'text',
+    text: `\u{1F4C1} 我的專案\n\n${projectList}`,
+  }
+
+  if (LIFF_ID) {
+    msg.quickReply = {
+      items: [{
+        type: 'action',
+        action: {
+          type: 'uri',
+          label: '\u{1F310} 在網頁查看',
+          uri: `https://liff.line.me/${LIFF_ID}?page=dashboard`,
+        },
+      }],
+    }
+  }
+
+  await messagingClient.replyMessage({
+    replyToken,
+    messages: [msg],
+  })
+}
+
+/**
+ * Quick Reply / Postback 統一處理
+ * 將按鈕值作為用戶消息投入 Orchestrator
+ */
+async function handleQuickReply(userId: string, value: string, replyToken: string): Promise<void> {
+  if (!messagingClient || !orchestratorQueue) return
+
+  // 即時回覆確認
+  await messagingClient.replyMessage({
+    replyToken,
+    messages: [{ type: 'text', text: '收到！正在處理...' }],
+  })
+
+  const { userId: systemUserId, conversationId, projectId, mode } = await getOrCreateConversation(userId)
+
+  // 寫入用戶消息到 DB
+  const conversation = await db.getConversation(conversationId)
+  if (conversation) {
+    const messageId = crypto.randomUUID()
+    const newMessage = {
+      id: messageId,
+      role: 'user',
+      content: value,
+      timestamp: new Date().toISOString(),
+    }
+    const messages = [...(conversation.messages as unknown[]), newMessage]
+    await db.updateConversationMessages(conversationId, messages)
+  }
+
+  // 投入 BullMQ
+  await orchestratorQueue.add('process-message', {
+    projectId,
+    conversationId,
+    userId: systemUserId,
+    message: value,
+    mode: mode === 'fast' ? 'fast' : 'fine',
+    messageSource: 'line',
+  }, {
+    attempts: 3,
+    backoff: { type: 'exponential', delay: 2000 },
+  })
+}
+
+// ============================================================
+// 用戶映射：LINE userId → 系統 conversation
+// ============================================================
+
+async function getOrCreateConversation(lineUserId: string): Promise<{
+  userId: string
+  conversationId: string
+  projectId: string
+  mode: string
+}> {
+  // 1. 查現有活躍對話
+  const existing = await db.getLineActiveConversation(lineUserId)
+  if (existing) {
+    return {
+      userId: existing.user_id,
+      conversationId: existing.conversation_id,
+      projectId: existing.project_id,
+      mode: existing.mode,
+    }
+  }
+
+  // 2. 找或建系統用戶
+  const systemUser = await findOrCreateLineUser(lineUserId)
+
+  // 3. 查找用戶的現有 draft 專案
+  const existingProject = await db.queryOne<{ id: string }>(
+    `SELECT id FROM projects WHERE user_id = $1 AND status IN ('draft', 'generating')
+     ORDER BY updated_at DESC LIMIT 1`,
+    [systemUser.id]
+  )
+
+  let projectId: string
+  if (existingProject) {
+    projectId = existingProject.id
+  } else {
+    // 建新專案
+    projectId = crypto.randomUUID()
+    const projectName = `LINE 專案 ${new Date().toLocaleDateString('zh-TW')}`
+    await db.query(
+      `INSERT INTO projects (id, user_id, name, status, created_at, updated_at)
+       VALUES ($1, $2, $3, 'draft', NOW(), NOW())`,
+      [projectId, systemUser.id, projectName]
+    )
+  }
+
+  // 4. 查找專案的現有未完成對話
+  const existingConv = await db.queryOne<{ id: string }>(
+    `SELECT id FROM conversations WHERE project_id = $1 AND spec_complete = false
+     ORDER BY updated_at DESC LIMIT 1`,
+    [projectId]
+  )
+
+  let conversationId: string
+  if (existingConv) {
+    conversationId = existingConv.id
+  } else {
+    // 建新對話
+    conversationId = crypto.randomUUID()
+    await db.query(
+      `INSERT INTO conversations (id, project_id, messages, spec_complete, created_at, updated_at)
+       VALUES ($1, $2, '[]', false, NOW(), NOW())`,
+      [conversationId, projectId]
+    )
+  }
+
+  // 5. 保存活躍對話映射
+  const mode = 'fast'
+  await db.setLineActiveConversation(lineUserId, systemUser.id, conversationId, projectId, mode)
+
+  return { userId: systemUser.id, conversationId, projectId, mode }
+}
+
+/**
+ * 找或建 LINE 用戶
+ * 複用 user_providers 表查詢，如果不存在則建立最小化用戶
+ */
+async function findOrCreateLineUser(lineUserId: string): Promise<{ id: string; email: string }> {
+  // 查現有用戶
+  const existing = await db.findUserByLineId(lineUserId)
+  if (existing) {
+    return { id: existing.id, email: existing.email }
+  }
+
+  // 取得 LINE profile（取得名字用於顯示）
+  let displayName: string | undefined
+  if (messagingClient) {
+    try {
+      const profile = await messagingClient.getProfile(lineUserId)
+      displayName = profile.displayName
+    } catch {
+      // 取不到 profile 沒關係
+    }
+  }
+
+  // 建立新用戶（ON CONFLICT 確保冪等性，防 race condition 重複建立）
+  const userId = crypto.randomUUID()
+  const email = `${lineUserId}@line.tellcraft.app`
+
+  const result = await db.queryOne<{ id: string }>(
+    `INSERT INTO users (id, email, name, provider, provider_id, plan, subscription_status, created_at)
+     VALUES ($1, $2, $3, 'line', $4, 'free', 'active', NOW())
+     ON CONFLICT (email) DO UPDATE SET updated_at = NOW()
+     RETURNING id`,
+    [userId, email, displayName || null, lineUserId]
+  )
+  const actualUserId = result?.id || userId
+
+  // 同步寫入 user_providers
+  await db.query(
+    `INSERT INTO user_providers (user_id, provider, provider_id, email, name, is_primary)
+     VALUES ($1, 'line', $2, $3, $4, TRUE)
+     ON CONFLICT (provider, provider_id) DO NOTHING`,
+    [actualUserId, lineUserId, email, displayName || null]
+  )
+
+  return { id: actualUserId, email }
+}

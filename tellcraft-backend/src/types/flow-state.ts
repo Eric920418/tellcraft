@@ -116,4 +116,6 @@ export interface FlowState {
   consecutiveEmptyRounds?: number
   // 動態 Discovery 上限（根據需求複雜度自動調整）
   discoveryLimits?: { maxRounds: number; maxTotalQuestions: number }
+  // 消息來源（LINE Bot 或 Web）
+  messageSource?: 'line' | 'web'
 }

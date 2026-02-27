@@ -10,6 +10,7 @@ import type { FlowState } from '../types/flow-state'
 import type { GeneratedComponent, DesignSystem, PartialCodeCallback } from '../services/uiux-generation'
 import { generateTailwindConfig } from '../services/uiux-generation'
 import { sendLineNotifyIfNeeded } from '../services/line-notify'
+import { sendLineFullMessage } from '../services/line-full-push'
 
 // ============================================================
 // FlowState 存儲
@@ -132,6 +133,10 @@ export async function sendMessage(
 
   // LINE 推播通知（fire-and-forget，不阻塞主流程）
   sendLineNotifyIfNeeded(conversationId, options.stage, options.content)
+    .catch(() => {})
+
+  // LINE Bot 全量翻譯推送（僅 LINE 來源的對話，與上方 notify 互斥）
+  sendLineFullMessage(conversationId, options)
     .catch(() => {})
 }
 

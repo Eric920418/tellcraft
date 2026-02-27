@@ -79,6 +79,9 @@ pm2 describe tellcraft-backend            # 詳細資訊（記憶體/重啟次�
 | **Fast Build** | `services/fast-build-generation.ts` | 快速模式輔助：tier 偵測、產品推斷、默認 DesignSystem（零 LLM） |
 | **Template Matcher** | `services/template-matcher.ts` | 三層評分智能匹配（關鍵詞 40 + Category 30 + UISpec 30，零 LLM） |
 | **LINE Notify** | `services/line-notify.ts` | LINE 推播通知（stage 白名單過濾，fire-and-forget） |
+| **LINE Bot Handler** | `services/line-bot-handler.ts` | LINE Bot 業務邏輯（Follow/Text/Postback 處理） |
+| **LINE Message Translator** | `services/line-message-translator.ts` | sendMessage → LINE Messages 全量翻譯 |
+| **LINE Full Push** | `services/line-full-push.ts` | LINE 來源對話的全量翻譯推送 |
 
 **前端（`app/`）— 大檔案優先閱讀**
 
@@ -176,6 +179,7 @@ sanitizeCodeForDeploy（6 類自動修復）
 | `dashboard.ts` | `/api/dashboard` | 用戶統計 + Admin 管理（users/projects/logs） |
 | `auth.ts` | `/api/auth` | Google/LINE OAuth + `/me` + `/refresh` + `/logout` |
 | `health.ts` | `/api/health` | 健康檢查 + Redis/DB 狀態 + `/cleanup-tmp` |
+| `line-bot.ts` | `/api/line/webhook` | LINE Bot Webhook（簽名驗證 + 事件分發），raw body 在 express.json 之前 |
 
 前端 Proxy：`app/api/vps/[...path]/route.ts` 將 `/api/vps/*` 轉發到 VPS 後端。
 
@@ -201,6 +205,7 @@ sanitizeCodeForDeploy（6 類自動修復）
 | `008_add_openapi_spec.sql` | OpenAPI spec |
 | `009_remove_audit_logs.sql` | 移除 audit_logs 表 |
 | `010_add_user_providers.sql` | 帳號綁定（多 OAuth provider） |
+| `011_add_line_active_conversations.sql` | LINE Bot 活躍對話映射表 |
 | `add_uiux_columns.sql` | UIUX 相關欄位 |
 
 新增 migration 後在 VPS 執行：`psql "$DATABASE_URL" -f tellcraft-backend/migrations/xxx.sql`
@@ -272,4 +277,4 @@ sanitizeCodeForDeploy（6 類自動修復）
 
 前端（`.env.local`）：`VPS_API_URL`, `NEXT_PUBLIC_VPS_API_URL`, `NEXT_PUBLIC_VPS_WS_URL`, `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `NEXT_PUBLIC_LIFF_ID`
 
-後端（`tellcraft-backend/.env`）：`DATABASE_URL`, `REDIS_URL`, `JWT_SECRET`, `ANTHROPIC_API_KEY`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `LINE_CHANNEL_ID`, `LINE_CHANNEL_SECRET`, `LINE_MESSAGING_CHANNEL_ACCESS_TOKEN`, `LIFF_ID`, `VERCEL_ACCESS_TOKEN`, `VERCEL_TEAM_ID`, `SUPABASE_SERVICE_ROLE_KEY`, `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`, `PORKBUN_API_KEY`, `PORKBUN_SECRET_KEY`, `UPLOAD_DIR`, `UPLOAD_BASE_URL`
+後端（`tellcraft-backend/.env`）：`DATABASE_URL`, `REDIS_URL`, `JWT_SECRET`, `ANTHROPIC_API_KEY`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `LINE_CHANNEL_ID`, `LINE_CHANNEL_SECRET`, `LINE_BOT_CHANNEL_SECRET`, `LINE_MESSAGING_CHANNEL_ACCESS_TOKEN`, `LIFF_ID`, `VERCEL_ACCESS_TOKEN`, `VERCEL_TEAM_ID`, `SUPABASE_SERVICE_ROLE_KEY`, `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`, `PORKBUN_API_KEY`, `PORKBUN_SECRET_KEY`, `UPLOAD_DIR`, `UPLOAD_BASE_URL`

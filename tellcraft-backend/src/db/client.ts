@@ -481,6 +481,78 @@ export async function cleanupExpiredFlowStates() {
 }
 
 // ============================================================
+// LINE Bot 活躍對話
+// ============================================================
+
+export interface LineActiveConversation {
+  line_user_id: string
+  user_id: string
+  conversation_id: string
+  project_id: string
+  mode: string
+}
+
+/**
+ * 查詢 LINE 用戶的活躍對話
+ */
+export async function getLineActiveConversation(lineUserId: string): Promise<LineActiveConversation | null> {
+  return queryOne<LineActiveConversation>(
+    'SELECT * FROM line_active_conversations WHERE line_user_id = $1',
+    [lineUserId]
+  )
+}
+
+/**
+ * 設定/更新 LINE 用戶的活躍對話
+ */
+export async function setLineActiveConversation(
+  lineUserId: string,
+  userId: string,
+  conversationId: string,
+  projectId: string,
+  mode: string = 'fast'
+) {
+  return query(
+    `INSERT INTO line_active_conversations (line_user_id, user_id, conversation_id, project_id, mode, created_at, updated_at)
+     VALUES ($1, $2, $3, $4, $5, NOW(), NOW())
+     ON CONFLICT (line_user_id)
+     DO UPDATE SET conversation_id = $3, project_id = $4, mode = $5, updated_at = NOW()`,
+    [lineUserId, userId, conversationId, projectId, mode]
+  )
+}
+
+/**
+ * 刪除 LINE 用戶的活躍對話（用於建新專案時清除）
+ */
+export async function deleteLineActiveConversation(lineUserId: string) {
+  return query(
+    'DELETE FROM line_active_conversations WHERE line_user_id = $1',
+    [lineUserId]
+  )
+}
+
+/**
+ * 透過 LINE userId 查找系統用戶
+ */
+export async function findUserByLineId(lineUserId: string): Promise<{ id: string; email: string; name: string | null } | null> {
+  // 優先查 user_providers 表
+  const result = await queryOne<{ id: string; email: string; name: string | null }>(
+    `SELECT u.id, u.email, u.name FROM user_providers up
+     JOIN users u ON up.user_id = u.id
+     WHERE up.provider = 'line' AND up.provider_id = $1`,
+    [lineUserId]
+  )
+  if (result) return result
+
+  // 向後相容：查 users 表
+  return queryOne<{ id: string; email: string; name: string | null }>(
+    `SELECT id, email, name FROM users
+     WHERE provider = 'line' AND provider_id = $1`,
+    [lineUserId]
+  )
+}
+
+// ============================================================
 // LINE 推播查詢
 // ============================================================
 

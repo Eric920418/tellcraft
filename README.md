@@ -49,7 +49,7 @@ npx ts-node bdd-spec/scripts/validate-feature.ts spec/features/
 `VPS_API_URL` `NEXT_PUBLIC_VPS_API_URL` `NEXT_PUBLIC_VPS_WS_URL` `NEXT_PUBLIC_SUPABASE_URL` `NEXT_PUBLIC_SUPABASE_ANON_KEY` `NEXT_PUBLIC_LIFF_ID`
 
 **後端**（`tellcraft-backend/.env`）：
-`DATABASE_URL` `REDIS_URL` `JWT_SECRET` `ANTHROPIC_API_KEY` `GOOGLE_CLIENT_ID` `GOOGLE_CLIENT_SECRET` `LINE_CHANNEL_ID` `LINE_CHANNEL_SECRET` `LINE_MESSAGING_CHANNEL_ACCESS_TOKEN` `LIFF_ID` `UPLOAD_DIR` `UPLOAD_BASE_URL`
+`DATABASE_URL` `REDIS_URL` `JWT_SECRET` `ANTHROPIC_API_KEY` `GOOGLE_CLIENT_ID` `GOOGLE_CLIENT_SECRET` `LINE_CHANNEL_ID` `LINE_CHANNEL_SECRET` `LINE_BOT_CHANNEL_SECRET` `LINE_MESSAGING_CHANNEL_ACCESS_TOKEN` `LIFF_ID` `UPLOAD_DIR` `UPLOAD_BASE_URL`
 
 ## 系統架構
 
@@ -204,6 +204,13 @@ Dashboard 帳號設定 → /api/auth/link/google（從 cookie 讀 JWT → 提取
 
 **LINE Developers Console**：Channel → LINE Login Settings → Callback URL：`https://tellcraft.com/api/auth/line/callback`
 
+**LINE Messaging API（Bot）設定**：
+1. LINE Developers Console → 進入 **Messaging API Channel**
+2. Webhook settings → Webhook URL：`https://tellcraft.com/api/line-webhook`
+3. 啟用 **Use webhook**，關閉 **Auto-reply messages**
+4. 複製 **Channel secret** → 填入後端 `LINE_BOT_CHANNEL_SECRET`
+5. `LINE_MESSAGING_CHANNEL_ACCESS_TOKEN` 複用現有（同 Channel）
+
 **LINE LIFF 設定**（LINE Login Channel → LIFF）：
 1. Add LIFF App → Name: `Tellcraft`, Size: **Full**, Endpoint URL: `https://tellcraft.com/liff`
 2. Scope: 勾選 `openid`、`profile`，Bot link feature: **On (Aggressive)**
@@ -252,6 +259,7 @@ Dashboard 帳號設定 → /api/auth/link/google（從 cookie 讀 JWT → 提取
 | **儀表板** | 用戶統計、專案管理、版本歷史、管理員面板、LLM 用量追蹤 |
 | **防護** | 三層防刷（前端冷卻 + API 限速 + Worker 鎖）、Classifier 三層防禦、LLM 自動重試 |
 | **通知** | LINE 推播通知（BDD 完成/UIUX 生成完成/部署成功失敗），離線用戶也能收到 |
+| **LINE Bot** | LINE 對話內完整 Fast Build 體驗（描述需求→生成→部署），Flex Message 卡片 + Quick Reply |
 | **UX** | 對話回退、錯誤恢復、自動恢復對話、專案自動命名、Markdown 渲染 |
 
 ## 專案結構
@@ -297,16 +305,19 @@ tellcraft-backend/
 │   │   ├── iteration-skill.ts    # 迭代 + 撤銷 + 回滾
 │   │   ├── fast-build-generation.ts # 快速模式（規則式，零 LLM）
 │   │   ├── template-matcher.ts   # 智能模板匹配（零 LLM）
-│   │   ├── line-notify.ts        # LINE 推播通知
+│   │   ├── line-notify.ts        # LINE 推播通知（Web 用戶，stage 白名單）
+│   │   ├── line-full-push.ts    # LINE Bot 全量翻譯推送（LINE 來源的對話）
+│   │   ├── line-bot-handler.ts  # LINE Bot 業務邏輯（Follow/Text/Postback）
+│   │   ├── line-message-translator.ts # sendMessage → LINE Messages 翻譯
 │   │   ├── classifier.ts         # 三層分類防禦
 │   │   ├── bdd-to-ui-spec.ts     # BDD→UI 翻譯
 │   │   ├── event-storming.ts     # Event Storming
 │   │   ├── change-management.ts  # 需求變更管理
 │   │   └── conversation-lock.ts  # 對話互斥鎖
-│   ├── routes/                   # API 路由（conversation/project/session/bdd/templates/operations/auth/health/upload）
+│   ├── routes/                   # API 路由（conversation/project/session/bdd/templates/operations/auth/health/upload/line-bot）
 │   ├── db/client.ts              # PostgreSQL 客戶端
 │   └── middleware/auth.ts        # JWT 認證中間件
-├── migrations/           # DB 遷移（001-010）
+├── migrations/           # DB 遷移（001-011）
 └── ecosystem.config.js   # PM2 配置
 
 bdd-spec/                 # BDD Skill 定義（instructions/ + rules/ + scripts/）
@@ -397,6 +408,31 @@ psql "$DATABASE_URL" -f tellcraft-backend/migrations/xxx.sql
 
 <details>
 <summary><h2>開發更新紀錄（點擊展開）</h2></summary>
+
+### LINE Bot 深度整合（2026-02-27）
+
+LINE 對話內完成完整專案生命週期（描述需求 → AI 生成 → 部署上線），不需要打開網頁。
+
+- **Webhook Proxy**：`app/api/line-webhook/route.ts` — 透傳 raw body + X-Line-Signature（現有 VPS proxy 會重序列化 body 導致簽名驗證失敗）
+- **Event Router**：`routes/line-bot.ts` — 簽名驗證 + Follow/Message/Postback 事件分發
+- **Bot Handler**：`services/line-bot-handler.ts` — 歡迎消息、文字→BullMQ、PostbackAction 路由、用戶自動註冊
+- **Message Translator**：`services/line-message-translator.ts` — sendMessage 參數→LINE Messages 全量翻譯
+  - code_preview → Flex Bubble + LIFF 預覽連結
+  - deploy_result → 成功綠/失敗紅 Flex Bubble + 網站 URL
+  - quality_gate_report → 摘要 Flex Bubble
+  - template_picker → Flex Carousel（最多 12 個 + "更多" LIFF 連結）
+  - variant_picker → Flex Carousel（方案 A-E + LIFF 對比連結）
+  - deployment_history → Flex Carousel + 回滾 PostbackAction
+  - 進度消息（fast_build_progress/building_progress）全部跳過
+  - quickReplies → LINE Quick Reply（ghost 排最後，最多 13 個）
+  - 長文本自動分割（段落邊界，最多 5 條）
+- **Full Push**：`services/line-full-push.ts` — 查 `line_active_conversations` 表判斷是否 LINE 來源，是則翻譯推送
+- **Migration**：`011_add_line_active_conversations.sql` — LINE userId → conversation 映射表
+- **DB Client**：新增 `getLineActiveConversation` / `setLineActiveConversation` / `deleteLineActiveConversation` / `findUserByLineId`
+- **FlowState**：新增 `messageSource?: 'line' | 'web'`
+- **replyToken 策略**：Webhook 收到 → replyMessage（免費確認），Orchestrator 完成 → pushMessage（計費結果）
+- **Fine 模式**：引導到 LIFF 網頁版（需要視覺交互）
+- **環境變數**：新增 `LINE_BOT_CHANNEL_SECRET`（Messaging API Channel Secret，不同於 Login Channel 的 `LINE_CHANNEL_SECRET`）
 
 ### 帳號綁定（雙登入系統）（2026-02-27）
 
