@@ -27,8 +27,8 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
     },
     alternates: {
       languages: {
-        'zh-TW': '/',
-        'en': '/en',
+        'en': '/',
+        'zh-TW': '/zh',
       },
     },
   }

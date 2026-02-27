@@ -41,10 +41,10 @@ export async function middleware(request: NextRequest) {
   // 獲取 auth_token cookie
   const token = request.cookies.get('auth_token')?.value
 
-  // 取得當前 locale（從 pathname 或 cookie 推斷）
+  // 取得當前 locale（優先 pathname，否則用 defaultLocale）
   const localeMatch = pathname.match(/^\/(zh|en)/)
-  const locale = localeMatch ? localeMatch[1] : 'zh'
-  const localePrefix = locale === 'zh' ? '' : `/${locale}`
+  const locale = localeMatch ? localeMatch[1] : routing.defaultLocale
+  const localePrefix = locale === routing.defaultLocale ? '' : `/${locale}`
 
   if (!token) {
     const url = request.nextUrl.clone()
