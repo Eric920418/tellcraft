@@ -174,6 +174,30 @@ change_history   -- JSONB，變更歷史追蹤
 - `/api/auth/me` 偵測 DB 與 JWT 的 admin 狀態差異 → 自動返回刷新的 token
 - 訪客→登入帳號合併：`/auth/post-login` → `migrateAnonymousAccount` → 專案/對話遷移
 
+### 帳號綁定（雙登入系統）
+
+用戶可同時綁定 Google 和 LINE 帳號，之後用任一方式都能登入同一帳戶。
+
+**資料模型**：`user_providers` 表（`user_id` + `provider` + `provider_id`），`UNIQUE(provider, provider_id)` + `UNIQUE(user_id, provider)`
+
+**綁定流程**：
+```
+Dashboard 帳號設定 → /api/auth/link/google（從 cookie 讀 JWT → 提取 userId）
+  → VPS /auth/google?linkUserId=XXX（放入 HMAC 簽名的 state）
+  → Google OAuth → Vercel callback → VPS exchange
+  → 檢查 linkUserId → INSERT user_providers → redirect /dashboard/account?linked=google
+```
+
+**API 端點**：
+| 端點 | 用途 |
+|------|------|
+| `GET /auth/providers` | 查詢已綁定的 providers |
+| `POST /auth/unlink/:provider` | 解除綁定（至少保留一個） |
+| `GET /api/auth/link/google` | 前端 → 觸發 Google 綁定 OAuth |
+| `GET /api/auth/link/line` | 前端 → 觸發 LINE 綁定 OAuth |
+
+**Edge Cases**：OAuth 帳號已綁定其他用戶 → 409；解綁最後一個 → 400；LINE 綁 Google → email 升級
+
 ### OAuth Console 設定
 
 **Google Cloud Console**：APIs & Services → Credentials → OAuth 2.0 → Redirect URI：`https://tellcraft.com/api/auth/google/callback`
@@ -192,6 +216,7 @@ change_history   -- JSONB，變更歷史追蹤
 /dashboard/projects                 # 我的專案
 /dashboard/projects/[id]            # 專案詳情（對話歷史/部署記錄/版本）
 /dashboard/conversations            # 我的對話
+/dashboard/account                  # 帳號設定（綁定/解綁 OAuth）
 /dashboard/admin                    # 管理員總覽（需 is_admin）
 /dashboard/admin/users              # 用戶管理
 /dashboard/admin/users/[id]         # 用戶詳情
@@ -223,7 +248,7 @@ change_history   -- JSONB，變更歷史追蹤
 | **迭代** | 對話內迭代修改、撤銷上一步、部署歷史回滾、迭代歷史追蹤 |
 | **預覽** | Sandpack 真實 React 渲染、串流增量更新、裝置切換、編輯模式、圖片上傳 |
 | **動畫** | BDD 需求藍圖面板（即時 Q&A 歷史視覺化）、3D 工廠流水線（Fast Build）、Remotion 驅動 |
-| **認證** | Google/LINE OAuth、JWT 雙軌（localStorage + Cookie）、訪客→帳號合併 |
+| **認證** | Google/LINE OAuth、JWT 雙軌（localStorage + Cookie）、訪客→帳號合併、帳號綁定（雙登入） |
 | **儀表板** | 用戶統計、專案管理、版本歷史、管理員面板、LLM 用量追蹤 |
 | **防護** | 三層防刷（前端冷卻 + API 限速 + Worker 鎖）、Classifier 三層防禦、LLM 自動重試 |
 | **通知** | LINE 推播通知（BDD 完成/UIUX 生成完成/部署成功失敗），離線用戶也能收到 |
@@ -281,7 +306,7 @@ tellcraft-backend/
 │   ├── routes/                   # API 路由（conversation/project/session/bdd/templates/operations/auth/health/upload）
 │   ├── db/client.ts              # PostgreSQL 客戶端
 │   └── middleware/auth.ts        # JWT 認證中間件
-├── migrations/           # DB 遷移（001-008）
+├── migrations/           # DB 遷移（001-010）
 └── ecosystem.config.js   # PM2 配置
 
 bdd-spec/                 # BDD Skill 定義（instructions/ + rules/ + scripts/）
@@ -372,6 +397,19 @@ psql "$DATABASE_URL" -f tellcraft-backend/migrations/xxx.sql
 
 <details>
 <summary><h2>開發更新紀錄（點擊展開）</h2></summary>
+
+### 帳號綁定（雙登入系統）（2026-02-27）
+
+Google 用戶可綁定 LINE 帳號（反之亦然），之後用任一方式都能登入同一帳戶。
+
+- **user_providers 表**：`(user_id, provider, provider_id)` 多 provider 存儲，UNIQUE 約束防衝突
+- **findOrCreateUser 重構**：優先查 `user_providers` → 向後相容查 `users.provider` → email 匹配改為 INSERT（不覆蓋）
+- **綁定流程**：Dashboard 帳號設定 → `/api/auth/link/{provider}` → VPS OAuth（state 帶 linkUserId）→ exchange 綁定模式
+- **解綁保護**：至少保留一個 provider，LINE 綁 Google 時自動升級假 email
+- **LINE Notify 改查**：`getLineUserIdByConversation` 改查 `user_providers` 表
+- **Admin Dashboard**：用戶列表返回 `providers` 陣列（子查詢 `string_agg`）
+- **帳號設定頁**：`/dashboard/account` — 已綁定列表 + 綁定按鈕 + 解綁 + toast 通知
+- **Migration**：`010_add_user_providers.sql`，自動遷移現有 `users.provider` 資料
 
 ### LINE LIFF 整合 + 推播升級（2026-02-27）
 

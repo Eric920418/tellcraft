@@ -3,6 +3,7 @@ import jwt from 'jsonwebtoken'
 import crypto from 'crypto'
 import Redis from 'ioredis'
 import * as db from '../db/client'
+import { requireAuth } from '../middleware/auth'
 
 const router: RouterType = Router()
 
@@ -95,32 +96,62 @@ async function findOrCreateUser(profile: {
   name?: string
   avatarUrl?: string
 }): Promise<{ id: string; email: string; name?: string; isAdmin?: boolean; isNew: boolean }> {
-  // 先用 provider + providerId 查找
+  // Step 1: 查 user_providers 表（新表）
+  const providerRecord = await db.queryOne<{ user_id: string }>(
+    'SELECT user_id FROM user_providers WHERE provider = $1 AND provider_id = $2',
+    [profile.provider, profile.providerId]
+  )
+
+  if (providerRecord) {
+    const user = await db.queryOne<{ id: string; email: string; name: string | null; is_admin: boolean }>(
+      'SELECT id, email, name, is_admin FROM users WHERE id = $1',
+      [providerRecord.user_id]
+    )
+    if (user) {
+      return { id: user.id, email: user.email, name: user.name || undefined, isAdmin: user.is_admin, isNew: false }
+    }
+  }
+
+  // Step 1b: 向後相容 — 查 users.provider（舊用戶可能尚未遷移到 user_providers）
   let user = await db.queryOne<{ id: string; email: string; name: string | null; is_admin: boolean }>(
     'SELECT id, email, name, is_admin FROM users WHERE provider = $1 AND provider_id = $2',
     [profile.provider, profile.providerId]
   )
 
   if (user) {
+    // 自動補寫 user_providers（舊用戶遷移）
+    await db.query(
+      `INSERT INTO user_providers (user_id, provider, provider_id, email, name, avatar_url, is_primary)
+       VALUES ($1, $2, $3, $4, $5, $6, TRUE)
+       ON CONFLICT (provider, provider_id) DO NOTHING`,
+      [user.id, profile.provider, profile.providerId, profile.email, profile.name, profile.avatarUrl]
+    )
     return { id: user.id, email: user.email, name: user.name || undefined, isAdmin: user.is_admin, isNew: false }
   }
 
-  // 再用 email 查找（可能是之前匿名或其他方式註冊的）
+  // Step 2: email 匹配 — 改為 INSERT user_providers（不再覆蓋 users.provider）
   user = await db.queryOne<{ id: string; email: string; name: string | null; is_admin: boolean }>(
     'SELECT id, email, name, is_admin FROM users WHERE email = $1',
     [profile.email]
   )
 
   if (user) {
-    // 更新 provider 資訊
+    // 將此 provider 綁定到已有帳戶（不覆蓋 users.provider）
     await db.query(
-      'UPDATE users SET provider = $1, provider_id = $2, name = COALESCE(name, $3), avatar_url = COALESCE(avatar_url, $4) WHERE id = $5',
-      [profile.provider, profile.providerId, profile.name, profile.avatarUrl, user.id]
+      `INSERT INTO user_providers (user_id, provider, provider_id, email, name, avatar_url, is_primary)
+       VALUES ($1, $2, $3, $4, $5, $6, FALSE)
+       ON CONFLICT (provider, provider_id) DO NOTHING`,
+      [user.id, profile.provider, profile.providerId, profile.email, profile.name, profile.avatarUrl]
+    )
+    // 補充 users 表名稱/頭像（如果缺失）
+    await db.query(
+      'UPDATE users SET name = COALESCE(name, $1), avatar_url = COALESCE(avatar_url, $2) WHERE id = $3',
+      [profile.name, profile.avatarUrl, user.id]
     )
     return { id: user.id, email: user.email, name: profile.name || user.name || undefined, isAdmin: user.is_admin, isNew: false }
   }
 
-  // 創建新用戶（使用 gen_random_uuid() 生成 ID）
+  // Step 3: 創建新用戶 + 同時寫入 user_providers
   const newUser = await db.queryOne<{ id: string }>(
     `INSERT INTO users (id, email, name, avatar_url, provider, provider_id, plan, subscription_status, created_at)
      VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, 'free', 'active', NOW())
@@ -132,7 +163,178 @@ async function findOrCreateUser(profile: {
     throw new Error('Failed to create user')
   }
 
+  // 同步寫入 user_providers
+  await db.query(
+    `INSERT INTO user_providers (user_id, provider, provider_id, email, name, avatar_url, is_primary)
+     VALUES ($1, $2, $3, $4, $5, $6, TRUE)
+     ON CONFLICT (provider, provider_id) DO NOTHING`,
+    [newUser.id, profile.provider, profile.providerId, profile.email, profile.name, profile.avatarUrl]
+  )
+
   return { id: newUser.id, email: profile.email, name: profile.name, isAdmin: false, isNew: true }
+}
+
+// ============================================================
+// 共用 OAuth Exchange 函數
+// ============================================================
+
+interface GoogleUserInfo {
+  id: string
+  email: string
+  name?: string
+  picture?: string
+}
+
+async function exchangeGoogleCode(code: string, redirectUri: string): Promise<GoogleUserInfo> {
+  const tokenResponse = await fetch('https://oauth2.googleapis.com/token', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({
+      code,
+      client_id: GOOGLE_CLIENT_ID!,
+      client_secret: GOOGLE_CLIENT_SECRET!,
+      redirect_uri: redirectUri,
+      grant_type: 'authorization_code',
+    }),
+  })
+
+  if (!tokenResponse.ok) {
+    const errorText = await tokenResponse.text()
+    throw new Error(`Google token error: ${errorText}`)
+  }
+
+  const tokens = await tokenResponse.json() as { access_token: string }
+
+  const userResponse = await fetch('https://www.googleapis.com/oauth2/v2/userinfo', {
+    headers: { Authorization: `Bearer ${tokens.access_token}` },
+  })
+
+  if (!userResponse.ok) {
+    throw new Error('Failed to get Google user info')
+  }
+
+  return await userResponse.json() as GoogleUserInfo
+}
+
+interface LineUserInfo {
+  userId: string
+  displayName: string
+  pictureUrl?: string
+  email: string
+}
+
+async function exchangeLineCode(code: string, redirectUri: string): Promise<LineUserInfo> {
+  const tokenResponse = await fetch('https://api.line.me/oauth2/v2.1/token', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({
+      grant_type: 'authorization_code',
+      code,
+      redirect_uri: redirectUri,
+      client_id: LINE_CHANNEL_ID!,
+      client_secret: LINE_CHANNEL_SECRET!,
+    }),
+  })
+
+  if (!tokenResponse.ok) {
+    const errorText = await tokenResponse.text()
+    throw new Error(`LINE token error: ${errorText}`)
+  }
+
+  const tokens = await tokenResponse.json() as { access_token: string; id_token?: string }
+
+  const profileResponse = await fetch('https://api.line.me/v2/profile', {
+    headers: { Authorization: `Bearer ${tokens.access_token}` },
+  })
+
+  if (!profileResponse.ok) {
+    throw new Error('Failed to get LINE profile')
+  }
+
+  const lineUser = await profileResponse.json() as {
+    userId: string
+    displayName: string
+    pictureUrl?: string
+  }
+
+  // LINE 不一定給 email，從 id_token 解析或用 userId 生成
+  let email = `${lineUser.userId}@line.tellcraft.app`
+  if (tokens.id_token) {
+    try {
+      const payload = JSON.parse(Buffer.from(tokens.id_token.split('.')[1], 'base64').toString())
+      if (payload.email) {
+        email = payload.email
+      }
+    } catch {
+      // ignore
+    }
+  }
+
+  return { ...lineUser, email }
+}
+
+// 帳號綁定共用邏輯
+async function linkProviderToUser(
+  userId: string,
+  provider: string,
+  providerId: string,
+  email?: string,
+  name?: string,
+  avatarUrl?: string
+): Promise<{ success: boolean; error?: string }> {
+  if (!['google', 'line'].includes(provider)) {
+    return { success: false, error: 'INVALID_PROVIDER' }
+  }
+
+  // 檢查此 OAuth 帳號是否已綁定到其他用戶
+  const existing = await db.queryOne<{ user_id: string }>(
+    'SELECT user_id FROM user_providers WHERE provider = $1 AND provider_id = $2',
+    [provider, providerId]
+  )
+
+  if (existing) {
+    if (existing.user_id === userId) {
+      return { success: true } // 已經綁定到自己
+    }
+    return { success: false, error: 'PROVIDER_ALREADY_LINKED' }
+  }
+
+  // 檢查此用戶是否已綁定同一 provider
+  const existingForUser = await db.queryOne<{ id: string }>(
+    'SELECT id FROM user_providers WHERE user_id = $1 AND provider = $2',
+    [userId, provider]
+  )
+
+  if (existingForUser) {
+    return { success: false, error: 'PROVIDER_ALREADY_BOUND' }
+  }
+
+  // 執行綁定
+  await db.query(
+    `INSERT INTO user_providers (user_id, provider, provider_id, email, name, avatar_url, is_primary)
+     VALUES ($1, $2, $3, $4, $5, $6, FALSE)`,
+    [userId, provider, providerId, email, name, avatarUrl]
+  )
+
+  // LINE 綁 Google 時，如果用戶 email 是假的 @line.tellcraft.app，更新為 Google 真實 email
+  if (provider === 'google' && email && !email.endsWith('@line.tellcraft.app')) {
+    const currentUser = await db.queryOne<{ email: string }>(
+      'SELECT email FROM users WHERE id = $1',
+      [userId]
+    )
+    if (currentUser?.email.endsWith('@line.tellcraft.app')) {
+      // 確認 email 不衝突
+      const emailConflict = await db.queryOne<{ id: string }>(
+        'SELECT id FROM users WHERE email = $1 AND id != $2',
+        [email, userId]
+      )
+      if (!emailConflict) {
+        await db.query('UPDATE users SET email = $1 WHERE id = $2', [email, userId])
+      }
+    }
+  }
+
+  return { success: true }
 }
 
 // ============================================================
@@ -163,6 +365,7 @@ router.get('/google', (req, res) => {
   const state = signState({
     returnTo: req.query.returnTo || '/',
     callbackHost: callbackHost || null,
+    linkUserId: req.query.linkUserId || null,
   })
 
   const authUrl = `https://accounts.google.com/o/oauth2/v2/auth?` +
@@ -191,53 +394,32 @@ router.get('/google/callback', async (req, res) => {
 
     // 驗證 state 簽名
     let returnTo = '/'
+    let linkUserId: string | null = null
     if (state && typeof state === 'string') {
       const stateData = verifyState(state)
       if (!stateData) {
         return res.redirect(`${APP_URL}/auth/login?error=invalid_state`)
       }
       returnTo = (stateData.returnTo as string) || '/'
+      linkUserId = (stateData.linkUserId as string) || null
     } else {
       return res.redirect(`${APP_URL}/auth/login?error=missing_state`)
     }
 
-    // 換取 access token
-    const tokenResponse = await fetch('https://oauth2.googleapis.com/token', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: new URLSearchParams({
-        code,
-        client_id: GOOGLE_CLIENT_ID!,
-        client_secret: GOOGLE_CLIENT_SECRET!,
-        redirect_uri: `${API_URL}/auth/google/callback`,
-        grant_type: 'authorization_code',
-      }),
-    })
+    const googleUser = await exchangeGoogleCode(code, `${API_URL}/auth/google/callback`)
 
-    if (!tokenResponse.ok) {
-      console.error('[Auth] Google token error:', await tokenResponse.text())
-      return res.redirect(`${APP_URL}/auth/login?error=token_failed`)
+    // 綁定模式
+    if (linkUserId) {
+      const result = await linkProviderToUser(
+        linkUserId, 'google', googleUser.id, googleUser.email, googleUser.name, googleUser.picture
+      )
+      if (!result.success) {
+        return res.redirect(`${APP_URL}/dashboard/account?error=${result.error}`)
+      }
+      return res.redirect(`${APP_URL}/dashboard/account?linked=google`)
     }
 
-    const tokens = await tokenResponse.json() as { access_token: string }
-
-    // 獲取用戶資訊
-    const userResponse = await fetch('https://www.googleapis.com/oauth2/v2/userinfo', {
-      headers: { Authorization: `Bearer ${tokens.access_token}` },
-    })
-
-    if (!userResponse.ok) {
-      return res.redirect(`${APP_URL}/auth/login?error=userinfo_failed`)
-    }
-
-    const googleUser = await userResponse.json() as {
-      id: string
-      email: string
-      name?: string
-      picture?: string
-    }
-
-    // 創建或更新用戶
+    // 登入模式
     const user = await findOrCreateUser({
       provider: 'google',
       providerId: googleUser.id,
@@ -246,10 +428,7 @@ router.get('/google/callback', async (req, res) => {
       avatarUrl: googleUser.picture,
     })
 
-    // 生成 JWT
     const token = generateToken(user)
-
-    // 重定向到前端，用 hash fragment（不進 server log / Referer）
     res.redirect(`${APP_URL}/auth/callback#token=${token}&returnTo=${encodeURIComponent(returnTo)}`)
   } catch (error) {
     console.error('[Auth] Google callback error:', error)
@@ -275,52 +454,32 @@ router.post('/google/exchange', async (req, res) => {
 
     // 驗證 state 簽名（CSRF 防護）
     let returnTo = '/'
+    let linkUserId: string | null = null
     if (state && typeof state === 'string') {
       const stateData = verifyState(state)
       if (!stateData) {
         return res.status(400).json({ error: 'invalid_state' })
       }
       returnTo = (stateData.returnTo as string) || '/'
+      linkUserId = (stateData.linkUserId as string) || null
     }
 
-    // 換取 access token（使用 Vercel 提供的 redirectUri）
-    const tokenResponse = await fetch('https://oauth2.googleapis.com/token', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: new URLSearchParams({
-        code,
-        client_id: GOOGLE_CLIENT_ID!,
-        client_secret: GOOGLE_CLIENT_SECRET!,
-        redirect_uri: redirectUri,
-        grant_type: 'authorization_code',
-      }),
-    })
+    // 共用 OAuth exchange
+    const googleUser = await exchangeGoogleCode(code, redirectUri)
 
-    if (!tokenResponse.ok) {
-      const errorText = await tokenResponse.text()
-      console.error('[Auth] Google token error:', errorText)
-      return res.status(400).json({ error: 'token_failed', details: errorText })
+    // 綁定模式
+    if (linkUserId) {
+      const result = await linkProviderToUser(
+        linkUserId, 'google', googleUser.id, googleUser.email, googleUser.name, googleUser.picture
+      )
+      if (!result.success) {
+        return res.json({ linked: false, error: result.error, returnTo })
+      }
+      console.log(`[Auth] Google linked to user ${linkUserId}`)
+      return res.json({ linked: true, provider: 'google', returnTo })
     }
 
-    const tokens = await tokenResponse.json() as { access_token: string }
-
-    // 獲取用戶資訊
-    const userResponse = await fetch('https://www.googleapis.com/oauth2/v2/userinfo', {
-      headers: { Authorization: `Bearer ${tokens.access_token}` },
-    })
-
-    if (!userResponse.ok) {
-      return res.status(400).json({ error: 'userinfo_failed' })
-    }
-
-    const googleUser = await userResponse.json() as {
-      id: string
-      email: string
-      name?: string
-      picture?: string
-    }
-
-    // 創建或更新用戶
+    // 登入模式
     const user = await findOrCreateUser({
       provider: 'google',
       providerId: googleUser.id,
@@ -329,10 +488,7 @@ router.post('/google/exchange', async (req, res) => {
       avatarUrl: googleUser.picture,
     })
 
-    // 生成 JWT
     const token = generateToken(user)
-
-    // 返回 token 給 Vercel
     res.json({ token, returnTo })
   } catch (error) {
     console.error('[Auth] Google exchange error:', error)
@@ -368,6 +524,7 @@ router.get('/line', (req, res) => {
   const state = signState({
     returnTo: req.query.returnTo || '/',
     callbackHost: callbackHost || null,
+    linkUserId: req.query.linkUserId || null,
   })
 
   const authUrl = `https://access.line.me/oauth2/v2.1/authorize?` +
@@ -395,80 +552,41 @@ router.get('/line/callback', async (req, res) => {
 
     // 驗證 state 簽名
     let returnTo = '/'
+    let linkUserId: string | null = null
     if (state && typeof state === 'string') {
       const stateData = verifyState(state)
       if (!stateData) {
         return res.redirect(`${APP_URL}/auth/login?error=invalid_state`)
       }
       returnTo = (stateData.returnTo as string) || '/'
+      linkUserId = (stateData.linkUserId as string) || null
     } else {
       return res.redirect(`${APP_URL}/auth/login?error=missing_state`)
     }
 
-    // 換取 access token
-    const tokenResponse = await fetch('https://api.line.me/oauth2/v2.1/token', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: new URLSearchParams({
-        grant_type: 'authorization_code',
-        code,
-        redirect_uri: `${API_URL}/auth/line/callback`,
-        client_id: LINE_CHANNEL_ID!,
-        client_secret: LINE_CHANNEL_SECRET!,
-      }),
-    })
+    const lineUser = await exchangeLineCode(code, `${API_URL}/auth/line/callback`)
 
-    if (!tokenResponse.ok) {
-      console.error('[Auth] LINE token error:', await tokenResponse.text())
-      return res.redirect(`${APP_URL}/auth/login?error=token_failed`)
-    }
-
-    const tokens = await tokenResponse.json() as {
-      access_token: string
-      id_token?: string
-    }
-
-    // 獲取用戶資訊
-    const profileResponse = await fetch('https://api.line.me/v2/profile', {
-      headers: { Authorization: `Bearer ${tokens.access_token}` },
-    })
-
-    if (!profileResponse.ok) {
-      return res.redirect(`${APP_URL}/auth/login?error=profile_failed`)
-    }
-
-    const lineUser = await profileResponse.json() as {
-      userId: string
-      displayName: string
-      pictureUrl?: string
-    }
-
-    // LINE 不一定給 email，從 id_token 解析或用 userId 生成
-    let email = `${lineUser.userId}@line.tellcraft.app`
-    if (tokens.id_token) {
-      try {
-        const payload = JSON.parse(Buffer.from(tokens.id_token.split('.')[1], 'base64').toString())
-        if (payload.email) {
-          email = payload.email
-        }
-      } catch {
-        // ignore
+    // 綁定模式
+    if (linkUserId) {
+      const result = await linkProviderToUser(
+        linkUserId, 'line', lineUser.userId, lineUser.email, lineUser.displayName, lineUser.pictureUrl
+      )
+      if (!result.success) {
+        return res.redirect(`${APP_URL}/dashboard/account?error=${result.error}`)
       }
+      return res.redirect(`${APP_URL}/dashboard/account?linked=line`)
     }
 
-    // 創建或更新用戶
+    // 登入模式
     const user = await findOrCreateUser({
       provider: 'line',
       providerId: lineUser.userId,
-      email,
+      email: lineUser.email,
       name: lineUser.displayName,
       avatarUrl: lineUser.pictureUrl,
     })
 
-    // 生成 JWT
     const token = generateToken(user)
-
-    // 重定向到前端，用 hash fragment（不進 server log / Referer）
     res.redirect(`${APP_URL}/auth/callback#token=${token}&returnTo=${encodeURIComponent(returnTo)}`)
   } catch (error) {
     console.error('[Auth] LINE callback error:', error)
@@ -494,79 +612,41 @@ router.post('/line/exchange', async (req, res) => {
 
     // 驗證 state 簽名（CSRF 防護）
     let returnTo = '/'
+    let linkUserId: string | null = null
     if (state && typeof state === 'string') {
       const stateData = verifyState(state)
       if (!stateData) {
         return res.status(400).json({ error: 'invalid_state' })
       }
       returnTo = (stateData.returnTo as string) || '/'
+      linkUserId = (stateData.linkUserId as string) || null
     }
 
-    // 換取 access token（使用 Vercel 提供的 redirectUri）
-    const tokenResponse = await fetch('https://api.line.me/oauth2/v2.1/token', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: new URLSearchParams({
-        grant_type: 'authorization_code',
-        code,
-        redirect_uri: redirectUri,
-        client_id: LINE_CHANNEL_ID!,
-        client_secret: LINE_CHANNEL_SECRET!,
-      }),
-    })
+    // 共用 OAuth exchange
+    const lineUser = await exchangeLineCode(code, redirectUri)
 
-    if (!tokenResponse.ok) {
-      const errorText = await tokenResponse.text()
-      console.error('[Auth] LINE token error:', errorText)
-      return res.status(400).json({ error: 'token_failed', details: errorText })
-    }
-
-    const tokens = await tokenResponse.json() as {
-      access_token: string
-      id_token?: string
-    }
-
-    // 獲取用戶資訊
-    const profileResponse = await fetch('https://api.line.me/v2/profile', {
-      headers: { Authorization: `Bearer ${tokens.access_token}` },
-    })
-
-    if (!profileResponse.ok) {
-      return res.status(400).json({ error: 'profile_failed' })
-    }
-
-    const lineUser = await profileResponse.json() as {
-      userId: string
-      displayName: string
-      pictureUrl?: string
-    }
-
-    // LINE 不一定給 email，從 id_token 解析或用 userId 生成
-    let email = `${lineUser.userId}@line.tellcraft.app`
-    if (tokens.id_token) {
-      try {
-        const payload = JSON.parse(Buffer.from(tokens.id_token.split('.')[1], 'base64').toString())
-        if (payload.email) {
-          email = payload.email
-        }
-      } catch {
-        // ignore
+    // 綁定模式
+    if (linkUserId) {
+      const result = await linkProviderToUser(
+        linkUserId, 'line', lineUser.userId, lineUser.email, lineUser.displayName, lineUser.pictureUrl
+      )
+      if (!result.success) {
+        return res.json({ linked: false, error: result.error, returnTo })
       }
+      console.log(`[Auth] LINE linked to user ${linkUserId}`)
+      return res.json({ linked: true, provider: 'line', returnTo })
     }
 
-    // 創建或更新用戶
+    // 登入模式
     const user = await findOrCreateUser({
       provider: 'line',
       providerId: lineUser.userId,
-      email,
+      email: lineUser.email,
       name: lineUser.displayName,
       avatarUrl: lineUser.pictureUrl,
     })
 
-    // 生成 JWT
     const token = generateToken(user)
-
-    // 返回 token 給 Vercel
     res.json({ token, returnTo })
   } catch (error) {
     console.error('[Auth] LINE exchange error:', error)
@@ -622,7 +702,7 @@ router.post('/liff/verify', async (req, res) => {
     // email fallback 和 /auth/line/callback 一致
     const email = lineProfile.email || `${lineProfile.sub}@line.tellcraft.app`
 
-    // 複用現有 findOrCreateUser
+    // 複用 findOrCreateUser（已重構為優先查 user_providers 表）
     const user = await findOrCreateUser({
       provider: 'line',
       providerId: lineProfile.sub,
@@ -683,8 +763,29 @@ router.get('/me', async (req, res) => {
         return res.status(401).json({ error: 'User not found' })
       }
 
+      // 查詢已綁定的 providers
+      const providers = await db.query<{
+        provider: string
+        provider_id: string
+        email: string | null
+        name: string | null
+        linked_at: string
+        is_primary: boolean
+      }>(
+        'SELECT provider, provider_id, email, name, linked_at, is_primary FROM user_providers WHERE user_id = $1 ORDER BY is_primary DESC, linked_at ASC',
+        [user.id]
+      )
+
+      const linkedProviders = providers.rows.map(p => ({
+        provider: p.provider,
+        email: p.email,
+        name: p.name,
+        linkedAt: p.linked_at,
+        isPrimary: p.is_primary,
+      }))
+
       const responseData: {
-        user: { id: string; email: string; name: string | null; avatarUrl: string | null; plan: string; isAdmin: boolean }
+        user: { id: string; email: string; name: string | null; avatarUrl: string | null; plan: string; isAdmin: boolean; linkedProviders: typeof linkedProviders }
         refreshedToken?: string
       } = {
         user: {
@@ -694,6 +795,7 @@ router.get('/me', async (req, res) => {
           avatarUrl: user.avatar_url,
           plan: user.plan,
           isAdmin: user.is_admin,
+          linkedProviders,
         }
       }
 
@@ -785,6 +887,98 @@ router.post('/refresh', async (req, res) => {
  * POST /auth/logout
  * 登出（純 JWT 模式下主要是前端清除 token）
  */
+// ============================================================
+// 帳號綁定管理
+// ============================================================
+
+/**
+ * GET /auth/providers
+ * 查詢當前用戶已綁定的 OAuth providers
+ */
+router.get('/providers', requireAuth, async (req, res) => {
+  try {
+    const userId = req.user!.id
+
+    const providers = await db.query<{
+      provider: string
+      provider_id: string
+      email: string | null
+      name: string | null
+      avatar_url: string | null
+      linked_at: string
+      is_primary: boolean
+    }>(
+      'SELECT provider, provider_id, email, name, avatar_url, linked_at, is_primary FROM user_providers WHERE user_id = $1 ORDER BY is_primary DESC, linked_at ASC',
+      [userId]
+    )
+
+    res.json({
+      providers: providers.rows.map(p => ({
+        provider: p.provider,
+        email: p.email,
+        name: p.name,
+        avatarUrl: p.avatar_url,
+        linkedAt: p.linked_at,
+        isPrimary: p.is_primary,
+      }))
+    })
+  } catch (error) {
+    console.error('[Auth] /providers error:', error)
+    res.status(500).json({ error: 'Failed to get providers' })
+  }
+})
+
+/**
+ * POST /auth/unlink/:provider
+ * 解除綁定指定 provider（至少保留一個）
+ */
+router.post('/unlink/:provider', requireAuth, async (req, res) => {
+  try {
+    const userId = req.user!.id
+    const provider = req.params.provider
+
+    if (!['google', 'line'].includes(provider)) {
+      return res.status(400).json({ error: 'Invalid provider' })
+    }
+
+    // 檢查是否有此綁定
+    const existing = await db.queryOne<{ id: string }>(
+      'SELECT id FROM user_providers WHERE user_id = $1 AND provider = $2',
+      [userId, provider]
+    )
+
+    if (!existing) {
+      return res.status(404).json({ error: 'Provider not linked' })
+    }
+
+    // 確保至少保留一個 provider
+    const countResult = await db.queryOne<{ count: string }>(
+      'SELECT COUNT(*) as count FROM user_providers WHERE user_id = $1',
+      [userId]
+    )
+
+    if (parseInt(countResult?.count || '0', 10) <= 1) {
+      return res.status(400).json({ error: 'LAST_PROVIDER' })
+    }
+
+    // 刪除綁定
+    await db.query(
+      'DELETE FROM user_providers WHERE user_id = $1 AND provider = $2',
+      [userId, provider]
+    )
+
+    console.log(`[Auth] User ${userId} unlinked ${provider}`)
+    res.json({ success: true })
+  } catch (error) {
+    console.error('[Auth] /unlink error:', error)
+    res.status(500).json({ error: 'Failed to unlink provider' })
+  }
+})
+
+// ============================================================
+// 登出
+// ============================================================
+
 router.post('/logout', async (req, res) => {
   try {
     const authHeader = req.headers.authorization

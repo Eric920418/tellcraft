@@ -489,14 +489,25 @@ export async function cleanupExpiredFlowStates() {
  * conversations → projects → users（provider='line'）
  */
 export async function getLineUserIdByConversation(conversationId: string): Promise<string | null> {
+  // 優先查 user_providers 表（支援帳號綁定後的 LINE 推播）
   const result = await queryOne<{ provider_id: string }>(
+    `SELECT up.provider_id FROM conversations c
+     JOIN projects p ON c.project_id = p.id
+     JOIN user_providers up ON p.user_id = up.user_id
+     WHERE c.id = $1 AND up.provider = 'line'`,
+    [conversationId]
+  )
+  if (result) return result.provider_id
+
+  // 向後相容：查 users 表（舊用戶可能未遷移）
+  const fallback = await queryOne<{ provider_id: string }>(
     `SELECT u.provider_id FROM conversations c
      JOIN projects p ON c.project_id = p.id
      JOIN users u ON p.user_id = u.id
      WHERE c.id = $1 AND u.provider = 'line' AND u.provider_id IS NOT NULL`,
     [conversationId]
   )
-  return result?.provider_id ?? null
+  return fallback?.provider_id ?? null
 }
 
 // ============================================================

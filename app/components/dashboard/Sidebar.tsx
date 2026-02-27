@@ -25,6 +25,7 @@ const navItems: NavItem[] = [
   { href: '/dashboard', label: '總覽', icon: '◐' },
   { href: '/dashboard/projects', label: '專案', icon: '□' },
   { href: '/dashboard/conversations', label: '對話', icon: '◇' },
+  { href: '/dashboard/account', label: '帳號設定', icon: '◎' },
   // 管理員專用
   { href: '/dashboard/admin', label: '管理總覽', icon: '⬡', adminOnly: true },
   { href: '/dashboard/admin/users', label: '用戶管理', icon: '○', adminOnly: true },

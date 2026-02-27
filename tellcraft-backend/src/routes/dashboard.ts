@@ -338,11 +338,13 @@ router.get('/admin/users', requireAdmin, async (req, res) => {
       created_at: string
       project_count: string
       provider: string | null
+      linked_providers: string | null
     }>(
       `SELECT
         u.id, u.email, u.name, u.plan, u.subscription_status, u.is_admin,
         u.message_count_this_period, u.created_at, u.provider,
-        COUNT(p.id) as project_count
+        COUNT(DISTINCT p.id) as project_count,
+        (SELECT string_agg(up.provider, ',') FROM user_providers up WHERE up.user_id = u.id) as linked_providers
        FROM users u
        LEFT JOIN projects p ON p.user_id = u.id
        ${whereClause}
@@ -362,7 +364,8 @@ router.get('/admin/users', requireAdmin, async (req, res) => {
       projectCount: parseInt(u.project_count, 10),
       messageCount: u.message_count_this_period,
       createdAt: u.created_at,
-      provider: u.provider || null
+      provider: u.provider || null,
+      providers: u.linked_providers ? u.linked_providers.split(',') : (u.provider ? [u.provider] : []),
     }))
 
     res.json({ items, total, page: pageNum, pageSize: limit })

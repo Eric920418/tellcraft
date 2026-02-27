@@ -5,6 +5,7 @@ const VPS_API_URL = process.env.VPS_API_URL || 'http://54.238.4.117:8080'
 /**
  * GET /api/auth/line/callback
  * 接收 LINE OAuth 回調，轉發給 VPS 處理
+ * 支援登入模式和帳號綁定模式
  */
 export async function GET(request: Request) {
   const url = new URL(request.url)
@@ -41,9 +42,24 @@ export async function GET(request: Request) {
       return NextResponse.redirect(`${url.origin}/auth/login?error=exchange_failed`)
     }
 
-    const data = await vpsResponse.json() as { token: string; returnTo?: string }
+    const data = await vpsResponse.json() as {
+      token?: string
+      returnTo?: string
+      linked?: boolean
+      error?: string
+      provider?: string
+    }
 
-    // 重定向到前端 callback 頁面
+    // 綁定模式：VPS 返回 linked: true/false
+    if (data.linked !== undefined) {
+      if (data.linked) {
+        return NextResponse.redirect(`${url.origin}/dashboard/account?linked=${data.provider || 'line'}`)
+      } else {
+        return NextResponse.redirect(`${url.origin}/dashboard/account?error=${data.error || 'link_failed'}`)
+      }
+    }
+
+    // 登入模式
     const returnTo = data.returnTo || '/'
     return NextResponse.redirect(
       `${url.origin}/auth/callback?token=${data.token}&returnTo=${encodeURIComponent(returnTo)}`
