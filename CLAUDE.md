@@ -19,8 +19,8 @@ pnpm typecheck            # TypeScript 型別檢查
 
 # VPS 後端開發（tellcraft-backend/）
 cd tellcraft-backend
-pnpm install && pnpm dev  # 啟動開發伺服器（http://localhost:3100）
-pnpm build                # TypeScript 編譯
+pnpm install && pnpm dev  # 啟動開發伺服器（http://localhost:3100，tsx watch 熱更新）
+pnpm build                # TypeScript 編譯（tsc → dist/）
 pnpm typecheck            # 型別檢查
 
 # BDD 規格驗證（修改 Feature Files 後必須依序執行）
@@ -196,14 +196,42 @@ sanitizeCodeForDeploy（6 類自動修復）
 | `003_add_template_overrides.sql` | 模板覆蓋設定 |
 | `004_add_project_files.sql` | project_files 代碼存儲表 |
 | `005_expand_templates.sql` | 模板分類擴展 + industry/use_cases/component_types + GIN 索引 |
+| `006_add_es_document.sql` | Event Storming document 欄位 |
+| `007_add_change_history.sql` | 變更歷史 |
+| `008_add_openapi_spec.sql` | OpenAPI spec |
+| `009_remove_audit_logs.sql` | 移除 audit_logs 表 |
+| `010_add_user_providers.sql` | 帳號綁定（多 OAuth provider） |
 | `add_uiux_columns.sql` | UIUX 相關欄位 |
 
 新增 migration 後在 VPS 執行：`psql "$DATABASE_URL" -f tellcraft-backend/migrations/xxx.sql`
+
+### Skill 定義目錄
+
+| 目錄 | 說明 |
+|------|------|
+| `bdd-spec/` | BDD Skill 定義：`skill.md`（metadata/觸發）、`instructions/`（00-06 各 phase 指引）、`scripts/`（lint/validate）、`resources/`（範例/模板） |
+| `uiux-skill/` | UIUX Skill 定義：設計階段指引 |
+| `quality-gate-skill/` | Quality Gate Skill 定義 |
+| `spec/` | BDD 產出：`features/`（.feature 檔案）、`actions/`（actions.yml）、`data/` |
 
 ### CI/CD
 
 - **VPS 後端自動部署**：push 到 `main` 分支 → GitHub Actions SSH 到 VPS → `git reset --hard origin/main` → `pnpm install --frozen-lockfile` → `pnpm build` → `pm2 restart tellcraft-backend`（`.github/workflows/deploy-vps.yml`）
 - **前端自動部署**：push 到 `main` → Vercel 自動偵測 Next.js 並部署
+
+### 基礎設施配置
+
+- **`vercel.json`**：region `sin1`（新加坡）、`maxDuration: 60`（所有 Server Actions）
+- **`ecosystem.config.js`**：PM2 設定，單實例、`max_memory_restart: '4G'`、日誌寫 `/var/log/tellcraft/`、優雅關閉 10 秒
+- **`tellcraft-backend/nginx/tellcraft.conf`**：Port 80 反向代理到 3100、`client_max_body_size 6m`（圖片上傳）、WebSocket `proxy_read_timeout 86400s`
+
+### 測試
+
+目前**無自動化測試框架**（前端 `test` script 是佔位符）。品質保障依賴：
+- BDD 規格驗證腳本（lint-gherkin-format + validate-feature）
+- TypeScript 型別檢查（`pnpm typecheck`）
+- ESLint（`pnpm lint`）
+- Quality Gate 靜態檢查（A11y/Performance/CodeQuality）
 
 ## BDD 規格格式（sdd.os ISA）
 
@@ -242,6 +270,6 @@ sanitizeCodeForDeploy（6 類自動修復）
 
 ## 環境變數
 
-前端（`.env.local`）：`VPS_API_URL`, `NEXT_PUBLIC_VPS_API_URL`, `NEXT_PUBLIC_VPS_WS_URL`, `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`
+前端（`.env.local`）：`VPS_API_URL`, `NEXT_PUBLIC_VPS_API_URL`, `NEXT_PUBLIC_VPS_WS_URL`, `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `NEXT_PUBLIC_LIFF_ID`
 
-後端（`tellcraft-backend/.env`）：`DATABASE_URL`, `REDIS_URL`, `JWT_SECRET`, `ANTHROPIC_API_KEY`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `LINE_CHANNEL_ID`, `LINE_CHANNEL_SECRET`, `LINE_MESSAGING_CHANNEL_ACCESS_TOKEN`
+後端（`tellcraft-backend/.env`）：`DATABASE_URL`, `REDIS_URL`, `JWT_SECRET`, `ANTHROPIC_API_KEY`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `LINE_CHANNEL_ID`, `LINE_CHANNEL_SECRET`, `LINE_MESSAGING_CHANNEL_ACCESS_TOKEN`, `LIFF_ID`, `VERCEL_ACCESS_TOKEN`, `VERCEL_TEAM_ID`, `SUPABASE_SERVICE_ROLE_KEY`, `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`, `PORKBUN_API_KEY`, `PORKBUN_SECRET_KEY`, `UPLOAD_DIR`, `UPLOAD_BASE_URL`
