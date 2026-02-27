@@ -1,16 +1,18 @@
 'use client'
 
 import { useEffect, useState } from 'react'
+import { useTranslations } from 'next-intl'
 
 const LIFF_ID = process.env.NEXT_PUBLIC_LIFF_ID
 
 export default function LiffPage() {
+  const t = useTranslations('liff')
   const [error, setError] = useState<string | null>(null)
-  const [status, setStatus] = useState('正在初始化 LINE 登入...')
+  const [status, setStatus] = useState(t('initStatus'))
 
   useEffect(() => {
     if (!LIFF_ID) {
-      setError('LIFF 尚未設定，請聯繫管理員')
+      setError(t('configError'))
       return
     }
 
@@ -22,7 +24,7 @@ export default function LiffPage() {
       // 動態 import，只在此頁面載入 LIFF SDK
       const liff = (await import('@line/liff')).default
 
-      setStatus('正在連接 LINE...')
+      setStatus(t('connectingLine'))
       await liff.init({ liffId: LIFF_ID! })
 
       // LIFF init 後讀參數（init 前 URL 參數可能不穩定）
@@ -31,7 +33,7 @@ export default function LiffPage() {
 
       // 未登入 → 觸發 LINE Login（LINE 內建瀏覽器幾乎不會觸發）
       if (!liff.isLoggedIn()) {
-        setStatus('正在跳轉 LINE 登入...')
+        setStatus(t('redirectingLogin'))
         liff.login({
           redirectUri: window.location.href,
         })
@@ -39,15 +41,15 @@ export default function LiffPage() {
       }
 
       // 取得 LINE ID Token
-      setStatus('正在驗證身份...')
+      setStatus(t('verifying'))
       const idToken = liff.getIDToken()
       if (!idToken) {
-        setError('無法取得 LINE 認證資訊，請重新開啟')
+        setError(t('noIdToken'))
         return
       }
 
       // 呼叫後端驗證 → 取得 JWT
-      setStatus('正在登入 Tellcraft...')
+      setStatus(t('loggingInTellcraft'))
       const res = await fetch('/api/vps/auth/liff/verify', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -56,7 +58,7 @@ export default function LiffPage() {
 
       if (!res.ok) {
         const data = await res.json().catch(() => ({}))
-        throw new Error(data.error || `驗證失敗 (${res.status})`)
+        throw new Error(data.error || `${t('verificationFailed')} (${res.status})`)
       }
 
       const { token } = await res.json() as { token: string }
@@ -75,7 +77,7 @@ export default function LiffPage() {
       })
 
       // 跳轉主頁面（帶 conversation 參數恢復對話）
-      setStatus('正在前往對話...')
+      setStatus(t('navigating'))
       const targetUrl = conversationId
         ? `/?conversation=${conversationId}`
         : '/'
@@ -83,7 +85,7 @@ export default function LiffPage() {
       window.location.href = targetUrl
     } catch (err) {
       console.error('[LIFF] Init error:', err)
-      setError(err instanceof Error ? err.message : '登入過程發生錯誤')
+      setError(err instanceof Error ? err.message : t('loginError'))
     }
   }
 
@@ -93,14 +95,14 @@ export default function LiffPage() {
         <div className="max-w-md w-full p-6 text-center">
           <div className="text-red-500 text-5xl mb-4">!</div>
           <h1 className="text-xl font-semibold text-gray-900 dark:text-white mb-2">
-            登入失敗
+            {t('loginFailed')}
           </h1>
           <p className="text-gray-600 dark:text-gray-400 mb-6">{error}</p>
           <a
             href="/"
             className="inline-block px-6 py-2.5 bg-[#06C755] text-white rounded-lg hover:bg-[#05b74d] transition font-medium"
           >
-            前往首頁
+            {t('goHome')}
           </a>
         </div>
       </div>

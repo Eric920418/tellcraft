@@ -255,7 +255,7 @@ Dashboard 帳號設定 → /api/auth/link/google（從 cookie 讀 JWT → 提取
 | **迭代** | 對話內迭代修改、撤銷上一步、部署歷史回滾、迭代歷史追蹤 |
 | **預覽** | Sandpack 真實 React 渲染、串流增量更新、裝置切換、編輯模式、圖片上傳 |
 | **動畫** | BDD 需求藍圖面板（即時 Q&A 歷史視覺化）、3D 工廠流水線（Fast Build）、Remotion 驅動 |
-| **認證** | Google/LINE OAuth、JWT 雙軌（localStorage + Cookie）、訪客→帳號合併、帳號綁定（雙登入） |
+| **認證** | Google/LINE OAuth、JWT 雙軌（localStorage + Cookie）、訪客→帳號合併、帳號綁定（雙登入）、auth 頁面 i18n（next-intl） |
 | **儀表板** | 用戶統計、專案管理、版本歷史、管理員面板、LLM 用量追蹤 |
 | **防護** | 三層防刷（前端冷卻 + API 限速 + Worker 鎖）、Classifier 三層防禦、LLM 自動重試 |
 | **通知** | LINE 推播通知（BDD 完成/UIUX 生成完成/部署成功失敗），離線用戶也能收到 |

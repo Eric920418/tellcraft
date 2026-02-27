@@ -3,15 +3,29 @@
 import { useEffect, useState, Suspense } from 'react'
 import { useSearchParams } from 'next/navigation'
 import { useRouter } from '@/i18n/navigation'
+import { useTranslations } from 'next-intl'
 
 /**
  * VPS Auth Callback Content
  * 處理 OAuth 回調，儲存 token 並重定向
  */
 function AuthCallbackContent() {
+  const t = useTranslations('auth')
   const router = useRouter()
   const searchParams = useSearchParams()
   const [error, setError] = useState<string | null>(null)
+
+  const getErrorMessage = (err: string): string => {
+    const errorMessages: Record<string, string> = {
+      missing_code: t('callbackErrorMissingCode'),
+      token_failed: t('callbackErrorTokenFailed'),
+      userinfo_failed: t('callbackErrorUserinfo'),
+      profile_failed: t('callbackErrorProfile'),
+      callback_failed: t('callbackErrorCallback'),
+      exchange_failed: t('callbackErrorExchange'),
+    }
+    return errorMessages[err] || t('callbackErrorDefault', { error: err })
+  }
 
   useEffect(() => {
     // 優先從 hash fragment 讀（更安全），fallback 到 query param（向後相容）
@@ -40,7 +54,7 @@ function AuthCallbackContent() {
     }
 
     if (!token) {
-      setError('未收到認證 token')
+      setError(t('callbackNoToken'))
       return
     }
 
@@ -85,14 +99,14 @@ function AuthCallbackContent() {
         <div className="max-w-md w-full p-6 text-center">
           <div className="text-red-500 text-6xl mb-4">!</div>
           <h1 className="text-xl font-semibold text-gray-900 dark:text-white mb-2">
-            登入失敗
+            {t('callbackLoginFailed')}
           </h1>
           <p className="text-gray-600 dark:text-gray-400 mb-6">{error}</p>
           <button
             onClick={() => router.push('/auth/login')}
             className="px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition"
           >
-            重新登入
+            {t('callbackRelogin')}
           </button>
         </div>
       </div>
@@ -103,7 +117,7 @@ function AuthCallbackContent() {
     <div className="min-h-screen flex items-center justify-center bg-gray-50 dark:bg-gray-900">
       <div className="text-center">
         <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-blue-500 mx-auto mb-4"></div>
-        <p className="text-gray-600 dark:text-gray-400">登入中...</p>
+        <p className="text-gray-600 dark:text-gray-400">{t('callbackLoggingIn')}</p>
       </div>
     </div>
   )
@@ -116,7 +130,7 @@ export default function AuthCallbackPage() {
       <div className="min-h-screen flex items-center justify-center bg-gray-50 dark:bg-gray-900">
         <div className="text-center">
           <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-blue-500 mx-auto mb-4"></div>
-          <p className="text-gray-600 dark:text-gray-400">載入中...</p>
+          <p className="text-gray-600 dark:text-gray-400">Loading...</p>
         </div>
       </div>
     }>
@@ -125,14 +139,3 @@ export default function AuthCallbackPage() {
   )
 }
 
-function getErrorMessage(error: string): string {
-  const errorMessages: Record<string, string> = {
-    missing_code: '缺少授權碼',
-    token_failed: '取得 token 失敗',
-    userinfo_failed: '取得用戶資訊失敗',
-    profile_failed: '取得用戶資料失敗',
-    callback_failed: '認證回調失敗',
-    exchange_failed: 'Token 交換失敗',
-  }
-  return errorMessages[error] || `認證錯誤: ${error}`
-}

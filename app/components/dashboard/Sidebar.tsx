@@ -2,6 +2,7 @@
 
 import { motion } from 'framer-motion'
 import { Link, usePathname } from '@/i18n/navigation'
+import { useTranslations } from 'next-intl'
 
 interface SidebarProps {
   isAdmin?: boolean
@@ -15,25 +16,26 @@ interface SidebarProps {
 
 interface NavItem {
   href: string
-  label: string
+  labelKey: string
   icon: string
   adminOnly?: boolean
 }
 
 const navItems: NavItem[] = [
-  { href: '/dashboard', label: '總覽', icon: '◐' },
-  { href: '/dashboard/projects', label: '專案', icon: '□' },
-  { href: '/dashboard/conversations', label: '對話', icon: '◇' },
-  { href: '/dashboard/account', label: '帳號設定', icon: '◎' },
+  { href: '/dashboard', labelKey: 'overview', icon: '◐' },
+  { href: '/dashboard/projects', labelKey: 'projects', icon: '□' },
+  { href: '/dashboard/conversations', labelKey: 'conversations', icon: '◇' },
+  { href: '/dashboard/account', labelKey: 'account', icon: '◎' },
   // 管理員專用
-  { href: '/dashboard/admin', label: '管理總覽', icon: '⬡', adminOnly: true },
-  { href: '/dashboard/admin/users', label: '用戶管理', icon: '○', adminOnly: true },
-  { href: '/dashboard/admin/usage', label: 'LLM 用量', icon: '◈', adminOnly: true },
-  { href: '/dashboard/admin/templates', label: '模板管理', icon: '◫', adminOnly: true },
+  { href: '/dashboard/admin', labelKey: 'adminOverview', icon: '⬡', adminOnly: true },
+  { href: '/dashboard/admin/users', labelKey: 'adminUsers', icon: '○', adminOnly: true },
+  { href: '/dashboard/admin/usage', labelKey: 'adminUsage', icon: '◈', adminOnly: true },
+  { href: '/dashboard/admin/templates', labelKey: 'adminTemplates', icon: '◫', adminOnly: true },
 ]
 
 export default function Sidebar({ isAdmin = false, user, className = '' }: SidebarProps) {
   const pathname = usePathname()
+  const t = useTranslations('nav')
 
   const filteredItems = navItems.filter(item => !item.adminOnly || isAdmin)
 
@@ -87,7 +89,7 @@ export default function Sidebar({ isAdmin = false, user, className = '' }: Sideb
         {/* 用戶導航 */}
         <div style={{ marginBottom: 24 }}>
           {userItems.map((item) => (
-            <NavLink key={item.href} item={item} isActive={pathname === item.href} />
+            <NavLink key={item.href} item={item} label={t(item.labelKey)} isActive={pathname === item.href} />
           ))}
         </div>
 
@@ -104,7 +106,7 @@ export default function Sidebar({ isAdmin = false, user, className = '' }: Sideb
                 marginBottom: 4,
               }}
             >
-              管理員
+              {t('adminSection')}
             </div>
             {adminItems.map((item) => {
               // 精確匹配：只有完全相同或是該項目的直接子頁面才算 active
@@ -115,6 +117,7 @@ export default function Sidebar({ isAdmin = false, user, className = '' }: Sideb
                 <NavLink
                   key={item.href}
                   item={item}
+                  label={t(item.labelKey)}
                   isActive={isExactMatch || isChildRoute}
                 />
               )
@@ -172,7 +175,7 @@ export default function Sidebar({ isAdmin = false, user, className = '' }: Sideb
               whiteSpace: 'nowrap',
             }}
           >
-            {user?.name || user?.email?.split('@')[0] || '用戶'}
+            {user?.name || user?.email?.split('@')[0] || t('dashboard')}
           </div>
           {isAdmin && (
             <div
@@ -181,7 +184,7 @@ export default function Sidebar({ isAdmin = false, user, className = '' }: Sideb
                 color: 'var(--gray-400)',
               }}
             >
-              管理員
+              {t('adminSection')}
             </div>
           )}
         </div>
@@ -190,7 +193,7 @@ export default function Sidebar({ isAdmin = false, user, className = '' }: Sideb
   )
 }
 
-function NavLink({ item, isActive }: { item: NavItem; isActive: boolean }) {
+function NavLink({ item, label, isActive }: { item: NavItem; label: string; isActive: boolean }) {
   return (
     <Link href={item.href} style={{ textDecoration: 'none' }}>
       <motion.div
@@ -221,7 +224,7 @@ function NavLink({ item, isActive }: { item: NavItem; isActive: boolean }) {
             color: isActive ? 'var(--black)' : 'var(--gray-600)',
           }}
         >
-          {item.label}
+          {label}
         </span>
       </motion.div>
     </Link>

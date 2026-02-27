@@ -4,8 +4,11 @@ import { useState, useEffect, Suspense } from 'react'
 import { useSearchParams } from 'next/navigation'
 import { Link } from '@/i18n/navigation'
 import { motion } from 'framer-motion'
+import { useTranslations } from 'next-intl'
 
 function LoginContent() {
+  const t = useTranslations('auth')
+  const tc = useTranslations('common')
   const [isLoading, setIsLoading] = useState<'google' | 'line' | null>(null)
   const [error, setError] = useState<string | null>(null)
   const searchParams = useSearchParams()
@@ -30,6 +33,18 @@ function LoginContent() {
     setIsLoading('line')
     setError(null)
     window.location.href = `/api/auth/line?returnTo=${encodeURIComponent(next)}`
+  }
+
+  const getErrorMessage = (err: string): string => {
+    const errorMessages: Record<string, string> = {
+      missing_code: t('errorMissingCode'),
+      token_failed: t('errorTokenFailed'),
+      userinfo_failed: t('errorUserinfoFailed'),
+      profile_failed: t('errorProfileFailed'),
+      callback_failed: t('errorCallbackFailed'),
+      exchange_failed: t('errorExchangeFailed'),
+    }
+    return errorMessages[err] || t('errorDefault', { error: err })
   }
 
   const displayError = error || (urlError ? getErrorMessage(urlError) : null)
@@ -69,7 +84,7 @@ function LoginContent() {
               marginBottom: 8,
             }}
           >
-            登入 Tellcraft
+            {t('loginTitle')}
           </h1>
           <p
             style={{
@@ -77,7 +92,7 @@ function LoginContent() {
               color: 'var(--gray-500)',
             }}
           >
-            用對話打造你的軟體產品
+            {t('loginSubtitle')}
           </p>
         </div>
 
@@ -129,7 +144,7 @@ function LoginContent() {
             ) : (
               <>
                 <GoogleIcon />
-                <span>使用 Google 帳號登入</span>
+                <span>{t('googleLogin')}</span>
               </>
             )}
           </motion.button>
@@ -162,7 +177,7 @@ function LoginContent() {
             ) : (
               <>
                 <LineIcon />
-                <span>使用 LINE 帳號登入</span>
+                <span>{t('lineLogin')}</span>
               </>
             )}
           </motion.button>
@@ -178,7 +193,7 @@ function LoginContent() {
           }}
         >
           <div style={{ flex: 1, height: 1, background: 'var(--border-color)' }} />
-          <span style={{ fontSize: 12, color: 'var(--gray-400)' }}>或</span>
+          <span style={{ fontSize: 12, color: 'var(--gray-400)' }}>{tc('or')}</span>
           <div style={{ flex: 1, height: 1, background: 'var(--border-color)' }} />
         </div>
 
@@ -193,7 +208,7 @@ function LoginContent() {
             textDecoration: 'none',
           }}
         >
-          以訪客身份繼續（功能受限）
+          {t('guestContinue')}
         </Link>
 
         {/* Footer */}
@@ -212,13 +227,13 @@ function LoginContent() {
               lineHeight: 1.6,
             }}
           >
-            登入即表示你同意我們的
+            {t('termsAgreement')}
             <a href="/terms" style={{ color: 'var(--gray-500)' }}>
-              服務條款
+              {t('termsLink')}
             </a>
-            和
+            {t('and')}
             <a href="/privacy" style={{ color: 'var(--gray-500)' }}>
-              隱私權政策
+              {t('privacyLink')}
             </a>
           </p>
         </div>
@@ -237,7 +252,7 @@ export default function LoginPage() {
         justifyContent: 'center',
         background: 'var(--gray-50)',
       }}>
-        <div style={{ color: 'var(--gray-500)', fontSize: 14 }}>載入中...</div>
+        <div style={{ color: 'var(--gray-500)', fontSize: 14 }}>Loading...</div>
       </div>
     }>
       <LoginContent />
@@ -245,17 +260,6 @@ export default function LoginPage() {
   )
 }
 
-function getErrorMessage(error: string): string {
-  const errorMessages: Record<string, string> = {
-    missing_code: '缺少授權碼，請重試',
-    token_failed: '取得認證失敗，請重試',
-    userinfo_failed: '取得用戶資訊失敗，請重試',
-    profile_failed: '取得用戶資料失敗，請重試',
-    callback_failed: '認證過程發生錯誤，請重試',
-    exchange_failed: 'Token 交換失敗，請重試',
-  }
-  return errorMessages[error] || `登入失敗: ${error}`
-}
 
 function GoogleIcon() {
   return (

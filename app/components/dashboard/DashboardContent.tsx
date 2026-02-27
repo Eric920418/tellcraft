@@ -2,6 +2,7 @@
 
 import { motion } from 'framer-motion'
 import { Link } from '@/i18n/navigation'
+import { useTranslations } from 'next-intl'
 import StatsCard from './StatsCard'
 import { ProgressBar } from './Chart'
 
@@ -24,12 +25,20 @@ interface Project {
   updatedAt: string
 }
 
-const statusLabels: Record<string, { label: string; color: string }> = {
-  draft: { label: '草稿', color: 'var(--gray-500)' },
-  generating: { label: '生成中', color: '#F59E0B' },
-  testing: { label: '測試中', color: '#3B82F6' },
-  deployed: { label: '已上線', color: '#22C55E' },
-  failed: { label: '失敗', color: '#EF4444' },
+const statusColors: Record<string, string> = {
+  draft: 'var(--gray-500)',
+  generating: '#F59E0B',
+  testing: '#3B82F6',
+  deployed: '#22C55E',
+  failed: '#EF4444',
+}
+
+const statusKeyMap: Record<string, string> = {
+  draft: 'statusDraft',
+  generating: 'statusGenerating',
+  testing: 'statusTesting',
+  deployed: 'statusDeployed',
+  failed: 'statusFailed',
 }
 
 export function DashboardContent({
@@ -39,6 +48,8 @@ export function DashboardContent({
   stats: Stats
   recentProjects: Project[]
 }) {
+  const t = useTranslations('dashboard')
+
   return (
     <div>
       {/* Header */}
@@ -56,10 +67,10 @@ export function DashboardContent({
             marginBottom: 8,
           }}
         >
-          儀表板
+          {t('title')}
         </h1>
         <p style={{ fontSize: 14, color: 'var(--gray-500)' }}>
-          歡迎回來，查看你的專案概覽
+          {t('subtitle')}
         </p>
       </motion.div>
 
@@ -73,27 +84,27 @@ export function DashboardContent({
         }}
       >
         <StatsCard
-          title="專案"
+          title={t('projectsLabel')}
           value={stats.totalProjects}
           icon="□"
           delay={0}
         />
         <StatsCard
-          title="對話"
+          title={t('conversationsLabel')}
           value={stats.totalConversations}
           icon="◇"
           delay={0.05}
         />
         <StatsCard
-          title="部署"
+          title={t('deploymentsLabel')}
           value={stats.totalDeployments}
           icon="⬡"
           delay={0.1}
         />
         <StatsCard
-          title="方案"
+          title={t('plan')}
           value={stats.messageUsage.plan.toUpperCase()}
-          subtitle={`${stats.messageUsage.used} / ${stats.messageUsage.limit} 則訊息`}
+          subtitle={t('messageCount', { used: stats.messageUsage.used, limit: stats.messageUsage.limit })}
           icon="◈"
           delay={0.15}
         />
@@ -118,12 +129,12 @@ export function DashboardContent({
             marginBottom: 16,
           }}
         >
-          訊息配額
+          {t('messageQuota')}
         </h2>
         <ProgressBar
           value={stats.messageUsage.used}
           max={stats.messageUsage.limit}
-          label="本週期使用量"
+          label={t('quotaUsage')}
         />
       </motion.div>
 
@@ -146,7 +157,7 @@ export function DashboardContent({
             marginBottom: 20,
           }}
         >
-          <h2 style={{ fontSize: 16, fontWeight: 500 }}>最近專案</h2>
+          <h2 style={{ fontSize: 16, fontWeight: 500 }}>{t('recentProjects')}</h2>
           <Link
             href="/dashboard/projects"
             style={{
@@ -155,7 +166,7 @@ export function DashboardContent({
               textDecoration: 'none',
             }}
           >
-            查看全部 →
+            {t('viewAll')} →
           </Link>
         </div>
 
@@ -167,7 +178,7 @@ export function DashboardContent({
               color: 'var(--gray-400)',
             }}
           >
-            <p style={{ marginBottom: 16 }}>還沒有專案</p>
+            <p style={{ marginBottom: 16 }}>{t('noProjects')}</p>
             <Link
               href="/"
               style={{
@@ -182,7 +193,7 @@ export function DashboardContent({
                 textDecoration: 'none',
               }}
             >
-              <span>+</span> 創建第一個專案
+              <span>+</span> {t('createFirstProject')}
             </Link>
           </div>
         ) : (
@@ -223,7 +234,7 @@ export function DashboardContent({
                         marginTop: 4,
                       }}
                     >
-                      {project.conversationCount} 個對話
+                      {t('conversationCount', { count: project.conversationCount })}
                     </div>
                   </div>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
@@ -237,12 +248,12 @@ export function DashboardContent({
                             : project.status === 'failed'
                             ? '#FEE2E2'
                             : 'var(--gray-100)',
-                        color: statusLabels[project.status]?.color || 'var(--gray-500)',
+                        color: statusColors[project.status] || 'var(--gray-500)',
                         textTransform: 'uppercase',
                         letterSpacing: '0.03em',
                       }}
                     >
-                      {statusLabels[project.status]?.label || project.status}
+                      {statusKeyMap[project.status] ? t(statusKeyMap[project.status]) : project.status}
                     </span>
                     <span style={{ fontSize: 12, color: 'var(--gray-400)' }}>→</span>
                   </div>

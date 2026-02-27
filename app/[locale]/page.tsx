@@ -3,6 +3,7 @@
 import { useState, useRef, useEffect, useCallback, Suspense, useDeferredValue } from 'react'
 import { useSearchParams } from 'next/navigation'
 import { motion, AnimatePresence, useInView } from 'framer-motion'
+import { useTranslations } from 'next-intl'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import RotatingText from '@/app/components/RotatingText'
@@ -37,7 +38,7 @@ import dynamic from 'next/dynamic'
 
 const SandpackPreviewComponent = dynamic(
   () => import('@/app/components/uiux/SandpackPreview'),
-  { ssr: false, loading: () => <div style={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--gray-50)' }}><p style={{ color: 'var(--gray-400)', fontSize: 14 }}>載入預覽環境...</p></div> }
+  { ssr: false, loading: () => <div style={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--gray-50)' }}><p style={{ color: 'var(--gray-400)', fontSize: 14 }}>Loading preview...</p></div> }
 )
 const FastBuildPlayer = dynamic(
   () => import('@/app/components/FastBuildPlayer'),
@@ -145,6 +146,7 @@ function AnimatedCounter({ target, duration = 2, suffix = '' }: { target: number
 
 // ============ Scroll Indicator ============
 function ScrollIndicator({ visible }: { visible: boolean }) {
+  const tHero = useTranslations('hero')
   return (
     <AnimatePresence>
       {visible && (
@@ -171,7 +173,7 @@ function ScrollIndicator({ visible }: { visible: boolean }) {
             letterSpacing: '0.1em',
             textTransform: 'uppercase'
           }}>
-            往下探索
+            {tHero('scrollIndicator')}
           </span>
           <motion.div
             animate={{ y: [0, 8, 0] }}
@@ -617,6 +619,7 @@ function HeroSection({
   buildMode: 'fast' | 'fine'
   onBuildModeChange: (mode: 'fast' | 'fine') => void
 }) {
+  const tHero = useTranslations('hero')
   const [isFocused, setIsFocused] = useState(false)
   const [isTransitioning, setIsTransitioning] = useState(false)
   const inputRef = useRef<HTMLTextAreaElement>(null)
@@ -698,7 +701,7 @@ function HeroSection({
         >
           <h1 className="hero-title" style={{ textAlign: 'center' }}>
             <TextType
-              texts={["告訴我你想做什麼"]}
+              texts={[tHero('title')]}
               typingSpeed={75}
               pauseDuration={1500}
               showCursor
@@ -719,7 +722,7 @@ function HeroSection({
               lineHeight: 1.7,
             }}
           >
-            描述你的想法，AI 會幫你釐清需求、生成程式碼、部署上線
+            {tHero('subtitle')}
           </motion.p>
         </motion.div>
 
@@ -754,8 +757,8 @@ function HeroSection({
               onFocus={() => setIsFocused(true)}
               onBlur={() => setIsFocused(false)}
               placeholder={buildMode === 'fast'
-                ? '描述你想要的網站，例如：一個咖啡店官網，需要首頁展示品牌故事、菜單頁、線上預約和聯繫我們'
-                : '描述你的想法，AI 會幫你深入釐清細節...'}
+                ? tHero('placeholderFast')
+                : tHero('placeholderFine')}
               rows={3}
               style={{
                 width: '100%',
@@ -801,7 +804,7 @@ function HeroSection({
                     whiteSpace: 'nowrap',
                   }}
                 >
-                  快速
+                  {tHero('modeFast')}
                 </button>
                 <button
                   onClick={() => onBuildModeChange('fine')}
@@ -818,7 +821,7 @@ function HeroSection({
                     whiteSpace: 'nowrap',
                   }}
                 >
-                  精細
+                  {tHero('modeFine')}
                 </button>
               </div>
               <span style={{ fontSize: 12, color: isFastModeShortWarning ? 'var(--amber-500, #f59e0b)' : 'var(--gray-400)', flex: 1, textAlign: 'center', transition: 'color 0.2s ease' }}>
@@ -3287,33 +3290,34 @@ function ChatSection({
 
 // ============ Use Cases Section (SEO) ============
 function UseCasesSection() {
+  const t = useTranslations('useCases')
   const ref = useRef(null)
   const isInView = useInView(ref, { once: true, margin: '-100px' })
 
   const useCases = [
     {
-      audience: '新創團隊',
-      title: '快速驗證產品概念',
-      description: '從構想到 MVP 上線，用對話完成整個開發流程。專注在商業驗證，而不是技術實作。',
-      examples: ['SaaS 訂閱平台', '內部管理系統', '客戶服務入口']
+      audience: t('audience1'),
+      title: t('title1'),
+      description: t('desc1'),
+      examples: [t('examples1_1'), t('examples1_2'), t('examples1_3')]
     },
     {
-      audience: '電商賣家',
-      title: '打造專屬購物網站',
-      description: '不再依賴平台抽成，建立自己的品牌官網。AI 幫你處理金流串接、庫存管理、訂單系統。',
-      examples: ['品牌官網', '預購系統', '會員商城']
+      audience: t('audience2'),
+      title: t('title2'),
+      description: t('desc2'),
+      examples: [t('examples2_1'), t('examples2_2'), t('examples2_3')]
     },
     {
-      audience: '接案工作者',
-      title: '倍增專案產能',
-      description: '把重複的開發工作交給 AI，專注在客戶溝通與設計。一個人也能接多個專案。',
-      examples: ['客製化網站', '活動報名頁', '企業形象官網']
+      audience: t('audience3'),
+      title: t('title3'),
+      description: t('desc3'),
+      examples: [t('examples3_1'), t('examples3_2'), t('examples3_3')]
     },
     {
-      audience: '中小企業',
-      title: '數位轉型不求人',
-      description: '不需要養工程團隊，用對話就能建置內部系統。降低 IT 成本，加速業務流程。',
-      examples: ['進銷存系統', '人資管理', 'CRM 系統']
+      audience: t('audience4'),
+      title: t('title4'),
+      description: t('desc4'),
+      examples: [t('examples4_1'), t('examples4_2'), t('examples4_3')]
     }
   ]
 
@@ -3342,9 +3346,9 @@ function UseCasesSection() {
             lineHeight: 1.3,
             marginBottom: 16,
           }}>
-            適合{' '}
+            {t('heading')}{' '}
             <RotatingText
-              texts={['新創團隊', '電商賣家', '接案工作者', '中小企業']}
+              texts={[t('audience1'), t('audience2'), t('audience3'), t('audience4')]}
               rotationInterval={2500}
               staggerDuration={0.03}
               transition={{ type: 'spring', damping: 20, stiffness: 200 }}
@@ -3360,7 +3364,7 @@ function UseCasesSection() {
             />
           </h2>
           <p style={{ fontSize: 16, color: 'var(--gray-500)', maxWidth: 500, margin: '0 auto' }}>
-            無論你是誰，只要有想法，就能用對話把它實現
+            {t('subtitle')}
           </p>
         </motion.div>
 
@@ -3441,34 +3445,35 @@ function UseCasesSection() {
 
 // ============ How It Works Section (SEO) ============
 function HowItWorksSection() {
+  const t = useTranslations('howItWorks')
   const ref = useRef(null)
   const isInView = useInView(ref, { once: true, margin: '-50px' })
 
   const steps = [
     {
       number: '01',
-      title: '描述你的想法',
-      description: '用自然語言告訴 AI 你想做什麼，就像跟朋友聊天一樣。',
+      title: t('step1Title'),
+      description: t('step1Desc'),
     },
     {
       number: '02',
-      title: 'AI 主動釐清',
-      description: 'AI 發現模糊地帶，主動提問確保規格明確可執行。',
+      title: t('step2Title'),
+      description: t('step2Desc'),
     },
     {
       number: '03',
-      title: '確認規格',
-      description: '完整的系統規格呈現給你確認，確保認知一致。',
+      title: t('step3Title'),
+      description: t('step3Desc'),
     },
     {
       number: '04',
-      title: '生成程式碼',
-      description: '前端、後端、資料庫一次到位，自動測試確保品質。',
+      title: t('step4Title'),
+      description: t('step4Desc'),
     },
     {
       number: '05',
-      title: '部署上線',
-      description: '自動部署到雲端，收到專屬網址，網站立即可用。',
+      title: t('step5Title'),
+      description: t('step5Desc'),
     }
   ]
 
@@ -3590,14 +3595,15 @@ function HowItWorksSection() {
 
 // ============ Stats Section (SEO) ============
 function StatsSection() {
+  const t = useTranslations('stats')
   const ref = useRef(null)
   const isInView = useInView(ref, { once: true, margin: '-100px' })
 
   const stats = [
-    { value: 90, suffix: '%', label: '開發時間節省', description: '相比傳統開發流程' },
-    { value: 24, suffix: '小時', label: '平均上線時間', description: '從想法到部署完成' },
-    { value: 0, suffix: '行', label: '需要撰寫的程式碼', description: '全程對話完成開發' },
-    { value: 100, suffix: '%', label: '程式碼擁有權', description: '可隨時匯出完整原始碼' },
+    { value: 90, suffix: '%', label: t('label1'), description: t('desc1') },
+    { value: 24, suffix: t('suffixHours'), label: t('label2'), description: t('desc2') },
+    { value: 0, suffix: t('suffixLines'), label: t('label3'), description: t('desc3') },
+    { value: 100, suffix: '%', label: t('label4'), description: t('desc4') },
   ]
 
   return (
@@ -3614,7 +3620,7 @@ function StatsSection() {
             fontWeight: 400,
             letterSpacing: '-0.02em',
           }}>
-            讓數字說話
+            {t('heading')}
           </h2>
         </motion.div>
 

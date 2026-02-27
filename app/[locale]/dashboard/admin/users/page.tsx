@@ -3,6 +3,7 @@
 import { useEffect, useState, useRef, useCallback, useMemo } from 'react'
 import { useRouter } from '@/i18n/navigation'
 import { motion } from 'framer-motion'
+import { useTranslations } from 'next-intl'
 import { DataTable, StatusBadge, SearchInput, type Column } from '@/app/components/dashboard'
 import { listAllUsers, setUserAdmin } from '@/app/lib/vps-api'
 

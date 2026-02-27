@@ -5,8 +5,10 @@ import { useSearchParams } from 'next/navigation'
 import { useRouter } from '@/i18n/navigation'
 import { motion } from 'framer-motion'
 import { initializeSessionFromAuth } from '@/app/actions'
+import { useTranslations } from 'next-intl'
 
 function PostLoginContent() {
+  const t = useTranslations('auth')
   const router = useRouter()
   const searchParams = useSearchParams()
   const [status, setStatus] = useState<'merging' | 'success' | 'error'>('merging')
@@ -66,12 +68,12 @@ function PostLoginContent() {
           // 沒有需要遷移的資料，直接跳轉
           router.push(next)
         } else {
-          setError(result.error || '登入處理失敗')
+          setError(result.error || t('postLoginErrorDefault'))
           setStatus('error')
         }
       } catch (err) {
         console.error('Post-login error:', err)
-        setError('登入處理時發生錯誤')
+        setError(t('postLoginErrorOccurred'))
         setStatus('error')
       }
     }
@@ -124,7 +126,7 @@ function PostLoginContent() {
                 marginBottom: 8,
               }}
             >
-              正在處理登入...
+              {t('postLoginProcessing')}
             </h2>
             <p
               style={{
@@ -132,7 +134,7 @@ function PostLoginContent() {
                 color: 'var(--gray-500)',
               }}
             >
-              請稍候
+              {t('postLoginPleaseWait')}
             </p>
           </>
         )}
@@ -162,7 +164,7 @@ function PostLoginContent() {
                 marginBottom: 8,
               }}
             >
-              登入成功
+              {t('postLoginSuccess')}
             </h2>
             <p
               style={{
@@ -171,7 +173,7 @@ function PostLoginContent() {
                 marginBottom: 16,
               }}
             >
-              已將你的訪客資料合併到帳號
+              {t('postLoginMerged')}
             </p>
             <div
               style={{
@@ -193,7 +195,7 @@ function PostLoginContent() {
                   >
                     {migrationResult.migratedProjects}
                   </div>
-                  <div style={{ fontSize: 12, color: 'var(--gray-500)' }}>專案已遷移</div>
+                  <div style={{ fontSize: 12, color: 'var(--gray-500)' }}>{t('postLoginProjectsMigrated')}</div>
                 </div>
               )}
               {migrationResult.migratedConversations > 0 && (
@@ -207,7 +209,7 @@ function PostLoginContent() {
                   >
                     {migrationResult.migratedConversations}
                   </div>
-                  <div style={{ fontSize: 12, color: 'var(--gray-500)' }}>對話已遷移</div>
+                  <div style={{ fontSize: 12, color: 'var(--gray-500)' }}>{t('postLoginConversationsMigrated')}</div>
                 </div>
               )}
             </div>
@@ -238,7 +240,7 @@ function PostLoginContent() {
                 marginBottom: 8,
               }}
             >
-              處理失敗
+              {t('postLoginFailed')}
             </h2>
             <p
               style={{
@@ -263,7 +265,7 @@ function PostLoginContent() {
                 cursor: 'pointer',
               }}
             >
-              繼續
+              {t('postLoginContinue')}
             </motion.button>
           </>
         )}

@@ -3,6 +3,7 @@
 import { motion } from 'framer-motion'
 import { useRef, useEffect, useState } from 'react'
 import { useInView } from 'framer-motion'
+import { useTranslations } from 'next-intl'
 
 interface ChartData {
   label: string
@@ -301,6 +302,7 @@ export function DonutChart({
   size?: number
   strokeWidth?: number
 }) {
+  const t = useTranslations('common')
   const ref = useRef<SVGSVGElement>(null)
   const isInView = useInView(ref, { once: true })
 

@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react'
 import { motion } from 'framer-motion'
 import { Link, useRouter } from '@/i18n/navigation'
+import { useTranslations } from 'next-intl'
 import { StatsCard, BarChart } from '@/app/components/dashboard'
 import { getAdminStats, getLLMUsageStats } from '@/app/lib/vps-api'
 
@@ -37,6 +38,8 @@ function getAuthToken(): string | null {
 
 export default function AdminDashboardPage() {
   const router = useRouter()
+  const t = useTranslations('dashboard.admin')
+  const tc = useTranslations('common')
   const [stats, setStats] = useState<AdminStats | null>(null)
   const [llmUsage, setLLMUsage] = useState<LLMUsage | null>(null)
   const [isLoading, setIsLoading] = useState(true)
@@ -60,7 +63,7 @@ export default function AdminDashboardPage() {
           router.push('/dashboard')
           return
         }
-        setError(statsResult.error || '載入失敗')
+        setError(statsResult.error || tc('loadFailed'))
         setIsLoading(false)
         return
       }
@@ -80,7 +83,7 @@ export default function AdminDashboardPage() {
   if (isLoading) {
     return (
       <div style={{ padding: '40px 0', textAlign: 'center', color: 'var(--gray-500)' }}>
-        載入中...
+        {tc('loading')}
       </div>
     )
   }
@@ -123,10 +126,10 @@ export default function AdminDashboardPage() {
             marginBottom: 8,
           }}
         >
-          管理員總覽
+          {t('title')}
         </h1>
         <p style={{ fontSize: 14, color: 'var(--gray-500)' }}>
-          平台整體統計與監控
+          {t('subtitle')}
         </p>
       </motion.div>
 
@@ -140,26 +143,26 @@ export default function AdminDashboardPage() {
         }}
       >
         <StatsCard
-          title="總用戶"
+          title={t('totalUsers')}
           value={stats?.totalUsers || 0}
-          subtitle={`${stats?.newUsers7d || 0} 新增（7天）`}
+          subtitle={t('newUsersInDays', { count: stats?.newUsers7d || 0 })}
           icon="○"
           delay={0}
         />
         <StatsCard
-          title="總專案"
+          title={t('totalProjects')}
           value={stats?.totalProjects || 0}
           icon="□"
           delay={0.05}
         />
         <StatsCard
-          title="總對話"
+          title={t('totalConversations')}
           value={stats?.totalConversations || 0}
           icon="◇"
           delay={0.1}
         />
         <StatsCard
-          title="成功部署"
+          title={t('totalDeployments')}
           value={stats?.totalDeployments || 0}
           icon="⬡"
           delay={0.15}
@@ -190,10 +193,10 @@ export default function AdminDashboardPage() {
           >
             <div style={{ fontSize: 20, marginBottom: 8 }}>○</div>
             <div style={{ fontSize: 16, fontWeight: 500, marginBottom: 4, color: 'var(--black)' }}>
-              用戶管理
+              {t('userManagement')}
             </div>
             <div style={{ fontSize: 13, color: 'var(--gray-500)' }}>
-              查看和管理所有用戶
+              {t('viewManageUsers')}
             </div>
           </motion.div>
         </Link>
@@ -209,10 +212,10 @@ export default function AdminDashboardPage() {
           >
             <div style={{ fontSize: 20, marginBottom: 8 }}>◈</div>
             <div style={{ fontSize: 16, fontWeight: 500, marginBottom: 4, color: 'var(--black)' }}>
-              LLM 用量
+              {t('llmUsage')}
             </div>
             <div style={{ fontSize: 13, color: 'var(--gray-500)' }}>
-              查看 API 使用統計
+              {t('viewApiUsage')}
             </div>
           </motion.div>
         </Link>
@@ -228,10 +231,10 @@ export default function AdminDashboardPage() {
           >
             <div style={{ fontSize: 20, marginBottom: 8 }}>◫</div>
             <div style={{ fontSize: 16, fontWeight: 500, marginBottom: 4, color: 'var(--black)' }}>
-              模板管理
+              {t('templateManagement')}
             </div>
             <div style={{ fontSize: 13, color: 'var(--gray-500)' }}>
-              管理 UIUX 模板
+              {t('manageTemplates')}
             </div>
           </motion.div>
         </Link>
@@ -256,7 +259,7 @@ export default function AdminDashboardPage() {
             border: '1px solid var(--border-color)',
           }}
         >
-          <h2 style={{ fontSize: 16, fontWeight: 500, marginBottom: 20 }}>LLM 成本</h2>
+          <h2 style={{ fontSize: 16, fontWeight: 500, marginBottom: 20 }}>{t('llmCostLabel')}</h2>
           <div style={{ display: 'flex', gap: 32 }}>
             <div>
               <div
@@ -268,7 +271,7 @@ export default function AdminDashboardPage() {
                   marginBottom: 8,
                 }}
               >
-                總成本
+                {t('totalCostLabel')}
               </div>
               <div
                 style={{
@@ -290,7 +293,7 @@ export default function AdminDashboardPage() {
                   marginBottom: 8,
                 }}
               >
-                總 Tokens
+                {t('totalTokensLabel')}
               </div>
               <div
                 style={{
@@ -313,12 +316,12 @@ export default function AdminDashboardPage() {
             border: '1px solid var(--border-color)',
           }}
         >
-          <h2 style={{ fontSize: 16, fontWeight: 500, marginBottom: 20 }}>最近 7 天活動</h2>
+          <h2 style={{ fontSize: 16, fontWeight: 500, marginBottom: 20 }}>{t('recent7dActivity')}</h2>
           {chartData.length > 0 ? (
             <BarChart data={chartData} height={150} />
           ) : (
             <div style={{ color: 'var(--gray-400)', fontSize: 14, textAlign: 'center', padding: '40px 0' }}>
-              暫無數據
+              {tc('noData')}
             </div>
           )}
         </div>
