@@ -4,8 +4,8 @@ import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { motion } from 'framer-motion'
 import Link from 'next/link'
-import { StatsCard, BarChart } from '../../components/dashboard'
-import { getAdminStats, getLLMUsageStats } from '../../lib/vps-api'
+import { StatsCard, BarChart } from '@/app/components/dashboard'
+import { getAdminStats, getLLMUsageStats } from '@/app/lib/vps-api'
 
 interface AdminStats {
   totalUsers: number

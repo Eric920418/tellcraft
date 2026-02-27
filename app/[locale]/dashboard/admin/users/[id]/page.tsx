@@ -4,8 +4,8 @@ import { useEffect, useState } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import { motion } from 'framer-motion'
 import Link from 'next/link'
-import { StatusBadge, MiniStatsCard } from '../../../../components/dashboard'
-import { getUserDetail, setUserAdmin } from '../../../../lib/vps-api'
+import { StatusBadge, MiniStatsCard } from '@/app/components/dashboard'
+import { getUserDetail, setUserAdmin } from '@/app/lib/vps-api'
 
 // 從 localStorage 獲取 token
 function getAuthToken(): string | null {

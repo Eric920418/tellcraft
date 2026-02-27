@@ -5,13 +5,13 @@ import { useSearchParams } from 'next/navigation'
 import { motion, AnimatePresence, useInView } from 'framer-motion'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
-import RotatingText from './components/RotatingText'
-import GlareHover from './components/GlareHover'
-import CardSwap, { Card } from './components/CardSwap'
-// import GridDistortion from './components/GridDistortion'
-import TextType from './components/TextType'
-import { AnimatedThemeToggler } from './components/AnimatedThemeToggler'
-import GlowButton from './components/GlowButton'
+import RotatingText from '@/app/components/RotatingText'
+import GlareHover from '@/app/components/GlareHover'
+import CardSwap, { Card } from '@/app/components/CardSwap'
+// import GridDistortion from '@/app/components/GridDistortion'
+import TextType from '@/app/components/TextType'
+import { AnimatedThemeToggler } from '@/app/components/AnimatedThemeToggler'
+import GlowButton from '@/app/components/GlowButton'
 // signOut moved to VPS auth flow
 import {
   initializeSession as vpsInitializeSession,
@@ -19,33 +19,33 @@ import {
   replyToConversation as vpsReplyToConversation,
   sendMessage as vpsSendMessage,
   uploadImage,
-} from './lib/vps-api'
-import { getAuthToken } from './hooks/useAuth'
-import ConversationPicker from './components/ConversationPicker'
-import LoginPrompt, { shouldShowLoginPrompt, dismissLoginPrompt } from './components/LoginPrompt'
-import { useAuth } from './hooks/useAuth'
-import ProjectReminder from './components/ProjectReminder'
-import SplitLayout from './components/uiux/SplitLayout'
-import SpecGenerationView from './components/SpecGenerationView'
-import PreviewPanel, { type ElementInfo } from './components/uiux/PreviewPanel'
-import PropertyEditor from './components/uiux/PropertyEditor'
-import DeviceSwitcher, { type DeviceType, getDeviceWidth } from './components/uiux/DeviceSwitcher'
-import TemplatePicker from './components/uiux/TemplatePicker'
-import QuickReplies from './components/QuickReplies'
-import type { StreamingPreview, FastBuildChunks } from './hooks/useVpsWebSocket'
+} from '@/app/lib/vps-api'
+import { getAuthToken } from '@/app/hooks/useAuth'
+import ConversationPicker from '@/app/components/ConversationPicker'
+import LoginPrompt, { shouldShowLoginPrompt, dismissLoginPrompt } from '@/app/components/LoginPrompt'
+import { useAuth } from '@/app/hooks/useAuth'
+import ProjectReminder from '@/app/components/ProjectReminder'
+import SplitLayout from '@/app/components/uiux/SplitLayout'
+import SpecGenerationView from '@/app/components/SpecGenerationView'
+import PreviewPanel, { type ElementInfo } from '@/app/components/uiux/PreviewPanel'
+import PropertyEditor from '@/app/components/uiux/PropertyEditor'
+import DeviceSwitcher, { type DeviceType, getDeviceWidth } from '@/app/components/uiux/DeviceSwitcher'
+import TemplatePicker from '@/app/components/uiux/TemplatePicker'
+import QuickReplies from '@/app/components/QuickReplies'
+import type { StreamingPreview, FastBuildChunks } from '@/app/hooks/useVpsWebSocket'
 import dynamic from 'next/dynamic'
 
 const SandpackPreviewComponent = dynamic(
-  () => import('./components/uiux/SandpackPreview'),
+  () => import('@/app/components/uiux/SandpackPreview'),
   { ssr: false, loading: () => <div style={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--gray-50)' }}><p style={{ color: 'var(--gray-400)', fontSize: 14 }}>載入預覽環境...</p></div> }
 )
 const FastBuildPlayer = dynamic(
-  () => import('./components/FastBuildPlayer'),
+  () => import('@/app/components/FastBuildPlayer'),
   { ssr: false, loading: () => null }
 )
-import { BuildingPlayer } from './components/building-scene'
-import { getTemplateById } from './actions/templates'
-import type { Template } from './lib/templates'
+import { BuildingPlayer } from '@/app/components/building-scene'
+import { getTemplateById } from '@/app/actions/templates'
+import type { Template } from '@/app/lib/templates'
 
 // ============ Types ============
 interface Message {

@@ -1,32 +1,10 @@
-import type { Metadata } from 'next'
-import { ThemeProvider } from './components/ThemeProvider'
-import './globals.css'
+import type { ReactNode } from 'react'
 
-export const metadata: Metadata = {
-  title: 'Tellcraft',
-  description: 'Tellcraft - AI-driven automation platform for developers 泰爾工藝 用對話打造你的軟體產品',
-  openGraph: {
-    images: ['/logo.png'],
-  },
+type Props = {
+  children: ReactNode
 }
 
-export default function RootLayout({
-  children,
-}: {
-  children: React.ReactNode
-}) {
-  return (
-    <html lang="zh-TW" suppressHydrationWarning>
-      <body>
-        <ThemeProvider
-          attribute="class"
-          defaultTheme="system"
-          enableSystem
-          disableTransitionOnChange
-        >
-          {children}
-        </ThemeProvider>
-      </body>
-    </html>
-  )
+// Root layout: passthrough only. Actual <html>/<body> is in [locale]/layout.tsx
+export default function RootLayout({ children }: Props) {
+  return children
 }

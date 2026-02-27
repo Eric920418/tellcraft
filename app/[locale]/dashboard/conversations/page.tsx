@@ -3,8 +3,8 @@
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { motion } from 'framer-motion'
-import { DataTable, type Column } from '../../components/dashboard'
-import { getUserConversations } from '../../lib/vps-api'
+import { DataTable, type Column } from '@/app/components/dashboard'
+import { getUserConversations } from '@/app/lib/vps-api'
 
 // 從 localStorage 獲取 token
 function getAuthToken(): string | null {

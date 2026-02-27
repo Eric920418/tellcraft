@@ -3,7 +3,7 @@
 import { useEffect, useState, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
 import { motion } from 'framer-motion'
-import { getAdminTemplates } from '../../../lib/vps-api'
+import { getAdminTemplates } from '@/app/lib/vps-api'
 
 interface AdminTemplate {
   id: string

@@ -3,8 +3,8 @@
 import { useEffect, useState, useMemo } from 'react'
 import { useRouter } from 'next/navigation'
 import { motion } from 'framer-motion'
-import { StatsCard, BarChart, LineChart, DateRangePicker } from '../../../components/dashboard'
-import { getLLMUsageStats } from '../../../lib/vps-api'
+import { StatsCard, BarChart, LineChart, DateRangePicker } from '@/app/components/dashboard'
+import { getLLMUsageStats } from '@/app/lib/vps-api'
 
 interface LLMUsage {
   totalInputTokens: number

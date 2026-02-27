@@ -1,7 +1,7 @@
 import { redirect } from 'next/navigation'
 import { cookies } from 'next/headers'
 import { jwtVerify } from 'jose'
-import { DashboardShell } from '../components/dashboard/DashboardShell'
+import { DashboardShell } from '@/app/components/dashboard/DashboardShell'
 
 const JWT_SECRET = new TextEncoder().encode(
   process.env.JWT_SECRET || 'tellcraft-jwt-secret-change-in-production'

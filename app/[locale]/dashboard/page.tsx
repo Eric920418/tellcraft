@@ -1,7 +1,7 @@
 import { redirect } from 'next/navigation'
 import { cookies } from 'next/headers'
-import { getDashboardStats } from '../lib/vps-api'
-import { DashboardContent } from '../components/dashboard/DashboardContent'
+import { getDashboardStats } from '@/app/lib/vps-api'
+import { DashboardContent } from '@/app/components/dashboard/DashboardContent'
 
 export default async function DashboardPage() {
   const cookieStore = await cookies()

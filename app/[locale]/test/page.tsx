@@ -2,12 +2,12 @@
 
 import { useState } from 'react'
 import Link from 'next/link'
-import { testDeploymentConfig, generateNextJsTemplate } from '../actions/deploy'
-import { listProjects } from '../actions/supabase'
-import { listVercelProjects } from '../actions/vercel'
-import { listZones } from '../actions/cloudflare'
-import { searchDomain, deployWithFreeDomain } from '../actions/domain'
-import { getDomainPricing, pingPorkbun } from '../actions/porkbun'
+import { testDeploymentConfig, generateNextJsTemplate } from '@/app/actions/deploy'
+import { listProjects } from '@/app/actions/supabase'
+import { listVercelProjects } from '@/app/actions/vercel'
+import { listZones } from '@/app/actions/cloudflare'
+import { searchDomain, deployWithFreeDomain } from '@/app/actions/domain'
+import { getDomainPricing, pingPorkbun } from '@/app/actions/porkbun'
 
 export default function TestPage() {
   const [output, setOutput] = useState<string>('')
