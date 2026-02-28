@@ -60,7 +60,6 @@ export default function AccountPage() {
       showToast(errorMessages[error] || t('errorGeneric', { error }), 'error')
       window.history.replaceState({}, '', '/dashboard/account')
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchParams])
 
   function showToast(message: string, type: 'success' | 'error') {
@@ -100,7 +99,6 @@ export default function AccountPage() {
 
   useEffect(() => {
     fetchProviders()
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   async function handleUnlink(provider: string) {

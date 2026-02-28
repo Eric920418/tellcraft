@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import { useTranslations } from 'next-intl'
+import { Link } from '@/i18n/navigation'
 import { useLocalePath } from '@/app/hooks/useLocalePath'
 
 const LIFF_ID = process.env.NEXT_PUBLIC_LIFF_ID
@@ -100,12 +101,12 @@ export default function LiffPage() {
             {t('loginFailed')}
           </h1>
           <p className="text-gray-600 dark:text-gray-400 mb-6">{error}</p>
-          <a
+          <Link
             href="/"
             className="inline-block px-6 py-2.5 bg-[#06C755] text-white rounded-lg hover:bg-[#05b74d] transition font-medium"
           >
             {t('goHome')}
-          </a>
+          </Link>
         </div>
       </div>
     )

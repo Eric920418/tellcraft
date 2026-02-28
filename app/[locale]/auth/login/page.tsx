@@ -228,13 +228,13 @@ function LoginContent() {
             }}
           >
             {t('termsAgreement')}
-            <a href="/terms" style={{ color: 'var(--gray-500)' }}>
+            <Link href="/terms" style={{ color: 'var(--gray-500)' }}>
               {t('termsLink')}
-            </a>
+            </Link>
             {t('and')}
-            <a href="/privacy" style={{ color: 'var(--gray-500)' }}>
+            <Link href="/privacy" style={{ color: 'var(--gray-500)' }}>
               {t('privacyLink')}
-            </a>
+            </Link>
           </p>
         </div>
       </motion.div>

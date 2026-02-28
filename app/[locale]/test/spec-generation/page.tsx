@@ -1,6 +1,7 @@
 'use client'
 
 import { useState } from 'react'
+import Link from 'next/link'
 import { SpecGenerationView } from '../../../components/SpecGenerationView'
 
 export default function TestSpecGenerationPage() {
@@ -39,7 +40,7 @@ export default function TestSpecGenerationPage() {
         >
           重新播放
         </button>
-        <a
+        <Link
           href="/test"
           style={{
             color: 'var(--text-muted)',
@@ -48,7 +49,7 @@ export default function TestSpecGenerationPage() {
           }}
         >
           ← 返回測試頁
-        </a>
+        </Link>
       </div>
     )
   }

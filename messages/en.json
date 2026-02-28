@@ -52,7 +52,7 @@
     "formulationProgress": "Generating spec documents...",
     "inputPlaceholderShort": "Type a message...",
     "inputPlaceholder": "Type a message... (Shift+Enter for new line)",
-    "goBackButton": "\u2190 Go back",
+    "goBackButton": "← Go back",
     "sendButton": "Send",
     "backButton": "Back",
     "bddSplitTitle": "Requirements Clarification",
@@ -67,7 +67,7 @@
   "preview": {
     "loading": "Loading preview environment...",
     "title": "Design Preview",
-    "titleWithStep": "Design Preview \u2014 {step}",
+    "titleWithStep": "Design Preview — {step}",
     "phaseProgress": "Phase {phaseNum}/{totalPhases}: {step}",
     "waitingMessage": "Preview will appear automatically after generation",
     "generating": "Generating",
@@ -92,7 +92,7 @@
     "generatedCode": "Generated code",
     "viewInPreview": "View full code in the preview panel on the right",
     "readonlyMode": "Read-only mode",
-    "readonlyHint": "Read-only mode \u2014 Cannot send messages",
+    "readonlyHint": "Read-only mode — Cannot send messages",
     "viewingConversation": "Viewing <strong>{name}</strong>'s conversation"
   },
   "stage": {
@@ -143,7 +143,7 @@
     "saveNote3": "Prefer Tailwind CSS classes for style changes; use inline styles when classes are insufficient."
   },
   "command": {
-    "goBack": "\u2190 Go back",
+    "goBack": "← Go back",
     "retry": "Retry",
     "accept": "Agree",
     "reject": "Disagree",
@@ -259,7 +259,7 @@
     "item4Category": "E-commerce",
     "item4Desc": "Tiered membership system, points accumulation, exclusive deals, and referral rewards.",
     "item4Stats": "Completed in 4 days",
-    "cardHint": "Hover to pause \u00b7 Click for details"
+    "cardHint": "Hover to pause · Click for details"
   },
   "faq": {
     "heading": "Frequently Asked Questions",
@@ -397,8 +397,8 @@
     "statusCancelled": "Cancelled",
     "conversations": "conversations",
     "projectDetail": "Project Details",
-    "backToProjects": "\u2190 Back to projects",
-    "backToUsers": "\u2190 Back to user list",
+    "backToProjects": "← Back to projects",
+    "backToUsers": "← Back to user list",
     "projectsLabel": "Projects",
     "conversationsLabel": "Conversations",
     "deploymentsLabel": "Deployments",
@@ -730,10 +730,10 @@
     "upload": "Upload",
     "unsupportedFileType": "Unsupported file type: {type}. Only JPG, PNG, WebP, GIF, SVG are supported",
     "fileSizeExceeded": "File size {size}MB exceeds 5MB limit",
-    "flexDirectionRow": "Horizontal \u2192",
-    "flexDirectionColumn": "Vertical \u2193",
-    "flexDirectionRowReverse": "Horizontal \u2190",
-    "flexDirectionColumnReverse": "Vertical \u2191",
+    "flexDirectionRow": "Horizontal →",
+    "flexDirectionColumn": "Vertical ↓",
+    "flexDirectionRowReverse": "Horizontal ←",
+    "flexDirectionColumnReverse": "Vertical ↑",
     "deviceDesktop": "Desktop",
     "deviceTablet": "Tablet",
     "deviceMobile": "Mobile",
@@ -804,7 +804,7 @@
     "stageCompleteLabel": "Complete",
     "stageCompleteDesc": "Spec generation successful",
     "aiPrefix": "AI is ",
-    "aiSuffix": "",
+    "aiSuffix": "...",
     "wordAnalyze": "analyzing",
     "wordOrganize": "organizing",
     "wordConstruct": "constructing",

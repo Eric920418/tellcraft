@@ -18,6 +18,7 @@ Tellcraft 是一個 AI 驅動的自動化開發平台。用戶只需描述需求
 | **佇列/狀態** | Redis | BullMQ 任務佇列 + 串流狀態 |
 | **LLM** | Claude Sonnet / Haiku | Anthropic SDK |
 | **動畫** | motion/react + Remotion | 需求藍圖面板 + 串流動畫 |
+| **i18n** | next-intl v4 | 中/英雙語，`[locale]` 路由 |
 | **樣式** | Tailwind CSS v4 | `@import "tailwindcss"` 語法 |
 | **預覽** | Sandpack（@codesandbox） | 瀏覽器內真實 React 渲染 |
 | **部署** | Vercel API | 代碼 → Next.js → Vercel 自動部署 |
@@ -233,6 +234,58 @@ Dashboard 帳號設定 → /api/auth/link/google（從 cookie 讀 JWT → 提取
 
 權限：Middleware 攔截未登入 `/dashboard` + 非管理員 `/dashboard/admin`，Server Actions `requireAdmin()` 二次驗證。
 
+## 國際化（i18n）
+
+### 架構
+
+基於 `next-intl` v4，`localePrefix: 'as-needed'`（`/` = 中文預設，`/en/` = English）。
+
+```
+URL 結構：
+  / → zh（預設，無前綴）
+  /en → English
+  /dashboard → zh
+  /en/dashboard → English
+```
+
+### 翻譯檔案
+
+`messages/zh.json` 和 `messages/en.json`，766 keys，27 namespaces：
+
+| Namespace | 範圍 | Keys |
+|-----------|------|------|
+| `hero`, `chat`, `preview`, `stage` | 主頁面 | ~86 |
+| `comparison`, `showcase`, `faq`, `testimonial`, `cta`, `footer` | Landing 區塊 | ~93 |
+| `dashboard` (含 `admin`, `usage`, `templates`, `account`) | 儀表板 | ~187 |
+| `auth`, `login`, `liff` | 認證 | ~61 |
+| `nav`, `common`, `errors` | 共用 | ~35 |
+| `cssLabel`, `codePreview`, `command` | 編輯器 | ~41 |
+| `uiux`, `deploy`, `conversationPicker` | 功能元件 | ~各 4-110 |
+
+### 使用方式
+
+```tsx
+// Client Component
+import { useTranslations } from 'next-intl'
+const t = useTranslations('chat')
+return <p>{t('sendButton')}</p>
+
+// 帶參數
+t('messageUsageDetail', { used: 10, limit: 100 })  // "10 / 100 則"
+
+// locale-aware 導航
+import { Link, useRouter } from '@/i18n/navigation'  // 自動加 locale 前綴
+import { useLocalePath } from '@/app/hooks/useLocalePath'
+window.location.href = localePath('/dashboard')       // 硬跳轉時用
+```
+
+### Phase 2 待辦
+
+- 後端錯誤訊息 i18n（`result.error === '無管理員權限'` 等比對值）
+- Remotion 動畫標籤（需通過 props 傳入 locale）
+- `app/lib/vps-api.ts` 錯誤訊息（需改為 error code 模式）
+- `app/[locale]/test/page.tsx`（dev 工具，低優先）
+
 ## BullMQ 任務模式
 
 | 功能 | 實現方式 |
@@ -267,7 +320,13 @@ Dashboard 帳號設定 → /api/auth/link/google（從 cookie 讀 JWT → 提取
 
 ```
 app/
-├── page.tsx              # 主頁面（對話 UI + 狀態管理，~4000 行）
+├── [locale]/             # i18n 路由群組（zh 預設 / en）
+│   ├── page.tsx          # 主頁面（對話 UI + 狀態管理，~4600 行）
+│   ├── layout.tsx        # NextIntlClientProvider 注入
+│   ├── dashboard/        # 儀表板頁面（/dashboard, /dashboard/admin）
+│   ├── auth/             # 認證（login/callback/post-login）
+│   ├── liff/             # LINE LIFF 入口
+│   └── test/             # 開發測試工具
 ├── actions/              # Server Actions
 │   ├── index.ts          # 核心 Actions（對話/訊息/專案/BDD）
 │   └── admin.ts          # 管理員 Actions
@@ -277,19 +336,27 @@ app/
 │   └── sandpack-utils.ts # Sandpack 預覽工具
 ├── hooks/
 │   ├── useAuth.ts        # JWT 認證
+│   ├── useLocalePath.ts  # locale-aware window.location.href
 │   └── useVpsWebSocket.ts # WebSocket
 ├── components/
 │   ├── uiux/             # UIUX 元件（SandpackPreview/PreviewPanel/TemplatePicker/PropertyEditor）
 │   ├── dashboard/        # 儀表板元件
 │   ├── remotion/         # Remotion 動畫（fast-build/ + building-scene/）
 │   ├── building-scene/   # 3D 場景入口（dynamic import）
-│   ├── BddAnimationPanel.tsx  # BDD 需求藍圖面板（文字歷史紀錄 + 分類 Q&A）
+│   ├── LocaleSwitcher.tsx # 語言切換器（中/EN）
+│   ├── BddAnimationPanel.tsx  # BDD 需求藍圖面板
 │   └── FastBuildPlayer.tsx # 3D 工廠 Player
-├── dashboard/            # 儀表板頁面（/dashboard, /dashboard/admin）
-├── auth/                 # 認證（login/callback/post-login）
-└── api/
-    ├── vps/[...path]/    # VPS Proxy（轉發到後端）
-    └── auth/             # OAuth 路由
+├── api/
+│   ├── vps/[...path]/    # VPS Proxy（轉發到後端）
+│   └── auth/             # OAuth 路由
+│
+├── i18n/                 # next-intl 基礎設施
+│   ├── routing.ts        # locales: ['zh', 'en'], defaultLocale: 'zh'
+│   ├── navigation.ts     # locale-aware Link/redirect/useRouter
+│   └── request.ts        # getRequestConfig（Server Component 用）
+└── messages/
+    ├── zh.json           # 中文翻譯（766 keys，27 namespaces）
+    └── en.json           # 英文翻譯（766 keys，同步）
 
 tellcraft-backend/
 ├── src/
@@ -410,15 +477,22 @@ psql "$DATABASE_URL" -f tellcraft-backend/migrations/xxx.sql
 <details>
 <summary><h2>開發更新紀錄（點擊展開）</h2></summary>
 
-### UIUX 元件 i18n 國際化（2026-02-27）
+### 前端 i18n 國際化 Phase 1（2026-02-28）
 
-UIUX 全系列 12 個元件完成 `next-intl` 國際化，所有硬編碼中文字串替換為 `useTranslations('uiux')` 呼叫。
+基於 `next-intl` v4 的完整前端國際化，中/英雙語支援（766 keys，27 namespaces）。
 
-- **已處理元件**：DeviceSwitcher、TemplateCard、QualityGateReport、TemplatePicker、VariantPicker、CodePreview、InteractivePreview、PreviewPanel、PropertyEditor、UiuxChatSection（SplitLayout/SandpackPreview 無中文字串）
-- **翻譯鍵**：`uiux` 命名空間新增 ~110 個鍵值（zh.json + en.json 同步）
-- **模組級常數處理**：`FLEX_DIRECTION_OPTIONS` 等含中文 label 的常數改為 `labelKey` 引用，組件內 `t(labelKey)` 解析
-- **子元件 i18n**：不能使用 hook 的子元件（TextAlignSelect/ShadowPresetSelect/OpacitySlider/ImageUrlInput）透過 props 傳入翻譯文字
-- **插值參數**：`totalFiles`/`maxVariantsMerge`/`selectedCount`/`selectVariantMessage`/`mergeVariantsMessage`/`selectTemplateMessage` 等使用 `t('key', { param })` 格式
+- **基礎設施**：`i18n/routing.ts` + `navigation.ts` + `request.ts`，`app/[locale]/` 路由群組，Middleware 合併（next-intl + JWT 認證）
+- **翻譯檔**：`messages/zh.json` + `messages/en.json`，766 keys 完全對齊
+- **主頁面**：page.tsx 全部 20+ 內部元件（HeroSection ~ Footer），ChatSection 6 個翻譯 hook
+- **Landing 區塊**：UseCases/HowItWorks/Stats/Comparison/Showcase/FAQ/Testimonial/CTA/Footer
+- **儀表板**：12 個 dashboard pages + 9 個 dashboard components（Sidebar/DashboardContent/DashboardShell/Chart/DataTable/StatsCard 等）
+- **認證**：login/callback/post-login/liff，4 頁全量翻譯
+- **UIUX 元件**：12 個（DeviceSwitcher/TemplateCard/QualityGateReport/TemplatePicker/VariantPicker/CodePreview/InteractivePreview/PreviewPanel/PropertyEditor/UiuxChatSection 等）
+- **UI 元件**：LoginPrompt/ConversationPicker/ProjectReminder/QuickReplies/SpecGenerationView/BddAnimationPanel/BuildingPlayer + deployer 3 元件
+- **模組級常數**：`INTERNAL_COMMAND_LABELS` → `COMMAND_KEYS` + `getCommandLabel()`，`CSS_LABELS` → `tCssLabel()` 動態查詢
+- **locale-aware 導航**：`Link`/`redirect`/`useRouter` 替換為 `@/i18n/navigation`，`useLocalePath` hook 處理 `window.location.href`
+- **LocaleSwitcher**：整合到主頁 header（landing + chat mode）
+- **TypeScript 0 錯誤，ESLint 0 新增錯誤**
 
 ### LINE Bot 深度整合（2026-02-27）
 

@@ -87,7 +87,8 @@
       "Bash(gh pr:*)",
       "Bash(tail:*)",
       "Bash(npx eslint:*)",
-      "Bash(sips:*)"
+      "Bash(sips:*)",
+      "Bash(echo === i18n Infrastructure ===:*)"
     ]
   }
 }

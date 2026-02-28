@@ -15,6 +15,7 @@ export default tseslint.config(
       'no-undef': 'off', // TypeScript handles this; js.configs.recommended enables it but it doesn't understand TS types
       '@typescript-eslint/no-unused-vars': ['warn', { argsIgnorePattern: '^_', varsIgnorePattern: '^_', destructuredArrayIgnorePattern: '^_' }],
       '@typescript-eslint/no-explicit-any': 'warn',
+      '@typescript-eslint/ban-ts-comment': ['error', { 'ts-nocheck': 'allow-with-description' }],
     },
   },
   {
