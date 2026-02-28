@@ -1,4 +1,5 @@
 import { recordLlmUsage } from '../db/client'
+import { safeParseJson } from '../utils/safe-parse-json'
 import { ClarifyItem } from './bdd-session'
 import { LlmTrackingContext } from './classifier'
 import { DecisionSummary } from './clarify-dedup'
@@ -267,22 +268,12 @@ ${partialSpecContext}
 
     console.log(`[PRD Discovery] LLM 回應完成 (tokens: ${inputTokens}/${outputTokens}, cost: $${costUsd.toFixed(4)}, conversation: ${trackingContext?.conversationId || 'none'})`)
 
-    // 解析回應
+    // 安全解析回應
     const content = data.content?.[0]?.text || ''
-    const jsonMatch = content.match(/```json\s*([\s\S]*?)\s*```/) || content.match(/```\s*([\s\S]*?)\s*```/) || content.match(/\{[\s\S]*\}/)
-
-    if (!jsonMatch) {
-      console.error('[PRD Discovery] 無法解析 LLM 回應，原始內容:', content.slice(0, 500))
-      return { success: false, error: 'AI 回應格式異常，請重新描述您的需求。' }
-    }
-
-    const jsonStr = jsonMatch[1] || jsonMatch[0]
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    let parsed: any
-    try {
-      parsed = JSON.parse(jsonStr)
-    } catch (parseErr) {
-      console.error('[PRD Discovery] JSON 解析失敗，原始內容:', jsonStr.slice(0, 500))
+    const parsed = safeParseJson<any>(content)
+    if (!parsed) {
+      console.error('[PRD Discovery] 無法解析 LLM 回應，原始內容:', content.slice(0, 500))
       return { success: false, error: 'AI 回應格式異常，請重新描述您的需求。' }
     }
 

@@ -6,6 +6,7 @@
 
 import Anthropic from '@anthropic-ai/sdk'
 import { recordLlmUsage } from '../db/client'
+import { safeParseJson } from '../utils/safe-parse-json'
 import { ClarifyItem } from './bdd-session'
 
 // ============================================================
@@ -119,20 +120,9 @@ export async function generateDecisionSummary(
     const content = finalMessage.content[0]
     if (content.type !== 'text') return null
 
-    let jsonStr = content.text.trim()
-    const codeBlockMatch = jsonStr.match(/`{3,}(?:json)?\s*\n?([\s\S]*?)`{3,}/)
-    if (codeBlockMatch) {
-      jsonStr = codeBlockMatch[1].trim()
-    }
-    if (jsonStr.startsWith('`')) {
-      jsonStr = jsonStr.replace(/^[`\s]*(?:json)?\s*/, '').replace(/[`\s]*$/, '')
-    }
-
-    const parsed = JSON.parse(jsonStr) as DecisionSummary
-
-    // 基本驗證
-    if (!parsed.coveredTopics || !Array.isArray(parsed.coveredTopics)) {
-      console.warn('[ClarifyDedup] Decision Summary 格式錯誤，缺少 coveredTopics')
+    const parsed = safeParseJson<DecisionSummary>(content.text)
+    if (!parsed || !parsed.coveredTopics || !Array.isArray(parsed.coveredTopics)) {
+      console.warn('[ClarifyDedup] Decision Summary 格式錯誤或無法解析')
       return null
     }
 
@@ -298,22 +288,13 @@ export async function deduplicateQuestions(
     const content = finalMessage.content[0]
     if (content.type !== 'text') return newItems
 
-    let jsonStr = content.text.trim()
-    const codeBlockMatch = jsonStr.match(/`{3,}(?:json)?\s*\n?([\s\S]*?)`{3,}/)
-    if (codeBlockMatch) {
-      jsonStr = codeBlockMatch[1].trim()
-    }
-    if (jsonStr.startsWith('`')) {
-      jsonStr = jsonStr.replace(/^[`\s]*(?:json)?\s*/, '').replace(/[`\s]*$/, '')
-    }
-
-    const parsed = JSON.parse(jsonStr) as {
+    const parsed = safeParseJson<{
       keep: number[]
       remove: Array<{ index: number; reason: string }>
-    }
+    }>(content.text)
 
-    if (!parsed.keep || !Array.isArray(parsed.keep)) {
-      console.warn('[ClarifyDedup] Dedup 結果格式錯誤，保留所有問題')
+    if (!parsed || !parsed.keep || !Array.isArray(parsed.keep)) {
+      console.warn('[ClarifyDedup] Dedup 結果格式錯誤或無法解析，保留所有問題')
       return newItems
     }
 

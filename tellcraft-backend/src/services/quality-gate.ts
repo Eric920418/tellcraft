@@ -565,8 +565,8 @@ ${codeBlocks.join('\n\n')}
  * 解析 LLM 修復結果，合併回原始代碼結構
  */
 function parseFixedFiles(content: string, originalCode: GeneratedCode): GeneratedCode {
-  const tsxRegex = /```tsx:([^\n]+)\n([\s\S]*?)```/g
-  const cssRegex = /```css:([^\n]+)\n([\s\S]*?)```/g
+  const tsxRegex = /`{3,}tsx:([^\n]+)\n([\s\S]*?)`{3,}/g
+  const cssRegex = /`{3,}css:([^\n]+)\n([\s\S]*?)`{3,}/g
 
   const fixedPages = new Map<string, string>()
   const fixedComponents = new Map<string, string>()

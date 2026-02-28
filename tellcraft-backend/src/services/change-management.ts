@@ -5,6 +5,7 @@
 
 import Anthropic from '@anthropic-ai/sdk'
 import { recordLlmUsage } from '../db/client'
+import { safeParseJson } from '../utils/safe-parse-json'
 import { LlmTrackingContext } from './classifier'
 import { GeneratedFeature } from './formulation'
 
@@ -138,19 +139,9 @@ ${existingSpecs.esDocument ? `**ES 文檔**（前 300 字）：\n${existingSpecs
       return { success: false, error: 'LLM 回應格式錯誤' }
     }
 
-    let jsonStr = content.text.trim()
-    const codeBlockMatch = jsonStr.match(/`{3,}(?:json)?\s*\n?([\s\S]*?)`{3,}/)
-    if (codeBlockMatch) {
-      jsonStr = codeBlockMatch[1].trim()
-    }
-    if (jsonStr.startsWith('`')) {
-      jsonStr = jsonStr.replace(/^[`\s]*(?:json)?\s*/, '').replace(/[`\s]*$/, '')
-    }
-
-    const impact = JSON.parse(jsonStr) as ImpactAnalysis
-
-    if (!impact.changeType || !impact.displayText) {
-      return { success: false, error: '影響分析結果格式不完整' }
+    const impact = safeParseJson<ImpactAnalysis>(content.text)
+    if (!impact || !impact.changeType || !impact.displayText) {
+      return { success: false, error: '影響分析結果格式不完整或無法解析' }
     }
 
     return { success: true, impact }
@@ -262,19 +253,14 @@ ${existingSpecs.entityMapping}
       return { success: false, error: 'LLM 回應格式錯誤' }
     }
 
-    let jsonStr = responseContent.text.trim()
-    const codeBlockMatch = jsonStr.match(/`{3,}(?:json)?\s*\n?([\s\S]*?)`{3,}/)
-    if (codeBlockMatch) {
-      jsonStr = codeBlockMatch[1].trim()
-    }
-    if (jsonStr.startsWith('`')) {
-      jsonStr = jsonStr.replace(/^[`\s]*(?:json)?\s*/, '').replace(/[`\s]*$/, '')
-    }
-
-    const parsed = JSON.parse(jsonStr) as {
+    const parsed = safeParseJson<{
       features?: GeneratedFeature[]
       schemaSql?: string | null
       entityMapping?: string | null
+    }>(responseContent.text)
+
+    if (!parsed) {
+      return { success: false, error: 'LLM 回應無法解析為有效 JSON' }
     }
 
     const updatedSpecs: UpdatedSpecs = {}

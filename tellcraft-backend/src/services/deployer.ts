@@ -1764,7 +1764,7 @@ ${codeBlocks.join('\n\n')}
 
     // 解析新依賴
     const newDependencies: Record<string, string> = {}
-    const depsMatch = content.match(/```json:NEW_DEPENDENCIES\n([\s\S]*?)```/)
+    const depsMatch = content.match(/`{3,}json:NEW_DEPENDENCIES\n([\s\S]*?)`{3,}/)
     if (depsMatch) {
       try {
         const parsed = JSON.parse(depsMatch[1].trim())
@@ -1789,7 +1789,7 @@ ${codeBlocks.join('\n\n')}
  * 解析 LLM 修復結果，合併回原始代碼結構
  */
 function parseLLMFixedFiles(content: string, originalCode: GeneratedCode): GeneratedCode {
-  const fileRegex = /```(?:tsx|ts|jsx|js|css):([^\n]+)\n([\s\S]*?)```/g
+  const fileRegex = /`{3,}(?:tsx|ts|jsx|js|css):([^\n]+)\n([\s\S]*?)`{3,}/g
 
   const fixedPages = new Map<string, string>()
   const fixedComponents = new Map<string, string>()

@@ -392,6 +392,8 @@ tellcraft-backend/
 │   │   ├── event-storming.ts     # Event Storming
 │   │   ├── change-management.ts  # 需求變更管理
 │   │   └── conversation-lock.ts  # 對話互斥鎖
+│   ├── utils/
+│   │   └── safe-parse-json.ts   # LLM JSON 安全解析（四層防禦，全後端共用）
 │   ├── routes/                   # API 路由（conversation/project/session/bdd/templates/operations/auth/health/upload/line-bot）
 │   ├── db/client.ts              # PostgreSQL 客戶端
 │   └── middleware/auth.ts        # JWT 認證中間件
@@ -486,6 +488,15 @@ psql "$DATABASE_URL" -f tellcraft-backend/migrations/xxx.sql
 
 <details>
 <summary><h2>開發更新紀錄（點擊展開）</h2></summary>
+
+### 統一 LLM JSON 解析防禦（2026-02-28）
+
+全後端 13 個檔案統一使用 `safeParseJson`（`utils/safe-parse-json.ts`），修復 Haiku 模型偶爾用 4+ 反引號包裹 JSON 導致解析失敗的問題。
+
+- **`safeParseJson` 增強**：四層防禦（code fence regex → 反引號清除 → 找首個 `{`/`[` → 清理尾隨逗號/控制字符）
+- **12 個 service 替換**：`bdd-to-ui-spec`/`clarify-dedup`(×2)/`change-management`(×2)/`event-storming`/`classifier`/`spec-discovery`/`uiux-generation`(×3)/`prd-discovery`/`formulation`(×4) — 刪除各自的 regex 解析，改 import 共用函數
+- **非 JSON code block regex**：`uiux-generation`(`parseGeneratedFiles`/`parseCompletedFileBlocks`)/`deployer`(`fixBuildErrors`/`parseLLMFixedFiles`)/`quality-gate`(`parseFixedFiles`) — `` ``` `` → `` `{3,} `` 支援 3+ 反引號
+- **不改的部分**：`iteration-skill`(深複製)/`line-bot-handler`(Webhook)/Redis 讀取/`formulation` L564(Gherkin)/`actions-design`(YAML)
 
 ### i18n Phase 2：Error/Utility i18n（2026-02-28）
 

@@ -5,6 +5,7 @@
 // ============================================================
 
 import { recordLlmUsage } from '../db/client'
+import { safeParseJson } from '../utils/safe-parse-json'
 import { LlmTrackingContext } from './classifier'
 
 // Haiku 定價 (每百萬 tokens)
@@ -191,38 +192,7 @@ async function callHaiku(
   return { success: false, error: lastError }
 }
 
-// ============================================================
-// JSON 安全解析
-// ============================================================
-
-function safeParseJson<T>(text: string): T | null {
-  // 嘗試從 markdown code block 中提取 JSON
-  const codeBlockMatch = text.match(/`{3,}(?:json)?\s*\n?([\s\S]*?)\n?`{3,}/)
-  let jsonStr = codeBlockMatch ? codeBlockMatch[1].trim() : text.trim()
-  if (jsonStr.startsWith('`')) {
-    jsonStr = jsonStr.replace(/^[`\s]*(?:json)?\s*/, '').replace(/[`\s]*$/, '')
-  }
-
-  try {
-    return JSON.parse(jsonStr) as T
-  } catch {
-    // 嘗試找到第一個 { 或 [ 開始的位置
-    const firstBrace = jsonStr.indexOf('{')
-    const firstBracket = jsonStr.indexOf('[')
-    const start = Math.min(
-      firstBrace >= 0 ? firstBrace : Infinity,
-      firstBracket >= 0 ? firstBracket : Infinity
-    )
-    if (start < Infinity) {
-      try {
-        return JSON.parse(jsonStr.slice(start)) as T
-      } catch {
-        return null
-      }
-    }
-    return null
-  }
-}
+// safeParseJson 已移至 ../utils/safe-parse-json.ts 共用
 
 // ============================================================
 // 1. shouldRunEventStorming — 判斷是否需要 ES

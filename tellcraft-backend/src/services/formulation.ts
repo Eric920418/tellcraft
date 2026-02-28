@@ -1,4 +1,5 @@
 import { recordLlmUsage } from '../db/client'
+import { safeParseJson } from '../utils/safe-parse-json'
 import { ClarifyItem } from './bdd-session'
 import { LlmTrackingContext } from './classifier'
 
@@ -205,15 +206,11 @@ ${decisions || '（無額外決策）'}`
   }
 
   try {
-    const jsonMatch = response.content?.match(/```json\s*([\s\S]*?)\s*```/) ||
-                      response.content?.match(/\{[\s\S]*\}/)
-    if (!jsonMatch) {
+    const parsed = safeParseJson<{ schemaSql?: string; entityMapping?: string }>(response.content || '')
+    if (!parsed) {
       console.error('[Formulation] Schema LLM 回應無法解析為 JSON，原始回應前 500 字:', response.content?.substring(0, 500))
       return { success: false, error: '無法解析 LLM 回應' }
     }
-
-    const jsonStr = jsonMatch[1] || jsonMatch[0]
-    const parsed = JSON.parse(jsonStr)
 
     console.log('[Formulation] SQL Schema 生成完成')
     return {
@@ -329,15 +326,11 @@ ${decisions || '（無額外決策）'}`
   }
 
   try {
-    const jsonMatch = response.content?.match(/```json\s*([\s\S]*?)\s*```/) ||
-                      response.content?.match(/\{[\s\S]*\}/)
-    if (!jsonMatch) {
+    const parsed = safeParseJson<{ features?: FeatureInfo[] }>(response.content || '')
+    if (!parsed) {
       console.error('[Formulation] Features LLM 回應無法解析為 JSON，原始回應前 500 字:', response.content?.substring(0, 500))
       return { success: false, error: '無法解析 LLM 回應' }
     }
-
-    const jsonStr = jsonMatch[1] || jsonMatch[0]
-    const parsed = JSON.parse(jsonStr)
 
     console.log(`[Formulation] 識別到 ${parsed.features?.length || 0} 個 Features`)
     return {
@@ -855,15 +848,11 @@ ${decisions}` : ''}`
   }
 
   try {
-    const jsonMatch = response.content?.match(/```json\s*([\s\S]*?)\s*```/) ||
-                      response.content?.match(/\{[\s\S]*\}/)
-    if (!jsonMatch) {
+    const parsed = safeParseJson<{ features?: GeneratedFeature[] }>(response.content || '')
+    if (!parsed) {
       console.error('[Formulation] Fix LLM 回應無法解析為 JSON，原始回應前 500 字:', response.content?.substring(0, 500))
       return { success: false, error: '無法解析 LLM 回應' }
     }
-
-    const jsonStr = jsonMatch[1] || jsonMatch[0]
-    const parsed = JSON.parse(jsonStr)
 
     console.log(`[Formulation] 修復完成，${parsed.features?.length || 0} 個 Features`)
     return {
@@ -977,15 +966,11 @@ ${decisions || '（無額外決策）'}`
   }
 
   try {
-    const jsonMatch = response.content?.match(/```json\s*([\s\S]*?)\s*```/) ||
-                      response.content?.match(/\{[\s\S]*\}/)
-    if (!jsonMatch) {
+    const parsed = safeParseJson<{ features?: GeneratedFeature[]; uncertainItems?: string[]; schemaSql?: string; entityMapping?: string }>(response.content || '')
+    if (!parsed) {
       console.error('[Formulation] Draft Batch LLM 回應無法解析為 JSON')
       return { success: false, error: '無法解析 LLM 回應' }
     }
-
-    const jsonStr = jsonMatch[1] || jsonMatch[0]
-    const parsed = JSON.parse(jsonStr)
 
     const features = (parsed.features || []) as GeneratedFeature[]
     const uncertainItems = (parsed.uncertainItems || []) as string[]

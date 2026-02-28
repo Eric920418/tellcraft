@@ -1,4 +1,5 @@
 import { recordLlmUsage } from '../db/client'
+import { safeParseJson } from '../utils/safe-parse-json'
 import { ClarifyItem } from './bdd-session'
 import { LlmTrackingContext } from './classifier'
 import { GeneratedFeature } from './formulation'
@@ -300,32 +301,33 @@ ${existingQuestions ? `---
   }
 
   try {
-    const jsonMatch = response.content?.match(/```json\s*([\s\S]*?)\s*```/) ||
-                      response.content?.match(/\{[\s\S]*\}/)
-    if (!jsonMatch) {
-      // 截斷且完全無 JSON → 視為無問題
-      if (response.truncated) {
-        console.warn('[SpecDiscovery] 截斷且無法提取 JSON，視為無問題繼續')
-        return { success: true, issues: [] }
+    // 先用 safeParseJson 嘗試解析
+    let parsed = safeParseJson<{ issues?: unknown[] }>(response.content || '')
+
+    if (!parsed) {
+      // safeParseJson 失敗：可能是截斷的 JSON，嘗試修復
+      const jsonMatch = response.content?.match(/`{3,}(?:json)?\s*\n?([\s\S]*?)\n?`{3,}/) ||
+                        response.content?.match(/\{[\s\S]*\}/)
+      if (!jsonMatch) {
+        if (response.truncated) {
+          console.warn('[SpecDiscovery] 截斷且無法提取 JSON，視為無問題繼續')
+          return { success: true, issues: [] }
+        }
+        return { success: false, error: '無法解析 LLM 回應' }
       }
-      return { success: false, error: '無法解析 LLM 回應' }
-    }
 
-    let jsonStr = jsonMatch[1] || jsonMatch[0]
-    let parsed: { issues?: unknown[] }
-
-    try {
-      parsed = JSON.parse(jsonStr)
-    } catch {
-      // JSON 不完整（截斷），嘗試修復：截取到最後一個完整的 } 並補上 ]}
-      console.warn('[SpecDiscovery] JSON 解析失敗，嘗試修復截斷的 JSON')
+      const jsonStr = jsonMatch[1] || jsonMatch[0]
+      console.warn('[SpecDiscovery] safeParseJson 失敗，嘗試修復截斷的 JSON')
       const lastCompleteObj = jsonStr.lastIndexOf('},')
       if (lastCompleteObj > 0) {
-        jsonStr = jsonStr.substring(0, lastCompleteObj + 1) + ']}'
-        parsed = JSON.parse(jsonStr)
-        console.log('[SpecDiscovery] JSON 修復成功')
-      } else {
-        // 無法修復，視為無問題繼續（不阻塞流程）
+        const fixedStr = jsonStr.substring(0, lastCompleteObj + 1) + ']}'
+        parsed = safeParseJson<{ issues?: unknown[] }>(fixedStr)
+        if (parsed) {
+          console.log('[SpecDiscovery] JSON 修復成功')
+        }
+      }
+
+      if (!parsed) {
         console.warn('[SpecDiscovery] JSON 無法修復，視為無問題繼續')
         return { success: true, issues: [] }
       }

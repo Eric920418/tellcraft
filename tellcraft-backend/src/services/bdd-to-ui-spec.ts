@@ -5,6 +5,7 @@
 
 import Anthropic from '@anthropic-ai/sdk'
 import { recordLlmUsage } from '../db/client'
+import { safeParseJson } from '../utils/safe-parse-json'
 
 // ============================================================
 // 類型定義
@@ -222,18 +223,11 @@ ${bddSpec}
           return { success: false, error: 'LLM 回應格式錯誤' }
         }
 
-        // 解析 JSON（可能包在 code block 裡，LLM 有時用 3+ 個反引號）
-        let jsonStr = content.text.trim()
-        const codeBlockMatch = jsonStr.match(/`{3,}(?:json)?\s*\n?([\s\S]*?)`{3,}/)
-        if (codeBlockMatch) {
-          jsonStr = codeBlockMatch[1].trim()
+        // 安全解析 JSON（支援 3+ 反引號 code fence、尾隨逗號等）
+        const spec = safeParseJson<UIRequirementsSpec>(content.text)
+        if (!spec) {
+          return { success: false, error: 'LLM 回應無法解析為有效 JSON' }
         }
-        // 最後防線：如果還是以反引號開頭，暴力去除首尾非 JSON 字元
-        if (jsonStr.startsWith('`')) {
-          jsonStr = jsonStr.replace(/^[`\s]*(?:json)?\s*/, '').replace(/[`\s]*$/, '')
-        }
-
-        const spec = JSON.parse(jsonStr) as UIRequirementsSpec
 
         // 基本驗證
         if (!spec.pages || !Array.isArray(spec.pages) || spec.pages.length === 0) {

@@ -1,5 +1,6 @@
 import { SkillName, SKILL_REGISTRY, getSkillDescriptionsForClassifier } from './registry'
 import { recordLlmUsage } from '../db/client'
+import { safeParseJson } from '../utils/safe-parse-json'
 
 // Haiku 定價 (每百萬 tokens)
 const HAIKU_PRICING = { input: 0.8, output: 4 }
@@ -200,16 +201,20 @@ ${skillDescriptions}
       return ruleBasedClassification(message)
     }
 
-    // 解析 JSON 回應
-    const jsonMatch = content.match(/\{[\s\S]*\}/)
-    if (!jsonMatch) {
+    // 安全解析 JSON 回應
+    const parsed = safeParseJson<{
+      intent?: string
+      confidence?: number
+      reasoning?: string
+      suggestedProjectName?: string
+      extractedEntities?: { projectType?: string; features?: string[] }
+    }>(content)
+    if (!parsed) {
       return ruleBasedClassification(message)
     }
 
-    const parsed = JSON.parse(jsonMatch[0])
-
     return {
-      intent: parsed.intent || 'unknown',
+      intent: (parsed.intent || 'unknown') as ClassifierIntent,
       confidence: parsed.confidence || 0.5,
       reasoning: parsed.reasoning || '',
       suggestedProjectName: parsed.suggestedProjectName || undefined,

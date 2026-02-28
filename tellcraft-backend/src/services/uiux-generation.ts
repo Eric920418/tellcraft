@@ -7,6 +7,7 @@
 import Anthropic from '@anthropic-ai/sdk'
 import { formatUISpecForPrompt, UIRequirementsSpec } from './bdd-to-ui-spec'
 import { recordLlmUsage } from '../db/client'
+import { safeParseJson } from '../utils/safe-parse-json'
 
 // 模組級 Anthropic 單例（避免每次 callClaude 都 new）
 let anthropicClient: Anthropic | null = null
@@ -790,15 +791,11 @@ ${tier === 'functional' ? '- 不要使用漸層（除非明確要求）\n- 不�
   }
 
   try {
-    // 解析 JSON
-    const jsonMatch = response.content.match(/```json\s*([\s\S]*?)\s*```/) ||
-                      response.content.match(/\{[\s\S]*"variants"[\s\S]*\}/)
-    if (!jsonMatch) {
+    // 安全解析 JSON
+    const parsed = safeParseJson<{ variants?: unknown[] }>(response.content)
+    if (!parsed) {
       return { success: false, error: '無法解析 LLM 回應' }
     }
-
-    const jsonStr = jsonMatch[1] || jsonMatch[0]
-    const parsed = JSON.parse(jsonStr)
 
     // 驗證變體結構
     if (!parsed.variants || !Array.isArray(parsed.variants) || parsed.variants.length !== 5) {
@@ -1030,9 +1027,9 @@ export function parseGeneratedFiles(content: string, designSystem: DesignSystem)
   components: GeneratedComponent[]
   styles: string
 } {
-  const tsxRegex = /```tsx:([^\n]+)\n([\s\S]*?)```/g
-  const tsRegex = /```ts:([^\n]+)\n([\s\S]*?)```/g
-  const cssRegex = /```css:([^\n]+)\n([\s\S]*?)```/g
+  const tsxRegex = /`{3,}tsx:([^\n]+)\n([\s\S]*?)`{3,}/g
+  const tsRegex = /`{3,}ts:([^\n]+)\n([\s\S]*?)`{3,}/g
+  const cssRegex = /`{3,}css:([^\n]+)\n([\s\S]*?)`{3,}/g
 
   const pages: GeneratedComponent[] = []
   const components: GeneratedComponent[] = []
@@ -1090,7 +1087,7 @@ export function parseGeneratedFiles(content: string, designSystem: DesignSystem)
 
   // 如果沒有解析到 styles，嘗試其他格式
   if (!styles) {
-    const cssMatch = content.match(/```css\n([\s\S]*?)```/)
+    const cssMatch = content.match(/`{3,}css\n([\s\S]*?)`{3,}/)
     if (cssMatch) {
       styles = cssMatch[1].trim()
     }
@@ -1122,9 +1119,9 @@ function parseCompletedFileBlocks(accumulatedText: string): {
   styles: string
   completedBlockCount: number
 } {
-  const tsxRegex = /```tsx:([^\n]+)\n([\s\S]*?)```/g
-  const tsRegex = /```ts:([^\n]+)\n([\s\S]*?)```/g
-  const cssRegex = /```css:([^\n]+)\n([\s\S]*?)```/g
+  const tsxRegex = /`{3,}tsx:([^\n]+)\n([\s\S]*?)`{3,}/g
+  const tsRegex = /`{3,}ts:([^\n]+)\n([\s\S]*?)`{3,}/g
+  const cssRegex = /`{3,}css:([^\n]+)\n([\s\S]*?)`{3,}/g
 
   const pages: GeneratedComponent[] = []
   const components: GeneratedComponent[] = []
@@ -2260,26 +2257,12 @@ ${sourceType === 'ideas'
   }
 
   try {
-    // 多種 JSON 提取策略（LLM 回傳格式不穩定）
-    const jsonMatch = response.content.match(/```json\s*([\s\S]*?)\s*```/) ||     // ```json ... ```
-                      response.content.match(/```\s*([\s\S]*?)\s*```/) ||          // ``` ... ```（無語言標記）
-                      response.content.match(/(\{[\s\S]*"styleSummary"[\s\S]*\})/) // 裸 JSON
-    if (!jsonMatch) {
+    // 安全解析 JSON（含尾隨逗號/控制字符清理）
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const parsed = safeParseJson<any>(response.content)
+    if (!parsed) {
       console.error('[UIUX] Design Brief JSON 提取失敗，LLM 原始回應:', response.content.substring(0, 500))
       return { success: false, error: '無法解析設計方向摘要' }
-    }
-
-    const jsonStr = jsonMatch[1] || jsonMatch[0]
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    let parsed: any
-    try {
-      parsed = JSON.parse(jsonStr)
-    } catch {
-      // JSON 解析失敗：嘗試清理常見格式問題（尾隨逗號、控制字符）
-      const cleaned = jsonStr
-        .replace(/,\s*([}\]])/g, '$1')       // 移除尾隨逗號
-        .replace(/[\x00-\x1f\x7f]/g, ' ')   // 移除控制字符
-      parsed = JSON.parse(cleaned)
     }
 
     // 推斷 tier（LLM 回傳 + fallback）
@@ -2396,14 +2379,11 @@ ${currentBrief.signature ? `- Signature Element：${currentBrief.signature}` : '
   }
 
   try {
-    const jsonMatch = response.content.match(/```json\s*([\s\S]*?)\s*```/) ||
-                      response.content.match(/\{[\s\S]*"styleSummary"[\s\S]*\}/)
-    if (!jsonMatch) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const parsed = safeParseJson<any>(response.content)
+    if (!parsed) {
       return { success: false, error: '無法解析調整後的設計方向' }
     }
-
-    const jsonStr = jsonMatch[1] || jsonMatch[0]
-    const parsed = JSON.parse(jsonStr)
 
     // 解析 tier（保持當前 tier 如果 LLM 沒回傳）
     let recommendedTier = currentBrief.recommendedTier
