@@ -7,7 +7,7 @@
 // ============================================================
 
 import { Router, type Router as RouterType } from 'express'
-import validateSignature from '@line/bot-sdk/lib/validate-signature'
+import { validateSignature } from '@line/bot-sdk'
 import { handleFollow, handleTextMessage, handlePostback } from '../services/line-bot-handler'
 
 const router: RouterType = Router()
