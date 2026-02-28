@@ -333,7 +333,7 @@ Server Action 錯誤訊息 + 工具模組中文字串國際化（+117 keys，2 n
 | **認證** | Google/LINE OAuth、JWT 雙軌（localStorage + Cookie）、訪客→帳號合併、帳號綁定（雙登入）、auth 頁面 i18n（next-intl） |
 | **儀表板** | 用戶統計、專案管理、版本歷史、管理員面板、LLM 用量追蹤、Dashboard 元件 i18n（next-intl） |
 | **i18n** | next-intl 多語系（zh/en）、UI 元件全量翻譯、Server Action 錯誤訊息 i18n（getTranslations）、lib 模組英文化、error code 機制、883 keys / 29 namespaces |
-| **防護** | 三層防刷（前端冷卻 + API 限速 + Worker 鎖）、五層輸入防禦（Prefilter 28 regex + isDesignFeedback + checkBuildRelevance + Classifier + refineCode）、LLM 自動重試 |
+| **防護** | 三層防刷（前端冷卻 + API 限速 + Worker 鎖）、六層輸入防禦 + 違規冷卻升級（3→60s / 6→5min / 10→30min）、LLM 自動重試 |
 | **通知** | LINE 推播通知（BDD 完成/UIUX 生成完成/部署成功失敗），離線用戶也能收到 |
 | **LINE Bot** | LINE 對話內完整 Fast Build 體驗（描述需求→生成→部署），Flex Message 卡片 + Quick Reply |
 | **UX** | 對話回退、錯誤恢復、自動恢復對話、專案自動命名、Markdown 渲染 |
@@ -529,12 +529,13 @@ psql "$DATABASE_URL" -f tellcraft-backend/migrations/xxx.sql
 
 - **根因**：`handleProcessMessage` 的 `mode === 'fast'` 路徑直接呼叫 `executeFastBuildSkill()`，完全跳過意圖驗證
 - **修復**：在 fast mode 入口加入 `isDesignFeedback()` 預驗證，攔截亂碼/問候/閒聊等無關輸入
-- **五層防禦**：
-  1. `prefilterMessage()`：全域攔截空訊息/超長/injection（28 個 regex，含混合語言）/頻率限制（30 秒 6 條）
+- **六層防禦**：
+  1. `prefilterMessage()`：冷卻期檢查 → 空訊息/超長 → injection（28 個 regex，含混合語言）+ 違規累計 → 頻率限制（30 秒 6 條），全訊息中英雙語
   2. `isDesignFeedback()`：fast mode 入口 + 迭代階段專用（亂碼/問候/閒聊/設計關鍵詞正向放行）
-  3. `checkBuildRelevance()`：fast mode 語義相關性檢查（正向關鍵詞零成本放行 + 微型 Haiku 二元判斷兜底，~$0.0002/次）
-  4. `classifyIntent()`：正常模式 Haiku 意圖分類（abuse/chitchat/onboarding 模板回覆）
+  3. `checkBuildRelevance()`：fast mode 語義相關性 + 具體性（強信號 ~80 詞直接放行 / 弱信號 Haiku 三元判斷：通過/模糊/不相關），中英雙語
+  4. `classifyIntent()`：正常模式 Haiku 意圖分類（abuse 觸發 `recordAbuseViolation` 累計違規）
   5. `refineCode [NO_CHANGE]`：LLM 級別最後防線（迭代階段）
+  6. **違規冷卻升級**：Redis `violation:{userId}` 計數器（24h TTL），3 次→60s / 6 次→5min / 10 次→30min 冷卻
 
 ### 統一 LLM JSON 解析防禦（2026-02-28）
 
@@ -811,9 +812,10 @@ Sandpack 取代 1105 行 regex 轉換器。支援 streaming 增量更新、裝�
 
 ### Classifier 防禦體系（2026-02-08，2026-03-01 增強）
 
-- **Prefilter**（零 LLM）：28 個 injection regex（含混合語言）+ Rate Limit 30 秒 6 條
-- **正常模式**：Prefilter → Classifier Meta Intent（Haiku，abuse 含警告回覆）→ Skill Intent
-- **快速模式**：Prefilter → `isDesignFeedback()`（零 LLM）→ `checkBuildRelevance()`（正向關鍵詞 + 微型 Haiku 兜底）
+- **Prefilter**（零 LLM）：冷卻期攔截 → injection 28 regex + 違規累計 → Rate Limit 30s/6 條，中英雙語
+- **違規升級**：Redis `violation:{userId}` 24h TTL，injection/abuse 均累計，3 次→60s / 6 次→5min / 10 次→30min 冷卻
+- **正常模式**：Prefilter → Classifier Meta Intent（abuse 觸發 `recordAbuseViolation`）→ Skill Intent
+- **快速模式**：Prefilter → `isDesignFeedback()` → `checkBuildRelevance()`（強信號 ~80 詞 / 弱信號 Haiku 三元：通過/模糊/不相關）
 
 ### Design Tier（2026-02-06）
 

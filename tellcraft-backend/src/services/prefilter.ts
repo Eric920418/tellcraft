@@ -199,6 +199,16 @@ const MAX_MESSAGE_LENGTH = 5000
 const RATE_LIMIT_WINDOW = 30  // 秒
 const RATE_LIMIT_MAX = 6
 
+// ── 違規冷卻升級 ──
+// 累計違規（injection/abuse）→ 冷卻期逐級升級
+// Redis key: `violation:{userId}` (count), TTL 24 小時自動歸零
+const VIOLATION_THRESHOLDS = [
+  { minCount: 3, cooldownSeconds: 60 },    // 第 3-5 次：冷卻 1 分鐘
+  { minCount: 6, cooldownSeconds: 300 },   // 第 6-9 次：冷卻 5 分鐘
+  { minCount: 10, cooldownSeconds: 1800 },  // 第 10+ 次：冷卻 30 分鐘
+]
+const VIOLATION_TTL = 86400  // 24 小時後歸零
+
 // Prompt injection 偵測模式
 // 設計原則：Tellcraft 讓用戶「描述產品需求」，正常需求可能包含
 // "forget password"、"act as admin"、"ignore items above $100" 等用語。
@@ -239,21 +249,85 @@ const INJECTION_PATTERNS = [
 ]
 
 /**
+ * 記錄違規並檢查是否觸發冷卻（Redis 原子操作）
+ *
+ * @returns 冷卻秒數（0 = 未觸發冷卻，正常返回違規回覆）
+ */
+async function recordViolation(userId: string, redis: Redis): Promise<number> {
+  const key = `violation:${userId}`
+  try {
+    // 原子操作：INCR + 確保 TTL
+    const luaScript = `
+      local count = redis.call("INCR", KEYS[1])
+      if count == 1 then
+        redis.call("EXPIRE", KEYS[1], ARGV[1])
+      end
+      return count
+    `
+    const count = await redis.eval(luaScript, 1, key, VIOLATION_TTL) as number
+    console.warn(`[Prefilter] 違規記錄: userId=${userId}, count=${count}`)
+
+    // 從高到低匹配冷卻等級
+    for (let i = VIOLATION_THRESHOLDS.length - 1; i >= 0; i--) {
+      if (count >= VIOLATION_THRESHOLDS[i].minCount) {
+        const cooldown = VIOLATION_THRESHOLDS[i].cooldownSeconds
+        // 設定冷卻 key
+        const cooldownKey = `cooldown:${userId}`
+        await redis.set(cooldownKey, '1', 'EX', cooldown)
+        return cooldown
+      }
+    }
+    return 0
+  } catch (err) {
+    console.error('[Prefilter] 違規記錄失敗（降級跳過）:', err)
+    return 0
+  }
+}
+
+/**
+ * 檢查用戶是否在冷卻期內
+ */
+async function checkCooldown(userId: string, redis: Redis): Promise<number> {
+  try {
+    const cooldownKey = `cooldown:${userId}`
+    const ttl = await redis.ttl(cooldownKey)
+    return ttl > 0 ? ttl : 0
+  } catch {
+    return 0
+  }
+}
+
+/**
  * 前置過濾用戶消息（零 LLM 成本）
  *
- * 檢查順序：空消息 → 長度上限 → Prompt injection → Rate limiting
+ * 檢查順序：冷卻期 → 空消息 → 長度上限 → Prompt injection（+ 違規累計）→ Rate limiting
  */
 export async function prefilterMessage(
   message: string,
   userId: string,
   redis: Redis
 ): Promise<PrefilterResult> {
+  const isChinese = /[\u4e00-\u9fff\u3400-\u4dbf]/.test(message)
+
+  // 0. 冷卻期檢查（違規累計觸發的暫停）
+  const cooldownTtl = await checkCooldown(userId, redis)
+  if (cooldownTtl > 0) {
+    const minutes = Math.ceil(cooldownTtl / 60)
+    return {
+      allowed: false,
+      reason: 'rate_limit',
+      errorMessage: isChinese
+        ? `⚠️ 因多次發送無效訊息，您的帳號暫時冷卻中。請 ${minutes} 分鐘後再試。\n\nTellcraft 專門用於網站開發，請準備好您的建站需求後再來。`
+        : `⚠️ Your account is temporarily on cooldown due to repeated invalid messages. Please try again in ${minutes} minute${minutes > 1 ? 's' : ''}.\n\nTellcraft is for building websites — please come back with your project idea.`,
+    }
+  }
+
   // 1. 空消息/純空白
   if (!message || !message.trim()) {
     return {
       allowed: false,
       reason: 'empty',
-      errorMessage: '請輸入您的需求描述。',
+      errorMessage: isChinese ? '請輸入您的需求描述。' : 'Please enter your request.',
     }
   }
 
@@ -262,7 +336,9 @@ export async function prefilterMessage(
     return {
       allowed: false,
       reason: 'too_long',
-      errorMessage: `訊息過長（${message.length} 字），請精簡至 ${MAX_MESSAGE_LENGTH} 字以內。`,
+      errorMessage: isChinese
+        ? `訊息過長（${message.length} 字），請精簡至 ${MAX_MESSAGE_LENGTH} 字以內。`
+        : `Message too long (${message.length} chars). Please keep it under ${MAX_MESSAGE_LENGTH} characters.`,
     }
   }
 
@@ -271,10 +347,18 @@ export async function prefilterMessage(
   for (const pattern of INJECTION_PATTERNS) {
     if (pattern.test(trimmed)) {
       console.warn(`[Prefilter] Prompt injection 偵測: userId=${userId}, pattern=${pattern}`)
+      // 記錄違規 + 可能觸發冷卻
+      const cooldown = await recordViolation(userId, redis)
+      const cooldownWarning = cooldown > 0
+        ? (isChinese ? `\n\n⚠️ 由於多次違規，您的帳號已被暫停 ${Math.ceil(cooldown / 60)} 分鐘。` : `\n\n⚠️ Due to repeated violations, your account has been suspended for ${Math.ceil(cooldown / 60)} minute${Math.ceil(cooldown / 60) > 1 ? 's' : ''}.`)
+        : ''
       return {
         allowed: false,
         reason: 'injection',
-        errorMessage: '無法處理此類訊息。請描述您想建立的產品或功能。',
+        errorMessage: (isChinese
+          ? '無法處理此類訊息。請描述您想建立的產品或功能。'
+          : 'This type of message cannot be processed. Please describe the product or feature you want to build.')
+          + cooldownWarning,
       }
     }
   }
@@ -296,7 +380,9 @@ export async function prefilterMessage(
       return {
         allowed: false,
         reason: 'rate_limit',
-        errorMessage: `發送過於頻繁，請 ${ttl > 0 ? ttl : RATE_LIMIT_WINDOW} 秒後再試。`,
+        errorMessage: isChinese
+          ? `發送過於頻繁，請 ${ttl > 0 ? ttl : RATE_LIMIT_WINDOW} 秒後再試。`
+          : `Too many messages. Please wait ${ttl > 0 ? ttl : RATE_LIMIT_WINDOW} seconds.`,
       }
     }
   } catch (err) {
@@ -305,4 +391,15 @@ export async function prefilterMessage(
   }
 
   return { allowed: true }
+}
+
+/**
+ * 記錄違規（供 orchestrator 在 Classifier 判定 abuse 後調用）
+ */
+export async function recordAbuseViolation(
+  userId: string,
+  redis: Redis
+): Promise<{ cooldown: number }> {
+  const cooldown = await recordViolation(userId, redis)
+  return { cooldown }
 }

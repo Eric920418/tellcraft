@@ -5,7 +5,7 @@ import { withConversationLock } from '../services/conversation-lock'
 import * as db from '../db/client'
 import { classifyIntent, ClassificationResult, isSkillIntent, MetaIntent } from '../services/classifier'
 import { SkillName } from '../services/registry'
-import { prefilterMessage, checkBuildRelevance } from '../services/prefilter'
+import { prefilterMessage, checkBuildRelevance, recordAbuseViolation } from '../services/prefilter'
 import {
   createBddSession,
   getBddSession,
@@ -541,8 +541,22 @@ async function handleProcessMessage(
   if (!isSkillIntent(classification.intent)) {
     console.log(`[Orchestrator] Meta intent: ${classification.intent}, 模板回覆`)
     const responseKey = classification.intent as keyof typeof META_RESPONSES
+    let responseContent = META_RESPONSES[responseKey] || META_RESPONSES.clarification_needed
+
+    // abuse → 記錄違規，可能觸發冷卻
+    if (classification.intent === 'abuse') {
+      const { cooldown } = await recordAbuseViolation(userId, redis)
+      if (cooldown > 0) {
+        const minutes = Math.ceil(cooldown / 60)
+        const isChinese = /[\u4e00-\u9fff\u3400-\u4dbf]/.test(message)
+        responseContent = isChinese
+          ? `⚠️ 由於多次發送無效訊息，您的帳號已被暫停 ${minutes} 分鐘。\n\nTellcraft 專門用於網站開發，請準備好您的建站需求後再來。`
+          : `⚠️ Due to repeated invalid messages, your account has been suspended for ${minutes} minute${minutes > 1 ? 's' : ''}.\n\nTellcraft is for building websites — please come back with your project idea.`
+      }
+    }
+
     await sendMessage(conversationId, io, {
-      content: META_RESPONSES[responseKey] || META_RESPONSES.clarification_needed,
+      content: responseContent,
       stage: 'meta_response',
     })
     return { taskId: null, skill: null }
