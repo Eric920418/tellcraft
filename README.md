@@ -92,7 +92,7 @@ npx ts-node bdd-spec/scripts/validate-feature.ts spec/features/
 | Service | LLM | 調用者 | 職責 |
 |---------|-----|--------|------|
 | `classifier.ts` | Haiku | 每條新訊息 | 意圖分類（規則式 + LLM） |
-| `prefilter.ts` | 無 | 每條訊息（最先） | 空訊息/長度/Injection/Rate Limit |
+| `prefilter.ts` | 無 / Haiku | 每條訊息（最先）+ Fast Mode | 空訊息/長度/Injection(28 regex)/Rate Limit + `checkBuildRelevance()` 語義相關性 |
 | `bdd-to-ui-spec.ts` | Haiku | UIUX Pipeline | BDD Feature Files → UIRequirementsSpec |
 | `prd-discovery.ts` | Sonnet | bdd-spec | PRD 需求發掘（多輪） |
 | `clarify-dedup.ts` | Haiku ×2 | bdd-spec | Decision Summary + 語意去重 |
@@ -333,7 +333,7 @@ Server Action 錯誤訊息 + 工具模組中文字串國際化（+117 keys，2 n
 | **認證** | Google/LINE OAuth、JWT 雙軌（localStorage + Cookie）、訪客→帳號合併、帳號綁定（雙登入）、auth 頁面 i18n（next-intl） |
 | **儀表板** | 用戶統計、專案管理、版本歷史、管理員面板、LLM 用量追蹤、Dashboard 元件 i18n（next-intl） |
 | **i18n** | next-intl 多語系（zh/en）、UI 元件全量翻譯、Server Action 錯誤訊息 i18n（getTranslations）、lib 模組英文化、error code 機制、883 keys / 29 namespaces |
-| **防護** | 三層防刷（前端冷卻 + API 限速 + Worker 鎖）、Classifier 三層防禦、LLM 自動重試 |
+| **防護** | 三層防刷（前端冷卻 + API 限速 + Worker 鎖）、五層輸入防禦（Prefilter 28 regex + isDesignFeedback + checkBuildRelevance + Classifier + refineCode）、LLM 自動重試 |
 | **通知** | LINE 推播通知（BDD 完成/UIUX 生成完成/部署成功失敗），離線用戶也能收到 |
 | **LINE Bot** | LINE 對話內完整 Fast Build 體驗（描述需求→生成→部署），Flex Message 卡片 + Quick Reply |
 | **UX** | 對話回退、錯誤恢復、自動恢復對話、專案自動命名、Markdown 渲染 |
@@ -522,6 +522,19 @@ psql "$DATABASE_URL" -f tellcraft-backend/migrations/xxx.sql
 - **新增 `utils/is-confirmation.ts`**：三層匹配策略 — 否定詞防護（「但」「少了」「想改」等轉折詞直接排除）→ 短詞精確匹配（≤4 字元「好」「對」「嗯」等）→ 長片語 includes（「沒問題」「沒錯」「確認」「是的」等）
 - **`event-storming.ts`**：L359 `handleInitConfirm` + L552 `handleESAnswer` 替換為 `isConfirmation()` 共用函數
 - **注意**：新增確認詞或否定詞時統一修改 `is-confirmation.ts`，不要在各 handler 中 inline 判斷
+
+### 快速模式輸入驗證修復（2026-03-01）
+
+修復 Fast Mode 入口無輸入驗證的 bug：用戶輸入「111」「哈哈哈」等無意義文字時，系統直接啟動快速建站生成網站。
+
+- **根因**：`handleProcessMessage` 的 `mode === 'fast'` 路徑直接呼叫 `executeFastBuildSkill()`，完全跳過意圖驗證
+- **修復**：在 fast mode 入口加入 `isDesignFeedback()` 預驗證，攔截亂碼/問候/閒聊等無關輸入
+- **五層防禦**：
+  1. `prefilterMessage()`：全域攔截空訊息/超長/injection（28 個 regex，含混合語言）/頻率限制（30 秒 6 條）
+  2. `isDesignFeedback()`：fast mode 入口 + 迭代階段專用（亂碼/問候/閒聊/設計關鍵詞正向放行）
+  3. `checkBuildRelevance()`：fast mode 語義相關性檢查（正向關鍵詞零成本放行 + 微型 Haiku 二元判斷兜底，~$0.0002/次）
+  4. `classifyIntent()`：正常模式 Haiku 意圖分類（abuse/chitchat/onboarding 模板回覆）
+  5. `refineCode [NO_CHANGE]`：LLM 級別最後防線（迭代階段）
 
 ### 統一 LLM JSON 解析防禦（2026-02-28）
 
@@ -796,9 +809,11 @@ A11y/Performance/Code Quality 靜態檢查 + Haiku 自動修復（最多 3 輪�
 
 Sandpack 取代 1105 行 regex 轉換器。支援 streaming 增量更新、裝置切換。
 
-### Classifier 三層防禦（2026-02-08）
+### Classifier 防禦體系（2026-02-08，2026-03-01 增強）
 
-Prefilter（零 LLM）→ Meta Intent（Haiku）→ Skill Intent。
+- **Prefilter**（零 LLM）：28 個 injection regex（含混合語言）+ Rate Limit 30 秒 6 條
+- **正常模式**：Prefilter → Classifier Meta Intent（Haiku，abuse 含警告回覆）→ Skill Intent
+- **快速模式**：Prefilter → `isDesignFeedback()`（零 LLM）→ `checkBuildRelevance()`（正向關鍵詞 + 微型 Haiku 兜底）
 
 ### Design Tier（2026-02-06）
 

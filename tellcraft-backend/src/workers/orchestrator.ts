@@ -5,7 +5,7 @@ import { withConversationLock } from '../services/conversation-lock'
 import * as db from '../db/client'
 import { classifyIntent, ClassificationResult, isSkillIntent, MetaIntent } from '../services/classifier'
 import { SkillName } from '../services/registry'
-import { prefilterMessage } from '../services/prefilter'
+import { prefilterMessage, checkBuildRelevance } from '../services/prefilter'
 import {
   createBddSession,
   getBddSession,
@@ -356,9 +356,11 @@ const META_RESPONSES: Record<MetaIntent | 'unknown' | 'clarification_needed', st
 
 有什麼產品或網站想法嗎？告訴我你想建立什麼，我們就開始吧！`,
 
-  abuse: `請描述您想建立的產品或功能，我才能幫助您。
+  abuse: `⚠️ 此類訊息無法處理。Tellcraft 專門用於產品開發，請正常使用。
 
-例如：「我想做一個餐廳官網」、「幫我設計一個作品集網站」`,
+如果您有建站需求，試試：「我想做一個餐廳官網」、「幫我設計一個作品集網站」
+
+持續發送無意義訊息可能會被暫時限制使用。`,
 
   unknown: `我不太確定您想做什麼。您可以試試：
 
@@ -465,6 +467,28 @@ async function handleProcessMessage(
   // 注意：Fix 1 的 FlowState 檢查已涵蓋 fast_generating 的冪等保護，
   // 不需要在此重複讀取 FlowState
   if (mode === 'fast') {
+    // 預驗證 Layer 1：攔截亂碼/問候/閒聊等無意義輸入（零 LLM）
+    const fastInputCheck = isDesignFeedback(message)
+    if (!fastInputCheck.valid) {
+      console.log(`[Orchestrator] 快速模式輸入被攔截: reason=${fastInputCheck.rejectReason}, msg="${message.substring(0, 50)}"`)
+      await sendMessage(conversationId, io, {
+        content: fastInputCheck.guideMessage || '請描述您想要建立的網站或應用，例如「做一個咖啡店官網」或「建立一個作品集網站」。',
+        stage: 'info',
+      })
+      return { taskId: null, skill: null }
+    }
+
+    // 預驗證 Layer 2：語義相關性檢查（正向關鍵詞放行 + 微型 Haiku 兜底）
+    const relevance = await checkBuildRelevance(message, { userId, conversationId })
+    if (!relevance.relevant) {
+      console.log(`[Orchestrator] 快速模式語義攔截: msg="${message.substring(0, 50)}"`)
+      await sendMessage(conversationId, io, {
+        content: relevance.errorMessage || '請描述您想要建立的網站或應用。',
+        stage: 'info',
+      })
+      return { taskId: null, skill: null }
+    }
+
     const taskId = await db.createTask({
       projectId,
       userId,
