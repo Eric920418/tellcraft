@@ -4520,8 +4520,23 @@ function HomeContent() {
     if (conversationId) {
       setResumeConversationId(conversationId)
       setIsChatActive(true)
+      window.history.pushState({ tellcraftChat: true }, '')
     }
   }, [searchParams])
+
+  // 瀏覽器返回鍵監聽 — 統一處理返回首頁邏輯
+  useEffect(() => {
+    const handlePopState = () => {
+      if (isChatActive) {
+        setIsChatActive(false)
+        setHeroInput('')
+        setInitialMessage('')
+        setResumeConversationId(null)
+      }
+    }
+    window.addEventListener('popstate', handlePopState)
+    return () => window.removeEventListener('popstate', handlePopState)
+  }, [isChatActive])
 
   // 對話模式時禁用首頁滾動
   useEffect(() => {
@@ -4591,16 +4606,12 @@ function HomeContent() {
     if (heroInput.trim()) {
       setInitialMessage(heroInput)
       setIsChatActive(true)
+      window.history.pushState({ tellcraftChat: true }, '')
     }
   }, [heroInput])
 
   const handleBackToHome = useCallback(() => {
-    setIsChatActive(false)
-    setHeroInput('')
-    setInitialMessage('')
-    setResumeConversationId(null)
-    // 清除 URL 參數
-    window.history.replaceState({}, '', '/')
+    window.history.back()
   }, [])
 
   const handleFocusInput = useCallback(() => {
@@ -4614,6 +4625,7 @@ function HomeContent() {
   const handleContinueFromReminder = useCallback((conversationId: string) => {
     setResumeConversationId(conversationId)
     setIsChatActive(true)
+    window.history.pushState({ tellcraftChat: true }, '')
   }, [])
 
   return (
