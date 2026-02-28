@@ -1,5 +1,7 @@
 'use server'
 
+import { getTranslations } from 'next-intl/server'
+
 import {
   Template,
   TemplateCategory,
@@ -45,7 +47,7 @@ export async function getTemplates(input?: {
 
     if (!result.success || !result.data) {
       // Fallback 到靜態資料
-      console.warn('[Templates] VPS API 失敗，使用靜態資料:', result.error)
+      console.warn('[Templates] VPS API failed, using static data:', result.error)
       let templates = INITIAL_TEMPLATES.filter(t => t.isActive)
 
       if (category !== 'all') {
@@ -101,43 +103,44 @@ export async function getTemplates(input?: {
 export async function getTemplateById(
   templateId: string
 ): Promise<ActionResult<Template>> {
+  const t = await getTranslations('actionErrors')
   try {
     const result = await vpsApi.getTemplateById({ templateId })
 
     if (!result.success || !result.data) {
       // Fallback 到靜態資料
-      const staticTemplate = INITIAL_TEMPLATES.find(t => t.id === templateId)
+      const staticTemplate = INITIAL_TEMPLATES.find(tmpl => tmpl.id === templateId)
       if (staticTemplate) {
         return { success: true, data: staticTemplate }
       }
-      return { success: false, error: '模板不存在' }
+      return { success: false, error: t('templateNotFound') }
     }
 
-    const t = result.data.template
+    const raw = result.data.template
     const template: Template = {
-      id: t.id,
-      name: t.name,
-      slug: t.slug,
-      category: t.category as TemplateCategory,
-      description: t.description,
-      thumbnailUrl: t.thumbnailUrl,
-      previewImageUrl: t.previewImageUrl || t.thumbnailUrl, // fallback to thumbnail
-      tags: t.tags,
-      designDefaults: t.designDefaults as Template['designDefaults'],
-      pageStructure: t.pageStructure as Template['pageStructure'],
-      isActive: t.isActive,
-      isFeatured: t.isFeatured,
-      sortOrder: t.sortOrder
+      id: raw.id,
+      name: raw.name,
+      slug: raw.slug,
+      category: raw.category as TemplateCategory,
+      description: raw.description,
+      thumbnailUrl: raw.thumbnailUrl,
+      previewImageUrl: raw.previewImageUrl || raw.thumbnailUrl, // fallback to thumbnail
+      tags: raw.tags,
+      designDefaults: raw.designDefaults as Template['designDefaults'],
+      pageStructure: raw.pageStructure as Template['pageStructure'],
+      isActive: raw.isActive,
+      isFeatured: raw.isFeatured,
+      sortOrder: raw.sortOrder
     }
 
     return { success: true, data: template }
   } catch {
     // Fallback 到靜態資料
-    const staticTemplate = INITIAL_TEMPLATES.find(t => t.id === templateId)
+    const staticTemplate = INITIAL_TEMPLATES.find(tmpl => tmpl.id === templateId)
     if (staticTemplate) {
       return { success: true, data: staticTemplate }
     }
-    return { success: false, error: '模板不存在' }
+    return { success: false, error: t('templateNotFound') }
   }
 }
 
@@ -147,41 +150,42 @@ export async function getTemplateById(
 export async function getTemplateBySlug(
   slug: string
 ): Promise<ActionResult<Template>> {
+  const t = await getTranslations('actionErrors')
   try {
     const result = await vpsApi.getTemplateBySlug({ slug })
 
     if (!result.success || !result.data) {
-      const staticTemplate = INITIAL_TEMPLATES.find(t => t.slug === slug)
+      const staticTemplate = INITIAL_TEMPLATES.find(tmpl => tmpl.slug === slug)
       if (staticTemplate) {
         return { success: true, data: staticTemplate }
       }
-      return { success: false, error: '模板不存在' }
+      return { success: false, error: t('templateNotFound') }
     }
 
-    const t = result.data.template
+    const raw = result.data.template
     const template: Template = {
-      id: t.id,
-      name: t.name,
-      slug: t.slug,
-      category: t.category as TemplateCategory,
-      description: t.description,
-      thumbnailUrl: t.thumbnailUrl,
-      previewImageUrl: t.previewImageUrl || t.thumbnailUrl, // fallback to thumbnail
-      tags: t.tags,
-      designDefaults: t.designDefaults as Template['designDefaults'],
-      pageStructure: t.pageStructure as Template['pageStructure'],
-      isActive: t.isActive,
-      isFeatured: t.isFeatured,
-      sortOrder: t.sortOrder
+      id: raw.id,
+      name: raw.name,
+      slug: raw.slug,
+      category: raw.category as TemplateCategory,
+      description: raw.description,
+      thumbnailUrl: raw.thumbnailUrl,
+      previewImageUrl: raw.previewImageUrl || raw.thumbnailUrl, // fallback to thumbnail
+      tags: raw.tags,
+      designDefaults: raw.designDefaults as Template['designDefaults'],
+      pageStructure: raw.pageStructure as Template['pageStructure'],
+      isActive: raw.isActive,
+      isFeatured: raw.isFeatured,
+      sortOrder: raw.sortOrder
     }
 
     return { success: true, data: template }
   } catch {
-    const staticTemplate = INITIAL_TEMPLATES.find(t => t.slug === slug)
+    const staticTemplate = INITIAL_TEMPLATES.find(tmpl => tmpl.slug === slug)
     if (staticTemplate) {
       return { success: true, data: staticTemplate }
     }
-    return { success: false, error: '模板不存在' }
+    return { success: false, error: t('templateNotFound') }
   }
 }
 
@@ -194,6 +198,7 @@ export async function getRecommendedTemplates(input: {
   maxResults?: number
 }): Promise<ActionResult<TemplateCardData[]>> {
   const { productDescription, maxResults = 5 } = input
+  const t = await getTranslations('actionErrors')
   const desc = productDescription.toLowerCase()
 
   // 關鍵字匹配規則
@@ -241,7 +246,7 @@ export async function getRecommendedTemplates(input: {
   // 獲取所有模板
   const result = await getTemplates()
   if (!result.success || !result.data) {
-    return { success: false, error: result.error || '獲取模板失敗' }
+    return { success: false, error: result.error || t('getTemplatesFailed') }
   }
 
   let templates = result.data
@@ -272,10 +277,11 @@ export async function getRecommendedTemplates(input: {
  */
 export async function initializeTemplates(): Promise<ActionResult<{ count: number }>> {
   try {
+  const t = await getTranslations('actionErrors')
     const token = await getAuthToken()
 
     if (!token) {
-      return { success: false, error: '未登入' }
+      return { success: false, error: t('notAuthenticated') }
     }
 
     // 將靜態模板轉換為 API 格式

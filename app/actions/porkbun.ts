@@ -108,8 +108,8 @@ export async function checkDomainAvailability(domain: string): Promise<{
   price?: string
   error?: string
 }> {
-  try {
   const t = await getTranslations('actionErrors')
+  try {
     // 使用 Google DNS API 檢查網域是否存在
     const controller = new AbortController()
     const timeoutId = setTimeout(() => controller.abort(), 5000)

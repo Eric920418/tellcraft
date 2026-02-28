@@ -91,8 +91,9 @@ export async function fullDomainWorkflow(
   onProgress?: (workflow: DomainWorkflow) => void
 ): Promise<DomainWorkflow> {
 
-  const report = (workflow: DomainWorkflow) => {
   const t = await getTranslations('actionErrors')
+
+  const report = (workflow: DomainWorkflow) => {
     console.log(`[Domain Workflow] ${workflow.status}: ${workflow.message}`)
     onProgress?.(workflow)
     return workflow

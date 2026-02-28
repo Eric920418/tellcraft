@@ -250,7 +250,7 @@ URL 結構：
 
 ### 翻譯檔案
 
-`messages/zh.json` 和 `messages/en.json`，766 keys，27 namespaces：
+`messages/zh.json` 和 `messages/en.json`，883 keys，29 namespaces：
 
 | Namespace | 範圍 | Keys |
 |-----------|------|------|
@@ -261,6 +261,8 @@ URL 結構：
 | `nav`, `common`, `errors` | 共用 | ~35 |
 | `cssLabel`, `codePreview`, `command` | 編輯器 | ~41 |
 | `uiux`, `deploy`, `conversationPicker` | 功能元件 | ~各 4-110 |
+| `actionErrors` | Server Action 錯誤訊息 | 69 |
+| `test` | 開發測試工具頁面 | 48 |
 
 ### 使用方式
 
@@ -279,12 +281,20 @@ import { useLocalePath } from '@/app/hooks/useLocalePath'
 window.location.href = localePath('/dashboard')       // 硬跳轉時用
 ```
 
-### Phase 2 待辦
+### Phase 2 完成（Error/Utility i18n）
 
-- 後端錯誤訊息 i18n（`result.error === '無管理員權限'` 等比對值）
+Server Action 錯誤訊息 + 工具模組中文字串國際化（+117 keys，2 namespaces）：
+
+- **Server Actions**（9 檔）：`getTranslations('actionErrors')` from `next-intl/server`，~50 個中文字串 → `t()` 呼叫
+- **後端 error code**：`'無管理員權限'` → `'ADMIN_REQUIRED'`，5 個 admin 頁面同步
+- **lib 模組**：`vps-api.ts`（8 字串）+ `llm.ts`（9 字串）改英文（技術診斷性質）
+- **test 頁面**：`useTranslations('test')`，48 個字串
+
+### Phase 3 待辦
+
+- VPS 後端返回的中文錯誤訊息 → error code 機制
+- LLM prompts / Skill instructions i18n
 - Remotion 動畫標籤（需通過 props 傳入 locale）
-- `app/lib/vps-api.ts` 錯誤訊息（需改為 error code 模式）
-- `app/[locale]/test/page.tsx`（dev 工具，低優先）
 
 ## BullMQ 任務模式
 
@@ -310,7 +320,7 @@ window.location.href = localePath('/dashboard')       // 硬跳轉時用
 | **動畫** | BDD 需求藍圖面板（即時 Q&A 歷史視覺化）、3D 工廠流水線（Fast Build）、Remotion 驅動 |
 | **認證** | Google/LINE OAuth、JWT 雙軌（localStorage + Cookie）、訪客→帳號合併、帳號綁定（雙登入）、auth 頁面 i18n（next-intl） |
 | **儀表板** | 用戶統計、專案管理、版本歷史、管理員面板、LLM 用量追蹤、Dashboard 元件 i18n（next-intl） |
-| **i18n** | next-intl 多語系（zh/en）、UI 元件全量翻譯（LoginPrompt/ConversationPicker/ProjectReminder/SpecGeneration/BddPanel/Deploy 系列/BuildingPlayer/UIUX 全系列元件）、useLocalePath hook |
+| **i18n** | next-intl 多語系（zh/en）、UI 元件全量翻譯、Server Action 錯誤訊息 i18n（getTranslations）、lib 模組英文化、error code 機制、883 keys / 29 namespaces |
 | **防護** | 三層防刷（前端冷卻 + API 限速 + Worker 鎖）、Classifier 三層防禦、LLM 自動重試 |
 | **通知** | LINE 推播通知（BDD 完成/UIUX 生成完成/部署成功失敗），離線用戶也能收到 |
 | **LINE Bot** | LINE 對話內完整 Fast Build 體驗（描述需求→生成→部署），Flex Message 卡片 + Quick Reply |
@@ -355,8 +365,8 @@ app/
 │   ├── navigation.ts     # locale-aware Link/redirect/useRouter
 │   └── request.ts        # getRequestConfig（Server Component 用）
 └── messages/
-    ├── zh.json           # 中文翻譯（766 keys，27 namespaces）
-    └── en.json           # 英文翻譯（766 keys，同步）
+    ├── zh.json           # 中文翻譯（883 keys，29 namespaces）
+    └── en.json           # 英文翻譯（883 keys，同步）
 
 tellcraft-backend/
 ├── src/
@@ -476,6 +486,15 @@ psql "$DATABASE_URL" -f tellcraft-backend/migrations/xxx.sql
 
 <details>
 <summary><h2>開發更新紀錄（點擊展開）</h2></summary>
+
+### i18n Phase 2：Error/Utility i18n（2026-02-28）
+
+Server Action 錯誤訊息 + 工具模組國際化，+117 keys / 2 namespaces（`actionErrors` + `test`）。
+
+- **Server Actions i18n**（9 檔）：`index.ts`/`cloudflare.ts`/`supabase.ts`/`porkbun.ts`/`domain.ts`/`storage.ts`/`templates.ts`/`admin.ts`/`deploy.ts`，使用 `getTranslations('actionErrors')` from `next-intl/server`
+- **error code 機制**：後端 `auth.ts` 返回 `'ADMIN_REQUIRED'`（取代中文 `'無管理員權限'`），5 個 admin 頁面同步更新比對值
+- **lib 模組英文化**：`vps-api.ts`（8 字串）+ `llm.ts`（9 字串）中文 → 英文（技術診斷日誌）
+- **test 頁面 i18n**：`useTranslations('test')`，48 個字串
 
 ### 前端 i18n 國際化 Phase 1（2026-02-28）
 

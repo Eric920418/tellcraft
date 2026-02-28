@@ -2500,6 +2500,16 @@ ${refineConceptSection}
 
 ${getStructureConstraints(tier)}
 
+## 重要：輸入驗證（最高優先）
+在修改代碼之前，先判斷用戶的訊息是否為**明確的設計修改請求**。
+如果用戶的訊息屬於以下情況，**不要修改任何代碼**，只輸出 [NO_CHANGE] 加上簡短原因：
+- 無意義文字、亂碼、隨機字元（如「asdf」「哈哈哈」「test」「123」）
+- 與設計修改完全無關的閒聊（如「你好」「今天天氣怎樣」「你是誰」）
+- 過於模糊無法執行的指令（如「改好一點」「變漂亮」），此時請在原因中引導用戶給出具體需求
+
+格式範例：
+[NO_CHANGE] 您的訊息似乎與設計修改無關。請描述具體需要修改的內容，例如「把標題改成紅色」或「在首頁新增一個聯繫表單」。
+
 ## 修改規則（Critical）
 1. **只修改用戶要求的部分**，不要改動不相關的檔案或代碼
 2. 保持現有的功能、動畫效果、響應式設計完好
@@ -2540,6 +2550,12 @@ ${codeBlocks.join('\n\n')}
 
   if (!response.success || !response.content) {
     return { success: false, error: response.error || '無法修改代碼' }
+  }
+
+  // 檢測 [NO_CHANGE] 標記：LLM 判定用戶輸入非有效修改請求
+  const noChangeMatch = response.content.match(/\[NO_CHANGE\]\s*(.*)/)
+  if (noChangeMatch) {
+    return { success: false, error: noChangeMatch[1].trim() || '無法理解修改需求，請提供具體的修改描述。' }
   }
 
   // 解析修改後的檔案，合併回原始代碼

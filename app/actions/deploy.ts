@@ -34,7 +34,7 @@ export async function deployProject(spec: ProjectSpec): Promise<DeploymentStatus
     if (!supabaseResult.success || !supabaseResult.project) {
       return {
         stage: 'error',
-        message: supabaseResult.error || '建立 Supabase Project 失敗',
+        message: supabaseResult.error || 'Supabase project creation failed',
         progress: 0,
         error: supabaseResult.error,
       }
@@ -50,7 +50,7 @@ export async function deployProject(spec: ProjectSpec): Promise<DeploymentStatus
       if (!migrationResult.success) {
         return {
           stage: 'error',
-          message: migrationResult.error || '執行 Migration 失敗',
+          message: migrationResult.error || 'Migration execution failed',
           progress: 30,
           supabaseProjectId,
           error: migrationResult.error,
@@ -65,7 +65,7 @@ export async function deployProject(spec: ProjectSpec): Promise<DeploymentStatus
     if (!configResult.success || !configResult.config) {
       return {
         stage: 'error',
-        message: configResult.error || '取得 Supabase 配置失敗',
+        message: configResult.error || 'Supabase config retrieval failed',
         progress: 40,
         supabaseProjectId,
         error: configResult.error,
@@ -79,7 +79,7 @@ export async function deployProject(spec: ProjectSpec): Promise<DeploymentStatus
     if (!vercelResult.success || !vercelResult.project) {
       return {
         stage: 'error',
-        message: vercelResult.error || '建立 Vercel Project 失敗',
+        message: vercelResult.error || 'Vercel project creation failed',
         progress: 50,
         supabaseProjectId,
         supabaseUrl: configResult.config.url,
@@ -105,7 +105,7 @@ export async function deployProject(spec: ProjectSpec): Promise<DeploymentStatus
     ])
 
     if (!envResult.success) {
-      console.warn('[Deploy] 設定環境變數失敗:', envResult.error)
+      console.warn('[Deploy] Failed to set env variables:', envResult.error)
       // 繼續部署，環境變數可以之後手動設定
     }
 
@@ -123,7 +123,7 @@ export async function deployProject(spec: ProjectSpec): Promise<DeploymentStatus
     if (!deployResult.success) {
       return {
         stage: 'error',
-        message: deployResult.error || '部署失敗',
+        message: deployResult.error || 'Deployment failed',
         progress: 80,
         supabaseProjectId,
         supabaseUrl: configResult.config.url,
@@ -135,7 +135,7 @@ export async function deployProject(spec: ProjectSpec): Promise<DeploymentStatus
     // 完成
     return {
       stage: 'complete',
-      message: '部署完成',
+      message: 'Deployment complete',
       progress: 100,
       supabaseProjectId,
       supabaseUrl: configResult.config.url,
@@ -249,16 +249,16 @@ export async function testDeploymentConfig(): Promise<{
 
   // 測試 Supabase
   if (!process.env.SUPABASE_ACCESS_TOKEN) {
-    result.supabase.error = '缺少 SUPABASE_ACCESS_TOKEN'
+    result.supabase.error = 'Missing SUPABASE_ACCESS_TOKEN'
   } else if (!process.env.SUPABASE_ORG_ID) {
-    result.supabase.error = '缺少 SUPABASE_ORG_ID'
+    result.supabase.error = 'Missing SUPABASE_ORG_ID'
   } else {
     result.supabase.configured = true
   }
 
   // 測試 Vercel
   if (!process.env.VERCEL_ACCESS_TOKEN) {
-    result.vercel.error = '缺少 VERCEL_ACCESS_TOKEN'
+    result.vercel.error = 'Missing VERCEL_ACCESS_TOKEN'
   } else {
     result.vercel.configured = true
   }

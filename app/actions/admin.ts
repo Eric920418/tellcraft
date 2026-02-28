@@ -1,5 +1,7 @@
 'use server'
 
+import { getTranslations } from 'next-intl/server'
+
 import { getAuthToken } from '../lib/auth'
 import * as vpsApi from '../lib/vps-api'
 
@@ -34,9 +36,10 @@ interface PaginatedResult<T> {
 // ============================================================
 
 async function requireToken(): Promise<string> {
+  const t = await getTranslations('actionErrors')
   const token = await getAuthToken()
   if (!token) {
-    throw new Error('未登入')
+    throw new Error(t('notAuthenticated'))
   }
   return token
 }

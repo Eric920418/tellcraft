@@ -34,7 +34,7 @@ async function ensureBucketExists(): Promise<{ success: boolean; error?: string 
   const { data: buckets, error: listError } = await db.storage.listBuckets()
 
   if (listError) {
-    return { success: false, error: `列出 buckets 失敗: ${listError.message}` }
+    return { success: false, error: `Failed to list buckets: ${listError.message}` }
   }
 
   const exists = buckets?.some(b => b.name === BUCKET_NAME)
@@ -46,7 +46,7 @@ async function ensureBucketExists(): Promise<{ success: boolean; error?: string 
     })
 
     if (createError) {
-      return { success: false, error: `建立 bucket 失敗: ${createError.message}` }
+      return { success: false, error: `Failed to create bucket: ${createError.message}` }
     }
   }
 
@@ -100,7 +100,7 @@ export async function uploadGeneratedCode(
     })
 
   if (uploadError) {
-    return { success: false, error: `上傳失敗: ${uploadError.message}` }
+    return { success: false, error: `Upload failed: ${uploadError.message}` }
   }
 
   // 取得 signed URL（有效期 7 天）
@@ -109,7 +109,7 @@ export async function uploadGeneratedCode(
     .createSignedUrl(packagePath, 7 * 24 * 60 * 60)
 
   if (urlError || !urlData?.signedUrl) {
-    return { success: false, error: `取得 URL 失敗: ${urlError?.message}` }
+    return { success: false, error: `Failed to get URL: ${urlError?.message}` }
   }
 
   return { success: true, url: urlData.signedUrl }
@@ -130,7 +130,7 @@ export async function downloadGeneratedCode(url: string): Promise<{
     const response = await fetch(url)
 
     if (!response.ok) {
-      return { success: false, error: `下載失敗: ${response.statusText}` }
+      return { success: false, error: `Download failed: ${response.statusText}` }
     }
 
     const packageData = await response.json()
@@ -158,7 +158,7 @@ export async function downloadGeneratedCode(url: string): Promise<{
       artifacts: { pages, components, styles, utils },
     }
   } catch (err) {
-    return { success: false, error: `解析失敗: ${err}` }
+    return { success: false, error: `Parse failed: ${err}` }
   }
 }
 
@@ -201,7 +201,7 @@ export async function createUiuxGeneration(
     .single()
 
   if (genError || !generation) {
-    return { success: false, error: genError?.message || '建立生成記錄失敗' }
+    return { success: false, error: genError?.message || 'Failed to create generation record' }
   }
 
   // 上傳程式碼
@@ -258,7 +258,7 @@ export async function getLatestUiuxGeneration(projectId: string): Promise<{
   }
 
   if (!data) {
-    return { success: false, error: '找不到生成記錄' }
+    return { success: false, error: 'Generation record not found' }
   }
 
   return {

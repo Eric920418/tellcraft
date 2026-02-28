@@ -1,6 +1,7 @@
 'use client'
 
 import { useState } from 'react'
+import { useTranslations } from 'next-intl'
 import { Link } from '@/i18n/navigation'
 import { testDeploymentConfig, generateNextJsTemplate } from '@/app/actions/deploy'
 import { listProjects } from '@/app/actions/supabase'
@@ -10,6 +11,7 @@ import { searchDomain, deployWithFreeDomain } from '@/app/actions/domain'
 import { getDomainPricing, pingPorkbun } from '@/app/actions/porkbun'
 
 export default function TestPage() {
+  const t = useTranslations('test')
   const [output, setOutput] = useState<string>('')
   const [loading, setLoading] = useState(false)
   const [domainInput, setDomainInput] = useState('')
@@ -23,14 +25,14 @@ export default function TestPage() {
   const testConfig = async () => {
     setLoading(true)
     clear()
-    log('測試 API 配置...\n')
+    log(t('testingApiConfig') + '...\n')
 
     try {
       const result = await testDeploymentConfig()
-      log(`Supabase: ${result.supabase.configured ? '✅ 已配置' : '❌ 未配置'} ${result.supabase.error || ''}`)
-      log(`Vercel: ${result.vercel.configured ? '✅ 已配置' : '❌ 未配置'} ${result.vercel.error || ''}`)
+      log(`Supabase: ${result.supabase.configured ? '✅ ' + t('configured') : '❌ ' + t('notConfigured')} ${result.supabase.error || ''}`)
+      log(`Vercel: ${result.vercel.configured ? '✅ ' + t('configured') : '❌ ' + t('notConfigured')} ${result.vercel.error || ''}`)
     } catch (err) {
-      log(`錯誤: ${err}`)
+      log(`${t('error')}: ${err}`)
     }
 
     setLoading(false)
@@ -39,20 +41,20 @@ export default function TestPage() {
   const testSupabase = async () => {
     setLoading(true)
     clear()
-    log('列出 Supabase Projects...\n')
+    log(t('listingSupabaseProjects') + '...\n')
 
     try {
       const result = await listProjects()
       if (result.success) {
-        log(`找到 ${result.projects?.length || 0} 個 Projects:`)
+        log(`${t('found')} ${result.projects?.length || 0} Projects:`)
         result.projects?.forEach(p => {
           log(`  - ${p.name} (${p.id}) [${p.status}]`)
         })
       } else {
-        log(`錯誤: ${result.error}`)
+        log(`${t('error')}: ${result.error}`)
       }
     } catch (err) {
-      log(`錯誤: ${err}`)
+      log(`${t('error')}: ${err}`)
     }
 
     setLoading(false)
@@ -61,23 +63,23 @@ export default function TestPage() {
   const testVercel = async () => {
     setLoading(true)
     clear()
-    log('列出 Vercel Projects...\n')
+    log(t('listingVercelProjects') + '...\n')
 
     try {
       const result = await listVercelProjects()
       if (result.success) {
-        log(`找到 ${result.projects?.length || 0} 個 Projects:`)
+        log(`${t('found')} ${result.projects?.length || 0} Projects:`)
         result.projects?.slice(0, 10).forEach(p => {
           log(`  - ${p.name} (${p.id})`)
         })
         if ((result.projects?.length || 0) > 10) {
-          log(`  ... 還有 ${(result.projects?.length || 0) - 10} 個`)
+          log(`  ... ${t('andMore', { count: (result.projects?.length || 0) - 10 })}`)
         }
       } else {
-        log(`錯誤: ${result.error}`)
+        log(`${t('error')}: ${result.error}`)
       }
     } catch (err) {
-      log(`錯誤: ${err}`)
+      log(`${t('error')}: ${err}`)
     }
 
     setLoading(false)
@@ -86,24 +88,24 @@ export default function TestPage() {
   const testCloudflare = async () => {
     setLoading(true)
     clear()
-    log('列出 Cloudflare Zones...\n')
+    log(t('listingCloudflareZones') + '...\n')
 
     try {
       const result = await listZones()
       if (result.success) {
-        log(`找到 ${result.zones?.length || 0} 個 Zones:`)
+        log(`${t('found')} ${result.zones?.length || 0} Zones:`)
         result.zones?.forEach(z => {
           log(`  - ${z.name} (${z.id}) [${z.status}]`)
           log(`    NS: ${z.name_servers?.join(', ')}`)
         })
         if (result.zones?.length === 0) {
-          log('  (尚未添加任何網域)')
+          log('  (' + t('noDomainsAdded') + ')')
         }
       } else {
-        log(`錯誤: ${result.error}`)
+        log(`${t('error')}: ${result.error}`)
       }
     } catch (err) {
-      log(`錯誤: ${err}`)
+      log(`${t('error')}: ${err}`)
     }
 
     setLoading(false)
@@ -112,20 +114,20 @@ export default function TestPage() {
   const testPorkbunPing = async () => {
     setLoading(true)
     clear()
-    log('測試 Porkbun API 連接...\n')
+    log(t('testingPorkbunConnection') + '...\n')
 
     try {
       const result = await pingPorkbun()
       if (result.success) {
         log('✅ ' + result.message)
         if (result.yourIp) {
-          log(`伺服器 IP: ${result.yourIp}`)
+          log(`${t('serverIp')}: ${result.yourIp}`)
         }
       } else {
-        log('❌ 連接失敗: ' + result.error)
+        log('❌ ' + t('connectionFailed') + ': ' + result.error)
       }
     } catch (err) {
-      log(`錯誤: ${err}`)
+      log(`${t('error')}: ${err}`)
     }
 
     setLoading(false)
@@ -134,24 +136,24 @@ export default function TestPage() {
   const testPorkbunPricing = async () => {
     setLoading(true)
     clear()
-    log('取得 Porkbun 網域價格...\n')
+    log(t('fetchingPorkbunPricing') + '...\n')
 
     try {
       const result = await getDomainPricing()
       if (result.success && result.pricing) {
-        log('常見後綴價格（美元/年）：')
+        log(t('commonTldPricing'))
         const tlds = ['com', 'io', 'ai', 'dev', 'app', 'net', 'org']
         tlds.forEach(tld => {
           if (result.pricing![tld]) {
             log(`  .${tld}: $${result.pricing![tld].registration}`)
           }
         })
-        log('\n(Mock 模式 - 實際價格請查看 Porkbun 官網)')
+        log('\n(' + t('mockModePricingNote') + ')')
       } else {
-        log(`錯誤: ${result.error}`)
+        log(`${t('error')}: ${result.error}`)
       }
     } catch (err) {
-      log(`錯誤: ${err}`)
+      log(`${t('error')}: ${err}`)
     }
 
     setLoading(false)
@@ -159,28 +161,28 @@ export default function TestPage() {
 
   const testDomainSearch = async () => {
     if (!domainInput) {
-      alert('請輸入網域名稱')
+      alert(t('enterDomainName'))
       return
     }
 
     setLoading(true)
     clear()
-    log(`搜尋網域: ${domainInput}\n`)
+    log(`${t('searchingDomain')}: ${domainInput}\n`)
 
     try {
       const result = await searchDomain(domainInput)
-      log(`狀態: ${result.status}`)
-      log(`訊息: ${result.message}`)
+      log(`${t('status')}: ${result.status}`)
+      log(`${t('message')}: ${result.message}`)
 
       if (result.status === 'available') {
-        log('\n✅ 此網域可以註冊！')
+        log('\n✅ ' + t('domainAvailable'))
       } else if (result.status === 'unavailable') {
-        log('\n❌ 此網域已被註冊')
+        log('\n❌ ' + t('domainTaken'))
       }
 
-      log('\n(Mock 模式 - 未連接 Porkbun API)')
+      log('\n(' + t('mockModeNoPorkbun') + ')')
     } catch (err) {
-      log(`錯誤: ${err}`)
+      log(`${t('error')}: ${err}`)
     }
 
     setLoading(false)
@@ -191,35 +193,35 @@ export default function TestPage() {
     clear()
 
     const projectName = `test-${Date.now()}`
-    log(`測試免費網域部署...\n`)
-    log(`專案名稱: ${projectName}`)
+    log(`${t('testingFreeDomainDeploy')}...\n`)
+    log(`${t('projectName')}: ${projectName}`)
 
     try {
       const files = await generateNextJsTemplate(projectName, '')
 
-      log('\n生成的檔案:')
+      log('\n' + t('generatedFiles') + ':')
       files.forEach(f => log(`  - ${f.file}`))
 
-      log('\n開始部署（這可能需要幾分鐘）...')
+      log('\n' + t('deployingMayTakeMinutes') + '...')
 
       const result = await deployWithFreeDomain(projectName, files)
 
-      log(`\n部署結果:`)
-      log(`  狀態: ${result.status}`)
-      log(`  訊息: ${result.message}`)
-      log(`  進度: ${result.progress}%`)
+      log(`\n${t('deployResult')}:`)
+      log(`  ${t('status')}: ${result.status}`)
+      log(`  ${t('message')}: ${result.message}`)
+      log(`  ${t('progress')}: ${result.progress}%`)
 
       if (result.vercelProjectId) {
         log(`  Vercel Project ID: ${result.vercelProjectId}`)
       }
       if (result.vercelDeploymentUrl) {
-        log(`  部署網址: ${result.vercelDeploymentUrl}`)
+        log(`  ${t('deployUrl')}: ${result.vercelDeploymentUrl}`)
       }
       if (result.error) {
-        log(`  錯誤: ${result.error}`)
+        log(`  ${t('error')}: ${result.error}`)
       }
     } catch (err) {
-      log(`錯誤: ${err}`)
+      log(`${t('error')}: ${err}`)
     }
 
     setLoading(false)
@@ -227,18 +229,14 @@ export default function TestPage() {
 
   return (
     <div style={{ padding: 32, fontFamily: 'var(--font-sans)', maxWidth: 1000, margin: '0 auto' }}>
-      <h1 style={{ marginBottom: 8, fontSize: 24 }}>API 測試頁面</h1>
-      <p style={{ color: '#737373', marginBottom: 24 }}>驗證各服務的 API 連接狀態</p>
+      <h1 style={{ marginBottom: 8, fontSize: 24 }}>{t("pageTitle")}</h1>
+      <p style={{ color: '#737373', marginBottom: 24 }}>{t("pageSubtitle")}</p>
 
       {/* API 連接測試 */}
       <div style={{ marginBottom: 32 }}>
-        <h2 style={{ fontSize: 14, color: '#a3a3a3', marginBottom: 12, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-          API 連接
-        </h2>
+        <h2 style={{ fontSize: 14, color: '#a3a3a3', marginBottom: 12, textTransform: 'uppercase', letterSpacing: '0.05em' }}>{t("apiConnection")}</h2>
         <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
-          <button onClick={testConfig} disabled={loading} style={btnStyle}>
-            測試配置
-          </button>
+          <button onClick={testConfig} disabled={loading} style={btnStyle}>{t("testConfig")}</button>
           <button onClick={testSupabase} disabled={loading} style={btnStyle}>
             Supabase
           </button>
@@ -248,26 +246,20 @@ export default function TestPage() {
           <button onClick={testCloudflare} disabled={loading} style={btnStyle}>
             Cloudflare
           </button>
-          <button onClick={testPorkbunPing} disabled={loading} style={btnStyle}>
-            Porkbun 連接
-          </button>
-          <button onClick={testPorkbunPricing} disabled={loading} style={btnStyle}>
-            Porkbun 價格
-          </button>
+          <button onClick={testPorkbunPing} disabled={loading} style={btnStyle}>{t("porkbunConnection")}</button>
+          <button onClick={testPorkbunPricing} disabled={loading} style={btnStyle}>{t("porkbunPricing")}</button>
         </div>
       </div>
 
       {/* 網域搜尋 */}
       <div style={{ marginBottom: 32 }}>
-        <h2 style={{ fontSize: 14, color: '#a3a3a3', marginBottom: 12, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-          網域搜尋
-        </h2>
+        <h2 style={{ fontSize: 14, color: '#a3a3a3', marginBottom: 12, textTransform: 'uppercase', letterSpacing: '0.05em' }}>{t("domainSearch")}</h2>
         <div style={{ display: 'flex', gap: 12 }}>
           <input
             type="text"
             value={domainInput}
             onChange={(e) => setDomainInput(e.target.value)}
-            placeholder="例如: my-awesome-site.com"
+            placeholder={t("domainPlaceholder")}
             style={{
               padding: '12px 16px',
               border: '1px solid #e0e0e0',
@@ -275,17 +267,13 @@ export default function TestPage() {
               fontSize: 14,
             }}
           />
-          <button onClick={testDomainSearch} disabled={loading} style={btnStyle}>
-            搜尋
-          </button>
+          <button onClick={testDomainSearch} disabled={loading} style={btnStyle}>{t("search")}</button>
         </div>
       </div>
 
       {/* 部署測試 */}
       <div style={{ marginBottom: 32 }}>
-        <h2 style={{ fontSize: 14, color: '#a3a3a3', marginBottom: 12, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-          部署測試
-        </h2>
+        <h2 style={{ fontSize: 14, color: '#a3a3a3', marginBottom: 12, textTransform: 'uppercase', letterSpacing: '0.05em' }}>{t("deployTest")}</h2>
         <button
           onClick={testFreeDeploy}
           disabled={loading}
@@ -296,22 +284,16 @@ export default function TestPage() {
             borderColor: '#1a1a1a',
           }}
         >
-          {loading ? '執行中...' : '測試免費網域部署'}
+          {loading ? t('executing') : t('testFreeDomainDeploy')}
         </button>
-        <p style={{ fontSize: 12, color: '#a3a3a3', marginTop: 8 }}>
-          會真的建立 Vercel Project，請謹慎使用
-        </p>
+        <p style={{ fontSize: 12, color: '#a3a3a3', marginTop: 8 }}>{t("deployWarning")}</p>
       </div>
 
       {/* 輸出 */}
       <div>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-          <h2 style={{ fontSize: 14, color: '#a3a3a3', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-            輸出
-          </h2>
-          <button onClick={clear} style={{ fontSize: 12, color: '#737373', background: 'none', border: 'none', cursor: 'pointer' }}>
-            清除
-          </button>
+          <h2 style={{ fontSize: 14, color: '#a3a3a3', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{t("output")}</h2>
+          <button onClick={clear} style={{ fontSize: 12, color: '#737373', background: 'none', border: 'none', cursor: 'pointer' }}>{t("clear")}</button>
         </div>
         <pre style={{
           padding: 20,
@@ -323,13 +305,13 @@ export default function TestPage() {
           fontSize: 13,
           lineHeight: 1.6,
         }}>
-          {output || '點擊按鈕開始測試'}
+          {output || t('clickToTest')}
         </pre>
       </div>
 
       <div style={{ marginTop: 24, paddingTop: 24, borderTop: '1px solid #e0e0e0', display: 'flex', gap: 24 }}>
-        <Link href="/" style={{ color: '#737373', fontSize: 14 }}>← 返回首頁</Link>
-        <Link href="/test/spec-generation" style={{ color: '#737373', fontSize: 14 }}>測試規格生成畫面 →</Link>
+        <Link href="/" style={{ color: '#737373', fontSize: 14 }}>{t("backToHome")}</Link>
+        <Link href="/test/spec-generation" style={{ color: '#737373', fontSize: 14 }}>{t("testSpecGeneration")}</Link>
       </div>
     </div>
   )
