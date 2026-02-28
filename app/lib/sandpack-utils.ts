@@ -119,6 +119,15 @@ const SANDPACK_EDIT_BRIDGE = `
 // window 檢查是防 SSR 的安全網，__tcEditBridgeInitialized 防 HMR 重複初始化
 if (typeof window !== 'undefined' && !window.__tcEditBridgeInitialized) {
   window.__tcEditBridgeInitialized = true;
+  try {
+
+  // postToParent：防 Sandpack 巢狀 iframe，同時通知 parent 和 top
+  function postToParent(msg) {
+    try { window.parent.postMessage(msg, '*'); } catch(e) {}
+    if (window.parent !== window.top) {
+      try { window.top.postMessage(msg, '*'); } catch(e) {}
+    }
+  }
 
   var editMode = false;
   var selectedId = null;
@@ -396,12 +405,12 @@ if (typeof window !== 'undefined' && !window.__tcEditBridgeInitialized) {
           // 發送結果到父視窗
           var finalRect = el.getBoundingClientRect();
           var cs = window.getComputedStyle(el);
-          window.parent.postMessage({
+          postToParent({
             type: 'tc_elementResized',
             elementId: elementId,
             changes: { width: cs.width, height: cs.height },
             styles: extractStyles(el)
-          }, '*');
+          });
         }
 
         document.addEventListener('mousemove', onMove);
@@ -488,6 +497,10 @@ if (typeof window !== 'undefined' && !window.__tcEditBridgeInitialized) {
       '[data-editable-type="container"]:hover {' +
         'outline-color: #f59e0b !important;' +
       '}' +
+      '[data-editable-type="image"] {' +
+        'pointer-events: auto !important;' +
+        'z-index: 2 !important;' +
+      '}' +
       '[data-editable-type="image"]:hover {' +
         'outline-color: #10b981 !important;' +
       '}' +
@@ -509,7 +522,7 @@ if (typeof window !== 'undefined' && !window.__tcEditBridgeInitialized) {
       selectedId = null;
       removeResizeHandles();
       updateEditStyles();
-      window.parent.postMessage({ type: 'tc_elementDeselected' }, '*');
+      postToParent({ type: 'tc_elementDeselected' });
       return;
     }
 
@@ -530,7 +543,7 @@ if (typeof window !== 'undefined' && !window.__tcEditBridgeInitialized) {
       removeResizeHandles();
     }
 
-    window.parent.postMessage({
+    postToParent({
       type: 'tc_elementSelected',
       data: {
         id: id,
@@ -541,7 +554,7 @@ if (typeof window !== 'undefined' && !window.__tcEditBridgeInitialized) {
         editableType: editableType,
         path: getElementPath(target)
       }
-    }, '*');
+    });
   }, true);
 
   // 接收父視窗指令
@@ -639,15 +652,27 @@ if (typeof window !== 'undefined' && !window.__tcEditBridgeInitialized) {
 
   // 初始標記 + 啟動 observer
   function init() {
-    fullRetag();
-    observer.observe(document.body, { childList: true, subtree: true });
-    window.parent.postMessage({ type: 'tc_iframeReady' }, '*');
+    try {
+      if (!document.body) {
+        setTimeout(init, 200);
+        return;
+      }
+      fullRetag();
+      observer.observe(document.body, { childList: true, subtree: true });
+      postToParent({ type: 'tc_iframeReady' });
+    } catch (err) {
+      console.error('[TC EditBridge] init() failed:', err);
+    }
   }
 
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', init);
   } else {
     setTimeout(init, 100);
+  }
+
+  } catch (err) {
+    console.error('[TC EditBridge] Init failed:', err);
   }
 }
 `

@@ -229,6 +229,10 @@ const EDIT_BRIDGE_SCRIPT = `
       '[data-editable-type="container"]:hover {' +
         'outline-color: #f59e0b !important;' +
       '}' +
+      '[data-editable-type="image"] {' +
+        'pointer-events: auto !important;' +
+        'z-index: 2 !important;' +
+      '}' +
       '[data-editable-type="image"]:hover {' +
         'outline-color: #10b981 !important;' +
       '}' +

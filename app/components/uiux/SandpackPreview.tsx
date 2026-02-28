@@ -104,6 +104,13 @@ export default function SandpackPreview({
       const iframe = containerRef.current.querySelector('iframe')
       if (iframe && iframe !== iframeRef.current) {
         iframeRef.current = iframe
+        // 新 iframe 被發現 → 立即同步當前 editMode
+        if (iframe.contentWindow) {
+          iframe.contentWindow.postMessage({
+            type: 'tc_setEditMode',
+            enabled: effectiveEditModeRef.current,
+          }, '*')
+        }
       }
     }
 
@@ -121,11 +128,21 @@ export default function SandpackPreview({
   effectiveEditModeRef.current = effectiveEditMode
 
   useEffect(() => {
-    if (!iframeRef.current?.contentWindow) return
-    iframeRef.current.contentWindow.postMessage({
-      type: 'tc_setEditMode',
-      enabled: effectiveEditMode,
-    }, '*')
+    const sendEditMode = () => {
+      if (!iframeRef.current?.contentWindow) return false
+      iframeRef.current.contentWindow.postMessage({
+        type: 'tc_setEditMode',
+        enabled: effectiveEditMode,
+      }, '*')
+      return true
+    }
+
+    if (!sendEditMode()) {
+      // iframe 尚未就緒，短暫重試
+      const retryTimer = setTimeout(sendEditMode, 300)
+      const retryTimer2 = setTimeout(sendEditMode, 800)
+      return () => { clearTimeout(retryTimer); clearTimeout(retryTimer2) }
+    }
   }, [effectiveEditMode])
 
   // ── 監聯 iframe postMessage ──
