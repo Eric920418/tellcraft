@@ -223,7 +223,7 @@ export async function requireAdmin(
       )
 
       if (!adminCheck?.is_admin) {
-        res.status(403).json({ error: '無管理員權限' })
+        res.status(403).json({ error: 'ADMIN_REQUIRED' })
         return
       }
 

@@ -2544,11 +2544,21 @@ function ChatSection({
 
                 // 沒打字 + 有對話 → 上一步按鈕
                 if (!hasInput && hasConversation) {
+                  const handleGoBack = () => {
+                    if (isBusy) return
+                    // 還沒有 taskId（初始階段）或只有一條用戶消息 → 回首頁
+                    const userMsgCount = messages.filter(m => m.role === 'user').length
+                    if (!sessionInfo?.currentTaskId || userMsgCount <= 1) {
+                      onBack()
+                    } else {
+                      handleSendMessage('__go_back__')
+                    }
+                  }
                   return (
                     <motion.button
                       whileHover={isBusy ? {} : { scale: 1.02, backgroundColor: 'var(--gray-100)' }}
                       whileTap={isBusy ? {} : { scale: 0.98 }}
-                      onClick={() => { if (!isBusy) handleSendMessage('__go_back__') }}
+                      onClick={handleGoBack}
                       disabled={isBusy}
                       style={{
                         padding: layoutMode === 'split' ? '0 16px' : '0 20px',

@@ -95,7 +95,7 @@ export default function AdminUserDetailPage() {
       const result = await getUserDetail({ token, userId })
 
       if (!result.success) {
-        if (result.error === '無管理員權限') {
+        if (result.error === 'ADMIN_REQUIRED') {
           router.push('/dashboard')
           return
         }

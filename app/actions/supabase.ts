@@ -1,5 +1,7 @@
 'use server'
 
+import { getTranslations } from 'next-intl/server'
+
 const SUPABASE_API = 'https://api.supabase.com/v1'
 
 interface SupabaseProject {
@@ -29,10 +31,11 @@ export async function createSupabaseProject(name: string): Promise<{
   error?: string
 }> {
   const token = process.env.SUPABASE_ACCESS_TOKEN
+  const t = await getTranslations('actionErrors')
   const orgId = process.env.SUPABASE_ORG_ID
 
   if (!token || !orgId) {
-    return { success: false, error: '缺少 Supabase 認證配置' }
+    return { success: false, error: t('missingSupabaseConfig') }
   }
 
   try {
@@ -56,7 +59,7 @@ export async function createSupabaseProject(name: string): Promise<{
 
     if (!response.ok) {
       const error = await response.text()
-      return { success: false, error: `建立 Supabase Project 失敗: ${error}` }
+      return { success: false, error: `Supabase project creation failed: ${error}` }
     }
 
     const project = await response.json() as CreateProjectResponse
@@ -65,12 +68,12 @@ export async function createSupabaseProject(name: string): Promise<{
     const readyProject = await waitForProjectReady(project.id)
 
     if (!readyProject) {
-      return { success: false, error: 'Supabase Project 建立超時' }
+      return { success: false, error: t('supabaseProjectTimeout') }
     }
 
     return { success: true, project: readyProject }
   } catch (err) {
-    return { success: false, error: `建立 Supabase Project 時發生錯誤: ${err}` }
+    return { success: false, error: `Supabase project creation error: ${err}` }
   }
 }
 
@@ -110,9 +113,10 @@ export async function runMigration(projectId: string, sql: string): Promise<{
   error?: string
 }> {
   const token = process.env.SUPABASE_ACCESS_TOKEN
+  const t = await getTranslations('actionErrors')
 
   if (!token) {
-    return { success: false, error: '缺少 Supabase 認證配置' }
+    return { success: false, error: t('missingSupabaseConfig') }
   }
 
   try {
@@ -130,12 +134,12 @@ export async function runMigration(projectId: string, sql: string): Promise<{
 
     if (!response.ok) {
       const error = await response.text()
-      return { success: false, error: `執行 Migration 失敗: ${error}` }
+      return { success: false, error: `Migration execution failed: ${error}` }
     }
 
     return { success: true }
   } catch (err) {
-    return { success: false, error: `執行 Migration 時發生錯誤: ${err}` }
+    return { success: false, error: `Migration execution error: ${err}` }
   }
 }
 
@@ -149,9 +153,10 @@ export async function getProjectConfig(projectId: string): Promise<{
   error?: string
 }> {
   const token = process.env.SUPABASE_ACCESS_TOKEN
+  const t = await getTranslations('actionErrors')
 
   if (!token) {
-    return { success: false, error: '缺少 Supabase 認證配置' }
+    return { success: false, error: t('missingSupabaseConfig') }
   }
 
   try {
@@ -164,14 +169,14 @@ export async function getProjectConfig(projectId: string): Promise<{
 
     if (!keysResponse.ok) {
       const error = await keysResponse.text()
-      return { success: false, error: `取得 API Keys 失敗: ${error}` }
+      return { success: false, error: `API keys retrieval failed: ${error}` }
     }
 
     const keys = await keysResponse.json() as Array<{ name: string; api_key: string }>
     const anonKey = keys.find(k => k.name === 'anon')?.api_key
 
     if (!anonKey) {
-      return { success: false, error: '找不到 anon key' }
+      return { success: false, error: t('anonKeyNotFound') }
     }
 
     return {
@@ -182,7 +187,7 @@ export async function getProjectConfig(projectId: string): Promise<{
       },
     }
   } catch (err) {
-    return { success: false, error: `取得 Project 配置時發生錯誤: ${err}` }
+    return { success: false, error: `Project config retrieval error: ${err}` }
   }
 }
 
@@ -193,9 +198,10 @@ export async function listProjects(): Promise<{
   error?: string
 }> {
   const token = process.env.SUPABASE_ACCESS_TOKEN
+  const t = await getTranslations('actionErrors')
 
   if (!token) {
-    return { success: false, error: '缺少 Supabase 認證配置' }
+    return { success: false, error: t('missingSupabaseConfig') }
   }
 
   try {
@@ -207,13 +213,13 @@ export async function listProjects(): Promise<{
 
     if (!response.ok) {
       const error = await response.text()
-      return { success: false, error: `列出 Projects 失敗: ${error}` }
+      return { success: false, error: `Projects listing failed: ${error}` }
     }
 
     const projects = await response.json() as SupabaseProject[]
     return { success: true, projects }
   } catch (err) {
-    return { success: false, error: `列出 Projects 時發生錯誤: ${err}` }
+    return { success: false, error: `Projects listing error: ${err}` }
   }
 }
 

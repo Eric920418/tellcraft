@@ -1,5 +1,7 @@
 'use server'
 
+import { getTranslations } from 'next-intl/server'
+
 import { checkDomainAvailability, registerDomain, updateNameservers } from './porkbun'
 import { createZone, setupVercelDns } from './cloudflare'
 import { createVercelProject, deployFiles } from './vercel'
@@ -41,12 +43,13 @@ export interface DomainWorkflow {
 // 搜尋網域可用性
 export async function searchDomain(domain: string): Promise<DomainWorkflow> {
   const result = await checkDomainAvailability(domain)
+  const t = await getTranslations('actionErrors')
 
   if (!result.success) {
     return {
       status: 'error',
       domain,
-      message: result.error || '查詢失敗',
+      message: result.error || t('queryFailed'),
       progress: 0,
       error: result.error,
     }
@@ -56,14 +59,14 @@ export async function searchDomain(domain: string): Promise<DomainWorkflow> {
     return {
       status: 'available',
       domain,
-      message: `網域可用，價格：${result.price}/年`,
+      message: `Domain available, price: ${result.price}/year`,
       progress: 10,
     }
   } else {
     return {
       status: 'unavailable',
       domain,
-      message: '網域已被註冊',
+      message: t('domainAlreadyRegistered'),
       progress: 0,
     }
   }
@@ -89,6 +92,7 @@ export async function fullDomainWorkflow(
 ): Promise<DomainWorkflow> {
 
   const report = (workflow: DomainWorkflow) => {
+  const t = await getTranslations('actionErrors')
     console.log(`[Domain Workflow] ${workflow.status}: ${workflow.message}`)
     onProgress?.(workflow)
     return workflow
@@ -98,7 +102,7 @@ export async function fullDomainWorkflow(
   report({
     status: 'registering',
     domain,
-    message: '正在註冊網域...',
+    message: t('registeringDomain'),
     progress: 15,
   })
 
@@ -108,7 +112,7 @@ export async function fullDomainWorkflow(
     return report({
       status: 'error',
       domain,
-      message: registerResult.error || '網域註冊失敗',
+      message: registerResult.error || t('domainRegistrationFailed'),
       progress: 15,
       error: registerResult.error,
     })
@@ -118,7 +122,7 @@ export async function fullDomainWorkflow(
   report({
     status: 'creating_zone',
     domain,
-    message: '正在建立 DNS 託管...',
+    message: t('creatingDnsZone'),
     progress: 30,
     porkbunDomain: registerResult.domain,
   })
@@ -129,7 +133,7 @@ export async function fullDomainWorkflow(
     return report({
       status: 'error',
       domain,
-      message: zoneResult.error || '建立 DNS Zone 失敗',
+      message: zoneResult.error || t('createDnsZoneFailed'),
       progress: 30,
       porkbunDomain: registerResult.domain,
       error: zoneResult.error,
@@ -143,7 +147,7 @@ export async function fullDomainWorkflow(
   report({
     status: 'setting_ns',
     domain,
-    message: '正在設定 Nameserver...',
+    message: t('settingNameserver'),
     progress: 40,
     porkbunDomain: registerResult.domain,
     cloudflareZoneId: zoneId,
@@ -156,7 +160,7 @@ export async function fullDomainWorkflow(
     return report({
       status: 'error',
       domain,
-      message: nsResult.error || '設定 Nameserver 失敗',
+      message: nsResult.error || t('setNameserverFailed'),
       progress: 40,
       porkbunDomain: registerResult.domain,
       cloudflareZoneId: zoneId,
@@ -169,7 +173,7 @@ export async function fullDomainWorkflow(
   report({
     status: 'creating_project',
     domain,
-    message: '正在建立部署環境...',
+    message: t('creatingDeployEnv'),
     progress: 50,
     porkbunDomain: registerResult.domain,
     cloudflareZoneId: zoneId,
@@ -183,7 +187,7 @@ export async function fullDomainWorkflow(
     return report({
       status: 'error',
       domain,
-      message: vercelResult.error || '建立 Vercel Project 失敗',
+      message: vercelResult.error || t('createVercelProjectFailed'),
       progress: 50,
       porkbunDomain: registerResult.domain,
       cloudflareZoneId: zoneId,
@@ -198,7 +202,7 @@ export async function fullDomainWorkflow(
   report({
     status: 'deploying',
     domain,
-    message: '正在部署程式碼...',
+    message: t('deployingCode'),
     progress: 60,
     porkbunDomain: registerResult.domain,
     cloudflareZoneId: zoneId,
@@ -212,7 +216,7 @@ export async function fullDomainWorkflow(
     return report({
       status: 'error',
       domain,
-      message: deployResult.error || '部署失敗',
+      message: deployResult.error || t('deployFailed'),
       progress: 60,
       porkbunDomain: registerResult.domain,
       cloudflareZoneId: zoneId,
@@ -226,7 +230,7 @@ export async function fullDomainWorkflow(
   report({
     status: 'setting_domain',
     domain,
-    message: '正在綁定自訂網域...',
+    message: t('bindingCustomDomain'),
     progress: 75,
     porkbunDomain: registerResult.domain,
     cloudflareZoneId: zoneId,
@@ -239,14 +243,14 @@ export async function fullDomainWorkflow(
 
   if (!domainBindResult.success) {
     // 網域綁定失敗不算致命錯誤，用戶可以之後手動綁定
-    console.warn('綁定網域失敗:', domainBindResult.error)
+    console.warn('Domain binding failed:', domainBindResult.error)
   }
 
   // Step 7: 設定 DNS 指向 Vercel
   report({
     status: 'verifying',
     domain,
-    message: '正在設定 DNS 記錄...',
+    message: t('settingDnsRecords'),
     progress: 85,
     porkbunDomain: registerResult.domain,
     cloudflareZoneId: zoneId,
@@ -264,14 +268,14 @@ export async function fullDomainWorkflow(
   ])
 
   if (!dnsResult.success) {
-    console.warn('設定 DNS 記錄失敗:', dnsResult.error)
+    console.warn('DNS record setup failed:', dnsResult.error)
   }
 
   // 完成
   return report({
     status: 'active',
     domain,
-    message: `網站已上線！網址：https://${domain}`,
+    message: `Site is live! URL: https://${domain}`,
     progress: 100,
     porkbunDomain: registerResult.domain,
     cloudflareZoneId: zoneId,
@@ -288,10 +292,11 @@ async function addDomainToVercel(projectId: string, domain: string): Promise<{
   error?: string
 }> {
   const token = process.env.VERCEL_ACCESS_TOKEN
+  const t = await getTranslations('actionErrors')
   const teamId = process.env.VERCEL_TEAM_ID
 
   if (!token) {
-    return { success: false, error: '缺少 Vercel 認證配置' }
+    return { success: false, error: t('missingVercelConfig') }
   }
 
   try {
@@ -325,7 +330,7 @@ async function addDomainToVercel(projectId: string, domain: string): Promise<{
       verification: data.verification,
     }
   } catch (err) {
-    return { success: false, error: `綁定網域時發生錯誤: ${err}` }
+    return { success: false, error: `Domain binding error: ${err}` }
   }
 }
 
@@ -335,9 +340,10 @@ export async function deployWithFreeDomain(
   files: Array<{ file: string; data: string }>,
 ): Promise<DomainWorkflow> {
   const projectSlug = projectName.toLowerCase().replace(/[^a-z0-9]/g, '-').slice(0, 30)
+  const t = await getTranslations('actionErrors')
   const freeDomain = `${projectSlug}.vercel.app`
 
-  console.log('[Deploy] 使用免費網域:', freeDomain)
+  console.log('[Deploy] Using free domain:', freeDomain)
 
   // Step 1: 建立 Vercel Project
   const vercelResult = await createVercelProject(projectSlug)
@@ -346,7 +352,7 @@ export async function deployWithFreeDomain(
     return {
       status: 'error',
       domain: freeDomain,
-      message: vercelResult.error || '建立 Vercel Project 失敗',
+      message: vercelResult.error || t('createVercelProjectFailed'),
       progress: 30,
       error: vercelResult.error,
     }
@@ -359,7 +365,7 @@ export async function deployWithFreeDomain(
     return {
       status: 'error',
       domain: freeDomain,
-      message: deployResult.error || '部署失敗',
+      message: deployResult.error || t('deployFailed'),
       progress: 60,
       vercelProjectId: vercelResult.project?.id,
       error: deployResult.error,
@@ -369,7 +375,7 @@ export async function deployWithFreeDomain(
   return {
     status: 'active',
     domain: freeDomain,
-    message: `網站已上線！網址：https://${freeDomain}`,
+    message: `Site is live! URL: https://${freeDomain}`,
     progress: 100,
     vercelProjectId: vercelResult.project?.id,
     vercelDeploymentUrl: deployResult.url,
@@ -383,8 +389,9 @@ export async function deployWithOwnDomain(
   files: Array<{ file: string; data: string }>,
 ): Promise<DomainWorkflow & { dnsInstructions?: string }> {
   const projectSlug = projectName.toLowerCase().replace(/[^a-z0-9]/g, '-').slice(0, 30)
+  const t = await getTranslations('actionErrors')
 
-  console.log('[Deploy] 使用自有網域:', domain)
+  console.log('[Deploy] Using own domain:', domain)
 
   // Step 1: 建立 Vercel Project
   const vercelResult = await createVercelProject(projectSlug)
@@ -393,7 +400,7 @@ export async function deployWithOwnDomain(
     return {
       status: 'error',
       domain,
-      message: vercelResult.error || '建立 Vercel Project 失敗',
+      message: vercelResult.error || t('createVercelProjectFailed'),
       progress: 30,
       error: vercelResult.error,
     }
@@ -406,7 +413,7 @@ export async function deployWithOwnDomain(
     return {
       status: 'error',
       domain,
-      message: deployResult.error || '部署失敗',
+      message: deployResult.error || t('deployFailed'),
       progress: 60,
       vercelProjectId: vercelResult.project?.id,
       error: deployResult.error,
@@ -418,23 +425,23 @@ export async function deployWithOwnDomain(
 
   // 生成 DNS 設定說明
   const dnsInstructions = `
-請在你的 DNS 管理介面設定以下記錄：
+Please set up the following DNS records:
 
-1. A 記錄
-   主機名稱：@ (或留空)
-   指向：76.76.21.21
+1. A Record
+      Host: @ (or leave empty)
+      Points to: 76.76.21.21
 
-2. CNAME 記錄
-   主機名稱：www
-   指向：cname.vercel-dns.com
+2. CNAME Record
+      Host: www
+      Points to: cname.vercel-dns.com
 
-設定完成後，DNS 傳播可能需要 24-48 小時。
+After setup, DNS propagation may take 24-48 hours.
 `.trim()
 
   return {
     status: 'active',
     domain,
-    message: `網站已部署！請依照說明設定 DNS。`,
+    message: `Site deployed! Please follow the DNS instructions.`,
     progress: 100,
     vercelProjectId: vercelResult.project?.id,
     vercelDeploymentUrl: deployResult.url,

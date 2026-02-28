@@ -59,7 +59,7 @@ export default function AdminDashboardPage() {
       ])
 
       if (!statsResult.success) {
-        if (statsResult.error === '無管理員權限') {
+        if (statsResult.error === 'ADMIN_REQUIRED') {
           router.push('/dashboard')
           return
         }

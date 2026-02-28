@@ -1,5 +1,7 @@
 'use server'
 
+import { getTranslations } from 'next-intl/server'
+
 const PORKBUN_API = 'https://api.porkbun.com/api/json/v3'
 
 // 帶超時的 fetch
@@ -25,10 +27,11 @@ export async function pingPorkbun(): Promise<{
   error?: string
 }> {
   const apiKey = process.env.PORKBUN_API_KEY
+  const t = await getTranslations('actionErrors')
   const secretKey = process.env.PORKBUN_SECRET_KEY
 
   if (!apiKey || !secretKey) {
-    return { success: false, error: '缺少 Porkbun API 認證配置' }
+    return { success: false, error: t('missingPorkbunConfig') }
   }
 
   try {
@@ -52,20 +55,20 @@ export async function pingPorkbun(): Promise<{
     if (data.status === 'SUCCESS') {
       return {
         success: true,
-        message: 'Porkbun API 連接成功',
+        message: 'Porkbun API connected',
         yourIp: data.yourIp,
       }
     } else {
       return {
         success: false,
-        error: data.message || `API 返回狀態: ${data.status}`,
+        error: data.message || `API returned status: ${data.status}`,
       }
     }
   } catch (err) {
     if (err instanceof Error && err.name === 'AbortError') {
-      return { success: false, error: '連接超時（5秒）- 你的網路可能無法連接 Porkbun' }
+      return { success: false, error: t('porkbunConnectionTimeout') }
     }
-    return { success: false, error: `連接 Porkbun API 時發生錯誤: ${err}` }
+    return { success: false, error: `Porkbun API connection error: ${err}` }
   }
 }
 
@@ -106,6 +109,7 @@ export async function checkDomainAvailability(domain: string): Promise<{
   error?: string
 }> {
   try {
+  const t = await getTranslations('actionErrors')
     // 使用 Google DNS API 檢查網域是否存在
     const controller = new AbortController()
     const timeoutId = setTimeout(() => controller.abort(), 5000)
@@ -137,9 +141,9 @@ export async function checkDomainAvailability(domain: string): Promise<{
     }
   } catch (err) {
     if (err instanceof Error && err.name === 'AbortError') {
-      return { success: false, error: '查詢超時，請稍後再試' }
+      return { success: false, error: t('queryTimeout') }
     }
-    return { success: false, error: `查詢網域時發生錯誤: ${err}` }
+    return { success: false, error: `Domain query error: ${err}` }
   }
 }
 
@@ -165,11 +169,12 @@ export async function registerDomain(
   error?: string
 }> {
   const apiKey = process.env.PORKBUN_API_KEY
+  const t = await getTranslations('actionErrors')
   const secretKey = process.env.PORKBUN_SECRET_KEY
 
   if (!apiKey || !secretKey) {
     // Mock 模式
-    console.log('[Porkbun] Mock 模式 - 模擬網域註冊:', domain)
+    console.log('[Porkbun] Mock mode - simulating domain registration:', domain)
     return {
       success: true,
       domain: domain,
@@ -200,7 +205,7 @@ export async function registerDomain(
     }
 
     if (data.status !== 'SUCCESS') {
-      return { success: false, error: data.message || '註冊失敗' }
+      return { success: false, error: data.message || t('registrationFailed') }
     }
 
     return {
@@ -209,7 +214,7 @@ export async function registerDomain(
       expireDate: data.expireDate,
     }
   } catch (err) {
-    return { success: false, error: `註冊網域時發生錯誤: ${err}` }
+    return { success: false, error: `Domain registration error: ${err}` }
   }
 }
 
@@ -222,11 +227,12 @@ export async function updateNameservers(
   error?: string
 }> {
   const apiKey = process.env.PORKBUN_API_KEY
+  const t = await getTranslations('actionErrors')
   const secretKey = process.env.PORKBUN_SECRET_KEY
 
   if (!apiKey || !secretKey) {
     // Mock 模式
-    console.log('[Porkbun] Mock 模式 - 更新 NS:', domain, nameservers)
+    console.log('[Porkbun] Mock mode - updating NS:', domain, nameservers)
     return { success: true }
   }
 
@@ -249,12 +255,12 @@ export async function updateNameservers(
     }
 
     if (data.status !== 'SUCCESS') {
-      return { success: false, error: data.message || '更新 Nameserver 失敗' }
+      return { success: false, error: data.message || t('updateNameserverFailed') }
     }
 
     return { success: true }
   } catch (err) {
-    return { success: false, error: `更新 Nameserver 時發生錯誤: ${err}` }
+    return { success: false, error: `Nameserver update error: ${err}` }
   }
 }
 
@@ -265,6 +271,7 @@ export async function getDomainInfo(domain: string): Promise<{
   error?: string
 }> {
   const apiKey = process.env.PORKBUN_API_KEY
+  const t = await getTranslations('actionErrors')
   const secretKey = process.env.PORKBUN_SECRET_KEY
 
   if (!apiKey || !secretKey) {
@@ -302,12 +309,12 @@ export async function getDomainInfo(domain: string): Promise<{
     }
 
     if (data.status !== 'SUCCESS') {
-      return { success: false, error: data.message || '取得網域資訊失敗' }
+      return { success: false, error: data.message || t('getDomainInfoFailed') }
     }
 
     return { success: true, info: data.domain }
   } catch (err) {
-    return { success: false, error: `取得網域資訊時發生錯誤: ${err}` }
+    return { success: false, error: `Domain info retrieval error: ${err}` }
   }
 }
 
@@ -318,6 +325,7 @@ export async function listDomains(): Promise<{
   error?: string
 }> {
   const apiKey = process.env.PORKBUN_API_KEY
+  const t = await getTranslations('actionErrors')
   const secretKey = process.env.PORKBUN_SECRET_KEY
 
   if (!apiKey || !secretKey) {
@@ -344,12 +352,12 @@ export async function listDomains(): Promise<{
     }
 
     if (data.status !== 'SUCCESS') {
-      return { success: false, error: data.message || '列出網域失敗' }
+      return { success: false, error: data.message || t('listDomainsFailed') }
     }
 
     return { success: true, domains: data.domains }
   } catch (err) {
-    return { success: false, error: `列出網域時發生錯誤: ${err}` }
+    return { success: false, error: `Domain listing error: ${err}` }
   }
 }
 
@@ -405,7 +413,7 @@ export async function getDomainPricing(): Promise<{
     return { success: true, pricing: data.pricing, source: 'api' }
   } catch (err) {
     // 超時或錯誤，返回備用價格
-    console.warn('[Porkbun] API 不可用，使用備用價格:', err)
+    console.warn('[Porkbun] API unavailable, using fallback pricing:', err)
     return { success: true, pricing: fallbackPricing, source: 'fallback' }
   }
 }

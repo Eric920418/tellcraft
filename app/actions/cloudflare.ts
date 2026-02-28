@@ -1,5 +1,7 @@
 'use server'
 
+import { getTranslations } from 'next-intl/server'
+
 const CLOUDFLARE_API = 'https://api.cloudflare.com/client/v4'
 
 interface Zone {
@@ -26,10 +28,11 @@ export async function createZone(domain: string): Promise<{
   error?: string
 }> {
   const token = process.env.CLOUDFLARE_API_TOKEN
+  const t = await getTranslations('actionErrors')
   const accountId = process.env.CLOUDFLARE_ACCOUNT_ID
 
   if (!token || !accountId) {
-    return { success: false, error: '缺少 Cloudflare 認證配置' }
+    return { success: false, error: t('missingCloudflareConfig') }
   }
 
   try {
@@ -49,7 +52,7 @@ export async function createZone(domain: string): Promise<{
     const data = await response.json() as { success: boolean; result?: Zone; errors?: Array<{ message: string }> }
 
     if (!data.success) {
-      const errorMsg = data.errors?.[0]?.message || '建立 Zone 失敗'
+      const errorMsg = data.errors?.[0]?.message || t('createZoneFailed')
       return { success: false, error: errorMsg }
     }
 
@@ -59,7 +62,7 @@ export async function createZone(domain: string): Promise<{
       nameservers: data.result?.name_servers,
     }
   } catch (err) {
-    return { success: false, error: `建立 Zone 時發生錯誤: ${err}` }
+    return { success: false, error: `Zone creation error: ${err}` }
   }
 }
 
@@ -70,9 +73,10 @@ export async function getZone(zoneId: string): Promise<{
   error?: string
 }> {
   const token = process.env.CLOUDFLARE_API_TOKEN
+  const t = await getTranslations('actionErrors')
 
   if (!token) {
-    return { success: false, error: '缺少 Cloudflare 認證配置' }
+    return { success: false, error: t('missingCloudflareConfig') }
   }
 
   try {
@@ -85,12 +89,12 @@ export async function getZone(zoneId: string): Promise<{
     const data = await response.json() as { success: boolean; result?: Zone; errors?: Array<{ message: string }> }
 
     if (!data.success) {
-      return { success: false, error: data.errors?.[0]?.message || '取得 Zone 失敗' }
+      return { success: false, error: data.errors?.[0]?.message || t('getZoneFailed') }
     }
 
     return { success: true, zone: data.result }
   } catch (err) {
-    return { success: false, error: `取得 Zone 時發生錯誤: ${err}` }
+    return { success: false, error: `Zone retrieval error: ${err}` }
   }
 }
 
@@ -101,9 +105,10 @@ export async function getZoneByName(domain: string): Promise<{
   error?: string
 }> {
   const token = process.env.CLOUDFLARE_API_TOKEN
+  const t = await getTranslations('actionErrors')
 
   if (!token) {
-    return { success: false, error: '缺少 Cloudflare 認證配置' }
+    return { success: false, error: t('missingCloudflareConfig') }
   }
 
   try {
@@ -116,16 +121,16 @@ export async function getZoneByName(domain: string): Promise<{
     const data = await response.json() as { success: boolean; result?: Zone[]; errors?: Array<{ message: string }> }
 
     if (!data.success) {
-      return { success: false, error: data.errors?.[0]?.message || '查詢 Zone 失敗' }
+      return { success: false, error: data.errors?.[0]?.message || t('queryZoneFailed') }
     }
 
     if (!data.result || data.result.length === 0) {
-      return { success: false, error: '找不到該網域' }
+      return { success: false, error: t('domainNotFound') }
     }
 
     return { success: true, zone: data.result[0] }
   } catch (err) {
-    return { success: false, error: `查詢 Zone 時發生錯誤: ${err}` }
+    return { success: false, error: `Zone query error: ${err}` }
   }
 }
 
@@ -145,9 +150,10 @@ export async function createDnsRecord(
   error?: string
 }> {
   const token = process.env.CLOUDFLARE_API_TOKEN
+  const t = await getTranslations('actionErrors')
 
   if (!token) {
-    return { success: false, error: '缺少 Cloudflare 認證配置' }
+    return { success: false, error: t('missingCloudflareConfig') }
   }
 
   try {
@@ -169,12 +175,12 @@ export async function createDnsRecord(
     const data = await response.json() as { success: boolean; result?: DnsRecord; errors?: Array<{ message: string }> }
 
     if (!data.success) {
-      return { success: false, error: data.errors?.[0]?.message || '新增 DNS 記錄失敗' }
+      return { success: false, error: data.errors?.[0]?.message || t('createDnsRecordFailed') }
     }
 
     return { success: true, record: data.result }
   } catch (err) {
-    return { success: false, error: `新增 DNS 記錄時發生錯誤: ${err}` }
+    return { success: false, error: `DNS record creation error: ${err}` }
   }
 }
 
@@ -185,9 +191,10 @@ export async function listDnsRecords(zoneId: string): Promise<{
   error?: string
 }> {
   const token = process.env.CLOUDFLARE_API_TOKEN
+  const t = await getTranslations('actionErrors')
 
   if (!token) {
-    return { success: false, error: '缺少 Cloudflare 認證配置' }
+    return { success: false, error: t('missingCloudflareConfig') }
   }
 
   try {
@@ -200,12 +207,12 @@ export async function listDnsRecords(zoneId: string): Promise<{
     const data = await response.json() as { success: boolean; result?: DnsRecord[]; errors?: Array<{ message: string }> }
 
     if (!data.success) {
-      return { success: false, error: data.errors?.[0]?.message || '列出 DNS 記錄失敗' }
+      return { success: false, error: data.errors?.[0]?.message || t('listDnsRecordsFailed') }
     }
 
     return { success: true, records: data.result }
   } catch (err) {
-    return { success: false, error: `列出 DNS 記錄時發生錯誤: ${err}` }
+    return { success: false, error: `DNS records listing error: ${err}` }
   }
 }
 
@@ -215,9 +222,10 @@ export async function deleteDnsRecord(zoneId: string, recordId: string): Promise
   error?: string
 }> {
   const token = process.env.CLOUDFLARE_API_TOKEN
+  const t = await getTranslations('actionErrors')
 
   if (!token) {
-    return { success: false, error: '缺少 Cloudflare 認證配置' }
+    return { success: false, error: t('missingCloudflareConfig') }
   }
 
   try {
@@ -231,12 +239,12 @@ export async function deleteDnsRecord(zoneId: string, recordId: string): Promise
     const data = await response.json() as { success: boolean; errors?: Array<{ message: string }> }
 
     if (!data.success) {
-      return { success: false, error: data.errors?.[0]?.message || '刪除 DNS 記錄失敗' }
+      return { success: false, error: data.errors?.[0]?.message || t('deleteDnsRecordFailed') }
     }
 
     return { success: true }
   } catch (err) {
-    return { success: false, error: `刪除 DNS 記錄時發生錯誤: ${err}` }
+    return { success: false, error: `DNS record deletion error: ${err}` }
   }
 }
 
@@ -250,9 +258,10 @@ export async function setupVercelDns(
   error?: string
 }> {
   const token = process.env.CLOUDFLARE_API_TOKEN
+  const t = await getTranslations('actionErrors')
 
   if (!token) {
-    return { success: false, error: '缺少 Cloudflare 認證配置' }
+    return { success: false, error: t('missingCloudflareConfig') }
   }
 
   try {
@@ -265,13 +274,13 @@ export async function setupVercelDns(
       })
 
       if (!result.success) {
-        return { success: false, error: `設定 ${record.type} 記錄失敗: ${result.error}` }
+        return { success: false, error: `Failed to set ${record.type} record: ${result.error}` }
       }
     }
 
     return { success: true }
   } catch (err) {
-    return { success: false, error: `設定 Vercel DNS 時發生錯誤: ${err}` }
+    return { success: false, error: `Vercel DNS setup error: ${err}` }
   }
 }
 
@@ -282,9 +291,10 @@ export async function listZones(): Promise<{
   error?: string
 }> {
   const token = process.env.CLOUDFLARE_API_TOKEN
+  const t = await getTranslations('actionErrors')
 
   if (!token) {
-    return { success: false, error: '缺少 Cloudflare 認證配置' }
+    return { success: false, error: t('missingCloudflareConfig') }
   }
 
   try {
@@ -297,11 +307,11 @@ export async function listZones(): Promise<{
     const data = await response.json() as { success: boolean; result?: Zone[]; errors?: Array<{ message: string }> }
 
     if (!data.success) {
-      return { success: false, error: data.errors?.[0]?.message || '列出 Zones 失敗' }
+      return { success: false, error: data.errors?.[0]?.message || t('listZonesFailed') }
     }
 
     return { success: true, zones: data.result }
   } catch (err) {
-    return { success: false, error: `列出 Zones 時發生錯誤: ${err}` }
+    return { success: false, error: `Zones listing error: ${err}` }
   }
 }

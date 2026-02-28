@@ -45,7 +45,7 @@ export default function AdminTemplatesPage() {
     const result = await getAdminTemplates({ token })
 
     if (!result.success) {
-      if (result.error === '無管理員權限') {
+      if (result.error === 'ADMIN_REQUIRED') {
         router.push('/dashboard')
         return
       }

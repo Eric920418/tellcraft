@@ -106,7 +106,7 @@ function repairTruncatedJson(jsonStr: string): string | null {
 
       // 驗證修復後的 JSON
       JSON.parse(repaired)
-      console.log(`[LLM] JSON 修復：截斷位置 ${lastCompleteItemEnd}，原長度 ${jsonStr.length}`)
+      console.log(`[LLM] JSON repair: truncated at ${lastCompleteItemEnd}, original length ${jsonStr.length}`)
       return repaired
     }
 
@@ -136,9 +136,9 @@ async function logLlmUsage(
       cost_usd: cost,
       purpose: context?.purpose || null,
     })
-    console.log(`[LLM] 已記錄使用量: ${inputTokens} in / ${outputTokens} out, $${cost.toFixed(6)}`)
+    console.log(`[LLM] Usage recorded: ${inputTokens} in / ${outputTokens} out, $${cost.toFixed(6)}`)
   } catch (err) {
-    console.error('[LLM] 記錄使用量失敗:', err)
+    console.error('[LLM] Usage recording failed:', err)
   }
 }
 
@@ -161,8 +161,8 @@ export async function callClaude(
   console.log('[LLM] API Key prefix:', apiKey?.substring(0, 15) || 'NONE')
 
   if (!apiKey) {
-    console.error('[LLM] ERROR: 缺少 ANTHROPIC_API_KEY')
-    return { success: false, error: '缺少 ANTHROPIC_API_KEY' }
+    console.error('[LLM] ERROR: Missing ANTHROPIC_API_KEY')
+    return { success: false, error: 'Missing ANTHROPIC_API_KEY' }
   }
 
   const model = options?.model || 'claude-sonnet-4-6'
@@ -208,14 +208,14 @@ export async function callClaude(
           }
         }
 
-        return { success: false, error: `API 錯誤: ${errorText}` }
+        return { success: false, error: `API error: ${errorText}` }
       }
 
       const data = await response.json()
       const content = data.content?.[0]?.text
 
       if (!content) {
-        return { success: false, error: '無法取得回應內容' }
+        return { success: false, error: 'Unable to parse response' }
       }
 
       // 計算 token 使用量和成本
@@ -235,15 +235,15 @@ export async function callClaude(
     } catch (err) {
       // 如果是網路錯誤且還有重試次數，繼續重試
       if (attempt < maxRetries - 1) {
-        console.log(`[LLM] 請求失敗，重試 ${attempt + 1}/${maxRetries}...`, err)
+        console.log(`[LLM] Request failed, retrying ${attempt + 1}/${maxRetries}...`, err)
         await new Promise(resolve => setTimeout(resolve, baseDelay))
         continue
       }
-      return { success: false, error: `呼叫 LLM 時發生錯誤: ${err}` }
+      return { success: false, error: `LLM call error: ${err}` }
     }
   }
 
-  return { success: false, error: '超過最大重試次數' }
+  return { success: false, error: 'Max retries exceeded' }
 }
 
 // ============================================================

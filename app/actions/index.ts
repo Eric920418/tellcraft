@@ -2,6 +2,7 @@
 
 // db 直連已遷移至 VPS API，此導入已移除
 import { getCurrentUser, getAuthToken } from '../lib/auth'
+import { getTranslations } from 'next-intl/server'
 import { deployProject as deployProjectReal, generateNextJsTemplate } from './deploy'
 import * as vpsApi from '../lib/vps-api'
 // VPS API types imported as needed
@@ -36,10 +37,11 @@ export async function createProject(input: {
   description?: string
 }): Promise<ActionResult<{ projectId: string; status: ProjectStatus }>> {
   const { name, description } = input
+  const t = await getTranslations('actionErrors')
 
   const token = await getAuthToken()
   if (!token) {
-    return { success: false, error: '未登入' }
+    return { success: false, error: t('notAuthenticated') }
   }
 
   const result = await vpsApi.createProject({
@@ -49,7 +51,7 @@ export async function createProject(input: {
   })
 
   if (!result.success || !result.data) {
-    return { success: false, error: result.error || '建立專案失敗' }
+    return { success: false, error: result.error || t('createProjectFailed') }
   }
 
   return {
@@ -72,6 +74,7 @@ export async function sendMessage(input: {
   projectId?: string
 }): Promise<ActionResult<{ messageId: string }>> {
   const { conversationId, content, projectId } = input
+  const t = await getTranslations('actionErrors')
 
   // 如果沒有提供 projectId，使用 addConversationMessage API
   const token = await getAuthToken()
@@ -86,7 +89,7 @@ export async function sendMessage(input: {
     })
 
     if (!result.success || !result.data) {
-      return { success: false, error: result.error || '發送訊息失敗' }
+      return { success: false, error: result.error || t('sendMessageFailed') }
     }
 
     return {
@@ -104,7 +107,7 @@ export async function sendMessage(input: {
   })
 
   if (!result.success || !result.data) {
-    return { success: false, error: result.error || '發送訊息失敗' }
+    return { success: false, error: result.error || t('sendMessageFailed') }
   }
 
   return {
@@ -123,16 +126,17 @@ export async function generateCode(input: {
   projectId: string
 }): Promise<ActionResult<{ generationId: string; status: string }>> {
   const { projectId } = input
+  const t = await getTranslations('actionErrors')
 
   const token = await getAuthToken()
   if (!token) {
-    return { success: false, error: '未登入' }
+    return { success: false, error: t('notAuthenticated') }
   }
 
   const result = await vpsApi.generateCode({ projectId, token })
 
   if (!result.success || !result.data) {
-    return { success: false, error: result.error || '生成程式碼失敗' }
+    return { success: false, error: result.error || t('generateCodeFailed') }
   }
 
   return {
@@ -153,16 +157,17 @@ export async function deployProject(input: {
   projectId: string
 }): Promise<ActionResult<{ deploymentId: string; url?: string; status: string }>> {
   const { projectId } = input
+  const t = await getTranslations('actionErrors')
 
   const token = await getAuthToken()
   if (!token) {
-    return { success: false, error: '未登入' }
+    return { success: false, error: t('notAuthenticated') }
   }
 
   const result = await vpsApi.deployProjectVps({ projectId, token })
 
   if (!result.success || !result.data) {
-    return { success: false, error: result.error || '部署專案失敗' }
+    return { success: false, error: result.error || t('deployProjectFailed') }
   }
 
   return {
@@ -185,10 +190,11 @@ export async function updateProject(input: {
   isDestructive?: boolean
 }): Promise<ActionResult<{ projectId: string; status: ProjectStatus; backupCreated?: boolean }>> {
   const { projectId, changes, isDestructive } = input
+  const t = await getTranslations('actionErrors')
 
   const token = await getAuthToken()
   if (!token) {
-    return { success: false, error: '未登入' }
+    return { success: false, error: t('notAuthenticated') }
   }
 
   const result = await vpsApi.iterateProject({
@@ -199,7 +205,7 @@ export async function updateProject(input: {
   })
 
   if (!result.success || !result.data) {
-    return { success: false, error: result.error || '迭代修改失敗' }
+    return { success: false, error: result.error || t('iterationFailed') }
   }
 
   return {
@@ -222,10 +228,11 @@ export async function cancelSubscription(input: {
   action?: 'cancel' | 'resubscribe'
 }): Promise<ActionResult<{ userId: string; status: SubscriptionStatus }>> {
   const { action = 'cancel' } = input
+  const t = await getTranslations('actionErrors')
 
   const token = await getAuthToken()
   if (!token) {
-    return { success: false, error: '未登入' }
+    return { success: false, error: t('notAuthenticated') }
   }
 
   const result = await vpsApi.subscriptionAction({
@@ -234,7 +241,7 @@ export async function cancelSubscription(input: {
   })
 
   if (!result.success || !result.data) {
-    return { success: false, error: result.error || '訂閱操作失敗' }
+    return { success: false, error: result.error || t('subscriptionFailed') }
   }
 
   return {
@@ -258,16 +265,17 @@ export async function exportData(input: {
   requestUserId?: string
 }): Promise<ActionResult<{ downloadUrl: string; format: string }>> {
   const { format, projectId } = input
+  const t = await getTranslations('actionErrors')
 
   const token = await getAuthToken()
   if (!token) {
-    return { success: false, error: '未登入' }
+    return { success: false, error: t('notAuthenticated') }
   }
 
   const result = await vpsApi.exportData({ format, projectId, token })
 
   if (!result.success || !result.data) {
-    return { success: false, error: result.error || '導出資料失敗' }
+    return { success: false, error: result.error || t('exportDataFailed') }
   }
 
   return {
@@ -289,14 +297,15 @@ export async function transferResources(input: {
   vercelToken?: string
 }): Promise<ActionResult<{ projectId: string; transferred: boolean }>> {
   const { projectId, dbApiKey, vercelToken } = input
+  const t = await getTranslations('actionErrors')
 
   const token = await getAuthToken()
   if (!token) {
-    return { success: false, error: '未登入' }
+    return { success: false, error: t('notAuthenticated') }
   }
 
   if (!dbApiKey || !vercelToken) {
-    return { success: false, error: 'API Key 無效' }
+    return { success: false, error: t('invalidApiKey') }
   }
 
   const result = await vpsApi.transferResources({
@@ -307,7 +316,7 @@ export async function transferResources(input: {
   })
 
   if (!result.success || !result.data) {
-    return { success: false, error: result.error || '移轉資源失敗' }
+    return { success: false, error: result.error || t('resourceMigrationFailed') }
   }
 
   return {
@@ -332,10 +341,11 @@ export async function createTask(input: {
   userId?: string
 }): Promise<ActionResult<{ taskId: string; status: TaskStatus; stepCount?: number; calculatedPriority?: number }>> {
   const { projectId, goal } = input
+  const t = await getTranslations('actionErrors')
 
   const token = await getAuthToken()
   if (!token) {
-    return { success: false, error: '未登入' }
+    return { success: false, error: t('notAuthenticated') }
   }
 
   const result = await vpsApi.createTaskFull({
@@ -345,7 +355,7 @@ export async function createTask(input: {
   })
 
   if (!result.success || !result.data) {
-    return { success: false, error: result.error || '建立任務失敗' }
+    return { success: false, error: result.error || t('createTaskFailed') }
   }
 
   return {
@@ -371,10 +381,11 @@ export async function confirmTaskPlan(input: {
   requestUserId?: string
 }): Promise<ActionResult<{ taskId: string; status: TaskStatus }>> {
   const { taskId, approved } = input
+  const t = await getTranslations('actionErrors')
 
   const token = await getAuthToken()
   if (!token) {
-    return { success: false, error: '未登入' }
+    return { success: false, error: t('notAuthenticated') }
   }
 
   const result = await vpsApi.confirmTaskPlan({
@@ -384,7 +395,7 @@ export async function confirmTaskPlan(input: {
   })
 
   if (!result.success || !result.data) {
-    return { success: false, error: result.error || '確認任務失敗' }
+    return { success: false, error: result.error || t('confirmTaskFailed') }
   }
 
   return {
@@ -406,10 +417,11 @@ export async function cancelTask(input: {
   taskId: string
 }): Promise<ActionResult<{ taskId: string; status: TaskStatus }>> {
   const { taskId } = input
+  const t = await getTranslations('actionErrors')
 
   const token = await getAuthToken()
   if (!token) {
-    return { success: false, error: '未登入' }
+    return { success: false, error: t('notAuthenticated') }
   }
 
   const result = await vpsApi.cancelTask({
@@ -418,7 +430,7 @@ export async function cancelTask(input: {
   })
 
   if (!result.success || !result.data) {
-    return { success: false, error: result.error || '取消任務失敗' }
+    return { success: false, error: result.error || t('cancelTaskFailed') }
   }
 
   return {
@@ -439,10 +451,11 @@ export async function retryTask(input: {
   taskId: string
 }): Promise<ActionResult<{ taskId: string; status: TaskStatus; currentStep?: number }>> {
   const { taskId } = input
+  const t = await getTranslations('actionErrors')
 
   const token = await getAuthToken()
   if (!token) {
-    return { success: false, error: '未登入' }
+    return { success: false, error: t('notAuthenticated') }
   }
 
   const result = await vpsApi.retryTask({
@@ -451,7 +464,7 @@ export async function retryTask(input: {
   })
 
   if (!result.success || !result.data) {
-    return { success: false, error: result.error || '重試任務失敗' }
+    return { success: false, error: result.error || t('retryTaskFailed') }
   }
 
   return {
@@ -478,10 +491,11 @@ export async function registerSkill(input: {
   timeoutMs?: number
 }): Promise<ActionResult<{ skillId: string; name: string; status: string; hasEmbedding?: boolean }>> {
   const { name, description } = input
+  const t = await getTranslations('actionErrors')
 
   const token = await getAuthToken()
   if (!token) {
-    return { success: false, error: '未登入' }
+    return { success: false, error: t('notAuthenticated') }
   }
 
   const result = await vpsApi.registerSkill({
@@ -492,7 +506,7 @@ export async function registerSkill(input: {
   })
 
   if (!result.success || !result.data) {
-    return { success: false, error: result.error || '註冊技能失敗' }
+    return { success: false, error: result.error || t('registerSkillFailed') }
   }
 
   return {
@@ -519,19 +533,20 @@ export async function configureWebhook(input: {
   isActive?: boolean
 }): Promise<ActionResult<{ webhookId: string; url?: string; isActive: boolean }>> {
   const { url, events } = input
+  const t = await getTranslations('actionErrors')
 
   // 前置：URL 必須是 HTTPS
   if (url && !url.startsWith('https://')) {
-    return { success: false, error: 'URL 必須是 HTTPS' }
+    return { success: false, error: t('urlMustBeHttps') }
   }
 
   const token = await getAuthToken()
   if (!token) {
-    return { success: false, error: '未登入' }
+    return { success: false, error: t('notAuthenticated') }
   }
 
   if (!url || !events) {
-    return { success: false, error: '缺少必要參數' }
+    return { success: false, error: t('missingRequiredParams') }
   }
 
   const result = await vpsApi.configureWebhook({
@@ -541,7 +556,7 @@ export async function configureWebhook(input: {
   })
 
   if (!result.success || !result.data) {
-    return { success: false, error: result.error || '配置 Webhook 失敗' }
+    return { success: false, error: result.error || t('configureWebhookFailed') }
   }
 
   return {
@@ -580,9 +595,10 @@ export async function initializeSession(input: {
   hasHistory: boolean
 }>> {
   const { anonymousId, conversationId, createNew = false } = input
+  const t = await getTranslations('actionErrors')
 
   if (!anonymousId) {
-    return { success: false, error: '缺少 anonymousId' }
+    return { success: false, error: t('missingAnonymousId') }
   }
 
   const result = await vpsApi.initializeSession({
@@ -592,7 +608,7 @@ export async function initializeSession(input: {
   })
 
   if (!result.success || !result.data) {
-    return { success: false, error: result.error || '初始化會話失敗' }
+    return { success: false, error: result.error || t('initSessionFailed') }
   }
 
   const data = result.data
@@ -641,15 +657,16 @@ export async function initializeSessionFromAuth(input?: {
   }
 }>> {
   const { anonymousId, conversationId, createNew = false } = input || {}
+  const t = await getTranslations('actionErrors')
 
   const token = await getAuthToken()
   if (!token) {
-    return { success: false, error: '未登入' }
+    return { success: false, error: t('notAuthenticated') }
   }
 
   const authUser = await getCurrentUser()
   if (!authUser) {
-    return { success: false, error: '未登入' }
+    return { success: false, error: t('notAuthenticated') }
   }
 
   // 使用 VPS API 初始化會話（帶 token 表示已認證用戶）
@@ -661,7 +678,7 @@ export async function initializeSessionFromAuth(input?: {
   })
 
   if (!result.success || !result.data) {
-    return { success: false, error: result.error || '初始化會話失敗' }
+    return { success: false, error: result.error || t('initSessionFailed') }
   }
 
   const data = result.data
@@ -725,7 +742,7 @@ export async function getCurrentUserAction(): Promise<ActionResult<{
 
     return { success: true, data: result.data }
   } catch (error) {
-    console.error('[getCurrentUserAction] 錯誤:', error)
+    console.error('[getCurrentUserAction] error:', error)
     return { success: true, data: null }
   }
 }
@@ -745,10 +762,11 @@ export async function migrateAnonymousAccount(input: {
   migratedConversations: number
 }>> {
   try {
+    const t = await getTranslations('actionErrors')
     const token = await getAuthToken()
 
     if (!token) {
-      return { success: false, error: '未登入' }
+      return { success: false, error: t('notAuthenticated') }
     }
 
     const result = await vpsApi.migrateAnonymousAccount({
@@ -757,12 +775,12 @@ export async function migrateAnonymousAccount(input: {
     })
 
     if (!result.success || !result.data) {
-      return { success: false, error: result.error || '遷移失敗' }
+      return { success: false, error: result.error || t('accountMigrationFailed') }
     }
 
     return { success: true, data: result.data }
   } catch (error) {
-    console.error('[migrateAnonymousAccount] 錯誤:', error)
+    console.error('[migrateAnonymousAccount] error:', error)
     return { success: false, error: (error as Error).message }
   }
 }
@@ -791,6 +809,7 @@ export async function sendMessageAndTrigger(input: {
   projectId: string
 }): Promise<ActionResult<{ messageId: string }>> {
   const { conversationId, content, projectId } = input
+  const t = await getTranslations('actionErrors')
 
   const token = await getAuthToken()
 
@@ -803,7 +822,7 @@ export async function sendMessageAndTrigger(input: {
   })
 
   if (!result.success || !result.data) {
-    return { success: false, error: result.error || '發送消息失敗' }
+    return { success: false, error: result.error || t('sendMessageFailed') }
   }
 
   return {
@@ -826,6 +845,7 @@ export async function replyToConversation(input: {
   specConfirmed?: boolean
 }): Promise<ActionResult<{ messageId: string }>> {
   const { conversationId, projectId, taskId, content, specConfirmed } = input
+  const t = await getTranslations('actionErrors')
 
   const token = await getAuthToken()
 
@@ -840,7 +860,7 @@ export async function replyToConversation(input: {
   })
 
   if (!result.success || !result.data) {
-    return { success: false, error: result.error || '回覆失敗' }
+    return { success: false, error: result.error || t('replyFailed') }
   }
 
   return {
@@ -869,13 +889,14 @@ export async function getUserConversations(_input: {
   }>
   hasMore: boolean
 }>> {
+  const t = await getTranslations('actionErrors')
   const token = await getAuthToken()
   const result = await vpsApi.getUserConversations({
     token: token || undefined,
   })
 
   if (!result.success || !result.data) {
-    return { success: false, error: result.error || '獲取對話列表失敗' }
+    return { success: false, error: result.error || t('getConversationsFailed') }
   }
 
   const conversations = result.data.conversations.map((c: Record<string, unknown>) => ({
@@ -922,6 +943,7 @@ export async function getConversationMessages(input: {
   isComplete?: boolean  // 對話是否已完成（spec_complete），用於停止輪詢
 }>> {
   const { conversationId, afterTimestamp, lastUpdatedAt } = input
+  const t = await getTranslations('actionErrors')
 
   const token = await getAuthToken()
 
@@ -933,7 +955,7 @@ export async function getConversationMessages(input: {
   })
 
   if (!result.success || !result.data) {
-    return { success: false, error: result.error || '獲取消息失敗' }
+    return { success: false, error: result.error || t('getMessagesFailed') }
   }
 
   const data = result.data
@@ -994,16 +1016,17 @@ export async function getUserStats(): Promise<ActionResult<{
   }
 }>> {
   try {
+    const t = await getTranslations('actionErrors')
     const token = await getAuthToken()
 
     if (!token) {
-      return { success: false, error: '未登入' }
+      return { success: false, error: t('notAuthenticated') }
     }
 
     const result = await vpsApi.getDashboardStats({ token })
 
     if (!result.success || !result.data) {
-      return { success: false, error: result.error || '獲取統計失敗' }
+      return { success: false, error: result.error || t('getStatsFailed') }
     }
 
     return {
@@ -1016,7 +1039,7 @@ export async function getUserStats(): Promise<ActionResult<{
       }
     }
   } catch (error) {
-    console.error('[getUserStats] 錯誤:', error)
+    console.error('[getUserStats] error:', error)
     return { success: false, error: (error as Error).message }
   }
 }
@@ -1046,10 +1069,11 @@ export async function getUserProjects(params: {
   pageSize: number
 }>> {
   try {
+    const t = await getTranslations('actionErrors')
     const token = await getAuthToken()
 
     if (!token) {
-      return { success: false, error: '未登入' }
+      return { success: false, error: t('notAuthenticated') }
     }
 
     const result = await vpsApi.getProjects({
@@ -1060,7 +1084,7 @@ export async function getUserProjects(params: {
     })
 
     if (!result.success || !result.data) {
-      return { success: false, error: result.error || '獲取專案列表失敗' }
+      return { success: false, error: result.error || t('getProjectsFailed') }
     }
 
     return {
@@ -1076,7 +1100,7 @@ export async function getUserProjects(params: {
       }
     }
   } catch (error) {
-    console.error('[getUserProjects] 錯誤:', error)
+    console.error('[getUserProjects] error:', error)
     return { success: false, error: (error as Error).message }
   }
 }
@@ -1171,16 +1195,17 @@ export async function getProjectDetail(projectId: string): Promise<ActionResult<
     createdAt: string
   }>
 }>> {
+  const t = await getTranslations('actionErrors')
   const token = await getAuthToken()
 
   if (!token) {
-    return { success: false, error: '未登入' }
+    return { success: false, error: t('notAuthenticated') }
   }
 
   const result = await vpsApi.getProjectDetail({ projectId, token })
 
   if (!result.success || !result.data) {
-    return { success: false, error: result.error || '獲取專案詳情失敗' }
+    return { success: false, error: result.error || t('getProjectDetailFailed') }
   }
 
   const { project, conversations, deployments, generations } = result.data
@@ -1252,24 +1277,25 @@ export async function deployProjectFromDb(input: {
   projectId: string
 }): Promise<ActionResult<{ deploymentId: string; url?: string; status: string }>> {
   const { projectId } = input
+  const t = await getTranslations('actionErrors')
 
   const token = await getAuthToken()
   if (!token) {
-    return { success: false, error: '未登入' }
+    return { success: false, error: t('notAuthenticated') }
   }
 
   // 1. 透過 VPS API 查詢專案資訊
   const projectResult = await vpsApi.getProject({ projectId, token })
 
   if (!projectResult.success || !projectResult.data) {
-    return { success: false, error: projectResult.error || '專案不存在' }
+    return { success: false, error: projectResult.error || t('projectNotFound') }
   }
 
   const project = projectResult.data.project
 
   // 2. 前置條件檢查
   if (project.status !== 'testing') {
-    return { success: false, error: '專案狀態必須為 testing' }
+    return { success: false, error: t('projectMustBeTesting') }
   }
 
   // 3. 讀取 schema
@@ -1372,6 +1398,7 @@ export async function createBddSession(input: {
   projectContext?: string
 }): Promise<ActionResult<{ sessionId: string }>> {
   const { projectId, conversationId, taskId, originalRequirements, projectContext } = input
+  const t = await getTranslations('actionErrors')
 
   const token = await getAuthToken()
   const result = await vpsApi.createBddSession({
@@ -1384,7 +1411,7 @@ export async function createBddSession(input: {
   })
 
   if (!result.success || !result.data) {
-    return { success: false, error: result.error || '創建 BDD Session 失敗' }
+    return { success: false, error: result.error || t('createBddSessionFailed') }
   }
 
   return { success: true, data: { sessionId: result.data.sessionId } }
@@ -1479,11 +1506,12 @@ export async function answerClarifyItem(input: {
   answer: string
 }): Promise<ActionResult<null>> {
   const { sessionId, itemId, answer } = input
+  const t = await getTranslations('actionErrors')
 
   // 讀取當前 session
   const sessionResult = await getBddSession({ sessionId })
   if (!sessionResult.success || !sessionResult.data) {
-    return { success: false, error: sessionResult.error || 'Session 不存在' }
+    return { success: false, error: sessionResult.error || t('sessionNotFound') }
   }
 
   const session = sessionResult.data
@@ -1493,7 +1521,7 @@ export async function answerClarifyItem(input: {
   // 找到並更新項目
   const itemIndex = clarifyItems.findIndex(item => item.id === itemId)
   if (itemIndex === -1) {
-    return { success: false, error: '找不到釐清項目' }
+    return { success: false, error: t('clarifyItemNotFound') }
   }
 
   const item = clarifyItems[itemIndex]
@@ -1525,11 +1553,12 @@ export async function confirmBatch(input: {
   itemIds?: string[]  // 如果不提供，確認所有 staging 項目
 }): Promise<ActionResult<{ confirmedCount: number }>> {
   const { sessionId, itemIds } = input
+  const t = await getTranslations('actionErrors')
 
   // 讀取當前 session
   const sessionResult = await getBddSession({ sessionId })
   if (!sessionResult.success || !sessionResult.data) {
-    return { success: false, error: sessionResult.error || 'Session 不存在' }
+    return { success: false, error: sessionResult.error || t('sessionNotFound') }
   }
 
   const session = sessionResult.data
@@ -1579,11 +1608,12 @@ export async function revertAnswer(input: {
   itemId: string
 }): Promise<ActionResult<null>> {
   const { sessionId, itemId } = input
+  const t = await getTranslations('actionErrors')
 
   // 讀取當前 session
   const sessionResult = await getBddSession({ sessionId })
   if (!sessionResult.success || !sessionResult.data) {
-    return { success: false, error: sessionResult.error || 'Session 不存在' }
+    return { success: false, error: sessionResult.error || t('sessionNotFound') }
   }
 
   const session = sessionResult.data
@@ -1593,7 +1623,7 @@ export async function revertAnswer(input: {
   // 找到項目
   const itemIndex = stagingItems.findIndex(item => item.id === itemId)
   if (itemIndex === -1) {
-    return { success: false, error: '找不到待確認的項目' }
+    return { success: false, error: t('pendingItemNotFound') }
   }
 
   const item = stagingItems[itemIndex]
@@ -1624,11 +1654,12 @@ export async function skipClarifyItem(input: {
   itemId: string
 }): Promise<ActionResult<null>> {
   const { sessionId, itemId } = input
+  const t = await getTranslations('actionErrors')
 
   // 讀取當前 session
   const sessionResult = await getBddSession({ sessionId })
   if (!sessionResult.success || !sessionResult.data) {
-    return { success: false, error: sessionResult.error || 'Session 不存在' }
+    return { success: false, error: sessionResult.error || t('sessionNotFound') }
   }
 
   const session = sessionResult.data
@@ -1638,7 +1669,7 @@ export async function skipClarifyItem(input: {
   // 找到並更新項目
   const itemIndex = clarifyItems.findIndex(item => item.id === itemId)
   if (itemIndex === -1) {
-    return { success: false, error: '找不到釐清項目' }
+    return { success: false, error: t('clarifyItemNotFound') }
   }
 
   const item = clarifyItems[itemIndex]
@@ -1668,11 +1699,12 @@ export async function addClarifyItems(input: {
   items: ClarifyItem[]
 }): Promise<ActionResult<{ addedCount: number; duplicatesRemoved: number }>> {
   const { sessionId, items } = input
+  const t = await getTranslations('actionErrors')
 
   // 讀取當前 session
   const sessionResult = await getBddSession({ sessionId })
   if (!sessionResult.success || !sessionResult.data) {
-    return { success: false, error: sessionResult.error || 'Session 不存在' }
+    return { success: false, error: sessionResult.error || t('sessionNotFound') }
   }
 
   const session = sessionResult.data
@@ -1759,11 +1791,12 @@ export async function getCurrentClarifyItem(input: {
   sessionId: string
 }): Promise<ActionResult<ClarifyItem | null>> {
   const { sessionId } = input
+  const t = await getTranslations('actionErrors')
 
   // 讀取當前 session
   const sessionResult = await getBddSession({ sessionId })
   if (!sessionResult.success || !sessionResult.data) {
-    return { success: false, error: sessionResult.error || 'Session 不存在' }
+    return { success: false, error: sessionResult.error || t('sessionNotFound') }
   }
 
   const session = sessionResult.data
@@ -1795,11 +1828,12 @@ export async function getBddSessionProgress(input: {
   progress: number  // 0-100
 }>> {
   const { sessionId } = input
+  const t = await getTranslations('actionErrors')
 
   // 讀取當前 session
   const sessionResult = await getBddSession({ sessionId })
   if (!sessionResult.success || !sessionResult.data) {
-    return { success: false, error: sessionResult.error || 'Session 不存在' }
+    return { success: false, error: sessionResult.error || t('sessionNotFound') }
   }
 
   const session = sessionResult.data

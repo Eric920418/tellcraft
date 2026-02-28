@@ -67,7 +67,7 @@ async function apiRequest<T>(
       console.error(`[VPS API] Non-JSON response (${response.status}): ${text.substring(0, 200)}`)
       return {
         success: false,
-        error: `VPS 後端無回應或返回錯誤 (HTTP ${response.status})`,
+        error: `VPS backend error (HTTP ${response.status})`,
       }
     }
 
@@ -77,7 +77,7 @@ async function apiRequest<T>(
         const retryAfter = (data as Record<string, unknown>).retryAfter as number | undefined
         return {
           success: false,
-          error: ((data as Record<string, unknown>).error as string) || '請求過於頻繁',
+          error: ((data as Record<string, unknown>).error as string) || 'Too many requests',
           retryAfter,
         } as ApiResponse<T>
       }
@@ -99,14 +99,14 @@ async function apiRequest<T>(
     // 429 自動重試一次
     if (!result.success && (result as { retryAfter?: number }).retryAfter) {
       const waitMs = ((result as { retryAfter?: number }).retryAfter || 3) * 1000
-      console.warn(`[VPS API] 429 限速，${waitMs}ms 後自動重試`)
+      console.warn(`[VPS API] 429 rate limited, retrying in ${waitMs}ms`)
       await new Promise(resolve => setTimeout(resolve, waitMs))
       return doFetch()
     }
 
     return result
   } catch (error) {
-    console.error('[VPS API] 請求失敗:', error)
+    console.error('[VPS API] Request failed:', error)
     return {
       success: false,
       error: error instanceof Error ? error.message : 'Unknown error',
@@ -1026,7 +1026,7 @@ export async function getBddSession(input: {
   } else if (input.projectId) {
     endpoint = `/api/bdd/session/by-project/${input.projectId}`
   } else {
-    return { success: false, error: '需要 sessionId、conversationId 或 projectId' }
+    return { success: false, error: 'Missing sessionId, conversationId, or projectId' }
   }
 
   return apiRequest(endpoint, {
@@ -1962,19 +1962,19 @@ export function uploadImage(input: {
           if (xhr.status >= 200 && xhr.status < 300 && data.success) {
             resolve({ success: true, data })
           } else {
-            resolve({ success: false, error: data.error || `上傳失敗 (${xhr.status})` })
+            resolve({ success: false, error: data.error || `Upload failed (${xhr.status})` })
           }
         } catch {
-          resolve({ success: false, error: `上傳失敗 (${xhr.status})` })
+          resolve({ success: false, error: `Upload failed (${xhr.status})` })
         }
       })
 
       xhr.addEventListener('error', () => {
-        resolve({ success: false, error: '網路錯誤，上傳失敗' })
+        resolve({ success: false, error: 'Network error, upload failed' })
       })
 
       xhr.addEventListener('abort', () => {
-        resolve({ success: false, error: '上傳已取消' })
+        resolve({ success: false, error: 'Upload cancelled' })
       })
 
       xhr.open('POST', url)
@@ -1997,10 +1997,10 @@ export function uploadImage(input: {
       if (res.ok && data.success) {
         return { success: true as const, data }
       }
-      return { success: false as const, error: data.error || `上傳失敗 (${res.status})` }
+      return { success: false as const, error: data.error || `Upload failed (${res.status})` }
     })
     .catch(() => {
-      return { success: false as const, error: '網路錯誤，上傳失敗' }
+      return { success: false as const, error: 'Network error, upload failed' }
     })
 }
 
