@@ -337,6 +337,7 @@ Server Action 錯誤訊息 + 工具模組中文字串國際化（+117 keys，2 n
 | **通知** | LINE 推播通知（BDD 完成/UIUX 生成完成/部署成功失敗），離線用戶也能收到 |
 | **LINE Bot** | LINE 對話內完整 Fast Build 體驗（描述需求→生成→部署），Flex Message 卡片 + Quick Reply |
 | **UX** | 對話回退、錯誤恢復、自動恢復對話、專案自動命名、Markdown 渲染 |
+| **穩定性** | FlowState 超時自動恢復（定時掃描 + LINE/Web 推送通知），伺服器重啟後自動恢復卡住的生成/部署任務 |
 
 ## 專案結構
 
@@ -501,6 +502,18 @@ psql "$DATABASE_URL" -f tellcraft-backend/migrations/xxx.sql
 
 <details>
 <summary><h2>開發更新紀錄（點擊展開）</h2></summary>
+
+### FlowState 超時自動恢復（2026-03-01）
+
+伺服器重啟後，卡在「生成中」phase 的對話不再永久卡死。新增定時掃描（每 2 分鐘），主動偵測超時的 FlowState 並自動恢復 + 透過 `sendMessage()` 推送通知（Web Socket.io + LINE pushMessage）。
+
+- **新增 `services/flowstate-recovery.ts`**：`scanAndRecoverStuckFlowStates()` 掃描所有 `flow:*` Redis keys，逐個檢查 phase + 超時
+- **覆蓋 4 個 phase**：`fast_generating`(5min) / `uiux_iterating`(5min) / `uiux_code_generation`(10min) / `deployer_deploying`(10min)
+- **恢復策略**：有代碼 → `uiux_complete`（保留進度）；無代碼 → 回到上一個穩定狀態；部署中斷 → `deployer_failed`
+- **推送機制**：複用 `sendMessage()`，自動走 LINE/Web 管道（LINE 用戶也能收到恢復通知）
+- **不掃描的 phase**：`formulation`（已有 checkpoint 恢復）、`spec_discovery`（已有超時跳過）、`waitingForReply=true` 的 phase
+- **wiring**：`index.ts` 新增 `setInterval` 每 2 分鐘調用，與現有 `cleanupOrphanBuildDirs` 同模式
+- **deployer 時間戳**：`orchestrator.ts` 進入 `deployer_deploying` 時設置 `uiuxCodeGenerationStartedAt`，供超時偵測使用
 
 ### 修復 Event Storming 確認語意辨識（2026-03-01）
 

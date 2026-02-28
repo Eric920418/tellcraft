@@ -27,6 +27,7 @@ import operationsRoutes from './routes/operations'
 import uploadRoutes from './routes/upload'
 import lineBotRoutes from './routes/line-bot'
 import { initLineBotHandler } from './services/line-bot-handler'
+import { scanAndRecoverStuckFlowStates } from './services/flowstate-recovery'
 import { messagingApi as lineMessagingApi } from '@line/bot-sdk'
 import { setAuthRedisClient } from './routes/auth'
 import { setMiddlewareRedisClient } from './middleware/auth'
@@ -342,6 +343,13 @@ async function start() {
 
   // 每 10 分鐘定時清理
   setInterval(cleanupOrphanBuildDirs, 10 * 60 * 1000)
+
+  // 每 2 分鐘掃描超時的 FlowState 並自動恢復
+  setInterval(() => {
+    scanAndRecoverStuckFlowStates(redis, io).catch(err => {
+      console.error('[FlowState Recovery] 掃描失敗:', err)
+    })
+  }, 2 * 60 * 1000)
 
   // 啟動服務器
   server.listen(PORT, '0.0.0.0', () => {

@@ -5953,6 +5953,7 @@ async function handleDeployExecute(
 
   state.phase = 'deployer_deploying'
   state.waitingForReply = false
+  state.uiuxCodeGenerationStartedAt = Date.now()
   await saveFlowState(redis, conversationId, state)
 
   await sendMessage(conversationId, io, {

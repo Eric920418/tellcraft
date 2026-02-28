@@ -626,6 +626,13 @@ function HeroSection({
   const [isTransitioning, setIsTransitioning] = useState(false)
   const inputRef = useRef<HTMLTextAreaElement>(null)
 
+  // 返回首頁時重置過渡動畫狀態
+  useEffect(() => {
+    if (!isChatActive) {
+      setIsTransitioning(false)
+    }
+  }, [isChatActive])
+
   const trimmedInput = inputValue.trim()
   const isFastModeShortWarning = buildMode === 'fast' && trimmedInput.length > 0 && trimmedInput.length < 15
   const canSubmit = trimmedInput.length > 0 && !isTransitioning
