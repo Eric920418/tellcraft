@@ -939,6 +939,8 @@ function ChatSection({
   const [codePreviewContainerWidth, setCodePreviewContainerWidth] = useState(0)
 
   // 打字指示器：立即顯示 "..."，10 秒後顯示完整提示
+  // + 安全超時：90 秒後自動清除 isTyping，防止後端靜默丟棄消息導致 UI 卡死
+  const typingSafetyRef = useRef<NodeJS.Timeout | null>(null)
   useEffect(() => {
     if (isTyping) {
       // 立即顯示 "..."
@@ -947,16 +949,28 @@ function ChatSection({
       typingTimerRef.current = setTimeout(() => {
         setTypingStage('message')
       }, 10000)
+      // 安全超時：90 秒後自動恢復輸入（正常流程不會觸發此超時）
+      typingSafetyRef.current = setTimeout(() => {
+        console.warn('[Chat] isTyping 安全超時觸發，自動恢復輸入')
+        setIsTyping(false)
+      }, 90000)
     } else {
       if (typingTimerRef.current) {
         clearTimeout(typingTimerRef.current)
         typingTimerRef.current = null
+      }
+      if (typingSafetyRef.current) {
+        clearTimeout(typingSafetyRef.current)
+        typingSafetyRef.current = null
       }
       setTypingStage('none')
     }
     return () => {
       if (typingTimerRef.current) {
         clearTimeout(typingTimerRef.current)
+      }
+      if (typingSafetyRef.current) {
+        clearTimeout(typingSafetyRef.current)
       }
     }
   }, [isTyping])

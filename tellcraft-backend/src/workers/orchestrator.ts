@@ -251,13 +251,10 @@ export function createOrchestratorWorker(
       })
 
       if (lockResult.locked) {
-        console.warn(`[Orchestrator] 對話 ${conversationId} 已鎖定，跳過 Job ${job.id}`)
-        // 透過 Socket.io 提示用戶（不寫 DB，避免污染對話歷史）
-        io.to(conversationId).emit('system_notice', {
-          type: 'busy',
-          message: '正在處理中，請稍候再試',
-        })
-        return
+        console.warn(`[Orchestrator] 對話 ${conversationId} 已鎖定，拋錯觸發重試 (Job ${job.id}, attempt ${job.attemptsMade + 1}/${job.opts.attempts || 3})`)
+        // 拋出錯誤讓 BullMQ 自動重試（exponential backoff 2s→4s），
+        // 而不是靜默丟棄用戶的消息
+        throw new Error(`LOCK_CONTENTION: 對話 ${conversationId} 正在處理中`)
       }
 
       return lockResult.result
@@ -861,6 +858,7 @@ async function handleContinueFlow(
       if (!session.success || !session.data) {
         state.phase = 'spec_completed'
         await saveFlowState(redis, conversationId, state)
+        await sendMessage(conversationId, io, { content: '規格資料已過期，已返回完成狀態。', stage: 'error' })
         return
       }
       const history = session.data.changeHistory || []
@@ -1350,7 +1348,10 @@ async function handleContinueFlow(
     // ── spec_completed：查看變更歷史 ──
     if (state.phase === 'spec_completed' && trimmedMsg.includes('變更歷史')) {
       const session = await getBddSession({ sessionId: state.sessionId! })
-      if (!session.success || !session.data) return
+      if (!session.success || !session.data) {
+        await sendMessage(conversationId, io, { content: '規格資料已過期，請開始新的對話。', stage: 'error' })
+        return
+      }
       const history = session.data.changeHistory || []
       if (history.length === 0) {
         await sendMessage(conversationId, io, { content: '目前沒有變更歷史。', stage: 'info' })
@@ -1369,7 +1370,10 @@ async function handleContinueFlow(
     // ── spec_completed：撤銷變更（回滾規格）──
     if (state.phase === 'spec_completed' && hasRollbackSpecIntent(trimmedMsg)) {
       const session = await getBddSession({ sessionId: state.sessionId! })
-      if (!session.success || !session.data) return
+      if (!session.success || !session.data) {
+        await sendMessage(conversationId, io, { content: '規格資料已過期，無法回滾。', stage: 'error' })
+        return
+      }
       const history = session.data.changeHistory || []
       if (history.length === 0) {
         await sendMessage(conversationId, io, { content: '目前沒有變更歷史可回滾。', stage: 'info' })
@@ -1525,19 +1529,31 @@ async function handleContinueFlow(
   }
 
   if (!state.waitingForReply) {
-    console.log('[Orchestrator] 流程不在等待回覆狀態')
+    console.warn(`[Orchestrator] 流程不在等待回覆狀態 (phase=${state.phase})，回覆用戶提示`)
+    await sendMessage(conversationId, io, {
+      content: '系統正在處理中，請稍候再試。',
+      stage: 'info',
+    })
     return
   }
 
   // 取得 BDD Session
   if (!state.sessionId) {
-    console.log('[Orchestrator] 缺少 sessionId')
+    console.warn('[Orchestrator] 缺少 sessionId，回覆用戶提示')
+    await sendMessage(conversationId, io, {
+      content: '對話狀態異常，請開始新的對話。',
+      stage: 'error',
+    })
     return
   }
 
   const session = await getBddSession({ sessionId: state.sessionId })
   if (!session.success || !session.data) {
-    console.log('[Orchestrator] Session 不存在')
+    console.warn('[Orchestrator] Session 不存在，回覆用戶提示')
+    await sendMessage(conversationId, io, {
+      content: '規格資料已過期，請開始新的對話。',
+      stage: 'error',
+    })
     return
   }
 
