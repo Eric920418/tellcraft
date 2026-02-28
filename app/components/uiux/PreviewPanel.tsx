@@ -700,6 +700,7 @@ export default function PreviewPanel({
 
   const actualLoading = isLoading || htmlLoading
   const actualError = error || htmlError
+  const hasContent = !!htmlContent || !!templateSlug || !!previewImageUrl || actualLoading
 
   return (
     <div
@@ -711,8 +712,8 @@ export default function PreviewPanel({
         overflow: 'hidden',
       }}
     >
-      {/* 工具列 */}
-      <div
+      {/* 工具列 — 只在有內容時顯示 */}
+      {hasContent && <div
         style={{
           display: 'flex',
           alignItems: 'center',
@@ -872,7 +873,7 @@ export default function PreviewPanel({
             )}
           </div>
         </div>
-      </div>
+      </div>}
 
       {/* 主內容區域 */}
       <div style={{ flex: 1, display: 'flex', overflow: 'hidden' }}>

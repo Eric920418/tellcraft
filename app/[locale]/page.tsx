@@ -3103,6 +3103,24 @@ function ChatSection({
       )
     }
 
+    // 無任何內容需要預覽 — 簡潔空態（不含工具列和 DeviceSwitcher）
+    if (!selectedTemplate && !selectedTemplateId) {
+      return (
+        <div style={{
+          height: '100%', display: 'flex', flexDirection: 'column',
+          alignItems: 'center', justifyContent: 'center',
+          background: 'var(--gray-50)', color: 'var(--gray-400)', gap: 16,
+        }}>
+          <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true">
+            <rect x="3" y="3" width="18" height="18" rx="2" />
+            <circle cx="8.5" cy="8.5" r="1.5" />
+            <path d="M21 15l-5-5L5 21" />
+          </svg>
+          <span style={{ fontSize: 14 }}>{tPreview('noPreview')}</span>
+        </div>
+      )
+    }
+
     return (
     <div style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
       <PreviewPanel
