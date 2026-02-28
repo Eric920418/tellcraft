@@ -420,46 +420,21 @@ async function getOrCreateConversation(lineUserId: string): Promise<{
   // 2. 找或建系統用戶
   const systemUser = await findOrCreateLineUser(lineUserId)
 
-  // 3. 查找用戶的現有 draft 專案
-  const existingProject = await db.queryOne<{ id: string }>(
-    `SELECT id FROM projects WHERE user_id = $1 AND status IN ('draft', 'generating')
-     ORDER BY updated_at DESC LIMIT 1`,
-    [systemUser.id]
+  // 3. LINE 永遠建全新專案 + 對話（不複用 Web 舊對話，避免撞上已有 FlowState）
+  const projectId = crypto.randomUUID()
+  const projectName = `LINE 專案 ${new Date().toLocaleDateString('zh-TW')}`
+  await db.query(
+    `INSERT INTO projects (id, user_id, name, status, created_at, updated_at)
+     VALUES ($1, $2, $3, 'draft', NOW(), NOW())`,
+    [projectId, systemUser.id, projectName]
   )
 
-  let projectId: string
-  if (existingProject) {
-    projectId = existingProject.id
-  } else {
-    // 建新專案
-    projectId = crypto.randomUUID()
-    const projectName = `LINE 專案 ${new Date().toLocaleDateString('zh-TW')}`
-    await db.query(
-      `INSERT INTO projects (id, user_id, name, status, created_at, updated_at)
-       VALUES ($1, $2, $3, 'draft', NOW(), NOW())`,
-      [projectId, systemUser.id, projectName]
-    )
-  }
-
-  // 4. 查找專案的現有未完成對話
-  const existingConv = await db.queryOne<{ id: string }>(
-    `SELECT id FROM conversations WHERE project_id = $1 AND spec_complete = false
-     ORDER BY updated_at DESC LIMIT 1`,
-    [projectId]
+  const conversationId = crypto.randomUUID()
+  await db.query(
+    `INSERT INTO conversations (id, project_id, messages, spec_complete, created_at, updated_at)
+     VALUES ($1, $2, '[]', false, NOW(), NOW())`,
+    [conversationId, projectId]
   )
-
-  let conversationId: string
-  if (existingConv) {
-    conversationId = existingConv.id
-  } else {
-    // 建新對話
-    conversationId = crypto.randomUUID()
-    await db.query(
-      `INSERT INTO conversations (id, project_id, messages, spec_complete, created_at, updated_at)
-       VALUES ($1, $2, '[]', false, NOW(), NOW())`,
-      [conversationId, projectId]
-    )
-  }
 
   // 5. 保存活躍對話映射
   const mode = 'fast'
