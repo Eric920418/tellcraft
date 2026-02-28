@@ -5,6 +5,7 @@
 // ============================================================
 
 import { recordLlmUsage } from '../db/client'
+import { isConfirmation } from '../utils/is-confirmation'
 import { safeParseJson } from '../utils/safe-parse-json'
 import { LlmTrackingContext } from './classifier'
 
@@ -355,8 +356,7 @@ export function handleInitConfirm(
   userMessage: string,
   knowledgeMap: ESKnowledgeMap
 ): ESExploreResult {
-  const trimmed = userMessage.trim().toLowerCase()
-  const isConfirm = ['y', 'yes', '是', '好', '確認', '可以', '沒問題', '正確', 'ok'].some(k => trimmed === k || trimmed.startsWith(k))
+  const isConfirm = isConfirmation(userMessage)
 
   if (isConfirm) {
     return {
@@ -548,8 +548,7 @@ export async function handleESAnswer(
     return exploreNextItem(knowledgeMap, trackingContext)
   }
 
-  const trimmed = userMessage.trim()
-  const isConfirm = ['確認', '好', '可以', '沒問題', 'ok', 'y', 'yes'].some(k => trimmed.toLowerCase() === k || trimmed.toLowerCase().startsWith(k + ' '))
+  const isConfirm = isConfirmation(userMessage)
 
   // 找到當前項目
   const cmd = knowledgeMap.commands.find(c => c.name === currentName)

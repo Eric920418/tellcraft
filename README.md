@@ -405,7 +405,8 @@ tellcraft-backend/
 │   │   ├── change-management.ts  # 需求變更管理
 │   │   └── conversation-lock.ts  # 對話互斥鎖
 │   ├── utils/
-│   │   └── safe-parse-json.ts   # LLM JSON 安全解析（四層防禦，全後端共用）
+│   │   ├── safe-parse-json.ts   # LLM JSON 安全解析（四層防禦，全後端共用）
+│   │   └── is-confirmation.ts   # 確認語意偵測（三層：否定詞排除 → 短詞精確 → 長片語 includes）
 │   ├── routes/                   # API 路由（conversation/project/session/bdd/templates/operations/auth/health/upload/line-bot）
 │   ├── db/client.ts              # PostgreSQL 客戶端
 │   └── middleware/auth.ts        # JWT 認證中間件
@@ -500,6 +501,14 @@ psql "$DATABASE_URL" -f tellcraft-backend/migrations/xxx.sql
 
 <details>
 <summary><h2>開發更新紀錄（點擊展開）</h2></summary>
+
+### 修復 Event Storming 確認語意辨識（2026-03-01）
+
+`event-storming.ts` 的 `handleInitConfirm` 和 `handleESAnswer` 確認偵測邏輯有缺陷：缺少「沒錯」「對」「是的」等常見確認詞，且 `startsWith(k + ' ')` 要求空格分隔（中文不用空格），導致「沒問題啊」「好的繼續」全部匹配失敗，被當成修改反饋觸發 LLM 重新調整。
+
+- **新增 `utils/is-confirmation.ts`**：三層匹配策略 — 否定詞防護（「但」「少了」「想改」等轉折詞直接排除）→ 短詞精確匹配（≤4 字元「好」「對」「嗯」等）→ 長片語 includes（「沒問題」「沒錯」「確認」「是的」等）
+- **`event-storming.ts`**：L359 `handleInitConfirm` + L552 `handleESAnswer` 替換為 `isConfirmation()` 共用函數
+- **注意**：新增確認詞或否定詞時統一修改 `is-confirmation.ts`，不要在各 handler 中 inline 判斷
 
 ### 統一 LLM JSON 解析防禦（2026-02-28）
 
