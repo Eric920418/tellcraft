@@ -518,7 +518,11 @@
       "unlinkSuccess": "{provider} unlinked",
       "unlinkFailed": "Failed to unlink",
       "networkError": "Network error, please try again later",
-      "confirmUnlink": "Are you sure you want to unlink {provider} account?"
+      "confirmUnlink": "Are you sure you want to unlink {provider} account?",
+      "languagePreference": "Language Preference",
+      "languagePreferenceHint": "Your language choice will be synced across all devices",
+      "languageSaved": "Language preference saved",
+      "languageSaveFailed": "Failed to save language preference"
     },
     "title": "Dashboard",
     "subtitle": "Welcome back, here's your project overview",

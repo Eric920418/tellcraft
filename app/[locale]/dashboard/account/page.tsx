@@ -36,7 +36,8 @@ export default function AccountPage() {
   const [isLoading, setIsLoading] = useState(true)
   const [unlinking, setUnlinking] = useState<string | null>(null)
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null)
-  const [user, setUser] = useState<{ name?: string; email?: string; avatarUrl?: string } | null>(null)
+  const [user, setUser] = useState<{ name?: string; email?: string; avatarUrl?: string; preferredLanguage?: string | null } | null>(null)
+  const [savingLanguage, setSavingLanguage] = useState(false)
 
   // 檢查 URL 參數中的綁定結果
   useEffect(() => {
@@ -100,6 +101,42 @@ export default function AccountPage() {
   useEffect(() => {
     fetchProviders()
   }, [])
+
+  async function handleLanguageChange(lang: string) {
+    const token = getAuthToken()
+    if (!token) return
+
+    setSavingLanguage(true)
+    try {
+      const res = await fetch('/api/auth/preferences', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ preferredLanguage: lang }),
+      })
+
+      if (res.ok) {
+        document.cookie = `NEXT_LOCALE=${lang};path=/;max-age=${60 * 60 * 24 * 365};samesite=lax`
+        showToast(t('languageSaved'), 'success')
+        // 硬跳轉確保 middleware 重新解析語言
+        const currentPath = window.location.pathname
+        // 移除現有 locale prefix 再加上新的
+        const pathWithoutLocale = currentPath.replace(/^\/(zh|en)/, '') || '/'
+        const newPath = lang === 'en' ? pathWithoutLocale : `/${lang}${pathWithoutLocale}`
+        setTimeout(() => {
+          window.location.href = newPath
+        }, 500)
+      } else {
+        showToast(t('languageSaveFailed'), 'error')
+      }
+    } catch {
+      showToast(t('languageSaveFailed'), 'error')
+    } finally {
+      setSavingLanguage(false)
+    }
+  }
 
   async function handleUnlink(provider: string) {
     const token = getAuthToken()
@@ -207,6 +244,43 @@ export default function AccountPage() {
           <div>
             <div style={{ fontSize: 16, fontWeight: 500 }}>{user?.name || t('noNameSet')}</div>
             <div style={{ fontSize: 14, color: 'var(--gray-500)', marginTop: 2 }}>{user?.email}</div>
+          </div>
+        </div>
+
+        {/* 語言偏好 */}
+        <div style={{ marginTop: 20, paddingTop: 16, borderTop: '1px solid var(--border-color)' }}>
+          <div style={{ fontSize: 14, fontWeight: 500, marginBottom: 4 }}>{t('languagePreference')}</div>
+          <div style={{ fontSize: 12, color: 'var(--gray-500)', marginBottom: 12 }}>{t('languagePreferenceHint')}</div>
+          <div style={{ display: 'flex', gap: 8 }}>
+            {[
+              { value: 'zh', label: '中文' },
+              { value: 'en', label: 'English' },
+            ].map(lang => {
+              const isActive = user?.preferredLanguage
+                ? user.preferredLanguage === lang.value
+                : (typeof document !== 'undefined' && document.cookie.match(/NEXT_LOCALE=(\w+)/)?.[1]) === lang.value
+              return (
+                <button
+                  key={lang.value}
+                  onClick={() => handleLanguageChange(lang.value)}
+                  disabled={savingLanguage}
+                  style={{
+                    padding: '8px 20px',
+                    fontSize: 13,
+                    fontWeight: isActive ? 600 : 400,
+                    border: isActive ? '2px solid var(--text-primary)' : '1px solid var(--border-color)',
+                    borderRadius: 8,
+                    background: isActive ? 'var(--gray-50)' : 'var(--white)',
+                    color: isActive ? 'var(--text-primary)' : 'var(--gray-500)',
+                    cursor: savingLanguage ? 'not-allowed' : 'pointer',
+                    opacity: savingLanguage ? 0.5 : 1,
+                    transition: 'all 0.15s ease',
+                  }}
+                >
+                  {lang.label}
+                </button>
+              )
+            })}
           </div>
         </div>
       </section>

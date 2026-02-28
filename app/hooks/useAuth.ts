@@ -12,6 +12,7 @@ export interface AuthUser {
   avatarUrl?: string
   plan?: string
   isAdmin?: boolean
+  preferredLanguage?: string | null
 }
 
 export interface AuthState {

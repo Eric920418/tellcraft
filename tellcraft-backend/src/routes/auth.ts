@@ -754,8 +754,9 @@ router.get('/me', async (req, res) => {
         avatar_url: string | null
         plan: string
         is_admin: boolean
+        preferred_language: string | null
       }>(
-        'SELECT id, email, name, avatar_url, plan, is_admin FROM users WHERE id = $1',
+        'SELECT id, email, name, avatar_url, plan, is_admin, preferred_language FROM users WHERE id = $1',
         [payload.sub]
       )
 
@@ -785,7 +786,7 @@ router.get('/me', async (req, res) => {
       }))
 
       const responseData: {
-        user: { id: string; email: string; name: string | null; avatarUrl: string | null; plan: string; isAdmin: boolean; linkedProviders: typeof linkedProviders }
+        user: { id: string; email: string; name: string | null; avatarUrl: string | null; plan: string; isAdmin: boolean; linkedProviders: typeof linkedProviders; preferredLanguage: string | null }
         refreshedToken?: string
       } = {
         user: {
@@ -796,6 +797,7 @@ router.get('/me', async (req, res) => {
           plan: user.plan,
           isAdmin: user.is_admin,
           linkedProviders,
+          preferredLanguage: user.preferred_language,
         }
       }
 
@@ -972,6 +974,37 @@ router.post('/unlink/:provider', requireAuth, async (req, res) => {
   } catch (error) {
     console.error('[Auth] /unlink error:', error)
     res.status(500).json({ error: 'Failed to unlink provider' })
+  }
+})
+
+// ============================================================
+// 語言偏好
+// ============================================================
+
+/**
+ * POST /auth/preferences
+ * 更新用戶語言偏好
+ */
+router.post('/preferences', requireAuth, async (req, res) => {
+  try {
+    const userId = req.user!.id
+    const { preferredLanguage } = req.body
+
+    // 驗證語言值
+    const allowedLanguages = ['zh', 'en']
+    if (preferredLanguage !== null && !allowedLanguages.includes(preferredLanguage)) {
+      return res.status(400).json({ error: 'Invalid language. Allowed: zh, en' })
+    }
+
+    await db.query(
+      'UPDATE users SET preferred_language = $1 WHERE id = $2',
+      [preferredLanguage, userId]
+    )
+
+    res.json({ success: true, preferredLanguage })
+  } catch (error) {
+    console.error('[Auth] /preferences error:', error)
+    res.status(500).json({ error: 'Failed to update preferences' })
   }
 })
 

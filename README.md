@@ -193,6 +193,7 @@ Dashboard 帳號設定 → /api/auth/link/google（從 cookie 讀 JWT → 提取
 | 端點 | 用途 |
 |------|------|
 | `GET /auth/providers` | 查詢已綁定的 providers |
+| `POST /auth/preferences` | 更新語言偏好（`{ preferredLanguage: 'zh'|'en' }`） |
 | `POST /auth/unlink/:provider` | 解除綁定（至少保留一個） |
 | `GET /api/auth/link/google` | 前端 → 觸發 Google 綁定 OAuth |
 | `GET /api/auth/link/line` | 前端 → 觸發 LINE 綁定 OAuth |
@@ -238,7 +239,18 @@ Dashboard 帳號設定 → /api/auth/link/google（從 cookie 讀 JWT → 提取
 
 ### 架構
 
-基於 `next-intl` v4，`localePrefix: 'as-needed'`，`localeDetection: false`（不依賴瀏覽器語言自動導向）。
+基於 `next-intl` v4，`localePrefix: 'as-needed'`，`localeDetection: true`。
+
+**語言偵測優先順序**（middleware）：
+1. URL locale prefix（最高，顯式導航）
+2. `NEXT_LOCALE` cookie（持久化的手動選擇，1 年有效期）
+3. `Accept-Language` header（瀏覽器語言自動偵測）
+4. `defaultLocale: 'en'`（兜底）
+
+**語言持久化**：
+- 手動切換語言 → 設 `NEXT_LOCALE` cookie + 登入用戶 fire-and-forget 同步 DB（`users.preferred_language`）
+- 登入後 → 從 DB 恢復語言偏好 → 設 cookie → 跳轉正確 locale 路徑
+- Account 頁面可明確設定語言偏好（跨裝置同步）
 
 ```
 URL 結構：
@@ -397,7 +409,7 @@ tellcraft-backend/
 │   ├── routes/                   # API 路由（conversation/project/session/bdd/templates/operations/auth/health/upload/line-bot）
 │   ├── db/client.ts              # PostgreSQL 客戶端
 │   └── middleware/auth.ts        # JWT 認證中間件
-├── migrations/           # DB 遷移（001-011）
+├── migrations/           # DB 遷移（001-012）
 └── ecosystem.config.js   # PM2 配置
 
 bdd-spec/                 # BDD Skill 定義（instructions/ + rules/ + scripts/）

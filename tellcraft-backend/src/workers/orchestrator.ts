@@ -172,6 +172,129 @@ function hasRollbackSpecIntent(msg: string): boolean {
   return keywords.some(k => msg.includes(k))
 }
 
+// ============================================================
+// 迭代輸入預驗證（零 LLM 成本，在 executeIteration 之前攔截）
+// ============================================================
+
+interface DesignFeedbackCheck {
+  valid: boolean
+  rejectReason?: 'gibberish' | 'greeting' | 'chitchat' | 'too_short' | 'abuse'
+  guideMessage?: string
+}
+
+function isDesignFeedback(msg: string): DesignFeedbackCheck {
+  const trimmed = msg.trim()
+
+  // 設計相關關鍵詞（正向放行信號）
+  const designSignals = [
+    // 動作
+    '改', '換', '加', '刪', '移除', '調整', '修改', '更新', '增加', '替換', '縮小', '放大', '移動', '對齊', '置中', '隱藏', '顯示',
+    // 屬性
+    '顏色', '色', '字體', '字號', '字型', '大小', '尺寸', '間距', '邊距', '圓角', '陰影', '透明', '粗細', '寬', '高',
+    // 元素
+    '標題', '按鈕', '圖片', '背景', '邊框', '文字', '連結', '導航', '選單', 'logo', '頁尾', '頁首', '卡片', '表格', '表單', '輸入',
+    'header', 'footer', 'button', 'background', 'font', 'color', 'margin', 'padding', 'border', 'image', 'icon', 'nav', 'menu',
+    'title', 'text', 'section', 'card', 'table', 'form', 'input', 'link', 'sidebar', 'modal',
+    // 設計概念
+    '風格', '排版', '佈局', '動畫', '效果', '樣式', 'RWD', '響應式', '手機版', '深色', '淺色',
+    // 功能
+    '功能', '搜尋', '篩選', '分頁', '彈窗', '下拉', '滾動', '切換', '展開', '摺疊',
+    // 簡短設計回饋（白名單）
+    '太大', '太小', '太粗', '太細', '太淡', '太深', '太亮', '太暗', '太窄', '太寬', '太擠', '太鬆', '太醜', '太花',
+    '跑版', '壞了', '跑掉', '不見了', '消失', '重疊', '遮住', '偏了', '歪了', '沒對齊', '破版',
+    '不好看', '不對', '不行', '不夠',
+  ]
+
+  // 先檢查正向信號（高優先級放行）
+  const hasDesignSignal = designSignals.some(k => trimmed.includes(k))
+
+  // Layer 1: 太短（≤2 字）且沒有設計信號
+  if (trimmed.length <= 2 && !hasDesignSignal) {
+    return {
+      valid: false,
+      rejectReason: 'too_short',
+      guideMessage: '請描述您想要修改的內容，例如：\n- 「把標題改成紅色」\n- 「字體放大一點」\n- 「加一個搜尋功能」',
+    }
+  }
+
+  // 有設計信號 → 直接放行
+  if (hasDesignSignal) {
+    return { valid: true }
+  }
+
+  // Layer 2: 亂碼檢測
+  // 純數字
+  if (/^\d+$/.test(trimmed)) {
+    return {
+      valid: false,
+      rejectReason: 'gibberish',
+      guideMessage: '看起來這不是設計修改的描述。請告訴我您想調整什麼，例如：\n- 「把標題改大」\n- 「換一個背景顏色」',
+    }
+  }
+  // 純符號
+  if (/^[^\w\u4e00-\u9fff\u3400-\u4dbf]+$/.test(trimmed)) {
+    return {
+      valid: false,
+      rejectReason: 'gibberish',
+      guideMessage: '看起來這不是設計修改的描述。請告訴我您想調整什麼，例如：\n- 「把標題改大」\n- 「換一個背景顏色」',
+    }
+  }
+  // 重複字元（同一字元重複 3+ 次，如 哈哈哈、aaa、嗯嗯嗯）
+  if (/^(.)\1{2,}$/.test(trimmed)) {
+    return {
+      valid: false,
+      rejectReason: 'gibberish',
+      guideMessage: '請描述您想修改的設計細節，例如：\n- 「標題字體太小」\n- 「背景換成深色」',
+    }
+  }
+  // 無母音英文亂打（純英文 4+ 字元且無母音，如 asdf, qwerty 除外）
+  if (/^[a-zA-Z]{4,}$/.test(trimmed) && !/[aeiouAEIOU]/.test(trimmed)) {
+    return {
+      valid: false,
+      rejectReason: 'gibberish',
+      guideMessage: '看起來這不是設計修改的描述。請告訴我您想調整什麼，例如：\n- 「把標題改大」\n- 「換一個背景顏色」',
+    }
+  }
+
+  // Layer 3: 打招呼
+  const greetings = [
+    /^(嗨|你好|哈囉|hello|hi|hey|yo|sup|嘿)$/i,
+    /^(ok|okay|好|好的|收到|了解|知道了|嗯|喔|哦|是的|對|沒問題)$/i,
+    /^(謝謝|感謝|thanks|thank you|thx|3q)$/i,
+  ]
+  if (greetings.some(r => r.test(trimmed))) {
+    return {
+      valid: false,
+      rejectReason: 'greeting',
+      guideMessage: '目前設計已完成！如果想要修改，請描述具體調整，例如：\n- 「標題字體換成粗體」\n- 「加一個聯絡表單」\n\n或者您可以選擇「部署上線」。',
+    }
+  }
+
+  // Layer 4: 閒聊
+  const chitchat = [
+    '天氣', '幾點', '你是誰', '你叫什麼', '講笑話', '說笑話', '幾歲',
+    '吃什麼', '吃飯', '早安', '午安', '晚安', '掰掰', '再見', 'bye',
+    '無聊', '好無聊', '你好嗎', '在嗎', '在不在',
+  ]
+  // 重複字元組合（如 哈哈哈、呵呵呵、嘻嘻嘻，但不限於同一字元）
+  const laughPattern = /^[哈呵嘻哼嗯啊喔]{2,}$/
+  if (chitchat.some(k => trimmed.includes(k)) || laughPattern.test(trimmed)) {
+    return {
+      valid: false,
+      rejectReason: 'chitchat',
+      guideMessage: '我是設計助手，目前專注在幫您完善設計。請告訴我需要修改什麼，例如：\n- 「按鈕太小，放大一點」\n- 「整體配色換成藍色系」',
+    }
+  }
+
+  // Layer 5: 長度啟發 — ≥8 字且沒命中拒絕規則 → 放行
+  if (trimmed.length >= 8) {
+    return { valid: true }
+  }
+
+  // Layer 6: 3-7 字模糊地帶 → 放行（交給 refineCode [NO_CHANGE] 兜底）
+  return { valid: true }
+}
+
 // ── 回退映射表：當前 phase → 回退目標 phase ──
 const PHASE_BACKTRACK_MAP: Record<string, string> = {
   'uiux_design_clarify':       'uiux_design_preference',
@@ -726,6 +849,18 @@ async function handleContinueFlow(
       return
     }
     // 其他訊息 → 視為修改請求，切回 uiux_complete 進入迭代
+    const feedbackCheck0 = isDesignFeedback(trimmed)
+    if (!feedbackCheck0.valid) {
+      await sendMessage(conversationId, io, {
+        content: feedbackCheck0.guideMessage || '請描述您想修改的設計內容。',
+        stage: 'info',
+        quickReplies: [
+          { label: '部署上線', value: '部署', style: 'primary' as const },
+          { label: '重試部署', value: '重試', style: 'ghost' as const },
+        ],
+      })
+      return
+    }
     state.phase = 'uiux_complete'
     await saveFlowState(redis, conversationId, state)
     await executeIteration({ conversationId, projectId: data.projectId, userId, userFeedback: message, redis, io })
@@ -1250,7 +1385,19 @@ async function handleContinueFlow(
       await executeRollbackQuery({ conversationId, projectId: data.projectId, redis, io })
       return
     }
-    // 其他訊息 → 視為修改請求，進入迭代
+    // 其他訊息 → 預驗證後視為修改請求，進入迭代
+    const feedbackCheck1 = isDesignFeedback(trimmed)
+    if (!feedbackCheck1.valid) {
+      await sendMessage(conversationId, io, {
+        content: feedbackCheck1.guideMessage || '請描述您想修改的設計內容。',
+        stage: 'info',
+        quickReplies: [
+          { label: '部署上線', value: '部署', style: 'primary' as const },
+          { label: '回滾版本', value: '回滾', style: 'ghost' as const },
+        ],
+      })
+      return
+    }
     await executeIteration({ conversationId, projectId: data.projectId, userId, userFeedback: message, redis, io })
     return
   }
@@ -1482,8 +1629,23 @@ async function handleContinueFlow(
         return
       }
 
-      // 有生成代碼 → 任何非 deploy 的訊息都視為修改請求
+      // 有生成代碼 → 預驗證後視為修改請求
       if (state.uiuxGeneratedCode && state.uiuxCodePhase === 'complete') {
+        const feedbackCheck2 = isDesignFeedback(trimmed)
+        if (!feedbackCheck2.valid) {
+          const qr: { label: string; value: string; style: 'primary' | 'ghost' }[] = [
+            { label: '部署上線', value: '部署', style: 'primary' },
+          ]
+          if (state.uiuxPreIterationCode) {
+            qr.push({ label: '撤銷修改', value: '撤銷', style: 'ghost' })
+          }
+          await sendMessage(conversationId, io, {
+            content: feedbackCheck2.guideMessage || '請描述您想修改的設計內容。',
+            stage: 'info',
+            quickReplies: qr,
+          })
+          return
+        }
         await executeIteration({ conversationId, projectId: data.projectId, userId, userFeedback: message, redis, io })
         return
       }

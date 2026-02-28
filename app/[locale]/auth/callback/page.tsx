@@ -83,6 +83,33 @@ function AuthCallbackContent() {
         console.error('[Auth] Error setting cookie:', err)
       }
 
+      // 取得用戶語言偏好並設置 NEXT_LOCALE cookie
+      try {
+        const meResponse = await fetch('/api/auth/me', {
+          headers: { 'Authorization': `Bearer ${token}` },
+        })
+        if (meResponse.ok) {
+          const meData = await meResponse.json()
+          const preferredLanguage = meData.user?.preferredLanguage
+          if (preferredLanguage) {
+            document.cookie = `NEXT_LOCALE=${preferredLanguage};path=/;max-age=${60 * 60 * 24 * 365};samesite=lax`
+            // 調整 returnTo 路徑的 locale
+            // 如果 returnTo 是 /zh/xxx 但偏好是 en，或 /en/xxx 但偏好是 zh，調整路徑
+            const localePrefix = `/${preferredLanguage}`
+            const otherLocale = preferredLanguage === 'zh' ? 'en' : 'zh'
+            const otherPrefix = `/${otherLocale}`
+            if (returnTo.startsWith(otherPrefix + '/') || returnTo === otherPrefix) {
+              returnTo = localePrefix + returnTo.slice(otherPrefix.length)
+            } else if (preferredLanguage !== 'en' && !returnTo.startsWith(localePrefix)) {
+              // 偏好非英文且 returnTo 沒有 locale prefix，加上
+              returnTo = localePrefix + returnTo
+            }
+          }
+        }
+      } catch {
+        // 忽略，不影響登入流程
+      }
+
       // 等待一小段時間確保 cookie 完全設定
       await new Promise(resolve => setTimeout(resolve, 100))
 

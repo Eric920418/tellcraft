@@ -518,7 +518,11 @@
       "unlinkSuccess": "已解除 {provider} 綁定",
       "unlinkFailed": "解除綁定失敗",
       "networkError": "網路錯誤，請稍後再試",
-      "confirmUnlink": "確定要解除 {provider} 帳號的綁定嗎？"
+      "confirmUnlink": "確定要解除 {provider} 帳號的綁定嗎？",
+      "languagePreference": "語言偏好",
+      "languagePreferenceHint": "設定後會在所有裝置上同步你的語言選擇",
+      "languageSaved": "語言偏好已儲存",
+      "languageSaveFailed": "語言偏好儲存失敗"
     },
     "title": "儀表板",
     "subtitle": "歡迎回來，查看你的專案概覽",

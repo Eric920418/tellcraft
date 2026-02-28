@@ -10,6 +10,25 @@ export default function LocaleSwitcher() {
   const pathname = usePathname()
 
   const switchLocale = (newLocale: string) => {
+    // 1. 手動設 NEXT_LOCALE cookie（client-side 導航不觸發 middleware）
+    document.cookie = `NEXT_LOCALE=${newLocale};path=/;max-age=${60 * 60 * 24 * 365};samesite=lax`
+
+    // 2. 若已登入，fire-and-forget 同步 DB
+    const token = typeof window !== 'undefined' ? localStorage.getItem('auth_token') : null
+    if (token) {
+      fetch('/api/auth/preferences', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ preferredLanguage: newLocale }),
+      }).catch(() => {
+        // 忽略錯誤，不影響語言切換
+      })
+    }
+
+    // 3. 導航到新語言
     router.replace(pathname, { locale: newLocale as (typeof routing.locales)[number] })
   }
 
