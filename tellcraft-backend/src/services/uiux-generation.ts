@@ -2612,6 +2612,12 @@ ${codeBlocks.join('\n\n')}
     }
   }
 
+  // 零改動檢測：LLM 沒回 [NO_CHANGE] 但也沒輸出任何代碼區塊
+  const hasAnyChange = modifiedPages.size > 0 || modifiedComponents.size > 0 || modifiedStyles
+  if (!hasAnyChange) {
+    return { success: false, error: '無法理解您的修改需求。請描述具體要修改的內容，例如「把標題文字改成藍色」或「在導航欄新增一個搜尋框」。' }
+  }
+
   return {
     success: true,
     pages: mergedPages,

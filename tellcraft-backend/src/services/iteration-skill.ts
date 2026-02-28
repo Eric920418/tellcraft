@@ -135,10 +135,18 @@ export async function executeIteration(input: {
     )
 
     if (!result.success || !result.pages) {
+      // 區分「無法理解」和「系統錯誤」
+      const isNoChange = result.error && !result.error.includes('未知錯誤') && !result.error.includes('無法修改')
       await sendMessage(conversationId, io, {
-        content: `修改失敗：${result.error || '未知錯誤，請稍後重試。'}`,
-        stage: 'error',
+        content: isNoChange
+          ? `${result.error}`
+          : `修改失敗：${result.error || '未知錯誤，請稍後重試。'}`,
+        stage: isNoChange ? 'info' : 'error',
+        quickReplies: [
+          { label: '部署上線', value: '部署', style: 'primary' as const },
+        ],
       })
+      // 不保存迭代前快照（沒有實際改動）
       state.phase = 'uiux_complete'
       state.uiuxCodeGenerationStartedAt = undefined
       await saveFlowState(redis, conversationId, state)
