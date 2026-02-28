@@ -3179,96 +3179,110 @@ function ChatSection({
   const lastMessage = messages[messages.length - 1]
   const isFormulationStage = lastMessage?.stage === 'formulation_progress' || lastMessage?.stage === 'formulation_start'
 
-  // Formulation 階段：顯示全屏 SpecGenerationView
-  if (isFormulationStage && isActive) {
-    // 直接使用 progress.current 作為階段 (0-4)
-    const progress = lastMessage?.progress
-    const currentStage = Math.min(4, progress?.current || 0)
+  // Split 佈局變數（提前計算，避免條件分支內定義）
+  const isBddSplitMode = messages.some(m =>
+    m.stage === 'clarify_question' || m.stage === 'prd_discovery_continue' || m.stage === 'prd_discovery_complete'
+  ) && !messages.some(m => m.stage?.startsWith('uiux') || m.richContent?.type === 'code_preview')
+  const screenWidth = typeof window !== 'undefined' ? window.innerWidth : 1920
+  const bddChatWidth = isBddSplitMode ? Math.round(screenWidth * 0.8) : 420
+  const bddMinChatWidth = isBddSplitMode ? Math.round(screenWidth * 0.7) : 320
+  const bddMaxChatWidth = isBddSplitMode ? Math.round(screenWidth * 0.9) : 600
 
-    return (
-      <SpecGenerationView
-        currentStage={currentStage}
-        onComplete={() => {
-          // 完成後會自動切換到下一個階段
-        }}
-      />
-    )
-  }
+  // 決定當前視圖（互斥）
+  const isFormulationView = isFormulationStage && isActive
+  const isSplitView = !isFormulationView && layoutMode === 'split' && isActive
+  const isDefaultView = !isFormulationView && !isSplitView
 
-  // 分屏佈局模式
-  if (layoutMode === 'split' && isActive) {
-    // BDD 階段（有釐清但還沒進 UIUX）需要更寬的對話面板
-    const isBddSplitMode = messages.some(m =>
-      m.stage === 'clarify_question' || m.stage === 'prd_discovery_continue' || m.stage === 'prd_discovery_complete'
-    ) && !messages.some(m => m.stage?.startsWith('uiux') || m.richContent?.type === 'code_preview')
-    // BDD 模式：聊天佔 80%，需求藍圖動畫佔 20%
-    const screenWidth = typeof window !== 'undefined' ? window.innerWidth : 1920
-    const bddChatWidth = isBddSplitMode ? Math.round(screenWidth * 0.8) : 420
-    const bddMinChatWidth = isBddSplitMode ? Math.round(screenWidth * 0.7) : 320
-    const bddMaxChatWidth = isBddSplitMode ? Math.round(screenWidth * 0.9) : 600
-
-    return (
-      <motion.div
-        key="split-layout"
-        initial={{ opacity: 0 }}
-        animate={{ opacity: isLayoutTransitioning ? 0.5 : 1 }}
-        exit={{ opacity: 0 }}
-        transition={{ duration: 0.4, ease: [0.32, 0.72, 0, 1] }}
-        style={{
-          position: 'fixed',
-          inset: 0,
-          zIndex: 100,
-        }}
-      >
-        <SplitLayout
-          defaultChatWidth={bddChatWidth}
-          minChatWidth={bddMinChatWidth}
-          maxChatWidth={bddMaxChatWidth}
-          chatPanel={
-            <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-              {/* Split Layout Header */}
-              <div
-                style={{
-                  height: 56,
-                  borderBottom: '1px solid var(--border-color)',
-                  display: 'flex',
-                  alignItems: 'center',
-                  padding: '0 16px',
-                  gap: 12,
-                }}
-              >
-                <button
-                  onClick={onBack}
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 6,
-                    fontSize: 13,
-                    color: 'var(--gray-600)',
-                    background: 'none',
-                    border: 'none',
-                    cursor: 'pointer',
-                    padding: '6px 0',
-                  }}
-                >
-                  <span>←</span>
-                  {tChat('headerBackButton')}
-                </button>
-                <div style={{ width: 1, height: 20, background: 'var(--border-color)' }} />
-                <span style={{ fontSize: 14, fontWeight: 500 }}>{isBddSplitMode ? tChat('bddSplitTitle') : tChat('uiuxSplitTitle')}</span>
-              </div>
-              {renderChatContent()}
-            </div>
-          }
-          previewPanel={renderPreviewPanel()}
-        />
-      </motion.div>
-    )
-  }
+  // Formulation progress
+  const formulationProgress = lastMessage?.progress
+  const formulationCurrentStage = Math.min(4, formulationProgress?.current || 0)
 
   return (
     <AnimatePresence>
-      {isActive && (
+      {/* Formulation 階段：全屏 SpecGenerationView */}
+      {isFormulationView && (
+        <motion.div
+          key="formulation-view"
+          initial={{ opacity: 0, scale: 1.03 }}
+          animate={{ opacity: 1, scale: 1 }}
+          exit={{ opacity: 0, scale: 0.98 }}
+          transition={{ duration: 0.5, ease: smoothEasing }}
+          style={{
+            position: 'fixed',
+            inset: 0,
+            zIndex: 9999,
+          }}
+        >
+          <SpecGenerationView
+            currentStage={formulationCurrentStage}
+            onComplete={() => {
+              // 完成後會自動切換到下一個階段
+            }}
+          />
+        </motion.div>
+      )}
+
+      {/* 分屏佈局模式 */}
+      {isSplitView && (
+        <motion.div
+          key="split-layout"
+          initial={{ opacity: 0 }}
+          animate={{ opacity: isLayoutTransitioning ? 0.5 : 1 }}
+          exit={{ opacity: 0, scale: 0.98, filter: 'blur(4px)' }}
+          transition={{ duration: 0.5, ease: smoothEasing }}
+          style={{
+            position: 'fixed',
+            inset: 0,
+            zIndex: 100,
+          }}
+        >
+          <SplitLayout
+            defaultChatWidth={bddChatWidth}
+            minChatWidth={bddMinChatWidth}
+            maxChatWidth={bddMaxChatWidth}
+            chatPanel={
+              <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+                {/* Split Layout Header */}
+                <div
+                  style={{
+                    height: 56,
+                    borderBottom: '1px solid var(--border-color)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    padding: '0 16px',
+                    gap: 12,
+                  }}
+                >
+                  <button
+                    onClick={onBack}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 6,
+                      fontSize: 13,
+                      color: 'var(--gray-600)',
+                      background: 'none',
+                      border: 'none',
+                      cursor: 'pointer',
+                      padding: '6px 0',
+                    }}
+                  >
+                    <span>←</span>
+                    {tChat('headerBackButton')}
+                  </button>
+                  <div style={{ width: 1, height: 20, background: 'var(--border-color)' }} />
+                  <span style={{ fontSize: 14, fontWeight: 500 }}>{isBddSplitMode ? tChat('bddSplitTitle') : tChat('uiuxSplitTitle')}</span>
+                </div>
+                {renderChatContent()}
+              </div>
+            }
+            previewPanel={renderPreviewPanel()}
+          />
+        </motion.div>
+      )}
+
+      {/* 預設全屏佈局 */}
+      {isDefaultView && isActive && (
         <motion.div
           key="default-layout"
           initial={{ opacity: 0, scale: 1.02 }}
