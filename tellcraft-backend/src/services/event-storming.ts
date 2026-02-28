@@ -197,8 +197,11 @@ async function callHaiku(
 
 function safeParseJson<T>(text: string): T | null {
   // 嘗試從 markdown code block 中提取 JSON
-  const codeBlockMatch = text.match(/```(?:json)?\s*\n?([\s\S]*?)\n?```/)
-  const jsonStr = codeBlockMatch ? codeBlockMatch[1].trim() : text.trim()
+  const codeBlockMatch = text.match(/`{3,}(?:json)?\s*\n?([\s\S]*?)\n?`{3,}/)
+  let jsonStr = codeBlockMatch ? codeBlockMatch[1].trim() : text.trim()
+  if (jsonStr.startsWith('`')) {
+    jsonStr = jsonStr.replace(/^[`\s]*(?:json)?\s*/, '').replace(/[`\s]*$/, '')
+  }
 
   try {
     return JSON.parse(jsonStr) as T

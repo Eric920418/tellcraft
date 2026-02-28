@@ -222,11 +222,15 @@ ${bddSpec}
           return { success: false, error: 'LLM 回應格式錯誤' }
         }
 
-        // 解析 JSON（可能包在 code block 裡）
+        // 解析 JSON（可能包在 code block 裡，LLM 有時用 3+ 個反引號）
         let jsonStr = content.text.trim()
-        const codeBlockMatch = jsonStr.match(/```(?:json)?\s*\n?([\s\S]*?)```/)
+        const codeBlockMatch = jsonStr.match(/`{3,}(?:json)?\s*\n?([\s\S]*?)`{3,}/)
         if (codeBlockMatch) {
           jsonStr = codeBlockMatch[1].trim()
+        }
+        // 最後防線：如果還是以反引號開頭，暴力去除首尾非 JSON 字元
+        if (jsonStr.startsWith('`')) {
+          jsonStr = jsonStr.replace(/^[`\s]*(?:json)?\s*/, '').replace(/[`\s]*$/, '')
         }
 
         const spec = JSON.parse(jsonStr) as UIRequirementsSpec

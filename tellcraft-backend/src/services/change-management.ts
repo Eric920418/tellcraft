@@ -139,9 +139,12 @@ ${existingSpecs.esDocument ? `**ES 文檔**（前 300 字）：\n${existingSpecs
     }
 
     let jsonStr = content.text.trim()
-    const codeBlockMatch = jsonStr.match(/```(?:json)?\s*\n?([\s\S]*?)```/)
+    const codeBlockMatch = jsonStr.match(/`{3,}(?:json)?\s*\n?([\s\S]*?)`{3,}/)
     if (codeBlockMatch) {
       jsonStr = codeBlockMatch[1].trim()
+    }
+    if (jsonStr.startsWith('`')) {
+      jsonStr = jsonStr.replace(/^[`\s]*(?:json)?\s*/, '').replace(/[`\s]*$/, '')
     }
 
     const impact = JSON.parse(jsonStr) as ImpactAnalysis
@@ -260,9 +263,12 @@ ${existingSpecs.entityMapping}
     }
 
     let jsonStr = responseContent.text.trim()
-    const codeBlockMatch = jsonStr.match(/```(?:json)?\s*\n?([\s\S]*?)```/)
+    const codeBlockMatch = jsonStr.match(/`{3,}(?:json)?\s*\n?([\s\S]*?)`{3,}/)
     if (codeBlockMatch) {
       jsonStr = codeBlockMatch[1].trim()
+    }
+    if (jsonStr.startsWith('`')) {
+      jsonStr = jsonStr.replace(/^[`\s]*(?:json)?\s*/, '').replace(/[`\s]*$/, '')
     }
 
     const parsed = JSON.parse(jsonStr) as {

@@ -120,9 +120,12 @@ export async function generateDecisionSummary(
     if (content.type !== 'text') return null
 
     let jsonStr = content.text.trim()
-    const codeBlockMatch = jsonStr.match(/```(?:json)?\s*\n?([\s\S]*?)```/)
+    const codeBlockMatch = jsonStr.match(/`{3,}(?:json)?\s*\n?([\s\S]*?)`{3,}/)
     if (codeBlockMatch) {
       jsonStr = codeBlockMatch[1].trim()
+    }
+    if (jsonStr.startsWith('`')) {
+      jsonStr = jsonStr.replace(/^[`\s]*(?:json)?\s*/, '').replace(/[`\s]*$/, '')
     }
 
     const parsed = JSON.parse(jsonStr) as DecisionSummary
@@ -296,9 +299,12 @@ export async function deduplicateQuestions(
     if (content.type !== 'text') return newItems
 
     let jsonStr = content.text.trim()
-    const codeBlockMatch = jsonStr.match(/```(?:json)?\s*\n?([\s\S]*?)```/)
+    const codeBlockMatch = jsonStr.match(/`{3,}(?:json)?\s*\n?([\s\S]*?)`{3,}/)
     if (codeBlockMatch) {
       jsonStr = codeBlockMatch[1].trim()
+    }
+    if (jsonStr.startsWith('`')) {
+      jsonStr = jsonStr.replace(/^[`\s]*(?:json)?\s*/, '').replace(/[`\s]*$/, '')
     }
 
     const parsed = JSON.parse(jsonStr) as {
