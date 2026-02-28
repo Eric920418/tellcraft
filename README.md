@@ -238,14 +238,14 @@ Dashboard 帳號設定 → /api/auth/link/google（從 cookie 讀 JWT → 提取
 
 ### 架構
 
-基於 `next-intl` v4，`localePrefix: 'as-needed'`（`/` = 中文預設，`/en/` = English）。
+基於 `next-intl` v4，`localePrefix: 'as-needed'`，`localeDetection: false`（不依賴瀏覽器語言自動導向）。
 
 ```
 URL 結構：
-  / → zh（預設，無前綴）
-  /en → English
-  /dashboard → zh
-  /en/dashboard → English
+  / → en（預設，無前綴）
+  /zh → 中文
+  /dashboard → en
+  /zh/dashboard → 中文
 ```
 
 ### 翻譯檔案
