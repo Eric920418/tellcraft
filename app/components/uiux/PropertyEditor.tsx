@@ -16,6 +16,8 @@ interface PropertyEditorProps {
   onClose: () => void
   onReset?: (elementId: string) => void
   onUploadImage?: (file: File) => Promise<string | null>
+  annotation?: string
+  onAnnotationChange?: (elementId: string, text: string) => void
 }
 
 // rgb()/rgba() → hex 轉換
@@ -134,7 +136,7 @@ const TEXT_TRANSFORM_OPTIONS = [
   { value: 'capitalize', label: 'Abc' },
 ]
 
-export default function PropertyEditor({ element, onUpdate, onClose, onReset, onUploadImage }: PropertyEditorProps) {
+export default function PropertyEditor({ element, onUpdate, onClose, onReset, onUploadImage, annotation, onAnnotationChange }: PropertyEditorProps) {
   const t = useTranslations('uiux')
   const [editedStyles, setEditedStyles] = useState<Record<string, string>>({})
   const [editedText, setEditedText] = useState('')

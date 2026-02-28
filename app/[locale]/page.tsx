@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useRef, useEffect, useCallback, Suspense, useDeferredValue } from 'react'
+import { useState, useRef, useEffect, useCallback, Suspense, useDeferredValue, useMemo } from 'react'
 import { useSearchParams } from 'next/navigation'
 import { motion, AnimatePresence, useInView } from 'framer-motion'
 import { useTranslations } from 'next-intl'
@@ -935,8 +935,24 @@ function ChatSection({
   const inputRef = useRef<HTMLTextAreaElement>(null)
   const typingTimerRef = useRef<NodeJS.Timeout | null>(null)
   const isComposingRef = useRef(false)  // 追蹤 IME 輸入法狀態
-  const codePreviewContainerRef = useRef<HTMLDivElement>(null)
+  const codePreviewContainerObserverRef = useRef<ResizeObserver | null>(null)
   const [codePreviewContainerWidth, setCodePreviewContainerWidth] = useState(0)
+  const codePreviewContainerRef = useCallback((el: HTMLDivElement | null) => {
+    // 斷開舊的 observer
+    if (codePreviewContainerObserverRef.current) {
+      codePreviewContainerObserverRef.current.disconnect()
+      codePreviewContainerObserverRef.current = null
+    }
+    if (!el) return
+    // 立即讀取一次寬度
+    setCodePreviewContainerWidth(el.clientWidth - 48)
+    // 綁定新的 observer
+    const observer = new ResizeObserver(() => {
+      setCodePreviewContainerWidth(el.clientWidth - 48)
+    })
+    observer.observe(el)
+    codePreviewContainerObserverRef.current = observer
+  }, [])
 
   // 打字指示器：立即顯示 "..."，10 秒後顯示完整提示
   // + 安全超時：90 秒後自動清除 isTyping，防止後端靜默丟棄消息導致 UI 卡死
@@ -1015,6 +1031,8 @@ function ChatSection({
 
   // Streaming preview（實時串流預覽，透過 HTTP 輪詢從 Redis 取得）
   const [streamingPreview, setStreamingPreview] = useState<StreamingPreview | null>(null)
+  // Code preview 穩定數據（從 messages 提取，避免每次 render 重新搜索陣列）
+  const [codePreviewData, setCodePreviewData] = useState<Record<string, unknown> | null>(null)
   // Fast Build chunk 計數（用於 FastBuildProgress 子進度更新）
   const [fastBuildChunks, setFastBuildChunks] = useState(0)
 
@@ -1029,16 +1047,7 @@ function ChatSection({
   const [codePreviewPendingReset, setCodePreviewPendingReset] = useState<{ elementId: string; seq: number } | null>(null)
   const [codePreviewPendingOverrides, setCodePreviewPendingOverrides] = useState<{ overrides: Record<string, Record<string, string>>; seq: number } | null>(null)
 
-  // Code Preview 容器尺寸追蹤（用於 iframe 縮放）
-  useEffect(() => {
-    const el = codePreviewContainerRef.current
-    if (!el) return
-    const observer = new ResizeObserver(() => {
-      setCodePreviewContainerWidth(el.clientWidth - 48) // 扣除 padding
-    })
-    observer.observe(el)
-    return () => observer.disconnect()
-  }, [])
+  // Code Preview 容器尺寸追蹤已改用 callback ref（codePreviewContainerRef）
 
   // ── Code Preview 編輯模式 handlers ──────────────────
   const handleCodePreviewElementUpdate = useCallback((elementId: string, changes: Record<string, string>) => {
@@ -1413,6 +1422,10 @@ function ChatSection({
           }))
           setMessages(historyMessages)
 
+          // 提取 code_preview 數據到穩定 state（避免 renderPreviewPanel 每次搜索 messages）
+          const cpMsg = [...historyMessages].reverse().find(m => m.richContent?.type === 'code_preview')
+          if (cpMsg?.richContent?.data) setCodePreviewData(cpMsg.richContent.data)
+
           // 找到最後一條 AI 消息的 stage
           const lastAiMessage = historyMessages.filter(m => m.role === 'assistant').pop()
           if (lastAiMessage?.stage) {
@@ -1463,9 +1476,23 @@ function ChatSection({
 
         // 處理 streaming preview（從 Redis 透過 HTTP 輪詢取得）
         if (result.data.streamingPreview) {
-          setStreamingPreview(result.data.streamingPreview as StreamingPreview)
-          // 更新 chunk 計數（根據檔案數量估算）
           const sp = result.data.streamingPreview as StreamingPreview
+          // 用 functional update + 快速內容比較避免不必要的 re-render
+          setStreamingPreview(prev => {
+            if (!prev) return sp
+            // 快速比較：phase + 檔案數 + 每個檔案的 path 和 content 長度
+            if (
+              prev.phase === sp.phase &&
+              prev.pages.length === sp.pages.length &&
+              prev.components.length === sp.components.length &&
+              prev.styles.length === sp.styles.length &&
+              prev.pages.every((p, i) => p.path === sp.pages[i]?.path && p.content.length === sp.pages[i]?.content.length) &&
+              prev.components.every((c, i) => c.path === sp.components[i]?.path && c.content.length === sp.components[i]?.content.length)
+            ) {
+              return prev // 相同 reference → 不觸發 re-render
+            }
+            return sp
+          })
           const newChunks = (sp.pages?.length || 0) + (sp.components?.length || 0)
           setFastBuildChunks(prev => prev !== newChunks ? newChunks : prev)
           // 串流期間加快輪詢
@@ -1509,6 +1536,8 @@ function ChatSection({
           // 收到 code_preview 消息時清除 streaming preview（最終版已到達）
           const hasCodePreview = formattedMessages.some(m => m.richContent?.type === 'code_preview')
           if (hasCodePreview) {
+            const cpMsg = formattedMessages.find(m => m.richContent?.type === 'code_preview')
+            if (cpMsg?.richContent?.data) setCodePreviewData(cpMsg.richContent.data)
             setStreamingPreview(null)
             setFastBuildChunks(0)
           }
@@ -1763,6 +1792,7 @@ function ChatSection({
       setConversations([])
       setLoginPromptConfig(null)
       setIsInitializing(true)  // 重置為 true，下次進入時直接顯示初始化中
+      setCodePreviewData(null)
       // 重置編輯模式相關狀態
       setCodePreviewEditMode(false)
       setCodePreviewSelectedElement(null)
@@ -1844,6 +1874,10 @@ function ChatSection({
         quickReplies: (m as unknown as Record<string, unknown>).quickReplies as Message['quickReplies'],
       }))
       setMessages(formattedMessages)
+
+      // 提取 code_preview 數據到穩定 state
+      const cpMsg = [...formattedMessages].reverse().find(m => m.richContent?.type === 'code_preview')
+      setCodePreviewData(cpMsg?.richContent?.data ?? null)
 
       // 更新 session 中的 conversationId
       setSessionInfo({
@@ -2623,6 +2657,20 @@ function ChatSection({
     </>
   )
 
+  // 穩定預覽數據（避免 renderPreviewPanel 每次 render 都建立新陣列 reference）
+  const stablePreviewData = useMemo(() => {
+    const activeData = streamingPreview || codePreviewData
+    if (!activeData) return null
+    return {
+      pages: (activeData.pages || []) as { path: string; content: string; description: string }[],
+      components: (activeData.components || []) as { path: string; content: string; description: string }[],
+      styles: (activeData.styles || '') as string,
+      tailwindConfig: (activeData.tailwindConfig || '') as string,
+      isStreaming: !!streamingPreview,
+      phase: ((streamingPreview as StreamingPreview | null)?.phase || 'structure') as 'structure' | 'animation' | 'rwd',
+    }
+  }, [streamingPreview, codePreviewData])
+
   // 預覽面板渲染函數（用於 SplitLayout）
   const renderPreviewPanel = () => {
     // ── BDD Q&A 蓋房子場景 ──
@@ -2686,19 +2734,9 @@ function ChatSection({
       )
     }
 
-    // 檢查是否有 code_preview 訊息（Implementation 階段生成的程式碼）
-    const codePreviewMessage = [...messages].reverse().find(m => m.richContent?.type === 'code_preview')
-    const codePreviewData = codePreviewMessage?.richContent?.data
-
-    // 優先使用 streaming preview（實時串流），fallback 到最終的 code_preview
-    const activeData = streamingPreview || codePreviewData
-    const isStreaming = !!streamingPreview
-
-    if (activeData) {
-      const pagesData = (activeData.pages || []) as { path: string; content: string; description: string }[]
-      const componentsData = (activeData.components || []) as { path: string; content: string; description: string }[]
-      const stylesData = (activeData.styles || '') as string
-      const tailwindConfigData = (activeData.tailwindConfig || '') as string
+    // 使用穩定的預覽數據（避免每次 render 都搜索 messages + 建立新陣列）
+    if (stablePreviewData) {
+      const { pages: pagesData, components: componentsData, styles: stylesData, tailwindConfig: tailwindConfigData, isStreaming } = stablePreviewData
       // 響應式渲染：容器寬度用於設備切換的外層限制
       const containerW = codePreviewContainerWidth > 0 ? codePreviewContainerWidth : 800
       const maxDeviceWidth = getDeviceWidth(codePreviewDevice)
@@ -2706,7 +2744,7 @@ function ChatSection({
 
       // Streaming 但還沒有任何頁面檔案 → 顯示藍圖進度
       if (isStreaming && pagesData.length === 0) {
-        const spPhase = streamingPreview?.phase || 'structure'
+        const spPhase = stablePreviewData.phase
         const phaseMap: Record<string, number> = { structure: 1, animation: 2, rwd: 3 }
         return (
           <FastBuildPlayer
@@ -2717,8 +2755,9 @@ function ChatSection({
         )
       }
 
+      const spPhase = stablePreviewData.phase
       const phaseLabel = isStreaming
-        ? (streamingPreview?.phase === 'structure' ? tPreview('streamingStructure') : streamingPreview?.phase === 'animation' ? tPreview('streamingAnimation') : tPreview('streamingRwd'))
+        ? (spPhase === 'structure' ? tPreview('streamingStructure') : spPhase === 'animation' ? tPreview('streamingAnimation') : tPreview('streamingRwd'))
         : null
 
       return (

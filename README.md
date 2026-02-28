@@ -598,6 +598,17 @@ BDD Q&A 動畫面板從 3D 鍛造車間場景改為**純 React 文字歷史紀�
 - **自動捲動**：新條目出現時自動捲動到底部
 - **移除依賴**：不再使用 Remotion Player、Three.js、@react-three/postprocessing
 
+### Sandpack 串流預覽防閃爍（2026-02-28）
+
+修復精細模式 UIUX 三階段生成（Structure → Animation → RWD）期間 Sandpack 預覽面板不斷閃爍/白屏的問題。
+
+**根因**：每次 1.5s 輪詢都觸發 `SandpackProvider` 完全重建（依賴 JSON 變化 → key 變化 → iframe 銷毀+重建）。
+
+**三處修復**：
+- `SandpackPreview.tsx`：streaming 期間凍結 `providerKey`（用 `useRef`），所有更新走 `SandpackFileUpdater.updateFile()` 增量路徑，streaming 結束後一次乾淨重建
+- `page.tsx` 輪詢去重：`setStreamingPreview` 改用 functional update + 快速內容比較（phase + 檔案數 + content.length），內容不變時返回舊 reference 不觸發 re-render
+- `page.tsx` 穩定數據源：新增 `codePreviewData` state + `stablePreviewData` useMemo，避免 `renderPreviewPanel` 每次 render 都搜索 messages 陣列 + 建立新 reference
+
 ### SandpackPreview 編輯模式（2026-02-26）
 
 想法模式和快速模式生成的 SandpackPreview 現在也支援即時編輯（文字/顏色/間距/圖片），與模板模式 PreviewPanel 一致。

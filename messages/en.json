@@ -140,7 +140,10 @@
     "saveMessage": "Please apply the following visual edits to the source code:",
     "saveNote1": "Note: Element numbers are ordered by appearance of same tag type in the page (starting from 1).",
     "saveNote2": "Modify the corresponding element in JSX source directly. Replace text content in JSX.",
-    "saveNote3": "Prefer Tailwind CSS classes for style changes; use inline styles when classes are insufficient."
+    "saveNote3": "Prefer Tailwind CSS classes for style changes; use inline styles when classes are insufficient.",
+    "annotationLabel": "Note",
+    "annotationPlaceholder": "Describe changes... (e.g., too much spacing, add animation)",
+    "annotationPrefix": "[Note]"
   },
   "command": {
     "goBack": "← Go back",

@@ -116,8 +116,23 @@ export default function AdminConversationViewerPage() {
   const lastUpdatedAtRef = useRef<string | null>(null)
   const pollIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const chatScrollRef = useRef<HTMLDivElement>(null)
-  const codePreviewContainerRef = useRef<HTMLDivElement>(null)
+  const codePreviewContainerObserverRef = useRef<ResizeObserver | null>(null)
   const [containerWidth, setContainerWidth] = useState(800)
+  const codePreviewContainerRef = useCallback((el: HTMLDivElement | null) => {
+    if (codePreviewContainerObserverRef.current) {
+      codePreviewContainerObserverRef.current.disconnect()
+      codePreviewContainerObserverRef.current = null
+    }
+    if (!el) return
+    setContainerWidth(el.clientWidth)
+    const observer = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        setContainerWidth(entry.contentRect.width)
+      }
+    })
+    observer.observe(el)
+    codePreviewContainerObserverRef.current = observer
+  }, [])
   const prevMessageCountRef = useRef(0)
 
   // 載入訊息
@@ -205,17 +220,7 @@ export default function AdminConversationViewerPage() {
     }
   }, [messages])
 
-  // 監測預覽容器寬度
-  useEffect(() => {
-    if (!codePreviewContainerRef.current) return
-    const observer = new ResizeObserver((entries) => {
-      for (const entry of entries) {
-        setContainerWidth(entry.contentRect.width)
-      }
-    })
-    observer.observe(codePreviewContainerRef.current)
-    return () => observer.disconnect()
-  }, [])
+  // 預覽容器寬度追蹤已改用 callback ref（codePreviewContainerRef）
 
   // 找到最新的 code_preview 訊息
   const codePreviewMessage = [...messages].reverse().find(m => m.richContent?.type === 'code_preview')

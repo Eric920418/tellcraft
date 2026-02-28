@@ -140,7 +140,10 @@
     "saveMessage": "請將以下視覺編輯修改套用到源碼中：",
     "saveNote1": "注意：元素序號是按頁面中同類標籤出現的順序（從 1 開始）。",
     "saveNote2": "請直接修改 JSX 源碼中對應元素。文字直接替換 JSX 內容。",
-    "saveNote3": "樣式修改優先用 Tailwind CSS class，無法用 class 時用 inline style。"
+    "saveNote3": "樣式修改優先用 Tailwind CSS class，無法用 class 時用 inline style。",
+    "annotationLabel": "備註",
+    "annotationPlaceholder": "輸入修改說明...（如：間距太大、加個動畫）",
+    "annotationPrefix": "[備註]"
   },
   "command": {
     "goBack": "← 上一步",

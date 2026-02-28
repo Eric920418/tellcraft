@@ -78,7 +78,14 @@ export default function SandpackPreview({
   )
 
   // 用依賴的 JSON 作為 Provider 的 key，確保依賴變化時重建
-  const providerKey = JSON.stringify(setup.dependencies)
+  // streaming 期間凍結 key，所有更新走 SandpackFileUpdater 增量更新
+  // streaming 結束後 key 自然更新 → 一次乾淨重建
+  const latestDepsJson = JSON.stringify(setup.dependencies)
+  const stableKeyRef = useRef(latestDepsJson)
+  if (!isStreaming) {
+    stableKeyRef.current = latestDepsJson
+  }
+  const providerKey = stableKeyRef.current
 
   // ── iframe ref 取得（Sandpack 自管理 iframe，需要用 querySelector 找到） ──
   const containerRef = useRef<HTMLDivElement>(null)
