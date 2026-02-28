@@ -4529,16 +4529,16 @@ function HomeContent() {
   }, [])
 
   // 檢查 URL 參數，如果有 conversation 則恢復對話
+  // 不做 pushState — 瀏覽器已有此 URL 的歷史記錄，返回時自然離開
   useEffect(() => {
     const conversationId = searchParams.get('conversation')
     if (conversationId) {
       setResumeConversationId(conversationId)
       setIsChatActive(true)
-      window.history.pushState({ tellcraftChat: true }, '')
     }
   }, [searchParams])
 
-  // 瀏覽器返回鍵監聽 — 統一處理返回首頁邏輯
+  // 瀏覽器返回鍵監聯 — 處理 pushState 進入對話後的瀏覽器返回
   useEffect(() => {
     const handlePopState = () => {
       if (isChatActive) {
@@ -4625,7 +4625,17 @@ function HomeContent() {
   }, [heroInput])
 
   const handleBackToHome = useCallback(() => {
-    window.history.back()
+    setIsChatActive(false)
+    setHeroInput('')
+    setInitialMessage('')
+    setResumeConversationId(null)
+    // pushState 進入的對話（首頁輸入/恢復專案）：pop 回上一條歷史記錄
+    // URL 參數進入的對話（?conversation=xxx）：replaceState 清除參數
+    if (window.history.state?.tellcraftChat) {
+      window.history.back()
+    } else {
+      window.history.replaceState({}, '', window.location.pathname)
+    }
   }, [])
 
   const handleFocusInput = useCallback(() => {
