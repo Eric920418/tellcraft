@@ -43,12 +43,15 @@ export async function handleFollow(userId: string, replyToken: string): Promise<
   if (!messagingClient) return
 
   const welcomeText = [
-    '歡迎使用 Tellcraft！',
-    'AI 驅動的自動開發平台',
+    '嗨！我是 Tellcraft',
+    '你的 AI 建站助手',
     '',
-    '描述你想做的產品，AI 幫你從 0 到上線',
+    '告訴我你想做什麼網站',
+    '90 秒內幫你從零生成到上線',
     '',
-    '試試說：「幫我做一個咖啡廳官網」',
+    '直接打字就行，例如：',
+    '「做一個花店官網」',
+    '「做一個餐廳預約網站」',
   ].join('\n')
 
   const messages: Message[] = [{
