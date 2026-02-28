@@ -18,58 +18,105 @@ export interface PrefilterResult {
 
 export interface RelevanceCheckResult {
   relevant: boolean
+  vague?: boolean    // 相關但描述太模糊
   errorMessage?: string
 }
 
-// 建站正向信號關鍵詞（命中任一 → 直接放行，零 LLM 成本）
-const BUILD_POSITIVE_SIGNALS = [
-  // 產品類型
-  '網站', '官網', '網頁', '頁面', '首頁', '平台', '系統', '應用',
-  'app', 'website', 'web', 'page', 'landing', 'portfolio', 'blog',
-  'dashboard', 'saas', 'cms', 'e-commerce', 'ecommerce',
-  // 設計意圖
-  '設計', '介面', 'ui', 'ux', '排版', '版面', '樣式', '風格',
-  '佈局', '布局', 'layout', 'design', 'theme',
-  // 建造動詞
-  '做一個', '建立', '建一個', '打造', '開發', '製作', '生成',
-  'build', 'create', 'make', 'generate',
-  // 產業/場景
-  '餐廳', '咖啡', '店', '公司', '品牌', '商品', '產品', '服務',
+// ── 強信號：有具體描述（產業/產品類型/功能），直接放行 ──
+const STRONG_SIGNALS = [
+  // 產業/場景 — 中文
+  '餐廳', '咖啡', '咖啡廳', '店', '公司', '品牌', '商品', '服務',
   '課程', '預約', '訂購', '購物', '電商', '部落格', '作品集',
-  '履歷', '活動', '展示', '形象', '行銷', '宣傳',
-  // 功能描述
+  '履歷', '活動', '展示', '形象', '行銷', '宣傳', '旅遊', '健身',
+  '醫療', '教育', '音樂', '攝影', '婚禮', '寵物', '美食', '房地產',
+  // 產業/場景 — 英文
+  'restaurant', 'coffee', 'cafe', 'bakery', 'hotel', 'gym', 'fitness',
+  'clinic', 'dental', 'medical', 'healthcare', 'pharmacy',
+  'school', 'academy', 'university', 'education', 'tutor',
+  'salon', 'spa', 'barber', 'beauty',
+  'law firm', 'accounting', 'consulting', 'agency', 'studio',
+  'photography', 'wedding', 'event', 'catering',
+  'real estate', 'property', 'rental',
+  'travel', 'tourism', 'booking',
+  'pet', 'veterinary', 'vet',
+  'music', 'band', 'podcast', 'art',
+  'church', 'nonprofit', 'charity', 'ngo',
+  'startup', 'tech', 'fintech', 'crypto',
+  'shop', 'store', 'boutique', 'marketplace',
+  'grocery', 'food', 'delivery', 'meal',
+  // 具體產品類型 — 中文
+  '官網',
+  // 具體產品類型 — 英文
+  'landing', 'portfolio', 'blog', 'dashboard', 'saas', 'cms',
+  'e-commerce', 'ecommerce', 'webshop', 'storefront',
+  'newsletter', 'resume', 'cv',
+  'directory', 'listing', 'marketplace',
+  'wiki', 'documentation', 'knowledge base',
+  // 具體功能描述 — 中文
   '按鈕', '表單', '導覽', '選單', '輪播', '圖片', '影片',
-  '動畫', '互動', '響應式', 'rwd', 'responsive',
+  '登入', '註冊', '購物車', '搜尋', '留言', '聯絡',
+  // 具體功能描述 — 英文
+  'login', 'sign up', 'signup', 'register', 'checkout', 'cart',
+  'contact form', 'booking form', 'reservation',
+  'gallery', 'carousel', 'slider', 'hero section',
+  'navbar', 'sidebar', 'footer', 'header',
+  'pricing', 'testimonial', 'faq',
+  'search', 'filter', 'comment', 'review',
+]
+
+// ── 弱信號：只有泛建站詞彙（知道要「建」但不知道建「什麼」），需 Haiku 確認 ──
+const WEAK_SIGNALS = [
+  // 泛用產品類型（沒有產業修飾就太模糊）— 中文
+  '網站', '網頁', '頁面', '首頁', '平台', '系統', '應用',
+  // 泛用產品類型 — 英文
+  'app', 'website', 'web', 'page', 'site', 'platform', 'application',
+  // 設計意圖 — 中文
+  '設計', '介面', '排版', '版面', '樣式', '風格', '佈局', '布局',
+  // 設計意圖 — 英文
+  'ui', 'ux', 'layout', 'design', 'theme', 'template', 'mockup', 'prototype',
+  // 建造動詞 — 中文
+  '做一個', '建立', '建一個', '打造', '開發', '製作', '生成',
+  // 建造動詞 — 英文
+  'build', 'create', 'make', 'generate', 'develop', 'set up', 'launch',
+  // 技術描述
+  '動畫', '互動', '響應式', 'rwd', 'responsive', 'animation', 'interactive',
 ]
 
 const HAIKU_PRICING = { input: 0.8, output: 4 }
 
 /**
- * 檢查用戶輸入是否與建站相關（Fast Mode 專用）
+ * 檢查用戶輸入是否與建站相關且具體到可執行（Fast Mode 專用）
  *
- * 兩層策略：
- * 1. 正向關鍵詞匹配（零成本，覆蓋 90%+ 正常請求）
- * 2. 微型 Haiku 二元判斷（~$0.0002/次，僅對模糊輸入觸發）
+ * 三層策略：
+ * 1. 強信號（產業/具體產品）→ 直接放行（零成本）
+ * 2. 弱信號（泛建站詞）→ Haiku 判斷是否具體到可生成
+ * 3. 無信號 → Haiku 判斷相關性
  */
 export async function checkBuildRelevance(
   message: string,
   context?: { userId?: string; conversationId?: string }
 ): Promise<RelevanceCheckResult> {
   const lower = message.toLowerCase()
+  const isChinese = /[\u4e00-\u9fff\u3400-\u4dbf]/.test(message)
 
-  // Layer 1: 正向關鍵詞 → 直接放行
-  if (BUILD_POSITIVE_SIGNALS.some(kw => lower.includes(kw))) {
+  // Layer 1: 強信號 → 直接放行（有產業/產品類型 = 夠具體）
+  if (STRONG_SIGNALS.some(kw => lower.includes(kw))) {
     return { relevant: true }
   }
 
-  // Layer 2: 沒有正向信號 → 微型 Haiku 判斷
+  const hasWeakSignal = WEAK_SIGNALS.some(kw => lower.includes(kw))
+
+  // Layer 2/3: 弱信號或無信號 → 微型 Haiku 判斷（相關性 + 具體性）
   const apiKey = process.env.ANTHROPIC_API_KEY
   if (!apiKey) {
-    // 無 API Key → 降級放行（寧可多生成一次也不誤擋）
     return { relevant: true }
   }
 
   try {
+    const systemPrompt = hasWeakSignal
+      ? '用戶想用快速建站工具。判斷描述是否具體到能知道「建什麼類型的網站」。只回覆 JSON:\n- 夠具體：{"relevant":true}\n- 相關但太模糊（如「做一個很酷的東西」「建一個網站」）：{"relevant":true,"vague":true}\n- 與建網站無關：{"relevant":false}'
+      : '判斷用戶訊息是否與「建立網站/應用/數位產品」相關。只回覆 JSON: {"relevant":true} 或 {"relevant":false}'
+
     const resp = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
       headers: {
@@ -80,13 +127,12 @@ export async function checkBuildRelevance(
       body: JSON.stringify({
         model: 'claude-haiku-4-5-20251001',
         max_tokens: 30,
-        system: '判斷用戶訊息是否與「建立網站/應用/數位產品」相關。只回覆 JSON: {"relevant":true} 或 {"relevant":false,"reason":"一句話原因"}',
+        system: systemPrompt,
         messages: [{ role: 'user', content: message }],
       }),
     })
 
     if (!resp.ok) {
-      // API 失敗 → 降級放行
       console.warn(`[Prefilter] 相關性檢查 API 錯誤 ${resp.status}，降級放行`)
       return { relevant: true }
     }
@@ -115,15 +161,31 @@ export async function checkBuildRelevance(
     const text = data.content?.[0]?.text
     if (!text) return { relevant: true }
 
-    const parsed = safeParseJson<{ relevant?: boolean; reason?: string }>(text)
-    if (!parsed || parsed.relevant !== false) {
-      return { relevant: true }
+    const parsed = safeParseJson<{ relevant?: boolean; vague?: boolean }>(text)
+    if (!parsed) return { relevant: true }
+
+    // 不相關 → 拒絕
+    if (parsed.relevant === false) {
+      return {
+        relevant: false,
+        errorMessage: isChinese
+          ? '這個需求似乎與建立網站無關。Tellcraft 專門用於快速建站。\n\n請描述您想建立的網站或應用，例如：「做一個咖啡店官網」、「建立一個作品集網站」'
+          : 'This doesn\'t seem related to building a website. Tellcraft is a website builder.\n\nPlease describe the website or app you\'d like to build, e.g. "Build a coffee shop website" or "Create a portfolio site"',
+      }
     }
 
-    return {
-      relevant: false,
-      errorMessage: `這個需求似乎與建立網站無關。Tellcraft 專門用於快速建站。\n\n請描述您想建立的網站或應用，例如：「做一個咖啡店官網」、「建立一個作品集網站」`,
+    // 相關但太模糊 → 要求補充
+    if (parsed.vague) {
+      return {
+        relevant: true,
+        vague: true,
+        errorMessage: isChinese
+          ? '描述有點模糊，我需要更多細節才能幫您建站。\n\n請告訴我：\n- 這是什麼類型的網站？（如：餐廳官網、個人作品集、電商平台）\n- 主要用途是什麼？\n\n例如：「做一個日式餐廳的官網，要有菜單和訂位功能」'
+          : 'Your description is a bit vague. I need more details to build your site.\n\nPlease tell me:\n- What type of website? (e.g. restaurant, portfolio, e-commerce)\n- What\'s its main purpose?\n\nExample: "Build a Japanese restaurant website with a menu and reservation system"',
+      }
     }
+
+    return { relevant: true }
   } catch (err) {
     console.error('[Prefilter] 相關性檢查失敗，降級放行:', err)
     return { relevant: true }

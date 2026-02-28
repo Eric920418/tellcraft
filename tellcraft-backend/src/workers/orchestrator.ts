@@ -478,10 +478,11 @@ async function handleProcessMessage(
       return { taskId: null, skill: null }
     }
 
-    // 預驗證 Layer 2：語義相關性檢查（正向關鍵詞放行 + 微型 Haiku 兜底）
+    // 預驗證 Layer 2：語義相關性 + 具體性檢查（強信號放行 + 弱信號 Haiku 判斷）
     const relevance = await checkBuildRelevance(message, { userId, conversationId })
-    if (!relevance.relevant) {
-      console.log(`[Orchestrator] 快速模式語義攔截: msg="${message.substring(0, 50)}"`)
+    if (!relevance.relevant || relevance.vague) {
+      const logReason = !relevance.relevant ? '不相關' : '太模糊'
+      console.log(`[Orchestrator] 快速模式語義攔截 (${logReason}): msg="${message.substring(0, 50)}"`)
       await sendMessage(conversationId, io, {
         content: relevance.errorMessage || '請描述您想要建立的網站或應用。',
         stage: 'info',
