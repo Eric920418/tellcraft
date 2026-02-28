@@ -184,37 +184,68 @@ interface DesignFeedbackCheck {
 
 function isDesignFeedback(msg: string): DesignFeedbackCheck {
   const trimmed = msg.trim()
+  const lower = trimmed.toLowerCase()
+
+  // 語言偵測：有中文字 → 中文引導，否則英文引導
+  const isChinese = /[\u4e00-\u9fff\u3400-\u4dbf]/.test(trimmed)
+
+  const guide = {
+    tooShort: isChinese
+      ? '請描述您想要修改的內容，例如：\n- 「把標題改成紅色」\n- 「字體放大一點」\n- 「加一個搜尋功能」'
+      : 'Please describe what you\'d like to change, e.g.:\n- "Make the title red"\n- "Increase the font size"\n- "Add a search feature"',
+    gibberish: isChinese
+      ? '看起來這不是設計修改的描述。請告訴我您想調整什麼，例如：\n- 「把標題改大」\n- 「換一個背景顏色」'
+      : 'This doesn\'t look like a design change request. Please tell me what to adjust, e.g.:\n- "Make the title bigger"\n- "Change the background color"',
+    greeting: isChinese
+      ? '目前設計已完成！如果想要修改，請描述具體調整，例如：\n- 「標題字體換成粗體」\n- 「加一個聯絡表單」\n\n或者您可以選擇「部署上線」。'
+      : 'The design is ready! To make changes, describe what to adjust, e.g.:\n- "Make the title bold"\n- "Add a contact form"\n\nOr you can deploy it.',
+    chitchat: isChinese
+      ? '我是設計助手，目前專注在幫您完善設計。請告訴我需要修改什麼，例如：\n- 「按鈕太小，放大一點」\n- 「整體配色換成藍色系」'
+      : 'I\'m your design assistant, focused on refining your design. Please tell me what to change, e.g.:\n- "The buttons are too small"\n- "Switch to a blue color scheme"',
+  }
 
   // 設計相關關鍵詞（正向放行信號）
   const designSignals = [
-    // 動作
+    // 中文動作
     '改', '換', '加', '刪', '移除', '調整', '修改', '更新', '增加', '替換', '縮小', '放大', '移動', '對齊', '置中', '隱藏', '顯示',
-    // 屬性
+    // 中文屬性
     '顏色', '色', '字體', '字號', '字型', '大小', '尺寸', '間距', '邊距', '圓角', '陰影', '透明', '粗細', '寬', '高',
-    // 元素
-    '標題', '按鈕', '圖片', '背景', '邊框', '文字', '連結', '導航', '選單', 'logo', '頁尾', '頁首', '卡片', '表格', '表單', '輸入',
-    'header', 'footer', 'button', 'background', 'font', 'color', 'margin', 'padding', 'border', 'image', 'icon', 'nav', 'menu',
-    'title', 'text', 'section', 'card', 'table', 'form', 'input', 'link', 'sidebar', 'modal',
-    // 設計概念
-    '風格', '排版', '佈局', '動畫', '效果', '樣式', 'RWD', '響應式', '手機版', '深色', '淺色',
-    // 功能
+    // 中文元素
+    '標題', '按鈕', '圖片', '背景', '邊框', '文字', '連結', '導航', '選單', '頁尾', '頁首', '卡片', '表格', '表單', '輸入',
+    // 中文設計概念
+    '風格', '排版', '佈局', '動畫', '效果', '樣式', '響應式', '手機版', '深色', '淺色',
+    // 中文功能
     '功能', '搜尋', '篩選', '分頁', '彈窗', '下拉', '滾動', '切換', '展開', '摺疊',
-    // 簡短設計回饋（白名單）
+    // 中文簡短設計回饋（白名單）
     '太大', '太小', '太粗', '太細', '太淡', '太深', '太亮', '太暗', '太窄', '太寬', '太擠', '太鬆', '太醜', '太花',
     '跑版', '壞了', '跑掉', '不見了', '消失', '重疊', '遮住', '偏了', '歪了', '沒對齊', '破版',
     '不好看', '不對', '不行', '不夠',
   ]
+  // 英文設計信號（用 lower 匹配，需要 word boundary 避免 false positive）
+  const designSignalsEn = [
+    // Actions
+    'change', 'modify', 'update', 'add', 'remove', 'delete', 'replace', 'move', 'resize', 'align', 'center', 'hide', 'show', 'fix', 'adjust', 'make', 'set', 'swap', 'switch', 'increase', 'decrease', 'enlarge', 'shrink', 'reduce',
+    // Properties
+    'color', 'colour', 'font', 'size', 'spacing', 'margin', 'padding', 'border', 'radius', 'shadow', 'opacity', 'weight', 'width', 'height', 'gap',
+    // Elements
+    'header', 'footer', 'button', 'background', 'image', 'icon', 'nav', 'menu', 'title', 'heading', 'text', 'section', 'card', 'table', 'form', 'input', 'link', 'sidebar', 'modal', 'logo', 'banner', 'hero', 'carousel', 'slider', 'dropdown', 'tooltip', 'badge', 'avatar', 'tab', 'accordion', 'breadcrumb', 'pagination', 'dialog', 'popup', 'overlay', 'divider', 'list',
+    // Design concepts
+    'style', 'layout', 'animation', 'theme', 'responsive', 'mobile', 'dark mode', 'light mode', 'gradient', 'hover', 'transition', 'grid', 'flex', 'rwd',
+    // Features
+    'feature', 'search', 'filter', 'sort', 'scroll', 'toggle', 'expand', 'collapse', 'login', 'signup', 'contact',
+    // Quick feedback
+    'too big', 'too small', 'too large', 'too wide', 'too narrow', 'too dark', 'too light', 'too bright', 'too thin', 'too thick', 'too bold', 'too cramped', 'too crowded', 'too ugly',
+    'broken', 'misaligned', 'overlapping', 'missing', 'disappeared', 'cropped', 'cut off', 'not aligned', 'off-center', 'wrong',
+    'bigger', 'smaller', 'larger', 'wider', 'narrower', 'darker', 'lighter', 'brighter', 'bolder', 'thinner',
+  ]
 
   // 先檢查正向信號（高優先級放行）
   const hasDesignSignal = designSignals.some(k => trimmed.includes(k))
+    || designSignalsEn.some(k => lower.includes(k))
 
   // Layer 1: 太短（≤2 字）且沒有設計信號
   if (trimmed.length <= 2 && !hasDesignSignal) {
-    return {
-      valid: false,
-      rejectReason: 'too_short',
-      guideMessage: '請描述您想要修改的內容，例如：\n- 「把標題改成紅色」\n- 「字體放大一點」\n- 「加一個搜尋功能」',
-    }
+    return { valid: false, rejectReason: 'too_short', guideMessage: guide.tooShort }
   }
 
   // 有設計信號 → 直接放行
@@ -225,65 +256,61 @@ function isDesignFeedback(msg: string): DesignFeedbackCheck {
   // Layer 2: 亂碼檢測
   // 純數字
   if (/^\d+$/.test(trimmed)) {
-    return {
-      valid: false,
-      rejectReason: 'gibberish',
-      guideMessage: '看起來這不是設計修改的描述。請告訴我您想調整什麼，例如：\n- 「把標題改大」\n- 「換一個背景顏色」',
-    }
+    return { valid: false, rejectReason: 'gibberish', guideMessage: guide.gibberish }
   }
   // 純符號
   if (/^[^\w\u4e00-\u9fff\u3400-\u4dbf]+$/.test(trimmed)) {
-    return {
-      valid: false,
-      rejectReason: 'gibberish',
-      guideMessage: '看起來這不是設計修改的描述。請告訴我您想調整什麼，例如：\n- 「把標題改大」\n- 「換一個背景顏色」',
-    }
+    return { valid: false, rejectReason: 'gibberish', guideMessage: guide.gibberish }
   }
   // 重複字元（同一字元重複 3+ 次，如 哈哈哈、aaa、嗯嗯嗯）
   if (/^(.)\1{2,}$/.test(trimmed)) {
-    return {
-      valid: false,
-      rejectReason: 'gibberish',
-      guideMessage: '請描述您想修改的設計細節，例如：\n- 「標題字體太小」\n- 「背景換成深色」',
-    }
+    return { valid: false, rejectReason: 'gibberish', guideMessage: guide.gibberish }
   }
   // 無母音英文亂打（純英文 4+ 字元且無母音，如 asdf, qwerty 除外）
   if (/^[a-zA-Z]{4,}$/.test(trimmed) && !/[aeiouAEIOU]/.test(trimmed)) {
-    return {
-      valid: false,
-      rejectReason: 'gibberish',
-      guideMessage: '看起來這不是設計修改的描述。請告訴我您想調整什麼，例如：\n- 「把標題改大」\n- 「換一個背景顏色」',
-    }
+    return { valid: false, rejectReason: 'gibberish', guideMessage: guide.gibberish }
   }
 
   // Layer 3: 打招呼
   const greetings = [
-    /^(嗨|你好|哈囉|hello|hi|hey|yo|sup|嘿)$/i,
-    /^(ok|okay|好|好的|收到|了解|知道了|嗯|喔|哦|是的|對|沒問題)$/i,
-    /^(謝謝|感謝|thanks|thank you|thx|3q)$/i,
+    /^(嗨|你好|哈囉|嘿)$/,
+    /^(好|好的|收到|了解|知道了|嗯|喔|哦|是的|對|沒問題)$/,
+    /^(謝謝|感謝|3q)$/,
+    /^(hello|hi|hey|yo|sup|howdy)$/i,
+    /^(ok|okay|sure|yep|yup|yeah|yes|no|nope|nah|alright|right|got it|noted|understood|roger)$/i,
+    /^(thanks|thank you|thx|ty|cheers)$/i,
+    /^(nice|cool|great|awesome|good|perfect|sweet|neat|wonderful|amazing|excellent|fantastic|brilliant|lovely|wow)$/i,
+    /^(lol|lmao|rofl|heh|hehe|haha|hahaha|lmfao)$/i,
   ]
   if (greetings.some(r => r.test(trimmed))) {
-    return {
-      valid: false,
-      rejectReason: 'greeting',
-      guideMessage: '目前設計已完成！如果想要修改，請描述具體調整，例如：\n- 「標題字體換成粗體」\n- 「加一個聯絡表單」\n\n或者您可以選擇「部署上線」。',
-    }
+    return { valid: false, rejectReason: 'greeting', guideMessage: guide.greeting }
   }
 
   // Layer 4: 閒聊
-  const chitchat = [
+  const chitchatZh = [
     '天氣', '幾點', '你是誰', '你叫什麼', '講笑話', '說笑話', '幾歲',
-    '吃什麼', '吃飯', '早安', '午安', '晚安', '掰掰', '再見', 'bye',
+    '吃什麼', '吃飯', '早安', '午安', '晚安', '掰掰', '再見',
     '無聊', '好無聊', '你好嗎', '在嗎', '在不在',
   ]
-  // 重複字元組合（如 哈哈哈、呵呵呵、嘻嘻嘻，但不限於同一字元）
+  const chitchatEn = [
+    'weather', 'what time', 'who are you', 'what are you', 'tell me a joke', 'tell a joke',
+    'how old', 'what\'s your name', 'good morning', 'good afternoon', 'good evening', 'good night',
+    'goodbye', 'bye bye', 'see you', 'see ya', 'take care',
+    'i\'m bored', 'bored', 'how are you', 'what\'s up', 'wassup', 'sup',
+    'are you there', 'anyone there', 'can you hear me', 'testing',
+    'what can you do', 'help me', 'who made you',
+  ]
+  // 重複字元組合（中文笑聲 + 英文笑聲）
   const laughPattern = /^[哈呵嘻哼嗯啊喔]{2,}$/
-  if (chitchat.some(k => trimmed.includes(k)) || laughPattern.test(trimmed)) {
-    return {
-      valid: false,
-      rejectReason: 'chitchat',
-      guideMessage: '我是設計助手，目前專注在幫您完善設計。請告訴我需要修改什麼，例如：\n- 「按鈕太小，放大一點」\n- 「整體配色換成藍色系」',
-    }
+  const laughPatternEn = /^(ha){2,}h?$/i
+  if (
+    chitchatZh.some(k => trimmed.includes(k))
+    || chitchatEn.some(k => lower.includes(k))
+    || laughPattern.test(trimmed)
+    || laughPatternEn.test(trimmed)
+    || /^bye$/i.test(trimmed)
+  ) {
+    return { valid: false, rejectReason: 'chitchat', guideMessage: guide.chitchat }
   }
 
   // Layer 5: 長度啟發 — ≥8 字且沒命中拒絕規則 → 放行
