@@ -645,6 +645,25 @@ BDD Q&A 動畫面板從 3D 鍛造車間場景改為**純 React 文字歷史紀�
 2. 擴展可編輯元素類型：container（section/header/footer/nav/main/article）+ image
 3. Undo/Redo 系統 + 元素路徑 Breadcrumb + 單元素重置
 
+### 編輯模式增強：元素批註 + 拖曳調整（2026-02-28）
+
+**元素批註系統**：選取元素後可輸入文字備註（如「間距太大」「加個漸層」），儲存時批註與屬性修改一起送給 AI，讓迭代修改更精準。
+
+- `PropertyEditor.tsx`：新增批註 textarea（琥珀色聚焦邊框，auto-grow）
+- `sandpack-utils.ts`（SANDPACK_EDIT_BRIDGE）：批註徽章（右上角 8x8 琥珀色圓點，hover 顯示批註文字）、`tc_setAnnotations` 訊息同步
+- `SandpackPreview.tsx`：`annotations` prop 轉發到 iframe、iframe 重建時自動恢復批註
+- `page.tsx`：`codePreviewAnnotations` state + localStorage 持久化 + `handleCodePreviewSave` 消息格式（`[備註]` 前綴）
+- 儲存按鈕條件：overrides 或 annotations 任一有內容即可點擊
+- 翻譯：`codePreview.annotationLabel/annotationPlaceholder/annotationPrefix`（zh/en）、`uiux.annotationLabel/annotationPlaceholder`（PropertyEditor 用）
+
+**拖曳調整尺寸**：選取 container/image 元素後顯示拖曳把手，可直接拖動改變寬高。
+
+- 三個把手：右邊（寬度，ew-resize）、下邊（高度，ns-resize）、右下角（寬高同時，nwse-resize）
+- 即時更新：mousemove 直接修改 `el.style`，mouseup 時 `tc_elementResized` postMessage 回父視窗
+- 最小尺寸：width >= 50px, height >= 30px
+- 把手生命週期：選取時建立、取消選取/關閉編輯模式時移除、scroll/resize 時重新定位、fullRetag 時重建
+- text 元素不顯示把手
+
 ### 編輯模式屬性擴展（2026-02-27）
 
 擴展 PropertyEditor 可編輯屬性，從表面屬性（顏色/間距）擴展到完整的佈局排版控制：

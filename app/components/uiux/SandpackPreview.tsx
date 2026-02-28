@@ -30,6 +30,10 @@ interface SandpackPreviewProps {
   pendingOverrides?: { overrides: Record<string, Record<string, string>>; seq: number } | null
   // 全量 overrides（用於 iframe 重建時自動恢復）
   overrides?: Record<string, Record<string, string>>
+  // 批註
+  annotations?: Record<string, string>
+  // 拖曳尺寸變更回調
+  onElementResized?: (elementId: string, changes: { width: string; height: string }) => void
 }
 
 /**
@@ -70,6 +74,8 @@ export default function SandpackPreview({
   pendingReset,
   pendingOverrides,
   overrides,
+  annotations,
+  onElementResized,
 }: SandpackPreviewProps) {
   // 構建 Sandpack 設定
   const setup = useMemo(
@@ -127,8 +133,14 @@ export default function SandpackPreview({
   const onElementSelectedRef = useRef(onElementSelected)
   onElementSelectedRef.current = onElementSelected
 
+  const onElementResizedRef = useRef(onElementResized)
+  onElementResizedRef.current = onElementResized
+
   const overridesRef = useRef(overrides)
   overridesRef.current = overrides
+
+  const annotationsRef = useRef(annotations)
+  annotationsRef.current = annotations
 
   useEffect(() => {
     const handleMessage = (e: MessageEvent) => {
@@ -154,6 +166,16 @@ export default function SandpackPreview({
               }, '*')
             }, 500)
           }
+          // 恢復批註
+          const currentAnnotations = annotationsRef.current
+          if (currentAnnotations && Object.keys(currentAnnotations).length > 0) {
+            setTimeout(() => {
+              source.postMessage({
+                type: 'tc_setAnnotations',
+                annotations: currentAnnotations,
+              }, '*')
+            }, 600)
+          }
         }
         // 同時更新 iframeRef（補足 polling 的時間差）
         if (containerRef.current) {
@@ -168,6 +190,10 @@ export default function SandpackPreview({
 
       if (msg.type === 'tc_elementDeselected') {
         onElementSelectedRef.current?.(null)
+      }
+
+      if (msg.type === 'tc_elementResized') {
+        onElementResizedRef.current?.(msg.elementId, msg.changes)
       }
     }
 
@@ -193,6 +219,15 @@ export default function SandpackPreview({
       elementId: pendingReset.elementId,
     }, '*')
   }, [pendingReset])
+
+  // ── annotations → postMessage tc_setAnnotations ──
+  useEffect(() => {
+    if (!iframeRef.current?.contentWindow) return
+    iframeRef.current.contentWindow.postMessage({
+      type: 'tc_setAnnotations',
+      annotations: annotations || {},
+    }, '*')
+  }, [annotations])
 
   // ── pendingOverrides → postMessage tc_applyOverrides（undo/redo 全量覆蓋）──
   useEffect(() => {

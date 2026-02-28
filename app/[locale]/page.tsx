@@ -1040,6 +1040,7 @@ function ChatSection({
   const [codePreviewEditMode, setCodePreviewEditMode] = useState(false)
   const [codePreviewSelectedElement, setCodePreviewSelectedElement] = useState<ElementInfo | null>(null)
   const [codePreviewOverrides, setCodePreviewOverrides] = useState<Record<string, Record<string, string>>>({})
+  const [codePreviewAnnotations, setCodePreviewAnnotations] = useState<Record<string, string>>({})
   const [codePreviewOverrideHistory, setCodePreviewOverrideHistory] = useState<Record<string, Record<string, string>>[]>([{}])
   const [codePreviewHistoryIndex, setCodePreviewHistoryIndex] = useState(0)
   const codePreviewSeqRef = useRef(0) // 遞增計數器（取代 Date.now()，避免同毫秒批次更新不觸發 effect）
@@ -1122,6 +1123,23 @@ function ChatSection({
     return null
   }, [auth.token, auth.isAuthenticated])
 
+  // Code Preview 批註回調
+  const handleCodePreviewAnnotationChange = useCallback((elementId: string, text: string) => {
+    setCodePreviewAnnotations(prev => {
+      if (!text) {
+        const next = { ...prev }
+        delete next[elementId]
+        return next
+      }
+      return { ...prev, [elementId]: text }
+    })
+  }, [])
+
+  // Code Preview 拖曳尺寸回調
+  const handleCodePreviewElementResized = useCallback((elementId: string, changes: { width: string; height: string }) => {
+    handleCodePreviewElementUpdate(elementId, changes)
+  }, [handleCodePreviewElementUpdate])
+
   // Code Preview 編輯模式鍵盤快捷鍵
   useEffect(() => {
     if (!codePreviewEditMode) return
@@ -1167,6 +1185,31 @@ function ChatSection({
       } catch { /* 忽略損壞的資料 */ }
     }
   }, [sessionInfo?.conversationId]) // eslint-disable-line -- 只在 conversationId 變化時執行（不要加 overrides）
+
+  // ── Code Preview Annotations 持久化（localStorage）──
+  useEffect(() => {
+    if (!sessionInfo?.conversationId) return
+    const key = `tc-edit-annotations-${sessionInfo.conversationId}`
+    if (Object.keys(codePreviewAnnotations).length > 0) {
+      localStorage.setItem(key, JSON.stringify(codePreviewAnnotations))
+    } else {
+      localStorage.removeItem(key)
+    }
+  }, [codePreviewAnnotations, sessionInfo?.conversationId])
+
+  useEffect(() => {
+    if (!sessionInfo?.conversationId) return
+    const key = `tc-edit-annotations-${sessionInfo.conversationId}`
+    const saved = localStorage.getItem(key)
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved)
+        if (parsed && typeof parsed === 'object' && Object.keys(parsed).length > 0) {
+          setCodePreviewAnnotations(parsed)
+        }
+      } catch { /* 忽略損壞的資料 */ }
+    }
+  }, [sessionInfo?.conversationId])
 
   // 監聯訊息的 layoutHint 或 UIUX 相關 stage，切換佈局模式
   // 手機（<768px）不進 split mode，避免爆版
@@ -2077,12 +2120,45 @@ function ChatSection({
 
   // ── 「儲存修改」：將 DOM 覆蓋轉為迭代修改消息，寫回源碼 ──
   const handleCodePreviewSave = async () => {
-    if (Object.keys(codePreviewOverrides).length === 0 || !sessionInfo) return
+    const hasOverrides = Object.keys(codePreviewOverrides).length > 0
+    const hasAnnotations = Object.keys(codePreviewAnnotations).length > 0
+    if ((!hasOverrides && !hasAnnotations) || !sessionInfo) return
 
     // 構建修改描述
     const lines: string[] = []
-    Object.entries(codePreviewOverrides).forEach(([elementId, changes]) => {
-      // 解析 elementId 格式：h1-0, p-2, container-section-0, img-0
+    const CSS_LABELS: Record<string, string> = {
+      display: tCssLabel('display'),
+      flexDirection: tCssLabel('flexDirection'),
+      justifyContent: tCssLabel('justifyContent'),
+      alignItems: tCssLabel('alignItems'),
+      gap: tCssLabel('gap'),
+      flexWrap: tCssLabel('flexWrap'),
+      overflow: tCssLabel('overflow'),
+      width: tCssLabel('width'),
+      maxWidth: tCssLabel('maxWidth'),
+      height: tCssLabel('height'),
+      textDecoration: tCssLabel('textDecoration'),
+      textTransform: tCssLabel('textTransform'),
+      color: tCssLabel('color'),
+      backgroundColor: tCssLabel('backgroundColor'),
+      fontSize: tCssLabel('fontSize'),
+      fontWeight: tCssLabel('fontWeight'),
+      textAlign: tCssLabel('textAlign'),
+      lineHeight: tCssLabel('lineHeight'),
+      letterSpacing: tCssLabel('letterSpacing'),
+      padding: tCssLabel('padding'),
+      margin: tCssLabel('margin'),
+      borderRadius: tCssLabel('borderRadius'),
+      borderStyle: tCssLabel('borderStyle'),
+      borderWidth: tCssLabel('borderWidth'),
+      borderColor: tCssLabel('borderColor'),
+      boxShadow: tCssLabel('boxShadow'),
+      opacity: tCssLabel('opacity'),
+      objectFit: tCssLabel('objectFit'),
+    }
+
+    // 解析 elementId 的共用函數
+    const parseElementId = (elementId: string) => {
       let tag: string
       let index: number
       if (elementId.startsWith('container-')) {
@@ -2094,39 +2170,17 @@ function ChatSection({
         tag = match ? match[1] : elementId
         index = match ? parseInt(match[2]) + 1 : 1
       }
+      return { tag, index }
+    }
 
-      const CSS_LABELS: Record<string, string> = {
-        display: tCssLabel('display'),
-        flexDirection: tCssLabel('flexDirection'),
-        justifyContent: tCssLabel('justifyContent'),
-        alignItems: tCssLabel('alignItems'),
-        gap: tCssLabel('gap'),
-        flexWrap: tCssLabel('flexWrap'),
-        overflow: tCssLabel('overflow'),
-        width: tCssLabel('width'),
-        maxWidth: tCssLabel('maxWidth'),
-        height: tCssLabel('height'),
-        textDecoration: tCssLabel('textDecoration'),
-        textTransform: tCssLabel('textTransform'),
-        color: tCssLabel('color'),
-        backgroundColor: tCssLabel('backgroundColor'),
-        fontSize: tCssLabel('fontSize'),
-        fontWeight: tCssLabel('fontWeight'),
-        textAlign: tCssLabel('textAlign'),
-        lineHeight: tCssLabel('lineHeight'),
-        letterSpacing: tCssLabel('letterSpacing'),
-        padding: tCssLabel('padding'),
-        margin: tCssLabel('margin'),
-        borderRadius: tCssLabel('borderRadius'),
-        borderStyle: tCssLabel('borderStyle'),
-        borderWidth: tCssLabel('borderWidth'),
-        borderColor: tCssLabel('borderColor'),
-        boxShadow: tCssLabel('boxShadow'),
-        opacity: tCssLabel('opacity'),
-        objectFit: tCssLabel('objectFit'),
-      }
+    // 已處理的 elementId（避免重複）
+    const processedElements = new Set<string>()
 
+    Object.entries(codePreviewOverrides).forEach(([elementId, changes]) => {
+      processedElements.add(elementId)
+      const { tag, index } = parseElementId(elementId)
       const prefix = `#${index} <${tag}>`
+
       Object.entries(changes).forEach(([prop, value]) => {
         if (prop === 'text') {
           lines.push(`- ${prefix}: ${tCodePreview('textChanged', { value })}`)
@@ -2139,6 +2193,20 @@ function ChatSection({
           lines.push(`- ${prefix}: ${tCodePreview('styleChanged', { label, prop, value })}`)
         }
       })
+
+      // 如果此元素也有批註，附加在屬性修改後面
+      const annotation = codePreviewAnnotations[elementId]
+      if (annotation) {
+        lines.push(`- ${prefix}: ${tCodePreview('annotationPrefix')} ${annotation}`)
+      }
+    })
+
+    // 處理只有批註、沒有 override 的元素
+    Object.entries(codePreviewAnnotations).forEach(([elementId, text]) => {
+      if (processedElements.has(elementId) || !text) return
+      const { tag, index } = parseElementId(elementId)
+      const prefix = `#${index} <${tag}>`
+      lines.push(`- ${prefix}: ${tCodePreview('annotationPrefix')} ${text}`)
     })
 
     const message = [
@@ -2155,12 +2223,14 @@ function ChatSection({
     setCodePreviewEditMode(false)
     setCodePreviewSelectedElement(null)
     setCodePreviewOverrides({})
+    setCodePreviewAnnotations({})
     setCodePreviewOverrideHistory([{}])
     setCodePreviewHistoryIndex(0)
     setCodePreviewPendingUpdate(null)
     setCodePreviewPendingReset(null)
     setCodePreviewPendingOverrides(null)
     localStorage.removeItem(`tc-edit-overrides-${sessionInfo.conversationId}`)
+    localStorage.removeItem(`tc-edit-annotations-${sessionInfo.conversationId}`)
 
     // 發送迭代修改消息（走正常的 iteration 路由）
     await handleSendMessage(message)
@@ -2853,16 +2923,16 @@ function ChatSection({
                       {/* 儲存修改按鈕 */}
                       <button
                         onClick={handleCodePreviewSave}
-                        disabled={Object.keys(codePreviewOverrides).length === 0 || isTyping}
+                        disabled={(Object.keys(codePreviewOverrides).length === 0 && Object.keys(codePreviewAnnotations).length === 0) || isTyping}
                         style={{
                           display: 'flex', alignItems: 'center', gap: 4,
                           padding: '4px 10px', borderRadius: 6,
                           border: '1px solid var(--border-color)',
-                          background: Object.keys(codePreviewOverrides).length > 0 && !isTyping ? 'var(--accent)' : 'var(--white)',
-                          color: Object.keys(codePreviewOverrides).length > 0 && !isTyping ? '#fff' : 'var(--gray-400)',
+                          background: (Object.keys(codePreviewOverrides).length > 0 || Object.keys(codePreviewAnnotations).length > 0) && !isTyping ? 'var(--accent)' : 'var(--white)',
+                          color: (Object.keys(codePreviewOverrides).length > 0 || Object.keys(codePreviewAnnotations).length > 0) && !isTyping ? '#fff' : 'var(--gray-400)',
                           fontSize: 12, fontWeight: 500,
-                          cursor: Object.keys(codePreviewOverrides).length > 0 && !isTyping ? 'pointer' : 'default',
-                          opacity: Object.keys(codePreviewOverrides).length > 0 && !isTyping ? 1 : 0.5,
+                          cursor: (Object.keys(codePreviewOverrides).length > 0 || Object.keys(codePreviewAnnotations).length > 0) && !isTyping ? 'pointer' : 'default',
+                          opacity: (Object.keys(codePreviewOverrides).length > 0 || Object.keys(codePreviewAnnotations).length > 0) && !isTyping ? 1 : 0.5,
                           transition: 'all 0.15s ease',
                         }}
                         title={tPreview('saveTitle')}
@@ -2924,6 +2994,8 @@ function ChatSection({
                   pendingReset={codePreviewPendingReset}
                   pendingOverrides={codePreviewPendingOverrides}
                   overrides={codePreviewOverrides}
+                  annotations={codePreviewAnnotations}
+                  onElementResized={handleCodePreviewElementResized}
                 />
               </div>
               {/* 編輯模式提示浮層 */}
@@ -2965,6 +3037,8 @@ function ChatSection({
                       onClose={() => setCodePreviewSelectedElement(null)}
                       onReset={handleCodePreviewResetElement}
                       onUploadImage={handleCodePreviewUploadImage}
+                      annotation={codePreviewAnnotations[codePreviewSelectedElement.id] || ''}
+                      onAnnotationChange={handleCodePreviewAnnotationChange}
                     />
                   </div>
                 </motion.div>

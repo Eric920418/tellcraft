@@ -266,6 +266,52 @@ export default function PropertyEditor({ element, onUpdate, onClose, onReset, on
           </div>
         )}
 
+        {/* 批註區塊 */}
+        {onAnnotationChange && (
+          <div
+            style={{
+              padding: '10px 16px',
+              borderBottom: '1px solid var(--gray-100)',
+              flexShrink: 0,
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: 5, marginBottom: 6 }}>
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="var(--gray-500)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <line x1="12" y1="5" x2="12" y2="19" />
+                <path d="M18 13l-6 6-6-6" style={{ display: 'none' }} />
+                <circle cx="12" cy="5" r="1" fill="var(--gray-500)" stroke="none" />
+                <path d="M5 11a7 7 0 0 0 14 0" />
+              </svg>
+              <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--gray-400)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                {t('annotationLabel')}
+              </span>
+            </div>
+            <textarea
+              value={annotation || ''}
+              onChange={(e) => element && onAnnotationChange(element.id, e.target.value)}
+              placeholder={t('annotationPlaceholder')}
+              rows={2}
+              style={{
+                width: '100%',
+                padding: 8,
+                fontSize: 12,
+                border: '1px solid var(--border-color)',
+                borderRadius: 6,
+                resize: 'none',
+                fontFamily: 'inherit',
+                lineHeight: 1.5,
+                minHeight: 48,
+                maxHeight: 96,
+                overflow: 'auto',
+                background: 'var(--gray-50)',
+                transition: 'border-color 0.15s ease',
+              }}
+              onFocus={(e) => { e.currentTarget.style.borderColor = '#f59e0b' }}
+              onBlur={(e) => { e.currentTarget.style.borderColor = 'var(--border-color)' }}
+            />
+          </div>
+        )}
+
         {/* 屬性列表 */}
         <div style={{ padding: 16, overflowY: 'auto', flex: 1 }}>
           {/* ── 文字內容（text 元素才顯示）── */}

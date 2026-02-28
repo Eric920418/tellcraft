@@ -753,7 +753,9 @@
     "useTemplate": "使用此模板",
     "selectVariantMessage": "選擇變體 {id}",
     "mergeVariantsMessage": "合併 {ids}",
-    "selectTemplateMessage": "我選擇「{name}」這個模板"
+    "selectTemplateMessage": "我選擇「{name}」這個模板",
+    "annotationLabel": "備註",
+    "annotationPlaceholder": "輸入修改說明...（如：間距太大、加個動畫）"
   },
   "liff": {
     "initStatus": "正在初始化 LINE 登入...",

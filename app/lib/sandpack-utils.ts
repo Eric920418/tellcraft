@@ -127,6 +127,12 @@ if (typeof window !== 'undefined' && !window.__tcEditBridgeInitialized) {
   // React re-render 後 MutationObserver 會自動重新套用
   var storedOverrides = {};
 
+  // 批註存儲：{ [elementId]: string }
+  var storedAnnotations = {};
+
+  // 拖曳把手 DOM 引用
+  var resizeHandles = [];
+
   // ── 標記函數 ──────────────────────────────────────
   // 策略：每次全量清除 → 從 DOM 順序重新分配 ID（確保 React 替換節點後 ID 一致）
 
@@ -301,13 +307,159 @@ if (typeof window !== 'undefined' && !window.__tcEditBridgeInitialized) {
     });
   }
 
+  // ── 批註徽章 ──────────────────────────────────────
+  function renderAnnotationBadges() {
+    // 移除舊徽章
+    document.querySelectorAll('.tc-annotation-badge').forEach(function(b) { b.remove(); });
+    if (!editMode) return;
+    Object.keys(storedAnnotations).forEach(function(elementId) {
+      var text = storedAnnotations[elementId];
+      if (!text) return;
+      var el = document.querySelector('[data-editable="' + elementId + '"]');
+      if (!el) return;
+      // 確保父元素有 position relative
+      var cs = window.getComputedStyle(el);
+      if (cs.position === 'static') el.style.position = 'relative';
+      var badge = document.createElement('div');
+      badge.className = 'tc-annotation-badge';
+      badge.setAttribute('data-annotation-for', elementId);
+      badge.title = text;
+      badge.style.cssText = 'position:absolute;top:-4px;right:-4px;width:8px;height:8px;border-radius:50%;background:#f59e0b;z-index:9999;pointer-events:auto;cursor:help;box-shadow:0 0 0 2px #fff;';
+      el.appendChild(badge);
+    });
+  }
+
+  // ── 拖曳把手 ──────────────────────────────────────
+  function removeResizeHandles() {
+    resizeHandles.forEach(function(h) { if (h.parentNode) h.parentNode.removeChild(h); });
+    resizeHandles = [];
+  }
+
+  function createResizeHandles(el, elementId) {
+    removeResizeHandles();
+    var type = el.getAttribute('data-editable-type');
+    if (type !== 'container' && type !== 'image') return;
+
+    var rect = el.getBoundingClientRect();
+
+    // 右邊把手（調整寬度）
+    var rightHandle = document.createElement('div');
+    rightHandle.className = 'tc-resize-handle tc-resize-right';
+    rightHandle.style.cssText = 'position:fixed;top:' + rect.top + 'px;left:' + (rect.right - 2) + 'px;width:4px;height:' + rect.height + 'px;cursor:ew-resize;background:transparent;z-index:10000;';
+    rightHandle.addEventListener('mouseenter', function() { rightHandle.style.background = '#3b82f6'; });
+    rightHandle.addEventListener('mouseleave', function() { if (!rightHandle._dragging) rightHandle.style.background = 'transparent'; });
+
+    // 下邊把手（調整高度）
+    var bottomHandle = document.createElement('div');
+    bottomHandle.className = 'tc-resize-handle tc-resize-bottom';
+    bottomHandle.style.cssText = 'position:fixed;top:' + (rect.bottom - 2) + 'px;left:' + rect.left + 'px;width:' + rect.width + 'px;height:4px;cursor:ns-resize;background:transparent;z-index:10000;';
+    bottomHandle.addEventListener('mouseenter', function() { bottomHandle.style.background = '#3b82f6'; });
+    bottomHandle.addEventListener('mouseleave', function() { if (!bottomHandle._dragging) bottomHandle.style.background = 'transparent'; });
+
+    // 右下角把手（同時調整寬高）
+    var cornerHandle = document.createElement('div');
+    cornerHandle.className = 'tc-resize-handle tc-resize-corner';
+    cornerHandle.style.cssText = 'position:fixed;top:' + (rect.bottom - 4) + 'px;left:' + (rect.right - 4) + 'px;width:8px;height:8px;cursor:nwse-resize;background:#3b82f6;border-radius:1px;z-index:10001;';
+    cornerHandle.addEventListener('mouseenter', function() { cornerHandle.style.background = '#2563eb'; });
+    cornerHandle.addEventListener('mouseleave', function() { if (!cornerHandle._dragging) cornerHandle.style.background = '#3b82f6'; });
+
+    function setupDrag(handle, axis) {
+      handle.addEventListener('mousedown', function(e) {
+        e.preventDefault();
+        e.stopPropagation();
+        handle._dragging = true;
+        handle.style.background = '#3b82f6';
+        var startX = e.clientX;
+        var startY = e.clientY;
+        var startRect = el.getBoundingClientRect();
+        var startW = startRect.width;
+        var startH = startRect.height;
+
+        function onMove(ev) {
+          var dx = ev.clientX - startX;
+          var dy = ev.clientY - startY;
+          if (axis === 'x' || axis === 'both') {
+            var newW = Math.max(50, startW + dx);
+            el.style.width = newW + 'px';
+          }
+          if (axis === 'y' || axis === 'both') {
+            var newH = Math.max(30, startH + dy);
+            el.style.height = newH + 'px';
+          }
+          repositionHandles();
+        }
+
+        function onUp() {
+          handle._dragging = false;
+          document.removeEventListener('mousemove', onMove);
+          document.removeEventListener('mouseup', onUp);
+          // 發送結果到父視窗
+          var finalRect = el.getBoundingClientRect();
+          var cs = window.getComputedStyle(el);
+          window.parent.postMessage({
+            type: 'tc_elementResized',
+            elementId: elementId,
+            changes: { width: cs.width, height: cs.height },
+            styles: extractStyles(el)
+          }, '*');
+        }
+
+        document.addEventListener('mousemove', onMove);
+        document.addEventListener('mouseup', onUp);
+      });
+    }
+
+    setupDrag(rightHandle, 'x');
+    setupDrag(bottomHandle, 'y');
+    setupDrag(cornerHandle, 'both');
+
+    document.body.appendChild(rightHandle);
+    document.body.appendChild(bottomHandle);
+    document.body.appendChild(cornerHandle);
+    resizeHandles = [rightHandle, bottomHandle, cornerHandle];
+  }
+
+  function repositionHandles() {
+    if (resizeHandles.length === 0 || !selectedId) return;
+    var el = document.querySelector('[data-editable="' + selectedId + '"]');
+    if (!el) return;
+    var rect = el.getBoundingClientRect();
+    // right
+    resizeHandles[0].style.top = rect.top + 'px';
+    resizeHandles[0].style.left = (rect.right - 2) + 'px';
+    resizeHandles[0].style.height = rect.height + 'px';
+    // bottom
+    resizeHandles[1].style.top = (rect.bottom - 2) + 'px';
+    resizeHandles[1].style.left = rect.left + 'px';
+    resizeHandles[1].style.width = rect.width + 'px';
+    // corner
+    resizeHandles[2].style.top = (rect.bottom - 4) + 'px';
+    resizeHandles[2].style.left = (rect.right - 4) + 'px';
+  }
+
+  // scroll/resize 時重新定位拖曳把手
+  window.addEventListener('scroll', repositionHandles, true);
+  window.addEventListener('resize', repositionHandles);
+
   // fullRetag：清除 → 重新標記 → 重新套用覆蓋
   function fullRetag() {
     clearAllTags();
+    removeResizeHandles();
     tagEditableElements();
     tagContainerElements();
     tagImageElements();
     reapplyStoredOverrides();
+    renderAnnotationBadges();
+    // 重建拖曳把手（如果有選中元素且是 container/image）
+    if (selectedId && editMode) {
+      var selEl = document.querySelector('[data-editable="' + selectedId + '"]');
+      if (selEl) {
+        var selType = selEl.getAttribute('data-editable-type');
+        if (selType === 'container' || selType === 'image') {
+          createResizeHandles(selEl, selectedId);
+        }
+      }
+    }
   }
 
   // 注入編輯模式高亮樣式
@@ -319,6 +471,8 @@ if (typeof window !== 'undefined' && !window.__tcEditBridgeInitialized) {
   function updateEditStyles() {
     if (!editMode) {
       styleEl.textContent = '';
+      removeResizeHandles();
+      renderAnnotationBadges();
       return;
     }
     styleEl.textContent =
@@ -340,15 +494,20 @@ if (typeof window !== 'undefined' && !window.__tcEditBridgeInitialized) {
       (selectedId
         ? '[data-editable="' + selectedId + '"] { outline: 2px solid #3b82f6 !important; outline-offset: 2px; }'
         : '');
+    renderAnnotationBadges();
   }
 
   // 點擊處理
   document.addEventListener('click', function(e) {
     if (!editMode) return;
 
+    // 忽略對拖曳把手的點擊
+    if (e.target.closest && e.target.closest('.tc-resize-handle')) return;
+
     var target = e.target.closest('[data-editable]');
     if (!target) {
       selectedId = null;
+      removeResizeHandles();
       updateEditStyles();
       window.parent.postMessage({ type: 'tc_elementDeselected' }, '*');
       return;
@@ -363,6 +522,14 @@ if (typeof window !== 'undefined' && !window.__tcEditBridgeInitialized) {
 
     var rect = target.getBoundingClientRect();
     var editableType = target.getAttribute('data-editable-type') || 'text';
+
+    // 建立拖曳把手（container/image 才有）
+    if (editableType === 'container' || editableType === 'image') {
+      createResizeHandles(target, id);
+    } else {
+      removeResizeHandles();
+    }
+
     window.parent.postMessage({
       type: 'tc_elementSelected',
       data: {
@@ -384,8 +551,16 @@ if (typeof window !== 'undefined' && !window.__tcEditBridgeInitialized) {
 
     if (msg.type === 'tc_setEditMode') {
       editMode = msg.enabled;
-      if (!editMode) selectedId = null;
+      if (!editMode) {
+        selectedId = null;
+        removeResizeHandles();
+      }
       updateEditStyles();
+    }
+
+    if (msg.type === 'tc_setAnnotations') {
+      storedAnnotations = msg.annotations || {};
+      renderAnnotationBadges();
     }
 
     if (msg.type === 'tc_applyUpdate') {
@@ -447,6 +622,7 @@ if (typeof window !== 'undefined' && !window.__tcEditBridgeInitialized) {
 
     if (msg.type === 'tc_deselectElement') {
       selectedId = null;
+      removeResizeHandles();
       updateEditStyles();
     }
   });
