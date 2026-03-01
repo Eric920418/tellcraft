@@ -40,7 +40,7 @@
   },
   "chat": {
     "initializing": "Initializing...",
-    "fastBuildPreview": "Generating your website, estimated 60-90 seconds...",
+    "fastBuildPreview": "Generating your website, estimated 5 minutes...",
     "analyzePreview": "Analyzing your requirements, please wait...",
     "initError": "Initialization failed",
     "sendError": "Failed to send message",

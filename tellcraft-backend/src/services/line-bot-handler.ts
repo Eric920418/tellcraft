@@ -47,7 +47,7 @@ export async function handleFollow(userId: string, replyToken: string): Promise<
     '你的 AI 建站助手',
     '',
     '告訴我你想做什麼網站',
-    '90 秒內幫你從零生成到上線',
+    '5 分鐘內幫你從零生成到上線',
     '',
     '直接打字就行，例如：',
     '「做一個花店官網」',

@@ -1398,7 +1398,7 @@ async function handleContinueFlow(
       return
     }
     await sendMessage(conversationId, io, {
-      content: '正在生成中，請稍候... 預計 60-90 秒完成。',
+      content: '正在生成中，請稍候... 預計 5 分鐘完成。',
       stage: 'info',
     })
     return
@@ -4072,7 +4072,7 @@ async function executeFastBuildSkill(params: {
 
   // ── 發送進度消息 ──
   await sendMessage(conversationId, io, {
-    content: `正在快速生成您的${PRODUCT_TYPE_LABELS[productType] || '網站'}，預計 60-90 秒...`,
+    content: `正在快速生成您的${PRODUCT_TYPE_LABELS[productType] || '網站'}，預計 5 分鐘...`,
     stage: 'fast_generating',
     progress: { current: 1, total: 3, step: '生成結構' },
     richContent: {

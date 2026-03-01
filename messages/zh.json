@@ -40,7 +40,7 @@
   },
   "chat": {
     "initializing": "正在初始化...",
-    "fastBuildPreview": "正在生成您的網站，預計 60-90 秒...",
+    "fastBuildPreview": "正在生成您的網站，預計 5 分鐘...",
     "analyzePreview": "正在分析您的需求，請稍候...",
     "initError": "初始化失敗",
     "sendError": "發送消息失敗",

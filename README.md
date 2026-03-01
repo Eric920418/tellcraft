@@ -78,7 +78,7 @@ npx ts-node bdd-spec/scripts/validate-feature.ts spec/features/
 |-------|------|-----|------|
 | `bdd-spec` | 需求釐清 + BDD 規格產出（ES → Discovery → Formulation → Actions → ISA） | Sonnet | 完成 |
 | `uiux` | 前端介面設計（Design Discovery → Design Lab → Implementation） | Sonnet | 完成 |
-| `fast-build` | 一句話快速建站，跳過 BDD/Discovery，60-90 秒出結果 | Sonnet ×3 | 完成 |
+| `fast-build` | 一句話快速建站，跳過 BDD/Discovery，5 分鐘出結果 | Sonnet ×3 | 完成 |
 | `quality-gate` | UIUX RWD 完成後自動觸發，靜態檢查 + LLM 自動修復 | Haiku | 完成 |
 | `deployer` | 代碼 → sanitize → 本地 build 驗證 → Vercel 部署 → 回滾 | Haiku（修復） | 完成 |
 | `iteration` | 迭代修改 + 撤銷上一步 + 版本回滾 | Sonnet | 完成 |
@@ -748,7 +748,7 @@ Remotion 改造（取代 motion/react + GSAP），3D 工廠流水線 + 低多邊
 
 ### Fast Mode 快速建站（2026-02-09）
 
-一句話 → 跳過 BDD/Discovery → 3 階段自動生成 → 60-90 秒預覽。
+一句話 → 跳過 BDD/Discovery → 3 階段自動生成 → ~5 分鐘預覽。
 
 ### BDD→UI 翻譯 + Variant 創意概念（2026-02-08）
 

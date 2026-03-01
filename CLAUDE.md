@@ -150,7 +150,7 @@ Discovery（Path A 問卷 / Path B 篩選後模板）
   → generateStructure(+Interaction, streaming) → generateAnimations(streaming) → generateRwd(streaming)
   → runQualityGate（靜態檢查，不做 LLM 修復）
   → phase='uiux_complete'（複用所有迭代/部署/回滾邏輯）
-  3 次 LLM | 0 次用戶交互 | 60-90 秒
+  3 次 LLM | 0 次用戶交互 | ~5 分鐘
 ```
 
 - **Design Tier**：`functional`（dashboard/SaaS，禁漸層/glow）vs `creative`（landing page，允許大膽設計）
