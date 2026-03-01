@@ -2949,7 +2949,7 @@ function ChatSection({
             </div>
           </div>
           {/* 主內容區域：預覽 */}
-          <div style={{ flex: 1, display: 'flex', overflow: 'hidden' }}>
+          <div style={{ flex: 1, display: 'flex', overflow: 'hidden', position: 'relative' }}>
             <div
               ref={codePreviewContainerRef}
               data-preview-container
@@ -3011,15 +3011,21 @@ function ChatSection({
             <AnimatePresence>
               {codePreviewEditMode && codePreviewSelectedElement && (
                 <motion.div
-                  initial={{ width: 0, opacity: 0 }}
-                  animate={{ width: 280, opacity: 1 }}
-                  exit={{ width: 0, opacity: 0 }}
+                  initial={{ x: 280, opacity: 0 }}
+                  animate={{ x: 0, opacity: 1 }}
+                  exit={{ x: 280, opacity: 0 }}
                   transition={{ duration: 0.2 }}
                   style={{
+                    position: 'absolute',
+                    right: 0,
+                    top: 0,
+                    bottom: 0,
+                    width: 280,
                     overflow: 'hidden',
                     borderLeft: '1px solid var(--border-color)',
                     background: 'var(--white)',
-                    flexShrink: 0,
+                    zIndex: 20,
+                    boxShadow: '-4px 0 16px rgba(0,0,0,0.08)',
                   }}
                 >
                   <PropertyEditor
