@@ -593,7 +593,8 @@ function injectMetadataIntoLayout(files: VercelFile[], meta: SiteMetadata): void
   const layoutIdx = files.findIndex(f => f.file === 'app/layout.tsx')
   if (layoutIdx === -1) return
 
-  let content = Buffer.from(files[layoutIdx].data, 'base64').toString('utf-8')
+  // wrapInNextJs 的 data 是純文字，直接操作即可（不是 base64）
+  let content = files[layoutIdx].data
 
   const escTitle = meta.title.replace(/'/g, "\\'").replace(/"/g, '\\"')
   const escDesc = meta.description.replace(/'/g, "\\'").replace(/"/g, '\\"')
@@ -609,7 +610,7 @@ function injectMetadataIntoLayout(files: VercelFile[], meta: SiteMetadata): void
     `description: '${escDesc}'`
   )
 
-  files[layoutIdx].data = Buffer.from(content).toString('base64')
+  files[layoutIdx].data = content
 }
 
 /**
