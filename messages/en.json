@@ -62,7 +62,8 @@
     "defaultUserName": "User",
     "dashboardButton": "Dashboard",
     "loginButton": "Log in",
-    "processing": "Processing..."
+    "processing": "Processing...",
+    "userInstruction": "User Instruction"
   },
   "preview": {
     "loading": "Loading preview environment...",
@@ -141,9 +142,9 @@
     "saveNote1": "Note: Element numbers are ordered by appearance of same tag type in the page (starting from 1).",
     "saveNote2": "Modify the corresponding element in JSX source directly. Replace text content in JSX.",
     "saveNote3": "Prefer Tailwind CSS classes for style changes; use inline styles when classes are insufficient.",
-    "annotationLabel": "Note",
-    "annotationPlaceholder": "Describe changes... (e.g., too much spacing, add animation)",
-    "annotationPrefix": "[Note]"
+    "selectedElements": "Selected Elements",
+    "clearSelection": "Clear All",
+    "selectionContext": "Selected Elements"
   },
   "command": {
     "goBack": "← Go back",
@@ -757,9 +758,7 @@
     "useTemplate": "Use this template",
     "selectVariantMessage": "Select variant {id}",
     "mergeVariantsMessage": "Merge {ids}",
-    "selectTemplateMessage": "I choose the \"{name}\" template",
-    "annotationLabel": "Note",
-    "annotationPlaceholder": "Describe changes... (e.g., too much spacing, add animation)"
+    "selectTemplateMessage": "I choose the \"{name}\" template"
   },
   "liff": {
     "initStatus": "Initializing LINE login...",

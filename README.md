@@ -362,7 +362,7 @@ app/
 │   ├── useLocalePath.ts  # locale-aware window.location.href
 │   └── useVpsWebSocket.ts # WebSocket
 ├── components/
-│   ├── uiux/             # UIUX 元件（SandpackPreview/PreviewPanel/TemplatePicker/PropertyEditor）
+│   ├── uiux/             # UIUX 元件（SandpackPreview/PreviewPanel/TemplatePicker）
 │   ├── dashboard/        # 儀表板元件
 │   ├── remotion/         # Remotion 動畫（fast-build/ + building-scene/）
 │   ├── building-scene/   # 3D 場景入口（dynamic import）
@@ -565,7 +565,7 @@ Server Action 錯誤訊息 + 工具模組國際化，+117 keys / 2 namespaces（
 - **Landing 區塊**：UseCases/HowItWorks/Stats/Comparison/Showcase/FAQ/Testimonial/CTA/Footer
 - **儀表板**：12 個 dashboard pages + 9 個 dashboard components（Sidebar/DashboardContent/DashboardShell/Chart/DataTable/StatsCard 等）
 - **認證**：login/callback/post-login/liff，4 頁全量翻譯
-- **UIUX 元件**：12 個（DeviceSwitcher/TemplateCard/QualityGateReport/TemplatePicker/VariantPicker/CodePreview/InteractivePreview/PreviewPanel/PropertyEditor/UiuxChatSection 等）
+- **UIUX 元件**：11 個（DeviceSwitcher/TemplateCard/QualityGateReport/TemplatePicker/VariantPicker/CodePreview/InteractivePreview/PreviewPanel/UiuxChatSection 等）
 - **UI 元件**：LoginPrompt/ConversationPicker/ProjectReminder/QuickReplies/SpecGenerationView/BddAnimationPanel/BuildingPlayer + deployer 3 元件
 - **模組級常數**：`INTERNAL_COMMAND_LABELS` → `COMMAND_KEYS` + `getCommandLabel()`，`CSS_LABELS` → `tCssLabel()` 動態查詢
 - **locale-aware 導航**：`Link`/`redirect`/`useRouter` 替換為 `@/i18n/navigation`，`useLocalePath` hook 處理 `window.location.href`
@@ -665,63 +665,19 @@ BDD Q&A 動畫面板從 3D 鍛造車間場景改為**純 React 文字歷史紀�
 - 編輯橋接腳本（`SANDPACK_EDIT_BRIDGE`）作為 Sandpack 檔案（`/lib/edit-bridge.js`）注入
 - `MutationObserver` + `setTimeout(300ms)` 延遲標記，observer 只監聽 `childList`（避免 attribute 死循環）
 - `window.__tcEditBridgeInitialized` 防重複初始化
-- `postMessage` 雙向通訊（`tc_setEditMode`/`tc_elementSelected`/`tc_applyUpdate`/`tc_resetElement`/`tc_applyOverrides`）
+- `postMessage` 雙向通訊（`tc_setEditMode`/`tc_selectionChanged`/`tc_clearSelection`/`tc_toggleElement`）
 
 **前端**：
-- `SandpackPreview.tsx`：新增 `editMode`/`onElementSelected`/`pendingUpdate`/`pendingReset`/`pendingOverrides`/`overrides` props，用 `setInterval(500ms)` + `querySelector('iframe')` 取得 Sandpack 管理的 iframe ref
-- `page.tsx`：code_preview 工具列新增編輯模式按鈕 + Undo/Redo + 儲存按鈕，右側 `PropertyEditor` sidebar（280px），鍵盤快捷鍵 `⌘Z`/`⌘⇧Z`
+- `SandpackPreview.tsx`：`editMode`/`onSelectionChanged` props，用 `setInterval(500ms)` + `querySelector('iframe')` 取得 Sandpack 管理的 iframe ref
+- `page.tsx`：code_preview 工具列編輯模式按鈕，聊天框上方選取 chips UI
 - 串流期間自動禁用編輯模式，切換對話時重置所有編輯狀態
 
-**持久化 + 儲存到源碼（2026-02-27）**：
-- `storedOverrides`：bridge 內部持久化，React re-render 後 MutationObserver 自動 `fullRetag()`（clearAllTags → 重新標記 → reapplyStoredOverrides）
-- `localStorage`：overrides 存入 `tc-edit-overrides-{conversationId}`，頁面重整後自動恢復
-- `tc_iframeReady`：iframe 重建時自動重發 `tc_applyOverrides`，延遲 500ms 等 bridge tag 完元素
-- 「儲存」按鈕：將 DOM overrides 轉為自然語言修改描述，發送為迭代修改消息（走現有 iteration 路由），LLM 修改源碼後永久保存
-
-### 模板編輯圖片上傳（2026-02-26）
-
-編輯模式選中圖片元素可直接上傳圖片，取代手動貼 URL。
-
-- 後端 `routes/upload.ts`：multer → `/var/www/uploads/tellcraft/{YYYY-MM}/{uuid}.{ext}`，5MB 限制
-- 前端 `PropertyEditor.tsx`：`ImageUrlInput` 子元件（URL + 上傳 + 拖放 + 進度條 + 縮圖預覽）
-- Vercel Proxy：POST `multipart/form-data` 透傳
-- Nginx：`client_max_body_size 6m` + `/uploads/tellcraft/` 靜態代理
-
-### 模板編輯模式修復與增強（2026-02-26）
-
-1. `template_overrides` 注入代碼生成：用戶在 PreviewPanel 編輯的修改正確傳入 `generateStructure()` prompt
-2. 擴展可編輯元素類型：container（section/header/footer/nav/main/article）+ image
-3. Undo/Redo 系統 + 元素路徑 Breadcrumb + 單元素重置
-
-### 編輯模式增強：元素批註 + 拖曳調整（2026-02-28）
-
-**元素批註系統**：選取元素後可輸入文字備註（如「間距太大」「加個漸層」），儲存時批註與屬性修改一起送給 AI，讓迭代修改更精準。
-
-- `PropertyEditor.tsx`：新增批註 textarea（琥珀色聚焦邊框，auto-grow）
-- `sandpack-utils.ts`（SANDPACK_EDIT_BRIDGE）：批註徽章（右上角 8x8 琥珀色圓點，hover 顯示批註文字）、`tc_setAnnotations` 訊息同步
-- `SandpackPreview.tsx`：`annotations` prop 轉發到 iframe、iframe 重建時自動恢復批註
-- `page.tsx`：`codePreviewAnnotations` state + localStorage 持久化 + `handleCodePreviewSave` 消息格式（`[備註]` 前綴）
-- 儲存按鈕條件：overrides 或 annotations 任一有內容即可點擊
-- 翻譯：`codePreview.annotationLabel/annotationPlaceholder/annotationPrefix`（zh/en）、`uiux.annotationLabel/annotationPlaceholder`（PropertyEditor 用）
-
-**拖曳調整尺寸**：選取 container/image 元素後顯示拖曳把手，可直接拖動改變寬高。
-
-- 三個把手：右邊（寬度，ew-resize）、下邊（高度，ns-resize）、右下角（寬高同時，nwse-resize）
-- 即時更新：mousemove 直接修改 `el.style`，mouseup 時 `tc_elementResized` postMessage 回父視窗
-- 最小尺寸：width >= 50px, height >= 30px
-- 把手生命週期：選取時建立、取消選取/關閉編輯模式時移除、scroll/resize 時重新定位、fullRetag 時重建
-- text 元素不顯示把手
-
-### 編輯模式屬性擴展（2026-02-27）
-
-擴展 PropertyEditor 可編輯屬性，從表面屬性（顏色/間距）擴展到完整的佈局排版控制：
-
-- **容器佈局**：display（block/flex/inline-flex/grid/inline/none）、flex 方向/主軸對齊/交叉軸對齊/gap/換行、overflow
-- **尺寸**（container + image）：width/maxWidth/height，支援任意 CSS 值（auto/100%/300px）
-- **文字裝飾**：textDecoration（none/underline/line-through）、textTransform（none/uppercase/lowercase/capitalize）
-- **條件顯示**：flex 相關屬性只在 display=flex/inline-flex 時展開
-- **儲存描述**：CSS 屬性自動映射中文標籤（如 `flexDirection` → `Flex 方向`），提升 LLM 理解精確度
-- 修改檔案：`PropertyEditor.tsx`、`sandpack-utils.ts`（SANDPACK_EDIT_BRIDGE）、`PreviewPanel.tsx`（EDIT_BRIDGE_SCRIPT）、`page.tsx`（handleCodePreviewSave）
+**多選 + 聊天溝通（2026-03-01 重構）**：
+- 編輯模式改為**多選 toggle**：點擊元素追加/取消選取，每個選取元素左上角顯示編號徽章（1, 2, 3...）
+- 移除 PropertyEditor 側邊欄、Undo/Redo、儲存按鈕、批註系統、拖曳把手、overrides 持久化
+- 選取元素以 chips 形式顯示在聊天輸入框上方，點 ✕ 可移除單個元素，「全部清除」清空選取
+- 發送訊息時自動附加選取元素上下文（標籤名 + 文字摘要 + 關鍵樣式），AI 根據上下文修改源碼
+- 發送後自動清空選取狀態
 
 ### BDD 3D 動畫重設計（2026-02-26）
 

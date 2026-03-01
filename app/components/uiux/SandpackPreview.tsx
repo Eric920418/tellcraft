@@ -24,16 +24,7 @@ interface SandpackPreviewProps {
   isStreaming?: boolean
   // 編輯模式 props
   editMode?: boolean
-  onElementSelected?: (element: ElementInfo | null) => void
-  pendingUpdate?: { elementId: string; changes: Record<string, string>; seq: number } | null
-  pendingReset?: { elementId: string; seq: number } | null
-  pendingOverrides?: { overrides: Record<string, Record<string, string>>; seq: number } | null
-  // 全量 overrides（用於 iframe 重建時自動恢復）
-  overrides?: Record<string, Record<string, string>>
-  // 批註
-  annotations?: Record<string, string>
-  // 拖曳尺寸變更回調
-  onElementResized?: (elementId: string, changes: { width: string; height: string }) => void
+  onSelectionChanged?: (elements: ElementInfo[]) => void
 }
 
 /**
@@ -69,13 +60,7 @@ export default function SandpackPreview({
   tailwindConfig,
   isStreaming,
   editMode,
-  onElementSelected,
-  pendingUpdate,
-  pendingReset,
-  pendingOverrides,
-  overrides,
-  annotations,
-  onElementResized,
+  onSelectionChanged,
 }: SandpackPreviewProps) {
   // 構建 Sandpack 設定
   const setup = useMemo(
@@ -146,18 +131,8 @@ export default function SandpackPreview({
   }, [effectiveEditMode])
 
   // ── 監聯 iframe postMessage ──
-  // 所有回調都用 ref，listener 只掛一次，避免 stale closure + 重新訂閱間隙
-  const onElementSelectedRef = useRef(onElementSelected)
-  onElementSelectedRef.current = onElementSelected
-
-  const onElementResizedRef = useRef(onElementResized)
-  onElementResizedRef.current = onElementResized
-
-  const overridesRef = useRef(overrides)
-  overridesRef.current = overrides
-
-  const annotationsRef = useRef(annotations)
-  annotationsRef.current = annotations
+  const onSelectionChangedRef = useRef(onSelectionChanged)
+  onSelectionChangedRef.current = onSelectionChanged
 
   useEffect(() => {
     const handleMessage = (e: MessageEvent) => {
@@ -165,95 +140,27 @@ export default function SandpackPreview({
       if (!msg || typeof msg.type !== 'string' || !msg.type.startsWith('tc_')) return
 
       if (msg.type === 'tc_iframeReady') {
-        // 用 e.source（即 iframe contentWindow），避免 iframeRef 尚未被 polling 填入
         const source = e.source as Window | null
         if (source) {
           source.postMessage({
             type: 'tc_setEditMode',
             enabled: effectiveEditModeRef.current,
           }, '*')
-          // iframe 重建後自動恢復已有的 overrides
-          const currentOverrides = overridesRef.current
-          if (currentOverrides && Object.keys(currentOverrides).length > 0) {
-            // 延遲 500ms 等 bridge tag 完元素後再套用
-            setTimeout(() => {
-              source.postMessage({
-                type: 'tc_applyOverrides',
-                overrides: currentOverrides,
-              }, '*')
-            }, 500)
-          }
-          // 恢復批註
-          const currentAnnotations = annotationsRef.current
-          if (currentAnnotations && Object.keys(currentAnnotations).length > 0) {
-            setTimeout(() => {
-              source.postMessage({
-                type: 'tc_setAnnotations',
-                annotations: currentAnnotations,
-              }, '*')
-            }, 600)
-          }
         }
-        // 同時更新 iframeRef（補足 polling 的時間差）
         if (containerRef.current) {
           const iframe = containerRef.current.querySelector('iframe')
           if (iframe) iframeRef.current = iframe
         }
       }
 
-      if (msg.type === 'tc_elementSelected') {
-        onElementSelectedRef.current?.(msg.data as ElementInfo)
-      }
-
-      if (msg.type === 'tc_elementDeselected') {
-        onElementSelectedRef.current?.(null)
-      }
-
-      if (msg.type === 'tc_elementResized') {
-        onElementResizedRef.current?.(msg.elementId, msg.changes)
+      if (msg.type === 'tc_selectionChanged') {
+        onSelectionChangedRef.current?.(msg.data as ElementInfo[])
       }
     }
 
     window.addEventListener('message', handleMessage)
     return () => window.removeEventListener('message', handleMessage)
   }, []) // 只掛一次，內部全用 ref 取最新值
-
-  // ── pendingUpdate → postMessage tc_applyUpdate ──
-  useEffect(() => {
-    if (!pendingUpdate || !iframeRef.current?.contentWindow) return
-    iframeRef.current.contentWindow.postMessage({
-      type: 'tc_applyUpdate',
-      elementId: pendingUpdate.elementId,
-      changes: pendingUpdate.changes,
-    }, '*')
-  }, [pendingUpdate])
-
-  // ── pendingReset → postMessage tc_resetElement ──
-  useEffect(() => {
-    if (!pendingReset || !iframeRef.current?.contentWindow) return
-    iframeRef.current.contentWindow.postMessage({
-      type: 'tc_resetElement',
-      elementId: pendingReset.elementId,
-    }, '*')
-  }, [pendingReset])
-
-  // ── annotations → postMessage tc_setAnnotations ──
-  useEffect(() => {
-    if (!iframeRef.current?.contentWindow) return
-    iframeRef.current.contentWindow.postMessage({
-      type: 'tc_setAnnotations',
-      annotations: annotations || {},
-    }, '*')
-  }, [annotations])
-
-  // ── pendingOverrides → postMessage tc_applyOverrides（undo/redo 全量覆蓋）──
-  useEffect(() => {
-    if (!pendingOverrides || !iframeRef.current?.contentWindow) return
-    iframeRef.current.contentWindow.postMessage({
-      type: 'tc_applyOverrides',
-      overrides: pendingOverrides.overrides,
-    }, '*')
-  }, [pendingOverrides])
 
   return (
     <div
