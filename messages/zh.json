@@ -144,7 +144,10 @@
     "saveNote3": "樣式修改優先用 Tailwind CSS class，無法用 class 時用 inline style。",
     "selectedElements": "已選取元素",
     "clearSelection": "全部清除",
-    "selectionContext": "選取元素"
+    "selectionContext": "選取元素",
+    "annotationLabel": "批註",
+    "annotationPlaceholder": "為這個元素添加說明...",
+    "annotationPrefix": "批註"
   },
   "command": {
     "goBack": "← 上一步",
@@ -651,6 +654,8 @@
     "clickToEdit": "點擊元素進行編輯",
     "templatePreview": "模板預覽",
     "previewAlt": "預覽",
+    "annotationLabel": "批註",
+    "annotationPlaceholder": "為這個元素添加修改說明...",
     "selectTemplateToPreview": "選擇一個模板以預覽",
     "templateLoadFailed": "模板載入失敗",
     "saveFailed": "保存失敗",

@@ -144,7 +144,10 @@
     "saveNote3": "Prefer Tailwind CSS classes for style changes; use inline styles when classes are insufficient.",
     "selectedElements": "Selected Elements",
     "clearSelection": "Clear All",
-    "selectionContext": "Selected Elements"
+    "selectionContext": "Selected Elements",
+    "annotationLabel": "Annotation",
+    "annotationPlaceholder": "Add a note for this element...",
+    "annotationPrefix": "Note"
   },
   "command": {
     "goBack": "← Go back",
@@ -651,6 +654,8 @@
     "clickToEdit": "Click an element to edit",
     "templatePreview": "Template Preview",
     "previewAlt": "Preview",
+    "annotationLabel": "Annotation",
+    "annotationPlaceholder": "Add a note for this element...",
     "selectTemplateToPreview": "Select a template to preview",
     "templateLoadFailed": "Template loading failed",
     "saveFailed": "Save failed",

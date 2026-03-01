@@ -132,6 +132,9 @@ if (typeof window !== 'undefined' && !window.__tcEditBridgeInitialized) {
   var editMode = false;
   var selectedIds = [];
   var elementMap = {}; // { [id]: elementInfo }
+  var storedOverrides = {};
+  var storedAnnotations = {};
+  var resizeHandles = [];
 
   // ── 標記函數 ──────────────────────────────────────
   // 策略：每次全量清除 → 從 DOM 順序重新分配 ID（確保 React 替換節點後 ID 一致）
@@ -332,14 +335,157 @@ if (typeof window !== 'undefined' && !window.__tcEditBridgeInitialized) {
     });
   }
 
-  // fullRetag：清除 → 重新標記 → 重新渲染選取徽章
+  // ── PropertyEditor 支援函數 ──────────────────────────────────
+
+  // 套用屬性修改到 DOM 元素
+  function applyChangesToElement(el, changes) {
+    if (!el || !changes) return;
+    for (var key in changes) {
+      if (key === 'text') {
+        el.textContent = changes[key];
+      } else if (key === 'imgSrc') {
+        el.src = changes[key];
+      } else if (key === 'imgAlt') {
+        el.alt = changes[key];
+      } else {
+        el.style[key] = changes[key];
+      }
+    }
+  }
+
+  // 重新套用已儲存的覆蓋
+  function reapplyStoredOverrides() {
+    for (var id in storedOverrides) {
+      var el = document.querySelector('[data-editable="' + id + '"]');
+      if (el) applyChangesToElement(el, storedOverrides[id]);
+    }
+  }
+
+  // 渲染批註徽章
+  function renderAnnotationBadges() {
+    document.querySelectorAll('.tc-annotation-badge').forEach(function(b) { b.remove(); });
+    if (!editMode) return;
+    for (var id in storedAnnotations) {
+      if (!storedAnnotations[id]) continue;
+      var el = document.querySelector('[data-editable="' + id + '"]');
+      if (!el) continue;
+      var cs = window.getComputedStyle(el);
+      if (cs.position === 'static') el.style.position = 'relative';
+      var badge = document.createElement('div');
+      badge.className = 'tc-annotation-badge';
+      badge.textContent = '📝';
+      badge.title = storedAnnotations[id];
+      badge.style.cssText = 'position:absolute;top:-8px;right:-8px;width:16px;height:16px;font-size:12px;display:flex;align-items:center;justify-content:center;z-index:9998;pointer-events:none;line-height:1;';
+      el.appendChild(badge);
+    }
+  }
+
+  // ── 拖曳把手 ──────────────────────────────────
+
+  function createResizeHandles(el, elementId) {
+    removeResizeHandles();
+    if (!el) return;
+    var rect = el.getBoundingClientRect();
+    var positions = [
+      { cursor: 'nw-resize', top: rect.top - 4, left: rect.left - 4 },
+      { cursor: 'ne-resize', top: rect.top - 4, left: rect.right - 4 },
+      { cursor: 'sw-resize', top: rect.bottom - 4, left: rect.left - 4 },
+      { cursor: 'se-resize', top: rect.bottom - 4, left: rect.right - 4 },
+    ];
+    positions.forEach(function(pos) {
+      var handle = document.createElement('div');
+      handle.className = 'tc-resize-handle';
+      handle.style.cssText = 'position:fixed;width:8px;height:8px;background:#3b82f6;border:1px solid #fff;border-radius:2px;z-index:10000;pointer-events:auto;cursor:' + pos.cursor + ';top:' + pos.top + 'px;left:' + pos.left + 'px;';
+      handle.dataset.elementId = elementId;
+      handle.dataset.cursor = pos.cursor;
+      document.body.appendChild(handle);
+      resizeHandles.push(handle);
+
+      // 拖曳 resize 邏輯
+      handle.addEventListener('mousedown', function(startEvent) {
+        startEvent.preventDefault();
+        startEvent.stopPropagation();
+        var startX = startEvent.clientX;
+        var startY = startEvent.clientY;
+        var startRect = el.getBoundingClientRect();
+        var dir = pos.cursor;
+
+        function onMove(moveEvent) {
+          var dx = moveEvent.clientX - startX;
+          var dy = moveEvent.clientY - startY;
+          var newWidth = startRect.width;
+          var newHeight = startRect.height;
+          if (dir.includes('e')) newWidth = startRect.width + dx;
+          if (dir.includes('w')) newWidth = startRect.width - dx;
+          if (dir.includes('s')) newHeight = startRect.height + dy;
+          if (dir.includes('n')) newHeight = startRect.height - dy;
+          if (newWidth > 20) el.style.width = newWidth + 'px';
+          if (newHeight > 20) el.style.height = newHeight + 'px';
+          repositionHandles();
+        }
+        function onUp() {
+          document.removeEventListener('mousemove', onMove);
+          document.removeEventListener('mouseup', onUp);
+          var finalRect = el.getBoundingClientRect();
+          postToParent({
+            type: 'tc_elementResized',
+            elementId: elementId,
+            width: Math.round(finalRect.width),
+            height: Math.round(finalRect.height)
+          });
+          repositionHandles();
+        }
+        document.addEventListener('mousemove', onMove);
+        document.addEventListener('mouseup', onUp);
+      });
+    });
+  }
+
+  function removeResizeHandles() {
+    resizeHandles.forEach(function(h) { if (h.parentNode) h.parentNode.removeChild(h); });
+    resizeHandles = [];
+  }
+
+  function repositionHandles() {
+    if (resizeHandles.length === 0) return;
+    var elementId = resizeHandles[0].dataset.elementId;
+    var el = document.querySelector('[data-editable="' + elementId + '"]');
+    if (!el) { removeResizeHandles(); return; }
+    var rect = el.getBoundingClientRect();
+    var positions = [
+      { top: rect.top - 4, left: rect.left - 4 },
+      { top: rect.top - 4, left: rect.right - 4 },
+      { top: rect.bottom - 4, left: rect.left - 4 },
+      { top: rect.bottom - 4, left: rect.right - 4 },
+    ];
+    resizeHandles.forEach(function(h, i) {
+      if (positions[i]) {
+        h.style.top = positions[i].top + 'px';
+        h.style.left = positions[i].left + 'px';
+      }
+    });
+  }
+
+  window.addEventListener('scroll', repositionHandles, true);
+  window.addEventListener('resize', repositionHandles);
+
+  // fullRetag：清除 → 重新標記 → 重新渲染選取徽章 + 覆蓋 + 批註 + 把手
   function fullRetag() {
     clearAllTags();
     tagEditableElements();
     tagContainerElements();
     tagImageElements();
     updateElementMap();
+    reapplyStoredOverrides();
     renderSelectionBadges();
+    renderAnnotationBadges();
+    // 如果有拖曳把手，重新定位
+    if (resizeHandles.length > 0) {
+      var handleElId = resizeHandles[0].dataset.elementId;
+      var handleEl = document.querySelector('[data-editable="' + handleElId + '"]');
+      if (handleEl) repositionHandles();
+      else removeResizeHandles();
+    }
   }
 
   // 注入編輯模式高亮樣式
@@ -352,6 +498,8 @@ if (typeof window !== 'undefined' && !window.__tcEditBridgeInitialized) {
     if (!editMode) {
       styleEl.textContent = '';
       renderSelectionBadges();
+      renderAnnotationBadges();
+      removeResizeHandles();
       return;
     }
     var css =
@@ -400,8 +548,18 @@ if (typeof window !== 'undefined' && !window.__tcEditBridgeInitialized) {
     var idx = selectedIds.indexOf(id);
     if (idx >= 0) {
       selectedIds.splice(idx, 1);
+      // 取消選取 → 通知 PropertyEditor
+      postToParent({ type: 'tc_elementDeselected', elementId: id });
+      removeResizeHandles();
     } else {
       selectedIds.push(id);
+      // 新增選取 → 發送元素資訊給 PropertyEditor + 建立拖曳把手
+      updateElementMap();
+      var info = elementMap[id];
+      if (info) {
+        postToParent({ type: 'tc_elementSelected', data: info });
+        createResizeHandles(target, id);
+      }
     }
 
     updateEditStyles();
@@ -437,6 +595,73 @@ if (typeof window !== 'undefined' && !window.__tcEditBridgeInitialized) {
       }
       updateEditStyles();
       notifySelectionChanged();
+    }
+
+    // PropertyEditor：套用屬性修改
+    if (msg.type === 'tc_applyUpdate') {
+      var updateEl = document.querySelector('[data-editable="' + msg.elementId + '"]');
+      if (updateEl) {
+        applyChangesToElement(updateEl, msg.changes);
+        // 儲存覆蓋以便 fullRetag 後重新套用
+        if (!storedOverrides[msg.elementId]) storedOverrides[msg.elementId] = {};
+        for (var ck in msg.changes) {
+          storedOverrides[msg.elementId][ck] = msg.changes[ck];
+        }
+        // 更新 elementMap 並回報最新狀態
+        updateElementMap();
+        var updatedInfo = elementMap[msg.elementId];
+        if (updatedInfo) {
+          postToParent({ type: 'tc_elementSelected', data: updatedInfo });
+        }
+        repositionHandles();
+      }
+    }
+
+    // PropertyEditor：重置元素
+    if (msg.type === 'tc_resetElement') {
+      var resetEl = document.querySelector('[data-editable="' + msg.elementId + '"]');
+      if (resetEl) {
+        // 還原原始文字
+        var origText = resetEl.getAttribute('data-original-text');
+        if (origText !== null) resetEl.textContent = origText;
+        // 還原圖片
+        var origSrc = resetEl.getAttribute('data-original-src');
+        if (origSrc !== null) resetEl.src = origSrc;
+        var origAlt = resetEl.getAttribute('data-original-alt');
+        if (origAlt !== null) resetEl.alt = origAlt;
+        // 移除 inline style 覆蓋
+        resetEl.removeAttribute('style');
+        // 清除儲存
+        delete storedOverrides[msg.elementId];
+        updateElementMap();
+        var resetInfo = elementMap[msg.elementId];
+        if (resetInfo) {
+          postToParent({ type: 'tc_elementSelected', data: resetInfo });
+        }
+      }
+    }
+
+    // 批量套用 overrides（iframe ready 時恢復）
+    if (msg.type === 'tc_applyOverrides') {
+      storedOverrides = msg.overrides || {};
+      reapplyStoredOverrides();
+    }
+
+    // 設定批註
+    if (msg.type === 'tc_setAnnotations') {
+      storedAnnotations = msg.annotations || {};
+      renderAnnotationBadges();
+    }
+
+    // 取消選取特定元素
+    if (msg.type === 'tc_deselectElement') {
+      var deselectIdx = selectedIds.indexOf(msg.elementId);
+      if (deselectIdx >= 0) {
+        selectedIds.splice(deselectIdx, 1);
+        updateEditStyles();
+        notifySelectionChanged();
+        removeResizeHandles();
+      }
     }
   });
 

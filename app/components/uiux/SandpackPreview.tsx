@@ -25,6 +25,14 @@ interface SandpackPreviewProps {
   // 編輯模式 props
   editMode?: boolean
   onSelectionChanged?: (elements: ElementInfo[]) => void
+  // PropertyEditor props
+  onElementSelected?: (element: ElementInfo | null) => void
+  pendingUpdate?: { elementId: string; changes: Record<string, string> } | null
+  pendingReset?: string | null
+  pendingOverrides?: Record<string, Record<string, string>> | null
+  overrides?: Record<string, Record<string, string>>
+  annotations?: Record<string, string>
+  onElementResized?: (elementId: string, width: number, height: number) => void
 }
 
 /**
@@ -61,6 +69,13 @@ export default function SandpackPreview({
   isStreaming,
   editMode,
   onSelectionChanged,
+  onElementSelected,
+  pendingUpdate,
+  pendingReset,
+  pendingOverrides,
+  overrides,
+  annotations,
+  onElementResized,
 }: SandpackPreviewProps) {
   // 構建 Sandpack 設定
   const setup = useMemo(
@@ -133,6 +148,14 @@ export default function SandpackPreview({
   // ── 監聯 iframe postMessage ──
   const onSelectionChangedRef = useRef(onSelectionChanged)
   onSelectionChangedRef.current = onSelectionChanged
+  const onElementSelectedRef = useRef(onElementSelected)
+  onElementSelectedRef.current = onElementSelected
+  const onElementResizedRef = useRef(onElementResized)
+  onElementResizedRef.current = onElementResized
+  const overridesRef = useRef(overrides)
+  overridesRef.current = overrides
+  const annotationsRef = useRef(annotations)
+  annotationsRef.current = annotations
 
   useEffect(() => {
     const handleMessage = (e: MessageEvent) => {
@@ -146,6 +169,24 @@ export default function SandpackPreview({
             type: 'tc_setEditMode',
             enabled: effectiveEditModeRef.current,
           }, '*')
+          // 恢復 overrides（延遲 500ms 等 DOM 標記完成）
+          if (overridesRef.current && Object.keys(overridesRef.current).length > 0) {
+            setTimeout(() => {
+              source.postMessage({
+                type: 'tc_applyOverrides',
+                overrides: overridesRef.current,
+              }, '*')
+            }, 500)
+          }
+          // 恢復 annotations（延遲 600ms）
+          if (annotationsRef.current && Object.keys(annotationsRef.current).length > 0) {
+            setTimeout(() => {
+              source.postMessage({
+                type: 'tc_setAnnotations',
+                annotations: annotationsRef.current,
+              }, '*')
+            }, 600)
+          }
         }
         if (containerRef.current) {
           const iframe = containerRef.current.querySelector('iframe')
@@ -156,11 +197,57 @@ export default function SandpackPreview({
       if (msg.type === 'tc_selectionChanged') {
         onSelectionChangedRef.current?.(msg.data as ElementInfo[])
       }
+
+      if (msg.type === 'tc_elementSelected') {
+        onElementSelectedRef.current?.(msg.data as ElementInfo)
+      }
+
+      if (msg.type === 'tc_elementDeselected') {
+        onElementSelectedRef.current?.(null)
+      }
+
+      if (msg.type === 'tc_elementResized') {
+        onElementResizedRef.current?.(msg.elementId, msg.width, msg.height)
+      }
     }
 
     window.addEventListener('message', handleMessage)
     return () => window.removeEventListener('message', handleMessage)
   }, []) // 只掛一次，內部全用 ref 取最新值
+
+  // ── PropertyEditor pending effects ──
+  useEffect(() => {
+    if (!pendingUpdate || !iframeRef.current?.contentWindow) return
+    iframeRef.current.contentWindow.postMessage({
+      type: 'tc_applyUpdate',
+      elementId: pendingUpdate.elementId,
+      changes: pendingUpdate.changes,
+    }, '*')
+  }, [pendingUpdate])
+
+  useEffect(() => {
+    if (!pendingReset || !iframeRef.current?.contentWindow) return
+    iframeRef.current.contentWindow.postMessage({
+      type: 'tc_resetElement',
+      elementId: pendingReset,
+    }, '*')
+  }, [pendingReset])
+
+  useEffect(() => {
+    if (!pendingOverrides || !iframeRef.current?.contentWindow) return
+    iframeRef.current.contentWindow.postMessage({
+      type: 'tc_applyOverrides',
+      overrides: pendingOverrides,
+    }, '*')
+  }, [pendingOverrides])
+
+  useEffect(() => {
+    if (!annotations || !iframeRef.current?.contentWindow) return
+    iframeRef.current.contentWindow.postMessage({
+      type: 'tc_setAnnotations',
+      annotations: annotations,
+    }, '*')
+  }, [annotations])
 
   return (
     <div
