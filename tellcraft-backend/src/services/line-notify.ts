@@ -46,6 +46,13 @@ export async function sendLineNotifyIfNeeded(
   if (!stage || !NOTIFY_STAGES.has(stage)) return
 
   try {
+    // LINE Bot 對話由 Full Push 處理，跳過 Notify 避免重複推送
+    const isLineBotConv = await db.queryOne(
+      'SELECT 1 FROM line_active_conversations WHERE conversation_id = $1',
+      [conversationId]
+    )
+    if (isLineBotConv) return
+
     const lineUserId = await db.getLineUserIdByConversation(conversationId)
     if (!lineUserId) return
 
@@ -92,6 +99,46 @@ function buildFlexMessage(conversationId: string, stage: string, content: string
 
   const actionUrl = buildActionUrl(conversationId)
 
+  // 從 content 提取部署 URL（用於部署成功卡片的按鈕）
+  const deployUrlMatch = content.match(/https?:\/\/[^\s)）]+\.vercel\.app[^\s)）]*/i)
+  const deployUrl = deployUrlMatch ? deployUrlMatch[0] : null
+
+  // Footer 按鈕
+  const footerButtons: FlexBubble['footer'] & { contents: unknown[] } = {
+    type: 'box',
+    layout: 'vertical',
+    spacing: 'sm',
+    contents: [],
+    paddingAll: '12px',
+  }
+
+  // 部署成功：加「打開網站」按鈕
+  if (deployUrl && stage === 'deployer_complete') {
+    footerButtons.contents.push({
+      type: 'button',
+      action: {
+        type: 'uri',
+        label: '\u{1F310} 打開網站',
+        uri: deployUrl,
+      },
+      style: 'primary',
+      color: '#06C755',
+      height: 'sm',
+    })
+  }
+
+  footerButtons.contents.push({
+    type: 'button',
+    action: {
+      type: 'uri',
+      label: '查看詳情',
+      uri: actionUrl,
+    },
+    style: deployUrl ? 'secondary' : 'primary',
+    color: deployUrl ? undefined : config.color,
+    height: 'sm',
+  })
+
   const bubble: FlexBubble = {
     type: 'bubble',
     size: 'kilo',
@@ -124,24 +171,7 @@ function buildFlexMessage(conversationId: string, stage: string, content: string
       ],
       paddingAll: '16px',
     },
-    footer: {
-      type: 'box',
-      layout: 'vertical',
-      contents: [
-        {
-          type: 'button',
-          action: {
-            type: 'uri',
-            label: '查看詳情',
-            uri: actionUrl,
-          },
-          style: 'primary',
-          color: config.color,
-          height: 'sm',
-        },
-      ],
-      paddingAll: '12px',
-    },
+    footer: footerButtons as FlexBubble['footer'],
   }
 
   return {
