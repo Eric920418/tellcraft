@@ -84,6 +84,11 @@ interface VercelDeployment {
   readyState: string
 }
 
+export interface SiteMetadata {
+  title: string
+  description: string
+}
+
 export interface DeployPreCheckResult {
   ready: boolean
   error?: string
@@ -581,6 +586,33 @@ export async function prepareDeployment(
 }
 
 /**
+ * 將 siteMetadata 注入 layout.tsx 的 export const metadata
+ * 用正則替換 title 和 description 的值
+ */
+function injectMetadataIntoLayout(files: VercelFile[], meta: SiteMetadata): void {
+  const layoutIdx = files.findIndex(f => f.file === 'app/layout.tsx')
+  if (layoutIdx === -1) return
+
+  let content = Buffer.from(files[layoutIdx].data, 'base64').toString('utf-8')
+
+  const escTitle = meta.title.replace(/'/g, "\\'").replace(/"/g, '\\"')
+  const escDesc = meta.description.replace(/'/g, "\\'").replace(/"/g, '\\"')
+
+  // 替換 title: '...' 或 title: "..."
+  content = content.replace(
+    /title:\s*(['"]).*?\1/,
+    `title: '${escTitle}'`
+  )
+  // 替換 description: '...' 或 description: "..."
+  content = content.replace(
+    /description:\s*(['"]).*?\1/,
+    `description: '${escDesc}'`
+  )
+
+  files[layoutIdx].data = Buffer.from(content).toString('base64')
+}
+
+/**
  * 執行部署
  */
 export async function executeDeployment(
@@ -591,6 +623,7 @@ export async function executeDeployment(
   options?: {
     extraDependencies?: Record<string, string>
     injectedFiles?: { file: string; data: string }[]
+    siteMetadata?: SiteMetadata
   },
   trackingContext?: { userId?: string; conversationId?: string }
 ): Promise<DeployResult> {
@@ -612,6 +645,12 @@ export async function executeDeployment(
     )
 
     const files = buildResult.files
+
+    // 注入 site metadata（替換 layout.tsx 中的 title/description）
+    if (options?.siteMetadata) {
+      injectMetadataIntoLayout(files, options.siteMetadata)
+      console.log(`[Deployer] Metadata 注入: title="${options.siteMetadata.title}", desc="${options.siteMetadata.description.slice(0, 50)}..."`)
+    }
 
     if (buildResult.fixes.length > 0) {
       console.log(`[Deployer] Build 驗證修復: ${buildResult.fixes.join('; ')}`)

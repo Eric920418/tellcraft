@@ -40,7 +40,7 @@ import {
 } from '../services/uiux-generation'
 import { translateBddToUISpec, buildUISpecSummary } from '../services/bdd-to-ui-spec'
 import { runQualityGate, autoFixCriticalIssues, QualityReport } from '../services/quality-gate'
-import { prepareDeployment, executeDeployment } from '../services/deployer'
+import { prepareDeployment, executeDeployment, type SiteMetadata } from '../services/deployer'
 import { detectDesignTier, inferProductType, inferPages, buildDefaultDesignSystem, buildMinimalTemplate, inferInteractionHint, getTemplateStyleHint, inferLayoutMode, PRODUCT_TYPE_LABELS } from '../services/fast-build-generation'
 import { ensureResponsiveClasses } from '../services/uiux-generation'
 import { matchTemplates } from '../services/template-matcher'
@@ -6007,6 +6007,33 @@ async function handleDeployExecute(
     },
   })
 
+  // 構建 site metadata（降級優先順序：uiuxUISpec → project DB → fastModeOriginalMessage）
+  let siteMetadata: SiteMetadata | undefined
+  try {
+    let metaTitle = state.uiuxUISpec?.productName || ''
+    let metaDesc = state.uiuxUISpec?.productSummary || ''
+
+    if (!metaTitle || !metaDesc) {
+      const project = await db.getProject(projectId)
+      if (!metaTitle && project?.name) metaTitle = project.name
+      if (!metaDesc && project?.description) metaDesc = project.description
+    }
+
+    if (!metaDesc && state.fastModeOriginalMessage) {
+      metaDesc = state.fastModeOriginalMessage.slice(0, 160)
+    }
+
+    if (metaTitle) {
+      siteMetadata = {
+        title: metaTitle,
+        description: metaDesc || metaTitle,
+      }
+      console.log(`[Orchestrator] Site metadata: title="${metaTitle}", desc="${(metaDesc || metaTitle).slice(0, 50)}"`)
+    }
+  } catch (e) {
+    console.warn('[Orchestrator] 構建 siteMetadata 失敗，跳過:', e)
+  }
+
   // 執行部署，帶進度回調（try/catch 防止 state 卡死在 deployer_deploying）
   let result: { success: boolean; deploymentUrl?: string; vercelDeploymentId?: string; error?: string; deployedCode?: unknown }
   try {
@@ -6024,6 +6051,7 @@ async function handleDeployExecute(
       {
         extraDependencies: preCheck.extraDependencies,
         injectedFiles: preCheck.injectedFiles,
+        siteMetadata,
       },
       { userId: state.userId, conversationId }
     )

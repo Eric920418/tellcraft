@@ -1586,7 +1586,7 @@ function ChatSection({
           // 收到 code_preview 消息時清除 streaming preview（最終版已到達）
           const hasCodePreview = formattedMessages.some(m => m.richContent?.type === 'code_preview')
           if (hasCodePreview) {
-            const cpMsg = formattedMessages.find(m => m.richContent?.type === 'code_preview')
+            const cpMsg = [...formattedMessages].reverse().find(m => m.richContent?.type === 'code_preview')
             if (cpMsg?.richContent?.data) setCodePreviewData(cpMsg.richContent.data)
             setStreamingPreview(null)
             setFastBuildChunks(0)
