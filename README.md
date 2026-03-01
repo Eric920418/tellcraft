@@ -503,6 +503,17 @@ psql "$DATABASE_URL" -f tellcraft-backend/migrations/xxx.sql
 <details>
 <summary><h2>開發更新紀錄（點擊展開）</h2></summary>
 
+### BDD 釐清階段語義分析（2026-03-01）
+
+精細模式需求釐清（spec_clarify）新增 `analyzeAnswerRelevance()`：用戶自由文字回答不再機械式接受，而是判斷是否明確回答了問題。
+
+- **兩層策略**：規則式快篩（含糊信號詞 + 短回答問號偵測）→ Haiku 語義判斷（四元：accept/ambiguous/off_topic/seeking_help）
+- **快篩放行**：>= 15 字無含糊信號直接 accept；選項題 A/B/C/D 跳過分析
+- **非 accept 處理**：ambiguous → 追問要求明確答案；off_topic → 引導回問題；seeking_help → 用簡單語言重新解釋
+- **防死循環**：FlowState `answerRejectCount` 連續 2 次拒絕後第 3 次強制 accept，accept 後重置
+- **錯誤降級**：API 失敗 / JSON 解析失敗 → 降級為 accept（不阻塞流程）
+- **成本**：每次分析約 $0.00036，預估觸發率 30%，每個 session ≈ $0.002
+
 ### FlowState 超時自動恢復（2026-03-01）
 
 伺服器重啟後，卡在「生成中」phase 的對話不再永久卡死。新增定時掃描（每 2 分鐘），主動偵測超時的 FlowState 並自動恢復 + 透過 `sendMessage()` 推送通知（Web Socket.io + LINE pushMessage）。
@@ -532,10 +543,11 @@ psql "$DATABASE_URL" -f tellcraft-backend/migrations/xxx.sql
 - **六層防禦**：
   1. `prefilterMessage()`：冷卻期檢查 → 空訊息/超長 → injection（28 個 regex，含混合語言）+ 違規累計 → 頻率限制（30 秒 6 條），全訊息中英雙語
   2. `isDesignFeedback()`：fast mode 入口 + 迭代階段專用（亂碼/問候/閒聊/設計關鍵詞正向放行）
-  3. `checkBuildRelevance()`：fast mode 語義相關性 + 具體性（強信號 ~80 詞直接放行 / 弱信號 Haiku 三元判斷：通過/模糊/不相關），中英雙語
-  4. `classifyIntent()`：正常模式 Haiku 意圖分類（abuse 觸發 `recordAbuseViolation` 累計違規）
-  5. `refineCode [NO_CHANGE]`：LLM 級別最後防線（迭代階段）
-  6. **違規冷卻升級**：Redis `violation:{userId}` 計數器（24h TTL），3 次→60s / 6 次→5min / 10 次→30min 冷卻
+  3. `analyzeAnswerRelevance()`：BDD 釐清階段自由文字語義分析（規則快篩 + Haiku 四元判斷：accept/ambiguous/off_topic/seeking_help），連續 2 次拒絕後強制 accept 防死循環
+  4. `checkBuildRelevance()`：fast mode 語義相關性 + 具體性（強信號 ~80 詞直接放行 / 弱信號 Haiku 三元判斷：通過/模糊/不相關），中英雙語
+  5. `classifyIntent()`：正常模式 Haiku 意圖分類（abuse 觸發 `recordAbuseViolation` 累計違規）
+  6. `refineCode [NO_CHANGE]`：LLM 級別最後防線（迭代階段）
+  7. **違規冷卻升級**：Redis `violation:{userId}` 計數器（24h TTL），3 次→60s / 6 次→5min / 10 次→30min 冷卻
 
 ### 統一 LLM JSON 解析防禦（2026-02-28）
 

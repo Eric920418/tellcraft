@@ -118,4 +118,6 @@ export interface FlowState {
   discoveryLimits?: { maxRounds: number; maxTotalQuestions: number }
   // 消息來源（LINE Bot 或 Web）
   messageSource?: 'line' | 'web'
+  // 釐清階段語義分析：連續拒絕計數（防死循環，第 3 次強制 accept）
+  answerRejectCount?: number
 }

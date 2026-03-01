@@ -2444,6 +2444,27 @@ async function processUserReply(input: ProcessReplyInput) {
         return
       }
 
+      // ── 語義分析：自由文字回答是否明確 ──
+      const isOptionAnswer = /^[A-Da-d]\.?\s*/.test(userMessage.trim())
+      if (!isOptionAnswer) {
+        const analysis = await analyzeAnswerRelevance(
+          currentItem, userMessage, state, conversationId, io
+        )
+        if (!analysis.accept) {
+          // 累加拒絕計數
+          state.answerRejectCount = (state.answerRejectCount || 0) + 1
+          await saveFlowState(redis, conversationId, state)
+          // 發送追問/解釋訊息，不記錄答案，不前進
+          await sendMessage(conversationId, io, {
+            content: analysis.replyContent || '請更明確地回答這個問題。',
+            stage: 'clarify_question',
+          })
+          return
+        }
+      }
+      // 重置拒絕計數
+      state.answerRejectCount = 0
+
       // 記錄答案
       await answerClarifyItem({
         sessionId: session.id,
@@ -3209,6 +3230,163 @@ function validateAnswer(
 
   // 接受任何輸入作為自定義答案
   return { valid: true, normalizedAnswer: trimmedAnswer }
+}
+
+// ============================================================
+// 釐清階段語義分析：判斷用戶自由文字是否明確回答了問題
+// ============================================================
+
+const AMBIGUOUS_SIGNALS = [
+  // 條件句
+  '如果', '看情況', '取決於', '要看', '不一定', '可能',
+  'if', 'depends', 'it depends', 'maybe',
+  // 反問/求助
+  '什麼意思', '是什麼', '不懂', '不了解', '不明白', '可以解釋',
+  'what do you mean', "don't understand", 'explain',
+  // 含糊確認
+  '都可以', '都行', '隨便', '無所謂', '沒差',
+  'whatever', "don't care", 'either',
+]
+
+type AnswerVerdict = 'accept' | 'ambiguous' | 'off_topic' | 'seeking_help'
+
+interface AnswerAnalysis {
+  accept: boolean
+  verdict: AnswerVerdict
+  replyContent?: string // 追問/解釋內容（非 accept 時使用）
+}
+
+async function analyzeAnswerRelevance(
+  item: ClarifyItem,
+  userMessage: string,
+  state: FlowState,
+  conversationId: string,
+  io: SocketIOServer,
+): Promise<AnswerAnalysis> {
+  const trimmed = userMessage.trim()
+  const lower = trimmed.toLowerCase()
+
+  // ── 規則式快篩 ──
+
+  // 長回答且無含糊信號 → 直接放行（通常有實質內容）
+  const hasAmbiguousSignal = AMBIGUOUS_SIGNALS.some(s => lower.includes(s))
+  if (trimmed.length >= 15 && !hasAmbiguousSignal) {
+    return { accept: true, verdict: 'accept' }
+  }
+
+  // 短回答且有問號 → 可能求助，送 Haiku
+  const mightBeQuestion = trimmed.length < 3 && trimmed.includes('?') || trimmed.includes('？')
+
+  // 無含糊信號且非疑似求助 → 放行
+  if (!hasAmbiguousSignal && !mightBeQuestion) {
+    return { accept: true, verdict: 'accept' }
+  }
+
+  // ── 防死循環：連續 2 次被拒後強制 accept ──
+  const rejectCount = state.answerRejectCount || 0
+  if (rejectCount >= 2) {
+    return { accept: true, verdict: 'accept' }
+  }
+
+  // ── Haiku 語義判斷 ──
+  const apiKey = process.env.ANTHROPIC_API_KEY
+  if (!apiKey) {
+    return { accept: true, verdict: 'accept' }
+  }
+
+  const questionText = item.whiteTextQuestion || item.question
+  const optionsText = item.options && item.options.length > 0
+    ? '\n選項：\n' + item.options.map((opt, i) => {
+        const letter = String.fromCharCode(65 + i)
+        const label = typeof opt === 'string' ? opt : opt.label
+        return `${letter}. ${label}`
+      }).join('\n')
+    : ''
+
+  try {
+    const resp = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': apiKey,
+        'anthropic-version': '2023-06-01',
+      },
+      body: JSON.stringify({
+        model: 'claude-haiku-4-5-20251001',
+        max_tokens: 150,
+        system: `你是 BDD 需求釐清助手。判斷用戶的回答是否「明確回答了問題」。
+只回覆 JSON（不要加任何其他文字）：
+- 明確回答：{"verdict":"accept"}
+- 含糊/條件式（如「看情況」「如果...就...」）：{"verdict":"ambiguous","followUp":"用一句話追問，要求用戶給出明確答案"}
+- 離題/沒回答問題：{"verdict":"off_topic","followUp":"溫和引導回到問題的一句話"}
+- 用戶在求助/問問題：{"verdict":"seeking_help","explanation":"用更簡單的語言重新解釋問題"}`,
+        messages: [{ role: 'user', content: `問題：${questionText}${optionsText}\n\n用戶回答：${userMessage}` }],
+      }),
+    })
+
+    if (!resp.ok) {
+      console.warn(`[AnswerRelevance] Haiku API 錯誤 ${resp.status}，降級放行`)
+      return { accept: true, verdict: 'accept' }
+    }
+
+    const data = await resp.json() as {
+      content?: Array<{ text?: string }>
+      usage?: { input_tokens?: number; output_tokens?: number }
+    }
+
+    // 記錄 LLM 使用量
+    if (data.usage) {
+      const inputTokens = data.usage.input_tokens || 0
+      const outputTokens = data.usage.output_tokens || 0
+      const cost = (inputTokens * 0.8 + outputTokens * 4) / 1_000_000
+      db.recordLlmUsage({
+        model: 'claude-haiku-4-5-20251001',
+        inputTokens,
+        outputTokens,
+        costUsd: cost,
+        purpose: 'answer_relevance',
+        conversationId,
+      })
+    }
+
+    const text = data.content?.[0]?.text?.trim()
+    if (!text) {
+      console.warn('[AnswerRelevance] 空回應，降級放行')
+      return { accept: true, verdict: 'accept' }
+    }
+
+    // 嘗試解析 JSON（容許 markdown code block 包裹）
+    const jsonStr = text.replace(/^```json?\s*/, '').replace(/\s*```$/, '')
+    const result = JSON.parse(jsonStr) as {
+      verdict: AnswerVerdict
+      followUp?: string
+      explanation?: string
+    }
+
+    if (result.verdict === 'accept') {
+      return { accept: true, verdict: 'accept' }
+    }
+
+    // 構造回覆內容
+    let replyContent: string
+    if (result.verdict === 'seeking_help' && result.explanation) {
+      replyContent = `💡 ${result.explanation}`
+    } else if (result.followUp) {
+      replyContent = result.followUp
+    } else {
+      // fallback：不應該到這裡，但以防萬一
+      return { accept: true, verdict: 'accept' }
+    }
+
+    return {
+      accept: false,
+      verdict: result.verdict,
+      replyContent,
+    }
+  } catch (err) {
+    console.warn('[AnswerRelevance] 分析失敗，降級放行:', err)
+    return { accept: true, verdict: 'accept' }
+  }
 }
 
 function getFullAnswer(item: ClarifyItem): string {
