@@ -21,6 +21,7 @@ import {
   getConversationMessages as vpsGetConversationMessages,
   replyToConversation as vpsReplyToConversation,
   sendMessage as vpsSendMessage,
+  getDashboardStats,
 } from '@/app/lib/vps-api'
 import { getAuthToken } from '@/app/hooks/useAuth'
 import ConversationPicker from '@/app/components/ConversationPicker'
@@ -614,7 +615,9 @@ function HeroSection({
   buildMode,
   onBuildModeChange,
   isAuthenticated,
-  onLoginRequired
+  onLoginRequired,
+  recentProjects,
+  onResumeProject,
 }: {
   onStartChat: () => void
   inputValue: string
@@ -624,6 +627,8 @@ function HeroSection({
   onBuildModeChange: (mode: 'fast' | 'fine') => void
   isAuthenticated: boolean
   onLoginRequired: () => void
+  recentProjects: Array<{ id: string; name: string; status: string; latestConversationId: string | null }>
+  onResumeProject: (conversationId: string) => void
 }) {
   const tHero = useTranslations('hero')
   const [isFocused, setIsFocused] = useState(false)
@@ -877,6 +882,65 @@ function HeroSection({
           </motion.div>
         </motion.div>
       </div>
+
+      {/* Recent Projects Pills */}
+      {!isChatActive && !isTransitioning && recentProjects.length > 0 && (
+        <motion.div
+          initial={{ opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.4, delay: 0.8 }}
+          style={{
+            position: 'relative',
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            gap: 8,
+            marginTop: 24,
+          }}
+        >
+          <span style={{ fontSize: 11, color: 'var(--gray-400)', letterSpacing: '0.03em' }}>
+            {tHero('recentProjects')}
+          </span>
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', justifyContent: 'center' }}>
+            {recentProjects.slice(0, 3).map((project) => (
+              project.latestConversationId && (
+                <motion.button
+                  key={project.id}
+                  whileHover={{ scale: 1.03 }}
+                  whileTap={{ scale: 0.97 }}
+                  onClick={() => onResumeProject(project.latestConversationId!)}
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 6,
+                    padding: '6px 14px',
+                    fontSize: 13,
+                    fontWeight: 400,
+                    background: 'var(--white)',
+                    color: 'var(--gray-600)',
+                    border: '1px solid var(--border-color)',
+                    borderRadius: 20,
+                    cursor: 'pointer',
+                    transition: 'all 0.15s ease',
+                  }}
+                >
+                  <span style={{
+                    width: 6,
+                    height: 6,
+                    borderRadius: '50%',
+                    background: project.status === 'deployed' ? '#22C55E'
+                      : project.status === 'failed' ? '#EF4444'
+                      : project.status === 'generating' ? '#F59E0B'
+                      : 'var(--gray-300)',
+                    flexShrink: 0,
+                  }} />
+                  {project.name}
+                </motion.button>
+              )
+            ))}
+          </div>
+        </motion.div>
+      )}
 
       <ScrollIndicator visible={!isFocused && !inputValue && !isTransitioning} />
     </motion.section>
@@ -4660,6 +4724,7 @@ function HomeContent() {
   const [anonymousId, setAnonymousId] = useState<string | undefined>(undefined)
   const [buildMode, setBuildMode] = useState<'fast' | 'fine'>('fast')
   const [showGuestLimitModal, setShowGuestLimitModal] = useState(false)
+  const [recentProjects, setRecentProjects] = useState<Array<{ id: string; name: string; status: string; latestConversationId: string | null }>>([])
 
   // VPS JWT Auth Hook
   const auth = useAuth()
@@ -4677,6 +4742,18 @@ function HomeContent() {
     const id = localStorage.getItem('tellcraft_anonymous_id') || undefined
     setAnonymousId(id)
   }, [])
+
+  // 已登入時取得最近專案（用於 Hero 快捷入口）
+  useEffect(() => {
+    if (!auth.isAuthenticated) return
+    const token = getAuthToken()
+    if (!token) return
+    getDashboardStats({ token }).then((result) => {
+      if (result.success && result.data) {
+        setRecentProjects(result.data.recentProjects.filter(p => p.latestConversationId))
+      }
+    }).catch(() => {})
+  }, [auth.isAuthenticated])
 
   // 檢查 URL 參數，如果有 conversation 則恢復對話
   // 不做 pushState — 瀏覽器已有此 URL 的歷史記錄，返回時自然離開
@@ -4919,6 +4996,8 @@ function HomeContent() {
         onBuildModeChange={setBuildMode}
         isAuthenticated={auth.isAuthenticated || auth.isLoading}
         onLoginRequired={handleLoginFromHero}
+        recentProjects={recentProjects}
+        onResumeProject={handleContinueFromReminder}
       />
 
       {/* Chat Overlay */}

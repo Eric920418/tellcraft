@@ -349,7 +349,7 @@ Server Action 錯誤訊息 + 工具模組中文字串國際化（+117 keys，2 n
 | **防護** | 三層防刷（前端冷卻 + API 限速 + Worker 鎖）、六層輸入防禦 + 違規冷卻升級（3→60s / 6→5min / 10→30min）、LLM 自動重試、Guest 限制（Fast Only + 一次使用 + 登入推薦） |
 | **通知** | LINE 推播通知（BDD 完成/UIUX 生成完成/部署成功失敗），離線用戶也能收到 |
 | **LINE Bot** | LINE 對話內完整 Fast Build 體驗（描述需求→生成→部署），Flex Message 卡片 + Quick Reply |
-| **UX** | 對話回退、錯誤恢復、自動恢復對話、專案自動命名、Markdown 渲染 |
+| **UX** | 對話回退、錯誤恢復、自動恢復對話、專案自動命名、Markdown 渲染、專案對話快捷入口（1-click） |
 | **穩定性** | FlowState 超時自動恢復（定時掃描 + LINE/Web 推送通知），伺服器重啟後自動恢復卡住的生成/部署任務 |
 
 ## 專案結構
@@ -515,6 +515,16 @@ psql "$DATABASE_URL" -f tellcraft-backend/migrations/xxx.sql
 
 <details>
 <summary><h2>開發更新紀錄（點擊展開）</h2></summary>
+
+### 專案對話快捷入口（2026-03-03）
+
+減少進入專案對話的點擊次數：Dashboard 首頁/專案列表一鍵進入對話，首頁為已登入用戶顯示最近專案快捷按鈕。
+
+- **後端**：`GET /api/project` 和 `GET /api/dashboard/stats` 新增 `latestConversationId` 子查詢
+- **Dashboard 專案列表**：每行新增 chat icon 按鈕，點擊直接跳轉到 `/?conversation={id}`（不影響行點擊進詳情）
+- **Dashboard 首頁**：Recent Projects 每行新增 chat icon，一鍵進入對話
+- **首頁 HeroSection**：已登入用戶輸入框下方顯示最近 3 個專案 pill 按鈕（status dot + name），點擊直接恢復對話
+- **i18n**：新增 `hero.recentProjects`、`dashboard.enterConversation` 翻譯 key
 
 ### 未登入用戶限制（2026-03-03）
 

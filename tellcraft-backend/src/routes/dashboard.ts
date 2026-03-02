@@ -45,15 +45,19 @@ router.get('/stats', requireAuth, async (req, res) => {
       return res.status(404).json({ error: '用戶不存在' })
     }
 
-    // 查詢專案數量和最近的專案
+    // 查詢專案數量和最近的專案（含最新對話 ID）
     const projectsResult = await query<{
       id: string
       name: string
       status: string
       created_at: string
       updated_at: string
+      latest_conversation_id: string | null
     }>(
-      `SELECT id, name, status, created_at, updated_at
+      `SELECT id, name, status, created_at, updated_at,
+              (SELECT c2.id FROM conversations c2
+               WHERE c2.project_id = projects.id
+               ORDER BY c2.updated_at DESC LIMIT 1) as latest_conversation_id
        FROM projects
        WHERE user_id = $1
        ORDER BY updated_at DESC
@@ -116,6 +120,7 @@ router.get('/stats', requireAuth, async (req, res) => {
       name: p.name,
       status: p.status,
       conversationCount: convCountMap.get(p.id) || 0,
+      latestConversationId: p.latest_conversation_id,
       updatedAt: p.updated_at
     }))
 

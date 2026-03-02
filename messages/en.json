@@ -37,7 +37,8 @@
     "fineHint": "Describe your idea for AI to deeply clarify",
     "guestHint": "Log in to unlock fine mode and unlimited builds",
     "startButton": "Start",
-    "scrollIndicator": "Scroll to explore"
+    "scrollIndicator": "Scroll to explore",
+    "recentProjects": "Recent projects"
   },
   "chat": {
     "initializing": "Initializing...",
@@ -558,6 +559,7 @@
     "statusLabel": "Status",
     "conversationsHeader": "Conversations",
     "urlHeader": "URL",
+    "enterConversation": "Enter conversation",
     "updatedAt": "Updated",
     "myConversations": "My Conversations",
     "conversationsSubtitle": "View all your AI conversations",

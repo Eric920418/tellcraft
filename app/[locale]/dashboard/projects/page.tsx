@@ -22,6 +22,7 @@ interface Project {
   vercelUrl: string | null
   customDomain: string | null
   conversationCount: number
+  latestConversationId: string | null
   createdAt: string
   updatedAt: string
 }
@@ -143,6 +144,44 @@ export default function ProjectsPage() {
             }}
           >
             {url.replace('https://', '')}
+          </a>
+        )
+      },
+    },
+    {
+      key: 'actions',
+      header: '',
+      width: '50px',
+      render: (project: Project) => {
+        if (!project.latestConversationId) return null
+        return (
+          <a
+            href={localePath(`/?conversation=${project.latestConversationId}`)}
+            title={t('enterConversation')}
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              width: 32,
+              height: 32,
+              borderRadius: 6,
+              color: 'var(--gray-400)',
+              textDecoration: 'none',
+              transition: 'all 0.15s ease',
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.color = 'var(--black)'
+              e.currentTarget.style.background = 'var(--gray-100)'
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.color = 'var(--gray-400)'
+              e.currentTarget.style.background = 'transparent'
+            }}
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+            </svg>
           </a>
         )
       },

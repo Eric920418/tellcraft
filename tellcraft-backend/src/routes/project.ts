@@ -61,7 +61,7 @@ router.get('/', requireAuth, async (req, res) => {
     )
     const total = parseInt(countResult?.count || '0', 10)
 
-    // 查詢專案列表（包含對話數量）
+    // 查詢專案列表（包含對話數量 + 最新對話 ID）
     const projects = await db.queryMany<{
       id: string
       name: string
@@ -72,10 +72,14 @@ router.get('/', requireAuth, async (req, res) => {
       created_at: string
       updated_at: string
       conversation_count: string
+      latest_conversation_id: string | null
     }>(
       `SELECT p.id, p.name, p.description, p.status, p.vercel_url, p.custom_domain,
               p.created_at, p.updated_at,
-              COUNT(c.id) as conversation_count
+              COUNT(c.id) as conversation_count,
+              (SELECT c2.id FROM conversations c2
+               WHERE c2.project_id = p.id
+               ORDER BY c2.updated_at DESC LIMIT 1) as latest_conversation_id
        FROM projects p
        LEFT JOIN conversations c ON c.project_id = p.id
        WHERE ${whereClause}
@@ -94,6 +98,7 @@ router.get('/', requireAuth, async (req, res) => {
         vercelUrl: p.vercel_url,
         customDomain: p.custom_domain,
         conversationCount: parseInt(p.conversation_count, 10),
+        latestConversationId: p.latest_conversation_id,
         createdAt: p.created_at,
         updatedAt: p.updated_at
       })),

@@ -37,7 +37,8 @@
     "fineHint": "描述你的想法，AI 深度釐清",
     "guestHint": "登入以解鎖精細模式和無限使用",
     "startButton": "開始",
-    "scrollIndicator": "往下探索"
+    "scrollIndicator": "往下探索",
+    "recentProjects": "最近專案"
   },
   "chat": {
     "initializing": "正在初始化...",
@@ -558,6 +559,7 @@
     "statusLabel": "狀態",
     "conversationsHeader": "對話",
     "urlHeader": "網址",
+    "enterConversation": "進入對話",
     "updatedAt": "更新時間",
     "myConversations": "我的對話",
     "conversationsSubtitle": "查看所有與 AI 的對話記錄",

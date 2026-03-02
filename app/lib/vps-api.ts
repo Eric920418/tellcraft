@@ -245,6 +245,7 @@ export async function getProjects(input: {
     vercelUrl: string | null
     customDomain: string | null
     conversationCount: number
+    latestConversationId: string | null
     createdAt: string
     updatedAt: string
   }>
@@ -332,6 +333,7 @@ export async function getDashboardStats(input: {
     name: string
     status: string
     conversationCount: number
+    latestConversationId: string | null
     updatedAt: string
   }>
 }>> {
