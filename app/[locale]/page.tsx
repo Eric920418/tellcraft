@@ -612,7 +612,9 @@ function HeroSection({
   onInputChange,
   isChatActive,
   buildMode,
-  onBuildModeChange
+  onBuildModeChange,
+  isAuthenticated,
+  onLoginRequired
 }: {
   onStartChat: () => void
   inputValue: string
@@ -620,6 +622,8 @@ function HeroSection({
   isChatActive: boolean
   buildMode: 'fast' | 'fine'
   onBuildModeChange: (mode: 'fast' | 'fine') => void
+  isAuthenticated: boolean
+  onLoginRequired: () => void
 }) {
   const tHero = useTranslations('hero')
   const [isFocused, setIsFocused] = useState(false)
@@ -816,7 +820,13 @@ function HeroSection({
                   {tHero('modeFast')}
                 </button>
                 <button
-                  onClick={() => onBuildModeChange('fine')}
+                  onClick={() => {
+                    if (!isAuthenticated) {
+                      onLoginRequired()
+                      return
+                    }
+                    onBuildModeChange('fine')
+                  }}
                   style={{
                     padding: '4px 10px',
                     fontSize: 12,
@@ -825,18 +835,24 @@ function HeroSection({
                     color: buildMode === 'fine' ? 'var(--white)' : 'var(--gray-500)',
                     border: 'none',
                     borderRadius: 4,
-                    cursor: 'pointer',
+                    cursor: isAuthenticated ? 'pointer' : 'default',
                     transition: 'all 0.2s ease',
                     whiteSpace: 'nowrap',
+                    opacity: isAuthenticated ? 1 : 0.5,
                   }}
                 >
                   {tHero('modeFine')}
+                  {!isAuthenticated && (
+                    <span style={{ marginLeft: 4, fontSize: 10, opacity: 0.6 }}>&#128274;</span>
+                  )}
                 </button>
               </div>
               <span style={{ fontSize: 12, color: isFastModeShortWarning ? 'var(--amber-500, #f59e0b)' : 'var(--gray-400)', flex: 1, textAlign: 'center', transition: 'color 0.2s ease' }}>
-                {isFastModeShortWarning
-                  ? tHero('shortWarning')
-                  : buildMode === 'fast' ? tHero('fastHint') : tHero('fineHint')}
+                {!isAuthenticated
+                  ? tHero('guestHint')
+                  : isFastModeShortWarning
+                    ? tHero('shortWarning')
+                    : buildMode === 'fast' ? tHero('fastHint') : tHero('fineHint')}
               </span>
               <motion.button
                 whileHover={{ scale: canSubmit ? 1.02 : 1 }}
@@ -927,6 +943,7 @@ function ChatSection({
   const [typingStage, setTypingStage] = useState<'none' | 'dots' | 'message'>('none')
   const [currentStage, setCurrentStage] = useState<Message['stage']>('discovery')
   const [sessionInfo, setSessionInfo] = useState<SessionInfo | null>(null)
+  const [guestBuildCompleted, setGuestBuildCompleted] = useState(false)
   const [isInitializing, setIsInitializing] = useState(true)  // 初始為 true 避免閃爍
   const [error, setError] = useState<string | null>(null)
   const [lastTimestamp, setLastTimestamp] = useState<string | null>(null)
@@ -1452,7 +1469,21 @@ function ChatSection({
         })
 
         if (!sendResult.success) {
-          setError(sendResult.error || tChat('sendError'))
+          // Guest 限制錯誤 → 顯示登入 modal
+          const initErr = sendResult.error || ''
+          if (initErr.includes('GUEST_FINE_LOCKED') || initErr.includes('GUEST_LIMIT_REACHED')) {
+            localStorage.setItem('tellcraft_guest_fast_used', 'true')
+            setGuestBuildCompleted(true)
+            setLoginPromptConfig({
+              show: true,
+              variant: 'emphasized',
+              message: tLogin('guestLimitTitle'),
+              subMessage: tLogin('guestLimitMessage'),
+              promptId: 'guest_limit'
+            })
+          } else {
+            setError(initErr || tChat('sendError'))
+          }
         } else if (sendResult.data?.messageId) {
           // 更新樂觀訊息的 ID 為實際的 DB ID，避免重複顯示
           setMessages(prev => prev.map(m =>
@@ -1866,9 +1897,48 @@ function ChatSection({
     }
   }, [isActive])
 
+  // 偵測 fast build 完成 → 標記 localStorage + state
+  useEffect(() => {
+    if (!sessionInfo || sessionInfo.isAuthenticated) return
+
+    const hasCompleted = messages.some(m =>
+      m.stage === 'uiux_complete' || m.stage === 'uiux_iteration_complete'
+    )
+    if (hasCompleted && !guestBuildCompleted) {
+      localStorage.setItem('tellcraft_guest_fast_used', 'true')
+      setGuestBuildCompleted(true)
+    }
+  }, [messages, sessionInfo, guestBuildCompleted])
+
   // 登入提示觸發邏輯
   useEffect(() => {
     if (!sessionInfo || sessionInfo.isAuthenticated) return
+
+    // 進入聊天時立即顯示 subtle 提示
+    if (messages.length <= 1) {
+      const promptId = 'guest_chat_entry'
+      if (shouldShowLoginPrompt(promptId)) {
+        setLoginPromptConfig({
+          show: true,
+          variant: 'subtle',
+          message: tLogin('guestChatEntry'),
+          promptId
+        })
+      }
+      return
+    }
+
+    // 完成後 → emphasized（每次都顯示，不受 dismiss 限制）
+    if (guestBuildCompleted) {
+      setLoginPromptConfig({
+        show: true,
+        variant: 'emphasized',
+        message: tLogin('guestCompleteTitle'),
+        subMessage: tLogin('guestCompleteMessage'),
+        promptId: 'guest_build_complete'
+      })
+      return
+    }
 
     // 對話 3 輪後顯示 subtle 提示
     const userMessageCount = messages.filter(m => m.role === 'user').length
@@ -1879,6 +1949,20 @@ function ChatSection({
           show: true,
           variant: 'subtle',
           message: tLogin('subtleAfterRounds'),
+          promptId
+        })
+      }
+    }
+
+    // fast_generating 階段
+    const hasFastGenerating = messages.some(m => m.stage === 'fast_generating')
+    if (hasFastGenerating) {
+      const promptId = 'fast_generating_login'
+      if (shouldShowLoginPrompt(promptId)) {
+        setLoginPromptConfig({
+          show: true,
+          variant: 'subtle',
+          message: tLogin('guestFastGenerating'),
           promptId
         })
       }
@@ -1910,7 +1994,7 @@ function ChatSection({
         })
       }
     }
-  }, [messages.length, currentStage, sessionInfo])
+  }, [messages.length, currentStage, sessionInfo, guestBuildCompleted])
 
   // 處理選擇歷史對話
   const handleSelectConversation = async (conversationId: string) => {
@@ -2020,6 +2104,19 @@ function ChatSection({
 
   const handleSend = async () => {
     if (!sessionInfo || !input.trim() || isTyping || sendCooldown) return
+
+    // Guest 已完成 fast build → 鎖定所有操作
+    if (guestBuildCompleted && !sessionInfo.isAuthenticated) {
+      setLoginPromptConfig({
+        show: true,
+        variant: 'emphasized',
+        message: tLogin('guestLimitTitle'),
+        subMessage: tLogin('guestLimitMessage'),
+        promptId: 'guest_limit'
+      })
+      return
+    }
+
     startSendCooldown()
 
     let content = input.trim()
@@ -2098,8 +2195,24 @@ function ChatSection({
     if (!result.success) {
       // 發送失敗：移除樂觀消息，避免幽靈訊息
       setMessages(prev => prev.filter(m => m.id !== userMessage.id))
-      setError(result.error || tChat('sendFailed'))
       setIsTyping(false)
+
+      // Guest 限制錯誤 → 顯示登入 modal
+      const err = result.error || ''
+      if (err.includes('GUEST_FINE_LOCKED') || err.includes('GUEST_LIMIT_REACHED')) {
+        localStorage.setItem('tellcraft_guest_fast_used', 'true')
+        setGuestBuildCompleted(true)
+        setLoginPromptConfig({
+          show: true,
+          variant: 'emphasized',
+          message: tLogin('guestLimitTitle'),
+          subMessage: tLogin('guestLimitMessage'),
+          promptId: 'guest_limit'
+        })
+        return
+      }
+
+      setError(err || tChat('sendFailed'))
     } else if (result.data?.messageId) {
       // 更新樂觀訊息的 ID 為實際的 DB ID，避免重複顯示
       setMessages(prev => prev.map(m =>
@@ -2111,6 +2224,19 @@ function ChatSection({
   // 發送指定內容的訊息（用於按鈕觸發）
   const handleSendMessage = async (content: string) => {
     if (!sessionInfo || !content.trim() || isTyping || sendCooldown) return
+
+    // Guest 已完成 fast build → 鎖定所有操作
+    if (guestBuildCompleted && !sessionInfo.isAuthenticated) {
+      setLoginPromptConfig({
+        show: true,
+        variant: 'emphasized',
+        message: tLogin('guestLimitTitle'),
+        subMessage: tLogin('guestLimitMessage'),
+        promptId: 'guest_limit'
+      })
+      return
+    }
+
     startSendCooldown()
 
     // 樂觀更新
@@ -2155,8 +2281,24 @@ function ChatSection({
     if (!result.success) {
       // 發送失敗：移除樂觀消息，避免幽靈訊息
       setMessages(prev => prev.filter(m => m.id !== userMessage.id))
-      setError(result.error || tChat('sendFailed'))
       setIsTyping(false)
+
+      // Guest 限制錯誤 → 顯示登入 modal
+      const err = result.error || ''
+      if (err.includes('GUEST_FINE_LOCKED') || err.includes('GUEST_LIMIT_REACHED')) {
+        localStorage.setItem('tellcraft_guest_fast_used', 'true')
+        setGuestBuildCompleted(true)
+        setLoginPromptConfig({
+          show: true,
+          variant: 'emphasized',
+          message: tLogin('guestLimitTitle'),
+          subMessage: tLogin('guestLimitMessage'),
+          promptId: 'guest_limit'
+        })
+        return
+      }
+
+      setError(err || tChat('sendFailed'))
     }
   }
 
@@ -2633,9 +2775,13 @@ function ChatSection({
                     }
                   }
                 }}
-                placeholder={layoutMode === 'split' ? tChat('inputPlaceholderShort') : tChat('inputPlaceholder')}
+                placeholder={
+                  guestBuildCompleted && !sessionInfo?.isAuthenticated
+                    ? tLogin('guestInputLocked')
+                    : layoutMode === 'split' ? tChat('inputPlaceholderShort') : tChat('inputPlaceholder')
+                }
                 rows={1}
-                disabled={isInitializing || !sessionInfo}
+                disabled={isInitializing || !sessionInfo || (guestBuildCompleted && !sessionInfo?.isAuthenticated)}
                 style={{
                   flex: 1,
                   resize: 'none',
@@ -2646,7 +2792,7 @@ function ChatSection({
                   fontFamily: 'inherit',
                   lineHeight: 1.5,
                   transition: 'border-color 0.2s ease, height 0.15s ease',
-                  opacity: isInitializing || !sessionInfo ? 0.5 : 1,
+                  opacity: (isInitializing || !sessionInfo || (guestBuildCompleted && !sessionInfo?.isAuthenticated)) ? 0.5 : 1,
                   minHeight: layoutMode === 'split' ? 40 : 48,
                   maxHeight: layoutMode === 'split' ? 120 : 200,
                   overflowY: 'hidden',
@@ -4503,6 +4649,7 @@ function Footer() {
 function HomeContent() {
   const tChat = useTranslations('chat')
   const tAuth = useTranslations('auth')
+  const tLogin = useTranslations('login')
   const tCommon = useTranslations('common')
   const localePath = useLocalePath()
   const searchParams = useSearchParams()
@@ -4512,6 +4659,7 @@ function HomeContent() {
   const [resumeConversationId, setResumeConversationId] = useState<string | null>(null)
   const [anonymousId, setAnonymousId] = useState<string | undefined>(undefined)
   const [buildMode, setBuildMode] = useState<'fast' | 'fine'>('fast')
+  const [showGuestLimitModal, setShowGuestLimitModal] = useState(false)
 
   // VPS JWT Auth Hook
   const auth = useAuth()
@@ -4618,13 +4766,29 @@ function HomeContent() {
     }
   }
 
+  const handleLoginFromHero = useCallback(() => {
+    const anonymousId = localStorage.getItem('tellcraft_anonymous_id')
+    const loginUrl = anonymousId
+      ? localePath(`/auth/login?anonymousId=${encodeURIComponent(anonymousId)}`)
+      : localePath('/auth/login')
+    window.location.href = loginUrl
+  }, [localePath])
+
   const handleStartChat = useCallback(() => {
     if (heroInput.trim()) {
+      // Guest 已用過 → 攔截
+      if (!auth.isAuthenticated && !auth.isLoading) {
+        const guestUsed = localStorage.getItem('tellcraft_guest_fast_used') === 'true'
+        if (guestUsed) {
+          setShowGuestLimitModal(true)
+          return
+        }
+      }
       setInitialMessage(heroInput)
       setIsChatActive(true)
       window.history.pushState({ tellcraftChat: true }, '')
     }
-  }, [heroInput])
+  }, [heroInput, auth.isAuthenticated, auth.isLoading])
 
   const handleBackToHome = useCallback(() => {
     setIsChatActive(false)
@@ -4753,6 +4917,8 @@ function HomeContent() {
         isChatActive={isChatActive}
         buildMode={buildMode}
         onBuildModeChange={setBuildMode}
+        isAuthenticated={auth.isAuthenticated || auth.isLoading}
+        onLoginRequired={handleLoginFromHero}
       />
 
       {/* Chat Overlay */}
@@ -4763,6 +4929,17 @@ function HomeContent() {
         onBack={handleBackToHome}
         buildMode={buildMode}
       />
+
+      {/* Guest Limit Modal */}
+      {showGuestLimitModal && (
+        <LoginPrompt
+          variant="emphasized"
+          message={tLogin('guestLimitTitle')}
+          subMessage={tLogin('guestLimitMessage')}
+          onLogin={handleLoginFromHero}
+          onDismiss={() => setShowGuestLimitModal(false)}
+        />
+      )}
 
       {/* SEO Content Sections */}
       <UseCasesSection />

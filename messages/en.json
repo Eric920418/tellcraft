@@ -35,6 +35,7 @@
     "shortWarning": "Description too short, results may not be optimal",
     "fastHint": "The more detail you provide, the better the result",
     "fineHint": "Describe your idea for AI to deeply clarify",
+    "guestHint": "Log in to unlock fine mode and unlimited builds",
     "startButton": "Start",
     "scrollIndicator": "Scroll to explore"
   },
@@ -164,7 +165,14 @@
     "loginButton": "Log in",
     "laterButton": "Later",
     "saveProgressButton": "Log in to save progress",
-    "laterFull": "Maybe later"
+    "laterFull": "Maybe later",
+    "guestChatEntry": "Log in to save conversations and unlock all features",
+    "guestFastGenerating": "Log in to save your site, iterate, and deploy",
+    "guestCompleteTitle": "Your website has been generated!",
+    "guestCompleteMessage": "Log in to save your work, make iterations, and deploy with one click. Your free trial has ended - log in for unlimited access.",
+    "guestLimitTitle": "Free trial ended",
+    "guestLimitMessage": "You've experienced one free build. Log in for unlimited fast mode and unlock fine mode for deeper AI-driven development.",
+    "guestInputLocked": "Log in to continue"
   },
   "useCases": {
     "heading": "For",

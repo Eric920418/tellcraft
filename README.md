@@ -333,7 +333,7 @@ Server Action 錯誤訊息 + 工具模組中文字串國際化（+117 keys，2 n
 | **認證** | Google/LINE OAuth、JWT 雙軌（localStorage + Cookie）、訪客→帳號合併、帳號綁定（雙登入）、auth 頁面 i18n（next-intl） |
 | **儀表板** | 用戶統計、專案管理、版本歷史、管理員面板、LLM 用量追蹤、Dashboard 元件 i18n（next-intl） |
 | **i18n** | next-intl 多語系（zh/en）、UI 元件全量翻譯、Server Action 錯誤訊息 i18n（getTranslations）、lib 模組英文化、error code 機制、883 keys / 29 namespaces |
-| **防護** | 三層防刷（前端冷卻 + API 限速 + Worker 鎖）、六層輸入防禦 + 違規冷卻升級（3→60s / 6→5min / 10→30min）、LLM 自動重試 |
+| **防護** | 三層防刷（前端冷卻 + API 限速 + Worker 鎖）、六層輸入防禦 + 違規冷卻升級（3→60s / 6→5min / 10→30min）、LLM 自動重試、Guest 限制（Fast Only + 一次使用 + 登入推薦） |
 | **通知** | LINE 推播通知（BDD 完成/UIUX 生成完成/部署成功失敗），離線用戶也能收到 |
 | **LINE Bot** | LINE 對話內完整 Fast Build 體驗（描述需求→生成→部署），Flex Message 卡片 + Quick Reply |
 | **UX** | 對話回退、錯誤恢復、自動恢復對話、專案自動命名、Markdown 渲染 |
@@ -502,6 +502,16 @@ psql "$DATABASE_URL" -f tellcraft-backend/migrations/xxx.sql
 
 <details>
 <summary><h2>開發更新紀錄（點擊展開）</h2></summary>
+
+### 未登入用戶限制（2026-03-03）
+
+匿名（Guest）用戶功能限制，防止 LLM 成本失控：
+
+- **Fast Mode Only**：Fine mode 按鈕加鎖，點擊跳轉登入頁
+- **一次使用**：Fast build 完成後鎖定所有操作（發送/回覆），顯示 emphasized 登入 modal
+- **雙重防繞過**：前端 localStorage + state 快速攔截，後端 DB 查詢不可繞過（`isAnonymousUser` + `hasGuestCompletedBuild`）
+- **登入推薦強化**：進入聊天 subtle 提示、fast_generating 階段 subtle 提示、完成後 emphasized modal（不受 dismiss 限制）
+- **後端 403**：`GUEST_FINE_LOCKED`（禁 fine mode）、`GUEST_LIMIT_REACHED`（已用完額度），前端統一捕獲顯示登入 modal
 
 ### BDD 釐清階段語義分析（2026-03-01）
 

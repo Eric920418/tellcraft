@@ -35,6 +35,7 @@
     "shortWarning": "描述太短，生成效果可能不理想",
     "fastHint": "描述越詳細，生成效果越好",
     "fineHint": "描述你的想法，AI 深度釐清",
+    "guestHint": "登入以解鎖精細模式和無限使用",
     "startButton": "開始",
     "scrollIndicator": "往下探索"
   },
@@ -164,7 +165,14 @@
     "loginButton": "登入",
     "laterButton": "稍後",
     "saveProgressButton": "登入以保存進度",
-    "laterFull": "稍後再說"
+    "laterFull": "稍後再說",
+    "guestChatEntry": "登入後可保存對話並解鎖所有功能",
+    "guestFastGenerating": "登入後可保存你的網站、迭代修改和部署",
+    "guestCompleteTitle": "你的網站已生成完成！",
+    "guestCompleteMessage": "登入以保存你的作品、進行迭代修改和一鍵部署。免費試用到此結束，登入後可無限使用。",
+    "guestLimitTitle": "免費試用已結束",
+    "guestLimitMessage": "你已體驗過一次快速建站。登入後可以無限使用快速模式，還能使用精細模式深度打磨你的網站。",
+    "guestInputLocked": "登入以繼續使用"
   },
   "useCases": {
     "heading": "適合",
