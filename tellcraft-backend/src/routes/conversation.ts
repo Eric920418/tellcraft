@@ -57,6 +57,36 @@ async function checkConversationRateLimit(conversationId: string): Promise<{ all
 }
 
 // ============================================================
+// Guest 限制 Helper
+// ============================================================
+
+/**
+ * 檢查用戶是否為匿名（email 以 @tellcraft.local 結尾）
+ */
+async function isAnonymousUser(userId: string): Promise<boolean> {
+  const user = await db.queryOne<{ email: string }>(
+    'SELECT email FROM users WHERE id = $1',
+    [userId]
+  )
+  return user?.email?.endsWith('@tellcraft.local') ?? false
+}
+
+/**
+ * 檢查匿名用戶是否已完成過 fast build（project_files 中有 uiux 記錄）
+ */
+async function hasGuestCompletedBuild(userId: string): Promise<boolean> {
+  const result = await db.queryOne<{ exists: boolean }>(
+    `SELECT EXISTS(
+      SELECT 1 FROM project_files pf
+      JOIN projects p ON pf.project_id = p.id
+      WHERE p.user_id = $1 AND pf.skill_source = 'uiux'
+    ) as exists`,
+    [userId]
+  )
+  return result?.exists ?? false
+}
+
+// ============================================================
 // 對話 API
 // ============================================================
 
@@ -88,6 +118,26 @@ router.post('/:id/message', optionalAuth, async (req, res) => {
     }
     if (trimmedMessage.length > 5000) {
       return res.status(400).json({ error: `訊息過長（${trimmedMessage.length} 字），上限 5000 字` })
+    }
+
+    // ===== Guest 限制 =====
+    const anonymous = await isAnonymousUser(userId)
+    if (anonymous) {
+      // 匿名用戶禁止 fine mode
+      if (mode === 'fine') {
+        return res.status(403).json({
+          error: 'GUEST_FINE_LOCKED',
+          message: '精細模式需要登入才能使用'
+        })
+      }
+      // 匿名用戶 fast build 只能一次
+      const alreadyUsed = await hasGuestCompletedBuild(userId)
+      if (alreadyUsed) {
+        return res.status(403).json({
+          error: 'GUEST_LIMIT_REACHED',
+          message: '免費試用已結束，請登入以繼續使用'
+        })
+      }
     }
 
     // 取得對話
@@ -200,6 +250,18 @@ router.post('/:id/reply', optionalAuth, async (req, res) => {
     }
     if (trimmedReply.length > 5000) {
       return res.status(400).json({ error: `訊息過長（${trimmedReply.length} 字），上限 5000 字` })
+    }
+
+    // ===== Guest 完成後鎖定回覆 =====
+    const anonymousReply = await isAnonymousUser(userId)
+    if (anonymousReply) {
+      const alreadyUsed = await hasGuestCompletedBuild(userId)
+      if (alreadyUsed) {
+        return res.status(403).json({
+          error: 'GUEST_LIMIT_REACHED',
+          message: '免費試用已結束，請登入以繼續使用'
+        })
+      }
     }
 
     // 取得對話
