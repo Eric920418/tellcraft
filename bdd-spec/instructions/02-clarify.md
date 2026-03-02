@@ -165,9 +165,25 @@ description: |
    - **禁止語義偏移**：白話化不可改變原始問題的技術含義
    - **禁止不一致用詞**：同一概念在不同釐清題中必須使用相同中文術語
 
-5. **翻譯驗證**：
+5. **白話品質自檢清單**：
+   - 問題和選項中不可出現：程式符號（>=, <=, !=, &&, ||）、型別名稱（INT, VARCHAR, DECIMAL）、SQL 語法（CHECK, NOT NULL, CONSTRAINT）、程式概念（API, CRUD, schema）
+   - 替換規則：null → 空白/未填寫、>= 0 → 不可以是負數、NOT NULL → 必填、BOOLEAN → 是或否
+   - 自檢方法：生成後想像你在跟一位沒有程式經驗的花店老闆對話，她會疑惑就需要重寫
+
+6. **翻譯驗證**：
    - 翻譯後，對照規格檔案確認所有術語皆已在規格中使用過
    - 若發現規格中對同一概念有多種用詞（如「顧客」與「客戶」），優先使用 Feature 檔案中的用詞（因更貼近使用者語言）
+
+### 技術上下文記錄
+
+每個釐清項目回答後，用戶的答案應映射回技術決策並記錄在 `technicalContext` 中。
+
+**示範**：
+- 用戶回答「訂單總金額 = 所有品項的小計加起來」
+  → `computations: [{ target: "total_amount", formula: "SUM(order_items.subtotal)", description: "訂單總金額等於所有品項小計加總" }]`
+- 用戶回答「訂單取消後要自動恢復庫存」
+  → `stateTransitions: [{ entity: "訂單", field: "status", from: "active", to: "cancelled", trigger: "cancel_order", description: "取消訂單" }]`
+  → `constraints: [{ expression: "ON cancel_order: product.stock += order_item.quantity", description: "取消訂單時恢復庫存", scope: "cross_entity" }]`
 
 #### 翻譯範例
 

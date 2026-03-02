@@ -61,6 +61,10 @@ export async function runPrdDiscovery(
 - **A4. 跨屬性不變條件**：屬性間的計算關係是否明確？
 - **A5. 關係與唯一性**：實體間的關聯關係是否完整？
 - **A6. 生命週期與狀態**：狀態轉換規則是否完整？
+- **A7. 計算公式**：衍生值（金額、百分比、排名）的計算公式是否明確？
+- **A8. 級聯效應**：實體狀態改變時，關聯實體如何同步？
+- **A9. 時間約束**：有效期、超時、保留期限？
+- **A10. 並發衝突**：同一資源多人操作的處理？
 
 ### B. 功能模型檢查（四類規則分類）
 - **B1. 功能識別**：所有使用者與系統的交互點是否都已識別？
@@ -72,6 +76,8 @@ export async function runPrdDiscovery(
 - **B3. 例子覆蓋度**：每條規則是否有足夠的例子？
 - **B4. 邊界條件覆蓋**：數值/組合/時間/狀態邊界是否涵蓋？
 - **B5. 錯誤與異常處理**：異常情況是否都有對應規則？
+- **B6. 狀態機完整性**：所有合法遷移路徑？不可回退的狀態？
+- **B7. 批量操作邊界**：數量上限、部分失敗策略？
 
 ### C. 術語與一致性檢查
 - **C1. 詞彙表**：核心概念是否都有一致的命名？
@@ -128,7 +134,16 @@ ${esDocumentContent}` : ''}
       "options": ["A. 選項描述", "B. 選項描述（建議）", "C. 選項描述"],
       "mode": "ask" | "propose",
       "proposedAnswer": "建議的答案（propose 模式必填）",
-      "confidence": "high" | "medium"
+      "confidence": "high" | "medium",
+      "technicalContext": {
+        "entities": [{ "name": "中文實體名", "tableName": "表名", "fields": [{ "name": "欄位名", "label": "中文名", "type": "型別", "constraints": ["約束"] }] }],
+        "relationships": [{ "from": "實體A", "to": "實體B", "type": "1:N", "foreignKey": "外鍵", "description": "白話描述" }],
+        "computations": [{ "target": "目標欄位", "formula": "計算公式", "description": "白話描述" }],
+        "stateTransitions": [{ "entity": "實體", "field": "狀態欄位", "from": "來源狀態", "to": "目標狀態", "trigger": "觸發動作", "description": "白話描述" }],
+        "constraints": [{ "expression": "技術表達式", "description": "白話描述", "scope": "single_field | cross_field | cross_entity" }],
+        "impactedFeatures": ["受影響的功能名稱"]
+      },
+      "whiteTextOptions": ["A. 純白話描述", "B. 純白話描述"]
     }
   ],
   "coverageSummary": {
@@ -137,6 +152,41 @@ ${esDocumentContent}` : ''}
   }
 }
 \`\`\`
+
+## 深度邏輯探測原則
+
+### 必須探測的維度：
+1. **計算公式**（A4/A7）— 金額/數量/百分比 → 怎麼算？哪些欄位參與？精度？
+2. **狀態機**（A6/B6）— 有狀態概念 → 有哪些狀態？如何轉換？有無最終狀態？
+3. **級聯效應**（A8）— 刪除/取消/退款 → 關聯資料怎麼處理？
+4. **跨欄位約束**（A4）— 多個相關欄位 → 互相限制？
+5. **邊界條件**（B4）— 數值 → 零、負數、極大值、小數怎麼處理？
+
+### 禁止的淺層問題：
+- ❌「這個欄位是否需要？」→ ✅「這個資訊是必填還是選填？沒填會怎樣？」
+- ❌「用什麼型別？」→ ✅「這個資訊長什麼樣？數字、文字、日期、還是從選項中選？」
+
+## 白話翻譯強制規則
+
+### 禁止清單（whiteTextQuestion + whiteTextOptions 不可出現）
+- 程式符號：>=, <=, !=, ==, &&, ||, null, undefined, true/false
+- 型別名稱：INT, VARCHAR, DECIMAL, BOOLEAN, ENUM, JSONB, UUID
+- SQL 語法：CHECK, NOT NULL, CONSTRAINT, FOREIGN KEY, PRIMARY KEY
+- 程式概念：API, CRUD, middleware, callback, schema
+
+### 替換規則
+| 技術用語 | 白話替換 |
+|----------|----------|
+| null | 空白、未填寫 |
+| >= 0 | 不可以是負數 |
+| NOT NULL | 必填、不能空白 |
+| DECIMAL(10,2) | 可以有小數的數字 |
+| ENUM('A','B') | 只能從幾個選項中選 |
+| 1:N 關係 | 一個 X 可以有多個 Y |
+| BOOLEAN | 是或否 |
+
+### 品質自檢
+生成後想像你在跟一位沒有程式經驗的花店老闆對話。她會疑惑就需要重寫。
 
 ## 優先級規則
 - **A1（實體完整性）** 的 Missing → **強制 High**
@@ -278,6 +328,7 @@ ${partialSpecContext}
     }
 
     // 轉換格式（符合 bdd-session.ts 的 ClarifyItem 類型）
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const items: ClarifyItem[] = (parsed.items || []).map((item: {
       id?: string
       question: string
@@ -288,6 +339,9 @@ ${partialSpecContext}
       mode?: 'ask' | 'propose'
       proposedAnswer?: string
       confidence?: 'high' | 'medium'
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      technicalContext?: any
+      whiteTextOptions?: string[]
     }) => ({
       id: item.id || crypto.randomUUID(),
       question: item.question,
@@ -303,6 +357,13 @@ ${partialSpecContext}
         mode: 'propose' as const,
         proposedAnswer: item.proposedAnswer,
         confidence: item.confidence || 'high',
+      } : {}),
+      // 深度邏輯探測欄位（寬容解析：格式錯則捨棄）
+      ...(item.technicalContext && typeof item.technicalContext === 'object' && Array.isArray(item.technicalContext.entities) ? {
+        technicalContext: item.technicalContext,
+      } : {}),
+      ...(Array.isArray(item.whiteTextOptions) && item.whiteTextOptions.length > 0 ? {
+        whiteTextOptions: item.whiteTextOptions,
       } : {}),
     }))
 

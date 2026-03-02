@@ -4,6 +4,59 @@ import * as db from '../db/client'
 // 類型定義
 // ============================================================
 
+// === 技術上下文型別（結構化記錄 AI 探測到的技術變數，供 Formulation 消費）===
+
+export interface TechnicalEntityRef {
+  name: string                     // 中文實體名（如「訂單」）
+  tableName?: string               // 表名（如 'orders'）
+  fields: TechnicalFieldRef[]
+}
+
+export interface TechnicalFieldRef {
+  name: string                     // 欄位名（如 'total_amount'）
+  label: string                    // 中文名（如「訂單總額」）
+  type?: string                    // 型別（如 'DECIMAL(10,2)'）
+  constraints?: string[]           // 約束（如 ['NOT NULL', 'CHECK(>= 0)']）
+}
+
+export interface TechnicalRelationship {
+  from: string
+  to: string
+  type: '1:1' | '1:N' | 'N:M'
+  foreignKey?: string
+  description: string              // 白話描述
+}
+
+export interface TechnicalComputation {
+  target: string                   // 目標欄位
+  formula: string                  // 公式（如 'SUM(items.subtotal)'）
+  description: string              // 白話描述
+}
+
+export interface TechnicalStateTransition {
+  entity: string
+  field: string                    // 狀態欄位
+  from: string
+  to: string
+  trigger: string                  // 觸發動作
+  description: string
+}
+
+export interface TechnicalConstraint {
+  expression: string               // 技術表達式
+  description: string              // 白話描述
+  scope: 'single_field' | 'cross_field' | 'cross_entity'
+}
+
+export interface TechnicalContext {
+  entities: TechnicalEntityRef[]
+  relationships?: TechnicalRelationship[]
+  computations?: TechnicalComputation[]
+  stateTransitions?: TechnicalStateTransition[]
+  constraints?: TechnicalConstraint[]
+  impactedFeatures?: string[]
+}
+
 export interface ClarifyItem {
   id: string
   question: string
@@ -17,6 +70,9 @@ export interface ClarifyItem {
   mode?: 'ask' | 'propose'          // 默認 'ask'
   proposedAnswer?: string            // propose 模式的建議答案
   confidence?: 'high' | 'medium'     // 建議信心度
+  // 深度邏輯探測
+  technicalContext?: TechnicalContext // 結構化技術上下文（Formulation 消費）
+  whiteTextOptions?: string[]        // 白話選項（展示用，與 options 並存）
 }
 
 export interface BddSession {

@@ -139,12 +139,25 @@ Phase 6: Change Management（需求變更 → 影響分析 → 執行修改 → 
 ```
 current_phase    -- prd_discovery / prd_clarify / formulation / spec_discovery / spec_clarify / actions_design / isa_config / completed
 current_round    -- 當前輪次
-clarify_items    -- JSONB，待處理 [{ id, question, category, priority, status, mode, proposedAnswer }]
+clarify_items    -- JSONB，待處理 [{ id, question, whiteTextQuestion, category, priority, status, mode, proposedAnswer, technicalContext?, whiteTextOptions? }]
 staging_items    -- JSONB，暫存區（待確認）
 resolved_items   -- JSONB，已解決
 schema_sql_content / entity_mapping_content / features_content / actions_yml_content / isa_config_content
 es_document_content  -- Event Storming 知識地圖
 change_history   -- JSONB，變更歷史追蹤
+```
+
+**ClarifyItem.technicalContext 結構**（JSONB 自動序列化，無需 DB migration）：
+```
+technicalContext: {
+  entities: [{ name, tableName?, fields: [{ name, label, type?, constraints? }] }]
+  relationships?: [{ from, to, type: '1:1'|'1:N'|'N:M', foreignKey?, description }]
+  computations?: [{ target, formula, description }]
+  stateTransitions?: [{ entity, field, from, to, trigger, description }]
+  constraints?: [{ expression, description, scope: 'single_field'|'cross_field'|'cross_entity' }]
+  impactedFeatures?: string[]
+}
+whiteTextOptions: string[]  -- 白話選項（展示用，與 options 並存）
 ```
 
 ## 認證系統

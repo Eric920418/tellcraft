@@ -2534,13 +2534,15 @@ async function sendClarifyQuestion(
   }
 
   // ── 普通問答模式（ask）──
+  // 優先使用白話選項展示
+  const displayOptions = item.whiteTextOptions && item.whiteTextOptions.length > 0
+    ? item.whiteTextOptions
+    : (item.options || []).map(opt => typeof opt === 'string' ? opt : (opt.description || opt.label || ''))
+
   // 檢測是否有「（建議）」選項
   let hasProposal = false
-  if (item.options && item.options.length > 0) {
-    hasProposal = item.options.some(opt => {
-      const optStr = typeof opt === 'string' ? opt : (opt.description || opt.label || '')
-      return optStr.includes('（建議）')
-    })
+  if (displayOptions.length > 0) {
+    hasProposal = displayOptions.some(opt => opt.includes('（建議）'))
   }
 
   if (hasProposal) {
@@ -2549,38 +2551,27 @@ async function sendClarifyQuestion(
     text += '\n\n'
   }
 
-  if (item.options && item.options.length > 0) {
-    text += item.options.map((opt, j) => {
-      if (typeof opt === 'string') {
-        const match = opt.match(/^([A-Z])\.\s*(.*)$/)
-        if (match) {
-          const isProposal = match[2].includes('（建議）')
-          const display = isProposal ? `${match[2]}  ✅` : match[2]
-          return `**${match[1]}.** ${display}`
-        }
-        return `**${String.fromCharCode(65 + j)}.** ${opt}`
-      } else {
-        return `**${String.fromCharCode(65 + j)}.** ${opt.description || opt.label || ''}`
+  if (displayOptions.length > 0) {
+    text += displayOptions.map((opt, j) => {
+      const match = opt.match(/^([A-Z])\.\s*(.*)$/)
+      if (match) {
+        const isProposal = match[2].includes('（建議）')
+        const display = isProposal ? `${match[2]}  ✅` : match[2]
+        return `**${match[1]}.** ${display}`
       }
+      return `**${String.fromCharCode(65 + j)}.** ${opt}`
     }).join('\n\n')
     text += '\n\n_（或直接輸入您的答案）_'
   }
 
-  // 構建 quick replies
+  // 構建 quick replies（也基於白話選項）
   const quickReplies: { label: string; value: string; style?: 'primary' | 'secondary' | 'ghost' }[] = []
-  if (item.options && item.options.length > 0) {
-    item.options.forEach((opt, j) => {
+  if (displayOptions.length > 0) {
+    displayOptions.forEach((opt, j) => {
       const letter = String.fromCharCode(65 + j)
-      let label = ''
-      let optStr = ''
-      if (typeof opt === 'string') {
-        const match = opt.match(/^([A-Z])\.\s*(.*)$/)
-        label = match ? `${match[1]}. ${match[2]}` : `${letter}. ${opt}`
-        optStr = match ? match[2] : opt
-      } else {
-        label = `${letter}. ${opt.description || opt.label || ''}`
-        optStr = opt.description || opt.label || ''
-      }
+      const match = opt.match(/^([A-Z])\.\s*(.*)$/)
+      const label = match ? `${match[1]}. ${match[2]}` : `${letter}. ${opt}`
+      const optStr = match ? match[2] : opt
       const isProposal = optStr.includes('（建議）')
       quickReplies.push({ label, value: letter, style: isProposal ? 'primary' : 'ghost' })
     })
@@ -3397,16 +3388,17 @@ function getFullAnswer(item: ClarifyItem): string {
     return `**${customMatch[1].toUpperCase()}.** ${customMatch[2]}`
   }
 
-  if (/^[A-Da-d]$/.test(answer) && item.options && item.options.length > 0) {
+  if (/^[A-Da-d]$/.test(answer)) {
     const optionIndex = answer.toUpperCase().charCodeAt(0) - 65
-    const opt = item.options[optionIndex]
-    if (opt) {
-      if (typeof opt === 'string') {
-        const match = opt.match(/^[A-Z]\.\s*(.*)$/)
-        return `**${answer.toUpperCase()}.** ${match ? match[1] : opt}`
-      } else {
-        return `**${answer.toUpperCase()}.** ${opt.description || opt.label || ''}`
-      }
+    // 優先使用白話選項展示
+    const displayOptions = item.whiteTextOptions && item.whiteTextOptions.length > 0
+      ? item.whiteTextOptions
+      : (item.options || []).map(opt => typeof opt === 'string' ? opt : (opt.description || opt.label || ''))
+
+    if (displayOptions.length > optionIndex) {
+      const opt = displayOptions[optionIndex]
+      const match = opt.match(/^[A-Z]\.\s*(.*)$/)
+      return `**${answer.toUpperCase()}.** ${match ? match[1] : opt}`
     }
   }
 

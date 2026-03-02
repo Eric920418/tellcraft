@@ -1,6 +1,6 @@
 import { recordLlmUsage } from '../db/client'
 import { safeParseJson } from '../utils/safe-parse-json'
-import { ClarifyItem } from './bdd-session'
+import { ClarifyItem, TechnicalContext } from './bdd-session'
 import { LlmTrackingContext } from './classifier'
 
 // Sonnet 定價 (每百萬 tokens)
@@ -122,6 +122,145 @@ async function callClaude(
 }
 
 // ============================================================
+// TechnicalContext 提取輔助函數
+// ============================================================
+
+/**
+ * 從 resolvedItems 的 technicalContext 中提取結構化 Schema 提示
+ * 供注入 Formulation 各階段的 prompt
+ */
+function extractSchemaHints(resolvedItems: ClarifyItem[]): string {
+  const itemsWithContext = resolvedItems.filter(
+    item => item.status === 'answered' && item.technicalContext
+  )
+  if (itemsWithContext.length === 0) return ''
+
+  const allEntities = new Map<string, TechnicalContext['entities'][0]>()
+  const allRelationships: NonNullable<TechnicalContext['relationships']> = []
+  const allComputations: NonNullable<TechnicalContext['computations']> = []
+  const allStateTransitions: NonNullable<TechnicalContext['stateTransitions']> = []
+  const allConstraints: NonNullable<TechnicalContext['constraints']> = []
+
+  for (const item of itemsWithContext) {
+    const ctx = item.technicalContext!
+
+    // 聚合實體（按 tableName 去重合併 fields）
+    for (const entity of ctx.entities) {
+      const key = entity.tableName || entity.name
+      const existing = allEntities.get(key)
+      if (existing) {
+        const existingFieldNames = new Set(existing.fields.map(f => f.name))
+        for (const field of entity.fields) {
+          if (!existingFieldNames.has(field.name)) {
+            existing.fields.push(field)
+          }
+        }
+      } else {
+        allEntities.set(key, { ...entity })
+      }
+    }
+
+    if (ctx.relationships) allRelationships.push(...ctx.relationships)
+    if (ctx.computations) allComputations.push(...ctx.computations)
+    if (ctx.stateTransitions) allStateTransitions.push(...ctx.stateTransitions)
+    if (ctx.constraints) allConstraints.push(...ctx.constraints)
+  }
+
+  const lines: string[] = ['## 結構化技術上下文（來自釐清階段）\n']
+
+  if (allEntities.size > 0) {
+    lines.push('### 實體與欄位')
+    for (const entity of allEntities.values()) {
+      const tablePart = entity.tableName ? ` (${entity.tableName})` : ''
+      lines.push(`- **${entity.name}**${tablePart}`)
+      for (const field of entity.fields) {
+        const typePart = field.type ? ` ${field.type}` : ''
+        const constraintPart = field.constraints?.length ? ` [${field.constraints.join(', ')}]` : ''
+        lines.push(`  - ${field.label} (${field.name})${typePart}${constraintPart}`)
+      }
+    }
+    lines.push('')
+  }
+
+  if (allRelationships.length > 0) {
+    lines.push('### 實體關係')
+    for (const rel of allRelationships) {
+      const fkPart = rel.foreignKey ? ` FK: ${rel.foreignKey}` : ''
+      lines.push(`- ${rel.from} → ${rel.to} [${rel.type}]${fkPart} — ${rel.description}`)
+    }
+    lines.push('')
+  }
+
+  if (allComputations.length > 0) {
+    lines.push('### 計算規則')
+    for (const comp of allComputations) {
+      lines.push(`- ${comp.target} = ${comp.formula} — ${comp.description}`)
+    }
+    lines.push('')
+  }
+
+  if (allStateTransitions.length > 0) {
+    lines.push('### 狀態轉換')
+    for (const st of allStateTransitions) {
+      lines.push(`- ${st.entity}.${st.field}: ${st.from} → ${st.to} (觸發: ${st.trigger}) — ${st.description}`)
+    }
+    lines.push('')
+  }
+
+  if (allConstraints.length > 0) {
+    lines.push('### 約束條件')
+    for (const c of allConstraints) {
+      lines.push(`- [${c.scope}] ${c.expression} — ${c.description}`)
+    }
+    lines.push('')
+  }
+
+  return lines.join('\n')
+}
+
+/**
+ * 為單一 ClarifyItem 生成技術映射文字（用於 decisions 字串中）
+ */
+function formatItemTechnicalMapping(item: ClarifyItem): string {
+  if (!item.technicalContext) return ''
+
+  const ctx = item.technicalContext
+  const parts: string[] = []
+
+  if (ctx.entities.length > 0) {
+    const entityStr = ctx.entities.map(e => {
+      const fields = e.fields.map(f => {
+        const typePart = f.type ? ` ${f.type}` : ''
+        return `${f.name}${typePart}`
+      }).join(', ')
+      const tablePart = e.tableName ? `(${e.tableName})` : ''
+      return `${e.name}${tablePart}: ${fields}`
+    }).join('; ')
+    parts.push(`[技術映射] 涉及實體：${entityStr}`)
+  }
+
+  if (ctx.computations?.length) {
+    for (const comp of ctx.computations) {
+      parts.push(`[計算規則] ${comp.target} = ${comp.formula}`)
+    }
+  }
+
+  if (ctx.stateTransitions?.length) {
+    for (const st of ctx.stateTransitions) {
+      parts.push(`[狀態轉換] ${st.entity}.${st.field}: ${st.from} → ${st.to}`)
+    }
+  }
+
+  if (ctx.constraints?.length) {
+    for (const c of ctx.constraints) {
+      parts.push(`[約束] ${c.expression}`)
+    }
+  }
+
+  return parts.join('\n')
+}
+
+// ============================================================
 // Phase 2: Formulation - 產出 SQL Schema
 // ============================================================
 
@@ -138,8 +277,14 @@ export async function generateSchemaSql(
 }> {
   const decisions = resolvedItems
     .filter(item => item.status === 'answered' && item.answer)
-    .map(item => `Q: ${item.whiteTextQuestion || item.question}\nA: ${item.answer}`)
+    .map(item => {
+      const base = `Q: ${item.whiteTextQuestion || item.question}\nA: ${item.answer}`
+      const techMapping = formatItemTechnicalMapping(item)
+      return techMapping ? `${base}\n${techMapping}` : base
+    })
     .join('\n\n')
+
+  const schemaHints = extractSchemaHints(resolvedItems)
 
   const systemPrompt = `你是一位資深的資料庫架構師。根據需求和釐清決策，產出 SQL Schema 和 Entity 映射。
 
@@ -182,7 +327,11 @@ ${requirements}
 ---
 
 釐清決策：
-${decisions || '（無額外決策）'}`
+${decisions || '（無額外決策）'}${schemaHints ? `
+
+---
+
+${schemaHints}` : ''}`
 
   console.log('[Formulation] 生成 SQL Schema...')
   const response = await callClaude(systemPrompt, userMessage, { maxTokens: 8192 })
@@ -241,8 +390,14 @@ export async function identifyFeatures(
 }> {
   const decisions = resolvedItems
     .filter(item => item.status === 'answered' && item.answer)
-    .map(item => `Q: ${item.whiteTextQuestion || item.question}\nA: ${item.answer}`)
+    .map(item => {
+      const base = `Q: ${item.whiteTextQuestion || item.question}\nA: ${item.answer}`
+      const techMapping = formatItemTechnicalMapping(item)
+      return techMapping ? `${base}\n${techMapping}` : base
+    })
     .join('\n\n')
+
+  const schemaHints = extractSchemaHints(resolvedItems)
 
   const systemPrompt = `你是一位資深的 BDD 分析師。根據需求和 Schema，識別所有需要的功能（Feature）。
 
@@ -302,7 +457,11 @@ ${schemaSql}
 ---
 
 釐清決策：
-${decisions || '（無額外決策）'}`
+${decisions || '（無額外決策）'}${schemaHints ? `
+
+---
+
+${schemaHints}` : ''}`
 
   console.log('[Formulation] 識別 Features...')
   const response = await callClaude(systemPrompt, userMessage, { maxTokens: 8192 })
@@ -361,8 +520,23 @@ export async function generateSingleFeature(
 }> {
   const decisions = resolvedItems
     .filter(item => item.status === 'answered' && item.answer)
-    .map(item => `Q: ${item.whiteTextQuestion || item.question}\nA: ${item.answer}`)
+    .map(item => {
+      const base = `Q: ${item.whiteTextQuestion || item.question}\nA: ${item.answer}`
+      const techMapping = formatItemTechnicalMapping(item)
+      return techMapping ? `${base}\n${techMapping}` : base
+    })
     .join('\n\n')
+
+  // 提取與此 feature 相關的 technicalContext
+  const relatedItems = resolvedItems.filter(item =>
+    item.technicalContext?.impactedFeatures?.some(f =>
+      f.toLowerCase().includes(featureInfo.actionName.toLowerCase()) ||
+      featureInfo.name.includes(f)
+    )
+  )
+  const featureSchemaHints = relatedItems.length > 0
+    ? extractSchemaHints(relatedItems)
+    : extractSchemaHints(resolvedItems)
 
   const systemPrompt = `你是一位資深的 BDD 分析師。請為指定的功能產出 Gherkin Feature File。
 
@@ -531,7 +705,11 @@ ${entityMapping}
 ---
 
 釐清決策：
-${decisions || '（無額外決策）'}`
+${decisions || '（無額外決策）'}${featureSchemaHints ? `
+
+---
+
+${featureSchemaHints}` : ''}`
 
   const response = await callClaude(systemPrompt, userMessage, { maxTokens: 8192 })
 
