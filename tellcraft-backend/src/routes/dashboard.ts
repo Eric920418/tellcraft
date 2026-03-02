@@ -202,11 +202,16 @@ router.get('/admin/usage', requireAdmin, async (req, res) => {
       output_tokens: number
       cost_usd: string
       created_at: string
+      user_name: string | null
+      user_email: string | null
     }>(
-      `SELECT id, user_id, conversation_id, model, input_tokens, output_tokens, cost_usd, created_at
+      `SELECT llm_usage.id, llm_usage.user_id, llm_usage.conversation_id, llm_usage.model,
+              llm_usage.input_tokens, llm_usage.output_tokens, llm_usage.cost_usd, llm_usage.created_at,
+              users.name AS user_name, users.email AS user_email
        FROM llm_usage
-       WHERE created_at >= $1 AND created_at <= $2
-       ORDER BY created_at ASC`,
+       LEFT JOIN users ON llm_usage.user_id = users.id
+       WHERE llm_usage.created_at >= $1 AND llm_usage.created_at <= $2
+       ORDER BY llm_usage.created_at ASC`,
       [start, end]
     )
 
@@ -220,6 +225,8 @@ router.get('/admin/usage', requireAdmin, async (req, res) => {
       outputTokens: number
       cost: number
       count: number
+      userName?: string
+      userId?: string
     }>()
 
     for (const row of result.rows) {
@@ -255,12 +262,18 @@ router.get('/admin/usage', requireAdmin, async (req, res) => {
       }
 
       const existing = breakdownMap.get(key) || { inputTokens: 0, outputTokens: 0, cost: 0, count: 0 }
-      breakdownMap.set(key, {
+      const entry: typeof existing = {
         inputTokens: existing.inputTokens + (row.input_tokens || 0),
         outputTokens: existing.outputTokens + (row.output_tokens || 0),
         cost: existing.cost + (parseFloat(row.cost_usd) || 0),
         count: existing.count + 1,
-      })
+      }
+      // conversation 分組時記錄用戶資訊（取第一條記錄的）
+      if (groupBy === 'conversation' && !existing.userName) {
+        entry.userName = row.user_name || row.user_email || undefined
+        entry.userId = row.user_id || undefined
+      }
+      breakdownMap.set(key, entry)
     }
 
     const breakdown = Array.from(breakdownMap.entries()).map(([key, value]) => ({

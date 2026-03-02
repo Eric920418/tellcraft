@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useState, useMemo } from 'react'
-import { useRouter } from '@/i18n/navigation'
+import { useRouter, Link } from '@/i18n/navigation'
 import { motion } from 'framer-motion'
 import { useTranslations } from 'next-intl'
 import { StatsCard, BarChart, LineChart, DateRangePicker } from '@/app/components/dashboard'
@@ -17,6 +17,8 @@ interface LLMUsage {
     outputTokens: number
     cost: number
     count: number
+    userName?: string
+    userId?: string
   }>
 }
 
@@ -345,11 +347,16 @@ export default function AdminUsagePage() {
         ) : (
           <>
             <div style={{ overflowX: 'auto' }}>
-              <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', tableLayout: 'fixed' }}>
                 <thead>
                   <tr style={{ borderBottom: '1px solid var(--border-color)' }}>
-                    <th style={{ padding: '12px 16px', textAlign: 'left', fontSize: 12, color: 'var(--gray-500)', fontWeight: 500 }}>
-                      {groupBy === 'model' ? t('columnModel') : groupBy === 'conversation' ? t('columnConversationId') : t('columnDate')}
+                    {groupBy === 'conversation' && (
+                      <th style={{ padding: '12px 16px', textAlign: 'left', fontSize: 12, color: 'var(--gray-500)', fontWeight: 500, width: '15%' }}>
+                        {t('columnUser')}
+                      </th>
+                    )}
+                    <th style={{ padding: '12px 16px', textAlign: 'left', fontSize: 12, color: 'var(--gray-500)', fontWeight: 500, width: groupBy === 'conversation' ? '20%' : undefined }}>
+                      {groupBy === 'model' ? t('columnModel') : groupBy === 'conversation' ? t('columnConversation') : t('columnDate')}
                     </th>
                     <th style={{ padding: '12px 16px', textAlign: 'right', fontSize: 12, color: 'var(--gray-500)', fontWeight: 500 }}>
                       {t('columnCount')}
@@ -363,15 +370,34 @@ export default function AdminUsagePage() {
                     <th style={{ padding: '12px 16px', textAlign: 'right', fontSize: 12, color: 'var(--gray-500)', fontWeight: 500 }}>
                       {t('columnCost')}
                     </th>
+                    {groupBy === 'conversation' && (
+                      <th style={{ padding: '12px 16px', textAlign: 'center', fontSize: 12, color: 'var(--gray-500)', fontWeight: 500, width: '8%' }}>
+                        {t('columnActions')}
+                      </th>
+                    )}
                   </tr>
                 </thead>
                 <tbody>
                   {pagedBreakdown.map((row) => (
                     <tr key={row.key} style={{ borderBottom: '1px solid var(--border-color)' }}>
-                      <td style={{ padding: '14px 16px', fontSize: 14 }}>
+                      {groupBy === 'conversation' && (
+                        <td style={{ padding: '14px 16px', fontSize: 13, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          {row.userId ? (
+                            <Link
+                              href={`/dashboard/admin/users/${row.userId}`}
+                              style={{ color: 'var(--gray-700)', textDecoration: 'none' }}
+                            >
+                              {row.userName || row.userId.slice(0, 8)}
+                            </Link>
+                          ) : (
+                            <span style={{ color: 'var(--gray-400)' }}>-</span>
+                          )}
+                        </td>
+                      )}
+                      <td style={{ padding: '14px 16px', fontSize: 14, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                         {groupBy === 'conversation' && row.key !== t('noConversation') ? (
-                          <a
-                            href={`/dashboard/conversations/${row.key}`}
+                          <Link
+                            href={`/dashboard/admin/conversations/${row.key}`}
                             style={{
                               color: 'var(--blue-600)',
                               textDecoration: 'none',
@@ -381,7 +407,7 @@ export default function AdminUsagePage() {
                             title={row.key}
                           >
                             {row.key.slice(0, 8)}...
-                          </a>
+                          </Link>
                         ) : (
                           row.key
                         )}
@@ -398,6 +424,25 @@ export default function AdminUsagePage() {
                       <td style={{ padding: '14px 16px', fontSize: 14, textAlign: 'right', fontFamily: 'var(--font-mono)' }}>
                         ${row.cost.toFixed(4)}
                       </td>
+                      {groupBy === 'conversation' && (
+                        <td style={{ padding: '14px 16px', textAlign: 'center' }}>
+                          {row.key !== t('noConversation') && (
+                            <Link
+                              href={`/dashboard/admin/conversations/${row.key}`}
+                              style={{
+                                fontSize: 12,
+                                color: 'var(--blue-600)',
+                                textDecoration: 'none',
+                                padding: '4px 8px',
+                                border: '1px solid var(--border-color)',
+                                borderRadius: 4,
+                              }}
+                            >
+                              {t('viewRecord')}
+                            </Link>
+                          )}
+                        </td>
+                      )}
                     </tr>
                   ))}
                 </tbody>

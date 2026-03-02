@@ -478,6 +478,10 @@
       "columnDate": "日期",
       "columnCount": "次數",
       "columnCost": "成本",
+      "columnUser": "用戶",
+      "columnConversation": "對話",
+      "columnActions": "操作",
+      "viewRecord": "查看",
       "noConversation": "(無對話)"
     },
     "templates": {

@@ -478,6 +478,10 @@
       "columnDate": "Date",
       "columnCount": "Count",
       "columnCost": "Cost",
+      "columnUser": "User",
+      "columnConversation": "Conversation",
+      "columnActions": "Actions",
+      "viewRecord": "View",
       "noConversation": "(No conversation)"
     },
     "templates": {

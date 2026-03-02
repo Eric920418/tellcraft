@@ -383,6 +383,8 @@ export async function getLLMUsageStats(input: {
     outputTokens: number
     cost: number
     count: number
+    userName?: string
+    userId?: string
   }>
 }>> {
   const params = new URLSearchParams()
