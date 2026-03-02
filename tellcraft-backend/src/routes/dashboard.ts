@@ -276,7 +276,8 @@ router.get('/admin/usage', requireAdmin, async (req, res) => {
           entry.userId = row.user_id || undefined
         }
         // 追蹤該分組的最新活動時間（SQL 已按 ASC，所以最後一條最新）
-        entry.latestAt = row.created_at
+        // pg 驅動對 TIMESTAMPTZ 返回 Date 物件，用 new Date() 統一處理
+        entry.latestAt = new Date(row.created_at).toISOString()
       }
       breakdownMap.set(key, entry)
     }
@@ -289,9 +290,9 @@ router.get('/admin/usage', requireAdmin, async (req, res) => {
     // conversation 分組按最新活動時間降序排列（最近活動在前）
     if (groupBy === 'conversation') {
       breakdown = breakdown.sort((a, b) => {
-        const timeA = a.latestAt || ''
-        const timeB = b.latestAt || ''
-        return timeB.localeCompare(timeA)
+        const timeA = new Date(a.latestAt || 0).getTime()
+        const timeB = new Date(b.latestAt || 0).getTime()
+        return timeB - timeA
       })
     }
 
