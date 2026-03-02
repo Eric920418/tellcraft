@@ -482,7 +482,8 @@
       "columnConversation": "對話",
       "columnActions": "操作",
       "viewRecord": "查看",
-      "noConversation": "(無對話)"
+      "noConversation": "(無對話)",
+      "systemUser": "系統"
     },
     "templates": {
       "title": "模板管理",

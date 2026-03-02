@@ -166,7 +166,7 @@ export function LineChart({
       ref={ref}
       width="100%"
       height={height}
-      style={{ overflow: 'visible' }}
+      style={{ overflow: 'hidden' }}
     >
       {/* Area */}
       {showArea && dimensions.width > 0 && (
@@ -209,21 +209,27 @@ export function LineChart({
           />
         ))}
 
-      {/* X axis labels */}
-      {points.map((point, i) => (
-        <text
-          key={`label-${i}`}
-          x={point.x}
-          y={height - 10}
-          textAnchor="middle"
-          style={{
-            fontSize: 11,
-            fill: 'var(--gray-400)',
-          }}
-        >
-          {point.label}
-        </text>
-      ))}
+      {/* X axis labels — 數據多時間隔顯示並截斷 */}
+      {points.map((point, i) => {
+        const labelInterval = data.length > 12 ? Math.ceil(data.length / 8) : 1
+        if (i % labelInterval !== 0 && i !== points.length - 1) return null
+        const maxLen = data.length > 10 ? 6 : 10
+        const displayLabel = point.label.length > maxLen ? point.label.slice(0, maxLen) : point.label
+        return (
+          <text
+            key={`label-${i}`}
+            x={point.x}
+            y={height - 10}
+            textAnchor="middle"
+            style={{
+              fontSize: 11,
+              fill: 'var(--gray-400)',
+            }}
+          >
+            {displayLabel}
+          </text>
+        )
+      })}
     </svg>
   )
 }

@@ -385,6 +385,7 @@ export async function getLLMUsageStats(input: {
     count: number
     userName?: string
     userId?: string
+    latestAt?: string
   }>
 }>> {
   const params = new URLSearchParams()

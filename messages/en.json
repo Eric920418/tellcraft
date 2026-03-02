@@ -482,7 +482,8 @@
       "columnConversation": "Conversation",
       "columnActions": "Actions",
       "viewRecord": "View",
-      "noConversation": "(No conversation)"
+      "noConversation": "(No conversation)",
+      "systemUser": "System"
     },
     "templates": {
       "title": "Template Management",

@@ -227,6 +227,7 @@ router.get('/admin/usage', requireAdmin, async (req, res) => {
       count: number
       userName?: string
       userId?: string
+      latestAt?: string
     }>()
 
     for (const row of result.rows) {
@@ -268,18 +269,31 @@ router.get('/admin/usage', requireAdmin, async (req, res) => {
         cost: existing.cost + (parseFloat(row.cost_usd) || 0),
         count: existing.count + 1,
       }
-      // conversation 分組時記錄用戶資訊（取第一條記錄的）
-      if (groupBy === 'conversation' && !existing.userName) {
-        entry.userName = row.user_name || row.user_email || undefined
-        entry.userId = row.user_id || undefined
+      // conversation 分組時記錄用戶資訊和最新活動時間
+      if (groupBy === 'conversation') {
+        if (!existing.userName) {
+          entry.userName = row.user_name || row.user_email || undefined
+          entry.userId = row.user_id || undefined
+        }
+        // 追蹤該分組的最新活動時間（SQL 已按 ASC，所以最後一條最新）
+        entry.latestAt = row.created_at
       }
       breakdownMap.set(key, entry)
     }
 
-    const breakdown = Array.from(breakdownMap.entries()).map(([key, value]) => ({
+    let breakdown = Array.from(breakdownMap.entries()).map(([key, value]) => ({
       key,
       ...value
     }))
+
+    // conversation 分組按最新活動時間降序排列（最近活動在前）
+    if (groupBy === 'conversation') {
+      breakdown = breakdown.sort((a, b) => {
+        const timeA = a.latestAt || ''
+        const timeB = b.latestAt || ''
+        return timeB.localeCompare(timeA)
+      })
+    }
 
     res.json({
       totalInputTokens,

@@ -19,6 +19,7 @@ interface LLMUsage {
     count: number
     userName?: string
     userId?: string
+    latestAt?: string
   }>
 }
 
@@ -49,7 +50,8 @@ export default function AdminUsagePage() {
   const [dateRange, setDateRange] = useState(getDefaultDateRange)
   const [tablePage, setTablePage] = useState(0)
   const TABLE_PAGE_SIZE = 20
-  const CHART_MAX_ITEMS = 20
+  // conversation 模式項目多，圖表減少到 10 個避免爆版
+  const CHART_MAX_ITEMS = groupBy === 'conversation' ? 10 : 20
 
   // 切換 groupBy 時重置分頁
   useEffect(() => {
@@ -100,11 +102,11 @@ export default function AdminUsagePage() {
       : items
     return sorted.map((d) => ({
       label: groupBy === 'conversation'
-        ? d.key.slice(0, 8)
+        ? (d.userName?.slice(0, 6) || d.key.slice(0, 6))
         : d.key.length > 10 ? d.key.slice(5) : d.key,
       value: d.count,
     }))
-  }, [usage?.breakdown, groupBy])
+  }, [usage?.breakdown, groupBy, CHART_MAX_ITEMS])
 
   const costChartData = useMemo(() => {
     const items = usage?.breakdown || []
@@ -113,11 +115,11 @@ export default function AdminUsagePage() {
       : items
     return sorted.map((d) => ({
       label: groupBy === 'conversation'
-        ? d.key.slice(0, 8)
+        ? (d.userName?.slice(0, 6) || d.key.slice(0, 6))
         : d.key.length > 10 ? d.key.slice(5) : d.key,
       value: d.cost,
     }))
-  }, [usage?.breakdown, groupBy])
+  }, [usage?.breakdown, groupBy, CHART_MAX_ITEMS])
 
   // 表格分頁
   const totalRows = usage?.breakdown.length || 0
@@ -264,6 +266,8 @@ export default function AdminUsagePage() {
             padding: 24,
             background: 'var(--white)',
             border: '1px solid var(--border-color)',
+            minWidth: 0,
+            overflow: 'hidden',
           }}
         >
           <h2 style={{ fontSize: 16, fontWeight: 500, marginBottom: 20 }}>
@@ -293,6 +297,8 @@ export default function AdminUsagePage() {
             padding: 24,
             background: 'var(--white)',
             border: '1px solid var(--border-color)',
+            minWidth: 0,
+            overflow: 'hidden',
           }}
         >
           <h2 style={{ fontSize: 16, fontWeight: 500, marginBottom: 20 }}>
@@ -390,7 +396,7 @@ export default function AdminUsagePage() {
                               {row.userName || row.userId.slice(0, 8)}
                             </Link>
                           ) : (
-                            <span style={{ color: 'var(--gray-400)' }}>-</span>
+                            <span style={{ color: 'var(--gray-400)', fontStyle: 'italic' }}>{t('systemUser')}</span>
                           )}
                         </td>
                       )}
