@@ -2636,10 +2636,23 @@ async function processUserReply(input: ProcessReplyInput) {
       // ── 語義閘門：自由文字回答是否明確 ──
       const isOptionAnswer = /^[A-Da-d]\.?\s*$/.test(userMessage.trim())
       if (!isOptionAnswer) {
+        const isZh = state.locale !== 'en'
+
+        // 超短輸入防護（≤3 字元非中文非有意義短詞 → 直接拒絕，不浪費 Sonnet）
+        const shortInput = userMessage.trim()
+        if (shortInput.length <= 3 && !/[\u4e00-\u9fff\u3400-\u4dbf]/.test(shortInput) && !/^(yes|no|ok|all|n\/a)$/i.test(shortInput)) {
+          await sendMessage(conversationId, io, {
+            content: isZh
+              ? '我不太確定您的意思。請選擇一個選項（如 A、B、C），或用完整句子描述您的想法。'
+              : 'I\'m not sure what you mean. Please select an option (e.g. A, B, C) or describe your thoughts in a complete sentence.',
+            stage: 'clarify_question',
+          })
+          return
+        }
+
         // 品質前置檢查（攔截亂碼，不讓 quickFilter 放行垃圾）
         const qualityCheck = checkInputQuality(userMessage.trim(), 'strict', state.locale)
         if (qualityCheck.quality !== 'valid') {
-          const isZh = state.locale !== 'en'
           await sendMessage(conversationId, io, {
             content: isZh
               ? '我不太確定您的意思。請選擇一個選項（如 A、B、C、D），或用完整句子描述您的想法。'
@@ -3422,20 +3435,17 @@ function validateAnswer(
     }
   }
 
-  // 帶點的格式
-  const letterWithDot = trimmedAnswer.match(/^([A-Za-z])\.?\s*(.*)/)
-  if (letterWithDot) {
-    const letter = letterWithDot[1].toUpperCase()
-    const customText = letterWithDot[2]?.trim()
+  // 帶分隔符的格式（如 "A. xxx"、"B: xxx"、"C xxx"）— 必須有明確分隔
+  const letterWithSep = trimmedAnswer.match(/^([A-Za-z])(?:[.:]\s*|\s+)(.+)/)
+  if (letterWithSep) {
+    const letter = letterWithSep[1].toUpperCase()
+    const customText = letterWithSep[2]?.trim()
     if (validLetters.includes(letter)) {
-      if (customText) {
-        return { valid: true, normalizedAnswer: `${letter}: ${customText}` }
-      }
-      return { valid: true, normalizedAnswer: letter }
+      return { valid: true, normalizedAnswer: customText ? `${letter}: ${customText}` : letter }
     }
   }
 
-  // 接受任何輸入作為自定義答案
+  // 接受任何輸入作為自定義答案（語義檢查由後續 semanticGateway 處理）
   return { valid: true, normalizedAnswer: trimmedAnswer }
 }
 

@@ -524,7 +524,8 @@ psql "$DATABASE_URL" -f tellcraft-backend/migrations/xxx.sql
 - **`prefilter.ts` 新增 `checkInputQuality()`**：`checkOffensive()`（~23 中英髒話 pattern）→ `checkGibberish()`（G1-G6 + G2b/G2c：同字元重複/短模式重複/去標點子模式重複/中文夾雜亂碼拉丁低 unique ratio/無母音/低 unique ratio/高子音密度/strict 短詞）→ `checkSpam()`（純數字/純數字符號/純符號）
 - **`prefilterMessage()` 整合**：injection check 之後、rate limit 之前注入品質檢測，offensive 觸發違規累計
 - **`handleContinueFlow` phase-aware gate**：go_back/retry 檢測後、phase 路由前二次攔截，`getPhaseStrictness()` 映射 strict/normal/lenient/skip，Redis anti-loop（3 次強制放行）
-- **`semanticGateway` 前置檢查**：BDD 釐清調用 `checkInputQuality('strict')` 攔截亂碼，在 gateway 之前攔截
+- **`semanticGateway` 前置檢查**：BDD 釐清調用 `checkInputQuality('strict')` 攔截亂碼，在 gateway 之前攔截。超短輸入（≤3 字元純拉丁）直接拒絕不送 Sonnet
+- **`validateAnswer` regex 修正**：選項解析改為 `/^([A-Za-z])(?:[.:]\s*|\s+)(.+)/`（要求字母後有明確分隔符），防止 "agd" 被貪婪解析為「選 A 加備註 gd」
 - **白名單**：~60 個技術縮寫（rwd/css/html/api/jwt...）不會被誤判為無母音亂碼
 - **中英雙語 userMessage**：拒絕時顯示引導用語，不只是冷冰冰的錯誤
 - **修復「不要部署」被當成迭代請求**：`hasDeployIntent()` 新增否定詞排除（不要/不想/別/先不...）+ `hasRejectDeployIntent()` 偵測拒絕部署意圖 → 回覆確認而非觸發迭代。`部屬` 加入 `部署` 的常見錯字別名。三個 phase（uiux_complete/deployer_complete/deployer_failed）均有處理
