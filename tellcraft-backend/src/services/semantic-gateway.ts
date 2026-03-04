@@ -85,14 +85,19 @@ function quickFilter(input: SemanticGatewayInput): SemanticGatewayResult | null 
     return { verdict: 'valid', accept: true }
   }
 
+  // BDD 釐清：其餘全部送 Sonnet（不做長度短路）
+  // 廢話文（結構正確中文但零實質）只有 LLM 能判斷
+  if (input.phase === 'bdd_clarify') return null
+
+  // ── 以下只有 Design clarify ──
+
   // 有實質內容的長回答 → 放行
-  // 必須：≥20 字 + 無問號 + 有實質內容（非重複/純符號/純數字）
   if (trimmed.length >= 20 && !trimmed.includes('?') && !trimmed.includes('？') && hasSubstantiveContent(trimmed)) {
     return { verdict: 'valid', accept: true }
   }
 
   // Design 問卷：≥5 字 + 有實質內容 → 放行
-  if (input.phase === 'design_clarify' && trimmed.length >= 5 && hasSubstantiveContent(trimmed)) {
+  if (trimmed.length >= 5 && hasSubstantiveContent(trimmed)) {
     return { verdict: 'valid', accept: true }
   }
 
@@ -114,7 +119,9 @@ ${input.questionOptions ? `選項：\n${input.questionOptions}` : ''}`
 
   const strictnessNote = input.phase === 'bdd_clarify'
     ? `- BDD 釐清需要明確回答。「看情況」「都可以」是 ambiguous。
-- 有條件的回答（如「如果...就...」）也是 ambiguous，需要用戶給出明確選擇。`
+- 有條件的回答（如「如果...就...」）也是 ambiguous，需要用戶給出明確選擇。
+- 注意「廢話文」：大量引經據典、哲學格言、但不包含任何具體的需求描述或決策。如果回答中充滿「不能不說非常重大」「深深地想到」「浮想聯翩」這類空洞措辭卻沒有實質回答問題，判定為 off_topic。
+- 回答必須包含跟問題相關的具體信息（如：功能選擇、數量、規則、流程等），不是「看起來很長但什麼都沒說」。`
     : `- 設計問卷容忍更寬鬆。「都可以」「簡約就好」在這裡是 valid。
 - 只要回答跟設計/風格/顏色/感覺有關，就是 valid。
 - 極短但有設計含義的詞（如「暗色」「圓角」「Apple 風」）也是 valid。`
