@@ -369,6 +369,60 @@ function sanitizeCodeForDeploy(code: GeneratedCode): SanitizeResult {
     }
   }
 
+  // ── 修復 7: useSearchParams() 缺少 Suspense boundary（Next.js 15 要求）──
+  // Next.js 15 要求 useSearchParams() 必須在 <Suspense> boundary 內
+  // 對 page 檔案：提取內容為 Client 組件，page 改為包裹 Suspense 的 Server Component
+  for (let i = 0; i < sanitized.pages.length; i++) {
+    const page = sanitized.pages[i]
+    const hasUseSearchParams = /\buseSearchParams\s*\(/.test(page.content)
+    if (!hasUseSearchParams) continue
+
+    // 從 path 推導組件名稱（如 app/page.tsx → PageClient, app/dashboard/page.tsx → DashboardClient）
+    const pathParts = page.path.replace(/^app\//, '').replace(/\/page\.(tsx|ts)$/, '').split('/')
+    const baseName = pathParts.length > 0 && pathParts[0] !== 'page' && pathParts[0] !== ''
+      ? pathParts[pathParts.length - 1].replace(/^\w/, c => c.toUpperCase())
+      : 'Home'
+    const clientComponentName = `${baseName}Client`
+    const clientComponentPath = page.path.replace(/page\.(tsx|ts)$/, `${clientComponentName}.tsx`)
+
+    // 提取原始 page 內容作為 Client 組件
+    let clientContent = page.content
+    // 確保 Client 組件有 'use client'
+    if (!/^['"]use client['"]/.test(clientContent.trimStart())) {
+      clientContent = "'use client'\n\n" + clientContent
+    }
+    // 將 default export 改為 named export
+    clientContent = clientContent.replace(
+      /export\s+default\s+function\s+(\w+)/,
+      `export default function ${clientComponentName}`
+    )
+
+    // 生成新的 Server Component page
+    const newPageContent = `import { Suspense } from 'react'
+import ${clientComponentName} from './${clientComponentName}'
+
+export default function Page() {
+  return (
+    <Suspense fallback={<div className="flex items-center justify-center min-h-screen"><div className="animate-spin h-8 w-8 border-4 border-primary border-t-transparent rounded-full" /></div>}>
+      <${clientComponentName} />
+    </Suspense>
+  )
+}
+`
+
+    // 更新 page 為 Server Component
+    sanitized.pages[i] = { ...page, content: newPageContent }
+
+    // 新增 Client 組件檔案
+    sanitized.components.push({
+      path: clientComponentPath,
+      content: clientContent,
+      description: `Client component extracted for Suspense boundary (useSearchParams)`,
+    })
+
+    fixes.push(`${page.path}: useSearchParams Suspense boundary 修復（提取 ${clientComponentName}）`)
+  }
+
   // CSS 中的 Google Fonts @import
   if (/@import\s+url\(['"]*https:\/\/fonts\.googleapis\.com/.test(sanitized.styles)) {
     sanitized.styles = sanitized.styles.replace(
@@ -436,35 +490,129 @@ export function safeMotionProps<T extends Record<string, unknown>>(props: T) {
     fixes.push(`自動補充 ${Object.keys(extraDependencies).length} 個第三方依賴: ${Object.keys(extraDependencies).join(', ')}`)
   }
 
-  // ── 檔案間引用檢查（只 log warning，不 block 部署）──
+  // ── 檔案間引用檢查 + 自動生成 stub 組件（防止 build 失敗）──
   const filePathSet = new Set<string>()
-  for (const f of allFiles) {
-    filePathSet.add(f.path)
-    filePathSet.add(f.path.replace(/\.(tsx?|jsx?)$/, ''))
-    // index 解析
-    const dir = f.path.replace(/\/[^/]+$/, '')
-    if (f.path.endsWith('/index.tsx') || f.path.endsWith('/index.ts')) {
-      filePathSet.add(dir)
+  const rebuildFilePathSet = () => {
+    filePathSet.clear()
+    const allCurrent = [...sanitized.pages, ...sanitized.components]
+    for (const f of allCurrent) {
+      filePathSet.add(f.path)
+      filePathSet.add(f.path.replace(/\.(tsx?|jsx?)$/, ''))
+      // index 解析
+      const dir = f.path.replace(/\/[^/]+$/, '')
+      if (f.path.endsWith('/index.tsx') || f.path.endsWith('/index.ts')) {
+        filePathSet.add(dir)
+      }
+    }
+  }
+  rebuildFilePathSet()
+
+  // 統一掃描 @/ 和 ./ 兩種路徑的 import
+  const allImportRegex = /from\s+['"](@\/[^'"]+|\.\.?\/[^'"]+)['"]/g
+  const brokenImports: Array<{ file: string; importPath: string; resolvedPath: string; importStatement: string }> = []
+
+  for (const file of [...sanitized.pages, ...sanitized.components]) {
+    allImportRegex.lastIndex = 0
+    let m
+    while ((m = allImportRegex.exec(file.content)) !== null) {
+      const importPath = m[1]
+      let resolved: string
+
+      if (importPath.startsWith('@/')) {
+        // @/ 映射到專案根目錄
+        resolved = importPath.slice(2) // @/components/Foo → components/Foo
+      } else {
+        // ./ 或 ../ 相對路徑
+        const fileDir = file.path.replace(/\/[^/]+$/, '') || '.'
+        resolved = importPath.startsWith('./')
+          ? fileDir + '/' + importPath.slice(2)
+          : fileDir + '/' + importPath
+      }
+
+      const candidates = [
+        resolved, resolved + '.tsx', resolved + '.ts', resolved + '.jsx', resolved + '.js',
+        resolved + '/index.tsx', resolved + '/index.ts',
+      ]
+      if (!candidates.some(c => filePathSet.has(c))) {
+        brokenImports.push({ file: file.path, importPath, resolvedPath: resolved, importStatement: m[0] })
+      }
     }
   }
 
-  const relativeImportRegex = /from\s+['"](\.[^'"]+)['"]/g
-  for (const file of allFiles) {
-    relativeImportRegex.lastIndex = 0
-    let m
-    while ((m = relativeImportRegex.exec(file.content)) !== null) {
-      const importPath = m[1]
-      if (importPath.startsWith('@/')) continue // alias 另外處理
+  // 對 broken import 去重（同一 resolvedPath 只生成一次 stub）
+  const stubGenerated = new Set<string>()
+  for (const broken of brokenImports) {
+    if (stubGenerated.has(broken.resolvedPath)) continue
+    stubGenerated.add(broken.resolvedPath)
 
-      const fileDir = file.path.replace(/\/[^/]+$/, '') || '.'
-      const resolved = importPath.startsWith('./')
-        ? fileDir + '/' + importPath.slice(2)
-        : fileDir + '/' + importPath
-      const candidates = [resolved, resolved + '.tsx', resolved + '.ts', resolved + '/index.tsx', resolved + '/index.ts']
-      if (!candidates.some(c => filePathSet.has(c))) {
-        console.warn(`[Deployer] 可能的 broken import: ${file.path} → ${importPath}`)
+    const stubPath = broken.resolvedPath.match(/\.(tsx?|jsx?)$/)
+      ? broken.resolvedPath
+      : broken.resolvedPath + '.tsx'
+
+    // 解析 import 語句推斷 export 方式
+    const importContent = [...sanitized.pages, ...sanitized.components]
+      .filter(f => f.content.includes(broken.importPath))
+      .map(f => f.content)
+      .join('\n')
+
+    // 提取 named imports：import { Foo, Bar } from '...'
+    const namedImportRegex = new RegExp(`import\\s*\\{([^}]+)\\}\\s*from\\s*['"]${broken.importPath.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}['"]`, 'g')
+    const namedExports: string[] = []
+    let nim
+    while ((nim = namedImportRegex.exec(importContent)) !== null) {
+      nim[1].split(',').map(s => s.trim()).filter(Boolean).forEach(n => {
+        // 處理 as 別名：import { Foo as Bar }
+        const realName = n.split(/\s+as\s+/)[0].trim()
+        if (realName && !namedExports.includes(realName)) namedExports.push(realName)
+      })
+    }
+
+    // 提取 default import：import Foo from '...'
+    const defaultImportRegex = new RegExp(`import\\s+(\\w+)\\s+from\\s*['"]${broken.importPath.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}['"]`)
+    const defaultMatch = importContent.match(defaultImportRegex)
+    const hasDefaultImport = !!defaultMatch
+
+    // 生成 stub 組件
+    const stubLines: string[] = ["'use client'\n"]
+    const isComponent = (name: string) => /^[A-Z]/.test(name)
+
+    for (const name of namedExports) {
+      if (isComponent(name)) {
+        stubLines.push(`export function ${name}({ children, ...props }: { children?: React.ReactNode; [key: string]: unknown }) {
+  return <div style={{ border: '2px dashed #ccc', padding: '1rem', borderRadius: '0.5rem', textAlign: 'center' as const }} {...props}>{children || '${name}'}</div>
+}\n`)
+      } else {
+        stubLines.push(`export const ${name} = () => null\n`)
       }
     }
+
+    if (hasDefaultImport) {
+      const defaultName = defaultMatch![1]
+      if (isComponent(defaultName)) {
+        stubLines.push(`export default function ${defaultName}({ children, ...props }: { children?: React.ReactNode; [key: string]: unknown }) {
+  return <div style={{ border: '2px dashed #ccc', padding: '1rem', borderRadius: '0.5rem', textAlign: 'center' as const }} {...props}>{children || '${defaultName}'}</div>
+}\n`)
+      } else {
+        stubLines.push(`export default function StubComponent() { return null }\n`)
+      }
+    }
+
+    // 沒抓到任何 export 時提供一個安全的 default export
+    if (namedExports.length === 0 && !hasDefaultImport) {
+      stubLines.push(`export default function StubComponent() { return null }\n`)
+    }
+
+    sanitized.components.push({
+      path: stubPath,
+      content: stubLines.join('\n'),
+      description: `Auto-generated stub for broken import: ${broken.importPath}`,
+    })
+
+    // 新 stub 加入已知路徑集合（避免連鎖引用重複生成）
+    rebuildFilePathSet()
+
+    console.log(`[Deployer] Broken import: ${broken.file} → ${broken.importPath}，生成 stub 組件: ${stubPath}`)
+    fixes.push(`${broken.file}: broken import ${broken.importPath} → 生成 stub 組件`)
   }
 
   return { code: sanitized, fixes, injectedFiles, extraDependencies }
@@ -1740,7 +1888,22 @@ async function fixBuildErrors(
    - 同理 \`searchParams\` 也要改成 \`Promise<{ ... }>\`，解構時用 \`await searchParams\`
    - 函式必須標記 \`async\`
    - **不要用舊寫法** \`{ params: { id: string } }\`
-10. **如果錯誤是 CSS/PostCSS 處理失敗**（webpack errors related to globals.css）：
+10. **useSearchParams 需要 Suspense boundary**（Next.js 15）：
+   - 如果看到 \`useSearchParams() should be wrapped in a suspense boundary\` 或類似錯誤
+   - page 檔案中使用 useSearchParams() 時，必須將 page 內容提取到獨立的 Client 組件
+   - page.tsx 改為 Server Component，import Client 組件並用 \`<Suspense>\` 包裹
+   - 範例：
+     \`\`\`tsx:app/search/SearchClient.tsx
+     'use client'
+     import { useSearchParams } from 'next/navigation'
+     export default function SearchClient() { const params = useSearchParams(); ... }
+     \`\`\`
+     \`\`\`tsx:app/search/page.tsx
+     import { Suspense } from 'react'
+     import SearchClient from './SearchClient'
+     export default function Page() { return <Suspense><SearchClient /></Suspense> }
+     \`\`\`
+11. **如果錯誤是 CSS/PostCSS 處理失敗**（webpack errors related to globals.css）：
    - 移除所有 Tailwind v4 語法：\`@theme {}\`、\`@import "tailwindcss"\`、\`@utility\`、\`@variant\`
    - 將 \`@theme { --color-xxx: ...; }\` 轉換為 \`:root { --color-xxx: ...; }\`
    - 確保使用 Tailwind v3 指令：\`@tailwind base;\`、\`@tailwind components;\`、\`@tailwind utilities;\`
@@ -1768,61 +1931,88 @@ ${codeBlocks.join('\n\n')}
 請輸出所有需要**修改或新建**的檔案。未改動的現有檔案不需要輸出。
 對於缺失的 @/ 模組，**必須生成完整的新檔案**。`
 
-  try {
-    // 使用 streaming 避免 Anthropic SDK 的非串流超時限制
-    const stream = client.messages.stream({
-      model: 'claude-haiku-4-5-20251001',
-      max_tokens: 24000,
-      messages: [{ role: 'user', content: prompt }],
-    })
-    const response = await stream.finalMessage()
+  // 指數退避重試（對齊 callClaude 的重試機制）
+  const FIX_RETRY_MAX = 3
+  const FIX_RETRY_BASE_DELAY_MS = 3000
+  let lastError: unknown = null
 
-    // 記錄 LLM 用量（Haiku: input $0.8/M, output $4/M）
-    const usage = response.usage
-    if (usage) {
-      const inputTokens = usage.input_tokens || 0
-      const outputTokens = usage.output_tokens || 0
-      const cost = (inputTokens * 0.8 + outputTokens * 4) / 1_000_000
-      db.recordLlmUsage({
+  for (let retryAttempt = 1; retryAttempt <= FIX_RETRY_MAX; retryAttempt++) {
+    try {
+      // 使用 streaming 避免 Anthropic SDK 的非串流超時限制
+      const stream = client.messages.stream({
         model: 'claude-haiku-4-5-20251001',
-        inputTokens,
-        outputTokens,
-        costUsd: cost,
-        purpose: 'deploy_build_fix',
-        userId: trackingContext?.userId,
-        conversationId: trackingContext?.conversationId,
-      }).catch(err => console.error('[Deployer] recordLlmUsage failed:', err))
-    }
+        max_tokens: 24000,
+        messages: [{ role: 'user', content: prompt }],
+      })
+      const response = await stream.finalMessage()
 
-    const content = response.content
-      .filter(block => block.type === 'text')
-      .map(block => (block as { type: 'text'; text: string }).text)
-      .join('\n')
-
-    // 解析修復後的檔案（複用 quality-gate 的模式）
-    const fixedCode = parseLLMFixedFiles(content, code)
-
-    // 解析新依賴
-    const newDependencies: Record<string, string> = {}
-    const depsMatch = content.match(/`{3,}json:NEW_DEPENDENCIES\n([\s\S]*?)`{3,}/)
-    if (depsMatch) {
-      try {
-        const parsed = JSON.parse(depsMatch[1].trim())
-        for (const [pkg, ver] of Object.entries(parsed)) {
-          if (typeof ver === 'string') {
-            newDependencies[pkg] = ver
-          }
-        }
-      } catch {
-        // 解析失敗忽略
+      // 記錄 LLM 用量（Haiku: input $0.8/M, output $4/M）
+      const usage = response.usage
+      if (usage) {
+        const inputTokens = usage.input_tokens || 0
+        const outputTokens = usage.output_tokens || 0
+        const cost = (inputTokens * 0.8 + outputTokens * 4) / 1_000_000
+        db.recordLlmUsage({
+          model: 'claude-haiku-4-5-20251001',
+          inputTokens,
+          outputTokens,
+          costUsd: cost,
+          purpose: 'deploy_build_fix',
+          userId: trackingContext?.userId,
+          conversationId: trackingContext?.conversationId,
+        }).catch(err => console.error('[Deployer] recordLlmUsage failed:', err))
       }
-    }
 
-    return { code: fixedCode, newDependencies }
-  } catch (error) {
-    console.error('[Deployer] fixBuildErrors LLM 呼叫失敗:', error)
-    return null
+      const content = response.content
+        .filter(block => block.type === 'text')
+        .map(block => (block as { type: 'text'; text: string }).text)
+        .join('\n')
+
+      // 解析修復後的檔案（複用 quality-gate 的模式）
+      const fixedCode = parseLLMFixedFiles(content, code)
+
+      // 解析新依賴
+      const newDependencies: Record<string, string> = {}
+      const depsMatch = content.match(/`{3,}json:NEW_DEPENDENCIES\n([\s\S]*?)`{3,}/)
+      if (depsMatch) {
+        try {
+          const parsed = JSON.parse(depsMatch[1].trim())
+          for (const [pkg, ver] of Object.entries(parsed)) {
+            if (typeof ver === 'string') {
+              newDependencies[pkg] = ver
+            }
+          }
+        } catch {
+          // 解析失敗忽略
+        }
+      }
+
+      return { code: fixedCode, newDependencies }
+    } catch (error) {
+      lastError = error
+      const errMsg = String(error)
+      const isRetryable = errMsg.includes('overloaded_error') ||
+        errMsg.includes('rate_limit_error') ||
+        errMsg.includes('529') ||
+        errMsg.includes('503') ||
+        errMsg.includes('ECONNRESET') ||
+        errMsg.includes('ETIMEDOUT')
+
+      if (retryAttempt < FIX_RETRY_MAX && isRetryable) {
+        const delay = FIX_RETRY_BASE_DELAY_MS * Math.pow(2, retryAttempt - 1) // 3s, 6s, 12s
+        console.warn(`[Deployer] fixBuildErrors LLM 暫時性錯誤 (attempt ${retryAttempt}/${FIX_RETRY_MAX})，${delay}ms 後重試:`, errMsg.slice(0, 150))
+        await new Promise(resolve => setTimeout(resolve, delay))
+        continue
+      }
+
+      // 非暫時性錯誤或重試用盡
+      console.error(`[Deployer] fixBuildErrors LLM 呼叫失敗 (attempt ${retryAttempt}/${FIX_RETRY_MAX}):`, error)
+      return null
+    }
   }
+
+  console.error('[Deployer] fixBuildErrors 所有重試都失敗:', lastError)
+  return null
 }
 
 /**
@@ -1948,7 +2138,12 @@ async function verifyBuildLocally(
     slotAcquired = true
     await fsPromises.mkdir(tmpDir, { recursive: true })
 
-    for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+    // 語義：MAX_ATTEMPTS 次 LLM 修復機會 + 最後 1 次驗證 build
+    // attempt 1: build → fail → LLM fix #1
+    // attempt 2: build (verify fix #1) → fail → LLM fix #2
+    // attempt 3: build (verify fix #2) → fail → LLM fix #3
+    // attempt 4: build (verify fix #3) → fail → degrade
+    for (let attempt = 1; attempt <= MAX_ATTEMPTS + 1; attempt++) {
       const files = wrapInNextJs(currentCode, projectName, tailwindConfig, currentExtraDeps, injectedFiles)
 
       if (attempt === 1) {
@@ -1990,7 +2185,7 @@ async function verifyBuildLocally(
         }
       } else {
         // 重試：只重寫源碼（保留 node_modules）
-        await onProgress?.({ percent: 10 + attempt * 8, step: `構建驗證：第 ${attempt} 次修復後重新構建...` })
+        await onProgress?.({ percent: 10 + attempt * 6, step: `構建驗證：第 ${attempt} 次修復後重新構建...` })
         await writeSourceFilesOnly(tmpDir, files)
 
         // 如果有新依賴需要安裝
@@ -2004,7 +2199,7 @@ async function verifyBuildLocally(
       }
 
       // 執行 next build
-      await onProgress?.({ percent: 15 + attempt * 8, step: `構建驗證：執行 next build（第 ${attempt} 次）...` })
+      await onProgress?.({ percent: 15 + attempt * 6, step: `構建驗證：執行 next build（第 ${attempt} 次）...` })
       const buildResult = await runNextBuild(tmpDir)
 
       if (buildResult.success) {
@@ -2034,9 +2229,10 @@ async function verifyBuildLocally(
         break
       }
 
-      if (attempt < MAX_ATTEMPTS) {
+      // 前 MAX_ATTEMPTS 次 build 失敗嘗試 LLM 修復，第 MAX_ATTEMPTS+1 次是純驗證 build
+      if (attempt <= MAX_ATTEMPTS) {
         // LLM 修復
-        await onProgress?.({ percent: 20 + attempt * 8, step: `AI 修復構建錯誤（第 ${attempt} 次）...` })
+        await onProgress?.({ percent: 20 + attempt * 6, step: `AI 修復構建錯誤（第 ${attempt} 次）...` })
 
         const allDeps = { ...BASE_DEPS, ...currentExtraDeps }
         const fixResult = await fixBuildErrors(currentCode, buildErrors, buildResult.output, allDeps, trackingContext)
@@ -2060,9 +2256,9 @@ async function verifyBuildLocally(
       }
     }
 
-    // 3 次都失敗 → 降級
-    console.warn('[Deployer] 3 次 build 都失敗，降級為 ignoreBuildErrors 部署')
-    fixes.push('3 次構建驗證都失敗，降級為忽略構建錯誤部署')
+    // 所有嘗試都失敗 → 降級
+    console.warn(`[Deployer] ${MAX_ATTEMPTS} 次 LLM 修復 + 驗證 build 都失敗，降級為 ignoreBuildErrors 部署`)
+    fixes.push(`${MAX_ATTEMPTS} 次 AI 修復都失敗，降級為忽略構建錯誤部署`)
     return {
       files: wrapInNextJsWithIgnoreErrors(currentCode, projectName, tailwindConfig, currentExtraDeps, injectedFiles),
       buildVerified: false,

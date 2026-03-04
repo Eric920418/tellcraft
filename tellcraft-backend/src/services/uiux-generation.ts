@@ -1019,6 +1019,177 @@ export function ensureResponsiveClasses(
   }
 }
 
+// ============================================================
+// 組件引用驗證 + LLM 自修復（Layer 1 防禦）
+// ============================================================
+
+interface MissingReference {
+  file: string
+  importPath: string
+  resolvedPath: string
+}
+
+/**
+ * 驗證所有 pages/components 的 import 引用是否有對應檔案
+ * 純函數，零 LLM 成本
+ */
+function validateComponentReferences(
+  pages: GeneratedComponent[],
+  components: GeneratedComponent[]
+): MissingReference[] {
+  // 構建已知路徑集合
+  const knownPaths = new Set<string>()
+  for (const f of [...pages, ...components]) {
+    knownPaths.add(f.path)
+    knownPaths.add(f.path.replace(/\.(tsx?|jsx?)$/, ''))
+    // index 解析
+    const dir = f.path.replace(/\/[^/]+$/, '')
+    if (f.path.endsWith('/index.tsx') || f.path.endsWith('/index.ts')) {
+      knownPaths.add(dir)
+    }
+  }
+
+  const missing: MissingReference[] = []
+  const seenResolved = new Set<string>()
+  const importRegex = /from\s+['"](@\/[^'"]+|\.\.?\/[^'"]+)['"]/g
+
+  for (const file of [...pages, ...components]) {
+    importRegex.lastIndex = 0
+    let m
+    while ((m = importRegex.exec(file.content)) !== null) {
+      const importPath = m[1]
+      let resolved: string
+
+      if (importPath.startsWith('@/')) {
+        resolved = importPath.slice(2)
+      } else {
+        const fileDir = file.path.replace(/\/[^/]+$/, '') || '.'
+        resolved = importPath.startsWith('./')
+          ? fileDir + '/' + importPath.slice(2)
+          : fileDir + '/' + importPath
+      }
+
+      const candidates = [
+        resolved, resolved + '.tsx', resolved + '.ts', resolved + '.jsx', resolved + '.js',
+        resolved + '/index.tsx', resolved + '/index.ts',
+      ]
+
+      if (!candidates.some(c => knownPaths.has(c)) && !seenResolved.has(resolved)) {
+        seenResolved.add(resolved)
+        missing.push({ file: file.path, importPath, resolvedPath: resolved })
+      }
+    }
+  }
+
+  return missing
+}
+
+/**
+ * 用 LLM 修復缺失的組件引用
+ * 收集引用上下文，讓 LLM 生成缺失的組件
+ */
+async function repairMissingComponents(
+  missingRefs: MissingReference[],
+  pages: GeneratedComponent[],
+  components: GeneratedComponent[],
+  trackingContext?: LlmTrackingContext
+): Promise<GeneratedComponent[]> {
+  if (missingRefs.length === 0) return []
+
+  // 收集引用上下文（哪個檔案引用、import 語句、使用處）
+  const allFiles = [...pages, ...components]
+  const contextLines: string[] = []
+
+  for (const ref of missingRefs) {
+    contextLines.push(`\n### 缺失模組: ${ref.importPath}（需要生成: ${ref.resolvedPath}）`)
+    contextLines.push(`被引用於: ${ref.file}`)
+
+    // 找到引用此 import 的檔案，提取相關的使用行
+    for (const f of allFiles) {
+      if (!f.content.includes(ref.importPath)) continue
+
+      // 提取 import 語句
+      const importLine = f.content.split('\n').find(l => l.includes(ref.importPath))
+      if (importLine) contextLines.push(`import 語句: ${importLine.trim()}`)
+
+      // 提取使用處（JSX 或函式調用）— 取前後 2 行作為上下文
+      const lines = f.content.split('\n')
+      // 從 importPath 推斷被引用的名稱
+      const nameMatch = importLine?.match(/import\s+(?:(\w+)|.*?\{([^}]+)\})/)
+      const names = nameMatch
+        ? (nameMatch[1] ? [nameMatch[1]] : (nameMatch[2] || '').split(',').map(s => s.split(/\s+as\s+/).pop()?.trim()).filter(Boolean))
+        : []
+
+      for (const name of names) {
+        if (!name) continue
+        for (let i = 0; i < lines.length; i++) {
+          if (lines[i].includes(name) && !lines[i].includes('import')) {
+            const start = Math.max(0, i - 1)
+            const end = Math.min(lines.length, i + 2)
+            contextLines.push(`使用處 (${f.path}:${i + 1}):`)
+            contextLines.push(lines.slice(start, end).map(l => `  ${l}`).join('\n'))
+            break // 每個名稱只取第一個使用處
+          }
+        }
+      }
+    }
+  }
+
+  const prompt = `你是 Next.js 組件生成專家。以下代碼引用了一些不存在的內部模組，請生成這些缺失的組件/工具。
+
+## 缺失的模組和引用上下文
+${contextLines.join('\n')}
+
+## 規則
+1. 根據 import 語句的名稱和使用方式推斷組件的功能和介面
+2. export 方式必須與 import 語句一致（named export 或 default export）
+3. 使用 'use client' 如果組件包含 hooks 或事件處理
+4. 動畫庫用 motion/react（不是 framer-motion）
+5. 路徑別名用 @/
+6. 組件要有合理的 UI 實作，不要只是空殼
+7. 使用 Tailwind CSS 樣式
+
+## 輸出格式
+每個檔案用 code block 格式，路徑對應缺失的 resolvedPath：
+\`\`\`tsx:path/to/component.tsx
+// 內容
+\`\`\`
+或
+\`\`\`ts:path/to/util.ts
+// 內容
+\`\`\`
+
+請生成所有缺失的檔案。`
+
+  const response = await callClaude(
+    '你是 Next.js 組件生成專家，專門修復缺失的組件引用。',
+    [{ role: 'user', content: prompt }],
+    { maxTokens: 8192, temperature: 0.1 },
+    { ...trackingContext, purpose: 'repair_missing_components' }
+  )
+
+  if (!response.success || !response.content) {
+    console.warn('[UIUX] repairMissingComponents LLM 呼叫失敗:', response.error)
+    return []
+  }
+
+  // 解析生成的檔案
+  const result: GeneratedComponent[] = []
+  const fileRegex = /`{3,}(?:tsx|ts|jsx|js):([^\n]+)\n([\s\S]*?)`{3,}/g
+  let match
+  while ((match = fileRegex.exec(response.content)) !== null) {
+    const filePath = match[1].trim()
+    const fileContent = match[2].trim()
+    result.push({
+      path: filePath,
+      content: fileContent,
+      description: `Auto-repaired missing component: ${filePath}`,
+    })
+  }
+
+  return result
+}
+
 /**
  * 解析 LLM 輸出的檔案
  */
@@ -1572,10 +1743,40 @@ ${productContext?.layoutMode === 'app'
 
   const { pages: generatedPages, components: generatedComponents, styles } = parseGeneratedFiles(response.content, designSystem)
 
+  // ── Layer 1 防禦：驗證組件引用完整性 + LLM 自修復 ──
+  let finalPages = generatedPages
+  let finalComponents = generatedComponents
+
+  const missingRefs = validateComponentReferences(generatedPages, generatedComponents)
+  if (missingRefs.length > 0) {
+    console.log(`[UIUX] generateStructure 發現 ${missingRefs.length} 個缺失引用:`,
+      missingRefs.map(r => `${r.file} → ${r.importPath}`))
+
+    // LLM 修復（最多 1 次）
+    const repairedComponents = await repairMissingComponents(
+      missingRefs, generatedPages, generatedComponents, trackingContext
+    )
+
+    if (repairedComponents.length > 0) {
+      console.log(`[UIUX] 已修復 ${repairedComponents.length} 個缺失組件:`,
+        repairedComponents.map(c => c.path))
+      finalComponents = [...generatedComponents, ...repairedComponents]
+
+      // 二次校驗（只 log，不再 LLM）
+      const remainingMissing = validateComponentReferences(finalPages, finalComponents)
+      if (remainingMissing.length > 0) {
+        console.warn(`[UIUX] 修復後仍有 ${remainingMissing.length} 個缺失引用:`,
+          remainingMissing.map(r => `${r.file} → ${r.importPath}`))
+      }
+    } else {
+      console.warn('[UIUX] LLM 修復失敗，交給下游 deployer 處理')
+    }
+  }
+
   return {
     success: true,
-    pages: generatedPages,
-    components: generatedComponents,
+    pages: finalPages,
+    components: finalComponents,
     styles,
   }
 }

@@ -157,11 +157,14 @@ Discovery（Path A 問卷 / Path B 篩選後模板）
 - **串流預覽**：生成時 Socket.io `preview_update` 即時推送，前端 Sandpack 增量更新（`useSandpack().sandpack.updateFile()`）
 - **Variant 概念**：`VariantConcept` 注入所有生成 prompt，確保創意方向一致
 
-### Deployer Pipeline
+### Deployer Pipeline（五層防禦）
 
 ```
-sanitizeCodeForDeploy（6 類自動修復）
-  → verifyBuildLocally（VPS /tmp 建臨時 Next.js，build 失敗 LLM 修復最多 3 輪）
+Layer 1: generateStructure 後 validateComponentReferences → repairMissingComponents（LLM 修復）
+Layer 2: sanitizeCodeForDeploy（7 類自動修復 + broken import 自動生成 stub 組件）
+Layer 3: fixBuildErrors（API 指數退避重試 3 次，覆蓋 overloaded/rate_limit）
+Layer 4: verifyBuildLocally（3 次 LLM 修復 + 1 次驗證 build，共 4 次 build）
+Layer 5: sanitizeCodeForDeploy 修復 7 — useSearchParams Suspense boundary 自動拆分
   → Vercel 部署
   → 部署後可迭代（refineCode → 重新部署）或回滾（Vercel Promote API）
 ```
@@ -265,6 +268,7 @@ sanitizeCodeForDeploy（6 類自動修復）
 - **文檔與實作同步**：改後端流程 → 同步更新 `uiux-skill/instructions/` + 此文件
 - **`handleCodePhaseRedo` 需要快照**：`uiuxStructureCode`/`uiuxAnimationCode`，否則 redo 在已修改代碼上重做
 - **`verifyBuildLocally` 的修復結果必須同步回 DB**：否則預覽和部署代碼分岔
+- **部署五層防禦**：L1 generateStructure 後驗證引用 → L2 sanitizeCodeForDeploy stub 生成 → L3 fixBuildErrors API 重試 → L4 build 循環 3+1 次 → L5 useSearchParams Suspense 拆分
 - **Anthropic SDK v0.72+**：大 `max_tokens` 必須用 `messages.stream()` + `await stream.finalMessage()`
 - **Skill 函數提前 return 必須保存 FlowState**：否則 `handleContinueFlow` 找不到 state → 用戶對話永久卡死
 - **Formulation phase 必須設 `formulationStartedAt`**：否則中斷後無法觸發超時恢復。`formulation` phase + `waitingForReply=false` 代表正在生成中，handleContinueFlow 會攔截用戶輸入 + 15 分鐘超時偵測
