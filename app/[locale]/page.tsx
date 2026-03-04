@@ -3,7 +3,7 @@
 import { useState, useRef, useEffect, useCallback, Suspense, useDeferredValue, useMemo } from 'react'
 import { useSearchParams } from 'next/navigation'
 import { motion, AnimatePresence, useInView } from 'framer-motion'
-import { useTranslations } from 'next-intl'
+import { useTranslations, useLocale } from 'next-intl'
 import { useLocalePath } from '@/app/hooks/useLocalePath'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
@@ -993,6 +993,7 @@ function ChatSection({
   const tLogin = useTranslations('login')
   const tCommand = useTranslations('command')
   const localePath = useLocalePath()
+  const locale = useLocale()
   const getCommandLabel = useCallback((content: string) => {
     const key = COMMAND_KEYS[content.trim()]
     return key ? tCommand(key) : content.trim()
@@ -1534,6 +1535,7 @@ function ChatSection({
           projectId: session.projectId,
           userId: session.userId,
           mode: buildMode,
+          locale,
           token: token || undefined
         })
 
@@ -2251,6 +2253,7 @@ function ChatSection({
         userId: sessionInfo.userId,
         taskId: sessionInfo.currentTaskId,
         message: content,
+        locale,
         token: token || undefined
       })
     } else {
@@ -2259,6 +2262,7 @@ function ChatSection({
         message: content,
         projectId: sessionInfo.projectId,
         userId: sessionInfo.userId,
+        locale,
         token: token || undefined
       })
     }
@@ -2337,6 +2341,7 @@ function ChatSection({
         userId: sessionInfo.userId,
         taskId: sessionInfo.currentTaskId,
         message: content.trim(),
+        locale,
         token: token || undefined,
       })
     } else {
@@ -2345,6 +2350,7 @@ function ChatSection({
         message: content.trim(),
         projectId: sessionInfo.projectId,
         userId: sessionInfo.userId,
+        locale,
         token: token || undefined,
       })
     }

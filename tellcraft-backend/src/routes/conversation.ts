@@ -100,7 +100,7 @@ async function hasGuestCompletedBuild(userId: string): Promise<boolean> {
 router.post('/:id/message', optionalAuth, async (req, res) => {
   try {
     const { id: conversationId } = req.params
-    const { message, projectId, userId: bodyUserId, mode } = req.body
+    const { message, projectId, userId: bodyUserId, mode, locale } = req.body
     const userId = req.user?.id || bodyUserId
 
     if (!userId) {
@@ -203,6 +203,7 @@ router.post('/:id/message', optionalAuth, async (req, res) => {
       userId,
       message,
       mode,
+      locale,
     }, {
       attempts: 3,
       backoff: {
@@ -232,7 +233,7 @@ router.post('/:id/message', optionalAuth, async (req, res) => {
 router.post('/:id/reply', optionalAuth, async (req, res) => {
   try {
     const { id: conversationId } = req.params
-    const { message, projectId, taskId, specConfirmed, userId: bodyUserId } = req.body
+    const { message, projectId, taskId, specConfirmed, userId: bodyUserId, locale } = req.body
     const userId = req.user?.id || bodyUserId
 
     if (!userId) {
@@ -318,6 +319,7 @@ router.post('/:id/reply', optionalAuth, async (req, res) => {
       taskId,
       message,
       specConfirmed,
+      locale,
     }, {
       attempts: 3,
       backoff: {

@@ -68,6 +68,7 @@ interface ProcessMessageData {
   userId: string
   message: string
   mode?: 'fast' | 'fine'
+  locale?: 'zh' | 'en'
 }
 
 interface ContinueFlowData {
@@ -77,6 +78,7 @@ interface ContinueFlowData {
   taskId?: string
   message: string
   specConfirmed?: boolean
+  locale?: 'zh' | 'en'
 }
 
 // PRD Discovery 限制（預設值，實際由 computeDiscoveryLimits 動態調整）
@@ -450,10 +452,10 @@ async function handleProcessMessage(
   redis: Redis,
   io: SocketIOServer
 ) {
-  const { projectId, conversationId, userId, message, mode } = data
+  const { projectId, conversationId, userId, message, mode, locale } = data
 
   // Step 1: Prefilter（零 LLM 成本防禦）
-  const prefilterResult = await prefilterMessage(message, userId, redis)
+  const prefilterResult = await prefilterMessage(message, userId, redis, locale)
   if (!prefilterResult.allowed) {
     console.log(`[Orchestrator] Prefilter 攔截: reason=${prefilterResult.reason}, userId=${userId}`)
     await sendMessage(conversationId, io, {
@@ -473,6 +475,7 @@ async function handleProcessMessage(
       projectId, conversationId, userId,
       taskId: existingState.taskId,
       message,
+      locale,
     }, redis, io)
   }
 
@@ -536,7 +539,7 @@ async function handleProcessMessage(
     })
 
     await executeFastBuildSkill({
-      taskId, projectId, conversationId, userId, message, redis, io,
+      taskId, projectId, conversationId, userId, message, locale, redis, io,
     })
     return { taskId, skill: 'fast-build' as SkillName }
   }
@@ -658,6 +661,7 @@ async function handleProcessMessage(
         conversationId,
         userId,
         message,
+        locale,
         extractedEntities: classification.extractedEntities,
         redis,
         io,
@@ -672,6 +676,7 @@ async function handleProcessMessage(
         conversationId,
         userId,
         message,
+        locale,
         extractedEntities: classification.extractedEntities,
         redis,
         io,
@@ -867,8 +872,11 @@ async function handleContinueFlow(
   // 取得當前流程狀態（優先 Redis，備用 PostgreSQL）— 放在 prefilter 前以取得 locale
   const state = await getFlowState(redis, conversationId)
 
+  // locale 優先用前端傳入，fallback FlowState 已存的
+  const effectiveLocale = data.locale || state?.locale
+
   // Prefilter（rate limit + 長度檢查，不影響 phase routing）
-  const prefilterResult = await prefilterMessage(message, userId, redis, state?.locale)
+  const prefilterResult = await prefilterMessage(message, userId, redis, effectiveLocale)
   if (!prefilterResult.allowed) {
     console.log(`[Orchestrator] ContinueFlow prefilter 攔截: reason=${prefilterResult.reason}`)
     await sendMessage(conversationId, io, {
@@ -890,6 +898,11 @@ async function handleContinueFlow(
   // 確保 userId 保存在 state 中（供內部函數取得 trackingContext）
   if (userId && !state.userId) {
     state.userId = userId
+  }
+
+  // 前端傳入 locale 時同步到 FlowState（用戶可能切換語言）
+  if (data.locale && state.locale !== data.locale) {
+    state.locale = data.locale
   }
 
   // ── 通用回退/重試檢測（在所有 phase 路由之前）──
@@ -1059,6 +1072,7 @@ async function handleContinueFlow(
       conversationId,
       userId,
       message,
+      locale: data.locale || state.locale,
       redis,
       io,
     })
@@ -2234,13 +2248,14 @@ interface BddSpecSkillInput {
   conversationId: string
   userId: string
   message: string
+  locale?: 'zh' | 'en'
   extractedEntities?: ClassificationResult['extractedEntities']
   redis: Redis
   io: SocketIOServer
 }
 
 async function executeBddSpecSkill(input: BddSpecSkillInput) {
-  const { taskId, projectId, conversationId, userId, message, redis, io } = input
+  const { taskId, projectId, conversationId, userId, message, locale, redis, io } = input
 
   // 取得專案背景
   const project = await db.getProject(projectId)
@@ -2278,7 +2293,7 @@ async function executeBddSpecSkill(input: BddSpecSkillInput) {
     totalQuestionsAsked: 0,
     userId,
     discoveryLimits,
-    locale: /[\u4e00-\u9fff\u3400-\u4dbf]/.test(message) ? 'zh' : 'en',
+    locale: locale || (/[\u4e00-\u9fff\u3400-\u4dbf]/.test(message) ? 'zh' : 'en'),
   }
 
   await saveFlowState(redis, conversationId, state)
@@ -4204,10 +4219,11 @@ async function executeFastBuildSkill(params: {
   conversationId: string
   userId: string
   message: string
+  locale?: 'zh' | 'en'
   redis: Redis
   io: SocketIOServer
 }) {
-  const { taskId, projectId, conversationId, userId, message, redis, io } = params
+  const { taskId, projectId, conversationId, userId, message, locale, redis, io } = params
 
   try {
   // ── 推斷設計參數（零 LLM 成本）──
@@ -4245,7 +4261,7 @@ async function executeFastBuildSkill(params: {
     uiuxCodeGenerationStartedAt: Date.now(),
     fastMode: true,
     fastModeProductType: productType,
-    locale: /[\u4e00-\u9fff\u3400-\u4dbf]/.test(message) ? 'zh' : 'en',
+    locale: locale || (/[\u4e00-\u9fff\u3400-\u4dbf]/.test(message) ? 'zh' : 'en'),
     fastModeLayoutMode: layoutMode,
     fastModeOriginalMessage: message,
     userId,

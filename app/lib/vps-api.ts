@@ -127,6 +127,7 @@ export async function sendMessage(input: {
   projectId: string
   userId?: string
   mode?: 'fast' | 'fine'
+  locale?: string
   token?: string
 }): Promise<ApiResponse<{ messageId: string; jobId: string }>> {
   return apiRequest(`/api/conversation/${input.conversationId}/message`, {
@@ -139,6 +140,7 @@ export async function sendMessage(input: {
       projectId: input.projectId,
       userId: input.userId,
       mode: input.mode,
+      locale: input.locale,
     }),
   })
 }
@@ -153,6 +155,7 @@ export async function replyToConversation(input: {
   userId?: string
   taskId?: string
   specConfirmed?: boolean
+  locale?: string
   token?: string
 }): Promise<ApiResponse<{ messageId: string; jobId: string }>> {
   return apiRequest(`/api/conversation/${input.conversationId}/reply`, {
@@ -166,6 +169,7 @@ export async function replyToConversation(input: {
       userId: input.userId,
       taskId: input.taskId,
       specConfirmed: input.specConfirmed,
+      locale: input.locale,
     }),
   })
 }
