@@ -184,8 +184,8 @@ ${bddSpec}
 
 請翻譯為前端 UI 需求規格 JSON。`
 
-    const RETRY_MAX = 3
-    const RETRY_BASE_DELAY_MS = 2000
+    const RETRY_MAX = 4
+    const RETRY_BASE_DELAY_MS = 5000
     let lastError: unknown = null
 
     for (let attempt = 1; attempt <= RETRY_MAX; attempt++) {

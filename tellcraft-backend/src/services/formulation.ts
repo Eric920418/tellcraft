@@ -934,13 +934,20 @@ export async function fixMultipleFeatures(
     return { success: true, fixedFeatures: [] }
   }
 
-  // 構建用戶釐清決策
+  // 構建用戶釐清決策（所有批次共用）
   const decisions = resolvedItems
     .filter(item => item.status === 'answered' && item.answer)
     .map(item => `Q: ${item.whiteTextQuestion || item.question}\nA: ${item.answer}`)
     .join('\n\n')
 
-  const systemPrompt = `你是一位 sdd.os ISA Gherkin 專家。請根據用戶反饋修正以下 Feature Files。
+  const BATCH_SIZE = 3
+
+  // ── 內部函數：修復一批 Features ──
+  async function fixFeatureBatch(
+    batch: FeatureFixInput[],
+    batchLabel: string
+  ): Promise<{ success: boolean; fixedFeatures?: GeneratedFeature[]; error?: string }> {
+    const systemPrompt = `你是一位 sdd.os ISA Gherkin 專家。請根據用戶反饋修正以下 Feature Files。
 
 ## sdd.os ISA 格式規範
 1. 檔案開頭必須有 \`# Action: actionName\` 和 \`# Summary:\` 註解
@@ -968,7 +975,7 @@ export async function fixMultipleFeatures(
 5. 若原有 @Post → 改為「後置（回應）」或「後置（狀態）」（根據內容判斷）
 
 ## 輸出格式
-請以 JSON 格式輸出修正後的內容：
+只輸出 JSON，不要加任何解釋、分析、或前言文字。直接以 { 開頭。
 \`\`\`json
 {
   "features": [
@@ -977,12 +984,11 @@ export async function fixMultipleFeatures(
 }
 \`\`\``
 
-  // 構建用戶消息
-  const featuresContent = features.map(f =>
-    `### Feature: ${f.name} (${f.actionName})\n\n**需修復的問題**:\n${f.issues.map((e, i) => `${i + 1}. ${e}`).join('\n')}\n\n**當前內容**:\n\`\`\`gherkin\n${f.content}\n\`\`\``
-  ).join('\n\n---\n\n')
+    const featuresContent = batch.map(f =>
+      `### Feature: ${f.name} (${f.actionName})\n\n**需修復的問題**:\n${f.issues.map((e, i) => `${i + 1}. ${e}`).join('\n')}\n\n**當前內容**:\n\`\`\`gherkin\n${f.content}\n\`\`\``
+    ).join('\n\n---\n\n')
 
-  const userMessage = `## 需要修復的 Feature Files
+    const userMessage = `## 需要修復的 Feature Files
 
 ${featuresContent}
 
@@ -1002,44 +1008,75 @@ ${decisions ? `---
 
 ## 用戶釐清決策（修復時必須遵守）
 
-${decisions}` : ''}`
+${decisions}` : ''}
 
-  console.log('[Formulation] 修復 Features...')
-  const response = await callClaude(systemPrompt, userMessage, { maxTokens: 16384, temperature: 0.1 })
+重要：只輸出 JSON，不要加任何解釋。直接以 { 開頭，以 } 結尾。`
 
-  if (!response.success) {
-    return { success: false, error: response.error }
-  }
+    console.log(`[Formulation] ${batchLabel} 修復 ${batch.length} 個 Features...`)
+    const response = await callClaude(systemPrompt, userMessage, { maxTokens: 16384, temperature: 0.1 })
 
-  // 記錄使用量
-  if (response.inputTokens && response.outputTokens) {
-    const costUsd = (response.inputTokens * SONNET_PRICING.input + response.outputTokens * SONNET_PRICING.output) / 1000000
-    await recordLlmUsage({
-      model: 'claude-sonnet-4-6',
-      inputTokens: response.inputTokens,
-      outputTokens: response.outputTokens,
-      costUsd,
-      purpose: 'formulation_fix_features',
-      userId: trackingContext?.userId,
-      conversationId: trackingContext?.conversationId,
-    }).catch(err => console.error('[Formulation] 記錄使用量失敗:', err))
-  }
-
-  try {
-    const parsed = safeParseJson<{ features?: GeneratedFeature[] }>(response.content || '')
-    if (!parsed) {
-      console.error('[Formulation] Fix LLM 回應無法解析為 JSON，原始回應前 500 字:', response.content?.substring(0, 500))
-      return { success: false, error: '無法解析 LLM 回應' }
+    if (!response.success) {
+      return { success: false, error: response.error }
     }
 
-    console.log(`[Formulation] 修復完成，${parsed.features?.length || 0} 個 Features`)
-    return {
-      success: true,
-      fixedFeatures: parsed.features || [],
+    // 記錄使用量
+    if (response.inputTokens && response.outputTokens) {
+      const costUsd = (response.inputTokens * SONNET_PRICING.input + response.outputTokens * SONNET_PRICING.output) / 1000000
+      await recordLlmUsage({
+        model: 'claude-sonnet-4-6',
+        inputTokens: response.inputTokens,
+        outputTokens: response.outputTokens,
+        costUsd,
+        purpose: 'formulation_fix_features',
+        userId: trackingContext?.userId,
+        conversationId: trackingContext?.conversationId,
+      }).catch(err => console.error('[Formulation] 記錄使用量失敗:', err))
     }
-  } catch (err) {
-    return { success: false, error: `解析回應時發生錯誤: ${err}` }
+
+    try {
+      const parsed = safeParseJson<{ features?: GeneratedFeature[] }>(response.content || '')
+      if (!parsed) {
+        console.error(`[Formulation] ${batchLabel} LLM 回應無法解析為 JSON，原始回應前 500 字:`, response.content?.substring(0, 500))
+        return { success: false, error: '無法解析 LLM 回應' }
+      }
+
+      console.log(`[Formulation] ${batchLabel} 修復完成，${parsed.features?.length || 0} 個 Features`)
+      return {
+        success: true,
+        fixedFeatures: parsed.features || [],
+      }
+    } catch (err) {
+      return { success: false, error: `解析回應時發生錯誤: ${err}` }
+    }
   }
+
+  // ── 主邏輯：≤3 個直接修，>3 個分批 ──
+
+  if (features.length <= BATCH_SIZE) {
+    return await fixFeatureBatch(features, '修復')
+  }
+
+  // 分批修復
+  console.log(`[Formulation] Features 數量 ${features.length} > ${BATCH_SIZE}，啟用分批修復`)
+  const allFixed: GeneratedFeature[] = []
+  let batchIndex = 0
+
+  for (let i = 0; i < features.length; i += BATCH_SIZE) {
+    batchIndex++
+    const batch = features.slice(i, i + BATCH_SIZE)
+    const batchLabel = `批次 ${batchIndex}/${Math.ceil(features.length / BATCH_SIZE)}`
+
+    const result = await fixFeatureBatch(batch, batchLabel)
+    if (result.success && result.fixedFeatures) {
+      allFixed.push(...result.fixedFeatures)
+    } else {
+      console.warn(`[Formulation] ${batchLabel} 修復失敗（${batch.length} 個），保留原始 Features`)
+      allFixed.push(...batch.map(f => ({ name: f.name, actionName: f.actionName, content: f.content })))
+    }
+  }
+
+  console.log(`[Formulation] 分批修復完成，共 ${allFixed.length} 個 Features`)
+  return { success: true, fixedFeatures: allFixed }
 }
 
 // ============================================================

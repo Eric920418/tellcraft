@@ -214,6 +214,27 @@ export async function runSpecDiscovery(
 5. **避免重複**：不要重複已經問過的問題
 6. **格式問題可自動修復**：如果只是 @Pre/@Post → 四類前綴 的轉換，直接在 suggestedFix 中說明，不必問用戶
 
+## 白話翻譯強制規則（whiteTextQuestion + options）
+
+### 禁止出現的技術用語
+- 程式符號：>=, <=, !=, ==, &&, ||
+- 型別名稱：INT, VARCHAR, DECIMAL, BOOLEAN, ENUM, JSONB, UUID
+- SQL 語法：NULL, NOT NULL, CHECK, CONSTRAINT, FOREIGN KEY, JOIN
+- 變數名稱：不得出現 snake_case 或 camelCase 的變數名（如 cover_image、coverImage、is_featured）
+- 表名引用：不得出現 table.column 格式（如 works.is_featured）
+
+### 替換範例
+| 技術寫法 | 白話寫法 |
+|----------|----------|
+| works.is_featured 設為 TRUE | 把作品標記為精選 |
+| cover_image 設為 NULL | 把封面圖清掉 |
+| featured_works 表新增一筆 | 把作品加到精選清單 |
+| snake_case / camelCase | 底線式寫法 / 駝峰式寫法 |
+| JOIN featured_works | 從精選清單中查詢 |
+
+### 品質自檢
+生成 whiteTextQuestion 後，想像你在跟策展團隊的美術設計師對話。她會疑惑就需要重寫。
+
 ## 輸出格式
 
 \`\`\`json

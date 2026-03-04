@@ -149,6 +149,17 @@ function quickFilter(input: SemanticGatewayInput): SemanticGatewayResult | null 
 
   // ── 以下只有 Design clarify ──
 
+  // URL → 放行（設計參考常提供網址）
+  if (/https?:\/\/\S+/.test(trimmed)) {
+    return { verdict: 'valid', accept: true }
+  }
+
+  // 中文答案 ≥2 字即可（中文一字一詞，如「黑白」「簡潔」「暖色」）
+  const hasChinese = /[\u4e00-\u9fff\u3400-\u4dbf]/.test(trimmed)
+  if (hasChinese && trimmed.length >= 2) {
+    return { verdict: 'valid', accept: true }
+  }
+
   // 有實質內容的長回答 → 放行
   if (trimmed.length >= 20 && !trimmed.includes('?') && !trimmed.includes('？') && hasSubstantiveContent(trimmed)) {
     return { verdict: 'valid', accept: true }

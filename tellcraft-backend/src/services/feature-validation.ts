@@ -226,8 +226,9 @@ export async function validateAndFixFeatures(
         existing.push(error)
         featureErrorMap.set(fileName, existing)
       } else {
-        // 無法定位到特定檔案，分配給所有 Feature
-        for (const f of currentFeatures) {
+        // 無法定位到特定檔案，只分配給前 3 個 Feature（避免大量 Features 全送修導致 LLM 截斷）
+        const fallbackTargets = currentFeatures.slice(0, 3)
+        for (const f of fallbackTargets) {
           const existing = featureErrorMap.get(f.name) || []
           existing.push(error)
           featureErrorMap.set(f.name, existing)

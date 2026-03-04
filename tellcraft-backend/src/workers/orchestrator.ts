@@ -57,6 +57,7 @@ import { validateAndFixFeatures } from '../services/feature-validation'
 import { analyzeChangeImpact, executeChange, verifyConsistency, rollbackChange, ImpactAnalysis } from '../services/change-management'
 import type { FlowState } from '../types/flow-state'
 import { sendMessage, saveFlowState, getFlowState, deleteFlowState, makeStreamingCallback, generatedCodeToFileRows } from './orchestrator-utils'
+import { sanitizeClarifyForDisplay, sanitizeForDisplay } from '../utils/white-text-sanitizer'
 
 // ============================================================
 // 類型定義
@@ -2760,11 +2761,19 @@ async function sendClarifyQuestion(
   total: number,
   globalProgress?: { answered: number; totalQuestions: number; round: number; maxRounds: number }
 ) {
-  let text = `（${index + 1}/${total}）\n\n${item.whiteTextQuestion || item.question}`
+  // ── 規則式白話清洗（展示層，不影響 DB 存儲）──
+  const rawQuestion = item.whiteTextQuestion || item.question
+  const rawOptions = (item.whiteTextOptions && item.whiteTextOptions.length > 0
+    ? item.whiteTextOptions
+    : (item.options || []).map(opt => typeof opt === 'string' ? opt : (opt.description || opt.label || ''))
+  )
+  const sanitized = sanitizeClarifyForDisplay(rawQuestion, rawOptions)
+
+  let text = `（${index + 1}/${total}）\n\n${sanitized.question}`
 
   // ── 提案模式（propose）：AI 直接建議答案，用戶只需確認/否決 ──
   if (item.mode === 'propose' && item.proposedAnswer) {
-    text += `\n\n**AI 建議**：${item.proposedAnswer}`
+    text += `\n\n**AI 建議**：${sanitizeForDisplay(item.proposedAnswer)}`
     if (item.confidence === 'high') {
       text += '\n\n_（高信心建議，同意請直接確認）_'
     }
@@ -2795,10 +2804,8 @@ async function sendClarifyQuestion(
   }
 
   // ── 普通問答模式（ask）──
-  // 優先使用白話選項展示
-  const displayOptions = item.whiteTextOptions && item.whiteTextOptions.length > 0
-    ? item.whiteTextOptions
-    : (item.options || []).map(opt => typeof opt === 'string' ? opt : (opt.description || opt.label || ''))
+  // 使用白話清洗後的選項展示
+  const displayOptions = sanitized.options
 
   // 檢測是否有「（建議）」選項
   let hasProposal = false

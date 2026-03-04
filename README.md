@@ -131,6 +131,12 @@ Phase 3: Spec Discovery + Clarify
     ↓ S1-S6 品質審查（規則完整性/Example 覆蓋/邊界條件/格式/跨 Feature 一致/Schema 對應）
     ↓ 最多 2 輪 / 10 題，超額時按嚴重度截斷（不跳過）
 
+白話化管線（PRD/Spec Clarify 共用）：
+    LLM 生成 → whiteTextQuestion + whiteTextOptions（prompt 約束）
+    → sendClarifyQuestion 前 sanitizeClarifyForDisplay()（規則式清洗，white-text-sanitizer.ts）
+    → 前端展示純白話文字
+    → DB 保留原始技術 question/options（供 Formulation 消費）
+
 Phase 4: Actions Design → actions.yml（Sonnet LLM）
 Phase 5: ISA Config → isa_codegen.yml（100% 規則式，零 LLM）
 Phase 6: Change Management（需求變更 → 影響分析 → 執行修改 → 一致性驗證）
@@ -554,7 +560,7 @@ psql "$DATABASE_URL" -f tellcraft-backend/migrations/xxx.sql
 
 `semanticGateway()`（`semantic-gateway.ts`）取代淺層函數（`analyzeAnswerRelevance` + `validateDesignAnswer` + keyword arrays），統一 BDD 釐清、設計問卷、迭代修改的輸入品質判斷。
 
-- **quickFilter 零 LLM 短路**：`__skip__` / 選項 A-D → 直接 accept；BDD 階段 `hasSubstantiveContent()` 前置攔截亂碼（零 LLM）→ 通過後才送 Sonnet；Design 問卷 ≥5 字有實質內容 → accept；Iteration 設計關鍵詞命中或 ≥8 字有實質內容 → accept
+- **quickFilter 零 LLM 短路**：`__skip__` / 選項 A-D → 直接 accept；BDD 階段 `hasSubstantiveContent()` 前置攔截亂碼（零 LLM）→ 通過後才送 Sonnet；Design 問卷 URL 直接 accept、中文 ≥2 字直接 accept、英文 ≥5 字有實質內容 → accept；Iteration 設計關鍵詞命中或 ≥8 字有實質內容 → accept
 - **Sonnet 語義判斷**（6 verdict）：valid / ambiguous / off_topic / seeking_help / evasive / content_policy，Sonnet 直接生成引導訊息（不再 code 硬寫模板）
 - **階段差異化**：BDD 釐清較嚴格（「都可以」= ambiguous），設計問卷較寬鬆（「都可以」= valid），迭代修改以「設計師能否直接執行」為判斷基準（「改好一點」= ambiguous，「字大一點」= valid）
 - **Anti-loop**：FlowState `semanticRejectCount`，BDD ≥3 次強制 accept；Iteration ≥2 次強制 accept（refineCode 有代碼上下文可兜底）；Design ≥2 次仍調 Sonnet 但一律顯示跳過按鈕
