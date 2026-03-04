@@ -199,11 +199,13 @@ function checkSpam(message: string, strictness: QualityStrictness, isChinese: bo
  *
  * 執行順序：offensive → gibberish → spam → valid
  */
-export function checkInputQuality(message: string, strictness: QualityStrictness = 'normal'): InputQualityResult {
+export function checkInputQuality(message: string, strictness: QualityStrictness = 'normal', locale?: 'zh' | 'en'): InputQualityResult {
   const trimmed = message.trim()
   if (!trimmed) return { quality: 'valid', confidence: 1 }
 
-  const isChinese = /[\u4e00-\u9fff\u3400-\u4dbf]/.test(trimmed)
+  // locale 有傳就用（用戶偏好），否則 fallback 到訊息內容偵測
+  // 亂碼是純拉丁字母時偵測會 fallback 到英文，但用戶可能是中文用戶
+  const isChinese = locale ? locale === 'zh' : /[\u4e00-\u9fff\u3400-\u4dbf]/.test(trimmed)
 
   // 1. 髒話
   const offensiveResult = checkOffensive(trimmed, isChinese)

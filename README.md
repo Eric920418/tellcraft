@@ -526,6 +526,7 @@ psql "$DATABASE_URL" -f tellcraft-backend/migrations/xxx.sql
 - **`analyzeAnswerRelevance` 前置檢查**：`checkInputQuality('strict')` 攔截亂碼，修復 `length >= 15` 快篩放行垃圾的漏洞
 - **白名單**：~60 個技術縮寫（rwd/css/html/api/jwt...）不會被誤判為無母音亂碼
 - **中英雙語 userMessage**：拒絕時顯示引導用語，不只是冷冰冰的錯誤
+- **修復「不要部署」被當成迭代請求**：`hasDeployIntent()` 新增否定詞排除（不要/不想/別/先不...）+ `hasRejectDeployIntent()` 偵測拒絕部署意圖 → 回覆確認而非觸發迭代。`部屬` 加入 `部署` 的常見錯字別名。三個 phase（uiux_complete/deployer_complete/deployer_failed）均有處理
 
 ### 專案對話快捷入口（2026-03-03）
 

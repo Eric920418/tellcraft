@@ -120,4 +120,6 @@ export interface FlowState {
   messageSource?: 'line' | 'web'
   // 釐清階段語義分析：連續拒絕計數（防死循環，第 3 次強制 accept）
   answerRejectCount?: number
+  // 用戶語言偏好（從第一條訊息偵測，供品質閘門等非 LLM 功能使用正確語言回覆）
+  locale?: 'zh' | 'en'
 }

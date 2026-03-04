@@ -141,9 +141,21 @@ const SPEC_DISCOVERY_LIMITS = {
 // ============================================================
 
 function hasDeployIntent(msg: string): boolean {
-  const kw = ['部署', 'deploy', '上線', '發布', '再部署', '重新部署']
+  const kw = ['部署', '部屬', 'deploy', '上線', '發布', '再部署', '重新部署']
+  const negation = ['不要', '不想', '不用', '別', '不需要', '取消', '先不', '暫時不', "don't", 'dont', 'not', 'cancel', 'no']
   const ex = ['改', '換', '調整', '修改', '更新', '加', '刪', '移除']
-  return kw.some(k => msg.includes(k)) && !ex.some(k => msg.includes(k))
+  const hasKw = kw.some(k => msg.includes(k))
+  if (!hasKw) return false
+  if (negation.some(n => msg.includes(n))) return false
+  if (ex.some(k => msg.includes(k))) return false
+  return true
+}
+
+/** 偵測「不要部署」「先不上線」等拒絕部署的意圖 */
+function hasRejectDeployIntent(msg: string): boolean {
+  const deployKw = ['部署', '部屬', 'deploy', '上線', '發布']
+  const negation = ['不要', '不想', '不用', '別', '不需要', '先不', '暫時不', "don't", 'dont', 'not yet', 'no']
+  return deployKw.some(k => msg.includes(k)) && negation.some(n => msg.includes(n))
 }
 
 function hasRollbackIntent(msg: string): boolean {
@@ -888,7 +900,7 @@ async function handleContinueFlow(
   // ── Phase-aware 品質閘門 ──
   const qualityStrictness = getPhaseStrictness(state.phase)
   if (qualityStrictness !== 'skip') {
-    const qualityCheck = checkInputQuality(trimmedMsg, qualityStrictness)
+    const qualityCheck = checkInputQuality(trimmedMsg, qualityStrictness, state.locale)
     if (qualityCheck.quality !== 'valid') {
       // Anti-loop: Redis 計數器，第 3 次強制放行
       const rejectKey = `quality_reject:${conversationId}`
@@ -955,6 +967,22 @@ async function handleContinueFlow(
   // 部署失敗後允許重試、返回修改、或直接迭代
   if (state.phase === 'deployer_failed') {
     const trimmed = message.trim()
+    // 拒絕部署（「不要部署了」「先不重試」）→ 直接返回修改模式
+    if (hasRejectDeployIntent(trimmed)) {
+      state.phase = 'uiux_complete'
+      await saveFlowState(redis, conversationId, state)
+      const isChinese = /[\u4e00-\u9fff]/.test(trimmed)
+      await sendMessage(conversationId, io, {
+        content: isChinese
+          ? '好的，已返回設計修改模式。直接輸入修改建議即可調整設計，完成後再部署。'
+          : 'Got it. You\'re back in design mode. Describe changes to adjust, then deploy when ready.',
+        stage: 'info',
+        quickReplies: [
+          { label: isChinese ? '部署上線' : 'Deploy', value: '部署', style: 'primary' as const },
+        ],
+      })
+      return
+    }
     if (hasDeployIntent(trimmed) || ['重試'].some(kw => trimmed.includes(kw))) {
       await executeDeployerSkill({
         taskId: state.taskId || '',
@@ -1508,6 +1536,21 @@ async function handleContinueFlow(
       })
       return
     }
+    // 拒絕部署（「不要再部署」「先不上線了」）→ 確認
+    if (hasRejectDeployIntent(trimmed)) {
+      const isChinese = /[\u4e00-\u9fff]/.test(trimmed)
+      await sendMessage(conversationId, io, {
+        content: isChinese
+          ? '好的，不再部署。您可以繼續修改設計，或選擇回滾到之前的版本。'
+          : 'Got it, no further deployment. You can continue modifying the design or rollback to a previous version.',
+        stage: 'deployer_complete',
+        quickReplies: [
+          { label: isChinese ? '部署上線' : 'Deploy', value: '部署', style: 'primary' as const },
+          { label: isChinese ? '回滾版本' : 'Rollback', value: '回滾', style: 'ghost' as const },
+        ],
+      })
+      return
+    }
     // 先檢查撤銷（「還原修改」比「還原」更具體，必須在 rollback 之前）
     if (hasUndoIntent(trimmed)) {
       await executeUndoIteration({ conversationId, projectId: data.projectId, redis, io })
@@ -1753,6 +1796,24 @@ async function handleContinueFlow(
           message,
           redis,
           io,
+        })
+        return
+      }
+      // 拒絕部署（「我不要部署」「先不上線」）→ 確認並提示其他選項
+      if (hasRejectDeployIntent(trimmed)) {
+        const isChinese = /[\u4e00-\u9fff]/.test(trimmed)
+        const qr: { label: string; value: string; style: 'primary' | 'ghost' }[] = [
+          { label: isChinese ? '部署上線' : 'Deploy', value: '部署', style: 'primary' },
+        ]
+        if (state.uiuxPreIterationCode) {
+          qr.push({ label: isChinese ? '撤銷修改' : 'Undo', value: '撤銷', style: 'ghost' })
+        }
+        await sendMessage(conversationId, io, {
+          content: isChinese
+            ? '好的，暫時不部署。您可以繼續修改設計，或隨時點擊「部署上線」。'
+            : 'Got it, not deploying for now. You can continue modifying the design, or click "Deploy" whenever ready.',
+          stage: 'uiux_complete',
+          quickReplies: qr,
         })
         return
       }
@@ -2202,6 +2263,7 @@ async function executeBddSpecSkill(input: BddSpecSkillInput) {
     totalQuestionsAsked: 0,
     userId,
     discoveryLimits,
+    locale: /[\u4e00-\u9fff\u3400-\u4dbf]/.test(message) ? 'zh' : 'en',
   }
 
   await saveFlowState(redis, conversationId, state)
@@ -3324,7 +3386,7 @@ async function analyzeAnswerRelevance(
   const lower = trimmed.toLowerCase()
 
   // ── 品質前置檢查（攔截亂碼，不讓長度快篩放行垃圾）──
-  const qualityCheck = checkInputQuality(trimmed, 'strict')
+  const qualityCheck = checkInputQuality(trimmed, 'strict', state.locale)
   if (qualityCheck.quality !== 'valid') {
     return { accept: false, verdict: 'off_topic' as AnswerVerdict, replyContent: qualityCheck.userMessage }
   }
@@ -4306,6 +4368,7 @@ async function executeFastBuildSkill(params: {
     uiuxCodeGenerationStartedAt: Date.now(),
     fastMode: true,
     fastModeProductType: productType,
+    locale: /[\u4e00-\u9fff\u3400-\u4dbf]/.test(message) ? 'zh' : 'en',
     fastModeLayoutMode: layoutMode,
     fastModeOriginalMessage: message,
     userId,
