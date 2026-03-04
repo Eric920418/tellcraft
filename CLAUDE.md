@@ -260,6 +260,7 @@ sanitizeCodeForDeploy（6 類自動修復）
 - **`app/components/templates/` 已廢棄**，PreviewPanel 用 Sandpack 渲染
 - **deployer_complete 路由順序**：先檢查「部署」→ 再檢查「回滾」→ `isDesignFeedback()` 預驗證 → 最後才是迭代修改
 - **迭代輸入三層防禦**：`prefilterMessage()`（全域）→ `isDesignFeedback()`（迭代階段專用，零 LLM）→ `refineCode [NO_CHANGE]`（LLM 兜底）
+- **輸入品質閘門（Universal Input Quality Gate）**：`prefilterMessage()` 內 `checkInputQuality()` 全域攔截亂碼/髒話/垃圾 + `handleContinueFlow` phase-aware 二次攔截（`getPhaseStrictness()` 映射 strict/normal/lenient/skip）+ `analyzeAnswerRelevance` 前置檢查。Redis anti-loop `quality_reject:{conversationId}` 連續 3 次強制放行防卡死
 - **文檔與實作同步**：改後端流程 → 同步更新 `uiux-skill/instructions/` + 此文件
 - **`handleCodePhaseRedo` 需要快照**：`uiuxStructureCode`/`uiuxAnimationCode`，否則 redo 在已修改代碼上重做
 - **`verifyBuildLocally` 的修復結果必須同步回 DB**：否則預覽和部署代碼分岔

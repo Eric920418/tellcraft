@@ -92,7 +92,7 @@ npx ts-node bdd-spec/scripts/validate-feature.ts spec/features/
 | Service | LLM | 調用者 | 職責 |
 |---------|-----|--------|------|
 | `classifier.ts` | Haiku | 每條新訊息 | 意圖分類（規則式 + LLM） |
-| `prefilter.ts` | 無 / Haiku | 每條訊息（最先）+ Fast Mode | 空訊息/長度/Injection(28 regex)/Rate Limit + `checkBuildRelevance()` 語義相關性 |
+| `prefilter.ts` | 無 / Haiku | 每條訊息（最先）+ Fast Mode | 空訊息/長度/Injection(28 regex)/品質閘門(亂碼+髒話+垃圾)/Rate Limit + `checkBuildRelevance()` 語義相關性 |
 | `bdd-to-ui-spec.ts` | Haiku | UIUX Pipeline | BDD Feature Files → UIRequirementsSpec |
 | `prd-discovery.ts` | Sonnet | bdd-spec | PRD 需求發掘（多輪） |
 | `clarify-dedup.ts` | Haiku ×2 | bdd-spec | Decision Summary + 語意去重 |
@@ -346,7 +346,7 @@ Server Action 錯誤訊息 + 工具模組中文字串國際化（+117 keys，2 n
 | **認證** | Google/LINE OAuth、JWT 雙軌（localStorage + Cookie）、訪客→帳號合併、帳號綁定（雙登入）、auth 頁面 i18n（next-intl） |
 | **儀表板** | 用戶統計、專案管理、版本歷史、管理員面板、LLM 用量追蹤、Dashboard 元件 i18n（next-intl） |
 | **i18n** | next-intl 多語系（zh/en）、UI 元件全量翻譯、Server Action 錯誤訊息 i18n（getTranslations）、lib 模組英文化、error code 機制、883 keys / 29 namespaces |
-| **防護** | 三層防刷（前端冷卻 + API 限速 + Worker 鎖）、六層輸入防禦 + 違規冷卻升級（3→60s / 6→5min / 10→30min）、LLM 自動重試、Guest 限制（Fast Only + 一次使用 + 登入推薦） |
+| **防護** | 三層防刷（前端冷卻 + API 限速 + Worker 鎖）、七層輸入防禦（含 Universal Input Quality Gate 亂碼/髒話/垃圾規則式攔截）+ 違規冷卻升級（3→60s / 6→5min / 10→30min）、LLM 自動重試、Guest 限制（Fast Only + 一次使用 + 登入推薦） |
 | **通知** | LINE 推播通知（BDD 完成/UIUX 生成完成/部署成功失敗），離線用戶也能收到 |
 | **LINE Bot** | LINE 對話內完整 Fast Build 體驗（描述需求→生成→部署），Flex Message 卡片 + Quick Reply |
 | **UX** | 對話回退、錯誤恢復、自動恢復對話、專案自動命名、Markdown 渲染、專案對話快捷入口（1-click） |
@@ -516,6 +516,17 @@ psql "$DATABASE_URL" -f tellcraft-backend/migrations/xxx.sql
 <details>
 <summary><h2>開發更新紀錄（點擊展開）</h2></summary>
 
+### Universal Input Quality Gate（2026-03-04）
+
+統一輸入品質閘門：純規則式（零 LLM）攔截亂碼/髒話/垃圾輸入，修復用戶發送 `AAAAAACCCCC`、`sssdsdsdasikwqherujqhweurhuweur`、辱罵內容暢通無阻的漏洞。
+
+- **`prefilter.ts` 新增 `checkInputQuality()`**：`checkOffensive()`（~23 中英髒話 pattern）→ `checkGibberish()`（G1-G6 六條規則：同字元重複/短模式重複/無母音/低 unique ratio/高子音密度/strict 短詞）→ `checkSpam()`（純數字/純符號）
+- **`prefilterMessage()` 整合**：injection check 之後、rate limit 之前注入品質檢測，offensive 觸發違規累計
+- **`handleContinueFlow` phase-aware gate**：go_back/retry 檢測後、phase 路由前二次攔截，`getPhaseStrictness()` 映射 strict/normal/lenient/skip，Redis anti-loop（3 次強制放行）
+- **`analyzeAnswerRelevance` 前置檢查**：`checkInputQuality('strict')` 攔截亂碼，修復 `length >= 15` 快篩放行垃圾的漏洞
+- **白名單**：~60 個技術縮寫（rwd/css/html/api/jwt...）不會被誤判為無母音亂碼
+- **中英雙語 userMessage**：拒絕時顯示引導用語，不只是冷冰冰的錯誤
+
 ### 專案對話快捷入口（2026-03-03）
 
 減少進入專案對話的點擊次數：Dashboard 首頁/專案列表一鍵進入對話，首頁為已登入用戶顯示最近專案快捷按鈕。
@@ -573,14 +584,15 @@ psql "$DATABASE_URL" -f tellcraft-backend/migrations/xxx.sql
 
 - **根因**：`handleProcessMessage` 的 `mode === 'fast'` 路徑直接呼叫 `executeFastBuildSkill()`，完全跳過意圖驗證
 - **修復**：在 fast mode 入口加入 `isDesignFeedback()` 預驗證，攔截亂碼/問候/閒聊等無關輸入
-- **六層防禦**：
-  1. `prefilterMessage()`：冷卻期檢查 → 空訊息/超長 → injection（28 個 regex，含混合語言）+ 違規累計 → 頻率限制（30 秒 6 條），全訊息中英雙語
-  2. `isDesignFeedback()`：fast mode 入口 + 迭代階段專用（亂碼/問候/閒聊/設計關鍵詞正向放行）
-  3. `analyzeAnswerRelevance()`：BDD 釐清階段自由文字語義分析（規則快篩 + Haiku 四元判斷：accept/ambiguous/off_topic/seeking_help），連續 2 次拒絕後強制 accept 防死循環
-  4. `checkBuildRelevance()`：fast mode 語義相關性 + 具體性（強信號 ~80 詞直接放行 / 弱信號 Haiku 三元判斷：通過/模糊/不相關），中英雙語
-  5. `classifyIntent()`：正常模式 Haiku 意圖分類（abuse 觸發 `recordAbuseViolation` 累計違規）
-  6. `refineCode [NO_CHANGE]`：LLM 級別最後防線（迭代階段）
-  7. **違規冷卻升級**：Redis `violation:{userId}` 計數器（24h TTL），3 次→60s / 6 次→5min / 10 次→30min 冷卻
+- **七層防禦**：
+  1. `prefilterMessage()`：冷卻期檢查 → 空訊息/超長 → injection（28 個 regex，含混合語言）+ 違規累計 → **品質閘門**（亂碼 G1-G6 + 髒話 ~23 pattern + 垃圾 2 規則）→ 頻率限制（30 秒 6 條），中英雙語
+  2. `handleContinueFlow` phase-aware gate：`getPhaseStrictness()` strict/normal/lenient/skip 依 phase 動態調整，Redis anti-loop（3 次強制放行防卡死）
+  3. `isDesignFeedback()`：fast mode 入口 + 迭代階段專用（亂碼/問候/閒聊/設計關鍵詞正向放行）
+  4. `analyzeAnswerRelevance()`：BDD 釐清階段自由文字語義分析（品質前置檢查 + 規則快篩 + Haiku 四元判斷），連續 2 次拒絕後強制 accept 防死循環
+  5. `checkBuildRelevance()`：fast mode 語義相關性 + 具體性（強信號 ~80 詞直接放行 / 弱信號 Haiku 三元判斷），中英雙語
+  6. `classifyIntent()`：正常模式 Haiku 意圖分類（abuse 觸發 `recordAbuseViolation` 累計違規）
+  7. `refineCode [NO_CHANGE]`：LLM 級別最後防線（迭代階段）
+  8. **違規冷卻升級**：Redis `violation:{userId}` 計數器（24h TTL），3 次→60s / 6 次→5min / 10 次→30min 冷卻
 
 ### 統一 LLM JSON 解析防禦（2026-02-28）
 
@@ -817,8 +829,10 @@ Sandpack 取代 1105 行 regex 轉換器。支援 streaming 增量更新、裝�
 
 ### Classifier 防禦體系（2026-02-08，2026-03-01 增強）
 
-- **Prefilter**（零 LLM）：冷卻期攔截 → injection 28 regex + 違規累計 → Rate Limit 30s/6 條，中英雙語
-- **違規升級**：Redis `violation:{userId}` 24h TTL，injection/abuse 均累計，3 次→60s / 6 次→5min / 10 次→30min 冷卻
+- **Prefilter**（零 LLM）：冷卻期攔截 → injection 28 regex + 違規累計 → **品質閘門**（亂碼 6 規則 + 髒話 ~23 pattern + 垃圾 2 規則）→ Rate Limit 30s/6 條，中英雙語
+- **Phase-aware 品質閘門**：`handleContinueFlow` 內 phase 路由前二次攔截，嚴格度 strict/normal/lenient/skip 依 phase 調整，Redis anti-loop 計數器（連續 3 次垃圾強制放行防卡死）
+- **analyzeAnswerRelevance 前置檢查**：BDD clarify 階段 `checkInputQuality('strict')` 攔截亂碼，避免 `length >= 15` 快篩放行垃圾
+- **違規升級**：Redis `violation:{userId}` 24h TTL，injection/abuse/offensive 均累計，3 次→60s / 6 次→5min / 10 次→30min 冷卻
 - **正常模式**：Prefilter → Classifier Meta Intent（abuse 觸發 `recordAbuseViolation`）→ Skill Intent
 - **快速模式**：Prefilter → `isDesignFeedback()` → `checkBuildRelevance()`（強信號 ~80 詞 / 弱信號 Haiku 三元：通過/模糊/不相關）
 

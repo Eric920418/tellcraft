@@ -5,7 +5,7 @@ import { withConversationLock } from '../services/conversation-lock'
 import * as db from '../db/client'
 import { classifyIntent, ClassificationResult, isSkillIntent, MetaIntent } from '../services/classifier'
 import { SkillName } from '../services/registry'
-import { prefilterMessage, checkBuildRelevance, recordAbuseViolation } from '../services/prefilter'
+import { prefilterMessage, checkBuildRelevance, recordAbuseViolation, checkInputQuality, type QualityStrictness } from '../services/prefilter'
 import {
   createBddSession,
   getBddSession,
@@ -786,6 +786,47 @@ async function handlePhaseError(
 }
 
 // ============================================================
+// Phase-aware 品質嚴格度映射
+// ============================================================
+
+function getPhaseStrictness(phase: string): QualityStrictness | 'skip' {
+  switch (phase) {
+    // strict: 需要有意義回答的階段
+    case 'spec_clarify':
+    case 'es_init':
+    case 'es_explore':
+    case 'uiux_design_preference':
+    case 'uiux_design_clarify':
+      return 'strict'
+
+    // normal: 自由輸入但應有基本品質
+    case 'uiux_design_brief_confirm':
+    case 'uiux_complete':
+    case 'deployer_complete':
+    case 'deployer_failed':
+      return 'normal'
+
+    // lenient: 可能是選擇性操作（版本號/模板名）
+    case 'uiux_template_selection':
+    case 'uiux_variant_selection':
+    case 'deployer_rollback_select':
+      return 'lenient'
+
+    // skip: 系統處理中，不需品質檢查
+    case 'fast_generating':
+    case 'uiux_code_generation':
+    case 'uiux_quality_gate':
+    case 'deployer_deploying':
+    case 'uiux_iterating':
+    case 'uiux_generating_variants':
+      return 'skip'
+
+    default:
+      return 'normal'
+  }
+}
+
+// ============================================================
 // 處理用戶回覆（繼續流程）
 // ============================================================
 
@@ -842,6 +883,31 @@ async function handleContinueFlow(
       stage: state.phase,
     })
     return
+  }
+
+  // ── Phase-aware 品質閘門 ──
+  const qualityStrictness = getPhaseStrictness(state.phase)
+  if (qualityStrictness !== 'skip') {
+    const qualityCheck = checkInputQuality(trimmedMsg, qualityStrictness)
+    if (qualityCheck.quality !== 'valid') {
+      // Anti-loop: Redis 計數器，第 3 次強制放行
+      const rejectKey = `quality_reject:${conversationId}`
+      const rejectCount = await redis.incr(rejectKey)
+      await redis.expire(rejectKey, 300)
+
+      if (rejectCount < 3) {
+        console.warn(`[Orchestrator] 品質攔截 (${rejectCount}/3): phase=${state.phase}, quality=${qualityCheck.quality}, reason=${qualityCheck.reason}`)
+        await sendMessage(conversationId, io, {
+          content: qualityCheck.userMessage || '請輸入有效的內容。',
+          stage: state.phase,
+        })
+        return
+      }
+      console.warn(`[Orchestrator] 品質攔截已達上限 (3/3)，強制放行: phase=${state.phase}`)
+      await redis.del(rejectKey)  // 放行並重置
+    } else {
+      await redis.del(`quality_reject:${conversationId}`)
+    }
   }
 
   // ── Event Storming 初始確認 ──
@@ -3256,6 +3322,12 @@ async function analyzeAnswerRelevance(
 ): Promise<AnswerAnalysis> {
   const trimmed = userMessage.trim()
   const lower = trimmed.toLowerCase()
+
+  // ── 品質前置檢查（攔截亂碼，不讓長度快篩放行垃圾）──
+  const qualityCheck = checkInputQuality(trimmed, 'strict')
+  if (qualityCheck.quality !== 'valid') {
+    return { accept: false, verdict: 'off_topic' as AnswerVerdict, replyContent: qualityCheck.userMessage }
+  }
 
   // ── 規則式快篩 ──
 

@@ -8,8 +8,216 @@ import { safeParseJson } from '../utils/safe-parse-json'
 
 export interface PrefilterResult {
   allowed: boolean
-  reason?: 'empty' | 'too_long' | 'injection' | 'rate_limit'
+  reason?: 'empty' | 'too_long' | 'injection' | 'rate_limit' | 'gibberish' | 'offensive' | 'spam'
   errorMessage?: string
+}
+
+// ============================================================
+// 輸入品質檢測（亂碼 / 髒話 / 垃圾輸入）
+// ============================================================
+
+export type InputQualityVerdict = 'valid' | 'gibberish' | 'offensive' | 'spam'
+export type QualityStrictness = 'strict' | 'normal' | 'lenient'
+
+export interface InputQualityResult {
+  quality: InputQualityVerdict
+  confidence: number
+  reason?: string           // debug 用
+  userMessage?: string      // 面向用戶的拒絕訊息
+}
+
+// ── 髒話庫（精準小型，命中即攔截）──
+const OFFENSIVE_PATTERNS_ZH = [
+  /傻逼/, /傻B/i, /煞筆/, /沙比/,
+  /操你/, /肏你/, /幹你/, /干你媽/, /幹你媽/,
+  /你媽[逼的死]/, /你媽B/i,
+  /狗娘/, /婊子/, /賤[人貨]/, /白癡/, /智障/,
+  /去死/, /滾[蛋開]/, /廢物/,
+  /雞[巴掰]/, /屌/,
+]
+
+const OFFENSIVE_PATTERNS_EN = [
+  /\bfuck\s*(you|off|ing)?\b/i,
+  /\bshit\b/i,
+  /\bbitch\b/i,
+  /\basshole\b/i,
+  /\bdick\s*head\b/i,
+  /\bstfu\b/i,
+  /\bkill\s+your\s*self\b/i,
+  /\bkys\b/i,
+]
+
+// ── 無母音英文白名單（常見技術縮寫）──
+const NO_VOWEL_WHITELIST = new Set([
+  'rwd', 'css', 'html', 'btn', 'cta', 'svg', 'npm', 'url',
+  'faq', 'crm', 'cms', 'dns', 'api', 'jwt', 'cdn', 'cli',
+  'ssl', 'tls', 'ssh', 'sql', 'php', 'xml', 'yml', 'pdf',
+  'rpc', 'tcp', 'udp', 'http', 'https', 'smtp', 'ftp',
+  'rgb', 'hsl', 'px', 'rem', 'vw', 'vh', 'ssr', 'ssg',
+  'seo', 'pwa', 'mvp', 'crm', 'sdk', 'www', 'ts', 'js',
+  'tsx', 'jsx', 'db', 'ux', 'ui', 'pr', 'mr', 'ci', 'cd',
+])
+
+function reject(
+  quality: InputQualityVerdict,
+  confidence: number,
+  reason: string,
+  isChinese: boolean
+): InputQualityResult {
+  const messages: Record<InputQualityVerdict, { zh: string; en: string }> = {
+    offensive: {
+      zh: '請文明使用 Tellcraft。如果您有建站需求，請描述您想建立的網站。',
+      en: 'Please use Tellcraft respectfully. If you have a project, describe the website you\'d like to build.',
+    },
+    gibberish: {
+      zh: '無法理解您的輸入。請用正常語句描述您的需求，例如：「做一個餐廳官網」',
+      en: 'I couldn\'t understand your input. Please describe your request clearly, e.g. "Build a restaurant website"',
+    },
+    spam: {
+      zh: '請輸入有效的文字內容。',
+      en: 'Please enter valid text content.',
+    },
+    valid: { zh: '', en: '' },
+  }
+  return {
+    quality,
+    confidence,
+    reason,
+    userMessage: isChinese ? messages[quality].zh : messages[quality].en,
+  }
+}
+
+function checkOffensive(message: string, isChinese: boolean): InputQualityResult | null {
+  for (const p of OFFENSIVE_PATTERNS_ZH) {
+    if (p.test(message)) {
+      return reject('offensive', 0.95, `zh pattern: ${p}`, isChinese)
+    }
+  }
+  for (const p of OFFENSIVE_PATTERNS_EN) {
+    if (p.test(message)) {
+      return reject('offensive', 0.95, `en pattern: ${p}`, isChinese)
+    }
+  }
+  return null
+}
+
+function checkGibberish(message: string, strictness: QualityStrictness, isChinese: boolean): InputQualityResult | null {
+  const trimmed = message.trim()
+
+  // 單字元/雙字元不在這裡處理（可能是有意義的短回覆如 A/B/好）
+  if (trimmed.length <= 2) return null
+
+  // G1: 全同字元重複（中文 ≥4 才算，英文 ≥3）
+  const sameCharMatch = trimmed.match(/^(.)\1+$/)
+  if (sameCharMatch) {
+    const char = sameCharMatch[1]
+    const threshold = /[\u4e00-\u9fff]/.test(char) ? 3 : 2  // 中文 4 字（index 3），英文 3 字（index 2）
+    if (trimmed.length > threshold) {
+      return reject('gibberish', 0.95, `G1: repeated char '${char}' ×${trimmed.length}`, isChinese)
+    }
+  }
+
+  // G2: 短模式重複 ≥3 次（1-3 字元模式，如 sdsd, WE2E2E2E）
+  for (let patLen = 1; patLen <= 3; patLen++) {
+    if (trimmed.length < patLen * 3) continue
+    const pat = trimmed.slice(0, patLen)
+    const repeated = pat.repeat(Math.ceil(trimmed.length / patLen)).slice(0, trimmed.length)
+    if (repeated === trimmed && trimmed.length / patLen >= 3) {
+      return reject('gibberish', 0.9, `G2: pattern '${pat}' repeated ${Math.floor(trimmed.length / patLen)}×`, isChinese)
+    }
+  }
+
+  // 以下規則只對純拉丁字母（可含數字）有效
+  const latinOnly = /^[a-zA-Z0-9]+$/.test(trimmed)
+  if (!latinOnly) return null
+
+  const letters = trimmed.replace(/[^a-zA-Z]/g, '')
+  if (letters.length < 3) return null
+
+  const lower = letters.toLowerCase()
+
+  // G3: 純拉丁 ≥4 字無母音（白名單排除）
+  if (letters.length >= 4 && !/[aeiou]/i.test(letters)) {
+    if (!NO_VOWEL_WHITELIST.has(lower)) {
+      return reject('gibberish', 0.9, `G3: no vowels in '${trimmed}'`, isChinese)
+    }
+  }
+
+  // G4: unique_chars/total_chars 過低
+  const uniqueChars = new Set(lower).size
+  const ratio = uniqueChars / lower.length
+  const ratioThreshold = strictness === 'strict' ? 0.35 : 0.25
+  if (lower.length >= 6 && ratio < ratioThreshold) {
+    return reject('gibberish', 0.85, `G4: char ratio ${ratio.toFixed(2)} < ${ratioThreshold}`, isChinese)
+  }
+
+  // G5: 高子音密度（英文）
+  if (letters.length >= 6) {
+    const consonants = lower.replace(/[aeiou]/g, '')
+    const consonantRatio = consonants.length / lower.length
+    if (consonantRatio > 0.85) {
+      return reject('gibberish', 0.85, `G5: consonant ratio ${consonantRatio.toFixed(2)}`, isChinese)
+    }
+    // 最長連續子音群 ≥6
+    const consonantGroups = lower.split(/[aeiou]+/)
+    const longestGroup = Math.max(...consonantGroups.map(g => g.length))
+    if (longestGroup >= 6) {
+      return reject('gibberish', 0.8, `G5: longest consonant group ${longestGroup}`, isChinese)
+    }
+  }
+
+  // G6: 混合字符無意義（strict only）— 純英數 3-6 字無母音
+  if (strictness === 'strict' && trimmed.length >= 3 && trimmed.length <= 6) {
+    if (/^[a-zA-Z0-9]+$/.test(trimmed) && !/[aeiouAEIOU]/.test(trimmed)) {
+      if (!NO_VOWEL_WHITELIST.has(lower)) {
+        return reject('gibberish', 0.7, `G6: short no-vowel '${trimmed}'`, isChinese)
+      }
+    }
+  }
+
+  return null
+}
+
+function checkSpam(message: string, strictness: QualityStrictness, isChinese: boolean): InputQualityResult | null {
+  const trimmed = message.trim()
+
+  // 純數字 ≤10 字（lenient 模式跳過，因為可能是選擇版本號等）
+  if (strictness !== 'lenient' && /^\d+$/.test(trimmed) && trimmed.length <= 10) {
+    return reject('spam', 0.8, `pure digits: '${trimmed}'`, isChinese)
+  }
+
+  // 純符號（無任何文字或數字）
+  if (/^[^\w\u4e00-\u9fff\u3400-\u4dbf]+$/.test(trimmed) && trimmed.length > 1) {
+    return reject('spam', 0.85, `pure symbols`, isChinese)
+  }
+
+  return null
+}
+
+/**
+ * 輸入品質檢測（純規則式，零 LLM）
+ *
+ * 執行順序：offensive → gibberish → spam → valid
+ */
+export function checkInputQuality(message: string, strictness: QualityStrictness = 'normal'): InputQualityResult {
+  const trimmed = message.trim()
+  if (!trimmed) return { quality: 'valid', confidence: 1 }
+
+  const isChinese = /[\u4e00-\u9fff\u3400-\u4dbf]/.test(trimmed)
+
+  // 1. 髒話
+  const offensiveResult = checkOffensive(trimmed, isChinese)
+  if (offensiveResult) return offensiveResult
+
+  // 2. 亂碼
+  const gibberishResult = checkGibberish(trimmed, strictness, isChinese)
+  if (gibberishResult) return gibberishResult
+
+  // 3. 垃圾
+  const spamResult = checkSpam(trimmed, strictness, isChinese)
+  if (spamResult) return spamResult
+
+  return { quality: 'valid', confidence: 1 }
 }
 
 // ============================================================
@@ -360,6 +568,28 @@ export async function prefilterMessage(
           : 'This type of message cannot be processed. Please describe the product or feature you want to build.')
           + cooldownWarning,
       }
+    }
+  }
+
+  // 3.5 輸入品質（亂碼 + 髒話 + 垃圾）
+  const qualityResult = checkInputQuality(trimmed, 'normal')
+  if (qualityResult.quality !== 'valid') {
+    console.warn(`[Prefilter] 品質攔截: userId=${userId}, quality=${qualityResult.quality}, reason=${qualityResult.reason}`)
+    if (qualityResult.quality === 'offensive') {
+      const cooldown = await recordViolation(userId, redis)
+      const cooldownWarning = cooldown > 0
+        ? (isChinese ? `\n\n⚠️ 由於多次違規，您的帳號已被暫停 ${Math.ceil(cooldown / 60)} 分鐘。` : `\n\n⚠️ Due to repeated violations, your account has been suspended for ${Math.ceil(cooldown / 60)} minute${Math.ceil(cooldown / 60) > 1 ? 's' : ''}.`)
+        : ''
+      return {
+        allowed: false,
+        reason: 'offensive',
+        errorMessage: (qualityResult.userMessage || '') + cooldownWarning,
+      }
+    }
+    return {
+      allowed: false,
+      reason: qualityResult.quality as PrefilterResult['reason'],
+      errorMessage: qualityResult.userMessage,
     }
   }
 
