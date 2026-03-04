@@ -85,9 +85,21 @@ function quickFilter(input: SemanticGatewayInput): SemanticGatewayResult | null 
     return { verdict: 'valid', accept: true }
   }
 
-  // BDD 釐清：其餘全部送 Sonnet（不做長度短路）
-  // 廢話文（結構正確中文但零實質）只有 LLM 能判斷
-  if (input.phase === 'bdd_clarify') return null
+  // BDD 釐清：先用 hasSubstantiveContent 過濾明顯垃圾，其餘送 Sonnet
+  if (input.phase === 'bdd_clarify') {
+    if (!hasSubstantiveContent(trimmed)) {
+      const isZh = input.locale !== 'en'
+      return {
+        verdict: 'off_topic',
+        accept: false,
+        guidanceMessage: isZh
+          ? '請輸入有意義的文字來回答問題。'
+          : 'Please provide a meaningful answer to the question.',
+      }
+    }
+    // 廢話文（結構正確中文但零實質）只有 LLM 能判斷
+    return null
+  }
 
   // ── 以下只有 Design clarify ──
 
@@ -163,9 +175,9 @@ export async function semanticGateway(
   const quick = quickFilter(input)
   if (quick) return quick
 
-  // ── Anti-loop：BDD 連續 2 次被拒 → 強制 accept ──
+  // ── Anti-loop：BDD 連續 3 次被拒 → 強制 accept ──
   const rejectCount = state.semanticRejectCount || 0
-  if (input.phase === 'bdd_clarify' && rejectCount >= 2) {
+  if (input.phase === 'bdd_clarify' && rejectCount >= 3) {
     return { verdict: 'valid', accept: true }
   }
 
@@ -192,8 +204,15 @@ export async function semanticGateway(
     })
 
     if (!resp.ok) {
-      console.warn(`[SemanticGateway] Sonnet API 錯誤 ${resp.status}，降級放行`)
-      return { verdict: 'valid', accept: true }
+      console.warn(`[SemanticGateway] Sonnet API 錯誤 ${resp.status}，降級拒絕`)
+      const isZh = input.locale !== 'en'
+      return {
+        verdict: 'off_topic',
+        accept: false,
+        guidanceMessage: isZh
+          ? '系統暫時無法處理您的回答，請再輸入一次。'
+          : 'System temporarily unavailable. Please try again.',
+      }
     }
 
     const data = await resp.json() as {
@@ -218,8 +237,15 @@ export async function semanticGateway(
 
     const text = data.content?.[0]?.text?.trim()
     if (!text) {
-      console.warn('[SemanticGateway] 空回應，降級放行')
-      return { verdict: 'valid', accept: true }
+      console.warn('[SemanticGateway] 空回應，降級拒絕')
+      const isZh = input.locale !== 'en'
+      return {
+        verdict: 'off_topic',
+        accept: false,
+        guidanceMessage: isZh
+          ? '系統暫時無法處理您的回答，請再輸入一次。'
+          : 'System temporarily unavailable. Please try again.',
+      }
     }
 
     // 解析 JSON（容許 markdown code block 包裹）
@@ -239,7 +265,14 @@ export async function semanticGateway(
       guidanceMessage: result.guidance,
     }
   } catch (err) {
-    console.warn('[SemanticGateway] 分析失敗，降級放行:', err)
-    return { verdict: 'valid', accept: true }
+    console.warn('[SemanticGateway] 分析失敗，降級拒絕:', err)
+    const isZh = input.locale !== 'en'
+    return {
+      verdict: 'off_topic',
+      accept: false,
+      guidanceMessage: isZh
+        ? '系統暫時無法處理您的回答，請再輸入一次。'
+        : 'System temporarily unavailable. Please try again.',
+    }
   }
 }

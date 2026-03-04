@@ -554,11 +554,11 @@ psql "$DATABASE_URL" -f tellcraft-backend/migrations/xxx.sql
 
 `semanticGateway()`（`semantic-gateway.ts`）取代 3 個獨立淺層函數（`analyzeAnswerRelevance` + `validateDesignAnswer` + keyword arrays），統一 BDD 釐清和設計問卷的輸入品質判斷。
 
-- **quickFilter 零 LLM 短路**（~80-90% 放行）：`__skip__` / 選項 A-D / ≥15 字無問號 / 設計問卷 ≥5 字 / BDD ≥8 字無問號 → 直接 accept
+- **quickFilter 零 LLM 短路**：`__skip__` / 選項 A-D → 直接 accept；BDD 階段 `hasSubstantiveContent()` 前置攔截亂碼（零 LLM）→ 通過後才送 Sonnet；Design 問卷 ≥5 字有實質內容 → accept
 - **Sonnet 語義判斷**（6 verdict）：valid / ambiguous / off_topic / seeking_help / evasive / content_policy，Sonnet 直接生成引導訊息（不再 code 硬寫模板）
 - **階段差異化**：BDD 釐清較嚴格（「都可以」= ambiguous），設計問卷較寬鬆（「都可以」= valid）
-- **Anti-loop**：FlowState `semanticRejectCount`，BDD ≥2 次強制 accept；Design ≥2 次仍調 Sonnet 但一律顯示跳過按鈕
-- **降級策略**：API 錯誤 / JSON 解析失敗 → 降級 accept（不阻塞流程）
+- **Anti-loop**：FlowState `semanticRejectCount`，BDD ≥3 次強制 accept；Design ≥2 次仍調 Sonnet 但一律顯示跳過按鈕
+- **降級策略 fail-closed**：Sonnet API 錯誤 / 空回應 / JSON 解析失敗 → 拒絕並提示重試（不是放行），配合 anti-loop 避免卡死
 - **品質前置**：BDD 階段 `checkInputQuality('strict')` 攔截亂碼在 gateway 之前
 - **成本**：Sonnet ~$0.003/次，但 quickFilter 放行率高，每個 session 預估 ~$0.01-0.03
 
