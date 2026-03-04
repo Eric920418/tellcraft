@@ -3042,6 +3042,8 @@ function ChatSection({
       const containerW = codePreviewContainerWidth > 0 ? codePreviewContainerWidth : 800
       const maxDeviceWidth = getDeviceWidth(codePreviewDevice)
       const previewWidth = codePreviewDevice === 'desktop' ? containerW : Math.min(maxDeviceWidth, containerW)
+      const DEVICE_HEIGHTS: Record<DeviceType, number> = { desktop: 0, tablet: 960, mobile: 812 }
+      const previewHeight = DEVICE_HEIGHTS[codePreviewDevice]
 
       // Streaming 但還沒有任何頁面檔案 → 顯示藍圖進度
       if (isStreaming && pagesData.length === 0) {
@@ -3175,8 +3177,8 @@ function ChatSection({
             {/* 右側：DeviceSwitcher + 寬度 */}
             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
               {!isStreaming && <DeviceSwitcher activeDevice={codePreviewDevice} onDeviceChange={(d) => { setCodePreviewDevice(d); handleClearSelection() }} />}
-              <span style={{ fontSize: 11, color: 'var(--gray-400)', fontFamily: 'var(--font-mono)', width: 50, textAlign: 'right' }}>
-                {previewWidth}px
+              <span style={{ fontSize: 11, color: 'var(--gray-400)', fontFamily: 'var(--font-mono)', textAlign: 'right' }}>
+                {previewWidth}{previewHeight ? `×${previewHeight}` : ''}
               </span>
             </div>
           </div>
@@ -3189,39 +3191,94 @@ function ChatSection({
                 flex: 1,
                 display: 'flex',
                 justifyContent: 'center',
-                padding: codePreviewDevice === 'desktop' ? 0 : 24,
+                alignItems: codePreviewDevice === 'desktop' ? undefined : 'flex-start',
+                padding: codePreviewDevice === 'mobile' ? 32 : codePreviewDevice === 'tablet' ? 24 : 0,
                 overflow: 'auto',
-                background: 'var(--gray-50)',
+                background: codePreviewDevice === 'desktop' ? 'var(--gray-50)' : 'var(--gray-100)',
                 position: 'relative',
               }}
             >
-              <div
-                style={{
-                  width: codePreviewDevice === 'desktop' ? '100%' : previewWidth,
-                  height: '100%',
-                  borderRadius: codePreviewDevice === 'desktop' ? 0 : 8,
-                  boxShadow: codePreviewDevice === 'desktop' ? 'none' : '0 8px 32px rgba(0,0,0,0.12), 0 2px 8px rgba(0,0,0,0.08)',
-                  background: '#fff',
-                  overflow: 'hidden',
-                }}
-              >
-                <SandpackPreviewComponent
-                  pages={pagesData}
-                  components={componentsData}
-                  styles={stylesData}
-                  tailwindConfig={tailwindConfigData}
-                  isStreaming={isStreaming}
-                  editMode={codePreviewEditMode}
-                  onSelectionChanged={handleCodePreviewSelectionChanged}
-                  onElementSelected={handleCodePreviewElementSelected}
-                  pendingUpdate={codePreviewPendingUpdate}
-                  pendingReset={codePreviewPendingReset}
-                  pendingOverrides={codePreviewPendingOverrides}
-                  overrides={codePreviewOverrides}
-                  annotations={codePreviewAnnotations}
-                  onElementResized={handleCodePreviewElementResized}
-                />
-              </div>
+              {codePreviewDevice === 'mobile' ? (
+                /* 手機外框 Phone Frame */
+                <div
+                  style={{
+                    background: '#1a1a1a',
+                    borderRadius: 44,
+                    padding: '0 12px',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    alignItems: 'center',
+                    boxShadow: '0 12px 40px rgba(0,0,0,0.18), 0 4px 12px rgba(0,0,0,0.1)',
+                    flexShrink: 0,
+                  }}
+                >
+                  {/* Dynamic Island */}
+                  <div style={{ width: '100%', height: 30, display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
+                    <div style={{ width: 100, height: 24, background: '#000', borderRadius: 12 }} />
+                  </div>
+                  {/* 螢幕區域 */}
+                  <div
+                    style={{
+                      width: previewWidth,
+                      height: previewHeight,
+                      borderRadius: 4,
+                      overflow: 'hidden',
+                      background: '#fff',
+                    }}
+                  >
+                    <SandpackPreviewComponent
+                      pages={pagesData}
+                      components={componentsData}
+                      styles={stylesData}
+                      tailwindConfig={tailwindConfigData}
+                      isStreaming={isStreaming}
+                      editMode={codePreviewEditMode}
+                      onSelectionChanged={handleCodePreviewSelectionChanged}
+                      onElementSelected={handleCodePreviewElementSelected}
+                      pendingUpdate={codePreviewPendingUpdate}
+                      pendingReset={codePreviewPendingReset}
+                      pendingOverrides={codePreviewPendingOverrides}
+                      overrides={codePreviewOverrides}
+                      annotations={codePreviewAnnotations}
+                      onElementResized={handleCodePreviewElementResized}
+                    />
+                  </div>
+                  {/* Home Indicator */}
+                  <div style={{ width: '100%', height: 18, display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
+                    <div style={{ width: 134, height: 5, background: 'rgba(255,255,255,0.3)', borderRadius: 3 }} />
+                  </div>
+                </div>
+              ) : (
+                /* Desktop / Tablet */
+                <div
+                  style={{
+                    width: codePreviewDevice === 'desktop' ? '100%' : previewWidth,
+                    height: codePreviewDevice === 'desktop' ? '100%' : previewHeight,
+                    borderRadius: codePreviewDevice === 'desktop' ? 0 : 8,
+                    boxShadow: codePreviewDevice === 'desktop' ? 'none' : '0 8px 32px rgba(0,0,0,0.12), 0 2px 8px rgba(0,0,0,0.08)',
+                    background: '#fff',
+                    overflow: 'hidden',
+                    flexShrink: 0,
+                  }}
+                >
+                  <SandpackPreviewComponent
+                    pages={pagesData}
+                    components={componentsData}
+                    styles={stylesData}
+                    tailwindConfig={tailwindConfigData}
+                    isStreaming={isStreaming}
+                    editMode={codePreviewEditMode}
+                    onSelectionChanged={handleCodePreviewSelectionChanged}
+                    onElementSelected={handleCodePreviewElementSelected}
+                    pendingUpdate={codePreviewPendingUpdate}
+                    pendingReset={codePreviewPendingReset}
+                    pendingOverrides={codePreviewPendingOverrides}
+                    overrides={codePreviewOverrides}
+                    annotations={codePreviewAnnotations}
+                    onElementResized={handleCodePreviewElementResized}
+                  />
+                </div>
+              )}
               {/* 編輯模式提示浮層 */}
               {codePreviewEditMode && codePreviewSelectedElements.length === 0 && !isStreaming && (
                 <div style={{
