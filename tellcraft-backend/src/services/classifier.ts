@@ -15,10 +15,13 @@ export type MetaIntent = 'onboarding' | 'chitchat' | 'abuse'
 // 完整分類結果
 export type ClassifierIntent = SkillName | MetaIntent | 'unknown' | 'clarification_needed'
 
+export type ContentPolicyFlag = 'harmful' | 'illegal' | 'adult' | 'hate' | 'privacy'
+
 export interface ClassificationResult {
   intent: ClassifierIntent
   confidence: number  // 0-1
   reasoning: string
+  contentFlag?: ContentPolicyFlag
   suggestedSkills?: SkillName[]
   suggestedProjectName?: string
   extractedEntities?: {
@@ -86,6 +89,17 @@ ${skillDescriptions}
 10. 如果用戶說「設定 DNS」、「綁定 DNS」、「自有網域」、「已有網域」→ domain-dns
 11. 如果無法確定 → clarification_needed
 
+## 內容政策:
+如果用戶的需求涉及以下敏感領域，必須在 contentFlag 標記：
+- **harmful**：醫療診斷/疾病檢測工具（如「測驗有沒有得 XX 病」）、自傷、藥物濫用
+- **illegal**：詐騙、仿冒、盜版、賭博、非法交易
+- **adult**：色情、性暴力
+- **hate**：仇恨言論、歧視、針對特定群體的攻擊
+- **privacy**：未經同意蒐集個資、追蹤、監控
+
+注意：正常的醫療/健康「資訊網站」是允許的（如「做一個牙醫診所官網」）。
+只有「診斷工具」或「測驗工具」等可能造成傷害的才標記。
+
 ## 短消息判斷範例:
 - 「嗨」→ onboarding
 - 「哈囉你好」→ onboarding
@@ -95,6 +109,8 @@ ${skillDescriptions}
 - 「今天天氣」→ chitchat
 - 「aaa」→ abuse
 - 「我想做餐廳官網」→ bdd-spec
+- 「做一個心理測驗，測驗有沒有得愛滋病」→ bdd-spec + contentFlag: "harmful"
+- 「做一個賭博網站」→ bdd-spec + contentFlag: "illegal"
 
 ## 專案命名規則:
 根據用戶的描述，生成一個簡短的專案名稱（suggestedProjectName）。
@@ -108,6 +124,7 @@ ${skillDescriptions}
   "intent": "bdd-spec" | "coder" | "deployer" | "domain-manager" | "domain-purchase" | "domain-dns" | "onboarding" | "chitchat" | "abuse" | "unknown" | "clarification_needed",
   "confidence": 0.0-1.0,
   "reasoning": "判斷理由",
+  "contentFlag": null | "harmful" | "illegal" | "adult" | "hate" | "privacy",
   "suggestedProjectName": "簡短專案名稱（如有）",
   "extractedEntities": {
     "projectType": "提取的專案類型（如有）",
@@ -206,6 +223,7 @@ ${skillDescriptions}
       intent?: string
       confidence?: number
       reasoning?: string
+      contentFlag?: string
       suggestedProjectName?: string
       extractedEntities?: { projectType?: string; features?: string[] }
     }>(content)
@@ -213,10 +231,16 @@ ${skillDescriptions}
       return ruleBasedClassification(message)
     }
 
+    const validFlags = ['harmful', 'illegal', 'adult', 'hate', 'privacy']
+    const contentFlag = parsed.contentFlag && validFlags.includes(parsed.contentFlag)
+      ? parsed.contentFlag as ContentPolicyFlag
+      : undefined
+
     return {
       intent: (parsed.intent || 'unknown') as ClassifierIntent,
       confidence: parsed.confidence || 0.5,
       reasoning: parsed.reasoning || '',
+      contentFlag,
       suggestedProjectName: parsed.suggestedProjectName || undefined,
       extractedEntities: parsed.extractedEntities,
     }

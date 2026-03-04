@@ -324,8 +324,8 @@ export async function checkBuildRelevance(
 
   try {
     const systemPrompt = hasWeakSignal
-      ? '用戶想用快速建站工具。判斷描述是否具體到能知道「建什麼類型的網站」。只回覆 JSON:\n- 夠具體：{"relevant":true}\n- 相關但太模糊（如「做一個很酷的東西」「建一個網站」）：{"relevant":true,"vague":true}\n- 與建網站無關：{"relevant":false}'
-      : '判斷用戶訊息是否與「建立網站/應用/數位產品」相關。只回覆 JSON: {"relevant":true} 或 {"relevant":false}'
+      ? '用戶想用快速建站工具。判斷描述是否具體到能知道「建什麼類型的網站」。同時檢查內容是否涉及有害/非法/成人/仇恨/隱私侵犯（正常的醫療資訊網站是允許的，只有診斷/測驗工具才算有害）。只回覆 JSON:\n- 夠具體：{"relevant":true}\n- 相關但太模糊（如「做一個很酷的東西」「建一個網站」）：{"relevant":true,"vague":true}\n- 與建網站無關：{"relevant":false}\n- 內容不當：{"relevant":false,"policy":"harmful|illegal|adult|hate|privacy"}'
+      : '判斷用戶訊息是否與「建立網站/應用/數位產品」相關。同時檢查內容是否涉及有害/非法/成人/仇恨/隱私侵犯。只回覆 JSON: {"relevant":true} 或 {"relevant":false} 或 {"relevant":false,"policy":"harmful|illegal|adult|hate|privacy"}'
 
     const resp = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
@@ -371,8 +371,18 @@ export async function checkBuildRelevance(
     const text = data.content?.[0]?.text
     if (!text) return { relevant: true }
 
-    const parsed = safeParseJson<{ relevant?: boolean; vague?: boolean }>(text)
+    const parsed = safeParseJson<{ relevant?: boolean; vague?: boolean; policy?: string }>(text)
     if (!parsed) return { relevant: true }
+
+    // 內容不當 → 拒絕（Content Policy）
+    if (parsed.policy) {
+      return {
+        relevant: false,
+        errorMessage: isChinese
+          ? '抱歉，Tellcraft 無法協助建立此類內容。請描述一個合適的網站需求。'
+          : 'Sorry, Tellcraft cannot assist with this type of content. Please describe an appropriate website.',
+      }
+    }
 
     // 不相關 → 拒絕
     if (parsed.relevant === false) {

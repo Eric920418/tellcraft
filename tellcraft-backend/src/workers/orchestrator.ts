@@ -45,6 +45,7 @@ import { detectDesignTier, inferProductType, inferPages, buildDefaultDesignSyste
 import { ensureResponsiveClasses } from '../services/uiux-generation'
 import { matchTemplates } from '../services/template-matcher'
 import { executeIteration, executeUndoIteration, executeRollbackQuery, executeRollbackSelection } from '../services/iteration-skill'
+import { safeParseJson } from '../utils/safe-parse-json'
 import {
   shouldRunEventStorming, initEventStorming, handleInitConfirm,
   exploreNextItem, handleESAnswer, generateESDocument,
@@ -548,6 +549,20 @@ async function handleProcessMessage(
   }>).slice(-10)
 
   const classification = await classifyIntent(message, history, { userId, conversationId })
+
+  // Step 2.5: Content Policy 攔截
+  if (classification.contentFlag) {
+    console.log(`[Orchestrator] Content Policy 攔截: flag=${classification.contentFlag}, msg="${message.substring(0, 50)}"`)
+    const isChinese = /[\u4e00-\u9fff\u3400-\u4dbf]/.test(message)
+    await sendMessage(conversationId, io, {
+      content: isChinese
+        ? '抱歉，Tellcraft 無法協助建立此類內容。\n\n如果這是誤判，請重新描述您的需求，我們很樂意幫助您建立合適的網站。'
+        : 'Sorry, Tellcraft cannot assist with this type of content.\n\nIf this was a mistake, please rephrase your request and we\'ll be happy to help.',
+      stage: 'content_policy_rejected',
+    })
+    await recordAbuseViolation(userId, redis)
+    return { taskId: null, skill: null }
+  }
 
   // Step 3: Meta Intent → 模板回覆（不建 task，零 Token 成本）
   if (!isSkillIntent(classification.intent)) {
@@ -3367,7 +3382,20 @@ const AMBIGUOUS_SIGNALS = [
   'whatever', "don't care", 'either',
 ]
 
-type AnswerVerdict = 'accept' | 'ambiguous' | 'off_topic' | 'seeking_help'
+const EVASIVE_SIGNALS = [
+  // 逃避/拒絕回答
+  '不要管', '別管', '不關你', '不想說', '不想回答', '不告訴', '管好你自己',
+  'none of your business', 'leave me alone', "don't care", 'go away',
+  // 敷衍
+  '隨便啦', '不知道啦', '沒有啦', '算了', '你決定', '你自己看',
+  'whatever', 'idk', 'dunno',
+  // 求助（補充 AMBIGUOUS_SIGNALS 沒有的）
+  '不太懂', '聽不懂', '看不懂', '太複雜', '太專業', '再說一次', '說清楚',
+  '再解釋', '什麼東西', '這是什麼',
+  'too complicated', 'too technical', 'say again', 'what is this',
+]
+
+type AnswerVerdict = 'accept' | 'ambiguous' | 'off_topic' | 'seeking_help' | 'evasive'
 
 interface AnswerAnalysis {
   accept: boolean
@@ -3393,17 +3421,20 @@ async function analyzeAnswerRelevance(
 
   // ── 規則式快篩 ──
 
-  // 長回答且無含糊信號 → 直接放行（通常有實質內容）
   const hasAmbiguousSignal = AMBIGUOUS_SIGNALS.some(s => lower.includes(s))
-  if (trimmed.length >= 15 && !hasAmbiguousSignal) {
+  const hasEvasiveSignal = EVASIVE_SIGNALS.some(s => lower.includes(s))
+  const needsHaiku = hasAmbiguousSignal || hasEvasiveSignal
+
+  // 長回答但有逃避/含糊信號 → 仍送 Haiku
+  if (trimmed.length >= 15 && !needsHaiku) {
     return { accept: true, verdict: 'accept' }
   }
 
   // 短回答且有問號 → 可能求助，送 Haiku
   const mightBeQuestion = trimmed.length < 3 && trimmed.includes('?') || trimmed.includes('？')
 
-  // 無含糊信號且非疑似求助 → 放行
-  if (!hasAmbiguousSignal && !mightBeQuestion) {
+  // 無任何信號且非求助 → 放行
+  if (!needsHaiku && !mightBeQuestion) {
     return { accept: true, verdict: 'accept' }
   }
 
@@ -3444,6 +3475,7 @@ async function analyzeAnswerRelevance(
 - 明確回答：{"verdict":"accept"}
 - 含糊/條件式（如「看情況」「如果...就...」）：{"verdict":"ambiguous","followUp":"用一句話追問，要求用戶給出明確答案"}
 - 離題/沒回答問題：{"verdict":"off_topic","followUp":"溫和引導回到問題的一句話"}
+- 逃避/拒絕回答（如「你不要管我」「隨便啦」「算了」）：{"verdict":"evasive","followUp":"溫和鼓勵用戶回答，說明為何需要這個資訊"}
 - 用戶在求助/問問題：{"verdict":"seeking_help","explanation":"用更簡單的語言重新解釋問題"}`,
         messages: [{ role: 'user', content: `問題：${questionText}${optionsText}\n\n用戶回答：${userMessage}` }],
       }),
@@ -5560,6 +5592,135 @@ async function startDesignClarifyWithInitialIdea(
   await saveFlowState(redis, conversationId, state)
 }
 
+// ============================================================
+// 設計問卷答案驗證
+// ============================================================
+
+const DESIGN_KEYWORDS_ZH = [
+  '簡約', '現代', '復古', '活潑', '專業', '可靠', '溫暖', '科技', '極簡', '奢華',
+  '文青', '清新', '暗色', '亮色', '圓角', '扁平', '漸層', '留白', '卡片', '列表',
+  '藍色', '綠色', '紅色', '黑色', '白色', '灰色', '粉色', '紫色', '橙色', '金色',
+  '排版', '字體', '間距', '動畫', '陰影', '邊框', '圖片', '背景', '色調', '風格',
+]
+const DESIGN_KEYWORDS_EN = [
+  'minimal', 'modern', 'retro', 'vibrant', 'professional', 'warm', 'tech', 'luxury',
+  'clean', 'dark', 'light', 'rounded', 'flat', 'gradient', 'card', 'grid', 'layout',
+  'blue', 'green', 'red', 'black', 'white', 'gray', 'pink', 'purple', 'orange',
+  'font', 'spacing', 'shadow', 'border', 'animation', 'background', 'style',
+  'notion', 'stripe', 'apple', 'airbnb', 'spotify', 'dribbble',
+]
+
+interface DesignAnswerValidation {
+  accept: boolean
+  guideMessage?: string
+}
+
+async function validateDesignAnswer(
+  answer: string,
+  question: { key: string; question: string; hint: string },
+  state: FlowState,
+  conversationId: string,
+  io: SocketIOServer,
+): Promise<DesignAnswerValidation> {
+  const trimmed = answer.trim()
+  const lower = trimmed.toLowerCase()
+
+  // ── Layer 1: 規則式快篩（零 LLM）──
+
+  // 逃避信號 → reject
+  if (EVASIVE_SIGNALS.some(s => lower.includes(s))) {
+    return {
+      accept: false,
+      guideMessage: `沒關係，這個問題沒有標準答案 😊\n\n**${question.question}**\n\n_${question.hint}_\n\n如果真的沒有想法，可以點「跳過此題」。`,
+    }
+  }
+
+  // 求助信號 → reject with 更詳細說明
+  const helpSignals = ['不太懂', '聽不懂', '看不懂', '太複雜', '太專業', '再說一次', '說清楚', '再解釋', '什麼東西', '這是什麼', '不明白', '不了解', "don't understand", 'too complicated', 'too technical', 'what is this', 'say again']
+  if (helpSignals.some(s => lower.includes(s))) {
+    return {
+      accept: false,
+      guideMessage: `讓我換個方式說明 💡\n\n**${question.question}**\n\n簡單來說，就是 _${question.hint}_\n\n你可以用很簡短的詞彙回答，例如一兩個形容詞就好。`,
+    }
+  }
+
+  // 有設計關鍵詞 → 直接放行
+  const hasDesignKeyword = DESIGN_KEYWORDS_ZH.some(k => lower.includes(k)) ||
+    DESIGN_KEYWORDS_EN.some(k => lower.includes(k))
+  if (hasDesignKeyword) {
+    return { accept: true }
+  }
+
+  // ≤2 字且無設計信號 → reject
+  if (trimmed.length <= 2) {
+    return {
+      accept: false,
+      guideMessage: `可以再多說一點嗎？\n\n**${question.question}**\n\n_${question.hint}_`,
+    }
+  }
+
+  // ≥5 字且無逃避/求助信號 → 放行（大部分正常回答會走這條）
+  if (trimmed.length >= 5) {
+    return { accept: true }
+  }
+
+  // ── Layer 2: 3-4 字邊界情況，用 Haiku 判斷 ──
+  const apiKey = process.env.ANTHROPIC_API_KEY
+  if (!apiKey) return { accept: true }
+
+  try {
+    const resp = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': apiKey,
+        'anthropic-version': '2023-06-01',
+      },
+      body: JSON.stringify({
+        model: 'claude-haiku-4-5-20251001',
+        max_tokens: 30,
+        system: '用戶被問設計問題，判斷回答是否有回答。只回 JSON: {"ok":true} 或 {"ok":false}',
+        messages: [{ role: 'user', content: `問題：${question.question}\n回答：${trimmed}` }],
+      }),
+    })
+
+    if (!resp.ok) return { accept: true }
+
+    const data = await resp.json() as { content?: Array<{ text?: string }>; usage?: { input_tokens?: number; output_tokens?: number } }
+
+    if (data.usage) {
+      const inputTokens = data.usage.input_tokens || 0
+      const outputTokens = data.usage.output_tokens || 0
+      const cost = (inputTokens * 0.8 + outputTokens * 4) / 1_000_000
+      db.recordLlmUsage({
+        model: 'claude-haiku-4-5-20251001',
+        inputTokens,
+        outputTokens,
+        costUsd: cost,
+        purpose: 'design_answer_validation',
+        conversationId,
+      }).catch(err => console.error('[DesignValidation] 記錄使用量失敗:', err))
+    }
+
+    const text = data.content?.[0]?.text?.trim()
+    if (!text) return { accept: true }
+
+    const parsed = safeParseJson<{ ok?: boolean }>(text)
+    if (!parsed) return { accept: true }
+
+    if (parsed.ok === false) {
+      return {
+        accept: false,
+        guideMessage: `這個回答好像跟問題不太相關 😅\n\n**${question.question}**\n\n_${question.hint}_`,
+      }
+    }
+
+    return { accept: true }
+  } catch {
+    return { accept: true }
+  }
+}
+
 /**
  * 處理設計釐清回覆
  */
@@ -5601,11 +5762,54 @@ async function handleDesignClarifyReply(
     },
   ]
 
-  // 保存當前回答
+  // 驗證並保存當前回答
   const currentQuestion = clarifyQuestions.find(q => q.step === step)
   if (currentQuestion) {
-    ideas.push({ step: currentQuestion.key, answer: message.trim() })
-    state.uiuxDesignIdeas = ideas
+    const trimmedMsg = message.trim()
+
+    // __skip__ → 跳過此題，不保存答案
+    if (trimmedMsg === '__skip__') {
+      // 不保存，直接進入下一題
+    } else {
+      // 驗證回答品質
+      const validation = await validateDesignAnswer(
+        trimmedMsg, currentQuestion, state, conversationId, io,
+      )
+      if (!validation.accept) {
+        // 驗證失敗，重新提問（不保存）
+        // Anti-loop：連續拒絕追蹤
+        const clarifyRejectCount = (state as FlowState & { designClarifyRejectCount?: number }).designClarifyRejectCount || 0
+        if (clarifyRejectCount >= 2) {
+          // 連續 2 次被拒，提供跳過按鈕但不強制放行
+          await sendMessage(conversationId, io, {
+            content: validation.guideMessage || `請重新回答。`,
+            stage: 'uiux_design_clarify',
+            quickReplies: [
+              { label: '跳過此題', value: '__skip__', style: 'ghost' },
+              { label: '← 重來', value: '__go_back__', style: 'ghost' },
+            ],
+          })
+        } else {
+          await sendMessage(conversationId, io, {
+            content: validation.guideMessage || `請重新回答。`,
+            stage: 'uiux_design_clarify',
+            quickReplies: [
+              { label: '跳過此題', value: '__skip__', style: 'ghost' },
+              { label: '← 重來', value: '__go_back__', style: 'ghost' },
+            ],
+          });
+        }
+        (state as FlowState & { designClarifyRejectCount?: number }).designClarifyRejectCount = clarifyRejectCount + 1
+        state.waitingForReply = true
+        await saveFlowState(redis, conversationId, state)
+        return
+      }
+
+      // 驗證通過，重置拒絕計數並保存答案
+      (state as FlowState & { designClarifyRejectCount?: number }).designClarifyRejectCount = 0
+      ideas.push({ step: currentQuestion.key, answer: trimmedMsg })
+      state.uiuxDesignIdeas = ideas
+    }
   }
 
   // 檢查是否還有下一個問題
@@ -5617,6 +5821,7 @@ async function handleDesignClarifyReply(
       content: `好的，收到！\n\n**${nextQuestion.question}**\n\n_${nextQuestion.hint}_`,
       stage: 'uiux_design_clarify',
       quickReplies: [
+        { label: '跳過此題', value: '__skip__', style: 'ghost' },
         { label: '← 重來', value: '__go_back__', style: 'ghost' },
       ],
     })

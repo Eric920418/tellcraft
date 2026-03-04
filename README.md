@@ -91,8 +91,8 @@ npx ts-node bdd-spec/scripts/validate-feature.ts spec/features/
 
 | Service | LLM | 調用者 | 職責 |
 |---------|-----|--------|------|
-| `classifier.ts` | Haiku | 每條新訊息 | 意圖分類（規則式 + LLM） |
-| `prefilter.ts` | 無 / Haiku | 每條訊息（最先）+ Fast Mode | 空訊息/長度/Injection(28 regex)/品質閘門(亂碼+髒話+垃圾)/Rate Limit + `checkBuildRelevance()` 語義相關性 |
+| `classifier.ts` | Haiku | 每條新訊息 | 意圖分類（規則式 + LLM）+ Content Policy 審查（contentFlag） |
+| `prefilter.ts` | 無 / Haiku | 每條訊息（最先）+ Fast Mode | 空訊息/長度/Injection(28 regex)/品質閘門(亂碼+髒話+垃圾)/Rate Limit + `checkBuildRelevance()` 語義相關性 + Content Policy |
 | `bdd-to-ui-spec.ts` | Haiku | UIUX Pipeline | BDD Feature Files → UIRequirementsSpec |
 | `prd-discovery.ts` | Sonnet | bdd-spec | PRD 需求發掘（多輪） |
 | `clarify-dedup.ts` | Haiku ×2 | bdd-spec | Decision Summary + 語意去重 |
@@ -346,7 +346,7 @@ Server Action 錯誤訊息 + 工具模組中文字串國際化（+117 keys，2 n
 | **認證** | Google/LINE OAuth、JWT 雙軌（localStorage + Cookie）、訪客→帳號合併、帳號綁定（雙登入）、auth 頁面 i18n（next-intl） |
 | **儀表板** | 用戶統計、專案管理、版本歷史、管理員面板、LLM 用量追蹤、Dashboard 元件 i18n（next-intl） |
 | **i18n** | next-intl 多語系（zh/en）、UI 元件全量翻譯、Server Action 錯誤訊息 i18n（getTranslations）、lib 模組英文化、error code 機制、883 keys / 29 namespaces |
-| **防護** | 三層防刷（前端冷卻 + API 限速 + Worker 鎖）、七層輸入防禦（含 Universal Input Quality Gate 亂碼/髒話/垃圾規則式攔截）+ 違規冷卻升級（3→60s / 6→5min / 10→30min）、LLM 自動重試、Guest 限制（Fast Only + 一次使用 + 登入推薦） |
+| **防護** | 三層防刷（前端冷卻 + API 限速 + Worker 鎖）、八層輸入防禦（含 Content Policy 語義審查 + Universal Input Quality Gate 亂碼/髒話/垃圾規則式攔截 + 設計問卷驗證）+ 違規冷卻升級（3→60s / 6→5min / 10→30min）、LLM 自動重試、Guest 限制（Fast Only + 一次使用 + 登入推薦） |
 | **通知** | LINE 推播通知（BDD 完成/UIUX 生成完成/部署成功失敗），離線用戶也能收到 |
 | **LINE Bot** | LINE 對話內完整 Fast Build 體驗（描述需求→生成→部署），Flex Message 卡片 + Quick Reply |
 | **UX** | 對話回退、錯誤恢復、自動恢復對話、專案自動命名、Markdown 渲染、專案對話快捷入口（1-click） |
@@ -585,15 +585,17 @@ psql "$DATABASE_URL" -f tellcraft-backend/migrations/xxx.sql
 
 - **根因**：`handleProcessMessage` 的 `mode === 'fast'` 路徑直接呼叫 `executeFastBuildSkill()`，完全跳過意圖驗證
 - **修復**：在 fast mode 入口加入 `isDesignFeedback()` 預驗證，攔截亂碼/問候/閒聊等無關輸入
-- **七層防禦**：
+- **十層防禦**：
   1. `prefilterMessage()`：冷卻期檢查 → 空訊息/超長 → injection（28 個 regex，含混合語言）+ 違規累計 → **品質閘門**（亂碼 G1-G6 + 髒話 ~23 pattern + 垃圾 2 規則）→ 頻率限制（30 秒 6 條），中英雙語
   2. `handleContinueFlow` phase-aware gate：`getPhaseStrictness()` strict/normal/lenient/skip 依 phase 動態調整，Redis anti-loop（3 次強制放行防卡死）
   3. `isDesignFeedback()`：fast mode 入口 + 迭代階段專用（亂碼/問候/閒聊/設計關鍵詞正向放行）
-  4. `analyzeAnswerRelevance()`：BDD 釐清階段自由文字語義分析（品質前置檢查 + 規則快篩 + Haiku 四元判斷），連續 2 次拒絕後強制 accept 防死循環
-  5. `checkBuildRelevance()`：fast mode 語義相關性 + 具體性（強信號 ~80 詞直接放行 / 弱信號 Haiku 三元判斷），中英雙語
-  6. `classifyIntent()`：正常模式 Haiku 意圖分類（abuse 觸發 `recordAbuseViolation` 累計違規）
-  7. `refineCode [NO_CHANGE]`：LLM 級別最後防線（迭代階段）
-  8. **違規冷卻升級**：Redis `violation:{userId}` 計數器（24h TTL），3 次→60s / 6 次→5min / 10 次→30min 冷卻
+  4. `classifyIntent()` **Content Policy**：Classifier prompt `contentFlag` 欄位（harmful/illegal/adult/hate/privacy），攔截不當需求（如「測驗有沒有得 XX 病」「做賭博網站」），正常醫療資訊網站放行
+  5. `analyzeAnswerRelevance()`：BDD 釐清階段自由文字語義分析（品質前置 + EVASIVE_SIGNALS + AMBIGUOUS_SIGNALS 規則快篩 + Haiku 五元判斷 accept/ambiguous/off_topic/evasive/seeking_help），連續 2 次拒絕後強制 accept 防死循環
+  6. `validateDesignAnswer()`：UIUX 設計問卷三層驗證（逃避/求助信號 → 設計關鍵詞正向匹配 → 邊界 Haiku），支援 `__skip__` 跳過 + anti-loop
+  7. `checkBuildRelevance()`：fast mode 語義相關性 + 具體性（強信號 ~80 詞直接放行 / 弱信號 Haiku 三元判斷）+ Content Policy
+  8. `classifyIntent()`：正常模式 Haiku 意圖分類（abuse 觸發 `recordAbuseViolation` 累計違規）
+  9. `refineCode [NO_CHANGE]`：LLM 級別最後防線（迭代階段）
+  10. **違規冷卻升級**：Redis `violation:{userId}` 計數器（24h TTL），3 次→60s / 6 次→5min / 10 次→30min 冷卻
 
 ### 統一 LLM JSON 解析防禦（2026-02-28）
 
@@ -828,14 +830,16 @@ A11y/Performance/Code Quality 靜態檢查 + Haiku 自動修復（最多 3 輪�
 
 Sandpack 取代 1105 行 regex 轉換器。支援 streaming 增量更新、裝置切換。
 
-### Classifier 防禦體系（2026-02-08，2026-03-01 增強）
+### Classifier 防禦體系（2026-02-08，2026-03-04 增強）
 
 - **Prefilter**（零 LLM）：冷卻期攔截 → injection 28 regex + 違規累計 → **品質閘門**（亂碼 6 規則 + 髒話 ~23 pattern + 垃圾 2 規則）→ Rate Limit 30s/6 條，中英雙語
+- **Content Policy**（Haiku）：Classifier prompt 新增 `contentFlag` 欄位，攔截 harmful/illegal/adult/hate/privacy 內容（如「測驗有沒有得愛滋病」「做賭博網站」），正常醫療/健康資訊網站放行
 - **Phase-aware 品質閘門**：`handleContinueFlow` 內 phase 路由前二次攔截，嚴格度 strict/normal/lenient/skip 依 phase 調整，Redis anti-loop 計數器（連續 3 次垃圾強制放行防卡死）
-- **analyzeAnswerRelevance 前置檢查**：BDD clarify 階段 `checkInputQuality('strict')` 攔截亂碼，避免 `length >= 15` 快篩放行垃圾
-- **違規升級**：Redis `violation:{userId}` 24h TTL，injection/abuse/offensive 均累計，3 次→60s / 6 次→5min / 10 次→30min 冷卻
-- **正常模式**：Prefilter → Classifier Meta Intent（abuse 觸發 `recordAbuseViolation`）→ Skill Intent
-- **快速模式**：Prefilter → `isDesignFeedback()` → `checkBuildRelevance()`（強信號 ~80 詞 / 弱信號 Haiku 三元：通過/模糊/不相關）
+- **analyzeAnswerRelevance 增強**：新增 `EVASIVE_SIGNALS`（逃避/敷衍/求助 ~30 個詞），與 `AMBIGUOUS_SIGNALS` 同等觸發 Haiku 語義判斷，新增 `evasive` verdict
+- **設計問卷驗證**：`validateDesignAnswer()` 三層檢查（逃避/求助信號規則式 → 設計關鍵詞正向匹配 → 邊界 Haiku），支援 `__skip__` 跳過機制 + anti-loop（連續 2 次拒絕顯示跳過按鈕）
+- **違規升級**：Redis `violation:{userId}` 24h TTL，injection/abuse/offensive/contentPolicy 均累計，3 次→60s / 6 次→5min / 10 次→30min 冷卻
+- **正常模式**：Prefilter → Classifier（Meta Intent + Content Policy）→ Skill Intent
+- **快速模式**：Prefilter → `isDesignFeedback()` → `checkBuildRelevance()`（強信號 ~80 詞 / 弱信號 Haiku 三元：通過/模糊/不相關 + Content Policy）
 
 ### Design Tier（2026-02-06）
 
