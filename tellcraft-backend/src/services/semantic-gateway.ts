@@ -1,0 +1,210 @@
+// ============================================================
+// 統一 Sonnet 語義閘門
+// 取代 analyzeAnswerRelevance() + validateDesignAnswer()
+// 用 Sonnet 語義理解取代填鴨式 keyword arrays
+// ============================================================
+
+import * as db from '../db/client'
+import type { FlowState } from '../types/flow-state'
+
+// ── 型別定義 ──
+
+export type SemanticVerdict =
+  | 'valid' | 'ambiguous' | 'off_topic'
+  | 'seeking_help' | 'evasive' | 'content_policy'
+
+export interface SemanticGatewayInput {
+  phase: 'bdd_clarify' | 'design_clarify'
+  userMessage: string
+  question?: string               // BDD: 當前問題文字
+  questionOptions?: string         // BDD: 格式化後的選項列表
+  designQuestion?: { key: string; question: string; hint: string }  // Design: 當前設計問題
+  conversationId: string
+  userId?: string
+  locale?: 'zh' | 'en'
+}
+
+export interface SemanticGatewayResult {
+  verdict: SemanticVerdict
+  accept: boolean
+  guidanceMessage?: string        // Sonnet 直接生成（非 valid 時）
+}
+
+// ── 核心逃避信號（極小集，只覆蓋零容忍的硬逃避）──
+const CORE_EVASIVE = [
+  '不要管', '別管', '不關你', '管好你', '不想說', '不想回答', '不告訴',
+  'none of your business', 'leave me alone', 'go away',
+]
+
+// ── 零 LLM 短路 ──
+
+function quickFilter(input: SemanticGatewayInput): SemanticGatewayResult | null {
+  const trimmed = input.userMessage.trim()
+  const lower = trimmed.toLowerCase()
+
+  // __skip__ → 放行
+  if (trimmed === '__skip__') return { verdict: 'valid', accept: true }
+
+  // 硬逃避信號 → 直接拒絕（不用 LLM）
+  if (CORE_EVASIVE.some(s => lower.includes(s))) return null  // → 送 Sonnet 生成引導訊息
+
+  // BDD 選項回答 A-D → 放行
+  if (input.phase === 'bdd_clarify' && /^[A-Da-d]\.?\s*/.test(trimmed)) {
+    return { verdict: 'valid', accept: true }
+  }
+
+  // ≥15 字且無問號 → 放行（覆蓋 ~80% 正常回答）
+  if (trimmed.length >= 15 && !trimmed.includes('?') && !trimmed.includes('？')) {
+    return { verdict: 'valid', accept: true }
+  }
+
+  // Design 問卷 ≥5 字且無核心逃避 → 放行
+  if (input.phase === 'design_clarify' && trimmed.length >= 5) {
+    return { verdict: 'valid', accept: true }
+  }
+
+  // BDD: 非短回答（≥8 字）且無問號 → 放行
+  if (input.phase === 'bdd_clarify' && trimmed.length >= 8 && !trimmed.includes('?') && !trimmed.includes('？')) {
+    return { verdict: 'valid', accept: true }
+  }
+
+  return null  // → 送 Sonnet
+}
+
+// ── Sonnet 語義判斷 ──
+
+function buildPrompt(input: SemanticGatewayInput): string {
+  const lang = input.locale === 'en' ? 'English' : '繁體中文'
+
+  const phaseContext = input.phase === 'bdd_clarify'
+    ? `你在 BDD 需求釐清階段。用戶正在回答軟體需求的釐清問題。
+當前問題：${input.question || '（未提供）'}
+${input.questionOptions ? `選項：\n${input.questionOptions}` : ''}`
+    : `你在 UI/UX 設計問卷階段。用戶正在回答設計偏好問題。
+當前問題：${input.designQuestion?.question || '（未提供）'}
+提示：${input.designQuestion?.hint || '（未提供）'}`
+
+  const strictnessNote = input.phase === 'bdd_clarify'
+    ? `- BDD 釐清需要明確回答。「看情況」「都可以」是 ambiguous。
+- 有條件的回答（如「如果...就...」）也是 ambiguous，需要用戶給出明確選擇。`
+    : `- 設計問卷容忍更寬鬆。「都可以」「簡約就好」在這裡是 valid。
+- 只要回答跟設計/風格/顏色/感覺有關，就是 valid。
+- 極短但有設計含義的詞（如「暗色」「圓角」「Apple 風」）也是 valid。`
+
+  return `你是輸入品質閘門。判斷用戶的回答在當前語境下是否有效。
+
+${phaseContext}
+
+## 判斷規則
+
+${strictnessNote}
+
+- 用戶在求助/不理解問題 → seeking_help
+- 用戶逃避/拒絕回答/敷衍（如「隨便」「你決定」「算了」）→ evasive
+- 用戶完全離題（跟問題無關的內容）→ off_topic
+- 用戶回答含糊不清、有條件、無法作為設計/開發依據 → ambiguous
+- 涉及違法/色情/仇恨/隱私 → content_policy
+- 用戶的回答明確且可作為下一步依據 → valid
+
+## 回覆格式
+
+只回覆 JSON（不要加其他文字）：
+- valid：{"verdict":"valid"}
+- 其他：{"verdict":"<type>","guidance":"用 ${lang} 寫的引導訊息，一到兩句話，溫和友善，幫助用戶回答這個問題"}
+
+guidance 的規則：
+- seeking_help：用更簡單的語言重新解釋問題
+- ambiguous：追問用戶，要求更具體的回答
+- evasive：溫和鼓勵，說明為什麼需要這個資訊
+- off_topic：引導回到當前問題
+- content_policy：禮貌拒絕，說明無法處理此類內容`
+}
+
+export async function semanticGateway(
+  input: SemanticGatewayInput,
+  state: FlowState,
+): Promise<SemanticGatewayResult> {
+  // ── 零 LLM 短路 ──
+  const quick = quickFilter(input)
+  if (quick) return quick
+
+  // ── Anti-loop：BDD 連續 2 次被拒 → 強制 accept ──
+  const rejectCount = state.semanticRejectCount || 0
+  if (input.phase === 'bdd_clarify' && rejectCount >= 2) {
+    return { verdict: 'valid', accept: true }
+  }
+
+  // ── Sonnet 語義判斷 ──
+  const apiKey = process.env.ANTHROPIC_API_KEY
+  if (!apiKey) {
+    return { verdict: 'valid', accept: true }
+  }
+
+  try {
+    const resp = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': apiKey,
+        'anthropic-version': '2023-06-01',
+      },
+      body: JSON.stringify({
+        model: 'claude-sonnet-4-6-20250514',
+        max_tokens: 200,
+        system: buildPrompt(input),
+        messages: [{ role: 'user', content: input.userMessage }],
+      }),
+    })
+
+    if (!resp.ok) {
+      console.warn(`[SemanticGateway] Sonnet API 錯誤 ${resp.status}，降級放行`)
+      return { verdict: 'valid', accept: true }
+    }
+
+    const data = await resp.json() as {
+      content?: Array<{ text?: string }>
+      usage?: { input_tokens?: number; output_tokens?: number }
+    }
+
+    // 記錄 LLM 使用量
+    if (data.usage) {
+      const inputTokens = data.usage.input_tokens || 0
+      const outputTokens = data.usage.output_tokens || 0
+      const cost = (inputTokens * 3 + outputTokens * 15) / 1_000_000
+      db.recordLlmUsage({
+        model: 'claude-sonnet-4-6-20250514',
+        inputTokens,
+        outputTokens,
+        costUsd: cost,
+        purpose: 'semantic_gateway',
+        conversationId: input.conversationId,
+      }).catch(err => console.error('[SemanticGateway] 記錄使用量失敗:', err))
+    }
+
+    const text = data.content?.[0]?.text?.trim()
+    if (!text) {
+      console.warn('[SemanticGateway] 空回應，降級放行')
+      return { verdict: 'valid', accept: true }
+    }
+
+    // 解析 JSON（容許 markdown code block 包裹）
+    const jsonStr = text.replace(/^```json?\s*/, '').replace(/\s*```$/, '')
+    const result = JSON.parse(jsonStr) as {
+      verdict?: SemanticVerdict
+      guidance?: string
+    }
+
+    if (!result.verdict || result.verdict === 'valid') {
+      return { verdict: 'valid', accept: true }
+    }
+
+    return {
+      verdict: result.verdict,
+      accept: false,
+      guidanceMessage: result.guidance,
+    }
+  } catch (err) {
+    console.warn('[SemanticGateway] 分析失敗，降級放行:', err)
+    return { verdict: 'valid', accept: true }
+  }
+}

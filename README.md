@@ -93,6 +93,7 @@ npx ts-node bdd-spec/scripts/validate-feature.ts spec/features/
 |---------|-----|--------|------|
 | `classifier.ts` | Haiku | 每條新訊息 | 意圖分類（規則式 + LLM）+ Content Policy 審查（contentFlag） |
 | `prefilter.ts` | 無 / Haiku | 每條訊息（最先）+ Fast Mode | 空訊息/長度/Injection(28 regex)/品質閘門(亂碼+髒話+垃圾)/Rate Limit + `checkBuildRelevance()` 語義相關性 + Content Policy |
+| `semantic-gateway.ts` | Sonnet | BDD 釐清 + 設計問卷 | 統一語義閘門：quickFilter 零 LLM 短路（~80-90% 放行）+ Sonnet 語義判斷（verdict + 引導訊息生成） |
 | `bdd-to-ui-spec.ts` | Haiku | UIUX Pipeline | BDD Feature Files → UIRequirementsSpec |
 | `prd-discovery.ts` | Sonnet | bdd-spec | PRD 需求發掘（多輪） |
 | `clarify-dedup.ts` | Haiku ×2 | bdd-spec | Decision Summary + 語意去重 |
@@ -523,7 +524,7 @@ psql "$DATABASE_URL" -f tellcraft-backend/migrations/xxx.sql
 - **`prefilter.ts` 新增 `checkInputQuality()`**：`checkOffensive()`（~23 中英髒話 pattern）→ `checkGibberish()`（G1-G6 六條規則：同字元重複/短模式重複/無母音/低 unique ratio/高子音密度/strict 短詞）→ `checkSpam()`（純數字/純符號）
 - **`prefilterMessage()` 整合**：injection check 之後、rate limit 之前注入品質檢測，offensive 觸發違規累計
 - **`handleContinueFlow` phase-aware gate**：go_back/retry 檢測後、phase 路由前二次攔截，`getPhaseStrictness()` 映射 strict/normal/lenient/skip，Redis anti-loop（3 次強制放行）
-- **`analyzeAnswerRelevance` 前置檢查**：`checkInputQuality('strict')` 攔截亂碼，修復 `length >= 15` 快篩放行垃圾的漏洞
+- **`semanticGateway` 前置檢查**：BDD 釐清調用 `checkInputQuality('strict')` 攔截亂碼，在 gateway 之前攔截
 - **白名單**：~60 個技術縮寫（rwd/css/html/api/jwt...）不會被誤判為無母音亂碼
 - **中英雙語 userMessage**：拒絕時顯示引導用語，不只是冷冰冰的錯誤
 - **修復「不要部署」被當成迭代請求**：`hasDeployIntent()` 新增否定詞排除（不要/不想/別/先不...）+ `hasRejectDeployIntent()` 偵測拒絕部署意圖 → 回覆確認而非觸發迭代。`部屬` 加入 `部署` 的常見錯字別名。三個 phase（uiux_complete/deployer_complete/deployer_failed）均有處理
@@ -548,16 +549,17 @@ psql "$DATABASE_URL" -f tellcraft-backend/migrations/xxx.sql
 - **登入推薦強化**：進入聊天 subtle 提示、fast_generating 階段 subtle 提示、完成後 emphasized modal（不受 dismiss 限制）
 - **後端 403**：`GUEST_FINE_LOCKED`（禁 fine mode）、`GUEST_LIMIT_REACHED`（已用完額度），前端統一捕獲顯示登入 modal
 
-### BDD 釐清階段語義分析（2026-03-01）
+### 統一 Sonnet 語義閘門（2026-03-04）
 
-精細模式需求釐清（spec_clarify）新增 `analyzeAnswerRelevance()`：用戶自由文字回答不再機械式接受，而是判斷是否明確回答了問題。
+`semanticGateway()`（`semantic-gateway.ts`）取代 3 個獨立淺層函數（`analyzeAnswerRelevance` + `validateDesignAnswer` + keyword arrays），統一 BDD 釐清和設計問卷的輸入品質判斷。
 
-- **兩層策略**：規則式快篩（含糊信號詞 + 短回答問號偵測）→ Haiku 語義判斷（四元：accept/ambiguous/off_topic/seeking_help）
-- **快篩放行**：>= 15 字無含糊信號直接 accept；選項題 A/B/C/D 跳過分析
-- **非 accept 處理**：ambiguous → 追問要求明確答案；off_topic → 引導回問題；seeking_help → 用簡單語言重新解釋
-- **防死循環**：FlowState `answerRejectCount` 連續 2 次拒絕後第 3 次強制 accept，accept 後重置
-- **錯誤降級**：API 失敗 / JSON 解析失敗 → 降級為 accept（不阻塞流程）
-- **成本**：每次分析約 $0.00036，預估觸發率 30%，每個 session ≈ $0.002
+- **quickFilter 零 LLM 短路**（~80-90% 放行）：`__skip__` / 選項 A-D / ≥15 字無問號 / 設計問卷 ≥5 字 / BDD ≥8 字無問號 → 直接 accept
+- **Sonnet 語義判斷**（6 verdict）：valid / ambiguous / off_topic / seeking_help / evasive / content_policy，Sonnet 直接生成引導訊息（不再 code 硬寫模板）
+- **階段差異化**：BDD 釐清較嚴格（「都可以」= ambiguous），設計問卷較寬鬆（「都可以」= valid）
+- **Anti-loop**：FlowState `semanticRejectCount`，BDD ≥2 次強制 accept；Design ≥2 次仍調 Sonnet 但一律顯示跳過按鈕
+- **降級策略**：API 錯誤 / JSON 解析失敗 → 降級 accept（不阻塞流程）
+- **品質前置**：BDD 階段 `checkInputQuality('strict')` 攔截亂碼在 gateway 之前
+- **成本**：Sonnet ~$0.003/次，但 quickFilter 放行率高，每個 session 預估 ~$0.01-0.03
 
 ### FlowState 超時自動恢復（2026-03-01）
 
@@ -585,17 +587,16 @@ psql "$DATABASE_URL" -f tellcraft-backend/migrations/xxx.sql
 
 - **根因**：`handleProcessMessage` 的 `mode === 'fast'` 路徑直接呼叫 `executeFastBuildSkill()`，完全跳過意圖驗證
 - **修復**：在 fast mode 入口加入 `isDesignFeedback()` 預驗證，攔截亂碼/問候/閒聊等無關輸入
-- **十層防禦**：
+- **九層防禦**：
   1. `prefilterMessage()`：冷卻期檢查 → 空訊息/超長 → injection（28 個 regex，含混合語言）+ 違規累計 → **品質閘門**（亂碼 G1-G6 + 髒話 ~23 pattern + 垃圾 2 規則）→ 頻率限制（30 秒 6 條），中英雙語
   2. `handleContinueFlow` phase-aware gate：`getPhaseStrictness()` strict/normal/lenient/skip 依 phase 動態調整，Redis anti-loop（3 次強制放行防卡死）
   3. `isDesignFeedback()`：fast mode 入口 + 迭代階段專用（亂碼/問候/閒聊/設計關鍵詞正向放行）
   4. `classifyIntent()` **Content Policy**：Classifier prompt `contentFlag` 欄位（harmful/illegal/adult/hate/privacy），攔截不當需求（如「測驗有沒有得 XX 病」「做賭博網站」），正常醫療資訊網站放行
-  5. `analyzeAnswerRelevance()`：BDD 釐清階段自由文字語義分析（品質前置 + EVASIVE_SIGNALS + AMBIGUOUS_SIGNALS 規則快篩 + Haiku 五元判斷 accept/ambiguous/off_topic/evasive/seeking_help），連續 2 次拒絕後強制 accept 防死循環
-  6. `validateDesignAnswer()`：UIUX 設計問卷三層驗證（逃避/求助信號 → 設計關鍵詞正向匹配 → 邊界 Haiku），支援 `__skip__` 跳過 + anti-loop
-  7. `checkBuildRelevance()`：fast mode 語義相關性 + 具體性（強信號 ~80 詞直接放行 / 弱信號 Haiku 三元判斷）+ Content Policy
-  8. `classifyIntent()`：正常模式 Haiku 意圖分類（abuse 觸發 `recordAbuseViolation` 累計違規）
-  9. `refineCode [NO_CHANGE]`：LLM 級別最後防線（迭代階段）
-  10. **違規冷卻升級**：Redis `violation:{userId}` 計數器（24h TTL），3 次→60s / 6 次→5min / 10 次→30min 冷卻
+  5. `semanticGateway()`：**統一 Sonnet 語義閘門**（BDD 釐清 + 設計問卷共用），quickFilter 零 LLM 短路 → Sonnet 六元判斷（valid/ambiguous/off_topic/seeking_help/evasive/content_policy），Sonnet 直接生成引導訊息
+  6. `checkBuildRelevance()`：fast mode 語義相關性 + 具體性（強信號 ~80 詞直接放行 / 弱信號 Haiku 三元判斷）+ Content Policy
+  7. `classifyIntent()`：正常模式 Haiku 意圖分類（abuse 觸發 `recordAbuseViolation` 累計違規）
+  8. `refineCode [NO_CHANGE]`：LLM 級別最後防線（迭代階段）
+  9. **違規冷卻升級**：Redis `violation:{userId}` 計數器（24h TTL），3 次→60s / 6 次→5min / 10 次→30min 冷卻
 
 ### 統一 LLM JSON 解析防禦（2026-02-28）
 
@@ -830,13 +831,12 @@ A11y/Performance/Code Quality 靜態檢查 + Haiku 自動修復（最多 3 輪�
 
 Sandpack 取代 1105 行 regex 轉換器。支援 streaming 增量更新、裝置切換。
 
-### Classifier 防禦體系（2026-02-08，2026-03-04 增強）
+### Classifier 防禦體系（2026-02-08，2026-03-04 重構）
 
 - **Prefilter**（零 LLM）：冷卻期攔截 → injection 28 regex + 違規累計 → **品質閘門**（亂碼 6 規則 + 髒話 ~23 pattern + 垃圾 2 規則）→ Rate Limit 30s/6 條，中英雙語
 - **Content Policy**（Haiku）：Classifier prompt 新增 `contentFlag` 欄位，攔截 harmful/illegal/adult/hate/privacy 內容（如「測驗有沒有得愛滋病」「做賭博網站」），正常醫療/健康資訊網站放行
 - **Phase-aware 品質閘門**：`handleContinueFlow` 內 phase 路由前二次攔截，嚴格度 strict/normal/lenient/skip 依 phase 調整，Redis anti-loop 計數器（連續 3 次垃圾強制放行防卡死）
-- **analyzeAnswerRelevance 增強**：新增 `EVASIVE_SIGNALS`（逃避/敷衍/求助 ~30 個詞），與 `AMBIGUOUS_SIGNALS` 同等觸發 Haiku 語義判斷，新增 `evasive` verdict
-- **設計問卷驗證**：`validateDesignAnswer()` 三層檢查（逃避/求助信號規則式 → 設計關鍵詞正向匹配 → 邊界 Haiku），支援 `__skip__` 跳過機制 + anti-loop（連續 2 次拒絕顯示跳過按鈕）
+- **統一 Sonnet 語義閘門**：`semanticGateway()`（`semantic-gateway.ts`）取代 `analyzeAnswerRelevance` + `validateDesignAnswer`，quickFilter 零 LLM 短路 ~80-90% → Sonnet 六元 verdict + 直接生成引導訊息，BDD/Design 共用但嚴格度差異化
 - **違規升級**：Redis `violation:{userId}` 24h TTL，injection/abuse/offensive/contentPolicy 均累計，3 次→60s / 6 次→5min / 10 次→30min 冷卻
 - **正常模式**：Prefilter → Classifier（Meta Intent + Content Policy）→ Skill Intent
 - **快速模式**：Prefilter → `isDesignFeedback()` → `checkBuildRelevance()`（強信號 ~80 詞 / 弱信號 Haiku 三元：通過/模糊/不相關 + Content Policy）

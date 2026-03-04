@@ -45,7 +45,7 @@ import { detectDesignTier, inferProductType, inferPages, buildDefaultDesignSyste
 import { ensureResponsiveClasses } from '../services/uiux-generation'
 import { matchTemplates } from '../services/template-matcher'
 import { executeIteration, executeUndoIteration, executeRollbackQuery, executeRollbackSelection } from '../services/iteration-skill'
-import { safeParseJson } from '../utils/safe-parse-json'
+import { semanticGateway } from '../services/semantic-gateway'
 import {
   shouldRunEventStorming, initEventStorming, handleInitConfirm,
   exploreNextItem, handleESAnswer, generateESDocument,
@@ -2587,26 +2587,50 @@ async function processUserReply(input: ProcessReplyInput) {
         return
       }
 
-      // ── 語義分析：自由文字回答是否明確 ──
+      // ── 語義閘門：自由文字回答是否明確 ──
       const isOptionAnswer = /^[A-Da-d]\.?\s*/.test(userMessage.trim())
       if (!isOptionAnswer) {
-        const analysis = await analyzeAnswerRelevance(
-          currentItem, userMessage, state, conversationId, io
-        )
-        if (!analysis.accept) {
-          // 累加拒絕計數
-          state.answerRejectCount = (state.answerRejectCount || 0) + 1
-          await saveFlowState(redis, conversationId, state)
-          // 發送追問/解釋訊息，不記錄答案，不前進
+        // 品質前置檢查（攔截亂碼，不讓 quickFilter 放行垃圾）
+        const qualityCheck = checkInputQuality(userMessage.trim(), 'strict', state.locale)
+        if (qualityCheck.quality !== 'valid') {
           await sendMessage(conversationId, io, {
-            content: analysis.replyContent || '請更明確地回答這個問題。',
+            content: qualityCheck.userMessage || '請更明確地回答這個問題。',
+            stage: 'clarify_question',
+          })
+          return
+        }
+
+        const questionText = currentItem.whiteTextQuestion || currentItem.question
+        const optionsText = currentItem.options && currentItem.options.length > 0
+          ? currentItem.options.map((opt, i) => {
+              const letter = String.fromCharCode(65 + i)
+              const label = typeof opt === 'string' ? opt : opt.label
+              return `${letter}. ${label}`
+            }).join('\n')
+          : undefined
+
+        const gatewayResult = await semanticGateway({
+          phase: 'bdd_clarify',
+          userMessage,
+          question: questionText,
+          questionOptions: optionsText,
+          conversationId,
+          userId: state.userId,
+          locale: state.locale,
+        }, state)
+
+        if (!gatewayResult.accept) {
+          state.semanticRejectCount = (state.semanticRejectCount || 0) + 1
+          await saveFlowState(redis, conversationId, state)
+          await sendMessage(conversationId, io, {
+            content: gatewayResult.guidanceMessage || '請更明確地回答這個問題。',
             stage: 'clarify_question',
           })
           return
         }
       }
       // 重置拒絕計數
-      state.answerRejectCount = 0
+      state.semanticRejectCount = 0
 
       // 記錄答案
       await answerClarifyItem({
@@ -3366,185 +3390,6 @@ function validateAnswer(
   return { valid: true, normalizedAnswer: trimmedAnswer }
 }
 
-// ============================================================
-// 釐清階段語義分析：判斷用戶自由文字是否明確回答了問題
-// ============================================================
-
-const AMBIGUOUS_SIGNALS = [
-  // 條件句
-  '如果', '看情況', '取決於', '要看', '不一定', '可能',
-  'if', 'depends', 'it depends', 'maybe',
-  // 反問/求助
-  '什麼意思', '是什麼', '不懂', '不了解', '不明白', '可以解釋',
-  'what do you mean', "don't understand", 'explain',
-  // 含糊確認
-  '都可以', '都行', '隨便', '無所謂', '沒差',
-  'whatever', "don't care", 'either',
-]
-
-const EVASIVE_SIGNALS = [
-  // 逃避/拒絕回答
-  '不要管', '別管', '不關你', '不想說', '不想回答', '不告訴', '管好你自己',
-  'none of your business', 'leave me alone', "don't care", 'go away',
-  // 敷衍
-  '隨便啦', '不知道啦', '沒有啦', '算了', '你決定', '你自己看',
-  'whatever', 'idk', 'dunno',
-  // 求助（補充 AMBIGUOUS_SIGNALS 沒有的）
-  '不太懂', '聽不懂', '看不懂', '太複雜', '太專業', '再說一次', '說清楚',
-  '再解釋', '什麼東西', '這是什麼',
-  'too complicated', 'too technical', 'say again', 'what is this',
-]
-
-type AnswerVerdict = 'accept' | 'ambiguous' | 'off_topic' | 'seeking_help' | 'evasive'
-
-interface AnswerAnalysis {
-  accept: boolean
-  verdict: AnswerVerdict
-  replyContent?: string // 追問/解釋內容（非 accept 時使用）
-}
-
-async function analyzeAnswerRelevance(
-  item: ClarifyItem,
-  userMessage: string,
-  state: FlowState,
-  conversationId: string,
-  io: SocketIOServer,
-): Promise<AnswerAnalysis> {
-  const trimmed = userMessage.trim()
-  const lower = trimmed.toLowerCase()
-
-  // ── 品質前置檢查（攔截亂碼，不讓長度快篩放行垃圾）──
-  const qualityCheck = checkInputQuality(trimmed, 'strict', state.locale)
-  if (qualityCheck.quality !== 'valid') {
-    return { accept: false, verdict: 'off_topic' as AnswerVerdict, replyContent: qualityCheck.userMessage }
-  }
-
-  // ── 規則式快篩 ──
-
-  const hasAmbiguousSignal = AMBIGUOUS_SIGNALS.some(s => lower.includes(s))
-  const hasEvasiveSignal = EVASIVE_SIGNALS.some(s => lower.includes(s))
-  const needsHaiku = hasAmbiguousSignal || hasEvasiveSignal
-
-  // 長回答但有逃避/含糊信號 → 仍送 Haiku
-  if (trimmed.length >= 15 && !needsHaiku) {
-    return { accept: true, verdict: 'accept' }
-  }
-
-  // 短回答且有問號 → 可能求助，送 Haiku
-  const mightBeQuestion = trimmed.length < 3 && trimmed.includes('?') || trimmed.includes('？')
-
-  // 無任何信號且非求助 → 放行
-  if (!needsHaiku && !mightBeQuestion) {
-    return { accept: true, verdict: 'accept' }
-  }
-
-  // ── 防死循環：連續 2 次被拒後強制 accept ──
-  const rejectCount = state.answerRejectCount || 0
-  if (rejectCount >= 2) {
-    return { accept: true, verdict: 'accept' }
-  }
-
-  // ── Haiku 語義判斷 ──
-  const apiKey = process.env.ANTHROPIC_API_KEY
-  if (!apiKey) {
-    return { accept: true, verdict: 'accept' }
-  }
-
-  const questionText = item.whiteTextQuestion || item.question
-  const optionsText = item.options && item.options.length > 0
-    ? '\n選項：\n' + item.options.map((opt, i) => {
-        const letter = String.fromCharCode(65 + i)
-        const label = typeof opt === 'string' ? opt : opt.label
-        return `${letter}. ${label}`
-      }).join('\n')
-    : ''
-
-  try {
-    const resp = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': apiKey,
-        'anthropic-version': '2023-06-01',
-      },
-      body: JSON.stringify({
-        model: 'claude-haiku-4-5-20251001',
-        max_tokens: 150,
-        system: `你是 BDD 需求釐清助手。判斷用戶的回答是否「明確回答了問題」。
-只回覆 JSON（不要加任何其他文字）：
-- 明確回答：{"verdict":"accept"}
-- 含糊/條件式（如「看情況」「如果...就...」）：{"verdict":"ambiguous","followUp":"用一句話追問，要求用戶給出明確答案"}
-- 離題/沒回答問題：{"verdict":"off_topic","followUp":"溫和引導回到問題的一句話"}
-- 逃避/拒絕回答（如「你不要管我」「隨便啦」「算了」）：{"verdict":"evasive","followUp":"溫和鼓勵用戶回答，說明為何需要這個資訊"}
-- 用戶在求助/問問題：{"verdict":"seeking_help","explanation":"用更簡單的語言重新解釋問題"}`,
-        messages: [{ role: 'user', content: `問題：${questionText}${optionsText}\n\n用戶回答：${userMessage}` }],
-      }),
-    })
-
-    if (!resp.ok) {
-      console.warn(`[AnswerRelevance] Haiku API 錯誤 ${resp.status}，降級放行`)
-      return { accept: true, verdict: 'accept' }
-    }
-
-    const data = await resp.json() as {
-      content?: Array<{ text?: string }>
-      usage?: { input_tokens?: number; output_tokens?: number }
-    }
-
-    // 記錄 LLM 使用量
-    if (data.usage) {
-      const inputTokens = data.usage.input_tokens || 0
-      const outputTokens = data.usage.output_tokens || 0
-      const cost = (inputTokens * 0.8 + outputTokens * 4) / 1_000_000
-      db.recordLlmUsage({
-        model: 'claude-haiku-4-5-20251001',
-        inputTokens,
-        outputTokens,
-        costUsd: cost,
-        purpose: 'answer_relevance',
-        conversationId,
-      })
-    }
-
-    const text = data.content?.[0]?.text?.trim()
-    if (!text) {
-      console.warn('[AnswerRelevance] 空回應，降級放行')
-      return { accept: true, verdict: 'accept' }
-    }
-
-    // 嘗試解析 JSON（容許 markdown code block 包裹）
-    const jsonStr = text.replace(/^```json?\s*/, '').replace(/\s*```$/, '')
-    const result = JSON.parse(jsonStr) as {
-      verdict: AnswerVerdict
-      followUp?: string
-      explanation?: string
-    }
-
-    if (result.verdict === 'accept') {
-      return { accept: true, verdict: 'accept' }
-    }
-
-    // 構造回覆內容
-    let replyContent: string
-    if (result.verdict === 'seeking_help' && result.explanation) {
-      replyContent = `💡 ${result.explanation}`
-    } else if (result.followUp) {
-      replyContent = result.followUp
-    } else {
-      // fallback：不應該到這裡，但以防萬一
-      return { accept: true, verdict: 'accept' }
-    }
-
-    return {
-      accept: false,
-      verdict: result.verdict,
-      replyContent,
-    }
-  } catch (err) {
-    console.warn('[AnswerRelevance] 分析失敗，降級放行:', err)
-    return { accept: true, verdict: 'accept' }
-  }
-}
 
 function getFullAnswer(item: ClarifyItem): string {
   const answer = item.answer || ''
@@ -5592,134 +5437,6 @@ async function startDesignClarifyWithInitialIdea(
   await saveFlowState(redis, conversationId, state)
 }
 
-// ============================================================
-// 設計問卷答案驗證
-// ============================================================
-
-const DESIGN_KEYWORDS_ZH = [
-  '簡約', '現代', '復古', '活潑', '專業', '可靠', '溫暖', '科技', '極簡', '奢華',
-  '文青', '清新', '暗色', '亮色', '圓角', '扁平', '漸層', '留白', '卡片', '列表',
-  '藍色', '綠色', '紅色', '黑色', '白色', '灰色', '粉色', '紫色', '橙色', '金色',
-  '排版', '字體', '間距', '動畫', '陰影', '邊框', '圖片', '背景', '色調', '風格',
-]
-const DESIGN_KEYWORDS_EN = [
-  'minimal', 'modern', 'retro', 'vibrant', 'professional', 'warm', 'tech', 'luxury',
-  'clean', 'dark', 'light', 'rounded', 'flat', 'gradient', 'card', 'grid', 'layout',
-  'blue', 'green', 'red', 'black', 'white', 'gray', 'pink', 'purple', 'orange',
-  'font', 'spacing', 'shadow', 'border', 'animation', 'background', 'style',
-  'notion', 'stripe', 'apple', 'airbnb', 'spotify', 'dribbble',
-]
-
-interface DesignAnswerValidation {
-  accept: boolean
-  guideMessage?: string
-}
-
-async function validateDesignAnswer(
-  answer: string,
-  question: { key: string; question: string; hint: string },
-  state: FlowState,
-  conversationId: string,
-  io: SocketIOServer,
-): Promise<DesignAnswerValidation> {
-  const trimmed = answer.trim()
-  const lower = trimmed.toLowerCase()
-
-  // ── Layer 1: 規則式快篩（零 LLM）──
-
-  // 逃避信號 → reject
-  if (EVASIVE_SIGNALS.some(s => lower.includes(s))) {
-    return {
-      accept: false,
-      guideMessage: `沒關係，這個問題沒有標準答案 😊\n\n**${question.question}**\n\n_${question.hint}_\n\n如果真的沒有想法，可以點「跳過此題」。`,
-    }
-  }
-
-  // 求助信號 → reject with 更詳細說明
-  const helpSignals = ['不太懂', '聽不懂', '看不懂', '太複雜', '太專業', '再說一次', '說清楚', '再解釋', '什麼東西', '這是什麼', '不明白', '不了解', "don't understand", 'too complicated', 'too technical', 'what is this', 'say again']
-  if (helpSignals.some(s => lower.includes(s))) {
-    return {
-      accept: false,
-      guideMessage: `讓我換個方式說明 💡\n\n**${question.question}**\n\n簡單來說，就是 _${question.hint}_\n\n你可以用很簡短的詞彙回答，例如一兩個形容詞就好。`,
-    }
-  }
-
-  // 有設計關鍵詞 → 直接放行
-  const hasDesignKeyword = DESIGN_KEYWORDS_ZH.some(k => lower.includes(k)) ||
-    DESIGN_KEYWORDS_EN.some(k => lower.includes(k))
-  if (hasDesignKeyword) {
-    return { accept: true }
-  }
-
-  // ≤2 字且無設計信號 → reject
-  if (trimmed.length <= 2) {
-    return {
-      accept: false,
-      guideMessage: `可以再多說一點嗎？\n\n**${question.question}**\n\n_${question.hint}_`,
-    }
-  }
-
-  // ≥5 字且無逃避/求助信號 → 放行（大部分正常回答會走這條）
-  if (trimmed.length >= 5) {
-    return { accept: true }
-  }
-
-  // ── Layer 2: 3-4 字邊界情況，用 Haiku 判斷 ──
-  const apiKey = process.env.ANTHROPIC_API_KEY
-  if (!apiKey) return { accept: true }
-
-  try {
-    const resp = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': apiKey,
-        'anthropic-version': '2023-06-01',
-      },
-      body: JSON.stringify({
-        model: 'claude-haiku-4-5-20251001',
-        max_tokens: 30,
-        system: '用戶被問設計問題，判斷回答是否有回答。只回 JSON: {"ok":true} 或 {"ok":false}',
-        messages: [{ role: 'user', content: `問題：${question.question}\n回答：${trimmed}` }],
-      }),
-    })
-
-    if (!resp.ok) return { accept: true }
-
-    const data = await resp.json() as { content?: Array<{ text?: string }>; usage?: { input_tokens?: number; output_tokens?: number } }
-
-    if (data.usage) {
-      const inputTokens = data.usage.input_tokens || 0
-      const outputTokens = data.usage.output_tokens || 0
-      const cost = (inputTokens * 0.8 + outputTokens * 4) / 1_000_000
-      db.recordLlmUsage({
-        model: 'claude-haiku-4-5-20251001',
-        inputTokens,
-        outputTokens,
-        costUsd: cost,
-        purpose: 'design_answer_validation',
-        conversationId,
-      }).catch(err => console.error('[DesignValidation] 記錄使用量失敗:', err))
-    }
-
-    const text = data.content?.[0]?.text?.trim()
-    if (!text) return { accept: true }
-
-    const parsed = safeParseJson<{ ok?: boolean }>(text)
-    if (!parsed) return { accept: true }
-
-    if (parsed.ok === false) {
-      return {
-        accept: false,
-        guideMessage: `這個回答好像跟問題不太相關 😅\n\n**${question.question}**\n\n_${question.hint}_`,
-      }
-    }
-
-    return { accept: true }
-  } catch {
-    return { accept: true }
-  }
-}
 
 /**
  * 處理設計釐清回覆
@@ -5771,42 +5488,33 @@ async function handleDesignClarifyReply(
     if (trimmedMsg === '__skip__') {
       // 不保存，直接進入下一題
     } else {
-      // 驗證回答品質
-      const validation = await validateDesignAnswer(
-        trimmedMsg, currentQuestion, state, conversationId, io,
-      )
-      if (!validation.accept) {
-        // 驗證失敗，重新提問（不保存）
-        // Anti-loop：連續拒絕追蹤
-        const clarifyRejectCount = (state as FlowState & { designClarifyRejectCount?: number }).designClarifyRejectCount || 0
-        if (clarifyRejectCount >= 2) {
-          // 連續 2 次被拒，提供跳過按鈕但不強制放行
-          await sendMessage(conversationId, io, {
-            content: validation.guideMessage || `請重新回答。`,
-            stage: 'uiux_design_clarify',
-            quickReplies: [
-              { label: '跳過此題', value: '__skip__', style: 'ghost' },
-              { label: '← 重來', value: '__go_back__', style: 'ghost' },
-            ],
-          })
-        } else {
-          await sendMessage(conversationId, io, {
-            content: validation.guideMessage || `請重新回答。`,
-            stage: 'uiux_design_clarify',
-            quickReplies: [
-              { label: '跳過此題', value: '__skip__', style: 'ghost' },
-              { label: '← 重來', value: '__go_back__', style: 'ghost' },
-            ],
-          });
-        }
-        (state as FlowState & { designClarifyRejectCount?: number }).designClarifyRejectCount = clarifyRejectCount + 1
+      // 語義閘門驗證回答品質
+      const gatewayResult = await semanticGateway({
+        phase: 'design_clarify',
+        userMessage: trimmedMsg,
+        designQuestion: currentQuestion,
+        conversationId,
+        userId: state.userId,
+        locale: state.locale,
+      }, state)
+
+      if (!gatewayResult.accept) {
+        state.semanticRejectCount = (state.semanticRejectCount || 0) + 1
         state.waitingForReply = true
         await saveFlowState(redis, conversationId, state)
+        await sendMessage(conversationId, io, {
+          content: gatewayResult.guidanceMessage || '請重新回答。',
+          stage: 'uiux_design_clarify',
+          quickReplies: [
+            { label: '跳過此題', value: '__skip__', style: 'ghost' },
+            { label: '← 重來', value: '__go_back__', style: 'ghost' },
+          ],
+        })
         return
       }
 
       // 驗證通過，重置拒絕計數並保存答案
-      (state as FlowState & { designClarifyRejectCount?: number }).designClarifyRejectCount = 0
+      state.semanticRejectCount = 0
       ideas.push({ step: currentQuestion.key, answer: trimmedMsg })
       state.uiuxDesignIdeas = ideas
     }

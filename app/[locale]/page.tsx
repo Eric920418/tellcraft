@@ -1017,6 +1017,11 @@ function ChatSection({
   const [lastUpdatedAt, setLastUpdatedAt] = useState<string | null>(null)  // 用於輪詢優化
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const chatScrollRef = useRef<HTMLDivElement>(null)
+  // 黏性 callback ref：AnimatePresence 佈局切換時，退場元素卸載會把 ref 設 null，
+  // 導致 scrollToBottom 失效。此 callback 只在掛載時更新 ref，忽略卸載的 null。
+  const chatScrollStickyRef = useCallback((el: HTMLDivElement | null) => {
+    if (el) chatScrollRef.current = el
+  }, [])
   const isNearBottomRef = useRef(true)  // 追蹤用戶是否在底部附近
   const isProgrammaticScrollRef = useRef(false)  // 程式控制滾動時暫時禁用檢測
   const hasInitialized = useRef(false)
@@ -1874,14 +1879,9 @@ function ChatSection({
   // 直接滾動到底部（instant，不用 smooth，避免動畫期間目標過時）
   const scrollToBottom = useCallback(() => {
     const container = chatScrollRef.current
-    if (!container) {
-      console.warn('[scrollToBottom] chatScrollRef.current is null')
-      return
-    }
+    if (!container) return
     isProgrammaticScrollRef.current = true
-    console.log('[scrollToBottom] before:', { scrollTop: container.scrollTop, scrollHeight: container.scrollHeight, clientHeight: container.clientHeight })
     container.scrollTop = container.scrollHeight
-    console.log('[scrollToBottom] after:', { scrollTop: container.scrollTop })
     // 延遲重置 flag，避免 scroll event 誤判
     setTimeout(() => {
       isProgrammaticScrollRef.current = false
@@ -1963,6 +1963,8 @@ function ChatSection({
       setCodePreviewPendingUpdate(null)
       setCodePreviewPendingReset(null)
       setCodePreviewPendingOverrides(null)
+      // 清理黏性 ref，避免持有已卸載的 DOM 元素
+      chatScrollRef.current = null
     }
   }, [isActive])
 
@@ -2476,7 +2478,7 @@ function ChatSection({
       {/* 對話內容 */}
       {!showConversationPicker && (
         <div
-          ref={chatScrollRef}
+          ref={chatScrollStickyRef}
           onScroll={handleChatScroll}
           style={{ flex: 1, overflow: 'auto', padding: layoutMode === 'split' ? '16px 0' : '32px 0' }}
         >

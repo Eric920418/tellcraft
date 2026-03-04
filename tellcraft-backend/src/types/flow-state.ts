@@ -118,8 +118,8 @@ export interface FlowState {
   discoveryLimits?: { maxRounds: number; maxTotalQuestions: number }
   // 消息來源（LINE Bot 或 Web）
   messageSource?: 'line' | 'web'
-  // 釐清階段語義分析：連續拒絕計數（防死循環，第 3 次強制 accept）
-  answerRejectCount?: number
+  // 統一語義閘門：連續拒絕計數（BDD ≥2 強制 accept；Design ≥2 顯示跳過）
+  semanticRejectCount?: number
   // 用戶語言偏好（從第一條訊息偵測，供品質閘門等非 LLM 功能使用正確語言回覆）
   locale?: 'zh' | 'en'
 }
