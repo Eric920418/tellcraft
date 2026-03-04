@@ -6,7 +6,7 @@
 // 自動恢復 + 透過 sendMessage() 推送通知（Web Socket.io + LINE pushMessage）。
 //
 // 覆蓋的 phase + 超時閾值：
-//   fast_generating     5 min  →  有代碼 → uiux_complete；無代碼 → idle
+//   fast_generating     20 min →  有代碼 → uiux_complete；無代碼 → idle
 //   uiux_iterating      5 min  →  uiux_complete
 //   uiux_code_generation 10 min →  三層恢復（有完成代碼/有中途代碼/無代碼）
 //   uiux_quality_gate   10 min →  同上
@@ -20,7 +20,7 @@ import { generateTailwindConfig } from './uiux-generation'
 import type { FlowState } from '../types/flow-state'
 
 // 超時閾值（毫秒）
-const FAST_BUILD_TIMEOUT_MS = 5 * 60 * 1000
+const FAST_BUILD_TIMEOUT_MS = 20 * 60 * 1000
 const ITERATION_TIMEOUT_MS = 5 * 60 * 1000
 const CODE_GENERATION_TIMEOUT_MS = 20 * 60 * 1000
 const DEPLOYER_TIMEOUT_MS = 10 * 60 * 1000

@@ -1521,7 +1521,7 @@ async function handleContinueFlow(
 
   // 快速模式生成中（攔截用戶輸入 + 死鎖偵測）
   if (state.phase === 'fast_generating') {
-    const FAST_BUILD_TIMEOUT_MS = 5 * 60 * 1000
+    const FAST_BUILD_TIMEOUT_MS = 20 * 60 * 1000
     const startedAt = state.uiuxCodeGenerationStartedAt || 0
     if (startedAt === 0 || Date.now() - startedAt > FAST_BUILD_TIMEOUT_MS) {
       console.warn('[Orchestrator] Fast Build 超時，嘗試恢復')

@@ -254,7 +254,16 @@ export default function UiuxChatSection({
                 <span style={{ whiteSpace: 'pre-wrap' }}>{message.content}</span>
               ) : (
                 <div className="markdown-content">
-                  <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                  <ReactMarkdown
+                    remarkPlugins={[remarkGfm]}
+                    components={{
+                      a: ({ href, children, ...props }) => (
+                        <a href={href} target="_blank" rel="noopener noreferrer" {...props}>
+                          {children}
+                        </a>
+                      ),
+                    }}
+                  >
                     {message.content}
                   </ReactMarkdown>
                 </div>
