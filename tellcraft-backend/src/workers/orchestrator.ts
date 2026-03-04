@@ -4397,6 +4397,7 @@ async function executeFastBuildSkill(params: {
   state.uiuxGeneratedCode = currentCode
   state.uiuxStructureCode = currentCode
   state.uiuxCodePhase = 'animation'
+  state.uiuxCodeGenerationStartedAt = Date.now() // 重設超時計時器
   await saveFlowState(redis, conversationId, state)
   if (projectId) {
     await db.upsertProjectFiles(projectId, 'uiux',
@@ -4440,6 +4441,7 @@ async function executeFastBuildSkill(params: {
   state.uiuxGeneratedCode = currentCode
   state.uiuxAnimationCode = currentCode
   state.uiuxCodePhase = 'rwd'
+  state.uiuxCodeGenerationStartedAt = Date.now() // 重設超時計時器
   await saveFlowState(redis, conversationId, state)
   if (projectId) {
     await db.upsertProjectFiles(projectId, 'uiux',
@@ -4685,6 +4687,7 @@ async function executeFullCodePipeline(
     state.uiuxGeneratedCode = currentCode
     state.uiuxStructureCode = currentCode
     state.uiuxCodePhase = 'animation'
+    state.uiuxCodeGenerationStartedAt = Date.now() // 重設超時計時器
     await saveFlowState(redis, conversationId, state)
     await updateBddSession({
       sessionId,
@@ -4729,6 +4732,7 @@ async function executeFullCodePipeline(
     state.uiuxGeneratedCode = currentCode
     state.uiuxAnimationCode = currentCode
     state.uiuxCodePhase = 'rwd'
+    state.uiuxCodeGenerationStartedAt = Date.now() // 重設超時計時器
     await saveFlowState(redis, conversationId, state)
     await updateBddSession({
       sessionId,

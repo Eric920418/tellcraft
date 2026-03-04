@@ -22,7 +22,7 @@ import type { FlowState } from '../types/flow-state'
 // 超時閾值（毫秒）
 const FAST_BUILD_TIMEOUT_MS = 5 * 60 * 1000
 const ITERATION_TIMEOUT_MS = 5 * 60 * 1000
-const CODE_GENERATION_TIMEOUT_MS = 10 * 60 * 1000
+const CODE_GENERATION_TIMEOUT_MS = 20 * 60 * 1000
 const DEPLOYER_TIMEOUT_MS = 10 * 60 * 1000
 
 // 需要掃描的 phase → 超時閾值
