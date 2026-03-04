@@ -821,6 +821,37 @@ async function handlePhaseError(
 // Phase-aware 品質嚴格度映射
 // ============================================================
 
+/**
+ * 根據 phase 返回上下文相關的品質攔截訊息（取代 prefilter 的通用訊息）
+ */
+function getPhaseQualityMessage(phase: string, locale?: 'zh' | 'en'): string | null {
+  const isZh = locale !== 'en'
+  switch (phase) {
+    case 'prd_clarify':
+    case 'spec_clarify':
+    case 'es_explore':
+      return isZh
+        ? '我不太確定您的意思。請選擇一個選項（如 A、B、C、D），或用完整句子描述您的想法。'
+        : 'I\'m not sure what you mean. Please select an option (e.g. A, B, C, D) or describe your thoughts in a complete sentence.'
+    case 'uiux_design_preference':
+    case 'uiux_design_clarify':
+      return isZh
+        ? '我不太確定您的意思。請選擇一個選項，或用文字描述您的設計偏好。'
+        : 'I\'m not sure what you mean. Please select an option or describe your design preference.'
+    case 'uiux_design_brief_confirm':
+      return isZh
+        ? '請針對設計方案給出具體的回饋，例如「配色太深，想要明亮一點」。'
+        : 'Please provide specific feedback on the design, e.g. "the colors are too dark, I want something brighter".'
+    case 'uiux_complete':
+    case 'deployer_complete':
+      return isZh
+        ? '請描述您想修改的內容，例如「把標題改大一點」或「換個顏色」。'
+        : 'Please describe what you\'d like to change, e.g. "make the title bigger" or "change the color".'
+    default:
+      return null // 使用 prefilter 預設訊息
+  }
+}
+
 function getPhaseStrictness(phase: string): QualityStrictness | 'skip' {
   switch (phase) {
     // strict: 需要有意義回答的階段
@@ -938,7 +969,7 @@ async function handleContinueFlow(
       if (rejectCount < 3) {
         console.warn(`[Orchestrator] 品質攔截 (${rejectCount}/3): phase=${state.phase}, quality=${qualityCheck.quality}, reason=${qualityCheck.reason}`)
         await sendMessage(conversationId, io, {
-          content: qualityCheck.userMessage || '請輸入有效的內容。',
+          content: getPhaseQualityMessage(state.phase, effectiveLocale) || qualityCheck.userMessage || '請輸入有效的內容。',
           stage: state.phase,
         })
         return
@@ -2608,8 +2639,11 @@ async function processUserReply(input: ProcessReplyInput) {
         // 品質前置檢查（攔截亂碼，不讓 quickFilter 放行垃圾）
         const qualityCheck = checkInputQuality(userMessage.trim(), 'strict', state.locale)
         if (qualityCheck.quality !== 'valid') {
+          const isZh = state.locale !== 'en'
           await sendMessage(conversationId, io, {
-            content: qualityCheck.userMessage || '請更明確地回答這個問題。',
+            content: isZh
+              ? '我不太確定您的意思。請選擇一個選項（如 A、B、C、D），或用完整句子描述您的想法。'
+              : 'I\'m not sure what you mean. Please select an option (e.g. A, B, C, D) or describe your thoughts in a complete sentence.',
             stage: 'clarify_question',
           })
           return

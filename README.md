@@ -835,7 +835,7 @@ Sandpack 取代 1105 行 regex 轉換器。支援 streaming 增量更新、裝�
 
 - **Prefilter**（零 LLM）：冷卻期攔截 → injection 28 regex + 違規累計 → **品質閘門**（亂碼 6 規則 + 髒話 ~23 pattern + 垃圾 2 規則）→ Rate Limit 30s/6 條，中英雙語。**locale 由前端 `useLocale()` 貫穿到後端**：`page.tsx` → `vps-api.ts`（locale 參數）→ `conversation.ts`（透傳 job data）→ `orchestrator.ts`（prefilterMessage + FlowState 初始化），確保錯誤訊息語言與用戶 UI 語言一致
 - **Content Policy**（Haiku）：Classifier prompt 新增 `contentFlag` 欄位，攔截 harmful/illegal/adult/hate/privacy 內容（如「測驗有沒有得愛滋病」「做賭博網站」），正常醫療/健康資訊網站放行
-- **Phase-aware 品質閘門**：`handleContinueFlow` 內 phase 路由前二次攔截，嚴格度 strict/normal/lenient/skip 依 phase 調整，Redis anti-loop 計數器（連續 3 次垃圾強制放行防卡死）
+- **Phase-aware 品質閘門**：`handleContinueFlow` 內 phase 路由前二次攔截，嚴格度 strict/normal/lenient/skip 依 phase 調整，Redis anti-loop 計數器（連續 3 次垃圾強制放行防卡死）。`getPhaseQualityMessage()` 提供上下文感知的拒絕訊息（Q&A 階段引導選擇選項、設計階段引導描述偏好），取代 prefilter 的通用「做一個餐廳官網」訊息
 - **統一 Sonnet 語義閘門**：`semanticGateway()`（`semantic-gateway.ts`）取代 `analyzeAnswerRelevance` + `validateDesignAnswer`，quickFilter 零 LLM 短路 ~80-90% → Sonnet 六元 verdict + 直接生成引導訊息，BDD/Design 共用但嚴格度差異化
 - **違規升級**：Redis `violation:{userId}` 24h TTL，injection/abuse/offensive/contentPolicy 均累計，3 次→60s / 6 次→5min / 10 次→30min 冷卻
 - **正常模式**：Prefilter → Classifier（Meta Intent + Content Policy）→ Skill Intent
