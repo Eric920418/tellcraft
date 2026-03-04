@@ -14,7 +14,7 @@ export type SemanticVerdict =
   | 'seeking_help' | 'evasive' | 'content_policy'
 
 export interface SemanticGatewayInput {
-  phase: 'bdd_clarify' | 'design_clarify'
+  phase: 'bdd_clarify' | 'design_clarify' | 'iteration'
   userMessage: string
   question?: string               // BDD: 當前問題文字
   questionOptions?: string         // BDD: 格式化後的選項列表
@@ -101,6 +101,52 @@ function quickFilter(input: SemanticGatewayInput): SemanticGatewayResult | null 
     return null
   }
 
+  // ── Iteration（迭代修改）──
+  if (input.phase === 'iteration') {
+    // 設計關鍵詞（從 isDesignFeedback 精簡移植）→ accept（零 LLM）
+    const ITER_DESIGN_SIGNALS_ZH = [
+      '改', '換', '加', '刪', '移除', '調整', '修改', '更新', '增加', '替換', '縮小', '放大',
+      '顏色', '色', '字體', '大小', '間距', '圓角', '陰影', '透明', '粗細',
+      '標題', '按鈕', '圖片', '背景', '邊框', '文字', '連結', '導航', '選單', '卡片', '表格', '表單',
+      '風格', '排版', '佈局', '動畫', '樣式', '響應式', '手機版', '深色', '淺色',
+      '功能', '搜尋', '篩選', '彈窗', '下拉', '滾動', '切換',
+      '太大', '太小', '太粗', '太細', '太淡', '太深', '太亮', '太暗', '太窄', '太寬', '太醜',
+      '跑版', '壞了', '不見了', '消失', '重疊', '偏了', '不好看', '不對', '不行', '不夠',
+    ]
+    const ITER_DESIGN_SIGNALS_EN = [
+      'change', 'modify', 'update', 'add', 'remove', 'delete', 'replace', 'move', 'resize', 'align',
+      'color', 'colour', 'font', 'size', 'spacing', 'margin', 'padding', 'border', 'radius', 'shadow',
+      'header', 'footer', 'button', 'background', 'image', 'icon', 'nav', 'menu', 'title', 'text', 'card', 'form',
+      'style', 'layout', 'animation', 'theme', 'responsive', 'mobile', 'dark mode', 'gradient', 'hover',
+      'feature', 'search', 'filter', 'scroll', 'toggle',
+      'too big', 'too small', 'too dark', 'too light', 'too narrow', 'too wide', 'too ugly',
+      'broken', 'misaligned', 'overlapping', 'missing', 'wrong',
+      'bigger', 'smaller', 'larger', 'wider', 'darker', 'lighter', 'bolder',
+      'make', 'set', 'fix', 'adjust', 'increase', 'decrease',
+    ]
+    const hasDesignKw = ITER_DESIGN_SIGNALS_ZH.some(k => trimmed.includes(k))
+      || ITER_DESIGN_SIGNALS_EN.some(k => lower.includes(k))
+    if (hasDesignKw) return { verdict: 'valid', accept: true }
+
+    // 無實質內容 → 零 LLM reject
+    if (!hasSubstantiveContent(trimmed)) {
+      const isZh = input.locale !== 'en'
+      return {
+        verdict: 'off_topic',
+        accept: false,
+        guidanceMessage: isZh
+          ? '請描述您想要修改的內容，例如：「把標題改成紅色」「字體放大一點」「加一個搜尋功能」'
+          : 'Please describe what you\'d like to change, e.g. "Make the title red", "Increase font size", "Add a search feature"',
+      }
+    }
+
+    // ≥8 字 + 有實質內容 → accept（零 LLM）
+    if (trimmed.length >= 8) return { verdict: 'valid', accept: true }
+
+    // 3-7 字無設計關鍵詞 → 送 Sonnet（模糊地帶）
+    return null
+  }
+
   // ── 以下只有 Design clarify ──
 
   // 有實質內容的長回答 → 放行
@@ -125,6 +171,9 @@ function buildPrompt(input: SemanticGatewayInput): string {
     ? `你在 BDD 需求釐清階段。用戶正在回答軟體需求的釐清問題。
 當前問題：${input.question || '（未提供）'}
 ${input.questionOptions ? `選項：\n${input.questionOptions}` : ''}`
+    : input.phase === 'iteration'
+    ? `你在 UI/UX 迭代修改階段。用戶正在對已生成的網頁設計提出修改意見。
+判斷標準：「設計師看到這句話，能不能直接執行？」`
     : `你在 UI/UX 設計問卷階段。用戶正在回答設計偏好問題。
 當前問題：${input.designQuestion?.question || '（未提供）'}
 提示：${input.designQuestion?.hint || '（未提供）'}`
@@ -134,6 +183,11 @@ ${input.questionOptions ? `選項：\n${input.questionOptions}` : ''}`
 - 有條件的回答（如「如果...就...」）也是 ambiguous，需要用戶給出明確選擇。
 - 注意「廢話文」：大量引經據典、哲學格言、但不包含任何具體的需求描述或決策。如果回答中充滿「不能不說非常重大」「深深地想到」「浮想聯翩」這類空洞措辭卻沒有實質回答問題，判定為 off_topic。
 - 回答必須包含跟問題相關的具體信息（如：功能選擇、數量、規則、流程等），不是「看起來很長但什麼都沒說」。`
+    : input.phase === 'iteration'
+    ? `- valid：有明確修改方向的回饋（「字大一點」「換個顏色」「加搜尋功能」「把 header 改成固定」）
+- ambiguous：方向不明，無法直接執行（「改好一點」「變漂亮」「再改改」— 哪裡？怎麼改？）
+- off_topic：與網頁設計無關（「幫我寫 Java」「今天天氣」「算數學」）
+- seeking_help / evasive：「你好」「謝謝」「ok」「怎麼改」這類非修改指令`
     : `- 設計問卷容忍更寬鬆。「都可以」「簡約就好」在這裡是 valid。
 - 只要回答跟設計/風格/顏色/感覺有關，就是 valid。
 - 極短但有設計含義的詞（如「暗色」「圓角」「Apple 風」）也是 valid。`
@@ -175,9 +229,10 @@ export async function semanticGateway(
   const quick = quickFilter(input)
   if (quick) return quick
 
-  // ── Anti-loop：BDD 連續 3 次被拒 → 強制 accept ──
+  // ── Anti-loop：連續被拒 N 次 → 強制 accept ──
   const rejectCount = state.semanticRejectCount || 0
-  if (input.phase === 'bdd_clarify' && rejectCount >= 3) {
+  const antiLoopThreshold = input.phase === 'iteration' ? 2 : 3
+  if (rejectCount >= antiLoopThreshold) {
     return { verdict: 'valid', accept: true }
   }
 

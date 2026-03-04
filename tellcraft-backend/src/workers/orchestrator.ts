@@ -188,7 +188,10 @@ function hasRollbackSpecIntent(msg: string): boolean {
 }
 
 // ============================================================
-// 迭代輸入預驗證（零 LLM 成本，在 executeIteration 之前攔截）
+// 迭代輸入預驗證（零 LLM 成本）
+// ⚠️ 僅用於 Fast Mode 入口（L487）的初步過濾。
+// 迭代階段（deployer_failed/deployer_complete/uiux_complete）
+// 已改用 semanticGateway({ phase: 'iteration' })，不再使用此函數。
 // ============================================================
 
 interface DesignFeedbackCheck {
@@ -1067,11 +1070,19 @@ async function handleContinueFlow(
       })
       return
     }
-    // 其他訊息 → 視為修改請求，切回 uiux_complete 進入迭代
-    const feedbackCheck0 = isDesignFeedback(trimmed)
-    if (!feedbackCheck0.valid) {
+    // 其他訊息 → semanticGateway 判斷是否為有效修改請求
+    const gwResult0 = await semanticGateway({
+      phase: 'iteration',
+      userMessage: trimmed,
+      conversationId,
+      userId,
+      locale: data.locale || state.locale,
+    }, state)
+    if (!gwResult0.accept) {
+      state.semanticRejectCount = (state.semanticRejectCount || 0) + 1
+      await saveFlowState(redis, conversationId, state)
       await sendMessage(conversationId, io, {
-        content: feedbackCheck0.guideMessage || '請描述您想修改的設計內容。',
+        content: gwResult0.guidanceMessage || '請描述您想修改的設計內容。',
         stage: 'info',
         quickReplies: [
           { label: '部署上線', value: '部署', style: 'primary' as const },
@@ -1080,6 +1091,7 @@ async function handleContinueFlow(
       })
       return
     }
+    state.semanticRejectCount = 0
     state.phase = 'uiux_complete'
     await saveFlowState(redis, conversationId, state)
     await executeIteration({ conversationId, projectId: data.projectId, userId, userFeedback: message, redis, io })
@@ -1620,11 +1632,19 @@ async function handleContinueFlow(
       await executeRollbackQuery({ conversationId, projectId: data.projectId, redis, io })
       return
     }
-    // 其他訊息 → 預驗證後視為修改請求，進入迭代
-    const feedbackCheck1 = isDesignFeedback(trimmed)
-    if (!feedbackCheck1.valid) {
+    // 其他訊息 → semanticGateway 判斷是否為有效修改請求
+    const gwResult1 = await semanticGateway({
+      phase: 'iteration',
+      userMessage: trimmed,
+      conversationId,
+      userId,
+      locale: data.locale || state.locale,
+    }, state)
+    if (!gwResult1.accept) {
+      state.semanticRejectCount = (state.semanticRejectCount || 0) + 1
+      await saveFlowState(redis, conversationId, state)
       await sendMessage(conversationId, io, {
-        content: feedbackCheck1.guideMessage || '請描述您想修改的設計內容。',
+        content: gwResult1.guidanceMessage || '請描述您想修改的設計內容。',
         stage: 'info',
         quickReplies: [
           { label: '部署上線', value: '部署', style: 'primary' as const },
@@ -1633,6 +1653,8 @@ async function handleContinueFlow(
       })
       return
     }
+    state.semanticRejectCount = 0
+    await saveFlowState(redis, conversationId, state)
     await executeIteration({ conversationId, projectId: data.projectId, userId, userFeedback: message, redis, io })
     return
   }
@@ -1882,10 +1904,18 @@ async function handleContinueFlow(
         return
       }
 
-      // 有生成代碼 → 預驗證後視為修改請求
+      // 有生成代碼 → semanticGateway 判斷是否為有效修改請求
       if (state.uiuxGeneratedCode && state.uiuxCodePhase === 'complete') {
-        const feedbackCheck2 = isDesignFeedback(trimmed)
-        if (!feedbackCheck2.valid) {
+        const gwResult2 = await semanticGateway({
+          phase: 'iteration',
+          userMessage: trimmed,
+          conversationId,
+          userId,
+          locale: data.locale || state.locale,
+        }, state)
+        if (!gwResult2.accept) {
+          state.semanticRejectCount = (state.semanticRejectCount || 0) + 1
+          await saveFlowState(redis, conversationId, state)
           const qr: { label: string; value: string; style: 'primary' | 'ghost' }[] = [
             { label: '部署上線', value: '部署', style: 'primary' },
           ]
@@ -1893,12 +1923,14 @@ async function handleContinueFlow(
             qr.push({ label: '撤銷修改', value: '撤銷', style: 'ghost' })
           }
           await sendMessage(conversationId, io, {
-            content: feedbackCheck2.guideMessage || '請描述您想修改的設計內容。',
+            content: gwResult2.guidanceMessage || '請描述您想修改的設計內容。',
             stage: 'info',
             quickReplies: qr,
           })
           return
         }
+        state.semanticRejectCount = 0
+        await saveFlowState(redis, conversationId, state)
         await executeIteration({ conversationId, projectId: data.projectId, userId, userFeedback: message, redis, io })
         return
       }
