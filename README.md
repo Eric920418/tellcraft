@@ -521,7 +521,7 @@ psql "$DATABASE_URL" -f tellcraft-backend/migrations/xxx.sql
 
 統一輸入品質閘門：純規則式（零 LLM）攔截亂碼/髒話/垃圾輸入，修復用戶發送 `AAAAAACCCCC`、`sssdsdsdasikwqherujqhweurhuweur`、辱罵內容暢通無阻的漏洞。
 
-- **`prefilter.ts` 新增 `checkInputQuality()`**：`checkOffensive()`（~23 中英髒話 pattern）→ `checkGibberish()`（G1-G6 六條規則：同字元重複/短模式重複/無母音/低 unique ratio/高子音密度/strict 短詞）→ `checkSpam()`（純數字/純符號）
+- **`prefilter.ts` 新增 `checkInputQuality()`**：`checkOffensive()`（~23 中英髒話 pattern）→ `checkGibberish()`（G1-G6 + G2b/G2c：同字元重複/短模式重複/去標點子模式重複/中文夾雜亂碼拉丁低 unique ratio/無母音/低 unique ratio/高子音密度/strict 短詞）→ `checkSpam()`（純數字/純數字符號/純符號）
 - **`prefilterMessage()` 整合**：injection check 之後、rate limit 之前注入品質檢測，offensive 觸發違規累計
 - **`handleContinueFlow` phase-aware gate**：go_back/retry 檢測後、phase 路由前二次攔截，`getPhaseStrictness()` 映射 strict/normal/lenient/skip，Redis anti-loop（3 次強制放行）
 - **`semanticGateway` 前置檢查**：BDD 釐清調用 `checkInputQuality('strict')` 攔截亂碼，在 gateway 之前攔截

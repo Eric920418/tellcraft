@@ -127,6 +127,31 @@ function checkGibberish(message: string, strictness: QualityStrictness, isChines
     }
   }
 
+  // G2b: 去除標點/空格後的子模式重複（捕捉 "0.0.0.0.0" → core "00000000"）
+  const corePunctStripped = trimmed.replace(/[\s.,!?;:。，！？、；：\-_=+'"…`~()（）[\]{}|\\/<>@#$%^&*]+/g, '')
+  if (corePunctStripped.length >= 3) {
+    for (let patLen = 1; patLen <= 3; patLen++) {
+      if (corePunctStripped.length < patLen * 3) continue
+      const pat = corePunctStripped.slice(0, patLen)
+      const repeated = pat.repeat(Math.ceil(corePunctStripped.length / patLen)).slice(0, corePunctStripped.length)
+      if (repeated === corePunctStripped && corePunctStripped.length / patLen >= 3) {
+        return reject('gibberish', 0.85, `G2b: stripped pattern '${pat}' repeated`, isChinese)
+      }
+    }
+  }
+
+  // G2c: 中文夾雜亂碼拉丁字母（如 "我要BBBCCCAAA"）— strict only
+  if (strictness === 'strict') {
+    const latinPart = trimmed.replace(/[^a-zA-Z]/g, '')
+    if (latinPart.length >= 4) {
+      const uniqueChars = new Set(latinPart.toLowerCase()).size
+      // unique ratio 過低表示重複填充（如 "BBBCCCAAA" unique=3, ratio=0.33）
+      if (uniqueChars / latinPart.length < 0.4) {
+        return reject('gibberish', 0.8, `G2c: low latin unique ratio ${(uniqueChars / latinPart.length).toFixed(2)} in '${latinPart}'`, isChinese)
+      }
+    }
+  }
+
   // 以下規則只對純拉丁字母（可含數字）有效
   const latinOnly = /^[a-zA-Z0-9]+$/.test(trimmed)
   if (!latinOnly) return null
@@ -184,6 +209,11 @@ function checkSpam(message: string, strictness: QualityStrictness, isChinese: bo
   // 純數字 ≤10 字（lenient 模式跳過，因為可能是選擇版本號等）
   if (strictness !== 'lenient' && /^\d+$/.test(trimmed) && trimmed.length <= 10) {
     return reject('spam', 0.8, `pure digits: '${trimmed}'`, isChinese)
+  }
+
+  // 純數字 + 符號（如 "0.0", "1.2.3", "0.0.0.0.0" — 無任何文字）
+  if (strictness !== 'lenient' && /^[\d\s.,:;!?=+\-*/()[\]{}|\\/<>@#$%^&_~`'"]+$/.test(trimmed)) {
+    return reject('spam', 0.8, `digits and symbols only: '${trimmed}'`, isChinese)
   }
 
   // 純符號（無任何文字或數字）
@@ -525,9 +555,10 @@ async function checkCooldown(userId: string, redis: Redis): Promise<number> {
 export async function prefilterMessage(
   message: string,
   userId: string,
-  redis: Redis
+  redis: Redis,
+  locale?: 'zh' | 'en'
 ): Promise<PrefilterResult> {
-  const isChinese = /[\u4e00-\u9fff\u3400-\u4dbf]/.test(message)
+  const isChinese = locale ? locale === 'zh' : /[\u4e00-\u9fff\u3400-\u4dbf]/.test(message)
 
   // 0. 冷卻期檢查（違規累計觸發的暫停）
   const cooldownTtl = await checkCooldown(userId, redis)
@@ -584,7 +615,7 @@ export async function prefilterMessage(
   }
 
   // 3.5 輸入品質（亂碼 + 髒話 + 垃圾）
-  const qualityResult = checkInputQuality(trimmed, 'normal')
+  const qualityResult = checkInputQuality(trimmed, 'normal', isChinese ? 'zh' : 'en')
   if (qualityResult.quality !== 'valid') {
     console.warn(`[Prefilter] 品質攔截: userId=${userId}, quality=${qualityResult.quality}, reason=${qualityResult.reason}`)
     if (qualityResult.quality === 'offensive') {

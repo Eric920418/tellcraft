@@ -36,6 +36,38 @@ const CORE_EVASIVE = [
   'none of your business', 'leave me alone', 'go away',
 ]
 
+// ── 實質內容檢測 ──
+
+function hasSubstantiveContent(text: string): boolean {
+  // 純數字 + 符號（如 "0.0.0.0.0.0", "123456", "!@#$%"）
+  if (/^[\d\s.!?,;:@#$%^&*()_+=\-[\]{}|\\/<>~`'"…。，！？、；：「」『』（）【】]+$/.test(text)) return false
+
+  // 重複子模式（如 "0.0.0.0", "哈哈哈哈", "AAABBBCCC"）
+  // 提取去除標點/空格的核心部分
+  const core = text.replace(/[\s.,!?;:。，！？、；：]+/g, '')
+  if (core.length >= 3) {
+    for (let patLen = 1; patLen <= 4; patLen++) {
+      if (core.length < patLen * 3) continue
+      const pat = core.slice(0, patLen)
+      const repeated = pat.repeat(Math.ceil(core.length / patLen)).slice(0, core.length)
+      if (repeated === core) return false
+    }
+  }
+
+  // 純拉丁字母無母音且不在白名單（如 "BBBCCCAAA" 的字母部分 — 但 "BBBCCCAAA" 有母音 A，所以要更嚴格）
+  const latinPart = text.replace(/[^a-zA-Z]/g, '')
+  if (latinPart.length >= 4) {
+    // unique chars ratio 過低 → 重複填充（如 "BBBCCCAAA" unique=3, ratio=3/9=0.33）
+    const uniqueChars = new Set(latinPart.toLowerCase()).size
+    if (uniqueChars / latinPart.length < 0.4) return false
+  }
+
+  // 至少包含中文字或英文單詞
+  const hasChinese = /[\u4e00-\u9fff\u3400-\u4dbf]/.test(text)
+  const hasEnglishWords = text.split(/\s+/).filter(w => /^[a-zA-Z]{2,}$/.test(w)).length >= 1
+  return hasChinese || hasEnglishWords
+}
+
 // ── 零 LLM 短路 ──
 
 function quickFilter(input: SemanticGatewayInput): SemanticGatewayResult | null {
@@ -45,26 +77,22 @@ function quickFilter(input: SemanticGatewayInput): SemanticGatewayResult | null 
   // __skip__ → 放行
   if (trimmed === '__skip__') return { verdict: 'valid', accept: true }
 
-  // 硬逃避信號 → 直接拒絕（不用 LLM）
-  if (CORE_EVASIVE.some(s => lower.includes(s))) return null  // → 送 Sonnet 生成引導訊息
+  // 硬逃避信號 → 送 Sonnet 生成引導訊息
+  if (CORE_EVASIVE.some(s => lower.includes(s))) return null
 
-  // BDD 選項回答 A-D → 放行
-  if (input.phase === 'bdd_clarify' && /^[A-Da-d]\.?\s*/.test(trimmed)) {
+  // BDD 選項回答 A-D（完整匹配，如 "A" "B." "c"）→ 放行
+  if (input.phase === 'bdd_clarify' && /^[A-Da-d]\.?\s*$/.test(trimmed)) {
     return { verdict: 'valid', accept: true }
   }
 
-  // ≥15 字且無問號 → 放行（覆蓋 ~80% 正常回答）
-  if (trimmed.length >= 15 && !trimmed.includes('?') && !trimmed.includes('？')) {
+  // 有實質內容的長回答 → 放行
+  // 必須：≥20 字 + 無問號 + 有實質內容（非重複/純符號/純數字）
+  if (trimmed.length >= 20 && !trimmed.includes('?') && !trimmed.includes('？') && hasSubstantiveContent(trimmed)) {
     return { verdict: 'valid', accept: true }
   }
 
-  // Design 問卷 ≥5 字且無核心逃避 → 放行
-  if (input.phase === 'design_clarify' && trimmed.length >= 5) {
-    return { verdict: 'valid', accept: true }
-  }
-
-  // BDD: 非短回答（≥8 字）且無問號 → 放行
-  if (input.phase === 'bdd_clarify' && trimmed.length >= 8 && !trimmed.includes('?') && !trimmed.includes('？')) {
+  // Design 問卷：≥5 字 + 有實質內容 → 放行
+  if (input.phase === 'design_clarify' && trimmed.length >= 5 && hasSubstantiveContent(trimmed)) {
     return { verdict: 'valid', accept: true }
   }
 

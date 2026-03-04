@@ -864,8 +864,11 @@ async function handleContinueFlow(
 ) {
   const { projectId, conversationId, userId, message } = data
 
+  // 取得當前流程狀態（優先 Redis，備用 PostgreSQL）— 放在 prefilter 前以取得 locale
+  const state = await getFlowState(redis, conversationId)
+
   // Prefilter（rate limit + 長度檢查，不影響 phase routing）
-  const prefilterResult = await prefilterMessage(message, userId, redis)
+  const prefilterResult = await prefilterMessage(message, userId, redis, state?.locale)
   if (!prefilterResult.allowed) {
     console.log(`[Orchestrator] ContinueFlow prefilter 攔截: reason=${prefilterResult.reason}`)
     await sendMessage(conversationId, io, {
@@ -874,9 +877,6 @@ async function handleContinueFlow(
     })
     return
   }
-
-  // 取得當前流程狀態（優先 Redis，備用 PostgreSQL）
-  const state = await getFlowState(redis, conversationId)
 
   if (!state) {
     console.log('[Orchestrator] 沒有找到流程狀態，可能是新對話或狀態已過期')
@@ -2588,7 +2588,7 @@ async function processUserReply(input: ProcessReplyInput) {
       }
 
       // ── 語義閘門：自由文字回答是否明確 ──
-      const isOptionAnswer = /^[A-Da-d]\.?\s*/.test(userMessage.trim())
+      const isOptionAnswer = /^[A-Da-d]\.?\s*$/.test(userMessage.trim())
       if (!isOptionAnswer) {
         // 品質前置檢查（攔截亂碼，不讓 quickFilter 放行垃圾）
         const qualityCheck = checkInputQuality(userMessage.trim(), 'strict', state.locale)
