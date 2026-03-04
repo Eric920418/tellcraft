@@ -421,12 +421,13 @@ export default function AdminConversationViewerPage() {
           }}>
             {ta('readonlyMode')}
           </span>
-          <span style={{ fontSize: 13, color: '#92400e' }}
-            dangerouslySetInnerHTML={{
-              __html: t('viewingConversation', { name: userInfo.name || userInfo.email }) +
-                (projectInfo.name ? ` — ${projectInfo.name}` : '')
-            }}
-          />
+          <span style={{ fontSize: 13, color: '#92400e' }}>
+            {t.rich('viewingConversation', {
+              name: userInfo.name || userInfo.email,
+              strong: (chunks) => <strong>{chunks}</strong>
+            })}
+            {projectInfo.name ? ` — ${projectInfo.name}` : ''}
+          </span>
         </div>
         <Link
           href={userId ? `/dashboard/admin/users/${userId}` : '/dashboard/admin/users'}

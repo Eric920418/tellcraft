@@ -3199,9 +3199,11 @@ function ChatSection({
               }}
             >
               {codePreviewDevice === 'mobile' ? (
-                /* 手機外框 Phone Frame */
+                /* 手機外框 Phone Frame — 固定高度避免 Sandpack 撐開 */
                 <div
                   style={{
+                    width: previewWidth + 24,
+                    height: 30 + previewHeight + 18,
                     background: '#1a1a1a',
                     borderRadius: 44,
                     padding: '0 12px',
@@ -3210,41 +3212,46 @@ function ChatSection({
                     alignItems: 'center',
                     boxShadow: '0 12px 40px rgba(0,0,0,0.18), 0 4px 12px rgba(0,0,0,0.1)',
                     flexShrink: 0,
+                    overflow: 'hidden',
                   }}
                 >
                   {/* Dynamic Island */}
-                  <div style={{ width: '100%', height: 30, display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
+                  <div style={{ width: '100%', height: 30, flexShrink: 0, display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
                     <div style={{ width: 100, height: 24, background: '#000', borderRadius: 12 }} />
                   </div>
-                  {/* 螢幕區域 */}
+                  {/* 螢幕區域 — position: relative + absolute 隔離 Sandpack 高度 */}
                   <div
                     style={{
                       width: previewWidth,
                       height: previewHeight,
+                      flexShrink: 0,
                       borderRadius: 4,
                       overflow: 'hidden',
                       background: '#fff',
+                      position: 'relative',
                     }}
                   >
-                    <SandpackPreviewComponent
-                      pages={pagesData}
-                      components={componentsData}
-                      styles={stylesData}
-                      tailwindConfig={tailwindConfigData}
-                      isStreaming={isStreaming}
-                      editMode={codePreviewEditMode}
-                      onSelectionChanged={handleCodePreviewSelectionChanged}
-                      onElementSelected={handleCodePreviewElementSelected}
-                      pendingUpdate={codePreviewPendingUpdate}
-                      pendingReset={codePreviewPendingReset}
-                      pendingOverrides={codePreviewPendingOverrides}
-                      overrides={codePreviewOverrides}
-                      annotations={codePreviewAnnotations}
-                      onElementResized={handleCodePreviewElementResized}
-                    />
+                    <div style={{ position: 'absolute', inset: 0 }}>
+                      <SandpackPreviewComponent
+                        pages={pagesData}
+                        components={componentsData}
+                        styles={stylesData}
+                        tailwindConfig={tailwindConfigData}
+                        isStreaming={isStreaming}
+                        editMode={codePreviewEditMode}
+                        onSelectionChanged={handleCodePreviewSelectionChanged}
+                        onElementSelected={handleCodePreviewElementSelected}
+                        pendingUpdate={codePreviewPendingUpdate}
+                        pendingReset={codePreviewPendingReset}
+                        pendingOverrides={codePreviewPendingOverrides}
+                        overrides={codePreviewOverrides}
+                        annotations={codePreviewAnnotations}
+                        onElementResized={handleCodePreviewElementResized}
+                      />
+                    </div>
                   </div>
                   {/* Home Indicator */}
-                  <div style={{ width: '100%', height: 18, display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
+                  <div style={{ width: '100%', height: 18, flexShrink: 0, display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
                     <div style={{ width: 134, height: 5, background: 'rgba(255,255,255,0.3)', borderRadius: 3 }} />
                   </div>
                 </div>
@@ -3259,8 +3266,29 @@ function ChatSection({
                     background: '#fff',
                     overflow: 'hidden',
                     flexShrink: 0,
+                    position: codePreviewDevice === 'tablet' ? 'relative' : undefined,
                   }}
                 >
+                  {codePreviewDevice === 'tablet' ? (
+                    <div style={{ position: 'absolute', inset: 0 }}>
+                      <SandpackPreviewComponent
+                        pages={pagesData}
+                        components={componentsData}
+                        styles={stylesData}
+                        tailwindConfig={tailwindConfigData}
+                        isStreaming={isStreaming}
+                        editMode={codePreviewEditMode}
+                        onSelectionChanged={handleCodePreviewSelectionChanged}
+                        onElementSelected={handleCodePreviewElementSelected}
+                        pendingUpdate={codePreviewPendingUpdate}
+                        pendingReset={codePreviewPendingReset}
+                        pendingOverrides={codePreviewPendingOverrides}
+                        overrides={codePreviewOverrides}
+                        annotations={codePreviewAnnotations}
+                        onElementResized={handleCodePreviewElementResized}
+                      />
+                    </div>
+                  ) : (
                   <SandpackPreviewComponent
                     pages={pagesData}
                     components={componentsData}
@@ -3277,6 +3305,7 @@ function ChatSection({
                     annotations={codePreviewAnnotations}
                     onElementResized={handleCodePreviewElementResized}
                   />
+                  )}
                 </div>
               )}
               {/* 編輯模式提示浮層 */}
