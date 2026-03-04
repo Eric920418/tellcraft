@@ -85,7 +85,7 @@ function quickFilter(input: SemanticGatewayInput): SemanticGatewayResult | null 
     return { verdict: 'valid', accept: true }
   }
 
-  // BDD 釐清：先用 hasSubstantiveContent 過濾明顯垃圾，其餘送 Sonnet
+  // BDD 釐清：先用 hasSubstantiveContent 過濾明顯垃圾，中文/長英文直接放行，邊界案例送 Sonnet
   if (input.phase === 'bdd_clarify') {
     if (!hasSubstantiveContent(trimmed)) {
       const isZh = input.locale !== 'en'
@@ -97,7 +97,21 @@ function quickFilter(input: SemanticGatewayInput): SemanticGatewayResult | null 
           : 'Please provide a meaningful answer to the question.',
       }
     }
-    // 廢話文（結構正確中文但零實質）只有 LLM 能判斷
+
+    // 中文含量足夠 → 直接放行（不送 Sonnet）
+    // 理由：通過 hasSubstantiveContent + checkInputQuality(strict) 的中文回答幾乎必然有效
+    // 下游有 batch_confirm 讓用戶確認，不需要 Sonnet 二次審核
+    const hasChinese = /[\u4e00-\u9fff\u3400-\u4dbf]/.test(trimmed)
+    if (hasChinese && trimmed.length >= 2) {
+      return { verdict: 'valid', accept: true }
+    }
+
+    // 英文長回答有實質內容 → 直接放行
+    if (trimmed.length >= 5 && hasSubstantiveContent(trimmed)) {
+      return { verdict: 'valid', accept: true }
+    }
+
+    // 短英文（1-4 字，非 A-D）→ 送 Sonnet（少數需要語義判斷的邊界案例）
     return null
   }
 
@@ -262,7 +276,7 @@ export async function semanticGateway(
         'anthropic-version': '2023-06-01',
       },
       body: JSON.stringify({
-        model: 'claude-sonnet-4-6-20250514',
+        model: 'claude-sonnet-4-6',
         max_tokens: 200,
         system: buildPrompt(input),
         messages: [{ role: 'user', content: input.userMessage }],
@@ -270,7 +284,13 @@ export async function semanticGateway(
     })
 
     if (!resp.ok) {
-      console.warn(`[SemanticGateway] Sonnet API 錯誤 ${resp.status}，降級拒絕`)
+      console.warn(`[SemanticGateway] Sonnet API 錯誤 ${resp.status}，降級...`)
+      // 設計偏好 + BDD 釐清：低風險，降級放行
+      // BDD 已通過 checkInputQuality(strict) + hasSubstantiveContent，到這步的輸入品質有保障
+      if (input.phase === 'design_clarify' || input.phase === 'bdd_clarify') {
+        return { verdict: 'valid', accept: true }
+      }
+      // iteration 保持 fail-closed（迭代修改需要更嚴格的把關）
       const isZh = input.locale !== 'en'
       return {
         verdict: 'off_topic',
@@ -292,7 +312,7 @@ export async function semanticGateway(
       const outputTokens = data.usage.output_tokens || 0
       const cost = (inputTokens * 3 + outputTokens * 15) / 1_000_000
       db.recordLlmUsage({
-        model: 'claude-sonnet-4-6-20250514',
+        model: 'claude-sonnet-4-6',
         inputTokens,
         outputTokens,
         costUsd: cost,
@@ -303,7 +323,10 @@ export async function semanticGateway(
 
     const text = data.content?.[0]?.text?.trim()
     if (!text) {
-      console.warn('[SemanticGateway] 空回應，降級拒絕')
+      console.warn('[SemanticGateway] 空回應，降級...')
+      if (input.phase === 'design_clarify' || input.phase === 'bdd_clarify') {
+        return { verdict: 'valid', accept: true }
+      }
       const isZh = input.locale !== 'en'
       return {
         verdict: 'off_topic',
@@ -331,7 +354,11 @@ export async function semanticGateway(
       guidanceMessage: result.guidance,
     }
   } catch (err) {
-    console.warn('[SemanticGateway] 分析失敗，降級拒絕:', err)
+    console.warn('[SemanticGateway] 分析失敗，降級:', err)
+    if (input.phase === 'design_clarify' || input.phase === 'bdd_clarify') {
+      return { verdict: 'valid', accept: true }
+    }
+    // iteration 保持 fail-closed
     const isZh = input.locale !== 'en'
     return {
       verdict: 'off_topic',

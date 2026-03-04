@@ -673,7 +673,8 @@ export async function generateDesignVariants(
   bddSpec: string,
   productType: string,
   designTier?: DesignTier,
-  trackingContext?: LlmTrackingContext
+  trackingContext?: LlmTrackingContext,
+  originalRequirements?: string
 ): Promise<DesignVariantsResult> {
   const tier = designTier || 'functional'
   const axes = getVariantAxes(tier)
@@ -683,12 +684,21 @@ export async function generateDesignVariants(
 ## 產品類型
 ${productType}
 
+## 用戶的原始願景（最高優先 — 定義設計方向）
+以下是用戶親自撰寫的需求描述。這代表產品的核心想像和美學目標。
+BDD 規格列出了技術功能，但設計變體應服務於用戶的原始願景。
+如果用戶 80% 的描述在講前端展覽動畫體驗，5 個變體都應圍繞前端體驗來差異化，
+不要圍繞後台管理介面的佈局差異。
+
+${originalRequirements || '（無原始描述）'}
+
 ## 模板基礎
 - 名稱：${template.name}
 - 類別：${template.category}
 - 設計默認值：${JSON.stringify(template.designDefaults, null, 2)}
 
-## BDD 規格（功能需求）
+## BDD 規格（功能清單 — 不代表設計優先級）
+功能數量不等於設計重要性。設計優先級以上方「用戶原始願景」為準。
 ${bddSpec || '（無規格）'}
 
 ${getVariantPromptHint(tier)}
@@ -1560,7 +1570,13 @@ const font = DM_Sans({ subsets: ['latin'], variable: '--font-sans' })
   const uiSpec = productContext?.uiSpec
 
   const productSection = productDesc
-    ? `## 產品描述（最重要！頁面結構和內容必須完全符合這個產品）\n${productDesc}\n`
+    ? `## 用戶的原始願景（最高優先 — 頁面結構和代碼篇幅必須正比於此描述的比重）
+以下是用戶親自撰寫的需求描述。如果用戶用 12 段描述前端動畫、只用 1 句提後台管理，
+那麼生成的代碼應 90% 是前端體驗，10% 是後台管理。
+**代碼投入必須正比於用戶描述篇幅**。
+
+${productDesc}
+`
     : ''
 
   // 創意概念 section — 放在最頂部，最高優先級

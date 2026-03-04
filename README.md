@@ -93,7 +93,7 @@ npx ts-node bdd-spec/scripts/validate-feature.ts spec/features/
 |---------|-----|--------|------|
 | `classifier.ts` | Haiku | 每條新訊息 | 意圖分類（規則式 + LLM）+ Content Policy 審查（contentFlag） |
 | `prefilter.ts` | 無 / Haiku | 每條訊息（最先）+ Fast Mode | 空訊息/長度/Injection(28 regex)/品質閘門(亂碼+髒話+垃圾)/Rate Limit + `checkBuildRelevance()` 語義相關性 + Content Policy |
-| `semantic-gateway.ts` | Sonnet | BDD 釐清 + 設計問卷 + 迭代修改 | 統一語義閘門：quickFilter 零 LLM 短路（~80-90% 放行）+ Sonnet 語義判斷（verdict + 引導訊息生成） |
+| `semantic-gateway.ts` | Sonnet | BDD 釐清 + 設計問卷 + 迭代修改 | 統一語義閘門：quickFilter 零 LLM 短路（BDD 中文 ≥2/英文 ≥5 + Design 中文/URL + Iteration 關鍵詞，~90%+ 放行）+ Sonnet 語義判斷（verdict + 引導訊息生成）。BDD/Design API 錯誤 fail-open，Iteration fail-closed |
 | `bdd-to-ui-spec.ts` | Haiku | UIUX Pipeline | BDD Feature Files → UIRequirementsSpec |
 | `prd-discovery.ts` | Sonnet | bdd-spec | PRD 需求發掘（多輪） |
 | `clarify-dedup.ts` | Haiku ×2 | bdd-spec | Decision Summary + 語意去重 |
@@ -523,6 +523,28 @@ psql "$DATABASE_URL" -f tellcraft-backend/migrations/xxx.sql
 <details>
 <summary><h2>開發更新紀錄（點擊展開）</h2></summary>
 
+### 修復 Semantic Gateway 全面失效（2026-03-05）
+
+修復客戶在 BDD 釐清和設計問卷階段所有正常回答都被拒絕的問題（「要後台管理系統」→「系統暫時無法處理您的回答」）。
+
+- **根因 1（模型 404）**：`semantic-gateway.ts` 使用了不存在的模型 ID `claude-sonnet-4-6-20250514`（全 codebase 唯一），Anthropic API 返回 404 → fail-closed 拒絕所有送 Sonnet 的輸入。修正為 `claude-sonnet-4-6`
+- **根因 2（BDD quickFilter 缺口）**：BDD clarify 的 quickFilter 只做 `hasSubstantiveContent` 過濾垃圾，通過後全部送 Sonnet。新增中文 ≥2 字 / 英文 ≥5 字有實質內容 → 零 LLM 直接 accept（只有 1-4 字短英文邊界案例才送 Sonnet）
+- **根因 3（BDD fail-closed 不合理）**：BDD clarify 的 Sonnet API 錯誤全部 fail-closed。改為 fail-open（與 design_clarify 一致），因為到達 Sonnet 這步的 BDD 輸入已通過 `checkInputQuality(strict)` + `hasSubstantiveContent`，品質有保障。Iteration 保持 fail-closed
+
+### Pipeline 需求失真修復（2026-03-05）
+
+修復上游信號失真逐級放大問題：用戶提供 14 節超詳細展覽網站規格（Three.js 動畫、Scroll narrative、3D Gallery），只提到一句「要後台管理」，系統卻生成 44 個釐清問題（25+ 關於 CMS）、5 個全是 CMS 的設計變體、40% Admin 後台代碼。
+
+**8 項修復**：
+- **Fix 1（P0）PRD Discovery 需求權重感知**：`prd-discovery.ts` systemPrompt 新增需求權重分析 section（DETAILED/MENTIONED/IMPLIED 分類 + 問題分配正比於描述篇幅）
+- **Fix 2（P0）Discovery 上限調降**：`computeDiscoveryLimits()` 最高 tier 50→35 題、40→30 題
+- **Fix 3（P0）Variant 注入原始需求**：`generateDesignVariants()` 新增 `originalRequirements` 參數，prompt 頂部注入「用戶原始願景」section，BDD 規格改標為「功能清單 — 不代表設計優先級」
+- **Fix 4（P0）Semantic Gateway 設計偏好降級放行**：`semantic-gateway.ts` 三處錯誤處理（API 錯誤/空回應/catch）對 `design_clarify` phase 改為降級放行（低風險輸入）
+- **Fix 5（P1）Design Brief Fallback**：`buildFallbackBrief()` 從用戶設計偏好構建 fallback brief，Brief LLM 失敗時不再直接跳過（保留 tier 推斷）
+- **Fix 6（P1）Structure Prompt 強化權重**：`productSection` 標籤改為「用戶的原始願景」+ 「代碼投入必須正比於用戶描述篇幅」
+- **Fix 7（P1）Formulation Feature 權重**：`identifyFeatures()` systemPrompt 新增需求權重原則（附屬功能合併為 1 個 Feature）
+- **Fix 8（P2）UISpec 翻譯 Retry**：BDD→UI 翻譯失敗後，用原始需求作為 fallback 再嘗試一次
+
 ### Universal Input Quality Gate（2026-03-04）
 
 統一輸入品質閘門：純規則式（零 LLM）攔截亂碼/髒話/垃圾輸入，修復用戶發送 `AAAAAACCCCC`、`sssdsdsdasikwqherujqhweurhuweur`、辱罵內容暢通無阻的漏洞。
@@ -560,11 +582,11 @@ psql "$DATABASE_URL" -f tellcraft-backend/migrations/xxx.sql
 
 `semanticGateway()`（`semantic-gateway.ts`）取代淺層函數（`analyzeAnswerRelevance` + `validateDesignAnswer` + keyword arrays），統一 BDD 釐清、設計問卷、迭代修改的輸入品質判斷。
 
-- **quickFilter 零 LLM 短路**：`__skip__` / 選項 A-D → 直接 accept；BDD 階段 `hasSubstantiveContent()` 前置攔截亂碼（零 LLM）→ 通過後才送 Sonnet；Design 問卷 URL 直接 accept、中文 ≥2 字直接 accept、英文 ≥5 字有實質內容 → accept；Iteration 設計關鍵詞命中或 ≥8 字有實質內容 → accept
+- **quickFilter 零 LLM 短路**：`__skip__` / 選項 A-D → 直接 accept；BDD 釐清中文 ≥2 字直接 accept、英文 ≥5 字 + 有實質 → accept（短英文邊界才送 Sonnet）；Design 問卷 URL / 中文 ≥2 / 英文 ≥5 → accept；Iteration 設計關鍵詞 / ≥8 字有實質 → accept
 - **Sonnet 語義判斷**（6 verdict）：valid / ambiguous / off_topic / seeking_help / evasive / content_policy，Sonnet 直接生成引導訊息（不再 code 硬寫模板）
 - **階段差異化**：BDD 釐清較嚴格（「都可以」= ambiguous），設計問卷較寬鬆（「都可以」= valid），迭代修改以「設計師能否直接執行」為判斷基準（「改好一點」= ambiguous，「字大一點」= valid）
 - **Anti-loop**：FlowState `semanticRejectCount`，BDD ≥3 次強制 accept；Iteration ≥2 次強制 accept（refineCode 有代碼上下文可兜底）；Design ≥2 次仍調 Sonnet 但一律顯示跳過按鈕
-- **降級策略 fail-closed**：Sonnet API 錯誤 / 空回應 / JSON 解析失敗 → 拒絕並提示重試（不是放行），配合 anti-loop 避免卡死
+- **降級策略**：BDD + Design API 錯誤 / 空回應 / catch → **fail-open**（低風險，已通過 checkInputQuality + hasSubstantiveContent）；Iteration → **fail-closed**（需嚴格把關），配合 anti-loop 避免卡死
 - **品質前置**：BDD 階段 `checkInputQuality('strict')` 攔截亂碼在 gateway 之前
 - **迭代入口升級**：`deployer_failed` / `deployer_complete` / `uiux_complete` 三處 `isDesignFeedback()` → `semanticGateway({ phase: 'iteration' })`，`isDesignFeedback()` 僅保留給 fast mode 入口
 - **`checkBuildRelevance` fail-closed**：API 錯誤 / 空回應 / JSON 解析失敗 / catch → 拒絕而非放行（保留無 API key 時的 fail-open）

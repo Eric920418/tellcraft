@@ -32,6 +32,7 @@ import {
   generateDesignBrief,
   adjustDesignBrief,
   DesignVariant,
+  DesignBrief,
   DesignTier,
   TemplateData,
   DesignSystem,
@@ -113,10 +114,10 @@ function computeDiscoveryLimits(requirements: string, hasEsDocument?: boolean): 
   }
   if (hasEsDocument || len >= 1500 || featureKeywords >= 12) {
     // 非常複雜的系統（有 ES 文檔或超長 PRD）
-    return { maxRounds: 10, maxTotalQuestions: 50 }
+    return { maxRounds: 8, maxTotalQuestions: 35 }
   }
   // 複雜需求
-  return { maxRounds: 8, maxTotalQuestions: 40 }
+  return { maxRounds: 6, maxTotalQuestions: 30 }
 }
 
 /** 取得 state 中的動態上限，fallback 到預設值 */
@@ -4648,7 +4649,18 @@ async function executeFullCodePipeline(
       await saveFlowState(redis, conversationId, state)
       console.log(`[Orchestrator] BDD→UI 翻譯完成: ${uiSpec.pages.length} 頁面`)
     } else {
-      console.warn('[Orchestrator] BDD→UI 翻譯失敗，降級用原始 bddSpec:', translateResult.error)
+      console.warn('[Orchestrator] BDD→UI 翻譯失敗，嘗試從原始需求生成...', translateResult.error)
+      if (originalRequirements) {
+        const fallbackResult = await translateBddToUISpec('', originalRequirements, { userId: state.userId, conversationId })
+        if (fallbackResult.success && fallbackResult.spec) {
+          uiSpec = fallbackResult.spec
+          state.uiuxUISpec = uiSpec
+          await saveFlowState(redis, conversationId, state)
+          console.log(`[Orchestrator] 原始需求→UI 翻譯完成: ${uiSpec.pages.length} 頁面`)
+        } else {
+          console.warn('[Orchestrator] 原始需求→UI 翻譯也失敗，降級用原始 bddSpec')
+        }
+      }
     }
   }
 
@@ -5701,6 +5713,31 @@ async function completeDesignClarify(
 // Design Brief 確認環節
 // ============================================================
 
+/** 從用戶設計偏好構建 fallback brief（Brief LLM 生成失敗時使用） */
+function buildFallbackBrief(state: FlowState, productType: string): DesignBrief {
+  const ideas = state.uiuxDesignIdeas || []
+  const feeling = ideas.find(i => i.step === 'feeling')?.answer || ''
+  const reference = ideas.find(i => i.step === 'reference')?.answer || ''
+  const color = ideas.find(i => i.step === 'color')?.answer || ''
+  const layout = ideas.find(i => i.step === 'layout')?.answer || ''
+
+  const creativeKeywords = ['創意', '藝術', '大膽', '獨特', '極簡', '高端', '前衛', '時尚', 'creative', 'artistic', 'minimal']
+  const isCreative = creativeKeywords.some(k => feeling.toLowerCase().includes(k))
+
+  return {
+    styleSummary: feeling || `${productType} 標準設計風格`,
+    colorDirection: color || '根據產品類型自動選擇',
+    layoutSuggestion: layout || '標準佈局',
+    referenceAnalysis: reference || '無參考',
+    professionalRecommendations: [],
+    sourceType: state.uiuxDesignIdeas ? 'ideas' : 'template',
+    recommendedTier: isCreative ? 'creative' : 'functional',
+    tierReason: '根據用戶偏好自動推斷',
+    domainKeywords: [],
+    signature: '',
+  }
+}
+
 /**
  * 啟動 Design Brief 確認
  * Path A 和 Path B 的匯流入口
@@ -5754,8 +5791,12 @@ async function startDesignBriefConfirm(
   )
 
   if (!briefResult.success || !briefResult.brief) {
-    // 降級：跳過 brief，直接生成變體
-    console.warn('[Orchestrator] Design Brief 生成失敗，降級直接生成變體:', briefResult.error)
+    // 降級：使用 fallback brief 而非完全跳過
+    console.warn('[Orchestrator] Design Brief 生成失敗，使用 fallback brief:', briefResult.error)
+    const fallbackBrief = buildFallbackBrief(state, productType)
+    state.uiuxDesignBrief = fallbackBrief
+    state.uiuxDesignTier = fallbackBrief.recommendedTier
+    await saveFlowState(redis, conversationId, state)
     await proceedToVariantGeneration(conversationId, state, redis, io)
     return
   }
@@ -5984,6 +6025,7 @@ async function proceedToVariantGeneration(
     ? session.data.featuresContent.map(f => `- ${f.name}`).join('\n')
     : ''
   const productType = session.data.projectContext || '通用應用'
+  const originalRequirements = session.data.originalRequirements || ''
 
   // 更新狀態
   state.phase = 'uiux_generating_variants'
@@ -6008,7 +6050,8 @@ async function proceedToVariantGeneration(
     bddSpec,
     productType,
     state.uiuxDesignTier,
-    { userId: state.userId, conversationId, purpose: 'uiux_variants' }
+    { userId: state.userId, conversationId, purpose: 'uiux_variants' },
+    originalRequirements
   )
 
   if (!variantsResult.success || !variantsResult.variants) {

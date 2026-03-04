@@ -405,6 +405,11 @@ export async function identifyFeatures(
 
 **只為需求描述或釐清決策中明確提到的操作生成 Feature**，不因 Schema 有 table 就自動補全所有 CRUD。
 
+### 需求權重原則（Critical）
+- **核心功能**（用戶大量描述的）→ 按需拆分為合理的 Feature
+- **附屬功能**（用戶用 1-2 句提到的，如「要後台管理」）→ 合併為 1 個 Feature（如 manage_admin），不要拆成 manage_users + manage_content + manage_settings
+- **Feature 數量應正比於需求描述篇幅**
+
 ### 智能合併規則
 | 情境 | 處理方式 | 範例 |
 |------|----------|------|
