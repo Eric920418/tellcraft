@@ -85,7 +85,7 @@ export async function listAllUsers(params: PaginationParams = {}): Promise<Actio
   subscriptionStatus: string
   isAdmin: boolean
   projectCount: number
-  messageCount: number
+  creditsUsed: number
   createdAt: string
 }>>> {
   try {

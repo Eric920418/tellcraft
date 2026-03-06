@@ -21,7 +21,7 @@ interface User {
   subscriptionStatus: string
   isAdmin: boolean
   projectCount: number
-  messageCount: number
+  creditsUsed: number
   createdAt: string
   provider: string | null
 }
@@ -270,11 +270,11 @@ export default function AdminUsersPage() {
       ),
     },
     {
-      key: 'messageCount',
-      header: ta('messagesColumn'),
+      key: 'creditsUsed',
+      header: 'Credits',
       width: '60px',
       render: (user: User) => (
-        <span style={{ fontFamily: 'var(--font-mono)' }}>{user.messageCount}</span>
+        <span style={{ fontFamily: 'var(--font-mono)' }}>{user.creditsUsed}</span>
       ),
     },
     {

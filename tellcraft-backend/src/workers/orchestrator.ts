@@ -473,8 +473,15 @@ async function handleProcessMessage(
     return { taskId: null, skill: null }
   }
 
-  // Credit 扣除：base message
-  await deductCredits(userId, CREDIT_COSTS.BASE_MESSAGE)
+  // Credit 扣除：base message（同時作為配額檢查，LINE 來源繞過了 conversation.ts 前置檢查）
+  const creditResult = await deductCredits(userId, CREDIT_COSTS.BASE_MESSAGE)
+  if (!creditResult.success) {
+    await sendMessage(conversationId, io, {
+      content: `已達 Credit 配額上限（${creditResult.creditsUsed}/${creditResult.creditLimit}），請升級方案以繼續使用。`,
+      stage: 'error',
+    })
+    return { taskId: null, skill: null }
+  }
 
   // Step 1.2: FlowState 檢查（已有流程的用戶訊息應走 continue-flow）
   // 使用反向邏輯：只要有 FlowState 且 phase 不是 'idle'，就轉發
@@ -1009,8 +1016,15 @@ async function handleContinueFlow(
     return
   }
 
-  // Credit 扣除：base reply
-  await deductCredits(userId, CREDIT_COSTS.BASE_MESSAGE)
+  // Credit 扣除：base reply（同時作為配額檢查，LINE 來源繞過了 conversation.ts 前置檢查）
+  const creditResult = await deductCredits(userId, CREDIT_COSTS.BASE_MESSAGE)
+  if (!creditResult.success) {
+    await sendMessage(conversationId, io, {
+      content: `已達 Credit 配額上限（${creditResult.creditsUsed}/${creditResult.creditLimit}），請升級方案以繼續使用。`,
+      stage: 'error',
+    })
+    return
+  }
 
   if (!state) {
     console.log('[Orchestrator] 沒有找到流程狀態，可能是新對話或狀態已過期')

@@ -544,7 +544,7 @@ export async function listAllUsers(input: {
     subscriptionStatus: string
     isAdmin: boolean
     projectCount: number
-    messageCount: number
+    creditsUsed: number
     createdAt: string
     provider: string | null
   }>
