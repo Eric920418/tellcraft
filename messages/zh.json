@@ -170,7 +170,8 @@
     "retry": "重試",
     "accept": "同意",
     "reject": "不同意",
-    "skipEs": "跳過 ES"
+    "skipEs": "跳過 ES",
+    "autoAdopt": "全部自動採用 AI 建議"
   },
   "login": {
     "subtleAfterRounds": "登入後可隨時恢復這個對話",

@@ -170,7 +170,8 @@
     "retry": "Retry",
     "accept": "Agree",
     "reject": "Disagree",
-    "skipEs": "Skip ES"
+    "skipEs": "Skip ES",
+    "autoAdopt": "Auto-adopt all AI suggestions"
   },
   "login": {
     "subtleAfterRounds": "Log in to resume this conversation anytime",

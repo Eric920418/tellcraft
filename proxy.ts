@@ -24,7 +24,7 @@ const intlMiddleware = createIntlMiddleware(routing)
 /**
  * 合併 next-intl locale routing + JWT 認證 Middleware
  */
-export async function middleware(request: NextRequest) {
+export async function proxy(request: NextRequest) {
   // Step 1: 先跑 next-intl middleware 處理 locale 偵測/redirect
   const response = intlMiddleware(request)
 

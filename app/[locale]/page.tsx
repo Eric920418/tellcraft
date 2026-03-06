@@ -94,6 +94,7 @@ const COMMAND_KEYS: Record<string, string> = {
   '__retry__': 'retry',
   '__accept_proposal__': 'accept',
   '__reject_proposal__': 'reject',
+  '__auto_adopt_all__': 'autoAdopt',
 }
 
 // ============ Animated Text Components ============
