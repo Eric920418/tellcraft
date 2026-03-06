@@ -75,6 +75,8 @@ app.use(cors({
 app.use(rateLimit({
   windowMs: 15 * 60 * 1000, // 15 分鐘
   max: 500,
+  // Avoid counting Socket.IO handshake traffic into HTTP API quota.
+  skip: (req) => req.path.startsWith('/socket.io/'),
   standardHeaders: true,
   legacyHeaders: false,
   message: { error: 'Too many requests, please try again later' },
