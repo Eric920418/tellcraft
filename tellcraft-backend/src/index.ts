@@ -28,6 +28,7 @@ import operationsRoutes from './routes/operations'
 import uploadRoutes from './routes/upload'
 import lineBotRoutes from './routes/line-bot'
 import { initLineBotHandler } from './services/line-bot-handler'
+import { cleanupExpiredGuestUsers } from './services/guest-cleanup'
 import { scanAndRecoverStuckFlowStates } from './services/flowstate-recovery'
 import { messagingApi as lineMessagingApi } from '@line/bot-sdk'
 import { setAuthRedisClient } from './routes/auth'
@@ -434,6 +435,14 @@ async function start() {
       console.error('[FlowState Recovery] 掃描失敗:', err)
     })
   }, 2 * 60 * 1000)
+
+  // 訪客資料清理：啟動 30 秒後執行一次，之後每 6 小時執行
+  setTimeout(() => cleanupExpiredGuestUsers(redis).catch(err => {
+    console.error('[訪客清理] 啟動清理失敗:', err)
+  }), 30 * 1000)
+  setInterval(() => cleanupExpiredGuestUsers(redis).catch(err => {
+    console.error('[訪客清理] 定時清理失敗:', err)
+  }), 6 * 60 * 60 * 1000)
 
   // 啟動服務器
   server.listen(PORT, '0.0.0.0', () => {

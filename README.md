@@ -359,6 +359,7 @@ Server Action 錯誤訊息 + 工具模組中文字串國際化（+117 keys，2 n
 | **LINE Bot** | LINE 對話內完整 Fast Build 體驗（描述需求→生成→部署），Flex Message 卡片 + Quick Reply |
 | **UX** | 對話回退、錯誤恢復、自動恢復對話、專案自動命名、Markdown 渲染、專案對話快捷入口（1-click） |
 | **穩定性** | FlowState 超時自動恢復（定時掃描 + LINE/Web 推送通知），伺服器重啟後自動恢復卡住的生成/部署任務 |
+| **資料治理** | 訪客資料自動清理（5 天無活動過期），匿名帳號 + 已遷移空殼帳號定時清除，保護正在執行的 FlowState |
 
 ## 專案結構
 
