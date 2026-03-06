@@ -102,6 +102,7 @@ npx ts-node bdd-spec/scripts/validate-feature.ts spec/features/
 | `event-storming.ts` | Haiku | bdd-spec | Event Storming DFS 探索 |
 | `fast-build-generation.ts` | 無 | fast-build | 規則式 tier/產品/DesignSystem（零 LLM） |
 | `template-matcher.ts` | 無 | orchestrator | 三層評分匹配（零 LLM） |
+| `customer-service.ts` | 無 / Sonnet | fast mode + handleContinueFlow | 客服問答：意圖偵測（greeting/question/chitchat/help）+ FAQ 零 LLM 匹配（9 主題）+ Sonnet 開放問答 |
 | `line-notify.ts` | 無 | orchestrator-utils | LINE 推播通知（stage 白名單過濾） |
 
 ### 兩種模式
@@ -359,7 +360,7 @@ Server Action 錯誤訊息 + 工具模組中文字串國際化（+117 keys，2 n
 | **i18n** | next-intl 多語系（zh/en）、UI 元件全量翻譯、Server Action 錯誤訊息 i18n（getTranslations）、lib 模組英文化、error code 機制、883 keys / 29 namespaces |
 | **防護** | 三層防刷（前端冷卻 + API 限速 + Worker 鎖）、八層輸入防禦（含 Content Policy 語義審查 + Universal Input Quality Gate 亂碼/髒話/垃圾規則式攔截 + 設計問卷驗證）+ 違規冷卻升級（3→60s / 6→5min / 10→30min）、LLM 自動重試、Guest 限制（Fast Only + 一次使用 + 登入推薦） |
 | **通知** | LINE 推播通知（BDD 完成/UIUX 生成完成/部署成功失敗），離線用戶也能收到 |
-| **LINE Bot** | LINE 對話內完整 Fast Build 體驗（描述需求→生成→部署），Flex Message 卡片 + Quick Reply |
+| **LINE Bot** | LINE 對話內完整 Fast Build 體驗（描述需求→生成→部署），Flex Message 卡片 + Quick Reply，客服問答（FAQ + Sonnet） |
 | **UX** | 對話回退、錯誤恢復、自動恢復對話、專案自動命名、Markdown 渲染、專案對話快捷入口（1-click）、專案置頂/取消置頂 |
 | **穩定性** | FlowState 超時自動恢復（定時掃描 + LINE/Web 推送通知），伺服器重啟後自動恢復卡住的生成/部署任務 |
 | **資料治理** | 訪客資料自動清理（5 天無活動過期），匿名帳號 + 已遷移空殼帳號定時清除，保護正在執行的 FlowState |
@@ -426,6 +427,7 @@ tellcraft-backend/
 │   │   ├── line-full-push.ts    # LINE Bot 全量翻譯推送（LINE 來源的對話）
 │   │   ├── line-bot-handler.ts  # LINE Bot 業務邏輯（Follow/Text/Postback）
 │   │   ├── line-message-translator.ts # sendMessage → LINE Messages 翻譯
+│   │   ├── customer-service.ts    # 客服問答（意圖偵測 + FAQ + Sonnet）
 │   │   ├── classifier.ts         # 三層分類防禦
 │   │   ├── bdd-to-ui-spec.ts     # BDD→UI 翻譯
 │   │   ├── event-storming.ts     # Event Storming
@@ -546,6 +548,17 @@ psql "$DATABASE_URL" -f tellcraft-backend/migrations/xxx.sql
 
 <details>
 <summary><h2>開發更新紀錄（點擊展開）</h2></summary>
+
+### LINE Bot 客服問答功能（2026-03-06）
+
+Fast mode 入口新增客服問答層，解決 LINE 用戶非建站輸入（問候/問題/閒聊）被錯誤引導的問題。
+
+- **`customer-service.ts`**（新建）：`detectFastModeIntent()` 零 LLM 意圖分類（greeting/acknowledgment/question/help/chitchat）+ `getFaqReply()` 9 主題 FAQ 匹配 + `answerWithSonnet()` 開放問題 Sonnet 回答
+- **問句排除邏輯**：帶建站強信號的問句（如「可以幫我做花店網站嗎？」）不被攔截，繼續走 fast build
+- **9 個 FAQ 主題**：pricing/capability/limitations/howto/deployment/iteration/domain/support/about，中英雙語回覆 + 建站引導 quickReplies
+- **handleContinueFlow 三處升級**：deployer_failed / deployer_complete / uiux_complete 的問候攔截 → `detectFastModeIntent()`，新增 question 分支（FAQ + Sonnet），不改變 FlowState
+- **刪除 `isGreetingOrChitchat()`**：邏輯搬入 `detectFastModeIntent()`，新增 question/help 分類
+- **stage `customer_service`**：LINE 正常推送（不在 SKIP_STAGES 中）
 
 ### 修復 LINE 完成對話問候語混亂引導（2026-03-06）
 
@@ -916,7 +929,7 @@ Sandpack 取代 1105 行 regex 轉換器。支援 streaming 增量更新、裝�
 - **統一 Sonnet 語義閘門**：`semanticGateway()`（`semantic-gateway.ts`）取代 `analyzeAnswerRelevance` + `validateDesignAnswer`，quickFilter 零 LLM 短路 ~80-90% → Sonnet 六元 verdict + 直接生成引導訊息，BDD/Design/Iteration 三階段共用但嚴格度差異化（iteration anti-loop ≥2 次放行）
 - **違規升級**：Redis `violation:{userId}` 24h TTL，injection/abuse/offensive/contentPolicy 均累計，3 次→60s / 6 次→5min / 10 次→30min 冷卻
 - **正常模式**：Prefilter → Classifier（Meta Intent + Content Policy）→ Skill Intent
-- **快速模式**：Prefilter → `isDesignFeedback()` → `checkBuildRelevance()`（強信號 ~80 詞 / 弱信號 Haiku 三元：通過/模糊/不相關 + Content Policy，**fail-closed**）
+- **快速模式**：Prefilter → `detectFastModeIntent()`（greeting/question/chitchat/help 攔截 + FAQ/Sonnet 回覆）→ `isDesignFeedback()` → `checkBuildRelevance()`（強信號 ~80 詞 / 弱信號 Haiku 三元：通過/模糊/不相關 + Content Policy，**fail-closed**）
 - **迭代模式**：`semanticGateway({ phase: 'iteration' })` 取代 `isDesignFeedback()`（設計關鍵詞零 LLM 短路 ~80% + Sonnet 語義審核 ~20%）
 
 ### Design Tier（2026-02-06）
