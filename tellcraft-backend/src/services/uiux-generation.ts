@@ -2701,7 +2701,8 @@ export async function refineCode(
     variantConcept?: VariantConcept
   },
   trackingContext?: LlmTrackingContext,
-  imageUrls?: string[]
+  imageUrls?: string[],
+  onTextDelta?: (text: string) => void
 ): Promise<GenerationResult> {
   const tier = designContext.designTier || 'functional'
 
@@ -2816,7 +2817,8 @@ ${codeBlocks.join('\n\n')}
     systemPrompt,
     [{ role: 'user', content: userContent }],
     { maxTokens: 32768, temperature: 0.2 },
-    { ...trackingContext, purpose: 'refine_code' }
+    { ...trackingContext, purpose: 'refine_code' },
+    onTextDelta
   )
 
   if (!response.success || !response.content) {

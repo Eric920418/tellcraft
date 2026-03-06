@@ -79,6 +79,8 @@ export interface FlowState {
   iterationCount?: number              // 迭代次數
   uiuxPreIterationCode?: GeneratedCode // 迭代前快照（供撤銷）
   iterationHistory?: IterationHistoryEntry[] // 迭代歷史摘要
+  lastIterationFeedback?: string       // 上次迭代反饋（供重試）
+  lastIterationImageUrls?: string[]    // 上次迭代圖片（供重試）
   // 回滾
   rollbackDeployments?: DeploymentRecord[]  // 可選的回滾版本列表
   // BDD→UI 翻譯結果快取
@@ -92,6 +94,7 @@ export interface FlowState {
   fastMode?: boolean
   fastModeProductType?: string
   fastModeOriginalMessage?: string  // 原始描述（供迭代時提供上下文）
+  fastModeExpandedPrompt?: string   // Haiku 擴展後的完整描述（供 generateStructure + 迭代上下文）
   fastModeLayoutMode?: 'app' | 'website'
   // 智能模板匹配
   matchedTemplateIds?: string[] // 匹配的模板 ID（分數排序）
@@ -124,6 +127,8 @@ export interface FlowState {
   messageSource?: 'line' | 'web'
   // 統一語義閘門：連續拒絕計數（BDD ≥2 強制 accept；Design ≥2 顯示跳過）
   semanticRejectCount?: number
+  // PRD Discovery 開始時間（超時偵測）
+  prdDiscoveryStartedAt?: number
   // 用戶語言偏好（從第一條訊息偵測，供品質閘門等非 LLM 功能使用正確語言回覆）
   locale?: 'zh' | 'en'
 }

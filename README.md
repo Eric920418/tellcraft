@@ -111,7 +111,7 @@ npx ts-node bdd-spec/scripts/validate-feature.ts spec/features/
 
 **精細模式 + 自動採用**：PRD Clarify 第一題出現「全部自動採用 AI 建議」按鈕 → 自動回答所有 BDD 問題（propose→proposedAnswer / ask→建議選項或 A）→ 自動確認草稿 → 自動回答 Spec Clarify → 進入設計階段（手動）。BDD 互動從 7-11 次降到 1 次。`FlowState.autoAdoptMode` 在 `completeSpecPhase` 末尾清除，`autoAdoptAllPendingQuestions` 有 MAX_ITERATIONS=200 安全閥。
 
-**快速模式（Fast）**：一句話描述 → 規則式推斷（tier/產品類型/配色/佈局） → Structure → Animation → RWD → 靜態 QG
+**快速模式（Fast）**：一句話描述 → 規則式推斷（tier/產品類型/配色/佈局） → Haiku 概念+Prompt 擴展（並行） → Structure → Animation → RWD → 靜態 QG
 
 ## BDD Spec 流程
 
@@ -345,7 +345,7 @@ Server Action 錯誤訊息 + 工具模組中文字串國際化（+117 keys，2 n
 | Design Brief 生成 | 3 | 1-4 Sonnet |
 | Design Variant 生成 | 2 | 1 Sonnet |
 | BDD Formulation | 5 | 2-5 Sonnet |
-| Fast Build 完整管線 | 8 | 1 Haiku（概念）+ 3 Sonnet + QG |
+| Fast Build 完整管線 | 8 | 2 Haiku（概念+擴展）+ 3 Sonnet + QG |
 | Normal UIUX 完整管線 | 10 | 3-6 Sonnet + QG |
 | 迭代修改 (refineCode) | 3 | 1 Sonnet (大 context) |
 | 部署 | 2 | 0-7 Sonnet (平均低) |
@@ -589,6 +589,16 @@ psql "$DATABASE_URL" -f tellcraft-backend/migrations/xxx.sql
 
 <details>
 <summary><h2>開發更新紀錄（點擊展開）</h2></summary>
+
+### Fast Build 自動 Prompt 擴展（2026-03-06）
+
+簡短描述（如「做一個咖啡廳網站」）自動擴展為完整網站需求，解決生成內容稀疏問題：
+- **`expandBriefPrompt()`**（fast-build-generation.ts）：1 次 Haiku 將簡短描述擴展為 400-600 字完整內容需求（含具體區塊、示範文案、功能細節），中文 > 80 字 / 英文 > 40 詞自動跳過
+- **並行執行**：`generateFastConcept` + `expandBriefPrompt` 並行調用（Promise.all），不增加延遲
+- **注入 generateStructure**：`originalRequirements` 改用 `expandedPrompt || message`，Sonnet 生成時有足夠上下文
+- **迭代上下文**：`executeIteration` 時注入擴展 prompt 為產品上下文（標註為理解用途，非修改指令）
+- **FlowState 新欄位**：`fastModeExpandedPrompt`（存入 Redis，迭代/重試時可復用）
+- **降級安全**：API 失敗/空回應/太短一律 return null，用原始描述繼續
 
 ### Fast Build 門面升級（2026-03-06）
 

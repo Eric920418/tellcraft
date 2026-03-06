@@ -153,7 +153,7 @@ export function makeStreamingCallback(
   conversationId: string,
   io: SocketIOServer,
   redis: Redis,
-  phase: 'structure' | 'animation' | 'rwd',
+  phase: 'structure' | 'animation' | 'rwd' | 'iteration',
   tailwindConfig: string
 ): PartialCodeCallback {
   let chunkCount = 0

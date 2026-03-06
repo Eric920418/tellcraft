@@ -6,6 +6,7 @@
 // 自動恢復 + 透過 sendMessage() 推送通知（Web Socket.io + LINE pushMessage）。
 //
 // 覆蓋的 phase + 超時閾值：
+//   prd_discovery       5 min  →  刪除 FlowState + 提示重新描述
 //   fast_generating     20 min →  有代碼 → uiux_complete；無代碼 → idle
 //   uiux_iterating      5 min  →  uiux_complete
 //   uiux_code_generation 10 min →  三層恢復（有完成代碼/有中途代碼/無代碼）
@@ -15,11 +16,12 @@
 
 import Redis from 'ioredis'
 import { Server as SocketIOServer } from 'socket.io'
-import { getFlowState, saveFlowState, sendMessage } from '../workers/orchestrator-utils'
+import { getFlowState, saveFlowState, deleteFlowState, sendMessage } from '../workers/orchestrator-utils'
 import { generateTailwindConfig } from './uiux-generation'
 import type { FlowState } from '../types/flow-state'
 
 // 超時閾值（毫秒）
+const PRD_DISCOVERY_TIMEOUT_MS = 5 * 60 * 1000
 const FAST_BUILD_TIMEOUT_MS = 20 * 60 * 1000
 const ITERATION_TIMEOUT_MS = 5 * 60 * 1000
 const CODE_GENERATION_TIMEOUT_MS = 20 * 60 * 1000
@@ -27,6 +29,7 @@ const DEPLOYER_TIMEOUT_MS = 10 * 60 * 1000
 
 // 需要掃描的 phase → 超時閾值
 const RECOVERABLE_PHASES: Record<string, number> = {
+  prd_discovery: PRD_DISCOVERY_TIMEOUT_MS,
   fast_generating: FAST_BUILD_TIMEOUT_MS,
   uiux_iterating: ITERATION_TIMEOUT_MS,
   uiux_code_generation: CODE_GENERATION_TIMEOUT_MS,
@@ -63,7 +66,9 @@ export async function scanAndRecoverStuckFlowStates(
       if (!timeoutMs) continue
 
       // 檢查是否超時（startedAt === 0 代表時間戳遺失，視為超時）
-      const startedAt = state.uiuxCodeGenerationStartedAt || 0
+      const startedAt = state.phase === 'prd_discovery'
+        ? (state.prdDiscoveryStartedAt || 0)
+        : (state.uiuxCodeGenerationStartedAt || 0)
       if (startedAt > 0 && Date.now() - startedAt <= timeoutMs) continue
 
       console.warn(
@@ -95,6 +100,9 @@ async function recoverFlowState(
   state: FlowState
 ): Promise<void> {
   switch (state.phase) {
+    case 'prd_discovery':
+      await recoverPrdDiscovery(redis, io, conversationId, state)
+      break
     case 'fast_generating':
       await recoverFastGenerating(redis, io, conversationId, state)
       break
@@ -109,6 +117,24 @@ async function recoverFlowState(
       await recoverDeployer(redis, io, conversationId, state)
       break
   }
+}
+
+/**
+ * prd_discovery 恢復：刪除 FlowState + 提示重新描述
+ * PRD Discovery 是初始階段，沒有可恢復的中途進度，直接重來最乾淨
+ */
+async function recoverPrdDiscovery(
+  redis: Redis, io: SocketIOServer, conversationId: string, state: FlowState
+) {
+  await deleteFlowState(redis, conversationId)
+
+  const isChinese = state.locale !== 'en'
+  await sendMessage(conversationId, io, {
+    content: isChinese
+      ? '需求分析中斷了，請重新描述您的需求。'
+      : 'Requirements analysis was interrupted. Please describe your requirements again.',
+    stage: 'error',
+  })
 }
 
 /**

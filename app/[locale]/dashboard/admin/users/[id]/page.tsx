@@ -317,11 +317,14 @@ export default function AdminUserDetailPage() {
           marginBottom: 24,
         }}
       >
-        <h2 style={{ fontSize: 16, fontWeight: 500, marginBottom: 20 }}>{t('projectsLabel')}</h2>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
+          <h2 style={{ fontSize: 16, fontWeight: 500 }}>{t('projectsLabel')}</h2>
+          <span style={{ fontSize: 13, color: 'var(--gray-400)' }}>{projects.length} {t('projectsLabel')}</span>
+        </div>
         {projects.length === 0 ? (
           <p style={{ color: 'var(--gray-400)', fontSize: 14 }}>{t('noProjects')}</p>
         ) : (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8, maxHeight: 480, overflowY: 'auto' }}>
             {projects.map((project) => (
               <div
                 key={project.id}
@@ -360,11 +363,14 @@ export default function AdminUserDetailPage() {
           border: '1px solid var(--border-color)',
         }}
       >
-        <h2 style={{ fontSize: 16, fontWeight: 500, marginBottom: 20 }}>{ta('recentConversations')}</h2>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
+          <h2 style={{ fontSize: 16, fontWeight: 500 }}>{ta('recentConversations')}</h2>
+          <span style={{ fontSize: 13, color: 'var(--gray-400)' }}>{recentConversations.length} {t('conversationsLabel')}</span>
+        </div>
         {recentConversations.length === 0 ? (
           <p style={{ color: 'var(--gray-400)', fontSize: 14 }}>{t('noConversations')}</p>
         ) : (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8, maxHeight: 480, overflowY: 'auto' }}>
             {recentConversations.map((conv) => (
               <Link
                 key={conv.id}

@@ -42,7 +42,7 @@ import {
 import { translateBddToUISpec, buildUISpecSummary } from '../services/bdd-to-ui-spec'
 import { runQualityGate, autoFixCriticalIssues, QualityReport } from '../services/quality-gate'
 import { prepareDeployment, executeDeployment, type SiteMetadata } from '../services/deployer'
-import { detectDesignTier, inferProductType, inferPages, buildDefaultDesignSystem, buildMinimalTemplate, inferInteractionHint, getTemplateStyleHint, inferLayoutMode, PRODUCT_TYPE_LABELS, generateFastConcept } from '../services/fast-build-generation'
+import { detectDesignTier, inferProductType, inferPages, buildDefaultDesignSystem, buildMinimalTemplate, inferInteractionHint, getTemplateStyleHint, inferLayoutMode, PRODUCT_TYPE_LABELS, generateFastConcept, expandBriefPrompt } from '../services/fast-build-generation'
 import { ensureResponsiveClasses } from '../services/uiux-generation'
 import { matchTemplates } from '../services/template-matcher'
 import { executeIteration, executeUndoIteration, executeRollbackQuery, executeRollbackSelection } from '../services/iteration-skill'
@@ -1120,6 +1120,20 @@ async function handleContinueFlow(
     return
   }
 
+  if (trimmedMsg === '__retry_iteration__' && state.lastIterationFeedback) {
+    console.log(`[Orchestrator] 迭代重試: conversationId=${conversationId}`)
+    await executeIteration({
+      conversationId,
+      projectId,
+      userId,
+      userFeedback: state.lastIterationFeedback,
+      redis,
+      io,
+      imageUrls: state.lastIterationImageUrls,
+    })
+    return
+  }
+
   if (trimmedMsg === '__new_project__') {
     // 清除流程狀態 + LINE 映射，讓下次消息建新專案
     await deleteFlowState(redis, conversationId)
@@ -1245,6 +1259,16 @@ async function handleContinueFlow(
       })
       return
     }
+    // 撤銷上一次迭代
+    if (hasUndoIntent(trimmed)) {
+      await executeUndoIteration({ conversationId, projectId: data.projectId, redis, io })
+      return
+    }
+    // 回滾到歷史版本
+    if (hasRollbackIntent(trimmed)) {
+      await executeRollbackQuery({ conversationId, projectId: data.projectId, redis, io })
+      return
+    }
     // 問候/問題/閒聊攔截 — 在 semanticGateway 前
     const intentCheck0 = detectFastModeIntent(trimmed)
     if (intentCheck0.match) {
@@ -1309,7 +1333,6 @@ async function handleContinueFlow(
       return
     }
     state.semanticRejectCount = 0
-    state.phase = 'uiux_complete'
     await saveFlowState(redis, conversationId, state)
     await executeIteration({ conversationId, projectId: data.projectId, userId, userFeedback: message, redis, io, imageUrls: data.imageUrls })
     return
@@ -1666,6 +1689,34 @@ async function handleContinueFlow(
       content: '正在分析變更影響，請稍候...',
       stage: 'info',
     })
+    return
+  }
+
+  // PRD Discovery 生成中（攔截用戶輸入 + 死鎖偵測）
+  if (state.phase === 'prd_discovery' && !state.waitingForReply) {
+    const PRD_DISCOVERY_TIMEOUT_MS = 5 * 60 * 1000 // 5 分鐘
+    const startedAt = state.prdDiscoveryStartedAt || 0
+    const isTimedOut = startedAt === 0 || (Date.now() - startedAt > PRD_DISCOVERY_TIMEOUT_MS)
+    if (isTimedOut) {
+      console.warn(`[Orchestrator] PRD Discovery 超時或無時間戳 (startedAt=${startedAt})，刪除 FlowState 讓用戶重新開始`)
+      await deleteFlowState(redis, conversationId)
+      const isChinese = state.locale !== 'en'
+      await sendMessage(conversationId, io, {
+        content: isChinese
+          ? '需求分析中斷了，請重新描述您的需求。'
+          : 'Requirements analysis was interrupted. Please describe your requirements again.',
+        stage: 'error',
+        quickReplies: [
+          { label: isChinese ? '重新開始' : 'Start Over', value: '__new_project__', style: 'primary' as const },
+        ],
+      })
+    } else {
+      const isChinese = state.locale !== 'en'
+      await sendMessage(conversationId, io, {
+        content: isChinese ? '正在分析需求，請稍候...' : 'Analyzing requirements, please wait...',
+        stage: 'info',
+      })
+    }
     return
   }
 
@@ -2533,6 +2584,7 @@ async function startPrdDiscoveryWithES(
   }
 
   state.phase = 'prd_discovery'
+  state.prdDiscoveryStartedAt = Date.now()
   state.esKnowledgeMap = undefined // 清除 ES 狀態節省 Redis 空間
   await saveFlowState(redis, conversationId, state)
 
@@ -2642,6 +2694,7 @@ async function executeBddSpecSkill(input: BddSpecSkillInput) {
     totalQuestionsAsked: 0,
     userId,
     discoveryLimits,
+    prdDiscoveryStartedAt: Date.now(),
     locale: locale || (/[\u4e00-\u9fff\u3400-\u4dbf]/.test(message) ? 'zh' : 'en'),
   }
 
@@ -4912,14 +4965,22 @@ async function executeFastBuildSkill(params: {
     console.warn('[FastBuild] 模板風格提示查詢失敗，降級跳過:', e)
   }
 
-  // ── Haiku 概念生成（+1 Haiku，給設計一個靈魂）──
+  // ── 並行：Haiku 概念生成 + Prompt 擴展 ──
   let variantConcept: VariantConcept | undefined
-  try {
+  let expandedPrompt: string | null = null
+  {
     const palette = designSystem.colorPalette as { primary?: string } | undefined
-    const concept = await generateFastConcept(
-      message, productType, tier, palette?.primary || '#6366f1',
-      { userId, conversationId }
-    )
+    const [concept, expanded] = await Promise.all([
+      generateFastConcept(
+        message, productType, tier, palette?.primary || '#6366f1',
+        { userId, conversationId }
+      ).catch(() => null),
+      expandBriefPrompt(message, productType, pages, { userId, conversationId })
+        .catch(() => null),
+    ])
+
+    expandedPrompt = expanded
+
     if (concept) {
       variantConcept = {
         name: concept.name,
@@ -4931,15 +4992,17 @@ async function executeFastBuildSkill(params: {
       }
       console.log(`[FastBuild] 概念生成成功: "${concept.name}" (suggested tier: ${concept.suggestedTier || 'N/A'})`)
 
-      // Upgrade 5: Tier 智能修正（Haiku 判斷 vs 規則不一致時以 Haiku 為準）
+      // Tier 智能修正（Haiku 判斷 vs 規則不一致時以 Haiku 為準）
       if (concept.suggestedTier && concept.suggestedTier !== tier) {
         console.log(`[FastBuild] Tier 修正: ${tier} → ${concept.suggestedTier}`)
         tier = concept.suggestedTier
         designSystem = buildDefaultDesignSystem(tier, productType)
       }
     }
-  } catch (e) {
-    console.warn('[FastBuild] 概念生成失敗，降級跳過:', e)
+
+    if (expandedPrompt) {
+      console.log(`[FastBuild] Prompt 擴展成功（${expandedPrompt.length} 字）`)
+    }
   }
 
   // ── 設定 FlowState ──
@@ -4961,6 +5024,7 @@ async function executeFastBuildSkill(params: {
     locale: locale || (/[\u4e00-\u9fff\u3400-\u4dbf]/.test(message) ? 'zh' : 'en'),
     fastModeLayoutMode: layoutMode,
     fastModeOriginalMessage: message,
+    fastModeExpandedPrompt: expandedPrompt || undefined,
     uiuxVariantConcept: variantConcept,
     userId,
   }
@@ -4992,7 +5056,7 @@ async function executeFastBuildSkill(params: {
     undefined, // 無 bddSpec
     tier,
     {
-      originalRequirements: message,
+      originalRequirements: expandedPrompt || message,
       variantConcept,
       interactionHint,
       templateStyleHint: templateStyleHint || undefined,

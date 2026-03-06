@@ -6,10 +6,12 @@ import { Server as SocketIOServer } from 'socket.io'
 import Redis from 'ioredis'
 import * as db from '../db/client'
 import type { FlowState, IterationHistoryEntry } from '../types/flow-state'
-import { sendMessage, saveFlowState, getFlowState, generatedCodeToFileRows, deductCredits } from '../workers/orchestrator-utils'
+import { sendMessage, saveFlowState, getFlowState, generatedCodeToFileRows, deductCredits, makeStreamingCallback } from '../workers/orchestrator-utils'
 import { CREDIT_COSTS } from '../config/plans'
-import { refineCode, generateTailwindConfig, GeneratedComponent } from './uiux-generation'
+import { refineCode, generateTailwindConfig, GeneratedComponent, buildStreamingHandler } from './uiux-generation'
 import { listProjectDeployments, rollbackToDeployment, toVercelSlug } from './deployer'
+
+const MAX_ITERATIONS_PER_SESSION = 50
 
 // ============================================================
 // 內部 Helper
@@ -94,10 +96,31 @@ export async function executeIteration(input: {
     return
   }
 
-  // 1. 設定 iterating phase 防止並行訊息
+  // 0. 安全閥：迭代次數上限
+  if ((state.iterationCount || 0) >= MAX_ITERATIONS_PER_SESSION) {
+    const isChinese = state.locale !== 'en'
+    await sendMessage(conversationId, io, {
+      content: isChinese
+        ? `已達到單次對話的迭代上限（${MAX_ITERATIONS_PER_SESSION} 次）。建議部署目前版本或開始新專案。`
+        : `Reached iteration limit (${MAX_ITERATIONS_PER_SESSION}). Please deploy or start a new project.`,
+      stage: 'info',
+      quickReplies: [
+        { label: isChinese ? '部署上線' : 'Deploy', value: '部署', style: 'primary' as const },
+        { label: isChinese ? '開始新專案' : 'New Project', value: '__new_project__', style: 'ghost' as const },
+      ],
+    })
+    return
+  }
+
+  // 1. 設定 iterating phase 防止並行訊息 + 保存反饋供重試
   state.phase = 'uiux_iterating'
   state.uiuxCodeGenerationStartedAt = Date.now()
+  state.lastIterationFeedback = userFeedback
+  state.lastIterationImageUrls = input.imageUrls
   await saveFlowState(redis, conversationId, state)
+
+  // 保留原有快照，失敗/異常時恢復
+  const previousSnapshot = state.uiuxPreIterationCode
 
   try {
     await sendMessage(conversationId, io, {
@@ -120,13 +143,24 @@ export async function executeIteration(input: {
       return
     }
 
-    // 3. 保存迭代前快照
-    state.uiuxPreIterationCode = JSON.parse(JSON.stringify(currentCode))
+    // 2.5 建構 streaming callback（迭代時即時預覽）
+    const tailwindConfig = state.uiuxDesignSystem
+      ? generateTailwindConfig(state.uiuxDesignSystem)
+      : ''
+    const streamingCallback = buildStreamingHandler(
+      makeStreamingCallback(conversationId, io, redis, 'iteration', tailwindConfig)
+    )
 
-    // 4. 呼叫 refineCode
+    // 3. 呼叫 refineCode（快照延後到成功後才覆蓋）
+    // Fast Build 擴展 prompt 注入為產品上下文，讓 LLM 理解網站全貌
+    let enrichedFeedback = userFeedback
+    if (state.fastMode && state.fastModeExpandedPrompt) {
+      enrichedFeedback = `${userFeedback}\n\n[產品完整描述（用於理解上下文，不是修改指令）]\n${state.fastModeExpandedPrompt}`
+    }
+
     const result = await refineCode(
       currentCode,
-      userFeedback,
+      enrichedFeedback,
       {
         designSystem: state.uiuxDesignSystem,
         designTier: state.uiuxDesignTier,
@@ -134,8 +168,12 @@ export async function executeIteration(input: {
         variantConcept: state.uiuxVariantConcept,
       },
       { userId: state.userId || userId, conversationId, purpose: 'uiux_refine' },
-      input.imageUrls
+      input.imageUrls,
+      streamingCallback
     )
+
+    // 清理 streaming preview key（無論成功/失敗）
+    await redis.del(`streaming:preview:${conversationId}`).catch(() => {})
 
     if (!result.success || !result.pages) {
       // 區分「無法理解」和「系統錯誤」
@@ -145,16 +183,23 @@ export async function executeIteration(input: {
           ? `${result.error}`
           : `修改失敗：${result.error || '未知錯誤，請稍後重試。'}`,
         stage: isNoChange ? 'info' : 'error',
-        quickReplies: [
-          { label: '部署上線', value: '部署', style: 'primary' as const },
-        ],
+        quickReplies: isNoChange
+          ? [{ label: '部署上線', value: '部署', style: 'primary' as const }]
+          : [
+              { label: '重試修改', value: '__retry_iteration__', style: 'primary' as const },
+              { label: '部署上線', value: '部署', style: 'secondary' as const },
+            ],
       })
-      // 不保存迭代前快照（沒有實際改動）
+      // 恢復之前的快照（沒有實際改動，不應覆蓋有效快照）
+      state.uiuxPreIterationCode = previousSnapshot
       state.phase = 'uiux_complete'
       state.uiuxCodeGenerationStartedAt = undefined
       await saveFlowState(redis, conversationId, state)
       return
     }
+
+    // 4. refineCode 成功，保存迭代前快照（此時才安全覆蓋）
+    state.uiuxPreIterationCode = JSON.parse(JSON.stringify(currentCode))
 
     // 5. 更新代碼
     const updatedCode = {
@@ -164,6 +209,8 @@ export async function executeIteration(input: {
     }
     state.uiuxGeneratedCode = updatedCode
     state.iterationCount = (state.iterationCount || 0) + 1
+    state.lastIterationFeedback = undefined
+    state.lastIterationImageUrls = undefined
 
     // 6. 記錄迭代歷史
     const changedFiles = result.pages.map(p => p.path)
@@ -179,11 +226,7 @@ export async function executeIteration(input: {
         generatedCodeToFileRows(updatedCode, state.uiuxDesignSystem))
     }
 
-    // 8. 發送預覽
-    const tailwindConfig = state.uiuxDesignSystem
-      ? generateTailwindConfig(state.uiuxDesignSystem)
-      : ''
-
+    // 8. 發送預覽（tailwindConfig 已在上方計算）
     // quickReplies：有迭代前快照時顯示撤銷按鈕
     const quickReplies: { label: string; value: string; style?: 'primary' | 'secondary' | 'ghost' }[] = [
       { label: '部署上線', value: '部署', style: 'primary' },
@@ -220,14 +263,18 @@ export async function executeIteration(input: {
     await saveFlowState(redis, conversationId, state)
   } catch (err) {
     console.error('[IterationSkill] executeIteration 異常:', err)
+    await redis.del(`streaming:preview:${conversationId}`).catch(() => {})
     state.phase = 'uiux_complete'
     state.uiuxCodeGenerationStartedAt = undefined
-    state.uiuxPreIterationCode = undefined
+    state.uiuxPreIterationCode = previousSnapshot
     await saveFlowState(redis, conversationId, state)
 
     await sendMessage(conversationId, io, {
       content: `修改過程發生異常：${err instanceof Error ? err.message : String(err)}\n\n請稍後再試，或嘗試其他描述方式。`,
       stage: 'error',
+      quickReplies: [
+        { label: '重試修改', value: '__retry_iteration__', style: 'primary' as const },
+      ],
     })
   }
 }
@@ -268,6 +315,7 @@ export async function executeUndoIteration(input: {
     state.uiuxGeneratedCode = state.uiuxPreIterationCode
     state.uiuxPreIterationCode = undefined // 只能撤銷一步
     state.iterationCount = Math.max(0, (state.iterationCount || 1) - 1)
+    state.iterationHistory?.pop()
     state.phase = 'uiux_complete'
     state.uiuxCodePhase = 'complete'
 

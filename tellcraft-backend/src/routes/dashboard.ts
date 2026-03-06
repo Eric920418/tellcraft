@@ -441,7 +441,7 @@ router.get('/admin/users/:userId', requireAdmin, async (req, res) => {
       status: string
       created_at: string
     }>(
-      'SELECT id, name, status, created_at FROM projects WHERE user_id = $1 ORDER BY created_at DESC LIMIT 10',
+      'SELECT id, name, status, created_at FROM projects WHERE user_id = $1 ORDER BY created_at DESC',
       [userId]
     )
 
@@ -456,8 +456,7 @@ router.get('/admin/users/:userId', requireAdmin, async (req, res) => {
        FROM conversations c
        JOIN projects p ON c.project_id = p.id
        WHERE p.user_id = $1
-       ORDER BY c.updated_at DESC
-       LIMIT 10`,
+       ORDER BY c.updated_at DESC`,
       [userId]
     )
 

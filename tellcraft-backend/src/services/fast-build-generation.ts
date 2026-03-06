@@ -777,3 +777,120 @@ Make the concept unique. signatureElement must be specific enough to code (e.g. 
     return null
   }
 }
+
+// ============================================================
+// Haiku Prompt 擴展（將簡短描述擴展為完整網站需求）
+// ============================================================
+
+/**
+ * 用 1 次 Haiku 將簡短描述擴展為完整的網站內容需求
+ * 跳過條件：描述已經夠詳細（中文 > 80 字 或 英文 > 40 詞）
+ * 失敗時 return null（降級用原始描述）
+ */
+export async function expandBriefPrompt(
+  description: string,
+  productType: string,
+  pages: string[],
+  context?: { userId?: string; conversationId?: string }
+): Promise<string | null> {
+  // 跳過條件：描述已夠詳細
+  const isChinese = /[\u4e00-\u9fff\u3400-\u4dbf]/.test(description)
+  if (isChinese) {
+    const charCount = description.replace(/\s/g, '').length
+    if (charCount > 80) {
+      console.log(`[ExpandPrompt] 描述已夠詳細（${charCount} 中文字），跳過擴展`)
+      return null
+    }
+  } else {
+    const wordCount = description.trim().split(/\s+/).length
+    if (wordCount > 40) {
+      console.log(`[ExpandPrompt] Description detailed enough (${wordCount} words), skipping expansion`)
+      return null
+    }
+  }
+
+  const apiKey = process.env.ANTHROPIC_API_KEY
+  if (!apiKey) return null
+
+  try {
+    const pagesStr = pages.join('、')
+    const label = PRODUCT_TYPE_LABELS[productType] || '網站'
+
+    const systemPrompt = isChinese
+      ? `你是網站內容策劃師。根據用戶的簡短描述，擴展為完整的網站內容需求。
+
+規則：
+1. 頁面結構嚴格按照提供的頁面列表，不要自行新增頁面
+2. 每個頁面描述具體的區塊內容（Hero、特色、列表、CTA 等）
+3. 提供具體的示範文案（真實的品名/價格/描述，不是 placeholder 如「項目1」「描述文字」）
+4. 包含功能細節和 CTA 文案
+5. 輸出 400-600 中文字的純文字描述
+6. 不要輸出 JSON 或 markdown 格式標記`
+      : `You are a website content planner. Expand the user's brief description into a complete website content requirement.
+
+Rules:
+1. Follow the provided page list strictly, do not add new pages
+2. Describe specific sections for each page (Hero, Features, List, CTA, etc.)
+3. Provide concrete sample copy (real names/prices/descriptions, NOT placeholders like "Item 1" or "Description text")
+4. Include functional details and CTA copy
+5. Output 200-300 words of plain text description
+6. Do not output JSON or markdown formatting`
+
+    const userMsg = isChinese
+      ? `用戶描述：${description}\n產品類型：${label}\n頁面列表：${pagesStr}`
+      : `User description: ${description}\nProduct type: ${label}\nPages: ${pagesStr}`
+
+    const resp = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': apiKey,
+        'anthropic-version': '2023-06-01',
+      },
+      body: JSON.stringify({
+        model: 'claude-haiku-4-5-20251001',
+        max_tokens: 1000,
+        temperature: 0.6,
+        system: systemPrompt,
+        messages: [{ role: 'user', content: userMsg }],
+      }),
+    })
+
+    if (!resp.ok) {
+      console.warn(`[ExpandPrompt] API 錯誤 ${resp.status}，降級跳過`)
+      return null
+    }
+
+    const data = await resp.json() as {
+      content?: Array<{ text?: string }>
+      usage?: { input_tokens?: number; output_tokens?: number }
+    }
+
+    if (data.usage) {
+      const inputTokens = data.usage.input_tokens || 0
+      const outputTokens = data.usage.output_tokens || 0
+      const cost = (inputTokens * HAIKU_PRICING.input + outputTokens * HAIKU_PRICING.output) / 1_000_000
+      recordLlmUsage({
+        model: 'claude-haiku-4-5-20251001',
+        inputTokens,
+        outputTokens,
+        costUsd: cost,
+        purpose: 'fast_build_prompt_expansion',
+        userId: context?.userId,
+        conversationId: context?.conversationId,
+      }).catch(err => console.error('[ExpandPrompt] 記錄用量失敗:', err))
+    }
+
+    const text = data.content?.[0]?.text?.trim()
+    if (!text || text.length < 50) {
+      console.warn('[ExpandPrompt] 回應太短或空，降級跳過')
+      return null
+    }
+
+    console.log(`[ExpandPrompt] 擴展成功（${text.length} 字）`)
+    return text
+  } catch (err) {
+    console.warn('[ExpandPrompt] 擴展失敗，降級跳過:', err)
+    return null
+  }
+}
