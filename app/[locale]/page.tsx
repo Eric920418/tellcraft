@@ -2496,6 +2496,18 @@ function ChatSection({
           lines.push(`- ${tCodePreview('imgSrcChanged', { value: val })}`)
         } else if (prop === 'imgAlt') {
           lines.push(`- ${tCodePreview('imgAltChanged', { value: val })}`)
+        } else if (prop === 'backgroundImage') {
+          // 提取純 URL 給 AI 清楚的指令
+          const urlMatch = val.match(/url\(["']?(.*?)["']?\)/)
+          const pureUrl = urlMatch ? urlMatch[1] : val
+          if (val === 'none' || !pureUrl) {
+            lines.push(`- 移除背景圖片`)
+          } else {
+            lines.push(`- 設定背景圖片: style={{ backgroundImage: "url(${pureUrl})", backgroundSize: "${codePreviewOverrides[elemId]?.backgroundSize || 'cover'}", backgroundPosition: "${codePreviewOverrides[elemId]?.backgroundPosition || 'center'}", backgroundRepeat: "${codePreviewOverrides[elemId]?.backgroundRepeat || 'no-repeat'}" }}`)
+          }
+        } else if (prop === 'backgroundSize' || prop === 'backgroundPosition' || prop === 'backgroundRepeat') {
+          // 已包含在 backgroundImage 行中，跳過獨立輸出
+          continue
         } else {
           const label = tUiux((`label${prop.charAt(0).toUpperCase() + prop.slice(1)}`) as never) || prop
           lines.push(`- ${tCodePreview('styleChanged', { label, prop, value: val })}`)

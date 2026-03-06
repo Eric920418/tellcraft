@@ -884,7 +884,7 @@ Sandpack 預覽支援多頁面導航。之前 Header 的 Link 按鈕點擊後會
 - 批註系統：每個元素可添加修改說明，儲存時附加到訊息
 - Undo/Redo（Cmd+Z / Cmd+Shift+Z）+ 儲存按鈕：將所有覆蓋彙整為訊息發送給 AI
 - overrides/annotations localStorage 持久化（per conversation）
-- 聊天附圖迭代：textarea 旁附件按鈕（最多 3 張），上傳後 URL 傳到後端 `refineCode`，Sonnet Vision 根據截圖 + 文字修改代碼
+- 聊天附圖迭代：textarea 旁附件按鈕（最多 3 張），上傳後 URL 傳到後端 `refineCode`，Sonnet Vision 根據截圖 + 文字修改代碼。圖片 URL 同時注入系統提示和用戶訊息文字中，AI 可根據指令決定：直接嵌入圖片 URL 到代碼（作為 img/background），或觀察設計細節作為參考
 
 ### BDD 3D 動畫重設計（2026-02-26）
 

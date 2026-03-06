@@ -143,7 +143,11 @@
     "borderColor": "邊框顏色",
     "boxShadow": "陰影",
     "opacity": "透明度",
-    "objectFit": "圖片填充模式"
+    "objectFit": "圖片填充模式",
+    "backgroundImage": "背景圖片",
+    "backgroundSize": "背景尺寸",
+    "backgroundPosition": "背景位置",
+    "backgroundRepeat": "背景重複"
   },
   "codePreview": {
     "textChanged": "文字改為「{value}」",

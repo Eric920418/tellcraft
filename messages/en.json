@@ -143,7 +143,11 @@
     "borderColor": "Border color",
     "boxShadow": "Box shadow",
     "opacity": "Opacity",
-    "objectFit": "Object fit"
+    "objectFit": "Object fit",
+    "backgroundImage": "Background image",
+    "backgroundSize": "Background size",
+    "backgroundPosition": "Background position",
+    "backgroundRepeat": "Background repeat"
   },
   "codePreview": {
     "textChanged": "Text changed to \"{value}\"",

@@ -2779,12 +2779,20 @@ ${getStructureConstraints(tier)}
 
 未修改的檔案不需要輸出。
 ${imageUrls?.length ? `
-## 圖片參考
-用戶附加了參考圖片，請仔細觀察圖片中的設計細節（佈局、配色、字體、間距、元素位置等），結合用戶的文字描述進行修改。` : ''}`
+## 用戶附加的圖片（${imageUrls.length} 張）
+用戶附加了參考圖片。請根據用戶的文字指示決定如何使用：
+- 如果用戶要求「加入這張圖」「用這張圖當背景」等 → 直接在代碼中使用下方的圖片 URL（作為 img src 或 CSS backgroundImage）
+- 如果用戶要求「照這個改」「參考這個設計」等 → 觀察圖片中的設計細節（佈局、配色、字體、間距等），據此修改代碼
+- 圖片 URL（可直接在代碼中使用）：
+${imageUrls.map((u, i) => `  ${i + 1}. ${u}`).join('\n')}` : ''}`
+
+  const imageUrlsSection = imageUrls?.length
+    ? `\n## 附加圖片 URL\n${imageUrls.map((u, i) => `${i + 1}. ${u}`).join('\n')}\n`
+    : ''
 
   const userMessage = `## 用戶的修改要求
 ${userFeedback}
-
+${imageUrlsSection}
 ## 現有代碼
 ${codeBlocks.join('\n\n')}
 
