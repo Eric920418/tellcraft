@@ -548,12 +548,30 @@ async function handleProcessMessage(
   // 注意：Fix 1 的 FlowState 檢查已涵蓋 fast_generating 的冪等保護，
   // 不需要在此重複讀取 FlowState
   if (mode === 'fast') {
-    // 預驗證 Layer 1：攔截亂碼/問候/閒聊等無意義輸入（零 LLM）
+    // 預驗證 Layer 0：問候/閒聊偵測 — 新用戶發「嗨」走到這裡，用建站引導回覆
+    const greetCheckFast = isGreetingOrChitchat(message)
+    if (greetCheckFast.match) {
+      const isChinese = /[\u4e00-\u9fff\u3400-\u4dbf]/.test(message) || locale === 'zh'
+      console.log(`[Orchestrator] 快速模式問候攔截: type=${greetCheckFast.type}, msg="${message}"`)
+      await sendMessage(conversationId, io, {
+        content: isChinese
+          ? '嗨！告訴我你想做什麼網站，例如：\n- 「做一個花店官網」\n- 「做一個餐廳預約網站」\n- 「做一個個人作品集」'
+          : 'Hi! Tell me what kind of website you\'d like to build, e.g.:\n- "Build a flower shop website"\n- "Create a restaurant booking site"\n- "Make a personal portfolio"',
+        stage: 'info',
+      })
+      return { taskId: null, skill: null }
+    }
+
+    // 預驗證 Layer 1：攔截亂碼等無意義輸入（零 LLM）
     const fastInputCheck = isDesignFeedback(message)
     if (!fastInputCheck.valid) {
       console.log(`[Orchestrator] 快速模式輸入被攔截: reason=${fastInputCheck.rejectReason}, msg="${message.substring(0, 50)}"`)
+      // 使用建站語境引導（不用 isDesignFeedback 的修改語境 guideMessage）
+      const isChinese = /[\u4e00-\u9fff\u3400-\u4dbf]/.test(message) || locale === 'zh'
       await sendMessage(conversationId, io, {
-        content: fastInputCheck.guideMessage || '請描述您想要建立的網站或應用，例如「做一個咖啡店官網」或「建立一個作品集網站」。',
+        content: isChinese
+          ? '請描述您想要建立的網站或應用，例如：\n- 「做一個咖啡店官網」\n- 「建立一個作品集網站」\n- 「做一個餐廳預約系統」'
+          : 'Please describe what you\'d like to build, e.g.:\n- "Build a coffee shop website"\n- "Create a portfolio site"\n- "Make a restaurant booking system"',
         stage: 'info',
       })
       return { taskId: null, skill: null }

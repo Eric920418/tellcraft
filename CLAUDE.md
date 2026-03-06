@@ -98,8 +98,8 @@ pm2 describe tellcraft-backend            # 詳細資訊（記憶體/重啟次�
 | **Server Actions** | `app/actions/index.ts` | ~1800 | 對話/訊息/專案等 Server Actions 入口 |
 | **Sandpack 預覽** | `app/lib/sandpack-utils.ts` + `app/components/uiux/SandpackPreview.tsx` | | UIUX 預覽核心，Sandpack 真實 React 渲染 |
 | **WebSocket Hook** | `app/hooks/useVpsWebSocket.ts` | | 即時訊息推送（型別定義） |
-| **Fast Build 進度** | `app/components/FastBuildProgress.tsx` | | 工程藍圖風三階段進度元件（motion/react） |
-| **3D 蓋房子** | `app/components/building-scene/` | | Three.js 低多邊形 3D 場景 + GSAP timeline（BDD Q&A 視覺回饋） |
+| **Fast Build 動畫** | `app/components/FastBuildPlayer.tsx` + `app/components/remotion/fast-build/` | | Remotion + @remotion/three 3D 工廠流水線動畫（Structure/Animation/RWD 三站）|
+| **3D 蓋房子** | `app/components/building-scene/` + `app/components/remotion/building-scene/` | | Remotion + @remotion/three 低多邊形 3D 場景（BDD Q&A 視覺回饋）|
 
 ### Skill 系統
 
@@ -188,9 +188,15 @@ Layer 5: sanitizeCodeForDeploy 修復 7 — useSearchParams Suspense boundary �
 | `dashboard.ts` | `/api/dashboard` | 用戶統計 + Admin 管理（users/projects/logs） |
 | `auth.ts` | `/api/auth` | Google/LINE OAuth + `/me` + `/refresh` + `/logout` |
 | `health.ts` | `/api/health` | 健康檢查 + Redis/DB 狀態 + `/cleanup-tmp` |
+| `user.ts` | `/api/user` | `GET /me`（用戶資訊）、帳號合併 |
+| `upload.ts` | `/api/upload` | multer 圖片上傳（5MB 上限，JPEG/PNG），存 `UPLOAD_DIR`，回傳公開 URL |
 | `line-bot.ts` | `/api/line/webhook` | LINE Bot Webhook（簽名驗證 + 事件分發），raw body 在 express.json 之前 |
 
 前端 Proxy：`app/api/vps/[...path]/route.ts` 將 `/api/vps/*` 轉發到 VPS 後端。
+
+### Locale 路由
+
+前端使用 `app/[locale]/` 多語系路由（zh/en）。`app/hooks/useLocalePath.ts` 處理帶 locale prefix 的路徑跳轉，`app/components/LocaleSwitcher.tsx` 切換語言。LIFF（LINE 內嵌）頁面在 `app/[locale]/liff/page.tsx`。
 
 ### 認證系統
 
@@ -277,6 +283,7 @@ Layer 5: sanitizeCodeForDeploy 修復 7 — useSearchParams Suspense boundary �
 - **`handleCodePhaseRedo` 需要快照**：`uiuxStructureCode`/`uiuxAnimationCode`，否則 redo 在已修改代碼上重做
 - **`verifyBuildLocally` 的修復結果必須同步回 DB**：否則預覽和部署代碼分岔
 - **部署五層防禦**：L1 generateStructure 後驗證引用 → L2 sanitizeCodeForDeploy stub 生成 → L3 fixBuildErrors API 重試 → L4 build 循環 3+1 次 → L5 useSearchParams Suspense 拆分
+- **Anthropic 模型 ID**：一律用 `claude-sonnet-4-6`（不加日期後綴），`claude-sonnet-4-6-20250514` 不存在會 404。全 codebase 用 `semantic-gateway.ts` 定義的常數而非手打
 - **Anthropic SDK v0.72+**：大 `max_tokens` 必須用 `messages.stream()` + `await stream.finalMessage()`
 - **Skill 函數提前 return 必須保存 FlowState**：否則 `handleContinueFlow` 找不到 state → 用戶對話永久卡死
 - **Formulation phase 必須設 `formulationStartedAt`**：否則中斷後無法觸發超時恢復。`formulation` phase + `waitingForReply=false` 代表正在生成中，handleContinueFlow 會攔截用戶輸入 + 15 分鐘超時偵測
