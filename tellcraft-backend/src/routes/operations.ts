@@ -9,14 +9,6 @@ import crypto from 'crypto'
 
 const router: Router = Router()
 
-// 方案配額限制
-const PLAN_MESSAGE_LIMITS: Record<string, number> = {
-  free: 50,
-  creator: 200,
-  pro: 1000,
-  business: Infinity
-}
-
 // ============================================================
 // 生成記錄 API
 // ============================================================

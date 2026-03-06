@@ -6,7 +6,8 @@ import { Server as SocketIOServer } from 'socket.io'
 import Redis from 'ioredis'
 import * as db from '../db/client'
 import type { FlowState, IterationHistoryEntry } from '../types/flow-state'
-import { sendMessage, saveFlowState, getFlowState, generatedCodeToFileRows } from '../workers/orchestrator-utils'
+import { sendMessage, saveFlowState, getFlowState, generatedCodeToFileRows, deductCredits } from '../workers/orchestrator-utils'
+import { CREDIT_COSTS } from '../config/plans'
 import { refineCode, generateTailwindConfig, GeneratedComponent } from './uiux-generation'
 import { listProjectDeployments, rollbackToDeployment, toVercelSlug } from './deployer'
 
@@ -206,7 +207,10 @@ export async function executeIteration(input: {
       quickReplies,
     })
 
-    // 9. 回到 uiux_complete 等待下一步
+    // 9. Credit 扣除：迭代修改額外成本（base 已在 handleContinueFlow 入口扣除）
+    await deductCredits(userId, CREDIT_COSTS.ITERATION - CREDIT_COSTS.BASE_MESSAGE)
+
+    // 10. 回到 uiux_complete 等待下一步
     state.phase = 'uiux_complete'
     state.uiuxCodePhase = 'complete'
     state.waitingForReply = false

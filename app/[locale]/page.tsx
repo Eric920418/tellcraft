@@ -1453,7 +1453,7 @@ function ChatSection({
         return
       }
 
-      const initReadOnly = !!result.data.readOnly && result.data.lockReason === 'message_limit'
+      const initReadOnly = !!result.data.readOnly && result.data.lockReason === 'credit_limit'
       setQuotaReadOnly(initReadOnly)
 
       const session: SessionInfo = {
@@ -1565,7 +1565,7 @@ function ChatSection({
               subMessage: tLogin('guestLimitMessage'),
               promptId: 'guest_limit'
             })
-          } else if (initErr.includes('MESSAGE_LIMIT_REACHED')) {
+          } else if (initErr.includes('CREDIT_LIMIT_REACHED')) {
             setQuotaReadOnly(true)
             setError(tChat('quotaReadonlyHint'))
           } else {
@@ -2312,7 +2312,7 @@ function ChatSection({
         })
         return
       }
-      if (err.includes('MESSAGE_LIMIT_REACHED')) {
+      if (err.includes('CREDIT_LIMIT_REACHED')) {
         setQuotaReadOnly(true)
         setError(tChat('quotaReadonlyHint'))
         return
@@ -2410,7 +2410,7 @@ function ChatSection({
         })
         return
       }
-      if (err.includes('MESSAGE_LIMIT_REACHED')) {
+      if (err.includes('CREDIT_LIMIT_REACHED')) {
         setQuotaReadOnly(true)
         setError(tChat('quotaReadonlyHint'))
         return

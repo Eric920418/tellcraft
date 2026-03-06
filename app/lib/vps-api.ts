@@ -342,7 +342,7 @@ export async function getDashboardStats(input: {
     totalProjects: number
     totalConversations: number
     totalDeployments: number
-    messageUsage: {
+    creditUsage: {
       used: number
       limit: number
       plan: string
@@ -448,7 +448,9 @@ export async function initializeSession(input: {
   isNewConversation: boolean
   resumed: boolean
   readOnly?: boolean
-  lockReason?: 'message_limit'
+  lockReason?: 'credit_limit'
+  creditsUsed?: number
+  creditLimit?: number
 }>> {
   return apiRequest('/api/session/initialize', {
     method: 'POST',

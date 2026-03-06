@@ -1008,7 +1008,7 @@ export async function getUserStats(): Promise<ActionResult<{
   totalProjects: number
   totalConversations: number
   totalDeployments: number
-  messageUsage: {
+  creditUsage: {
     used: number
     limit: number
     plan: string
@@ -1034,7 +1034,7 @@ export async function getUserStats(): Promise<ActionResult<{
         totalProjects: result.data.stats.totalProjects,
         totalConversations: result.data.stats.totalConversations,
         totalDeployments: result.data.stats.totalDeployments,
-        messageUsage: result.data.stats.messageUsage
+        creditUsage: result.data.stats.creditUsage
       }
     }
   } catch (error) {

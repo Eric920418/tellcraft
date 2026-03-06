@@ -57,7 +57,8 @@ import { generateIsaConfig } from '../services/isa-config'
 import { validateAndFixFeatures } from '../services/feature-validation'
 import { analyzeChangeImpact, executeChange, verifyConsistency, rollbackChange, ImpactAnalysis } from '../services/change-management'
 import type { FlowState } from '../types/flow-state'
-import { sendMessage, saveFlowState, getFlowState, deleteFlowState, makeStreamingCallback, generatedCodeToFileRows } from './orchestrator-utils'
+import { sendMessage, saveFlowState, getFlowState, deleteFlowState, makeStreamingCallback, generatedCodeToFileRows, deductCredits } from './orchestrator-utils'
+import { CREDIT_COSTS } from '../config/plans'
 import { sanitizeClarifyForDisplay, sanitizeForDisplay } from '../utils/white-text-sanitizer'
 import { detectFastModeIntent, getFaqReply, answerWithSonnet } from '../services/customer-service'
 
@@ -471,6 +472,9 @@ async function handleProcessMessage(
     })
     return { taskId: null, skill: null }
   }
+
+  // Credit 扣除：base message
+  await deductCredits(userId, CREDIT_COSTS.BASE_MESSAGE)
 
   // Step 1.2: FlowState 檢查（已有流程的用戶訊息應走 continue-flow）
   // 使用反向邏輯：只要有 FlowState 且 phase 不是 'idle'，就轉發
@@ -1004,6 +1008,9 @@ async function handleContinueFlow(
     })
     return
   }
+
+  // Credit 扣除：base reply
+  await deductCredits(userId, CREDIT_COSTS.BASE_MESSAGE)
 
   if (!state) {
     console.log('[Orchestrator] 沒有找到流程狀態，可能是新對話或狀態已過期')
@@ -3965,6 +3972,11 @@ async function finishClarifyAndStartFormulation(
 
   console.log('[Orchestrator] Formulation 完成，進入 Spec Discovery')
 
+  // Credit 扣除：BDD Formulation 額外成本
+  if (state.userId) {
+    await deductCredits(state.userId, CREDIT_COSTS.BDD_FORMULATION - CREDIT_COSTS.BASE_MESSAGE)
+  }
+
   // 進入 Spec Discovery 階段
   await startSpecDiscovery(conversationId, state, result.features || [], result.schemaSql || '', result.entityMapping || '', redis, io)
 }
@@ -5043,6 +5055,9 @@ async function executeFastBuildSkill(params: {
   state.uiuxCodeGenerationStartedAt = undefined
   await saveFlowState(redis, conversationId, state)
 
+  // Credit 扣除：Fast Build 額外成本（base 已在入口扣除）
+  await deductCredits(userId, CREDIT_COSTS.FAST_BUILD - CREDIT_COSTS.BASE_MESSAGE)
+
   if (projectId) {
     await db.upsertProjectFiles(projectId, 'uiux',
       generatedCodeToFileRows(currentCode, designSystem))
@@ -5340,6 +5355,11 @@ async function executeFullCodePipeline(
   state.phase = 'uiux_complete'
   state.waitingForReply = false
   await saveFlowState(redis, conversationId, state)
+
+  // Credit 扣除：UIUX 完整管線額外成本（base 已在入口扣除）
+  if (state.userId) {
+    await deductCredits(state.userId, CREDIT_COSTS.UIUX_PIPELINE - CREDIT_COSTS.BASE_MESSAGE)
+  }
 
   await updateBddSession({
     sessionId,
@@ -6363,6 +6383,11 @@ async function startDesignBriefConfirm(
   state.waitingForReply = true
   await saveFlowState(redis, conversationId, state)
 
+  // Credit 扣除：Design Brief 額外成本
+  if (state.userId) {
+    await deductCredits(state.userId, CREDIT_COSTS.DESIGN_BRIEF - CREDIT_COSTS.BASE_MESSAGE)
+  }
+
   // 構建展示訊息
   const brief = briefResult.brief
   const tierLabel = brief.recommendedTier === 'creative' ? '創意型' : '功能型'
@@ -6642,6 +6667,11 @@ async function proceedToVariantGeneration(
   state.uiuxVariants = variants
   state.waitingForReply = true
   await saveFlowState(redis, conversationId, state)
+
+  // Credit 扣除：Design Variant 額外成本
+  if (state.userId) {
+    await deductCredits(state.userId, CREDIT_COSTS.DESIGN_VARIANT - CREDIT_COSTS.BASE_MESSAGE)
+  }
 
   // 構建變體描述
   const variantDescriptions = variants.map(v =>
@@ -6994,6 +7024,11 @@ async function handleDeployExecute(
     state.deployerPreCheck = undefined
     state.phase = 'deployer_complete'
     await saveFlowState(redis, conversationId, state)
+
+    // Credit 扣除：Deploy 額外成本
+    if (state.userId) {
+      await deductCredits(state.userId, CREDIT_COSTS.DEPLOY - CREDIT_COSTS.BASE_MESSAGE)
+    }
 
     // 如果代碼被修復過，更新 code_preview 到 DB（重新打開對話時才能看到修復後的版本）
     if (result.deployedCode) {

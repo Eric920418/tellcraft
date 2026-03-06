@@ -8,6 +8,7 @@ import { query, queryOne } from '../db/client'
 import { requireAuth, requireAdmin } from '../middleware/auth'
 import { parseLogLine, sanitizeLogLine, isNoiseLine, type ParsedLogLine } from '../utils/log-parser'
 import type Redis from 'ioredis'
+import { getCreditLimit } from '../config/plans'
 
 const router: Router = Router()
 
@@ -16,14 +17,6 @@ let redisClient: Redis | null = null
 
 export function setDashboardRedisClient(redis: Redis) {
   redisClient = redis
-}
-
-// 方案配額限制
-const PLAN_MESSAGE_LIMITS: Record<string, number> = {
-  free: 50,
-  creator: 200,
-  pro: 1000,
-  business: Infinity
 }
 
 /**
@@ -37,9 +30,9 @@ router.get('/stats', requireAuth, async (req, res) => {
     // 查詢用戶信息
     const user = await queryOne<{
       plan: string
-      message_count_this_period: number
+      credits_used_this_period: number
     }>(
-      'SELECT plan, message_count_this_period FROM users WHERE id = $1',
+      'SELECT plan, credits_used_this_period FROM users WHERE id = $1',
       [userId]
     )
 
@@ -108,13 +101,13 @@ router.get('/stats', requireAuth, async (req, res) => {
     }
 
     const plan = user.plan || 'free'
-    const rawLimit = PLAN_MESSAGE_LIMITS[plan] || 50
+    const rawLimit = getCreditLimit(plan)
     const stats = {
       totalProjects: projectCount,
       totalConversations: convCount,
       totalDeployments: deployCount,
-      messageUsage: {
-        used: user.message_count_this_period || 0,
+      creditUsage: {
+        used: user.credits_used_this_period || 0,
         limit: rawLimit === Infinity ? -1 : rawLimit,
         plan
       }
@@ -373,7 +366,7 @@ router.get('/admin/users', requireAdmin, async (req, res) => {
       plan: string
       subscription_status: string
       is_admin: boolean
-      message_count_this_period: number
+      credits_used_this_period: number
       created_at: string
       project_count: string
       provider: string | null
@@ -381,7 +374,7 @@ router.get('/admin/users', requireAdmin, async (req, res) => {
     }>(
       `SELECT
         u.id, u.email, u.name, u.plan, u.subscription_status, u.is_admin,
-        u.message_count_this_period, u.created_at, u.provider,
+        u.credits_used_this_period, u.created_at, u.provider,
         COUNT(DISTINCT p.id) as project_count,
         (SELECT string_agg(up.provider, ',') FROM user_providers up WHERE up.user_id = u.id) as linked_providers
        FROM users u
@@ -401,7 +394,7 @@ router.get('/admin/users', requireAdmin, async (req, res) => {
       subscriptionStatus: u.subscription_status,
       isAdmin: u.is_admin,
       projectCount: parseInt(u.project_count, 10),
-      messageCount: u.message_count_this_period,
+      creditsUsed: u.credits_used_this_period,
       createdAt: u.created_at,
       provider: u.provider || null,
       providers: u.linked_providers ? u.linked_providers.split(',') : (u.provider ? [u.provider] : []),
@@ -430,10 +423,10 @@ router.get('/admin/users/:userId', requireAdmin, async (req, res) => {
       plan: string
       subscription_status: string
       is_admin: boolean
-      message_count_this_period: number
+      credits_used_this_period: number
       created_at: string
     }>(
-      'SELECT id, email, name, plan, subscription_status, is_admin, message_count_this_period, created_at FROM users WHERE id = $1',
+      'SELECT id, email, name, plan, subscription_status, is_admin, credits_used_this_period, created_at FROM users WHERE id = $1',
       [userId]
     )
 
@@ -493,7 +486,7 @@ router.get('/admin/users/:userId', requireAdmin, async (req, res) => {
         plan: user.plan,
         subscriptionStatus: user.subscription_status,
         isAdmin: user.is_admin,
-        messageCount: user.message_count_this_period,
+        creditsUsed: user.credits_used_this_period,
         createdAt: user.created_at
       },
       projects: projectsResult.rows.map(p => ({

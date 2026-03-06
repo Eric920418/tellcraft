@@ -2,16 +2,9 @@ import { Router, type Router as RouterType } from 'express'
 import { requireAuth, requireActiveSubscription } from '../middleware/auth'
 import * as db from '../db/client'
 import { toVercelSlug, deleteVercelProject } from '../services/deployer'
+import { getProjectLimit } from '../config/plans'
 
 const router: RouterType = Router()
-
-// 方案限制
-const PLAN_PROJECT_LIMITS: Record<string, number> = {
-  free: 1,
-  creator: 5,
-  pro: 20,
-  business: 100,
-}
 
 // ============================================================
 // 專案 API
@@ -206,7 +199,7 @@ router.post('/', requireAuth, requireActiveSubscription, async (req, res) => {
       [userId]
     )
 
-    const limit = PLAN_PROJECT_LIMITS[userPlan] || 1
+    const limit = getProjectLimit(userPlan)
     if (parseInt(count) >= limit) {
       return res.status(403).json({
         error: 'Project limit reached',

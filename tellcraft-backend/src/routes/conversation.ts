@@ -4,6 +4,7 @@ import Redis from 'ioredis'
 import crypto from 'crypto'
 import { requireAuth, optionalAuth } from '../middleware/auth'
 import * as db from '../db/client'
+import { getCreditLimit, isCreditExhausted, CREDIT_LIMIT_ERROR_CODE } from '../config/plans'
 
 const router: RouterType = Router()
 
@@ -25,13 +26,6 @@ export function setRedisClient(redis: Redis) {
 
 const RATE_LIMIT_WINDOW_SECONDS = 5
 const RATE_LIMIT_MAX_REQUESTS = 1
-const PLAN_MESSAGE_LIMITS: Record<string, number> = {
-  free: 50,
-  creator: 200,
-  pro: 1000,
-  business: Infinity,
-}
-const MESSAGE_LIMIT_ERROR_CODE = 'MESSAGE_LIMIT_REACHED'
 
 /**
  * Lua script: INCR + EXPIRE 原子操作
@@ -93,27 +87,27 @@ async function hasGuestCompletedBuild(userId: string): Promise<boolean> {
   return result?.exists ?? false
 }
 
-async function getUserMessageQuotaStatus(userId: string): Promise<{
-  messageCount: number
-  messageLimit: number
+async function getUserCreditQuotaStatus(userId: string): Promise<{
+  creditsUsed: number
+  creditLimit: number
   limitReached: boolean
 } | null> {
   const user = await db.queryOne<{
     plan: string
-    message_count_this_period: number
+    credits_used_this_period: number
   }>(
-    'SELECT plan, message_count_this_period FROM users WHERE id = $1',
+    'SELECT plan, credits_used_this_period FROM users WHERE id = $1',
     [userId]
   )
 
   if (!user) return null
 
-  const messageLimit = PLAN_MESSAGE_LIMITS[user.plan] || 50
-  const messageCount = user.message_count_this_period || 0
+  const creditLimit = getCreditLimit(user.plan)
+  const creditsUsed = user.credits_used_this_period || 0
   return {
-    messageCount,
-    messageLimit,
-    limitReached: messageCount >= messageLimit,
+    creditsUsed,
+    creditLimit,
+    limitReached: isCreditExhausted(user.plan, creditsUsed),
   }
 }
 
@@ -171,14 +165,14 @@ router.post('/:id/message', optionalAuth, async (req, res) => {
       }
     }
 
-    const quota = await getUserMessageQuotaStatus(userId)
+    const quota = await getUserCreditQuotaStatus(userId)
     if (!quota) {
       return res.status(404).json({ error: 'User not found' })
     }
     if (quota.limitReached) {
       return res.status(403).json({
-        error: MESSAGE_LIMIT_ERROR_CODE,
-        message: '已達到本期訊息配額上限',
+        error: CREDIT_LIMIT_ERROR_CODE,
+        message: '已達到本期 Credit 配額上限',
       })
     }
 
@@ -229,11 +223,7 @@ router.post('/:id/message', optionalAuth, async (req, res) => {
     const messages = [...(conversation.messages as unknown[]), newMessage]
     await db.updateConversationMessages(conversationId, messages)
 
-    // 更新用戶消息計數
-    await db.query(
-      'UPDATE users SET message_count_this_period = $1 WHERE id = $2',
-      [quota.messageCount + 1, userId]
-    )
+    // Credit 扣除由 Orchestrator 負責（按操作加權）
 
     // 加入 BullMQ 隊列
     const job = await orchestratorQueue.add('process-message', {
@@ -304,14 +294,14 @@ router.post('/:id/reply', optionalAuth, async (req, res) => {
       }
     }
 
-    const replyQuota = await getUserMessageQuotaStatus(userId)
+    const replyQuota = await getUserCreditQuotaStatus(userId)
     if (!replyQuota) {
       return res.status(404).json({ error: 'User not found' })
     }
     if (replyQuota.limitReached) {
       return res.status(403).json({
-        error: MESSAGE_LIMIT_ERROR_CODE,
-        message: '已達到本期訊息配額上限',
+        error: CREDIT_LIMIT_ERROR_CODE,
+        message: '已達到本期 Credit 配額上限',
       })
     }
 

@@ -29,6 +29,7 @@ import uploadRoutes from './routes/upload'
 import lineBotRoutes from './routes/line-bot'
 import { initLineBotHandler } from './services/line-bot-handler'
 import { cleanupExpiredGuestUsers } from './services/guest-cleanup'
+import { resetExpiredCredits } from './services/credit-reset'
 import { scanAndRecoverStuckFlowStates } from './services/flowstate-recovery'
 import {
   recordSocketConnected,
@@ -474,6 +475,14 @@ async function start() {
   setInterval(() => cleanupExpiredGuestUsers(redis).catch(err => {
     console.error('[訪客清理] 定時清理失敗:', err)
   }), 6 * 60 * 60 * 1000)
+
+  // Credit 月重置：啟動 60 秒後執行一次，之後每 1 小時執行
+  setTimeout(() => resetExpiredCredits().catch(err => {
+    console.error('[Credit Reset] 啟動重置失敗:', err)
+  }), 60 * 1000)
+  setInterval(() => resetExpiredCredits().catch(err => {
+    console.error('[Credit Reset] 定時重置失敗:', err)
+  }), 60 * 60 * 1000)
 
   // 啟動服務器
   server.listen(PORT, '0.0.0.0', () => {

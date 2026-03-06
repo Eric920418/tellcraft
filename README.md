@@ -333,6 +333,47 @@ Server Action 錯誤訊息 + 工具模組中文字串國際化（+117 keys，2 n
 - LLM prompts / Skill instructions i18n
 - Remotion 動畫標籤（需通過 props 傳入 locale）
 
+## Credit 加權配額系統
+
+以 Credit 加權計費取代「每條訊息 +1」，直接反映真實 API 成本。
+
+### 操作成本
+
+| 操作 | Credits | 原因 |
+|------|---------|------|
+| 聊天/釐清/BDD 回答 | 1 | 0-1 Haiku |
+| Design Brief 生成 | 3 | 1-4 Sonnet |
+| Design Variant 生成 | 2 | 1 Sonnet |
+| BDD Formulation | 5 | 2-5 Sonnet |
+| Fast Build 完整管線 | 8 | 3 Sonnet + QG |
+| Normal UIUX 完整管線 | 10 | 3-6 Sonnet + QG |
+| 迭代修改 (refineCode) | 3 | 1 Sonnet (大 context) |
+| 部署 | 2 | 0-7 Sonnet (平均低) |
+
+### 方案配額
+
+| 方案 | Credits/月 | 約等於 |
+|------|-----------|--------|
+| free | 30 | ~3 次 fast-build 或 ~30 次對話 |
+| creator | 150 | ~15 次 fast-build |
+| pro | 800 | ~80 次 fast-build |
+| business | ∞ | 無限 |
+
+### 扣除機制
+
+- **入口扣除**：每條訊息（`handleProcessMessage` / `handleContinueFlow`）扣 1 credit (base)
+- **操作扣除**：重操作完成後額外扣除（例如 Fast Build = 8 total = 1 base + 7 額外）
+- **CAS 原子更新**：`WHERE credits_used + amount <= limit` 防競態超額
+- **失敗仍扣**：LLM 已調用，成本已發生
+- **月重置**：每小時掃描 `subscription_period_start + 1 month <= NOW()` 的用戶，重置為 0
+
+### 核心檔案
+
+- 常數唯一來源：`tellcraft-backend/src/config/plans.ts`
+- 扣除函數：`tellcraft-backend/src/workers/orchestrator-utils.ts` (`deductCredits`)
+- 月重置：`tellcraft-backend/src/services/credit-reset.ts`
+- Migration：`tellcraft-backend/migrations/014_add_credits_system.sql`
+
 ## BullMQ 任務模式
 
 | 功能 | 實現方式 |

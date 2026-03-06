@@ -10,7 +10,7 @@ interface Stats {
   totalProjects: number
   totalConversations: number
   totalDeployments: number
-  messageUsage: {
+  creditUsage: {
     used: number
     limit: number
     plan: string
@@ -105,8 +105,8 @@ export function DashboardContent({
         />
         <StatsCard
           title={t('plan')}
-          value={stats.messageUsage.plan.toUpperCase()}
-          subtitle={t('messageCount', { used: stats.messageUsage.used, limit: stats.messageUsage.limit < 0 ? '∞' : stats.messageUsage.limit })}
+          value={stats.creditUsage.plan.toUpperCase()}
+          subtitle={t('messageCount', { used: stats.creditUsage.used, limit: stats.creditUsage.limit < 0 ? '∞' : stats.creditUsage.limit })}
           icon="◈"
           delay={0.15}
         />
@@ -134,8 +134,8 @@ export function DashboardContent({
           {t('messageQuota')}
         </h2>
         <ProgressBar
-          value={stats.messageUsage.used}
-          max={stats.messageUsage.limit}
+          value={stats.creditUsage.used}
+          max={stats.creditUsage.limit}
           label={t('quotaUsage')}
         />
       </motion.div>

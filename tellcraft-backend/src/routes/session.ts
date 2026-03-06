@@ -56,9 +56,9 @@ router.post('/initialize', optionalAuth, async (req: Request, res: Response) => 
     // 查詢用戶資料
     const user = await queryOne<{
       plan: string
-      message_count_this_period: number
+      credits_used_this_period: number
     }>(
-      'SELECT plan, message_count_this_period FROM users WHERE id = $1',
+      'SELECT plan, credits_used_this_period FROM users WHERE id = $1',
       [userId]
     )
 
@@ -66,7 +66,7 @@ router.post('/initialize', optionalAuth, async (req: Request, res: Response) => 
       return res.status(404).json({ error: '用戶不存在' })
     }
 
-    const { quotaReached } = getMessageQuotaStatus(user.plan, user.message_count_this_period)
+    const quotaReached = isCreditExhausted(user.plan, user.credits_used_this_period)
 
     // 如果指定了 conversationId，嘗試恢復
     if (conversationId && !createNew) {
@@ -94,7 +94,9 @@ router.post('/initialize', optionalAuth, async (req: Request, res: Response) => 
           isNewConversation: false,
           resumed: true,
           readOnly: quotaReached,
-          lockReason: quotaReached ? 'message_limit' : undefined,
+          lockReason: quotaReached ? 'credit_limit' : undefined,
+          creditsUsed: user.credits_used_this_period,
+          creditLimit: getCreditLimit(user.plan),
         })
       }
     }
@@ -118,8 +120,8 @@ router.post('/initialize', optionalAuth, async (req: Request, res: Response) => 
 
       if (!latestConversation) {
         return res.status(403).json({
-          error: MESSAGE_LIMIT_ERROR_CODE,
-          message: '已達到本期訊息配額上限',
+          error: CREDIT_LIMIT_ERROR_CODE,
+          message: '已達到本期 Credit 配額上限',
         })
       }
 
@@ -133,7 +135,9 @@ router.post('/initialize', optionalAuth, async (req: Request, res: Response) => 
         isNewConversation: false,
         resumed: true,
         readOnly: true,
-        lockReason: 'message_limit',
+        lockReason: 'credit_limit',
+        creditsUsed: user.credits_used_this_period,
+        creditLimit: getCreditLimit(user.plan),
       })
     }
 
@@ -157,7 +161,7 @@ router.post('/initialize', optionalAuth, async (req: Request, res: Response) => 
         'SELECT COUNT(*) as count FROM projects WHERE user_id = $1',
         [userId]
       )
-      const projectLimit = PLAN_PROJECT_LIMITS[user.plan] || 1
+      const projectLimit = getProjectLimit(user.plan)
 
       if (parseInt(projectCount?.count || '0', 10) >= projectLimit && !createNew) {
         // 達到限制，複用最近的專案
