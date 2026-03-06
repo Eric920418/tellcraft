@@ -82,28 +82,26 @@ export default function ProjectsPage() {
     }
 
     fetchProjects()
-  }, [page, statusFilter, search, router])
+  }, [page, statusFilter, search, router, refetchFlag])
+
+  const [refetchFlag, setRefetchFlag] = useState(0)
 
   const handleTogglePin = async (project: Project) => {
     const token = getAuthToken()
     if (!token) return
 
-    // 樂觀更新
-    const prevProjects = [...projects]
-    const newPinned = !project.isPinned
-    const updated = projects.map(p =>
-      p.id === project.id ? { ...p, isPinned: newPinned } : p
-    )
-    // 重新排序：置頂在前，置頂內按時間，非置頂按更新時間
-    updated.sort((a, b) => {
-      if (a.isPinned !== b.isPinned) return a.isPinned ? -1 : 1
-      return new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()
-    })
-    setProjects(updated)
-
     const result = await togglePinProject({ projectId: project.id, token })
-    if (!result.success) {
-      setProjects(prevProjects) // 失敗回滾
+    if (result.success) {
+      // 置頂後跳回第 1 頁，取消置頂留在當前頁重新拉資料
+      if (!project.isPinned) {
+        if (page === 1) {
+          setRefetchFlag(f => f + 1)
+        } else {
+          setPage(1)
+        }
+      } else {
+        setRefetchFlag(f => f + 1)
+      }
     }
   }
 

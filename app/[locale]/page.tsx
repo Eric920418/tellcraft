@@ -2654,9 +2654,10 @@ function ChatSection({
               const uiuxStartIndex = messages.findIndex(m =>
                 m.stage?.startsWith('uiux') || m.richContent?.type === 'template_picker'
               )
-              const displayMessages = layoutMode === 'split' && uiuxStartIndex !== -1
+              const displayMessages = (layoutMode === 'split' && uiuxStartIndex !== -1
                 ? messages.slice(uiuxStartIndex)  // 只顯示 UIUX 開始之後的消息
                 : messages
+              ).filter(m => !(m.stage === 'deployer_code_sync' && !m.content?.trim()))
 
               return displayMessages.map((message, index) => {
                 const isRecentMessage = index >= displayMessages.length - 3
