@@ -108,6 +108,8 @@ npx ts-node bdd-spec/scripts/validate-feature.ts spec/features/
 
 **精細模式（Fine）**：BDD 完成 → 模板匹配 → Discovery → Brief 確認 → 5 變體 → Structure → Animation → RWD → QG
 
+**精細模式 + 自動採用**：PRD Clarify 第一題出現「全部自動採用 AI 建議」按鈕 → 自動回答所有 BDD 問題（propose→proposedAnswer / ask→建議選項或 A）→ 自動確認草稿 → 自動回答 Spec Clarify → 進入設計階段（手動）。BDD 互動從 7-11 次降到 1 次。`FlowState.autoAdoptMode` 在 `completeSpecPhase` 末尾清除，`autoAdoptAllPendingQuestions` 有 MAX_ITERATIONS=200 安全閥。
+
 **快速模式（Fast）**：一句話描述 → 規則式推斷（tier/產品類型/配色/佈局） → Structure → Animation → RWD → 靜態 QG
 
 ## BDD Spec 流程
@@ -120,6 +122,7 @@ Phase 1: PRD Discovery + Clarify（多輪動態釐清）
     ↓ 檢查清單掃描：A1-A6（領域模型）、B1-B5（功能模型）、C1-C2（術語一致）、D1-D2（品質）
     ↓ 每輪最多 5 題，每 5 題批量確認（支援反悔），動態上限 3-10 輪 / 15-50 題
     ↓ 三層去重：L1 Bug Fix + L2 Decision Summary(Haiku) + L3 Post-gen Dedup(Haiku)
+    ↓ 可選「全部自動採用 AI 建議」（第一題按鈕，autoAdoptMode while 迴圈自動填答）
 
 Phase 2: Formulation（需求驅動 + 智能分組）
     ↓ 同一實體 CRUD 合併為 1 個 Feature，狀態轉換/跨實體保持獨立

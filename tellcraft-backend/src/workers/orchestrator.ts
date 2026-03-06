@@ -4519,6 +4519,7 @@ async function completeSpecPhase(
   // 更新狀態為等待設計偏好回覆
   state.phase = 'uiux_design_preference'
   state.lastStablePhase = 'uiux_design_preference'
+  state.autoAdoptMode = false  // BDD 完成，設計階段回到手動
   state.waitingForReply = true
   await saveFlowState(redis, conversationId, state)
 
