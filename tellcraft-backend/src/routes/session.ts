@@ -6,33 +6,9 @@ import { Router, Request, Response } from 'express'
 import { query, queryOne } from '../db/client'
 import { requireAuth, optionalAuth } from '../middleware/auth'
 import crypto from 'crypto'
+import { getCreditLimit, getProjectLimit, isCreditExhausted, CREDIT_LIMIT_ERROR_CODE } from '../config/plans'
 
 const router: Router = Router()
-
-// 方案配額限制
-const PLAN_MESSAGE_LIMITS: Record<string, number> = {
-  free: 50,
-  creator: 200,
-  pro: 1000,
-  business: Infinity
-}
-
-const PLAN_PROJECT_LIMITS: Record<string, number> = {
-  free: 1,
-  creator: 1,
-  pro: 3,
-  business: 10
-}
-
-const MESSAGE_LIMIT_ERROR_CODE = 'MESSAGE_LIMIT_REACHED'
-
-function getMessageQuotaStatus(plan: string, messageCount: number): { messageLimit: number; quotaReached: boolean } {
-  const messageLimit = PLAN_MESSAGE_LIMITS[plan] || 50
-  return {
-    messageLimit,
-    quotaReached: messageCount >= messageLimit,
-  }
-}
 
 /**
  * POST /api/session/initialize
@@ -67,8 +43,8 @@ router.post('/initialize', optionalAuth, async (req: Request, res: Response) => 
         // 創建匿名用戶
         userId = crypto.randomUUID()
         await query(
-          `INSERT INTO users (id, email, plan, subscription_status, message_count_this_period)
-           VALUES ($1, $2, 'free', 'active', 0)`,
+          `INSERT INTO users (id, email, plan, subscription_status, credits_used_this_period, message_count_this_period)
+           VALUES ($1, $2, 'free', 'active', 0, 0)`,
           [userId, anonEmail]
         )
         isNewUser = true

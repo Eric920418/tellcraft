@@ -128,16 +128,7 @@ export async function handleTextMessage(
     return
   }
 
-  // 1. 即時回覆確認
-  await messagingClient.replyMessage({
-    replyToken,
-    messages: [{
-      type: 'text',
-      text: '收到！正在處理... \u{26A1}',
-    }],
-  })
-
-  // 2. 找或建對話
+  // 1. 找或建對話（replyToken 不消耗，orchestrator 會透過 pushMessage 回覆）
   const { userId: systemUserId, conversationId, projectId, mode } = await getOrCreateConversation(userId)
 
   // 3. 寫入用戶消息到 DB
@@ -699,12 +690,6 @@ async function buildResumeSummary(
  */
 async function handleQuickReply(userId: string, value: string, replyToken: string): Promise<void> {
   if (!messagingClient || !orchestratorQueue) return
-
-  // 即時回覆確認
-  await messagingClient.replyMessage({
-    replyToken,
-    messages: [{ type: 'text', text: '收到！正在處理...' }],
-  })
 
   const { userId: systemUserId, conversationId, projectId, mode } = await getOrCreateConversation(userId)
 

@@ -11,6 +11,7 @@ import type { GeneratedComponent, DesignSystem, PartialCodeCallback } from '../s
 import { generateTailwindConfig } from '../services/uiux-generation'
 import { sendLineNotifyIfNeeded } from '../services/line-notify'
 import { sendLineFullMessage } from '../services/line-full-push'
+import { getCreditLimit, PLAN_CREDIT_LIMITS } from '../config/plans'
 
 // ============================================================
 // FlowState 存儲
@@ -207,4 +208,68 @@ export function generatedCodeToFileRows(
   }
 
   return rows
+}
+
+// ============================================================
+// Credit 扣除
+// ============================================================
+
+/**
+ * CAS 原子扣除 Credit
+ * - business plan 無上限（仍更新計數供統計）
+ * - 返回 { success, creditsUsed, creditLimit }
+ */
+export async function deductCredits(
+  userId: string,
+  amount: number
+): Promise<{ success: boolean; creditsUsed: number; creditLimit: number }> {
+  // 查詢用戶 plan
+  const user = await db.queryOne<{ plan: string; credits_used_this_period: number }>(
+    'SELECT plan, credits_used_this_period FROM users WHERE id = $1',
+    [userId]
+  )
+
+  if (!user) {
+    return { success: false, creditsUsed: 0, creditLimit: 0 }
+  }
+
+  const creditLimit = getCreditLimit(user.plan)
+
+  // business plan 無上限 — 直接更新計數
+  if (creditLimit === Infinity) {
+    const result = await db.queryOne<{ credits_used_this_period: number }>(
+      `UPDATE users SET credits_used_this_period = credits_used_this_period + $1
+       WHERE id = $2
+       RETURNING credits_used_this_period`,
+      [amount, userId]
+    )
+    return {
+      success: true,
+      creditsUsed: result?.credits_used_this_period ?? 0,
+      creditLimit: -1,
+    }
+  }
+
+  // CAS 原子更新：確保不超額
+  const result = await db.queryOne<{ credits_used_this_period: number }>(
+    `UPDATE users SET credits_used_this_period = credits_used_this_period + $1
+     WHERE id = $2 AND credits_used_this_period + $1 <= $3
+     RETURNING credits_used_this_period`,
+    [amount, userId, creditLimit]
+  )
+
+  if (!result) {
+    // 超額 — 返回當前使用量
+    return {
+      success: false,
+      creditsUsed: user.credits_used_this_period,
+      creditLimit,
+    }
+  }
+
+  return {
+    success: true,
+    creditsUsed: result.credits_used_this_period,
+    creditLimit,
+  }
 }
