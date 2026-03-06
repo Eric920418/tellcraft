@@ -52,17 +52,18 @@ router.get('/stats', requireAuth, async (req, res) => {
       id: string
       name: string
       status: string
+      is_pinned: boolean
       created_at: string
       updated_at: string
       latest_conversation_id: string | null
     }>(
-      `SELECT id, name, status, created_at, updated_at,
+      `SELECT id, name, status, is_pinned, created_at, updated_at,
               (SELECT c2.id FROM conversations c2
                WHERE c2.project_id = projects.id
                ORDER BY c2.updated_at DESC LIMIT 1) as latest_conversation_id
        FROM projects
        WHERE user_id = $1
-       ORDER BY updated_at DESC
+       ORDER BY is_pinned DESC, pinned_at DESC NULLS LAST, updated_at DESC
        LIMIT 5`,
       [userId]
     )
@@ -123,6 +124,7 @@ router.get('/stats', requireAuth, async (req, res) => {
       id: p.id,
       name: p.name,
       status: p.status,
+      isPinned: p.is_pinned,
       conversationCount: convCountMap.get(p.id) || 0,
       latestConversationId: p.latest_conversation_id,
       updatedAt: p.updated_at

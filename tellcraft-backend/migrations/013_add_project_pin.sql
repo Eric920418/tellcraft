@@ -1,0 +1,4 @@
+-- 013: 專案置頂功能
+ALTER TABLE projects ADD COLUMN IF NOT EXISTS is_pinned BOOLEAN NOT NULL DEFAULT FALSE;
+ALTER TABLE projects ADD COLUMN IF NOT EXISTS pinned_at TIMESTAMPTZ DEFAULT NULL;
+CREATE INDEX IF NOT EXISTS idx_projects_pinned ON projects (user_id, is_pinned DESC, pinned_at DESC NULLS LAST) WHERE is_pinned = TRUE;

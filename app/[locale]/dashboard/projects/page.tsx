@@ -5,7 +5,7 @@ import { motion } from 'framer-motion'
 import { Link, useRouter } from '@/i18n/navigation'
 import { useTranslations } from 'next-intl'
 import { DataTable, StatusBadge, SearchInput, type Column } from '@/app/components/dashboard'
-import { getProjects } from '@/app/lib/vps-api'
+import { getProjects, togglePinProject } from '@/app/lib/vps-api'
 import { useLocalePath } from '@/app/hooks/useLocalePath'
 
 // 從 localStorage 獲取 token
@@ -23,6 +23,7 @@ interface Project {
   customDomain: string | null
   conversationCount: number
   latestConversationId: string | null
+  isPinned: boolean
   createdAt: string
   updatedAt: string
 }
@@ -83,12 +84,65 @@ export default function ProjectsPage() {
     fetchProjects()
   }, [page, statusFilter, search, router])
 
+  const handleTogglePin = async (project: Project) => {
+    const token = getAuthToken()
+    if (!token) return
+
+    // 樂觀更新
+    const prevProjects = [...projects]
+    const newPinned = !project.isPinned
+    const updated = projects.map(p =>
+      p.id === project.id ? { ...p, isPinned: newPinned } : p
+    )
+    // 重新排序：置頂在前，置頂內按時間，非置頂按更新時間
+    updated.sort((a, b) => {
+      if (a.isPinned !== b.isPinned) return a.isPinned ? -1 : 1
+      return new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()
+    })
+    setProjects(updated)
+
+    const result = await togglePinProject({ projectId: project.id, token })
+    if (!result.success) {
+      setProjects(prevProjects) // 失敗回滾
+    }
+  }
+
   const getStatusLabel = (status: string) => {
     const key = statusLabelKeys[status]
     return key ? t(key) : status
   }
 
   const columns: Column<Project>[] = [
+    {
+      key: 'pin',
+      header: '',
+      width: '40px',
+      render: (project: Project) => (
+        <button
+          onClick={(e) => {
+            e.stopPropagation()
+            handleTogglePin(project)
+          }}
+          title={project.isPinned ? t('unpinProject') : t('pinProject')}
+          style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            width: 28,
+            height: 28,
+            border: 'none',
+            background: 'transparent',
+            cursor: 'pointer',
+            borderRadius: 4,
+            transition: 'all 0.15s ease',
+          }}
+        >
+          <svg width="14" height="14" viewBox="0 0 24 24" fill={project.isPinned ? '#F59E0B' : 'none'} stroke={project.isPinned ? '#F59E0B' : 'var(--gray-300)'} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M12 2l2.09 6.26L21 9.27l-5 4.87L17.18 21 12 17.27 6.82 21 8 14.14l-5-4.87 6.91-1.01L12 2z" />
+          </svg>
+        </button>
+      ),
+    },
     {
       key: 'name',
       header: t('projectName'),

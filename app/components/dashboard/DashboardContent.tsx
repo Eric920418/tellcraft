@@ -21,6 +21,7 @@ interface Project {
   id: string
   name: string
   status: string
+  isPinned: boolean
   conversationCount: number
   latestConversationId: string | null
   updatedAt: string
@@ -225,7 +226,12 @@ export function DashboardContent({
                   }}
                 >
                   <div>
-                    <div style={{ fontSize: 14, fontWeight: 500, color: 'var(--black)' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 14, fontWeight: 500, color: 'var(--black)' }}>
+                      {project.isPinned && (
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="#F59E0B" stroke="#F59E0B" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                          <path d="M12 2l2.09 6.26L21 9.27l-5 4.87L17.18 21 12 17.27 6.82 21 8 14.14l-5-4.87 6.91-1.01L12 2z" />
+                        </svg>
+                      )}
                       {project.name}
                     </div>
                     <div

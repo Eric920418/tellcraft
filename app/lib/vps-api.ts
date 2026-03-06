@@ -250,6 +250,7 @@ export async function getProjects(input: {
     customDomain: string | null
     conversationCount: number
     latestConversationId: string | null
+    isPinned: boolean
     createdAt: string
     updatedAt: string
   }>
@@ -267,6 +268,21 @@ export async function getProjects(input: {
 
   return apiRequest(`/api/project${query}`, {
     method: 'GET',
+    headers: {
+      Authorization: `Bearer ${input.token}`,
+    },
+  })
+}
+
+/**
+ * 置頂/取消置頂專案
+ */
+export async function togglePinProject(input: {
+  projectId: string
+  token: string
+}): Promise<ApiResponse<{ success: boolean; isPinned: boolean }>> {
+  return apiRequest(`/api/project/${input.projectId}/pin`, {
+    method: 'POST',
     headers: {
       Authorization: `Bearer ${input.token}`,
     },
@@ -336,6 +352,7 @@ export async function getDashboardStats(input: {
     id: string
     name: string
     status: string
+    isPinned: boolean
     conversationCount: number
     latestConversationId: string | null
     updatedAt: string

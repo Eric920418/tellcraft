@@ -69,13 +69,14 @@ router.get('/', requireAuth, async (req, res) => {
       status: string
       vercel_url: string | null
       custom_domain: string | null
+      is_pinned: boolean
       created_at: string
       updated_at: string
       conversation_count: string
       latest_conversation_id: string | null
     }>(
       `SELECT p.id, p.name, p.description, p.status, p.vercel_url, p.custom_domain,
-              p.created_at, p.updated_at,
+              p.is_pinned, p.created_at, p.updated_at,
               COUNT(c.id) as conversation_count,
               (SELECT c2.id FROM conversations c2
                WHERE c2.project_id = p.id
@@ -84,7 +85,7 @@ router.get('/', requireAuth, async (req, res) => {
        LEFT JOIN conversations c ON c.project_id = p.id
        WHERE ${whereClause}
        GROUP BY p.id
-       ORDER BY p.updated_at DESC
+       ORDER BY p.is_pinned DESC, p.pinned_at DESC NULLS LAST, p.updated_at DESC
        LIMIT $${paramIndex} OFFSET $${paramIndex + 1}`,
       [...params, limit, offset]
     )
@@ -99,6 +100,7 @@ router.get('/', requireAuth, async (req, res) => {
         customDomain: p.custom_domain,
         conversationCount: parseInt(p.conversation_count, 10),
         latestConversationId: p.latest_conversation_id,
+        isPinned: p.is_pinned,
         createdAt: p.created_at,
         updatedAt: p.updated_at
       })),
@@ -109,6 +111,39 @@ router.get('/', requireAuth, async (req, res) => {
   } catch (error) {
     console.error('[Project] 取得專案列表失敗:', error)
     res.status(500).json({ error: 'Failed to get projects' })
+  }
+})
+
+/**
+ * POST /api/project/:id/pin
+ * 置頂/取消置頂專案
+ */
+router.post('/:id/pin', requireAuth, async (req, res) => {
+  try {
+    const { id } = req.params
+    const userId = req.user!.id
+
+    // 驗證專案擁有權
+    const project = await db.queryOne<{ user_id: string; is_pinned: boolean }>(
+      'SELECT user_id, is_pinned FROM projects WHERE id = $1',
+      [id]
+    )
+
+    if (!project || project.user_id !== userId) {
+      return res.status(404).json({ error: 'Project not found' })
+    }
+
+    const newPinned = !project.is_pinned
+
+    await db.query(
+      `UPDATE projects SET is_pinned = $1, pinned_at = $2 WHERE id = $3`,
+      [newPinned, newPinned ? new Date().toISOString() : null, id]
+    )
+
+    res.json({ success: true, isPinned: newPinned })
+  } catch (error) {
+    console.error('[Project] 置頂專案失敗:', error)
+    res.status(500).json({ error: 'Failed to toggle pin' })
   }
 })
 
