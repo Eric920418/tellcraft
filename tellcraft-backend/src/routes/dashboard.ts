@@ -6,7 +6,7 @@ import { Router, Request, Response } from 'express'
 import { execSync } from 'child_process'
 import { query, queryOne } from '../db/client'
 import { requireAuth, requireAdmin } from '../middleware/auth'
-import { parseLogLine, sanitizeLogLine, type ParsedLogLine } from '../utils/log-parser'
+import { parseLogLine, sanitizeLogLine, isNoiseLine, type ParsedLogLine } from '../utils/log-parser'
 import type Redis from 'ioredis'
 
 const router: Router = Router()
@@ -905,10 +905,13 @@ router.get('/admin/logs', requireAdmin, async (req: Request, res: Response) => {
     // 按時間排序
     allLines.sort((a, b) => a.timestamp.localeCompare(b.timestamp))
 
+    // 過濾噪音日誌（Socket 連接/斷開等）
+    const meaningful = allLines.filter(l => !isNoiseLine(l))
+
     // since 過濾（只返回時間戳 > since 的行）
     const afterSince = since
-      ? allLines.filter(l => l.timestamp > since)
-      : allLines
+      ? meaningful.filter(l => l.timestamp > since)
+      : meaningful
 
     // 搜尋過濾
     const filtered = search

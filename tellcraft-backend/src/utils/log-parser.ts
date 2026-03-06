@@ -46,6 +46,21 @@ export function parseLogLine(raw: string, source: 'out' | 'error'): ParsedLogLin
   return { id, timestamp, tag, message, level, source, raw }
 }
 
+// 噪音日誌 pattern（高頻低價值，預設過濾）
+const NOISE_PATTERNS = [
+  /^\[Socket\]\s*(連接|斷開):/,
+  /^\[Socket\]\s*\S+\s*(訂閱對話|取消訂閱|訂閱 admin logs|取消訂閱 admin logs)/,
+]
+
+/**
+ * 判斷是否為噪音日誌（預設過濾）
+ */
+export function isNoiseLine(line: ParsedLogLine): boolean {
+  if (!line.tag) return false
+  const full = `${line.tag} ${line.message}`
+  return NOISE_PATTERNS.some(p => p.test(full))
+}
+
 // 敏感資訊 regex 列表
 const SENSITIVE_PATTERNS = [
   /Bearer\s+[A-Za-z0-9\-._~+/]+=*/g,
