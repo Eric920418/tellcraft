@@ -50,6 +50,7 @@ export function parseLogLine(raw: string, source: 'out' | 'error'): ParsedLogLin
 const NOISE_PATTERNS = [
   /^\[Socket\]\s*(連接|斷開):/,
   /^\[Socket\]\s*\S+\s*(訂閱對話|取消訂閱|訂閱 admin logs|取消訂閱 admin logs)/,
+  /^\[callClaude\]\s*streaming chunk #\d+/,
 ]
 
 /**
