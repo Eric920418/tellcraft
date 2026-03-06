@@ -3,9 +3,11 @@ import { Pool, PoolClient, QueryResult, QueryResultRow } from 'pg'
 // 連接池
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
-  max: parseInt(process.env.DB_POOL_MAX || '50', 10),
-  idleTimeoutMillis: 60000,
+  max: parseInt(process.env.DB_POOL_MAX || '15', 10),
+  idleTimeoutMillis: 30000,
   connectionTimeoutMillis: 5000,
+  keepAlive: true,
+  keepAliveInitialDelayMillis: 10000,
 })
 
 // 監聯連接錯誤

@@ -989,7 +989,8 @@ export function ensureResponsiveClasses(
   components: GeneratedComponent[]
 ): { pages: GeneratedComponent[]; components: GeneratedComponent[] } {
   const allContent = [...pages, ...components].map(c => c.content).join('\n')
-  if (/\b(sm|md|lg|xl):/.test(allContent)) return { pages, components }
+  const responsiveCount = (allContent.match(/\b(sm|md|lg|xl):/g) || []).length
+  if (responsiveCount >= 3) return { pages, components }
 
   console.log('[ensureResponsiveClasses] No responsive classes detected, injecting basic responsive patterns')
 
@@ -2657,10 +2658,10 @@ ${currentBrief.signature ? `- Signature Element：${currentBrief.signature}` : '
     }
 
     const brief: DesignBrief = {
-      styleSummary: parsed.styleSummary,
-      colorDirection: parsed.colorDirection,
-      layoutSuggestion: parsed.layoutSuggestion,
-      referenceAnalysis: parsed.referenceAnalysis,
+      styleSummary: parsed.styleSummary || currentBrief.styleSummary,
+      colorDirection: parsed.colorDirection || currentBrief.colorDirection,
+      layoutSuggestion: parsed.layoutSuggestion || currentBrief.layoutSuggestion,
+      referenceAnalysis: parsed.referenceAnalysis || currentBrief.referenceAnalysis,
       professionalRecommendations: parsed.professionalRecommendations || [],
       sourceType: currentBrief.sourceType,
       recommendedTier,

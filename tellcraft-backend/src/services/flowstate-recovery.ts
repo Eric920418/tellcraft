@@ -25,6 +25,7 @@ const PRD_DISCOVERY_TIMEOUT_MS = 5 * 60 * 1000
 const FAST_BUILD_TIMEOUT_MS = 20 * 60 * 1000
 const ITERATION_TIMEOUT_MS = 5 * 60 * 1000
 const CODE_GENERATION_TIMEOUT_MS = 20 * 60 * 1000
+const QUALITY_GATE_TIMEOUT_MS = 10 * 60 * 1000
 const DEPLOYER_TIMEOUT_MS = 10 * 60 * 1000
 
 // 需要掃描的 phase → 超時閾值
@@ -33,7 +34,7 @@ const RECOVERABLE_PHASES: Record<string, number> = {
   fast_generating: FAST_BUILD_TIMEOUT_MS,
   uiux_iterating: ITERATION_TIMEOUT_MS,
   uiux_code_generation: CODE_GENERATION_TIMEOUT_MS,
-  uiux_quality_gate: CODE_GENERATION_TIMEOUT_MS,
+  uiux_quality_gate: QUALITY_GATE_TIMEOUT_MS,
   deployer_deploying: DEPLOYER_TIMEOUT_MS,
 }
 

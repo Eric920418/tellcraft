@@ -621,6 +621,19 @@ Fast mode 入口新增客服問答層，解決 LINE 用戶非建站輸入（問�
 - **刪除 `isGreetingOrChitchat()`**：邏輯搬入 `detectFastModeIntent()`，新增 question/help 分類
 - **stage `customer_service`**：LINE 正常推送（不在 SKIP_STAGES 中）
 
+### UIUX Skill 全面修復（2026-03-07）
+
+修復 2 個 Critical、3 個 High、4 個 Medium 問題。
+
+- **C1 前端 richContent 渲染缺失**：`variant_picker`/`quality_gate_report`/`deploy_result`/`deployment_history` 四個 richContent type 後端有發送但前端未渲染。新增 4 個 dynamic import + 4 個渲染分支（`page.tsx`）
+- **C2 deployer 異常路徑返回原始代碼**：`verifyBuildLocally` catch 區塊使用初始 `code`/`extraDependencies` 而非修復後的 `currentCode`/`currentExtraDeps`，部署時丟失所有 LLM 修復
+- **H1 handleVariantSelection 早期 return 無反饋**：缺 sessionId/BDD Session 時靜默 return，用戶永遠不知道發生什麼。新增錯誤提示 + `__new_project__` quickReply + `deleteFlowState`
+- **H2 proceedToVariantGeneration Path B 無降級**：Path B 變體生成失敗只顯示錯誤，改為降級回模板選擇。同時修復兩個缺 sessionId 的 early return
+- **H3 adjustDesignBrief 丟失欄位**：`styleSummary`/`colorDirection`/`layoutSuggestion`/`referenceAnalysis` 缺 fallback，LLM 未返回時欄位為 undefined 覆蓋原值
+- **M1 handleCodePhaseRedo 死代碼**：移除不可能觸發的 `case 'rwd'`（RWD 完成後 phase 直接設為 `quality_gate`）
+- **M2 uiux_quality_gate 超時**：從 20 分鐘降至 10 分鐘（QG 通常秒級完成，新增獨立 `QUALITY_GATE_TIMEOUT_MS` 常數）
+- **M3 ensureResponsiveClasses 冪等性**：單個 responsive class 就跳過整體注入，改為 ≥3 個才視為已處理
+
 ### 修復 LINE 完成對話問候語混亂引導（2026-03-06）
 
 修復 LINE 用戶在專案完成後發送「嗨」等問候語，收到「請描述您想要修改的內容」迭代引導的問題。

@@ -4872,12 +4872,24 @@ async function handleVariantSelection(
   // 取得 BDD Session
   if (!state.sessionId) {
     console.error('[Orchestrator] 缺少 sessionId')
+    await sendMessage(conversationId, io, {
+      content: '設計資訊已過期，請重新開始一個新對話。',
+      stage: 'error',
+      quickReplies: [{ label: '開始新專案', value: '__new_project__', style: 'primary' }],
+    })
+    await deleteFlowState(redis, conversationId)
     return
   }
 
   const session = await getBddSession({ sessionId: state.sessionId })
   if (!session.success || !session.data) {
     console.error('[Orchestrator] 無法取得 BDD Session')
+    await sendMessage(conversationId, io, {
+      content: '無法取得設計資料，請重新開始。',
+      stage: 'error',
+      quickReplies: [{ label: '開始新專案', value: '__new_project__', style: 'primary' }],
+    })
+    await deleteFlowState(redis, conversationId)
     return
   }
 
@@ -6049,8 +6061,6 @@ async function handleCodePhaseRedo(
   // 恢復上一階段的代碼快照，確保 redo 是在乾淨的基礎上重做
   if (uiuxCodePhase === 'animation' && state.uiuxStructureCode) {
     state.uiuxGeneratedCode = state.uiuxStructureCode
-  } else if (uiuxCodePhase === 'rwd' && state.uiuxAnimationCode) {
-    state.uiuxGeneratedCode = state.uiuxAnimationCode
   }
 
   switch (uiuxCodePhase) {
@@ -6059,9 +6069,6 @@ async function handleCodePhaseRedo(
       break
     case 'animation':
       await executeCodePhaseAnimation(conversationId, state, redis, io)
-      break
-    case 'rwd':
-      await executeCodePhaseRwd(conversationId, state, redis, io)
       break
     default:
       await sendMessage(conversationId, io, {
@@ -6765,12 +6772,24 @@ async function proceedToVariantGeneration(
   // 取得 BDD Session
   if (!state.sessionId) {
     console.error('[Orchestrator] proceedToVariantGeneration: 缺少 sessionId')
+    await sendMessage(conversationId, io, {
+      content: '設計資訊已過期，請重新開始。',
+      stage: 'error',
+      quickReplies: [{ label: '開始新專案', value: '__new_project__', style: 'primary' }],
+    })
+    await deleteFlowState(redis, conversationId)
     return
   }
 
   const session = await getBddSession({ sessionId: state.sessionId })
   if (!session.success || !session.data) {
     console.error('[Orchestrator] proceedToVariantGeneration: 無法取得 BDD Session')
+    await sendMessage(conversationId, io, {
+      content: '無法取得設計資料，請重新開始。',
+      stage: 'error',
+      quickReplies: [{ label: '開始新專案', value: '__new_project__', style: 'primary' }],
+    })
+    await deleteFlowState(redis, conversationId)
     return
   }
 
@@ -6818,11 +6837,12 @@ async function proceedToVariantGeneration(
       })
       await showTemplatePicker(conversationId, state, redis, io)
     } else {
-      // Path B：顯示錯誤
+      // Path B：降級回模板選擇
       await sendMessage(conversationId, io, {
-        content: `生成設計變體時發生錯誤：${variantsResult.error}。請稍後再試。`,
+        content: '生成設計方案時發生錯誤。讓我們重新選擇模板。',
         stage: 'error',
       })
+      await showTemplatePicker(conversationId, state, redis, io)
     }
     return
   }

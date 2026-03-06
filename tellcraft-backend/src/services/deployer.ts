@@ -2314,10 +2314,10 @@ async function verifyBuildLocally(
     console.error('[Deployer] verifyBuildLocally 異常:', err)
     fixes.push(`構建驗證異常：${err instanceof Error ? err.message : String(err)}`)
     return {
-      files: wrapInNextJsWithIgnoreErrors(code, projectName, tailwindConfig, extraDependencies, injectedFiles),
+      files: wrapInNextJsWithIgnoreErrors(currentCode, projectName, tailwindConfig, currentExtraDeps, injectedFiles),
       buildVerified: false,
       fixes,
-      finalCode: code,
+      finalCode: currentCode,
     }
   } finally {
     if (slotAcquired) releaseDeploySlot()

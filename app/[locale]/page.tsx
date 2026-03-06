@@ -46,9 +46,26 @@ const FastBuildPlayer = dynamic(
   () => import('@/app/components/FastBuildPlayer'),
   { ssr: false, loading: () => null }
 )
+const VariantPicker = dynamic(
+  () => import('@/app/components/uiux/VariantPicker'),
+  { ssr: false }
+)
+const QualityGateReport = dynamic(
+  () => import('@/app/components/uiux/QualityGateReport'),
+  { ssr: false }
+)
+const DeployResult = dynamic(
+  () => import('@/app/components/deployer/DeployResult'),
+  { ssr: false }
+)
+const DeploymentHistory = dynamic(
+  () => import('@/app/components/deployer/DeploymentHistory'),
+  { ssr: false }
+)
 import { BuildingPlayer } from '@/app/components/building-scene'
 import { getTemplateById } from '@/app/actions/templates'
 import type { Template } from '@/app/lib/templates'
+import type { DesignVariant } from '@/app/components/uiux/VariantPicker'
 
 // ============ Types ============
 interface Message {
@@ -2846,6 +2863,61 @@ function ChatSection({
                             initialTemplates={message.richContent?.data?.templates as import('../lib/templates').TemplateCardData[] | undefined}
                             columns={layoutMode === 'split' ? 1 : 2}
                             showCategories={!message.richContent?.data?.filteredMode}
+                          />
+                        </motion.div>
+                      )}
+
+                      {/* 設計變體選擇器 */}
+                      {message.richContent?.type === 'variant_picker' && (
+                        <motion.div
+                          initial={{ opacity: 0, y: 10 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          transition={{ delay: 0.2 }}
+                          style={{ marginTop: 16, width: '100%' }}
+                        >
+                          <VariantPicker
+                            variants={(message.richContent.data as { variants: DesignVariant[] }).variants}
+                            onSelect={(ids: string[]) => handleSendMessage(ids.length === 1 ? `選擇 ${ids[0]}` : `合併 ${ids.join('+')}`)}
+                            selectedIds={(message.richContent.data as { selectedIds?: string[] }).selectedIds}
+                          />
+                        </motion.div>
+                      )}
+
+                      {/* 品質檢查報告 */}
+                      {message.richContent?.type === 'quality_gate_report' && (
+                        <motion.div
+                          initial={{ opacity: 0, y: 10 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          transition={{ delay: 0.2 }}
+                          style={{ marginTop: 16, width: '100%' }}
+                        >
+                          <QualityGateReport report={message.richContent.data as { passed: boolean; timestamp: string; summary: { total: number; critical: number; warning: number; info: number; autoFixed: number }; categories: { a11y: { passed: boolean; issues: { id: string; category: string; severity: 'critical' | 'warning' | 'info'; rule: string; message: string; file: string; line?: number; suggestion?: string }[] }; performance: { passed: boolean; issues: { id: string; category: string; severity: 'critical' | 'warning' | 'info'; rule: string; message: string; file: string; line?: number; suggestion?: string }[] }; code_quality: { passed: boolean; issues: { id: string; category: string; severity: 'critical' | 'warning' | 'info'; rule: string; message: string; file: string; line?: number; suggestion?: string }[] } } }} />
+                        </motion.div>
+                      )}
+
+                      {/* 部署結果 */}
+                      {message.richContent?.type === 'deploy_result' && (
+                        <motion.div
+                          initial={{ opacity: 0, y: 10 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          transition={{ delay: 0.2 }}
+                          style={{ marginTop: 16, width: '100%' }}
+                        >
+                          <DeployResult data={message.richContent.data as { success?: boolean; deploymentUrl?: string; error?: string }} />
+                        </motion.div>
+                      )}
+
+                      {/* 部署歷史（回滾選擇） */}
+                      {message.richContent?.type === 'deployment_history' && (
+                        <motion.div
+                          initial={{ opacity: 0, y: 10 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          transition={{ delay: 0.2 }}
+                          style={{ marginTop: 16, width: '100%' }}
+                        >
+                          <DeploymentHistory
+                            data={message.richContent.data as { deployments?: { index: number; id: string; vercelDeploymentId: string; url: string; createdAt: string; isCurrent: boolean }[] }}
+                            onSendMessage={handleSendMessage}
                           />
                         </motion.div>
                       )}

@@ -292,7 +292,7 @@ ${existingQuestions ? `---
 請審查以上 Feature Files，找出需要與用戶確認的品質問題。`
 
   console.log('[SpecDiscovery] 開始審查 Feature Files...')
-  let response = await callClaude(systemPrompt, userMessage, { maxTokens: 8192 })
+  let response = await callClaude(systemPrompt, userMessage, { maxTokens: 12288 })
 
   if (!response.success) {
     return { success: false, error: response.error }
