@@ -615,6 +615,7 @@
     "deleteItemDeployments": "{count} 個部署歷史",
     "deleting": "刪除中...",
     "confirmDelete": "確認刪除",
+    "deleteConfirmNameLabel": "請輸入專案名稱「{name}」以確認刪除",
     "generationsLabel": "生成",
     "createdDate": "創建日期",
     "loginFirst": "請先登入",

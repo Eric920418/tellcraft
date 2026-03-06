@@ -615,6 +615,7 @@
     "deleteItemDeployments": "{count} deployments",
     "deleting": "Deleting...",
     "confirmDelete": "Confirm Delete",
+    "deleteConfirmNameLabel": "Type \"{name}\" to confirm deletion",
     "generationsLabel": "Generations",
     "createdDate": "Created",
     "loginFirst": "Please log in first",

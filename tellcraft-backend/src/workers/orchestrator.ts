@@ -189,6 +189,66 @@ function hasRollbackSpecIntent(msg: string): boolean {
   return keywords.some(k => msg.includes(k))
 }
 
+interface GreetingCheck {
+  match: boolean
+  type: 'greeting' | 'chitchat' | 'acknowledgment' | null
+}
+
+function isGreetingOrChitchat(msg: string): GreetingCheck {
+  const trimmed = msg.trim()
+  const lower = trimmed.toLowerCase()
+
+  // 問候語（精確匹配）
+  const greetings = [
+    /^(嗨|你好|哈囉|嘿|哈嘍)$/,
+    /^(hello|hi|hey|yo|sup|howdy)$/i,
+    /^(早安|午安|晚安)$/,
+    /^(good morning|good afternoon|good evening|good night)$/i,
+  ]
+  if (greetings.some(r => r.test(trimmed))) {
+    return { match: true, type: 'greeting' }
+  }
+
+  // 確認/致謝（精確匹配）
+  const acknowledgments = [
+    /^(好|好的|收到|了解|知道了|嗯|喔|哦|是的|對|沒問題)$/,
+    /^(謝謝|感謝|3q)$/,
+    /^(ok|okay|sure|yep|yup|yeah|yes|no|nope|nah|alright|right|got it|noted|understood|roger)$/i,
+    /^(thanks|thank you|thx|ty|cheers)$/i,
+    /^(nice|cool|great|awesome|good|perfect|sweet|neat|wonderful|amazing|excellent|fantastic|brilliant|lovely|wow)$/i,
+    /^(lol|lmao|rofl|heh|hehe|haha|hahaha|lmfao)$/i,
+  ]
+  if (acknowledgments.some(r => r.test(trimmed))) {
+    return { match: true, type: 'acknowledgment' }
+  }
+
+  // 閒聊
+  const chitchatZh = [
+    '天氣', '幾點', '你是誰', '你叫什麼', '講笑話', '說笑話', '幾歲',
+    '吃什麼', '吃飯', '掰掰', '再見',
+    '無聊', '好無聊', '你好嗎', '在嗎', '在不在',
+  ]
+  const chitchatEn = [
+    'weather', 'what time', 'who are you', 'what are you', 'tell me a joke',
+    'how old', 'what\'s your name', 'goodbye', 'bye bye', 'see you', 'see ya',
+    'i\'m bored', 'bored', 'how are you', 'what\'s up', 'wassup',
+    'are you there', 'anyone there', 'what can you do', 'who made you',
+  ]
+  const laughPattern = /^[哈呵嘻哼嗯啊喔]{2,}$/
+  const laughPatternEn = /^(ha){2,}h?$/i
+  if (
+    chitchatZh.some(k => trimmed.includes(k))
+    || chitchatEn.some(k => lower.includes(k))
+    || laughPattern.test(trimmed)
+    || laughPatternEn.test(trimmed)
+    || /^bye$/i.test(trimmed)
+  ) {
+    return { match: true, type: 'chitchat' }
+  }
+
+  return { match: false, type: null }
+}
+
 // ============================================================
 // 迭代輸入預驗證（零 LLM 成本）
 // ⚠️ 僅用於 Fast Mode 入口（L487）的初步過濾。
@@ -961,6 +1021,20 @@ async function handleContinueFlow(
     return
   }
 
+  if (trimmedMsg === '__new_project__') {
+    // 清除流程狀態 + LINE 映射，讓下次消息建新專案
+    await deleteFlowState(redis, conversationId)
+    await db.deleteLineActiveConversationByConversationId(conversationId)
+    const isChinese = /[\u4e00-\u9fff]/.test(message) || state.locale === 'zh'
+    await sendMessage(conversationId, io, {
+      content: isChinese
+        ? '好的！請描述您想做的新產品，我來幫您實現。'
+        : 'Sure! Describe the new product you\'d like to build, and I\'ll help you create it.',
+      stage: 'info',
+    })
+    return
+  }
+
   // ── Phase-aware 品質閘門 ──
   const qualityStrictness = getPhaseStrictness(state.phase)
   if (qualityStrictness !== 'skip') {
@@ -1072,6 +1146,22 @@ async function handleContinueFlow(
       })
       return
     }
+    // 問候/閒聊攔截 — 在 semanticGateway 前，給出友善上下文引導
+    const greetCheck0 = isGreetingOrChitchat(trimmed)
+    if (greetCheck0.match) {
+      const isChinese = /[\u4e00-\u9fff]/.test(trimmed) || state.locale === 'zh'
+      await sendMessage(conversationId, io, {
+        content: isChinese
+          ? '嗨！部署之前遇到了問題。您可以：\n- 描述修改需求來調整設計\n- 點擊「重試部署」重新部署\n- 點擊「開始新專案」重新開始'
+          : 'Hi! The deployment ran into an issue. You can:\n- Describe changes to adjust the design\n- Click "Retry Deploy" to try again\n- Click "New Project" to start fresh',
+        stage: 'info',
+        quickReplies: [
+          { label: isChinese ? '重試部署' : 'Retry Deploy', value: '重試', style: 'primary' as const },
+          { label: isChinese ? '開始新專案' : 'New Project', value: '__new_project__', style: 'ghost' as const },
+        ],
+      })
+      return
+    }
     // 其他訊息 → semanticGateway 判斷是否為有效修改請求
     const gwResult0 = await semanticGateway({
       phase: 'iteration',
@@ -1126,6 +1216,12 @@ async function handleContinueFlow(
 
   // Draft Batch 草稿審閱
   if (state.phase === 'formulation_draft_review') {
+    // autoAdopt 模式下自動確認草稿
+    if (state.autoAdoptMode) {
+      await autoAdoptPostFormulation(conversationId, state, redis, io)
+      return
+    }
+
     const trimmed = message.trim()
     const isConfirm = trimmed === '確認' || trimmed.includes('確認') || trimmed.includes('繼續') || trimmed === 'Y' || trimmed === 'y'
 
@@ -1634,6 +1730,22 @@ async function handleContinueFlow(
       await executeRollbackQuery({ conversationId, projectId: data.projectId, redis, io })
       return
     }
+    // 問候/閒聊攔截 — 在 semanticGateway 前，給出友善上下文引導
+    const greetCheck1 = isGreetingOrChitchat(trimmed)
+    if (greetCheck1.match) {
+      const isChinese = /[\u4e00-\u9fff]/.test(trimmed) || state.locale === 'zh'
+      await sendMessage(conversationId, io, {
+        content: isChinese
+          ? '嗨！您的網站已經部署上線了。您可以：\n- 描述修改需求來調整設計\n- 點擊「部署上線」更新網站\n- 點擊「開始新專案」重新開始'
+          : 'Hi! Your site is live. You can:\n- Describe changes to adjust the design\n- Click "Deploy" to update the site\n- Click "New Project" to start fresh',
+        stage: 'info',
+        quickReplies: [
+          { label: isChinese ? '部署上線' : 'Deploy', value: '部署', style: 'primary' as const },
+          { label: isChinese ? '開始新專案' : 'New Project', value: '__new_project__', style: 'ghost' as const },
+        ],
+      })
+      return
+    }
     // 其他訊息 → semanticGateway 判斷是否為有效修改請求
     const gwResult1 = await semanticGateway({
       phase: 'iteration',
@@ -1903,6 +2015,23 @@ async function handleContinueFlow(
       }
       if (hasUndoIntent(trimmed)) {
         await executeUndoIteration({ conversationId, projectId: data.projectId, redis, io })
+        return
+      }
+
+      // 問候/閒聊攔截 — 在 semanticGateway 前，給出友善上下文引導
+      const greetCheck2 = isGreetingOrChitchat(trimmed)
+      if (greetCheck2.match) {
+        const isChinese = /[\u4e00-\u9fff]/.test(trimmed) || state.locale === 'zh'
+        await sendMessage(conversationId, io, {
+          content: isChinese
+            ? '嗨！您的設計已經完成了。您可以：\n- 描述修改需求來調整設計\n- 點擊「部署上線」發布網站\n- 點擊「開始新專案」重新開始'
+            : 'Hi! Your design is ready. You can:\n- Describe changes to adjust the design\n- Click "Deploy" to publish your site\n- Click "New Project" to start fresh',
+          stage: 'info',
+          quickReplies: [
+            { label: isChinese ? '部署上線' : 'Deploy', value: '部署', style: 'primary' as const },
+            { label: isChinese ? '開始新專案' : 'New Project', value: '__new_project__', style: 'ghost' as const },
+          ],
+        })
         return
       }
 
@@ -2489,6 +2618,28 @@ async function processUserReply(input: ProcessReplyInput) {
 
   const userMessage = message.trim()
 
+  // 自動採用 AI 建議
+  if (userMessage === '__auto_adopt_all__') {
+    state.autoAdoptMode = true
+    await saveFlowState(redis, conversationId, state)
+    await sendMessage(conversationId, io, {
+      content: '已啟動自動模式！AI 將自動採用最佳建議完成所有釐清問題...',
+      stage: 'auto_adopt_progress',
+    })
+    try {
+      await autoAdoptAllPendingQuestions(conversationId, state, redis, io)
+    } catch (err) {
+      console.error('[AutoAdopt] 自動模式異常，降級手動:', err)
+      state.autoAdoptMode = false
+      await saveFlowState(redis, conversationId, state)
+      await sendMessage(conversationId, io, {
+        content: `自動模式遇到錯誤，已切回手動模式。請繼續回答問題。`,
+        stage: 'error',
+      })
+    }
+    return
+  }
+
   // 處理特殊指令
   if (userMessage === '跳過' || userMessage.toLowerCase() === 'skip') {
     // 跳過當前問題
@@ -2754,6 +2905,267 @@ async function processUserReply(input: ProcessReplyInput) {
 // 輔助函數
 // ============================================================
 
+// ============================================================
+// 自動採用 AI 建議
+// ============================================================
+
+/**
+ * 從 ClarifyItem 自動推斷最佳答案
+ * propose 模式 → proposedAnswer
+ * ask 模式 → 找「（建議）」選項，沒有就選 A
+ * 沒有選項也沒有 proposedAnswer → 跳過
+ */
+function autoAdoptAnswer(item: ClarifyItem): string {
+  if (item.mode === 'propose' && item.proposedAnswer) {
+    return item.proposedAnswer
+  }
+  if (item.options && item.options.length > 0) {
+    const opts = item.options.map(opt =>
+      typeof opt === 'string' ? opt : (opt.description || opt.label || '')
+    )
+    const idx = opts.findIndex(o => o.includes('（建議）'))
+    return String.fromCharCode(65 + (idx >= 0 ? idx : 0))
+  }
+  return '__skip__'
+}
+
+/**
+ * 自動回答所有 BDD 問題直到釐清完成
+ * 處理 prd_clarify 和 spec_clarify 兩種 phase
+ * 安全閥：MAX_ITERATIONS = 200
+ */
+async function autoAdoptAllPendingQuestions(
+  conversationId: string,
+  state: FlowState,
+  redis: Redis,
+  io: SocketIOServer
+) {
+  const MAX_ITERATIONS = 200
+  let iteration = 0
+
+  while (iteration < MAX_ITERATIONS) {
+    iteration++
+
+    const session = await getBddSession({ sessionId: state.sessionId! })
+    if (!session.success || !session.data) {
+      console.error('[AutoAdopt] 無法取得 BDD Session，中止自動模式')
+      state.autoAdoptMode = false
+      await saveFlowState(redis, conversationId, state)
+      break
+    }
+
+    const pending = session.data.clarifyItems.filter((i: ClarifyItem) => i.status === 'pending')
+
+    if (pending.length === 0) {
+      // 本輪問完 → confirmBatch
+      if (session.data.stagingItems.length > 0) {
+        await confirmBatch({ sessionId: state.sessionId! })
+      }
+      state.batchCount = 0
+
+      // ── spec_clarify：委託 completeSpecClarifyPhase 修復 + 判斷是否再跑一輪 ──
+      if (state.phase === 'spec_clarify') {
+        await completeSpecClarifyPhase(conversationId, state, redis, io)
+        // completeSpecClarifyPhase 可能又進入 spec_clarify（新一輪問題）
+        if (state.phase === 'spec_clarify' && state.autoAdoptMode) {
+          continue
+        }
+        return // 已到 uiux_design_preference 或其他終態
+      }
+
+      // ── prd_clarify：檢查終止條件，生成下一輪 ──
+      const resolvedItems = session.data.resolvedItems || []
+      const pendingClarifyItems = session.data.clarifyItems || []
+      const allExistingItems = [...resolvedItems, ...pendingClarifyItems]
+      const totalAnswered = resolvedItems.length
+
+      const limits = getDiscoveryLimits(state)
+      if (state.currentRound >= limits.MAX_ROUNDS || totalAnswered >= limits.MAX_TOTAL_QUESTIONS) {
+        console.log(`[AutoAdopt] 達到終止條件 (輪數: ${state.currentRound}/${limits.MAX_ROUNDS}, 問題數: ${totalAnswered}/${limits.MAX_TOTAL_QUESTIONS})`)
+        await finishClarifyAndStartFormulation(conversationId, state, redis, io)
+        await autoAdoptPostFormulation(conversationId, state, redis, io)
+        return
+      }
+
+      // 生成下一輪問題（複製 completeClärifyPhase 核心邏輯）
+      console.log(`[AutoAdopt] 開始第 ${state.currentRound + 1} 輪 PRD Discovery`)
+      await sendMessage(conversationId, io, {
+        content: `自動釐清中... 第 ${state.currentRound + 1} 輪`,
+        stage: 'auto_adopt_progress',
+      })
+
+      const originalRequirements = session.data.originalRequirements || ''
+      const decisionSummary = resolvedItems.length >= 5
+        ? await generateDecisionSummary(resolvedItems, { conversationId })
+        : null
+
+      if (resolvedItems.length >= 5 && !state.partialSpecContext) {
+        const partialContext = await generatePartialSpecContext(
+          originalRequirements, resolvedItems, { conversationId }
+        )
+        if (partialContext) {
+          state.partialSpecContext = partialContext
+        }
+      }
+
+      const esDocumentContent = session.data.esDocumentContent || undefined
+      const discoveryResult = await runPrdDiscovery(
+        originalRequirements, { conversationId },
+        allExistingItems, decisionSummary, esDocumentContent,
+        state.partialSpecContext
+      )
+
+      let newItems = discoveryResult.items || []
+      if (newItems.length > 0 && allExistingItems.length > 0) {
+        newItems = await deduplicateQuestions(newItems, allExistingItems, { conversationId })
+      }
+
+      if (!discoveryResult.success || newItems.length === 0) {
+        state.consecutiveEmptyRounds = (state.consecutiveEmptyRounds || 0) + 1
+        if (state.consecutiveEmptyRounds >= 2) {
+          console.log(`[AutoAdopt] 連續 ${state.consecutiveEmptyRounds} 輪無新問題，進入 Formulation`)
+          await finishClarifyAndStartFormulation(conversationId, state, redis, io)
+          await autoAdoptPostFormulation(conversationId, state, redis, io)
+          return
+        }
+        state.currentRound++
+        await saveFlowState(redis, conversationId, state)
+        continue
+      }
+
+      // 有新問題
+      state.consecutiveEmptyRounds = 0
+      await addClarifyItems({ sessionId: state.sessionId!, items: newItems })
+      state.currentRound++
+      state.totalQuestionsAsked += newItems.length
+      state.batchCount = 0
+      await saveFlowState(redis, conversationId, state)
+      continue
+    }
+
+    // ── 回答第一個 pending item ──
+    const item = pending[0]
+    const answer = autoAdoptAnswer(item)
+
+    if (answer === '__skip__') {
+      await updateBddSession({
+        sessionId: session.data.id,
+        updates: {
+          clarifyItems: session.data.clarifyItems.filter((i: ClarifyItem) => i.id !== item.id),
+          resolvedItems: [...session.data.resolvedItems, { ...item, status: 'skipped' as const }],
+        },
+      })
+    } else if (item.mode === 'propose' && item.proposedAnswer) {
+      await answerClarifyItem({
+        sessionId: session.data.id,
+        itemId: item.id,
+        answer: item.proposedAnswer,
+      })
+    } else {
+      const optIndex = answer.charCodeAt(0) - 65
+      const opts = (item.options || []).map(opt =>
+        typeof opt === 'string' ? opt : (opt.description || opt.label || '')
+      )
+      const actualAnswer = opts[optIndex] || answer
+      await answerClarifyItem({
+        sessionId: session.data.id,
+        itemId: item.id,
+        answer: actualAnswer,
+      })
+    }
+
+    state.questionIndex = (state.questionIndex || 0) + 1
+    state.batchCount = (state.batchCount || 0) + 1
+
+    // 每 5 題發進度消息
+    if (iteration % 5 === 0) {
+      const totalDone = session.data.resolvedItems.length + session.data.stagingItems.length + 1
+      await sendMessage(conversationId, io, {
+        content: `自動採用 AI 建議中... 已完成 ${totalDone} 題`,
+        stage: 'auto_adopt_progress',
+      })
+    }
+
+    await saveFlowState(redis, conversationId, state)
+  }
+
+  if (iteration >= MAX_ITERATIONS) {
+    console.error(`[AutoAdopt] 達到安全閥上限 ${MAX_ITERATIONS}，中止`)
+    state.autoAdoptMode = false
+    await saveFlowState(redis, conversationId, state)
+    await sendMessage(conversationId, io, {
+      content: '自動模式已超過安全上限，已切回手動模式。請繼續回答問題。',
+      stage: 'info',
+    })
+  }
+}
+
+/**
+ * autoAdopt 完成 PRD Clarify 後，處理後續 Formulation → Spec Discovery → Spec Clarify
+ * finishClarifyAndStartFormulation 同步執行完畢後，state.phase 可能是：
+ * - formulation_draft_review（草稿需確認）
+ * - spec_clarify（Spec Discovery 發現問題）
+ * - uiux_design_preference（全部完成）
+ * - spec_clarify（Formulation 失敗，回退）
+ */
+async function autoAdoptPostFormulation(
+  conversationId: string,
+  state: FlowState,
+  redis: Redis,
+  io: SocketIOServer
+) {
+  if (!state.autoAdoptMode) return
+
+  // 草稿審閱 → 自動確認
+  if (state.phase === 'formulation_draft_review') {
+    await sendMessage(conversationId, io, {
+      content: '自動確認規格草稿...',
+      stage: 'auto_adopt_progress',
+    })
+
+    const session = await getBddSession({ sessionId: state.sessionId! })
+    if (!session.success || !session.data) {
+      state.autoAdoptMode = false
+      await saveFlowState(redis, conversationId, state)
+      return
+    }
+
+    const features = (session.data.featuresContent || []).map(
+      (f: { name: string; actionName?: string; content: string }) => ({
+        name: f.name,
+        actionName: f.actionName || '',
+        content: f.content,
+      })
+    )
+    const schemaSql = session.data.schemaSqlContent || ''
+    const entityMapping = session.data.entityMappingContent || ''
+
+    state.phase = 'spec_discovery'
+    state.formulationDraftUncertainItems = undefined
+    await saveFlowState(redis, conversationId, state)
+
+    await sendMessage(conversationId, io, {
+      content: '草稿已確認！正在進行品質檢查...',
+      stage: 'formulation_complete',
+    })
+    await startSpecDiscovery(conversationId, state, features, schemaSql, entityMapping, redis, io)
+
+    // startSpecDiscovery 後 state.phase 可能是 spec_clarify 或 uiux_design_preference
+    if (state.phase === 'spec_clarify' && state.autoAdoptMode) {
+      await autoAdoptAllPendingQuestions(conversationId, state, redis, io)
+    }
+    return
+  }
+
+  // Spec Clarify → 自動回答
+  if (state.phase === 'spec_clarify' && state.waitingForReply) {
+    await autoAdoptAllPendingQuestions(conversationId, state, redis, io)
+    return
+  }
+
+  // 其他情況（uiux_design_preference 等）→ autoAdoptMode 已在 completeSpecPhase 中清除
+}
+
 async function sendClarifyQuestion(
   conversationId: string,
   io: SocketIOServer,
@@ -2783,6 +3195,11 @@ async function sendClarifyQuestion(
       { label: '同意', value: '__accept_proposal__', style: 'primary' },
       { label: '不同意', value: '__reject_proposal__', style: 'ghost' },
     ]
+
+    // 第一輪第一題顯示「全部自動採用」按鈕
+    if (globalProgress?.answered === 0 && globalProgress?.round === 1) {
+      quickReplies.push({ label: '全部自動採用 AI 建議', value: '__auto_adopt_all__', style: 'secondary' })
+    }
 
     // 計算建築進度
     const buildingProgress = globalProgress ? {
@@ -2844,6 +3261,11 @@ async function sendClarifyQuestion(
       const isProposal = optStr.includes('（建議）')
       quickReplies.push({ label, value: letter, style: isProposal ? 'primary' : 'ghost' })
     })
+  }
+
+  // 第一輪第一題顯示「全部自動採用」按鈕
+  if (globalProgress?.answered === 0 && globalProgress?.round === 1) {
+    quickReplies.push({ label: '全部自動採用 AI 建議', value: '__auto_adopt_all__', style: 'secondary' })
   }
 
   // 計算建築進度（用於 3D 蓋房子動畫）

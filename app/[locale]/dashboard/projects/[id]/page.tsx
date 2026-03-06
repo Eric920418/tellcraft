@@ -79,6 +79,7 @@ export default function ProjectDetailPage() {
   const [isIterating, setIsIterating] = useState(false)
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
   const [isDeleting, setIsDeleting] = useState(false)
+  const [deleteConfirmName, setDeleteConfirmName] = useState('')
 
   const getStatusLabel = (status: string) => {
     const key = statusLabelKeys[status]
@@ -561,7 +562,7 @@ export default function ProjectDetailPage() {
           {t('deleteProjectWarning')}
         </p>
         <button
-          onClick={() => setShowDeleteConfirm(true)}
+          onClick={() => { setShowDeleteConfirm(true); setDeleteConfirmName('') }}
           style={{
             padding: '10px 20px',
             fontSize: 14,
@@ -600,7 +601,7 @@ export default function ProjectDetailPage() {
             justifyContent: 'center',
             zIndex: 1000,
           }}
-          onClick={() => !isDeleting && setShowDeleteConfirm(false)}
+          onClick={() => { if (!isDeleting) { setShowDeleteConfirm(false); setDeleteConfirmName('') } }}
         >
           <motion.div
             initial={{ opacity: 0, scale: 0.95 }}
@@ -625,9 +626,30 @@ export default function ProjectDetailPage() {
               <li>{t('deleteItemGenerations', { count: generations.length })}</li>
               <li>{t('deleteItemDeployments', { count: deployments.length })}</li>
             </ul>
+            <div style={{ marginBottom: 24 }}>
+              <p style={{ fontSize: 13, color: 'var(--gray-500)', marginBottom: 8 }}>
+                {t('deleteConfirmNameLabel', { name: project.name })}
+              </p>
+              <input
+                type="text"
+                value={deleteConfirmName}
+                onChange={(e) => setDeleteConfirmName(e.target.value)}
+                placeholder={project.name}
+                autoFocus
+                style={{
+                  width: '100%',
+                  padding: '8px 12px',
+                  fontSize: 14,
+                  border: '1px solid var(--border-color)',
+                  outline: 'none',
+                  fontFamily: 'var(--font-mono)',
+                  boxSizing: 'border-box',
+                }}
+              />
+            </div>
             <div style={{ display: 'flex', gap: 12, justifyContent: 'flex-end' }}>
               <button
-                onClick={() => setShowDeleteConfirm(false)}
+                onClick={() => { setShowDeleteConfirm(false); setDeleteConfirmName('') }}
                 disabled={isDeleting}
                 style={{
                   padding: '10px 20px',
@@ -642,7 +664,7 @@ export default function ProjectDetailPage() {
               </button>
               <button
                 onClick={handleDeleteProject}
-                disabled={isDeleting}
+                disabled={isDeleting || deleteConfirmName !== project.name}
                 style={{
                   padding: '10px 20px',
                   fontSize: 14,
@@ -650,7 +672,8 @@ export default function ProjectDetailPage() {
                   background: isDeleting ? '#F87171' : '#DC2626',
                   color: 'white',
                   border: 'none',
-                  cursor: isDeleting ? 'not-allowed' : 'pointer',
+                  cursor: (isDeleting || deleteConfirmName !== project.name) ? 'not-allowed' : 'pointer',
+                  opacity: deleteConfirmName !== project.name ? 0.4 : 1,
                 }}
               >
                 {isDeleting ? t('deleting') : t('confirmDelete')}

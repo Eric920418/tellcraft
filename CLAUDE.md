@@ -263,8 +263,9 @@ Layer 5: sanitizeCodeForDeploy 修復 7 — useSearchParams Suspense boundary �
 - **Tailwind v4**：用 `@import "tailwindcss"`，不是 v3 的 `@tailwind`
 - **Tailwind config 禁止 CSS 變數引用**：`generateTailwindConfig()` 必須用硬編碼值（`'9999px'` 非 `'var(--radius-full)'`），否則部署後 CSS 變數可能遺失導致樣式失效
 - **`app/components/templates/` 已廢棄**，PreviewPanel 用 Sandpack 渲染
-- **deployer_complete 路由順序**：先檢查「部署」→ 再檢查「回滾」→ `semanticGateway({ phase: 'iteration' })` 預驗證 → 最後才是迭代修改
-- **迭代輸入三層防禦**：`prefilterMessage()`（全域）→ `semanticGateway({ phase: 'iteration' })`（Sonnet 語義審核，quickFilter 零 LLM 短路 ~80%）→ `refineCode [NO_CHANGE]`（LLM 兜底）。`isDesignFeedback()` 僅用於 fast mode 入口
+- **deployer_complete 路由順序**：先檢查「部署」→ 再檢查「回滾」→ `isGreetingOrChitchat` 問候攔截 → `semanticGateway({ phase: 'iteration' })` 預驗證 → 最後才是迭代修改
+- **complete/failed 問候攔截**：`uiux_complete`/`deployer_complete`/`deployer_failed` 三處 `semanticGateway` 前插入 `isGreetingOrChitchat()` 零 LLM 攔截，回覆友善上下文引導 + quickReplies。`__new_project__` 在 `handleContinueFlow` 入口處理（清 FlowState + LINE 映射）
+- **迭代輸入三層防禦**：`prefilterMessage()`（全域）→ `isGreetingOrChitchat()`（問候攔截）→ `semanticGateway({ phase: 'iteration' })`（Sonnet 語義審核，quickFilter 零 LLM 短路 ~80%）→ `refineCode [NO_CHANGE]`（LLM 兜底）。`isDesignFeedback()` 僅用於 fast mode 入口
 - **`checkBuildRelevance` fail-closed**：API 錯誤/空回應/JSON 解析/catch 全部降級拒絕（不是放行），保留無 API key 時的 fail-open
 - **輸入品質閘門（Universal Input Quality Gate）**：`prefilterMessage()` 內 `checkInputQuality()` 全域攔截亂碼/髒話/垃圾 + `handleContinueFlow` phase-aware 二次攔截（`getPhaseStrictness()` 映射 strict/normal/lenient/skip）+ `analyzeAnswerRelevance` 前置檢查。Redis anti-loop `quality_reject:{conversationId}` 連續 3 次強制放行防卡死
 - **參考網站分析（`reference-analyzer.ts`）**：puppeteer-core 需要系統 Chromium（`/usr/bin/chromium-browser`），VPS 須 `apt install chromium-browser`。截圖 JPEG 75 quality、15s timeout、buffer 不存 FlowState（只存文字分析結果）。SSRF 防護禁 localhost/內網 IP

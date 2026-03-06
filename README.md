@@ -544,6 +544,16 @@ psql "$DATABASE_URL" -f tellcraft-backend/migrations/xxx.sql
 <details>
 <summary><h2>開發更新紀錄（點擊展開）</h2></summary>
 
+### 修復 LINE 完成對話問候語混亂引導（2026-03-06）
+
+修復 LINE 用戶在專案完成後發送「嗨」等問候語，收到「請描述您想要修改的內容」迭代引導的問題。
+
+- **根因**：`line_active_conversations` 映射在專案完成後不清除 → 問候語路由到舊對話 → `semanticGateway` 拒絕 → 回覆迭代引導
+- **`isGreetingOrChitchat()`**（orchestrator.ts）：零 LLM 問候/閒聊/致謝偵測（精確正則匹配），在 `semanticGateway` 前攔截
+- **三處攔截**：`uiux_complete`、`deployer_complete`、`deployer_failed` 的 `semanticGateway` 調用前插入，攔截後回覆友善上下文引導 + quickReplies（部署/新專案）
+- **`__new_project__`**：`handleContinueFlow` 新增特殊值處理，清除 FlowState + LINE 映射 → 下次消息建新專案
+- **`deleteLineActiveConversationByConversationId()`**（db/client.ts）：按 conversation_id 刪除 LINE 映射（Web 用戶幂等無害）
+
 ### 修復 Semantic Gateway 全面失效（2026-03-05）
 
 修復客戶在 BDD 釐清和設計問卷階段所有正常回答都被拒絕的問題（「要後台管理系統」→「系統暫時無法處理您的回答」）。

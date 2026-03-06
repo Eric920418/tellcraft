@@ -532,6 +532,16 @@ export async function deleteLineActiveConversation(lineUserId: string) {
 }
 
 /**
+ * 透過 conversation_id 刪除 LINE 活躍對話映射（用於「開始新專案」清除舊映射）
+ */
+export async function deleteLineActiveConversationByConversationId(conversationId: string) {
+  return query(
+    'DELETE FROM line_active_conversations WHERE conversation_id = $1',
+    [conversationId]
+  )
+}
+
+/**
  * 透過 LINE userId 查找系統用戶
  */
 export async function findUserByLineId(lineUserId: string): Promise<{ id: string; email: string; name: string | null } | null> {
