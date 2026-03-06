@@ -55,6 +55,7 @@ export default function ProjectsPage() {
   const [search, setSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState<string>('')
 
+  const [refetchFlag, setRefetchFlag] = useState(0)
   const pageSize = 10
 
   useEffect(() => {
@@ -84,7 +85,6 @@ export default function ProjectsPage() {
     fetchProjects()
   }, [page, statusFilter, search, router, refetchFlag])
 
-  const [refetchFlag, setRefetchFlag] = useState(0)
 
   const handleTogglePin = async (project: Project) => {
     const token = getAuthToken()

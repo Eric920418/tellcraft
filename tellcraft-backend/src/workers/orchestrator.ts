@@ -3019,10 +3019,13 @@ async function processUserReply(input: ProcessReplyInput) {
       const validation = validateAnswer(currentItem, userMessage)
 
       if (!validation.valid) {
+        // 重新發送帶 quickReplies 的問題（避免按鈕消失）
         await sendMessage(conversationId, io, {
           content: `⚠️ ${validation.errorMessage}\n\n請重新回答上面的問題。`,
           stage: 'clarify_question',
         })
+        await sendClarifyQuestion(conversationId, io, currentItem, state.questionIndex,
+          session.clarifyItems.length + session.stagingItems.length + session.resolvedItems.length)
         return
       }
 
