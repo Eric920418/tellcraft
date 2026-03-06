@@ -31,6 +31,7 @@ const navItems: NavItem[] = [
   { href: '/dashboard/admin/users', labelKey: 'adminUsers', icon: '○', adminOnly: true },
   { href: '/dashboard/admin/usage', labelKey: 'adminUsage', icon: '◈', adminOnly: true },
   { href: '/dashboard/admin/templates', labelKey: 'adminTemplates', icon: '◫', adminOnly: true },
+  { href: '/dashboard/admin/logs', labelKey: 'adminLogs', icon: '▤', adminOnly: true },
 ]
 
 export default function Sidebar({ isAdmin = false, user, className = '' }: SidebarProps) {

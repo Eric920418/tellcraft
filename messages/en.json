@@ -387,6 +387,7 @@
     "adminUsers": "User Management",
     "adminUsage": "LLM Usage",
     "adminTemplates": "Template Management",
+    "adminLogs": "System Logs",
     "adminSection": "Admin",
     "dashboard": "Dashboard",
     "admin": "Admin Panel",
@@ -511,6 +512,23 @@
       "preview": "Preview",
       "closePreview": "Close",
       "previewTitle": "{name} Preview"
+    },
+    "logs": {
+      "title": "System Logs",
+      "subtitle": "Real-time VPS backend log monitoring",
+      "connected": "Connected",
+      "disconnected": "Disconnected",
+      "sourceAll": "All",
+      "sourceOut": "Stdout",
+      "sourceError": "Stderr",
+      "searchPlaceholder": "Search logs...",
+      "pause": "Pause",
+      "resume": "Resume",
+      "clear": "Clear",
+      "linesCount": "lines",
+      "noLogs": "No logs available",
+      "scrollToBottom": "↓ Scroll to bottom",
+      "pausedHint": "Live streaming paused, new logs will appear when resumed"
     },
     "account": {
       "title": "Account Settings",

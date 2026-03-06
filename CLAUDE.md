@@ -77,6 +77,7 @@ pm2 describe tellcraft-backend            # 詳細資訊（記憶體/重啟次�
 | **Deployer** | `services/deployer.ts` | sanitize → build 驗證 → Vercel 部署 → 回滾 |
 | **Iteration Skill** | `services/iteration-skill.ts` | 迭代修改 + 撤銷 + 版本回滾（從 orchestrator 抽出） |
 | **Fast Build** | `services/fast-build-generation.ts` | 快速模式輔助：tier 偵測、產品推斷、默認 DesignSystem（零 LLM） |
+| **Reference Analyzer** | `services/reference-analyzer.ts` | 參考網站真實分析：URL→截圖(puppeteer-core)→Haiku Vision→設計風格分析，三層降級 |
 | **Template Matcher** | `services/template-matcher.ts` | 三層評分智能匹配（關鍵詞 40 + Category 30 + UISpec 30，零 LLM） |
 | **LINE Notify** | `services/line-notify.ts` | LINE 推播通知（stage 白名單過濾，fire-and-forget） |
 | **LINE Bot Handler** | `services/line-bot-handler.ts` | LINE Bot 業務邏輯（Follow/Text/Postback 處理） |
@@ -134,9 +135,10 @@ BDD 完成 → matchTemplates()（零 LLM，三層評分）
   ├─ 有匹配 → "討論式設計 / 使用模板(N個推薦)"
   └─ 無匹配 → "開始設計"（不顯示模板按鈕）
 Discovery（Path A 問卷 / Path B 篩選後模板）
-  → Design Brief 確認（AI 顧問 + Design Tier 推薦，最多 3 輪）
+  → completeDesignClarify：analyzeReference()（URL→截圖→Haiku Vision，快取 FlowState.uiuxReferenceAnalysis）
+  → Design Brief 確認（AI 顧問 + Design Tier 推薦 + 真實參考分析注入，最多 3 輪）
   → BDD→UI 翻譯（Haiku，快取在 FlowState.uiuxUISpec）
-  → 5 變體生成 + 用戶選擇 → extractVariantConcept()
+  → 5 變體生成（+ 參考分析注入）+ 用戶選擇 → extractVariantConcept()
   → Implementation: generateStructure(+Interaction) → generateAnimations() → generateRwd()
   → Quality Gate 自動觸發
   → 迭代修改（refineCode）↔ 部署（deployer）↔ 回滾
@@ -265,6 +267,7 @@ Layer 5: sanitizeCodeForDeploy 修復 7 — useSearchParams Suspense boundary �
 - **迭代輸入三層防禦**：`prefilterMessage()`（全域）→ `semanticGateway({ phase: 'iteration' })`（Sonnet 語義審核，quickFilter 零 LLM 短路 ~80%）→ `refineCode [NO_CHANGE]`（LLM 兜底）。`isDesignFeedback()` 僅用於 fast mode 入口
 - **`checkBuildRelevance` fail-closed**：API 錯誤/空回應/JSON 解析/catch 全部降級拒絕（不是放行），保留無 API key 時的 fail-open
 - **輸入品質閘門（Universal Input Quality Gate）**：`prefilterMessage()` 內 `checkInputQuality()` 全域攔截亂碼/髒話/垃圾 + `handleContinueFlow` phase-aware 二次攔截（`getPhaseStrictness()` 映射 strict/normal/lenient/skip）+ `analyzeAnswerRelevance` 前置檢查。Redis anti-loop `quality_reject:{conversationId}` 連續 3 次強制放行防卡死
+- **參考網站分析（`reference-analyzer.ts`）**：puppeteer-core 需要系統 Chromium（`/usr/bin/chromium-browser`），VPS 須 `apt install chromium-browser`。截圖 JPEG 75 quality、15s timeout、buffer 不存 FlowState（只存文字分析結果）。SSRF 防護禁 localhost/內網 IP
 - **文檔與實作同步**：改後端流程 → 同步更新 `uiux-skill/instructions/` + 此文件
 - **`handleCodePhaseRedo` 需要快照**：`uiuxStructureCode`/`uiuxAnimationCode`，否則 redo 在已修改代碼上重做
 - **`verifyBuildLocally` 的修復結果必須同步回 DB**：否則預覽和部署代碼分岔

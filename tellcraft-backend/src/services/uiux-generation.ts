@@ -1609,6 +1609,19 @@ ${variantConcept.signatureElement ? `Signature Element：${variantConcept.signat
     ? `## 用戶設計偏好\n${designIdeas.map(i => `- ${i.step}：${i.answer}`).join('\n')}\n`
     : ''
 
+  // 參考網站真實分析
+  const refAnalysis = productContext?.referenceAnalysis
+  const referenceSection = refAnalysis?.visionAnalysis
+    ? `## 參考網站設計分析（真實數據 — 指導風格方向）
+URL: ${refAnalysis.url}
+${refAnalysis.metadata?.title ? `網站: ${refAnalysis.metadata.title}` : ''}
+
+${refAnalysis.visionAnalysis}
+
+參考這些設計特徵但不照搬。提取設計精神，融入本產品的獨特定位。
+`
+    : ''
+
   const briefSection = brief
     ? `## 設計方向（AI 設計顧問確認）
 - 風格：${brief.styleSummary}
@@ -1708,6 +1721,7 @@ ${sections.join('\n\n')}
 ${conceptSection}
 ${productSection}
 ${designSection}
+${referenceSection}
 ${briefSection}
 ${overridesSection}
 ${templateStyleSection}

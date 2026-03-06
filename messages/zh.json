@@ -387,6 +387,7 @@
     "adminUsers": "用戶管理",
     "adminUsage": "LLM 用量",
     "adminTemplates": "模板管理",
+    "adminLogs": "系統日誌",
     "adminSection": "管理員",
     "dashboard": "儀表板",
     "admin": "管理後台",
@@ -511,6 +512,23 @@
       "preview": "預覽",
       "closePreview": "關閉",
       "previewTitle": "{name} 預覽"
+    },
+    "logs": {
+      "title": "系統日誌",
+      "subtitle": "即時 VPS 後端日誌監控",
+      "connected": "已連線",
+      "disconnected": "已斷線",
+      "sourceAll": "全部",
+      "sourceOut": "標準輸出",
+      "sourceError": "錯誤日誌",
+      "searchPlaceholder": "搜尋日誌...",
+      "pause": "暫停",
+      "resume": "繼續",
+      "clear": "清空",
+      "linesCount": "行",
+      "noLogs": "暫無日誌",
+      "scrollToBottom": "↓ 回到底部",
+      "pausedHint": "即時串流已暫停，新日誌將在繼續後顯示"
     },
     "account": {
       "title": "帳號設定",

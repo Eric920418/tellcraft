@@ -251,6 +251,7 @@ Dashboard 帳號設定 → /api/auth/link/google（從 cookie 讀 JWT → 提取
 /dashboard/admin/users/[id]         # 用戶詳情
 /dashboard/admin/usage              # LLM 用量統計
 /dashboard/admin/conversations/[id] # 對話檢視器（唯讀）
+/dashboard/admin/logs               # 系統日誌（即時 VPS 日誌監控）
 ```
 
 權限：Middleware 攔截未登入 `/dashboard` + 非管理員 `/dashboard/admin`，Server Actions `requireAdmin()` 二次驗證。
@@ -351,7 +352,7 @@ Server Action 錯誤訊息 + 工具模組中文字串國際化（+117 keys，2 n
 | **預覽** | Sandpack 真實 React 渲染、串流增量更新、裝置切換、編輯模式、圖片上傳 |
 | **動畫** | BDD 需求藍圖面板（即時 Q&A 歷史視覺化）、3D 工廠流水線（Fast Build）、Remotion 驅動 |
 | **認證** | Google/LINE OAuth、JWT 雙軌（localStorage + Cookie）、訪客→帳號合併、帳號綁定（雙登入）、auth 頁面 i18n（next-intl） |
-| **儀表板** | 用戶統計、專案管理、版本歷史、管理員面板、LLM 用量追蹤、Dashboard 元件 i18n（next-intl） |
+| **儀表板** | 用戶統計、專案管理、版本歷史、管理員面板、LLM 用量追蹤、即時系統日誌監控（Socket.io tail -F）、Dashboard 元件 i18n（next-intl） |
 | **i18n** | next-intl 多語系（zh/en）、UI 元件全量翻譯、Server Action 錯誤訊息 i18n（getTranslations）、lib 模組英文化、error code 機制、883 keys / 29 namespaces |
 | **防護** | 三層防刷（前端冷卻 + API 限速 + Worker 鎖）、八層輸入防禦（含 Content Policy 語義審查 + Universal Input Quality Gate 亂碼/髒話/垃圾規則式攔截 + 設計問卷驗證）+ 違規冷卻升級（3→60s / 6→5min / 10→30min）、LLM 自動重試、Guest 限制（Fast Only + 一次使用 + 登入推薦） |
 | **通知** | LINE 推播通知（BDD 完成/UIUX 生成完成/部署成功失敗），離線用戶也能收到 |
@@ -379,6 +380,7 @@ app/
 │   └── sandpack-utils.ts # Sandpack 預覽工具
 ├── hooks/
 │   ├── useAuth.ts        # JWT 認證
+│   ├── useAdminLogs.ts   # 管理員日誌串流 (Socket.io)
 │   ├── useLocalePath.ts  # locale-aware window.location.href
 │   └── useVpsWebSocket.ts # WebSocket
 ├── components/
@@ -426,6 +428,7 @@ tellcraft-backend/
 │   │   ├── change-management.ts  # 需求變更管理
 │   │   └── conversation-lock.ts  # 對話互斥鎖
 │   ├── utils/
+│   │   ├── log-parser.ts        # 日誌解析 + 敏感資訊遮罩（dashboard + Socket.io 共用）
 │   │   ├── safe-parse-json.ts   # LLM JSON 安全解析（四層防禦，全後端共用）
 │   │   └── is-confirmation.ts   # 確認語意偵測（三層：否定詞排除 → 短詞精確 → 長片語 includes）
 │   ├── routes/                   # API 路由（conversation/project/session/bdd/templates/operations/auth/health/upload/line-bot）
