@@ -10,6 +10,8 @@ const sockets = [];
 let connected = 0;
 let connectErrors = 0;
 let disconnects = 0;
+let currentConnected = 0;
+let maxConnected = 0;
 const connectErrorReasons = new Map();
 
 function delay(ms) {
@@ -33,6 +35,10 @@ function createSocket(i) {
 
     socket.on('connect', () => {
       connected += 1;
+      currentConnected += 1;
+      if (currentConnected > maxConnected) {
+        maxConnected = currentConnected;
+      }
       if (!settled) {
         settled = true;
         resolve();
@@ -51,6 +57,9 @@ function createSocket(i) {
 
     socket.on('disconnect', () => {
       disconnects += 1;
+      if (currentConnected > 0) {
+        currentConnected -= 1;
+      }
     });
 
     sockets.push(socket);
@@ -105,6 +114,7 @@ async function main() {
     target,
     totalAttempted: total,
     connected,
+    maxConnected,
     aliveBeforeClose,
     connectErrors,
     disconnects,
