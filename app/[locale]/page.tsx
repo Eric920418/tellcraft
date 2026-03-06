@@ -57,7 +57,7 @@ interface Message {
   content: string
   timestamp: Date
   stage?: 'init' | 'init_progress' | 'discovery' | 'clarify' | 'prd_discovery_complete' | 'formulation_start' | 'formulation_progress' | 'formulation' | 'uiux' | 'uiux_template_picker' | 'generating' | 'deploying' | 'complete' | 'prefilter_rejected' | 'meta_response'
-    | 'fast_generating' | 'fast_need_more_info'
+    | 'fast_generating'
     | 'es_init' | 'es_explore'
     | 'prd_discovery_analyzing' | 'prd_discovery_generating' | 'prd_discovery_deduping'
     | 'info' | 'error'
@@ -846,9 +846,6 @@ function HeroSection({
                   }}
                 >
                   {tHero('modeFine')}
-                  {!isAuthenticated && (
-                    <span style={{ marginLeft: 4, fontSize: 10, opacity: 0.6 }}>&#128274;</span>
-                  )}
                 </button>
               </div>
               <span style={{ fontSize: 12, color: isFastModeShortWarning ? 'var(--amber-500, #f59e0b)' : 'var(--gray-400)', flex: 1, textAlign: 'center', transition: 'color 0.2s ease' }}>
@@ -1131,6 +1128,10 @@ function ChatSection({
   // Fast Build chunk 計數（用於 FastBuildProgress 子進度更新）
   const [fastBuildChunks, setFastBuildChunks] = useState(0)
 
+  // Mobile Preview Modal
+  const [showMobilePreview, setShowMobilePreview] = useState(false)
+  const [mobilePreviewDevice, setMobilePreviewDevice] = useState<DeviceType>('mobile')
+
   // Code Preview 編輯模式狀態
   const [codePreviewEditMode, setCodePreviewEditMode] = useState(false)
   const [codePreviewSelectedElements, setCodePreviewSelectedElements] = useState<ElementInfo[]>([])
@@ -1139,6 +1140,10 @@ function ChatSection({
   const [codePreviewOverrides, setCodePreviewOverrides] = useState<Record<string, Record<string, string>>>({})
   const [codePreviewAnnotations, setCodePreviewAnnotations] = useState<Record<string, string>>({})
   const [codePreviewOverrideHistory, setCodePreviewOverrideHistory] = useState<Record<string, Record<string, string>>[]>([{}])
+
+  // 聊天附圖
+  const [attachedImages, setAttachedImages] = useState<{ file: File; previewUrl: string }[]>([])
+  const chatImageInputRef = useRef<HTMLInputElement>(null)
   const [codePreviewHistoryIndex, setCodePreviewHistoryIndex] = useState(0)
   const codePreviewSeqRef = useRef(0)
   const [codePreviewPendingUpdate, setCodePreviewPendingUpdate] = useState<{ elementId: string; changes: Record<string, string> } | null>(null)
@@ -2195,6 +2200,31 @@ function ChatSection({
   const isGuestLocked = guestBuildCompleted && !sessionInfo?.isAuthenticated
   const isReadOnlyMode = isGuestLocked || quotaReadOnly
 
+  const handleAttachImage = useCallback((files: FileList | null) => {
+    if (!files) return
+    const MAX_ATTACHED = 3
+    const ACCEPTED_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'image/gif']
+    const MAX_SIZE = 5 * 1024 * 1024
+
+    for (let i = 0; i < files.length; i++) {
+      const file = files[i]
+      if (!ACCEPTED_TYPES.includes(file.type)) continue
+      if (file.size > MAX_SIZE) continue
+      setAttachedImages(prev => {
+        if (prev.length >= MAX_ATTACHED) return prev
+        return [...prev, { file, previewUrl: URL.createObjectURL(file) }]
+      })
+    }
+  }, [])
+
+  const handleRemoveAttachedImage = useCallback((index: number) => {
+    setAttachedImages(prev => {
+      const removed = prev[index]
+      if (removed) URL.revokeObjectURL(removed.previewUrl)
+      return prev.filter((_, i) => i !== index)
+    })
+  }, [])
+
   const handleSend = async () => {
     if (!sessionInfo || !input.trim() || isTyping || sendCooldown) return
 
@@ -2217,6 +2247,12 @@ function ChatSection({
     }
 
     startSendCooldown()
+
+    // 收集附圖（先保存引用再清空 state）
+    const pendingImages = [...attachedImages]
+    if (pendingImages.length > 0) {
+      setAttachedImages([])
+    }
 
     let content = input.trim()
     setInput('')
@@ -2269,6 +2305,31 @@ function ChatSection({
       scrollToBottom()
     })
 
+    // 上傳附圖取得 URLs
+    let imageUrls: string[] | undefined
+    if (pendingImages.length > 0) {
+      const token = getAuthToken()
+      if (token) {
+        const urls: string[] = []
+        for (const img of pendingImages) {
+          try {
+            const uploadResult = await uploadImage({ file: img.file, token })
+            if (uploadResult.success && uploadResult.data?.url) {
+              urls.push(uploadResult.data.url)
+            }
+          } catch {
+            // 上傳失敗忽略，繼續送出文字
+          } finally {
+            URL.revokeObjectURL(img.previewUrl)
+          }
+        }
+        if (urls.length > 0) imageUrls = urls
+      } else {
+        // 無 token 時清理 previewUrls
+        for (const img of pendingImages) URL.revokeObjectURL(img.previewUrl)
+      }
+    }
+
     // 判斷是首次消息還是多輪對話回覆
     const token = getAuthToken()
     let result
@@ -2280,7 +2341,8 @@ function ChatSection({
         taskId: sessionInfo.currentTaskId,
         message: content,
         locale,
-        token: token || undefined
+        token: token || undefined,
+        imageUrls,
       })
     } else {
       result = await vpsSendMessage({
@@ -2289,7 +2351,8 @@ function ChatSection({
         projectId: sessionInfo.projectId,
         userId: sessionInfo.userId,
         locale,
-        token: token || undefined
+        token: token || undefined,
+        imageUrls,
       })
     }
 
@@ -2703,11 +2766,19 @@ function ChatSection({
                                 <span style={{ fontSize: 12, color: 'var(--gray-500)' }}>
                                   {message.progress?.step || (message.stage === 'init_progress' ? tChat('analyzingProgress') : tChat('formulationProgress'))}
                                 </span>
-                                {message.progress && (
-                                  <span style={{ fontSize: 11, color: 'var(--gray-400)' }}>
-                                    {message.progress.current}/{message.progress.total}
-                                  </span>
-                                )}
+                                <span style={{ fontSize: 11, color: 'var(--gray-400)', display: 'flex', gap: 6 }}>
+                                  {(() => {
+                                    const est = (message.richContent?.data as Record<string, unknown>)?.estimatedSecondsRemaining as number | undefined
+                                    if (est && est > 0) {
+                                      const mins = Math.ceil(est / 60)
+                                      return <span>{est <= 30 ? (tChat('almostDone') || 'Almost done...') : `~${mins} min`}</span>
+                                    }
+                                    return null
+                                  })()}
+                                  {message.progress && (
+                                    <span>{message.progress.current}/{message.progress.total}</span>
+                                  )}
+                                </span>
                               </div>
                               <div style={{
                                 height: 3,
@@ -2763,6 +2834,34 @@ function ChatSection({
                             showCategories={!message.richContent?.data?.filteredMode}
                           />
                         </motion.div>
+                      )}
+
+                      {/* Mobile Preview Button (< 768px when code_preview exists and not in split mode) */}
+                      {message.richContent?.type === 'code_preview' && layoutMode !== 'split' && (
+                        <motion.button
+                          initial={{ opacity: 0, y: 8 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          transition={{ delay: 0.3 }}
+                          onClick={() => setShowMobilePreview(true)}
+                          className="mobile-preview-btn"
+                          style={{
+                            display: 'none', // 默認隱藏，CSS media query 在 < 768px 時顯示
+                            marginTop: 12,
+                            padding: '12px 20px',
+                            background: 'var(--black)',
+                            color: 'var(--white)',
+                            border: 'none',
+                            cursor: 'pointer',
+                            fontSize: 14,
+                            fontWeight: 500,
+                            width: '100%',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            gap: 8,
+                          }}
+                        >
+                          {tChat('viewPreview') || 'View Preview'}
+                        </motion.button>
                       )}
 
                       {/* Quick Replies */}
@@ -2883,7 +2982,67 @@ function ChatSection({
                 </button>
               </div>
             )}
+            {/* 附圖預覽列 */}
+            {attachedImages.length > 0 && (
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 8 }}>
+                {attachedImages.map((img, idx) => (
+                  <div key={idx} style={{ position: 'relative', width: 56, height: 56, borderRadius: 6, overflow: 'hidden', border: '1px solid var(--gray-200)' }}>
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img src={img.previewUrl} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                    <button
+                      onClick={() => handleRemoveAttachedImage(idx)}
+                      style={{
+                        position: 'absolute', top: 2, right: 2,
+                        width: 18, height: 18, borderRadius: '50%',
+                        background: 'rgba(0,0,0,0.6)', border: 'none',
+                        color: '#fff', fontSize: 12, lineHeight: 1,
+                        cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      }}
+                    >
+                      &times;
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
             <div style={{ display: 'flex', gap: layoutMode === 'split' ? 8 : 12, alignItems: 'flex-end' }}>
+              {/* 附圖按鈕 */}
+              <input
+                ref={chatImageInputRef}
+                type="file"
+                multiple
+                accept="image/jpeg,image/png,image/webp,image/gif"
+                onChange={(e) => { handleAttachImage(e.target.files); e.target.value = '' }}
+                style={{ display: 'none' }}
+              />
+              <motion.button
+                whileHover={{ scale: 1.05 }}
+                whileTap={{ scale: 0.95 }}
+                onClick={() => chatImageInputRef.current?.click()}
+                disabled={isInitializing || !sessionInfo || isReadOnlyMode || attachedImages.length >= 3}
+                title={tChat('attachImage')}
+                style={{
+                  padding: 0,
+                  width: layoutMode === 'split' ? 40 : 48,
+                  height: layoutMode === 'split' ? 40 : 48,
+                  background: 'none',
+                  border: '1px solid var(--border-color)',
+                  borderRadius: 6,
+                  cursor: (isInitializing || !sessionInfo || isReadOnlyMode || attachedImages.length >= 3) ? 'not-allowed' : 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  flexShrink: 0,
+                  opacity: (isInitializing || !sessionInfo || isReadOnlyMode || attachedImages.length >= 3) ? 0.4 : 0.7,
+                  transition: 'opacity 0.15s ease',
+                }}
+              >
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--gray-500)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                  <rect x="3" y="3" width="18" height="18" rx="2" />
+                  <circle cx="8.5" cy="8.5" r="1.5" />
+                  <path d="M21 15l-5-5L5 21" />
+                </svg>
+              </motion.button>
               <textarea
                 ref={inputRef}
                 value={input}
@@ -3565,6 +3724,112 @@ function ChatSection({
   const formulationCurrentStage = Math.min(4, formulationProgress?.current || 0)
 
   return (
+    <>
+    {/* Mobile Preview Modal */}
+    <AnimatePresence>
+      {showMobilePreview && stablePreviewData && (
+        <motion.div
+          key="mobile-preview-modal"
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          transition={{ duration: 0.25 }}
+          style={{
+            position: 'fixed',
+            inset: 0,
+            zIndex: 10000,
+            background: 'var(--white)',
+            display: 'flex',
+            flexDirection: 'column',
+          }}
+        >
+          {/* Header */}
+          <div style={{
+            height: 52,
+            borderBottom: '1px solid var(--border-color)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            padding: '0 16px',
+            flexShrink: 0,
+          }}>
+            <span style={{ fontSize: 14, fontWeight: 600 }}>{tChat('previewTitle') || 'Preview'}</span>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <DeviceSwitcher activeDevice={mobilePreviewDevice} onDeviceChange={setMobilePreviewDevice} />
+              <button
+                onClick={() => setShowMobilePreview(false)}
+                style={{
+                  background: 'none',
+                  border: '1px solid var(--border-color)',
+                  padding: '6px 12px',
+                  fontSize: 13,
+                  cursor: 'pointer',
+                  color: 'var(--gray-600)',
+                }}
+              >
+                {tChat('closeButton') || 'Close'}
+              </button>
+            </div>
+          </div>
+          {/* Preview */}
+          <div style={{ flex: 1, overflow: 'hidden', display: 'flex', justifyContent: 'center' }}>
+            <div style={{ width: mobilePreviewDevice === 'desktop' ? '100%' : getDeviceWidth(mobilePreviewDevice), maxWidth: '100%', height: '100%', overflow: 'hidden' }}>
+              <SandpackPreviewComponent
+                pages={stablePreviewData.pages}
+                components={stablePreviewData.components}
+                styles={stablePreviewData.styles}
+                tailwindConfig={stablePreviewData.tailwindConfig}
+              />
+            </div>
+          </div>
+          {/* Bottom actions */}
+          <div style={{
+            height: 60,
+            borderTop: '1px solid var(--border-color)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: 12,
+            padding: '0 16px',
+            flexShrink: 0,
+          }}>
+            <button
+              onClick={() => {
+                setShowMobilePreview(false)
+                handleSendMessage(locale === 'en' ? 'deploy' : '部署')
+              }}
+              style={{
+                flex: 1,
+                padding: '10px 0',
+                background: 'var(--black)',
+                color: 'var(--white)',
+                border: 'none',
+                fontSize: 14,
+                fontWeight: 500,
+                cursor: 'pointer',
+              }}
+            >
+              {tChat('deployButton') || 'Deploy'}
+            </button>
+            <button
+              onClick={() => setShowMobilePreview(false)}
+              style={{
+                flex: 1,
+                padding: '10px 0',
+                background: 'var(--white)',
+                color: 'var(--black)',
+                border: '1px solid var(--border-color)',
+                fontSize: 14,
+                cursor: 'pointer',
+              }}
+            >
+              {tChat('modifyButton') || 'Modify'}
+            </button>
+          </div>
+        </motion.div>
+      )}
+    </AnimatePresence>
+
     <AnimatePresence>
       {/* Formulation 階段：全屏 SpecGenerationView */}
       {isFormulationView && (
@@ -3740,8 +4005,8 @@ function ChatSection({
               ))}
             </div>
 
-            {/* 手機版進度膠囊 - 精緻設計 */}
-            <div className="mobile-progress-capsule">
+            {/* 手機版進度膠囊 - 精緻設計（未登入隱藏避免爆版） */}
+            <div className="mobile-progress-capsule" style={sessionInfo?.isAuthenticated === false ? { display: 'none' } : undefined}>
               {/* 進度環 */}
               <div className="progress-ring-container">
                 <svg className="progress-ring" width="24" height="24" viewBox="0 0 24 24">
@@ -3835,6 +4100,7 @@ function ChatSection({
         </motion.div>
       )}
     </AnimatePresence>
+    </>
   )
 }
 

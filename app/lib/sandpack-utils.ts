@@ -329,6 +329,10 @@ if (typeof window !== 'undefined' && !window.__tcEditBridgeInitialized) {
       base.width = cs.width;
       base.maxWidth = cs.maxWidth;
       base.height = cs.height;
+      base.backgroundImage = cs.backgroundImage;
+      base.backgroundSize = cs.backgroundSize;
+      base.backgroundPosition = cs.backgroundPosition;
+      base.backgroundRepeat = cs.backgroundRepeat;
     }
 
     if (type === 'image') {

@@ -106,7 +106,7 @@ const RETRY_BASE_DELAY_MS = 2000
 
 export async function callClaude(
   systemPrompt: string,
-  messages: Array<{ role: 'user' | 'assistant'; content: string }>,
+  messages: Array<{ role: 'user' | 'assistant'; content: string | Anthropic.MessageCreateParams['messages'][number]['content'] }>,
   options?: {
     maxTokens?: number
     temperature?: number
@@ -2700,7 +2700,8 @@ export async function refineCode(
     designBrief?: DesignBrief
     variantConcept?: VariantConcept
   },
-  trackingContext?: LlmTrackingContext
+  trackingContext?: LlmTrackingContext,
+  imageUrls?: string[]
 ): Promise<GenerationResult> {
   const tier = designContext.designTier || 'functional'
 
@@ -2776,7 +2777,10 @@ ${getStructureConstraints(tier)}
 /* 如果需要修改樣式 */
 \`\`\`
 
-未修改的檔案不需要輸出。`
+未修改的檔案不需要輸出。
+${imageUrls?.length ? `
+## 圖片參考
+用戶附加了參考圖片，請仔細觀察圖片中的設計細節（佈局、配色、字體、間距、元素位置等），結合用戶的文字描述進行修改。` : ''}`
 
   const userMessage = `## 用戶的修改要求
 ${userFeedback}
@@ -2786,9 +2790,23 @@ ${codeBlocks.join('\n\n')}
 
 請根據用戶要求修改代碼，只輸出被修改的檔案。`
 
+  // 構建 user message content — 有圖片時用 content blocks
+  let userContent: string | Anthropic.MessageCreateParams['messages'][number]['content'] = userMessage
+  if (imageUrls?.length) {
+    const contentBlocks: Anthropic.MessageCreateParams['messages'][number]['content'] = []
+    for (const url of imageUrls) {
+      contentBlocks.push({
+        type: 'image' as const,
+        source: { type: 'url' as const, url },
+      })
+    }
+    contentBlocks.push({ type: 'text' as const, text: userMessage })
+    userContent = contentBlocks
+  }
+
   const response = await callClaude(
     systemPrompt,
-    [{ role: 'user', content: userMessage }],
+    [{ role: 'user', content: userContent }],
     { maxTokens: 32768, temperature: 0.2 },
     { ...trackingContext, purpose: 'refine_code' }
   )

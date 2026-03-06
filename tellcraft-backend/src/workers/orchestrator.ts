@@ -42,7 +42,7 @@ import {
 import { translateBddToUISpec, buildUISpecSummary } from '../services/bdd-to-ui-spec'
 import { runQualityGate, autoFixCriticalIssues, QualityReport } from '../services/quality-gate'
 import { prepareDeployment, executeDeployment, type SiteMetadata } from '../services/deployer'
-import { detectDesignTier, inferProductType, inferPages, buildDefaultDesignSystem, buildMinimalTemplate, inferInteractionHint, getTemplateStyleHint, inferLayoutMode, PRODUCT_TYPE_LABELS } from '../services/fast-build-generation'
+import { detectDesignTier, inferProductType, inferPages, buildDefaultDesignSystem, buildMinimalTemplate, inferInteractionHint, getTemplateStyleHint, inferLayoutMode, PRODUCT_TYPE_LABELS, generateFastConcept } from '../services/fast-build-generation'
 import { ensureResponsiveClasses } from '../services/uiux-generation'
 import { matchTemplates } from '../services/template-matcher'
 import { executeIteration, executeUndoIteration, executeRollbackQuery, executeRollbackSelection } from '../services/iteration-skill'
@@ -73,6 +73,7 @@ interface ProcessMessageData {
   message: string
   mode?: 'fast' | 'fine'
   locale?: 'zh' | 'en'
+  imageUrls?: string[]
 }
 
 interface ContinueFlowData {
@@ -83,6 +84,7 @@ interface ContinueFlowData {
   message: string
   specConfirmed?: boolean
   locale?: 'zh' | 'en'
+  imageUrls?: string[]
 }
 
 // PRD Discovery 限制（預設值，實際由 computeDiscoveryLimits 動態調整）
@@ -595,12 +597,32 @@ async function handleProcessMessage(
 
     // 預驗證 Layer 2：語義相關性 + 具體性檢查（強信號放行 + 弱信號 Haiku 判斷）
     const relevance = await checkBuildRelevance(message, { userId, conversationId })
-    if (!relevance.relevant || relevance.vague) {
-      const logReason = !relevance.relevant ? '不相關' : '太模糊'
-      console.log(`[Orchestrator] 快速模式語義攔截 (${logReason}): msg="${message.substring(0, 50)}"`)
+    if (!relevance.relevant) {
+      console.log(`[Orchestrator] 快速模式語義攔截 (不相關): msg="${message.substring(0, 50)}"`)
       await sendMessage(conversationId, io, {
-        content: relevance.errorMessage || '請描述您想要建立的網站或應用。',
+        content: relevance.errorMessage || (isChinese ? '請描述您想要建立的網站或應用。' : 'Please describe the website or app you\'d like to build.'),
         stage: 'info',
+      })
+      return { taskId: null, skill: null }
+    }
+    if (relevance.vague) {
+      console.log(`[Orchestrator] 快速模式語義攔截 (太模糊): msg="${message.substring(0, 50)}"`)
+      await sendMessage(conversationId, io, {
+        content: isChinese
+          ? '描述再具體一點，我能做得更好！試試告訴我：\n\n- **什麼類型**的網站？（咖啡店、作品集、SaaS...）\n- **想要什麼功能**？（菜單展示、預約系統、價格頁...）\n- **什麼風格**？（簡約、溫暖、科技感...）'
+          : 'A bit more detail helps me build better! Try telling me:\n\n- **What type** of site? (cafe, portfolio, SaaS...)\n- **What features**? (menu, booking, pricing...)\n- **What style**? (minimal, warm, techy...)',
+        stage: 'info',
+        quickReplies: isChinese
+          ? [
+              { label: '咖啡店官網', value: '做一個咖啡店官網，要有菜單展示和聯繫資訊', style: 'secondary' as const },
+              { label: '個人作品集', value: '建一個設計師作品集網站，簡約風格', style: 'secondary' as const },
+              { label: 'SaaS 產品頁', value: '做一個 SaaS 產品的 Landing Page，有功能介紹和定價方案', style: 'secondary' as const },
+            ]
+          : [
+              { label: 'Cafe website', value: 'Build a cafe website with menu and contact info', style: 'secondary' as const },
+              { label: 'Portfolio', value: 'Create a designer portfolio site, minimal style', style: 'secondary' as const },
+              { label: 'SaaS landing', value: 'Build a SaaS landing page with features and pricing', style: 'secondary' as const },
+            ],
       })
       return { taskId: null, skill: null }
     }
@@ -1064,6 +1086,39 @@ async function handleContinueFlow(
     })
     return
   }
+  if (trimmedMsg === '__retry_fast_build__' && state.fastMode && state.fastModeOriginalMessage) {
+    // Fast Build 重試：用原始描述重新生成
+    console.log(`[Orchestrator] Fast Build 重試: conversationId=${conversationId}`)
+    const retryTaskId = await db.createTask({
+      projectId,
+      userId,
+      goal: state.fastModeOriginalMessage,
+      status: 'executing',
+    })
+    if (!retryTaskId) {
+      const isChinese = state.locale === 'zh'
+      await sendMessage(conversationId, io, {
+        content: isChinese ? '重試失敗，請稍後再試。' : 'Retry failed. Please try again later.',
+        stage: 'error',
+        quickReplies: [
+          { label: isChinese ? '重試' : 'Retry', value: '__retry_fast_build__', style: 'primary' as const },
+        ],
+      })
+      return
+    }
+    await deleteFlowState(redis, conversationId)
+    await executeFastBuildSkill({
+      taskId: retryTaskId,
+      projectId,
+      conversationId,
+      userId,
+      message: state.fastModeOriginalMessage,
+      locale: state.locale,
+      redis,
+      io,
+    })
+    return
+  }
 
   if (trimmedMsg === '__new_project__') {
     // 清除流程狀態 + LINE 映射，讓下次消息建新專案
@@ -1256,7 +1311,7 @@ async function handleContinueFlow(
     state.semanticRejectCount = 0
     state.phase = 'uiux_complete'
     await saveFlowState(redis, conversationId, state)
-    await executeIteration({ conversationId, projectId: data.projectId, userId, userFeedback: message, redis, io })
+    await executeIteration({ conversationId, projectId: data.projectId, userId, userFeedback: message, redis, io, imageUrls: data.imageUrls })
     return
   }
 
@@ -1264,22 +1319,6 @@ async function handleContinueFlow(
     await sendMessage(conversationId, io, {
       content: '正在部署中，請稍候...',
       stage: 'info',
-    })
-    return
-  }
-
-  // 快速模式描述太短，用戶補充後重新執行
-  if (state.phase === 'fast_need_more_info') {
-    await deleteFlowState(redis, conversationId)
-    await executeFastBuildSkill({
-      taskId: state.taskId || data.taskId || '',
-      projectId,
-      conversationId,
-      userId,
-      message,
-      locale: data.locale || state.locale,
-      redis,
-      io,
     })
     return
   }
@@ -1863,7 +1902,7 @@ async function handleContinueFlow(
     }
     state.semanticRejectCount = 0
     await saveFlowState(redis, conversationId, state)
-    await executeIteration({ conversationId, projectId: data.projectId, userId, userFeedback: message, redis, io })
+    await executeIteration({ conversationId, projectId: data.projectId, userId, userFeedback: message, redis, io, imageUrls: data.imageUrls })
     return
   }
 
@@ -2178,7 +2217,7 @@ async function handleContinueFlow(
         }
         state.semanticRejectCount = 0
         await saveFlowState(redis, conversationId, state)
-        await executeIteration({ conversationId, projectId: data.projectId, userId, userFeedback: message, redis, io })
+        await executeIteration({ conversationId, projectId: data.projectId, userId, userFeedback: message, redis, io, imageUrls: data.imageUrls })
         return
       }
     }
@@ -4855,10 +4894,10 @@ async function executeFastBuildSkill(params: {
 
   try {
   // ── 推斷設計參數（零 LLM 成本）──
-  const tier = detectDesignTier(message)
+  let tier = detectDesignTier(message)
   const productType = inferProductType(message)
   const pages = inferPages(message, productType)
-  const designSystem = buildDefaultDesignSystem(tier, productType)
+  let designSystem = buildDefaultDesignSystem(tier, productType)
   const template = buildMinimalTemplate(message, productType)
 
   const layoutMode = inferLayoutMode(productType, message)
@@ -4871,6 +4910,36 @@ async function executeFastBuildSkill(params: {
     if (templateStyleHint) console.log(`[FastBuild] 匹配到模板風格提示`)
   } catch (e) {
     console.warn('[FastBuild] 模板風格提示查詢失敗，降級跳過:', e)
+  }
+
+  // ── Haiku 概念生成（+1 Haiku，給設計一個靈魂）──
+  let variantConcept: VariantConcept | undefined
+  try {
+    const palette = designSystem.colorPalette as { primary?: string } | undefined
+    const concept = await generateFastConcept(
+      message, productType, tier, palette?.primary || '#6366f1',
+      { userId, conversationId }
+    )
+    if (concept) {
+      variantConcept = {
+        name: concept.name,
+        description: concept.vibe,
+        keyFeatures: concept.keyFeatures,
+        signatureElement: concept.signatureElement,
+        previewDescription: concept.vibe,
+        sourceVariantIds: [],
+      }
+      console.log(`[FastBuild] 概念生成成功: "${concept.name}" (suggested tier: ${concept.suggestedTier || 'N/A'})`)
+
+      // Upgrade 5: Tier 智能修正（Haiku 判斷 vs 規則不一致時以 Haiku 為準）
+      if (concept.suggestedTier && concept.suggestedTier !== tier) {
+        console.log(`[FastBuild] Tier 修正: ${tier} → ${concept.suggestedTier}`)
+        tier = concept.suggestedTier
+        designSystem = buildDefaultDesignSystem(tier, productType)
+      }
+    }
+  } catch (e) {
+    console.warn('[FastBuild] 概念生成失敗，降級跳過:', e)
   }
 
   // ── 設定 FlowState ──
@@ -4892,18 +4961,23 @@ async function executeFastBuildSkill(params: {
     locale: locale || (/[\u4e00-\u9fff\u3400-\u4dbf]/.test(message) ? 'zh' : 'en'),
     fastModeLayoutMode: layoutMode,
     fastModeOriginalMessage: message,
+    uiuxVariantConcept: variantConcept,
     userId,
   }
   await saveFlowState(redis, conversationId, state)
 
-  // ── 發送進度消息 ──
+  const isChinese = state.locale === 'zh'
+
+  // ── 發送進度消息（含預估時間）──
   await sendMessage(conversationId, io, {
-    content: `正在快速生成您的${PRODUCT_TYPE_LABELS[productType] || '網站'}，預計 5 分鐘...`,
+    content: isChinese
+      ? `正在快速生成您的${PRODUCT_TYPE_LABELS[productType] || '網站'}${variantConcept ? `\n設計概念：**${variantConcept.name}** — ${variantConcept.description}` : ''}`
+      : `Quickly generating your ${PRODUCT_TYPE_LABELS[productType] || 'website'}...${variantConcept ? `\nDesign concept: **${variantConcept.name}** — ${variantConcept.description}` : ''}`,
     stage: 'fast_generating',
-    progress: { current: 1, total: 3, step: '生成結構' },
+    progress: { current: 1, total: 3, step: isChinese ? '生成結構' : 'Generating structure' },
     richContent: {
       type: 'fast_build_progress' as 'fast_build_progress',
-      data: { phase: 'structure', progress: { current: 1, total: 3, step: '生成結構' } } as unknown as Record<string, unknown>,
+      data: { phase: 'structure', progress: { current: 1, total: 3, step: isChinese ? '生成結構' : 'Generating structure' }, estimatedSecondsRemaining: 240 } as unknown as Record<string, unknown>,
     },
   })
 
@@ -4919,6 +4993,7 @@ async function executeFastBuildSkill(params: {
     tier,
     {
       originalRequirements: message,
+      variantConcept,
       interactionHint,
       templateStyleHint: templateStyleHint || undefined,
       layoutMode,
@@ -4929,12 +5004,18 @@ async function executeFastBuildSkill(params: {
 
   if (!structureResult.success) {
     console.error('[FastBuild] 結構生成失敗:', structureResult.error)
-    state.phase = 'idle'
+    // 保留 FlowState 以供重試（只清除生成時間戳）
+    state.phase = 'fast_generating'
     state.uiuxCodeGenerationStartedAt = undefined
     await saveFlowState(redis, conversationId, state)
     await sendMessage(conversationId, io, {
-      content: `生成失敗：${structureResult.error}\n\n請嘗試重新描述你的需求。`,
+      content: isChinese
+        ? `生成失敗：${structureResult.error}\n\n你可以點「重試」使用相同描述再試一次。`
+        : `Generation failed: ${structureResult.error}\n\nClick "Retry" to try again with the same description.`,
       stage: 'error',
+      quickReplies: [
+        { label: isChinese ? '重試' : 'Retry', value: '__retry_fast_build__', style: 'primary' as const },
+      ],
     })
     return
   }
@@ -4958,12 +5039,12 @@ async function executeFastBuildSkill(params: {
 
   // ===== 階段 2/3：動畫 =====
   await sendMessage(conversationId, io, {
-    content: '結構生成完成，正在添加動畫效果...',
+    content: isChinese ? '結構生成完成，正在添加動畫效果...' : 'Structure done, adding animations...',
     stage: 'fast_generating',
-    progress: { current: 2, total: 3, step: '添加動畫' },
+    progress: { current: 2, total: 3, step: isChinese ? '添加動畫' : 'Adding animations' },
     richContent: {
       type: 'fast_build_progress' as 'fast_build_progress',
-      data: { phase: 'animation', progress: { current: 2, total: 3, step: '添加動畫' } } as unknown as Record<string, unknown>,
+      data: { phase: 'animation', progress: { current: 2, total: 3, step: isChinese ? '添加動畫' : 'Adding animations' }, estimatedSecondsRemaining: 120 } as unknown as Record<string, unknown>,
     },
   })
 
@@ -4975,7 +5056,7 @@ async function executeFastBuildSkill(params: {
     tier,
     { userId, conversationId, purpose: 'fast-build-animation' },
     makeStreamingCallback(conversationId, io, redis, 'animation', twConfig),
-    undefined, // variantConcept
+    variantConcept, // 注入創意概念
     fastUiSpecSummary,
   )
 
@@ -5002,12 +5083,12 @@ async function executeFastBuildSkill(params: {
 
   // ===== 階段 3/3：響應式 =====
   await sendMessage(conversationId, io, {
-    content: '動畫添加完成，正在優化響應式佈局...',
+    content: isChinese ? '動畫添加完成，正在優化響應式佈局...' : 'Animations done, optimizing responsive layout...',
     stage: 'fast_generating',
-    progress: { current: 3, total: 3, step: '響應式優化' },
+    progress: { current: 3, total: 3, step: isChinese ? '響應式優化' : 'Responsive optimization' },
     richContent: {
       type: 'fast_build_progress' as 'fast_build_progress',
-      data: { phase: 'rwd', progress: { current: 3, total: 3, step: '響應式優化' } } as unknown as Record<string, unknown>,
+      data: { phase: 'rwd', progress: { current: 3, total: 3, step: isChinese ? '響應式優化' : 'Responsive optimization' }, estimatedSecondsRemaining: 60 } as unknown as Record<string, unknown>,
     },
   })
   const rwdResult = await generateRwd(
@@ -5016,7 +5097,7 @@ async function executeFastBuildSkill(params: {
     tier,
     { userId, conversationId, purpose: 'fast-build-rwd' },
     makeStreamingCallback(conversationId, io, redis, 'rwd', twConfig),
-    undefined, // variantConcept
+    variantConcept, // 注入創意概念
     fastUiSpecSummary,
     layoutMode,
   )
@@ -5087,13 +5168,19 @@ async function executeFastBuildSkill(params: {
   const qgText = report.passed && report.summary.warning === 0
     ? ''
     : report.passed
-      ? `\n品質檢查通過（${report.summary.warning} 個建議項）。`
-      : `\n品質檢查：${report.summary.critical} 個問題、${report.summary.warning} 個建議。`
+      ? (isChinese ? `\n品質檢查通過（${report.summary.warning} 個建議項）。` : `\nQuality check passed (${report.summary.warning} suggestions).`)
+      : (isChinese ? `\n品質檢查：${report.summary.critical} 個問題、${report.summary.warning} 個建議。` : `\nQuality check: ${report.summary.critical} issues, ${report.summary.warning} suggestions.`)
+
+  const conceptNote = variantConcept
+    ? (isChinese ? `\n設計概念：**${variantConcept.name}**` : `\nDesign concept: **${variantConcept.name}**`)
+    : ''
 
   await sendMessage(conversationId, io, {
-    content: `快速生成完成！共 ${finalPageCount} 個頁面、${finalComponentCount} 個組件。${qgText}\n\n你可以：\n- 直接說想修改的地方，AI 會幫你調整\n- 輸入「**部署**」即可上線`,
+    content: isChinese
+      ? `快速生成完成！共 ${finalPageCount} 個頁面、${finalComponentCount} 個組件。${conceptNote}${qgText}\n\n你可以：\n- 直接說想修改的地方，AI 會幫你調整\n- 輸入「**部署**」即可上線`
+      : `Generation complete! ${finalPageCount} pages, ${finalComponentCount} components.${conceptNote}${qgText}\n\nYou can:\n- Describe changes and AI will adjust\n- Type "**deploy**" to go live`,
     stage: 'uiux_generation_complete',
-    progress: { current: 3, total: 3, step: '完成' },
+    progress: { current: 3, total: 3, step: isChinese ? '完成' : 'Done' },
     layoutHint: 'split',
     richContent: {
       type: 'code_preview',
@@ -5106,7 +5193,7 @@ async function executeFastBuildSkill(params: {
       } as Record<string, unknown>,
     },
     quickReplies: [
-      { label: '部署上線', value: '部署', style: 'primary' },
+      { label: isChinese ? '部署上線' : 'Deploy', value: '部署', style: 'primary' },
     ],
   })
 
@@ -5115,23 +5202,33 @@ async function executeFastBuildSkill(params: {
 
   } catch (err) {
     console.error('[FastBuild] 未預期錯誤:', err)
+    const errLocale = locale || 'zh'
+    const errIsChinese = errLocale === 'zh'
     // 嘗試恢復 FlowState
     try {
-      const state = await getFlowState(redis, conversationId)
-      if (state) {
-        const hasCode = state.uiuxGeneratedCode &&
-          (state.uiuxGeneratedCode.pages.length > 0 || state.uiuxGeneratedCode.components.length > 0)
-        state.phase = hasCode ? 'uiux_complete' : 'idle'
-        state.uiuxCodeGenerationStartedAt = undefined
-        if (hasCode) state.uiuxCodePhase = 'complete'
-        await saveFlowState(redis, conversationId, state)
+      const recoveryState = await getFlowState(redis, conversationId)
+      if (recoveryState) {
+        const hasCode = recoveryState.uiuxGeneratedCode &&
+          (recoveryState.uiuxGeneratedCode.pages.length > 0 || recoveryState.uiuxGeneratedCode.components.length > 0)
+        if (hasCode) {
+          recoveryState.phase = 'uiux_complete'
+          recoveryState.uiuxCodeGenerationStartedAt = undefined
+          recoveryState.uiuxCodePhase = 'complete'
+          await saveFlowState(redis, conversationId, recoveryState)
+        }
+        // 不 delete：保留 FlowState 供 __retry_fast_build__ 使用
       }
     } catch (recoveryErr) {
       console.error('[FastBuild] 恢復 FlowState 也失敗:', recoveryErr)
     }
     await sendMessage(conversationId, io, {
-      content: `生成過程中出現錯誤：${err instanceof Error ? err.message : '未知錯誤'}\n\n請重新描述你的需求再試一次。`,
+      content: errIsChinese
+        ? `生成過程中出現錯誤：${err instanceof Error ? err.message : '未知錯誤'}\n\n你可以點「重試」再試一次。`
+        : `Error during generation: ${err instanceof Error ? err.message : 'Unknown error'}\n\nClick "Retry" to try again.`,
       stage: 'error',
+      quickReplies: [
+        { label: errIsChinese ? '重試' : 'Retry', value: '__retry_fast_build__', style: 'primary' as const },
+      ],
     }).catch(msgErr => {
       console.error('[FastBuild] 發送錯誤訊息失敗:', msgErr)
     })

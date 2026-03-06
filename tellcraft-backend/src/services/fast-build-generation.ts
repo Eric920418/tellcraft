@@ -1,12 +1,12 @@
 /**
  * Fast Build 生成服務
  * 快速模式專用的輔助函數：tier 偵測、產品推斷、默認 DesignSystem 建立
- * 零 LLM 成本 — 全部用規則式推斷
+ * 大部分零 LLM 成本（規則式推斷），generateFastConcept 使用 1 次 Haiku
  */
 
-import type { DesignTier, DesignSystem, TemplateData } from './uiux-generation'
+import type { DesignTier, DesignSystem, TemplateData, VariantConcept } from './uiux-generation'
 import { matchTemplates } from './template-matcher'
-import { query, queryOne } from '../db/client'
+import { query, queryOne, recordLlmUsage } from '../db/client'
 
 // ============================================================
 // Tier 偵測（規則式，零 LLM 成本）
@@ -654,4 +654,126 @@ export async function getTemplateStyleHint(
   }
 
   return parts.join('\n')
+}
+
+// ============================================================
+// Haiku 概念生成（+1 Haiku 調用，給 Fast Build 設計靈魂）
+// ============================================================
+
+const HAIKU_PRICING = { input: 0.8, output: 4 }
+
+export interface FastConcept {
+  name: string
+  vibe: string
+  signatureElement: string
+  keyFeatures: string[]
+  suggestedTier?: DesignTier
+}
+
+/**
+ * 用 1 次 Haiku 生成簡化的創意概念
+ * 失敗時降級返回 null（不影響主流程）
+ */
+export async function generateFastConcept(
+  description: string,
+  productType: string,
+  tier: DesignTier,
+  primaryColor: string,
+  context?: { userId?: string; conversationId?: string }
+): Promise<FastConcept | null> {
+  const apiKey = process.env.ANTHROPIC_API_KEY
+  if (!apiKey) return null
+
+  try {
+    const isChinese = /[\u4e00-\u9fff\u3400-\u4dbf]/.test(description)
+    const systemPrompt = isChinese
+      ? `你是設計顧問。根據產品描述生成設計概念。回覆嚴格 JSON（無其他文字）：
+{"name":"概念名稱(2-4字)","vibe":"設計氛圍描述(1句話)","signatureElement":"一個招牌視覺元素(具體的設計手法)","keyFeatures":["設計特徵1","設計特徵2","設計特徵3"],"suggestedTier":"functional或creative"}
+suggestedTier 判斷規則：dashboard/admin/SaaS 工具型 → functional；品牌展示/創意/個性化 → creative。
+讓概念獨特，避免泛用描述。signatureElement 要具體到能直接寫代碼（如「hero 區域的漸層玻璃態卡片」而非「現代設計」）。`
+      : `You are a design consultant. Generate a design concept from the product description. Reply strictly JSON (no other text):
+{"name":"Concept name(2-4 words)","vibe":"Design vibe(1 sentence)","signatureElement":"One signature visual element(specific design technique)","keyFeatures":["Feature 1","Feature 2","Feature 3"],"suggestedTier":"functional or creative"}
+suggestedTier rules: dashboard/admin/SaaS tools → functional; brand/creative/personality → creative.
+Make the concept unique. signatureElement must be specific enough to code (e.g. "frosted glass hero cards with gradient border" not "modern design").`
+
+    const userMsg = isChinese
+      ? `產品：${description}\n類型：${productType}\n當前 tier：${tier}\n主色：${primaryColor}`
+      : `Product: ${description}\nType: ${productType}\nCurrent tier: ${tier}\nPrimary color: ${primaryColor}`
+
+    const resp = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': apiKey,
+        'anthropic-version': '2023-06-01',
+      },
+      body: JSON.stringify({
+        model: 'claude-haiku-4-5-20251001',
+        max_tokens: 300,
+        temperature: 0.7,
+        system: systemPrompt,
+        messages: [{ role: 'user', content: userMsg }],
+      }),
+    })
+
+    if (!resp.ok) {
+      console.warn(`[FastConcept] API 錯誤 ${resp.status}，降級跳過`)
+      return null
+    }
+
+    const data = await resp.json() as {
+      content?: Array<{ text?: string }>
+      usage?: { input_tokens?: number; output_tokens?: number }
+    }
+
+    if (data.usage) {
+      const inputTokens = data.usage.input_tokens || 0
+      const outputTokens = data.usage.output_tokens || 0
+      const cost = (inputTokens * HAIKU_PRICING.input + outputTokens * HAIKU_PRICING.output) / 1_000_000
+      recordLlmUsage({
+        model: 'claude-haiku-4-5-20251001',
+        inputTokens,
+        outputTokens,
+        costUsd: cost,
+        purpose: 'fast_build_concept',
+        userId: context?.userId,
+        conversationId: context?.conversationId,
+      }).catch(err => console.error('[FastConcept] 記錄用量失敗:', err))
+    }
+
+    const text = data.content?.[0]?.text
+    if (!text) {
+      console.warn('[FastConcept] 空回應，降級跳過')
+      return null
+    }
+
+    // 解析 JSON（容忍 markdown code fence）
+    const jsonMatch = text.match(/\{[\s\S]*\}/)
+    if (!jsonMatch) {
+      console.warn('[FastConcept] 無法解析 JSON，降級跳過')
+      return null
+    }
+
+    const parsed = JSON.parse(jsonMatch[0]) as Partial<FastConcept>
+    if (!parsed.name || !parsed.vibe || !parsed.signatureElement) {
+      console.warn('[FastConcept] 缺少必要欄位，降級跳過')
+      return null
+    }
+
+    // 驗證 suggestedTier
+    if (parsed.suggestedTier && parsed.suggestedTier !== 'functional' && parsed.suggestedTier !== 'creative') {
+      parsed.suggestedTier = undefined
+    }
+
+    return {
+      name: parsed.name,
+      vibe: parsed.vibe,
+      signatureElement: parsed.signatureElement,
+      keyFeatures: Array.isArray(parsed.keyFeatures) ? parsed.keyFeatures.slice(0, 5) : [],
+      suggestedTier: parsed.suggestedTier,
+    }
+  } catch (err) {
+    console.warn('[FastConcept] 生成失敗，降級跳過:', err)
+    return null
+  }
 }

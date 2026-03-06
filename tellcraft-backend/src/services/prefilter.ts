@@ -373,13 +373,8 @@ export async function checkBuildRelevance(
     })
 
     if (!resp.ok) {
-      console.warn(`[Prefilter] 相關性檢查 API 錯誤 ${resp.status}，降級拒絕`)
-      return {
-        relevant: false,
-        errorMessage: isChinese
-          ? '系統暫時無法處理您的請求，請稍後再試。'
-          : 'System temporarily unavailable. Please try again shortly.',
-      }
+      console.warn(`[Prefilter] 相關性檢查 API 錯誤 ${resp.status}，降級放行（fail-open）`)
+      return { relevant: true }
     }
 
     const data = await resp.json() as {
@@ -405,24 +400,14 @@ export async function checkBuildRelevance(
 
     const text = data.content?.[0]?.text
     if (!text) {
-      console.warn('[Prefilter] 相關性檢查空回應，降級拒絕')
-      return {
-        relevant: false,
-        errorMessage: isChinese
-          ? '系統暫時無法處理您的請求，請稍後再試。'
-          : 'System temporarily unavailable. Please try again shortly.',
-      }
+      console.warn('[Prefilter] 相關性檢查空回應，降級放行（fail-open）')
+      return { relevant: true }
     }
 
     const parsed = safeParseJson<{ relevant?: boolean; vague?: boolean; policy?: string }>(text)
     if (!parsed) {
-      console.warn('[Prefilter] 相關性檢查 JSON 解析失敗，降級拒絕')
-      return {
-        relevant: false,
-        errorMessage: isChinese
-          ? '系統暫時無法處理您的請求，請稍後再試。'
-          : 'System temporarily unavailable. Please try again shortly.',
-      }
+      console.warn('[Prefilter] 相關性檢查 JSON 解析失敗，降級放行（fail-open）')
+      return { relevant: true }
     }
 
     // 內容不當 → 拒絕（Content Policy）
@@ -458,13 +443,8 @@ export async function checkBuildRelevance(
 
     return { relevant: true }
   } catch (err) {
-    console.error('[Prefilter] 相關性檢查失敗，降級拒絕:', err)
-    return {
-      relevant: false,
-      errorMessage: isChinese
-        ? '系統暫時無法處理您的請求，請稍後再試。'
-        : 'System temporarily unavailable. Please try again shortly.',
-    }
+    console.error('[Prefilter] 相關性檢查失敗，降級放行（fail-open）:', err)
+    return { relevant: true }
   }
 }
 

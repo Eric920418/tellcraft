@@ -125,7 +125,7 @@ async function getUserCreditQuotaStatus(userId: string): Promise<{
 router.post('/:id/message', optionalAuth, async (req, res) => {
   try {
     const { id: conversationId } = req.params
-    const { message, projectId, userId: bodyUserId, mode, locale } = req.body
+    const { message, projectId, userId: bodyUserId, mode, locale, imageUrls } = req.body
     const userId = req.user?.id || bodyUserId
 
     if (!userId) {
@@ -134,6 +134,18 @@ router.post('/:id/message', optionalAuth, async (req, res) => {
 
     if (!message || !projectId) {
       return res.status(400).json({ error: 'Missing message or projectId' })
+    }
+
+    // 驗證 imageUrls（可選）
+    if (imageUrls !== undefined) {
+      if (!Array.isArray(imageUrls) || imageUrls.length > 3) {
+        return res.status(400).json({ error: 'imageUrls must be an array with at most 3 items' })
+      }
+      for (const url of imageUrls) {
+        if (typeof url !== 'string' || !url.startsWith('https://')) {
+          return res.status(400).json({ error: 'Each imageUrl must be a valid https URL' })
+        }
+      }
     }
 
     // 輸入驗證：非空 + 長度限制
@@ -233,6 +245,7 @@ router.post('/:id/message', optionalAuth, async (req, res) => {
       message,
       mode,
       locale,
+      imageUrls: imageUrls || undefined,
     }, {
       attempts: 3,
       backoff: {
@@ -262,7 +275,7 @@ router.post('/:id/message', optionalAuth, async (req, res) => {
 router.post('/:id/reply', optionalAuth, async (req, res) => {
   try {
     const { id: conversationId } = req.params
-    const { message, projectId, taskId, specConfirmed, userId: bodyUserId, locale } = req.body
+    const { message, projectId, taskId, specConfirmed, userId: bodyUserId, locale, imageUrls } = req.body
     const userId = req.user?.id || bodyUserId
 
     if (!userId) {
@@ -271,6 +284,18 @@ router.post('/:id/reply', optionalAuth, async (req, res) => {
 
     if (!message || !projectId) {
       return res.status(400).json({ error: 'Missing message or projectId' })
+    }
+
+    // 驗證 imageUrls（可選）
+    if (imageUrls !== undefined) {
+      if (!Array.isArray(imageUrls) || imageUrls.length > 3) {
+        return res.status(400).json({ error: 'imageUrls must be an array with at most 3 items' })
+      }
+      for (const url of imageUrls) {
+        if (typeof url !== 'string' || !url.startsWith('https://')) {
+          return res.status(400).json({ error: 'Each imageUrl must be a valid https URL' })
+        }
+      }
     }
 
     // 輸入驗證：非空 + 長度限制
@@ -360,6 +385,7 @@ router.post('/:id/reply', optionalAuth, async (req, res) => {
       message,
       specConfirmed,
       locale,
+      imageUrls: imageUrls || undefined,
     }, {
       attempts: 3,
       backoff: {

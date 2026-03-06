@@ -551,7 +551,6 @@ const PHASE_SUMMARY: Record<string, string> = {
   uiux_quality_gate: '品質檢查中',
   uiux_complete: '設計已完成，可以修改或部署',
   uiux_iterating: '正在修改設計中，請稍候',
-  fast_need_more_info: '需要更多描述，請補充產品細節',
   fast_generating: '快速生成中，請稍候',
   deployer_deploying: '部署中，請稍候',
   deployer_failed: '上次部署失敗，可以重試或修改後再部署',

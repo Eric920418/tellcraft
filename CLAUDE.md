@@ -128,7 +128,6 @@ pm2 describe tellcraft-backend            # 詳細資訊（記憶體/重啟次�
 | `uiux_code_generation` | Implementation 確認/重做（Structure+Interaction → Animation → RWD） |
 | `uiux_quality_gate` | Quality Gate 執行中 |
 | `uiux_complete` / `uiux_iterating` | UIUX 完成（可迭代或部署）/ 迭代修改中 |
-| `fast_need_more_info` | 快速模式描述太短，等待用戶補充（補充後清除 FlowState 重新執行） |
 | `fast_generating` | 快速模式生成中（攔截用戶輸入，完成後 → `uiux_complete`） |
 | `deployer_deploying` / `deployer_failed` / `deployer_complete` | 部署流程（用戶說「部署」直接執行，無二次確認） |
 | `deployer_rollback_select` | 等待用戶選擇回滾版本 |
@@ -153,16 +152,23 @@ Discovery（Path A 問卷 / Path B 篩選後模板）
 
 ```
 用戶描述（mode=fast）→ 跳過 Classifier
+  → checkBuildRelevance（vague 攔截 + quickReplies 引導）
   → detectDesignTier（規則式）→ inferProductType → buildDefaultDesignSystem → inferInteractionHint
-  → generateStructure(+Interaction, streaming) → generateAnimations(streaming) → generateRwd(streaming)
-  → runQualityGate（靜態檢查，不做 LLM 修復）
+  → generateFastConcept（1 次 Haiku，概念 + suggestedTier 修正）
+  → generateStructure(+Interaction+Concept, streaming) → generateAnimations(streaming) → generateRwd(streaming)
+  → runQualityGate（靜態檢查 + 最多 2 輪 LLM autoFix）
   → phase='uiux_complete'（複用所有迭代/部署/回滾邏輯）
-  3 次 LLM | 0 次用戶交互 | ~5 分鐘
+  4~6 次 LLM | 0 次用戶交互 | ~5 分鐘
 ```
 
+- **Haiku 概念生成**：`generateFastConcept()` 生成 `FastConcept`（name/vibe/signatureElement/keyFeatures/suggestedTier），轉換為 `VariantConcept` 注入三階段 prompt
+- **Tier 智能修正**：Haiku suggestedTier 與規則不一致時覆蓋 tier + 重建 designSystem
 - **Design Tier**：`functional`（dashboard/SaaS，禁漸層/glow）vs `creative`（landing page，允許大膽設計）
 - **串流預覽**：生成時 Socket.io `preview_update` 即時推送，前端 Sandpack 增量更新（`useSandpack().sandpack.updateFile()`）
 - **Variant 概念**：`VariantConcept` 注入所有生成 prompt，確保創意方向一致
+- **失敗重試**：`__retry_fast_build__` quickReply，handleContinueFlow 攔截用 `fastModeOriginalMessage` 重新生成
+- **手機預覽**：< 768px 顯示全屏 SandpackPreview Modal（含裝置切換/部署/修改按鈕）
+- **進度預估**：每階段推送 `estimatedSecondsRemaining`（240→120→60），前端顯示 `~X min`
 
 ### Deployer Pipeline（五層防禦）
 

@@ -129,6 +129,43 @@ const TEXT_DECORATION_OPTIONS = [
   { value: 'line-through', label: 'Strikethrough' },
 ]
 
+const BACKGROUND_SIZE_OPTIONS = [
+  { value: 'cover', label: 'Cover' },
+  { value: 'contain', label: 'Contain' },
+  { value: 'auto', label: 'Auto' },
+  { value: '100% 100%', label: 'Stretch' },
+]
+
+const BACKGROUND_POSITION_OPTIONS = [
+  { value: 'center', label: 'Center' },
+  { value: 'top', label: 'Top' },
+  { value: 'bottom', label: 'Bottom' },
+  { value: 'left', label: 'Left' },
+  { value: 'right', label: 'Right' },
+  { value: 'top left', label: 'Top Left' },
+  { value: 'top right', label: 'Top Right' },
+  { value: 'bottom left', label: 'Bottom Left' },
+  { value: 'bottom right', label: 'Bottom Right' },
+]
+
+const BACKGROUND_REPEAT_OPTIONS = [
+  { value: 'no-repeat', label: 'No Repeat' },
+  { value: 'repeat', label: 'Repeat' },
+  { value: 'repeat-x', label: 'Repeat X' },
+  { value: 'repeat-y', label: 'Repeat Y' },
+]
+
+function parseBackgroundImageUrl(cssValue: string): string {
+  if (!cssValue || cssValue === 'none') return ''
+  const match = cssValue.match(/url\(["']?(.*?)["']?\)/)
+  return match ? match[1] : ''
+}
+
+function wrapAsBackgroundImageUrl(url: string): string {
+  if (!url) return 'none'
+  return `url(${url})`
+}
+
 const TEXT_TRANSFORM_OPTIONS = [
   { value: 'none', label: 'None' },
   { value: 'uppercase', label: 'ABC' },
@@ -440,6 +477,73 @@ export default function PropertyEditor({ element, onUpdate, onClose, onReset, on
                 value={editedStyles.backgroundColor || 'transparent'}
                 onChange={(v) => updateStyle('backgroundColor', v)}
               />
+            </PropertyGroup>
+          )}
+
+          {/* ── 背景圖片（container 才顯示）── */}
+          {isContainer && (
+            <PropertyGroup title={t('groupBackgroundImage')}>
+              <ImageUrlInput
+                label={t('labelBgImageSource')}
+                value={parseBackgroundImageUrl(editedStyles.backgroundImage || '')}
+                onChange={(v) => updateStyle('backgroundImage', wrapAsBackgroundImageUrl(v))}
+                onUpload={onUploadImage}
+                dragLabel={t('dragImageHere')}
+                uploadLabel={t('upload')}
+                uploadingLabel={t('uploading')}
+                uploadFailedLabel={t('uploadFailed')}
+                unsupportedTypeLabel={(type: string) => t('unsupportedFileType', { type })}
+                fileSizeExceededLabel={(size: string) => t('fileSizeExceeded', { size })}
+                previewAltLabel={t('previewAlt')}
+              />
+              <SelectInput
+                label={t('labelBgSize')}
+                value={editedStyles.backgroundSize || 'cover'}
+                options={BACKGROUND_SIZE_OPTIONS}
+                onChange={(v) => updateStyle('backgroundSize', v)}
+              />
+              <SelectInput
+                label={t('labelBgPosition')}
+                value={editedStyles.backgroundPosition || 'center'}
+                options={BACKGROUND_POSITION_OPTIONS}
+                onChange={(v) => updateStyle('backgroundPosition', v)}
+              />
+              <SelectInput
+                label={t('labelBgRepeat')}
+                value={editedStyles.backgroundRepeat || 'no-repeat'}
+                options={BACKGROUND_REPEAT_OPTIONS}
+                onChange={(v) => updateStyle('backgroundRepeat', v)}
+              />
+              {parseBackgroundImageUrl(editedStyles.backgroundImage || '') && (
+                <motion.button
+                  whileHover={{ scale: 1.01 }}
+                  whileTap={{ scale: 0.99 }}
+                  onClick={() => {
+                    updateStyle('backgroundImage', 'none')
+                  }}
+                  style={{
+                    width: '100%',
+                    padding: '6px 10px',
+                    fontSize: 11,
+                    fontWeight: 500,
+                    background: '#fef2f2',
+                    color: '#dc2626',
+                    border: '1px solid #fecaca',
+                    borderRadius: 4,
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    gap: 4,
+                  }}
+                >
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+                    <line x1="18" y1="6" x2="6" y2="18" />
+                    <line x1="6" y1="6" x2="18" y2="18" />
+                  </svg>
+                  {t('clearBgImage')}
+                </motion.button>
+              )}
             </PropertyGroup>
           )}
 

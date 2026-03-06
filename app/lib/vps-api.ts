@@ -129,6 +129,7 @@ export async function sendMessage(input: {
   mode?: 'fast' | 'fine'
   locale?: string
   token?: string
+  imageUrls?: string[]
 }): Promise<ApiResponse<{ messageId: string; jobId: string }>> {
   return apiRequest(`/api/conversation/${input.conversationId}/message`, {
     method: 'POST',
@@ -141,6 +142,7 @@ export async function sendMessage(input: {
       userId: input.userId,
       mode: input.mode,
       locale: input.locale,
+      imageUrls: input.imageUrls,
     }),
   })
 }
@@ -157,6 +159,7 @@ export async function replyToConversation(input: {
   specConfirmed?: boolean
   locale?: string
   token?: string
+  imageUrls?: string[]
 }): Promise<ApiResponse<{ messageId: string; jobId: string }>> {
   return apiRequest(`/api/conversation/${input.conversationId}/reply`, {
     method: 'POST',
@@ -170,6 +173,7 @@ export async function replyToConversation(input: {
       taskId: input.taskId,
       specConfirmed: input.specConfirmed,
       locale: input.locale,
+      imageUrls: input.imageUrls,
     }),
   })
 }

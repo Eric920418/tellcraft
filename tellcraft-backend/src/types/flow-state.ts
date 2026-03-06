@@ -88,7 +88,7 @@ export interface FlowState {
   // 自動採用 AI 建議（BDD 釐清專用，completeSpecPhase 末尾清除）
   autoAdoptMode?: boolean
   // 快速模式
-  // phase: 'fast_need_more_info'（描述太短，等待補充）、'fast_generating'（生成中）
+  // phase: 'fast_generating'（生成中）
   fastMode?: boolean
   fastModeProductType?: string
   fastModeOriginalMessage?: string  // 原始描述（供迭代時提供上下文）

@@ -82,6 +82,7 @@ export async function executeIteration(input: {
   userFeedback: string
   redis: Redis
   io: SocketIOServer
+  imageUrls?: string[]
 }): Promise<void> {
   const { conversationId, projectId, userId, userFeedback, redis, io } = input
   const state = await getFlowState(redis, conversationId)
@@ -132,7 +133,8 @@ export async function executeIteration(input: {
         designBrief: state.uiuxDesignBrief,
         variantConcept: state.uiuxVariantConcept,
       },
-      { userId: state.userId || userId, conversationId, purpose: 'uiux_refine' }
+      { userId: state.userId || userId, conversationId, purpose: 'uiux_refine' },
+      input.imageUrls
     )
 
     if (!result.success || !result.pages) {

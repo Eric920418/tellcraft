@@ -78,7 +78,7 @@ npx ts-node bdd-spec/scripts/validate-feature.ts spec/features/
 |-------|------|-----|------|
 | `bdd-spec` | 需求釐清 + BDD 規格產出（ES → Discovery → Formulation → Actions → ISA） | Sonnet | 完成 |
 | `uiux` | 前端介面設計（Design Discovery → Design Lab → Implementation） | Sonnet | 完成 |
-| `fast-build` | 一句話快速建站，跳過 BDD/Discovery，5 分鐘出結果 | Sonnet ×3 | 完成 |
+| `fast-build` | 一句話快速建站，Haiku 概念生成 + Tier 智能修正 + Sonnet 三階段生成 | Haiku ×1 + Sonnet ×3 | 完成 |
 | `quality-gate` | UIUX RWD 完成後自動觸發，靜態檢查 + LLM 自動修復 | Haiku | 完成 |
 | `deployer` | 代碼 → sanitize → 本地 build 驗證 → Vercel 部署 → 回滾 | Haiku（修復） | 完成 |
 | `iteration` | 迭代修改 + 撤銷上一步 + 版本回滾 | Sonnet | 完成 |
@@ -345,7 +345,7 @@ Server Action 錯誤訊息 + 工具模組中文字串國際化（+117 keys，2 n
 | Design Brief 生成 | 3 | 1-4 Sonnet |
 | Design Variant 生成 | 2 | 1 Sonnet |
 | BDD Formulation | 5 | 2-5 Sonnet |
-| Fast Build 完整管線 | 8 | 3 Sonnet + QG |
+| Fast Build 完整管線 | 8 | 1 Haiku（概念）+ 3 Sonnet + QG |
 | Normal UIUX 完整管線 | 10 | 3-6 Sonnet + QG |
 | 迭代修改 (refineCode) | 3 | 1 Sonnet (大 context) |
 | 部署 | 2 | 0-7 Sonnet (平均低) |
@@ -390,7 +390,7 @@ Server Action 錯誤訊息 + 工具模組中文字串國際化（+117 keys，2 n
 |------|------|
 | **BDD 規格** | 5 階段釐清、Event Storming、提案模式、草稿批量、變更管理、規格回滾、Scenario Outline、OpenAPI 產出 |
 | **UIUX 設計** | 雙軌 Discovery、Design Tier、5 變體、三階段生成、串流即時預覽、BDD→UI 翻譯、Variant 概念注入 |
-| **快速建站** | 26 種產品類型、22 套產業配色、App/Website 佈局模式、模板風格整合、智能模板匹配 |
+| **快速建站** | 26 種產品類型、22 套產業配色、Haiku 概念生成（設計靈魂）、Tier 智能修正、vague 攔截引導、失敗重試、進度預估、手機全屏預覽、App/Website 佈局模式、模板風格整合、智能模板匹配 |
 | **品質** | Quality Gate 靜態檢查、LLM 自動修復、RWD 響應式安全網、Tailwind v4→v3 轉換 |
 | **部署** | sanitize 6 類預檢、本地 build 驗證（3 輪 LLM 修復）、Vercel 部署、版本回滾 |
 | **迭代** | 對話內迭代修改、撤銷上一步、部署歷史回滾、迭代歷史追蹤 |
@@ -589,6 +589,16 @@ psql "$DATABASE_URL" -f tellcraft-backend/migrations/xxx.sql
 
 <details>
 <summary><h2>開發更新紀錄（點擊展開）</h2></summary>
+
+### Fast Build 門面升級（2026-03-06）
+
+5 項升級提升 Fast Build 設計品質與 UX：
+1. **Haiku 概念生成**：+1 Haiku 調用生成 `FastConcept`（name/vibe/signatureElement/keyFeatures），注入 VariantConcept 驅動 Structure/Animation/RWD 三階段，設計獨特性大幅提升
+2. **Tier 智能修正**：Haiku 同時判斷 `suggestedTier`，與規則不一致時以 Haiku 為準（解決「有設計感的 dashboard」誤判）
+3. **Vague 輸入攔截**：`checkBuildRelevance` vague 分支拆開，回覆引導訊息 + quickReplies 範例（咖啡店/作品集/SaaS）
+4. **失敗重試**：結構失敗/catch 附帶 `__retry_fast_build__` quickReply，handleContinueFlow 攔截後用 `fastModeOriginalMessage` 重新生成
+5. **手機預覽 Modal**：< 768px 生成完成後顯示「查看預覽」按鈕，點擊展開全屏 SandpackPreview（含裝置切換 + 部署/修改按鈕）
+6. **進度預估**：每階段推送 `estimatedSecondsRemaining`（240→120→60），前端顯示 `~X min`，最後 30s 顯示「即將完成」
 
 ### LINE Bot 客服問答功能（2026-03-06）
 
@@ -869,11 +879,12 @@ Sandpack 預覽支援多頁面導航。之前 Header 的 Link 按鈕點擊後會
 - 選取元素以 chips 形式顯示在聊天輸入框上方，點 ✕ 可移除單個元素，「全部清除」清空選取
 - 發送訊息時自動附加選取元素上下文（標籤名 + 文字摘要 + 關鍵樣式），AI 根據上下文修改源碼
 - 發送後自動清空選取狀態
-- PropertyEditor 側邊欄（280px）：點擊元素後顯示屬性編輯器（文字/顏色/間距/圖片等即時編輯）
+- PropertyEditor 側邊欄（280px）：點擊元素後顯示屬性編輯器（文字/顏色/間距/圖片等即時編輯）；容器元素支援背景圖片上傳（backgroundImage/Size/Position/Repeat）
 - 拖曳把手：選取元素四角顯示 resize handles，拖曳調整尺寸
 - 批註系統：每個元素可添加修改說明，儲存時附加到訊息
 - Undo/Redo（Cmd+Z / Cmd+Shift+Z）+ 儲存按鈕：將所有覆蓋彙整為訊息發送給 AI
 - overrides/annotations localStorage 持久化（per conversation）
+- 聊天附圖迭代：textarea 旁附件按鈕（最多 3 張），上傳後 URL 傳到後端 `refineCode`，Sonnet Vision 根據截圖 + 文字修改代碼
 
 ### BDD 3D 動畫重設計（2026-02-26）
 
