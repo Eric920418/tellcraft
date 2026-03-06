@@ -3,7 +3,6 @@
 // db 直連已遷移至 VPS API，此導入已移除
 import { getCurrentUser, getAuthToken } from '../lib/auth'
 import { getTranslations } from 'next-intl/server'
-import { deployProject as deployProjectReal, generateNextJsTemplate } from './deploy'
 import * as vpsApi from '../lib/vps-api'
 // VPS API types imported as needed
 
@@ -1238,109 +1237,6 @@ export async function getProjectDetail(projectId: string): Promise<ActionResult<
 // ============================================================
 // 部署整合 Actions
 // ============================================================
-
-/**
- * 從資料庫取得專案 Schema
- * 優先從 generations 表讀取，否則返回空字串
- */
-async function getProjectSchema(_projectId: string): Promise<string> {
-  // TODO: 透過 VPS API 從 Storage 讀取 schema
-  // 暫時返回空 schema（用模板）
-  return ''
-}
-
-/**
- * 從資料庫或模板取得專案檔案
- */
-async function getProjectFiles(projectId: string): Promise<Array<{ file: string; data: string }>> {
-  // 優先從 Storage 讀取
-  // TODO: 實作 VPS API Storage 讀取
-
-  // 暫時使用模板，透過 VPS API 取得專案名稱
-  const token = await getAuthToken()
-  if (token) {
-    const result = await vpsApi.getProject({ projectId, token })
-    if (result.success && result.data) {
-      return generateNextJsTemplate(result.data.project.name || 'my-app', '')
-    }
-  }
-
-  return generateNextJsTemplate('my-app', '')
-}
-
-/**
- * 從資料庫部署專案（整合真正的 Vercel API）
- * - 前置：專案狀態必須為 testing
- * - 後置：部署成功後更新專案的 Vercel/Supabase 資訊
- */
-export async function deployProjectFromDb(input: {
-  projectId: string
-}): Promise<ActionResult<{ deploymentId: string; url?: string; status: string }>> {
-  const { projectId } = input
-  const t = await getTranslations('actionErrors')
-
-  const token = await getAuthToken()
-  if (!token) {
-    return { success: false, error: t('notAuthenticated') }
-  }
-
-  // 1. 透過 VPS API 查詢專案資訊
-  const projectResult = await vpsApi.getProject({ projectId, token })
-
-  if (!projectResult.success || !projectResult.data) {
-    return { success: false, error: projectResult.error || t('projectNotFound') }
-  }
-
-  const project = projectResult.data.project
-
-  // 2. 前置條件檢查
-  if (project.status !== 'testing') {
-    return { success: false, error: t('projectMustBeTesting') }
-  }
-
-  // 3. 讀取 schema
-  const schema = await getProjectSchema(projectId)
-
-  // 4. 讀取或生成程式碼
-  const files = await getProjectFiles(projectId)
-
-  // 5. 呼叫真正的部署 API
-  const result = await deployProjectReal({
-    name: project.name,
-    schema,
-    files,
-  })
-
-  // 6. 根據結果透過 VPS API 更新狀態
-  if (result.stage === 'complete') {
-    await vpsApi.updateProjectStatus({
-      projectId,
-      status: 'deployed',
-      vercelUrl: result.deploymentUrl,
-      token,
-    })
-
-    return {
-      success: true,
-      data: {
-        deploymentId: result.vercelProjectId || '',
-        url: result.deploymentUrl,
-        status: result.stage,
-      },
-    }
-  }
-
-  // 部署失敗
-  return {
-    success: false,
-    data: {
-      deploymentId: '',
-      url: undefined,
-      status: result.stage,
-    },
-    error: result.error || result.message,
-  }
-}
 
 // ============================================================
 // BDD Session Actions
