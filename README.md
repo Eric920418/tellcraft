@@ -50,7 +50,7 @@ npx ts-node bdd-spec/scripts/validate-feature.ts spec/features/
 `VPS_API_URL` `NEXT_PUBLIC_VPS_API_URL` `NEXT_PUBLIC_VPS_WS_URL` `NEXT_PUBLIC_SUPABASE_URL` `NEXT_PUBLIC_SUPABASE_ANON_KEY` `NEXT_PUBLIC_LIFF_ID`
 
 **後端**（`tellcraft-backend/.env`）：
-`DATABASE_URL` `REDIS_URL` `JWT_SECRET` `ANTHROPIC_API_KEY` `GOOGLE_CLIENT_ID` `GOOGLE_CLIENT_SECRET` `LINE_CHANNEL_ID` `LINE_CHANNEL_SECRET` `LINE_BOT_CHANNEL_SECRET` `LINE_MESSAGING_CHANNEL_ACCESS_TOKEN` `LIFF_ID` `UPLOAD_DIR` `UPLOAD_BASE_URL`
+`DATABASE_URL` `REDIS_URL` `JWT_SECRET` `ANTHROPIC_API_KEY` `GOOGLE_CLIENT_ID` `GOOGLE_CLIENT_SECRET` `LINE_CHANNEL_ID` `LINE_CHANNEL_SECRET` `LINE_BOT_CHANNEL_SECRET` `LINE_MESSAGING_CHANNEL_ACCESS_TOKEN` `LIFF_ID` `UPLOAD_DIR` `UPLOAD_BASE_URL` `SOCKET_VERBOSE_LOG`
 
 ## 系統架構
 
@@ -472,6 +472,20 @@ sudo cp nginx/tellcraft.conf /etc/nginx/sites-available/tellcraft
 sudo ln -s /etc/nginx/sites-available/tellcraft /etc/nginx/sites-enabled/
 sudo nginx -t && sudo systemctl reload nginx
 
+# 5.5 高併發 WebSocket（必做，否則容易在 ~700 連線附近出現 websocket error）
+# /etc/nginx/nginx.conf：提高 worker 連線上限
+sudo sed -i 's/worker_processes .*/worker_processes auto;/' /etc/nginx/nginx.conf
+sudo sed -i 's/worker_connections .*/worker_connections 16384;/' /etc/nginx/nginx.conf
+
+# 提高檔案描述符限制
+echo '* soft nofile 200000' | sudo tee -a /etc/security/limits.conf
+echo '* hard nofile 200000' | sudo tee -a /etc/security/limits.conf
+echo 'fs.file-max = 400000' | sudo tee /etc/sysctl.d/99-tellcraft.conf
+sudo sysctl --system
+
+# 套用設定
+sudo nginx -t && sudo systemctl restart nginx
+
 # 6. 上傳目錄（圖片上傳功能）
 mkdir -p /var/www/uploads/tellcraft
 
@@ -508,6 +522,9 @@ curl -s http://localhost:8080/health
 # 健康檢查
 curl http://54.238.4.117:8080/health
 # 預期: {"status":"ok","services":{"database":"connected","redis":"connected"}}
+
+# 並發監控（含 Socket 即時連線/峰值/錯誤分類）
+curl http://54.238.4.117:8080/health/stats
 
 # 即時日誌
 pm2 logs tellcraft-backend --lines 100

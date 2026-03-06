@@ -3,11 +3,9 @@
 import { useState } from 'react'
 import { useTranslations } from 'next-intl'
 import { Link } from '@/i18n/navigation'
-import { testDeploymentConfig, generateNextJsTemplate } from '@/app/actions/deploy'
-import { listProjects } from '@/app/actions/supabase'
 import { listVercelProjects } from '@/app/actions/vercel'
 import { listZones } from '@/app/actions/cloudflare'
-import { searchDomain, deployWithFreeDomain } from '@/app/actions/domain'
+import { searchDomain } from '@/app/actions/domain'
 import { getDomainPricing, pingPorkbun } from '@/app/actions/porkbun'
 
 export default function TestPage() {
@@ -21,44 +19,6 @@ export default function TestPage() {
   }
 
   const clear = () => setOutput('')
-
-  const testConfig = async () => {
-    setLoading(true)
-    clear()
-    log(t('testingApiConfig') + '...\n')
-
-    try {
-      const result = await testDeploymentConfig()
-      log(`Supabase: ${result.supabase.configured ? '✅ ' + t('configured') : '❌ ' + t('notConfigured')} ${result.supabase.error || ''}`)
-      log(`Vercel: ${result.vercel.configured ? '✅ ' + t('configured') : '❌ ' + t('notConfigured')} ${result.vercel.error || ''}`)
-    } catch (err) {
-      log(`${t('error')}: ${err}`)
-    }
-
-    setLoading(false)
-  }
-
-  const testSupabase = async () => {
-    setLoading(true)
-    clear()
-    log(t('listingSupabaseProjects') + '...\n')
-
-    try {
-      const result = await listProjects()
-      if (result.success) {
-        log(`${t('found')} ${result.projects?.length || 0} Projects:`)
-        result.projects?.forEach(p => {
-          log(`  - ${p.name} (${p.id}) [${p.status}]`)
-        })
-      } else {
-        log(`${t('error')}: ${result.error}`)
-      }
-    } catch (err) {
-      log(`${t('error')}: ${err}`)
-    }
-
-    setLoading(false)
-  }
 
   const testVercel = async () => {
     setLoading(true)
@@ -188,45 +148,6 @@ export default function TestPage() {
     setLoading(false)
   }
 
-  const testFreeDeploy = async () => {
-    setLoading(true)
-    clear()
-
-    const projectName = `test-${Date.now()}`
-    log(`${t('testingFreeDomainDeploy')}...\n`)
-    log(`${t('projectName')}: ${projectName}`)
-
-    try {
-      const files = await generateNextJsTemplate(projectName, '')
-
-      log('\n' + t('generatedFiles') + ':')
-      files.forEach(f => log(`  - ${f.file}`))
-
-      log('\n' + t('deployingMayTakeMinutes') + '...')
-
-      const result = await deployWithFreeDomain(projectName, files)
-
-      log(`\n${t('deployResult')}:`)
-      log(`  ${t('status')}: ${result.status}`)
-      log(`  ${t('message')}: ${result.message}`)
-      log(`  ${t('progress')}: ${result.progress}%`)
-
-      if (result.vercelProjectId) {
-        log(`  Vercel Project ID: ${result.vercelProjectId}`)
-      }
-      if (result.vercelDeploymentUrl) {
-        log(`  ${t('deployUrl')}: ${result.vercelDeploymentUrl}`)
-      }
-      if (result.error) {
-        log(`  ${t('error')}: ${result.error}`)
-      }
-    } catch (err) {
-      log(`${t('error')}: ${err}`)
-    }
-
-    setLoading(false)
-  }
-
   return (
     <div style={{ padding: 32, fontFamily: 'var(--font-sans)', maxWidth: 1000, margin: '0 auto' }}>
       <h1 style={{ marginBottom: 8, fontSize: 24 }}>{t("pageTitle")}</h1>
@@ -236,10 +157,6 @@ export default function TestPage() {
       <div style={{ marginBottom: 32 }}>
         <h2 style={{ fontSize: 14, color: '#a3a3a3', marginBottom: 12, textTransform: 'uppercase', letterSpacing: '0.05em' }}>{t("apiConnection")}</h2>
         <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
-          <button onClick={testConfig} disabled={loading} style={btnStyle}>{t("testConfig")}</button>
-          <button onClick={testSupabase} disabled={loading} style={btnStyle}>
-            Supabase
-          </button>
           <button onClick={testVercel} disabled={loading} style={btnStyle}>
             Vercel
           </button>
@@ -269,24 +186,6 @@ export default function TestPage() {
           />
           <button onClick={testDomainSearch} disabled={loading} style={btnStyle}>{t("search")}</button>
         </div>
-      </div>
-
-      {/* 部署測試 */}
-      <div style={{ marginBottom: 32 }}>
-        <h2 style={{ fontSize: 14, color: '#a3a3a3', marginBottom: 12, textTransform: 'uppercase', letterSpacing: '0.05em' }}>{t("deployTest")}</h2>
-        <button
-          onClick={testFreeDeploy}
-          disabled={loading}
-          style={{
-            ...btnStyle,
-            background: loading ? '#f5f5f5' : '#1a1a1a',
-            color: loading ? '#a3a3a3' : '#fff',
-            borderColor: '#1a1a1a',
-          }}
-        >
-          {loading ? t('executing') : t('testFreeDomainDeploy')}
-        </button>
-        <p style={{ fontSize: 12, color: '#a3a3a3', marginTop: 8 }}>{t("deployWarning")}</p>
       </div>
 
       {/* 輸出 */}

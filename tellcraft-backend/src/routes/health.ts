@@ -5,6 +5,7 @@ import * as fsPromises from 'fs/promises'
 import { testConnection, pool } from '../db/client'
 import { getLlmConcurrencyStats } from '../services/uiux-generation'
 import { getDeployConcurrencyStats } from '../services/deployer'
+import { getSocketMetrics } from '../services/socket-metrics'
 import { requireAdmin } from '../middleware/auth'
 
 const router: RouterType = Router()
@@ -42,6 +43,7 @@ router.get('/stats', async (_req, res) => {
     const memUsage = process.memoryUsage()
     const llmStats = getLlmConcurrencyStats()
     const deployStats = getDeployConcurrencyStats()
+    const socketStats = getSocketMetrics()
 
     // DB 連接池狀態
     const dbStats = {
@@ -67,6 +69,7 @@ router.get('/stats', async (_req, res) => {
       concurrency: {
         llm: llmStats,
         deploy: deployStats,
+        socket: socketStats,
       },
       database: dbStats,
       tmpBuildDirs,

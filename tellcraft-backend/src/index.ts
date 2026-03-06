@@ -30,6 +30,11 @@ import lineBotRoutes from './routes/line-bot'
 import { initLineBotHandler } from './services/line-bot-handler'
 import { cleanupExpiredGuestUsers } from './services/guest-cleanup'
 import { scanAndRecoverStuckFlowStates } from './services/flowstate-recovery'
+import {
+  recordSocketConnected,
+  recordSocketDisconnected,
+  recordSocketEngineError,
+} from './services/socket-metrics'
 import { messagingApi as lineMessagingApi } from '@line/bot-sdk'
 import { setAuthRedisClient } from './routes/auth'
 import { parseLogLine, sanitizeLogLine } from './utils/log-parser'
@@ -42,6 +47,7 @@ import { setMiddlewareRedisClient } from './middleware/auth'
 const PORT = parseInt(process.env.PORT || '3100', 10)
 const REDIS_URL = process.env.REDIS_URL || 'redis://localhost:6379'
 const CORS_ORIGIN = process.env.CORS_ORIGIN || 'https://tellcraft.com'
+const SOCKET_VERBOSE_LOG = process.env.SOCKET_VERBOSE_LOG === 'true'
 
 // ============================================================
 // Express 應用
@@ -90,6 +96,9 @@ const io = new SocketIOServer(server, {
     credentials: true,
   },
   transports: ['websocket', 'polling'],
+  // Disable compression to reduce CPU spikes under high concurrent sockets.
+  perMessageDeflate: false,
+  httpCompression: false,
   pingTimeout: 60000,
   pingInterval: 25000,
   maxHttpBufferSize: 5e6,
@@ -124,8 +133,17 @@ io.use((socket, next) => {
   return next(new Error('Authentication required'))
 })
 
+io.engine.on('connection_error', (err) => {
+  const reason = err.message || err.code || 'engine_connection_error'
+  recordSocketEngineError(String(reason))
+  console.warn('[Socket] engine connection_error:', reason)
+})
+
 io.on('connection', (socket) => {
-  console.log(`[Socket] 連接: ${socket.id} (user: ${socket.data.userId || 'anon:' + socket.data.anonymousId})`)
+  recordSocketConnected()
+  if (SOCKET_VERBOSE_LOG) {
+    console.log(`[Socket] 連接: ${socket.id} (user: ${socket.data.userId || 'anon:' + socket.data.anonymousId})`)
+  }
 
   // 訂閱對話（含所有權驗證）
   socket.on('subscribe', async (conversationId: string) => {
@@ -174,7 +192,9 @@ io.on('connection', (socket) => {
       }
 
       socket.join(`conversation:${conversationId}`)
-      console.log(`[Socket] ${socket.id} 訂閱對話: ${conversationId}`)
+      if (SOCKET_VERBOSE_LOG) {
+        console.log(`[Socket] ${socket.id} 訂閱對話: ${conversationId}`)
+      }
     } catch (err) {
       console.error('[Socket] subscribe error:', err)
       socket.emit('error', { message: 'Subscribe failed' })
@@ -184,7 +204,9 @@ io.on('connection', (socket) => {
   // 取消訂閱
   socket.on('unsubscribe', (conversationId: string) => {
     socket.leave(`conversation:${conversationId}`)
-    console.log(`[Socket] ${socket.id} 取消訂閱: ${conversationId}`)
+    if (SOCKET_VERBOSE_LOG) {
+      console.log(`[Socket] ${socket.id} 取消訂閱: ${conversationId}`)
+    }
   })
 
   // ====== Admin Log Streaming ======
@@ -248,7 +270,9 @@ io.on('connection', (socket) => {
         tailProcess = null
       })
 
-      console.log(`[Socket] ${socket.id} 訂閱 admin logs (source: ${source})`)
+      if (SOCKET_VERBOSE_LOG) {
+        console.log(`[Socket] ${socket.id} 訂閱 admin logs (source: ${source})`)
+      }
       socket.emit('admin_logs_subscribed', { source })
     } catch (err) {
       console.error('[Socket] subscribe_admin_logs error:', err)
@@ -261,16 +285,21 @@ io.on('connection', (socket) => {
       tailProcess.kill()
       tailProcess = null
     }
-    console.log(`[Socket] ${socket.id} 取消訂閱 admin logs`)
+    if (SOCKET_VERBOSE_LOG) {
+      console.log(`[Socket] ${socket.id} 取消訂閱 admin logs`)
+    }
   })
 
   socket.on('disconnect', () => {
+    recordSocketDisconnected()
     // 清除 tail 進程
     if (tailProcess) {
       tailProcess.kill()
       tailProcess = null
     }
-    console.log(`[Socket] 斷開: ${socket.id}`)
+    if (SOCKET_VERBOSE_LOG) {
+      console.log(`[Socket] 斷開: ${socket.id}`)
+    }
   })
 })
 

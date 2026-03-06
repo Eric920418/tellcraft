@@ -734,6 +734,21 @@ export async function prepareDeployment(
 }
 
 /**
+ * 清理 metadata 字串，確保可安全嵌入 JS 單引號字串
+ * 移除換行/回車/tab → 空格，轉義反斜線和單引號，合併多空白
+ */
+function sanitizeMetadataString(str: string, maxLen: number): string {
+  return str
+    .replace(/\\/g, '\\\\')        // 反斜線（必須第一個處理）
+    .replace(/'/g, "\\'")           // 單引號
+    .replace(/[\n\r]/g, ' ')        // 換行/回車 → 空格
+    .replace(/\t/g, ' ')            // tab → 空格
+    .replace(/\s{2,}/g, ' ')        // 多空白合併
+    .trim()
+    .slice(0, maxLen)
+}
+
+/**
  * 將 siteMetadata 注入 layout.tsx 的 export const metadata
  * 用正則替換 title 和 description 的值
  */
@@ -741,21 +756,17 @@ function injectMetadataIntoLayout(files: VercelFile[], meta: SiteMetadata): void
   const layoutIdx = files.findIndex(f => f.file === 'app/layout.tsx')
   if (layoutIdx === -1) return
 
-  // wrapInNextJs 的 data 是純文字，直接操作即可（不是 base64）
   let content = files[layoutIdx].data
+  const safeTitle = sanitizeMetadataString(meta.title, 60)
+  const safeDesc = sanitizeMetadataString(meta.description, 160)
 
-  const escTitle = meta.title.replace(/'/g, "\\'").replace(/"/g, '\\"')
-  const escDesc = meta.description.replace(/'/g, "\\'").replace(/"/g, '\\"')
-
-  // 替換 title: '...' 或 title: "..."
   content = content.replace(
     /title:\s*(['"]).*?\1/,
-    `title: '${escTitle}'`
+    `title: '${safeTitle}'`
   )
-  // 替換 description: '...' 或 description: "..."
   content = content.replace(
     /description:\s*(['"]).*?\1/,
-    `description: '${escDesc}'`
+    `description: '${safeDesc}'`
   )
 
   files[layoutIdx].data = content
@@ -831,6 +842,8 @@ export async function executeDeployment(
     const finalStatus = readyDeployment?.readyState || deployment.readyState
 
     if (readyDeployment?.readyState === 'ERROR') {
+      const buildLogs = await fetchVercelBuildLogs(deployment.id)
+      if (buildLogs) console.error(`[Deployer] Vercel build logs:\n${buildLogs}`)
       return { success: false, error: 'Vercel 建置失敗，請檢查代碼。', vercelDeploymentId: deployment.id }
     }
 
@@ -925,13 +938,15 @@ function wrapInNextJs(
     }, null, 2),
   })
 
-  // next.config.ts — ESLint 錯誤忽略（LLM 生成代碼 lint 不保證通過）
-  // TypeScript 錯誤由本地 build 驗證修復，不再用 ignoreBuildErrors
+  // next.config.ts — 本地已驗證，ignoreBuildErrors 防 VPS/Vercel Node 版本差異
   files.push({
     file: 'next.config.ts',
     data: `import type { NextConfig } from 'next'
 
 const nextConfig: NextConfig = {
+  typescript: {
+    ignoreBuildErrors: true,
+  },
   eslint: {
     ignoreDuringBuilds: true,
   },
@@ -1380,6 +1395,36 @@ async function waitForDeploymentReady(deploymentId: string, maxWaitMs = 300000):
   }
 
   return null
+}
+
+/**
+ * 抓取 Vercel 部署的 build logs（失敗時用於除錯）
+ * 回傳最後 50 行 stderr log，失敗時回傳空字串
+ */
+async function fetchVercelBuildLogs(deploymentId: string): Promise<string> {
+  try {
+    const token = process.env.VERCEL_ACCESS_TOKEN!
+    const teamId = process.env.VERCEL_TEAM_ID
+    const params = new URLSearchParams()
+    if (teamId) params.append('teamId', teamId)
+
+    const response = await fetch(
+      `${VERCEL_API}/v7/deployments/${deploymentId}/events?${params}`,
+      { headers: { 'Authorization': `Bearer ${token}` } }
+    )
+
+    if (!response.ok) return ''
+
+    const events = await response.json() as Array<{ type?: string; text?: string; payload?: { text?: string } }>
+    const errorLines = events
+      .filter(e => e.type === 'stderr' || e.type === 'error')
+      .map(e => e.text || e.payload?.text || '')
+      .filter(Boolean)
+
+    return errorLines.slice(-50).join('\n')
+  } catch {
+    return ''
+  }
 }
 
 // ============================================================

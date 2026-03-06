@@ -3,8 +3,6 @@
 // 注意：這個模組直接在服務器端使用，不是 Server Actions
 // ============================================================
 
-import { db } from './db'
-
 const ANTHROPIC_API = 'https://api.anthropic.com/v1/messages'
 
 // Claude 定價 (每百萬 tokens，美元)
@@ -126,20 +124,8 @@ async function logLlmUsage(
   cost: number,
   context?: LlmTrackingContext
 ): Promise<void> {
-  try {
-    await db.from('llm_usage').insert({
-      user_id: context?.userId || null,
-      conversation_id: context?.conversationId || null,
-      model,
-      input_tokens: inputTokens,
-      output_tokens: outputTokens,
-      cost_usd: cost,
-      purpose: context?.purpose || null,
-    })
-    console.log(`[LLM] Usage recorded: ${inputTokens} in / ${outputTokens} out, $${cost.toFixed(6)}`)
-  } catch (err) {
-    console.error('[LLM] Usage recording failed:', err)
-  }
+  // LLM usage is now recorded by VPS backend (tellcraft-backend/src/db/client.ts recordLlmUsage)
+  console.log(`[LLM] Usage: ${inputTokens} in / ${outputTokens} out, $${cost.toFixed(6)}`)
 }
 
 /**

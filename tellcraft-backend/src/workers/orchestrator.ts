@@ -6417,13 +6417,17 @@ async function handleDeployExecute(
     }
 
     if (!metaDesc && state.fastModeOriginalMessage) {
-      metaDesc = state.fastModeOriginalMessage.slice(0, 160)
+      metaDesc = state.fastModeOriginalMessage
+        .replace(/[\n\r]+/g, ' ')
+        .replace(/\s{2,}/g, ' ')
+        .trim()
+        .slice(0, 160)
     }
 
     if (metaTitle) {
       siteMetadata = {
-        title: metaTitle,
-        description: metaDesc || metaTitle,
+        title: metaTitle.replace(/[\n\r]+/g, ' ').trim().slice(0, 100),
+        description: (metaDesc || metaTitle).replace(/[\n\r]+/g, ' ').trim().slice(0, 300),
       }
       console.log(`[Orchestrator] Site metadata: title="${metaTitle}", desc="${(metaDesc || metaTitle).slice(0, 50)}"`)
     }
