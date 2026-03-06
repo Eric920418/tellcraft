@@ -1037,6 +1037,16 @@ router.delete('/:id', requireAuth, async (req, res) => {
         'DELETE FROM tasks WHERE project_id = $1',
         [id]
       )
+      // 刪除 LINE 活躍對話映射（conversation_id FK 無 CASCADE）
+      await client.query(
+        'DELETE FROM line_active_conversations WHERE conversation_id IN (SELECT id FROM conversations WHERE project_id = $1)',
+        [id]
+      )
+      // 刪除 Flow States（conversation_id 可能有 FK）
+      await client.query(
+        'DELETE FROM flow_states WHERE conversation_id IN (SELECT id FROM conversations WHERE project_id = $1)',
+        [id]
+      )
       // 刪除 Conversations
       await client.query(
         'DELETE FROM conversations WHERE project_id = $1',

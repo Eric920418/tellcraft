@@ -59,6 +59,7 @@ import { analyzeChangeImpact, executeChange, verifyConsistency, rollbackChange, 
 import type { FlowState } from '../types/flow-state'
 import { sendMessage, saveFlowState, getFlowState, deleteFlowState, makeStreamingCallback, generatedCodeToFileRows } from './orchestrator-utils'
 import { sanitizeClarifyForDisplay, sanitizeForDisplay } from '../utils/white-text-sanitizer'
+import { detectFastModeIntent, getFaqReply, answerWithSonnet } from '../services/customer-service'
 
 // ============================================================
 // 類型定義
@@ -189,65 +190,6 @@ function hasRollbackSpecIntent(msg: string): boolean {
   return keywords.some(k => msg.includes(k))
 }
 
-interface GreetingCheck {
-  match: boolean
-  type: 'greeting' | 'chitchat' | 'acknowledgment' | null
-}
-
-function isGreetingOrChitchat(msg: string): GreetingCheck {
-  const trimmed = msg.trim()
-  const lower = trimmed.toLowerCase()
-
-  // 問候語（精確匹配）
-  const greetings = [
-    /^(嗨|你好|哈囉|嘿|哈嘍)$/,
-    /^(hello|hi|hey|yo|sup|howdy)$/i,
-    /^(早安|午安|晚安)$/,
-    /^(good morning|good afternoon|good evening|good night)$/i,
-  ]
-  if (greetings.some(r => r.test(trimmed))) {
-    return { match: true, type: 'greeting' }
-  }
-
-  // 確認/致謝（精確匹配）
-  const acknowledgments = [
-    /^(好|好的|收到|了解|知道了|嗯|喔|哦|是的|對|沒問題)$/,
-    /^(謝謝|感謝|3q)$/,
-    /^(ok|okay|sure|yep|yup|yeah|yes|no|nope|nah|alright|right|got it|noted|understood|roger)$/i,
-    /^(thanks|thank you|thx|ty|cheers)$/i,
-    /^(nice|cool|great|awesome|good|perfect|sweet|neat|wonderful|amazing|excellent|fantastic|brilliant|lovely|wow)$/i,
-    /^(lol|lmao|rofl|heh|hehe|haha|hahaha|lmfao)$/i,
-  ]
-  if (acknowledgments.some(r => r.test(trimmed))) {
-    return { match: true, type: 'acknowledgment' }
-  }
-
-  // 閒聊
-  const chitchatZh = [
-    '天氣', '幾點', '你是誰', '你叫什麼', '講笑話', '說笑話', '幾歲',
-    '吃什麼', '吃飯', '掰掰', '再見',
-    '無聊', '好無聊', '你好嗎', '在嗎', '在不在',
-  ]
-  const chitchatEn = [
-    'weather', 'what time', 'who are you', 'what are you', 'tell me a joke',
-    'how old', 'what\'s your name', 'goodbye', 'bye bye', 'see you', 'see ya',
-    'i\'m bored', 'bored', 'how are you', 'what\'s up', 'wassup',
-    'are you there', 'anyone there', 'what can you do', 'who made you',
-  ]
-  const laughPattern = /^[哈呵嘻哼嗯啊喔]{2,}$/
-  const laughPatternEn = /^(ha){2,}h?$/i
-  if (
-    chitchatZh.some(k => trimmed.includes(k))
-    || chitchatEn.some(k => lower.includes(k))
-    || laughPattern.test(trimmed)
-    || laughPatternEn.test(trimmed)
-    || /^bye$/i.test(trimmed)
-  ) {
-    return { match: true, type: 'chitchat' }
-  }
-
-  return { match: false, type: null }
-}
 
 // ============================================================
 // 迭代輸入預驗證（零 LLM 成本）
@@ -548,18 +490,82 @@ async function handleProcessMessage(
   // 注意：Fix 1 的 FlowState 檢查已涵蓋 fast_generating 的冪等保護，
   // 不需要在此重複讀取 FlowState
   if (mode === 'fast') {
-    // 預驗證 Layer 0：問候/閒聊偵測 — 新用戶發「嗨」走到這裡，用建站引導回覆
-    const greetCheckFast = isGreetingOrChitchat(message)
-    if (greetCheckFast.match) {
-      const isChinese = /[\u4e00-\u9fff\u3400-\u4dbf]/.test(message) || locale === 'zh'
-      console.log(`[Orchestrator] 快速模式問候攔截: type=${greetCheckFast.type}, msg="${message}"`)
-      await sendMessage(conversationId, io, {
-        content: isChinese
-          ? '嗨！告訴我你想做什麼網站，例如：\n- 「做一個花店官網」\n- 「做一個餐廳預約網站」\n- 「做一個個人作品集」'
-          : 'Hi! Tell me what kind of website you\'d like to build, e.g.:\n- "Build a flower shop website"\n- "Create a restaurant booking site"\n- "Make a personal portfolio"',
-        stage: 'info',
-      })
-      return { taskId: null, skill: null }
+    const isChinese = /[\u4e00-\u9fff\u3400-\u4dbf]/.test(message) || locale === 'zh'
+
+    // 預驗證 Layer 0：意圖偵測（問候/問題/閒聊/使用說明）
+    const intentCheck = detectFastModeIntent(message)
+    if (intentCheck.match) {
+      console.log(`[Orchestrator] 快速模式意圖攔截: type=${intentCheck.type}, faqTopic=${intentCheck.faqTopic || 'N/A'}, msg="${message}"`)
+      const buildQuickReplies = [
+        { label: isChinese ? '開始建站' : 'Start Building', value: isChinese ? '做一個網站' : 'Build a website', style: 'primary' as const },
+      ]
+
+      if (intentCheck.type === 'greeting') {
+        await sendMessage(conversationId, io, {
+          content: isChinese
+            ? '嗨！我是 Tellcraft，AI 自動建站助手。告訴我你想做什麼網站，例如：\n- 「做一個花店官網」\n- 「做一個餐廳預約網站」\n- 「做一個個人作品集」'
+            : 'Hi! I\'m Tellcraft, your AI website builder. Tell me what kind of website you\'d like, e.g.:\n- "Build a flower shop website"\n- "Create a restaurant booking site"\n- "Make a personal portfolio"',
+          stage: 'customer_service',
+          quickReplies: buildQuickReplies,
+        })
+        return { taskId: null, skill: null }
+      }
+
+      if (intentCheck.type === 'acknowledgment') {
+        await sendMessage(conversationId, io, {
+          content: isChinese
+            ? '想建立網站嗎？直接告訴我你需要什麼就好！\n\n例如：「做一個咖啡店官網」'
+            : 'Want to build a website? Just tell me what you need!\n\ne.g. "Build a coffee shop website"',
+          stage: 'customer_service',
+          quickReplies: buildQuickReplies,
+        })
+        return { taskId: null, skill: null }
+      }
+
+      if (intentCheck.type === 'help') {
+        await sendMessage(conversationId, io, {
+          content: isChinese
+            ? '使用 Tellcraft 超簡單，只要三步：\n\n1. 描述需求 — 告訴我你想做什麼網站\n   例：「做一個花店官網」\n2. 預覽調整 — 查看生成結果，用自然語言修改\n   例：「把標題改大一點」\n3. 部署上線 — 說「部署」就自動上線！\n\n現在就試試吧！'
+            : 'Using Tellcraft is easy — just 3 steps:\n\n1. Describe — tell me what website you want\n   e.g. "Build a flower shop website"\n2. Preview & adjust — modify with natural language\n   e.g. "Make the title bigger"\n3. Deploy — say "deploy" to go live!\n\nTry it now!',
+          stage: 'customer_service',
+          quickReplies: buildQuickReplies,
+        })
+        return { taskId: null, skill: null }
+      }
+
+      if (intentCheck.type === 'question') {
+        // FAQ 命中 → 零 LLM 回覆
+        const faqResult = getFaqReply(message, locale)
+        if (faqResult) {
+          console.log(`[Orchestrator] FAQ 命中: topic=${faqResult.topic}`)
+          await sendMessage(conversationId, io, {
+            content: faqResult.reply,
+            stage: 'customer_service',
+            quickReplies: buildQuickReplies,
+          })
+          return { taskId: null, skill: null }
+        }
+        // FAQ 未命中 → Sonnet 回答
+        console.log(`[Orchestrator] FAQ 未命中，使用 Sonnet 回答`)
+        const sonnetReply = await answerWithSonnet(message, { conversationId, locale })
+        await sendMessage(conversationId, io, {
+          content: sonnetReply,
+          stage: 'customer_service',
+          quickReplies: buildQuickReplies,
+        })
+        return { taskId: null, skill: null }
+      }
+
+      if (intentCheck.type === 'chitchat') {
+        await sendMessage(conversationId, io, {
+          content: isChinese
+            ? '我是 Tellcraft 建站助手，專門幫你快速建立網站。想試試看嗎？直接告訴我你想做什麼！'
+            : 'I\'m Tellcraft, your website building assistant. Want to try? Just tell me what you\'d like to build!',
+          stage: 'customer_service',
+          quickReplies: buildQuickReplies,
+        })
+        return { taskId: null, skill: null }
+      }
     }
 
     // 預驗證 Layer 1：攔截亂碼等無意義輸入（零 LLM）
@@ -567,7 +573,6 @@ async function handleProcessMessage(
     if (!fastInputCheck.valid) {
       console.log(`[Orchestrator] 快速模式輸入被攔截: reason=${fastInputCheck.rejectReason}, msg="${message.substring(0, 50)}"`)
       // 使用建站語境引導（不用 isDesignFeedback 的修改語境 guideMessage）
-      const isChinese = /[\u4e00-\u9fff\u3400-\u4dbf]/.test(message) || locale === 'zh'
       await sendMessage(conversationId, io, {
         content: isChinese
           ? '請描述您想要建立的網站或應用，例如：\n- 「做一個咖啡店官網」\n- 「建立一個作品集網站」\n- 「做一個餐廳預約系統」'
@@ -1164,10 +1169,36 @@ async function handleContinueFlow(
       })
       return
     }
-    // 問候/閒聊攔截 — 在 semanticGateway 前，給出友善上下文引導
-    const greetCheck0 = isGreetingOrChitchat(trimmed)
-    if (greetCheck0.match) {
+    // 問候/問題/閒聊攔截 — 在 semanticGateway 前
+    const intentCheck0 = detectFastModeIntent(trimmed)
+    if (intentCheck0.match) {
       const isChinese = /[\u4e00-\u9fff]/.test(trimmed) || state.locale === 'zh'
+      // question → 客服回覆（不改變 FlowState）
+      if (intentCheck0.type === 'question') {
+        const faqResult = getFaqReply(trimmed, state.locale)
+        if (faqResult) {
+          await sendMessage(conversationId, io, {
+            content: faqResult.reply,
+            stage: 'customer_service',
+            quickReplies: [
+              { label: isChinese ? '重試部署' : 'Retry Deploy', value: '重試', style: 'primary' as const },
+              { label: isChinese ? '開始新專案' : 'New Project', value: '__new_project__', style: 'ghost' as const },
+            ],
+          })
+        } else {
+          const sonnetReply = await answerWithSonnet(trimmed, { conversationId, locale: state.locale })
+          await sendMessage(conversationId, io, {
+            content: sonnetReply,
+            stage: 'customer_service',
+            quickReplies: [
+              { label: isChinese ? '重試部署' : 'Retry Deploy', value: '重試', style: 'primary' as const },
+              { label: isChinese ? '開始新專案' : 'New Project', value: '__new_project__', style: 'ghost' as const },
+            ],
+          })
+        }
+        return
+      }
+      // greeting/acknowledgment/chitchat/help → 友善上下文引導
       await sendMessage(conversationId, io, {
         content: isChinese
           ? '嗨！部署之前遇到了問題。您可以：\n- 描述修改需求來調整設計\n- 點擊「重試部署」重新部署\n- 點擊「開始新專案」重新開始'
@@ -1748,10 +1779,34 @@ async function handleContinueFlow(
       await executeRollbackQuery({ conversationId, projectId: data.projectId, redis, io })
       return
     }
-    // 問候/閒聊攔截 — 在 semanticGateway 前，給出友善上下文引導
-    const greetCheck1 = isGreetingOrChitchat(trimmed)
-    if (greetCheck1.match) {
+    // 問候/問題/閒聊攔截 — 在 semanticGateway 前
+    const intentCheck1 = detectFastModeIntent(trimmed)
+    if (intentCheck1.match) {
       const isChinese = /[\u4e00-\u9fff]/.test(trimmed) || state.locale === 'zh'
+      if (intentCheck1.type === 'question') {
+        const faqResult = getFaqReply(trimmed, state.locale)
+        if (faqResult) {
+          await sendMessage(conversationId, io, {
+            content: faqResult.reply,
+            stage: 'customer_service',
+            quickReplies: [
+              { label: isChinese ? '部署上線' : 'Deploy', value: '部署', style: 'primary' as const },
+              { label: isChinese ? '開始新專案' : 'New Project', value: '__new_project__', style: 'ghost' as const },
+            ],
+          })
+        } else {
+          const sonnetReply = await answerWithSonnet(trimmed, { conversationId, locale: state.locale })
+          await sendMessage(conversationId, io, {
+            content: sonnetReply,
+            stage: 'customer_service',
+            quickReplies: [
+              { label: isChinese ? '部署上線' : 'Deploy', value: '部署', style: 'primary' as const },
+              { label: isChinese ? '開始新專案' : 'New Project', value: '__new_project__', style: 'ghost' as const },
+            ],
+          })
+        }
+        return
+      }
       await sendMessage(conversationId, io, {
         content: isChinese
           ? '嗨！您的網站已經部署上線了。您可以：\n- 描述修改需求來調整設計\n- 點擊「部署上線」更新網站\n- 點擊「開始新專案」重新開始'
@@ -2036,10 +2091,32 @@ async function handleContinueFlow(
         return
       }
 
-      // 問候/閒聊攔截 — 在 semanticGateway 前，給出友善上下文引導
-      const greetCheck2 = isGreetingOrChitchat(trimmed)
-      if (greetCheck2.match) {
+      // 問候/問題/閒聊攔截 — 在 semanticGateway 前
+      const intentCheck2 = detectFastModeIntent(trimmed)
+      if (intentCheck2.match) {
         const isChinese = /[\u4e00-\u9fff]/.test(trimmed) || state.locale === 'zh'
+        if (intentCheck2.type === 'question') {
+          const faqResult = getFaqReply(trimmed, state.locale)
+          const qr = [
+            { label: isChinese ? '部署上線' : 'Deploy', value: '部署', style: 'primary' as const },
+            { label: isChinese ? '開始新專案' : 'New Project', value: '__new_project__', style: 'ghost' as const },
+          ]
+          if (faqResult) {
+            await sendMessage(conversationId, io, {
+              content: faqResult.reply,
+              stage: 'customer_service',
+              quickReplies: qr,
+            })
+          } else {
+            const sonnetReply = await answerWithSonnet(trimmed, { conversationId, locale: state.locale })
+            await sendMessage(conversationId, io, {
+              content: sonnetReply,
+              stage: 'customer_service',
+              quickReplies: qr,
+            })
+          }
+          return
+        }
         await sendMessage(conversationId, io, {
           content: isChinese
             ? '嗨！您的設計已經完成了。您可以：\n- 描述修改需求來調整設計\n- 點擊「部署上線」發布網站\n- 點擊「開始新專案」重新開始'
