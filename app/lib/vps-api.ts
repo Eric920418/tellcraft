@@ -2015,5 +2015,38 @@ export function uploadImage(input: {
     })
 }
 
+// ============================================================
+// Admin 日誌監控
+// ============================================================
+
+export interface ParsedLogLine {
+  id: string
+  timestamp: string
+  tag: string | null
+  message: string
+  level: 'info' | 'warn' | 'error'
+  source: 'out' | 'error'
+  raw: string
+}
+
+/**
+ * 獲取 VPS 日誌（初始載入）
+ */
+export async function getAdminLogs(input: {
+  token: string
+  lines?: number
+  source?: 'all' | 'out' | 'error'
+  search?: string
+}): Promise<ApiResponse<{ lines: ParsedLogLine[]; total: number }>> {
+  const params = new URLSearchParams()
+  if (input.lines) params.append('lines', String(input.lines))
+  if (input.source) params.append('source', input.source)
+  if (input.search) params.append('search', input.search)
+
+  return apiRequest(`/api/dashboard/admin/logs?${params}`, {
+    headers: { Authorization: `Bearer ${input.token}` },
+  })
+}
+
 // 導出類型
 export type { ClarifyItem, BddSession }

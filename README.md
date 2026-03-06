@@ -738,6 +738,18 @@ BDD Q&A 動畫面板從 3D 鍛造車間場景改為**純 React 文字歷史紀�
 - **自動捲動**：新條目出現時自動捲動到底部
 - **移除依賴**：不再使用 Remotion Player、Three.js、@react-three/postprocessing
 
+### Sandpack 多頁面路由（2026-03-06）
+
+Sandpack 預覽支援多頁面導航。之前 Header 的 Link 按鈕點擊後會回到預覽首頁（因為 iframe 內無路由系統），現在用 hash-based routing 模擬 Next.js App Router。
+
+**實作**（僅修改 `sandpack-utils.ts`）：
+- **Router Context**：`SandpackRouterProvider` 監聽 `hashchange`，管理 `pathname` state
+- **Link shim**：攔截內部連結點擊 → `location.hash = '#/about'`，外部連結/錨點放行
+- **Navigation shim**：`usePathname()` 回傳當前路由（active link 高亮可用），`useRouter().push()` 更新 hash
+- **Entry point**：多頁時自動生成路由表，import 所有頁面，根據 pathname 動態渲染
+- **Layout 持久化**：Layout 包在 Router 外層，頁面切換時不重掛載
+- 單頁應用（landing page）保持原有邏輯不受影響
+
 ### Sandpack 串流預覽防閃爍（2026-02-28）
 
 修復精細模式 UIUX 三階段生成（Structure → Animation → RWD）期間 Sandpack 預覽面板不斷閃爍/白屏的問題。

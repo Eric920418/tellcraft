@@ -4679,6 +4679,7 @@ async function executeFullCodePipeline(
         uiSpec,
         variantConcept: state.uiuxVariantConcept,
         templateOverrides: state.templateOverrides,
+        referenceAnalysis: state.uiuxReferenceAnalysis,
       },
       { userId: state.userId, conversationId, purpose: 'uiux_structure' },
       makeStreamingCallback(conversationId, io, redis, 'structure', twConfig)
@@ -4923,6 +4924,7 @@ async function executeCodePhaseStructure(
       designBrief: state.uiuxDesignBrief,
       uiSpec: structUISpec,
       variantConcept: state.uiuxVariantConcept,
+      referenceAnalysis: state.uiuxReferenceAnalysis,
     },
     { userId: state.userId, conversationId, purpose: 'uiux_structure' },
     makeStreamingCallback(conversationId, io, redis, 'structure', twCfg)
@@ -5677,6 +5679,35 @@ async function completeDesignClarify(
     stage: 'uiux_design_clarify_complete',
   })
 
+  // 分析參考網站（如有 URL）
+  const referenceIdea = ideas.find(i => i.step === 'reference')
+  if (referenceIdea?.answer) {
+    try {
+      const { analyzeReference } = await import('../services/reference-analyzer')
+      const analysis = await analyzeReference(referenceIdea.answer, {
+        userId: state.userId,
+        conversationId,
+        purpose: 'reference_analysis',
+      })
+      state.uiuxReferenceAnalysis = analysis
+      await saveFlowState(redis, conversationId, state)
+
+      if (analysis.analysisSource === 'vision' && analysis.visionAnalysis) {
+        await sendMessage(conversationId, io, {
+          content: `已分析 **${analysis.metadata?.title || analysis.url}** 的設計風格，會融入後續方案。`,
+          stage: 'uiux_design_clarify_complete',
+        })
+      } else if (analysis.analysisSource === 'metadata_only') {
+        await sendMessage(conversationId, io, {
+          content: `已取得 **${analysis.metadata?.title || analysis.url}** 的基本資訊。`,
+          stage: 'uiux_design_clarify_complete',
+        })
+      }
+    } catch (err) {
+      console.warn('[Orchestrator] 參考網站分析失敗，降級為純文字:', err)
+    }
+  }
+
   // 取得 BDD Session
   if (!state.sessionId) {
     console.error('[Orchestrator] 缺少 sessionId')
@@ -5787,7 +5818,8 @@ async function startDesignBriefConfirm(
     productType,
     sourceType === 'ideas' ? (state.uiuxDesignIdeas || null) : null,
     sourceType,
-    { userId: state.userId, conversationId, purpose: 'uiux_brief' }
+    { userId: state.userId, conversationId, purpose: 'uiux_brief' },
+    state.uiuxReferenceAnalysis
   )
 
   if (!briefResult.success || !briefResult.brief) {
@@ -6051,7 +6083,8 @@ async function proceedToVariantGeneration(
     productType,
     state.uiuxDesignTier,
     { userId: state.userId, conversationId, purpose: 'uiux_variants' },
-    originalRequirements
+    originalRequirements,
+    state.uiuxReferenceAnalysis
   )
 
   if (!variantsResult.success || !variantsResult.variants) {

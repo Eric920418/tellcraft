@@ -3,8 +3,10 @@
  * 提供用戶儀表板所需的數據
  */
 import { Router, Request, Response } from 'express'
+import { execSync } from 'child_process'
 import { query, queryOne } from '../db/client'
 import { requireAuth, requireAdmin } from '../middleware/auth'
+import { parseLogLine, sanitizeLogLine, type ParsedLogLine } from '../utils/log-parser'
 import type Redis from 'ioredis'
 
 const router: Router = Router()
@@ -854,6 +856,68 @@ router.get('/admin/conversations/:conversationId/messages', requireAdmin, async 
   } catch (error) {
     console.error('[Dashboard] 獲取對話訊息失敗:', error)
     res.status(500).json({ error: '獲取對話訊息失敗' })
+  }
+})
+
+// ============================================================
+// Admin 日誌監控
+// ============================================================
+
+const LOG_FILES = {
+  out: '/var/log/tellcraft/out.log',
+  error: '/var/log/tellcraft/error.log',
+}
+
+/**
+ * GET /admin/logs
+ * 獲取最近 N 行 VPS 日誌
+ */
+router.get('/admin/logs', requireAdmin, async (req: Request, res: Response) => {
+  try {
+    const lines = Math.min(parseInt(req.query.lines as string) || 200, 1000)
+    const source = (req.query.source as string) || 'all'
+    const search = (req.query.search as string) || ''
+
+    const filesToRead = source === 'all'
+      ? [LOG_FILES.out, LOG_FILES.error]
+      : [LOG_FILES[source as keyof typeof LOG_FILES] || LOG_FILES.out]
+
+    const allLines: ParsedLogLine[] = []
+
+    for (const file of filesToRead) {
+      try {
+        const result = execSync(
+          `tail -n ${lines} "${file}"`,
+          { encoding: 'utf-8', timeout: 5000 }
+        )
+        const fileSource = file.includes('error') ? 'error' as const : 'out' as const
+        const parsed = result.split('\n')
+          .filter(Boolean)
+          .map(line => parseLogLine(line, fileSource))
+        allLines.push(...parsed)
+      } catch {
+        // 檔案不存在或無權限，跳過
+      }
+    }
+
+    // 按時間排序
+    allLines.sort((a, b) => a.timestamp.localeCompare(b.timestamp))
+
+    // 搜尋過濾
+    const filtered = search
+      ? allLines.filter(l =>
+          l.message.toLowerCase().includes(search.toLowerCase()) ||
+          (l.tag?.toLowerCase().includes(search.toLowerCase()) ?? false)
+        )
+      : allLines
+
+    // 敏感資訊遮罩
+    const sanitized = filtered.map(sanitizeLogLine)
+
+    res.json({ lines: sanitized, total: sanitized.length })
+  } catch (error) {
+    console.error('[Dashboard] 獲取日誌失敗:', error)
+    res.status(500).json({ error: '獲取日誌失敗' })
   }
 })
 

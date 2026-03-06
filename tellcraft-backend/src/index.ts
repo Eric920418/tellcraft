@@ -12,6 +12,7 @@ import * as os from 'os'
 import * as path from 'path'
 import * as fsPromises from 'fs/promises'
 
+import { spawn, type ChildProcessWithoutNullStreams } from 'child_process'
 import { testConnection, closePool } from './db/client'
 import { createOrchestratorWorker } from './workers/orchestrator'
 import conversationRoutes, { setOrchestratorQueue, setRedisClient } from './routes/conversation'
@@ -30,6 +31,7 @@ import { initLineBotHandler } from './services/line-bot-handler'
 import { scanAndRecoverStuckFlowStates } from './services/flowstate-recovery'
 import { messagingApi as lineMessagingApi } from '@line/bot-sdk'
 import { setAuthRedisClient } from './routes/auth'
+import { parseLogLine, sanitizeLogLine } from './utils/log-parser'
 import { setMiddlewareRedisClient } from './middleware/auth'
 
 // ============================================================
@@ -184,7 +186,89 @@ io.on('connection', (socket) => {
     console.log(`[Socket] ${socket.id} 取消訂閱: ${conversationId}`)
   })
 
+  // ====== Admin Log Streaming ======
+  let tailProcess: ChildProcessWithoutNullStreams | null = null
+
+  socket.on('subscribe_admin_logs', async (options?: { source?: 'all' | 'out' | 'error' }) => {
+    try {
+      // 驗證 admin 身份（查 DB，不信任 JWT payload）
+      if (!socket.data.userId) {
+        socket.emit('error', { message: 'Authentication required' })
+        return
+      }
+
+      const { queryOne: dbQueryOne } = await import('./db/client')
+      const adminCheck = await dbQueryOne<{ is_admin: boolean }>(
+        'SELECT is_admin FROM users WHERE id = $1',
+        [socket.data.userId]
+      )
+
+      if (!adminCheck?.is_admin) {
+        socket.emit('error', { message: 'Admin required' })
+        return
+      }
+
+      // 清除之前的 tail 進程
+      if (tailProcess) {
+        tailProcess.kill()
+        tailProcess = null
+      }
+
+      const source = options?.source || 'all'
+      const LOG_FILES = {
+        out: '/var/log/tellcraft/out.log',
+        error: '/var/log/tellcraft/error.log',
+      }
+      const files = source === 'all'
+        ? [LOG_FILES.out, LOG_FILES.error]
+        : [LOG_FILES[source as keyof typeof LOG_FILES] || LOG_FILES.out]
+
+      // tail -F 支援 logrotate，-n 0 不讀歷史（歷史由 HTTP API 提供）
+      tailProcess = spawn('tail', ['-F', '-n', '0', ...files])
+
+      tailProcess.stdout.on('data', (data: Buffer) => {
+        const lines = data.toString().split('\n').filter(Boolean)
+        for (const line of lines) {
+          const parsed = parseLogLine(line, 'out')
+          const sanitized = sanitizeLogLine(parsed)
+          socket.emit('admin_log_line', sanitized)
+        }
+      })
+
+      tailProcess.stderr.on('data', (data: Buffer) => {
+        const errMsg = data.toString()
+        // tail -F 在檔案不存在時輸出警告到 stderr，忽略這些
+        if (!errMsg.includes('has become inaccessible') && !errMsg.includes('No such file')) {
+          console.error('[Admin Logs] tail stderr:', errMsg)
+        }
+      })
+
+      tailProcess.on('close', () => {
+        tailProcess = null
+      })
+
+      console.log(`[Socket] ${socket.id} 訂閱 admin logs (source: ${source})`)
+      socket.emit('admin_logs_subscribed', { source })
+    } catch (err) {
+      console.error('[Socket] subscribe_admin_logs error:', err)
+      socket.emit('error', { message: 'Failed to subscribe to logs' })
+    }
+  })
+
+  socket.on('unsubscribe_admin_logs', () => {
+    if (tailProcess) {
+      tailProcess.kill()
+      tailProcess = null
+    }
+    console.log(`[Socket] ${socket.id} 取消訂閱 admin logs`)
+  })
+
   socket.on('disconnect', () => {
+    // 清除 tail 進程
+    if (tailProcess) {
+      tailProcess.kill()
+      tailProcess = null
+    }
     console.log(`[Socket] 斷開: ${socket.id}`)
   })
 })

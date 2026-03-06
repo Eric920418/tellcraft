@@ -85,19 +85,78 @@ export default function Image({ src, alt, fill, width, height, className, style,
 `
 
 const NEXT_LINK_SHIM = `import React from 'react';
-export default function Link({ href, children, className, style, ...rest }) {
-  return React.createElement('a', { href, className, style, ...rest }, children);
+import { useRouter } from './NextNavigation';
+export default function Link({ href, children, className, style, onClick, ...rest }) {
+  const router = useRouter();
+  function handleClick(e) {
+    if (onClick) onClick(e);
+    if (!href || href.startsWith('http') || href.startsWith('mailto:') || href.startsWith('tel:') || rest.target === '_blank') return;
+    if (href.startsWith('#') && !href.startsWith('#/')) {
+      e.preventDefault();
+      const el = document.getElementById(href.slice(1));
+      if (el) el.scrollIntoView({ behavior: 'smooth' });
+      return;
+    }
+    e.preventDefault();
+    router.push(href);
+  }
+  return React.createElement('a', { href, className, style, onClick: handleClick, ...rest }, children);
 }
 `
 
-const NEXT_NAVIGATION_SHIM = `export function useRouter() {
-  return { push: () => {}, replace: () => {}, back: () => {}, forward: () => {}, refresh: () => {}, prefetch: () => {} };
+const NEXT_NAVIGATION_SHIM = `import React from 'react';
+
+const RouterContext = React.createContext({ pathname: '/', push: (p) => {}, replace: (p) => {}, back: () => {}, forward: () => {}, refresh: () => {}, prefetch: () => {} });
+
+function getPathnameFromHash() {
+  const hash = typeof window !== 'undefined' ? window.location.hash : '';
+  if (hash.startsWith('#/')) return hash.slice(1);
+  return '/';
 }
-export function usePathname() { return '/'; }
+
+export function SandpackRouterProvider({ children }) {
+  const [pathname, setPathname] = React.useState(getPathnameFromHash);
+
+  React.useEffect(() => {
+    function onHashChange() {
+      setPathname(getPathnameFromHash());
+      window.scrollTo(0, 0);
+    }
+    window.addEventListener('hashchange', onHashChange);
+    return () => window.removeEventListener('hashchange', onHashChange);
+  }, []);
+
+  const router = React.useMemo(() => ({
+    pathname,
+    push: (path) => { window.location.hash = '#' + path; },
+    replace: (path) => {
+      const url = new URL(window.location.href);
+      url.hash = '#' + path;
+      window.history.replaceState(null, '', url.toString());
+      setPathname(path.startsWith('/') ? path : '/' + path);
+    },
+    back: () => { window.history.back(); },
+    forward: () => { window.history.forward(); },
+    refresh: () => { window.location.reload(); },
+    prefetch: () => {},
+  }), [pathname]);
+
+  return React.createElement(RouterContext.Provider, { value: router }, children);
+}
+
+export function useRouter() {
+  return React.useContext(RouterContext);
+}
+
+export function usePathname() {
+  const { pathname } = React.useContext(RouterContext);
+  return pathname;
+}
+
 export function useSearchParams() { return new URLSearchParams(); }
 export function useParams() { return {}; }
-export function redirect() {}
-export function notFound() {}
+export function redirect(path) { if (typeof window !== 'undefined') window.location.hash = '#' + path; }
+export function notFound() { console.warn('[Sandpack] notFound() called'); }
 `
 
 const NEXT_THEMES_SHIM = `import React from 'react';
@@ -916,6 +975,30 @@ function mapToSandpackPath(originalPath: string): string {
 }
 
 /**
+ * Sandpack 檔案路徑 → 路由路徑
+ * '/App.tsx' → '/'，'/app/about/page.tsx' → '/about'
+ */
+function sandpackPathToRoute(sandpackPath: string): string | null {
+  if (sandpackPath === '/App.tsx') return '/'
+  const match = sandpackPath.match(/^\/app\/(.+)\/page\.(tsx|jsx|ts|js)$/)
+  if (match) return '/' + match[1]
+  return null
+}
+
+/**
+ * 路由路徑 → React 組件 import 名稱
+ * '/' → 'PageHome'，'/about' → 'PageAbout'
+ */
+function routeToComponentName(route: string): string {
+  if (route === '/') return 'PageHome'
+  return 'Page' + route
+    .split('/')
+    .filter(Boolean)
+    .map(seg => seg.charAt(0).toUpperCase() + seg.slice(1).replace(/[^a-zA-Z0-9]/g, ''))
+    .join('')
+}
+
+/**
  * 掃描所有檔案的 import，收集需要安裝的 npm 依賴
  */
 function scanDependencies(files: Record<string, string>): Record<string, string> {
@@ -1297,7 +1380,55 @@ export function buildSandpackSetup(
     entryBody.push(`if (typeof window !== 'undefined' && (window as any).tailwind) { ${tailwindCdnScript} }`)
   }
 
-  if (hasLayout && hasApp) {
+  // 收集所有頁面路由
+  const pageRoutes: { route: string; sandpackPath: string; importName: string }[] = []
+  for (const key of Object.keys(files)) {
+    const route = sandpackPathToRoute(key)
+    if (route !== null) {
+      pageRoutes.push({ route, sandpackPath: key, importName: routeToComponentName(route) })
+    }
+  }
+  pageRoutes.sort((a, b) => (a.route === '/' ? -1 : b.route === '/' ? 1 : a.route.localeCompare(b.route)))
+
+  const isMultiPage = pageRoutes.length > 1
+
+  if (isMultiPage) {
+    // ── 多頁模式：hash-based routing ──
+    entryImports.push("import { SandpackRouterProvider, usePathname } from './shims/NextNavigation'")
+    if (hasLayout) entryImports.push("import Layout from './Layout'")
+    for (const pr of pageRoutes) {
+      const importPath = pr.sandpackPath.replace(/\.(tsx|jsx|ts|js)$/, '')
+      entryImports.push(`import ${pr.importName} from '${importPath}'`)
+    }
+
+    // 路由表 + Router 元件
+    const routeEntries = pageRoutes.map(pr => `  '${pr.route}': ${pr.importName}`).join(',\n')
+    entryBody.push(`const ROUTES: Record<string, React.ComponentType> = {\n${routeEntries}\n}`)
+    entryBody.push('')
+    entryBody.push(`function SandpackRouter() {`)
+    entryBody.push(`  const pathname = usePathname()`)
+    entryBody.push(`  const Page = ROUTES[pathname] || ROUTES['/'] || (() => React.createElement('div', null, 'Page not found'))`)
+    entryBody.push(`  return React.createElement(Page)`)
+    entryBody.push(`}`)
+    entryBody.push('')
+
+    if (hasLayout) {
+      entryBody.push(`createRoot(document.getElementById("root")!).render(`)
+      entryBody.push(`  React.createElement(SandpackRouterProvider, null,`)
+      entryBody.push(`    React.createElement(Layout, null,`)
+      entryBody.push(`      React.createElement(SandpackRouter)`)
+      entryBody.push(`    )`)
+      entryBody.push(`  )`)
+      entryBody.push(`)`)
+    } else {
+      entryBody.push(`createRoot(document.getElementById("root")!).render(`)
+      entryBody.push(`  React.createElement(SandpackRouterProvider, null,`)
+      entryBody.push(`    React.createElement(SandpackRouter)`)
+      entryBody.push(`  )`)
+      entryBody.push(`)`)
+    }
+  } else if (hasLayout && hasApp) {
+    // ── 單頁模式（向後兼容）──
     entryImports.push("import Layout from './Layout'")
     entryImports.push("import App from './App'")
     entryBody.push('createRoot(document.getElementById("root")).render(<Layout><App /></Layout>)')
@@ -1305,11 +1436,9 @@ export function buildSandpackSetup(
     entryImports.push("import App from './App'")
     entryBody.push('createRoot(document.getElementById("root")).render(<App />)')
   } else if (pages.length > 0) {
-    // 找第一個可用的頁面
     const firstPagePath = mapToSandpackPath(pages[0].path)
-    const importName = 'Page'
-    entryImports.push(`import ${importName} from '${firstPagePath.replace(/\.tsx$/, '')}'`)
-    entryBody.push(`createRoot(document.getElementById("root")).render(<${importName} />)`)
+    entryImports.push(`import Page from '${firstPagePath.replace(/\.tsx$/, '')}'`)
+    entryBody.push(`createRoot(document.getElementById("root")).render(<Page />)`)
   }
 
   files['/index.tsx'] = entryImports.join('\n') + '\n\n' + entryBody.join('\n') + '\n'

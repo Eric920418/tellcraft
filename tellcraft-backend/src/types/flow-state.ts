@@ -8,6 +8,7 @@ import type { QualityReport } from '../services/quality-gate'
 import type { DeployPreCheckResult, DeploymentRecord } from '../services/deployer'
 import type { UIRequirementsSpec } from '../services/bdd-to-ui-spec'
 import type { ESKnowledgeMap } from '../services/event-storming'
+import type { ReferenceAnalysis } from '../services/reference-analyzer'
 import type { ImpactAnalysis } from '../services/change-management'
 
 // ============================================================
@@ -60,6 +61,7 @@ export interface FlowState {
   // 設計釐清
   uiuxDesignClarifyStep?: number // 當前釐清步驟（1-4）
   uiuxDesignIdeas?: Array<{ step: string; answer: string }> // 用戶的設計想法
+  uiuxReferenceAnalysis?: ReferenceAnalysis // 參考網站分析結果（截圖 + Vision）
   // Design Brief 確認
   uiuxDesignBriefRound?: number
   uiuxDesignBrief?: DesignBrief

@@ -674,10 +674,21 @@ export async function generateDesignVariants(
   productType: string,
   designTier?: DesignTier,
   trackingContext?: LlmTrackingContext,
-  originalRequirements?: string
+  originalRequirements?: string,
+  referenceAnalysis?: import('./reference-analyzer').ReferenceAnalysis
 ): Promise<DesignVariantsResult> {
   const tier = designTier || 'functional'
   const axes = getVariantAxes(tier)
+
+  const referenceSection = referenceAnalysis?.visionAnalysis
+    ? `\n\n## 參考網站設計分析（真實數據 — 指導風格方向）
+URL: ${referenceAnalysis.url}
+${referenceAnalysis.metadata?.title ? `網站: ${referenceAnalysis.metadata.title}` : ''}
+
+${referenceAnalysis.visionAnalysis}
+
+設計變體應參考但不照搬這些設計特徵。提取其設計精神，結合產品需求做差異化。`
+    : ''
 
   const systemPrompt = `你是一位資深的 UI/UX 設計師和前端架構師。你的任務是為一個產品生成 5 個不同方向的設計變體。
 
@@ -690,7 +701,7 @@ BDD 規格列出了技術功能，但設計變體應服務於用戶的原始願�
 如果用戶 80% 的描述在講前端展覽動畫體驗，5 個變體都應圍繞前端體驗來差異化，
 不要圍繞後台管理介面的佈局差異。
 
-${originalRequirements || '（無原始描述）'}
+${originalRequirements || '（無原始描述）'}${referenceSection}
 
 ## 模板基礎
 - 名稱：${template.name}
@@ -1414,6 +1425,7 @@ export async function generateStructure(
     templateStyleHint?: string
     layoutMode?: 'app' | 'website'
     templateOverrides?: Record<string, Record<string, string>>
+    referenceAnalysis?: import('./reference-analyzer').ReferenceAnalysis
   },
   trackingContext?: LlmTrackingContext,
   onPartialCode?: PartialCodeCallback
@@ -2367,7 +2379,8 @@ export async function generateDesignBrief(
   productType: string,
   userIdeas: Array<{ step: string; answer: string }> | null,
   sourceType: 'ideas' | 'template',
-  trackingContext?: LlmTrackingContext
+  trackingContext?: LlmTrackingContext,
+  referenceAnalysis?: import('./reference-analyzer').ReferenceAnalysis
 ): Promise<{
   success: boolean
   brief?: DesignBrief
@@ -2385,6 +2398,25 @@ ${userIdeas.map(i => `- **${i.step}**: ${i.answer}`).join('\n')}`
 - 描述：${template.description}
 - 設計默認值：${JSON.stringify(template.designDefaults, null, 2)}`
 
+  // 參考網站真實分析（截圖 + Vision）
+  const referenceContext = referenceAnalysis?.visionAnalysis
+    ? `## 參考網站真實分析（基於截圖的 AI 視覺分析 — 高優先）
+URL: ${referenceAnalysis.url}
+${referenceAnalysis.metadata?.title ? `網站標題: ${referenceAnalysis.metadata.title}` : ''}
+${referenceAnalysis.metadata?.description ? `網站描述: ${referenceAnalysis.metadata.description}` : ''}
+
+### 視覺設計分析
+${referenceAnalysis.visionAnalysis}
+
+**重要**：以上分析基於真實截圖，你的 referenceAnalysis 輸出必須基於這些真實數據，不要編造或推測參考網站的設計特徵。`
+    : referenceAnalysis?.analysisSource === 'metadata_only' && referenceAnalysis.metadata?.title
+      ? `## 參考網站資訊（Metadata）
+URL: ${referenceAnalysis.url}
+標題: ${referenceAnalysis.metadata.title}
+${referenceAnalysis.metadata?.description ? `描述: ${referenceAnalysis.metadata.description}` : ''}
+${referenceAnalysis.metadata?.themeColor ? `主題色: ${referenceAnalysis.metadata.themeColor}` : ''}`
+      : ''
+
   const systemPrompt = `你是一位資深 UI/UX 設計顧問。你的任務是根據用戶提供的資訊，總結設計方向並給出專業建議。
 
 ## 產品類型
@@ -2396,6 +2428,8 @@ ${bddSpec || '（無規格）'}
 ${templateContext}
 
 ${ideasContext}
+
+${referenceContext}
 
 ## 你的角色
 ${sourceType === 'ideas'
@@ -2430,7 +2464,7 @@ ${sourceType === 'ideas'
   "styleSummary": "風格定位總結（1-2 句話）",
   "colorDirection": "色彩方向建議（1-2 句話）",
   "layoutSuggestion": "佈局建議（1-2 句話）",
-  "referenceAnalysis": "參考分析（基於用戶提到的參考或模板特色，1-2 句話）",
+  "referenceAnalysis": "參考分析（基於真實網站分析結果——如有的話，或基於模板特色，2-3 句話）",
   "professionalRecommendations": [
     "專業建議 1",
     "專業建議 2",
