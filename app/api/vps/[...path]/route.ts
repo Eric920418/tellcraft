@@ -96,8 +96,16 @@ export async function POST(
         body: rawBody,
       })
     } else {
-      // JSON：保持原邏輯
-      const body = await request.json()
+      // JSON：body 可能為空（如 POST /pin），需容錯
+      const text = await request.text()
+      let body: unknown = {}
+      if (text) {
+        try {
+          body = JSON.parse(text)
+        } catch {
+          // 非 JSON body，直接轉發原始文字
+        }
+      }
       response = await fetch(`${VPS_API_URL}${targetPath}`, {
         method: 'POST',
         headers: {
