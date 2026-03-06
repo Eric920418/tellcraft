@@ -48,6 +48,31 @@ export interface LlmTrackingContext {
   conversationId?: string
 }
 
+// ============================================================
+// 長文需求預過濾（跳過 Haiku，防止誤分類為 onboarding）
+// ============================================================
+
+const REQUIREMENT_KEYWORDS = /(?:做|建|設計|開發|想要|需要|功能|系統|網站|平台|頁面|app|介面|landing|官網|電商|作品集|展覽|預約|管理|商品|訂單|dashboard|portfolio|gallery|blog|scroll|animation|nav|three\.js|響應式|互動|選單|導航|首頁|子頁面|表單|登入|註冊|購物|部落格|風格|佈局|layout)/i
+
+/**
+ * 長文需求預過濾：超過 60 字且含需求關鍵詞 → 直接 bdd-spec
+ * 防止 Haiku 把詳細需求描述誤分類為 onboarding/chitchat
+ */
+function prefilterLongRequirement(message: string): ClassificationResult | null {
+  if (message.length < 60) return null
+  if (!REQUIREMENT_KEYWORDS.test(message)) return null
+
+  const entities = extractEntitiesFromMessage(message)
+  console.log(`[Classifier] 長文預過濾命中 (${message.length} 字)，直接分類為 bdd-spec`)
+  return {
+    intent: 'bdd-spec',
+    confidence: 0.95,
+    reasoning: `長文包含明確需求描述 (${message.length} 字)，直接分類為需求釐清`,
+    suggestedProjectName: deriveProjectName(message, entities),
+    extractedEntities: entities,
+  }
+}
+
 /**
  * 使用 AI 判斷用戶意圖
  */
@@ -56,6 +81,10 @@ export async function classifyIntent(
   conversationHistory?: Array<{ role: 'user' | 'assistant'; content: string }>,
   trackingContext?: LlmTrackingContext
 ): Promise<ClassificationResult> {
+  // 長文需求預過濾：直接 bdd-spec，省 Haiku 調用 + 避免誤分類
+  const prefiltered = prefilterLongRequirement(message)
+  if (prefiltered) return prefiltered
+
   const apiKey = process.env.ANTHROPIC_API_KEY
 
   if (!apiKey) {
@@ -236,8 +265,26 @@ ${skillDescriptions}
       ? parsed.contentFlag as ContentPolicyFlag
       : undefined
 
+    const intent = (parsed.intent || 'unknown') as ClassifierIntent
+
+    // 後驗證：Haiku 返回 meta-intent 但消息明顯是需求 → 覆寫為 bdd-spec
+    // 保留 contentFlag（仍需要內容政策檢查）
+    const metaIntents: string[] = ['onboarding', 'chitchat', 'abuse']
+    if (metaIntents.includes(intent) && message.length >= 30 && REQUIREMENT_KEYWORDS.test(message)) {
+      console.warn(`[Classifier] 後驗證覆寫：Haiku 返回 "${intent}" 但消息含需求關鍵詞 (${message.length} 字)，覆寫為 bdd-spec`)
+      const entities = extractEntitiesFromMessage(message)
+      return {
+        intent: 'bdd-spec',
+        confidence: 0.9,
+        reasoning: `Haiku 誤分類為 ${intent}，後驗證覆寫（${message.length} 字含需求關鍵詞）`,
+        contentFlag,
+        suggestedProjectName: parsed.suggestedProjectName || deriveProjectName(message, entities),
+        extractedEntities: parsed.extractedEntities || entities,
+      }
+    }
+
     return {
-      intent: (parsed.intent || 'unknown') as ClassifierIntent,
+      intent,
       confidence: parsed.confidence || 0.5,
       reasoning: parsed.reasoning || '',
       contentFlag,

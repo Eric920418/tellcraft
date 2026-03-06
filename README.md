@@ -91,7 +91,7 @@ npx ts-node bdd-spec/scripts/validate-feature.ts spec/features/
 
 | Service | LLM | 調用者 | 職責 |
 |---------|-----|--------|------|
-| `classifier.ts` | Haiku | 每條新訊息 | 意圖分類（規則式 + LLM）+ Content Policy 審查（contentFlag） |
+| `classifier.ts` | Haiku | 每條新訊息 | 意圖分類（長文預過濾 ≥60字 → 規則式 → LLM + 後驗證覆寫）+ Content Policy 審查（contentFlag） |
 | `prefilter.ts` | 無 / Haiku | 每條訊息（最先）+ Fast Mode | 空訊息/長度/Injection(28 regex)/品質閘門(亂碼+髒話+垃圾)/Rate Limit + `checkBuildRelevance()` 語義相關性 + Content Policy |
 | `semantic-gateway.ts` | Sonnet | BDD 釐清 + 設計問卷 + 迭代修改 | 統一語義閘門：quickFilter 零 LLM 短路（BDD 中文 ≥2/英文 ≥5 + Design 中文/URL + Iteration 關鍵詞，~90%+ 放行）+ Sonnet 語義判斷（verdict + 引導訊息生成）。BDD/Design API 錯誤 fail-open，Iteration fail-closed |
 | `bdd-to-ui-spec.ts` | Haiku | UIUX Pipeline | BDD Feature Files → UIRequirementsSpec |
@@ -990,7 +990,8 @@ Sandpack 取代 1105 行 regex 轉換器。支援 streaming 增量更新、裝�
 - **Phase-aware 品質閘門**：`handleContinueFlow` 內 phase 路由前二次攔截，嚴格度 strict/normal/lenient/skip 依 phase 調整，Redis anti-loop 計數器（連續 3 次垃圾強制放行防卡死）。`getPhaseQualityMessage()` 提供上下文感知的拒絕訊息（Q&A 階段引導選擇選項、設計階段引導描述偏好），取代 prefilter 的通用「做一個餐廳官網」訊息
 - **統一 Sonnet 語義閘門**：`semanticGateway()`（`semantic-gateway.ts`）取代 `analyzeAnswerRelevance` + `validateDesignAnswer`，quickFilter 零 LLM 短路 ~80-90% → Sonnet 六元 verdict + 直接生成引導訊息，BDD/Design/Iteration 三階段共用但嚴格度差異化（iteration anti-loop ≥2 次放行）
 - **違規升級**：Redis `violation:{userId}` 24h TTL，injection/abuse/offensive/contentPolicy 均累計，3 次→60s / 6 次→5min / 10 次→30min 冷卻
-- **正常模式**：Prefilter → Classifier（Meta Intent + Content Policy）→ Skill Intent
+- **長文預過濾**（2026-03-06）：`prefilterLongRequirement()` — ≥60 字 + 需求關鍵詞 → 直接 `bdd-spec`，跳過 Haiku（省成本 + 防誤分類）。後驗證：Haiku 返回 meta-intent 但 ≥30 字含關鍵詞 → 覆寫為 `bdd-spec`（保留 contentFlag）。**根因**：Haiku 會把 500+ 字的詳細需求誤分類為 `onboarding`
+- **正常模式**：Prefilter → **長文預過濾** → Classifier（Meta Intent + Content Policy + 後驗證）→ Skill Intent
 - **快速模式**：Prefilter → `detectFastModeIntent()`（greeting/question/chitchat/help 攔截 + FAQ/Sonnet 回覆）→ `isDesignFeedback()` → `checkBuildRelevance()`（強信號 ~80 詞 / 弱信號 Haiku 三元：通過/模糊/不相關 + Content Policy，**fail-closed**）
 - **迭代模式**：`semanticGateway({ phase: 'iteration' })` 取代 `isDesignFeedback()`（設計關鍵詞零 LLM 短路 ~80% + Sonnet 語義審核 ~20%）
 
