@@ -104,14 +104,16 @@ router.get('/stats', requireAuth, async (req, res) => {
       })
     }
 
+    const plan = user.plan || 'free'
+    const rawLimit = PLAN_MESSAGE_LIMITS[plan] || 50
     const stats = {
       totalProjects: projectCount,
       totalConversations: convCount,
       totalDeployments: deployCount,
       messageUsage: {
         used: user.message_count_this_period || 0,
-        limit: PLAN_MESSAGE_LIMITS[user.plan || 'free'] || 50,
-        plan: user.plan || 'free'
+        limit: rawLimit === Infinity ? -1 : rawLimit,
+        plan
       }
     }
 

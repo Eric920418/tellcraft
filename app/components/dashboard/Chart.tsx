@@ -248,7 +248,8 @@ export function ProgressBar({
   showPercentage?: boolean
   color?: string
 }) {
-  const percentage = Math.min((value / max) * 100, 100)
+  const isUnlimited = !max || max < 0
+  const percentage = isUnlimited ? 0 : Math.min((value / max) * 100, 100)
 
   return (
     <div style={{ width: '100%' }}>
@@ -271,7 +272,7 @@ export function ProgressBar({
                 color: 'var(--gray-500)',
               }}
             >
-              {value.toLocaleString()} / {max.toLocaleString()}
+              {(value ?? 0).toLocaleString()} / {isUnlimited ? '∞' : max.toLocaleString()}
             </span>
           )}
         </div>

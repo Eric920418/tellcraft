@@ -105,7 +105,7 @@ export function DashboardContent({
         <StatsCard
           title={t('plan')}
           value={stats.messageUsage.plan.toUpperCase()}
-          subtitle={t('messageCount', { used: stats.messageUsage.used, limit: stats.messageUsage.limit })}
+          subtitle={t('messageCount', { used: stats.messageUsage.used, limit: stats.messageUsage.limit < 0 ? '∞' : stats.messageUsage.limit })}
           icon="◈"
           delay={0.15}
         />
