@@ -79,6 +79,10 @@ pm2 describe tellcraft-backend            # 詳細資訊（記憶體/重啟次�
 | **Fast Build** | `services/fast-build-generation.ts` | 快速模式輔助：tier 偵測、產品推斷、默認 DesignSystem（零 LLM） |
 | **Reference Analyzer** | `services/reference-analyzer.ts` | 參考網站真實分析：URL→截圖(puppeteer-core)→Haiku Vision→設計風格分析，三層降級 |
 | **Template Matcher** | `services/template-matcher.ts` | 三層評分智能匹配（關鍵詞 40 + Category 30 + UISpec 30，零 LLM） |
+| **Semantic Gateway** | `services/semantic-gateway.ts` | 統一語義閘門：quickFilter 零 LLM 短路 + Sonnet 六元 verdict（bdd_clarify/design_clarify/iteration），取代 keyword array |
+| **Prefilter** | `services/prefilter.ts` | 全域輸入預過濾：checkInputQuality 亂碼/髒話/垃圾 + phase-aware 二次攔截（getPhaseStrictness）+ Redis anti-loop |
+| **FlowState Recovery** | `services/flowstate-recovery.ts` | 每 2 分鐘掃描 Redis flow:* key，逾時 phase 自動恢復（fast_generating 20m / uiux_iterating 5m / deployer_deploying 10m）|
+| **Conversation Lock** | `services/conversation-lock.ts` | Redis SET NX EX 互斥鎖（TTL 5 分鐘），同一對話同時只允許一個 Worker job 執行 |
 | **LINE Notify** | `services/line-notify.ts` | LINE 推播通知（stage 白名單過濾，fire-and-forget） |
 | **LINE Bot Handler** | `services/line-bot-handler.ts` | LINE Bot 業務邏輯（Follow/Text/Postback 處理） |
 | **LINE Message Translator** | `services/line-message-translator.ts` | sendMessage → LINE Messages 全量翻譯 |

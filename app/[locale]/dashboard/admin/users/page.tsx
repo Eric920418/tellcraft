@@ -26,7 +26,7 @@ interface User {
   provider: string | null
 }
 
-type ProviderTab = 'all' | 'google' | 'line' | 'guest'
+type ProviderTab = 'oauth' | 'guest'
 
 const planLabels: Record<string, string> = {
   free: 'Free',
@@ -60,7 +60,7 @@ export default function AdminUsersPage() {
   const [searchQuery, setSearchQuery] = useState('')
   const [sortBy, setSortBy] = useState('created_at')
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc')
-  const [activeTab, setActiveTab] = useState<ProviderTab>('all')
+  const [activeTab, setActiveTab] = useState<ProviderTab>('oauth')
   const debounceTimerRef = useRef<NodeJS.Timeout | null>(null)
 
   const getStatusLabel = (status: string) => {
@@ -69,9 +69,7 @@ export default function AdminUsersPage() {
   }
 
   const providerTabs: { key: ProviderTab; label: string }[] = [
-    { key: 'all', label: ta('filterAll') },
-    { key: 'google', label: ta('providerGoogle') },
-    { key: 'line', label: ta('providerLine') },
+    { key: 'oauth', label: ta('providerOAuth') },
     { key: 'guest', label: ta('providerGuest') },
   ]
 
@@ -134,32 +132,26 @@ export default function AdminUsersPage() {
 
   // 按 provider 分類
   const categorizedUsers = useMemo(() => {
-    const google: User[] = []
-    const line: User[] = []
+    const oauth: User[] = []
     const guest: User[] = []
 
     for (const u of allUsers) {
-      if (u.provider === 'google') google.push(u)
-      else if (u.provider === 'line') line.push(u)
+      if (u.provider === 'google' || u.provider === 'line') oauth.push(u)
       else guest.push(u)
     }
 
-    return { google, line, guest }
+    return { oauth, guest }
   }, [allUsers])
 
   const displayUsers = useMemo(() => {
-    if (activeTab === 'all') return allUsers
-    if (activeTab === 'google') return categorizedUsers.google
-    if (activeTab === 'line') return categorizedUsers.line
+    if (activeTab === 'oauth') return categorizedUsers.oauth
     return categorizedUsers.guest
-  }, [activeTab, allUsers, categorizedUsers])
+  }, [activeTab, categorizedUsers])
 
   const tabCounts = useMemo(() => ({
-    all: allUsers.length,
-    google: categorizedUsers.google.length,
-    line: categorizedUsers.line.length,
+    oauth: categorizedUsers.oauth.length,
     guest: categorizedUsers.guest.length,
-  }), [allUsers, categorizedUsers])
+  }), [categorizedUsers])
 
   const handleToggleAdmin = async (userId: string, currentIsAdmin: boolean) => {
     const token = getAuthToken()

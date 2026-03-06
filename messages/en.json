@@ -460,6 +460,7 @@
       "removeAdminFull": "Remove admin access",
       "providerGoogle": "Google Login",
       "providerLine": "LINE Login",
+      "providerOAuth": "Social Login",
       "providerGuest": "Guest",
       "filterAll": "All",
       "userNotExists": "User not found",
