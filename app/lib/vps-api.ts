@@ -2030,18 +2030,20 @@ export interface ParsedLogLine {
 }
 
 /**
- * 獲取 VPS 日誌（初始載入）
+ * 獲取 VPS 日誌
  */
 export async function getAdminLogs(input: {
   token: string
   lines?: number
   source?: 'all' | 'out' | 'error'
   search?: string
+  since?: string
 }): Promise<ApiResponse<{ lines: ParsedLogLine[]; total: number }>> {
   const params = new URLSearchParams()
   if (input.lines) params.append('lines', String(input.lines))
   if (input.source) params.append('source', input.source)
   if (input.search) params.append('search', input.search)
+  if (input.since) params.append('since', input.since)
 
   return apiRequest(`/api/dashboard/admin/logs?${params}`, {
     headers: { Authorization: `Bearer ${input.token}` },

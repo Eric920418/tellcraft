@@ -1,11 +1,10 @@
 'use client'
 
 import { useEffect, useRef, useState, useCallback } from 'react'
-import { io, Socket } from 'socket.io-client'
-import type { ParsedLogLine } from '@/app/lib/vps-api'
+import { getAdminLogs, type ParsedLogLine } from '@/app/lib/vps-api'
 
-const WS_URL = process.env.NEXT_PUBLIC_VPS_WS_URL || 'http://54.238.4.117:8080'
 const MAX_LINES = 2000
+const POLL_INTERVAL = 3000
 
 interface UseAdminLogsOptions {
   enabled: boolean
@@ -23,83 +22,100 @@ interface UseAdminLogsReturn {
 
 export function useAdminLogs(options: UseAdminLogsOptions): UseAdminLogsReturn {
   const { enabled, source = 'all' } = options
-  const socketRef = useRef<Socket | null>(null)
   const [lines, setLines] = useState<ParsedLogLine[]>([])
   const [isConnected, setIsConnected] = useState(false)
   const [isPaused, setIsPaused] = useState(false)
   const isPausedRef = useRef(false)
-  const bufferRef = useRef<ParsedLogLine[]>([])
+  const lastTimestampRef = useRef<string>('')
+  const initialLoadDone = useRef(false)
 
+  // HTTP 輪詢（走 VPS API proxy，避免 Mixed Content / CORS 問題）
   useEffect(() => {
     if (!enabled) return
 
     const token = localStorage.getItem('auth_token')
     if (!token) return
 
-    const socket = io(WS_URL, {
-      transports: ['websocket', 'polling'],
-      autoConnect: true,
-      reconnection: true,
-      reconnectionAttempts: 10,
-      reconnectionDelay: 2000,
-      auth: { token },
-    })
+    let active = true
+    initialLoadDone.current = false
 
-    socketRef.current = socket
+    // 初始載入
+    async function loadInitial() {
+      const result = await getAdminLogs({ token: token!, lines: 200, source })
+      if (!active) return
 
-    socket.on('connect', () => {
-      setIsConnected(true)
-      socket.emit('subscribe_admin_logs', { source })
-    })
-
-    socket.on('disconnect', () => {
-      setIsConnected(false)
-    })
-
-    socket.on('admin_log_line', (line: ParsedLogLine) => {
-      if (isPausedRef.current) {
-        bufferRef.current.push(line)
-        if (bufferRef.current.length > MAX_LINES) {
-          bufferRef.current = bufferRef.current.slice(-MAX_LINES)
+      if (result.success && result.data?.lines) {
+        const newLines = result.data.lines
+        setLines(newLines)
+        setIsConnected(true)
+        initialLoadDone.current = true
+        // 記錄最新時間戳
+        if (newLines.length > 0) {
+          lastTimestampRef.current = newLines[newLines.length - 1].timestamp
         }
-        return
+      } else {
+        setIsConnected(false)
       }
-      setLines(prev => {
-        const next = [...prev, line]
-        return next.length > MAX_LINES ? next.slice(-MAX_LINES) : next
-      })
-    })
+    }
 
-    socket.on('error', (err: { message: string }) => {
-      console.error('[AdminLogs] Socket error:', err.message)
-    })
+    loadInitial()
+
+    // 輪詢新日誌
+    const interval = setInterval(async () => {
+      if (!active || isPausedRef.current || !initialLoadDone.current) return
+
+      const since = lastTimestampRef.current
+      const result = await getAdminLogs({
+        token: token!,
+        lines: 100,
+        source,
+        since: since || undefined,
+      })
+
+      if (!active) return
+
+      if (result.success && result.data?.lines) {
+        setIsConnected(true)
+        const newLines = result.data.lines
+
+        if (newLines.length > 0) {
+          // 更新最新時間戳
+          lastTimestampRef.current = newLines[newLines.length - 1].timestamp
+
+          setLines(prev => {
+            // 用 raw 去重（同一秒內可能有多行相同時間戳）
+            const existingRaws = new Set(prev.slice(-200).map(l => l.raw))
+            const deduped = newLines.filter(l => !existingRaws.has(l.raw))
+            if (deduped.length === 0) return prev
+            const merged = [...prev, ...deduped]
+            return merged.length > MAX_LINES ? merged.slice(-MAX_LINES) : merged
+          })
+        }
+      } else {
+        setIsConnected(false)
+      }
+    }, POLL_INTERVAL)
 
     return () => {
-      socket.emit('unsubscribe_admin_logs')
-      socket.disconnect()
-      socketRef.current = null
+      active = false
+      clearInterval(interval)
     }
   }, [enabled, source])
 
   const pause = useCallback(() => {
     isPausedRef.current = true
     setIsPaused(true)
-    bufferRef.current = []
   }, [])
 
   const resume = useCallback(() => {
-    setLines(prev => {
-      const merged = [...prev, ...bufferRef.current]
-      bufferRef.current = []
-      return merged.length > MAX_LINES ? merged.slice(-MAX_LINES) : merged
-    })
     isPausedRef.current = false
     setIsPaused(false)
   }, [])
 
   const clear = useCallback(() => {
     setLines([])
-    bufferRef.current = []
+    lastTimestampRef.current = ''
+    initialLoadDone.current = false
   }, [])
 
   return { lines, isConnected, isPaused, pause, resume, clear }

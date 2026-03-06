@@ -1,10 +1,9 @@
 'use client'
 
 import { useEffect, useState, useRef, useMemo, useCallback } from 'react'
-import { useRouter } from '@/i18n/navigation'
 import { motion, AnimatePresence } from 'framer-motion'
 import { useTranslations } from 'next-intl'
-import { getAdminLogs, type ParsedLogLine } from '@/app/lib/vps-api'
+import type { ParsedLogLine } from '@/app/lib/vps-api'
 import { useAdminLogs } from '@/app/hooks/useAdminLogs'
 
 // Tag 顏色映射
@@ -32,40 +31,29 @@ const LEVEL_STYLES: Record<string, { color: string; border: string; bg: string }
   error: { color: '#F87171', border: '#DC2626', bg: 'rgba(220, 38, 38, 0.06)' },
 }
 
-function getAuthToken(): string | null {
-  if (typeof window === 'undefined') return null
-  return localStorage.getItem('auth_token')
-}
-
 export default function AdminLogsPage() {
-  const router = useRouter()
   const t = useTranslations('dashboard.logs')
   const tc = useTranslations('common')
 
-  const [initialLines, setInitialLines] = useState<ParsedLogLine[]>([])
-  const [isLoading, setIsLoading] = useState(true)
   const [source, setSource] = useState<'all' | 'out' | 'error'>('all')
   const [searchQuery, setSearchQuery] = useState('')
   const [autoScroll, setAutoScroll] = useState(true)
 
-  const { lines: streamLines, isConnected, isPaused, pause, resume, clear } = useAdminLogs({
+  const { lines, isConnected, isPaused, pause, resume, clear } = useAdminLogs({
     enabled: true,
     source,
   })
 
-  // 合併初始載入 + 即時串流
-  const allLines = useMemo(() => [...initialLines, ...streamLines], [initialLines, streamLines])
-
   // 搜尋過濾
   const filteredLines = useMemo(() => {
-    if (!searchQuery) return allLines
+    if (!searchQuery) return lines
     const q = searchQuery.toLowerCase()
-    return allLines.filter(l =>
+    return lines.filter(l =>
       l.message.toLowerCase().includes(q) ||
       (l.tag?.toLowerCase().includes(q) ?? false) ||
       l.timestamp.includes(q)
     )
-  }, [allLines, searchQuery])
+  }, [lines, searchQuery])
 
   // 自動捲動
   const logContainerRef = useRef<HTMLDivElement>(null)
@@ -74,29 +62,6 @@ export default function AdminLogsPage() {
       logContainerRef.current.scrollTop = logContainerRef.current.scrollHeight
     }
   }, [filteredLines, autoScroll])
-
-  // 初始載入
-  useEffect(() => {
-    async function loadInitial() {
-      const token = getAuthToken()
-      if (!token) {
-        router.push('/auth/login')
-        return
-      }
-
-      setIsLoading(true)
-      const result = await getAdminLogs({ token, lines: 200, source })
-
-      if (!result.success) {
-        setIsLoading(false)
-        return
-      }
-
-      setInitialLines(result.data?.lines || [])
-      setIsLoading(false)
-    }
-    loadInitial()
-  }, [source, router])
 
   // 偵測捲動位置
   const handleScroll = useCallback(() => {
@@ -109,7 +74,6 @@ export default function AdminLogsPage() {
   // 切換 source 時重置
   const handleSourceChange = useCallback((s: 'all' | 'out' | 'error') => {
     setSource(s)
-    setInitialLines([])
     clear()
   }, [clear])
 
@@ -214,7 +178,7 @@ export default function AdminLogsPage() {
 
         {/* 清空 */}
         <button
-          onClick={() => { setInitialLines([]); clear() }}
+          onClick={clear}
           style={{
             padding: '6px 14px',
             fontSize: 13,
@@ -256,7 +220,7 @@ export default function AdminLogsPage() {
             padding: '8px 0',
           }}
         >
-          {isLoading ? (
+          {lines.length === 0 && !isConnected ? (
             <div style={{ padding: 40, textAlign: 'center', color: '#6B7280' }}>{tc('loading')}</div>
           ) : filteredLines.length === 0 ? (
             <div style={{ padding: 40, textAlign: 'center', color: '#6B7280' }}>{t('noLogs')}</div>

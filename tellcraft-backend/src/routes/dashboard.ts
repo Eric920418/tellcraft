@@ -871,12 +871,14 @@ const LOG_FILES = {
 /**
  * GET /admin/logs
  * 獲取最近 N 行 VPS 日誌
+ * Query: ?lines=200&source=all|out|error&search=keyword&since=2026-03-06+12:00:00
  */
 router.get('/admin/logs', requireAdmin, async (req: Request, res: Response) => {
   try {
     const lines = Math.min(parseInt(req.query.lines as string) || 200, 1000)
     const source = (req.query.source as string) || 'all'
     const search = (req.query.search as string) || ''
+    const since = (req.query.since as string) || ''
 
     const filesToRead = source === 'all'
       ? [LOG_FILES.out, LOG_FILES.error]
@@ -903,13 +905,18 @@ router.get('/admin/logs', requireAdmin, async (req: Request, res: Response) => {
     // 按時間排序
     allLines.sort((a, b) => a.timestamp.localeCompare(b.timestamp))
 
+    // since 過濾（只返回時間戳 > since 的行）
+    const afterSince = since
+      ? allLines.filter(l => l.timestamp > since)
+      : allLines
+
     // 搜尋過濾
     const filtered = search
-      ? allLines.filter(l =>
+      ? afterSince.filter(l =>
           l.message.toLowerCase().includes(search.toLowerCase()) ||
           (l.tag?.toLowerCase().includes(search.toLowerCase()) ?? false)
         )
-      : allLines
+      : afterSince
 
     // 敏感資訊遮罩
     const sanitized = filtered.map(sanitizeLogLine)

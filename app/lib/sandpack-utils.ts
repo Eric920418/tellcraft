@@ -987,14 +987,19 @@ function sandpackPathToRoute(sandpackPath: string): string | null {
 
 /**
  * 路由路徑 → React 組件 import 名稱
- * '/' → 'PageHome'，'/about' → 'PageAbout'
+ * '/' → 'PageIndex'，'/about' → 'PageAbout'，'/works/[id]' → 'PageWorksId'
  */
 function routeToComponentName(route: string): string {
-  if (route === '/') return 'PageHome'
+  if (route === '/') return 'PageIndex'
   return 'Page' + route
     .split('/')
     .filter(Boolean)
-    .map(seg => seg.charAt(0).toUpperCase() + seg.slice(1).replace(/[^a-zA-Z0-9]/g, ''))
+    .map(seg => {
+      const clean = seg.replace(/[^a-zA-Z0-9]/g, '')
+      if (!clean) return ''
+      return clean.charAt(0).toUpperCase() + clean.slice(1)
+    })
+    .filter(Boolean)
     .join('')
 }
 
