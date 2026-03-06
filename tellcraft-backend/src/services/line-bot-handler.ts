@@ -102,7 +102,10 @@ export async function handleFollow(userId: string, replyToken: string): Promise<
 
 const PROJECT_LIST_KEYWORDS = [
   '我的專案', '切換專案', '繼續專案', '專案列表',
+  '查看專案', '看專案', '列出專案', '有哪些專案',
+  '哪些專案', '之前的專案', '舊專案', '歷史專案',
   'my projects', 'switch project', 'my project',
+  'list projects', 'show projects',
 ]
 
 function isProjectListIntent(text: string): boolean {
