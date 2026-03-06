@@ -430,6 +430,8 @@ export async function initializeSession(input: {
   isNewProject: boolean
   isNewConversation: boolean
   resumed: boolean
+  readOnly?: boolean
+  lockReason?: 'message_limit'
 }>> {
   return apiRequest('/api/session/initialize', {
     method: 'POST',

@@ -54,6 +54,8 @@
     "formulationProgress": "Generating spec documents...",
     "inputPlaceholderShort": "Type a message...",
     "inputPlaceholder": "Type a message... (Shift+Enter for new line)",
+    "quotaInputLocked": "Message quota reached. Read-only mode is active.",
+    "quotaReadonlyHint": "Message quota reached. You can preview existing content only.",
     "goBackButton": "← Go back",
     "sendButton": "Send",
     "backButton": "Back",

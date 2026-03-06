@@ -24,6 +24,16 @@ const PLAN_PROJECT_LIMITS: Record<string, number> = {
   business: 10
 }
 
+const MESSAGE_LIMIT_ERROR_CODE = 'MESSAGE_LIMIT_REACHED'
+
+function getMessageQuotaStatus(plan: string, messageCount: number): { messageLimit: number; quotaReached: boolean } {
+  const messageLimit = PLAN_MESSAGE_LIMITS[plan] || 50
+  return {
+    messageLimit,
+    quotaReached: messageCount >= messageLimit,
+  }
+}
+
 /**
  * POST /api/session/initialize
  * 初始化會話（支援匿名用戶）
@@ -80,11 +90,7 @@ router.post('/initialize', optionalAuth, async (req: Request, res: Response) => 
       return res.status(404).json({ error: '用戶不存在' })
     }
 
-    // 檢查配額
-    const messageLimit = PLAN_MESSAGE_LIMITS[user.plan] || 50
-    if (user.message_count_this_period >= messageLimit) {
-      return res.status(403).json({ error: '已達到本期訊息配額上限' })
-    }
+    const { quotaReached } = getMessageQuotaStatus(user.plan, user.message_count_this_period)
 
     // 如果指定了 conversationId，嘗試恢復
     if (conversationId && !createNew) {
@@ -110,9 +116,49 @@ router.post('/initialize', optionalAuth, async (req: Request, res: Response) => 
           isNewUser,
           isNewProject: false,
           isNewConversation: false,
-          resumed: true
+          resumed: true,
+          readOnly: quotaReached,
+          lockReason: quotaReached ? 'message_limit' : undefined,
         })
       }
+    }
+
+    // 配額滿：進入唯讀模式，回傳最近一個有歷史內容的對話供預覽
+    if (quotaReached) {
+      const latestConversation = await queryOne<{
+        id: string
+        project_id: string
+        messages: any
+      }>(
+        `SELECT c.id, c.project_id, c.messages
+         FROM conversations c
+         JOIN projects p ON c.project_id = p.id
+         WHERE p.user_id = $1
+           AND jsonb_array_length(COALESCE(c.messages::jsonb, '[]'::jsonb)) > 0
+         ORDER BY c.updated_at DESC
+         LIMIT 1`,
+        [userId]
+      )
+
+      if (!latestConversation) {
+        return res.status(403).json({
+          error: MESSAGE_LIMIT_ERROR_CODE,
+          message: '已達到本期訊息配額上限',
+        })
+      }
+
+      return res.json({
+        userId,
+        projectId: latestConversation.project_id,
+        conversationId: latestConversation.id,
+        messages: latestConversation.messages || [],
+        isNewUser,
+        isNewProject: false,
+        isNewConversation: false,
+        resumed: true,
+        readOnly: true,
+        lockReason: 'message_limit',
+      })
     }
 
     // 查找或創建專案
@@ -224,7 +270,8 @@ router.post('/initialize', optionalAuth, async (req: Request, res: Response) => 
       isNewUser,
       isNewProject,
       isNewConversation,
-      resumed: !isNewConversation && messages.length > 0
+      resumed: !isNewConversation && messages.length > 0,
+      readOnly: false,
     })
   } catch (error) {
     console.error('[Session] 初始化失敗:', error)

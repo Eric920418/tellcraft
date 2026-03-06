@@ -955,6 +955,7 @@ interface SessionInfo {
   currentTaskId?: string
   isAuthenticated?: boolean
   hasHistory?: boolean
+  readOnly?: boolean
   user?: {
     email?: string
     name?: string
@@ -1009,6 +1010,7 @@ function ChatSection({
   const [currentStage, setCurrentStage] = useState<Message['stage']>('discovery')
   const [sessionInfo, setSessionInfo] = useState<SessionInfo | null>(null)
   const [guestBuildCompleted, setGuestBuildCompleted] = useState(false)
+  const [quotaReadOnly, setQuotaReadOnly] = useState(false)
   const [isInitializing, setIsInitializing] = useState(true)  // 初始為 true 避免閃爍
   const [error, setError] = useState<string | null>(null)
   const [lastTimestamp, setLastTimestamp] = useState<string | null>(null)
@@ -1452,12 +1454,16 @@ function ChatSection({
         return
       }
 
+      const initReadOnly = !!result.data.readOnly && result.data.lockReason === 'message_limit'
+      setQuotaReadOnly(initReadOnly)
+
       const session: SessionInfo = {
         userId: result.data.userId,
         projectId: result.data.projectId,
         conversationId: result.data.conversationId,
         isAuthenticated: !!token,
-        hasHistory: result.data.messages.length > 0
+        hasHistory: result.data.messages.length > 0,
+        readOnly: initReadOnly,
       }
       const hasHistory = result.data.messages.length > 0
 
@@ -1483,6 +1489,9 @@ function ChatSection({
           }))
           setMessages(historyMessages)
 
+          const cpMsg = [...historyMessages].reverse().find(m => m.richContent?.type === 'code_preview')
+          setCodePreviewData(cpMsg?.richContent?.data ?? null)
+
           // 重要：恢復 currentTaskId，否則後續發消息會走錯誤的流程
           if (historyResult.data.currentTaskId) {
             setSessionInfo(prev => prev ? {
@@ -1496,13 +1505,18 @@ function ChatSection({
           if (lastAiMessage?.stage) {
             setCurrentStage(lastAiMessage.stage)
           }
+
+          if (historyMessages.length > 0) {
+            const lastMsg = historyMessages[historyMessages.length - 1]
+            setLastTimestamp(lastMsg.timestamp.toISOString())
+          }
         }
         setIsInitializing(false)
         return
       }
 
       // 如果有初始消息，發送它
-      if (initialMessage) {
+      if (initialMessage && !initReadOnly) {
         // 樂觀更新：先顯示用戶消息（標記為 pending）
         const userMsg: Message = {
           id: crypto.randomUUID(),
@@ -1552,6 +1566,9 @@ function ChatSection({
               subMessage: tLogin('guestLimitMessage'),
               promptId: 'guest_limit'
             })
+          } else if (initErr.includes('MESSAGE_LIMIT_REACHED')) {
+            setQuotaReadOnly(true)
+            setError(tChat('quotaReadonlyHint'))
           } else {
             setError(initErr || tChat('sendError'))
           }
@@ -1585,7 +1602,7 @@ function ChatSection({
 
           // 提取 code_preview 數據到穩定 state（避免 renderPreviewPanel 每次搜索 messages）
           const cpMsg = [...historyMessages].reverse().find(m => m.richContent?.type === 'code_preview')
-          if (cpMsg?.richContent?.data) setCodePreviewData(cpMsg.richContent.data)
+          setCodePreviewData(cpMsg?.richContent?.data ?? null)
 
           // 找到最後一條 AI 消息的 stage
           const lastAiMessage = historyMessages.filter(m => m.role === 'assistant').pop()
@@ -1952,6 +1969,7 @@ function ChatSection({
       setShowConversationPicker(false)
       setConversations([])
       setLoginPromptConfig(null)
+      setQuotaReadOnly(false)
       setIsInitializing(true)  // 重置為 true，下次進入時直接顯示初始化中
       setCodePreviewData(null)
       // 重置編輯模式相關狀態
@@ -2175,11 +2193,20 @@ function ChatSection({
     if (cooldownTimerRef.current) clearTimeout(cooldownTimerRef.current)
   }, [])
 
+  const isGuestLocked = guestBuildCompleted && !sessionInfo?.isAuthenticated
+  const isReadOnlyMode = isGuestLocked || quotaReadOnly
+
   const handleSend = async () => {
     if (!sessionInfo || !input.trim() || isTyping || sendCooldown) return
 
+    // 配額唯讀模式：禁止任何對話送出
+    if (quotaReadOnly) {
+      setError(tChat('quotaReadonlyHint'))
+      return
+    }
+
     // Guest 已完成 fast build → 鎖定所有操作
-    if (guestBuildCompleted && !sessionInfo.isAuthenticated) {
+    if (isGuestLocked) {
       setLoginPromptConfig({
         show: true,
         variant: 'emphasized',
@@ -2286,6 +2313,11 @@ function ChatSection({
         })
         return
       }
+      if (err.includes('MESSAGE_LIMIT_REACHED')) {
+        setQuotaReadOnly(true)
+        setError(tChat('quotaReadonlyHint'))
+        return
+      }
 
       setError(err || tChat('sendFailed'))
     } else if (result.data?.messageId) {
@@ -2300,8 +2332,13 @@ function ChatSection({
   const handleSendMessage = async (content: string) => {
     if (!sessionInfo || !content.trim() || isTyping || sendCooldown) return
 
+    if (quotaReadOnly) {
+      setError(tChat('quotaReadonlyHint'))
+      return
+    }
+
     // Guest 已完成 fast build → 鎖定所有操作
-    if (guestBuildCompleted && !sessionInfo.isAuthenticated) {
+    if (isGuestLocked) {
       setLoginPromptConfig({
         show: true,
         variant: 'emphasized',
@@ -2372,6 +2409,11 @@ function ChatSection({
           subMessage: tLogin('guestLimitMessage'),
           promptId: 'guest_limit'
         })
+        return
+      }
+      if (err.includes('MESSAGE_LIMIT_REACHED')) {
+        setQuotaReadOnly(true)
+        setError(tChat('quotaReadonlyHint'))
         return
       }
 
@@ -2730,7 +2772,11 @@ function ChatSection({
                        message.quickReplies.length > 0 &&
                        index === displayMessages.length - 1 &&
                        typingStage === 'none' && (
-                        <QuickReplies replies={message.quickReplies} onSelect={handleSendMessage} />
+                        <QuickReplies
+                          replies={message.quickReplies}
+                          onSelect={handleSendMessage}
+                          disabled={isTyping || sendCooldown || isInitializing || !sessionInfo || isReadOnlyMode}
+                        />
                       )}
                     </>
                   )}
@@ -2862,12 +2908,14 @@ function ChatSection({
                   }
                 }}
                 placeholder={
-                  guestBuildCompleted && !sessionInfo?.isAuthenticated
+                  isGuestLocked
                     ? tLogin('guestInputLocked')
+                    : quotaReadOnly
+                      ? tChat('quotaInputLocked')
                     : layoutMode === 'split' ? tChat('inputPlaceholderShort') : tChat('inputPlaceholder')
                 }
                 rows={1}
-                disabled={isInitializing || !sessionInfo || (guestBuildCompleted && !sessionInfo?.isAuthenticated)}
+                disabled={isInitializing || !sessionInfo || isReadOnlyMode}
                 style={{
                   flex: 1,
                   resize: 'none',
@@ -2878,7 +2926,7 @@ function ChatSection({
                   fontFamily: 'inherit',
                   lineHeight: 1.5,
                   transition: 'border-color 0.2s ease, height 0.15s ease',
-                  opacity: (isInitializing || !sessionInfo || (guestBuildCompleted && !sessionInfo?.isAuthenticated)) ? 0.5 : 1,
+                  opacity: (isInitializing || !sessionInfo || isReadOnlyMode) ? 0.5 : 1,
                   minHeight: layoutMode === 'split' ? 40 : 48,
                   maxHeight: layoutMode === 'split' ? 120 : 200,
                   overflowY: 'hidden',
@@ -2889,7 +2937,7 @@ function ChatSection({
               {(() => {
                 const hasInput = !!deferredInput.trim()
                 const hasConversation = messages.length > 0 && sessionInfo
-                const isBusy = isTyping || sendCooldown || isInitializing || !sessionInfo
+                const isBusy = isTyping || sendCooldown || isInitializing || !sessionInfo || isReadOnlyMode
 
                 // 沒打字 + 有對話 → 上一步按鈕
                 if (!hasInput && hasConversation) {

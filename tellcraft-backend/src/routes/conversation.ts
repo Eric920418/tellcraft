@@ -25,6 +25,13 @@ export function setRedisClient(redis: Redis) {
 
 const RATE_LIMIT_WINDOW_SECONDS = 5
 const RATE_LIMIT_MAX_REQUESTS = 1
+const PLAN_MESSAGE_LIMITS: Record<string, number> = {
+  free: 50,
+  creator: 200,
+  pro: 1000,
+  business: Infinity,
+}
+const MESSAGE_LIMIT_ERROR_CODE = 'MESSAGE_LIMIT_REACHED'
 
 /**
  * Lua script: INCR + EXPIRE 原子操作
@@ -86,6 +93,30 @@ async function hasGuestCompletedBuild(userId: string): Promise<boolean> {
   return result?.exists ?? false
 }
 
+async function getUserMessageQuotaStatus(userId: string): Promise<{
+  messageCount: number
+  messageLimit: number
+  limitReached: boolean
+} | null> {
+  const user = await db.queryOne<{
+    plan: string
+    message_count_this_period: number
+  }>(
+    'SELECT plan, message_count_this_period FROM users WHERE id = $1',
+    [userId]
+  )
+
+  if (!user) return null
+
+  const messageLimit = PLAN_MESSAGE_LIMITS[user.plan] || 50
+  const messageCount = user.message_count_this_period || 0
+  return {
+    messageCount,
+    messageLimit,
+    limitReached: messageCount >= messageLimit,
+  }
+}
+
 // ============================================================
 // 對話 API
 // ============================================================
@@ -140,6 +171,17 @@ router.post('/:id/message', optionalAuth, async (req, res) => {
       }
     }
 
+    const quota = await getUserMessageQuotaStatus(userId)
+    if (!quota) {
+      return res.status(404).json({ error: 'User not found' })
+    }
+    if (quota.limitReached) {
+      return res.status(403).json({
+        error: MESSAGE_LIMIT_ERROR_CODE,
+        message: '已達到本期訊息配額上限',
+      })
+    }
+
     // 取得對話
     const conversation = await db.getConversation(conversationId)
     if (!conversation) {
@@ -188,13 +230,10 @@ router.post('/:id/message', optionalAuth, async (req, res) => {
     await db.updateConversationMessages(conversationId, messages)
 
     // 更新用戶消息計數
-    const user = await db.getUser(userId)
-    if (user) {
-      await db.query(
-        'UPDATE users SET message_count_this_period = $1 WHERE id = $2',
-        [user.message_count_this_period + 1, userId]
-      )
-    }
+    await db.query(
+      'UPDATE users SET message_count_this_period = $1 WHERE id = $2',
+      [quota.messageCount + 1, userId]
+    )
 
     // 加入 BullMQ 隊列
     const job = await orchestratorQueue.add('process-message', {
@@ -263,6 +302,17 @@ router.post('/:id/reply', optionalAuth, async (req, res) => {
           message: '免費試用已結束，請登入以繼續使用'
         })
       }
+    }
+
+    const replyQuota = await getUserMessageQuotaStatus(userId)
+    if (!replyQuota) {
+      return res.status(404).json({ error: 'User not found' })
+    }
+    if (replyQuota.limitReached) {
+      return res.status(403).json({
+        error: MESSAGE_LIMIT_ERROR_CODE,
+        message: '已達到本期訊息配額上限',
+      })
     }
 
     // 取得對話

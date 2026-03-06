@@ -54,6 +54,8 @@
     "formulationProgress": "正在產出規格文件...",
     "inputPlaceholderShort": "輸入訊息...",
     "inputPlaceholder": "輸入訊息...（Shift+Enter 換行）",
+    "quotaInputLocked": "訊息配額已滿，目前為唯讀模式",
+    "quotaReadonlyHint": "已達訊息配額上限，僅可預覽既有內容",
     "goBackButton": "← 上一步",
     "sendButton": "送出",
     "backButton": "返回",
