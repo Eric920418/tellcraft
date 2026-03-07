@@ -29,6 +29,7 @@ import {
   hasChangeIntent, hasRollbackSpecIntent,
   DESIGN_BRIEF_LIMITS,
 } from '../intent-helpers'
+import { handlePhaseError } from '../phase-router'
 import { createLogger } from '../../lib/logger'
 
 // Lazy imports to avoid circular dependencies
@@ -206,7 +207,8 @@ export async function handleUiuxMixedPhaseRouting(
   )
 
     if (state.phase === 'spec_completed' && hasChangeIntent(trimmedMsg)) {
-      await handleSpecChange(conversationId, state, trimmedMsg, redis, io)
+      const specChangeHandler = await getSpecChangeHandler()
+      await specChangeHandler(conversationId, state, trimmedMsg, redis, io)
       return
     }
 
@@ -331,7 +333,8 @@ export async function handleUiuxMixedPhaseRouting(
     if (state.phase === 'uiux_complete') {
       const trimmed = message.trim()
       if (hasDeployIntent(trimmed)) {
-        await executeDeployerSkill({
+        const deployerSkill = await getDeployerSkill()
+        await deployerSkill({
           taskId: state.taskId || '',
           projectId: data.projectId,
           conversationId,
@@ -473,7 +476,6 @@ export async function handleUiuxMixedPhaseRouting(
       })
     }
     return
-  }
 }
 
 // ============================================================
@@ -1765,7 +1767,7 @@ export async function completeDesignClarify(
   const referenceIdea = ideas.find(i => i.step === 'reference')
   if (referenceIdea?.answer) {
     try {
-      const { analyzeReference } = await import('../services/reference-analyzer')
+      const { analyzeReference } = await import('../../services/reference-analyzer')
       const analysis = await analyzeReference(referenceIdea.answer, {
         userId: state.userId,
         conversationId,

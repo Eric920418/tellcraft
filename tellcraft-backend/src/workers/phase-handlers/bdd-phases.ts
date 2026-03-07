@@ -28,6 +28,7 @@ import { generateIsaConfig } from '../../services/isa-config'
 import { validateAndFixFeatures } from '../../services/feature-validation'
 import { analyzeChangeImpact, executeChange, verifyConsistency, rollbackChange } from '../../services/change-management'
 import { matchTemplates } from '../../services/template-matcher'
+import { checkInputQuality } from '../../services/prefilter'
 import { sendMessage, saveFlowState, getFlowState, deleteFlowState, deductCredits } from '../orchestrator-utils'
 import { CREDIT_COSTS } from '../../config/plans'
 import { sanitizeClarifyForDisplay, sanitizeForDisplay } from '../../utils/white-text-sanitizer'
@@ -377,14 +378,14 @@ export async function handleSpecChangeConfirm(
         affectedLayersList.push(...state.changeImpact.affectedLayers.actions.map(a => `actions:${a}`))
       }
 
-      const historyEntry: import('../services/bdd-session').ChangeHistoryEntry = {
+      const historyEntry: import('../../services/bdd-session').ChangeHistoryEntry = {
         id: crypto.randomUUID(),
         timestamp: Date.now(),
         description: state.changeImpact.description,
         changeType: state.changeImpact.changeType,
         affectedLayers: affectedLayersList,
         previousSnapshot: {
-          features: existingSpecs.features as import('../services/bdd-session').FeatureFile[],
+          features: existingSpecs.features as import('../../services/bdd-session').FeatureFile[],
           schemaSql: existingSpecs.schemaSql,
           entityMapping: existingSpecs.entityMapping,
           actionsYml: existingSpecs.actionsYml || undefined,
