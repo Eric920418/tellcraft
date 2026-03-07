@@ -14,10 +14,12 @@ const SandpackPreviewComponent = dynamic(
 interface MobilePreviewModalProps {
   show: boolean
   stablePreviewData: {
-    pages: Record<string, string>
-    components: Record<string, string>
-    styles: Record<string, string>
-    tailwindConfig?: string
+    pages: { path: string; content: string; description: string }[]
+    components: { path: string; content: string; description: string }[]
+    styles: string
+    tailwindConfig: string
+    isStreaming: boolean
+    phase: 'structure' | 'animation' | 'rwd'
   } | null
   onClose: () => void
   onDeploy: () => void

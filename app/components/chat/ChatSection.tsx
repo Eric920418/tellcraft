@@ -3,7 +3,6 @@
 import { useState, useRef, useEffect, useCallback, useMemo, useDeferredValue } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { useTranslations, useLocale } from 'next-intl'
-import { useLocalePath } from '@/app/hooks/useLocalePath'
 import { useAuth, getAuthToken } from '@/app/hooks/useAuth'
 import {
   replyToConversation as vpsReplyToConversation,
@@ -49,13 +48,11 @@ export default function ChatSection({
   buildMode?: 'fast' | 'fine'
 }) {
   const tChat = useTranslations('chat')
-  const tPreview = useTranslations('preview')
   const tStage = useTranslations('stage')
   const tCodePreview = useTranslations('codePreview')
   const tUiux = useTranslations('uiux')
   const tLogin = useTranslations('login')
   const tCommand = useTranslations('command')
-  const localePath = useLocalePath()
   const locale = useLocale()
   const auth = useAuth()
 
@@ -134,11 +131,6 @@ export default function ChatSection({
   }, [])
 
   // ── Hooks ──
-  const editor = useCodePreviewEditor(
-    // Will be set after session init
-    undefined
-  )
-
   const sessionCallbacks = useMemo(() => ({
     onMessagesSet: (msgs: Message[]) => setMessages(msgs),
     onMessagesUpdate: (updater: (prev: Message[]) => Message[]) => setMessages(updater),
@@ -152,7 +144,6 @@ export default function ChatSection({
       loginPromptHook.setLoginPromptConfig(config)
     },
     onError: (_err: string | null) => { /* handled by session hook */ },
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }), [])
 
   const session = useChatSession(
@@ -212,7 +203,6 @@ export default function ChatSection({
     onSessionTaskIdUpdate: (taskId: string) => {
       session.setSessionInfo(prev => prev ? { ...prev, currentTaskId: taskId } : null)
     },
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }), [])
 
   const polling = useChatPolling(
@@ -294,7 +284,6 @@ export default function ChatSection({
       polling.resetPolling()
       scroll.chatScrollRef.current = null
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isActive])
 
   // ── Cooldown ──
@@ -601,7 +590,6 @@ export default function ChatSection({
     handleSendMessage(content)
     editorHook.setCodePreviewOverrides({})
     editorHook.setCodePreviewAnnotations({})
-    editorHook.codePreviewOverrideHistory // read-only, reset via hook internals
     editorHook.setCodePreviewHistoryIndex(0)
   }, [session.sessionInfo, editorHook, tCodePreview, tUiux, handleSendMessage])
 
@@ -756,6 +744,8 @@ export default function ChatSection({
                   handleSelectConversation={session.handleSelectConversation}
                   handleStartNewConversation={handleStartNewConversation}
                   onShowMobilePreview={() => setShowMobilePreview(true)}
+                  isGuestLocked={isGuestLocked}
+                  quotaReadOnly={session.quotaReadOnly}
                 />
               </div>
             }
@@ -764,7 +754,6 @@ export default function ChatSection({
                 messages={messages}
                 sessionInfo={session.sessionInfo}
                 streamingPreview={streamingPreview}
-                codePreviewData={codePreviewData}
                 fastBuildChunks={fastBuildChunks}
                 stablePreviewData={stablePreviewData}
                 codePreviewEditMode={editorHook.codePreviewEditMode}
@@ -797,7 +786,6 @@ export default function ChatSection({
                 handleSendMessage={handleSendMessage}
                 selectedTemplateId={selectedTemplateId}
                 selectedTemplate={selectedTemplate}
-                handleTemplateSelect={handleTemplateSelect}
               />
             }
           />
@@ -984,6 +972,8 @@ export default function ChatSection({
             handleSelectConversation={session.handleSelectConversation}
             handleStartNewConversation={handleStartNewConversation}
             onShowMobilePreview={() => setShowMobilePreview(true)}
+            isGuestLocked={isGuestLocked}
+            quotaReadOnly={session.quotaReadOnly}
           />
 
           {/* Emphasized login prompt (Modal) */}

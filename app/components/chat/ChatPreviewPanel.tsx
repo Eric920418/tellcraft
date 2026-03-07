@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useCallback, useRef, useMemo } from 'react'
+import { useState, useCallback, useRef } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { useTranslations } from 'next-intl'
 import dynamic from 'next/dynamic'
@@ -20,43 +20,21 @@ const FastBuildPlayer = dynamic(
   { ssr: false, loading: () => null }
 )
 
-interface Message {
-  id: string
-  role: 'user' | 'assistant' | 'system'
-  content: string
-  timestamp: Date
-  stage?: string
-  progress?: { current: number; total: number; step: string }
-  layoutHint?: 'default' | 'split' | 'full_preview'
-  richContent?: {
-    type: string
-    data: Record<string, unknown>
-  }
-  quickReplies?: { label: string; value: string; style?: 'primary' | 'secondary' | 'ghost' }[]
-  pending?: boolean
-}
-
-interface SessionInfo {
-  userId: string
-  projectId: string
-  conversationId: string
-  currentTaskId?: string
-  isAuthenticated?: boolean
-  hasHistory?: boolean
-  readOnly?: boolean
-  user?: {
-    email?: string
-    name?: string
-    avatarUrl?: string
-  }
-}
+import type { Message, SessionInfo } from '@/app/types/chat'
 
 export interface ChatPreviewPanelProps {
   messages: Message[]
   sessionInfo: SessionInfo | null
   streamingPreview: StreamingPreview | null
-  codePreviewData: Record<string, unknown> | null
   fastBuildChunks: number
+  stablePreviewData: {
+    pages: { path: string; content: string; description: string }[]
+    components: { path: string; content: string; description: string }[]
+    styles: string
+    tailwindConfig: string
+    isStreaming: boolean
+    phase: 'structure' | 'animation' | 'rwd'
+  } | null
   codePreviewEditMode: boolean
   setCodePreviewEditMode: (v: boolean) => void
   codePreviewSelectedElements: ElementInfo[]
@@ -85,7 +63,6 @@ export interface ChatPreviewPanelProps {
   getPreviewIframe: () => HTMLIFrameElement | null
   handleCodePreviewSave: () => void
   handleSendMessage: (content: string) => void
-  handleTemplateSelect: (templateId: string) => void
   selectedTemplateId: string | null
   selectedTemplate: Template | null
 }
@@ -94,8 +71,8 @@ export default function ChatPreviewPanel({
   messages,
   sessionInfo,
   streamingPreview,
-  codePreviewData,
   fastBuildChunks,
+  stablePreviewData,
   codePreviewEditMode,
   setCodePreviewEditMode,
   codePreviewSelectedElements,
@@ -124,7 +101,6 @@ export default function ChatPreviewPanel({
   getPreviewIframe,
   handleCodePreviewSave,
   handleSendMessage,
-  handleTemplateSelect,
   selectedTemplateId,
   selectedTemplate,
 }: ChatPreviewPanelProps) {
@@ -151,19 +127,7 @@ export default function ChatPreviewPanel({
     codePreviewContainerObserverRef.current = observer
   }, [])
 
-  // 穩定預覽數據（避免每次 render 都建立新陣列 reference）
-  const stablePreviewData = useMemo(() => {
-    const activeData = streamingPreview || codePreviewData
-    if (!activeData) return null
-    return {
-      pages: (activeData.pages || []) as { path: string; content: string; description: string }[],
-      components: (activeData.components || []) as { path: string; content: string; description: string }[],
-      styles: (activeData.styles || '') as string,
-      tailwindConfig: (activeData.tailwindConfig || '') as string,
-      isStreaming: !!streamingPreview,
-      phase: ((streamingPreview as StreamingPreview | null)?.phase || 'structure') as 'structure' | 'animation' | 'rwd',
-    }
-  }, [streamingPreview, codePreviewData])
+  // stablePreviewData is passed as prop from ChatSection
 
   // ── BDD Q&A 蓋房子場景 ──
   // 用 messages.some() 判斷是否在 BDD 階段，避免用戶回答後 latestMsg 沒 stage 導致動畫消失

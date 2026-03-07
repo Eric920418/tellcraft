@@ -252,7 +252,7 @@ export function useChatSession(
     }
 
     init()
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+
   }, [isActive, initialMessage, resumeConversationId, getAnonymousId])
 
   // Detect guest build completed
@@ -300,7 +300,7 @@ export function useChatSession(
     }
 
     setIsInitializing(false)
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+
   }, [sessionInfo])
 
   const checkGuestBuildCompleted = useCallback((messages: Message[]) => {
@@ -313,7 +313,7 @@ export function useChatSession(
       setGuestBuildCompleted(true)
       callbacks.onGuestBuildCompleted(true)
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+
   }, [sessionInfo, guestBuildCompleted])
 
   return {

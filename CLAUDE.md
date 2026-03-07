@@ -99,7 +99,12 @@ pm2 describe tellcraft-backend            # 詳細資訊（記憶體/重啟次�
 
 | 模組 | 路徑 | 行數 | 職責 |
 |------|------|------|------|
-| **主頁面** | `app/page.tsx` | ~4000 | 對話 UI 主體、所有 richContent 渲染、狀態管理 |
+| **主頁面** | `app/[locale]/page.tsx` | ~360 | HomeContent 編排（Hero + Chat + Landing Sections + Auth） |
+| **對話容器** | `app/components/chat/ChatSection.tsx` | ~994 | 對話組合容器（5 hooks + handleSend/handleSendMessage） |
+| **消息列表** | `app/components/chat/ChatMessageList.tsx` | ~771 | 消息渲染 + 輸入框 + richContent 分派 |
+| **預覽面板** | `app/components/chat/ChatPreviewPanel.tsx` | ~651 | 右側預覽（BDD/FastBuild/CodePreview/Template） |
+| **共用型別** | `app/types/chat.ts` | ~67 | Message/SessionInfo/ConversationItem/COMMAND_KEYS |
+| **聊天 Hooks** | `app/hooks/useChat*.ts` + `useLoginPrompt.ts` | ~1063 | 滾動/編輯器/輪詢/會話/登入提示 |
 | **LLM 工具** | `app/lib/llm.ts` | ~2200 | LLM 呼叫封裝、prompt 工具 |
 | **VPS API Client** | `app/lib/vps-api.ts` | ~1900 | 前端呼叫 VPS 的 HTTP 客戶端 |
 | **Server Actions** | `app/actions/index.ts` | ~1800 | 對話/訊息/專案等 Server Actions 入口 |
@@ -107,6 +112,7 @@ pm2 describe tellcraft-backend            # 詳細資訊（記憶體/重啟次�
 | **WebSocket Hook** | `app/hooks/useVpsWebSocket.ts` | | 即時訊息推送（型別定義） |
 | **Fast Build 動畫** | `app/components/FastBuildPlayer.tsx` + `app/components/remotion/fast-build/` | | Remotion + @remotion/three 3D 工廠流水線動畫（Structure/Animation/RWD 三站）|
 | **3D 蓋房子** | `app/components/building-scene/` + `app/components/remotion/building-scene/` | | Remotion + @remotion/three 低多邊形 3D 場景（BDD Q&A 視覺回饋）|
+| **Landing 組件** | `app/components/landing/` | ~1978 | 15 個自包含 Landing Page 組件 |
 
 ### Skill 系統
 

@@ -421,21 +421,29 @@ Server Action 錯誤訊息 + 工具模組中文字串國際化（+117 keys，2 n
 ```
 app/
 ├── [locale]/             # i18n 路由群組（zh 預設 / en）
-│   ├── page.tsx          # 主頁面（對話 UI + 狀態管理，~4600 行）
+│   ├── page.tsx          # 主頁面（HomeContent 編排，~360 行）
 │   ├── layout.tsx        # NextIntlClientProvider 注入
 │   ├── dashboard/        # 儀表板頁面（/dashboard, /dashboard/admin）
 │   ├── auth/             # 認證（login/callback/post-login）
 │   ├── liff/             # LINE LIFF 入口
 │   └── test/             # 開發測試工具
+├── types/
+│   └── chat.ts           # 共用型別（Message/SessionInfo/ConversationItem/COMMAND_KEYS）
 ├── actions/              # Server Actions
 │   ├── index.ts          # 核心 Actions（對話/訊息/專案/BDD）
 │   └── admin.ts          # 管理員 Actions
 ├── lib/
 │   ├── vps-api.ts        # VPS HTTP 客戶端（~1900 行）
 │   ├── llm.ts            # LLM 封裝（~2200 行）
+│   ├── chat-utils.ts     # 聊天純函數（smoothEasing/STAGES/mapBackendStageToFrontend）
 │   └── sandpack-utils.ts # Sandpack 預覽工具
 ├── hooks/
 │   ├── useAuth.ts        # JWT 認證
+│   ├── useChatScroll.ts  # 聊天滾動邏輯（auto-scroll/MutationObserver）
+│   ├── useCodePreviewEditor.ts # 代碼預覽編輯模式（選取/修改/undo/localStorage）
+│   ├── useChatPolling.ts # 消息輪詢（智慧退避 3s-15s）
+│   ├── useChatSession.ts # 會話初始化 + 對話切換
+│   ├── useLoginPrompt.ts # 登入提示觸發邏輯
 │   ├── useAdminLogs.ts   # 管理員日誌串流 (Socket.io)
 │   ├── useLocalePath.ts  # locale-aware window.location.href
 │   └── useVpsWebSocket.ts # WebSocket
@@ -444,8 +452,22 @@ app/
 │   ├── dashboard/        # 儀表板元件
 │   ├── remotion/         # Remotion 動畫（fast-build/ + building-scene/）
 │   ├── building-scene/   # 3D 場景入口（dynamic import）
+│   ├── landing/          # Landing page 元件（15 個自包含組件）
+│   │   ├── HeroSection.tsx      # Hero + 輸入 + 模式切換 + 最近專案
+│   │   ├── UseCasesSection.tsx  # 用例展示
+│   │   ├── HowItWorksSection.tsx # 流程說明
+│   │   ├── StatsSection.tsx     # 統計計數器
+│   │   ├── ComparisonSection.tsx # 功能比較表
+│   │   ├── ShowcaseSection.tsx  # 作品展示
+│   │   ├── FAQSection.tsx       # FAQ 區塊
+│   │   ├── TestimonialSection.tsx # 推薦語
+│   │   ├── CTASection.tsx       # CTA 區塊
+│   │   ├── Footer.tsx           # 頁尾
+│   │   └── index.ts             # Barrel re-export
 │   ├── chat/             # 對話相關元件
-│   │   ├── ChatPreviewPanel.tsx  # 預覽面板（從 page.tsx renderPreviewPanel 抽出）
+│   │   ├── ChatSection.tsx      # 對話組合容器（5 hooks + 核心邏輯，~994 行）
+│   │   ├── ChatMessageList.tsx  # 消息列表 + 輸入框 + typing indicator
+│   │   ├── ChatPreviewPanel.tsx # 右側預覽面板（BDD/FastBuild/CodePreview/Template）
 │   │   └── MobilePreviewModal.tsx # 手機預覽 Modal
 │   ├── LocaleSwitcher.tsx # 語言切換器（中/EN）
 │   ├── BddAnimationPanel.tsx  # BDD 需求藍圖面板
