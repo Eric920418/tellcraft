@@ -2692,6 +2692,172 @@ export async function refineCode(
   imageUrls?: string[],
   onTextDelta?: (text: string) => void
 ): Promise<GenerationResult> {
+  type CodeBundle = {
+    pages: GeneratedComponent[]
+    components: GeneratedComponent[]
+    styles: string
+  }
+
+  const buildCodeBlocks = (code: CodeBundle): string[] => {
+    const blocks: string[] = []
+    for (const page of code.pages) {
+      blocks.push(`\`\`\`tsx:${page.path}\n${page.content}\n\`\`\``)
+    }
+    for (const comp of code.components) {
+      blocks.push(`\`\`\`tsx:${comp.path}\n${comp.content}\n\`\`\``)
+    }
+    if (code.styles) {
+      blocks.push(`\`\`\`css:globals.css\n${code.styles}\n\`\`\``)
+    }
+    return blocks
+  }
+
+  const parseModifiedCodeBlocks = (
+    content: string,
+    baseCode: CodeBundle
+  ): {
+    modifiedPages: Map<string, string>
+    modifiedComponents: Map<string, string>
+    modifiedStyles: string
+  } => {
+    const tsxRegex = /```tsx:([^\n]+)\n([\s\S]*?)```/g
+    const cssRegex = /```css:([^\n]+)\n([\s\S]*?)```/g
+    const modifiedPages = new Map<string, string>()
+    const modifiedComponents = new Map<string, string>()
+    let modifiedStyles = ''
+
+    let match
+    while ((match = tsxRegex.exec(content)) !== null) {
+      const path = match[1].trim()
+      const fileContent = match[2].trim()
+
+      if (baseCode.pages.some(p => p.path === path)) {
+        modifiedPages.set(path, fileContent)
+      } else if (baseCode.components.some(c => c.path === path)) {
+        modifiedComponents.set(path, fileContent)
+      } else if (path.includes('/page.tsx') || path.includes('/page.ts')) {
+        modifiedPages.set(path, fileContent)
+      } else {
+        modifiedComponents.set(path, fileContent)
+      }
+    }
+
+    while ((match = cssRegex.exec(content)) !== null) {
+      modifiedStyles = match[2].trim()
+    }
+
+    return { modifiedPages, modifiedComponents, modifiedStyles }
+  }
+
+  const mergeCodeBundle = (
+    baseCode: CodeBundle,
+    patches: {
+      modifiedPages: Map<string, string>
+      modifiedComponents: Map<string, string>
+      modifiedStyles: string
+    }
+  ): CodeBundle => {
+    const mergedPages = baseCode.pages.map(p => ({
+      ...p,
+      content: patches.modifiedPages.get(p.path) || p.content,
+    }))
+    for (const [path, content] of patches.modifiedPages) {
+      if (!baseCode.pages.some(p => p.path === path)) {
+        mergedPages.push({ path, content, description: `頁面: ${path}` })
+      }
+    }
+
+    const mergedComponents = baseCode.components.map(c => ({
+      ...c,
+      content: patches.modifiedComponents.get(c.path) || c.content,
+    }))
+    for (const [path, content] of patches.modifiedComponents) {
+      if (!baseCode.components.some(c => c.path === path)) {
+        mergedComponents.push({ path, content, description: `組件: ${path}` })
+      }
+    }
+
+    return {
+      pages: mergedPages,
+      components: mergedComponents,
+      styles: patches.modifiedStyles || baseCode.styles,
+    }
+  }
+
+  const hasAnyPatch = (patches: {
+    modifiedPages: Map<string, string>
+    modifiedComponents: Map<string, string>
+    modifiedStyles: string
+  }): boolean => patches.modifiedPages.size > 0 || patches.modifiedComponents.size > 0 || !!patches.modifiedStyles
+
+  const escapeRegExp = (value: string): string =>
+    value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+
+  const hasRenderableUrl = (content: string, url: string): boolean => {
+    const escaped = escapeRegExp(url)
+    const srcPattern = new RegExp(`src\\s*=\\s*\\{?\\s*["'\`]${escaped}["'\`]`)
+    const cssUrlPattern = new RegExp(`url\\(\\s*["'\`]?${escaped}["'\`]?\\s*\\)`)
+    return srcPattern.test(content) || cssUrlPattern.test(content) || content.includes(url)
+  }
+
+  const findMissingLockedUrls = (code: CodeBundle, lockedUrls: string[]): string[] => {
+    if (!lockedUrls.length) return []
+    const allFiles = [...code.pages, ...code.components]
+    return lockedUrls.filter(url => !allFiles.some(file => hasRenderableUrl(file.content, url)))
+  }
+
+  const repairLockedUploadUrls = async (
+    code: CodeBundle,
+    missingUrls: string[]
+  ): Promise<CodeBundle | null> => {
+    if (!missingUrls.length) return code
+
+    const repairSystemPrompt = `你是一位資深前端工程師。你會收到一份目前已可運作的 React/Next.js 代碼，以及「必須保留」的圖片 URL。
+
+任務：
+1. 只做最小必要修改，確保每個 URL 都被實際用在畫面上（img src 或 CSS backgroundImage）
+2. 不要刪除既有功能、互動、動畫、響應式邏輯
+3. 不要把 URL 改成其他網址、placeholder 或 data URI
+4. 若 URL 已被正確使用，不要重複新增
+
+輸出格式：
+只輸出被修改的檔案，使用：
+\`\`\`tsx:path/to/file.tsx
+...完整檔案內容...
+\`\`\`
+\`\`\`css:globals.css
+...完整內容...
+\`\`\``
+
+    const repairUserMessage = `## 缺失的鎖定圖片 URL（必須補回）
+${missingUrls.map((u, i) => `${i + 1}. ${u}`).join('\n')}
+
+## 當前代碼
+${buildCodeBlocks(code).join('\n\n')}
+
+請輸出最小修改，補回缺失的圖片 URL。`
+
+    const repairResponse = await callClaude(
+      repairSystemPrompt,
+      [{ role: 'user', content: repairUserMessage }],
+      { maxTokens: 16384, temperature: 0 },
+      { ...trackingContext, purpose: 'repair_locked_upload_urls' }
+    )
+
+    if (!repairResponse.success || !repairResponse.content) {
+      logger.warn({ error: repairResponse.error }, 'repairLockedUploadUrls LLM 呼叫失敗')
+      return null
+    }
+
+    const repairedPatches = parseModifiedCodeBlocks(repairResponse.content, code)
+    if (!hasAnyPatch(repairedPatches)) {
+      logger.warn('repairLockedUploadUrls 無有效代碼區塊輸出')
+      return null
+    }
+
+    return mergeCodeBundle(code, repairedPatches)
+  }
+
   const tier = designContext.designTier || 'functional'
   const feedbackUrls = Array.from(
     new Set(
@@ -2707,17 +2873,7 @@ export async function refineCode(
     )
   )
 
-  // 組合所有現有代碼
-  const codeBlocks: string[] = []
-  for (const page of currentCode.pages) {
-    codeBlocks.push(`\`\`\`tsx:${page.path}\n${page.content}\n\`\`\``)
-  }
-  for (const comp of currentCode.components) {
-    codeBlocks.push(`\`\`\`tsx:${comp.path}\n${comp.content}\n\`\`\``)
-  }
-  if (currentCode.styles) {
-    codeBlocks.push(`\`\`\`css:globals.css\n${currentCode.styles}\n\`\`\``)
-  }
+  const codeBlocks = buildCodeBlocks(currentCode)
 
   const designSystemSection = designContext.designSystem
     ? buildDesignSystemPrompt(designContext.designSystem)
@@ -2846,70 +3002,47 @@ ${codeBlocks.join('\n\n')}
     return { success: false, error: noChangeMatch[1].trim() || '無法理解修改需求，請提供具體的修改描述。' }
   }
 
-  // 解析修改後的檔案，合併回原始代碼
-  const tsxRegex = /```tsx:([^\n]+)\n([\s\S]*?)```/g
-  const cssRegex = /```css:([^\n]+)\n([\s\S]*?)```/g
+  const initialPatches = parseModifiedCodeBlocks(response.content, currentCode)
 
-  const modifiedPages = new Map<string, string>()
-  const modifiedComponents = new Map<string, string>()
-  let modifiedStyles = ''
+  // 零改動檢測：LLM 沒回 [NO_CHANGE] 但也沒輸出任何代碼區塊
+  if (!hasAnyPatch(initialPatches)) {
+    return { success: false, error: '無法理解您的修改需求。請描述具體要修改的內容，例如「把標題文字改成藍色」或「在導航欄新增一個搜尋框」。' }
+  }
 
-  let match
-  while ((match = tsxRegex.exec(response.content)) !== null) {
-    const path = match[1].trim()
-    const fileContent = match[2].trim()
+  let mergedCode = mergeCodeBundle(currentCode, initialPatches)
 
-    if (currentCode.pages.some(p => p.path === path)) {
-      modifiedPages.set(path, fileContent)
-    } else if (currentCode.components.some(c => c.path === path)) {
-      modifiedComponents.set(path, fileContent)
-    } else {
-      // 新增的檔案，根據路徑判斷類型
-      if (path.includes('/page.tsx') || path.includes('/page.ts')) {
-        modifiedPages.set(path, fileContent)
-      } else {
-        modifiedComponents.set(path, fileContent)
+  // 鎖定圖片 URL 最終驗證：若缺失，嘗試一次修復
+  if (lockedUploadUrls.length > 0) {
+    const missingBeforeRepair = findMissingLockedUrls(mergedCode, lockedUploadUrls)
+    if (missingBeforeRepair.length > 0) {
+      logger.warn(
+        { missingCount: missingBeforeRepair.length, missingBeforeRepair },
+        'refineCode: 偵測到鎖定圖片 URL 在合併結果中缺失，嘗試修復'
+      )
+
+      const repaired = await repairLockedUploadUrls(mergedCode, missingBeforeRepair)
+      if (repaired) {
+        mergedCode = repaired
+      }
+
+      const missingAfterRepair = findMissingLockedUrls(mergedCode, lockedUploadUrls)
+      if (missingAfterRepair.length > 0) {
+        logger.warn(
+          { missingCount: missingAfterRepair.length, missingAfterRepair },
+          'refineCode: 鎖定圖片 URL 修復後仍缺失'
+        )
+        return {
+          success: false,
+          error: '偵測到剛上傳的圖片在更新後遺失，為避免覆蓋您的設計，本次修改已取消。請再按一次儲存，或縮小修改範圍重試。',
+        }
       }
     }
   }
 
-  while ((match = cssRegex.exec(response.content)) !== null) {
-    modifiedStyles = match[2].trim()
-  }
-
-  // 合併：被修改的檔案用新版本，未修改的保留原版
-  const mergedPages = currentCode.pages.map(p => ({
-    ...p,
-    content: modifiedPages.get(p.path) || p.content,
-  }))
-  // 加入新增的頁面
-  for (const [path, content] of modifiedPages) {
-    if (!currentCode.pages.some(p => p.path === path)) {
-      mergedPages.push({ path, content, description: `頁面: ${path}` })
-    }
-  }
-
-  const mergedComponents = currentCode.components.map(c => ({
-    ...c,
-    content: modifiedComponents.get(c.path) || c.content,
-  }))
-  // 加入新增的組件
-  for (const [path, content] of modifiedComponents) {
-    if (!currentCode.components.some(c => c.path === path)) {
-      mergedComponents.push({ path, content, description: `組件: ${path}` })
-    }
-  }
-
-  // 零改動檢測：LLM 沒回 [NO_CHANGE] 但也沒輸出任何代碼區塊
-  const hasAnyChange = modifiedPages.size > 0 || modifiedComponents.size > 0 || modifiedStyles
-  if (!hasAnyChange) {
-    return { success: false, error: '無法理解您的修改需求。請描述具體要修改的內容，例如「把標題文字改成藍色」或「在導航欄新增一個搜尋框」。' }
-  }
-
   return {
     success: true,
-    pages: mergedPages,
-    components: mergedComponents,
-    styles: modifiedStyles || currentCode.styles,
+    pages: mergedCode.pages,
+    components: mergedCode.components,
+    styles: mergedCode.styles,
   }
 }
