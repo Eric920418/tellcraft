@@ -1129,9 +1129,14 @@ function ImageUrlInput({
       const url = await onUpload(file)
       if (url) {
         onChange(url)
+      } else {
+        setUploadError(uploadFailedLabel)
       }
-    } catch {
-      setUploadError(uploadFailedLabel)
+    } catch (err) {
+      const message = err instanceof Error && err.message
+        ? err.message
+        : uploadFailedLabel
+      setUploadError(message)
     } finally {
       setUploading(false)
       setUploadProgress(0)

@@ -33,6 +33,7 @@ import SpecGenerationView from '@/app/components/SpecGenerationView'
 import PreviewPanel, { type ElementInfo } from '@/app/components/uiux/PreviewPanel'
 import PropertyEditor from '@/app/components/uiux/PropertyEditor'
 import { uploadImage } from '@/app/lib/vps-api'
+import { normalizeLegacyUploadUrl } from '@/app/lib/upload-url'
 import DeviceSwitcher, { type DeviceType, getDeviceWidth } from '@/app/components/uiux/DeviceSwitcher'
 import TemplatePicker from '@/app/components/uiux/TemplatePicker'
 import QuickReplies from '@/app/components/QuickReplies'
@@ -1268,10 +1269,19 @@ function ChatSection({
 
   const handleCodePreviewUploadImage = useCallback(async (file: File): Promise<string | null> => {
     const token = getAuthToken()
-    if (!token) return null
+    if (!token) {
+      throw new Error(locale === 'en' ? 'Please sign in before uploading images' : '請先登入再上傳圖片')
+    }
     const result = await uploadImage({ file, token })
-    return result.success ? (result.data?.url || null) : null
-  }, [])
+    if (!result.success) {
+      throw new Error(result.error || (locale === 'en' ? 'Upload failed' : '上傳失敗'))
+    }
+    const uploadedUrl = result.data?.url || ''
+    if (!uploadedUrl) {
+      throw new Error(locale === 'en' ? 'Upload response missing image URL' : '上傳成功但缺少圖片 URL')
+    }
+    return normalizeLegacyUploadUrl(uploadedUrl)
+  }, [locale])
 
   const handleCodePreviewAnnotationChange = useCallback((elementId: string, text: string) => {
     setCodePreviewAnnotations(prev => ({ ...prev, [elementId]: text }))
@@ -2509,17 +2519,18 @@ function ChatSection({
     for (const [elemId, changes] of Object.entries(codePreviewOverrides)) {
       lines.push(`### ${elemId}`)
       for (const [prop, val] of Object.entries(changes)) {
+        const normalizedVal = normalizeLegacyUploadUrl(String(val))
         if (prop === 'text') {
-          lines.push(`- ${tCodePreview('textChanged', { value: val })}`)
+          lines.push(`- ${tCodePreview('textChanged', { value: normalizedVal })}`)
         } else if (prop === 'imgSrc') {
-          lines.push(`- ${tCodePreview('imgSrcChanged', { value: val })}`)
+          lines.push(`- ${tCodePreview('imgSrcChanged', { value: normalizedVal })}`)
         } else if (prop === 'imgAlt') {
-          lines.push(`- ${tCodePreview('imgAltChanged', { value: val })}`)
+          lines.push(`- ${tCodePreview('imgAltChanged', { value: normalizedVal })}`)
         } else if (prop === 'backgroundImage') {
           // 提取純 URL 給 AI 清楚的指令
-          const urlMatch = val.match(/url\(["']?(.*?)["']?\)/)
-          const pureUrl = urlMatch ? urlMatch[1] : val
-          if (val === 'none' || !pureUrl) {
+          const urlMatch = normalizedVal.match(/url\(["']?(.*?)["']?\)/)
+          const pureUrl = normalizeLegacyUploadUrl(urlMatch ? urlMatch[1] : normalizedVal)
+          if (normalizedVal === 'none' || !pureUrl) {
             lines.push(`- 移除背景圖片`)
           } else {
             lines.push(`- 設定背景圖片: style={{ backgroundImage: "url(${pureUrl})", backgroundSize: "${codePreviewOverrides[elemId]?.backgroundSize || 'cover'}", backgroundPosition: "${codePreviewOverrides[elemId]?.backgroundPosition || 'center'}", backgroundRepeat: "${codePreviewOverrides[elemId]?.backgroundRepeat || 'no-repeat'}" }}`)

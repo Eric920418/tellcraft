@@ -7,6 +7,7 @@ import DeviceSwitcher, { DeviceType, getDeviceWidth } from './DeviceSwitcher'
 import PropertyEditor from './PropertyEditor'
 import { useAuth } from '../../hooks/useAuth'
 import { getTemplateOverrides, saveTemplateOverrides, uploadImage } from '../../lib/vps-api'
+import { normalizeLegacyUploadUrl } from '../../lib/upload-url'
 
 // ============================================================
 // PreviewPanel - 預覽面板元件
@@ -652,7 +653,9 @@ export default function PreviewPanel({
 
   // ── 圖片上傳 ────────────────────────────────────
   const handleUploadImage = useCallback(async (file: File): Promise<string | null> => {
-    if (!token || !isAuthenticated) return null
+    if (!token || !isAuthenticated) {
+      throw new Error('請先登入再上傳圖片')
+    }
 
     const result = await uploadImage({
       file,
@@ -661,11 +664,12 @@ export default function PreviewPanel({
     })
 
     if (result.success && result.data?.url) {
-      return result.data.url
+      return normalizeLegacyUploadUrl(result.data.url)
     }
 
-    console.error('[PreviewPanel] 圖片上傳失敗:', result.error)
-    return null
+    const errorMessage = result.error || '上傳失敗'
+    console.error('[PreviewPanel] 圖片上傳失敗:', errorMessage)
+    throw new Error(errorMessage)
   }, [token, isAuthenticated])
 
   // ── 鍵盤快捷鍵（Cmd+Z / Cmd+Shift+Z）────────────

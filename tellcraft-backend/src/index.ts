@@ -52,6 +52,7 @@ const PORT = parseInt(process.env.PORT || '3100', 10)
 const REDIS_URL = process.env.REDIS_URL || 'redis://localhost:6379'
 const CORS_ORIGIN = process.env.CORS_ORIGIN || 'https://tellcraft.com'
 const SOCKET_VERBOSE_LOG = process.env.SOCKET_VERBOSE_LOG === 'true'
+const UPLOAD_DIR = process.env.UPLOAD_DIR || '/var/www/uploads/tellcraft'
 
 // ============================================================
 // Express 應用
@@ -396,6 +397,17 @@ app.use('/api/templates', templatesRoutes)
 app.use('/api/bdd', bddRoutes)
 app.use('/api/operations', operationsRoutes)
 app.use('/api/upload', uploadRoutes)
+app.use('/uploads/tellcraft', (req, res, next) => {
+  if (!/\.(jpe?g|png|webp|gif|svg)$/i.test(req.path)) {
+    res.status(403).json({ error: 'Forbidden file type' })
+    return
+  }
+  next()
+}, express.static(UPLOAD_DIR, {
+  immutable: true,
+  maxAge: '30d',
+  fallthrough: false,
+}))
 
 // 404 處理
 app.use((_req, res) => {

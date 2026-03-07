@@ -55,10 +55,12 @@ npx ts-node bdd-spec/scripts/validate-feature.ts spec/features/
 ### 環境變數
 
 **前端**（`.env.local`）：
-`VPS_API_URL` `NEXT_PUBLIC_VPS_API_URL` `NEXT_PUBLIC_VPS_WS_URL` `NEXT_PUBLIC_SUPABASE_URL` `NEXT_PUBLIC_SUPABASE_ANON_KEY` `NEXT_PUBLIC_LIFF_ID`
+`VPS_API_URL` `NEXT_PUBLIC_VPS_API_URL` `NEXT_PUBLIC_VPS_WS_URL` `NEXT_PUBLIC_UPLOAD_BASE_URL` `NEXT_PUBLIC_SUPABASE_URL` `NEXT_PUBLIC_SUPABASE_ANON_KEY` `NEXT_PUBLIC_LIFF_ID`
 
 **後端**（`tellcraft-backend/.env`）：
 `DATABASE_URL` `REDIS_URL` `JWT_SECRET` `ANTHROPIC_API_KEY` `GOOGLE_CLIENT_ID` `GOOGLE_CLIENT_SECRET` `LINE_CHANNEL_ID` `LINE_CHANNEL_SECRET` `LINE_BOT_CHANNEL_SECRET` `LINE_MESSAGING_CHANNEL_ACCESS_TOKEN` `LIFF_ID` `UPLOAD_DIR` `UPLOAD_BASE_URL` `SOCKET_VERBOSE_LOG`
+
+> `UPLOAD_BASE_URL` 必填（例如 `https://api.tellcraft.com/uploads/tellcraft`），未設定時 `/api/upload/image` 會回傳 `UPLOAD_BASE_URL_MISSING`。
 
 ## 系統架構
 
@@ -442,6 +444,9 @@ app/
 │   ├── dashboard/        # 儀表板元件
 │   ├── remotion/         # Remotion 動畫（fast-build/ + building-scene/）
 │   ├── building-scene/   # 3D 場景入口（dynamic import）
+│   ├── chat/             # 對話相關元件
+│   │   ├── ChatPreviewPanel.tsx  # 預覽面板（從 page.tsx renderPreviewPanel 抽出）
+│   │   └── MobilePreviewModal.tsx # 手機預覽 Modal
 │   ├── LocaleSwitcher.tsx # 語言切換器（中/EN）
 │   ├── BddAnimationPanel.tsx  # BDD 需求藍圖面板
 │   └── FastBuildPlayer.tsx # 3D 工廠 Player
@@ -461,8 +466,15 @@ tellcraft-backend/
 ├── src/
 │   ├── index.ts          # Express + Socket.io + BullMQ 入口
 │   ├── workers/
-│   │   ├── orchestrator.ts       # 核心流程引擎（~3900 行）
-│   │   └── orchestrator-utils.ts # 共用函數（sendMessage/FlowState 等）
+│   │   ├── orchestrator.ts       # Worker setup + handleProcessMessage + slim handleContinueFlow (~480 行)
+│   │   ├── phase-router.ts       # Phase 路由分派（routePhase + deployer 子路由）
+│   │   ├── intent-helpers.ts     # 意圖判斷 helper + 常數（hasDeployIntent 等）
+│   │   ├── orchestrator-utils.ts # 共用函數（sendMessage/FlowState 等）
+│   │   └── phase-handlers/
+│   │       ├── bdd-phases.ts         # BDD 全流程（ES/Discovery/Clarify/Formulation/Spec）
+│   │       ├── uiux-phases.ts        # UIUX 全流程（Discovery/Brief/Variant/CodePipeline）
+│   │       ├── deploy-phases.ts      # 部署執行（prepareDeployment + executeDeployment）
+│   │       └── fast-build-phases.ts  # 快速建站（一句話 → 跳過 BDD → 生成）
 │   ├── types/
 │   │   └── flow-state.ts         # FlowState 介面（避免循環 import）
 │   ├── services/
@@ -515,7 +527,7 @@ git clone git@github.com:Eric920418/tellcraft.git ~/tellcraft-repo
 
 # 3. 配置環境變數
 cp ~/tellcraft-repo/tellcraft-backend/.env.example ~/tellcraft-repo/tellcraft-backend/.env
-# 編輯 .env 填入 DATABASE_URL, REDIS_URL, JWT_SECRET, ANTHROPIC_API_KEY 等
+# 編輯 .env 填入 DATABASE_URL, REDIS_URL, JWT_SECRET, ANTHROPIC_API_KEY, UPLOAD_BASE_URL 等
 
 # 4. 安裝依賴並 build
 cd ~/tellcraft-repo/tellcraft-backend

@@ -217,7 +217,7 @@ function translateDeployResult(
   quickReplies?: { label: string; value: string; style?: string }[]
 ): Message[] {
   const success = data.success as boolean
-  const url = data.url as string | undefined
+  const url = (data.deploymentUrl || data.url) as string | undefined
   const error = data.error as string | undefined
 
   if (success && url) {

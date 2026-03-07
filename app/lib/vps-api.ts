@@ -1972,7 +1972,7 @@ export function uploadImage(input: {
   file: File
   token: string
   onProgress?: (percent: number) => void
-}): Promise<ApiResponse<{ url: string; filename: string; size: number }>> {
+}): Promise<ApiResponse<{ path?: string; url: string; filename: string; size: number }>> {
   const baseUrl = getApiBase()
   const url = `${baseUrl}/api/upload/image`
 

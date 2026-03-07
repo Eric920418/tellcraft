@@ -15,7 +15,7 @@ const router: Router = Router()
 // ============================================================
 
 const UPLOAD_DIR = process.env.UPLOAD_DIR || '/var/www/uploads/tellcraft'
-const UPLOAD_BASE_URL = process.env.UPLOAD_BASE_URL || 'https://api.tellcraft.com/uploads/tellcraft'
+const UPLOAD_BASE_URL = (process.env.UPLOAD_BASE_URL || '').trim().replace(/\/+$/, '')
 
 const MAX_FILE_SIZE = 5 * 1024 * 1024 // 5MB
 const ALLOWED_MIMETYPES = [
@@ -90,19 +90,30 @@ router.post(
     })
   },
   (req: Request, res: Response) => {
+    if (!UPLOAD_BASE_URL) {
+      logger.error('UPLOAD_BASE_URL is not configured')
+      res.status(500).json({
+        success: false,
+        code: 'UPLOAD_BASE_URL_MISSING',
+        error: '伺服器未設定圖片公開網址（UPLOAD_BASE_URL）',
+      })
+      return
+    }
+
     if (!req.file) {
       res.status(400).json({ success: false, error: '未提供圖片檔案' })
       return
     }
 
     // 構建公開 URL
-    const relativePath = path.relative(UPLOAD_DIR, req.file.path)
+    const relativePath = path.relative(UPLOAD_DIR, req.file.path).split(path.sep).join('/')
     const url = `${UPLOAD_BASE_URL}/${relativePath}`
 
     logger.info({ userId: req.user?.id, originalname: req.file.originalname, url }, '用戶上傳圖片')
 
     res.json({
       success: true,
+      path: relativePath,
       url,
       filename: req.file.filename,
       size: req.file.size,

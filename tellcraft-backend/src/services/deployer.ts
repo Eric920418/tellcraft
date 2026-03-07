@@ -240,6 +240,55 @@ const BASE_DEPS: Record<string, string> = {
   autoprefixer: '^10.0.0',
 }
 
+const LEGACY_UPLOAD_BASE_URLS = [
+  'https://api.tellcraft.com/uploads/tellcraft',
+  'http://api.tellcraft.com/uploads/tellcraft',
+  'http://54.238.4.117/uploads/tellcraft',
+  'http://54.238.4.117:8080/uploads/tellcraft',
+]
+
+function normalizeUploadBaseUrl(baseUrl?: string | null): string {
+  return (baseUrl || '').trim().replace(/\/+$/, '')
+}
+
+function rewriteLegacyUploadUrl(content: string, targetBaseUrl: string): { content: string; replacements: number } {
+  if (!targetBaseUrl) return { content, replacements: 0 }
+
+  let nextContent = content
+  let replacements = 0
+
+  for (const legacyBaseUrl of LEGACY_UPLOAD_BASE_URLS) {
+    if (!legacyBaseUrl || legacyBaseUrl === targetBaseUrl) continue
+    const pattern = new RegExp(legacyBaseUrl.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g')
+    nextContent = nextContent.replace(pattern, () => {
+      replacements += 1
+      return targetBaseUrl
+    })
+  }
+
+  return { content: nextContent, replacements }
+}
+
+function normalizeGeneratedCodeUploadUrls(code: GeneratedCode, targetBaseUrl: string): number {
+  if (!targetBaseUrl) return 0
+
+  let replacements = 0
+  for (const page of code.pages) {
+    const result = rewriteLegacyUploadUrl(page.content, targetBaseUrl)
+    page.content = result.content
+    replacements += result.replacements
+  }
+  for (const comp of code.components) {
+    const result = rewriteLegacyUploadUrl(comp.content, targetBaseUrl)
+    comp.content = result.content
+    replacements += result.replacements
+  }
+  const styleResult = rewriteLegacyUploadUrl(code.styles || '', targetBaseUrl)
+  code.styles = styleResult.content
+  replacements += styleResult.replacements
+  return replacements
+}
+
 /**
  * 部署前代碼預檢 + 自動修復
  * 掃描所有已知的 build 失敗模式，自動修復後返回乾淨的代碼
@@ -254,6 +303,12 @@ function sanitizeCodeForDeploy(code: GeneratedCode): SanitizeResult {
     pages: code.pages.map(p => ({ ...p, content: p.content })),
     components: code.components.map(c => ({ ...c, content: c.content })),
     styles: code.styles,
+  }
+
+  const normalizedUploadBaseUrl = normalizeUploadBaseUrl(process.env.UPLOAD_BASE_URL)
+  const rewrittenUploadUrls = normalizeGeneratedCodeUploadUrls(sanitized, normalizedUploadBaseUrl)
+  if (rewrittenUploadUrls > 0) {
+    fixes.push(`圖片 URL 正規化 (${rewrittenUploadUrls} 處)`)
   }
 
   const allFiles = [...sanitized.pages, ...sanitized.components]

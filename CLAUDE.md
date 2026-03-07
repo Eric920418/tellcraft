@@ -68,7 +68,13 @@ pm2 describe tellcraft-backend            # 詳細資訊（記憶體/重啟次�
 
 | 模組 | 路徑 | 職責 |
 |------|------|------|
-| **Orchestrator** | `workers/orchestrator.ts`（~3900 行） | BullMQ Worker，核心流程引擎，`FlowState.phase` 狀態機 |
+| **Orchestrator** | `workers/orchestrator.ts`（~480 行） | BullMQ Worker setup + handleProcessMessage + slim handleContinueFlow |
+| **Phase Router** | `workers/phase-router.ts`（~380 行） | Phase 路由分派 + deployer_failed/complete 子路由 + handlePhaseError |
+| **Intent Helpers** | `workers/intent-helpers.ts`（~286 行） | 意圖判斷 helper（hasDeployIntent 等）+ 常數（PHASE_BACKTRACK_MAP 等） |
+| **BDD Phases** | `workers/phase-handlers/bdd-phases.ts`（~3000 行） | BDD 全流程：ES/Discovery/Clarify/Formulation/Spec |
+| **UIUX Phases** | `workers/phase-handlers/uiux-phases.ts`（~2420 行） | UIUX 全流程：Discovery/Brief/Variant/CodePipeline/Mixed routing |
+| **Deploy Phases** | `workers/phase-handlers/deploy-phases.ts`（~240 行） | 部署執行：prepareDeployment + executeDeployment |
+| **Fast Build Phases** | `workers/phase-handlers/fast-build-phases.ts`（~400 行） | 快速建站：一句話 → 跳過 BDD → 生成 |
 | **Orchestrator Utils** | `workers/orchestrator-utils.ts` | 共用基礎設施：sendMessage/saveFlowState/getFlowState 等 |
 | **FlowState 型別** | `types/flow-state.ts` | FlowState 介面 + 子型別（避免循環 import） |
 | **Classifier** | `services/classifier.ts` | 三層防禦：Prefilter → Meta Intent → Skill 分類 |
