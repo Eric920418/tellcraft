@@ -2,9 +2,12 @@ import { Router, type Router as RouterType } from 'express'
 import { Queue } from 'bullmq'
 import Redis from 'ioredis'
 import crypto from 'crypto'
-import { requireAuth, optionalAuth } from '../middleware/auth'
+import { optionalAuth } from '../middleware/auth'
 import * as db from '../db/client'
 import { getCreditLimit, isCreditExhausted, CREDIT_LIMIT_ERROR_CODE } from '../config/plans'
+import { createLogger } from '../lib/logger'
+
+const logger = createLogger('conversation')
 
 const router: RouterType = Router()
 
@@ -52,7 +55,7 @@ async function checkConversationRateLimit(conversationId: string): Promise<{ all
 
     return { allowed: true, retryAfter: 0 }
   } catch (err) {
-    console.warn('[RateLimit] Redis 錯誤，降級放行:', err)
+    logger.warn({ err }, 'Redis 錯誤，降級放行')
     return { allowed: true, retryAfter: 0 } // 降級放行
   }
 }
@@ -260,7 +263,7 @@ router.post('/:id/message', optionalAuth, async (req, res) => {
       jobId: job.id,
     })
   } catch (error) {
-    console.error('[Conversation] 發送消息失敗:', error)
+    logger.error({ err: error }, '發送消息失敗')
     res.status(500).json({ error: 'Failed to send message' })
   }
 })
@@ -400,7 +403,7 @@ router.post('/:id/reply', optionalAuth, async (req, res) => {
       jobId: job.id,
     })
   } catch (error) {
-    console.error('[Conversation] 回覆失敗:', error)
+    logger.error({ err: error }, '回覆失敗')
     res.status(500).json({ error: 'Failed to reply' })
   }
 })
@@ -487,7 +490,7 @@ router.get('/:id/messages', optionalAuth, async (req, res) => {
       streamingPreview,
     })
   } catch (error) {
-    console.error('[Conversation] 取得消息失敗:', error)
+    logger.error({ err: error }, '取得消息失敗')
     res.status(500).json({ error: 'Failed to get messages' })
   }
 })

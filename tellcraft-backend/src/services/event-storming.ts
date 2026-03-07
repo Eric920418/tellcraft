@@ -8,6 +8,9 @@ import { recordLlmUsage } from '../db/client'
 import { isConfirmation } from '../utils/is-confirmation'
 import { safeParseJson } from '../utils/safe-parse-json'
 import { LlmTrackingContext } from './classifier'
+import { createLogger } from '../lib/logger'
+
+const logger = createLogger('event-storming')
 
 // Haiku 定價 (每百萬 tokens)
 const HAIKU_PRICING = { input: 0.8, output: 4 }
@@ -141,7 +144,7 @@ async function callHaiku(
         const status = response.status
         if (attempt < RETRY_MAX && (status === 429 || status === 529 || status === 503)) {
           const delay = RETRY_BASE_DELAY_MS * Math.pow(2, attempt - 1)
-          console.warn(`[event-storming callHaiku] HTTP ${status} (attempt ${attempt}/${RETRY_MAX})，${delay}ms 後重試`)
+          logger.warn({ status, attempt, retryMax: RETRY_MAX, delayMs: delay }, 'callHaiku HTTP 錯誤，重試中')
           await new Promise(resolve => setTimeout(resolve, delay))
           continue
         }
@@ -168,7 +171,7 @@ async function callHaiku(
           purpose: 'event-storming',
           userId: trackingContext.userId,
           conversationId: trackingContext.conversationId,
-        }).catch(err => console.error('[event-storming] 記錄使用量失敗:', err))
+        }).catch(err => logger.error({ err }, '記錄使用量失敗'))
       }
 
       return {
@@ -182,7 +185,7 @@ async function callHaiku(
       const msg = String(error)
       if (attempt < RETRY_MAX && (msg.includes('ECONNRESET') || msg.includes('ETIMEDOUT') || msg.includes('fetch failed'))) {
         const delay = RETRY_BASE_DELAY_MS * Math.pow(2, attempt - 1)
-        console.warn(`[event-storming callHaiku] 網路錯誤 (attempt ${attempt}/${RETRY_MAX})，${delay}ms 後重試`)
+        logger.warn({ attempt, retryMax: RETRY_MAX, delayMs: delay, error: msg.slice(0, 150) }, 'callHaiku 網路錯誤，重試中')
         await new Promise(resolve => setTimeout(resolve, delay))
         continue
       }
@@ -224,13 +227,13 @@ export async function shouldRunEventStorming(
   const response = await callHaiku(systemPrompt, `用戶需求：${message}`, { maxTokens: 256 }, trackingContext)
 
   if (!response.success || !response.content) {
-    console.warn('[event-storming] shouldRunEventStorming LLM 失敗，默認跳過 ES:', response.error)
+    logger.warn({ error: response.error }, 'shouldRunEventStorming LLM 失敗，默認跳過 ES')
     return { needed: false, reasoning: 'LLM 調用失敗，跳過 Event Storming' }
   }
 
   const parsed = safeParseJson<{ needed: boolean; reasoning: string }>(response.content)
   if (!parsed) {
-    console.warn('[event-storming] shouldRunEventStorming 解析失敗，默認跳過 ES')
+    logger.warn('shouldRunEventStorming 解析失敗，默認跳過 ES')
     return { needed: false, reasoning: '解析失敗，跳過 Event Storming' }
   }
 
@@ -449,7 +452,7 @@ ${clearedContext || '（尚無已澄清項目）'}
 
   if (!response.success || !response.content) {
     // 降級：標記為 partial 繼續下一個
-    console.warn(`[event-storming] exploreNextItem 失敗（${nextItem.name}）:`, response.error)
+    logger.warn({ itemName: nextItem.name, error: response.error }, 'exploreNextItem 失敗')
     markItemStatus(knowledgeMap, nextItem.name, 'partial')
     knowledgeMap.currentItemName = null
     knowledgeMap.currentSubStep = null
@@ -465,7 +468,7 @@ ${clearedContext || '（尚無已澄清項目）'}
 
   const parsed = safeParseJson<ExploreProposal>(response.content)
   if (!parsed) {
-    console.warn(`[event-storming] exploreNextItem 解析失敗（${nextItem.name}）`)
+    logger.warn({ itemName: nextItem.name }, 'exploreNextItem 解析失敗')
     markItemStatus(knowledgeMap, nextItem.name, 'partial')
     knowledgeMap.currentItemName = null
     knowledgeMap.currentSubStep = null
@@ -591,7 +594,7 @@ ${clearedContext || '（無）'}
   const response = await callHaiku(systemPrompt, `用戶反饋：${userMessage}`, { maxTokens: 1024 }, trackingContext)
 
   if (!response.success || !response.content) {
-    console.warn(`[event-storming] handleESAnswer 失敗（${currentName}）:`, response.error)
+    logger.warn({ itemName: currentName, error: response.error }, 'handleESAnswer 失敗')
     // 降級：標記 partial 繼續
     markItemStatus(knowledgeMap, currentName, 'partial')
     knowledgeMap.currentItemName = null

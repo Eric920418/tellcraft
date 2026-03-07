@@ -6,6 +6,9 @@
 import Anthropic from '@anthropic-ai/sdk'
 import { recordLlmUsage } from '../db/client'
 import { safeParseJson } from '../utils/safe-parse-json'
+import { createLogger } from '../lib/logger'
+
+const logger = createLogger('bdd-to-ui-spec')
 
 // ============================================================
 // 類型定義
@@ -214,7 +217,7 @@ ${bddSpec}
             purpose: 'bdd_to_ui_translation',
             userId: trackingContext?.userId,
             conversationId: trackingContext?.conversationId,
-          }).catch(err => console.error('[BDD→UI] recordLlmUsage failed:', err))
+          }).catch(err => logger.error({ err }, 'recordLlmUsage failed'))
         }
 
         const content = finalMessage.content[0]
@@ -234,8 +237,7 @@ ${bddSpec}
           return { success: false, error: '翻譯結果缺少頁面定義' }
         }
 
-        console.log(`[BDD→UI] 翻譯完成: ${spec.pages.length} 頁面, ${spec.entities?.length || 0} 實體`,
-          trackingContext?.conversationId ? `(conv: ${trackingContext.conversationId})` : '')
+        logger.info({ pages: spec.pages.length, entities: spec.entities?.length || 0, conversationId: trackingContext?.conversationId }, '翻譯完成')
 
         return { success: true, spec }
       } catch (innerErr) {
@@ -246,7 +248,7 @@ ${bddSpec}
           errMsg.includes('ECONNRESET') || errMsg.includes('ETIMEDOUT')
         if (attempt < RETRY_MAX && isRetryable) {
           const delay = RETRY_BASE_DELAY_MS * Math.pow(2, attempt - 1)
-          console.warn(`[BDD→UI] 暫時性錯誤 (attempt ${attempt}/${RETRY_MAX})，${delay}ms 後重試:`, errMsg.slice(0, 150))
+          logger.warn({ attempt, retryMax: RETRY_MAX, delayMs: delay, error: errMsg.slice(0, 150) }, '暫時性錯誤，重試中')
           await new Promise(resolve => setTimeout(resolve, delay))
           continue
         }
@@ -254,10 +256,10 @@ ${bddSpec}
       }
     }
 
-    console.error('[BDD→UI] 翻譯失敗:', lastError)
+    logger.error({ err: lastError }, '翻譯失敗')
     return { success: false, error: `BDD→UI 翻譯失敗: ${lastError}` }
   } catch (err) {
-    console.error('[BDD→UI] 翻譯初始化失敗:', err)
+    logger.error({ err }, '翻譯初始化失敗')
     return { success: false, error: `BDD→UI 翻譯失敗: ${err}` }
   }
 }

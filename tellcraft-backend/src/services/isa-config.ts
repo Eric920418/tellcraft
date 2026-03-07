@@ -1,4 +1,7 @@
 import * as yaml from 'js-yaml'
+import { createLogger } from '../lib/logger'
+
+const logger = createLogger('isa-config')
 
 // ============================================================
 // 類型定義
@@ -67,7 +70,7 @@ const LINTER_PATHS = {
 function scanStepPatterns(features: Array<{ content: string }>): Map<string, StepPattern> {
   const patterns = new Map<string, StepPattern>()
 
-  for (const [type, regex] of Object.entries(STEP_REGEXES)) {
+  for (const [type] of Object.entries(STEP_REGEXES)) {
     patterns.set(type, { type: type as StepPattern['type'], count: 0, examples: [] })
   }
 
@@ -382,11 +385,11 @@ export function generateIsaConfig(
     const patternSummary = Array.from(detectedPatterns.entries())
       .map(([type, p]) => `${type}: ${p.count}`)
       .join(', ')
-    console.log(`[IsaConfig] 掃描完成：${patternSummary}`)
+    logger.info({ patternSummary }, '掃描完成')
 
     // Step 1.5: 動態派生約束
     const derived = deriveConstraints(features, input.entityMapping)
-    console.log(`[IsaConfig] 動態約束：${derived.entityNames.length} entities, ${derived.tableNames.length} tables, statePrecondition=${derived.hasStatePrecondition}`)
+    logger.info({ entities: derived.entityNames.length, tables: derived.tableNames.length, statePrecondition: derived.hasStatePrecondition }, '動態約束')
 
     // Step 2: 生成 instructions
     const instructions = buildInstructions(detectedPatterns, derived)
@@ -417,11 +420,10 @@ export function generateIsaConfig(
     // Step 4: 覆蓋率驗證
     const validation = validateIsaConfig(isaConfigYml, features)
     if (!validation.valid) {
-      console.warn(`[IsaConfig] 覆蓋率不完整，${validation.unmatchedSteps.length} 個未匹配步驟:`,
-        validation.unmatchedSteps.slice(0, 5))
+      logger.warn({ unmatchedCount: validation.unmatchedSteps.length, samples: validation.unmatchedSteps.slice(0, 5) }, '覆蓋率不完整')
     }
 
-    console.log(`[IsaConfig] 生成完成，${instructions.length} 個 instructions`)
+    logger.info({ instructionCount: instructions.length }, '生成完成')
     return { success: true, isaConfigYml }
   } catch (err) {
     return { success: false, error: `生成失敗: ${err}` }

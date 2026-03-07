@@ -699,7 +699,7 @@ function translateTextContent(
   quickReplies?: { label: string; value: string; style?: string }[]
 ): Message[] {
   // 清理 Markdown
-  let text = content
+  const text = content
     .replace(/\*\*/g, '')     // 去粗體
     .replace(/```[\s\S]*?```/g, '[代碼區塊]')  // 代碼塊簡化
     .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')     // Markdown 連結 → 純文字

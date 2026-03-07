@@ -14,6 +14,9 @@
 // ============================================================
 
 import { queryMany, query } from '../db/client'
+import { createLogger } from '../lib/logger'
+
+const logger = createLogger('credit-reset')
 
 export async function resetExpiredCredits(): Promise<void> {
   const startTime = Date.now()
@@ -31,7 +34,7 @@ export async function resetExpiredCredits(): Promise<void> {
       return
     }
 
-    console.log(`[Credit Reset] 找到 ${expiredUsers.length} 個需要重置的用戶`)
+    logger.info({ count: expiredUsers.length }, '找到需要重置的用戶')
 
     let resetCount = 0
 
@@ -46,13 +49,13 @@ export async function resetExpiredCredits(): Promise<void> {
         )
         resetCount++
       } catch (err) {
-        console.error(`[Credit Reset] 重置用戶 ${user.email} 失敗:`, err)
+        logger.error({ err, email: user.email }, '重置用戶失敗')
       }
     }
 
     const duration = Date.now() - startTime
-    console.log(`[Credit Reset] 完成：重置 ${resetCount} / ${expiredUsers.length}，耗時 ${duration}ms`)
+    logger.info({ resetCount, total: expiredUsers.length, durationMs: duration }, '重置完成')
   } catch (err) {
-    console.error('[Credit Reset] 查詢失敗:', err)
+    logger.error({ err }, '查詢失敗')
   }
 }

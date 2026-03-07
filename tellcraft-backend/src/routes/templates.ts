@@ -5,6 +5,9 @@
 import { Router } from 'express'
 import { query, queryOne } from '../db/client'
 import { requireAuth, requireAdmin } from '../middleware/auth'
+import { createLogger } from '../lib/logger'
+
+const logger = createLogger('templates')
 
 const router: Router = Router()
 
@@ -78,7 +81,7 @@ router.get('/', async (req, res) => {
 
     res.json({ templates })
   } catch (error) {
-    console.error('[Templates] 獲取模板列表失敗:', error)
+    logger.error({ err: error }, '獲取模板列表失敗')
     res.status(500).json({ error: '獲取模板列表失敗' })
   }
 })
@@ -139,7 +142,7 @@ router.get('/preview/:id', async (req, res) => {
     }
 
     // 3. 無快取 → 返回佔位頁面
-    console.log(`[Templates] 模板無預覽快取: ${template.name} (slug: ${template.slug})`)
+    logger.info({ templateName: template.name, slug: template.slug }, '模板無預覽快取')
 
     const designDefaults = template.design_defaults
     const placeholderHtml = `<!DOCTYPE html>
@@ -167,7 +170,7 @@ router.get('/preview/:id', async (req, res) => {
     res.send(placeholderHtml)
 
   } catch (error) {
-    console.error('[Templates] 生成預覽失敗:', error)
+    logger.error({ err: error }, '生成預覽失敗')
 
     // 返回錯誤頁面
     const errorHtml = `<!DOCTYPE html>
@@ -235,7 +238,7 @@ router.post('/preview/:id/regenerate', requireAuth, async (req, res) => {
     const newVersion = (currentVersion?.version || 0) + 1
 
     // 3. 禁止 LLM 生成 — 模板預覽必須透過 DB 手動插入（使用 Claude Code 生成 SQL）
-    console.log(`[Templates] ⚠️ regenerate 已禁用 LLM: ${template.name} (v${newVersion})`)
+    logger.info({ templateName: template.name, version: newVersion }, 'regenerate 已禁用 LLM')
 
     return res.status(403).json({
       error: '模板預覽 LLM 生成已禁用。請透過 Claude Code 生成 HTML 後直接插入 template_previews 表。',
@@ -244,7 +247,7 @@ router.post('/preview/:id/regenerate', requireAuth, async (req, res) => {
     })
 
   } catch (error) {
-    console.error('[Templates] 重新生成預覽失敗:', error)
+    logger.error({ err: error }, '重新生成預覽失敗')
     res.status(500).json({ error: '重新生成預覽失敗' })
   }
 })
@@ -298,7 +301,7 @@ router.get('/:id', async (req, res) => {
       }
     })
   } catch (error) {
-    console.error('[Templates] 獲取模板失敗:', error)
+    logger.error({ err: error }, '獲取模板失敗')
     res.status(500).json({ error: '獲取模板失敗' })
   }
 })
@@ -352,7 +355,7 @@ router.get('/slug/:slug', async (req, res) => {
       }
     })
   } catch (error) {
-    console.error('[Templates] 獲取模板失敗:', error)
+    logger.error({ err: error }, '獲取模板失敗')
     res.status(500).json({ error: '獲取模板失敗' })
   }
 })
@@ -425,7 +428,7 @@ router.post('/init', requireAdmin, async (req, res) => {
 
     res.json({ success: true, count })
   } catch (error) {
-    console.error('[Templates] 初始化模板失敗:', error)
+    logger.error({ err: error }, '初始化模板失敗')
     res.status(500).json({ error: '初始化模板失敗' })
   }
 })
@@ -484,7 +487,7 @@ router.get('/admin/list', requireAdmin, async (req, res) => {
 
     res.json({ templates })
   } catch (error) {
-    console.error('[Templates] 獲取管理員模板列表失敗:', error)
+    logger.error({ err: error }, '獲取管理員模板列表失敗')
     res.status(500).json({ error: '獲取模板列表失敗' })
   }
 })
@@ -540,7 +543,7 @@ router.put('/preview/:id', requireAdmin, async (req, res) => {
       htmlLength: html_content.length,
     })
   } catch (error) {
-    console.error('[Templates] 更新預覽失敗:', error)
+    logger.error({ err: error }, '更新預覽失敗')
     res.status(500).json({ error: '更新預覽失敗' })
   }
 })

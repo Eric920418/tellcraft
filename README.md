@@ -39,6 +39,14 @@ pnpm install && pnpm dev  # http://localhost:3100
 pnpm typecheck            # 前端
 cd tellcraft-backend && pnpm typecheck  # 後端
 
+# 測試
+pnpm test:ci              # 前端（Vitest + jsdom）
+cd tellcraft-backend && pnpm test:ci  # 後端（Vitest）
+
+# Lint
+pnpm lint                 # 前端（ESLint）
+cd tellcraft-backend && pnpm lint     # 後端（ESLint）
+
 # BDD 規格驗證
 npx ts-node bdd-spec/scripts/lint-gherkin-format.ts spec/features/
 npx ts-node bdd-spec/scripts/validate-feature.ts spec/features/

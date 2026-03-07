@@ -9,6 +9,9 @@ import { requireAuth, requireAdmin } from '../middleware/auth'
 import { parseLogLine, sanitizeLogLine, isNoiseLine, type ParsedLogLine } from '../utils/log-parser'
 import type Redis from 'ioredis'
 import { getCreditLimit } from '../config/plans'
+import { createLogger } from '../lib/logger'
+
+const logger = createLogger('dashboard')
 
 const router: Router = Router()
 
@@ -125,7 +128,7 @@ router.get('/stats', requireAuth, async (req, res) => {
 
     res.json({ stats, recentProjects })
   } catch (error) {
-    console.error('[Dashboard] 獲取統計失敗:', error)
+    logger.error({ err: error }, '獲取統計失敗')
     res.status(500).json({ error: '獲取統計數據失敗' })
   }
 })
@@ -175,7 +178,7 @@ router.get('/admin/stats', requireAdmin, async (req, res) => {
       totalLLMCost: parseFloat(llmCost?.total || '0')
     })
   } catch (error) {
-    console.error('[Dashboard] 獲取管理員統計失敗:', error)
+    logger.error({ err: error }, '獲取管理員統計失敗')
     res.status(500).json({ error: '獲取統計數據失敗' })
   }
 })
@@ -307,7 +310,7 @@ router.get('/admin/usage', requireAdmin, async (req, res) => {
       breakdown
     })
   } catch (error) {
-    console.error('[Dashboard] 獲取 LLM 用量失敗:', error)
+    logger.error({ err: error }, '獲取 LLM 用量失敗')
     res.status(500).json({ error: '獲取用量數據失敗' })
   }
 })
@@ -402,7 +405,7 @@ router.get('/admin/users', requireAdmin, async (req, res) => {
 
     res.json({ items, total, page: pageNum, pageSize: limit })
   } catch (error) {
-    console.error('[Dashboard] 獲取用戶列表失敗:', error)
+    logger.error({ err: error }, '獲取用戶列表失敗')
     res.status(500).json({ error: '獲取用戶列表失敗' })
   }
 })
@@ -508,7 +511,7 @@ router.get('/admin/users/:userId', requireAdmin, async (req, res) => {
       }
     })
   } catch (error) {
-    console.error('[Dashboard] 獲取用戶詳情失敗:', error)
+    logger.error({ err: error }, '獲取用戶詳情失敗')
     res.status(500).json({ error: '獲取用戶詳情失敗' })
   }
 })
@@ -619,7 +622,7 @@ router.get('/admin/projects', requireAdmin, async (req, res) => {
 
     res.json({ items, total, page: pageNum, pageSize: limit, totalPages: Math.ceil(total / limit) })
   } catch (error) {
-    console.error('[Dashboard] 獲取專案列表失敗:', error)
+    logger.error({ err: error }, '獲取專案列表失敗')
     res.status(500).json({ error: '獲取專案列表失敗' })
   }
 })
@@ -713,7 +716,7 @@ router.get('/admin/conversations', requireAdmin, async (req, res) => {
 
     res.json({ items, total, page: pageNum, pageSize: limit, totalPages: Math.ceil(total / limit) })
   } catch (error) {
-    console.error('[Dashboard] 獲取對話列表失敗:', error)
+    logger.error({ err: error }, '獲取對話列表失敗')
     res.status(500).json({ error: '獲取對話列表失敗' })
   }
 })
@@ -739,7 +742,7 @@ router.post('/admin/users/:userId/admin', requireAdmin, async (req, res) => {
 
     res.json({ success: true })
   } catch (error) {
-    console.error('[Dashboard] 設置管理員狀態失敗:', error)
+    logger.error({ err: error }, '設置管理員狀態失敗')
     res.status(500).json({ error: '設置管理員狀態失敗' })
   }
 })
@@ -848,7 +851,7 @@ router.get('/admin/conversations/:conversationId/messages', requireAdmin, async 
       },
     })
   } catch (error) {
-    console.error('[Dashboard] 獲取對話訊息失敗:', error)
+    logger.error({ err: error }, '獲取對話訊息失敗')
     res.status(500).json({ error: '獲取對話訊息失敗' })
   }
 })
@@ -920,7 +923,7 @@ router.get('/admin/logs', requireAdmin, async (req: Request, res: Response) => {
 
     res.json({ lines: sanitized, total: sanitized.length })
   } catch (error) {
-    console.error('[Dashboard] 獲取日誌失敗:', error)
+    logger.error({ err: error }, '獲取日誌失敗')
     res.status(500).json({ error: '獲取日誌失敗' })
   }
 })

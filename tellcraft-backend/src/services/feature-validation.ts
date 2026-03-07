@@ -4,6 +4,9 @@ import * as path from 'path'
 import { fixMultipleFeatures, FeatureFixInput } from './formulation'
 import { ClarifyItem } from './bdd-session'
 import { LlmTrackingContext } from './classifier'
+import { createLogger } from '../lib/logger'
+
+const logger = createLogger('feature-validation')
 
 // ============================================================
 // 類型定義
@@ -65,7 +68,7 @@ function cleanupTmpDir(tmpDir: string): void {
   try {
     fs.rmSync(tmpDir, { recursive: true, force: true })
   } catch (err) {
-    console.warn('[FeatureValidation] 清理臨時目錄失敗:', err)
+    logger.warn({ err }, '清理臨時目錄失敗')
   }
 }
 
@@ -151,10 +154,7 @@ export async function validateFeatures(
     const lintSummary = parseLintOutput(lintResult.stdout)
 
     if (!lintSummary) {
-      console.warn('[FeatureValidation] Lint 腳本輸出解析失敗')
-      console.warn('[FeatureValidation] Lint stdout:', lintResult.stdout.substring(0, 500))
-      console.warn('[FeatureValidation] Lint stderr:', lintResult.stderr.substring(0, 500))
-      console.warn('[FeatureValidation] Lint exitCode:', lintResult.exitCode)
+      logger.warn({ stdout: lintResult.stdout.substring(0, 500), stderr: lintResult.stderr.substring(0, 500), exitCode: lintResult.exitCode }, 'Lint 腳本輸出解析失敗')
       // 腳本本身出錯（非 Feature 問題），不推入 allErrors 避免觸發無效 LLM 修復
     } else if (!lintSummary.passed) {
       allErrors.push(...lintSummary.errors)
@@ -165,10 +165,7 @@ export async function validateFeatures(
     const validateSummary = parseValidateOutput(validateResult.stdout)
 
     if (!validateSummary) {
-      console.warn('[FeatureValidation] Validate 腳本輸出解析失敗')
-      console.warn('[FeatureValidation] Validate stdout:', validateResult.stdout.substring(0, 500))
-      console.warn('[FeatureValidation] Validate stderr:', validateResult.stderr.substring(0, 500))
-      console.warn('[FeatureValidation] Validate exitCode:', validateResult.exitCode)
+      logger.warn({ stdout: validateResult.stdout.substring(0, 500), stderr: validateResult.stderr.substring(0, 500), exitCode: validateResult.exitCode }, 'Validate 腳本輸出解析失敗')
       // 腳本本身出錯（非 Feature 問題），不推入 allErrors 避免觸發無效 LLM 修復
     } else if (!validateSummary.passed) {
       allErrors.push(...validateSummary.errors)
@@ -212,7 +209,7 @@ export async function validateAndFixFeatures(
     lastResult = await validateFeatures(currentFeatures)
 
     if (lastResult.lintPassed && lastResult.validatePassed) {
-      console.log(`[FeatureValidation] 驗證通過（第 ${round + 1} 輪）`)
+      logger.info({ round: round + 1 }, '驗證通過')
       return {
         success: true,
         fixedFeatures: currentFeatures,
@@ -221,7 +218,7 @@ export async function validateAndFixFeatures(
       }
     }
 
-    console.log(`[FeatureValidation] 第 ${round + 1} 輪驗證失敗，${lastResult.errors.length} 個錯誤，嘗試修復...`)
+    logger.info({ round: round + 1, errorCount: lastResult.errors.length }, '驗證失敗，嘗試修復...')
 
     // 構建修復輸入：將錯誤分配到對應 Feature
     const featureErrorMap = new Map<string, string[]>()
@@ -279,7 +276,7 @@ export async function validateAndFixFeatures(
     )
 
     if (!fixResult.success || !fixResult.fixedFeatures) {
-      console.warn(`[FeatureValidation] 第 ${round + 1} 輪修復失敗:`, fixResult.error)
+      logger.warn({ round: round + 1, error: fixResult.error }, '修復失敗')
       break
     }
 
@@ -292,7 +289,7 @@ export async function validateAndFixFeatures(
   }
 
   // 修復迴圈結束，使用最後結果
-  console.warn(`[FeatureValidation] ${MAX_FIX_ROUNDS} 輪修復後仍有問題，使用最後修復版本繼續`)
+  logger.warn({ maxRounds: MAX_FIX_ROUNDS }, '修復輪次用盡仍有問題，使用最後修復版本繼續')
   return {
     success: false,
     fixedFeatures: currentFeatures,

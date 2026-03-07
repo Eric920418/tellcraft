@@ -8,6 +8,9 @@ import { recordLlmUsage } from '../db/client'
 import { safeParseJson } from '../utils/safe-parse-json'
 import { LlmTrackingContext } from './classifier'
 import { GeneratedFeature } from './formulation'
+import { createLogger } from '../lib/logger'
+
+const logger = createLogger('change-management')
 
 // ============================================================
 // 類型定義
@@ -129,9 +132,9 @@ ${existingSpecs.esDocument ? `**ES 文檔**（前 300 字）：\n${existingSpecs
         purpose: 'change_impact_analysis',
         userId: trackingContext?.userId,
         conversationId: trackingContext?.conversationId,
-      }).catch(err => console.error('[ChangeMgmt] recordLlmUsage failed:', err))
+      }).catch(err => logger.error({ err }, 'recordLlmUsage failed'))
 
-      console.log(`[ChangeMgmt] Impact Analysis 完成 (tokens: ${usage.input_tokens}/${usage.output_tokens}, cost: $${cost.toFixed(4)})`)
+      logger.info({ inputTokens: usage.input_tokens, outputTokens: usage.output_tokens, cost: cost.toFixed(4) }, 'Impact Analysis 完成')
     }
 
     const content = finalMessage.content[0]
@@ -146,7 +149,7 @@ ${existingSpecs.esDocument ? `**ES 文檔**（前 300 字）：\n${existingSpecs
 
     return { success: true, impact }
   } catch (err) {
-    console.error('[ChangeMgmt] analyzeChangeImpact 失敗:', err)
+    logger.error({ err }, 'analyzeChangeImpact 失敗')
     return { success: false, error: err instanceof Error ? err.message : '分析失敗' }
   }
 }
@@ -243,9 +246,9 @@ ${existingSpecs.entityMapping}
         purpose: 'change_execute',
         userId: trackingContext?.userId,
         conversationId: trackingContext?.conversationId,
-      }).catch(err => console.error('[ChangeMgmt] recordLlmUsage failed:', err))
+      }).catch(err => logger.error({ err }, 'recordLlmUsage failed'))
 
-      console.log(`[ChangeMgmt] Execute Change 完成 (tokens: ${usage.input_tokens}/${usage.output_tokens}, cost: $${cost.toFixed(4)})`)
+      logger.info({ inputTokens: usage.input_tokens, outputTokens: usage.output_tokens, cost: cost.toFixed(4) }, 'Execute Change 完成')
     }
 
     const responseContent = finalMessage.content[0]
@@ -277,7 +280,7 @@ ${existingSpecs.entityMapping}
 
     return { success: true, updatedSpecs }
   } catch (err) {
-    console.error('[ChangeMgmt] executeChange 失敗:', err)
+    logger.error({ err }, 'executeChange 失敗')
     return { success: false, error: err instanceof Error ? err.message : '執行變更失敗' }
   }
 }
@@ -350,7 +353,7 @@ export async function rollbackChange(
 
     await updateBddSession({ sessionId, updates })
 
-    console.log(`[ChangeMgmt] 回滾變更 "${entry.description}"，剩餘 ${trimmedHistory.length} 筆歷史`)
+    logger.info({ description: entry.description, remainingHistory: trimmedHistory.length }, '回滾變更')
 
     return {
       success: true,
@@ -363,7 +366,7 @@ export async function rollbackChange(
       },
     }
   } catch (err) {
-    console.error('[ChangeMgmt] rollbackChange 失敗:', err)
+    logger.error({ err }, 'rollbackChange 失敗')
     return { success: false, error: err instanceof Error ? err.message : '回滾失敗' }
   }
 }

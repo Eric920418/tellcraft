@@ -11,7 +11,10 @@ import type { GeneratedComponent, DesignSystem, PartialCodeCallback } from '../s
 import { generateTailwindConfig } from '../services/uiux-generation'
 import { sendLineNotifyIfNeeded } from '../services/line-notify'
 import { sendLineFullMessage } from '../services/line-full-push'
-import { getCreditLimit, PLAN_CREDIT_LIMITS } from '../config/plans'
+import { getCreditLimit } from '../config/plans'
+import { createLogger } from '../lib/logger'
+
+const logger = createLogger('orchestrator-utils')
 
 // ============================================================
 // FlowState 存儲
@@ -32,7 +35,7 @@ export async function saveFlowState(redis: Redis, conversationId: string, state:
     // PostgreSQL（備份）
     db.saveFlowState(conversationId, state).catch(err => {
       // PostgreSQL 寫入失敗不應阻塞流程，只記錄錯誤
-      console.error('[Orchestrator] PostgreSQL 備份寫入失敗:', err)
+      logger.error({ err }, 'PostgreSQL 備份寫入失敗')
     }),
   ])
 }
@@ -53,7 +56,7 @@ export async function getFlowState(redis: Redis, conversationId: string): Promis
       return JSON.parse(stateJson) as FlowState
     }
   } catch (err) {
-    console.error('[Orchestrator] Redis 讀取失敗，嘗試從 PostgreSQL 恢復:', err)
+    logger.error({ err }, 'Redis 讀取失敗，嘗試從 PostgreSQL 恢復')
   }
 
   // 2. Redis 無數據，嘗試從 PostgreSQL 恢復
@@ -61,17 +64,17 @@ export async function getFlowState(redis: Redis, conversationId: string): Promis
     const dbState = await db.getFlowState(conversationId)
     if (dbState && dbState.state) {
       const state = dbState.state as FlowState
-      console.log('[Orchestrator] 從 PostgreSQL 恢復流程狀態:', conversationId)
+      logger.info({ conversationId }, '從 PostgreSQL 恢復流程狀態')
 
       // 恢復到 Redis
       await redis.set(stateKey, JSON.stringify(state), 'EX', 86400).catch(err => {
-        console.error('[Orchestrator] 恢復到 Redis 失敗:', err)
+        logger.error({ err }, '恢復到 Redis 失敗')
       })
 
       return state
     }
   } catch (err) {
-    console.error('[Orchestrator] PostgreSQL 讀取失敗:', err)
+    logger.error({ err }, 'PostgreSQL 讀取失敗')
   }
 
   return null
@@ -86,7 +89,7 @@ export async function deleteFlowState(redis: Redis, conversationId: string) {
   await Promise.all([
     redis.del(stateKey),
     db.deleteFlowState(conversationId).catch(err => {
-      console.error('[Orchestrator] PostgreSQL 刪除失敗:', err)
+      logger.error({ err }, 'PostgreSQL 刪除失敗')
     }),
   ])
 }
@@ -172,7 +175,7 @@ export function makeStreamingCallback(
     // 存入 Redis，前端透過 HTTP 輪詢取得（解決 Mixed Content 問題）
     const redisKey = `streaming:preview:${conversationId}`
     redis.set(redisKey, JSON.stringify(previewData), 'EX', 30).catch(err => {
-      console.error('[StreamingPreview] Redis write failed:', err)
+      logger.error({ err }, 'Redis write failed')
     })
 
     // 同時透過 Socket.io 推送（供未來 WSS 或本地開發使用）

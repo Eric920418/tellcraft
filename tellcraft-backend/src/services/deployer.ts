@@ -9,7 +9,9 @@ import * as path from 'path'
 import * as fsPromises from 'fs/promises'
 import Anthropic from '@anthropic-ai/sdk'
 import * as db from '../db/client'
+import { createLogger } from '../lib/logger'
 
+const logger = createLogger('deployer')
 const execFileAsync = promisify(execFile)
 
 const VERCEL_API = 'https://api.vercel.com'
@@ -611,7 +613,7 @@ export function safeMotionProps<T extends Record<string, unknown>>(props: T) {
     // 新 stub 加入已知路徑集合（避免連鎖引用重複生成）
     rebuildFilePathSet()
 
-    console.log(`[Deployer] Broken import: ${broken.file} → ${broken.importPath}，生成 stub 組件: ${stubPath}`)
+    logger.info({ file: broken.file, importPath: broken.importPath, stubPath }, 'Broken import，生成 stub 組件')
     fixes.push(`${broken.file}: broken import ${broken.importPath} → 生成 stub 組件`)
   }
 
@@ -715,7 +717,7 @@ export async function prepareDeployment(
   const sanitizedCode = sanitizeResult.code
 
   if (sanitizeResult.fixes.length > 0) {
-    console.log(`[Deployer] 預檢修復 ${sanitizeResult.fixes.length} 項:`, sanitizeResult.fixes)
+    logger.info({ count: sanitizeResult.fixes.length, fixes: sanitizeResult.fixes }, '預檢修復')
   }
 
   const fileCount = sanitizedCode.pages.length + sanitizedCode.components.length + 1 // +1 for styles
@@ -809,14 +811,14 @@ export async function executeDeployment(
     // 注入 site metadata（替換 layout.tsx 中的 title/description）
     if (options?.siteMetadata) {
       injectMetadataIntoLayout(files, options.siteMetadata)
-      console.log(`[Deployer] Metadata 注入: title="${options.siteMetadata.title}", desc="${options.siteMetadata.description.slice(0, 50)}..."`)
+      logger.info({ title: options.siteMetadata.title, desc: options.siteMetadata.description.slice(0, 50) }, 'Metadata 注入')
     }
 
     if (buildResult.fixes.length > 0) {
-      console.log(`[Deployer] Build 驗證修復: ${buildResult.fixes.join('; ')}`)
+      logger.info({ fixes: buildResult.fixes.join('; ') }, 'Build 驗證修復')
     }
     if (!buildResult.buildVerified) {
-      console.warn('[Deployer] Build 驗證未通過，使用降級部署')
+      logger.warn('Build 驗證未通過，使用降級部署')
     }
 
     // 3. 建立 Vercel Project（50%）
@@ -824,7 +826,7 @@ export async function executeDeployment(
     const vercelProject = await createVercelProject(projectName)
     if (!vercelProject) {
       // 已存在的話繼續部署
-      console.log(`[Deployer] Vercel project "${projectName}" 可能已存在，繼續部署`)
+      logger.info({ projectName }, 'Vercel project 可能已存在，繼續部署')
     }
 
     // 4. 部署檔案（70%）
@@ -843,7 +845,7 @@ export async function executeDeployment(
 
     if (readyDeployment?.readyState === 'ERROR') {
       const buildLogs = await fetchVercelBuildLogs(deployment.id)
-      if (buildLogs) console.error(`[Deployer] Vercel build logs:\n${buildLogs}`)
+      if (buildLogs) logger.error({ buildLogs }, 'Vercel build logs')
       return { success: false, error: 'Vercel 建置失敗，請檢查代碼。', vercelDeploymentId: deployment.id }
     }
 
@@ -877,9 +879,9 @@ export async function executeDeployment(
         fileRows.push({ filePath: 'globals.css', content: deployedCode.styles, fileType: 'style' })
       }
       await db.upsertProjectFiles(projectId, 'uiux', fileRows)
-      console.log(`[Deployer] 已同步 build 修復後的代碼到 project_files（${fileRows.length} 個檔案）`)
+      logger.info({ fileCount: fileRows.length }, '已同步 build 修復後的代碼到 project_files')
     } catch (syncErr) {
-      console.error('[Deployer] 同步代碼到 project_files 失敗（不影響部署）:', syncErr)
+      logger.error({ err: syncErr }, '同步代碼到 project_files 失敗（不影響部署）')
     }
 
     await onProgress({ percent: 100, step: '部署完成！' })
@@ -891,7 +893,7 @@ export async function executeDeployment(
       deployedCode,
     }
   } catch (err) {
-    console.error('[Deployer] 部署失敗:', err)
+    logger.error({ err }, '部署失敗')
     return { success: false, error: `部署失敗：${err instanceof Error ? err.message : String(err)}` }
   }
 }
@@ -1197,7 +1199,7 @@ export default function RootLayout({
     })
 
     for (const page of otherPages) {
-      let pagePath = page.path
+      const pagePath = page.path
         .replace(/^(app\/|pages\/)?/, '')        // 去掉 app/ 或 pages/ 前綴
         .replace(/\/page\.(tsx|ts|jsx|js)$/, '')  // 去掉尾部 /page.tsx
         .replace(/\.(tsx|ts|jsx|js)$/, '')        // 去掉副檔名
@@ -1259,11 +1261,11 @@ async function createVercelProject(name: string): Promise<VercelProject | null> 
       const errorText = await response.text()
       // 409 表示已存在，需要確保 Deployment Protection 已關閉
       if (response.status === 409) {
-        console.log(`[Deployer] Vercel project "${name}" 已存在，確保公開存取`)
+        logger.info({ name }, 'Vercel project 已存在，確保公開存取')
         await disableDeploymentProtection(name)
         return null
       }
-      console.error(`[Deployer] 建立 Vercel Project 失敗: ${errorText}`)
+      logger.error({ errorText }, '建立 Vercel Project 失敗')
       return null
     }
 
@@ -1272,7 +1274,7 @@ async function createVercelProject(name: string): Promise<VercelProject | null> 
 
     return await response.json() as VercelProject
   } catch (err) {
-    console.error('[Deployer] 建立 Vercel Project 錯誤:', err)
+    logger.error({ err }, '建立 Vercel Project 錯誤')
     return null
   }
 }
@@ -1302,12 +1304,12 @@ async function disableDeploymentProtection(projectName: string): Promise<void> {
 
     if (!response.ok) {
       const errorText = await response.text()
-      console.warn(`[Deployer] 關閉 Deployment Protection 失敗: ${errorText}`)
+      logger.warn({ errorText }, '關閉 Deployment Protection 失敗')
     } else {
-      console.log(`[Deployer] 已關閉 "${projectName}" 的 Deployment Protection`)
+      logger.info({ projectName }, '已關閉 Deployment Protection')
     }
   } catch (err) {
-    console.warn('[Deployer] 關閉 Deployment Protection 異常:', err)
+    logger.warn({ err }, '關閉 Deployment Protection 異常')
   }
 }
 
@@ -1347,13 +1349,13 @@ async function deployFilesToVercel(projectName: string, files: VercelFile[]): Pr
 
     if (!response.ok) {
       const errorText = await response.text()
-      console.error(`[Deployer] 部署失敗: ${errorText}`)
+      logger.error({ errorText }, '部署失敗')
       return null
     }
 
     return await response.json() as VercelDeployment
   } catch (err) {
-    console.error('[Deployer] 部署錯誤:', err)
+    logger.error({ err }, '部署錯誤')
     return null
   }
 }
@@ -1503,7 +1505,7 @@ export async function rollbackToDeployment(
 
     if (!promoteRes.ok) {
       const errText = await promoteRes.text()
-      console.error('[Deployer] Promote 失敗:', errText)
+      logger.error({ errText }, 'Promote 失敗')
 
       // Fallback：嘗試用 aliases API 將 production alias 指向目標 deployment
       const aliasRes = await fetch(`${VERCEL_API}/v2/deployments/${targetDeploymentId}/aliases?${params}`, {
@@ -1517,7 +1519,7 @@ export async function rollbackToDeployment(
 
       if (!aliasRes.ok) {
         const aliasErr = await aliasRes.text()
-        console.error('[Deployer] Alias fallback 失敗:', aliasErr)
+        logger.error({ aliasErr }, 'Alias fallback 失敗')
         return { success: false, error: '回滾失敗，請稍後再試。' }
       }
     }
@@ -1527,7 +1529,7 @@ export async function rollbackToDeployment(
       url: `https://${detail.url}`,
     }
   } catch (err) {
-    console.error('[Deployer] 回滾錯誤:', err)
+    logger.error({ err }, '回滾錯誤')
     return { success: false, error: `回滾失敗：${err instanceof Error ? err.message : String(err)}` }
   }
 }
@@ -1561,20 +1563,20 @@ export async function deleteVercelProject(
     )
 
     if (response.status === 204 || response.status === 200) {
-      console.log(`[Deployer] 已刪除 Vercel 專案: ${projectName}`)
+      logger.info({ projectName }, '已刪除 Vercel 專案')
       return { success: true }
     }
 
     if (response.status === 404) {
-      console.log(`[Deployer] Vercel 專案 "${projectName}" 不存在，跳過刪除`)
+      logger.info({ projectName }, 'Vercel 專案不存在，跳過刪除')
       return { success: true }
     }
 
     const errorText = await response.text()
-    console.error(`[Deployer] 刪除 Vercel 專案失敗 (${response.status}): ${errorText}`)
+    logger.error({ status: response.status, errorText }, '刪除 Vercel 專案失敗')
     return { success: false, error: `Vercel API 錯誤: ${response.status}` }
   } catch (err) {
-    console.error('[Deployer] 刪除 Vercel 專案異常:', err)
+    logger.error({ err }, '刪除 Vercel 專案異常')
     return { success: false, error: err instanceof Error ? err.message : String(err) }
   }
 }
@@ -2005,7 +2007,7 @@ ${codeBlocks.join('\n\n')}
           purpose: 'deploy_build_fix',
           userId: trackingContext?.userId,
           conversationId: trackingContext?.conversationId,
-        }).catch(err => console.error('[Deployer] recordLlmUsage failed:', err))
+        }).catch(err => logger.error({ err }, 'recordLlmUsage failed'))
       }
 
       const content = response.content
@@ -2045,18 +2047,18 @@ ${codeBlocks.join('\n\n')}
 
       if (retryAttempt < FIX_RETRY_MAX && isRetryable) {
         const delay = FIX_RETRY_BASE_DELAY_MS * Math.pow(2, retryAttempt - 1) // 3s, 6s, 12s
-        console.warn(`[Deployer] fixBuildErrors LLM 暫時性錯誤 (attempt ${retryAttempt}/${FIX_RETRY_MAX})，${delay}ms 後重試:`, errMsg.slice(0, 150))
+        logger.warn({ attempt: retryAttempt, maxRetries: FIX_RETRY_MAX, delayMs: delay, errMsg: errMsg.slice(0, 150) }, 'fixBuildErrors LLM 暫時性錯誤，即將重試')
         await new Promise(resolve => setTimeout(resolve, delay))
         continue
       }
 
       // 非暫時性錯誤或重試用盡
-      console.error(`[Deployer] fixBuildErrors LLM 呼叫失敗 (attempt ${retryAttempt}/${FIX_RETRY_MAX}):`, error)
+      logger.error({ err: error, attempt: retryAttempt, maxRetries: FIX_RETRY_MAX }, 'fixBuildErrors LLM 呼叫失敗')
       return null
     }
   }
 
-  console.error('[Deployer] fixBuildErrors 所有重試都失敗:', lastError)
+  logger.error({ err: lastError }, 'fixBuildErrors 所有重試都失敗')
   return null
 }
 
@@ -2099,7 +2101,7 @@ function parseLLMFixedFiles(content: string, originalCode: GeneratedCode): Gener
   // 添加 LLM 生成的新檔案（缺失的組件/工具）
   for (const [filePath, fileContent] of fixedComponents) {
     if (!originalCode.components.some(c => c.path === filePath)) {
-      console.log(`[Deployer] parseLLMFixedFiles 新增缺失組件: ${filePath}`)
+      logger.info({ filePath }, 'parseLLMFixedFiles 新增缺失組件')
       result.components.push({
         path: filePath,
         content: fileContent,
@@ -2109,7 +2111,7 @@ function parseLLMFixedFiles(content: string, originalCode: GeneratedCode): Gener
   }
   for (const [filePath, fileContent] of fixedPages) {
     if (!originalCode.pages.some(p => p.path === filePath)) {
-      console.log(`[Deployer] parseLLMFixedFiles 新增缺失頁面: ${filePath}`)
+      logger.info({ filePath }, 'parseLLMFixedFiles 新增缺失頁面')
       result.pages.push({
         path: filePath,
         content: fileContent,
@@ -2203,7 +2205,7 @@ async function verifyBuildLocally(
           // 嘗試解析並移除壞依賴
           const badPkgs = parseInstallErrors(installResult.output)
           if (badPkgs.length > 0) {
-            console.log(`[Deployer] npm install 失敗，移除壞依賴: ${badPkgs.join(', ')}`)
+            logger.info({ badPkgs }, 'npm install 失敗，移除壞依賴')
             fixes.push(`移除無法安裝的依賴: ${badPkgs.join(', ')}`)
             for (const pkg of badPkgs) {
               delete currentExtraDeps[pkg]
@@ -2218,7 +2220,7 @@ async function verifyBuildLocally(
           }
 
           if (!installResult.success) {
-            console.error('[Deployer] npm install 最終失敗，降級部署')
+            logger.error('npm install 最終失敗，降級部署')
             fixes.push('npm install 失敗，降級為 ignoreBuildErrors 部署')
             return {
               files: wrapInNextJsWithIgnoreErrors(currentCode, projectName, tailwindConfig, currentExtraDeps, injectedFiles),
@@ -2248,7 +2250,7 @@ async function verifyBuildLocally(
       const buildResult = await runNextBuild(tmpDir)
 
       if (buildResult.success) {
-        console.log(`[Deployer] Build 驗證通過（第 ${attempt} 次）`)
+        logger.info({ attempt }, 'Build 驗證通過')
         if (attempt > 1) {
           fixes.push(`第 ${attempt} 次構建通過（AI 自動修復成功）`)
         }
@@ -2262,14 +2264,14 @@ async function verifyBuildLocally(
       }
 
       // Build 失敗 — 解析錯誤
-      console.log(`[Deployer] Build 失敗（第 ${attempt} 次），解析錯誤...`)
+      logger.info({ attempt }, 'Build 失敗，解析錯誤...')
       const buildErrors = parseBuildErrors(buildResult.output)
-      console.log(`[Deployer] 發現 ${buildErrors.length} 個 build 錯誤:`, buildErrors.map(e => e.message))
+      logger.info({ count: buildErrors.length, errors: buildErrors.map(e => e.message) }, '發現 build 錯誤')
 
       if (buildErrors.length === 0) {
         // 印出 build output 尾部以便診斷未知錯誤格式
         const outputTail = buildResult.output.slice(-1500)
-        console.warn('[Deployer] Build 失敗但無法解析錯誤，build output 尾部:\n', outputTail)
+        logger.warn({ outputTail }, 'Build 失敗但無法解析錯誤')
         fixes.push('Build 失敗但無法解析錯誤類型')
         break
       }
@@ -2283,7 +2285,7 @@ async function verifyBuildLocally(
         const fixResult = await fixBuildErrors(currentCode, buildErrors, buildResult.output, allDeps, trackingContext)
 
         if (!fixResult) {
-          console.warn('[Deployer] LLM 修復失敗，繼續下一輪')
+          logger.warn('LLM 修復失敗，繼續下一輪')
           fixes.push(`第 ${attempt} 次 AI 修復失敗`)
           continue
         }
@@ -2302,7 +2304,7 @@ async function verifyBuildLocally(
     }
 
     // 所有嘗試都失敗 → 降級
-    console.warn(`[Deployer] ${MAX_ATTEMPTS} 次 LLM 修復 + 驗證 build 都失敗，降級為 ignoreBuildErrors 部署`)
+    logger.warn({ maxAttempts: MAX_ATTEMPTS }, 'LLM 修復 + 驗證 build 都失敗，降級為 ignoreBuildErrors 部署')
     fixes.push(`${MAX_ATTEMPTS} 次 AI 修復都失敗，降級為忽略構建錯誤部署`)
     return {
       files: wrapInNextJsWithIgnoreErrors(currentCode, projectName, tailwindConfig, currentExtraDeps, injectedFiles),
@@ -2311,7 +2313,7 @@ async function verifyBuildLocally(
       finalCode: currentCode,
     }
   } catch (err) {
-    console.error('[Deployer] verifyBuildLocally 異常:', err)
+    logger.error({ err }, 'verifyBuildLocally 異常')
     fixes.push(`構建驗證異常：${err instanceof Error ? err.message : String(err)}`)
     return {
       files: wrapInNextJsWithIgnoreErrors(currentCode, projectName, tailwindConfig, currentExtraDeps, injectedFiles),
@@ -2325,7 +2327,7 @@ async function verifyBuildLocally(
     try {
       await fsPromises.rm(tmpDir, { recursive: true, force: true })
     } catch (cleanupErr) {
-      console.error(`[Deployer] 清理臨時目錄失敗: ${tmpDir}`, cleanupErr)
+      logger.error({ err: cleanupErr, tmpDir }, '清理臨時目錄失敗')
     }
   }
 }

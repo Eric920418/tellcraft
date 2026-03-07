@@ -2,6 +2,9 @@ import { Request, Response, NextFunction } from 'express'
 import jwt from 'jsonwebtoken'
 import Redis from 'ioredis'
 import { getUser, queryOne } from '../db/client'
+import { createLogger } from '../lib/logger'
+
+const logger = createLogger('auth')
 
 // JWT 配置
 if (!process.env.JWT_SECRET) {
@@ -26,6 +29,7 @@ async function isTokenBlacklisted(token: string): Promise<boolean> {
 // ============================================================
 
 declare global {
+  // eslint-disable-next-line @typescript-eslint/no-namespace
   namespace Express {
     interface Request {
       user?: {
@@ -113,7 +117,7 @@ export async function requireAuth(
 
     next()
   } catch (error) {
-    console.error('[Auth] 認證錯誤:', error)
+    logger.error({ err: error }, '認證錯誤')
     res.status(500).json({ error: 'Authentication failed' })
   }
 }
@@ -152,7 +156,7 @@ export async function optionalAuth(
     next()
   } catch (error) {
     // 認證失敗時仍允許匿名訪問
-    console.warn('[Auth] Optional auth failed:', error)
+    logger.warn({ err: error }, 'Optional auth failed')
     next()
   }
 }
@@ -229,7 +233,7 @@ export async function requireAdmin(
 
       next()
     } catch (error) {
-      console.error('[Auth] requireAdmin error:', error)
+      logger.error({ err: error }, 'requireAdmin error')
       res.status(500).json({ error: 'Admin check failed' })
     }
   })

@@ -5,6 +5,9 @@
 import { Router, Request, Response } from 'express'
 import { query, queryOne } from '../db/client'
 import { requireAuth, optionalAuth } from '../middleware/auth'
+import { createLogger } from '../lib/logger'
+
+const logger = createLogger('user')
 
 const router: Router = Router()
 
@@ -42,7 +45,7 @@ router.get('/me', optionalAuth, async (req: Request, res: Response) => {
       isAdmin: user.is_admin
     })
   } catch (error) {
-    console.error('[User] 獲取用戶資訊失敗:', error)
+    logger.error({ err: error }, '獲取用戶資訊失敗')
     res.status(500).json({ error: '獲取用戶資訊失敗' })
   }
 })
@@ -159,7 +162,7 @@ router.post('/migrate', requireAuth, async (req: Request, res: Response) => {
       migratedConversations
     })
   } catch (error) {
-    console.error('[User] 帳號遷移失敗:', error)
+    logger.error({ err: error }, '帳號遷移失敗')
     res.status(500).json({ error: '帳號遷移失敗' })
   }
 })

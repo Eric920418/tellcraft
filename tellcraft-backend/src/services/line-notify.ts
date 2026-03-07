@@ -6,6 +6,9 @@
 import { messagingApi } from '@line/bot-sdk'
 import type { FlexBubble, FlexMessage } from '@line/bot-sdk/lib/messaging-api/model/models'
 import * as db from '../db/client'
+import { createLogger } from '../lib/logger'
+
+const logger = createLogger('line-notify')
 
 // 模組級單例：未配置 token 時整個模組靜默跳過
 const client = process.env.LINE_MESSAGING_CHANNEL_ACCESS_TOKEN
@@ -63,10 +66,10 @@ export async function sendLineNotifyIfNeeded(
       messages: [message],
     })
 
-    console.log(`[LINE Notify] 推播成功: conversation=${conversationId}, stage=${stage}`)
+    logger.info({ conversationId, stage }, '推播成功')
   } catch (err) {
     // 推播失敗不阻塞主流程（用戶可能未加好友、token 過期等）
-    console.warn(`[LINE Notify] 推播失敗: conversation=${conversationId}, stage=${stage}`, err)
+    logger.warn({ err, conversationId, stage }, '推播失敗')
   }
 }
 

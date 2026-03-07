@@ -1,6 +1,9 @@
 import Redis from 'ioredis'
 import { recordLlmUsage } from '../db/client'
 import { safeParseJson } from '../utils/safe-parse-json'
+import { createLogger } from '../lib/logger'
+
+const logger = createLogger('prefilter')
 
 // ============================================================
 // Pre-filter：零 LLM 成本的前置過濾層
@@ -373,7 +376,7 @@ export async function checkBuildRelevance(
     })
 
     if (!resp.ok) {
-      console.warn(`[Prefilter] 相關性檢查 API 錯誤 ${resp.status}，降級放行（fail-open）`)
+      logger.warn({ status: resp.status }, '相關性檢查 API 錯誤，降級放行（fail-open）')
       return { relevant: true }
     }
 
@@ -395,18 +398,18 @@ export async function checkBuildRelevance(
         purpose: 'fast_mode_relevance_check',
         userId: context?.userId,
         conversationId: context?.conversationId,
-      }).catch(err => console.error('[Prefilter] 記錄使用量失敗:', err))
+      }).catch(err => logger.error({ err }, '記錄使用量失敗'))
     }
 
     const text = data.content?.[0]?.text
     if (!text) {
-      console.warn('[Prefilter] 相關性檢查空回應，降級放行（fail-open）')
+      logger.warn('相關性檢查空回應，降級放行（fail-open）')
       return { relevant: true }
     }
 
     const parsed = safeParseJson<{ relevant?: boolean; vague?: boolean; policy?: string }>(text)
     if (!parsed) {
-      console.warn('[Prefilter] 相關性檢查 JSON 解析失敗，降級放行（fail-open）')
+      logger.warn('相關性檢查 JSON 解析失敗，降級放行（fail-open）')
       return { relevant: true }
     }
 
@@ -443,7 +446,7 @@ export async function checkBuildRelevance(
 
     return { relevant: true }
   } catch (err) {
-    console.error('[Prefilter] 相關性檢查失敗，降級放行（fail-open）:', err)
+    logger.error({ err }, '相關性檢查失敗，降級放行（fail-open）')
     return { relevant: true }
   }
 }
@@ -521,7 +524,7 @@ async function recordViolation(userId: string, redis: Redis): Promise<number> {
       return count
     `
     const count = await redis.eval(luaScript, 1, key, VIOLATION_TTL) as number
-    console.warn(`[Prefilter] 違規記錄: userId=${userId}, count=${count}`)
+    logger.warn({ userId, count }, '違規記錄')
 
     // 從高到低匹配冷卻等級
     for (let i = VIOLATION_THRESHOLDS.length - 1; i >= 0; i--) {
@@ -535,7 +538,7 @@ async function recordViolation(userId: string, redis: Redis): Promise<number> {
     }
     return 0
   } catch (err) {
-    console.error('[Prefilter] 違規記錄失敗（降級跳過）:', err)
+    logger.error({ err }, '違規記錄失敗（降級跳過）')
     return 0
   }
 }
@@ -603,7 +606,7 @@ export async function prefilterMessage(
   const trimmed = message.trim()
   for (const pattern of INJECTION_PATTERNS) {
     if (pattern.test(trimmed)) {
-      console.warn(`[Prefilter] Prompt injection 偵測: userId=${userId}, pattern=${pattern}`)
+      logger.warn({ userId, pattern: String(pattern) }, 'Prompt injection 偵測')
       // 記錄違規 + 可能觸發冷卻
       const cooldown = await recordViolation(userId, redis)
       const cooldownWarning = cooldown > 0
@@ -623,7 +626,7 @@ export async function prefilterMessage(
   // 3.5 輸入品質（亂碼 + 髒話 + 垃圾）
   const qualityResult = checkInputQuality(trimmed, 'normal', isChinese ? 'zh' : 'en')
   if (qualityResult.quality !== 'valid') {
-    console.warn(`[Prefilter] 品質攔截: userId=${userId}, quality=${qualityResult.quality}, reason=${qualityResult.reason}`)
+    logger.warn({ userId, quality: qualityResult.quality, reason: qualityResult.reason }, '品質攔截')
     if (qualityResult.quality === 'offensive') {
       const cooldown = await recordViolation(userId, redis)
       const cooldownWarning = cooldown > 0
@@ -666,7 +669,7 @@ export async function prefilterMessage(
     }
   } catch (err) {
     // Redis rate limit 失敗不阻塞（降級放行）
-    console.error('[Prefilter] Rate limit 檢查失敗（降級放行）:', err)
+    logger.error({ err }, 'Rate limit 檢查失敗（降級放行）')
   }
 
   return { allowed: true }

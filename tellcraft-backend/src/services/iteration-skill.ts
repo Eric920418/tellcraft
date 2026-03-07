@@ -5,7 +5,10 @@
 import { Server as SocketIOServer } from 'socket.io'
 import Redis from 'ioredis'
 import * as db from '../db/client'
-import type { FlowState, IterationHistoryEntry } from '../types/flow-state'
+import { createLogger } from '../lib/logger'
+
+const logger = createLogger('iteration-skill')
+import type { FlowState } from '../types/flow-state'
 import { sendMessage, saveFlowState, getFlowState, generatedCodeToFileRows, deductCredits, makeStreamingCallback } from '../workers/orchestrator-utils'
 import { CREDIT_COSTS } from '../config/plans'
 import { refineCode, generateTailwindConfig, GeneratedComponent, buildStreamingHandler } from './uiux-generation'
@@ -262,7 +265,7 @@ export async function executeIteration(input: {
     state.uiuxCodeGenerationStartedAt = undefined
     await saveFlowState(redis, conversationId, state)
   } catch (err) {
-    console.error('[IterationSkill] executeIteration 異常:', err)
+    logger.error({ err }, 'executeIteration 異常')
     await redis.del(`streaming:preview:${conversationId}`).catch(() => {})
     state.phase = 'uiux_complete'
     state.uiuxCodeGenerationStartedAt = undefined
@@ -352,7 +355,7 @@ export async function executeUndoIteration(input: {
       ],
     })
   } catch (err) {
-    console.error('[IterationSkill] executeUndoIteration 異常:', err)
+    logger.error({ err }, 'executeUndoIteration 異常')
     await sendMessage(conversationId, io, {
       content: `撤銷操作異常：${err instanceof Error ? err.message : String(err)}`,
       stage: 'error',
@@ -424,7 +427,7 @@ export async function executeRollbackQuery(input: {
       },
     })
   } catch (err) {
-    console.error('[IterationSkill] executeRollbackQuery 異常:', err)
+    logger.error({ err }, 'executeRollbackQuery 異常')
     // 保持原 phase 不變（deployer_complete），讓用戶可重試
     await sendMessage(conversationId, io, {
       content: `查詢部署歷史失敗：${err instanceof Error ? err.message : String(err)}\n\n請稍後再試。`,
@@ -543,7 +546,7 @@ export async function executeRollbackSelection(input: {
       })
     }
   } catch (err) {
-    console.error('[IterationSkill] executeRollbackSelection 異常:', err)
+    logger.error({ err }, 'executeRollbackSelection 異常')
     state.phase = 'deployer_complete'
     state.rollbackDeployments = undefined
     await saveFlowState(redis, conversationId, state)

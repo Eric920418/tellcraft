@@ -10,6 +10,24 @@ import type { UIRequirementsSpec } from '../services/bdd-to-ui-spec'
 import type { ESKnowledgeMap } from '../services/event-storming'
 import type { ReferenceAnalysis } from '../services/reference-analyzer'
 import type { ImpactAnalysis } from '../services/change-management'
+import type Redis from 'ioredis'
+import type { Server as SocketIOServer } from 'socket.io'
+
+// ============================================================
+// Phase Handler Context（Phase 1-1 拆分用）
+// ============================================================
+
+export interface PhaseContext {
+  conversationId: string
+  projectId: string
+  userId: string
+  message: string
+  state: FlowState
+  redis: Redis
+  io: SocketIOServer
+  locale?: 'zh' | 'en'
+  imageUrls?: string[]
+}
 
 // ============================================================
 // 迭代歷史

@@ -4,10 +4,13 @@
 // ============================================================
 
 import { messagingApi } from '@line/bot-sdk'
-import type { Message, FlexBubble, FlexCarousel, FlexMessage, TextMessage } from '@line/bot-sdk/lib/messaging-api/model/models'
+import type { Message, FlexBubble, FlexCarousel, FlexMessage } from '@line/bot-sdk/lib/messaging-api/model/models'
 import { Queue } from 'bullmq'
 import crypto from 'crypto'
 import * as db from '../db/client'
+import { createLogger } from '../lib/logger'
+
+const logger = createLogger('line-bot-handler')
 
 // ============================================================
 // 依賴注入（由 index.ts 初始化時設置）
@@ -177,7 +180,7 @@ export async function handlePostback(
   try {
     data = JSON.parse(dataStr)
   } catch {
-    console.warn('[LINE Bot] Invalid postback data:', dataStr)
+    logger.warn({ dataStr }, 'Invalid postback data')
     return
   }
 
@@ -221,7 +224,7 @@ export async function handlePostback(
       await handleQuickReply(userId, '撤銷修改', replyToken)
       break
     default:
-      console.warn('[LINE Bot] Unknown postback action:', data.a)
+      logger.warn({ action: data.a }, 'Unknown postback action')
   }
 }
 
@@ -690,7 +693,7 @@ async function buildResumeSummary(
  * Quick Reply / Postback 統一處理
  * 將按鈕值作為用戶消息投入 Orchestrator
  */
-async function handleQuickReply(userId: string, value: string, replyToken: string): Promise<void> {
+async function handleQuickReply(userId: string, value: string, _replyToken: string): Promise<void> {
   if (!messagingClient || !orchestratorQueue) return
 
   const { userId: systemUserId, conversationId, projectId, mode } = await getOrCreateConversation(userId)

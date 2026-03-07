@@ -3,6 +3,9 @@ import { requireAuth, requireActiveSubscription } from '../middleware/auth'
 import * as db from '../db/client'
 import { toVercelSlug, deleteVercelProject } from '../services/deployer'
 import { getProjectLimit } from '../config/plans'
+import { createLogger } from '../lib/logger'
+
+const logger = createLogger('project')
 
 const router: RouterType = Router()
 
@@ -102,7 +105,7 @@ router.get('/', requireAuth, async (req, res) => {
       pageSize: limit
     })
   } catch (error) {
-    console.error('[Project] 取得專案列表失敗:', error)
+    logger.error({ err: error }, '取得專案列表失敗')
     res.status(500).json({ error: 'Failed to get projects' })
   }
 })
@@ -135,7 +138,7 @@ router.post('/:id/pin', requireAuth, async (req, res) => {
 
     res.json({ success: true, isPinned: newPinned })
   } catch (error) {
-    console.error('[Project] 置頂專案失敗:', error)
+    logger.error({ err: error }, '置頂專案失敗')
     res.status(500).json({ error: 'Failed to toggle pin' })
   }
 })
@@ -174,7 +177,7 @@ router.get('/:id', requireAuth, async (req, res) => {
       conversation,
     })
   } catch (error) {
-    console.error('[Project] 取得專案失敗:', error)
+    logger.error({ err: error }, '取得專案失敗')
     res.status(500).json({ error: 'Failed to get project' })
   }
 })
@@ -254,7 +257,7 @@ router.post('/', requireAuth, requireActiveSubscription, async (req, res) => {
       },
     })
   } catch (error) {
-    console.error('[Project] 創建專案失敗:', error)
+    logger.error({ err: error }, '創建專案失敗')
     res.status(500).json({ error: 'Failed to create project' })
   }
 })
@@ -302,7 +305,7 @@ router.patch('/:id', requireAuth, async (req, res) => {
 
     res.json({ success: true })
   } catch (error) {
-    console.error('[Project] 更新專案失敗:', error)
+    logger.error({ err: error }, '更新專案失敗')
     res.status(500).json({ error: 'Failed to update project' })
   }
 })
@@ -407,7 +410,7 @@ router.get('/:id/detail', requireAuth, async (req, res) => {
       })),
     })
   } catch (error) {
-    console.error('[Project] 取得專案詳情失敗:', error)
+    logger.error({ err: error }, '取得專案詳情失敗')
     res.status(500).json({ error: 'Failed to get project detail' })
   }
 })
@@ -452,7 +455,7 @@ router.get('/:id/latest-generation', requireAuth, async (req, res) => {
       } : null
     })
   } catch (error) {
-    console.error('[Project] 取得最新生成記錄失敗:', error)
+    logger.error({ err: error }, '取得最新生成記錄失敗')
     res.status(500).json({ error: 'Failed to get latest generation' })
   }
 })
@@ -513,7 +516,7 @@ router.get('/:id/versions', requireAuth, async (req, res) => {
       }))
     })
   } catch (error) {
-    console.error('[Project] 取得版本歷史失敗:', error)
+    logger.error({ err: error }, '取得版本歷史失敗')
     res.status(500).json({ error: 'Failed to get versions' })
   }
 })
@@ -556,7 +559,7 @@ router.patch('/:id/versions/:versionNumber', requireAuth, async (req, res) => {
 
     res.json({ success: true })
   } catch (error) {
-    console.error('[Project] 更新版本標籤失敗:', error)
+    logger.error({ err: error }, '更新版本標籤失敗')
     res.status(500).json({ error: 'Failed to update version label' })
   }
 })
@@ -652,7 +655,7 @@ router.post('/:id/versions/:versionNumber/rollback', requireAuth, async (req, re
       message: `已回滾到版本 ${targetVersion.version_number}，創建新版本 ${newVersionNumber}`
     })
   } catch (error) {
-    console.error('[Project] 版本回滾失敗:', error)
+    logger.error({ err: error }, '版本回滾失敗')
     res.status(500).json({ error: 'Failed to rollback version' })
   }
 })
@@ -721,7 +724,7 @@ router.get('/:id/versions/compare', requireAuth, async (req, res) => {
       featuresDiff
     })
   } catch (error) {
-    console.error('[Project] 版本對比失敗:', error)
+    logger.error({ err: error }, '版本對比失敗')
     res.status(500).json({ error: 'Failed to compare versions' })
   }
 })
@@ -854,7 +857,7 @@ router.post('/:id/iterate', requireAuth, async (req, res) => {
       projectStatus: 'generating'
     })
   } catch (error) {
-    console.error('[Project] 開始新迭代失敗:', error)
+    logger.error({ err: error }, '開始新迭代失敗')
     res.status(500).json({ error: 'Failed to start iteration' })
   }
 })
@@ -888,7 +891,7 @@ router.get('/:id/template-overrides', requireAuth, async (req, res) => {
       overrides: project.template_overrides || {}
     })
   } catch (error) {
-    console.error('[Project] 取得模板客製化失敗:', error)
+    logger.error({ err: error }, '取得模板客製化失敗')
     res.status(500).json({ error: 'Failed to get template overrides' })
   }
 })
@@ -929,7 +932,7 @@ router.put('/:id/template-overrides', requireAuth, async (req, res) => {
 
     res.json({ success: true })
   } catch (error) {
-    console.error('[Project] 更新模板客製化失敗:', error)
+    logger.error({ err: error }, '更新模板客製化失敗')
     res.status(500).json({ error: 'Failed to update template overrides' })
   }
 })
@@ -974,7 +977,7 @@ router.get('/:id/files', requireAuth, async (req, res) => {
       total: files.length,
     })
   } catch (error) {
-    console.error('[Project] 取得專案檔案失敗:', error)
+    logger.error({ err: error }, '取得專案檔案失敗')
     res.status(500).json({ error: 'Failed to get project files' })
   }
 })
@@ -999,7 +1002,7 @@ router.delete('/:id', requireAuth, async (req, res) => {
       const vercelSlug = toVercelSlug(project.name, id)
       const vercelResult = await deleteVercelProject(vercelSlug)
       if (!vercelResult.success) {
-        console.warn(`[Project] 刪除 Vercel 專案失敗（不阻擋刪除）: ${vercelResult.error}`)
+        logger.warn({ error: vercelResult.error }, '刪除 Vercel 專案失敗（不阻擋刪除）')
       }
     }
 
@@ -1054,7 +1057,7 @@ router.delete('/:id', requireAuth, async (req, res) => {
 
     res.json({ success: true })
   } catch (error) {
-    console.error('[Project] 刪除專案失敗:', error)
+    logger.error({ err: error }, '刪除專案失敗')
     res.status(500).json({ error: 'Failed to delete project' })
   }
 })

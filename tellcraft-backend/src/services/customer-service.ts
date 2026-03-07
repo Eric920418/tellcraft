@@ -4,6 +4,9 @@
 // ============================================================
 
 import { recordLlmUsage } from '../db/client'
+import { createLogger } from '../lib/logger'
+
+const logger = createLogger('customer-service')
 
 // ── 型別定義 ──
 
@@ -324,7 +327,7 @@ Rules:
     })
 
     if (!resp.ok) {
-      console.warn(`[CustomerService] Sonnet API 錯誤 ${resp.status}，降級回覆`)
+      logger.warn({ status: resp.status }, 'Sonnet API 錯誤，降級回覆')
       return fallbackReply
     }
 
@@ -345,7 +348,7 @@ Rules:
         costUsd: cost,
         purpose: 'customer_service',
         conversationId: context.conversationId,
-      }).catch(err => console.error('[CustomerService] recordLlmUsage failed:', err))
+      }).catch(err => logger.error({ err }, 'recordLlmUsage failed'))
     }
 
     const text = data.content?.[0]?.text?.trim()
@@ -353,7 +356,7 @@ Rules:
 
     return text
   } catch (err) {
-    console.error('[CustomerService] Sonnet 呼叫失敗:', err)
+    logger.error({ err }, 'Sonnet 呼叫失敗')
     return fallbackReply
   }
 }

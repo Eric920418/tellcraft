@@ -3,6 +3,9 @@ import { safeParseJson } from '../utils/safe-parse-json'
 import { ClarifyItem } from './bdd-session'
 import { LlmTrackingContext } from './classifier'
 import { DecisionSummary } from './clarify-dedup'
+import { createLogger } from '../lib/logger'
+
+const logger = createLogger('prd-discovery')
 
 // Sonnet 定價 (每百萬 tokens)
 const SONNET_PRICING = { input: 3, output: 15 }
@@ -36,7 +39,7 @@ export async function runPrdDiscovery(
   const apiKey = process.env.ANTHROPIC_API_KEY
 
   if (!apiKey) {
-    console.error('[PRD Discovery] ANTHROPIC_API_KEY 未設定')
+    logger.error('ANTHROPIC_API_KEY 未設定')
     return { success: false, error: 'API key not configured' }
   }
 
@@ -249,7 +252,7 @@ ${partialSpecContext}
   const userMessage = `需求描述：\n${requirements}`
 
   try {
-    console.log('[PRD Discovery] 調用 LLM 分析需求...')
+    logger.info('調用 LLM 分析需求...')
 
     const RETRY_MAX = 3
     const RETRY_BASE_DELAY_MS = 2000
@@ -278,7 +281,7 @@ ${partialSpecContext}
         const isRetryable = response.status === 429 || response.status === 529 || response.status === 503
         if (attempt < RETRY_MAX && isRetryable) {
           const delay = RETRY_BASE_DELAY_MS * Math.pow(2, attempt - 1)
-          console.warn(`[PRD Discovery] HTTP ${response.status} (attempt ${attempt}/${RETRY_MAX})，${delay}ms 後重試`)
+          logger.warn({ status: response.status, attempt, maxRetries: RETRY_MAX, delayMs: delay }, 'HTTP 錯誤，重試中')
           await new Promise(resolve => setTimeout(resolve, delay))
           continue
         }
@@ -288,7 +291,7 @@ ${partialSpecContext}
         const isRetryable = errMsg.includes('ECONNRESET') || errMsg.includes('ETIMEDOUT') || errMsg.includes('fetch failed')
         if (attempt < RETRY_MAX && isRetryable) {
           const delay = RETRY_BASE_DELAY_MS * Math.pow(2, attempt - 1)
-          console.warn(`[PRD Discovery] 網路錯誤 (attempt ${attempt}/${RETRY_MAX})，${delay}ms 後重試:`, errMsg.slice(0, 100))
+          logger.warn({ attempt, maxRetries: RETRY_MAX, delayMs: delay, error: errMsg.slice(0, 100) }, '網路錯誤，重試中')
           await new Promise(resolve => setTimeout(resolve, delay))
           continue
         }
@@ -299,7 +302,7 @@ ${partialSpecContext}
     if (!response || !response.ok) {
       const errorText = response ? await response.text() : 'No response'
       const status = response?.status || 0
-      console.error('[PRD Discovery] API 請求失敗:', status, errorText)
+      logger.error({ status, errorText }, 'API 請求失敗')
       if (status === 529 || status === 503) {
         return { success: false, error: 'AI 伺服器目前繁忙，已自動重試但仍無法處理。請稍等 1-2 分鐘後再試。' }
       }
@@ -327,21 +330,21 @@ ${partialSpecContext}
       purpose: 'prd_discovery',
       userId: trackingContext?.userId,
       conversationId: trackingContext?.conversationId,
-    }).catch(err => console.error('[PRD Discovery] 記錄 LLM 使用量失敗:', err))
+    }).catch(err => logger.error({ err }, '記錄 LLM 使用量失敗'))
 
-    console.log(`[PRD Discovery] LLM 回應完成 (tokens: ${inputTokens}/${outputTokens}, cost: $${costUsd.toFixed(4)}, conversation: ${trackingContext?.conversationId || 'none'})`)
+    logger.info({ inputTokens, outputTokens, cost: costUsd.toFixed(4), conversationId: trackingContext?.conversationId }, 'LLM 回應完成')
 
     // 安全解析回應
     const content = data.content?.[0]?.text || ''
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const parsed = safeParseJson<any>(content)
     if (!parsed) {
-      console.error('[PRD Discovery] 無法解析 LLM 回應，原始內容:', content.slice(0, 500))
+      logger.error({ responsePreview: content.slice(0, 500) }, '無法解析 LLM 回應')
       return { success: false, error: 'AI 回應格式異常，請重新描述您的需求。' }
     }
 
     // 轉換格式（符合 bdd-session.ts 的 ClarifyItem 類型）
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+     
     const items: ClarifyItem[] = (parsed.items || []).map((item: {
       id?: string
       question: string
@@ -380,7 +383,7 @@ ${partialSpecContext}
       } : {}),
     }))
 
-    console.log(`[PRD Discovery] 生成 ${items.length} 個釐清問題`)
+    logger.info({ itemCount: items.length }, '生成釐清問題')
 
     return {
       success: true,
@@ -388,7 +391,7 @@ ${partialSpecContext}
       coverageSummary: parsed.coverageSummary,
     }
   } catch (error) {
-    console.error('[PRD Discovery] 執行失敗:', error)
+    logger.error({ err: error }, '執行失敗')
     return {
       success: false,
       error: error instanceof Error ? error.message : 'Unknown error',

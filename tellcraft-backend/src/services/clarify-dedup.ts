@@ -8,6 +8,9 @@ import Anthropic from '@anthropic-ai/sdk'
 import { recordLlmUsage } from '../db/client'
 import { safeParseJson } from '../utils/safe-parse-json'
 import { ClarifyItem } from './bdd-session'
+import { createLogger } from '../lib/logger'
+
+const logger = createLogger('clarify-dedup')
 
 // ============================================================
 // 類型定義
@@ -112,9 +115,9 @@ export async function generateDecisionSummary(
         purpose: 'clarify_decision_summary',
         userId: trackingContext?.userId,
         conversationId: trackingContext?.conversationId,
-      }).catch(err => console.error('[ClarifyDedup] recordLlmUsage failed:', err))
+      }).catch(err => logger.error({ err }, 'recordLlmUsage failed'))
 
-      console.log(`[ClarifyDedup] Decision Summary 生成完成 (tokens: ${usage.input_tokens}/${usage.output_tokens}, cost: $${cost.toFixed(4)})`)
+      logger.info({ inputTokens: usage.input_tokens, outputTokens: usage.output_tokens, cost: cost.toFixed(4) }, 'Decision Summary 生成完成')
     }
 
     const content = finalMessage.content[0]
@@ -122,15 +125,15 @@ export async function generateDecisionSummary(
 
     const parsed = safeParseJson<DecisionSummary>(content.text)
     if (!parsed || !parsed.coveredTopics || !Array.isArray(parsed.coveredTopics)) {
-      console.warn('[ClarifyDedup] Decision Summary 格式錯誤或無法解析')
+      logger.warn('Decision Summary 格式錯誤或無法解析')
       return null
     }
 
-    console.log(`[ClarifyDedup] Decision Summary: ${parsed.coveredTopics.length} 主題, ${parsed.excludedFeatures?.length || 0} 排除功能`)
+    logger.info({ topicCount: parsed.coveredTopics.length, excludedCount: parsed.excludedFeatures?.length || 0 }, 'Decision Summary 完成')
 
     return parsed
   } catch (err) {
-    console.error('[ClarifyDedup] generateDecisionSummary 失敗（降級跳過）:', err)
+    logger.error({ err }, 'generateDecisionSummary 失敗（降級跳過）')
     return null
   }
 }
@@ -196,9 +199,9 @@ export async function generatePartialSpecContext(
         purpose: 'clarify_partial_spec_context',
         userId: trackingContext?.userId,
         conversationId: trackingContext?.conversationId,
-      }).catch(err => console.error('[ClarifyDedup] recordLlmUsage failed:', err))
+      }).catch(err => logger.error({ err }, 'recordLlmUsage failed'))
 
-      console.log(`[ClarifyDedup] Partial Spec Context 生成完成 (tokens: ${usage.input_tokens}/${usage.output_tokens}, cost: $${cost.toFixed(4)})`)
+      logger.info({ inputTokens: usage.input_tokens, outputTokens: usage.output_tokens, cost: cost.toFixed(4) }, 'Partial Spec Context 生成完成')
     }
 
     const content = finalMessage.content[0]
@@ -206,7 +209,7 @@ export async function generatePartialSpecContext(
 
     return content.text.trim()
   } catch (err) {
-    console.error('[ClarifyDedup] generatePartialSpecContext 失敗（降級跳過）:', err)
+    logger.error({ err }, 'generatePartialSpecContext 失敗（降級跳過）')
     return null
   }
 }
@@ -280,9 +283,9 @@ export async function deduplicateQuestions(
         purpose: 'clarify_dedup',
         userId: trackingContext?.userId,
         conversationId: trackingContext?.conversationId,
-      }).catch(err => console.error('[ClarifyDedup] recordLlmUsage failed:', err))
+      }).catch(err => logger.error({ err }, 'recordLlmUsage failed'))
 
-      console.log(`[ClarifyDedup] Dedup 完成 (tokens: ${usage.input_tokens}/${usage.output_tokens}, cost: $${cost.toFixed(4)})`)
+      logger.info({ inputTokens: usage.input_tokens, outputTokens: usage.output_tokens, cost: cost.toFixed(4) }, 'Dedup 完成')
     }
 
     const content = finalMessage.content[0]
@@ -294,7 +297,7 @@ export async function deduplicateQuestions(
     }>(content.text)
 
     if (!parsed || !parsed.keep || !Array.isArray(parsed.keep)) {
-      console.warn('[ClarifyDedup] Dedup 結果格式錯誤或無法解析，保留所有問題')
+      logger.warn('Dedup 結果格式錯誤或無法解析，保留所有問題')
       return newItems
     }
 
@@ -305,14 +308,14 @@ export async function deduplicateQuestions(
     const removedCount = newItems.length - filtered.length
     if (removedCount > 0) {
       const reasons = (parsed.remove || []).map(r => `  N${r.index}: ${r.reason}`).join('\n')
-      console.log(`[ClarifyDedup] 去重移除 ${removedCount}/${newItems.length} 個問題:\n${reasons}`)
+      logger.info({ removedCount, totalCount: newItems.length, reasons }, '去重移除問題')
     } else {
-      console.log(`[ClarifyDedup] 去重：全部保留 (${newItems.length} 個)`)
+      logger.info({ totalCount: newItems.length }, '去重：全部保留')
     }
 
     return filtered
   } catch (err) {
-    console.error('[ClarifyDedup] deduplicateQuestions 失敗（降級保留全部）:', err)
+    logger.error({ err }, 'deduplicateQuestions 失敗（降級保留全部）')
     return newItems
   }
 }

@@ -7,6 +7,9 @@ import { query, queryOne } from '../db/client'
 import { requireAuth, optionalAuth } from '../middleware/auth'
 import crypto from 'crypto'
 import { getCreditLimit, getProjectLimit, isCreditExhausted, CREDIT_LIMIT_ERROR_CODE } from '../config/plans'
+import { createLogger } from '../lib/logger'
+
+const logger = createLogger('session')
 
 const router: Router = Router()
 
@@ -254,7 +257,7 @@ router.post('/initialize', optionalAuth, async (req: Request, res: Response) => 
       readOnly: false,
     })
   } catch (error) {
-    console.error('[Session] 初始化失敗:', error)
+    logger.error({ err: error }, '初始化失敗')
     // 臨時返回詳細錯誤用於診斷
     res.status(500).json({
       error: '初始化失敗',
@@ -300,7 +303,7 @@ router.get('/conversations', requireAuth, async (req: Request, res: Response) =>
 
     res.json({ conversations })
   } catch (error) {
-    console.error('[Session] 獲取對話列表失敗:', error)
+    logger.error({ err: error }, '獲取對話列表失敗')
     res.status(500).json({ error: '獲取對話列表失敗' })
   }
 })
@@ -380,7 +383,7 @@ router.get('/project-reminder', requireAuth, async (req: Request, res: Response)
 
     res.json({ reminder })
   } catch (error) {
-    console.error('[Session] 獲取專案提醒失敗:', error)
+    logger.error({ err: error }, '獲取專案提醒失敗')
     res.status(500).json({ error: '獲取專案提醒失敗' })
   }
 })

@@ -1,7 +1,10 @@
 import { recordLlmUsage } from '../db/client'
+import { createLogger } from '../lib/logger'
 import { safeParseJson } from '../utils/safe-parse-json'
 import { ClarifyItem, TechnicalContext } from './bdd-session'
 import { LlmTrackingContext } from './classifier'
+
+const logger = createLogger('formulation')
 
 // Sonnet 定價 (每百萬 tokens)
 const SONNET_PRICING = { input: 3, output: 15 }
@@ -87,7 +90,7 @@ async function callClaude(
         const errorText = await response.text()
         if (attempt < RETRY_MAX && isRetryableStatus(response.status)) {
           const delay = RETRY_BASE_DELAY_MS * Math.pow(2, attempt - 1)
-          console.warn(`[formulation callClaude] HTTP ${response.status} (attempt ${attempt}/${RETRY_MAX})，${delay}ms 後重試`)
+          logger.warn({ status: response.status, attempt, maxRetries: RETRY_MAX, delayMs: delay }, 'HTTP 錯誤，即將重試')
           await new Promise(resolve => setTimeout(resolve, delay))
           continue
         }
@@ -110,7 +113,7 @@ async function callClaude(
       lastError = error instanceof Error ? error.message : 'Unknown error'
       if (attempt < RETRY_MAX && isRetryableFetchError(error)) {
         const delay = RETRY_BASE_DELAY_MS * Math.pow(2, attempt - 1)
-        console.warn(`[formulation callClaude] 網路錯誤 (attempt ${attempt}/${RETRY_MAX})，${delay}ms 後重試:`, lastError.slice(0, 100))
+        logger.warn({ attempt, maxRetries: RETRY_MAX, delayMs: delay, error: lastError.slice(0, 100) }, '網路錯誤，即將重試')
         await new Promise(resolve => setTimeout(resolve, delay))
         continue
       }
@@ -333,7 +336,7 @@ ${decisions || '（無額外決策）'}${schemaHints ? `
 
 ${schemaHints}` : ''}`
 
-  console.log('[Formulation] 生成 SQL Schema...')
+  logger.info('生成 SQL Schema...')
   const response = await callClaude(systemPrompt, userMessage, { maxTokens: 8192 })
 
   if (!response.success) {
@@ -351,24 +354,24 @@ ${schemaHints}` : ''}`
       purpose: 'formulation_schema',
       userId: trackingContext?.userId,
       conversationId: trackingContext?.conversationId,
-    }).catch(err => console.error('[Formulation] 記錄使用量失敗:', err))
+    }).catch(err => logger.error({ err }, '記錄使用量失敗'))
   }
 
   try {
     const parsed = safeParseJson<{ schemaSql?: string; entityMapping?: string }>(response.content || '')
     if (!parsed) {
-      console.error('[Formulation] Schema LLM 回應無法解析為 JSON，原始回應前 500 字:', response.content?.substring(0, 500))
+      logger.error({ rawResponse: response.content?.substring(0, 500) }, 'Schema LLM 回應無法解析為 JSON')
       return { success: false, error: '無法解析 LLM 回應' }
     }
 
-    console.log('[Formulation] SQL Schema 生成完成')
+    logger.info('SQL Schema 生成完成')
     return {
       success: true,
       schemaSql: parsed.schemaSql,
       entityMapping: parsed.entityMapping,
     }
   } catch (err) {
-    console.error('[Formulation] Schema JSON 解析失敗:', err, '原始回應前 500 字:', response.content?.substring(0, 500))
+    logger.error({ err, rawResponse: response.content?.substring(0, 500) }, 'Schema JSON 解析失敗')
     return { success: false, error: `解析回應時發生錯誤: ${err}` }
   }
 }
@@ -468,7 +471,7 @@ ${decisions || '（無額外決策）'}${schemaHints ? `
 
 ${schemaHints}` : ''}`
 
-  console.log('[Formulation] 識別 Features...')
+  logger.info('識別 Features...')
   const response = await callClaude(systemPrompt, userMessage, { maxTokens: 8192 })
 
   if (!response.success) {
@@ -486,17 +489,17 @@ ${schemaHints}` : ''}`
       purpose: 'formulation_identify_features',
       userId: trackingContext?.userId,
       conversationId: trackingContext?.conversationId,
-    }).catch(err => console.error('[Formulation] 記錄使用量失敗:', err))
+    }).catch(err => logger.error({ err }, '記錄使用量失敗'))
   }
 
   try {
     const parsed = safeParseJson<{ features?: FeatureInfo[] }>(response.content || '')
     if (!parsed) {
-      console.error('[Formulation] Features LLM 回應無法解析為 JSON，原始回應前 500 字:', response.content?.substring(0, 500))
+      logger.error({ rawResponse: response.content?.substring(0, 500) }, 'Features LLM 回應無法解析為 JSON')
       return { success: false, error: '無法解析 LLM 回應' }
     }
 
-    console.log(`[Formulation] 識別到 ${parsed.features?.length || 0} 個 Features`)
+    logger.info({ featureCount: parsed.features?.length || 0 }, '識別 Features 完成')
     return {
       success: true,
       features: parsed.features,
@@ -733,7 +736,7 @@ ${featureSchemaHints}` : ''}`
       purpose: 'formulation_generate_feature',
       userId: trackingContext?.userId,
       conversationId: trackingContext?.conversationId,
-    }).catch(err => console.error('[Formulation] 記錄使用量失敗:', err))
+    }).catch(err => logger.error({ err }, '記錄使用量失敗'))
   }
 
   // 提取 Gherkin 內容
@@ -791,7 +794,7 @@ export async function runFormulation(
 
     if (options?.resumeFrom) {
       // ── 從 checkpoint 恢復，跳過 Step 1 和 Step 2 ──
-      console.log(`[Formulation] 從 checkpoint 恢復，已完成 ${options.resumeFrom.completedNames.length} 個 Features`)
+      logger.info({ completedCount: options.resumeFrom.completedNames.length }, '從 checkpoint 恢復')
       schemaSql = options.resumeFrom.schemaSql
       entityMapping = options.resumeFrom.entityMapping
       featureList = options.resumeFrom.identifiedFeatures
@@ -851,7 +854,7 @@ export async function runFormulation(
 
       // 跳過已完成的 feature（恢復模式）
       if (completedNamesSet.has(featureInfo.actionName)) {
-        console.log(`[Formulation] 跳過已完成: ${featureInfo.actionName}`)
+        logger.info({ actionName: featureInfo.actionName }, '跳過已完成的 Feature')
         continue
       }
 
@@ -884,10 +887,10 @@ export async function runFormulation(
             completedNames: Array.from(completedNamesSet),
             totalExpected: featureList.length,
           })
-          console.log(`[Formulation] Checkpoint 保存：${completedNamesSet.size}/${featureList.length}`)
+          logger.info({ completed: completedNamesSet.size, total: featureList.length }, 'Checkpoint 已保存')
         }
       } else {
-        console.error(`[Formulation] 生成 Feature "${featureInfo.name}" 失敗:`, result.error)
+        logger.error({ featureName: featureInfo.name, error: result.error }, '生成 Feature 失敗')
         // 繼續生成其他 Features
       }
     }
@@ -896,7 +899,7 @@ export async function runFormulation(
       return { success: false, error: '沒有成功生成任何 Feature' }
     }
 
-    console.log(`[Formulation] 完成！生成了 ${generatedFeatures.length} 個 Features（總計 ${completedNamesSet.size} 個）`)
+    logger.info({ generated: generatedFeatures.length, total: completedNamesSet.size }, 'Formulation 完成')
 
     return {
       success: true,
@@ -905,7 +908,7 @@ export async function runFormulation(
       features: generatedFeatures,
     }
   } catch (error) {
-    console.error('[Formulation] 執行失敗:', error)
+    logger.error({ err: error }, '執行失敗')
     return {
       success: false,
       error: error instanceof Error ? error.message : 'Unknown error',
@@ -1017,7 +1020,7 @@ ${decisions}` : ''}
 
 重要：只輸出 JSON，不要加任何解釋。直接以 { 開頭，以 } 結尾。`
 
-    console.log(`[Formulation] ${batchLabel} 修復 ${batch.length} 個 Features...`)
+    logger.info({ batchLabel, featureCount: batch.length }, '修復 Features...')
     const response = await callClaude(systemPrompt, userMessage, { maxTokens: 16384, temperature: 0.1 })
 
     if (!response.success) {
@@ -1035,17 +1038,17 @@ ${decisions}` : ''}
         purpose: 'formulation_fix_features',
         userId: trackingContext?.userId,
         conversationId: trackingContext?.conversationId,
-      }).catch(err => console.error('[Formulation] 記錄使用量失敗:', err))
+      }).catch(err => logger.error({ err }, '記錄使用量失敗'))
     }
 
     try {
       const parsed = safeParseJson<{ features?: GeneratedFeature[] }>(response.content || '')
       if (!parsed) {
-        console.error(`[Formulation] ${batchLabel} LLM 回應無法解析為 JSON，原始回應前 500 字:`, response.content?.substring(0, 500))
+        logger.error({ batchLabel, rawResponse: response.content?.substring(0, 500) }, 'LLM 回應無法解析為 JSON')
         return { success: false, error: '無法解析 LLM 回應' }
       }
 
-      console.log(`[Formulation] ${batchLabel} 修復完成，${parsed.features?.length || 0} 個 Features`)
+      logger.info({ batchLabel, fixedCount: parsed.features?.length || 0 }, '修復完成')
       return {
         success: true,
         fixedFeatures: parsed.features || [],
@@ -1062,7 +1065,7 @@ ${decisions}` : ''}
   }
 
   // 分批修復
-  console.log(`[Formulation] Features 數量 ${features.length} > ${BATCH_SIZE}，啟用分批修復`)
+  logger.info({ featureCount: features.length, batchSize: BATCH_SIZE }, '啟用分批修復')
   const allFixed: GeneratedFeature[] = []
   let batchIndex = 0
 
@@ -1075,12 +1078,12 @@ ${decisions}` : ''}
     if (result.success && result.fixedFeatures) {
       allFixed.push(...result.fixedFeatures)
     } else {
-      console.warn(`[Formulation] ${batchLabel} 修復失敗（${batch.length} 個），保留原始 Features`)
+      logger.warn({ batchLabel, failedCount: batch.length }, '批次修復失敗，保留原始 Features')
       allFixed.push(...batch.map(f => ({ name: f.name, actionName: f.actionName, content: f.content })))
     }
   }
 
-  console.log(`[Formulation] 分批修復完成，共 ${allFixed.length} 個 Features`)
+  logger.info({ totalFixed: allFixed.length }, '分批修復完成')
   return { success: true, fixedFeatures: allFixed }
 }
 
@@ -1164,7 +1167,7 @@ ${esDocumentContent}
 釐清決策：
 ${decisions || '（無額外決策）'}`
 
-  console.log('[Formulation] Draft Batch: 開始一次性生成草稿...')
+  logger.info('Draft Batch: 開始一次性生成草稿...')
   const response = await callClaude(systemPrompt, userMessage, { maxTokens: 16384 })
 
   if (!response.success) {
@@ -1182,20 +1185,20 @@ ${decisions || '（無額外決策）'}`
       purpose: 'formulation_draft_batch',
       userId: trackingContext?.userId,
       conversationId: trackingContext?.conversationId,
-    }).catch(err => console.error('[Formulation] 記錄使用量失敗:', err))
+    }).catch(err => logger.error({ err }, '記錄使用量失敗'))
   }
 
   try {
     const parsed = safeParseJson<{ features?: GeneratedFeature[]; uncertainItems?: string[]; schemaSql?: string; entityMapping?: string }>(response.content || '')
     if (!parsed) {
-      console.error('[Formulation] Draft Batch LLM 回應無法解析為 JSON')
+      logger.error('Draft Batch LLM 回應無法解析為 JSON')
       return { success: false, error: '無法解析 LLM 回應' }
     }
 
     const features = (parsed.features || []) as GeneratedFeature[]
     const uncertainItems = (parsed.uncertainItems || []) as string[]
 
-    console.log(`[Formulation] Draft Batch 完成：${features.length} 個 Features，${uncertainItems.length} 個待澄清項目`)
+    logger.info({ featureCount: features.length, uncertainCount: uncertainItems.length }, 'Draft Batch 完成')
 
     return {
       success: true,
@@ -1205,7 +1208,7 @@ ${decisions || '（無額外決策）'}`
       uncertainItems,
     }
   } catch (err) {
-    console.error('[Formulation] Draft Batch JSON 解析失敗:', err)
+    logger.error({ err }, 'Draft Batch JSON 解析失敗')
     return { success: false, error: `解析回應時發生錯誤: ${err}` }
   }
 }

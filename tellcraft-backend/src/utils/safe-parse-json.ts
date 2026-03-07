@@ -31,6 +31,7 @@ export function safeParseJson<T>(text: string): T | null {
     // 第四層：清理常見格式問題後重試
     const cleaned = sliced
       .replace(/,\s*([}\]])/g, '$1')       // 移除尾隨逗號 {a:1,} → {a:1}
+      // eslint-disable-next-line no-control-regex
       .replace(/[\x00-\x1f\x7f]/g, ' ')   // 移除控制字符
     return tryParse<T>(cleaned)
   }

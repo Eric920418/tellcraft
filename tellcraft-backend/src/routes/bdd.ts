@@ -6,6 +6,9 @@ import { Router, Request, Response } from 'express'
 import { query, queryOne } from '../db/client'
 import { requireAuth } from '../middleware/auth'
 import crypto from 'crypto'
+import { createLogger } from '../lib/logger'
+
+const logger = createLogger('bdd')
 
 const router: Router = Router()
 
@@ -143,7 +146,7 @@ router.post('/session', requireAuth, async (req: Request, res: Response) => {
 
     res.json({ sessionId })
   } catch (error) {
-    console.error('[BDD] 創建 Session 失敗:', error)
+    logger.error({ err: error }, '創建 Session 失敗')
     res.status(500).json({ error: '創建 BDD Session 失敗' })
   }
 })
@@ -167,7 +170,7 @@ router.get('/session/:id', requireAuth, async (req: Request, res: Response) => {
 
     res.json({ session: rowToSession(row) })
   } catch (error) {
-    console.error('[BDD] 獲取 Session 失敗:', error)
+    logger.error({ err: error }, '獲取 Session 失敗')
     res.status(500).json({ error: '獲取 BDD Session 失敗' })
   }
 })
@@ -193,7 +196,7 @@ router.get('/session/by-conversation/:conversationId', requireAuth, async (req: 
 
     res.json({ session: rowToSession(row) })
   } catch (error) {
-    console.error('[BDD] 獲取 Session 失敗:', error)
+    logger.error({ err: error }, '獲取 Session 失敗')
     res.status(500).json({ error: '獲取 BDD Session 失敗' })
   }
 })
@@ -219,7 +222,7 @@ router.get('/session/by-project/:projectId', requireAuth, async (req: Request, r
 
     res.json({ session: rowToSession(row) })
   } catch (error) {
-    console.error('[BDD] 獲取 Session 失敗:', error)
+    logger.error({ err: error }, '獲取 Session 失敗')
     res.status(500).json({ error: '獲取 BDD Session 失敗' })
   }
 })
@@ -299,7 +302,7 @@ router.patch('/session/:id', requireAuth, async (req: Request, res: Response) =>
 
     res.json({ session: rowToSession(row) })
   } catch (error) {
-    console.error('[BDD] 更新 Session 失敗:', error)
+    logger.error({ err: error }, '更新 Session 失敗')
     res.status(500).json({ error: '更新 BDD Session 失敗' })
   }
 })
@@ -355,7 +358,7 @@ router.post('/session/:id/answer', requireAuth, async (req: Request, res: Respon
 
     res.json({ success: true, item, remainingCount: clarifyItems.length })
   } catch (error) {
-    console.error('[BDD] 回答項目失敗:', error)
+    logger.error({ err: error }, '回答項目失敗')
     res.status(500).json({ error: '回答項目失敗' })
   }
 })
@@ -410,7 +413,7 @@ router.post('/session/:id/confirm', requireAuth, async (req: Request, res: Respo
 
     res.json({ success: true, confirmedCount: itemIds.length, remainingCount: clarifyItems.length })
   } catch (error) {
-    console.error('[BDD] 批次確認失敗:', error)
+    logger.error({ err: error }, '批次確認失敗')
     res.status(500).json({ error: '批次確認失敗' })
   }
 })
@@ -465,7 +468,7 @@ router.post('/session/:id/revert', requireAuth, async (req: Request, res: Respon
 
     res.json({ success: true, item })
   } catch (error) {
-    console.error('[BDD] 撤銷回答失敗:', error)
+    logger.error({ err: error }, '撤銷回答失敗')
     res.status(500).json({ error: '撤銷回答失敗' })
   }
 })
@@ -510,7 +513,7 @@ router.post('/session/:id/skip', requireAuth, async (req: Request, res: Response
 
     res.json({ success: true, item })
   } catch (error) {
-    console.error('[BDD] 跳過項目失敗:', error)
+    logger.error({ err: error }, '跳過項目失敗')
     res.status(500).json({ error: '跳過項目失敗' })
   }
 })
@@ -559,7 +562,7 @@ router.post('/session/:id/items', requireAuth, async (req: Request, res: Respons
 
     res.json({ success: true, addedCount: newItems.length, totalCount: clarifyItems.length })
   } catch (error) {
-    console.error('[BDD] 新增項目失敗:', error)
+    logger.error({ err: error }, '新增項目失敗')
     res.status(500).json({ error: '新增項目失敗' })
   }
 })
@@ -590,7 +593,7 @@ router.get('/session/:id/current', requireAuth, async (req: Request, res: Respon
       totalResolved: row.resolved_items?.length || 0,
     })
   } catch (error) {
-    console.error('[BDD] 獲取當前項目失敗:', error)
+    logger.error({ err: error }, '獲取當前項目失敗')
     res.status(500).json({ error: '獲取當前項目失敗' })
   }
 })
@@ -621,7 +624,7 @@ router.get('/session/:id/progress', requireAuth, async (req: Request, res: Respo
       consecutiveEmptyRounds: row.consecutive_empty_rounds,
     })
   } catch (error) {
-    console.error('[BDD] 獲取進度失敗:', error)
+    logger.error({ err: error }, '獲取進度失敗')
     res.status(500).json({ error: '獲取進度失敗' })
   }
 })

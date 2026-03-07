@@ -17,6 +17,9 @@
 
 import Redis from 'ioredis'
 import { queryMany, transaction } from '../db/client'
+import { createLogger } from '../lib/logger'
+
+const logger = createLogger('guest-cleanup')
 
 // 正在生成中的 phase（waitingForReply=false 表示 worker 正在處理）
 const ACTIVE_PHASES = new Set([
@@ -52,11 +55,11 @@ export async function cleanupExpiredGuestUsers(redis: Redis): Promise<void> {
     )
 
     if (expiredUsers.length === 0) {
-      console.log('[訪客清理] 無過期訪客')
+      logger.info('無過期訪客')
       return
     }
 
-    console.log(`[訪客清理] 找到 ${expiredUsers.length} 個過期訪客`)
+    logger.info({ count: expiredUsers.length }, '找到過期訪客')
 
     let cleaned = 0
     let skipped = 0
@@ -125,13 +128,13 @@ export async function cleanupExpiredGuestUsers(redis: Redis): Promise<void> {
 
         cleaned++
       } catch (err) {
-        console.error(`[訪客清理] 清理用戶 ${user.email} 失敗:`, err)
+        logger.error({ err, email: user.email }, '清理用戶失敗')
       }
     }
 
     const duration = Date.now() - startTime
-    console.log(`[訪客清理] 完成：清理 ${cleaned} / 跳過 ${skipped} / 共 ${expiredUsers.length}，耗時 ${duration}ms`)
+    logger.info({ cleaned, skipped, total: expiredUsers.length, durationMs: duration }, '清理完成')
   } catch (err) {
-    console.error('[訪客清理] 查詢過期訪客失敗:', err)
+    logger.error({ err }, '查詢過期訪客失敗')
   }
 }

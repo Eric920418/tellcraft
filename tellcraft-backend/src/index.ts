@@ -40,6 +40,9 @@ import { messagingApi as lineMessagingApi } from '@line/bot-sdk'
 import { setAuthRedisClient } from './routes/auth'
 import { parseLogLine, sanitizeLogLine } from './utils/log-parser'
 import { setMiddlewareRedisClient } from './middleware/auth'
+import { createLogger } from './lib/logger'
+
+const logger = createLogger('server')
 
 // ============================================================
 // 環境變數
@@ -139,13 +142,13 @@ io.use((socket, next) => {
 io.engine.on('connection_error', (err) => {
   const reason = err.message || err.code || 'engine_connection_error'
   recordSocketEngineError(String(reason))
-  console.warn('[Socket] engine connection_error:', reason)
+  logger.warn({ reason }, 'Engine connection_error')
 })
 
 io.on('connection', (socket) => {
   recordSocketConnected()
   if (SOCKET_VERBOSE_LOG) {
-    console.log(`[Socket] 連接: ${socket.id} (user: ${socket.data.userId || 'anon:' + socket.data.anonymousId})`)
+    logger.info({ socketId: socket.id, userId: socket.data.userId || 'anon:' + socket.data.anonymousId }, '連接')
   }
 
   // 訂閱對話（含所有權驗證）
@@ -196,10 +199,10 @@ io.on('connection', (socket) => {
 
       socket.join(`conversation:${conversationId}`)
       if (SOCKET_VERBOSE_LOG) {
-        console.log(`[Socket] ${socket.id} 訂閱對話: ${conversationId}`)
+        logger.info({ socketId: socket.id, conversationId }, '訂閱對話')
       }
     } catch (err) {
-      console.error('[Socket] subscribe error:', err)
+      logger.error({ err }, 'Subscribe error')
       socket.emit('error', { message: 'Subscribe failed' })
     }
   })
@@ -208,7 +211,7 @@ io.on('connection', (socket) => {
   socket.on('unsubscribe', (conversationId: string) => {
     socket.leave(`conversation:${conversationId}`)
     if (SOCKET_VERBOSE_LOG) {
-      console.log(`[Socket] ${socket.id} 取消訂閱: ${conversationId}`)
+      logger.info({ socketId: socket.id, conversationId }, '取消訂閱')
     }
   })
 
@@ -265,7 +268,7 @@ io.on('connection', (socket) => {
         const errMsg = data.toString()
         // tail -F 在檔案不存在時輸出警告到 stderr，忽略這些
         if (!errMsg.includes('has become inaccessible') && !errMsg.includes('No such file')) {
-          console.error('[Admin Logs] tail stderr:', errMsg)
+          logger.error({ stderr: errMsg }, 'Tail stderr')
         }
       })
 
@@ -274,11 +277,11 @@ io.on('connection', (socket) => {
       })
 
       if (SOCKET_VERBOSE_LOG) {
-        console.log(`[Socket] ${socket.id} 訂閱 admin logs (source: ${source})`)
+        logger.info({ socketId: socket.id, source }, '訂閱 admin logs')
       }
       socket.emit('admin_logs_subscribed', { source })
     } catch (err) {
-      console.error('[Socket] subscribe_admin_logs error:', err)
+      logger.error({ err }, 'subscribe_admin_logs error')
       socket.emit('error', { message: 'Failed to subscribe to logs' })
     }
   })
@@ -289,7 +292,7 @@ io.on('connection', (socket) => {
       tailProcess = null
     }
     if (SOCKET_VERBOSE_LOG) {
-      console.log(`[Socket] ${socket.id} 取消訂閱 admin logs`)
+      logger.info({ socketId: socket.id }, '取消訂閱 admin logs')
     }
   })
 
@@ -301,7 +304,7 @@ io.on('connection', (socket) => {
       tailProcess = null
     }
     if (SOCKET_VERBOSE_LOG) {
-      console.log(`[Socket] 斷開: ${socket.id}`)
+      logger.info({ socketId: socket.id }, '斷開')
     }
   })
 })
@@ -319,11 +322,11 @@ const redis = new Redis(REDIS_URL, {
 })
 
 redis.on('connect', () => {
-  console.log('[Redis] 已連接')
+  logger.info('Redis 已連接')
 })
 
 redis.on('error', (err) => {
-  console.error('[Redis] 錯誤:', err)
+  logger.error({ err }, 'Redis 錯誤')
 })
 
 // BullMQ 隊列
@@ -358,7 +361,7 @@ if (process.env.LINE_MESSAGING_CHANNEL_ACCESS_TOKEN) {
     messagingClient: lineMessagingClient,
     orchestratorQueue,
   })
-  console.log('[LINE Bot] Handler 已初始化')
+  logger.info('LINE Bot Handler 已初始化')
 }
 
 // 設置 Redis 到認證模組（用於 token 黑名單）
@@ -401,7 +404,7 @@ app.use((_req, res) => {
 
 // 錯誤處理
 app.use((err: Error, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
-  console.error('[Error]', err)
+  logger.error({ err }, 'Unhandled error')
   res.status(500).json({
     error: 'Internal server error',
     message: process.env.NODE_ENV === 'development' ? err.message : undefined,
@@ -432,10 +435,10 @@ async function cleanupOrphanBuildDirs() {
     }
 
     if (cleaned > 0) {
-      console.log(`[清理] 移除 ${cleaned} 個過期的 build 臨時目錄`)
+      logger.info({ cleaned }, '移除過期的 build 臨時目錄')
     }
   } catch (err) {
-    console.error('[清理] 清理臨時目錄失敗:', err)
+    logger.error({ err }, '清理臨時目錄失敗')
   }
 }
 
@@ -444,14 +447,14 @@ async function cleanupOrphanBuildDirs() {
 // ============================================================
 
 async function start() {
-  console.log('='.repeat(60))
-  console.log('  Tellcraft Backend Server')
-  console.log('='.repeat(60))
+  logger.info('='.repeat(60))
+  logger.info('Tellcraft Backend Server')
+  logger.info('='.repeat(60))
 
   // 測試資料庫連接
   const dbConnected = await testConnection()
   if (!dbConnected) {
-    console.error('[啟動] 資料庫連接失敗，退出')
+    logger.error('資料庫連接失敗，退出')
     process.exit(1)
   }
 
@@ -464,31 +467,31 @@ async function start() {
   // 每 2 分鐘掃描超時的 FlowState 並自動恢復
   setInterval(() => {
     scanAndRecoverStuckFlowStates(redis, io).catch(err => {
-      console.error('[FlowState Recovery] 掃描失敗:', err)
+      logger.error({ err }, 'FlowState Recovery 掃描失敗')
     })
   }, 2 * 60 * 1000)
 
   // 訪客資料清理：啟動 30 秒後執行一次，之後每 6 小時執行
   setTimeout(() => cleanupExpiredGuestUsers(redis).catch(err => {
-    console.error('[訪客清理] 啟動清理失敗:', err)
+    logger.error({ err }, '訪客清理 啟動清理失敗')
   }), 30 * 1000)
   setInterval(() => cleanupExpiredGuestUsers(redis).catch(err => {
-    console.error('[訪客清理] 定時清理失敗:', err)
+    logger.error({ err }, '訪客清理 定時清理失敗')
   }), 6 * 60 * 60 * 1000)
 
   // Credit 月重置：啟動 60 秒後執行一次，之後每 1 小時執行
   setTimeout(() => resetExpiredCredits().catch(err => {
-    console.error('[Credit Reset] 啟動重置失敗:', err)
+    logger.error({ err }, 'Credit Reset 啟動重置失敗')
   }), 60 * 1000)
   setInterval(() => resetExpiredCredits().catch(err => {
-    console.error('[Credit Reset] 定時重置失敗:', err)
+    logger.error({ err }, 'Credit Reset 定時重置失敗')
   }), 60 * 60 * 1000)
 
   // 啟動服務器
   server.listen(PORT, '0.0.0.0', () => {
-    console.log(`[Server] 運行在 http://0.0.0.0:${PORT}`)
-    console.log(`[Server] CORS 來源: ${CORS_ORIGIN}`)
-    console.log('='.repeat(60))
+    logger.info({ port: PORT }, '運行在 http://0.0.0.0')
+    logger.info({ corsOrigin: CORS_ORIGIN }, 'CORS 來源')
+    logger.info('='.repeat(60))
   })
 }
 
@@ -497,33 +500,33 @@ async function start() {
 // ============================================================
 
 async function shutdown() {
-  console.log('\n[關閉] 收到關閉信號...')
+  logger.info('收到關閉信號...')
 
   // 關閉 Worker
   await orchestratorWorker.close()
-  console.log('[關閉] Worker 已關閉')
+  logger.info('Worker 已關閉')
 
   // 關閉隊列
   await orchestratorQueue.close()
-  console.log('[關閉] 隊列已關閉')
+  logger.info('隊列已關閉')
 
   // 關閉 Redis
   redis.disconnect()
-  console.log('[關閉] Redis 已斷開')
+  logger.info('Redis 已斷開')
 
   // 關閉資料庫連接池
   await closePool()
-  console.log('[關閉] 資料庫連接池已關閉')
+  logger.info('資料庫連接池已關閉')
 
   // 關閉 HTTP 服務器
   server.close(() => {
-    console.log('[關閉] HTTP 服務器已關閉')
+    logger.info('HTTP 服務器已關閉')
     process.exit(0)
   })
 
   // 超時強制退出
   setTimeout(() => {
-    console.error('[關閉] 超時，強制退出')
+    logger.error('超時，強制退出')
     process.exit(1)
   }, 10000)
 }
@@ -533,6 +536,6 @@ process.on('SIGINT', shutdown)
 
 // 啟動
 start().catch((err) => {
-  console.error('[啟動] 錯誤:', err)
+  logger.error({ err }, '啟動錯誤')
   process.exit(1)
 })

@@ -6,6 +6,9 @@
 
 import * as db from '../db/client'
 import type { FlowState } from '../types/flow-state'
+import { createLogger } from '../lib/logger'
+
+const logger = createLogger('semantic-gateway')
 
 // ── 型別定義 ──
 
@@ -35,6 +38,95 @@ const CORE_EVASIVE = [
   '不要管', '別管', '不關你', '管好你', '不想說', '不想回答', '不告訴',
   'none of your business', 'leave me alone', 'go away',
 ]
+
+// ── BDD clarify 問答相關性檢測 ──
+
+// 離題領域信號（需 >= 2 個才判定 suspicious）
+const OFF_TOPIC_SIGNALS: string[] = [
+  // 食物/餐飲
+  '吃', '喝', '餐', '飯', '麵', '拉麵', '火鍋', '好吃', '美味', '料理',
+  // 天氣/自然
+  '天氣', '下雨', '晴天', '颱風', '溫度',
+  // 個人生活/娛樂
+  '看電影', '旅行', '運動', '游泳', '打球', '散步', '逛街',
+  '女朋友', '男朋友', '約會',
+  // 哲學/空泛
+  '人生', '哲學', '宇宙', '命運', '浮想聯翩',
+  // 英文
+  'delicious', 'yummy', 'weather', 'rain', 'sunny',
+  'girlfriend', 'boyfriend', 'movie', 'vacation', 'gym',
+  'philosophy', 'universe', 'destiny',
+]
+
+// Evasive 信號（BDD clarify 專用，命中任一個 → suspicious → 送 Sonnet）
+const BDD_EVASIVE_SIGNALS: string[] = [
+  // 中文敷衍
+  '隨便', '都可以', '都行', '看情況', '再說', '無所謂', '沒差',
+  '你決定', '你說了算', '不知道', '沒想法', '不確定',
+  '算了', '懶得', '不想',
+  // 英文敷衍
+  'whatever', 'don\'t care', 'doesn\'t matter', 'up to you',
+  'you decide', 'no idea', 'not sure', 'don\'t know',
+  'idk', 'idc', 'dunno',
+]
+
+// 軟體/商業領域詞彙（出現任一個 → 視為可能相關）
+const SOFTWARE_BIZ_VOCAB: string[] = [
+  '功能', '系統', '用戶', '使用者', '需要', '支援', '模組',
+  '資料', '頁面', '介面', '設定', '權限', '角色', '通知',
+  '帳號', '密碼', '管理', '後台', '流程', '狀態', '欄位',
+  '必填', '選填', '匯出', '匯入', '搜尋', '篩選', '排序',
+  '上傳', '下載', '登入', '註冊', '訂單', '商品', '付款',
+  '預約', '客戶', '會員', '方式', '類型', '規則', '限制',
+  '條件', '數量', '金額', '分類', '標籤', '驗證', '審核',
+  // 英文
+  'system', 'user', 'feature', 'data', 'page', 'setting',
+  'permission', 'role', 'account', 'login', 'register',
+  'order', 'product', 'payment', 'customer', 'member',
+  'type', 'rule', 'limit', 'condition', 'amount',
+]
+
+/**
+ * BDD clarify 問答相關性檢測（零 LLM）
+ * 判斷用戶回答是否跟當前問題相關
+ */
+function checkQuestionAnswerRelevance(
+  answer: string,
+  question?: string,
+  questionOptions?: string,
+): 'relevant' | 'suspicious' | 'evasive' | 'unknown' {
+  // 無問題上下文 → 無法判斷
+  if (!question) return 'unknown'
+
+  const lower = answer.toLowerCase()
+
+  // 1. 檢查 evasive 信號
+  if (BDD_EVASIVE_SIGNALS.some(s => lower.includes(s))) return 'evasive'
+
+  // 2. 提取問題主題錨點（合併 question + options）
+  const questionText = question + (questionOptions ? ' ' + questionOptions : '')
+  // 中文連續片段 >=2 字
+  const zhAnchors = questionText.match(/[\u4e00-\u9fff\u3400-\u4dbf]{2,}/g) || []
+  // 英文單詞 >=3 字（排除停用詞）
+  const enStopWords = new Set(['the', 'and', 'for', 'are', 'but', 'not', 'you', 'all', 'can', 'had', 'her', 'was', 'one', 'our', 'out', 'has', 'have', 'with', 'this', 'that', 'from', 'they', 'been', 'said', 'each', 'which', 'their', 'will', 'other', 'about', 'many', 'then', 'them', 'these', 'some', 'would', 'make', 'like', 'into', 'could', 'what', 'your', 'does', 'need', 'how', 'when', 'where', 'why', 'should'])
+  const enAnchors = questionText.toLowerCase().split(/\s+/)
+    .filter(w => /^[a-zA-Z]{3,}$/.test(w) && !enStopWords.has(w))
+
+  // 3. 檢查主題重疊：答案包含任何問題錨點
+  const answerLower = answer.toLowerCase()
+  if (zhAnchors.some(a => answer.includes(a))) return 'relevant'
+  if (enAnchors.some(a => answerLower.includes(a))) return 'relevant'
+
+  // 4. 檢查軟體/商業詞彙
+  if (SOFTWARE_BIZ_VOCAB.some(v => answerLower.includes(v))) return 'relevant'
+
+  // 5. 檢查離題信號（>= 2 個才判定）
+  const offTopicHits = OFF_TOPIC_SIGNALS.filter(s => answerLower.includes(s)).length
+  if (offTopicHits >= 2) return 'suspicious'
+
+  // 6. 預設 fail-open
+  return 'unknown'
+}
 
 // ── 實質內容檢測 ──
 
@@ -80,9 +172,39 @@ function quickFilter(input: SemanticGatewayInput): SemanticGatewayResult | null 
   // 硬逃避信號 → 送 Sonnet 生成引導訊息
   if (CORE_EVASIVE.some(s => lower.includes(s))) return null
 
-  // BDD 選項回答 A-D（完整匹配，如 "A" "B." "c"）→ 放行
-  if (input.phase === 'bdd_clarify' && /^[A-Da-d]\.?\s*$/.test(trimmed)) {
-    return { verdict: 'valid', accept: true }
+  // BDD 選項回答：驗證引用的選項字母是否在合法範圍內
+  if (input.phase === 'bdd_clarify') {
+    // 解析回答中引用的選項字母（支援 "A" "A+B" "A、C" "A和D" "A,B,C" "AC" 等格式）
+    const optionLetterPattern = /[A-Da-d]/g
+    const isOptionLike = /^[A-Da-d\s.,+、和跟與&]+\.?\s*$/.test(trimmed)
+
+    if (isOptionLike) {
+      const referencedLetters = [...new Set(trimmed.match(optionLetterPattern)?.map(l => l.toUpperCase()) || [])]
+
+      if (referencedLetters.length > 0 && input.questionOptions) {
+        // 從 questionOptions 提取合法選項字母（格式 "A. xxx\nB. xxx"）
+        const validLetters = new Set(
+          (input.questionOptions.match(/^([A-Z])\./gm) || []).map(m => m[0])
+        )
+
+        const invalidLetters = referencedLetters.filter(l => !validLetters.has(l))
+        if (invalidLetters.length > 0) {
+          const validList = [...validLetters].sort().join('、')
+          const isZh = input.locale !== 'en'
+          return {
+            verdict: 'off_topic',
+            accept: false,
+            guidanceMessage: isZh
+              ? `選項 ${invalidLetters.join('、')} 不存在，目前可選的是 ${validList}，請重新選擇。`
+              : `Option ${invalidLetters.join(', ')} does not exist. Available options are ${validList}. Please choose again.`,
+          }
+        }
+      }
+      // 所有引用的選項都合法 → 放行
+      if (referencedLetters.length > 0) {
+        return { verdict: 'valid', accept: true }
+      }
+    }
   }
 
   // BDD 釐清：先用 hasSubstantiveContent 過濾明顯垃圾，中文/長英文直接放行，邊界案例送 Sonnet
@@ -98,16 +220,26 @@ function quickFilter(input: SemanticGatewayInput): SemanticGatewayResult | null 
       }
     }
 
-    // 中文含量足夠 → 直接放行（不送 Sonnet）
-    // 理由：通過 hasSubstantiveContent + checkInputQuality(strict) 的中文回答幾乎必然有效
-    // 下游有 batch_confirm 讓用戶確認，不需要 Sonnet 二次審核
+    // 中文含量足夠 → 檢查相關性後才放行
     const hasChinese = /[\u4e00-\u9fff\u3400-\u4dbf]/.test(trimmed)
     if (hasChinese && trimmed.length >= 2) {
+      if (input.question) {
+        const relevance = checkQuestionAnswerRelevance(trimmed, input.question, input.questionOptions)
+        if (relevance === 'suspicious' || relevance === 'evasive') {
+          return null  // → 送 Sonnet 審核
+        }
+      }
       return { verdict: 'valid', accept: true }
     }
 
-    // 英文長回答有實質內容 → 直接放行
+    // 英文長回答有實質內容 → 檢查相關性後才放行
     if (trimmed.length >= 5 && hasSubstantiveContent(trimmed)) {
+      if (input.question) {
+        const relevance = checkQuestionAnswerRelevance(trimmed, input.question, input.questionOptions)
+        if (relevance === 'suspicious' || relevance === 'evasive') {
+          return null  // → 送 Sonnet 審核
+        }
+      }
       return { verdict: 'valid', accept: true }
     }
 
@@ -207,7 +339,9 @@ ${input.questionOptions ? `選項：\n${input.questionOptions}` : ''}`
     ? `- BDD 釐清需要明確回答。「看情況」「都可以」是 ambiguous。
 - 有條件的回答（如「如果...就...」）也是 ambiguous，需要用戶給出明確選擇。
 - 注意「廢話文」：大量引經據典、哲學格言、但不包含任何具體的需求描述或決策。如果回答中充滿「不能不說非常重大」「深深地想到」「浮想聯翩」這類空洞措辭卻沒有實質回答問題，判定為 off_topic。
-- 回答必須包含跟問題相關的具體信息（如：功能選擇、數量、規則、流程等），不是「看起來很長但什麼都沒說」。`
+- 回答必須包含跟問題相關的具體信息（如：功能選擇、數量、規則、流程等），不是「看起來很長但什麼都沒說」。
+- **相關性**：回答必須跟當前問題的主題相關。如果問的是付款方式，回答卻在聊食物/天氣/個人生活，判定為 off_topic。注意：間接但相關的回答（如問「需要幾種」答「大概兩三種」）是 valid。
+- **敷衍區分**：包含「不確定」「不知道」等詞但同時有具體想法的回答（如「不確定，但可能需要中英文」）是 valid。只有純敷衍無任何具體資訊的才是 evasive。`
     : input.phase === 'iteration'
     ? `- valid：有明確修改方向的回饋（「字大一點」「換個顏色」「加搜尋功能」「把 header 改成固定」）
 - ambiguous：方向不明，無法直接執行（「改好一點」「變漂亮」「再改改」— 哪裡？怎麼改？）
@@ -284,7 +418,7 @@ export async function semanticGateway(
     })
 
     if (!resp.ok) {
-      console.warn(`[SemanticGateway] Sonnet API 錯誤 ${resp.status}，降級...`)
+      logger.warn({ status: resp.status }, 'Sonnet API 錯誤，降級')
       // 設計偏好 + BDD 釐清：低風險，降級放行
       // BDD 已通過 checkInputQuality(strict) + hasSubstantiveContent，到這步的輸入品質有保障
       if (input.phase === 'design_clarify' || input.phase === 'bdd_clarify') {
@@ -318,12 +452,12 @@ export async function semanticGateway(
         costUsd: cost,
         purpose: 'semantic_gateway',
         conversationId: input.conversationId,
-      }).catch(err => console.error('[SemanticGateway] 記錄使用量失敗:', err))
+      }).catch(err => logger.error({ err }, '記錄使用量失敗'))
     }
 
     const text = data.content?.[0]?.text?.trim()
     if (!text) {
-      console.warn('[SemanticGateway] 空回應，降級...')
+      logger.warn('空回應，降級')
       if (input.phase === 'design_clarify' || input.phase === 'bdd_clarify') {
         return { verdict: 'valid', accept: true }
       }
@@ -354,7 +488,7 @@ export async function semanticGateway(
       guidanceMessage: result.guidance,
     }
   } catch (err) {
-    console.warn('[SemanticGateway] 分析失敗，降級:', err)
+    logger.warn({ err }, '分析失敗，降級')
     if (input.phase === 'design_clarify' || input.phase === 'bdd_clarify') {
       return { verdict: 'valid', accept: true }
     }

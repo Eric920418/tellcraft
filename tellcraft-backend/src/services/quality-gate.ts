@@ -7,6 +7,9 @@
 import Anthropic from '@anthropic-ai/sdk'
 import { GeneratedComponent } from './uiux-generation'
 import { recordLlmUsage } from '../db/client'
+import { createLogger } from '../lib/logger'
+
+const logger = createLogger('quality-gate')
 
 // ============================================================
 // 型別定義
@@ -544,7 +547,7 @@ ${codeBlocks.join('\n\n')}
         purpose: 'quality_gate_autofix',
         userId: trackingContext?.userId,
         conversationId: trackingContext?.conversationId,
-      }).catch(err => console.error('[QualityGate] recordLlmUsage failed:', err))
+      }).catch(err => logger.error({ err }, 'recordLlmUsage failed'))
     }
 
     const content = response.content
@@ -556,7 +559,7 @@ ${codeBlocks.join('\n\n')}
     const result = parseFixedFiles(content, code)
     return result
   } catch (error) {
-    console.error('[QualityGate] autoFix 失敗:', error)
+    logger.error({ err: error }, 'autoFix 失敗')
     return null
   }
 }

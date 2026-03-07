@@ -4,9 +4,12 @@
  * 大部分零 LLM 成本（規則式推斷），generateFastConcept 使用 1 次 Haiku
  */
 
-import type { DesignTier, DesignSystem, TemplateData, VariantConcept } from './uiux-generation'
+import type { DesignTier, DesignSystem, TemplateData } from './uiux-generation'
 import { matchTemplates } from './template-matcher'
-import { query, queryOne, recordLlmUsage } from '../db/client'
+import { queryOne, recordLlmUsage } from '../db/client'
+import { createLogger } from '../lib/logger'
+
+const logger = createLogger('fast-build-generation')
 
 // ============================================================
 // Tier 偵測（規則式，零 LLM 成本）
@@ -190,7 +193,7 @@ export function inferPages(description: string, productType: string): string[] {
   const pageKeywords = ['首頁', '關於', '聯繫', '菜單', '作品', '價格', '功能', '文章', '產品', '服務', '團隊', '常見問題', 'FAQ', '課表', '教練', '醫師', '科別', '物件', '行程', '案例', '預約', '門市', '房型', '設施', '訂房', '捐款', '演出', '方案', '師資', '課程', '聯絡', '新聞', '最新消息', '下載', '支援', '幫助', '會員', '儀表板']
   const negativePatterns = ['不要', '不需要', '不用', '沒有', '去掉', '移除']
   // 子句分隔符（中英文標點）
-  const clauseSeparators = /[，。,\.、；;！!？?]/
+  const clauseSeparators = /[，。,.、；;！!？?]/
   const lower = description.toLowerCase()
   const mentioned = pageKeywords.filter(k => {
     const kLower = k.toLowerCase()
@@ -717,7 +720,7 @@ Make the concept unique. signatureElement must be specific enough to code (e.g. 
     })
 
     if (!resp.ok) {
-      console.warn(`[FastConcept] API 錯誤 ${resp.status}，降級跳過`)
+      logger.warn({ status: resp.status }, 'FastConcept API 錯誤，降級跳過')
       return null
     }
 
@@ -738,25 +741,25 @@ Make the concept unique. signatureElement must be specific enough to code (e.g. 
         purpose: 'fast_build_concept',
         userId: context?.userId,
         conversationId: context?.conversationId,
-      }).catch(err => console.error('[FastConcept] 記錄用量失敗:', err))
+      }).catch(err => logger.error({ err }, 'FastConcept 記錄用量失敗'))
     }
 
     const text = data.content?.[0]?.text
     if (!text) {
-      console.warn('[FastConcept] 空回應，降級跳過')
+      logger.warn('FastConcept 空回應，降級跳過')
       return null
     }
 
     // 解析 JSON（容忍 markdown code fence）
     const jsonMatch = text.match(/\{[\s\S]*\}/)
     if (!jsonMatch) {
-      console.warn('[FastConcept] 無法解析 JSON，降級跳過')
+      logger.warn('FastConcept 無法解析 JSON，降級跳過')
       return null
     }
 
     const parsed = JSON.parse(jsonMatch[0]) as Partial<FastConcept>
     if (!parsed.name || !parsed.vibe || !parsed.signatureElement) {
-      console.warn('[FastConcept] 缺少必要欄位，降級跳過')
+      logger.warn('FastConcept 缺少必要欄位，降級跳過')
       return null
     }
 
@@ -773,7 +776,7 @@ Make the concept unique. signatureElement must be specific enough to code (e.g. 
       suggestedTier: parsed.suggestedTier,
     }
   } catch (err) {
-    console.warn('[FastConcept] 生成失敗，降級跳過:', err)
+    logger.warn({ err }, 'FastConcept 生成失敗，降級跳過')
     return null
   }
 }
@@ -798,13 +801,13 @@ export async function expandBriefPrompt(
   if (isChinese) {
     const charCount = description.replace(/\s/g, '').length
     if (charCount > 80) {
-      console.log(`[ExpandPrompt] 描述已夠詳細（${charCount} 中文字），跳過擴展`)
+      logger.info({ charCount }, 'ExpandPrompt 描述已夠詳細，跳過擴展')
       return null
     }
   } else {
     const wordCount = description.trim().split(/\s+/).length
     if (wordCount > 40) {
-      console.log(`[ExpandPrompt] Description detailed enough (${wordCount} words), skipping expansion`)
+      logger.info({ wordCount }, 'ExpandPrompt description detailed enough, skipping expansion')
       return null
     }
   }
@@ -857,7 +860,7 @@ Rules:
     })
 
     if (!resp.ok) {
-      console.warn(`[ExpandPrompt] API 錯誤 ${resp.status}，降級跳過`)
+      logger.warn({ status: resp.status }, 'ExpandPrompt API 錯誤，降級跳過')
       return null
     }
 
@@ -878,19 +881,19 @@ Rules:
         purpose: 'fast_build_prompt_expansion',
         userId: context?.userId,
         conversationId: context?.conversationId,
-      }).catch(err => console.error('[ExpandPrompt] 記錄用量失敗:', err))
+      }).catch(err => logger.error({ err }, 'ExpandPrompt 記錄用量失敗'))
     }
 
     const text = data.content?.[0]?.text?.trim()
     if (!text || text.length < 50) {
-      console.warn('[ExpandPrompt] 回應太短或空，降級跳過')
+      logger.warn('ExpandPrompt 回應太短或空，降級跳過')
       return null
     }
 
-    console.log(`[ExpandPrompt] 擴展成功（${text.length} 字）`)
+    logger.info({ length: text.length }, 'ExpandPrompt 擴展成功')
     return text
   } catch (err) {
-    console.warn('[ExpandPrompt] 擴展失敗，降級跳過:', err)
+    logger.warn({ err }, 'ExpandPrompt 擴展失敗，降級跳過')
     return null
   }
 }

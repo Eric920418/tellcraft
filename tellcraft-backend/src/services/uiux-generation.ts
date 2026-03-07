@@ -8,6 +8,9 @@ import Anthropic from '@anthropic-ai/sdk'
 import { formatUISpecForPrompt, UIRequirementsSpec } from './bdd-to-ui-spec'
 import { recordLlmUsage } from '../db/client'
 import { safeParseJson } from '../utils/safe-parse-json'
+import { createLogger } from '../lib/logger'
+
+const logger = createLogger('uiux-generation')
 
 // 模組級 Anthropic 單例（避免每次 callClaude 都 new）
 let anthropicClient: Anthropic | null = null
@@ -139,7 +142,7 @@ export async function callClaude(
             accumulated += text
             chunkCount++
             if (chunkCount % 50 === 1) {
-              console.log(`[callClaude] streaming chunk #${chunkCount}, accumulated ${accumulated.length} chars`)
+              logger.info({ chunkCount, accumulatedLength: accumulated.length }, 'streaming chunk')
             }
             onTextDelta(accumulated)
           })
@@ -161,7 +164,7 @@ export async function callClaude(
             purpose: trackingContext?.purpose || 'uiux_generation',
             userId: trackingContext?.userId,
             conversationId: trackingContext?.conversationId,
-          }).catch(err => console.error('[UIUX] recordLlmUsage failed:', err))
+          }).catch(err => logger.error({ err }, 'recordLlmUsage failed'))
         }
 
         const content = finalMessage.content[0]
@@ -174,7 +177,7 @@ export async function callClaude(
         lastError = err
         if (attempt < RETRY_MAX && isRetryableError(err)) {
           const delay = RETRY_BASE_DELAY_MS * Math.pow(2, attempt - 1) // 2s, 4s, 8s
-          console.warn(`[callClaude] 暫時性錯誤 (attempt ${attempt}/${RETRY_MAX})，${delay}ms 後重試:`, String(err).slice(0, 150))
+          logger.warn({ attempt, maxRetry: RETRY_MAX, delay, err: String(err).slice(0, 150) }, '暫時性錯誤，重試')
           await new Promise(resolve => setTimeout(resolve, delay))
           continue
         }
@@ -992,7 +995,7 @@ export function ensureResponsiveClasses(
   const responsiveCount = (allContent.match(/\b(sm|md|lg|xl):/g) || []).length
   if (responsiveCount >= 3) return { pages, components }
 
-  console.log('[ensureResponsiveClasses] No responsive classes detected, injecting basic responsive patterns')
+  logger.info('No responsive classes detected, injecting basic responsive patterns')
 
   const transform = (content: string): string => {
     // Grid columns — mobile-first: 1 col → md breakpoint
@@ -1191,7 +1194,7 @@ ${contextLines.join('\n')}
   )
 
   if (!response.success || !response.content) {
-    console.warn('[UIUX] repairMissingComponents LLM 呼叫失敗:', response.error)
+    logger.warn({ error: response.error }, 'repairMissingComponents LLM 呼叫失敗')
     return []
   }
 
@@ -1394,11 +1397,11 @@ export function buildStreamingHandler(
     const parsed = parseCompletedFileBlocks(accumulated)
     const now = Date.now()
     if (parsed.completedBlockCount > lastBlockCount) {
-      console.log(`[StreamingPreview] 新區塊完成: ${parsed.completedBlockCount} blocks, ${parsed.pages.length} pages, ${parsed.components.length} components, timeSinceLastEmit=${now - lastEmitTime}ms`)
+      logger.info({ blocks: parsed.completedBlockCount, pages: parsed.pages.length, components: parsed.components.length, timeSinceLastEmit: now - lastEmitTime }, '新區塊完成')
       if (now - lastEmitTime >= 1500) {
         lastBlockCount = parsed.completedBlockCount
         lastEmitTime = now
-        console.log(`[StreamingPreview] >>> EMIT preview_update: ${parsed.pages.length} pages, ${parsed.components.length} components`)
+        logger.info({ pages: parsed.pages.length, components: parsed.components.length }, 'EMIT preview_update')
         onPartialCode({ pages: parsed.pages, components: parsed.components, styles: parsed.styles })
       }
     }
@@ -1787,13 +1790,12 @@ ${productContext?.layoutMode === 'app'
   const { pages: generatedPages, components: generatedComponents, styles } = parseGeneratedFiles(response.content, designSystem)
 
   // ── Layer 1 防禦：驗證組件引用完整性 + LLM 自修復 ──
-  let finalPages = generatedPages
+  const finalPages = generatedPages
   let finalComponents = generatedComponents
 
   const missingRefs = validateComponentReferences(generatedPages, generatedComponents)
   if (missingRefs.length > 0) {
-    console.log(`[UIUX] generateStructure 發現 ${missingRefs.length} 個缺失引用:`,
-      missingRefs.map(r => `${r.file} → ${r.importPath}`))
+    logger.info({ count: missingRefs.length, refs: missingRefs.map(r => `${r.file} → ${r.importPath}`) }, 'generateStructure 發現缺失引用')
 
     // LLM 修復（最多 1 次）
     const repairedComponents = await repairMissingComponents(
@@ -1801,18 +1803,16 @@ ${productContext?.layoutMode === 'app'
     )
 
     if (repairedComponents.length > 0) {
-      console.log(`[UIUX] 已修復 ${repairedComponents.length} 個缺失組件:`,
-        repairedComponents.map(c => c.path))
+      logger.info({ count: repairedComponents.length, paths: repairedComponents.map(c => c.path) }, '已修復缺失組件')
       finalComponents = [...generatedComponents, ...repairedComponents]
 
       // 二次校驗（只 log，不再 LLM）
       const remainingMissing = validateComponentReferences(finalPages, finalComponents)
       if (remainingMissing.length > 0) {
-        console.warn(`[UIUX] 修復後仍有 ${remainingMissing.length} 個缺失引用:`,
-          remainingMissing.map(r => `${r.file} → ${r.importPath}`))
+        logger.warn({ count: remainingMissing.length, refs: remainingMissing.map(r => `${r.file} → ${r.importPath}`) }, '修復後仍有缺失引用')
       }
     } else {
-      console.warn('[UIUX] LLM 修復失敗，交給下游 deployer 處理')
+      logger.warn('LLM 修復失敗，交給下游 deployer 處理')
     }
   }
 
@@ -2153,7 +2153,7 @@ export async function generateAllCode(
   trackingContext?: LlmTrackingContext
 ): Promise<GenerationResult> {
   // 使用三階段生成
-  console.log('[UIUX] generateAllCode: 使用三階段生成流程')
+  logger.info('generateAllCode: 使用三階段生成流程')
 
   // 階段 1：結構
   const structureResult = await generateStructure(designSystem, pages, template, bddSpec, designTier, undefined, trackingContext)
@@ -2174,7 +2174,7 @@ export async function generateAllCode(
   )
   const stage2Output = animationResult.success ? animationResult : structureResult
   if (!animationResult.success) {
-    console.warn('[UIUX] generateAllCode: 動畫生成失敗，使用結構產出繼續', animationResult.error)
+    logger.warn({ error: animationResult.error }, 'generateAllCode: 動畫生成失敗，使用結構產出繼續')
   }
 
   // 階段 3：RWD（失敗時 fallback 到階段 2 產出）
@@ -2189,7 +2189,7 @@ export async function generateAllCode(
     trackingContext
   )
   if (!rwdResult.success) {
-    console.warn('[UIUX] generateAllCode: RWD 生成失敗，使用前一階段產出', rwdResult.error)
+    logger.warn({ error: rwdResult.error }, 'generateAllCode: RWD 生成失敗，使用前一階段產出')
     return stage2Output
   }
 
@@ -2527,7 +2527,7 @@ ${sourceType === 'ideas'
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const parsed = safeParseJson<any>(response.content)
     if (!parsed) {
-      console.error('[UIUX] Design Brief JSON 提取失敗，LLM 原始回應:', response.content.substring(0, 500))
+      logger.error({ rawResponse: response.content.substring(0, 500) }, 'Design Brief JSON 提取失敗')
       return { success: false, error: '無法解析設計方向摘要' }
     }
 

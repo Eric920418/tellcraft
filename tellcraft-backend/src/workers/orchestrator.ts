@@ -31,16 +31,13 @@ import {
   generateTailwindConfig,
   generateDesignBrief,
   adjustDesignBrief,
-  DesignVariant,
   DesignBrief,
-  DesignTier,
   TemplateData,
-  DesignSystem,
   GeneratedComponent,
   VariantConcept,
 } from '../services/uiux-generation'
 import { translateBddToUISpec, buildUISpecSummary } from '../services/bdd-to-ui-spec'
-import { runQualityGate, autoFixCriticalIssues, QualityReport } from '../services/quality-gate'
+import { runQualityGate, autoFixCriticalIssues } from '../services/quality-gate'
 import { prepareDeployment, executeDeployment, type SiteMetadata } from '../services/deployer'
 import { detectDesignTier, inferProductType, inferPages, buildDefaultDesignSystem, buildMinimalTemplate, inferInteractionHint, getTemplateStyleHint, inferLayoutMode, PRODUCT_TYPE_LABELS, generateFastConcept, expandBriefPrompt } from '../services/fast-build-generation'
 import { ensureResponsiveClasses } from '../services/uiux-generation'
@@ -55,12 +52,15 @@ import type { ESKnowledgeMap } from '../services/event-storming'
 import { generateActionsYml } from '../services/actions-design'
 import { generateIsaConfig } from '../services/isa-config'
 import { validateAndFixFeatures } from '../services/feature-validation'
-import { analyzeChangeImpact, executeChange, verifyConsistency, rollbackChange, ImpactAnalysis } from '../services/change-management'
+import { analyzeChangeImpact, executeChange, verifyConsistency, rollbackChange } from '../services/change-management'
 import type { FlowState } from '../types/flow-state'
 import { sendMessage, saveFlowState, getFlowState, deleteFlowState, makeStreamingCallback, generatedCodeToFileRows, deductCredits } from './orchestrator-utils'
 import { CREDIT_COSTS } from '../config/plans'
 import { sanitizeClarifyForDisplay, sanitizeForDisplay } from '../utils/white-text-sanitizer'
 import { detectFastModeIntent, getFaqReply, answerWithSonnet } from '../services/customer-service'
+import { createLogger } from '../lib/logger'
+
+const logger = createLogger('orchestrator')
 
 // ============================================================
 // 類型定義
@@ -411,7 +411,7 @@ export function createOrchestratorWorker(
   const worker = new Worker(
     'orchestrator',
     async (job: Job) => {
-      console.log(`[Orchestrator] 處理 Job: ${job.name} (${job.id})`)
+      logger.info({ jobName: job.name, jobId: job.id }, '處理 Job')
 
       const data = job.data as ProcessMessageData | ContinueFlowData
       const { conversationId } = data
@@ -428,7 +428,7 @@ export function createOrchestratorWorker(
       })
 
       if (lockResult.locked) {
-        console.warn(`[Orchestrator] 對話 ${conversationId} 已鎖定，拋錯觸發重試 (Job ${job.id}, attempt ${job.attemptsMade + 1}/${job.opts.attempts || 3})`)
+        logger.warn({ conversationId, jobId: job.id, attempt: job.attemptsMade + 1, maxAttempts: job.opts.attempts || 3 }, '對話已鎖定，拋錯觸發重試')
         // 拋出錯誤讓 BullMQ 自動重試（exponential backoff 2s→4s），
         // 而不是靜默丟棄用戶的消息
         throw new Error(`LOCK_CONTENTION: 對話 ${conversationId} 正在處理中`)
@@ -443,11 +443,11 @@ export function createOrchestratorWorker(
   )
 
   worker.on('completed', (job) => {
-    console.log(`[Orchestrator] Job 完成: ${job.id}`)
+    logger.info({ jobId: job.id }, 'Job 完成')
   })
 
   worker.on('failed', (job, err) => {
-    console.error(`[Orchestrator] Job 失敗: ${job?.id}`, err)
+    logger.error({ err, jobId: job?.id }, 'Job 失敗')
   })
 
   return worker
@@ -467,7 +467,7 @@ async function handleProcessMessage(
   // Step 1: Prefilter（零 LLM 成本防禦）
   const prefilterResult = await prefilterMessage(message, userId, redis, locale)
   if (!prefilterResult.allowed) {
-    console.log(`[Orchestrator] Prefilter 攔截: reason=${prefilterResult.reason}, userId=${userId}`)
+    logger.info({ reason: prefilterResult.reason, userId }, 'Prefilter 攔截')
     await sendMessage(conversationId, io, {
       content: prefilterResult.errorMessage || '無法處理此訊息。',
       stage: 'prefilter_rejected',
@@ -490,7 +490,7 @@ async function handleProcessMessage(
   // 避免手動維護 phase 白名單（容易漏掉 BDD 中間 phase 導致並行衝突）
   const existingState = await getFlowState(redis, conversationId)
   if (existingState && existingState.phase !== 'idle') {
-    console.log(`[Orchestrator] 已有 FlowState (phase=${existingState.phase})，轉發到 continue-flow`)
+    logger.info({ phase: existingState.phase }, '已有 FlowState，轉發到 continue-flow')
     return handleContinueFlow({
       projectId, conversationId, userId,
       taskId: existingState.taskId,
@@ -508,7 +508,7 @@ async function handleProcessMessage(
     // 預驗證 Layer 0：意圖偵測（問候/問題/閒聊/使用說明）
     const intentCheck = detectFastModeIntent(message)
     if (intentCheck.match) {
-      console.log(`[Orchestrator] 快速模式意圖攔截: type=${intentCheck.type}, faqTopic=${intentCheck.faqTopic || 'N/A'}, msg="${message}"`)
+      logger.info({ type: intentCheck.type, faqTopic: intentCheck.faqTopic || 'N/A', msg: message }, '快速模式意圖攔截')
       const buildQuickReplies = [
         { label: isChinese ? '開始建站' : 'Start Building', value: isChinese ? '做一個網站' : 'Build a website', style: 'primary' as const },
       ]
@@ -550,7 +550,7 @@ async function handleProcessMessage(
         // FAQ 命中 → 零 LLM 回覆
         const faqResult = getFaqReply(message, locale)
         if (faqResult) {
-          console.log(`[Orchestrator] FAQ 命中: topic=${faqResult.topic}`)
+          logger.info({ topic: faqResult.topic }, 'FAQ 命中')
           await sendMessage(conversationId, io, {
             content: faqResult.reply,
             stage: 'customer_service',
@@ -559,7 +559,7 @@ async function handleProcessMessage(
           return { taskId: null, skill: null }
         }
         // FAQ 未命中 → Sonnet 回答
-        console.log(`[Orchestrator] FAQ 未命中，使用 Sonnet 回答`)
+        logger.info('FAQ 未命中，使用 Sonnet 回答')
         const sonnetReply = await answerWithSonnet(message, { conversationId, locale })
         await sendMessage(conversationId, io, {
           content: sonnetReply,
@@ -584,7 +584,7 @@ async function handleProcessMessage(
     // 預驗證 Layer 1：攔截亂碼等無意義輸入（零 LLM）
     const fastInputCheck = isDesignFeedback(message)
     if (!fastInputCheck.valid) {
-      console.log(`[Orchestrator] 快速模式輸入被攔截: reason=${fastInputCheck.rejectReason}, msg="${message.substring(0, 50)}"`)
+      logger.info({ reason: fastInputCheck.rejectReason, msg: message.substring(0, 50) }, '快速模式輸入被攔截')
       // 使用建站語境引導（不用 isDesignFeedback 的修改語境 guideMessage）
       await sendMessage(conversationId, io, {
         content: isChinese
@@ -598,7 +598,7 @@ async function handleProcessMessage(
     // 預驗證 Layer 2：語義相關性 + 具體性檢查（強信號放行 + 弱信號 Haiku 判斷）
     const relevance = await checkBuildRelevance(message, { userId, conversationId })
     if (!relevance.relevant) {
-      console.log(`[Orchestrator] 快速模式語義攔截 (不相關): msg="${message.substring(0, 50)}"`)
+      logger.info({ msg: message.substring(0, 50) }, '快速模式語義攔截 (不相關)')
       await sendMessage(conversationId, io, {
         content: relevance.errorMessage || (isChinese ? '請描述您想要建立的網站或應用。' : 'Please describe the website or app you\'d like to build.'),
         stage: 'info',
@@ -606,7 +606,7 @@ async function handleProcessMessage(
       return { taskId: null, skill: null }
     }
     if (relevance.vague) {
-      console.log(`[Orchestrator] 快速模式語義攔截 (太模糊): msg="${message.substring(0, 50)}"`)
+      logger.info({ msg: message.substring(0, 50) }, '快速模式語義攔截 (太模糊)')
       await sendMessage(conversationId, io, {
         content: isChinese
           ? '描述再具體一點，我能做得更好！試試告訴我：\n\n- **什麼類型**的網站？（咖啡店、作品集、SaaS...）\n- **想要什麼功能**？（菜單展示、預約系統、價格頁...）\n- **什麼風格**？（簡約、溫暖、科技感...）'
@@ -648,10 +648,10 @@ async function handleProcessMessage(
           'UPDATE projects SET name = $1, updated_at = NOW() WHERE id = $2',
           [autoName, projectId]
         )
-        console.log(`[Orchestrator] 快速模式自動命名: "${project.name}" → "${autoName}"`)
+        logger.info({ oldName: project.name, newName: autoName }, '快速模式自動命名')
       }
     } catch (err) {
-      console.error('[Orchestrator] 快速模式自動命名失敗（不影響流程）:', err)
+      logger.error({ err }, '快速模式自動命名失敗（不影響流程）')
     }
 
     await db.updateTask(taskId, {
@@ -676,7 +676,7 @@ async function handleProcessMessage(
 
   // Step 2.5: Content Policy 攔截
   if (classification.contentFlag) {
-    console.log(`[Orchestrator] Content Policy 攔截: flag=${classification.contentFlag}, msg="${message.substring(0, 50)}"`)
+    logger.info({ flag: classification.contentFlag, msg: message.substring(0, 50) }, 'Content Policy 攔截')
     const isChinese = /[\u4e00-\u9fff\u3400-\u4dbf]/.test(message)
     await sendMessage(conversationId, io, {
       content: isChinese
@@ -690,7 +690,7 @@ async function handleProcessMessage(
 
   // Step 3: Meta Intent → 模板回覆（不建 task，零 Token 成本）
   if (!isSkillIntent(classification.intent)) {
-    console.log(`[Orchestrator] Meta intent: ${classification.intent}, 模板回覆`)
+    logger.info({ intent: classification.intent }, 'Meta intent, 模板回覆')
     const responseKey = classification.intent as keyof typeof META_RESPONSES
     let responseContent = META_RESPONSES[responseKey] || META_RESPONSES.clarification_needed
 
@@ -760,10 +760,10 @@ async function handleProcessMessage(
           'UPDATE projects SET name = $1, updated_at = NOW() WHERE id = $2',
           [finalName, projectId]
         )
-        console.log(`[Orchestrator] 自動命名專案: "${project.name}" → "${finalName}"`)
+        logger.info({ oldName: project.name, newName: finalName }, '自動命名專案')
       }
     } catch (err) {
-      console.error('[Orchestrator] 自動命名失敗（不影響流程）:', err)
+      logger.error({ err }, '自動命名失敗（不影響流程）')
     }
   }
 
@@ -790,7 +790,7 @@ async function handleProcessMessage(
       break
     case 'uiux':
       // 安全網：UIUX 不應由 Classifier 直接觸發，設計流程從 BDD 需求釐清進入
-      console.warn(`[Orchestrator] Classifier 返回 "uiux"，重導向到 bdd-spec`)
+      logger.warn('Classifier 返回 "uiux"，重導向到 bdd-spec')
       await executeBddSpecSkill({
         taskId,
         projectId,
@@ -873,7 +873,7 @@ async function handleGoBack(
   const targetPhase = PHASE_BACKTRACK_MAP[state.phase]
   if (!targetPhase) return false
 
-  console.log(`[Orchestrator] 回退: ${state.phase} → ${targetPhase}`)
+  logger.info({ from: state.phase, to: targetPhase }, '回退')
 
   // 根據目標 phase 清理下游欄位
   if (targetPhase === 'uiux_design_preference') {
@@ -915,7 +915,7 @@ async function handlePhaseError(
   io: SocketIOServer
 ) {
   const errorMsg = error instanceof Error ? error.message : String(error)
-  console.error(`[Orchestrator] Phase handler 錯誤 (phase=${state.phase}):`, errorMsg)
+  logger.error({ phase: state.phase, err: errorMsg }, 'Phase handler 錯誤')
 
   const targetPhase = PHASE_BACKTRACK_MAP[state.phase]
   const targetLabel = targetPhase ? PHASE_LABELS[targetPhase] : null
@@ -1030,7 +1030,7 @@ async function handleContinueFlow(
   // Prefilter（rate limit + 長度檢查，不影響 phase routing）
   const prefilterResult = await prefilterMessage(message, userId, redis, effectiveLocale)
   if (!prefilterResult.allowed) {
-    console.log(`[Orchestrator] ContinueFlow prefilter 攔截: reason=${prefilterResult.reason}`)
+    logger.info({ reason: prefilterResult.reason }, 'ContinueFlow prefilter 攔截')
     await sendMessage(conversationId, io, {
       content: prefilterResult.errorMessage || '無法處理此訊息。',
       stage: 'prefilter_rejected',
@@ -1049,7 +1049,7 @@ async function handleContinueFlow(
   }
 
   if (!state) {
-    console.log('[Orchestrator] 沒有找到流程狀態，可能是新對話或狀態已過期')
+    logger.info('沒有找到流程狀態，可能是新對話或狀態已過期')
     await sendMessage(conversationId, io, {
       content: '此對話的流程狀態已過期，請開始新的對話。',
       stage: 'error',
@@ -1088,7 +1088,7 @@ async function handleContinueFlow(
   }
   if (trimmedMsg === '__retry_fast_build__' && state.fastMode && state.fastModeOriginalMessage) {
     // Fast Build 重試：用原始描述重新生成
-    console.log(`[Orchestrator] Fast Build 重試: conversationId=${conversationId}`)
+    logger.info({ conversationId }, 'Fast Build 重試')
     const retryTaskId = await db.createTask({
       projectId,
       userId,
@@ -1121,7 +1121,7 @@ async function handleContinueFlow(
   }
 
   if (trimmedMsg === '__retry_iteration__' && state.lastIterationFeedback) {
-    console.log(`[Orchestrator] 迭代重試: conversationId=${conversationId}`)
+    logger.info({ conversationId }, '迭代重試')
     await executeIteration({
       conversationId,
       projectId,
@@ -1159,14 +1159,14 @@ async function handleContinueFlow(
       await redis.expire(rejectKey, 300)
 
       if (rejectCount < 3) {
-        console.warn(`[Orchestrator] 品質攔截 (${rejectCount}/3): phase=${state.phase}, quality=${qualityCheck.quality}, reason=${qualityCheck.reason}`)
+        logger.warn({ rejectCount, phase: state.phase, quality: qualityCheck.quality, reason: qualityCheck.reason }, '品質攔截')
         await sendMessage(conversationId, io, {
           content: getPhaseQualityMessage(state.phase, effectiveLocale) || qualityCheck.userMessage || '請輸入有效的內容。',
           stage: state.phase,
         })
         return
       }
-      console.warn(`[Orchestrator] 品質攔截已達上限 (3/3)，強制放行: phase=${state.phase}`)
+      logger.warn({ phase: state.phase }, '品質攔截已達上限 (3/3)，強制放行')
       await redis.del(rejectKey)  // 放行並重置
     } else {
       await redis.del(`quality_reject:${conversationId}`)
@@ -1698,7 +1698,7 @@ async function handleContinueFlow(
     const startedAt = state.prdDiscoveryStartedAt || 0
     const isTimedOut = startedAt === 0 || (Date.now() - startedAt > PRD_DISCOVERY_TIMEOUT_MS)
     if (isTimedOut) {
-      console.warn(`[Orchestrator] PRD Discovery 超時或無時間戳 (startedAt=${startedAt})，刪除 FlowState 讓用戶重新開始`)
+      logger.warn({ startedAt }, 'PRD Discovery 超時或無時間戳，刪除 FlowState 讓用戶重新開始')
       await deleteFlowState(redis, conversationId)
       const isChinese = state.locale !== 'en'
       await sendMessage(conversationId, io, {
@@ -1727,17 +1727,17 @@ async function handleContinueFlow(
     // startedAt === 0 代表舊對話（沒有此欄位），視為已超時（肯定沒有活躍的生成任務）
     const isTimedOut = startedAt === 0 || (Date.now() - startedAt > FORMULATION_TIMEOUT_MS)
     if (isTimedOut) {
-      console.warn(`[Orchestrator] Formulation 超時或無時間戳 (startedAt=${startedAt})，嘗試恢復`)
+      logger.warn({ startedAt }, 'Formulation 超時或無時間戳，嘗試恢復')
       const hasCheckpoint = state.formulationSchemaSql && state.formulationIdentifiedFeatures && state.formulationIdentifiedFeatures.length > 0
       if (hasCheckpoint) {
-        console.log(`[Orchestrator] 從 checkpoint 恢復 Formulation（已完成 ${state.formulationCompletedNames?.length || 0}/${state.formulationTotalExpected || '?'}）`)
+        logger.info({ completed: state.formulationCompletedNames?.length || 0, total: state.formulationTotalExpected || '?' }, '從 checkpoint 恢復 Formulation')
         await sendMessage(conversationId, io, {
           content: `規格生成中斷了，正在從上次進度恢復（已完成 ${state.formulationCompletedNames?.length || 0}/${state.formulationTotalExpected || '?'} 個功能）...`,
           stage: 'formulation_start',
         })
         await resumeFormulation(conversationId, state, redis, io)
       } else {
-        console.log('[Orchestrator] 無 checkpoint，重新開始 Formulation')
+        logger.info('無 checkpoint，重新開始 Formulation')
         await sendMessage(conversationId, io, {
           content: '規格生成中斷了，正在重新開始...',
           stage: 'formulation_start',
@@ -1760,7 +1760,7 @@ async function handleContinueFlow(
     // startedAt === 0 代表舊對話，視為已超時
     const isTimedOut = startedAt === 0 || (Date.now() - startedAt > SPEC_DISCOVERY_TIMEOUT_MS)
     if (isTimedOut) {
-      console.warn(`[Orchestrator] Spec Discovery 超時或無時間戳，視為完成並進入下一階段`)
+      logger.warn('Spec Discovery 超時或無時間戳，視為完成並進入下一階段')
       await sendMessage(conversationId, io, {
         content: '品質檢查超時，已略過。進入下一階段...',
         stage: 'spec_discovery_complete',
@@ -1780,7 +1780,7 @@ async function handleContinueFlow(
     const FAST_BUILD_TIMEOUT_MS = 20 * 60 * 1000
     const startedAt = state.uiuxCodeGenerationStartedAt || 0
     if (startedAt === 0 || Date.now() - startedAt > FAST_BUILD_TIMEOUT_MS) {
-      console.warn('[Orchestrator] Fast Build 超時，嘗試恢復')
+      logger.warn('Fast Build 超時，嘗試恢復')
       const hasCode = state.uiuxGeneratedCode &&
         (state.uiuxGeneratedCode.pages.length > 0 || state.uiuxGeneratedCode.components.length > 0)
       if (hasCode) {
@@ -1834,7 +1834,7 @@ async function handleContinueFlow(
     const ITERATION_TIMEOUT_MS = 5 * 60 * 1000
     const iterStartedAt = state.uiuxCodeGenerationStartedAt || 0
     if (iterStartedAt > 0 && Date.now() - iterStartedAt > ITERATION_TIMEOUT_MS) {
-      console.warn('[Orchestrator] 迭代修改超時，自動恢復到 uiux_complete')
+      logger.warn('迭代修改超時，自動恢復到 uiux_complete')
       state.phase = 'uiux_complete'
       state.uiuxCodeGenerationStartedAt = undefined
       await saveFlowState(redis, conversationId, state)
@@ -1976,7 +1976,7 @@ async function handleContinueFlow(
     const isTimedOut = startedAt === 0 || elapsed > GENERATION_TIMEOUT_MS
 
     if (isTimedOut) {
-      console.warn(`[Orchestrator] 代碼生成超時 (${startedAt === 0 ? 'legacy' : Math.round(elapsed / 1000) + 's'})，偵測到中斷，自動恢復`)
+      logger.warn({ elapsed: startedAt === 0 ? 'legacy' : Math.round(elapsed / 1000) + 's' }, '代碼生成超時，偵測到中斷，自動恢復')
 
       // 檢查是否有已存檔的代碼可以恢復
       const hasCode = state.uiuxGeneratedCode &&
@@ -1985,7 +1985,7 @@ async function handleContinueFlow(
 
       if (hasCode && resumePhase !== 'structure' && resumePhase !== 'complete') {
         // 有中途存檔且未完成 → 自動恢復管線（從中斷點繼續）
-        console.log(`[Orchestrator] 從 ${resumePhase} 階段自動恢復管線`)
+        logger.info({ resumePhase }, '從階段自動恢復管線')
         state.uiuxCodeGenerationStartedAt = Date.now()
         state.waitingForReply = false
         await saveFlowState(redis, conversationId, state)
@@ -1994,7 +1994,7 @@ async function handleContinueFlow(
         await executeFullCodePipeline(conversationId, state, redis, io)
       } else if (hasCode && resumePhase === 'complete') {
         // 所有階段都完成了但沒走到最後收尾 → 直接進入 uiux_complete
-        console.log('[Orchestrator] 代碼已全部生成，進入完成狀態')
+        logger.info('代碼已全部生成，進入完成狀態')
         state.phase = 'uiux_complete'
         state.uiuxCodePhase = 'complete'
         state.uiuxCodeGenerationStartedAt = undefined
@@ -2276,7 +2276,7 @@ async function handleContinueFlow(
     // ── UIUX 階段 catch-all ──
     // 如果到這裡還沒 return，表示訊息無法識別
     // 絕對不能讓它洩漏到下方的 BDD processUserReply
-    console.log(`[Orchestrator] UIUX 階段未匹配的訊息: phase=${state.phase}, message="${message}"`)
+    logger.info({ phase: state.phase, message }, 'UIUX 階段未匹配的訊息')
     if (state.phase === 'uiux_variant_selection') {
       const vrIds = (state.uiuxVariants || []).map(v => ({
         label: `選擇 ${v.id}`,
@@ -2301,7 +2301,7 @@ async function handleContinueFlow(
       })
     } else if (state.phase === 'uiux_complete' && (!state.uiuxGeneratedCode || state.uiuxCodePhase !== 'complete')) {
       // 異常狀態：uiux_complete 但無代碼（例如 structure 失敗後殘留）
-      console.warn('[Orchestrator] uiux_complete 但無生成代碼，重置為 idle')
+      logger.warn('uiux_complete 但無生成代碼，重置為 idle')
       state.phase = 'idle'
       await saveFlowState(redis, conversationId, state)
       await sendMessage(conversationId, io, {
@@ -2313,7 +2313,7 @@ async function handleContinueFlow(
   }
 
   if (!state.waitingForReply) {
-    console.warn(`[Orchestrator] 流程不在等待回覆狀態 (phase=${state.phase})，回覆用戶提示`)
+    logger.warn({ phase: state.phase }, '流程不在等待回覆狀態，回覆用戶提示')
     await sendMessage(conversationId, io, {
       content: '系統正在處理中，請稍候再試。',
       stage: 'info',
@@ -2323,7 +2323,7 @@ async function handleContinueFlow(
 
   // 取得 BDD Session
   if (!state.sessionId) {
-    console.warn('[Orchestrator] 缺少 sessionId，回覆用戶提示')
+    logger.warn('缺少 sessionId，回覆用戶提示')
     await sendMessage(conversationId, io, {
       content: '對話狀態異常，請開始新的對話。',
       stage: 'error',
@@ -2333,7 +2333,7 @@ async function handleContinueFlow(
 
   const session = await getBddSession({ sessionId: state.sessionId })
   if (!session.success || !session.data) {
-    console.warn('[Orchestrator] Session 不存在，回覆用戶提示')
+    logger.warn('Session 不存在，回覆用戶提示')
     await sendMessage(conversationId, io, {
       content: '規格資料已過期，請開始新的對話。',
       stage: 'error',
@@ -2377,7 +2377,7 @@ async function handleESInitReply(
   }
 
   if (!state.esKnowledgeMap) {
-    console.error('[Orchestrator] ES init reply 但沒有 esKnowledgeMap')
+    logger.error('ES init reply 但沒有 esKnowledgeMap')
     await skipESAndStartDiscovery(conversationId, state, redis, io)
     return
   }
@@ -2438,7 +2438,7 @@ async function handleESInitReply(
         ],
       })
     } else {
-      console.warn('[Orchestrator] ES 重新初始化失敗，跳過 ES')
+      logger.warn('ES 重新初始化失敗，跳過 ES')
       await skipESAndStartDiscovery(conversationId, state, redis, io)
     }
   }
@@ -2464,7 +2464,7 @@ async function handleESExploreReply(
   }
 
   if (!state.esKnowledgeMap) {
-    console.error('[Orchestrator] ES explore reply 但沒有 esKnowledgeMap')
+    logger.error('ES explore reply 但沒有 esKnowledgeMap')
     await skipESAndStartDiscovery(conversationId, state, redis, io)
     return
   }
@@ -2517,7 +2517,7 @@ async function handleESComplete(
     await updateBddSession({
       sessionId: state.sessionId,
       updates: { esDocumentContent: esDocument },
-    }).catch(err => console.error('[Orchestrator] 保存 ES 文檔失敗:', err))
+    }).catch(err => logger.error({ err }, '保存 ES 文檔失敗'))
   }
 
   await sendMessage(conversationId, io, {
@@ -2546,7 +2546,7 @@ async function skipESAndStartDiscovery(
       await updateBddSession({
         sessionId: state.sessionId,
         updates: { esDocumentContent: esDocument },
-      }).catch(err => console.error('[Orchestrator] 保存部分 ES 文檔失敗:', err))
+      }).catch(err => logger.error({ err }, '保存部分 ES 文檔失敗'))
     }
   }
 
@@ -2580,7 +2580,7 @@ async function startPrdDiscoveryWithES(
   // 有 ES 文檔時重新計算動態上限（複雜度更高）
   if (esDocument && !state.discoveryLimits) {
     state.discoveryLimits = computeDiscoveryLimits(originalRequirements, true)
-    console.log(`[Orchestrator] ES 後重算 Discovery 上限: maxRounds=${state.discoveryLimits.maxRounds}, maxQuestions=${state.discoveryLimits.maxTotalQuestions}`)
+    logger.info({ maxRounds: state.discoveryLimits.maxRounds, maxQuestions: state.discoveryLimits.maxTotalQuestions }, 'ES 後重算 Discovery 上限')
   }
 
   state.phase = 'prd_discovery'
@@ -2594,11 +2594,11 @@ async function startPrdDiscoveryWithES(
     progress: { current: 2, total: 3, step: '分析需求細節' },
   })
 
-  console.log(`[Orchestrator] 調用 PRD Discovery（${esDocument ? '含 ES 文檔' : '無 ES'}）`)
+  logger.info({ hasEsDocument: !!esDocument }, '調用 PRD Discovery')
   const discoveryResult = await runPrdDiscovery(enrichedRequirements, trackingContext, undefined, undefined, esDocument || undefined)
 
   if (!discoveryResult.success || !discoveryResult.items) {
-    console.error('[Orchestrator] PRD Discovery 失敗:', discoveryResult.error)
+    logger.error({ err: discoveryResult.error }, 'PRD Discovery 失敗')
     // 刪除 FlowState，讓用戶重新輸入時走 handleProcessMessage 重新開始
     await deleteFlowState(redis, conversationId)
     await sendMessage(conversationId, io, {
@@ -2609,7 +2609,7 @@ async function startPrdDiscoveryWithES(
   }
 
   const discoveryItems: ClarifyItem[] = discoveryResult.items
-  console.log(`[Orchestrator] PRD Discovery 生成 ${discoveryItems.length} 個釐清問題`)
+  logger.info({ count: discoveryItems.length }, 'PRD Discovery 生成釐清問題')
 
   await addClarifyItems({ sessionId: state.sessionId!, items: discoveryItems })
   await updateBddSession({ sessionId: state.sessionId!, updates: { currentPhase: 'prd_clarify' } })
@@ -2679,7 +2679,7 @@ async function executeBddSpecSkill(input: BddSpecSkillInput) {
 
   // 根據需求複雜度動態計算 Discovery 上限
   const discoveryLimits = computeDiscoveryLimits(message)
-  console.log(`[Orchestrator] Discovery 動態上限: maxRounds=${discoveryLimits.maxRounds}, maxQuestions=${discoveryLimits.maxTotalQuestions} (需求長度=${message.length})`)
+  logger.info({ maxRounds: discoveryLimits.maxRounds, maxQuestions: discoveryLimits.maxTotalQuestions, msgLength: message.length }, 'Discovery 動態上限')
 
   // 初始化流程狀態
   const state: FlowState = {
@@ -2703,7 +2703,7 @@ async function executeBddSpecSkill(input: BddSpecSkillInput) {
   // ── Phase 0: Event Storming 偵測 ──
   try {
     const esCheck = await shouldRunEventStorming(message, { userId, conversationId })
-    console.log(`[Orchestrator] Event Storming 偵測: needed=${esCheck.needed}, reasoning=${esCheck.reasoning}`)
+    logger.info({ needed: esCheck.needed, reasoning: esCheck.reasoning }, 'Event Storming 偵測')
 
     if (esCheck.needed) {
       await sendMessage(conversationId, io, {
@@ -2730,12 +2730,12 @@ async function executeBddSpecSkill(input: BddSpecSkillInput) {
         })
         return // 等待用戶確認初始清單
       } else {
-        console.warn('[Orchestrator] Event Storming 初始化失敗，跳過 ES:', esResult.error)
+        logger.warn({ err: esResult.error }, 'Event Storming 初始化失敗，跳過 ES')
         // 降級：繼續原有流程
       }
     }
   } catch (esError) {
-    console.warn('[Orchestrator] Event Storming 偵測異常，跳過:', esError)
+    logger.warn({ err: esError }, 'Event Storming 偵測異常，跳過')
     // 降級：繼續原有流程
   }
 
@@ -2747,11 +2747,11 @@ async function executeBddSpecSkill(input: BddSpecSkillInput) {
   })
 
   // 調用 LLM 進行 PRD Discovery（動態生成釐清問題）
-  console.log(`[Orchestrator] 調用 PRD Discovery 分析需求: ${message.slice(0, 100)}...`)
+  logger.info({ msg: message.slice(0, 100) }, '調用 PRD Discovery 分析需求')
   const discoveryResult = await runPrdDiscovery(message, { userId, conversationId })
 
   if (!discoveryResult.success || !discoveryResult.items) {
-    console.error('[Orchestrator] PRD Discovery 失敗:', discoveryResult.error)
+    logger.error({ err: discoveryResult.error }, 'PRD Discovery 失敗')
     // 刪除 FlowState，讓用戶重新輸入時走 handleProcessMessage 重新開始
     await deleteFlowState(redis, conversationId)
     await sendMessage(conversationId, io, {
@@ -2762,7 +2762,7 @@ async function executeBddSpecSkill(input: BddSpecSkillInput) {
   }
 
   const discoveryItems: ClarifyItem[] = discoveryResult.items
-  console.log(`[Orchestrator] PRD Discovery 生成 ${discoveryItems.length} 個釐清問題`)
+  logger.info({ count: discoveryItems.length }, 'PRD Discovery 生成釐清問題')
 
   // 添加釐清項目
   await addClarifyItems({ sessionId, items: discoveryItems })
@@ -2837,7 +2837,7 @@ async function processUserReply(input: ProcessReplyInput) {
     try {
       await autoAdoptAllPendingQuestions(conversationId, state, redis, io)
     } catch (err) {
-      console.error('[AutoAdopt] 自動模式異常，降級手動:', err)
+      logger.error({ err }, '自動模式異常，降級手動')
       state.autoAdoptMode = false
       await saveFlowState(redis, conversationId, state)
       await sendMessage(conversationId, io, {
@@ -3159,7 +3159,7 @@ async function autoAdoptAllPendingQuestions(
 
     const session = await getBddSession({ sessionId: state.sessionId! })
     if (!session.success || !session.data) {
-      console.error('[AutoAdopt] 無法取得 BDD Session，中止自動模式')
+      logger.error('無法取得 BDD Session，中止自動模式')
       state.autoAdoptMode = false
       await saveFlowState(redis, conversationId, state)
       break
@@ -3192,14 +3192,14 @@ async function autoAdoptAllPendingQuestions(
 
       const limits = getDiscoveryLimits(state)
       if (state.currentRound >= limits.MAX_ROUNDS || totalAnswered >= limits.MAX_TOTAL_QUESTIONS) {
-        console.log(`[AutoAdopt] 達到終止條件 (輪數: ${state.currentRound}/${limits.MAX_ROUNDS}, 問題數: ${totalAnswered}/${limits.MAX_TOTAL_QUESTIONS})`)
+        logger.info(`達到終止條件 (輪數: ${state.currentRound}/${limits.MAX_ROUNDS}, 問題數: ${totalAnswered}/${limits.MAX_TOTAL_QUESTIONS})`)
         await finishClarifyAndStartFormulation(conversationId, state, redis, io)
         await autoAdoptPostFormulation(conversationId, state, redis, io)
         return
       }
 
       // 生成下一輪問題（複製 completeClärifyPhase 核心邏輯）
-      console.log(`[AutoAdopt] 開始第 ${state.currentRound + 1} 輪 PRD Discovery`)
+      logger.info(`開始第 ${state.currentRound + 1} 輪 PRD Discovery`)
       await sendMessage(conversationId, io, {
         content: `自動釐清中... 第 ${state.currentRound + 1} 輪`,
         stage: 'auto_adopt_progress',
@@ -3234,7 +3234,7 @@ async function autoAdoptAllPendingQuestions(
       if (!discoveryResult.success || newItems.length === 0) {
         state.consecutiveEmptyRounds = (state.consecutiveEmptyRounds || 0) + 1
         if (state.consecutiveEmptyRounds >= 2) {
-          console.log(`[AutoAdopt] 連續 ${state.consecutiveEmptyRounds} 輪無新問題，進入 Formulation`)
+          logger.info(`連續 ${state.consecutiveEmptyRounds} 輪無新問題，進入 Formulation`)
           await finishClarifyAndStartFormulation(conversationId, state, redis, io)
           await autoAdoptPostFormulation(conversationId, state, redis, io)
           return
@@ -3301,7 +3301,7 @@ async function autoAdoptAllPendingQuestions(
   }
 
   if (iteration >= MAX_ITERATIONS) {
-    console.error(`[AutoAdopt] 達到安全閥上限 ${MAX_ITERATIONS}，中止`)
+    logger.error(`達到安全閥上限 ${MAX_ITERATIONS}，中止`)
     state.autoAdoptMode = false
     await saveFlowState(redis, conversationId, state)
     await sendMessage(conversationId, io, {
@@ -3425,7 +3425,7 @@ async function sendClarifyQuestion(
       stage: 'clarify_question',
       quickReplies,
       richContent: buildingProgress ? {
-        type: 'building_progress' as 'building_progress',
+        type: 'building_progress' as const,
         data: buildingProgress as unknown as Record<string, unknown>,
       } : undefined,
     })
@@ -3492,7 +3492,7 @@ async function sendClarifyQuestion(
     stage: 'clarify_question',
     quickReplies,
     richContent: buildingProgress ? {
-      type: 'building_progress' as 'building_progress',
+      type: 'building_progress' as const,
       data: buildingProgress as unknown as Record<string, unknown>,
     } : undefined,
   })
@@ -3594,7 +3594,7 @@ async function completeClärifyPhase(
   // 取得 session 和已回答的問題
   const session = await getBddSession({ sessionId: state.sessionId! })
   if (!session.success || !session.data) {
-    console.error('[Orchestrator] 無法取得 BDD Session')
+    logger.error('無法取得 BDD Session')
     return
   }
 
@@ -3610,13 +3610,13 @@ async function completeClärifyPhase(
     totalAnswered >= limits.MAX_TOTAL_QUESTIONS
 
   if (shouldStop) {
-    console.log(`[Orchestrator] 達到終止條件 (輪數: ${state.currentRound}/${limits.MAX_ROUNDS}, 問題數: ${totalAnswered}/${limits.MAX_TOTAL_QUESTIONS})，進入 Formulation`)
+    logger.info(`達到終止條件 (輪數: ${state.currentRound}/${limits.MAX_ROUNDS}, 問題數: ${totalAnswered}/${limits.MAX_TOTAL_QUESTIONS})，進入 Formulation`)
     await finishClarifyAndStartFormulation(conversationId, state, redis, io)
     return
   }
 
   // 嘗試生成更多問題（多輪 PRD Discovery）
-  console.log(`[Orchestrator] 開始第 ${state.currentRound + 1} 輪 PRD Discovery`)
+  logger.info(`開始第 ${state.currentRound + 1} 輪 PRD Discovery`)
 
   await sendMessage(conversationId, io, {
     content: `好的，讓我根據您的回答再確認一些細節...`,
@@ -3688,7 +3688,7 @@ async function completeClärifyPhase(
 
     if (state.consecutiveEmptyRounds >= 2) {
       // 連續兩輪空 → 正式終止
-      console.log(`[Orchestrator] 連續 ${state.consecutiveEmptyRounds} 輪無新問題，進入 Formulation`)
+      logger.info(`連續 ${state.consecutiveEmptyRounds} 輪無新問題，進入 Formulation`)
       await sendMessage(conversationId, io, {
         content: `需求已經足夠清楚了！`,
         stage: 'prd_discovery_complete',
@@ -3698,7 +3698,7 @@ async function completeClärifyPhase(
     }
 
     // 第一輪空 → 再跑一輪確認
-    console.log(`[Orchestrator] 第 ${state.currentRound + 1} 輪無新問題（第 ${state.consecutiveEmptyRounds} 次），再確認一輪`)
+    logger.info(`第 ${state.currentRound + 1} 輪無新問題（第 ${state.consecutiveEmptyRounds} 次），再確認一輪`)
     state.currentRound++
     await saveFlowState(redis, conversationId, state)
     await sendMessage(conversationId, io, {
@@ -3713,7 +3713,7 @@ async function completeClärifyPhase(
   // 有新問題 → 重置空輪計數器
   state.consecutiveEmptyRounds = 0
 
-  console.log(`[Orchestrator] 第 ${state.currentRound + 1} 輪生成 ${newItems.length} 個新問題（去重後）`)
+  logger.info(`第 ${state.currentRound + 1} 輪生成 ${newItems.length} 個新問題（去重後）`)
 
   // 添加新問題到 session
   await addClarifyItems({ sessionId: state.sessionId!, items: newItems })
@@ -3843,7 +3843,7 @@ async function resumeFormulation(
       redis, io
     )
   } catch (error) {
-    console.error('[Orchestrator] resumeFormulation 失敗:', error)
+    logger.error({ err: error }, 'resumeFormulation 失敗')
     // 回退到 spec_clarify，讓用戶可以重試
     state.phase = 'spec_clarify'
     state.waitingForReply = true
@@ -3899,7 +3899,7 @@ async function finishClarifyAndStartFormulation(
 
   // 取得 BDD Session 資料
   if (!state.sessionId) {
-    console.error('[Orchestrator] 缺少 sessionId，無法執行 Formulation')
+    logger.error('缺少 sessionId，無法執行 Formulation')
     await sendMessage(conversationId, io, {
       content: '發生錯誤：缺少 Session 資料',
       stage: 'error',
@@ -3909,7 +3909,7 @@ async function finishClarifyAndStartFormulation(
 
   const session = await getBddSession({ sessionId: state.sessionId })
   if (!session.success || !session.data) {
-    console.error('[Orchestrator] 無法取得 BDD Session')
+    logger.error('無法取得 BDD Session')
     await sendMessage(conversationId, io, {
       content: '發生錯誤：無法取得對話資料',
       stage: 'error',
@@ -3923,12 +3923,12 @@ async function finishClarifyAndStartFormulation(
     ...(session.data.resolvedItems || []),
   ].filter(item => item.answer)
 
-  console.log(`[Orchestrator] 開始 Formulation，共 ${allResolvedItems.length} 個釐清項目`)
+  logger.info(`開始 Formulation，共 ${allResolvedItems.length} 個釐清項目`)
 
   // 如果有 ES 文檔，嘗試 Draft Batch Mode
   const esDocumentContent = session.data.esDocumentContent
   if (esDocumentContent) {
-    console.log('[Orchestrator] 偵測到 ES 文檔，嘗試 Draft Batch 生成...')
+    logger.info('偵測到 ES 文檔，嘗試 Draft Batch 生成...')
     await sendMessage(conversationId, io, {
       content: '根據 Event Storming 分析結果，正在一次性生成規格草稿...',
       stage: 'formulation_start',
@@ -3983,7 +3983,7 @@ async function finishClarifyAndStartFormulation(
       await saveFlowState(redis, conversationId, state)
       return
     } else {
-      console.warn('[Orchestrator] Draft Batch 失敗，fallback 到逐個生成:', draftResult.error)
+      logger.warn({ err: draftResult.error }, 'Draft Batch 失敗，fallback 到逐個生成')
       // fallback 到原有流程
     }
   }
@@ -4020,7 +4020,7 @@ async function finishClarifyAndStartFormulation(
 
   // LLM 偶發性回應格式錯誤時自動重試 1 次
   if (!result.success && result.error?.includes('無法解析 LLM 回應')) {
-    console.warn('[Orchestrator] Formulation 解析失敗，自動重試...')
+    logger.warn('Formulation 解析失敗，自動重試...')
     result = await runFormulation(
       session.data.originalRequirements,
       allResolvedItems,
@@ -4032,7 +4032,7 @@ async function finishClarifyAndStartFormulation(
   }
 
   if (!result.success) {
-    console.error('[Orchestrator] Formulation 失敗:', result.error)
+    logger.error({ err: result.error }, 'Formulation 失敗')
 
     // 回退 phase 到 spec_clarify，讓用戶可以重試
     state.phase = 'spec_clarify'
@@ -4079,7 +4079,7 @@ async function finishClarifyAndStartFormulation(
     progress: { current: 3, total: 4, step: '品質檢查' },
   })
 
-  console.log('[Orchestrator] Formulation 完成，進入 Spec Discovery')
+  logger.info('Formulation 完成，進入 Spec Discovery')
 
   // Credit 扣除：BDD Formulation 額外成本
   if (state.userId) {
@@ -4178,7 +4178,7 @@ async function startSpecDiscovery(
   // 取得 session
   const session = await getBddSession({ sessionId: state.sessionId! })
   if (!session.success || !session.data) {
-    console.error('[Orchestrator] 無法取得 BDD Session')
+    logger.error('無法取得 BDD Session')
     await sendMessage(conversationId, io, {
       content: '發生錯誤：無法取得對話資料',
       stage: 'error',
@@ -4191,7 +4191,7 @@ async function startSpecDiscovery(
     item.checklistItem?.startsWith('S')
   )
 
-  console.log(`[Orchestrator] 開始第 ${state.specRound} 輪 Spec Discovery`)
+  logger.info(`開始第 ${state.specRound} 輪 Spec Discovery`)
 
   // 調用 Spec Discovery LLM
   const discoveryResult = await runSpecDiscovery(
@@ -4203,7 +4203,7 @@ async function startSpecDiscovery(
   )
 
   if (!discoveryResult.success) {
-    console.error('[Orchestrator] Spec Discovery 失敗:', discoveryResult.error)
+    logger.error({ err: discoveryResult.error }, 'Spec Discovery 失敗')
     // Spec Discovery 失敗時，直接完成（不阻塞用戶）
     await sendMessage(conversationId, io, {
       content: `品質檢查遇到問題：${discoveryResult.error}。已略過，規格已完成。`,
@@ -4214,11 +4214,11 @@ async function startSpecDiscovery(
   }
 
   let issues = discoveryResult.issues || []
-  console.log(`[Orchestrator] Spec Discovery 發現 ${issues.length} 個問題`)
+  logger.info(`Spec Discovery 發現 ${issues.length} 個問題`)
 
   // 沒有問題 → 直接完成
   if (issues.length === 0) {
-    console.log('[Orchestrator] Spec Discovery 沒有發現問題，規格品質良好')
+    logger.info('Spec Discovery 沒有發現問題，規格品質良好')
     await sendMessage(conversationId, io, {
       content: '規格品質檢查通過！',
       stage: 'spec_discovery_complete',
@@ -4232,7 +4232,7 @@ async function startSpecDiscovery(
   const remainingQuota = Math.max(SPEC_DISCOVERY_LIMITS.MAX_TOTAL_QUESTIONS - previousQuestions, SPEC_DISCOVERY_LIMITS.QUESTIONS_PER_ROUND)
 
   if (issues.length > remainingQuota) {
-    console.log(`[Orchestrator] 問題數 ${issues.length} 超過剩餘配額 ${remainingQuota}，截斷至 ${remainingQuota} 個（按嚴重度排序）`)
+    logger.info(`問題數 ${issues.length} 超過剩餘配額 ${remainingQuota}，截斷至 ${remainingQuota} 個（按嚴重度排序）`)
     // 按 severity 排序：high > medium > low
     const severityOrder: Record<string, number> = { high: 0, medium: 1, low: 2 }
     issues = [...issues]
@@ -4287,7 +4287,7 @@ async function completeSpecClarifyPhase(
   // 取得 session
   const session = await getBddSession({ sessionId: state.sessionId! })
   if (!session.success || !session.data) {
-    console.error('[Orchestrator] 無法取得 BDD Session')
+    logger.error('無法取得 BDD Session')
     return
   }
 
@@ -4298,7 +4298,7 @@ async function completeSpecClarifyPhase(
 
   if (specAnswers.length === 0) {
     // 沒有回答（可能用戶全部跳過），直接完成
-    console.log('[Orchestrator] Spec Clarify 沒有回答，直接完成')
+    logger.info('Spec Clarify 沒有回答，直接完成')
     await completeSpecPhase(conversationId, state, redis, io)
     return
   }
@@ -4325,7 +4325,7 @@ async function fixFeaturesAndComplete(
   // 取得 session
   const session = await getBddSession({ sessionId: state.sessionId! })
   if (!session.success || !session.data) {
-    console.error('[Orchestrator] 無法取得 BDD Session')
+    logger.error('無法取得 BDD Session')
     return
   }
 
@@ -4362,7 +4362,7 @@ async function fixFeaturesAndComplete(
 
   // 如果沒有需要修復的 Feature，直接進入下一輪或完成
   if (featureIssuesMap.size === 0) {
-    console.log('[Orchestrator] 沒有需要修復的 Feature')
+    logger.info('沒有需要修復的 Feature')
     // 檢查是否需要更多輪 Spec Discovery
     if (state.specRound! < SPEC_DISCOVERY_LIMITS.MAX_ROUNDS) {
       await startSpecDiscovery(conversationId, state, features, schemaSql, entityMapping, redis, io)
@@ -4383,7 +4383,7 @@ async function fixFeaturesAndComplete(
   // 取得所有 resolved items（包括 PRD 階段的）作為釐清決策
   const allResolvedItems = session.data.resolvedItems || []
 
-  console.log(`[Orchestrator] 修復 ${featuresToFix.length} 個 Features`)
+  logger.info(`修復 ${featuresToFix.length} 個 Features`)
 
   // 調用修復函數
   const fixResult = await fixMultipleFeatures(
@@ -4395,7 +4395,7 @@ async function fixFeaturesAndComplete(
   )
 
   if (!fixResult.success || !fixResult.fixedFeatures) {
-    console.error('[Orchestrator] Feature 修復失敗:', fixResult.error)
+    logger.error({ err: fixResult.error }, 'Feature 修復失敗')
     await sendMessage(conversationId, io, {
       content: `規格修正遇到問題：${fixResult.error}。已保留原始規格。`,
       stage: 'spec_fix_error',
@@ -4586,7 +4586,7 @@ async function completeSpecPhase(
         })
         // 更新本地引用
         features.splice(0, features.length, ...validationResult.fixedFeatures)
-        console.log(`[Orchestrator] Feature 驗證修復完成，${validationResult.fixRounds} 輪`)
+        logger.info(`Feature 驗證修復完成，${validationResult.fixRounds} 輪`)
       } else {
         // 無需修復，只記錄驗證結果
         await updateBddSession({
@@ -4620,9 +4620,9 @@ async function completeSpecPhase(
           sessionId: state.sessionId!,
           updates: sessionUpdates,
         })
-        console.log('[Orchestrator] Actions Design 完成' + (actionsResult.openApiSpec ? ' (含 OpenAPI 3.0)' : ''))
+        logger.info('Actions Design 完成' + (actionsResult.openApiSpec ? ' (含 OpenAPI 3.0)' : ''))
       } else {
-        console.warn('[Orchestrator] Actions Design 失敗，降級跳過:', actionsResult.error)
+        logger.warn({ err: actionsResult.error }, 'Actions Design 失敗，降級跳過')
       }
     }
 
@@ -4646,13 +4646,13 @@ async function completeSpecPhase(
           sessionId: state.sessionId!,
           updates: { isaConfigContent: isaResult.isaConfigYml },
         })
-        console.log('[Orchestrator] ISA Config 完成')
+        logger.info('ISA Config 完成')
       } else {
-        console.warn('[Orchestrator] ISA Config 失敗，降級跳過:', isaResult.error)
+        logger.warn({ err: isaResult.error }, 'ISA Config 失敗，降級跳過')
       }
     }
   } catch (err) {
-    console.error('[Orchestrator] Phase 4/5 自動執行異常，降級跳過:', err)
+    logger.error({ err: err }, 'Phase 4/5 自動執行異常，降級跳過')
   }
 
   // 更新 session 為 spec_completed
@@ -4704,10 +4704,10 @@ async function completeSpecPhase(
     if (matchResults.length > 0) {
       state.matchedTemplateIds = matchResults.map(r => r.templateId)
       matchedCount = matchResults.length
-      console.log(`[Orchestrator] 模板匹配完成：${matchedCount} 個匹配`)
+      logger.info(`模板匹配完成：${matchedCount} 個匹配`)
     }
   } catch (err) {
-    console.warn('[Orchestrator] 模板匹配失敗，降級為無匹配:', err)
+    logger.warn({ err: err }, '模板匹配失敗，降級為無匹配')
   }
 
   // 根據匹配結果條件路由
@@ -4739,7 +4739,7 @@ async function completeSpecPhase(
   state.waitingForReply = true
   await saveFlowState(redis, conversationId, state)
 
-  console.log(`[Orchestrator] Spec 階段完成，等待用戶設計偏好（匹配模板：${matchedCount} 個）`)
+  logger.info(`Spec 階段完成，等待用戶設計偏好（匹配模板：${matchedCount} 個）`)
 }
 
 // ============================================================
@@ -4769,7 +4769,7 @@ async function handleTemplateSelection(
   }
 
   const templateIdOrName = templateMatch[1]
-  console.log(`[Orchestrator] 用戶選擇模板: ${templateIdOrName}`)
+  logger.info(`用戶選擇模板: ${templateIdOrName}`)
 
   // 查詢模板
   const templateResult = await db.queryOne<{
@@ -4814,7 +4814,7 @@ async function handleTemplateSelection(
     if (overridesResult?.template_overrides && Object.keys(overridesResult.template_overrides).length > 0) {
       state.templateOverrides = overridesResult.template_overrides
       await saveFlowState(redis, conversationId, state)
-      console.log(`[Orchestrator] 載入 template overrides: ${Object.keys(overridesResult.template_overrides).length} 個元素`)
+      logger.info(`載入 template overrides: ${Object.keys(overridesResult.template_overrides).length} 個元素`)
     }
   }
 
@@ -4867,11 +4867,11 @@ async function handleVariantSelection(
     return
   }
 
-  console.log(`[Orchestrator] 用戶選擇變體: ${selectedIds.join(', ')}`)
+  logger.info(`用戶選擇變體: ${selectedIds.join(', ')}`)
 
   // 取得 BDD Session
   if (!state.sessionId) {
-    console.error('[Orchestrator] 缺少 sessionId')
+    logger.error('缺少 sessionId')
     await sendMessage(conversationId, io, {
       content: '設計資訊已過期，請重新開始一個新對話。',
       stage: 'error',
@@ -4883,7 +4883,7 @@ async function handleVariantSelection(
 
   const session = await getBddSession({ sessionId: state.sessionId })
   if (!session.success || !session.data) {
-    console.error('[Orchestrator] 無法取得 BDD Session')
+    logger.error('無法取得 BDD Session')
     await sendMessage(conversationId, io, {
       content: '無法取得設計資料，請重新開始。',
       stage: 'error',
@@ -4920,7 +4920,7 @@ async function handleVariantSelection(
   // 提取選中 variant 的創意概念
   const variantConcept = extractVariantConcept(selectedIds, variants)
   state.uiuxVariantConcept = variantConcept
-  console.log(`[Orchestrator] 變體創意概念: ${variantConcept.name}${variantConcept.signatureElement ? ` (Signature: ${variantConcept.signatureElement})` : ''}`)
+  logger.info(`變體創意概念: ${variantConcept.name}${variantConcept.signatureElement ? ` (Signature: ${variantConcept.signatureElement})` : ''}`)
 
   // 保存到 BDD Session
   await updateBddSession({
@@ -4969,15 +4969,15 @@ async function executeFastBuildSkill(params: {
   const template = buildMinimalTemplate(message, productType)
 
   const layoutMode = inferLayoutMode(productType, message)
-  console.log(`[FastBuild] tier=${tier}, type=${productType}, layout=${layoutMode}, pages=[${pages.join(',')}]`)
+  logger.info(`tier=${tier}, type=${productType}, layout=${layoutMode}, pages=[${pages.join(',')}]`)
 
   // ── 模板風格提示（降級跳過，不影響主流程）──
   let templateStyleHint: string | null = null
   try {
     templateStyleHint = await getTemplateStyleHint(message, productType)
-    if (templateStyleHint) console.log(`[FastBuild] 匹配到模板風格提示`)
+    if (templateStyleHint) logger.info('匹配到模板風格提示')
   } catch (e) {
-    console.warn('[FastBuild] 模板風格提示查詢失敗，降級跳過:', e)
+    logger.warn({ err: e }, '模板風格提示查詢失敗，降級跳過')
   }
 
   // ── 並行：Haiku 概念生成 + Prompt 擴展 ──
@@ -5005,18 +5005,18 @@ async function executeFastBuildSkill(params: {
         previewDescription: concept.vibe,
         sourceVariantIds: [],
       }
-      console.log(`[FastBuild] 概念生成成功: "${concept.name}" (suggested tier: ${concept.suggestedTier || 'N/A'})`)
+      logger.info(`概念生成成功: "${concept.name}" (suggested tier: ${concept.suggestedTier || 'N/A'})`)
 
       // Tier 智能修正（Haiku 判斷 vs 規則不一致時以 Haiku 為準）
       if (concept.suggestedTier && concept.suggestedTier !== tier) {
-        console.log(`[FastBuild] Tier 修正: ${tier} → ${concept.suggestedTier}`)
+        logger.info(`Tier 修正: ${tier} → ${concept.suggestedTier}`)
         tier = concept.suggestedTier
         designSystem = buildDefaultDesignSystem(tier, productType)
       }
     }
 
     if (expandedPrompt) {
-      console.log(`[FastBuild] Prompt 擴展成功（${expandedPrompt.length} 字）`)
+      logger.info(`Prompt 擴展成功（${expandedPrompt.length} 字）`)
     }
   }
 
@@ -5055,7 +5055,7 @@ async function executeFastBuildSkill(params: {
     stage: 'fast_generating',
     progress: { current: 1, total: 3, step: isChinese ? '生成結構' : 'Generating structure' },
     richContent: {
-      type: 'fast_build_progress' as 'fast_build_progress',
+      type: 'fast_build_progress' as const,
       data: { phase: 'structure', progress: { current: 1, total: 3, step: isChinese ? '生成結構' : 'Generating structure' }, estimatedSecondsRemaining: 240 } as unknown as Record<string, unknown>,
     },
   })
@@ -5082,7 +5082,7 @@ async function executeFastBuildSkill(params: {
   )
 
   if (!structureResult.success) {
-    console.error('[FastBuild] 結構生成失敗:', structureResult.error)
+    logger.error({ err: structureResult.error }, '結構生成失敗')
     // 保留 FlowState 以供重試（只清除生成時間戳）
     state.phase = 'fast_generating'
     state.uiuxCodeGenerationStartedAt = undefined
@@ -5122,7 +5122,7 @@ async function executeFastBuildSkill(params: {
     stage: 'fast_generating',
     progress: { current: 2, total: 3, step: isChinese ? '添加動畫' : 'Adding animations' },
     richContent: {
-      type: 'fast_build_progress' as 'fast_build_progress',
+      type: 'fast_build_progress' as const,
       data: { phase: 'animation', progress: { current: 2, total: 3, step: isChinese ? '添加動畫' : 'Adding animations' }, estimatedSecondsRemaining: 120 } as unknown as Record<string, unknown>,
     },
   })
@@ -5146,7 +5146,7 @@ async function executeFastBuildSkill(params: {
       styles: animationResult.styles || currentCode.styles,
     }
   } else {
-    console.warn('[FastBuild] 動畫生成失敗，使用結構代碼繼續:', animationResult.error)
+    logger.warn({ err: animationResult.error }, '動畫生成失敗，使用結構代碼繼續')
   }
 
   // ── Animation 中途存檔 ──
@@ -5166,7 +5166,7 @@ async function executeFastBuildSkill(params: {
     stage: 'fast_generating',
     progress: { current: 3, total: 3, step: isChinese ? '響應式優化' : 'Responsive optimization' },
     richContent: {
-      type: 'fast_build_progress' as 'fast_build_progress',
+      type: 'fast_build_progress' as const,
       data: { phase: 'rwd', progress: { current: 3, total: 3, step: isChinese ? '響應式優化' : 'Responsive optimization' }, estimatedSecondsRemaining: 60 } as unknown as Record<string, unknown>,
     },
   })
@@ -5188,7 +5188,7 @@ async function executeFastBuildSkill(params: {
       styles: rwdResult.styles || currentCode.styles,
     }
   } else {
-    console.warn('[FastBuild] RWD 生成失敗，套用 ensureResponsiveClasses:', rwdResult.error)
+    logger.warn({ err: rwdResult.error }, 'RWD 生成失敗，套用 ensureResponsiveClasses')
     const fixed = ensureResponsiveClasses(currentCode.pages, currentCode.components)
     currentCode.pages = fixed.pages
     currentCode.components = fixed.components
@@ -5196,7 +5196,7 @@ async function executeFastBuildSkill(params: {
 
   // ===== Quality Gate（靜態檢查 + 最多 2 輪 LLM 修復）=====
   let report = runQualityGate(currentCode, tier)
-  console.log(`[FastBuild] QG: passed=${report.passed}, critical=${report.summary.critical}, warning=${report.summary.warning}`)
+  logger.info(`QG: passed=${report.passed}, critical=${report.summary.critical}, warning=${report.summary.warning}`)
 
   const FAST_QG_MAX_ATTEMPTS = 2
   for (let attempt = 0; attempt < FAST_QG_MAX_ATTEMPTS && !report.passed; attempt++) {
@@ -5207,15 +5207,15 @@ async function executeFastBuildSkill(params: {
     ].filter(i => i.severity === 'critical')
     if (criticalIssues.length === 0) break
 
-    console.log(`[FastBuild] QG 第 ${attempt + 1} 輪修復：${criticalIssues.length} 個 critical`)
+    logger.info(`QG 第 ${attempt + 1} 輪修復：${criticalIssues.length} 個 critical`)
     try {
       const fixed = await autoFixCriticalIssues(currentCode, criticalIssues, { userId, conversationId })
       if (!fixed) break
       currentCode = fixed
       report = runQualityGate(currentCode, tier)
-      console.log(`[FastBuild] QG 修復後: passed=${report.passed}, critical=${report.summary.critical}`)
+      logger.info(`QG 修復後: passed=${report.passed}, critical=${report.summary.critical}`)
     } catch (qgErr) {
-      console.warn('[FastBuild] QG 修復失敗，跳過:', qgErr)
+      logger.warn({ err: qgErr }, 'QG 修復失敗，跳過')
       break
     }
   }
@@ -5277,10 +5277,10 @@ async function executeFastBuildSkill(params: {
   })
 
   await db.updateTask(taskId, { status: 'completed' })
-  console.log(`[FastBuild] 完成: ${finalPageCount} pages, ${finalComponentCount} components`)
+  logger.info(`完成: ${finalPageCount} pages, ${finalComponentCount} components`)
 
   } catch (err) {
-    console.error('[FastBuild] 未預期錯誤:', err)
+    logger.error({ err: err }, '未預期錯誤')
     const errLocale = locale || 'zh'
     const errIsChinese = errLocale === 'zh'
     // 嘗試恢復 FlowState
@@ -5298,7 +5298,7 @@ async function executeFastBuildSkill(params: {
         // 不 delete：保留 FlowState 供 __retry_fast_build__ 使用
       }
     } catch (recoveryErr) {
-      console.error('[FastBuild] 恢復 FlowState 也失敗:', recoveryErr)
+      logger.error({ err: recoveryErr }, '恢復 FlowState 也失敗')
     }
     await sendMessage(conversationId, io, {
       content: errIsChinese
@@ -5309,7 +5309,7 @@ async function executeFastBuildSkill(params: {
         { label: errIsChinese ? '重試' : 'Retry', value: '__retry_fast_build__', style: 'primary' as const },
       ],
     }).catch(msgErr => {
-      console.error('[FastBuild] 發送錯誤訊息失敗:', msgErr)
+      logger.error({ err: msgErr }, '發送錯誤訊息失敗')
     })
     await db.updateTask(taskId, { status: 'failed' }).catch(() => {})
     // 不再 throw → 阻止 BullMQ 重試
@@ -5329,7 +5329,7 @@ async function executeFullCodePipeline(
   const { sessionId, uiuxDesignSystem } = state
 
   if (!sessionId || !uiuxDesignSystem) {
-    console.error('[Orchestrator] Pipeline 缺少必要的狀態數據')
+    logger.error('Pipeline 缺少必要的狀態數據')
     return
   }
 
@@ -5347,7 +5347,7 @@ async function executeFullCodePipeline(
   if (resumeIndex > 0 && (currentCode.pages.length > 0 || currentCode.components.length > 0)) {
     const pageCount = currentCode.pages.length
     const compCount = currentCode.components.length
-    console.log(`[Orchestrator] Pipeline 從 ${resumePhase} 階段恢復（已有 ${pageCount} 頁 ${compCount} 組件）`)
+    logger.info(`Pipeline 從 ${resumePhase} 階段恢復（已有 ${pageCount} 頁 ${compCount} 組件）`)
     await sendMessage(conversationId, io, {
       content: `正在從中斷點恢復生成（已完成 ${pageCount} 個頁面），繼續處理中...`,
       stage: 'uiux_pipeline_progress',
@@ -5364,24 +5364,24 @@ async function executeFullCodePipeline(
   // ===== BDD→UI 翻譯（有快取跳過）=====
   let uiSpec = state.uiuxUISpec
   if (!uiSpec && bddSpec) {
-    console.log('[Orchestrator] Pipeline 開始 BDD→UI 翻譯...')
+    logger.info('Pipeline 開始 BDD→UI 翻譯...')
     const translateResult = await translateBddToUISpec(bddSpec, originalRequirements, { userId: state.userId, conversationId })
     if (translateResult.success && translateResult.spec) {
       uiSpec = translateResult.spec
       state.uiuxUISpec = uiSpec
       await saveFlowState(redis, conversationId, state)
-      console.log(`[Orchestrator] BDD→UI 翻譯完成: ${uiSpec.pages.length} 頁面`)
+      logger.info(`BDD→UI 翻譯完成: ${uiSpec.pages.length} 頁面`)
     } else {
-      console.warn('[Orchestrator] BDD→UI 翻譯失敗，嘗試從原始需求生成...', translateResult.error)
+      logger.warn({ err: translateResult.error }, 'BDD→UI 翻譯失敗，嘗試從原始需求生成...')
       if (originalRequirements) {
         const fallbackResult = await translateBddToUISpec('', originalRequirements, { userId: state.userId, conversationId })
         if (fallbackResult.success && fallbackResult.spec) {
           uiSpec = fallbackResult.spec
           state.uiuxUISpec = uiSpec
           await saveFlowState(redis, conversationId, state)
-          console.log(`[Orchestrator] 原始需求→UI 翻譯完成: ${uiSpec.pages.length} 頁面`)
+          logger.info(`原始需求→UI 翻譯完成: ${uiSpec.pages.length} 頁面`)
         } else {
-          console.warn('[Orchestrator] 原始需求→UI 翻譯也失敗，降級用原始 bddSpec')
+          logger.warn('原始需求→UI 翻譯也失敗，降級用原始 bddSpec')
         }
       }
     }
@@ -5409,7 +5409,7 @@ async function executeFullCodePipeline(
     )
 
     if (!structureResult.success) {
-      console.error('[Orchestrator] Pipeline 結構生成失敗:', structureResult.error)
+      logger.error({ err: structureResult.error }, 'Pipeline 結構生成失敗')
       state.phase = 'uiux_variant_selection'
       state.uiuxCodePhase = undefined
       await saveFlowState(redis, conversationId, state)
@@ -5468,7 +5468,7 @@ async function executeFullCodePipeline(
         styles: animationResult.styles || currentCode.styles,
       }
     } else {
-      console.warn('[Orchestrator] Pipeline 動畫生成失敗，使用結構代碼繼續:', animationResult.error)
+      logger.warn({ err: animationResult.error }, 'Pipeline 動畫生成失敗，使用結構代碼繼續')
     }
 
     // ── Animation 中途存檔 ──
@@ -5509,7 +5509,7 @@ async function executeFullCodePipeline(
       styles: rwdResult.styles || currentCode.styles,
     }
   } else {
-    console.warn('[Orchestrator] Pipeline RWD 生成失敗，使用動畫代碼繼續:', rwdResult.error)
+    logger.warn({ err: rwdResult.error }, 'Pipeline RWD 生成失敗，使用動畫代碼繼續')
   }
 
   // ===== Quality Gate（靜默執行）=====
@@ -5526,7 +5526,7 @@ async function executeFullCodePipeline(
 
     if (criticalIssues.length === 0) break
 
-    console.log(`[Orchestrator] Pipeline QG 修復 ${attempt + 1}/${MAX_FIX_ATTEMPTS}`)
+    logger.info(`Pipeline QG 修復 ${attempt + 1}/${MAX_FIX_ATTEMPTS}`)
 
     const fixedCode = await autoFixCriticalIssues(currentCode, criticalIssues, { userId: state.userId, conversationId })
     if (!fixedCode) break
@@ -5594,7 +5594,7 @@ async function executeFullCodePipeline(
     ],
   })
 
-  console.log(`[Orchestrator] Pipeline 完成: ${finalPageCount} pages, ${finalComponentCount} components, QG passed=${report.passed}`)
+  logger.info(`Pipeline 完成: ${finalPageCount} pages, ${finalComponentCount} components, QG passed=${report.passed}`)
 }
 
 /**
@@ -5609,7 +5609,7 @@ async function executeCodePhaseStructure(
   const { sessionId, uiuxDesignSystem } = state
 
   if (!sessionId || !uiuxDesignSystem) {
-    console.error('[Orchestrator] 缺少必要的狀態數據')
+    logger.error('缺少必要的狀態數據')
     return
   }
 
@@ -5659,7 +5659,7 @@ async function executeCodePhaseStructure(
   )
 
   if (!structureResult.success) {
-    console.error('[Orchestrator] 結構生成失敗:', structureResult.error)
+    logger.error({ err: structureResult.error }, '結構生成失敗')
     await sendMessage(conversationId, io, {
       content: `結構生成失敗：${structureResult.error}。請稍後再試。`,
       stage: 'error',
@@ -5720,7 +5720,7 @@ async function executeCodePhaseStructure(
     },
   })
 
-  console.log(`[Orchestrator] 結構生成完成: ${pageCount} pages, ${componentCount} components`)
+  logger.info(`結構生成完成: ${pageCount} pages, ${componentCount} components`)
 }
 
 /**
@@ -5735,7 +5735,7 @@ async function executeCodePhaseAnimation(
   const { sessionId, uiuxDesignSystem, uiuxGeneratedCode } = state
 
   if (!sessionId || !uiuxDesignSystem || !uiuxGeneratedCode) {
-    console.error('[Orchestrator] 缺少必要的狀態數據')
+    logger.error('缺少必要的狀態數據')
     return
   }
 
@@ -5760,7 +5760,7 @@ async function executeCodePhaseAnimation(
   )
 
   if (!animationResult.success) {
-    console.error('[Orchestrator] 動畫生成失敗:', animationResult.error)
+    logger.error({ err: animationResult.error }, '動畫生成失敗')
     await sendMessage(conversationId, io, {
       content: `動畫生成失敗：${animationResult.error}。您可以選擇繼續或重試。`,
       stage: 'error',
@@ -5818,7 +5818,7 @@ async function executeCodePhaseAnimation(
     },
   })
 
-  console.log('[Orchestrator] 動畫生成完成')
+  logger.info('動畫生成完成')
 }
 
 /**
@@ -5833,7 +5833,7 @@ async function executeCodePhaseRwd(
   const { sessionId, uiuxDesignSystem, uiuxGeneratedCode } = state
 
   if (!sessionId || !uiuxDesignSystem || !uiuxGeneratedCode) {
-    console.error('[Orchestrator] 缺少必要的狀態數據')
+    logger.error('缺少必要的狀態數據')
     return
   }
 
@@ -5858,7 +5858,7 @@ async function executeCodePhaseRwd(
   )
 
   if (!rwdResult.success) {
-    console.error('[Orchestrator] 響應式設計生成失敗:', rwdResult.error)
+    logger.error({ err: rwdResult.error }, '響應式設計生成失敗')
     await sendMessage(conversationId, io, {
       content: `響應式設計生成失敗：${rwdResult.error}。您可以選擇完成或重試。`,
       stage: 'error',
@@ -5879,7 +5879,7 @@ async function executeCodePhaseRwd(
   state.waitingForReply = false
   await saveFlowState(redis, conversationId, state)
 
-  console.log('[Orchestrator] RWD 完成，觸發 Quality Gate')
+  logger.info('RWD 完成，觸發 Quality Gate')
 
   // 觸發 Quality Gate
   await executeQualityGate(conversationId, state, redis, io)
@@ -5897,7 +5897,7 @@ async function executeQualityGate(
   const { sessionId, uiuxDesignSystem, uiuxGeneratedCode } = state
 
   if (!sessionId || !uiuxDesignSystem || !uiuxGeneratedCode) {
-    console.error('[Orchestrator] Quality Gate 缺少必要的狀態數據')
+    logger.error('Quality Gate 缺少必要的狀態數據')
     return
   }
 
@@ -5923,7 +5923,7 @@ async function executeQualityGate(
 
     if (criticalIssues.length === 0) break
 
-    console.log(`[Orchestrator] Quality Gate 修復嘗試 ${attempt + 1}/${MAX_FIX_ATTEMPTS}，${criticalIssues.length} 個 critical issues`)
+    logger.info(`Quality Gate 修復嘗試 ${attempt + 1}/${MAX_FIX_ATTEMPTS}，${criticalIssues.length} 個 critical issues`)
 
     await sendMessage(conversationId, io, {
       content: `發現 ${criticalIssues.length} 個 critical 問題，正在自動修復（第 ${attempt + 1} 輪）...`,
@@ -5932,7 +5932,7 @@ async function executeQualityGate(
 
     const fixedCode = await autoFixCriticalIssues(currentCode, criticalIssues, { userId: state.userId, conversationId })
     if (!fixedCode) {
-      console.error('[Orchestrator] Quality Gate autoFix 失敗')
+      logger.error('Quality Gate autoFix 失敗')
       break
     }
 
@@ -6005,7 +6005,7 @@ async function executeQualityGate(
     },
   })
 
-  console.log(`[Orchestrator] Quality Gate 完成: passed=${report.passed}, issues=${report.summary.total}, autoFixed=${totalAutoFixed}`)
+  logger.info(`Quality Gate 完成: passed=${report.passed}, issues=${report.summary.total}, autoFixed=${totalAutoFixed}`)
 }
 
 /**
@@ -6019,7 +6019,7 @@ async function handleCodePhaseConfirm(
 ) {
   const { uiuxCodePhase } = state
 
-  console.log(`[Orchestrator] 確認當前階段: ${uiuxCodePhase}`)
+  logger.info(`確認當前階段: ${uiuxCodePhase}`)
 
   switch (uiuxCodePhase) {
     case 'structure':
@@ -6054,9 +6054,9 @@ async function handleCodePhaseRedo(
   redis: Redis,
   io: SocketIOServer
 ) {
-  const { uiuxCodePhase, sessionId } = state
+  const { uiuxCodePhase } = state
 
-  console.log(`[Orchestrator] 重做當前階段: ${uiuxCodePhase}`)
+  logger.info(`重做當前階段: ${uiuxCodePhase}`)
 
   // 恢復上一階段的代碼快照，確保 redo 是在乾淨的基礎上重做
   if (uiuxCodePhase === 'animation' && state.uiuxStructureCode) {
@@ -6427,27 +6427,23 @@ async function completeDesignClarify(
         })
       }
     } catch (err) {
-      console.warn('[Orchestrator] 參考網站分析失敗，降級為純文字:', err)
+      logger.warn({ err: err }, '參考網站分析失敗，降級為純文字')
     }
   }
 
   // 取得 BDD Session
   if (!state.sessionId) {
-    console.error('[Orchestrator] 缺少 sessionId')
+    logger.error('缺少 sessionId')
     return
   }
 
   const session = await getBddSession({ sessionId: state.sessionId })
   if (!session.success || !session.data) {
-    console.error('[Orchestrator] 無法取得 BDD Session')
+    logger.error('無法取得 BDD Session')
     return
   }
 
   // 構建設計需求摘要
-  const bddSpec = session.data.featuresContent
-    ? session.data.featuresContent.map(f => `- ${f.name}`).join('\n')
-    : ''
-
   // 創建一個虛擬模板，基於用戶的設計想法
   const customTemplate: TemplateData = {
     id: 'custom',
@@ -6517,14 +6513,14 @@ async function startDesignBriefConfirm(
 
   // 取得 BDD Session
   if (!state.sessionId) {
-    console.error('[Orchestrator] 缺少 sessionId')
+    logger.error('缺少 sessionId')
     await proceedToVariantGeneration(conversationId, state, redis, io)
     return
   }
 
   const session = await getBddSession({ sessionId: state.sessionId })
   if (!session.success || !session.data) {
-    console.error('[Orchestrator] 無法取得 BDD Session')
+    logger.error('無法取得 BDD Session')
     await proceedToVariantGeneration(conversationId, state, redis, io)
     return
   }
@@ -6547,7 +6543,7 @@ async function startDesignBriefConfirm(
 
   if (!briefResult.success || !briefResult.brief) {
     // 降級：使用 fallback brief 而非完全跳過
-    console.warn('[Orchestrator] Design Brief 生成失敗，使用 fallback brief:', briefResult.error)
+    logger.warn({ err: briefResult.error }, 'Design Brief 生成失敗，使用 fallback brief')
     const fallbackBrief = buildFallbackBrief(state, productType)
     state.uiuxDesignBrief = fallbackBrief
     state.uiuxDesignTier = fallbackBrief.recommendedTier
@@ -6605,7 +6601,7 @@ ${brief.professionalRecommendations.map(r => `- ${r}`).join('\n')}`
     ],
   })
 
-  console.log('[Orchestrator] Design Brief 已生成，等待用戶確認')
+  logger.info('Design Brief 已生成，等待用戶確認')
 }
 
 /**
@@ -6624,7 +6620,7 @@ async function handleDesignBriefReply(
   // 判斷是否確認
   const confirmPatterns = /^(好|好的|可以|沒問題|確認|是|是的|對|嗯|ok|y|yes|沒有|就這樣|開始|proceed|go|沒有要調整|不用調整|直接開始|開始生成|不用了|可以了|很好|讚|棒|符合)$/i
   if (confirmPatterns.test(msg) || msg.includes('沒有要調整') || msg.includes('開始生成') || msg.includes('就這樣') || msg.includes('符合期待') || msg.includes('沒問題')) {
-    console.log('[Orchestrator] 用戶確認 Design Brief，進入變體生成')
+    logger.info('用戶確認 Design Brief，進入變體生成')
     await proceedToVariantGeneration(conversationId, state, redis, io)
     return
   }
@@ -6633,7 +6629,7 @@ async function handleDesignBriefReply(
   const round = state.uiuxDesignBriefRound || 1
   if (round >= DESIGN_BRIEF_LIMITS.MAX_ROUNDS) {
     // 已達上限，自動 proceed
-    console.log('[Orchestrator] Design Brief 調整已達 3 輪上限，自動進入變體生成')
+    logger.info('Design Brief 調整已達 3 輪上限，自動進入變體生成')
     await sendMessage(conversationId, io, {
       content: '已經調整了幾輪了，讓我根據目前的方向開始生成設計方案吧！',
       stage: 'uiux_design_brief_confirm',
@@ -6644,7 +6640,7 @@ async function handleDesignBriefReply(
 
   // 呼叫 LLM 調整 brief
   if (!state.uiuxDesignBrief || !state.uiuxPreparedTemplate) {
-    console.error('[Orchestrator] 缺少 Design Brief 或模板資訊')
+    logger.error('缺少 Design Brief 或模板資訊')
     await proceedToVariantGeneration(conversationId, state, redis, io)
     return
   }
@@ -6677,7 +6673,7 @@ async function handleDesignBriefReply(
   )
 
   if (!adjustResult.success || !adjustResult.brief) {
-    console.warn('[Orchestrator] 調整 Design Brief 失敗:', adjustResult.error)
+    logger.warn({ err: adjustResult.error }, '調整 Design Brief 失敗')
     await sendMessage(conversationId, io, {
       content: `調整時遇到問題，讓我直接用目前的方向開始生成吧。`,
       stage: 'uiux_design_brief_confirm',
@@ -6720,7 +6716,7 @@ ${brief.professionalRecommendations.map(r => `- ${r}`).join('\n')}`
     ],
   })
 
-  console.log(`[Orchestrator] Design Brief 已調整（第 ${round + 1} 輪）`)
+  logger.info(`Design Brief 已調整（第 ${round + 1} 輪）`)
 }
 
 /**
@@ -6735,7 +6731,7 @@ async function proceedToVariantGeneration(
 ) {
   const template = state.uiuxPreparedTemplate
   if (!template) {
-    console.error('[Orchestrator] proceedToVariantGeneration: 缺少 uiuxPreparedTemplate')
+    logger.error('proceedToVariantGeneration: 缺少 uiuxPreparedTemplate')
     await sendMessage(conversationId, io, {
       content: '發生錯誤：缺少模板資訊。請重新選擇設計方向。',
       stage: 'error',
@@ -6771,7 +6767,7 @@ async function proceedToVariantGeneration(
 
   // 取得 BDD Session
   if (!state.sessionId) {
-    console.error('[Orchestrator] proceedToVariantGeneration: 缺少 sessionId')
+    logger.error('proceedToVariantGeneration: 缺少 sessionId')
     await sendMessage(conversationId, io, {
       content: '設計資訊已過期，請重新開始。',
       stage: 'error',
@@ -6783,7 +6779,7 @@ async function proceedToVariantGeneration(
 
   const session = await getBddSession({ sessionId: state.sessionId })
   if (!session.success || !session.data) {
-    console.error('[Orchestrator] proceedToVariantGeneration: 無法取得 BDD Session')
+    logger.error('proceedToVariantGeneration: 無法取得 BDD Session')
     await sendMessage(conversationId, io, {
       content: '無法取得設計資料，請重新開始。',
       stage: 'error',
@@ -6828,7 +6824,7 @@ async function proceedToVariantGeneration(
   )
 
   if (!variantsResult.success || !variantsResult.variants) {
-    console.error('[Orchestrator] 生成設計變體失敗:', variantsResult.error)
+    logger.error({ err: variantsResult.error }, '生成設計變體失敗')
     if (sourceType === 'ideas') {
       // Path A fallback：切換到模板選擇
       await sendMessage(conversationId, io, {
@@ -6848,7 +6844,7 @@ async function proceedToVariantGeneration(
   }
 
   const variants = variantsResult.variants
-  console.log(`[Orchestrator] 成功生成 ${variants.length} 個設計變體`)
+  logger.info(`成功生成 ${variants.length} 個設計變體`)
 
   // 保存變體到 BDD Session
   await updateBddSession({
@@ -7175,10 +7171,10 @@ async function handleDeployExecute(
         title: metaTitle.replace(/[\n\r]+/g, ' ').trim().slice(0, 100),
         description: (metaDesc || metaTitle).replace(/[\n\r]+/g, ' ').trim().slice(0, 300),
       }
-      console.log(`[Orchestrator] Site metadata: title="${metaTitle}", desc="${(metaDesc || metaTitle).slice(0, 50)}"`)
+      logger.info(`Site metadata: title="${metaTitle}", desc="${(metaDesc || metaTitle).slice(0, 50)}"`)
     }
   } catch (e) {
-    console.warn('[Orchestrator] 構建 siteMetadata 失敗，跳過:', e)
+    logger.warn({ err: e }, '構建 siteMetadata 失敗，跳過')
   }
 
   // 執行部署，帶進度回調（try/catch 防止 state 卡死在 deployer_deploying）
@@ -7203,7 +7199,7 @@ async function handleDeployExecute(
       { userId: state.userId, conversationId }
     )
   } catch (err) {
-    console.error('[Orchestrator] handleDeployExecute 異常:', err)
+    logger.error({ err: err }, 'handleDeployExecute 異常')
     result = { success: false, error: `部署過程異常：${err instanceof Error ? err.message : String(err)}` }
   }
 
@@ -7216,7 +7212,7 @@ async function handleDeployExecute(
         styles: string
       }
       state.uiuxGeneratedCode = deployedCode
-      console.log(`[Orchestrator] 已同步 build 修復後代碼到 FlowState（pages: ${deployedCode.pages?.length}, components: ${deployedCode.components?.length}）`)
+      logger.info(`已同步 build 修復後代碼到 FlowState（pages: ${deployedCode.pages?.length}, components: ${deployedCode.components?.length}）`)
     }
 
     state.deployerPreCheck = undefined

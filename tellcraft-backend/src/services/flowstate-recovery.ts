@@ -16,9 +16,12 @@
 
 import Redis from 'ioredis'
 import { Server as SocketIOServer } from 'socket.io'
-import { getFlowState, saveFlowState, deleteFlowState, sendMessage } from '../workers/orchestrator-utils'
+import { saveFlowState, deleteFlowState, sendMessage } from '../workers/orchestrator-utils'
 import { generateTailwindConfig } from './uiux-generation'
 import type { FlowState } from '../types/flow-state'
+import { createLogger } from '../lib/logger'
+
+const logger = createLogger('flowstate-recovery')
 
 // 超時閾值（毫秒）
 const PRD_DISCOVERY_TIMEOUT_MS = 5 * 60 * 1000
@@ -46,12 +49,14 @@ export async function scanAndRecoverStuckFlowStates(
   redis: Redis,
   io: SocketIOServer
 ): Promise<void> {
-  const keys = await redis.keys('flow:*')
-  if (keys.length === 0) return
-
   let recovered = 0
+  let totalScanned = 0
 
-  for (const key of keys) {
+  const stream = redis.scanStream({ match: 'flow:*', count: 100 })
+
+  for await (const keys of stream as AsyncIterable<string[]>) {
+    totalScanned += keys.length
+    for (const key of keys) {
     try {
       const conversationId = key.replace('flow:', '')
       const stateJson = await redis.get(key)
@@ -72,21 +77,23 @@ export async function scanAndRecoverStuckFlowStates(
         : (state.uiuxCodeGenerationStartedAt || 0)
       if (startedAt > 0 && Date.now() - startedAt <= timeoutMs) continue
 
-      console.warn(
-        `[FlowState Recovery] 偵測到超時: conversation=${conversationId}, phase=${state.phase}, ` +
-        `startedAt=${startedAt ? new Date(startedAt).toISOString() : 'none'}, ` +
-        `elapsed=${startedAt ? Math.round((Date.now() - startedAt) / 1000) + 's' : 'unknown'}`
-      )
+      logger.warn({
+        conversationId,
+        phase: state.phase,
+        startedAt: startedAt ? new Date(startedAt).toISOString() : 'none',
+        elapsedSec: startedAt ? Math.round((Date.now() - startedAt) / 1000) : undefined,
+      }, '偵測到超時')
 
       await recoverFlowState(redis, io, conversationId, state)
       recovered++
-    } catch (err) {
-      console.error(`[FlowState Recovery] 處理 ${key} 時錯誤:`, err)
+      } catch (err) {
+        logger.error({ err, key }, '處理時錯誤')
+      }
     }
   }
 
   if (recovered > 0) {
-    console.log(`[FlowState Recovery] 掃描 ${keys.length} 個對話，恢復 ${recovered} 個`)
+    logger.info({ scanned: totalScanned, recovered }, '掃描完成')
   }
 }
 

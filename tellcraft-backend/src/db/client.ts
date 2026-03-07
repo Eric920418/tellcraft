@@ -1,4 +1,7 @@
 import { Pool, PoolClient, QueryResult, QueryResultRow } from 'pg'
+import { createLogger } from '../lib/logger'
+
+const logger = createLogger('db')
 
 // 連接池
 const pool = new Pool({
@@ -12,7 +15,7 @@ const pool = new Pool({
 
 // 監聯連接錯誤
 pool.on('error', (err) => {
-  console.error('[DB] 連接池錯誤:', err)
+  logger.error({ err }, '連接池錯誤')
 })
 
 // ============================================================
@@ -31,11 +34,11 @@ export async function query<T extends QueryResultRow = QueryResultRow>(
     const result = await pool.query<T>(text, params)
     const duration = Date.now() - start
     if (duration > 100) {
-      console.log(`[DB] 慢查詢 (${duration}ms):`, text.substring(0, 100))
+      logger.warn({ duration, query: text.substring(0, 100) }, '慢查詢')
     }
     return result
   } catch (error) {
-    console.error('[DB] 查詢錯誤:', error)
+    logger.error({ err: error }, '查詢錯誤')
     throw error
   }
 }
@@ -605,10 +608,10 @@ export async function getLineUserIdByConversation(conversationId: string): Promi
 export async function testConnection(): Promise<boolean> {
   try {
     await query('SELECT 1')
-    console.log('[DB] 連接成功')
+    logger.info('連接成功')
     return true
   } catch (error) {
-    console.error('[DB] 連接失敗:', error)
+    logger.error({ err: error }, '連接失敗')
     return false
   }
 }
@@ -618,7 +621,7 @@ export async function testConnection(): Promise<boolean> {
  */
 export async function closePool(): Promise<void> {
   await pool.end()
-  console.log('[DB] 連接池已關閉')
+  logger.info('連接池已關閉')
 }
 
 export { pool }

@@ -4,6 +4,9 @@
  * 規則式清洗，在 sendClarifyQuestion 發送前呼叫。
  * DB 中仍保留原始技術 question/options（Formulation 消費需要技術資訊）。
  */
+import { createLogger } from '../lib/logger'
+
+const logger = createLogger('white-text-sanitizer')
 
 // ============================================================
 // 術語替換對照表：精確匹配 + 正則匹配
@@ -218,7 +221,7 @@ export function sanitizeClarifyForDisplay(
   ]
 
   if (remainingTerms.length > 0) {
-    console.warn('[WhiteTextSanitizer] 清洗後仍有技術術語:', remainingTerms.slice(0, 10))
+    logger.warn({ remainingTerms: remainingTerms.slice(0, 10) }, '清洗後仍有技術術語')
   }
 
   return {

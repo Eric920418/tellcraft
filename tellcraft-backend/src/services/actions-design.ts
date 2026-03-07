@@ -1,6 +1,9 @@
 import * as yaml from 'js-yaml'
 import { recordLlmUsage } from '../db/client'
 import { LlmTrackingContext } from './classifier'
+import { createLogger } from '../lib/logger'
+
+const logger = createLogger('actions-design')
 
 // Sonnet 定價 (每百萬 tokens)
 const SONNET_PRICING = { input: 3, output: 15 }
@@ -92,7 +95,7 @@ async function callClaude(
         const errorText = await response.text()
         if (attempt < RETRY_MAX && isRetryableStatus(response.status)) {
           const delay = RETRY_BASE_DELAY_MS * Math.pow(2, attempt - 1)
-          console.warn(`[ActionsDesign] HTTP ${response.status} (attempt ${attempt}/${RETRY_MAX})，${delay}ms 後重試`)
+          logger.warn({ status: response.status, attempt, maxRetries: RETRY_MAX, delayMs: delay }, 'HTTP 錯誤，重試中')
           await new Promise(resolve => setTimeout(resolve, delay))
           continue
         }
@@ -115,7 +118,7 @@ async function callClaude(
       lastError = error instanceof Error ? error.message : 'Unknown error'
       if (attempt < RETRY_MAX && isRetryableFetchError(error)) {
         const delay = RETRY_BASE_DELAY_MS * Math.pow(2, attempt - 1)
-        console.warn(`[ActionsDesign] 網路錯誤 (attempt ${attempt}/${RETRY_MAX})，${delay}ms 後重試:`, lastError.slice(0, 100))
+        logger.warn({ attempt, maxRetries: RETRY_MAX, delayMs: delay, error: lastError.slice(0, 100) }, '網路錯誤，重試中')
         await new Promise(resolve => setTimeout(resolve, delay))
         continue
       }
@@ -321,7 +324,7 @@ ${entityMapping}
 
 請根據以上內容生成 actions.yml。`
 
-  console.log(`[ActionsDesign] 生成 actions.yml，${features.length} 個 Features...`)
+  logger.info({ featureCount: features.length }, '生成 actions.yml')
   const response = await callClaude(SYSTEM_PROMPT, userMessage, { maxTokens: 16384, temperature: 0.1 })
 
   if (!response.success) {
@@ -339,13 +342,13 @@ ${entityMapping}
       purpose: 'actions_design',
       userId: trackingContext.userId,
       conversationId: trackingContext.conversationId,
-    }).catch(err => console.error('[ActionsDesign] 記錄使用量失敗:', err))
+    }).catch(err => logger.error({ err }, '記錄使用量失敗'))
   }
 
   // 提取 YAML 內容
   const yamlMatch = response.content?.match(/```yaml\s*([\s\S]*?)\s*```/)
   if (!yamlMatch) {
-    console.error('[ActionsDesign] LLM 回應無法提取 YAML，前 500 字:', response.content?.substring(0, 500))
+    logger.error({ responsePreview: response.content?.substring(0, 500) }, 'LLM 回應無法提取 YAML')
     return { success: false, error: '無法從 LLM 回應提取 YAML' }
   }
 
@@ -354,7 +357,7 @@ ${entityMapping}
   // 驗證
   const validation = validateActionsYml(actionsYml, features)
   if (!validation.valid) {
-    console.warn('[ActionsDesign] 初次生成驗證失敗:', validation.errors)
+    logger.warn({ errors: validation.errors }, '初次生成驗證失敗')
 
     // 修復重試（1 次）
     const fixPrompt = `你之前生成的 actions.yml 有以下問題，請修正後重新輸出完整 YAML：
@@ -369,7 +372,7 @@ ${actionsYml}
 
 請修正上述問題，輸出完整的修正版 YAML（用 \`\`\`yaml\`\`\` 包裹）。`
 
-    console.log('[ActionsDesign] 修復重試...')
+    logger.info('修復重試...')
     const fixResponse = await callClaude(SYSTEM_PROMPT, fixPrompt, { maxTokens: 16384, temperature: 0.1 })
 
     if (fixResponse.success) {
@@ -378,29 +381,29 @@ ${actionsYml}
         const fixedYml = fixYamlMatch[1].trim()
         const fixValidation = validateActionsYml(fixedYml, features)
         if (fixValidation.valid) {
-          console.log('[ActionsDesign] 修復後驗證通過')
+          logger.info('修復後驗證通過')
           return { success: true, actionsYml: fixedYml }
         }
-        console.warn('[ActionsDesign] 修復後仍有問題:', fixValidation.errors)
+        logger.warn({ errors: fixValidation.errors }, '修復後仍有問題')
         // 降級：使用修復版（可能部分正確）
         return { success: true, actionsYml: fixedYml }
       }
     }
 
     // 降級：使用初始版本
-    console.warn('[ActionsDesign] 修復失敗，使用初始版本')
+    logger.warn('修復失敗，使用初始版本')
     return { success: true, actionsYml }
   }
 
-  console.log(`[ActionsDesign] 生成完成，${features.length} 個 Actions`)
+  logger.info({ actionCount: features.length }, '生成完成')
 
   // 自動生成 OpenAPI 3.0 spec
   let openApiSpec: string | undefined
   try {
     openApiSpec = convertToOpenAPI(actionsYml, projectName)
-    console.log('[ActionsDesign] OpenAPI 3.0 spec 生成完成')
+    logger.info('OpenAPI 3.0 spec 生成完成')
   } catch (err) {
-    console.warn('[ActionsDesign] OpenAPI 生成失敗，降級跳過:', err)
+    logger.warn({ err }, 'OpenAPI 生成失敗，降級跳過')
   }
 
   return { success: true, actionsYml, openApiSpec }

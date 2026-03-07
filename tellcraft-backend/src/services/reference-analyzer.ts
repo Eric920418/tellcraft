@@ -7,6 +7,9 @@
 import Anthropic from '@anthropic-ai/sdk'
 import * as cheerio from 'cheerio'
 import { recordLlmUsage } from '../db/client'
+import { createLogger } from '../lib/logger'
+
+const logger = createLogger('reference-analyzer')
 
 export interface ReferenceAnalysis {
   url: string
@@ -145,7 +148,7 @@ async function takeScreenshot(url: string): Promise<Buffer | null> {
       await browser.close()
     }
   } catch (err) {
-    console.warn('[ReferenceAnalyzer] 截圖失敗:', String(err).slice(0, 200))
+    logger.warn({ error: String(err).slice(0, 200) }, '截圖失敗')
     return null
   }
 }
@@ -216,14 +219,14 @@ ${metadata.themeColor ? `- 主題色: ${metadata.themeColor}` : ''}
         costUsd: (response.usage.input_tokens * 0.8 + response.usage.output_tokens * 4) / 1_000_000,
         purpose: 'reference_vision_analysis',
         conversationId: trackingContext?.conversationId,
-      }).catch(err => console.error('[ReferenceAnalyzer] 記錄用量失敗:', err))
+      }).catch(err => logger.error({ err }, '記錄用量失敗'))
     }
 
     const text = response.content[0]
     if (text.type === 'text') return text.text.trim()
     return null
   } catch (err) {
-    console.warn('[ReferenceAnalyzer] Vision 分析失敗:', String(err).slice(0, 200))
+    logger.warn({ error: String(err).slice(0, 200) }, 'Vision 分析失敗')
     return null
   }
 }

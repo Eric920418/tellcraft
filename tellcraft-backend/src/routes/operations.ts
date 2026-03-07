@@ -3,9 +3,12 @@
  * 處理各種數據庫操作，支持前端 Server Actions 遷移
  */
 import { Router, Request, Response } from 'express'
-import { query, queryOne, queryMany, transaction } from '../db/client'
+import { query, queryOne } from '../db/client'
 import { requireAuth } from '../middleware/auth'
 import crypto from 'crypto'
+import { createLogger } from '../lib/logger'
+
+const logger = createLogger('operations')
 
 const router: Router = Router()
 
@@ -51,7 +54,7 @@ router.post('/generations', requireAuth, async (req: Request, res: Response) => 
 
     res.json({ generationId, attemptCount: finalAttemptCount })
   } catch (error) {
-    console.error('[Operations] 創建生成記錄失敗:', error)
+    logger.error({ err: error }, '創建生成記錄失敗')
     res.status(500).json({ error: '創建生成記錄失敗' })
   }
 })
@@ -88,7 +91,7 @@ router.get('/generations/:projectId/latest', requireAuth, async (req: Request, r
       } : null
     })
   } catch (error) {
-    console.error('[Operations] 獲取生成記錄失敗:', error)
+    logger.error({ err: error }, '獲取生成記錄失敗')
     res.status(500).json({ error: '獲取生成記錄失敗' })
   }
 })
@@ -114,7 +117,7 @@ router.post('/deployments', requireAuth, async (req: Request, res: Response) => 
 
     res.json({ deploymentId })
   } catch (error) {
-    console.error('[Operations] 創建部署記錄失敗:', error)
+    logger.error({ err: error }, '創建部署記錄失敗')
     res.status(500).json({ error: '創建部署記錄失敗' })
   }
 })
@@ -153,7 +156,7 @@ router.patch('/deployments/:id', requireAuth, async (req: Request, res: Response
 
     res.json({ success: true })
   } catch (error) {
-    console.error('[Operations] 更新部署記錄失敗:', error)
+    logger.error({ err: error }, '更新部署記錄失敗')
     res.status(500).json({ error: '更新部署記錄失敗' })
   }
 })
@@ -180,7 +183,7 @@ router.post('/tasks', requireAuth, async (req: Request, res: Response) => {
 
     res.json({ taskId })
   } catch (error) {
-    console.error('[Operations] 創建任務失敗:', error)
+    logger.error({ err: error }, '創建任務失敗')
     res.status(500).json({ error: '創建任務失敗' })
   }
 })
@@ -234,7 +237,7 @@ router.patch('/tasks/:id', requireAuth, async (req: Request, res: Response) => {
 
     res.json({ success: true })
   } catch (error) {
-    console.error('[Operations] 更新任務失敗:', error)
+    logger.error({ err: error }, '更新任務失敗')
     res.status(500).json({ error: '更新任務失敗' })
   }
 })
@@ -286,7 +289,7 @@ router.get('/tasks/:id', requireAuth, async (req: Request, res: Response) => {
       }
     })
   } catch (error) {
-    console.error('[Operations] 獲取任務失敗:', error)
+    logger.error({ err: error }, '獲取任務失敗')
     res.status(500).json({ error: '獲取任務失敗' })
   }
 })
@@ -353,7 +356,7 @@ router.post('/tasks/full', requireAuth, async (req: Request, res: Response) => {
       calculatedPriority
     })
   } catch (error) {
-    console.error('[Operations] 完整建立任務失敗:', error)
+    logger.error({ err: error }, '完整建立任務失敗')
     res.status(500).json({ error: '建立任務失敗' })
   }
 })
@@ -396,7 +399,7 @@ router.post('/tasks/:id/confirm', requireAuth, async (req: Request, res: Respons
 
     res.json({ taskId: id, status: newStatus })
   } catch (error) {
-    console.error('[Operations] 確認任務失敗:', error)
+    logger.error({ err: error }, '確認任務失敗')
     res.status(500).json({ error: '確認任務失敗' })
   }
 })
@@ -452,7 +455,7 @@ router.post('/tasks/:id/cancel', requireAuth, async (req: Request, res: Response
 
     res.json({ taskId: id, status: 'cancelled' })
   } catch (error) {
-    console.error('[Operations] 取消任務失敗:', error)
+    logger.error({ err: error }, '取消任務失敗')
     res.status(500).json({ error: '取消任務失敗' })
   }
 })
@@ -503,7 +506,7 @@ router.post('/tasks/:id/retry', requireAuth, async (req: Request, res: Response)
 
     res.json({ taskId: id, status: 'executing', currentStep })
   } catch (error) {
-    console.error('[Operations] 重試任務失敗:', error)
+    logger.error({ err: error }, '重試任務失敗')
     res.status(500).json({ error: '重試任務失敗' })
   }
 })
@@ -577,7 +580,7 @@ router.get('/conversations/:id/messages', requireAuth, async (req: Request, res:
       bddPhase: bddSession?.current_phase,
     })
   } catch (error) {
-    console.error('[Operations] 獲取對話消息失敗:', error)
+    logger.error({ err: error }, '獲取對話消息失敗')
     res.status(500).json({ error: '獲取對話消息失敗' })
   }
 })
@@ -621,7 +624,7 @@ router.post('/conversations/:id/messages', requireAuth, async (req: Request, res
 
     res.json({ messageId })
   } catch (error) {
-    console.error('[Operations] 添加消息失敗:', error)
+    logger.error({ err: error }, '添加消息失敗')
     res.status(500).json({ error: '添加消息失敗' })
   }
 })
@@ -660,7 +663,7 @@ router.post('/subscription/cancel', requireAuth, async (req: Request, res: Respo
 
     res.json({ success: true })
   } catch (error) {
-    console.error('[Operations] 取消訂閱失敗:', error)
+    logger.error({ err: error }, '取消訂閱失敗')
     res.status(500).json({ error: '取消訂閱失敗' })
   }
 })
@@ -718,7 +721,7 @@ router.patch('/projects/:id/status', requireAuth, async (req: Request, res: Resp
 
     res.json({ success: true })
   } catch (error) {
-    console.error('[Operations] 更新專案狀態失敗:', error)
+    logger.error({ err: error }, '更新專案狀態失敗')
     res.status(500).json({ error: '更新專案狀態失敗' })
   }
 })
@@ -744,7 +747,7 @@ router.post('/notifications', requireAuth, async (req: Request, res: Response) =
 
     res.json({ notificationId })
   } catch (error) {
-    console.error('[Operations] 創建通知失敗:', error)
+    logger.error({ err: error }, '創建通知失敗')
     res.status(500).json({ error: '創建通知失敗' })
   }
 })
@@ -884,7 +887,7 @@ router.post('/generate', requireAuth, async (req: Request, res: Response) => {
 
     res.json({ generationId, attemptCount, status: 'success' })
   } catch (error) {
-    console.error('[Operations] 生成程式碼失敗:', error)
+    logger.error({ err: error }, '生成程式碼失敗')
     res.status(500).json({ error: '生成程式碼失敗' })
   }
 })
@@ -897,7 +900,7 @@ router.patch('/projects/:id/iterate', requireAuth, async (req: Request, res: Res
   try {
     const { id } = req.params
     const userId = req.user!.id
-    const { changes, isDestructive } = req.body
+    const { isDestructive } = req.body
 
     // 驗證專案
     const project = await queryOne<{ id: string; status: string; user_id: string }>(
@@ -934,7 +937,7 @@ router.patch('/projects/:id/iterate', requireAuth, async (req: Request, res: Res
 
     res.json({ projectId: id, status: 'generating', backupCreated })
   } catch (error) {
-    console.error('[Operations] 迭代修改失敗:', error)
+    logger.error({ err: error }, '迭代修改失敗')
     res.status(500).json({ error: '迭代修改失敗' })
   }
 })
@@ -973,7 +976,7 @@ router.post('/subscription/action', requireAuth, async (req: Request, res: Respo
 
     res.json({ userId, status: 'suspended' })
   } catch (error) {
-    console.error('[Operations] 訂閱操作失敗:', error)
+    logger.error({ err: error }, '訂閱操作失敗')
     res.status(500).json({ error: '訂閱操作失敗' })
   }
 })
@@ -1026,7 +1029,7 @@ router.post('/deploy', requireAuth, async (req: Request, res: Response) => {
 
     res.json({ deploymentId, status: 'pending' })
   } catch (error) {
-    console.error('[Operations] 部署專案失敗:', error)
+    logger.error({ err: error }, '部署專案失敗')
     res.status(500).json({ error: '部署專案失敗' })
   }
 })
@@ -1061,7 +1064,7 @@ router.post('/export', requireAuth, async (req: Request, res: Response) => {
 
     res.json({ downloadUrl, format: format === 'sql' ? 'sql_dump' : 'json' })
   } catch (error) {
-    console.error('[Operations] 導出資料失敗:', error)
+    logger.error({ err: error }, '導出資料失敗')
     res.status(500).json({ error: '導出資料失敗' })
   }
 })
@@ -1121,7 +1124,7 @@ router.post('/transfer', requireAuth, async (req: Request, res: Response) => {
 
     res.json({ projectId, transferred: true })
   } catch (error) {
-    console.error('[Operations] 移轉資源失敗:', error)
+    logger.error({ err: error }, '移轉資源失敗')
     res.status(500).json({ error: '移轉資源失敗' })
   }
 })
@@ -1158,7 +1161,7 @@ router.post('/skills', requireAuth, async (req: Request, res: Response) => {
 
     res.json({ skillId, status: 'created' })
   } catch (error) {
-    console.error('[Operations] 註冊技能失敗:', error)
+    logger.error({ err: error }, '註冊技能失敗')
     res.status(500).json({ error: '註冊技能失敗' })
   }
 })
@@ -1202,7 +1205,7 @@ router.post('/webhooks', requireAuth, async (req: Request, res: Response) => {
 
     res.json({ webhookId, status: 'created' })
   } catch (error) {
-    console.error('[Operations] 配置 Webhook 失敗:', error)
+    logger.error({ err: error }, '配置 Webhook 失敗')
     res.status(500).json({ error: '配置 Webhook 失敗' })
   }
 })

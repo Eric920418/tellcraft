@@ -4,6 +4,9 @@ import crypto from 'crypto'
 import Redis from 'ioredis'
 import * as db from '../db/client'
 import { requireAuth } from '../middleware/auth'
+import { createLogger } from '../lib/logger'
+
+const logger = createLogger('auth')
 
 const router: RouterType = Router()
 
@@ -431,7 +434,7 @@ router.get('/google/callback', async (req, res) => {
     const token = generateToken(user)
     res.redirect(`${APP_URL}/auth/callback#token=${token}&returnTo=${encodeURIComponent(returnTo)}`)
   } catch (error) {
-    console.error('[Auth] Google callback error:', error)
+    logger.error({ err: error }, 'Google callback error')
     res.redirect(`${APP_URL}/auth/login?error=callback_failed`)
   }
 })
@@ -475,7 +478,7 @@ router.post('/google/exchange', async (req, res) => {
       if (!result.success) {
         return res.json({ linked: false, error: result.error, returnTo })
       }
-      console.log(`[Auth] Google linked to user ${linkUserId}`)
+      logger.info({ userId: linkUserId }, 'Google linked to user')
       return res.json({ linked: true, provider: 'google', returnTo })
     }
 
@@ -491,7 +494,7 @@ router.post('/google/exchange', async (req, res) => {
     const token = generateToken(user)
     res.json({ token, returnTo })
   } catch (error) {
-    console.error('[Auth] Google exchange error:', error)
+    logger.error({ err: error }, 'Google exchange error')
     res.status(500).json({ error: 'exchange_failed' })
   }
 })
@@ -589,7 +592,7 @@ router.get('/line/callback', async (req, res) => {
     const token = generateToken(user)
     res.redirect(`${APP_URL}/auth/callback#token=${token}&returnTo=${encodeURIComponent(returnTo)}`)
   } catch (error) {
-    console.error('[Auth] LINE callback error:', error)
+    logger.error({ err: error }, 'LINE callback error')
     res.redirect(`${APP_URL}/auth/login?error=callback_failed`)
   }
 })
@@ -633,7 +636,7 @@ router.post('/line/exchange', async (req, res) => {
       if (!result.success) {
         return res.json({ linked: false, error: result.error, returnTo })
       }
-      console.log(`[Auth] LINE linked to user ${linkUserId}`)
+      logger.info({ userId: linkUserId }, 'LINE linked to user')
       return res.json({ linked: true, provider: 'line', returnTo })
     }
 
@@ -649,7 +652,7 @@ router.post('/line/exchange', async (req, res) => {
     const token = generateToken(user)
     res.json({ token, returnTo })
   } catch (error) {
-    console.error('[Auth] LINE exchange error:', error)
+    logger.error({ err: error }, 'LINE exchange error')
     res.status(500).json({ error: 'exchange_failed' })
   }
 })
@@ -688,7 +691,7 @@ router.post('/liff/verify', async (req, res) => {
 
     if (!verifyResponse.ok) {
       const errorText = await verifyResponse.text()
-      console.error('[Auth] LIFF verify error:', errorText)
+      logger.error({ errorText }, 'LIFF verify error')
       return res.status(401).json({ error: 'ID Token 驗證失敗' })
     }
 
@@ -713,10 +716,10 @@ router.post('/liff/verify', async (req, res) => {
 
     const token = generateToken(user)
 
-    console.log(`[Auth] LIFF verify success: userId=${lineProfile.sub}, isNew=${user.isNew}`)
+    logger.info({ lineUserId: lineProfile.sub, isNew: user.isNew }, 'LIFF verify success')
     res.json({ token })
   } catch (error) {
-    console.error('[Auth] LIFF verify error:', error)
+    logger.error({ err: error }, 'LIFF verify error')
     res.status(500).json({ error: 'LIFF 驗證失敗' })
   }
 })
@@ -803,7 +806,7 @@ router.get('/me', async (req, res) => {
 
       // admin 狀態在 DB 中改變（例如被其他管理員設為管理）→ 自動刷新 token
       if (Boolean(payload.isAdmin) !== Boolean(user.is_admin)) {
-        console.log(`[Auth] Admin status changed for user ${user.id}: JWT=${payload.isAdmin} → DB=${user.is_admin}, issuing refreshed token`)
+        logger.info({ userId: user.id, jwtAdmin: payload.isAdmin, dbAdmin: user.is_admin }, 'Admin status changed, issuing refreshed token')
         responseData.refreshedToken = generateToken({
           id: user.id,
           email: user.email,
@@ -817,7 +820,7 @@ router.get('/me', async (req, res) => {
       return res.status(401).json({ error: 'Invalid token' })
     }
   } catch (error) {
-    console.error('[Auth] /me error:', error)
+    logger.error({ err: error }, '/me error')
     res.status(500).json({ error: 'Internal error' })
   }
 })
@@ -880,7 +883,7 @@ router.post('/refresh', async (req, res) => {
       return res.status(401).json({ error: 'Invalid token' })
     }
   } catch (error) {
-    console.error('[Auth] /refresh error:', error)
+    logger.error({ err: error }, '/refresh error')
     res.status(500).json({ error: 'Internal error' })
   }
 })
@@ -925,7 +928,7 @@ router.get('/providers', requireAuth, async (req, res) => {
       }))
     })
   } catch (error) {
-    console.error('[Auth] /providers error:', error)
+    logger.error({ err: error }, '/providers error')
     res.status(500).json({ error: 'Failed to get providers' })
   }
 })
@@ -969,10 +972,10 @@ router.post('/unlink/:provider', requireAuth, async (req, res) => {
       [userId, provider]
     )
 
-    console.log(`[Auth] User ${userId} unlinked ${provider}`)
+    logger.info({ userId, provider }, 'User unlinked provider')
     res.json({ success: true })
   } catch (error) {
-    console.error('[Auth] /unlink error:', error)
+    logger.error({ err: error }, '/unlink error')
     res.status(500).json({ error: 'Failed to unlink provider' })
   }
 })
@@ -1003,7 +1006,7 @@ router.post('/preferences', requireAuth, async (req, res) => {
 
     res.json({ success: true, preferredLanguage })
   } catch (error) {
-    console.error('[Auth] /preferences error:', error)
+    logger.error({ err: error }, '/preferences error')
     res.status(500).json({ error: 'Failed to update preferences' })
   }
 })
@@ -1021,7 +1024,7 @@ router.post('/logout', async (req, res) => {
     }
     res.json({ success: true })
   } catch (error) {
-    console.error('[Auth] logout error:', error)
+    logger.error({ err: error }, 'Logout error')
     res.json({ success: true }) // 登出不應失敗
   }
 })

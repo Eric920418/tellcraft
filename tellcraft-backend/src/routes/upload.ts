@@ -4,6 +4,9 @@ import * as path from 'path'
 import * as fs from 'fs'
 import * as crypto from 'crypto'
 import { requireAuth } from '../middleware/auth'
+import { createLogger } from '../lib/logger'
+
+const logger = createLogger('upload')
 
 const router: Router = Router()
 
@@ -96,7 +99,7 @@ router.post(
     const relativePath = path.relative(UPLOAD_DIR, req.file.path)
     const url = `${UPLOAD_BASE_URL}/${relativePath}`
 
-    console.log(`[Upload] 用戶 ${req.user?.id} 上傳圖片: ${req.file.originalname} → ${url}`)
+    logger.info({ userId: req.user?.id, originalname: req.file.originalname, url }, '用戶上傳圖片')
 
     res.json({
       success: true,

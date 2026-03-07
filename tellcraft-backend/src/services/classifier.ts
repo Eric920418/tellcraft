@@ -1,6 +1,9 @@
 import { SkillName, SKILL_REGISTRY, getSkillDescriptionsForClassifier } from './registry'
 import { recordLlmUsage } from '../db/client'
 import { safeParseJson } from '../utils/safe-parse-json'
+import { createLogger } from '../lib/logger'
+
+const logger = createLogger('classifier')
 
 // Haiku 定價 (每百萬 tokens)
 const HAIKU_PRICING = { input: 0.8, output: 4 }
@@ -63,7 +66,7 @@ function prefilterLongRequirement(message: string): ClassificationResult | null 
   if (!REQUIREMENT_KEYWORDS.test(message)) return null
 
   const entities = extractEntitiesFromMessage(message)
-  console.log(`[Classifier] 長文預過濾命中 (${message.length} 字)，直接分類為 bdd-spec`)
+  logger.info({ messageLength: message.length }, '長文預過濾命中，直接分類為 bdd-spec')
   return {
     intent: 'bdd-spec',
     confidence: 0.95,
@@ -88,7 +91,7 @@ export async function classifyIntent(
   const apiKey = process.env.ANTHROPIC_API_KEY
 
   if (!apiKey) {
-    console.warn('[Classifier] ANTHROPIC_API_KEY 未設定，使用規則式分類')
+    logger.warn('ANTHROPIC_API_KEY 未設定，使用規則式分類')
     return ruleBasedClassification(message)
   }
 
@@ -193,7 +196,7 @@ ${skillDescriptions}
         const isRetryable = response.status === 429 || response.status === 529 || response.status === 503
         if (attempt < RETRY_MAX && isRetryable) {
           const delay = RETRY_BASE_DELAY_MS * Math.pow(2, attempt - 1)
-          console.warn(`[Classifier] HTTP ${response.status} (attempt ${attempt}/${RETRY_MAX})，${delay}ms 後重試`)
+          logger.warn({ status: response.status, attempt, maxRetry: RETRY_MAX, delay }, 'HTTP 錯誤，重試')
           await new Promise(resolve => setTimeout(resolve, delay))
           continue
         }
@@ -202,7 +205,7 @@ ${skillDescriptions}
         const errMsg = String(fetchErr)
         if (attempt < RETRY_MAX && (errMsg.includes('ECONNRESET') || errMsg.includes('ETIMEDOUT'))) {
           const delay = RETRY_BASE_DELAY_MS * Math.pow(2, attempt - 1)
-          console.warn(`[Classifier] 網路錯誤 (attempt ${attempt}/${RETRY_MAX})，${delay}ms 後重試`)
+          logger.warn({ attempt, maxRetry: RETRY_MAX, delay }, '網路錯誤，重試')
           await new Promise(resolve => setTimeout(resolve, delay))
           continue
         }
@@ -211,7 +214,7 @@ ${skillDescriptions}
     }
 
     if (!response || !response.ok) {
-      console.error('[Classifier] API 錯誤 (重試後仍失敗):', response?.status)
+      logger.error({ status: response?.status }, 'API 錯誤 (重試後仍失敗)')
       return ruleBasedClassification(message)
     }
 
@@ -237,9 +240,9 @@ ${skillDescriptions}
           userId: trackingContext?.userId,
           conversationId: trackingContext?.conversationId,
         })
-        console.log(`[Classifier] 已記錄使用量: ${inputTokens} in / ${outputTokens} out, $${cost.toFixed(6)} (conversation: ${trackingContext?.conversationId || 'none'})`)
+        logger.info({ inputTokens, outputTokens, cost: cost.toFixed(6), conversationId: trackingContext?.conversationId }, '已記錄使用量')
       } catch (err) {
-        console.error('[Classifier] 記錄使用量失敗:', err)
+        logger.error({ err }, '記錄使用量失敗')
       }
     }
 
@@ -271,7 +274,7 @@ ${skillDescriptions}
     // 保留 contentFlag（仍需要內容政策檢查）
     const metaIntents: string[] = ['onboarding', 'chitchat', 'abuse']
     if (metaIntents.includes(intent) && message.length >= 30 && REQUIREMENT_KEYWORDS.test(message)) {
-      console.warn(`[Classifier] 後驗證覆寫：Haiku 返回 "${intent}" 但消息含需求關鍵詞 (${message.length} 字)，覆寫為 bdd-spec`)
+      logger.warn({ originalIntent: intent, messageLength: message.length }, '後驗證覆寫為 bdd-spec')
       const entities = extractEntitiesFromMessage(message)
       return {
         intent: 'bdd-spec',
@@ -292,7 +295,7 @@ ${skillDescriptions}
       extractedEntities: parsed.extractedEntities,
     }
   } catch (error) {
-    console.error('[Classifier] 分類失敗:', error)
+    logger.error({ err: error }, '分類失敗')
     return ruleBasedClassification(message)
   }
 }

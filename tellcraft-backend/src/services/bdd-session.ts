@@ -1,4 +1,7 @@
 import * as db from '../db/client'
+import { createLogger } from '../lib/logger'
+
+const logger = createLogger('bdd-session')
 
 // ============================================================
 // 類型定義
@@ -209,7 +212,7 @@ export async function createBddSession(data: {
     }
     return { success: true, data: { sessionId } }
   } catch (error) {
-    console.error('[BddSession] 創建失敗:', error)
+    logger.error({ err: error }, '創建失敗')
     return { success: false, error: String(error) }
   }
 }
@@ -262,7 +265,7 @@ export async function getBddSession(input: {
 
     return { success: true, data }
   } catch (error) {
-    console.error('[BddSession] 取得失敗:', error)
+    logger.error({ err: error }, '取得失敗')
     return { success: false, error: String(error) }
   }
 }
@@ -303,7 +306,7 @@ export async function updateBddSession(input: {
     await db.updateBddSession(input.sessionId, input.updates)
     return { success: true }
   } catch (error) {
-    console.error('[BddSession] 更新失敗:', error)
+    logger.error({ err: error }, '更新失敗')
     return { success: false, error: String(error) }
   }
 }
@@ -334,7 +337,7 @@ export async function addClarifyItems(input: {
 
     return { success: true }
   } catch (error) {
-    console.error('[BddSession] 添加釐清項目失敗:', error)
+    logger.error({ err: error }, '添加釐清項目失敗')
     return { success: false, error: String(error) }
   }
 }
@@ -379,7 +382,7 @@ export async function answerClarifyItem(input: {
 
     return { success: true }
   } catch (error) {
-    console.error('[BddSession] 回答釐清項目失敗:', error)
+    logger.error({ err: error }, '回答釐清項目失敗')
     return { success: false, error: String(error) }
   }
 }
@@ -407,7 +410,7 @@ export async function confirmBatch(input: {
 
     return { success: true }
   } catch (error) {
-    console.error('[BddSession] 確認批次失敗:', error)
+    logger.error({ err: error }, '確認批次失敗')
     return { success: false, error: String(error) }
   }
 }
@@ -451,7 +454,7 @@ export async function revertResolvedItem(input: {
 
     return { success: true }
   } catch (error) {
-    console.error('[BddSession] 反悔已確認項目失敗:', error)
+    logger.error({ err: error }, '反悔已確認項目失敗')
     return { success: false, error: String(error) }
   }
 }
@@ -495,7 +498,7 @@ export async function revertAnswer(input: {
 
     return { success: true }
   } catch (error) {
-    console.error('[BddSession] 反悔答案失敗:', error)
+    logger.error({ err: error }, '反悔答案失敗')
     return { success: false, error: String(error) }
   }
 }

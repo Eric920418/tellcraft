@@ -163,7 +163,7 @@ function parseBackgroundImageUrl(cssValue: string): string {
 
 function wrapAsBackgroundImageUrl(url: string): string {
   if (!url) return 'none'
-  return `url(${url})`
+  return `url("${url}")`
 }
 
 const TEXT_TRANSFORM_OPTIONS = [

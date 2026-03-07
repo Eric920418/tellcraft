@@ -2,6 +2,7 @@
 
 import { useState, useRef, useEffect, useCallback, Suspense, useDeferredValue, useMemo } from 'react'
 import { useSearchParams } from 'next/navigation'
+import ErrorBoundary from '@/app/components/ErrorBoundary'
 import { motion, AnimatePresence, useInView } from 'framer-motion'
 import { useTranslations, useLocale } from 'next-intl'
 import { useLocalePath } from '@/app/hooks/useLocalePath'
@@ -5508,13 +5509,15 @@ function HomeContent() {
       />
 
       {/* Chat Overlay */}
-      <ChatSection
-        isActive={isChatActive}
-        initialMessage={initialMessage}
-        resumeConversationId={resumeConversationId}
-        onBack={handleBackToHome}
-        buildMode={buildMode}
-      />
+      <ErrorBoundary>
+        <ChatSection
+          isActive={isChatActive}
+          initialMessage={initialMessage}
+          resumeConversationId={resumeConversationId}
+          onBack={handleBackToHome}
+          buildMode={buildMode}
+        />
+      </ErrorBoundary>
 
       {/* Guest Limit Modal */}
       {showGuestLimitModal && (

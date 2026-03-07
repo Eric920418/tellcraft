@@ -9,7 +9,8 @@
     "start": "next start",
     "lint": "eslint . --ext .ts,.tsx",
     "typecheck": "tsc --noEmit",
-    "test": "echo \"Tests will be implemented by SDD Runner\""
+    "test": "vitest",
+    "test:ci": "vitest run"
   },
   "packageManager": "pnpm@10.13.1",
   "dependencies": {
@@ -48,6 +49,8 @@
     "@eslint/eslintrc": "^3.3.3",
     "@eslint/js": "^9.39.2",
     "@next/eslint-plugin-next": "^16.1.6",
+    "@testing-library/jest-dom": "^6.9.1",
+    "@testing-library/react": "^16.3.2",
     "@types/jsonwebtoken": "^9.0.10",
     "@types/node": "^25.0.10",
     "@types/pg": "^8.16.0",
@@ -56,9 +59,11 @@
     "@types/three": "^0.182.0",
     "dotenv": "^17.2.3",
     "eslint": "^9.39.2",
+    "jsdom": "^28.1.0",
     "jsonwebtoken": "^9.0.3",
     "tsx": "^4.21.0",
     "typescript": "^5.9.3",
-    "typescript-eslint": "^8.54.0"
+    "typescript-eslint": "^8.54.0",
+    "vitest": "^4.0.18"
   }
 }

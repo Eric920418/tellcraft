@@ -3,6 +3,9 @@ import { safeParseJson } from '../utils/safe-parse-json'
 import { ClarifyItem } from './bdd-session'
 import { LlmTrackingContext } from './classifier'
 import { GeneratedFeature } from './formulation'
+import { createLogger } from '../lib/logger'
+
+const logger = createLogger('spec-discovery')
 
 // Sonnet 定價 (每百萬 tokens)
 const SONNET_PRICING = { input: 3, output: 15 }
@@ -99,7 +102,7 @@ async function callClaude(
         const errorText = await response.text()
         if (attempt < RETRY_MAX && isRetryableStatus(response.status)) {
           const delay = RETRY_BASE_DELAY_MS * Math.pow(2, attempt - 1)
-          console.warn(`[spec-discovery callClaude] HTTP ${response.status} (attempt ${attempt}/${RETRY_MAX})，${delay}ms 後重試`)
+          logger.warn({ status: response.status, attempt, maxRetries: RETRY_MAX, delayMs: delay }, 'callClaude HTTP 錯誤，重試中')
           await new Promise(resolve => setTimeout(resolve, delay))
           continue
         }
@@ -115,7 +118,7 @@ async function callClaude(
 
       const truncated = data.stop_reason === 'max_tokens'
       if (truncated) {
-        console.warn(`[spec-discovery callClaude] 回應被截斷 (stop_reason=max_tokens, output=${data.usage?.output_tokens})`)
+        logger.warn({ outputTokens: data.usage?.output_tokens }, 'callClaude 回應被截斷 (stop_reason=max_tokens)')
       }
 
       return {
@@ -129,7 +132,7 @@ async function callClaude(
       lastError = error instanceof Error ? error.message : 'Unknown error'
       if (attempt < RETRY_MAX && isRetryableFetchError(error)) {
         const delay = RETRY_BASE_DELAY_MS * Math.pow(2, attempt - 1)
-        console.warn(`[spec-discovery callClaude] 網路錯誤 (attempt ${attempt}/${RETRY_MAX})，${delay}ms 後重試:`, lastError.slice(0, 100))
+        logger.warn({ attempt, maxRetries: RETRY_MAX, delayMs: delay, error: lastError.slice(0, 100) }, 'callClaude 網路錯誤，重試中')
         await new Promise(resolve => setTimeout(resolve, delay))
         continue
       }
@@ -291,7 +294,7 @@ ${existingQuestions ? `---
 
 請審查以上 Feature Files，找出需要與用戶確認的品質問題。`
 
-  console.log('[SpecDiscovery] 開始審查 Feature Files...')
+  logger.info('開始審查 Feature Files...')
   let response = await callClaude(systemPrompt, userMessage, { maxTokens: 12288 })
 
   if (!response.success) {
@@ -300,7 +303,7 @@ ${existingQuestions ? `---
 
   // 截斷時用更大的 maxTokens 重試一次
   if (response.truncated) {
-    console.warn('[SpecDiscovery] 回應被截斷，以 16384 tokens 重試')
+    logger.warn('回應被截斷，以 16384 tokens 重試')
     response = await callClaude(systemPrompt, userMessage, { maxTokens: 16384 })
     if (!response.success) {
       return { success: false, error: response.error }
@@ -318,7 +321,7 @@ ${existingQuestions ? `---
       purpose: 'spec_discovery',
       userId: trackingContext?.userId,
       conversationId: trackingContext?.conversationId,
-    }).catch(err => console.error('[SpecDiscovery] 記錄使用量失敗:', err))
+    }).catch(err => logger.error({ err }, '記錄使用量失敗'))
   }
 
   try {
@@ -331,25 +334,25 @@ ${existingQuestions ? `---
                         response.content?.match(/\{[\s\S]*\}/)
       if (!jsonMatch) {
         if (response.truncated) {
-          console.warn('[SpecDiscovery] 截斷且無法提取 JSON，視為無問題繼續')
+          logger.warn('截斷且無法提取 JSON，視為無問題繼續')
           return { success: true, issues: [] }
         }
         return { success: false, error: '無法解析 LLM 回應' }
       }
 
       const jsonStr = jsonMatch[1] || jsonMatch[0]
-      console.warn('[SpecDiscovery] safeParseJson 失敗，嘗試修復截斷的 JSON')
+      logger.warn('safeParseJson 失敗，嘗試修復截斷的 JSON')
       const lastCompleteObj = jsonStr.lastIndexOf('},')
       if (lastCompleteObj > 0) {
         const fixedStr = jsonStr.substring(0, lastCompleteObj + 1) + ']}'
         parsed = safeParseJson<{ issues?: unknown[] }>(fixedStr)
         if (parsed) {
-          console.log('[SpecDiscovery] JSON 修復成功')
+          logger.info('JSON 修復成功')
         }
       }
 
       if (!parsed) {
-        console.warn('[SpecDiscovery] JSON 無法修復，視為無問題繼續')
+        logger.warn('JSON 無法修復，視為無問題繼續')
         return { success: true, issues: [] }
       }
     }
@@ -360,7 +363,7 @@ ${existingQuestions ? `---
       id: `spec_${Date.now()}_${index}`,
     }))
 
-    console.log(`[SpecDiscovery] 發現 ${issues.length} 個問題`)
+    logger.info({ issueCount: issues.length }, '審查完成')
     return { success: true, issues }
   } catch (err) {
     return { success: false, error: `解析回應時發生錯誤: ${err}` }

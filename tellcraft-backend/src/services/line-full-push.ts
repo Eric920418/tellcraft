@@ -7,6 +7,9 @@
 import { messagingApi } from '@line/bot-sdk'
 import * as db from '../db/client'
 import { translateToLineMessages, type TranslateOptions } from './line-message-translator'
+import { createLogger } from '../lib/logger'
+
+const logger = createLogger('line-full-push')
 
 // 模組級單例
 const client = process.env.LINE_MESSAGING_CHANNEL_ACCESS_TOKEN
@@ -64,9 +67,9 @@ export async function sendLineFullMessage(
       messages: result.messages,
     })
 
-    console.log(`[LINE Full Push] 推送成功: conversation=${conversationId}, messages=${result.messages.length}`)
+    logger.info({ conversationId, messageCount: result.messages.length }, '推送成功')
   } catch (err) {
     // 推送失敗不阻塞主流程
-    console.warn(`[LINE Full Push] 推送失敗: conversation=${conversationId}`, err)
+    logger.warn({ err, conversationId }, '推送失敗')
   }
 }

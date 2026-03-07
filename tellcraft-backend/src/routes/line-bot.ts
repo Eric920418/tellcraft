@@ -9,6 +9,9 @@
 import { Router, type Router as RouterType } from 'express'
 import { validateSignature } from '@line/bot-sdk'
 import { handleFollow, handleTextMessage, handlePostback } from '../services/line-bot-handler'
+import { createLogger } from '../lib/logger'
+
+const logger = createLogger('line-bot')
 
 const router: RouterType = Router()
 
@@ -21,7 +24,7 @@ const LINE_BOT_CHANNEL_SECRET = process.env.LINE_BOT_CHANNEL_SECRET
 router.post('/', async (req, res) => {
   // 未配置 → 靜默返回 200（避免 LINE Platform 持續重試）
   if (!LINE_BOT_CHANNEL_SECRET) {
-    console.warn('[LINE Bot] LINE_BOT_CHANNEL_SECRET not configured, skipping webhook')
+    logger.warn('LINE_BOT_CHANNEL_SECRET not configured, skipping webhook')
     return res.status(200).json({ message: 'ok' })
   }
 
@@ -35,7 +38,7 @@ router.post('/', async (req, res) => {
     // req.body 是 Buffer（express.raw() 處理的）
     const rawBody = req.body as Buffer
     if (!validateSignature(rawBody, LINE_BOT_CHANNEL_SECRET, signature)) {
-      console.warn('[LINE Bot] Signature verification failed')
+      logger.warn('Signature verification failed')
       return res.status(403).json({ error: 'Invalid signature' })
     }
 
@@ -51,11 +54,11 @@ router.post('/', async (req, res) => {
       try {
         await routeEvent(event)
       } catch (err) {
-        console.error('[LINE Bot] Event processing error:', err, JSON.stringify(event).substring(0, 200))
+        logger.error({ err, event: JSON.stringify(event).substring(0, 200) }, 'Event processing error')
       }
     }
   } catch (err) {
-    console.error('[LINE Bot] Webhook error:', err)
+    logger.error({ err }, 'Webhook error')
     // 即使出錯也返回 200，避免 LINE Platform 重試
     if (!res.headersSent) {
       res.status(200).json({ message: 'ok' })
@@ -79,7 +82,7 @@ async function routeEvent(event: {
 
   switch (event.type) {
     case 'follow':
-      console.log(`[LINE Bot] Follow event: ${userId}`)
+      logger.info({ userId }, 'Follow event')
       if (event.replyToken) {
         await handleFollow(userId, event.replyToken)
       }
@@ -87,25 +90,25 @@ async function routeEvent(event: {
 
     case 'message':
       if (event.message?.type === 'text' && event.replyToken) {
-        console.log(`[LINE Bot] Text message: ${userId} → "${event.message.text.substring(0, 50)}"`)
+        logger.info({ userId, text: event.message.text.substring(0, 50) }, 'Text message')
         await handleTextMessage(userId, event.message.text, event.replyToken)
       }
       break
 
     case 'postback':
       if (event.postback?.data && event.replyToken) {
-        console.log(`[LINE Bot] Postback: ${userId} → ${event.postback.data.substring(0, 100)}`)
+        logger.info({ userId, data: event.postback.data.substring(0, 100) }, 'Postback')
         await handlePostback(userId, event.postback.data, event.replyToken)
       }
       break
 
     case 'unfollow':
-      console.log(`[LINE Bot] Unfollow: ${userId}`)
+      logger.info({ userId }, 'Unfollow')
       // 可選：清理 line_active_conversations
       break
 
     default:
-      console.log(`[LINE Bot] Unhandled event type: ${event.type}`)
+      logger.info({ eventType: event.type }, 'Unhandled event type')
   }
 }
 
