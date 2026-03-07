@@ -26,48 +26,63 @@ const PINO_LEVELS: Record<number, 'info' | 'warn' | 'error'> = {
 }
 
 /**
+ * 嘗試解析 Pino JSON，成功返回結構化結果，失敗返回 null
+ */
+function parsePinoJson(
+  jsonStr: string,
+  pm2Timestamp: string,
+  id: string,
+  source: 'out' | 'error',
+  raw: string,
+): ParsedLogLine | null {
+  if (!jsonStr.startsWith('{')) return null
+  try {
+    const json = JSON.parse(jsonStr)
+    // 優先用 Pino 時間，fallback PM2 時間戳
+    const ts = json.time ? new Date(json.time) : null
+    const timestamp = ts
+      ? `${ts.getFullYear()}-${String(ts.getMonth() + 1).padStart(2, '0')}-${String(ts.getDate()).padStart(2, '0')} ${String(ts.getHours()).padStart(2, '0')}:${String(ts.getMinutes()).padStart(2, '0')}:${String(ts.getSeconds()).padStart(2, '0')}`
+      : pm2Timestamp
+    const tag = json.module ? `[${json.module}]` : null
+    const level = PINO_LEVELS[json.level] || 'info'
+
+    // 組裝 message：msg + 其他有意義的欄位
+    const skipKeys = new Set(['level', 'time', 'pid', 'hostname', 'module', 'msg'])
+    const extras: string[] = []
+    for (const [k, v] of Object.entries(json)) {
+      if (skipKeys.has(k)) continue
+      if (v === null || v === undefined) continue
+      if (typeof v === 'object') {
+        extras.push(`${k}=${JSON.stringify(v)}`)
+      } else {
+        extras.push(`${k}=${v}`)
+      }
+    }
+    const message = extras.length > 0
+      ? `${json.msg || ''}  ${extras.join(' ')}`
+      : (json.msg || '')
+
+    return { id, timestamp, tag, message: message.trim(), level, source, raw }
+  } catch {
+    return null
+  }
+}
+
+/**
  * 解析 PM2 日誌行
- * 支援兩種格式：
- *   PM2:  '2026-03-01 08:16:30: [Tag] message'
- *   Pino: '{"level":30,"time":1772881956866,"module":"server","msg":"..."}'
+ * 支援三種格式：
+ *   純 Pino:  '{"level":30,"time":...,"module":"server","msg":"..."}'
+ *   PM2+Pino: '2026-03-01 08:16:30: {"level":30,...}'
+ *   純 PM2:   '2026-03-01 08:16:30: [Tag] message'
  */
 export function parseLogLine(raw: string, source: 'out' | 'error'): ParsedLogLine {
   const id = `log-${Date.now()}-${lineCounter++}`
 
-  // 嘗試解析 Pino JSON 格式
-  if (raw.startsWith('{')) {
-    try {
-      const json = JSON.parse(raw)
-      const ts = json.time ? new Date(json.time) : null
-      const timestamp = ts
-        ? `${ts.getFullYear()}-${String(ts.getMonth() + 1).padStart(2, '0')}-${String(ts.getDate()).padStart(2, '0')} ${String(ts.getHours()).padStart(2, '0')}:${String(ts.getMinutes()).padStart(2, '0')}:${String(ts.getSeconds()).padStart(2, '0')}`
-        : ''
-      const tag = json.module ? `[${json.module}]` : null
-      const level = PINO_LEVELS[json.level] || 'info'
+  // 1. 純 Pino JSON（無 PM2 時間戳前綴）
+  const pinoResult = parsePinoJson(raw, '', id, source, raw)
+  if (pinoResult) return pinoResult
 
-      // 組裝 message：msg + 其他有意義的欄位
-      const skipKeys = new Set(['level', 'time', 'pid', 'hostname', 'module', 'msg'])
-      const extras: string[] = []
-      for (const [k, v] of Object.entries(json)) {
-        if (skipKeys.has(k)) continue
-        if (v === null || v === undefined) continue
-        if (typeof v === 'object') {
-          extras.push(`${k}=${JSON.stringify(v)}`)
-        } else {
-          extras.push(`${k}=${v}`)
-        }
-      }
-      const message = extras.length > 0
-        ? `${json.msg || ''}  ${extras.join(' ')}`
-        : (json.msg || '')
-
-      return { id, timestamp, tag, message: message.trim(), level, source, raw }
-    } catch {
-      // JSON 解析失敗，fallback 到 PM2 格式
-    }
-  }
-
-  // PM2 格式：'2026-03-01 08:16:30: ...'
+  // 2. PM2 時間戳前綴：'2026-03-01 08:16:30: ...'
   const match = raw.match(/^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}):\s*(.*)$/)
 
   let timestamp = ''
@@ -76,9 +91,13 @@ export function parseLogLine(raw: string, source: 'out' | 'error'): ParsedLogLin
   if (match) {
     timestamp = match[1]
     rest = match[2]
+
+    // 3. PM2 時間戳 + Pino JSON：'2026-03-01 08:16:30: {"level":30,...}'
+    const pm2PinoResult = parsePinoJson(rest, timestamp, id, source, raw)
+    if (pm2PinoResult) return pm2PinoResult
   }
 
-  // 提取 [Tag]
+  // 4. 純 PM2 文字格式
   const tagMatch = rest.match(/^\[([^\]]+)\]\s*(.*)$/)
   const tag = tagMatch ? `[${tagMatch[1]}]` : null
   const message = tagMatch ? tagMatch[2] : rest
@@ -96,6 +115,8 @@ const NOISE_PATTERNS = [
   /^\[Socket\]\s*(連接|斷開):/,
   /^\[Socket\]\s*\S+\s*(訂閱對話|取消訂閱|訂閱 admin logs|取消訂閱 admin logs)/,
   /^\[callClaude\]\s*streaming chunk #\d+/,
+  /^\[uiux-generation\]\s*streaming chunk/,
+  /^\[guest-cleanup\]\s*無過期訪客/,
 ]
 
 /**
