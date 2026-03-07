@@ -1,5 +1,6 @@
 import { recordLlmUsage } from '../db/client'
 import { createLogger } from '../lib/logger'
+import { getAnthropicHeaders, MODEL } from '../lib/anthropic'
 import { safeParseJson } from '../utils/safe-parse-json'
 import { ClarifyItem, TechnicalContext } from './bdd-session'
 import { LlmTrackingContext } from './classifier'
@@ -60,25 +61,15 @@ async function callClaude(
   outputTokens?: number
   error?: string
 }> {
-  const apiKey = process.env.ANTHROPIC_API_KEY
-
-  if (!apiKey) {
-    return { success: false, error: 'ANTHROPIC_API_KEY not configured' }
-  }
-
   let lastError: string = 'Unknown error'
 
   for (let attempt = 1; attempt <= RETRY_MAX; attempt++) {
     try {
       const response = await fetch('https://api.anthropic.com/v1/messages', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-api-key': apiKey,
-          'anthropic-version': '2023-06-01',
-        },
+        headers: getAnthropicHeaders(),
         body: JSON.stringify({
-          model: 'claude-sonnet-4-6',
+          model: MODEL.SONNET,
           max_tokens: options.maxTokens || 8192,
           temperature: options.temperature || 0.2,
           system: systemPrompt,
@@ -347,7 +338,7 @@ ${schemaHints}` : ''}`
   if (response.inputTokens && response.outputTokens) {
     const costUsd = (response.inputTokens * SONNET_PRICING.input + response.outputTokens * SONNET_PRICING.output) / 1000000
     await recordLlmUsage({
-      model: 'claude-sonnet-4-6',
+      model: MODEL.SONNET,
       inputTokens: response.inputTokens,
       outputTokens: response.outputTokens,
       costUsd,
@@ -482,7 +473,7 @@ ${schemaHints}` : ''}`
   if (response.inputTokens && response.outputTokens) {
     const costUsd = (response.inputTokens * SONNET_PRICING.input + response.outputTokens * SONNET_PRICING.output) / 1000000
     await recordLlmUsage({
-      model: 'claude-sonnet-4-6',
+      model: MODEL.SONNET,
       inputTokens: response.inputTokens,
       outputTokens: response.outputTokens,
       costUsd,
@@ -729,7 +720,7 @@ ${featureSchemaHints}` : ''}`
   if (response.inputTokens && response.outputTokens) {
     const costUsd = (response.inputTokens * SONNET_PRICING.input + response.outputTokens * SONNET_PRICING.output) / 1000000
     await recordLlmUsage({
-      model: 'claude-sonnet-4-6',
+      model: MODEL.SONNET,
       inputTokens: response.inputTokens,
       outputTokens: response.outputTokens,
       costUsd,
@@ -1031,7 +1022,7 @@ ${decisions}` : ''}
     if (response.inputTokens && response.outputTokens) {
       const costUsd = (response.inputTokens * SONNET_PRICING.input + response.outputTokens * SONNET_PRICING.output) / 1000000
       await recordLlmUsage({
-        model: 'claude-sonnet-4-6',
+        model: MODEL.SONNET,
         inputTokens: response.inputTokens,
         outputTokens: response.outputTokens,
         costUsd,
@@ -1178,7 +1169,7 @@ ${decisions || '（無額外決策）'}`
   if (response.inputTokens && response.outputTokens) {
     const costUsd = (response.inputTokens * SONNET_PRICING.input + response.outputTokens * SONNET_PRICING.output) / 1000000
     await recordLlmUsage({
-      model: 'claude-sonnet-4-6',
+      model: MODEL.SONNET,
       inputTokens: response.inputTokens,
       outputTokens: response.outputTokens,
       costUsd,

@@ -1,5 +1,6 @@
 import * as yaml from 'js-yaml'
 import { recordLlmUsage } from '../db/client'
+import { getAnthropicHeaders, MODEL } from '../lib/anthropic'
 import { LlmTrackingContext } from './classifier'
 import { createLogger } from '../lib/logger'
 
@@ -66,24 +67,15 @@ async function callClaude(
   outputTokens?: number
   error?: string
 }> {
-  const apiKey = process.env.ANTHROPIC_API_KEY
-  if (!apiKey) {
-    return { success: false, error: 'ANTHROPIC_API_KEY not configured' }
-  }
-
   let lastError = 'Unknown error'
 
   for (let attempt = 1; attempt <= RETRY_MAX; attempt++) {
     try {
       const response = await fetch('https://api.anthropic.com/v1/messages', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-api-key': apiKey,
-          'anthropic-version': '2023-06-01',
-        },
+        headers: getAnthropicHeaders(),
         body: JSON.stringify({
-          model: 'claude-sonnet-4-6',
+          model: MODEL.SONNET,
           max_tokens: options.maxTokens || 8192,
           temperature: options.temperature || 0.2,
           system: systemPrompt,
@@ -335,7 +327,7 @@ ${entityMapping}
   if (response.inputTokens && response.outputTokens && trackingContext) {
     const costUsd = (response.inputTokens * SONNET_PRICING.input + response.outputTokens * SONNET_PRICING.output) / 1000000
     await recordLlmUsage({
-      model: 'claude-sonnet-4-6',
+      model: MODEL.SONNET,
       inputTokens: response.inputTokens,
       outputTokens: response.outputTokens,
       costUsd,

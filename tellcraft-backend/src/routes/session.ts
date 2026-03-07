@@ -5,6 +5,8 @@
 import { Router, Request, Response } from 'express'
 import { query, queryOne } from '../db/client'
 import { requireAuth, optionalAuth } from '../middleware/auth'
+import { validateBody } from '../middleware/validate'
+import { initializeSessionSchema } from '../schemas/session'
 import crypto from 'crypto'
 import { getCreditLimit, getProjectLimit, isCreditExhausted, CREDIT_LIMIT_ERROR_CODE } from '../config/plans'
 import { createLogger } from '../lib/logger'
@@ -17,13 +19,9 @@ const router: Router = Router()
  * POST /api/session/initialize
  * 初始化會話（支援匿名用戶）
  */
-router.post('/initialize', optionalAuth, async (req: Request, res: Response) => {
+router.post('/initialize', optionalAuth, validateBody(initializeSessionSchema), async (req: Request, res: Response) => {
   try {
-    const { anonymousId, conversationId, createNew } = req.body as {
-      anonymousId?: string
-      conversationId?: string
-      createNew?: boolean
-    }
+    const { anonymousId, conversationId, createNew } = req.body
 
     let userId: string
     let isNewUser = false

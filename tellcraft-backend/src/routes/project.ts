@@ -1,5 +1,7 @@
 import { Router, type Router as RouterType } from 'express'
 import { requireAuth, requireActiveSubscription } from '../middleware/auth'
+import { validateBody } from '../middleware/validate'
+import { createProjectSchema, templateOverridesSchema } from '../schemas/project'
 import * as db from '../db/client'
 import { toVercelSlug, deleteVercelProject } from '../services/deployer'
 import { getProjectLimit } from '../config/plans'
@@ -186,15 +188,11 @@ router.get('/:id', requireAuth, async (req, res) => {
  * POST /api/project
  * 創建專案
  */
-router.post('/', requireAuth, requireActiveSubscription, async (req, res) => {
+router.post('/', requireAuth, requireActiveSubscription, validateBody(createProjectSchema), async (req, res) => {
   try {
     const userId = req.user!.id
     const userPlan = req.user!.plan
     const { name, description } = req.body
-
-    if (!name) {
-      return res.status(400).json({ error: 'Project name is required' })
-    }
 
     // 檢查專案數量限制
     const { rows: [{ count }] } = await db.query<{ count: string }>(
@@ -900,15 +898,11 @@ router.get('/:id/template-overrides', requireAuth, async (req, res) => {
  * PUT /api/project/:id/template-overrides
  * 更新專案的模板客製化
  */
-router.put('/:id/template-overrides', requireAuth, async (req, res) => {
+router.put('/:id/template-overrides', requireAuth, validateBody(templateOverridesSchema), async (req, res) => {
   try {
     const { id } = req.params
     const userId = req.user!.id
-    const { overrides } = req.body as { overrides: Record<string, Record<string, string>> }
-
-    if (!overrides || typeof overrides !== 'object') {
-      return res.status(400).json({ error: 'Invalid overrides format' })
-    }
+    const { overrides } = req.body
 
     // 驗證專案擁有權
     const project = await db.queryOne<{ user_id: string }>(

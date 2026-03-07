@@ -11,6 +11,7 @@ import { sendMessage, saveFlowState, getFlowState, deleteFlowState, deductCredit
 import { CREDIT_COSTS } from '../config/plans'
 import { createLogger } from '../lib/logger'
 import { executeIteration } from '../services/iteration-skill'
+import { handleJobFinalFailure } from '../services/job-failure-handler'
 
 // Phase routing
 import { routePhase, type ContinueFlowData } from './phase-router'
@@ -92,6 +93,9 @@ export function createOrchestratorWorker(
 
   worker.on('failed', (job, err) => {
     logger.error({ err, jobId: job?.id }, 'Job 失敗')
+    handleJobFinalFailure(job, err, io).catch(fatalErr => {
+      logger.error({ err: fatalErr }, 'handleJobFinalFailure itself failed')
+    })
   })
 
   return worker

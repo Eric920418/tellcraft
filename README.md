@@ -521,9 +521,16 @@ tellcraft-backend/
 │   │   ├── safe-parse-json.ts   # LLM JSON 安全解析（四層防禦，全後端共用）
 │   │   └── is-confirmation.ts   # 確認語意偵測（三層：否定詞排除 → 短詞精確 → 長片語 includes）
 │   ├── routes/                   # API 路由（conversation/project/session/bdd/templates/operations/auth/health/upload/line-bot）
+│   ├── lib/
+│   │   ├── env.ts               # Zod 環境變數驗證，啟動時快速失敗
+│   │   ├── anthropic.ts         # 統一 Anthropic Client + MODEL 常數
+│   │   └── logger.ts            # Pino logger 工廠
+│   ├── schemas/                  # Zod API 請求 schema（conversation/session/operations/bdd/project）
 │   ├── db/client.ts              # PostgreSQL 客戶端
-│   └── middleware/auth.ts        # JWT 認證中間件
-├── migrations/           # DB 遷移（001-012）
+│   └── middleware/
+│       ├── auth.ts              # JWT 認證中間件
+│       └── validate.ts          # Zod 請求驗證中間件（validateBody/Query/Params）
+├── migrations/           # DB 遷移（001-013）
 └── ecosystem.config.js   # PM2 配置
 
 bdd-spec/                 # BDD Skill 定義（instructions/ + rules/ + scripts/）
@@ -631,6 +638,15 @@ psql "$DATABASE_URL" -f tellcraft-backend/migrations/xxx.sql
 
 <details>
 <summary><h2>開發更新紀錄（點擊展開）</h2></summary>
+
+### Phase 2：後端基礎設施統一（2026-03-07）
+
+4 項後端技術債清理，提升開發體驗和生產可靠性：
+
+1. **環境變數驗證**（`lib/env.ts`）：Zod 4 schema 三層分類（REQUIRED/OPTIONAL+預設/功能開關），啟動時 `validateEnv()` 快速失敗 + 明確錯誤訊息。index.ts/db/client.ts/middleware/auth.ts/routes/auth.ts 統一改用 `getEnv()` 取得型別安全的環境變數
+2. **Anthropic Client 統一**（`lib/anthropic.ts`）：全 codebase 唯一的 `getAnthropicClient()` + `MODEL.SONNET`/`MODEL.HAIKU` 常數。消除 7 份重複 `getAnthropicClient()`、59 處硬編碼模型 ID。SDK 用戶（6 檔）改 import 單例；fetch 用戶（10 檔）改用 `getAnthropicHeaders()` + MODEL 常數
+3. **Zod API 驗證**（`middleware/validate.ts` + `schemas/`）：`validateBody(schema)` 中間件工廠，高風險路由全覆蓋 — conversation（sendMessage/reply）、session（initialize）、operations（4 端點）、bdd（6 端點）、project（create/template-overrides），移除 ~100 行手動 `if (!req.body.xxx)` 驗證
+4. **BullMQ DLQ**（`services/job-failure-handler.ts` + `migrations/013`）：`job_failures` 表持久化最終失敗、Socket.io 推送用戶錯誤消息+重試按鈕、FATAL log 觸發告警、`removeOnFail.age` 24h→7d
 
 ### Fast Build 自動 Prompt 擴展（2026-03-06）
 

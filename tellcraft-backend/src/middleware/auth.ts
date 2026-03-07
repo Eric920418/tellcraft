@@ -2,15 +2,13 @@ import { Request, Response, NextFunction } from 'express'
 import jwt from 'jsonwebtoken'
 import Redis from 'ioredis'
 import { getUser, queryOne } from '../db/client'
+import { getEnv } from '../lib/env'
 import { createLogger } from '../lib/logger'
 
 const logger = createLogger('auth')
 
-// JWT 配置
-if (!process.env.JWT_SECRET) {
-  throw new Error('CRITICAL: JWT_SECRET environment variable is not set!')
-}
-const JWT_SECRET: string = process.env.JWT_SECRET
+// JWT 配置（已在啟動時由 validateEnv() 驗證）
+const JWT_SECRET: string = getEnv().JWT_SECRET
 
 // Redis client（由 index.ts 注入，用於 token 黑名單）
 let redisClient: Redis | null = null

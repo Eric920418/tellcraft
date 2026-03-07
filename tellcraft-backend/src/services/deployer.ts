@@ -7,7 +7,8 @@ import { promisify } from 'util'
 import * as os from 'os'
 import * as path from 'path'
 import * as fsPromises from 'fs/promises'
-import Anthropic from '@anthropic-ai/sdk'
+import { getAnthropicClient, MODEL } from '../lib/anthropic'
+import { getEnv } from '../lib/env'
 import * as db from '../db/client'
 import { createLogger } from '../lib/logger'
 
@@ -20,7 +21,7 @@ const VERCEL_API = 'https://api.vercel.com'
 // 部署並發限流器（防止同時跑太多 npm install + next build）
 // ============================================================
 
-const DEPLOY_MAX_CONCURRENT = parseInt(process.env.DEPLOY_MAX_CONCURRENT || '3', 10)
+const DEPLOY_MAX_CONCURRENT = getEnv().DEPLOY_MAX_CONCURRENT
 let deployActiveCount = 0
 const deployWaitQueue: Array<() => void> = []
 
@@ -116,23 +117,6 @@ export type ProgressCallback = (progress: {
   percent: number
   step: string
 }) => Promise<void>
-
-// ============================================================
-// Anthropic Client（複用 quality-gate.ts 的模式）
-// ============================================================
-
-let anthropicClient: Anthropic | null = null
-
-function getAnthropicClient(): Anthropic {
-  if (!anthropicClient) {
-    const apiKey = process.env.CLAUDE_API_KEY || process.env.ANTHROPIC_API_KEY
-    if (!apiKey) {
-      throw new Error('缺少 CLAUDE_API_KEY 或 ANTHROPIC_API_KEY')
-    }
-    anthropicClient = new Anthropic({ apiKey })
-  }
-  return anthropicClient
-}
 
 // ============================================================
 // 本地 Build 驗證 — 類型定義
@@ -688,7 +672,7 @@ export async function prepareDeployment(
   userId: string
 ): Promise<DeployPreCheckResult> {
   // 1. 檢查 VERCEL_ACCESS_TOKEN
-  if (!process.env.VERCEL_ACCESS_TOKEN) {
+  if (!getEnv().VERCEL_ACCESS_TOKEN) {
     return { ready: false, error: '缺少 VERCEL_ACCESS_TOKEN 環境變數，無法部署。' }
   }
 
@@ -1293,8 +1277,8 @@ export default function RootLayout({
  * 建立 Vercel Project
  */
 async function createVercelProject(name: string): Promise<VercelProject | null> {
-  const token = process.env.VERCEL_ACCESS_TOKEN!
-  const teamId = process.env.VERCEL_TEAM_ID
+  const token = getEnv().VERCEL_ACCESS_TOKEN!
+  const teamId = getEnv().VERCEL_TEAM_ID
 
   const params = new URLSearchParams()
   if (teamId) params.append('teamId', teamId)
@@ -1338,8 +1322,8 @@ async function createVercelProject(name: string): Promise<VercelProject | null> 
  * 關閉 Vercel 專案的 Deployment Protection，讓所有人都能訪問
  */
 async function disableDeploymentProtection(projectName: string): Promise<void> {
-  const token = process.env.VERCEL_ACCESS_TOKEN!
-  const teamId = process.env.VERCEL_TEAM_ID
+  const token = getEnv().VERCEL_ACCESS_TOKEN!
+  const teamId = getEnv().VERCEL_TEAM_ID
 
   const params = new URLSearchParams()
   if (teamId) params.append('teamId', teamId)
@@ -1372,8 +1356,8 @@ async function disableDeploymentProtection(projectName: string): Promise<void> {
  * 部署檔案到 Vercel
  */
 async function deployFilesToVercel(projectName: string, files: VercelFile[]): Promise<VercelDeployment | null> {
-  const token = process.env.VERCEL_ACCESS_TOKEN!
-  const teamId = process.env.VERCEL_TEAM_ID
+  const token = getEnv().VERCEL_ACCESS_TOKEN!
+  const teamId = getEnv().VERCEL_TEAM_ID
 
   const params = new URLSearchParams()
   if (teamId) params.append('teamId', teamId)
@@ -1419,8 +1403,8 @@ async function deployFilesToVercel(projectName: string, files: VercelFile[]): Pr
  * 等待部署完成
  */
 async function waitForDeploymentReady(deploymentId: string, maxWaitMs = 300000): Promise<VercelDeployment | null> {
-  const token = process.env.VERCEL_ACCESS_TOKEN!
-  const teamId = process.env.VERCEL_TEAM_ID
+  const token = getEnv().VERCEL_ACCESS_TOKEN!
+  const teamId = getEnv().VERCEL_TEAM_ID
   const startTime = Date.now()
   const pollInterval = 5000
 
@@ -1460,8 +1444,8 @@ async function waitForDeploymentReady(deploymentId: string, maxWaitMs = 300000):
  */
 async function fetchVercelBuildLogs(deploymentId: string): Promise<string> {
   try {
-    const token = process.env.VERCEL_ACCESS_TOKEN!
-    const teamId = process.env.VERCEL_TEAM_ID
+    const token = getEnv().VERCEL_ACCESS_TOKEN!
+    const teamId = getEnv().VERCEL_TEAM_ID
     const params = new URLSearchParams()
     if (teamId) params.append('teamId', teamId)
 
@@ -1521,12 +1505,12 @@ export async function rollbackToDeployment(
   projectName: string,
   targetDeploymentId: string
 ): Promise<{ success: boolean; url?: string; error?: string }> {
-  const token = process.env.VERCEL_ACCESS_TOKEN
+  const token = getEnv().VERCEL_ACCESS_TOKEN
   if (!token) {
     return { success: false, error: '缺少 VERCEL_ACCESS_TOKEN' }
   }
 
-  const teamId = process.env.VERCEL_TEAM_ID
+  const teamId = getEnv().VERCEL_TEAM_ID
   const params = new URLSearchParams()
   if (teamId) params.append('teamId', teamId)
 
@@ -1599,12 +1583,12 @@ export async function rollbackToDeployment(
 export async function deleteVercelProject(
   projectName: string
 ): Promise<{ success: boolean; error?: string }> {
-  const token = process.env.VERCEL_ACCESS_TOKEN
+  const token = getEnv().VERCEL_ACCESS_TOKEN
   if (!token) {
     return { success: false, error: '缺少 VERCEL_ACCESS_TOKEN' }
   }
 
-  const teamId = process.env.VERCEL_TEAM_ID
+  const teamId = getEnv().VERCEL_TEAM_ID
   const params = new URLSearchParams()
   if (teamId) params.append('teamId', teamId)
 
@@ -2042,7 +2026,7 @@ ${codeBlocks.join('\n\n')}
     try {
       // 使用 streaming 避免 Anthropic SDK 的非串流超時限制
       const stream = client.messages.stream({
-        model: 'claude-haiku-4-5-20251001',
+        model: MODEL.HAIKU,
         max_tokens: 24000,
         messages: [{ role: 'user', content: prompt }],
       })
@@ -2055,7 +2039,7 @@ ${codeBlocks.join('\n\n')}
         const outputTokens = usage.output_tokens || 0
         const cost = (inputTokens * 0.8 + outputTokens * 4) / 1_000_000
         db.recordLlmUsage({
-          model: 'claude-haiku-4-5-20251001',
+          model: MODEL.HAIKU,
           inputTokens,
           outputTokens,
           costUsd: cost,

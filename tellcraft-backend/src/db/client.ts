@@ -1,12 +1,13 @@
 import { Pool, PoolClient, QueryResult, QueryResultRow } from 'pg'
+import { getEnv } from '../lib/env'
 import { createLogger } from '../lib/logger'
 
 const logger = createLogger('db')
 
 // 連接池
 const pool = new Pool({
-  connectionString: process.env.DATABASE_URL,
-  max: parseInt(process.env.DB_POOL_MAX || '15', 10),
+  connectionString: getEnv().DATABASE_URL,
+  max: getEnv().DB_POOL_MAX,
   idleTimeoutMillis: 30000,
   connectionTimeoutMillis: 5000,
   keepAlive: true,

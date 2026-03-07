@@ -3,7 +3,7 @@
  * 將 ISA 格式的 BDD Feature Files 翻譯為前端可消費的 UI 需求規格
  */
 
-import Anthropic from '@anthropic-ai/sdk'
+import { getAnthropicClient, MODEL } from '../lib/anthropic'
 import { recordLlmUsage } from '../db/client'
 import { safeParseJson } from '../utils/safe-parse-json'
 import { createLogger } from '../lib/logger'
@@ -65,22 +65,6 @@ interface TranslateResult {
   error?: string
 }
 
-// ============================================================
-// Anthropic 單例
-// ============================================================
-
-let anthropicClient: Anthropic | null = null
-
-function getAnthropicClient(): Anthropic {
-  if (!anthropicClient) {
-    const apiKey = process.env.CLAUDE_API_KEY || process.env.ANTHROPIC_API_KEY
-    if (!apiKey) {
-      throw new Error('缺少 CLAUDE_API_KEY 或 ANTHROPIC_API_KEY')
-    }
-    anthropicClient = new Anthropic({ apiKey })
-  }
-  return anthropicClient
-}
 
 // ============================================================
 // 核心函數
@@ -194,7 +178,7 @@ ${bddSpec}
     for (let attempt = 1; attempt <= RETRY_MAX; attempt++) {
       try {
         const stream = anthropic.messages.stream({
-          model: 'claude-haiku-4-5-20251001',
+          model: MODEL.HAIKU,
           max_tokens: 4096,
           temperature: 0.1,
           system: systemPrompt,
@@ -210,7 +194,7 @@ ${bddSpec}
           const outputTokens = usage.output_tokens || 0
           const cost = (inputTokens * 0.8 + outputTokens * 4) / 1_000_000
           recordLlmUsage({
-            model: 'claude-haiku-4-5-20251001',
+            model: MODEL.HAIKU,
             inputTokens,
             outputTokens,
             costUsd: cost,

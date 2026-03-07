@@ -94,6 +94,11 @@ pm2 describe tellcraft-backend            # 詳細資訊（記憶體/重啟次�
 | **LINE Bot Handler** | `services/line-bot-handler.ts` | LINE Bot 業務邏輯（Follow/Text/Postback 處理） |
 | **LINE Message Translator** | `services/line-message-translator.ts` | sendMessage → LINE Messages 全量翻譯 |
 | **LINE Full Push** | `services/line-full-push.ts` | LINE 來源對話的全量翻譯推送 |
+| **Env** | `lib/env.ts` | Zod 環境變數驗證，啟動時快速失敗 |
+| **Anthropic** | `lib/anthropic.ts` | 統一 Client 單例 + MODEL 常數（SONNET/HAIKU） |
+| **Validate** | `middleware/validate.ts` | Zod 請求驗證中間件（validateBody/Query/Params） |
+| **Schemas** | `schemas/*.ts` | API 路由 Zod schema 定義（conversation/session/operations/bdd/project） |
+| **Job Failure** | `services/job-failure-handler.ts` | BullMQ 最終失敗持久化 + 用戶通知 |
 
 **前端（`app/`）— 大檔案優先閱讀**
 
@@ -321,4 +326,12 @@ Layer 5: sanitizeCodeForDeploy 修復 7 — useSearchParams Suspense boundary �
 
 前端（`.env.local`）：`VPS_API_URL`, `NEXT_PUBLIC_VPS_API_URL`, `NEXT_PUBLIC_VPS_WS_URL`, `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `NEXT_PUBLIC_LIFF_ID`
 
-後端（`tellcraft-backend/.env`）：`DATABASE_URL`, `REDIS_URL`, `JWT_SECRET`, `ANTHROPIC_API_KEY`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `LINE_CHANNEL_ID`, `LINE_CHANNEL_SECRET`, `LINE_BOT_CHANNEL_SECRET`, `LINE_MESSAGING_CHANNEL_ACCESS_TOKEN`, `LIFF_ID`, `VERCEL_ACCESS_TOKEN`, `VERCEL_TEAM_ID`, `SUPABASE_SERVICE_ROLE_KEY`, `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`, `PORKBUN_API_KEY`, `PORKBUN_SECRET_KEY`, `UPLOAD_DIR`, `UPLOAD_BASE_URL`
+後端（`tellcraft-backend/.env`）：所有環境變數定義在 `lib/env.ts` 的 Zod schema 中，分三層（REQUIRED/OPTIONAL+預設/功能開關）。啟動時 `validateEnv()` 驗證，缺必要變數會立即 crash。
+
+## Phase 3 待辦：效能與可觀察性
+
+| 步驟 | 內容 | 說明 |
+|------|------|------|
+| **3-1** | 消息列表虛擬化 | `@tanstack/react-virtual`，100 條消息 DOM < 30 個 |
+| **3-2** | 前端錯誤追蹤 Sentry | `@sentry/nextjs`，crash 自動上報 |
+| **3-4** | LLM Usage 追蹤強化 | `lib/anthropic.ts` 加 `callLLM()` wrapper，自動記 token + cost |

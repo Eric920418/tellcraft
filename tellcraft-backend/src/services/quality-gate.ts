@@ -4,7 +4,7 @@
  * 基於 regex/字串匹配的靜態分析，發現 critical 問題時用 LLM 自動修復
  */
 
-import Anthropic from '@anthropic-ai/sdk'
+import { getAnthropicClient, MODEL } from '../lib/anthropic'
 import { GeneratedComponent } from './uiux-generation'
 import { recordLlmUsage } from '../db/client'
 import { createLogger } from '../lib/logger'
@@ -54,22 +54,6 @@ interface GeneratedCode {
 
 type DesignTier = 'functional' | 'creative'
 
-// ============================================================
-// Anthropic Client（複用 uiux-generation 的模式）
-// ============================================================
-
-let anthropicClient: Anthropic | null = null
-
-function getAnthropicClient(): Anthropic {
-  if (!anthropicClient) {
-    const apiKey = process.env.CLAUDE_API_KEY || process.env.ANTHROPIC_API_KEY
-    if (!apiKey) {
-      throw new Error('缺少 CLAUDE_API_KEY 或 ANTHROPIC_API_KEY')
-    }
-    anthropicClient = new Anthropic({ apiKey })
-  }
-  return anthropicClient
-}
 
 // ============================================================
 // 輔助：在代碼中逐行掃描
@@ -527,7 +511,7 @@ ${codeBlocks.join('\n\n')}
 
   try {
     const stream = client.messages.stream({
-      model: 'claude-haiku-4-5-20251001',
+      model: MODEL.HAIKU,
       max_tokens: 16000,
       messages: [{ role: 'user', content: prompt }],
     })
@@ -540,7 +524,7 @@ ${codeBlocks.join('\n\n')}
       const outputTokens = usage.output_tokens || 0
       const cost = (inputTokens * 0.8 + outputTokens * 4) / 1_000_000
       recordLlmUsage({
-        model: 'claude-haiku-4-5-20251001',
+        model: MODEL.HAIKU,
         inputTokens,
         outputTokens,
         costUsd: cost,

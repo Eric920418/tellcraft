@@ -7,6 +7,7 @@
 import type { DesignTier, DesignSystem, TemplateData } from './uiux-generation'
 import { matchTemplates } from './template-matcher'
 import { queryOne, recordLlmUsage } from '../db/client'
+import { getAnthropicHeaders, MODEL } from '../lib/anthropic'
 import { createLogger } from '../lib/logger'
 
 const logger = createLogger('fast-build-generation')
@@ -684,9 +685,6 @@ export async function generateFastConcept(
   primaryColor: string,
   context?: { userId?: string; conversationId?: string }
 ): Promise<FastConcept | null> {
-  const apiKey = process.env.ANTHROPIC_API_KEY
-  if (!apiKey) return null
-
   try {
     const isChinese = /[\u4e00-\u9fff\u3400-\u4dbf]/.test(description)
     const systemPrompt = isChinese
@@ -705,13 +703,9 @@ Make the concept unique. signatureElement must be specific enough to code (e.g. 
 
     const resp = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': apiKey,
-        'anthropic-version': '2023-06-01',
-      },
+      headers: getAnthropicHeaders(),
       body: JSON.stringify({
-        model: 'claude-haiku-4-5-20251001',
+        model: MODEL.HAIKU,
         max_tokens: 300,
         temperature: 0.7,
         system: systemPrompt,
@@ -734,7 +728,7 @@ Make the concept unique. signatureElement must be specific enough to code (e.g. 
       const outputTokens = data.usage.output_tokens || 0
       const cost = (inputTokens * HAIKU_PRICING.input + outputTokens * HAIKU_PRICING.output) / 1_000_000
       recordLlmUsage({
-        model: 'claude-haiku-4-5-20251001',
+        model: MODEL.HAIKU,
         inputTokens,
         outputTokens,
         costUsd: cost,
@@ -812,9 +806,6 @@ export async function expandBriefPrompt(
     }
   }
 
-  const apiKey = process.env.ANTHROPIC_API_KEY
-  if (!apiKey) return null
-
   try {
     const pagesStr = pages.join('、')
     const label = PRODUCT_TYPE_LABELS[productType] || '網站'
@@ -845,13 +836,9 @@ Rules:
 
     const resp = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': apiKey,
-        'anthropic-version': '2023-06-01',
-      },
+      headers: getAnthropicHeaders(),
       body: JSON.stringify({
-        model: 'claude-haiku-4-5-20251001',
+        model: MODEL.HAIKU,
         max_tokens: 1000,
         temperature: 0.6,
         system: systemPrompt,
@@ -874,7 +861,7 @@ Rules:
       const outputTokens = data.usage.output_tokens || 0
       const cost = (inputTokens * HAIKU_PRICING.input + outputTokens * HAIKU_PRICING.output) / 1_000_000
       recordLlmUsage({
-        model: 'claude-haiku-4-5-20251001',
+        model: MODEL.HAIKU,
         inputTokens,
         outputTokens,
         costUsd: cost,

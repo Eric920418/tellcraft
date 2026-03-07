@@ -1,5 +1,6 @@
 import { recordLlmUsage } from '../db/client'
 import { safeParseJson } from '../utils/safe-parse-json'
+import { getAnthropicHeaders, MODEL } from '../lib/anthropic'
 import { ClarifyItem } from './bdd-session'
 import { LlmTrackingContext } from './classifier'
 import { DecisionSummary } from './clarify-dedup'
@@ -36,13 +37,6 @@ export async function runPrdDiscovery(
   esDocumentContent?: string,
   partialSpecContext?: string
 ): Promise<PrdDiscoveryResult> {
-  const apiKey = process.env.ANTHROPIC_API_KEY
-
-  if (!apiKey) {
-    logger.error('ANTHROPIC_API_KEY 未設定')
-    return { success: false, error: 'API key not configured' }
-  }
-
   // 建立已釐清的 Q&A 列表（包含問題和答案）
   const existingQA = existingItems
     ?.filter(item => item.answer)
@@ -262,13 +256,9 @@ ${partialSpecContext}
       try {
         response = await fetch('https://api.anthropic.com/v1/messages', {
           method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'x-api-key': apiKey,
-            'anthropic-version': '2023-06-01',
-          },
+          headers: getAnthropicHeaders(),
           body: JSON.stringify({
-            model: 'claude-sonnet-4-6',
+            model: MODEL.SONNET,
             max_tokens: 8192,
             temperature: 0.2,
             system: systemPrompt,
@@ -323,7 +313,7 @@ ${partialSpecContext}
     const costUsd = (inputTokens * SONNET_PRICING.input + outputTokens * SONNET_PRICING.output) / 1000000
 
     await recordLlmUsage({
-      model: 'claude-sonnet-4-6',
+      model: MODEL.SONNET,
       inputTokens,
       outputTokens,
       costUsd,

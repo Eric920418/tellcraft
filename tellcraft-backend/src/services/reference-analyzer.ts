@@ -4,9 +4,10 @@
  * 三層降級：vision → metadata_only → text_only
  */
 
-import Anthropic from '@anthropic-ai/sdk'
 import * as cheerio from 'cheerio'
 import { recordLlmUsage } from '../db/client'
+import { getAnthropicClient, MODEL } from '../lib/anthropic'
+import { getEnv } from '../lib/env'
 import { createLogger } from '../lib/logger'
 
 const logger = createLogger('reference-analyzer')
@@ -28,19 +29,6 @@ interface LlmTrackingContext {
   userId?: string
   conversationId?: string
   purpose?: string
-}
-
-// ── Anthropic client（獨立於 uiux-generation.ts）──
-
-let anthropicClient: Anthropic | null = null
-
-function getClient(): Anthropic {
-  if (!anthropicClient) {
-    const apiKey = process.env.CLAUDE_API_KEY || process.env.ANTHROPIC_API_KEY
-    if (!apiKey) throw new Error('缺少 ANTHROPIC_API_KEY')
-    anthropicClient = new Anthropic({ apiKey })
-  }
-  return anthropicClient
 }
 
 // ── URL 偵測 + SSRF 防護 ──
@@ -118,7 +106,7 @@ async function takeScreenshot(url: string): Promise<Buffer | null> {
   try {
     const puppeteer = await import('puppeteer-core')
     const browser = await puppeteer.default.launch({
-      executablePath: process.env.CHROMIUM_PATH || '/usr/bin/chromium-browser',
+      executablePath: getEnv().CHROMIUM_PATH || '/usr/bin/chromium-browser',
       headless: true,
       args: [
         '--no-sandbox',
@@ -162,7 +150,7 @@ async function analyzeWithVision(
   trackingContext?: LlmTrackingContext
 ): Promise<string | null> {
   try {
-    const client = getClient()
+    const client = getAnthropicClient()
     const base64 = screenshot.toString('base64')
 
     const systemPrompt = `你是一位專業的 UI/UX 設計分析師。分析這個網站截圖的視覺設計特徵。
@@ -188,7 +176,7 @@ ${metadata.themeColor ? `- 主題色: ${metadata.themeColor}` : ''}
 最後用 2-3 句話總結這個網站的設計精髓，說明哪些設計決策值得參考。`
 
     const response = await client.messages.create({
-      model: 'claude-haiku-4-5-20251001',
+      model: MODEL.HAIKU,
       max_tokens: 1024,
       system: systemPrompt,
       messages: [{
@@ -213,7 +201,7 @@ ${metadata.themeColor ? `- 主題色: ${metadata.themeColor}` : ''}
     // 記錄 LLM 用量
     if (response.usage) {
       recordLlmUsage({
-        model: 'claude-haiku-4-5-20251001',
+        model: MODEL.HAIKU,
         inputTokens: response.usage.input_tokens,
         outputTokens: response.usage.output_tokens,
         costUsd: (response.usage.input_tokens * 0.8 + response.usage.output_tokens * 4) / 1_000_000,

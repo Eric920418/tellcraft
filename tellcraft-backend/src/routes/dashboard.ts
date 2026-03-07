@@ -928,4 +928,35 @@ router.get('/admin/logs', requireAdmin, async (req: Request, res: Response) => {
   }
 })
 
+// ============================================================
+// Job Failures（BullMQ 最終失敗記錄）
+// ============================================================
+
+router.get('/job-failures', requireAdmin, async (req: Request, res: Response) => {
+  try {
+    const limit = Math.min(parseInt(String(req.query.limit) || '50', 10), 200)
+    const offset = parseInt(String(req.query.offset) || '0', 10)
+
+    const rows = await query(
+      `SELECT id, job_id, job_name, conversation_id, user_id, error, resolved_at, created_at
+       FROM job_failures
+       ORDER BY created_at DESC
+       LIMIT $1 OFFSET $2`,
+      [limit, offset]
+    )
+
+    const countResult = await queryOne<{ count: string }>(
+      'SELECT COUNT(*) as count FROM job_failures WHERE resolved_at IS NULL'
+    )
+
+    res.json({
+      failures: rows.rows,
+      unresolvedCount: parseInt(countResult?.count || '0', 10),
+    })
+  } catch (error) {
+    logger.error({ err: error }, '獲取 job failures 失敗')
+    res.status(500).json({ error: '獲取 job failures 失敗' })
+  }
+})
+
 export default router

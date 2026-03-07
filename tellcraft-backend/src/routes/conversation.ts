@@ -3,6 +3,8 @@ import { Queue } from 'bullmq'
 import Redis from 'ioredis'
 import crypto from 'crypto'
 import { optionalAuth } from '../middleware/auth'
+import { validateBody } from '../middleware/validate'
+import { sendMessageSchema, replyMessageSchema } from '../schemas/conversation'
 import * as db from '../db/client'
 import { getCreditLimit, isCreditExhausted, CREDIT_LIMIT_ERROR_CODE } from '../config/plans'
 import { createLogger } from '../lib/logger'
@@ -125,7 +127,7 @@ async function getUserCreditQuotaStatus(userId: string): Promise<{
  * 1. Bearer token 認證（前端直接呼叫）
  * 2. userId 在 body 中（server action 呼叫）
  */
-router.post('/:id/message', optionalAuth, async (req, res) => {
+router.post('/:id/message', optionalAuth, validateBody(sendMessageSchema), async (req, res) => {
   try {
     const { id: conversationId } = req.params
     const { message, projectId, userId: bodyUserId, mode, locale, imageUrls } = req.body
@@ -135,30 +137,7 @@ router.post('/:id/message', optionalAuth, async (req, res) => {
       return res.status(401).json({ error: 'Missing userId or authentication' })
     }
 
-    if (!message || !projectId) {
-      return res.status(400).json({ error: 'Missing message or projectId' })
-    }
-
-    // 驗證 imageUrls（可選）
-    if (imageUrls !== undefined) {
-      if (!Array.isArray(imageUrls) || imageUrls.length > 3) {
-        return res.status(400).json({ error: 'imageUrls must be an array with at most 3 items' })
-      }
-      for (const url of imageUrls) {
-        if (typeof url !== 'string' || !url.startsWith('https://')) {
-          return res.status(400).json({ error: 'Each imageUrl must be a valid https URL' })
-        }
-      }
-    }
-
-    // 輸入驗證：非空 + 長度限制
-    const trimmedMessage = typeof message === 'string' ? message.trim() : ''
-    if (!trimmedMessage) {
-      return res.status(400).json({ error: '訊息不能為空' })
-    }
-    if (trimmedMessage.length > 5000) {
-      return res.status(400).json({ error: `訊息過長（${trimmedMessage.length} 字），上限 5000 字` })
-    }
+    const trimmedMessage = message.trim()
 
     // ===== Guest 限制 =====
     const anonymous = await isAnonymousUser(userId)
@@ -275,7 +254,7 @@ router.post('/:id/message', optionalAuth, async (req, res) => {
  * 1. Bearer token 認證（前端直接呼叫）
  * 2. userId 在 body 中（server action 呼叫）
  */
-router.post('/:id/reply', optionalAuth, async (req, res) => {
+router.post('/:id/reply', optionalAuth, validateBody(replyMessageSchema), async (req, res) => {
   try {
     const { id: conversationId } = req.params
     const { message, projectId, taskId, specConfirmed, userId: bodyUserId, locale, imageUrls } = req.body
@@ -285,30 +264,7 @@ router.post('/:id/reply', optionalAuth, async (req, res) => {
       return res.status(401).json({ error: 'Missing userId or authentication' })
     }
 
-    if (!message || !projectId) {
-      return res.status(400).json({ error: 'Missing message or projectId' })
-    }
-
-    // 驗證 imageUrls（可選）
-    if (imageUrls !== undefined) {
-      if (!Array.isArray(imageUrls) || imageUrls.length > 3) {
-        return res.status(400).json({ error: 'imageUrls must be an array with at most 3 items' })
-      }
-      for (const url of imageUrls) {
-        if (typeof url !== 'string' || !url.startsWith('https://')) {
-          return res.status(400).json({ error: 'Each imageUrl must be a valid https URL' })
-        }
-      }
-    }
-
-    // 輸入驗證：非空 + 長度限制
-    const trimmedReply = typeof message === 'string' ? message.trim() : ''
-    if (!trimmedReply) {
-      return res.status(400).json({ error: '訊息不能為空' })
-    }
-    if (trimmedReply.length > 5000) {
-      return res.status(400).json({ error: `訊息過長（${trimmedReply.length} 字），上限 5000 字` })
-    }
+    const trimmedReply = message.trim()
 
     // ===== Guest 完成後鎖定回覆 =====
     const anonymousReply = await isAnonymousUser(userId)

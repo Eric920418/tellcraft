@@ -2,6 +2,7 @@ import Redis from 'ioredis'
 import { recordLlmUsage } from '../db/client'
 import { safeParseJson } from '../utils/safe-parse-json'
 import { createLogger } from '../lib/logger'
+import { getAnthropicHeaders, MODEL } from '../lib/anthropic'
 
 const logger = createLogger('prefilter')
 
@@ -350,11 +351,6 @@ export async function checkBuildRelevance(
   const hasWeakSignal = WEAK_SIGNALS.some(kw => lower.includes(kw))
 
   // Layer 2/3: 弱信號或無信號 → 微型 Haiku 判斷（相關性 + 具體性）
-  const apiKey = process.env.ANTHROPIC_API_KEY
-  if (!apiKey) {
-    return { relevant: true }
-  }
-
   try {
     const systemPrompt = hasWeakSignal
       ? '用戶想用快速建站工具。判斷描述是否具體到能知道「建什麼類型的網站」。同時檢查內容是否涉及有害/非法/成人/仇恨/隱私侵犯（正常的醫療資訊網站是允許的，只有診斷/測驗工具才算有害）。只回覆 JSON:\n- 夠具體：{"relevant":true}\n- 相關但太模糊（如「做一個很酷的東西」「建一個網站」）：{"relevant":true,"vague":true}\n- 與建網站無關：{"relevant":false}\n- 內容不當：{"relevant":false,"policy":"harmful|illegal|adult|hate|privacy"}'
@@ -362,13 +358,9 @@ export async function checkBuildRelevance(
 
     const resp = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': apiKey,
-        'anthropic-version': '2023-06-01',
-      },
+      headers: getAnthropicHeaders(),
       body: JSON.stringify({
-        model: 'claude-haiku-4-5-20251001',
+        model: MODEL.HAIKU,
         max_tokens: 30,
         system: systemPrompt,
         messages: [{ role: 'user', content: message }],
@@ -391,7 +383,7 @@ export async function checkBuildRelevance(
       const outputTokens = data.usage.output_tokens || 0
       const cost = (inputTokens * HAIKU_PRICING.input + outputTokens * HAIKU_PRICING.output) / 1_000_000
       recordLlmUsage({
-        model: 'claude-haiku-4-5-20251001',
+        model: MODEL.HAIKU,
         inputTokens,
         outputTokens,
         costUsd: cost,

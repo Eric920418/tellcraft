@@ -5,6 +5,8 @@
 import { Router, Request, Response } from 'express'
 import { query, queryOne } from '../db/client'
 import { requireAuth } from '../middleware/auth'
+import { validateBody } from '../middleware/validate'
+import { createGenerationSchema, createDeploymentSchema, createTaskSchema, createWebhookSchema } from '../schemas/operations'
 import crypto from 'crypto'
 import { createLogger } from '../lib/logger'
 
@@ -20,7 +22,7 @@ const router: Router = Router()
  * POST /api/operations/generations
  * 創建或更新生成記錄
  */
-router.post('/generations', requireAuth, async (req: Request, res: Response) => {
+router.post('/generations', requireAuth, validateBody(createGenerationSchema), async (req: Request, res: Response) => {
   try {
     const { projectId, status, attemptCount } = req.body
 
@@ -104,7 +106,7 @@ router.get('/generations/:projectId/latest', requireAuth, async (req: Request, r
  * POST /api/operations/deployments
  * 創建部署記錄
  */
-router.post('/deployments', requireAuth, async (req: Request, res: Response) => {
+router.post('/deployments', requireAuth, validateBody(createDeploymentSchema), async (req: Request, res: Response) => {
   try {
     const { projectId, url, status, organizationId } = req.body
 
@@ -169,7 +171,7 @@ router.patch('/deployments/:id', requireAuth, async (req: Request, res: Response
  * POST /api/operations/tasks
  * 創建任務
  */
-router.post('/tasks', requireAuth, async (req: Request, res: Response) => {
+router.post('/tasks', requireAuth, validateBody(createTaskSchema), async (req: Request, res: Response) => {
   try {
     const userId = req.user!.id
     const { projectId, skillId, input, priority } = req.body
@@ -1174,7 +1176,7 @@ router.post('/skills', requireAuth, async (req: Request, res: Response) => {
  * POST /api/operations/webhooks
  * 配置 Webhook
  */
-router.post('/webhooks', requireAuth, async (req: Request, res: Response) => {
+router.post('/webhooks', requireAuth, validateBody(createWebhookSchema), async (req: Request, res: Response) => {
   try {
     const userId = req.user!.id
     const { url, events, secret } = req.body

@@ -4,7 +4,9 @@
  */
 
 // LLM 函數需要從後端獨立實現
-import Anthropic from '@anthropic-ai/sdk'
+import type Anthropic from '@anthropic-ai/sdk'
+import { getAnthropicClient, MODEL } from '../lib/anthropic'
+import { getEnv } from '../lib/env'
 import { formatUISpecForPrompt, UIRequirementsSpec } from './bdd-to-ui-spec'
 import { recordLlmUsage } from '../db/client'
 import { safeParseJson } from '../utils/safe-parse-json'
@@ -12,25 +14,11 @@ import { createLogger } from '../lib/logger'
 
 const logger = createLogger('uiux-generation')
 
-// 模組級 Anthropic 單例（避免每次 callClaude 都 new）
-let anthropicClient: Anthropic | null = null
-
-function getAnthropicClient(): Anthropic {
-  if (!anthropicClient) {
-    const apiKey = process.env.CLAUDE_API_KEY || process.env.ANTHROPIC_API_KEY
-    if (!apiKey) {
-      throw new Error('缺少 CLAUDE_API_KEY 或 ANTHROPIC_API_KEY')
-    }
-    anthropicClient = new Anthropic({ apiKey })
-  }
-  return anthropicClient
-}
-
 // ============================================================
 // LLM 並發限流器（Semaphore）
 // ============================================================
 
-const LLM_MAX_CONCURRENT = parseInt(process.env.LLM_MAX_CONCURRENT || '10', 10)
+const LLM_MAX_CONCURRENT = getEnv().LLM_MAX_CONCURRENT
 let llmActiveCount = 0
 const llmWaitQueue: Array<() => void> = []
 
@@ -125,7 +113,7 @@ export async function callClaude(
     for (let attempt = 1; attempt <= RETRY_MAX; attempt++) {
       try {
         const stream = anthropic.messages.stream({
-          model: 'claude-sonnet-4-6',
+          model: MODEL.SONNET,
           max_tokens: options?.maxTokens || 4096,
           temperature: options?.temperature ?? 0.2,
           system: systemPrompt,
@@ -157,7 +145,7 @@ export async function callClaude(
           const outputTokens = usage.output_tokens || 0
           const cost = (inputTokens * 3 + outputTokens * 15) / 1_000_000
           recordLlmUsage({
-            model: 'claude-sonnet-4-6',
+            model: MODEL.SONNET,
             inputTokens,
             outputTokens,
             costUsd: cost,

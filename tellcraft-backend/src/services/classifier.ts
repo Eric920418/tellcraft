@@ -2,6 +2,7 @@ import { SkillName, SKILL_REGISTRY, getSkillDescriptionsForClassifier } from './
 import { recordLlmUsage } from '../db/client'
 import { safeParseJson } from '../utils/safe-parse-json'
 import { createLogger } from '../lib/logger'
+import { getAnthropicHeaders, MODEL } from '../lib/anthropic'
 
 const logger = createLogger('classifier')
 
@@ -88,13 +89,6 @@ export async function classifyIntent(
   const prefiltered = prefilterLongRequirement(message)
   if (prefiltered) return prefiltered
 
-  const apiKey = process.env.ANTHROPIC_API_KEY
-
-  if (!apiKey) {
-    logger.warn('ANTHROPIC_API_KEY 未設定，使用規則式分類')
-    return ruleBasedClassification(message)
-  }
-
   try {
     const skillDescriptions = getSkillDescriptionsForClassifier()
 
@@ -177,13 +171,9 @@ ${skillDescriptions}
       try {
         response = await fetch('https://api.anthropic.com/v1/messages', {
           method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'x-api-key': apiKey,
-            'anthropic-version': '2023-06-01',
-          },
+          headers: getAnthropicHeaders(),
           body: JSON.stringify({
-            model: 'claude-haiku-4-5-20251001',
+            model: MODEL.HAIKU,
             max_tokens: 500,
             system: systemPrompt,
             messages: messages.map(m => ({
@@ -232,7 +222,7 @@ ${skillDescriptions}
 
       try {
         await recordLlmUsage({
-          model: 'claude-haiku-4-5-20251001',
+          model: MODEL.HAIKU,
           inputTokens,
           outputTokens,
           costUsd: cost,

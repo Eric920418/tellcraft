@@ -4,17 +4,15 @@ import crypto from 'crypto'
 import Redis from 'ioredis'
 import * as db from '../db/client'
 import { requireAuth } from '../middleware/auth'
+import { getEnv } from '../lib/env'
 import { createLogger } from '../lib/logger'
 
 const logger = createLogger('auth')
 
 const router: RouterType = Router()
 
-// JWT 配置
-if (!process.env.JWT_SECRET) {
-  throw new Error('CRITICAL: JWT_SECRET environment variable is not set!')
-}
-const JWT_SECRET: string = process.env.JWT_SECRET
+// JWT 配置（已在啟動時由 validateEnv() 驗證）
+const JWT_SECRET: string = getEnv().JWT_SECRET
 const JWT_EXPIRES_IN = '7d'
 
 // Redis client（由 index.ts 注入，用於 token 黑名單）
@@ -24,16 +22,17 @@ export function setAuthRedisClient(redis: Redis) {
 }
 
 // OAuth 配置
-const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID
-const GOOGLE_CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET
-const LINE_CHANNEL_ID = process.env.LINE_CHANNEL_ID
-const LINE_CHANNEL_SECRET = process.env.LINE_CHANNEL_SECRET
+const _env = getEnv()
+const GOOGLE_CLIENT_ID = _env.GOOGLE_CLIENT_ID
+const GOOGLE_CLIENT_SECRET = _env.GOOGLE_CLIENT_SECRET
+const LINE_CHANNEL_ID = _env.LINE_CHANNEL_ID
+const LINE_CHANNEL_SECRET = _env.LINE_CHANNEL_SECRET
 
-const APP_URL = process.env.APP_URL || 'https://tellcraft.com'
-const API_URL = process.env.API_URL || 'http://54.238.4.117:8080'
+const APP_URL = _env.APP_URL
+const API_URL = _env.API_URL
 
 // Callback Host 白名單
-const ALLOWED_CALLBACK_HOSTS = (process.env.ALLOWED_CALLBACK_HOSTS || 'https://tellcraft.com').split(',').map(h => h.trim())
+const ALLOWED_CALLBACK_HOSTS = _env.ALLOWED_CALLBACK_HOSTS.split(',').map(h => h.trim())
 
 function isAllowedCallbackHost(host: string): boolean {
   return ALLOWED_CALLBACK_HOSTS.some(allowed => host === allowed)

@@ -4,7 +4,7 @@
  * 用 Haiku 做輕量語意判斷，失敗時全部降級不阻斷流程
  */
 
-import Anthropic from '@anthropic-ai/sdk'
+import { getAnthropicClient, MODEL } from '../lib/anthropic'
 import { recordLlmUsage } from '../db/client'
 import { safeParseJson } from '../utils/safe-parse-json'
 import { ClarifyItem } from './bdd-session'
@@ -28,22 +28,6 @@ export interface DecisionSummary {
 // Haiku 定價 (每百萬 tokens)
 const HAIKU_PRICING = { input: 0.8, output: 4 }
 
-// ============================================================
-// Anthropic 單例
-// ============================================================
-
-let anthropicClient: Anthropic | null = null
-
-function getAnthropicClient(): Anthropic {
-  if (!anthropicClient) {
-    const apiKey = process.env.CLAUDE_API_KEY || process.env.ANTHROPIC_API_KEY
-    if (!apiKey) {
-      throw new Error('缺少 CLAUDE_API_KEY 或 ANTHROPIC_API_KEY')
-    }
-    anthropicClient = new Anthropic({ apiKey })
-  }
-  return anthropicClient
-}
 
 // ============================================================
 // Decision Summary 生成
@@ -94,7 +78,7 @@ export async function generateDecisionSummary(
 - excludedFeatures 只列用戶明確說「不需要」「不要」的功能`
 
     const stream = anthropic.messages.stream({
-      model: 'claude-haiku-4-5-20251001',
+      model: MODEL.HAIKU,
       max_tokens: 2048,
       temperature: 0.1,
       system: systemPrompt,
@@ -108,7 +92,7 @@ export async function generateDecisionSummary(
     if (usage) {
       const cost = (usage.input_tokens * HAIKU_PRICING.input + usage.output_tokens * HAIKU_PRICING.output) / 1_000_000
       recordLlmUsage({
-        model: 'claude-haiku-4-5-20251001',
+        model: MODEL.HAIKU,
         inputTokens: usage.input_tokens,
         outputTokens: usage.output_tokens,
         costUsd: cost,
@@ -178,7 +162,7 @@ export async function generatePartialSpecContext(
 - 直接輸出文字摘要，不需要 JSON`
 
     const stream = anthropic.messages.stream({
-      model: 'claude-haiku-4-5-20251001',
+      model: MODEL.HAIKU,
       max_tokens: 1024,
       temperature: 0.1,
       system: systemPrompt,
@@ -192,7 +176,7 @@ export async function generatePartialSpecContext(
     if (usage) {
       const cost = (usage.input_tokens * HAIKU_PRICING.input + usage.output_tokens * HAIKU_PRICING.output) / 1_000_000
       recordLlmUsage({
-        model: 'claude-haiku-4-5-20251001',
+        model: MODEL.HAIKU,
         inputTokens: usage.input_tokens,
         outputTokens: usage.output_tokens,
         costUsd: cost,
@@ -259,7 +243,7 @@ export async function deduplicateQuestions(
 其中 index 是 N 編號（1-based）。keep 列出保留的 N 編號，remove 列出移除的。`
 
     const stream = anthropic.messages.stream({
-      model: 'claude-haiku-4-5-20251001',
+      model: MODEL.HAIKU,
       max_tokens: 1024,
       temperature: 0.1,
       system: systemPrompt,
@@ -276,7 +260,7 @@ export async function deduplicateQuestions(
     if (usage) {
       const cost = (usage.input_tokens * HAIKU_PRICING.input + usage.output_tokens * HAIKU_PRICING.output) / 1_000_000
       recordLlmUsage({
-        model: 'claude-haiku-4-5-20251001',
+        model: MODEL.HAIKU,
         inputTokens: usage.input_tokens,
         outputTokens: usage.output_tokens,
         costUsd: cost,

@@ -1,4 +1,9 @@
 import 'dotenv/config'
+
+// 環境變數驗證（必須在所有其他 import 之前）
+import { validateEnv, getEnv } from './lib/env'
+validateEnv()
+
 import express from 'express'
 import { createServer } from 'http'
 import { Server as SocketIOServer } from 'socket.io'
@@ -45,14 +50,15 @@ import { createLogger } from './lib/logger'
 const logger = createLogger('server')
 
 // ============================================================
-// 環境變數
+// 環境變數（從已驗證的 env 取得）
 // ============================================================
 
-const PORT = parseInt(process.env.PORT || '3100', 10)
-const REDIS_URL = process.env.REDIS_URL || 'redis://localhost:6379'
-const CORS_ORIGIN = process.env.CORS_ORIGIN || 'https://tellcraft.com'
-const SOCKET_VERBOSE_LOG = process.env.SOCKET_VERBOSE_LOG === 'true'
-const UPLOAD_DIR = process.env.UPLOAD_DIR || '/var/www/uploads/tellcraft'
+const env = getEnv()
+const PORT = env.PORT
+const REDIS_URL = env.REDIS_URL
+const CORS_ORIGIN = env.CORS_ORIGIN
+const SOCKET_VERBOSE_LOG = env.SOCKET_VERBOSE_LOG
+const UPLOAD_DIR = env.UPLOAD_DIR
 
 // ============================================================
 // Express 應用
@@ -113,10 +119,7 @@ const io = new SocketIOServer(server, {
 })
 
 // Socket.io 認證中間件
-const JWT_SECRET = process.env.JWT_SECRET
-if (!JWT_SECRET) {
-  throw new Error('CRITICAL: JWT_SECRET environment variable is not set!')
-}
+const JWT_SECRET = env.JWT_SECRET
 
 io.use((socket, next) => {
   const token = socket.handshake.auth?.token
@@ -344,7 +347,7 @@ const orchestratorQueue = new Queue('orchestrator', {
       count: 1000,
     },
     removeOnFail: {
-      age: 86400, // 24 小時後刪除
+      age: 604800, // 7 天後刪除
     },
   },
 })
@@ -354,9 +357,9 @@ setOrchestratorQueue(orchestratorQueue)
 setRedisClient(redis)
 
 // 初始化 LINE Bot Handler（注入 Messaging Client + 隊列）
-if (process.env.LINE_MESSAGING_CHANNEL_ACCESS_TOKEN) {
+if (env.LINE_MESSAGING_CHANNEL_ACCESS_TOKEN) {
   const lineMessagingClient = new lineMessagingApi.MessagingApiClient({
-    channelAccessToken: process.env.LINE_MESSAGING_CHANNEL_ACCESS_TOKEN,
+    channelAccessToken: env.LINE_MESSAGING_CHANNEL_ACCESS_TOKEN,
   })
   initLineBotHandler({
     messagingClient: lineMessagingClient,
@@ -419,7 +422,7 @@ app.use((err: Error, _req: express.Request, res: express.Response, _next: expres
   logger.error({ err }, 'Unhandled error')
   res.status(500).json({
     error: 'Internal server error',
-    message: process.env.NODE_ENV === 'development' ? err.message : undefined,
+    message: env.NODE_ENV === 'development' ? err.message : undefined,
   })
 })
 

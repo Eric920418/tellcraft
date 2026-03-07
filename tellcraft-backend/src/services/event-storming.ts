@@ -9,6 +9,7 @@ import { isConfirmation } from '../utils/is-confirmation'
 import { safeParseJson } from '../utils/safe-parse-json'
 import { LlmTrackingContext } from './classifier'
 import { createLogger } from '../lib/logger'
+import { getAnthropicHeaders, MODEL } from '../lib/anthropic'
 
 const logger = createLogger('event-storming')
 
@@ -113,25 +114,15 @@ async function callHaiku(
   outputTokens?: number
   error?: string
 }> {
-  const apiKey = process.env.ANTHROPIC_API_KEY
-
-  if (!apiKey) {
-    return { success: false, error: 'ANTHROPIC_API_KEY not configured' }
-  }
-
   let lastError = 'Unknown error'
 
   for (let attempt = 1; attempt <= RETRY_MAX; attempt++) {
     try {
       const response = await fetch('https://api.anthropic.com/v1/messages', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-api-key': apiKey,
-          'anthropic-version': '2023-06-01',
-        },
+        headers: getAnthropicHeaders(),
         body: JSON.stringify({
-          model: 'claude-haiku-4-5-20251001',
+          model: MODEL.HAIKU,
           max_tokens: options.maxTokens || 4096,
           temperature: options.temperature ?? 0.3,
           system: systemPrompt,
@@ -164,7 +155,7 @@ async function callHaiku(
       if (trackingContext) {
         const cost = (inputTokens * HAIKU_PRICING.input + outputTokens * HAIKU_PRICING.output) / 1_000_000
         recordLlmUsage({
-          model: 'claude-haiku-4-5-20251001',
+          model: MODEL.HAIKU,
           inputTokens,
           outputTokens,
           costUsd: cost,

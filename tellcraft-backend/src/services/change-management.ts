@@ -3,7 +3,7 @@
  * spec_completed 後，用戶可增量修改已完成的規格
  */
 
-import Anthropic from '@anthropic-ai/sdk'
+import { getAnthropicClient, MODEL } from '../lib/anthropic'
 import { recordLlmUsage } from '../db/client'
 import { safeParseJson } from '../utils/safe-parse-json'
 import { LlmTrackingContext } from './classifier'
@@ -47,22 +47,6 @@ interface UpdatedSpecs {
   actionsYml?: string
 }
 
-// ============================================================
-// Anthropic 單例
-// ============================================================
-
-let anthropicClient: Anthropic | null = null
-
-function getAnthropicClient(): Anthropic {
-  if (!anthropicClient) {
-    const apiKey = process.env.CLAUDE_API_KEY || process.env.ANTHROPIC_API_KEY
-    if (!apiKey) {
-      throw new Error('缺少 CLAUDE_API_KEY 或 ANTHROPIC_API_KEY')
-    }
-    anthropicClient = new Anthropic({ apiKey })
-  }
-  return anthropicClient
-}
 
 // Haiku 定價 (每百萬 tokens)
 const HAIKU_PRICING = { input: 0.8, output: 4 }
@@ -111,7 +95,7 @@ ${existingSpecs.esDocument ? `**ES 文檔**（前 300 字）：\n${existingSpecs
 }`
 
     const stream = anthropic.messages.stream({
-      model: 'claude-haiku-4-5-20251001',
+      model: MODEL.HAIKU,
       max_tokens: 2048,
       temperature: 0.1,
       system: systemPrompt,
@@ -125,7 +109,7 @@ ${existingSpecs.esDocument ? `**ES 文檔**（前 300 字）：\n${existingSpecs
     if (usage) {
       const cost = (usage.input_tokens * HAIKU_PRICING.input + usage.output_tokens * HAIKU_PRICING.output) / 1_000_000
       recordLlmUsage({
-        model: 'claude-haiku-4-5-20251001',
+        model: MODEL.HAIKU,
         inputTokens: usage.input_tokens,
         outputTokens: usage.output_tokens,
         costUsd: cost,
@@ -225,7 +209,7 @@ ${existingSpecs.entityMapping}
 \`\`\``
 
     const stream = anthropic.messages.stream({
-      model: 'claude-sonnet-4-6',
+      model: MODEL.SONNET,
       max_tokens: 16384,
       temperature: 0.2,
       system: systemPrompt,
@@ -239,7 +223,7 @@ ${existingSpecs.entityMapping}
     if (usage) {
       const cost = (usage.input_tokens * SONNET_PRICING.input + usage.output_tokens * SONNET_PRICING.output) / 1_000_000
       recordLlmUsage({
-        model: 'claude-sonnet-4-6',
+        model: MODEL.SONNET,
         inputTokens: usage.input_tokens,
         outputTokens: usage.output_tokens,
         costUsd: cost,

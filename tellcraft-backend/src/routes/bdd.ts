@@ -5,6 +5,8 @@
 import { Router, Request, Response } from 'express'
 import { query, queryOne } from '../db/client'
 import { requireAuth } from '../middleware/auth'
+import { validateBody } from '../middleware/validate'
+import { createBddSessionSchema, answerSchema, confirmSchema, revertSchema, skipSchema, addItemsSchema } from '../schemas/bdd'
 import crypto from 'crypto'
 import { createLogger } from '../lib/logger'
 
@@ -91,7 +93,7 @@ function rowToSession(row: any): BddSession {
  * POST /api/bdd/session
  * 創建 BDD Session
  */
-router.post('/session', requireAuth, async (req: Request, res: Response) => {
+router.post('/session', requireAuth, validateBody(createBddSessionSchema), async (req: Request, res: Response) => {
   try {
     const {
       conversationId,
@@ -99,17 +101,7 @@ router.post('/session', requireAuth, async (req: Request, res: Response) => {
       taskId,
       originalRequirements,
       projectContext,
-    } = req.body as {
-      conversationId: string
-      projectId?: string
-      taskId?: string
-      originalRequirements: string
-      projectContext?: Record<string, unknown>
-    }
-
-    if (!conversationId || !originalRequirements) {
-      return res.status(400).json({ error: '缺少必要參數' })
-    }
+    } = req.body
 
     // 查找之前的 session 來繼承已解決的項目
     let inheritedResolvedItems: ClarifyItem[] = []
@@ -311,14 +303,10 @@ router.patch('/session/:id', requireAuth, async (req: Request, res: Response) =>
  * POST /api/bdd/session/:id/answer
  * 回答釐清項目
  */
-router.post('/session/:id/answer', requireAuth, async (req: Request, res: Response) => {
+router.post('/session/:id/answer', requireAuth, validateBody(answerSchema), async (req: Request, res: Response) => {
   try {
     const { id } = req.params
-    const { itemId, answer } = req.body as { itemId: string; answer: string }
-
-    if (!itemId || !answer) {
-      return res.status(400).json({ error: '缺少必要參數' })
-    }
+    const { itemId, answer } = req.body
 
     // 獲取 session
     const row = await queryOne<any>('SELECT * FROM bdd_sessions WHERE id = $1', [id])
@@ -367,14 +355,10 @@ router.post('/session/:id/answer', requireAuth, async (req: Request, res: Respon
  * POST /api/bdd/session/:id/confirm
  * 批次確認項目
  */
-router.post('/session/:id/confirm', requireAuth, async (req: Request, res: Response) => {
+router.post('/session/:id/confirm', requireAuth, validateBody(confirmSchema), async (req: Request, res: Response) => {
   try {
     const { id } = req.params
-    const { itemIds, answers } = req.body as { itemIds: string[]; answers: Record<string, string> }
-
-    if (!itemIds || itemIds.length === 0) {
-      return res.status(400).json({ error: '缺少必要參數' })
-    }
+    const { itemIds, answers } = req.body
 
     // 獲取 session
     const row = await queryOne<any>('SELECT * FROM bdd_sessions WHERE id = $1', [id])
@@ -422,14 +406,10 @@ router.post('/session/:id/confirm', requireAuth, async (req: Request, res: Respo
  * POST /api/bdd/session/:id/revert
  * 撤銷回答
  */
-router.post('/session/:id/revert', requireAuth, async (req: Request, res: Response) => {
+router.post('/session/:id/revert', requireAuth, validateBody(revertSchema), async (req: Request, res: Response) => {
   try {
     const { id } = req.params
-    const { itemId } = req.body as { itemId: string }
-
-    if (!itemId) {
-      return res.status(400).json({ error: '缺少必要參數' })
-    }
+    const { itemId } = req.body
 
     // 獲取 session
     const row = await queryOne<any>('SELECT * FROM bdd_sessions WHERE id = $1', [id])
@@ -477,14 +457,10 @@ router.post('/session/:id/revert', requireAuth, async (req: Request, res: Respon
  * POST /api/bdd/session/:id/skip
  * 跳過項目
  */
-router.post('/session/:id/skip', requireAuth, async (req: Request, res: Response) => {
+router.post('/session/:id/skip', requireAuth, validateBody(skipSchema), async (req: Request, res: Response) => {
   try {
     const { id } = req.params
-    const { itemId } = req.body as { itemId: string }
-
-    if (!itemId) {
-      return res.status(400).json({ error: '缺少必要參數' })
-    }
+    const { itemId } = req.body
 
     // 獲取 session
     const row = await queryOne<any>('SELECT * FROM bdd_sessions WHERE id = $1', [id])
@@ -522,14 +498,10 @@ router.post('/session/:id/skip', requireAuth, async (req: Request, res: Response
  * POST /api/bdd/session/:id/items
  * 新增釐清項目
  */
-router.post('/session/:id/items', requireAuth, async (req: Request, res: Response) => {
+router.post('/session/:id/items', requireAuth, validateBody(addItemsSchema), async (req: Request, res: Response) => {
   try {
     const { id } = req.params
-    const { items } = req.body as { items: Omit<ClarifyItem, 'id' | 'status' | 'createdAt'>[] }
-
-    if (!items || items.length === 0) {
-      return res.status(400).json({ error: '缺少必要參數' })
-    }
+    const { items } = req.body
 
     // 獲取 session
     const row = await queryOne<any>('SELECT * FROM bdd_sessions WHERE id = $1', [id])
@@ -541,7 +513,7 @@ router.post('/session/:id/items', requireAuth, async (req: Request, res: Respons
     const now = new Date().toISOString()
 
     // 新增項目
-    const newItems: ClarifyItem[] = items.map(item => ({
+    const newItems: ClarifyItem[] = items.map((item: { question: string; category?: string }) => ({
       ...item,
       id: crypto.randomUUID(),
       status: 'pending' as const,

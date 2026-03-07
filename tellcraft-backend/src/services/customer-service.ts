@@ -5,6 +5,7 @@
 
 import { recordLlmUsage } from '../db/client'
 import { createLogger } from '../lib/logger'
+import { getAnthropicHeaders, MODEL } from '../lib/anthropic'
 
 const logger = createLogger('customer-service')
 
@@ -276,9 +277,6 @@ export async function answerWithSonnet(
     ? '這個問題我目前無法回答。如果您有建站需求，直接告訴我想做什麼網站就好！'
     : 'I\'m not sure about that. If you want to build a website, just tell me what you need!'
 
-  const apiKey = process.env.ANTHROPIC_API_KEY
-  if (!apiKey) return fallbackReply
-
   const systemPrompt = isChinese
     ? `你是 Tellcraft 平台的客服助手。Tellcraft 是 AI 驅動的自動化建站平台，用戶描述需求後 AI 自動生成網站。
 
@@ -313,13 +311,9 @@ Rules:
   try {
     const resp = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': apiKey,
-        'anthropic-version': '2023-06-01',
-      },
+      headers: getAnthropicHeaders(),
       body: JSON.stringify({
-        model: 'claude-sonnet-4-6',
+        model: MODEL.SONNET,
         max_tokens: 300,
         system: systemPrompt,
         messages: [{ role: 'user', content: msg }],
@@ -342,7 +336,7 @@ Rules:
       const outputTokens = data.usage.output_tokens || 0
       const cost = (inputTokens * 3 + outputTokens * 15) / 1_000_000
       recordLlmUsage({
-        model: 'claude-sonnet-4-6',
+        model: MODEL.SONNET,
         inputTokens,
         outputTokens,
         costUsd: cost,

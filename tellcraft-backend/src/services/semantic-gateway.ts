@@ -7,6 +7,7 @@
 import * as db from '../db/client'
 import type { FlowState } from '../types/flow-state'
 import { createLogger } from '../lib/logger'
+import { getAnthropicHeaders, MODEL } from '../lib/anthropic'
 
 const logger = createLogger('semantic-gateway')
 
@@ -396,21 +397,12 @@ export async function semanticGateway(
   }
 
   // ── Sonnet 語義判斷 ──
-  const apiKey = process.env.ANTHROPIC_API_KEY
-  if (!apiKey) {
-    return { verdict: 'valid', accept: true }
-  }
-
   try {
     const resp = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': apiKey,
-        'anthropic-version': '2023-06-01',
-      },
+      headers: getAnthropicHeaders(),
       body: JSON.stringify({
-        model: 'claude-sonnet-4-6',
+        model: MODEL.SONNET,
         max_tokens: 200,
         system: buildPrompt(input),
         messages: [{ role: 'user', content: input.userMessage }],
@@ -446,7 +438,7 @@ export async function semanticGateway(
       const outputTokens = data.usage.output_tokens || 0
       const cost = (inputTokens * 3 + outputTokens * 15) / 1_000_000
       db.recordLlmUsage({
-        model: 'claude-sonnet-4-6',
+        model: MODEL.SONNET,
         inputTokens,
         outputTokens,
         costUsd: cost,
