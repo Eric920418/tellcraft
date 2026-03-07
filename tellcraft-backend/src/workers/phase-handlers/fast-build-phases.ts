@@ -22,6 +22,7 @@ import {
 import { buildUISpecSummary } from '../../services/bdd-to-ui-spec'
 import { sendMessage, saveFlowState, getFlowState, deleteFlowState, makeStreamingCallback, generatedCodeToFileRows, deductCredits } from '../orchestrator-utils'
 import { CREDIT_COSTS } from '../../config/plans'
+import { recommendMoods } from '../../services/design-moods'
 import { createLogger } from '../../lib/logger'
 
 const logger = createLogger('fast-build-phases')
@@ -98,6 +99,10 @@ export async function executeFastBuildSkill(params: {
     }
   }
 
+  // ── 推薦 Mood ──
+  const recommendedMoodIds = recommendMoods(message, productType, tier)
+  const moodId = recommendedMoodIds[0] || undefined
+
   // ── 設定 FlowState ──
   const state: FlowState = {
     phase: 'fast_generating',
@@ -119,6 +124,7 @@ export async function executeFastBuildSkill(params: {
     fastModeOriginalMessage: message,
     fastModeExpandedPrompt: expandedPrompt || undefined,
     uiuxVariantConcept: variantConcept,
+    uiuxDesignMood: moodId,
     userId,
   }
   await saveFlowState(redis, conversationId, state)
@@ -154,6 +160,7 @@ export async function executeFastBuildSkill(params: {
       interactionHint,
       templateStyleHint: templateStyleHint || undefined,
       layoutMode,
+      moodId,
     },
     { userId, conversationId, purpose: 'fast-build-structure' },
     makeStreamingCallback(conversationId, io, redis, 'structure', twConfig)
@@ -216,6 +223,7 @@ export async function executeFastBuildSkill(params: {
     makeStreamingCallback(conversationId, io, redis, 'animation', twConfig),
     variantConcept, // 注入創意概念
     fastUiSpecSummary,
+    moodId,
   )
 
   if (animationResult.success) {
@@ -258,6 +266,7 @@ export async function executeFastBuildSkill(params: {
     variantConcept, // 注入創意概念
     fastUiSpecSummary,
     layoutMode,
+    moodId,
   )
 
   if (rwdResult.success) {

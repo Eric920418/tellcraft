@@ -87,6 +87,8 @@ export interface FlowState {
   uiuxPreparedTemplate?: import('../services/uiux-generation').TemplateData
   // Design Tier（功能型 vs 創意型）
   uiuxDesignTier?: DesignTier
+  // Design Mood（設計情緒預設）
+  uiuxDesignMood?: string
   // Quality Gate 報告
   uiuxQualityReport?: QualityReport
   // Deployer 專用

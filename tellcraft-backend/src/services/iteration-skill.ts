@@ -169,6 +169,7 @@ export async function executeIteration(input: {
         designTier: state.uiuxDesignTier,
         designBrief: state.uiuxDesignBrief,
         variantConcept: state.uiuxVariantConcept,
+        moodId: state.uiuxDesignMood,
       },
       { userId: state.userId || userId, conversationId, purpose: 'uiux_refine' },
       input.imageUrls,

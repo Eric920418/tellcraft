@@ -19,6 +19,7 @@ import { translateBddToUISpec, buildUISpecSummary } from '../../services/bdd-to-
 import { runQualityGate, autoFixCriticalIssues } from '../../services/quality-gate'
 import { getBddSession, updateBddSession } from '../../services/bdd-session'
 import { analyzeReference } from '../../services/reference-analyzer'
+import { recommendMoods, getMoodSummary } from '../../services/design-moods'
 import { executeIteration, executeUndoIteration } from '../../services/iteration-skill'
 import { semanticGateway } from '../../services/semantic-gateway'
 import { detectFastModeIntent, getFaqReply, answerWithSonnet } from '../../services/customer-service'
@@ -791,6 +792,7 @@ export async function executeFullCodePipeline(
         variantConcept: state.uiuxVariantConcept,
         templateOverrides: state.templateOverrides,
         referenceAnalysis: state.uiuxReferenceAnalysis,
+        moodId: state.uiuxDesignMood,
       },
       { userId: state.userId, conversationId, purpose: 'uiux_structure' },
       makeStreamingCallback(conversationId, io, redis, 'structure', twConfig)
@@ -846,7 +848,8 @@ export async function executeFullCodePipeline(
       { userId: state.userId, conversationId, purpose: 'uiux_animation' },
       makeStreamingCallback(conversationId, io, redis, 'animation', twConfig),
       state.uiuxVariantConcept,
-      pipelineUiSpecSummary
+      pipelineUiSpecSummary,
+      state.uiuxDesignMood
     )
 
     if (animationResult.success) {
@@ -887,7 +890,9 @@ export async function executeFullCodePipeline(
     { userId: state.userId, conversationId, purpose: 'uiux_rwd' },
     makeStreamingCallback(conversationId, io, redis, 'rwd', twConfig),
     state.uiuxVariantConcept,
-    pipelineUiSpecSummary
+    pipelineUiSpecSummary,
+    undefined,
+    state.uiuxDesignMood
   )
 
   if (rwdResult.success) {
@@ -1041,6 +1046,7 @@ async function executeCodePhaseStructure(
       uiSpec: structUISpec,
       variantConcept: state.uiuxVariantConcept,
       referenceAnalysis: state.uiuxReferenceAnalysis,
+      moodId: state.uiuxDesignMood,
     },
     { userId: state.userId, conversationId, purpose: 'uiux_structure' },
     makeStreamingCallback(conversationId, io, redis, 'structure', twCfg)
@@ -1144,7 +1150,8 @@ async function executeCodePhaseAnimation(
     { userId: state.userId, conversationId, purpose: 'uiux_animation' },
     makeStreamingCallback(conversationId, io, redis, 'animation', animTwCfg),
     state.uiuxVariantConcept,
-    stepUiSpecSummary
+    stepUiSpecSummary,
+    state.uiuxDesignMood
   )
 
   if (!animationResult.success) {
@@ -1242,7 +1249,9 @@ async function executeCodePhaseRwd(
     { userId: state.userId, conversationId, purpose: 'uiux_rwd' },
     makeStreamingCallback(conversationId, io, redis, 'rwd', rwdTwCfg),
     state.uiuxVariantConcept,
-    rwdStepUiSpecSummary
+    rwdStepUiSpecSummary,
+    undefined,
+    state.uiuxDesignMood
   )
 
   if (!rwdResult.success) {
@@ -1843,6 +1852,15 @@ export async function completeDesignClarify(
     pageStructure: { pages: ['home', 'dashboard'], components: [] },
   }
 
+  // 規則式推薦 Mood
+  const feeling = ideas.find(i => i.step === 'feeling')?.answer || ''
+  const productType = inferCategoryFromIdeas(ideas)
+  const recommendedMoodIds = recommendMoods(feeling, productType, state.uiuxDesignTier || 'creative')
+  if (recommendedMoodIds.length > 0) {
+    state.uiuxDesignMood = recommendedMoodIds[0]
+    await saveFlowState(redis, conversationId, state)
+  }
+
   // 進入 Design Brief 確認環節
   await startDesignBriefConfirm(conversationId, state, customTemplate, 'ideas', redis, io)
 }
@@ -1979,8 +1997,12 @@ _${brief.tierReason || tierDesc}_
 **專業建議**：
 ${brief.professionalRecommendations.map(r => `- ${r}`).join('\n')}`
 
+  const moodInfo = state.uiuxDesignMood
+    ? `\n**視覺風格**：${getMoodSummary(state.uiuxDesignMood)}`
+    : ''
+
   await sendMessage(conversationId, io, {
-    content: `${displayText}\n\n---\n\n如果沒有要調整的，我就開始生成設計方案了？\n也可以告訴我想調整的部分，例如：「顏色想暖一點」、「佈局改卡片式」、「我想要更有創意的設計」`,
+    content: `${displayText}${moodInfo}\n\n---\n\n如果沒有要調整的，我就開始生成設計方案了？\n也可以告訴我想調整的部分，例如：「顏色想暖一點」、「佈局改卡片式」、「我想要更有創意的設計」`,
     stage: 'uiux_design_brief_confirm',
     quickReplies: [
       { label: '確認，開始生成', value: '確認', style: 'primary' },
@@ -2070,9 +2092,18 @@ export async function handleDesignBriefReply(
     return
   }
 
-  // 更新 state（含 tier 同步）
+  // 更新 state（含 tier 同步 + mood 重新推薦）
   state.uiuxDesignBrief = adjustResult.brief
   state.uiuxDesignTier = adjustResult.brief.recommendedTier
+  // 根據調整後的 styleSummary 重新推薦 mood
+  const adjustedMoods = recommendMoods(
+    adjustResult.brief.styleSummary + ' ' + message,
+    productType,
+    adjustResult.brief.recommendedTier
+  )
+  if (adjustedMoods.length > 0) {
+    state.uiuxDesignMood = adjustedMoods[0]
+  }
   state.uiuxDesignBriefRound = round + 1
   history.push({ role: 'assistant', content: adjustResult.displayText || '' })
   state.uiuxDesignBriefHistory = history
@@ -2091,12 +2122,16 @@ export async function handleDesignBriefReply(
 **專業建議**：
 ${brief.professionalRecommendations.map(r => `- ${r}`).join('\n')}`
 
+  const adjustedMoodInfo = state.uiuxDesignMood
+    ? `\n**視覺風格**：${getMoodSummary(state.uiuxDesignMood)}`
+    : ''
+
   const promptSuffix = round + 1 >= DESIGN_BRIEF_LIMITS.MAX_ROUNDS
     ? '\n\n已更新！接下來我就開始生成設計方案了。'
     : '\n\n已更新！還有要調整的嗎？沒有的話我就開始了！'
 
   await sendMessage(conversationId, io, {
-    content: `${displayText}${promptSuffix}`,
+    content: `${displayText}${adjustedMoodInfo}${promptSuffix}`,
     stage: 'uiux_design_brief_confirm',
     quickReplies: [
       { label: '確認，開始生成', value: '確認', style: 'primary' },
@@ -2208,7 +2243,8 @@ export async function proceedToVariantGeneration(
     state.uiuxDesignTier,
     { userId: state.userId, conversationId, purpose: 'uiux_variants' },
     originalRequirements,
-    state.uiuxReferenceAnalysis
+    state.uiuxReferenceAnalysis,
+    state.uiuxDesignMood
   )
 
   if (!variantsResult.success || !variantsResult.variants) {

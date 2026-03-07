@@ -112,6 +112,7 @@ npx ts-node bdd-spec/scripts/validate-feature.ts spec/features/
 | `event-storming.ts` | Haiku | bdd-spec | Event Storming DFS 探索 |
 | `fast-build-generation.ts` | 無 | fast-build | 規則式 tier/產品/DesignSystem（零 LLM） |
 | `template-matcher.ts` | 無 | orchestrator | 三層評分匹配（零 LLM） |
+| `design-moods.ts` | 無 | uiux-phases / fast-build | 8 個設計情緒預設 + `recommendMoods()` 規則推薦 + prompt 注入 getter |
 | `customer-service.ts` | 無 / Sonnet | fast mode + handleContinueFlow | 客服問答：意圖偵測（greeting/question/chitchat/help）+ FAQ 零 LLM 匹配（9 主題）+ Sonnet 開放問答 |
 | `line-notify.ts` | 無 | orchestrator-utils | LINE 推播通知（stage 白名單過濾） |
 

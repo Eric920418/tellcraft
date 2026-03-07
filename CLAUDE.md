@@ -86,6 +86,7 @@ pm2 describe tellcraft-backend            # 詳細資訊（記憶體/重啟次�
 | **Design Techniques** | `services/design-techniques.ts` | 視覺技法庫（30 個 Layout/Surface/Typography/Interaction 技法），按 tier+productType 加權隨機注入 Structure prompt |
 | **Reference Analyzer** | `services/reference-analyzer.ts` | 參考網站真實分析：URL→截圖(puppeteer-core)→Haiku Vision→設計風格分析，三層降級 |
 | **Template Matcher** | `services/template-matcher.ts` | 三層評分智能匹配（關鍵詞 40 + Category 30 + UISpec 30，零 LLM） |
+| **Design Moods** | `services/design-moods.ts` | 8 個設計情緒預設 + `recommendMoods()` 規則推薦（feeling 50 + productType 30 + tier 過濾）+ prompt 注入 getter |
 | **Semantic Gateway** | `services/semantic-gateway.ts` | 統一語義閘門：quickFilter 零 LLM 短路 + Sonnet 六元 verdict（bdd_clarify/design_clarify/iteration），取代 keyword array |
 | **Customer Service** | `services/customer-service.ts` | 客服問答：detectFastModeIntent 意圖分類（greeting/question/chitchat/help）+ FAQ 零 LLM 匹配（9 主題）+ answerWithSonnet 開放問答 |
 | **Prefilter** | `services/prefilter.ts` | 全域輸入預過濾：checkInputQuality 亂碼/髒話/垃圾 + phase-aware 二次攔截（getPhaseStrictness）+ Redis anti-loop |
@@ -304,6 +305,7 @@ Layer 5: sanitizeCodeForDeploy 修復 7 — useSearchParams Suspense boundary �
 - **`checkBuildRelevance` fail-closed**：API 錯誤/空回應/JSON 解析/catch 全部降級拒絕（不是放行），保留無 API key 時的 fail-open
 - **輸入品質閘門（Universal Input Quality Gate）**：`prefilterMessage()` 內 `checkInputQuality()` 全域攔截亂碼/髒話/垃圾 + `handleContinueFlow` phase-aware 二次攔截（`getPhaseStrictness()` 映射 strict/normal/lenient/skip）+ `analyzeAnswerRelevance` 前置檢查。Redis anti-loop `quality_reject:{conversationId}` 連續 3 次強制放行防卡死
 - **參考網站分析（`reference-analyzer.ts`）**：puppeteer-core 需要系統 Chromium（`/usr/bin/chromium-browser`），VPS 須 `apt install chromium-browser`。截圖 JPEG 75 quality、15s timeout、buffer 不存 FlowState（只存文字分析結果）。SSRF 防護禁 localhost/內網 IP
+- **Mood 與 tier 互補不衝突**：mood 描述視覺方向（「做什麼」），tier 描述技術限制（「不做什麼」）。`recommendMoods` 的 tier 過濾防止不相容組合。Mood prompt 優先級：`variantConcept` > `mood` > `tier constraints`
 - **文檔與實作同步**：改後端流程 → 同步更新 `uiux-skill/instructions/` + 此文件
 - **`handleCodePhaseRedo` 需要快照**：`uiuxStructureCode`/`uiuxAnimationCode`，否則 redo 在已修改代碼上重做
 - **`verifyBuildLocally` 的修復結果必須同步回 DB**：否則預覽和部署代碼分岔

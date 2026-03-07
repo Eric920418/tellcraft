@@ -10,6 +10,7 @@ import { getEnv } from '../lib/env'
 import { formatUISpecForPrompt, UIRequirementsSpec } from './bdd-to-ui-spec'
 import { safeParseJson } from '../utils/safe-parse-json'
 import { selectTechniques, formatTechniquesForPrompt } from './design-techniques'
+import { getMoodPromptBlock, getMoodAnimationHint, getMoodRwdHint, getMoodSummary } from './design-moods'
 import { createLogger } from '../lib/logger'
 
 const logger = createLogger('uiux-generation')
@@ -713,7 +714,8 @@ export async function generateDesignVariants(
   designTier?: DesignTier,
   trackingContext?: LlmTrackingContext,
   originalRequirements?: string,
-  referenceAnalysis?: import('./reference-analyzer').ReferenceAnalysis
+  referenceAnalysis?: import('./reference-analyzer').ReferenceAnalysis,
+  moodId?: string
 ): Promise<DesignVariantsResult> {
   const tier = designTier || 'functional'
   const axes = getVariantAxes(tier)
@@ -751,7 +753,7 @@ ${originalRequirements || '（無原始描述）'}${referenceSection}
 ${bddSpec || '（無規格）'}
 
 ${getVariantPromptHint(tier)}
-
+${moodId ? `\n## Design Mood（視覺風格指引 — 最高優先）\n${getMoodPromptBlock(moodId)}\n` : ''}
 ## 5 個設計軸
 ${Object.values(axes).map(v => `- **${v.id}. ${v.name}**：${v.description}\n  ${v.prompt}`).join('\n\n')}
 
@@ -1487,6 +1489,7 @@ export async function generateStructure(
     layoutMode?: 'app' | 'website'
     templateOverrides?: Record<string, Record<string, string>>
     referenceAnalysis?: import('./reference-analyzer').ReferenceAnalysis
+    moodId?: string
   },
   trackingContext?: LlmTrackingContext,
   onPartialCode?: PartialCodeCallback
@@ -1790,7 +1793,7 @@ ${productSection}
 ${designSection}
 ${referenceSection}
 ${briefSection}
-${overridesSection}
+${productContext?.moodId ? `## Design Mood（視覺風格指引 — 高優先）\n${getMoodPromptBlock(productContext.moodId)}\n` : ''}${overridesSection}
 ${templateStyleSection}
 ${requirementsSection}
 ${interactionSection}
@@ -1841,7 +1844,7 @@ ${productContext?.layoutMode === 'app'
   const response = await callClaude(
     systemPrompt,
     [{ role: 'user', content: userMessage }],
-    { maxTokens: 32768, temperature: designTier === 'creative' ? 0.35 : 0.2 },
+    { maxTokens: 32768, temperature: designTier === 'creative' ? (productContext?.moodId ? 0.4 : 0.35) : 0.2 },
     { ...trackingContext, purpose: 'generate_structure' },
     buildStreamingHandler(onPartialCode)
   )
@@ -1902,7 +1905,8 @@ export async function generateAnimations(
   trackingContext?: LlmTrackingContext,
   onPartialCode?: PartialCodeCallback,
   variantConcept?: VariantConcept,
-  uiSpecSummary?: string
+  uiSpecSummary?: string,
+  moodId?: string
 ): Promise<GenerationResult> {
   const tier = designTier || 'functional'
 
@@ -1983,8 +1987,12 @@ ${getAnimationConstraints(tier)}
     ? `\n## 互動上下文（供動畫決策參考）\n${uiSpecSummary}\n注意：Modal 開關、表單提交、列表增刪 等互動都需要對應的動畫（enter/exit/success）。\n`
     : ''
 
+  const moodAnimSection = moodId
+    ? `\n## Mood 動畫風格\n${getMoodAnimationHint(moodId)}\n`
+    : ''
+
   const userMessage = `請在以下代碼基礎上添加動畫效果：
-${conceptReminder}${uiSpecHint}
+${conceptReminder}${moodAnimSection}${uiSpecHint}
 ## 現有代碼
 ${existingCodeStr}
 
@@ -2040,7 +2048,8 @@ export async function generateRwd(
   onPartialCode?: PartialCodeCallback,
   variantConcept?: VariantConcept,
   uiSpecSummary?: string,
-  layoutMode?: 'app' | 'website'
+  layoutMode?: 'app' | 'website',
+  moodId?: string
 ): Promise<GenerationResult> {
   const tier = designTier || 'functional'
 
@@ -2157,8 +2166,12 @@ ${layoutMode === 'app'
     ? `\n## 互動上下文（供響應式決策參考）\n${uiSpecSummary}\n注意：表格在移動端需要橫向滾動或卡片化；表單需要全寬；多步驟流程需要移動端友好的步驟指示器。\n`
     : ''
 
+  const moodRwdSection = moodId
+    ? `\n## Mood RWD 指引\n${getMoodRwdHint(moodId)}\n`
+    : ''
+
   const userMessage = `請在以下代碼基礎上添加響應式設計：
-${rwdConceptReminder}${rwdUiSpecHint}
+${rwdConceptReminder}${moodRwdSection}${rwdUiSpecHint}
 ## 現有代碼
 ${existingCodeStr}
 
@@ -2445,6 +2458,7 @@ export interface DesignBrief {
   tierReason: string               // 推薦原因
   domainKeywords?: string[]        // Domain 探索關鍵概念
   signature?: string               // Signature element 描述
+  recommendedMood?: string         // AI/規則推薦的 mood ID
 }
 
 /**
@@ -2763,6 +2777,7 @@ export async function refineCode(
     designTier?: DesignTier
     designBrief?: DesignBrief
     variantConcept?: VariantConcept
+    moodId?: string
   },
   trackingContext?: LlmTrackingContext,
   imageUrls?: string[],
@@ -3090,7 +3105,7 @@ ${designSystemSection}
 ${briefSection}
 
 ${refineConceptSection}
-
+${designContext.moodId ? `\n## 設計風格（修改時不可丟失）\nMood: ${getMoodSummary(designContext.moodId)}\n` : ''}
 ${getStructureConstraints(tier)}
 
 ## 重要：輸入驗證（最高優先）
