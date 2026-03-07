@@ -15,12 +15,57 @@ export interface ParsedLogLine {
 
 let lineCounter = 0
 
+// Pino level number → level name
+const PINO_LEVELS: Record<number, 'info' | 'warn' | 'error'> = {
+  10: 'info',  // trace
+  20: 'info',  // debug
+  30: 'info',
+  40: 'warn',
+  50: 'error',
+  60: 'error', // fatal
+}
+
 /**
  * 解析 PM2 日誌行
- * 格式：'2026-03-01 08:16:30: [Tag] message'
+ * 支援兩種格式：
+ *   PM2:  '2026-03-01 08:16:30: [Tag] message'
+ *   Pino: '{"level":30,"time":1772881956866,"module":"server","msg":"..."}'
  */
 export function parseLogLine(raw: string, source: 'out' | 'error'): ParsedLogLine {
   const id = `log-${Date.now()}-${lineCounter++}`
+
+  // 嘗試解析 Pino JSON 格式
+  if (raw.startsWith('{')) {
+    try {
+      const json = JSON.parse(raw)
+      const ts = json.time ? new Date(json.time) : null
+      const timestamp = ts
+        ? `${ts.getFullYear()}-${String(ts.getMonth() + 1).padStart(2, '0')}-${String(ts.getDate()).padStart(2, '0')} ${String(ts.getHours()).padStart(2, '0')}:${String(ts.getMinutes()).padStart(2, '0')}:${String(ts.getSeconds()).padStart(2, '0')}`
+        : ''
+      const tag = json.module ? `[${json.module}]` : null
+      const level = PINO_LEVELS[json.level] || 'info'
+
+      // 組裝 message：msg + 其他有意義的欄位
+      const skipKeys = new Set(['level', 'time', 'pid', 'hostname', 'module', 'msg'])
+      const extras: string[] = []
+      for (const [k, v] of Object.entries(json)) {
+        if (skipKeys.has(k)) continue
+        if (v === null || v === undefined) continue
+        if (typeof v === 'object') {
+          extras.push(`${k}=${JSON.stringify(v)}`)
+        } else {
+          extras.push(`${k}=${v}`)
+        }
+      }
+      const message = extras.length > 0
+        ? `${json.msg || ''}  ${extras.join(' ')}`
+        : (json.msg || '')
+
+      return { id, timestamp, tag, message: message.trim(), level, source, raw }
+    } catch {
+      // JSON 解析失敗，fallback 到 PM2 格式
+    }
+  }
 
   // PM2 格式：'2026-03-01 08:16:30: ...'
   const match = raw.match(/^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}):\s*(.*)$/)
