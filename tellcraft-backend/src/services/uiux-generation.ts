@@ -155,6 +155,10 @@ export async function callClaude(
           }).catch(err => logger.error({ err }, 'recordLlmUsage failed'))
         }
 
+        if (finalMessage.stop_reason === 'max_tokens') {
+          logger.warn({ purpose: trackingContext?.purpose, outputTokens: finalMessage.usage?.output_tokens }, 'LLM 回應被 max_tokens 截斷，可能導致 JSON 解析失敗')
+        }
+
         const content = finalMessage.content[0]
         if (content.type === 'text') {
           return { success: true, content: content.text }
@@ -2502,7 +2506,7 @@ ${sourceType === 'ideas'
   const response = await callClaude(
     systemPrompt,
     [{ role: 'user', content: userMessage }],
-    { maxTokens: 2048, temperature: 0.3 },
+    { maxTokens: 4096, temperature: 0.3 },
     { ...trackingContext, purpose: 'generate_design_brief' }
   )
 
