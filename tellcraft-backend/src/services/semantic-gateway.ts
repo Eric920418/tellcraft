@@ -4,10 +4,9 @@
 // 用 Sonnet 語義理解取代填鴨式 keyword arrays
 // ============================================================
 
-import * as db from '../db/client'
 import type { FlowState } from '../types/flow-state'
 import { createLogger } from '../lib/logger'
-import { getAnthropicHeaders, MODEL } from '../lib/anthropic'
+import { getAnthropicHeaders, MODEL, trackLlmUsage } from '../lib/anthropic'
 
 const logger = createLogger('semantic-gateway')
 
@@ -434,17 +433,13 @@ export async function semanticGateway(
 
     // 記錄 LLM 使用量
     if (data.usage) {
-      const inputTokens = data.usage.input_tokens || 0
-      const outputTokens = data.usage.output_tokens || 0
-      const cost = (inputTokens * 3 + outputTokens * 15) / 1_000_000
-      db.recordLlmUsage({
+      trackLlmUsage({
         model: MODEL.SONNET,
-        inputTokens,
-        outputTokens,
-        costUsd: cost,
+        inputTokens: data.usage.input_tokens || 0,
+        outputTokens: data.usage.output_tokens || 0,
         purpose: 'semantic_gateway',
         conversationId: input.conversationId,
-      }).catch(err => logger.error({ err }, '記錄使用量失敗'))
+      })
     }
 
     const text = data.content?.[0]?.text?.trim()

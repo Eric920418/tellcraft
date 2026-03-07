@@ -5,8 +5,7 @@
  */
 
 import * as cheerio from 'cheerio'
-import { recordLlmUsage } from '../db/client'
-import { getAnthropicClient, MODEL } from '../lib/anthropic'
+import { getAnthropicClient, MODEL, trackLlmUsage } from '../lib/anthropic'
 import { getEnv } from '../lib/env'
 import { createLogger } from '../lib/logger'
 
@@ -200,14 +199,13 @@ ${metadata.themeColor ? `- 主題色: ${metadata.themeColor}` : ''}
 
     // 記錄 LLM 用量
     if (response.usage) {
-      recordLlmUsage({
+      trackLlmUsage({
         model: MODEL.HAIKU,
         inputTokens: response.usage.input_tokens,
         outputTokens: response.usage.output_tokens,
-        costUsd: (response.usage.input_tokens * 0.8 + response.usage.output_tokens * 4) / 1_000_000,
         purpose: 'reference_vision_analysis',
         conversationId: trackingContext?.conversationId,
-      }).catch(err => logger.error({ err }, '記錄用量失敗'))
+      })
     }
 
     const text = response.content[0]

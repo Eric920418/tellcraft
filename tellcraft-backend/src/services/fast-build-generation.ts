@@ -6,8 +6,8 @@
 
 import type { DesignTier, DesignSystem, TemplateData } from './uiux-generation'
 import { matchTemplates } from './template-matcher'
-import { queryOne, recordLlmUsage } from '../db/client'
-import { getAnthropicHeaders, MODEL } from '../lib/anthropic'
+import { queryOne } from '../db/client'
+import { getAnthropicHeaders, MODEL, calculateLlmCost, trackLlmUsage } from '../lib/anthropic'
 import { createLogger } from '../lib/logger'
 
 const logger = createLogger('fast-build-generation')
@@ -664,8 +664,6 @@ export async function getTemplateStyleHint(
 // Haiku 概念生成（+1 Haiku 調用，給 Fast Build 設計靈魂）
 // ============================================================
 
-const HAIKU_PRICING = { input: 0.8, output: 4 }
-
 export interface FastConcept {
   name: string
   vibe: string
@@ -726,16 +724,14 @@ Make the concept unique. signatureElement must be specific enough to code (e.g. 
     if (data.usage) {
       const inputTokens = data.usage.input_tokens || 0
       const outputTokens = data.usage.output_tokens || 0
-      const cost = (inputTokens * HAIKU_PRICING.input + outputTokens * HAIKU_PRICING.output) / 1_000_000
-      recordLlmUsage({
+      trackLlmUsage({
         model: MODEL.HAIKU,
         inputTokens,
         outputTokens,
-        costUsd: cost,
         purpose: 'fast_build_concept',
         userId: context?.userId,
         conversationId: context?.conversationId,
-      }).catch(err => logger.error({ err }, 'FastConcept 記錄用量失敗'))
+      })
     }
 
     const text = data.content?.[0]?.text
@@ -859,16 +855,14 @@ Rules:
     if (data.usage) {
       const inputTokens = data.usage.input_tokens || 0
       const outputTokens = data.usage.output_tokens || 0
-      const cost = (inputTokens * HAIKU_PRICING.input + outputTokens * HAIKU_PRICING.output) / 1_000_000
-      recordLlmUsage({
+      trackLlmUsage({
         model: MODEL.HAIKU,
         inputTokens,
         outputTokens,
-        costUsd: cost,
         purpose: 'fast_build_prompt_expansion',
         userId: context?.userId,
         conversationId: context?.conversationId,
-      }).catch(err => logger.error({ err }, 'ExpandPrompt 記錄用量失敗'))
+      })
     }
 
     const text = data.content?.[0]?.text?.trim()

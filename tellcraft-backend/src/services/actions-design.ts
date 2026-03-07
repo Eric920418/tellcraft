@@ -1,13 +1,9 @@
 import * as yaml from 'js-yaml'
-import { recordLlmUsage } from '../db/client'
-import { getAnthropicHeaders, MODEL } from '../lib/anthropic'
+import { getAnthropicHeaders, MODEL, trackLlmUsage } from '../lib/anthropic'
 import { LlmTrackingContext } from './classifier'
 import { createLogger } from '../lib/logger'
 
 const logger = createLogger('actions-design')
-
-// Sonnet 定價 (每百萬 tokens)
-const SONNET_PRICING = { input: 3, output: 15 }
 
 // ============================================================
 // 類型定義
@@ -324,17 +320,15 @@ ${entityMapping}
   }
 
   // 記錄使用量
-  if (response.inputTokens && response.outputTokens && trackingContext) {
-    const costUsd = (response.inputTokens * SONNET_PRICING.input + response.outputTokens * SONNET_PRICING.output) / 1000000
-    await recordLlmUsage({
+  if (response.inputTokens && response.outputTokens) {
+    trackLlmUsage({
       model: MODEL.SONNET,
       inputTokens: response.inputTokens,
       outputTokens: response.outputTokens,
-      costUsd,
       purpose: 'actions_design',
-      userId: trackingContext.userId,
-      conversationId: trackingContext.conversationId,
-    }).catch(err => logger.error({ err }, '記錄使用量失敗'))
+      userId: trackingContext?.userId,
+      conversationId: trackingContext?.conversationId,
+    })
   }
 
   // 提取 YAML 內容

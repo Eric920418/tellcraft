@@ -1,4 +1,5 @@
 import { NextConfig } from 'next';
+import { withSentryConfig } from '@sentry/nextjs';
 import createNextIntlPlugin from 'next-intl/plugin';
 
 const DEFAULT_VPS_API_URL = 'http://54.238.4.117:8080';
@@ -16,4 +17,15 @@ const nextConfig: NextConfig = {
 };
 
 const withNextIntl = createNextIntlPlugin('./i18n/request.ts');
-export default withNextIntl(nextConfig);
+
+export default withSentryConfig(withNextIntl(nextConfig), {
+  org: process.env.SENTRY_ORG,
+  project: process.env.SENTRY_PROJECT,
+  authToken: process.env.SENTRY_AUTH_TOKEN,
+
+  // 繞過 ad blocker
+  tunnelRoute: '/monitoring',
+
+  // CI 以外不印 source map 上傳 log
+  silent: !process.env.CI,
+});

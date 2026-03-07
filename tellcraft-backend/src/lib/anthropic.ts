@@ -1,10 +1,14 @@
 /**
- * 統一 Anthropic Client + 模型 ID 常數
- * 全 codebase 唯一的 `new Anthropic` 和模型字串來源
+ * 統一 Anthropic Client + 模型 ID 常數 + Pricing
+ * 全 codebase 唯一的 `new Anthropic`、模型字串、定價來源
  */
 
 import Anthropic from '@anthropic-ai/sdk'
 import { getEnv } from './env'
+import { recordLlmUsage } from '../db/client'
+import { createLogger } from './logger'
+
+const logger = createLogger('anthropic')
 
 // ============================================================
 // 模型 ID 常數（全 codebase 唯一來源）
@@ -16,6 +20,49 @@ export const MODEL = {
 } as const
 
 export type ModelId = (typeof MODEL)[keyof typeof MODEL]
+
+// ============================================================
+// 定價（USD per 1M tokens）— 全 codebase 唯一來源
+// ============================================================
+
+export const PRICING: Record<string, { input: number; output: number }> = {
+  [MODEL.SONNET]: { input: 3, output: 15 },
+  [MODEL.HAIKU]: { input: 0.8, output: 4 },
+}
+
+export function calculateLlmCost(
+  model: string,
+  inputTokens: number,
+  outputTokens: number,
+): number {
+  const p = PRICING[model]
+  if (!p) return 0
+  return (inputTokens * p.input + outputTokens * p.output) / 1_000_000
+}
+
+/**
+ * Fire-and-forget LLM 用量記錄。
+ * 自動計算 cost，DB 寫入失敗只 log 不 throw。
+ */
+export function trackLlmUsage(params: {
+  model: string
+  inputTokens: number
+  outputTokens: number
+  purpose: string
+  userId?: string
+  conversationId?: string
+}): void {
+  const cost = calculateLlmCost(params.model, params.inputTokens, params.outputTokens)
+  recordLlmUsage({
+    model: params.model,
+    inputTokens: params.inputTokens,
+    outputTokens: params.outputTokens,
+    costUsd: cost,
+    purpose: params.purpose,
+    userId: params.userId,
+    conversationId: params.conversationId,
+  }).catch(err => logger.error({ err }, 'trackLlmUsage failed'))
+}
 
 // ============================================================
 // Anthropic SDK Client（單例）

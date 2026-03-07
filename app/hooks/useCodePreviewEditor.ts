@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback, useRef } from 'react'
 import type { ElementInfo } from '@/app/components/uiux/PreviewPanel'
 import { getAuthToken } from '@/app/hooks/useAuth'
 import { uploadImage } from '@/app/lib/vps-api'
+import { normalizeLegacyUploadUrl } from '@/app/lib/upload-url'
 
 export function useCodePreviewEditor(conversationId: string | undefined) {
   const [codePreviewEditMode, setCodePreviewEditMode] = useState(false)
@@ -107,9 +108,18 @@ export function useCodePreviewEditor(conversationId: string | undefined) {
 
   const handleCodePreviewUploadImage = useCallback(async (file: File): Promise<string | null> => {
     const token = getAuthToken()
-    if (!token) return null
+    if (!token) {
+      throw new Error('請先登入再上傳圖片')
+    }
     const result = await uploadImage({ file, token })
-    return result.success ? (result.data?.url || null) : null
+    if (!result.success) {
+      throw new Error(result.error || '上傳失敗')
+    }
+    const uploadedUrl = result.data?.url || ''
+    if (!uploadedUrl) {
+      throw new Error('上傳成功但缺少圖片 URL')
+    }
+    return normalizeLegacyUploadUrl(uploadedUrl)
   }, [])
 
   const handleCodePreviewAnnotationChange = useCallback((elementId: string, text: string) => {

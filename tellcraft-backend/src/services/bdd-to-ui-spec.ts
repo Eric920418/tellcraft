@@ -3,8 +3,7 @@
  * 將 ISA 格式的 BDD Feature Files 翻譯為前端可消費的 UI 需求規格
  */
 
-import { getAnthropicClient, MODEL } from '../lib/anthropic'
-import { recordLlmUsage } from '../db/client'
+import { getAnthropicClient, MODEL, trackLlmUsage } from '../lib/anthropic'
 import { safeParseJson } from '../utils/safe-parse-json'
 import { createLogger } from '../lib/logger'
 
@@ -187,21 +186,17 @@ ${bddSpec}
 
         const finalMessage = await stream.finalMessage()
 
-        // 記錄 LLM 用量（Haiku: input $0.8/M, output $4/M）
+        // 記錄 LLM 用量
         const usage = finalMessage.usage
         if (usage) {
-          const inputTokens = usage.input_tokens || 0
-          const outputTokens = usage.output_tokens || 0
-          const cost = (inputTokens * 0.8 + outputTokens * 4) / 1_000_000
-          recordLlmUsage({
+          trackLlmUsage({
             model: MODEL.HAIKU,
-            inputTokens,
-            outputTokens,
-            costUsd: cost,
+            inputTokens: usage.input_tokens || 0,
+            outputTokens: usage.output_tokens || 0,
             purpose: 'bdd_to_ui_translation',
             userId: trackingContext?.userId,
             conversationId: trackingContext?.conversationId,
-          }).catch(err => logger.error({ err }, 'recordLlmUsage failed'))
+          })
         }
 
         const content = finalMessage.content[0]

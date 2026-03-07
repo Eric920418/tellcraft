@@ -9,6 +9,7 @@ import {
   sendMessage as vpsSendMessage,
 } from '@/app/lib/vps-api'
 import { smoothEasing, mapBackendStageToFrontend, STAGES } from '@/app/lib/chat-utils'
+import { normalizeLegacyUploadUrl } from '@/app/lib/upload-url'
 import { COMMAND_KEYS } from '@/app/types/chat'
 import type { Message } from '@/app/types/chat'
 import type { StreamingPreview } from '@/app/hooks/useVpsWebSocket'
@@ -327,7 +328,10 @@ export default function ChatSection({
   }, [])
 
   // ── Send message (button trigger) ──
-  const handleSendMessage = useCallback(async (content: string) => {
+  const handleSendMessage = useCallback(async (
+    content: string,
+    options?: { imageUrls?: string[] }
+  ) => {
     if (!session.sessionInfo || !content.trim() || isTyping || sendCooldown) return
 
     if (session.quotaReadOnly) {
@@ -372,6 +376,7 @@ export default function ChatSection({
         message: content.trim(),
         locale,
         token: token || undefined,
+        imageUrls: options?.imageUrls,
       })
     } else {
       result = await vpsSendMessage({
@@ -381,6 +386,7 @@ export default function ChatSection({
         userId: session.sessionInfo.userId,
         locale,
         token: token || undefined,
+        imageUrls: options?.imageUrls,
       })
     }
 
@@ -488,7 +494,9 @@ export default function ChatSection({
         for (const img of pendingImages) {
           try {
             const uploadResult = await uploadImage({ file: img.file, token })
-            if (uploadResult.success && uploadResult.data?.url) urls.push(uploadResult.data.url)
+            if (uploadResult.success && uploadResult.data?.url) {
+              urls.push(normalizeLegacyUploadUrl(uploadResult.data.url))
+            }
           } catch { /* ignore */ } finally {
             URL.revokeObjectURL(img.previewUrl)
           }
@@ -555,43 +563,86 @@ export default function ChatSection({
   }, [session, input, isTyping, sendCooldown, isGuestLocked, attachedImages, startSendCooldown, editorHook, scroll, locale, tChat, tCodePreview, tLogin, loginPromptHook])
 
   // ── Code preview save ──
+  const extractImageUrlsFromOverrides = useCallback((overrides: Record<string, Record<string, string>>): string[] => {
+    const urls = new Set<string>()
+
+    for (const changes of Object.values(overrides)) {
+      const rawImgSrc = (changes.imgSrc || '').trim()
+      if (/^https?:\/\//i.test(rawImgSrc)) {
+        urls.add(normalizeLegacyUploadUrl(rawImgSrc))
+      }
+
+      const bg = (changes.backgroundImage || '').trim()
+      if (!bg || bg === 'none') continue
+      const bgMatch = bg.match(/url\(["']?(.*?)["']?\)/i)
+      const bgUrl = (bgMatch ? bgMatch[1] : bg).trim()
+      if (/^https?:\/\//i.test(bgUrl)) {
+        urls.add(normalizeLegacyUploadUrl(bgUrl))
+      }
+    }
+
+    return Array.from(urls)
+  }, [])
+
   const handleCodePreviewSave = useCallback(() => {
     if (!session.sessionInfo || Object.keys(editorHook.codePreviewOverrides).length === 0) return
     const lines: string[] = [tCodePreview('saveMessage'), '', tCodePreview('saveNote1'), tCodePreview('saveNote2'), tCodePreview('saveNote3'), '']
+    const lockedImageUrls = extractImageUrlsFromOverrides(editorHook.codePreviewOverrides)
+
     for (const [elemId, changes] of Object.entries(editorHook.codePreviewOverrides)) {
       lines.push(`### ${elemId}`)
       for (const [prop, val] of Object.entries(changes)) {
+        const normalizedVal = normalizeLegacyUploadUrl(String(val))
         if (prop === 'text') {
-          lines.push(`- ${tCodePreview('textChanged', { value: val })}`)
+          lines.push(`- ${tCodePreview('textChanged', { value: normalizedVal })}`)
         } else if (prop === 'imgSrc') {
-          lines.push(`- ${tCodePreview('imgSrcChanged', { value: val })}`)
+          lines.push(`- ${tCodePreview('imgSrcChanged', { value: normalizedVal })}`)
+          if (/^https?:\/\//i.test(normalizedVal)) {
+            lines.push(`- 鎖定圖片 URL（不可替換/不可刪除）: ${normalizedVal}`)
+          }
         } else if (prop === 'imgAlt') {
-          lines.push(`- ${tCodePreview('imgAltChanged', { value: val })}`)
+          lines.push(`- ${tCodePreview('imgAltChanged', { value: normalizedVal })}`)
         } else if (prop === 'backgroundImage') {
-          const urlMatch = val.match(/url\(["']?(.*?)["']?\)/)
-          const pureUrl = urlMatch ? urlMatch[1] : val
-          if (val === 'none' || !pureUrl) {
+          const urlMatch = normalizedVal.match(/url\(["']?(.*?)["']?\)/)
+          const pureUrl = normalizeLegacyUploadUrl(urlMatch ? urlMatch[1] : normalizedVal)
+          if (normalizedVal === 'none' || !pureUrl) {
             lines.push(`- 移除背景圖片`)
           } else {
             lines.push(`- 設定背景圖片: style={{ backgroundImage: "url(${pureUrl})", backgroundSize: "${editorHook.codePreviewOverrides[elemId]?.backgroundSize || 'cover'}", backgroundPosition: "${editorHook.codePreviewOverrides[elemId]?.backgroundPosition || 'center'}", backgroundRepeat: "${editorHook.codePreviewOverrides[elemId]?.backgroundRepeat || 'no-repeat'}" }}`)
+            lines.push(`- 鎖定背景圖 URL（不可替換/不可刪除）: ${pureUrl}`)
           }
         } else if (prop === 'backgroundSize' || prop === 'backgroundPosition' || prop === 'backgroundRepeat') {
           continue
         } else {
           const label = tUiux((`label${prop.charAt(0).toUpperCase() + prop.slice(1)}`) as never) || prop
-          lines.push(`- ${tCodePreview('styleChanged', { label, prop, value: val })}`)
+          lines.push(`- ${tCodePreview('styleChanged', { label, prop, value: normalizedVal })}`)
         }
       }
       const ann = editorHook.codePreviewAnnotations[elemId]
       if (ann) lines.push(`- ${tCodePreview('annotationPrefix')}: ${ann}`)
       lines.push('')
     }
+
+    if (lockedImageUrls.length > 0) {
+      lines.push('## 圖片資產鎖定（最高優先）')
+      lines.push('以下圖片 URL 必須原樣保留，不可替換、不可刪除、不可改成 placeholder/unsplash/base64/local path：')
+      for (const url of lockedImageUrls) {
+        lines.push(`- ${url}`)
+      }
+      lines.push('')
+    }
+
     const content = lines.join('\n')
-    handleSendMessage(content)
+    void handleSendMessage(content, { imageUrls: lockedImageUrls })
     editorHook.setCodePreviewOverrides({})
     editorHook.setCodePreviewAnnotations({})
     editorHook.setCodePreviewHistoryIndex(0)
-  }, [session.sessionInfo, editorHook, tCodePreview, tUiux, handleSendMessage])
+    editorHook.setCodePreviewSelectedElements([])
+    const iframe = editorHook.getPreviewIframe()
+    if (iframe?.contentWindow) {
+      iframe.contentWindow.postMessage({ type: 'tc_clearSelection' }, '*')
+    }
+  }, [session.sessionInfo, editorHook, tCodePreview, tUiux, handleSendMessage, extractImageUrlsFromOverrides])
 
   // ── Handle new conversation ──
   const handleStartNewConversation = useCallback(() => {

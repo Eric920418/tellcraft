@@ -1,14 +1,10 @@
-import { recordLlmUsage } from '../db/client'
 import { createLogger } from '../lib/logger'
-import { getAnthropicHeaders, MODEL } from '../lib/anthropic'
+import { getAnthropicHeaders, MODEL, calculateLlmCost, trackLlmUsage } from '../lib/anthropic'
 import { safeParseJson } from '../utils/safe-parse-json'
 import { ClarifyItem, TechnicalContext } from './bdd-session'
 import { LlmTrackingContext } from './classifier'
 
 const logger = createLogger('formulation')
-
-// Sonnet 定價 (每百萬 tokens)
-const SONNET_PRICING = { input: 3, output: 15 }
 
 // ============================================================
 // 類型定義
@@ -336,16 +332,16 @@ ${schemaHints}` : ''}`
 
   // 記錄使用量
   if (response.inputTokens && response.outputTokens) {
-    const costUsd = (response.inputTokens * SONNET_PRICING.input + response.outputTokens * SONNET_PRICING.output) / 1000000
-    await recordLlmUsage({
+    const costUsd = calculateLlmCost(MODEL.SONNET, response.inputTokens, response.outputTokens)
+    logger.info({ inputTokens: response.inputTokens, outputTokens: response.outputTokens, cost: costUsd.toFixed(4) }, 'formulation_schema LLM usage')
+    trackLlmUsage({
       model: MODEL.SONNET,
       inputTokens: response.inputTokens,
       outputTokens: response.outputTokens,
-      costUsd,
       purpose: 'formulation_schema',
       userId: trackingContext?.userId,
       conversationId: trackingContext?.conversationId,
-    }).catch(err => logger.error({ err }, '記錄使用量失敗'))
+    })
   }
 
   try {
@@ -471,16 +467,14 @@ ${schemaHints}` : ''}`
 
   // 記錄使用量
   if (response.inputTokens && response.outputTokens) {
-    const costUsd = (response.inputTokens * SONNET_PRICING.input + response.outputTokens * SONNET_PRICING.output) / 1000000
-    await recordLlmUsage({
+    trackLlmUsage({
       model: MODEL.SONNET,
       inputTokens: response.inputTokens,
       outputTokens: response.outputTokens,
-      costUsd,
       purpose: 'formulation_identify_features',
       userId: trackingContext?.userId,
       conversationId: trackingContext?.conversationId,
-    }).catch(err => logger.error({ err }, '記錄使用量失敗'))
+    })
   }
 
   try {
@@ -718,16 +712,14 @@ ${featureSchemaHints}` : ''}`
 
   // 記錄使用量
   if (response.inputTokens && response.outputTokens) {
-    const costUsd = (response.inputTokens * SONNET_PRICING.input + response.outputTokens * SONNET_PRICING.output) / 1000000
-    await recordLlmUsage({
+    trackLlmUsage({
       model: MODEL.SONNET,
       inputTokens: response.inputTokens,
       outputTokens: response.outputTokens,
-      costUsd,
       purpose: 'formulation_generate_feature',
       userId: trackingContext?.userId,
       conversationId: trackingContext?.conversationId,
-    }).catch(err => logger.error({ err }, '記錄使用量失敗'))
+    })
   }
 
   // 提取 Gherkin 內容
@@ -1020,16 +1012,14 @@ ${decisions}` : ''}
 
     // 記錄使用量
     if (response.inputTokens && response.outputTokens) {
-      const costUsd = (response.inputTokens * SONNET_PRICING.input + response.outputTokens * SONNET_PRICING.output) / 1000000
-      await recordLlmUsage({
+      trackLlmUsage({
         model: MODEL.SONNET,
         inputTokens: response.inputTokens,
         outputTokens: response.outputTokens,
-        costUsd,
         purpose: 'formulation_fix_features',
         userId: trackingContext?.userId,
         conversationId: trackingContext?.conversationId,
-      }).catch(err => logger.error({ err }, '記錄使用量失敗'))
+      })
     }
 
     try {
@@ -1167,16 +1157,14 @@ ${decisions || '（無額外決策）'}`
 
   // 記錄使用量
   if (response.inputTokens && response.outputTokens) {
-    const costUsd = (response.inputTokens * SONNET_PRICING.input + response.outputTokens * SONNET_PRICING.output) / 1000000
-    await recordLlmUsage({
+    trackLlmUsage({
       model: MODEL.SONNET,
       inputTokens: response.inputTokens,
       outputTokens: response.outputTokens,
-      costUsd,
       purpose: 'formulation_draft_batch',
       userId: trackingContext?.userId,
       conversationId: trackingContext?.conversationId,
-    }).catch(err => logger.error({ err }, '記錄使用量失敗'))
+    })
   }
 
   try {

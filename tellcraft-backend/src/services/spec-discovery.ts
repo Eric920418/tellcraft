@@ -1,15 +1,11 @@
-import { recordLlmUsage } from '../db/client'
 import { safeParseJson } from '../utils/safe-parse-json'
-import { getAnthropicHeaders, MODEL } from '../lib/anthropic'
+import { getAnthropicHeaders, MODEL, trackLlmUsage } from '../lib/anthropic'
 import { ClarifyItem } from './bdd-session'
 import { LlmTrackingContext } from './classifier'
 import { GeneratedFeature } from './formulation'
 import { createLogger } from '../lib/logger'
 
 const logger = createLogger('spec-discovery')
-
-// Sonnet 定價 (每百萬 tokens)
-const SONNET_PRICING = { input: 3, output: 15 }
 
 // ============================================================
 // 類型定義
@@ -303,16 +299,14 @@ ${existingQuestions ? `---
 
   // 記錄使用量
   if (response.inputTokens && response.outputTokens) {
-    const costUsd = (response.inputTokens * SONNET_PRICING.input + response.outputTokens * SONNET_PRICING.output) / 1000000
-    await recordLlmUsage({
+    trackLlmUsage({
       model: MODEL.SONNET,
       inputTokens: response.inputTokens,
       outputTokens: response.outputTokens,
-      costUsd,
       purpose: 'spec_discovery',
       userId: trackingContext?.userId,
       conversationId: trackingContext?.conversationId,
-    }).catch(err => logger.error({ err }, '記錄使用量失敗'))
+    })
   }
 
   try {

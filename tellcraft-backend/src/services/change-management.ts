@@ -3,8 +3,7 @@
  * spec_completed 後，用戶可增量修改已完成的規格
  */
 
-import { getAnthropicClient, MODEL } from '../lib/anthropic'
-import { recordLlmUsage } from '../db/client'
+import { getAnthropicClient, MODEL, calculateLlmCost, trackLlmUsage } from '../lib/anthropic'
 import { safeParseJson } from '../utils/safe-parse-json'
 import { LlmTrackingContext } from './classifier'
 import { GeneratedFeature } from './formulation'
@@ -47,11 +46,6 @@ interface UpdatedSpecs {
   actionsYml?: string
 }
 
-
-// Haiku 定價 (每百萬 tokens)
-const HAIKU_PRICING = { input: 0.8, output: 4 }
-// Sonnet 定價 (每百萬 tokens)
-const SONNET_PRICING = { input: 3, output: 15 }
 
 // ============================================================
 // 1. 分析變更影響（Haiku，輕量快速）
@@ -107,16 +101,15 @@ ${existingSpecs.esDocument ? `**ES 文檔**（前 300 字）：\n${existingSpecs
     // 記錄 LLM 用量
     const usage = finalMessage.usage
     if (usage) {
-      const cost = (usage.input_tokens * HAIKU_PRICING.input + usage.output_tokens * HAIKU_PRICING.output) / 1_000_000
-      recordLlmUsage({
+      const cost = calculateLlmCost(MODEL.HAIKU, usage.input_tokens, usage.output_tokens)
+      trackLlmUsage({
         model: MODEL.HAIKU,
         inputTokens: usage.input_tokens,
         outputTokens: usage.output_tokens,
-        costUsd: cost,
         purpose: 'change_impact_analysis',
         userId: trackingContext?.userId,
         conversationId: trackingContext?.conversationId,
-      }).catch(err => logger.error({ err }, 'recordLlmUsage failed'))
+      })
 
       logger.info({ inputTokens: usage.input_tokens, outputTokens: usage.output_tokens, cost: cost.toFixed(4) }, 'Impact Analysis 完成')
     }
@@ -221,16 +214,15 @@ ${existingSpecs.entityMapping}
     // 記錄 LLM 用量
     const usage = finalMessage.usage
     if (usage) {
-      const cost = (usage.input_tokens * SONNET_PRICING.input + usage.output_tokens * SONNET_PRICING.output) / 1_000_000
-      recordLlmUsage({
+      const cost = calculateLlmCost(MODEL.SONNET, usage.input_tokens, usage.output_tokens)
+      trackLlmUsage({
         model: MODEL.SONNET,
         inputTokens: usage.input_tokens,
         outputTokens: usage.output_tokens,
-        costUsd: cost,
         purpose: 'change_execute',
         userId: trackingContext?.userId,
         conversationId: trackingContext?.conversationId,
-      }).catch(err => logger.error({ err }, 'recordLlmUsage failed'))
+      })
 
       logger.info({ inputTokens: usage.input_tokens, outputTokens: usage.output_tokens, cost: cost.toFixed(4) }, 'Execute Change 完成')
     }

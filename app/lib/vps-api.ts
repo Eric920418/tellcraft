@@ -107,6 +107,11 @@ async function apiRequest<T>(
     return result
   } catch (error) {
     console.error('[VPS API] Request failed:', error)
+    if (typeof window !== 'undefined') {
+      import('@sentry/nextjs').then(Sentry => {
+        Sentry.captureException(error, { tags: { source: 'vps-api' } })
+      }).catch(() => {})
+    }
     return {
       success: false,
       error: error instanceof Error ? error.message : 'Unknown error',

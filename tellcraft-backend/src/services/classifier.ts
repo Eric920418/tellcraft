@@ -1,13 +1,9 @@
 import { SkillName, SKILL_REGISTRY, getSkillDescriptionsForClassifier } from './registry'
-import { recordLlmUsage } from '../db/client'
 import { safeParseJson } from '../utils/safe-parse-json'
 import { createLogger } from '../lib/logger'
-import { getAnthropicHeaders, MODEL } from '../lib/anthropic'
+import { calculateLlmCost, getAnthropicHeaders, MODEL, trackLlmUsage } from '../lib/anthropic'
 
 const logger = createLogger('classifier')
-
-// Haiku 定價 (每百萬 tokens)
-const HAIKU_PRICING = { input: 0.8, output: 4 }
 
 // ============================================================
 // Intent Classification 結果類型
@@ -218,22 +214,17 @@ ${skillDescriptions}
     if (data.usage) {
       const inputTokens = data.usage.input_tokens || 0
       const outputTokens = data.usage.output_tokens || 0
-      const cost = (inputTokens * HAIKU_PRICING.input + outputTokens * HAIKU_PRICING.output) / 1_000_000
+      const cost = calculateLlmCost(MODEL.HAIKU, inputTokens, outputTokens)
 
-      try {
-        await recordLlmUsage({
-          model: MODEL.HAIKU,
-          inputTokens,
-          outputTokens,
-          costUsd: cost,
-          purpose: 'intent_classification',
-          userId: trackingContext?.userId,
-          conversationId: trackingContext?.conversationId,
-        })
-        logger.info({ inputTokens, outputTokens, cost: cost.toFixed(6), conversationId: trackingContext?.conversationId }, '已記錄使用量')
-      } catch (err) {
-        logger.error({ err }, '記錄使用量失敗')
-      }
+      trackLlmUsage({
+        model: MODEL.HAIKU,
+        inputTokens,
+        outputTokens,
+        purpose: 'intent_classification',
+        userId: trackingContext?.userId,
+        conversationId: trackingContext?.conversationId,
+      })
+      logger.info({ inputTokens, outputTokens, cost: cost.toFixed(6), conversationId: trackingContext?.conversationId }, '已記錄使用量')
     }
 
     if (!content) {

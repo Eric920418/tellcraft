@@ -4,17 +4,13 @@
 // 全部使用 Haiku，成本 ~$0.002/次
 // ============================================================
 
-import { recordLlmUsage } from '../db/client'
 import { isConfirmation } from '../utils/is-confirmation'
 import { safeParseJson } from '../utils/safe-parse-json'
 import { LlmTrackingContext } from './classifier'
 import { createLogger } from '../lib/logger'
-import { getAnthropicHeaders, MODEL } from '../lib/anthropic'
+import { getAnthropicHeaders, MODEL, trackLlmUsage } from '../lib/anthropic'
 
 const logger = createLogger('event-storming')
-
-// Haiku 定價 (每百萬 tokens)
-const HAIKU_PRICING = { input: 0.8, output: 4 }
 
 // ============================================================
 // 常量配置
@@ -153,16 +149,14 @@ async function callHaiku(
 
       // 記錄使用量
       if (trackingContext) {
-        const cost = (inputTokens * HAIKU_PRICING.input + outputTokens * HAIKU_PRICING.output) / 1_000_000
-        recordLlmUsage({
+        trackLlmUsage({
           model: MODEL.HAIKU,
           inputTokens,
           outputTokens,
-          costUsd: cost,
           purpose: 'event-storming',
           userId: trackingContext.userId,
           conversationId: trackingContext.conversationId,
-        }).catch(err => logger.error({ err }, '記錄使用量失敗'))
+        })
       }
 
       return {

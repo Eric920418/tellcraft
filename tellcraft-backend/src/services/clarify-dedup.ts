@@ -4,8 +4,7 @@
  * 用 Haiku 做輕量語意判斷，失敗時全部降級不阻斷流程
  */
 
-import { getAnthropicClient, MODEL } from '../lib/anthropic'
-import { recordLlmUsage } from '../db/client'
+import { getAnthropicClient, MODEL, calculateLlmCost, trackLlmUsage } from '../lib/anthropic'
 import { safeParseJson } from '../utils/safe-parse-json'
 import { ClarifyItem } from './bdd-session'
 import { createLogger } from '../lib/logger'
@@ -24,10 +23,6 @@ export interface DecisionSummary {
   }>
   excludedFeatures: string[]
 }
-
-// Haiku 定價 (每百萬 tokens)
-const HAIKU_PRICING = { input: 0.8, output: 4 }
-
 
 // ============================================================
 // Decision Summary 生成
@@ -90,16 +85,15 @@ export async function generateDecisionSummary(
     // 記錄 LLM 用量
     const usage = finalMessage.usage
     if (usage) {
-      const cost = (usage.input_tokens * HAIKU_PRICING.input + usage.output_tokens * HAIKU_PRICING.output) / 1_000_000
-      recordLlmUsage({
+      const cost = calculateLlmCost(MODEL.HAIKU, usage.input_tokens, usage.output_tokens)
+      trackLlmUsage({
         model: MODEL.HAIKU,
         inputTokens: usage.input_tokens,
         outputTokens: usage.output_tokens,
-        costUsd: cost,
         purpose: 'clarify_decision_summary',
         userId: trackingContext?.userId,
         conversationId: trackingContext?.conversationId,
-      }).catch(err => logger.error({ err }, 'recordLlmUsage failed'))
+      })
 
       logger.info({ inputTokens: usage.input_tokens, outputTokens: usage.output_tokens, cost: cost.toFixed(4) }, 'Decision Summary 生成完成')
     }
@@ -174,16 +168,15 @@ export async function generatePartialSpecContext(
     // 記錄 LLM 用量
     const usage = finalMessage.usage
     if (usage) {
-      const cost = (usage.input_tokens * HAIKU_PRICING.input + usage.output_tokens * HAIKU_PRICING.output) / 1_000_000
-      recordLlmUsage({
+      const cost = calculateLlmCost(MODEL.HAIKU, usage.input_tokens, usage.output_tokens)
+      trackLlmUsage({
         model: MODEL.HAIKU,
         inputTokens: usage.input_tokens,
         outputTokens: usage.output_tokens,
-        costUsd: cost,
         purpose: 'clarify_partial_spec_context',
         userId: trackingContext?.userId,
         conversationId: trackingContext?.conversationId,
-      }).catch(err => logger.error({ err }, 'recordLlmUsage failed'))
+      })
 
       logger.info({ inputTokens: usage.input_tokens, outputTokens: usage.output_tokens, cost: cost.toFixed(4) }, 'Partial Spec Context 生成完成')
     }
@@ -258,16 +251,15 @@ export async function deduplicateQuestions(
     // 記錄 LLM 用量
     const usage = finalMessage.usage
     if (usage) {
-      const cost = (usage.input_tokens * HAIKU_PRICING.input + usage.output_tokens * HAIKU_PRICING.output) / 1_000_000
-      recordLlmUsage({
+      const cost = calculateLlmCost(MODEL.HAIKU, usage.input_tokens, usage.output_tokens)
+      trackLlmUsage({
         model: MODEL.HAIKU,
         inputTokens: usage.input_tokens,
         outputTokens: usage.output_tokens,
-        costUsd: cost,
         purpose: 'clarify_dedup',
         userId: trackingContext?.userId,
         conversationId: trackingContext?.conversationId,
-      }).catch(err => logger.error({ err }, 'recordLlmUsage failed'))
+      })
 
       logger.info({ inputTokens: usage.input_tokens, outputTokens: usage.output_tokens, cost: cost.toFixed(4) }, 'Dedup 完成')
     }

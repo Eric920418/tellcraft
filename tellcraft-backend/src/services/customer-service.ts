@@ -3,9 +3,8 @@
 // 零 LLM 意圖路由 + FAQ 匹配 + Sonnet 開放問答
 // ============================================================
 
-import { recordLlmUsage } from '../db/client'
 import { createLogger } from '../lib/logger'
-import { getAnthropicHeaders, MODEL } from '../lib/anthropic'
+import { getAnthropicHeaders, MODEL, trackLlmUsage } from '../lib/anthropic'
 
 const logger = createLogger('customer-service')
 
@@ -332,17 +331,13 @@ Rules:
 
     // 記錄使用量
     if (data.usage) {
-      const inputTokens = data.usage.input_tokens || 0
-      const outputTokens = data.usage.output_tokens || 0
-      const cost = (inputTokens * 3 + outputTokens * 15) / 1_000_000
-      recordLlmUsage({
+      trackLlmUsage({
         model: MODEL.SONNET,
-        inputTokens,
-        outputTokens,
-        costUsd: cost,
+        inputTokens: data.usage.input_tokens || 0,
+        outputTokens: data.usage.output_tokens || 0,
         purpose: 'customer_service',
         conversationId: context.conversationId,
-      }).catch(err => logger.error({ err }, 'recordLlmUsage failed'))
+      })
     }
 
     const text = data.content?.[0]?.text?.trim()

@@ -1,15 +1,11 @@
-import { recordLlmUsage } from '../db/client'
 import { safeParseJson } from '../utils/safe-parse-json'
-import { getAnthropicHeaders, MODEL } from '../lib/anthropic'
+import { getAnthropicHeaders, MODEL, calculateLlmCost, trackLlmUsage } from '../lib/anthropic'
 import { ClarifyItem } from './bdd-session'
 import { LlmTrackingContext } from './classifier'
 import { DecisionSummary } from './clarify-dedup'
 import { createLogger } from '../lib/logger'
 
 const logger = createLogger('prd-discovery')
-
-// Sonnet 定價 (每百萬 tokens)
-const SONNET_PRICING = { input: 3, output: 15 }
 
 // ============================================================
 // PRD Discovery 類型
@@ -310,17 +306,16 @@ ${partialSpecContext}
     // 記錄 LLM 使用量
     const inputTokens = data.usage?.input_tokens || 0
     const outputTokens = data.usage?.output_tokens || 0
-    const costUsd = (inputTokens * SONNET_PRICING.input + outputTokens * SONNET_PRICING.output) / 1000000
+    const costUsd = calculateLlmCost(MODEL.SONNET, inputTokens, outputTokens)
 
-    await recordLlmUsage({
+    trackLlmUsage({
       model: MODEL.SONNET,
       inputTokens,
       outputTokens,
-      costUsd,
       purpose: 'prd_discovery',
       userId: trackingContext?.userId,
       conversationId: trackingContext?.conversationId,
-    }).catch(err => logger.error({ err }, '記錄 LLM 使用量失敗'))
+    })
 
     logger.info({ inputTokens, outputTokens, cost: costUsd.toFixed(4), conversationId: trackingContext?.conversationId }, 'LLM 回應完成')
 

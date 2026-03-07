@@ -7,7 +7,7 @@ import { promisify } from 'util'
 import * as os from 'os'
 import * as path from 'path'
 import * as fsPromises from 'fs/promises'
-import { getAnthropicClient, MODEL } from '../lib/anthropic'
+import { getAnthropicClient, MODEL, trackLlmUsage } from '../lib/anthropic'
 import { getEnv } from '../lib/env'
 import * as db from '../db/client'
 import { createLogger } from '../lib/logger'
@@ -2032,21 +2032,17 @@ ${codeBlocks.join('\n\n')}
       })
       const response = await stream.finalMessage()
 
-      // 記錄 LLM 用量（Haiku: input $0.8/M, output $4/M）
+      // 記錄 LLM 用量
       const usage = response.usage
       if (usage) {
-        const inputTokens = usage.input_tokens || 0
-        const outputTokens = usage.output_tokens || 0
-        const cost = (inputTokens * 0.8 + outputTokens * 4) / 1_000_000
-        db.recordLlmUsage({
+        trackLlmUsage({
           model: MODEL.HAIKU,
-          inputTokens,
-          outputTokens,
-          costUsd: cost,
+          inputTokens: usage.input_tokens || 0,
+          outputTokens: usage.output_tokens || 0,
           purpose: 'deploy_build_fix',
           userId: trackingContext?.userId,
           conversationId: trackingContext?.conversationId,
-        }).catch(err => logger.error({ err }, 'recordLlmUsage failed'))
+        })
       }
 
       const content = response.content

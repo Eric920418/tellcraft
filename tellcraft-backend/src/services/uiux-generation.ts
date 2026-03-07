@@ -5,10 +5,9 @@
 
 // LLM 函數需要從後端獨立實現
 import type Anthropic from '@anthropic-ai/sdk'
-import { getAnthropicClient, MODEL } from '../lib/anthropic'
+import { getAnthropicClient, MODEL, trackLlmUsage } from '../lib/anthropic'
 import { getEnv } from '../lib/env'
 import { formatUISpecForPrompt, UIRequirementsSpec } from './bdd-to-ui-spec'
-import { recordLlmUsage } from '../db/client'
 import { safeParseJson } from '../utils/safe-parse-json'
 import { createLogger } from '../lib/logger'
 
@@ -138,21 +137,17 @@ export async function callClaude(
 
         const finalMessage = await stream.finalMessage()
 
-        // 記錄 LLM 用量（Sonnet: input $3/M, output $15/M）
+        // 記錄 LLM 用量
         const usage = finalMessage.usage
         if (usage) {
-          const inputTokens = usage.input_tokens || 0
-          const outputTokens = usage.output_tokens || 0
-          const cost = (inputTokens * 3 + outputTokens * 15) / 1_000_000
-          recordLlmUsage({
+          trackLlmUsage({
             model: MODEL.SONNET,
-            inputTokens,
-            outputTokens,
-            costUsd: cost,
+            inputTokens: usage.input_tokens || 0,
+            outputTokens: usage.output_tokens || 0,
             purpose: trackingContext?.purpose || 'uiux_generation',
             userId: trackingContext?.userId,
             conversationId: trackingContext?.conversationId,
-          }).catch(err => logger.error({ err }, 'recordLlmUsage failed'))
+          })
         }
 
         if (finalMessage.stop_reason === 'max_tokens') {
@@ -2698,6 +2693,19 @@ export async function refineCode(
   onTextDelta?: (text: string) => void
 ): Promise<GenerationResult> {
   const tier = designContext.designTier || 'functional'
+  const feedbackUrls = Array.from(
+    new Set(
+      (userFeedback.match(/https?:\/\/[^\s)"'`]+/g) || [])
+        .map(u => u.trim())
+        .filter(Boolean)
+    )
+  )
+  const lockedUploadUrls = Array.from(
+    new Set(
+      [...(imageUrls || []), ...feedbackUrls]
+        .filter(u => /\/uploads\/tellcraft\//.test(u))
+    )
+  )
 
   // 組合所有現有代碼
   const codeBlocks: string[] = []
@@ -2759,6 +2767,16 @@ ${getStructureConstraints(tier)}
 6. 使用 Tailwind CSS classes
 7. 保持無障礙功能（aria-label、focus-visible 等）
 8. 保持現有的互動功能完好（Modal/Dialog 開關、表單 state、事件處理），不要移除 'use client'
+${lockedUploadUrls.length ? `
+## 圖片資產鎖定（最高優先）
+以下圖片 URL 屬於用戶剛上傳的資產，修改時必須原樣保留：
+${lockedUploadUrls.map((u, i) => `${i + 1}. ${u}`).join('\n')}
+
+嚴格禁止：
+- 將上述 URL 改成 placeholder（例如 unsplash、picsum、dummyimage、placehold）
+- 刪除對上述 URL 的使用（除非用戶明確要求移除該圖片）
+- 改成 data URI、相對路徑或其他網域
+` : ''}
 
 ## 輸出格式
 只輸出**被修改的檔案**，使用以下格式：
@@ -2783,10 +2801,14 @@ ${imageUrls.map((u, i) => `  ${i + 1}. ${u}`).join('\n')}` : ''}`
   const imageUrlsSection = imageUrls?.length
     ? `\n## 附加圖片 URL\n${imageUrls.map((u, i) => `${i + 1}. ${u}`).join('\n')}\n`
     : ''
+  const lockedUrlsSection = lockedUploadUrls.length
+    ? `\n## 鎖定圖片 URL（不可替換）\n${lockedUploadUrls.map((u, i) => `${i + 1}. ${u}`).join('\n')}\n`
+    : ''
 
   const userMessage = `## 用戶的修改要求
 ${userFeedback}
 ${imageUrlsSection}
+${lockedUrlsSection}
 ## 現有代碼
 ${codeBlocks.join('\n\n')}
 

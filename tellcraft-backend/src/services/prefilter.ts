@@ -1,8 +1,7 @@
 import Redis from 'ioredis'
-import { recordLlmUsage } from '../db/client'
 import { safeParseJson } from '../utils/safe-parse-json'
 import { createLogger } from '../lib/logger'
-import { getAnthropicHeaders, MODEL } from '../lib/anthropic'
+import { getAnthropicHeaders, MODEL, trackLlmUsage } from '../lib/anthropic'
 
 const logger = createLogger('prefilter')
 
@@ -326,8 +325,6 @@ const WEAK_SIGNALS = [
   '動畫', '互動', '響應式', 'rwd', 'responsive', 'animation', 'interactive',
 ]
 
-const HAIKU_PRICING = { input: 0.8, output: 4 }
-
 /**
  * 檢查用戶輸入是否與建站相關且具體到可執行（Fast Mode 專用）
  *
@@ -379,18 +376,14 @@ export async function checkBuildRelevance(
 
     // 記錄使用量
     if (data.usage) {
-      const inputTokens = data.usage.input_tokens || 0
-      const outputTokens = data.usage.output_tokens || 0
-      const cost = (inputTokens * HAIKU_PRICING.input + outputTokens * HAIKU_PRICING.output) / 1_000_000
-      recordLlmUsage({
+      trackLlmUsage({
         model: MODEL.HAIKU,
-        inputTokens,
-        outputTokens,
-        costUsd: cost,
+        inputTokens: data.usage.input_tokens || 0,
+        outputTokens: data.usage.output_tokens || 0,
         purpose: 'fast_mode_relevance_check',
         userId: context?.userId,
         conversationId: context?.conversationId,
-      }).catch(err => logger.error({ err }, '記錄使用量失敗'))
+      })
     }
 
     const text = data.content?.[0]?.text

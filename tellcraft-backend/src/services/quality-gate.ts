@@ -4,9 +4,8 @@
  * 基於 regex/字串匹配的靜態分析，發現 critical 問題時用 LLM 自動修復
  */
 
-import { getAnthropicClient, MODEL } from '../lib/anthropic'
+import { getAnthropicClient, MODEL, trackLlmUsage } from '../lib/anthropic'
 import { GeneratedComponent } from './uiux-generation'
-import { recordLlmUsage } from '../db/client'
 import { createLogger } from '../lib/logger'
 
 const logger = createLogger('quality-gate')
@@ -517,21 +516,17 @@ ${codeBlocks.join('\n\n')}
     })
     const response = await stream.finalMessage()
 
-    // 記錄 LLM 用量（Haiku: input $0.8/M, output $4/M）
+    // 記錄 LLM 用量
     const usage = response.usage
     if (usage) {
-      const inputTokens = usage.input_tokens || 0
-      const outputTokens = usage.output_tokens || 0
-      const cost = (inputTokens * 0.8 + outputTokens * 4) / 1_000_000
-      recordLlmUsage({
+      trackLlmUsage({
         model: MODEL.HAIKU,
-        inputTokens,
-        outputTokens,
-        costUsd: cost,
+        inputTokens: usage.input_tokens || 0,
+        outputTokens: usage.output_tokens || 0,
         purpose: 'quality_gate_autofix',
         userId: trackingContext?.userId,
         conversationId: trackingContext?.conversationId,
-      }).catch(err => logger.error({ err }, 'recordLlmUsage failed'))
+      })
     }
 
     const content = response.content
