@@ -1,5 +1,29 @@
 import { vi } from 'vitest'
 
+// Mock env（必須在其他 import 之前，因為 deployer/anthropic 在模組頂層呼叫 getEnv()）
+vi.mock('../lib/env', () => ({
+  validateEnv: vi.fn(() => ({})),
+  getEnv: vi.fn(() => ({
+    DATABASE_URL: 'postgresql://test:test@localhost/test',
+    JWT_SECRET: 'test-secret',
+    ANTHROPIC_API_KEY: 'sk-ant-test',
+    PORT: 3100,
+    REDIS_URL: 'redis://localhost:6379',
+    CORS_ORIGIN: 'http://localhost:3000',
+    DB_POOL_MAX: 15,
+    LOG_LEVEL: 'info',
+    NODE_ENV: 'test',
+    WORKER_CONCURRENCY: 20,
+    LLM_MAX_CONCURRENT: 10,
+    DEPLOY_MAX_CONCURRENT: 3,
+    UPLOAD_DIR: '/tmp/uploads',
+    APP_URL: 'http://localhost:3000',
+    API_URL: 'http://localhost:3100',
+    SOCKET_VERBOSE_LOG: false,
+    ALLOWED_CALLBACK_HOSTS: 'http://localhost:3000',
+  })),
+}))
+
 // Mock Redis
 vi.mock('ioredis', () => {
   const RedisMock = vi.fn(() => ({
@@ -16,11 +40,11 @@ vi.mock('ioredis', () => {
 
 // Mock pg Pool
 vi.mock('pg', () => {
-  const pool = {
-    query: vi.fn().mockResolvedValue({ rows: [], rowCount: 0 }),
-    connect: vi.fn(),
-    end: vi.fn(),
-    on: vi.fn(),
+  class PoolMock {
+    query = vi.fn().mockResolvedValue({ rows: [], rowCount: 0 })
+    connect = vi.fn()
+    end = vi.fn()
+    on = vi.fn()
   }
-  return { default: { Pool: vi.fn(() => pool) }, Pool: vi.fn(() => pool) }
+  return { default: { Pool: PoolMock }, Pool: PoolMock }
 })

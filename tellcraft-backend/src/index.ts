@@ -45,6 +45,7 @@ import { messagingApi as lineMessagingApi } from '@line/bot-sdk'
 import { setAuthRedisClient } from './routes/auth'
 import { parseLogLine, sanitizeLogLine } from './utils/log-parser'
 import { setMiddlewareRedisClient } from './middleware/auth'
+import { setCacheRedisClient } from './lib/cache'
 import { createLogger } from './lib/logger'
 
 const logger = createLogger('server')
@@ -372,6 +373,7 @@ if (env.LINE_MESSAGING_CHANNEL_ACCESS_TOKEN) {
 setAuthRedisClient(redis)
 setMiddlewareRedisClient(redis)
 setDashboardRedisClient(redis)
+setCacheRedisClient(redis)
 
 // 創建 Worker
 const orchestratorWorker = createOrchestratorWorker(redis, io)

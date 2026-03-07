@@ -409,6 +409,8 @@ Server Action 錯誤訊息 + 工具模組中文字串國際化（+117 keys，2 n
 | **認證** | Google/LINE OAuth、JWT 雙軌（localStorage + Cookie）、訪客→帳號合併、帳號綁定（雙登入）、auth 頁面 i18n（next-intl） |
 | **儀表板** | 用戶統計、專案管理、版本歷史、管理員面板、LLM 用量追蹤（統一 PRICING + trackLlmUsage）、即時系統日誌監控（Socket.io tail -F）、Dashboard 元件 i18n（next-intl） |
 | **可觀察性** | Sentry 前端錯誤追蹤（@sentry/nextjs，error boundary + replay + tunnel）、消息列表虛擬化（@tanstack/react-virtual，100+ 條 DOM < 30）、ChatMessageItem React.memo |
+| **測試** | 關鍵路徑單元測試 239 條（intent-helpers/log-parser/deployer-sanitize/semantic-gateway），Vitest |
+| **效能** | Redis 快取工具（`cached()` + `invalidateCache()`）、Dashboard admin stats 快取（5min TTL）、LATERAL JOIN 取代子查詢、GROUP BY 取代迴圈計數、複合索引（conversations/deployments/messages/llm_usage） |
 | **i18n** | next-intl 多語系（zh/en）、UI 元件全量翻譯、Server Action 錯誤訊息 i18n（getTranslations）、lib 模組英文化、error code 機制、883 keys / 29 namespaces |
 | **防護** | 三層防刷（前端冷卻 + API 限速 + Worker 鎖）、八層輸入防禦（含 Content Policy 語義審查 + Universal Input Quality Gate 亂碼/髒話/垃圾規則式攔截 + 設計問卷驗證）+ 違規冷卻升級（3→60s / 6→5min / 10→30min）、LLM 自動重試、Guest 限制（Fast Only + 一次使用 + 登入推薦） |
 | **通知** | LINE 推播通知（BDD 完成/UIUX 生成完成/部署成功失敗），離線用戶也能收到 |
@@ -523,16 +525,22 @@ tellcraft-backend/
 │   │   ├── safe-parse-json.ts   # LLM JSON 安全解析（四層防禦，全後端共用）
 │   │   └── is-confirmation.ts   # 確認語意偵測（三層：否定詞排除 → 短詞精確 → 長片語 includes）
 │   ├── routes/                   # API 路由（conversation/project/session/bdd/templates/operations/auth/health/upload/line-bot）
+│   ├── __tests__/               # 單元測試（Vitest，239 條用例）
+│   │   ├── intent-helpers.test.ts  # 意圖判斷純函數測試
+│   │   ├── log-parser.test.ts      # 日誌解析/遮罩測試
+│   │   ├── deployer-sanitize.test.ts # 部署預檢 7 層修復測試
+│   │   └── semantic-gateway.test.ts  # 語義閘門零 LLM 短路測試
 │   ├── lib/
 │   │   ├── env.ts               # Zod 環境變數驗證，啟動時快速失敗
 │   │   ├── anthropic.ts         # 統一 Anthropic Client + MODEL 常數 + PRICING + trackLlmUsage
+│   │   ├── cache.ts             # 通用 Redis 快取（cached + invalidateCache）
 │   │   └── logger.ts            # Pino logger 工廠
 │   ├── schemas/                  # Zod API 請求 schema（conversation/session/operations/bdd/project）
 │   ├── db/client.ts              # PostgreSQL 客戶端
 │   └── middleware/
 │       ├── auth.ts              # JWT 認證中間件
 │       └── validate.ts          # Zod 請求驗證中間件（validateBody/Query/Params）
-├── migrations/           # DB 遷移（001-015）
+├── migrations/           # DB 遷移（001-016）
 └── ecosystem.config.js   # PM2 配置
 
 bdd-spec/                 # BDD Skill 定義（instructions/ + rules/ + scripts/）

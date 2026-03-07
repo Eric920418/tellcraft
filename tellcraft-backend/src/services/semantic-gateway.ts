@@ -90,7 +90,7 @@ const SOFTWARE_BIZ_VOCAB: string[] = [
  * BDD clarify 問答相關性檢測（零 LLM）
  * 判斷用戶回答是否跟當前問題相關
  */
-function checkQuestionAnswerRelevance(
+export function checkQuestionAnswerRelevance(
   answer: string,
   question?: string,
   questionOptions?: string,
@@ -130,7 +130,7 @@ function checkQuestionAnswerRelevance(
 
 // ── 實質內容檢測 ──
 
-function hasSubstantiveContent(text: string): boolean {
+export function hasSubstantiveContent(text: string): boolean {
   // 純數字 + 符號（如 "0.0.0.0.0.0", "123456", "!@#$%"）
   if (/^[\d\s.!?,;:@#$%^&*()_+=\-[\]{}|\\/<>~`'"…。，！？、；：「」『』（）【】]+$/.test(text)) return false
 
@@ -162,7 +162,7 @@ function hasSubstantiveContent(text: string): boolean {
 
 // ── 零 LLM 短路 ──
 
-function quickFilter(input: SemanticGatewayInput): SemanticGatewayResult | null {
+export function quickFilter(input: SemanticGatewayInput): SemanticGatewayResult | null {
   const trimmed = input.userMessage.trim()
   const lower = trimmed.toLowerCase()
 

@@ -9,6 +9,7 @@ import { requireAuth, requireAdmin } from '../middleware/auth'
 import { parseLogLine, sanitizeLogLine, isNoiseLine, type ParsedLogLine } from '../utils/log-parser'
 import type Redis from 'ioredis'
 import { getCreditLimit } from '../config/plans'
+import { cached, invalidateCache } from '../lib/cache'
 import { createLogger } from '../lib/logger'
 
 const logger = createLogger('dashboard')
@@ -43,7 +44,7 @@ router.get('/stats', requireAuth, async (req, res) => {
       return res.status(404).json({ error: '用戶不存在' })
     }
 
-    // 查詢專案數量和最近的專案（含最新對話 ID）
+    // 查詢專案數量和最近的專案（含最新對話 ID）— LATERAL JOIN 取代 N+1 子查詢
     const projectsResult = await query<{
       id: string
       name: string
@@ -53,13 +54,16 @@ router.get('/stats', requireAuth, async (req, res) => {
       updated_at: string
       latest_conversation_id: string | null
     }>(
-      `SELECT id, name, status, is_pinned, created_at, updated_at,
-              (SELECT c2.id FROM conversations c2
-               WHERE c2.project_id = projects.id
-               ORDER BY c2.updated_at DESC LIMIT 1) as latest_conversation_id
-       FROM projects
-       WHERE user_id = $1
-       ORDER BY is_pinned DESC, pinned_at DESC NULLS LAST, updated_at DESC
+      `SELECT p.id, p.name, p.status, p.is_pinned, p.created_at, p.updated_at,
+              lc.id as latest_conversation_id
+       FROM projects p
+       LEFT JOIN LATERAL (
+         SELECT id FROM conversations
+         WHERE project_id = p.id
+         ORDER BY updated_at DESC LIMIT 1
+       ) lc ON true
+       WHERE p.user_id = $1
+       ORDER BY p.is_pinned DESC, p.pinned_at DESC NULLS LAST, p.updated_at DESC
        LIMIT 5`,
       [userId]
     )
@@ -89,8 +93,8 @@ router.get('/stats', requireAuth, async (req, res) => {
           `SELECT COUNT(*) as count FROM deployments WHERE project_id = ANY($1) AND status = 'success'`,
           [projectIds]
         ),
-        query<{ project_id: string }>(
-          `SELECT project_id FROM conversations WHERE project_id = ANY($1)`,
+        query<{ project_id: string; count: string }>(
+          `SELECT project_id, COUNT(*) as count FROM conversations WHERE project_id = ANY($1) GROUP BY project_id`,
           [projectIds]
         )
       ])
@@ -99,7 +103,7 @@ router.get('/stats', requireAuth, async (req, res) => {
       deployCount = parseInt(deployCountResult?.count || '0', 10)
 
       convCountsResult.rows.forEach(c => {
-        convCountMap.set(c.project_id, (convCountMap.get(c.project_id) || 0) + 1)
+        convCountMap.set(c.project_id, parseInt(c.count, 10))
       })
     }
 
@@ -139,44 +143,47 @@ router.get('/stats', requireAuth, async (req, res) => {
  */
 router.get('/admin/stats', requireAdmin, async (req, res) => {
   try {
-    const [
-      usersCount,
-      projectsCount,
-      conversationsCount,
-      deploymentsCount,
-      newUsers7d,
-      llmCost
-    ] = await Promise.all([
-      queryOne<{ count: string }>('SELECT COUNT(*) as count FROM users'),
-      queryOne<{ count: string }>('SELECT COUNT(*) as count FROM projects'),
-      queryOne<{ count: string }>('SELECT COUNT(*) as count FROM conversations'),
-      queryOne<{ count: string }>("SELECT COUNT(*) as count FROM deployments WHERE status = 'success'"),
-      queryOne<{ count: string }>(
-        `SELECT COUNT(*) as count FROM users WHERE created_at >= NOW() - INTERVAL '7 days'`
-      ),
-      queryOne<{ total: string }>(
-        `SELECT COALESCE(SUM(cost_usd), 0) as total FROM llm_usage
-         WHERE created_at >= NOW() - INTERVAL '30 days'`
-      )
-    ])
+    const stats = await cached('cache:admin:stats', 300, async () => {
+      const [
+        usersCount,
+        projectsCount,
+        conversationsCount,
+        deploymentsCount,
+        newUsers7d,
+        llmCost,
+        activeUsers7d,
+      ] = await Promise.all([
+        queryOne<{ count: string }>('SELECT COUNT(*) as count FROM users'),
+        queryOne<{ count: string }>('SELECT COUNT(*) as count FROM projects'),
+        queryOne<{ count: string }>('SELECT COUNT(*) as count FROM conversations'),
+        queryOne<{ count: string }>("SELECT COUNT(*) as count FROM deployments WHERE status = 'success'"),
+        queryOne<{ count: string }>(
+          `SELECT COUNT(*) as count FROM users WHERE created_at >= NOW() - INTERVAL '7 days'`
+        ),
+        queryOne<{ total: string }>(
+          `SELECT COALESCE(SUM(cost_usd), 0) as total FROM llm_usage
+           WHERE created_at >= NOW() - INTERVAL '30 days'`
+        ),
+        queryOne<{ count: string }>(
+          `SELECT COUNT(DISTINCT p.user_id) as count
+           FROM conversations c
+           JOIN projects p ON c.project_id = p.id
+           WHERE c.updated_at >= NOW() - INTERVAL '7 days'`
+        ),
+      ])
 
-    // 計算 7 天活躍用戶（有對話更新的）
-    const activeUsers7d = await queryOne<{ count: string }>(
-      `SELECT COUNT(DISTINCT p.user_id) as count
-       FROM conversations c
-       JOIN projects p ON c.project_id = p.id
-       WHERE c.updated_at >= NOW() - INTERVAL '7 days'`
-    )
-
-    res.json({
-      totalUsers: parseInt(usersCount?.count || '0', 10),
-      totalProjects: parseInt(projectsCount?.count || '0', 10),
-      totalConversations: parseInt(conversationsCount?.count || '0', 10),
-      totalDeployments: parseInt(deploymentsCount?.count || '0', 10),
-      activeUsers7d: parseInt(activeUsers7d?.count || '0', 10),
-      newUsers7d: parseInt(newUsers7d?.count || '0', 10),
-      totalLLMCost: parseFloat(llmCost?.total || '0')
+      return {
+        totalUsers: parseInt(usersCount?.count || '0', 10),
+        totalProjects: parseInt(projectsCount?.count || '0', 10),
+        totalConversations: parseInt(conversationsCount?.count || '0', 10),
+        totalDeployments: parseInt(deploymentsCount?.count || '0', 10),
+        activeUsers7d: parseInt(activeUsers7d?.count || '0', 10),
+        newUsers7d: parseInt(newUsers7d?.count || '0', 10),
+        totalLLMCost: parseFloat(llmCost?.total || '0'),
+      }
     })
+
+    res.json(stats)
   } catch (error) {
     logger.error({ err: error }, '獲取管理員統計失敗')
     res.status(500).json({ error: '獲取統計數據失敗' })

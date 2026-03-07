@@ -277,7 +277,7 @@ function normalizeGeneratedCodeUploadUrls(code: GeneratedCode, targetBaseUrl: st
  * 部署前代碼預檢 + 自動修復
  * 掃描所有已知的 build 失敗模式，自動修復後返回乾淨的代碼
  */
-function sanitizeCodeForDeploy(code: GeneratedCode): SanitizeResult {
+export function sanitizeCodeForDeploy(code: GeneratedCode): SanitizeResult {
   const fixes: string[] = []
   const injectedFiles: { file: string; data: string }[] = []
   const extraDependencies: Record<string, string> = {}
