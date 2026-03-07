@@ -649,6 +649,12 @@ export default function ChatSection({
     const content = lines.join('\n')
     const startedAt = Date.now()
     setPendingCodePreviewSaveAt(startedAt)
+    editorHook.setCodePreviewSelectedElements([])
+    const iframe = editorHook.getPreviewIframe()
+    if (iframe?.contentWindow) {
+      iframe.contentWindow.postMessage({ type: 'tc_clearSelection' }, '*')
+    }
+
     const sent = await handleSendMessage(content, { imageUrls: lockedImageUrls })
     if (!sent) {
       setPendingCodePreviewSaveAt(null)
