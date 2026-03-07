@@ -107,6 +107,7 @@ export async function handleUiuxCodeGenerating(
 export async function handleUiuxIterating(
   conversationId: string, state: FlowState, redis: Redis, io: SocketIOServer
 ) {
+    const isChinese = state.locale !== 'en'
     const ITERATION_TIMEOUT_MS = 5 * 60 * 1000
     const iterStartedAt = state.uiuxCodeGenerationStartedAt || 0
     if (iterStartedAt > 0 && Date.now() - iterStartedAt > ITERATION_TIMEOUT_MS) {
@@ -115,13 +116,17 @@ export async function handleUiuxIterating(
       state.uiuxCodeGenerationStartedAt = undefined
       await saveFlowState(redis, conversationId, state)
       await sendMessage(conversationId, io, {
-        content: '修改中斷了，請重新描述你想調整的內容。',
+        content: isChinese
+          ? '修改中斷了，請重新描述你想調整的內容。'
+          : 'Modification was interrupted. Please describe what you want to adjust.',
         stage: 'uiux_complete',
       })
       return
     }
     await sendMessage(conversationId, io, {
-      content: '正在修改設計中，請稍候...',
+      content: isChinese
+        ? '正在修改設計中，請稍候...'
+        : 'Modifying design, please wait...',
       stage: 'info',
     })
     return
@@ -130,10 +135,27 @@ export async function handleUiuxIterating(
 export async function handleFastGenerating(
   conversationId: string, state: FlowState, redis: Redis, io: SocketIOServer
 ) {
+    // 結構生成失敗後等待用戶點重試，攔截隨機輸入
+    if (state.waitingForReply) {
+      const isChinese = state.locale !== 'en'
+      await sendMessage(conversationId, io, {
+        content: isChinese
+          ? '生成已暫停。請點擊「重試」按鈕重新生成，或點「開始新專案」重新描述需求。'
+          : 'Generation is paused. Click "Retry" to regenerate, or "New Project" to start fresh.',
+        stage: 'info',
+        quickReplies: [
+          { label: isChinese ? '重試' : 'Retry', value: '__retry_fast_build__', style: 'primary' as const },
+          { label: isChinese ? '開始新專案' : 'New Project', value: '__new_project__', style: 'ghost' as const },
+        ],
+      })
+      return
+    }
+
     const FAST_BUILD_TIMEOUT_MS = 20 * 60 * 1000
     const startedAt = state.uiuxCodeGenerationStartedAt || 0
     if (startedAt === 0 || Date.now() - startedAt > FAST_BUILD_TIMEOUT_MS) {
       logger.warn('Fast Build 超時，嘗試恢復')
+      const isChinese = state.locale !== 'en'
       const hasCode = state.uiuxGeneratedCode &&
         (state.uiuxGeneratedCode.pages.length > 0 || state.uiuxGeneratedCode.components.length > 0)
       if (hasCode) {
@@ -146,7 +168,9 @@ export async function handleFastGenerating(
         const compCount = state.uiuxGeneratedCode!.components.length
         const twConfig = state.uiuxDesignSystem ? generateTailwindConfig(state.uiuxDesignSystem) : ''
         await sendMessage(conversationId, io, {
-          content: `快速生成中斷了，但已恢復之前的進度（${pageCount} 個頁面、${compCount} 個組件）。\n\n你可以：\n- 輸入「**部署**」部署現有代碼\n- 或描述想調整的地方`,
+          content: isChinese
+            ? `快速生成中斷了，但已恢復之前的進度（${pageCount} 個頁面、${compCount} 個組件）。\n\n你可以：\n- 輸入「**部署**」部署現有代碼\n- 或描述想調整的地方`
+            : `Generation was interrupted, but progress has been recovered (${pageCount} pages, ${compCount} components).\n\nYou can:\n- Type "**Deploy**" to deploy the current code\n- Or describe what you'd like to adjust`,
           stage: 'uiux_complete',
           layoutHint: 'split',
           richContent: {
@@ -160,22 +184,25 @@ export async function handleFastGenerating(
             } as Record<string, unknown>,
           },
           quickReplies: [
-            { label: '部署上線', value: '部署', style: 'primary' },
+            { label: isChinese ? '部署上線' : 'Deploy', value: '部署', style: 'primary' },
           ],
         })
       } else {
-        state.phase = 'idle'
-        state.uiuxCodeGenerationStartedAt = undefined
-        await saveFlowState(redis, conversationId, state)
+        await deleteFlowState(redis, conversationId)
         await sendMessage(conversationId, io, {
-          content: '快速生成中斷了，請重新描述你想要什麼樣的網站。',
+          content: isChinese
+            ? '快速生成中斷了，請重新描述你想要什麼樣的網站。'
+            : 'Generation was interrupted. Please describe what kind of website you want.',
           stage: 'error',
         })
       }
       return
     }
+    const isChinese = state.locale !== 'en'
     await sendMessage(conversationId, io, {
-      content: '正在生成中，請稍候... 預計 5 分鐘完成。',
+      content: isChinese
+        ? '正在生成中，請稍候... 預計 5 分鐘完成。'
+        : 'Generating, please wait... Estimated 5 minutes.',
       stage: 'info',
     })
     return

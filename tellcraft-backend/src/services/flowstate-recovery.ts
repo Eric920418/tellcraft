@@ -152,6 +152,7 @@ async function recoverPrdDiscovery(
 async function recoverFastGenerating(
   redis: Redis, io: SocketIOServer, conversationId: string, state: FlowState
 ) {
+  const isChinese = state.locale !== 'en'
   const hasCode = state.uiuxGeneratedCode &&
     (state.uiuxGeneratedCode.pages.length > 0 || state.uiuxGeneratedCode.components.length > 0)
 
@@ -167,7 +168,9 @@ async function recoverFastGenerating(
     const twConfig = state.uiuxDesignSystem ? generateTailwindConfig(state.uiuxDesignSystem) : ''
 
     await sendMessage(conversationId, io, {
-      content: `快速生成中斷了，但已恢復之前的進度（${pageCount} 個頁面、${compCount} 個組件）。\n\n你可以：\n- 輸入「**部署**」部署現有代碼\n- 或描述想調整的地方`,
+      content: isChinese
+        ? `快速生成中斷了，但已恢復之前的進度（${pageCount} 個頁面、${compCount} 個組件）。\n\n你可以：\n- 輸入「**部署**」部署現有代碼\n- 或描述想調整的地方`
+        : `Generation was interrupted, but progress has been recovered (${pageCount} pages, ${compCount} components).\n\nYou can:\n- Type "**Deploy**" to deploy the current code\n- Or describe what you'd like to adjust`,
       stage: 'uiux_complete',
       layoutHint: 'split',
       richContent: {
@@ -181,16 +184,16 @@ async function recoverFastGenerating(
         } as Record<string, unknown>,
       },
       quickReplies: [
-        { label: '部署上線', value: '部署', style: 'primary' },
+        { label: isChinese ? '部署上線' : 'Deploy', value: '部署', style: 'primary' },
       ],
     })
   } else {
-    state.phase = 'idle'
-    state.uiuxCodeGenerationStartedAt = undefined
-    await saveFlowState(redis, conversationId, state)
+    await deleteFlowState(redis, conversationId)
 
     await sendMessage(conversationId, io, {
-      content: '快速生成中斷了，請重新描述你想要什麼樣的網站。',
+      content: isChinese
+        ? '快速生成中斷了，請重新描述你想要什麼樣的網站。'
+        : 'Generation was interrupted. Please describe what kind of website you want.',
       stage: 'error',
     })
   }
@@ -203,12 +206,15 @@ async function recoverFastGenerating(
 async function recoverUiuxIterating(
   redis: Redis, io: SocketIOServer, conversationId: string, state: FlowState
 ) {
+  const isChinese = state.locale !== 'en'
   state.phase = 'uiux_complete'
   state.uiuxCodeGenerationStartedAt = undefined
   await saveFlowState(redis, conversationId, state)
 
   await sendMessage(conversationId, io, {
-    content: '修改中斷了，請重新描述你想調整的內容。',
+    content: isChinese
+      ? '修改中斷了，請重新描述你想調整的內容。'
+      : 'Modification was interrupted. Please describe what you want to adjust.',
     stage: 'uiux_complete',
   })
 }

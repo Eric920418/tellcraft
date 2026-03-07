@@ -164,6 +164,7 @@ export async function executeFastBuildSkill(params: {
     // 保留 FlowState 以供重試（只清除生成時間戳）
     state.phase = 'fast_generating'
     state.uiuxCodeGenerationStartedAt = undefined
+    state.waitingForReply = true
     await saveFlowState(redis, conversationId, state)
     await sendMessage(conversationId, io, {
       content: isChinese
@@ -372,8 +373,11 @@ export async function executeFastBuildSkill(params: {
           recoveryState.uiuxCodeGenerationStartedAt = undefined
           recoveryState.uiuxCodePhase = 'complete'
           await saveFlowState(redis, conversationId, recoveryState)
+        } else {
+          recoveryState.uiuxCodeGenerationStartedAt = undefined
+          recoveryState.waitingForReply = true
+          await saveFlowState(redis, conversationId, recoveryState)
         }
-        // 不 delete：保留 FlowState 供 __retry_fast_build__ 使用
       }
     } catch (recoveryErr) {
       logger.error({ err: recoveryErr }, '恢復 FlowState 也失敗')
