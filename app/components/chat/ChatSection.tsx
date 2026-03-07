@@ -587,6 +587,36 @@ export default function ChatSection({
     return Array.from(urls)
   }, [])
 
+  const getCurrentPreviewRoute = useCallback((): string => {
+    const normalize = (raw: string): string => {
+      const value = raw.trim()
+      if (!value) return '/'
+      let route = value
+      if (route.startsWith('#')) route = route.slice(1)
+      const queryPos = route.indexOf('?')
+      if (queryPos >= 0) route = route.slice(0, queryPos)
+      if (!route.startsWith('/')) route = `/${route}`
+      route = route.replace(/\/+$/, '')
+      return route || '/'
+    }
+
+    try {
+      const iframe = editorHook.getPreviewIframe()
+      const loc = iframe?.contentWindow?.location
+      if (!loc) return '/'
+      if (loc.hash && loc.hash.startsWith('#/')) {
+        return normalize(loc.hash)
+      }
+      if (loc.pathname && loc.pathname !== 'about:blank') {
+        return normalize(loc.pathname)
+      }
+    } catch {
+      // Cross-origin 或 iframe 尚未就緒時，回退到首頁路由
+    }
+
+    return '/'
+  }, [editorHook])
+
   const clearCodePreviewDraft = useCallback(() => {
     editorHook.setCodePreviewOverrides({})
     editorHook.setCodePreviewAnnotations({})
@@ -602,6 +632,11 @@ export default function ChatSection({
     if (!session.sessionInfo || Object.keys(editorHook.codePreviewOverrides).length === 0 || pendingCodePreviewSaveAt) return
     const lines: string[] = [tCodePreview('saveMessage'), '', tCodePreview('saveNote1'), tCodePreview('saveNote2'), tCodePreview('saveNote3'), '']
     const lockedImageUrls = extractImageUrlsFromOverrides(editorHook.codePreviewOverrides)
+    const previewRoute = getCurrentPreviewRoute()
+
+    lines.push('## 當前預覽路由（必須優先套用於此頁）')
+    lines.push(`- ${previewRoute}`)
+    lines.push('')
 
     for (const [elemId, changes] of Object.entries(editorHook.codePreviewOverrides)) {
       lines.push(`### ${elemId}`)
@@ -659,7 +694,7 @@ export default function ChatSection({
     if (!sent) {
       setPendingCodePreviewSaveAt(null)
     }
-  }, [session.sessionInfo, editorHook, tCodePreview, tUiux, handleSendMessage, extractImageUrlsFromOverrides, pendingCodePreviewSaveAt])
+  }, [session.sessionInfo, editorHook, tCodePreview, tUiux, handleSendMessage, extractImageUrlsFromOverrides, getCurrentPreviewRoute, pendingCodePreviewSaveAt])
 
   useEffect(() => {
     if (!pendingCodePreviewSaveAt) return

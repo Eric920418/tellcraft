@@ -2818,7 +2818,7 @@ export async function refineCode(
 
       for (const file of allFiles) {
         const usage = getUrlUsage(file.content, url)
-        const validUsage = usage.directRenderable || (usage.rawUrl && usage.renderHint)
+        const validUsage = usage.directRenderable
         if (validUsage) {
           foundRenderableUsage = true
           break
@@ -2841,19 +2841,84 @@ export async function refineCode(
     return missing
   }
 
+  const normalizeRoute = (input: string): string => {
+    let route = (input || '').trim()
+    if (!route) return '/'
+    if (route.startsWith('#')) route = route.slice(1)
+    const queryPos = route.indexOf('?')
+    if (queryPos >= 0) route = route.slice(0, queryPos)
+    if (!route.startsWith('/')) route = `/${route}`
+    route = route.replace(/\/+$/, '')
+    return route || '/'
+  }
+
+  const pagePathToRoute = (pagePath: string): string | null => {
+    const normalizedPath = pagePath.replace(/\\/g, '/')
+    let appRelative = normalizedPath
+
+    const appMarkerIdx = normalizedPath.lastIndexOf('/app/')
+    if (appMarkerIdx >= 0) {
+      appRelative = normalizedPath.slice(appMarkerIdx + '/app/'.length)
+    } else if (normalizedPath.startsWith('app/')) {
+      appRelative = normalizedPath.slice('app/'.length)
+    } else {
+      return null
+    }
+
+    if (appRelative === 'page.tsx' || appRelative === 'page.ts') return '/'
+    if (!appRelative.endsWith('/page.tsx') && !appRelative.endsWith('/page.ts')) return null
+
+    let route = appRelative.replace(/\/page\.tsx?$/, '')
+    route = route.replace(/^\[locale\](\/|$)/, '')
+    route = route.replace(/\/?\([^/]+\)/g, '')
+    return normalizeRoute(route || '/')
+  }
+
+  const extractTargetPreviewRoute = (feedback: string): string | null => {
+    const explicitMatch =
+      feedback.match(/當前預覽路由（必須優先套用於此頁）[\s\S]{0,120}?-\s*(\/[^\s\n]+)/) ||
+      feedback.match(/當前預覽路由[^\/\n]*?(\/[^\s\n]+)/)
+
+    if (!explicitMatch?.[1]) return null
+    return normalizeRoute(explicitMatch[1])
+  }
+
+  const findMissingLockedUrlsInRoute = (
+    code: CodeBundle,
+    lockedUrls: string[],
+    targetRoute: string
+  ): { missingUrls: string[]; targetPagePaths: string[] } => {
+    if (!lockedUrls.length) return { missingUrls: [], targetPagePaths: [] }
+    const targetPages = code.pages.filter(page => pagePathToRoute(page.path) === targetRoute)
+    const targetPagePaths = targetPages.map(p => p.path)
+    if (targetPages.length === 0) {
+      return { missingUrls: [], targetPagePaths: [] }
+    }
+
+    // 目標頁 + components 都納入檢查（圖片可能在被目標頁引入的共用組件內）
+    const candidateFiles = [...targetPages, ...code.components]
+    const missingUrls = lockedUrls.filter(url =>
+      !candidateFiles.some(file => getUrlUsage(file.content, url).directRenderable)
+    )
+
+    return { missingUrls, targetPagePaths }
+  }
+
   const repairLockedUploadUrls = async (
     code: CodeBundle,
-    missingUrls: string[]
+    missingUrls: string[],
+    targetRoute?: string | null
   ): Promise<CodeBundle | null> => {
     if (!missingUrls.length) return code
 
     const repairSystemPrompt = `你是一位資深前端工程師。你會收到一份目前已可運作的 React/Next.js 代碼，以及「必須保留」的圖片 URL。
 
 任務：
-1. 只做最小必要修改，確保每個 URL 都被實際用在畫面上（img src 或 CSS backgroundImage）
-2. 不要刪除既有功能、互動、動畫、響應式邏輯
-3. 不要把 URL 改成其他網址、placeholder 或 data URI
-4. 若 URL 已被正確使用，不要重複新增
+- 只做最小必要修改，確保每個 URL 都被實際用在畫面上（img src 或 CSS backgroundImage）
+${targetRoute ? `- 圖片必須出現在目標路由「${targetRoute}」的頁面（可直接在該頁，或該頁引入的元件）` : ''}
+- 不要刪除既有功能、互動、動畫、響應式邏輯
+- 不要把 URL 改成其他網址、placeholder 或 data URI
+- 若 URL 已被正確使用，不要重複新增
 
 輸出格式：
 只輸出被修改的檔案，使用：
@@ -2866,6 +2931,7 @@ export async function refineCode(
 
     const repairUserMessage = `## 缺失的鎖定圖片 URL（必須補回）
 ${missingUrls.map((u, i) => `${i + 1}. ${u}`).join('\n')}
+${targetRoute ? `\n## 目標路由（必須套用）\n${targetRoute}\n` : ''}
 
 ## 當前代碼
 ${buildCodeBlocks(code).join('\n\n')}
@@ -2907,10 +2973,15 @@ ${buildCodeBlocks(code).join('\n\n')}
         .filter(u => /\/uploads\/tellcraft\//.test(u))
     )
   )
+  const targetPreviewRoute = extractTargetPreviewRoute(userFeedback)
 
   if (lockedUploadUrls.length > 0) {
     logger.info(
-      { lockedUploadUrlsCount: lockedUploadUrls.length, imageUrlsCount: imageUrls?.length || 0 },
+      {
+        lockedUploadUrlsCount: lockedUploadUrls.length,
+        imageUrlsCount: imageUrls?.length || 0,
+        targetPreviewRoute: targetPreviewRoute || undefined,
+      },
       'refineCode: 偵測到鎖定圖片 URL'
     )
   }
@@ -2975,6 +3046,11 @@ ${lockedUploadUrls.map((u, i) => `${i + 1}. ${u}`).join('\n')}
 - 刪除對上述 URL 的使用（除非用戶明確要求移除該圖片）
 - 改成 data URI、相對路徑或其他網域
 ` : ''}
+${targetPreviewRoute ? `
+## 路由鎖定（最高優先）
+本次修改的目標路由為：${targetPreviewRoute}
+含鎖定圖片 URL 的修改必須保留在此路由對應頁面（或其引入組件），禁止改到其他頁面路由。
+` : ''}
 
 ## 輸出格式
 只輸出**被修改的檔案**，使用以下格式：
@@ -3002,11 +3078,15 @@ ${imageUrls.map((u, i) => `  ${i + 1}. ${u}`).join('\n')}` : ''}`
   const lockedUrlsSection = lockedUploadUrls.length
     ? `\n## 鎖定圖片 URL（不可替換）\n${lockedUploadUrls.map((u, i) => `${i + 1}. ${u}`).join('\n')}\n`
     : ''
+  const targetRouteSection = targetPreviewRoute
+    ? `\n## 當前預覽路由（必須優先套用於此頁）\n${targetPreviewRoute}\n`
+    : ''
 
   const userMessage = `## 用戶的修改要求
 ${userFeedback}
 ${imageUrlsSection}
 ${lockedUrlsSection}
+${targetRouteSection}
 ## 現有代碼
 ${codeBlocks.join('\n\n')}
 
@@ -3055,6 +3135,46 @@ ${codeBlocks.join('\n\n')}
 
   // 鎖定圖片 URL 最終驗證：若缺失，嘗試一次修復
   if (lockedUploadUrls.length > 0) {
+    if (targetPreviewRoute) {
+      const routeCheckBefore = findMissingLockedUrlsInRoute(mergedCode, lockedUploadUrls, targetPreviewRoute)
+      if (routeCheckBefore.targetPagePaths.length === 0) {
+        logger.warn(
+          { targetPreviewRoute },
+          'refineCode: 找不到目標路由對應頁面，略過路由鎖定驗證'
+        )
+      } else if (routeCheckBefore.missingUrls.length > 0) {
+        logger.warn(
+          {
+            targetPreviewRoute,
+            targetPagePaths: routeCheckBefore.targetPagePaths,
+            missingUrls: routeCheckBefore.missingUrls,
+          },
+          'refineCode: 目標路由缺少鎖定圖片 URL，嘗試修復'
+        )
+
+        const repairedForRoute = await repairLockedUploadUrls(mergedCode, routeCheckBefore.missingUrls, targetPreviewRoute)
+        if (repairedForRoute) {
+          mergedCode = repairedForRoute
+        }
+
+        const routeCheckAfter = findMissingLockedUrlsInRoute(mergedCode, lockedUploadUrls, targetPreviewRoute)
+        if (routeCheckAfter.targetPagePaths.length > 0 && routeCheckAfter.missingUrls.length > 0) {
+          logger.warn(
+            {
+              targetPreviewRoute,
+              targetPagePaths: routeCheckAfter.targetPagePaths,
+              missingUrls: routeCheckAfter.missingUrls,
+            },
+            'refineCode: 目標路由修復後仍缺少鎖定圖片 URL'
+          )
+          return {
+            success: false,
+            error: `偵測到圖片被改到其他頁面（目標路由 ${targetPreviewRoute} 缺少鎖定圖片），為避免覆蓋您的設計，本次修改已取消。`,
+          }
+        }
+      }
+    }
+
     const missingBeforeRepair = findMissingLockedUrls(mergedCode, lockedUploadUrls)
     if (missingBeforeRepair.length > 0) {
       logger.warn(
@@ -3062,7 +3182,7 @@ ${codeBlocks.join('\n\n')}
         'refineCode: 偵測到鎖定圖片 URL 在合併結果中缺失，嘗試修復'
       )
 
-      const repaired = await repairLockedUploadUrls(mergedCode, missingBeforeRepair)
+      const repaired = await repairLockedUploadUrls(mergedCode, missingBeforeRepair, targetPreviewRoute)
       if (repaired) {
         mergedCode = repaired
       }
