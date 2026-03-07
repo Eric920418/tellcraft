@@ -94,6 +94,7 @@ export default function ChatSection({
   // ── Attached images ──
   const [attachedImages, setAttachedImages] = useState<{ file: File; previewUrl: string }[]>([])
   const chatImageInputRef = useRef<HTMLInputElement>(null)
+  const [pendingCodePreviewSaveAt, setPendingCodePreviewSaveAt] = useState<number | null>(null)
 
   // ── Typing indicator ──
   const typingSafetyRef = useRef<NodeJS.Timeout | null>(null)
@@ -332,11 +333,11 @@ export default function ChatSection({
     content: string,
     options?: { imageUrls?: string[] }
   ) => {
-    if (!session.sessionInfo || !content.trim() || isTyping || sendCooldown) return
+    if (!session.sessionInfo || !content.trim() || isTyping || sendCooldown) return false
 
     if (session.quotaReadOnly) {
       session.setError(tChat('quotaReadonlyHint'))
-      return
+      return false
     }
 
     if (isGuestLocked) {
@@ -347,7 +348,7 @@ export default function ChatSection({
         subMessage: tLogin('guestLimitMessage'),
         promptId: 'guest_limit'
       })
-      return
+      return false
     }
 
     startSendCooldown()
@@ -405,16 +406,18 @@ export default function ChatSection({
           subMessage: tLogin('guestLimitMessage'),
           promptId: 'guest_limit'
         })
-        return
+        return false
       }
       if (err.includes('CREDIT_LIMIT_REACHED')) {
         session.setQuotaReadOnly(true)
         session.setError(tChat('quotaReadonlyHint'))
-        return
+        return false
       }
 
       session.setError(err || tChat('sendFailed'))
+      return false
     }
+    return true
   }, [session, isTyping, sendCooldown, isGuestLocked, startSendCooldown, getCommandLabel, scroll, locale, tChat, tLogin, loginPromptHook])
 
   // ── Send from input (Enter key) ──
@@ -584,8 +587,19 @@ export default function ChatSection({
     return Array.from(urls)
   }, [])
 
-  const handleCodePreviewSave = useCallback(() => {
-    if (!session.sessionInfo || Object.keys(editorHook.codePreviewOverrides).length === 0) return
+  const clearCodePreviewDraft = useCallback(() => {
+    editorHook.setCodePreviewOverrides({})
+    editorHook.setCodePreviewAnnotations({})
+    editorHook.setCodePreviewHistoryIndex(0)
+    editorHook.setCodePreviewSelectedElements([])
+    const iframe = editorHook.getPreviewIframe()
+    if (iframe?.contentWindow) {
+      iframe.contentWindow.postMessage({ type: 'tc_clearSelection' }, '*')
+    }
+  }, [editorHook])
+
+  const handleCodePreviewSave = useCallback(async () => {
+    if (!session.sessionInfo || Object.keys(editorHook.codePreviewOverrides).length === 0 || pendingCodePreviewSaveAt) return
     const lines: string[] = [tCodePreview('saveMessage'), '', tCodePreview('saveNote1'), tCodePreview('saveNote2'), tCodePreview('saveNote3'), '']
     const lockedImageUrls = extractImageUrlsFromOverrides(editorHook.codePreviewOverrides)
 
@@ -633,16 +647,31 @@ export default function ChatSection({
     }
 
     const content = lines.join('\n')
-    void handleSendMessage(content, { imageUrls: lockedImageUrls })
-    editorHook.setCodePreviewOverrides({})
-    editorHook.setCodePreviewAnnotations({})
-    editorHook.setCodePreviewHistoryIndex(0)
-    editorHook.setCodePreviewSelectedElements([])
-    const iframe = editorHook.getPreviewIframe()
-    if (iframe?.contentWindow) {
-      iframe.contentWindow.postMessage({ type: 'tc_clearSelection' }, '*')
+    const startedAt = Date.now()
+    setPendingCodePreviewSaveAt(startedAt)
+    const sent = await handleSendMessage(content, { imageUrls: lockedImageUrls })
+    if (!sent) {
+      setPendingCodePreviewSaveAt(null)
     }
-  }, [session.sessionInfo, editorHook, tCodePreview, tUiux, handleSendMessage, extractImageUrlsFromOverrides])
+  }, [session.sessionInfo, editorHook, tCodePreview, tUiux, handleSendMessage, extractImageUrlsFromOverrides, pendingCodePreviewSaveAt])
+
+  useEffect(() => {
+    if (!pendingCodePreviewSaveAt) return
+
+    const completionMessage = [...messages].reverse().find((m) => {
+      const ts = new Date(m.timestamp).getTime()
+      if (Number.isNaN(ts) || ts < pendingCodePreviewSaveAt) return false
+      return m.stage === 'uiux_iteration_complete' || m.stage === 'error' || m.stage === 'info'
+    })
+
+    if (!completionMessage) return
+
+    if (completionMessage.stage === 'uiux_iteration_complete') {
+      clearCodePreviewDraft()
+    }
+
+    setPendingCodePreviewSaveAt(null)
+  }, [messages, pendingCodePreviewSaveAt, clearCodePreviewDraft])
 
   // ── Handle new conversation ──
   const handleStartNewConversation = useCallback(() => {
