@@ -1,533 +1,486 @@
 // ============================================================
 // UIUX Phase Handlers
-// 從 orchestrator.ts 提取的所有 UIUX 相關 phase 處理函數
+// Design Discovery, Variants, Code Pipeline, Template
+// 從 orchestrator.ts 提取
 // ============================================================
 
-import type Redis from 'ioredis'
-import type { Server as SocketIOServer } from 'socket.io'
-import type { FlowState } from '../../types/flow-state'
-import type { ContinueFlowData } from '../phase-router'
-import { handlePhaseError } from '../phase-router'
-import { sendMessage, saveFlowState, getFlowState, deleteFlowState, makeStreamingCallback, generatedCodeToFileRows, deductCredits } from '../orchestrator-utils'
+import { Server as SocketIOServer } from 'socket.io'
+import Redis from 'ioredis'
 import * as db from '../../db/client'
+import type { FlowState } from '../../types/flow-state'
 import {
-  generateDesignVariants,
-  synthesizeVariants,
-  extractVariantConcept,
-  generateStructure,
-  generateAnimations,
-  generateRwd,
-  generateTailwindConfig,
-  generateDesignBrief,
-  adjustDesignBrief,
+  generateDesignVariants, synthesizeVariants, extractVariantConcept,
+  generateStructure, generateAnimations, generateRwd,
+  generateTailwindConfig, generateDesignBrief, adjustDesignBrief,
+  DesignBrief, TemplateData, GeneratedComponent, VariantConcept,
   ensureResponsiveClasses,
-  type DesignBrief,
-  type TemplateData,
-  type GeneratedComponent,
-  type VariantConcept,
 } from '../../services/uiux-generation'
 import { translateBddToUISpec, buildUISpecSummary } from '../../services/bdd-to-ui-spec'
 import { runQualityGate, autoFixCriticalIssues } from '../../services/quality-gate'
 import { getBddSession, updateBddSession } from '../../services/bdd-session'
-import { executeIteration, executeUndoIteration, executeRollbackQuery, executeRollbackSelection } from '../../services/iteration-skill'
+import { analyzeReference } from '../../services/reference-analyzer'
+import { executeIteration, executeUndoIteration } from '../../services/iteration-skill'
 import { semanticGateway } from '../../services/semantic-gateway'
 import { detectFastModeIntent, getFaqReply, answerWithSonnet } from '../../services/customer-service'
+import { sendMessage, saveFlowState, getFlowState, deleteFlowState, makeStreamingCallback, generatedCodeToFileRows, deductCredits } from '../orchestrator-utils'
+import { CREDIT_COSTS } from '../../config/plans'
 import {
-  detectDesignTier,
-  inferProductType,
-  inferPages,
-  buildDefaultDesignSystem,
-  buildMinimalTemplate,
-  inferInteractionHint,
-  getTemplateStyleHint,
-  inferLayoutMode,
-  PRODUCT_TYPE_LABELS,
-  generateFastConcept,
-  expandBriefPrompt,
-} from '../../services/fast-build-generation'
-import { matchTemplates } from '../../services/template-matcher'
-import {
-  hasDeployIntent,
-  hasRejectDeployIntent,
-  hasUndoIntent,
-  hasRollbackIntent,
-  hasChangeIntent,
-  hasRollbackSpecIntent,
+  hasDeployIntent, hasRejectDeployIntent, hasUndoIntent,
+  hasChangeIntent, hasRollbackSpecIntent,
   DESIGN_BRIEF_LIMITS,
 } from '../intent-helpers'
-import { CREDIT_COSTS } from '../../config/plans'
 import { createLogger } from '../../lib/logger'
 
-// Deploy phase handlers (sibling file)
-import { executeDeployerSkill } from './deploy-phases'
-
-// BDD phase handlers (sibling file) — handleSpecChange for spec_completed routing
-import { handleSpecChange } from './bdd-phases'
+// Lazy imports to avoid circular dependencies
+const getDeployerSkill = () => import('./deploy-phases').then(m => m.executeDeployerSkill)
+const getSpecChangeHandler = () => import('./bdd-phases').then(m => m.handleSpecChange)
 
 const logger = createLogger('uiux-phases')
 
 // ============================================================
-// Phase Router Wrappers
+// UIUX Phase Routing Handlers (called from phase-router.ts)
 // ============================================================
 
-/**
- * 代碼生成管線執行中（uiux_code_generation / uiux_quality_gate）
- * 死鎖偵測 + 自動恢復
- */
 export async function handleUiuxCodeGenerating(
-  conversationId: string,
-  state: FlowState,
-  redis: Redis,
-  io: SocketIOServer
-): Promise<void> {
-  // 死鎖偵測：如果生成已超過 10 分鐘，判定為中斷（如 server 重啟），自動恢復
-  const GENERATION_TIMEOUT_MS = 10 * 60 * 1000
-  const startedAt = state.uiuxCodeGenerationStartedAt || 0
-  const elapsed = Date.now() - startedAt
+  conversationId: string, state: FlowState, redis: Redis, io: SocketIOServer
+) {
+    const GENERATION_TIMEOUT_MS = 10 * 60 * 1000
+    const startedAt = state.uiuxCodeGenerationStartedAt || 0
+    const elapsed = Date.now() - startedAt
 
-  const isTimedOut = startedAt === 0 || elapsed > GENERATION_TIMEOUT_MS
+    const isTimedOut = startedAt === 0 || elapsed > GENERATION_TIMEOUT_MS
 
-  if (isTimedOut) {
-    logger.warn({ elapsed: startedAt === 0 ? 'legacy' : Math.round(elapsed / 1000) + 's' }, '代碼生成超時，偵測到中斷，自動恢復')
+    if (isTimedOut) {
+      logger.warn({ elapsed: startedAt === 0 ? 'legacy' : Math.round(elapsed / 1000) + 's' }, '代碼生成超時，偵測到中斷，自動恢復')
 
-    // 檢查是否有已存檔的代碼可以恢復
-    const hasCode = state.uiuxGeneratedCode &&
-      (state.uiuxGeneratedCode.pages.length > 0 || state.uiuxGeneratedCode.components.length > 0)
-    const resumePhase = state.uiuxCodePhase || 'structure'
+      // 檢查是否有已存檔的代碼可以恢復
+      const hasCode = state.uiuxGeneratedCode &&
+        (state.uiuxGeneratedCode.pages.length > 0 || state.uiuxGeneratedCode.components.length > 0)
+      const resumePhase = state.uiuxCodePhase || 'structure'
 
-    if (hasCode && resumePhase !== 'structure' && resumePhase !== 'complete') {
-      // 有中途存檔且未完成 → 自動恢復管線（從中斷點繼續）
-      logger.info({ resumePhase }, '從階段自動恢復管線')
-      state.uiuxCodeGenerationStartedAt = Date.now()
-      state.waitingForReply = false
-      await saveFlowState(redis, conversationId, state)
+      if (hasCode && resumePhase !== 'structure' && resumePhase !== 'complete') {
+        // 有中途存檔且未完成 → 自動恢復管線（從中斷點繼續）
+        logger.info({ resumePhase }, '從階段自動恢復管線')
+        state.uiuxCodeGenerationStartedAt = Date.now()
+        state.waitingForReply = false
+        await saveFlowState(redis, conversationId, state)
 
-      // 直接呼叫管線，它會根據 uiuxCodePhase 跳過已完成的階段
-      await executeFullCodePipeline(conversationId, state, redis, io)
-    } else if (hasCode && resumePhase === 'complete') {
-      // 所有階段都完成了但沒走到最後收尾 → 直接進入 uiux_complete
-      logger.info('代碼已全部生成，進入完成狀態')
-      state.phase = 'uiux_complete'
-      state.uiuxCodePhase = 'complete'
-      state.uiuxCodeGenerationStartedAt = undefined
-      state.waitingForReply = false
-      await saveFlowState(redis, conversationId, state)
+        // 直接呼叫管線，它會根據 uiuxCodePhase 跳過已完成的階段
+        await executeFullCodePipeline(conversationId, state, redis, io)
+      } else if (hasCode && resumePhase === 'complete') {
+        // 所有階段都完成了但沒走到最後收尾 → 直接進入 uiux_complete
+        logger.info('代碼已全部生成，進入完成狀態')
+        state.phase = 'uiux_complete'
+        state.uiuxCodePhase = 'complete'
+        state.uiuxCodeGenerationStartedAt = undefined
+        state.waitingForReply = false
+        await saveFlowState(redis, conversationId, state)
 
-      await sendMessage(conversationId, io, {
-        content: '代碼生成已恢復完成！\n\n你可以：\n- 輸入「**部署**」部署上線\n- 或描述想調整的地方，我來修改',
-        stage: 'uiux_complete',
-      })
-    } else {
-      // 沒有存檔 → 回到變體選擇重新生成
-      state.phase = 'uiux_variant_selection'
-      state.uiuxCodePhase = undefined
-      state.uiuxCodeGenerationStartedAt = undefined
-      state.waitingForReply = true
-      await saveFlowState(redis, conversationId, state)
+        await sendMessage(conversationId, io, {
+          content: '代碼生成已恢復完成！\n\n你可以：\n- 輸入「**部署**」部署上線\n- 或描述想調整的地方，我來修改',
+          stage: 'uiux_complete',
+        })
+      } else {
+        // 沒有存檔 → 回到變體選擇重新生成
+        state.phase = 'uiux_variant_selection'
+        state.uiuxCodePhase = undefined
+        state.uiuxCodeGenerationStartedAt = undefined
+        state.waitingForReply = true
+        await saveFlowState(redis, conversationId, state)
 
-      await sendMessage(conversationId, io, {
-        content: '代碼生成被中斷了（可能因為伺服器重啟）。請重新選擇設計方案以繼續。\n\n例如輸入「選擇 E」重新開始。',
-        stage: 'uiux_variants_ready',
-      })
+        await sendMessage(conversationId, io, {
+          content: '代碼生成被中斷了（可能因為伺服器重啟）。請重新選擇設計方案以繼續。\n\n例如輸入「選擇 E」重新開始。',
+          stage: 'uiux_variants_ready',
+        })
+      }
+      return
     }
-    return
-  }
 
-  await sendMessage(conversationId, io, {
-    content: '正在生成中，請稍候...',
-    stage: 'info',
-  })
-}
-
-/**
- * 迭代修改進行中（uiux_iterating）
- * 死鎖偵測
- */
-export async function handleUiuxIterating(
-  conversationId: string,
-  state: FlowState,
-  redis: Redis,
-  io: SocketIOServer
-): Promise<void> {
-  // 死鎖偵測（同代碼生成）
-  const ITERATION_TIMEOUT_MS = 5 * 60 * 1000
-  const iterStartedAt = state.uiuxCodeGenerationStartedAt || 0
-  if (iterStartedAt > 0 && Date.now() - iterStartedAt > ITERATION_TIMEOUT_MS) {
-    logger.warn('迭代修改超時，自動恢復到 uiux_complete')
-    state.phase = 'uiux_complete'
-    state.uiuxCodeGenerationStartedAt = undefined
-    await saveFlowState(redis, conversationId, state)
     await sendMessage(conversationId, io, {
-      content: '修改中斷了，請重新描述你想調整的內容。',
-      stage: 'uiux_complete',
+      content: '正在生成中，請稍候...',
+      stage: 'info',
     })
     return
-  }
-  await sendMessage(conversationId, io, {
-    content: '正在修改設計中，請稍候...',
-    stage: 'info',
-  })
 }
 
-/**
- * 快速模式生成中（fast_generating）
- * 攔截用戶輸入 + 死鎖偵測
- */
-export async function handleFastGenerating(
-  conversationId: string,
-  state: FlowState,
-  redis: Redis,
-  io: SocketIOServer
-): Promise<void> {
-  const FAST_BUILD_TIMEOUT_MS = 20 * 60 * 1000
-  const startedAt = state.uiuxCodeGenerationStartedAt || 0
-  if (startedAt === 0 || Date.now() - startedAt > FAST_BUILD_TIMEOUT_MS) {
-    logger.warn('Fast Build 超時，嘗試恢復')
-    const hasCode = state.uiuxGeneratedCode &&
-      (state.uiuxGeneratedCode.pages.length > 0 || state.uiuxGeneratedCode.components.length > 0)
-    if (hasCode) {
+export async function handleUiuxIterating(
+  conversationId: string, state: FlowState, redis: Redis, io: SocketIOServer
+) {
+    const ITERATION_TIMEOUT_MS = 5 * 60 * 1000
+    const iterStartedAt = state.uiuxCodeGenerationStartedAt || 0
+    if (iterStartedAt > 0 && Date.now() - iterStartedAt > ITERATION_TIMEOUT_MS) {
+      logger.warn('迭代修改超時，自動恢復到 uiux_complete')
       state.phase = 'uiux_complete'
-      state.uiuxCodePhase = 'complete'
       state.uiuxCodeGenerationStartedAt = undefined
-      state.waitingForReply = false
       await saveFlowState(redis, conversationId, state)
-      const pageCount = state.uiuxGeneratedCode!.pages.length
-      const compCount = state.uiuxGeneratedCode!.components.length
-      const twConfig = state.uiuxDesignSystem ? generateTailwindConfig(state.uiuxDesignSystem) : ''
       await sendMessage(conversationId, io, {
-        content: `快速生成中斷了，但已恢復之前的進度（${pageCount} 個頁面、${compCount} 個組件）。\n\n你可以：\n- 輸入「**部署**」部署現有代碼\n- 或描述想調整的地方`,
+        content: '修改中斷了，請重新描述你想調整的內容。',
         stage: 'uiux_complete',
-        layoutHint: 'split',
-        richContent: {
-          type: 'code_preview',
-          data: {
-            pages: state.uiuxGeneratedCode!.pages,
-            components: state.uiuxGeneratedCode!.components,
-            styles: state.uiuxGeneratedCode!.styles,
-            tailwindConfig: twConfig,
-            currentPhase: 'complete',
-          } as Record<string, unknown>,
-        },
-        quickReplies: [
-          { label: '部署上線', value: '部署', style: 'primary' },
-        ],
       })
-    } else {
-      state.phase = 'idle'
-      state.uiuxCodeGenerationStartedAt = undefined
-      await saveFlowState(redis, conversationId, state)
-      await sendMessage(conversationId, io, {
-        content: '快速生成中斷了，請重新描述你想要什麼樣的網站。',
-        stage: 'error',
-      })
+      return
     }
+    await sendMessage(conversationId, io, {
+      content: '正在修改設計中，請稍候...',
+      stage: 'info',
+    })
     return
-  }
-  await sendMessage(conversationId, io, {
-    content: '正在生成中，請稍候... 預計 5 分鐘完成。',
-    stage: 'info',
-  })
 }
 
-/**
- * UIUX 混合階段路由
- * 處理 uiux_template_selection / spec_completed / uiux_variant_selection /
- * uiux_generating_variants / uiux_complete 等多個 phase 的訊息路由
- */
+export async function handleFastGenerating(
+  conversationId: string, state: FlowState, redis: Redis, io: SocketIOServer
+) {
+    const FAST_BUILD_TIMEOUT_MS = 20 * 60 * 1000
+    const startedAt = state.uiuxCodeGenerationStartedAt || 0
+    if (startedAt === 0 || Date.now() - startedAt > FAST_BUILD_TIMEOUT_MS) {
+      logger.warn('Fast Build 超時，嘗試恢復')
+      const hasCode = state.uiuxGeneratedCode &&
+        (state.uiuxGeneratedCode.pages.length > 0 || state.uiuxGeneratedCode.components.length > 0)
+      if (hasCode) {
+        state.phase = 'uiux_complete'
+        state.uiuxCodePhase = 'complete'
+        state.uiuxCodeGenerationStartedAt = undefined
+        state.waitingForReply = false
+        await saveFlowState(redis, conversationId, state)
+        const pageCount = state.uiuxGeneratedCode!.pages.length
+        const compCount = state.uiuxGeneratedCode!.components.length
+        const twConfig = state.uiuxDesignSystem ? generateTailwindConfig(state.uiuxDesignSystem) : ''
+        await sendMessage(conversationId, io, {
+          content: `快速生成中斷了，但已恢復之前的進度（${pageCount} 個頁面、${compCount} 個組件）。\n\n你可以：\n- 輸入「**部署**」部署現有代碼\n- 或描述想調整的地方`,
+          stage: 'uiux_complete',
+          layoutHint: 'split',
+          richContent: {
+            type: 'code_preview',
+            data: {
+              pages: state.uiuxGeneratedCode!.pages,
+              components: state.uiuxGeneratedCode!.components,
+              styles: state.uiuxGeneratedCode!.styles,
+              tailwindConfig: twConfig,
+              currentPhase: 'complete',
+            } as Record<string, unknown>,
+          },
+          quickReplies: [
+            { label: '部署上線', value: '部署', style: 'primary' },
+          ],
+        })
+      } else {
+        state.phase = 'idle'
+        state.uiuxCodeGenerationStartedAt = undefined
+        await saveFlowState(redis, conversationId, state)
+        await sendMessage(conversationId, io, {
+          content: '快速生成中斷了，請重新描述你想要什麼樣的網站。',
+          stage: 'error',
+        })
+      }
+      return
+    }
+    await sendMessage(conversationId, io, {
+      content: '正在生成中，請稍候... 預計 5 分鐘完成。',
+      stage: 'info',
+    })
+    return
+}
+
+export interface UiuxContinueFlowData {
+  projectId: string
+  conversationId: string
+  userId: string
+  taskId?: string
+  message: string
+  locale?: 'zh' | 'en'
+  imageUrls?: string[]
+}
+
 export async function handleUiuxMixedPhaseRouting(
-  data: ContinueFlowData,
+  data: UiuxContinueFlowData,
   state: FlowState,
   trimmedMsg: string,
   message: string,
   redis: Redis,
   io: SocketIOServer
-): Promise<void> {
+) {
   const { conversationId, projectId, userId } = data
 
-  // 全形字母轉半形（中文輸入法常見）
+  // 全形字母轉半形
   const normalizedMsg = message.replace(/[Ａ-Ｚａ-ｚ]/g, ch =>
     String.fromCharCode(ch.charCodeAt(0) - 0xFEE0)
   )
 
-  // ── spec_completed：檢測需求變更意圖 ──
-  if (state.phase === 'spec_completed' && hasChangeIntent(trimmedMsg)) {
-    await handleSpecChange(conversationId, state, trimmedMsg, redis, io)
-    return
-  }
-
-  // ── spec_completed：查看變更歷史 ──
-  if (state.phase === 'spec_completed' && trimmedMsg.includes('變更歷史')) {
-    const session = await getBddSession({ sessionId: state.sessionId! })
-    if (!session.success || !session.data) {
-      await sendMessage(conversationId, io, { content: '規格資料已過期，請開始新的對話。', stage: 'error' })
-      return
-    }
-    const history = session.data.changeHistory || []
-    if (history.length === 0) {
-      await sendMessage(conversationId, io, { content: '目前沒有變更歷史。', stage: 'info' })
-    } else {
-      let text = `**變更歷史**（${history.length} 筆）\n\n`
-      history.forEach((entry, i) => {
-        const time = new Date(entry.timestamp).toLocaleString('zh-TW')
-        text += `**${i + 1}.** [${entry.changeType}] ${entry.description}\n   ${time} | 影響：${entry.affectedLayers.join(', ')}\n\n`
-      })
-      text += '_輸入「撤銷變更」可回滾到某個版本_'
-      await sendMessage(conversationId, io, { content: text, stage: 'info' })
-    }
-    return
-  }
-
-  // ── spec_completed：撤銷變更（回滾規格）──
-  if (state.phase === 'spec_completed' && hasRollbackSpecIntent(trimmedMsg)) {
-    const session = await getBddSession({ sessionId: state.sessionId! })
-    if (!session.success || !session.data) {
-      await sendMessage(conversationId, io, { content: '規格資料已過期，無法回滾。', stage: 'error' })
-      return
-    }
-    const history = session.data.changeHistory || []
-    if (history.length === 0) {
-      await sendMessage(conversationId, io, { content: '目前沒有變更歷史可回滾。', stage: 'info' })
-      return
-    }
-    let text = `**選擇要回滾到的版本**\n\n回滾會還原該筆變更及其之後的所有變更。\n\n`
-    history.forEach((entry, i) => {
-      const time = new Date(entry.timestamp).toLocaleString('zh-TW')
-      text += `**${i + 1}.** [${entry.changeType}] ${entry.description}\n   ${time}\n\n`
-    })
-    text += '_輸入編號（如「1」）選擇要回滾的變更，或輸入「取消」放棄。_'
-    state.phase = 'spec_rollback_select'
-    await saveFlowState(redis, conversationId, state)
-    await sendMessage(conversationId, io, {
-      content: text,
-      stage: 'spec_rollback_select',
-      quickReplies: [
-        ...history.map((_, i) => ({ label: `回滾 #${i + 1}`, value: String(i + 1), style: 'ghost' as const })),
-        { label: '取消', value: '取消', style: 'ghost' as const },
-      ],
-    })
-    return
-  }
-
-  // 檢查是否是模板選擇訊息
-  if (message.includes('我選擇') && message.includes('模板')) {
-    try {
-      await handleTemplateSelection(conversationId, state, message, redis, io)
-    } catch (err) {
-      await handlePhaseError(conversationId, state, err, redis, io)
-    }
-    return
-  }
-
-  // 檢查是否是變體選擇訊息（支援多種自然語言表達，含全形）
-  if (
-    normalizedMsg.includes('選擇變體') ||
-    normalizedMsg.includes('合併') ||
-    normalizedMsg.match(/選擇?\s*[A-E]/i) ||
-    normalizedMsg.match(/我要\s*[A-E]/i) ||
-    normalizedMsg.match(/我選\s*[A-E]/i) ||
-    normalizedMsg.match(/^[A-E]$/i)
-  ) {
-    try {
-      await handleVariantSelection(conversationId, state, normalizedMsg, redis, io)
-    } catch (err) {
-      await handlePhaseError(conversationId, state, err, redis, io)
-    }
-    return
-  }
-
-  // variant_selection 階段：任何包含 A-E 的訊息都嘗試路由
-  if (state.phase === 'uiux_variant_selection' && normalizedMsg.match(/[A-E]/i)) {
-    try {
-      await handleVariantSelection(conversationId, state, normalizedMsg, redis, io)
-    } catch (err) {
-      await handlePhaseError(conversationId, state, err, redis, io)
-    }
-    return
-  }
-
-  // 檢查是否是確認使用模板
-  if (message.includes('確認使用')) {
-    await handleConfirmTemplate(conversationId, state, redis, io)
-    return
-  }
-
-  // 管線跑完後的確認/重做（管線執行中 waitingForReply=false，不會觸發）
-  if (state.uiuxCodePhase && state.waitingForReply && (
-    message.includes('繼續') ||
-    message.includes('下一步') ||
-    message.includes('好') ||
-    message.includes('可以') ||
-    message === 'Y' ||
-    message === 'y'
-  )) {
-    await handleCodePhaseConfirm(conversationId, state, redis, io)
-    return
-  }
-
-  if (state.uiuxCodePhase && state.waitingForReply && (
-    message.includes('重新生成') ||
-    message.includes('重做')
-  )) {
-    await handleCodePhaseRedo(conversationId, state, redis, io)
-    return
-  }
-
-  // ── UIUX 完成後檢查是否要部署、撤銷或迭代修改 ──
-  if (state.phase === 'uiux_complete') {
-    const trimmed = message.trim()
-    if (hasDeployIntent(trimmed)) {
-      await executeDeployerSkill({
-        taskId: state.taskId || '',
-        projectId,
-        conversationId,
-        userId,
-        message,
-        redis,
-        io,
-      })
-      return
-    }
-    // 拒絕部署（「我不要部署」「先不上線」）→ 確認並提示其他選項
-    if (hasRejectDeployIntent(trimmed)) {
-      const isChinese = /[\u4e00-\u9fff]/.test(trimmed)
-      const qr: { label: string; value: string; style: 'primary' | 'ghost' }[] = [
-        { label: isChinese ? '部署上線' : 'Deploy', value: '部署', style: 'primary' },
-      ]
-      if (state.uiuxPreIterationCode) {
-        qr.push({ label: isChinese ? '撤銷修改' : 'Undo', value: '撤銷', style: 'ghost' })
-      }
-      await sendMessage(conversationId, io, {
-        content: isChinese
-          ? '好的，暫時不部署。您可以繼續修改設計，或隨時點擊「部署上線」。'
-          : 'Got it, not deploying for now. You can continue modifying the design, or click "Deploy" whenever ready.',
-        stage: 'uiux_complete',
-        quickReplies: qr,
-      })
-      return
-    }
-    if (hasUndoIntent(trimmed)) {
-      await executeUndoIteration({ conversationId, projectId, redis, io })
+    if (state.phase === 'spec_completed' && hasChangeIntent(trimmedMsg)) {
+      await handleSpecChange(conversationId, state, trimmedMsg, redis, io)
       return
     }
 
-    // 問候/問題/閒聊攔截 — 在 semanticGateway 前
-    const intentCheck2 = detectFastModeIntent(trimmed)
-    if (intentCheck2.match) {
-      const isChinese = /[\u4e00-\u9fff]/.test(trimmed) || state.locale === 'zh'
-      if (intentCheck2.type === 'question') {
-        const faqResult = getFaqReply(trimmed, state.locale)
-        const qr = [
-          { label: isChinese ? '部署上線' : 'Deploy', value: '部署', style: 'primary' as const },
-          { label: isChinese ? '開始新專案' : 'New Project', value: '__new_project__', style: 'ghost' as const },
-        ]
-        if (faqResult) {
-          await sendMessage(conversationId, io, {
-            content: faqResult.reply,
-            stage: 'customer_service',
-            quickReplies: qr,
-          })
-        } else {
-          const sonnetReply = await answerWithSonnet(trimmed, { conversationId, locale: state.locale })
-          await sendMessage(conversationId, io, {
-            content: sonnetReply,
-            stage: 'customer_service',
-            quickReplies: qr,
-          })
-        }
+    // ── spec_completed：查看變更歷史 ──
+    if (state.phase === 'spec_completed' && trimmedMsg.includes('變更歷史')) {
+      const session = await getBddSession({ sessionId: state.sessionId! })
+      if (!session.success || !session.data) {
+        await sendMessage(conversationId, io, { content: '規格資料已過期，請開始新的對話。', stage: 'error' })
         return
       }
+      const history = session.data.changeHistory || []
+      if (history.length === 0) {
+        await sendMessage(conversationId, io, { content: '目前沒有變更歷史。', stage: 'info' })
+      } else {
+        let text = `**變更歷史**（${history.length} 筆）\n\n`
+        history.forEach((entry, i) => {
+          const time = new Date(entry.timestamp).toLocaleString('zh-TW')
+          text += `**${i + 1}.** [${entry.changeType}] ${entry.description}\n   ${time} | 影響：${entry.affectedLayers.join(', ')}\n\n`
+        })
+        text += '_輸入「撤銷變更」可回滾到某個版本_'
+        await sendMessage(conversationId, io, { content: text, stage: 'info' })
+      }
+      return
+    }
+
+    // ── spec_completed：撤銷變更（回滾規格）──
+    if (state.phase === 'spec_completed' && hasRollbackSpecIntent(trimmedMsg)) {
+      const session = await getBddSession({ sessionId: state.sessionId! })
+      if (!session.success || !session.data) {
+        await sendMessage(conversationId, io, { content: '規格資料已過期，無法回滾。', stage: 'error' })
+        return
+      }
+      const history = session.data.changeHistory || []
+      if (history.length === 0) {
+        await sendMessage(conversationId, io, { content: '目前沒有變更歷史可回滾。', stage: 'info' })
+        return
+      }
+      let text = `**選擇要回滾到的版本**\n\n回滾會還原該筆變更及其之後的所有變更。\n\n`
+      history.forEach((entry, i) => {
+        const time = new Date(entry.timestamp).toLocaleString('zh-TW')
+        text += `**${i + 1}.** [${entry.changeType}] ${entry.description}\n   ${time}\n\n`
+      })
+      text += '_輸入編號（如「1」）選擇要回滾的變更，或輸入「取消」放棄。_'
+      state.phase = 'spec_rollback_select'
+      await saveFlowState(redis, conversationId, state)
       await sendMessage(conversationId, io, {
-        content: isChinese
-          ? '嗨！您的設計已經完成了。您可以：\n- 描述修改需求來調整設計\n- 點擊「部署上線」發布網站\n- 點擊「開始新專案」重新開始'
-          : 'Hi! Your design is ready. You can:\n- Describe changes to adjust the design\n- Click "Deploy" to publish your site\n- Click "New Project" to start fresh',
-        stage: 'info',
+        content: text,
+        stage: 'spec_rollback_select',
         quickReplies: [
-          { label: isChinese ? '部署上線' : 'Deploy', value: '部署', style: 'primary' as const },
-          { label: isChinese ? '開始新專案' : 'New Project', value: '__new_project__', style: 'ghost' as const },
+          ...history.map((_, i) => ({ label: `回滾 #${i + 1}`, value: String(i + 1), style: 'ghost' as const })),
+          { label: '取消', value: '取消', style: 'ghost' as const },
         ],
       })
       return
     }
 
-    // 有生成代碼 → semanticGateway 判斷是否為有效修改請求
-    if (state.uiuxGeneratedCode && state.uiuxCodePhase === 'complete') {
-      const gwResult2 = await semanticGateway({
-        phase: 'iteration',
-        userMessage: trimmed,
-        conversationId,
-        userId,
-        locale: data.locale || state.locale,
-      }, state)
-      if (!gwResult2.accept) {
-        state.semanticRejectCount = (state.semanticRejectCount || 0) + 1
-        await saveFlowState(redis, conversationId, state)
+    // 檢查是否是模板選擇訊息
+    if (message.includes('我選擇') && message.includes('模板')) {
+      try {
+        await handleTemplateSelection(conversationId, state, message, redis, io)
+      } catch (err) {
+        await handlePhaseError(conversationId, state, err, redis, io)
+      }
+      return
+    }
+
+    // 檢查是否是變體選擇訊息（支援多種自然語言表達，含全形）
+    if (
+      normalizedMsg.includes('選擇變體') ||
+      normalizedMsg.includes('合併') ||
+      normalizedMsg.match(/選擇?\s*[A-E]/i) ||
+      normalizedMsg.match(/我要\s*[A-E]/i) ||
+      normalizedMsg.match(/我選\s*[A-E]/i) ||
+      normalizedMsg.match(/^[A-E]$/i)
+    ) {
+      try {
+        await handleVariantSelection(conversationId, state, normalizedMsg, redis, io)
+      } catch (err) {
+        await handlePhaseError(conversationId, state, err, redis, io)
+      }
+      return
+    }
+
+    // variant_selection 階段：任何包含 A-E 的訊息都嘗試路由
+    if (state.phase === 'uiux_variant_selection' && normalizedMsg.match(/[A-E]/i)) {
+      try {
+        await handleVariantSelection(conversationId, state, normalizedMsg, redis, io)
+      } catch (err) {
+        await handlePhaseError(conversationId, state, err, redis, io)
+      }
+      return
+    }
+
+    // 檢查是否是確認使用模板
+    if (message.includes('確認使用')) {
+      await handleConfirmTemplate(conversationId, state, redis, io)
+      return
+    }
+
+    // 管線跑完後的確認/重做（管線執行中 waitingForReply=false，不會觸發）
+    if (state.uiuxCodePhase && state.waitingForReply && (
+      message.includes('繼續') ||
+      message.includes('下一步') ||
+      message.includes('好') ||
+      message.includes('可以') ||
+      message === 'Y' ||
+      message === 'y'
+    )) {
+      await handleCodePhaseConfirm(conversationId, state, redis, io)
+      return
+    }
+
+    if (state.uiuxCodePhase && state.waitingForReply && (
+      message.includes('重新生成') ||
+      message.includes('重做')
+    )) {
+      await handleCodePhaseRedo(conversationId, state, redis, io)
+      return
+    }
+
+    // ── UIUX 完成後檢查是否要部署、撤銷或迭代修改 ──
+    if (state.phase === 'uiux_complete') {
+      const trimmed = message.trim()
+      if (hasDeployIntent(trimmed)) {
+        await executeDeployerSkill({
+          taskId: state.taskId || '',
+          projectId: data.projectId,
+          conversationId,
+          userId,
+          message,
+          redis,
+          io,
+        })
+        return
+      }
+      // 拒絕部署（「我不要部署」「先不上線」）→ 確認並提示其他選項
+      if (hasRejectDeployIntent(trimmed)) {
+        const isChinese = /[\u4e00-\u9fff]/.test(trimmed)
         const qr: { label: string; value: string; style: 'primary' | 'ghost' }[] = [
-          { label: '部署上線', value: '部署', style: 'primary' },
+          { label: isChinese ? '部署上線' : 'Deploy', value: '部署', style: 'primary' },
         ]
         if (state.uiuxPreIterationCode) {
-          qr.push({ label: '撤銷修改', value: '撤銷', style: 'ghost' })
+          qr.push({ label: isChinese ? '撤銷修改' : 'Undo', value: '撤銷', style: 'ghost' })
         }
         await sendMessage(conversationId, io, {
-          content: gwResult2.guidanceMessage || '請描述您想修改的設計內容。',
-          stage: 'info',
+          content: isChinese
+            ? '好的，暫時不部署。您可以繼續修改設計，或隨時點擊「部署上線」。'
+            : 'Got it, not deploying for now. You can continue modifying the design, or click "Deploy" whenever ready.',
+          stage: 'uiux_complete',
           quickReplies: qr,
         })
         return
       }
-      state.semanticRejectCount = 0
-      await saveFlowState(redis, conversationId, state)
-      await executeIteration({ conversationId, projectId, userId, userFeedback: message, redis, io, imageUrls: data.imageUrls })
-      return
-    }
-  }
+      if (hasUndoIntent(trimmed)) {
+        await executeUndoIteration({ conversationId, projectId: data.projectId, redis, io })
+        return
+      }
 
-  // ── UIUX 階段 catch-all ──
-  // 如果到這裡還沒 return，表示訊息無法識別
-  // 絕對不能讓它洩漏到下方的 BDD processUserReply
-  logger.info({ phase: state.phase, message }, 'UIUX 階段未匹配的訊息')
-  if (state.phase === 'uiux_variant_selection') {
-    const vrIds = (state.uiuxVariants || []).map(v => ({
-      label: `選擇 ${v.id}`,
-      value: `選擇 ${v.id}`,
-      style: 'ghost' as const,
-    }))
-    await sendMessage(conversationId, io, {
-      content: '請選擇您喜歡的設計方向。\n\n- 輸入「選擇 A」直接使用某個方案\n- 輸入「合併 A+C」組合多個方案的特點',
-      stage: 'info',
-      quickReplies: vrIds.length > 0 ? vrIds : [
-        { label: '選擇 A', value: '選擇 A', style: 'ghost' as const },
-        { label: '選擇 B', value: '選擇 B', style: 'ghost' as const },
-        { label: '選擇 C', value: '選擇 C', style: 'ghost' as const },
-        { label: '選擇 D', value: '選擇 D', style: 'ghost' as const },
-        { label: '選擇 E', value: '選擇 E', style: 'ghost' as const },
-      ],
-    })
-  } else if (state.phase === 'uiux_template_selection') {
-    await sendMessage(conversationId, io, {
-      content: '請選擇一個模板，或描述您想要的設計風格。',
-      stage: 'info',
-    })
-  } else if (state.phase === 'uiux_complete' && (!state.uiuxGeneratedCode || state.uiuxCodePhase !== 'complete')) {
-    // 異常狀態：uiux_complete 但無代碼（例如 structure 失敗後殘留）
-    logger.warn('uiux_complete 但無生成代碼，重置為 idle')
-    state.phase = 'idle'
-    await saveFlowState(redis, conversationId, state)
-    await sendMessage(conversationId, io, {
-      content: '目前沒有已生成的設計，請描述你想要什麼樣的網站，我來幫你生成。',
-      stage: 'info',
-    })
+      // 問候/問題/閒聊攔截 — 在 semanticGateway 前
+      const intentCheck2 = detectFastModeIntent(trimmed)
+      if (intentCheck2.match) {
+        const isChinese = /[\u4e00-\u9fff]/.test(trimmed) || state.locale === 'zh'
+        if (intentCheck2.type === 'question') {
+          const faqResult = getFaqReply(trimmed, state.locale)
+          const qr = [
+            { label: isChinese ? '部署上線' : 'Deploy', value: '部署', style: 'primary' as const },
+            { label: isChinese ? '開始新專案' : 'New Project', value: '__new_project__', style: 'ghost' as const },
+          ]
+          if (faqResult) {
+            await sendMessage(conversationId, io, {
+              content: faqResult.reply,
+              stage: 'customer_service',
+              quickReplies: qr,
+            })
+          } else {
+            const sonnetReply = await answerWithSonnet(trimmed, { conversationId, locale: state.locale })
+            await sendMessage(conversationId, io, {
+              content: sonnetReply,
+              stage: 'customer_service',
+              quickReplies: qr,
+            })
+          }
+          return
+        }
+        await sendMessage(conversationId, io, {
+          content: isChinese
+            ? '嗨！您的設計已經完成了。您可以：\n- 描述修改需求來調整設計\n- 點擊「部署上線」發布網站\n- 點擊「開始新專案」重新開始'
+            : 'Hi! Your design is ready. You can:\n- Describe changes to adjust the design\n- Click "Deploy" to publish your site\n- Click "New Project" to start fresh',
+          stage: 'info',
+          quickReplies: [
+            { label: isChinese ? '部署上線' : 'Deploy', value: '部署', style: 'primary' as const },
+            { label: isChinese ? '開始新專案' : 'New Project', value: '__new_project__', style: 'ghost' as const },
+          ],
+        })
+        return
+      }
+
+      // 有生成代碼 → semanticGateway 判斷是否為有效修改請求
+      if (state.uiuxGeneratedCode && state.uiuxCodePhase === 'complete') {
+        const gwResult2 = await semanticGateway({
+          phase: 'iteration',
+          userMessage: trimmed,
+          conversationId,
+          userId,
+          locale: data.locale || state.locale,
+        }, state)
+        if (!gwResult2.accept) {
+          state.semanticRejectCount = (state.semanticRejectCount || 0) + 1
+          await saveFlowState(redis, conversationId, state)
+          const qr: { label: string; value: string; style: 'primary' | 'ghost' }[] = [
+            { label: '部署上線', value: '部署', style: 'primary' },
+          ]
+          if (state.uiuxPreIterationCode) {
+            qr.push({ label: '撤銷修改', value: '撤銷', style: 'ghost' })
+          }
+          await sendMessage(conversationId, io, {
+            content: gwResult2.guidanceMessage || '請描述您想修改的設計內容。',
+            stage: 'info',
+            quickReplies: qr,
+          })
+          return
+        }
+        state.semanticRejectCount = 0
+        await saveFlowState(redis, conversationId, state)
+        await executeIteration({ conversationId, projectId: data.projectId, userId, userFeedback: message, redis, io, imageUrls: data.imageUrls })
+        return
+      }
+    }
+
+    // ── UIUX 階段 catch-all ──
+    // 如果到這裡還沒 return，表示訊息無法識別
+    // 絕對不能讓它洩漏到下方的 BDD processUserReply
+    logger.info({ phase: state.phase, message }, 'UIUX 階段未匹配的訊息')
+    if (state.phase === 'uiux_variant_selection') {
+      const vrIds = (state.uiuxVariants || []).map(v => ({
+        label: `選擇 ${v.id}`,
+        value: `選擇 ${v.id}`,
+        style: 'ghost' as const,
+      }))
+      await sendMessage(conversationId, io, {
+        content: '請選擇您喜歡的設計方向。\n\n- 輸入「選擇 A」直接使用某個方案\n- 輸入「合併 A+C」組合多個方案的特點',
+        stage: 'info',
+        quickReplies: vrIds.length > 0 ? vrIds : [
+          { label: '選擇 A', value: '選擇 A', style: 'ghost' as const },
+          { label: '選擇 B', value: '選擇 B', style: 'ghost' as const },
+          { label: '選擇 C', value: '選擇 C', style: 'ghost' as const },
+          { label: '選擇 D', value: '選擇 D', style: 'ghost' as const },
+          { label: '選擇 E', value: '選擇 E', style: 'ghost' as const },
+        ],
+      })
+    } else if (state.phase === 'uiux_template_selection') {
+      await sendMessage(conversationId, io, {
+        content: '請選擇一個模板，或描述您想要的設計風格。',
+        stage: 'info',
+      })
+    } else if (state.phase === 'uiux_complete' && (!state.uiuxGeneratedCode || state.uiuxCodePhase !== 'complete')) {
+      // 異常狀態：uiux_complete 但無代碼（例如 structure 失敗後殘留）
+      logger.warn('uiux_complete 但無生成代碼，重置為 idle')
+      state.phase = 'idle'
+      await saveFlowState(redis, conversationId, state)
+      await sendMessage(conversationId, io, {
+        content: '目前沒有已生成的設計，請描述你想要什麼樣的網站，我來幫你生成。',
+        stage: 'info',
+      })
+    }
+    return
   }
 }
 
 // ============================================================
-// UIUX 處理函數
+// UIUX Core Functions
 // ============================================================
 
-/**
- * 處理模板選擇
- * 當用戶選擇模板後，生成 5 個設計變體
- */
-async function handleTemplateSelection(
+export async function handleTemplateSelection(
   conversationId: string,
   state: FlowState,
   message: string,
@@ -603,7 +556,7 @@ async function handleTemplateSelection(
  * 處理變體選擇
  * 用戶選擇或合併變體後，啟動三階段生成流程
  */
-async function handleVariantSelection(
+export async function handleVariantSelection(
   conversationId: string,
   state: FlowState,
   message: string,
@@ -722,13 +675,10 @@ async function handleVariantSelection(
 }
 
 // ============================================================
-// 完整代碼生成管線
+// 快速建站 Skill
 // ============================================================
 
-/**
- * 完整代碼生成管線：Structure → Animation → RWD → Quality Gate
- * 一氣呵成，中間只發進度訊息，不等用戶確認
- */
+
 export async function executeFullCodePipeline(
   conversationId: string,
   state: FlowState,
@@ -1005,10 +955,6 @@ export async function executeFullCodePipeline(
 
   logger.info(`Pipeline 完成: ${finalPageCount} pages, ${finalComponentCount} components, QG passed=${report.passed}`)
 }
-
-// ============================================================
-// 各階段獨立執行（保留供獨立調用）
-// ============================================================
 
 /**
  * 階段 1：生成結構（保留供獨立調用）
@@ -1301,7 +1247,7 @@ async function executeCodePhaseRwd(
 /**
  * Quality Gate：自動品質檢查 + 修復
  */
-async function executeQualityGate(
+export async function executeQualityGate(
   conversationId: string,
   state: FlowState,
   redis: Redis,
@@ -1424,7 +1370,7 @@ async function executeQualityGate(
 /**
  * 處理階段確認（繼續到下一階段）
  */
-async function handleCodePhaseConfirm(
+export async function handleCodePhaseConfirm(
   conversationId: string,
   state: FlowState,
   redis: Redis,
@@ -1461,7 +1407,7 @@ async function handleCodePhaseConfirm(
 /**
  * 處理階段重做
  */
-async function handleCodePhaseRedo(
+export async function handleCodePhaseRedo(
   conversationId: string,
   state: FlowState,
   redis: Redis,
@@ -1565,7 +1511,7 @@ async function getTemplateAndBddSpec(sessionId: string): Promise<{
  * 處理確認使用模板
  * 當用戶確認使用當前預覽的模板時
  */
-async function handleConfirmTemplate(
+export async function handleConfirmTemplate(
   conversationId: string,
   state: FlowState,
   redis: Redis,
@@ -1799,7 +1745,7 @@ export async function handleDesignClarifyReply(
 /**
  * 完成設計釐清，基於用戶想法生成設計變體
  */
-async function completeDesignClarify(
+export async function completeDesignClarify(
   conversationId: string,
   state: FlowState,
   redis: Redis,
@@ -1819,7 +1765,7 @@ async function completeDesignClarify(
   const referenceIdea = ideas.find(i => i.step === 'reference')
   if (referenceIdea?.answer) {
     try {
-      const { analyzeReference } = await import('../../services/reference-analyzer')
+      const { analyzeReference } = await import('../services/reference-analyzer')
       const analysis = await analyzeReference(referenceIdea.answer, {
         userId: state.userId,
         conversationId,
@@ -2136,7 +2082,7 @@ ${brief.professionalRecommendations.map(r => `- ${r}`).join('\n')}`
  * 進入變體生成（公共邏輯）
  * Design Brief 確認後或降級時調用
  */
-async function proceedToVariantGeneration(
+export async function proceedToVariantGeneration(
   conversationId: string,
   state: FlowState,
   redis: Redis,
@@ -2467,3 +2413,8 @@ function inferDesignDefaultsFromIdeas(ideas: Array<{ step: string; answer: strin
 
   return defaults
 }
+
+// ============================================================
+// Deployer Skill
+// ============================================================
+
