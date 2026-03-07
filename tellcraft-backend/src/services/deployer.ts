@@ -1197,6 +1197,12 @@ export default function RootLayout({
       workSans: 'Work_Sans', manrope: 'Manrope', outfit: 'Outfit',
       sora: 'Sora', cabin: 'Cabin', nunito: 'Nunito', rubik: 'Rubik',
       figtree: 'Figtree', plusJakartaSans: 'Plus_Jakarta_Sans',
+      instrumentSerif: 'Instrument_Serif', instrumentSans: 'Instrument_Sans',
+      bricolageGrotesque: 'Bricolage_Grotesque', libreBaskerville: 'Libre_Baskerville',
+      crimsonPro: 'Crimson_Pro', fraunces: 'Fraunces', bitter: 'Bitter',
+      archivo: 'Archivo', albertSans: 'Albert_Sans', lexend: 'Lexend',
+      onest: 'Onest', beVietnamPro: 'Be_Vietnam_Pro',
+      cormorantGaramond: 'Cormorant_Garamond', lora: 'Lora',
     }
 
     const imports: string[] = []

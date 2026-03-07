@@ -235,6 +235,7 @@ export function inferPages(description: string, productType: string): string[] {
 interface IndustryPalette {
   primary: string; secondary: string; accent: string
   background: string; foreground: string; muted: string; border: string
+  surface1: string; surface2: string; surface3: string; ring: string
   fontFamily: string; displayFont?: string
 }
 
@@ -243,148 +244,174 @@ const INDUSTRY_COLOR_PALETTES: Record<string, IndustryPalette> = {
   restaurant: {
     primary: '#b45309', secondary: '#78350f', accent: '#d97706',
     background: '#fffbeb', foreground: '#1c1917', muted: '#fef3c7', border: '#fde68a',
+    surface1: '#fffbeb', surface2: '#ffffff', surface3: '#fef3c7', ring: '#d97706',
     fontFamily: 'DM Sans', displayFont: 'Playfair Display',
   },
   cafe: {
     primary: '#92400e', secondary: '#78350f', accent: '#b45309',
     background: '#fefce8', foreground: '#1c1917', muted: '#fef9c3', border: '#fde047',
+    surface1: '#fefce8', surface2: '#ffffff', surface3: '#fef9c3', ring: '#b45309',
     fontFamily: 'DM Sans', displayFont: 'Lora',
   },
   // 健康/醫療 — 冷靜淺綠+藍
   healthcare: {
     primary: '#0d9488', secondary: '#0f766e', accent: '#14b8a6',
     background: '#f0fdfa', foreground: '#0f172a', muted: '#ccfbf1', border: '#99f6e4',
+    surface1: '#f0fdfa', surface2: '#ffffff', surface3: '#ccfbf1', ring: '#14b8a6',
     fontFamily: 'DM Sans',
   },
   fitness: {
     primary: '#059669', secondary: '#047857', accent: '#10b981',
     background: '#f0fdf4', foreground: '#0f172a', muted: '#dcfce7', border: '#bbf7d0',
+    surface1: '#f0fdf4', surface2: '#ffffff', surface3: '#dcfce7', ring: '#10b981',
     fontFamily: 'Outfit',
   },
   // 專業服務 — 穩重深藍/灰
   legal: {
     primary: '#1e3a5f', secondary: '#334155', accent: '#2563eb',
     background: '#f8fafc', foreground: '#0f172a', muted: '#f1f5f9', border: '#e2e8f0',
+    surface1: '#f8fafc', surface2: '#ffffff', surface3: '#f1f5f9', ring: '#2563eb',
     fontFamily: 'DM Sans', displayFont: 'Playfair Display',
   },
   finance: {
     primary: '#1e40af', secondary: '#1e3a8a', accent: '#3b82f6',
     background: '#eff6ff', foreground: '#0f172a', muted: '#dbeafe', border: '#bfdbfe',
-    fontFamily: 'DM Sans',
+    surface1: '#eff6ff', surface2: '#ffffff', surface3: '#dbeafe', ring: '#3b82f6',
+    fontFamily: 'DM Sans', displayFont: 'DM Mono',
   },
   realestate: {
     primary: '#0369a1', secondary: '#075985', accent: '#0ea5e9',
     background: '#f0f9ff', foreground: '#0f172a', muted: '#e0f2fe', border: '#bae6fd',
+    surface1: '#f0f9ff', surface2: '#ffffff', surface3: '#e0f2fe', ring: '#0ea5e9',
     fontFamily: 'DM Sans',
   },
   // 教育 — 知性藍紫
   education: {
     primary: '#4f46e5', secondary: '#4338ca', accent: '#6366f1',
     background: '#fafafe', foreground: '#1e1b4b', muted: '#eef2ff', border: '#e0e7ff',
+    surface1: '#fafafe', surface2: '#ffffff', surface3: '#eef2ff', ring: '#6366f1',
     fontFamily: 'DM Sans',
   },
   // 創意/藝術 — 大膽對比
   portfolio: {
     primary: '#18181b', secondary: '#3f3f46', accent: '#f59e0b',
     background: '#fafafa', foreground: '#18181b', muted: '#f4f4f5', border: '#e4e4e7',
-    fontFamily: 'Outfit', displayFont: 'Sora',
+    surface1: '#fafafa', surface2: '#ffffff', surface3: '#f4f4f5', ring: '#f59e0b',
+    fontFamily: 'Plus Jakarta Sans', displayFont: 'Instrument Serif',
   },
   photography: {
     primary: '#18181b', secondary: '#27272a', accent: '#a3a3a3',
     background: '#fafafa', foreground: '#18181b', muted: '#f5f5f5', border: '#e5e5e5',
+    surface1: '#fafafa', surface2: '#ffffff', surface3: '#f5f5f5', ring: '#18181b',
     fontFamily: 'Outfit', displayFont: 'Playfair Display',
   },
   music: {
     primary: '#7c3aed', secondary: '#6d28d9', accent: '#a78bfa',
     background: '#faf5ff', foreground: '#1e1b4b', muted: '#f3e8ff', border: '#e9d5ff',
-    fontFamily: 'Outfit', displayFont: 'Sora',
+    surface1: '#faf5ff', surface2: '#ffffff', surface3: '#f3e8ff', ring: '#a78bfa',
+    fontFamily: 'Space Grotesk', displayFont: 'Instrument Serif',
   },
   // 美容/時尚 — 柔和粉色調
   salon: {
     primary: '#be185d', secondary: '#9d174d', accent: '#ec4899',
     background: '#fff1f2', foreground: '#1c1917', muted: '#ffe4e6', border: '#fecdd3',
-    fontFamily: 'DM Sans', displayFont: 'Playfair Display',
+    surface1: '#fff1f2', surface2: '#ffffff', surface3: '#ffe4e6', ring: '#ec4899',
+    fontFamily: 'DM Sans', displayFont: 'Cormorant Garamond',
   },
   wedding: {
     primary: '#be123c', secondary: '#9f1239', accent: '#f43f5e',
     background: '#fff1f2', foreground: '#1c1917', muted: '#ffe4e6', border: '#fecdd3',
+    surface1: '#fff1f2', surface2: '#ffffff', surface3: '#ffe4e6', ring: '#f43f5e',
     fontFamily: 'DM Sans', displayFont: 'Cormorant Garamond',
   },
   // 旅遊/飯店 — 自然色系
   travel: {
     primary: '#0891b2', secondary: '#0e7490', accent: '#06b6d4',
     background: '#ecfeff', foreground: '#0f172a', muted: '#cffafe', border: '#a5f3fc',
+    surface1: '#ecfeff', surface2: '#ffffff', surface3: '#cffafe', ring: '#06b6d4',
     fontFamily: 'Outfit',
   },
   hotel: {
     primary: '#78350f', secondary: '#92400e', accent: '#d97706',
     background: '#fffbeb', foreground: '#1c1917', muted: '#fef3c7', border: '#fde68a',
+    surface1: '#fffbeb', surface2: '#ffffff', surface3: '#fef3c7', ring: '#d97706',
     fontFamily: 'DM Sans', displayFont: 'Playfair Display',
   },
   // 公益 — 溫暖綠色
   nonprofit: {
     primary: '#15803d', secondary: '#166534', accent: '#22c55e',
     background: '#f0fdf4', foreground: '#14532d', muted: '#dcfce7', border: '#bbf7d0',
+    surface1: '#f0fdf4', surface2: '#ffffff', surface3: '#dcfce7', ring: '#22c55e',
     fontFamily: 'DM Sans',
   },
   // 電商/零售 — 活力明亮
   ecommerce: {
     primary: '#ea580c', secondary: '#c2410c', accent: '#f97316',
     background: '#fff7ed', foreground: '#1c1917', muted: '#ffedd5', border: '#fed7aa',
+    surface1: '#fff7ed', surface2: '#ffffff', surface3: '#ffedd5', ring: '#f97316',
     fontFamily: 'Outfit',
   },
   retail: {
     primary: '#dc2626', secondary: '#b91c1c', accent: '#ef4444',
     background: '#fef2f2', foreground: '#1c1917', muted: '#fee2e2', border: '#fecaca',
+    surface1: '#fef2f2', surface2: '#ffffff', surface3: '#fee2e2', ring: '#ef4444',
     fontFamily: 'Outfit',
   },
   // 工具型 — 清爽功能導向
   tool: {
     primary: '#3b82f6', secondary: '#64748b', accent: '#10b981',
     background: '#ffffff', foreground: '#0f172a', muted: '#f8fafc', border: '#e2e8f0',
+    surface1: '#ffffff', surface2: '#f8fafc', surface3: '#f1f5f9', ring: '#3b82f6',
     fontFamily: 'DM Sans',
   },
   // 代理/行銷 — 現代感
   agency: {
     primary: '#6366f1', secondary: '#4f46e5', accent: '#818cf8',
     background: '#fafafa', foreground: '#18181b', muted: '#f4f4f5', border: '#e4e4e7',
-    fontFamily: 'Outfit', displayFont: 'Sora',
+    surface1: '#fafafa', surface2: '#ffffff', surface3: '#f4f4f5', ring: '#818cf8',
+    fontFamily: 'Space Grotesk', displayFont: 'Instrument Serif',
   },
   // 部落格 — 閱讀導向
   blog: {
     primary: '#18181b', secondary: '#3f3f46', accent: '#6366f1',
     background: '#fafafa', foreground: '#18181b', muted: '#f4f4f5', border: '#e4e4e7',
-    fontFamily: 'DM Sans', displayFont: 'Lora',
+    surface1: '#fafafa', surface2: '#ffffff', surface3: '#f4f4f5', ring: '#6366f1',
+    fontFamily: 'DM Sans', displayFont: 'Libre Baskerville',
   },
   // 管理後台 — 功能導向
   dashboard: {
     primary: '#3b82f6', secondary: '#64748b', accent: '#10b981',
     background: '#ffffff', foreground: '#0f172a', muted: '#f1f5f9', border: '#e2e8f0',
-    fontFamily: 'DM Sans',
+    surface1: '#ffffff', surface2: '#f8fafc', surface3: '#f1f5f9', ring: '#3b82f6',
+    fontFamily: 'DM Sans', displayFont: 'DM Mono',
   },
   // 活動 — 紫色+金色活力
   event: {
     primary: '#7c3aed', secondary: '#6d28d9', accent: '#f59e0b',
     background: '#faf5ff', foreground: '#1e1b4b', muted: '#f3e8ff', border: '#e9d5ff',
-    fontFamily: 'Outfit', displayFont: 'Sora',
+    surface1: '#faf5ff', surface2: '#ffffff', surface3: '#f3e8ff', ring: '#f59e0b',
+    fontFamily: 'Outfit', displayFont: 'Fraunces',
   },
   // Landing — 現代靛+金
   landing: {
     primary: '#6366f1', secondary: '#4f46e5', accent: '#f59e0b',
     background: '#fafafa', foreground: '#18181b', muted: '#f4f4f5', border: '#e4e4e7',
-    fontFamily: 'Outfit', displayFont: 'Sora',
+    surface1: '#fafafa', surface2: '#ffffff', surface3: '#f4f4f5', ring: '#f59e0b',
+    fontFamily: 'Bricolage Grotesque', displayFont: 'DM Sans',
   },
   // 個人網站 — 暖色調
   personal: {
     primary: '#18181b', secondary: '#3f3f46', accent: '#f59e0b',
     background: '#fafafa', foreground: '#18181b', muted: '#f4f4f5', border: '#e4e4e7',
+    surface1: '#fafafa', surface2: '#ffffff', surface3: '#f4f4f5', ring: '#f59e0b',
     fontFamily: 'Outfit',
   },
   // SaaS — 科技感
   saas: {
     primary: '#6366f1', secondary: '#4f46e5', accent: '#06b6d4',
     background: '#fafafa', foreground: '#18181b', muted: '#f4f4f5', border: '#e4e4e7',
-    fontFamily: 'DM Sans',
+    surface1: '#fafafa', surface2: '#ffffff', surface3: '#f4f4f5', ring: '#06b6d4',
+    fontFamily: 'Space Grotesk',
   },
 }
 
@@ -410,11 +437,16 @@ function paletteToDesignSystem(p: IndustryPalette, tier: DesignTier): DesignSyst
   --color-foreground: ${p.foreground};
   --color-muted: ${p.muted};
   --color-border: ${p.border};
+  --color-surface-1: ${p.surface1};
+  --color-surface-2: ${p.surface2};
+  --color-surface-3: ${p.surface3};
+  --color-ring: ${p.ring};
 }`,
     tailwindExtend: {
       colors: {
         primary: p.primary, secondary: p.secondary, accent: p.accent,
         background: p.background, foreground: p.foreground, muted: p.muted, border: p.border,
+        'surface-1': p.surface1, 'surface-2': p.surface2, 'surface-3': p.surface3, ring: p.ring,
       },
       fontFamily: fontFamilies,
     },
@@ -427,6 +459,7 @@ function paletteToDesignSystem(p: IndustryPalette, tier: DesignTier): DesignSyst
     colorPalette: {
       primary: p.primary, secondary: p.secondary, accent: p.accent,
       background: p.background, foreground: p.foreground, muted: p.muted, border: p.border,
+      surface1: p.surface1, surface2: p.surface2, surface3: p.surface3, ring: p.ring,
       destructive: '#ef4444', success: '#22c55e',
     },
     spacing: {
@@ -446,11 +479,13 @@ const TIER_FALLBACK_PALETTES: Record<DesignTier, IndustryPalette> = {
   functional: {
     primary: '#3b82f6', secondary: '#64748b', accent: '#3b82f6',
     background: '#ffffff', foreground: '#0f172a', muted: '#f1f5f9', border: '#e2e8f0',
+    surface1: '#ffffff', surface2: '#f8fafc', surface3: '#f1f5f9', ring: '#3b82f6',
     fontFamily: 'DM Sans',
   },
   creative: {
     primary: '#6366f1', secondary: '#a855f7', accent: '#f59e0b',
     background: '#fafafa', foreground: '#18181b', muted: '#f4f4f5', border: '#e4e4e7',
+    surface1: '#fafafa', surface2: '#ffffff', surface3: '#f4f4f5', ring: '#f59e0b',
     fontFamily: 'Outfit', displayFont: 'Playfair Display',
   },
 }

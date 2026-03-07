@@ -9,6 +9,7 @@ import { getAnthropicClient, MODEL, trackLlmUsage } from '../lib/anthropic'
 import { getEnv } from '../lib/env'
 import { formatUISpecForPrompt, UIRequirementsSpec } from './bdd-to-ui-spec'
 import { safeParseJson } from '../utils/safe-parse-json'
+import { selectTechniques, formatTechniquesForPrompt } from './design-techniques'
 import { createLogger } from '../lib/logger'
 
 const logger = createLogger('uiux-generation')
@@ -194,56 +195,48 @@ export type DesignTier = 'functional' | 'creative'
 export function getCraftFoundations(): string {
   return `## Craft Foundations（設計品質底線）
 
-### Subtle Layering（微層次 — 最重要的品質指標）
-- 表面之間的差異必須微妙但可辨識 — 學習 Vercel、Supabase、Linear 的做法
-- 色階跳躍要輕柔：不是 gray-100 到 gray-300，而是 gray-50 到 gray-100
-- 邊框要輕但不隱形 — 不看不見，找時能找到
-- Squint test：模糊眼睛看介面，仍然能感知層級，但沒有東西跳出來刺眼
+### Subtle Layering（品質第一指標）
+表面差異微妙但可辨識。
+- Instead of: gray-100 跳到 gray-300 → Try: gray-50 到 gray-100 的輕柔過渡
+- Instead of: 粗邊框 → Try: \`ring-1 ring-black/5\` 或 \`border border-gray-200/60\`
+- Instead of: 大面積 drop-shadow → Try: \`shadow-sm\` + \`ring-1 ring-black/5\` 雙層微陰影
+- Squint test: 模糊眼睛看，能感知層級但沒有東西刺眼
+- 用 surface-1（底層）→ surface-2（卡片）→ surface-3（hover/active）建立表面層級
 
 ### 顏色意圖
-- 灰色構建結構，彩色傳達意義（狀態、動作、強調、品牌）
-- 沒有動機的彩色就是噪音
-- 一個有意圖的 accent color 勝過五個隨意的顏色
-- 每個顏色都能追溯到語義：foreground（文字層級）、background（表面層級）、border（分隔層級）、brand、semantic
+- 灰色構建結構，彩色只在需要行動或注意時出現
+- Instead of: 五個隨機 accent color → Try: 一個 accent + 語義色（success/error/warning）
+- Instead of: 純白卡片放有色背景 → Try: 用 surface-1/surface-2 區分表面層級
+- 每個顏色都能追溯到語義：foreground（文字）、background（底層）、surface-1/2/3（表面層級）、brand、semantic
 
-### 間距系統
-- 選定一個 base unit（4px 或 8px）嚴格用倍數
-- 一致性比具體數字重要
-- 隨意的間距值是「沒有設計系統」的最明顯信號
-- padding 保持對稱，除非有明確的理由不對稱
-
-### 深度策略（選一個，全局堅持）
-- **Borders-only**：乾淨、技術感，適合密集工具
-- **Subtle shadows**：柔和提升，適合親和的產品
-- **Layered shadows**：高級感、立體感，適合需要存在感的卡片
-- 禁止混合使用。不要同時用粗邊框和陰影
-
-### 圓角
-- 銳利 = 技術感，圓潤 = 親和感
-- 選定一個 scale 全局一致使用
-- 小元素不要用大圓角
+### 深度策略（選一個貫徹全局）
+| 策略 | 適合 | 實作 |
+|------|------|------|
+| Borders-only | 密集工具 | \`border border-gray-200\` |
+| Subtle shadows | 親和產品 | \`shadow-sm\` + 微弱 border |
+| Layered shadows | 高級感 | \`shadow-md shadow-black/5\` + \`ring-1 ring-black/5\` |
+禁止混合。
 
 ### 排版層級
-- 標題需要 weight 和 tight tracking
-- 正文需要可讀性
-- 數據需要 monospace 或 tabular-nums
-- 建立清晰的層級：不只是大小，還有 weight、color、spacing
+- 標題：font-bold + tracking-tight + 大字號
+- 正文：font-normal + leading-relaxed + 適中字號
+- 數據/標籤：tabular-nums 或 font-mono
+- Instead of: 只靠字號區分 → Try: weight + color + spacing 三維度建立層級
+
+### 間距系統
+- 選定 base unit（4px 或 8px）嚴格用倍數
+- 一致性比具體數字重要
+- 隨意的間距值是「沒有設計系統」的最明顯信號
 
 ### 互動狀態完整性
-- 每個互動元素必須有：default / hover / active / focus / disabled
-- 數據必須有：loading / empty / error 狀態
-- 缺少狀態 = 感覺壞了
+每個互動元素必須有完整狀態。
+Instead of: 只有 default + hover → Try: default / hover / active / focus-visible / disabled 全覆蓋
+數據必須有：loading / empty / error 狀態
 
-### 禁止清單（通用）
-- 刺眼的邊框 — 如果邊框是你第一眼看到的東西，它太強了
-- 劇烈的表面跳躍 — elevation 變化要像耳語一般安靜
-- 混合深度策略 — 不要同時 border + shadow
-- 大面積 drop shadow — 陰影要微妙，不要搶注意力
-- 小元素用大圓角
-- 純白卡片放在有色背景上
-- 粗裝飾性邊框
+### 禁止
+- 原生 select/date input — 無法 style，必須自建組件
 - 純裝飾用途的漸層和顏色 — 顏色必須有意義
-- 原生 select/date input — 無法 style，必須自建組件`
+- 小元素用大圓角`
 }
 
 // ============================================================
@@ -260,23 +253,25 @@ export function getStructureConstraints(tier: DesignTier): string {
     return `${craft}
 
 ## 設計約束（Creative Tier — 創意型）
-允許更多視覺表現力，但保持專業品味：
 
-### 顏色與視覺
-- 漸層 OK（有品味的線性漸層，禁止紫色多色漸層 — 那仍是 AI slop）
-- 背景可以有紋理、微妙漸層、幾何圖案
-- 多 accent color OK（最多 3 個，必須協調）
-- 適度使用 glow/光暈效果（輕微、小面積）
+### 視覺表現力
+- 漸層：線性漸層、radial gradient、mesh gradient 都 OK（禁止紫色多色 AI slop）
+- 背景：可用噪點紋理（CSS SVG filter）、幾何圖案（dot grid）、微妙漸層
+- Glass 效果：\`backdrop-blur-xl bg-white/70 border-white/20\`（適度、小面積）
+- 多色：最多 3 個 accent color，必須和諧
 
-### 佈局
-- 不對稱佈局、overlap 元素、grid-breaking OK
-- 可以有全寬 hero section、大膽的留白
-- 可以使用 sticky scroll、parallax-like 效果（用 transform 實現）
+### 佈局選單（至少用一個非標準佈局）
+- **Bento Grid**：不等大小的網格，突出重要內容（CSS grid auto-fit + span）
+- **Editorial Split**：左右不對稱分割（60/40 或 70/30），文圖交錯
+- **Full-bleed Sections**：全寬段落 + 窄內容交替，建立視覺節奏
+- **Overlapping Elements**：元素局部重疊增加視覺張力（negative margin / absolute）
+- **Sticky Scroll**：固定左側 + 右側滾動切換
 
-### 字體
-- 鼓勵獨特的字體選擇（display font + body font 搭配）
+### 字體表現
+- Display font 用於 hero/標題（clamp() 響應式）
+- 鼓勵 serif + sans 搭配建立對比
+- Instead of: 全站統一字號 → Try: 標題用 text-5xl tracking-tighter，正文用 text-base leading-relaxed
 - 禁止只用 Inter/Roboto/Arial
-- 可以使用大號標題（clamp() 響應式）
 
 ### 仍然禁止
 - 紫色多色漸層（AI slop）
@@ -291,29 +286,38 @@ export function getStructureConstraints(tier: DesignTier): string {
 ## 設計約束（Functional Tier — 功能型）
 保守、可預測的介面設計。每一個選擇都必須能解釋 why。
 
-### 顏色與視覺
-- 禁止漸層（除非用戶明確要求）
-- 禁止 glow 效果作為主要視覺手段
-- 每個視圖限一個 accent color — 灰色構建結構，accent 只在需要行動或注意的地方出現
-- 優先使用 Tailwind 預設陰影和色彩 tokens
-- 表面差異要微妙 — 不要 gray-100 / gray-300 的劇烈跳躍
+### 佈局選單（禁止千篇一律的 sidebar + card grid）
+Instead of 等大小卡片矩陣，試試：
+- **Command Center**：頂部命令列 + 左側 nav + 主區域（Linear 風格）
+- **Data Table + Detail Panel**：左側列表/表格 + 右側詳情面板（Notion 風格）
+- **Bento Dashboard**：不等大小的 metric 卡 + 主圖表（大小比例有變化）
+- **Timeline View**：時間軸式的數據展示
+- **Sidebar + Canvas**：左側工具列 + 中央畫布/編輯區
 
-### 佈局
-- 佈局必須從數據特性和用戶任務出發，不是套模板
-- 同一種資料有無限呈現方式：metric 可以是 hero number / sparkline / progress ring / comparison delta / trend badge
-- 問自己：用戶在這個畫面最常做什麼？佈局是否為那個動作服務？
-- 導航不是腳手架，導航就是產品 — 它教用戶如何理解這個空間
+### 數據可視化多樣性
+同一個 metric 有無限呈現方式：
+| 常見（避免全用） | 替代方案 |
+|-----------------|---------|
+| icon + 大數字 + 小標籤 | sparkline + 趨勢箭頭 |
+| 同大小 stat card | 大小混合 + hero metric 突出關鍵指標 |
+| 圓餅圖 | progress ring / bar chart / tree map |
+| 普通表格 | 帶 inline chart 的增強表格 |
+
+### 顏色
+- 一個 accent color 聚焦注意力
+- 灰色構建結構（surface-1 → surface-2 微層次）
+- Instead of: 彩色邊框區分 → Try: 左側色條（\`border-l-4\`）或微背景色
+- 禁止漸層（除非用戶明確要求）
+- 禁止 glow 效果
 
 ### 字體
 - 可讀性優先
-- 字體不是容器，字體就是設計 — 標題的 weight、label 的個性、段落的質感定義了產品感覺
+- 字體不是容器，字體就是設計 — 標題 weight、label 個性、段落質感定義產品感覺
 - 禁止 Inter/Roboto/Arial 作為唯一字體（可以作為 fallback）
 
 ### 禁止
 - 紫色多色漸層（AI slop）
-- 千篇一律的 card grid 佈局 — sidebar + 同大小卡片矩陣是 AI 生成的最明顯特徵
-- 過度裝飾
-- 過度使用 emoji
+- 過度裝飾 / 過度使用 emoji
 - 多個 accent color — 稀釋焦點`
 }
 
@@ -321,6 +325,32 @@ export function getStructureConstraints(tier: DesignTier): string {
  * 根據 tier 返回動畫生成階段的約束文本
  */
 export function getAnimationConstraints(tier: DesignTier): string {
+  const animationPatterns = `
+### 推薦動畫 Pattern（motion/react 實作參考）
+
+入場動畫：
+\`\`\`tsx
+<motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.4, ease: 'easeOut' }}>
+\`\`\`
+
+Stagger 列表：
+\`\`\`tsx
+{items.map((item, i) => (
+  <motion.div key={item.id} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.05 }} />
+))}
+\`\`\`
+
+Scroll reveal：
+\`\`\`tsx
+<motion.section initial={{ opacity: 0 }} whileInView={{ opacity: 1 }} viewport={{ once: true, margin: '-50px' }}>
+\`\`\`
+
+Card hover lift：
+\`\`\`tsx
+<motion.div whileHover={{ y: -2, boxShadow: '0 10px 25px rgba(0,0,0,0.08)' }} transition={{ duration: 0.2 }}>
+\`\`\`
+`
+
   if (tier === 'creative') {
     return `## 動畫風格（Creative Tier — 創意型）
 允許更豐富的動畫表現，但必須遵守效能規則：
@@ -339,7 +369,7 @@ export function getAnimationConstraints(tier: DesignTier): string {
 - 互動反饋仍然 ≤200ms
 - 可以有連續的微動畫（但必須在可視範圍內才播放）
 - 每個動畫都要有意義，不是為了動而動
-
+${animationPatterns}
 ### 仍然必須遵守
 - 只動畫 compositor props（transform/opacity）
 - 尊重 prefers-reduced-motion
@@ -359,7 +389,7 @@ export function getAnimationConstraints(tier: DesignTier): string {
 - 禁止 bouncy/spring 效果
 - 避免 layout shift
 - 避免過度動畫（保持克制）
-
+${animationPatterns}
 ### 必須遵守
 - 只動畫 compositor props（transform/opacity）
 - 尊重 prefers-reduced-motion
@@ -377,13 +407,18 @@ function getVariantPromptHint(tier: DesignTier): string {
 這是一個需要視覺表現力的產品。設計變體應該更大膽：
 - 可以使用漸層背景（但禁止紫色多色漸層）
 - 可以使用多 accent color（協調的）
-- 鼓勵獨特的字體搭配
-- 佈局可以不對稱、有 overlap
+- 鼓勵獨特的字體搭配（serif + sans 對比）
+- 佈局可以不對稱、有 overlap、Bento Grid
 - Variant E (Expressive) 應該特別大膽
 
 ## Signature Element
-每個變體必須有一個「Signature」— 一個只屬於這個產品的視覺/結構/互動元素。
-如果把產品名稱拿掉，看到這個元素就能猜到是什麼產品，那就是好的 Signature。`
+每個變體必須有一個「Signature」— 一個只屬於這個產品的**具體視覺元素**。
+好的 signatureElement 範例：
+- 「打字機式的 hero 文字入場動畫」
+- 「食材圖鑑式的圓角菜單卡片」
+- 「分裂畫面的 before/after 對比區塊」
+- 「電影分鏡式的作品時間軸」
+壞的 signatureElement（太抽象）：「清晰的視覺層級」「現代設計」「乾淨的介面」`
   }
 
   return `## Design Tier: Functional（功能型）
@@ -394,14 +429,18 @@ function getVariantPromptHint(tier: DesignTier): string {
 
 ## Anti-Default 原則
 每個設計選擇都必須是有意識的，不能因為「常見」就使用。
-- 同樣的資料有無限的呈現方式 — metric 不一定是 icon + 大數字 + 小標籤
-- sidebar 不一定是唯一的導航方式
-- card grid 不是唯一的佈局模式
+- metric 不一定是 icon + 大數字 + 小標籤 — 試試 sparkline、progress ring、趨勢箭頭
+- sidebar 不一定是唯一的導航方式 — 試試頂部 tab、breadcrumb、command palette
+- card grid 不是唯一的佈局模式 — 試試 bento grid、split panel、timeline
 
 ## Signature Element
-每個變體必須有一個「Signature」— 一個能讓這個介面與其他 dashboard 區分的元素。
-可以是 token 命名（--ink 而不是 --gray-700）、獨特的 metric 展示方式、特殊的導航模式等。
-不需要誇張，但必須有識別度。`
+每個變體必須有一個「Signature」— 一個能讓這個介面與其他 dashboard 區分的**具體視覺元素**。
+好的 signatureElement 範例：
+- 「時鐘式的 24 小時活動熱力圖」
+- 「地鐵路線圖式的流程追蹤」
+- 「指揮中心式的數據總覽面板」
+- 「太空任務控制台的狀態面板」
+壞的 signatureElement（太抽象）：「清晰的視覺層級」「功能導向設計」「直覺的操作流程」`
 }
 
 /**
@@ -413,12 +452,12 @@ function getVariantAxes(tier: DesignTier) {
     axes.E = {
       ...axes.E,
       prompt: `大膽的視覺表現：
-- 漸層背景、紋理、微妙的粒子或幾何效果
-- 獨特的字體搭配（display font + body font）
+- 漸層背景（mesh gradient / radial gradient）、噪點紋理、幾何圖案
+- 獨特的字體搭配（display font + body font，serif/sans 對比）
 - 不對稱佈局、overlap 元素、打破 grid
-- 豐富的 hover 效果和入場動畫
-- 大膽但有品味的配色方案
-- 但保持專業品味，不要卡通化`,
+- Glass 效果（backdrop-blur + 半透明邊框）
+- 超大標題（text-6xl+ tracking-tighter）+ 漸層文字
+- 大膽但有品味的配色（禁止紫色多色 AI slop）`,
     }
   }
   return axes
@@ -452,6 +491,10 @@ export interface DesignSystem {
     foreground: string
     muted: string
     border: string
+    surface1?: string
+    surface2?: string
+    surface3?: string
+    ring?: string
     destructive?: string
     success?: string
   }
@@ -598,55 +641,60 @@ const VARIANT_AXES = {
     name: 'Hierarchy Focus',
     axis: 'hierarchy' as const,
     description: '強調視覺層級，清晰的信息架構',
-    prompt: `專注於視覺層級和信息架構：
-- 明確的標題層級（H1→H2→H3）
-- 使用大小和粗細區分重要性
-- 留白引導視線流動
-- 主要操作突出，次要操作內斂`,
+    prompt: `視覺層級和信息架構。選擇一種信息組織策略：
+- **Hero-Driven**：一個壓倒性的主視覺元素 + 漸進式次要信息
+- **Card Hierarchy**：大小不等的卡片，大卡片 = 重要信息
+- **Typography-Led**：用字體大小/粗細/顏色建立 5 級信息層級
+靈感：Linear 的清晰層級、Stripe 的信息密度控制`,
   },
   B: {
     id: 'B' as const,
     name: 'Layout Model',
     axis: 'layout' as const,
     description: '探索根本不同的空間組織方式',
-    prompt: `探索根本不同的空間組織方式（不只是 Card/List/Table 三選一）：
-- 思考數據的本質特性最適合什麼呈現方式
-- 考慮非對稱佈局、分割面板、timeline、地圖式等非常規方案
-- 不要從「常見佈局」出發，而是從「這些數據怎麼被理解」出發
-- 佈局本身就是設計決策，不是預設模板的選擇`,
+    prompt: `根本不同的空間組織。你必須使用以下之一（不是 sidebar + card grid）：
+- **Bento Grid**：CSS grid 不等比例，內容決定尺寸
+- **Split Panel**：左右不對稱（40/60 或 30/70），各有功能
+- **Timeline/Flow**：時間或步驟驅動的佈局
+- **Canvas + Toolbar**：中央工作區 + 邊欄工具
+- **Stacked Sections**：全寬段落堆疊，每段有獨立視覺語言
+靈感：Notion 的 block 式、Arc 的 sidebar、Figma 的 canvas`,
   },
   C: {
     id: 'C' as const,
     name: 'Density',
     axis: 'density' as const,
     description: '密度變化：Compact vs Spacious',
-    prompt: `調整信息密度：
-- Compact：更緊湊的間距，適合專業用戶
-- Comfortable：平衡的間距，適合日常使用
-- Spacious：更多留白，適合消費級產品
-根據目標用戶選擇合適的密度`,
+    prompt: `信息密度極端化。選一個方向：
+- **Ultra-Compact**：Bloomberg Terminal 風格，最大信息密度，小字號 + 緊湊間距
+- **Balanced**：間距節奏感（8px 基準 → 小元素 4px、區塊 24-32px）
+- **Spacious Editorial**：大量留白，每個元素都有呼吸空間
+密度不只是間距 — 還包括字體大小、行高、元素數量`,
   },
   D: {
     id: 'D' as const,
     name: 'Interaction',
     axis: 'interaction' as const,
     description: '探索獨特的互動模式和操作流程',
-    prompt: `探索能讓用戶「驚喜但合理」的互動模式：
-- 思考這個產品的核心操作是什麼，用最少步驟完成
-- 考慮非常規互動：gesture、long-press reveal、contextual toolbar、inline expansion
-- 反饋機制要有個性（不只是 toast — 考慮 inline confirmation、progress storytelling）
-- 通過 Swap Test 驗證：如果換個產品也用同樣互動，是否需要重新設計？`,
+    prompt: `獨特的互動模式。至少實作一個非標準互動：
+- **Inline Expand**：點擊行展開詳情（不彈 Modal）
+- **Command Palette**：Cmd+K 快速搜尋/跳轉
+- **Contextual Toolbar**：選中/hover 時出現的操作條
+- **Drag Reorder**：拖拽排序列表/卡片
+- **Quick Actions**：hover 時出現操作按鈕（Slack hover actions 風格）
+靈感：VS Code 的 command palette、Slack 的 hover actions`,
   },
   E: {
     id: 'E' as const,
     name: 'Expressive',
     axis: 'expressive' as const,
     description: '表現力：有意義的動畫和品牌特色',
-    prompt: `增強表現力和品牌特色：
+    prompt: `表現力和品牌特色。具體方向：
 - 有意義的微動畫（狀態轉換、載入、成功反饋）
-- 品牌色彩的創意運用
-- 獨特的視覺元素
-- 但避免過度設計`,
+- 品牌色彩的創意運用（漸層文字、色塊背景交替）
+- 獨特的視覺元素（幾何裝飾、背景紋理、微噪點）
+- 字體搭配要有個性（serif + sans 對比、display font 大標題）
+- 但保持專業品味，不要過度設計`,
   },
 }
 
@@ -740,7 +788,10 @@ ${Object.values(axes).map(v => `- **${v.id}. ${v.name}**：${v.description}\n  $
           "background": "#...",
           "foreground": "#...",
           "muted": "#...",
-          "border": "#..."
+          "border": "#...",
+          "surface1": "#... (主背景)",
+          "surface2": "#... (卡片)",
+          "surface3": "#... (hover)"
         },
         "spacing": {
           "unit": 4,
@@ -771,21 +822,32 @@ ${Object.values(axes).map(v => `- **${v.id}. ${v.name}**：${v.description}\n  $
 - 卡片佈局有無限的比例、間距、強調方式
 Linear 的卡片不像 Notion 的。Vercel 的 metric 不像 Stripe 的。同樣的概念，無限的表達。
 
+## 強制差異化規則（Critical）
+1. 5 個變體必須使用 **至少 3 種不同的佈局模型**（不允許全部用 sidebar + main content）
+2. 每個變體的 signatureElement 必須是具體的視覺元素（例如「用等高線圖表示數據趨勢」），不是抽象概念（例如「清晰的視覺層級」）
+3. 配色不能只改 hue — 至少 2 個變體要改變深度策略（borders-only vs shadows vs layered）
+4. 字體搭配至少 3 種不同組合
+5. surface-1/2/3 層級色差要微妙但可辨識（不是全部 #ffffff）
+
+## 簽名元素範例（按產品類型）
+- Dashboard：「時鐘式的 24 小時活動熱力圖」「地鐵路線圖式的流程追蹤」
+- Landing Page：「打字機式的 hero 文字動畫」「分裂畫面的 before/after 對比」
+- Restaurant：「食材圖鑑式的菜單卡片」「手繪風格的裝飾分隔線」
+- Portfolio：「電影分鏡式的作品展示」「雜誌翻頁式的專案詳情」
+- SaaS：「指揮中心式的數據總覽」「太空任務控制台的狀態面板」
+
 ## 設計原則
-1. **每個變體必須有明確的差異**：不是細微調整，而是設計方向的根本不同
-2. **顏色來自產品世界**：如果這個產品是一個實體空間，你會看到什麼顏色？顏色要有來源，不是隨意套用
-3. **字體是設計，不是容器**：字體的 weight、個性、質感定義產品的感覺，而不只是裝文字
-4. **間距要一致**：使用 4px 或 8px 為基礎單位
-5. **避免 AI Slop**：不要紫色漸層、glow 效果、過度裝飾
-6. **Subtle Layering**：表面之間的差異要微妙但可辨識，邊框輕但不隱形，陰影安靜但有層次
-${tier === 'creative' ? `7. **大膽設計**：Creative tier 允許漸層（有品味的）、多色、不對稱佈局
-8. **獨特字體**：鼓勵使用 display font + body font 搭配` : ''}
+1. **顏色來自產品世界**：如果這個產品是一個實體空間，你會看到什麼顏色？
+2. **字體是設計，不是容器**：字體的 weight、個性、質感定義產品的感覺
+3. **間距要一致**：使用 4px 或 8px 為基礎單位
+4. **Subtle Layering**：用 surface-1/2/3 建立微妙但可辨識的表面層級
+${tier === 'creative' ? `5. **大膽設計**：Creative tier 允許漸層（有品味的）、多色、不對稱佈局
+6. **獨特字體**：鼓勵使用 display font + body font 搭配` : `5. **避免 AI Slop**：禁止紫色漸層、glow 效果、過度裝飾`}
 
 ## 禁止
 - 不要使用 Inter, Roboto, Arial 作為唯一字體（可以作為 fallback）
 - 不要使用紫色漸層配白色背景
 - 不要使用過度飽和的顏色
-- 不要 5 個變體都用同樣的 sidebar 寬度和卡片排列 — 這是 AI 生成最明顯的特徵
 ${tier === 'functional' ? '- 不要使用漸層（除非明確要求）\n- 不要使用 glow 效果' : '- 漸層 OK 但禁止紫色多色漸層\n- 輕微 glow OK 但禁止大面積 glow'}`
 
   const userMessage = `請根據上述信息，生成 5 個設計變體。確保每個變體都有獨特的設計方向和完整的 Design System。`
@@ -936,6 +998,14 @@ ${designSystem.cssVariables}
 - Foreground: ${designSystem.colorPalette.foreground}
 - Muted: ${designSystem.colorPalette.muted}
 - Border: ${designSystem.colorPalette.border}
+${designSystem.colorPalette.surface1 ? `- Surface-1 (主背景): ${designSystem.colorPalette.surface1}
+- Surface-2 (卡片): ${designSystem.colorPalette.surface2}
+- Surface-3 (hover): ${designSystem.colorPalette.surface3}
+- Ring (focus): ${designSystem.colorPalette.ring}
+
+顏色使用指引：
+- 背景分層：surface-1（底層）→ surface-2（卡片）→ surface-3（hover/active）
+- 這三個層級的色差要微妙但可辨識（Subtle Layering 原則）` : ''}
 
 ### 字體規範
 - 主要字體 (font-sans): ${designSystem.typography.fontFamily}
@@ -1423,6 +1493,10 @@ export async function generateStructure(
 ): Promise<GenerationResult> {
   const tier = designTier || 'functional'
 
+  // 選擇視覺技法並注入 prompt
+  const techniques = selectTechniques(tier, template.category, 3)
+  const techniquesSection = formatTechniquesForPrompt(techniques)
+
   const systemPrompt = `你是一位專業的前端開發者。根據提供的 Design System 生成桌面版前端代碼，包含完整的互動功能。
 
 ${buildDesignSystemPrompt(designSystem)}
@@ -1474,6 +1548,8 @@ ${buildDesignSystemPrompt(designSystem)}
 - 例如：\`const [items, setItems] = useState(initialData)\`
 
 ${getStructureConstraints(tier)}
+
+${techniquesSection}
 
 ## 組件規則
 - 有鍵盤/focus 行為的組件使用 Radix 或 React Aria

@@ -1076,6 +1076,19 @@ Sandpack 取代 1105 行 regex 轉換器。支援 streaming 增量更新、裝�
 - **快速模式**：Prefilter → `detectFastModeIntent()`（greeting/question/chitchat/help 攔截 + FAQ/Sonnet 回覆）→ `isDesignFeedback()` → `checkBuildRelevance()`（強信號 ~80 詞 / 弱信號 Haiku 三元：通過/模糊/不相關 + Content Policy，**fail-closed**）
 - **迭代模式**：`semanticGateway({ phase: 'iteration' })` 取代 `isDesignFeedback()`（設計關鍵詞零 LLM 短路 ~80% + Sonnet 語義審核 ~20%）
 
+### 生成樣式品質升級（2026-03-08）
+
+- **視覺技法庫**（`design-techniques.ts` 新建）：30 個結構化技法（Layout/Surface/Typography/Interaction），按 tier 和 productType 加權隨機選 3 個注入 Structure prompt
+- **Prompt 重寫**：`getCraftFoundations()` 從禁止驅動 → 示範驅動（Instead of X → Try Y），新增 surface-1/2/3 表面分層指引
+- **約束集具體化**：Creative tier 新增佈局選單（Bento Grid/Editorial Split/Sticky Scroll 等）；Functional tier 新增數據可視化替代方案表
+- **VARIANT_AXES 具體化**：每個 axis 加入 3-5 個具體選項和靈感參考；新增強制差異化規則（3 種不同佈局 + 具體 signatureElement + 3 種不同字體）
+- **設計系統升級**：`IndustryPalette` 新增 surface1/2/3/ring 欄位（24 個產業配色全部更新），`paletteToDesignSystem()` 輸出新色階
+- **字體個性化**：portfolio/blog/agency/landing/event/music/salon/saas/dashboard/finance 更換更有辨識度的字體配對（Plus Jakarta Sans + Instrument Serif、Bricolage Grotesque 等）
+- **deployer FONT_LOOKUP**：新增 14 個字體映射（Instrument Serif/Sans、Bricolage Grotesque、Libre Baskerville、Cormorant Garamond 等）
+- **動畫約束**：`getAnimationConstraints()` 新增具體 motion/react 程式碼範例（入場/stagger/scroll reveal/card hover）
+- **`buildDesignSystemPrompt()`**：新增 surface 色階顯示 + 顏色使用指引
+- **`generateDesignVariants()`**：JSON schema 新增 surface1/2/3，新增簽名元素範例表
+
 ### Design Tier（2026-02-06）
 
 functional（dashboard/SaaS）vs creative（landing page），約束集切換。
