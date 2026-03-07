@@ -2793,17 +2793,52 @@ export async function refineCode(
   const escapeRegExp = (value: string): string =>
     value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 
-  const hasRenderableUrl = (content: string, url: string): boolean => {
+  const getUrlUsage = (content: string, url: string): {
+    directRenderable: boolean
+    rawUrl: boolean
+    renderHint: boolean
+  } => {
     const escaped = escapeRegExp(url)
     const srcPattern = new RegExp(`src\\s*=\\s*\\{?\\s*["'\`]${escaped}["'\`]`)
     const cssUrlPattern = new RegExp(`url\\(\\s*["'\`]?${escaped}["'\`]?\\s*\\)`)
-    return srcPattern.test(content) || cssUrlPattern.test(content) || content.includes(url)
+    const directRenderable = srcPattern.test(content) || cssUrlPattern.test(content)
+    const rawUrl = content.includes(url)
+    const renderHint = /src\s*=|backgroundImage|url\(/.test(content)
+    return { directRenderable, rawUrl, renderHint }
   }
 
   const findMissingLockedUrls = (code: CodeBundle, lockedUrls: string[]): string[] => {
     if (!lockedUrls.length) return []
     const allFiles = [...code.pages, ...code.components]
-    return lockedUrls.filter(url => !allFiles.some(file => hasRenderableUrl(file.content, url)))
+    const missing: string[] = []
+
+    for (const url of lockedUrls) {
+      let foundRenderableUsage = false
+      const rawOnlyPaths: string[] = []
+
+      for (const file of allFiles) {
+        const usage = getUrlUsage(file.content, url)
+        const validUsage = usage.directRenderable || (usage.rawUrl && usage.renderHint)
+        if (validUsage) {
+          foundRenderableUsage = true
+          break
+        }
+        if (usage.rawUrl) {
+          rawOnlyPaths.push(file.path)
+        }
+      }
+
+      if (!foundRenderableUsage) {
+        missing.push(url)
+      } else if (rawOnlyPaths.length > 0) {
+        logger.warn(
+          { url, rawOnlyPaths },
+          'refineCode: URL 只以裸字串出現於部分檔案（可能非可渲染上下文）'
+        )
+      }
+    }
+
+    return missing
   }
 
   const repairLockedUploadUrls = async (
@@ -2872,6 +2907,13 @@ ${buildCodeBlocks(code).join('\n\n')}
         .filter(u => /\/uploads\/tellcraft\//.test(u))
     )
   )
+
+  if (lockedUploadUrls.length > 0) {
+    logger.info(
+      { lockedUploadUrlsCount: lockedUploadUrls.length, imageUrlsCount: imageUrls?.length || 0 },
+      'refineCode: 偵測到鎖定圖片 URL'
+    )
+  }
 
   const codeBlocks = buildCodeBlocks(currentCode)
 
