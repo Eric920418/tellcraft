@@ -225,15 +225,29 @@ export default function ChatSection({
     let targetMode: 'default' | 'split' = 'default'
 
     if (!isMobile) {
+      const hasUiuxMessage = messages.some(m =>
+        m.stage?.startsWith('uiux') || m.richContent?.type === 'template_picker'
+      )
+      const hasGenerationMessage = messages.some(m => {
+        const stage = m.stage || ''
+        return stage === 'fast_generating'
+          || stage === 'generating'
+          || stage === 'uiux_pipeline_progress'
+          || stage === 'uiux_structure_generating'
+          || stage === 'uiux_animation_generating'
+          || stage === 'uiux_rwd_generating'
+          || stage === 'uiux_quality_gate_running'
+          || stage === 'uiux_quality_gate_fixing'
+      })
+      const hasPreviewSignals = !!streamingPreview || !!codePreviewData || fastBuildChunks > 0
+      const shouldForceSplit = hasUiuxMessage || hasGenerationMessage || hasPreviewSignals
+
       const lastHintMessage = [...messages].reverse().find(m => m.layoutHint)
-      if (lastHintMessage?.layoutHint) {
+      if (shouldForceSplit) {
+        targetMode = 'split'
+      } else if (lastHintMessage?.layoutHint) {
         targetMode = lastHintMessage.layoutHint === 'split' ? 'split' : 'default'
       } else {
-        const hasUiuxMessage = messages.some(m =>
-          m.stage?.startsWith('uiux') || m.richContent?.type === 'template_picker'
-        )
-        if (hasUiuxMessage) targetMode = 'split'
-
         const hasClarifyMessage = messages.some(m =>
           m.stage === 'clarify_question' || m.stage === 'prd_discovery_complete' || m.stage === 'prd_discovery_continue'
         )
@@ -250,7 +264,7 @@ export default function ChatSection({
       }, 300)
       return () => clearTimeout(transitionTimer)
     }
-  }, [messages])
+  }, [messages, streamingPreview, codePreviewData, fastBuildChunks])
 
   // ── Template loading ──
   useEffect(() => {
