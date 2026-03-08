@@ -43,6 +43,16 @@ interface VariantPickerProps {
   maxSelections?: number
 }
 
+const CARD_INTERACTION_VARIANTS = {
+  rest: { scale: 1, y: 0 },
+  hover: { scale: 1.015, y: -2 },
+}
+
+const COLOR_PREVIEW_VARIANTS = {
+  rest: { opacity: 0, y: 6 },
+  hover: { opacity: 1, y: 0 },
+}
+
 // 變體軸的圖標和顏色
 const AXIS_CONFIG: Record<string, { icon: string; color: string; bgColor: string }> = {
   hierarchy: { icon: '📊', color: '#3B82F6', bgColor: '#EFF6FF' },
@@ -61,7 +71,6 @@ export default function VariantPicker({
 }: VariantPickerProps) {
   const t = useTranslations('uiux')
   const [selected, setSelected] = useState<string[]>(selectedIds)
-  const [hoveredId, setHoveredId] = useState<string | null>(null)
 
   const handleSelect = useCallback((id: string) => {
     setSelected(prev => {
@@ -158,17 +167,18 @@ export default function VariantPicker({
       >
         {variants.map((variant) => {
           const isSelected = selected.includes(variant.id)
-          const isHovered = hoveredId === variant.id
           const axisConfig = AXIS_CONFIG[variant.axis] || AXIS_CONFIG.hierarchy
 
           return (
             <motion.div
               key={variant.id}
+              initial={false}
+              animate={isSelected ? 'hover' : 'rest'}
+              whileHover="hover"
+              variants={CARD_INTERACTION_VARIANTS}
               onClick={() => handleSelect(variant.id)}
-              onMouseEnter={() => setHoveredId(variant.id)}
-              onMouseLeave={() => setHoveredId(null)}
-              whileHover={{ scale: 1.02 }}
               whileTap={{ scale: 0.98 }}
+              transition={{ duration: 0.18, ease: [0.22, 1, 0.36, 1] }}
               style={{
                 position: 'relative',
                 padding: 16,
@@ -176,7 +186,9 @@ export default function VariantPicker({
                 border: `2px solid ${isSelected ? axisConfig.color : 'var(--border-color)'}`,
                 borderRadius: 12,
                 cursor: 'pointer',
-                transition: 'all 0.2s ease',
+                overflow: 'hidden',
+                transition: 'background-color 0.18s ease, border-color 0.18s ease',
+                willChange: 'transform',
               }}
             >
               {/* 選擇指示器 */}
@@ -293,35 +305,36 @@ export default function VariantPicker({
               </div>
 
               {/* 顏色預覽 */}
-              <AnimatePresence>
-                {(isSelected || isHovered) && (
-                  <motion.div
-                    initial={{ opacity: 0, height: 0 }}
-                    animate={{ opacity: 1, height: 'auto' }}
-                    exit={{ opacity: 0, height: 0 }}
-                    style={{ marginTop: 12, paddingTop: 12, borderTop: '1px solid var(--border-color)' }}
-                  >
-                    <div style={{ fontSize: 10, color: 'var(--gray-500)', marginBottom: 6 }}>
-                      {t('colorPreview')}
-                    </div>
-                    <div style={{ display: 'flex', gap: 4 }}>
-                      {Object.entries(variant.designSystem.colorPalette).slice(0, 5).map(([name, color]) => (
-                        <div
-                          key={name}
-                          title={name}
-                          style={{
-                            width: 20,
-                            height: 20,
-                            background: color,
-                            borderRadius: 4,
-                            border: '1px solid rgba(0,0,0,0.1)',
-                          }}
-                        />
-                      ))}
-                    </div>
-                  </motion.div>
-                )}
-              </AnimatePresence>
+              <motion.div
+                variants={COLOR_PREVIEW_VARIANTS}
+                transition={{ duration: 0.14, ease: 'easeOut' }}
+                style={{
+                  marginTop: 12,
+                  minHeight: 42,
+                  paddingTop: 12,
+                  borderTop: '1px solid var(--border-color)',
+                  pointerEvents: 'none',
+                }}
+              >
+                <div style={{ fontSize: 10, color: 'var(--gray-500)', marginBottom: 6 }}>
+                  {t('colorPreview')}
+                </div>
+                <div style={{ display: 'flex', gap: 4 }}>
+                  {Object.entries(variant.designSystem.colorPalette).slice(0, 5).map(([name, color]) => (
+                    <div
+                      key={name}
+                      title={name}
+                      style={{
+                        width: 20,
+                        height: 20,
+                        background: color,
+                        borderRadius: 4,
+                        border: '1px solid rgba(0,0,0,0.1)',
+                      }}
+                    />
+                  ))}
+                </div>
+              </motion.div>
             </motion.div>
           )
         })}

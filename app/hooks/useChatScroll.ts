@@ -3,11 +3,12 @@
 import { useRef, useEffect, useCallback } from 'react'
 import type { Message } from '@/app/types/chat'
 
-export function useChatScroll(messages: Message[], typingStage: string) {
+export function useChatScroll(messages: Message[]) {
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const chatScrollRef = useRef<HTMLDivElement>(null)
   const isNearBottomRef = useRef(true)
   const isProgrammaticScrollRef = useRef(false)
+  const lastScrollTopRef = useRef(0)
 
   // Sticky callback ref: AnimatePresence layout transitions unmount exit elements
   // setting ref to null, causing scrollToBottom to fail. This callback only updates
@@ -21,6 +22,7 @@ export function useChatScroll(messages: Message[], typingStage: string) {
     if (!container) return
     isProgrammaticScrollRef.current = true
     container.scrollTop = container.scrollHeight
+    lastScrollTopRef.current = container.scrollTop
     setTimeout(() => {
       isProgrammaticScrollRef.current = false
     }, 50)
@@ -28,13 +30,17 @@ export function useChatScroll(messages: Message[], typingStage: string) {
 
   // Scroll to bottom on message changes
   useEffect(() => {
+    const scrollIfNearBottom = () => {
+      if (isNearBottomRef.current) scrollToBottom()
+    }
+
     if (isNearBottomRef.current) {
-      scrollToBottom()
-      const t1 = setTimeout(() => scrollToBottom(), 100)
-      const t2 = setTimeout(() => scrollToBottom(), 350)
+      scrollIfNearBottom()
+      const t1 = setTimeout(scrollIfNearBottom, 100)
+      const t2 = setTimeout(scrollIfNearBottom, 350)
       return () => { clearTimeout(t1); clearTimeout(t2) }
     }
-  }, [messages, typingStage, scrollToBottom])
+  }, [messages.length, scrollToBottom])
 
   // MutationObserver for auto-scroll on content height changes
   useEffect(() => {
@@ -54,15 +60,26 @@ export function useChatScroll(messages: Message[], typingStage: string) {
         })
       }
     })
-    observer.observe(container, { childList: true, subtree: true, attributes: true, attributeFilter: ['style'] })
+    observer.observe(container, { childList: true, subtree: true })
     return () => { observer.disconnect(); cancelAnimationFrame(rafId) }
-  }, [messages])
+  }, [messages.length])
 
   const handleChatScroll = useCallback(() => {
     if (isProgrammaticScrollRef.current) return
     const container = chatScrollRef.current
     if (!container) return
-    const threshold = 150
+
+    const currentTop = container.scrollTop
+    const previousTop = lastScrollTopRef.current
+    lastScrollTopRef.current = currentTop
+
+    // Any manual upward scroll means user wants to read history; stop auto-follow immediately.
+    if (currentTop < previousTop - 2) {
+      isNearBottomRef.current = false
+      return
+    }
+
+    const threshold = 72
     const distanceFromBottom = container.scrollHeight - container.scrollTop - container.clientHeight
     isNearBottomRef.current = distanceFromBottom < threshold
   }, [])

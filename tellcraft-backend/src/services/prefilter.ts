@@ -73,7 +73,7 @@ function reject(
       en: 'Please use Tellcraft respectfully. If you have a project, describe the website you\'d like to build.',
     },
     gibberish: {
-      zh: '無法理解您的輸入。請用正常語句描述您的需求，例如：「做一個餐廳官網」',
+      zh: '無法理解您的輸入。請用正常語句描述您的需求',
       en: 'I couldn\'t understand your input. Please describe your request clearly, e.g. "Build a restaurant website"',
     },
     spam: {

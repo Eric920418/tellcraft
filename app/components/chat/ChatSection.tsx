@@ -166,7 +166,7 @@ export default function ChatSection({
     session.guestBuildCompleted,
   )
 
-  const scroll = useChatScroll(messages, typingStage)
+  const scroll = useChatScroll(messages)
 
   const pollingRef = useRef<{ setLastTimestamp: (ts: string) => void }>({ setLastTimestamp: () => {} })
 
