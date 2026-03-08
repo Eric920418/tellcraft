@@ -2078,6 +2078,8 @@ export async function getAdminLogs(input: {
   since?: string
 }): Promise<ApiResponse<{ lines: ParsedLogLine[]; total: number }>> {
   const params = new URLSearchParams()
+  // 強制繞過任何中間層快取，避免舊日誌殘留
+  params.append('_t', String(Date.now()))
   if (input.lines) params.append('lines', String(input.lines))
   if (input.source) params.append('source', input.source)
   if (input.search) params.append('search', input.search)
