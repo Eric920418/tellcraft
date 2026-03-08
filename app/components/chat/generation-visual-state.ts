@@ -21,15 +21,22 @@ export interface GenerationVisualState {
   progressPercent: number
   phaseLabelKey: 'phaseReasoning' | 'phaseStructure' | 'phaseAnimation' | 'phaseRwd' | 'phaseQuality'
   statusLabelKey: 'aiStatusReasoning' | 'aiStatusStructure' | 'aiStatusAnimation' | 'aiStatusRwd' | 'aiStatusQuality'
+  sceneActionKey: 'aiActionReasoning' | 'aiActionAssembling' | 'aiActionInjecting' | 'aiActionResponsive' | 'aiActionPolishing'
+  activeModuleKey: 'aiModuleSemanticMap' | 'aiModuleHeaderHero' | 'aiModuleContentGrid' | 'aiModuleInteractionLayer' | 'aiModuleResponsiveMatrix' | 'aiModuleQualityGuard'
   taskIndex: number
-  activeNodeCount: number
+  assembledModules: number
+  totalModules: number
+  stabilityScore: number
+  styleInjectionCount: number
+  interactionComponents: number
 }
 
 const PHASES: GenerationPhase[] = ['reasoning', 'structure', 'animation', 'rwd', 'quality']
+
 const BASELINE_PROGRESS: Record<GenerationPhase, number> = {
-  reasoning: 8,
-  structure: 28,
-  animation: 54,
+  reasoning: 12,
+  structure: 34,
+  animation: 58,
   rwd: 78,
   quality: 92,
 }
@@ -59,28 +66,30 @@ function mapPhaseFromInputs(input: GenerationVisualInput): GenerationPhase {
 }
 
 function getProgressPercent(input: GenerationVisualInput, phase: GenerationPhase): number {
+  const phaseIndex = PHASES.indexOf(phase)
   const totalPhases = PHASES.length
-  const phaseNumber = PHASES.indexOf(phase) + 1
   const progress = input.progress
 
   let percent = BASELINE_PROGRESS[phase]
   if (progress && progress.total > 0) {
     if (progress.total <= totalPhases) {
       const segment = clamp(progress.current / progress.total, 0, 1)
-      percent = ((phaseNumber - 1 + segment) / totalPhases) * 100
+      percent = ((phaseIndex + segment) / totalPhases) * 100
     } else {
       percent = clamp((progress.current / progress.total) * 100, 0, 100)
     }
   }
 
-  const chunkBoost = Math.min(input.streamingChunks || 0, 60) * 0.2
-  return clamp(percent + chunkBoost, 3, 99)
+  const chunkBoost = Math.min(input.streamingChunks || 0, 40) * 0.15
+  return clamp(percent + chunkBoost, 5, 99)
 }
 
 export function resolveGenerationVisualState(input: GenerationVisualInput): GenerationVisualState {
   const phase = mapPhaseFromInputs(input)
-  const phaseNumber = PHASES.indexOf(phase) + 1
+  const phaseIndex = PHASES.indexOf(phase)
+  const phaseNumber = phaseIndex + 1
   const progressPercent = getProgressPercent(input, phase)
+  const streamingChunks = input.streamingChunks || 0
 
   const phaseLabelKeyMap: Record<GenerationPhase, GenerationVisualState['phaseLabelKey']> = {
     reasoning: 'phaseReasoning',
@@ -98,13 +107,31 @@ export function resolveGenerationVisualState(input: GenerationVisualInput): Gene
     quality: 'aiStatusQuality',
   }
 
-  const activityByPhase: Record<GenerationPhase, number> = {
-    reasoning: 5,
-    structure: 7,
-    animation: 9,
-    rwd: 11,
-    quality: 13,
+  const actionKeyMap: Record<GenerationPhase, GenerationVisualState['sceneActionKey']> = {
+    reasoning: 'aiActionReasoning',
+    structure: 'aiActionAssembling',
+    animation: 'aiActionInjecting',
+    rwd: 'aiActionResponsive',
+    quality: 'aiActionPolishing',
   }
+
+  const moduleKeyMap: Record<GenerationPhase, GenerationVisualState['activeModuleKey']> = {
+    reasoning: 'aiModuleSemanticMap',
+    structure: 'aiModuleHeaderHero',
+    animation: 'aiModuleInteractionLayer',
+    rwd: 'aiModuleResponsiveMatrix',
+    quality: 'aiModuleQualityGuard',
+  }
+
+  const totalModules = 24
+  const assembledModules = clamp(Math.round((progressPercent / 100) * totalModules) + phaseNumber, 2, totalModules)
+  const stabilityScore = clamp(Math.round(progressPercent * 0.88 + (phase === 'quality' ? 8 : 0)), 12, 99)
+  const styleInjectionCount = clamp(8 + phaseNumber * 10 + Math.round(progressPercent * 1.1) + Math.round(streamingChunks / 2), 8, 220)
+  const interactionComponents = clamp(
+    phase === 'reasoning' ? 0 : phase === 'structure' ? 2 : 4 + Math.round((progressPercent - 35) / 8),
+    0,
+    24,
+  )
 
   return {
     phase,
@@ -113,7 +140,13 @@ export function resolveGenerationVisualState(input: GenerationVisualInput): Gene
     progressPercent,
     phaseLabelKey: phaseLabelKeyMap[phase],
     statusLabelKey: statusLabelKeyMap[phase],
-    taskIndex: phaseNumber - 1,
-    activeNodeCount: Math.min(14, activityByPhase[phase] + Math.round((input.streamingChunks || 0) / 8)),
+    sceneActionKey: actionKeyMap[phase],
+    activeModuleKey: moduleKeyMap[phase],
+    taskIndex: phaseIndex,
+    assembledModules,
+    totalModules,
+    stabilityScore,
+    styleInjectionCount,
+    interactionComponents,
   }
 }

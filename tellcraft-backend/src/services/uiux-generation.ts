@@ -216,35 +216,24 @@ export async function callClaude(
             maxContinuations: MAX_TOKEN_CONTINUATIONS,
           }, 'LLM 回應被 max_tokens 截斷')
 
-          const continuationSeed = normalizedSegment || lastContinuationSeed || accumulated.slice(-4000).trim()
-
-          if (!continuationSeed || continuationCount >= MAX_TOKEN_CONTINUATIONS) {
-            logger.warn({
-              purpose: trackingContext?.purpose,
-              continuationCount,
-              maxContinuations: MAX_TOKEN_CONTINUATIONS,
-            }, '截斷後無法再續寫，可能導致回應不完整')
+          if (continuationCount >= MAX_TOKEN_CONTINUATIONS) {
+            logger.warn({ purpose: trackingContext?.purpose, continuationCount }, '已達最大續寫次數，停止')
             break
           }
 
-          if (!normalizedSegment) {
-            logger.warn({
-              purpose: trackingContext?.purpose,
-              continuationCount,
-            }, '截斷段落缺失，使用 fallback seed 續寫')
-          }
-
           continuationCount++
+          // 只取最後 3000 chars 作為位置錨點：
+          // - 讓 LLM 知道「當前在哪」
+          // - 避免把 32768 token 全塞進 input（會讓下一次 context 爆炸且速度慢）
+          // - baseMessages 保持原始 user prompt，LLM 仍能看到「要生成哪些檔案」的完整指令
+          const continuationAnchor = accumulated.slice(-3000)
           requestMessages = [
-            ...requestMessages,
-            { role: 'assistant', content: continuationSeed },
+            ...baseMessages,
+            { role: 'assistant', content: continuationAnchor },
             { role: 'user', content: CONTINUE_FROM_LAST_TOKEN_PROMPT },
           ]
 
-          logger.info({
-            purpose: trackingContext?.purpose,
-            continuationCount,
-          }, '觸發自動續寫，避免 max_tokens 截斷')
+          logger.info({ purpose: trackingContext?.purpose, continuationCount }, '觸發自動續寫')
         }
 
         if (accumulated.trim()) {
@@ -2114,7 +2103,21 @@ ${getMoodCodeFragment(productContext.moodId)}
 `
     : ''
 
-  const userMessage = `請根據以下資訊生成桌面版前端代碼，包含完整互動功能。
+  // ── buildUserMsg：userMessage 工廠，供單次和分批生成共用 ──
+  // targetPages：此次要生成的頁面（可能是全部或一個批次）
+  // existingComponentPaths：已在前批生成的共用組件路徑（pass 2+ 傳入）
+  const buildUserMsg = (targetPages: string[], existingComponentPaths: string[] = []) => {
+    const isLaterBatch = existingComponentPaths.length > 0
+    const existingNote = isLaterBatch ? `
+## ⚠️ 已存在的共用組件（禁止重新生成）
+以下組件已在前一批次生成，可直接 import，**不要輸出這些檔案**：
+${existingComponentPaths.map(p => `- ${p}`).join('\n')}
+
+本批次只需生成：${targetPages.join(', ')} 這幾個頁面及其專屬組件。
+globals.css 已存在，**不要輸出**。
+` : ''
+
+    return `請根據以下資訊生成桌面版前端代碼，包含完整互動功能。
 
 ${conceptSection}
 ${productSection}
@@ -2126,7 +2129,7 @@ ${templateStyleSection}
 ${requirementsSection}
 ${interactionSection}
 ## 頁面規劃策略
-以下頁面列表僅作為起始建議：${pages.map(p => `${p}`).join(', ')}
+以下頁面列表${isLaterBatch ? '（本批次）' : '僅作為起始建議'}：${targetPages.join(', ')}
 
 ${productContext?.layoutMode === 'app'
 ? `**工具型/應用型產品 — 頁面以功能為導向：**
@@ -2134,26 +2137,33 @@ ${productContext?.layoutMode === 'app'
 - 主頁面直接呈現核心功能界面，佔滿螢幕
 - 不要生成形象官網的 Header/Footer/Hero Section
 - 頁面中使用有意義的模擬數據（和工具功能相關）`
+: isLaterBatch
+? `**只生成本批次頁面，不要生成 Header/Footer/Layout（已存在）**
+- 每個頁面完整 Section + 互動功能
+- 頁面中使用有意義的模擬數據（和產品領域相關）`
 : `**你應該根據需求規格自行判斷最終的頁面結構：**
 - 歸納出需要哪些頁面，每個頁面承載什麼功能
 - 可以增加、移除、合併、重新命名頁面 — 只要能完整覆蓋功能需求
 - Header/Footer 的導航連結要對應你最終決定的頁面結構
 - 頁面中使用有意義的模擬數據（和產品領域相關，不要用 Lorem ipsum）`}
 ${variantConcept ? `- 每個頁面都必須體現「${variantConcept.name}」的創意概念，不是只有首頁` : ''}
-${pages.length >= 5 ? `
+${pages.length >= 5 && !isLaterBatch ? `
 **多頁面策略（${pages.length} 個頁面）**：
 - 主要頁面（首頁、核心功能頁）：完整 Section + 豐富互動
 - 次要頁面（關於、聯繫、FAQ）：精簡 1-2 個 Section
 - 共用組件盡量抽取（ProductCard、ContactForm 等）多頁面複用
 - Layout 組件統一管理 Header/Footer 導航` : ''}
-
+${existingNote}
 ## 模板資訊（設計風格參考）
 - 名稱：${template.name}
 - 類別：${template.category}
 - 描述：${template.description}
 
 ## 需要生成的內容
-${productContext?.layoutMode === 'app'
+${isLaterBatch
+? `1. 本批次每個頁面的 page.tsx（完整互動結構）
+2. 這些頁面的專屬 UI 組件（共用 Layout/Header/Footer 已存在，不需輸出）`
+: productContext?.layoutMode === 'app'
 ? `1. 功能頁面的 page.tsx（完整互動功能，佔滿螢幕）
 2. App Shell Layout（如需側邊欄導航；單頁工具只需基本 layout，無 Header/Footer/Hero）
 3. 功能所需的 UI 組件
@@ -2174,24 +2184,82 @@ ${productContext?.layoutMode === 'app'
 - 自檢：掃描你所有輸出的 import 語句，確認每個 @/ 或 ./ 開頭的路徑都有對應的輸出檔案
 
 請確保所有組件使用一致的 Design System。互動功能必須完整可用（Modal 能開關、表單能提交、列表能增刪）。動畫和響應式會在後續階段添加。`
-
-  const response = await callClaude(
-    systemPrompt,
-    [{ role: 'user', content: userMessage }],
-    { maxTokens: 32768, temperature: designTier === 'creative' ? (productContext?.moodId ? 0.5 : 0.4) : 0.3 },
-    { ...trackingContext, purpose: 'generate_structure' },
-    buildStreamingHandler(onPartialCode)
-  )
-
-  if (!response.success || !response.content) {
-    return { success: false, error: response.error || '無法生成結構代碼' }
   }
 
-  const { pages: rawPages, components: rawComponents, styles } = parseGeneratedFiles(response.content, designSystem)
+  const llmOpts = { maxTokens: 32768, temperature: designTier === 'creative' ? (productContext?.moodId ? 0.5 : 0.4) : 0.3 }
+
+  // ── Multi-pass：4+ 頁分批生成，每批 3 頁，避免單次 max_tokens 截斷 ──
+  const MULTI_PASS_THRESHOLD = 4
+  const BATCH_SIZE = 3
+
+  let allRawPages: GeneratedComponent[] = []
+  let allRawComponents: GeneratedComponent[] = []
+  let styles: string | undefined
+
+  if (pages.length >= MULTI_PASS_THRESHOLD) {
+    logger.info({ totalPages: pages.length, batchSize: BATCH_SIZE }, 'generateStructure multi-pass 模式')
+
+    const batches: string[][] = []
+    for (let i = 0; i < pages.length; i += BATCH_SIZE) {
+      batches.push(pages.slice(i, i + BATCH_SIZE))
+    }
+
+    for (let batchIdx = 0; batchIdx < batches.length; batchIdx++) {
+      const batch = batches[batchIdx]
+      const isFirstBatch = batchIdx === 0
+      const existingPaths = isFirstBatch ? [] : allRawComponents.map(c => c.path)
+
+      logger.info({ batchIdx: batchIdx + 1, totalBatches: batches.length, pages: batch }, 'generateStructure 批次開始')
+
+      const batchResponse = await callClaude(
+        systemPrompt,
+        [{ role: 'user', content: buildUserMsg(batch, existingPaths) }],
+        llmOpts,
+        { ...trackingContext, purpose: `generate_structure_b${batchIdx + 1}` },
+        isFirstBatch ? buildStreamingHandler(onPartialCode) : undefined,
+      )
+
+      if (!batchResponse.success || !batchResponse.content) {
+        if (isFirstBatch) return { success: false, error: batchResponse.error || '無法生成結構代碼' }
+        logger.warn({ batchIdx, batch, error: batchResponse.error }, 'Multi-pass 批次失敗，跳過')
+        continue
+      }
+
+      const { pages: bPages, components: bComps, styles: bStyles } = parseGeneratedFiles(batchResponse.content, designSystem)
+      if (isFirstBatch) styles = bStyles
+
+      for (const p of bPages) {
+        if (!allRawPages.find(x => x.path === p.path)) allRawPages.push(p)
+      }
+      for (const c of bComps) {
+        if (!allRawComponents.find(x => x.path === c.path)) allRawComponents.push(c)
+      }
+
+      logger.info({ batchIdx: batchIdx + 1, pages: bPages.length, components: bComps.length }, 'generateStructure 批次完成')
+    }
+  } else {
+    // 單次生成（≤ 3 頁）
+    const response = await callClaude(
+      systemPrompt,
+      [{ role: 'user', content: buildUserMsg(pages) }],
+      llmOpts,
+      { ...trackingContext, purpose: 'generate_structure' },
+      buildStreamingHandler(onPartialCode),
+    )
+
+    if (!response.success || !response.content) {
+      return { success: false, error: response.error || '無法生成結構代碼' }
+    }
+
+    const { pages: rawPages, components: rawComponents, styles: singleStyles } = parseGeneratedFiles(response.content, designSystem)
+    allRawPages = rawPages
+    allRawComponents = rawComponents
+    styles = singleStyles
+  }
 
   // ── Layer 0 防禦：TSX 語法檢查 + LLM 自動修復 ──
-  const syntaxFixed = await checkAndFixSyntaxErrors([...rawPages, ...rawComponents], trackingContext)
-  const rawPagePaths = new Set(rawPages.map(p => p.path))
+  const syntaxFixed = await checkAndFixSyntaxErrors([...allRawPages, ...allRawComponents], trackingContext)
+  const rawPagePaths = new Set(allRawPages.map(p => p.path))
   const generatedPages = syntaxFixed.filter(f => rawPagePaths.has(f.path))
   const generatedComponents = syntaxFixed.filter(f => !rawPagePaths.has(f.path))
 
@@ -3593,6 +3661,55 @@ ${codeBlocks.join('\n\n')}
   }
 
   let mergedCode = mergeCodeBundle(currentCode, initialPatches)
+
+  // ── 縮水偵測：修改後檔案比原版少 40%+ 視為 LLM 截斷，直接 fail ──
+  const SHRINK_THRESHOLD = 0.4
+  const allOriginal = [...currentCode.pages, ...currentCode.components]
+  for (const [path, newContent] of [
+    ...initialPatches.modifiedPages.entries(),
+    ...initialPatches.modifiedComponents.entries(),
+  ]) {
+    const original = allOriginal.find(f => f.path === path)
+    if (!original) continue
+    const originalLines = original.content.split('\n').length
+    const newLines = newContent.split('\n').length
+    if (originalLines > 30 && newLines < originalLines * (1 - SHRINK_THRESHOLD)) {
+      logger.error(
+        { path, originalLines, newLines },
+        'refineCode：修改後代碼縮水超過 40%，疑似 LLM 截斷，取消本次迭代'
+      )
+      return {
+        success: false,
+        error: `修改後的 ${path.split('/').pop()} 內容大幅縮減（${originalLines} → ${newLines} 行），疑似代碼截斷。已取消本次修改，請重新嘗試或描述更小範圍的修改。`,
+      }
+    }
+  }
+
+  // ── 語法驗證：只檢查被修改的檔案，失敗時直接 fail refineCode（不存快照）──
+  const patchedPaths = new Set([
+    ...initialPatches.modifiedPages.keys(),
+    ...initialPatches.modifiedComponents.keys(),
+  ])
+  const modifiedForSyntaxCheck = [...mergedCode.pages, ...mergedCode.components].filter(f =>
+    patchedPaths.has(f.path)
+  )
+  if (modifiedForSyntaxCheck.length > 0) {
+    const syntaxChecked = await checkAndFixSyntaxErrors(modifiedForSyntaxCheck, trackingContext)
+    const stillBroken = syntaxChecked.filter(f => getSyntaxErrors(f.path, f.content).length > 0)
+    if (stillBroken.length > 0) {
+      logger.error({ paths: stillBroken.map(f => f.path) }, 'refineCode：語法修復失敗，取消本次迭代')
+      return {
+        success: false,
+        error: `代碼修改後出現語法錯誤（${stillBroken.map(f => f.path.split('/').pop()).join('、')}），已自動取消。請重新描述修改需求，或嘗試更小範圍的修改。`,
+      }
+    }
+    const fixedMap = new Map(syntaxChecked.map(f => [f.path, f.content]))
+    mergedCode = {
+      pages: mergedCode.pages.map(p => ({ ...p, content: fixedMap.get(p.path) ?? p.content })),
+      components: mergedCode.components.map(c => ({ ...c, content: fixedMap.get(c.path) ?? c.content })),
+      styles: mergedCode.styles,
+    }
+  }
 
   // 鎖定圖片 URL 最終驗證：若缺失，嘗試一次修復
   if (lockedUploadUrls.length > 0) {
