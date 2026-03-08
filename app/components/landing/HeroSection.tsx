@@ -240,6 +240,7 @@ function HeroSection({
         style={{
           position: 'absolute',
           inset: 0,
+          zIndex: -1,
           background: 'radial-gradient(ellipse at 50% 30%, var(--gray-50) 0%, var(--white) 70%)',
           pointerEvents: 'none',
         }}
@@ -248,8 +249,6 @@ function HeroSection({
       <div
         className="hero-content-grid"
         style={{
-          position: 'relative',
-          zIndex: 1,
           width: '100%',
           maxWidth: 640,
         }}
