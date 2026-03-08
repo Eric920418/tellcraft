@@ -11,7 +11,7 @@ import { Queue } from 'bullmq'
 import Redis from 'ioredis'
 import cors from 'cors'
 import helmet from 'helmet'
-import rateLimit from 'express-rate-limit'
+import rateLimit, { ipKeyGenerator } from 'express-rate-limit'
 import jwt from 'jsonwebtoken'
 import * as os from 'os'
 import * as path from 'path'
@@ -101,7 +101,7 @@ app.use(rateLimit({
         if (decoded?.sub) return `user:${decoded.sub}`
       }
     } catch {}
-    return req.ip || 'unknown'
+    return ipKeyGenerator(req)
   },
 }))
 
