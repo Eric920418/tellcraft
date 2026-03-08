@@ -1989,6 +1989,7 @@ export async function generateStructure(
     templateOverrides?: Record<string, Record<string, string>>
     referenceAnalysis?: import('./reference-analyzer').ReferenceAnalysis
     moodId?: string
+    existingComponentSummary?: string  // 已有組件路徑列表（增量生成用）
   },
   trackingContext?: LlmTrackingContext,
   onPartialCode?: PartialCodeCallback
@@ -2324,6 +2325,11 @@ ${isLaterBatch
   let allRawComponents: GeneratedComponent[] = []
   let styles: string | undefined
 
+  // 增量生成：外部已有組件路徑（Fast Build 第 2 批傳入）
+  const externalExistingPaths = productContext?.existingComponentSummary
+    ? productContext.existingComponentSummary.split('\n').map(l => l.trim()).filter(Boolean)
+    : []
+
   if (pages.length >= MULTI_PASS_THRESHOLD) {
     logger.info({ totalPages: pages.length, batchSize: BATCH_SIZE }, 'generateStructure multi-pass 模式')
 
@@ -2335,7 +2341,9 @@ ${isLaterBatch
     for (let batchIdx = 0; batchIdx < batches.length; batchIdx++) {
       const batch = batches[batchIdx]
       const isFirstBatch = batchIdx === 0
-      const existingPaths = isFirstBatch ? [] : allRawComponents.map(c => c.path)
+      const existingPaths = isFirstBatch
+        ? externalExistingPaths
+        : [...externalExistingPaths, ...allRawComponents.map(c => c.path)]
 
       logger.info({ batchIdx: batchIdx + 1, totalBatches: batches.length, pages: batch }, 'generateStructure 批次開始')
 

@@ -101,7 +101,7 @@ app.use(rateLimit({
         if (decoded?.sub) return `user:${decoded.sub}`
       }
     } catch {}
-    return ipKeyGenerator(req)
+    return ipKeyGenerator(req.ip ?? req.socket.remoteAddress ?? '127.0.0.1')
   },
 }))
 
