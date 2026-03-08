@@ -244,32 +244,25 @@ textarea {
 }
 
 .hero-content-grid {
-  display: grid;
   width: 100%;
-  grid-template-columns: minmax(220px, 260px) minmax(0, 640px);
-  grid-template-areas:
-    "presets title"
-    "presets composer";
-  column-gap: 28px;
-  row-gap: 16px;
-  justify-content: center;
-  align-items: start;
+  max-width: 640px;
+  margin: 0 auto;
 }
 
 .hero-title-block {
-  grid-area: title;
   text-align: center;
 }
 
 .hero-composer-block {
-  grid-area: composer;
   width: 100%;
 }
 
 .hero-preset-panel {
-  grid-area: presets;
-  width: 100%;
-  align-self: center;
+  position: absolute;
+  left: 20px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 260px;
   padding: 14px;
   border: 1px solid var(--border-color);
   background: var(--white);
@@ -571,15 +564,8 @@ textarea {
 
 /* ============ Chat Header Mobile Responsive ============ */
 
-/* 平板以下：隱藏步驟指示器文字，顯示精緻進度膠囊 */
-@media (max-width: 900px) {
+@media (max-width: 1100px) {
   .hero-content-grid {
-    grid-template-columns: 1fr;
-    grid-template-areas:
-      "title"
-      "presets"
-      "composer";
-    row-gap: 18px;
     max-width: 680px !important;
   }
 
@@ -588,10 +574,14 @@ textarea {
   }
 
   .hero-preset-panel {
+    position: static;
+    transform: none;
+    width: 100%;
     border: none;
     box-shadow: none;
     background: transparent;
     padding: 0;
+    margin-bottom: 12px;
   }
 
   .hero-preset-list {
@@ -608,7 +598,10 @@ textarea {
     max-width: 260px;
     scroll-snap-align: start;
   }
+}
 
+/* 平板以下：隱藏步驟指示器文字，顯示精緻進度膠囊 */
+@media (max-width: 900px) {
   .chat-header {
     padding: 0 16px !important;
   }

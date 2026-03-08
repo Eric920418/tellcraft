@@ -246,9 +246,8 @@ function HeroSection({
       <div
         className="hero-content-grid"
         style={{
-          position: 'relative',
           width: '100%',
-          maxWidth: 1040,
+          maxWidth: 640,
         }}
       >
         {/* 標題區塊 - 先退場 */}
