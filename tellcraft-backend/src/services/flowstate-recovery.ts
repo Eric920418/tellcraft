@@ -16,7 +16,8 @@
 
 import Redis from 'ioredis'
 import { Server as SocketIOServer } from 'socket.io'
-import { saveFlowState, deleteFlowState, sendMessage } from '../workers/orchestrator-utils'
+import { saveFlowState, deleteFlowState, sendMessage, hasRecentFlowActivity } from '../workers/orchestrator-utils'
+import { forceReleaseConversationLock } from './conversation-lock'
 import { generateTailwindConfig } from './uiux-generation'
 import type { FlowState } from '../types/flow-state'
 import { createLogger } from '../lib/logger'
@@ -90,6 +91,17 @@ export async function scanAndRecoverStuckFlowStates(
         : (state.uiuxCodeGenerationStartedAt || 0)
       if (startedAt > 0 && Date.now() - startedAt <= timeoutMs) continue
 
+      // 生成類 phase 先檢查近期活動心跳，避免活躍串流被誤判為超時。
+      if (
+        state.phase === 'fast_generating' ||
+        state.phase === 'uiux_iterating' ||
+        state.phase === 'uiux_code_generation' ||
+        state.phase === 'uiux_quality_gate'
+      ) {
+        const hasRecentActivity = await hasRecentFlowActivity(redis, conversationId)
+        if (hasRecentActivity) continue
+      }
+
       logger.warn({
         conversationId,
         phase: state.phase,
@@ -100,6 +112,11 @@ export async function scanAndRecoverStuckFlowStates(
       }, '偵測到超時')
 
       await recoverFlowState(redis, io, conversationId, state)
+      // 強制釋放 conversation lock，讓後續訊息能正常處理
+      const released = await forceReleaseConversationLock(redis, conversationId)
+      if (released) {
+        logger.info({ conversationId }, '強制釋放 conversation lock')
+      }
       recovered++
       } catch (err) {
         logger.error({ err, key }, '處理時錯誤')
@@ -168,6 +185,12 @@ async function recoverFastGenerating(
   redis: Redis, io: SocketIOServer, conversationId: string, state: FlowState
 ) {
   const isChinese = state.locale !== 'en'
+  const hasRecentActivity = await hasRecentFlowActivity(redis, conversationId)
+  if (hasRecentActivity) {
+    logger.info({ conversationId }, 'Fast Build 仍有活動心跳，跳過恢復')
+    return
+  }
+
   const hasCode = state.uiuxGeneratedCode &&
     (state.uiuxGeneratedCode.pages.length > 0 || state.uiuxGeneratedCode.components.length > 0)
 

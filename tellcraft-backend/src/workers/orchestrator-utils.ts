@@ -15,6 +15,12 @@ import { getCreditLimit } from '../config/plans'
 import { createLogger } from '../lib/logger'
 
 const logger = createLogger('orchestrator-utils')
+const FLOW_ACTIVITY_TTL_SECONDS = 300
+const FLOW_ACTIVITY_PING_INTERVAL_MS = 15_000
+
+function getFlowActivityKey(conversationId: string): string {
+  return `flow:activity:${conversationId}`
+}
 
 function normalizeMessageContent(content: unknown): string {
   if (typeof content === 'string') return content
@@ -179,6 +185,30 @@ export async function sendMessage(
     .catch(() => {})
 }
 
+export async function touchFlowActivity(
+  redis: Redis,
+  conversationId: string,
+  ttlSeconds: number = FLOW_ACTIVITY_TTL_SECONDS
+): Promise<void> {
+  try {
+    await redis.set(getFlowActivityKey(conversationId), String(Date.now()), 'EX', ttlSeconds)
+  } catch {
+    // 心跳寫入失敗不影響主流程
+  }
+}
+
+export async function hasRecentFlowActivity(
+  redis: Redis,
+  conversationId: string
+): Promise<boolean> {
+  try {
+    const exists = await redis.exists(getFlowActivityKey(conversationId))
+    return exists > 0
+  } catch {
+    return false
+  }
+}
+
 // ============================================================
 // 串流預覽 Callback
 // ============================================================
@@ -195,9 +225,17 @@ export function makeStreamingCallback(
   tailwindConfig: string
 ): PartialCodeCallback {
   let chunkCount = 0
+  let lastActivityAt = 0
 
   return (partialCode) => {
+    const now = Date.now()
     chunkCount++
+
+    // 用 Redis 心跳標記活躍生成，避免被超時掃描誤判為中斷。
+    if (now - lastActivityAt >= FLOW_ACTIVITY_PING_INTERVAL_MS) {
+      lastActivityAt = now
+      void touchFlowActivity(redis, conversationId)
+    }
 
     const previewData = {
       pages: partialCode.pages,

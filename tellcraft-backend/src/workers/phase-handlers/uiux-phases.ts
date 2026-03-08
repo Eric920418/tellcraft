@@ -23,7 +23,7 @@ import { recommendMoods, getMoodSummary } from '../../services/design-moods'
 import { executeIteration, executeUndoIteration } from '../../services/iteration-skill'
 import { semanticGateway } from '../../services/semantic-gateway'
 import { detectFastModeIntent, getFaqReply, answerWithSonnet } from '../../services/customer-service'
-import { sendMessage, saveFlowState, getFlowState, deleteFlowState, makeStreamingCallback, generatedCodeToFileRows, deductCredits } from '../orchestrator-utils'
+import { sendMessage, saveFlowState, getFlowState, deleteFlowState, makeStreamingCallback, generatedCodeToFileRows, deductCredits, hasRecentFlowActivity } from '../orchestrator-utils'
 import { CREDIT_COSTS } from '../../config/plans'
 import {
   hasDeployIntent, hasRejectDeployIntent, hasUndoIntent,
@@ -53,6 +53,16 @@ export async function handleUiuxCodeGenerating(
     const isTimedOut = startedAt === 0 || elapsed > GENERATION_TIMEOUT_MS
 
     if (isTimedOut) {
+      const hasRecentActivity = await hasRecentFlowActivity(redis, conversationId)
+      if (hasRecentActivity) {
+        logger.info('代碼生成檢查超時但近期仍有活動心跳，跳過恢復')
+        await sendMessage(conversationId, io, {
+          content: '正在生成中，請稍候...',
+          stage: 'info',
+        })
+        return
+      }
+
       logger.warn({ elapsed: startedAt === 0 ? 'legacy' : Math.round(elapsed / 1000) + 's' }, '代碼生成超時，偵測到中斷，自動恢復')
 
       // 檢查是否有已存檔的代碼可以恢復
@@ -155,6 +165,19 @@ export async function handleFastGenerating(
     const FAST_BUILD_TIMEOUT_MS = 20 * 60 * 1000
     const startedAt = state.uiuxCodeGenerationStartedAt || 0
     if (startedAt === 0 || Date.now() - startedAt > FAST_BUILD_TIMEOUT_MS) {
+      const hasRecentActivity = await hasRecentFlowActivity(redis, conversationId)
+      if (hasRecentActivity) {
+        const isChinese = state.locale !== 'en'
+        logger.info('Fast Build 檢查超時但近期仍有活動心跳，跳過恢復')
+        await sendMessage(conversationId, io, {
+          content: isChinese
+            ? '正在生成中，請稍候... 預計 5 分鐘完成。'
+            : 'Generating, please wait... Estimated 5 minutes.',
+          stage: 'info',
+        })
+        return
+      }
+
       logger.warn('Fast Build 超時，嘗試恢復')
       const isChinese = state.locale !== 'en'
       const hasCode = state.uiuxGeneratedCode &&
@@ -2586,4 +2609,3 @@ function inferDesignDefaultsFromIdeas(ideas: Array<{ step: string; answer: strin
 // ============================================================
 // Deployer Skill
 // ============================================================
-

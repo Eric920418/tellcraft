@@ -2,7 +2,9 @@ import Redis from 'ioredis'
 import crypto from 'crypto'
 
 const LOCK_PREFIX = 'conv-lock:'
-const LOCK_TTL_SECONDS = 300 // 5 分鐘，覆蓋最長的部署流程
+// 35 分鐘：覆蓋最長的 fast_generating RWD 階段（35 min timeout）
+// flowstate-recovery 會在超時後強制釋放 lock，不用擔心 lock 卡 35 分鐘
+const LOCK_TTL_SECONDS = 2100
 
 /**
  * 嘗試取得對話互斥鎖（Redis SET NX EX）
@@ -38,6 +40,19 @@ export async function releaseConversationLock(
     end
   `
   const result = await redis.eval(script, 1, key, lockId)
+  return result === 1
+}
+
+/**
+ * 強制釋放對話鎖（不驗證 lockId）
+ * 僅供 flowstate-recovery 在超時恢復後使用，避免 lock 繼續卡住
+ */
+export async function forceReleaseConversationLock(
+  redis: Redis,
+  conversationId: string
+): Promise<boolean> {
+  const key = `${LOCK_PREFIX}${conversationId}`
+  const result = await redis.del(key)
   return result === 1
 }
 
