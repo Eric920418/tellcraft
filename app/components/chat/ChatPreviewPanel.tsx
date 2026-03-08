@@ -198,8 +198,8 @@ export default function ChatPreviewPanel({
     const DEVICE_HEIGHTS: Record<DeviceType, number> = { desktop: 0, tablet: 960, mobile: 812 }
     const previewHeight = DEVICE_HEIGHTS[codePreviewDevice]
 
-    // Streaming 但還沒有任何頁面檔案 → 顯示藍圖進度
-    if (isStreaming && pagesData.length === 0) {
+    // Streaming 期間一律顯示等待動畫，避免早期 chunk 尚不可渲染造成白屏
+    if (isStreaming) {
       const spPhase = stablePreviewData.phase
       const phaseMap: Record<string, number> = { structure: 1, animation: 2, rwd: 3 }
       return (
@@ -211,11 +211,6 @@ export default function ChatPreviewPanel({
         />
       )
     }
-
-    const spPhase = stablePreviewData.phase
-    const phaseLabel = isStreaming
-      ? (spPhase === 'structure' ? tPreview('streamingStructure') : spPhase === 'animation' ? tPreview('streamingAnimation') : tPreview('streamingRwd'))
-      : null
 
     return (
       <div style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
@@ -232,105 +227,95 @@ export default function ChatPreviewPanel({
         >
           {/* 左側：標題 + 編輯按鈕 + Undo/Redo */}
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            {isStreaming ? (
-              <span style={{ fontSize: 14, fontWeight: 500, color: 'var(--black)', display: 'flex', alignItems: 'center', gap: 8 }}>
-                <span style={{
-                  width: 8, height: 8, borderRadius: '50%',
-                  background: 'var(--accent)', animation: 'pulse 1.5s ease-in-out infinite',
-                }} />
-                {phaseLabel}
-              </span>
-            ) : (
-              <>
-                <span style={{ fontSize: 14, fontWeight: 500, color: 'var(--black)' }}>{tPreview('title')}</span>
-                {/* 編輯模式切換按鈕 */}
-                <button
-                  onClick={() => {
-                    if (codePreviewEditMode) {
-                      setCodePreviewEditMode(false)
-                      setCodePreviewSelectedElements([])
-                      setCodePreviewSelectedElement(null)
-                      handleClearSelection()
-                    } else {
-                      setCodePreviewEditMode(true)
-                    }
-                  }}
-                  style={{
-                    display: 'flex', alignItems: 'center', gap: 4,
-                    padding: '4px 10px', borderRadius: 6,
-                    border: '1px solid var(--border-color)',
-                    background: codePreviewEditMode ? 'var(--black)' : 'var(--white)',
-                    color: codePreviewEditMode ? 'var(--white)' : 'var(--gray-600)',
-                    fontSize: 12, fontWeight: 500, cursor: 'pointer',
-                    transition: 'all 0.15s ease',
-                  }}
-                  title={codePreviewEditMode ? tPreview('exitEditTitle') : tPreview('enterEditTitle')}
-                >
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M17 3a2.85 2.85 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z" />
-                    <path d="m15 5 4 4" />
-                  </svg>
-                  {tPreview('editButton')}
-                </button>
-                {/* Undo/Redo + 儲存按鈕（編輯模式時顯示） */}
-                {codePreviewEditMode && (
-                  <>
+            <>
+              <span style={{ fontSize: 14, fontWeight: 500, color: 'var(--black)' }}>{tPreview('title')}</span>
+              {/* 編輯模式切換按鈕 */}
+              <button
+                onClick={() => {
+                  if (codePreviewEditMode) {
+                    setCodePreviewEditMode(false)
+                    setCodePreviewSelectedElements([])
+                    setCodePreviewSelectedElement(null)
+                    handleClearSelection()
+                  } else {
+                    setCodePreviewEditMode(true)
+                  }
+                }}
+                style={{
+                  display: 'flex', alignItems: 'center', gap: 4,
+                  padding: '4px 10px', borderRadius: 6,
+                  border: '1px solid var(--border-color)',
+                  background: codePreviewEditMode ? 'var(--black)' : 'var(--white)',
+                  color: codePreviewEditMode ? 'var(--white)' : 'var(--gray-600)',
+                  fontSize: 12, fontWeight: 500, cursor: 'pointer',
+                  transition: 'all 0.15s ease',
+                }}
+                title={codePreviewEditMode ? tPreview('exitEditTitle') : tPreview('enterEditTitle')}
+              >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M17 3a2.85 2.85 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z" />
+                  <path d="m15 5 4 4" />
+                </svg>
+                {tPreview('editButton')}
+              </button>
+              {/* Undo/Redo + 儲存按鈕（編輯模式時顯示） */}
+              {codePreviewEditMode && (
+                <>
+                  <button
+                    onClick={handleCodePreviewUndo}
+                    disabled={!codePreviewCanUndo}
+                    style={{
+                      padding: '4px 6px', background: 'none', border: 'none',
+                      cursor: codePreviewCanUndo ? 'pointer' : 'default',
+                      opacity: codePreviewCanUndo ? 1 : 0.3,
+                      display: 'flex', alignItems: 'center',
+                    }}
+                    title={tUiux('undoTitle')}
+                  >
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--gray-600)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M3 7v6h6" /><path d="M21 17a9 9 0 00-9-9 9 9 0 00-6 2.3L3 13" />
+                    </svg>
+                  </button>
+                  <button
+                    onClick={handleCodePreviewRedo}
+                    disabled={!codePreviewCanRedo}
+                    style={{
+                      padding: '4px 6px', background: 'none', border: 'none',
+                      cursor: codePreviewCanRedo ? 'pointer' : 'default',
+                      opacity: codePreviewCanRedo ? 1 : 0.3,
+                      display: 'flex', alignItems: 'center',
+                    }}
+                    title={tUiux('redoTitle')}
+                  >
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--gray-600)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M21 7v6h-6" /><path d="M3 17a9 9 0 019-9 9 9 0 016 2.3L21 13" />
+                    </svg>
+                  </button>
+                  {Object.keys(codePreviewOverrides).length > 0 && (
                     <button
-                      onClick={handleCodePreviewUndo}
-                      disabled={!codePreviewCanUndo}
+                      onClick={handleCodePreviewSave}
                       style={{
-                        padding: '4px 6px', background: 'none', border: 'none',
-                        cursor: codePreviewCanUndo ? 'pointer' : 'default',
-                        opacity: codePreviewCanUndo ? 1 : 0.3,
-                        display: 'flex', alignItems: 'center',
+                        padding: '4px 10px', borderRadius: 6,
+                        background: '#3b82f6', color: '#fff',
+                        border: 'none', fontSize: 12, fontWeight: 500,
+                        cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 4,
                       }}
-                      title={tUiux('undoTitle')}
                     >
-                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--gray-600)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                        <path d="M3 7v6h6" /><path d="M21 17a9 9 0 00-9-9 9 9 0 00-6 2.3L3 13" />
+                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M19 21H5a2 2 0 01-2-2V5a2 2 0 012-2h11l5 5v11a2 2 0 01-2 2z" />
+                        <polyline points="17 21 17 13 7 13 7 21" />
+                        <polyline points="7 3 7 8 15 8" />
                       </svg>
+                      {tUiux('saveChanges')}
                     </button>
-                    <button
-                      onClick={handleCodePreviewRedo}
-                      disabled={!codePreviewCanRedo}
-                      style={{
-                        padding: '4px 6px', background: 'none', border: 'none',
-                        cursor: codePreviewCanRedo ? 'pointer' : 'default',
-                        opacity: codePreviewCanRedo ? 1 : 0.3,
-                        display: 'flex', alignItems: 'center',
-                      }}
-                      title={tUiux('redoTitle')}
-                    >
-                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--gray-600)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                        <path d="M21 7v6h-6" /><path d="M3 17a9 9 0 019-9 9 9 0 016 2.3L21 13" />
-                      </svg>
-                    </button>
-                    {Object.keys(codePreviewOverrides).length > 0 && (
-                      <button
-                        onClick={handleCodePreviewSave}
-                        style={{
-                          padding: '4px 10px', borderRadius: 6,
-                          background: '#3b82f6', color: '#fff',
-                          border: 'none', fontSize: 12, fontWeight: 500,
-                          cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 4,
-                        }}
-                      >
-                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                          <path d="M19 21H5a2 2 0 01-2-2V5a2 2 0 012-2h11l5 5v11a2 2 0 01-2 2z" />
-                          <polyline points="17 21 17 13 7 13 7 21" />
-                          <polyline points="7 3 7 8 15 8" />
-                        </svg>
-                        {tUiux('saveChanges')}
-                      </button>
-                    )}
-                  </>
-                )}
-              </>
-            )}
+                  )}
+                </>
+              )}
+            </>
           </div>
           {/* 右側：DeviceSwitcher + 寬度 */}
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            {!isStreaming && <DeviceSwitcher activeDevice={codePreviewDevice} onDeviceChange={(d) => { setCodePreviewDevice(d); handleClearSelection() }} />}
+            <DeviceSwitcher activeDevice={codePreviewDevice} onDeviceChange={(d) => { setCodePreviewDevice(d); handleClearSelection() }} />
             <span style={{ fontSize: 11, color: 'var(--gray-400)', fontFamily: 'var(--font-mono)', textAlign: 'right' }}>
               {previewWidth}{previewHeight ? `×${previewHeight}` : ''}
             </span>
@@ -519,7 +504,6 @@ export default function ChatPreviewPanel({
             )}
           </AnimatePresence>
         </div>
-        {isStreaming && <style>{`@keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }`}</style>}
       </div>
     )
   }
