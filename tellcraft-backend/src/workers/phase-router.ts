@@ -130,6 +130,20 @@ export async function routePhase(
     return true
   }
   if (state.phase === 'fast_generating') {
+    // awaiting_continue 時用戶輸入普通文字 → 視為「想先修改」→ 轉 uiux_complete + 迭代
+    if (state.waitingForReply && state.fastBuildStage === 'awaiting_continue') {
+      state.phase = 'uiux_complete'
+      state.fastBuildStage = 'complete'
+      state.uiuxCodePhase = 'complete'
+      state.waitingForReply = false
+      state.uiuxCodeGenerationStartedAt = undefined
+      await saveFlowState(redis, conversationId, state)
+      await executeIteration({
+        conversationId, projectId: data.projectId, userId: data.userId,
+        userFeedback: data.message, redis, io,
+      })
+      return true
+    }
     await handleFastGenerating(conversationId, state, redis, io)
     return true
   }

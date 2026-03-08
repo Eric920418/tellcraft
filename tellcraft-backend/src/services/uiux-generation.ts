@@ -2395,7 +2395,7 @@ ${isLaterBatch
     // 單次生成（≤ 2 頁）
     const response = await callClaude(
       systemPrompt,
-      [{ role: 'user', content: buildUserMsg(pages) }],
+      [{ role: 'user', content: buildUserMsg(pages, externalExistingPaths) }],
       singlePassLlmOpts,
       { ...trackingContext, purpose: 'generate_structure' },
       buildStreamingHandler(onPartialCode),

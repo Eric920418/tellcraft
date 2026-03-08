@@ -23,7 +23,7 @@ import {
 
 // Phase handlers used directly by handleProcessMessage
 import { executeBddSpecSkill } from './phase-handlers/bdd-phases'
-import { executeFastBuildSkill } from './phase-handlers/fast-build-phases'
+import { executeFastBuildSkill, runFastBuildPipeline, sendFastBuildCompleteMessage } from './phase-handlers/fast-build-phases'
 import { executeDeployerSkill } from './phase-handlers/deploy-phases'
 import { handleGoBack } from './phase-handlers/bdd-phases'
 import { handleBddWaitingForReply } from './phase-handlers/bdd-phases'
@@ -525,6 +525,36 @@ async function handleContinueFlow(
     }
     await deleteFlowState(redis, conversationId)
     await executeFastBuildSkill({ taskId: retryTaskId, projectId, conversationId, userId, message: state.fastModeOriginalMessage, locale: state.locale, redis, io })
+    return
+  }
+  // __continue_fast_build__：繼續生成下一批
+  if (trimmedMsg === '__continue_fast_build__' && state.fastMode && state.fastBuildStage === 'awaiting_continue') {
+    logger.info({ conversationId, batch: (state.fastBuildCurrentBatchIndex || 0) + 1 }, 'Fast Build 繼續生成')
+    state.fastBuildStage = 'generating'
+    state.fastBuildCurrentBatchIndex = (state.fastBuildCurrentBatchIndex || 0) + 1
+    state.waitingForReply = false
+    state.uiuxCodeGenerationStartedAt = Date.now()
+    state.uiuxCodePhase = 'structure'
+    await saveFlowState(redis, conversationId, state)
+    const remainingPages = (state.fastBuildAllPages || []).filter(
+      p => !(state.fastBuildCompletedPages || []).includes(p)
+    )
+    await runFastBuildPipeline({
+      state, targetPages: remainingPages,
+      conversationId, projectId, userId, redis, io,
+    })
+    return
+  }
+  // __finish_fast_build__：用戶選擇不繼續，直接完成
+  if (trimmedMsg === '__finish_fast_build__' && state.fastMode && state.fastBuildStage === 'awaiting_continue') {
+    logger.info({ conversationId }, 'Fast Build 用戶選擇直接完成')
+    state.phase = 'uiux_complete'
+    state.fastBuildStage = 'complete'
+    state.uiuxCodePhase = 'complete'
+    state.waitingForReply = false
+    state.uiuxCodeGenerationStartedAt = undefined
+    await saveFlowState(redis, conversationId, state)
+    await sendFastBuildCompleteMessage(conversationId, state, io, redis)
     return
   }
   if (trimmedMsg === '__retry_iteration__' && state.lastIterationFeedback) {

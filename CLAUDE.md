@@ -74,7 +74,7 @@ pm2 describe tellcraft-backend            # 詳細資訊（記憶體/重啟次�
 | **BDD Phases** | `workers/phase-handlers/bdd-phases.ts`（~3000 行） | BDD 全流程：ES/Discovery/Clarify/Formulation/Spec |
 | **UIUX Phases** | `workers/phase-handlers/uiux-phases.ts`（~2420 行） | UIUX 全流程：Discovery/Brief/Variant/CodePipeline/Mixed routing |
 | **Deploy Phases** | `workers/phase-handlers/deploy-phases.ts`（~240 行） | 部署執行：prepareDeployment + executeDeployment |
-| **Fast Build Phases** | `workers/phase-handlers/fast-build-phases.ts`（~400 行） | 快速建站：一句話 → 跳過 BDD → 生成 |
+| **Fast Build Phases** | `workers/phase-handlers/fast-build-phases.ts`（~480 行） | 快速建站：增量交互式生成（executeFastBuildSkill + runFastBuildPipeline + mergeGeneratedCode） |
 | **Orchestrator Utils** | `workers/orchestrator-utils.ts` | 共用基礎設施：sendMessage/saveFlowState/getFlowState 等 |
 | **FlowState 型別** | `types/flow-state.ts` | FlowState 介面 + 子型別（避免循環 import） |
 | **Classifier** | `services/classifier.ts` | 三層防禦：Prefilter → Meta Intent → Skill 分類 |
@@ -131,7 +131,7 @@ pm2 describe tellcraft-backend            # 詳細資訊（記憶體/重啟次�
 | `quality-gate` | UIUX RWD 完成後**自動觸發**，critical 問題 LLM 自動修復（最多 3 輪）|
 | `deployer` | UIUX 代碼 → Next.js → Vercel 部署（用戶說「部署」觸發） |
 | `iteration` | 迭代修改 + 撤銷上一步 + 版本回滾（`uiux_complete`/`deployer_complete` 自動路由） |
-| `fast-build` | 快速建站：一句話 → 跳過 BDD/Discovery → inferInteractionHint → Structure+Interaction → Animation → RWD → 靜態 QG → Preview |
+| `fast-build` | 快速建站：一句話 → 跳過 BDD/Discovery → inferInteractionHint → 增量生成（首頁先預覽 → 用戶確認 → 剩餘頁面）→ 靜態 QG → Preview |
 
 ### Orchestrator Phase 狀態機
 
@@ -148,7 +148,7 @@ pm2 describe tellcraft-backend            # 詳細資訊（記憶體/重啟次�
 | `uiux_code_generation` | Implementation 確認/重做（Structure+Interaction → Animation → RWD） |
 | `uiux_quality_gate` | Quality Gate 執行中 |
 | `uiux_complete` / `uiux_iterating` | UIUX 完成（可迭代或部署）/ 迭代修改中 |
-| `fast_generating` | 快速模式生成中（攔截用戶輸入，完成後 → `uiux_complete`） |
+| `fast_generating` | 快速模式生成中（攔截用戶輸入；`fastBuildStage=awaiting_continue` 時暫停等用戶確認繼續/完成/迭代） |
 | `deployer_deploying` / `deployer_failed` / `deployer_complete` | 部署流程（用戶說「部署」直接執行，無二次確認） |
 | `deployer_rollback_select` | 等待用戶選擇回滾版本 |
 
@@ -175,12 +175,16 @@ Discovery（Path A 問卷 / Path B 篩選後模板）
   → checkBuildRelevance（vague 攔截 + quickReplies 引導）
   → detectDesignTier（規則式）→ inferProductType → buildDefaultDesignSystem → inferInteractionHint
   → generateFastConcept（1 次 Haiku，概念 + suggestedTier 修正）
-  → generateStructure(+Interaction+Concept, streaming) → generateAnimations(streaming) → generateRwd(streaming)
-  → runQualityGate（靜態檢查 + 最多 2 輪 LLM autoFix）
+  → 增量生成：第 1 批（首頁）S+A+R+QG → 預覽 + 「繼續生成」/「就這樣部署」
+  → 第 2 批（剩餘頁面）S+A+R+QG → mergeGeneratedCode → 完成
   → phase='uiux_complete'（複用所有迭代/部署/回滾邏輯）
-  4~6 次 LLM | 0 次用戶交互 | ~5 分鐘
+  ≤1 頁不暫停，行為與過去一致
 ```
 
+- **增量交互式生成**：`executeFastBuildSkill` 設定 `fastBuildAllPages` → `runFastBuildPipeline` 跑第 1 批（首頁）→ 有剩餘頁面時 `fastBuildStage='awaiting_continue'` 暫停 → 用戶按「繼續生成」(`__continue_fast_build__`) 跑第 2 批 → `mergeGeneratedCode` 合併 → 完成。按「就這樣部署」(`__finish_fast_build__`) 或輸入普通文字 → 直接轉 `uiux_complete`
+- **FlowState 增量欄位**：`fastBuildStage`（generating/awaiting_continue/complete）、`fastBuildAllPages`、`fastBuildCompletedPages`、`fastBuildCurrentBatchIndex`
+- **`mergeGeneratedCode()`**：按 path 去重合併（新批次覆蓋同路徑），styles 保留首批
+- **`buildExistingComponentSummary()`**：構建已有組件路徑列表注入 `productContext.existingComponentSummary` → `generateStructure` 的 `buildUserMsg` 告訴 LLM 不要重新生成
 - **Haiku 概念生成**：`generateFastConcept()` 生成 `FastConcept`（name/vibe/signatureElement/keyFeatures/suggestedTier），轉換為 `VariantConcept` 注入三階段 prompt
 - **Tier 智能修正**：Haiku suggestedTier 與規則不一致時覆蓋 tier + 重建 designSystem
 - **Design Tier**：`functional`（dashboard/SaaS，禁漸層/glow）vs `creative`（landing page，允許大膽設計）

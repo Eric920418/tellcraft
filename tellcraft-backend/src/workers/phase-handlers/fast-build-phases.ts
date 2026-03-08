@@ -6,7 +6,7 @@
 import { Server as SocketIOServer } from 'socket.io'
 import Redis from 'ioredis'
 import * as db from '../../db/client'
-import type { FlowState } from '../../types/flow-state'
+import type { FlowState, GeneratedCode } from '../../types/flow-state'
 import {
   generateStructure, generateAnimations, generateRwd,
   generateTailwindConfig, ensureResponsiveClasses,
@@ -131,6 +131,11 @@ export async function executeFastBuildSkill(params: {
     uiuxVariantConcept: variantConcept,
     uiuxDesignMood: moodId,
     userId,
+    // 增量生成欄位
+    fastBuildStage: 'generating',
+    fastBuildAllPages: finalPages,
+    fastBuildCompletedPages: [],
+    fastBuildCurrentBatchIndex: 0,
   }
   await saveFlowState(redis, conversationId, state)
 
@@ -152,31 +157,139 @@ export async function executeFastBuildSkill(params: {
     },
   })
 
+  // ── 決定第 1 批頁面：≤1 頁全部生成，>1 頁只生成首頁 ──
+  const firstBatchPages = finalPages.length <= 1 ? finalPages : [finalPages[0]]
+
+  // ── 執行第 1 批 pipeline ──
+  await runFastBuildPipeline({
+    state,
+    targetPages: firstBatchPages,
+    conversationId,
+    projectId,
+    userId,
+    redis,
+    io,
+  })
+
+  await db.updateTask(taskId, { status: 'completed' })
+  logger.info(`executeFastBuildSkill 完成（batch 0, ${firstBatchPages.length} pages）`)
+
+  } catch (err) {
+    logger.error({ err: err }, '未預期錯誤')
+    const errLocale = locale || 'zh'
+    const errIsChinese = errLocale === 'zh'
+    // 嘗試恢復 FlowState
+    try {
+      const recoveryState = await getFlowState(redis, conversationId)
+      if (recoveryState) {
+        const hasCode = recoveryState.uiuxGeneratedCode &&
+          (recoveryState.uiuxGeneratedCode.pages.length > 0 || recoveryState.uiuxGeneratedCode.components.length > 0)
+        if (hasCode) {
+          recoveryState.phase = 'uiux_complete'
+          recoveryState.uiuxCodeGenerationStartedAt = undefined
+          recoveryState.uiuxCodePhase = 'complete'
+          await saveFlowState(redis, conversationId, recoveryState)
+        } else {
+          recoveryState.uiuxCodeGenerationStartedAt = undefined
+          recoveryState.waitingForReply = true
+          await saveFlowState(redis, conversationId, recoveryState)
+        }
+      }
+    } catch (recoveryErr) {
+      logger.error({ err: recoveryErr }, '恢復 FlowState 也失敗')
+    }
+    await sendMessage(conversationId, io, {
+      content: errIsChinese
+        ? `生成過程中出現錯誤：${err instanceof Error ? err.message : '未知錯誤'}\n\n你可以點「重試」再試一次。`
+        : `Error during generation: ${err instanceof Error ? err.message : 'Unknown error'}\n\nClick "Retry" to try again.`,
+      stage: 'error',
+      quickReplies: [
+        { label: errIsChinese ? '重試' : 'Retry', value: '__retry_fast_build__', style: 'primary' as const },
+      ],
+    }).catch(msgErr => {
+      logger.error({ err: msgErr }, '發送錯誤訊息失敗')
+    })
+    await db.updateTask(params.taskId, { status: 'failed' }).catch(() => {})
+    // 不再 throw → 阻止 BullMQ 重試
+  }
+}
+
+// ============================================================
+// Pipeline：Structure → Animation → RWD → Quality Gate
+// 可被首批和後續批次共用
+// ============================================================
+
+export async function runFastBuildPipeline(params: {
+  state: FlowState
+  targetPages: string[]
+  conversationId: string
+  projectId: string
+  userId: string
+  redis: Redis
+  io: SocketIOServer
+}) {
+  const { state, targetPages, conversationId, projectId, userId, redis, io } = params
+  const isChinese = state.locale === 'zh'
+  const designSystem = state.uiuxDesignSystem!
+  const tier = state.uiuxDesignTier || 'functional'
+  const variantConcept = state.uiuxVariantConcept
+  const moodId = state.uiuxDesignMood
+  const layoutMode = state.fastModeLayoutMode || 'website'
+  const productType = state.fastModeProductType || 'landing'
+  const expandedPrompt = state.fastModeExpandedPrompt || state.fastModeOriginalMessage || ''
+  const template = buildMinimalTemplate(expandedPrompt, productType)
   const twConfig = generateTailwindConfig(designSystem)
+  const isLaterBatch = (state.fastBuildCurrentBatchIndex || 0) > 0
+  const existingCode = isLaterBatch ? state.uiuxGeneratedCode : undefined
+
+  // 構建已有組件路徑摘要（第 2+ 批用）
+  const existingComponentSummary = existingCode
+    ? buildExistingComponentSummary(existingCode)
+    : undefined
+
+  // streaming callback：第 2+ 批需合併已有代碼
+  const baseStreamingCallback = makeStreamingCallback(conversationId, io, redis, 'structure', twConfig)
+  const structureStreamingCallback = existingCode
+    ? (partial: { pages: GeneratedComponent[]; components: GeneratedComponent[]; styles: string }) =>
+        baseStreamingCallback({
+          pages: [...existingCode.pages, ...partial.pages],
+          components: [...existingCode.components, ...partial.components],
+          styles: existingCode.styles || partial.styles,
+        })
+    : baseStreamingCallback
 
   // ===== 階段 1/3：結構 =====
   const interactionHint = inferInteractionHint(productType)
+
+  // 模板風格提示（降級跳過）
+  let templateStyleHint: string | null = null
+  if (!isLaterBatch) {
+    try {
+      templateStyleHint = await getTemplateStyleHint(expandedPrompt, productType)
+    } catch { /* 降級跳過 */ }
+  }
+
   const structureResult = await generateStructure(
     designSystem,
-    finalPages,
+    targetPages,
     template,
     undefined, // 無 bddSpec
     tier,
     {
-      originalRequirements: expandedPrompt || message,
+      originalRequirements: expandedPrompt,
       variantConcept,
-      interactionHint,
+      interactionHint: isLaterBatch ? undefined : interactionHint, // 後續批次不重複注入
       templateStyleHint: templateStyleHint || undefined,
       layoutMode,
       moodId,
+      existingComponentSummary,
     },
-    { userId, conversationId, purpose: 'fast-build-structure' },
-    makeStreamingCallback(conversationId, io, redis, 'structure', twConfig)
+    { userId, conversationId, purpose: isLaterBatch ? 'fast-build-structure-batch' : 'fast-build-structure' },
+    structureStreamingCallback
   )
 
   if (!structureResult.success) {
-    logger.error({ err: structureResult.error }, '結構生成失敗')
-    // 保留 FlowState 以供重試（只清除生成時間戳）
+    logger.error({ err: structureResult.error, batch: state.fastBuildCurrentBatchIndex }, '結構生成失敗')
     state.phase = 'fast_generating'
     state.uiuxCodeGenerationStartedAt = undefined
     state.waitingForReply = true
@@ -193,17 +306,22 @@ export async function executeFastBuildSkill(params: {
     return
   }
 
-  let currentCode = {
+  let currentCode: GeneratedCode = {
     pages: structureResult.pages || [],
     components: structureResult.components || [],
     styles: structureResult.styles || '',
   }
 
+  // 第 2+ 批：合併到已有代碼
+  if (isLaterBatch && existingCode) {
+    currentCode = mergeGeneratedCode(existingCode, currentCode)
+  }
+
   // ── Structure 中途存檔 ──
   state.uiuxGeneratedCode = currentCode
-  state.uiuxStructureCode = currentCode
+  state.uiuxStructureCode = isLaterBatch ? state.uiuxStructureCode : currentCode
   state.uiuxCodePhase = 'animation'
-  state.uiuxCodeGenerationStartedAt = Date.now() // 重設超時計時器
+  state.uiuxCodeGenerationStartedAt = Date.now()
   await saveFlowState(redis, conversationId, state)
   if (projectId) {
     await db.upsertProjectFiles(projectId, 'uiux',
@@ -221,15 +339,25 @@ export async function executeFastBuildSkill(params: {
     },
   })
 
+  const animStreamingBase = makeStreamingCallback(conversationId, io, redis, 'animation', twConfig)
+  const animStreamingCallback = existingCode
+    ? (partial: { pages: GeneratedComponent[]; components: GeneratedComponent[]; styles: string }) =>
+        animStreamingBase({
+          pages: [...existingCode.pages, ...partial.pages],
+          components: [...existingCode.components, ...partial.components],
+          styles: existingCode.styles || partial.styles,
+        })
+    : animStreamingBase
+
   const fastUiSpecSummary = state.uiuxUISpec ? buildUISpecSummary(state.uiuxUISpec)
     : (interactionHint ? `產品互動概覽：\n${interactionHint}` : undefined)
   const animationResult = await generateAnimations(
     designSystem,
     currentCode,
     tier,
-    { userId, conversationId, purpose: 'fast-build-animation' },
-    makeStreamingCallback(conversationId, io, redis, 'animation', twConfig),
-    variantConcept, // 注入創意概念
+    { userId, conversationId, purpose: isLaterBatch ? 'fast-build-animation-batch' : 'fast-build-animation' },
+    animStreamingCallback,
+    variantConcept,
     fastUiSpecSummary,
     moodId,
   )
@@ -246,9 +374,9 @@ export async function executeFastBuildSkill(params: {
 
   // ── Animation 中途存檔 ──
   state.uiuxGeneratedCode = currentCode
-  state.uiuxAnimationCode = currentCode
+  state.uiuxAnimationCode = isLaterBatch ? state.uiuxAnimationCode : currentCode
   state.uiuxCodePhase = 'rwd'
-  state.uiuxCodeGenerationStartedAt = Date.now() // 重設超時計時器
+  state.uiuxCodeGenerationStartedAt = Date.now()
   await saveFlowState(redis, conversationId, state)
   if (projectId) {
     await db.upsertProjectFiles(projectId, 'uiux',
@@ -265,13 +393,24 @@ export async function executeFastBuildSkill(params: {
       data: { phase: 'rwd', progress: { current: 3, total: 3, step: isChinese ? '響應式優化' : 'Responsive optimization' }, estimatedSecondsRemaining: 60 } as unknown as Record<string, unknown>,
     },
   })
+
+  const rwdStreamingBase = makeStreamingCallback(conversationId, io, redis, 'rwd', twConfig)
+  const rwdStreamingCallback = existingCode
+    ? (partial: { pages: GeneratedComponent[]; components: GeneratedComponent[]; styles: string }) =>
+        rwdStreamingBase({
+          pages: [...existingCode.pages, ...partial.pages],
+          components: [...existingCode.components, ...partial.components],
+          styles: existingCode.styles || partial.styles,
+        })
+    : rwdStreamingBase
+
   const rwdResult = await generateRwd(
     designSystem,
     currentCode,
     tier,
-    { userId, conversationId, purpose: 'fast-build-rwd' },
-    makeStreamingCallback(conversationId, io, redis, 'rwd', twConfig),
-    variantConcept, // 注入創意概念
+    { userId, conversationId, purpose: isLaterBatch ? 'fast-build-rwd-batch' : 'fast-build-rwd' },
+    rwdStreamingCallback,
+    variantConcept,
     fastUiSpecSummary,
     layoutMode,
     moodId,
@@ -316,35 +455,126 @@ export async function executeFastBuildSkill(params: {
     }
   }
 
-  // ===== 保存最終結果 =====
+  // ── 更新已完成頁面 ──
+  const completedPages = [...(state.fastBuildCompletedPages || []), ...targetPages]
+  state.fastBuildCompletedPages = completedPages
   state.uiuxGeneratedCode = currentCode
   state.uiuxQualityReport = report
+
+  // ── 判斷是否還有剩餘頁面 ──
+  const allPages = state.fastBuildAllPages || []
+  const remainingPages = allPages.filter(p => !completedPages.includes(p))
+
+  if (remainingPages.length > 0) {
+    // 有剩餘頁面 → 暫停，等用戶確認
+    state.fastBuildStage = 'awaiting_continue'
+    state.waitingForReply = true
+    state.uiuxCodeGenerationStartedAt = undefined
+    state.uiuxCodePhase = 'complete' // 當前批次完成
+    await saveFlowState(redis, conversationId, state)
+
+    if (projectId) {
+      await db.upsertProjectFiles(projectId, 'uiux',
+        generatedCodeToFileRows(currentCode, designSystem))
+    }
+    await redis.del(`streaming:preview:${conversationId}`).catch(() => {})
+
+    const pageCount = currentCode.pages.length
+    const compCount = currentCode.components.length
+    const conceptNote = variantConcept
+      ? (isChinese ? `\n設計概念：**${variantConcept.name}**` : `\nDesign concept: **${variantConcept.name}**`)
+      : ''
+    const qgText = report.passed && report.summary.warning === 0
+      ? ''
+      : report.passed
+        ? (isChinese ? `\n品質檢查通過（${report.summary.warning} 個建議項）。` : `\nQuality check passed (${report.summary.warning} suggestions).`)
+        : (isChinese ? `\n品質檢查：${report.summary.critical} 個問題、${report.summary.warning} 個建議。` : `\nQuality check: ${report.summary.critical} issues, ${report.summary.warning} suggestions.`)
+
+    const remainingLabel = remainingPages.join(isChinese ? '、' : ', ')
+
+    await sendMessage(conversationId, io, {
+      content: isChinese
+        ? `首頁生成完成！${pageCount} 個頁面、${compCount} 個組件。${conceptNote}${qgText}\n\n還有 ${remainingPages.length} 個頁面待生成：${remainingLabel}`
+        : `Homepage generated! ${pageCount} pages, ${compCount} components.${conceptNote}${qgText}\n\n${remainingPages.length} more page(s) to generate: ${remainingLabel}`,
+      stage: 'fast_generating',
+      layoutHint: 'split',
+      richContent: {
+        type: 'code_preview',
+        data: {
+          pages: currentCode.pages,
+          components: currentCode.components,
+          styles: currentCode.styles,
+          tailwindConfig: twConfig,
+          currentPhase: 'partial_complete',
+        } as Record<string, unknown>,
+      },
+      quickReplies: [
+        { label: isChinese ? `繼續生成（${remainingPages.length} 頁）` : `Continue (${remainingPages.length} pages)`, value: '__continue_fast_build__', style: 'primary' },
+        { label: isChinese ? '就這樣，部署' : 'Deploy as-is', value: '__finish_fast_build__', style: 'secondary' },
+      ],
+    })
+
+    // Credit 扣除：首批完成時先扣
+    if ((state.fastBuildCurrentBatchIndex || 0) === 0) {
+      await deductCredits(userId, CREDIT_COSTS.FAST_BUILD - CREDIT_COSTS.BASE_MESSAGE)
+    }
+
+    logger.info(`Pipeline batch ${state.fastBuildCurrentBatchIndex} 完成，暫停等待用戶（剩 ${remainingPages.length} 頁）`)
+    return
+  }
+
+  // ── 所有頁面生成完成 ──
   state.uiuxCodePhase = 'complete'
   state.phase = 'uiux_complete'
+  state.fastBuildStage = 'complete'
   state.waitingForReply = false
   state.uiuxCodeGenerationStartedAt = undefined
   await saveFlowState(redis, conversationId, state)
 
-  // Credit 扣除：Fast Build 額外成本（base 已在入口扣除）
-  await deductCredits(userId, CREDIT_COSTS.FAST_BUILD - CREDIT_COSTS.BASE_MESSAGE)
+  // Credit 扣除（≤1 頁的情況在這裡扣，>1 頁首批已扣）
+  if ((state.fastBuildCurrentBatchIndex || 0) === 0) {
+    await deductCredits(userId, CREDIT_COSTS.FAST_BUILD - CREDIT_COSTS.BASE_MESSAGE)
+  }
 
   if (projectId) {
     await db.upsertProjectFiles(projectId, 'uiux',
       generatedCodeToFileRows(currentCode, designSystem))
   }
-
-  // ===== 清除 streaming preview =====
   await redis.del(`streaming:preview:${conversationId}`).catch(() => {})
 
-  // ===== 完成訊息 =====
+  await sendFastBuildCompleteMessage(conversationId, state, io, redis)
+  logger.info(`Pipeline 全部完成: ${currentCode.pages.length} pages, ${currentCode.components.length} components`)
+}
+
+// ============================================================
+// 完成訊息（供 pipeline 完成和 __finish_fast_build__ 共用）
+// ============================================================
+
+export async function sendFastBuildCompleteMessage(
+  conversationId: string,
+  state: FlowState,
+  io: SocketIOServer,
+  redis: Redis,
+) {
+  const isChinese = state.locale === 'zh'
+  const currentCode = state.uiuxGeneratedCode
+  if (!currentCode) return
+
+  const designSystem = state.uiuxDesignSystem
+  const twConfig = designSystem ? generateTailwindConfig(designSystem) : ''
+  const variantConcept = state.uiuxVariantConcept
+  const report = state.uiuxQualityReport
+
   const finalPageCount = currentCode.pages.length
   const finalComponentCount = currentCode.components.length
 
-  const qgText = report.passed && report.summary.warning === 0
+  const qgText = !report
     ? ''
-    : report.passed
-      ? (isChinese ? `\n品質檢查通過（${report.summary.warning} 個建議項）。` : `\nQuality check passed (${report.summary.warning} suggestions).`)
-      : (isChinese ? `\n品質檢查：${report.summary.critical} 個問題、${report.summary.warning} 個建議。` : `\nQuality check: ${report.summary.critical} issues, ${report.summary.warning} suggestions.`)
+    : report.passed && report.summary.warning === 0
+      ? ''
+      : report.passed
+        ? (isChinese ? `\n品質檢查通過（${report.summary.warning} 個建議項）。` : `\nQuality check passed (${report.summary.warning} suggestions).`)
+        : (isChinese ? `\n品質檢查：${report.summary.critical} 個問題、${report.summary.warning} 個建議。` : `\nQuality check: ${report.summary.critical} issues, ${report.summary.warning} suggestions.`)
 
   const conceptNote = variantConcept
     ? (isChinese ? `\n設計概念：**${variantConcept.name}**` : `\nDesign concept: **${variantConcept.name}**`)
@@ -371,51 +601,37 @@ export async function executeFastBuildSkill(params: {
       { label: isChinese ? '部署上線' : 'Deploy', value: '部署', style: 'primary' },
     ],
   })
+}
 
-  await db.updateTask(taskId, { status: 'completed' })
-  logger.info(`完成: ${finalPageCount} pages, ${finalComponentCount} components`)
+// ============================================================
+// 純函數：合併已有代碼和新批次
+// ============================================================
 
-  } catch (err) {
-    logger.error({ err: err }, '未預期錯誤')
-    const errLocale = locale || 'zh'
-    const errIsChinese = errLocale === 'zh'
-    // 嘗試恢復 FlowState
-    try {
-      const recoveryState = await getFlowState(redis, conversationId)
-      if (recoveryState) {
-        const hasCode = recoveryState.uiuxGeneratedCode &&
-          (recoveryState.uiuxGeneratedCode.pages.length > 0 || recoveryState.uiuxGeneratedCode.components.length > 0)
-        if (hasCode) {
-          recoveryState.phase = 'uiux_complete'
-          recoveryState.uiuxCodeGenerationStartedAt = undefined
-          recoveryState.uiuxCodePhase = 'complete'
-          await saveFlowState(redis, conversationId, recoveryState)
-        } else {
-          recoveryState.uiuxCodeGenerationStartedAt = undefined
-          recoveryState.waitingForReply = true
-          await saveFlowState(redis, conversationId, recoveryState)
-        }
-      }
-    } catch (recoveryErr) {
-      logger.error({ err: recoveryErr }, '恢復 FlowState 也失敗')
-    }
-    await sendMessage(conversationId, io, {
-      content: errIsChinese
-        ? `生成過程中出現錯誤：${err instanceof Error ? err.message : '未知錯誤'}\n\n你可以點「重試」再試一次。`
-        : `Error during generation: ${err instanceof Error ? err.message : 'Unknown error'}\n\nClick "Retry" to try again.`,
-      stage: 'error',
-      quickReplies: [
-        { label: errIsChinese ? '重試' : 'Retry', value: '__retry_fast_build__', style: 'primary' as const },
-      ],
-    }).catch(msgErr => {
-      logger.error({ err: msgErr }, '發送錯誤訊息失敗')
-    })
-    await db.updateTask(taskId, { status: 'failed' }).catch(() => {})
-    // 不再 throw → 阻止 BullMQ 重試
+export function mergeGeneratedCode(existing: GeneratedCode, newBatch: GeneratedCode): GeneratedCode {
+  // pages 按 path 去重（新批次覆蓋同路徑）
+  const pageMap = new Map<string, GeneratedComponent>()
+  for (const p of existing.pages) pageMap.set(p.path, p)
+  for (const p of newBatch.pages) pageMap.set(p.path, p)
+
+  // components 按 path 去重（新批次覆蓋同路徑）
+  const compMap = new Map<string, GeneratedComponent>()
+  for (const c of existing.components) compMap.set(c.path, c)
+  for (const c of newBatch.components) compMap.set(c.path, c)
+
+  return {
+    pages: Array.from(pageMap.values()),
+    components: Array.from(compMap.values()),
+    styles: existing.styles || newBatch.styles, // 保留首批的 styles
   }
 }
 
-/**
- * 完整代碼生成管線：Structure → Animation → RWD → Quality Gate
- * 一氣呵成，中間只發進度訊息，不等用戶確認
- */
+// ============================================================
+// 純函數：構建已有組件路徑摘要（供 prompt 告訴 LLM 可 import）
+// ============================================================
+
+export function buildExistingComponentSummary(code: GeneratedCode): string {
+  const paths: string[] = []
+  for (const p of code.pages) paths.push(p.path)
+  for (const c of code.components) paths.push(c.path)
+  return paths.join('\n')
+}
