@@ -248,6 +248,8 @@ function HeroSection({
       <div
         className="hero-content-grid"
         style={{
+          position: 'relative',
+          zIndex: 1,
           width: '100%',
           maxWidth: 640,
         }}
