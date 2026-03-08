@@ -371,7 +371,10 @@ export default function ChatSection({
     content: string,
     options?: { imageUrls?: string[] }
   ) => {
-    if (!session.sessionInfo || !content.trim() || isTyping || sendCooldown) return false
+    const isSpecialCommand = content.trim().startsWith('__') && content.trim().endsWith('__')
+    if (!session.sessionInfo || !content.trim()) return false
+    // 特殊指令（QuickReply buttons）放寬 isTyping 檢查，避免 stale state 卡住
+    if (!isSpecialCommand && (isTyping || sendCooldown)) return false
 
     if (session.quotaReadOnly) {
       session.setError(tChat('quotaReadonlyHint'))

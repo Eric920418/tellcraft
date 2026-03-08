@@ -141,16 +141,13 @@ export function createOrchestratorWorker(
       if (lockResult.locked) {
         logger.info({ conversationId, jobId: job.id, jobName: job.name }, '對話已鎖定，丟棄 job 並通知用戶')
         // 不 throw（避免觸發 BullMQ retry + 最終失敗通知），直接完成 job
-        if (job.name === 'process-message') {
-          const msgData = data as ProcessMessageData
-          const isChinese = msgData.locale !== 'en'
-          await sendMessage(conversationId, io, {
-            content: isChinese
-              ? '目前正在處理上一個任務，請稍候片刻再試。'
-              : 'Still processing your previous request. Please wait a moment.',
-            stage: 'error',
-          })
-        }
+        const isChinese = (data as { locale?: string }).locale !== 'en'
+        await sendMessage(conversationId, io, {
+          content: isChinese
+            ? '目前正在處理上一個任務，請稍候片刻再試。'
+            : 'Still processing your previous request. Please wait a moment.',
+          stage: 'error',
+        })
         return
       }
 
