@@ -132,12 +132,15 @@ function stripContinuationMetaText(segment: string): string {
     /^The previous/i,
     /^Since (the|my|this|output)/i,
     /previous output was cut off/i,
-    /generate the complete code/i,
+    /generate the complete/i,
     /provide all the files/i,
+    /complete (animated|structure|rwd|styled|code) files/i,
     /start(ing)? (from|over|again)/i,
     /^(Note|Important|Please note):/i,
     /^(Continuing|Resuming|Picking up)/i,
     /^(Apologies|Sorry)/i,
+    /^Now (I'll|let me|here)/i,
+    /^(OK|Okay|Alright),? (here|let|I)/i,
   ]
   const lines = segment.split('\n')
   for (let i = 0; i < Math.min(lines.length, 15); i++) {
@@ -235,12 +238,22 @@ export async function callClaude(
           if (continuationCount > 0 && currentSegment.length > 0) {
             const stripped = stripContinuationMetaText(currentSegment)
             if (stripped.length < currentSegment.length) {
+              // 元文字被剝離 → 前段末尾可能有截斷行（如未結束的 string literal）
+              const prevAccumulated = accumulated.slice(0, accumulated.length - currentSegment.length)
+              let cleanPrev = prevAccumulated
+              // 如果前段末尾不以換行結束，代表截斷發生在行內 → 移除該截斷行
+              if (cleanPrev.length > 0 && !cleanPrev.endsWith('\n')) {
+                const lastNewline = cleanPrev.lastIndexOf('\n')
+                if (lastNewline >= 0) {
+                  cleanPrev = cleanPrev.slice(0, lastNewline + 1)
+                }
+              }
+              const removedChars = accumulated.length - (cleanPrev.length + stripped.length)
               logger.warn(
-                { continuationCount, removedChars: currentSegment.length - stripped.length },
-                'callClaude: 剝離 continuation meta-commentary'
+                { continuationCount, removedChars, truncatedLineRemoved: cleanPrev.length < prevAccumulated.length },
+                'callClaude: 剝離 continuation meta-commentary + 截斷行'
               )
-              // 從 accumulated 移除污染部分
-              accumulated = accumulated.slice(0, accumulated.length - currentSegment.length) + stripped
+              accumulated = cleanPrev + stripped
               currentSegment = stripped
               onTextDelta?.(accumulated)
             }
@@ -1581,7 +1594,7 @@ async function checkAndFixSyntaxErrors(
       { ...trackingContext, purpose: 'fix_syntax_errors' }
     )
     if (response.success && response.content) {
-      const fixRegex = /```tsx:([^\n]+)\n([\s\S]*?)```/g
+      const fixRegex = /```tsx:([^\n]+)\n([\s\S]*?)\n```/g
       let m: RegExpExecArray | null
       while ((m = fixRegex.exec(response.content)) !== null) {
         result.set(m[1].trim(), m[2].trim())
@@ -1621,7 +1634,7 @@ async function checkAndFixSyntaxErrors(
       { ...trackingContext, purpose: 'fix_truncated_file' }
     )
     if (response.success && response.content) {
-      const fixRegex = /```tsx:([^\n]+)\n([\s\S]*?)```/g
+      const fixRegex = /```tsx:([^\n]+)\n([\s\S]*?)\n```/g
       let m: RegExpExecArray | null
       while ((m = fixRegex.exec(response.content)) !== null) {
         result.set(m[1].trim(), m[2].trim())
@@ -1657,9 +1670,9 @@ export function parseGeneratedFiles(content: string, designSystem: DesignSystem)
   components: GeneratedComponent[]
   styles: string
 } {
-  const tsxRegex = /`{3,}tsx:([^\n]+)\n([\s\S]*?)`{3,}/g
-  const tsRegex = /`{3,}ts:([^\n]+)\n([\s\S]*?)`{3,}/g
-  const cssRegex = /`{3,}css:([^\n]+)\n([\s\S]*?)`{3,}/g
+  const tsxRegex = /`{3,}tsx:([^\n]+)\n([\s\S]*?)\n`{3,}/g
+  const tsRegex = /`{3,}ts:([^\n]+)\n([\s\S]*?)\n`{3,}/g
+  const cssRegex = /`{3,}css:([^\n]+)\n([\s\S]*?)\n`{3,}/g
 
   // 用 Map 去重：相同路徑保留最後一個（LLM 截斷後重新生成的完整版覆蓋截斷版）
   const pagesMap = new Map<string, GeneratedComponent>()
@@ -1753,9 +1766,9 @@ function parseCompletedFileBlocks(accumulatedText: string): {
   styles: string
   completedBlockCount: number
 } {
-  const tsxRegex = /`{3,}tsx:([^\n]+)\n([\s\S]*?)`{3,}/g
-  const tsRegex = /`{3,}ts:([^\n]+)\n([\s\S]*?)`{3,}/g
-  const cssRegex = /`{3,}css:([^\n]+)\n([\s\S]*?)`{3,}/g
+  const tsxRegex = /`{3,}tsx:([^\n]+)\n([\s\S]*?)\n`{3,}/g
+  const tsRegex = /`{3,}ts:([^\n]+)\n([\s\S]*?)\n`{3,}/g
+  const cssRegex = /`{3,}css:([^\n]+)\n([\s\S]*?)\n`{3,}/g
 
   const pages: GeneratedComponent[] = []
   const components: GeneratedComponent[] = []
@@ -3421,8 +3434,8 @@ export async function refineCode(
     modifiedComponents: Map<string, string>
     modifiedStyles: string
   } => {
-    const tsxRegex = /```tsx:([^\n]+)\n([\s\S]*?)```/g
-    const cssRegex = /```css:([^\n]+)\n([\s\S]*?)```/g
+    const tsxRegex = /```tsx:([^\n]+)\n([\s\S]*?)\n```/g
+    const cssRegex = /```css:([^\n]+)\n([\s\S]*?)\n```/g
     const modifiedPages = new Map<string, string>()
     const modifiedComponents = new Map<string, string>()
     let modifiedStyles = ''
