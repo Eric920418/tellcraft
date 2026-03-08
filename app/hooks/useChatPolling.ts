@@ -17,7 +17,7 @@ export function useChatPolling(
     onFastBuildChunks: (n: number) => void
     onCodePreviewData: (data: Record<string, unknown> | null) => void
     onLayoutModeChange: (mode: 'split') => void
-    onSessionTaskIdUpdate: (taskId: string) => void
+    onSessionTaskIdUpdate: (taskId: string | null) => void
   }
 ) {
   const [lastTimestamp, setLastTimestamp] = useState<string | null>(null)
@@ -222,9 +222,8 @@ export function useChatPolling(
           pollInterval = Math.min(pollInterval * 1.5, MAX_INTERVAL)
         }
 
-        if (result.data.currentTaskId) {
-          callbacksRef.current.onSessionTaskIdUpdate(result.data.currentTaskId)
-        }
+        // 同步 currentTaskId（設置或清除）
+        callbacksRef.current.onSessionTaskIdUpdate(result.data.currentTaskId || null)
 
         if (result.data.isComplete) {
           isPolling = false

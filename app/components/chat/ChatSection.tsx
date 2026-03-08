@@ -222,8 +222,12 @@ export default function ChatSection({
         layoutModeRef.current = mode
       }
     },
-    onSessionTaskIdUpdate: (taskId: string) => {
-      session.setSessionInfo(prev => prev ? { ...prev, currentTaskId: taskId } : null)
+    onSessionTaskIdUpdate: (taskId: string | null) => {
+      session.setSessionInfo(prev => {
+        if (!prev) return null
+        if (taskId) return prev.currentTaskId === taskId ? prev : { ...prev, currentTaskId: taskId }
+        return prev.currentTaskId ? { ...prev, currentTaskId: undefined } : prev
+      })
     },
   }), [])
 
