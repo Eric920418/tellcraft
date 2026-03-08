@@ -1663,6 +1663,39 @@ async function checkAndFixSyntaxErrors(
 }
 
 /**
+ * 從已解析的程式碼中移除 LLM 元文字行（continuation 污染的最終防線）
+ * 這些行永遠不會是合法的 TSX/TS/CSS，可安全移除
+ */
+function stripLlmMetaLines(code: string): string {
+  const LLM_META_LINE = [
+    /^Here (is|are|'s) the complete/i,
+    /^Here (is|are|'s) the (full|updated|modified|remaining|rest)/i,
+    /^I (need|will|should|am going|want|must) (to )?(generate|provide|create|output|continue|start|write|give)/i,
+    /^Let me (provide|generate|continue|create|output|write|give|start)/i,
+    /^The previous (output|code|generation|response)/i,
+    /^(Continuing|Resuming|Picking up) (from|where|the|with)/i,
+    /^(Apologies|Sorry),? (the|my|for|I)/i,
+    /^Now (I'll|let me|here|continuing)/i,
+    /^(OK|Okay|Alright),? (here|let|I)/i,
+    /^Since (the|my|this) (previous|output|code|response)/i,
+    /^(Note|Important|Please note):/i,
+  ]
+  const lines = code.split('\n')
+  const cleaned = lines.filter(line => {
+    const trimmed = line.trim()
+    if (!trimmed) return true
+    return !LLM_META_LINE.some(p => p.test(trimmed))
+  })
+  if (cleaned.length < lines.length) {
+    logger.warn(
+      { removedLines: lines.length - cleaned.length },
+      'stripLlmMetaLines: 從生成代碼中移除 LLM 元文字行'
+    )
+  }
+  return cleaned.join('\n')
+}
+
+/**
  * 解析 LLM 輸出的檔案
  */
 export function parseGeneratedFiles(content: string, designSystem: DesignSystem): {
@@ -1683,7 +1716,7 @@ export function parseGeneratedFiles(content: string, designSystem: DesignSystem)
   let match
   while ((match = tsxRegex.exec(content)) !== null) {
     const path = match[1].trim()
-    const fileContent = match[2].trim()
+    const fileContent = stripLlmMetaLines(match[2].trim())
 
     if (path.includes('/page.tsx') || path.includes('/page.ts')) {
       pagesMap.set(path, {
@@ -1703,7 +1736,7 @@ export function parseGeneratedFiles(content: string, designSystem: DesignSystem)
   // 解析 .ts 檔案（utility、types、configs）
   while ((match = tsRegex.exec(content)) !== null) {
     const path = match[1].trim()
-    const fileContent = match[2].trim()
+    const fileContent = stripLlmMetaLines(match[2].trim())
 
     if (path.includes('/page.ts')) {
       pagesMap.set(path, {
@@ -1779,7 +1812,7 @@ function parseCompletedFileBlocks(accumulatedText: string): {
   while ((match = tsxRegex.exec(accumulatedText)) !== null) {
     completedBlockCount++
     const path = match[1].trim()
-    const fileContent = match[2].trim()
+    const fileContent = stripLlmMetaLines(match[2].trim())
 
     if (path.includes('/page.tsx') || path.includes('/page.ts')) {
       pages.push({ path, content: fileContent, description: `頁面: ${path.split('/').slice(-2, -1)[0]}` })
@@ -1791,7 +1824,7 @@ function parseCompletedFileBlocks(accumulatedText: string): {
   while ((match = tsRegex.exec(accumulatedText)) !== null) {
     completedBlockCount++
     const path = match[1].trim()
-    const fileContent = match[2].trim()
+    const fileContent = stripLlmMetaLines(match[2].trim())
 
     if (path.includes('/page.ts')) {
       pages.push({ path, content: fileContent, description: `頁面: ${path.split('/').slice(-2, -1)[0]}` })
@@ -3443,7 +3476,7 @@ export async function refineCode(
     let match
     while ((match = tsxRegex.exec(content)) !== null) {
       const path = match[1].trim()
-      const fileContent = match[2].trim()
+      const fileContent = stripLlmMetaLines(match[2].trim())
 
       if (baseCode.pages.some(p => p.path === path)) {
         modifiedPages.set(path, fileContent)
@@ -3457,7 +3490,7 @@ export async function refineCode(
     }
 
     while ((match = cssRegex.exec(content)) !== null) {
-      modifiedStyles = match[2].trim()
+      modifiedStyles = stripLlmMetaLines(match[2].trim())
     }
 
     return { modifiedPages, modifiedComponents, modifiedStyles }
