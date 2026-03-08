@@ -1441,6 +1441,104 @@ ${contextLines.join('\n')}
 }
 
 /**
+ * 取得 TSX/TS 檔案的語法錯誤清單（使用 TypeScript 內建 parser，零 LLM）
+ */
+function getSyntaxErrors(filename: string, content: string): string[] {
+  if (content.length < 50) return []
+  const tsxName = filename.endsWith('.tsx') || filename.endsWith('.ts') ? filename : filename + '.tsx'
+  const result = ts.transpileModule(content, {
+    compilerOptions: {
+      jsx: ts.JsxEmit.Preserve,
+      target: ts.ScriptTarget.Latest,
+    },
+    fileName: tsxName,
+    reportDiagnostics: true,
+  })
+  if (!result.diagnostics?.length) return []
+  return result.diagnostics.map(d => {
+    const msg = ts.flattenDiagnosticMessageText(d.messageText, '\n')
+    if (d.file && d.start !== undefined) {
+      const pos = d.file.getLineAndCharacterOfPosition(d.start)
+      return `Line ${pos.line + 1}:${pos.character + 1} — ${msg}`
+    }
+    return msg
+  })
+}
+
+/**
+ * 語法錯誤自動修復（parseGeneratedFiles 後立即執行，最多 1 次 LLM 修復）
+ */
+async function checkAndFixSyntaxErrors(
+  files: GeneratedComponent[],
+  trackingContext?: LlmTrackingContext
+): Promise<GeneratedComponent[]> {
+  const broken: Array<{ file: GeneratedComponent; errors: string[] }> = []
+  for (const file of files) {
+    const errors = getSyntaxErrors(file.path, file.content)
+    if (errors.length > 0) broken.push({ file, errors })
+  }
+  if (broken.length === 0) return files
+
+  logger.warn(
+    { count: broken.length, paths: broken.map(b => b.file.path) },
+    'TSX 語法錯誤，呼叫 LLM 修復'
+  )
+
+  const errorSummary = broken
+    .map(({ file, errors }) => `=== ${file.path} ===\n${errors.slice(0, 3).join('\n')}`)
+    .join('\n\n')
+  const brokenCode = broken
+    .map(({ file }) => `\`\`\`tsx:${file.path}\n${file.content}\n\`\`\``)
+    .join('\n\n')
+
+  const systemPrompt = [
+    'You are a TypeScript/TSX syntax expert.',
+    'Fix ONLY the syntax errors (missing brackets, parentheses, braces, quotes, etc.).',
+    'Do NOT change logic, imports, or component behavior.',
+    'Output each fixed file in the format:',
+    '```tsx:PATH',
+    '...full fixed code...',
+    '```',
+  ].join('\n')
+
+  const response = await callClaude(
+    systemPrompt,
+    [{ role: 'user', content: `Fix these syntax errors:\n\n${errorSummary}\n\nFiles:\n\n${brokenCode}` }],
+    { maxTokens: 8192, temperature: 0 },
+    { ...trackingContext, purpose: 'fix_syntax_errors' }
+  )
+
+  if (!response.success || !response.content) {
+    logger.warn('語法修復 LLM 失敗，保留原始代碼')
+    return files
+  }
+
+  const fixedMap = new Map<string, string>()
+  const fixRegex = /```tsx:([^\n]+)\n([\s\S]*?)```/g
+  let m: RegExpExecArray | null
+  while ((m = fixRegex.exec(response.content)) !== null) {
+    fixedMap.set(m[1].trim(), m[2].trim())
+  }
+
+  if (fixedMap.size === 0) {
+    logger.warn('語法修復：LLM 輸出格式無法解析')
+    return files
+  }
+
+  return files.map(file => {
+    const fixed = fixedMap.get(file.path)
+    if (!fixed) return file
+    const remaining = getSyntaxErrors(file.path, fixed)
+    if (remaining.length > 0) {
+      logger.warn({ path: file.path, errors: remaining }, '修復後仍有語法錯誤，保留原始代碼')
+      return file
+    }
+    logger.info({ path: file.path }, 'TSX 語法修復成功')
+    return { ...file, content: fixed }
+  })
+}
+
+/**
  * 解析 LLM 輸出的檔案
  */
 export function parseGeneratedFiles(content: string, designSystem: DesignSystem): {
@@ -2089,7 +2187,13 @@ ${productContext?.layoutMode === 'app'
     return { success: false, error: response.error || '無法生成結構代碼' }
   }
 
-  const { pages: generatedPages, components: generatedComponents, styles } = parseGeneratedFiles(response.content, designSystem)
+  const { pages: rawPages, components: rawComponents, styles } = parseGeneratedFiles(response.content, designSystem)
+
+  // ── Layer 0 防禦：TSX 語法檢查 + LLM 自動修復 ──
+  const syntaxFixed = await checkAndFixSyntaxErrors([...rawPages, ...rawComponents], trackingContext)
+  const rawPagePaths = new Set(rawPages.map(p => p.path))
+  const generatedPages = syntaxFixed.filter(f => rawPagePaths.has(f.path))
+  const generatedComponents = syntaxFixed.filter(f => !rawPagePaths.has(f.path))
 
   // ── Layer 1 防禦：驗證組件引用完整性 + LLM 自修復 ──
   const finalPages = generatedPages
@@ -2273,7 +2377,13 @@ ${existingCodeStr}
     return { success: false, error: response.error || '無法生成動畫代碼' }
   }
 
-  const { pages, components, styles } = parseGeneratedFiles(response.content, designSystem)
+  const { pages: rawAnimPages, components: rawAnimComps, styles } = parseGeneratedFiles(response.content, designSystem)
+
+  // ── Layer 0 防禦：TSX 語法檢查 + LLM 自動修復 ──
+  const animSyntaxFixed = await checkAndFixSyntaxErrors([...rawAnimPages, ...rawAnimComps], trackingContext)
+  const rawAnimPagePaths = new Set(rawAnimPages.map(p => p.path))
+  const pages = animSyntaxFixed.filter(f => rawAnimPagePaths.has(f.path))
+  const components = animSyntaxFixed.filter(f => !rawAnimPagePaths.has(f.path))
 
   // 如果沒有解析到新的 styles，保留原有的
   const finalStyles = styles || existingCode.styles
@@ -2453,7 +2563,13 @@ ${existingCodeStr}
     return { success: false, error: response.error || '無法生成響應式代碼' }
   }
 
-  const { pages: parsedPages, components: parsedComps, styles: parsedStyles } = parseGeneratedFiles(response.content, designSystem)
+  const { pages: rawRwdPages, components: rawRwdComps, styles: parsedStyles } = parseGeneratedFiles(response.content, designSystem)
+
+  // ── Layer 0 防禦：TSX 語法檢查 + LLM 自動修復 ──
+  const rwdSyntaxFixed = await checkAndFixSyntaxErrors([...rawRwdPages, ...rawRwdComps], trackingContext)
+  const rawRwdPagePaths = new Set(rawRwdPages.map(p => p.path))
+  const parsedPages = rwdSyntaxFixed.filter(f => rawRwdPagePaths.has(f.path))
+  const parsedComps = rwdSyntaxFixed.filter(f => !rawRwdPagePaths.has(f.path))
 
   const finalPages = parsedPages.length > 0 ? parsedPages : existingCode.pages
   const finalComps = parsedComps.length > 0 ? parsedComps : existingCode.components
