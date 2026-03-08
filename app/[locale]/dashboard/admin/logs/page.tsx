@@ -39,7 +39,7 @@ export default function AdminLogsPage() {
   const [searchQuery, setSearchQuery] = useState('')
   const [autoScroll, setAutoScroll] = useState(true)
 
-  const { lines, isConnected, isPaused, pause, resume, clear } = useAdminLogs({
+  const { lines, isConnected, isPaused, pause, resume, clear, clearLocal } = useAdminLogs({
     enabled: true,
     source,
   })
@@ -73,8 +73,13 @@ export default function AdminLogsPage() {
 
   // 切換 source 時重置
   const handleSourceChange = useCallback((s: 'all' | 'out' | 'error') => {
+    if (s === source) return
     setSource(s)
-    clear()
+    clearLocal()
+  }, [clearLocal, source])
+
+  const handleClear = useCallback(() => {
+    void clear()
   }, [clear])
 
   return (
@@ -178,7 +183,7 @@ export default function AdminLogsPage() {
 
         {/* 清空 */}
         <button
-          onClick={clear}
+          onClick={handleClear}
           style={{
             padding: '6px 14px',
             fontSize: 13,

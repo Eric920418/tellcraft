@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useRef, useState, useCallback } from 'react'
-import { getAdminLogs, type ParsedLogLine } from '@/app/lib/vps-api'
+import { clearAdminLogs, getAdminLogs, type ParsedLogLine } from '@/app/lib/vps-api'
 
 const MAX_LINES = 2000
 const POLL_INTERVAL = 3000
@@ -17,7 +17,8 @@ interface UseAdminLogsReturn {
   isPaused: boolean
   pause: () => void
   resume: () => void
-  clear: () => void
+  clear: () => Promise<boolean>
+  clearLocal: () => void
 }
 
 export function useAdminLogs(options: UseAdminLogsOptions): UseAdminLogsReturn {
@@ -112,11 +113,25 @@ export function useAdminLogs(options: UseAdminLogsOptions): UseAdminLogsReturn {
     setIsPaused(false)
   }, [])
 
-  const clear = useCallback(() => {
+  const clearLocal = useCallback(() => {
     setLines([])
     lastTimestampRef.current = ''
     initialLoadDone.current = false
   }, [])
 
-  return { lines, isConnected, isPaused, pause, resume, clear }
+  const clear = useCallback(async () => {
+    const token = localStorage.getItem('auth_token')
+    if (!token) return false
+
+    const result = await clearAdminLogs({ token, source })
+    if (!result.success) return false
+
+    setLines([])
+    lastTimestampRef.current = ''
+    // 清空後維持輪詢啟用，讓新日誌可即時顯示
+    initialLoadDone.current = true
+    return true
+  }, [source])
+
+  return { lines, isConnected, isPaused, pause, resume, clear, clearLocal }
 }

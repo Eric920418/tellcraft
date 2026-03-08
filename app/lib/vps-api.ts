@@ -2078,5 +2078,22 @@ export async function getAdminLogs(input: {
   })
 }
 
+/**
+ * 清空 VPS 日誌（持久化，重整後不會回來）
+ */
+export async function clearAdminLogs(input: {
+  token: string
+  source?: 'all' | 'out' | 'error'
+}): Promise<ApiResponse<{ success: boolean; clearedCount: number; files: string[] }>> {
+  const params = new URLSearchParams()
+  if (input.source) params.append('source', input.source)
+  const query = params.toString() ? `?${params.toString()}` : ''
+
+  return apiRequest(`/api/dashboard/admin/logs${query}`, {
+    method: 'DELETE',
+    headers: { Authorization: `Bearer ${input.token}` },
+  })
+}
+
 // 導出類型
 export type { ClarifyItem, BddSession }

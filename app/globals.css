@@ -243,6 +243,122 @@ textarea {
   line-height: 1.3;
 }
 
+.hero-content-grid {
+  display: grid;
+  width: 100%;
+  grid-template-columns: minmax(220px, 260px) minmax(0, 640px);
+  grid-template-areas:
+    "presets title"
+    "presets composer";
+  column-gap: 28px;
+  row-gap: 16px;
+  justify-content: center;
+  align-items: start;
+}
+
+.hero-title-block {
+  grid-area: title;
+  text-align: center;
+}
+
+.hero-composer-block {
+  grid-area: composer;
+  width: 100%;
+}
+
+.hero-preset-panel {
+  grid-area: presets;
+  width: 100%;
+  align-self: center;
+  padding: 14px;
+  border: 1px solid var(--border-color);
+  background: var(--white);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.04);
+}
+
+.hero-preset-header {
+  margin-bottom: 10px;
+}
+
+.hero-preset-header span {
+  display: block;
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--gray-500);
+  margin-bottom: 4px;
+}
+
+.hero-preset-header p {
+  font-size: 13px;
+  color: var(--gray-400);
+  line-height: 1.4;
+}
+
+.hero-preset-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.hero-preset-card {
+  width: 100%;
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 11px;
+  border: 1px solid var(--border-color);
+  background: var(--gray-50);
+  text-align: left;
+  transition: border-color 0.2s ease, background-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.hero-preset-card:hover {
+  border-color: var(--gray-400);
+  background: var(--white);
+}
+
+.hero-preset-card.is-active {
+  border-color: var(--black);
+  box-shadow: 0 0 0 1px var(--black);
+  background: var(--white);
+}
+
+.hero-preset-index {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--gray-400);
+  line-height: 1.5;
+  flex-shrink: 0;
+}
+
+.hero-preset-content {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.hero-preset-card-title {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-primary);
+  line-height: 1.35;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  overflow: hidden;
+}
+
+.hero-preset-card-summary {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--gray-500);
+}
+
 /* GSAP SplitText */
 .split-char,
 .split-word,
@@ -457,6 +573,42 @@ textarea {
 
 /* 平板以下：隱藏步驟指示器文字，顯示精緻進度膠囊 */
 @media (max-width: 900px) {
+  .hero-content-grid {
+    grid-template-columns: 1fr;
+    grid-template-areas:
+      "title"
+      "presets"
+      "composer";
+    row-gap: 18px;
+    max-width: 680px !important;
+  }
+
+  .hero-title-block {
+    margin-bottom: 0 !important;
+  }
+
+  .hero-preset-panel {
+    border: none;
+    box-shadow: none;
+    background: transparent;
+    padding: 0;
+  }
+
+  .hero-preset-list {
+    flex-direction: row;
+    gap: 10px;
+    overflow-x: auto;
+    padding: 2px 2px 8px;
+    scroll-snap-type: x mandatory;
+  }
+
+  .hero-preset-card {
+    flex: 0 0 auto;
+    min-width: 230px;
+    max-width: 260px;
+    scroll-snap-align: start;
+  }
+
   .chat-header {
     padding: 0 16px !important;
   }
@@ -472,6 +624,14 @@ textarea {
 
 /* 手機版：精煉設計 */
 @media (max-width: 640px) {
+  .hero-content-grid {
+    max-width: 100% !important;
+  }
+
+  .hero-preset-card {
+    min-width: 78vw;
+  }
+
   .chat-header {
     padding: 0 16px !important;
     height: 56px !important;

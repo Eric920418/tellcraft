@@ -4,6 +4,7 @@
  */
 import { Router, Request, Response } from 'express'
 import { execSync } from 'child_process'
+import { truncateSync } from 'fs'
 import { query, queryOne } from '../db/client'
 import { requireAuth, requireAdmin } from '../middleware/auth'
 import { parseLogLine, sanitizeLogLine, isNoiseLine, type ParsedLogLine } from '../utils/log-parser'
@@ -872,6 +873,15 @@ const LOG_FILES = {
   error: '/var/log/tellcraft/error.log',
 }
 
+function resolveLogFiles(source?: string): string[] {
+  if (!source || source === 'all') {
+    return [LOG_FILES.out, LOG_FILES.error]
+  }
+  if (source === 'out') return [LOG_FILES.out]
+  if (source === 'error') return [LOG_FILES.error]
+  return [LOG_FILES.out, LOG_FILES.error]
+}
+
 /**
  * GET /admin/logs
  * 獲取最近 N 行 VPS 日誌
@@ -884,9 +894,7 @@ router.get('/admin/logs', requireAdmin, async (req: Request, res: Response) => {
     const search = (req.query.search as string) || ''
     const since = (req.query.since as string) || ''
 
-    const filesToRead = source === 'all'
-      ? [LOG_FILES.out, LOG_FILES.error]
-      : [LOG_FILES[source as keyof typeof LOG_FILES] || LOG_FILES.out]
+    const filesToRead = resolveLogFiles(source)
 
     const allLines: ParsedLogLine[] = []
 
@@ -932,6 +940,41 @@ router.get('/admin/logs', requireAdmin, async (req: Request, res: Response) => {
   } catch (error) {
     logger.error({ err: error }, '獲取日誌失敗')
     res.status(500).json({ error: '獲取日誌失敗' })
+  }
+})
+
+/**
+ * DELETE /admin/logs
+ * 清空 PM2 日誌檔（保留檔案本身，僅 truncate 內容）
+ * Query: ?source=all|out|error
+ */
+router.delete('/admin/logs', requireAdmin, async (req: Request, res: Response) => {
+  try {
+    const source = (req.query.source as string) || 'all'
+    const filesToClear = resolveLogFiles(source)
+    let clearedCount = 0
+
+    for (const file of filesToClear) {
+      try {
+        truncateSync(file, 0)
+        clearedCount += 1
+      } catch (error) {
+        const err = error as NodeJS.ErrnoException
+        if (err.code === 'ENOENT') {
+          continue
+        }
+        throw error
+      }
+    }
+
+    res.json({
+      success: true,
+      clearedCount,
+      files: filesToClear,
+    })
+  } catch (error) {
+    logger.error({ err: error }, '清空日誌失敗')
+    res.status(500).json({ error: '清空日誌失敗' })
   }
 })
 

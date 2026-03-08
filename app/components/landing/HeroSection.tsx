@@ -1,11 +1,35 @@
 'use client'
 
-import { useState, useRef, useEffect } from 'react'
-import { motion } from 'framer-motion'
+import { useState, useRef, useEffect, useMemo, useCallback } from 'react'
+import { motion, AnimatePresence } from 'framer-motion'
 import { useTranslations } from 'next-intl'
 import { smoothEasing } from '@/app/lib/chat-utils'
 import ScrollIndicator from './ScrollIndicator'
 import TextType from '@/app/components/TextType'
+
+const VISIBLE_PRESET_COUNT = 4
+const PRESET_ROTATE_INTERVAL_MS = 7000
+
+type PresetDefinition = {
+  key: string
+  title: string
+  summary: string
+  prompt: string
+}
+
+type PresetCard = {
+  id: number
+  preset: PresetDefinition
+}
+
+const pickRandomPresets = (presets: PresetDefinition[], count: number) => {
+  const shuffled = [...presets]
+  for (let i = shuffled.length - 1; i > 0; i -= 1) {
+    const j = Math.floor(Math.random() * (i + 1))
+    ;[shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]]
+  }
+  return shuffled.slice(0, Math.min(count, shuffled.length))
+}
 
 function HeroSection({
   onStartChat,
@@ -33,7 +57,74 @@ function HeroSection({
   const tHero = useTranslations('hero')
   const [isFocused, setIsFocused] = useState(false)
   const [isTransitioning, setIsTransitioning] = useState(false)
+  const [presetCards, setPresetCards] = useState<PresetCard[]>([])
+  const [activePresetKey, setActivePresetKey] = useState<string | null>(null)
   const inputRef = useRef<HTMLTextAreaElement>(null)
+  const presetIdRef = useRef(0)
+  const presetActiveTimeoutRef = useRef<number | null>(null)
+
+  const presetNeuronTitle = tHero('presetNeuronTitle')
+  const presetNeuronSummary = tHero('presetNeuronSummary')
+  const presetNeuronPrompt = tHero('presetNeuronPrompt')
+  const presetSpectrumTitle = tHero('presetSpectrumTitle')
+  const presetSpectrumSummary = tHero('presetSpectrumSummary')
+  const presetSpectrumPrompt = tHero('presetSpectrumPrompt')
+  const presetResonanceTitle = tHero('presetResonanceTitle')
+  const presetResonanceSummary = tHero('presetResonanceSummary')
+  const presetResonancePrompt = tHero('presetResonancePrompt')
+  const presetFiberTitle = tHero('presetFiberTitle')
+  const presetFiberSummary = tHero('presetFiberSummary')
+  const presetFiberPrompt = tHero('presetFiberPrompt')
+
+  const presetDefinitions = useMemo(
+    () => [
+      {
+        key: 'neuron',
+        title: presetNeuronTitle,
+        summary: presetNeuronSummary,
+        prompt: presetNeuronPrompt,
+      },
+      {
+        key: 'spectrum',
+        title: presetSpectrumTitle,
+        summary: presetSpectrumSummary,
+        prompt: presetSpectrumPrompt,
+      },
+      {
+        key: 'resonance',
+        title: presetResonanceTitle,
+        summary: presetResonanceSummary,
+        prompt: presetResonancePrompt,
+      },
+      {
+        key: 'fiber',
+        title: presetFiberTitle,
+        summary: presetFiberSummary,
+        prompt: presetFiberPrompt,
+      },
+    ],
+    [
+      presetNeuronTitle,
+      presetNeuronSummary,
+      presetNeuronPrompt,
+      presetSpectrumTitle,
+      presetSpectrumSummary,
+      presetSpectrumPrompt,
+      presetResonanceTitle,
+      presetResonanceSummary,
+      presetResonancePrompt,
+      presetFiberTitle,
+      presetFiberSummary,
+      presetFiberPrompt,
+    ]
+  )
+
+  const buildPresetCards = useCallback((presets: PresetDefinition[]) => (
+    pickRandomPresets(presets, VISIBLE_PRESET_COUNT).map((preset) => ({
+      id: (presetIdRef.current += 1),
+      preset,
+    }))
+  ), [])
 
   // 返回首頁時重置過渡動畫狀態
   useEffect(() => {
@@ -42,9 +133,64 @@ function HeroSection({
     }
   }, [isChatActive])
 
+  useEffect(() => {
+    setPresetCards(buildPresetCards(presetDefinitions))
+  }, [presetDefinitions, buildPresetCards])
+
+  useEffect(() => {
+    if (isChatActive || isTransitioning || presetDefinitions.length <= VISIBLE_PRESET_COUNT) {
+      return
+    }
+
+    const interval = window.setInterval(() => {
+      setPresetCards((previousCards) => {
+        if (previousCards.length === 0) {
+          return buildPresetCards(presetDefinitions)
+        }
+
+        const existingKeys = new Set(previousCards.map((card) => card.preset.key))
+        const candidates = presetDefinitions.filter((preset) => !existingKeys.has(preset.key))
+        if (candidates.length === 0) return previousCards
+
+        const replaceIndex = Math.floor(Math.random() * previousCards.length)
+        const replacement = candidates[Math.floor(Math.random() * candidates.length)]
+        const nextCards = [...previousCards]
+        nextCards[replaceIndex] = {
+          id: (presetIdRef.current += 1),
+          preset: replacement,
+        }
+        return nextCards
+      })
+    }, PRESET_ROTATE_INTERVAL_MS)
+
+    return () => {
+      window.clearInterval(interval)
+    }
+  }, [presetDefinitions, isChatActive, isTransitioning, buildPresetCards])
+
+  useEffect(() => {
+    return () => {
+      if (presetActiveTimeoutRef.current !== null) {
+        window.clearTimeout(presetActiveTimeoutRef.current)
+      }
+    }
+  }, [])
+
   const trimmedInput = inputValue.trim()
   const isFastModeShortWarning = buildMode === 'fast' && trimmedInput.length > 0 && trimmedInput.length < 15
   const canSubmit = trimmedInput.length > 0 && !isTransitioning
+
+  const handlePresetApply = (preset: PresetDefinition) => {
+    onInputChange(preset.prompt)
+    inputRef.current?.focus()
+    setActivePresetKey(preset.key)
+    if (presetActiveTimeoutRef.current !== null) {
+      window.clearTimeout(presetActiveTimeoutRef.current)
+    }
+    presetActiveTimeoutRef.current = window.setTimeout(() => {
+      setActivePresetKey(null)
+    }, 900)
+  }
 
   const handleStartClick = () => {
     if (!canSubmit) return
@@ -97,14 +243,17 @@ function HeroSection({
         }}
       />
 
-      <div style={{
-        position: 'relative',
-        width: '100%',
-        maxWidth: 600,
-        textAlign: 'center',
-      }}>
+      <div
+        className="hero-content-grid"
+        style={{
+          position: 'relative',
+          width: '100%',
+          maxWidth: 1040,
+        }}
+      >
         {/* 標題區塊 - 先退場 */}
         <motion.div
+          className="hero-title-block"
           animate={{
             opacity: isTransitioning || isChatActive ? 0 : 1,
             y: isTransitioning || isChatActive ? -40 : 0,
@@ -144,8 +293,54 @@ function HeroSection({
           </motion.p>
         </motion.div>
 
+        <motion.aside
+          className="hero-preset-panel"
+          initial={{ opacity: 0, x: -24 }}
+          animate={{
+            opacity: isTransitioning || isChatActive ? 0 : 1,
+            x: isTransitioning || isChatActive ? -16 : 0,
+            y: isTransitioning || isChatActive ? 10 : 0,
+          }}
+          transition={{
+            duration: 0.4,
+            ease: smoothEasing,
+            delay: isTransitioning ? 0 : 0.65,
+          }}
+        >
+          <div className="hero-preset-header">
+            <span>{tHero('presetTitle')}</span>
+            <p>{tHero('presetSubtitle')}</p>
+          </div>
+          <div className="hero-preset-list" role="list" aria-label={tHero('presetTitle')}>
+            <AnimatePresence initial={false} mode="popLayout">
+              {presetCards.map((card, index) => (
+                <motion.button
+                  key={card.id}
+                  layout
+                  role="listitem"
+                  whileHover={{ y: -2, scale: 1.01 }}
+                  whileTap={{ scale: 0.98 }}
+                  initial={{ opacity: 0, y: 10, scale: 0.98 }}
+                  animate={{ opacity: 1, y: 0, scale: 1 }}
+                  exit={{ opacity: 0, y: -10, scale: 0.98 }}
+                  transition={{ duration: 0.25, ease: smoothEasing }}
+                  onClick={() => handlePresetApply(card.preset)}
+                  className={`hero-preset-card ${activePresetKey === card.preset.key ? 'is-active' : ''}`}
+                >
+                  <span className="hero-preset-index">{`${index + 1}`.padStart(2, '0')}</span>
+                  <span className="hero-preset-content">
+                    <span className="hero-preset-card-title">{card.preset.title}</span>
+                    <span className="hero-preset-card-summary">{card.preset.summary}</span>
+                  </span>
+                </motion.button>
+              ))}
+            </AnimatePresence>
+          </div>
+        </motion.aside>
+
         {/* 輸入框區塊 - 稍後退場，有不同的動態 */}
         <motion.div
+          className="hero-composer-block"
           initial={{ opacity: 0, y: 30 }}
           animate={{
             opacity: isTransitioning || isChatActive ? 0 : 1,
