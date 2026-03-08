@@ -174,6 +174,7 @@ export default function ProjectsPage() {
       key: 'pin',
       header: '',
       width: '40px',
+      truncate: false,
       render: (project: Project) => (
         <button
           onClick={(e) => {
@@ -220,6 +221,7 @@ export default function ProjectsPage() {
       key: 'status',
       header: t('statusLabel'),
       width: '120px',
+      truncate: false,
       render: (project: Project) => (
         <StatusBadge
           status={getStatusLabel(project.status)}
@@ -231,6 +233,7 @@ export default function ProjectsPage() {
       key: 'conversationCount',
       header: t('conversationsHeader'),
       width: '80px',
+      truncate: false,
       render: (project: Project) => (
         <span style={{ fontFamily: 'var(--font-mono)' }}>{project.conversationCount}</span>
       ),
@@ -263,12 +266,14 @@ export default function ProjectsPage() {
       key: 'actions',
       header: '',
       width: '64px',
+      truncate: false,
       render: (project: Project) => renderProjectDetailAction(project),
     },
     {
       key: 'updatedAt',
       header: t('updatedAt'),
       width: '140px',
+      truncate: false,
       render: (project: Project) => (
         <span style={{ fontSize: 12, color: 'var(--gray-400)' }}>
           {new Date(project.updatedAt).toLocaleDateString('zh-TW')}
@@ -282,6 +287,7 @@ export default function ProjectsPage() {
       key: 'pin',
       header: '',
       width: '40px',
+      truncate: false,
       render: (project: Project) => (
         <button
           onClick={(e) => {
@@ -334,6 +340,7 @@ export default function ProjectsPage() {
       key: 'actions',
       header: '',
       width: '64px',
+      truncate: false,
       render: (project: Project) => renderProjectDetailAction(project),
     },
   ]

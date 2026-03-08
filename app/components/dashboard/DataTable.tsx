@@ -10,6 +10,7 @@ export interface Column<T> {
   width?: string
   render?: (item: T) => React.ReactNode
   sortable?: boolean
+  truncate?: boolean
 }
 
 interface DataTableProps<T> {
@@ -158,23 +159,27 @@ export default function DataTable<T extends object>({
                     transition: 'background 0.15s ease',
                   }}
                 >
-                  {columns.map((column) => (
-                    <div
-                      key={String(column.key)}
-                      style={{
-                        padding: '14px 16px',
-                        fontSize: 14,
-                        color: 'var(--gray-700)',
-                        overflow: 'hidden',
-                        textOverflow: 'ellipsis',
-                        whiteSpace: 'nowrap',
-                      }}
-                    >
-                      {column.render
-                        ? column.render(item)
-                        : String(item[column.key as keyof T] ?? '')}
-                    </div>
-                  ))}
+                  {columns.map((column) => {
+                    const shouldTruncate = column.truncate !== false
+
+                    return (
+                      <div
+                        key={String(column.key)}
+                        style={{
+                          padding: '14px 16px',
+                          fontSize: 14,
+                          color: 'var(--gray-700)',
+                          overflow: shouldTruncate ? 'hidden' : 'visible',
+                          textOverflow: shouldTruncate ? 'ellipsis' : 'clip',
+                          whiteSpace: shouldTruncate ? 'nowrap' : 'normal',
+                        }}
+                      >
+                        {column.render
+                          ? column.render(item)
+                          : String(item[column.key as keyof T] ?? '')}
+                      </div>
+                    )
+                  })}
                 </motion.div>
               )
             })
