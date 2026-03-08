@@ -303,6 +303,16 @@ export async function handleUiuxMixedPhaseRouting(
       return
     }
 
+    // uiux_template_selection 階段：自然語言匹配（序號、名稱）
+    if (state.phase === 'uiux_template_selection') {
+      try {
+        await handleTemplateNaturalSelection(conversationId, state, message, redis, io)
+      } catch (err) {
+        await handlePhaseError(conversationId, state, err, redis, io)
+      }
+      return
+    }
+
     // 檢查是否是變體選擇訊息（支援多種自然語言表達，含全形）
     if (
       normalizedMsg.includes('選擇變體') ||
@@ -509,6 +519,99 @@ export async function handleUiuxMixedPhaseRouting(
 // ============================================================
 // UIUX Core Functions
 // ============================================================
+
+/**
+ * 從自然語言訊息中解析模板序號
+ * 支援：「第一個」「第1個」「1」「first」「1st」等
+ */
+function parseTemplateOrdinal(msg: string): number | null {
+  const trimmed = msg.trim()
+
+  // 純數字：「1」「2」
+  const numMatch = trimmed.match(/^(\d+)$/)
+  if (numMatch) return parseInt(numMatch[1])
+
+  // 中文序數：「第一個」「第1個」「第一」「第三個模板」
+  const zhMap: Record<string, number> = {
+    '一': 1, '二': 2, '三': 3, '四': 4, '五': 5,
+    '六': 6, '七': 7, '八': 8, '九': 9, '十': 10,
+    '1': 1, '2': 2, '3': 3, '4': 4, '5': 5,
+    '6': 6, '7': 7, '8': 8, '9': 9, '10': 10,
+  }
+  const zhMatch = trimmed.match(/第([一二三四五六七八九十\d]+)/)
+  if (zhMatch) return zhMap[zhMatch[1]] ?? null
+
+  // 英文序數
+  const lower = trimmed.toLowerCase()
+  const enMap: Record<string, number> = {
+    'first': 1, '1st': 1, 'second': 2, '2nd': 2, 'third': 3, '3rd': 3,
+    'fourth': 4, '4th': 4, 'fifth': 5, '5th': 5,
+  }
+  for (const [key, val] of Object.entries(enMap)) {
+    if (lower.includes(key)) return val
+  }
+
+  return null
+}
+
+/**
+ * uiux_template_selection 階段的自然語言匹配
+ * 當用戶不按按鈕，直接打字「第一個」「這個」「1」時的處理
+ */
+async function handleTemplateNaturalSelection(
+  conversationId: string,
+  state: FlowState,
+  message: string,
+  redis: Redis,
+  io: SocketIOServer
+) {
+  const templates = state.displayedTemplates
+  if (!templates || templates.length === 0) {
+    // 沒有模板列表（舊 FlowState），提示用戶使用按鈕
+    await sendMessage(conversationId, io, {
+      content: '請點擊模板卡片後按「使用此模板」按鈕來選擇。',
+      stage: 'info',
+    })
+    return
+  }
+
+  // 1. 嘗試序號匹配
+  const ordinal = parseTemplateOrdinal(message)
+  if (ordinal !== null) {
+    if (ordinal >= 1 && ordinal <= templates.length) {
+      const selected = templates[ordinal - 1]
+      logger.info({ ordinal, templateId: selected.id, templateName: selected.name }, '序號匹配模板')
+      const synthesized = `我選擇「${selected.name}」這個模板`
+      await handleTemplateSelection(conversationId, state, synthesized, redis, io)
+      return
+    }
+    // 序號超出範圍
+    await sendMessage(conversationId, io, {
+      content: `目前有 ${templates.length} 個模板，請輸入 1~${templates.length} 的編號。`,
+      stage: 'info',
+    })
+    return
+  }
+
+  // 2. 嘗試名稱模糊匹配
+  const lowerMsg = message.toLowerCase().trim()
+  const nameMatches = templates.filter(t =>
+    t.name.toLowerCase().includes(lowerMsg) || lowerMsg.includes(t.name.toLowerCase())
+  )
+  if (nameMatches.length === 1) {
+    logger.info({ templateId: nameMatches[0].id, templateName: nameMatches[0].name }, '名稱匹配模板')
+    const synthesized = `我選擇「${nameMatches[0].name}」這個模板`
+    await handleTemplateSelection(conversationId, state, synthesized, redis, io)
+    return
+  }
+
+  // 3. 沒有匹配：列出模板讓用戶選擇
+  const list = templates.map((t, i) => `**${i + 1}.** ${t.name}`).join('\n')
+  await sendMessage(conversationId, io, {
+    content: `請選擇一個模板（輸入編號即可）：\n\n${list}`,
+    stage: 'info',
+  })
+}
 
 export async function handleTemplateSelection(
   conversationId: string,
@@ -2419,6 +2522,7 @@ export async function showTemplatePicker(
   state.phase = 'uiux_template_selection'
   state.lastStablePhase = 'uiux_template_selection'
   state.waitingForReply = false
+  state.displayedTemplates = templates.map(t => ({ id: t.id, name: t.name }))
   await saveFlowState(redis, conversationId, state)
 }
 
