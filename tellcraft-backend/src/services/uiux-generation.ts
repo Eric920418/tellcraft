@@ -2018,6 +2018,12 @@ ${productContext?.layoutMode === 'app'
 - Header/Footer 的導航連結要對應你最終決定的頁面結構
 - 頁面中使用有意義的模擬數據（和產品領域相關，不要用 Lorem ipsum）`}
 ${variantConcept ? `- 每個頁面都必須體現「${variantConcept.name}」的創意概念，不是只有首頁` : ''}
+${pages.length >= 5 ? `
+**多頁面策略（${pages.length} 個頁面）**：
+- 主要頁面（首頁、核心功能頁）：完整 Section + 豐富互動
+- 次要頁面（關於、聯繫、FAQ）：精簡 1-2 個 Section
+- 共用組件盡量抽取（ProductCard、ContactForm 等）多頁面複用
+- Layout 組件統一管理 Header/Footer 導航` : ''}
 
 ## 模板資訊（設計風格參考）
 - 名稱：${template.name}

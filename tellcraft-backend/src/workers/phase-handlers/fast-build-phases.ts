@@ -18,6 +18,7 @@ import {
   buildDefaultDesignSystem, buildMinimalTemplate,
   inferInteractionHint, getTemplateStyleHint, inferLayoutMode,
   PRODUCT_TYPE_LABELS, generateFastConcept, expandBriefPrompt,
+  mergePages,
 } from '../../services/fast-build-generation'
 import { buildUISpecSummary } from '../../services/bdd-to-ui-spec'
 import { sendMessage, saveFlowState, getFlowState, deleteFlowState, makeStreamingCallback, generatedCodeToFileRows, deductCredits } from '../orchestrator-utils'
@@ -59,21 +60,16 @@ export async function executeFastBuildSkill(params: {
     logger.warn({ err: e }, '模板風格提示查詢失敗，降級跳過')
   }
 
-  // ── 並行：Haiku 概念生成 + Prompt 擴展 ──
+  // ── 順序執行：先概念生成（取 suggestedPages）→ 合併頁面 → Prompt 擴展 ──
   let variantConcept: VariantConcept | undefined
   let expandedPrompt: string | null = null
+  let finalPages = pages
   {
     const palette = designSystem.colorPalette as { primary?: string } | undefined
-    const [concept, expanded] = await Promise.all([
-      generateFastConcept(
-        message, productType, tier, palette?.primary || '#6366f1',
-        { userId, conversationId }
-      ).catch(() => null),
-      expandBriefPrompt(message, productType, pages, { userId, conversationId })
-        .catch(() => null),
-    ])
-
-    expandedPrompt = expanded
+    const concept = await generateFastConcept(
+      message, productType, tier, palette?.primary || '#6366f1',
+      { userId, conversationId }
+    ).catch(() => null)
 
     if (concept) {
       variantConcept = {
@@ -84,7 +80,7 @@ export async function executeFastBuildSkill(params: {
         previewDescription: concept.vibe,
         sourceVariantIds: [],
       }
-      logger.info(`概念生成成功: "${concept.name}" (suggested tier: ${concept.suggestedTier || 'N/A'})`)
+      logger.info(`概念生成成功: "${concept.name}" (suggested tier: ${concept.suggestedTier || 'N/A'}, suggestedPages: ${concept.suggestedPages?.join(',') || 'N/A'})`)
 
       // Tier 智能修正（Haiku 判斷 vs 規則不一致時以 Haiku 為準）
       if (concept.suggestedTier && concept.suggestedTier !== tier) {
@@ -92,7 +88,16 @@ export async function executeFastBuildSkill(params: {
         tier = concept.suggestedTier
         designSystem = buildDefaultDesignSystem(tier, productType)
       }
+
+      // 合併頁面（DEFAULT_PAGES + Haiku suggestedPages）
+      finalPages = mergePages(pages, concept.suggestedPages)
+      if (finalPages.length !== pages.length) {
+        logger.info(`頁面合併: ${pages.length} → ${finalPages.length} [${finalPages.join(',')}]`)
+      }
     }
+
+    expandedPrompt = await expandBriefPrompt(message, productType, finalPages, { userId, conversationId })
+      .catch(() => null)
 
     if (expandedPrompt) {
       logger.info(`Prompt 擴展成功（${expandedPrompt.length} 字）`)
@@ -150,7 +155,7 @@ export async function executeFastBuildSkill(params: {
   const interactionHint = inferInteractionHint(productType)
   const structureResult = await generateStructure(
     designSystem,
-    pages,
+    finalPages,
     template,
     undefined, // 無 bddSpec
     tier,

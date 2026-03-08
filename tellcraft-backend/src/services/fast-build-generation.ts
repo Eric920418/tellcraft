@@ -158,29 +158,33 @@ export function inferProductType(description: string): string {
 // ============================================================
 
 const DEFAULT_PAGES: Record<string, string[]> = {
+  // ── 複雜產品（5-7 頁）──
+  ecommerce: ['首頁', '商品列表', '商品詳情', '購物車', '結帳', '會員中心', '聯繫'],
+  saas: ['首頁', '功能介紹', '價格方案', '使用案例', '常見問題', '聯繫'],
+  hotel: ['首頁', '房型介紹', '設施服務', '餐飲', '訂房', '聯繫'],
+  healthcare: ['首頁', '科別介紹', '醫師團隊', '線上掛號', '衛教專區', '聯繫'],
+  education: ['首頁', '課程列表', '課程詳情', '師資介紹', '常見問題', '聯繫'],
+  salon: ['首頁', '服務項目', '作品展示', '設計師團隊', '預約', '聯繫'],
+  // ── 中等複雜（5 頁）──
+  realestate: ['首頁', '物件列表', '物件詳情', '關於我們', '聯繫'],
+  travel: ['首頁', '行程列表', '行程詳情', '旅遊攻略', '聯繫'],
+  fitness: ['首頁', '課表', '教練團隊', '會員方案', '聯繫'],
+  retail: ['首頁', '產品列表', '產品詳情', '門市資訊', '聯繫'],
+  // ── 標準產品（4 頁）──
   restaurant: ['首頁', '菜單', '關於我們', '聯繫'],
   cafe: ['首頁', '菜單', '關於', '聯繫'],
-  fitness: ['首頁', '課表', '教練', '聯繫'],
-  healthcare: ['首頁', '科別介紹', '醫師團隊', '聯繫'],
-  education: ['首頁', '課程列表', '師資', '聯繫'],
-  realestate: ['首頁', '物件列表', '關於', '聯繫'],
-  travel: ['首頁', '行程列表', '關於', '聯繫'],
   agency: ['首頁', '案例', '服務', '聯繫'],
-  salon: ['首頁', '服務項目', '預約', '聯繫'],
   legal: ['首頁', '服務領域', '律師團隊', '聯繫'],
   finance: ['首頁', '服務', '關於', '聯繫'],
   nonprofit: ['首頁', '使命', '活動', '捐款'],
-  retail: ['首頁', '產品', '門市', '聯繫'],
-  hotel: ['首頁', '房型', '設施', '訂房'],
   wedding: ['首頁', '作品', '方案', '聯繫'],
   music: ['首頁', '音樂', '演出', '聯繫'],
   photography: ['首頁', '作品集', '方案', '聯繫'],
   portfolio: ['首頁', '作品集', '關於我', '聯繫'],
   blog: ['首頁', '文章列表', '關於'],
+  // ── 簡單產品（1-3 頁，維持不變）──
   tool: ['主頁面'],
   dashboard: ['Dashboard'],
-  saas: ['首頁', '功能介紹', '價格', '聯繫'],
-  ecommerce: ['首頁', '產品列表', '關於', '聯繫'],
   landing: ['首頁'],
   event: ['首頁', '活動詳情', '報名'],
   personal: ['首頁', '關於我', '聯繫'],
@@ -226,6 +230,27 @@ export function inferPages(description: string, productType: string): string[] {
   }
 
   return DEFAULT_PAGES[productType] || ['首頁']
+}
+
+// ============================================================
+// 頁面合併（DEFAULT_PAGES + Haiku suggestedPages）
+// ============================================================
+
+/**
+ * 合併預設頁面和 Haiku 建議頁面，去重後截斷
+ * - defaultPages 為基底，suggestedPages 補充
+ * - 去重用正規化 key（去空白+小寫）
+ * - 上限 maxPages 個
+ */
+export function mergePages(defaultPages: string[], suggestedPages?: string[], maxPages = 7): string[] {
+  if (!suggestedPages?.length) return defaultPages.slice(0, maxPages)
+  const seen = new Map<string, string>()
+  for (const p of defaultPages) seen.set(p.replace(/\s/g, '').toLowerCase(), p)
+  for (const p of suggestedPages) {
+    const key = p.replace(/\s/g, '').toLowerCase()
+    if (!seen.has(key)) seen.set(key, p)
+  }
+  return Array.from(seen.values()).slice(0, maxPages)
 }
 
 // ============================================================
@@ -618,27 +643,36 @@ const INTERACTION_HINTS: Record<string, string> = {
 - 預約功能（如適用）：日期選擇 + 人數 → 提交表單`,
   cafe: `- 菜單頁：分類篩選（咖啡/茶/甜點），點擊分類即時過濾
 - 聯繫頁：聯繫表單（姓名、Email、訊息），提交後顯示成功提示`,
-  fitness: `- 課表頁：週曆/日曆切換，點擊時段查看課程詳情
-- 教練頁：教練卡片，點擊展開詳細資歷 Modal
+  fitness: `- 課表頁：週曆/日曆切換，點擊時段查看課程詳情 Modal
+- 教練團隊：教練卡片（照片/專長/證照），點擊展開詳細資歷
+- 會員方案：方案比較表（月費/季費/年費）+ 方案特色 + CTA 報名按鈕
 - 聯繫頁：免費體驗預約表單（日期+時段+姓名+電話）`,
-  healthcare: `- 科別介紹：Tab 或 Accordion 切換不同科別
-- 醫師團隊：醫師卡片，點擊展開專長與經歷
-- 線上掛號：選擇科別 → 選擇醫師 → 選擇日期時段 → 填資料 → 確認`,
-  education: `- 課程列表：分類篩選（依難度/類型），搜尋框即時過濾
-- 課程詳情：章節大綱 Accordion + 報名按鈕 → Modal 表單
-- 師資介紹：教師卡片，點擊展開經歷`,
-  realestate: `- 物件列表：篩選（地區/價格/坪數/類型），搜尋框
-- 物件卡片：點擊查看詳情（Modal 或跳轉，含照片輪播）
+  healthcare: `- 科別介紹：Tab 或 Accordion 切換不同科別，含服務說明與常見症狀
+- 醫師團隊：醫師卡片，點擊展開專長/經歷/門診時間
+- 線上掛號：選擇科別 → 選擇醫師 → 選擇日期時段 → 填寫個人資料 → 確認
+- 衛教專區：文章列表 + 分類篩選（依科別）+ 搜尋框
+- 聯繫頁：地圖 + 交通指引 + 聯繫表單`,
+  education: `- 課程列表：分類篩選（依難度/類型/科目），搜尋框即時過濾
+- 課程詳情：章節大綱 Accordion + 課程時長/費用 + 報名按鈕 → Modal 表單
+- 師資介紹：教師卡片，點擊展開經歷/專長/學歷
+- 常見問題：Accordion 展開/收合（報名流程/退費/證書等）
+- 聯繫頁：聯繫表單 + 校區地圖`,
+  realestate: `- 物件列表：篩選（地區/價格/坪數/類型），搜尋框，列表/網格切換
+- 物件詳情：照片輪播 + 格局圖 + 設備清單 + 價格 + 地址地圖 + 聯繫按鈕
+- 關於我們：公司介紹 + 團隊成員 + 服務理念
 - 聯繫表單：物件編號自動帶入，姓名+電話+訊息`,
-  travel: `- 行程列表：篩選（目的地/天數/價格），搜尋框
-- 行程卡片：點擊查看詳情（含日程表、照片、價格）
-- 報名表單：選擇日期 + 人數 → 填寫資料 → 送出`,
+  travel: `- 行程列表：篩選（目的地/天數/價格），搜尋框，卡片展示
+- 行程詳情：日程表 Accordion（每日行程）+ 照片輪播 + 價格 + 包含/不包含 + 報名按鈕
+- 旅遊攻略：文章列表 + 目的地分類篩選 + 搜尋
+- 報名表單：選擇日期 + 人數 → 填寫資料 → 送出確認`,
   agency: `- 案例展示：分類篩選（依服務類型），Lightbox 瀏覽
 - 服務介紹：Tab 切換不同服務項目
 - 聯繫表單：姓名、公司、Email、需求描述`,
-  salon: `- 服務項目：分類（剪髮/染燙/護理），價格表
-- 預約系統：選擇服務 → 選設計師 → 選日期時段 → 填資料
-- 作品展示：照片牆 Lightbox，before/after 對比`,
+  salon: `- 服務項目：分類（剪髮/染燙/護理/美甲），價格表 + 時長
+- 作品展示：照片牆 Lightbox，before/after 對比滑動
+- 設計師團隊：設計師卡片（照片/專長/年資），點擊查看作品集
+- 預約系統：選擇服務 → 選設計師 → 選日期時段 → 填資料 → 確認
+- 聯繫頁：營業時間 + 地址地圖 + 聯繫表單`,
   legal: `- 服務領域：Accordion 或 Tab 展開各領域說明
 - 律師團隊：律師卡片，點擊查看專長/學歷/經歷
 - 免費諮詢表單：姓名、電話、Email、案件簡述`,
@@ -648,12 +682,15 @@ const INTERACTION_HINTS: Record<string, string> = {
   nonprofit: `- 捐款區：金額選擇按鈕 + 自訂金額輸入
 - 活動列表：時間軸或卡片，點擊查看詳情
 - 志工報名表單：姓名、Email、可用時段`,
-  retail: `- 產品展示：分類篩選 + 搜尋框
-- 門市資訊：地圖嵌入（或列表），營業時間
+  retail: `- 產品列表：分類篩選 + 搜尋框 + 價格排序
+- 產品詳情：照片輪播 + 規格說明 + 價格 + 庫存狀態 + 門市可取貨標示
+- 門市資訊：地圖嵌入 + 各門市營業時間/地址/電話
 - 聯繫表單 + 會員優惠申請`,
-  hotel: `- 房型介紹：Tab 或卡片切換不同房型（含照片輪播）
-- 設施服務：Icon Grid + 點擊展開說明
-- 訂房表單：入住/退房日期 + 房型 + 人數 → 送出`,
+  hotel: `- 房型介紹：Tab 或卡片切換不同房型（含照片輪播 + 設備圖標 + 價格）
+- 設施服務：Icon Grid + 點擊展開說明（泳池/健身房/Spa/商務中心）
+- 餐飲頁：餐廳介紹卡片 + 菜單分類瀏覽 + 營業時間
+- 訂房表單：入住/退房日期選擇 + 房型下拉 + 人數 + 特殊需求文字框 → 送出確認
+- 聯繫頁：地圖嵌入 + 交通指引 + 聯繫表單`,
   wedding: `- 照片/影片展示：Lightbox 全螢幕瀏覽
 - 服務方案：卡片比較表（方案 A/B/C）
 - 諮詢表單：婚期、預算範圍、聯繫方式`,
@@ -677,13 +714,17 @@ const INTERACTION_HINTS: Record<string, string> = {
 - 新增資料：按鈕 → Modal 表單 → 提交加入列表
 - 刪除資料：按鈕 → AlertDialog 確認 → 移除
 - 編輯資料：按鈕 → 預填 Modal → 提交更新`,
-  saas: `- 價格頁：月付/年付切換（toggle 控制顯示不同價格）
-- 功能頁：Tab 或 Accordion 切換不同功能模組說明
+  saas: `- 功能介紹：Tab 或 Accordion 切換不同功能模組，含螢幕截圖/動圖展示
+- 價格方案：月付/年付切換 Toggle + 方案比較表（免費/專業/企業）+ CTA 按鈕
+- 使用案例：客戶案例卡片 + 產業分類篩選 + 點擊展開詳情
+- 常見問題：Accordion 展開/收合 + 搜尋過濾
 - CTA 按鈕：點擊滾動到註冊區域或打開註冊 Modal
 - 聯繫頁：聯繫表單，提交後顯示成功提示`,
-  ecommerce: `- 產品列表：分類篩選 + 搜尋框即時過濾
-- 產品卡片：點擊查看詳情（Modal 或跳轉）
-- 加入購物車按鈕：點擊後更新購物車計數
+  ecommerce: `- 商品列表：分類篩選 + 搜尋框即時過濾 + 價格排序
+- 商品詳情：圖片輪播 + 規格選擇（尺寸/顏色）+ 數量調整 + 加入購物車按鈕 + 相關商品推薦
+- 購物車：商品列表（含縮圖）+ 數量調整（+/-）+ 刪除按鈕 + 小計/總計即時更新 + 前往結帳按鈕
+- 結帳：收件資訊表單（姓名/地址/電話）+ 付款方式選擇（信用卡/轉帳）+ 訂單摘要 + 確認下單
+- 會員中心：Tab 切換（訂單記錄/個人資料/收藏清單）+ 訂單狀態標籤（處理中/已出貨/已完成）
 - 聯繫頁：聯繫表單，提交後顯示成功提示`,
   landing: `- CTA 按鈕：點擊滾動到對應區域或打開表單 Modal
 - FAQ 區域：Accordion 展開/收合
@@ -812,6 +853,7 @@ export interface FastConcept {
   signatureElement: string
   keyFeatures: string[]
   suggestedTier?: DesignTier
+  suggestedPages?: string[]
 }
 
 /**
@@ -829,12 +871,14 @@ export async function generateFastConcept(
     const isChinese = /[\u4e00-\u9fff\u3400-\u4dbf]/.test(description)
     const systemPrompt = isChinese
       ? `你是設計顧問。根據產品描述生成設計概念。回覆嚴格 JSON（無其他文字）：
-{"name":"概念名稱(2-4字)","vibe":"設計氛圍描述(1句話)","signatureElement":"一個招牌視覺元素(具體的設計手法)","keyFeatures":["設計特徵1","設計特徵2","設計特徵3"],"suggestedTier":"functional或creative"}
+{"name":"概念名稱(2-4字)","vibe":"設計氛圍描述(1句話)","signatureElement":"一個招牌視覺元素(具體的設計手法)","keyFeatures":["設計特徵1","設計特徵2","設計特徵3"],"suggestedTier":"functional或creative","suggestedPages":["頁面1","頁面2",...]}
 suggestedTier 判斷規則：dashboard/admin/SaaS 工具型 → functional；品牌展示/創意/個性化 → creative。
+suggestedPages：列出該產品完整用戶體驗所需的所有頁面（5-7個），從用戶旅程角度思考（瀏覽→選擇→操作→完成）。
 讓概念獨特，避免泛用描述。signatureElement 要具體到能直接寫代碼（如「hero 區域的漸層玻璃態卡片」而非「現代設計」）。`
       : `You are a design consultant. Generate a design concept from the product description. Reply strictly JSON (no other text):
-{"name":"Concept name(2-4 words)","vibe":"Design vibe(1 sentence)","signatureElement":"One signature visual element(specific design technique)","keyFeatures":["Feature 1","Feature 2","Feature 3"],"suggestedTier":"functional or creative"}
+{"name":"Concept name(2-4 words)","vibe":"Design vibe(1 sentence)","signatureElement":"One signature visual element(specific design technique)","keyFeatures":["Feature 1","Feature 2","Feature 3"],"suggestedTier":"functional or creative","suggestedPages":["Page 1","Page 2",...]}
 suggestedTier rules: dashboard/admin/SaaS tools → functional; brand/creative/personality → creative.
+suggestedPages: List all pages needed for a complete user experience (5-7 pages), think from the user journey (browse→select→act→complete).
 Make the concept unique. signatureElement must be specific enough to code (e.g. "frosted glass hero cards with gradient border" not "modern design").`
 
     const userMsg = isChinese
@@ -846,7 +890,7 @@ Make the concept unique. signatureElement must be specific enough to code (e.g. 
       headers: getAnthropicHeaders(),
       body: JSON.stringify({
         model: MODEL.HAIKU,
-        max_tokens: 300,
+        max_tokens: 500,
         temperature: 0.7,
         system: systemPrompt,
         messages: [{ role: 'user', content: userMsg }],
@@ -900,12 +944,22 @@ Make the concept unique. signatureElement must be specific enough to code (e.g. 
       parsed.suggestedTier = undefined
     }
 
+    // 驗證 suggestedPages
+    let suggestedPages: string[] | undefined
+    if (Array.isArray(parsed.suggestedPages)) {
+      suggestedPages = parsed.suggestedPages
+        .filter((p): p is string => typeof p === 'string' && p.trim().length > 0)
+        .slice(0, 7)
+      if (suggestedPages.length === 0) suggestedPages = undefined
+    }
+
     return {
       name: parsed.name,
       vibe: parsed.vibe,
       signatureElement: parsed.signatureElement,
       keyFeatures: Array.isArray(parsed.keyFeatures) ? parsed.keyFeatures.slice(0, 5) : [],
       suggestedTier: parsed.suggestedTier,
+      suggestedPages,
     }
   } catch (err) {
     logger.warn({ err }, 'FastConcept 生成失敗，降級跳過')
@@ -952,7 +1006,7 @@ export async function expandBriefPrompt(
       ? `你是網站內容策劃師。根據用戶的簡短描述，擴展為完整的網站內容需求。
 
 規則：
-1. 頁面結構嚴格按照提供的頁面列表，不要自行新增頁面
+1. 以提供的頁面列表為核心骨架，為每個頁面描述具體內容。可以微調頁面名稱，但不要刪除核心頁面
 2. 每個頁面描述具體的區塊內容（Hero、特色、列表、CTA 等）
 3. 提供具體的示範文案（真實的品名/價格/描述，不是 placeholder 如「項目1」「描述文字」）
 4. 包含功能細節和 CTA 文案
@@ -961,7 +1015,7 @@ export async function expandBriefPrompt(
       : `You are a website content planner. Expand the user's brief description into a complete website content requirement.
 
 Rules:
-1. Follow the provided page list strictly, do not add new pages
+1. Use the provided page list as the core skeleton, describe specific content for each page. You may fine-tune page names but do not remove core pages
 2. Describe specific sections for each page (Hero, Features, List, CTA, etc.)
 3. Provide concrete sample copy (real names/prices/descriptions, NOT placeholders like "Item 1" or "Description text")
 4. Include functional details and CTA copy

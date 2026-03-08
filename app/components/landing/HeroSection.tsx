@@ -59,6 +59,7 @@ function HeroSection({
   const [isTransitioning, setIsTransitioning] = useState(false)
   const [presetCards, setPresetCards] = useState<PresetCard[]>([])
   const [activePresetKey, setActivePresetKey] = useState<string | null>(null)
+  const [isPresetOpen, setIsPresetOpen] = useState(true)
   const inputRef = useRef<HTMLTextAreaElement>(null)
   const presetIdRef = useRef(0)
   const presetActiveTimeoutRef = useRef<number | null>(null)
@@ -297,11 +298,11 @@ function HeroSection({
 
         <motion.aside
           className="hero-preset-panel"
-          initial={{ opacity: 0, x: -24 }}
+          initial={{ opacity: 0, x: -260, y: '-50%' }}
           animate={{
             opacity: isTransitioning || isChatActive ? 0 : 1,
-            x: isTransitioning || isChatActive ? -16 : 0,
-            y: isTransitioning || isChatActive ? 10 : 0,
+            x: isTransitioning || isChatActive ? -260 : isPresetOpen ? 0 : -248,
+            y: '-50%',
           }}
           transition={{
             duration: 0.4,
@@ -309,6 +310,20 @@ function HeroSection({
             delay: isTransitioning ? 0 : 0.65,
           }}
         >
+          {/* 伸縮 toggle */}
+          <button
+            className="hero-preset-toggle"
+            onClick={() => setIsPresetOpen((prev) => !prev)}
+            aria-label={isPresetOpen ? 'Collapse presets' : 'Expand presets'}
+          >
+            <motion.span
+              animate={{ rotate: isPresetOpen ? 180 : 0 }}
+              transition={{ duration: 0.25 }}
+              style={{ display: 'inline-block', lineHeight: 1 }}
+            >
+              ›
+            </motion.span>
+          </button>
           <div className="hero-preset-header">
             <span>{tHero('presetTitle')}</span>
             <p>{tHero('presetSubtitle')}</p>

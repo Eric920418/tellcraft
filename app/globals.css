@@ -261,12 +261,37 @@ textarea {
   position: absolute;
   left: 20px;
   top: 50%;
-  transform: translateY(-50%);
+  /* transform 由 Framer Motion 控制（y: '-50%' 垂直置中 + x 伸縮） */
   width: 260px;
   padding: 14px;
   border: 1px solid var(--border-color);
   background: var(--white);
   box-shadow: 0 6px 20px rgba(0, 0, 0, 0.04);
+}
+
+.hero-preset-toggle {
+  position: absolute;
+  right: -28px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 24px;
+  height: 48px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--white);
+  border: 1px solid var(--border-color);
+  border-left: none;
+  border-radius: 0 6px 6px 0;
+  cursor: pointer;
+  font-size: 16px;
+  color: var(--gray-500);
+  transition: color 0.2s ease, background 0.2s ease;
+}
+
+.hero-preset-toggle:hover {
+  color: var(--text-primary);
+  background: var(--gray-50);
 }
 
 .hero-preset-header {
@@ -574,29 +599,7 @@ textarea {
   }
 
   .hero-preset-panel {
-    position: static;
-    transform: none;
-    width: 100%;
-    border: none;
-    box-shadow: none;
-    background: transparent;
-    padding: 0;
-    margin-bottom: 12px;
-  }
-
-  .hero-preset-list {
-    flex-direction: row;
-    gap: 10px;
-    overflow-x: auto;
-    padding: 2px 2px 8px;
-    scroll-snap-type: x mandatory;
-  }
-
-  .hero-preset-card {
-    flex: 0 0 auto;
-    min-width: 230px;
-    max-width: 260px;
-    scroll-snap-align: start;
+    display: none !important;
   }
 }
 
@@ -619,10 +622,6 @@ textarea {
 @media (max-width: 640px) {
   .hero-content-grid {
     max-width: 100% !important;
-  }
-
-  .hero-preset-card {
-    min-width: 78vw;
   }
 
   .chat-header {

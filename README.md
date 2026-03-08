@@ -122,7 +122,7 @@ npx ts-node bdd-spec/scripts/validate-feature.ts spec/features/
 
 **精細模式 + 自動採用**：PRD Clarify 第一題出現「全部自動採用 AI 建議」按鈕 → 自動回答所有 BDD 問題（propose→proposedAnswer / ask→建議選項或 A）→ 自動確認草稿 → 自動回答 Spec Clarify → 進入設計階段（手動）。BDD 互動從 7-11 次降到 1 次。`FlowState.autoAdoptMode` 在 `completeSpecPhase` 末尾清除，`autoAdoptAllPendingQuestions` 有 MAX_ITERATIONS=200 安全閥。
 
-**快速模式（Fast）**：一句話描述 → 規則式推斷（tier/產品類型/配色/佈局） → Haiku 概念+Prompt 擴展（並行） → Structure → Animation → RWD → 靜態 QG
+**快速模式（Fast）**：一句話描述 → 規則式推斷（tier/產品類型/配色/佈局） → Haiku 概念生成（含頁面推理 suggestedPages）→ `mergePages()` 合併預設+建議頁面（上限 7 頁）→ Prompt 擴展 → Structure → Animation → RWD → 靜態 QG。複雜產品（電商/SaaS/飯店等）預設 5-7 頁，簡單產品（landing/tool）維持 1-4 頁。
 
 ## BDD Spec 流程
 
@@ -659,11 +659,23 @@ psql "$DATABASE_URL" -f tellcraft-backend/migrations/xxx.sql
 3. **Zod API 驗證**（`middleware/validate.ts` + `schemas/`）：`validateBody(schema)` 中間件工廠，高風險路由全覆蓋 — conversation（sendMessage/reply）、session（initialize）、operations（4 端點）、bdd（6 端點）、project（create/template-overrides），移除 ~100 行手動 `if (!req.body.xxx)` 驗證
 4. **BullMQ DLQ**（`services/job-failure-handler.ts` + `migrations/013`）：`job_failures` 表持久化最終失敗、Socket.io 推送用戶錯誤消息+重試按鈕、FATAL log 觸發告警、`removeOnFail.age` 24h→7d
 
+### Fast Build 頁面深度增強（2026-03-08）
+
+複雜產品類型（電商/SaaS/飯店等）頁面數量從 4 頁擴充到 5-7 頁，覆蓋完整用戶體驗：
+- **DEFAULT_PAGES 擴充**：ecommerce 4→7（+商品詳情/購物車/結帳/會員中心）、saas 4→6、hotel 4→6、healthcare 4→6、education 4→6、salon 4→6、realestate 4→5、travel 4→5、fitness 4→5、retail 4→5。簡單產品維持不變
+- **Haiku 頁面推理**：`generateFastConcept` 新增 `suggestedPages` 欄位，Haiku 從用戶旅程角度推理 5-7 頁，`max_tokens` 300→500
+- **`mergePages()` 工具函數**：DEFAULT_PAGES 為基底 + Haiku suggestedPages 補充，正規化去重（忽略空白+大小寫），上限 7 頁
+- **順序化執行**：`Promise.all([concept, expand])` 改為先跑 concept → mergePages → 再跑 expandBriefPrompt（延遲 +1-2s，佔比 <0.5%）
+- **expandBriefPrompt 解禁**：移除「不要自行新增頁面」限制，改為「以頁面列表為核心骨架，可微調名稱但不刪除核心頁面」
+- **INTERACTION_HINTS 擴充**：ecommerce/saas/hotel/healthcare/education/salon/realestate/travel/fitness/retail 補充新增頁面的互動描述
+- **多頁面策略提示**（uiux-generation.ts）：pages ≥ 5 時注入主/次頁面投入度區分 + 共用組件抽取 + Layout 統一管理
+- **測試**：`merge-pages.test.ts` 10 條（合併/去重/上限/空值降級/優先序）
+
 ### Fast Build 自動 Prompt 擴展（2026-03-06）
 
 簡短描述（如「做一個咖啡廳網站」）自動擴展為完整網站需求，解決生成內容稀疏問題：
 - **`expandBriefPrompt()`**（fast-build-generation.ts）：1 次 Haiku 將簡短描述擴展為 400-600 字完整內容需求（含具體區塊、示範文案、功能細節），中文 > 80 字 / 英文 > 40 詞自動跳過
-- **並行執行**：`generateFastConcept` + `expandBriefPrompt` 並行調用（Promise.all），不增加延遲
+- **順序執行**：先跑 `generateFastConcept`（取 suggestedPages）→ `mergePages` → 再跑 `expandBriefPrompt`（使用合併後的頁面列表）
 - **注入 generateStructure**：`originalRequirements` 改用 `expandedPrompt || message`，Sonnet 生成時有足夠上下文
 - **迭代上下文**：`executeIteration` 時注入擴展 prompt 為產品上下文（標註為理解用途，非修改指令）
 - **FlowState 新欄位**：`fastModeExpandedPrompt`（存入 Redis，迭代/重試時可復用）
