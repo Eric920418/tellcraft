@@ -8,16 +8,13 @@ import { BuildingPlayer } from '@/app/components/building-scene'
 import PreviewPanel, { type ElementInfo } from '@/app/components/uiux/PreviewPanel'
 import PropertyEditor from '@/app/components/uiux/PropertyEditor'
 import DeviceSwitcher, { type DeviceType, getDeviceWidth } from '@/app/components/uiux/DeviceSwitcher'
+import AIGenerationWaitingScene from './AIGenerationWaitingScene'
 import type { StreamingPreview } from '@/app/hooks/useVpsWebSocket'
 import type { Template } from '@/app/lib/templates'
 
 const SandpackPreviewComponent = dynamic(
   () => import('@/app/components/uiux/SandpackPreview'),
   { ssr: false, loading: () => <div style={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--gray-50)' }}><p style={{ color: 'var(--gray-400)', fontSize: 14 }}>Loading preview...</p></div> }
-)
-const FastBuildPlayer = dynamic(
-  () => import('@/app/components/FastBuildPlayer'),
-  { ssr: false, loading: () => null }
 )
 
 import type { Message, SessionInfo } from '@/app/types/chat'
@@ -182,8 +179,9 @@ export default function ChatPreviewPanel({
     const fbProgress = fbData?.progress || { current: 1, total: 3, step: tPreview('phaseStructure') }
 
     return (
-      <FastBuildPlayer
-        phase={fbPhase}
+      <AIGenerationWaitingScene
+        stage={latestMsg?.stage}
+        fastBuildPhase={fbPhase}
         progress={fbProgress}
         streamingChunks={fastBuildChunks}
       />
@@ -205,8 +203,9 @@ export default function ChatPreviewPanel({
       const spPhase = stablePreviewData.phase
       const phaseMap: Record<string, number> = { structure: 1, animation: 2, rwd: 3 }
       return (
-        <FastBuildPlayer
-          phase={spPhase as 'structure' | 'animation' | 'rwd'}
+        <AIGenerationWaitingScene
+          stage={latestMsg?.stage}
+          streamingPhase={spPhase as 'structure' | 'animation' | 'rwd'}
           progress={{ current: phaseMap[spPhase] || 1, total: 3, step: spPhase === 'structure' ? tPreview('phaseStructure') : spPhase === 'animation' ? tPreview('phaseAnimation') : tPreview('phaseRwd') }}
           streamingChunks={fastBuildChunks}
         />
@@ -531,50 +530,12 @@ export default function ChatPreviewPanel({
   const isGenerating = lastMsg && generatingStages.includes(lastMsg.stage || '')
 
   if (isGenerating) {
-    // 從 progress 推斷當前階段
-    const progress = lastMsg?.progress
-    const step = progress?.step || tPreview('generating')
-    const phaseNum = progress?.current || 0
-    const totalPhases = progress?.total || 3
-
     return (
-      <div style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
-        {/* 頂部 bar */}
-        <div style={{
-          display: 'flex', alignItems: 'center', padding: '12px 16px',
-          borderBottom: '1px solid var(--border-color)', background: 'var(--white)', gap: 8,
-        }}>
-          <span style={{
-            width: 8, height: 8, borderRadius: '50%',
-            background: 'var(--accent)', animation: 'pulse 1.5s ease-in-out infinite',
-          }} />
-          <span style={{ fontSize: 14, fontWeight: 500, color: 'var(--black)' }}>
-            {tPreview('titleWithStep', { step })}
-          </span>
-        </div>
-        {/* 中央等待區 */}
-        <div ref={codePreviewContainerRef} style={{
-          flex: 1, display: 'flex', flexDirection: 'column',
-          alignItems: 'center', justifyContent: 'center', background: 'var(--gray-50)', gap: 16,
-        }}>
-          {/* 進度條 */}
-          <div style={{ width: 200, height: 4, borderRadius: 2, background: 'var(--gray-200)', overflow: 'hidden' }}>
-            <div style={{
-              width: `${(phaseNum / totalPhases) * 100}%`,
-              height: '100%', borderRadius: 2,
-              background: 'var(--accent)',
-              transition: 'width 0.5s ease',
-            }} />
-          </div>
-          <p style={{ color: 'var(--gray-500)', fontSize: 14, margin: 0 }}>
-            {tPreview('phaseProgress', { phaseNum, totalPhases, step })}
-          </p>
-          <p style={{ color: 'var(--gray-400)', fontSize: 12, margin: 0 }}>
-            {tPreview('waitingMessage')}
-          </p>
-        </div>
-        <style>{`@keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }`}</style>
-      </div>
+      <AIGenerationWaitingScene
+        stage={lastMsg?.stage}
+        progress={lastMsg?.progress}
+        streamingChunks={fastBuildChunks}
+      />
     )
   }
 
