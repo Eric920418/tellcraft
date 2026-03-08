@@ -5,6 +5,7 @@
 
 // LLM 函數需要從後端獨立實現
 import type Anthropic from '@anthropic-ai/sdk'
+import * as ts from 'typescript'
 import { getAnthropicClient, MODEL, trackLlmUsage } from '../lib/anthropic'
 import { getEnv } from '../lib/env'
 import { formatUISpecForPrompt, UIRequirementsSpec } from './bdd-to-ui-spec'
@@ -112,12 +113,20 @@ function getAnimationPersonalityHint(p: string): string {
 // callClaude — 使用 streaming 避免長請求超時，含自動重試
 const RETRY_MAX = 3
 const RETRY_BASE_DELAY_MS = 2000
-const MAX_TOKEN_CONTINUATIONS = 2
+const MAX_TOKEN_CONTINUATIONS = 3
 const CONTINUE_FROM_LAST_TOKEN_PROMPT = [
   'Continue exactly from where you stopped.',
   'Do not repeat any previously generated text.',
   'Output only the continuation content.',
 ].join(' ')
+
+function extractTextContent(content: Anthropic.Message['content']): string {
+  return content
+    .map((block) => (block.type === 'text' ? block.text : ''))
+    .filter(Boolean)
+    .join('\n')
+    .trim()
+}
 
 export async function callClaude(
   systemPrompt: string,
@@ -143,6 +152,7 @@ export async function callClaude(
         let accumulated = ''
         let continuationCount = 0
         let requestMessages = [...baseMessages]
+        let lastContinuationSeed = ''
 
         while (true) {
           const stream = anthropic.messages.stream({
@@ -182,12 +192,17 @@ export async function callClaude(
 
           // streaming text 可能為空，回退使用 finalMessage 內容
           if (!currentSegment) {
-            const textBlock = finalMessage.content.find((block) => block.type === 'text')
-            if (textBlock?.type === 'text') {
-              currentSegment = textBlock.text
-              accumulated += textBlock.text
+            const fallbackText = extractTextContent(finalMessage.content)
+            if (fallbackText) {
+              currentSegment = fallbackText
+              accumulated += fallbackText
               onTextDelta?.(accumulated)
             }
+          }
+
+          const normalizedSegment = currentSegment.trim()
+          if (normalizedSegment) {
+            lastContinuationSeed = normalizedSegment
           }
 
           if (finalMessage.stop_reason !== 'max_tokens') {
@@ -201,7 +216,9 @@ export async function callClaude(
             maxContinuations: MAX_TOKEN_CONTINUATIONS,
           }, 'LLM 回應被 max_tokens 截斷')
 
-          if (!currentSegment || continuationCount >= MAX_TOKEN_CONTINUATIONS) {
+          const continuationSeed = normalizedSegment || lastContinuationSeed || accumulated.slice(-4000).trim()
+
+          if (!continuationSeed || continuationCount >= MAX_TOKEN_CONTINUATIONS) {
             logger.warn({
               purpose: trackingContext?.purpose,
               continuationCount,
@@ -210,10 +227,17 @@ export async function callClaude(
             break
           }
 
+          if (!normalizedSegment) {
+            logger.warn({
+              purpose: trackingContext?.purpose,
+              continuationCount,
+            }, '截斷段落缺失，使用 fallback seed 續寫')
+          }
+
           continuationCount++
           requestMessages = [
             ...requestMessages,
-            { role: 'assistant', content: currentSegment },
+            { role: 'assistant', content: continuationSeed },
             { role: 'user', content: CONTINUE_FROM_LAST_TOKEN_PROMPT },
           ]
 

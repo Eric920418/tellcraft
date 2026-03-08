@@ -26,6 +26,7 @@ const logger = createLogger('flowstate-recovery')
 // 超時閾值（毫秒）
 const PRD_DISCOVERY_TIMEOUT_MS = 5 * 60 * 1000
 const FAST_BUILD_TIMEOUT_MS = 20 * 60 * 1000
+const FAST_BUILD_RWD_TIMEOUT_MS = 35 * 60 * 1000
 const ITERATION_TIMEOUT_MS = 5 * 60 * 1000
 const CODE_GENERATION_TIMEOUT_MS = 20 * 60 * 1000
 const QUALITY_GATE_TIMEOUT_MS = 10 * 60 * 1000
@@ -39,6 +40,18 @@ const RECOVERABLE_PHASES: Record<string, number> = {
   uiux_code_generation: CODE_GENERATION_TIMEOUT_MS,
   uiux_quality_gate: QUALITY_GATE_TIMEOUT_MS,
   deployer_deploying: DEPLOYER_TIMEOUT_MS,
+}
+
+function getPhaseTimeoutMs(state: FlowState): number | undefined {
+  const baseTimeout = RECOVERABLE_PHASES[state.phase]
+  if (!baseTimeout) return undefined
+
+  // RWD 階段輸出通常最大，給更寬鬆的恢復窗口，避免誤判活躍生成為超時。
+  if (state.phase === 'fast_generating' && state.uiuxCodePhase === 'rwd') {
+    return FAST_BUILD_RWD_TIMEOUT_MS
+  }
+
+  return baseTimeout
 }
 
 /**
@@ -68,7 +81,7 @@ export async function scanAndRecoverStuckFlowStates(
       if (state.waitingForReply) continue
 
       // 檢查是否是可恢復的 phase
-      const timeoutMs = RECOVERABLE_PHASES[state.phase]
+      const timeoutMs = getPhaseTimeoutMs(state)
       if (!timeoutMs) continue
 
       // 檢查是否超時（startedAt === 0 代表時間戳遺失，視為超時）
@@ -80,6 +93,8 @@ export async function scanAndRecoverStuckFlowStates(
       logger.warn({
         conversationId,
         phase: state.phase,
+        codePhase: state.uiuxCodePhase,
+        timeoutSec: Math.round(timeoutMs / 1000),
         startedAt: startedAt ? new Date(startedAt).toISOString() : 'none',
         elapsedSec: startedAt ? Math.round((Date.now() - startedAt) / 1000) : undefined,
       }, '偵測到超時')
