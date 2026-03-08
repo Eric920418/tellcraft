@@ -83,7 +83,7 @@ app.use(cors({
   credentials: true,
 }))
 
-// 全域 Rate Limiting（per real client IP via X-Forwarded-For）
+// 全域 Rate Limiting（per user ID 或 IP）
 app.use(rateLimit({
   windowMs: 15 * 60 * 1000, // 15 分鐘
   max: 500,
@@ -92,6 +92,17 @@ app.use(rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   message: { error: 'Too many requests, please try again later' },
+  keyGenerator: (req) => {
+    try {
+      const auth = req.headers.authorization || ''
+      const token = auth.replace('Bearer ', '')
+      if (token) {
+        const decoded = jwt.decode(token) as { sub?: string } | null
+        if (decoded?.sub) return `user:${decoded.sub}`
+      }
+    } catch {}
+    return req.ip || 'unknown'
+  },
 }))
 
 // LINE Webhook 路由必須在 express.json() 之前註冊（簽名驗證需要 raw body）
@@ -523,6 +534,8 @@ async function start() {
     logger.info({ port: PORT }, '運行在 http://0.0.0.0')
     logger.info({ corsOrigin: CORS_ORIGIN }, 'CORS 來源')
     logger.info('='.repeat(60))
+    // pm2 reload 需要此信號才知道新進程就緒，才會關閉舊進程
+    if (typeof process.send === 'function') process.send('ready')
   })
 }
 
@@ -555,11 +568,11 @@ async function shutdown() {
     process.exit(0)
   })
 
-  // 超時強制退出
+  // 超時強制退出（85s，比 PM2 kill_timeout 90s 早 5s，確保日誌能寫出）
   setTimeout(() => {
     logger.error('超時，強制退出')
     process.exit(1)
-  }, 10000)
+  }, 85000)
 }
 
 process.on('SIGTERM', shutdown)

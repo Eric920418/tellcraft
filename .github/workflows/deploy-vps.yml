@@ -66,9 +66,9 @@ jobs:
           echo "Building TypeScript..."
           pnpm build
 
-          # 重啟 PM2
-          echo "Restarting PM2..."
-          pm2 restart tellcraft-backend
+          # 零停機熱更新（重新讀 ecosystem.config.js，新進程就緒後再關舊進程）
+          echo "Reloading PM2..."
+          pm2 reload ecosystem.config.js --only tellcraft-backend --wait-ready
 
           # 顯示狀態
           echo "=========================================="

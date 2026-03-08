@@ -242,8 +242,8 @@ async function recoverFastGenerating(
 
     await sendMessage(conversationId, io, {
       content: isChinese
-        ? '快速生成中斷了，請重新描述你想要什麼樣的網站。'
-        : 'Generation was interrupted. Please describe what kind of website you want.',
+        ? '快速生成中斷了，請稍等自動恢復。'
+        : 'Generation was interrupted. Please wait for automatic recovery.',
       stage: 'error',
     })
   }

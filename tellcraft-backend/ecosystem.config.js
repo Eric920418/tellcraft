@@ -18,9 +18,9 @@ module.exports = {
       out_file: '/var/log/tellcraft/out.log',
       merge_logs: true,
       // 優雅關閉
-      kill_timeout: 10000,
+      kill_timeout: 90000,   // 90s：等待 active LLM job 完成後再 SIGKILL
       wait_ready: true,
-      listen_timeout: 10000,
+      listen_timeout: 15000,
     },
   ],
 }
