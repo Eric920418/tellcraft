@@ -259,12 +259,14 @@ textarea {
 
 .hero-preset-panel {
   position: absolute;
-  left: 20px;
+  left: 0;
   top: 50%;
   /* transform 由 Framer Motion 控制（y: '-50%' 垂直置中 + x 伸縮） */
   width: 260px;
   padding: 14px;
   border: 1px solid var(--border-color);
+  border-left: none;
+  border-radius: 0 8px 8px 0;
   background: var(--white);
   box-shadow: 0 6px 20px rgba(0, 0, 0, 0.04);
 }

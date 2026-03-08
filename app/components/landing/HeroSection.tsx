@@ -229,6 +229,7 @@ function HeroSection({
         justifyContent: 'center',
         padding: '0 24px',
         position: 'relative',
+        overflowX: 'clip',
         willChange: 'transform, opacity, filter',
       }}
     >
@@ -301,7 +302,7 @@ function HeroSection({
           initial={{ opacity: 0, x: -260, y: '-50%' }}
           animate={{
             opacity: isTransitioning || isChatActive ? 0 : 1,
-            x: isTransitioning || isChatActive ? -260 : isPresetOpen ? 0 : -248,
+            x: isTransitioning || isChatActive ? -260 : isPresetOpen ? 0 : -260,
             y: '-50%',
           }}
           transition={{
