@@ -120,6 +120,37 @@ const CONTINUE_FROM_LAST_TOKEN_PROMPT = [
   'Output only the continuation content.',
 ].join(' ')
 
+/**
+ * 剝離 continuation 起頭的 LLM 元文字（"I need to...", "Let me...", 等）
+ * 當 LLM 決定重新生成而非繼續時，這些文字會污染 accumulated code
+ */
+function stripContinuationMetaText(segment: string): string {
+  const META_PATTERNS = [
+    /^I (need|will|should|am going|want|must)/i,
+    /^Let me/i,
+    /^Here (is|are|'s)/i,
+    /^The previous/i,
+    /^Since (the|my|this|output)/i,
+    /previous output was cut off/i,
+    /generate the complete code/i,
+    /provide all the files/i,
+    /start(ing)? (from|over|again)/i,
+    /^(Note|Important|Please note):/i,
+    /^(Continuing|Resuming|Picking up)/i,
+    /^(Apologies|Sorry)/i,
+  ]
+  const lines = segment.split('\n')
+  for (let i = 0; i < Math.min(lines.length, 15); i++) {
+    const trimmed = lines[i].trim()
+    if (!trimmed) continue
+    if (META_PATTERNS.some(p => p.test(trimmed))) continue
+    // 找到第一個非元文字行
+    if (i === 0) return segment // 第一行就是代碼，不需剝離
+    return lines.slice(i).join('\n')
+  }
+  return segment
+}
+
 function extractTextContent(content: Anthropic.Message['content']): string {
   return content
     .map((block) => (block.type === 'text' ? block.text : ''))
@@ -196,6 +227,21 @@ export async function callClaude(
             if (fallbackText) {
               currentSegment = fallbackText
               accumulated += fallbackText
+              onTextDelta?.(accumulated)
+            }
+          }
+
+          // 剝離 continuation 元文字（只在非首次回應時）
+          if (continuationCount > 0 && currentSegment.length > 0) {
+            const stripped = stripContinuationMetaText(currentSegment)
+            if (stripped.length < currentSegment.length) {
+              logger.warn(
+                { continuationCount, removedChars: currentSegment.length - stripped.length },
+                'callClaude: 剝離 continuation meta-commentary'
+              )
+              // 從 accumulated 移除污染部分
+              accumulated = accumulated.slice(0, accumulated.length - currentSegment.length) + stripped
+              currentSegment = stripped
               onTextDelta?.(accumulated)
             }
           }
@@ -1539,8 +1585,9 @@ export function parseGeneratedFiles(content: string, designSystem: DesignSystem)
   const tsRegex = /`{3,}ts:([^\n]+)\n([\s\S]*?)`{3,}/g
   const cssRegex = /`{3,}css:([^\n]+)\n([\s\S]*?)`{3,}/g
 
-  const pages: GeneratedComponent[] = []
-  const components: GeneratedComponent[] = []
+  // 用 Map 去重：相同路徑保留最後一個（LLM 截斷後重新生成的完整版覆蓋截斷版）
+  const pagesMap = new Map<string, GeneratedComponent>()
+  const componentsMap = new Map<string, GeneratedComponent>()
   let styles = ''
 
   // 解析 .tsx 檔案
@@ -1550,13 +1597,13 @@ export function parseGeneratedFiles(content: string, designSystem: DesignSystem)
     const fileContent = match[2].trim()
 
     if (path.includes('/page.tsx') || path.includes('/page.ts')) {
-      pages.push({
+      pagesMap.set(path, {
         path,
         content: fileContent,
         description: `頁面: ${path.split('/').slice(-2, -1)[0]}`,
       })
     } else {
-      components.push({
+      componentsMap.set(path, {
         path,
         content: fileContent,
         description: `組件: ${path.split('/').pop()?.replace('.tsx', '')}`,
@@ -1570,19 +1617,22 @@ export function parseGeneratedFiles(content: string, designSystem: DesignSystem)
     const fileContent = match[2].trim()
 
     if (path.includes('/page.ts')) {
-      pages.push({
+      pagesMap.set(path, {
         path,
         content: fileContent,
         description: `頁面: ${path.split('/').slice(-2, -1)[0]}`,
       })
     } else {
-      components.push({
+      componentsMap.set(path, {
         path,
         content: fileContent,
         description: `工具: ${path.split('/').pop()?.replace('.ts', '')}`,
       })
     }
   }
+
+  const pages = [...pagesMap.values()]
+  const components = [...componentsMap.values()]
 
   while ((match = cssRegex.exec(content)) !== null) {
     const path = match[1].trim()
@@ -2186,11 +2236,13 @@ ${isLaterBatch
 請確保所有組件使用一致的 Design System。互動功能必須完整可用（Modal 能開關、表單能提交、列表能增刪）。動畫和響應式會在後續階段添加。`
   }
 
-  const llmOpts = { maxTokens: 32768, temperature: designTier === 'creative' ? (productContext?.moodId ? 0.5 : 0.4) : 0.3 }
+  const baseTemperature = designTier === 'creative' ? (productContext?.moodId ? 0.5 : 0.4) : 0.3
+  const singlePassLlmOpts = { maxTokens: 32768, temperature: baseTemperature }
+  const multiPassLlmOpts = { maxTokens: 24576, temperature: baseTemperature }
 
-  // ── Multi-pass：4+ 頁分批生成，每批 3 頁，避免單次 max_tokens 截斷 ──
-  const MULTI_PASS_THRESHOLD = 4
-  const BATCH_SIZE = 3
+  // ── Multi-pass：3+ 頁改為逐頁生成，從源頭降低單次輸出量，避免連續撞 max_tokens ──
+  const MULTI_PASS_THRESHOLD = 3
+  const BATCH_SIZE = 1
 
   let allRawPages: GeneratedComponent[] = []
   let allRawComponents: GeneratedComponent[] = []
@@ -2214,7 +2266,7 @@ ${isLaterBatch
       const batchResponse = await callClaude(
         systemPrompt,
         [{ role: 'user', content: buildUserMsg(batch, existingPaths) }],
-        llmOpts,
+        multiPassLlmOpts,
         { ...trackingContext, purpose: `generate_structure_b${batchIdx + 1}` },
         isFirstBatch ? buildStreamingHandler(onPartialCode) : undefined,
       )
@@ -2238,11 +2290,11 @@ ${isLaterBatch
       logger.info({ batchIdx: batchIdx + 1, pages: bPages.length, components: bComps.length }, 'generateStructure 批次完成')
     }
   } else {
-    // 單次生成（≤ 3 頁）
+    // 單次生成（≤ 2 頁）
     const response = await callClaude(
       systemPrompt,
       [{ role: 'user', content: buildUserMsg(pages) }],
-      llmOpts,
+      singlePassLlmOpts,
       { ...trackingContext, purpose: 'generate_structure' },
       buildStreamingHandler(onPartialCode),
     )
