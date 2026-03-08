@@ -1870,6 +1870,14 @@ function getBaseRules(): string {
 - 破壞性操作用 AlertDialog 確認
 - loading state 用 skeleton
 
+## 資料防禦規則（Critical — 必須遵守）
+- 所有陣列 .map()/.forEach() 迭代前必須做 null guard：\`(items ?? []).map(...)\`
+- 迭代回呼中的變數存取必須用 optional chaining：\`item?.property\`
+- 條件渲染陣列項目時用 \`{items?.length > 0 && items.map(...)}\`
+- 物件屬性存取若來源可能 undefined，必須用 \`?.\` 或提供 fallback：\`item?.name ?? ''\`
+- style 中引用的值必須防禦：\`style={{ background: item?.color ?? '#ccc' }}\`
+- 禁止假設 mock 資料陣列永遠非空 — 空陣列和 undefined 都必須安全處理
+
 ## 無障礙規則（必須遵守）
 ### Accessible Names（Critical）
 - 每個互動控件都必須有 accessible name
