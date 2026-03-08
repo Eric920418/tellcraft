@@ -743,6 +743,10 @@ textarea {
     flex-wrap: wrap;
     gap: 16px;
   }
+
+  .dashboard-account-container {
+    padding: 0 !important;
+  }
 }
 
 @media (max-width: 480px) {

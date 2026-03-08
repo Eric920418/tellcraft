@@ -182,7 +182,7 @@ export default function AccountPage() {
   }
 
   return (
-    <div style={{ maxWidth: 640, margin: '0 auto', padding: '40px 24px' }}>
+    <div className="dashboard-account-container" style={{ maxWidth: 640, margin: '0 auto', padding: '40px 24px' }}>
       {/* Toast */}
       {toast && (
         <motion.div
