@@ -60,10 +60,17 @@ describe('parseLogLine', () => {
   it('應該解析純 PM2 文字格式', () => {
     const raw = '2026-03-01 08:16:30: [Server] Listening on port 3100'
     const result = parseLogLine(raw, 'out')
-    expect(result.timestamp).toBe('2026-03-01 08:16:30')
+    expect(result.timestamp).toBe('2026-03-01 16:16:30')
     expect(result.tag).toBe('[Server]')
     expect(result.message).toBe('Listening on port 3100')
     expect(result.level).toBe('info')
+  })
+
+  it('應該將無時區 Pino 字串時間視為 UTC 再轉台灣時間', () => {
+    const raw = '{"level":30,"time":"2026-03-08 06:10:03","module":"server","msg":"ping"}'
+    const result = parseLogLine(raw, 'out')
+    expect(result.timestamp).toBe('2026-03-08 14:10:03')
+    expect(result.tag).toBe('[server]')
   })
 
   it('應該從 error source 推斷 error level', () => {

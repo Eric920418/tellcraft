@@ -4,16 +4,43 @@
  */
 
 const TW_TIMEZONE = 'Asia/Taipei'
+const PM2_TS_PATTERN = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/
+const NAIVE_ISO_TS_PATTERN = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?$/
 
 /** 將 Date 格式化為台灣時間 YYYY-MM-DD HH:MM:SS */
 function formatTaiwanTime(date: Date): string {
   return date.toLocaleString('sv-SE', { timeZone: TW_TIMEZONE })
 }
 
-/** 將 PM2 時間戳字串（伺服器本地時間）轉為台灣時間 */
+/** 解析日誌時間（無時區的字串視為 UTC） */
+function parseLogTimestamp(value: unknown): Date | null {
+  if (typeof value === 'number') {
+    const d = new Date(value)
+    return isNaN(d.getTime()) ? null : d
+  }
+
+  if (typeof value !== 'string') return null
+  const raw = value.trim()
+  if (!raw) return null
+
+  if (PM2_TS_PATTERN.test(raw)) {
+    const d = new Date(`${raw.replace(' ', 'T')}Z`)
+    return isNaN(d.getTime()) ? null : d
+  }
+
+  if (NAIVE_ISO_TS_PATTERN.test(raw)) {
+    const d = new Date(`${raw}Z`)
+    return isNaN(d.getTime()) ? null : d
+  }
+
+  const d = new Date(raw)
+  return isNaN(d.getTime()) ? null : d
+}
+
+/** 將 PM2 時間戳字串（UTC）轉為台灣時間 */
 function convertPm2Timestamp(pm2Ts: string): string {
-  const date = new Date(pm2Ts.replace(' ', 'T'))
-  return !isNaN(date.getTime()) ? formatTaiwanTime(date) : pm2Ts
+  const date = parseLogTimestamp(pm2Ts)
+  return date ? formatTaiwanTime(date) : pm2Ts
 }
 
 export interface ParsedLogLine {
@@ -51,8 +78,8 @@ function parsePinoJson(
   if (!jsonStr.startsWith('{')) return null
   try {
     const json = JSON.parse(jsonStr)
-    // 優先用 Pino 時間（epoch ms），fallback PM2 時間戳，統一轉台灣時間
-    const ts = json.time ? new Date(json.time) : null
+    // 優先用 Pino 時間（epoch ms / ISO 字串），fallback PM2 時間戳，統一轉台灣時間
+    const ts = parseLogTimestamp(json.time)
     const timestamp = ts ? formatTaiwanTime(ts) : pm2Timestamp
     const tag = json.module ? `[${json.module}]` : null
     const level = PINO_LEVELS[json.level] || 'info'

@@ -476,3 +476,254 @@ export function listAvailableMoods(tier?: DesignTier): Array<{ id: string; name:
     .filter(m => !tier || m.compatibleTiers.includes(tier))
     .map(m => ({ id: m.id, name: m.name, nameEn: m.nameEn, description: m.description }))
 }
+
+// ============================================================
+// Few-shot 風格錨點代碼片段
+// ============================================================
+
+export const MOOD_CODE_FRAGMENTS: Record<string, string> = {
+  'glassmorphic-dark': `
+// === Glassmorphic Dark 風格示範 ===
+// 毛玻璃卡片
+function GlassCard({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="relative backdrop-blur-xl bg-white/5 border border-white/10
+                    rounded-2xl p-6 shadow-[0_8px_32px_rgba(0,0,0,0.4)]">
+      <div className="absolute inset-0 rounded-2xl bg-gradient-to-b
+                      from-white/5 to-transparent pointer-events-none" />
+      {children}
+    </div>
+  )
+}
+// Hero 區塊
+// <section className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950
+//                     flex items-center justify-center">
+//   <h1 className="text-7xl font-bold bg-gradient-to-r from-cyan-400 to-violet-400
+//                  bg-clip-text text-transparent">
+//     Product Name
+//   </h1>
+// </section>
+// 霓虹按鈕
+// <button className="px-6 py-3 rounded-xl border border-cyan-400/30 bg-cyan-400/10
+//                    text-cyan-400 hover:bg-cyan-400/20 hover:border-cyan-400/60
+//                    transition-all cursor-pointer">
+//   Get Started
+// </button>`,
+
+  'brutalist': `
+// === Brutalist 風格示範 ===
+// 粗邊框卡片
+function BrutalistCard({ title, content }: { title: string; content: string }) {
+  return (
+    <div className="border-4 border-black p-6 bg-white hover:bg-yellow-400
+                    transition-colors cursor-pointer shadow-[4px_4px_0_black]">
+      <h2 className="font-mono font-black text-2xl uppercase mb-3">{title}</h2>
+      <p className="font-mono text-base">{content}</p>
+    </div>
+  )
+}
+// Hero 區塊
+// <section className="min-h-screen bg-white border-b-8 border-black flex items-center px-16">
+//   <div className="max-w-4xl">
+//     <p className="font-mono text-sm uppercase tracking-widest mb-4">Est. 2024</p>
+//     <h1 className="font-black text-8xl uppercase leading-none tracking-tighter">
+//       MAKE<br/>THINGS<br/>HAPPEN
+//     </h1>
+//     <div className="mt-8 h-2 w-48 bg-black" />
+//   </div>
+// </section>
+// CTA 按鈕
+// <button className="border-4 border-black bg-black text-white font-mono font-black
+//                    uppercase px-8 py-4 hover:bg-yellow-400 hover:text-black
+//                    transition-colors cursor-pointer">
+//   START NOW →
+// </button>`,
+
+  'organic-warm': `
+// === Organic Warm 風格示範 ===
+// 大圓角暖色卡片
+function WarmCard({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="bg-amber-50 rounded-3xl p-8 shadow-xl shadow-amber-100/50
+                    border border-amber-100 hover:shadow-2xl transition-shadow">
+      {children}
+    </div>
+  )
+}
+// Hero 區塊
+// <section className="min-h-screen bg-stone-50 flex items-center px-20 py-32">
+//   <div className="max-w-5xl">
+//     <h1 className="font-light text-6xl text-stone-800 leading-relaxed" style={{ fontFamily: 'Cormorant Garamond' }}>
+//       Crafted with Care
+//     </h1>
+//     <p className="mt-8 text-xl text-stone-600 font-light max-w-xl leading-relaxed">
+//       Handmade with love and natural ingredients.
+//     </p>
+//   </div>
+// </section>
+// CTA 按鈕
+// <button className="px-10 py-4 rounded-full bg-amber-700 text-amber-50
+//                    hover:bg-amber-800 transition-colors cursor-pointer font-medium">
+//   Explore Collection
+// </button>`,
+
+  'editorial-clean': `
+// === Editorial Clean 風格示範 ===
+// 無框内容區塊
+function EditorialSection({ label, title, children }: { label: string; title: string; children: React.ReactNode }) {
+  return (
+    <section className="py-32 border-t border-stone-200">
+      <p className="text-xs uppercase tracking-[0.2em] text-stone-400 mb-6">{label}</p>
+      <h2 className="text-6xl font-light text-stone-900 mb-12 max-w-2xl leading-tight" style={{ fontFamily: 'Instrument Serif' }}>
+        {title}
+      </h2>
+      <div className="max-w-prose text-stone-600 leading-relaxed">{children}</div>
+    </section>
+  )
+}
+// Hero 區塊
+// <section className="min-h-screen flex items-end px-20 pb-32">
+//   <div>
+//     <h1 className="text-8xl font-light leading-none text-stone-900" style={{ fontFamily: 'Instrument Serif' }}>
+//       The Future<br/><em>of Design</em>
+//     </h1>
+//   </div>
+// </section>
+// CTA 按鈕（極簡文字型）
+// <a className="text-stone-900 border-b border-stone-900 pb-0.5 hover:border-stone-400
+//               transition-colors text-sm uppercase tracking-wider cursor-pointer">
+//   Read More
+// </a>`,
+
+  'neo-corporate': `
+// === Neo Corporate 風格示範 ===
+// 數據卡片
+function MetricCard({ label, value, trend }: { label: string; value: string; trend: string }) {
+  return (
+    <div className="bg-white rounded-lg border border-slate-200 p-6 shadow-sm
+                    hover:shadow-md transition-shadow">
+      <p className="text-xs font-medium text-slate-500 uppercase tracking-wide mb-2">{label}</p>
+      <p className="text-3xl font-semibold text-slate-900 tabular-nums">{value}</p>
+      <p className="text-sm text-emerald-600 mt-1 font-medium">{trend}</p>
+    </div>
+  )
+}
+// App Shell
+// <div className="min-h-screen bg-slate-50 flex">
+//   <aside className="w-64 bg-white border-r border-slate-200 p-6">
+//     <nav className="space-y-1">
+//       <a className="flex items-center gap-3 px-3 py-2 rounded-lg bg-blue-50 text-blue-700 font-medium text-sm cursor-pointer">
+//         Dashboard
+//       </a>
+//     </nav>
+//   </aside>
+//   <main id="main" className="flex-1 p-8">...</main>
+// </div>
+// CTA 按鈕
+// <button className="px-4 py-2 bg-gradient-to-r from-blue-600 to-indigo-600 text-white
+//                    rounded-lg text-sm font-medium hover:from-blue-700 hover:to-indigo-700
+//                    transition-all cursor-pointer">
+//   Get Started
+// </button>`,
+
+  'playful-pop': `
+// === Playful Pop 風格示範 ===
+// 彩色漸層卡片
+function PopCard({ emoji, title, children }: { emoji: string; title: string; children: React.ReactNode }) {
+  return (
+    <div className="rounded-3xl p-6 bg-gradient-to-br from-purple-50 to-pink-50
+                    border-2 border-purple-200 hover:border-purple-400
+                    shadow-purple-100/50 shadow-lg hover:shadow-xl transition-all cursor-pointer
+                    hover:-translate-y-1">
+      <span className="text-3xl mb-4 block">{emoji}</span>
+      <h3 className="font-bold text-xl text-purple-900 mb-2">{title}</h3>
+      <div className="text-purple-700 text-sm">{children}</div>
+    </div>
+  )
+}
+// Hero 區塊
+// <section className="min-h-screen bg-gradient-to-br from-purple-500 via-pink-500 to-orange-400
+//                     flex items-center justify-center text-white">
+//   <div className="text-center">
+//     <h1 className="text-7xl font-black mb-6">Let's Make Magic! ✨</h1>
+//     <p className="text-2xl font-medium opacity-90">Something awesome awaits.</p>
+//   </div>
+// </section>
+// CTA 按鈕
+// <button className="px-8 py-4 rounded-full bg-gradient-to-r from-purple-500 to-pink-500
+//                    text-white font-bold text-lg hover:from-purple-600 hover:to-pink-600
+//                    shadow-purple-300/50 shadow-xl hover:shadow-2xl transition-all cursor-pointer">
+//   Get Started 🚀
+// </button>`,
+
+  'luxury-minimal': `
+// === Luxury Minimal 風格示範 ===
+// 奢華留白區塊
+function LuxurySection({ eyebrow, headline, children }: { eyebrow: string; headline: string; children: React.ReactNode }) {
+  return (
+    <section className="py-40 px-20">
+      <p className="text-xs uppercase tracking-[0.3em] text-amber-600 mb-8">{eyebrow}</p>
+      <h2 className="text-7xl font-light tracking-wider text-stone-900 mb-16 max-w-3xl leading-none"
+          style={{ fontFamily: 'Cormorant Garamond' }}>
+        {headline}
+      </h2>
+      <div className="h-px w-16 bg-amber-600 mb-16" />
+      <div className="text-stone-500 font-light leading-loose max-w-lg">{children}</div>
+    </section>
+  )
+}
+// Hero 區塊
+// <section className="min-h-screen bg-[#F5F0EB] flex items-center px-20">
+//   <div>
+//     <p className="text-xs uppercase tracking-[0.4em] text-amber-600 mb-12">Est. MMXXIV</p>
+//     <h1 className="text-8xl font-extralight text-stone-900 leading-none tracking-wide"
+//         style={{ fontFamily: 'Cormorant Garamond' }}>
+//       Beyond<br/>Ordinary
+//     </h1>
+//   </div>
+// </section>
+// CTA 按鈕（細邊框型）
+// <button className="px-8 py-3 border border-stone-900 text-stone-900 text-xs
+//                    uppercase tracking-[0.2em] hover:bg-stone-900 hover:text-white
+//                    transition-colors cursor-pointer">
+//   Discover More
+// </button>`,
+
+  'tech-dark': `
+// === Tech Dark 風格示範 ===
+// 終端風格卡片
+function TerminalCard({ command, output }: { command: string; output: string }) {
+  return (
+    <div className="bg-slate-900 rounded-lg border border-slate-700 p-5">
+      <div className="flex items-center gap-2 mb-4">
+        <div className="w-3 h-3 rounded-full bg-rose-500" />
+        <div className="w-3 h-3 rounded-full bg-amber-500" />
+        <div className="w-3 h-3 rounded-full bg-emerald-500" />
+      </div>
+      <p className="font-mono text-sm text-slate-400"><span className="text-green-400">$</span> {command}</p>
+      <p className="font-mono text-sm text-slate-300 mt-2">{output}</p>
+    </div>
+  )
+}
+// App Header
+// <header className="bg-slate-950 border-b border-slate-800 px-6 py-4 flex items-center gap-4">
+//   <div className="flex items-center gap-2">
+//     <div className="w-2 h-2 rounded-full bg-green-400 animate-pulse" />
+//     <span className="font-mono text-sm text-slate-300">system online</span>
+//   </div>
+// </header>
+// CTA 按鈕
+// <button className="px-4 py-2 bg-transparent border border-slate-600 text-slate-300
+//                    font-mono text-sm hover:border-green-400 hover:text-green-400
+//                    transition-colors cursor-pointer rounded">
+//   $ deploy --now
+// </button>`,
+}
+
+export function getMoodCodeFragment(moodId: string): string {
+  return MOOD_CODE_FRAGMENTS[moodId] || ''
+}
+
+export function getMoodById(moodId: string): DesignMood | undefined {
+  return DESIGN_MOODS[moodId]
+}

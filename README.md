@@ -1077,6 +1077,19 @@ Sandpack 取代 1105 行 regex 轉換器。支援 streaming 增量更新、裝�
 - **快速模式**：Prefilter → `detectFastModeIntent()`（greeting/question/chitchat/help 攔截 + FAQ/Sonnet 回覆）→ `isDesignFeedback()` → `checkBuildRelevance()`（強信號 ~80 詞 / 弱信號 Haiku 三元：通過/模糊/不相關 + Content Policy，**fail-closed**）
 - **迭代模式**：`semanticGateway({ phase: 'iteration' })` 取代 `isDesignFeedback()`（設計關鍵詞零 LLM 短路 ~80% + Sonnet 語義審核 ~20%）
 
+### Phase 5-D：Prompt 架構重構 — 創意優先（2026-03-08）
+
+- **systemPrompt 重排**：`generateStructure` 新順序 → 創作使命/設計使命（前 40%）→ mood → patterns → tier constraints → techniques → design system（技術 token）→ 任務定義 → data-animate 規格 → 合規規則（尾部）
+- **新函數 `getTierCreativePhilosophy(tier)`**：creative「讓用戶第一眼就想截圖」/ functional「一秒就知道下一步」，取代開場句
+- **新函數 `getBaseRules()`**：把 a11y/metadata/font/professional UI 規則抽成命名函數，統一移至 systemPrompt 尾部
+- **新函數 `getDataAnimateSpec()`**：8 個 data-animate 值規格（fade-up/stagger-children/hero-entrance/reveal-on-scroll/count-up/slide-in-left-right/hover-lift/parallax）
+- **`moodSection` 位置調整**：從 userMessage 移至 systemPrompt 第 2 個位置（primacy effect 優化）
+- **`MOOD_CODE_FRAGMENTS`（design-moods.ts）**：8 個 mood 各 ~60-80 行 few-shot 代碼示範（card + hero + button），注入 userMessage 作為風格錨點
+- **`getMoodCodeFragment(moodId)` / `getMoodById(moodId)`**：新 export
+- **`generateAnimations` 新增段落**：`data-animate 意圖實作` — 找到所有 data-animate 元素，按對應表用 motion/react 實作後**移除屬性**
+- **Temperature 調整**：generateStructure creative+mood `0.4→0.5`、creative `0.35→0.4`、functional `0.2→0.3`；generateDesignVariants creative `0.4→0.6`
+- **測試**：33 條覆蓋 getMoodCodeFragment（8 個 mood / 未知 ID）、getTierCreativePhilosophy（截圖/一秒/差異）、getDataAnimateSpec（8 個值）、module 匯出驗證
+
 ### Phase 5-C：DesignSystem 2.0（2026-03-08）
 
 - **DesignSystem 介面擴展**：新增 `shadows`（borders-only/subtle-shadows/layered-shadows）、`depth`（flat/subtle/elevated/glassmorphic + cardStyle）、`gradients`（primary/surface/accent）、`animationPersonality`（minimal/smooth/bouncy/dramatic/playful）、`layoutArchetype`（bento/editorial/dashboard/storytelling/app-shell）、`mood` 6 個 optional 欄位

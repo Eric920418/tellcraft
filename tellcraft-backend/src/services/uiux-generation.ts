@@ -10,7 +10,7 @@ import { getEnv } from '../lib/env'
 import { formatUISpecForPrompt, UIRequirementsSpec } from './bdd-to-ui-spec'
 import { safeParseJson } from '../utils/safe-parse-json'
 import { selectTechniques, formatTechniquesForPrompt } from './design-techniques'
-import { getMoodPromptBlock, getMoodAnimationHint, getMoodRwdHint, getMoodSummary } from './design-moods'
+import { getMoodPromptBlock, getMoodAnimationHint, getMoodRwdHint, getMoodSummary, getMoodCodeFragment, getMoodById } from './design-moods'
 import { selectCompositionPatterns, formatPatternsForPrompt, listPatternsForVariants } from './composition-patterns'
 import { createLogger } from '../lib/logger'
 
@@ -112,6 +112,12 @@ function getAnimationPersonalityHint(p: string): string {
 // callClaude — 使用 streaming 避免長請求超時，含自動重試
 const RETRY_MAX = 3
 const RETRY_BASE_DELAY_MS = 2000
+const MAX_TOKEN_CONTINUATIONS = 2
+const CONTINUE_FROM_LAST_TOKEN_PROMPT = [
+  'Continue exactly from where you stopped.',
+  'Do not repeat any previously generated text.',
+  'Output only the continuation content.',
+].join(' ')
 
 export async function callClaude(
   systemPrompt: string,
@@ -127,55 +133,98 @@ export async function callClaude(
   try {
     const anthropic = getAnthropicClient()
     let lastError: unknown = null
+    const baseMessages = messages.map(m => ({
+      role: m.role,
+      content: m.content,
+    }))
 
     for (let attempt = 1; attempt <= RETRY_MAX; attempt++) {
       try {
-        const stream = anthropic.messages.stream({
-          model: MODEL.SONNET,
-          max_tokens: options?.maxTokens || 4096,
-          temperature: options?.temperature ?? 0.2,
-          system: systemPrompt,
-          messages: messages.map(m => ({
-            role: m.role,
-            content: m.content,
-          })),
-        })
+        let accumulated = ''
+        let continuationCount = 0
+        let requestMessages = [...baseMessages]
 
-        if (onTextDelta) {
-          let accumulated = ''
+        while (true) {
+          const stream = anthropic.messages.stream({
+            model: MODEL.SONNET,
+            max_tokens: options?.maxTokens || 4096,
+            temperature: options?.temperature ?? 0.2,
+            system: systemPrompt,
+            messages: requestMessages,
+          })
+
           let chunkCount = 0
+          let currentSegment = ''
           stream.on('text', (text) => {
+            currentSegment += text
             accumulated += text
             chunkCount++
             if (chunkCount % 50 === 1) {
               logger.info({ chunkCount, accumulatedLength: accumulated.length }, 'streaming chunk')
             }
-            onTextDelta(accumulated)
+            onTextDelta?.(accumulated)
           })
+
+          const finalMessage = await stream.finalMessage()
+
+          // 記錄 LLM 用量
+          const usage = finalMessage.usage
+          if (usage) {
+            trackLlmUsage({
+              model: MODEL.SONNET,
+              inputTokens: usage.input_tokens || 0,
+              outputTokens: usage.output_tokens || 0,
+              purpose: trackingContext?.purpose || 'uiux_generation',
+              userId: trackingContext?.userId,
+              conversationId: trackingContext?.conversationId,
+            })
+          }
+
+          // streaming text 可能為空，回退使用 finalMessage 內容
+          if (!currentSegment) {
+            const textBlock = finalMessage.content.find((block) => block.type === 'text')
+            if (textBlock?.type === 'text') {
+              currentSegment = textBlock.text
+              accumulated += textBlock.text
+              onTextDelta?.(accumulated)
+            }
+          }
+
+          if (finalMessage.stop_reason !== 'max_tokens') {
+            break
+          }
+
+          logger.warn({
+            purpose: trackingContext?.purpose,
+            outputTokens: finalMessage.usage?.output_tokens,
+            continuationCount,
+            maxContinuations: MAX_TOKEN_CONTINUATIONS,
+          }, 'LLM 回應被 max_tokens 截斷')
+
+          if (!currentSegment || continuationCount >= MAX_TOKEN_CONTINUATIONS) {
+            logger.warn({
+              purpose: trackingContext?.purpose,
+              continuationCount,
+              maxContinuations: MAX_TOKEN_CONTINUATIONS,
+            }, '截斷後無法再續寫，可能導致回應不完整')
+            break
+          }
+
+          continuationCount++
+          requestMessages = [
+            ...requestMessages,
+            { role: 'assistant', content: currentSegment },
+            { role: 'user', content: CONTINUE_FROM_LAST_TOKEN_PROMPT },
+          ]
+
+          logger.info({
+            purpose: trackingContext?.purpose,
+            continuationCount,
+          }, '觸發自動續寫，避免 max_tokens 截斷')
         }
 
-        const finalMessage = await stream.finalMessage()
-
-        // 記錄 LLM 用量
-        const usage = finalMessage.usage
-        if (usage) {
-          trackLlmUsage({
-            model: MODEL.SONNET,
-            inputTokens: usage.input_tokens || 0,
-            outputTokens: usage.output_tokens || 0,
-            purpose: trackingContext?.purpose || 'uiux_generation',
-            userId: trackingContext?.userId,
-            conversationId: trackingContext?.conversationId,
-          })
-        }
-
-        if (finalMessage.stop_reason === 'max_tokens') {
-          logger.warn({ purpose: trackingContext?.purpose, outputTokens: finalMessage.usage?.output_tokens }, 'LLM 回應被 max_tokens 截斷，可能導致 JSON 解析失敗')
-        }
-
-        const content = finalMessage.content[0]
-        if (content.type === 'text') {
-          return { success: true, content: content.text }
+        if (accumulated.trim()) {
+          return { success: true, content: accumulated }
         }
 
         return { success: false, error: '無法取得回應內容' }
@@ -911,7 +960,7 @@ ${tier === 'functional' ? '- 不要使用漸層（除非明確要求）\n- 不�
   const response = await callClaude(
     systemPrompt,
     [{ role: 'user', content: userMessage }],
-    { maxTokens: 16384, temperature: 0.4 }, // 稍低的 temperature 確保結構一致
+    { maxTokens: 16384, temperature: tier === 'creative' ? 0.6 : 0.4 }, // creative 更高 temperature 鼓勵差異化
     { ...trackingContext, purpose: 'generate_design_variants' }
   )
 
@@ -1560,104 +1609,26 @@ export function buildStreamingHandler(
   }
 }
 
-/**
- * 階段 1：生成結構與互動（Structure + Interaction）
- * 生成桌面版本，包含 HTML 結構、基礎 CSS、組件骨架、完整互動邏輯
- * 不包含動畫和響應式設計
- */
-export async function generateStructure(
-  designSystem: DesignSystem,
-  pages: string[],
-  template: TemplateData,
-  bddSpec?: string,
-  designTier?: DesignTier,
-  productContext?: {
-    originalRequirements?: string
-    designIdeas?: Array<{ step: string; answer: string }>
-    designBrief?: DesignBrief
-    uiSpec?: UIRequirementsSpec
-    variantConcept?: VariantConcept
-    interactionHint?: string
-    templateStyleHint?: string
-    layoutMode?: 'app' | 'website'
-    templateOverrides?: Record<string, Record<string, string>>
-    referenceAnalysis?: import('./reference-analyzer').ReferenceAnalysis
-    moodId?: string
-  },
-  trackingContext?: LlmTrackingContext,
-  onPartialCode?: PartialCodeCallback
-): Promise<GenerationResult> {
-  const tier = designTier || 'functional'
+// ============================================================
+// Prompt 架構輔助函數（Phase 5-D）
+// ============================================================
 
-  // 選擇視覺技法並注入 prompt
-  const techniques = selectTechniques(tier, template.category, 3)
-  const techniquesSection = formatTechniquesForPrompt(techniques)
+function getTierCreativePhilosophy(tier: DesignTier): string {
+  if (tier === 'creative') {
+    return `## 創作使命（Creative Mission）
+你是一位有強烈審美主張的設計師，不是照規格施工的工程師。
+**第一原則：讓用戶第一眼就想截圖**。用 Design System 的色彩大膽組合，打破常規佈局預期，讓 signatureElement 真正成為視覺錨點。
+每個設計決策問自己：這會讓人停下來多看一眼嗎？`
+  } else {
+    return `## 設計使命（Design Mission）
+你是一位追求清晰與效率的 UI 工程師。
+**第一原則：用戶一秒就知道下一步做什麼**。資訊密度適中，層次清晰，每個元素存在都有理由。
+每個設計決策問自己：這讓任務更容易完成嗎？`
+  }
+}
 
-  // 選擇組合模式並注入 prompt
-  const patterns = selectCompositionPatterns(
-    tier, template.category, pages, productContext?.moodId,
-    undefined,  // count: default 2
-    designSystem.layoutArchetype  // layoutArchetypeHint
-  )
-  const patternsSection = formatPatternsForPrompt(patterns)
-
-  const systemPrompt = `你是一位專業的前端開發者。根據提供的 Design System 生成桌面版前端代碼，包含完整的互動功能。
-
-${buildDesignSystemPrompt(designSystem)}
-
-## 本階段任務：結構與互動生成（Structure + Interaction）
-這是第一階段，需要生成：
-1. 完整的 HTML 結構
-2. 基礎 CSS 樣式（顏色、字體、間距、圓角）
-3. 可交互的組件（含 state 管理和事件處理）
-
-## 本階段禁止
-- 不要添加任何動畫效果（transition, animation, motion）
-- 不要添加響應式設計（md:, lg:, @media）
-- 假設寬度為 1280px 桌面版
-
-## 'use client' 使用規則
-- 需要 useState/useEffect/useRef/事件處理的組件**必須**加 'use client'
-- 純展示組件（無 state、無事件處理）**不要**加 'use client'
-- layout.tsx 和純 metadata 的 page.tsx **不要**加 'use client'
-
-## 互動完整性規則（Critical — 按鈕必須有功能）
-每個 UI 操作都必須有完整的互動實作，不能只是靜態佔位：
-
-### create 類操作（新增/建立/記錄）
-- 必須有觸發按鈕 → 打開 Modal/Dialog（用 useState 控制開關）
-- Modal 內必須有完整表單（所有欄位、驗證、提交按鈕）
-- 提交後：加入列表/表格 + 關閉 Modal + 清空表單
-- 使用 Radix Dialog 或原生 dialog 實作
-
-### delete 類操作（刪除/移除）
-- 必須有觸發按鈕 → 打開 AlertDialog 確認
-- 確認後：從列表移除該項目
-- 使用 Radix AlertDialog 實作
-
-### update 類操作（修改/編輯）
-- 點擊編輯按鈕 → 打開預填資料的 Modal
-- 修改後提交 → 更新列表中的對應項目
-
-### filter 類操作（搜尋/篩選）
-- 搜尋框/篩選器用 useState 控制
-- 輸入時即時過濾列表（用 useMemo 或 filter）
-
-### view 類操作（查看/瀏覽）
-- 點擊展開詳情面板、或導航到詳情頁
-
-### 資料管理模式
-- 使用 useState 管理列表資料（初始值為有意義的模擬數據）
-- CRUD 操作直接操作 state（前端 demo，不需要 API）
-- 例如：\`const [items, setItems] = useState(initialData)\`
-
-${getStructureConstraints(tier)}
-
-${techniquesSection}
-
-${patternsSection}
-
-## 組件規則
+function getBaseRules(): string {
+  return `## 組件規則
 - 有鍵盤/focus 行為的組件使用 Radix 或 React Aria
 - 破壞性操作用 AlertDialog 確認
 - loading state 用 skeleton
@@ -1743,8 +1714,129 @@ const font = DM_Sans({ subsets: ['latin'], variable: '--font-sans' })
 - 有 fixed navbar 時，main content 要加 padding-top 避免被遮擋
 - container max-width 全局統一（max-w-6xl 或 max-w-7xl），不要混用
 - Flex 子元素要加 min-w-0 — 否則 truncate/line-clamp 在 flex 容器裡不生效
-- <img> 必須有 explicit width + height 屬性（或用 next/image 的 fill）防止 CLS
+- <img> 必須有 explicit width + height 屬性（或用 next/image 的 fill）防止 CLS`
+}
 
+function getDataAnimateSpec(): string {
+  return `### 可用的 data-animate 值（只標記關鍵元素，不要每個 div 都加）
+- \`data-animate="fade-up"\` — 向上淡入（卡片、段落內容）
+- \`data-animate="stagger-children"\` — 子元素依序入場（列表/網格容器）
+- \`data-animate="hero-entrance"\` — 英雄標題戲劇性入場
+- \`data-animate="reveal-on-scroll"\` — 滾動觸發顯示（feature sections）
+- \`data-animate="count-up"\` — 數字計數動畫（統計數字）
+- \`data-animate="slide-in-left"\` / \`"slide-in-right"\` — 側滑入
+- \`data-animate="hover-lift"\` — 懸停上浮（卡片 hover 效果）
+- \`data-animate="parallax"\` — 視差（背景、裝飾元素）`
+}
+
+/**
+ * 階段 1：生成結構與互動（Structure + Interaction）
+ * 生成桌面版本，包含 HTML 結構、基礎 CSS、組件骨架、完整互動邏輯
+ * 不包含動畫和響應式設計
+ */
+export async function generateStructure(
+  designSystem: DesignSystem,
+  pages: string[],
+  template: TemplateData,
+  bddSpec?: string,
+  designTier?: DesignTier,
+  productContext?: {
+    originalRequirements?: string
+    designIdeas?: Array<{ step: string; answer: string }>
+    designBrief?: DesignBrief
+    uiSpec?: UIRequirementsSpec
+    variantConcept?: VariantConcept
+    interactionHint?: string
+    templateStyleHint?: string
+    layoutMode?: 'app' | 'website'
+    templateOverrides?: Record<string, Record<string, string>>
+    referenceAnalysis?: import('./reference-analyzer').ReferenceAnalysis
+    moodId?: string
+  },
+  trackingContext?: LlmTrackingContext,
+  onPartialCode?: PartialCodeCallback
+): Promise<GenerationResult> {
+  const tier = designTier || 'functional'
+
+  // 選擇視覺技法並注入 prompt
+  const techniques = selectTechniques(tier, template.category, 3)
+  const techniquesSection = formatTechniquesForPrompt(techniques)
+
+  // 選擇組合模式並注入 prompt
+  const patterns = selectCompositionPatterns(
+    tier, template.category, pages, productContext?.moodId,
+    undefined,  // count: default 2
+    designSystem.layoutArchetype  // layoutArchetypeHint
+  )
+  const patternsSection = formatPatternsForPrompt(patterns)
+
+  const moodSystemSection = productContext?.moodId
+    ? `\n## Design Mood（視覺風格指引 — 定義美學方向）\n${getMoodPromptBlock(productContext.moodId)}\n`
+    : ''
+
+  const systemPrompt = `${getTierCreativePhilosophy(tier)}
+${moodSystemSection}
+${patternsSection}
+
+${getStructureConstraints(tier)}
+
+${techniquesSection}
+
+${buildDesignSystemPrompt(designSystem)}
+
+## 本階段任務：結構與互動生成（Structure + Interaction）
+這是第一階段，需要生成：
+1. 完整的 HTML 結構
+2. 基礎 CSS 樣式（顏色、字體、間距、圓角）
+3. 可交互的組件（含 state 管理和事件處理）
+
+## 本階段禁止
+- 不要使用 motion/react API（import from 'motion/react' 禁止）
+- 不要使用 CSS transition/animation class（動畫在下一階段添加）
+- 不要添加響應式設計（md:, lg:, @media）（RWD 在第三階段）
+- 假設寬度為 1280px 桌面版
+
+## 動畫意圖標記（data-animate）—— 取代「禁止動畫」
+對需要動畫的關鍵元素加 data-animate 屬性，Animation 階段會實作這些意圖。
+
+${getDataAnimateSpec()}
+
+## 'use client' 使用規則
+- 需要 useState/useEffect/useRef/事件處理的組件**必須**加 'use client'
+- 純展示組件（無 state、無事件處理）**不要**加 'use client'
+- layout.tsx 和純 metadata 的 page.tsx **不要**加 'use client'
+
+## 互動完整性規則（Critical — 按鈕必須有功能）
+每個 UI 操作都必須有完整的互動實作，不能只是靜態佔位：
+
+### create 類操作（新增/建立/記錄）
+- 必須有觸發按鈕 → 打開 Modal/Dialog（用 useState 控制開關）
+- Modal 內必須有完整表單（所有欄位、驗證、提交按鈕）
+- 提交後：加入列表/表格 + 關閉 Modal + 清空表單
+- 使用 Radix Dialog 或原生 dialog 實作
+
+### delete 類操作（刪除/移除）
+- 必須有觸發按鈕 → 打開 AlertDialog 確認
+- 確認後：從列表移除該項目
+- 使用 Radix AlertDialog 實作
+
+### update 類操作（修改/編輯）
+- 點擊編輯按鈕 → 打開預填資料的 Modal
+- 修改後提交 → 更新列表中的對應項目
+
+### filter 類操作（搜尋/篩選）
+- 搜尋框/篩選器用 useState 控制
+- 輸入時即時過濾列表（用 useMemo 或 filter）
+
+### view 類操作（查看/瀏覽）
+- 點擊展開詳情面板、或導航到詳情頁
+
+### 資料管理模式
+- 使用 useState 管理列表資料（初始值為有意義的模擬數據）
+- CRUD 操作直接操作 state（前端 demo，不需要 API）
+- 例如：\`const [items, setItems] = useState(initialData)\`
+
+${getBaseRules()}
 `
 
   // 構建產品上下文
@@ -1889,6 +1981,17 @@ ${sections.join('\n\n')}
 `
   }
 
+  const moodCodeSection = productContext?.moodId && getMoodCodeFragment(productContext.moodId)
+    ? `## 風格錨點（Style Reference — 目標視覺風格代碼示範）
+以下片段展示了 ${getMoodById(productContext.moodId)?.name || productContext.moodId} 風格的視覺表現。
+你的輸出應體現相同的設計語言（為本產品量身定製，不要複製結構）：
+
+\`\`\`tsx
+${getMoodCodeFragment(productContext.moodId)}
+\`\`\`
+`
+    : ''
+
   const userMessage = `請根據以下資訊生成桌面版前端代碼，包含完整互動功能。
 
 ${conceptSection}
@@ -1896,7 +1999,7 @@ ${productSection}
 ${designSection}
 ${referenceSection}
 ${briefSection}
-${productContext?.moodId ? `## Design Mood（視覺風格指引 — 高優先）\n${getMoodPromptBlock(productContext.moodId)}\n` : ''}${overridesSection}
+${moodCodeSection}${overridesSection}
 ${templateStyleSection}
 ${requirementsSection}
 ${interactionSection}
@@ -1947,7 +2050,7 @@ ${productContext?.layoutMode === 'app'
   const response = await callClaude(
     systemPrompt,
     [{ role: 'user', content: userMessage }],
-    { maxTokens: 32768, temperature: designTier === 'creative' ? (productContext?.moodId ? 0.4 : 0.35) : 0.2 },
+    { maxTokens: 32768, temperature: designTier === 'creative' ? (productContext?.moodId ? 0.5 : 0.4) : 0.3 },
     { ...trackingContext, purpose: 'generate_structure' },
     buildStreamingHandler(onPartialCode)
   )
@@ -2074,7 +2177,23 @@ ${getAnimationConstraints(tier)}
 - 不要修改現有的互動邏輯（Modal 開關、表單 state、事件處理、useState）
 - 不要移除任何 'use client' 聲明
 - 不要添加響應式設計
-- 不要使用 CSS animation（使用 motion/react）`
+- 不要使用 CSS animation（使用 motion/react）
+
+## data-animate 意圖實作（優先執行）
+結構代碼中帶 data-animate 屬性的元素代表動畫意圖，你必須實作它們：
+1. 找到所有 data-animate 元素
+2. 用 motion/react 實作對應動畫（見對應表）
+3. **移除 data-animate 屬性**（它只是意圖標記，不留在生產代碼中）
+
+對應實作：
+- "fade-up" → initial={{ opacity:0, y:20 }} animate={{ opacity:1, y:0 }} transition={{ duration:0.5 }}
+- "stagger-children" → variants={container} + variants={item} staggerChildren: 0.1
+- "hero-entrance" → initial={{ opacity:0, y:-30, scale:0.95 }} + transition={{ duration:0.6, ease:'easeOut' }}
+- "reveal-on-scroll" → useInView hook + whileInView="visible" viewport={{ once:true, margin:'-100px' }}
+- "count-up" → useMotionValue + useSpring(val, { stiffness:100, damping:20 }) + useTransform
+- "slide-in-left/right" → initial={{ opacity:0, x:±50 }} animate={{ opacity:1, x:0 }}
+- "hover-lift" → whileHover={{ y:-4 }} transition={{ type:'spring', stiffness:300 }}
+- "parallax" → useScroll + useTransform(scrollY, [0,500], [0,-100])`
 
   const existingCodeStr = [
     ...existingCode.pages.map(p => `\`\`\`tsx:${p.path}\n${p.content}\n\`\`\``),

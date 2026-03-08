@@ -38,6 +38,7 @@ export default function AccountPage() {
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null)
   const [user, setUser] = useState<{ name?: string; email?: string; avatarUrl?: string; preferredLanguage?: string | null } | null>(null)
   const [savingLanguage, setSavingLanguage] = useState(false)
+  const [isMobile, setIsMobile] = useState(false)
 
   // 檢查 URL 參數中的綁定結果
   useEffect(() => {
@@ -100,6 +101,25 @@ export default function AccountPage() {
 
   useEffect(() => {
     fetchProviders()
+  }, [])
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+
+    const mediaQuery = window.matchMedia('(max-width: 768px)')
+    const syncMobileState = (event?: MediaQueryListEvent) => {
+      setIsMobile(event ? event.matches : mediaQuery.matches)
+    }
+
+    syncMobileState()
+
+    if (typeof mediaQuery.addEventListener === 'function') {
+      mediaQuery.addEventListener('change', syncMobileState)
+      return () => mediaQuery.removeEventListener('change', syncMobileState)
+    }
+
+    mediaQuery.addListener(syncMobileState)
+    return () => mediaQuery.removeListener(syncMobileState)
   }, [])
 
   async function handleLanguageChange(lang: string) {
@@ -192,7 +212,8 @@ export default function AccountPage() {
           style={{
             position: 'fixed',
             top: 20,
-            right: 20,
+            right: isMobile ? 12 : 20,
+            left: isMobile ? 12 : 'auto',
             padding: '12px 20px',
             borderRadius: 8,
             background: toast.type === 'success' ? '#10B981' : '#EF4444',
@@ -224,7 +245,7 @@ export default function AccountPage() {
         background: 'var(--white)',
       }}>
         <h2 style={{ fontSize: 16, fontWeight: 600, marginBottom: 16 }}>{t('basicInfo')}</h2>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+        <div style={{ display: 'flex', alignItems: isMobile ? 'flex-start' : 'center', flexDirection: isMobile ? 'column' : 'row', gap: 16 }}>
           {user?.avatarUrl ? (
             /* eslint-disable-next-line @next/next/no-img-element */
             <img
@@ -241,9 +262,9 @@ export default function AccountPage() {
               {user?.name?.[0] || user?.email?.[0] || '?'}
             </div>
           )}
-          <div>
+          <div style={{ minWidth: 0, width: '100%' }}>
             <div style={{ fontSize: 16, fontWeight: 500 }}>{user?.name || t('noNameSet')}</div>
-            <div style={{ fontSize: 14, color: 'var(--gray-500)', marginTop: 2 }}>{user?.email}</div>
+            <div style={{ fontSize: 14, color: 'var(--gray-500)', marginTop: 2, wordBreak: 'break-all' }}>{user?.email}</div>
           </div>
         </div>
 
@@ -251,7 +272,7 @@ export default function AccountPage() {
         <div style={{ marginTop: 20, paddingTop: 16, borderTop: '1px solid var(--border-color)' }}>
           <div style={{ fontSize: 14, fontWeight: 500, marginBottom: 4 }}>{t('languagePreference')}</div>
           <div style={{ fontSize: 12, color: 'var(--gray-500)', marginBottom: 12 }}>{t('languagePreferenceHint')}</div>
-          <div style={{ display: 'flex', gap: 8 }}>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
             {[
               { value: 'zh', label: '中文' },
               { value: 'en', label: 'English' },
@@ -307,6 +328,7 @@ export default function AccountPage() {
                   style={{
                     display: 'flex',
                     alignItems: 'center',
+                    flexWrap: isMobile ? 'wrap' : 'nowrap',
                     gap: 12,
                     padding: '12px 16px',
                     background: 'var(--gray-50)',
@@ -325,7 +347,7 @@ export default function AccountPage() {
                   </div>
 
                   {/* Info */}
-                  <div style={{ flex: 1 }}>
+                  <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ fontSize: 14, fontWeight: 500 }}>
                       {config.label}
                       {p.isPrimary && (
@@ -337,10 +359,10 @@ export default function AccountPage() {
                         </span>
                       )}
                     </div>
-                    <div style={{ fontSize: 12, color: 'var(--gray-500)', marginTop: 2 }}>
+                    <div style={{ fontSize: 12, color: 'var(--gray-500)', marginTop: 2, wordBreak: 'break-all' }}>
                       {p.email || '—'}
                       {p.linkedAt && (
-                        <span style={{ marginLeft: 8 }}>
+                        <span style={{ marginLeft: isMobile ? 0 : 8, display: isMobile ? 'block' : 'inline' }}>
                           {t('linkedAt', { date: new Date(p.linkedAt).toLocaleDateString() })}
                         </span>
                       )}
@@ -362,6 +384,7 @@ export default function AccountPage() {
                         cursor: unlinking === p.provider ? 'not-allowed' : 'pointer',
                         opacity: unlinking === p.provider ? 0.5 : 1,
                         transition: 'all 0.15s ease',
+                        width: isMobile ? '100%' : 'auto',
                       }}
                     >
                       {unlinking === p.provider ? t('unlinking') : t('unlinkAccount')}
@@ -397,6 +420,7 @@ export default function AccountPage() {
                   style={{
                     display: 'flex',
                     alignItems: 'center',
+                    flexWrap: isMobile ? 'wrap' : 'nowrap',
                     gap: 12,
                     padding: '12px 16px',
                     borderRadius: 8,
@@ -423,9 +447,9 @@ export default function AccountPage() {
                   }}>
                     {config.icon}
                   </div>
-                  <div style={{ flex: 1 }}>
+                  <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ fontSize: 14, fontWeight: 500 }}>{t('linkProvider', { provider: config.label })}</div>
-                    <div style={{ fontSize: 12, color: 'var(--gray-500)' }}>
+                    <div style={{ fontSize: 12, color: 'var(--gray-500)', wordBreak: 'break-word' }}>
                       {t('linkProviderHint', { provider: config.label })}
                     </div>
                   </div>
