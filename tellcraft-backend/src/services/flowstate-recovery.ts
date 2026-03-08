@@ -17,7 +17,7 @@
 import Redis from 'ioredis'
 import { Server as SocketIOServer } from 'socket.io'
 import { saveFlowState, deleteFlowState, sendMessage, hasRecentFlowActivity } from '../workers/orchestrator-utils'
-import { forceReleaseConversationLock } from './conversation-lock'
+import { forceReleaseConversationLock, forceReleaseUserActiveLock } from './conversation-lock'
 import { generateTailwindConfig } from './uiux-generation'
 import type { FlowState } from '../types/flow-state'
 import { createLogger } from '../lib/logger'
@@ -89,7 +89,12 @@ export async function scanAndRecoverStuckFlowStates(
       const startedAt = state.phase === 'prd_discovery'
         ? (state.prdDiscoveryStartedAt || 0)
         : (state.uiuxCodeGenerationStartedAt || 0)
-      if (startedAt > 0 && Date.now() - startedAt <= timeoutMs) continue
+
+      // 早期恢復：lock 不存在 = Worker 已死，縮短等待至 5 分鐘（取代完整超時）
+      const lockExists = (await redis.exists(`conv-lock:${conversationId}`)) === 1
+      const effectiveTimeoutMs = !lockExists ? 5 * 60 * 1000 : timeoutMs
+
+      if (startedAt > 0 && Date.now() - startedAt <= effectiveTimeoutMs) continue
 
       // 生成類 phase 先檢查近期活動心跳，避免活躍串流被誤判為超時。
       if (
@@ -116,6 +121,10 @@ export async function scanAndRecoverStuckFlowStates(
       const released = await forceReleaseConversationLock(redis, conversationId)
       if (released) {
         logger.info({ conversationId }, '強制釋放 conversation lock')
+      }
+      // 同時釋放 user-active lock
+      if (state.userId) {
+        await forceReleaseUserActiveLock(redis, state.userId).catch(() => {})
       }
       recovered++
       } catch (err) {
@@ -381,6 +390,10 @@ async function scanAndCleanOrphanedLocks(redis: Redis): Promise<void> {
             logger.warn({ conversationId, phase: state.phase, elapsedSec },
               '清理孤立 lock（waitingForReply=true 但 lock 未釋放）')
             cleaned++
+          }
+          // 同時釋放 user-active lock
+          if (state.userId) {
+            await forceReleaseUserActiveLock(redis, state.userId).catch(() => {})
           }
         }
         // waitingForReply=false：Worker 可能仍在執行，交由 RECOVERABLE_PHASES 處理
