@@ -75,6 +75,8 @@ function HeroSection({
   const presetFiberTitle = tHero('presetFiberTitle')
   const presetFiberSummary = tHero('presetFiberSummary')
   const presetFiberPrompt = tHero('presetFiberPrompt')
+  const heroTitle = tHero('title')
+  const heroTitleTexts = useMemo(() => [heroTitle], [heroTitle])
 
   const presetDefinitions = useMemo(
     () => [
@@ -267,7 +269,7 @@ function HeroSection({
         >
           <h1 className="hero-title" style={{ textAlign: 'center' }}>
             <TextType
-              texts={[tHero('title')]}
+              texts={heroTitleTexts}
               typingSpeed={75}
               pauseDuration={1500}
               showCursor
