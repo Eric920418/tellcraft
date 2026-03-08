@@ -41,7 +41,7 @@ function jsonNoStore(data: unknown, status: number): NextResponse {
       'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate',
       Pragma: 'no-cache',
       Expires: '0',
-      Surrogate-Control: 'no-store',
+      'Surrogate-Control': 'no-store',
     },
   })
 }
@@ -59,7 +59,7 @@ export async function GET(
   const targetPath = '/' + path.join('/')
 
   if (!validateProxyPath(targetPath)) {
-    return NextResponse.json({ error: 'Invalid proxy path' }, { status: 400 })
+    return jsonNoStore({ error: 'Invalid proxy path' }, 400)
   }
   const url = new URL(request.url)
   const queryString = url.search
