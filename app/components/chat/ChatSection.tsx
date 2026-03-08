@@ -21,6 +21,7 @@ import { useCodePreviewEditor } from '@/app/hooks/useCodePreviewEditor'
 import { useLoginPrompt } from '@/app/hooks/useLoginPrompt'
 import { useChatSession } from '@/app/hooks/useChatSession'
 import { useChatPolling } from '@/app/hooks/useChatPolling'
+import { useTabSync } from '@/app/hooks/useTabSync'
 
 import { ProcessStep } from '@/app/components/landing'
 import { AnimatedThemeToggler } from '@/app/components/AnimatedThemeToggler'
@@ -96,6 +97,9 @@ export default function ChatSection({
   const chatImageInputRef = useRef<HTMLInputElement>(null)
   const [pendingCodePreviewSaveAt, setPendingCodePreviewSaveAt] = useState<number | null>(null)
 
+  // ref 供 typing useEffect 廣播用（避免 session 宣告順序問題）
+  const conversationIdRef = useRef<string | undefined>(undefined)
+
   // ── Typing indicator ──
   const typingSafetyRef = useRef<NodeJS.Timeout | null>(null)
   useEffect(() => {
@@ -167,6 +171,22 @@ export default function ChatSection({
   )
 
   const scroll = useChatScroll(messages)
+
+  const { isOtherTabBusy, broadcastTaskStarted, broadcastTaskCompleted } = useTabSync(
+    session.sessionInfo?.userId
+  )
+
+  // 同步 conversationId 到 ref + 廣播任務完成
+  useEffect(() => {
+    conversationIdRef.current = session.sessionInfo?.conversationId
+  }, [session.sessionInfo?.conversationId])
+
+  useEffect(() => {
+    if (!isTyping && conversationIdRef.current) {
+      broadcastTaskCompleted(conversationIdRef.current)
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isTyping])
 
   const pollingRef = useRef<{ setLastTimestamp: (ts: string) => void }>({ setLastTimestamp: () => {} })
 
@@ -410,6 +430,15 @@ export default function ChatSection({
       setIsTyping(false)
 
       const err = result.error || ''
+      if (err.includes('USER_TASK_IN_PROGRESS')) {
+        const otherConv = (result as { activeConversationId?: string }).activeConversationId
+        session.setError(
+          otherConv
+            ? '另一個視窗有 AI 任務正在執行中，請等待完成後再發送新任務。'
+            : '此對話的 AI 任務正在執行中，請稍候。'
+        )
+        return false
+      }
       if (err.includes('GUEST_FINE_LOCKED') || err.includes('GUEST_LIMIT_REACHED')) {
         localStorage.setItem('tellcraft_guest_fast_used', 'true')
         session.setGuestBuildCompleted(true)
@@ -431,8 +460,10 @@ export default function ChatSection({
       session.setError(err || tChat('sendFailed'))
       return false
     }
+    // 廣播任務開始，讓同一瀏覽器其他 Tab 知道
+    broadcastTaskStarted(session.sessionInfo.conversationId)
     return true
-  }, [session, isTyping, sendCooldown, isGuestLocked, startSendCooldown, getCommandLabel, scroll, locale, tChat, tLogin, loginPromptHook])
+  }, [session, isTyping, sendCooldown, isGuestLocked, startSendCooldown, getCommandLabel, scroll, locale, tChat, tLogin, loginPromptHook, broadcastTaskStarted])
 
   // ── Send from input (Enter key) ──
   const handleSend = useCallback(async () => {
@@ -554,6 +585,15 @@ export default function ChatSection({
       setIsTyping(false)
 
       const err = result.error || ''
+      if (err.includes('USER_TASK_IN_PROGRESS')) {
+        const otherConv = (result as { activeConversationId?: string }).activeConversationId
+        session.setError(
+          otherConv
+            ? '另一個視窗有 AI 任務正在執行中，請等待完成後再發送新任務。'
+            : '此對話的 AI 任務正在執行中，請稍候。'
+        )
+        return
+      }
       if (err.includes('GUEST_FINE_LOCKED') || err.includes('GUEST_LIMIT_REACHED')) {
         localStorage.setItem('tellcraft_guest_fast_used', 'true')
         session.setGuestBuildCompleted(true)
@@ -576,8 +616,12 @@ export default function ChatSection({
       setMessages(prev => prev.map(m =>
         m.id === userMessage.id ? { ...m, id: result.data!.messageId } : m
       ))
+      // 廣播任務開始，讓同一瀏覽器其他 Tab 知道
+      if (session.sessionInfo?.conversationId) {
+        broadcastTaskStarted(session.sessionInfo.conversationId)
+      }
     }
-  }, [session, input, isTyping, sendCooldown, isGuestLocked, attachedImages, startSendCooldown, editorHook, scroll, locale, tChat, tCodePreview, tLogin, loginPromptHook])
+  }, [session, input, isTyping, sendCooldown, isGuestLocked, attachedImages, startSendCooldown, editorHook, scroll, locale, tChat, tCodePreview, tLogin, loginPromptHook, broadcastTaskStarted])
 
   // ── Code preview save ──
   const extractImageUrlsFromOverrides = useCallback((overrides: Record<string, Record<string, string>>): string[] => {

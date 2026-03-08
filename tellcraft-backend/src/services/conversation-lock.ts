@@ -56,6 +56,89 @@ export async function forceReleaseConversationLock(
   return result === 1
 }
 
+// ============================================================
+// 用戶全局任務鎖（user-active）
+// 同一用戶任何時間只能有一個活躍 AI 任務
+// ============================================================
+
+const USER_ACTIVE_PREFIX = 'user-active:'
+export const USER_ACTIVE_TTL_SECONDS = 2100 // 35 分鐘，與 conv-lock 一致
+
+/**
+ * API 層呼叫：原子 check-and-set
+ * 返回 { acquired: true } 或 { acquired: false, activeConversationId }
+ * Redis 不可用時 fail-open（返回 acquired: true）
+ */
+export async function acquireUserActiveLock(
+  redis: Redis,
+  userId: string,
+  conversationId: string
+): Promise<{ acquired: true } | { acquired: false; activeConversationId: string }> {
+  try {
+    const key = `${USER_ACTIVE_PREFIX}${userId}`
+    // Lua 原子 check-and-set：有佔用者返回佔用 conversationId，否則設值並返回 "OK"
+    const script = `
+      local existing = redis.call("GET", KEYS[1])
+      if existing then
+        return existing
+      end
+      redis.call("SET", KEYS[1], ARGV[1], "EX", ARGV[2])
+      return "OK"
+    `
+    const result = await redis.eval(script, 1, key, conversationId, String(USER_ACTIVE_TTL_SECONDS)) as string
+
+    if (result === 'OK') {
+      return { acquired: true }
+    }
+    // 返回的是已佔用的 conversationId
+    return { acquired: false, activeConversationId: result }
+  } catch {
+    // Redis 不可用時 fail-open
+    return { acquired: true }
+  }
+}
+
+/**
+ * Worker 完成後釋放（Lua 精確釋放，只釋放自己佔用的鎖）
+ */
+export async function releaseUserActiveLock(
+  redis: Redis,
+  userId: string,
+  conversationId: string
+): Promise<boolean> {
+  try {
+    const key = `${USER_ACTIVE_PREFIX}${userId}`
+    const script = `
+      if redis.call("GET", KEYS[1]) == ARGV[1] then
+        return redis.call("DEL", KEYS[1])
+      else
+        return 0
+      end
+    `
+    const result = await redis.eval(script, 1, key, conversationId)
+    return result === 1
+  } catch {
+    return false
+  }
+}
+
+/**
+ * 強制釋放用戶任務鎖（不驗證 conversationId）
+ * 僅供 flowstate-recovery 在超時後使用
+ */
+export async function forceReleaseUserActiveLock(
+  redis: Redis,
+  userId: string
+): Promise<boolean> {
+  try {
+    const key = `${USER_ACTIVE_PREFIX}${userId}`
+    const result = await redis.del(key)
+    return result === 1
+  } catch {
+    return false
+  }
+}
+
 /**
  * 包裝函數：自動 acquire → 執行 → release
  * 鎖失敗時返回 { locked: true }，成功時返回 { locked: false, result }

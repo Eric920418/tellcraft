@@ -1,7 +1,7 @@
 import { Job, Worker } from 'bullmq'
 import { Server as SocketIOServer } from 'socket.io'
 import Redis from 'ioredis'
-import { withConversationLock } from '../services/conversation-lock'
+import { withConversationLock, releaseUserActiveLock } from '../services/conversation-lock'
 import * as db from '../db/client'
 import { classifyIntent, isSkillIntent } from '../services/classifier'
 import { SkillName } from '../services/registry'
@@ -98,12 +98,20 @@ export function createOrchestratorWorker(
     }
   )
 
-  worker.on('completed', (job) => {
+  worker.on('completed', async (job) => {
     logger.info({ jobId: job.id }, 'Job 完成')
+    const { userId, conversationId } = job.data as { userId?: string; conversationId?: string }
+    if (userId && conversationId) {
+      await releaseUserActiveLock(redis, userId, conversationId).catch(() => {})
+    }
   })
 
   worker.on('failed', (job, err) => {
     logger.error({ err, jobId: job?.id }, 'Job 失敗')
+    const data = job?.data as { userId?: string; conversationId?: string } | undefined
+    if (data?.userId && data?.conversationId) {
+      releaseUserActiveLock(redis, data.userId, data.conversationId).catch(() => {})
+    }
     handleJobFinalFailure(job, err, io).catch(fatalErr => {
       logger.error({ err: fatalErr }, 'handleJobFinalFailure itself failed')
     })

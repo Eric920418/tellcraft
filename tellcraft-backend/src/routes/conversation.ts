@@ -7,6 +7,7 @@ import { validateBody } from '../middleware/validate'
 import { sendMessageSchema, replyMessageSchema } from '../schemas/conversation'
 import * as db from '../db/client'
 import { getCreditLimit, isCreditExhausted, CREDIT_LIMIT_ERROR_CODE } from '../config/plans'
+import { acquireUserActiveLock, releaseUserActiveLock, USER_ACTIVE_TTL_SECONDS } from '../services/conversation-lock'
 import { createLogger } from '../lib/logger'
 
 const logger = createLogger('conversation')
@@ -205,6 +206,18 @@ router.post('/:id/message', optionalAuth, validateBody(sendMessageSchema), async
       })
     }
 
+    // 用戶全局任務鎖（防止多視窗同時跑多個 LLM 任務）
+    const userLockResult = await acquireUserActiveLock(redisClient, userId, conversationId)
+    if (!userLockResult.acquired) {
+      return res.status(409).json({
+        error: 'USER_TASK_IN_PROGRESS',
+        message: '您有一個 AI 任務正在執行中，請等待完成後再發送。',
+        activeConversationId: userLockResult.activeConversationId !== conversationId
+          ? userLockResult.activeConversationId
+          : undefined,
+      })
+    }
+
     // 新增用戶消息到 DB
     const messageId = crypto.randomUUID()
     const newMessage = {
@@ -220,21 +233,28 @@ router.post('/:id/message', optionalAuth, validateBody(sendMessageSchema), async
     // Credit 扣除由 Orchestrator 負責（按操作加權）
 
     // 加入 BullMQ 隊列
-    const job = await orchestratorQueue.add('process-message', {
-      projectId,
-      conversationId,
-      userId,
-      message,
-      mode,
-      locale,
-      imageUrls: imageUrls || undefined,
-    }, {
-      attempts: 3,
-      backoff: {
-        type: 'exponential',
-        delay: 2000,
-      },
-    })
+    let job
+    try {
+      job = await orchestratorQueue.add('process-message', {
+        projectId,
+        conversationId,
+        userId,
+        message,
+        mode,
+        locale,
+        imageUrls: imageUrls || undefined,
+      }, {
+        attempts: 3,
+        backoff: {
+          type: 'exponential',
+          delay: 2000,
+        },
+      })
+    } catch (queueErr) {
+      // BullMQ 失敗時回退 user-active lock
+      await releaseUserActiveLock(redisClient, userId, conversationId).catch(() => {})
+      throw queueErr
+    }
 
     res.json({
       success: true,
@@ -321,6 +341,21 @@ router.post('/:id/reply', optionalAuth, validateBody(replyMessageSchema), async 
         error: `請求過於頻繁，請 ${replyRateLimit.retryAfter} 秒後再試`,
         retryAfter: replyRateLimit.retryAfter,
       })
+    }
+
+    // 用戶全局任務鎖：同一 conversationId 的 reply（多輪交互）只刷新 TTL
+    const replyLockResult = await acquireUserActiveLock(redisClient, userId, conversationId)
+    if (!replyLockResult.acquired) {
+      if (replyLockResult.activeConversationId !== conversationId) {
+        // 別的對話在跑 → 拒絕
+        return res.status(409).json({
+          error: 'USER_TASK_IN_PROGRESS',
+          message: '您有一個 AI 任務正在執行中，請等待完成後再發送。',
+          activeConversationId: replyLockResult.activeConversationId,
+        })
+      }
+      // 同一對話的 reply（BDD 釐清、變體選擇等正常多輪流程）→ 刷新 TTL
+      await redisClient.expire(`user-active:${userId}`, USER_ACTIVE_TTL_SECONDS).catch(() => {})
     }
 
     // 新增用戶消息到 DB

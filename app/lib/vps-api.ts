@@ -25,6 +25,7 @@ interface ApiResponse<T = unknown> {
   success: boolean
   data?: T
   error?: string
+  activeConversationId?: string
 }
 
 interface Message {
@@ -79,6 +80,14 @@ async function apiRequest<T>(
           success: false,
           error: ((data as Record<string, unknown>).error as string) || 'Too many requests',
           retryAfter,
+        } as ApiResponse<T>
+      }
+      // 409 用戶全局任務鎖：提取 activeConversationId
+      if (response.status === 409) {
+        return {
+          success: false,
+          error: (data as Record<string, unknown>).error as string || 'USER_TASK_IN_PROGRESS',
+          activeConversationId: (data as Record<string, unknown>).activeConversationId as string | undefined,
         } as ApiResponse<T>
       }
       return {
