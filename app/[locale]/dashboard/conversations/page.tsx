@@ -32,6 +32,7 @@ export default function ConversationsPage() {
   const [conversations, setConversations] = useState<Conversation[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [isMobile, setIsMobile] = useState(false)
 
   useEffect(() => {
     const fetchData = async () => {
@@ -54,7 +55,26 @@ export default function ConversationsPage() {
     fetchData()
   }, [router])
 
-  const columns: Column<Conversation>[] = [
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+
+    const mediaQuery = window.matchMedia('(max-width: 768px)')
+    const syncMobileState = (event?: MediaQueryListEvent) => {
+      setIsMobile(event ? event.matches : mediaQuery.matches)
+    }
+
+    syncMobileState()
+
+    if (typeof mediaQuery.addEventListener === 'function') {
+      mediaQuery.addEventListener('change', syncMobileState)
+      return () => mediaQuery.removeEventListener('change', syncMobileState)
+    }
+
+    mediaQuery.addListener(syncMobileState)
+    return () => mediaQuery.removeListener(syncMobileState)
+  }, [])
+
+  const desktopColumns: Column<Conversation>[] = [
     {
       key: 'projectName',
       header: t('projectHeader'),
@@ -93,6 +113,25 @@ export default function ConversationsPage() {
         <span style={{ fontSize: 12, color: 'var(--gray-400)' }}>
           {formatRelativeTime(conv.updatedAt, t)}
         </span>
+      ),
+    },
+  ]
+
+  const mobileColumns: Column<Conversation>[] = [
+    {
+      key: 'summary',
+      header: t('projectHeader'),
+      width: '1fr',
+      render: (conv: Conversation) => (
+        <div style={{ minWidth: 0 }}>
+          <div style={{ fontWeight: 500 }}>{conv.projectName}</div>
+          <div style={{ fontSize: 13, color: 'var(--gray-500)', marginTop: 4, overflow: 'hidden', textOverflow: 'ellipsis' }}>
+            {conv.lastMessage ? conv.lastMessage : '-'}
+          </div>
+          <div style={{ fontSize: 12, color: 'var(--gray-400)', marginTop: 6 }}>
+            {conv.messageCount} {t('messageCountHeader')} · {formatRelativeTime(conv.updatedAt, t)}
+          </div>
+        </div>
       ),
     },
   ]
@@ -143,9 +182,10 @@ export default function ConversationsPage() {
         transition={{ duration: 0.4, delay: 0.1 }}
       >
         <DataTable
-          columns={columns}
+          columns={isMobile ? mobileColumns : desktopColumns}
           data={conversations}
           keyField="id"
+          minTableWidth={isMobile ? 0 : 480}
           isLoading={isLoading}
           emptyMessage={t('noConversationsYet')}
           onRowClick={(conv) => {

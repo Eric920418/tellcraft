@@ -19,6 +19,7 @@ interface DataTableProps<T> {
   isLoading?: boolean
   emptyMessage?: string
   onRowClick?: (item: T) => void
+  minTableWidth?: number | string
   pagination?: {
     page: number
     pageSize: number
@@ -39,6 +40,7 @@ export default function DataTable<T extends object>({
   isLoading = false,
   emptyMessage,
   onRowClick,
+  minTableWidth = 480,
   pagination,
   sortConfig,
 }: DataTableProps<T>) {
@@ -56,7 +58,7 @@ export default function DataTable<T extends object>({
           border: '1px solid var(--border-color)',
           background: 'var(--white)',
           overflow: 'hidden',
-          minWidth: 480,
+          minWidth: minTableWidth,
         }}
       >
         {/* Header */}
@@ -185,8 +187,10 @@ export default function DataTable<T extends object>({
         <div
           style={{
             display: 'flex',
+            flexWrap: 'wrap',
             alignItems: 'center',
             justifyContent: 'space-between',
+            gap: 12,
             padding: '16px 0',
           }}
         >
@@ -194,7 +198,7 @@ export default function DataTable<T extends object>({
             {t('paginationInfo', { total: pagination.total, page: pagination.page, totalPages })}
           </span>
 
-          <div style={{ display: 'flex', gap: 8 }}>
+          <div style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'flex-end', gap: 8 }}>
             <PaginationButton
               onClick={() => pagination.onPageChange(pagination.page - 1)}
               disabled={pagination.page <= 1}

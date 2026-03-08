@@ -83,6 +83,7 @@ export function DashboardShell({
         className="dashboard-main"
         style={{
           flex: 1,
+          minWidth: 0,
           marginLeft: 240,
           padding: 32,
           minHeight: '100vh',

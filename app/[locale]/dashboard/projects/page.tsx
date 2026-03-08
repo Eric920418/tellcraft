@@ -54,6 +54,7 @@ export default function ProjectsPage() {
   const [isLoading, setIsLoading] = useState(true)
   const [search, setSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState<string>('')
+  const [isMobile, setIsMobile] = useState(false)
 
   const [refetchFlag, setRefetchFlag] = useState(0)
   const pageSize = 10
@@ -85,6 +86,25 @@ export default function ProjectsPage() {
     fetchProjects()
   }, [page, statusFilter, search, router, refetchFlag])
 
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+
+    const mediaQuery = window.matchMedia('(max-width: 768px)')
+    const syncMobileState = (event?: MediaQueryListEvent) => {
+      setIsMobile(event ? event.matches : mediaQuery.matches)
+    }
+
+    syncMobileState()
+
+    if (typeof mediaQuery.addEventListener === 'function') {
+      mediaQuery.addEventListener('change', syncMobileState)
+      return () => mediaQuery.removeEventListener('change', syncMobileState)
+    }
+
+    mediaQuery.addListener(syncMobileState)
+    return () => mediaQuery.removeListener(syncMobileState)
+  }, [])
+
 
   const handleTogglePin = async (project: Project) => {
     const token = getAuthToken()
@@ -110,7 +130,41 @@ export default function ProjectsPage() {
     return key ? t(key) : status
   }
 
-  const columns: Column<Project>[] = [
+  const renderConversationAction = (project: Project) => {
+    if (!project.latestConversationId) return null
+    return (
+      <a
+        href={localePath(`/?conversation=${project.latestConversationId}`)}
+        title={t('enterConversation')}
+        onClick={(e) => e.stopPropagation()}
+        style={{
+          display: 'inline-flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          width: 32,
+          height: 32,
+          borderRadius: 6,
+          color: 'var(--gray-400)',
+          textDecoration: 'none',
+          transition: 'all 0.15s ease',
+        }}
+        onMouseEnter={(e) => {
+          e.currentTarget.style.color = 'var(--black)'
+          e.currentTarget.style.background = 'var(--gray-100)'
+        }}
+        onMouseLeave={(e) => {
+          e.currentTarget.style.color = 'var(--gray-400)'
+          e.currentTarget.style.background = 'transparent'
+        }}
+      >
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+        </svg>
+      </a>
+    )
+  }
+
+  const desktopColumns: Column<Project>[] = [
     {
       key: 'pin',
       header: '',
@@ -204,39 +258,7 @@ export default function ProjectsPage() {
       key: 'actions',
       header: '',
       width: '50px',
-      render: (project: Project) => {
-        if (!project.latestConversationId) return null
-        return (
-          <a
-            href={localePath(`/?conversation=${project.latestConversationId}`)}
-            title={t('enterConversation')}
-            onClick={(e) => e.stopPropagation()}
-            style={{
-              display: 'inline-flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              width: 32,
-              height: 32,
-              borderRadius: 6,
-              color: 'var(--gray-400)',
-              textDecoration: 'none',
-              transition: 'all 0.15s ease',
-            }}
-            onMouseEnter={(e) => {
-              e.currentTarget.style.color = 'var(--black)'
-              e.currentTarget.style.background = 'var(--gray-100)'
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.color = 'var(--gray-400)'
-              e.currentTarget.style.background = 'transparent'
-            }}
-          >
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
-            </svg>
-          </a>
-        )
-      },
+      render: (project: Project) => renderConversationAction(project),
     },
     {
       key: 'updatedAt',
@@ -247,6 +269,67 @@ export default function ProjectsPage() {
           {new Date(project.updatedAt).toLocaleDateString('zh-TW')}
         </span>
       ),
+    },
+  ]
+
+  const mobileColumns: Column<Project>[] = [
+    {
+      key: 'pin',
+      header: '',
+      width: '40px',
+      render: (project: Project) => (
+        <button
+          onClick={(e) => {
+            e.stopPropagation()
+            handleTogglePin(project)
+          }}
+          title={project.isPinned ? t('unpinProject') : t('pinProject')}
+          style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            width: 28,
+            height: 28,
+            border: 'none',
+            background: 'transparent',
+            cursor: 'pointer',
+            borderRadius: 4,
+            transition: 'all 0.15s ease',
+          }}
+        >
+          <svg width="14" height="14" viewBox="0 0 24 24" fill={project.isPinned ? '#F59E0B' : 'none'} stroke={project.isPinned ? '#F59E0B' : 'var(--gray-300)'} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M12 2l2.09 6.26L21 9.27l-5 4.87L17.18 21 12 17.27 6.82 21 8 14.14l-5-4.87 6.91-1.01L12 2z" />
+          </svg>
+        </button>
+      ),
+    },
+    {
+      key: 'summary',
+      header: t('projectName'),
+      width: '1fr',
+      render: (project: Project) => (
+        <div>
+          <div style={{ fontWeight: 500 }}>{project.name}</div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 6 }}>
+            <StatusBadge
+              status={getStatusLabel(project.status)}
+              variant={statusVariants[project.status] || 'default'}
+            />
+            <span style={{ fontSize: 12, color: 'var(--gray-500)' }}>
+              {t('conversationCount', { count: project.conversationCount })}
+            </span>
+          </div>
+          <div style={{ fontSize: 12, color: 'var(--gray-400)', marginTop: 6 }}>
+            {new Date(project.updatedAt).toLocaleDateString('zh-TW')}
+          </div>
+        </div>
+      ),
+    },
+    {
+      key: 'actions',
+      header: '',
+      width: '50px',
+      render: (project: Project) => renderConversationAction(project),
     },
   ]
 
@@ -345,9 +428,10 @@ export default function ProjectsPage() {
         transition={{ duration: 0.4, delay: 0.2 }}
       >
         <DataTable
-          columns={columns}
+          columns={isMobile ? mobileColumns : desktopColumns}
           data={projects}
           keyField="id"
+          minTableWidth={isMobile ? 0 : 480}
           isLoading={isLoading}
           emptyMessage={t('noProjectsYet')}
           onRowClick={(project) => {
