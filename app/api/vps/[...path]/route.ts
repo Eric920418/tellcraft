@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 
 const VPS_API_URL = process.env.VPS_API_URL || 'http://54.238.4.117:8080'
+export const dynamic = 'force-dynamic'
+export const revalidate = 0
 
 // 路徑驗證白名單
 const ALLOWED_PATH_PREFIXES = ['/api/', '/auth/', '/health']
@@ -32,6 +34,18 @@ async function safeParseResponse(response: Response): Promise<{ data: unknown; s
   }
 }
 
+function jsonNoStore(data: unknown, status: number): NextResponse {
+  return NextResponse.json(data, {
+    status,
+    headers: {
+      'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate',
+      Pragma: 'no-cache',
+      Expires: '0',
+      Surrogate-Control: 'no-store',
+    },
+  })
+}
+
 /**
  * VPS API 代理
  * 解決 Mixed Content 問題（HTTPS -> HTTP）
@@ -53,6 +67,7 @@ export async function GET(
   try {
     const response = await fetch(`${VPS_API_URL}${targetPath}${queryString}`, {
       method: 'GET',
+      cache: 'no-store',
       headers: {
         'Content-Type': 'application/json',
         'Authorization': request.headers.get('authorization') || '',
@@ -60,10 +75,10 @@ export async function GET(
     })
 
     const { data, status } = await safeParseResponse(response)
-    return NextResponse.json(data, { status })
+    return jsonNoStore(data, status)
   } catch (error) {
     console.error('[VPS Proxy] GET error:', error)
-    return NextResponse.json({ error: 'VPS connection failed' }, { status: 502 })
+    return jsonNoStore({ error: 'VPS connection failed' }, 502)
   }
 }
 
@@ -75,10 +90,12 @@ export async function POST(
   const targetPath = '/' + path.join('/')
 
   if (!validateProxyPath(targetPath)) {
-    return NextResponse.json({ error: 'Invalid proxy path' }, { status: 400 })
+    return jsonNoStore({ error: 'Invalid proxy path' }, 400)
   }
 
   try {
+    const url = new URL(request.url)
+    const queryString = url.search
     const contentType = request.headers.get('content-type') || ''
     const isMultipart = contentType.includes('multipart/form-data')
 
@@ -87,8 +104,9 @@ export async function POST(
     if (isMultipart) {
       // FormData：透傳原始 body + Content-Type（保留 boundary）
       const rawBody = await request.arrayBuffer()
-      response = await fetch(`${VPS_API_URL}${targetPath}`, {
+      response = await fetch(`${VPS_API_URL}${targetPath}${queryString}`, {
         method: 'POST',
+        cache: 'no-store',
         headers: {
           'Content-Type': contentType,
           'Authorization': request.headers.get('authorization') || '',
@@ -106,8 +124,9 @@ export async function POST(
           // 非 JSON body，直接轉發原始文字
         }
       }
-      response = await fetch(`${VPS_API_URL}${targetPath}`, {
+      response = await fetch(`${VPS_API_URL}${targetPath}${queryString}`, {
         method: 'POST',
+        cache: 'no-store',
         headers: {
           'Content-Type': 'application/json',
           'Authorization': request.headers.get('authorization') || '',
@@ -117,10 +136,10 @@ export async function POST(
     }
 
     const { data, status } = await safeParseResponse(response)
-    return NextResponse.json(data, { status })
+    return jsonNoStore(data, status)
   } catch (error) {
     console.error('[VPS Proxy] POST error:', error)
-    return NextResponse.json({ error: 'VPS connection failed' }, { status: 502 })
+    return jsonNoStore({ error: 'VPS connection failed' }, 502)
   }
 }
 
@@ -132,13 +151,16 @@ export async function PUT(
   const targetPath = '/' + path.join('/')
 
   if (!validateProxyPath(targetPath)) {
-    return NextResponse.json({ error: 'Invalid proxy path' }, { status: 400 })
+    return jsonNoStore({ error: 'Invalid proxy path' }, 400)
   }
 
   try {
+    const url = new URL(request.url)
+    const queryString = url.search
     const body = await request.json()
-    const response = await fetch(`${VPS_API_URL}${targetPath}`, {
+    const response = await fetch(`${VPS_API_URL}${targetPath}${queryString}`, {
       method: 'PUT',
+      cache: 'no-store',
       headers: {
         'Content-Type': 'application/json',
         'Authorization': request.headers.get('authorization') || '',
@@ -147,10 +169,10 @@ export async function PUT(
     })
 
     const { data, status } = await safeParseResponse(response)
-    return NextResponse.json(data, { status })
+    return jsonNoStore(data, status)
   } catch (error) {
     console.error('[VPS Proxy] PUT error:', error)
-    return NextResponse.json({ error: 'VPS connection failed' }, { status: 502 })
+    return jsonNoStore({ error: 'VPS connection failed' }, 502)
   }
 }
 
@@ -162,12 +184,15 @@ export async function DELETE(
   const targetPath = '/' + path.join('/')
 
   if (!validateProxyPath(targetPath)) {
-    return NextResponse.json({ error: 'Invalid proxy path' }, { status: 400 })
+    return jsonNoStore({ error: 'Invalid proxy path' }, 400)
   }
 
   try {
-    const response = await fetch(`${VPS_API_URL}${targetPath}`, {
+    const url = new URL(request.url)
+    const queryString = url.search
+    const response = await fetch(`${VPS_API_URL}${targetPath}${queryString}`, {
       method: 'DELETE',
+      cache: 'no-store',
       headers: {
         'Content-Type': 'application/json',
         'Authorization': request.headers.get('authorization') || '',
@@ -175,9 +200,9 @@ export async function DELETE(
     })
 
     const { data, status } = await safeParseResponse(response)
-    return NextResponse.json(data, { status })
+    return jsonNoStore(data, status)
   } catch (error) {
     console.error('[VPS Proxy] DELETE error:', error)
-    return NextResponse.json({ error: 'VPS connection failed' }, { status: 502 })
+    return jsonNoStore({ error: 'VPS connection failed' }, 502)
   }
 }

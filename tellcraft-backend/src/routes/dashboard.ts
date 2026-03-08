@@ -889,6 +889,11 @@ function resolveLogFiles(source?: string): string[] {
  */
 router.get('/admin/logs', requireAdmin, async (req: Request, res: Response) => {
   try {
+    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate')
+    res.setHeader('Pragma', 'no-cache')
+    res.setHeader('Expires', '0')
+    res.setHeader('Surrogate-Control', 'no-store')
+
     const lines = Math.min(parseInt(req.query.lines as string) || 200, 1000)
     const source = (req.query.source as string) || 'all'
     const search = (req.query.search as string) || ''

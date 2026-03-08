@@ -54,6 +54,7 @@ async function apiRequest<T>(
   const doFetch = async (): Promise<ApiResponse<T>> => {
     const response = await fetch(fullUrl, {
       ...options,
+      cache: (options.method || 'GET').toUpperCase() === 'GET' ? 'no-store' : options.cache,
       headers: {
         'Content-Type': 'application/json',
         ...options.headers,

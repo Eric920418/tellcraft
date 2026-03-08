@@ -215,9 +215,12 @@ export async function handleFastGenerating(
         await deleteFlowState(redis, conversationId)
         await sendMessage(conversationId, io, {
           content: isChinese
-            ? '快速生成中斷了，請稍等自動恢復。'
-            : 'Generation was interrupted. Please wait for automatic recovery.',
+            ? '快速生成被中斷了（伺服器重啟），請重新描述你想要什麼樣的網站。'
+            : 'Generation was interrupted (server restart). Please describe what kind of website you want.',
           stage: 'error',
+          quickReplies: [
+            { label: isChinese ? '重新開始' : 'Start over', value: '__new_project__', style: 'primary' },
+          ],
         })
       }
       return
