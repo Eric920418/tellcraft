@@ -11,6 +11,7 @@ import { formatUISpecForPrompt, UIRequirementsSpec } from './bdd-to-ui-spec'
 import { safeParseJson } from '../utils/safe-parse-json'
 import { selectTechniques, formatTechniquesForPrompt } from './design-techniques'
 import { getMoodPromptBlock, getMoodAnimationHint, getMoodRwdHint, getMoodSummary } from './design-moods'
+import { selectCompositionPatterns, formatPatternsForPrompt, listPatternsForVariants } from './composition-patterns'
 import { createLogger } from '../lib/logger'
 
 const logger = createLogger('uiux-generation')
@@ -754,6 +755,8 @@ ${bddSpec || '（無規格）'}
 
 ${getVariantPromptHint(tier)}
 ${moodId ? `\n## Design Mood（視覺風格指引 — 最高優先）\n${getMoodPromptBlock(moodId)}\n` : ''}
+${listPatternsForVariants(tier)}
+
 ## 5 個設計軸
 ${Object.values(axes).map(v => `- **${v.id}. ${v.name}**：${v.description}\n  ${v.prompt}`).join('\n\n')}
 
@@ -1500,6 +1503,10 @@ export async function generateStructure(
   const techniques = selectTechniques(tier, template.category, 3)
   const techniquesSection = formatTechniquesForPrompt(techniques)
 
+  // 選擇組合模式並注入 prompt
+  const patterns = selectCompositionPatterns(tier, template.category, pages, productContext?.moodId)
+  const patternsSection = formatPatternsForPrompt(patterns)
+
   const systemPrompt = `你是一位專業的前端開發者。根據提供的 Design System 生成桌面版前端代碼，包含完整的互動功能。
 
 ${buildDesignSystemPrompt(designSystem)}
@@ -1553,6 +1560,8 @@ ${buildDesignSystemPrompt(designSystem)}
 ${getStructureConstraints(tier)}
 
 ${techniquesSection}
+
+${patternsSection}
 
 ## 組件規則
 - 有鍵盤/focus 行為的組件使用 Radix 或 React Aria

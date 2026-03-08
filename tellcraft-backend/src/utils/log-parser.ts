@@ -3,6 +3,19 @@
  * 供 dashboard API 和 Socket.io 即時串流共用
  */
 
+const TW_TIMEZONE = 'Asia/Taipei'
+
+/** 將 Date 格式化為台灣時間 YYYY-MM-DD HH:MM:SS */
+function formatTaiwanTime(date: Date): string {
+  return date.toLocaleString('sv-SE', { timeZone: TW_TIMEZONE })
+}
+
+/** 將 PM2 時間戳字串（伺服器本地時間）轉為台灣時間 */
+function convertPm2Timestamp(pm2Ts: string): string {
+  const date = new Date(pm2Ts.replace(' ', 'T'))
+  return !isNaN(date.getTime()) ? formatTaiwanTime(date) : pm2Ts
+}
+
 export interface ParsedLogLine {
   id: string
   timestamp: string
@@ -38,11 +51,9 @@ function parsePinoJson(
   if (!jsonStr.startsWith('{')) return null
   try {
     const json = JSON.parse(jsonStr)
-    // 優先用 Pino 時間，fallback PM2 時間戳
+    // 優先用 Pino 時間（epoch ms），fallback PM2 時間戳，統一轉台灣時間
     const ts = json.time ? new Date(json.time) : null
-    const timestamp = ts
-      ? `${ts.getFullYear()}-${String(ts.getMonth() + 1).padStart(2, '0')}-${String(ts.getDate()).padStart(2, '0')} ${String(ts.getHours()).padStart(2, '0')}:${String(ts.getMinutes()).padStart(2, '0')}:${String(ts.getSeconds()).padStart(2, '0')}`
-      : pm2Timestamp
+    const timestamp = ts ? formatTaiwanTime(ts) : pm2Timestamp
     const tag = json.module ? `[${json.module}]` : null
     const level = PINO_LEVELS[json.level] || 'info'
 
@@ -89,7 +100,7 @@ export function parseLogLine(raw: string, source: 'out' | 'error'): ParsedLogLin
   let rest = raw
 
   if (match) {
-    timestamp = match[1]
+    timestamp = convertPm2Timestamp(match[1])
     rest = match[2]
 
     // 3. PM2 時間戳 + Pino JSON：'2026-03-01 08:16:30: {"level":30,...}'

@@ -1077,6 +1077,14 @@ Sandpack 取代 1105 行 regex 轉換器。支援 streaming 增量更新、裝�
 - **快速模式**：Prefilter → `detectFastModeIntent()`（greeting/question/chitchat/help 攔截 + FAQ/Sonnet 回覆）→ `isDesignFeedback()` → `checkBuildRelevance()`（強信號 ~80 詞 / 弱信號 Haiku 三元：通過/模糊/不相關 + Content Policy，**fail-closed**）
 - **迭代模式**：`semanticGateway({ phase: 'iteration' })` 取代 `isDesignFeedback()`（設計關鍵詞零 LLM 短路 ~80% + Sonnet 語義審核 ~20%）
 
+### Phase 5-B：組合模式庫（2026-03-08）
+
+- **`composition-patterns.ts`**（新建）：20 個 section-level 組合模式（Hero 4 + Content 7 + Data 5 + Shell 4），每個含具體 Tailwind 骨架
+- **`selectCompositionPatterns(tier, productType, pages, moodId)`**：page-type 偵測（needsHero/needsData 保底）+ productType/mood 加權 + 互斥檢查，預設選 2 個
+- **`generateStructure` 注入**：techniques 之後、組件規則之前注入 `formatPatternsForPrompt()`
+- **`generateDesignVariants` 注入**：mood 之後、5 個設計軸之前注入 `listPatternsForVariants()` 供差異化
+- **測試**：26 條覆蓋 tier 過濾/needsHero 保底/needsData 保底/mood 親和/互斥/數量限制/格式化
+
 ### 生成樣式品質升級（2026-03-08）
 
 - **視覺技法庫**（`design-techniques.ts` 新建）：30 個結構化技法（Layout/Surface/Typography/Interaction），按 tier 和 productType 加權隨機選 3 個注入 Structure prompt
