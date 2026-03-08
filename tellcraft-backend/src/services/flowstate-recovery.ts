@@ -127,6 +127,9 @@ export async function scanAndRecoverStuckFlowStates(
   if (recovered > 0) {
     logger.info({ scanned: totalScanned, recovered }, '掃描完成')
   }
+
+  // 清理孤立 conv-lock（waitingForReply=true 但 lock 未釋放）
+  await scanAndCleanOrphanedLocks(redis)
 }
 
 // ============================================================
@@ -331,6 +334,67 @@ async function recoverCodeGeneration(
  * deployer_deploying 恢復
  * → deployer_failed + 提示重試或返回修改
  */
+/**
+ * 掃描並清理孤立的 conv-lock：
+ * 1. FlowState 不存在 → orphaned lock → 刪除
+ * 2. FlowState 存在且 waitingForReply=true → job 已完成但 lock 未釋放 → 刪除
+ * 3. waitingForReply=false → Worker 可能仍在執行，skip（由 RECOVERABLE_PHASES 機制處理）
+ *
+ * elapsed < 60s 跳過保護：避免誤刪剛 acquire 的合法鎖
+ */
+async function scanAndCleanOrphanedLocks(redis: Redis): Promise<void> {
+  const LOCK_TTL_SECONDS = 2100
+  let cleaned = 0
+  let totalScanned = 0
+
+  const stream = redis.scanStream({ match: 'conv-lock:*', count: 100 })
+
+  for await (const keys of stream as AsyncIterable<string[]>) {
+    totalScanned += keys.length
+    for (const key of keys) {
+      try {
+        const conversationId = key.replace('conv-lock:', '')
+
+        // TTL 保護：跳過太新的鎖（可能是剛 acquire 的合法鎖）
+        const ttl = await redis.ttl(key)
+        if (ttl < 0) continue  // -2=key消失(已正常釋放), -1=無TTL(異常但別動)
+        const elapsedSec = LOCK_TTL_SECONDS - ttl
+        if (elapsedSec < 60) continue
+
+        const stateJson = await redis.get(`flow:${conversationId}`)
+
+        if (!stateJson) {
+          // 孤立鎖：無對應 FlowState
+          const released = await forceReleaseConversationLock(redis, conversationId)
+          if (released) {
+            logger.warn({ conversationId, elapsedSec }, '清理孤立 lock（無 FlowState）')
+            cleaned++
+          }
+          continue
+        }
+
+        const state = JSON.parse(stateJson) as FlowState
+        if (state.waitingForReply) {
+          // Job 已完成（設了 waitingForReply=true）但 lock 未釋放 → 程序崩潰
+          const released = await forceReleaseConversationLock(redis, conversationId)
+          if (released) {
+            logger.warn({ conversationId, phase: state.phase, elapsedSec },
+              '清理孤立 lock（waitingForReply=true 但 lock 未釋放）')
+            cleaned++
+          }
+        }
+        // waitingForReply=false：Worker 可能仍在執行，交由 RECOVERABLE_PHASES 處理
+      } catch (err) {
+        logger.error({ err, key }, '清理孤立 lock 時錯誤')
+      }
+    }
+  }
+
+  if (cleaned > 0) {
+    logger.info({ scanned: totalScanned, cleaned }, '孤立 lock 清理完成')
+  }
+}
+
 async function recoverDeployer(
   redis: Redis, io: SocketIOServer, conversationId: string, state: FlowState
 ) {

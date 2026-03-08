@@ -375,6 +375,16 @@ setMiddlewareRedisClient(redis)
 setDashboardRedisClient(redis)
 setCacheRedisClient(redis)
 
+// 啟動清理：刪除上次程序崩潰/重啟留下的孤立 conv-lock
+// 安全：單一實例部署，啟動時不可能有活躍 Worker，所有鎖皆為殘留
+// fire-and-forget，不阻塞 Worker 啟動（lock 在 Worker handle 前早已清除）
+redis.keys('conv-lock:*').then(async (staleConvLocks) => {
+  if (staleConvLocks.length > 0) {
+    await redis.del(...staleConvLocks)
+    logger.warn({ count: staleConvLocks.length }, '啟動清理：刪除殘留對話鎖')
+  }
+}).catch((err) => logger.error({ err }, '啟動清理 conv-lock 失敗'))
+
 // 創建 Worker
 const orchestratorWorker = createOrchestratorWorker(redis, io)
 
