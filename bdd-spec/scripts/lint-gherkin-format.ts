@@ -183,8 +183,14 @@ function lintStep(lineNum: number, keyword: string, content: string): LintError 
   const pattern = determineExpectedPattern(keyword, content)
 
   if (!pattern) {
-    // 步驟不屬於任何已知的 ISA 模式，跳過
-    return null
+    return {
+      line: lineNum,
+      stepType: keyword,
+      original: content,
+      errorType: 'pattern_mismatch',
+      message: '未支援的 ISA 步驟格式',
+      suggestion: '僅支援：準備一個{entity}, with table: / {summary}, call table: / {summary}成功, with table: / 操作失敗 / 存在一個{entity}, with table:',
+    }
   }
 
   // 檢查是否精確匹配 ISA regex

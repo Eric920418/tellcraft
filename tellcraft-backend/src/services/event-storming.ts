@@ -183,6 +183,25 @@ async function callHaiku(
 
 // safeParseJson 已移至 ../utils/safe-parse-json.ts 共用
 
+function normalizeQuestionText(value: unknown): string | null {
+  if (typeof value === 'string') {
+    const text = value.trim()
+    return text.length > 0 ? text : null
+  }
+
+  if (Array.isArray(value)) {
+    const lines = value
+      .map(item => (typeof item === 'string' ? item : String(item ?? '')).trim())
+      .filter(Boolean)
+    return lines.length > 0 ? lines.join('\n') : null
+  }
+
+  if (value == null) return null
+
+  const text = String(value).trim()
+  return text.length > 0 ? text : null
+}
+
 // ============================================================
 // 1. shouldRunEventStorming — 判斷是否需要 ES
 // ============================================================
@@ -592,7 +611,7 @@ ${clearedContext || '（無）'}
     params?: string[]
     returnFields?: string[]
     rules?: Array<{ type: string; description: string }>
-    followUpQuestion?: string
+    followUpQuestion?: unknown
     isComplete?: boolean
   }
 
@@ -641,11 +660,22 @@ ${clearedContext || '（無）'}
   }
 
   // 有追問
-  if (parsed.followUpQuestion) {
+  const normalizedFollowUpQuestion = normalizeQuestionText(parsed.followUpQuestion)
+  if (normalizedFollowUpQuestion) {
+    if (typeof parsed.followUpQuestion !== 'string') {
+      logger.warn(
+        {
+          itemName: currentName,
+          followUpType: Array.isArray(parsed.followUpQuestion) ? 'array' : typeof parsed.followUpQuestion,
+        },
+        'followUpQuestion 非字串，已正規化'
+      )
+    }
+
     knowledgeMap.totalQuestionsAsked++
     return {
       type: 'sub_question',
-      content: parsed.followUpQuestion,
+      content: normalizedFollowUpQuestion,
       knowledgeMap,
       quickReplies: [
         { label: '確認', value: '確認', style: 'primary' },

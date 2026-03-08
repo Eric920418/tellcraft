@@ -16,6 +16,29 @@ import { createLogger } from '../lib/logger'
 
 const logger = createLogger('orchestrator-utils')
 
+function normalizeMessageContent(content: unknown): string {
+  if (typeof content === 'string') return content
+
+  if (Array.isArray(content)) {
+    const lines = content
+      .map(item => (typeof item === 'string' ? item : String(item ?? '')).trim())
+      .filter(Boolean)
+    return lines.join('\n')
+  }
+
+  if (content == null) return ''
+
+  if (typeof content === 'object') {
+    try {
+      return JSON.stringify(content)
+    } catch {
+      return String(content)
+    }
+  }
+
+  return String(content)
+}
+
 // ============================================================
 // FlowState 存儲
 // ============================================================
@@ -102,7 +125,7 @@ export async function sendMessage(
   conversationId: string,
   io: SocketIOServer,
   options: {
-    content: string
+    content: unknown
     stage?: string
     progress?: { current: number; total: number; step: string }
     layoutHint?: 'default' | 'split' | 'full_preview'
@@ -113,10 +136,22 @@ export async function sendMessage(
     quickReplies?: { label: string; value: string; style?: 'primary' | 'secondary' | 'ghost' }[]
   }
 ) {
+  const normalizedContent = normalizeMessageContent(options.content)
+  if (typeof options.content !== 'string') {
+    logger.warn(
+      {
+        conversationId,
+        stage: options.stage,
+        contentType: Array.isArray(options.content) ? 'array' : typeof options.content,
+      },
+      'sendMessage content 非字串，已正規化'
+    )
+  }
+
   const message = {
     id: crypto.randomUUID(),
     role: 'assistant',
-    content: options.content,
+    content: normalizedContent,
     timestamp: new Date().toISOString(),
     stage: options.stage,
     progress: options.progress,
@@ -136,11 +171,11 @@ export async function sendMessage(
   io.to(`conversation:${conversationId}`).emit('message', message)
 
   // LINE 推播通知（fire-and-forget，不阻塞主流程）
-  sendLineNotifyIfNeeded(conversationId, options.stage, options.content)
+  sendLineNotifyIfNeeded(conversationId, options.stage, normalizedContent)
     .catch(() => {})
 
   // LINE Bot 全量翻譯推送（僅 LINE 來源的對話，與上方 notify 互斥）
-  sendLineFullMessage(conversationId, options)
+  sendLineFullMessage(conversationId, { ...options, content: normalizedContent })
     .catch(() => {})
 }
 

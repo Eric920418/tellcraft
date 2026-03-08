@@ -36,6 +36,11 @@ interface ActionsYmlStructure {
   types?: Record<string, unknown>
 }
 
+interface ExtractYamlResult {
+  yamlText: string
+  strategy: 'fenced-yaml' | 'unclosed-fenced-yaml' | 'yaml-root' | 'raw-content'
+}
+
 // ============================================================
 // LLM 調用（複用 formulation.ts 的 raw fetch 模式）
 // ============================================================
@@ -189,6 +194,79 @@ export function validateActionsYml(
   return { valid: errors.length === 0, errors }
 }
 
+function hasActionsArray(parsed: unknown): parsed is ActionsYmlStructure {
+  if (!parsed || typeof parsed !== 'object') {
+    return false
+  }
+  const obj = parsed as Record<string, unknown>
+  return Array.isArray(obj.actions)
+}
+
+function tryParseActionsYaml(candidate: string): string | null {
+  const normalized = candidate
+    .replace(/^\uFEFF/, '') // 移除 BOM
+    .replace(/^\s*yaml\s*\n/i, '')
+    .trim()
+
+  if (!normalized) {
+    return null
+  }
+
+  try {
+    const parsed = yaml.load(normalized)
+    if (hasActionsArray(parsed)) {
+      return normalized
+    }
+  } catch {
+    return null
+  }
+
+  return null
+}
+
+function extractYamlFromLlmResponse(content?: string): ExtractYamlResult | null {
+  const text = (content || '').trim()
+  if (!text) {
+    return null
+  }
+
+  // 1) 優先：標準 fenced yaml/yml
+  const fencedMatches = text.matchAll(/```(?:yaml|yml)\s*([\s\S]*?)\s*```/gi)
+  for (const match of fencedMatches) {
+    const parsed = tryParseActionsYaml(match[1] || '')
+    if (parsed) {
+      return { yamlText: parsed, strategy: 'fenced-yaml' }
+    }
+  }
+
+  // 2) 降級：只有開頭 fence，沒有結尾 fence（常見於輸出截斷）
+  const unclosedFenceMatch = text.match(/```(?:yaml|yml)\s*([\s\S]*)$/i)
+  if (unclosedFenceMatch) {
+    const parsed = tryParseActionsYaml(unclosedFenceMatch[1] || '')
+    if (parsed) {
+      return { yamlText: parsed, strategy: 'unclosed-fenced-yaml' }
+    }
+  }
+
+  // 3) 降級：從 YAML root key 開始嘗試（處理模型未包 code fence 的情況）
+  const rootMatch = text.match(/(?:^|\n)(project|actions|types)\s*:/i)
+  if (rootMatch && typeof rootMatch.index === 'number') {
+    const rootStart = rootMatch.index + (rootMatch[0].startsWith('\n') ? 1 : 0)
+    const parsed = tryParseActionsYaml(text.slice(rootStart))
+    if (parsed) {
+      return { yamlText: parsed, strategy: 'yaml-root' }
+    }
+  }
+
+  // 4) 最後嘗試整段內容（容忍回應前後有少量空白/說明）
+  const parsed = tryParseActionsYaml(text)
+  if (parsed) {
+    return { yamlText: parsed, strategy: 'raw-content' }
+  }
+
+  return null
+}
+
 // ============================================================
 // 核心生成函數
 // ============================================================
@@ -331,14 +409,39 @@ ${entityMapping}
     })
   }
 
-  // 提取 YAML 內容
-  const yamlMatch = response.content?.match(/```yaml\s*([\s\S]*?)\s*```/)
-  if (!yamlMatch) {
+  // 提取 YAML 內容（含容錯降級）
+  let extracted = extractYamlFromLlmResponse(response.content)
+  if (!extracted) {
+    logger.warn({ responsePreview: response.content?.substring(0, 500) }, '首次提取 YAML 失敗，嘗試格式重試')
+    const reformatPrompt = `你上一則回覆無法被程式解析為 actions.yml（可能缺少結尾 code fence 或輸出截斷）。
+
+請重新輸出「完整 actions.yml」，並嚴格遵守：
+1. 只輸出一個 \`\`\`yaml\`\`\` 區塊
+2. 不要輸出任何額外解釋文字
+3. YAML 必須包含 project / actions / types
+
+## 上一則回覆（可能截斷）
+\`\`\`
+${(response.content || '').slice(0, 2000)}
+\`\`\``
+    const reformatResponse = await callClaude(SYSTEM_PROMPT, reformatPrompt, { maxTokens: 16384, temperature: 0.1 })
+    if (reformatResponse.success) {
+      extracted = extractYamlFromLlmResponse(reformatResponse.content)
+      if (extracted) {
+        logger.info({ strategy: extracted.strategy }, '格式重試後成功提取 YAML')
+      }
+    }
+  }
+  if (!extracted) {
     logger.error({ responsePreview: response.content?.substring(0, 500) }, 'LLM 回應無法提取 YAML')
     return { success: false, error: '無法從 LLM 回應提取 YAML' }
   }
 
-  const actionsYml = yamlMatch[1].trim()
+  if (extracted.strategy !== 'fenced-yaml') {
+    logger.warn({ strategy: extracted.strategy }, 'LLM YAML 以容錯模式提取')
+  }
+
+  const actionsYml = extracted.yamlText
 
   // 驗證
   const validation = validateActionsYml(actionsYml, features)
@@ -362,9 +465,12 @@ ${actionsYml}
     const fixResponse = await callClaude(SYSTEM_PROMPT, fixPrompt, { maxTokens: 16384, temperature: 0.1 })
 
     if (fixResponse.success) {
-      const fixYamlMatch = fixResponse.content?.match(/```yaml\s*([\s\S]*?)\s*```/)
-      if (fixYamlMatch) {
-        const fixedYml = fixYamlMatch[1].trim()
+      const fixExtracted = extractYamlFromLlmResponse(fixResponse.content)
+      if (fixExtracted) {
+        if (fixExtracted.strategy !== 'fenced-yaml') {
+          logger.warn({ strategy: fixExtracted.strategy }, '修復回應 YAML 以容錯模式提取')
+        }
+        const fixedYml = fixExtracted.yamlText
         const fixValidation = validateActionsYml(fixedYml, features)
         if (fixValidation.valid) {
           logger.info('修復後驗證通過')
