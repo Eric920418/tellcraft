@@ -778,7 +778,7 @@ export async function handleVariantSelection(
   }
 
   // 合併變體生成最終 Design System
-  const finalDesignSystem = synthesizeVariants(selectedIds, variants)
+  const finalDesignSystem = synthesizeVariants(selectedIds, variants, state.uiuxDesignMood)
 
   // 提取選中 variant 的創意概念
   const variantConcept = extractVariantConcept(selectedIds, variants)

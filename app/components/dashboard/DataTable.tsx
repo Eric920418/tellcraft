@@ -49,13 +49,14 @@ export default function DataTable<T extends object>({
   const totalPages = pagination ? Math.ceil(pagination.total / pagination.pageSize) : 1
 
   return (
-    <div style={{ width: '100%' }}>
+    <div style={{ width: '100%', overflowX: 'auto', WebkitOverflowScrolling: 'touch' as const }}>
       {/* Table */}
       <div
         style={{
           border: '1px solid var(--border-color)',
           background: 'var(--white)',
           overflow: 'hidden',
+          minWidth: 480,
         }}
       >
         {/* Header */}

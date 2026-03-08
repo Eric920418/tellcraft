@@ -232,7 +232,7 @@ export function inferPages(description: string, productType: string): string[] {
 // 產業別配色系統
 // ============================================================
 
-interface IndustryPalette {
+export interface IndustryPalette {
   primary: string; secondary: string; accent: string
   background: string; foreground: string; muted: string; border: string
   surface1: string; surface2: string; surface3: string; ring: string
@@ -416,13 +416,115 @@ const INDUSTRY_COLOR_PALETTES: Record<string, IndustryPalette> = {
 }
 
 // ============================================================
+// DesignSystem 2.0 輔助函數（純函數，零 LLM）
+// ============================================================
+
+export function deriveShadows(tier: DesignTier, productType: string, palette: IndustryPalette): DesignSystem['shadows'] {
+  if (tier === 'functional') {
+    if (['dashboard', 'saas', 'tool'].includes(productType)) {
+      return { strategy: 'borders-only', values: {} }
+    }
+    return {
+      strategy: 'subtle-shadows',
+      values: {
+        sm: '0 1px 3px rgba(0,0,0,0.06)',
+        md: '0 4px 6px rgba(0,0,0,0.07)',
+      },
+    }
+  }
+  // creative
+  if (['portfolio', 'photography', 'agency'].includes(productType)) {
+    return {
+      strategy: 'subtle-shadows',
+      values: {
+        sm: '0 1px 3px rgba(0,0,0,0.06)',
+        md: '0 4px 6px rgba(0,0,0,0.07)',
+        glow: `0 0 20px ${palette.accent}30`,
+      },
+    }
+  }
+  if (['event', 'music', 'landing'].includes(productType)) {
+    return {
+      strategy: 'layered-shadows',
+      values: {
+        sm: '0 1px 3px rgba(0,0,0,0.06)',
+        md: '0 4px 6px rgba(0,0,0,0.07)',
+        lg: '0 10px 25px rgba(0,0,0,0.10)',
+        glow: `0 0 30px ${palette.accent}25`,
+      },
+    }
+  }
+  return {
+    strategy: 'subtle-shadows',
+    values: {
+      sm: '0 1px 3px rgba(0,0,0,0.06)',
+      md: '0 4px 6px rgba(0,0,0,0.07)',
+    },
+  }
+}
+
+export function deriveDepth(tier: DesignTier, productType: string): DesignSystem['depth'] {
+  if (tier === 'functional') {
+    if (['dashboard', 'tool'].includes(productType)) {
+      return { strategy: 'flat', cardStyle: 'bg-surface-2 rounded-md border border-border' }
+    }
+    if (['saas', 'finance'].includes(productType)) {
+      return { strategy: 'subtle', cardStyle: 'bg-white border border-border rounded-lg' }
+    }
+    return { strategy: 'subtle', cardStyle: 'bg-white shadow-sm rounded-lg border border-border/50' }
+  }
+  // creative
+  if (['portfolio', 'photography'].includes(productType)) {
+    return { strategy: 'elevated', cardStyle: 'bg-white shadow-md hover:shadow-lg rounded-xl transition-shadow' }
+  }
+  if (['event', 'music', 'landing'].includes(productType)) {
+    return { strategy: 'elevated', cardStyle: 'bg-white shadow-lg rounded-2xl' }
+  }
+  return { strategy: 'subtle', cardStyle: 'bg-white shadow-sm rounded-xl border border-border/50' }
+}
+
+export function deriveAnimationPersonality(tier: DesignTier, productType: string): DesignSystem['animationPersonality'] {
+  if (tier === 'functional') {
+    if (['dashboard', 'tool', 'admin'].includes(productType)) return 'minimal'
+    return 'smooth'
+  }
+  // creative
+  if (['portfolio', 'photography'].includes(productType)) return 'dramatic'
+  if (['event', 'music'].includes(productType)) return 'bouncy'
+  return 'smooth'
+}
+
+export function deriveLayoutArchetype(tier: DesignTier, productType: string): DesignSystem['layoutArchetype'] {
+  if (tier === 'functional') {
+    if (['dashboard', 'admin', 'tool'].includes(productType)) return 'dashboard'
+    return 'app-shell'
+  }
+  // creative
+  if (['portfolio', 'photography'].includes(productType)) return 'editorial'
+  if (['landing', 'agency', 'event', 'music'].includes(productType)) return 'storytelling'
+  return 'bento'
+}
+
+export function deriveGradients(tier: DesignTier, productType: string, palette: IndustryPalette): DesignSystem['gradients'] | undefined {
+  if (tier === 'functional') return undefined
+  const base: NonNullable<DesignSystem['gradients']> = {
+    primary: `linear-gradient(135deg, ${palette.primary}, ${palette.secondary})`,
+    surface: `linear-gradient(180deg, ${palette.background}, ${palette.surface3 ?? palette.muted})`,
+  }
+  if (['event', 'music', 'landing'].includes(productType)) {
+    base.accent = `radial-gradient(ellipse at 50% 0%, ${palette.accent}20, transparent 70%)`
+  }
+  return base
+}
+
+// ============================================================
 // 默認 DesignSystem（零 LLM 成本）
 // ============================================================
 
 /**
  * 從 IndustryPalette 建構完整 DesignSystem
  */
-function paletteToDesignSystem(p: IndustryPalette, tier: DesignTier): DesignSystem {
+function paletteToDesignSystem(p: IndustryPalette, tier: DesignTier, productType?: string): DesignSystem {
   const fontSans = [p.fontFamily, 'system-ui', 'sans-serif']
   const fontFamilies: Record<string, string[]> = { sans: fontSans }
   if (p.displayFont) fontFamilies.display = [p.displayFont, 'serif']
@@ -471,6 +573,11 @@ function paletteToDesignSystem(p: IndustryPalette, tier: DesignTier): DesignSyst
     borderRadius: tier === 'functional'
       ? { none: '0', sm: '0.25rem', md: '0.5rem', lg: '0.75rem', full: '9999px' }
       : { none: '0', sm: '0.375rem', md: '0.75rem', lg: '1rem', full: '9999px' },
+    shadows: deriveShadows(tier, productType ?? '', p),
+    depth: deriveDepth(tier, productType ?? ''),
+    animationPersonality: deriveAnimationPersonality(tier, productType ?? ''),
+    layoutArchetype: deriveLayoutArchetype(tier, productType ?? ''),
+    gradients: deriveGradients(tier, productType ?? '', p),
   }
 }
 
@@ -498,7 +605,7 @@ const TIER_FALLBACK_PALETTES: Record<DesignTier, IndustryPalette> = {
 export function buildDefaultDesignSystem(tier: DesignTier, productType?: string): DesignSystem {
   const palette = (productType && INDUSTRY_COLOR_PALETTES[productType])
     || TIER_FALLBACK_PALETTES[tier]
-  return paletteToDesignSystem(palette, tier)
+  return paletteToDesignSystem(palette, tier, productType)
 }
 
 // ============================================================

@@ -349,7 +349,8 @@ export function selectCompositionPatterns(
   productType: string,
   pages: string[],
   moodId?: string,
-  count: number = 2
+  count: number = 2,
+  layoutArchetypeHint?: string
 ): CompositionPattern[] {
   const maxCount = Math.min(count, 3)
 
@@ -380,6 +381,25 @@ export function selectCompositionPatterns(
     // moodId 在 moodAffinity → × 1.5
     if (moodId && p.moodAffinity?.includes(moodId)) {
       weight *= 1.5
+    }
+
+    // layoutArchetypeHint → 對應 category 加分
+    if (layoutArchetypeHint) {
+      const archetypeCategoryBonus: Record<string, { categories: PatternCategory[]; bonus: number }[]> = {
+        bento:        [{ categories: ['content'], bonus: 20 }],
+        editorial:    [{ categories: ['content'], bonus: 20 }],
+        dashboard:    [{ categories: ['data'], bonus: 20 }],
+        storytelling: [{ categories: ['hero'], bonus: 20 }, { categories: ['content'], bonus: 15 }],
+        'app-shell':  [{ categories: ['shell'], bonus: 20 }],
+      }
+      const bonuses = archetypeCategoryBonus[layoutArchetypeHint]
+      if (bonuses) {
+        for (const { categories, bonus } of bonuses) {
+          if (categories.includes(p.category)) {
+            weight += bonus
+          }
+        }
+      }
     }
 
     return { pattern: p, weight }

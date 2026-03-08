@@ -730,6 +730,25 @@ textarea {
     padding: 20px 16px !important;
     padding-top: 76px !important;
   }
+
+  .stats-grid {
+    grid-template-columns: repeat(2, 1fr) !important;
+  }
+
+  .dashboard-filters-row {
+    flex-wrap: wrap;
+  }
+
+  .dashboard-page-header {
+    flex-wrap: wrap;
+    gap: 16px;
+  }
+}
+
+@media (max-width: 480px) {
+  .stats-grid {
+    grid-template-columns: 1fr !important;
+  }
 }
 
 /* ============ Template Preview Interactivity ============ */

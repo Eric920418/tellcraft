@@ -78,6 +78,7 @@ export function DashboardContent({
 
       {/* Stats Grid */}
       <div
+        className="stats-grid"
         style={{
           display: 'grid',
           gridTemplateColumns: 'repeat(4, 1fr)',
@@ -199,7 +200,7 @@ export function DashboardContent({
             </Link>
           </div>
         ) : (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 1, overflow: 'hidden' }}>
             {recentProjects.map((project, index) => (
               <Link
                 key={project.id}

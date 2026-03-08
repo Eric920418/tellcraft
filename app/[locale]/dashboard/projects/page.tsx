@@ -257,6 +257,7 @@ export default function ProjectsPage() {
         initial={{ opacity: 0, y: -20 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.4 }}
+        className="dashboard-page-header"
         style={{
           display: 'flex',
           justifyContent: 'space-between',
@@ -302,13 +303,14 @@ export default function ProjectsPage() {
         initial={{ opacity: 0, y: 10 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.4, delay: 0.1 }}
+        className="dashboard-filters-row"
         style={{
           display: 'flex',
           gap: 12,
           marginBottom: 20,
         }}
       >
-        <div style={{ width: 280 }}>
+        <div style={{ flex: 1, minWidth: 0 }}>
           <SearchInput
             value={search}
             onChange={setSearch}

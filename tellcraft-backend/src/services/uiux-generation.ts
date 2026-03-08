@@ -93,6 +93,22 @@ function humanizeError(err: unknown): string {
   return 'AI 處理時發生錯誤，請稍後重試。如持續失敗，請嘗試其他描述方式。'
 }
 
+// ============================================================
+// 動畫個性提示常數
+// ============================================================
+
+const ANIMATION_PERSONALITY_HINTS: Record<string, string> = {
+  minimal:  'duration ≤150ms，只有必要狀態轉換，禁止裝飾性入場動畫',
+  smooth:   'ease-out 300-400ms，opacity + translateY(8px)，重視 easing 質感',
+  bouncy:   'spring physics（stiffness 300, damping 20），hover scale 1.03，有回彈感',
+  dramatic: 'stagger reveal 500ms，translateY(-40px) 入場，bold、有份量感',
+  playful:  '快速反饋 150ms + 多色過渡 + 略誇張的 tap/hover 反應',
+}
+
+function getAnimationPersonalityHint(p: string): string {
+  return ANIMATION_PERSONALITY_HINTS[p] || ''
+}
+
 // callClaude — 使用 streaming 避免長請求超時，含自動重試
 const RETRY_MAX = 3
 const RETRY_BASE_DELAY_MS = 2000
@@ -515,6 +531,27 @@ export interface DesignSystem {
     layoutPreference?: string   // 來自 layout 變體的佈局偏好
     interactionModel?: string   // 來自 interaction 變體的互動模式
   }
+  shadows?: {
+    strategy: 'borders-only' | 'subtle-shadows' | 'layered-shadows'
+    values: {
+      sm?: string
+      md?: string
+      lg?: string
+      glow?: string
+    }
+  }
+  gradients?: {
+    primary?: string
+    surface?: string
+    accent?: string
+  }
+  depth?: {
+    strategy: 'flat' | 'subtle' | 'elevated' | 'glassmorphic'
+    cardStyle: string
+  }
+  animationPersonality?: 'minimal' | 'smooth' | 'bouncy' | 'dramatic' | 'playful'
+  layoutArchetype?: 'bento' | 'editorial' | 'dashboard' | 'storytelling' | 'app-shell'
+  mood?: string
 }
 
 /**
@@ -808,7 +845,21 @@ ${Object.values(axes).map(v => `- **${v.id}. ${v.name}**：${v.description}\n  $
           "md": "0.5rem",
           "lg": "0.75rem",
           "full": "9999px"
-        }
+        },
+        "shadows": {
+          "strategy": "subtle-shadows",
+          "values": {
+            "sm": "0 1px 3px rgba(0,0,0,0.06)",
+            "md": "0 4px 6px rgba(0,0,0,0.07)",
+            "lg": "0 10px 25px rgba(0,0,0,0.10)"
+          }
+        },
+        "depth": {
+          "strategy": "subtle",
+          "cardStyle": "bg-white shadow-sm rounded-xl border border-border/50"
+        },
+        "animationPersonality": "smooth",
+        "layoutArchetype": "bento"
       }
     }
     // ... 其他 4 個變體
@@ -895,13 +946,16 @@ ${tier === 'functional' ? '- 不要使用漸層（除非明確要求）\n- 不�
  */
 export function synthesizeVariants(
   selectedVariantIds: string[],
-  allVariants: DesignVariant[]
+  allVariants: DesignVariant[],
+  moodId?: string
 ): DesignSystem {
   // 如果只選擇一個變體，直接返回其 Design System
   if (selectedVariantIds.length === 1) {
     const variant = allVariants.find(v => v.id === selectedVariantIds[0])
     if (variant) {
-      return variant.designSystem
+      const result = variant.designSystem
+      if (moodId) result.mood = moodId
+      return result
     }
   }
 
@@ -909,7 +963,9 @@ export function synthesizeVariants(
   const baseVariant = allVariants.find(v => v.id === selectedVariantIds[0])
   if (!baseVariant) {
     // fallback 到第一個變體
-    return allVariants[0].designSystem
+    const result = allVariants[0].designSystem
+    if (moodId) result.mood = moodId
+    return result
   }
 
   const result: DesignSystem = JSON.parse(JSON.stringify(baseVariant.designSystem))
@@ -932,11 +988,16 @@ export function synthesizeVariants(
       case 'expressive':
         // 合併 color palette 的 accent
         result.colorPalette.accent = variant.designSystem.colorPalette.accent
+        // 合併 depth 和 shadows（expressive 軸的視覺深度）
+        if (variant.designSystem.depth) result.depth = variant.designSystem.depth
+        if (variant.designSystem.shadows) result.shadows = variant.designSystem.shadows
         break
       case 'layout':
         // 合併佈局偏好到 metadata
         if (!result.metadata) result.metadata = {}
         result.metadata.layoutPreference = variant.description
+        // 合併 layoutArchetype
+        if (variant.designSystem.layoutArchetype) result.layoutArchetype = variant.designSystem.layoutArchetype
         break
       case 'interaction':
         // 合併互動模式偏好到 metadata
@@ -945,6 +1006,9 @@ export function synthesizeVariants(
         break
     }
   }
+
+  // 設置 moodId
+  if (moodId) result.mood = moodId
 
   // 重新生成 CSS variables
   result.cssVariables = generateCssVariables(result)
@@ -987,7 +1051,7 @@ function generateCssVariables(ds: DesignSystem): string {
 /**
  * 共用的 Design System Prompt 構建函數
  */
-function buildDesignSystemPrompt(designSystem: DesignSystem): string {
+export function buildDesignSystemPrompt(designSystem: DesignSystem): string {
   return `## Design System（必須嚴格遵守）
 
 ### CSS Variables
@@ -1025,6 +1089,32 @@ ${designSystem.tailwindExtend.fontFamily?.mono ? `- 等寬字體 (font-mono): ${
 
 ### 圓角規範
 ${JSON.stringify(designSystem.borderRadius, null, 2)}
+${designSystem.shadows ? `
+### 陰影策略（Shadow — 必須遵守）
+${designSystem.shadows.strategy === 'borders-only'
+  ? '- strategy: borders-only → 用 border 建立層次，禁止使用 shadow-*'
+  : designSystem.shadows.strategy === 'subtle-shadows'
+  ? '- strategy: subtle-shadows → 低調單層陰影，強調懸浮感'
+  : '- strategy: layered-shadows → 多層次陰影，sm→lg 建立深度'}
+${designSystem.shadows.values.sm ? `- shadow-sm: ${designSystem.shadows.values.sm}` : ''}
+${designSystem.shadows.values.md ? `- shadow-md: ${designSystem.shadows.values.md}` : ''}
+${designSystem.shadows.values.lg ? `- shadow-lg: ${designSystem.shadows.values.lg}` : ''}
+${designSystem.shadows.values.glow ? `- glow: ${designSystem.shadows.values.glow}` : ''}` : ''}
+${designSystem.depth ? `
+### 卡片視覺深度（Depth — 統一標準）
+- strategy: ${designSystem.depth.strategy}
+- 統一卡片樣式：
+\`\`\`
+${designSystem.depth.cardStyle}
+\`\`\`` : ''}
+${designSystem.gradients ? `
+### 漸層規範（Gradients）
+${designSystem.gradients.primary ? `- primary gradient: ${designSystem.gradients.primary}` : ''}
+${designSystem.gradients.surface ? `- surface gradient: ${designSystem.gradients.surface}` : ''}
+${designSystem.gradients.accent ? `- accent gradient: ${designSystem.gradients.accent}` : ''}` : ''}
+${designSystem.mood ? `
+### 設計情緒基調
+${getMoodSummary(designSystem.mood)}（完整風格指引已在生成指令中注入）` : ''}
 
 ## 技術棧
 - Next.js 16 App Router（優先使用 Server Components）
@@ -1504,7 +1594,11 @@ export async function generateStructure(
   const techniquesSection = formatTechniquesForPrompt(techniques)
 
   // 選擇組合模式並注入 prompt
-  const patterns = selectCompositionPatterns(tier, template.category, pages, productContext?.moodId)
+  const patterns = selectCompositionPatterns(
+    tier, template.category, pages, productContext?.moodId,
+    undefined,  // count: default 2
+    designSystem.layoutArchetype  // layoutArchetypeHint
+  )
   const patternsSection = formatPatternsForPrompt(patterns)
 
   const systemPrompt = `你是一位專業的前端開發者。根據提供的 Design System 生成桌面版前端代碼，包含完整的互動功能。
@@ -1998,6 +2092,8 @@ ${getAnimationConstraints(tier)}
 
   const moodAnimSection = moodId
     ? `\n## Mood 動畫風格\n${getMoodAnimationHint(moodId)}\n`
+    : designSystem.animationPersonality
+    ? `\n## 動畫個性（補充指引）\n${getAnimationPersonalityHint(designSystem.animationPersonality)}\n`
     : ''
 
   const userMessage = `請在以下代碼基礎上添加動畫效果：
