@@ -144,8 +144,7 @@ function stripContinuationMetaText(segment: string): string {
     const trimmed = lines[i].trim()
     if (!trimmed) continue
     if (META_PATTERNS.some(p => p.test(trimmed))) continue
-    // 找到第一個非元文字行
-    if (i === 0) return segment // 第一行就是代碼，不需剝離
+    // 找到第一個非元文字行（不管 i 是否為 0）
     return lines.slice(i).join('\n')
   }
   return segment
@@ -1503,65 +1502,139 @@ function getSyntaxErrors(filename: string, content: string): string[] {
 /**
  * 語法錯誤自動修復（parseGeneratedFiles 後立即執行，最多 1 次 LLM 修復）
  */
+/**
+ * 偵測檔案是否為 LLM 截斷型破損（非一般語法錯誤）
+ * 截斷特徵：錯誤在前 5 行 OR 末行不以合法結尾符號收尾
+ */
+function isTruncatedFile(content: string, errors: string[]): boolean {
+  // 錯誤在前 5 行（截斷在開頭 → generation 從未正確展開）
+  const earlyError = errors.some(e => {
+    const m = e.match(/:(\d+)(?::\d+)?/)
+    if (!m) return false
+    return parseInt(m[1], 10) <= 5
+  })
+  if (earlyError) return true
+  // 末行不以合法語句結尾 → 截斷在尾部
+  const nonEmptyLines = content.split('\n').filter(l => l.trim())
+  if (nonEmptyLines.length === 0) return false
+  const lastLine = nonEmptyLines[nonEmptyLines.length - 1].trim()
+  return !/[}\);'">\]`]$/.test(lastLine)
+}
+
 async function checkAndFixSyntaxErrors(
   files: GeneratedComponent[],
   trackingContext?: LlmTrackingContext
 ): Promise<GeneratedComponent[]> {
-  const broken: Array<{ file: GeneratedComponent; errors: string[] }> = []
+  const broken: Array<{ file: GeneratedComponent; errors: string[]; truncated: boolean }> = []
   for (const file of files) {
     const errors = getSyntaxErrors(file.path, file.content)
-    if (errors.length > 0) broken.push({ file, errors })
+    if (errors.length > 0) broken.push({ file, errors, truncated: isTruncatedFile(file.content, errors) })
   }
   if (broken.length === 0) return files
 
   logger.warn(
-    { count: broken.length, paths: broken.map(b => b.file.path) },
+    { count: broken.length, paths: broken.map(b => b.file.path), truncated: broken.filter(b => b.truncated).map(b => b.file.path) },
     'TSX 語法錯誤，呼叫 LLM 修復'
   )
 
-  const errorSummary = broken
-    .map(({ file, errors }) => `=== ${file.path} ===\n${errors.slice(0, 3).join('\n')}`)
+  // 收集非破損檔案的前 20 行作為 import context（供截斷型修復使用）
+  const healthyImportContext = files
+    .filter(f => !broken.some(b => b.file.path === f.path))
+    .map(f => {
+      const head = f.content.split('\n').slice(0, 20).join('\n')
+      return `// ${f.path}\n${head}`
+    })
     .join('\n\n')
-  const brokenCode = broken
-    .map(({ file }) => `\`\`\`tsx:${file.path}\n${file.content}\n\`\`\``)
-    .join('\n\n')
 
-  const systemPrompt = [
-    'You are a TypeScript/TSX syntax expert.',
-    'Fix ONLY the syntax errors (missing brackets, parentheses, braces, quotes, etc.).',
-    'Do NOT change logic, imports, or component behavior.',
-    'Output each fixed file in the format:',
-    '```tsx:PATH',
-    '...full fixed code...',
-    '```',
-  ].join('\n')
+  // 分類：截斷型用 regenerate prompt；一般型用 fix-only prompt
+  const truncatedBroken = broken.filter(b => b.truncated)
+  const normalBroken = broken.filter(b => !b.truncated)
 
-  const response = await callClaude(
-    systemPrompt,
-    [{ role: 'user', content: `Fix these syntax errors:\n\n${errorSummary}\n\nFiles:\n\n${brokenCode}` }],
-    { maxTokens: 8192, temperature: 0 },
-    { ...trackingContext, purpose: 'fix_syntax_errors' }
-  )
+  const result = new Map<string, string>()
 
-  if (!response.success || !response.content) {
-    logger.warn('語法修復 LLM 失敗，保留原始代碼')
-    return files
+  // ---- 一般語法修復 ----
+  if (normalBroken.length > 0) {
+    const errorSummary = normalBroken
+      .map(({ file, errors }) => `=== ${file.path} ===\n${errors.slice(0, 3).join('\n')}`)
+      .join('\n\n')
+    const brokenCode = normalBroken
+      .map(({ file }) => `\`\`\`tsx:${file.path}\n${file.content}\n\`\`\``)
+      .join('\n\n')
+
+    const systemPrompt = [
+      'You are a TypeScript/TSX syntax expert.',
+      'Fix ONLY the syntax errors (missing brackets, parentheses, braces, quotes, etc.).',
+      'Do NOT change logic, imports, or component behavior.',
+      'Output each fixed file in the format:',
+      '```tsx:PATH',
+      '...full fixed code...',
+      '```',
+    ].join('\n')
+
+    const response = await callClaude(
+      systemPrompt,
+      [{ role: 'user', content: `Fix these syntax errors:\n\n${errorSummary}\n\nFiles:\n\n${brokenCode}` }],
+      { maxTokens: 8192, temperature: 0 },
+      { ...trackingContext, purpose: 'fix_syntax_errors' }
+    )
+    if (response.success && response.content) {
+      const fixRegex = /```tsx:([^\n]+)\n([\s\S]*?)```/g
+      let m: RegExpExecArray | null
+      while ((m = fixRegex.exec(response.content)) !== null) {
+        result.set(m[1].trim(), m[2].trim())
+      }
+    } else {
+      logger.warn('一般語法修復 LLM 失敗')
+    }
   }
 
-  const fixedMap = new Map<string, string>()
-  const fixRegex = /```tsx:([^\n]+)\n([\s\S]*?)```/g
-  let m: RegExpExecArray | null
-  while ((m = fixRegex.exec(response.content)) !== null) {
-    fixedMap.set(m[1].trim(), m[2].trim())
+  // ---- 截斷型修復（regenerate prompt + import context）----
+  if (truncatedBroken.length > 0) {
+    const brokenCode = truncatedBroken
+      .map(({ file }) => `\`\`\`tsx:${file.path}\n${file.content}\n\`\`\``)
+      .join('\n\n')
+
+    const contextSection = healthyImportContext
+      ? `\n\nContext from other files (first 20 lines each):\n${healthyImportContext}`
+      : ''
+
+    const systemPrompt = [
+      'You are a TypeScript/TSX expert.',
+      'The following files are TRUNCATED — generation was cut off mid-file.',
+      'Please REGENERATE each complete file from scratch based on:',
+      '1. The partial code provided (for intent and structure clues)',
+      '2. Import context from sibling files',
+      'Do NOT just fix syntax — write the COMPLETE working file.',
+      'Output each regenerated file in the format:',
+      '```tsx:PATH',
+      '...full code...',
+      '```',
+    ].join('\n')
+
+    const response = await callClaude(
+      systemPrompt,
+      [{ role: 'user', content: `Truncated files to regenerate:\n\n${brokenCode}${contextSection}` }],
+      { maxTokens: 8192, temperature: 0 },
+      { ...trackingContext, purpose: 'fix_truncated_file' }
+    )
+    if (response.success && response.content) {
+      const fixRegex = /```tsx:([^\n]+)\n([\s\S]*?)```/g
+      let m: RegExpExecArray | null
+      while ((m = fixRegex.exec(response.content)) !== null) {
+        result.set(m[1].trim(), m[2].trim())
+      }
+    } else {
+      logger.warn('截斷型修復 LLM 失敗')
+    }
   }
 
-  if (fixedMap.size === 0) {
-    logger.warn('語法修復：LLM 輸出格式無法解析')
+  if (result.size === 0) {
+    logger.warn('語法修復：LLM 輸出格式無法解析或全部失敗')
     return files
   }
 
   return files.map(file => {
-    const fixed = fixedMap.get(file.path)
+    const fixed = result.get(file.path)
     if (!fixed) return file
     const remaining = getSyntaxErrors(file.path, fixed)
     if (remaining.length > 0) {
