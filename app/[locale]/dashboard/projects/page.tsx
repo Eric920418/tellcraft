@@ -6,7 +6,6 @@ import { Link, useRouter } from '@/i18n/navigation'
 import { useTranslations } from 'next-intl'
 import { DataTable, StatusBadge, SearchInput, type Column } from '@/app/components/dashboard'
 import { getProjects, togglePinProject } from '@/app/lib/vps-api'
-import { useLocalePath } from '@/app/hooks/useLocalePath'
 
 // 從 localStorage 獲取 token
 function getAuthToken(): string | null {
@@ -47,7 +46,6 @@ const statusLabelKeys: Record<string, string> = {
 export default function ProjectsPage() {
   const router = useRouter()
   const t = useTranslations('dashboard')
-  const localePath = useLocalePath()
   const [projects, setProjects] = useState<Project[]>([])
   const [total, setTotal] = useState(0)
   const [page, setPage] = useState(1)
@@ -130,21 +128,26 @@ export default function ProjectsPage() {
     return key ? t(key) : status
   }
 
-  const renderConversationAction = (project: Project) => {
-    if (!project.latestConversationId) return null
+  const getProjectPrimaryPath = (project: Project) => {
+    if (project.latestConversationId) return `/?conversation=${project.latestConversationId}`
+    return `/dashboard/projects/${project.id}`
+  }
+
+  const renderProjectDetailAction = (project: Project) => {
     return (
-      <a
-        href={localePath(`/?conversation=${project.latestConversationId}`)}
-        title={t('enterConversation')}
+      <Link
+        href={`/dashboard/projects/${project.id}`}
+        title={t('projectDetail')}
         onClick={(e) => e.stopPropagation()}
         style={{
           display: 'inline-flex',
           alignItems: 'center',
           justifyContent: 'center',
-          width: 32,
-          height: 32,
-          borderRadius: 6,
-          color: 'var(--gray-400)',
+          width: 40,
+          height: 40,
+          borderRadius: 10,
+          color: 'var(--gray-500)',
+          background: 'var(--gray-50)',
           textDecoration: 'none',
           transition: 'all 0.15s ease',
         }}
@@ -153,14 +156,16 @@ export default function ProjectsPage() {
           e.currentTarget.style.background = 'var(--gray-100)'
         }}
         onMouseLeave={(e) => {
-          e.currentTarget.style.color = 'var(--gray-400)'
-          e.currentTarget.style.background = 'transparent'
+          e.currentTarget.style.color = 'var(--gray-500)'
+          e.currentTarget.style.background = 'var(--gray-50)'
         }}
       >
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-          <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <circle cx="12" cy="12" r="9" />
+          <path d="M12 16v-4" />
+          <path d="M12 8h.01" />
         </svg>
-      </a>
+      </Link>
     )
   }
 
@@ -257,8 +262,8 @@ export default function ProjectsPage() {
     {
       key: 'actions',
       header: '',
-      width: '50px',
-      render: (project: Project) => renderConversationAction(project),
+      width: '64px',
+      render: (project: Project) => renderProjectDetailAction(project),
     },
     {
       key: 'updatedAt',
@@ -328,8 +333,8 @@ export default function ProjectsPage() {
     {
       key: 'actions',
       header: '',
-      width: '50px',
-      render: (project: Project) => renderConversationAction(project),
+      width: '64px',
+      render: (project: Project) => renderProjectDetailAction(project),
     },
   ]
 
@@ -435,7 +440,7 @@ export default function ProjectsPage() {
           isLoading={isLoading}
           emptyMessage={t('noProjectsYet')}
           onRowClick={(project) => {
-            window.location.href = localePath(`/dashboard/projects/${project.id}`)
+            router.push(getProjectPrimaryPath(project))
           }}
           pagination={{
             page,

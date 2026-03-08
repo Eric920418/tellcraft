@@ -1,7 +1,7 @@
 'use client'
 
 import { motion } from 'framer-motion'
-import { Link } from '@/i18n/navigation'
+import { Link, useRouter } from '@/i18n/navigation'
 import { useTranslations } from 'next-intl'
 import StatsCard from './StatsCard'
 import { ProgressBar } from './Chart'
@@ -51,6 +51,12 @@ export function DashboardContent({
   recentProjects: Project[]
 }) {
   const t = useTranslations('dashboard')
+  const router = useRouter()
+
+  const getProjectPrimaryPath = (project: Project) => {
+    if (project.latestConversationId) return `/?conversation=${project.latestConversationId}`
+    return `/dashboard/projects/${project.id}`
+  }
 
   return (
     <div>
@@ -202,93 +208,108 @@ export function DashboardContent({
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 1, overflow: 'hidden' }}>
             {recentProjects.map((project, index) => (
-              <Link
+              <motion.div
                 key={project.id}
-                href={`/dashboard/projects/${project.id}`}
-                style={{ textDecoration: 'none' }}
+                initial={{ opacity: 0, x: -10 }}
+                animate={{ opacity: 1, x: 0 }}
+                transition={{ duration: 0.3, delay: index * 0.05 }}
+                whileHover={{ x: 4 }}
+                role="button"
+                tabIndex={0}
+                onClick={() => {
+                  router.push(getProjectPrimaryPath(project))
+                }}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter' || event.key === ' ') {
+                    event.preventDefault()
+                    router.push(getProjectPrimaryPath(project))
+                  }
+                }}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  padding: '14px 16px',
+                  marginLeft: -16,
+                  marginRight: -16,
+                  borderBottom:
+                    index < recentProjects.length - 1
+                      ? '1px solid var(--border-color)'
+                      : 'none',
+                  transition: 'background 0.15s ease',
+                  cursor: 'pointer',
+                }}
               >
-                <motion.div
-                  initial={{ opacity: 0, x: -10 }}
-                  animate={{ opacity: 1, x: 0 }}
-                  transition={{ duration: 0.3, delay: index * 0.05 }}
-                  whileHover={{ x: 4 }}
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'space-between',
-                    padding: '14px 16px',
-                    marginLeft: -16,
-                    marginRight: -16,
-                    borderBottom:
-                      index < recentProjects.length - 1
-                        ? '1px solid var(--border-color)'
-                        : 'none',
-                    transition: 'background 0.15s ease',
-                  }}
-                >
-                  <div>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 14, fontWeight: 500, color: 'var(--black)' }}>
-                      {project.isPinned && (
-                        <svg width="12" height="12" viewBox="0 0 24 24" fill="#F59E0B" stroke="#F59E0B" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                          <path d="M12 2l2.09 6.26L21 9.27l-5 4.87L17.18 21 12 17.27 6.82 21 8 14.14l-5-4.87 6.91-1.01L12 2z" />
-                        </svg>
-                      )}
-                      {project.name}
-                    </div>
-                    <div
-                      style={{
-                        fontSize: 12,
-                        color: 'var(--gray-400)',
-                        marginTop: 4,
-                      }}
-                    >
-                      {t('conversationCount', { count: project.conversationCount })}
-                    </div>
-                  </div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                    <span
-                      style={{
-                        fontSize: 11,
-                        padding: '3px 8px',
-                        background:
-                          project.status === 'deployed'
-                            ? '#DCFCE7'
-                            : project.status === 'failed'
-                            ? '#FEE2E2'
-                            : 'var(--gray-100)',
-                        color: statusColors[project.status] || 'var(--gray-500)',
-                        textTransform: 'uppercase',
-                        letterSpacing: '0.03em',
-                      }}
-                    >
-                      {statusKeyMap[project.status] ? t(statusKeyMap[project.status]) : project.status}
-                    </span>
-                    {project.latestConversationId && (
-                      <Link
-                        href={`/?conversation=${project.latestConversationId}`}
-                        title={t('enterConversation')}
-                        onClick={(e) => e.stopPropagation()}
-                        style={{
-                          display: 'inline-flex',
-                          alignItems: 'center',
-                          justifyContent: 'center',
-                          width: 28,
-                          height: 28,
-                          borderRadius: 6,
-                          color: 'var(--gray-400)',
-                          textDecoration: 'none',
-                          transition: 'all 0.15s ease',
-                        }}
-                      >
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                          <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
-                        </svg>
-                      </Link>
+                <div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 14, fontWeight: 500, color: 'var(--black)' }}>
+                    {project.isPinned && (
+                      <svg width="12" height="12" viewBox="0 0 24 24" fill="#F59E0B" stroke="#F59E0B" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M12 2l2.09 6.26L21 9.27l-5 4.87L17.18 21 12 17.27 6.82 21 8 14.14l-5-4.87 6.91-1.01L12 2z" />
+                      </svg>
                     )}
-                    <span style={{ fontSize: 12, color: 'var(--gray-400)' }}>→</span>
+                    {project.name}
                   </div>
-                </motion.div>
-              </Link>
+                  <div
+                    style={{
+                      fontSize: 12,
+                      color: 'var(--gray-400)',
+                      marginTop: 4,
+                    }}
+                  >
+                    {t('conversationCount', { count: project.conversationCount })}
+                  </div>
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                  <span
+                    style={{
+                      fontSize: 11,
+                      padding: '3px 8px',
+                      background:
+                        project.status === 'deployed'
+                          ? '#DCFCE7'
+                          : project.status === 'failed'
+                          ? '#FEE2E2'
+                          : 'var(--gray-100)',
+                      color: statusColors[project.status] || 'var(--gray-500)',
+                      textTransform: 'uppercase',
+                      letterSpacing: '0.03em',
+                    }}
+                  >
+                    {statusKeyMap[project.status] ? t(statusKeyMap[project.status]) : project.status}
+                  </span>
+                  <Link
+                    href={`/dashboard/projects/${project.id}`}
+                    title={t('projectDetail')}
+                    onClick={(e) => e.stopPropagation()}
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      width: 40,
+                      height: 40,
+                      borderRadius: 10,
+                      color: 'var(--gray-500)',
+                      background: 'var(--gray-50)',
+                      textDecoration: 'none',
+                      transition: 'all 0.15s ease',
+                    }}
+                    onMouseEnter={(e) => {
+                      e.currentTarget.style.color = 'var(--black)'
+                      e.currentTarget.style.background = 'var(--gray-100)'
+                    }}
+                    onMouseLeave={(e) => {
+                      e.currentTarget.style.color = 'var(--gray-500)'
+                      e.currentTarget.style.background = 'var(--gray-50)'
+                    }}
+                  >
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <circle cx="12" cy="12" r="9" />
+                      <path d="M12 16v-4" />
+                      <path d="M12 8h.01" />
+                    </svg>
+                  </Link>
+                </div>
+              </motion.div>
             ))}
           </div>
         )}
