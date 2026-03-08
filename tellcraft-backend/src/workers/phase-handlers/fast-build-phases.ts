@@ -17,7 +17,7 @@ import {
   detectDesignTier, inferProductType, inferPages,
   buildDefaultDesignSystem, buildMinimalTemplate,
   inferInteractionHint, getTemplateStyleHint, inferLayoutMode,
-  PRODUCT_TYPE_LABELS, generateFastConcept, expandBriefPrompt,
+  generateFastConcept, expandBriefPrompt,
   mergePages,
 } from '../../services/fast-build-generation'
 import { buildUISpecSummary } from '../../services/bdd-to-ui-spec'
@@ -135,12 +135,15 @@ export async function executeFastBuildSkill(params: {
   await saveFlowState(redis, conversationId, state)
 
   const isChinese = state.locale === 'zh'
+  const buildTargetLabel = layoutMode === 'app'
+    ? (isChinese ? '應用' : 'app')
+    : (isChinese ? '網站' : 'website')
 
   // ── 發送進度消息（含預估時間）──
   await sendMessage(conversationId, io, {
     content: isChinese
-      ? `正在快速生成您的${PRODUCT_TYPE_LABELS[productType] || '網站'}${variantConcept ? `\n設計概念：**${variantConcept.name}** — ${variantConcept.description}` : ''}`
-      : `Quickly generating your ${PRODUCT_TYPE_LABELS[productType] || 'website'}...${variantConcept ? `\nDesign concept: **${variantConcept.name}** — ${variantConcept.description}` : ''}`,
+      ? `正在快速生成您的${buildTargetLabel}...${variantConcept ? `\n設計概念：**${variantConcept.name}** — ${variantConcept.description}` : ''}`
+      : `Quickly generating your ${buildTargetLabel}...${variantConcept ? `\nDesign concept: **${variantConcept.name}** — ${variantConcept.description}` : ''}`,
     stage: 'fast_generating',
     progress: { current: 1, total: 3, step: isChinese ? '生成結構' : 'Generating structure' },
     richContent: {
