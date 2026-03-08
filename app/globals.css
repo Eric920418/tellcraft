@@ -253,6 +253,14 @@ textarea {
   text-align: center;
 }
 
+.hero-subtitle {
+  font-size: 15px;
+  color: var(--gray-500);
+  max-width: 400px;
+  margin: 16px auto 0;
+  line-height: 1.7;
+}
+
 .hero-composer-block {
   width: 100%;
 }
@@ -624,6 +632,15 @@ textarea {
 @media (max-width: 640px) {
   .hero-content-grid {
     max-width: 100% !important;
+  }
+
+  .hero-subtitle {
+    width: 100%;
+    max-width: 100%;
+    font-size: 13px;
+    line-height: 1.55;
+    margin: 12px 0 14px;
+    padding: 0 4px;
   }
 
   .chat-header {

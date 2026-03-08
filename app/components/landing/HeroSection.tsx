@@ -282,16 +282,10 @@ function HeroSection({
             />
           </h1>
           <motion.p
+            className="hero-subtitle"
             initial={{ opacity: 0 }}
             animate={{ opacity: isTransitioning || isChatActive ? 0 : 1 }}
             transition={{ duration: 0.3, delay: isTransitioning ? 0 : 1.2 }}
-            style={{
-              fontSize: 15,
-              color: 'var(--gray-500)',
-              maxWidth: 400,
-              margin: '16px auto 0',
-              lineHeight: 1.7,
-            }}
           >
             {tHero('subtitle')}
           </motion.p>
@@ -306,9 +300,9 @@ function HeroSection({
             y: '-50%',
           }}
           transition={{
-            duration: 0.4,
-            ease: smoothEasing,
-            delay: isTransitioning ? 0 : 0.65,
+            opacity: { duration: 0.4, delay: isTransitioning ? 0 : 0.65 },
+            x: { duration: 0.22, ease: smoothEasing },
+            y: { duration: 0 },
           }}
         >
           {/* 伸縮 toggle */}
