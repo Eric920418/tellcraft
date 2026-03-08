@@ -401,11 +401,13 @@ export default function ProjectsPage() {
         className="dashboard-filters-row"
         style={{
           display: 'flex',
+          alignItems: 'center',
+          flexWrap: 'wrap',
           gap: 12,
           marginBottom: 20,
         }}
       >
-        <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ flex: '1 1 320px', minWidth: 0 }}>
           <SearchInput
             value={search}
             onChange={setSearch}
@@ -422,6 +424,10 @@ export default function ProjectsPage() {
             background: 'var(--white)',
             outline: 'none',
             cursor: 'pointer',
+            width: 180,
+            minWidth: 140,
+            maxWidth: '100%',
+            flexShrink: 0,
           }}
         >
           <option value="">{t('allStatus')}</option>

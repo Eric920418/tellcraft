@@ -18,6 +18,76 @@ interface PrdDiscoveryResult {
   error?: string
 }
 
+interface ParsedPrdPayload {
+  items?: unknown[]
+  coverageSummary?: Record<string, 'clear' | 'partial' | 'missing'>
+}
+
+interface ParsedPrdItem {
+  id?: string
+  question: string
+  whiteTextQuestion?: string
+  priority?: string
+  checklistItem?: string
+  options?: Array<string | { label: string; description: string }>
+  mode?: 'ask' | 'propose'
+  proposedAnswer?: string
+  confidence?: 'high' | 'medium'
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  technicalContext?: any
+  whiteTextOptions?: string[]
+}
+
+function parsePrdPayload(content: string): ParsedPrdPayload | null {
+  // 1) 直接安全解析
+  let parsed = safeParseJson<unknown>(content)
+
+  // 2) 失敗時，嘗試從 code fence 或大括號區段提取 JSON
+  if (!parsed) {
+    const jsonMatch = content.match(/`{3,}(?:json)?\s*\n?([\s\S]*?)\n?`{3,}/i) ||
+                      content.match(/\{[\s\S]*\}/)
+    if (jsonMatch) {
+      const jsonStr = jsonMatch[1] || jsonMatch[0]
+      parsed = safeParseJson<unknown>(jsonStr)
+    }
+  }
+
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    return null
+  }
+
+  return parsed as ParsedPrdPayload
+}
+
+function buildFallbackClarifyItem(content: string): ClarifyItem {
+  const trimmed = content.trim()
+  const fallbackQuestion = trimmed
+    ? `AI 回應未符合 JSON 格式。請先補充需求核心：${trimmed.slice(0, 140)}${trimmed.length > 140 ? '...' : ''}`
+    : '需求描述目前資訊不足，請先補充主要使用者、核心功能與使用情境。'
+
+  return {
+    id: crypto.randomUUID(),
+    question: fallbackQuestion,
+    whiteTextQuestion: fallbackQuestion,
+    priority: 'high',
+    checklistItem: 'B1',
+    status: 'pending',
+    options: [
+      'A. 先列出主要使用者角色與目標（建議）',
+      'B. 先列出 3-5 個核心功能',
+      'C. 先說明是創作平台、閱讀平台，或兩者兼具',
+    ],
+  }
+}
+
+function isParsedPrdItem(value: unknown): value is ParsedPrdItem {
+  if (!value || typeof value !== 'object') {
+    return false
+  }
+  const item = value as Record<string, unknown>
+  return typeof item.question === 'string'
+}
+
 // ============================================================
 // PRD Discovery 實現
 // ============================================================
@@ -319,31 +389,21 @@ ${partialSpecContext}
 
     logger.info({ inputTokens, outputTokens, cost: costUsd.toFixed(4), conversationId: trackingContext?.conversationId }, 'LLM 回應完成')
 
-    // 安全解析回應
+    // 安全解析回應（含容錯提取）
     const content = data.content?.[0]?.text || ''
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const parsed = safeParseJson<any>(content)
+    const parsed = parsePrdPayload(content)
     if (!parsed) {
-      logger.error({ responsePreview: content.slice(0, 500) }, '無法解析 LLM 回應')
-      return { success: false, error: 'AI 回應格式異常，請重新描述您的需求。' }
+      logger.warn({ responsePreview: content.slice(0, 500) }, '無法解析 LLM JSON，使用降級釐清題')
+      return {
+        success: true,
+        items: [buildFallbackClarifyItem(content)],
+      }
     }
 
     // 轉換格式（符合 bdd-session.ts 的 ClarifyItem 類型）
      
-    const items: ClarifyItem[] = (parsed.items || []).map((item: {
-      id?: string
-      question: string
-      whiteTextQuestion?: string
-      priority?: string
-      checklistItem?: string
-      options?: Array<string | { label: string; description: string }>
-      mode?: 'ask' | 'propose'
-      proposedAnswer?: string
-      confidence?: 'high' | 'medium'
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      technicalContext?: any
-      whiteTextOptions?: string[]
-    }) => ({
+    const parsedItems = (parsed.items || []).filter(isParsedPrdItem)
+    const items: ClarifyItem[] = parsedItems.map((item: ParsedPrdItem) => ({
       id: item.id || crypto.randomUUID(),
       question: item.question,
       whiteTextQuestion: item.whiteTextQuestion || item.question,
