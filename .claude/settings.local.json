@@ -89,7 +89,8 @@
       "Bash(npx eslint:*)",
       "Bash(sips:*)",
       "Bash(echo === i18n Infrastructure ===:*)",
-      "Bash(pnpm test:ci:*)"
+      "Bash(pnpm test:ci:*)",
+      "Bash(npx vitest:*)"
     ]
   }
 }

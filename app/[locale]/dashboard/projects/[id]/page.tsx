@@ -229,6 +229,7 @@ export default function ProjectDetailPage() {
         initial={{ opacity: 0, y: -20 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.4 }}
+        className="dashboard-page-header"
         style={{
           display: 'flex',
           justifyContent: 'space-between',
@@ -256,7 +257,7 @@ export default function ProjectDetailPage() {
             <p style={{ fontSize: 14, color: 'var(--gray-500)' }}>{project.description}</p>
           )}
         </div>
-        <div style={{ display: 'flex', gap: 12 }}>
+        <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', flexShrink: 0 }}>
           {/* 繼續對話按鈕 */}
           {canContinue && (
             <button
@@ -330,6 +331,7 @@ export default function ProjectDetailPage() {
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.4, delay: 0.1 }}
+        className="stats-grid"
         style={{
           display: 'grid',
           gridTemplateColumns: 'repeat(4, 1fr)',
@@ -443,7 +445,7 @@ export default function ProjectDetailPage() {
                         color: 'var(--gray-500)',
                         marginTop: 4,
                         fontStyle: 'italic',
-                        maxWidth: 400,
+                        maxWidth: '100%',
                         overflow: 'hidden',
                         textOverflow: 'ellipsis',
                         whiteSpace: 'nowrap',

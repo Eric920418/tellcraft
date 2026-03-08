@@ -1077,6 +1077,18 @@ Sandpack 取代 1105 行 regex 轉換器。支援 streaming 增量更新、裝�
 - **快速模式**：Prefilter → `detectFastModeIntent()`（greeting/question/chitchat/help 攔截 + FAQ/Sonnet 回覆）→ `isDesignFeedback()` → `checkBuildRelevance()`（強信號 ~80 詞 / 弱信號 Haiku 三元：通過/模糊/不相關 + Content Policy，**fail-closed**）
 - **迭代模式**：`semanticGateway({ phase: 'iteration' })` 取代 `isDesignFeedback()`（設計關鍵詞零 LLM 短路 ~80% + Sonnet 語義審核 ~20%）
 
+### Phase 5-C：DesignSystem 2.0（2026-03-08）
+
+- **DesignSystem 介面擴展**：新增 `shadows`（borders-only/subtle-shadows/layered-shadows）、`depth`（flat/subtle/elevated/glassmorphic + cardStyle）、`gradients`（primary/surface/accent）、`animationPersonality`（minimal/smooth/bouncy/dramatic/playful）、`layoutArchetype`（bento/editorial/dashboard/storytelling/app-shell）、`mood` 6 個 optional 欄位
+- **`fast-build-generation.ts` 5 個純函數**（零 LLM）：`deriveShadows`（functional+dashboard/saas/tool → borders-only；creative+event/music/landing → layered-shadows+glow）/ `deriveDepth`（functional+dashboard/tool → flat；creative+portfolio → elevated+hover:shadow-lg）/ `deriveAnimationPersonality`（functional+dashboard → minimal；creative+portfolio/photography → dramatic；creative+event/music → bouncy）/ `deriveLayoutArchetype`（functional+dashboard → dashboard；creative+portfolio → editorial；creative+landing → storytelling）/ `deriveGradients`（functional → undefined；creative+landing/event/music → radial accent gradient）
+- **`buildDesignSystemPrompt` 擴展**：新增陰影策略/卡片視覺深度/漸層規範/設計情緒基調四個條件渲染章節（無對應欄位時不渲染，向後相容）
+- **`generateAnimations` 擴展**：moodId 優先，無 moodId 時降級用 `animationPersonality` → `getAnimationPersonalityHint()` 提供動畫指引
+- **`generateStructure` 擴展**：`selectCompositionPatterns` 新增 `layoutArchetype` 參數傳遞
+- **`synthesizeVariants` 擴展**：新增 `moodId?` 參數，expressive axis 合併 depth+shadows，layout axis 合併 layoutArchetype，最後設置 `result.mood`
+- **`composition-patterns.ts` 擴展**：`selectCompositionPatterns` 新增 `layoutArchetypeHint?` 參數，對應 category 加 +20/+15 分（bento/editorial→content，dashboard→data，storytelling→hero+content，app-shell→shell）
+- **`uiux-phases.ts` 更新**：`synthesizeVariants` 調用傳入 `state.uiuxDesignMood`
+- **測試**：59 條覆蓋 deriveShadows/deriveDepth/deriveAnimationPersonality/deriveLayoutArchetype/deriveGradients/buildDesignSystemPrompt 向後相容/synthesizeVariants 新欄位合併/selectCompositionPatterns layoutArchetypeHint/buildDefaultDesignSystem 整合
+
 ### Phase 5-B：組合模式庫（2026-03-08）
 
 - **`composition-patterns.ts`**（新建）：20 個 section-level 組合模式（Hero 4 + Content 7 + Data 5 + Shell 4），每個含具體 Tailwind 骨架
