@@ -131,8 +131,13 @@ export function useAdminLogs(options: UseAdminLogsOptions): UseAdminLogsReturn {
     const token = localStorage.getItem('auth_token')
     if (!token) return false
 
-    const result = await clearAdminLogs({ token, source })
-    if (!result.success) return false
+    let clearResult = await clearAdminLogs({ token, source })
+
+    // 清空失敗時重試一次（短暫網路抖動或代理超時）
+    if (!clearResult.success) {
+      await new Promise(resolve => setTimeout(resolve, 300))
+      clearResult = await clearAdminLogs({ token, source })
+    }
 
     const refreshed = await getAdminLogs({ token, lines: 200, source })
     if (refreshed.success && refreshed.data?.lines) {
@@ -151,7 +156,7 @@ export function useAdminLogs(options: UseAdminLogsOptions): UseAdminLogsReturn {
 
     // 清空後維持輪詢啟用，讓新日誌可即時顯示
     initialLoadDone.current = true
-    return true
+    return clearResult.success
   }, [source])
 
   return { lines, isConnected, isPaused, pause, resume, clear, clearLocal }
