@@ -241,6 +241,8 @@ export async function runFastBuildPipeline(params: {
   const twConfig = generateTailwindConfig(designSystem)
   const isLaterBatch = (state.fastBuildCurrentBatchIndex || 0) > 0
   const existingCode = isLaterBatch ? state.uiuxGeneratedCode : undefined
+  const allPages = state.fastBuildAllPages || []
+  const isIncrementalFirstBatch = !isLaterBatch && allPages.length > targetPages.length
 
   // 構建已有組件路徑摘要（第 2+ 批用）
   const existingComponentSummary = existingCode
@@ -283,6 +285,7 @@ export async function runFastBuildPipeline(params: {
       layoutMode,
       moodId,
       existingComponentSummary,
+      incrementalFirstBatch: isIncrementalFirstBatch,
     },
     { userId, conversationId, purpose: isLaterBatch ? 'fast-build-structure-batch' : 'fast-build-structure' },
     structureStreamingCallback
@@ -462,7 +465,6 @@ export async function runFastBuildPipeline(params: {
   state.uiuxQualityReport = report
 
   // ── 判斷是否還有剩餘頁面 ──
-  const allPages = state.fastBuildAllPages || []
   const remainingPages = allPages.filter(p => !completedPages.includes(p))
 
   if (remainingPages.length > 0) {

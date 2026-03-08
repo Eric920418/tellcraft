@@ -247,9 +247,16 @@ export function mergePages(defaultPages: string[], suggestedPages?: string[], ma
   if (!suggestedPages?.length) return defaultPages.slice(0, maxPages)
   const seen = new Map<string, string>()
   for (const p of defaultPages) seen.set(p.replace(/\s/g, '').toLowerCase(), p)
-  for (const p of suggestedPages) {
-    const key = p.replace(/\s/g, '').toLowerCase()
-    if (!seen.has(key)) seen.set(key, p)
+  for (const raw of suggestedPages) {
+    // 清理 LLM 回傳的垃圾頁名：去掉括號描述、路徑前綴、截取到合理長度
+    const cleaned = raw
+      .replace(/^\/+/, '')           // 去掉前導 /
+      .replace(/[（(].*/g, '')       // 去掉括號及後面的描述
+      .replace(/[，,].*/g, '')       // 去掉逗號後的描述
+      .trim()
+    if (!cleaned || cleaned.length > 20) continue  // 跳過空值和過長的垃圾
+    const key = cleaned.replace(/\s/g, '').toLowerCase()
+    if (!seen.has(key)) seen.set(key, cleaned)
   }
   return Array.from(seen.values()).slice(0, maxPages)
 }

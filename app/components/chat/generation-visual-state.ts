@@ -1,4 +1,5 @@
 export type GenerationPhase = 'reasoning' | 'structure' | 'animation' | 'rwd' | 'quality'
+export type InsightSlotId = 'nav' | 'hero-title' | 'hero-media' | 'cta' | 'cards' | 'text-list' | 'feature-grid' | 'form-block'
 
 export interface GenerationProgress {
   current: number
@@ -29,6 +30,8 @@ export interface GenerationVisualState {
   stabilityScore: number
   styleInjectionCount: number
   interactionComponents: number
+  activeInsightSlotId: InsightSlotId
+  decisionConfidence: number
 }
 
 const PHASES: GenerationPhase[] = ['reasoning', 'structure', 'animation', 'rwd', 'quality']
@@ -123,6 +126,14 @@ export function resolveGenerationVisualState(input: GenerationVisualInput): Gene
     quality: 'aiModuleQualityGuard',
   }
 
+  const insightSlotMap: Record<GenerationPhase, InsightSlotId> = {
+    reasoning: 'hero-title',
+    structure: 'hero-media',
+    animation: 'cta',
+    rwd: 'cards',
+    quality: 'form-block',
+  }
+
   const totalModules = 24
   const assembledModules = clamp(Math.round((progressPercent / 100) * totalModules) + phaseNumber, 2, totalModules)
   const stabilityScore = clamp(Math.round(progressPercent * 0.88 + (phase === 'quality' ? 8 : 0)), 12, 99)
@@ -132,6 +143,7 @@ export function resolveGenerationVisualState(input: GenerationVisualInput): Gene
     0,
     24,
   )
+  const decisionConfidence = clamp(Math.round(42 + progressPercent * 0.58 + (phase === 'quality' ? 5 : 0)), 45, 99)
 
   return {
     phase,
@@ -148,5 +160,7 @@ export function resolveGenerationVisualState(input: GenerationVisualInput): Gene
     stabilityScore,
     styleInjectionCount,
     interactionComponents,
+    activeInsightSlotId: insightSlotMap[phase],
+    decisionConfidence,
   }
 }

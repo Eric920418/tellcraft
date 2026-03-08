@@ -82,4 +82,44 @@ describe('mergePages', () => {
     expect(result).toContain('聯繫')
     expect(result).toContain('FAQ')
   })
+
+  it('清理帶括號描述的垃圾頁名', () => {
+    const result = mergePages(
+      ['首頁'],
+      ['/landing（沉浸式敘事入口，含個人節點生成）', '/home（首頁，含展覽主視覺、策展人）']
+    )
+    // /landing → landing（去前導 / + 去括號描述）
+    // /home → home（去前導 /），但 "首頁" 已存在，home 是不同 key 所以會加入
+    expect(result).toContain('landing')
+    expect(result).toContain('home')
+    // 不應包含括號描述
+    expect(result.every(p => !p.includes('（'))).toBe(true)
+  })
+
+  it('跳過清理後過長的垃圾頁名', () => {
+    const result = mergePages(
+      ['首頁'],
+      ['這是一個非常非常非常長的頁面名稱超過二十個字的情況']
+    )
+    // 超過 20 字的頁名被跳過
+    expect(result).toEqual(['首頁'])
+  })
+
+  it('跳過清理後為空的垃圾頁名', () => {
+    const result = mergePages(
+      ['首頁'],
+      ['（純括號描述沒有頁名）', '/', '']
+    )
+    expect(result).toEqual(['首頁'])
+  })
+
+  it('清理帶逗號描述的頁名', () => {
+    const result = mergePages(
+      ['首頁'],
+      ['作品集,含互動展示', '關於我們']
+    )
+    expect(result).toContain('作品集')
+    expect(result).toContain('關於我們')
+    expect(result.every(p => !p.includes(','))).toBe(true)
+  })
 })

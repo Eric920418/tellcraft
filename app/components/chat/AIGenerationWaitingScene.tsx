@@ -1,6 +1,6 @@
 'use client'
 
-import { useMemo, useRef, useState, type MouseEvent } from 'react'
+import { useEffect, useMemo, useRef, useState, type MouseEvent } from 'react'
 import { motion, useMotionTemplate, useMotionValue, useReducedMotion } from 'framer-motion'
 import { useTranslations } from 'next-intl'
 
@@ -9,6 +9,7 @@ import {
   resolveGenerationVisualState,
   type GenerationPhase,
   type GenerationProgress,
+  type InsightSlotId,
 } from './generation-visual-state'
 
 interface AIGenerationWaitingSceneProps {
@@ -20,7 +21,7 @@ interface AIGenerationWaitingSceneProps {
 }
 
 interface StageSlot {
-  id: 'nav' | 'hero-title' | 'hero-media' | 'cta' | 'cards' | 'text-list' | 'feature-grid' | 'form-block'
+  id: InsightSlotId
   kind: 'bar' | 'text' | 'media' | 'button' | 'cards' | 'list' | 'form'
   x: number
   y: number
@@ -40,7 +41,7 @@ const STAGE_SLOTS: StageSlot[] = [
   { id: 'form-block', kind: 'form', x: 8, y: 93, w: 84, h: 5, appearAt: 4 },
 ]
 
-const PHASE_ACTIVE_SLOTS: Record<GenerationPhase, StageSlot['id'][]> = {
+const PHASE_ACTIVE_SLOTS: Record<GenerationPhase, InsightSlotId[]> = {
   reasoning: ['hero-title', 'nav'],
   structure: ['nav', 'hero-title', 'hero-media', 'cards'],
   animation: ['cta', 'cards', 'feature-grid'],
@@ -48,32 +49,25 @@ const PHASE_ACTIVE_SLOTS: Record<GenerationPhase, StageSlot['id'][]> = {
   quality: ['form-block', 'feature-grid', 'hero-title'],
 }
 
+const INSIGHT_PREFIX_BY_SLOT: Record<InsightSlotId, 'aiInsightHero' | 'aiInsightCards' | 'aiInsightCta' | 'aiInsightForm' | 'aiInsightNav'> = {
+  nav: 'aiInsightNav',
+  'hero-title': 'aiInsightHero',
+  'hero-media': 'aiInsightHero',
+  cta: 'aiInsightCta',
+  cards: 'aiInsightCards',
+  'text-list': 'aiInsightCards',
+  'feature-grid': 'aiInsightCards',
+  'form-block': 'aiInsightForm',
+}
+
+const MOBILE_ROTATION_SLOTS: InsightSlotId[] = ['hero-title', 'cards', 'cta']
+
 const TASKS = [
-  {
-    titleKey: 'aiTaskReasoning',
-    actionKey: 'aiActionReasoning',
-    moduleKey: 'aiModuleSemanticMap',
-  },
-  {
-    titleKey: 'aiTaskStructure',
-    actionKey: 'aiActionAssembling',
-    moduleKey: 'aiModuleHeaderHero',
-  },
-  {
-    titleKey: 'aiTaskAnimation',
-    actionKey: 'aiActionInjecting',
-    moduleKey: 'aiModuleInteractionLayer',
-  },
-  {
-    titleKey: 'aiTaskRwd',
-    actionKey: 'aiActionResponsive',
-    moduleKey: 'aiModuleResponsiveMatrix',
-  },
-  {
-    titleKey: 'aiTaskQuality',
-    actionKey: 'aiActionPolishing',
-    moduleKey: 'aiModuleQualityGuard',
-  },
+  { titleKey: 'aiTaskReasoning', actionKey: 'aiActionReasoning', moduleKey: 'aiModuleSemanticMap' },
+  { titleKey: 'aiTaskStructure', actionKey: 'aiActionAssembling', moduleKey: 'aiModuleHeaderHero' },
+  { titleKey: 'aiTaskAnimation', actionKey: 'aiActionInjecting', moduleKey: 'aiModuleInteractionLayer' },
+  { titleKey: 'aiTaskRwd', actionKey: 'aiActionResponsive', moduleKey: 'aiModuleResponsiveMatrix' },
+  { titleKey: 'aiTaskQuality', actionKey: 'aiActionPolishing', moduleKey: 'aiModuleQualityGuard' },
 ] as const
 
 const PHASE_COLORS: Record<GenerationPhase, string> = {
@@ -84,10 +78,10 @@ const PHASE_COLORS: Record<GenerationPhase, string> = {
   quality: '#f59e0b',
 }
 
-const SLOT_BY_ID: Record<StageSlot['id'], StageSlot> = STAGE_SLOTS.reduce((acc, slot) => {
+const SLOT_BY_ID: Record<InsightSlotId, StageSlot> = STAGE_SLOTS.reduce((acc, slot) => {
   acc[slot.id] = slot
   return acc
-}, {} as Record<StageSlot['id'], StageSlot>)
+}, {} as Record<InsightSlotId, StageSlot>)
 
 function renderSlotBody(slot: StageSlot, accentColor: string) {
   if (slot.kind === 'bar') {
@@ -156,13 +150,11 @@ function renderSlotBody(slot: StageSlot, accentColor: string) {
   }
 
   return (
-    <>
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 6, width: '100%' }}>
-        {Array.from({ length: 3 }).map((_, idx) => (
-          <div key={idx} style={{ height: 12, borderRadius: 6, border: '1px solid rgba(148,163,184,0.28)', background: 'rgba(15,23,42,0.12)' }} />
-        ))}
-      </div>
-    </>
+    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 6, width: '100%' }}>
+      {Array.from({ length: 3 }).map((_, idx) => (
+        <div key={idx} style={{ height: 12, borderRadius: 6, border: '1px solid rgba(148,163,184,0.28)', background: 'rgba(15,23,42,0.12)' }} />
+      ))}
+    </div>
   )
 }
 
@@ -177,7 +169,15 @@ export default function AIGenerationWaitingScene({
   const reduceMotion = useReducedMotion()
 
   const stageRef = useRef<HTMLDivElement | null>(null)
-  const [hoveredSlotId, setHoveredSlotId] = useState<StageSlot['id'] | null>(null)
+  const hoverOpenTimerRef = useRef<NodeJS.Timeout | null>(null)
+  const hoverCloseTimerRef = useRef<NodeJS.Timeout | null>(null)
+  const lastSwitchAtRef = useRef(0)
+
+  const [supportsHover, setSupportsHover] = useState(true)
+  const [mobileAutoPaused, setMobileAutoPaused] = useState(false)
+  const [mobileRotateIndex, setMobileRotateIndex] = useState(0)
+  const [hoveredSlotId, setHoveredSlotId] = useState<InsightSlotId | null>(null)
+  const [activeInsightSlotId, setActiveInsightSlotId] = useState<InsightSlotId | null>(null)
 
   const cursorX = useMotionValue(0)
   const cursorY = useMotionValue(0)
@@ -195,9 +195,63 @@ export default function AIGenerationWaitingScene({
   const phaseColor = PHASE_COLORS[visual.phase]
   const stepText = progress?.step || tAny(visual.sceneActionKey)
 
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+
+    const mediaQuery = window.matchMedia('(hover: hover) and (pointer: fine)')
+    const update = () => setSupportsHover(mediaQuery.matches)
+    update()
+
+    mediaQuery.addEventListener('change', update)
+    return () => mediaQuery.removeEventListener('change', update)
+  }, [])
+
+  useEffect(() => {
+    if (supportsHover || mobileAutoPaused) return
+
+    const timer = setInterval(() => {
+      setMobileRotateIndex(prev => (prev + 1) % MOBILE_ROTATION_SLOTS.length)
+    }, 8000)
+
+    return () => clearInterval(timer)
+  }, [supportsHover, mobileAutoPaused])
+
+  useEffect(() => {
+    if (supportsHover || mobileAutoPaused) return
+    setActiveInsightSlotId(MOBILE_ROTATION_SLOTS[mobileRotateIndex])
+  }, [mobileRotateIndex, supportsHover, mobileAutoPaused])
+
+  useEffect(() => {
+    return () => {
+      if (hoverOpenTimerRef.current) clearTimeout(hoverOpenTimerRef.current)
+      if (hoverCloseTimerRef.current) clearTimeout(hoverCloseTimerRef.current)
+    }
+  }, [])
+
+  const clearHoverTimers = () => {
+    if (hoverOpenTimerRef.current) {
+      clearTimeout(hoverOpenTimerRef.current)
+      hoverOpenTimerRef.current = null
+    }
+    if (hoverCloseTimerRef.current) {
+      clearTimeout(hoverCloseTimerRef.current)
+      hoverCloseTimerRef.current = null
+    }
+  }
+
+  const switchInsight = (slotId: InsightSlotId | null) => {
+    const now = Date.now()
+    if (slotId && now - lastSwitchAtRef.current < 180) return
+    if (slotId) lastSwitchAtRef.current = now
+    setActiveInsightSlotId(slotId)
+  }
+
+  const fallbackInsightSlotId = visual.activeInsightSlotId
+  const displayInsightSlotId = activeInsightSlotId || fallbackInsightSlotId
+
   const activeSlotIds = PHASE_ACTIVE_SLOTS[visual.phase]
-  const fallbackFocus = activeSlotIds[0]
-  const focusSlot = SLOT_BY_ID[(hoveredSlotId && SLOT_BY_ID[hoveredSlotId]) ? hoveredSlotId : fallbackFocus]
+  const focusSlotId = hoveredSlotId || displayInsightSlotId
+  const focusSlot = SLOT_BY_ID[focusSlotId]
 
   const onStageMouseMove = (event: MouseEvent<HTMLDivElement>) => {
     if (!stageRef.current) return
@@ -205,6 +259,48 @@ export default function AIGenerationWaitingScene({
     cursorX.set(event.clientX - rect.left)
     cursorY.set(event.clientY - rect.top)
   }
+
+  const onSlotEnter = (slotId: InsightSlotId) => {
+    if (!supportsHover) return
+    setHoveredSlotId(slotId)
+    if (hoverCloseTimerRef.current) {
+      clearTimeout(hoverCloseTimerRef.current)
+      hoverCloseTimerRef.current = null
+    }
+    if (hoverOpenTimerRef.current) clearTimeout(hoverOpenTimerRef.current)
+    hoverOpenTimerRef.current = setTimeout(() => switchInsight(slotId), 150)
+  }
+
+  const onSlotLeave = () => {
+    if (!supportsHover) return
+    setHoveredSlotId(null)
+    if (hoverOpenTimerRef.current) {
+      clearTimeout(hoverOpenTimerRef.current)
+      hoverOpenTimerRef.current = null
+    }
+    hoverCloseTimerRef.current = setTimeout(() => switchInsight(null), 80)
+  }
+
+  const onSlotClick = (slotId: InsightSlotId) => {
+    if (supportsHover) return
+    clearHoverTimers()
+    setMobileAutoPaused(true)
+    setHoveredSlotId(slotId)
+    if (activeInsightSlotId === slotId) {
+      setActiveInsightSlotId(null)
+      return
+    }
+    switchInsight(slotId)
+  }
+
+  const insightPrefix = INSIGHT_PREFIX_BY_SLOT[displayInsightSlotId]
+  const insightLines = [
+    `${tAny(`${insightPrefix}Block`)} · ${tAny(`${insightPrefix}Role`)}`,
+    `${tAny('aiHoverLineOperation')}${tAny(`${insightPrefix}Operation`)}`,
+    `${tAny('aiHoverLineReason')}${tAny(`${insightPrefix}Reason`)}`,
+    `${tAny('aiHoverLineImpact')}${tAny(`${insightPrefix}Impact`)}`,
+    `${tAny('aiHoverLineKnowledge')}${tAny(`${insightPrefix}Knowledge`)}`,
+  ]
 
   return (
     <div
@@ -258,11 +354,11 @@ export default function AIGenerationWaitingScene({
         </div>
       </div>
 
-      <div style={{ position: 'relative', zIndex: 2, display: 'grid', gridTemplateColumns: '1fr 280px', gap: 14, flex: 1, minHeight: 0, padding: '12px 16px 10px 16px' }}>
+      <div style={{ position: 'relative', zIndex: 2, display: 'grid', gridTemplateColumns: '1fr 300px', gap: 14, flex: 1, minHeight: 0, padding: '12px 16px 10px 16px' }}>
         <div
           ref={stageRef}
           onMouseMove={onStageMouseMove}
-          onMouseLeave={() => setHoveredSlotId(null)}
+          onMouseLeave={onSlotLeave}
           style={{
             position: 'relative',
             borderRadius: 14,
@@ -310,8 +406,7 @@ export default function AIGenerationWaitingScene({
             {STAGE_SLOTS.map((slot, idx) => {
               const isVisible = slot.appearAt <= visual.taskIndex + 1
               const isActive = activeSlotIds.includes(slot.id)
-              const isFocus = (hoveredSlotId || fallbackFocus) === slot.id
-
+              const isFocus = focusSlotId === slot.id
               const responsiveWidth = visual.phase === 'rwd' && (slot.id === 'cards' || slot.id === 'feature-grid')
                 ? `${Math.max(slot.w - 10, 28)}%`
                 : `${slot.w}%`
@@ -319,7 +414,9 @@ export default function AIGenerationWaitingScene({
               return (
                 <motion.div
                   key={`${slot.id}-${visual.phase}`}
-                  onMouseEnter={() => setHoveredSlotId(slot.id)}
+                  onMouseEnter={() => onSlotEnter(slot.id)}
+                  onMouseLeave={onSlotLeave}
+                  onClick={() => onSlotClick(slot.id)}
                   initial={reduceMotion ? false : { opacity: 0, x: -18, y: 10, scale: 0.96 }}
                   animate={{
                     opacity: isVisible ? (isActive ? 1 : 0.72) : 0.2,
@@ -350,7 +447,7 @@ export default function AIGenerationWaitingScene({
                     justifyContent: slot.kind === 'button' ? 'center' : 'flex-start',
                     gap: 5,
                     overflow: 'hidden',
-                    cursor: 'default',
+                    cursor: supportsHover ? 'default' : 'pointer',
                   }}
                 >
                   {renderSlotBody(slot, phaseColor)}
@@ -373,32 +470,6 @@ export default function AIGenerationWaitingScene({
                 </motion.div>
               )
             })}
-
-            {!reduceMotion && visual.phase === 'reasoning' && (
-              <>
-                {['Hero', 'CTA', 'Gallery', 'Booking', 'Brand Story'].map((chip, idx) => (
-                  <motion.div
-                    key={chip}
-                    initial={{ x: -80 + idx * 8, y: 12 + idx * 18, opacity: 0 }}
-                    animate={{ x: 6 + idx * 13, y: 16 + idx * 7, opacity: [0, 0.85, 0.85] }}
-                    transition={{ duration: 0.9, delay: idx * 0.12, repeat: Infinity, repeatDelay: 1.6 }}
-                    style={{
-                      position: 'absolute',
-                      padding: '4px 8px',
-                      borderRadius: 999,
-                      border: `1px solid ${phaseColor}66`,
-                      background: `${phaseColor}1d`,
-                      color: '#e2e8f0',
-                      fontSize: 11,
-                      fontFamily: 'var(--font-mono)',
-                      pointerEvents: 'none',
-                    }}
-                  >
-                    {chip}
-                  </motion.div>
-                ))}
-              </>
-            )}
 
             {focusSlot && (
               <motion.div
@@ -426,39 +497,79 @@ export default function AIGenerationWaitingScene({
         </div>
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10, minHeight: 0 }}>
-          {TASKS.map((task, idx) => {
-            const status = idx < visual.taskIndex ? 'done' : idx === visual.taskIndex ? 'active' : 'pending'
-            const statusColor = status === 'done' ? '#22c55e' : status === 'active' ? phaseColor : 'rgba(148,163,184,0.75)'
-            const statusLabel = status === 'done'
-              ? tAny('aiStateCompleted')
-              : status === 'active'
-                ? tAny('aiStateActive')
-                : tAny('aiStatePending')
+          <motion.div
+            key={displayInsightSlotId}
+            initial={{ opacity: 0, y: 6 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.24 }}
+            style={{
+              width: 280,
+              borderRadius: 10,
+              border: `1px solid ${phaseColor}88`,
+              background: 'rgba(8,14,28,0.92)',
+              padding: '10px 12px',
+              display: 'grid',
+              gap: 6,
+            }}
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10 }}>
+              <span style={{ fontSize: 12, fontWeight: 600, color: '#e2e8f0' }}>{tAny('aiHoverTitle')}</span>
+              <span style={{ fontSize: 10, color: phaseColor, fontFamily: 'var(--font-mono)' }}>{supportsHover ? tAny('aiHoverActive') : tAny('aiHoverTapHint')}</span>
+            </div>
 
-            return (
-              <motion.div
-                key={task.titleKey}
-                initial={{ opacity: 0, y: 8 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ duration: 0.28, delay: idx * 0.04 }}
+            {insightLines.map((line, idx) => (
+              <p
+                key={idx}
                 style={{
-                  borderRadius: 10,
-                  border: status === 'active' ? `1px solid ${phaseColor}99` : '1px solid rgba(148,163,184,0.25)',
-                  background: status === 'active' ? `${phaseColor}1c` : 'rgba(15,23,42,0.45)',
-                  padding: '10px 12px',
-                  display: 'grid',
-                  gap: 5,
+                  margin: 0,
+                  fontSize: 11,
+                  lineHeight: 1.35,
+                  color: 'rgba(203,213,225,0.92)',
+                  whiteSpace: 'nowrap',
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
                 }}
               >
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10 }}>
-                  <span style={{ fontSize: 13, fontWeight: 600, color: '#e2e8f0' }}>{tAny(task.titleKey)}</span>
-                  <span style={{ fontSize: 11, color: statusColor, fontFamily: 'var(--font-mono)' }}>{statusLabel}</span>
-                </div>
-                <p style={{ margin: 0, fontSize: 11, color: 'rgba(148,163,184,0.9)' }}>{tAny(task.actionKey)}</p>
-                <p style={{ margin: 0, fontSize: 11, color: 'rgba(148,163,184,0.72)' }}>{tAny(task.moduleKey)}</p>
-              </motion.div>
-            )
-          })}
+                {line}
+              </p>
+            ))}
+          </motion.div>
+
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10, minHeight: 0, overflow: 'auto', paddingRight: 4 }}>
+            {TASKS.map((task, idx) => {
+              const status = idx < visual.taskIndex ? 'done' : idx === visual.taskIndex ? 'active' : 'pending'
+              const statusColor = status === 'done' ? '#22c55e' : status === 'active' ? phaseColor : 'rgba(148,163,184,0.75)'
+              const statusLabel = status === 'done'
+                ? tAny('aiStateCompleted')
+                : status === 'active'
+                  ? tAny('aiStateActive')
+                  : tAny('aiStatePending')
+
+              return (
+                <motion.div
+                  key={task.titleKey}
+                  initial={{ opacity: 0, y: 8 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ duration: 0.28, delay: idx * 0.04 }}
+                  style={{
+                    borderRadius: 10,
+                    border: status === 'active' ? `1px solid ${phaseColor}99` : '1px solid rgba(148,163,184,0.25)',
+                    background: status === 'active' ? `${phaseColor}1c` : 'rgba(15,23,42,0.45)',
+                    padding: '10px 12px',
+                    display: 'grid',
+                    gap: 5,
+                  }}
+                >
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10 }}>
+                    <span style={{ fontSize: 13, fontWeight: 600, color: '#e2e8f0' }}>{tAny(task.titleKey)}</span>
+                    <span style={{ fontSize: 11, color: statusColor, fontFamily: 'var(--font-mono)' }}>{statusLabel}</span>
+                  </div>
+                  <p style={{ margin: 0, fontSize: 11, color: 'rgba(148,163,184,0.9)' }}>{tAny(task.actionKey)}</p>
+                  <p style={{ margin: 0, fontSize: 11, color: 'rgba(148,163,184,0.72)' }}>{tAny(task.moduleKey)}</p>
+                </motion.div>
+              )
+            })}
+          </div>
         </div>
       </div>
 
@@ -481,6 +592,10 @@ export default function AIGenerationWaitingScene({
             <p style={{ margin: '4px 0 0 0', fontSize: 15, fontFamily: 'var(--font-mono)', color: '#e2e8f0' }}>{visual.interactionComponents}</p>
           </div>
         </div>
+      </div>
+
+      <div style={{ position: 'absolute', right: 20, bottom: 20, fontSize: 10, color: 'rgba(148,163,184,0.62)', fontFamily: 'var(--font-mono)', pointerEvents: 'none' }}>
+        {tAny('aiConfidenceLabel')}: {visual.decisionConfidence}%
       </div>
     </div>
   )

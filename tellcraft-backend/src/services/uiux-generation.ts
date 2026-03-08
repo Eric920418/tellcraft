@@ -1990,6 +1990,7 @@ export async function generateStructure(
     referenceAnalysis?: import('./reference-analyzer').ReferenceAnalysis
     moodId?: string
     existingComponentSummary?: string  // 已有組件路徑列表（增量生成用）
+    incrementalFirstBatch?: boolean    // 增量首批：只生成指定頁面 + Layout/Header/Footer
   },
   trackingContext?: LlmTrackingContext,
   onPartialCode?: PartialCodeCallback
@@ -2256,9 +2257,18 @@ ${templateStyleSection}
 ${requirementsSection}
 ${interactionSection}
 ## 頁面規劃策略
-以下頁面列表${isLaterBatch ? '（本批次）' : '僅作為起始建議'}：${targetPages.join(', ')}
+${productContext?.incrementalFirstBatch
+? `**嚴格限制：本批次只生成以下頁面**：${targetPages.join(', ')}
+- ⚠️ 禁止生成上述列表以外的頁面（其他頁面會在後續批次生成）
+- 必須生成 Layout 組件（Header + Footer），Header 導航連結預留所有頁面
+- 必須生成 globals.css
+- 頁面中使用有意義的模擬數據（和產品領域相關）
+- 共用組件盡量抽取，後續批次可直接 import 複用`
+: `以下頁面列表${isLaterBatch ? '（本批次）' : '僅作為起始建議'}：${targetPages.join(', ')}`}
 
-${productContext?.layoutMode === 'app'
+${productContext?.incrementalFirstBatch
+? '' // 增量首批已有明確限制，不需要額外策略段
+: productContext?.layoutMode === 'app'
 ? `**工具型/應用型產品 — 頁面以功能為導向：**
 - 工具型產品通常只有 1-3 個功能頁面，不需要行銷頁面（Hero/CTA/Testimonials）
 - 主頁面直接呈現核心功能界面，佔滿螢幕
@@ -2274,7 +2284,7 @@ ${productContext?.layoutMode === 'app'
 - Header/Footer 的導航連結要對應你最終決定的頁面結構
 - 頁面中使用有意義的模擬數據（和產品領域相關，不要用 Lorem ipsum）`}
 ${variantConcept ? `- 每個頁面都必須體現「${variantConcept.name}」的創意概念，不是只有首頁` : ''}
-${pages.length >= 5 && !isLaterBatch ? `
+${pages.length >= 5 && !isLaterBatch && !productContext?.incrementalFirstBatch ? `
 **多頁面策略（${pages.length} 個頁面）**：
 - 主要頁面（首頁、核心功能頁）：完整 Section + 豐富互動
 - 次要頁面（關於、聯繫、FAQ）：精簡 1-2 個 Section

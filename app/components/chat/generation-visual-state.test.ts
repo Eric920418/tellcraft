@@ -15,6 +15,7 @@ describe('resolveGenerationVisualState', () => {
     expect(result.phaseNumber).toBe(3)
     expect(result.sceneActionKey).toBe('aiActionInjecting')
     expect(result.activeModuleKey).toBe('aiModuleInteractionLayer')
+    expect(result.activeInsightSlotId).toBe('cta')
   })
 
   it('maps uiux quality gate stage to quality phase and quality module', () => {
@@ -28,6 +29,7 @@ describe('resolveGenerationVisualState', () => {
     expect(result.statusLabelKey).toBe('aiStatusQuality')
     expect(result.activeModuleKey).toBe('aiModuleQualityGuard')
     expect(result.stabilityScore).toBeGreaterThan(80)
+    expect(result.decisionConfidence).toBeGreaterThan(80)
   })
 
   it('uses streaming phase when stage is missing and returns build metrics', () => {
@@ -40,5 +42,6 @@ describe('resolveGenerationVisualState', () => {
     expect(result.taskIndex).toBe(3)
     expect(result.assembledModules).toBeGreaterThan(10)
     expect(result.styleInjectionCount).toBeGreaterThan(40)
+    expect(result.activeInsightSlotId).toBe('cards')
   })
 })
