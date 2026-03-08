@@ -164,6 +164,7 @@ export async function callClaude(
   options?: {
     maxTokens?: number
     temperature?: number
+    maxContinuations?: number
   },
   trackingContext?: LlmTrackingContext,
   onTextDelta?: (accumulatedText: string) => void
@@ -254,14 +255,16 @@ export async function callClaude(
             break
           }
 
+          const effectiveMaxContinuations = options?.maxContinuations ?? MAX_TOKEN_CONTINUATIONS
+
           logger.warn({
             purpose: trackingContext?.purpose,
             outputTokens: finalMessage.usage?.output_tokens,
             continuationCount,
-            maxContinuations: MAX_TOKEN_CONTINUATIONS,
+            maxContinuations: effectiveMaxContinuations,
           }, 'LLM 回應被 max_tokens 截斷')
 
-          if (continuationCount >= MAX_TOKEN_CONTINUATIONS) {
+          if (continuationCount >= effectiveMaxContinuations) {
             logger.warn({ purpose: trackingContext?.purpose, continuationCount }, '已達最大續寫次數，停止')
             break
           }
@@ -2311,11 +2314,11 @@ ${isLaterBatch
 
   const baseTemperature = designTier === 'creative' ? (productContext?.moodId ? 0.5 : 0.4) : 0.3
   const singlePassLlmOpts = { maxTokens: 32768, temperature: baseTemperature }
-  const multiPassLlmOpts = { maxTokens: 32768, temperature: baseTemperature }
+  const multiPassLlmOpts = { maxTokens: 32768, temperature: baseTemperature, maxContinuations: 5 }
 
   // ── Multi-pass：3+ 頁改為逐頁生成，從源頭降低單次輸出量，避免連續撞 max_tokens ──
   const MULTI_PASS_THRESHOLD = 3
-  const BATCH_SIZE = 3
+  const BATCH_SIZE = 2
 
   let allRawPages: GeneratedComponent[] = []
   let allRawComponents: GeneratedComponent[] = []
@@ -2336,12 +2339,25 @@ ${isLaterBatch
 
       logger.info({ batchIdx: batchIdx + 1, totalBatches: batches.length, pages: batch }, 'generateStructure 批次開始')
 
+      // 所有 batch 都傳 streaming handler，確保心跳持續存活（非首 batch 合併已累積結果）
+      const batchStreamingHandler = onPartialCode
+        ? buildStreamingHandler(
+            isFirstBatch
+              ? onPartialCode
+              : (partial) => onPartialCode({
+                  pages: [...allRawPages, ...partial.pages],
+                  components: [...allRawComponents, ...partial.components],
+                  styles: styles || partial.styles,
+                })
+          )
+        : undefined
+
       const batchResponse = await callClaude(
         systemPrompt,
         [{ role: 'user', content: buildUserMsg(batch, existingPaths) }],
         multiPassLlmOpts,
         { ...trackingContext, purpose: `generate_structure_b${batchIdx + 1}` },
-        isFirstBatch ? buildStreamingHandler(onPartialCode) : undefined,
+        batchStreamingHandler,
       )
 
       if (!batchResponse.success || !batchResponse.content) {
@@ -2358,6 +2374,11 @@ ${isLaterBatch
       }
       for (const c of bComps) {
         if (!allRawComponents.find(x => x.path === c.path)) allRawComponents.push(c)
+      }
+
+      // 批次完成後刷新心跳 + 更新預覽（覆蓋批次間隙無 streaming 的空窗期）
+      if (onPartialCode) {
+        onPartialCode({ pages: allRawPages, components: allRawComponents, styles: styles || '' })
       }
 
       logger.info({ batchIdx: batchIdx + 1, pages: bPages.length, components: bComps.length }, 'generateStructure 批次完成')

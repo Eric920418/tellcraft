@@ -9,6 +9,7 @@ import { matchTemplates } from './template-matcher'
 import { queryOne } from '../db/client'
 import { getAnthropicHeaders, MODEL, calculateLlmCost, trackLlmUsage } from '../lib/anthropic'
 import { createLogger } from '../lib/logger'
+import { safeParseJson } from '../utils/safe-parse-json'
 
 const logger = createLogger('fast-build-generation')
 
@@ -890,8 +891,8 @@ Make the concept unique. signatureElement must be specific enough to code (e.g. 
       headers: getAnthropicHeaders(),
       body: JSON.stringify({
         model: MODEL.HAIKU,
-        max_tokens: 500,
-        temperature: 0.7,
+        max_tokens: 600,
+        temperature: 0.5,
         system: systemPrompt,
         messages: [{ role: 'user', content: userMsg }],
       }),
@@ -926,14 +927,33 @@ Make the concept unique. signatureElement must be specific enough to code (e.g. 
       return null
     }
 
-    // 解析 JSON（容忍 markdown code fence）
-    const jsonMatch = text.match(/\{[\s\S]*\}/)
-    if (!jsonMatch) {
-      logger.warn('FastConcept 無法解析 JSON，降級跳過')
+    // 解析 JSON（safeParseJson 四層防禦 + 截斷修復）
+    let parsed = safeParseJson<Partial<FastConcept>>(text)
+    if (!parsed) {
+      // 第五層：max_tokens 截斷修復 — 嘗試補齊未閉合的 JSON
+      const braceStart = text.indexOf('{')
+      if (braceStart >= 0) {
+        let truncated = text.slice(braceStart)
+          .replace(/,\s*$/, '')           // 移除尾隨逗號
+        // 補齊未閉合的陣列和物件
+        const openBrackets = (truncated.match(/\[/g) || []).length - (truncated.match(/\]/g) || []).length
+        const openBraces = (truncated.match(/\{/g) || []).length - (truncated.match(/\}/g) || []).length
+        // 截斷可能在字串值中間，嘗試關閉當前字串
+        if ((truncated.match(/"/g) || []).length % 2 !== 0) {
+          truncated += '"'
+        }
+        truncated += ']'.repeat(Math.max(0, openBrackets))
+        truncated += '}'.repeat(Math.max(0, openBraces))
+        parsed = safeParseJson<Partial<FastConcept>>(truncated)
+        if (parsed) {
+          logger.info('FastConcept JSON 截斷修復成功')
+        }
+      }
+    }
+    if (!parsed) {
+      logger.warn({ textPreview: text.slice(0, 200) }, 'FastConcept 無法解析 JSON，降級跳過')
       return null
     }
-
-    const parsed = JSON.parse(jsonMatch[0]) as Partial<FastConcept>
     if (!parsed.name || !parsed.vibe || !parsed.signatureElement) {
       logger.warn('FastConcept 缺少必要欄位，降級跳過')
       return null

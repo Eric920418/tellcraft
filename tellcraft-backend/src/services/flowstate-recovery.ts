@@ -111,7 +111,9 @@ export async function scanAndRecoverStuckFlowStates(
         conversationId,
         phase: state.phase,
         codePhase: state.uiuxCodePhase,
-        timeoutSec: Math.round(timeoutMs / 1000),
+        timeoutSec: Math.round(effectiveTimeoutMs / 1000),
+        baseTimeoutSec: Math.round(timeoutMs / 1000),
+        lockExists,
         startedAt: startedAt ? new Date(startedAt).toISOString() : 'none',
         elapsedSec: startedAt ? Math.round((Date.now() - startedAt) / 1000) : undefined,
       }, '偵測到超時')
