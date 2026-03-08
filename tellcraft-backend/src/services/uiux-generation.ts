@@ -2311,11 +2311,11 @@ ${isLaterBatch
 
   const baseTemperature = designTier === 'creative' ? (productContext?.moodId ? 0.5 : 0.4) : 0.3
   const singlePassLlmOpts = { maxTokens: 32768, temperature: baseTemperature }
-  const multiPassLlmOpts = { maxTokens: 24576, temperature: baseTemperature }
+  const multiPassLlmOpts = { maxTokens: 32768, temperature: baseTemperature }
 
   // ── Multi-pass：3+ 頁改為逐頁生成，從源頭降低單次輸出量，避免連續撞 max_tokens ──
   const MULTI_PASS_THRESHOLD = 3
-  const BATCH_SIZE = 1
+  const BATCH_SIZE = 3
 
   let allRawPages: GeneratedComponent[] = []
   let allRawComponents: GeneratedComponent[] = []

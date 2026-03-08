@@ -34,15 +34,17 @@ export function useAdminLogs(options: UseAdminLogsOptions): UseAdminLogsReturn {
   useEffect(() => {
     if (!enabled) return
 
-    const token = localStorage.getItem('auth_token')
-    if (!token) return
-
     let active = true
     initialLoadDone.current = false
 
     // 初始載入
     async function loadInitial() {
-      const result = await getAdminLogs({ token: token!, lines: 200, source })
+      const token = localStorage.getItem('auth_token')
+      if (!token) {
+        if (active) setIsConnected(false)
+        return
+      }
+      const result = await getAdminLogs({ token, lines: 200, source })
       if (!active) return
 
       if (result.success && result.data?.lines) {
@@ -65,9 +67,15 @@ export function useAdminLogs(options: UseAdminLogsOptions): UseAdminLogsReturn {
     const interval = setInterval(async () => {
       if (!active || isPausedRef.current || !initialLoadDone.current) return
 
+      const token = localStorage.getItem('auth_token')
+      if (!token) {
+        setIsConnected(false)
+        return
+      }
+
       const since = lastTimestampRef.current
       const result = await getAdminLogs({
-        token: token!,
+        token,
         lines: 100,
         source,
         since: since || undefined,
@@ -126,8 +134,21 @@ export function useAdminLogs(options: UseAdminLogsOptions): UseAdminLogsReturn {
     const result = await clearAdminLogs({ token, source })
     if (!result.success) return false
 
-    setLines([])
-    lastTimestampRef.current = ''
+    const refreshed = await getAdminLogs({ token, lines: 200, source })
+    if (refreshed.success && refreshed.data?.lines) {
+      setLines(refreshed.data.lines)
+      if (refreshed.data.lines.length > 0) {
+        lastTimestampRef.current = refreshed.data.lines[refreshed.data.lines.length - 1].timestamp
+      } else {
+        lastTimestampRef.current = ''
+      }
+      setIsConnected(true)
+    } else {
+      setLines([])
+      lastTimestampRef.current = ''
+      setIsConnected(false)
+    }
+
     // 清空後維持輪詢啟用，讓新日誌可即時顯示
     initialLoadDone.current = true
     return true

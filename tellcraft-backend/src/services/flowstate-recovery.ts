@@ -26,7 +26,7 @@ const logger = createLogger('flowstate-recovery')
 
 // 超時閾值（毫秒）
 const PRD_DISCOVERY_TIMEOUT_MS = 5 * 60 * 1000
-const FAST_BUILD_TIMEOUT_MS = 20 * 60 * 1000
+const FAST_BUILD_TIMEOUT_MS = 25 * 60 * 1000
 const FAST_BUILD_RWD_TIMEOUT_MS = 35 * 60 * 1000
 const ITERATION_TIMEOUT_MS = 5 * 60 * 1000
 const CODE_GENERATION_TIMEOUT_MS = 20 * 60 * 1000
