@@ -2532,7 +2532,8 @@ export async function generateAnimations(
   onPartialCode?: PartialCodeCallback,
   variantConcept?: VariantConcept,
   uiSpecSummary?: string,
-  moodId?: string
+  moodId?: string,
+  incrementalOptions?: { maxTokens?: number; maxContinuations?: number },
 ): Promise<GenerationResult> {
   const tier = designTier || 'functional'
 
@@ -2654,7 +2655,7 @@ ${existingCodeStr}
   const response = await callClaude(
     systemPrompt,
     [{ role: 'user', content: userMessage }],
-    { maxTokens: 32768, temperature: tier === 'creative' ? 0.35 : 0.2 },
+    { maxTokens: incrementalOptions?.maxTokens || 32768, temperature: tier === 'creative' ? 0.35 : 0.2, maxContinuations: incrementalOptions?.maxContinuations },
     { ...trackingContext, purpose: 'generate_animations' },
     buildStreamingHandler(onPartialCode)
   )
@@ -2699,7 +2700,8 @@ export async function generateRwd(
   variantConcept?: VariantConcept,
   uiSpecSummary?: string,
   layoutMode?: 'app' | 'website',
-  moodId?: string
+  moodId?: string,
+  incrementalOptions?: { maxTokens?: number; maxContinuations?: number },
 ): Promise<GenerationResult> {
   const tier = designTier || 'functional'
 
@@ -2840,7 +2842,7 @@ ${existingCodeStr}
   const response = await callClaude(
     systemPrompt,
     [{ role: 'user', content: userMessage }],
-    { maxTokens: 32768, temperature: 0.2 },
+    { maxTokens: incrementalOptions?.maxTokens || 32768, temperature: 0.2, maxContinuations: incrementalOptions?.maxContinuations },
     { ...trackingContext, purpose: 'generate_rwd' },
     buildStreamingHandler(onPartialCode)
   )

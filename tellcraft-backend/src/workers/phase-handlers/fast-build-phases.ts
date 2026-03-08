@@ -342,34 +342,59 @@ export async function runFastBuildPipeline(params: {
     },
   })
 
+  // 第 2+ 批：只傳新增檔案給 animation（減少 ~60% token）
+  const animInput = (isLaterBatch && existingCode)
+    ? buildIncrementalCode(currentCode, existingCode)
+    : currentCode
+
   const animStreamingBase = makeStreamingCallback(conversationId, io, redis, 'animation', twConfig)
-  const animStreamingCallback = existingCode
-    ? (partial: { pages: GeneratedComponent[]; components: GeneratedComponent[]; styles: string }) =>
+  const animStreamingCallback = (isLaterBatch && existingCode)
+    ? (partial: { pages: GeneratedComponent[]; components: GeneratedComponent[]; styles: string }) => {
+        // 合併：已有檔案（不變）+ partial 新增檔案
+        const existingPagePaths = new Set(existingCode.pages.map(p => p.path))
+        const existingCompPaths = new Set(existingCode.components.map(c => c.path))
         animStreamingBase({
-          pages: [...existingCode.pages, ...partial.pages],
-          components: [...existingCode.components, ...partial.components],
-          styles: existingCode.styles || partial.styles,
+          pages: [
+            ...currentCode.pages.filter(p => existingPagePaths.has(p.path) || !partial.pages.some(pp => pp.path === p.path)),
+            ...partial.pages,
+          ],
+          components: [
+            ...currentCode.components.filter(c => existingCompPaths.has(c.path) || !partial.components.some(pc => pc.path === c.path)),
+            ...partial.components,
+          ],
+          styles: currentCode.styles || partial.styles,
         })
+      }
     : animStreamingBase
 
   const fastUiSpecSummary = state.uiuxUISpec ? buildUISpecSummary(state.uiuxUISpec)
     : (interactionHint ? `產品互動概覽：\n${interactionHint}` : undefined)
   const animationResult = await generateAnimations(
     designSystem,
-    currentCode,
+    animInput,
     tier,
     { userId, conversationId, purpose: isLaterBatch ? 'fast-build-animation-batch' : 'fast-build-animation' },
     animStreamingCallback,
     variantConcept,
     fastUiSpecSummary,
     moodId,
+    isLaterBatch ? { maxTokens: calcIncrementalMaxTokens(animInput), maxContinuations: 1 } : undefined,
   )
 
   if (animationResult.success) {
-    currentCode = {
-      pages: animationResult.pages || currentCode.pages,
-      components: animationResult.components || currentCode.components,
-      styles: animationResult.styles || currentCode.styles,
+    if (isLaterBatch && existingCode) {
+      // 增量合併：只覆蓋新增檔案的動畫版本，保留已有檔案不變
+      currentCode = mergeGeneratedCode(currentCode, {
+        pages: animationResult.pages || [],
+        components: animationResult.components || [],
+        styles: animationResult.styles || currentCode.styles,
+      })
+    } else {
+      currentCode = {
+        pages: animationResult.pages || currentCode.pages,
+        components: animationResult.components || currentCode.components,
+        styles: animationResult.styles || currentCode.styles,
+      }
     }
   } else {
     logger.warn({ err: animationResult.error }, '動畫生成失敗，使用結構代碼繼續')
@@ -397,19 +422,33 @@ export async function runFastBuildPipeline(params: {
     },
   })
 
+  // 第 2+ 批：只傳新增檔案給 RWD
+  const rwdInput = (isLaterBatch && existingCode)
+    ? buildIncrementalCode(currentCode, existingCode)
+    : currentCode
+
   const rwdStreamingBase = makeStreamingCallback(conversationId, io, redis, 'rwd', twConfig)
-  const rwdStreamingCallback = existingCode
-    ? (partial: { pages: GeneratedComponent[]; components: GeneratedComponent[]; styles: string }) =>
+  const rwdStreamingCallback = (isLaterBatch && existingCode)
+    ? (partial: { pages: GeneratedComponent[]; components: GeneratedComponent[]; styles: string }) => {
+        const existingPagePaths = new Set(existingCode.pages.map(p => p.path))
+        const existingCompPaths = new Set(existingCode.components.map(c => c.path))
         rwdStreamingBase({
-          pages: [...existingCode.pages, ...partial.pages],
-          components: [...existingCode.components, ...partial.components],
-          styles: existingCode.styles || partial.styles,
+          pages: [
+            ...currentCode.pages.filter(p => existingPagePaths.has(p.path) || !partial.pages.some(pp => pp.path === p.path)),
+            ...partial.pages,
+          ],
+          components: [
+            ...currentCode.components.filter(c => existingCompPaths.has(c.path) || !partial.components.some(pc => pc.path === c.path)),
+            ...partial.components,
+          ],
+          styles: currentCode.styles || partial.styles,
         })
+      }
     : rwdStreamingBase
 
   const rwdResult = await generateRwd(
     designSystem,
-    currentCode,
+    rwdInput,
     tier,
     { userId, conversationId, purpose: isLaterBatch ? 'fast-build-rwd-batch' : 'fast-build-rwd' },
     rwdStreamingCallback,
@@ -417,13 +456,22 @@ export async function runFastBuildPipeline(params: {
     fastUiSpecSummary,
     layoutMode,
     moodId,
+    isLaterBatch ? { maxTokens: calcIncrementalMaxTokens(rwdInput), maxContinuations: 1 } : undefined,
   )
 
   if (rwdResult.success) {
-    currentCode = {
-      pages: rwdResult.pages || currentCode.pages,
-      components: rwdResult.components || currentCode.components,
-      styles: rwdResult.styles || currentCode.styles,
+    if (isLaterBatch && existingCode) {
+      currentCode = mergeGeneratedCode(currentCode, {
+        pages: rwdResult.pages || [],
+        components: rwdResult.components || [],
+        styles: rwdResult.styles || currentCode.styles,
+      })
+    } else {
+      currentCode = {
+        pages: rwdResult.pages || currentCode.pages,
+        components: rwdResult.components || currentCode.components,
+        styles: rwdResult.styles || currentCode.styles,
+      }
     }
   } else {
     logger.warn({ err: rwdResult.error }, 'RWD 生成失敗，套用 ensureResponsiveClasses')
@@ -636,4 +684,29 @@ export function buildExistingComponentSummary(code: GeneratedCode): string {
   for (const p of code.pages) paths.push(p.path)
   for (const c of code.components) paths.push(c.path)
   return paths.join('\n')
+}
+
+// ============================================================
+// 純函數：構建增量代碼（只包含本批新增的檔案）
+// 用於第 2+ 批 animation/rwd，避免重新處理第 1 批已完成的
+// ============================================================
+
+function buildIncrementalCode(
+  currentBatchCode: GeneratedCode,
+  existingCode: GeneratedCode,
+): GeneratedCode {
+  const existingPagePaths = new Set(existingCode.pages.map(p => p.path))
+  const existingCompPaths = new Set(existingCode.components.map(c => c.path))
+
+  return {
+    pages: currentBatchCode.pages.filter(p => !existingPagePaths.has(p.path)),
+    components: currentBatchCode.components.filter(c => !existingCompPaths.has(c.path)),
+    styles: currentBatchCode.styles, // styles 傳入供參考但 LLM 不需重新輸出
+  }
+}
+
+function calcIncrementalMaxTokens(code: GeneratedCode): number {
+  const fileCount = code.pages.length + code.components.length
+  // 每個檔案 ~4096 token 輸出，下限 8192，上限 32768
+  return Math.min(32768, Math.max(8192, fileCount * 4096))
 }
