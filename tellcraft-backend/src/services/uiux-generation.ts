@@ -1674,7 +1674,7 @@ async function checkAndFixSyntaxErrors(
     const response = await callClaude(
       systemPrompt,
       [{ role: 'user', content: `Truncated files to regenerate:\n\n${brokenCode}${contextSection}` }],
-      { maxTokens: 8192, temperature: 0 },
+      { maxTokens: 16384, temperature: 0 },
       { ...trackingContext, purpose: 'fix_truncated_file' }
     )
     if (response.success && response.content) {

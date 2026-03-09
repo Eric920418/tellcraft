@@ -28,6 +28,16 @@ import { createLogger } from '../../lib/logger'
 
 const logger = createLogger('fast-build-phases')
 
+// 檢查 pipeline 是否應該中止（用戶已按「完成/部署」，phase 被外部改掉）
+async function isPipelineAborted(redis: Redis, conversationId: string): Promise<boolean> {
+  const fresh = await getFlowState(redis, conversationId)
+  if (!fresh || fresh.phase !== 'fast_generating') {
+    logger.warn({ phase: fresh?.phase, conversationId }, 'Pipeline phase changed externally, aborting QG')
+    return true
+  }
+  return false
+}
+
 export async function executeFastBuildSkill(params: {
   taskId: string
   projectId: string
@@ -481,11 +491,17 @@ export async function runFastBuildPipeline(params: {
   }
 
   // ===== Quality Gate（靜態檢查 + 最多 2 輪 LLM 修復）=====
+  // 先確認用戶尚未按「完成/部署」讓 phase 被外部改掉
+  if (await isPipelineAborted(redis, conversationId)) return
+
   let report = runQualityGate(currentCode, tier, state.uiuxDesignMood)
   logger.info(`QG: passed=${report.passed}, critical=${report.summary.critical}, warning=${report.summary.warning}`)
 
   const FAST_QG_MAX_ATTEMPTS = 2
   for (let attempt = 0; attempt < FAST_QG_MAX_ATTEMPTS && !report.passed; attempt++) {
+    // 每輪修復前再確認是否被中止
+    if (await isPipelineAborted(redis, conversationId)) return
+
     const criticalIssues = [
       ...report.categories.a11y.issues,
       ...report.categories.performance.issues,
@@ -766,10 +782,14 @@ export async function resumeFastBuildPipeline(params: {
     }
 
     // ── Quality Gate ──
+    if (await isPipelineAborted(redis, conversationId)) return
+
     let report = runQualityGate(currentCode, tier, state.uiuxDesignMood)
     logger.info(`恢復 QG: passed=${report.passed}, critical=${report.summary.critical}`)
 
     for (let attempt = 0; attempt < 2 && !report.passed; attempt++) {
+      if (await isPipelineAborted(redis, conversationId)) return
+
       const criticalIssues = [
         ...report.categories.a11y.issues,
         ...report.categories.performance.issues,
