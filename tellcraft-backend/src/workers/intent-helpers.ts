@@ -26,7 +26,7 @@ export const SPEC_DISCOVERY_LIMITS = {
 }
 
 // Fast Mode 限制
-export const FAST_MODE_MAX_MESSAGE_LENGTH = 1200
+export const FAST_MODE_MAX_MESSAGE_LENGTH = 1500
 
 // ── 回退映射表：當前 phase → 回退目標 phase ──
 export const PHASE_BACKTRACK_MAP: Record<string, string> = {
