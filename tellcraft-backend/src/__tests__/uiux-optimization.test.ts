@@ -41,6 +41,7 @@ import {
   type DesignSystem,
 } from '../services/uiux-generation'
 import { autoFixCriticalIssuesRuleBased, runQualityGate } from '../services/quality-gate'
+import { expandBriefPrompt, shouldExpandBriefPrompt } from '../services/fast-build-generation'
 
 const MOCK_DESIGN_SYSTEM: DesignSystem = {
   cssVariables: ':root { --color-primary: #2563eb; }',
@@ -101,6 +102,15 @@ describe('uiux optimization helpers', () => {
     expect(batches.length).toBeGreaterThan(1)
     expect(batches.flat()).toEqual(['首頁', '功能介紹', '價格方案', 'FAQ', '聯繫'])
   })
+
+  it('should skip brief expansion when prompt already has page/detail signals', () => {
+    expect(
+      shouldExpandBriefPrompt(
+        '首頁要有 Hero、功能介紹、FAQ 和聯繫表單，價格方案放第二屏，CTA 用立即預約。',
+        ['首頁', '功能介紹', 'FAQ', '聯繫']
+      )
+    ).toBe(false)
+  })
 })
 
 describe('quality gate rule-based autofix', () => {
@@ -142,5 +152,25 @@ export default function Page() {
     expect(fixed?.pages[0].content).toContain('aria-label="Email"')
     expect(fixed?.styles).toContain('@import "tailwindcss"')
     expect(fixed?.styles).not.toContain('@tailwind')
+  })
+})
+
+describe('fast-build prompt expansion cache', () => {
+  it('should reuse cached expanded prompt for the same brief', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        content: [{ text: '首頁包含 Hero 主視覺、產品特色模組與立即預約 CTA；課表頁說明課程分類、教練資訊與預約流程；聯繫頁提供表單、電話、營業時間與地圖資訊。' }],
+        usage: { input_tokens: 10, output_tokens: 20 },
+      }),
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    const first = await expandBriefPrompt('做一個健身官網', 'fitness', ['首頁', '課表', '聯繫'])
+    const second = await expandBriefPrompt('做一個健身官網', 'fitness', ['首頁', '課表', '聯繫'])
+
+    expect(first).toBeTruthy()
+    expect(second).toBe(first)
+    expect(fetchMock).toHaveBeenCalledTimes(1)
   })
 })

@@ -10,7 +10,8 @@
     "lint": "eslint . --ext .ts,.tsx",
     "typecheck": "tsc --noEmit",
     "test": "vitest",
-    "test:ci": "vitest run"
+    "test:backend": "vitest run --config vitest.backend.config.ts",
+    "test:ci": "vitest run && vitest run --config vitest.backend.config.ts"
   },
   "packageManager": "pnpm@10.13.1",
   "dependencies": {

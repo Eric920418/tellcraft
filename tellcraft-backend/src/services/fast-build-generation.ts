@@ -12,6 +12,28 @@ import { createLogger } from '../lib/logger'
 import { safeParseJson } from '../utils/safe-parse-json'
 
 const logger = createLogger('fast-build-generation')
+const FAST_BUILD_CACHE_LIMIT = 200
+const FAST_CONCEPT_CACHE = new Map<string, FastConcept>()
+const EXPANDED_PROMPT_CACHE = new Map<string, string>()
+
+function normalizeCacheText(input: string): string {
+  return input.trim().toLowerCase().replace(/\s+/g, ' ')
+}
+
+function buildFastCacheKey(prefix: string, parts: string[]): string {
+  return `${prefix}:${parts.map(normalizeCacheText).join('|')}`
+}
+
+function rememberCacheValue<T>(cache: Map<string, T>, key: string, value: T): void {
+  if (cache.has(key)) {
+    cache.delete(key)
+  }
+  cache.set(key, value)
+  if (cache.size > FAST_BUILD_CACHE_LIMIT) {
+    const oldestKey = cache.keys().next().value
+    if (oldestKey) cache.delete(oldestKey)
+  }
+}
 
 // ============================================================
 // Tier 偵測（規則式，零 LLM 成本）
@@ -231,6 +253,33 @@ export function inferPages(description: string, productType: string): string[] {
   }
 
   return DEFAULT_PAGES[productType] || ['首頁']
+}
+
+export function shouldExpandBriefPrompt(description: string, pages: string[]): boolean {
+  const trimmed = description.trim()
+  if (!trimmed) return false
+
+  const isChinese = /[\u4e00-\u9fff\u3400-\u4dbf]/.test(trimmed)
+  if (isChinese) {
+    const charCount = trimmed.replace(/\s/g, '').length
+    if (charCount > 80) return false
+  } else {
+    const wordCount = trimmed.split(/\s+/).length
+    if (wordCount > 40) return false
+  }
+
+  const normalized = trimmed.toLowerCase()
+  const punctuationCount = (trimmed.match(/[，。,.、；;!?！？\n]/g) || []).length
+  const pageMentions = pages.filter(page => normalized.includes(page.toLowerCase())).length
+  const detailSignals = [
+    'hero', 'cta', 'faq', 'pricing', 'features', 'about', 'contact',
+    '標題', '按鈕', '表單', '方案', '價格', '聯繫', '功能', '特色',
+  ].filter(signal => normalized.includes(signal)).length
+
+  if (pageMentions >= 2 && punctuationCount >= 2) return false
+  if (detailSignals >= 3 && punctuationCount >= 2) return false
+
+  return true
 }
 
 // ============================================================
@@ -875,6 +924,13 @@ export async function generateFastConcept(
   primaryColor: string,
   context?: { userId?: string; conversationId?: string }
 ): Promise<FastConcept | null> {
+  const cacheKey = buildFastCacheKey('fast-concept', [description, productType, tier, primaryColor])
+  const cached = FAST_CONCEPT_CACHE.get(cacheKey)
+  if (cached) {
+    logger.info({ productType }, 'FastConcept cache hit')
+    return cached
+  }
+
   try {
     const isChinese = /[\u4e00-\u9fff\u3400-\u4dbf]/.test(description)
     const systemPrompt = isChinese
@@ -980,7 +1036,7 @@ Make the concept unique. signatureElement must be specific enough to code (e.g. 
       if (suggestedPages.length === 0) suggestedPages = undefined
     }
 
-    return {
+    const result = {
       name: parsed.name,
       vibe: parsed.vibe,
       signatureElement: parsed.signatureElement,
@@ -988,6 +1044,8 @@ Make the concept unique. signatureElement must be specific enough to code (e.g. 
       suggestedTier: parsed.suggestedTier,
       suggestedPages,
     }
+    rememberCacheValue(FAST_CONCEPT_CACHE, cacheKey, result)
+    return result
   } catch (err) {
     logger.warn({ err }, 'FastConcept 生成失敗，降級跳過')
     return null
@@ -1009,23 +1067,20 @@ export async function expandBriefPrompt(
   pages: string[],
   context?: { userId?: string; conversationId?: string }
 ): Promise<string | null> {
-  // 跳過條件：描述已夠詳細
-  const isChinese = /[\u4e00-\u9fff\u3400-\u4dbf]/.test(description)
-  if (isChinese) {
-    const charCount = description.replace(/\s/g, '').length
-    if (charCount > 80) {
-      logger.info({ charCount }, 'ExpandPrompt 描述已夠詳細，跳過擴展')
-      return null
-    }
-  } else {
-    const wordCount = description.trim().split(/\s+/).length
-    if (wordCount > 40) {
-      logger.info({ wordCount }, 'ExpandPrompt description detailed enough, skipping expansion')
-      return null
-    }
+  if (!shouldExpandBriefPrompt(description, pages)) {
+    logger.info('ExpandPrompt 描述已夠詳細，跳過擴展')
+    return null
+  }
+
+  const cacheKey = buildFastCacheKey('expand-prompt', [description, productType, pages.join('|')])
+  const cached = EXPANDED_PROMPT_CACHE.get(cacheKey)
+  if (cached) {
+    logger.info({ productType }, 'ExpandPrompt cache hit')
+    return cached
   }
 
   try {
+    const isChinese = /[\u4e00-\u9fff\u3400-\u4dbf]/.test(description)
     const pagesStr = pages.join('、')
     const label = PRODUCT_TYPE_LABELS[productType] || '網站'
 
@@ -1095,6 +1150,7 @@ Rules:
     }
 
     logger.info({ length: text.length }, 'ExpandPrompt 擴展成功')
+    rememberCacheValue(EXPANDED_PROMPT_CACHE, cacheKey, text)
     return text
   } catch (err) {
     logger.warn({ err }, 'ExpandPrompt 擴展失敗，降級跳過')
