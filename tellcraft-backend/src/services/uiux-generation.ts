@@ -2300,6 +2300,7 @@ export async function generateStructure(
     variantConcept?: VariantConcept
     interactionHint?: string
     templateStyleHint?: string
+    layoutGuardPrompt?: string
     layoutMode?: 'app' | 'website'
     templateOverrides?: Record<string, Record<string, string>>
     referenceAnalysis?: import('./reference-analyzer').ReferenceAnalysis
@@ -2494,6 +2495,11 @@ ${templateStyleHint}
 `
     : ''
 
+  const layoutGuardPrompt = productContext?.layoutGuardPrompt
+  const layoutGuardSection = layoutGuardPrompt
+    ? `${layoutGuardPrompt}\n`
+    : ''
+
   // 用戶模板編輯覆蓋（PreviewPanel 中的自訂修改）
   const overrides = productContext?.templateOverrides
   let overridesSection = ''
@@ -2574,6 +2580,7 @@ ${referenceSection}
 ${briefSection}
 ${moodCodeSection}${overridesSection}
 ${templateStyleSection}
+${layoutGuardSection}
 ${requirementsSection}
 ${interactionSection}
 ## 頁面規劃策略

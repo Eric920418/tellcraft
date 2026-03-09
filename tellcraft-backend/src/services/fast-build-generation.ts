@@ -24,6 +24,15 @@ function buildFastCacheKey(prefix: string, parts: string[]): string {
   return `${prefix}:${parts.map(normalizeCacheText).join('|')}`
 }
 
+export function buildFastModeCacheKey(
+  description: string,
+  productType: string,
+  pages: string[],
+  tier: DesignTier,
+): string {
+  return buildFastCacheKey('fast-build', [description, productType, pages.join('|'), tier])
+}
+
 function rememberCacheValue<T>(cache: Map<string, T>, key: string, value: T): void {
   if (cache.has(key)) {
     cache.delete(key)
@@ -280,6 +289,94 @@ export function shouldExpandBriefPrompt(description: string, pages: string[]): b
   if (detailSignals >= 3 && punctuationCount >= 2) return false
 
   return true
+}
+
+const HOME_PAGE_PATTERNS = ['首頁', 'home', 'landing', '主頁面']
+const APP_CORE_PAGE_PATTERNS = ['dashboard', '儀表板', '控制台', '工作台', 'workspace', '主頁面', '看板']
+const COMPLEX_FAST_BUILD_TYPES = new Set([
+  'saas',
+  'ecommerce',
+  'hotel',
+  'travel',
+  'education',
+  'healthcare',
+  'fitness',
+  'retail',
+  'salon',
+])
+const CONVERSION_PAGE_PRIORITIES: Record<string, string[]> = {
+  saas: ['價格方案', 'pricing', 'plans', '方案', '功能介紹', 'features'],
+  ecommerce: ['商品列表', 'products', 'shop', '商品詳情'],
+  hotel: ['訂房', 'booking', '預訂', '房型介紹'],
+  travel: ['行程列表', 'tours', '行程詳情', '報名'],
+  education: ['課程列表', 'courses', '課程詳情', '報名'],
+  healthcare: ['線上掛號', '預約', 'booking', '科別介紹'],
+  fitness: ['會員方案', '方案', '課表', '預約'],
+  retail: ['產品列表', '商品列表', 'products', '門市資訊'],
+  salon: ['預約', 'booking', '服務項目', '作品展示'],
+}
+
+function findPageByPatterns(pages: string[], patterns: string[]): string | undefined {
+  const normalizedPages = pages.map(page => ({
+    raw: page,
+    normalized: page.trim().toLowerCase(),
+  }))
+
+  for (const pattern of patterns.map(pattern => pattern.toLowerCase())) {
+    const matched = normalizedPages.find(page => page.normalized.includes(pattern))
+    if (matched) return matched.raw
+  }
+
+  return undefined
+}
+
+export function pickFirstBatchPages(
+  productType: string,
+  layoutMode: LayoutMode,
+  pages: string[],
+): string[] {
+  if (pages.length <= 1) return [...pages]
+
+  const homePage = findPageByPatterns(pages, HOME_PAGE_PATTERNS) || pages[0]
+
+  if (layoutMode === 'app') {
+    const corePage = findPageByPatterns(pages, APP_CORE_PAGE_PATTERNS) || pages[0]
+    return [corePage]
+  }
+
+  if (!COMPLEX_FAST_BUILD_TYPES.has(productType)) {
+    return [homePage]
+  }
+
+  const conversionPage = findPageByPatterns(pages, CONVERSION_PAGE_PRIORITIES[productType] || [])
+  if (conversionPage && conversionPage !== homePage) {
+    return [homePage, conversionPage]
+  }
+
+  const fallbackSecondPage = pages.find(page => page !== homePage)
+  return fallbackSecondPage ? [homePage, fallbackSecondPage] : [homePage]
+}
+
+export function enforceFastBuildLayoutGuards(
+  productType: string,
+  layoutMode: LayoutMode,
+  promptSection?: string,
+): string {
+  const base = promptSection?.trim()
+  const guard =
+    layoutMode === 'app'
+      ? `## Fast Build Layout Guards
+- Product type: ${productType}
+- This is an app/tool/dashboard flow. Prefer app shell, workspace, dashboard canvas, inspector panels, command surfaces, utility-focused layouts.
+- Do NOT generate marketing hero sections, testimonials, brand story blocks, pricing tables, newsletter signup bands, or promotional CTA strips unless the page list explicitly includes them.
+- Navigation should support task completion first. Avoid homepage-style storytelling rhythms.`
+      : `## Fast Build Layout Guards
+- Product type: ${productType}
+- This is a website/marketing flow. Prefer homepage sections, editorial content flow, feature storytelling, pricing/contact/about pages.
+- Do NOT generate app-shell layouts, sidebar-first dashboards, command-center chrome, dense admin tables, or utility-console framing unless the page list explicitly demands it.
+- Navigation should feel like a website, not a productivity tool.`
+
+  return [base, guard].filter(Boolean).join('\n\n')
 }
 
 // ============================================================

@@ -116,6 +116,10 @@ export interface FlowState {
   fastModeOriginalMessage?: string  // 原始描述（供迭代時提供上下文）
   fastModeExpandedPrompt?: string   // Haiku 擴展後的完整描述（供 generateStructure + 迭代上下文）
   fastModeLayoutMode?: 'app' | 'website'
+  fastModeTemplateStyleHint?: string
+  fastModeInteractionHint?: string
+  fastModeFirstBatchPages?: string[]
+  fastModeCacheKey?: string
   // 增量交互式生成
   fastBuildStage?: 'generating' | 'awaiting_continue' | 'complete'
   fastBuildAllPages?: string[]         // inferPages+mergePages 的完整頁面列表

@@ -18,6 +18,7 @@ import {
   buildDefaultDesignSystem, buildMinimalTemplate,
   inferInteractionHint, getTemplateStyleHint, inferLayoutMode,
   generateFastConcept, expandBriefPrompt,
+  buildFastModeCacheKey, pickFirstBatchPages, enforceFastBuildLayoutGuards,
   mergePages,
 } from '../../services/fast-build-generation'
 import { buildUISpecSummary } from '../../services/bdd-to-ui-spec'
@@ -27,6 +28,24 @@ import { recommendMoods } from '../../services/design-moods'
 import { createLogger } from '../../lib/logger'
 
 const logger = createLogger('fast-build-phases')
+
+function formatFastBuildBatchLabel(pages: string[], locale: 'zh' | 'en'): string {
+  if (pages.length === 0) {
+    return locale === 'zh' ? '本批頁面' : 'current batch'
+  }
+
+  if (pages.length === 1) {
+    return pages[0] || (locale === 'zh' ? '本批頁面' : 'current batch')
+  }
+
+  return locale === 'zh'
+    ? `本批頁面（${pages.join('、')}）`
+    : `batch (${pages.join(', ')})`
+}
+
+function hasCodeTargets(code: GeneratedCode): boolean {
+  return code.pages.length + code.components.length > 0
+}
 
 // 檢查 pipeline 是否應該中止（用戶已按「完成/部署」，phase 被外部改掉）
 async function isPipelineAborted(redis: Redis, conversationId: string): Promise<boolean> {
@@ -60,6 +79,7 @@ export async function executeFastBuildSkill(params: {
 
   const layoutMode = inferLayoutMode(productType, message)
   logger.info(`tier=${tier}, type=${productType}, layout=${layoutMode}, pages=[${pages.join(',')}]`)
+  const interactionHint = inferInteractionHint(productType)
 
   // ── 模板風格提示（降級跳過，不影響主流程）──
   let templateStyleHint: string | null = null
@@ -117,6 +137,8 @@ export async function executeFastBuildSkill(params: {
   // ── 推薦 Mood ──
   const recommendedMoodIds = recommendMoods(message, productType, tier)
   const moodId = recommendedMoodIds[0] || undefined
+  const firstBatchPages = pickFirstBatchPages(productType, layoutMode, finalPages)
+  const fastModeCacheKey = buildFastModeCacheKey(message, productType, finalPages, tier)
 
   // ── 設定 FlowState ──
   const state: FlowState = {
@@ -138,6 +160,10 @@ export async function executeFastBuildSkill(params: {
     fastModeLayoutMode: layoutMode,
     fastModeOriginalMessage: message,
     fastModeExpandedPrompt: expandedPrompt || undefined,
+    fastModeTemplateStyleHint: templateStyleHint || undefined,
+    fastModeInteractionHint: interactionHint || undefined,
+    fastModeFirstBatchPages: firstBatchPages,
+    fastModeCacheKey: fastModeCacheKey,
     uiuxVariantConcept: variantConcept,
     uiuxDesignMood: moodId,
     userId,
@@ -166,9 +192,6 @@ export async function executeFastBuildSkill(params: {
       data: { phase: 'structure', progress: { current: 1, total: 3, step: isChinese ? '生成結構' : 'Generating structure' }, estimatedSecondsRemaining: 240 } as unknown as Record<string, unknown>,
     },
   })
-
-  // ── 決定第 1 批頁面：≤1 頁全部生成，>1 頁只生成首頁 ──
-  const firstBatchPages = finalPages.length <= 1 ? finalPages : [finalPages[0]]
 
   // ── 執行第 1 批 pipeline ──
   await runFastBuildPipeline({
@@ -247,6 +270,8 @@ export async function runFastBuildPipeline(params: {
   const layoutMode = state.fastModeLayoutMode || 'website'
   const productType = state.fastModeProductType || 'landing'
   const expandedPrompt = state.fastModeExpandedPrompt || state.fastModeOriginalMessage || ''
+  const interactionHint = state.fastModeInteractionHint || inferInteractionHint(productType)
+  const layoutGuardPrompt = enforceFastBuildLayoutGuards(productType, layoutMode)
   const template = buildMinimalTemplate(expandedPrompt, productType)
   const twConfig = generateTailwindConfig(designSystem)
   const isLaterBatch = (state.fastBuildCurrentBatchIndex || 0) > 0
@@ -270,14 +295,14 @@ export async function runFastBuildPipeline(params: {
         })
     : baseStreamingCallback
 
-  // ===== 階段 1/3：結構 =====
-  const interactionHint = inferInteractionHint(productType)
-
   // 模板風格提示（降級跳過）
-  let templateStyleHint: string | null = null
-  if (!isLaterBatch) {
+  let templateStyleHint: string | null = state.fastModeTemplateStyleHint || null
+  if (!templateStyleHint && !isLaterBatch) {
     try {
       templateStyleHint = await getTemplateStyleHint(expandedPrompt, productType)
+      if (templateStyleHint) {
+        state.fastModeTemplateStyleHint = templateStyleHint
+      }
     } catch { /* 降級跳過 */ }
   }
 
@@ -292,6 +317,7 @@ export async function runFastBuildPipeline(params: {
       variantConcept,
       interactionHint: isLaterBatch ? undefined : interactionHint, // 後續批次不重複注入
       templateStyleHint: templateStyleHint || undefined,
+      layoutGuardPrompt,
       layoutMode,
       moodId,
       existingComponentSummary,
@@ -380,36 +406,40 @@ export async function runFastBuildPipeline(params: {
 
   const fastUiSpecSummary = state.uiuxUISpec ? buildUISpecSummary(state.uiuxUISpec)
     : (interactionHint ? `產品互動概覽：\n${interactionHint}` : undefined)
-  const animationResult = await generateAnimations(
-    designSystem,
-    animInput,
-    tier,
-    { userId, conversationId, purpose: isLaterBatch ? 'fast-build-animation-batch' : 'fast-build-animation' },
-    animStreamingCallback,
-    variantConcept,
-    fastUiSpecSummary,
-    moodId,
-    isLaterBatch ? { maxTokens: calcIncrementalMaxTokens(animInput), maxContinuations: 1 } : undefined,
-    'fast',
-  )
+  if (hasCodeTargets(animInput)) {
+    const animationResult = await generateAnimations(
+      designSystem,
+      animInput,
+      tier,
+      { userId, conversationId, purpose: isLaterBatch ? 'fast-build-animation-batch' : 'fast-build-animation' },
+      animStreamingCallback,
+      variantConcept,
+      fastUiSpecSummary,
+      moodId,
+      isLaterBatch ? { maxTokens: calcIncrementalMaxTokens(animInput), maxContinuations: 1 } : undefined,
+      'fast',
+    )
 
-  if (animationResult.success) {
-    if (isLaterBatch && existingCode) {
-      // 增量合併：只覆蓋新增檔案的動畫版本，保留已有檔案不變
-      currentCode = mergeGeneratedCode(currentCode, {
-        pages: animationResult.pages || [],
-        components: animationResult.components || [],
-        styles: animationResult.styles || currentCode.styles,
-      })
-    } else {
-      currentCode = {
-        pages: animationResult.pages || currentCode.pages,
-        components: animationResult.components || currentCode.components,
-        styles: animationResult.styles || currentCode.styles,
+    if (animationResult.success) {
+      if (isLaterBatch && existingCode) {
+        // 增量合併：只覆蓋新增檔案的動畫版本，保留已有檔案不變
+        currentCode = mergeGeneratedCode(currentCode, {
+          pages: animationResult.pages || [],
+          components: animationResult.components || [],
+          styles: animationResult.styles || currentCode.styles,
+        })
+      } else {
+        currentCode = {
+          pages: animationResult.pages || currentCode.pages,
+          components: animationResult.components || currentCode.components,
+          styles: animationResult.styles || currentCode.styles,
+        }
       }
+    } else {
+      logger.warn({ err: animationResult.error }, '動畫生成失敗，使用結構代碼繼續')
     }
   } else {
-    logger.warn({ err: animationResult.error }, '動畫生成失敗，使用結構代碼繼續')
+    logger.info({ batch: state.fastBuildCurrentBatchIndex }, '動畫階段跳過：無新增檔案目標')
   }
 
   // ── Animation 中途存檔 ──
@@ -458,39 +488,43 @@ export async function runFastBuildPipeline(params: {
       }
     : rwdStreamingBase
 
-  const rwdResult = await generateRwd(
-    designSystem,
-    rwdInput,
-    tier,
-    { userId, conversationId, purpose: isLaterBatch ? 'fast-build-rwd-batch' : 'fast-build-rwd' },
-    rwdStreamingCallback,
-    variantConcept,
-    fastUiSpecSummary,
-    layoutMode,
-    moodId,
-    isLaterBatch ? { maxTokens: calcIncrementalMaxTokens(rwdInput), maxContinuations: 1 } : undefined,
-    'fast',
-  )
+  if (hasCodeTargets(rwdInput)) {
+    const rwdResult = await generateRwd(
+      designSystem,
+      rwdInput,
+      tier,
+      { userId, conversationId, purpose: isLaterBatch ? 'fast-build-rwd-batch' : 'fast-build-rwd' },
+      rwdStreamingCallback,
+      variantConcept,
+      fastUiSpecSummary,
+      layoutMode,
+      moodId,
+      isLaterBatch ? { maxTokens: calcIncrementalMaxTokens(rwdInput), maxContinuations: 1 } : undefined,
+      'fast',
+    )
 
-  if (rwdResult.success) {
-    if (isLaterBatch && existingCode) {
-      currentCode = mergeGeneratedCode(currentCode, {
-        pages: rwdResult.pages || [],
-        components: rwdResult.components || [],
-        styles: rwdResult.styles || currentCode.styles,
-      })
-    } else {
-      currentCode = {
-        pages: rwdResult.pages || currentCode.pages,
-        components: rwdResult.components || currentCode.components,
-        styles: rwdResult.styles || currentCode.styles,
+    if (rwdResult.success) {
+      if (isLaterBatch && existingCode) {
+        currentCode = mergeGeneratedCode(currentCode, {
+          pages: rwdResult.pages || [],
+          components: rwdResult.components || [],
+          styles: rwdResult.styles || currentCode.styles,
+        })
+      } else {
+        currentCode = {
+          pages: rwdResult.pages || currentCode.pages,
+          components: rwdResult.components || currentCode.components,
+          styles: rwdResult.styles || currentCode.styles,
+        }
       }
+    } else {
+      logger.warn({ err: rwdResult.error }, 'RWD 生成失敗，套用 ensureResponsiveClasses')
+      const fixed = ensureResponsiveClasses(currentCode.pages, currentCode.components)
+      currentCode.pages = fixed.pages
+      currentCode.components = fixed.components
     }
   } else {
-    logger.warn({ err: rwdResult.error }, 'RWD 生成失敗，套用 ensureResponsiveClasses')
-    const fixed = ensureResponsiveClasses(currentCode.pages, currentCode.components)
-    currentCode.pages = fixed.pages
-    currentCode.components = fixed.components
+    logger.info({ batch: state.fastBuildCurrentBatchIndex }, 'RWD 階段跳過：無新增檔案目標')
   }
 
   // ===== Quality Gate（靜態檢查 + 最多 2 輪 LLM 修復）=====
@@ -573,10 +607,11 @@ export async function runFastBuildPipeline(params: {
 
     const remainingLabel = remainingPages.join(isChinese ? '、' : ', ')
 
+    const completedLabel = formatFastBuildBatchLabel(targetPages, state.locale || 'zh')
     await sendMessage(conversationId, io, {
       content: isChinese
-        ? `首頁生成完成！${pageCount} 個頁面、${compCount} 個組件。${conceptNote}${qgText}\n\n還有 ${remainingPages.length} 個頁面待生成：${remainingLabel}`
-        : `Homepage generated! ${pageCount} pages, ${compCount} components.${conceptNote}${qgText}\n\n${remainingPages.length} more page(s) to generate: ${remainingLabel}`,
+        ? `${completedLabel}生成完成！${pageCount} 個頁面、${compCount} 個組件。${conceptNote}${qgText}\n\n還有 ${remainingPages.length} 個頁面待生成：${remainingLabel}`
+        : `${completedLabel} generated! ${pageCount} pages, ${compCount} components.${conceptNote}${qgText}\n\n${remainingPages.length} more page(s) to generate: ${remainingLabel}`,
       stage: 'fast_generating',
       layoutHint: 'split',
       richContent: {
@@ -708,7 +743,7 @@ export async function resumeFastBuildPipeline(params: {
   const codePhase = state.uiuxCodePhase || 'structure'
   let currentCode = state.uiuxGeneratedCode!
 
-  const interactionHint = inferInteractionHint(productType)
+  const interactionHint = state.fastModeInteractionHint || inferInteractionHint(productType)
   const fastUiSpecSummary = state.uiuxUISpec ? buildUISpecSummary(state.uiuxUISpec)
     : (interactionHint ? `產品互動概覽：\n${interactionHint}` : undefined)
 

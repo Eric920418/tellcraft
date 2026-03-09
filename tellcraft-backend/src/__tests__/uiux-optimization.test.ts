@@ -41,7 +41,12 @@ import {
   type DesignSystem,
 } from '../services/uiux-generation'
 import { autoFixCriticalIssuesRuleBased, runQualityGate } from '../services/quality-gate'
-import { expandBriefPrompt, shouldExpandBriefPrompt } from '../services/fast-build-generation'
+import {
+  enforceFastBuildLayoutGuards,
+  expandBriefPrompt,
+  pickFirstBatchPages,
+  shouldExpandBriefPrompt,
+} from '../services/fast-build-generation'
 
 const MOCK_DESIGN_SYSTEM: DesignSystem = {
   cssVariables: ':root { --color-primary: #2563eb; }',
@@ -110,6 +115,27 @@ describe('uiux optimization helpers', () => {
         ['首頁', '功能介紹', 'FAQ', '聯繫']
       )
     ).toBe(false)
+  })
+
+  it('should pick homepage plus conversion page for complex website fast build', () => {
+    expect(
+      pickFirstBatchPages('saas', 'website', ['首頁', '功能介紹', '價格方案', 'FAQ', '聯繫'])
+    ).toEqual(['首頁', '價格方案'])
+  })
+
+  it('should pick the core workspace page first for app-like fast build', () => {
+    expect(
+      pickFirstBatchPages('tool', 'app', ['介紹', '主頁面', '設定'])
+    ).toEqual(['主頁面'])
+  })
+
+  it('should add hard layout guards for app and website modes', () => {
+    const appGuard = enforceFastBuildLayoutGuards('tool', 'app', '原始需求')
+    const websiteGuard = enforceFastBuildLayoutGuards('landing', 'website')
+
+    expect(appGuard).toContain('Do NOT generate marketing hero sections')
+    expect(appGuard).toContain('原始需求')
+    expect(websiteGuard).toContain('Do NOT generate app-shell layouts')
   })
 })
 
