@@ -1495,6 +1495,8 @@ ${contextLines.join('\n')}
  */
 function getSyntaxErrors(filename: string, content: string): string[] {
   if (content.length < 50) return []
+  // 只檢查 TS/TSX 檔案，CSS/JSON 等非 TS 檔案跳過
+  if (/\.(css|json|md|html|svg)$/i.test(filename)) return []
   const tsxName = filename.endsWith('.tsx') || filename.endsWith('.ts') ? filename : filename + '.tsx'
   const result = ts.transpileModule(content, {
     compilerOptions: {
