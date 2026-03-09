@@ -130,10 +130,11 @@ describe('uiux optimization helpers', () => {
     ).toEqual(['首頁', '價格方案'])
   })
 
-  it('should pick the core workspace page first for app-like fast build', () => {
+  it('should return all pages when count <= 4 for app-like fast build', () => {
+    // ≤4 頁時直接全批返回，不再只選核心頁
     expect(
       pickFirstBatchPages('tool', 'app', ['介紹', '主頁面', '設定'])
-    ).toEqual(['主頁面'])
+    ).toEqual(['介紹', '主頁面', '設定'])
   })
 
   it('should add hard layout guards for app and website modes', () => {

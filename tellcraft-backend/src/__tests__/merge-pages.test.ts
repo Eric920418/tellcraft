@@ -22,7 +22,8 @@ describe('mergePages', () => {
       ['首頁', '產品列表', '聯繫'],
       ['商品詳情', '購物車']
     )
-    expect(result).toEqual(['首頁', '產品列表', '聯繫', '商品詳情', '購物車'])
+    // maxPages 預設 4，合併後取前 4
+    expect(result).toEqual(['首頁', '產品列表', '聯繫', '商品詳情'])
   })
 
   it('去重（相同名稱不重複加入）', () => {
@@ -41,14 +42,14 @@ describe('mergePages', () => {
     expect(result).toEqual(['首頁', 'About Us', '聯繫'])
   })
 
-  it('預設上限 7 個頁面', () => {
+  it('預設上限 4 個頁面', () => {
     const result = mergePages(
       ['首頁', '商品列表', '商品詳情', '購物車', '結帳'],
       ['會員中心', '聯繫', '常見問題', '退換貨']
     )
-    expect(result).toHaveLength(7)
-    // 前 5 個是 defaultPages，後 2 個是 suggestedPages
-    expect(result).toEqual(['首頁', '商品列表', '商品詳情', '購物車', '結帳', '會員中心', '聯繫'])
+    expect(result).toHaveLength(4)
+    // defaultPages 本身已超過上限，直接截斷
+    expect(result).toEqual(['首頁', '商品列表', '商品詳情', '購物車'])
   })
 
   it('自訂 maxPages 上限', () => {
