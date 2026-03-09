@@ -25,6 +25,9 @@ export const SPEC_DISCOVERY_LIMITS = {
   QUESTIONS_PER_ROUND: 5,
 }
 
+// Fast Mode 限制
+export const FAST_MODE_MAX_MESSAGE_LENGTH = 1200
+
 // ── 回退映射表：當前 phase → 回退目標 phase ──
 export const PHASE_BACKTRACK_MAP: Record<string, string> = {
   'uiux_design_clarify':       'uiux_design_preference',
@@ -209,6 +212,19 @@ export interface DesignFeedbackCheck {
   valid: boolean
   rejectReason?: 'gibberish' | 'greeting' | 'chitchat' | 'too_short' | 'abuse'
   guideMessage?: string
+}
+
+export function checkFastModeMessageLength(msg: string): {
+  valid: boolean
+  currentLength: number
+  maxLength: number
+} {
+  const currentLength = msg.trim().length
+  return {
+    valid: currentLength <= FAST_MODE_MAX_MESSAGE_LENGTH,
+    currentLength,
+    maxLength: FAST_MODE_MAX_MESSAGE_LENGTH,
+  }
 }
 
 export function isDesignFeedback(msg: string): DesignFeedbackCheck {

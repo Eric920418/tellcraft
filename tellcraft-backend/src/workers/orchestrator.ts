@@ -16,7 +16,7 @@ import { handleJobFinalFailure } from '../services/job-failure-handler'
 // Phase routing
 import { routePhase, type ContinueFlowData } from './phase-router'
 import {
-  hasGoBackIntent, isDesignFeedback,
+  hasGoBackIntent, isDesignFeedback, checkFastModeMessageLength,
   META_RESPONSES, PHASE_BACKTRACK_MAP,
   getPhaseQualityMessage, getPhaseStrictness,
 } from './intent-helpers'
@@ -202,6 +202,7 @@ async function handleProcessMessage(
 ) {
   const { projectId, conversationId, userId, message, mode, locale } = data
   const isAutoRepairMsg = message.trim().startsWith('__auto_repair_preview__:')
+  const existingState = await getFlowState(redis, conversationId)
 
   if (!isAutoRepairMsg) {
     // Step 1: Prefilter（零 LLM 成本防禦）
@@ -213,6 +214,22 @@ async function handleProcessMessage(
         stage: 'prefilter_rejected',
       })
       return { taskId: null, skill: null }
+    }
+
+    // Step 1.1: Fast Mode 過長輸入攔截（僅新請求，避免卡在超大 prompt）
+    if (mode === 'fast' && (!existingState || existingState.phase === 'idle')) {
+      const isChinese = /[\u4e00-\u9fff\u3400-\u4dbf]/.test(message) || locale === 'zh'
+      const lengthCheck = checkFastModeMessageLength(message)
+      if (!lengthCheck.valid) {
+        logger.info({ length: lengthCheck.currentLength, maxLength: lengthCheck.maxLength }, '快速模式輸入過長，已攔截')
+        await sendMessage(conversationId, io, {
+          content: isChinese
+            ? `快速模式適合簡短需求，請控制在 ${lengthCheck.maxLength} 字內。您這次輸入約 ${lengthCheck.currentLength} 字。\n\n建議只保留核心資訊：產品類型、主要頁面、關鍵功能、風格方向。若要貼完整長規格，請改用精準模式。`
+            : `Fast mode works best with short briefs. Please keep it under ${lengthCheck.maxLength} characters. Your message is about ${lengthCheck.currentLength} characters.\n\nKeep only the essentials: product type, key pages, main features, and style direction. For long detailed specs, use fine mode instead.`,
+          stage: 'prefilter_rejected',
+        })
+        return { taskId: null, skill: null }
+      }
     }
 
     // Credit 扣除
@@ -229,9 +246,6 @@ async function handleProcessMessage(
       return { taskId: null, skill: null }
     }
   }
-
-  // Step 1.2: FlowState 檢查
-  const existingState = await getFlowState(redis, conversationId)
 
   // Auto-repair：只在有效 FlowState 時路由，否則靜默放棄
   if (isAutoRepairMsg) {

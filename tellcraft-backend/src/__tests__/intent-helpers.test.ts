@@ -9,6 +9,8 @@ import {
   hasRollbackSpecIntent,
   computeDiscoveryLimits,
   isDesignFeedback,
+  checkFastModeMessageLength,
+  FAST_MODE_MAX_MESSAGE_LENGTH,
   getPhaseStrictness,
 } from '../workers/intent-helpers'
 
@@ -334,6 +336,29 @@ describe('isDesignFeedback', () => {
     const result = isDesignFeedback('好無聊')
     expect(result.valid).toBe(false)
     expect(result.rejectReason).toBe('chitchat')
+  })
+})
+
+// ============================================================
+// checkFastModeMessageLength
+// ============================================================
+
+describe('checkFastModeMessageLength', () => {
+  it('應該接受限制內的 fast mode 描述', () => {
+    const result = checkFastModeMessageLength('做一個咖啡店官網，要有菜單、訂位、品牌故事')
+    expect(result).toEqual({
+      valid: true,
+      currentLength: '做一個咖啡店官網，要有菜單、訂位、品牌故事'.length,
+      maxLength: FAST_MODE_MAX_MESSAGE_LENGTH,
+    })
+  })
+
+  it('應該拒絕超過上限的 fast mode 描述', () => {
+    const longMessage = '功能很多。'.repeat(700)
+    const result = checkFastModeMessageLength(longMessage)
+    expect(result.valid).toBe(false)
+    expect(result.currentLength).toBe(longMessage.length)
+    expect(result.maxLength).toBe(FAST_MODE_MAX_MESSAGE_LENGTH)
   })
 })
 

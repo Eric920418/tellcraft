@@ -2226,19 +2226,48 @@ export function buildStreamingHandler(
 
   let lastBlockCount = 0
   let lastEmitTime = Date.now()
+  let lastEmitLength = 0
 
   return (accumulated: string) => {
     const parsed = parseCompletedFileBlocks(accumulated)
     const now = Date.now()
-    if (parsed.completedBlockCount > lastBlockCount) {
-      logger.info({ blocks: parsed.completedBlockCount, pages: parsed.pages.length, components: parsed.components.length, timeSinceLastEmit: now - lastEmitTime }, '新區塊完成')
-      if (now - lastEmitTime >= 1500) {
-        lastBlockCount = parsed.completedBlockCount
-        lastEmitTime = now
-        logger.info({ pages: parsed.pages.length, components: parsed.components.length }, 'EMIT preview_update')
-        onPartialCode({ pages: parsed.pages, components: parsed.components, styles: parsed.styles })
-      }
+    const hasNewBlocks = parsed.completedBlockCount > lastBlockCount
+    const elapsedMs = now - lastEmitTime
+    const charsSinceLastEmit = accumulated.length - lastEmitLength
+    const shouldEmitHeartbeat = elapsedMs >= 2500 && charsSinceLastEmit >= 600
+
+    if (!hasNewBlocks && !shouldEmitHeartbeat) {
+      return
     }
+
+    if (hasNewBlocks) {
+      logger.info({
+        blocks: parsed.completedBlockCount,
+        pages: parsed.pages.length,
+        components: parsed.components.length,
+        timeSinceLastEmit: elapsedMs,
+      }, '新區塊完成')
+    } else {
+      logger.info({
+        accumulatedLength: accumulated.length,
+        charsSinceLastEmit,
+        timeSinceLastEmit: elapsedMs,
+      }, 'streaming heartbeat')
+    }
+
+    if (elapsedMs < 1500) {
+      return
+    }
+
+    lastBlockCount = parsed.completedBlockCount
+    lastEmitTime = now
+    lastEmitLength = accumulated.length
+    logger.info({
+      pages: parsed.pages.length,
+      components: parsed.components.length,
+      heartbeat: !hasNewBlocks,
+    }, 'EMIT preview_update')
+    onPartialCode({ pages: parsed.pages, components: parsed.components, styles: parsed.styles })
   }
 }
 
