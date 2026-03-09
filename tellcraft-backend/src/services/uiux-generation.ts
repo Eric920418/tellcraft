@@ -142,6 +142,7 @@ const CONTINUE_FROM_LAST_TOKEN_PROMPT = [
 function stripContinuationMetaText(segment: string): string {
   const META_PATTERNS = [
     /^I (need|will|should|am going|want|must)/i,
+    /^I'(ll|m|ve) /i,
     /^Let me/i,
     /^Here (is|are|'s)/i,
     /^The previous/i,
@@ -150,6 +151,7 @@ function stripContinuationMetaText(segment: string): string {
     /generate the complete/i,
     /provide all the files/i,
     /complete (animated|structure|rwd|styled|code) files/i,
+    /output the complete (responsive|animated|structure|rwd|styled|code)/i,
     /start(ing)? (from|over|again)/i,
     /^(Note|Important|Please note):/i,
     /^(Continuing|Resuming|Picking up)/i,
@@ -1918,9 +1920,9 @@ async function checkAndFixSyntaxErrors(
  */
 function stripLlmMetaLines(code: string): string {
   const LLM_META_LINE = [
-    /^Here (is|are|'s) the complete/i,
-    /^Here (is|are|'s) the (full|updated|modified|remaining|rest)/i,
+    /^Here (is|are|'s) the (complete|full|updated|modified|remaining|rest)/i,
     /^I (need|will|should|am going|want|must) (to )?(generate|provide|create|output|continue|start|write|give)/i,
+    /^I'(ll|m|ve) (output|provide|generate|continue|write|give|now)/i,
     /^Let me (provide|generate|continue|create|output|write|give|start)/i,
     /^The previous (output|code|generation|response)/i,
     /^(Continuing|Resuming|Picking up) (from|where|the|with)/i,
@@ -1929,16 +1931,25 @@ function stripLlmMetaLines(code: string): string {
     /^(OK|Okay|Alright),? (here|let|I)/i,
     /^Since (the|my|this) (previous|output|code|response)/i,
     /^(Note|Important|Please note):/i,
+    /output the complete (responsive|animated|structure|rwd|styled|code)/i,
   ]
+  // 行內污染：meta 文字出現在 JSX expression / template literal 中段
+  // 例如 key={`${I'll output the complete...`} 或 key={I'll output...}
+  const INLINE_META = /[`{$]\s*(I'(ll|m|ve) |I (need|will|should)|Let me |Here (is|are)|I'll output)/i
   const lines = code.split('\n')
+  let removedCount = 0
   const cleaned = lines.filter(line => {
     const trimmed = line.trim()
     if (!trimmed) return true
-    return !LLM_META_LINE.some(p => p.test(trimmed))
+    // 整行是純元文字
+    if (LLM_META_LINE.some(p => p.test(trimmed))) { removedCount++; return false }
+    // 行內嵌入元文字（在 JSX expression 或 template literal 後）
+    if (INLINE_META.test(line)) { removedCount++; return false }
+    return true
   })
-  if (cleaned.length < lines.length) {
+  if (removedCount > 0) {
     logger.warn(
-      { removedLines: lines.length - cleaned.length },
+      { removedLines: removedCount },
       'stripLlmMetaLines: 從生成代碼中移除 LLM 元文字行'
     )
   }
@@ -3712,6 +3723,7 @@ export async function refineCode(
     designBrief?: DesignBrief
     variantConcept?: VariantConcept
     moodId?: string
+    generationProfile?: GenerationProfile
   },
   trackingContext?: LlmTrackingContext,
   imageUrls?: string[],
@@ -3814,6 +3826,104 @@ export async function refineCode(
     modifiedComponents: Map<string, string>
     modifiedStyles: string
   }): boolean => patches.modifiedPages.size > 0 || patches.modifiedComponents.size > 0 || !!patches.modifiedStyles
+
+  const resolveImportPath = (fromPath: string, importPath: string): string | null => {
+    if (importPath.startsWith('@/')) {
+      return importPath.slice(2)
+    }
+    if (!importPath.startsWith('.')) return null
+
+    const baseDir = fromPath.includes('/') ? fromPath.slice(0, fromPath.lastIndexOf('/')) : ''
+    const segments = `${baseDir}/${importPath}`.split('/')
+    const resolved: string[] = []
+    for (const segment of segments) {
+      if (!segment || segment === '.') continue
+      if (segment === '..') {
+        resolved.pop()
+      } else {
+        resolved.push(segment)
+      }
+    }
+    return resolved.join('/')
+  }
+
+  const findImportedComponents = (filePath: string, content: string, code: CodeBundle): Set<string> => {
+    const matches = [...content.matchAll(/from\s+['"](@\/[^'"]+|\.\.?\/[^'"]+)['"]/g)]
+    const resolvedPaths = new Set<string>()
+    for (const match of matches) {
+      const resolved = resolveImportPath(filePath, match[1])
+      if (!resolved) continue
+      const candidates = [
+        resolved,
+        `${resolved}.tsx`,
+        `${resolved}.ts`,
+        `${resolved}/index.tsx`,
+        `${resolved}/index.ts`,
+      ]
+      const found = code.components.find(component => candidates.includes(component.path))
+      if (found) resolvedPaths.add(found.path)
+    }
+    return resolvedPaths
+  }
+
+  const pickRefineTargetBundle = (code: CodeBundle): CodeBundle => {
+    const generationProfile = designContext.generationProfile || 'balanced'
+    if (generationProfile === 'quality') {
+      return code
+    }
+
+    const targetPagePaths = new Set<string>()
+    const targetComponentPaths = new Set<string>()
+    const normalizedFeedback = userFeedback.toLowerCase()
+
+    if (targetPreviewRoute) {
+      for (const page of code.pages) {
+        if (pagePathToRoute(page.path) === targetPreviewRoute) {
+          targetPagePaths.add(page.path)
+          for (const importPath of findImportedComponents(page.path, page.content, code)) {
+            targetComponentPaths.add(importPath)
+          }
+        }
+      }
+    }
+
+    for (const page of code.pages) {
+      const basename = page.path.split('/').pop()?.replace(/\.(tsx?|jsx?)$/, '').toLowerCase() || ''
+      if (basename && normalizedFeedback.includes(basename)) {
+        targetPagePaths.add(page.path)
+      }
+    }
+
+    for (const component of code.components) {
+      const basename = component.path.split('/').pop()?.replace(/\.(tsx?|jsx?)$/, '').toLowerCase() || ''
+      if (basename && normalizedFeedback.includes(basename)) {
+        targetComponentPaths.add(component.path)
+      }
+      if (/header|nav/.test(component.path.toLowerCase()) && /header|nav|navbar|menu/.test(normalizedFeedback)) {
+        targetComponentPaths.add(component.path)
+      }
+      if (/footer/.test(component.path.toLowerCase()) && /footer/.test(normalizedFeedback)) {
+        targetComponentPaths.add(component.path)
+      }
+      if (/hero/.test(component.path.toLowerCase()) && /hero|banner/.test(normalizedFeedback)) {
+        targetComponentPaths.add(component.path)
+      }
+    }
+
+    const targetPages = code.pages.filter(page => targetPagePaths.has(page.path))
+    const targetComponents = code.components.filter(component => targetComponentPaths.has(component.path))
+
+    const needsStyles = /color|font|spacing|background|theme|global|樣式|字體|顏色|間距|背景/.test(normalizedFeedback)
+    if (targetPages.length === 0 && targetComponents.length === 0 && !needsStyles) {
+      return code
+    }
+
+    return {
+      pages: targetPages.length > 0 ? targetPages : code.pages.slice(0, 1),
+      components: targetComponents,
+      styles: needsStyles ? code.styles : '',
+    }
+  }
 
   const escapeRegExp = (value: string): string =>
     value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
@@ -3985,6 +4095,7 @@ ${buildCodeBlocks(code).join('\n\n')}
   }
 
   const tier = designContext.designTier || 'functional'
+  const generationProfile = designContext.generationProfile || 'balanced'
   const feedbackUrls = Array.from(
     new Set(
       (userFeedback.match(/https?:\/\/[^\s)"'`]+/g) || [])
@@ -4011,10 +4122,11 @@ ${buildCodeBlocks(code).join('\n\n')}
     )
   }
 
-  const codeBlocks = buildCodeBlocks(currentCode)
+  const promptCodeBundle = pickRefineTargetBundle(currentCode)
+  const codeBlocks = buildCodeBlocks(promptCodeBundle)
 
   const designSystemSection = designContext.designSystem
-    ? buildDesignSystemPrompt(designContext.designSystem)
+    ? buildCompactDesignPrompt(designContext.designSystem, { includeMood: true })
     : ''
 
   const briefSection = designContext.designBrief
@@ -4112,6 +4224,9 @@ ${userFeedback}
 ${imageUrlsSection}
 ${lockedUrlsSection}
 ${targetRouteSection}
+## 專案檔案清單（未列出內容的檔案視為只讀）
+${buildCodeManifest(currentCode)}
+
 ## 現有代碼
 ${codeBlocks.join('\n\n')}
 
@@ -4134,7 +4249,12 @@ ${codeBlocks.join('\n\n')}
   const response = await callClaude(
     systemPrompt,
     [{ role: 'user', content: userContent }],
-    { maxTokens: 32768, temperature: 0.2 },
+    {
+      maxTokens: 32768,
+      temperature: 0.2,
+      promptLabel: 'refine-code',
+      contextSizeHint: generationProfile,
+    },
     { ...trackingContext, purpose: 'refine_code' },
     onTextDelta
   )
