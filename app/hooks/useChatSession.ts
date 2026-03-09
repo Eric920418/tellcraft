@@ -175,7 +175,8 @@ export function useChatSession(
             ? tChat('fastBuildPreview')
             : tChat('analyzePreview'),
           timestamp: new Date(),
-          stage: buildMode === 'fast' ? 'fast_generating' : 'clarify'
+          stage: buildMode === 'fast' ? 'fast_generating' : 'clarify',
+          pending: true
         }
 
         callbacks.onMessagesSet([userMsg, previewMsg])

@@ -79,7 +79,6 @@ export default function ChatSection({
 
   // ── Layout state ──
   const [layoutMode, setLayoutMode] = useState<'default' | 'split'>('default')
-  const [isLayoutTransitioning, setIsLayoutTransitioning] = useState(false)
   const layoutModeRef = useRef(layoutMode)
   const [selectedTemplateId, setSelectedTemplateId] = useState<string | null>(null)
   const [selectedTemplate, setSelectedTemplate] = useState<Template | null>(null)
@@ -262,10 +261,12 @@ export default function ChatSection({
     let targetMode: 'default' | 'split' = 'default'
 
     if (!isMobile) {
-      const hasUiuxMessage = messages.some(m =>
+      // 排除 pending 消息（客戶端臨時生成的佔位消息，不代表後端實際狀態）
+      const confirmedMessages = messages.filter(m => !m.pending)
+      const hasUiuxMessage = confirmedMessages.some(m =>
         m.stage?.startsWith('uiux') || m.richContent?.type === 'template_picker'
       )
-      const hasGenerationMessage = messages.some(m => {
+      const hasGenerationMessage = confirmedMessages.some(m => {
         const stage = m.stage || ''
         return stage === 'fast_generating'
           || stage === 'generating'
@@ -279,13 +280,13 @@ export default function ChatSection({
       const hasPreviewSignals = !!streamingPreview || !!codePreviewData || fastBuildChunks > 0
       const shouldForceSplit = hasUiuxMessage || hasGenerationMessage || hasPreviewSignals
 
-      const lastHintMessage = [...messages].reverse().find(m => m.layoutHint)
+      const lastHintMessage = [...confirmedMessages].reverse().find(m => m.layoutHint)
       if (shouldForceSplit) {
         targetMode = 'split'
       } else if (lastHintMessage?.layoutHint) {
         targetMode = lastHintMessage.layoutHint === 'split' ? 'split' : 'default'
       } else {
-        const hasClarifyMessage = messages.some(m =>
+        const hasClarifyMessage = confirmedMessages.some(m =>
           m.stage === 'clarify_question' || m.stage === 'prd_discovery_complete' || m.stage === 'prd_discovery_continue'
         )
         if (hasClarifyMessage && !hasUiuxMessage) targetMode = 'split'
@@ -293,13 +294,8 @@ export default function ChatSection({
     }
 
     if (targetMode !== layoutModeRef.current) {
-      setIsLayoutTransitioning(true)
-      const transitionTimer = setTimeout(() => {
-        layoutModeRef.current = targetMode
-        setLayoutMode(targetMode)
-        setTimeout(() => setIsLayoutTransitioning(false), 400)
-      }, 300)
-      return () => clearTimeout(transitionTimer)
+      layoutModeRef.current = targetMode
+      setLayoutMode(targetMode)
     }
   }, [messages, streamingPreview, codePreviewData, fastBuildChunks])
 
@@ -1016,7 +1012,7 @@ export default function ChatSection({
         <motion.div
           key="split-layout"
           initial={{ opacity: 0 }}
-          animate={{ opacity: isLayoutTransitioning ? 0.5 : 1 }}
+          animate={{ opacity: 1 }}
           exit={{ opacity: 0, scale: 0.98, filter: 'blur(4px)' }}
           transition={{ duration: 0.5, ease: smoothEasing }}
           style={{ position: 'fixed', inset: 0, zIndex: 100 }}
@@ -1180,11 +1176,7 @@ export default function ChatSection({
         <motion.div
           key="default-layout"
           initial={{ opacity: 0, scale: 1.02 }}
-          animate={{
-            opacity: isLayoutTransitioning ? 0 : 1,
-            scale: isLayoutTransitioning ? 0.98 : 1,
-            filter: isLayoutTransitioning ? 'blur(4px)' : 'blur(0px)'
-          }}
+          animate={{ opacity: 1, scale: 1, filter: 'blur(0px)' }}
           exit={{ opacity: 0, scale: 0.98, filter: 'blur(4px)' }}
           transition={{
             duration: 0.4,
