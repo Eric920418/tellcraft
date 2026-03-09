@@ -478,30 +478,33 @@ async function handleContinueFlow(
   io: SocketIOServer
 ) {
   const { projectId, conversationId, userId, message } = data
+  const isAutoRepair = message.trim().startsWith('__auto_repair_preview__:')
 
   const state = await getFlowState(redis, conversationId)
   const effectiveLocale = data.locale || state?.locale
 
-  // Prefilter
-  const prefilterResult = await prefilterMessage(message, userId, redis, effectiveLocale)
-  if (!prefilterResult.allowed) {
-    logger.info({ reason: prefilterResult.reason }, 'ContinueFlow prefilter 攔截')
-    await sendMessage(conversationId, io, { content: prefilterResult.errorMessage || '無法處理此訊息。', stage: 'prefilter_rejected' })
-    return
-  }
+  if (!isAutoRepair) {
+    // Prefilter
+    const prefilterResult = await prefilterMessage(message, userId, redis, effectiveLocale)
+    if (!prefilterResult.allowed) {
+      logger.info({ reason: prefilterResult.reason }, 'ContinueFlow prefilter 攔截')
+      await sendMessage(conversationId, io, { content: prefilterResult.errorMessage || '無法處理此訊息。', stage: 'prefilter_rejected' })
+      return
+    }
 
-  // Credit 扣除
-  const creditResult = await deductCredits(userId, CREDIT_COSTS.BASE_MESSAGE)
-  if (!creditResult.success) {
-    const user = await db.queryOne<{ plan: string }>(
-      'SELECT plan FROM users WHERE id = $1',
-      [userId]
-    )
-    await sendMessage(conversationId, io, {
-      content: buildCreditLimitReachedMessage(user?.plan || 'free', creditResult.creditsUsed, creditResult.creditLimit),
-      stage: 'error',
-    })
-    return
+    // Credit 扣除
+    const creditResult = await deductCredits(userId, CREDIT_COSTS.BASE_MESSAGE)
+    if (!creditResult.success) {
+      const user = await db.queryOne<{ plan: string }>(
+        'SELECT plan FROM users WHERE id = $1',
+        [userId]
+      )
+      await sendMessage(conversationId, io, {
+        content: buildCreditLimitReachedMessage(user?.plan || 'free', creditResult.creditsUsed, creditResult.creditLimit),
+        stage: 'error',
+      })
+      return
+    }
   }
 
   if (!state) {
@@ -514,6 +517,36 @@ async function handleContinueFlow(
   if (data.locale && state.locale !== data.locale) state.locale = data.locale
 
   const trimmedMsg = message.trim()
+
+  // ── Auto-repair bypass ──
+  if (isAutoRepair) {
+    const errorJson = trimmedMsg.slice('__auto_repair_preview__:'.length)
+    let errorInfo = { name: 'Error', message: 'Runtime error', path: '' }
+    try { errorInfo = JSON.parse(errorJson) } catch { /* use defaults */ }
+
+    const repairablePhases = ['uiux_complete', 'deployer_complete', 'uiux_iteration_complete', 'fast_generating']
+    if (!repairablePhases.includes(state.phase)) {
+      logger.info({ phase: state.phase }, 'Auto-repair skipped: not in repairable phase')
+      return
+    }
+
+    const MAX_AUTO_REPAIRS = 1
+    if ((state.autoRepairCount || 0) >= MAX_AUTO_REPAIRS) {
+      logger.info({ conversationId }, 'Auto-repair limit reached')
+      return
+    }
+    state.autoRepairCount = (state.autoRepairCount || 0) + 1
+    await saveFlowState(redis, conversationId, state)
+
+    const isChinese = state.locale !== 'en'
+    const userFeedback = isChinese
+      ? `請修復以下執行錯誤：${errorInfo.name}: ${errorInfo.message}${errorInfo.path ? ` (${errorInfo.path})` : ''}。確保所有 import 正確、所有使用的變數都已宣告、所有 props 型別正確。`
+      : `Fix this runtime error: ${errorInfo.name}: ${errorInfo.message}${errorInfo.path ? ` (${errorInfo.path})` : ''}. Ensure all imports are correct, all referenced variables are declared, and all prop types match.`
+
+    logger.info({ errorInfo, phase: state.phase }, 'Auto-repair triggered')
+    await executeIteration({ conversationId, projectId, userId, userFeedback, redis, io })
+    return
+  }
 
   // ── 通用回退/重試 ──
   if ((hasGoBackIntent(trimmedMsg) || trimmedMsg === '__go_back__') && PHASE_BACKTRACK_MAP[state.phase]) {
@@ -635,25 +668,27 @@ async function handleContinueFlow(
   }
 
   // ── Phase-aware 品質閘門 ──
-  const qualityStrictness = getPhaseStrictness(state.phase)
-  if (qualityStrictness !== 'skip') {
-    const qualityCheck = checkInputQuality(trimmedMsg, qualityStrictness, state.locale)
-    if (qualityCheck.quality !== 'valid') {
-      const rejectKey = `quality_reject:${conversationId}`
-      const rejectCount = await redis.incr(rejectKey)
-      await redis.expire(rejectKey, 300)
-      if (rejectCount < 3) {
-        logger.warn({ rejectCount, phase: state.phase, quality: qualityCheck.quality, reason: qualityCheck.reason }, '品質攔截')
-        await sendMessage(conversationId, io, {
-          content: getPhaseQualityMessage(state.phase, effectiveLocale) || qualityCheck.userMessage || '請輸入有效的內容。',
-          stage: state.phase,
-        })
-        return
+  if (!isAutoRepair) {
+    const qualityStrictness = getPhaseStrictness(state.phase)
+    if (qualityStrictness !== 'skip') {
+      const qualityCheck = checkInputQuality(trimmedMsg, qualityStrictness, state.locale)
+      if (qualityCheck.quality !== 'valid') {
+        const rejectKey = `quality_reject:${conversationId}`
+        const rejectCount = await redis.incr(rejectKey)
+        await redis.expire(rejectKey, 300)
+        if (rejectCount < 3) {
+          logger.warn({ rejectCount, phase: state.phase, quality: qualityCheck.quality, reason: qualityCheck.reason }, '品質攔截')
+          await sendMessage(conversationId, io, {
+            content: getPhaseQualityMessage(state.phase, effectiveLocale) || qualityCheck.userMessage || '請輸入有效的內容。',
+            stage: state.phase,
+          })
+          return
+        }
+        logger.warn({ phase: state.phase }, '品質攔截已達上限 (3/3)，強制放行')
+        await redis.del(rejectKey)
+      } else {
+        await redis.del(`quality_reject:${conversationId}`)
       }
-      logger.warn({ phase: state.phase }, '品質攔截已達上限 (3/3)，強制放行')
-      await redis.del(rejectKey)
-    } else {
-      await redis.del(`quality_reject:${conversationId}`)
     }
   }
 

@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useCallback, useRef } from 'react'
+import { useState, useCallback, useRef, useMemo } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { useTranslations } from 'next-intl'
 import dynamic from 'next/dynamic'
@@ -62,6 +62,7 @@ export interface ChatPreviewPanelProps {
   handleSendMessage: (content: string) => void
   selectedTemplateId: string | null
   selectedTemplate: Template | null
+  onRuntimeError?: (error: { name: string; message: string; path?: string }) => void
 }
 
 export default function ChatPreviewPanel({
@@ -100,6 +101,7 @@ export default function ChatPreviewPanel({
   handleSendMessage,
   selectedTemplateId,
   selectedTemplate,
+  onRuntimeError,
 }: ChatPreviewPanelProps) {
   const tPreview = useTranslations('preview')
   const tUiux = useTranslations('uiux')
@@ -187,6 +189,11 @@ export default function ChatPreviewPanel({
       />
     )
   }
+
+  const codeVersion = useMemo(() => {
+    if (!stablePreviewData) return ''
+    return (stablePreviewData.pages[0]?.content?.slice(0, 100) ?? '') + String(stablePreviewData.components.length)
+  }, [stablePreviewData])
 
   // 使用穩定的預覽數據（避免每次 render 都搜索 messages + 建立新陣列）
   if (stablePreviewData) {
@@ -386,6 +393,8 @@ export default function ChatPreviewPanel({
                       overrides={codePreviewOverrides}
                       annotations={codePreviewAnnotations}
                       onElementResized={handleCodePreviewElementResized}
+                      onRuntimeError={onRuntimeError}
+                      codeVersion={codeVersion}
                     />
                   </div>
                 </div>
@@ -425,6 +434,8 @@ export default function ChatPreviewPanel({
                       overrides={codePreviewOverrides}
                       annotations={codePreviewAnnotations}
                       onElementResized={handleCodePreviewElementResized}
+                      onRuntimeError={onRuntimeError}
+                      codeVersion={codeVersion}
                     />
                   </div>
                 ) : (
@@ -443,6 +454,8 @@ export default function ChatPreviewPanel({
                   overrides={codePreviewOverrides}
                   annotations={codePreviewAnnotations}
                   onElementResized={handleCodePreviewElementResized}
+                  onRuntimeError={onRuntimeError}
+                  codeVersion={codeVersion}
                 />
                 )}
               </div>

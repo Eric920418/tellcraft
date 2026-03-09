@@ -33,6 +33,44 @@ interface SandpackPreviewProps {
   overrides?: Record<string, Record<string, string>>
   annotations?: Record<string, string>
   onElementResized?: (elementId: string, width: number, height: number) => void
+  // Runtime error detection
+  onRuntimeError?: (error: { name: string; message: string; path?: string }) => void
+  codeVersion?: string
+}
+
+/**
+ * 子元件：監聽 Sandpack runtime error 並回報給父元件
+ */
+function SandpackErrorListener({
+  onRuntimeError, isStreaming, codeVersion,
+}: {
+  onRuntimeError?: (error: { name: string; message: string; path?: string }) => void
+  isStreaming?: boolean
+  codeVersion: string
+}) {
+  const { listen } = useSandpack()
+  const hasReportedRef = useRef(false)
+  const lastVersionRef = useRef(codeVersion)
+
+  useEffect(() => {
+    if (codeVersion !== lastVersionRef.current) {
+      lastVersionRef.current = codeVersion
+      hasReportedRef.current = false
+    }
+  }, [codeVersion])
+
+  useEffect(() => {
+    const unsub = listen((msg) => {
+      if (isStreaming || !onRuntimeError || hasReportedRef.current) return
+      if (msg.type !== 'action' || (msg as { action?: string }).action !== 'unhandled-error') return
+      const e = msg as { name?: string; message?: string; path?: string }
+      hasReportedRef.current = true
+      onRuntimeError({ name: e.name || 'Error', message: e.message || 'Unknown', path: e.path })
+    })
+    return () => unsub()
+  }, [listen, onRuntimeError, isStreaming])
+
+  return null
 }
 
 /**
@@ -76,6 +114,8 @@ export default function SandpackPreview({
   overrides,
   annotations,
   onElementResized,
+  onRuntimeError,
+  codeVersion,
 }: SandpackPreviewProps) {
   // 構建 Sandpack 設定
   const setup = useMemo(
@@ -281,6 +321,13 @@ export default function SandpackPreview({
         }}
       >
         <SandpackFileUpdater files={setup.files} />
+        {onRuntimeError && (
+          <SandpackErrorListener
+            onRuntimeError={onRuntimeError}
+            isStreaming={isStreaming}
+            codeVersion={codeVersion ?? ''}
+          />
+        )}
         <SandpackPreviewPane
           showRefreshButton={false}
           showOpenInCodeSandbox={false}

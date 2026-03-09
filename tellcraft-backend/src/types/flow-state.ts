@@ -157,6 +157,8 @@ export interface FlowState {
   messageSource?: 'line' | 'web'
   // 統一語義閘門：連續拒絕計數（BDD ≥2 強制 accept；Design ≥2 顯示跳過）
   semanticRejectCount?: number
+  // 自動修復計數（每個代碼版本最多 1 次，iteration 成功後重置）
+  autoRepairCount?: number
   // PRD Discovery 開始時間（超時偵測）
   prdDiscoveryStartedAt?: number
   // 用戶語言偏好（從第一條訊息偵測，供品質閘門等非 LLM 功能使用正確語言回覆）

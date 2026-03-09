@@ -92,6 +92,11 @@ export default function ChatSection({
   // ── Mobile Preview ──
   const [showMobilePreview, setShowMobilePreview] = useState(false)
 
+  // ── Auto-repair state ──
+  const [autoRepairStatus, setAutoRepairStatus] = useState<'idle' | 'detecting' | 'repairing'>('idle')
+  const autoRepairTimerRef = useRef<NodeJS.Timeout | null>(null)
+  const autoRepairVersionRef = useRef<string>('')
+
   // ── Attached images ──
   const [attachedImages, setAttachedImages] = useState<{ file: File; previewUrl: string }[]>([])
   const chatImageInputRef = useRef<HTMLInputElement>(null)
@@ -323,6 +328,9 @@ export default function ChatSection({
       editorHook.resetEditor()
       polling.resetPolling()
       scroll.chatScrollRef.current = null
+      if (autoRepairTimerRef.current) { clearTimeout(autoRepairTimerRef.current); autoRepairTimerRef.current = null }
+      setAutoRepairStatus('idle')
+      autoRepairVersionRef.current = ''
     }
   }, [isActive])
 
@@ -369,9 +377,10 @@ export default function ChatSection({
   // ── Send message (button trigger) ──
   const handleSendMessage = useCallback(async (
     content: string,
-    options?: { imageUrls?: string[] }
+    options?: { imageUrls?: string[]; silent?: boolean }
   ) => {
-    const isSpecialCommand = content.trim().startsWith('__') && content.trim().endsWith('__')
+    const isSpecialCommand = (content.trim().startsWith('__') && content.trim().endsWith('__'))
+      || content.trim().startsWith('__auto_repair_preview__:')
     if (!session.sessionInfo || !content.trim()) return false
     // 特殊指令（QuickReply buttons）放寬 isTyping 檢查，避免 stale state 卡住
     if (!isSpecialCommand && (isTyping || sendCooldown)) return false
@@ -392,20 +401,23 @@ export default function ChatSection({
       return false
     }
 
-    startSendCooldown()
-
-    const displayContent = getCommandLabel(content)
-    const userMessage: Message = {
-      id: crypto.randomUUID(),
-      role: 'user',
-      content: displayContent,
-      timestamp: new Date(),
-      pending: true
+    let userMessageId: string | null = null
+    if (!options?.silent) {
+      startSendCooldown()
+      const displayContent = getCommandLabel(content)
+      userMessageId = crypto.randomUUID()
+      const userMessage: Message = {
+        id: userMessageId,
+        role: 'user',
+        content: displayContent,
+        timestamp: new Date(),
+        pending: true
+      }
+      scroll.isNearBottomRef.current = true
+      setMessages(prev => [...prev, userMessage])
+      requestAnimationFrame(() => scroll.scrollToBottom())
     }
-    scroll.isNearBottomRef.current = true
-    setMessages(prev => [...prev, userMessage])
     setIsTyping(true)
-    requestAnimationFrame(() => scroll.scrollToBottom())
 
     const token = getAuthToken()
     let result
@@ -433,8 +445,12 @@ export default function ChatSection({
     }
 
     if (!result.success) {
-      setMessages(prev => prev.filter(m => m.id !== userMessage.id))
+      if (userMessageId) {
+        setMessages(prev => prev.filter(m => m.id !== userMessageId))
+      }
       setIsTyping(false)
+
+      if (options?.silent) return false
 
       const err = result.error || ''
       if (err.includes('USER_TASK_IN_PROGRESS')) {
@@ -467,8 +483,10 @@ export default function ChatSection({
       session.setError(err || tChat('sendFailed'))
       return false
     }
-    // 廣播任務開始，讓同一瀏覽器其他 Tab 知道
-    broadcastTaskStarted(session.sessionInfo.conversationId)
+    if (!options?.silent) {
+      // 廣播任務開始，讓同一瀏覽器其他 Tab 知道
+      broadcastTaskStarted(session.sessionInfo.conversationId)
+    }
     return true
   }, [session, isTyping, sendCooldown, isGuestLocked, startSendCooldown, getCommandLabel, scroll, locale, tChat, tLogin, loginPromptHook, broadcastTaskStarted])
 
@@ -803,6 +821,38 @@ export default function ChatSection({
     }
   }, [streamingPreview, codePreviewData])
 
+  // ── Auto-repair phase guard ──
+  const isRepairablePhase = useMemo(() => {
+    if (isTyping) return false
+    const lastAssistantStage = [...messages].reverse()
+      .find(m => m.role === 'assistant' && m.stage)?.stage
+    return lastAssistantStage === 'uiux_complete'
+      || lastAssistantStage === 'uiux_iteration_complete'
+      || lastAssistantStage === 'deployer_complete'
+  }, [messages, isTyping])
+
+  const handleRuntimeError = useCallback((
+    error: { name: string; message: string; path?: string }
+  ) => {
+    if (!isRepairablePhase || !session.sessionInfo) return
+
+    const codeVersion = stablePreviewData
+      ? (stablePreviewData.pages[0]?.content?.slice(0, 100) ?? '') + String(stablePreviewData.components.length)
+      : ''
+    if (autoRepairVersionRef.current === codeVersion) return
+    autoRepairVersionRef.current = codeVersion
+
+    if (autoRepairTimerRef.current) clearTimeout(autoRepairTimerRef.current)
+    setAutoRepairStatus('detecting')
+
+    autoRepairTimerRef.current = setTimeout(async () => {
+      setAutoRepairStatus('repairing')
+      const payload = JSON.stringify({ name: error.name, message: error.message, path: error.path ?? '' })
+      await handleSendMessage(`__auto_repair_preview__:${payload}`, { silent: true })
+      setAutoRepairStatus('idle')
+    }, 3000)
+  }, [isRepairablePhase, session.sessionInfo, stablePreviewData, handleSendMessage])
+
   // ── View mode ──
   const lastMessage = messages[messages.length - 1]
   const isFormulationStage = lastMessage?.stage === 'formulation_progress' || lastMessage?.stage === 'formulation_start'
@@ -936,6 +986,22 @@ export default function ChatSection({
               </div>
             }
             previewPanel={
+              <div style={{ position: 'relative', height: '100%' }}>
+                {autoRepairStatus !== 'idle' && (
+                  <div style={{
+                    position: 'absolute', top: 8, right: 8, zIndex: 50,
+                    padding: '4px 12px', borderRadius: 6, background: 'rgba(0,0,0,0.75)',
+                    color: '#fff', fontSize: 12, fontWeight: 500,
+                    display: 'flex', alignItems: 'center', gap: 6,
+                    pointerEvents: 'none',
+                  }}>
+                    <span style={{
+                      width: 6, height: 6, borderRadius: '50%', display: 'inline-block',
+                      background: autoRepairStatus === 'detecting' ? '#facc15' : '#60a5fa',
+                    }} />
+                    {autoRepairStatus === 'detecting' ? '偵測到執行錯誤...' : '自動修復中...'}
+                  </div>
+                )}
               <ChatPreviewPanel
                 messages={messages}
                 sessionInfo={session.sessionInfo}
@@ -972,7 +1038,9 @@ export default function ChatSection({
                 handleSendMessage={handleSendMessage}
                 selectedTemplateId={selectedTemplateId}
                 selectedTemplate={selectedTemplate}
+                onRuntimeError={handleRuntimeError}
               />
+              </div>
             }
           />
         </motion.div>

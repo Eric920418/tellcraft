@@ -215,6 +215,7 @@ export async function executeIteration(input: {
     state.iterationCount = (state.iterationCount || 0) + 1
     state.lastIterationFeedback = undefined
     state.lastIterationImageUrls = undefined
+    state.autoRepairCount = 0  // 新代碼版本，重置 auto-repair 計數
 
     // 6. 記錄迭代歷史
     const changedFiles = result.pages.map(p => p.path)
