@@ -43,14 +43,14 @@ interface HoverCardPosition {
 }
 
 const FORGE_MODULES: ForgeModule[] = [
-  { id: 'nav', kind: 'header', x: 10, y: 15, w: 78, h: 8, appearAt: 0, zone: 'anvil', hoverable: true },
-  { id: 'hero-title', kind: 'hero-copy', x: 12, y: 28, w: 34, h: 23, appearAt: 0, zone: 'anvil', hoverable: true },
-  { id: 'hero-media', kind: 'hero-media', x: 50, y: 26, w: 30, h: 28, appearAt: 1, zone: 'anvil', hoverable: true },
-  { id: 'cta', kind: 'cta', x: 14, y: 54, w: 20, h: 8, appearAt: 1, zone: 'assembly', hoverable: true },
-  { id: 'cards', kind: 'cards', x: 12, y: 63, w: 68, h: 18, appearAt: 1, zone: 'assembly', hoverable: true },
-  { id: 'text-list', kind: 'list', x: 14, y: 84, w: 26, h: 9, appearAt: 2, zone: 'refine', hoverable: false },
-  { id: 'feature-grid', kind: 'feature', x: 45, y: 84, w: 35, h: 9, appearAt: 3, zone: 'refine', hoverable: false },
-  { id: 'form-block', kind: 'footer', x: 12, y: 94, w: 68, h: 5, appearAt: 4, zone: 'finish', hoverable: true },
+  { id: 'nav', kind: 'header', x: 8, y: 10, w: 84, h: 8, appearAt: 0, zone: 'anvil', hoverable: true },
+  { id: 'hero-title', kind: 'hero-copy', x: 8, y: 22, w: 40, h: 24, appearAt: 0, zone: 'anvil', hoverable: true },
+  { id: 'hero-media', kind: 'hero-media', x: 52, y: 20, w: 40, h: 30, appearAt: 1, zone: 'anvil', hoverable: true },
+  { id: 'cta', kind: 'cta', x: 8, y: 50, w: 22, h: 8, appearAt: 1, zone: 'assembly', hoverable: true },
+  { id: 'cards', kind: 'cards', x: 8, y: 62, w: 84, h: 18, appearAt: 1, zone: 'assembly', hoverable: true },
+  { id: 'text-list', kind: 'list', x: 8, y: 83, w: 30, h: 8, appearAt: 2, zone: 'refine', hoverable: false },
+  { id: 'feature-grid', kind: 'feature', x: 44, y: 83, w: 48, h: 8, appearAt: 3, zone: 'refine', hoverable: false },
+  { id: 'form-block', kind: 'footer', x: 8, y: 93, w: 84, h: 5, appearAt: 4, zone: 'finish', hoverable: true },
 ]
 
 const PHASE_ACTIVE_MODULES: Record<GenerationPhase, InsightSlotId[]> = {
@@ -105,16 +105,16 @@ const MODULE_BY_ID: Record<InsightSlotId, ForgeModule> = FORGE_MODULES.reduce((a
 }, {} as Record<InsightSlotId, ForgeModule>)
 
 const INTAKE_INGOTS = [
-  { left: '6%', width: '18%', delay: 0 },
-  { left: '30%', width: '16%', delay: 0.22 },
-  { left: '51%', width: '12%', delay: 0.4 },
+  { left: '4%', width: '15%', delay: 0 },
+  { left: '24%', width: '14%', delay: 0.24 },
+  { left: '43%', width: '11%', delay: 0.44 },
 ]
 
 const GUIDE_MARKS = [
-  { left: '16%', top: '23%', width: '12%' },
-  { left: '66%', top: '23%', width: '10%' },
-  { left: '18%', bottom: '21%', width: '9%' },
-  { right: '18%', bottom: '21%', width: '11%' },
+  { left: '10%', top: '18%', width: '16%' },
+  { left: '72%', top: '20%', width: '12%' },
+  { left: '12%', bottom: '19%', width: '12%' },
+  { right: '12%', bottom: '19%', width: '15%' },
 ]
 
 const PHASE_INDEX: Record<GenerationPhase, number> = {
@@ -131,17 +131,17 @@ function clamp(value: number, min: number, max: number): number {
 
 function getModuleWidth(module: ForgeModule, phase: GenerationPhase): string {
   if (phase === 'rwd' && (module.id === 'cards' || module.id === 'feature-grid')) {
-    return `${Math.max(module.w - 10, 28)}%`
+    return `${Math.max(module.w - 10, 30)}%`
   }
   return `${module.w}%`
 }
 
 function getZoneTint(zone: ForgeZone, accent: string): string {
-  if (zone === 'intake') return `${accent}26`
-  if (zone === 'anvil') return `${accent}22`
-  if (zone === 'assembly') return `${accent}1c`
-  if (zone === 'refine') return `${accent}16`
-  return `${accent}12`
+  if (zone === 'intake') return `${accent}18`
+  if (zone === 'anvil') return `${accent}16`
+  if (zone === 'assembly') return `${accent}14`
+  if (zone === 'refine') return `${accent}10`
+  return `${accent}0c`
 }
 
 function resolveModuleFinishState(
@@ -164,55 +164,55 @@ function resolveModuleFinishState(
 function getFinishTokens(finish: ModuleFinish, accentColor: string) {
   if (finish === 'raw') {
     return {
-      grooveColor: 'rgba(201, 176, 152, 0.08)',
-      warmInset: 'rgba(251, 191, 36, 0.04)',
-      surfaceTone: 'rgba(90, 78, 70, 0.12)',
-      highlightTone: 'rgba(255, 255, 255, 0.02)',
-      plateBackground: 'linear-gradient(180deg, rgba(70, 60, 54, 0.16) 0%, rgba(36, 31, 28, 0.8) 18%, rgba(18, 16, 15, 0.94) 100%)',
-      opacity: 0.42,
+      grooveColor: 'rgba(197, 174, 153, 0.08)',
+      warmInset: 'rgba(251, 191, 36, 0.03)',
+      highlightTone: 'rgba(255,255,255,0.02)',
+      plateBackground: 'linear-gradient(180deg, rgba(67, 58, 53, 0.16) 0%, rgba(29, 25, 22, 0.84) 20%, rgba(18, 16, 15, 0.96) 100%)',
+      borderColor: 'rgba(165, 145, 130, 0.08)',
+      opacity: 0.46,
     }
   }
 
   if (finish === 'heated') {
     return {
-      grooveColor: `${accentColor}5a`,
-      warmInset: `${accentColor}4a`,
-      surfaceTone: `${accentColor}18`,
-      highlightTone: 'rgba(255, 237, 213, 0.08)',
-      plateBackground: 'linear-gradient(180deg, rgba(121, 95, 77, 0.26) 0%, rgba(66, 52, 45, 0.84) 16%, rgba(25, 21, 19, 1) 100%)',
-      opacity: 0.96,
+      grooveColor: `${accentColor}5e`,
+      warmInset: `${accentColor}44`,
+      highlightTone: 'rgba(255, 236, 214, 0.08)',
+      plateBackground: 'linear-gradient(180deg, rgba(124, 97, 78, 0.24) 0%, rgba(60, 48, 42, 0.9) 16%, rgba(24, 21, 19, 1) 100%)',
+      borderColor: `${accentColor}50`,
+      opacity: 0.98,
     }
   }
 
   if (finish === 'shaped') {
     return {
-      grooveColor: 'rgba(243, 220, 197, 0.18)',
-      warmInset: `${accentColor}24`,
-      surfaceTone: 'rgba(248, 231, 214, 0.06)',
-      highlightTone: 'rgba(255, 255, 255, 0.05)',
-      plateBackground: 'linear-gradient(180deg, rgba(106, 87, 77, 0.2) 0%, rgba(54, 44, 39, 0.94) 14%, rgba(23, 20, 18, 1) 100%)',
-      opacity: 0.86,
+      grooveColor: 'rgba(243, 220, 198, 0.18)',
+      warmInset: `${accentColor}20`,
+      highlightTone: 'rgba(255,255,255,0.05)',
+      plateBackground: 'linear-gradient(180deg, rgba(104, 85, 75, 0.18) 0%, rgba(46, 39, 35, 0.94) 16%, rgba(22, 19, 17, 1) 100%)',
+      borderColor: 'rgba(210, 186, 162, 0.14)',
+      opacity: 0.88,
     }
   }
 
   if (finish === 'trimmed') {
     return {
-      grooveColor: 'rgba(247, 229, 210, 0.24)',
-      warmInset: `${accentColor}18`,
-      surfaceTone: 'rgba(248, 231, 214, 0.08)',
-      highlightTone: 'rgba(255, 255, 255, 0.07)',
-      plateBackground: 'linear-gradient(180deg, rgba(115, 94, 81, 0.18) 0%, rgba(58, 48, 42, 0.96) 12%, rgba(22, 19, 17, 1) 100%)',
-      opacity: 0.92,
+      grooveColor: 'rgba(246, 229, 211, 0.24)',
+      warmInset: `${accentColor}16`,
+      highlightTone: 'rgba(255,255,255,0.07)',
+      plateBackground: 'linear-gradient(180deg, rgba(112, 92, 80, 0.16) 0%, rgba(50, 43, 38, 0.96) 14%, rgba(21, 18, 16, 1) 100%)',
+      borderColor: 'rgba(228, 208, 188, 0.18)',
+      opacity: 0.94,
     }
   }
 
   return {
-    grooveColor: 'rgba(252, 241, 229, 0.34)',
-    warmInset: 'rgba(255, 244, 232, 0.1)',
-    surfaceTone: 'rgba(248, 231, 214, 0.1)',
-    highlightTone: 'rgba(255, 255, 255, 0.1)',
-    plateBackground: 'linear-gradient(180deg, rgba(124, 104, 89, 0.16) 0%, rgba(60, 50, 43, 0.98) 10%, rgba(21, 18, 16, 1) 100%)',
-    opacity: 0.96,
+    grooveColor: 'rgba(252, 242, 231, 0.34)',
+    warmInset: 'rgba(255, 244, 232, 0.08)',
+    highlightTone: 'rgba(255,255,255,0.1)',
+    plateBackground: 'linear-gradient(180deg, rgba(120, 102, 88, 0.14) 0%, rgba(53, 46, 41, 0.98) 12%, rgba(19, 17, 15, 1) 100%)',
+    borderColor: 'rgba(244, 229, 214, 0.22)',
+    opacity: 0.98,
   }
 }
 
@@ -225,16 +225,16 @@ function renderModuleBody(module: ForgeModule, accentColor: string, finish: Modu
     return (
       <>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
-          <div style={{ display: 'flex', gap: 6, width: '45%' }}>
-            <span style={{ width: '48%', height: 6, borderRadius: 999, background: grooveColor, opacity: isRaw ? 0.55 : 1 }} />
-            <span style={{ width: '24%', height: 6, borderRadius: 999, background: 'rgba(244, 228, 213, 0.14)' }} />
+          <div style={{ display: 'flex', gap: 6, width: '48%' }}>
+            <span style={{ width: '42%', height: 5, borderRadius: 999, background: grooveColor, opacity: isRaw ? 0.5 : 1 }} />
+            <span style={{ width: '26%', height: 5, borderRadius: 999, background: isRaw ? 'rgba(244,228,213,0.08)' : 'rgba(244,228,213,0.14)' }} />
           </div>
-          <div style={{ display: 'flex', gap: 6, width: '28%', justifyContent: 'flex-end' }}>
-            <span style={{ width: '24%', height: 5, borderRadius: 999, background: isPolished ? 'rgba(255, 244, 232, 0.24)' : 'rgba(244, 228, 213, 0.12)' }} />
-            <span style={{ width: '18%', height: 5, borderRadius: 999, background: grooveColor, opacity: isRaw ? 0.5 : 1 }} />
+          <div style={{ display: 'flex', gap: 6, width: '24%', justifyContent: 'flex-end' }}>
+            <span style={{ width: '24%', height: 5, borderRadius: 999, background: isPolished ? 'rgba(255,244,232,0.24)' : 'rgba(244,228,213,0.12)' }} />
+            <span style={{ width: '18%', height: 5, borderRadius: 999, background: grooveColor }} />
           </div>
         </div>
-        <div style={{ height: 2, width: '100%', borderRadius: 999, background: `linear-gradient(90deg, transparent 0%, ${warmInset} 20%, transparent 100%)` }} />
+        <div style={{ height: 2, width: '100%', borderRadius: 999, background: `linear-gradient(90deg, transparent 0%, ${warmInset} 26%, transparent 100%)` }} />
       </>
     )
   }
@@ -242,15 +242,15 @@ function renderModuleBody(module: ForgeModule, accentColor: string, finish: Modu
   if (module.kind === 'hero-copy') {
     return (
       <>
-        <div style={{ height: 28, width: isRaw ? '64%' : '76%', borderRadius: 8, background: `linear-gradient(180deg, ${warmInset} 0%, rgba(56, 45, 40, 0.9) 100%)`, boxShadow: `inset 0 1px 0 rgba(255,255,255,0.06), inset 0 0 0 1px ${grooveColor}` }} />
+        <div style={{ height: isRaw ? 20 : 28, width: isRaw ? '62%' : '78%', borderRadius: 8, background: `linear-gradient(180deg, ${warmInset} 0%, rgba(57, 47, 41, 0.9) 100%)`, boxShadow: `inset 0 0 0 1px ${grooveColor}` }} />
         <div style={{ display: 'grid', gap: 7 }}>
-          <span style={{ height: 7, width: isRaw ? '74%' : '90%', borderRadius: 999, background: grooveColor }} />
-          <span style={{ height: 7, width: isRaw ? '68%' : '84%', borderRadius: 999, background: isRaw ? 'rgba(244, 228, 213, 0.08)' : 'rgba(244, 228, 213, 0.16)' }} />
-          <span style={{ height: 7, width: isRaw ? '48%' : '68%', borderRadius: 999, background: isRaw ? 'rgba(244, 228, 213, 0.06)' : 'rgba(244, 228, 213, 0.12)' }} />
+          <span style={{ height: 7, width: isRaw ? '70%' : '92%', borderRadius: 999, background: grooveColor }} />
+          <span style={{ height: 7, width: isRaw ? '58%' : '84%', borderRadius: 999, background: isRaw ? 'rgba(244,228,213,0.08)' : 'rgba(244,228,213,0.15)' }} />
+          <span style={{ height: 7, width: isRaw ? '44%' : '68%', borderRadius: 999, background: isRaw ? 'rgba(244,228,213,0.06)' : 'rgba(244,228,213,0.11)' }} />
         </div>
         <div style={{ display: 'flex', gap: 8, marginTop: 'auto' }}>
-          <span style={{ width: isRaw ? 42 : 54, height: 12, borderRadius: 999, background: grooveColor, boxShadow: isRaw ? 'none' : `0 0 18px ${warmInset}` }} />
-          <span style={{ width: 38, height: 12, borderRadius: 999, background: isPolished ? 'rgba(255, 244, 232, 0.2)' : 'rgba(244, 228, 213, 0.12)' }} />
+          <span style={{ width: isRaw ? 38 : 56, height: 12, borderRadius: 999, background: grooveColor, boxShadow: isRaw ? 'none' : `0 0 12px ${warmInset}` }} />
+          <span style={{ width: 40, height: 12, borderRadius: 999, background: isPolished ? 'rgba(255,244,232,0.2)' : 'rgba(244,228,213,0.1)' }} />
         </div>
       </>
     )
@@ -259,15 +259,15 @@ function renderModuleBody(module: ForgeModule, accentColor: string, finish: Modu
   if (module.kind === 'hero-media') {
     return (
       <>
-        <div style={{ position: 'absolute', inset: 10, borderRadius: 12, background: `linear-gradient(135deg, ${warmInset} 0%, rgba(31, 27, 25, 0.84) 42%, rgba(18, 16, 14, 0.96) 100%)`, boxShadow: `inset 0 0 0 1px ${grooveColor}, inset 0 14px 24px rgba(255,255,255,0.04)` }} />
-        <div style={{ position: 'absolute', left: isRaw ? '16%' : '20%', right: isRaw ? '16%' : '20%', top: isRaw ? '18%' : '22%', bottom: isRaw ? '18%' : '22%', borderRadius: 10, border: `1px solid ${grooveColor}`, opacity: 0.9 }} />
+        <div style={{ position: 'absolute', inset: 10, borderRadius: 12, background: `linear-gradient(135deg, ${warmInset} 0%, rgba(31, 27, 25, 0.86) 42%, rgba(16, 14, 13, 0.98) 100%)`, boxShadow: `inset 0 0 0 1px ${grooveColor}` }} />
+        <div style={{ position: 'absolute', left: isRaw ? '14%' : '20%', right: isRaw ? '14%' : '20%', top: isRaw ? '18%' : '22%', bottom: isRaw ? '18%' : '22%', borderRadius: 10, border: `1px solid ${grooveColor}` }} />
         {isRaw && (
           <>
-            <div style={{ position: 'absolute', left: '20%', top: '26%', width: '62%', height: 1, background: 'rgba(244, 228, 213, 0.08)', transform: 'rotate(18deg)' }} />
-            <div style={{ position: 'absolute', left: '20%', top: '58%', width: '62%', height: 1, background: 'rgba(244, 228, 213, 0.08)', transform: 'rotate(-18deg)' }} />
+            <div style={{ position: 'absolute', left: '20%', top: '28%', width: '58%', height: 1, background: 'rgba(244,228,213,0.08)', transform: 'rotate(14deg)' }} />
+            <div style={{ position: 'absolute', left: '20%', top: '58%', width: '58%', height: 1, background: 'rgba(244,228,213,0.08)', transform: 'rotate(-14deg)' }} />
           </>
         )}
-        <div style={{ position: 'absolute', left: '16%', bottom: '18%', width: isPolished ? '54%' : '48%', height: 8, borderRadius: 999, background: isPolished ? 'rgba(255, 244, 232, 0.2)' : 'rgba(244, 228, 213, 0.14)' }} />
+        <div style={{ position: 'absolute', left: '16%', bottom: '18%', width: isPolished ? '54%' : '46%', height: 8, borderRadius: 999, background: isPolished ? 'rgba(255,244,232,0.2)' : 'rgba(244,228,213,0.12)' }} />
       </>
     )
   }
@@ -276,10 +276,10 @@ function renderModuleBody(module: ForgeModule, accentColor: string, finish: Modu
     return (
       <>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
-          <div style={{ width: finish === 'raw' ? '42%' : finish === 'polished' ? '60%' : '54%', height: 8, borderRadius: 999, background: grooveColor }} />
-          <div style={{ width: 16, height: 16, borderRadius: '50%', background: finish === 'raw' ? 'rgba(244, 228, 213, 0.08)' : 'rgba(244, 228, 213, 0.12)', boxShadow: finish === 'raw' ? 'none' : `0 0 14px ${warmInset}` }} />
+          <div style={{ width: isRaw ? '42%' : isPolished ? '60%' : '54%', height: 8, borderRadius: 999, background: grooveColor }} />
+          <div style={{ width: 16, height: 16, borderRadius: '50%', background: isRaw ? 'rgba(244,228,213,0.08)' : 'rgba(244,228,213,0.12)', boxShadow: isRaw ? 'none' : `0 0 10px ${warmInset}` }} />
         </div>
-        <div style={{ height: 3, width: finish === 'raw' ? '18%' : '30%', borderRadius: 999, background: finish === 'polished' ? 'rgba(255, 244, 232, 0.22)' : 'rgba(244, 228, 213, 0.16)' }} />
+        <div style={{ height: 3, width: isRaw ? '18%' : '30%', borderRadius: 999, background: isPolished ? 'rgba(255,244,232,0.22)' : 'rgba(244,228,213,0.16)' }} />
       </>
     )
   }
@@ -288,15 +288,14 @@ function renderModuleBody(module: ForgeModule, accentColor: string, finish: Modu
     return (
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 10, width: '100%', height: '100%' }}>
         {Array.from({ length: 3 }).map((_, index) => (
-          <div key={index} style={{ position: 'relative', borderRadius: 12, background: 'linear-gradient(180deg, rgba(73, 60, 53, 0.75) 0%, rgba(28, 24, 22, 0.96) 100%)', boxShadow: `inset 0 0 0 1px ${grooveColor}, inset 0 16px 22px rgba(255,255,255,0.04)`, transform: `translateY(${finish === 'raw' ? '0px' : index % 2 === 0 ? '0px' : '4px'})`, opacity: finish === 'raw' ? 0.68 : 1 }}>
-            <div style={{ position: 'absolute', left: 14, right: 14, top: -4, height: 7, borderRadius: 999, background: finish === 'raw' ? 'linear-gradient(180deg, rgba(164, 145, 129, 0.12) 0%, rgba(55, 45, 39, 0.9) 100%)' : 'linear-gradient(180deg, rgba(214, 186, 160, 0.24) 0%, rgba(82, 66, 56, 0.96) 100%)' }} />
-            <div style={{ position: 'absolute', left: 12, right: 12, top: 12, height: finish === 'raw' ? 14 : 22, borderRadius: 8, background: `linear-gradient(180deg, ${warmInset} 0%, rgba(52, 42, 38, 0.8) 100%)` }} />
-            <div style={{ position: 'absolute', left: 12, right: 22, top: 44, display: 'grid', gap: 7 }}>
-              <span style={{ height: 6, borderRadius: 999, background: grooveColor, width: finish === 'raw' ? '74%' : '100%' }} />
-              <span style={{ height: 6, width: finish === 'raw' ? '62%' : '88%', borderRadius: 999, background: finish === 'raw' ? 'rgba(244, 228, 213, 0.08)' : 'rgba(244, 228, 213, 0.14)' }} />
-              <span style={{ height: 6, width: finish === 'raw' ? '44%' : '72%', borderRadius: 999, background: finish === 'raw' ? 'rgba(244, 228, 213, 0.06)' : 'rgba(244, 228, 213, 0.1)' }} />
+          <div key={index} style={{ position: 'relative', borderRadius: 12, background: 'linear-gradient(180deg, rgba(64, 53, 47, 0.76) 0%, rgba(26, 23, 21, 0.96) 100%)', boxShadow: `inset 0 0 0 1px ${grooveColor}`, transform: `translateY(${isRaw ? '0px' : index % 2 === 0 ? '0px' : '5px'})`, opacity: isRaw ? 0.66 : 1 }}>
+            <div style={{ position: 'absolute', left: 12, right: 12, top: 10, height: isRaw ? 14 : 22, borderRadius: 8, background: `linear-gradient(180deg, ${warmInset} 0%, rgba(50, 41, 37, 0.82) 100%)` }} />
+            <div style={{ position: 'absolute', left: 12, right: 20, top: 40, display: 'grid', gap: 7 }}>
+              <span style={{ height: 6, width: isRaw ? '72%' : '100%', borderRadius: 999, background: grooveColor }} />
+              <span style={{ height: 6, width: isRaw ? '58%' : '88%', borderRadius: 999, background: isRaw ? 'rgba(244,228,213,0.08)' : 'rgba(244,228,213,0.14)' }} />
+              <span style={{ height: 6, width: isRaw ? '42%' : '72%', borderRadius: 999, background: isRaw ? 'rgba(244,228,213,0.06)' : 'rgba(244,228,213,0.1)' }} />
             </div>
-            <div style={{ position: 'absolute', left: 12, bottom: 12, width: finish === 'raw' ? 30 : 42, height: 10, borderRadius: 999, background: finish === 'polished' ? 'rgba(255, 244, 232, 0.18)' : `${accentColor}54` }} />
+            <div style={{ position: 'absolute', left: 12, bottom: 12, width: isRaw ? 28 : 42, height: 10, borderRadius: 999, background: isPolished ? 'rgba(255,244,232,0.18)' : `${accentColor}54` }} />
           </div>
         ))}
       </div>
@@ -309,7 +308,7 @@ function renderModuleBody(module: ForgeModule, accentColor: string, finish: Modu
         {Array.from({ length: 3 }).map((_, index) => (
           <div key={index} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <span style={{ width: 8, height: 8, borderRadius: 2, background: grooveColor }} />
-            <span style={{ flex: 1, height: 5, borderRadius: 999, background: 'rgba(244, 228, 213, 0.14)' }} />
+            <span style={{ flex: 1, height: 5, borderRadius: 999, background: 'rgba(244,228,213,0.14)' }} />
           </div>
         ))}
       </div>
@@ -320,7 +319,7 @@ function renderModuleBody(module: ForgeModule, accentColor: string, finish: Modu
     return (
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 8, width: '100%' }}>
         {Array.from({ length: 4 }).map((_, index) => (
-          <div key={index} style={{ borderRadius: 8, height: 18, background: 'linear-gradient(180deg, rgba(61, 49, 44, 0.74) 0%, rgba(28, 24, 22, 0.94) 100%)', boxShadow: `inset 0 0 0 1px ${grooveColor}`, opacity: isRaw ? 0.56 : 1 }} />
+          <div key={index} style={{ borderRadius: 8, height: 18, background: 'linear-gradient(180deg, rgba(61, 49, 44, 0.72) 0%, rgba(27, 24, 21, 0.94) 100%)', boxShadow: `inset 0 0 0 1px ${grooveColor}`, opacity: isRaw ? 0.56 : 1 }} />
         ))}
       </div>
     )
@@ -330,8 +329,8 @@ function renderModuleBody(module: ForgeModule, accentColor: string, finish: Modu
     <>
       <div style={{ height: 4, width: '26%', borderRadius: 999, background: grooveColor }} />
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr auto', gap: 8, width: '100%' }}>
-        <div style={{ height: 10, borderRadius: 6, background: 'rgba(244, 228, 213, 0.1)', boxShadow: `inset 0 0 0 1px ${grooveColor}` }} />
-        <div style={{ height: 10, borderRadius: 6, background: 'rgba(244, 228, 213, 0.1)', boxShadow: `inset 0 0 0 1px ${grooveColor}` }} />
+        <div style={{ height: 10, borderRadius: 6, background: 'rgba(244,228,213,0.1)', boxShadow: `inset 0 0 0 1px ${grooveColor}` }} />
+        <div style={{ height: 10, borderRadius: 6, background: 'rgba(244,228,213,0.1)', boxShadow: `inset 0 0 0 1px ${grooveColor}` }} />
         <div style={{ width: 48, height: 10, borderRadius: 999, background: `${accentColor}52` }} />
       </div>
     </>
@@ -400,7 +399,7 @@ export default function AIGenerationWaitingScene({
 
   const cursorX = useMotionValue(0)
   const cursorY = useMotionValue(0)
-  const stageGlow = useMotionTemplate`radial-gradient(220px 160px at ${cursorX}px ${cursorY}px, rgba(249, 115, 22, 0.08), transparent 76%)`
+  const stageGlow = useMotionTemplate`radial-gradient(180px 120px at ${cursorX}px ${cursorY}px, rgba(249,115,22,0.06), transparent 78%)`
 
   const visual = useMemo(() => resolveGenerationVisualState({
     stage,
@@ -520,7 +519,7 @@ export default function AIGenerationWaitingScene({
         display: 'flex',
         flexDirection: 'column',
         overflow: 'hidden',
-        background: 'radial-gradient(circle at top, rgba(88,48,26,0.32) 0%, rgba(16,13,11,0.98) 42%), linear-gradient(180deg, #0f0c0a 0%, #120f0d 52%, #171311 100%)',
+        background: 'radial-gradient(circle at top, rgba(82,46,24,0.2) 0%, rgba(16,13,11,0.98) 42%), linear-gradient(180deg, #0f0c0a 0%, #120f0d 52%, #171311 100%)',
       }}
     >
       <div
@@ -528,22 +527,13 @@ export default function AIGenerationWaitingScene({
         style={{
           position: 'absolute',
           inset: 0,
-          backgroundImage: 'repeating-linear-gradient(175deg, rgba(255,255,255,0.012) 0 1px, transparent 1px 12px)',
-          opacity: 0.08,
-          pointerEvents: 'none',
-        }}
-      />
-      <div
-        aria-hidden="true"
-        style={{
-          position: 'absolute',
-          inset: 0,
-          background: 'radial-gradient(circle at 50% -10%, rgba(251,146,60,0.1) 0%, transparent 30%), radial-gradient(circle at 50% 110%, rgba(120,53,15,0.08) 0%, transparent 24%)',
+          backgroundImage: 'repeating-linear-gradient(175deg, rgba(255,255,255,0.01) 0 1px, transparent 1px 16px)',
+          opacity: 0.05,
           pointerEvents: 'none',
         }}
       />
 
-      <div style={{ position: 'relative', zIndex: 2, padding: '14px 18px 10px 18px', borderBottom: '1px solid rgba(184, 140, 102, 0.18)' }}>
+      <div style={{ position: 'relative', zIndex: 2, padding: '14px 18px 10px 18px', borderBottom: '1px solid rgba(184, 140, 102, 0.16)' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}>
           <div>
             <p style={{ margin: 0, fontSize: 11, color: 'rgba(242, 196, 151, 0.88)', letterSpacing: '0.12em', textTransform: 'uppercase', fontFamily: 'var(--font-mono)' }}>
@@ -558,7 +548,7 @@ export default function AIGenerationWaitingScene({
           </div>
 
           <div style={{ display: 'grid', justifyItems: 'end', gap: 6 }}>
-            <div style={{ borderRadius: 999, border: `1px solid ${phaseColor}88`, background: `${phaseColor}20`, color: '#f7e8da', padding: '6px 12px', fontFamily: 'var(--font-mono)', fontSize: 12, letterSpacing: '0.05em' }}>
+            <div style={{ borderRadius: 999, border: `1px solid ${phaseColor}88`, background: `${phaseColor}16`, color: '#f7e8da', padding: '6px 12px', fontFamily: 'var(--font-mono)', fontSize: 12, letterSpacing: '0.05em' }}>
               {tAny(visual.statusLabelKey)}
             </div>
             <div style={{ fontSize: 10, color: 'rgba(226, 190, 156, 0.72)', fontFamily: 'var(--font-mono)' }}>
@@ -578,9 +568,9 @@ export default function AIGenerationWaitingScene({
             minHeight: 380,
             overflow: 'hidden',
             borderRadius: 24,
-            border: '1px solid rgba(189, 147, 111, 0.1)',
-            background: 'linear-gradient(180deg, rgba(18,16,14,0.99) 0%, rgba(12,10,9,1) 100%)',
-            boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.02), 0 18px 36px rgba(0,0,0,0.22)',
+            border: '1px solid rgba(189, 147, 111, 0.08)',
+            background: 'linear-gradient(180deg, rgba(18,16,14,0.98) 0%, rgba(12,10,9,1) 100%)',
+            boxShadow: '0 14px 30px rgba(0,0,0,0.18)',
           }}
         >
           <motion.div
@@ -596,14 +586,27 @@ export default function AIGenerationWaitingScene({
             aria-hidden="true"
             style={{
               position: 'absolute',
-              left: '6%',
-              right: '6%',
-              top: '10%',
+              left: '7%',
+              right: '7%',
+              top: '12%',
               bottom: '12%',
-              borderRadius: 30,
-              background: 'linear-gradient(180deg, rgba(42,37,34,0.98) 0%, rgba(25,22,20,1) 16%, rgba(16,14,13,1) 100%)',
-              boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.04), inset 0 -18px 22px rgba(0,0,0,0.34)',
-              clipPath: 'polygon(1.8% 0, 98.2% 0, 100% 6%, 100% 94%, 98.2% 100%, 1.8% 100%, 0 94%, 0 6%)',
+              borderRadius: 22,
+              background: 'linear-gradient(180deg, rgba(36,31,28,0.98) 0%, rgba(20,18,16,1) 100%)',
+              boxShadow: 'inset 0 0 0 1px rgba(205, 171, 136, 0.12), inset 0 12px 14px rgba(255,255,255,0.02), inset 0 -16px 20px rgba(0,0,0,0.24)',
+            }}
+          />
+
+          <div
+            aria-hidden="true"
+            style={{
+              position: 'absolute',
+              left: '8.5%',
+              right: '8.5%',
+              top: '13.5%',
+              bottom: '13.5%',
+              borderRadius: 20,
+              background: 'linear-gradient(180deg, rgba(20,18,16,0.96) 0%, rgba(13,12,11,1) 100%)',
+              boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.02)',
             }}
           />
 
@@ -613,47 +616,19 @@ export default function AIGenerationWaitingScene({
               position: 'absolute',
               left: '9.5%',
               right: '9.5%',
-              top: '14.5%',
-              bottom: '16%',
-              borderRadius: 20,
-              background: 'linear-gradient(180deg, rgba(28,24,22,0.98) 0%, rgba(16,14,13,1) 100%)',
-              boxShadow: 'inset 0 0 0 1px rgba(201,167,135,0.12), inset 0 10px 14px rgba(255,255,255,0.03), inset 0 -14px 18px rgba(0,0,0,0.34)',
-            }}
-          />
-
-          <div
-            aria-hidden="true"
-            style={{
-              position: 'absolute',
-              left: '10.5%',
-              right: '10.5%',
-              top: '16.5%',
-              bottom: '18%',
-              borderRadius: 18,
-              background: 'linear-gradient(180deg, rgba(20,17,16,1) 0%, rgba(12,11,10,1) 100%)',
-              boxShadow: 'inset 0 0 0 1px rgba(255,255,255,0.03), inset 0 14px 18px rgba(255,255,255,0.02), inset 0 -14px 20px rgba(0,0,0,0.28)',
-            }}
-          />
-
-          <div
-            aria-hidden="true"
-            style={{
-              position: 'absolute',
-              left: '12%',
-              right: '12%',
               top: '11%',
-              height: '8%',
-              borderRadius: 18,
-              background: 'linear-gradient(180deg, rgba(34,28,24,0.96) 0%, rgba(18,15,13,0.98) 100%)',
-              boxShadow: 'inset 0 0 0 1px rgba(255,255,255,0.03)',
+              height: '6.5%',
+              borderRadius: 14,
+              background: 'linear-gradient(180deg, rgba(28,24,22,0.98) 0%, rgba(17,14,13,1) 100%)',
+              boxShadow: 'inset 0 0 0 1px rgba(255,255,255,0.025)',
             }}
           >
             {INTAKE_INGOTS.map((ingot) => (
               <motion.div
                 key={ingot.left}
                 initial={reduceMotion ? false : { x: 0, opacity: 0.4 }}
-                animate={reduceMotion ? { opacity: 0.75 } : { x: ['0%', '28%'], opacity: [0.45, 0.95, 0.5] }}
-                transition={{ duration: 2.8, repeat: Infinity, repeatType: 'reverse', ease: 'easeInOut', delay: ingot.delay }}
+                animate={reduceMotion ? { opacity: 0.7 } : { x: ['0%', '24%'], opacity: [0.4, 0.88, 0.44] }}
+                transition={{ duration: 2.6, repeat: Infinity, repeatType: 'reverse', ease: 'easeInOut', delay: ingot.delay }}
                 style={{
                   position: 'absolute',
                   left: ingot.left,
@@ -661,12 +636,12 @@ export default function AIGenerationWaitingScene({
                   width: ingot.width,
                   height: '52%',
                   borderRadius: 999,
-                  background: `linear-gradient(90deg, rgba(79, 64, 53, 0.95) 0%, ${phaseColor}88 52%, rgba(255, 218, 170, 0.5) 100%)`,
-                  boxShadow: `0 0 20px ${phaseColor}22, inset 0 1px 0 rgba(255,255,255,0.14)`,
+                  background: `linear-gradient(90deg, rgba(79,64,53,0.9) 0%, ${phaseColor}82 52%, rgba(255,218,170,0.42) 100%)`,
+                  boxShadow: `0 0 10px ${phaseColor}22`,
                 }}
               />
             ))}
-            <div style={{ position: 'absolute', left: '3%', top: '28%', fontSize: 10, color: 'rgba(241, 208, 176, 0.65)', fontFamily: 'var(--font-mono)', letterSpacing: '0.08em' }}>{stepText}</div>
+            <div style={{ position: 'absolute', left: '3%', top: '28%', fontSize: 10, color: 'rgba(241,208,176,0.6)', fontFamily: 'var(--font-mono)', letterSpacing: '0.08em' }}>{stepText}</div>
           </div>
 
           {GUIDE_MARKS.map((mark, index) => (
@@ -677,8 +652,8 @@ export default function AIGenerationWaitingScene({
                 position: 'absolute',
                 height: 1,
                 borderRadius: 999,
-                background: 'linear-gradient(90deg, transparent 0%, rgba(227, 190, 153, 0.5) 50%, transparent 100%)',
-                opacity: 0.55,
+                background: 'linear-gradient(90deg, transparent 0%, rgba(227,190,153,0.34) 50%, transparent 100%)',
+                opacity: 0.45,
                 ...mark,
               }}
             />
@@ -688,31 +663,31 @@ export default function AIGenerationWaitingScene({
             aria-hidden="true"
             style={{
               position: 'absolute',
-              left: '14%',
-              right: '14%',
-              bottom: '12%',
-              height: '5.5%',
-              borderRadius: 14,
-              background: 'linear-gradient(180deg, rgba(20,18,17,0.98) 0%, rgba(15,13,12,1) 100%)',
-              boxShadow: 'inset 0 0 0 1px rgba(255,255,255,0.025)',
+              left: '12%',
+              right: '12%',
+              bottom: '11%',
+              height: '4.5%',
+              borderRadius: 12,
+              background: 'linear-gradient(180deg, rgba(18,16,15,0.98) 0%, rgba(14,12,11,1) 100%)',
+              boxShadow: 'inset 0 0 0 1px rgba(255,255,255,0.02)',
             }}
           >
             <motion.div
-              initial={reduceMotion ? false : { x: '-40%', opacity: 0.35 }}
-              animate={reduceMotion ? { opacity: 0.7 } : { x: ['-32%', '76%'], opacity: [0.3, 0.68, 0.34] }}
-              transition={{ duration: 3.8, repeat: Infinity, ease: 'linear' }}
+              initial={reduceMotion ? false : { x: '-40%', opacity: 0.18 }}
+              animate={reduceMotion ? { opacity: 0.48 } : { x: ['-30%', '78%'], opacity: [0.12, 0.46, 0.12] }}
+              transition={{ duration: 3.2, repeat: Infinity, ease: 'linear' }}
               style={{
                 position: 'absolute',
                 top: '24%',
-                width: '24%',
+                width: '18%',
                 height: '48%',
                 borderRadius: 999,
-                background: 'linear-gradient(90deg, rgba(255,255,255,0) 0%, rgba(251,191,36,0.18) 45%, rgba(255,255,255,0) 100%)',
+                background: 'linear-gradient(90deg, rgba(255,255,255,0) 0%, rgba(251,191,36,0.16) 50%, rgba(255,255,255,0) 100%)',
               }}
             />
           </div>
 
-          <div style={{ position: 'absolute', left: '10%', right: '10%', top: '18%', bottom: '16%' }}>
+          <div style={{ position: 'absolute', left: '9.5%', right: '9.5%', top: '19%', bottom: '15%' }}>
             {FORGE_MODULES.map((module, index) => {
               const isVisible = module.appearAt <= visual.taskIndex + 1
               const isActive = activeModuleIds.includes(module.id)
@@ -723,6 +698,7 @@ export default function AIGenerationWaitingScene({
               const finishState = resolveModuleFinishState(module, visual.phase, visual.moduleFinish, isVisible, isActive)
               const finishTokens = getFinishTokens(finishState, phaseColor)
               const isRaw = finishState === 'raw'
+              const isPolished = finishState === 'polished'
 
               const moduleStyle: CSSProperties = {
                 position: 'absolute',
@@ -739,14 +715,14 @@ export default function AIGenerationWaitingScene({
                 overflow: 'hidden',
                 cursor: canHover ? (supportsHover ? 'default' : 'pointer') : 'default',
                 background: finishTokens.plateBackground,
-                border: `1px solid ${isActive || isFocus ? `${phaseColor}7a` : finishState === 'polished' ? 'rgba(244, 228, 213, 0.18)' : finishState === 'raw' ? 'rgba(164, 145, 129, 0.08)' : 'rgba(209, 184, 160, 0.16)'}`,
+                border: `1px solid ${isActive || isFocus ? `${phaseColor}74` : finishTokens.borderColor}`,
                 boxShadow: isFocus
-                  ? `0 16px 26px rgba(0,0,0,0.28), 0 0 0 1px ${phaseColor}30 inset, inset 0 1px 0 rgba(255,255,255,0.08), inset 0 -10px 18px rgba(0,0,0,0.3), 0 0 24px ${phaseColor}24`
+                  ? `0 12px 22px rgba(0,0,0,0.2), inset 0 0 0 1px ${phaseColor}28, 0 0 16px ${phaseColor}14`
                   : isActive
-                    ? `0 14px 22px rgba(0,0,0,0.24), inset 0 0 0 1px ${phaseColor}28, inset 0 1px 0 rgba(255,255,255,0.07), inset 0 -12px 18px rgba(0,0,0,0.34), 0 0 ${24 + visual.forgeTemperature * 0.18}px ${phaseColor}18`
+                    ? `0 10px 18px rgba(0,0,0,0.18), inset 0 0 0 1px ${phaseColor}22`
                     : isRaw
-                      ? '0 8px 12px rgba(0,0,0,0.12), inset 0 0 0 1px rgba(255,255,255,0.02), inset 0 -8px 14px rgba(0,0,0,0.24)'
-                      : '0 12px 18px rgba(0,0,0,0.18), inset 0 0 0 1px rgba(255,255,255,0.03), inset 0 -12px 18px rgba(0,0,0,0.32)',
+                      ? '0 6px 10px rgba(0,0,0,0.1), inset 0 0 0 1px rgba(255,255,255,0.02)'
+                      : '0 10px 16px rgba(0,0,0,0.14), inset 0 0 0 1px rgba(255,255,255,0.03)',
                 opacity: finishTokens.opacity,
               }
 
@@ -756,58 +732,24 @@ export default function AIGenerationWaitingScene({
                   onMouseEnter={() => canHover && onSlotEnter(module.id)}
                   onMouseLeave={() => canHover && onSlotLeave()}
                   onClick={() => canHover && onSlotClick(module.id)}
-                  initial={reduceMotion ? false : { opacity: 0, y: 18, scale: 0.96, rotateX: 4 }}
+                  initial={reduceMotion ? false : { opacity: 0, y: 14, scale: 0.97 }}
                   animate={{
                     opacity: moduleStyle.opacity,
-                    y: isVisible ? (isRaw ? 4 : 0) : 14,
-                    scale: isFocus ? 1.012 : isActive ? 1.004 : isRaw ? 0.986 : 1,
+                    y: isVisible ? (isRaw ? 4 : 0) : 12,
+                    scale: isFocus ? 1.012 : isActive ? 1.004 : isRaw ? 0.988 : 1,
                     x: visual.phase === 'rwd' && (module.id === 'cards' || module.id === 'feature-grid') ? -8 : 0,
                     boxShadow: moduleStyle.boxShadow,
                   }}
-                  transition={{ duration: 0.5, ease: [0.22, 1, 0.36, 1], delay: reduceMotion ? 0 : index * 0.04 }}
+                  transition={{ duration: 0.42, ease: [0.22, 1, 0.36, 1], delay: reduceMotion ? 0 : index * 0.04 }}
                   style={moduleStyle}
                 >
                   <div
                     aria-hidden="true"
                     style={{
                       position: 'absolute',
-                      left: 14,
-                      top: -5,
-                      width: 22,
-                      height: 8,
-                      borderRadius: 999,
-                      background: finishState === 'raw'
-                        ? 'linear-gradient(180deg, rgba(164, 145, 129, 0.14) 0%, rgba(56, 46, 40, 0.9) 100%)'
-                        : 'linear-gradient(180deg, rgba(214, 186, 160, 0.22) 0%, rgba(79, 63, 55, 0.96) 100%)',
-                      boxShadow: '0 2px 4px rgba(0,0,0,0.18)',
-                      pointerEvents: 'none',
-                    }}
-                  />
-                  {module.kind !== 'cta' && (
-                    <div
-                      aria-hidden="true"
-                      style={{
-                        position: 'absolute',
-                        right: 14,
-                        top: -5,
-                        width: 22,
-                        height: 8,
-                        borderRadius: 999,
-                        background: finishState === 'raw'
-                          ? 'linear-gradient(180deg, rgba(164, 145, 129, 0.1) 0%, rgba(56, 46, 40, 0.86) 100%)'
-                          : 'linear-gradient(180deg, rgba(214, 186, 160, 0.18) 0%, rgba(79, 63, 55, 0.92) 100%)',
-                        boxShadow: '0 2px 4px rgba(0,0,0,0.18)',
-                        pointerEvents: 'none',
-                      }}
-                    />
-                  )}
-                  <div
-                    aria-hidden="true"
-                    style={{
-                      position: 'absolute',
                       inset: 0,
                       borderRadius: module.kind === 'cta' ? 999 : 16,
-                      background: `linear-gradient(180deg, ${finishTokens.highlightTone} 0%, transparent 18%, transparent 68%, rgba(0,0,0,0.22) 100%), radial-gradient(circle at top left, ${finishState === 'raw' ? 'rgba(255,255,255,0.02)' : getZoneTint(module.zone, phaseColor)} 0%, transparent 48%)`,
+                      background: `linear-gradient(180deg, ${finishTokens.highlightTone} 0%, transparent 18%, transparent 72%, rgba(0,0,0,0.18) 100%), radial-gradient(circle at top left, ${isRaw ? 'rgba(255,255,255,0.015)' : getZoneTint(module.zone, phaseColor)} 0%, transparent 46%)`,
                       pointerEvents: 'none',
                     }}
                   />
@@ -817,8 +759,7 @@ export default function AIGenerationWaitingScene({
                       position: 'absolute',
                       inset: 2,
                       borderRadius: module.kind === 'cta' ? 999 : 14,
-                      border: `1px solid ${isActive ? `${phaseColor}40` : finishState === 'polished' ? 'rgba(255,255,255,0.08)' : finishState === 'raw' ? 'rgba(255,255,255,0.02)' : 'rgba(255,255,255,0.04)'}`,
-                      clipPath: module.kind === 'cta' ? 'none' : 'polygon(1.4% 0, 98.6% 0, 100% 8%, 100% 92%, 98.6% 100%, 1.4% 100%, 0 92%, 0 8%)',
+                      border: `1px solid ${isActive ? `${phaseColor}34` : isPolished ? 'rgba(255,255,255,0.08)' : isRaw ? 'rgba(255,255,255,0.02)' : 'rgba(255,255,255,0.04)'}`,
                       pointerEvents: 'none',
                     }}
                   />
@@ -828,9 +769,9 @@ export default function AIGenerationWaitingScene({
                       position: 'absolute',
                       insetInline: 10,
                       top: 0,
-                      height: 3,
+                      height: 2,
                       borderRadius: 999,
-                      background: `linear-gradient(90deg, transparent 0%, ${finishTokens.highlightTone} 18%, ${isActive ? `${phaseColor}88` : finishState === 'polished' ? 'rgba(255,255,255,0.18)' : finishState === 'raw' ? 'rgba(255,255,255,0.05)' : 'rgba(255,255,255,0.08)'} 50%, transparent 100%)`,
+                      background: `linear-gradient(90deg, transparent 0%, ${isPolished ? 'rgba(255,255,255,0.18)' : finishTokens.highlightTone} 28%, ${isActive ? `${phaseColor}6a` : 'rgba(255,255,255,0.08)'} 50%, transparent 100%)`,
                       pointerEvents: 'none',
                     }}
                   />
@@ -838,93 +779,97 @@ export default function AIGenerationWaitingScene({
 
                   {!reduceMotion && isActive && (
                     <>
-                      {(visual.forgeAction === 'shaping' || visual.forgeAction === 'trimming') && (
-                        <motion.div
-                          aria-hidden="true"
-                          initial={{ opacity: 0.08, y: -10 }}
-                          animate={{ opacity: [0.08, 0.26, 0.08], y: [-10, 1, -10] }}
-                          transition={{ duration: 1.4, repeat: Infinity, ease: 'easeInOut', delay: index * 0.06 }}
-                          style={{
-                            position: 'absolute',
-                            left: '10%',
-                            right: '10%',
-                            top: '-10%',
-                            height: '38%',
-                            background: 'linear-gradient(180deg, rgba(0,0,0,0.34) 0%, rgba(0,0,0,0.14) 32%, transparent 100%)',
-                            pointerEvents: 'none',
-                          }}
-                        />
-                      )}
-
                       {visual.forgeAction === 'heating' && (
                         <motion.div
                           aria-hidden="true"
-                          initial={{ x: '-30%', opacity: 0.16 }}
-                          animate={{ x: ['-20%', '60%'], opacity: [0.14, 0.34, 0.12] }}
-                          transition={{ duration: 1.8, repeat: Infinity, ease: 'easeInOut', delay: index * 0.08 }}
+                          initial={{ x: '-26%', opacity: 0.14 }}
+                          animate={{ x: ['-18%', '74%'], opacity: [0.12, 0.34, 0.12] }}
+                          transition={{ duration: 1.7, repeat: Infinity, ease: 'easeInOut', delay: index * 0.08 }}
                           style={{
                             position: 'absolute',
-                            top: '8%',
-                            width: '22%',
+                            top: '10%',
+                            width: '18%',
                             height: 3,
                             borderRadius: 999,
-                            background: `linear-gradient(90deg, transparent 0%, ${phaseColor}aa 50%, transparent 100%)`,
-                            boxShadow: `0 0 8px ${phaseColor}44`,
+                            background: `linear-gradient(90deg, transparent 0%, ${phaseColor}a8 50%, transparent 100%)`,
+                            boxShadow: `0 0 6px ${phaseColor}32`,
                             pointerEvents: 'none',
                           }}
                         />
                       )}
 
-                      <motion.div
-                        aria-hidden="true"
-                        initial={{ x: '-24%', opacity: 0.18 }}
-                        animate={{ x: ['-12%', '84%'], opacity: visual.forgeAction === 'polishing' ? [0.1, 0.56, 0.12] : [0.1, 0.36, 0.08] }}
-                        transition={{ duration: visual.forgeAction === 'polishing' ? 2.4 : 2, repeat: Infinity, ease: 'easeInOut', delay: index * 0.08 }}
-                        style={{
-                          position: 'absolute',
-                          top: visual.forgeAction === 'polishing' ? '8%' : '12%',
-                          height: visual.forgeAction === 'polishing' ? 2 : 3,
-                          width: visual.forgeAction === 'polishing' ? '18%' : '12%',
-                          borderRadius: 999,
-                          background: `linear-gradient(90deg, transparent 0%, ${visual.forgeAction === 'polishing' ? 'rgba(255,244,232,0.78)' : `${phaseColor}88`} 50%, transparent 100%)`,
-                          boxShadow: visual.forgeAction === 'polishing' ? '0 0 10px rgba(255,244,232,0.18)' : `0 0 8px ${phaseColor}22`,
-                          pointerEvents: 'none',
-                        }}
-                      />
-                      {(visual.forgeAction === 'striking' || visual.forgeAction === 'trimming') && (
+                      {(visual.forgeAction === 'shaping' || visual.forgeAction === 'trimming') && (
                         <motion.div
                           aria-hidden="true"
-                          initial={{ scale: 0.4, opacity: 0.18 }}
-                          animate={{ scale: [0.55, 1.8], opacity: [0.24, 0] }}
-                          transition={{ duration: 1.1, repeat: Infinity, ease: 'easeOut', delay: 0.24 + index * 0.09 }}
+                          initial={{ opacity: 0.06, y: -8 }}
+                          animate={{ opacity: [0.06, 0.22, 0.06], y: [-8, 1, -8] }}
+                          transition={{ duration: 1.35, repeat: Infinity, ease: 'easeInOut', delay: index * 0.06 }}
                           style={{
                             position: 'absolute',
-                            left: '16%',
-                            top: '18%',
-                            width: 28,
-                            height: 28,
-                            borderRadius: '50%',
-                            background: `radial-gradient(circle, rgba(255,232,205,0.88) 0%, ${phaseColor}66 38%, transparent 72%)`,
+                            left: '12%',
+                            right: '12%',
+                            top: '-10%',
+                            height: '34%',
+                            background: 'linear-gradient(180deg, rgba(0,0,0,0.32) 0%, rgba(0,0,0,0.12) 36%, transparent 100%)',
                             pointerEvents: 'none',
                           }}
                         />
                       )}
-                      {Array.from({ length: visual.forgeAction === 'striking' ? 4 : visual.forgeAction === 'trimming' ? 2 : 0 }).map((_, sparkIndex) => (
+
+                      {(visual.forgeAction === 'polishing' || visual.forgeAction === 'heating') && (
+                        <motion.div
+                          aria-hidden="true"
+                          initial={{ x: '-18%', opacity: 0.08 }}
+                          animate={{ x: ['-10%', '82%'], opacity: visual.forgeAction === 'polishing' ? [0.08, 0.5, 0.12] : [0.08, 0.24, 0.08] }}
+                          transition={{ duration: visual.forgeAction === 'polishing' ? 2.3 : 1.9, repeat: Infinity, ease: 'easeInOut', delay: index * 0.06 }}
+                          style={{
+                            position: 'absolute',
+                            top: visual.forgeAction === 'polishing' ? '8%' : '12%',
+                            width: visual.forgeAction === 'polishing' ? '16%' : '10%',
+                            height: 2,
+                            borderRadius: 999,
+                            background: `linear-gradient(90deg, transparent 0%, ${visual.forgeAction === 'polishing' ? 'rgba(255,244,232,0.72)' : `${phaseColor}80`} 50%, transparent 100%)`,
+                            boxShadow: visual.forgeAction === 'polishing' ? '0 0 8px rgba(255,244,232,0.12)' : `0 0 6px ${phaseColor}24`,
+                            pointerEvents: 'none',
+                          }}
+                        />
+                      )}
+
+                      {(visual.forgeAction === 'striking' || visual.forgeAction === 'trimming') && (
+                        <motion.div
+                          aria-hidden="true"
+                          initial={{ scale: 0.45, opacity: 0.16 }}
+                          animate={{ scale: [0.55, 1.7], opacity: [0.24, 0] }}
+                          transition={{ duration: 1.1, repeat: Infinity, ease: 'easeOut', delay: 0.2 + index * 0.08 }}
+                          style={{
+                            position: 'absolute',
+                            left: '14%',
+                            top: '16%',
+                            width: 24,
+                            height: 24,
+                            borderRadius: '50%',
+                            background: `radial-gradient(circle, rgba(255,234,205,0.88) 0%, ${phaseColor}64 38%, transparent 72%)`,
+                            pointerEvents: 'none',
+                          }}
+                        />
+                      )}
+
+                      {Array.from({ length: visual.forgeAction === 'striking' ? 3 : visual.forgeAction === 'trimming' ? 2 : 0 }).map((_, sparkIndex) => (
                         <motion.span
                           key={sparkIndex}
                           aria-hidden="true"
                           initial={{ x: 0, y: 0, opacity: 0 }}
-                          animate={{ x: [0, 7 - sparkIndex * 2], y: [0, -18 - sparkIndex * 7], opacity: [0, 0.7, 0] }}
-                          transition={{ duration: 0.9, repeat: Infinity, ease: 'easeOut', delay: index * 0.08 + sparkIndex * 0.16 }}
+                          animate={{ x: [0, 6 - sparkIndex * 2], y: [0, -16 - sparkIndex * 6], opacity: [0, 0.66, 0] }}
+                          transition={{ duration: 0.86, repeat: Infinity, ease: 'easeOut', delay: index * 0.08 + sparkIndex * 0.16 }}
                           style={{
                             position: 'absolute',
-                            right: `${12 + sparkIndex * 10}%`,
+                            right: `${14 + sparkIndex * 10}%`,
                             top: `${18 + sparkIndex * 6}%`,
                             width: 3,
                             height: 3,
                             borderRadius: '50%',
-                            background: sparkIndex % 2 === 0 ? '#ffd7a3' : phaseColor,
-                            boxShadow: `0 0 8px ${phaseColor}`,
+                            background: sparkIndex % 2 === 0 ? '#ffd6a1' : phaseColor,
+                            boxShadow: `0 0 6px ${phaseColor}`,
                             pointerEvents: 'none',
                           }}
                         />
@@ -933,14 +878,14 @@ export default function AIGenerationWaitingScene({
                       {visual.forgeAction === 'trimming' && (
                         <motion.div
                           aria-hidden="true"
-                          initial={{ opacity: 0.1, scaleX: 0.96 }}
-                          animate={{ opacity: [0.08, 0.22, 0.08], scaleX: [0.96, 1, 0.96] }}
-                          transition={{ duration: 1.6, repeat: Infinity, ease: 'easeInOut' }}
+                          initial={{ opacity: 0.08, scaleX: 0.97 }}
+                          animate={{ opacity: [0.08, 0.2, 0.08], scaleX: [0.97, 1, 0.97] }}
+                          transition={{ duration: 1.5, repeat: Infinity, ease: 'easeInOut' }}
                           style={{
                             position: 'absolute',
                             inset: 6,
                             borderRadius: module.kind === 'cta' ? 999 : 12,
-                            border: `1px solid rgba(255,244,232,0.14)`,
+                            border: '1px solid rgba(255,244,232,0.12)',
                             pointerEvents: 'none',
                           }}
                         />
@@ -954,8 +899,8 @@ export default function AIGenerationWaitingScene({
                       position: 'absolute',
                       inset: 0,
                       borderRadius: module.kind === 'cta' ? 999 : 16,
-                      boxShadow: isFocus ? `0 0 0 1px ${phaseColor}55 inset` : 'none',
-                      background: isFocus ? `radial-gradient(circle at 30% 20%, ${isRaw ? `${phaseColor}10` : `${phaseColor}20`} 0%, transparent 42%)` : 'transparent',
+                      boxShadow: isFocus ? `0 0 0 1px ${phaseColor}48 inset` : 'none',
+                      background: isFocus ? `radial-gradient(circle at 30% 20%, ${isRaw ? `${phaseColor}0d` : `${phaseColor}18`} 0%, transparent 42%)` : 'transparent',
                       pointerEvents: 'none',
                     }}
                   />
@@ -967,8 +912,8 @@ export default function AIGenerationWaitingScene({
                       insetInline: 8,
                       bottom: 6,
                       height: 1,
-                      opacity: finishState === 'raw' ? 0.22 : 0.5 + heatStrength * 0.2,
-                      background: `linear-gradient(90deg, transparent 0%, ${isActive ? `${phaseColor}72` : finishState === 'polished' ? 'rgba(255, 244, 232, 0.18)' : finishState === 'raw' ? 'rgba(214, 188, 161, 0.08)' : 'rgba(214, 188, 161, 0.16)'} 50%, transparent 100%)`,
+                      opacity: isRaw ? 0.18 : 0.44 + heatStrength * 0.14,
+                      background: `linear-gradient(90deg, transparent 0%, ${isActive ? `${phaseColor}62` : isPolished ? 'rgba(255,244,232,0.16)' : isRaw ? 'rgba(214,188,161,0.06)' : 'rgba(214,188,161,0.14)'} 50%, transparent 100%)`,
                       pointerEvents: 'none',
                     }}
                   />
@@ -981,18 +926,18 @@ export default function AIGenerationWaitingScene({
                 aria-hidden="true"
                 initial={false}
                 animate={{
-                  left: `${focusedModule.x - 1.2}%`,
-                  top: `${focusedModule.y - 1.4}%`,
-                  width: `calc(${getModuleWidth(focusedModule, visual.phase)} + 2.4%)`,
-                  height: `${focusedModule.h + 2.8}%`,
+                  left: `${focusedModule.x - 1.1}%`,
+                  top: `${focusedModule.y - 1.2}%`,
+                  width: `calc(${getModuleWidth(focusedModule, visual.phase)} + 2.2%)`,
+                  height: `${focusedModule.h + 2.4}%`,
                   opacity: 1,
                 }}
-                transition={{ duration: 0.36, ease: [0.22, 1, 0.36, 1] }}
+                transition={{ duration: 0.32, ease: [0.22, 1, 0.36, 1] }}
                 style={{
                   position: 'absolute',
                   borderRadius: focusedModule.kind === 'cta' ? 999 : 18,
-                  border: `1px solid ${phaseColor}52`,
-                  boxShadow: `0 0 0 1px ${phaseColor}18 inset, 0 0 28px ${phaseColor}18`,
+                  border: `1px solid ${phaseColor}42`,
+                  boxShadow: `0 0 0 1px ${phaseColor}14 inset, 0 0 18px ${phaseColor}10`,
                   pointerEvents: 'none',
                 }}
               />
@@ -1008,10 +953,10 @@ export default function AIGenerationWaitingScene({
                 top: hoverCardPosition?.y ?? 0,
                 width: hoverCardPosition?.width ?? 288,
                 borderRadius: 14,
-                border: `1px solid ${phaseColor}66`,
-                background: 'linear-gradient(180deg, rgba(42,33,27,0.92) 0%, rgba(20,16,14,0.98) 100%)',
-                boxShadow: `0 16px 36px rgba(0,0,0,0.34), 0 0 0 1px rgba(255,255,255,0.03) inset, 0 0 24px ${phaseColor}18`,
-                backdropFilter: 'blur(14px)',
+                border: `1px solid ${phaseColor}5a`,
+                background: 'linear-gradient(180deg, rgba(36,29,25,0.94) 0%, rgba(18,15,14,0.98) 100%)',
+                boxShadow: `0 12px 26px rgba(0,0,0,0.26), 0 0 0 1px rgba(255,255,255,0.03) inset`,
+                backdropFilter: 'blur(10px)',
                 padding: '12px 14px',
                 pointerEvents: 'none',
                 zIndex: 12,
@@ -1025,9 +970,9 @@ export default function AIGenerationWaitingScene({
                       position: 'absolute',
                       width: 12,
                       height: 12,
-                      background: 'rgba(28,23,20,0.96)',
-                      borderLeft: `1px solid ${phaseColor}66`,
-                      borderTop: `1px solid ${phaseColor}66`,
+                      background: 'rgba(26,21,19,0.98)',
+                      borderLeft: `1px solid ${phaseColor}5a`,
+                      borderTop: `1px solid ${phaseColor}5a`,
                       transform: hoverCardPosition.anchor === 'left'
                         ? 'rotate(-45deg)'
                         : hoverCardPosition.anchor === 'right'

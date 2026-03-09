@@ -38,6 +38,8 @@ import {
   buildAdaptiveStructureBatches,
   buildCompactDesignPrompt,
   buildDesignSystemPrompt,
+  findSuspiciousRefineShrinks,
+  type RefinePatchSet,
   type DesignSystem,
 } from '../services/uiux-generation'
 import { autoFixCriticalIssuesRuleBased, runQualityGate } from '../services/quality-gate'
@@ -136,6 +138,33 @@ describe('uiux optimization helpers', () => {
     expect(appGuard).toContain('Do NOT generate marketing hero sections')
     expect(appGuard).toContain('原始需求')
     expect(websiteGuard).toContain('Do NOT generate app-shell layouts')
+  })
+
+  it('should detect suspicious refine shrink for truncated large files', () => {
+    const baseCode = {
+      pages: [],
+      components: [{
+        path: 'components/NeuralCanvas.tsx',
+        description: 'canvas',
+        content: Array.from({ length: 421 }, (_, index) => `line-${index + 1}`).join('\n'),
+      }],
+      styles: '',
+    }
+    const patches: RefinePatchSet = {
+      modifiedPages: new Map(),
+      modifiedComponents: new Map([
+        ['components/NeuralCanvas.tsx', Array.from({ length: 189 }, (_, index) => `line-${index + 1}`).join('\n')],
+      ]),
+      modifiedStyles: '',
+    }
+
+    expect(findSuspiciousRefineShrinks(baseCode, patches)).toEqual([
+      {
+        path: 'components/NeuralCanvas.tsx',
+        originalLines: 421,
+        newLines: 189,
+      },
+    ])
   })
 })
 
