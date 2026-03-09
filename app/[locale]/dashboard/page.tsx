@@ -23,7 +23,7 @@ export default async function DashboardPage() {
           totalProjects: 0,
           totalConversations: 0,
           totalDeployments: 0,
-          creditUsage: { used: 0, limit: 30, plan: 'free', isFairUse: false }
+          creditUsage: { used: 0, limit: 15, plan: 'free', isFairUse: false }
         }}
         recentProjects={[]}
       />

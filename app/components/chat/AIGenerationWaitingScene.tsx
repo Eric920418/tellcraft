@@ -110,18 +110,6 @@ const INTAKE_INGOTS = [
   { left: '51%', width: '12%', delay: 0.4 },
 ]
 
-const CLAMP_POSITIONS: Array<{ left?: string; right?: string; top?: string; bottom?: string; rotate?: string }> = [
-  { left: '7%', top: '14%', rotate: '-8deg' },
-  { right: '8%', top: '18%', rotate: '12deg' },
-  { left: '10%', bottom: '14%', rotate: '6deg' },
-  { right: '11%', bottom: '12%', rotate: '-10deg' },
-]
-
-const BENCH_BRACES = [
-  { left: '6%', top: '24%', bottom: '24%' },
-  { right: '6%', top: '24%', bottom: '24%' },
-]
-
 const GUIDE_MARKS = [
   { left: '16%', top: '23%', width: '12%' },
   { left: '66%', top: '23%', width: '10%' },
@@ -412,7 +400,7 @@ export default function AIGenerationWaitingScene({
 
   const cursorX = useMotionValue(0)
   const cursorY = useMotionValue(0)
-  const stageGlow = useMotionTemplate`radial-gradient(300px 220px at ${cursorX}px ${cursorY}px, rgba(249, 115, 22, 0.16), transparent 72%)`
+  const stageGlow = useMotionTemplate`radial-gradient(220px 160px at ${cursorX}px ${cursorY}px, rgba(249, 115, 22, 0.08), transparent 76%)`
 
   const visual = useMemo(() => resolveGenerationVisualState({
     stage,
@@ -427,7 +415,6 @@ export default function AIGenerationWaitingScene({
   const activeModuleIds = PHASE_ACTIVE_MODULES[visual.phase]
   const phaseFocusSlotId = visual.activeInsightSlotId
   const focusSlotId = hoveredSlotId || activeHoverCardSlotId || phaseFocusSlotId
-  const activeModule = MODULE_BY_ID[phaseFocusSlotId]
   const focusedModule = MODULE_BY_ID[focusSlotId]
   const hoverCardModule = activeHoverCardSlotId ? MODULE_BY_ID[activeHoverCardSlotId] : null
   const hoverCardPosition = useMemo(
@@ -541,8 +528,8 @@ export default function AIGenerationWaitingScene({
         style={{
           position: 'absolute',
           inset: 0,
-          backgroundImage: 'repeating-linear-gradient(175deg, rgba(255,255,255,0.02) 0 1px, transparent 1px 10px), repeating-linear-gradient(90deg, rgba(255,255,255,0.012) 0 1px, transparent 1px 80px)',
-          opacity: 0.14,
+          backgroundImage: 'repeating-linear-gradient(175deg, rgba(255,255,255,0.012) 0 1px, transparent 1px 12px)',
+          opacity: 0.08,
           pointerEvents: 'none',
         }}
       />
@@ -551,7 +538,7 @@ export default function AIGenerationWaitingScene({
         style={{
           position: 'absolute',
           inset: 0,
-          background: 'radial-gradient(circle at 50% -10%, rgba(251,146,60,0.18) 0%, transparent 35%), radial-gradient(circle at 50% 110%, rgba(120,53,15,0.18) 0%, transparent 28%)',
+          background: 'radial-gradient(circle at 50% -10%, rgba(251,146,60,0.1) 0%, transparent 30%), radial-gradient(circle at 50% 110%, rgba(120,53,15,0.08) 0%, transparent 24%)',
           pointerEvents: 'none',
         }}
       />
@@ -591,9 +578,9 @@ export default function AIGenerationWaitingScene({
             minHeight: 380,
             overflow: 'hidden',
             borderRadius: 24,
-            border: '1px solid rgba(189, 147, 111, 0.16)',
-            background: 'linear-gradient(180deg, rgba(20,17,15,0.98) 0%, rgba(13,11,10,1) 100%)',
-            boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.02), inset 0 -18px 40px rgba(0,0,0,0.4), 0 22px 54px rgba(0,0,0,0.32)',
+            border: '1px solid rgba(189, 147, 111, 0.1)',
+            background: 'linear-gradient(180deg, rgba(18,16,14,0.99) 0%, rgba(12,10,9,1) 100%)',
+            boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.02), 0 18px 36px rgba(0,0,0,0.22)',
           }}
         >
           <motion.div
@@ -609,44 +596,28 @@ export default function AIGenerationWaitingScene({
             aria-hidden="true"
             style={{
               position: 'absolute',
-              left: '4%',
-              right: '4%',
-              top: '7%',
-              bottom: '8%',
-              borderRadius: 40,
-              background: 'linear-gradient(180deg, rgba(53,46,41,0.98) 0%, rgba(30,26,23,1) 16%, rgba(19,17,15,1) 100%)',
-              boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.05), inset 0 -24px 32px rgba(0,0,0,0.46), 0 18px 36px rgba(0,0,0,0.26)',
-              clipPath: 'polygon(2.8% 0, 97.2% 0, 100% 10%, 100% 90%, 97.2% 100%, 2.8% 100%, 0 90%, 0 10%)',
+              left: '6%',
+              right: '6%',
+              top: '10%',
+              bottom: '12%',
+              borderRadius: 30,
+              background: 'linear-gradient(180deg, rgba(42,37,34,0.98) 0%, rgba(25,22,20,1) 16%, rgba(16,14,13,1) 100%)',
+              boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.04), inset 0 -18px 22px rgba(0,0,0,0.34)',
+              clipPath: 'polygon(1.8% 0, 98.2% 0, 100% 6%, 100% 94%, 98.2% 100%, 1.8% 100%, 0 94%, 0 6%)',
             }}
           />
-
-          {BENCH_BRACES.map((brace, index) => (
-            <div
-              key={index}
-              aria-hidden="true"
-              style={{
-                position: 'absolute',
-                width: 22,
-                borderRadius: 14,
-                background: 'linear-gradient(180deg, rgba(87,76,67,0.96) 0%, rgba(36,30,27,0.98) 100%)',
-                boxShadow: 'inset 0 0 0 1px rgba(255,255,255,0.04), inset 6px 0 10px rgba(255,255,255,0.03), 0 10px 18px rgba(0,0,0,0.22)',
-                ...brace,
-              }}
-            />
-          ))}
 
           <div
             aria-hidden="true"
             style={{
               position: 'absolute',
-              left: '8%',
-              right: '8%',
-              top: '14%',
-              bottom: '14%',
-              borderRadius: 30,
-              background: 'linear-gradient(180deg, rgba(77,66,58,0.96) 0%, rgba(34,29,26,0.98) 22%, rgba(20,18,16,1) 100%)',
-              boxShadow: 'inset 0 0 0 1px rgba(201,167,135,0.14), inset 0 1px 0 rgba(255,255,255,0.08), inset 0 -20px 30px rgba(0,0,0,0.48), 0 12px 28px rgba(0,0,0,0.28)',
-              clipPath: 'polygon(2.4% 0, 97.6% 0, 100% 8%, 100% 92%, 97.6% 100%, 2.4% 100%, 0 92%, 0 8%)',
+              left: '9.5%',
+              right: '9.5%',
+              top: '14.5%',
+              bottom: '16%',
+              borderRadius: 20,
+              background: 'linear-gradient(180deg, rgba(28,24,22,0.98) 0%, rgba(16,14,13,1) 100%)',
+              boxShadow: 'inset 0 0 0 1px rgba(201,167,135,0.12), inset 0 10px 14px rgba(255,255,255,0.03), inset 0 -14px 18px rgba(0,0,0,0.34)',
             }}
           />
 
@@ -656,11 +627,11 @@ export default function AIGenerationWaitingScene({
               position: 'absolute',
               left: '10.5%',
               right: '10.5%',
-              top: '17.5%',
-              bottom: '17.5%',
-              borderRadius: 22,
-              background: 'linear-gradient(180deg, rgba(24,20,18,1) 0%, rgba(14,12,11,1) 100%)',
-              boxShadow: 'inset 0 0 0 1px rgba(255,255,255,0.04), inset 0 18px 24px rgba(255,255,255,0.03), inset 0 -18px 24px rgba(0,0,0,0.36)',
+              top: '16.5%',
+              bottom: '18%',
+              borderRadius: 18,
+              background: 'linear-gradient(180deg, rgba(20,17,16,1) 0%, rgba(12,11,10,1) 100%)',
+              boxShadow: 'inset 0 0 0 1px rgba(255,255,255,0.03), inset 0 14px 18px rgba(255,255,255,0.02), inset 0 -14px 20px rgba(0,0,0,0.28)',
             }}
           />
 
@@ -717,13 +688,13 @@ export default function AIGenerationWaitingScene({
             aria-hidden="true"
             style={{
               position: 'absolute',
-              left: '12%',
-              right: '12%',
-              bottom: '10%',
-              height: '8%',
-              borderRadius: 16,
-              background: 'linear-gradient(180deg, rgba(22,19,17,0.98) 0%, rgba(18,15,13,1) 100%)',
-              boxShadow: 'inset 0 0 0 1px rgba(255,255,255,0.03)',
+              left: '14%',
+              right: '14%',
+              bottom: '12%',
+              height: '5.5%',
+              borderRadius: 14,
+              background: 'linear-gradient(180deg, rgba(20,18,17,0.98) 0%, rgba(15,13,12,1) 100%)',
+              boxShadow: 'inset 0 0 0 1px rgba(255,255,255,0.025)',
             }}
           >
             <motion.div
@@ -732,52 +703,16 @@ export default function AIGenerationWaitingScene({
               transition={{ duration: 3.8, repeat: Infinity, ease: 'linear' }}
               style={{
                 position: 'absolute',
-                top: '28%',
+                top: '24%',
                 width: '24%',
-                height: '42%',
+                height: '48%',
                 borderRadius: 999,
-                background: 'linear-gradient(90deg, rgba(255,255,255,0) 0%, rgba(251,191,36,0.28) 45%, rgba(255,255,255,0) 100%)',
+                background: 'linear-gradient(90deg, rgba(255,255,255,0) 0%, rgba(251,191,36,0.18) 45%, rgba(255,255,255,0) 100%)',
               }}
             />
           </div>
 
-          {CLAMP_POSITIONS.map((clampStyle, index) => (
-            <div
-              key={index}
-              aria-hidden="true"
-              style={{
-                position: 'absolute',
-                width: 52,
-                height: 18,
-                borderRadius: 999,
-                background: 'linear-gradient(180deg, rgba(89,76,67,0.96) 0%, rgba(42,36,32,0.98) 100%)',
-                boxShadow: 'inset 0 0 0 1px rgba(255,255,255,0.05), 0 8px 16px rgba(0,0,0,0.24)',
-                transform: `rotate(${clampStyle.rotate || '0deg'})`,
-                ...clampStyle,
-              }}
-            />
-          ))}
-
-          {!reduceMotion && activeModule && (
-            <motion.div
-              aria-hidden="true"
-              initial={{ x: '-18%', opacity: 0.35 }}
-              animate={{ x: ['-10%', '102%'], opacity: [0.24, 0.7, 0.2] }}
-              transition={{ duration: visual.phase === 'quality' ? 3.4 : 2.4, repeat: Infinity, ease: 'easeInOut' }}
-              style={{
-                position: 'absolute',
-                left: `${activeModule.x}%`,
-                top: `${activeModule.y}%`,
-                width: getModuleWidth(activeModule, visual.phase),
-                height: `${activeModule.h}%`,
-                background: `linear-gradient(90deg, transparent 0%, ${phaseColor}00 12%, ${phaseColor}66 50%, ${phaseColor}00 88%, transparent 100%)`,
-                filter: 'blur(8px)',
-                pointerEvents: 'none',
-              }}
-            />
-          )}
-
-          <div style={{ position: 'absolute', left: '13%', right: '13%', top: '21%', bottom: '20%' }}>
+          <div style={{ position: 'absolute', left: '10%', right: '10%', top: '18%', bottom: '16%' }}>
             {FORGE_MODULES.map((module, index) => {
               const isVisible = module.appearAt <= visual.taskIndex + 1
               const isActive = activeModuleIds.includes(module.id)
@@ -903,22 +838,60 @@ export default function AIGenerationWaitingScene({
 
                   {!reduceMotion && isActive && (
                     <>
+                      {(visual.forgeAction === 'shaping' || visual.forgeAction === 'trimming') && (
+                        <motion.div
+                          aria-hidden="true"
+                          initial={{ opacity: 0.08, y: -10 }}
+                          animate={{ opacity: [0.08, 0.26, 0.08], y: [-10, 1, -10] }}
+                          transition={{ duration: 1.4, repeat: Infinity, ease: 'easeInOut', delay: index * 0.06 }}
+                          style={{
+                            position: 'absolute',
+                            left: '10%',
+                            right: '10%',
+                            top: '-10%',
+                            height: '38%',
+                            background: 'linear-gradient(180deg, rgba(0,0,0,0.34) 0%, rgba(0,0,0,0.14) 32%, transparent 100%)',
+                            pointerEvents: 'none',
+                          }}
+                        />
+                      )}
+
+                      {visual.forgeAction === 'heating' && (
+                        <motion.div
+                          aria-hidden="true"
+                          initial={{ x: '-30%', opacity: 0.16 }}
+                          animate={{ x: ['-20%', '60%'], opacity: [0.14, 0.34, 0.12] }}
+                          transition={{ duration: 1.8, repeat: Infinity, ease: 'easeInOut', delay: index * 0.08 }}
+                          style={{
+                            position: 'absolute',
+                            top: '8%',
+                            width: '22%',
+                            height: 3,
+                            borderRadius: 999,
+                            background: `linear-gradient(90deg, transparent 0%, ${phaseColor}aa 50%, transparent 100%)`,
+                            boxShadow: `0 0 8px ${phaseColor}44`,
+                            pointerEvents: 'none',
+                          }}
+                        />
+                      )}
+
                       <motion.div
                         aria-hidden="true"
-                        initial={{ x: '-42%', opacity: 0.3 }}
-                        animate={{ x: ['-18%', '115%'], opacity: [0.25, 0.85, 0.2] }}
-                        transition={{ duration: visual.forgeAction === 'polishing' ? 3 : 1.9, repeat: Infinity, ease: 'easeInOut', delay: index * 0.08 }}
+                        initial={{ x: '-24%', opacity: 0.18 }}
+                        animate={{ x: ['-12%', '84%'], opacity: visual.forgeAction === 'polishing' ? [0.1, 0.56, 0.12] : [0.1, 0.36, 0.08] }}
+                        transition={{ duration: visual.forgeAction === 'polishing' ? 2.4 : 2, repeat: Infinity, ease: 'easeInOut', delay: index * 0.08 }}
                         style={{
                           position: 'absolute',
-                          top: '-12%',
-                          bottom: '-10%',
-                          width: '22%',
-                          background: `linear-gradient(90deg, transparent 0%, ${phaseColor}${visual.forgeAction === 'polishing' ? '40' : '5c'} 50%, transparent 100%)`,
-                          filter: 'blur(9px)',
+                          top: visual.forgeAction === 'polishing' ? '8%' : '12%',
+                          height: visual.forgeAction === 'polishing' ? 2 : 3,
+                          width: visual.forgeAction === 'polishing' ? '18%' : '12%',
+                          borderRadius: 999,
+                          background: `linear-gradient(90deg, transparent 0%, ${visual.forgeAction === 'polishing' ? 'rgba(255,244,232,0.78)' : `${phaseColor}88`} 50%, transparent 100%)`,
+                          boxShadow: visual.forgeAction === 'polishing' ? '0 0 10px rgba(255,244,232,0.18)' : `0 0 8px ${phaseColor}22`,
                           pointerEvents: 'none',
                         }}
                       />
-                      {visual.forgeAction !== 'polishing' && (
+                      {(visual.forgeAction === 'striking' || visual.forgeAction === 'trimming') && (
                         <motion.div
                           aria-hidden="true"
                           initial={{ scale: 0.4, opacity: 0.18 }}
@@ -936,7 +909,7 @@ export default function AIGenerationWaitingScene({
                           }}
                         />
                       )}
-                      {Array.from({ length: visual.forgeAction === 'striking' ? 4 : 2 }).map((_, sparkIndex) => (
+                      {Array.from({ length: visual.forgeAction === 'striking' ? 4 : visual.forgeAction === 'trimming' ? 2 : 0 }).map((_, sparkIndex) => (
                         <motion.span
                           key={sparkIndex}
                           aria-hidden="true"
@@ -956,6 +929,22 @@ export default function AIGenerationWaitingScene({
                           }}
                         />
                       ))}
+
+                      {visual.forgeAction === 'trimming' && (
+                        <motion.div
+                          aria-hidden="true"
+                          initial={{ opacity: 0.1, scaleX: 0.96 }}
+                          animate={{ opacity: [0.08, 0.22, 0.08], scaleX: [0.96, 1, 0.96] }}
+                          transition={{ duration: 1.6, repeat: Infinity, ease: 'easeInOut' }}
+                          style={{
+                            position: 'absolute',
+                            inset: 6,
+                            borderRadius: module.kind === 'cta' ? 999 : 12,
+                            border: `1px solid rgba(255,244,232,0.14)`,
+                            pointerEvents: 'none',
+                          }}
+                        />
+                      )}
                     </>
                   )}
 

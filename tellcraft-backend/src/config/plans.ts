@@ -24,7 +24,7 @@ export const CREDIT_COSTS = {
 
 /** 方案每月 Credit 配額 */
 export const PLAN_CREDIT_LIMITS: Record<string, number> = {
-  free: 30,
+  free: 15,
   creator: 90,
   pro: 300,
   business: 900,
@@ -43,7 +43,7 @@ export const CREDIT_LIMIT_ERROR_CODE = 'CREDIT_LIMIT_REACHED'
 
 /** 取得方案 Credit 上限 */
 export function getCreditLimit(plan: string): number {
-  return PLAN_CREDIT_LIMITS[plan] ?? 30
+  return PLAN_CREDIT_LIMITS[plan] ?? 15
 }
 
 /** 對外以 fair use 文案呈現的方案 */

@@ -2810,46 +2810,17 @@ ${layoutMode === 'app'
 - 不要使用 display: none 隱藏重要內容（用 sr-only）
 - 不要破壞無障礙功能
 
-## Pre-Delivery Checklist（RWD 完成前自我檢查）
-在輸出最終代碼前，逐項確認：
-
-### 排版與文字
-- [ ] 標題用 text-balance，內文用 text-pretty
+## Pre-Delivery Checklist（輸出前自我確認）
 - [ ] 移動端最小字體 16px（避免 iOS 自動放大）
-- [ ] 長文字有 truncate 或 line-clamp 保護
-
-### 互動元素
-- [ ] 所有可點擊元素有 cursor-pointer
-- [ ] 觸控目標至少 44×44px（移動端）
-- [ ] hover 效果不影響移動端（用 @media (hover: hover)）
-- [ ] 每個互動元素有完整狀態：default/hover/active/focus/disabled
-- [ ] focus ring 用 focus-visible 不是 focus
-- [ ] touch-action: manipulation 已設定（消除 300ms 延遲）
-- [ ] Modal/Drawer 有 overscroll-behavior: contain
-
-### 對比度與可見性
-- [ ] 正文文字對比度足夠（light: slate-900, dark: slate-100）
-- [ ] placeholder 可見但不搶焦點（slate-400）
-- [ ] disabled 狀態視覺明確但不消失（opacity-50 + cursor-not-allowed）
-
-### 佈局完整性
-- [ ] 固定元素尊重 safe-area-inset
-- [ ] ${layoutMode === 'app' ? '應用界面移動端可操作且功能完整' : '移動端導航可用且可關閉（ESC + 點擊外部）'}
-- [ ] 表單移動端 inputmode 正確（email/tel/numeric）
-- [ ] 圖片有 explicit width/height 或 aspect-ratio 防止 CLS
+- [ ] 觸控目標至少 44×44px，touch-action: manipulation
 - [ ] Flex 子元素有 min-w-0（truncate 才能生效）
-
-### 效能
-- [ ] 響應式圖片用 srcset 或 next/image
-- [ ] 離屏動畫暫停
-- [ ] 尊重 prefers-reduced-motion
-- [ ] 沒有 transition-all（必須列出具體屬性）
-
-### 無障礙
-- [ ] <html lang="..."> 已設定
-- [ ] Skip Link 存在且 focus 時可見
-- [ ] Heading 層級連續（h1→h2→h3，無跳級）
-- [ ] 動態訊息用 aria-live 或 role="status"/role="alert"`
+- [ ] 固定元素尊重 safe-area-inset
+- [ ] 圖片有 explicit width/height 或 aspect-ratio 防 CLS
+- [ ] 可點擊元素有 focus-visible ring
+- [ ] 表單 inputmode 正確（email/tel/numeric）
+- [ ] Modal/Drawer 有 overscroll-behavior: contain
+- [ ] 尊重 prefers-reduced-motion，禁止 transition-all
+- [ ] ${layoutMode === 'app' ? '移動端功能完整可用' : '移動端漢堡選單可用且可關閉'}`
 
   const existingCodeStr = [
     ...existingCode.pages.map(p => `\`\`\`tsx:${p.path}\n${p.content}\n\`\`\``),
@@ -2882,14 +2853,15 @@ ${existingCodeStr}
 5. 卡片堆疊佈局
 6. 字體和間距響應式調整
 
-⚠️ 自給自足規則：如果你新增了 import 引用內部模組（@/ 或 ./），你必須同時輸出該檔案。禁止引用不存在的內部模組。
-
-請輸出完整的修改後代碼，保持相同的檔案路徑格式。`
+⚠️ 選擇性輸出（重要效率規則）：
+只輸出你實際添加了響應式 class 的檔案。沒有修改的檔案完全省略（不輸出 code block）。
+若你新增了 import 引用內部模組（@/ 或 ./），你必須同時輸出該檔案。
+保持相同的檔案路徑格式。`
 
   const response = await callClaude(
     systemPrompt,
     [{ role: 'user', content: userMessage }],
-    { maxTokens: incrementalOptions?.maxTokens || 32768, temperature: 0.2, maxContinuations: incrementalOptions?.maxContinuations },
+    { maxTokens: incrementalOptions?.maxTokens || 32768, temperature: 0.2, maxContinuations: incrementalOptions?.maxContinuations ?? 2 },
     { ...trackingContext, purpose: 'generate_rwd' },
     buildStreamingHandler(onPartialCode)
   )
@@ -2906,8 +2878,18 @@ ${existingCodeStr}
   const parsedPages = rwdSyntaxFixed.filter(f => rawRwdPagePaths.has(f.path))
   const parsedComps = rwdSyntaxFixed.filter(f => !rawRwdPagePaths.has(f.path))
 
-  const finalPages = parsedPages.length > 0 ? parsedPages : existingCode.pages
-  const finalComps = parsedComps.length > 0 ? parsedComps : existingCode.components
+  // Per-file merge：原始 map → 用 RWD 修改版覆蓋，未修改的保留原版
+  const rwdPageMap = new Map(parsedPages.map(p => [p.path, p]))
+  const rwdCompMap = new Map(parsedComps.map(c => [c.path, c]))
+
+  const finalPages = [
+    ...existingCode.pages.map(p => rwdPageMap.get(p.path) ?? p),
+    ...parsedPages.filter(p => !existingCode.pages.find(e => e.path === p.path)),
+  ]
+  const finalComps = [
+    ...existingCode.components.map(c => rwdCompMap.get(c.path) ?? c),
+    ...parsedComps.filter(c => !existingCode.components.find(e => e.path === c.path)),
+  ]
   const finalStyles = parsedStyles || existingCode.styles
 
   // Safety net: 如果 LLM 沒有產出響應式 class，自動注入基本響應式模式
