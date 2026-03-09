@@ -49,7 +49,11 @@ import {
   pickFirstBatchPages,
   shouldExpandBriefPrompt,
 } from '../services/fast-build-generation'
-import { buildPostDeployFastBuildQuickReplies, getRemainingFastBuildPages } from '../workers/phase-handlers/fast-build-phases'
+import {
+  buildPostDeployFastBuildQuickReplies,
+  getRemainingFastBuildPages,
+  runFastBuildBatchAudit,
+} from '../workers/phase-handlers/fast-build-phases'
 
 const MOCK_DESIGN_SYSTEM: DesignSystem = {
   cssVariables: ':root { --color-primary: #2563eb; }',
@@ -187,6 +191,72 @@ describe('uiux optimization helpers', () => {
       { label: '部署上線', value: '部署', style: 'secondary' },
       { label: '回滾版本', value: '回滾', style: 'ghost' },
     ])
+  })
+
+  it('should fail batch audit when app layout contains marketing sections', () => {
+    const result = runFastBuildBatchAudit({
+      layoutMode: 'app',
+      productType: 'tool',
+      targetPages: ['主頁面'],
+      originalRequirements: '做一個文字轉換工具',
+      batchCode: {
+        pages: [{
+          path: 'app/page.tsx',
+          description: 'tool',
+          content: '<main><section><h1>Hero</h1><p>Testimonials</p><div>Pricing</div></section></main>',
+        }],
+        components: [],
+        styles: '',
+      },
+    })
+
+    expect(result.passed).toBe(false)
+    expect(result.severity).toBe('critical')
+    expect(result.issues.join(' ')).toContain('marketing hero')
+  })
+
+  it('should fail batch audit when website layout looks like app shell', () => {
+    const result = runFastBuildBatchAudit({
+      layoutMode: 'website',
+      productType: 'landing',
+      targetPages: ['首頁'],
+      originalRequirements: '做一個品牌官網',
+      batchCode: {
+        pages: [{
+          path: 'app/page.tsx',
+          description: 'landing',
+          content: '<div className="min-h-screen flex"><aside className="sidebar border-r" /><main><h1>Welcome</h1><p>Command palette</p></main></div>',
+        }],
+        components: [],
+        styles: '',
+      },
+    })
+
+    expect(result.passed).toBe(false)
+    expect(result.severity).toBe('critical')
+    expect(result.issues.join(' ')).toContain('sidebar/app shell')
+  })
+
+  it('should request fallback when target page count is missing', () => {
+    const result = runFastBuildBatchAudit({
+      layoutMode: 'website',
+      productType: 'saas',
+      targetPages: ['首頁', '價格方案'],
+      originalRequirements: '做一個 saas 官網',
+      batchCode: {
+        pages: [{
+          path: 'app/page.tsx',
+          description: 'home',
+          content: '<main><section>Home</section></main>',
+        }],
+        components: [],
+        styles: '',
+      },
+    })
+
+    expect(result.passed).toBe(false)
+    expect(result.shouldRunLlmFallback).toBe(true)
+    expect(result.issues.join(' ')).toContain('missing target pages')
   })
 })
 

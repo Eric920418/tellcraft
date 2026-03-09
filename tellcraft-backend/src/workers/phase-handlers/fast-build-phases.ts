@@ -10,7 +10,7 @@ import type { FlowState, GeneratedCode } from '../../types/flow-state'
 import {
   generateStructure, generateAnimations, generateRwd,
   generateTailwindConfig, ensureResponsiveClasses,
-  VariantConcept, GeneratedComponent,
+  VariantConcept, GeneratedComponent, callClaude,
 } from '../../services/uiux-generation'
 import { runQualityGate, autoFixCriticalIssues, autoFixCriticalIssuesRuleBased } from '../../services/quality-gate'
 import {
@@ -26,10 +26,18 @@ import { sendMessage, saveFlowState, getFlowState, deleteFlowState, makeStreamin
 import { CREDIT_COSTS } from '../../config/plans'
 import { recommendMoods } from '../../services/design-moods'
 import { createLogger } from '../../lib/logger'
+import { safeParseJson } from '../../utils/safe-parse-json'
 
 const logger = createLogger('fast-build-phases')
 
 type QuickReply = { label: string; value: string; style: 'primary' | 'secondary' | 'ghost' }
+export type BatchAuditSeverity = 'none' | 'warning' | 'critical'
+export interface BatchAuditResult {
+  passed: boolean
+  severity: BatchAuditSeverity
+  issues: string[]
+  shouldRunLlmFallback: boolean
+}
 
 function formatFastBuildBatchLabel(pages: string[], locale: 'zh' | 'en'): string {
   if (pages.length === 0) {
@@ -47,6 +55,105 @@ function formatFastBuildBatchLabel(pages: string[], locale: 'zh' | 'en'): string
 
 function hasCodeTargets(code: GeneratedCode): boolean {
   return code.pages.length + code.components.length > 0
+}
+
+const APP_MARKETING_PATTERNS: Array<{ pattern: RegExp; label: string }> = [
+  { pattern: /\bhero\b|主視覺|hero section/i, label: 'marketing hero' },
+  { pattern: /testimonial|testimonials|用戶見證|客戶評價/i, label: 'testimonials' },
+  { pattern: /pricing|price plan|價格方案|方案比較/i, label: 'pricing table' },
+  { pattern: /newsletter|subscribe|訂閱電子報/i, label: 'newsletter CTA' },
+  { pattern: /brand story|our story|品牌故事/i, label: 'brand story' },
+]
+
+const WEBSITE_APP_SHELL_PATTERNS: Array<{ pattern: RegExp; label: string }> = [
+  { pattern: /<aside\b|sidebar|side-nav|border-r|min-h-screen[^`'"]{0,120}flex/i, label: 'sidebar/app shell' },
+  { pattern: /command palette|command menu|快捷指令|命令中心/i, label: 'command center' },
+  { pattern: /admin table|data table|儀表板|dashboard card|analytics/i, label: 'admin/dashboard framing' },
+]
+
+const PAGE_INTENT_RULES: Array<{ pattern: RegExp; requiredSignals: RegExp[]; label: string }> = [
+  { pattern: /價格|pricing|plans?/i, requiredSignals: [/pricing|price|monthly|annual|方案|月付|年付/i], label: 'pricing intent' },
+  { pattern: /訂房|booking|預約|reservation|掛號/i, requiredSignals: [/booking|reservation|appointment|預約|掛號|入住|日期/i], label: 'booking intent' },
+  { pattern: /dashboard|儀表板|主頁面/i, requiredSignals: [/dashboard|chart|table|metric|統計|資料|useState/i], label: 'dashboard/tool intent' },
+  { pattern: /商品|products?/i, requiredSignals: [/product|商品|price|加入購物車|cart/i], label: 'product intent' },
+]
+
+function flattenBatchText(code: GeneratedCode): string {
+  return [...code.pages, ...code.components]
+    .map(file => `${file.path}\n${file.content}`)
+    .join('\n')
+    .toLowerCase()
+}
+
+function buildBatchManifest(code: GeneratedCode): string {
+  return [
+    ...code.pages.map(page => `page:${page.path}`),
+    ...code.components.map(component => `component:${component.path}`),
+  ].join('\n')
+}
+
+function buildBatchContentExcerpt(code: GeneratedCode, maxCharsPerFile = 1200): string {
+  return [...code.pages, ...code.components]
+    .map(file => `## ${file.path}\n${file.content.slice(0, maxCharsPerFile)}`)
+    .join('\n\n')
+}
+
+export function runFastBuildBatchAudit(input: {
+  layoutMode: 'app' | 'website'
+  productType: string
+  targetPages: string[]
+  originalRequirements: string
+  batchCode: GeneratedCode
+}): BatchAuditResult {
+  const issues: string[] = []
+  let shouldRunLlmFallback = false
+  const text = flattenBatchText(input.batchCode)
+
+  if (input.batchCode.pages.length < input.targetPages.length) {
+    issues.push(`missing target pages (${input.batchCode.pages.length}/${input.targetPages.length})`)
+    shouldRunLlmFallback = true
+  }
+
+  if (input.layoutMode === 'app') {
+    for (const rule of APP_MARKETING_PATTERNS) {
+      if (rule.pattern.test(text)) {
+        issues.push(`app layout contains ${rule.label}`)
+      }
+    }
+  } else {
+    const appShellHits = WEBSITE_APP_SHELL_PATTERNS.filter(rule => rule.pattern.test(text))
+    if (appShellHits.length >= 2) {
+      issues.push(...appShellHits.map(hit => `website layout contains ${hit.label}`))
+    } else if (appShellHits.length === 1) {
+      shouldRunLlmFallback = true
+    }
+  }
+
+  for (const targetPage of input.targetPages) {
+    for (const rule of PAGE_INTENT_RULES) {
+      if (!rule.pattern.test(targetPage)) continue
+      if (!rule.requiredSignals.some(signal => signal.test(text))) {
+        issues.push(`target page "${targetPage}" is missing ${rule.label}`)
+        shouldRunLlmFallback = true
+      }
+    }
+  }
+
+  if (input.layoutMode === 'app' && /(hero|pricing|testimonial|newsletter|brand story)/i.test(input.originalRequirements) === false) {
+    if (/hero|pricing|testimonial|newsletter|brand story/i.test(text)) {
+      issues.push('app batch drifted toward marketing-only structure')
+    }
+  }
+
+  const severity: BatchAuditSeverity =
+    issues.length === 0 ? 'none' : issues.some(issue => /contains|drifted|missing target pages/.test(issue)) ? 'critical' : 'warning'
+
+  return {
+    passed: severity !== 'critical',
+    severity,
+    issues,
+    shouldRunLlmFallback: severity === 'critical' && shouldRunLlmFallback,
+  }
 }
 
 export function getRemainingFastBuildPages(state: Pick<FlowState, 'fastMode' | 'fastBuildAllPages' | 'fastBuildCompletedPages'>): string[] {
@@ -96,6 +203,78 @@ export function buildPostDeployFastBuildQuickReplies(
   }
 
   return quickReplies
+}
+
+async function runFastBuildBatchAuditLlmFallback(input: {
+  layoutMode: 'app' | 'website'
+  productType: string
+  targetPages: string[]
+  originalRequirements: string
+  batchCode: GeneratedCode
+  issues: string[]
+  userId: string
+  conversationId: string
+}): Promise<BatchAuditResult | null> {
+  const systemPrompt = `你是一位嚴格的前端產出審核員。你的任務是判斷「這一批生成的頁面是否偏離原始需求」。
+
+規則：
+- 只判斷是否偏題，不要修 code。
+- 偏題的情況包括：app/tool 生成成 marketing 官網、website 生成成 admin/app shell、目標頁面意圖明顯缺失。
+- 如果只是文案細節不同，但頁面方向正確，判定 passed=true。
+- 嚴格輸出 JSON：{"passed":boolean,"severity":"warning|critical","issues":["..."]}`
+
+  const userMessage = `## Original Requirements
+${input.originalRequirements}
+
+## Product Context
+- productType: ${input.productType}
+- layoutMode: ${input.layoutMode}
+- targetPages: ${input.targetPages.join(', ')}
+
+## Rule-based Findings
+${input.issues.map((issue, index) => `${index + 1}. ${issue}`).join('\n')}
+
+## Batch Manifest
+${buildBatchManifest(input.batchCode)}
+
+## Batch Excerpts
+${buildBatchContentExcerpt(input.batchCode)}
+
+請只判斷是否偏離需求，輸出 JSON。`
+
+  const response = await callClaude(
+    systemPrompt,
+    [{ role: 'user', content: userMessage }],
+    {
+      maxTokens: 1200,
+      temperature: 0,
+      promptLabel: 'fast-build-batch-audit',
+      contextSizeHint: 'fast',
+    },
+    {
+      purpose: 'fast_build_batch_audit',
+      userId: input.userId,
+      conversationId: input.conversationId,
+    }
+  )
+
+  if (!response.success || !response.content) {
+    logger.warn({ error: response.error }, 'fast build batch audit fallback 失敗')
+    return null
+  }
+
+  const parsed = safeParseJson<{ passed?: boolean; severity?: BatchAuditSeverity; issues?: string[] }>(response.content)
+  if (!parsed || typeof parsed.passed !== 'boolean') {
+    logger.warn({ preview: response.content.slice(0, 200) }, 'fast build batch audit fallback JSON 解析失敗')
+    return null
+  }
+
+  return {
+    passed: parsed.passed,
+    severity: parsed.severity === 'warning' || parsed.severity === 'critical' ? parsed.severity : (parsed.passed ? 'none' : 'critical'),
+    issues: Array.isArray(parsed.issues) ? parsed.issues : input.issues,
+    shouldRunLlmFallback: false,
+  }
 }
 
 // 檢查 pipeline 是否應該中止（用戶已按「完成/部署」，phase 被外部改掉）
@@ -397,11 +576,63 @@ export async function runFastBuildPipeline(params: {
     return
   }
 
-  let currentCode: GeneratedCode = {
+  let currentBatchCode: GeneratedCode = {
     pages: structureResult.pages || [],
     components: structureResult.components || [],
     styles: structureResult.styles || '',
   }
+
+  let batchAudit = runFastBuildBatchAudit({
+    layoutMode,
+    productType,
+    targetPages,
+    originalRequirements: expandedPrompt,
+    batchCode: currentBatchCode,
+  })
+
+  if (!batchAudit.passed && batchAudit.shouldRunLlmFallback) {
+    const fallbackAudit = await runFastBuildBatchAuditLlmFallback({
+      layoutMode,
+      productType,
+      targetPages,
+      originalRequirements: expandedPrompt,
+      batchCode: currentBatchCode,
+      issues: batchAudit.issues,
+      userId,
+      conversationId,
+    })
+    if (fallbackAudit) {
+      batchAudit = fallbackAudit
+    }
+  }
+
+  logger.info({
+    passed: batchAudit.passed,
+    severity: batchAudit.severity,
+    issues: batchAudit.issues,
+    llmFallback: batchAudit.shouldRunLlmFallback,
+    batch: state.fastBuildCurrentBatchIndex,
+  }, 'fast build batch audit 完成')
+
+  if (!batchAudit.passed) {
+    logger.warn({ batchAudit, batch: state.fastBuildCurrentBatchIndex }, 'fast build batch audit 攔截本批生成')
+    state.phase = 'fast_generating'
+    state.uiuxCodeGenerationStartedAt = undefined
+    state.waitingForReply = true
+    await saveFlowState(redis, conversationId, state)
+    await sendMessage(conversationId, io, {
+      content: isChinese
+        ? `本批頁面生成結果偏離原始需求，已中止後續動畫與響應式處理以避免浪費 token。\n\n問題：${batchAudit.issues.join('；')}\n\n你可以點「重試」重新生成，或調整描述後再試。`
+        : `This batch drifted from the original requirements, so animation/RWD were stopped to avoid wasting tokens.\n\nIssues: ${batchAudit.issues.join('; ')}\n\nYou can retry or adjust the prompt and try again.`,
+      stage: 'error',
+      quickReplies: [
+        { label: isChinese ? '重試' : 'Retry', value: '__retry_fast_build__', style: 'primary' as const },
+      ],
+    })
+    return
+  }
+
+  let currentCode: GeneratedCode = currentBatchCode
 
   // 第 2+ 批：合併到已有代碼
   if (isLaterBatch && existingCode) {

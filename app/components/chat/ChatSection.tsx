@@ -21,6 +21,7 @@ import { useCodePreviewEditor } from '@/app/hooks/useCodePreviewEditor'
 import { useLoginPrompt } from '@/app/hooks/useLoginPrompt'
 import { useChatSession } from '@/app/hooks/useChatSession'
 import { useChatPolling } from '@/app/hooks/useChatPolling'
+import { useCompletionAlert } from '@/app/hooks/useCompletionAlert'
 import { useTabSync } from '@/app/hooks/useTabSync'
 
 import { ProcessStep } from '@/app/components/landing'
@@ -242,6 +243,13 @@ export default function ChatSection({
     pollingCallbacks,
   )
   pollingRef.current = polling
+
+  const completionAlert = useCompletionAlert({
+    conversationId: session.sessionInfo?.conversationId,
+    isTyping,
+    messages,
+    toastMessage: tChat('completionAlertToast'),
+  })
 
   // ── Guest build detection ──
   useEffect(() => {
@@ -872,6 +880,44 @@ export default function ChatSection({
   const formulationProgress = lastMessage?.progress
   const formulationCurrentStage = Math.min(4, formulationProgress?.current || 0)
 
+  const alertToggleButton = (
+    <button
+      type="button"
+      onClick={() => completionAlert.setIsEnabled(!completionAlert.isEnabled)}
+      aria-pressed={completionAlert.isEnabled}
+      title={completionAlert.isEnabled ? tChat('completionAlertDisable') : tChat('completionAlertEnable')}
+      style={{
+        display: 'inline-flex',
+        alignItems: 'center',
+        gap: 8,
+        height: 34,
+        padding: '0 12px',
+        borderRadius: 999,
+        border: `1px solid ${completionAlert.isEnabled ? 'rgba(16, 185, 129, 0.24)' : 'var(--border-color)'}`,
+        background: completionAlert.isEnabled ? 'rgba(16, 185, 129, 0.08)' : 'rgba(148, 163, 184, 0.08)',
+        color: completionAlert.isEnabled ? '#047857' : 'var(--gray-500)',
+        fontSize: 12,
+        fontWeight: 600,
+        letterSpacing: '0.01em',
+        cursor: 'pointer',
+        transition: 'background 160ms ease, border-color 160ms ease, color 160ms ease',
+      }}
+    >
+      <span
+        aria-hidden="true"
+        style={{
+          width: 8,
+          height: 8,
+          borderRadius: '50%',
+          background: completionAlert.isEnabled ? '#10B981' : 'rgba(100, 116, 139, 0.7)',
+          boxShadow: completionAlert.isEnabled ? '0 0 0 4px rgba(16, 185, 129, 0.14)' : 'none',
+          transition: 'background 160ms ease, box-shadow 160ms ease',
+        }}
+      />
+      {completionAlert.isEnabled ? tChat('completionAlertOn') : tChat('completionAlertOff')}
+    </button>
+  )
+
   return (
     <>
     {/* Mobile Preview Modal */}
@@ -884,6 +930,67 @@ export default function ChatSection({
         handleSendMessage(locale === 'en' ? 'deploy' : '部署')
       }}
     />
+
+    <AnimatePresence>
+      {completionAlert.toast && (
+        <motion.div
+          key={completionAlert.toast.id}
+          initial={{ opacity: 0, y: 16, scale: 0.96 }}
+          animate={{ opacity: 1, y: 0, scale: 1 }}
+          exit={{ opacity: 0, y: 8, scale: 0.98 }}
+          transition={{ duration: 0.22, ease: smoothEasing }}
+          role="status"
+          aria-live="polite"
+          onClick={completionAlert.dismissToast}
+          style={{
+            position: 'fixed',
+            right: 20,
+            bottom: 20,
+            zIndex: 10001,
+            display: 'flex',
+            alignItems: 'center',
+            gap: 12,
+            minWidth: 220,
+            maxWidth: 320,
+            padding: '14px 16px',
+            borderRadius: 18,
+            border: '1px solid rgba(15, 23, 42, 0.08)',
+            background: 'rgba(255, 255, 255, 0.96)',
+            color: 'var(--gray-700)',
+            boxShadow: '0 18px 44px rgba(15, 23, 42, 0.18)',
+            backdropFilter: 'blur(18px)',
+            cursor: 'pointer',
+          }}
+        >
+          <div
+            aria-hidden="true"
+            style={{
+              width: 34,
+              height: 34,
+              borderRadius: 12,
+              background: 'linear-gradient(135deg, rgba(16, 185, 129, 0.18), rgba(59, 130, 246, 0.12))',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              color: '#047857',
+              fontSize: 16,
+              fontWeight: 700,
+              flexShrink: 0,
+            }}
+          >
+            AI
+          </div>
+          <div style={{ minWidth: 0 }}>
+            <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: '0.08em', color: 'var(--gray-400)', textTransform: 'uppercase' }}>
+              {tChat('completionAlertBadge')}
+            </div>
+            <div style={{ marginTop: 2, fontSize: 14, fontWeight: 600, letterSpacing: '-0.01em' }}>
+              {completionAlert.toast.message}
+            </div>
+          </div>
+        </motion.div>
+      )}
+    </AnimatePresence>
 
     <AnimatePresence>
       {/* Formulation View */}
@@ -940,6 +1047,9 @@ export default function ChatSection({
                   </button>
                   <div style={{ width: 1, height: 20, background: 'var(--border-color)' }} />
                   <span style={{ fontSize: 14, fontWeight: 500 }}>{isBddSplitMode ? tChat('bddSplitTitle') : tChat('uiuxSplitTitle')}</span>
+                  <div style={{ marginLeft: 'auto' }}>
+                    {alertToggleButton}
+                  </div>
                 </div>
                 <ChatMessageList
                   messages={messages}
@@ -1144,6 +1254,7 @@ export default function ChatSection({
 
             {/* Right: Theme + User */}
             <div style={{ display: 'flex', alignItems: 'center', gap: 16, flexShrink: 0 }}>
+              <span style={{ display: 'flex', alignItems: 'center' }}>{alertToggleButton}</span>
               <span className="header-theme-toggle" style={{ display: 'flex', alignItems: 'center', gap: 8 }}><AnimatedThemeToggler /><LocaleSwitcher /></span>
               <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
                 {(auth.isAuthenticated || session.sessionInfo?.isAuthenticated) ? (
