@@ -1785,7 +1785,7 @@ ${contextLines.join('\n')}
  * 規則：如果 xyzRef.current 被使用，但 component body 內找不到對應的 useRef 宣告，
  * 自動在第一個 return/useEffect/useCallback/canvas 相關行前插入宣告。
  */
-function repairUndeclaredRefs(file: GeneratedComponent): { content: string; repaired: boolean } {
+export function repairUndeclaredRefs(file: GeneratedComponent): { content: string; repaired: boolean } {
   const content = file.content
   // 找出所有 xyzRef.current 用法
   const usageMatches = [...content.matchAll(/\b(\w+Ref)\.current\b/g)]
