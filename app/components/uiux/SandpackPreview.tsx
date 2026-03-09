@@ -62,10 +62,10 @@ function SandpackErrorListener({
   useEffect(() => {
     const unsub = listen((msg) => {
       if (isStreaming || !onRuntimeError || hasReportedRef.current) return
-      if (msg.type !== 'action' || (msg as { action?: string }).action !== 'unhandled-error') return
-      const e = msg as { name?: string; message?: string; path?: string }
+      if (msg.type !== 'action' || (msg as { action?: string }).action !== 'show-error') return
+      const e = msg as { title?: string; message?: string; path?: string }
       hasReportedRef.current = true
-      onRuntimeError({ name: e.name || 'Error', message: e.message || 'Unknown', path: e.path })
+      onRuntimeError({ name: e.title || 'Error', message: e.message || 'Unknown', path: e.path })
     })
     return () => unsub()
   }, [listen, onRuntimeError, isStreaming])
