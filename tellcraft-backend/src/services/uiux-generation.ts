@@ -65,6 +65,21 @@ interface LlmTrackingContext {
   purpose?: string
 }
 
+function estimateContentChars(
+  content: string | Anthropic.MessageCreateParams['messages'][number]['content']
+): number {
+  if (typeof content === 'string') return content.length
+  return content.reduce((total, block) => {
+    if (block.type === 'text') return total + block.text.length
+    if (block.type === 'image') {
+      const source = block.source
+      if (source.type === 'url') return total + source.url.length
+      if (source.type === 'base64') return total + source.data.length
+    }
+    return total
+  }, 0)
+}
+
 // 判斷是否為可重試的暫時性錯誤
 function isRetryableError(err: unknown): boolean {
   const msg = String(err)
@@ -168,6 +183,8 @@ export async function callClaude(
     maxTokens?: number
     temperature?: number
     maxContinuations?: number
+    promptLabel?: string
+    contextSizeHint?: string
   },
   trackingContext?: LlmTrackingContext,
   onTextDelta?: (accumulatedText: string) => void
@@ -187,6 +204,8 @@ export async function callClaude(
         let continuationCount = 0
         let requestMessages = [...baseMessages]
         let lastContinuationSeed = ''
+        const requestStartedAt = Date.now()
+        const inputCharEstimate = systemPrompt.length + requestMessages.reduce((sum, msg) => sum + estimateContentChars(msg.content), 0)
 
         while (true) {
           const stream = anthropic.messages.stream({
@@ -222,6 +241,15 @@ export async function callClaude(
               userId: trackingContext?.userId,
               conversationId: trackingContext?.conversationId,
             })
+            logger.info({
+              purpose: trackingContext?.purpose,
+              promptLabel: options?.promptLabel,
+              contextSizeHint: options?.contextSizeHint,
+              inputTokens: usage.input_tokens || 0,
+              outputTokens: usage.output_tokens || 0,
+              inputCharEstimate,
+              durationMs: Date.now() - requestStartedAt,
+            }, 'LLM 請求完成')
           }
 
           // streaming text 可能為空，回退使用 finalMessage 內容
@@ -325,6 +353,7 @@ export async function callClaude(
 // ============================================================
 
 export type DesignTier = 'functional' | 'creative'
+export type GenerationProfile = 'balanced' | 'quality' | 'fast'
 
 // ============================================================
 // Mood-Design System 衝突檢測（防止白字疊白底）
@@ -831,6 +860,12 @@ export interface GenerationResult {
   error?: string
 }
 
+interface CodeBundle {
+  pages: GeneratedComponent[]
+  components: GeneratedComponent[]
+  styles: string
+}
+
 // LlmTrackingContext 已在上方定義
 
 // ============================================================
@@ -1298,6 +1333,177 @@ ${getMoodSummary(designSystem.mood)}（完整風格指引已在生成指令中�
 - 禁止使用 Tailwind 默認顏色（bg-blue-500 等）
 - 對比配對：亮底（background/surface-1/2/3）→ text-foreground（深色）；深底（slate-950/black）→ text-white（白色）
 - 半透明白色卡片（bg-white/50 以上）→ 偏亮 → 用深色文字；bg-white/10 以下 → 依底層顏色決定文字色`
+}
+
+export function buildCompactDesignPrompt(
+  designSystem: DesignSystem,
+  options?: { includeTypography?: boolean; includeMood?: boolean }
+): string {
+  const lines = [
+    '## Design System 摘要（迭代階段）',
+    `- Colors: primary=${designSystem.colorPalette.primary}, accent=${designSystem.colorPalette.accent}, background=${designSystem.colorPalette.background}, foreground=${designSystem.colorPalette.foreground}, border=${designSystem.colorPalette.border}`,
+    `- Surface layering: ${designSystem.colorPalette.surface1 || designSystem.colorPalette.background} -> ${designSystem.colorPalette.surface2 || designSystem.colorPalette.muted} -> ${designSystem.colorPalette.surface3 || designSystem.colorPalette.background}`,
+    `- Radius: sm=${designSystem.borderRadius.sm}, md=${designSystem.borderRadius.md}, lg=${designSystem.borderRadius.lg}`,
+    `- Spacing unit: ${designSystem.spacing.unit}px`,
+  ]
+
+  if (options?.includeTypography !== false) {
+    lines.push(`- Typography: ${designSystem.typography.fontFamily}`)
+  }
+  if (designSystem.shadows?.strategy) {
+    lines.push(`- Depth strategy: ${designSystem.shadows.strategy}`)
+  }
+  if (designSystem.animationPersonality) {
+    lines.push(`- Animation personality: ${designSystem.animationPersonality}`)
+  }
+  if (options?.includeMood !== false && designSystem.mood) {
+    lines.push(`- Mood: ${getMoodSummary(designSystem.mood)}`)
+  }
+
+  lines.push(
+    '- 使用既有 Design System token；不要改色盤、字體家族、間距尺度。',
+    '- 只輸出實際修改的檔案。'
+  )
+
+  return lines.join('\n')
+}
+
+function countResponsiveClassesInBundle(code: CodeBundle): number {
+  const allContent = [...code.pages, ...code.components].map(c => c.content).join('\n')
+  return (allContent.match(/\b(sm|md|lg|xl|2xl):/g) || []).length
+}
+
+function mergeCodeBundle(base: CodeBundle, patch: Partial<CodeBundle>): CodeBundle {
+  const pageMap = new Map((patch.pages || []).map(page => [page.path, page]))
+  const componentMap = new Map((patch.components || []).map(component => [component.path, component]))
+
+  const pages = [
+    ...base.pages.map(page => pageMap.get(page.path) ?? page),
+    ...(patch.pages || []).filter(page => !base.pages.some(existing => existing.path === page.path)),
+  ]
+  const components = [
+    ...base.components.map(component => componentMap.get(component.path) ?? component),
+    ...(patch.components || []).filter(component => !base.components.some(existing => existing.path === component.path)),
+  ]
+
+  return {
+    pages,
+    components,
+    styles: patch.styles || base.styles,
+  }
+}
+
+function buildCodeManifest(code: CodeBundle): string {
+  const pageList = code.pages.map(page => `- page: ${page.path}`).join('\n')
+  const componentList = code.components.map(component => `- component: ${component.path}`).join('\n')
+  return [pageList, componentList].filter(Boolean).join('\n')
+}
+
+function selectAnimationTargets(code: CodeBundle, profile: GenerationProfile): CodeBundle {
+  const selectedPages = code.pages.filter(page => {
+    const content = page.content
+    const shouldInclude =
+      content.includes('data-animate') ||
+      /<button|<form|onClick=|onSubmit=|hover:|dialog|Modal|AlertDialog/.test(content)
+    return shouldInclude
+  })
+
+  if (profile === 'quality' && selectedPages.length === 0) {
+    return code
+  }
+
+  const selectedComponents = code.components.filter(component => {
+    const content = component.content
+    return content.includes('data-animate') ||
+      /<button|<form|onClick=|onSubmit=|hover:|dialog|Modal|AlertDialog/.test(content)
+  })
+
+  return {
+    pages: selectedPages,
+    components: selectedComponents,
+    styles: code.styles,
+  }
+}
+
+function selectRwdTargets(code: CodeBundle, profile: GenerationProfile): CodeBundle {
+  const selectedPages = code.pages.filter(page =>
+    /grid-|flex|table|header|nav|sidebar|form|overflow-x|w-\[|max-w-|px-|py-/.test(page.content)
+  )
+  const selectedComponents = code.components.filter(component =>
+    /grid-|flex|table|header|nav|sidebar|form|overflow-x|w-\[|max-w-|px-|py-/.test(component.content)
+  )
+
+  if (profile === 'quality' && selectedPages.length === 0 && selectedComponents.length === 0) {
+    return code
+  }
+
+  return {
+    pages: selectedPages,
+    components: selectedComponents,
+    styles: code.styles,
+  }
+}
+
+function shouldSkipAnimationStage(code: CodeBundle, profile: GenerationProfile): boolean {
+  if (profile === 'quality') return false
+  return ![...code.pages, ...code.components].some(file => file.content.includes('data-animate'))
+}
+
+function shouldSkipRwdStage(code: CodeBundle, profile: GenerationProfile): boolean {
+  const responsiveCount = countResponsiveClassesInBundle(code)
+  if (profile === 'quality') return responsiveCount >= 12
+  return responsiveCount >= 8
+}
+
+function estimateStructureBatchWeight(
+  page: string,
+  contextChars: number,
+  profile: GenerationProfile
+): number {
+  const normalizedPage = page.toLowerCase()
+  let weight = Math.ceil(contextChars / 16)
+  weight += Math.max(600, page.length * 60)
+  if (/(home|首頁|dashboard|主頁)/i.test(normalizedPage)) weight += 500
+  if (profile === 'quality') weight += 250
+  if (profile === 'fast') weight -= 100
+  return weight
+}
+
+export function buildAdaptiveStructureBatches(
+  pages: string[],
+  options?: {
+    contextChars?: number
+    profile?: GenerationProfile
+    maxEstimatedTokens?: number
+  }
+): string[][] {
+  if (pages.length <= 2) return [pages]
+
+  const profile = options?.profile || 'balanced'
+  const contextChars = options?.contextChars || 0
+  const maxEstimatedTokens = options?.maxEstimatedTokens || (profile === 'quality' ? 14000 : profile === 'fast' ? 9000 : 11000)
+
+  const batches: string[][] = []
+  let currentBatch: string[] = []
+  let currentWeight = 0
+
+  for (const page of pages) {
+    const pageWeight = estimateStructureBatchWeight(page, contextChars, profile)
+    if (currentBatch.length > 0 && currentWeight + pageWeight > maxEstimatedTokens) {
+      batches.push(currentBatch)
+      currentBatch = [page]
+      currentWeight = pageWeight
+      continue
+    }
+    currentBatch.push(page)
+    currentWeight += pageWeight
+  }
+
+  if (currentBatch.length > 0) {
+    batches.push(currentBatch)
+  }
+
+  return batches
 }
 
 /**
@@ -2089,11 +2295,13 @@ export async function generateStructure(
     moodId?: string
     existingComponentSummary?: string  // 已有組件路徑列表（增量生成用）
     incrementalFirstBatch?: boolean    // 增量首批：只生成指定頁面 + Layout/Header/Footer
+    generationProfile?: GenerationProfile
   },
   trackingContext?: LlmTrackingContext,
   onPartialCode?: PartialCodeCallback
 ): Promise<GenerationResult> {
   const tier = designTier || 'functional'
+  const generationProfile = productContext?.generationProfile || 'balanced'
 
   // 選擇視覺技法並注入 prompt
   const techniques = selectTechniques(tier, template.category, 3)
@@ -2425,12 +2633,14 @@ ${isLaterBatch
   }
 
   const baseTemperature = designTier === 'creative' ? (productContext?.moodId ? 0.5 : 0.4) : 0.3
-  const singlePassLlmOpts = { maxTokens: 32768, temperature: baseTemperature }
-  const multiPassLlmOpts = { maxTokens: 32768, temperature: baseTemperature, maxContinuations: 5 }
-
-  // ── Multi-pass：3+ 頁改為逐頁生成，從源頭降低單次輸出量，避免連續撞 max_tokens ──
-  const MULTI_PASS_THRESHOLD = 3
-  const BATCH_SIZE = 2
+  const singlePassLlmOpts = { maxTokens: 32768, temperature: baseTemperature, promptLabel: 'uiux-structure-single', contextSizeHint: generationProfile }
+  const multiPassLlmOpts = {
+    maxTokens: 32768,
+    temperature: baseTemperature,
+    maxContinuations: generationProfile === 'quality' ? 4 : generationProfile === 'fast' ? 1 : 2,
+    promptLabel: 'uiux-structure-batch',
+    contextSizeHint: generationProfile,
+  }
 
   let allRawPages: GeneratedComponent[] = []
   let allRawComponents: GeneratedComponent[] = []
@@ -2441,13 +2651,18 @@ ${isLaterBatch
     ? productContext.existingComponentSummary.split('\n').map(l => l.trim()).filter(Boolean)
     : []
 
-  if (pages.length >= MULTI_PASS_THRESHOLD) {
-    logger.info({ totalPages: pages.length, batchSize: BATCH_SIZE }, 'generateStructure multi-pass 模式')
+  const contextChars =
+    systemPrompt.length +
+    (productDesc?.length || 0) +
+    (bddSpec?.length || 0) +
+    JSON.stringify(productContext?.uiSpec || {}).length
+  const batches = buildAdaptiveStructureBatches(pages, {
+    contextChars,
+    profile: generationProfile,
+  })
 
-    const batches: string[][] = []
-    for (let i = 0; i < pages.length; i += BATCH_SIZE) {
-      batches.push(pages.slice(i, i + BATCH_SIZE))
-    }
+  if (batches.length > 1) {
+    logger.info({ totalPages: pages.length, batchCount: batches.length, generationProfile }, 'generateStructure multi-pass 模式')
 
     for (let batchIdx = 0; batchIdx < batches.length; batchIdx++) {
       const batch = batches[batchIdx]
@@ -2503,7 +2718,7 @@ ${isLaterBatch
       logger.info({ batchIdx: batchIdx + 1, pages: bPages.length, components: bComps.length }, 'generateStructure 批次完成')
     }
   } else {
-    // 單次生成（≤ 2 頁）
+    // 單次生成
     const response = await callClaude(
       systemPrompt,
       [{ role: 'user', content: buildUserMsg(pages, externalExistingPaths) }],
@@ -2569,11 +2784,7 @@ ${isLaterBatch
  */
 export async function generateAnimations(
   designSystem: DesignSystem,
-  existingCode: {
-    pages: GeneratedComponent[]
-    components: GeneratedComponent[]
-    styles: string
-  },
+  existingCode: CodeBundle,
   designTier?: DesignTier,
   trackingContext?: LlmTrackingContext,
   onPartialCode?: PartialCodeCallback,
@@ -2581,12 +2792,20 @@ export async function generateAnimations(
   uiSpecSummary?: string,
   moodId?: string,
   incrementalOptions?: { maxTokens?: number; maxContinuations?: number },
+  generationProfile: GenerationProfile = 'balanced',
 ): Promise<GenerationResult> {
   const tier = designTier || 'functional'
+  if (shouldSkipAnimationStage(existingCode, generationProfile)) {
+    logger.info({ purpose: trackingContext?.purpose, generationProfile }, '動畫階段跳過：未偵測到 data-animate 意圖')
+    return { success: true, pages: existingCode.pages, components: existingCode.components, styles: existingCode.styles }
+  }
+
+  const targetCode = selectAnimationTargets(existingCode, generationProfile)
+  const promptCode = targetCode.pages.length > 0 || targetCode.components.length > 0 ? targetCode : existingCode
 
   const systemPrompt = `你是一位專業的前端動畫專家。在現有代碼基礎上添加適當的動畫效果。
 
-${buildDesignSystemPrompt(designSystem)}
+${buildCompactDesignPrompt(designSystem, { includeMood: true })}
 
 ## 本階段任務：動畫增強（Animations）
 這是第二階段，需要：
@@ -2664,9 +2883,9 @@ ${getAnimationConstraints(tier)}
 - "parallax" → useScroll + useTransform(scrollY, [0,500], [0,-100])`
 
   const existingCodeStr = [
-    ...existingCode.pages.map(p => `\`\`\`tsx:${p.path}\n${p.content}\n\`\`\``),
-    ...existingCode.components.map(c => `\`\`\`tsx:${c.path}\n${c.content}\n\`\`\``),
-    `\`\`\`css:globals.css\n${existingCode.styles}\n\`\`\``,
+    ...promptCode.pages.map(p => `\`\`\`tsx:${p.path}\n${p.content}\n\`\`\``),
+    ...promptCode.components.map(c => `\`\`\`tsx:${c.path}\n${c.content}\n\`\`\``),
+    `\`\`\`css:globals.css\n${promptCode.styles}\n\`\`\``,
   ].join('\n\n')
 
   const conceptReminder = variantConcept
@@ -2685,6 +2904,9 @@ ${getAnimationConstraints(tier)}
 
   const userMessage = `請在以下代碼基礎上添加動畫效果：
 ${conceptReminder}${moodAnimSection}${uiSpecHint}
+## 專案檔案清單（未列出內容的檔案視為只讀）
+${buildCodeManifest(existingCode)}
+
 ## 現有代碼
 ${existingCodeStr}
 
@@ -2702,7 +2924,13 @@ ${existingCodeStr}
   const response = await callClaude(
     systemPrompt,
     [{ role: 'user', content: userMessage }],
-    { maxTokens: incrementalOptions?.maxTokens || 32768, temperature: tier === 'creative' ? 0.35 : 0.2, maxContinuations: incrementalOptions?.maxContinuations },
+    {
+      maxTokens: incrementalOptions?.maxTokens || 32768,
+      temperature: tier === 'creative' ? 0.35 : 0.2,
+      maxContinuations: incrementalOptions?.maxContinuations,
+      promptLabel: 'uiux-animation',
+      contextSizeHint: generationProfile,
+    },
     { ...trackingContext, purpose: 'generate_animations' },
     buildStreamingHandler(onPartialCode)
   )
@@ -2722,11 +2950,17 @@ ${existingCodeStr}
   // 如果沒有解析到新的 styles，保留原有的
   const finalStyles = styles || existingCode.styles
 
+  const merged = mergeCodeBundle(existingCode, {
+    pages,
+    components,
+    styles: finalStyles,
+  })
+
   return {
     success: true,
-    pages: pages.length > 0 ? pages : existingCode.pages,
-    components: components.length > 0 ? components : existingCode.components,
-    styles: finalStyles,
+    pages: merged.pages,
+    components: merged.components,
+    styles: merged.styles,
   }
 }
 
@@ -2736,11 +2970,7 @@ ${existingCodeStr}
  */
 export async function generateRwd(
   designSystem: DesignSystem,
-  existingCode: {
-    pages: GeneratedComponent[]
-    components: GeneratedComponent[]
-    styles: string
-  },
+  existingCode: CodeBundle,
   designTier?: DesignTier,
   trackingContext?: LlmTrackingContext,
   onPartialCode?: PartialCodeCallback,
@@ -2749,8 +2979,16 @@ export async function generateRwd(
   layoutMode?: 'app' | 'website',
   moodId?: string,
   incrementalOptions?: { maxTokens?: number; maxContinuations?: number },
+  generationProfile: GenerationProfile = 'balanced',
 ): Promise<GenerationResult> {
   const tier = designTier || 'functional'
+  if (shouldSkipRwdStage(existingCode, generationProfile)) {
+    logger.info({ purpose: trackingContext?.purpose, generationProfile }, 'RWD 階段跳過：既有響應式 class 已足夠')
+    return { success: true, pages: existingCode.pages, components: existingCode.components, styles: existingCode.styles }
+  }
+
+  const targetCode = selectRwdTargets(existingCode, generationProfile)
+  const promptCode = targetCode.pages.length > 0 || targetCode.components.length > 0 ? targetCode : existingCode
 
   const rwdTierHint = tier === 'creative'
     ? `## Design Tier: Creative（創意型 RWD）
@@ -2765,7 +3003,7 @@ export async function generateRwd(
 
   const systemPrompt = `你是一位專業的響應式設計專家。在現有代碼基礎上添加完整的響應式設計。
 
-${buildDesignSystemPrompt(designSystem)}
+${buildCompactDesignPrompt(designSystem, { includeMood: true })}
 
 ${rwdTierHint}
 
@@ -2823,9 +3061,9 @@ ${layoutMode === 'app'
 - [ ] ${layoutMode === 'app' ? '移動端功能完整可用' : '移動端漢堡選單可用且可關閉'}`
 
   const existingCodeStr = [
-    ...existingCode.pages.map(p => `\`\`\`tsx:${p.path}\n${p.content}\n\`\`\``),
-    ...existingCode.components.map(c => `\`\`\`tsx:${c.path}\n${c.content}\n\`\`\``),
-    `\`\`\`css:globals.css\n${existingCode.styles}\n\`\`\``,
+    ...promptCode.pages.map(p => `\`\`\`tsx:${p.path}\n${p.content}\n\`\`\``),
+    ...promptCode.components.map(c => `\`\`\`tsx:${c.path}\n${c.content}\n\`\`\``),
+    `\`\`\`css:globals.css\n${promptCode.styles}\n\`\`\``,
   ].join('\n\n')
 
   const rwdConceptReminder = variantConcept
@@ -2842,6 +3080,9 @@ ${layoutMode === 'app'
 
   const userMessage = `請在以下代碼基礎上添加響應式設計：
 ${rwdConceptReminder}${moodRwdSection}${rwdUiSpecHint}
+## 專案檔案清單（未列出內容的檔案視為只讀）
+${buildCodeManifest(existingCode)}
+
 ## 現有代碼
 ${existingCodeStr}
 
@@ -2861,7 +3102,13 @@ ${existingCodeStr}
   const response = await callClaude(
     systemPrompt,
     [{ role: 'user', content: userMessage }],
-    { maxTokens: incrementalOptions?.maxTokens || 32768, temperature: 0.2, maxContinuations: incrementalOptions?.maxContinuations ?? 2 },
+    {
+      maxTokens: incrementalOptions?.maxTokens || 32768,
+      temperature: 0.2,
+      maxContinuations: incrementalOptions?.maxContinuations ?? 2,
+      promptLabel: 'uiux-rwd',
+      contextSizeHint: generationProfile,
+    },
     { ...trackingContext, purpose: 'generate_rwd' },
     buildStreamingHandler(onPartialCode)
   )

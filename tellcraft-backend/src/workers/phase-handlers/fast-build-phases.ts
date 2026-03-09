@@ -12,7 +12,7 @@ import {
   generateTailwindConfig, ensureResponsiveClasses,
   VariantConcept, GeneratedComponent,
 } from '../../services/uiux-generation'
-import { runQualityGate, autoFixCriticalIssues } from '../../services/quality-gate'
+import { runQualityGate, autoFixCriticalIssues, autoFixCriticalIssuesRuleBased } from '../../services/quality-gate'
 import {
   detectDesignTier, inferProductType, inferPages,
   buildDefaultDesignSystem, buildMinimalTemplate,
@@ -296,6 +296,7 @@ export async function runFastBuildPipeline(params: {
       moodId,
       existingComponentSummary,
       incrementalFirstBatch: isIncrementalFirstBatch,
+      generationProfile: 'fast',
     },
     { userId, conversationId, purpose: isLaterBatch ? 'fast-build-structure-batch' : 'fast-build-structure' },
     structureStreamingCallback
@@ -389,6 +390,7 @@ export async function runFastBuildPipeline(params: {
     fastUiSpecSummary,
     moodId,
     isLaterBatch ? { maxTokens: calcIncrementalMaxTokens(animInput), maxContinuations: 1 } : undefined,
+    'fast',
   )
 
   if (animationResult.success) {
@@ -467,6 +469,7 @@ export async function runFastBuildPipeline(params: {
     layoutMode,
     moodId,
     isLaterBatch ? { maxTokens: calcIncrementalMaxTokens(rwdInput), maxContinuations: 1 } : undefined,
+    'fast',
   )
 
   if (rwdResult.success) {
@@ -502,7 +505,7 @@ export async function runFastBuildPipeline(params: {
     // 每輪修復前再確認是否被中止
     if (await isPipelineAborted(redis, conversationId)) return
 
-    const criticalIssues = [
+    let criticalIssues = [
       ...report.categories.a11y.issues,
       ...report.categories.performance.issues,
       ...report.categories.code_quality.issues,
@@ -511,6 +514,18 @@ export async function runFastBuildPipeline(params: {
 
     logger.info(`QG 第 ${attempt + 1} 輪修復：${criticalIssues.length} 個 critical`)
     try {
+      const ruleFixed = autoFixCriticalIssuesRuleBased(currentCode, criticalIssues)
+      if (ruleFixed) {
+        currentCode = ruleFixed
+        report = runQualityGate(currentCode, tier, state.uiuxDesignMood)
+        criticalIssues = [
+          ...report.categories.a11y.issues,
+          ...report.categories.performance.issues,
+          ...report.categories.code_quality.issues,
+        ].filter(i => i.severity === 'critical')
+        if (criticalIssues.length === 0) break
+      }
+
       const fixed = await autoFixCriticalIssues(currentCode, criticalIssues, { userId, conversationId })
       if (!fixed) break
       currentCode = fixed
@@ -717,10 +732,12 @@ export async function resumeFastBuildPipeline(params: {
         tier,
         { userId, conversationId, purpose: 'fast-build-animation-resume' },
         animStreamingCallback,
-        variantConcept,
-        fastUiSpecSummary,
-        moodId,
-      )
+      variantConcept,
+      fastUiSpecSummary,
+      moodId,
+      undefined,
+      'fast',
+    )
 
       if (animationResult.success) {
         currentCode = {
@@ -766,6 +783,8 @@ export async function resumeFastBuildPipeline(params: {
       fastUiSpecSummary,
       layoutMode,
       moodId,
+      undefined,
+      'fast',
     )
 
     if (rwdResult.success) {
@@ -790,7 +809,7 @@ export async function resumeFastBuildPipeline(params: {
     for (let attempt = 0; attempt < 2 && !report.passed; attempt++) {
       if (await isPipelineAborted(redis, conversationId)) return
 
-      const criticalIssues = [
+      let criticalIssues = [
         ...report.categories.a11y.issues,
         ...report.categories.performance.issues,
         ...report.categories.code_quality.issues,
@@ -798,6 +817,18 @@ export async function resumeFastBuildPipeline(params: {
       if (criticalIssues.length === 0) break
 
       try {
+        const ruleFixed = autoFixCriticalIssuesRuleBased(currentCode, criticalIssues)
+        if (ruleFixed) {
+          currentCode = ruleFixed
+          report = runQualityGate(currentCode, tier, state.uiuxDesignMood)
+          criticalIssues = [
+            ...report.categories.a11y.issues,
+            ...report.categories.performance.issues,
+            ...report.categories.code_quality.issues,
+          ].filter(i => i.severity === 'critical')
+          if (criticalIssues.length === 0) break
+        }
+
         const fixed = await autoFixCriticalIssues(currentCode, criticalIssues, { userId, conversationId })
         if (!fixed) break
         currentCode = fixed

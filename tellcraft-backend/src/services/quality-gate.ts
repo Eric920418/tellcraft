@@ -533,6 +533,115 @@ export function runQualityGate(code: GeneratedCode, designTier?: DesignTier, moo
   }
 }
 
+function mergeGeneratedCode(base: GeneratedCode, patch: Partial<GeneratedCode>): GeneratedCode {
+  const pageMap = new Map((patch.pages || []).map(page => [page.path, page]))
+  const componentMap = new Map((patch.components || []).map(component => [component.path, component]))
+
+  return {
+    pages: [
+      ...base.pages.map(page => pageMap.get(page.path) ?? page),
+      ...(patch.pages || []).filter(page => !base.pages.some(existing => existing.path === page.path)),
+    ],
+    components: [
+      ...base.components.map(component => componentMap.get(component.path) ?? component),
+      ...(patch.components || []).filter(component => !base.components.some(existing => existing.path === component.path)),
+    ],
+    styles: patch.styles || base.styles,
+  }
+}
+
+function addClassToken(tag: string, token: string): string {
+  const classMatch = tag.match(/className=(["'])([^"']*)(\1)/)
+  if (!classMatch) {
+    return tag.replace(/<(\w+)/, `<$1 className="${token}"`)
+  }
+  const quote = classMatch[1]
+  const current = classMatch[2]
+  if (current.includes(token)) return tag
+  const nextValue = `${current} ${token}`.trim()
+  return tag.replace(classMatch[0], `className=${quote}${nextValue}${quote}`)
+}
+
+function applyRuleBasedFixToFile(content: string, issue: QualityIssue): string {
+  switch (issue.rule) {
+    case 'motion-import':
+      return content.replace(/from\s+['"]framer-motion['"]/g, "from 'motion/react'")
+    case 'tailwind-v4': {
+      const withoutTailwind = content.replace(/^\s*@tailwind\s+(base|components|utilities)\s*;?\s*$/gm, '').trim()
+      if (withoutTailwind.includes('@import "tailwindcss"')) {
+        return withoutTailwind
+      }
+      return `@import "tailwindcss"\n\n${withoutTailwind}`.trim()
+    }
+    case 'focus-visible':
+      return content
+        .replace(/<button\b[^>]*>/g, tag => addClassToken(tag, 'focus-visible:ring-2 focus-visible:ring-offset-2'))
+        .replace(/<a\b[^>]*>/g, tag => addClassToken(tag, 'focus-visible:ring-2 focus-visible:ring-offset-2'))
+    case 'form-labels':
+      return content.replace(/<input\b([^>]*?)>/g, (match, attrs) => {
+        if (/aria-label=|aria-labelledby=|id=/.test(attrs)) return match
+        const placeholder = attrs.match(/placeholder=(["'])(.*?)\1/)
+        if (placeholder?.[2]) {
+          return `<input${attrs} aria-label="${placeholder[2]}">`
+        }
+        return match
+      })
+    default:
+      return content
+  }
+}
+
+export function autoFixCriticalIssuesRuleBased(
+  code: GeneratedCode,
+  issues: QualityIssue[]
+): GeneratedCode | null {
+  let changed = false
+
+  const pages = code.pages.map(page => {
+    const fileIssues = issues.filter(issue => issue.file === page.path)
+    if (fileIssues.length === 0) return page
+    let nextContent = page.content
+    for (const issue of fileIssues) {
+      nextContent = applyRuleBasedFixToFile(nextContent, issue)
+    }
+    if (nextContent !== page.content) changed = true
+    return nextContent === page.content ? page : { ...page, content: nextContent }
+  })
+
+  const components = code.components.map(component => {
+    const fileIssues = issues.filter(issue => issue.file === component.path)
+    if (fileIssues.length === 0) return component
+    let nextContent = component.content
+    for (const issue of fileIssues) {
+      nextContent = applyRuleBasedFixToFile(nextContent, issue)
+    }
+    if (nextContent !== component.content) changed = true
+    return nextContent === component.content ? component : { ...component, content: nextContent }
+  })
+
+  let styles = code.styles
+  const styleIssues = issues.filter(issue => issue.file === 'globals.css')
+  if (styleIssues.length > 0) {
+    for (const issue of styleIssues) {
+      styles = applyRuleBasedFixToFile(styles, issue)
+    }
+    if (styles !== code.styles) changed = true
+  }
+
+  if (!changed) return null
+  return { pages, components, styles }
+}
+
+function pickIssueScopedCode(code: GeneratedCode, issues: QualityIssue[]): GeneratedCode {
+  const filePaths = new Set(issues.map(issue => issue.file))
+
+  return {
+    pages: code.pages.filter(page => filePaths.has(page.path)),
+    components: code.components.filter(component => filePaths.has(component.path)),
+    styles: filePaths.has('globals.css') ? code.styles : '',
+  }
+}
+
 // ============================================================
 // 自動修復：用 LLM 修復 critical issues
 // ============================================================
@@ -543,17 +652,18 @@ export async function autoFixCriticalIssues(
   trackingContext?: { userId?: string; conversationId?: string }
 ): Promise<GeneratedCode | null> {
   const client = getAnthropicClient()
+  const scopedCode = pickIssueScopedCode(code, issues)
 
   // 組合所有代碼供 LLM 修復
   const codeBlocks: string[] = []
-  for (const page of code.pages) {
+  for (const page of scopedCode.pages) {
     codeBlocks.push(`\`\`\`tsx:${page.path}\n${page.content}\n\`\`\``)
   }
-  for (const comp of code.components) {
+  for (const comp of scopedCode.components) {
     codeBlocks.push(`\`\`\`tsx:${comp.path}\n${comp.content}\n\`\`\``)
   }
-  if (code.styles) {
-    codeBlocks.push(`\`\`\`css:globals.css\n${code.styles}\n\`\`\``)
+  if (scopedCode.styles) {
+    codeBlocks.push(`\`\`\`css:globals.css\n${scopedCode.styles}\n\`\`\``)
   }
 
   const issueList = issues.map(i =>
@@ -605,8 +715,8 @@ ${codeBlocks.join('\n\n')}
       .join('\n')
 
     // 解析修復後的檔案
-    const result = parseFixedFiles(content, code)
-    return result
+    const result = parseFixedFiles(content, scopedCode)
+    return mergeGeneratedCode(code, result)
   } catch (error) {
     logger.error({ err: error }, 'autoFix 失敗')
     return null

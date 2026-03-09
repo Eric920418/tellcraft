@@ -16,7 +16,7 @@ import {
   ensureResponsiveClasses,
 } from '../../services/uiux-generation'
 import { translateBddToUISpec, buildUISpecSummary } from '../../services/bdd-to-ui-spec'
-import { runQualityGate, autoFixCriticalIssues } from '../../services/quality-gate'
+import { runQualityGate, autoFixCriticalIssues, autoFixCriticalIssuesRuleBased } from '../../services/quality-gate'
 import { getBddSession, updateBddSession } from '../../services/bdd-session'
 import { analyzeReference } from '../../services/reference-analyzer'
 import { recommendMoods, getMoodSummary } from '../../services/design-moods'
@@ -1036,6 +1036,7 @@ export async function executeFullCodePipeline(
         templateOverrides: state.templateOverrides,
         referenceAnalysis: state.uiuxReferenceAnalysis,
         moodId: state.uiuxDesignMood,
+        generationProfile: 'balanced',
       },
       { userId: state.userId, conversationId, purpose: 'uiux_structure' },
       makeStreamingCallback(conversationId, io, redis, 'structure', twConfig)
@@ -1092,7 +1093,9 @@ export async function executeFullCodePipeline(
       makeStreamingCallback(conversationId, io, redis, 'animation', twConfig),
       state.uiuxVariantConcept,
       pipelineUiSpecSummary,
-      state.uiuxDesignMood
+      state.uiuxDesignMood,
+      undefined,
+      'balanced'
     )
 
     if (animationResult.success) {
@@ -1135,7 +1138,9 @@ export async function executeFullCodePipeline(
     state.uiuxVariantConcept,
     pipelineUiSpecSummary,
     undefined,
-    state.uiuxDesignMood
+    state.uiuxDesignMood,
+    undefined,
+    'balanced'
   )
 
   if (rwdResult.success) {
@@ -1154,7 +1159,7 @@ export async function executeFullCodePipeline(
   let totalAutoFixed = 0
 
   for (let attempt = 0; attempt < MAX_FIX_ATTEMPTS && !report.passed; attempt++) {
-    const criticalIssues = [
+    let criticalIssues = [
       ...report.categories.a11y.issues,
       ...report.categories.performance.issues,
       ...report.categories.code_quality.issues,
@@ -1163,6 +1168,21 @@ export async function executeFullCodePipeline(
     if (criticalIssues.length === 0) break
 
     logger.info(`Pipeline QG 修復 ${attempt + 1}/${MAX_FIX_ATTEMPTS}`)
+
+    const ruleFixed = autoFixCriticalIssuesRuleBased(currentCode, criticalIssues)
+    if (ruleFixed) {
+      currentCode = ruleFixed
+      report = runQualityGate(currentCode, state.uiuxDesignTier, state.uiuxDesignMood)
+      criticalIssues = [
+        ...report.categories.a11y.issues,
+        ...report.categories.performance.issues,
+        ...report.categories.code_quality.issues,
+      ].filter(i => i.severity === 'critical')
+      if (criticalIssues.length === 0) {
+        totalAutoFixed += 1
+        break
+      }
+    }
 
     const fixedCode = await autoFixCriticalIssues(currentCode, criticalIssues, { userId: state.userId, conversationId })
     if (!fixedCode) break
@@ -1290,6 +1310,7 @@ async function executeCodePhaseStructure(
       variantConcept: state.uiuxVariantConcept,
       referenceAnalysis: state.uiuxReferenceAnalysis,
       moodId: state.uiuxDesignMood,
+      generationProfile: 'balanced',
     },
     { userId: state.userId, conversationId, purpose: 'uiux_structure' },
     makeStreamingCallback(conversationId, io, redis, 'structure', twCfg)
@@ -1394,7 +1415,9 @@ async function executeCodePhaseAnimation(
     makeStreamingCallback(conversationId, io, redis, 'animation', animTwCfg),
     state.uiuxVariantConcept,
     stepUiSpecSummary,
-    state.uiuxDesignMood
+    state.uiuxDesignMood,
+    undefined,
+    'balanced'
   )
 
   if (!animationResult.success) {
@@ -1494,7 +1517,9 @@ async function executeCodePhaseRwd(
     state.uiuxVariantConcept,
     rwdStepUiSpecSummary,
     undefined,
-    state.uiuxDesignMood
+    state.uiuxDesignMood,
+    undefined,
+    'balanced'
   )
 
   if (!rwdResult.success) {
@@ -1555,7 +1580,7 @@ export async function executeQualityGate(
 
   // 自動修復循環
   for (let attempt = 0; attempt < MAX_FIX_ATTEMPTS && !report.passed; attempt++) {
-    const criticalIssues = [
+    let criticalIssues = [
       ...report.categories.a11y.issues,
       ...report.categories.performance.issues,
       ...report.categories.code_quality.issues,
@@ -1569,6 +1594,21 @@ export async function executeQualityGate(
       content: `發現 ${criticalIssues.length} 個 critical 問題，正在自動修復（第 ${attempt + 1} 輪）...`,
       stage: 'uiux_quality_gate_fixing',
     })
+
+    const ruleFixed = autoFixCriticalIssuesRuleBased(currentCode, criticalIssues)
+    if (ruleFixed) {
+      currentCode = ruleFixed
+      report = runQualityGate(currentCode, state.uiuxDesignTier, state.uiuxDesignMood)
+      criticalIssues = [
+        ...report.categories.a11y.issues,
+        ...report.categories.performance.issues,
+        ...report.categories.code_quality.issues,
+      ].filter(i => i.severity === 'critical')
+      if (criticalIssues.length === 0) {
+        totalAutoFixed += 1
+        break
+      }
+    }
 
     const fixedCode = await autoFixCriticalIssues(currentCode, criticalIssues, { userId: state.userId, conversationId })
     if (!fixedCode) {
