@@ -2394,6 +2394,90 @@ const font = DM_Sans({ subsets: ['latin'], variable: '--font-sans' })
 - <img> 必須有 explicit width + height 屬性（或用 next/image 的 fill）防止 CLS`
 }
 
+// ============================================================
+// Fast Mode 精簡版 Prompt 函數（只影響 fast build，完整模式不受影響）
+// ============================================================
+
+function getCraftFoundationsFast(): string {
+  return `## Craft Foundations（設計品質底線）
+
+### Subtle Layering
+- 用 surface-1（底層）→ surface-2（卡片）→ surface-3（hover/active）建立表面層級
+- 陰影用 \`shadow-sm\` + \`ring-1 ring-black/5\`，禁止大面積 drop-shadow
+
+### Contrast（必須遵守）
+- 禁止白字配亮底：text-white 不能出現在 bg-white, bg-muted, bg-surface-1/2/3 上
+- 毛玻璃（backdrop-blur）必須在深色容器內（bg-*-900 以上）才能用白字
+- 灰色構建結構，彩色只在需要行動或注意時出現
+
+### 排版層級
+- 標題：font-bold + tracking-tight，正文：leading-relaxed，標籤：tabular-nums
+- weight + color + spacing 三維度建立層級
+
+### 間距系統
+- 選定 base unit（8px）嚴格用倍數，一致性比具體數字重要`
+}
+
+function getStructureConstraintsFast(tier: DesignTier): string {
+  const craft = getCraftFoundationsFast()
+
+  if (tier === 'creative') {
+    return `${craft}
+
+## 設計約束（Creative Tier — 創意型）
+- 漸層：線性漸層、radial gradient OK（禁止紫色多色 AI slop）
+- Glass 效果：\`backdrop-blur-xl bg-white/70 border-white/20\`（適度、小面積）
+- Display font 用於 hero/標題（clamp() 響應式），鼓勵 serif + sans 搭配
+- 禁止 Inter/Roboto/Arial 作為唯一字體
+- 禁止卡通化、不專業的設計`
+  }
+
+  return `${craft}
+
+## 設計約束（Functional Tier — 功能型）
+- 一個 accent color 聚焦注意力，灰色構建結構
+- 禁止漸層（除非用戶明確要求）、禁止 glow 效果
+- 字體可讀性優先，禁止 Inter/Roboto/Arial 作為唯一字體
+- 禁止紫色多色漸層（AI slop）、過度裝飾`
+}
+
+function getBaseRulesFast(): string {
+  return `## React Hooks 宣告規則（Critical）
+- 所有使用的 ref 必須在 component body 頂層宣告
+- 所有使用的 state 必須宣告
+- useEffect / useCallback 的依賴陣列必須完整
+
+## 資料防禦規則（Critical）
+- 所有陣列 .map()/.forEach() 前必須做 null guard：\`(items ?? []).map(...)\`
+- 物件屬性存取用 \`?.\` 或提供 fallback
+
+## Font Loading 規則
+- 必須使用 next/font 載入字體（禁止 <link> / @import Google Fonts）
+- 在 layout.tsx import，透過 className 或 CSS variable 全局應用
+
+## 自給自足規則（Critical）
+- 每個 import 的內部模組都必須在輸出中生成
+- 第三方套件（react, next, motion/react, @heroicons/react 等）可自由 import
+- 禁止用 emoji 作為 UI icon — 必須使用 SVG icon（Heroicons 或 Lucide）
+
+## 無障礙規則（Critical）
+- 每個互動控件必須有 accessible name（aria-label 或 label）
+- icon-only buttons 必須有 aria-label
+- 禁止用 div/span 當按鈕（用 button/a）
+- 不跳過 heading level（h1→h2→h3）
+- dialog/overlay 必須支援 Escape 關閉
+
+## 組件規則
+- 破壞性操作用 AlertDialog 確認
+- loading state 用 skeleton
+
+## 佈局防坑（常見 build/視覺 bug）
+- 有 fixed navbar 時 main content 加 padding-top
+- Flex 子元素加 min-w-0（否則 truncate 不生效）
+- <img> 必須有 width + height（防 CLS）
+- 所有可點擊元素 cursor-pointer`
+}
+
 function getDataAnimateSpec(): string {
   return `### 可用的 data-animate 值（只標記關鍵元素，不要每個 div 都加）
 - \`data-animate="fade-up"\` — 向上淡入（卡片、段落內容）
@@ -2439,18 +2523,26 @@ export async function generateStructure(
 ): Promise<GenerationResult> {
   const tier = designTier || 'functional'
   const generationProfile = productContext?.generationProfile || 'balanced'
+  const isFastMode = generationProfile === 'fast'
 
-  // 選擇視覺技法並注入 prompt
-  const techniques = selectTechniques(tier, template.category, 3)
-  const techniquesSection = formatTechniquesForPrompt(techniques)
+  // 快速模式：輕量版 patterns（名稱+描述，無代碼骨架），跳過 techniques
+  // 完整模式：完整 techniques + patterns（含 Tailwind 骨架）
+  let techniquesSection = ''
+  let patternsSection = ''
+  if (!isFastMode) {
+    const techniques = selectTechniques(tier, template.category, 3)
+    techniquesSection = formatTechniquesForPrompt(techniques)
 
-  // 選擇組合模式並注入 prompt
-  const patterns = selectCompositionPatterns(
-    tier, template.category, pages, productContext?.moodId,
-    undefined,  // count: default 2
-    designSystem.layoutArchetype  // layoutArchetypeHint
-  )
-  const patternsSection = formatPatternsForPrompt(patterns)
+    const patterns = selectCompositionPatterns(
+      tier, template.category, pages, productContext?.moodId,
+      undefined,  // count: default 2
+      designSystem.layoutArchetype  // layoutArchetypeHint
+    )
+    patternsSection = formatPatternsForPrompt(patterns)
+  } else {
+    // 快速模式：只列 pattern 名稱+描述（~150 tokens），避免千篇一律佈局
+    patternsSection = `## 可參考的佈局模式\n從以下模式中選擇適合的佈局，避免千篇一律的 hero→features→pricing：\n${listPatternsForVariants(tier)}`
+  }
 
   const moodSystemSection = productContext?.moodId
     ? `\n## Design Mood（視覺風格指引 — 定義美學方向）\n${getMoodPromptBlock(productContext.moodId)}\n`
@@ -2458,12 +2550,16 @@ export async function generateStructure(
 
   const moodConflictWarning = buildMoodConflictWarning(productContext?.moodId, designSystem)
 
+  // 快速模式使用精簡版約束函數（省 ~1500 字）
+  const constraintsBlock = isFastMode ? getStructureConstraintsFast(tier) : getStructureConstraints(tier)
+  const baseRulesBlock = isFastMode ? getBaseRulesFast() : getBaseRules()
+
   const systemPrompt = `${getTierCreativePhilosophy(tier)}
 ${moodSystemSection}
 ${moodConflictWarning}
 ${patternsSection}
 
-${getStructureConstraints(tier)}
+${constraintsBlock}
 
 ${techniquesSection}
 
@@ -2521,7 +2617,7 @@ ${getDataAnimateSpec()}
 - CRUD 操作直接操作 state（前端 demo，不需要 API）
 - 例如：\`const [items, setItems] = useState(initialData)\`
 
-${getBaseRules()}
+${baseRulesBlock}
 `
 
   // 構建產品上下文
@@ -2671,7 +2767,8 @@ ${sections.join('\n\n')}
 `
   }
 
-  const moodCodeSection = productContext?.moodId && getMoodCodeFragment(productContext.moodId)
+  // 快速模式跳過 moodCodeSection（省 ~500-800 字），mood prompt block 仍在 systemPrompt 保留方向
+  const moodCodeSection = !isFastMode && productContext?.moodId && getMoodCodeFragment(productContext.moodId)
     ? `## 風格錨點（Style Reference — 目標視覺風格代碼示範）
 以下片段展示了 ${getMoodById(productContext.moodId)?.name || productContext.moodId} 風格的視覺表現。
 你的輸出應體現相同的設計語言（為本產品量身定製，不要複製結構）：

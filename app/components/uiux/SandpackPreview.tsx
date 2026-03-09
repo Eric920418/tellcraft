@@ -70,6 +70,19 @@ function SandpackErrorListener({
     return () => unsub()
   }, [listen, onRuntimeError, isStreaming])
 
+  // 補捕：若錯誤在訂閱前就已觸發（SandpackProvider 重建競態），sandpack.error 仍是 reactive state
+  const { sandpack } = useSandpack()
+  useEffect(() => {
+    if (isStreaming || !onRuntimeError || hasReportedRef.current) return
+    if (!sandpack.error) return
+    hasReportedRef.current = true
+    onRuntimeError({
+      name: sandpack.error.title || 'SandpackError',
+      message: sandpack.error.message,
+      path: sandpack.error.path,
+    })
+  }, [sandpack.error, isStreaming, onRuntimeError])
+
   return null
 }
 

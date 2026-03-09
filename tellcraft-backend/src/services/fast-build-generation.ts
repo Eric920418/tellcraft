@@ -190,19 +190,18 @@ export function inferProductType(description: string): string {
 // ============================================================
 
 const DEFAULT_PAGES: Record<string, string[]> = {
-  // ── 複雜產品（5-7 頁）──
-  ecommerce: ['首頁', '商品列表', '商品詳情', '購物車', '結帳', '會員中心', '聯繫'],
-  saas: ['首頁', '功能介紹', '價格方案', '使用案例', '常見問題', '聯繫'],
-  hotel: ['首頁', '房型介紹', '設施服務', '餐飲', '訂房', '聯繫'],
-  healthcare: ['首頁', '科別介紹', '醫師團隊', '線上掛號', '衛教專區', '聯繫'],
-  education: ['首頁', '課程列表', '課程詳情', '師資介紹', '常見問題', '聯繫'],
-  salon: ['首頁', '服務項目', '作品展示', '設計師團隊', '預約', '聯繫'],
-  // ── 中等複雜（5 頁）──
-  realestate: ['首頁', '物件列表', '物件詳情', '關於我們', '聯繫'],
-  travel: ['首頁', '行程列表', '行程詳情', '旅遊攻略', '聯繫'],
-  fitness: ['首頁', '課表', '教練團隊', '會員方案', '聯繫'],
-  retail: ['首頁', '產品列表', '產品詳情', '門市資訊', '聯繫'],
-  // ── 標準產品（4 頁）──
+  // ── 核心差異化頁面（3-4 頁，去掉通用頁）──
+  ecommerce: ['首頁', '商品列表', '商品詳情', '購物車'],
+  saas: ['首頁', '功能介紹', '價格方案'],
+  hotel: ['首頁', '房型介紹', '訂房'],
+  healthcare: ['首頁', '科別介紹', '線上掛號'],
+  education: ['首頁', '課程列表', '課程詳情'],
+  salon: ['首頁', '服務項目', '預約'],
+  realestate: ['首頁', '物件列表', '物件詳情'],
+  travel: ['首頁', '行程列表', '行程詳情'],
+  fitness: ['首頁', '課表', '會員方案'],
+  retail: ['首頁', '產品列表', '產品詳情'],
+  // ── 標準產品（3-4 頁，維持不變）──
   restaurant: ['首頁', '菜單', '關於我們', '聯繫'],
   cafe: ['首頁', '菜單', '關於', '聯繫'],
   agency: ['首頁', '案例', '服務', '聯繫'],
@@ -335,7 +334,7 @@ export function pickFirstBatchPages(
   layoutMode: LayoutMode,
   pages: string[],
 ): string[] {
-  if (pages.length <= 1) return [...pages]
+  if (pages.length <= 4) return [...pages]  // 4 頁以內一批完成，無需暫停
 
   const homePage = findPageByPatterns(pages, HOME_PAGE_PATTERNS) || pages[0]
 
@@ -389,7 +388,7 @@ export function enforceFastBuildLayoutGuards(
  * - 去重用正規化 key（去空白+小寫）
  * - 上限 maxPages 個
  */
-export function mergePages(defaultPages: string[], suggestedPages?: string[], maxPages = 7): string[] {
+export function mergePages(defaultPages: string[], suggestedPages?: string[], maxPages = 4): string[] {
   if (!suggestedPages?.length) return defaultPages.slice(0, maxPages)
   const seen = new Map<string, string>()
   for (const p of defaultPages) seen.set(p.replace(/\s/g, '').toLowerCase(), p)
@@ -1034,12 +1033,12 @@ export async function generateFastConcept(
       ? `你是設計顧問。根據產品描述生成設計概念。回覆嚴格 JSON（無其他文字）：
 {"name":"概念名稱(2-4字)","vibe":"設計氛圍描述(1句話)","signatureElement":"一個招牌視覺元素(具體的設計手法)","keyFeatures":["設計特徵1","設計特徵2","設計特徵3"],"suggestedTier":"functional或creative","suggestedPages":["頁面1","頁面2",...]}
 suggestedTier 判斷規則：dashboard/admin/SaaS 工具型 → functional；品牌展示/創意/個性化 → creative。
-suggestedPages：列出該產品完整用戶體驗所需的所有頁面（5-7個），從用戶旅程角度思考（瀏覽→選擇→操作→完成）。
+suggestedPages：列出最核心的 2-4 個頁面（首頁 + 最能展現產品特色的功能頁），不要超過 4 個。
 讓概念獨特，避免泛用描述。signatureElement 要具體到能直接寫代碼（如「hero 區域的漸層玻璃態卡片」而非「現代設計」）。`
       : `You are a design consultant. Generate a design concept from the product description. Reply strictly JSON (no other text):
 {"name":"Concept name(2-4 words)","vibe":"Design vibe(1 sentence)","signatureElement":"One signature visual element(specific design technique)","keyFeatures":["Feature 1","Feature 2","Feature 3"],"suggestedTier":"functional or creative","suggestedPages":["Page 1","Page 2",...]}
 suggestedTier rules: dashboard/admin/SaaS tools → functional; brand/creative/personality → creative.
-suggestedPages: List all pages needed for a complete user experience (5-7 pages), think from the user journey (browse→select→act→complete).
+suggestedPages: List 2-4 core pages (homepage + key feature pages), max 4.
 Make the concept unique. signatureElement must be specific enough to code (e.g. "frosted glass hero cards with gradient border" not "modern design").`
 
     const userMsg = isChinese
@@ -1129,7 +1128,7 @@ Make the concept unique. signatureElement must be specific enough to code (e.g. 
     if (Array.isArray(parsed.suggestedPages)) {
       suggestedPages = parsed.suggestedPages
         .filter((p): p is string => typeof p === 'string' && p.trim().length > 0)
-        .slice(0, 7)
+        .slice(0, 4)
       if (suggestedPages.length === 0) suggestedPages = undefined
     }
 

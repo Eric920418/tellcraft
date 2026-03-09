@@ -198,6 +198,7 @@ export async function executeIteration(input: {
       state.uiuxPreIterationCode = previousSnapshot
       state.phase = 'uiux_complete'
       state.uiuxCodeGenerationStartedAt = undefined
+      state.autoRepairCount = 0  // 修復失敗也重置，允許下次（手動或 codeVersion 更新後）重試
       await saveFlowState(redis, conversationId, state)
       return
     }

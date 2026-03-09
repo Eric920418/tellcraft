@@ -174,14 +174,14 @@ Discovery（Path A 問卷 / Path B 篩選後模板）
 用戶描述（mode=fast）→ 跳過 Classifier
   → checkBuildRelevance（vague 攔截 + quickReplies 引導）
   → detectDesignTier（規則式）→ inferProductType → buildDefaultDesignSystem → inferInteractionHint
-  → generateFastConcept（1 次 Haiku，概念 + suggestedTier 修正）
-  → 增量生成：第 1 批（首頁）S+A+R+QG → 預覽 + 「繼續生成」/「就這樣部署」
-  → 第 2 批（剩餘頁面）S+A+R+QG → mergeGeneratedCode → 完成
+  → generateFastConcept（1 次 Haiku，概念 + suggestedTier 修正，suggestedPages 2-4 頁）
+  → mergePages（上限 4 頁）→ 單批生成 S+A+R+QG → 完成
   → phase='uiux_complete'（複用所有迭代/部署/回滾邏輯）
-  ≤1 頁不暫停，行為與過去一致
+  ≤4 頁不暫停（大多數場景單批完成）
 ```
 
-- **增量交互式生成**：`executeFastBuildSkill` 設定 `fastBuildAllPages` → `runFastBuildPipeline` 跑第 1 批（首頁）→ 有剩餘頁面時 `fastBuildStage='awaiting_continue'` 暫停 → 用戶按「繼續生成」(`__continue_fast_build__`) 跑第 2 批 → `mergeGeneratedCode` 合併 → 完成。按「就這樣部署」(`__finish_fast_build__`) 或輸入普通文字 → 直接轉 `uiux_complete`
+- **效能優化**：DEFAULT_PAGES 所有類型上限 3-4 頁，mergePages 上限 4，pickFirstBatchPages ≤4 頁一批完成（消除暫停確認）。Structure prompt 快速模式跳過 techniques/patterns/moodCode + 使用精簡版 craft/constraints/baseRules（systemPrompt ~7000→~4000 字）
+- **增量交互式生成**（>4 頁時才觸發，目前預設不會觸發）：`executeFastBuildSkill` 設定 `fastBuildAllPages` → `runFastBuildPipeline` 跑第 1 批 → 有剩餘頁面時暫停 → 用戶按「繼續生成」跑第 2 批 → `mergeGeneratedCode` 合併 → 完成
 - **FlowState 增量欄位**：`fastBuildStage`（generating/awaiting_continue/complete）、`fastBuildAllPages`、`fastBuildCompletedPages`、`fastBuildCurrentBatchIndex`
 - **`mergeGeneratedCode()`**：按 path 去重合併（新批次覆蓋同路徑），styles 保留首批
 - **`buildExistingComponentSummary()`**：構建已有組件路徑列表注入 `productContext.existingComponentSummary` → `generateStructure` 的 `buildUserMsg` 告訴 LLM 不要重新生成

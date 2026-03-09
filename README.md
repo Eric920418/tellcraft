@@ -122,7 +122,7 @@ npx ts-node bdd-spec/scripts/validate-feature.ts spec/features/
 
 **精細模式 + 自動採用**：PRD Clarify 第一題出現「全部自動採用 AI 建議」按鈕 → 自動回答所有 BDD 問題（propose→proposedAnswer / ask→建議選項或 A）→ 自動確認草稿 → 自動回答 Spec Clarify → 進入設計階段（手動）。BDD 互動從 7-11 次降到 1 次。`FlowState.autoAdoptMode` 在 `completeSpecPhase` 末尾清除，`autoAdoptAllPendingQuestions` 有 MAX_ITERATIONS=200 安全閥。
 
-**快速模式（Fast）**：一句話描述 → 規則式推斷（tier/產品類型/配色/佈局） → Haiku 概念生成（含頁面推理 suggestedPages）→ `mergePages()` 合併預設+建議頁面（上限 7 頁）→ Prompt 擴展 → Structure → Animation → RWD → 靜態 QG。複雜產品（電商/SaaS/飯店等）預設 5-7 頁，簡單產品（landing/tool）維持 1-4 頁。
+**快速模式（Fast）**：一句話描述 → 規則式推斷（tier/產品類型/配色/佈局） → Haiku 概念生成（含頁面推理 suggestedPages, 2-4 頁）→ `mergePages()` 合併預設+建議頁面（上限 4 頁）→ Prompt 擴展 → Structure（精簡 prompt，跳過 techniques/patterns/moodCode）→ Animation → RWD → 靜態 QG。所有類型上限 3-4 頁，4 頁以內單批完成（無暫停確認）。
 
 ## BDD Spec 流程
 
@@ -659,16 +659,29 @@ psql "$DATABASE_URL" -f tellcraft-backend/migrations/xxx.sql
 3. **Zod API 驗證**（`middleware/validate.ts` + `schemas/`）：`validateBody(schema)` 中間件工廠，高風險路由全覆蓋 — conversation（sendMessage/reply）、session（initialize）、operations（4 端點）、bdd（6 端點）、project（create/template-overrides），移除 ~100 行手動 `if (!req.body.xxx)` 驗證
 4. **BullMQ DLQ**（`services/job-failure-handler.ts` + `migrations/013`）：`job_failures` 表持久化最終失敗、Socket.io 推送用戶錯誤消息+重試按鈕、FATAL log 觸發告警、`removeOnFail.age` 24h→7d
 
+### Fast Build 效能優化（2026-03-09）
+
+兩階段優化大幅降低 Fast Build 生成時間和 token 消耗：
+
+**階段 1：砍頁數（最大收益）**
+- **DEFAULT_PAGES 裁剪**：所有複雜類型上限 3-4 頁，只保留核心差異化頁面（ecommerce 7→4、saas 6→3、hotel 6→3 等），去掉通用頁（聯繫/FAQ/關於）
+- **`mergePages()` 上限**：`maxPages` 7→4
+- **`generateFastConcept` prompt**：suggestedPages 5-7→2-4 頁，驗證 `.slice(0,7)`→`.slice(0,4)`
+- **`pickFirstBatchPages` 門檻**：`pages.length <= 1`→`<= 4`，4 頁以內一批完成（消除「繼續生成」暫停）
+
+**階段 2：快速模式 Prompt 瘦身**
+- **`generateStructure` fast 分支**：`generationProfile === 'fast'` 時跳過 techniques（~500-800 字）、patterns（~400-600 字）、moodCodeSection（~500-800 字）
+- **3 個精簡函數**：`getCraftFoundationsFast()`（~150 字 vs 原 ~500 字）、`getStructureConstraintsFast(tier)`（~300 字 vs 原 ~800 字）、`getBaseRulesFast()`（~600 字 vs 原 ~1,800 字）
+- **完整模式不受影響**：所有改動透過 `isFastMode` 分支隔離
+
+**預期效果**：saas 130s→55s（-58%）、ecommerce 150s→60s（-60%）、Structure input tokens -40%、總 token -60%、消除用戶等待中斷
+
 ### Fast Build 頁面深度增強（2026-03-08）
 
-複雜產品類型（電商/SaaS/飯店等）頁面數量從 4 頁擴充到 5-7 頁，覆蓋完整用戶體驗：
-- **DEFAULT_PAGES 擴充**：ecommerce 4→7（+商品詳情/購物車/結帳/會員中心）、saas 4→6、hotel 4→6、healthcare 4→6、education 4→6、salon 4→6、realestate 4→5、travel 4→5、fitness 4→5、retail 4→5。簡單產品維持不變
-- **Haiku 頁面推理**：`generateFastConcept` 新增 `suggestedPages` 欄位，Haiku 從用戶旅程角度推理 5-7 頁，`max_tokens` 300→500
-- **`mergePages()` 工具函數**：DEFAULT_PAGES 為基底 + Haiku suggestedPages 補充，正規化去重（忽略空白+大小寫），上限 7 頁
-- **順序化執行**：`Promise.all([concept, expand])` 改為先跑 concept → mergePages → 再跑 expandBriefPrompt（延遲 +1-2s，佔比 <0.5%）
-- **expandBriefPrompt 解禁**：移除「不要自行新增頁面」限制，改為「以頁面列表為核心骨架，可微調名稱但不刪除核心頁面」
-- **INTERACTION_HINTS 擴充**：ecommerce/saas/hotel/healthcare/education/salon/realestate/travel/fitness/retail 補充新增頁面的互動描述
-- **多頁面策略提示**（uiux-generation.ts）：pages ≥ 5 時注入主/次頁面投入度區分 + 共用組件抽取 + Layout 統一管理
+（此版本已被上方效能優化取代）原先將複雜產品擴充到 5-7 頁，導致生成時間暴增。
+- **`mergePages()` 工具函數**：DEFAULT_PAGES 為基底 + Haiku suggestedPages 補充，正規化去重
+- **順序化執行**：先跑 concept → mergePages → 再跑 expandBriefPrompt
+- **INTERACTION_HINTS 擴充**：補充各類型頁面的互動描述
 - **測試**：`merge-pages.test.ts` 10 條（合併/去重/上限/空值降級/優先序）
 
 ### Fast Build 自動 Prompt 擴展（2026-03-06）

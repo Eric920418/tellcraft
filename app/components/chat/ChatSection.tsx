@@ -886,6 +886,7 @@ export default function ChatSection({
       onClick={() => completionAlert.setIsEnabled(!completionAlert.isEnabled)}
       aria-pressed={completionAlert.isEnabled}
       title={completionAlert.isEnabled ? tChat('completionAlertDisable') : tChat('completionAlertEnable')}
+      className="completion-alert-toggle"
       style={{
         display: 'inline-flex',
         alignItems: 'center',
@@ -1099,17 +1100,35 @@ export default function ChatSection({
               <div style={{ position: 'relative', height: '100%' }}>
                 {autoRepairStatus !== 'idle' && (
                   <div style={{
-                    position: 'absolute', top: 8, right: 8, zIndex: 50,
-                    padding: '4px 12px', borderRadius: 6, background: 'rgba(0,0,0,0.75)',
-                    color: '#fff', fontSize: 12, fontWeight: 500,
-                    display: 'flex', alignItems: 'center', gap: 6,
+                    position: 'absolute', inset: 0, zIndex: 50,
+                    display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+                    background: 'rgba(255,255,255,0.85)',
+                    backdropFilter: 'blur(4px)',
                     pointerEvents: 'none',
+                    gap: 16,
                   }}>
-                    <span style={{
-                      width: 6, height: 6, borderRadius: '50%', display: 'inline-block',
-                      background: autoRepairStatus === 'detecting' ? '#facc15' : '#60a5fa',
-                    }} />
-                    {autoRepairStatus === 'detecting' ? '偵測到執行錯誤...' : '自動修復中...'}
+                    {autoRepairStatus === 'detecting' ? (
+                      <>
+                        <svg width="36" height="36" viewBox="0 0 24 24" fill="none" style={{ color: '#f59e0b' }}>
+                          <path d="M12 9v4m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                        </svg>
+                        <div style={{ textAlign: 'center' }}>
+                          <div style={{ fontSize: 14, fontWeight: 600, color: '#1a1a1a' }}>偵測到執行錯誤</div>
+                          <div style={{ fontSize: 12, color: '#666', marginTop: 4 }}>3 秒後自動修復...</div>
+                        </div>
+                      </>
+                    ) : (
+                      <>
+                        <svg width="36" height="36" viewBox="0 0 24 24" fill="none" className="animate-spin" style={{ color: '#3b82f6' }}>
+                          <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="2" strokeOpacity="0.25"/>
+                          <path d="M12 2a10 10 0 0110 10" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/>
+                        </svg>
+                        <div style={{ textAlign: 'center' }}>
+                          <div style={{ fontSize: 14, fontWeight: 600, color: '#1a1a1a' }}>AI 自動修復中</div>
+                          <div style={{ fontSize: 12, color: '#666', marginTop: 4 }}>正在修復預覽錯誤，請稍候...</div>
+                        </div>
+                      </>
+                    )}
                   </div>
                 )}
               <ChatPreviewPanel

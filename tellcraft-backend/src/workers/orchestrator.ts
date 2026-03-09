@@ -551,6 +551,11 @@ async function handleContinueFlow(
   if (userId && !state.userId) state.userId = userId
   if (data.locale && state.locale !== data.locale) state.locale = data.locale
 
+  // 普通用戶訊息進來時重置 autoRepairCount，避免前次修復失敗後永久卡死
+  if (!isAutoRepair && state.autoRepairCount) {
+    state.autoRepairCount = 0
+  }
+
   const trimmedMsg = message.trim()
 
   // ── Auto-repair bypass ──
