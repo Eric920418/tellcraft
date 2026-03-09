@@ -9,7 +9,7 @@ import { query, queryOne } from '../db/client'
 import { requireAuth, requireAdmin } from '../middleware/auth'
 import { parseLogLine, sanitizeLogLine, isNoiseLine, type ParsedLogLine } from '../utils/log-parser'
 import type Redis from 'ioredis'
-import { getCreditLimit } from '../config/plans'
+import { getCreditLimit, isFairUsePlan } from '../config/plans'
 import { cached, invalidateCache } from '../lib/cache'
 import { createLogger } from '../lib/logger'
 
@@ -109,15 +109,15 @@ router.get('/stats', requireAuth, async (req, res) => {
     }
 
     const plan = user.plan || 'free'
-    const rawLimit = getCreditLimit(plan)
     const stats = {
       totalProjects: projectCount,
       totalConversations: convCount,
       totalDeployments: deployCount,
       creditUsage: {
         used: user.credits_used_this_period || 0,
-        limit: rawLimit === Infinity ? -1 : rawLimit,
-        plan
+        limit: getCreditLimit(plan),
+        plan,
+        isFairUse: isFairUsePlan(plan),
       }
     }
 

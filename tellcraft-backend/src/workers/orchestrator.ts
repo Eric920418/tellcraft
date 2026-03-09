@@ -8,7 +8,7 @@ import { SkillName } from '../services/registry'
 import { prefilterMessage, checkBuildRelevance, recordAbuseViolation, checkInputQuality } from '../services/prefilter'
 import { detectFastModeIntent, getFaqReply, answerWithSonnet } from '../services/customer-service'
 import { sendMessage, saveFlowState, getFlowState, deleteFlowState, deductCredits } from './orchestrator-utils'
-import { CREDIT_COSTS } from '../config/plans'
+import { CREDIT_COSTS, isFairUsePlan } from '../config/plans'
 import { createLogger } from '../lib/logger'
 import { executeIteration } from '../services/iteration-skill'
 import { handleJobFinalFailure } from '../services/job-failure-handler'
@@ -29,6 +29,13 @@ import { handleGoBack } from './phase-handlers/bdd-phases'
 import { handleBddWaitingForReply } from './phase-handlers/bdd-phases'
 
 const logger = createLogger('orchestrator')
+
+function buildCreditLimitReachedMessage(plan: string, creditsUsed: number, creditLimit: number): string {
+  if (isFairUsePlan(plan)) {
+    return `已達本期 Fair use 配額上限（已使用 ${creditsUsed} Credits），請聯繫支援或升級更高額度方案。`
+  }
+  return `已達 Credit 配額上限（${creditsUsed}/${creditLimit}），請升級方案以繼續使用。`
+}
 
 // ============================================================
 // 類型定義
@@ -206,8 +213,12 @@ async function handleProcessMessage(
   // Credit 扣除
   const creditResult = await deductCredits(userId, CREDIT_COSTS.BASE_MESSAGE)
   if (!creditResult.success) {
+    const user = await db.queryOne<{ plan: string }>(
+      'SELECT plan FROM users WHERE id = $1',
+      [userId]
+    )
     await sendMessage(conversationId, io, {
-      content: `已達 Credit 配額上限（${creditResult.creditsUsed}/${creditResult.creditLimit}），請升級方案以繼續使用。`,
+      content: buildCreditLimitReachedMessage(user?.plan || 'free', creditResult.creditsUsed, creditResult.creditLimit),
       stage: 'error',
     })
     return { taskId: null, skill: null }
@@ -479,8 +490,12 @@ async function handleContinueFlow(
   // Credit 扣除
   const creditResult = await deductCredits(userId, CREDIT_COSTS.BASE_MESSAGE)
   if (!creditResult.success) {
+    const user = await db.queryOne<{ plan: string }>(
+      'SELECT plan FROM users WHERE id = $1',
+      [userId]
+    )
     await sendMessage(conversationId, io, {
-      content: `已達 Credit 配額上限（${creditResult.creditsUsed}/${creditResult.creditLimit}），請升級方案以繼續使用。`,
+      content: buildCreditLimitReachedMessage(user?.plan || 'free', creditResult.creditsUsed, creditResult.creditLimit),
       stage: 'error',
     })
     return

@@ -171,8 +171,8 @@ const FAQ_ENTRIES: Record<string, FaqEntry> = {
       /收費|費用|多少錢|價格|免費|付費|訂閱|方案|定價/,
       /pricing|price|cost|free|how much|subscription|plan/i,
     ],
-    replyZh: '目前 Tellcraft 正在公測階段，所有功能完全免費使用！\n\n包含：\n- AI 自動生成網站\n- 免費部署上線（Vercel）\n- 無限次修改迭代\n\n未來可能推出進階方案，但現在請盡情使用。\n\n想試試看嗎？直接告訴我你想做什麼網站！',
-    replyEn: 'Tellcraft is currently in public beta — all features are completely free!\n\nIncludes:\n- AI-powered website generation\n- Free deployment (Vercel)\n- Unlimited iterations\n\nWant to try it? Just tell me what kind of website you\'d like to build!',
+    replyZh: 'Tellcraft 目前提供三種月費方案：\n\n- Creator：NT$699 / 月（90 Credits）\n- Pro：NT$1,990 / 月（300 Credits）\n- Business：NT$4,990 / 月（高用量 Fair use）\n\n所有方案都支援 AI 建站、迭代修改與部署。想試試看嗎？直接告訴我你想做什麼網站！',
+    replyEn: 'Tellcraft currently offers three monthly plans:\n\n- Creator: NT$699/mo (90 credits)\n- Pro: NT$1,990/mo (300 credits)\n- Business: NT$4,990/mo (high-usage fair use)\n\nAll plans include AI-powered building, iteration, and deployment. Want to try it? Tell me what kind of website you want to build!',
   },
   capability: {
     patterns: [
@@ -215,8 +215,8 @@ const FAQ_ENTRIES: Record<string, FaqEntry> = {
       /怎麼修改|可以改幾次|修改次數|改幾次|能改嗎|改了還能改/,
       /how.*modify|how many.*changes|can i change|edit.*limit/i,
     ],
-    replyZh: '網站生成後可以無限次修改！\n\n用自然語言描述就好：\n- 「把標題改成紅色」\n- 「加一個聯絡表單」\n- 「背景換成深色」\n\n也支援撤銷上一步修改和版本回滾。\n\n想開始建站嗎？直接告訴我你的需求！',
-    replyEn: 'You can modify your site unlimited times!\n\nJust describe changes in natural language:\n- "Make the title red"\n- "Add a contact form"\n- "Switch to dark background"\n\nUndo and version rollback are also supported.\n\nReady to start? Tell me what you\'d like to build!',
+    replyZh: '網站生成後可以持續迭代修改。\n\n用自然語言描述就好：\n- 「把標題改成紅色」\n- 「加一個聯絡表單」\n- 「背景換成深色」\n\n也支援撤銷上一步修改和版本回滾。高頻修改建議選擇 Pro 或 Business 方案。\n\n想開始建站嗎？直接告訴我你的需求！',
+    replyEn: 'You can keep iterating on your site after it is generated.\n\nJust describe changes in natural language:\n- "Make the title red"\n- "Add a contact form"\n- "Switch to dark background"\n\nUndo and version rollback are also supported. For high-frequency iteration, Pro or Business is the best fit.\n\nReady to start? Tell me what you\'d like to build!',
   },
   domain: {
     patterns: [
@@ -281,10 +281,10 @@ export async function answerWithSonnet(
 
 平台資訊：
 - 技術：Next.js + React + Tailwind CSS，部署到 Vercel
-- 目前免費公測
+- 目前提供 Creator / Pro / Business 三種月費方案
 - 支援：一句話建站、即時預覽、自然語言修改、一鍵部署
 - 不支援：手機 APP、Vue/Angular、後端開發、資料庫
-- 可無限次修改，支援撤銷和版本回滾
+- 支援在方案配額內持續修改，並支援撤銷和版本回滾
 
 回答規則：
 - 只回答與 Tellcraft 平台相關的問題
@@ -296,10 +296,10 @@ export async function answerWithSonnet(
 
 Platform info:
 - Tech: Next.js + React + Tailwind CSS, deployed to Vercel
-- Currently free (public beta)
+- Offers Creator / Pro / Business monthly plans
 - Supports: one-sentence builds, live preview, natural language edits, one-click deploy
 - Not supported: mobile apps, Vue/Angular, backend/database development
-- Unlimited modifications, undo and version rollback supported
+- Supports ongoing edits within plan credits, plus undo and version rollback
 
 Rules:
 - Only answer questions related to Tellcraft

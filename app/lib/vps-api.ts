@@ -365,6 +365,7 @@ export async function getDashboardStats(input: {
       used: number
       limit: number
       plan: string
+      isFairUse: boolean
     }
   }
   recentProjects: Array<{

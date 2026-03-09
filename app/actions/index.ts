@@ -1012,6 +1012,7 @@ export async function getUserStats(): Promise<ActionResult<{
     used: number
     limit: number
     plan: string
+    isFairUse: boolean
   }
 }>> {
   try {

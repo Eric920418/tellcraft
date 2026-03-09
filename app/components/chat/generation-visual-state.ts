@@ -1,5 +1,8 @@
 export type GenerationPhase = 'reasoning' | 'structure' | 'animation' | 'rwd' | 'quality'
 export type InsightSlotId = 'nav' | 'hero-title' | 'hero-media' | 'cta' | 'cards' | 'text-list' | 'feature-grid' | 'form-block'
+export type ForgeAction = 'heating' | 'shaping' | 'striking' | 'trimming' | 'polishing'
+export type ForgeZone = 'intake' | 'anvil' | 'assembly' | 'refine' | 'finish'
+export type ModuleFinish = 'raw' | 'heated' | 'shaped' | 'trimmed' | 'polished'
 
 export interface GenerationProgress {
   current: number
@@ -32,6 +35,10 @@ export interface GenerationVisualState {
   interactionComponents: number
   activeInsightSlotId: InsightSlotId
   decisionConfidence: number
+  forgeAction: ForgeAction
+  forgeTemperature: number
+  moduleFinish: ModuleFinish
+  activeWorkbenchZone: ForgeZone
 }
 
 const PHASES: GenerationPhase[] = ['reasoning', 'structure', 'animation', 'rwd', 'quality']
@@ -121,7 +128,7 @@ export function resolveGenerationVisualState(input: GenerationVisualInput): Gene
   const moduleKeyMap: Record<GenerationPhase, GenerationVisualState['activeModuleKey']> = {
     reasoning: 'aiModuleSemanticMap',
     structure: 'aiModuleHeaderHero',
-    animation: 'aiModuleInteractionLayer',
+    animation: 'aiModuleContentGrid',
     rwd: 'aiModuleResponsiveMatrix',
     quality: 'aiModuleQualityGuard',
   }
@@ -134,6 +141,30 @@ export function resolveGenerationVisualState(input: GenerationVisualInput): Gene
     quality: 'form-block',
   }
 
+  const forgeActionMap: Record<GenerationPhase, ForgeAction> = {
+    reasoning: 'heating',
+    structure: 'shaping',
+    animation: 'striking',
+    rwd: 'trimming',
+    quality: 'polishing',
+  }
+
+  const forgeZoneMap: Record<GenerationPhase, ForgeZone> = {
+    reasoning: 'intake',
+    structure: 'anvil',
+    animation: 'assembly',
+    rwd: 'refine',
+    quality: 'finish',
+  }
+
+  const finishMap: Record<GenerationPhase, ModuleFinish> = {
+    reasoning: 'heated',
+    structure: 'shaped',
+    animation: 'shaped',
+    rwd: 'trimmed',
+    quality: 'polished',
+  }
+
   const totalModules = 24
   const assembledModules = clamp(Math.round((progressPercent / 100) * totalModules) + phaseNumber, 2, totalModules)
   const stabilityScore = clamp(Math.round(progressPercent * 0.88 + (phase === 'quality' ? 8 : 0)), 12, 99)
@@ -144,6 +175,21 @@ export function resolveGenerationVisualState(input: GenerationVisualInput): Gene
     24,
   )
   const decisionConfidence = clamp(Math.round(42 + progressPercent * 0.58 + (phase === 'quality' ? 5 : 0)), 45, 99)
+  const forgeTemperature = clamp(
+    Math.round(
+      phase === 'quality'
+        ? 38 + progressPercent * 0.18
+        : phase === 'rwd'
+          ? 55 + progressPercent * 0.16
+          : phase === 'animation'
+            ? 74 + progressPercent * 0.14
+            : phase === 'structure'
+              ? 68 + progressPercent * 0.1
+              : 82 + progressPercent * 0.08,
+    ),
+    32,
+    98,
+  )
 
   return {
     phase,
@@ -162,5 +208,9 @@ export function resolveGenerationVisualState(input: GenerationVisualInput): Gene
     interactionComponents,
     activeInsightSlotId: insightSlotMap[phase],
     decisionConfidence,
+    forgeAction: forgeActionMap[phase],
+    forgeTemperature,
+    moduleFinish: finishMap[phase],
+    activeWorkbenchZone: forgeZoneMap[phase],
   }
 }

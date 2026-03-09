@@ -292,7 +292,6 @@ export function generatedCodeToFileRows(
 
 /**
  * CAS 原子扣除 Credit
- * - business plan 無上限（仍更新計數供統計）
  * - 返回 { success, creditsUsed, creditLimit }
  */
 export async function deductCredits(
@@ -310,21 +309,6 @@ export async function deductCredits(
   }
 
   const creditLimit = getCreditLimit(user.plan)
-
-  // business plan 無上限 — 直接更新計數
-  if (creditLimit === Infinity) {
-    const result = await db.queryOne<{ credits_used_this_period: number }>(
-      `UPDATE users SET credits_used_this_period = credits_used_this_period + $1
-       WHERE id = $2
-       RETURNING credits_used_this_period`,
-      [amount, userId]
-    )
-    return {
-      success: true,
-      creditsUsed: result?.credits_used_this_period ?? 0,
-      creditLimit: -1,
-    }
-  }
 
   // CAS 原子更新：確保不超額
   const result = await db.queryOne<{ credits_used_this_period: number }>(

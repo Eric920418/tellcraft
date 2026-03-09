@@ -14,6 +14,7 @@ interface Stats {
     used: number
     limit: number
     plan: string
+    isFairUse: boolean
   }
 }
 
@@ -52,6 +53,9 @@ export function DashboardContent({
 }) {
   const t = useTranslations('dashboard')
   const router = useRouter()
+  const creditUsageSubtitle = stats.creditUsage.isFairUse
+    ? t('messageCountFairUse', { used: stats.creditUsage.used })
+    : t('messageCount', { used: stats.creditUsage.used, limit: stats.creditUsage.limit })
 
   const getProjectPrimaryPath = (project: Project) => {
     if (project.latestConversationId) return `/?conversation=${project.latestConversationId}`
@@ -113,7 +117,7 @@ export function DashboardContent({
         <StatsCard
           title={t('plan')}
           value={stats.creditUsage.plan.toUpperCase()}
-          subtitle={t('messageCount', { used: stats.creditUsage.used, limit: stats.creditUsage.limit < 0 ? '∞' : stats.creditUsage.limit })}
+          subtitle={creditUsageSubtitle}
           icon="◈"
           delay={0.15}
         />
@@ -144,6 +148,7 @@ export function DashboardContent({
           value={stats.creditUsage.used}
           max={stats.creditUsage.limit}
           label={t('quotaUsage')}
+          maxLabel={stats.creditUsage.isFairUse ? t('fairUseLabel') : undefined}
         />
       </motion.div>
 
