@@ -12,6 +12,7 @@ import { prepareDeployment, executeDeployment, type SiteMetadata } from '../../s
 import { sendMessage, saveFlowState, getFlowState, deductCredits } from '../orchestrator-utils'
 import { CREDIT_COSTS } from '../../config/plans'
 import { createLogger } from '../../lib/logger'
+import { buildPostDeployFastBuildQuickReplies, getRemainingFastBuildPages } from './fast-build-phases'
 
 const logger = createLogger('deploy-phases')
 
@@ -200,8 +201,13 @@ export async function handleDeployExecute(
       })
     }
 
+    const remainingPages = getRemainingFastBuildPages(state)
+    const continuationNote = remainingPages.length > 0
+      ? `\n\n目前是先上線已完成頁面；若要補完其餘頁面，可點「繼續生成（${remainingPages.length} 頁）」回到生成流程。`
+      : ''
+
     await sendMessage(conversationId, io, {
-      content: `**部署成功！**\n\n您的網站已上線：${result.deploymentUrl}\n\n---\n\n直接輸入修改建議即可迭代設計（如「把標題改大」「換個配色」）\n輸入「**回滾**」可恢復到之前的版本`,
+      content: `**部署成功！**\n\n您的網站已上線：${result.deploymentUrl}\n\n---\n\n直接輸入修改建議即可迭代設計（如「把標題改大」「換個配色」）\n輸入「**回滾**」可恢復到之前的版本${continuationNote}`,
       stage: 'deployer_complete',
       richContent: {
         type: 'deploy_result',
@@ -211,10 +217,7 @@ export async function handleDeployExecute(
           success: true,
         } as Record<string, unknown>,
       },
-      quickReplies: [
-        { label: '重新部署', value: '部署', style: 'secondary' },
-        { label: '回滾版本', value: '回滾', style: 'secondary' },
-      ],
+      quickReplies: buildPostDeployFastBuildQuickReplies(state, { includeDeploy: true, includeRollback: true }),
     })
   } else {
     state.phase = 'deployer_failed'
@@ -237,5 +240,4 @@ export async function handleDeployExecute(
     })
   }
 }
-
 

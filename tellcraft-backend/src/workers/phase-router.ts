@@ -30,6 +30,7 @@ import {
   handleUiuxMixedPhaseRouting,
 } from './phase-handlers/uiux-phases'
 import { executeDeployerSkill } from './phase-handlers/deploy-phases'
+import { buildPostDeployFastBuildQuickReplies } from './phase-handlers/fast-build-phases'
 
 const logger = createLogger('phase-router')
 
@@ -301,10 +302,7 @@ async function routeDeployerComplete(
         ? '好的，不再部署。您可以繼續修改設計，或選擇回滾到之前的版本。'
         : 'Got it, no further deployment. You can continue modifying the design or rollback to a previous version.',
       stage: 'deployer_complete',
-      quickReplies: [
-        { label: isChinese ? '部署上線' : 'Deploy', value: '部署', style: 'primary' as const },
-        { label: isChinese ? '回滾版本' : 'Rollback', value: '回滾', style: 'ghost' as const },
-      ],
+      quickReplies: buildPostDeployFastBuildQuickReplies(state, { includeDeploy: true, includeRollback: true }),
     })
     return
   }
@@ -321,10 +319,7 @@ async function routeDeployerComplete(
   const intentCheck = detectFastModeIntent(trimmed)
   if (intentCheck.match) {
     const isChinese = /[\u4e00-\u9fff]/.test(trimmed) || state.locale === 'zh'
-    const qr = [
-      { label: isChinese ? '部署上線' : 'Deploy', value: '部署', style: 'primary' as const },
-      { label: isChinese ? '開始新專案' : 'New Project', value: '__new_project__', style: 'ghost' as const },
-    ]
+    const qr = buildPostDeployFastBuildQuickReplies(state, { includeDeploy: true, includeNewProject: true })
     if (intentCheck.type === 'question') {
       const faqResult = getFaqReply(trimmed, state.locale)
       if (faqResult) {
@@ -352,10 +347,7 @@ async function routeDeployerComplete(
     await sendMessage(conversationId, io, {
       content: gwResult.guidanceMessage || '請描述您想修改的設計內容。',
       stage: 'info',
-      quickReplies: [
-        { label: '部署上線', value: '部署', style: 'primary' as const },
-        { label: '回滾版本', value: '回滾', style: 'ghost' as const },
-      ],
+      quickReplies: buildPostDeployFastBuildQuickReplies(state, { includeDeploy: true, includeRollback: true }),
     })
     return
   }

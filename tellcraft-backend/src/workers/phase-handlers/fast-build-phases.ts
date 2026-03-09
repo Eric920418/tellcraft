@@ -29,6 +29,8 @@ import { createLogger } from '../../lib/logger'
 
 const logger = createLogger('fast-build-phases')
 
+type QuickReply = { label: string; value: string; style: 'primary' | 'secondary' | 'ghost' }
+
 function formatFastBuildBatchLabel(pages: string[], locale: 'zh' | 'en'): string {
   if (pages.length === 0) {
     return locale === 'zh' ? '本批頁面' : 'current batch'
@@ -45,6 +47,55 @@ function formatFastBuildBatchLabel(pages: string[], locale: 'zh' | 'en'): string
 
 function hasCodeTargets(code: GeneratedCode): boolean {
   return code.pages.length + code.components.length > 0
+}
+
+export function getRemainingFastBuildPages(state: Pick<FlowState, 'fastMode' | 'fastBuildAllPages' | 'fastBuildCompletedPages'>): string[] {
+  if (!state.fastMode) return []
+  const completed = new Set(state.fastBuildCompletedPages || [])
+  return (state.fastBuildAllPages || []).filter(page => !completed.has(page))
+}
+
+export function buildPostDeployFastBuildQuickReplies(
+  state: Pick<FlowState, 'fastMode' | 'fastBuildAllPages' | 'fastBuildCompletedPages' | 'locale'>,
+  options?: { includeDeploy?: boolean; includeRollback?: boolean; includeNewProject?: boolean },
+): QuickReply[] {
+  const isChinese = state.locale === 'zh'
+  const quickReplies: QuickReply[] = []
+  const remainingPages = getRemainingFastBuildPages(state)
+
+  if (remainingPages.length > 0) {
+    quickReplies.push({
+      label: isChinese ? `繼續生成（${remainingPages.length} 頁）` : `Continue (${remainingPages.length} pages)`,
+      value: '__continue_fast_build_after_deploy__',
+      style: 'primary',
+    })
+  }
+
+  if (options?.includeDeploy) {
+    quickReplies.push({
+      label: isChinese ? '部署上線' : 'Deploy',
+      value: '部署',
+      style: remainingPages.length > 0 ? 'secondary' : 'primary',
+    })
+  }
+
+  if (options?.includeRollback) {
+    quickReplies.push({
+      label: isChinese ? '回滾版本' : 'Rollback',
+      value: '回滾',
+      style: 'ghost',
+    })
+  }
+
+  if (options?.includeNewProject) {
+    quickReplies.push({
+      label: isChinese ? '開始新專案' : 'New Project',
+      value: '__new_project__',
+      style: 'ghost',
+    })
+  }
+
+  return quickReplies
 }
 
 // 檢查 pipeline 是否應該中止（用戶已按「完成/部署」，phase 被外部改掉）
@@ -680,6 +731,7 @@ export async function sendFastBuildCompleteMessage(
   const twConfig = designSystem ? generateTailwindConfig(designSystem) : ''
   const variantConcept = state.uiuxVariantConcept
   const report = state.uiuxQualityReport
+  const remainingPages = getRemainingFastBuildPages(state)
 
   const finalPageCount = currentCode.pages.length
   const finalComponentCount = currentCode.components.length
@@ -696,10 +748,16 @@ export async function sendFastBuildCompleteMessage(
     ? (isChinese ? `\n設計概念：**${variantConcept.name}**` : `\nDesign concept: **${variantConcept.name}**`)
     : ''
 
+  const continuationNote = remainingPages.length > 0
+    ? (isChinese
+        ? `\n\n目前先上線的是已完成頁面；還有 ${remainingPages.length} 個頁面可繼續生成：${remainingPages.join('、')}`
+        : `\n\nThe currently deployed-ready set only includes completed pages; ${remainingPages.length} more page(s) can still be generated: ${remainingPages.join(', ')}`)
+    : ''
+
   await sendMessage(conversationId, io, {
     content: isChinese
-      ? `快速生成完成！共 ${finalPageCount} 個頁面、${finalComponentCount} 個組件。${conceptNote}${qgText}\n\n你可以：\n- 直接說想修改的地方，AI 會幫你調整\n- 輸入「**部署**」即可上線`
-      : `Generation complete! ${finalPageCount} pages, ${finalComponentCount} components.${conceptNote}${qgText}\n\nYou can:\n- Describe changes and AI will adjust\n- Type "**deploy**" to go live`,
+      ? `快速生成完成！共 ${finalPageCount} 個頁面、${finalComponentCount} 個組件。${conceptNote}${qgText}${continuationNote}\n\n你可以：\n- 直接說想修改的地方，AI 會幫你調整\n- 輸入「**部署**」即可上線`
+      : `Generation complete! ${finalPageCount} pages, ${finalComponentCount} components.${conceptNote}${qgText}${continuationNote}\n\nYou can:\n- Describe changes and AI will adjust\n- Type "**deploy**" to go live`,
     stage: 'uiux_generation_complete',
     progress: { current: 3, total: 3, step: isChinese ? '完成' : 'Done' },
     layoutHint: 'split',
@@ -713,9 +771,7 @@ export async function sendFastBuildCompleteMessage(
         currentPhase: 'complete',
       } as Record<string, unknown>,
     },
-    quickReplies: [
-      { label: isChinese ? '部署上線' : 'Deploy', value: '部署', style: 'primary' },
-    ],
+    quickReplies: buildPostDeployFastBuildQuickReplies(state, { includeDeploy: true }),
   })
 }
 

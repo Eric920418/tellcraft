@@ -49,6 +49,7 @@ import {
   pickFirstBatchPages,
   shouldExpandBriefPrompt,
 } from '../services/fast-build-generation'
+import { buildPostDeployFastBuildQuickReplies, getRemainingFastBuildPages } from '../workers/phase-handlers/fast-build-phases'
 
 const MOCK_DESIGN_SYSTEM: DesignSystem = {
   cssVariables: ':root { --color-primary: #2563eb; }',
@@ -164,6 +165,27 @@ describe('uiux optimization helpers', () => {
         originalLines: 421,
         newLines: 189,
       },
+    ])
+  })
+
+  it('should compute remaining fast-build pages after partial deploy', () => {
+    expect(getRemainingFastBuildPages({
+      fastMode: true,
+      fastBuildAllPages: ['首頁', '價格方案', '聯繫'],
+      fastBuildCompletedPages: ['首頁'],
+    })).toEqual(['價格方案', '聯繫'])
+  })
+
+  it('should include continue quick reply after deploy when pages remain', () => {
+    expect(buildPostDeployFastBuildQuickReplies({
+      fastMode: true,
+      fastBuildAllPages: ['首頁', '價格方案', '聯繫'],
+      fastBuildCompletedPages: ['首頁'],
+      locale: 'zh',
+    }, { includeDeploy: true, includeRollback: true })).toEqual([
+      { label: '繼續生成（2 頁）', value: '__continue_fast_build_after_deploy__', style: 'primary' },
+      { label: '部署上線', value: '部署', style: 'secondary' },
+      { label: '回滾版本', value: '回滾', style: 'ghost' },
     ])
   })
 })

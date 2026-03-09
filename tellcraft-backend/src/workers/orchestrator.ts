@@ -23,7 +23,10 @@ import {
 
 // Phase handlers used directly by handleProcessMessage
 import { executeBddSpecSkill } from './phase-handlers/bdd-phases'
-import { executeFastBuildSkill, runFastBuildPipeline, sendFastBuildCompleteMessage, resumeFastBuildPipeline } from './phase-handlers/fast-build-phases'
+import {
+  executeFastBuildSkill, runFastBuildPipeline, sendFastBuildCompleteMessage,
+  resumeFastBuildPipeline, getRemainingFastBuildPages,
+} from './phase-handlers/fast-build-phases'
 import { executeDeployerSkill } from './phase-handlers/deploy-phases'
 import { handleGoBack } from './phase-handlers/bdd-phases'
 import { handleBddWaitingForReply } from './phase-handlers/bdd-phases'
@@ -567,6 +570,32 @@ async function handleContinueFlow(
     state.uiuxCodeGenerationStartedAt = undefined
     await saveFlowState(redis, conversationId, state)
     await sendFastBuildCompleteMessage(conversationId, state, io, redis)
+    return
+  }
+  if (trimmedMsg === '__continue_fast_build_after_deploy__' && state.fastMode) {
+    const remainingPages = getRemainingFastBuildPages(state)
+    if (remainingPages.length === 0) {
+      await sendFastBuildCompleteMessage(conversationId, state, io, redis)
+      return
+    }
+
+    logger.info({ conversationId, remainingPages }, 'Fast Build 部署後繼續生成剩餘頁面')
+    state.phase = 'fast_generating'
+    state.fastBuildStage = 'generating'
+    state.fastBuildCurrentBatchIndex = (state.fastBuildCurrentBatchIndex || 0) + 1
+    state.waitingForReply = false
+    state.uiuxCodeGenerationStartedAt = Date.now()
+    state.uiuxCodePhase = 'structure'
+    await saveFlowState(redis, conversationId, state)
+    await runFastBuildPipeline({
+      state,
+      targetPages: remainingPages,
+      conversationId,
+      projectId,
+      userId,
+      redis,
+      io,
+    })
     return
   }
   // __resume_fast_build_pipeline__：從中斷階段恢復管線（animation/rwd）
