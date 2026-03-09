@@ -30,7 +30,7 @@
     "subtitle": "Describe your idea. AI will clarify requirements, generate code, and deploy.",
     "placeholderFast": "Describe the website you want, e.g.: A coffee shop website with brand story, menu page, online booking and contact us",
     "placeholderFine": "Describe your idea, AI will help you clarify the details...",
-    "modeFast": "Fast",
+    "modeFast": "Interface",
     "modeFine": "Fine",
     "shortWarning": "Description too short, results may not be optimal",
     "fastHint": "The more detail you provide, the better the result",
@@ -283,7 +283,7 @@
     "guestCompleteTitle": "Your website has been generated!",
     "guestCompleteMessage": "Log in to save your work, make iterations, and deploy with one click. Your free trial has ended - log in for unlimited access.",
     "guestLimitTitle": "Free trial ended",
-    "guestLimitMessage": "You've experienced one free build. Log in for unlimited fast mode and unlock fine mode for deeper AI-driven development.",
+    "guestLimitMessage": "You've experienced one free interface build. Log in for unlimited interface mode and unlock fine mode for deeper AI-driven development.",
     "guestInputLocked": "Log in to continue"
   },
   "useCases": {

@@ -179,10 +179,10 @@ export const SKILL_REGISTRY: Record<SkillName, SkillMetadata> = {
 
   'fast-build': {
     name: 'fast-build',
-    displayName: '快速建站',
+    displayName: '介面建站',
     description: '一句話描述需求，AI 直接生成完整網站。跳過需求釐清和設計探索，5 分鐘出結果。',
     triggerPatterns: [
-      '快速', '直接做', '馬上',
+      '介面', '快速', '直接做', '馬上',
     ],
     minPlan: 'free',
     costLevel: 'medium',

@@ -66,9 +66,9 @@ export async function handleFollow(userId: string, replyToken: string): Promise<
           type: 'action',
           action: {
             type: 'postback',
-            label: '\u{26A1} 快速建站',
+            label: '\u{26A1} 介面建站',
             data: JSON.stringify({ a: 'start', m: 'f' }),
-            displayText: '快速建站',
+            displayText: '介面建站',
           },
         },
         {
@@ -280,7 +280,7 @@ async function handleHelp(replyToken: string): Promise<void> {
   const helpText = [
     '\u{2753} Tellcraft 使用說明',
     '',
-    '\u{26A1} 快速建站',
+    '\u{26A1} 介面建站',
     '直接發一句話描述你的產品，AI 自動生成網站',
     '例如：「幫我做一個咖啡廳官網」',
     '',
@@ -554,7 +554,7 @@ const PHASE_SUMMARY: Record<string, string> = {
   uiux_quality_gate: '品質檢查中',
   uiux_complete: '設計已完成，可以修改或部署',
   uiux_iterating: '正在修改設計中，請稍候',
-  fast_generating: '快速生成中，請稍候',
+  fast_generating: '介面模式生成中，請稍候',
   deployer_deploying: '部署中，請稍候',
   deployer_failed: '上次部署失敗，可以重試或修改後再部署',
   deployer_complete: '已部署上線，可以修改或回滾',

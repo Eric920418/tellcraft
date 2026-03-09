@@ -30,7 +30,7 @@
     "subtitle": "描述你的想法，AI 會幫你釐清需求、生成程式碼、部署上線",
     "placeholderFast": "描述你想要的網站，例如：一個咖啡店官網，需要首頁展示品牌故事、菜單頁、線上預約和聯繫我們",
     "placeholderFine": "描述你的想法，AI 會幫你深入釐清細節...",
-    "modeFast": "快速",
+    "modeFast": "介面",
     "modeFine": "精細",
     "shortWarning": "描述太短，生成效果可能不理想",
     "fastHint": "描述越詳細，生成效果越好",
@@ -283,7 +283,7 @@
     "guestCompleteTitle": "你的網站已生成完成！",
     "guestCompleteMessage": "登入以保存你的作品、進行迭代修改和一鍵部署。免費試用到此結束，登入後可無限使用。",
     "guestLimitTitle": "免費試用已結束",
-    "guestLimitMessage": "你已體驗過一次快速建站。登入後可以無限使用快速模式，還能使用精細模式深度打磨你的網站。",
+    "guestLimitMessage": "你已體驗過一次介面建站。登入後可以無限使用介面模式，還能使用精細模式深度打磨你的網站。",
     "guestInputLocked": "登入以繼續使用"
   },
   "useCases": {

@@ -347,7 +347,7 @@ async function handleProcessMessage(
           projectId,
           desiredName: message.slice(0, 25),
           maxLength: 25,
-          fallbackName: '快速建站',
+          fallbackName: '介面建站',
         })
         if (finalName) {
           logger.info({ oldName: project.name, newName: finalName }, '快速模式自動命名')

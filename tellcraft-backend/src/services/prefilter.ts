@@ -350,7 +350,7 @@ export async function checkBuildRelevance(
   // Layer 2/3: 弱信號或無信號 → 微型 Haiku 判斷（相關性 + 具體性）
   try {
     const systemPrompt = hasWeakSignal
-      ? '用戶想用快速建站工具。判斷描述是否具體到能知道「建什麼類型的網站」。同時檢查內容是否涉及有害/非法/成人/仇恨/隱私侵犯（正常的醫療資訊網站是允許的，只有診斷/測驗工具才算有害）。只回覆 JSON:\n- 夠具體：{"relevant":true}\n- 相關但太模糊（如「做一個很酷的東西」「建一個網站」）：{"relevant":true,"vague":true}\n- 與建網站無關：{"relevant":false}\n- 內容不當：{"relevant":false,"policy":"harmful|illegal|adult|hate|privacy"}'
+      ? '用戶想用介面建站工具。判斷描述是否具體到能知道「建什麼類型的網站」。同時檢查內容是否涉及有害/非法/成人/仇恨/隱私侵犯（正常的醫療資訊網站是允許的，只有診斷/測驗工具才算有害）。只回覆 JSON:\n- 夠具體：{"relevant":true}\n- 相關但太模糊（如「做一個很酷的東西」「建一個網站」）：{"relevant":true,"vague":true}\n- 與建網站無關：{"relevant":false}\n- 內容不當：{"relevant":false,"policy":"harmful|illegal|adult|hate|privacy"}'
       : '判斷用戶訊息是否與「建立網站/應用/數位產品」相關。同時檢查內容是否涉及有害/非法/成人/仇恨/隱私侵犯。只回覆 JSON: {"relevant":true} 或 {"relevant":false} 或 {"relevant":false,"policy":"harmful|illegal|adult|hate|privacy"}'
 
     const resp = await fetch('https://api.anthropic.com/v1/messages', {
@@ -413,7 +413,7 @@ export async function checkBuildRelevance(
       return {
         relevant: false,
         errorMessage: isChinese
-          ? '這個需求似乎與建立網站無關。Tellcraft 專門用於快速建站。\n\n請描述您想建立的網站或應用，例如：「做一個咖啡店官網」、「建立一個作品集網站」'
+          ? '這個需求似乎與建立網站無關。Tellcraft 專門用於介面建站。\n\n請描述您想建立的網站或應用，例如：「做一個咖啡店官網」、「建立一個作品集網站」'
           : 'This doesn\'t seem related to building a website. Tellcraft is a website builder.\n\nPlease describe the website or app you\'d like to build, e.g. "Build a coffee shop website" or "Create a portfolio site"',
       }
     }
