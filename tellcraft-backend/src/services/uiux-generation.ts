@@ -868,6 +868,43 @@ interface CodeBundle {
   styles: string
 }
 
+export interface RefinePatchSet {
+  modifiedPages: Map<string, string>
+  modifiedComponents: Map<string, string>
+  modifiedStyles: string
+}
+
+export interface SuspiciousRefineShrink {
+  path: string
+  originalLines: number
+  newLines: number
+}
+
+export function findSuspiciousRefineShrinks(
+  baseCode: CodeBundle,
+  patches: RefinePatchSet,
+  threshold = 0.4,
+): SuspiciousRefineShrink[] {
+  const issues: SuspiciousRefineShrink[] = []
+  const allOriginal = [...baseCode.pages, ...baseCode.components]
+
+  for (const [path, newContent] of [
+    ...patches.modifiedPages.entries(),
+    ...patches.modifiedComponents.entries(),
+  ]) {
+    const original = allOriginal.find(file => file.path === path)
+    if (!original) continue
+
+    const originalLines = original.content.split('\n').length
+    const newLines = newContent.split('\n').length
+    if (originalLines > 30 && newLines < originalLines * (1 - threshold)) {
+      issues.push({ path, originalLines, newLines })
+    }
+  }
+
+  return issues
+}
+
 // LlmTrackingContext 已在上方定義
 
 // ============================================================
@@ -1743,6 +1780,52 @@ ${contextLines.join('\n')}
 /**
  * 取得 TSX/TS 檔案的語法錯誤清單（使用 TypeScript 內建 parser，零 LLM）
  */
+/**
+ * 偵測並自動修復 TSX 中未宣告的 useRef 變數（語意層錯誤，ts.transpileModule 抓不到）
+ * 規則：如果 xyzRef.current 被使用，但 component body 內找不到對應的 useRef 宣告，
+ * 自動在第一個 return/useEffect/useCallback/canvas 相關行前插入宣告。
+ */
+function repairUndeclaredRefs(file: GeneratedComponent): { content: string; repaired: boolean } {
+  const content = file.content
+  // 找出所有 xyzRef.current 用法
+  const usageMatches = [...content.matchAll(/\b(\w+Ref)\.current\b/g)]
+  if (usageMatches.length === 0) return { content, repaired: false }
+  const usedRefs = new Set(usageMatches.map(m => m[1]))
+
+  // 找出已宣告的 useRef（const xyzRef = useRef...）
+  const declaredRefs = new Set<string>()
+  for (const m of content.matchAll(/\bconst\s+(\w+Ref)\s*=/g)) {
+    declaredRefs.add(m[1])
+  }
+
+  const missing = [...usedRefs].filter(r => !declaredRefs.has(r))
+  if (missing.length === 0) return { content, repaired: false }
+
+  // 推斷合理的初始值：mouseRef → {x,y}；nodesRef/itemsRef → []；其餘 → null
+  const inferInitial = (name: string): string => {
+    if (/mouse/i.test(name)) return 'useRef<{ x: number; y: number }>({ x: 0, y: 0 })'
+    if (/nodes|items|list|data/i.test(name)) return 'useRef<unknown[]>([])'
+    if (/canvas|ctx|container|wrapper/i.test(name)) return 'useRef<HTMLElement | null>(null)'
+    return 'useRef(null)'
+  }
+
+  const declarations = missing.map(r => `  const ${r} = ${inferInitial(r)}`).join('\n')
+
+  // 插入位置：第一個 useEffect/useCallback/canvas 相關行前，或 return 語句前
+  const insertPattern = /^(\s*(?:useEffect|useCallback|useRef|const\s+\w+\s*=\s*useRef|return\s*[(<]))/m
+  const insertIdx = content.search(insertPattern)
+  let fixed: string
+  if (insertIdx >= 0) {
+    fixed = content.slice(0, insertIdx) + declarations + '\n' + content.slice(insertIdx)
+  } else {
+    // fallback：在函式最後一個 hook 宣告後
+    fixed = content + '\n' + declarations
+  }
+
+  logger.warn({ path: file.path, missing }, 'repairUndeclaredRefs: 自動補宣告缺失的 useRef')
+  return { content: fixed, repaired: true }
+}
+
 function getSyntaxErrors(filename: string, content: string): string[] {
   if (content.length < 50) return []
   // 只檢查 TS/TSX 檔案，CSS/JSON 等非 TS 檔案跳過
@@ -1793,12 +1876,18 @@ async function checkAndFixSyntaxErrors(
   files: GeneratedComponent[],
   trackingContext?: LlmTrackingContext
 ): Promise<GeneratedComponent[]> {
+  // 先做語意修復：自動補宣告缺失的 useRef（語法層抓不到）
+  const withRefsRepaired = files.map(f => {
+    const { content, repaired } = repairUndeclaredRefs(f)
+    return repaired ? { ...f, content } : f
+  })
+
   const broken: Array<{ file: GeneratedComponent; errors: string[]; truncated: boolean }> = []
-  for (const file of files) {
+  for (const file of withRefsRepaired) {
     const errors = getSyntaxErrors(file.path, file.content)
     if (errors.length > 0) broken.push({ file, errors, truncated: isTruncatedFile(file.content, errors) })
   }
-  if (broken.length === 0) return files
+  if (broken.length === 0) return withRefsRepaired
 
   logger.warn(
     { count: broken.length, paths: broken.map(b => b.file.path), truncated: broken.filter(b => b.truncated).map(b => b.file.path) },
@@ -1806,7 +1895,7 @@ async function checkAndFixSyntaxErrors(
   )
 
   // 收集非破損檔案的前 20 行作為 import context（供截斷型修復使用）
-  const healthyImportContext = files
+  const healthyImportContext = withRefsRepaired
     .filter(f => !broken.some(b => b.file.path === f.path))
     .map(f => {
       const head = f.content.split('\n').slice(0, 20).join('\n')
@@ -1901,7 +1990,7 @@ async function checkAndFixSyntaxErrors(
     return files
   }
 
-  return files.map(file => {
+  return withRefsRepaired.map(file => {
     const fixed = result.get(file.path)
     if (!fixed) return file
     const remaining = getSyntaxErrors(file.path, fixed)
@@ -2176,6 +2265,13 @@ function getBaseRules(): string {
 - 有鍵盤/focus 行為的組件使用 Radix 或 React Aria
 - 破壞性操作用 AlertDialog 確認
 - loading state 用 skeleton
+
+## React Hooks 宣告規則（Critical — 必須遵守）
+- 所有使用的 ref 必須在 component body 頂層宣告：用了 \`mouseRef.current\` → 必須有 \`const mouseRef = useRef(...)\`
+- 所有使用的 state 必須宣告：用了 \`setCount\` → 必須有 \`const [count, setCount] = useState(...)\`
+- Canvas / requestAnimationFrame 動畫若追蹤 mouse → 必須宣告 \`const mouseRef = useRef({ x: 0, y: 0 })\` + mousemove handler
+- useEffect / useCallback 的依賴陣列必須完整：所有 callback 內用到的外部變數都要列出
+- 禁止在 event handler 或 animation frame 內直接讀未宣告的變數
 
 ## 資料防禦規則（Critical — 必須遵守）
 - 所有陣列 .map()/.forEach() 迭代前必須做 null guard：\`(items ?? []).map(...)\`
@@ -3736,12 +3832,6 @@ export async function refineCode(
   imageUrls?: string[],
   onTextDelta?: (text: string) => void
 ): Promise<GenerationResult> {
-  type CodeBundle = {
-    pages: GeneratedComponent[]
-    components: GeneratedComponent[]
-    styles: string
-  }
-
   const buildCodeBlocks = (code: CodeBundle): string[] => {
     const blocks: string[] = []
     for (const page of code.pages) {
@@ -3759,11 +3849,7 @@ export async function refineCode(
   const parseModifiedCodeBlocks = (
     content: string,
     baseCode: CodeBundle
-  ): {
-    modifiedPages: Map<string, string>
-    modifiedComponents: Map<string, string>
-    modifiedStyles: string
-  } => {
+  ): RefinePatchSet => {
     const tsxRegex = /```tsx:([^\n]+)\n([\s\S]*?)\n```/g
     const cssRegex = /```css:([^\n]+)\n([\s\S]*?)\n```/g
     const modifiedPages = new Map<string, string>()
@@ -3795,11 +3881,7 @@ export async function refineCode(
 
   const mergeCodeBundle = (
     baseCode: CodeBundle,
-    patches: {
-      modifiedPages: Map<string, string>
-      modifiedComponents: Map<string, string>
-      modifiedStyles: string
-    }
+    patches: RefinePatchSet
   ): CodeBundle => {
     const mergedPages = baseCode.pages.map(p => ({
       ...p,
@@ -3828,11 +3910,8 @@ export async function refineCode(
     }
   }
 
-  const hasAnyPatch = (patches: {
-    modifiedPages: Map<string, string>
-    modifiedComponents: Map<string, string>
-    modifiedStyles: string
-  }): boolean => patches.modifiedPages.size > 0 || patches.modifiedComponents.size > 0 || !!patches.modifiedStyles
+  const hasAnyPatch = (patches: RefinePatchSet): boolean =>
+    patches.modifiedPages.size > 0 || patches.modifiedComponents.size > 0 || !!patches.modifiedStyles
 
   const resolveImportPath = (fromPath: string, importPath: string): string | null => {
     if (importPath.startsWith('@/')) {
@@ -4101,6 +4180,113 @@ ${buildCodeBlocks(code).join('\n\n')}
     return mergeCodeBundle(code, repairedPatches)
   }
 
+  const clonePatchSet = (patches: RefinePatchSet): RefinePatchSet => ({
+    modifiedPages: new Map(patches.modifiedPages),
+    modifiedComponents: new Map(patches.modifiedComponents),
+    modifiedStyles: patches.modifiedStyles,
+  })
+
+  const recoverSuspiciousShrinkPatches = async (
+    baseCode: CodeBundle,
+    originalPatches: RefinePatchSet,
+    shrinkIssues: SuspiciousRefineShrink[],
+  ): Promise<RefinePatchSet | null> => {
+    if (shrinkIssues.length === 0) return originalPatches
+
+    const targetFiles = shrinkIssues
+      .map(issue => [...baseCode.pages, ...baseCode.components].find(file => file.path === issue.path))
+      .filter((file): file is GeneratedComponent => Boolean(file))
+
+    if (targetFiles.length === 0) return null
+
+    const retrySystemPrompt = `你是一位專門修復 LLM 截斷輸出的資深前端工程師。
+
+任務：
+- 你會收到原始完整檔案、用戶修改要求、以及上一次疑似截斷的草稿。
+- 只修改指定檔案，輸出該檔案的「完整內容」，不能只輸出片段。
+- 以原始檔案為基底做最小必要修改，保留所有既有功能、hook、事件、動畫、響應式與輔助函式。
+- 除非用戶明確要求刪除整段功能，否則不要大幅縮減檔案內容。
+- 若上一版草稿漏掉了後半段邏輯，你必須補回。
+
+輸出格式：
+\`\`\`tsx:path/to/file.tsx
+// 完整檔案內容
+\`\`\`
+\`\`\`css:globals.css
+/* 如需修改 */
+\`\`\`
+
+不要輸出解釋，不要輸出未修改檔案。`
+
+    const retryFileBlocks = targetFiles.map(file => {
+      const priorDraft =
+        originalPatches.modifiedPages.get(file.path) ||
+        originalPatches.modifiedComponents.get(file.path) ||
+        ''
+
+      return [
+        `## 目標檔案\n${file.path}`,
+        `### 原始完整內容（必須以此為基底保留既有邏輯）`,
+        `\`\`\`tsx:${file.path}\n${file.content}\n\`\`\``,
+        priorDraft
+          ? `### 上一次疑似截斷的草稿（僅供參考，不可直接照抄）\n\`\`\`tsx:${file.path}\n${priorDraft}\n\`\`\``
+          : '',
+      ].filter(Boolean).join('\n\n')
+    }).join('\n\n')
+
+    const retryUserMessage = `## 用戶的修改要求
+${userFeedback}
+${lockedUploadUrls.length ? `\n## 鎖定圖片 URL（不可替換）\n${lockedUploadUrls.join('\n')}\n` : ''}
+${targetPreviewRoute ? `\n## 目標路由\n${targetPreviewRoute}\n` : ''}
+
+## 專案檔案清單
+${buildCodeManifest(currentCode)}
+
+${retryFileBlocks}
+
+請只輸出上面列出的目標檔案完整內容，修復截斷問題並保留既有邏輯。`
+
+    const retryResponse = await callClaude(
+      retrySystemPrompt,
+      [{ role: 'user', content: retryUserMessage }],
+      {
+        maxTokens: 24576,
+        temperature: 0.1,
+        promptLabel: 'refine-code-shrink-recovery',
+        contextSizeHint: generationProfile,
+      },
+      { ...trackingContext, purpose: 'refine_code_shrink_recovery' }
+    )
+
+    if (!retryResponse.success || !retryResponse.content) {
+      logger.warn({ error: retryResponse.error, paths: shrinkIssues.map(issue => issue.path) }, 'refineCode shrink recovery 失敗')
+      return null
+    }
+
+    const retryPatches = parseModifiedCodeBlocks(retryResponse.content, baseCode)
+    if (!hasAnyPatch(retryPatches)) {
+      logger.warn({ paths: shrinkIssues.map(issue => issue.path) }, 'refineCode shrink recovery 無有效代碼區塊')
+      return null
+    }
+
+    const mergedPatches = clonePatchSet(originalPatches)
+    for (const issue of shrinkIssues) {
+      const recoveredPage = retryPatches.modifiedPages.get(issue.path)
+      if (recoveredPage) {
+        mergedPatches.modifiedPages.set(issue.path, recoveredPage)
+      }
+      const recoveredComponent = retryPatches.modifiedComponents.get(issue.path)
+      if (recoveredComponent) {
+        mergedPatches.modifiedComponents.set(issue.path, recoveredComponent)
+      }
+    }
+    if (retryPatches.modifiedStyles) {
+      mergedPatches.modifiedStyles = retryPatches.modifiedStyles
+    }
+
+    return mergedPatches
+  }
+
   const tier = designContext.designTier || 'functional'
   const generationProfile = designContext.generationProfile || 'balanced'
   const feedbackUrls = Array.from(
@@ -4283,35 +4469,41 @@ ${codeBlocks.join('\n\n')}
     return { success: false, error: '無法理解您的修改需求。請描述具體要修改的內容，例如「把標題文字改成藍色」或「在導航欄新增一個搜尋框」。' }
   }
 
-  let mergedCode = mergeCodeBundle(currentCode, initialPatches)
-
-  // ── 縮水偵測：修改後檔案比原版少 40%+ 視為 LLM 截斷，直接 fail ──
+  // ── 縮水偵測：大檔案先嘗試單檔修復，再決定是否取消 ──
   const SHRINK_THRESHOLD = 0.4
-  const allOriginal = [...currentCode.pages, ...currentCode.components]
-  for (const [path, newContent] of [
-    ...initialPatches.modifiedPages.entries(),
-    ...initialPatches.modifiedComponents.entries(),
-  ]) {
-    const original = allOriginal.find(f => f.path === path)
-    if (!original) continue
-    const originalLines = original.content.split('\n').length
-    const newLines = newContent.split('\n').length
-    if (originalLines > 30 && newLines < originalLines * (1 - SHRINK_THRESHOLD)) {
-      logger.error(
-        { path, originalLines, newLines },
-        'refineCode：修改後代碼縮水超過 40%，疑似 LLM 截斷，取消本次迭代'
-      )
-      return {
-        success: false,
-        error: `修改後的 ${path.split('/').pop()} 內容大幅縮減（${originalLines} → ${newLines} 行），疑似代碼截斷。已取消本次修改，請重新嘗試或描述更小範圍的修改。`,
-      }
+  let effectivePatches = initialPatches
+  let shrinkIssues = findSuspiciousRefineShrinks(currentCode, effectivePatches, SHRINK_THRESHOLD)
+  if (shrinkIssues.length > 0) {
+    logger.warn(
+      { shrinkIssues },
+      'refineCode：偵測到疑似截斷的大幅縮水檔案，嘗試單檔修復'
+    )
+
+    const recoveredPatches = await recoverSuspiciousShrinkPatches(currentCode, effectivePatches, shrinkIssues)
+    if (recoveredPatches) {
+      effectivePatches = recoveredPatches
+      shrinkIssues = findSuspiciousRefineShrinks(currentCode, effectivePatches, SHRINK_THRESHOLD)
     }
   }
 
+  if (shrinkIssues.length > 0) {
+    const issue = shrinkIssues[0]
+    logger.error(
+      issue,
+      'refineCode：修改後代碼縮水超過 40%，且修復重試後仍疑似 LLM 截斷，取消本次迭代'
+    )
+    return {
+      success: false,
+      error: `修改後的 ${issue.path.split('/').pop()} 內容大幅縮減（${issue.originalLines} → ${issue.newLines} 行），疑似代碼截斷。已取消本次修改，請重新嘗試或描述更小範圍的修改。`,
+    }
+  }
+
+  let mergedCode = mergeCodeBundle(currentCode, effectivePatches)
+
   // ── 語法驗證：只檢查被修改的檔案，失敗時直接 fail refineCode（不存快照）──
   const patchedPaths = new Set([
-    ...initialPatches.modifiedPages.keys(),
-    ...initialPatches.modifiedComponents.keys(),
+    ...effectivePatches.modifiedPages.keys(),
+    ...effectivePatches.modifiedComponents.keys(),
   ])
   const modifiedForSyntaxCheck = [...mergedCode.pages, ...mergedCode.components].filter(f =>
     patchedPaths.has(f.path)
