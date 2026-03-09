@@ -15,7 +15,7 @@ import { getCreditLimit } from '../config/plans'
 import { createLogger } from '../lib/logger'
 
 const logger = createLogger('orchestrator-utils')
-const FLOW_ACTIVITY_TTL_SECONDS = 300
+const FLOW_ACTIVITY_TTL_SECONDS = 60
 const FLOW_ACTIVITY_PING_INTERVAL_MS = 15_000
 
 function getFlowActivityKey(conversationId: string): string {

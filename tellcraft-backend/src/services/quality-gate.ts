@@ -421,16 +421,86 @@ function checkCodeQuality(code: GeneratedCode, _designTier?: DesignTier): Qualit
 }
 
 // ============================================================
+// Checker 4: Color Contrast
+// ============================================================
+
+function checkColorContrast(code: GeneratedCode, moodId?: string): QualityIssue[] {
+  const issues: QualityIssue[] = []
+  let issueCounter = 0
+
+  const allFiles = [
+    ...code.pages.map(f => ({ path: f.path, content: f.content })),
+    ...code.components.map(f => ({ path: f.path, content: f.content })),
+  ]
+
+  // Layer A：通用亮底白字偵測（所有 mood 都跑）
+  const lightBgPatterns = [
+    'bg-white', 'bg-muted', 'bg-surface-1', 'bg-surface-2', 'bg-surface-3',
+    'bg-gray-50', 'bg-gray-100', 'bg-slate-50', 'bg-zinc-50', 'bg-[#fafafa]', 'bg-[#ffffff]'
+  ]
+  const whiteTextPatterns = ['text-white', 'text-slate-50', 'text-gray-50', 'text-zinc-50']
+
+  for (const { path, content } of allFiles) {
+    const lines = content.split('\n')
+    for (let i = 0; i < lines.length; i++) {
+      const window = lines.slice(Math.max(0, i - 2), i + 3).join(' ')
+      const hasLightBg = lightBgPatterns.some(p => window.includes(p))
+      const hasWhiteText = whiteTextPatterns.some(p => window.includes(p))
+      if (hasLightBg && hasWhiteText) {
+        issues.push({
+          id: `contrast-${++issueCounter}`,
+          category: 'a11y',
+          severity: 'critical',
+          rule: 'color-contrast',
+          file: path,
+          line: i + 1,
+          message: '亮色背景上使用白色文字，對比度不足（WCAG AA 違規）',
+          suggestion: '改用 text-foreground 或 text-zinc-900；若需要白字，必須先加深色容器（bg-slate-950）',
+        })
+        break  // 每個檔案只報一次，避免 autofix prompt 過長
+      }
+    }
+  }
+
+  // Layer B：Dark mood 缺乏深色容器偵測
+  const DARK_MOOD_IDS = ['glassmorphic-dark', 'tech-dark']
+  if (moodId && DARK_MOOD_IDS.includes(moodId)) {
+    for (const { path, content } of allFiles) {
+      const hasBackdropBlur = content.includes('backdrop-blur')
+      const hasWhiteText = whiteTextPatterns.some(p => content.includes(p))
+      const hasDarkContainer = /bg-(slate|zinc|gray|neutral)-9\d\d|bg-black/.test(content)
+
+      if ((hasBackdropBlur || hasWhiteText) && !hasDarkContainer) {
+        issues.push({
+          id: `contrast-${++issueCounter}`,
+          category: 'a11y',
+          severity: 'critical',
+          rule: 'dark-mood-contrast',
+          file: path,
+          message: `glassmorphic-dark mood 需要深色底層容器，但 ${path} 中找不到 bg-slate-900/bg-zinc-950/bg-black`,
+          suggestion: '在使用 backdrop-blur 或 text-white 的 section 外層加 bg-slate-950 或 bg-zinc-950 容器',
+        })
+        break
+      }
+    }
+  }
+
+  return issues
+}
+
+// ============================================================
 // 主函數：runQualityGate
 // ============================================================
 
-export function runQualityGate(code: GeneratedCode, designTier?: DesignTier): QualityReport {
-  // 並行執行 3 個 checker
+export function runQualityGate(code: GeneratedCode, designTier?: DesignTier, moodId?: string): QualityReport {
+  // 並行執行 checkers
   const a11yIssues = checkAccessibility(code)
   const perfIssues = checkPerformance(code)
   const cqIssues = checkCodeQuality(code, designTier)
+  const contrastIssues = checkColorContrast(code, moodId)
 
-  const allIssues = [...a11yIssues, ...perfIssues, ...cqIssues]
+  const allA11yIssues = [...a11yIssues, ...contrastIssues]
+  const allIssues = [...allA11yIssues, ...perfIssues, ...cqIssues]
 
   const critical = allIssues.filter(i => i.severity === 'critical').length
   const warning = allIssues.filter(i => i.severity === 'warning').length
@@ -448,8 +518,8 @@ export function runQualityGate(code: GeneratedCode, designTier?: DesignTier): Qu
     },
     categories: {
       a11y: {
-        passed: a11yIssues.filter(i => i.severity === 'critical').length === 0,
-        issues: a11yIssues,
+        passed: allA11yIssues.filter(i => i.severity === 'critical').length === 0,
+        issues: allA11yIssues,
       },
       performance: {
         passed: perfIssues.filter(i => i.severity === 'critical').length === 0,

@@ -481,7 +481,7 @@ export async function runFastBuildPipeline(params: {
   }
 
   // ===== Quality Gate（靜態檢查 + 最多 2 輪 LLM 修復）=====
-  let report = runQualityGate(currentCode, tier)
+  let report = runQualityGate(currentCode, tier, state.uiuxDesignMood)
   logger.info(`QG: passed=${report.passed}, critical=${report.summary.critical}, warning=${report.summary.warning}`)
 
   const FAST_QG_MAX_ATTEMPTS = 2
@@ -498,7 +498,7 @@ export async function runFastBuildPipeline(params: {
       const fixed = await autoFixCriticalIssues(currentCode, criticalIssues, { userId, conversationId })
       if (!fixed) break
       currentCode = fixed
-      report = runQualityGate(currentCode, tier)
+      report = runQualityGate(currentCode, tier, state.uiuxDesignMood)
       logger.info(`QG 修復後: passed=${report.passed}, critical=${report.summary.critical}`)
     } catch (qgErr) {
       logger.warn({ err: qgErr }, 'QG 修復失敗，跳過')
@@ -651,6 +651,178 @@ export async function sendFastBuildCompleteMessage(
       { label: isChinese ? '部署上線' : 'Deploy', value: '部署', style: 'primary' },
     ],
   })
+}
+
+// ============================================================
+// 管線恢復：從中斷的階段跑剩餘管線
+// ============================================================
+
+export async function resumeFastBuildPipeline(params: {
+  state: FlowState
+  conversationId: string
+  projectId: string
+  userId: string
+  redis: Redis
+  io: SocketIOServer
+}) {
+  const { state, conversationId, projectId, userId, redis, io } = params
+  const isChinese = state.locale === 'zh'
+  const designSystem = state.uiuxDesignSystem!
+  const tier = state.uiuxDesignTier || 'functional'
+  const variantConcept = state.uiuxVariantConcept
+  const moodId = state.uiuxDesignMood
+  const layoutMode = state.fastModeLayoutMode || 'website'
+  const productType = state.fastModeProductType || 'landing'
+  const twConfig = generateTailwindConfig(designSystem)
+  const codePhase = state.uiuxCodePhase || 'structure'
+  let currentCode = state.uiuxGeneratedCode!
+
+  const interactionHint = inferInteractionHint(productType)
+  const fastUiSpecSummary = state.uiuxUISpec ? buildUISpecSummary(state.uiuxUISpec)
+    : (interactionHint ? `產品互動概覽：\n${interactionHint}` : undefined)
+
+  try {
+    // ── 恢復 Animation（如果中斷在 animation 階段）──
+    if (codePhase === 'animation') {
+      await sendMessage(conversationId, io, {
+        content: isChinese ? '正在恢復動畫生成...' : 'Resuming animation generation...',
+        stage: 'fast_generating',
+        progress: { current: 2, total: 3, step: isChinese ? '添加動畫' : 'Adding animations' },
+        richContent: {
+          type: 'fast_build_progress' as const,
+          data: { phase: 'animation', progress: { current: 2, total: 3, step: isChinese ? '添加動畫' : 'Adding animations' }, estimatedSecondsRemaining: 120 } as unknown as Record<string, unknown>,
+        },
+      })
+
+      const animStreamingCallback = makeStreamingCallback(conversationId, io, redis, 'animation', twConfig)
+      const animationResult = await generateAnimations(
+        designSystem,
+        currentCode,
+        tier,
+        { userId, conversationId, purpose: 'fast-build-animation-resume' },
+        animStreamingCallback,
+        variantConcept,
+        fastUiSpecSummary,
+        moodId,
+      )
+
+      if (animationResult.success) {
+        currentCode = {
+          pages: animationResult.pages || currentCode.pages,
+          components: animationResult.components || currentCode.components,
+          styles: animationResult.styles || currentCode.styles,
+        }
+      } else {
+        logger.warn({ err: animationResult.error }, '恢復 Animation 失敗，使用現有代碼繼續')
+      }
+
+      // Animation 存檔
+      state.uiuxGeneratedCode = currentCode
+      state.uiuxAnimationCode = currentCode
+      state.uiuxCodePhase = 'rwd'
+      state.uiuxCodeGenerationStartedAt = Date.now()
+      await saveFlowState(redis, conversationId, state)
+      if (projectId) {
+        await db.upsertProjectFiles(projectId, 'uiux',
+          generatedCodeToFileRows(currentCode, designSystem))
+      }
+    }
+
+    // ── RWD（animation 恢復後或直接從 rwd 恢復）──
+    await sendMessage(conversationId, io, {
+      content: isChinese ? '正在優化響應式佈局...' : 'Optimizing responsive layout...',
+      stage: 'fast_generating',
+      progress: { current: 3, total: 3, step: isChinese ? '響應式優化' : 'Responsive optimization' },
+      richContent: {
+        type: 'fast_build_progress' as const,
+        data: { phase: 'rwd', progress: { current: 3, total: 3, step: isChinese ? '響應式優化' : 'Responsive optimization' }, estimatedSecondsRemaining: 60 } as unknown as Record<string, unknown>,
+      },
+    })
+
+    const rwdStreamingCallback = makeStreamingCallback(conversationId, io, redis, 'rwd', twConfig)
+    const rwdResult = await generateRwd(
+      designSystem,
+      currentCode,
+      tier,
+      { userId, conversationId, purpose: 'fast-build-rwd-resume' },
+      rwdStreamingCallback,
+      variantConcept,
+      fastUiSpecSummary,
+      layoutMode,
+      moodId,
+    )
+
+    if (rwdResult.success) {
+      currentCode = {
+        pages: rwdResult.pages || currentCode.pages,
+        components: rwdResult.components || currentCode.components,
+        styles: rwdResult.styles || currentCode.styles,
+      }
+    } else {
+      logger.warn({ err: rwdResult.error }, '恢復 RWD 失敗，套用 ensureResponsiveClasses')
+      const fixed = ensureResponsiveClasses(currentCode.pages, currentCode.components)
+      currentCode.pages = fixed.pages
+      currentCode.components = fixed.components
+    }
+
+    // ── Quality Gate ──
+    let report = runQualityGate(currentCode, tier, state.uiuxDesignMood)
+    logger.info(`恢復 QG: passed=${report.passed}, critical=${report.summary.critical}`)
+
+    for (let attempt = 0; attempt < 2 && !report.passed; attempt++) {
+      const criticalIssues = [
+        ...report.categories.a11y.issues,
+        ...report.categories.performance.issues,
+        ...report.categories.code_quality.issues,
+      ].filter(i => i.severity === 'critical')
+      if (criticalIssues.length === 0) break
+
+      try {
+        const fixed = await autoFixCriticalIssues(currentCode, criticalIssues, { userId, conversationId })
+        if (!fixed) break
+        currentCode = fixed
+        report = runQualityGate(currentCode, tier, state.uiuxDesignMood)
+      } catch (qgErr) {
+        logger.warn({ err: qgErr }, '恢復 QG 修復失敗，跳過')
+        break
+      }
+    }
+
+    // ── 完成 ──
+    state.uiuxGeneratedCode = currentCode
+    state.uiuxQualityReport = report
+    state.uiuxCodePhase = 'complete'
+    state.phase = 'uiux_complete'
+    state.fastBuildStage = 'complete'
+    state.waitingForReply = false
+    state.uiuxCodeGenerationStartedAt = undefined
+    await saveFlowState(redis, conversationId, state)
+
+    if (projectId) {
+      await db.upsertProjectFiles(projectId, 'uiux',
+        generatedCodeToFileRows(currentCode, designSystem))
+    }
+    await redis.del(`streaming:preview:${conversationId}`).catch(() => {})
+
+    await sendFastBuildCompleteMessage(conversationId, state, io, redis)
+    logger.info(`管線恢復完成: ${currentCode.pages.length} pages, ${currentCode.components.length} components`)
+  } catch (err) {
+    // 恢復失敗 → 保留已有代碼轉 uiux_complete
+    logger.error({ err }, '管線恢復失敗，保留已有代碼')
+    state.uiuxGeneratedCode = currentCode
+    state.phase = 'uiux_complete'
+    state.uiuxCodePhase = 'complete'
+    state.waitingForReply = false
+    state.uiuxCodeGenerationStartedAt = undefined
+    await saveFlowState(redis, conversationId, state)
+
+    if (projectId) {
+      await db.upsertProjectFiles(projectId, 'uiux',
+        generatedCodeToFileRows(currentCode, designSystem)).catch(() => {})
+    }
+
+    await sendFastBuildCompleteMessage(conversationId, state, io, redis)
+  }
 }
 
 // ============================================================

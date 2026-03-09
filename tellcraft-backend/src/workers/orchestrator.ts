@@ -23,7 +23,7 @@ import {
 
 // Phase handlers used directly by handleProcessMessage
 import { executeBddSpecSkill } from './phase-handlers/bdd-phases'
-import { executeFastBuildSkill, runFastBuildPipeline, sendFastBuildCompleteMessage } from './phase-handlers/fast-build-phases'
+import { executeFastBuildSkill, runFastBuildPipeline, sendFastBuildCompleteMessage, resumeFastBuildPipeline } from './phase-handlers/fast-build-phases'
 import { executeDeployerSkill } from './phase-handlers/deploy-phases'
 import { handleGoBack } from './phase-handlers/bdd-phases'
 import { handleBddWaitingForReply } from './phase-handlers/bdd-phases'
@@ -552,6 +552,26 @@ async function handleContinueFlow(
     state.uiuxCodeGenerationStartedAt = undefined
     await saveFlowState(redis, conversationId, state)
     await sendFastBuildCompleteMessage(conversationId, state, io, redis)
+    return
+  }
+  // __resume_fast_build_pipeline__：從中斷階段恢復管線（animation/rwd）
+  if (trimmedMsg === '__resume_fast_build_pipeline__' && state.fastMode) {
+    const codePhase = state.uiuxCodePhase || 'structure'
+    if (codePhase === 'animation' || codePhase === 'rwd') {
+      logger.info({ conversationId, codePhase }, 'Fast Build 管線恢復')
+      state.waitingForReply = false
+      state.fastBuildStage = 'generating'
+      state.uiuxCodeGenerationStartedAt = Date.now()
+      await saveFlowState(redis, conversationId, state)
+      await resumeFastBuildPipeline({ state, conversationId, projectId, userId, redis, io })
+    } else {
+      // 不在可恢復的中間階段 → 走 uiux_complete
+      state.phase = 'uiux_complete'
+      state.uiuxCodePhase = 'complete'
+      state.waitingForReply = false
+      await saveFlowState(redis, conversationId, state)
+      await sendFastBuildCompleteMessage(conversationId, state, io, redis)
+    }
     return
   }
   if (trimmedMsg === '__retry_iteration__' && state.lastIterationFeedback) {

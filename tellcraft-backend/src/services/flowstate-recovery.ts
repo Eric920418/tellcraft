@@ -207,8 +207,45 @@ async function recoverFastGenerating(
 
   const hasCode = state.uiuxGeneratedCode &&
     (state.uiuxGeneratedCode.pages.length > 0 || state.uiuxGeneratedCode.components.length > 0)
+  const codePhase = state.uiuxCodePhase || 'structure'
 
-  if (hasCode) {
+  if (hasCode && (codePhase === 'animation' || codePhase === 'rwd')) {
+    // 中間態：有部分代碼，animation/rwd 未完成 → 暫停讓用戶選擇繼續或部署
+    state.waitingForReply = true
+    state.fastBuildStage = 'awaiting_continue'
+    state.uiuxCodeGenerationStartedAt = undefined
+    await saveFlowState(redis, conversationId, state)
+
+    const pageCount = state.uiuxGeneratedCode!.pages.length
+    const compCount = state.uiuxGeneratedCode!.components.length
+    const twConfig = state.uiuxDesignSystem ? generateTailwindConfig(state.uiuxDesignSystem) : ''
+    const phaseLabel = codePhase === 'animation'
+      ? (isChinese ? '動畫' : 'animation')
+      : (isChinese ? '響應式' : 'responsive')
+
+    await sendMessage(conversationId, io, {
+      content: isChinese
+        ? `快速生成在${phaseLabel}階段中斷了，已保留之前的進度（${pageCount} 個頁面、${compCount} 個組件）。\n\n你可以：`
+        : `Generation was interrupted during ${phaseLabel} phase. Progress saved (${pageCount} pages, ${compCount} components).\n\nYou can:`,
+      stage: 'fast_generating',
+      layoutHint: 'split',
+      richContent: {
+        type: 'code_preview',
+        data: {
+          pages: state.uiuxGeneratedCode!.pages,
+          components: state.uiuxGeneratedCode!.components,
+          styles: state.uiuxGeneratedCode!.styles,
+          tailwindConfig: twConfig,
+          currentPhase: codePhase,
+        } as Record<string, unknown>,
+      },
+      quickReplies: [
+        { label: isChinese ? '繼續完成' : 'Continue', value: '__resume_fast_build_pipeline__', style: 'primary' },
+        { label: isChinese ? '就這樣，部署' : 'Deploy as-is', value: '__finish_fast_build__', style: 'secondary' },
+      ],
+    })
+  } else if (hasCode) {
+    // 有完整代碼（structure 完成或 complete 階段）→ 直接跳 uiux_complete
     state.phase = 'uiux_complete'
     state.uiuxCodePhase = 'complete'
     state.uiuxCodeGenerationStartedAt = undefined

@@ -327,6 +327,41 @@ export async function callClaude(
 export type DesignTier = 'functional' | 'creative'
 
 // ============================================================
+// Mood-Design System 衝突檢測（防止白字疊白底）
+// ============================================================
+
+const DARK_MOOD_IDS = ['glassmorphic-dark', 'tech-dark']
+
+function isLightColor(hex: string): boolean {
+  const m = hex.match(/^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i)
+  if (!m) return true
+  const [r, g, b] = [parseInt(m[1], 16), parseInt(m[2], 16), parseInt(m[3], 16)]
+  return (r + g + b) / 3 > 200  // RGB 均值 > 200 判定為亮色
+}
+
+function buildMoodConflictWarning(moodId: string | undefined, ds: DesignSystem): string {
+  if (!moodId || !DARK_MOOD_IDS.includes(moodId)) return ''
+  const bg = ds.colorPalette?.background ?? ''
+  if (!isLightColor(bg)) return ''
+  return `
+## ⚠️ CRITICAL: Mood-Background 衝突警告（必須優先遵守）
+你選擇的設計情緒「${moodId}」需要深色底層，但 Design System background 是亮色（${bg}）。
+
+強制規則：
+- CSS 的 background 變數只是頁面底色，不代表每個 section 的背景色
+- 每個 section 必須包裹在深色容器中（bg-slate-950、bg-zinc-950、bg-black）
+- 毛玻璃效果（backdrop-blur）必須在深色容器內使用（底層必須是 bg-*-900 以上）
+- text-white 只能在深色容器（bg-*-900 以上）內使用，絕不能在亮色底層上
+- 正確範例：
+  <section className="bg-slate-950 min-h-screen">
+    <div className="backdrop-blur-xl bg-white/5 rounded-2xl p-8">
+      <p className="text-white">...</p>
+    </div>
+  </section>
+`
+}
+
+// ============================================================
 // 共用 Craft 原則（兩個 tier 都適用）
 // ============================================================
 
@@ -377,7 +412,12 @@ Instead of: 只有 default + hover → Try: default / hover / active / focus-vis
 ### 禁止
 - 原生 select/date input — 無法 style，必須自建組件
 - 純裝飾用途的漸層和顏色 — 顏色必須有意義
-- 小元素用大圓角`
+- 小元素用大圓角
+
+### 對比度規則（Contrast — 必須遵守）
+- 禁止白字配亮底：text-white 不能出現在 bg-white, bg-muted, bg-surface-1/2/3 上
+- 毛玻璃（backdrop-blur）必須在深色容器內（bg-*-900 以上或 bg-black）才能用白字
+- 若 Design System 的 background 是亮色，每個 section 可用深色容器包裹整個 section`
 }
 
 // ============================================================
@@ -1255,7 +1295,9 @@ ${getMoodSummary(designSystem.mood)}（完整風格指引已在生成指令中�
 - 只使用 Design System 定義的顏色
 - 使用 Tailwind 自訂顏色 utility：bg-primary, text-foreground, border-border 等（已在 tailwind.config 中配置）
 - 禁止使用 bg-[var(--color-primary)] 這種 arbitrary value 語法
-- 禁止使用 Tailwind 默認顏色（bg-blue-500 等）`
+- 禁止使用 Tailwind 默認顏色（bg-blue-500 等）
+- 對比配對：亮底（background/surface-1/2/3）→ text-foreground（深色）；深底（slate-950/black）→ text-white（白色）
+- 半透明白色卡片（bg-white/50 以上）→ 偏亮 → 用深色文字；bg-white/10 以下 → 依底層顏色決定文字色`
 }
 
 /**
@@ -2069,8 +2111,11 @@ export async function generateStructure(
     ? `\n## Design Mood（視覺風格指引 — 定義美學方向）\n${getMoodPromptBlock(productContext.moodId)}\n`
     : ''
 
+  const moodConflictWarning = buildMoodConflictWarning(productContext?.moodId, designSystem)
+
   const systemPrompt = `${getTierCreativePhilosophy(tier)}
 ${moodSystemSection}
+${moodConflictWarning}
 ${patternsSection}
 
 ${getStructureConstraints(tier)}

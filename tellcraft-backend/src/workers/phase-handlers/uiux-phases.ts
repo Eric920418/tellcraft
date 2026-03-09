@@ -162,6 +162,20 @@ export async function handleFastGenerating(
       return
     }
 
+    // ── 快速孤兒偵測 ──
+    // conv-lock 不存在 = Worker 已死（啟動清理刪除所有殘留鎖）
+    const lockExists = (await redis.exists(`conv-lock:${conversationId}`)) === 1
+    const orphanStartedAt = state.uiuxCodeGenerationStartedAt || 0
+    const elapsedMs = orphanStartedAt > 0 ? Date.now() - orphanStartedAt : 0
+
+    if (!lockExists && orphanStartedAt > 0 && elapsedMs > 60_000) {
+      logger.warn({ conversationId, elapsedMs, codePhase: state.uiuxCodePhase },
+        'Fast Build 孤兒偵測：conv-lock 不存在，立即恢復')
+      await redis.del(`flow:activity:${conversationId}`).catch(() => {})
+      await recoverFastBuildFromInterruption(conversationId, state, redis, io)
+      return
+    }
+
     const FAST_BUILD_TIMEOUT_MS = 20 * 60 * 1000
     const startedAt = state.uiuxCodeGenerationStartedAt || 0
     if (startedAt === 0 || Date.now() - startedAt > FAST_BUILD_TIMEOUT_MS) {
@@ -233,6 +247,106 @@ export async function handleFastGenerating(
       stage: 'info',
     })
     return
+}
+
+// ============================================================
+// Fast Build 中斷恢復（孤兒偵測 + flowstate-recovery 共用）
+// ============================================================
+
+export async function recoverFastBuildFromInterruption(
+  conversationId: string,
+  state: FlowState,
+  redis: Redis,
+  io: SocketIOServer
+) {
+  const isChinese = state.locale !== 'en'
+  const codePhase = state.uiuxCodePhase || 'structure'
+  const hasCode = state.uiuxGeneratedCode &&
+    (state.uiuxGeneratedCode.pages.length > 0 || state.uiuxGeneratedCode.components.length > 0)
+
+  if (!hasCode) {
+    // 無代碼 → 刪除 FlowState + 提示重新開始
+    await deleteFlowState(redis, conversationId)
+    await sendMessage(conversationId, io, {
+      content: isChinese
+        ? '快速生成被中斷了（伺服器重啟），請重新描述你想要什麼樣的網站。'
+        : 'Generation was interrupted (server restart). Please describe what kind of website you want.',
+      stage: 'error',
+      quickReplies: [
+        { label: isChinese ? '重新開始' : 'Start over', value: '__new_project__', style: 'primary' },
+      ],
+    })
+    return
+  }
+
+  if (codePhase === 'animation' || codePhase === 'rwd') {
+    // 中間態（有 structure 代碼，animation/rwd 未完成）→ 暫停讓用戶選擇
+    state.waitingForReply = true
+    state.fastBuildStage = 'awaiting_continue'
+    state.uiuxCodeGenerationStartedAt = undefined
+    await saveFlowState(redis, conversationId, state)
+
+    const pageCount = state.uiuxGeneratedCode!.pages.length
+    const compCount = state.uiuxGeneratedCode!.components.length
+    const twConfig = state.uiuxDesignSystem ? generateTailwindConfig(state.uiuxDesignSystem) : ''
+    const phaseLabel = codePhase === 'animation'
+      ? (isChinese ? '動畫' : 'animation')
+      : (isChinese ? '響應式' : 'responsive')
+
+    await sendMessage(conversationId, io, {
+      content: isChinese
+        ? `快速生成在${phaseLabel}階段中斷了，已保留之前的進度（${pageCount} 個頁面、${compCount} 個組件）。\n\n你可以：`
+        : `Generation was interrupted during ${phaseLabel} phase. Progress saved (${pageCount} pages, ${compCount} components).\n\nYou can:`,
+      stage: 'fast_generating',
+      layoutHint: 'split',
+      richContent: {
+        type: 'code_preview',
+        data: {
+          pages: state.uiuxGeneratedCode!.pages,
+          components: state.uiuxGeneratedCode!.components,
+          styles: state.uiuxGeneratedCode!.styles,
+          tailwindConfig: twConfig,
+          currentPhase: codePhase,
+        } as Record<string, unknown>,
+      },
+      quickReplies: [
+        { label: isChinese ? '繼續完成' : 'Continue', value: '__resume_fast_build_pipeline__', style: 'primary' },
+        { label: isChinese ? '就這樣，部署' : 'Deploy as-is', value: '__finish_fast_build__', style: 'secondary' },
+      ],
+    })
+  } else {
+    // structure 或 complete → 直接跳 uiux_complete
+    state.phase = 'uiux_complete'
+    state.uiuxCodePhase = 'complete'
+    state.uiuxCodeGenerationStartedAt = undefined
+    state.waitingForReply = false
+    await saveFlowState(redis, conversationId, state)
+
+    const pageCount = state.uiuxGeneratedCode!.pages.length
+    const compCount = state.uiuxGeneratedCode!.components.length
+    const twConfig = state.uiuxDesignSystem ? generateTailwindConfig(state.uiuxDesignSystem) : ''
+
+    await sendMessage(conversationId, io, {
+      content: isChinese
+        ? `快速生成中斷了，但已恢復之前的進度（${pageCount} 個頁面、${compCount} 個組件）。\n\n你可以：\n- 輸入「**部署**」部署現有代碼\n- 或描述想調整的地方`
+        : `Generation was interrupted, but progress has been recovered (${pageCount} pages, ${compCount} components).\n\nYou can:\n- Type "**Deploy**" to deploy the current code\n- Or describe what you'd like to adjust`,
+      stage: 'uiux_complete',
+      layoutHint: 'split',
+      richContent: {
+        type: 'code_preview',
+        data: {
+          pages: state.uiuxGeneratedCode!.pages,
+          components: state.uiuxGeneratedCode!.components,
+          styles: state.uiuxGeneratedCode!.styles,
+          tailwindConfig: twConfig,
+          currentPhase: 'complete',
+        } as Record<string, unknown>,
+      },
+      quickReplies: [
+        { label: isChinese ? '部署上線' : 'Deploy', value: '部署', style: 'primary' },
+      ],
+    })
+  }
 }
 
 export interface UiuxContinueFlowData {
@@ -1036,7 +1150,7 @@ export async function executeFullCodePipeline(
 
   // ===== Quality Gate（靜默執行）=====
   const MAX_FIX_ATTEMPTS = 3
-  let report = runQualityGate(currentCode, state.uiuxDesignTier)
+  let report = runQualityGate(currentCode, state.uiuxDesignTier, state.uiuxDesignMood)
   let totalAutoFixed = 0
 
   for (let attempt = 0; attempt < MAX_FIX_ATTEMPTS && !report.passed; attempt++) {
@@ -1055,7 +1169,7 @@ export async function executeFullCodePipeline(
 
     totalAutoFixed += criticalIssues.length
     currentCode = fixedCode
-    report = runQualityGate(currentCode, state.uiuxDesignTier)
+    report = runQualityGate(currentCode, state.uiuxDesignTier, state.uiuxDesignMood)
   }
 
   report.summary.autoFixed = totalAutoFixed
@@ -1436,7 +1550,7 @@ export async function executeQualityGate(
 
   const MAX_FIX_ATTEMPTS = 3
   let currentCode = { ...uiuxGeneratedCode }
-  let report = runQualityGate(currentCode, state.uiuxDesignTier)
+  let report = runQualityGate(currentCode, state.uiuxDesignTier, state.uiuxDesignMood)
   let totalAutoFixed = 0
 
   // 自動修復循環
@@ -1464,7 +1578,7 @@ export async function executeQualityGate(
 
     totalAutoFixed += criticalIssues.length
     currentCode = fixedCode
-    report = runQualityGate(currentCode, state.uiuxDesignTier)
+    report = runQualityGate(currentCode, state.uiuxDesignTier, state.uiuxDesignMood)
   }
 
   // 更新 autoFixed 計數

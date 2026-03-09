@@ -392,13 +392,18 @@ setCacheRedisClient(redis)
 Promise.all([
   redis.keys('conv-lock:*'),
   redis.keys('user-active:*'),
-]).then(async ([staleConvLocks, staleUserLocks]) => {
-  const stale = [...staleConvLocks, ...staleUserLocks]
+  redis.keys('flow:activity:*'),
+]).then(async ([staleConvLocks, staleUserLocks, staleActivity]) => {
+  const stale = [...staleConvLocks, ...staleUserLocks, ...staleActivity]
   if (stale.length > 0) {
     await redis.del(...stale)
-    logger.warn({ convLocks: staleConvLocks.length, userLocks: staleUserLocks.length }, '啟動清理：刪除殘留鎖')
+    logger.warn({
+      convLocks: staleConvLocks.length,
+      userLocks: staleUserLocks.length,
+      activityKeys: staleActivity.length,
+    }, '啟動清理：刪除殘留鎖和心跳')
   }
-}).catch((err) => logger.error({ err }, '啟動清理 lock 失敗'))
+}).catch((err) => logger.error({ err }, '啟動清理失敗'))
 
 // 創建 Worker
 const orchestratorWorker = createOrchestratorWorker(redis, io)
@@ -545,6 +550,15 @@ async function start() {
 
 async function shutdown() {
   logger.info('收到關閉信號...')
+
+  // 清理 flow:activity keys（進程死後心跳不應殘留）
+  try {
+    const activityKeys = await redis.keys('flow:activity:*')
+    if (activityKeys.length > 0) {
+      await redis.del(...activityKeys)
+      logger.info({ count: activityKeys.length }, '關閉時清理 flow:activity keys')
+    }
+  } catch { /* 不影響關閉 */ }
 
   // 關閉 Worker
   await orchestratorWorker.close()
