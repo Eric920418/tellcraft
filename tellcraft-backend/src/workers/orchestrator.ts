@@ -201,34 +201,51 @@ async function handleProcessMessage(
   io: SocketIOServer
 ) {
   const { projectId, conversationId, userId, message, mode, locale } = data
+  const isAutoRepairMsg = message.trim().startsWith('__auto_repair_preview__:')
 
-  // Step 1: Prefilter（零 LLM 成本防禦）
-  const prefilterResult = await prefilterMessage(message, userId, redis, locale)
-  if (!prefilterResult.allowed) {
-    logger.info({ reason: prefilterResult.reason, userId }, 'Prefilter 攔截')
-    await sendMessage(conversationId, io, {
-      content: prefilterResult.errorMessage || '無法處理此訊息。',
-      stage: 'prefilter_rejected',
-    })
-    return { taskId: null, skill: null }
-  }
+  if (!isAutoRepairMsg) {
+    // Step 1: Prefilter（零 LLM 成本防禦）
+    const prefilterResult = await prefilterMessage(message, userId, redis, locale)
+    if (!prefilterResult.allowed) {
+      logger.info({ reason: prefilterResult.reason, userId }, 'Prefilter 攔截')
+      await sendMessage(conversationId, io, {
+        content: prefilterResult.errorMessage || '無法處理此訊息。',
+        stage: 'prefilter_rejected',
+      })
+      return { taskId: null, skill: null }
+    }
 
-  // Credit 扣除
-  const creditResult = await deductCredits(userId, CREDIT_COSTS.BASE_MESSAGE)
-  if (!creditResult.success) {
-    const user = await db.queryOne<{ plan: string }>(
-      'SELECT plan FROM users WHERE id = $1',
-      [userId]
-    )
-    await sendMessage(conversationId, io, {
-      content: buildCreditLimitReachedMessage(user?.plan || 'free', creditResult.creditsUsed, creditResult.creditLimit),
-      stage: 'error',
-    })
-    return { taskId: null, skill: null }
+    // Credit 扣除
+    const creditResult = await deductCredits(userId, CREDIT_COSTS.BASE_MESSAGE)
+    if (!creditResult.success) {
+      const user = await db.queryOne<{ plan: string }>(
+        'SELECT plan FROM users WHERE id = $1',
+        [userId]
+      )
+      await sendMessage(conversationId, io, {
+        content: buildCreditLimitReachedMessage(user?.plan || 'free', creditResult.creditsUsed, creditResult.creditLimit),
+        stage: 'error',
+      })
+      return { taskId: null, skill: null }
+    }
   }
 
   // Step 1.2: FlowState 檢查
   const existingState = await getFlowState(redis, conversationId)
+
+  // Auto-repair：只在有效 FlowState 時路由，否則靜默放棄
+  if (isAutoRepairMsg) {
+    if (!existingState || existingState.phase === 'idle') {
+      logger.info({ conversationId }, 'Auto-repair skipped: no valid FlowState')
+      return { taskId: null, skill: null }
+    }
+    return handleContinueFlow({
+      projectId, conversationId, userId,
+      taskId: existingState.taskId,
+      message, locale,
+    }, redis, io)
+  }
+
   if (existingState && existingState.phase !== 'idle') {
     logger.info({ phase: existingState.phase }, '已有 FlowState，轉發到 continue-flow')
     return handleContinueFlow({
@@ -508,6 +525,10 @@ async function handleContinueFlow(
   }
 
   if (!state) {
+    if (isAutoRepair) {
+      logger.info({ conversationId }, 'Auto-repair skipped: FlowState not found')
+      return
+    }
     logger.info('沒有找到流程狀態，可能是新對話或狀態已過期')
     await sendMessage(conversationId, io, { content: '此對話的流程狀態已過期，請開始新的對話。', stage: 'error' })
     return
