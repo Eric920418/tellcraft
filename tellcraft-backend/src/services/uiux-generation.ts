@@ -1784,6 +1784,95 @@ ${contextLines.join('\n')}
 /**
  * 取得 TSX/TS 檔案的語法錯誤清單（使用 TypeScript 內建 parser，零 LLM）
  */
+
+/**
+ * 偵測 `const x = dict[key]` 模式（bracket lookup 可能回傳 undefined），
+ * 將後續 `x.prop` 轉成 `x?.prop`，防止 "Cannot read properties of undefined" 崩潰
+ */
+export function repairBracketLookupAccess(
+  file: GeneratedComponent
+): { content: string; repaired: boolean } {
+  if (!/\.(tsx?|jsx?)$/.test(file.path)) return { content: file.content, repaired: false }
+
+  // 找出從 bracket lookup 賦值的變數（末尾沒有 ?? 的版本才需要修復）
+  const potentiallyUndefined = new Set<string>()
+  for (const line of file.content.split('\n')) {
+    // 例：const config = PERSONALITY_CONFIGS[type]  或  const item = items[idx]
+    const m = line.match(/^\s*(?:const|let)\s+(\w+)\s*=\s*\w+\[[^\]]+\]\s*(?:\/\/.*)?$/)
+    if (m && !line.includes('??')) potentiallyUndefined.add(m[1])
+  }
+  if (potentiallyUndefined.size === 0) return { content: file.content, repaired: false }
+
+  let fixed = file.content
+  const repairedVars: string[] = []
+
+  for (const varName of potentiallyUndefined) {
+    // 把 varName.prop（未加 ?.）轉成 varName?.prop
+    // lookbehind 排除已有 ?. 的情況
+    const regex = new RegExp(`(?<![?])\\b${varName}\\.(?![?])`, 'g')
+    const next = fixed.replace(regex, `${varName}?.`)
+    if (next !== fixed) {
+      fixed = next
+      repairedVars.push(varName)
+    }
+  }
+
+  if (repairedVars.length === 0) return { content: file.content, repaired: false }
+  logger.warn({ path: file.path, vars: repairedVars }, 'repairBracketLookupAccess: 補 optional chaining')
+  return { content: fixed, repaired: true }
+}
+
+const REACT_HOOKS = [
+  'useState', 'useEffect', 'useRef', 'useCallback', 'useMemo',
+  'useContext', 'useReducer', 'useLayoutEffect', 'useId',
+  'useImperativeHandle', 'useDeferredValue', 'useTransition',
+] as const
+
+/**
+ * 偵測並自動修復 TSX 中缺少的 React hooks import
+ * 根本性修復 `(0 , _react.useState) is not a function` 錯誤
+ */
+export function repairMissingReactImports(
+  file: GeneratedComponent
+): { content: string; repaired: boolean } {
+  if (!/\.(tsx?|jsx?)$/.test(file.path)) return { content: file.content, repaired: false }
+
+  const content = file.content
+
+  // 排除 import 行後，偵測實際使用的 hooks
+  const contentWithoutImports = content.replace(/^import\s+.+from\s+['"].+['"]\s*;?\s*$/gm, '')
+  const usedHooks = REACT_HOOKS.filter(h => new RegExp(`\\b${h}\\s*[(<]`).test(contentWithoutImports))
+  if (usedHooks.length === 0) return { content, repaired: false }
+
+  // 找現有的 react import 行
+  const reactImportRegex = /^(import\s+(?:React\s*,?\s*)?(?:\{([^}]*)\})?\s*from\s+['"]react['"];?)$/m
+  const match = content.match(reactImportRegex)
+
+  const alreadyImported = match?.[2]
+    ? match[2].split(',').map(s => s.trim()).filter(Boolean)
+    : []
+  const missing = usedHooks.filter(h => !alreadyImported.includes(h))
+  if (missing.length === 0) return { content, repaired: false }
+
+  let fixed: string
+  if (match) {
+    const allNamed = [...new Set([...alreadyImported, ...missing])].sort()
+    const hasDefault = /import\s+React\s*,/.test(match[0]) || /import\s+React\s+from/.test(match[0])
+    const newImport = hasDefault
+      ? `import React, { ${allNamed.join(', ')} } from 'react'`
+      : `import { ${allNamed.join(', ')} } from 'react'`
+    fixed = content.replace(match[0], newImport)
+  } else {
+    const useClientMatch = content.match(/^['"]use client['"]\s*\n/)
+    const insertAfter = useClientMatch ? useClientMatch[0].length : 0
+    const newImport = `import { ${missing.join(', ')} } from 'react'\n`
+    fixed = content.slice(0, insertAfter) + newImport + content.slice(insertAfter)
+  }
+
+  logger.warn({ path: file.path, missing }, 'repairMissingReactImports: 補缺失 React hooks import')
+  return { content: fixed, repaired: true }
+}
+
 /**
  * 偵測並自動修復 TSX 中未宣告的 useRef 變數（語意層錯誤，ts.transpileModule 抓不到）
  * 規則：如果 xyzRef.current 被使用，但 component body 內找不到對應的 useRef 宣告，
@@ -1885,13 +1974,23 @@ async function checkAndFixSyntaxErrors(
     const { content, repaired } = repairUndeclaredRefs(f)
     return repaired ? { ...f, content } : f
   })
+  // 再修復缺失的 React hooks import（根本性修復 _react.useState is not a function）
+  const withImportsRepaired = withRefsRepaired.map(f => {
+    const { content, repaired } = repairMissingReactImports(f)
+    return repaired ? { ...f, content } : f
+  })
+  // 修復 bracket lookup 可能回傳 undefined（Cannot read properties of undefined）
+  const withLookupRepaired = withImportsRepaired.map(f => {
+    const { content, repaired } = repairBracketLookupAccess(f)
+    return repaired ? { ...f, content } : f
+  })
 
   const broken: Array<{ file: GeneratedComponent; errors: string[]; truncated: boolean }> = []
-  for (const file of withRefsRepaired) {
+  for (const file of withLookupRepaired) {
     const errors = getSyntaxErrors(file.path, file.content)
     if (errors.length > 0) broken.push({ file, errors, truncated: isTruncatedFile(file.content, errors) })
   }
-  if (broken.length === 0) return withRefsRepaired
+  if (broken.length === 0) return withLookupRepaired
 
   logger.warn(
     { count: broken.length, paths: broken.map(b => b.file.path), truncated: broken.filter(b => b.truncated).map(b => b.file.path) },
@@ -1899,7 +1998,7 @@ async function checkAndFixSyntaxErrors(
   )
 
   // 收集非破損檔案的前 20 行作為 import context（供截斷型修復使用）
-  const healthyImportContext = withRefsRepaired
+  const healthyImportContext = withLookupRepaired
     .filter(f => !broken.some(b => b.file.path === f.path))
     .map(f => {
       const head = f.content.split('\n').slice(0, 20).join('\n')
@@ -1994,7 +2093,7 @@ async function checkAndFixSyntaxErrors(
     return files
   }
 
-  return withRefsRepaired.map(file => {
+  return withLookupRepaired.map(file => {
     const fixed = result.get(file.path)
     if (!fixed) return file
     const remaining = getSyntaxErrors(file.path, fixed)

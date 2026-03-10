@@ -11,6 +11,7 @@ import { getAnthropicClient, MODEL, trackLlmUsage } from '../lib/anthropic'
 import { getEnv } from '../lib/env'
 import * as db from '../db/client'
 import { createLogger } from '../lib/logger'
+import { repairMissingReactImports, repairBracketLookupAccess } from './uiux-generation'
 
 const logger = createLogger('deployer')
 const execFileAsync = promisify(execFile)
@@ -316,6 +317,20 @@ export function sanitizeCodeForDeploy(code: GeneratedCode): SanitizeResult {
     if (needsClient && !hasUseClient) {
       file.content = "'use client'\n\n" + file.content
       fixes.push(`${file.path}: 自動加入 'use client'`)
+    }
+
+    // ── 修復 2.5: 缺少 React hooks import ──
+    const { content: importFixed, repaired: importRepaired } = repairMissingReactImports(file)
+    if (importRepaired) {
+      file.content = importFixed
+      fixes.push(`${file.path}: 補缺失 React hooks import`)
+    }
+
+    // ── 修復 2.7: bracket lookup 可能回傳 undefined → 補 optional chaining ──
+    const { content: lookupFixed, repaired: lookupRepaired } = repairBracketLookupAccess(file)
+    if (lookupRepaired) {
+      file.content = lookupFixed
+      fixes.push(`${file.path}: 補 optional chaining（bracket lookup）`)
     }
 
     // ── 修復 3: motion.* 上的 spread props（TypeScript 類型衝突）──
