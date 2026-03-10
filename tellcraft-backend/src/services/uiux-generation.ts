@@ -1822,6 +1822,75 @@ export function repairBracketLookupAccess(
   return { content: fixed, repaired: true }
 }
 
+// React-only hooks，不應出現在 motion/react import 中
+const REACT_ONLY_HOOKS_SET = new Set([
+  'useState', 'useEffect', 'useRef', 'useCallback', 'useMemo',
+  'useContext', 'useReducer', 'useLayoutEffect', 'useId',
+  'useImperativeHandle', 'useDeferredValue', 'useTransition',
+])
+
+/**
+ * 修復 React hooks 被誤從 motion/react import 的問題
+ * 修復 `(0 , _react.useState) is not a function` 錯誤
+ *
+ * 原因：LLM 生成代碼時看到 `motion/react` 就把 useState 也一起放進去
+ * import { useState } from 'motion/react'  ← 錯誤，motion/react 不導出 React hooks
+ * → 把 React hooks 移到正確的 `react` import
+ */
+export function repairMotionReactHookImports(
+  file: GeneratedComponent
+): { content: string; repaired: boolean } {
+  if (!/\.(tsx?|jsx?)$/.test(file.path)) return { content: file.content, repaired: false }
+
+  // 找到所有 motion/react import 行（可能有多行）
+  const motionImportRegex = /^import\s+\{([^}]+)\}\s*from\s+['"]motion\/react['"]\s*;?\s*$/gm
+  let fixed = file.content
+  const migratedHooks: string[] = []
+
+  // 收集需要從 motion/react 移走的 React hooks
+  for (const match of [...fixed.matchAll(motionImportRegex)]) {
+    const names = match[1].split(',').map(s => s.trim()).filter(Boolean)
+    const reactHooks = names.filter(n => REACT_ONLY_HOOKS_SET.has(n))
+    if (reactHooks.length === 0) continue
+
+    migratedHooks.push(...reactHooks)
+    const remaining = names.filter(n => !REACT_ONLY_HOOKS_SET.has(n))
+
+    if (remaining.length > 0) {
+      fixed = fixed.replace(match[0], `import { ${remaining.join(', ')} } from 'motion/react'`)
+    } else {
+      // 整行都是 React hooks，直接刪掉這行
+      fixed = fixed.replace(match[0] + '\n', '').replace(match[0], '')
+    }
+  }
+
+  if (migratedHooks.length === 0) return { content: file.content, repaired: false }
+
+  // 把 hooks 加進 react import（或新增一行）
+  const reactImportRegex = /^(import\s+(?:React\s*,?\s*)?(?:\{([^}]*)\})?\s*from\s+['"]react['"]\s*;?)$/m
+  const reactMatch = fixed.match(reactImportRegex)
+
+  if (reactMatch) {
+    const existing = reactMatch[2]
+      ? reactMatch[2].split(',').map(s => s.trim()).filter(Boolean)
+      : []
+    const merged = [...new Set([...existing, ...migratedHooks])].sort()
+    const hasDefault = /import\s+React\s*,/.test(reactMatch[0]) || /import\s+React\s+from/.test(reactMatch[0])
+    const newImport = hasDefault
+      ? `import React, { ${merged.join(', ')} } from 'react'`
+      : `import { ${merged.join(', ')} } from 'react'`
+    fixed = fixed.replace(reactMatch[0], newImport)
+  } else {
+    const useClientMatch = fixed.match(/^['"]use client['"]\s*\n/)
+    const insertAfter = useClientMatch ? useClientMatch[0].length : 0
+    const newImport = `import { ${[...new Set(migratedHooks)].sort().join(', ')} } from 'react'\n`
+    fixed = fixed.slice(0, insertAfter) + newImport + fixed.slice(insertAfter)
+  }
+
+  logger.warn({ path: file.path, hooks: migratedHooks }, 'repairMotionReactHookImports: 修正 motion/react 誤導入 React hooks')
+  return { content: fixed, repaired: true }
+}
+
 /**
  * 偵測並修復 null/undefined 值被數字索引存取的問題
  * 修復 `Cannot read properties of null (reading '0')` 錯誤
@@ -2017,8 +2086,13 @@ async function checkAndFixSyntaxErrors(
   files: GeneratedComponent[],
   trackingContext?: LlmTrackingContext
 ): Promise<GeneratedComponent[]> {
-  // 先做語意修復：自動補宣告缺失的 useRef（語法層抓不到）
-  const withRefsRepaired = files.map(f => {
+  // 先修復 motion/react 誤導入 React hooks（必須在 repairMissingReactImports 之前）
+  const withMotionFixed = files.map(f => {
+    const { content, repaired } = repairMotionReactHookImports(f)
+    return repaired ? { ...f, content } : f
+  })
+  // 補宣告缺失的 useRef
+  const withRefsRepaired = withMotionFixed.map(f => {
     const { content, repaired } = repairUndeclaredRefs(f)
     return repaired ? { ...f, content } : f
   })

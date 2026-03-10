@@ -1,10 +1,10 @@
 import { createLogger } from '../lib/logger'
 import * as db from '../db/client'
-import { repairUndeclaredRefs, repairMissingReactImports, repairBracketLookupAccess, repairNullIndexAccess } from './uiux-generation'
+import { repairUndeclaredRefs, repairMissingReactImports, repairBracketLookupAccess, repairNullIndexAccess, repairMotionReactHookImports } from './uiux-generation'
 import type { Redis } from 'ioredis'
 
 const logger = createLogger('code-repair')
-const REPAIR_DONE_KEY = 'code-repair:v3' // 版本號：新增 fixer 時遞增
+const REPAIR_DONE_KEY = 'code-repair:v4' // 版本號：新增 fixer 時遞增
 
 /**
  * 對單一檔案物件套用所有 fixer（純記憶體，不寫 DB）
@@ -14,6 +14,9 @@ export function applyFixersToContent(filePath: string, content: string): { conte
   if (!/\.(tsx?|jsx?)$/.test(filePath)) return { content, changed: false }
   const f = { path: filePath, content, description: '' }
   let current = content
+
+  const r0 = repairMotionReactHookImports({ ...f, content: current })
+  if (r0.repaired) current = r0.content
 
   const r1 = repairUndeclaredRefs({ ...f, content: current })
   if (r1.repaired) current = r1.content
