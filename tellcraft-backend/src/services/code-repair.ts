@@ -1,13 +1,37 @@
 import { createLogger } from '../lib/logger'
 import * as db from '../db/client'
-import { repairUndeclaredRefs, repairMissingReactImports, repairBracketLookupAccess } from './uiux-generation'
+import { repairUndeclaredRefs, repairMissingReactImports, repairBracketLookupAccess, repairNullIndexAccess } from './uiux-generation'
 import type { Redis } from 'ioredis'
 
 const logger = createLogger('code-repair')
-const REPAIR_DONE_KEY = 'code-repair:v2' // 版本號：新增 fixer 時遞增
+const REPAIR_DONE_KEY = 'code-repair:v3' // 版本號：新增 fixer 時遞增
 
 /**
- * 修復單一 project 的所有 project_files
+ * 對單一檔案物件套用所有 fixer（純記憶體，不寫 DB）
+ * 回傳修復後的 content 與是否有改動
+ */
+export function applyFixersToContent(filePath: string, content: string): { content: string; changed: boolean } {
+  if (!/\.(tsx?|jsx?)$/.test(filePath)) return { content, changed: false }
+  const f = { path: filePath, content, description: '' }
+  let current = content
+
+  const r1 = repairUndeclaredRefs({ ...f, content: current })
+  if (r1.repaired) current = r1.content
+
+  const r2 = repairMissingReactImports({ ...f, content: current })
+  if (r2.repaired) current = r2.content
+
+  const r3 = repairBracketLookupAccess({ ...f, content: current })
+  if (r3.repaired) current = r3.content
+
+  const r4 = repairNullIndexAccess({ ...f, content: current })
+  if (r4.repaired) current = r4.content
+
+  return { content: current, changed: current !== content }
+}
+
+/**
+ * 修復單一 project 的所有 project_files（寫回 DB）
  * 回傳修復的檔案數
  */
 export async function repairProjectFiles(projectId: string): Promise<number> {
@@ -20,23 +44,11 @@ export async function repairProjectFiles(projectId: string): Promise<number> {
 
   let repairedCount = 0
   for (const file of files) {
-    const f = { path: file.file_path, content: file.content, description: '' }
-    let current = f.content
-    let changed = false
-
-    const r1 = repairUndeclaredRefs({ ...f, content: current })
-    if (r1.repaired) { current = r1.content; changed = true }
-
-    const r2 = repairMissingReactImports({ ...f, content: current })
-    if (r2.repaired) { current = r2.content; changed = true }
-
-    const r3 = repairBracketLookupAccess({ ...f, content: current })
-    if (r3.repaired) { current = r3.content; changed = true }
-
+    const { content, changed } = applyFixersToContent(file.file_path, file.content)
     if (changed) {
       await db.query(
         `UPDATE project_files SET content = $1, updated_at = NOW() WHERE id = $2`,
-        [current, file.id]
+        [content, file.id]
       )
       repairedCount++
     }

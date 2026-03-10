@@ -1822,6 +1822,54 @@ export function repairBracketLookupAccess(
   return { content: fixed, repaired: true }
 }
 
+/**
+ * 偵測並修復 null/undefined 值被數字索引存取的問題
+ * 修復 `Cannot read properties of null (reading '0')` 錯誤
+ *
+ * 處理兩種模式：
+ * 1. .match(...)[n]   → .match(...)?.[n]   （match 無匹配回傳 null）
+ * 2. varName[n]（varName 來自 bracket lookup）→ varName?.[n]
+ */
+export function repairNullIndexAccess(
+  file: GeneratedComponent
+): { content: string; repaired: boolean } {
+  if (!/\.(tsx?|jsx?)$/.test(file.path)) return { content: file.content, repaired: false }
+
+  let fixed = file.content
+  const repairs: string[] = []
+
+  // 模式 1：.match(...)[n] 或 .exec(...)[n] → ?.[ n ]
+  // 排除已有 ?. 的情況
+  const matchIndexRegex = /\.(match|exec)\(([^)]*)\)\[(\d+)\]/g
+  const fixedMatch = fixed.replace(matchIndexRegex, (full, method, args, idx) => {
+    repairs.push(`${method}()[${idx}]`)
+    return `.${method}(${args})?.[${idx}]`
+  })
+  if (fixedMatch !== fixed) fixed = fixedMatch
+
+  // 模式 2：來自 bracket lookup 的變數用數字索引（排除宣告行本身）
+  const potentiallyNull = new Set<string>()
+  for (const line of fixed.split('\n')) {
+    const m = line.match(/^\s*(?:const|let)\s+(\w+)\s*=\s*\w+\[[^\]]+\]\s*(?:\/\/.*)?$/)
+    if (m && !line.includes('??')) potentiallyNull.add(m[1])
+  }
+
+  for (const varName of potentiallyNull) {
+    // varName[digit]（未加 ?.）→ varName?.[digit]
+    // lookbehind 排除 ?.[ 已修復的情況，lookahead 排除賦值左側
+    const regex = new RegExp(`(?<!\\?)\\b${varName}\\[(\\d+)\\](?!\\s*=)`, 'g')
+    const next = fixed.replace(regex, (_, idx) => {
+      repairs.push(`${varName}[${idx}]`)
+      return `${varName}?.[${idx}]`
+    })
+    if (next !== fixed) fixed = next
+  }
+
+  if (repairs.length === 0) return { content: file.content, repaired: false }
+  logger.warn({ path: file.path, repairs }, 'repairNullIndexAccess: 補 null index optional chaining')
+  return { content: fixed, repaired: true }
+}
+
 const REACT_HOOKS = [
   'useState', 'useEffect', 'useRef', 'useCallback', 'useMemo',
   'useContext', 'useReducer', 'useLayoutEffect', 'useId',
@@ -1984,9 +2032,14 @@ async function checkAndFixSyntaxErrors(
     const { content, repaired } = repairBracketLookupAccess(f)
     return repaired ? { ...f, content } : f
   })
+  // 修復 null 值被數字索引存取（Cannot read properties of null (reading '0')）
+  const withNullIndexRepaired = withLookupRepaired.map(f => {
+    const { content, repaired } = repairNullIndexAccess(f)
+    return repaired ? { ...f, content } : f
+  })
 
   const broken: Array<{ file: GeneratedComponent; errors: string[]; truncated: boolean }> = []
-  for (const file of withLookupRepaired) {
+  for (const file of withNullIndexRepaired) {
     const errors = getSyntaxErrors(file.path, file.content)
     if (errors.length > 0) broken.push({ file, errors, truncated: isTruncatedFile(file.content, errors) })
   }

@@ -5,7 +5,7 @@ import { validateBody } from '../middleware/validate'
 import { createProjectSchema, templateOverridesSchema, batchDeleteSchema } from '../schemas/project'
 import * as db from '../db/client'
 import { toVercelSlug, deleteVercelProject } from '../services/deployer'
-import { repairProjectFiles } from '../services/code-repair'
+import { repairProjectFiles, applyFixersToContent } from '../services/code-repair'
 import { getProjectLimit } from '../config/plans'
 import { createLogger } from '../lib/logger'
 
@@ -1016,8 +1016,14 @@ router.get('/:id/files', requireAuth, async (req, res) => {
 
     const files = await db.getProjectFiles(id, skill_source)
 
+    // 先 in-memory 修復再回傳，確保用戶第一次打開就看到修復後的內容
+    const repairedFiles = files.map(f => {
+      const { content, changed } = applyFixersToContent(f.file_path, f.content)
+      return changed ? { ...f, content } : f
+    })
+
     res.json({
-      files: files.map(f => ({
+      files: repairedFiles.map(f => ({
         id: f.id,
         filePath: f.file_path,
         skillSource: f.skill_source,
@@ -1027,10 +1033,10 @@ router.get('/:id/files', requireAuth, async (req, res) => {
         createdAt: f.created_at,
         updatedAt: f.updated_at,
       })),
-      total: files.length,
+      total: repairedFiles.length,
     })
 
-    // 懶修復：fire-and-forget，不影響回應時間
+    // 背景存回 DB（讓下次直接從 DB 拿到修復版本）
     repairProjectFiles(id).catch(err =>
       logger.warn({ err, projectId: id }, 'lazy project repair failed')
     )
