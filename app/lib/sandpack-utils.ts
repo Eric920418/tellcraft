@@ -110,8 +110,21 @@ const RouterContext = React.createContext({ pathname: '/', push: (p) => {}, repl
 
 function getPathnameFromHash() {
   const hash = typeof window !== 'undefined' ? window.location.hash : '';
-  if (hash.startsWith('#/')) return hash.slice(1);
+  if (hash.startsWith('#/')) {
+    const raw = hash.slice(1);
+    const qIdx = raw.indexOf('?');
+    return qIdx >= 0 ? raw.slice(0, qIdx) : raw;
+  }
   return '/';
+}
+
+function getSearchFromHash() {
+  const hash = typeof window !== 'undefined' ? window.location.hash : '';
+  if (hash.startsWith('#/')) {
+    const qIdx = hash.indexOf('?');
+    return qIdx >= 0 ? hash.slice(qIdx) : '';
+  }
+  return '';
 }
 
 export function SandpackRouterProvider({ children }) {
@@ -153,7 +166,7 @@ export function usePathname() {
   return pathname;
 }
 
-export function useSearchParams() { return new URLSearchParams(); }
+export function useSearchParams() { return new URLSearchParams(getSearchFromHash()); }
 export function useParams() { return {}; }
 export function redirect(path) { if (typeof window !== 'undefined') window.location.hash = '#' + path; }
 export function notFound() { console.warn('[Sandpack] notFound() called'); }
