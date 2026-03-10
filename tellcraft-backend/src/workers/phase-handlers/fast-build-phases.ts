@@ -139,8 +139,12 @@ export function runFastBuildBatchAudit(input: {
     }
   }
 
-  if (input.layoutMode === 'app' && /(hero|pricing|testimonial|newsletter|brand story)/i.test(input.originalRequirements) === false) {
-    if (/hero|pricing|testimonial|newsletter|brand story/i.test(text)) {
+  // 「drifted」只在 contains 問題還沒出現時才補充（避免三重計算同一根因）
+  const hasContainsIssue = issues.some(i => i.startsWith('app layout contains'))
+  if (!hasContainsIssue && input.layoutMode === 'app') {
+    // 排除：原始需求本身就提到行銷元素（中英文同義詞都要查）
+    const requirementsHasMarketing = /(hero|主視覺|pricing|testimonial|用戶見證|newsletter|訂閱電子報|brand story|品牌故事)/i.test(input.originalRequirements)
+    if (!requirementsHasMarketing && /hero|主視覺|pricing|testimonial|newsletter|brand story/i.test(text)) {
       issues.push('app batch drifted toward marketing-only structure')
     }
   }

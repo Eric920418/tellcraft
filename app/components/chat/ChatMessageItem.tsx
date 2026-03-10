@@ -44,7 +44,7 @@ export interface ChatMessageItemProps {
   sessionInfo: SessionInfo | null
   isReadOnlyMode: boolean
   selectedTemplateId: string | null
-  handleSendMessage: (message: string) => void
+  handleSendMessage: (message: string, options?: { displayLabel?: string }) => void
   handleTemplateSelect: (templateId: string) => void
   onShowMobilePreview: () => void
   getCommandLabel: (content: string) => string
@@ -343,7 +343,10 @@ export const ChatMessageItem = React.memo(function ChatMessageItem({
            typingStage === 'none' && (
             <QuickReplies
               replies={message.quickReplies}
-              onSelect={handleSendMessage}
+              onSelect={(value) => {
+                const reply = message.quickReplies?.find(r => r.value === value)
+                handleSendMessage(value, { displayLabel: reply?.label })
+              }}
               disabled={isTyping || sendCooldown || isInitializing || !sessionInfo || isReadOnlyMode}
             />
           )}

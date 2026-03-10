@@ -36,7 +36,7 @@ export interface ChatMessageListProps {
   adjustTextareaHeight: () => void
   isComposingRef: React.RefObject<boolean>
   handleSend: () => void
-  handleSendMessage: (message: string) => void
+  handleSendMessage: (message: string, options?: { displayLabel?: string }) => void
   onBack: () => void
   handleTemplateSelect: (templateId: string) => void
   selectedTemplateId: string | null

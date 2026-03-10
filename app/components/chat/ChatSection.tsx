@@ -381,7 +381,7 @@ export default function ChatSection({
   // ── Send message (button trigger) ──
   const handleSendMessage = useCallback(async (
     content: string,
-    options?: { imageUrls?: string[]; silent?: boolean }
+    options?: { imageUrls?: string[]; silent?: boolean; displayLabel?: string }
   ) => {
     const isSpecialCommand = (content.trim().startsWith('__') && content.trim().endsWith('__'))
       || content.trim().startsWith('__auto_repair_preview__:')
@@ -408,7 +408,7 @@ export default function ChatSection({
     let userMessageId: string | null = null
     if (!options?.silent) {
       startSendCooldown()
-      const displayContent = getCommandLabel(content)
+      const displayContent = options?.displayLabel ?? getCommandLabel(content)
       userMessageId = crypto.randomUUID()
       const userMessage: Message = {
         id: userMessageId,

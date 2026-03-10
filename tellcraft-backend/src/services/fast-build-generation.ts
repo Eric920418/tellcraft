@@ -146,11 +146,14 @@ const PRODUCT_TYPE_RULES: Array<{ keywords: string[]; type: string }> = [
   { keywords: ['非營利', '公益', 'ngo', '慈善'], type: 'nonprofit' },
   { keywords: ['零售', '門市', '實體店', '百貨'], type: 'retail' },
   { keywords: ['教育', '課程', '培訓', '學校', '線上學習'], type: 'education' },
+  // ── 活動/節慶（放在 tool 之前，避免被清單等泛用詞搶走）──
+  { keywords: ['活動節', '設計節', '音樂節', '藝術節', '節慶', '慶典', 'festival', 'design festival', 'art festival', 'music festival'], type: 'event' },
   // ── 工具型產品（放在泛用類型前面，避免被 saas 搶走）──
+  // 注意：「清單」太廣泛（如「元件清單」非 checklist），已移除；改用更精確的 checklist
   {
     keywords: [
       '計算機', 'calculator', '轉換器', 'converter',
-      '看板', 'kanban', 'todo', '待辦', '清單', 'checklist',
+      '看板', 'kanban', 'todo', '待辦', 'checklist',
       '編輯器', 'editor', '筆記', 'note',
       '計時器', 'timer', '碼表', 'stopwatch', '倒數',
       '記帳', '追蹤器', 'tracker', '記錄器',
