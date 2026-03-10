@@ -5,7 +5,8 @@ import { motion, AnimatePresence } from 'framer-motion'
 import { Link, useRouter } from '@/i18n/navigation'
 import { useTranslations } from 'next-intl'
 import { DataTable, StatusBadge, SearchInput, type Column } from '@/app/components/dashboard'
-import { getProjects, togglePinProject, deleteProjects } from '@/app/lib/vps-api'
+import ProjectHoverCard from '@/app/components/dashboard/ProjectHoverCard'
+import { getProjects, togglePinProject, deleteProjects, getConversationMessages } from '@/app/lib/vps-api'
 import { useAuth } from '@/app/hooks/useAuth'
 
 // 從 localStorage 獲取 token
@@ -66,6 +67,15 @@ export default function ProjectsPage() {
   const [downloadError, setDownloadError] = useState<string | null>(null)
   const pageSize = 10
 
+  // Hover preview state
+  const [hoverProject, setHoverProject] = useState<Project | null>(null)
+  const [hoverAnchorRect, setHoverAnchorRect] = useState<DOMRect | null>(null)
+  const [hoverMessages, setHoverMessages] = useState<{ id: string; role: 'user' | 'assistant'; content: string; timestamp: string }[] | null>(null)
+  const [hoverLoading, setHoverLoading] = useState(false)
+  const messageCache = useRef<Map<string, { id: string; role: 'user' | 'assistant'; content: string; timestamp: string }[]>>(new Map())
+  const showTimeoutRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+  const hideTimeoutRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+
   // 換頁/篩選/搜尋時清空選取
   useEffect(() => {
     setSelectedIds(new Set())
@@ -117,6 +127,66 @@ export default function ProjectsPage() {
     return () => mediaQuery.removeListener(syncMobileState)
   }, [])
 
+
+  const handleRowMouseEnter = (project: Project, event: React.MouseEvent<HTMLDivElement>) => {
+    clearTimeout(hideTimeoutRef.current)
+    const rect = event.currentTarget.getBoundingClientRect()
+    setHoverProject(project)
+    setHoverAnchorRect(rect)
+
+    const cached = messageCache.current.get(project.id)
+    if (cached) {
+      setHoverMessages(cached)
+      setHoverLoading(false)
+      return
+    }
+
+    if (!project.latestConversationId) {
+      setHoverMessages([])
+      setHoverLoading(false)
+      return
+    }
+
+    setHoverLoading(true)
+    const token = getAuthToken()
+    const projectId = project.id
+    clearTimeout(showTimeoutRef.current)
+    showTimeoutRef.current = setTimeout(async () => {
+      if (!token || !project.latestConversationId) {
+        setHoverLoading(false)
+        return
+      }
+      const result = await getConversationMessages({ conversationId: project.latestConversationId, token })
+      if (result.success && result.data) {
+        const msgs = result.data.messages
+          .filter((m) => m.role !== ('system' as string))
+          .slice(-4)
+        messageCache.current.set(projectId, msgs)
+        setHoverMessages(msgs)
+        setHoverLoading(false)
+      } else {
+        setHoverMessages([])
+        setHoverLoading(false)
+      }
+    }, 300)
+  }
+
+  const handleRowMouseLeave = () => {
+    clearTimeout(showTimeoutRef.current)
+    hideTimeoutRef.current = setTimeout(() => {
+      setHoverProject(null)
+      setHoverAnchorRect(null)
+      setHoverMessages(null)
+    }, 200)
+  }
+
+  const handleCardMouseLeave = () => {
+    hideTimeoutRef.current = setTimeout(() => {
+      setHoverProject(null)
+      setHoverAnchorRect(null)
+      setHoverMessages(null)
+    }, 200)
+  }
 
   const handleToggleSelect = (id: string) => {
     setSelectedIds(prev => {
@@ -691,6 +761,8 @@ export default function ProjectsPage() {
           onRowClick={(project) => {
             router.push(getProjectPrimaryPath(project))
           }}
+          onRowMouseEnter={isMobile ? undefined : handleRowMouseEnter}
+          onRowMouseLeave={isMobile ? undefined : handleRowMouseLeave}
           pagination={{
             page,
             pageSize,
@@ -792,6 +864,21 @@ export default function ProjectsPage() {
               </div>
             </motion.div>
           </>
+        )}
+      </AnimatePresence>
+
+      {/* Hover Preview Card */}
+      <AnimatePresence>
+        {hoverProject && hoverAnchorRect && (
+          <ProjectHoverCard
+            key={hoverProject.id}
+            project={hoverProject}
+            messages={hoverMessages}
+            isLoading={hoverLoading}
+            anchorRect={hoverAnchorRect}
+            onMouseEnter={() => clearTimeout(hideTimeoutRef.current)}
+            onMouseLeave={handleCardMouseLeave}
+          />
         )}
       </AnimatePresence>
     </div>

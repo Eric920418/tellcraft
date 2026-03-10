@@ -954,25 +954,30 @@ router.get('/:id/download-code', requireAuth, requirePlan('creator', 'pro', 'bus
       return res.status(400).json({ error: 'No files found for this project' })
     }
 
+    // 在記憶體組裝 ZIP，再一次送出（避免 pipe + chunked 的 streaming 複雜性）
     const safeName = project.name.replace(/[^a-z0-9\u4e00-\u9fff-]/gi, '-').replace(/-+/g, '-').slice(0, 50)
-    res.setHeader('Content-Type', 'application/zip')
-    res.setHeader('Content-Disposition', `attachment; filename="${safeName}-code.zip"`)
-    res.setHeader('Transfer-Encoding', 'chunked')
 
     const archive = archiver('zip', { zlib: { level: 6 } })
-    archive.on('error', (err) => {
-      logger.error({ err }, 'archiver error')
-      res.destroy()
+    const chunks: Buffer[] = []
+
+    await new Promise<void>((resolve, reject) => {
+      archive.on('data', (chunk: Buffer) => chunks.push(chunk))
+      archive.on('end', resolve)
+      archive.on('error', reject)
+      archive.on('warning', (warn) => logger.warn({ warn }, 'archiver warning'))
+
+      for (const file of files) {
+        archive.append(Buffer.from(file.content), { name: file.file_path })
+      }
+
+      archive.finalize().catch(reject)
     })
-    archive.on('warning', (err) => logger.warn({ err }, 'archiver warning'))
 
-    archive.pipe(res)
-
-    for (const file of files) {
-      archive.append(file.content, { name: file.file_path })
-    }
-
-    await archive.finalize()
+    const zipBuffer = Buffer.concat(chunks)
+    res.setHeader('Content-Type', 'application/zip')
+    res.setHeader('Content-Disposition', `attachment; filename="${safeName}-code.zip"`)
+    res.setHeader('Content-Length', String(zipBuffer.length))
+    res.send(zipBuffer)
   } catch (error) {
     logger.error({ err: error }, '下載代碼失敗')
     if (!res.headersSent) {

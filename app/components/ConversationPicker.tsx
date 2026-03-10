@@ -187,9 +187,18 @@ export default function ConversationPicker({
                   color: 'var(--gray-500)',
                   lineHeight: 1.5,
                   overflow: 'hidden',
-                  textOverflow: 'ellipsis',
-                  whiteSpace: 'nowrap',
                   marginBottom: 8,
+                  ...(hoveredId === conv.id
+                    ? {
+                        display: '-webkit-box',
+                        WebkitBoxOrient: 'vertical' as const,
+                        WebkitLineClamp: 3,
+                        whiteSpace: 'normal',
+                      }
+                    : {
+                        textOverflow: 'ellipsis',
+                        whiteSpace: 'nowrap',
+                      }),
                 }}>
                   {conv.lastMessage}
                 </p>
@@ -210,6 +219,9 @@ export default function ConversationPicker({
                   <span style={{ opacity: 0.7 }}>💬</span>
                   {t('messagesCount', { count: conv.messageCount })}
                 </span>
+                {hoveredId === conv.id && (
+                  <span style={{ fontSize: 11, color: 'var(--gray-400)', marginLeft: 'auto' }}>→</span>
+                )}
               </div>
             </motion.button>
           ))}

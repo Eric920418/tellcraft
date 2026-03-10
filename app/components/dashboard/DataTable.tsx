@@ -20,6 +20,8 @@ interface DataTableProps<T> {
   isLoading?: boolean
   emptyMessage?: string
   onRowClick?: (item: T) => void
+  onRowMouseEnter?: (item: T, event: React.MouseEvent<HTMLDivElement>) => void
+  onRowMouseLeave?: (item: T, event: React.MouseEvent<HTMLDivElement>) => void
   minTableWidth?: number | string
   pagination?: {
     page: number
@@ -41,6 +43,8 @@ export default function DataTable<T extends object>({
   isLoading = false,
   emptyMessage,
   onRowClick,
+  onRowMouseEnter,
+  onRowMouseLeave,
   minTableWidth = 480,
   pagination,
   sortConfig,
@@ -147,8 +151,8 @@ export default function DataTable<T extends object>({
                   initial={{ opacity: 0, y: 10 }}
                   animate={{ opacity: 1, y: 0 }}
                   transition={{ duration: 0.2, delay: index * 0.02 }}
-                  onMouseEnter={() => setHoveredRow(key)}
-                  onMouseLeave={() => setHoveredRow(null)}
+                  onMouseEnter={(e) => { setHoveredRow(key); onRowMouseEnter?.(item, e) }}
+                  onMouseLeave={(e) => { setHoveredRow(null); onRowMouseLeave?.(item, e) }}
                   onClick={() => onRowClick?.(item)}
                   style={{
                     display: 'grid',
