@@ -121,7 +121,7 @@ export const ChatMessageItem = React.memo(function ChatMessageItem({
             lineHeight: 1.75,
           }}>
             {message.role === 'user' ? (
-              <span style={{ whiteSpace: 'pre-wrap' }}>{getCommandLabel(message.content)}</span>
+              <span style={{ whiteSpace: 'pre-wrap', overflowWrap: 'break-word', wordBreak: 'break-word' }}>{getCommandLabel(message.content)}</span>
             ) : (
               <div className="markdown-content">
                 <ReactMarkdown
