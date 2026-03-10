@@ -125,6 +125,7 @@ export interface FlowState {
   fastBuildAllPages?: string[]         // inferPages+mergePages 的完整頁面列表
   fastBuildCompletedPages?: string[]   // 已完成 pipeline 的頁面
   fastBuildCurrentBatchIndex?: number  // 當前批次（0=首頁, 1=剩餘）
+  fastBuildPendingFinish?: boolean     // 用戶在生成中點「就這樣部署」→ 批次完成後直接完成不暫停
   // 智能模板匹配
   matchedTemplateIds?: string[] // 匹配的模板 ID（分數排序）
   displayedTemplates?: { id: string; name: string }[] // showTemplatePicker 展示順序（供自然語言選擇）

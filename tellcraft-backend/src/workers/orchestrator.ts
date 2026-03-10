@@ -634,15 +634,29 @@ async function handleContinueFlow(
     return
   }
   // __finish_fast_build__：用戶選擇不繼續，直接完成
-  if (trimmedMsg === '__finish_fast_build__' && state.fastMode && state.fastBuildStage === 'awaiting_continue') {
-    logger.info({ conversationId }, 'Fast Build 用戶選擇直接完成')
-    state.phase = 'uiux_complete'
-    state.fastBuildStage = 'complete'
-    state.uiuxCodePhase = 'complete'
-    state.waitingForReply = false
-    state.uiuxCodeGenerationStartedAt = undefined
-    await saveFlowState(redis, conversationId, state)
-    await sendFastBuildCompleteMessage(conversationId, state, io, redis)
+  if (trimmedMsg === '__finish_fast_build__' && state.fastMode) {
+    if (state.fastBuildStage === 'awaiting_continue') {
+      logger.info({ conversationId }, 'Fast Build 用戶選擇直接完成')
+      state.phase = 'uiux_complete'
+      state.fastBuildStage = 'complete'
+      state.uiuxCodePhase = 'complete'
+      state.waitingForReply = false
+      state.uiuxCodeGenerationStartedAt = undefined
+      await saveFlowState(redis, conversationId, state)
+      await sendFastBuildCompleteMessage(conversationId, state, io, redis)
+    } else if (state.fastBuildStage === 'generating') {
+      // 生成中收到「就這樣部署」→ 設標記，當前批次完成後自動結束不再暫停
+      logger.info({ conversationId }, 'Fast Build 生成中收到 finish 指令，設 pendingFinish 標記')
+      state.fastBuildPendingFinish = true
+      await saveFlowState(redis, conversationId, state)
+      const isChinese = state.locale !== 'en'
+      await sendMessage(conversationId, io, {
+        content: isChinese
+          ? '收到！目前批次完成後將直接結束，不再繼續生成剩餘頁面。'
+          : 'Got it! Will finish after the current batch completes.',
+        stage: 'info',
+      })
+    }
     return
   }
   if (trimmedMsg === '__continue_fast_build_after_deploy__' && state.fastMode) {

@@ -237,7 +237,7 @@ export default function ChatMessageList({
                       showProgressBar={showProgressBar}
                       layoutMode={layoutMode}
                       typingStage={typingStage}
-                      isTyping={isTyping}
+                      isTyping={isTyping || isShowingProgress}
                       sendCooldown={sendCooldown}
                       isInitializing={isInitializing}
                       sessionInfo={sessionInfo}

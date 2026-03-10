@@ -866,8 +866,15 @@ export async function runFastBuildPipeline(params: {
   // ── 判斷是否還有剩餘頁面 ──
   const remainingPages = allPages.filter(p => !completedPages.includes(p))
 
-  if (remainingPages.length > 0) {
-    // 有剩餘頁面 → 暫停，等用戶確認
+  // 從 Redis 重讀 pendingFinish 旗標，防止 Worker 用舊 in-memory state 漏判
+  const freshState = await getFlowState(redis, conversationId)
+  const pendingFinish = state.fastBuildPendingFinish || freshState?.fastBuildPendingFinish
+  if (pendingFinish) {
+    state.fastBuildPendingFinish = true // 同步進 in-memory 以便後續邏輯一致
+  }
+
+  if (remainingPages.length > 0 && !pendingFinish) {
+    // 有剩餘頁面 → 暫停，等用戶確認（除非用戶已要求直接完成）
     state.fastBuildStage = 'awaiting_continue'
     state.waitingForReply = true
     state.uiuxCodeGenerationStartedAt = undefined
@@ -925,12 +932,13 @@ export async function runFastBuildPipeline(params: {
     return
   }
 
-  // ── 所有頁面生成完成 ──
+  // ── 所有頁面生成完成（包含 pendingFinish 提前結束）──
   state.uiuxCodePhase = 'complete'
   state.phase = 'uiux_complete'
   state.fastBuildStage = 'complete'
   state.waitingForReply = false
   state.uiuxCodeGenerationStartedAt = undefined
+  state.fastBuildPendingFinish = undefined
   await saveFlowState(redis, conversationId, state)
 
   // Credit 扣除（≤1 頁的情況在這裡扣，>1 頁首批已扣）
