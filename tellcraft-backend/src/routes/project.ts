@@ -979,9 +979,10 @@ router.get('/:id/download-code', requireAuth, requirePlan('creator', 'pro', 'bus
     res.setHeader('Content-Length', String(zipBuffer.length))
     res.send(zipBuffer)
   } catch (error) {
-    logger.error({ err: error }, '下載代碼失敗')
+    const msg = error instanceof Error ? error.message : String(error)
+    logger.error({ err: error }, `下載代碼失敗: ${msg}`)
     if (!res.headersSent) {
-      res.status(500).json({ error: 'Failed to download project code' })
+      res.status(500).json({ error: `Failed to download project code: ${msg}` })
     }
   }
 })
