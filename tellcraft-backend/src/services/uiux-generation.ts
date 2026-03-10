@@ -1794,12 +1794,16 @@ export function repairBracketLookupAccess(
 ): { content: string; repaired: boolean } {
   if (!/\.(tsx?|jsx?)$/.test(file.path)) return { content: file.content, repaired: false }
 
-  // 找出從 bracket lookup 賦值的變數（末尾沒有 ?? 的版本才需要修復）
+  // 找出可能為 undefined 的變數（兩種來源）
   const potentiallyUndefined = new Set<string>()
   for (const line of file.content.split('\n')) {
-    // 例：const config = PERSONALITY_CONFIGS[type]  或  const item = items[idx]
-    const m = line.match(/^\s*(?:const|let)\s+(\w+)\s*=\s*\w+\[[^\]]+\]\s*(?:\/\/.*)?$/)
-    if (m && !line.includes('??')) potentiallyUndefined.add(m[1])
+    if (line.includes('??') || line.includes('||')) continue
+    // 模式 1：bracket lookup → const config = CONFIGS[type]
+    const m1 = line.match(/^\s*(?:const|let)\s+(\w+)\s*=\s*\w+\[[^\]]+\]\s*(?:\/\/.*)?$/)
+    if (m1) potentiallyUndefined.add(m1[1])
+    // 模式 2：optional chain 賦值 → const colors = config?.colors
+    const m2 = line.match(/^\s*(?:const|let)\s+(\w+)\s*=\s*\S+\?\.\w+\s*(?:\/\/.*)?$/)
+    if (m2) potentiallyUndefined.add(m2[1])
   }
   if (potentiallyUndefined.size === 0) return { content: file.content, repaired: false }
 
@@ -1807,14 +1811,24 @@ export function repairBracketLookupAccess(
   const repairedVars: string[] = []
 
   for (const varName of potentiallyUndefined) {
-    // 把 varName.prop（未加 ?.）轉成 varName?.prop
-    // lookbehind 排除已有 ?. 的情況
-    const regex = new RegExp(`(?<![?])\\b${varName}\\.(?![?])`, 'g')
-    const next = fixed.replace(regex, `${varName}?.`)
-    if (next !== fixed) {
-      fixed = next
-      repairedVars.push(varName)
-    }
+    let changed = false
+    // 修復 1：varName.prop（未加 ?.）→ varName?.prop
+    const dotRegex = new RegExp(`(?<![?])\\b${varName}\\.(?![?])`, 'g')
+    const afterDot = fixed.replace(dotRegex, `${varName}?.`)
+    if (afterDot !== fixed) { fixed = afterDot; changed = true }
+
+    // 修復 2：varName[expr]（未加 ?.）→ varName?.[expr]（排除賦值左側）
+    const bracketRegex = new RegExp(`(?<!\\?)\\b${varName}\\[(?!\\s*$)`, 'g')
+    const afterBracket = fixed.replace(bracketRegex, (match, offset) => {
+      // 排除宣告行本身（const varName = xxx[...]）
+      const lineStart = fixed.lastIndexOf('\n', offset) + 1
+      const lineText = fixed.slice(lineStart, offset + match.length)
+      if (/(?:const|let)\s+\w+\s*=/.test(lineText)) return match
+      return `${varName}?.[`
+    })
+    if (afterBracket !== fixed) { fixed = afterBracket; changed = true }
+
+    if (changed) repairedVars.push(varName)
   }
 
   if (repairedVars.length === 0) return { content: file.content, repaired: false }
