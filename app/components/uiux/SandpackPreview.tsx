@@ -1,6 +1,6 @@
 'use client'
 
-import React, { useMemo, useRef, useEffect } from 'react'
+import React, { useMemo, useRef, useEffect, useState, useCallback } from 'react'
 import {
   SandpackProvider,
   SandpackPreview as SandpackPreviewPane,
@@ -41,14 +41,41 @@ interface SandpackPreviewProps {
 /**
  * 子元件：監聽 Sandpack runtime error 並回報給父元件
  */
+/** 解包 Sandpack 包裝的 "Cannot assign to read only property 'message' of object 'SyntaxError: ...'" */
+function unwrapSandpackError(raw: { title?: string; message?: string; path?: string }) {
+  let name = raw.title || 'Error'
+  let message = raw.message || 'Unknown'
+  const innerMatch = message.match(/'((?:SyntaxError|ReferenceError|TypeError|Error)[^']{10,})'/)
+  if (innerMatch) {
+    message = innerMatch[1]
+    name = message.split(':')[0].trim() || name
+  }
+  return { name, message, path: raw.path }
+}
+
+/** 判斷是否為 Sandpack 網路/連線錯誤（非程式碼 bug，不應觸發 auto-repair） */
+function isNetworkError(error: { name?: string; message?: string }) {
+  const combined = `${error.name ?? ''} ${error.message ?? ''}`.toLowerCase()
+  return (
+    combined.includes('time_out') ||
+    combined.includes('timeout') ||
+    combined.includes("couldn't connect") ||
+    combined.includes('could not connect') ||
+    combined.includes('network') ||
+    combined.includes('failed to fetch') ||
+    combined.includes('server')
+  )
+}
+
 function SandpackErrorListener({
-  onRuntimeError, isStreaming, codeVersion,
+  onRuntimeError, onNetworkError, isStreaming, codeVersion,
 }: {
   onRuntimeError?: (error: { name: string; message: string; path?: string }) => void
+  onNetworkError?: () => void
   isStreaming?: boolean
   codeVersion: string
 }) {
-  const { listen } = useSandpack()
+  const { listen, sandpack } = useSandpack()
   const hasReportedRef = useRef(false)
   const lastVersionRef = useRef(codeVersion)
 
@@ -59,29 +86,31 @@ function SandpackErrorListener({
     }
   }, [codeVersion])
 
+  // listen() 捕捉：runtime error overlay + compile error events
   useEffect(() => {
     const unsub = listen((msg) => {
-      if (isStreaming || !onRuntimeError || hasReportedRef.current) return
-      if (msg.type !== 'action' || (msg as { action?: string }).action !== 'show-error') return
-      const e = msg as { title?: string; message?: string; path?: string }
+      if (isStreaming || hasReportedRef.current) return
+      const m = msg as { type?: string; action?: string; title?: string; message?: string; path?: string }
+      const isRuntimeError = m.type === 'action' && m.action === 'show-error'
+      const isCompileError = m.type === 'compile-error' || m.action === 'compile-error'
+      if (!isRuntimeError && !isCompileError) return
       hasReportedRef.current = true
-      onRuntimeError({ name: e.title || 'Error', message: e.message || 'Unknown', path: e.path })
+      const err = unwrapSandpackError(m)
+      if (isNetworkError(err)) { onNetworkError?.(); return }
+      onRuntimeError?.(err)
     })
     return () => unsub()
-  }, [listen, onRuntimeError, isStreaming])
+  }, [listen, onRuntimeError, onNetworkError, isStreaming])
 
   // 補捕：若錯誤在訂閱前就已觸發（SandpackProvider 重建競態），sandpack.error 仍是 reactive state
-  const { sandpack } = useSandpack()
   useEffect(() => {
-    if (isStreaming || !onRuntimeError || hasReportedRef.current) return
+    if (isStreaming || hasReportedRef.current) return
     if (!sandpack.error) return
     hasReportedRef.current = true
-    onRuntimeError({
-      name: sandpack.error.title || 'SandpackError',
-      message: sandpack.error.message,
-      path: sandpack.error.path,
-    })
-  }, [sandpack.error, isStreaming, onRuntimeError])
+    const err = unwrapSandpackError(sandpack.error)
+    if (isNetworkError(err)) { onNetworkError?.(); return }
+    onRuntimeError?.(err)
+  }, [sandpack.error, isStreaming, onRuntimeError, onNetworkError])
 
   return null
 }
@@ -130,6 +159,14 @@ export default function SandpackPreview({
   onRuntimeError,
   codeVersion,
 }: SandpackPreviewProps) {
+  const [networkError, setNetworkError] = useState(false)
+  const [retryCount, setRetryCount] = useState(0)
+  const handleNetworkError = useCallback(() => setNetworkError(true), [])
+  const handleRetry = useCallback(() => {
+    setNetworkError(false)
+    setRetryCount(c => c + 1)
+  }, [])
+
   // 構建 Sandpack 設定
   const setup = useMemo(
     () => buildSandpackSetup(pages, components, styles, tailwindConfig),
@@ -144,7 +181,7 @@ export default function SandpackPreview({
   if (!isStreaming) {
     stableKeyRef.current = latestDepsJson
   }
-  const providerKey = stableKeyRef.current
+  const providerKey = stableKeyRef.current + retryCount
 
   // ── iframe ref 取得（Sandpack 自管理 iframe，需要用 querySelector 找到） ──
   const containerRef = useRef<HTMLDivElement>(null)
@@ -310,6 +347,7 @@ export default function SandpackPreview({
         width: '100%',
         display: 'flex',
         flexDirection: 'column',
+        position: 'relative',
         // 覆蓋 Sandpack 的預設高度 CSS 變數
         '--sp-layout-height': '100%',
       } as React.CSSProperties}
@@ -321,6 +359,32 @@ export default function SandpackPreview({
         div[class*="sp-preview"] { display: flex !important; flex-direction: column !important; flex: 1 !important; }
         .sp-preview-actions { display: none !important; }
       `}</style>
+      {networkError && (
+        <div style={{
+          position: 'absolute', inset: 0, zIndex: 60,
+          display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+          background: 'rgba(255,255,255,0.95)', backdropFilter: 'blur(4px)',
+          gap: 16,
+        }}>
+          <svg width="36" height="36" viewBox="0 0 24 24" fill="none" style={{ color: '#f59e0b' }}>
+            <path d="M8.11 16.11A5.5 5.5 0 0112 15a5.5 5.5 0 013.89 1.11M2 8.82A14 14 0 0112 5c3.84 0 7.31 1.46 9.88 3.84M5 12.65A9.5 9.5 0 0112 10a9.5 9.5 0 017 3M12 20h.01" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+          </svg>
+          <div style={{ textAlign: 'center' }}>
+            <div style={{ fontSize: 14, fontWeight: 600, color: '#1a1a1a' }}>預覽連線逾時</div>
+            <div style={{ fontSize: 12, color: '#666', marginTop: 4 }}>Sandpack 無法連接到 CDN，請檢查網路後重試</div>
+          </div>
+          <button
+            onClick={handleRetry}
+            style={{
+              padding: '8px 20px', borderRadius: 8, border: 'none',
+              background: '#1a1a1a', color: '#fff', fontSize: 13, fontWeight: 500,
+              cursor: 'pointer',
+            }}
+          >
+            重新載入預覽
+          </button>
+        </div>
+      )}
       <SandpackProvider
         key={providerKey}
         template="react-ts"
@@ -334,13 +398,12 @@ export default function SandpackPreview({
         }}
       >
         <SandpackFileUpdater files={setup.files} />
-        {onRuntimeError && (
-          <SandpackErrorListener
-            onRuntimeError={onRuntimeError}
-            isStreaming={isStreaming}
-            codeVersion={codeVersion ?? ''}
-          />
-        )}
+        <SandpackErrorListener
+          onRuntimeError={onRuntimeError}
+          onNetworkError={handleNetworkError}
+          isStreaming={isStreaming}
+          codeVersion={codeVersion ?? ''}
+        />
         <SandpackPreviewPane
           showRefreshButton={false}
           showOpenInCodeSandbox={false}
