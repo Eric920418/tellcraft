@@ -87,9 +87,17 @@ export default function ProjectHoverCard({
     const vw = window.innerWidth
     const vh = window.innerHeight
 
-    let left = anchorRect.right + CARD_OFFSET
-    if (left + CARD_WIDTH > vw - 8) {
-      left = anchorRect.left - CARD_WIDTH - CARD_OFFSET
+    const rightLeft = anchorRect.right + CARD_OFFSET
+    const leftLeft = anchorRect.left - CARD_WIDTH - CARD_OFFSET
+
+    let left: number
+    if (rightLeft + CARD_WIDTH <= vw - 8) {
+      left = rightLeft
+    } else if (leftLeft >= 8) {
+      left = leftLeft
+    } else {
+      // 兩側都放不下（全寬表格），釘在 viewport 右側邊緣
+      left = vw - CARD_WIDTH - 8
     }
 
     const estimatedHeight = 300
