@@ -88,9 +88,11 @@ app.use(cors({
 // 全域 Rate Limiting（per user ID 或 IP）
 app.use(rateLimit({
   windowMs: 15 * 60 * 1000, // 15 分鐘
-  max: 500,
-  // Avoid counting Socket.IO handshake traffic into HTTP API quota.
-  skip: (req) => req.path.startsWith('/socket.io/'),
+  max: 1500,
+  // Skip Socket.IO handshake + message polling (has its own rate limits, and fast-build polls at 1500ms)
+  skip: (req) =>
+    req.path.startsWith('/socket.io/') ||
+    (req.method === 'GET' && /^\/api\/conversations\/[^/]+\/messages$/.test(req.path)),
   standardHeaders: true,
   legacyHeaders: false,
   message: { error: 'Too many requests, please try again later' },
