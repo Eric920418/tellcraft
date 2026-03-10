@@ -1,7 +1,7 @@
 import { Router, type Router as RouterType } from 'express'
 import { requireAuth, requireActiveSubscription } from '../middleware/auth'
 import { validateBody } from '../middleware/validate'
-import { createProjectSchema, templateOverridesSchema } from '../schemas/project'
+import { createProjectSchema, templateOverridesSchema, batchDeleteSchema } from '../schemas/project'
 import * as db from '../db/client'
 import { toVercelSlug, deleteVercelProject } from '../services/deployer'
 import { getProjectLimit } from '../config/plans'
@@ -973,6 +973,64 @@ router.get('/:id/files', requireAuth, async (req, res) => {
   } catch (error) {
     logger.error({ err: error }, '取得專案檔案失敗')
     res.status(500).json({ error: 'Failed to get project files' })
+  }
+})
+
+/**
+ * DELETE /api/project/batch
+ * 批量刪除專案（最多 50 個）
+ */
+router.delete('/batch', requireAuth, validateBody(batchDeleteSchema), async (req, res) => {
+  try {
+    const userId = req.user!.id
+    const { ids } = req.body as { ids: string[] }
+
+    // 一次驗證所有 ids 的擁有權
+    const owned = await db.queryMany<{ id: string; status: string; name: string }>(
+      'SELECT id, status, name FROM projects WHERE id = ANY($1::uuid[]) AND user_id = $2',
+      [ids, userId]
+    )
+
+    if (owned.length !== ids.length) {
+      return res.status(403).json({ error: '部分專案不存在或無權限刪除' })
+    }
+
+    // 並行清理 Vercel（只清 deployed，失敗不阻擋）
+    await Promise.allSettled(
+      owned
+        .filter(p => p.status === 'deployed')
+        .map(async (p) => {
+          const vercelSlug = toVercelSlug(p.name, p.id)
+          const result = await deleteVercelProject(vercelSlug)
+          if (!result.success) {
+            logger.warn({ error: result.error, projectId: p.id }, '批量刪除：清理 Vercel 專案失敗（不阻擋）')
+          }
+        })
+    )
+
+    // 事務級聯刪除
+    await db.transaction(async (client) => {
+      await client.query('DELETE FROM deployments WHERE project_id = ANY($1::uuid[])', [ids])
+      await client.query('DELETE FROM generations WHERE project_id = ANY($1::uuid[])', [ids])
+      await client.query('DELETE FROM project_files WHERE project_id = ANY($1::uuid[])', [ids])
+      await client.query('DELETE FROM bdd_sessions WHERE project_id = ANY($1::uuid[])', [ids])
+      await client.query('DELETE FROM tasks WHERE project_id = ANY($1::uuid[])', [ids])
+      await client.query(
+        'DELETE FROM line_active_conversations WHERE conversation_id IN (SELECT id FROM conversations WHERE project_id = ANY($1::uuid[]))',
+        [ids]
+      )
+      await client.query(
+        'DELETE FROM flow_states WHERE conversation_id IN (SELECT id FROM conversations WHERE project_id = ANY($1::uuid[]))',
+        [ids]
+      )
+      await client.query('DELETE FROM conversations WHERE project_id = ANY($1::uuid[])', [ids])
+      await client.query('DELETE FROM projects WHERE id = ANY($1::uuid[])', [ids])
+    })
+
+    res.json({ success: true, deleted: ids.length })
+  } catch (error) {
+    logger.error({ err: error }, '批量刪除專案失敗')
+    res.status(500).json({ error: 'Failed to batch delete projects' })
   }
 })
 

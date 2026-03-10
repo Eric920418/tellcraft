@@ -14,3 +14,7 @@ export const updateProjectSchema = z.object({
 export const templateOverridesSchema = z.object({
   overrides: z.record(z.string(), z.unknown()),
 }).passthrough()
+
+export const batchDeleteSchema = z.object({
+  ids: z.array(z.string().uuid()).min(1).max(50),
+})

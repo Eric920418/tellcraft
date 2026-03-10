@@ -1,11 +1,11 @@
 'use client'
 
-import { useEffect, useState } from 'react'
-import { motion } from 'framer-motion'
+import { useEffect, useRef, useState } from 'react'
+import { motion, AnimatePresence } from 'framer-motion'
 import { Link, useRouter } from '@/i18n/navigation'
 import { useTranslations } from 'next-intl'
 import { DataTable, StatusBadge, SearchInput, type Column } from '@/app/components/dashboard'
-import { getProjects, togglePinProject } from '@/app/lib/vps-api'
+import { getProjects, togglePinProject, deleteProjects } from '@/app/lib/vps-api'
 
 // 從 localStorage 獲取 token
 function getAuthToken(): string | null {
@@ -54,8 +54,17 @@ export default function ProjectsPage() {
   const [statusFilter, setStatusFilter] = useState<string>('')
   const [isMobile, setIsMobile] = useState(false)
 
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
+  const [showDeleteModal, setShowDeleteModal] = useState(false)
+  const [isDeleting, setIsDeleting] = useState(false)
+  const [deleteError, setDeleteError] = useState<string | null>(null)
   const [refetchFlag, setRefetchFlag] = useState(0)
   const pageSize = 10
+
+  // 換頁/篩選/搜尋時清空選取
+  useEffect(() => {
+    setSelectedIds(new Set())
+  }, [page, statusFilter, search])
 
   useEffect(() => {
     const fetchProjects = async () => {
@@ -103,6 +112,42 @@ export default function ProjectsPage() {
     return () => mediaQuery.removeListener(syncMobileState)
   }, [])
 
+
+  const handleToggleSelect = (id: string) => {
+    setSelectedIds(prev => {
+      const next = new Set(prev)
+      if (next.has(id)) {
+        next.delete(id)
+      } else {
+        next.add(id)
+      }
+      return next
+    })
+  }
+
+  const handleToggleSelectAll = () => {
+    if (selectedIds.size === projects.length && projects.length > 0) {
+      setSelectedIds(new Set())
+    } else {
+      setSelectedIds(new Set(projects.map(p => p.id)))
+    }
+  }
+
+  const handleBatchDelete = async () => {
+    const token = getAuthToken()
+    if (!token) return
+    setIsDeleting(true)
+    setDeleteError(null)
+    const result = await deleteProjects({ ids: Array.from(selectedIds), token })
+    setIsDeleting(false)
+    if (result.success) {
+      setShowDeleteModal(false)
+      setSelectedIds(new Set())
+      setRefetchFlag(f => f + 1)
+    } else {
+      setDeleteError(result.error ?? '刪除失敗，請稍後再試')
+    }
+  }
 
   const handleTogglePin = async (project: Project) => {
     const token = getAuthToken()
@@ -173,32 +218,41 @@ export default function ProjectsPage() {
     {
       key: 'pin',
       header: '',
-      width: '40px',
+      width: '72px',
       truncate: false,
       render: (project: Project) => (
-        <button
-          onClick={(e) => {
-            e.stopPropagation()
-            handleTogglePin(project)
-          }}
-          title={project.isPinned ? t('unpinProject') : t('pinProject')}
-          style={{
-            display: 'inline-flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            width: 28,
-            height: 28,
-            border: 'none',
-            background: 'transparent',
-            cursor: 'pointer',
-            borderRadius: 4,
-            transition: 'all 0.15s ease',
-          }}
-        >
-          <svg width="14" height="14" viewBox="0 0 24 24" fill={project.isPinned ? '#F59E0B' : 'none'} stroke={project.isPinned ? '#F59E0B' : 'var(--gray-300)'} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M12 2l2.09 6.26L21 9.27l-5 4.87L17.18 21 12 17.27 6.82 21 8 14.14l-5-4.87 6.91-1.01L12 2z" />
-          </svg>
-        </button>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+          <input
+            type="checkbox"
+            checked={selectedIds.has(project.id)}
+            onChange={() => handleToggleSelect(project.id)}
+            onClick={(e) => e.stopPropagation()}
+            style={{ width: 16, height: 16, cursor: 'pointer', accentColor: 'var(--black)', flexShrink: 0 }}
+          />
+          <button
+            onClick={(e) => {
+              e.stopPropagation()
+              handleTogglePin(project)
+            }}
+            title={project.isPinned ? t('unpinProject') : t('pinProject')}
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              width: 28,
+              height: 28,
+              border: 'none',
+              background: 'transparent',
+              cursor: 'pointer',
+              borderRadius: 4,
+              transition: 'all 0.15s ease',
+            }}
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill={project.isPinned ? '#F59E0B' : 'none'} stroke={project.isPinned ? '#F59E0B' : 'var(--gray-300)'} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M12 2l2.09 6.26L21 9.27l-5 4.87L17.18 21 12 17.27 6.82 21 8 14.14l-5-4.87 6.91-1.01L12 2z" />
+            </svg>
+          </button>
+        </div>
       ),
     },
     {
@@ -286,32 +340,41 @@ export default function ProjectsPage() {
     {
       key: 'pin',
       header: '',
-      width: '40px',
+      width: '60px',
       truncate: false,
       render: (project: Project) => (
-        <button
-          onClick={(e) => {
-            e.stopPropagation()
-            handleTogglePin(project)
-          }}
-          title={project.isPinned ? t('unpinProject') : t('pinProject')}
-          style={{
-            display: 'inline-flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            width: 28,
-            height: 28,
-            border: 'none',
-            background: 'transparent',
-            cursor: 'pointer',
-            borderRadius: 4,
-            transition: 'all 0.15s ease',
-          }}
-        >
-          <svg width="14" height="14" viewBox="0 0 24 24" fill={project.isPinned ? '#F59E0B' : 'none'} stroke={project.isPinned ? '#F59E0B' : 'var(--gray-300)'} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M12 2l2.09 6.26L21 9.27l-5 4.87L17.18 21 12 17.27 6.82 21 8 14.14l-5-4.87 6.91-1.01L12 2z" />
-          </svg>
-        </button>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+          <input
+            type="checkbox"
+            checked={selectedIds.has(project.id)}
+            onChange={() => handleToggleSelect(project.id)}
+            onClick={(e) => e.stopPropagation()}
+            style={{ width: 16, height: 16, cursor: 'pointer', accentColor: 'var(--black)', flexShrink: 0 }}
+          />
+          <button
+            onClick={(e) => {
+              e.stopPropagation()
+              handleTogglePin(project)
+            }}
+            title={project.isPinned ? t('unpinProject') : t('pinProject')}
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              width: 28,
+              height: 28,
+              border: 'none',
+              background: 'transparent',
+              cursor: 'pointer',
+              borderRadius: 4,
+              transition: 'all 0.15s ease',
+            }}
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill={project.isPinned ? '#F59E0B' : 'none'} stroke={project.isPinned ? '#F59E0B' : 'var(--gray-300)'} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M12 2l2.09 6.26L21 9.27l-5 4.87L17.18 21 12 17.27 6.82 21 8 14.14l-5-4.87 6.91-1.01L12 2z" />
+            </svg>
+          </button>
+        </div>
       ),
     },
     {
@@ -437,6 +500,39 @@ export default function ProjectsPage() {
           <option value="deployed">{t('statusDeployed')}</option>
           <option value="failed">{t('statusFailed')}</option>
         </select>
+        <AnimatePresence>
+          {selectedIds.size > 0 && (
+            <motion.button
+              key="batch-delete-btn"
+              initial={{ opacity: 0, scale: 0.9 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.9 }}
+              transition={{ duration: 0.15 }}
+              onClick={() => { setDeleteError(null); setShowDeleteModal(true) }}
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 6,
+                padding: '10px 16px',
+                fontSize: 14,
+                fontWeight: 500,
+                background: '#EF4444',
+                color: '#fff',
+                border: 'none',
+                cursor: 'pointer',
+                flexShrink: 0,
+              }}
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <polyline points="3 6 5 6 21 6" />
+                <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
+                <path d="M10 11v6M14 11v6" />
+                <path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2" />
+              </svg>
+              刪除選取（{selectedIds.size}）
+            </motion.button>
+          )}
+        </AnimatePresence>
       </motion.div>
 
       {/* Table */}
@@ -445,6 +541,37 @@ export default function ProjectsPage() {
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.4, delay: 0.2 }}
       >
+        {/* 全選行 */}
+        {projects.length > 0 && (
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 10,
+              padding: '8px 12px',
+              marginBottom: 4,
+              background: selectedIds.size > 0 ? 'var(--gray-50)' : 'transparent',
+              borderRadius: 6,
+            }}
+          >
+            <input
+              type="checkbox"
+              ref={(el) => {
+                if (el) {
+                  el.indeterminate = selectedIds.size > 0 && selectedIds.size < projects.length
+                  el.checked = selectedIds.size === projects.length && projects.length > 0
+                }
+              }}
+              onChange={handleToggleSelectAll}
+              style={{ width: 16, height: 16, cursor: 'pointer', accentColor: 'var(--black)' }}
+            />
+            <span style={{ fontSize: 13, color: 'var(--gray-500)' }}>
+              {selectedIds.size > 0
+                ? `已選取 ${selectedIds.size} 個`
+                : `全選本頁 ${projects.length} 個`}
+            </span>
+          </div>
+        )}
         <DataTable
           columns={isMobile ? mobileColumns : desktopColumns}
           data={projects}
@@ -463,6 +590,101 @@ export default function ProjectsPage() {
           }}
         />
       </motion.div>
+
+      {/* 批量刪除確認 Modal */}
+      <AnimatePresence>
+        {showDeleteModal && (
+          <>
+            <motion.div
+              key="modal-overlay"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: 0.15 }}
+              onClick={() => !isDeleting && setShowDeleteModal(false)}
+              style={{
+                position: 'fixed',
+                inset: 0,
+                background: 'rgba(0,0,0,0.5)',
+                zIndex: 1000,
+              }}
+            />
+            <motion.div
+              key="modal-box"
+              initial={{ opacity: 0, scale: 0.95, y: '-48%', x: '-50%' }}
+              animate={{ opacity: 1, scale: 1, y: '-50%', x: '-50%' }}
+              exit={{ opacity: 0, scale: 0.95, y: '-48%', x: '-50%' }}
+              transition={{ duration: 0.15 }}
+              style={{
+                position: 'fixed',
+                top: '50%',
+                left: '50%',
+                zIndex: 1001,
+                background: 'var(--white)',
+                borderRadius: 12,
+                padding: '28px 32px',
+                width: 400,
+                maxWidth: 'calc(100vw - 32px)',
+                boxShadow: '0 20px 60px rgba(0,0,0,0.2)',
+              }}
+            >
+              <h3 style={{ fontSize: 18, fontWeight: 600, marginBottom: 12 }}>
+                刪除 {selectedIds.size} 個專案
+              </h3>
+              <p style={{ fontSize: 14, color: 'var(--gray-500)', lineHeight: 1.6, marginBottom: 8 }}>
+                此操作無法復原。選取的專案及其所有代碼、對話記錄、部署資料都將永久刪除。
+              </p>
+              {deleteError && (
+                <div style={{
+                  marginTop: 12,
+                  padding: '10px 14px',
+                  background: '#FEF2F2',
+                  border: '1px solid #FECACA',
+                  borderRadius: 6,
+                  fontSize: 13,
+                  color: '#DC2626',
+                }}>
+                  {deleteError}
+                </div>
+              )}
+              <div style={{ display: 'flex', gap: 10, marginTop: 24, justifyContent: 'flex-end' }}>
+                <button
+                  onClick={() => setShowDeleteModal(false)}
+                  disabled={isDeleting}
+                  style={{
+                    padding: '9px 18px',
+                    fontSize: 14,
+                    border: '1px solid var(--border-color)',
+                    background: 'var(--white)',
+                    cursor: isDeleting ? 'not-allowed' : 'pointer',
+                    borderRadius: 6,
+                    opacity: isDeleting ? 0.5 : 1,
+                  }}
+                >
+                  取消
+                </button>
+                <button
+                  onClick={handleBatchDelete}
+                  disabled={isDeleting}
+                  style={{
+                    padding: '9px 18px',
+                    fontSize: 14,
+                    fontWeight: 500,
+                    background: isDeleting ? '#FCA5A5' : '#EF4444',
+                    color: '#fff',
+                    border: 'none',
+                    cursor: isDeleting ? 'not-allowed' : 'pointer',
+                    borderRadius: 6,
+                    transition: 'background 0.15s',
+                  }}
+                >
+                  {isDeleting ? '刪除中...' : `刪除（${selectedIds.size}）`}
+                </button>
+              </div>
+            </motion.div>
+          </>
+        )}
+      </AnimatePresence>
     </div>
   )
 }

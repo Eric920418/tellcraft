@@ -1278,6 +1278,20 @@ export async function deleteProject(input: {
 }
 
 /**
+ * 批量刪除專案
+ */
+export async function deleteProjects(input: {
+  ids: string[]
+  token: string
+}): Promise<ApiResponse<{ success: boolean; deleted: number }>> {
+  return apiRequest('/api/project/batch', {
+    method: 'DELETE',
+    headers: { Authorization: `Bearer ${input.token}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ ids: input.ids }),
+  })
+}
+
+/**
  * 獲取專案版本歷史
  */
 export async function getProjectVersions(input: {
