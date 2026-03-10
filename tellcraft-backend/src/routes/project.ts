@@ -1,5 +1,6 @@
 import { Router, type Router as RouterType } from 'express'
-import { requireAuth, requireActiveSubscription } from '../middleware/auth'
+import archiver from 'archiver'
+import { requireAuth, requireActiveSubscription, requirePlan } from '../middleware/auth'
 import { validateBody } from '../middleware/validate'
 import { createProjectSchema, templateOverridesSchema, batchDeleteSchema } from '../schemas/project'
 import * as db from '../db/client'
@@ -928,6 +929,55 @@ router.put('/:id/template-overrides', requireAuth, validateBody(templateOverride
   } catch (error) {
     logger.error({ err: error }, '更新模板客製化失敗')
     res.status(500).json({ error: 'Failed to update template overrides' })
+  }
+})
+
+/**
+ * GET /api/project/:id/download-code
+ * 下載專案全部代碼（ZIP）— 付費方案限定
+ */
+router.get('/:id/download-code', requireAuth, requirePlan('creator', 'pro', 'business'), async (req, res) => {
+  try {
+    const { id } = req.params
+    const userId = req.user!.id
+
+    const project = await db.queryOne<{ user_id: string; name: string }>(
+      'SELECT user_id, name FROM projects WHERE id = $1',
+      [id]
+    )
+    if (!project || project.user_id !== userId) {
+      return res.status(404).json({ error: 'Project not found' })
+    }
+
+    const files = await db.getProjectFiles(id)
+    if (files.length === 0) {
+      return res.status(400).json({ error: 'No files found for this project' })
+    }
+
+    const safeName = project.name.replace(/[^a-z0-9\u4e00-\u9fff-]/gi, '-').replace(/-+/g, '-').slice(0, 50)
+    res.setHeader('Content-Type', 'application/zip')
+    res.setHeader('Content-Disposition', `attachment; filename="${safeName}-code.zip"`)
+    res.setHeader('Transfer-Encoding', 'chunked')
+
+    const archive = archiver('zip', { zlib: { level: 6 } })
+    archive.on('error', (err) => {
+      logger.error({ err }, 'archiver error')
+      res.destroy()
+    })
+    archive.on('warning', (err) => logger.warn({ err }, 'archiver warning'))
+
+    archive.pipe(res)
+
+    for (const file of files) {
+      archive.append(file.content, { name: file.file_path })
+    }
+
+    await archive.finalize()
+  } catch (error) {
+    logger.error({ err: error }, '下載代碼失敗')
+    if (!res.headersSent) {
+      res.status(500).json({ error: 'Failed to download project code' })
+    }
   }
 })
 

@@ -6,6 +6,7 @@ import { Link, useRouter } from '@/i18n/navigation'
 import { useTranslations } from 'next-intl'
 import { DataTable, StatusBadge, SearchInput, type Column } from '@/app/components/dashboard'
 import { getProjects, togglePinProject, deleteProjects } from '@/app/lib/vps-api'
+import { useAuth } from '@/app/hooks/useAuth'
 
 // 從 localStorage 獲取 token
 function getAuthToken(): string | null {
@@ -46,6 +47,8 @@ const statusLabelKeys: Record<string, string> = {
 export default function ProjectsPage() {
   const router = useRouter()
   const t = useTranslations('dashboard')
+  const { user } = useAuth()
+  const isPaidUser = !!user && user.plan !== 'free' && !!user.plan
   const [projects, setProjects] = useState<Project[]>([])
   const [total, setTotal] = useState(0)
   const [page, setPage] = useState(1)
@@ -59,6 +62,8 @@ export default function ProjectsPage() {
   const [isDeleting, setIsDeleting] = useState(false)
   const [deleteError, setDeleteError] = useState<string | null>(null)
   const [refetchFlag, setRefetchFlag] = useState(0)
+  const [isDownloading, setIsDownloading] = useState<string | null>(null)
+  const [downloadError, setDownloadError] = useState<string | null>(null)
   const pageSize = 10
 
   // 換頁/篩選/搜尋時清空選取
@@ -168,6 +173,36 @@ export default function ProjectsPage() {
     }
   }
 
+  const handleDownload = async (project: Project) => {
+    const token = getAuthToken()
+    if (!token) return
+    setIsDownloading(project.id)
+    setDownloadError(null)
+    try {
+      const res = await fetch(`/api/projects/${project.id}/download-code`, {
+        headers: { Authorization: `Bearer ${token}` },
+      })
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}))
+        setDownloadError(err.error || '下載失敗，請稍後再試')
+        return
+      }
+      const blob = await res.blob()
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `${project.name}-code.zip`
+      document.body.appendChild(a)
+      a.click()
+      document.body.removeChild(a)
+      URL.revokeObjectURL(url)
+    } catch {
+      setDownloadError('下載失敗，請稍後再試')
+    } finally {
+      setIsDownloading(null)
+    }
+  }
+
   const getStatusLabel = (status: string) => {
     const key = statusLabelKeys[status]
     return key ? t(key) : status
@@ -180,37 +215,87 @@ export default function ProjectsPage() {
 
   const renderProjectDetailAction = (project: Project) => {
     return (
-      <Link
-        href={`/dashboard/projects/${project.id}`}
-        title={t('projectDetail')}
-        onClick={(e) => e.stopPropagation()}
-        style={{
-          display: 'inline-flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          width: 40,
-          height: 40,
-          borderRadius: 10,
-          color: 'var(--gray-500)',
-          background: 'var(--gray-50)',
-          textDecoration: 'none',
-          transition: 'all 0.15s ease',
-        }}
-        onMouseEnter={(e) => {
-          e.currentTarget.style.color = 'var(--black)'
-          e.currentTarget.style.background = 'var(--gray-100)'
-        }}
-        onMouseLeave={(e) => {
-          e.currentTarget.style.color = 'var(--gray-500)'
-          e.currentTarget.style.background = 'var(--gray-50)'
-        }}
-      >
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-          <circle cx="12" cy="12" r="9" />
-          <path d="M12 16v-4" />
-          <path d="M12 8h.01" />
-        </svg>
-      </Link>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+        {/* 下載代碼按鈕 */}
+        <button
+          onClick={(e) => {
+            e.stopPropagation()
+            if (isPaidUser) handleDownload(project)
+          }}
+          disabled={isDownloading === project.id}
+          title={isPaidUser ? '下載代碼 (ZIP)' : '升級付費方案以下載代碼'}
+          style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            width: 40,
+            height: 40,
+            borderRadius: 10,
+            border: 'none',
+            color: 'var(--gray-500)',
+            background: 'var(--gray-50)',
+            cursor: isPaidUser && isDownloading !== project.id ? 'pointer' : 'not-allowed',
+            opacity: isPaidUser ? 1 : 0.4,
+            transition: 'all 0.15s ease',
+            flexShrink: 0,
+          }}
+          onMouseEnter={(e) => {
+            if (isPaidUser) {
+              e.currentTarget.style.color = 'var(--black)'
+              e.currentTarget.style.background = 'var(--gray-100)'
+            }
+          }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.color = 'var(--gray-500)'
+            e.currentTarget.style.background = 'var(--gray-50)'
+          }}
+        >
+          {isDownloading === project.id ? (
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ animation: 'spin 1s linear infinite' }}>
+              <path d="M21 12a9 9 0 1 1-6.219-8.56" />
+            </svg>
+          ) : (
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+              <polyline points="7 10 12 15 17 10" />
+              <line x1="12" y1="15" x2="12" y2="3" />
+            </svg>
+          )}
+        </button>
+        {/* 詳情連結 */}
+        <Link
+          href={`/dashboard/projects/${project.id}`}
+          title={t('projectDetail')}
+          onClick={(e) => e.stopPropagation()}
+          style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            width: 40,
+            height: 40,
+            borderRadius: 10,
+            color: 'var(--gray-500)',
+            background: 'var(--gray-50)',
+            textDecoration: 'none',
+            transition: 'all 0.15s ease',
+            flexShrink: 0,
+          }}
+          onMouseEnter={(e) => {
+            e.currentTarget.style.color = 'var(--black)'
+            e.currentTarget.style.background = 'var(--gray-100)'
+          }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.color = 'var(--gray-500)'
+            e.currentTarget.style.background = 'var(--gray-50)'
+          }}
+        >
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <circle cx="12" cy="12" r="9" />
+            <path d="M12 16v-4" />
+            <path d="M12 8h.01" />
+          </svg>
+        </Link>
+      </div>
     )
   }
 
@@ -319,7 +404,7 @@ export default function ProjectsPage() {
     {
       key: 'actions',
       header: '',
-      width: '64px',
+      width: '116px',
       truncate: false,
       render: (project: Project) => renderProjectDetailAction(project),
     },
@@ -410,6 +495,7 @@ export default function ProjectsPage() {
 
   return (
     <div>
+      <style>{`@keyframes spin { from { transform: rotate(0deg) } to { transform: rotate(360deg) } }`}</style>
       {/* Header */}
       <motion.div
         initial={{ opacity: 0, y: -20 }}
@@ -534,6 +620,29 @@ export default function ProjectsPage() {
           )}
         </AnimatePresence>
       </motion.div>
+
+      {/* 下載錯誤提示 */}
+      {downloadError && (
+        <div style={{
+          padding: '10px 14px',
+          background: '#FEF2F2',
+          border: '1px solid #FECACA',
+          borderRadius: 6,
+          fontSize: 13,
+          color: '#DC2626',
+          marginBottom: 12,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          gap: 8,
+        }}>
+          <span>{downloadError}</span>
+          <button
+            onClick={() => setDownloadError(null)}
+            style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#DC2626', fontSize: 16, lineHeight: 1, padding: 0 }}
+          >×</button>
+        </div>
+      )}
 
       {/* Table */}
       <motion.div

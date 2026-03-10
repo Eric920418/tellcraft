@@ -382,6 +382,16 @@ Server Action 錯誤訊息 + 工具模組中文字串國際化（+117 keys，2 n
 - **失敗仍扣**：LLM 已調用，成本已發生
 - **月重置**：每小時掃描 `subscription_period_start + 1 month <= NOW()` 的用戶，重置為 0
 
+### 付費限定功能
+
+| 功能 | 說明 | 限制 |
+|------|------|------|
+| **代碼下載 (ZIP)** | 下載專案全部 `project_files` 打包為 ZIP | creator / pro / business |
+
+- **API**：`GET /api/project/:id/download-code`（後端 archiver ZIP 串流）
+- **前端 Route**：`/api/projects/[id]/download-code`（binary 透傳，不走 vps proxy，避免 JSON 解析損壞 binary）
+- **UI**：Dashboard 專案列表每列加下載按鈕，免費方案 `opacity:0.4` + `cursor:not-allowed` + title 提示升級
+
 ### 核心檔案
 
 - 常數唯一來源：`tellcraft-backend/src/config/plans.ts`
