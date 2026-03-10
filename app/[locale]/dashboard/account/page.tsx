@@ -486,34 +486,34 @@ export default function AccountPage() {
             {unlinkedProviders.map(provider => {
               const config = PROVIDER_CONFIG[provider]
 
-              // Telegram 用 Login Widget，不用 <a> 連結
+              // Telegram 用 Login Widget，獨立垂直區塊
               if (provider === 'telegram') {
                 return (
                   <div
                     key={provider}
                     style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      flexWrap: isMobile ? 'wrap' : 'nowrap',
-                      gap: 12,
-                      padding: '12px 16px',
+                      padding: '14px 16px',
                       borderRadius: 8,
                       border: `1px dashed var(--border-color)`,
                     }}
                   >
-                    <div style={{
-                      width: 36, height: 36, borderRadius: 8,
-                      background: `${config.color}20`, color: config.color,
-                      display: 'flex', alignItems: 'center', justifyContent: 'center',
-                      fontSize: 16, fontWeight: 700, flexShrink: 0,
-                    }}>
-                      {config.icon}
+                    {/* 標題行 */}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>
+                      <div style={{
+                        width: 32, height: 32, borderRadius: 7, flexShrink: 0,
+                        background: `${config.color}20`, color: config.color,
+                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        fontSize: 14, fontWeight: 700,
+                      }}>
+                        {config.icon}
+                      </div>
+                      <div>
+                        <div style={{ fontSize: 14, fontWeight: 500 }}>{t('linkProvider', { provider: config.label })}</div>
+                        <div style={{ fontSize: 12, color: 'var(--gray-500)' }}>{t('linkProviderHint', { provider: config.label })}</div>
+                      </div>
                     </div>
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ fontSize: 14, fontWeight: 500, marginBottom: 4 }}>{t('linkProvider', { provider: config.label })}</div>
-                      {/* Telegram Login Widget 注入容器 */}
-                      <div ref={telegramWidgetRef} />
-                    </div>
+                    {/* Telegram Login Widget 注入容器（獨立一行，不在 flex 內） */}
+                    <div ref={telegramWidgetRef} style={{ lineHeight: 0 }} />
                   </div>
                 )
               }
