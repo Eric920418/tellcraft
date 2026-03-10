@@ -2526,6 +2526,8 @@ function getBaseRules(): string {
 - loading state 用 skeleton
 
 ## React Hooks 宣告規則（Critical — 必須遵守）
+- **React hooks 只能從 'react' import**：\`import { useState, useEffect, useRef, useCallback, useMemo } from 'react'\`
+- **禁止從 'motion/react' import React hooks**：motion/react 只 import 動畫相關 API（motion, AnimatePresence, useAnimation 等）
 - 所有使用的 ref 必須在 component body 頂層宣告：用了 \`mouseRef.current\` → 必須有 \`const mouseRef = useRef(...)\`
 - 所有使用的 state 必須宣告：用了 \`setCount\` → 必須有 \`const [count, setCount] = useState(...)\`
 - Canvas / requestAnimationFrame 動畫若追蹤 mouse → 必須宣告 \`const mouseRef = useRef({ x: 0, y: 0 })\` + mousemove handler
@@ -2673,6 +2675,7 @@ function getStructureConstraintsFast(tier: DesignTier): string {
 
 function getBaseRulesFast(): string {
   return `## React Hooks 宣告規則（Critical）
+- **React hooks（useState/useEffect/useRef/useCallback/useMemo）只能從 'react' import，禁止從 'motion/react' import**
 - 所有使用的 ref 必須在 component body 頂層宣告
 - 所有使用的 state 必須宣告
 - useEffect / useCallback 的依賴陣列必須完整
