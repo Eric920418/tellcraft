@@ -115,6 +115,10 @@ npx ts-node bdd-spec/scripts/validate-feature.ts spec/features/
 | `design-moods.ts` | 無 | uiux-phases / fast-build | 8 個設計情緒預設 + `recommendMoods()` 規則推薦 + prompt 注入 getter |
 | `customer-service.ts` | 無 / Sonnet | fast mode + handleContinueFlow | 客服問答：意圖偵測（greeting/question/chitchat/help）+ FAQ 零 LLM 匹配（9 主題）+ Sonnet 開放問答 |
 | `line-notify.ts` | 無 | orchestrator-utils | LINE 推播通知（stage 白名單過濾） |
+| `telegram-notify.ts` | 無 | orchestrator-utils | Telegram 里程碑推播通知（stage 白名單，非 Bot 對話才推） |
+| `telegram-full-push.ts` | 無 | orchestrator-utils | Telegram Bot 全量翻譯推送（Telegram 來源的對話） |
+| `telegram-bot-handler.ts` | 無 | index.ts | Telegram Bot 業務邏輯（/start/文字/Callback Query，`initTelegramBotHandler` 注入） |
+| `telegram-message-translator.ts` | 無 | telegram-full-push | sendMessage → Telegram MarkdownV2 + Inline Keyboard 翻譯層 |
 
 ### 兩種模式
 
@@ -414,8 +418,9 @@ Server Action 錯誤訊息 + 工具模組中文字串國際化（+117 keys，2 n
 | **效能** | Redis 快取工具（`cached()` + `invalidateCache()`）、Dashboard admin stats 快取（5min TTL）、LATERAL JOIN 取代子查詢、GROUP BY 取代迴圈計數、複合索引（conversations/deployments/messages/llm_usage） |
 | **i18n** | next-intl 多語系（zh/en）、UI 元件全量翻譯、Server Action 錯誤訊息 i18n（getTranslations）、lib 模組英文化、error code 機制、883 keys / 29 namespaces |
 | **防護** | 三層防刷（前端冷卻 + API 限速 + Worker 鎖）、八層輸入防禦（含 Content Policy 語義審查 + Universal Input Quality Gate 亂碼/髒話/垃圾規則式攔截 + 設計問卷驗證）+ 違規冷卻升級（3→60s / 6→5min / 10→30min）、LLM 自動重試、Guest 限制（Fast Only + 一次使用 + 登入推薦） |
-| **通知** | LINE 推播通知（BDD 完成/UIUX 生成完成/部署成功失敗），離線用戶也能收到 |
+| **通知** | LINE 推播通知（BDD 完成/UIUX 生成完成/部署成功失敗），離線用戶也能收到；Telegram 同等里程碑通知 |
 | **LINE Bot** | LINE 對話內完整 Fast Build 體驗（描述需求→生成→部署），Flex Message 卡片 + Quick Reply，客服問答（FAQ + Sonnet） |
+| **Telegram Bot** | Telegram 對話內完整 Fast Build 體驗（描述需求→生成→部署），MarkdownV2 + Inline Keyboard；Login Widget 帳號綁定；里程碑通知 |
 | **UX** | 對話回退、錯誤恢復、自動恢復對話、專案自動命名、Markdown 渲染、專案對話快捷入口（1-click）、專案置頂/取消置頂 |
 | **穩定性** | FlowState 超時自動恢復（定時掃描 + LINE/Web 推送通知），伺服器重啟後自動恢復卡住的生成/部署任務 |
 | **資料治理** | 訪客資料自動清理（5 天無活動過期），匿名帳號 + 已遷移空殼帳號定時清除，保護正在執行的 FlowState |
@@ -515,6 +520,10 @@ tellcraft-backend/
 │   │   ├── line-full-push.ts    # LINE Bot 全量翻譯推送（LINE 來源的對話）
 │   │   ├── line-bot-handler.ts  # LINE Bot 業務邏輯（Follow/Text/Postback）
 │   │   ├── line-message-translator.ts # sendMessage → LINE Messages 翻譯
+│   │   ├── telegram-notify.ts   # Telegram 里程碑推播通知（非 Bot 對話）
+│   │   ├── telegram-full-push.ts # Telegram Bot 全量翻譯推送
+│   │   ├── telegram-bot-handler.ts # Telegram Bot 業務邏輯（/start/文字/Callback）
+│   │   ├── telegram-message-translator.ts # sendMessage → Telegram MarkdownV2+Keyboard
 │   │   ├── customer-service.ts    # 客服問答（意圖偵測 + FAQ + Sonnet）
 │   │   ├── classifier.ts         # 三層分類防禦
 │   │   ├── bdd-to-ui-spec.ts     # BDD→UI 翻譯
@@ -525,7 +534,7 @@ tellcraft-backend/
 │   │   ├── log-parser.ts        # 日誌解析 + 敏感資訊遮罩（dashboard + Socket.io 共用）
 │   │   ├── safe-parse-json.ts   # LLM JSON 安全解析（四層防禦，全後端共用）
 │   │   └── is-confirmation.ts   # 確認語意偵測（三層：否定詞排除 → 短詞精確 → 長片語 includes）
-│   ├── routes/                   # API 路由（conversation/project/session/bdd/templates/operations/auth/health/upload/line-bot）
+│   ├── routes/                   # API 路由（conversation/project/session/bdd/templates/operations/auth/health/upload/line-bot/telegram-bot）
 │   ├── __tests__/               # 單元測試（Vitest，239 條用例）
 │   │   ├── intent-helpers.test.ts  # 意圖判斷純函數測試
 │   │   ├── log-parser.test.ts      # 日誌解析/遮罩測試

@@ -33,6 +33,8 @@ import operationsRoutes from './routes/operations'
 import uploadRoutes from './routes/upload'
 import lineBotRoutes from './routes/line-bot'
 import { initLineBotHandler } from './services/line-bot-handler'
+import telegramBotRoutes from './routes/telegram-bot'
+import { initTelegramBotHandler } from './services/telegram-bot-handler'
 import { cleanupExpiredGuestUsers } from './services/guest-cleanup'
 import { resetExpiredCredits } from './services/credit-reset'
 import { scanAndRecoverStuckFlowStates } from './services/flowstate-recovery'
@@ -108,6 +110,10 @@ app.use(rateLimit({
 // LINE Webhook 路由必須在 express.json() 之前註冊（簽名驗證需要 raw body）
 app.use('/api/line/webhook', express.raw({ type: 'application/json' }))
 app.use('/api/line/webhook', lineBotRoutes)
+
+// Telegram Webhook 路由（JSON 格式，使用 header secret 驗證）
+app.use('/api/telegram/webhook', express.json())
+app.use('/api/telegram/webhook', telegramBotRoutes)
 
 app.use(express.json({ limit: '50mb' }))
 
@@ -378,6 +384,15 @@ if (env.LINE_MESSAGING_CHANNEL_ACCESS_TOKEN) {
     orchestratorQueue,
   })
   logger.info('LINE Bot Handler 已初始化')
+}
+
+// 初始化 Telegram Bot Handler（注入 Bot Token + 隊列）
+if (env.TELEGRAM_BOT_TOKEN) {
+  initTelegramBotHandler({
+    botToken: env.TELEGRAM_BOT_TOKEN,
+    orchestratorQueue,
+  })
+  logger.info('Telegram Bot Handler 已初始化')
 }
 
 // 設置 Redis 到認證模組（用於 token 黑名單）

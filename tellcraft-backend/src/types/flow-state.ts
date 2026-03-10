@@ -153,8 +153,8 @@ export interface FlowState {
   consecutiveEmptyRounds?: number
   // 動態 Discovery 上限（根據需求複雜度自動調整）
   discoveryLimits?: { maxRounds: number; maxTotalQuestions: number }
-  // 消息來源（LINE Bot 或 Web）
-  messageSource?: 'line' | 'web'
+  // 消息來源（LINE Bot、Telegram Bot 或 Web）
+  messageSource?: 'line' | 'telegram' | 'web'
   // 統一語義閘門：連續拒絕計數（BDD ≥2 強制 accept；Design ≥2 顯示跳過）
   semanticRejectCount?: number
   // 自動修復計數（每個代碼版本最多 1 次，iteration 成功後重置）

@@ -11,6 +11,8 @@ import type { GeneratedComponent, DesignSystem, PartialCodeCallback } from '../s
 import { generateTailwindConfig } from '../services/uiux-generation'
 import { sendLineNotifyIfNeeded } from '../services/line-notify'
 import { sendLineFullMessage } from '../services/line-full-push'
+import { sendTelegramNotifyIfNeeded } from '../services/telegram-notify'
+import { sendTelegramFullMessage } from '../services/telegram-full-push'
 import { getCreditLimit } from '../config/plans'
 import { createLogger } from '../lib/logger'
 
@@ -182,6 +184,14 @@ export async function sendMessage(
 
   // LINE Bot 全量翻譯推送（僅 LINE 來源的對話，與上方 notify 互斥）
   sendLineFullMessage(conversationId, { ...options, content: normalizedContent })
+    .catch(() => {})
+
+  // Telegram 推播通知（里程碑，非 Bot 對話才推）
+  sendTelegramNotifyIfNeeded(conversationId, options.stage, normalizedContent)
+    .catch(() => {})
+
+  // Telegram Bot 全量翻譯推送（僅 Telegram 來源的對話）
+  sendTelegramFullMessage(conversationId, { ...options, content: normalizedContent })
     .catch(() => {})
 }
 

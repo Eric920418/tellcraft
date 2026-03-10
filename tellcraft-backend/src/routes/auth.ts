@@ -284,7 +284,7 @@ async function linkProviderToUser(
   name?: string,
   avatarUrl?: string
 ): Promise<{ success: boolean; error?: string }> {
-  if (!['google', 'line'].includes(provider)) {
+  if (!['google', 'line', 'telegram'].includes(provider)) {
     return { success: false, error: 'INVALID_PROVIDER' }
   }
 
@@ -941,7 +941,7 @@ router.post('/unlink/:provider', requireAuth, async (req, res) => {
     const userId = req.user!.id
     const provider = req.params.provider
 
-    if (!['google', 'line'].includes(provider)) {
+    if (!['google', 'line', 'telegram'].includes(provider)) {
       return res.status(400).json({ error: 'Invalid provider' })
     }
 
@@ -971,11 +971,90 @@ router.post('/unlink/:provider', requireAuth, async (req, res) => {
       [userId, provider]
     )
 
+    // Telegram 解綁後清除活躍對話映射（避免 Bot 殘留）
+    if (provider === 'telegram') {
+      await db.query(
+        'DELETE FROM telegram_active_conversations WHERE user_id = $1',
+        [userId]
+      )
+    }
+
     logger.info({ userId, provider }, 'User unlinked provider')
     res.json({ success: true })
   } catch (error) {
     logger.error({ err: error }, '/unlink error')
     res.status(500).json({ error: 'Failed to unlink provider' })
+  }
+})
+
+// ============================================================
+// Telegram Login Widget 綁定
+// ============================================================
+
+/**
+ * POST /auth/telegram/link-widget
+ * 前端 Telegram Login Widget callback 後呼叫此端點
+ * 驗證 Telegram hash，然後將 Telegram 帳號綁定到當前用戶
+ */
+router.post('/telegram/link-widget', requireAuth, async (req, res) => {
+  try {
+    const userId = req.user!.id
+    const tgData = req.body as {
+      id?: number | string
+      first_name?: string
+      last_name?: string
+      username?: string
+      photo_url?: string
+      auth_date?: number | string
+      hash?: string
+    }
+
+    if (!tgData.id || !tgData.hash || !tgData.auth_date) {
+      return res.status(400).json({ error: 'Missing required Telegram fields' })
+    }
+
+    const env = getEnv()
+    if (!env.TELEGRAM_BOT_TOKEN) {
+      return res.status(500).json({ error: 'Telegram not configured' })
+    }
+
+    // 驗證 auth_date（不超過 86400 秒前）
+    const authDate = Number(tgData.auth_date)
+    if (Date.now() / 1000 - authDate > 86400) {
+      return res.status(400).json({ error: 'AUTH_DATE_EXPIRED' })
+    }
+
+    // 驗證 hash：SHA256(BOT_TOKEN) 作為 HMAC key
+    const dataCheckArr = Object.entries(tgData)
+      .filter(([k]) => k !== 'hash')
+      .map(([k, v]) => `${k}=${v}`)
+      .sort()
+      .join('\n')
+
+    const secretKey = crypto.createHash('sha256').update(env.TELEGRAM_BOT_TOKEN).digest()
+    const expectedHash = crypto.createHmac('sha256', secretKey).update(dataCheckArr).digest('hex')
+
+    if (!crypto.timingSafeEqual(Buffer.from(tgData.hash, 'hex'), Buffer.from(expectedHash, 'hex'))) {
+      return res.status(400).json({ error: 'INVALID_HASH' })
+    }
+
+    // 將 Telegram id 轉為 string（防止 BigInt 精度問題）
+    const tgUserId = String(tgData.id)
+    const displayName = [tgData.first_name, tgData.last_name].filter(Boolean).join(' ') || tgData.username
+
+    const result = await linkProviderToUser(
+      userId, 'telegram', tgUserId, `${tgUserId}@telegram.tellcraft.app`, displayName, tgData.photo_url
+    )
+
+    if (!result.success) {
+      return res.status(400).json({ error: result.error })
+    }
+
+    logger.info({ userId, tgUserId }, 'Telegram linked to user')
+    res.json({ success: true, provider: 'telegram' })
+  } catch (error) {
+    logger.error({ err: error }, '/telegram/link-widget error')
+    res.status(500).json({ error: 'Failed to link Telegram' })
   }
 })
 

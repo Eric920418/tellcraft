@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useSearchParams } from 'next/navigation'
 import { useRouter } from '@/i18n/navigation'
 import { motion } from 'framer-motion'
@@ -23,9 +23,13 @@ interface ProviderInfo {
 const PROVIDER_CONFIG: Record<string, { label: string; icon: string; color: string }> = {
   google: { label: 'Google', icon: 'G', color: '#4285F4' },
   line: { label: 'LINE', icon: 'L', color: '#06C755' },
+  telegram: { label: 'Telegram', icon: 'T', color: '#26A5E4' },
 }
 
-const ALL_PROVIDERS = ['google', 'line']
+const ALL_PROVIDERS = ['google', 'line', 'telegram']
+
+// NEXT_PUBLIC_TELEGRAM_BOT_USERNAME 由 .env.local 提供
+const TELEGRAM_BOT_USERNAME = process.env.NEXT_PUBLIC_TELEGRAM_BOT_USERNAME || ''
 
 export default function AccountPage() {
   const router = useRouter()
@@ -39,6 +43,7 @@ export default function AccountPage() {
   const [user, setUser] = useState<{ name?: string; email?: string; avatarUrl?: string; preferredLanguage?: string | null } | null>(null)
   const [savingLanguage, setSavingLanguage] = useState(false)
   const [isMobile, setIsMobile] = useState(false)
+  const telegramWidgetRef = useRef<HTMLDivElement>(null)
 
   // 檢查 URL 參數中的綁定結果
   useEffect(() => {
@@ -121,6 +126,73 @@ export default function AccountPage() {
     mediaQuery.addListener(syncMobileState)
     return () => mediaQuery.removeListener(syncMobileState)
   }, [])
+
+  // Telegram Login Widget 注入
+  useEffect(() => {
+    const linkedProviderNames = providers.map(p => p.provider)
+    const isTelegramLinked = linkedProviderNames.includes('telegram')
+
+    if (isTelegramLinked || !TELEGRAM_BOT_USERNAME || !telegramWidgetRef.current) return
+
+    // 清除舊 script（避免重複注入）
+    telegramWidgetRef.current.innerHTML = ''
+
+    // window.onTelegramAuth callback
+    const w = window as typeof window & { onTelegramAuth?: (user: Record<string, unknown>) => void }
+    w.onTelegramAuth = async (tgUser: Record<string, unknown>) => {
+      const token = getAuthToken()
+      if (!token) return
+
+      try {
+        const res = await fetch('/api/vps/auth/telegram/link-widget', {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            id: String(tgUser.id),
+            first_name: tgUser.first_name,
+            last_name: tgUser.last_name,
+            username: tgUser.username,
+            photo_url: tgUser.photo_url,
+            auth_date: tgUser.auth_date,
+            hash: tgUser.hash,
+          }),
+        })
+
+        const data = await res.json()
+        if (res.ok && data.success) {
+          showToast(t('linkSuccess', { provider: 'Telegram' }), 'success')
+          fetchProviders()
+        } else {
+          const errorMessages: Record<string, string> = {
+            PROVIDER_ALREADY_LINKED: t('errorProviderAlreadyLinked'),
+            PROVIDER_ALREADY_BOUND: t('errorProviderAlreadyBound'),
+            INVALID_HASH: t('errorGeneric', { error: 'Invalid hash' }),
+            AUTH_DATE_EXPIRED: t('errorGeneric', { error: 'Auth expired' }),
+          }
+          showToast(errorMessages[data.error] || t('errorLinkFailed'), 'error')
+        }
+      } catch {
+        showToast(t('networkError'), 'error')
+      }
+    }
+
+    // 注入 Telegram Login Widget script
+    const script = document.createElement('script')
+    script.src = 'https://telegram.org/js/telegram-widget.js?22'
+    script.setAttribute('data-telegram-login', TELEGRAM_BOT_USERNAME)
+    script.setAttribute('data-size', 'medium')
+    script.setAttribute('data-onauth', 'onTelegramAuth(user)')
+    script.setAttribute('data-request-access', 'write')
+    script.async = true
+    telegramWidgetRef.current.appendChild(script)
+
+    return () => {
+      if (w.onTelegramAuth) delete w.onTelegramAuth
+    }
+  }, [providers, t])
 
   async function handleLanguageChange(lang: string) {
     const token = getAuthToken()
@@ -413,6 +485,39 @@ export default function AccountPage() {
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
             {unlinkedProviders.map(provider => {
               const config = PROVIDER_CONFIG[provider]
+
+              // Telegram 用 Login Widget，不用 <a> 連結
+              if (provider === 'telegram') {
+                return (
+                  <div
+                    key={provider}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      flexWrap: isMobile ? 'wrap' : 'nowrap',
+                      gap: 12,
+                      padding: '12px 16px',
+                      borderRadius: 8,
+                      border: `1px dashed var(--border-color)`,
+                    }}
+                  >
+                    <div style={{
+                      width: 36, height: 36, borderRadius: 8,
+                      background: `${config.color}20`, color: config.color,
+                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      fontSize: 16, fontWeight: 700, flexShrink: 0,
+                    }}>
+                      {config.icon}
+                    </div>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: 14, fontWeight: 500, marginBottom: 4 }}>{t('linkProvider', { provider: config.label })}</div>
+                      {/* Telegram Login Widget 注入容器 */}
+                      <div ref={telegramWidgetRef} />
+                    </div>
+                  </div>
+                )
+              }
+
               return (
                 <a
                   key={provider}

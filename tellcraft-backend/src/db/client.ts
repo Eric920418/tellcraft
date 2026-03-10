@@ -600,6 +600,108 @@ export async function getLineUserIdByConversation(conversationId: string): Promi
 }
 
 // ============================================================
+// Telegram 活躍對話映射（與 LINE 完全對應）
+// ============================================================
+
+interface TelegramActiveConversation {
+  telegram_user_id: string
+  user_id: string
+  conversation_id: string
+  project_id: string
+  mode: string
+}
+
+/**
+ * 查詢 Telegram 用戶的活躍對話
+ * tgUserId 傳 string，DB 欄位 BIGINT，用 $1::bigint 轉型
+ */
+export async function getTelegramActiveConversation(tgUserId: string): Promise<TelegramActiveConversation | null> {
+  return queryOne<TelegramActiveConversation>(
+    'SELECT * FROM telegram_active_conversations WHERE telegram_user_id = $1::bigint',
+    [tgUserId]
+  )
+}
+
+/**
+ * 設定/更新 Telegram 用戶的活躍對話
+ */
+export async function setTelegramActiveConversation(
+  tgUserId: string,
+  userId: string,
+  conversationId: string,
+  projectId: string,
+  mode: string = 'fast'
+) {
+  return query(
+    `INSERT INTO telegram_active_conversations (telegram_user_id, user_id, conversation_id, project_id, mode, created_at, updated_at)
+     VALUES ($1::bigint, $2, $3, $4, $5, NOW(), NOW())
+     ON CONFLICT (telegram_user_id) DO UPDATE SET
+       user_id = EXCLUDED.user_id,
+       conversation_id = EXCLUDED.conversation_id,
+       project_id = EXCLUDED.project_id,
+       mode = EXCLUDED.mode,
+       updated_at = NOW()`,
+    [tgUserId, userId, conversationId, projectId, mode]
+  )
+}
+
+/**
+ * 刪除 Telegram 用戶的活躍對話（用於建新專案時清除）
+ */
+export async function deleteTelegramActiveConversation(tgUserId: string) {
+  return query(
+    'DELETE FROM telegram_active_conversations WHERE telegram_user_id = $1::bigint',
+    [tgUserId]
+  )
+}
+
+/**
+ * 透過 Telegram userId 查找系統用戶
+ */
+export async function findUserByTelegramId(tgUserId: string): Promise<{ id: string; email: string; name: string | null } | null> {
+  // 優先查 user_providers 表
+  const result = await queryOne<{ id: string; email: string; name: string | null }>(
+    `SELECT u.id, u.email, u.name FROM user_providers up
+     JOIN users u ON up.user_id = u.id
+     WHERE up.provider = 'telegram' AND up.provider_id = $1`,
+    [tgUserId]
+  )
+  if (result) return result
+
+  // 向後相容：查 users 表
+  return queryOne<{ id: string; email: string; name: string | null }>(
+    `SELECT id, email, name FROM users WHERE provider = 'telegram' AND provider_id = $1`,
+    [tgUserId]
+  )
+}
+
+/**
+ * 透過 conversationId 查找 Telegram 用戶的 provider_id（BIGINT string）
+ * JOIN user_providers WHERE provider='telegram'，降級查 users.provider='telegram'
+ */
+export async function getTelegramUserIdByConversation(conversationId: string): Promise<string | null> {
+  // 優先查 user_providers 表
+  const result = await queryOne<{ provider_id: string }>(
+    `SELECT up.provider_id FROM conversations c
+     JOIN projects p ON c.project_id = p.id
+     JOIN user_providers up ON p.user_id = up.user_id
+     WHERE c.id = $1 AND up.provider = 'telegram'`,
+    [conversationId]
+  )
+  if (result) return result.provider_id
+
+  // 向後相容：查 users 表
+  const fallback = await queryOne<{ provider_id: string }>(
+    `SELECT u.provider_id FROM conversations c
+     JOIN projects p ON c.project_id = p.id
+     JOIN users u ON p.user_id = u.id
+     WHERE c.id = $1 AND u.provider = 'telegram' AND u.provider_id IS NOT NULL`,
+    [conversationId]
+  )
+  return fallback?.provider_id ?? null
+}
+
+// ============================================================
 // 連接管理
 // ============================================================
 

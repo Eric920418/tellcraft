@@ -52,6 +52,10 @@ const envSchema = z.object({
   CLOUDFLARE_ACCOUNT_ID: z.string().optional(),
   PORKBUN_API_KEY: z.string().optional(),
   PORKBUN_SECRET_KEY: z.string().optional(),
+  // Telegram Bot
+  TELEGRAM_BOT_TOKEN: z.string().optional(),
+  TELEGRAM_BOT_USERNAME: z.string().optional(), // 不含 @，Login Widget 必須
+  TELEGRAM_WEBHOOK_SECRET: z.string().optional(), // Header 驗證密鑰
 })
 
 // ============================================================
