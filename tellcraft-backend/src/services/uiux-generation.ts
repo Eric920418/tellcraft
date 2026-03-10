@@ -1817,13 +1817,14 @@ export function repairBracketLookupAccess(
     const afterDot = fixed.replace(dotRegex, `${varName}?.`)
     if (afterDot !== fixed) { fixed = afterDot; changed = true }
 
-    // 修復 2：varName[expr]（未加 ?.）→ varName?.[expr]（排除賦值左側）
+    // 修復 2：varName[expr]（未加 ?.）→ varName?.[expr]（排除宣告 varName 自己的那行）
     const bracketRegex = new RegExp(`(?<!\\?)\\b${varName}\\[(?!\\s*$)`, 'g')
     const afterBracket = fixed.replace(bracketRegex, (match, offset) => {
-      // 排除宣告行本身（const varName = xxx[...]）
+      // 只排除宣告 varName 自己的行（const varName = xxx[...]），不排除其他行
       const lineStart = fixed.lastIndexOf('\n', offset) + 1
       const lineText = fixed.slice(lineStart, offset + match.length)
-      if (/(?:const|let)\s+\w+\s*=/.test(lineText)) return match
+      const declPattern = new RegExp(`(?:const|let)\\s+${varName}\\s*=`)
+      if (declPattern.test(lineText)) return match
       return `${varName}?.[`
     })
     if (afterBracket !== fixed) { fixed = afterBracket; changed = true }
