@@ -898,10 +898,10 @@ export async function executeDeployment(
       [projectId, deployment.id, deploymentUrl, finalStatus === 'READY' ? 'success' : 'deploying']
     )
 
-    // 更新專案狀態
+    // 更新專案狀態與 URL
     await db.query(
-      `UPDATE projects SET status = 'deployed', updated_at = NOW() WHERE id = $1`,
-      [projectId]
+      `UPDATE projects SET status = 'deployed', vercel_url = $2, updated_at = NOW() WHERE id = $1`,
+      [projectId, deploymentUrl]
     )
 
     // 7. 將 build 修復後的代碼同步回 project_files（確保預覽和部署一致）
