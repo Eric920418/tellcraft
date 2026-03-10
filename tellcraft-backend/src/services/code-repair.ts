@@ -56,6 +56,48 @@ export async function repairProjectFiles(projectId: string): Promise<number> {
   return repairedCount
 }
 
+type CodeFile = { path: string; content: string; description: string }
+
+/**
+ * 對 messages 陣列中所有 code_preview richContent 套用 fixer（純記憶體）
+ * 回傳 { messages: 修復後的陣列, changed: 是否有任何改動 }
+ */
+export function repairCodePreviewInMessages(messages: unknown[]): { messages: unknown[]; changed: boolean } {
+  let anyChanged = false
+
+  const repaired = messages.map(msg => {
+    const m = msg as Record<string, unknown>
+    const rc = m.richContent as { type?: string; data?: Record<string, unknown> } | undefined
+    if (rc?.type !== 'code_preview' || !rc.data) return msg
+
+    const data = rc.data
+    let dataChanged = false
+
+    const repairFiles = (files: unknown): { files: CodeFile[]; changed: boolean } => {
+      if (!Array.isArray(files)) return { files: [], changed: false }
+      let fc = false
+      const result = (files as CodeFile[]).map(f => {
+        const { content, changed } = applyFixersToContent(f.path, f.content)
+        if (changed) { fc = true; return { ...f, content } }
+        return f
+      })
+      return { files: result, changed: fc }
+    }
+
+    const { files: pages, changed: pc } = repairFiles(data.pages)
+    if (pc) dataChanged = true
+
+    const { files: components, changed: cc } = repairFiles(data.components)
+    if (cc) dataChanged = true
+
+    if (!dataChanged) return msg
+    anyChanged = true
+    return { ...m, richContent: { ...rc, data: { ...data, pages, components } } }
+  })
+
+  return { messages: repaired, changed: anyChanged }
+}
+
 /**
  * 啟動時一次性修復所有 project_files
  * 用 Redis key 防止重複執行（版本號遞增時重跑）

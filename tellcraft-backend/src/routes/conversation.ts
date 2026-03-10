@@ -8,6 +8,7 @@ import { sendMessageSchema, replyMessageSchema } from '../schemas/conversation'
 import * as db from '../db/client'
 import { getCreditLimit, isCreditExhausted, CREDIT_LIMIT_ERROR_CODE } from '../config/plans'
 import { acquireUserActiveLock, releaseUserActiveLock, USER_ACTIVE_TTL_SECONDS } from '../services/conversation-lock'
+import { repairCodePreviewInMessages } from '../services/code-repair'
 import { createLogger } from '../lib/logger'
 
 const logger = createLogger('conversation')
@@ -471,8 +472,11 @@ router.get('/:id/messages', optionalAuth, async (req, res) => {
       }
     }
 
+    // 對 code_preview richContent 套用 in-memory 修復（確保舊對話也能正確渲染）
+    const { messages: fixedMessages, changed: messagesChanged } = repairCodePreviewInMessages(conversation.messages)
+
     res.json({
-      messages: conversation.messages,
+      messages: fixedMessages,
       updatedAt: conversation.updated_at,
       hasChanges: true,
       currentTaskId: activeTask?.id || activeSessionId,
@@ -480,6 +484,13 @@ router.get('/:id/messages', optionalAuth, async (req, res) => {
       isComplete: conversation.spec_complete && !activeTask && !activeSessionId,
       streamingPreview,
     })
+
+    // 背景存回 DB，讓後續輪詢直接拿到修復版本
+    if (messagesChanged) {
+      db.updateConversationMessages(conversationId, fixedMessages).catch(err =>
+        logger.warn({ err, conversationId }, 'repair messages DB update failed')
+      )
+    }
   } catch (error) {
     logger.error({ err: error }, '取得消息失敗')
     res.status(500).json({ error: 'Failed to get messages' })
