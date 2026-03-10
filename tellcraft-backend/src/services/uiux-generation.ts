@@ -1365,6 +1365,8 @@ ${getMoodSummary(designSystem.mood)}（完整風格指引已在生成指令中�
 // 檔案內容
 \`\`\`
 
+⚠️ code fence 規則：每個 code block 的第一行必須直接是代碼（import、'use client'、const 等），禁止在代碼前加任何說明文字（如 "Here is the..."、"This component..."）。
+
 ## 顏色使用規則
 - 只使用 Design System 定義的顏色
 - 使用 Tailwind 自訂顏色 utility：bg-primary, text-foreground, border-border 等（已在 tailwind.config 中配置）
@@ -1745,6 +1747,8 @@ ${contextLines.join('\n')}
 \`\`\`ts:path/to/util.ts
 // 內容
 \`\`\`
+
+⚠️ code fence 規則：每個 code block 的第一行必須直接是代碼，禁止在代碼前加任何說明文字。
 
 請生成所有缺失的檔案。`
 
@@ -3158,6 +3162,7 @@ ${existingCodeStr}
 5. 表單輸入 focus 動畫
 
 ⚠️ 自給自足規則：如果你新增了 import 引用內部模組（@/ 或 ./），你必須同時輸出該檔案。禁止引用不存在的內部模組。
+⚠️ code fence 規則：每個 code block 的第一行必須直接是代碼，禁止在代碼前加任何說明文字。
 
 請輸出完整的修改後代碼，保持相同的檔案路徑格式。`
 
@@ -3337,6 +3342,7 @@ ${existingCodeStr}
 ⚠️ 選擇性輸出（重要效率規則）：
 只輸出你實際添加了響應式 class 的檔案。沒有修改的檔案完全省略（不輸出 code block）。
 若你新增了 import 引用內部模組（@/ 或 ./），你必須同時輸出該檔案。
+⚠️ code fence 規則：每個 code block 的第一行必須直接是代碼，禁止在代碼前加任何說明文字。
 保持相同的檔案路徑格式。`
 
   const response = await callClaude(
@@ -4520,6 +4526,7 @@ ${targetPreviewRoute ? `
 \`\`\`
 
 未修改的檔案不需要輸出。
+⚠️ code fence 規則：每個 code block 的第一行必須直接是代碼，禁止在代碼前加任何說明文字（如 "Here is..."、"This component..."）。
 ${imageUrls?.length ? `
 ## 用戶附加的圖片（${imageUrls.length} 張）
 用戶附加了參考圖片。請根據用戶的文字指示決定如何使用：

@@ -90,10 +90,6 @@
     "almostDone": "Almost done...",
     "attachImage": "Attach image",
     "attachedImages": "{count} image(s) attached",
-    "completionAlertOn": "Background alert on",
-    "completionAlertOff": "Background alert off",
-    "completionAlertEnable": "Enable AI completion alert",
-    "completionAlertDisable": "Disable AI completion alert",
     "completionAlertBadge": "Response Ready",
     "completionAlertToast": "AI has finished responding"
   },

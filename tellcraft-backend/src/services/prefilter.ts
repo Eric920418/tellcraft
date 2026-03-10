@@ -337,6 +337,12 @@ export async function checkBuildRelevance(
   message: string,
   context?: { userId?: string; conversationId?: string }
 ): Promise<RelevanceCheckResult> {
+  // Layer 0: 「做/建 + 任意詞(1-15字) + 網站/官網/網頁/頁面」→ 直接放行（含 typo，零成本）
+  const BUILD_PATTERN = /(?:做|建|幫我做|建立|打造|製作|開發|做一個|建一個).{1,15}(?:網站|官網|網頁|頁面)/
+  if (BUILD_PATTERN.test(message)) {
+    return { relevant: true }
+  }
+
   const lower = message.toLowerCase()
   const isChinese = /[\u4e00-\u9fff\u3400-\u4dbf]/.test(message)
 
@@ -350,7 +356,23 @@ export async function checkBuildRelevance(
   // Layer 2/3: 弱信號或無信號 → 微型 Haiku 判斷（相關性 + 具體性）
   try {
     const systemPrompt = hasWeakSignal
-      ? '用戶想用介面建站工具。判斷描述是否具體到能知道「建什麼類型的網站」。同時檢查內容是否涉及有害/非法/成人/仇恨/隱私侵犯（正常的醫療資訊網站是允許的，只有診斷/測驗工具才算有害）。只回覆 JSON:\n- 夠具體：{"relevant":true}\n- 相關但太模糊（如「做一個很酷的東西」「建一個網站」）：{"relevant":true,"vague":true}\n- 與建網站無關：{"relevant":false}\n- 內容不當：{"relevant":false,"policy":"harmful|illegal|adult|hate|privacy"}'
+      ? `用戶想用介面建站工具。判斷描述是否具體到能知道「建什麼類型的網站」。同時檢查內容是否涉及有害/非法/成人/仇恨/隱私侵犯（正常的醫療資訊網站是允許的，只有診斷/測驗工具才算有害）。
+
+具體的例子（→ {"relevant":true}）：
+- 有產業詞：「做咖啡廳網站」「餐廳訂位系統」「健身房官網」「卡啡廳網站」（含錯字也算）
+- 有功能描述：「有菜單和預約的網站」「電商購物平台」
+- 有產品類型：「個人作品集」「SaaS landing page」
+- 即使有錯字或縮寫，只要能辨識產業/功能 = 具體
+
+模糊的例子（→ {"relevant":true,"vague":true}）：
+- 純泛用：「做一個很酷的網站」「建一個網頁」「做個很棒的東西」
+- 完全不知道建什麼：「做一個」「建立一個系統」（沒有領域詞）
+
+只回覆 JSON:
+- 夠具體：{"relevant":true}
+- 相關但太模糊：{"relevant":true,"vague":true}
+- 與建網站無關：{"relevant":false}
+- 內容不當：{"relevant":false,"policy":"harmful|illegal|adult|hate|privacy"}`
       : '判斷用戶訊息是否與「建立網站/應用/數位產品」相關。同時檢查內容是否涉及有害/非法/成人/仇恨/隱私侵犯。只回覆 JSON: {"relevant":true} 或 {"relevant":false} 或 {"relevant":false,"policy":"harmful|illegal|adult|hate|privacy"}'
 
     const resp = await fetch('https://api.anthropic.com/v1/messages', {

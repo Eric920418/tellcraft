@@ -876,45 +876,6 @@ export default function ChatSection({
   const formulationProgress = lastMessage?.progress
   const formulationCurrentStage = Math.min(4, formulationProgress?.current || 0)
 
-  const alertToggleButton = (
-    <button
-      type="button"
-      onClick={() => completionAlert.setIsEnabled(!completionAlert.isEnabled)}
-      aria-pressed={completionAlert.isEnabled}
-      title={completionAlert.isEnabled ? tChat('completionAlertDisable') : tChat('completionAlertEnable')}
-      className="completion-alert-toggle"
-      style={{
-        display: 'inline-flex',
-        alignItems: 'center',
-        gap: 8,
-        height: 34,
-        padding: '0 12px',
-        borderRadius: 999,
-        border: `1px solid ${completionAlert.isEnabled ? 'rgba(16, 185, 129, 0.24)' : 'var(--border-color)'}`,
-        background: completionAlert.isEnabled ? 'rgba(16, 185, 129, 0.08)' : 'rgba(148, 163, 184, 0.08)',
-        color: completionAlert.isEnabled ? '#047857' : 'var(--gray-500)',
-        fontSize: 12,
-        fontWeight: 600,
-        letterSpacing: '0.01em',
-        cursor: 'pointer',
-        transition: 'background 160ms ease, border-color 160ms ease, color 160ms ease',
-      }}
-    >
-      <span
-        aria-hidden="true"
-        style={{
-          width: 8,
-          height: 8,
-          borderRadius: '50%',
-          background: completionAlert.isEnabled ? '#10B981' : 'rgba(100, 116, 139, 0.7)',
-          boxShadow: completionAlert.isEnabled ? '0 0 0 4px rgba(16, 185, 129, 0.14)' : 'none',
-          transition: 'background 160ms ease, box-shadow 160ms ease',
-        }}
-      />
-      {completionAlert.isEnabled ? tChat('completionAlertOn') : tChat('completionAlertOff')}
-    </button>
-  )
-
   return (
     <>
     {/* Mobile Preview Modal */}
@@ -1044,9 +1005,6 @@ export default function ChatSection({
                   </button>
                   <div style={{ width: 1, height: 20, background: 'var(--border-color)' }} />
                   <span style={{ fontSize: 14, fontWeight: 500 }}>{isBddSplitMode ? tChat('bddSplitTitle') : tChat('uiuxSplitTitle')}</span>
-                  <div style={{ marginLeft: 'auto' }}>
-                    {alertToggleButton}
-                  </div>
                 </div>
                 <ChatMessageList
                   messages={messages}
@@ -1265,7 +1223,6 @@ export default function ChatSection({
 
             {/* Right: Theme + User */}
             <div style={{ display: 'flex', alignItems: 'center', gap: 16, flexShrink: 0 }}>
-              <span style={{ display: 'flex', alignItems: 'center' }}>{alertToggleButton}</span>
               <span className="header-theme-toggle" style={{ display: 'flex', alignItems: 'center', gap: 8 }}><AnimatedThemeToggler /><LocaleSwitcher /></span>
               <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
                 {(auth.isAuthenticated || session.sessionInfo?.isAuthenticated) ? (

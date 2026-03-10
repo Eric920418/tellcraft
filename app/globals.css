@@ -663,8 +663,7 @@ textarea {
   .chat-header .user-name,
   .chat-header .header-dashboard-btn,
   .chat-header .header-theme-toggle,
-  .chat-header .header-avatar,
-  .chat-header .completion-alert-toggle {
+  .chat-header .header-avatar {
     display: none;
   }
 

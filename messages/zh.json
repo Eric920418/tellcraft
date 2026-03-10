@@ -90,10 +90,6 @@
     "almostDone": "即將完成...",
     "attachImage": "附加圖片",
     "attachedImages": "已附加 {count} 張圖片",
-    "completionAlertOn": "背景提醒 開",
-    "completionAlertOff": "背景提醒 關",
-    "completionAlertEnable": "開啟 AI 完成提醒",
-    "completionAlertDisable": "關閉 AI 完成提醒",
     "completionAlertBadge": "回答完成",
     "completionAlertToast": "AI 已回答完畢"
   },

@@ -3,7 +3,6 @@
 import { useEffect, useRef, useState } from 'react'
 import type { Message } from '@/app/types/chat'
 
-const COMPLETION_ALERT_KEY = 'tellcraft_completion_alert_enabled'
 const TOAST_DURATION_MS = 4000
 
 interface ActiveTurn {
@@ -50,13 +49,11 @@ export function useCompletionAlert({
   messages: Message[]
   toastMessage: string
 }) {
-  const [isEnabled, setIsEnabled] = useState(true)
   const [toast, setToast] = useState<CompletionToast | null>(null)
 
   const activeTurnRef = useRef<ActiveTurn | null>(null)
   const audioContextRef = useRef<AudioContext | null>(null)
   const toastTimerRef = useRef<NodeJS.Timeout | null>(null)
-  const hasLoadedPreferenceRef = useRef(false)
   const currentConversationIdRef = useRef<string | undefined>(conversationId)
   const isHiddenRef = useRef(false)
   const lastArmedUserMessageIdRef = useRef<string | null>(null)
@@ -77,19 +74,6 @@ export function useCompletionAlert({
     document.addEventListener('visibilitychange', handleVisibilityChange)
     return () => document.removeEventListener('visibilitychange', handleVisibilityChange)
   }, [])
-
-  useEffect(() => {
-    if (typeof window === 'undefined') return
-
-    const stored = window.localStorage.getItem(COMPLETION_ALERT_KEY)
-    setIsEnabled(stored !== 'false')
-    hasLoadedPreferenceRef.current = true
-  }, [])
-
-  useEffect(() => {
-    if (!hasLoadedPreferenceRef.current || typeof window === 'undefined') return
-    window.localStorage.setItem(COMPLETION_ALERT_KEY, String(isEnabled))
-  }, [isEnabled])
 
   useEffect(() => {
     if (typeof window === 'undefined') return
@@ -185,7 +169,7 @@ export function useCompletionAlert({
 
     activeTurnRef.current = null
 
-    if (!hasNewAssistantMessage || !isEnabled || !isHiddenRef.current) {
+    if (!hasNewAssistantMessage || !isHiddenRef.current) {
       return
     }
 
@@ -245,15 +229,13 @@ export function useCompletionAlert({
       message: toastMessage,
       waitingForVisibility: isHiddenRef.current,
     })
-  }, [conversationId, isEnabled, isTyping, messages, toastMessage])
+  }, [conversationId, isTyping, messages, toastMessage])
 
   useEffect(() => () => {
     if (toastTimerRef.current) clearTimeout(toastTimerRef.current)
   }, [])
 
   return {
-    isEnabled,
-    setIsEnabled,
     toast,
     dismissToast: () => setToast(null),
   }
