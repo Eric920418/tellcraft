@@ -955,7 +955,9 @@ router.get('/:id/download-code', requireAuth, requirePlan('creator', 'pro', 'bus
     }
 
     // 在記憶體組裝 ZIP，再一次送出（避免 pipe + chunked 的 streaming 複雜性）
-    const safeName = project.name.replace(/[^a-z0-9\u4e00-\u9fff-]/gi, '-').replace(/-+/g, '-').slice(0, 50)
+    // ASCII-only fallback + RFC 5987 UTF-8 filename（支援中文專案名稱）
+    const asciiName = project.name.replace(/[^a-z0-9-]/gi, '-').replace(/-+/g, '-').replace(/^-|-$/g, '').slice(0, 50) || 'project'
+    const encodedName = encodeURIComponent(`${project.name.slice(0, 50)}-code.zip`)
 
     const archive = archiver('zip', { zlib: { level: 6 } })
     const chunks: Buffer[] = []
@@ -975,7 +977,7 @@ router.get('/:id/download-code', requireAuth, requirePlan('creator', 'pro', 'bus
 
     const zipBuffer = Buffer.concat(chunks)
     res.setHeader('Content-Type', 'application/zip')
-    res.setHeader('Content-Disposition', `attachment; filename="${safeName}-code.zip"`)
+    res.setHeader('Content-Disposition', `attachment; filename="${asciiName}-code.zip"; filename*=UTF-8''${encodedName}`)
     res.setHeader('Content-Length', String(zipBuffer.length))
     res.send(zipBuffer)
   } catch (error) {
