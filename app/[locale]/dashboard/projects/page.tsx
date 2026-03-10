@@ -158,9 +158,8 @@ export default function ProjectsPage() {
       }
       const result = await getConversationMessages({ conversationId: project.latestConversationId, token })
       if (result.success && result.data) {
-        const msgs = result.data.messages
-          .filter((m) => m.role !== ('system' as string))
-          .slice(-4)
+        const firstUserMsg = result.data.messages.find((m) => m.role === 'user')
+        const msgs = firstUserMsg ? [firstUserMsg] : []
         messageCache.current.set(projectId, msgs)
         setHoverMessages(msgs)
         setHoverLoading(false)

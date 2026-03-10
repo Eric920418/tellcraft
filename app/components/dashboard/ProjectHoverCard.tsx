@@ -86,34 +86,39 @@ export default function ProjectHoverCard({
   useEffect(() => {
     const vw = window.innerWidth
     const vh = window.innerHeight
+    const estimatedHeight = 260
 
     const rightLeft = anchorRect.right + CARD_OFFSET
     const leftLeft = anchorRect.left - CARD_WIDTH - CARD_OFFSET
 
     let left: number
-    if (rightLeft + CARD_WIDTH <= vw - 8) {
-      left = rightLeft
-    } else if (leftLeft >= 8) {
-      left = leftLeft
-    } else {
-      // 兩側都放不下（全寬表格），釘在 viewport 右側邊緣
-      left = vw - CARD_WIDTH - 8
-    }
+    let top: number
 
-    const estimatedHeight = 300
-    let top = anchorRect.top
-    if (top + estimatedHeight > vh - 8) {
-      top = vh - estimatedHeight - 8
+    if (rightLeft + CARD_WIDTH <= vw - 8) {
+      // 右側有空間
+      left = rightLeft
+      top = Math.min(anchorRect.top, vh - estimatedHeight - 8)
+      top = Math.max(8, top)
+    } else if (leftLeft >= 8) {
+      // 左側有空間
+      left = leftLeft
+      top = Math.min(anchorRect.top, vh - estimatedHeight - 8)
+      top = Math.max(8, top)
+    } else {
+      // 全寬表格：浮在 row 下方，不遮住當前 row 的按鈕
+      left = vw - CARD_WIDTH - 8
+      const belowTop = anchorRect.bottom + 6
+      top = belowTop + estimatedHeight <= vh - 8
+        ? belowTop
+        : anchorRect.top - estimatedHeight - 6
+      top = Math.max(8, top)
     }
-    if (top < 8) top = 8
 
     setPos({ left, top })
   }, [anchorRect])
 
   const url = project.customDomain || project.vercelUrl
-  const displayMessages = messages
-    ? messages.filter((m) => m.role !== ('system' as string)).slice(-4)
-    : []
+  const firstPrompt = messages?.[0]?.content ?? null
 
   return (
     <motion.div
@@ -199,7 +204,7 @@ export default function ProjectHoverCard({
         )}
       </div>
 
-      {/* Messages */}
+      {/* First Prompt */}
       <div style={{ padding: '12px 16px' }}>
         <div
           style={{
@@ -208,60 +213,34 @@ export default function ProjectHoverCard({
             color: 'var(--gray-400)',
             textTransform: 'uppercase',
             letterSpacing: '0.05em',
-            marginBottom: 10,
+            marginBottom: 8,
           }}
         >
-          最近對話
+          初始需求
         </div>
 
         {isLoading ? (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-            <SkeletonLine width="85%" />
-            <SkeletonLine width="70%" />
-            <SkeletonLine width="90%" />
-          </div>
-        ) : displayMessages.length === 0 ? (
-          <p style={{ fontSize: 12, color: 'var(--gray-300)', margin: 0 }}>尚無對話記錄</p>
-        ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-            {displayMessages.map((msg) => (
-              <div
-                key={msg.id}
-                style={{
-                  display: 'flex',
-                  flexDirection: msg.role === 'user' ? 'row-reverse' : 'row',
-                  alignItems: 'flex-start',
-                  gap: 6,
-                }}
-              >
-                <span
-                  style={{
-                    fontSize: 10,
-                    fontWeight: 500,
-                    color: msg.role === 'user' ? 'var(--black)' : 'var(--gray-400)',
-                    whiteSpace: 'nowrap',
-                    marginTop: 2,
-                  }}
-                >
-                  {msg.role === 'user' ? '你' : 'AI'}
-                </span>
-                <span
-                  style={{
-                    fontSize: 12,
-                    color: msg.role === 'user' ? 'var(--gray-700)' : 'var(--gray-500)',
-                    lineHeight: 1.5,
-                    textAlign: msg.role === 'user' ? 'right' : 'left',
-                    overflow: 'hidden',
-                    display: '-webkit-box',
-                    WebkitBoxOrient: 'vertical',
-                    WebkitLineClamp: 2,
-                  }}
-                >
-                  {msg.content.length > 80 ? msg.content.slice(0, 80) + '...' : msg.content}
-                </span>
-              </div>
-            ))}
+            <SkeletonLine width="90%" />
+            <SkeletonLine width="75%" />
           </div>
+        ) : firstPrompt ? (
+          <p
+            style={{
+              fontSize: 12,
+              color: 'var(--gray-600)',
+              lineHeight: 1.6,
+              margin: 0,
+              display: '-webkit-box',
+              WebkitBoxOrient: 'vertical',
+              WebkitLineClamp: 4,
+              overflow: 'hidden',
+            }}
+          >
+            {firstPrompt}
+          </p>
+        ) : (
+          <p style={{ fontSize: 12, color: 'var(--gray-300)', margin: 0 }}>尚無對話記錄</p>
         )}
       </div>
     </motion.div>
