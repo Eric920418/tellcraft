@@ -5,6 +5,7 @@ import { validateBody } from '../middleware/validate'
 import { createProjectSchema, templateOverridesSchema, batchDeleteSchema } from '../schemas/project'
 import * as db from '../db/client'
 import { toVercelSlug, deleteVercelProject } from '../services/deployer'
+import { repairProjectFiles } from '../services/code-repair'
 import { getProjectLimit } from '../config/plans'
 import { createLogger } from '../lib/logger'
 
@@ -1028,6 +1029,11 @@ router.get('/:id/files', requireAuth, async (req, res) => {
       })),
       total: files.length,
     })
+
+    // 懶修復：fire-and-forget，不影響回應時間
+    repairProjectFiles(id).catch(err =>
+      logger.warn({ err, projectId: id }, 'lazy project repair failed')
+    )
   } catch (error) {
     logger.error({ err: error }, '取得專案檔案失敗')
     res.status(500).json({ error: 'Failed to get project files' })
