@@ -43,6 +43,7 @@ function HomeContent() {
   const [anonymousId, setAnonymousId] = useState<string | undefined>(undefined)
   const [buildMode, setBuildMode] = useState<'fast' | 'fine'>('fast')
   const [showGuestLimitModal, setShowGuestLimitModal] = useState(false)
+  const [openedFromUrl, setOpenedFromUrl] = useState(false)
   const [recentProjects, setRecentProjects] = useState<Array<{ id: string; name: string; status: string; latestConversationId: string | null }>>([])
 
   // VPS JWT Auth Hook
@@ -80,6 +81,7 @@ function HomeContent() {
     if (conversationId) {
       setResumeConversationId(conversationId)
       setIsChatActive(true)
+      setOpenedFromUrl(true)
     }
   }, [searchParams])
 
@@ -182,12 +184,13 @@ function HomeContent() {
     setHeroInput('')
     setInitialMessage('')
     setResumeConversationId(null)
-    if (window.history.state?.tellcraftChat) {
+    setOpenedFromUrl(false)
+    if (window.history.state?.tellcraftChat || openedFromUrl) {
       window.history.back()
     } else {
       window.history.replaceState({}, '', window.location.pathname)
     }
-  }, [])
+  }, [openedFromUrl])
 
   const handleFocusInput = useCallback(() => {
     const input = document.querySelector('textarea')
