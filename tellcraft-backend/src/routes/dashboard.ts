@@ -12,6 +12,7 @@ import type Redis from 'ioredis'
 import { getCreditLimit, isFairUsePlan } from '../config/plans'
 import { cached, invalidateCache } from '../lib/cache'
 import { createLogger } from '../lib/logger'
+import { generateThumbnailsForSeedTemplates } from '../services/thumbnail-recapture'
 
 const logger = createLogger('dashboard')
 
@@ -1012,6 +1013,21 @@ router.get('/job-failures', requireAdmin, async (req: Request, res: Response) =>
     logger.error({ err: error }, '獲取 job failures 失敗')
     res.status(500).json({ error: '獲取 job failures 失敗' })
   }
+})
+
+/**
+ * POST /admin/regenerate-thumbnails
+ * 手動觸發 seed 模板縮圖重新生成（fire-and-forget）
+ */
+router.post('/admin/regenerate-thumbnails', requireAdmin, async (req: Request, res: Response) => {
+  const rows = await query<{ count: string }>(
+    `SELECT COUNT(*) as count FROM templates WHERE thumbnail_url IS NULL AND is_active = true AND vercel_url IS NULL`,
+    []
+  )
+  const pending = parseInt(rows.rows[0]?.count || '0', 10)
+  // fire-and-forget
+  generateThumbnailsForSeedTemplates().catch(err => logger.error({ err }, '手動觸發縮圖生成失敗'))
+  res.json({ success: true, message: `已觸發縮圖生成，待處理：${pending} 筆` })
 })
 
 export default router
