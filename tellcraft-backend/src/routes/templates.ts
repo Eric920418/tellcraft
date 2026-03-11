@@ -104,7 +104,7 @@ router.post('/submit/preflight', requireAuth, validateBody(templateSubmitPreflig
 
     const hasPages = filesResult.rows.some(f => f.file_type === 'page')
     const hasStyles = filesResult.rows.some(f => f.file_type === 'style')
-    const isDeployed = project.status === 'deployed' && !!project.vercel_url
+    const isDeployed = project.status === 'deployed'
 
     // 重複檢查
     const existing = await queryOne<{ id: string }>(
