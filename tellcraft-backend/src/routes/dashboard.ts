@@ -1020,6 +1020,11 @@ router.get('/job-failures', requireAdmin, async (req: Request, res: Response) =>
  * 手動觸發 seed 模板縮圖重新生成（fire-and-forget）
  */
 router.post('/admin/regenerate-thumbnails', requireAdmin, async (req: Request, res: Response) => {
+  // Clear existing thumbnails so they will be regenerated (old ones may have broken CJK rendering)
+  await query(
+    `UPDATE templates SET thumbnail_url = NULL WHERE is_active = true AND source_project_id IS NULL`,
+    []
+  )
   const rows = await query<{ count: string }>(
     `SELECT COUNT(*) as count FROM templates WHERE thumbnail_url IS NULL AND is_active = true AND source_project_id IS NULL`,
     []
@@ -1027,7 +1032,7 @@ router.post('/admin/regenerate-thumbnails', requireAdmin, async (req: Request, r
   const pending = parseInt(rows.rows[0]?.count || '0', 10)
   // fire-and-forget
   generateThumbnailsForSeedTemplates().catch(err => logger.error({ err }, '手動觸發縮圖生成失敗'))
-  res.json({ success: true, message: `已觸發縮圖生成，待處理：${pending} 筆` })
+  res.json({ success: true, message: `已清除舊縮圖並觸發重新生成，待處理：${pending} 筆` })
 })
 
 export default router
