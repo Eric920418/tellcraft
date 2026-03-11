@@ -4,7 +4,7 @@ import { repairUndeclaredRefs, repairMissingReactImports, repairBracketLookupAcc
 import type { Redis } from 'ioredis'
 
 const logger = createLogger('code-repair')
-const REPAIR_DONE_KEY = 'code-repair:v6' // 版本號：新增 fixer 時遞增
+const REPAIR_DONE_KEY = 'code-repair:v7' // 版本號：新增 fixer 時遞增
 
 /**
  * 對單一檔案物件套用所有 fixer（純記憶體，不寫 DB）
