@@ -76,8 +76,8 @@ export default function TemplateSubmitModal({ isOpen, onClose, projectId }: Temp
       setSubmitError('名稱至少 2 個字')
       return
     }
-    if (!description.trim() || description.trim().length < 10) {
-      setSubmitError('描述至少 10 個字')
+    if (!description.trim()) {
+      setSubmitError('請填寫描述')
       return
     }
     if (tags.length === 0) {
@@ -247,7 +247,7 @@ export default function TemplateSubmitModal({ isOpen, onClose, projectId }: Temp
                     border: '1px solid var(--gray-200, #e5e7eb)', fontSize: 14,
                     outline: 'none', resize: 'vertical', boxSizing: 'border-box',
                   }}
-                  placeholder="簡述這個模板的特色和適用場景（至少 10 個字）"
+                  placeholder="簡述這個模板的特色和適用場景"
                 />
                 <span style={{ fontSize: 11, color: 'var(--text-secondary)', float: 'right' }}>
                   {description.length}/500
