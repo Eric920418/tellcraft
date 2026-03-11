@@ -226,7 +226,7 @@ router.post('/submit', requireAuth, validateBody(templateSubmitSchema), async (r
         category,
         description,
         finalThumbnailUrl,
-        JSON.stringify(tags),
+        tags,
         JSON.stringify(pageStructure),
         projectId,
         userId,
