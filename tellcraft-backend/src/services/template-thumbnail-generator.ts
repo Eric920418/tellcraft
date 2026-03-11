@@ -87,7 +87,7 @@ function genLandingHtml(name: string, c: TemplateColors): string {
   const border = isDark ? '#27272a' : '#e2e8f0'
   const shortName = name.slice(0, 12)
 
-  const navLinks = ['功能', '定價', '關於'].map(item =>
+  const navLinks = ['Features', 'Pricing', 'About'].map(item =>
     `<span style="color: rgba(255,255,255,0.85); font-size: 14px">${item}</span>`
   ).join('')
 
@@ -100,9 +100,9 @@ function genLandingHtml(name: string, c: TemplateColors): string {
   ).join('')
 
   const featureCards = [
-    { icon: '⚡', title: '極速啟動', desc: '一鍵部署，分鐘內上線，無需繁瑣配置' },
-    { icon: '🎨', title: '自由設計', desc: '完整客製化能力，讓品牌個性盡情展現' },
-    { icon: '🔒', title: '安全可靠', desc: '企業級安全架構，資料加密全程保護' },
+    { icon: '⚡', title: 'Fast Deploy', desc: 'One-click deployment, live in minutes with zero configuration.' },
+    { icon: '🎨', title: 'Custom Design', desc: 'Full customization power to express your brand identity.' },
+    { icon: '🔒', title: 'Secure', desc: 'Enterprise-grade security architecture with end-to-end encryption.' },
   ].map(f =>
     `<div style="padding: 28px; background: ${cardBg}; border-radius: 12px; border: 1px solid ${border}"><div style="font-size: 32px; margin-bottom: 14px">${f.icon}</div><div style="font-weight: 600; font-size: 16px; margin-bottom: 8px">${f.title}</div><div style="color: ${subtext}; font-size: 14px; line-height: 1.6">${f.desc}</div></div>`
   ).join('')
@@ -113,17 +113,17 @@ function genLandingHtml(name: string, c: TemplateColors): string {
     <div style="font-weight: 700; font-size: 20px; color: white; letter-spacing: -0.02em">${shortName}</div>
     <div style="display: flex; gap: 28px; align-items: center">
       ${navLinks}
-      <button style="background: white; color: ${primary}; border: none; padding: 8px 20px; border-radius: 999px; font-size: 14px; font-weight: 600">開始使用</button>
+      <button style="background: white; color: ${primary}; border: none; padding: 8px 20px; border-radius: 999px; font-size: 14px; font-weight: 600">Get Started</button>
     </div>
   </nav>
   <section style="padding: 80px 48px 60px; max-width: 1200px; margin: 0 auto; display: grid; grid-template-columns: 1fr 1fr; gap: 64px; align-items: center">
     <div>
-      <div style="display: inline-flex; align-items: center; background: ${rgba(accent, 0.12)}; color: ${accent}; padding: 6px 14px; border-radius: 999px; font-size: 12px; font-weight: 600; margin-bottom: 24px; gap: 6px">✦ 全新發布</div>
+      <div style="display: inline-flex; align-items: center; background: ${rgba(accent, 0.12)}; color: ${accent}; padding: 6px 14px; border-radius: 999px; font-size: 12px; font-weight: 600; margin-bottom: 24px; gap: 6px">✦ New Release</div>
       <h1 style="font-size: 52px; font-weight: 800; line-height: 1.1; letter-spacing: -0.03em; margin: 0 0 20px">${name}</h1>
-      <p style="font-size: 18px; color: ${subtext}; line-height: 1.7; margin: 0 0 36px">專為現代團隊打造的智能解決方案，提升工作效率，讓創意無限延伸。</p>
+      <p style="font-size: 18px; color: ${subtext}; line-height: 1.7; margin: 0 0 36px">Built for modern teams to boost productivity and unleash creativity without limits.</p>
       <div style="display: flex; gap: 12px">
-        <button style="background: ${primary}; color: white; border: none; padding: 14px 28px; border-radius: 8px; font-size: 15px; font-weight: 600">免費開始</button>
-        <button style="background: transparent; color: ${text}; border: 1.5px solid ${border}; padding: 14px 28px; border-radius: 8px; font-size: 15px">觀看 Demo →</button>
+        <button style="background: ${primary}; color: white; border: none; padding: 14px 28px; border-radius: 8px; font-size: 15px; font-weight: 600">Start Free</button>
+        <button style="background: transparent; color: ${text}; border: 1.5px solid ${border}; padding: 14px 28px; border-radius: 8px; font-size: 15px">Watch Demo →</button>
       </div>
     </div>
     <div style="background: linear-gradient(135deg, ${rgba(primary, 0.1)}, ${rgba(accent, 0.1)}); border-radius: 20px; padding: 28px; border: 1px solid ${border}">
@@ -150,12 +150,12 @@ function genSaasHtml(name: string, c: TemplateColors): string {
   const shortName = name.slice(0, 12)
 
   const metrics = [
-    { label: '總用戶', value: '12,847', trend: '+12%', up: true },
-    { label: '月收入', value: '$48.2K', trend: '+8.3%', up: true },
-    { label: '轉換率', value: '3.24%', trend: '+0.8%', up: true },
-    { label: '流失率', value: '2.1%', trend: '-0.3%', up: false },
+    { label: 'Total Users', value: '12,847', trend: '+12%', up: true },
+    { label: 'MRR', value: '$48.2K', trend: '+8.3%', up: true },
+    { label: 'Conv. Rate', value: '3.24%', trend: '+0.8%', up: true },
+    { label: 'Churn', value: '2.1%', trend: '-0.3%', up: false },
   ]
-  const navItems = ['概覽', '分析', '用戶', '報告', '設置']
+  const navItems = ['Overview', 'Analytics', 'Users', 'Reports', 'Settings']
   const navIcons = ['📊', '📈', '👥', '📋', '⚙️']
   const bars = [40, 65, 45, 80, 55, 90, 75, 85, 60, 95, 70, 88]
 
@@ -193,7 +193,7 @@ function genSaasHtml(name: string, c: TemplateColors): string {
       <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-bottom: 20px">${metricCards}</div>
       <div style="background: ${contentBg}; border: 1px solid ${border}; border-radius: 10px; padding: 20px">
         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px">
-          <div style="font-size: 14px; font-weight: 600; color: ${text}">趨勢分析</div>
+          <div style="font-size: 14px; font-weight: 600; color: ${text}">Trend Analysis</div>
           <div style="display: flex; gap: 8px">${timeBtns}</div>
         </div>
         <div style="display: flex; align-items: flex-end; gap: 6px; height: 100px">${barCols}</div>
@@ -214,21 +214,21 @@ function genDashboardHtml(name: string, c: TemplateColors): string {
   const shortName = name.slice(0, 12)
 
   const orders = [
-    { name: 'Wang Wei', amount: '$342', status: '已完成', color: '#DCFCE7', tc: '#16A34A' },
-    { name: 'Li Ming', amount: '$187', status: '處理中', color: '#FEF3C7', tc: '#D97706' },
-    { name: 'Chen Fang', amount: '$528', status: '待確認', color: '#DBEAFE', tc: '#2563EB' },
-    { name: 'Zhang Hua', amount: '$95', status: '已完成', color: '#DCFCE7', tc: '#16A34A' },
-    { name: 'Liu Yang', amount: '$412', status: '處理中', color: '#FEF3C7', tc: '#D97706' },
+    { name: 'Wang Wei', amount: '$342', status: 'Done', color: '#DCFCE7', tc: '#16A34A' },
+    { name: 'Li Ming', amount: '$187', status: 'Processing', color: '#FEF3C7', tc: '#D97706' },
+    { name: 'Chen Fang', amount: '$528', status: 'Pending', color: '#DBEAFE', tc: '#2563EB' },
+    { name: 'Zhang Hua', amount: '$95', status: 'Done', color: '#DCFCE7', tc: '#16A34A' },
+    { name: 'Liu Yang', amount: '$412', status: 'Processing', color: '#FEF3C7', tc: '#D97706' },
   ]
 
-  const sidebarRows = ['儀表板', '訂單', '產品', '客戶', '財務'].map((item, i) =>
+  const sidebarRows = ['Dashboard', 'Orders', 'Products', 'Customers', 'Finance'].map((item, i) =>
     `<div style="padding: 10px 16px; color: ${i === 0 ? primary : 'rgba(255,255,255,0.5)'}; font-size: 13px; background: ${i === 0 ? rgba(primary, 0.12) : 'transparent'}; border-left: 2px solid ${i === 0 ? primary : 'transparent'}">${item}</div>`
   ).join('')
 
   const statCards = [
-    { label: '今日訂單', val: '284' },
-    { label: '本月營收', val: '$32.5K' },
-    { label: '待處理', val: '18' },
+    { label: 'Today Orders', val: '284' },
+    { label: 'Monthly Rev.', val: '$32.5K' },
+    { label: 'Pending', val: '18' },
   ].map(card =>
     `<div style="background: ${contentBg}; border-radius: 8px; padding: 18px; border: 1px solid ${border}"><div style="font-size: 11px; color: ${subtext}; margin-bottom: 8px; text-transform: uppercase; letter-spacing: 0.05em">${card.label}</div><div style="font-size: 28px; font-weight: 700; color: ${text}">${card.val}</div></div>`
   ).join('')
@@ -241,14 +241,14 @@ function genDashboardHtml(name: string, c: TemplateColors): string {
 <div style="height: 100vh; display: flex; flex-direction: column; background: ${bg}">
   <div style="background: ${contentBg}; border-bottom: 1px solid ${border}; padding: 0 24px; height: 56px; display: flex; align-items: center; justify-content: space-between; flex-shrink: 0">
     <div style="font-weight: 700; font-size: 18px; color: ${primary}">${shortName}</div>
-    <button style="padding: 7px 16px; background: ${primary}; color: white; border: none; border-radius: 6px; font-size: 13px; font-weight: 500">+ 新增</button>
+    <button style="padding: 7px 16px; background: ${primary}; color: white; border: none; border-radius: 6px; font-size: 13px; font-weight: 500">+ New</button>
   </div>
   <div style="flex: 1; display: flex; overflow: hidden">
     <div style="width: 200px; background: ${sidebarBg}; padding: 16px 0; flex-shrink: 0">${sidebarRows}</div>
     <div style="flex: 1; padding: 24px; overflow: auto">
       <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; margin-bottom: 20px">${statCards}</div>
       <div style="background: ${contentBg}; border-radius: 8px; border: 1px solid ${border}; overflow: hidden">
-        <div style="padding: 14px 18px; border-bottom: 1px solid ${border}; font-weight: 600; font-size: 14px; color: ${text}">最新訂單</div>
+        <div style="padding: 14px 18px; border-bottom: 1px solid ${border}; font-weight: 600; font-size: 14px; color: ${text}">Recent Orders</div>
         ${orderRows}
       </div>
     </div>
@@ -266,13 +266,13 @@ function genEcommerceHtml(name: string, c: TemplateColors): string {
   const shortName = name.slice(0, 10)
 
   const products = [
-    { name: '設計師外套', price: 'NT$3,280', badge: 'NEW', emoji: '🧥' },
-    { name: '聯名托特包', price: 'NT$5,800', badge: 'HOT', emoji: '👜' },
-    { name: '休閒長褲', price: 'NT$1,980', badge: '', emoji: '👖' },
-    { name: '皮革腰帶', price: 'NT$880', badge: 'SALE', emoji: '👗' },
+    { name: 'Designer Jacket', price: '$328', badge: 'NEW', emoji: '🧥' },
+    { name: 'Tote Bag', price: '$580', badge: 'HOT', emoji: '👜' },
+    { name: 'Casual Pants', price: '$198', badge: '', emoji: '👖' },
+    { name: 'Leather Belt', price: '$88', badge: 'SALE', emoji: '👗' },
   ]
 
-  const navLinks = ['新品', '女裝', '男裝', '配件', 'Sale'].map(item =>
+  const navLinks = ['New', 'Women', 'Men', 'Accessories', 'Sale'].map(item =>
     `<span style="font-size: 14px; color: ${subtext}">${item}</span>`
   ).join('')
 
@@ -288,13 +288,13 @@ function genEcommerceHtml(name: string, c: TemplateColors): string {
     <div style="display: flex; gap: 18px; font-size: 20px"><span>🔍</span><span>🛒</span><span>👤</span></div>
   </nav>
   <div style="background: linear-gradient(135deg, ${primary}, ${accent}); padding: 60px 48px; text-align: center; color: white">
-    <div style="font-size: 11px; letter-spacing: 0.2em; margin-bottom: 12px; opacity: 0.85; text-transform: uppercase">2024 春夏新品</div>
+    <div style="font-size: 11px; letter-spacing: 0.2em; margin-bottom: 12px; opacity: 0.85; text-transform: uppercase">2024 Spring / Summer</div>
     <h1 style="font-size: 48px; font-weight: 800; letter-spacing: -0.03em; margin: 0 0 14px">${name}</h1>
-    <p style="font-size: 16px; opacity: 0.85; margin: 0 0 28px">探索最新設計，引領潮流風尚</p>
-    <button style="background: white; color: ${primary}; border: none; padding: 14px 32px; border-radius: 999px; font-size: 15px; font-weight: 700">立即選購</button>
+    <p style="font-size: 16px; opacity: 0.85; margin: 0 0 28px">Explore the latest designs and lead the trend.</p>
+    <button style="background: white; color: ${primary}; border: none; padding: 14px 32px; border-radius: 999px; font-size: 15px; font-weight: 700">Shop Now</button>
   </div>
   <div style="padding: 44px 48px; max-width: 1200px; margin: 0 auto">
-    <h2 style="font-size: 22px; font-weight: 700; margin: 0 0 24px; letter-spacing: -0.02em">熱銷商品</h2>
+    <h2 style="font-size: 22px; font-weight: 700; margin: 0 0 24px; letter-spacing: -0.02em">Best Sellers</h2>
     <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 18px">${productCards}</div>
   </div>
 </div>`
@@ -310,15 +310,15 @@ function genPortfolioHtml(name: string, c: TemplateColors): string {
   const colors6 = [primary, accent, '#10b981', '#f59e0b', '#ec4899', '#06b6d4']
 
   const works = [
-    { title: '品牌識別設計', cat: 'Branding' },
-    { title: '電商平台', cat: 'Web' },
+    { title: 'Brand Identity', cat: 'Branding' },
+    { title: 'E-commerce', cat: 'Web' },
     { title: 'App UX', cat: 'Mobile' },
-    { title: '年報設計', cat: 'Print' },
-    { title: '產品攝影', cat: 'Photo' },
-    { title: '動態影像', cat: 'Motion' },
+    { title: 'Annual Report', cat: 'Print' },
+    { title: 'Photography', cat: 'Photo' },
+    { title: 'Motion', cat: 'Motion' },
   ]
 
-  const navLinks = ['作品', '關於', '服務', '聯繫'].map(item =>
+  const navLinks = ['Works', 'About', 'Services', 'Contact'].map(item =>
     `<span style="font-size: 14px; color: ${subtext}">${item}</span>`
   ).join('')
 
@@ -331,7 +331,7 @@ function genPortfolioHtml(name: string, c: TemplateColors): string {
   <nav style="padding: 20px 48px; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid ${border}">
     <div style="font-size: 18px; font-weight: 700; letter-spacing: -0.02em">${shortName}</div>
     <div style="display: flex; gap: 32px">${navLinks}</div>
-    <button style="padding: 8px 20px; background: ${primary}; color: white; border: none; border-radius: 6px; font-size: 13px">合作洽談</button>
+    <button style="padding: 8px 20px; background: ${primary}; color: white; border: none; border-radius: 6px; font-size: 13px">Get in Touch</button>
   </nav>
   <div style="padding: 44px 48px; max-width: 1200px; margin: 0 auto">
     <div style="margin-bottom: 36px">
@@ -352,17 +352,17 @@ function genBlogHtml(name: string, c: TemplateColors): string {
   const shortName = name.slice(0, 12)
 
   const articles = [
-    { title: '如何用設計思維解決複雜問題', date: '3月10日', tag: '設計', min: 5 },
-    { title: '2024 年值得關注的視覺趨勢', date: '3月5日', tag: '趨勢', min: 7 },
-    { title: '字型選擇對品牌傳達的重要性', date: '2月28日', tag: '排版', min: 4 },
+    { title: 'How Design Thinking Solves Complex Problems', date: 'Mar 10', tag: 'Design', min: 5 },
+    { title: 'Visual Trends Worth Watching in 2024', date: 'Mar 5', tag: 'Trends', min: 7 },
+    { title: 'Why Typography Matters for Brand Communication', date: 'Feb 28', tag: 'Typography', min: 4 },
   ]
 
-  const navLinks = ['最新', '設計', '科技', '生活'].map(t =>
+  const navLinks = ['Latest', 'Design', 'Tech', 'Life'].map(t =>
     `<span style="font-size: 14px; color: ${subtext}">${t}</span>`
   ).join('')
 
   const articleRows = articles.map((a, i) =>
-    `<div style="padding-bottom: 28px; margin-bottom: 28px; border-bottom: ${i < 2 ? `1px solid ${border}` : 'none'}; display: flex; gap: 20px; align-items: flex-start"><div style="flex: 1"><span style="font-size: 11px; background: ${rgba(primary, 0.1)}; color: ${primary}; padding: 2px 8px; border-radius: 4px; font-weight: 600">${a.tag}</span><h3 style="font-size: 20px; font-weight: 600; margin: 8px 0; line-height: 1.3">${a.title}</h3><div style="font-size: 12px; color: ${subtext}">${a.date} · ${a.min} 分鐘閱讀</div></div><div style="width: 100px; height: 68px; border-radius: 8px; background: linear-gradient(135deg, ${rgba(primary, 0.25)}, ${rgba(primary, 0.1)}); flex-shrink: 0"></div></div>`
+    `<div style="padding-bottom: 28px; margin-bottom: 28px; border-bottom: ${i < 2 ? `1px solid ${border}` : 'none'}; display: flex; gap: 20px; align-items: flex-start"><div style="flex: 1"><span style="font-size: 11px; background: ${rgba(primary, 0.1)}; color: ${primary}; padding: 2px 8px; border-radius: 4px; font-weight: 600">${a.tag}</span><h3 style="font-size: 20px; font-weight: 600; margin: 8px 0; line-height: 1.3">${a.title}</h3><div style="font-size: 12px; color: ${subtext}">${a.date} · ${a.min} min read</div></div><div style="width: 100px; height: 68px; border-radius: 8px; background: linear-gradient(135deg, ${rgba(primary, 0.25)}, ${rgba(primary, 0.1)}); flex-shrink: 0"></div></div>`
   ).join('')
 
   return `
@@ -370,13 +370,13 @@ function genBlogHtml(name: string, c: TemplateColors): string {
   <nav style="padding: 0 48px; height: 60px; display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid ${border}; font-family: -apple-system, sans-serif">
     <div style="font-weight: 800; font-size: 20px; letter-spacing: -0.02em; color: ${primary}">${shortName}</div>
     <div style="display: flex; gap: 24px">${navLinks}</div>
-    <button style="padding: 8px 18px; background: ${primary}; color: white; border: none; border-radius: 6px; font-size: 13px; font-family: -apple-system, sans-serif">訂閱</button>
+    <button style="padding: 8px 18px; background: ${primary}; color: white; border: none; border-radius: 6px; font-size: 13px; font-family: -apple-system, sans-serif">Subscribe</button>
   </nav>
   <div style="position: relative; height: 340px; background: linear-gradient(160deg, ${rgba(primary, 0.95)}, ${rgba(primary, 0.6)}); display: flex; align-items: flex-end; padding: 44px 48px">
     <div>
-      <div style="font-size: 10px; font-family: -apple-system, sans-serif; letter-spacing: 0.12em; color: rgba(255,255,255,0.75); margin-bottom: 10px; text-transform: uppercase">精選文章</div>
-      <h1 style="font-size: 36px; font-weight: 700; color: white; margin: 0 0 10px; line-height: 1.2; max-width: 680px">${name}：關於設計與創意的深度思考</h1>
-      <div style="font-size: 13px; color: rgba(255,255,255,0.75); font-family: -apple-system, sans-serif">2024年3月15日 · 閱讀時間 8 分鐘</div>
+      <div style="font-size: 10px; font-family: -apple-system, sans-serif; letter-spacing: 0.12em; color: rgba(255,255,255,0.75); margin-bottom: 10px; text-transform: uppercase">FEATURED</div>
+      <h1 style="font-size: 36px; font-weight: 700; color: white; margin: 0 0 10px; line-height: 1.2; max-width: 680px">${name}: Deep Thoughts on Design and Creativity</h1>
+      <div style="font-size: 13px; color: rgba(255,255,255,0.75); font-family: -apple-system, sans-serif">March 15, 2024 · 8 min read</div>
     </div>
   </div>
   <div style="max-width: 800px; margin: 0 auto; padding: 36px 48px">${articleRows}</div>
@@ -385,9 +385,22 @@ function genBlogHtml(name: string, c: TemplateColors): string {
 
 // ── 主 export ──────────────────────────────────────────────────────────────────
 
+const CATEGORY_DISPLAY: Record<string, string> = {
+  landing: 'Landing Page', event: 'Event Page', saas: 'SaaS Platform',
+  tool: 'Tool Dashboard', dashboard: 'Dashboard', ecommerce: 'E-commerce',
+  portfolio: 'Portfolio', content: 'Content Site', blog: 'Blog',
+}
+
+/** If name contains CJK chars (no system font on VPS), fall back to category label */
+function safeDisplayName(name: string, category: string): string {
+  return /[\u4e00-\u9fff\u3040-\u309f\u30a0-\u30ff]/.test(name)
+    ? (CATEGORY_DISPLAY[category] ?? 'Template')
+    : name
+}
+
 export function generateTemplateHtml(template: TemplateMeta): string {
   const colors = extractColors(template.tags, template.description)
-  const name = template.name
+  const name = safeDisplayName(template.name, template.category)
 
   let bodyHtml: string
   switch (template.category) {
