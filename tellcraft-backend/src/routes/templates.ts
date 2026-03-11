@@ -545,6 +545,39 @@ router.post('/preview/:id/regenerate', requireAuth, async (req, res) => {
 })
 
 /**
+ * GET /api/templates/:id/files
+ * 取得模板的 project_files（seed 模板用 template_id 關聯，用戶投稿模板不走此路）
+ */
+router.get('/:id/files', async (req, res) => {
+  try {
+    const { id } = req.params
+    if (!isUUID(id)) return res.status(400).json({ error: '無效的模板 ID' })
+
+    const files = await query<{
+      id: string; file_path: string; skill_source: string; file_type: string; content: string; description: string | null
+    }>(
+      `SELECT id, file_path, skill_source, file_type, content, description
+       FROM project_files WHERE template_id = $1 ORDER BY file_path`,
+      [id]
+    )
+
+    res.json({
+      files: files.rows.map(f => ({
+        id: f.id,
+        filePath: f.file_path,
+        fileType: f.file_type,
+        skillSource: f.skill_source,
+        content: f.content,
+        description: f.description,
+      })),
+    })
+  } catch (error) {
+    logger.error({ err: error }, '取得模板 files 失敗')
+    res.status(500).json({ error: '取得失敗' })
+  }
+})
+
+/**
  * GET /api/templates/:id
  * 根據 ID 獲取單個模板
  */

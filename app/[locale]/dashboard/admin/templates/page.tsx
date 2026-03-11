@@ -5,7 +5,7 @@ import dynamic from 'next/dynamic'
 import { useRouter } from '@/i18n/navigation'
 import { motion } from 'framer-motion'
 import { useTranslations } from 'next-intl'
-import { getAdminTemplates, getProjectFiles } from '@/app/lib/vps-api'
+import { getAdminTemplates, getProjectFiles, getTemplateSeedFiles } from '@/app/lib/vps-api'
 import { reviewTemplate } from '@/app/actions/templates'
 
 const SandpackPreview = dynamic(
@@ -94,28 +94,41 @@ export default function AdminTemplatesPage() {
     const token = getAuthToken()
     setSandpackLoading(true)
     setSandpackData(null)
+
+    const buildSandpackData = (files: Array<{ path?: string; filePath?: string; content: string; fileType: string }>) => {
+      const norm = files.map(f => ({ path: f.path ?? (f as { filePath?: string }).filePath ?? '', content: f.content, fileType: f.fileType }))
+      const pages = norm.filter(f => f.fileType === 'page').map(f => ({ path: f.path, content: f.content, description: '' }))
+      const components = norm.filter(f => f.fileType === 'component').map(f => ({ path: f.path, content: f.content, description: '' }))
+      const styles = norm.filter(f => f.fileType === 'style').map(f => f.content).join('\n')
+      const tailwindConfig = norm.find(f => f.fileType === 'config')?.content
+      setSandpackData({ pages, components, styles, tailwindConfig })
+    }
+
     if (template.sourceProjectId && token) {
+      // 用戶投稿模板：走 project_files via project_id
       const result = await getProjectFiles({ token, projectId: template.sourceProjectId })
       if (result.success && result.data) {
-        const files = result.data.files
-        const pages = files.filter(f => f.fileType === 'page').map(f => ({ path: f.path, content: f.content, description: '' }))
-        const components = files.filter(f => f.fileType === 'component').map(f => ({ path: f.path, content: f.content, description: '' }))
-        const styles = files.filter(f => f.fileType === 'style').map(f => f.content).join('\n')
-        const tailwindConfig = files.find(f => f.fileType === 'config')?.content
-        setSandpackData({ pages, components, styles, tailwindConfig })
+        buildSandpackData(result.data.files)
       }
     } else {
-      // 無 sourceProjectId：前端即時生成代碼，零延遲
-      const { generateTemplatePreviewCode } = await import('@/app/lib/template-preview-generator')
-      const generated = generateTemplatePreviewCode({
-        id: template.id,
-        name: template.name,
-        description: template.description,
-        category: template.category,
-        tags: template.tags,
-      })
-      setSandpackData(generated)
+      // Seed 模板：先查 DB 的 template_id files
+      const result = await getTemplateSeedFiles(template.id)
+      if (result.success && result.data?.files && result.data.files.length > 0) {
+        buildSandpackData(result.data.files.map(f => ({ path: f.filePath, content: f.content, fileType: f.fileType })))
+      } else {
+        // Fallback：尚未 seed 時前端即時生成
+        const { generateTemplatePreviewCode } = await import('@/app/lib/template-preview-generator')
+        const generated = generateTemplatePreviewCode({
+          id: template.id,
+          name: template.name,
+          description: template.description,
+          category: template.category,
+          tags: template.tags,
+        })
+        setSandpackData(generated)
+      }
     }
+
     setSandpackLoading(false)
   }, [])
 

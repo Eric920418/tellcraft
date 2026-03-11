@@ -563,7 +563,8 @@ tellcraft-backend/
 │   └── middleware/
 │       ├── auth.ts              # JWT 認證中間件
 │       └── validate.ts          # Zod 請求驗證中間件（validateBody/Query/Params）
-├── migrations/           # DB 遷移（001-018）
+├── migrations/           # DB 遷移（001-020）
+│   └── 020_add_template_id_to_project_files.sql  # project_files.template_id，支援 seed 模板代碼
 └── ecosystem.config.js   # PM2 配置
 
 bdd-spec/                 # BDD Skill 定義（instructions/ + rules/ + scripts/）
@@ -680,6 +681,23 @@ psql "$DATABASE_URL" -f tellcraft-backend/migrations/xxx.sql
 2. **Anthropic Client 統一**（`lib/anthropic.ts`）：全 codebase 唯一的 `getAnthropicClient()` + `MODEL.SONNET`/`MODEL.HAIKU` 常數。消除 7 份重複 `getAnthropicClient()`、59 處硬編碼模型 ID。SDK 用戶（6 檔）改 import 單例；fetch 用戶（10 檔）改用 `getAnthropicHeaders()` + MODEL 常數
 3. **Zod API 驗證**（`middleware/validate.ts` + `schemas/`）：`validateBody(schema)` 中間件工廠，高風險路由全覆蓋 — conversation（sendMessage/reply）、session（initialize）、operations（4 端點）、bdd（6 端點）、project（create/template-overrides），移除 ~100 行手動 `if (!req.body.xxx)` 驗證
 4. **BullMQ DLQ**（`services/job-failure-handler.ts` + `migrations/013`）：`job_failures` 表持久化最終失敗、Socket.io 推送用戶錯誤消息+重試按鈕、FATAL log 觸發告警、`removeOnFail.age` 24h→7d
+
+### Seed 模板真實代碼（2026-03-12）
+
+將後台 100 個 seed 模板轉換為與用戶投稿相同的格式——真實 React 代碼存入 DB，admin Sandpack 預覽走同一套 `loadPreviewFiles` 機制。
+
+**核心方案**：`project_files` 加 `template_id UUID` 欄位 + `project_id` 改為允許 NULL。
+- **Migration 020**：`project_files.template_id` + 唯一索引 + `chk_project_files_owner` 防同時 NULL
+- **`seed-template-code-generator.ts`**：20 種 TemplateType 純 TS 代碼生成器（零 LLM），`detectType()` 以 category + tags 決定版型，輸出多檔案（page + components + style + config）
+- **`GET /api/templates/:id/files`**：公開端點，回傳 template_id 關聯的 project_files
+- **`getTemplateSeedFiles()`**：前端 vps-api.ts 新增函數
+- **`loadPreviewFiles`**（admin/templates/page.tsx）：`sourceProjectId` 存在 → 走 project 路徑（用戶投稿）；否則先查 DB template_id files，無資料才 fallback 前端即時生成
+- **`scripts/seed-template-files.ts`**：一次性腳本，連 DB 讀所有 seed 模板 → 生成代碼 → UPSERT
+
+**VPS 執行順序**：
+1. `psql "$DATABASE_URL" -f tellcraft-backend/migrations/020_add_template_id_to_project_files.sql`
+2. 部署後端（`pnpm build && pm2 restart tellcraft-backend`）
+3. `cd tellcraft-backend && DATABASE_URL="..." npx tsx scripts/seed-template-files.ts`
 
 ### Fast Build 效能優化（2026-03-09）
 
