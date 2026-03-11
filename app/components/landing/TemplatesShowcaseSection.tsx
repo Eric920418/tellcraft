@@ -173,7 +173,7 @@ function TemplateCard({ card }: { card: TemplateCardData }) {
       whileHover={{ scale: 1.03, boxShadow: '0 8px 24px rgba(0,0,0,0.12)' }}
       transition={{ duration: 0.2 }}
       style={{
-        width: 340,
+        width: 420,
         flexShrink: 0,
         borderRadius: 12,
         border: '1px solid var(--border-color)',
@@ -232,7 +232,7 @@ function MarqueeRow({ cards, direction, duration = 35 }: {
       style={{ overflow: 'hidden', width: '100%' }}
     >
       <div style={{
-        display: 'flex', gap: 20, width: 'max-content',
+        display: 'flex', gap: 24, width: 'max-content',
         animation: `${animName} ${duration}s linear infinite`,
         animationPlayState: paused ? 'paused' : 'running',
       }}>
@@ -324,8 +324,8 @@ export default function TemplatesShowcaseSection() {
         transition={{ duration: 0.5, delay: 0.35 }}
         style={{ display: 'flex', flexDirection: 'column', gap: 16 }}
       >
-        <MarqueeRow cards={row1} direction="left" duration={35} />
-        <MarqueeRow cards={row2} direction="right" duration={42} />
+        <MarqueeRow cards={row1} direction="left" duration={45} />
+        <MarqueeRow cards={row2} direction="right" duration={55} />
       </motion.div>
 
       <motion.div {...fadeUp(0.5)} style={{ textAlign: 'center', marginTop: 40 }}>
