@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect, useCallback } from 'react'
-import { motion, AnimatePresence } from 'motion/react'
+import { motion, AnimatePresence } from 'framer-motion'
 import { templateSubmitPreflight, templateSubmit } from '@/app/actions/templates'
 import { CATEGORY_LABELS, type TemplateCategory } from '@/app/lib/templates'
 
