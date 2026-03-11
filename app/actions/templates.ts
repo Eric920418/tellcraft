@@ -211,6 +211,7 @@ export async function getRecommendedTemplates(input: {
     dashboard: 0,
     blog: 0,
     event: 0,
+    tool: 0,
   }
 
   // SaaS 關鍵字
