@@ -1819,15 +1819,27 @@ export function repairBracketLookupAccess(
     if (source === 'optchain') {
       const fixedLines = fixed.split('\n')
       for (let li = 0; li < fixedLines.length; li++) {
-        const lineMatch = fixedLines[li].match(new RegExp(`^(\\s*)(?:const|let)\\s+${varName}\\s*=\\s*(\\S+\\?\\.\\w+)\\s*$`))
-        if (lineMatch && !fixedLines[li].includes('??')) {
-          const indent = lineMatch[1]
+        // 匹配兩種情況：還沒加 ?? [] 的，和已有 ?? [] 但缺 guard 的
+        const lineMatch = fixedLines[li].match(new RegExp(`^(\\s*)(?:const|let)\\s+${varName}\\s*=\\s*\\S+\\?\\.\\w+(.*)$`))
+        if (!lineMatch) continue
+
+        const indent = lineMatch[1]
+        const tail = lineMatch[2].trim()
+
+        // 1. 還沒有 ?? fallback → 加上
+        if (!tail.includes('??')) {
           fixedLines[li] = fixedLines[li].trimEnd() + ' ?? []'
-          // 插入 guard：空陣列就 return，避免 undefined 傳播
+        }
+
+        // 2. 下一行不是 guard → 插入
+        const nextLine = fixedLines[li + 1]?.trim() ?? ''
+        if (!nextLine.startsWith(`if (!${varName}`)) {
           fixedLines.splice(li + 1, 0, `${indent}if (!${varName}.length) return`)
           changed = true
-          break
+        } else if (!tail.includes('??')) {
+          changed = true // 只加了 ?? []
         }
+        break
       }
       fixed = fixedLines.join('\n')
     }
