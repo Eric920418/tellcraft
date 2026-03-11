@@ -285,17 +285,28 @@ export function sanitizeCodeForDeploy(code: GeneratedCode): SanitizeResult {
 
   // 深拷貝避免修改原始代碼，同時 normalize 路徑（LLM 可能生成含 .. 的相對路徑）
   const normalizePath = (p: string) => path.normalize(p).replace(/\\/g, '/')
+
+  // normalize + 去重（後者覆蓋前者；防止 app/a/../components/X.tsx 和 app/b/../components/X.tsx 都 normalize 成同路徑）
+  const deduplicateByNormalizedPath = <T extends { path: string }>(files: T[]): T[] => {
+    const seen = new Map<string, T>()
+    for (const f of files) {
+      seen.set(normalizePath(f.path), { ...f, path: normalizePath(f.path) })
+    }
+    return Array.from(seen.values())
+  }
+
+  const pathFixes: string[] = []
+  for (const f of [...code.pages, ...code.components]) {
+    const n = normalizePath(f.path)
+    if (f.path !== n) pathFixes.push(`${f.path} → ${n}`)
+  }
+
   const sanitized: GeneratedCode = {
-    pages: code.pages.map(p => ({ ...p, path: normalizePath(p.path), content: p.content })),
-    components: code.components.map(c => ({ ...c, path: normalizePath(c.path), content: c.content })),
+    pages: deduplicateByNormalizedPath(code.pages.map(p => ({ ...p, content: p.content }))),
+    components: deduplicateByNormalizedPath(code.components.map(c => ({ ...c, content: c.content }))),
     styles: code.styles,
   }
 
-  // 記錄被 normalize 的路徑
-  const pathFixes = [
-    ...code.pages.filter(p => p.path !== normalizePath(p.path)).map(p => `${p.path} → ${normalizePath(p.path)}`),
-    ...code.components.filter(c => c.path !== normalizePath(c.path)).map(c => `${c.path} → ${normalizePath(c.path)}`),
-  ]
   if (pathFixes.length > 0) {
     fixes.push(`路徑正規化: ${pathFixes.join(', ')}`)
   }
@@ -595,12 +606,14 @@ export function safeMotionProps<T extends Record<string, unknown>>(props: T) {
           : fileDir + '/' + importPath
       }
 
+      // normalize resolved path（消除 app/x/../components/Y 形式）
+      const resolvedNorm = normalizePath(resolved)
       const candidates = [
-        resolved, resolved + '.tsx', resolved + '.ts', resolved + '.jsx', resolved + '.js',
-        resolved + '/index.tsx', resolved + '/index.ts',
+        resolvedNorm, resolvedNorm + '.tsx', resolvedNorm + '.ts', resolvedNorm + '.jsx', resolvedNorm + '.js',
+        resolvedNorm + '/index.tsx', resolvedNorm + '/index.ts',
       ]
       if (!candidates.some(c => filePathSet.has(c))) {
-        brokenImports.push({ file: file.path, importPath, resolvedPath: resolved, importStatement: m[0] })
+        brokenImports.push({ file: file.path, importPath, resolvedPath: resolvedNorm, importStatement: m[0] })
       }
     }
   }
