@@ -933,19 +933,36 @@ export async function regenerateTemplatePreview(input: {
   })
 }
 
+export interface ProjectFileData {
+  path: string
+  content: string
+  fileType: string    // 'page' | 'component' | 'style' | 'config'
+  skillSource: string // 'uiux' | 'code' | 'merge'
+}
+
 /**
- * 上傳（更新）模板預覽 HTML（管理員專用）
+ * 取得專案的生成檔案（用於 Sandpack 預覽）
  */
-export async function updateTemplatePreview(input: {
+export async function getProjectFiles(input: {
   token: string
-  templateId: string
-  htmlContent: string
-}): Promise<ApiResponse<{ success: boolean; version: number; htmlLength: number }>> {
-  return apiRequest(`/api/templates/preview/${input.templateId}`, {
-    method: 'PUT',
-    headers: { Authorization: `Bearer ${input.token}` },
-    body: JSON.stringify({ html_content: input.htmlContent }),
-  })
+  projectId: string
+}): Promise<ApiResponse<{ files: ProjectFileData[] }>> {
+  const result = await apiRequest<{ files: Array<{ filePath: string; content: string; fileType: string; skillSource: string }> }>(
+    `/api/project/${input.projectId}/files`,
+    { headers: { Authorization: `Bearer ${input.token}` } }
+  )
+  if (!result.success || !result.data) return result as unknown as ApiResponse<{ files: ProjectFileData[] }>
+  return {
+    success: true,
+    data: {
+      files: result.data.files.map(f => ({
+        path: f.filePath,
+        content: f.content,
+        fileType: f.fileType,
+        skillSource: f.skillSource,
+      })),
+    },
+  }
 }
 
 // ============================================================

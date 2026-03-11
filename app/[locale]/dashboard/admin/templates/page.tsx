@@ -1,11 +1,17 @@
 'use client'
 
 import { useEffect, useState, useCallback } from 'react'
+import dynamic from 'next/dynamic'
 import { useRouter } from '@/i18n/navigation'
 import { motion } from 'framer-motion'
 import { useTranslations } from 'next-intl'
-import { getAdminTemplates } from '@/app/lib/vps-api'
-import { reviewTemplate, generateTemplatePreview } from '@/app/actions/templates'
+import { getAdminTemplates, getProjectFiles } from '@/app/lib/vps-api'
+import { reviewTemplate } from '@/app/actions/templates'
+
+const SandpackPreview = dynamic(
+  () => import('@/app/components/uiux/SandpackPreview'),
+  { ssr: false }
+)
 
 interface AdminTemplate {
   id: string
@@ -23,6 +29,7 @@ interface AdminTemplate {
   reviewStatus: string
   reviewReason: string | null
   submittedBy: string | null
+  sourceProjectId: string | null
   preview: {
     version: number | null
     updatedAt: string | null
@@ -43,11 +50,16 @@ export default function AdminTemplatesPage() {
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [previewingId, setPreviewingId] = useState<string | null>(null)
-  const [previewIframeKey, setPreviewIframeKey] = useState(0)
-  const [generatingPreviewId, setGeneratingPreviewId] = useState<string | null>(null)
   const [reviewingId, setReviewingId] = useState<string | null>(null)
   const [rejectingId, setRejectingId] = useState<string | null>(null)
   const [rejectReason, setRejectReason] = useState('')
+  const [sandpackData, setSandpackData] = useState<{
+    pages: Array<{ path: string; content: string; description: string }>
+    components: Array<{ path: string; content: string; description: string }>
+    styles: string
+    tailwindConfig?: string
+  } | null>(null)
+  const [sandpackLoading, setSandpackLoading] = useState(false)
 
   const fetchTemplates = useCallback(async () => {
     const token = getAuthToken()
@@ -77,6 +89,24 @@ export default function AdminTemplatesPage() {
   useEffect(() => {
     fetchTemplates()
   }, [fetchTemplates])
+
+  const loadPreviewFiles = useCallback(async (template: AdminTemplate) => {
+    if (!template.sourceProjectId) return
+    const token = getAuthToken()
+    if (!token) return
+    setSandpackLoading(true)
+    setSandpackData(null)
+    const result = await getProjectFiles({ token, projectId: template.sourceProjectId })
+    if (result.success && result.data) {
+      const files = result.data.files
+      const pages = files.filter(f => f.fileType === 'page').map(f => ({ path: f.path, content: f.content, description: '' }))
+      const components = files.filter(f => f.fileType === 'component').map(f => ({ path: f.path, content: f.content, description: '' }))
+      const styles = files.filter(f => f.fileType === 'style').map(f => f.content).join('\n')
+      const tailwindConfig = files.find(f => f.fileType === 'config')?.content
+      setSandpackData({ pages, components, styles, tailwindConfig })
+    }
+    setSandpackLoading(false)
+  }, [])
 
   const handleApprove = async (templateId: string) => {
     setReviewingId(templateId)
@@ -108,19 +138,10 @@ export default function AdminTemplatesPage() {
     }
   }
 
-  const handleGeneratePreview = async (templateId: string) => {
-    setGeneratingPreviewId(templateId)
-    try {
-      const result = await generateTemplatePreview(templateId)
-      if (result.success) {
-        await fetchTemplates()
-        setPreviewIframeKey(k => k + 1)
-      } else {
-        alert(result.error || '生成預覽失敗')
-      }
-    } finally {
-      setGeneratingPreviewId(null)
-    }
+  const openPreview = (template: AdminTemplate) => {
+    setPreviewingId(template.id)
+    setSandpackData(null)
+    loadPreviewFiles(template)
   }
 
   if (isLoading) {
@@ -147,7 +168,7 @@ export default function AdminTemplatesPage() {
   }
 
   const pendingCount = templates.filter(t => t.reviewStatus === 'pending').length
-  const previewBaseUrl = ''
+  const previewingTemplate = templates.find(t => t.id === previewingId)
 
   return (
     <div>
@@ -433,7 +454,13 @@ export default function AdminTemplatesPage() {
                         </>
                       )}
                       <button
-                        onClick={() => setPreviewingId(previewingId === template.id ? null : template.id)}
+                        onClick={() => {
+                          if (previewingId === template.id) {
+                            setPreviewingId(null)
+                          } else {
+                            openPreview(template)
+                          }
+                        }}
                         style={{
                           padding: '6px 12px',
                           fontSize: 12,
@@ -554,51 +581,46 @@ export default function AdminTemplatesPage() {
               }}
             >
               <span style={{ fontWeight: 500 }}>
-                {t('previewTitle', { name: templates.find(tpl => tpl.id === previewingId)?.name || '' })}
+                {t('previewTitle', { name: previewingTemplate?.name || '' })}
               </span>
-              <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                {templates.find(tpl => tpl.id === previewingId)?.preview?.status === 'none' && (
-                  <button
-                    onClick={() => previewingId && handleGeneratePreview(previewingId)}
-                    disabled={generatingPreviewId === previewingId}
-                    style={{
-                      padding: '6px 12px',
-                      fontSize: 12,
-                      background: generatingPreviewId === previewingId ? 'var(--gray-100)' : '#FFF7ED',
-                      color: generatingPreviewId === previewingId ? 'var(--gray-400)' : '#EA580C',
-                      border: '1px solid #FED7AA',
-                      borderRadius: 4,
-                      cursor: generatingPreviewId === previewingId ? 'not-allowed' : 'pointer',
-                    }}
-                  >
-                    {generatingPreviewId === previewingId ? '生成中...' : '⚡ 生成基本預覽'}
-                  </button>
-                )}
-                <button
-                  onClick={() => setPreviewingId(null)}
-                  style={{
-                    padding: '4px 8px',
-                    fontSize: 12,
-                    background: 'var(--gray-100)',
-                    border: 'none',
-                    borderRadius: 4,
-                    cursor: 'pointer',
-                  }}
-                >
-                  {t('closePreview')}
-                </button>
-              </div>
+              <button
+                onClick={() => setPreviewingId(null)}
+                style={{
+                  padding: '4px 8px',
+                  fontSize: 12,
+                  background: 'var(--gray-100)',
+                  border: 'none',
+                  borderRadius: 4,
+                  cursor: 'pointer',
+                }}
+              >
+                {t('closePreview')}
+              </button>
             </div>
-            <iframe
-              key={previewIframeKey}
-              src={`${previewBaseUrl}/api/templates/preview/${previewingId}?v=${previewIframeKey}`}
-              style={{
-                flex: 1,
-                width: '100%',
-                border: 'none',
-              }}
-              title="Template Preview"
-            />
+            {sandpackLoading ? (
+              <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--gray-400)' }}>
+                載入預覽中...
+              </div>
+            ) : sandpackData ? (
+              <div style={{ flex: 1, overflow: 'hidden' }}>
+                <SandpackPreview
+                  pages={sandpackData.pages}
+                  components={sandpackData.components}
+                  styles={sandpackData.styles}
+                  tailwindConfig={sandpackData.tailwindConfig}
+                />
+              </div>
+            ) : previewingTemplate?.thumbnailUrl ? (
+              <img
+                src={previewingTemplate.thumbnailUrl}
+                alt={previewingTemplate.name}
+                style={{ flex: 1, objectFit: 'contain', background: '#f9fafb' }}
+              />
+            ) : (
+              <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--gray-400)' }}>
+                此模板無可用預覽
+              </div>
+            )}
           </motion.div>
         </motion.div>
       )}
