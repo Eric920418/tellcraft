@@ -1799,12 +1799,14 @@ export function repairBracketLookupAccess(
   const potentiallyUndefined: VarInfo[] = []
   const lines = file.content.split('\n')
   for (const line of lines) {
-    if (line.includes('??') || line.includes('||')) continue
-    // 模式 1：bracket lookup → const config = CONFIGS[type]
-    const m1 = line.match(/^\s*(?:const|let)\s+(\w+)\s*=\s*\w+\[[^\]]+\]\s*(?:\/\/.*)?$/)
-    if (m1) potentiallyUndefined.push({ name: m1[1], source: 'bracket' })
-    // 模式 2：optional chain 賦值 → const colors = config?.colors
-    const m2 = line.match(/^\s*(?:const|let)\s+(\w+)\s*=\s*(\S+\?\.\w+)\s*(?:\/\/.*)?$/)
+    // 模式 1：bracket lookup → const config = CONFIGS[type]（跳過已有 ?? 的行）
+    if (!line.includes('??') && !line.includes('||')) {
+      const m1 = line.match(/^\s*(?:const|let)\s+(\w+)\s*=\s*\w+\[[^\]]+\]\s*(?:\/\/.*)?$/)
+      if (m1) potentiallyUndefined.push({ name: m1[1], source: 'bracket' })
+    }
+    // 模式 2：optional chain 賦值 → const colors = config?.colors 或已加 ?? [] 的版本
+    // 不跳過有 ?? 的行（需要檢查是否有 guard）
+    const m2 = line.match(/^\s*(?:const|let)\s+(\w+)\s*=\s*\S+\?\.\w+/)
     if (m2) potentiallyUndefined.push({ name: m2[1], source: 'optchain' })
   }
   if (potentiallyUndefined.length === 0) return { content: file.content, repaired: false }
