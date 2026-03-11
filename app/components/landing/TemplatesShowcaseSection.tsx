@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { motion, useInView } from 'framer-motion'
 import { getTemplates } from '@/app/actions/templates'
-import type { TemplateCardData } from '@/app/lib/templates'
+import { INITIAL_TEMPLATES, toTemplateCardData, type TemplateCardData } from '@/app/lib/templates'
 
 function TemplateCard({ card }: { card: TemplateCardData }) {
   const categoryColors: Record<string, string> = {
@@ -161,16 +161,30 @@ export default function TemplatesShowcaseSection() {
   const isInView = useInView(sectionRef, { once: true, margin: '-80px' })
 
   useEffect(() => {
+    const staticFallback = INITIAL_TEMPLATES.filter(t => t.isActive).map(toTemplateCardData)
+
     getTemplates().then(result => {
-      if (result.success && result.data && result.data.length > 0) {
-        const shuffled = shuffle(result.data)
-        const take = shuffled.slice(0, 16)
-        // Ensure both rows have at least 4 cards for marquee effect
-        const half = Math.max(4, Math.ceil(take.length / 2))
-        setRow1(take.slice(0, half))
-        setRow2(take.slice(half))
-        setLoaded(true)
-      }
+      const data = (result.success && result.data && result.data.length > 0)
+        ? result.data
+        : staticFallback
+      const shuffled = shuffle(data)
+      // Duplicate small datasets so each row has enough cards for marquee
+      const padded = shuffled.length < 8
+        ? [...shuffled, ...shuffled, ...shuffled, ...shuffled]
+        : shuffled
+      const take = padded.slice(0, 16)
+      const half = Math.ceil(take.length / 2)
+      setRow1(take.slice(0, half))
+      setRow2(take.slice(half))
+      setLoaded(true)
+    }).catch(() => {
+      const shuffled = shuffle(staticFallback)
+      const padded = [...shuffled, ...shuffled, ...shuffled, ...shuffled]
+      const take = padded.slice(0, 16)
+      const half = Math.ceil(take.length / 2)
+      setRow1(take.slice(0, half))
+      setRow2(take.slice(half))
+      setLoaded(true)
     })
   }, [])
 
