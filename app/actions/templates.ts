@@ -346,6 +346,103 @@ export async function getMyTemplates(): Promise<ActionResult<vpsApi.MyTemplateDa
 }
 
 /**
+ * 管理員生成並上傳模板基本預覽（根據 metadata 組裝靜態 HTML，無 LLM）
+ */
+export async function generateTemplatePreview(
+  templateId: string
+): Promise<ActionResult<{ version: number }>> {
+  try {
+    const token = await getAuthToken()
+    if (!token) return { success: false, error: 'NOT_AUTHENTICATED' }
+
+    // 取得模板詳情
+    const templateResult = await vpsApi.getTemplateById({ templateId })
+    if (!templateResult.success || !templateResult.data) {
+      return { success: false, error: templateResult.error || '模板不存在' }
+    }
+
+    const raw = templateResult.data.template
+    const defaults = raw.designDefaults as {
+      colorPalette?: { primary?: string; background?: string; text?: string; accent?: string }
+      typography?: { headingFont?: string; bodyFont?: string }
+    } | null | undefined
+
+    const primary = defaults?.colorPalette?.primary || '#6366f1'
+    const background = defaults?.colorPalette?.background || '#ffffff'
+    const textColor = defaults?.colorPalette?.text || '#1f2937'
+    const accent = defaults?.colorPalette?.accent || primary
+
+    const pageStructure = raw.pageStructure as {
+      pages?: Array<{ name?: string; path?: string; sections?: string[] }>
+    } | null | undefined
+    const pages = pageStructure?.pages || []
+
+    const tagsHtml = raw.tags
+      .map(
+        tag =>
+          `<span style="display:inline-block;padding:4px 10px;border-radius:20px;background:${accent}22;color:${accent};font-size:12px;border:1px solid ${accent}44;">${tag}</span>`
+      )
+      .join(' ')
+
+    const pagesHtml =
+      pages.length > 0
+        ? `<div style="margin-top:24px;">
+            <div style="font-size:12px;color:#6b7280;text-transform:uppercase;letter-spacing:.08em;margin-bottom:10px;">頁面結構</div>
+            <div style="display:flex;flex-wrap:wrap;gap:8px;">
+              ${pages.map(p => `<div style="padding:8px 14px;background:#f9fafb;border:1px solid #e5e7eb;border-radius:6px;font-size:13px;">${p.name || p.path || '頁面'}</div>`).join('')}
+            </div>
+          </div>`
+        : ''
+
+    const html = `<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>${raw.name} — 模板預覽</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:${background};color:${textColor};min-height:100vh;}
+.hero{background:${primary};padding:64px 40px;text-align:center;color:#fff;}
+.hero h1{font-size:clamp(28px,5vw,48px);font-weight:700;letter-spacing:-.02em;margin-bottom:12px;}
+.hero p{font-size:16px;opacity:.85;max-width:520px;margin:0 auto;}
+.badge{display:inline-block;padding:6px 14px;border-radius:20px;background:#ffffff22;font-size:13px;margin-top:20px;}
+.content{max-width:800px;margin:0 auto;padding:48px 24px;}
+.section-title{font-size:11px;text-transform:uppercase;letter-spacing:.1em;color:#9ca3af;margin-bottom:12px;}
+.desc{font-size:16px;line-height:1.7;color:#374151;margin-bottom:32px;}
+.tags{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:32px;}
+.divider{height:1px;background:#e5e7eb;margin:32px 0;}
+</style>
+</head>
+<body>
+<div class="hero">
+  <h1>${raw.name}</h1>
+  <p>${raw.description || ''}</p>
+  <div class="badge">${raw.category}</div>
+</div>
+<div class="content">
+  ${raw.description ? `<div class="section-title">關於此模板</div><p class="desc">${raw.description}</p>` : ''}
+  ${raw.tags.length > 0 ? `<div class="section-title">標籤</div><div class="tags">${tagsHtml}</div>` : ''}
+  ${pagesHtml}
+  <div class="divider"></div>
+  <div style="font-size:12px;color:#9ca3af;text-align:center;">Tellcraft Template Preview · Generated ${new Date().toISOString().slice(0, 10)}</div>
+</div>
+</body>
+</html>`
+
+    const uploadResult = await vpsApi.updateTemplatePreview({ token, templateId, htmlContent: html })
+    if (!uploadResult.success || !uploadResult.data) {
+      return { success: false, error: uploadResult.error || '上傳預覽失敗' }
+    }
+
+    return { success: true, data: { version: uploadResult.data.version } }
+  } catch (err) {
+    return { success: false, error: String(err) }
+  }
+}
+
+/**
  * 管理員審核模板（批准/拒絕）
  */
 export async function reviewTemplate(input: {

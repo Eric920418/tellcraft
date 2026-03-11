@@ -5,7 +5,7 @@ import { useRouter } from '@/i18n/navigation'
 import { motion } from 'framer-motion'
 import { useTranslations } from 'next-intl'
 import { getAdminTemplates } from '@/app/lib/vps-api'
-import { reviewTemplate } from '@/app/actions/templates'
+import { reviewTemplate, generateTemplatePreview } from '@/app/actions/templates'
 
 interface AdminTemplate {
   id: string
@@ -23,6 +23,11 @@ interface AdminTemplate {
   reviewStatus: string
   reviewReason: string | null
   submittedBy: string | null
+  preview: {
+    version: number | null
+    updatedAt: string | null
+    status: 'cached' | 'none'
+  }
 }
 
 function getAuthToken(): string | null {
@@ -38,6 +43,8 @@ export default function AdminTemplatesPage() {
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [previewingId, setPreviewingId] = useState<string | null>(null)
+  const [previewIframeKey, setPreviewIframeKey] = useState(0)
+  const [generatingPreviewId, setGeneratingPreviewId] = useState<string | null>(null)
   const [reviewingId, setReviewingId] = useState<string | null>(null)
   const [rejectingId, setRejectingId] = useState<string | null>(null)
   const [rejectReason, setRejectReason] = useState('')
@@ -98,6 +105,21 @@ export default function AdminTemplatesPage() {
       }
     } finally {
       setReviewingId(null)
+    }
+  }
+
+  const handleGeneratePreview = async (templateId: string) => {
+    setGeneratingPreviewId(templateId)
+    try {
+      const result = await generateTemplatePreview(templateId)
+      if (result.success) {
+        await fetchTemplates()
+        setPreviewIframeKey(k => k + 1)
+      } else {
+        alert(result.error || '生成預覽失敗')
+      }
+    } finally {
+      setGeneratingPreviewId(null)
     }
   }
 
@@ -216,6 +238,9 @@ export default function AdminTemplatesPage() {
               </th>
               <th style={{ padding: '12px 16px', textAlign: 'left', fontSize: 12, fontWeight: 500, color: 'var(--gray-500)' }}>
                 審核狀態
+              </th>
+              <th style={{ padding: '12px 16px', textAlign: 'left', fontSize: 12, fontWeight: 500, color: 'var(--gray-500)' }}>
+                預覽
               </th>
               <th style={{ padding: '12px 16px', textAlign: 'right', fontSize: 12, fontWeight: 500, color: 'var(--gray-500)' }}>
                 {t('actions')}
@@ -339,6 +364,35 @@ export default function AdminTemplatesPage() {
                       </span>
                     )}
                   </td>
+                  <td style={{ padding: '16px' }}>
+                    {template.preview?.status === 'cached' ? (
+                      <span
+                        style={{
+                          padding: '4px 8px',
+                          fontSize: 11,
+                          background: '#DCFCE7',
+                          color: '#16A34A',
+                          borderRadius: 4,
+                          border: '1px solid #BBF7D0',
+                        }}
+                      >
+                        已生成
+                      </span>
+                    ) : (
+                      <span
+                        style={{
+                          padding: '4px 8px',
+                          fontSize: 11,
+                          background: 'var(--gray-100)',
+                          color: 'var(--gray-500)',
+                          borderRadius: 4,
+                          border: '1px solid var(--border-color)',
+                        }}
+                      >
+                        未生成
+                      </span>
+                    )}
+                  </td>
                   <td style={{ padding: '16px', textAlign: 'right' }}>
                     <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', alignItems: 'center' }}>
                       {template.reviewStatus === 'pending' && (
@@ -396,7 +450,7 @@ export default function AdminTemplatesPage() {
                 </motion.tr>
                 {rejectingId === template.id && (
                   <tr style={{ borderBottom: '1px solid var(--border-color)', background: '#FFF7ED' }}>
-                    <td colSpan={5} style={{ padding: '12px 16px' }}>
+                    <td colSpan={6} style={{ padding: '12px 16px' }}>
                       <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
                         <span style={{ fontSize: 12, color: '#92400E', flexShrink: 0 }}>拒絕原因：</span>
                         <input
@@ -487,7 +541,7 @@ export default function AdminTemplatesPage() {
               display: 'flex',
               flexDirection: 'column',
             }}
-            onClick={e => e.stopPropagation()}
+            onClick={(e: React.MouseEvent) => e.stopPropagation()}
           >
             <div
               style={{
@@ -496,27 +550,48 @@ export default function AdminTemplatesPage() {
                 display: 'flex',
                 justifyContent: 'space-between',
                 alignItems: 'center',
+                gap: 12,
               }}
             >
               <span style={{ fontWeight: 500 }}>
                 {t('previewTitle', { name: templates.find(tpl => tpl.id === previewingId)?.name || '' })}
               </span>
-              <button
-                onClick={() => setPreviewingId(null)}
-                style={{
-                  padding: '4px 8px',
-                  fontSize: 12,
-                  background: 'var(--gray-100)',
-                  border: 'none',
-                  borderRadius: 4,
-                  cursor: 'pointer',
-                }}
-              >
-                {t('closePreview')}
-              </button>
+              <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                {templates.find(tpl => tpl.id === previewingId)?.preview?.status === 'none' && (
+                  <button
+                    onClick={() => previewingId && handleGeneratePreview(previewingId)}
+                    disabled={generatingPreviewId === previewingId}
+                    style={{
+                      padding: '6px 12px',
+                      fontSize: 12,
+                      background: generatingPreviewId === previewingId ? 'var(--gray-100)' : '#FFF7ED',
+                      color: generatingPreviewId === previewingId ? 'var(--gray-400)' : '#EA580C',
+                      border: '1px solid #FED7AA',
+                      borderRadius: 4,
+                      cursor: generatingPreviewId === previewingId ? 'not-allowed' : 'pointer',
+                    }}
+                  >
+                    {generatingPreviewId === previewingId ? '生成中...' : '⚡ 生成基本預覽'}
+                  </button>
+                )}
+                <button
+                  onClick={() => setPreviewingId(null)}
+                  style={{
+                    padding: '4px 8px',
+                    fontSize: 12,
+                    background: 'var(--gray-100)',
+                    border: 'none',
+                    borderRadius: 4,
+                    cursor: 'pointer',
+                  }}
+                >
+                  {t('closePreview')}
+                </button>
+              </div>
             </div>
             <iframe
-              src={`${previewBaseUrl}/api/templates/preview/${previewingId}`}
+              key={previewIframeKey}
+              src={`${previewBaseUrl}/api/templates/preview/${previewingId}?v=${previewIframeKey}`}
               style={{
                 flex: 1,
                 width: '100%',

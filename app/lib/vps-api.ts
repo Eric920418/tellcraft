@@ -933,6 +933,21 @@ export async function regenerateTemplatePreview(input: {
   })
 }
 
+/**
+ * 上傳（更新）模板預覽 HTML（管理員專用）
+ */
+export async function updateTemplatePreview(input: {
+  token: string
+  templateId: string
+  htmlContent: string
+}): Promise<ApiResponse<{ success: boolean; version: number; htmlLength: number }>> {
+  return apiRequest(`/api/templates/preview/${input.templateId}`, {
+    method: 'PUT',
+    headers: { Authorization: `Bearer ${input.token}` },
+    body: JSON.stringify({ html_content: input.htmlContent }),
+  })
+}
+
 // ============================================================
 // 模板提交 API
 // ============================================================
