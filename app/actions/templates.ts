@@ -12,6 +12,7 @@ import {
   getFeaturedTemplates
 } from '../lib/templates'
 import * as vpsApi from '../lib/vps-api'
+import { reviewTemplate as reviewTemplateApi } from '../lib/vps-api'
 import { getAuthToken } from '../lib/auth'
 
 // ============================================================
@@ -339,6 +340,28 @@ export async function getMyTemplates(): Promise<ActionResult<vpsApi.MyTemplateDa
       return { success: false, error: result.error || '獲取失敗' }
     }
     return { success: true, data: result.data.templates }
+  } catch (err) {
+    return { success: false, error: String(err) }
+  }
+}
+
+/**
+ * 管理員審核模板（批准/拒絕）
+ */
+export async function reviewTemplate(input: {
+  templateId: string
+  status: 'approved' | 'rejected'
+  reason?: string
+}): Promise<ActionResult<{ reviewStatus: string; isActive: boolean }>> {
+  try {
+    const token = await getAuthToken()
+    if (!token) return { success: false, error: 'NOT_AUTHENTICATED' }
+
+    const result = await reviewTemplateApi({ token, ...input })
+    if (!result.success || !result.data) {
+      return { success: false, error: result.error || '審核失敗' }
+    }
+    return { success: true, data: result.data }
   } catch (err) {
     return { success: false, error: String(err) }
   }

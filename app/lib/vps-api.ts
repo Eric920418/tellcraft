@@ -893,6 +893,10 @@ export async function initializeTemplates(input: {
  */
 interface AdminTemplateData extends TemplateData {
   createdAt: string
+  reviewStatus: string
+  reviewReason: string | null
+  submittedBy: string | null
+  sourceProjectId: string | null
   preview: {
     version: number | null
     updatedAt: string | null

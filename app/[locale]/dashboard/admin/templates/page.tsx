@@ -5,6 +5,7 @@ import { useRouter } from '@/i18n/navigation'
 import { motion } from 'framer-motion'
 import { useTranslations } from 'next-intl'
 import { getAdminTemplates } from '@/app/lib/vps-api'
+import { reviewTemplate } from '@/app/actions/templates'
 
 interface AdminTemplate {
   id: string
@@ -19,6 +20,9 @@ interface AdminTemplate {
   isFeatured: boolean
   sortOrder: number
   createdAt: string
+  reviewStatus: string
+  reviewReason: string | null
+  submittedBy: string | null
 }
 
 function getAuthToken(): string | null {
@@ -34,6 +38,9 @@ export default function AdminTemplatesPage() {
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [previewingId, setPreviewingId] = useState<string | null>(null)
+  const [reviewingId, setReviewingId] = useState<string | null>(null)
+  const [rejectingId, setRejectingId] = useState<string | null>(null)
+  const [rejectReason, setRejectReason] = useState('')
 
   const fetchTemplates = useCallback(async () => {
     const token = getAuthToken()
@@ -55,7 +62,7 @@ export default function AdminTemplatesPage() {
     }
 
     if (result.data) {
-      setTemplates(result.data.templates)
+      setTemplates(result.data.templates as AdminTemplate[])
     }
     setIsLoading(false)
   }, [router])
@@ -63,6 +70,36 @@ export default function AdminTemplatesPage() {
   useEffect(() => {
     fetchTemplates()
   }, [fetchTemplates])
+
+  const handleApprove = async (templateId: string) => {
+    setReviewingId(templateId)
+    try {
+      const result = await reviewTemplate({ templateId, status: 'approved' })
+      if (result.success) {
+        await fetchTemplates()
+      } else {
+        alert(result.error || '審核失敗')
+      }
+    } finally {
+      setReviewingId(null)
+    }
+  }
+
+  const handleRejectConfirm = async (templateId: string) => {
+    setReviewingId(templateId)
+    try {
+      const result = await reviewTemplate({ templateId, status: 'rejected', reason: rejectReason || undefined })
+      if (result.success) {
+        setRejectingId(null)
+        setRejectReason('')
+        await fetchTemplates()
+      } else {
+        alert(result.error || '拒絕失敗')
+      }
+    } finally {
+      setReviewingId(null)
+    }
+  }
 
   if (isLoading) {
     return (
@@ -87,8 +124,8 @@ export default function AdminTemplatesPage() {
     )
   }
 
-  // 使用本地 API route（HTTPS 代理），避免混合內容問題
-  const previewBaseUrl = ''  // 相對路徑，自動使用當前域名
+  const pendingCount = templates.filter(t => t.reviewStatus === 'pending').length
+  const previewBaseUrl = ''
 
   return (
     <div>
@@ -119,7 +156,7 @@ export default function AdminTemplatesPage() {
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.4, delay: 0.1 }}
-        style={{ marginBottom: 32 }}
+        style={{ marginBottom: 32, display: 'flex', gap: 16 }}
       >
         <div
           style={{
@@ -136,6 +173,23 @@ export default function AdminTemplatesPage() {
             {templates.length}
           </div>
         </div>
+        {pendingCount > 0 && (
+          <div
+            style={{
+              padding: 20,
+              background: '#FFF7ED',
+              border: '1px solid #FED7AA',
+              display: 'inline-block',
+            }}
+          >
+            <div style={{ fontSize: 11, color: '#92400E', marginBottom: 8, textTransform: 'uppercase' }}>
+              待審核
+            </div>
+            <div style={{ fontSize: 28, fontWeight: 300, fontFamily: 'var(--font-mono)', color: '#EA580C' }}>
+              {pendingCount}
+            </div>
+          </div>
+        )}
       </motion.div>
 
       {/* Templates Table */}
@@ -160,6 +214,9 @@ export default function AdminTemplatesPage() {
               <th style={{ padding: '12px 16px', textAlign: 'left', fontSize: 12, fontWeight: 500, color: 'var(--gray-500)' }}>
                 {t('status')}
               </th>
+              <th style={{ padding: '12px 16px', textAlign: 'left', fontSize: 12, fontWeight: 500, color: 'var(--gray-500)' }}>
+                審核狀態
+              </th>
               <th style={{ padding: '12px 16px', textAlign: 'right', fontSize: 12, fontWeight: 500, color: 'var(--gray-500)' }}>
                 {t('actions')}
               </th>
@@ -167,34 +224,78 @@ export default function AdminTemplatesPage() {
           </thead>
           <tbody>
             {templates.map((template, index) => (
-              <motion.tr
-                key={template.id}
-                initial={{ opacity: 0, y: 10 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ duration: 0.2, delay: index * 0.03 }}
-                style={{ borderBottom: '1px solid var(--border-color)' }}
-              >
-                <td style={{ padding: '16px' }}>
-                  <div>
-                    <div style={{ fontWeight: 500, marginBottom: 2 }}>{template.name}</div>
-                    <div style={{ fontSize: 12, color: 'var(--gray-500)' }}>{template.slug}</div>
-                  </div>
-                </td>
-                <td style={{ padding: '16px' }}>
-                  <span
-                    style={{
-                      padding: '4px 8px',
-                      fontSize: 11,
-                      background: 'var(--gray-100)',
-                      borderRadius: 4,
-                    }}
-                  >
-                    {template.category}
-                  </span>
-                </td>
-                <td style={{ padding: '16px' }}>
-                  <div style={{ display: 'flex', gap: 8 }}>
-                    {template.isActive && (
+              <>
+                <motion.tr
+                  key={template.id}
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ duration: 0.2, delay: index * 0.03 }}
+                  style={{ borderBottom: rejectingId === template.id ? 'none' : '1px solid var(--border-color)' }}
+                >
+                  <td style={{ padding: '16px' }}>
+                    <div>
+                      <div style={{ fontWeight: 500, marginBottom: 2 }}>{template.name}</div>
+                      <div style={{ fontSize: 12, color: 'var(--gray-500)' }}>{template.slug}</div>
+                    </div>
+                  </td>
+                  <td style={{ padding: '16px' }}>
+                    <span
+                      style={{
+                        padding: '4px 8px',
+                        fontSize: 11,
+                        background: 'var(--gray-100)',
+                        borderRadius: 4,
+                      }}
+                    >
+                      {template.category}
+                    </span>
+                  </td>
+                  <td style={{ padding: '16px' }}>
+                    <div style={{ display: 'flex', gap: 8 }}>
+                      {template.isActive && (
+                        <span
+                          style={{
+                            padding: '4px 8px',
+                            fontSize: 11,
+                            background: '#DCFCE7',
+                            color: '#16A34A',
+                            borderRadius: 4,
+                          }}
+                        >
+                          {t('enabled')}
+                        </span>
+                      )}
+                      {template.isFeatured && (
+                        <span
+                          style={{
+                            padding: '4px 8px',
+                            fontSize: 11,
+                            background: '#FEF3C7',
+                            color: '#D97706',
+                            borderRadius: 4,
+                          }}
+                        >
+                          {t('featured')}
+                        </span>
+                      )}
+                    </div>
+                  </td>
+                  <td style={{ padding: '16px' }}>
+                    {template.reviewStatus === 'pending' && (
+                      <span
+                        style={{
+                          padding: '4px 8px',
+                          fontSize: 11,
+                          background: '#FFF7ED',
+                          color: '#EA580C',
+                          borderRadius: 4,
+                          border: '1px solid #FED7AA',
+                        }}
+                      >
+                        待審核
+                      </span>
+                    )}
+                    {template.reviewStatus === 'approved' && (
                       <span
                         style={{
                           padding: '4px 8px',
@@ -202,42 +303,155 @@ export default function AdminTemplatesPage() {
                           background: '#DCFCE7',
                           color: '#16A34A',
                           borderRadius: 4,
+                          border: '1px solid #BBF7D0',
                         }}
                       >
-                        {t('enabled')}
+                        已通過
                       </span>
                     )}
-                    {template.isFeatured && (
+                    {template.reviewStatus === 'rejected' && (
+                      <span
+                        title={template.reviewReason || ''}
+                        style={{
+                          padding: '4px 8px',
+                          fontSize: 11,
+                          background: '#FEE2E2',
+                          color: '#DC2626',
+                          borderRadius: 4,
+                          border: '1px solid #FECACA',
+                          cursor: template.reviewReason ? 'help' : 'default',
+                        }}
+                      >
+                        已拒絕
+                      </span>
+                    )}
+                    {(!template.reviewStatus || (template.reviewStatus !== 'pending' && template.reviewStatus !== 'approved' && template.reviewStatus !== 'rejected')) && (
                       <span
                         style={{
                           padding: '4px 8px',
                           fontSize: 11,
-                          background: '#FEF3C7',
-                          color: '#D97706',
+                          background: 'var(--gray-100)',
+                          color: 'var(--gray-500)',
                           borderRadius: 4,
                         }}
                       >
-                        {t('featured')}
+                        —
                       </span>
                     )}
-                  </div>
-                </td>
-                <td style={{ padding: '16px', textAlign: 'right' }}>
-                  <button
-                    onClick={() => setPreviewingId(previewingId === template.id ? null : template.id)}
-                    style={{
-                      padding: '6px 12px',
-                      fontSize: 12,
-                      background: 'var(--gray-100)',
-                      border: 'none',
-                      borderRadius: 4,
-                      cursor: 'pointer',
-                    }}
-                  >
-                    {previewingId === template.id ? t('closePreview') : t('preview')}
-                  </button>
-                </td>
-              </motion.tr>
+                  </td>
+                  <td style={{ padding: '16px', textAlign: 'right' }}>
+                    <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', alignItems: 'center' }}>
+                      {template.reviewStatus === 'pending' && (
+                        <>
+                          <button
+                            onClick={() => handleApprove(template.id)}
+                            disabled={reviewingId === template.id}
+                            style={{
+                              padding: '6px 12px',
+                              fontSize: 12,
+                              background: reviewingId === template.id ? 'var(--gray-100)' : '#DCFCE7',
+                              color: reviewingId === template.id ? 'var(--gray-400)' : '#16A34A',
+                              border: '1px solid #BBF7D0',
+                              borderRadius: 4,
+                              cursor: reviewingId === template.id ? 'not-allowed' : 'pointer',
+                            }}
+                          >
+                            {reviewingId === template.id ? '...' : '✓ 批准'}
+                          </button>
+                          <button
+                            onClick={() => {
+                              setRejectingId(rejectingId === template.id ? null : template.id)
+                              setRejectReason('')
+                            }}
+                            disabled={reviewingId === template.id}
+                            style={{
+                              padding: '6px 12px',
+                              fontSize: 12,
+                              background: '#FEE2E2',
+                              color: '#DC2626',
+                              border: '1px solid #FECACA',
+                              borderRadius: 4,
+                              cursor: 'pointer',
+                            }}
+                          >
+                            ✗ 拒絕
+                          </button>
+                        </>
+                      )}
+                      <button
+                        onClick={() => setPreviewingId(previewingId === template.id ? null : template.id)}
+                        style={{
+                          padding: '6px 12px',
+                          fontSize: 12,
+                          background: 'var(--gray-100)',
+                          border: 'none',
+                          borderRadius: 4,
+                          cursor: 'pointer',
+                        }}
+                      >
+                        {previewingId === template.id ? t('closePreview') : t('preview')}
+                      </button>
+                    </div>
+                  </td>
+                </motion.tr>
+                {rejectingId === template.id && (
+                  <tr style={{ borderBottom: '1px solid var(--border-color)', background: '#FFF7ED' }}>
+                    <td colSpan={5} style={{ padding: '12px 16px' }}>
+                      <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                        <span style={{ fontSize: 12, color: '#92400E', flexShrink: 0 }}>拒絕原因：</span>
+                        <input
+                          type="text"
+                          value={rejectReason}
+                          onChange={e => setRejectReason(e.target.value)}
+                          placeholder="選填，說明拒絕原因"
+                          style={{
+                            flex: 1,
+                            padding: '6px 10px',
+                            fontSize: 12,
+                            border: '1px solid #FED7AA',
+                            borderRadius: 4,
+                            background: 'white',
+                            outline: 'none',
+                          }}
+                          onKeyDown={e => {
+                            if (e.key === 'Enter') handleRejectConfirm(template.id)
+                            if (e.key === 'Escape') { setRejectingId(null); setRejectReason('') }
+                          }}
+                          autoFocus
+                        />
+                        <button
+                          onClick={() => handleRejectConfirm(template.id)}
+                          disabled={reviewingId === template.id}
+                          style={{
+                            padding: '6px 12px',
+                            fontSize: 12,
+                            background: '#DC2626',
+                            color: 'white',
+                            border: 'none',
+                            borderRadius: 4,
+                            cursor: 'pointer',
+                          }}
+                        >
+                          {reviewingId === template.id ? '...' : '確認'}
+                        </button>
+                        <button
+                          onClick={() => { setRejectingId(null); setRejectReason('') }}
+                          style={{
+                            padding: '6px 12px',
+                            fontSize: 12,
+                            background: 'var(--gray-100)',
+                            border: 'none',
+                            borderRadius: 4,
+                            cursor: 'pointer',
+                          }}
+                        >
+                          取消
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                )}
+              </>
             ))}
           </tbody>
         </table>
