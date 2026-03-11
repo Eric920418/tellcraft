@@ -271,6 +271,78 @@ export async function getRecommendedTemplates(input: {
   }
 }
 
+// ============================================================
+// 模板提交 Actions
+// ============================================================
+
+/**
+ * 模板提交 preflight 檢查
+ */
+export async function templateSubmitPreflight(
+  projectId: string
+): Promise<ActionResult<{
+  checks: { hasPages: boolean; hasStyles: boolean; isDeployed: boolean; notDuplicate: boolean }
+  passed: boolean
+  errors: string[]
+  prefilled: { name: string; category: string; tags: string[] }
+}>> {
+  try {
+    const token = await getAuthToken()
+    if (!token) return { success: false, error: '未登入' }
+
+    const result = await vpsApi.templateSubmitPreflight({ token, projectId })
+    if (!result.success || !result.data) {
+      return { success: false, error: result.error || '檢查失敗' }
+    }
+    return { success: true, data: result.data }
+  } catch (err) {
+    return { success: false, error: String(err) }
+  }
+}
+
+/**
+ * 提交專案為模板
+ */
+export async function templateSubmit(input: {
+  projectId: string
+  name: string
+  description: string
+  category: string
+  tags: string[]
+  thumbnailUrl?: string
+}): Promise<ActionResult<{ templateId: string; slug: string; reviewStatus: string }>> {
+  try {
+    const token = await getAuthToken()
+    if (!token) return { success: false, error: '未登入' }
+
+    const result = await vpsApi.templateSubmit({ token, ...input })
+    if (!result.success || !result.data) {
+      return { success: false, error: result.error || '提交失敗' }
+    }
+    return { success: true, data: result.data }
+  } catch (err) {
+    return { success: false, error: String(err) }
+  }
+}
+
+/**
+ * 獲取我的模板列表
+ */
+export async function getMyTemplates(): Promise<ActionResult<vpsApi.MyTemplateData[]>> {
+  try {
+    const token = await getAuthToken()
+    if (!token) return { success: false, error: '未登入' }
+
+    const result = await vpsApi.getMyTemplates({ token })
+    if (!result.success || !result.data) {
+      return { success: false, error: result.error || '獲取失敗' }
+    }
+    return { success: true, data: result.data.templates }
+  } catch (err) {
+    return { success: false, error: String(err) }
+  }
+}
+
 /**
  * 初始化模板資料（將靜態資料寫入資料庫）
  * - 僅供管理員使用

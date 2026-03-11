@@ -1,10 +1,17 @@
 /**
  * Templates API 路由
- * 提供模板資料的 CRUD 操作
+ * 提供模板資料的 CRUD 操作 + 用戶模板提交 + 管理員審核
  */
 import { Router } from 'express'
+import crypto from 'crypto'
+import path from 'path'
+import fs from 'fs'
 import { query, queryOne } from '../db/client'
 import { requireAuth, requireAdmin } from '../middleware/auth'
+import { validateBody } from '../middleware/validate'
+import { templateSubmitPreflightSchema, templateSubmitSchema, templateReviewSchema } from '../schemas/template-submit'
+import { takeScreenshot } from '../services/reference-analyzer'
+import { getEnv } from '../lib/env'
 import { createLogger } from '../lib/logger'
 
 const logger = createLogger('templates')
@@ -13,6 +20,302 @@ const router: Router = Router()
 
 // UUID 格式檢測
 const isUUID = (s: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s)
+
+// 簡易 slugify
+function slugify(text: string): string {
+  return text
+    .toLowerCase()
+    .trim()
+    .replace(/[\s_]+/g, '-')
+    .replace(/[^\w\u4e00-\u9fff-]/g, '')
+    .replace(/-+/g, '-')
+    .replace(/^-|-$/g, '')
+    .slice(0, 80) || 'template'
+}
+
+// 截圖並存到 UPLOAD_DIR，回傳公開 URL
+async function captureAndSaveThumbnail(url: string): Promise<string | null> {
+  try {
+    const buffer = await takeScreenshot(url)
+    if (!buffer) return null
+
+    const env = getEnv()
+    const uploadDir = env.UPLOAD_DIR
+    const uploadBaseUrl = (env.UPLOAD_BASE_URL || '').trim().replace(/\/+$/, '')
+    if (!uploadBaseUrl) {
+      logger.warn('UPLOAD_BASE_URL 未設定，無法儲存截圖')
+      return null
+    }
+
+    const now = new Date()
+    const subDir = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
+    const fullDir = path.join(uploadDir, subDir)
+    fs.mkdirSync(fullDir, { recursive: true })
+
+    const filename = `tmpl-${crypto.randomUUID()}.jpg`
+    const filePath = path.join(fullDir, filename)
+    fs.writeFileSync(filePath, buffer)
+
+    return `${uploadBaseUrl}/${subDir}/${filename}`
+  } catch (err) {
+    logger.warn({ error: String(err).slice(0, 200) }, '封面截圖儲存失敗')
+    return null
+  }
+}
+
+// ============================================================
+// 模板提交 API（放在 /:id 前避免路徑衝突）
+// ============================================================
+
+/**
+ * POST /api/templates/submit/preflight
+ * 提交前檢查：檢查專案狀態、推斷預填資料
+ */
+router.post('/submit/preflight', requireAuth, validateBody(templateSubmitPreflightSchema), async (req, res) => {
+  try {
+    const { projectId } = req.body
+    const userId = req.user!.id
+
+    // 驗證專案擁有權
+    const project = await queryOne<{
+      id: string; name: string; status: string; vercel_url: string | null; user_id: string
+    }>(
+      'SELECT id, name, status, vercel_url, user_id FROM projects WHERE id = $1',
+      [projectId]
+    )
+
+    if (!project) {
+      return res.status(404).json({ error: '專案不存在' })
+    }
+    if (project.user_id !== userId) {
+      return res.status(403).json({ error: '無權限操作此專案' })
+    }
+
+    // 檢查項目
+    const filesResult = await query<{ file_path: string; file_type: string }>(
+      `SELECT file_path, CASE
+        WHEN file_path LIKE '%/page.tsx' OR file_path LIKE '%/page.jsx' THEN 'page'
+        WHEN file_path LIKE '%.css' OR file_path LIKE '%tailwind%' THEN 'style'
+        ELSE 'other'
+       END as file_type
+       FROM project_files WHERE project_id = $1`,
+      [projectId]
+    )
+
+    const hasPages = filesResult.rows.some(f => f.file_type === 'page')
+    const hasStyles = filesResult.rows.some(f => f.file_type === 'style')
+    const isDeployed = project.status === 'deployed' && !!project.vercel_url
+
+    // 重複檢查
+    const existing = await queryOne<{ id: string }>(
+      `SELECT id FROM templates WHERE source_project_id = $1 AND review_status IN ('pending', 'approved')`,
+      [projectId]
+    )
+    const notDuplicate = !existing
+
+    const checks = { hasPages, hasStyles, isDeployed, notDuplicate }
+    const errors: string[] = []
+    if (!hasPages) errors.push('專案中沒有頁面檔案')
+    if (!hasStyles) errors.push('專案中沒有樣式檔案')
+    if (!isDeployed) errors.push('專案尚未部署')
+    if (!notDuplicate) errors.push('此專案已提交過模板')
+
+    const passed = errors.length === 0
+
+    // 推斷預填資料
+    const prefilled: { name: string; category: string; tags: string[] } = {
+      name: project.name || '',
+      category: 'landing',
+      tags: [],
+    }
+
+    // 嘗試從 Redis FlowState 推斷分類
+    // 這裡用簡單的專案名推斷，因為路由中無法直接訪問 Redis
+    const nameLower = (project.name || '').toLowerCase()
+    if (nameLower.includes('saas') || nameLower.includes('dashboard')) prefilled.category = 'saas'
+    else if (nameLower.includes('ecommerce') || nameLower.includes('shop') || nameLower.includes('商')) prefilled.category = 'ecommerce'
+    else if (nameLower.includes('blog') || nameLower.includes('部落格')) prefilled.category = 'blog'
+    else if (nameLower.includes('portfolio') || nameLower.includes('作品')) prefilled.category = 'portfolio'
+    else if (nameLower.includes('event') || nameLower.includes('活動')) prefilled.category = 'event'
+
+    res.json({ checks, passed, errors, prefilled })
+  } catch (error) {
+    logger.error({ err: error }, '模板提交 preflight 失敗')
+    res.status(500).json({ error: '檢查失敗' })
+  }
+})
+
+/**
+ * POST /api/templates/submit
+ * 用戶提交專案為模板
+ */
+router.post('/submit', requireAuth, validateBody(templateSubmitSchema), async (req, res) => {
+  try {
+    const { projectId, name, description, category, tags, thumbnailUrl } = req.body
+    const userId = req.user!.id
+
+    // 重新驗證擁有權 + 專案狀態
+    const project = await queryOne<{
+      id: string; name: string; status: string; vercel_url: string | null; user_id: string
+    }>(
+      'SELECT id, name, status, vercel_url, user_id FROM projects WHERE id = $1',
+      [projectId]
+    )
+
+    if (!project) return res.status(404).json({ error: '專案不存在' })
+    if (project.user_id !== userId) return res.status(403).json({ error: '無權限操作此專案' })
+
+    // 重新執行關鍵檢查（防繞過）
+    const filesResult = await query<{ file_path: string }>(
+      `SELECT file_path FROM project_files WHERE project_id = $1 AND (file_path LIKE '%/page.tsx' OR file_path LIKE '%/page.jsx')`,
+      [projectId]
+    )
+    if (filesResult.rows.length === 0) return res.status(400).json({ error: '專案中沒有頁面檔案' })
+
+    const existing = await queryOne<{ id: string }>(
+      `SELECT id FROM templates WHERE source_project_id = $1 AND review_status IN ('pending', 'approved')`,
+      [projectId]
+    )
+    if (existing) return res.status(409).json({ error: '此專案已提交過模板' })
+
+    // Slug 生成（衝突時加隨機後綴，最多重試 3 次）
+    let slug = slugify(name)
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const slugConflict = await queryOne<{ id: string }>('SELECT id FROM templates WHERE slug = $1', [slug])
+      if (!slugConflict) break
+      slug = `${slugify(name)}-${crypto.randomBytes(3).toString('hex')}`
+    }
+
+    // Name 衝突處理
+    let finalName = name
+    const nameConflict = await queryOne<{ id: string }>('SELECT id FROM templates WHERE name = $1', [finalName])
+    if (nameConflict) {
+      finalName = `${name} (${crypto.randomBytes(3).toString('hex')})`
+    }
+
+    // 從 project_files 組裝 page_structure
+    const allFiles = await query<{ file_path: string }>(
+      'SELECT file_path FROM project_files WHERE project_id = $1',
+      [projectId]
+    )
+    const pages = allFiles.rows
+      .filter(f => f.file_path.includes('/page.tsx') || f.file_path.includes('/page.jsx'))
+      .map(f => f.file_path)
+    const components = allFiles.rows
+      .filter(f => !f.file_path.includes('/page.') && (f.file_path.endsWith('.tsx') || f.file_path.endsWith('.jsx')))
+      .map(f => f.file_path)
+    const pageStructure = { pages, components }
+
+    // 封面截圖
+    let finalThumbnailUrl = thumbnailUrl || null
+    if (!finalThumbnailUrl && project.vercel_url) {
+      const vercelUrl = project.vercel_url.startsWith('http') ? project.vercel_url : `https://${project.vercel_url}`
+      finalThumbnailUrl = await captureAndSaveThumbnail(vercelUrl)
+    }
+
+    // INSERT 模板
+    const templateId = crypto.randomUUID()
+    await query(
+      `INSERT INTO templates (id, name, slug, category, description, thumbnail_url, tags, page_structure,
+        is_active, is_featured, sort_order, source_project_id, submitted_by, review_status)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, false, false, 999, $9, $10, 'pending')`,
+      [
+        templateId,
+        finalName,
+        slug,
+        category,
+        description,
+        finalThumbnailUrl,
+        JSON.stringify(tags),
+        JSON.stringify(pageStructure),
+        projectId,
+        userId,
+      ]
+    )
+
+    logger.info({ templateId, slug, projectId, userId }, '用戶提交模板')
+
+    res.json({ templateId, slug, reviewStatus: 'pending' })
+  } catch (error) {
+    logger.error({ err: error }, '模板提交失敗')
+    res.status(500).json({ error: '提交失敗' })
+  }
+})
+
+/**
+ * GET /api/templates/mine
+ * 獲取當前用戶提交的模板列表
+ */
+router.get('/mine', requireAuth, async (req, res) => {
+  try {
+    const userId = req.user!.id
+
+    const result = await query<{
+      id: string; name: string; slug: string; category: string; description: string
+      thumbnail_url: string | null; tags: string[]; review_status: string; review_reason: string | null
+      created_at: Date; source_project_id: string | null
+    }>(
+      `SELECT id, name, slug, category, description, thumbnail_url, tags, review_status, review_reason, created_at, source_project_id
+       FROM templates WHERE submitted_by = $1 ORDER BY created_at DESC`,
+      [userId]
+    )
+
+    const templates = result.rows.map(row => ({
+      id: row.id,
+      name: row.name,
+      slug: row.slug,
+      category: row.category,
+      description: row.description,
+      thumbnailUrl: row.thumbnail_url,
+      tags: row.tags,
+      reviewStatus: row.review_status,
+      reviewReason: row.review_reason,
+      createdAt: row.created_at,
+      sourceProjectId: row.source_project_id,
+    }))
+
+    res.json({ templates })
+  } catch (error) {
+    logger.error({ err: error }, '獲取我的模板失敗')
+    res.status(500).json({ error: '獲取失敗' })
+  }
+})
+
+/**
+ * PATCH /api/templates/:id/review
+ * 管理員審核模板（approve/reject）
+ */
+router.patch('/:id/review', requireAdmin, validateBody(templateReviewSchema), async (req, res) => {
+  try {
+    const { id } = req.params
+    const { status, reason } = req.body
+
+    if (!isUUID(id)) return res.status(400).json({ error: '無效的模板 ID' })
+
+    const template = await queryOne<{ id: string; review_status: string }>(
+      'SELECT id, review_status FROM templates WHERE id = $1',
+      [id]
+    )
+    if (!template) return res.status(404).json({ error: '模板不存在' })
+
+    const isActive = status === 'approved'
+    await query(
+      `UPDATE templates SET review_status = $1, review_reason = $2, is_active = $3 WHERE id = $4`,
+      [status, reason || null, isActive, id]
+    )
+
+    logger.info({ templateId: id, status, adminId: req.user!.id }, '管理員審核模板')
+
+    res.json({ success: true, reviewStatus: status, isActive })
+  } catch (error) {
+    logger.error({ err: error }, '模板審核失敗')
+    res.status(500).json({ error: '審核失敗' })
+  }
+})
+
+// ============================================================
+// 公開模板 API
+// ============================================================
 
 /**
  * GET /api/templates
@@ -25,7 +328,7 @@ router.get('/', async (req, res) => {
       featuredOnly?: string
     }
 
-    let sql = `SELECT * FROM templates WHERE is_active = true`
+    let sql = `SELECT * FROM templates WHERE is_active = true AND review_status = 'approved'`
     const params: string[] = []
     let paramIndex = 1
 
@@ -440,6 +743,23 @@ router.post('/init', requireAdmin, async (req, res) => {
 router.get('/admin/list', requireAdmin, async (req, res) => {
   try {
     // 獲取所有模板和預覽狀態
+    const { review_status: filterStatus } = req.query as { review_status?: string }
+
+    let sql = `SELECT
+        t.*,
+        tp.version as preview_version,
+        tp.updated_at as preview_updated_at
+      FROM templates t
+      LEFT JOIN template_previews tp ON t.id = tp.template_id`
+    const params: string[] = []
+
+    if (filterStatus && ['pending', 'approved', 'rejected'].includes(filterStatus)) {
+      sql += ` WHERE t.review_status = $1`
+      params.push(filterStatus)
+    }
+
+    sql += ` ORDER BY t.created_at DESC`
+
     const result = await query<{
       id: string
       name: string
@@ -453,17 +773,13 @@ router.get('/admin/list', requireAdmin, async (req, res) => {
       is_featured: boolean
       sort_order: number
       created_at: Date
+      review_status: string
+      review_reason: string | null
+      submitted_by: string | null
+      source_project_id: string | null
       preview_version: number | null
       preview_updated_at: Date | null
-    }>(
-      `SELECT
-        t.*,
-        tp.version as preview_version,
-        tp.updated_at as preview_updated_at
-      FROM templates t
-      LEFT JOIN template_previews tp ON t.id = tp.template_id
-      ORDER BY t.sort_order ASC`
-    )
+    }>(sql, params)
 
     const templates = result.rows.map(row => ({
       id: row.id,
@@ -478,6 +794,10 @@ router.get('/admin/list', requireAdmin, async (req, res) => {
       isFeatured: row.is_featured,
       sortOrder: row.sort_order,
       createdAt: row.created_at,
+      reviewStatus: row.review_status || 'approved',
+      reviewReason: row.review_reason,
+      submittedBy: row.submitted_by,
+      sourceProjectId: row.source_project_id,
       preview: {
         version: row.preview_version,
         updatedAt: row.preview_updated_at,

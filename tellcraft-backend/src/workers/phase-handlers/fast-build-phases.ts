@@ -206,6 +206,13 @@ export function buildPostDeployFastBuildQuickReplies(
     })
   }
 
+  // 上傳到模板庫
+  quickReplies.push({
+    label: isChinese ? '上傳到模板庫' : 'Upload as Template',
+    value: '__upload_template__',
+    style: 'ghost',
+  })
+
   return quickReplies
 }
 

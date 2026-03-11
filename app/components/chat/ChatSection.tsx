@@ -31,6 +31,7 @@ import GlowButton from '@/app/components/GlowButton'
 import SplitLayout from '@/app/components/uiux/SplitLayout'
 import SpecGenerationView from '@/app/components/SpecGenerationView'
 import LoginPrompt from '@/app/components/LoginPrompt'
+import TemplateSubmitModal from '@/app/components/templates/TemplateSubmitModal'
 import { getTemplateById } from '@/app/actions/templates'
 
 import ChatMessageList from './ChatMessageList'
@@ -91,6 +92,9 @@ export default function ChatSection({
 
   // ── Mobile Preview ──
   const [showMobilePreview, setShowMobilePreview] = useState(false)
+
+  // ── Template Submit Modal ──
+  const [showTemplateSubmitModal, setShowTemplateSubmitModal] = useState(false)
 
   // ── Auto-repair state ──
   const [autoRepairStatus, setAutoRepairStatus] = useState<'idle' | 'detecting' | 'repairing'>('idle')
@@ -385,6 +389,13 @@ export default function ChatSection({
   ) => {
     const isSpecialCommand = (content.trim().startsWith('__') && content.trim().endsWith('__'))
       || content.trim().startsWith('__auto_repair_preview__:')
+
+    // 攔截模板上傳指令 — 在前端處理，不發送到後端
+    if (content.trim() === '__upload_template__') {
+      setShowTemplateSubmitModal(true)
+      return true
+    }
+
     if (!session.sessionInfo || !content.trim()) return false
     // 特殊指令（QuickReply buttons）放寬 isTyping 檢查，避免 stale state 卡住
     if (!isSpecialCommand && (isTyping || sendCooldown)) return false
@@ -887,6 +898,12 @@ export default function ChatSection({
         setShowMobilePreview(false)
         handleSendMessage(locale === 'en' ? 'deploy' : '部署')
       }}
+    />
+
+    <TemplateSubmitModal
+      isOpen={showTemplateSubmitModal}
+      onClose={() => setShowTemplateSubmitModal(false)}
+      projectId={session.sessionInfo?.projectId || null}
     />
 
     <AnimatePresence>

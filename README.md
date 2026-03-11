@@ -431,6 +431,7 @@ Server Action 錯誤訊息 + 工具模組中文字串國際化（+117 keys，2 n
 | **通知** | LINE 推播通知（BDD 完成/UIUX 生成完成/部署成功失敗），離線用戶也能收到；Telegram 同等里程碑通知 |
 | **LINE Bot** | LINE 對話內完整 Fast Build 體驗（描述需求→生成→部署），Flex Message 卡片 + Quick Reply，客服問答（FAQ + Sonnet） |
 | **Telegram Bot** | Telegram 對話內完整 Fast Build 體驗（描述需求→生成→部署），MarkdownV2 + Inline Keyboard；Login Widget 帳號綁定；里程碑通知 |
+| **模板上傳** | 用戶提交專案為模板（preflight 自動檢查 + puppeteer 封面截圖 + 管理員審核），chatQuickReply + 專案管理入口 |
 | **UX** | 對話回退、錯誤恢復、自動恢復對話、專案自動命名、Markdown 渲染、專案對話快捷入口（1-click）、專案置頂/取消置頂 |
 | **穩定性** | FlowState 超時自動恢復（定時掃描 + LINE/Web 推送通知），伺服器重啟後自動恢復卡住的生成/部署任務 |
 | **資料治理** | 訪客資料自動清理（5 天無活動過期），匿名帳號 + 已遷移空殼帳號定時清除，保護正在執行的 FlowState |
@@ -483,6 +484,8 @@ app/
 │   │   ├── CTASection.tsx       # CTA 區塊
 │   │   ├── Footer.tsx           # 頁尾
 │   │   └── index.ts             # Barrel re-export
+│   ├── templates/         # 模板提交元件
+│   │   └── TemplateSubmitModal.tsx # 模板上傳 Modal（preflight 檢查 + 表單 + 提交審核）
 │   ├── chat/             # 對話相關元件
 │   │   ├── ChatSection.tsx      # 對話組合容器（5 hooks + 核心邏輯，~994 行）
 │   │   ├── ChatMessageList.tsx  # 消息列表（@tanstack/react-virtual 虛擬滾動）+ 輸入框
@@ -555,12 +558,12 @@ tellcraft-backend/
 │   │   ├── anthropic.ts         # 統一 Anthropic Client + MODEL 常數 + PRICING + trackLlmUsage
 │   │   ├── cache.ts             # 通用 Redis 快取（cached + invalidateCache）
 │   │   └── logger.ts            # Pino logger 工廠
-│   ├── schemas/                  # Zod API 請求 schema（conversation/session/operations/bdd/project）
+│   ├── schemas/                  # Zod API 請求 schema（conversation/session/operations/bdd/project/template-submit）
 │   ├── db/client.ts              # PostgreSQL 客戶端
 │   └── middleware/
 │       ├── auth.ts              # JWT 認證中間件
 │       └── validate.ts          # Zod 請求驗證中間件（validateBody/Query/Params）
-├── migrations/           # DB 遷移（001-016）
+├── migrations/           # DB 遷移（001-018）
 └── ecosystem.config.js   # PM2 配置
 
 bdd-spec/                 # BDD Skill 定義（instructions/ + rules/ + scripts/）

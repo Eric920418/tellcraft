@@ -64,4 +64,5 @@ export const COMMAND_KEYS: Record<string, string> = {
   '__accept_proposal__': 'accept',
   '__reject_proposal__': 'reject',
   '__auto_adopt_all__': 'autoAdopt',
+  '__upload_template__': 'uploadTemplate',
 }

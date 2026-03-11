@@ -930,6 +930,107 @@ export async function regenerateTemplatePreview(input: {
 }
 
 // ============================================================
+// 模板提交 API
+// ============================================================
+
+export interface TemplatePreflightResult {
+  checks: { hasPages: boolean; hasStyles: boolean; isDeployed: boolean; notDuplicate: boolean }
+  passed: boolean
+  errors: string[]
+  prefilled: { name: string; category: string; tags: string[] }
+}
+
+export interface TemplateSubmitResult {
+  templateId: string
+  slug: string
+  reviewStatus: string
+}
+
+export interface MyTemplateData {
+  id: string
+  name: string
+  slug: string
+  category: string
+  description: string
+  thumbnailUrl: string | null
+  tags: string[]
+  reviewStatus: string
+  reviewReason: string | null
+  createdAt: string
+  sourceProjectId: string | null
+}
+
+/**
+ * 模板提交 preflight 檢查
+ */
+export async function templateSubmitPreflight(input: {
+  token: string
+  projectId: string
+}): Promise<ApiResponse<TemplatePreflightResult>> {
+  return apiRequest('/api/templates/submit/preflight', {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${input.token}`,
+    },
+    body: JSON.stringify({ projectId: input.projectId }),
+  })
+}
+
+/**
+ * 提交專案為模板
+ */
+export async function templateSubmit(input: {
+  token: string
+  projectId: string
+  name: string
+  description: string
+  category: string
+  tags: string[]
+  thumbnailUrl?: string
+}): Promise<ApiResponse<TemplateSubmitResult>> {
+  const { token, ...body } = input
+  return apiRequest('/api/templates/submit', {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify(body),
+  })
+}
+
+/**
+ * 獲取我的模板列表
+ */
+export async function getMyTemplates(input: {
+  token: string
+}): Promise<ApiResponse<{ templates: MyTemplateData[] }>> {
+  return apiRequest('/api/templates/mine', {
+    method: 'GET',
+    headers: {
+      Authorization: `Bearer ${input.token}`,
+    },
+  })
+}
+
+/**
+ * 管理員審核模板
+ */
+export async function reviewTemplate(input: {
+  token: string
+  templateId: string
+  status: 'approved' | 'rejected'
+  reason?: string
+}): Promise<ApiResponse<{ success: boolean; reviewStatus: string; isActive: boolean }>> {
+  return apiRequest(`/api/templates/${input.templateId}/review`, {
+    method: 'PATCH',
+    headers: {
+      Authorization: `Bearer ${input.token}`,
+    },
+    body: JSON.stringify({ status: input.status, reason: input.reason }),
+  })
+}
+
+// ============================================================
 // User API
 // ============================================================
 

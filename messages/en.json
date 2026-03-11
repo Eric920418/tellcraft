@@ -269,7 +269,8 @@
     "accept": "Agree",
     "reject": "Disagree",
     "skipEs": "Skip ES",
-    "autoAdopt": "Auto-adopt all AI suggestions"
+    "autoAdopt": "Auto-adopt all AI suggestions",
+    "uploadTemplate": "Upload as Template"
   },
   "login": {
     "subtleAfterRounds": "Log in to resume this conversation anytime",

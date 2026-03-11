@@ -101,7 +101,7 @@ async function fetchMetadata(url: string): Promise<SiteMetadata> {
 
 // ── 截圖（puppeteer-core）──
 
-async function takeScreenshot(url: string): Promise<Buffer | null> {
+export async function takeScreenshot(url: string): Promise<Buffer | null> {
   try {
     const puppeteer = await import('puppeteer-core')
     const browser = await puppeteer.default.launch({

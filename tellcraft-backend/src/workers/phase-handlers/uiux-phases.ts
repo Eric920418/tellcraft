@@ -532,6 +532,7 @@ export async function handleUiuxMixedPhaseRouting(
         if (state.uiuxPreIterationCode) {
           qr.push({ label: isChinese ? '撤銷修改' : 'Undo', value: '撤銷', style: 'ghost' })
         }
+        qr.push({ label: isChinese ? '上傳到模板庫' : 'Upload as Template', value: '__upload_template__', style: 'ghost' })
         await sendMessage(conversationId, io, {
           content: isChinese
             ? '好的，暫時不部署。您可以繼續修改設計，或隨時點擊「部署上線」。'
@@ -555,6 +556,7 @@ export async function handleUiuxMixedPhaseRouting(
           const qr = [
             { label: isChinese ? '部署上線' : 'Deploy', value: '部署', style: 'primary' as const },
             { label: isChinese ? '開始新專案' : 'New Project', value: '__new_project__', style: 'ghost' as const },
+            { label: isChinese ? '上傳到模板庫' : 'Upload as Template', value: '__upload_template__', style: 'ghost' as const },
           ]
           if (faqResult) {
             await sendMessage(conversationId, io, {
@@ -580,6 +582,7 @@ export async function handleUiuxMixedPhaseRouting(
           quickReplies: [
             { label: isChinese ? '部署上線' : 'Deploy', value: '部署', style: 'primary' as const },
             { label: isChinese ? '開始新專案' : 'New Project', value: '__new_project__', style: 'ghost' as const },
+            { label: isChinese ? '上傳到模板庫' : 'Upload as Template', value: '__upload_template__', style: 'ghost' as const },
           ],
         })
         return
@@ -1247,6 +1250,7 @@ export async function executeFullCodePipeline(
     },
     quickReplies: [
       { label: '部署上線', value: '部署', style: 'primary' },
+      { label: '上傳到模板庫', value: '__upload_template__', style: 'ghost' },
     ],
   })
 
