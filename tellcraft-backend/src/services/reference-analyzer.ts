@@ -140,6 +140,47 @@ export async function takeScreenshot(url: string): Promise<Buffer | null> {
   }
 }
 
+/**
+ * 渲染 HTML 字串並截圖（用於 seed 模板縮圖生成）
+ * 使用 page.setContent() 取代 page.goto()，不需要外部 URL
+ */
+export async function screenshotHtmlContent(html: string): Promise<Buffer | null> {
+  try {
+    const puppeteer = await import('puppeteer-core')
+    const browser = await puppeteer.default.launch({
+      executablePath: getEnv().CHROMIUM_PATH || '/usr/bin/chromium-browser',
+      headless: true,
+      args: [
+        '--no-sandbox',
+        '--disable-gpu',
+        '--disable-dev-shm-usage',
+        '--single-process',
+        '--disable-extensions',
+        '--disable-background-networking',
+        '--disable-default-apps',
+        '--no-first-run',
+      ],
+    })
+
+    try {
+      const page = await browser.newPage()
+      await page.setViewport({ width: 1440, height: 900 })
+      await page.setContent(html, { waitUntil: 'networkidle0', timeout: 25000 })
+      const buffer = await page.screenshot({
+        type: 'jpeg',
+        quality: 75,
+        fullPage: false,
+      })
+      return Buffer.from(buffer)
+    } finally {
+      await browser.close()
+    }
+  } catch (err) {
+    logger.warn({ error: String(err).slice(0, 200) }, 'HTML 內容截圖失敗')
+    return null
+  }
+}
+
 // ── Claude Vision 分析 ──
 
 async function analyzeWithVision(

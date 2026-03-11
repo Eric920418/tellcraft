@@ -91,19 +91,30 @@ export default function AdminTemplatesPage() {
   }, [fetchTemplates])
 
   const loadPreviewFiles = useCallback(async (template: AdminTemplate) => {
-    if (!template.sourceProjectId) return
     const token = getAuthToken()
-    if (!token) return
     setSandpackLoading(true)
     setSandpackData(null)
-    const result = await getProjectFiles({ token, projectId: template.sourceProjectId })
-    if (result.success && result.data) {
-      const files = result.data.files
-      const pages = files.filter(f => f.fileType === 'page').map(f => ({ path: f.path, content: f.content, description: '' }))
-      const components = files.filter(f => f.fileType === 'component').map(f => ({ path: f.path, content: f.content, description: '' }))
-      const styles = files.filter(f => f.fileType === 'style').map(f => f.content).join('\n')
-      const tailwindConfig = files.find(f => f.fileType === 'config')?.content
-      setSandpackData({ pages, components, styles, tailwindConfig })
+    if (template.sourceProjectId && token) {
+      const result = await getProjectFiles({ token, projectId: template.sourceProjectId })
+      if (result.success && result.data) {
+        const files = result.data.files
+        const pages = files.filter(f => f.fileType === 'page').map(f => ({ path: f.path, content: f.content, description: '' }))
+        const components = files.filter(f => f.fileType === 'component').map(f => ({ path: f.path, content: f.content, description: '' }))
+        const styles = files.filter(f => f.fileType === 'style').map(f => f.content).join('\n')
+        const tailwindConfig = files.find(f => f.fileType === 'config')?.content
+        setSandpackData({ pages, components, styles, tailwindConfig })
+      }
+    } else {
+      // 無 sourceProjectId：前端即時生成代碼，零延遲
+      const { generateTemplatePreviewCode } = await import('@/app/lib/template-preview-generator')
+      const generated = generateTemplatePreviewCode({
+        id: template.id,
+        name: template.name,
+        description: template.description,
+        category: template.category,
+        tags: template.tags,
+      })
+      setSandpackData(generated)
     }
     setSandpackLoading(false)
   }, [])

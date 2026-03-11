@@ -35,6 +35,7 @@ function shuffle<T>(arr: T[]): T[] {
 const [INIT_ROW1, INIT_ROW2] = splitRows(STATIC_CARDS)
 
 function TemplateCard({ card }: { card: TemplateCardData }) {
+  const [imgFailed, setImgFailed] = useState(false)
   const categoryColors: Record<string, string> = {
     saas: '#6366f1',
     landing: '#0ea5e9',
@@ -47,6 +48,7 @@ function TemplateCard({ card }: { card: TemplateCardData }) {
     tool: '#64748b',
   }
   const badgeColor = categoryColors[card.category] ?? '#64748b'
+  const showImg = !!card.thumbnailUrl && !imgFailed
 
   return (
     <motion.div
@@ -66,18 +68,19 @@ function TemplateCard({ card }: { card: TemplateCardData }) {
         style={{
           aspectRatio: '16/9',
           overflow: 'hidden',
-          background: card.thumbnailUrl
+          background: showImg
             ? 'transparent'
             : `linear-gradient(135deg, ${badgeColor}22, ${badgeColor}44)`,
         }}
       >
-        {card.thumbnailUrl ? (
+        {showImg ? (
           // eslint-disable-next-line @next/next/no-img-element
           <img
             src={card.thumbnailUrl}
             alt={card.name}
             style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
             loading="lazy"
+            onError={() => setImgFailed(true)}
           />
         ) : (
           <div style={{

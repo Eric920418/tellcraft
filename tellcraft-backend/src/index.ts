@@ -39,7 +39,7 @@ import { cleanupExpiredGuestUsers } from './services/guest-cleanup'
 import { resetExpiredCredits } from './services/credit-reset'
 import { scanAndRecoverStuckFlowStates } from './services/flowstate-recovery'
 import { runStartupCodeRepair } from './services/code-repair'
-import { recaptureAllMissingThumbnails } from './services/thumbnail-recapture'
+import { recaptureAllMissingThumbnails, generateThumbnailsForSeedTemplates } from './services/thumbnail-recapture'
 import {
   recordSocketConnected,
   recordSocketDisconnected,
@@ -542,10 +542,15 @@ async function start() {
     logger.error({ err }, 'startup code repair 失敗')
   )
 
-  // 啟動 90 秒後自動補截圖（等 DB 穩定後才跑 Chromium）
+  // 啟動 90 秒後自動補截圖（有 vercel_url 的模板）
   setTimeout(() => recaptureAllMissingThumbnails().catch(err => {
     logger.error({ err }, '自動補截圖失敗')
   }), 90 * 1000)
+
+  // 啟動 150 秒後為 seed 模板生成 HTML 截圖（無 vercel_url 的 100 個 seed 模板）
+  setTimeout(() => generateThumbnailsForSeedTemplates().catch(err => {
+    logger.error({ err }, 'Seed 模板縮圖生成失敗')
+  }), 150 * 1000)
 
   // 訪客資料清理：啟動 30 秒後執行一次，之後每 6 小時執行
   setTimeout(() => cleanupExpiredGuestUsers(redis).catch(err => {
