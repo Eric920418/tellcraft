@@ -17,6 +17,7 @@ import { smoothEasing } from '@/app/lib/chat-utils'
 
 import {
   HeroSection,
+  TemplatesShowcaseSection,
   UseCasesSection,
   HowItWorksSection,
   StatsSection,
@@ -331,6 +332,7 @@ function HomeContent() {
       )}
 
       {/* SEO Content Sections */}
+      <TemplatesShowcaseSection />
       <UseCasesSection />
       <HowItWorksSection />
       <StatsSection />

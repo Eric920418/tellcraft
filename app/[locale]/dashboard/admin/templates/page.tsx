@@ -260,9 +260,6 @@ export default function AdminTemplatesPage() {
               <th style={{ padding: '12px 16px', textAlign: 'left', fontSize: 12, fontWeight: 500, color: 'var(--gray-500)' }}>
                 審核狀態
               </th>
-              <th style={{ padding: '12px 16px', textAlign: 'left', fontSize: 12, fontWeight: 500, color: 'var(--gray-500)' }}>
-                預覽
-              </th>
               <th style={{ padding: '12px 16px', textAlign: 'right', fontSize: 12, fontWeight: 500, color: 'var(--gray-500)' }}>
                 {t('actions')}
               </th>
@@ -385,35 +382,6 @@ export default function AdminTemplatesPage() {
                       </span>
                     )}
                   </td>
-                  <td style={{ padding: '16px' }}>
-                    {template.preview?.status === 'cached' ? (
-                      <span
-                        style={{
-                          padding: '4px 8px',
-                          fontSize: 11,
-                          background: '#DCFCE7',
-                          color: '#16A34A',
-                          borderRadius: 4,
-                          border: '1px solid #BBF7D0',
-                        }}
-                      >
-                        已生成
-                      </span>
-                    ) : (
-                      <span
-                        style={{
-                          padding: '4px 8px',
-                          fontSize: 11,
-                          background: 'var(--gray-100)',
-                          color: 'var(--gray-500)',
-                          borderRadius: 4,
-                          border: '1px solid var(--border-color)',
-                        }}
-                      >
-                        未生成
-                      </span>
-                    )}
-                  </td>
                   <td style={{ padding: '16px', textAlign: 'right' }}>
                     <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', alignItems: 'center' }}>
                       {template.reviewStatus === 'pending' && (
@@ -477,7 +445,7 @@ export default function AdminTemplatesPage() {
                 </motion.tr>
                 {rejectingId === template.id && (
                   <tr style={{ borderBottom: '1px solid var(--border-color)', background: '#FFF7ED' }}>
-                    <td colSpan={6} style={{ padding: '12px 16px' }}>
+                    <td colSpan={5} style={{ padding: '12px 16px' }}>
                       <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
                         <span style={{ fontSize: 12, color: '#92400E', flexShrink: 0 }}>拒絕原因：</span>
                         <input
