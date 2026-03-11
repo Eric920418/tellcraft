@@ -78,7 +78,12 @@ ${bodyHtml}
 
 // ── HTML 生成函數 ─────────────────────────────────────────────────────────────
 
-function genLandingHtml(name: string, c: TemplateColors): string {
+/** Deterministic pseudo-random value in [min, max] using seed + offset */
+function sv(seed: number, offset: number, min: number, max: number): number {
+  return min + (((seed >>> offset) ^ (seed * 0x9e3779b9 >>> (offset + 7))) % (max - min + 1) + (max - min + 1)) % (max - min + 1)
+}
+
+function genLandingHtml(name: string, c: TemplateColors, seed: number): string {
   const { primary, accent, isDark } = c
   const bg = isDark ? '#09090b' : '#ffffff'
   const text = isDark ? '#f1f5f9' : '#0f172a'
@@ -91,11 +96,15 @@ function genLandingHtml(name: string, c: TemplateColors): string {
     `<span style="color: rgba(255,255,255,0.85); font-size: 14px">${item}</span>`
   ).join('')
 
+  const m1 = `${sv(seed, 0, 20, 120)}K`
+  const m2 = `${sv(seed, 4, 40, 95)}%`
+  const m3 = `+${sv(seed, 8, 10, 60)}`
   const metricCols = [primary, accent, '#10b981'].map((col, i) =>
-    `<div style="flex: 1; height: 60px; border-radius: 8px; background: ${col}; opacity: 0.8; display: flex; align-items: center; justify-content: center; color: white; font-weight: 700; font-size: 18px">${['84K', '61%', '+28'][i]}</div>`
+    `<div style="flex: 1; height: 60px; border-radius: 8px; background: ${col}; opacity: 0.8; display: flex; align-items: center; justify-content: center; color: white; font-weight: 700; font-size: 18px">${[m1, m2, m3][i]}</div>`
   ).join('')
 
-  const bars = [85, 60, 92, 48].map((w, i) =>
+  const barWidths = [0, 1, 2, 3].map(i => sv(seed, i * 5 + 16, 30, 95))
+  const bars = barWidths.map((w, i) =>
     `<div style="height: 8px; background: ${border}; border-radius: 4px; margin-bottom: 10px; overflow: hidden"><div style="width: ${w}%; height: 100%; background: ${primary}; opacity: ${(0.4 + i * 0.15).toFixed(2)}"></div></div>`
   ).join('')
 
@@ -139,7 +148,7 @@ function genLandingHtml(name: string, c: TemplateColors): string {
 </div>`
 }
 
-function genSaasHtml(name: string, c: TemplateColors): string {
+function genSaasHtml(name: string, c: TemplateColors, seed: number): string {
   const { primary, accent, isDark } = c
   const bg = isDark ? '#0d0d14' : '#f1f5f9'
   const sidebarBg = isDark ? '#0a0a12' : '#1e293b'
@@ -149,15 +158,19 @@ function genSaasHtml(name: string, c: TemplateColors): string {
   const border = isDark ? '#1e2030' : '#e2e8f0'
   const shortName = name.slice(0, 12)
 
+  const users = `${sv(seed, 0, 1, 99)},${String(sv(seed, 4, 100, 999))}`
+  const mrr = `$${sv(seed, 8, 10, 200)}.${sv(seed, 12, 0, 9)}K`
+  const conv = `${sv(seed, 16, 1, 9)}.${sv(seed, 20, 0, 9)}%`
+  const churn = `${sv(seed, 24, 1, 5)}.${sv(seed, 28, 0, 9)}%`
   const metrics = [
-    { label: 'Total Users', value: '12,847', trend: '+12%', up: true },
-    { label: 'MRR', value: '$48.2K', trend: '+8.3%', up: true },
-    { label: 'Conv. Rate', value: '3.24%', trend: '+0.8%', up: true },
-    { label: 'Churn', value: '2.1%', trend: '-0.3%', up: false },
+    { label: 'Total Users', value: users, trend: `+${sv(seed, 1, 5, 25)}%`, up: true },
+    { label: 'MRR', value: mrr, trend: `+${sv(seed, 3, 3, 18)}.${sv(seed,5,0,9)}%`, up: true },
+    { label: 'Conv. Rate', value: conv, trend: `+${sv(seed, 7, 1, 9)}.${sv(seed,9,0,9)}%`, up: true },
+    { label: 'Churn', value: churn, trend: `-${sv(seed, 11, 1, 9)}.${sv(seed,13,0,9)}%`, up: false },
   ]
   const navItems = ['Overview', 'Analytics', 'Users', 'Reports', 'Settings']
   const navIcons = ['📊', '📈', '👥', '📋', '⚙️']
-  const bars = [40, 65, 45, 80, 55, 90, 75, 85, 60, 95, 70, 88]
+  const bars = [0,1,2,3,4,5,6,7,8,9,10,11].map(i => sv(seed, i * 3 + 30, 20, 98))
 
   const sidebarRows = navItems.map((item, i) =>
     `<div style="padding: 10px 18px; color: ${i === 0 ? primary : 'rgba(255,255,255,0.5)'}; font-size: 13px; display: flex; align-items: center; gap: 10px; background: ${i === 0 ? rgba(primary, 0.12) : 'transparent'}; border-left: 2px solid ${i === 0 ? primary : 'transparent'}"><span>${navIcons[i]}</span> ${item}</div>`
@@ -203,7 +216,7 @@ function genSaasHtml(name: string, c: TemplateColors): string {
 </div>`
 }
 
-function genDashboardHtml(name: string, c: TemplateColors): string {
+function genDashboardHtml(name: string, c: TemplateColors, seed: number): string {
   const { primary, isDark } = c
   const bg = isDark ? '#0d0d14' : '#f1f5f9'
   const sidebarBg = isDark ? '#0a0a12' : '#1e293b'
@@ -226,9 +239,9 @@ function genDashboardHtml(name: string, c: TemplateColors): string {
   ).join('')
 
   const statCards = [
-    { label: 'Today Orders', val: '284' },
-    { label: 'Monthly Rev.', val: '$32.5K' },
-    { label: 'Pending', val: '18' },
+    { label: 'Today Orders', val: String(sv(seed, 0, 50, 600)) },
+    { label: 'Monthly Rev.', val: `$${sv(seed, 4, 8, 150)}.${sv(seed, 8, 0, 9)}K` },
+    { label: 'Pending', val: String(sv(seed, 12, 3, 45)) },
   ].map(card =>
     `<div style="background: ${contentBg}; border-radius: 8px; padding: 18px; border: 1px solid ${border}"><div style="font-size: 11px; color: ${subtext}; margin-bottom: 8px; text-transform: uppercase; letter-spacing: 0.05em">${card.label}</div><div style="font-size: 28px; font-weight: 700; color: ${text}">${card.val}</div></div>`
   ).join('')
@@ -256,7 +269,7 @@ function genDashboardHtml(name: string, c: TemplateColors): string {
 </div>`
 }
 
-function genEcommerceHtml(name: string, c: TemplateColors): string {
+function genEcommerceHtml(name: string, c: TemplateColors, seed: number): string {
   const { primary, accent, isDark } = c
   const bg = isDark ? '#0a0a0f' : '#ffffff'
   const text = isDark ? '#f1f5f9' : '#111827'
@@ -300,7 +313,7 @@ function genEcommerceHtml(name: string, c: TemplateColors): string {
 </div>`
 }
 
-function genPortfolioHtml(name: string, c: TemplateColors): string {
+function genPortfolioHtml(name: string, c: TemplateColors, seed: number): string {
   const { primary, accent, isDark } = c
   const bg = isDark ? '#0a0a0a' : '#fafafa'
   const text = isDark ? '#f1f5f9' : '#0f172a'
@@ -343,7 +356,8 @@ function genPortfolioHtml(name: string, c: TemplateColors): string {
 </div>`
 }
 
-function genBlogHtml(name: string, c: TemplateColors): string {
+function genBlogHtml(name: string, c: TemplateColors, seed: number): string {
+  void seed // seed reserved for future variation
   const { primary, isDark } = c
   const bg = isDark ? '#0f0f0f' : '#ffffff'
   const text = isDark ? '#e2e8f0' : '#111827'
@@ -386,33 +400,49 @@ function genBlogHtml(name: string, c: TemplateColors): string {
 // ── 主 export ──────────────────────────────────────────────────────────────────
 
 const CATEGORY_DISPLAY: Record<string, string> = {
-  landing: 'Landing Page', event: 'Event Page', saas: 'SaaS Platform',
-  tool: 'Tool Dashboard', dashboard: 'Dashboard', ecommerce: 'E-commerce',
-  portfolio: 'Portfolio', content: 'Content Site', blog: 'Blog',
+  landing: 'Landing', event: 'Event', saas: 'SaaS',
+  tool: 'Tool', dashboard: 'Dashboard', ecommerce: 'Shop',
+  portfolio: 'Portfolio', content: 'Content', blog: 'Blog',
 }
 
-/** If name contains CJK chars (no system font on VPS), fall back to category label */
+/**
+ * Strip CJK characters, keep ASCII letters/digits/spaces.
+ * "Email 行銷平台" → "Email"
+ * "問卷達人 FormCraft" → "FormCraft"
+ * "純中文名稱" → category fallback
+ */
 function safeDisplayName(name: string, category: string): string {
-  return /[\u4e00-\u9fff\u3040-\u309f\u30a0-\u30ff]/.test(name)
-    ? (CATEGORY_DISPLAY[category] ?? 'Template')
-    : name
+  const stripped = name
+    .replace(/[\u4e00-\u9fff\u3040-\u309f\u30a0-\u30ff\u3400-\u4dbf\uf900-\ufaff]/g, '')
+    .replace(/[^\x20-\x7E]/g, '')   // remove other non-ASCII
+    .replace(/\s+/g, ' ')
+    .trim()
+  return stripped || (CATEGORY_DISPLAY[category] ?? 'Template')
+}
+
+/** Simple numeric hash from a string for deterministic variety */
+function strHash(s: string): number {
+  let h = 0
+  for (let i = 0; i < s.length; i++) h = (Math.imul(31, h) + s.charCodeAt(i)) >>> 0
+  return h
 }
 
 export function generateTemplateHtml(template: TemplateMeta): string {
   const colors = extractColors(template.tags, template.description)
   const name = safeDisplayName(template.name, template.category)
+  const seed = strHash(template.id)
 
   let bodyHtml: string
   switch (template.category) {
-    case 'saas':      bodyHtml = genSaasHtml(name, colors);        break
-    case 'tool':      bodyHtml = genSaasHtml(name, colors);        break
-    case 'dashboard': bodyHtml = genDashboardHtml(name, colors);   break
-    case 'ecommerce': bodyHtml = genEcommerceHtml(name, colors);   break
-    case 'portfolio': bodyHtml = genPortfolioHtml(name, colors);   break
-    case 'content':   bodyHtml = genPortfolioHtml(name, colors);   break
-    case 'blog':      bodyHtml = genBlogHtml(name, colors);        break
-    case 'event':     bodyHtml = genLandingHtml(name, colors);     break
-    default:          bodyHtml = genLandingHtml(name, colors);     break
+    case 'saas':      bodyHtml = genSaasHtml(name, colors, seed);        break
+    case 'tool':      bodyHtml = genSaasHtml(name, colors, seed);        break
+    case 'dashboard': bodyHtml = genDashboardHtml(name, colors, seed);   break
+    case 'ecommerce': bodyHtml = genEcommerceHtml(name, colors, seed);   break
+    case 'portfolio': bodyHtml = genPortfolioHtml(name, colors, seed);   break
+    case 'content':   bodyHtml = genPortfolioHtml(name, colors, seed);   break
+    case 'blog':      bodyHtml = genBlogHtml(name, colors, seed);        break
+    case 'event':     bodyHtml = genLandingHtml(name, colors, seed);     break
+    default:          bodyHtml = genLandingHtml(name, colors, seed);     break
   }
 
   return buildHtmlPage(bodyHtml)
