@@ -6,6 +6,7 @@ import { Link, useRouter } from '@/i18n/navigation'
 import { useTranslations } from 'next-intl'
 import { DataTable, StatusBadge, SearchInput, type Column } from '@/app/components/dashboard'
 import ProjectHoverCard from '@/app/components/dashboard/ProjectHoverCard'
+import TemplateSubmitModal from '@/app/components/templates/TemplateSubmitModal'
 import { getProjects, togglePinProject, deleteProjects, getConversationMessages } from '@/app/lib/vps-api'
 import { useAuth } from '@/app/hooks/useAuth'
 
@@ -65,6 +66,8 @@ export default function ProjectsPage() {
   const [refetchFlag, setRefetchFlag] = useState(0)
   const [isDownloading, setIsDownloading] = useState<string | null>(null)
   const [downloadError, setDownloadError] = useState<string | null>(null)
+  const [showTemplateModal, setShowTemplateModal] = useState(false)
+  const [uploadProjectId, setUploadProjectId] = useState<string | null>(null)
   const pageSize = 10
 
   // Hover preview state
@@ -285,6 +288,45 @@ export default function ProjectsPage() {
   const renderProjectDetailAction = (project: Project) => {
     return (
       <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+        {/* 上傳到模板庫（僅已部署專案） */}
+        {project.status === 'deployed' && (
+          <button
+            onClick={(e) => {
+              e.stopPropagation()
+              setUploadProjectId(project.id)
+              setShowTemplateModal(true)
+            }}
+            title="上傳到模板庫"
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              width: 40,
+              height: 40,
+              borderRadius: 10,
+              border: 'none',
+              color: 'var(--gray-500)',
+              background: 'var(--gray-50)',
+              cursor: 'pointer',
+              transition: 'all 0.15s ease',
+              flexShrink: 0,
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.color = 'var(--black)'
+              e.currentTarget.style.background = 'var(--gray-100)'
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.color = 'var(--gray-500)'
+              e.currentTarget.style.background = 'var(--gray-50)'
+            }}
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+              <polyline points="17 8 12 3 7 8" />
+              <line x1="12" y1="3" x2="12" y2="15" />
+            </svg>
+          </button>
+        )}
         {/* 下載代碼按鈕 */}
         <button
           onClick={(e) => {
@@ -880,6 +922,13 @@ export default function ProjectsPage() {
           />
         )}
       </AnimatePresence>
+
+      {/* 模板上傳 Modal */}
+      <TemplateSubmitModal
+        isOpen={showTemplateModal}
+        onClose={() => { setShowTemplateModal(false); setUploadProjectId(null) }}
+        projectId={uploadProjectId}
+      />
     </div>
   )
 }
