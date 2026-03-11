@@ -1021,7 +1021,7 @@ router.get('/job-failures', requireAdmin, async (req: Request, res: Response) =>
  */
 router.post('/admin/regenerate-thumbnails', requireAdmin, async (req: Request, res: Response) => {
   const rows = await query<{ count: string }>(
-    `SELECT COUNT(*) as count FROM templates WHERE thumbnail_url IS NULL AND is_active = true AND vercel_url IS NULL`,
+    `SELECT COUNT(*) as count FROM templates WHERE thumbnail_url IS NULL AND is_active = true AND source_project_id IS NULL`,
     []
   )
   const pending = parseInt(rows.rows[0]?.count || '0', 10)

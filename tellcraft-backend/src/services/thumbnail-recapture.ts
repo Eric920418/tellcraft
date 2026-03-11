@@ -77,7 +77,7 @@ export async function generateThumbnailsForSeedTemplates(): Promise<void> {
        FROM templates
        WHERE thumbnail_url IS NULL
          AND is_active = true
-         AND vercel_url IS NULL
+         AND source_project_id IS NULL
        LIMIT 120`,
       []
     )
