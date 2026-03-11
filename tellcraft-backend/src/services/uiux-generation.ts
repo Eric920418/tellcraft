@@ -2084,7 +2084,7 @@ export function repairUndeclaredRefs(file: GeneratedComponent): { content: strin
   return { content: fixed, repaired: true }
 }
 
-function getSyntaxErrors(filename: string, content: string): string[] {
+export function getSyntaxErrors(filename: string, content: string): string[] {
   if (content.length < 50) return []
   // 只檢查 TS/TSX 檔案，CSS/JSON 等非 TS 檔案跳過
   if (/\.(css|json|md|html|svg)$/i.test(filename)) return []
@@ -2118,7 +2118,7 @@ function getSyntaxErrors(filename: string, content: string): string[] {
 function isTruncatedFile(content: string, errors: string[]): boolean {
   // 錯誤在前 5 行（截斷在開頭 → generation 從未正確展開）
   const earlyError = errors.some(e => {
-    const m = e.match(/:(\d+)(?::\d+)?/)
+    const m = e.match(/Line (\d+)/)
     if (!m) return false
     return parseInt(m[1], 10) <= 5
   })
