@@ -376,6 +376,47 @@ export default function ChatMessageList({
                 ))}
               </div>
             )}
+            {/* BDD 精細模式：全部自動採用按鈕 */}
+            {(() => {
+              const lastMsg = messages[messages.length - 1]
+              const isClarifyStage = lastMsg?.stage === 'clarify_question'
+              const isBusy = isTyping || sendCooldown || isInitializing || !sessionInfo || isReadOnlyMode
+              if (!isClarifyStage || isBusy) return null
+              return (
+                <div style={{ marginBottom: 8 }}>
+                  <button
+                    onClick={() => handleSendMessage('__auto_adopt_all__', { displayLabel: '全部自動採用 AI 建議' })}
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: 6,
+                      padding: '6px 14px',
+                      fontSize: 13,
+                      fontWeight: 500,
+                      border: '1px solid var(--border-color)',
+                      background: 'var(--white)',
+                      color: 'var(--gray-600)',
+                      cursor: 'pointer',
+                      borderRadius: 6,
+                      transition: 'all 0.15s ease',
+                    }}
+                    onMouseEnter={(e) => {
+                      e.currentTarget.style.background = 'var(--gray-50)'
+                      e.currentTarget.style.borderColor = 'var(--gray-400)'
+                    }}
+                    onMouseLeave={(e) => {
+                      e.currentTarget.style.background = 'var(--white)'
+                      e.currentTarget.style.borderColor = 'var(--border-color)'
+                    }}
+                  >
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M12 2a10 10 0 0 1 10 10" /><path d="M12 12l-4-4 4-4" />
+                    </svg>
+                    全部自動採用 AI 建議
+                  </button>
+                </div>
+              )
+            })()}
             <div style={{ display: 'flex', gap: layoutMode === 'split' ? 8 : 12, alignItems: 'flex-end' }}>
               {/* 附圖按鈕 */}
               <input

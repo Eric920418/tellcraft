@@ -1659,11 +1659,6 @@ export async function sendClarifyQuestion(
       { label: '不同意', value: '__reject_proposal__', style: 'ghost' },
     ]
 
-    // 第一輪第一題顯示「全部自動採用」按鈕
-    if (globalProgress?.answered === 0 && globalProgress?.round === 1) {
-      quickReplies.push({ label: '全部自動採用 AI 建議', value: '__auto_adopt_all__', style: 'secondary' })
-    }
-
     // 計算建築進度
     const buildingProgress = globalProgress ? {
       current: globalProgress.answered + 1,
@@ -1724,11 +1719,6 @@ export async function sendClarifyQuestion(
       const isProposal = optStr.includes('（建議）')
       quickReplies.push({ label, value: letter, style: isProposal ? 'primary' : 'ghost' })
     })
-  }
-
-  // 第一輪第一題顯示「全部自動採用」按鈕
-  if (globalProgress?.answered === 0 && globalProgress?.round === 1) {
-    quickReplies.push({ label: '全部自動採用 AI 建議', value: '__auto_adopt_all__', style: 'secondary' })
   }
 
   // 計算建築進度（用於 3D 蓋房子動畫）

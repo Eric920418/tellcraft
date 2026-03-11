@@ -39,6 +39,7 @@ import { cleanupExpiredGuestUsers } from './services/guest-cleanup'
 import { resetExpiredCredits } from './services/credit-reset'
 import { scanAndRecoverStuckFlowStates } from './services/flowstate-recovery'
 import { runStartupCodeRepair } from './services/code-repair'
+import { recaptureAllMissingThumbnails } from './services/thumbnail-recapture'
 import {
   recordSocketConnected,
   recordSocketDisconnected,
@@ -540,6 +541,11 @@ async function start() {
   runStartupCodeRepair(redis).catch(err =>
     logger.error({ err }, 'startup code repair 失敗')
   )
+
+  // 啟動 90 秒後自動補截圖（等 DB 穩定後才跑 Chromium）
+  setTimeout(() => recaptureAllMissingThumbnails().catch(err => {
+    logger.error({ err }, '自動補截圖失敗')
+  }), 90 * 1000)
 
   // 訪客資料清理：啟動 30 秒後執行一次，之後每 6 小時執行
   setTimeout(() => cleanupExpiredGuestUsers(redis).catch(err => {

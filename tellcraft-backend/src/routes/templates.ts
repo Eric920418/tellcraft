@@ -4,14 +4,11 @@
  */
 import { Router } from 'express'
 import crypto from 'crypto'
-import path from 'path'
-import fs from 'fs'
 import { query, queryOne } from '../db/client'
 import { requireAuth, requireAdmin } from '../middleware/auth'
 import { validateBody } from '../middleware/validate'
 import { templateSubmitPreflightSchema, templateSubmitSchema, templateReviewSchema } from '../schemas/template-submit'
-import { takeScreenshot } from '../services/reference-analyzer'
-import { getEnv } from '../lib/env'
+import { captureAndSaveThumbnail } from '../services/thumbnail-recapture'
 import { createLogger } from '../lib/logger'
 
 const logger = createLogger('templates')
@@ -33,35 +30,6 @@ function slugify(text: string): string {
     .slice(0, 80) || 'template'
 }
 
-// 截圖並存到 UPLOAD_DIR，回傳公開 URL
-async function captureAndSaveThumbnail(url: string): Promise<string | null> {
-  try {
-    const buffer = await takeScreenshot(url)
-    if (!buffer) return null
-
-    const env = getEnv()
-    const uploadDir = env.UPLOAD_DIR
-    const uploadBaseUrl = (env.UPLOAD_BASE_URL || '').trim().replace(/\/+$/, '')
-    if (!uploadBaseUrl) {
-      logger.warn('UPLOAD_BASE_URL 未設定，無法儲存截圖')
-      return null
-    }
-
-    const now = new Date()
-    const subDir = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
-    const fullDir = path.join(uploadDir, subDir)
-    fs.mkdirSync(fullDir, { recursive: true })
-
-    const filename = `tmpl-${crypto.randomUUID()}.jpg`
-    const filePath = path.join(fullDir, filename)
-    fs.writeFileSync(filePath, buffer)
-
-    return `${uploadBaseUrl}/${subDir}/${filename}`
-  } catch (err) {
-    logger.warn({ error: String(err).slice(0, 200) }, '封面截圖儲存失敗')
-    return null
-  }
-}
 
 // ============================================================
 // 模板提交 API（放在 /:id 前避免路徑衝突）
@@ -306,12 +274,33 @@ router.patch('/:id/review', requireAdmin, validateBody(templateReviewSchema), as
 
     logger.info({ templateId: id, status, adminId: req.user!.id }, '管理員審核模板')
 
+    // approved 且無縮圖時，後台自動截圖（fire-and-forget）
+    if (isActive) {
+      queryOne<{ vercel_url: string | null; thumbnail_url: string | null }>(
+        `SELECT p.vercel_url, t.thumbnail_url
+         FROM templates t
+         LEFT JOIN projects p ON p.id = t.source_project_id
+         WHERE t.id = $1`,
+        [id]
+      ).then(async row => {
+        if (row?.vercel_url && !row.thumbnail_url) {
+          const url = row.vercel_url.startsWith('http') ? row.vercel_url : `https://${row.vercel_url}`
+          const thumbUrl = await captureAndSaveThumbnail(url)
+          if (thumbUrl) {
+            await query(`UPDATE templates SET thumbnail_url = $1 WHERE id = $2`, [thumbUrl, id])
+            logger.info({ templateId: id, thumbUrl }, '模板縮圖自動截圖完成')
+          }
+        }
+      }).catch(err => logger.warn({ err }, '模板縮圖後台截圖失敗'))
+    }
+
     res.json({ success: true, reviewStatus: status, isActive })
   } catch (error) {
     logger.error({ err: error }, '模板審核失敗')
     res.status(500).json({ error: '審核失敗' })
   }
 })
+
 
 // ============================================================
 // 公開模板 API
