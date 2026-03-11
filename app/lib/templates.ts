@@ -4,7 +4,7 @@
 
 // 模板分類
 export type TemplateCategory = 'saas' | 'landing' | 'ecommerce' | 'content'
-  | 'portfolio' | 'dashboard' | 'blog' | 'event'
+  | 'portfolio' | 'dashboard' | 'blog' | 'event' | 'tool'
 
 // 設計風格
 export type DesignStyle = 'minimal' | 'modern' | 'professional' | 'playful' | 'elegant'
@@ -252,6 +252,7 @@ export const CATEGORY_LABELS: Record<TemplateCategory, string> = {
   dashboard: '控制台',
   blog: '部落格',
   event: '活動',
+  tool: '工具',
 }
 
 /**
@@ -266,4 +267,5 @@ export const CATEGORY_ICONS: Record<TemplateCategory, string> = {
   dashboard: '📈',
   blog: '✍️',
   event: '🎪',
+  tool: '🔧',
 }
