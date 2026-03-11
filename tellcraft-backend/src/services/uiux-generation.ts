@@ -1815,11 +1815,21 @@ export function repairBracketLookupAccess(
   for (const { name: varName, source } of potentiallyUndefined) {
     let changed = false
 
-    // optional chain 賦值：加 ?? [] fallback（防 undefined 傳播到 canvas/string concat）
+    // optional chain 賦值：加 ?? [] fallback + early return guard
     if (source === 'optchain') {
-      const declRegex = new RegExp(`(const|let)\\s+${varName}\\s*=\\s*(\\S+\\?\\.\\w+)\\s*$`, 'gm')
-      const afterFallback = fixed.replace(declRegex, `$1 ${varName} = $2 ?? []`)
-      if (afterFallback !== fixed) { fixed = afterFallback; changed = true }
+      const fixedLines = fixed.split('\n')
+      for (let li = 0; li < fixedLines.length; li++) {
+        const lineMatch = fixedLines[li].match(new RegExp(`^(\\s*)(?:const|let)\\s+${varName}\\s*=\\s*(\\S+\\?\\.\\w+)\\s*$`))
+        if (lineMatch && !fixedLines[li].includes('??')) {
+          const indent = lineMatch[1]
+          fixedLines[li] = fixedLines[li].trimEnd() + ' ?? []'
+          // 插入 guard：空陣列就 return，避免 undefined 傳播
+          fixedLines.splice(li + 1, 0, `${indent}if (!${varName}.length) return`)
+          changed = true
+          break
+        }
+      }
+      fixed = fixedLines.join('\n')
     }
 
     // 修復 1：varName.prop（未加 ?.）→ varName?.prop
