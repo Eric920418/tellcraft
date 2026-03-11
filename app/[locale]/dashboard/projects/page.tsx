@@ -515,7 +515,7 @@ export default function ProjectsPage() {
     {
       key: 'actions',
       header: '',
-      width: '116px',
+      width: '156px',
       truncate: false,
       render: (project: Project) => renderProjectDetailAction(project),
     },
@@ -598,7 +598,7 @@ export default function ProjectsPage() {
     {
       key: 'actions',
       header: '',
-      width: '64px',
+      width: '104px',
       truncate: false,
       render: (project: Project) => renderProjectDetailAction(project),
     },

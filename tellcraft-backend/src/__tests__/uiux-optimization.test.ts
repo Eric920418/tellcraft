@@ -191,6 +191,7 @@ describe('uiux optimization helpers', () => {
       { label: '繼續生成（2 頁）', value: '__continue_fast_build_after_deploy__', style: 'primary' },
       { label: '部署上線', value: '部署', style: 'secondary' },
       { label: '回滾版本', value: '回滾', style: 'ghost' },
+      { label: '上傳到模板庫', value: '__upload_template__', style: 'ghost' },
     ])
   })
 

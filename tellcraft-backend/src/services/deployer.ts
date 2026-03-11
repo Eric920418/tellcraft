@@ -283,11 +283,21 @@ export function sanitizeCodeForDeploy(code: GeneratedCode): SanitizeResult {
   const injectedFiles: { file: string; data: string }[] = []
   const extraDependencies: Record<string, string> = {}
 
-  // 深拷貝避免修改原始代碼
+  // 深拷貝避免修改原始代碼，同時 normalize 路徑（LLM 可能生成含 .. 的相對路徑）
+  const normalizePath = (p: string) => path.normalize(p).replace(/\\/g, '/')
   const sanitized: GeneratedCode = {
-    pages: code.pages.map(p => ({ ...p, content: p.content })),
-    components: code.components.map(c => ({ ...c, content: c.content })),
+    pages: code.pages.map(p => ({ ...p, path: normalizePath(p.path), content: p.content })),
+    components: code.components.map(c => ({ ...c, path: normalizePath(c.path), content: c.content })),
     styles: code.styles,
+  }
+
+  // 記錄被 normalize 的路徑
+  const pathFixes = [
+    ...code.pages.filter(p => p.path !== normalizePath(p.path)).map(p => `${p.path} → ${normalizePath(p.path)}`),
+    ...code.components.filter(c => c.path !== normalizePath(c.path)).map(c => `${c.path} → ${normalizePath(c.path)}`),
+  ]
+  if (pathFixes.length > 0) {
+    fixes.push(`路徑正規化: ${pathFixes.join(', ')}`)
   }
 
   const normalizedUploadBaseUrl = normalizeUploadBaseUrl(process.env.UPLOAD_BASE_URL)
@@ -1657,12 +1667,11 @@ function isSourceFile(filePath: string): boolean {
  * 路徑遍歷防護：確保解析後的路徑在目標目錄內
  */
 function validateFilePath(dir: string, filePath: string): string {
-  // 拒絕含 .. 的路徑
-  if (filePath.includes('..')) {
-    throw new Error(`Path traversal detected: ${filePath}`)
-  }
+  // 先 normalize 消除 ..（LLM 可能生成 app/personalities/../components/Header.tsx 這類合法相對路徑）
+  const normalizedFilePath = path.normalize(filePath)
   const resolvedDir = path.resolve(dir)
-  const resolvedPath = path.resolve(dir, filePath)
+  const resolvedPath = path.resolve(dir, normalizedFilePath)
+  // 確保解析後的路徑仍在目標目錄內（防止真正的路徑遍歷攻擊）
   if (!resolvedPath.startsWith(resolvedDir + path.sep) && resolvedPath !== resolvedDir) {
     throw new Error(`Path traversal detected: ${filePath} resolves outside ${dir}`)
   }
