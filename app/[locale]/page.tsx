@@ -46,6 +46,7 @@ function HomeContent() {
   const [showGuestLimitModal, setShowGuestLimitModal] = useState(false)
   const [openedFromUrl, setOpenedFromUrl] = useState(false)
   const [recentProjects, setRecentProjects] = useState<Array<{ id: string; name: string; status: string; latestConversationId: string | null }>>([])
+  const [isDashboardLoading, setIsDashboardLoading] = useState(false)
 
   // VPS JWT Auth Hook
   const auth = useAuth()
@@ -139,6 +140,7 @@ function HomeContent() {
       return
     }
 
+    setIsDashboardLoading(true)
     try {
       const res = await fetch('/api/auth/set-cookie', {
         method: 'POST',
@@ -154,6 +156,8 @@ function HomeContent() {
       }
     } catch {
       window.location.href = localePath('/dashboard')
+    } finally {
+      setIsDashboardLoading(false)
     }
   }
 
@@ -280,7 +284,7 @@ function HomeContent() {
               {auth.user.name || auth.user.email?.split('@')[0] || tChat('defaultUserName')}
             </span>
             <GlowButton onClick={handleDashboard} variant="outline" size="sm">
-              {tAuth('dashboardButton')}
+              {isDashboardLoading ? '...' : tAuth('dashboardButton')}
             </GlowButton>
             <GlowButton onClick={handleSignOut} variant="outline" size="sm">
               {tAuth('logoutButton')}

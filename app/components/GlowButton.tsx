@@ -1,6 +1,6 @@
 'use client'
 
-import React, { useState } from 'react'
+import React, { useState, useCallback } from 'react'
 import { motion } from 'framer-motion'
 
 interface GlowButtonProps {
@@ -21,6 +21,11 @@ export function GlowButton({
   style = {}
 }: GlowButtonProps) {
   const [isHovered, setIsHovered] = useState(false)
+  const [isPressed, setIsPressed] = useState(false)
+
+  const handlePointerDown = useCallback(() => setIsPressed(true), [])
+  const handlePointerUp = useCallback(() => setIsPressed(false), [])
+  const handlePointerLeave = useCallback(() => setIsPressed(false), [])
 
   const isOutline = variant === 'outline'
   const height = size === 'sm' ? 36 : 44
@@ -44,7 +49,9 @@ export function GlowButton({
     alignItems: 'center',
     justifyContent: 'center',
     textDecoration: 'none',
-    transition: 'all 0.3s ease',
+    transition: 'all 0.3s ease, transform 0.1s ease, opacity 0.1s ease',
+    transform: isPressed ? 'scale(0.96)' : 'scale(1)',
+    opacity: isPressed ? 0.8 : 1,
     ...style
   }
 
@@ -138,7 +145,10 @@ export function GlowButton({
         href={href}
         style={baseStyles}
         onMouseEnter={() => setIsHovered(true)}
-        onMouseLeave={() => setIsHovered(false)}
+        onMouseLeave={() => { setIsHovered(false); handlePointerLeave() }}
+        onPointerDown={handlePointerDown}
+        onPointerUp={handlePointerUp}
+        onPointerLeave={handlePointerLeave}
       >
         {content}
       </a>
@@ -150,7 +160,10 @@ export function GlowButton({
       onClick={onClick}
       style={baseStyles}
       onMouseEnter={() => setIsHovered(true)}
-      onMouseLeave={() => setIsHovered(false)}
+      onMouseLeave={() => { setIsHovered(false); handlePointerLeave() }}
+      onPointerDown={handlePointerDown}
+      onPointerUp={handlePointerUp}
+      onPointerLeave={handlePointerLeave}
     >
       {content}
     </button>

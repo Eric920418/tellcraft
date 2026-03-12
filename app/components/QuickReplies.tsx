@@ -50,6 +50,7 @@ export default function QuickReplies({ replies, onSelect, disabled }: QuickRepli
             key={`${reply.value}-${i}`}
             initial={{ opacity: 0, y: 6 }}
             animate={{ opacity: 1, y: 0 }}
+            whileTap={disabled ? undefined : { scale: 0.94, opacity: 0.7 }}
             transition={{ duration: 0.2, delay: i * 0.05 }}
             onClick={() => !disabled && onSelect(reply.value)}
             disabled={disabled}

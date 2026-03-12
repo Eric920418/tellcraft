@@ -26,6 +26,8 @@ export default function TemplateSubmitModal({ isOpen, onClose, projectId }: Temp
   const [category, setCategory] = useState<TemplateCategory>('landing')
   const [tagInput, setTagInput] = useState('')
   const [tags, setTags] = useState<string[]>([])
+  const [thumbnailUrl, setThumbnailUrl] = useState('')
+  const [thumbnailUploading, setThumbnailUploading] = useState(false)
   const [submitError, setSubmitError] = useState('')
   const [resultSlug, setResultSlug] = useState('')
 
@@ -54,6 +56,7 @@ export default function TemplateSubmitModal({ isOpen, onClose, projectId }: Temp
       setCategory((prefilled.category as TemplateCategory) || 'landing')
       setTags(prefilled.tags || [])
       setDescription('')
+      setThumbnailUrl('')
       setStep('form')
     })
   }, [isOpen, projectId])
@@ -70,6 +73,31 @@ export default function TemplateSubmitModal({ isOpen, onClose, projectId }: Temp
     setTags(prev => prev.filter(t => t !== tag))
   }, [])
 
+  const handleThumbnailUpload = useCallback(async (file: File) => {
+    setThumbnailUploading(true)
+    setSubmitError('')
+    try {
+      const token = localStorage.getItem('auth_token') || ''
+      const formData = new FormData()
+      formData.append('file', file)
+      const res = await fetch('/api/vps/upload', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}` },
+        body: formData,
+      })
+      const data = await res.json()
+      if (data.url) {
+        setThumbnailUrl(data.url)
+      } else {
+        setSubmitError(data.error || '圖片上傳失敗')
+      }
+    } catch {
+      setSubmitError('圖片上傳失敗，請重試')
+    } finally {
+      setThumbnailUploading(false)
+    }
+  }, [])
+
   const handleSubmit = useCallback(async () => {
     if (!projectId) return
     if (!name.trim() || name.trim().length < 2) {
@@ -84,6 +112,10 @@ export default function TemplateSubmitModal({ isOpen, onClose, projectId }: Temp
       setSubmitError('至少需要 1 個標籤')
       return
     }
+    if (!thumbnailUrl) {
+      setSubmitError('請上傳縮圖（建議截圖你的網站畫面）')
+      return
+    }
 
     setStep('submitting')
     setSubmitError('')
@@ -94,6 +126,7 @@ export default function TemplateSubmitModal({ isOpen, onClose, projectId }: Temp
       description: description.trim(),
       category,
       tags,
+      thumbnailUrl,
     })
 
     if (!result.success || !result.data) {
@@ -334,6 +367,72 @@ export default function TemplateSubmitModal({ isOpen, onClose, projectId }: Temp
                   </div>
                 )}
               </label>
+
+              {/* Thumbnail upload */}
+              <div style={{ marginBottom: 20 }}>
+                <span style={{ fontSize: 13, fontWeight: 500, color: 'var(--text-primary)', display: 'block', marginBottom: 6 }}>
+                  縮圖 * <span style={{ fontWeight: 400, color: 'var(--text-secondary, #666)' }}>（截圖你的網站畫面上傳）</span>
+                </span>
+                <label style={{
+                  display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+                  gap: 8, padding: thumbnailUrl ? 0 : '20px 16px',
+                  border: `2px dashed ${thumbnailUrl ? 'transparent' : 'var(--gray-200, #e5e7eb)'}`,
+                  borderRadius: 10, cursor: step === 'submitting' ? 'default' : 'pointer',
+                  background: thumbnailUrl ? 'transparent' : 'var(--gray-50, #f9fafb)',
+                  transition: 'border-color 0.15s',
+                  overflow: 'hidden',
+                }}>
+                  <input
+                    type="file"
+                    accept="image/jpeg,image/png,image/webp"
+                    style={{ display: 'none' }}
+                    disabled={step === 'submitting' || thumbnailUploading}
+                    onChange={e => {
+                      const file = e.target.files?.[0]
+                      if (file) handleThumbnailUpload(file)
+                      e.target.value = ''
+                    }}
+                  />
+                  {thumbnailUrl ? (
+                    <div style={{ position: 'relative', width: '100%' }}>
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img
+                        src={thumbnailUrl}
+                        alt="縮圖預覽"
+                        style={{ width: '100%', height: 160, objectFit: 'cover', borderRadius: 8, display: 'block' }}
+                      />
+                      <div style={{
+                        position: 'absolute', inset: 0, borderRadius: 8,
+                        background: 'rgba(0,0,0,0)', display: 'flex',
+                        alignItems: 'center', justifyContent: 'center',
+                        opacity: 0, transition: 'opacity 0.15s',
+                      }}
+                        onMouseEnter={e => { (e.currentTarget as HTMLElement).style.opacity = '1'; (e.currentTarget as HTMLElement).style.background = 'rgba(0,0,0,0.4)' }}
+                        onMouseLeave={e => { (e.currentTarget as HTMLElement).style.opacity = '0'; (e.currentTarget as HTMLElement).style.background = 'rgba(0,0,0,0)' }}
+                      >
+                        <span style={{ color: '#fff', fontSize: 13, fontWeight: 500 }}>重新上傳</span>
+                      </div>
+                    </div>
+                  ) : thumbnailUploading ? (
+                    <>
+                      <div style={{
+                        width: 24, height: 24, border: '2px solid var(--gray-200)',
+                        borderTopColor: 'var(--black, #000)', borderRadius: '50%',
+                        animation: 'spin 0.8s linear infinite',
+                      }} />
+                      <span style={{ fontSize: 13, color: 'var(--text-secondary)' }}>上傳中...</span>
+                    </>
+                  ) : (
+                    <>
+                      <span style={{ fontSize: 24 }}>🖼</span>
+                      <span style={{ fontSize: 13, color: 'var(--text-secondary)', textAlign: 'center' }}>
+                        點擊上傳縮圖<br />
+                        <span style={{ fontSize: 11 }}>JPG / PNG，建議 1440×900</span>
+                      </span>
+                    </>
+                  )}
+                </label>
+              </div>
 
               {/* Submit error */}
               {submitError && (

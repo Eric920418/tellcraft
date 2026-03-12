@@ -14,53 +14,6 @@ import { createLogger } from '../lib/logger'
 
 const logger = createLogger('thumbnail-recapture')
 
-/**
- * 用 Puppeteer 截取 Sandpack Live 預覽頁（/zh/templates/live/:id）
- * 等待 body[data-ready="true"] 後才截圖，確保 Sandpack 已渲染完成
- */
-async function screenshotSandpackPage(templateId: string): Promise<Buffer | null> {
-  const env = getEnv()
-  const appUrl = (env.APP_URL || 'https://tellcraft.com').replace(/\/+$/, '')
-  const url = `${appUrl}/zh/templates/live/${templateId}`
-
-  try {
-    const puppeteer = await import('puppeteer-core')
-    const browser = await puppeteer.default.launch({
-      executablePath: env.CHROMIUM_PATH || '/usr/bin/chromium-browser',
-      headless: true,
-      args: [
-        '--no-sandbox',
-        '--disable-gpu',
-        '--disable-dev-shm-usage',
-        // 不用 --single-process：會阻止跨源 iframe（Sandpack preview）正常渲染
-        '--disable-extensions',
-        '--disable-default-apps',
-        '--no-first-run',
-        // 允許 Sandpack preview iframe 正確執行
-        '--disable-web-security',
-        '--allow-running-insecure-content',
-      ],
-    })
-
-    try {
-      const page = await browser.newPage()
-      await page.setViewport({ width: 1440, height: 900 })
-      // 用 'load' 而非 'networkidle2'：Sandpack iframe 的 CDN 請求會讓 networkidle2 永遠等待
-      await page.goto(url, { waitUntil: 'load', timeout: 30000 })
-      // 等待 Sandpack 完成渲染（前端 idle+35s 正常路徑 或 55s 安全兜底）
-      await page.waitForSelector('body[data-ready="true"]', { timeout: 120000 })
-      // 額外等待確保 iframe 視覺完全穩定
-      await new Promise(r => setTimeout(r, 1500))
-      const buffer = await page.screenshot({ type: 'jpeg', quality: 75, fullPage: false })
-      return Buffer.from(buffer)
-    } finally {
-      await browser.close()
-    }
-  } catch (err) {
-    logger.warn({ error: String(err).slice(0, 300), templateId }, 'Sandpack 截圖失敗')
-    return null
-  }
-}
 
 export async function captureAndSaveThumbnail(url: string): Promise<string | null> {
   try {
@@ -173,19 +126,15 @@ export async function generateThumbnailsForSeedTemplates(): Promise<void> {
 }
 
 /**
- * 對單一社群模板執行縮圖擷取：
- *   1. 社群模板（有 source_project_id）→ Puppeteer 截取 Sandpack Live 預覽頁（真實渲染）
- *   2. 若有 vercel_url → 截取已部署站台
- *   3. fallback：generateTemplateHtml 生成假 HTML 截圖
- * 成功回傳縮圖 URL，失敗回傳 null
+ * 對單一模板執行縮圖擷取（只對有 vercel_url 的才截圖）
+ * 社群模板縮圖由用戶提交時自行上傳，不走 Puppeteer
  */
 export async function captureTemplateThumbnail(templateId: string): Promise<string | null> {
   const row = await query<{
     id: string; name: string; description: string; category: string; tags: string[]
-    vercel_url: string | null; source_project_id: string | null
+    vercel_url: string | null
   }>(
-    `SELECT t.id, t.name, t.description, t.category, t.tags,
-            t.source_project_id, p.vercel_url
+    `SELECT t.id, t.name, t.description, t.category, t.tags, p.vercel_url
      FROM templates t
      LEFT JOIN projects p ON p.id = t.source_project_id
      WHERE t.id = $1`,
@@ -194,22 +143,7 @@ export async function captureTemplateThumbnail(templateId: string): Promise<stri
   const tmpl = row.rows[0]
   if (!tmpl) return null
 
-  // 嘗試 1：社群模板 → Sandpack Live 頁截圖（真實渲染，最高品質）
-  if (tmpl.source_project_id) {
-    logger.info({ templateId }, '社群模板：嘗試 Sandpack Live 頁截圖')
-    const buffer = await screenshotSandpackPage(templateId)
-    if (buffer) {
-      const thumbUrl = await saveBuffer(buffer)
-      if (thumbUrl) {
-        await query(`UPDATE templates SET thumbnail_url = $1 WHERE id = $2`, [thumbUrl, templateId])
-        logger.info({ templateId, source: 'sandpack_live' }, '模板縮圖 Sandpack 截圖完成')
-        return thumbUrl
-      }
-    }
-    logger.warn({ templateId }, 'Sandpack Live 截圖失敗，嘗試 vercel_url')
-  }
-
-  // 嘗試 2：截已部署站台
+  // 有 vercel_url → 截已部署站台（用於部署後自動更新縮圖）
   if (tmpl.vercel_url) {
     const url = tmpl.vercel_url.startsWith('http') ? tmpl.vercel_url : `https://${tmpl.vercel_url}`
     const thumbUrl = await captureAndSaveThumbnail(url)
@@ -218,29 +152,9 @@ export async function captureTemplateThumbnail(templateId: string): Promise<stri
       logger.info({ templateId, source: 'vercel_url' }, '模板縮圖截圖完成')
       return thumbUrl
     }
-    logger.warn({ templateId }, 'vercel_url 截圖失敗，改用 HTML fallback')
+    logger.warn({ templateId }, 'vercel_url 截圖失敗')
   }
 
-  // 嘗試 3：generateTemplateHtml 假截圖（最後手段）
-  try {
-    const html = generateTemplateHtml({
-      id: tmpl.id,
-      name: tmpl.name,
-      description: tmpl.description || '',
-      category: tmpl.category,
-      tags: Array.isArray(tmpl.tags) ? tmpl.tags : [],
-    })
-    const buffer = await screenshotHtmlContent(html)
-    if (!buffer) return null
-    const thumbUrl = await saveBuffer(buffer)
-    if (thumbUrl) {
-      await query(`UPDATE templates SET thumbnail_url = $1 WHERE id = $2`, [thumbUrl, templateId])
-      logger.info({ templateId, source: 'html_fallback' }, '模板縮圖 HTML fallback 完成')
-      return thumbUrl
-    }
-  } catch (err) {
-    logger.warn({ templateId, err }, '模板縮圖 HTML fallback 失敗')
-  }
   return null
 }
 
