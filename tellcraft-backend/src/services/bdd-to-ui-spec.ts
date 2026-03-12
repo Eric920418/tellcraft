@@ -178,7 +178,7 @@ ${bddSpec}
       try {
         const stream = anthropic.messages.stream({
           model: MODEL.HAIKU,
-          max_tokens: 4096,
+          max_tokens: 8192,
           temperature: 0.1,
           system: systemPrompt,
           messages: [{ role: 'user', content: userMessage }],
@@ -208,6 +208,12 @@ ${bddSpec}
         // 安全解析 JSON（支援 3+ 反引號 code fence、尾隨逗號等）
         const spec = safeParseJson<UIRequirementsSpec>(content.text)
         if (!spec) {
+          // JSON 截斷/格式錯誤可重試（通常是 max_tokens 不足導致輸出截斷）
+          lastError = new Error('LLM 回應無法解析為有效 JSON')
+          if (attempt < RETRY_MAX) {
+            logger.warn({ attempt, outputLength: content.text.length }, 'JSON 解析失敗，重試中')
+            continue
+          }
           return { success: false, error: 'LLM 回應無法解析為有效 JSON' }
         }
 
