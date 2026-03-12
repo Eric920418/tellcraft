@@ -265,9 +265,26 @@ function TemplatesContent() {
 
   return (
     <div style={{ minHeight: '100vh', background: 'var(--bg-primary, #fff)', color: 'var(--black, #000)' }}>
+      {/* 返回鍵 */}
+      <div style={{ padding: '20px 24px 0', maxWidth: 1200, margin: '0 auto' }}>
+        <button
+          onClick={() => router.push('/')}
+          style={{
+            display: 'inline-flex', alignItems: 'center', gap: 6,
+            fontSize: 13, color: 'var(--gray-400, #94a3b8)',
+            background: 'none', border: 'none', cursor: 'pointer', padding: 0,
+            transition: 'color 0.15s',
+          }}
+          onMouseEnter={e => (e.currentTarget.style.color = 'var(--black, #000)')}
+          onMouseLeave={e => (e.currentTarget.style.color = 'var(--gray-400, #94a3b8)')}
+        >
+          ← 返回首頁
+        </button>
+      </div>
+
       {/* Nav 區塊 */}
       <div style={{
-        padding: '64px 24px 40px',
+        padding: '32px 24px 40px',
         maxWidth: 1200,
         margin: '0 auto',
         textAlign: 'center',
@@ -398,8 +415,8 @@ function TemplatesContent() {
               style={{
                 position: 'fixed',
                 top: '50%', left: '50%',
-                width: 'min(92vw, 960px)',
-                height: 'min(88vh, 680px)',
+                width: 'min(96vw, 1280px)',
+                height: 'min(92vh, 900px)',
                 background: 'var(--bg-primary, #fff)',
                 borderRadius: 16,
                 overflow: 'hidden',
