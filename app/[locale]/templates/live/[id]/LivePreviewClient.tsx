@@ -9,24 +9,25 @@ import {
 import { buildSandpackSetup } from '@/app/lib/sandpack-utils'
 import type { TemplateFileData } from '@/app/lib/vps-api'
 
-/** 監聽 Sandpack status，就緒後設 data-ready 讓 Puppeteer 可截圖 */
+/** 監聽 Sandpack status，確保 iframe 內容渲染完畢後才通知截圖 */
 function ReadinessSignaler() {
   const { sandpack } = useSandpack()
 
-  // 安全兜底：無論 Sandpack 是否完成，50 秒後強制設 ready，避免 Puppeteer 永遠卡住
+  // 安全兜底：55 秒後強制設 ready，避免 Puppeteer 永遠卡住
   useEffect(() => {
     const safety = setTimeout(() => {
       document.body.dataset.ready = 'true'
-    }, 50000)
+    }, 55000)
     return () => clearTimeout(safety)
   }, [])
 
-  // 正常路徑：idle 或 timeout 都算完成
+  // 正常路徑：status=idle 代表 bundler 就緒，但 iframe 內容還需要更多時間渲染
+  // 等 10 秒讓 React app 完整 render 後再截圖
   useEffect(() => {
     if (sandpack.status === 'idle' || sandpack.status === 'timeout') {
       const t = setTimeout(() => {
         document.body.dataset.ready = 'true'
-      }, 2500)
+      }, 10000)
       return () => clearTimeout(t)
     }
   }, [sandpack.status])

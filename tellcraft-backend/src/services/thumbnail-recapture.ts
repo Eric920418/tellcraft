@@ -45,10 +45,10 @@ async function screenshotSandpackPage(templateId: string): Promise<Buffer | null
       await page.setViewport({ width: 1440, height: 900 })
       // 用 'load' 而非 'networkidle2'：Sandpack iframe 的 CDN 請求會讓 networkidle2 永遠等待
       await page.goto(url, { waitUntil: 'load', timeout: 30000 })
-      // 等待 Sandpack 完成渲染（90 秒，含前端安全兜底 50 秒後強制設 ready）
-      await page.waitForSelector('body[data-ready="true"]', { timeout: 90000 })
-      // 再等一點讓 iframe 視覺穩定
-      await new Promise(r => setTimeout(r, 800))
+      // 等待 Sandpack 完成渲染（前端 idle+10s 正常路徑 或 55s 安全兜底）
+      await page.waitForSelector('body[data-ready="true"]', { timeout: 100000 })
+      // 額外等待確保 iframe 視覺完全穩定
+      await new Promise(r => setTimeout(r, 1500))
       const buffer = await page.screenshot({ type: 'jpeg', quality: 75, fullPage: false })
       return Buffer.from(buffer)
     } finally {
