@@ -317,13 +317,13 @@ router.patch('/:id/review', requireAdmin, validateBody(templateReviewSchema), as
 
     logger.info({ templateId: id, status, adminId: req.user!.id }, '管理員審核模板')
 
-    // approved 且為社群模板時，後台自動截圖（fire-and-forget，無縮圖才截）
+    // approved 且為社群模板時，後台自動截圖（fire-and-forget，永遠重截確保真實縮圖）
     if (isActive) {
-      queryOne<{ thumbnail_url: string | null; source_project_id: string | null }>(
-        `SELECT thumbnail_url, source_project_id FROM templates WHERE id = $1`,
+      queryOne<{ source_project_id: string | null }>(
+        `SELECT source_project_id FROM templates WHERE id = $1`,
         [id]
       ).then(async row => {
-        if (row?.source_project_id && !row.thumbnail_url) {
+        if (row?.source_project_id) {
           await captureTemplateThumbnail(id)
         }
       }).catch(err => logger.warn({ err }, '模板縮圖後台截圖失敗'))

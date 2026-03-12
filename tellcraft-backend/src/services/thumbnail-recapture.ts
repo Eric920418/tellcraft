@@ -242,33 +242,34 @@ export async function captureTemplateThumbnail(templateId: string): Promise<stri
 }
 
 /**
- * 啟動時自動補齊所有缺縮圖的已上線社群模板（序列執行，避免多個 Chromium 同時開）
+ * 啟動時重新截圖所有已上線社群模板（含已有假縮圖的），確保縮圖是真實 Sandpack 渲染
+ * 序列執行，避免多個 Chromium 同時開
  */
 export async function recaptureAllMissingThumbnails(): Promise<void> {
   try {
-    // 社群模板（有 source_project_id）且無縮圖
+    // 掃全部社群模板（有 source_project_id），不篩 thumbnail_url，確保假縮圖也被替換
     const rows = await query<{ id: string }>(
       `SELECT t.id
        FROM templates t
-       WHERE t.thumbnail_url IS NULL
-         AND t.is_active = true
+       WHERE t.is_active = true
          AND t.source_project_id IS NOT NULL
+       ORDER BY t.created_at DESC
        LIMIT 20`,
       []
     )
 
     if (rows.rows.length === 0) return
 
-    logger.info({ count: rows.rows.length }, '自動補截圖：找到缺圖社群模板，開始序列截圖')
+    logger.info({ count: rows.rows.length }, '自動截圖：掃描社群模板，開始 Sandpack 序列截圖')
 
     for (const row of rows.rows) {
       try {
         await captureTemplateThumbnail(row.id)
       } catch (err) {
-        logger.warn({ templateId: row.id, err }, '自動補截圖單筆失敗，繼續下一筆')
+        logger.warn({ templateId: row.id, err }, '自動截圖單筆失敗，繼續下一筆')
       }
     }
   } catch (err) {
-    logger.error({ err }, '自動補截圖掃描失敗')
+    logger.error({ err }, '自動截圖掃描失敗')
   }
 }
