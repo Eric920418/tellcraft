@@ -317,7 +317,7 @@ router.get('/', async (req, res) => {
       featuredOnly?: string
     }
 
-    let sql = `SELECT t.*, p.vercel_url AS project_vercel_url
+    let sql = `SELECT t.*, p.vercel_url AS project_vercel_url, t.source_project_id
                FROM templates t
                LEFT JOIN projects p ON p.id = t.source_project_id
                WHERE t.is_active = true AND t.review_status = 'approved'`
@@ -354,6 +354,7 @@ router.get('/', async (req, res) => {
       is_featured: boolean
       sort_order: number
       project_vercel_url: string | null
+      source_project_id: string | null
     }>(sql, params)
 
     const templates = result.rows.map(row => ({
@@ -373,6 +374,7 @@ router.get('/', async (req, res) => {
       isActive: row.is_active,
       isFeatured: row.is_featured,
       sortOrder: row.sort_order,
+      sourceProjectId: row.source_project_id,
       deployedUrl: row.project_vercel_url
         ? (row.project_vercel_url.startsWith('http') ? row.project_vercel_url : `https://${row.project_vercel_url}`)
         : null,
@@ -382,6 +384,54 @@ router.get('/', async (req, res) => {
   } catch (error) {
     logger.error({ err: error }, '獲取模板列表失敗')
     res.status(500).json({ error: '獲取模板列表失敗' })
+  }
+})
+
+/**
+ * GET /api/templates/:id/files
+ * 公開取得用戶提交模板的 source project files（用於 Sandpack 渲染）
+ * 不需 auth，只對已 approved 的模板開放
+ */
+router.get('/:id/files', async (req, res) => {
+  try {
+    const { id } = req.params
+
+    // 只允許 approved 模板
+    const template = await queryOne<{ source_project_id: string | null }>(
+      `SELECT source_project_id FROM templates WHERE id = $1 AND is_active = true AND review_status = 'approved'`,
+      [id]
+    )
+    if (!template) {
+      return res.status(404).json({ error: '模板不存在或未審核' })
+    }
+    if (!template.source_project_id) {
+      return res.status(404).json({ error: '此模板無原始專案檔案' })
+    }
+
+    const result = await query<{
+      file_path: string
+      content: string
+      file_type: string
+      skill_source: string
+    }>(
+      `SELECT file_path, content, file_type, skill_source
+       FROM project_files
+       WHERE project_id = $1
+       ORDER BY file_path`,
+      [template.source_project_id]
+    )
+
+    const files = result.rows.map(f => ({
+      filePath: f.file_path,
+      content: f.content,
+      fileType: f.file_type,
+      skillSource: f.skill_source,
+    }))
+
+    res.json({ files })
+  } catch (error) {
+    logger.error({ err: error }, '取得模板檔案失敗')
+    res.status(500).json({ error: '取得模板檔案失敗' })
   }
 })
 

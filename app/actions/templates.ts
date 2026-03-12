@@ -12,7 +12,7 @@ import {
   getFeaturedTemplates
 } from '../lib/templates'
 import * as vpsApi from '../lib/vps-api'
-import { reviewTemplate as reviewTemplateApi } from '../lib/vps-api'
+import { reviewTemplate as reviewTemplateApi, getTemplatePublicFiles as getTemplatePublicFilesApi, type TemplateFileData } from '../lib/vps-api'
 import { getAuthToken } from '../lib/auth'
 
 // ============================================================
@@ -76,6 +76,7 @@ export async function getTemplates(input?: {
       tags: t.tags,
       isFeatured: t.isFeatured,
       deployedUrl: t.deployedUrl ?? null,
+      sourceProjectId: t.sourceProjectId ?? null,
     }))
 
     return { success: true, data: templates }
@@ -405,6 +406,23 @@ export async function initializeTemplates(): Promise<ActionResult<{ count: numbe
     }
 
     return { success: true, data: { count: result.data?.count || 0 } }
+  } catch (err) {
+    return { success: false, error: String(err) }
+  }
+}
+
+/**
+ * 公開取得用戶提交模板的 project files（用於 Sandpack 渲染）
+ */
+export async function getTemplateFiles(
+  templateId: string
+): Promise<ActionResult<{ files: TemplateFileData[] }>> {
+  try {
+    const result = await getTemplatePublicFilesApi({ templateId })
+    if (!result.success || !result.data) {
+      return { success: false, error: result.error || '取得模板檔案失敗' }
+    }
+    return { success: true, data: result.data }
   } catch (err) {
     return { success: false, error: String(err) }
   }

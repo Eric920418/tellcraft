@@ -56,8 +56,10 @@ export interface TemplateCardData {
   thumbnailUrl: string
   tags: string[]
   isFeatured: boolean
-  /** 用戶提交模板的已部署 URL（source_project.vercel_url），可直接作 iframe src */
+  /** 用戶提交模板的已部署 URL（source_project.vercel_url） */
   deployedUrl?: string | null
+  /** 用戶提交模板的原始專案 ID（有值代表是社群模板，需用 Sandpack 渲染） */
+  sourceProjectId?: string | null
 }
 
 // ============================================================
@@ -240,6 +242,7 @@ export function toTemplateCardData(template: Template): TemplateCardData {
     tags: template.tags,
     isFeatured: template.isFeatured,
     deployedUrl: null,
+    sourceProjectId: null,
   }
 }
 

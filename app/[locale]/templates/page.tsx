@@ -1,10 +1,11 @@
 'use client'
 
 import { useEffect, useState, Suspense } from 'react'
+import dynamic from 'next/dynamic'
 import { useSearchParams } from 'next/navigation'
 import { useRouter } from '@/i18n/navigation'
 import { motion, AnimatePresence } from 'framer-motion'
-import { getTemplates } from '@/app/actions/templates'
+import { getTemplates, getTemplateFiles } from '@/app/actions/templates'
 import {
   type TemplateCardData,
   type TemplateCategory,
@@ -147,6 +148,32 @@ const CATEGORY_ORDER: TemplateCategory[] = [
   'landing', 'saas', 'ecommerce', 'blog', 'portfolio', 'event', 'dashboard', 'content', 'tool',
 ]
 
+// ── Sandpack 動態載入（只給用戶提交模板用） ──────────────────────────────────────
+
+const SandpackPreview = dynamic(
+  () => import('@/app/components/uiux/SandpackPreview'),
+  { ssr: false, loading: () => <SandpackSkeleton /> }
+)
+
+function SandpackSkeleton() {
+  return (
+    <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#0f0f0f' }}>
+      <div style={{ textAlign: 'center', color: '#666' }}>
+        <div style={{ width: 32, height: 32, border: '3px solid #333', borderTopColor: '#fff', borderRadius: '50%', animation: 'spin 0.8s linear infinite', margin: '0 auto 12px' }} />
+        <style>{`@keyframes spin { to { transform: rotate(360deg) } }`}</style>
+        <div style={{ fontSize: 13 }}>載入預覽中…</div>
+      </div>
+    </div>
+  )
+}
+
+interface SandpackData {
+  pages: { path: string; content: string; description: string }[]
+  components: { path: string; content: string; description: string }[]
+  styles: string
+  tailwindConfig?: string
+}
+
 // ── 靜態初始資料（SSR 安全） ───────────────────────────────────────────────────
 
 const STATIC_CARDS = INITIAL_TEMPLATES.filter(t => t.isActive).map(toTemplateCardData)
@@ -160,6 +187,9 @@ function TemplatesContent() {
   const [activeCategory, setActiveCategory] = useState<TemplateCategory | 'all'>('all')
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [iframeLoading, setIframeLoading] = useState(false)
+  const [sandpackData, setSandpackData] = useState<SandpackData | null>(null)
+  const [sandpackLoading, setSandpackLoading] = useState(false)
+  const [sandpackError, setSandpackError] = useState<string | null>(null)
 
   // 載入模板資料
   useEffect(() => {
@@ -180,9 +210,43 @@ function TemplatesContent() {
     }
   }, [searchParams])
 
+  // 當選中用戶提交模板時，載入 Sandpack 檔案
+  useEffect(() => {
+    if (!selectedId) {
+      setSandpackData(null)
+      setSandpackError(null)
+      return
+    }
+    const card = templates.find(t => t.id === selectedId)
+    if (!card?.sourceProjectId) return  // 預設模板不需要 Sandpack
+
+    setSandpackLoading(true)
+    setSandpackData(null)
+    setSandpackError(null)
+
+    getTemplateFiles(selectedId).then(result => {
+      if (result.success && result.data) {
+        const files = result.data.files
+        setSandpackData({
+          pages: files.filter(f => f.fileType === 'page').map(f => ({ path: f.filePath, content: f.content, description: '' })),
+          components: files.filter(f => f.fileType === 'component').map(f => ({ path: f.filePath, content: f.content, description: '' })),
+          styles: files.filter(f => f.fileType === 'style').map(f => f.content).join('\n'),
+          tailwindConfig: files.find(f => f.fileType === 'config')?.content,
+        })
+      } else {
+        setSandpackError(result.error || '載入失敗')
+      }
+      setSandpackLoading(false)
+    }).catch(err => {
+      setSandpackError(String(err))
+      setSandpackLoading(false)
+    })
+  }, [selectedId, templates])
+
   // 關閉 modal
   const closeModal = () => {
     setSelectedId(null)
+    setSandpackData(null)
     router.replace('/templates')
   }
 
@@ -415,32 +479,55 @@ function TemplatesContent() {
                 </div>
               </div>
 
-              {/* iframe 預覽 */}
-              <div style={{ flex: 1, position: 'relative', background: '#f8fafc' }}>
-                {iframeLoading && (
-                  <div style={{
-                    position: 'absolute', inset: 0,
-                    display: 'flex', alignItems: 'center', justifyContent: 'center',
-                    background: '#f8fafc',
-                    zIndex: 1,
-                  }}>
-                    <div style={{
-                      width: 32, height: 32,
-                      border: '3px solid var(--border-color, #e2e8f0)',
-                      borderTopColor: 'var(--black, #000)',
-                      borderRadius: '50%',
-                      animation: 'spin 0.8s linear infinite',
-                    }} />
-                    <style>{`@keyframes spin { to { transform: rotate(360deg) } }`}</style>
-                  </div>
+              {/* 預覽區域 */}
+              <div style={{ flex: 1, position: 'relative', overflow: 'hidden' }}>
+                {selectedTemplate?.sourceProjectId ? (
+                  // 用戶提交模板 → Sandpack 渲染
+                  sandpackLoading ? (
+                    <SandpackSkeleton />
+                  ) : sandpackError ? (
+                    <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#f8fafc' }}>
+                      <div style={{ textAlign: 'center', color: '#94a3b8' }}>
+                        <div style={{ fontSize: 32, marginBottom: 12 }}>⚠️</div>
+                        <div style={{ fontSize: 14 }}>無法載入預覽</div>
+                        <div style={{ fontSize: 12, marginTop: 4, color: '#cbd5e1' }}>{sandpackError}</div>
+                      </div>
+                    </div>
+                  ) : sandpackData ? (
+                    <SandpackPreview
+                      pages={sandpackData.pages}
+                      components={sandpackData.components}
+                      styles={sandpackData.styles}
+                      tailwindConfig={sandpackData.tailwindConfig}
+                    />
+                  ) : null
+                ) : (
+                  // 預設模板 → iframe 走 preview 路由
+                  <>
+                    {iframeLoading && (
+                      <div style={{
+                        position: 'absolute', inset: 0,
+                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        background: '#f8fafc', zIndex: 1,
+                      }}>
+                        <div style={{
+                          width: 32, height: 32,
+                          border: '3px solid var(--border-color, #e2e8f0)',
+                          borderTopColor: 'var(--black, #000)',
+                          borderRadius: '50%',
+                          animation: 'spin 0.8s linear infinite',
+                        }} />
+                        <style>{`@keyframes spin { to { transform: rotate(360deg) } }`}</style>
+                      </div>
+                    )}
+                    <iframe
+                      key={selectedId}
+                      src={`/api/template-preview/${selectedId}`}
+                      style={{ width: '100%', height: '100%', border: 'none' }}
+                      onLoad={() => setIframeLoading(false)}
+                    />
+                  </>
                 )}
-                {/* 用戶提交模板：直接 iframe 到 deployedUrl；預設模板：走 preview 路由 */}
-                <iframe
-                  key={selectedId}
-                  src={selectedTemplate?.deployedUrl ?? `/api/template-preview/${selectedId}`}
-                  style={{ width: '100%', height: '100%', border: 'none' }}
-                  onLoad={() => setIframeLoading(false)}
-                />
               </div>
             </motion.div>
           </>

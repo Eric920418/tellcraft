@@ -831,6 +831,7 @@ interface TemplateData {
   isFeatured: boolean
   sortOrder: number
   deployedUrl?: string | null
+  sourceProjectId?: string | null
 }
 
 /**
@@ -858,6 +859,24 @@ export async function getTemplateById(input: {
   templateId: string
 }): Promise<ApiResponse<{ template: TemplateData }>> {
   return apiRequest(`/api/templates/${input.templateId}`, {
+    method: 'GET',
+  })
+}
+
+/**
+ * 公開取得用戶提交模板的 project files（用於 Sandpack 渲染）
+ */
+export interface TemplateFileData {
+  filePath: string
+  content: string
+  fileType: string
+  skillSource: string
+}
+
+export async function getTemplatePublicFiles(input: {
+  templateId: string
+}): Promise<ApiResponse<{ files: TemplateFileData[] }>> {
+  return apiRequest(`/api/templates/${input.templateId}/files`, {
     method: 'GET',
   })
 }
