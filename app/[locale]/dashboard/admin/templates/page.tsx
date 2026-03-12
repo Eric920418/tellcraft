@@ -122,6 +122,23 @@ export default function AdminTemplatesPage() {
     }
   }
 
+  const handleRecapture = async (templateId: string) => {
+    const token = getAuthToken()
+    if (!token) return alert('未登入')
+    const VPS_API_URL = process.env.NEXT_PUBLIC_VPS_API_URL || ''
+    const res = await fetch(`${VPS_API_URL}/api/templates/${templateId}/recapture`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}` },
+    })
+    if (res.ok) {
+      alert('截圖成功，重新整理後可見')
+      await fetchTemplates()
+    } else {
+      const data = await res.json().catch(() => ({}))
+      alert(data.error || '截圖失敗')
+    }
+  }
+
   const handleRejectConfirm = async (templateId: string) => {
     setReviewingId(templateId)
     try {
@@ -446,6 +463,24 @@ export default function AdminTemplatesPage() {
                       >
                         {previewingId === template.id ? t('closePreview') : t('preview')}
                       </button>
+                      {/* 重新截圖（社群模板才顯示） */}
+                      {template.sourceProjectId && (
+                        <button
+                          onClick={() => handleRecapture(template.id)}
+                          title="重新截圖縮圖"
+                          style={{
+                            padding: '6px 10px',
+                            fontSize: 12,
+                            background: template.thumbnailUrl ? 'var(--gray-100)' : '#FEF3C7',
+                            border: `1px solid ${template.thumbnailUrl ? 'var(--border-color)' : '#FCD34D'}`,
+                            borderRadius: 4,
+                            cursor: 'pointer',
+                            color: template.thumbnailUrl ? 'var(--gray-600)' : '#92400E',
+                          }}
+                        >
+                          {template.thumbnailUrl ? '🔄 重截' : '📸 截圖'}
+                        </button>
+                      )}
                     </div>
                   </td>
                 </motion.tr>

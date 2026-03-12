@@ -8,7 +8,7 @@ import { query, queryOne } from '../db/client'
 import { requireAuth, requireAdmin } from '../middleware/auth'
 import { validateBody } from '../middleware/validate'
 import { templateSubmitPreflightSchema, templateSubmitSchema, templateReviewSchema } from '../schemas/template-submit'
-import { captureAndSaveThumbnail } from '../services/thumbnail-recapture'
+import { captureAndSaveThumbnail, captureTemplateThumbnail } from '../services/thumbnail-recapture'
 import { createLogger } from '../lib/logger'
 
 const logger = createLogger('templates')
@@ -246,6 +246,30 @@ router.get('/mine', requireAuth, async (req, res) => {
   } catch (error) {
     logger.error({ err: error }, '獲取我的模板失敗')
     res.status(500).json({ error: '獲取失敗' })
+  }
+})
+
+/**
+ * POST /api/templates/:id/recapture
+ * 管理員手動觸發縮圖重新截圖（優先 vercel_url，fallback HTML 生成）
+ */
+router.post('/:id/recapture', requireAdmin, async (req, res) => {
+  try {
+    const { id } = req.params
+    const template = await queryOne<{ id: string }>(
+      'SELECT id FROM templates WHERE id = $1',
+      [id]
+    )
+    if (!template) return res.status(404).json({ error: '模板不存在' })
+
+    const thumbUrl = await captureTemplateThumbnail(id)
+    if (!thumbUrl) {
+      return res.status(422).json({ error: '截圖失敗，請確認 Chromium 環境或 vercel_url 是否有效' })
+    }
+    res.json({ thumbnailUrl: thumbUrl })
+  } catch (error) {
+    logger.error({ err: error }, '手動觸發縮圖失敗')
+    res.status(500).json({ error: '截圖失敗' })
   }
 })
 

@@ -125,33 +125,83 @@ export async function generateThumbnailsForSeedTemplates(): Promise<void> {
 }
 
 /**
- * 啟動時自動補齊所有缺縮圖的已上線模板（序列執行，避免多個 Chromium 同時開）
+ * 對單一社群模板執行縮圖擷取：
+ *   1. 優先用 vercel_url 截真實站台
+ *   2. fallback：用 generateTemplateHtml 生成 HTML 後截圖
+ * 成功回傳縮圖 URL，失敗回傳 null
+ */
+export async function captureTemplateThumbnail(templateId: string): Promise<string | null> {
+  const row = await query<{
+    id: string; name: string; description: string; category: string; tags: string[]
+    vercel_url: string | null
+  }>(
+    `SELECT t.id, t.name, t.description, t.category, t.tags, p.vercel_url
+     FROM templates t
+     LEFT JOIN projects p ON p.id = t.source_project_id
+     WHERE t.id = $1`,
+    [templateId]
+  )
+  const tmpl = row.rows[0]
+  if (!tmpl) return null
+
+  // 嘗試 1：截真實站台
+  if (tmpl.vercel_url) {
+    const url = tmpl.vercel_url.startsWith('http') ? tmpl.vercel_url : `https://${tmpl.vercel_url}`
+    const thumbUrl = await captureAndSaveThumbnail(url)
+    if (thumbUrl) {
+      await query(`UPDATE templates SET thumbnail_url = $1 WHERE id = $2`, [thumbUrl, templateId])
+      logger.info({ templateId, source: 'vercel_url' }, '模板縮圖截圖完成')
+      return thumbUrl
+    }
+    logger.warn({ templateId }, 'vercel_url 截圖失敗，改用 HTML fallback')
+  }
+
+  // 嘗試 2：用 generateTemplateHtml 生成 HTML 截圖
+  try {
+    const html = generateTemplateHtml({
+      id: tmpl.id,
+      name: tmpl.name,
+      description: tmpl.description || '',
+      category: tmpl.category,
+      tags: Array.isArray(tmpl.tags) ? tmpl.tags : [],
+    })
+    const buffer = await screenshotHtmlContent(html)
+    if (!buffer) return null
+    const thumbUrl = await saveBuffer(buffer)
+    if (thumbUrl) {
+      await query(`UPDATE templates SET thumbnail_url = $1 WHERE id = $2`, [thumbUrl, templateId])
+      logger.info({ templateId, source: 'html_fallback' }, '模板縮圖 HTML fallback 完成')
+      return thumbUrl
+    }
+  } catch (err) {
+    logger.warn({ templateId, err }, '模板縮圖 HTML fallback 失敗')
+  }
+  return null
+}
+
+/**
+ * 啟動時自動補齊所有缺縮圖的已上線社群模板（序列執行，避免多個 Chromium 同時開）
  */
 export async function recaptureAllMissingThumbnails(): Promise<void> {
   try {
-    const rows = await query<{ id: string; vercel_url: string }>(
-      `SELECT t.id, p.vercel_url
+    // 社群模板（有 source_project_id）且無縮圖
+    const rows = await query<{ id: string }>(
+      `SELECT t.id
        FROM templates t
-       JOIN projects p ON p.id = t.source_project_id
        WHERE t.thumbnail_url IS NULL
          AND t.is_active = true
-         AND p.vercel_url IS NOT NULL
+         AND t.source_project_id IS NOT NULL
        LIMIT 20`,
       []
     )
 
     if (rows.rows.length === 0) return
 
-    logger.info({ count: rows.rows.length }, '自動補截圖：找到缺圖模板，開始序列截圖')
+    logger.info({ count: rows.rows.length }, '自動補截圖：找到缺圖社群模板，開始序列截圖')
 
     for (const row of rows.rows) {
       try {
-        const url = row.vercel_url.startsWith('http') ? row.vercel_url : `https://${row.vercel_url}`
-        const thumbUrl = await captureAndSaveThumbnail(url)
-        if (thumbUrl) {
-          await query(`UPDATE templates SET thumbnail_url = $1 WHERE id = $2`, [thumbUrl, row.id])
-          logger.info({ templateId: row.id }, '自動補截圖完成')
-        }
+        await captureTemplateThumbnail(row.id)
       } catch (err) {
         logger.warn({ templateId: row.id, err }, '自動補截圖單筆失敗，繼續下一筆')
       }
