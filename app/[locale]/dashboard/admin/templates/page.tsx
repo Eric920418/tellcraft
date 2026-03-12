@@ -146,7 +146,7 @@ export default function AdminTemplatesPage() {
       loadPreviewFiles(template)
     } else {
       // Seed 模板：直接用已存在的 HTML 預覽
-      setIframeSrc(`/api/vps/templates/preview/${template.id}`)
+      setIframeSrc(`/api/template-preview/${template.id}`)
     }
   }
 
