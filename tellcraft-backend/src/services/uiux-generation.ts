@@ -2209,7 +2209,7 @@ async function checkAndFixSyntaxErrors(
     const response = await callClaude(
       systemPrompt,
       [{ role: 'user', content: `Fix these syntax errors:\n\n${errorSummary}\n\nFiles:\n\n${brokenCode}` }],
-      { maxTokens: 8192, temperature: 0 },
+      { maxTokens: 32768, temperature: 0 },
       { ...trackingContext, purpose: 'fix_syntax_errors' }
     )
     if (response.success && response.content) {
