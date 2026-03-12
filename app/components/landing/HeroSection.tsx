@@ -249,6 +249,13 @@ function HeroSection({
       />
 
       <div
+        style={{
+          position: 'relative',
+          width: '100%',
+          maxWidth: 640,
+        }}
+      >
+      <div
         className="hero-content-grid"
         style={{
           width: '100%',
@@ -487,19 +494,22 @@ function HeroSection({
         </motion.div>
       </div>
 
-      {/* Recent Projects Pills */}
+      {/* Recent Projects Pills - absolute positioned to avoid flex layout shift */}
       {!isChatActive && !isTransitioning && recentProjects.length > 0 && (
         <motion.div
           initial={{ opacity: 0, y: 10 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.4, delay: 0.8 }}
           style={{
-            position: 'relative',
+            position: 'absolute',
+            top: '100%',
+            left: 0,
+            right: 0,
+            paddingTop: 20,
             display: 'flex',
             flexDirection: 'column',
             alignItems: 'center',
             gap: 8,
-            marginTop: 24,
           }}
         >
           <span style={{ fontSize: 11, color: 'var(--gray-400)', letterSpacing: '0.03em' }}>
@@ -545,6 +555,7 @@ function HeroSection({
           </div>
         </motion.div>
       )}
+      </div>
 
       <ScrollIndicator visible={!isFocused && !inputValue && !isTransitioning} />
     </motion.section>
