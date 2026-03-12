@@ -298,22 +298,14 @@ router.patch('/:id/review', requireAdmin, validateBody(templateReviewSchema), as
 
     logger.info({ templateId: id, status, adminId: req.user!.id }, '管理員審核模板')
 
-    // approved 且無縮圖時，後台自動截圖（fire-and-forget）
+    // approved 且為社群模板時，後台自動截圖（fire-and-forget，無縮圖才截）
     if (isActive) {
-      queryOne<{ vercel_url: string | null; thumbnail_url: string | null }>(
-        `SELECT p.vercel_url, t.thumbnail_url
-         FROM templates t
-         LEFT JOIN projects p ON p.id = t.source_project_id
-         WHERE t.id = $1`,
+      queryOne<{ thumbnail_url: string | null; source_project_id: string | null }>(
+        `SELECT thumbnail_url, source_project_id FROM templates WHERE id = $1`,
         [id]
       ).then(async row => {
-        if (row?.vercel_url && !row.thumbnail_url) {
-          const url = row.vercel_url.startsWith('http') ? row.vercel_url : `https://${row.vercel_url}`
-          const thumbUrl = await captureAndSaveThumbnail(url)
-          if (thumbUrl) {
-            await query(`UPDATE templates SET thumbnail_url = $1 WHERE id = $2`, [thumbUrl, id])
-            logger.info({ templateId: id, thumbUrl }, '模板縮圖自動截圖完成')
-          }
+        if (row?.source_project_id && !row.thumbnail_url) {
+          await captureTemplateThumbnail(id)
         }
       }).catch(err => logger.warn({ err }, '模板縮圖後台截圖失敗'))
     }
