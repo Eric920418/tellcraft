@@ -4936,6 +4936,24 @@ ${codeBlocks.join('\n\n')}
     }
   }
 
+  // ── 非修改檔案的既有語法錯誤掃描：stub 替換，避免夾帶舊錯誤進 DB ──
+  const unstubbed = [...mergedCode.pages, ...mergedCode.components].filter(
+    f => !patchedPaths.has(f.path) && getSyntaxErrors(f.path, f.content).length > 0
+  )
+  if (unstubbed.length > 0) {
+    logger.warn({ paths: unstubbed.map(f => f.path) }, 'refineCode：非修改檔案有既有語法錯誤，替換為 stub')
+    const stubMap = new Map(unstubbed.map(f => {
+      const name = (f.path.split('/').pop() || 'Component').replace(/\.\w+$/, '').replace(/[^a-zA-Z0-9]/g, '')
+      const stub = `import React from 'react'\nexport default function ${name || 'ErrorStub'}() {\n  return (\n    <div style={{ border: '2px dashed #ef4444', borderRadius: '8px', padding: '24px', margin: '16px', backgroundColor: '#fef2f2', color: '#991b1b', fontFamily: 'system-ui, sans-serif', textAlign: 'center' as const }}>\n      <p style={{ fontWeight: 600, marginBottom: '8px' }}>此組件有語法錯誤</p>\n      <p style={{ fontSize: '14px', color: '#b91c1c' }}>需要重新生成：${f.path.split('/').pop()}</p>\n    </div>\n  )\n}`
+      return [f.path, stub]
+    }))
+    mergedCode = {
+      pages: mergedCode.pages.map(p => ({ ...p, content: stubMap.get(p.path) ?? p.content })),
+      components: mergedCode.components.map(c => ({ ...c, content: stubMap.get(c.path) ?? c.content })),
+      styles: mergedCode.styles,
+    }
+  }
+
   // 鎖定圖片 URL 最終驗證：若缺失，嘗試一次修復
   if (lockedUploadUrls.length > 0) {
     if (targetPreviewRoute) {
