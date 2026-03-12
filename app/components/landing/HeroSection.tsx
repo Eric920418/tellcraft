@@ -249,13 +249,6 @@ function HeroSection({
       />
 
       <div
-        style={{
-          position: 'relative',
-          width: '100%',
-          maxWidth: 640,
-        }}
-      >
-      <div
         className="hero-content-grid"
         style={{
           width: '100%',
@@ -494,68 +487,64 @@ function HeroSection({
         </motion.div>
       </div>
 
-      {/* Recent Projects Pills - absolute positioned to avoid flex layout shift */}
-      {!isChatActive && !isTransitioning && recentProjects.length > 0 && (
-        <motion.div
-          initial={{ opacity: 0, y: 10 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.4, delay: 0.8 }}
-          style={{
-            position: 'absolute',
-            top: '100%',
-            left: 0,
-            right: 0,
-            paddingTop: 20,
-            display: 'flex',
-            flexDirection: 'column',
-            alignItems: 'center',
-            gap: 8,
-          }}
-        >
-          <span style={{ fontSize: 11, color: 'var(--gray-400)', letterSpacing: '0.03em' }}>
-            {tHero('recentProjects')}
-          </span>
-          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', justifyContent: 'center' }}>
-            {recentProjects.slice(0, 3).map((project) => (
-              project.latestConversationId && (
-                <motion.button
-                  key={project.id}
-                  whileHover={{ scale: 1.03 }}
-                  whileTap={{ scale: 0.97 }}
-                  onClick={() => onResumeProject(project.latestConversationId!)}
-                  style={{
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    gap: 6,
-                    padding: '6px 14px',
-                    fontSize: 13,
-                    fontWeight: 400,
-                    background: 'var(--white)',
-                    color: 'var(--gray-600)',
-                    border: '1px solid var(--border-color)',
-                    borderRadius: 20,
-                    cursor: 'pointer',
-                    transition: 'all 0.15s ease',
-                  }}
-                >
-                  <span style={{
-                    width: 6,
-                    height: 6,
-                    borderRadius: '50%',
-                    background: project.status === 'deployed' ? '#22C55E'
-                      : project.status === 'failed' ? '#EF4444'
-                      : project.status === 'generating' ? '#F59E0B'
-                      : 'var(--gray-300)',
-                    flexShrink: 0,
-                  }} />
-                  {project.name}
-                </motion.button>
-              )
-            ))}
-          </div>
-        </motion.div>
+      {/* Recent Projects - 只有 authenticated 時才預留空間，防止 projects 載入後 grid 位移 */}
+      {isAuthenticated && (
+        <div style={{ marginTop: 24, minHeight: 64, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'flex-start' }}>
+          <AnimatePresence>
+            {!isChatActive && !isTransitioning && recentProjects.length > 0 && (
+              <motion.div
+                initial={{ opacity: 0, y: 8 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -8 }}
+                transition={{ duration: 0.35, delay: 0.8 }}
+                style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8 }}
+              >
+                <span style={{ fontSize: 11, color: 'var(--gray-400)', letterSpacing: '0.03em' }}>
+                  {tHero('recentProjects')}
+                </span>
+                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', justifyContent: 'center' }}>
+                  {recentProjects.slice(0, 3).map((project) => (
+                    project.latestConversationId && (
+                      <motion.button
+                        key={project.id}
+                        whileHover={{ scale: 1.03 }}
+                        whileTap={{ scale: 0.97 }}
+                        onClick={() => onResumeProject(project.latestConversationId!)}
+                        style={{
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: 6,
+                          padding: '6px 14px',
+                          fontSize: 13,
+                          fontWeight: 400,
+                          background: 'var(--white)',
+                          color: 'var(--gray-600)',
+                          border: '1px solid var(--border-color)',
+                          borderRadius: 20,
+                          cursor: 'pointer',
+                          transition: 'all 0.15s ease',
+                        }}
+                      >
+                        <span style={{
+                          width: 6,
+                          height: 6,
+                          borderRadius: '50%',
+                          background: project.status === 'deployed' ? '#22C55E'
+                            : project.status === 'failed' ? '#EF4444'
+                            : project.status === 'generating' ? '#F59E0B'
+                            : 'var(--gray-300)',
+                          flexShrink: 0,
+                        }} />
+                        {project.name}
+                      </motion.button>
+                    )
+                  ))}
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </div>
       )}
-      </div>
 
       <ScrollIndicator visible={!isFocused && !inputValue && !isTransitioning} />
     </motion.section>
