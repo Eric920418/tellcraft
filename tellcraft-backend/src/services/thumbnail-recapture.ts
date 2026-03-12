@@ -243,42 +243,11 @@ export async function captureTemplateThumbnail(templateId: string): Promise<stri
 }
 
 /**
- * 一次性：清除社群模板中由 generateTemplateHtml 產生的假縮圖
- * Sandpack 功能上線前審核的模板，縮圖是假的，需清除讓啟動掃描補上真實截圖
- * 判斷依據：thumbnail_url 存在（非 NULL）但從未有過真實 Sandpack 截圖記錄
- * 使用 pg_catalog 不存在的欄位比對是侵入性的，改用「啟動時清除所有社群模板假縮圖」
- * 只執行一次：清除後，啟動掃描（thumbnail_url IS NULL）會自動補上真實截圖
- */
-async function clearFakeCommunityThumbnails(): Promise<void> {
-  try {
-    // 找出有縮圖但從未做過 Sandpack 截圖的社群模板
-    // 判斷：thumbnail_url 不含 '/sandpack/' 標記（我們在 saveBuffer 無法區分，改用時間判斷）
-    // 保守做法：只清除 created_at 在 Sandpack 功能上線前（2026-03-12）的模板縮圖
-    const result = await query(
-      `UPDATE templates
-       SET thumbnail_url = NULL
-       WHERE source_project_id IS NOT NULL
-         AND is_active = true
-         AND thumbnail_url IS NOT NULL
-         AND created_at < '2026-03-12T00:00:00Z'`,
-      []
-    )
-    if ((result as { rowCount?: number }).rowCount) {
-      logger.info({ count: (result as { rowCount?: number }).rowCount }, '已清除舊假縮圖，待啟動掃描補上真實截圖')
-    }
-  } catch (err) {
-    logger.warn({ err }, '清除假縮圖失敗（不影響服務）')
-  }
-}
-
-/**
  * 啟動時補齊所有缺圖的社群模板（thumbnail_url IS NULL）
  * 已有縮圖的由「用戶重新部署」觸發更新（deployer.ts），不在這裡重複截
  * 序列執行，避免多個 Chromium 同時開
  */
 export async function recaptureAllMissingThumbnails(): Promise<void> {
-  // 清舊假縮圖，使其進入 IS NULL 補圖流程
-  await clearFakeCommunityThumbnails()
 
   try {
     // 只補從未截過的社群模板（thumbnail_url IS NULL）
