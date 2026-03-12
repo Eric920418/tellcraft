@@ -1014,6 +1014,8 @@ export interface MyTemplateData {
   reviewReason: string | null
   createdAt: string
   sourceProjectId: string | null
+  approvedAt: string | null
+  sourceProjectUpdatedAt: string | null
 }
 
 /**
@@ -1062,6 +1064,39 @@ export async function getMyTemplates(input: {
 }): Promise<ApiResponse<{ templates: MyTemplateData[] }>> {
   return apiRequest('/api/templates/mine', {
     method: 'GET',
+    headers: {
+      Authorization: `Bearer ${input.token}`,
+    },
+  })
+}
+
+/**
+ * 用戶更新自己模板的縮圖並重新送審
+ */
+export async function resubmitTemplateThumbnail(input: {
+  token: string
+  templateId: string
+  thumbnailUrl: string
+}): Promise<ApiResponse<{ success: boolean }>> {
+  return apiRequest(`/api/templates/${input.templateId}/thumbnail/resubmit`, {
+    method: 'PATCH',
+    headers: {
+      Authorization: `Bearer ${input.token}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ thumbnailUrl: input.thumbnailUrl }),
+  })
+}
+
+/**
+ * 用戶發布模板更新（已上線模板退回待審核）
+ */
+export async function publishTemplateUpdate(input: {
+  token: string
+  templateId: string
+}): Promise<ApiResponse<{ success: boolean }>> {
+  return apiRequest(`/api/templates/${input.templateId}/publish-update`, {
+    method: 'POST',
     headers: {
       Authorization: `Bearer ${input.token}`,
     },

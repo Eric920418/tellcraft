@@ -8,6 +8,8 @@ import { DataTable, StatusBadge, SearchInput, type Column } from '@/app/componen
 import ProjectHoverCard from '@/app/components/dashboard/ProjectHoverCard'
 import TemplateSubmitModal from '@/app/components/templates/TemplateSubmitModal'
 import { getProjects, togglePinProject, deleteProjects, getConversationMessages } from '@/app/lib/vps-api'
+import { getMyTemplates, updateMyTemplateThumbnail, publishTemplateUpdate } from '@/app/actions/templates'
+import type { MyTemplateData } from '@/app/lib/vps-api'
 import { useAuth } from '@/app/hooks/useAuth'
 
 // 從 localStorage 獲取 token
@@ -70,6 +72,15 @@ export default function ProjectsPage() {
   const [uploadProjectId, setUploadProjectId] = useState<string | null>(null)
   const pageSize = 10
 
+  // 我的模板
+  const [myTemplates, setMyTemplates] = useState<MyTemplateData[]>([])
+  const [myTemplatesLoading, setMyTemplatesLoading] = useState(true)
+  const [thumbnailUploading, setThumbnailUploading] = useState<string | null>(null)
+  const [thumbnailError, setThumbnailError] = useState<string | null>(null)
+  const thumbnailInputRef = useRef<HTMLInputElement | null>(null)
+  const [thumbnailTargetId, setThumbnailTargetId] = useState<string | null>(null)
+  const [publishingUpdate, setPublishingUpdate] = useState<string | null>(null)
+
   // Hover preview state
   const [hoverProject, setHoverProject] = useState<Project | null>(null)
   const [hoverAnchorRect, setHoverAnchorRect] = useState<DOMRect | null>(null)
@@ -130,6 +141,51 @@ export default function ProjectsPage() {
     return () => mediaQuery.removeListener(syncMobileState)
   }, [])
 
+
+  useEffect(() => {
+    const token = getAuthToken()
+    if (!token) return
+    setMyTemplatesLoading(true)
+    getMyTemplates().then(result => {
+      if (result.success && result.data) setMyTemplates(result.data)
+      setMyTemplatesLoading(false)
+    })
+  }, [])
+
+  const handleThumbnailUpdate = async (templateId: string, file: File) => {
+    const token = getAuthToken()
+    if (!token) return
+    setThumbnailUploading(templateId)
+    setThumbnailError(null)
+    try {
+      const formData = new FormData()
+      formData.append('file', file)
+      const uploadRes = await fetch('/api/vps/upload', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}` },
+        body: formData,
+      })
+      if (!uploadRes.ok) {
+        const err = await uploadRes.json().catch(() => ({}))
+        setThumbnailError(err.error || '上傳失敗')
+        return
+      }
+      const { url } = await uploadRes.json()
+      const result = await updateMyTemplateThumbnail(templateId, url)
+      if (!result.success) {
+        setThumbnailError(result.error || '更新失敗')
+        return
+      }
+      // 重新整理我的模板列表
+      const refreshed = await getMyTemplates()
+      if (refreshed.success && refreshed.data) setMyTemplates(refreshed.data)
+    } catch {
+      setThumbnailError('上傳失敗，請稍後再試')
+    } finally {
+      setThumbnailUploading(null)
+      setThumbnailTargetId(null)
+    }
+  }
 
   const handleRowMouseEnter = (project: Project, event: React.MouseEvent<HTMLDivElement>) => {
     clearTimeout(hideTimeoutRef.current)
@@ -922,6 +978,314 @@ export default function ProjectsPage() {
           />
         )}
       </AnimatePresence>
+
+      {/* 我的模板 */}
+      {(myTemplatesLoading || myTemplates.length > 0) && (
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.4, delay: 0.3 }}
+          style={{ marginTop: 48 }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
+            <h2 style={{ fontSize: 18, fontWeight: 600, color: 'var(--black)' }}>我的模板</h2>
+            <span style={{ fontSize: 13, color: 'var(--gray-400)' }}>
+              {myTemplatesLoading ? '載入中...' : `${myTemplates.length} 個`}
+            </span>
+          </div>
+
+          {thumbnailError && (
+            <div style={{
+              padding: '10px 14px',
+              background: '#FEF2F2',
+              border: '1px solid #FECACA',
+              borderRadius: 6,
+              fontSize: 13,
+              color: '#DC2626',
+              marginBottom: 12,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              gap: 8,
+            }}>
+              <span>{thumbnailError}</span>
+              <button onClick={() => setThumbnailError(null)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#DC2626', fontSize: 16, lineHeight: 1, padding: 0 }}>×</button>
+            </div>
+          )}
+
+          {/* 隱藏的 file input */}
+          <input
+            ref={thumbnailInputRef}
+            type="file"
+            accept="image/jpeg,image/png,image/webp"
+            style={{ display: 'none' }}
+            onChange={(e) => {
+              const file = e.target.files?.[0]
+              if (file && thumbnailTargetId) {
+                handleThumbnailUpdate(thumbnailTargetId, file)
+              }
+              e.target.value = ''
+            }}
+          />
+
+          <div style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))',
+            gap: 16,
+          }}>
+            {myTemplatesLoading
+              ? Array.from({ length: 3 }).map((_, i) => (
+                <div key={i} style={{
+                  borderRadius: 10,
+                  overflow: 'hidden',
+                  border: '1px solid var(--border-color)',
+                  background: 'var(--gray-50)',
+                  animation: 'pulse 1.5s ease-in-out infinite',
+                }}>
+                  <div style={{ height: 140, background: 'var(--gray-100)' }} />
+                  <div style={{ padding: '12px 14px' }}>
+                    <div style={{ height: 14, background: 'var(--gray-200)', borderRadius: 4, marginBottom: 8, width: '70%' }} />
+                    <div style={{ height: 12, background: 'var(--gray-200)', borderRadius: 4, width: '40%' }} />
+                  </div>
+                </div>
+              ))
+              : myTemplates.map((tmpl) => {
+                const statusConfig: Record<string, { label: string; bg: string; color: string }> = {
+                  pending:  { label: '審核中', bg: '#FEF9C3', color: '#854D0E' },
+                  approved: { label: '已上線', bg: '#DCFCE7', color: '#166534' },
+                  rejected: { label: '已拒絕', bg: '#FEE2E2', color: '#991B1B' },
+                }
+                const st = statusConfig[tmpl.reviewStatus] ?? { label: tmpl.reviewStatus, bg: 'var(--gray-100)', color: 'var(--gray-600)' }
+                const isUploading = thumbnailUploading === tmpl.id
+                const isPublishing = publishingUpdate === tmpl.id
+                const hasUnpublishedUpdate =
+                  tmpl.reviewStatus === 'approved' &&
+                  !!tmpl.sourceProjectUpdatedAt &&
+                  !!tmpl.approvedAt &&
+                  new Date(tmpl.sourceProjectUpdatedAt) > new Date(tmpl.approvedAt)
+
+                return (
+                  <div key={tmpl.id} style={{
+                    borderRadius: 10,
+                    overflow: 'hidden',
+                    border: `1px solid ${hasUnpublishedUpdate ? '#FB923C' : 'var(--border-color)'}`,
+                    background: 'var(--white)',
+                    display: 'flex',
+                    flexDirection: 'column',
+                  }}>
+                    {/* 縮圖 */}
+                    <div style={{
+                      height: 140,
+                      background: 'var(--gray-100)',
+                      position: 'relative',
+                      overflow: 'hidden',
+                    }}>
+                      {tmpl.thumbnailUrl ? (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img
+                          src={tmpl.thumbnailUrl}
+                          alt={tmpl.name}
+                          style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                        />
+                      ) : (
+                        <div style={{
+                          width: '100%',
+                          height: '100%',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          flexDirection: 'column',
+                          gap: 6,
+                          color: 'var(--gray-400)',
+                        }}>
+                          <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                            <rect x="3" y="3" width="18" height="18" rx="2" />
+                            <circle cx="8.5" cy="8.5" r="1.5" />
+                            <polyline points="21 15 16 10 5 21" />
+                          </svg>
+                          <span style={{ fontSize: 11 }}>無縮圖</span>
+                        </div>
+                      )}
+                      {/* 上傳中遮罩 */}
+                      {isUploading && (
+                        <div style={{
+                          position: 'absolute',
+                          inset: 0,
+                          background: 'rgba(0,0,0,0.5)',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                        }}>
+                          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ animation: 'spin 1s linear infinite' }}>
+                            <path d="M21 12a9 9 0 1 1-6.219-8.56" />
+                          </svg>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* 未發布更新 banner */}
+                    {hasUnpublishedUpdate && (
+                      <div style={{
+                        padding: '7px 12px',
+                        background: '#FFF7ED',
+                        borderBottom: '1px solid #FED7AA',
+                        fontSize: 12,
+                        color: '#C2410C',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 6,
+                      }}>
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
+                          <circle cx="12" cy="12" r="10" />
+                          <line x1="12" y1="8" x2="12" y2="12" />
+                          <line x1="12" y1="16" x2="12.01" y2="16" />
+                        </svg>
+                        專案有新版本尚未發布
+                      </div>
+                    )}
+
+                    {/* 資訊 */}
+                    <div style={{ padding: '12px 14px', flex: 1, display: 'flex', flexDirection: 'column', gap: 6 }}>
+                      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 8 }}>
+                        <span style={{ fontSize: 14, fontWeight: 600, color: 'var(--black)', lineHeight: 1.3, flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          {tmpl.name}
+                        </span>
+                        <span style={{
+                          fontSize: 11,
+                          fontWeight: 500,
+                          padding: '2px 8px',
+                          borderRadius: 99,
+                          background: st.bg,
+                          color: st.color,
+                          flexShrink: 0,
+                          whiteSpace: 'nowrap',
+                        }}>
+                          {st.label}
+                        </span>
+                      </div>
+
+                      <span style={{ fontSize: 12, color: 'var(--gray-400)', textTransform: 'capitalize' }}>
+                        {tmpl.category}
+                      </span>
+
+                      {tmpl.reviewStatus === 'rejected' && tmpl.reviewReason && (
+                        <div style={{
+                          fontSize: 12,
+                          color: '#991B1B',
+                          background: '#FEF2F2',
+                          borderRadius: 5,
+                          padding: '5px 8px',
+                          lineHeight: 1.5,
+                        }}>
+                          拒絕原因：{tmpl.reviewReason}
+                        </div>
+                      )}
+
+                      {/* 發布更新按鈕（有未發布更新時顯示） */}
+                      {hasUnpublishedUpdate && (
+                        <button
+                          disabled={isPublishing}
+                          onClick={async () => {
+                            setPublishingUpdate(tmpl.id)
+                            setThumbnailError(null)
+                            try {
+                              const result = await publishTemplateUpdate(tmpl.id)
+                              if (!result.success) {
+                                setThumbnailError(result.error || '發布失敗')
+                                return
+                              }
+                              const refreshed = await getMyTemplates()
+                              if (refreshed.success && refreshed.data) setMyTemplates(refreshed.data)
+                            } catch {
+                              setThumbnailError('發布失敗，請稍後再試')
+                            } finally {
+                              setPublishingUpdate(null)
+                            }
+                          }}
+                          style={{
+                            marginTop: 'auto',
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            gap: 5,
+                            fontSize: 12,
+                            fontWeight: 500,
+                            padding: '7px 12px',
+                            borderRadius: 6,
+                            border: 'none',
+                            background: isPublishing ? '#6B7280' : '#111',
+                            color: '#fff',
+                            cursor: isPublishing ? 'not-allowed' : 'pointer',
+                            opacity: isPublishing ? 0.7 : 1,
+                            transition: 'background 0.15s',
+                            width: '100%',
+                          }}
+                          onMouseEnter={(e) => { if (!isPublishing) e.currentTarget.style.background = '#374151' }}
+                          onMouseLeave={(e) => { if (!isPublishing) e.currentTarget.style.background = '#111' }}
+                        >
+                          {isPublishing ? (
+                            <>
+                              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ animation: 'spin 1s linear infinite' }}>
+                                <path d="M21 12a9 9 0 1 1-6.219-8.56" />
+                              </svg>
+                              發布中...
+                            </>
+                          ) : (
+                            <>
+                              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                <path d="M12 2v10m0 0l-3-3m3 3l3-3" />
+                                <path d="M20 16v4a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2v-4" />
+                              </svg>
+                              發布更新
+                            </>
+                          )}
+                        </button>
+                      )}
+
+                      {/* 更新縮圖按鈕 */}
+                      <button
+                        disabled={isUploading}
+                        onClick={() => {
+                          setThumbnailTargetId(tmpl.id)
+                          thumbnailInputRef.current?.click()
+                        }}
+                        style={{
+                          marginTop: 'auto',
+                          paddingTop: 6,
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          gap: 5,
+                          fontSize: 12,
+                          fontWeight: 500,
+                          padding: '7px 12px',
+                          borderRadius: 6,
+                          border: '1px solid var(--border-color)',
+                          background: 'var(--white)',
+                          color: 'var(--gray-600)',
+                          cursor: isUploading ? 'not-allowed' : 'pointer',
+                          opacity: isUploading ? 0.5 : 1,
+                          transition: 'all 0.15s',
+                          width: '100%',
+                        }}
+                        onMouseEnter={(e) => { if (!isUploading) { e.currentTarget.style.background = 'var(--gray-50)'; e.currentTarget.style.color = 'var(--black)' } }}
+                        onMouseLeave={(e) => { e.currentTarget.style.background = 'var(--white)'; e.currentTarget.style.color = 'var(--gray-600)' }}
+                      >
+                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                          <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                          <polyline points="17 8 12 3 7 8" />
+                          <line x1="12" y1="3" x2="12" y2="15" />
+                        </svg>
+                        {isUploading ? '上傳中...' : '更新縮圖並重新送審'}
+                      </button>
+                    </div>
+                  </div>
+                )
+              })
+            }
+          </div>
+        </motion.div>
+      )}
 
       {/* 模板上傳 Modal */}
       <TemplateSubmitModal

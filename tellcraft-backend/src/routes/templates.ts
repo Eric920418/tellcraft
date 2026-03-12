@@ -221,10 +221,15 @@ router.get('/mine', requireAuth, async (req, res) => {
     const result = await query<{
       id: string; name: string; slug: string; category: string; description: string
       thumbnail_url: string | null; tags: string[]; review_status: string; review_reason: string | null
-      created_at: Date; source_project_id: string | null
+      created_at: Date; source_project_id: string | null; approved_at: Date | null
+      project_updated_at: Date | null
     }>(
-      `SELECT id, name, slug, category, description, thumbnail_url, tags, review_status, review_reason, created_at, source_project_id
-       FROM templates WHERE submitted_by = $1 ORDER BY created_at DESC`,
+      `SELECT t.id, t.name, t.slug, t.category, t.description, t.thumbnail_url, t.tags,
+              t.review_status, t.review_reason, t.created_at, t.source_project_id, t.approved_at,
+              p.updated_at AS project_updated_at
+       FROM templates t
+       LEFT JOIN projects p ON p.id = t.source_project_id
+       WHERE t.submitted_by = $1 ORDER BY t.created_at DESC`,
       [userId]
     )
 
@@ -240,12 +245,76 @@ router.get('/mine', requireAuth, async (req, res) => {
       reviewReason: row.review_reason,
       createdAt: row.created_at,
       sourceProjectId: row.source_project_id,
+      approvedAt: row.approved_at,
+      sourceProjectUpdatedAt: row.project_updated_at,
     }))
 
     res.json({ templates })
   } catch (error) {
     logger.error({ err: error }, '獲取我的模板失敗')
     res.status(500).json({ error: '獲取失敗' })
+  }
+})
+
+/**
+ * POST /api/templates/:id/publish-update
+ * 用戶將已上線模板退回待審核（有新版本時手動發布更新）
+ */
+router.post('/:id/publish-update', requireAuth, async (req, res) => {
+  try {
+    const { id } = req.params
+    const userId = req.user!.id
+
+    const template = await queryOne<{ id: string; submitted_by: string; review_status: string }>(
+      `SELECT id, submitted_by, review_status FROM templates WHERE id = $1`,
+      [id]
+    )
+    if (!template) return res.status(404).json({ error: '模板不存在' })
+    if (template.submitted_by !== userId) return res.status(403).json({ error: '無權限' })
+    if (template.review_status !== 'approved') return res.status(400).json({ error: '只有已上線的模板才能發布更新' })
+
+    await query(
+      `UPDATE templates SET review_status = 'pending', is_active = false WHERE id = $1`,
+      [id]
+    )
+    logger.info({ templateId: id, userId }, '用戶發布模板更新，退回待審核')
+    res.json({ success: true })
+  } catch (error) {
+    logger.error({ err: error }, '發布模板更新失敗')
+    res.status(500).json({ error: '發布失敗' })
+  }
+})
+
+/**
+ * PATCH /api/templates/:id/thumbnail/resubmit
+ * 用戶更新自己模板的縮圖並重新送審
+ * - 驗證此模板屬於當前用戶
+ * - 更新 thumbnail_url，將 review_status 改回 pending、is_active = false
+ */
+router.patch('/:id/thumbnail/resubmit', requireAuth, async (req, res) => {
+  try {
+    const { id } = req.params
+    const { thumbnailUrl } = req.body as { thumbnailUrl: string }
+    const userId = req.user!.id
+
+    if (!thumbnailUrl) return res.status(400).json({ error: 'thumbnailUrl 必填' })
+
+    const template = await queryOne<{ id: string; submitted_by: string }>(
+      `SELECT id, submitted_by FROM templates WHERE id = $1`,
+      [id]
+    )
+    if (!template) return res.status(404).json({ error: '模板不存在' })
+    if (template.submitted_by !== userId) return res.status(403).json({ error: '無權限' })
+
+    await query(
+      `UPDATE templates SET thumbnail_url = $1, review_status = 'pending', is_active = false WHERE id = $2`,
+      [thumbnailUrl, id]
+    )
+    logger.info({ templateId: id, userId }, '用戶更新縮圖並重新送審')
+    res.json({ success: true })
+  } catch (error) {
+    logger.error({ err: error }, '用戶更新縮圖失敗')
+    res.status(500).json({ error: '更新失敗' })
   }
 })
 
@@ -311,7 +380,7 @@ router.patch('/:id/review', requireAdmin, validateBody(templateReviewSchema), as
 
     const isActive = status === 'approved'
     await query(
-      `UPDATE templates SET review_status = $1, review_reason = $2, is_active = $3 WHERE id = $4`,
+      `UPDATE templates SET review_status = $1, review_reason = $2, is_active = $3${isActive ? ', approved_at = NOW()' : ''} WHERE id = $4`,
       [status, reason || null, isActive, id]
     )
 

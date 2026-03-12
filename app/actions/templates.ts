@@ -348,6 +348,24 @@ export async function getMyTemplates(): Promise<ActionResult<vpsApi.MyTemplateDa
 }
 
 /**
+ * 用戶發布模板更新（已上線模板退回待審核）
+ */
+export async function publishTemplateUpdate(
+  templateId: string
+): Promise<ActionResult<void>> {
+  try {
+    const token = await getAuthToken()
+    if (!token) return { success: false, error: '未登入' }
+
+    const result = await vpsApi.publishTemplateUpdate({ token, templateId })
+    if (!result.success) return { success: false, error: result.error || '發布失敗' }
+    return { success: true }
+  } catch (err) {
+    return { success: false, error: String(err) }
+  }
+}
+
+/**
  * 管理員審核模板（批准/拒絕）
  */
 export async function reviewTemplate(input: {
@@ -406,6 +424,25 @@ export async function initializeTemplates(): Promise<ActionResult<{ count: numbe
     }
 
     return { success: true, data: { count: result.data?.count || 0 } }
+  } catch (err) {
+    return { success: false, error: String(err) }
+  }
+}
+
+/**
+ * 用戶更新自己模板的縮圖並重新送審
+ */
+export async function updateMyTemplateThumbnail(
+  templateId: string,
+  thumbnailUrl: string
+): Promise<ActionResult<void>> {
+  try {
+    const token = await getAuthToken()
+    if (!token) return { success: false, error: '未登入' }
+
+    const result = await vpsApi.resubmitTemplateThumbnail({ token, templateId, thumbnailUrl })
+    if (!result.success) return { success: false, error: result.error || '更新失敗' }
+    return { success: true }
   } catch (err) {
     return { success: false, error: String(err) }
   }
