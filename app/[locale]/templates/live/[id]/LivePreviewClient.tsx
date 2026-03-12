@@ -13,9 +13,17 @@ import type { TemplateFileData } from '@/app/lib/vps-api'
 function ReadinessSignaler() {
   const { sandpack } = useSandpack()
 
+  // 安全兜底：無論 Sandpack 是否完成，50 秒後強制設 ready，避免 Puppeteer 永遠卡住
   useEffect(() => {
-    if (sandpack.status === 'idle') {
-      // 等待 iframe 內容穩定後再通知截圖
+    const safety = setTimeout(() => {
+      document.body.dataset.ready = 'true'
+    }, 50000)
+    return () => clearTimeout(safety)
+  }, [])
+
+  // 正常路徑：idle 或 timeout 都算完成
+  useEffect(() => {
+    if (sandpack.status === 'idle' || sandpack.status === 'timeout') {
       const t = setTimeout(() => {
         document.body.dataset.ready = 'true'
       }, 2500)
