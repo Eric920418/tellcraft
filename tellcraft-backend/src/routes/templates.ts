@@ -250,6 +250,25 @@ router.get('/mine', requireAuth, async (req, res) => {
 })
 
 /**
+ * PATCH /api/templates/:id/thumbnail
+ * 管理員直接設定縮圖 URL（手動上傳後呼叫）
+ */
+router.patch('/:id/thumbnail', requireAdmin, async (req, res) => {
+  try {
+    const { id } = req.params
+    const { thumbnailUrl } = req.body as { thumbnailUrl: string }
+    if (!thumbnailUrl) return res.status(400).json({ error: 'thumbnailUrl 必填' })
+
+    await query(`UPDATE templates SET thumbnail_url = $1 WHERE id = $2`, [thumbnailUrl, id])
+    logger.info({ templateId: id, thumbnailUrl }, '管理員手動更新縮圖')
+    res.json({ success: true, thumbnailUrl })
+  } catch (error) {
+    logger.error({ err: error }, '更新縮圖失敗')
+    res.status(500).json({ error: '更新失敗' })
+  }
+})
+
+/**
  * POST /api/templates/:id/recapture
  * 管理員手動觸發縮圖重新截圖（優先 vercel_url，fallback HTML 生成）
  */

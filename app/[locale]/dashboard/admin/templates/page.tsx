@@ -61,6 +61,7 @@ export default function AdminTemplatesPage() {
   } | null>(null)
   const [sandpackLoading, setSandpackLoading] = useState(false)
   const [iframeSrc, setIframeSrc] = useState<string | null>(null)
+  const [uploadingThumbId, setUploadingThumbId] = useState<string | null>(null)
 
   const fetchTemplates = useCallback(async () => {
     const token = getAuthToken()
@@ -119,6 +120,38 @@ export default function AdminTemplatesPage() {
       }
     } finally {
       setReviewingId(null)
+    }
+  }
+
+  const handleUploadThumbnail = async (templateId: string, file: File) => {
+    const token = getAuthToken()
+    if (!token) return alert('未登入')
+    setUploadingThumbId(templateId)
+    try {
+      // 1. 上傳圖片
+      const VPS_API_URL = process.env.NEXT_PUBLIC_VPS_API_URL || ''
+      const form = new FormData()
+      form.append('image', file)
+      const uploadRes = await fetch(`${VPS_API_URL}/api/upload`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}` },
+        body: form,
+      })
+      if (!uploadRes.ok) throw new Error('上傳失敗')
+      const { url } = await uploadRes.json()
+
+      // 2. 更新模板縮圖
+      const patchRes = await fetch(`${VPS_API_URL}/api/templates/${templateId}/thumbnail`, {
+        method: 'PATCH',
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ thumbnailUrl: url }),
+      })
+      if (!patchRes.ok) throw new Error('更新失敗')
+      await fetchTemplates()
+    } catch (err) {
+      alert(String(err))
+    } finally {
+      setUploadingThumbId(null)
     }
   }
 
@@ -463,23 +496,37 @@ export default function AdminTemplatesPage() {
                       >
                         {previewingId === template.id ? t('closePreview') : t('preview')}
                       </button>
-                      {/* 重新截圖（社群模板才顯示） */}
+                      {/* 社群模板：上傳縮圖 */}
                       {template.sourceProjectId && (
-                        <button
-                          onClick={() => handleRecapture(template.id)}
-                          title="重新截圖縮圖"
-                          style={{
-                            padding: '6px 10px',
-                            fontSize: 12,
-                            background: template.thumbnailUrl ? 'var(--gray-100)' : '#FEF3C7',
-                            border: `1px solid ${template.thumbnailUrl ? 'var(--border-color)' : '#FCD34D'}`,
-                            borderRadius: 4,
-                            cursor: 'pointer',
-                            color: template.thumbnailUrl ? 'var(--gray-600)' : '#92400E',
-                          }}
-                        >
-                          {template.thumbnailUrl ? '🔄 重截' : '📸 截圖'}
-                        </button>
+                        <>
+                          <label
+                            title="上傳縮圖（JPG/PNG）"
+                            style={{
+                              padding: '6px 10px',
+                              fontSize: 12,
+                              background: template.thumbnailUrl ? 'var(--gray-100)' : '#FEF3C7',
+                              border: `1px solid ${template.thumbnailUrl ? 'var(--border-color)' : '#FCD34D'}`,
+                              borderRadius: 4,
+                              cursor: uploadingThumbId === template.id ? 'not-allowed' : 'pointer',
+                              color: template.thumbnailUrl ? 'var(--gray-600)' : '#92400E',
+                              display: 'inline-flex', alignItems: 'center',
+                              opacity: uploadingThumbId === template.id ? 0.5 : 1,
+                            }}
+                          >
+                            {uploadingThumbId === template.id ? '上傳中…' : (template.thumbnailUrl ? '🖼 換圖' : '📸 上傳縮圖')}
+                            <input
+                              type="file"
+                              accept="image/jpeg,image/png,image/webp"
+                              style={{ display: 'none' }}
+                              disabled={uploadingThumbId === template.id}
+                              onChange={e => {
+                                const file = e.target.files?.[0]
+                                if (file) handleUploadThumbnail(template.id, file)
+                                e.target.value = ''
+                              }}
+                            />
+                          </label>
+                        </>
                       )}
                     </div>
                   </td>
