@@ -70,14 +70,18 @@ async function saveBuffer(buffer: Buffer): Promise<string | null> {
  */
 export async function generateThumbnailsForSeedTemplates(): Promise<void> {
   try {
+    // JOIN template_previews 取得真實 HTML（若存在），否則用假生成 fallback
     const rows = await query<{
       id: string; name: string; description: string; category: string; tags: string[]
+      html_content: string | null
     }>(
-      `SELECT id, name, description, category, tags
-       FROM templates
-       WHERE thumbnail_url IS NULL
-         AND is_active = true
-         AND source_project_id IS NULL
+      `SELECT t.id, t.name, t.description, t.category, t.tags,
+              tp.html_content
+       FROM templates t
+       LEFT JOIN template_previews tp ON tp.template_id = t.id
+       WHERE t.thumbnail_url IS NULL
+         AND t.is_active = true
+         AND t.source_project_id IS NULL
        LIMIT 120`,
       []
     )
@@ -91,7 +95,8 @@ export async function generateThumbnailsForSeedTemplates(): Promise<void> {
 
     for (const row of rows.rows) {
       try {
-        const html = generateTemplateHtml({
+        // 優先用 template_previews 的真實 HTML，無則 fallback 到假生成
+        const html = row.html_content ?? generateTemplateHtml({
           id: row.id,
           name: row.name,
           description: row.description || '',
@@ -106,7 +111,7 @@ export async function generateThumbnailsForSeedTemplates(): Promise<void> {
         const thumbUrl = await saveBuffer(buffer)
         if (thumbUrl) {
           await query(`UPDATE templates SET thumbnail_url = $1 WHERE id = $2`, [thumbUrl, row.id])
-          logger.info({ templateId: row.id, name: row.name }, 'Seed 模板縮圖完成')
+          logger.info({ templateId: row.id, name: row.name, hasRealHtml: !!row.html_content }, 'Seed 模板縮圖完成')
         }
       } catch (err) {
         logger.warn({ templateId: row.id, err }, 'Seed 模板縮圖單筆失敗，繼續下一筆')
