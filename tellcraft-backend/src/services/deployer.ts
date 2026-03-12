@@ -957,6 +957,18 @@ export async function executeDeployment(
       }
       await db.upsertProjectFiles(projectId, 'uiux', fileRows)
       logger.info({ fileCount: fileRows.length }, '已同步 build 修復後的代碼到 project_files')
+
+      // 若此專案是某個已上線模板的來源，自動更新模板縮圖（fire-and-forget）
+      db.query<{ id: string }>(
+        `SELECT id FROM templates WHERE source_project_id = $1 AND is_active = true LIMIT 1`,
+        [projectId]
+      ).then(async result => {
+        const tmpl = result.rows[0]
+        if (!tmpl) return
+        const { captureTemplateThumbnail } = await import('./thumbnail-recapture')
+        await captureTemplateThumbnail(tmpl.id)
+        logger.info({ templateId: tmpl.id, projectId }, '部署後自動更新模板縮圖完成')
+      }).catch(err => logger.warn({ err, projectId }, '部署後模板縮圖更新失敗（不影響部署）'))
     } catch (syncErr) {
       logger.error({ err: syncErr }, '同步代碼到 project_files 失敗（不影響部署）')
     }
