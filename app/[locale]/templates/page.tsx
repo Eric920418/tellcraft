@@ -327,14 +327,13 @@ function TemplatesContent() {
             {/* Modal 內容 */}
             <motion.div
               key="modal"
-              initial={{ opacity: 0, scale: 0.96, y: 16 }}
-              animate={{ opacity: 1, scale: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 0.96, y: 16 }}
+              initial={{ opacity: 0, scale: 0.96, x: '-50%', y: 'calc(-50% + 16px)' }}
+              animate={{ opacity: 1, scale: 1, x: '-50%', y: '-50%' }}
+              exit={{ opacity: 0, scale: 0.96, x: '-50%', y: 'calc(-50% + 16px)' }}
               transition={{ duration: 0.25, ease: [0.25, 0.46, 0.45, 0.94] }}
               style={{
                 position: 'fixed',
                 top: '50%', left: '50%',
-                transform: 'translate(-50%, -50%)',
                 width: 'min(92vw, 960px)',
                 height: 'min(88vh, 680px)',
                 background: 'var(--bg-primary, #fff)',
