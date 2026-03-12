@@ -5,7 +5,7 @@ import dynamic from 'next/dynamic'
 import { useRouter } from '@/i18n/navigation'
 import { motion } from 'framer-motion'
 import { useTranslations } from 'next-intl'
-import { getAdminTemplates, getProjectFiles, getTemplateSeedFiles } from '@/app/lib/vps-api'
+import { getAdminTemplates, getProjectFiles } from '@/app/lib/vps-api'
 import { reviewTemplate } from '@/app/actions/templates'
 
 const SandpackPreview = dynamic(
@@ -60,6 +60,7 @@ export default function AdminTemplatesPage() {
     tailwindConfig?: string
   } | null>(null)
   const [sandpackLoading, setSandpackLoading] = useState(false)
+  const [iframeSrc, setIframeSrc] = useState<string | null>(null)
 
   const fetchTemplates = useCallback(async () => {
     const token = getAuthToken()
@@ -92,43 +93,18 @@ export default function AdminTemplatesPage() {
 
   const loadPreviewFiles = useCallback(async (template: AdminTemplate) => {
     const token = getAuthToken()
+    if (!template.sourceProjectId || !token) return
     setSandpackLoading(true)
     setSandpackData(null)
-
-    const buildSandpackData = (files: Array<{ path?: string; filePath?: string; content: string; fileType: string }>) => {
-      const norm = files.map(f => ({ path: f.path ?? (f as { filePath?: string }).filePath ?? '', content: f.content, fileType: f.fileType }))
-      const pages = norm.filter(f => f.fileType === 'page').map(f => ({ path: f.path, content: f.content, description: '' }))
-      const components = norm.filter(f => f.fileType === 'component').map(f => ({ path: f.path, content: f.content, description: '' }))
-      const styles = norm.filter(f => f.fileType === 'style').map(f => f.content).join('\n')
-      const tailwindConfig = norm.find(f => f.fileType === 'config')?.content
+    const result = await getProjectFiles({ token, projectId: template.sourceProjectId })
+    if (result.success && result.data) {
+      const files = result.data.files
+      const pages = files.filter(f => f.fileType === 'page').map(f => ({ path: f.path, content: f.content, description: '' }))
+      const components = files.filter(f => f.fileType === 'component').map(f => ({ path: f.path, content: f.content, description: '' }))
+      const styles = files.filter(f => f.fileType === 'style').map(f => f.content).join('\n')
+      const tailwindConfig = files.find(f => f.fileType === 'config')?.content
       setSandpackData({ pages, components, styles, tailwindConfig })
     }
-
-    if (template.sourceProjectId && token) {
-      // 用戶投稿模板：走 project_files via project_id
-      const result = await getProjectFiles({ token, projectId: template.sourceProjectId })
-      if (result.success && result.data) {
-        buildSandpackData(result.data.files)
-      }
-    } else {
-      // Seed 模板：先查 DB 的 template_id files
-      const result = await getTemplateSeedFiles(template.id)
-      if (result.success && result.data?.files && result.data.files.length > 0) {
-        buildSandpackData(result.data.files.map(f => ({ path: f.filePath, content: f.content, fileType: f.fileType })))
-      } else {
-        // Fallback：尚未 seed 時前端即時生成
-        const { generateTemplatePreviewCode } = await import('@/app/lib/template-preview-generator')
-        const generated = generateTemplatePreviewCode({
-          id: template.id,
-          name: template.name,
-          description: template.description,
-          category: template.category,
-          tags: template.tags,
-        })
-        setSandpackData(generated)
-      }
-    }
-
     setSandpackLoading(false)
   }, [])
 
@@ -165,7 +141,13 @@ export default function AdminTemplatesPage() {
   const openPreview = (template: AdminTemplate) => {
     setPreviewingId(template.id)
     setSandpackData(null)
-    loadPreviewFiles(template)
+    setIframeSrc(null)
+    if (template.sourceProjectId) {
+      loadPreviewFiles(template)
+    } else {
+      // Seed 模板：直接用已存在的 HTML 預覽
+      setIframeSrc(`/api/vps/templates/preview/${template.id}`)
+    }
   }
 
   if (isLoading) {
@@ -545,7 +527,7 @@ export default function AdminTemplatesPage() {
             justifyContent: 'center',
             padding: 40,
           }}
-          onClick={() => setPreviewingId(null)}
+          onClick={() => { setPreviewingId(null); setIframeSrc(null) }}
         >
           <motion.div
             initial={{ scale: 0.95, opacity: 0 }}
@@ -576,7 +558,7 @@ export default function AdminTemplatesPage() {
                 {t('previewTitle', { name: previewingTemplate?.name || '' })}
               </span>
               <button
-                onClick={() => setPreviewingId(null)}
+                onClick={() => { setPreviewingId(null); setIframeSrc(null) }}
                 style={{
                   padding: '4px 8px',
                   fontSize: 12,
@@ -589,7 +571,13 @@ export default function AdminTemplatesPage() {
                 {t('closePreview')}
               </button>
             </div>
-            {sandpackLoading ? (
+            {iframeSrc ? (
+              <iframe
+                src={iframeSrc}
+                style={{ flex: 1, border: 'none', width: '100%' }}
+                title={previewingTemplate?.name}
+              />
+            ) : sandpackLoading ? (
               <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--gray-400)' }}>
                 載入預覽中...
               </div>

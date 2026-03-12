@@ -965,15 +965,6 @@ export async function getProjectFiles(input: {
   }
 }
 
-/**
- * 取得 seed 模板的 project_files（template_id 關聯）
- */
-export async function getTemplateSeedFiles(templateId: string): Promise<ApiResponse<{
-  files: Array<{ filePath: string; fileType: string; skillSource: string; content: string }>
-}>> {
-  return apiRequest(`/api/templates/${templateId}/files`, { method: 'GET' })
-}
-
 // ============================================================
 // 模板提交 API
 // ============================================================
