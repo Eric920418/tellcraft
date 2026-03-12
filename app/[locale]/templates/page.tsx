@@ -359,7 +359,7 @@ function TemplatesContent() {
                     <>
                       <span style={{ fontWeight: 600, fontSize: 15 }}>{selectedTemplate.name}</span>
                       <span style={{
-                        marginLeft: 10,
+                        marginLeft: 8,
                         fontSize: 11, fontWeight: 500,
                         textTransform: 'uppercase',
                         padding: '2px 8px', borderRadius: 999,
@@ -368,6 +368,16 @@ function TemplatesContent() {
                       }}>
                         {CATEGORY_LABELS[selectedTemplate.category] ?? selectedTemplate.category}
                       </span>
+                      {selectedTemplate.deployedUrl && (
+                        <span style={{
+                          marginLeft: 6,
+                          fontSize: 10, fontWeight: 600,
+                          padding: '2px 8px', borderRadius: 999,
+                          background: '#8b5cf6', color: '#fff',
+                        }}>
+                          社群
+                        </span>
+                      )}
                     </>
                   )}
                 </div>
@@ -424,9 +434,10 @@ function TemplatesContent() {
                     <style>{`@keyframes spin { to { transform: rotate(360deg) } }`}</style>
                   </div>
                 )}
+                {/* 用戶提交模板：直接 iframe 到 deployedUrl；預設模板：走 preview 路由 */}
                 <iframe
                   key={selectedId}
-                  src={`/api/template-preview/${selectedId}`}
+                  src={selectedTemplate?.deployedUrl ?? `/api/template-preview/${selectedId}`}
                   style={{ width: '100%', height: '100%', border: 'none' }}
                   onLoad={() => setIframeLoading(false)}
                 />
@@ -446,6 +457,7 @@ function TemplateCard({ card, onClick }: { card: TemplateCardData; onClick: () =
   const badgeColor = CATEGORY_COLORS[card.category] ?? '#64748b'
   const hasRealThumb = !!card.thumbnailUrl && !imgFailed
   const thumbSrc = hasRealThumb ? card.thumbnailUrl : generateThumbnailSvg(card)
+  const isUserSubmitted = !!card.deployedUrl
 
   return (
     <motion.div
@@ -454,12 +466,24 @@ function TemplateCard({ card, onClick }: { card: TemplateCardData; onClick: () =
       onClick={onClick}
       style={{
         borderRadius: 12,
-        border: '1px solid var(--border-color, #e2e8f0)',
+        border: `1px solid ${isUserSubmitted ? '#8b5cf640' : 'var(--border-color, #e2e8f0)'}`,
         overflow: 'hidden',
         background: 'var(--bg-secondary, #f8fafc)',
         cursor: 'pointer',
+        position: 'relative',
       }}
     >
+      {/* 用戶提交標記 */}
+      {isUserSubmitted && (
+        <div style={{
+          position: 'absolute', top: 8, right: 8, zIndex: 1,
+          fontSize: 9, fontWeight: 600, letterSpacing: '0.06em',
+          textTransform: 'uppercase', padding: '2px 7px', borderRadius: 999,
+          background: '#8b5cf6', color: '#fff',
+        }}>
+          社群
+        </div>
+      )}
       <div style={{ aspectRatio: '16/9', overflow: 'hidden' }}>
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img

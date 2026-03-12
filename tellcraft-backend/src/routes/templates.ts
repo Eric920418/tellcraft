@@ -317,21 +317,24 @@ router.get('/', async (req, res) => {
       featuredOnly?: string
     }
 
-    let sql = `SELECT * FROM templates WHERE is_active = true AND review_status = 'approved'`
+    let sql = `SELECT t.*, p.vercel_url AS project_vercel_url
+               FROM templates t
+               LEFT JOIN projects p ON p.id = t.source_project_id
+               WHERE t.is_active = true AND t.review_status = 'approved'`
     const params: string[] = []
     let paramIndex = 1
 
     if (category && category !== 'all') {
-      sql += ` AND category = $${paramIndex}`
+      sql += ` AND t.category = $${paramIndex}`
       params.push(category)
       paramIndex++
     }
 
     if (featuredOnly === 'true') {
-      sql += ` AND is_featured = true`
+      sql += ` AND t.is_featured = true`
     }
 
-    sql += ` ORDER BY sort_order ASC`
+    sql += ` ORDER BY t.sort_order ASC`
 
     const result = await query<{
       id: string
@@ -350,6 +353,7 @@ router.get('/', async (req, res) => {
       is_active: boolean
       is_featured: boolean
       sort_order: number
+      project_vercel_url: string | null
     }>(sql, params)
 
     const templates = result.rows.map(row => ({
@@ -368,7 +372,10 @@ router.get('/', async (req, res) => {
       pageStructure: row.page_structure,
       isActive: row.is_active,
       isFeatured: row.is_featured,
-      sortOrder: row.sort_order
+      sortOrder: row.sort_order,
+      deployedUrl: row.project_vercel_url
+        ? (row.project_vercel_url.startsWith('http') ? row.project_vercel_url : `https://${row.project_vercel_url}`)
+        : null,
     }))
 
     res.json({ templates })
@@ -387,10 +394,14 @@ router.get('/preview/:id', async (req, res) => {
   try {
     const identifier = req.params.id
 
-    // 1. 獲取模板（支援 UUID 或 slug）
+    // 1. 獲取模板（支援 UUID 或 slug），同時 JOIN 取得 source project 的 vercel_url
     const templateQuery = isUUID(identifier)
-      ? 'SELECT id, name, slug, category, description, design_defaults, page_structure FROM templates WHERE id = $1'
-      : 'SELECT id, name, slug, category, description, design_defaults, page_structure FROM templates WHERE slug = $1'
+      ? `SELECT t.id, t.name, t.slug, t.category, t.description, t.design_defaults, t.page_structure,
+               p.vercel_url AS project_vercel_url
+         FROM templates t LEFT JOIN projects p ON p.id = t.source_project_id WHERE t.id = $1`
+      : `SELECT t.id, t.name, t.slug, t.category, t.description, t.design_defaults, t.page_structure,
+               p.vercel_url AS project_vercel_url
+         FROM templates t LEFT JOIN projects p ON p.id = t.source_project_id WHERE t.slug = $1`
 
     const template = await queryOne<{
       id: string
@@ -411,6 +422,7 @@ router.get('/preview/:id', async (req, res) => {
         pages: string[]
         components: string[]
       }
+      project_vercel_url: string | null
     }>(templateQuery, [identifier])
 
     if (!template) {
@@ -433,7 +445,16 @@ router.get('/preview/:id', async (req, res) => {
       return res.send(cached.html_content)
     }
 
-    // 3. 無快取 → 返回佔位頁面
+    // 3. 無快取 → 若有 source project 的 vercel_url，直接 redirect 展示真實站台
+    if (template.project_vercel_url) {
+      const deployedUrl = template.project_vercel_url.startsWith('http')
+        ? template.project_vercel_url
+        : `https://${template.project_vercel_url}`
+      logger.info({ templateName: template.name, deployedUrl }, '模板無預覽快取，redirect 到 deployed site')
+      return res.redirect(302, deployedUrl)
+    }
+
+    // 4. 無快取且無 deployed URL → 返回佔位頁面
     logger.info({ templateName: template.name, slug: template.slug }, '模板無預覽快取')
 
     const designDefaults = template.design_defaults

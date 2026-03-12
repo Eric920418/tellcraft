@@ -56,6 +56,8 @@ export interface TemplateCardData {
   thumbnailUrl: string
   tags: string[]
   isFeatured: boolean
+  /** 用戶提交模板的已部署 URL（source_project.vercel_url），可直接作 iframe src */
+  deployedUrl?: string | null
 }
 
 // ============================================================
@@ -236,7 +238,8 @@ export function toTemplateCardData(template: Template): TemplateCardData {
     description: template.description,
     thumbnailUrl: template.thumbnailUrl,
     tags: template.tags,
-    isFeatured: template.isFeatured
+    isFeatured: template.isFeatured,
+    deployedUrl: null,
   }
 }
 

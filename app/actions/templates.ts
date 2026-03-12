@@ -74,7 +74,8 @@ export async function getTemplates(input?: {
       description: t.description,
       thumbnailUrl: t.thumbnailUrl,
       tags: t.tags,
-      isFeatured: t.isFeatured
+      isFeatured: t.isFeatured,
+      deployedUrl: t.deployedUrl ?? null,
     }))
 
     return { success: true, data: templates }

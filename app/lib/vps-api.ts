@@ -830,6 +830,7 @@ interface TemplateData {
   isActive: boolean
   isFeatured: boolean
   sortOrder: number
+  deployedUrl?: string | null
 }
 
 /**
