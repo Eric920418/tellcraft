@@ -32,11 +32,13 @@ async function screenshotSandpackPage(templateId: string): Promise<Buffer | null
         '--no-sandbox',
         '--disable-gpu',
         '--disable-dev-shm-usage',
-        '--single-process',
+        // 不用 --single-process：會阻止跨源 iframe（Sandpack preview）正常渲染
         '--disable-extensions',
-        '--disable-background-networking',
         '--disable-default-apps',
         '--no-first-run',
+        // 允許 Sandpack preview iframe 正確執行
+        '--disable-web-security',
+        '--allow-running-insecure-content',
       ],
     })
 
@@ -45,8 +47,8 @@ async function screenshotSandpackPage(templateId: string): Promise<Buffer | null
       await page.setViewport({ width: 1440, height: 900 })
       // 用 'load' 而非 'networkidle2'：Sandpack iframe 的 CDN 請求會讓 networkidle2 永遠等待
       await page.goto(url, { waitUntil: 'load', timeout: 30000 })
-      // 等待 Sandpack 完成渲染（前端 idle+10s 正常路徑 或 55s 安全兜底）
-      await page.waitForSelector('body[data-ready="true"]', { timeout: 100000 })
+      // 等待 Sandpack 完成渲染（前端 idle+35s 正常路徑 或 55s 安全兜底）
+      await page.waitForSelector('body[data-ready="true"]', { timeout: 120000 })
       // 額外等待確保 iframe 視覺完全穩定
       await new Promise(r => setTimeout(r, 1500))
       const buffer = await page.screenshot({ type: 'jpeg', quality: 75, fullPage: false })

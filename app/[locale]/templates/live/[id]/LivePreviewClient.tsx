@@ -21,13 +21,13 @@ function ReadinessSignaler() {
     return () => clearTimeout(safety)
   }, [])
 
-  // 正常路徑：status=idle 代表 bundler 就緒，但 iframe 內容還需要更多時間渲染
-  // 等 10 秒讓 React app 完整 render 後再截圖
+  // 正常路徑：status=idle 代表 bundler 連線就緒（不是編譯完成！）
+  // 編譯在 idle 後才開始，需等 35 秒讓 React app 編譯並在 iframe 裡完整 render
   useEffect(() => {
     if (sandpack.status === 'idle' || sandpack.status === 'timeout') {
       const t = setTimeout(() => {
         document.body.dataset.ready = 'true'
-      }, 10000)
+      }, 35000)
       return () => clearTimeout(t)
     }
   }, [sandpack.status])
