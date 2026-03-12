@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react'
 import { motion, useInView } from 'framer-motion'
+import { useRouter } from '@/i18n/navigation'
 import { getTemplates } from '@/app/actions/templates'
 import { INITIAL_TEMPLATES, toTemplateCardData, type TemplateCardData } from '@/app/lib/templates'
 
@@ -151,6 +152,7 @@ function shuffle<T>(arr: T[]): T[] {
 const [INIT_ROW1, INIT_ROW2] = splitRows(STATIC_CARDS)
 
 function TemplateCard({ card }: { card: TemplateCardData }) {
+  const router = useRouter()
   const [imgFailed, setImgFailed] = useState(false)
   const categoryColors: Record<string, string> = {
     saas: '#6366f1',
@@ -172,6 +174,7 @@ function TemplateCard({ card }: { card: TemplateCardData }) {
     <motion.div
       whileHover={{ scale: 1.03, boxShadow: '0 8px 24px rgba(0,0,0,0.12)' }}
       transition={{ duration: 0.2 }}
+      onClick={() => router.push(`/templates?id=${card.id}`)}
       style={{
         width: 420,
         flexShrink: 0,
