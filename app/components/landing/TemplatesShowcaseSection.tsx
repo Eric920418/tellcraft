@@ -6,6 +6,25 @@ import { useRouter } from '@/i18n/navigation'
 import { getTemplates } from '@/app/actions/templates'
 import { INITIAL_TEMPLATES, toTemplateCardData, type TemplateCardData } from '@/app/lib/templates'
 
+// CSS 放在組件外，避免每次 render 重新注入
+const MARQUEE_STYLES = `
+  @keyframes tc-scroll-left {
+    0%   { transform: translateX(0) }
+    100% { transform: translateX(-50%) }
+  }
+  @keyframes tc-scroll-right {
+    0%   { transform: translateX(-50%) }
+    100% { transform: translateX(0) }
+  }
+  .tc-card {
+    transition: transform 0.2s ease, box-shadow 0.2s ease;
+  }
+  .tc-card:hover {
+    transform: scale(1.03);
+    box-shadow: 0 8px 24px rgba(0,0,0,0.12);
+  }
+`
+
 // ── 前端即時 SVG 縮圖生成（無 DB 縮圖時使用）────────────────────────────────────
 
 const THUMB_COLOR_MAP: Record<string, string> = {
@@ -125,6 +144,13 @@ function generateThumbnailSvg(card: TemplateCardData): string {
 // 靜態初始資料（同步，避免 SSR hydration mismatch）
 const STATIC_CARDS = INITIAL_TEMPLATES.filter(t => t.isActive).map(toTemplateCardData)
 
+// 模組層級 SVG 快取，避免每次 render 重算
+const svgCache = new Map<string, string>()
+function getCachedSvg(card: TemplateCardData): string {
+  if (!svgCache.has(card.id)) svgCache.set(card.id, generateThumbnailSvg(card))
+  return svgCache.get(card.id)!
+}
+
 function padToMin(arr: TemplateCardData[], min: number): TemplateCardData[] {
   if (arr.length === 0) return arr
   let out = [...arr]
@@ -151,29 +177,24 @@ function shuffle<T>(arr: T[]): T[] {
 // 初始（deterministic，SSR 安全）
 const [INIT_ROW1, INIT_ROW2] = splitRows(STATIC_CARDS)
 
+const CATEGORY_COLORS: Record<string, string> = {
+  saas: '#6366f1', landing: '#0ea5e9', ecommerce: '#10b981',
+  content: '#f59e0b', portfolio: '#ec4899', dashboard: '#8b5cf6',
+  blog: '#14b8a6', event: '#f97316', tool: '#64748b',
+}
+
 function TemplateCard({ card }: { card: TemplateCardData }) {
   const router = useRouter()
   const [imgFailed, setImgFailed] = useState(false)
-  const categoryColors: Record<string, string> = {
-    saas: '#6366f1',
-    landing: '#0ea5e9',
-    ecommerce: '#10b981',
-    content: '#f59e0b',
-    portfolio: '#ec4899',
-    dashboard: '#8b5cf6',
-    blog: '#14b8a6',
-    event: '#f97316',
-    tool: '#64748b',
-  }
-  const badgeColor = categoryColors[card.category] ?? '#64748b'
+  const badgeColor = CATEGORY_COLORS[card.category] ?? '#64748b'
   const hasRealThumb = !!card.thumbnailUrl && !imgFailed
-  // 無真實縮圖時，用前端即時生成的 SVG 縮圖
-  const thumbSrc = hasRealThumb ? card.thumbnailUrl : generateThumbnailSvg(card)
+  // 無真實縮圖時，用快取的 SVG 縮圖（不重算）
+  const thumbSrc = hasRealThumb ? card.thumbnailUrl : getCachedSvg(card)
 
   return (
-    <motion.div
-      whileHover={{ scale: 1.03, boxShadow: '0 8px 24px rgba(0,0,0,0.12)' }}
-      transition={{ duration: 0.2 }}
+    // 用 CSS :hover 代替 JS whileHover，消除每張卡片的 JS 事件監聽器
+    <div
+      className="tc-card"
       onClick={() => router.push(`/templates?id=${card.id}`)}
       style={{
         width: 420,
@@ -216,7 +237,7 @@ function TemplateCard({ card }: { card: TemplateCardData }) {
           {card.category}
         </span>
       </div>
-    </motion.div>
+    </div>
   )
 }
 
@@ -238,6 +259,8 @@ function MarqueeRow({ cards, direction, duration = 35 }: {
         display: 'flex', gap: 24, width: 'max-content',
         animation: `${animName} ${duration}s linear infinite`,
         animationPlayState: paused ? 'paused' : 'running',
+        // 告訴瀏覽器此元素會使用 transform，提升為獨立 GPU 合成層
+        willChange: 'transform',
       }}>
         {[...cards, ...cards].map((card, i) => (
           <TemplateCard key={`${card.id}-${i}`} card={card} />
@@ -286,16 +309,7 @@ export default function TemplatesShowcaseSection() {
 
   return (
     <section ref={sectionRef} style={{ padding: '80px 0', overflow: 'hidden' }}>
-      <style>{`
-        @keyframes tc-scroll-left {
-          0%   { transform: translateX(0) }
-          100% { transform: translateX(-50%) }
-        }
-        @keyframes tc-scroll-right {
-          0%   { transform: translateX(-50%) }
-          100% { transform: translateX(0) }
-        }
-      `}</style>
+      <style>{MARQUEE_STYLES}</style>
 
       <div style={{ padding: '0 24px', textAlign: 'center', marginBottom: 48 }}>
         <motion.div {...fadeUp(0)} style={{

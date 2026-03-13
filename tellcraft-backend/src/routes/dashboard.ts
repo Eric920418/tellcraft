@@ -55,17 +55,18 @@ router.get('/stats', requireAuth, async (req, res) => {
       created_at: string
       updated_at: string
       latest_conversation_id: string | null
+      latest_conversation_at: string | null
     }>(
       `SELECT p.id, p.name, p.status, p.is_pinned, p.created_at, p.updated_at,
-              lc.id as latest_conversation_id
+              lc.id as latest_conversation_id, lc.updated_at as latest_conversation_at
        FROM projects p
        LEFT JOIN LATERAL (
-         SELECT id FROM conversations
+         SELECT id, updated_at FROM conversations
          WHERE project_id = p.id
          ORDER BY updated_at DESC LIMIT 1
        ) lc ON true
        WHERE p.user_id = $1
-       ORDER BY p.is_pinned DESC, p.pinned_at DESC NULLS LAST, p.updated_at DESC
+       ORDER BY p.is_pinned DESC, p.pinned_at DESC NULLS LAST, COALESCE(lc.updated_at, p.updated_at) DESC
        LIMIT 5`,
       [userId]
     )
