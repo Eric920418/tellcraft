@@ -250,11 +250,19 @@ Layer 5: sanitizeCodeForDeploy 修復 7 — useSearchParams Suspense boundary �
 | `006_add_es_document.sql` | Event Storming document 欄位 |
 | `007_add_change_history.sql` | 變更歷史 |
 | `008_add_openapi_spec.sql` | OpenAPI spec |
-| `009_remove_audit_logs.sql` | 移除 audit_logs 表 |
+| `009_drop_audit_logs.sql` | 移除 audit_logs 表 |
 | `010_add_user_providers.sql` | 帳號綁定（多 OAuth provider） |
 | `011_add_line_active_conversations.sql` | LINE Bot 活躍對話映射表 |
 | `012_add_language_preference.sql` | 用戶語言偏好（`preferred_language`） |
-| `add_uiux_columns.sql` | UIUX 相關欄位 |
+| `013_add_project_pin.sql` | 專案釘選 |
+| `014_add_credits_system.sql` | 點數系統 |
+| `015_add_job_failures.sql` | BullMQ 最終失敗持久化 |
+| `016_add_performance_indexes.sql` | 效能索引（CONCURRENTLY） |
+| `017_add_telegram_active_conversations.sql` | Telegram 活躍對話映射表 |
+| `018_add_template_submission.sql` | 模板提交 |
+| `019_add_template_approved_at.sql` | 模板審核時間 |
+| `020_add_tool_template_category.sql` | 工具模板分類 |
+| `021_add_uiux_columns.sql` | UIUX 相關欄位 |
 
 新增 migration 後在 VPS 執行：`psql "$DATABASE_URL" -f tellcraft-backend/migrations/xxx.sql`
 
