@@ -28,6 +28,7 @@ import {
   resumeFastBuildPipeline, getRemainingFastBuildPages,
 } from './phase-handlers/fast-build-phases'
 import { executeDeployerSkill } from './phase-handlers/deploy-phases'
+import { executeDomainSkill } from './phase-handlers/domain-phases'
 import { handleGoBack } from './phase-handlers/bdd-phases'
 import { handleBddWaitingForReply } from './phase-handlers/bdd-phases'
 
@@ -493,6 +494,11 @@ async function handleProcessMessage(
     case 'deployer':
       await executeDeployerSkill({ taskId, projectId, conversationId, userId, message, redis, io })
       break
+    case 'domain-manager':
+    case 'domain-purchase':
+    case 'domain-dns':
+      await executeDomainSkill({ taskId, projectId, conversationId, userId, message, skillName, redis, io, locale })
+      break
     default:
       await sendMessage(conversationId, io, { content: `Skill "${skillName}" 尚未在 VPS 後端實現。`, stage: 'error' })
   }
@@ -704,6 +710,16 @@ async function handleContinueFlow(
       await saveFlowState(redis, conversationId, state)
       await sendFastBuildCompleteMessage(conversationId, state, io, redis)
     }
+    return
+  }
+  // __cancel_domain__：取消域名操作
+  if (trimmedMsg === '__cancel_domain__') {
+    await deleteFlowState(redis, conversationId)
+    const isChinese = state.locale !== 'en'
+    await sendMessage(conversationId, io, {
+      content: isChinese ? '已取消域名操作。' : 'Domain operation cancelled.',
+      stage: 'info',
+    })
     return
   }
   if (trimmedMsg === '__retry_iteration__' && state.lastIterationFeedback) {

@@ -28,6 +28,22 @@ const DeploymentHistory = dynamic(
   () => import('@/app/components/deployer/DeploymentHistory'),
   { ssr: false }
 )
+const DomainSearchResult = dynamic(
+  () => import('@/app/components/domain/DomainSearchResult').then(m => ({ default: m.DomainSearchResult })),
+  { ssr: false }
+)
+const DomainProgress = dynamic(
+  () => import('@/app/components/domain/DomainProgress').then(m => ({ default: m.DomainProgress })),
+  { ssr: false }
+)
+const DnsInstructions = dynamic(
+  () => import('@/app/components/domain/DnsInstructions').then(m => ({ default: m.DnsInstructions })),
+  { ssr: false }
+)
+const DomainRegistrantForm = dynamic(
+  () => import('@/app/components/domain/DomainRegistrantForm').then(m => ({ default: m.DomainRegistrantForm })),
+  { ssr: false }
+)
 
 export interface ChatMessageItemProps {
   message: Message
@@ -305,6 +321,34 @@ export const ChatMessageItem = React.memo(function ChatMessageItem({
                 onSendMessage={handleSendMessage}
               />
             </motion.div>
+          )}
+
+          {/* Domain 搜尋結果 */}
+          {message.richContent?.type === 'domain_search_result' && (
+            <DomainSearchResult data={message.richContent.data as { domain: string; available: boolean; price?: string; source?: string }} />
+          )}
+
+          {/* Domain 進度 */}
+          {message.richContent?.type === 'domain_progress' && (
+            <DomainProgress data={message.richContent.data as { domain: string; step?: string; status?: string; completedSteps?: string[] }} />
+          )}
+
+          {/* DNS 設定說明 */}
+          {message.richContent?.type === 'domain_dns_instructions' && (
+            <DnsInstructions data={message.richContent.data as { domain: string; records: Array<{ type: string; name: string; value: string }> }} />
+          )}
+
+          {/* Domain 購買人表單 */}
+          {message.richContent?.type === 'domain_registrant_form' && (
+            <DomainRegistrantForm
+              data={message.richContent.data as { domain: string; price?: string }}
+              onSendMessage={handleSendMessage}
+            />
+          )}
+
+          {/* Domain 完成結果 */}
+          {message.richContent?.type === 'domain_complete_result' && (
+            <DomainSearchResult data={{ ...(message.richContent.data as { domain: string }), available: true }} />
           )}
 
           {/* Mobile Preview Button */}

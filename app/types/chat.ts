@@ -22,10 +22,12 @@ export interface Message {
     | 'uiux_quality_gate_running' | 'uiux_quality_gate_fixing' | 'uiux_quality_gate_complete'
     | 'uiux_complete' | 'uiux_iterating' | 'uiux_iteration_complete'
     | 'deployer_checking' | 'deployer_deploying' | 'deployer_code_sync' | 'deployer_complete' | 'deployer_error' | 'deployer_cancelled' | 'deployer_rolling_back' | 'deployer_rollback_select'
+    | 'domain_searching' | 'domain_confirm_purchase' | 'domain_registering' | 'domain_own_setup' | 'domain_dns_verifying' | 'domain_complete' | 'domain_failed'
   progress?: { current: number; total: number; step: string }
   layoutHint?: 'default' | 'split' | 'full_preview'
   richContent?: {
     type: 'template_picker' | 'variant_picker' | 'design_preview' | 'code_preview' | 'quality_gate_report' | 'deploy_progress' | 'deploy_result' | 'deployment_history' | 'fast_build_progress' | 'building_progress'
+      | 'domain_search_result' | 'domain_progress' | 'domain_dns_instructions' | 'domain_registrant_form' | 'domain_complete_result'
     data: Record<string, unknown>
   }
   quickReplies?: { label: string; value: string; style?: 'primary' | 'secondary' | 'ghost' }[]

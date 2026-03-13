@@ -75,6 +75,7 @@ pm2 describe tellcraft-backend            # 詳細資訊（記憶體/重啟次�
 | **UIUX Phases** | `workers/phase-handlers/uiux-phases.ts`（~2420 行） | UIUX 全流程：Discovery/Brief/Variant/CodePipeline/Mixed routing |
 | **Deploy Phases** | `workers/phase-handlers/deploy-phases.ts`（~240 行） | 部署執行：prepareDeployment + executeDeployment |
 | **Fast Build Phases** | `workers/phase-handlers/fast-build-phases.ts`（~480 行） | 快速建站：增量交互式生成（executeFastBuildSkill + runFastBuildPipeline + mergeGeneratedCode） |
+| **Domain Phases** | `workers/phase-handlers/domain-phases.ts` | 域名全流程：搜尋/確認購買/註冊/自有域名設定/DNS 驗證/完成/失敗 |
 | **Orchestrator Utils** | `workers/orchestrator-utils.ts` | 共用基礎設施：sendMessage/saveFlowState/getFlowState 等 |
 | **FlowState 型別** | `types/flow-state.ts` | FlowState 介面 + 子型別（避免循環 import） |
 | **Classifier** | `services/classifier.ts` | 三層防禦：Prefilter → Meta Intent → Skill 分類 |
@@ -91,7 +92,8 @@ pm2 describe tellcraft-backend            # 詳細資訊（記憶體/重啟次�
 | **Semantic Gateway** | `services/semantic-gateway.ts` | 統一語義閘門：quickFilter 零 LLM 短路 + Sonnet 六元 verdict（bdd_clarify/design_clarify/iteration），取代 keyword array |
 | **Customer Service** | `services/customer-service.ts` | 客服問答：detectFastModeIntent 意圖分類（greeting/question/chitchat/help）+ FAQ 零 LLM 匹配（9 主題）+ answerWithSonnet 開放問答 |
 | **Prefilter** | `services/prefilter.ts` | 全域輸入預過濾：checkInputQuality 亂碼/髒話/垃圾 + phase-aware 二次攔截（getPhaseStrictness）+ Redis anti-loop |
-| **FlowState Recovery** | `services/flowstate-recovery.ts` | 每 2 分鐘掃描 Redis flow:* key，逾時 phase 自動恢復（prd_discovery 5m / fast_generating 20m / uiux_iterating 5m / deployer_deploying 10m）|
+| **Domain Service** | `services/domain-service.ts` | 域名 API 封裝（Porkbun 註冊 + Cloudflare DNS + Vercel 綁定 + RDAP 查詢）+ 購買/自有域名工作流 + 反向補償 rollback |
+| **FlowState Recovery** | `services/flowstate-recovery.ts` | 每 2 分鐘掃描 Redis flow:* key，逾時 phase 自動恢復（prd_discovery 5m / fast_generating 20m / uiux_iterating 5m / deployer_deploying 10m / domain_searching 3m / domain_registering 10m / domain_dns_verifying 5m）|
 | **Conversation Lock** | `services/conversation-lock.ts` | Redis SET NX EX 互斥鎖（TTL 5 分鐘），同一對話同時只允許一個 Worker job 執行 |
 | **LINE Notify** | `services/line-notify.ts` | LINE 推播通知（stage 白名單過濾，fire-and-forget） |
 | **LINE Bot Handler** | `services/line-bot-handler.ts` | LINE Bot 業務邏輯（Follow/Text/Postback 處理） |
@@ -100,7 +102,7 @@ pm2 describe tellcraft-backend            # 詳細資訊（記憶體/重啟次�
 | **Env** | `lib/env.ts` | Zod 環境變數驗證，啟動時快速失敗 |
 | **Anthropic** | `lib/anthropic.ts` | 統一 Client 單例 + MODEL 常數（SONNET/HAIKU） |
 | **Validate** | `middleware/validate.ts` | Zod 請求驗證中間件（validateBody/Query/Params） |
-| **Schemas** | `schemas/*.ts` | API 路由 Zod schema 定義（conversation/session/operations/bdd/project） |
+| **Schemas** | `schemas/*.ts` | API 路由 Zod schema 定義（conversation/session/operations/bdd/project/domain） |
 | **Job Failure** | `services/job-failure-handler.ts` | BullMQ 最終失敗持久化 + 用戶通知 |
 
 **前端（`app/`）— 大檔案優先閱讀**
@@ -132,6 +134,9 @@ pm2 describe tellcraft-backend            # 詳細資訊（記憶體/重啟次�
 | `deployer` | UIUX 代碼 → Next.js → Vercel 部署（用戶說「部署」觸發） |
 | `iteration` | 迭代修改 + 撤銷上一步 + 版本回滾（`uiux_complete`/`deployer_complete` 自動路由） |
 | `fast-build` | 快速建站：一句話 → 跳過 BDD/Discovery → inferInteractionHint → 增量生成（首頁先預覽 → 用戶確認 → 剩餘頁面）→ 靜態 QG → Preview |
+| `domain-manager` | 域名管理：列出已有域名 / 引導購買或綁定（付費會員限定） |
+| `domain-purchase` | 域名購買：RDAP 查詢可用性 → 確認 → Porkbun 註冊 → Cloudflare DNS → Vercel 綁定（付費會員限定，配額 creator:1/pro:2/business:3） |
+| `domain-dns` | 自有域名綁定：顯示 DNS 設定說明 → 用戶確認 → 驗證 DNS 傳播 → 完成（付費會員限定，共用域名配額） |
 
 ### Orchestrator Phase 狀態機
 
@@ -151,6 +156,13 @@ pm2 describe tellcraft-backend            # 詳細資訊（記憶體/重啟次�
 | `fast_generating` | 快速模式生成中（攔截用戶輸入；`fastBuildStage=awaiting_continue` 時暫停等用戶確認繼續/完成/迭代） |
 | `deployer_deploying` / `deployer_failed` / `deployer_complete` | 部署流程（用戶說「部署」直接執行，無二次確認） |
 | `deployer_rollback_select` | 等待用戶選擇回滾版本 |
+| `domain_searching` | 域名查詢中（攔截用戶輸入） |
+| `domain_confirm_purchase` | 顯示價格，等用戶確認購買 / 取消 / 填寫 registrant 表單 |
+| `domain_registering` | 註冊 + DNS 自動設定中（攔截用戶輸入） |
+| `domain_own_setup` | 顯示 DNS 說明，等用戶確認已設定 |
+| `domain_dns_verifying` | 驗證 DNS 傳播中（攔截用戶輸入） |
+| `domain_complete` | 域名綁定完成（quickReplies 引導管理） |
+| `domain_failed` | 域名操作失敗 + 重試/放棄選項 |
 
 ### UIUX Pipeline 概覽
 
@@ -223,6 +235,7 @@ Layer 5: sanitizeCodeForDeploy 修復 7 — useSearchParams Suspense boundary �
 | `user.ts` | `/api/user` | `GET /me`（用戶資訊）、帳號合併 |
 | `upload.ts` | `/api/upload` | multer 圖片上傳（5MB 上限，JPEG/PNG），存 `UPLOAD_DIR`，回傳公開 URL |
 | `line-bot.ts` | `/api/line/webhook` | LINE Bot Webhook（簽名驗證 + 事件分發），raw body 在 express.json 之前 |
+| `domain.ts` | `/api/domain` | 域名 CRUD：`POST /check`（可用性）、`GET /list`、`GET /:id`、`GET /:id/dns`、`POST /:id/dns`、`DELETE /:id/dns/:recordId`、`DELETE /:id`、`GET /pricing` |
 
 前端 Proxy：`app/api/vps/[...path]/route.ts` 將 `/api/vps/*` 轉發到 VPS 後端。
 
@@ -263,6 +276,7 @@ Layer 5: sanitizeCodeForDeploy 修復 7 — useSearchParams Suspense boundary �
 | `019_add_template_approved_at.sql` | 模板審核時間 |
 | `020_add_tool_template_category.sql` | 工具模板分類 |
 | `021_add_uiux_columns.sql` | UIUX 相關欄位 |
+| `022_add_domain_records.sql` | 域名記錄表（domain_records：狀態追蹤 + Porkbun/Cloudflare/Vercel 欄位 + completed_steps rollback） |
 
 新增 migration 後在 VPS 執行：`psql "$DATABASE_URL" -f tellcraft-backend/migrations/xxx.sql`
 
@@ -313,7 +327,7 @@ Layer 5: sanitizeCodeForDeploy 修復 7 — useSearchParams Suspense boundary �
 - **Tailwind v4**：用 `@import "tailwindcss"`，不是 v3 的 `@tailwind`
 - **Tailwind config 禁止 CSS 變數引用**：`generateTailwindConfig()` 必須用硬編碼值（`'9999px'` 非 `'var(--radius-full)'`），否則部署後 CSS 變數可能遺失導致樣式失效
 - **`app/components/templates/` 已廢棄**，PreviewPanel 用 Sandpack 渲染
-- **deployer_complete 路由順序**：先檢查「部署」→ 再檢查「回滾」→ `isGreetingOrChitchat` 問候攔截 → `semanticGateway({ phase: 'iteration' })` 預驗證 → 最後才是迭代修改
+- **deployer_complete 路由順序**：先檢查「部署」→ 再檢查「回滾」→ 再檢查「域名」(`hasDomainIntent`) → `isGreetingOrChitchat` 問候攔截 → `semanticGateway({ phase: 'iteration' })` 預驗證 → 最後才是迭代修改
 - **complete/failed 問候攔截**：`uiux_complete`/`deployer_complete`/`deployer_failed` 三處 `semanticGateway` 前插入 `isGreetingOrChitchat()` 零 LLM 攔截，回覆友善上下文引導 + quickReplies。`__new_project__` 在 `handleContinueFlow` 入口處理（清 FlowState + LINE 映射）
 - **迭代輸入三層防禦**：`prefilterMessage()`（全域）→ `isGreetingOrChitchat()`（問候攔截）→ `semanticGateway({ phase: 'iteration' })`（Sonnet 語義審核，quickFilter 零 LLM 短路 ~80%）→ `refineCode [NO_CHANGE]`（LLM 兜底）。`isDesignFeedback()` 僅用於 fast mode 入口
 - **`checkBuildRelevance` fail-closed**：API 錯誤/空回應/JSON 解析/catch 全部降級拒絕（不是放行），保留無 API key 時的 fail-open

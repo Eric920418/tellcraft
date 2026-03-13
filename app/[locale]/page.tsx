@@ -4,8 +4,14 @@ import { useState, useEffect, useCallback, Suspense } from 'react'
 import { useSearchParams } from 'next/navigation'
 import ErrorBoundary from '@/app/components/ErrorBoundary'
 import { motion, AnimatePresence } from 'framer-motion'
-import { useTranslations } from 'next-intl'
+import { useTranslations, useLocale } from 'next-intl'
 import { useLocalePath } from '@/app/hooks/useLocalePath'
+import {
+  getOrganizationSchema,
+  getWebSiteSchema,
+  getSoftwareApplicationSchema,
+  getFAQSchema,
+} from '@/app/lib/structured-data'
 import { AnimatedThemeToggler } from '@/app/components/AnimatedThemeToggler'
 import LocaleSwitcher from '@/app/components/LocaleSwitcher'
 import GlowButton from '@/app/components/GlowButton'
@@ -35,6 +41,8 @@ function HomeContent() {
   const tChat = useTranslations('chat')
   const tAuth = useTranslations('auth')
   const tLogin = useTranslations('login')
+  const tFaq = useTranslations('faq')
+  const locale = useLocale()
   const localePath = useLocalePath()
   const searchParams = useSearchParams()
   const [isChatActive, setIsChatActive] = useState(false)
@@ -210,8 +218,25 @@ function HomeContent() {
     window.history.pushState({ tellcraftChat: true }, '')
   }, [])
 
+  const faqItems = Array.from({ length: 8 }, (_, i) => ({
+    question: tFaq(`q${i + 1}`),
+    answer: tFaq(`a${i + 1}`),
+  }))
+
+  const jsonLdData = [
+    getOrganizationSchema(),
+    getWebSiteSchema(locale),
+    getSoftwareApplicationSchema(locale),
+    getFAQSchema(faqItems),
+  ]
+
   return (
     <main>
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLdData) }}
+      />
+
       {/* Project Reminder */}
       {!isChatActive && (
         <ProjectReminder

@@ -3,10 +3,7 @@
 import { useState } from 'react'
 import { useTranslations } from 'next-intl'
 import { Link } from '@/i18n/navigation'
-import { listVercelProjects } from '@/app/actions/vercel'
-import { listZones } from '@/app/actions/cloudflare'
-import { searchDomain } from '@/app/actions/domain'
-import { getDomainPricing, pingPorkbun } from '@/app/actions/porkbun'
+import { checkDomainAvailability, getDomainPricing, listDomains } from '@/app/lib/vps-api'
 
 export default function TestPage() {
   const t = useTranslations('test')
@@ -20,95 +17,67 @@ export default function TestPage() {
 
   const clear = () => setOutput('')
 
-  const testVercel = async () => {
-    setLoading(true)
-    clear()
-    log(t('listingVercelProjects') + '...\n')
-
-    try {
-      const result = await listVercelProjects()
-      if (result.success) {
-        log(`${t('found')} ${result.projects?.length || 0} Projects:`)
-        result.projects?.slice(0, 10).forEach(p => {
-          log(`  - ${p.name} (${p.id})`)
-        })
-        if ((result.projects?.length || 0) > 10) {
-          log(`  ... ${t('andMore', { count: (result.projects?.length || 0) - 10 })}`)
-        }
-      } else {
-        log(`${t('error')}: ${result.error}`)
-      }
-    } catch (err) {
-      log(`${t('error')}: ${err}`)
-    }
-
-    setLoading(false)
+  // 從 localStorage 取得 token（測試頁面用）
+  const getToken = () => {
+    if (typeof window === 'undefined') return ''
+    return localStorage.getItem('auth_token') || ''
   }
 
-  const testCloudflare = async () => {
+  const testDomainPricing = async () => {
     setLoading(true)
     clear()
-    log(t('listingCloudflareZones') + '...\n')
+    log('查詢域名價格...\n')
 
     try {
-      const result = await listZones()
-      if (result.success) {
-        log(`${t('found')} ${result.zones?.length || 0} Zones:`)
-        result.zones?.forEach(z => {
-          log(`  - ${z.name} (${z.id}) [${z.status}]`)
-          log(`    NS: ${z.name_servers?.join(', ')}`)
-        })
-        if (result.zones?.length === 0) {
-          log('  (' + t('noDomainsAdded') + ')')
-        }
-      } else {
-        log(`${t('error')}: ${result.error}`)
+      const token = getToken()
+      if (!token) {
+        log('❌ 請先登入（無 auth token）')
+        setLoading(false)
+        return
       }
-    } catch (err) {
-      log(`${t('error')}: ${err}`)
-    }
-
-    setLoading(false)
-  }
-
-  const testPorkbunPing = async () => {
-    setLoading(true)
-    clear()
-    log(t('testingPorkbunConnection') + '...\n')
-
-    try {
-      const result = await pingPorkbun()
-      if (result.success) {
-        log('✅ ' + result.message)
-        if (result.yourIp) {
-          log(`${t('serverIp')}: ${result.yourIp}`)
-        }
-      } else {
-        log('❌ ' + t('connectionFailed') + ': ' + result.error)
-      }
-    } catch (err) {
-      log(`${t('error')}: ${err}`)
-    }
-
-    setLoading(false)
-  }
-
-  const testPorkbunPricing = async () => {
-    setLoading(true)
-    clear()
-    log(t('fetchingPorkbunPricing') + '...\n')
-
-    try {
-      const result = await getDomainPricing()
-      if (result.success && result.pricing) {
+      const result = await getDomainPricing({ token })
+      if (result.success && result.data) {
         log(t('commonTldPricing'))
+        const pricing = result.data.pricing
         const tlds = ['com', 'io', 'ai', 'dev', 'app', 'net', 'org']
         tlds.forEach(tld => {
-          if (result.pricing![tld]) {
-            log(`  .${tld}: $${result.pricing![tld].registration}`)
+          if (pricing[tld]) {
+            log(`  .${tld}: $${pricing[tld].registration}`)
           }
         })
-        log('\n(' + t('mockModePricingNote') + ')')
+        log(`\n來源：${result.data.source}`)
+      } else {
+        log(`${t('error')}: ${result.error}`)
+      }
+    } catch (err) {
+      log(`${t('error')}: ${err}`)
+    }
+
+    setLoading(false)
+  }
+
+  const testListDomains = async () => {
+    setLoading(true)
+    clear()
+    log('查詢已有域名...\n')
+
+    try {
+      const token = getToken()
+      if (!token) {
+        log('❌ 請先登入')
+        setLoading(false)
+        return
+      }
+      const result = await listDomains({ token })
+      if (result.success && result.data) {
+        const domains = result.data
+        if (domains.length === 0) {
+          log('沒有綁定任何域名')
+        } else {
+          domains.forEach(d => {
+            log(`  - ${d.domain} [${d.status}] (${d.source})`)
+          })
+        }
       } else {
         log(`${t('error')}: ${result.error}`)
       }
@@ -130,17 +99,25 @@ export default function TestPage() {
     log(`${t('searchingDomain')}: ${domainInput}\n`)
 
     try {
-      const result = await searchDomain(domainInput)
-      log(`${t('status')}: ${result.status}`)
-      log(`${t('message')}: ${result.message}`)
-
-      if (result.status === 'available') {
-        log('\n✅ ' + t('domainAvailable'))
-      } else if (result.status === 'unavailable') {
-        log('\n❌ ' + t('domainTaken'))
+      const token = getToken()
+      if (!token) {
+        log('❌ 請先登入')
+        setLoading(false)
+        return
       }
-
-      log('\n(' + t('mockModeNoPorkbun') + ')')
+      const result = await checkDomainAvailability({ domain: domainInput, token })
+      if (result.success && result.data) {
+        const { available, price, source } = result.data
+        if (available) {
+          log('✅ ' + t('domainAvailable'))
+          if (price) log(`價格：${price}`)
+        } else {
+          log('❌ ' + t('domainTaken'))
+        }
+        log(`查詢來源：${source}`)
+      } else {
+        log(`${t('error')}: ${result.error}`)
+      }
     } catch (err) {
       log(`${t('error')}: ${err}`)
     }
@@ -157,14 +134,12 @@ export default function TestPage() {
       <div style={{ marginBottom: 32 }}>
         <h2 style={{ fontSize: 14, color: '#a3a3a3', marginBottom: 12, textTransform: 'uppercase', letterSpacing: '0.05em' }}>{t("apiConnection")}</h2>
         <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
-          <button onClick={testVercel} disabled={loading} style={btnStyle}>
-            Vercel
+          <button onClick={testDomainPricing} disabled={loading} style={btnStyle}>
+            域名價格
           </button>
-          <button onClick={testCloudflare} disabled={loading} style={btnStyle}>
-            Cloudflare
+          <button onClick={testListDomains} disabled={loading} style={btnStyle}>
+            已有域名
           </button>
-          <button onClick={testPorkbunPing} disabled={loading} style={btnStyle}>{t("porkbunConnection")}</button>
-          <button onClick={testPorkbunPricing} disabled={loading} style={btnStyle}>{t("porkbunPricing")}</button>
         </div>
       </div>
 

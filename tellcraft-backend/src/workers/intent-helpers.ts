@@ -34,6 +34,7 @@ export const PHASE_BACKTRACK_MAP: Record<string, string> = {
   'uiux_template_selection':   'uiux_design_preference',
   'uiux_design_brief_confirm': 'uiux_design_preference',
   'uiux_variant_selection':    'uiux_design_brief_confirm',
+  'domain_confirm_purchase':   'domain_searching',
 }
 
 // ── Phase 中文標籤 ──
@@ -43,6 +44,13 @@ export const PHASE_LABELS: Record<string, string> = {
   'uiux_template_selection':   '模板選擇',
   'uiux_design_brief_confirm': '設計方向確認',
   'uiux_variant_selection':    '方案選擇',
+  'domain_searching':          '域名查詢',
+  'domain_confirm_purchase':   '確認購買',
+  'domain_registering':        '域名註冊中',
+  'domain_own_setup':          'DNS 設定',
+  'domain_dns_verifying':      'DNS 驗證中',
+  'domain_complete':           '域名完成',
+  'domain_failed':             '域名失敗',
 }
 
 // ============================================================
@@ -115,6 +123,11 @@ export function hasGoBackIntent(msg: string): boolean {
   if (msg.includes('返回修改') || msg.includes('回去修改')) return false
   const keywords = ['返回', '回去', '上一步', '重新選擇', '重選', '重來', '回到上一步', 'go back']
   return keywords.some(k => msg.includes(k))
+}
+
+export function hasDomainIntent(msg: string): boolean {
+  const kw = ['域名', '網域', 'domain', '綁定網域', '綁定域名', '買域名', '自訂網域', 'custom domain', 'bind domain']
+  return kw.some(k => msg.toLowerCase().includes(k))
 }
 
 export function hasChangeIntent(msg: string): boolean {
@@ -198,7 +211,12 @@ export function getPhaseStrictness(phase: string): QualityStrictness | 'skip' {
     case 'uiux_complete':
     case 'deployer_complete':
     case 'deployer_failed':
+    case 'domain_complete':
+    case 'domain_failed':
       return 'lenient'
+    case 'domain_confirm_purchase':
+    case 'domain_own_setup':
+      return 'normal'
     default:
       return 'skip'
   }

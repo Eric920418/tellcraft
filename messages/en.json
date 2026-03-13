@@ -1,7 +1,9 @@
 {
   "metadata": {
-    "title": "Tellcraft",
-    "description": "Tellcraft - AI-driven automation platform. Build your software products through conversation."
+    "title": "Tellcraft - AI Website Builder | Build Sites Through Conversation",
+    "description": "Describe your idea, AI clarifies requirements, generates code, and deploys. No coding needed. Build professional websites in minutes.",
+    "templatesTitle": "Design Templates",
+    "templatesDescription": "Browse curated AI-powered design templates. Customize with one sentence and deploy instantly."
   },
   "common": {
     "loading": "Loading...",
@@ -1128,5 +1130,11 @@
     "deployResult": "Deploy result",
     "progress": "Progress",
     "deployUrl": "Deploy URL"
+  },
+  "templates": {
+    "pageTitle": "Browse All Templates",
+    "pageDescription": "Curated design templates — customize with one sentence and deploy instantly",
+    "backToHome": "← Back to Home",
+    "startUsing": "Start Using"
   }
 }

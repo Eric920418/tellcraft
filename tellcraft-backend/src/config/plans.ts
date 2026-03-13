@@ -38,6 +38,14 @@ export const PLAN_PROJECT_LIMITS: Record<string, number> = {
   business: 100,
 }
 
+/** 方案域名數量上限（free 不可使用） */
+export const PLAN_DOMAIN_LIMITS: Record<string, number> = {
+  free: 0,
+  creator: 1,
+  pro: 2,
+  business: 3,
+}
+
 /** 配額耗盡錯誤碼 */
 export const CREDIT_LIMIT_ERROR_CODE = 'CREDIT_LIMIT_REACHED'
 
@@ -54,6 +62,11 @@ export function isFairUsePlan(plan: string): boolean {
 /** 取得方案專案上限 */
 export function getProjectLimit(plan: string): number {
   return PLAN_PROJECT_LIMITS[plan] ?? 1
+}
+
+/** 取得方案域名上限 */
+export function getDomainLimit(plan: string): number {
+  return PLAN_DOMAIN_LIMITS[plan] ?? 0
 }
 
 /** 判斷是否已用完 Credit */

@@ -1,7 +1,12 @@
+import type { Metadata } from 'next'
 import { redirect } from 'next/navigation'
 import { cookies } from 'next/headers'
 import { jwtVerify } from 'jose'
 import { DashboardShell } from '@/app/components/dashboard/DashboardShell'
+
+export const metadata: Metadata = {
+  robots: { index: false, follow: false },
+}
 
 const JWT_SECRET = new TextEncoder().encode(
   process.env.JWT_SECRET || 'tellcraft-jwt-secret-change-in-production'

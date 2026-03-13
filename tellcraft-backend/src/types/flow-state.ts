@@ -10,6 +10,7 @@ import type { UIRequirementsSpec } from '../services/bdd-to-ui-spec'
 import type { ESKnowledgeMap } from '../services/event-storming'
 import type { ReferenceAnalysis } from '../services/reference-analyzer'
 import type { ImpactAnalysis } from '../services/change-management'
+import type { RegistrantInfo } from '../schemas/domain'
 import type Redis from 'ioredis'
 import type { Server as SocketIOServer } from 'socket.io'
 
@@ -165,4 +166,15 @@ export interface FlowState {
   prdDiscoveryStartedAt?: number
   // 用戶語言偏好（從第一條訊息偵測，供品質閘門等非 LLM 功能使用正確語言回覆）
   locale?: 'zh' | 'en'
+  // Domain Skill 專用
+  domainId?: string
+  domainName?: string
+  domainSource?: 'purchased' | 'own'
+  domainCompletedSteps?: string[]
+  domainCloudflareZoneId?: string
+  domainPrice?: string
+  domainProjectId?: string
+  domainVercelProjectId?: string
+  domainRegistrationStartedAt?: number
+  domainRegistrant?: RegistrantInfo
 }

@@ -31,6 +31,7 @@ import templatesRoutes from './routes/templates'
 import bddRoutes from './routes/bdd'
 import operationsRoutes from './routes/operations'
 import uploadRoutes from './routes/upload'
+import domainRoutes from './routes/domain'
 import lineBotRoutes from './routes/line-bot'
 import { initLineBotHandler } from './services/line-bot-handler'
 import telegramBotRoutes from './routes/telegram-bot'
@@ -451,6 +452,7 @@ app.use('/api/templates', templatesRoutes)
 app.use('/api/bdd', bddRoutes)
 app.use('/api/operations', operationsRoutes)
 app.use('/api/upload', uploadRoutes)
+app.use('/api/domain', domainRoutes)
 app.use('/uploads/tellcraft', (req, res, next) => {
   if (!/\.(jpe?g|png|webp|gif|svg)$/i.test(req.path)) {
     res.status(403).json({ error: 'Forbidden file type' })

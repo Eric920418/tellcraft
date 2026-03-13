@@ -52,6 +52,21 @@ npx ts-node bdd-spec/scripts/lint-gherkin-format.ts spec/features/
 npx ts-node bdd-spec/scripts/validate-feature.ts spec/features/
 ```
 
+### SEO 配置
+
+| 項目 | 檔案 | 說明 |
+|------|------|------|
+| robots.txt | `app/robots.ts` | 允許公開頁面，禁止 dashboard/auth/api/test/liff |
+| sitemap.xml | `app/sitemap.ts` | 公開頁面 + hreflang（en/zh-TW） |
+| manifest.json | `app/manifest.ts` | PWA manifest（standalone） |
+| favicon.ico | `app/favicon.ico` | 從 icon.png 轉換（16/32/48px） |
+| Metadata | `app/[locale]/layout.tsx` | metadataBase + title template + OG + Twitter Card + canonical + keywords |
+| noindex | `app/[locale]/{dashboard,auth,test,liff}/layout.tsx` | 非公開路由 noindex/nofollow |
+| JSON-LD | `app/[locale]/page.tsx` | Organization + WebSite + SoftwareApplication + FAQPage |
+| Breadcrumb | `app/[locale]/templates/TemplatesPage.tsx` | BreadcrumbList（Home → Templates） |
+| 字體 | `app/[locale]/layout.tsx` | next/font（Noto Sans TC + IBM Plex Mono），消除 render-blocking |
+| 結構化資料工具 | `app/lib/structured-data.ts` | JSON-LD schema 生成函數 |
+
 ### 環境變數
 
 **前端**（`.env.local`）：
@@ -93,9 +108,9 @@ npx ts-node bdd-spec/scripts/validate-feature.ts spec/features/
 | `deployer` | 代碼 → sanitize → 本地 build 驗證 → Vercel 部署 → 回滾 | Haiku（修復） | 完成 |
 | `iteration` | 迭代修改 + 撤銷上一步 + 版本回滾 | Sonnet | 完成 |
 | `coder` | 後端代碼生成 | — | **未實作**，Registry 有定義 |
-| `domain-manager` | 網域管理 | — | **前端獨立**，`app/actions/domain.ts` 未接入 Orchestrator |
-| `domain-purchase` | 網域購買（Porkbun） | — | **前端獨立**，`app/actions/porkbun.ts` |
-| `domain-dns` | DNS 管理（Cloudflare） | — | **前端獨立**，`app/actions/cloudflare.ts` |
+| `domain-manager` | 域名管理：列出已有域名 / 引導購買或綁定 | — | 完成（VPS 後端 + Orchestrator） |
+| `domain-purchase` | 域名購買：RDAP 查詢 → Porkbun 註冊 → Cloudflare DNS → Vercel 綁定 | — | 完成（7 步 phase 狀態機 + 反向補償 rollback） |
+| `domain-dns` | 自有域名 DNS 綁定 + Cloudflare DNS CRUD | — | 完成（REST API + Orchestrator 對話流程） |
 
 ### 內部服務層
 
@@ -897,7 +912,7 @@ Fast mode 入口新增客服問答層，解決 LINE 用戶非建站輸入（問�
 
 Server Action 錯誤訊息 + 工具模組國際化，+117 keys / 2 namespaces（`actionErrors` + `test`）。
 
-- **Server Actions i18n**（9 檔）：`index.ts`/`cloudflare.ts`/`supabase.ts`/`porkbun.ts`/`domain.ts`/`storage.ts`/`templates.ts`/`admin.ts`/`deploy.ts`，使用 `getTranslations('actionErrors')` from `next-intl/server`
+- **Server Actions i18n**（原 9 檔，現存 2 檔）：`index.ts`/`templates.ts`，使用 `getTranslations('actionErrors')` from `next-intl/server`（`cloudflare.ts`/`porkbun.ts`/`domain.ts`/`vercel.ts` 等已遷移至 VPS 後端或刪除）
 - **error code 機制**：後端 `auth.ts` 返回 `'ADMIN_REQUIRED'`（取代中文 `'無管理員權限'`），5 個 admin 頁面同步更新比對值
 - **lib 模組英文化**：`vps-api.ts`（8 字串）+ `llm.ts`（9 字串）中文 → 英文（技術診斷日誌）
 - **test 頁面 i18n**：`useTranslations('test')`，48 個字串

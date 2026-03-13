@@ -32,6 +32,9 @@ const ITERATION_TIMEOUT_MS = 5 * 60 * 1000
 const CODE_GENERATION_TIMEOUT_MS = 20 * 60 * 1000
 const QUALITY_GATE_TIMEOUT_MS = 10 * 60 * 1000
 const DEPLOYER_TIMEOUT_MS = 10 * 60 * 1000
+const DOMAIN_SEARCHING_TIMEOUT_MS = 3 * 60 * 1000
+const DOMAIN_REGISTERING_TIMEOUT_MS = 10 * 60 * 1000
+const DOMAIN_DNS_VERIFYING_TIMEOUT_MS = 5 * 60 * 1000
 
 // 需要掃描的 phase → 超時閾值
 const RECOVERABLE_PHASES: Record<string, number> = {
@@ -41,6 +44,9 @@ const RECOVERABLE_PHASES: Record<string, number> = {
   uiux_code_generation: CODE_GENERATION_TIMEOUT_MS,
   uiux_quality_gate: QUALITY_GATE_TIMEOUT_MS,
   deployer_deploying: DEPLOYER_TIMEOUT_MS,
+  domain_searching: DOMAIN_SEARCHING_TIMEOUT_MS,
+  domain_registering: DOMAIN_REGISTERING_TIMEOUT_MS,
+  domain_dns_verifying: DOMAIN_DNS_VERIFYING_TIMEOUT_MS,
 }
 
 function getPhaseTimeoutMs(state: FlowState): number | undefined {
@@ -88,6 +94,8 @@ export async function scanAndRecoverStuckFlowStates(
       // 檢查是否超時（startedAt === 0 代表時間戳遺失，視為超時）
       const startedAt = state.phase === 'prd_discovery'
         ? (state.prdDiscoveryStartedAt || 0)
+        : state.phase === 'domain_registering' || state.phase === 'domain_searching' || state.phase === 'domain_dns_verifying'
+        ? (state.domainRegistrationStartedAt || 0)
         : (state.uiuxCodeGenerationStartedAt || 0)
 
       // 早期恢復：lock 不存在 = Worker 已死，縮短等待至 5 分鐘（取代完整超時）
@@ -169,6 +177,15 @@ async function recoverFlowState(
       break
     case 'deployer_deploying':
       await recoverDeployer(redis, io, conversationId, state)
+      break
+    case 'domain_searching':
+      await recoverDomainSearching(redis, io, conversationId, state)
+      break
+    case 'domain_registering':
+      await recoverDomainRegistering(redis, io, conversationId, state)
+      break
+    case 'domain_dns_verifying':
+      await recoverDomainDnsVerifying(redis, io, conversationId, state)
       break
   }
 }
@@ -448,6 +465,61 @@ async function scanAndCleanOrphanedLocks(redis: Redis): Promise<void> {
   if (cleaned > 0) {
     logger.info({ scanned: totalScanned, cleaned }, '孤立 lock 清理完成')
   }
+}
+
+async function recoverDomainSearching(
+  redis: Redis, io: SocketIOServer, conversationId: string, state: FlowState
+) {
+  await deleteFlowState(redis, conversationId)
+  const isChinese = state.locale !== 'en'
+  await sendMessage(conversationId, io, {
+    content: isChinese
+      ? '域名查詢逾時了，請重新輸入您想查詢的域名。'
+      : 'Domain search timed out. Please enter the domain you want to check again.',
+    stage: 'error',
+  })
+}
+
+async function recoverDomainRegistering(
+  redis: Redis, io: SocketIOServer, conversationId: string, state: FlowState
+) {
+  const isChinese = state.locale !== 'en'
+  state.phase = 'domain_failed'
+  state.waitingForReply = true
+  state.domainRegistrationStartedAt = undefined
+  await saveFlowState(redis, conversationId, state)
+
+  const completedSteps = state.domainCompletedSteps || []
+  await sendMessage(conversationId, io, {
+    content: isChinese
+      ? `域名註冊流程中斷了（已完成步驟：${completedSteps.length}）。\n\n您可以重試或放棄。`
+      : `Domain registration was interrupted (${completedSteps.length} steps completed).\n\nYou can retry or cancel.`,
+    stage: 'error',
+    quickReplies: [
+      { label: isChinese ? '重試' : 'Retry', value: '__retry_domain__', style: 'primary' },
+      { label: isChinese ? '放棄' : 'Cancel', value: '__cancel_domain__', style: 'ghost' },
+    ],
+  })
+}
+
+async function recoverDomainDnsVerifying(
+  redis: Redis, io: SocketIOServer, conversationId: string, state: FlowState
+) {
+  const isChinese = state.locale !== 'en'
+  state.phase = 'domain_own_setup'
+  state.waitingForReply = true
+  await saveFlowState(redis, conversationId, state)
+
+  await sendMessage(conversationId, io, {
+    content: isChinese
+      ? 'DNS 驗證逾時了。請確認 DNS 記錄已正確設定，然後再次告訴我「設定好了」。'
+      : 'DNS verification timed out. Please verify your DNS records are correct and tell me "done" to try again.',
+    stage: 'domain_own_setup',
+    quickReplies: [
+      { label: isChinese ? '設定好了' : 'Done', value: isChinese ? '設定好了' : 'done', style: 'primary' },
+      { label: isChinese ? '取消' : 'Cancel', value: '__cancel_domain__', style: 'ghost' },
+    ],
+  })
 }
 
 async function recoverDeployer(

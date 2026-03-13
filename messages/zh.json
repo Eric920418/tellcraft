@@ -1,7 +1,9 @@
 {
   "metadata": {
-    "title": "Tellcraft",
-    "description": "Tellcraft - AI 驅動的自動化開發平台 用對話打造你的軟體產品"
+    "title": "Tellcraft - AI 自動建站平台 | 用對話打造網站",
+    "description": "描述你的想法，AI 釐清需求、生成程式碼、一鍵部署。不需要寫程式，幾分鐘內打造專業網站。",
+    "templatesTitle": "設計模板",
+    "templatesDescription": "瀏覽精選 AI 設計模板，一句話描述需求即可客製化並即時部署。"
   },
   "common": {
     "loading": "載入中...",
@@ -1128,5 +1130,11 @@
     "deployResult": "部署結果",
     "progress": "進度",
     "deployUrl": "部署網址"
+  },
+  "templates": {
+    "pageTitle": "瀏覽所有模板",
+    "pageDescription": "精選設計模板，一句話描述需求即可套用並完整客製化",
+    "backToHome": "← 返回首頁",
+    "startUsing": "開始使用"
   }
 }

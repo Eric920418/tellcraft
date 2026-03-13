@@ -11,7 +11,7 @@ import { executeIteration, executeUndoIteration, executeRollbackQuery, executeRo
 import { semanticGateway } from '../services/semantic-gateway'
 import { detectFastModeIntent, getFaqReply, answerWithSonnet } from '../services/customer-service'
 import {
-  hasDeployIntent, hasRejectDeployIntent, hasRollbackIntent, hasUndoIntent,
+  hasDeployIntent, hasRejectDeployIntent, hasRollbackIntent, hasUndoIntent, hasDomainIntent,
   PHASE_BACKTRACK_MAP, PHASE_LABELS,
 } from './intent-helpers'
 import { createLogger } from '../lib/logger'
@@ -31,6 +31,11 @@ import {
 } from './phase-handlers/uiux-phases'
 import { executeDeployerSkill } from './phase-handlers/deploy-phases'
 import { buildPostDeployFastBuildQuickReplies } from './phase-handlers/fast-build-phases'
+import {
+  executeDomainSkill,
+  handleDomainConfirmPurchase, handleDomainOwnSetup,
+  handleDomainDnsVerifying, handleDomainComplete, handleDomainFailed,
+} from './phase-handlers/domain-phases'
 
 const logger = createLogger('phase-router')
 
@@ -150,6 +155,36 @@ export async function routePhase(
   }
   if (state.phase === 'uiux_iterating') {
     await handleUiuxIterating(conversationId, state, redis, io)
+    return true
+  }
+
+  // ── Domain Phases ──
+  if (state.phase === 'domain_searching' || state.phase === 'domain_registering') {
+    const isChinese = state.locale !== 'en'
+    await sendMessage(conversationId, io, {
+      content: isChinese ? '正在處理中，請稍候...' : 'Processing, please wait...',
+      stage: 'info',
+    })
+    return true
+  }
+  if (state.phase === 'domain_dns_verifying') {
+    await handleDomainDnsVerifying({ conversationId, projectId, userId, message, state, redis, io, locale: data.locale })
+    return true
+  }
+  if (state.phase === 'domain_confirm_purchase') {
+    await handleDomainConfirmPurchase({ conversationId, projectId, userId, message, state, redis, io, locale: data.locale })
+    return true
+  }
+  if (state.phase === 'domain_own_setup') {
+    await handleDomainOwnSetup({ conversationId, projectId, userId, message, state, redis, io, locale: data.locale })
+    return true
+  }
+  if (state.phase === 'domain_complete') {
+    await handleDomainComplete({ conversationId, projectId, userId, message, state, redis, io, locale: data.locale })
+    return true
+  }
+  if (state.phase === 'domain_failed') {
+    await handleDomainFailed({ conversationId, projectId, userId, message, state, redis, io, locale: data.locale })
     return true
   }
 
@@ -295,6 +330,13 @@ async function routeDeployerComplete(
     await executeDeployerSkill({ taskId: state.taskId || '', projectId, conversationId, userId, message, redis, io })
     return
   }
+  if (hasDomainIntent(trimmed)) {
+    await executeDomainSkill({
+      taskId: state.taskId || '', projectId, conversationId, userId, message,
+      skillName: 'domain-dns', redis, io, locale: data.locale || state.locale,
+    })
+    return
+  }
   if (hasRejectDeployIntent(trimmed)) {
     const isChinese = /[\u4e00-\u9fff]/.test(trimmed)
     await sendMessage(conversationId, io, {
@@ -320,6 +362,7 @@ async function routeDeployerComplete(
   if (intentCheck.match) {
     const isChinese = /[\u4e00-\u9fff]/.test(trimmed) || state.locale === 'zh'
     const qr = buildPostDeployFastBuildQuickReplies(state, { includeDeploy: true, includeNewProject: true })
+    qr.push({ label: isChinese ? '綁定自訂網域' : 'Bind Custom Domain', value: '綁定網域', style: 'ghost' as const })
     if (intentCheck.type === 'question') {
       const faqResult = getFaqReply(trimmed, state.locale)
       if (faqResult) {
@@ -332,8 +375,8 @@ async function routeDeployerComplete(
     }
     await sendMessage(conversationId, io, {
       content: isChinese
-        ? '嗨！您的網站已經部署上線了。您可以：\n- 描述修改需求來調整設計\n- 點擊「部署上線」更新網站\n- 點擊「開始新專案」重新開始'
-        : 'Hi! Your site is live. You can:\n- Describe changes to adjust the design\n- Click "Deploy" to update the site\n- Click "New Project" to start fresh',
+        ? '嗨！您的網站已經部署上線了。您可以：\n- 描述修改需求來調整設計\n- 點擊「部署上線」更新網站\n- 綁定自訂網域\n- 點擊「開始新專案」重新開始'
+        : 'Hi! Your site is live. You can:\n- Describe changes to adjust the design\n- Click "Deploy" to update the site\n- Bind a custom domain\n- Click "New Project" to start fresh',
       stage: 'info', quickReplies: qr,
     })
     return

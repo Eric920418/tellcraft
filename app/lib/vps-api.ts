@@ -2314,5 +2314,97 @@ export async function clearAdminLogs(input: {
   })
 }
 
+// ============================================================
+// Domain API
+// ============================================================
+
+export async function checkDomainAvailability(input: {
+  domain: string
+  token: string
+}): Promise<ApiResponse<{ available: boolean; price?: string; source: string }>> {
+  return apiRequest('/api/domain/check', {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${input.token}` },
+    body: JSON.stringify({ domain: input.domain }),
+  })
+}
+
+export async function getDomainPricing(input: {
+  token: string
+}): Promise<ApiResponse<{ pricing: Record<string, { registration: string; renewal: string }>; source: string }>> {
+  return apiRequest('/api/domain/pricing', {
+    headers: { Authorization: `Bearer ${input.token}` },
+  })
+}
+
+export async function listDomains(input: {
+  token: string
+}): Promise<ApiResponse<Array<{ id: string; domain: string; status: string; source: string; created_at: string }>>> {
+  return apiRequest('/api/domain/list', {
+    headers: { Authorization: `Bearer ${input.token}` },
+  })
+}
+
+export async function getDomainDetails(input: {
+  domainId: string
+  token: string
+}): Promise<ApiResponse<{ id: string; domain: string; status: string; source: string; cloudflare_zone_id?: string }>> {
+  return apiRequest(`/api/domain/${input.domainId}`, {
+    headers: { Authorization: `Bearer ${input.token}` },
+  })
+}
+
+export async function getDomainDnsRecords(input: {
+  domainId: string
+  token: string
+}): Promise<ApiResponse<Array<{ id: string; type: string; name: string; content: string; ttl: number; proxied: boolean }>>> {
+  return apiRequest(`/api/domain/${input.domainId}/dns`, {
+    headers: { Authorization: `Bearer ${input.token}` },
+  })
+}
+
+export async function createDomainDnsRecord(input: {
+  domainId: string
+  type: string
+  name: string
+  content: string
+  ttl?: number
+  proxied?: boolean
+  token: string
+}): Promise<ApiResponse<{ id: string; type: string; name: string; content: string }>> {
+  return apiRequest(`/api/domain/${input.domainId}/dns`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${input.token}` },
+    body: JSON.stringify({
+      type: input.type,
+      name: input.name,
+      content: input.content,
+      ttl: input.ttl,
+      proxied: input.proxied,
+    }),
+  })
+}
+
+export async function deleteDomainDnsRecord(input: {
+  domainId: string
+  recordId: string
+  token: string
+}): Promise<ApiResponse<{ success: boolean }>> {
+  return apiRequest(`/api/domain/${input.domainId}/dns/${input.recordId}`, {
+    method: 'DELETE',
+    headers: { Authorization: `Bearer ${input.token}` },
+  })
+}
+
+export async function removeDomainBinding(input: {
+  domainId: string
+  token: string
+}): Promise<ApiResponse<{ success: boolean }>> {
+  return apiRequest(`/api/domain/${input.domainId}`, {
+    method: 'DELETE',
+    headers: { Authorization: `Bearer ${input.token}` },
+  })
+}
+
 // 導出類型
 export type { ClarifyItem, BddSession }
