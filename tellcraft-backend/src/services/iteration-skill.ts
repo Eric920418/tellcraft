@@ -77,6 +77,25 @@ function recordIterationHistory(
 }
 
 /**
+ * 將文字轉為 token 集合（支援中英文混合）
+ * 英文：按空格分詞；中文：字元 bigram（因為中文沒有空格分隔）
+ */
+function tokenize(text: string): Set<string> {
+  const normalized = text.toLowerCase().replace(/[^\u4e00-\u9fff\w\s]/g, '')
+  const tokens = new Set<string>()
+  // 英文 word tokens
+  for (const word of normalized.split(/\s+/)) {
+    if (word.length > 1 && !/[\u4e00-\u9fff]/.test(word)) tokens.add(word)
+  }
+  // 中文 bigram tokens（「萬花筒」→ {萬花, 花筒}）
+  const cjk = normalized.replace(/[^\u4e00-\u9fff]/g, '')
+  for (let i = 0; i < cjk.length - 1; i++) {
+    tokens.add(cjk.slice(i, i + 2))
+  }
+  return tokens
+}
+
+/**
  * 偵測重複抱怨：比較當前反饋與歷史，回傳連續相似次數（零 LLM）
  */
 function detectRepeatedComplaint(
@@ -84,16 +103,16 @@ function detectRepeatedComplaint(
   history: { feedback: string; filesChanged: string[] }[]
 ): number {
   if (!history.length) return 0
-  const normalize = (t: string) => t.toLowerCase().replace(/[^\u4e00-\u9fff\w]/g, '')
-  const currentTokens = new Set(normalize(currentFeedback).split(/\s+/).filter(w => w.length > 1))
+  const currentTokens = tokenize(currentFeedback)
   if (currentTokens.size === 0) return 0
 
   let count = 0
   for (let i = history.length - 1; i >= Math.max(0, history.length - 5); i--) {
-    const pastTokens = new Set(normalize(history[i].feedback).split(/\s+/).filter(w => w.length > 1))
+    const pastTokens = tokenize(history[i].feedback)
     const intersection = [...currentTokens].filter(k => pastTokens.has(k)).length
-    const union = new Set([...currentTokens, ...pastTokens]).size
-    if (union > 0 && intersection / union > 0.3) count++
+    const minSize = Math.min(currentTokens.size, pastTokens.size)
+    // overlap coefficient（intersection / min_size）比 Jaccard 更適合長短句比對
+    if (minSize > 0 && intersection / minSize >= 0.2) count++
     else break
   }
   return count
@@ -188,8 +207,15 @@ export async function executeIteration(input: {
     const repeatCount = detectRepeatedComplaint(userFeedback, state.iterationHistory || [])
     let escalationTemperature: number | undefined
 
-    if (repeatCount >= 2) {
-      enrichedFeedback = `⚠️ 用戶已第 ${repeatCount + 1} 次反饋同樣問題。之前 ${repeatCount} 次修改都未解決。\n你必須：1. 排查「視覺問題診斷」清單每一條 2. 採取與之前不同的策略 3. 檢查組件是否被多次實例化（ID 衝突）\n\n${enrichedFeedback}`
+    if (repeatCount >= 1) {
+      enrichedFeedback = `⚠️ 用戶已第 ${repeatCount + 1} 次反饋同樣問題。之前 ${repeatCount} 次修改都未解決。
+你必須：
+1. 回顧下方「迭代歷史」中之前修改了哪些檔案 — 這些修改顯然沒有解決問題
+2. 排查「視覺問題診斷」清單每一條（SVG ID 衝突、z-index、overflow、SSR 水合）
+3. 採取與之前完全不同的實作策略
+4. 如果之前只是調參數（opacity/顏色/大小），這次必須檢查結構性問題（組件是否渲染、SVG 是否正確、ref 是否連接）
+
+${enrichedFeedback}`
       escalationTemperature = 0.4
       logger.info({ repeatCount, conversationId }, '迭代重複抱怨偵測：策略升級')
     }
@@ -276,7 +302,7 @@ export async function executeIteration(input: {
       quickReplies.push({ label: '撤銷修改', value: '撤銷', style: 'ghost' })
     }
 
-    const iterMsg = repeatCount >= 2
+    const iterMsg = repeatCount >= 1
       ? `**設計已更新！** (第 ${state.iterationCount} 次迭代)\n\n本次針對重複問題進行了深層修復，請仔細確認效果。\n\n---\n\n輸入「**部署**」重新上線，或繼續提供修改建議。`
       : `**設計已更新！** (第 ${state.iterationCount} 次迭代)\n\n請在預覽面板查看修改效果。\n\n---\n\n輸入「**部署**」重新上線，或繼續提供修改建議。`
 

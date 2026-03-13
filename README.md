@@ -703,7 +703,7 @@ psql "$DATABASE_URL" -f tellcraft-backend/migrations/xxx.sql
 
 - **迭代歷史注入**：`refineCode` 現在接收最近 3 次迭代歷史，讓 LLM 知道之前試過什麼、為什麼沒用
 - **視覺診斷指引**：system prompt 新增 6 項排查清單（SVG ID 衝突、z-index、overflow、opacity、SSR 水合、條件渲染）
-- **重複抱怨偵測**：`detectRepeatedComplaint()` 零 LLM 關鍵詞相似度比對，連續 ≥2 次相同抱怨時升級策略（強化指令 + temperature 0.2→0.4）+ 差異化成功訊息
+- **重複抱怨偵測**：`detectRepeatedComplaint()` 零 LLM 相似度比對（中文 bigram + 英文 word token + overlap coefficient ≥0.2），連續 ≥1 次相同抱怨即升級策略（強化排查指令 + temperature 0.2→0.4）+ 差異化成功訊息
 - **SVG ID 碰撞檢查**：Quality Gate 新增 `checkIdUniqueness()`，掃描 components 中硬編碼的 SVG gradient/filter/clipPath ID，標記為 critical 由 Haiku 自動修復
 
 ### Seed 模板真實代碼（2026-03-12）
