@@ -489,6 +489,36 @@ function checkColorContrast(code: GeneratedCode, moodId?: string): QualityIssue[
 }
 
 // ============================================================
+// Checker 5: SVG/HTML ID Uniqueness
+// ============================================================
+
+function checkIdUniqueness(code: GeneratedCode): QualityIssue[] {
+  const issues: QualityIssue[] = []
+  let issueCounter = 0
+  const SVG_DEFS_RE = /<(linearGradient|radialGradient|clipPath|mask|filter|pattern)\s[^>]*id=["']([^"']+)["']/gi
+
+  for (const file of code.components) {
+    SVG_DEFS_RE.lastIndex = 0
+    let m
+    while ((m = SVG_DEFS_RE.exec(file.content)) !== null) {
+      const idValue = m[2]
+      // 跳過已用動態 ID 的情況（模板字串 ${...}）
+      if (idValue.includes('${')) continue
+      issues.push({
+        id: `id-${++issueCounter}`,
+        category: 'code_quality',
+        severity: 'critical',
+        rule: 'svg-id-uniqueness',
+        message: `SVG <${m[1]}> 使用硬編碼 id="${idValue}"，多實例渲染時會 ID 衝突`,
+        file: file.path,
+        suggestion: '用 React.useId() 生成唯一前綴：const uid = useId(); id={`${uid}-name`}',
+      })
+    }
+  }
+  return issues
+}
+
+// ============================================================
 // 主函數：runQualityGate
 // ============================================================
 
@@ -498,9 +528,11 @@ export function runQualityGate(code: GeneratedCode, designTier?: DesignTier, moo
   const perfIssues = checkPerformance(code)
   const cqIssues = checkCodeQuality(code, designTier)
   const contrastIssues = checkColorContrast(code, moodId)
+  const idIssues = checkIdUniqueness(code)
 
   const allA11yIssues = [...a11yIssues, ...contrastIssues]
-  const allIssues = [...allA11yIssues, ...perfIssues, ...cqIssues]
+  const allCqIssues = [...cqIssues, ...idIssues]
+  const allIssues = [...allA11yIssues, ...perfIssues, ...allCqIssues]
 
   const critical = allIssues.filter(i => i.severity === 'critical').length
   const warning = allIssues.filter(i => i.severity === 'warning').length
@@ -526,8 +558,8 @@ export function runQualityGate(code: GeneratedCode, designTier?: DesignTier, moo
         issues: perfIssues,
       },
       code_quality: {
-        passed: cqIssues.filter(i => i.severity === 'critical').length === 0,
-        issues: cqIssues,
+        passed: allCqIssues.filter(i => i.severity === 'critical').length === 0,
+        issues: allCqIssues,
       },
     },
   }

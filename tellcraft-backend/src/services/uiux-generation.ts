@@ -4236,6 +4236,8 @@ export async function refineCode(
     variantConcept?: VariantConcept
     moodId?: string
     generationProfile?: GenerationProfile
+    iterationHistory?: Array<{ feedback: string; filesChanged: string[] }>
+    temperatureOverride?: number
   },
   trackingContext?: LlmTrackingContext,
   imageUrls?: string[],
@@ -4746,6 +4748,16 @@ ${designContext.variantConcept.signatureElement ? `Signature Element：${designC
 修改代碼時必須保持這個創意概念的完整性。`
     : ''
 
+  const iterationHistorySection = (() => {
+    const history = designContext.iterationHistory
+    if (!history || history.length === 0) return ''
+    const recent = history.slice(-3)
+    const lines = recent.map((entry, i) =>
+      `${i + 1}. 反饋：「${entry.feedback.slice(0, 150)}」→ 修改了 ${entry.filesChanged.map(f => f.split('/').pop()).join(', ')}`
+    )
+    return `\n## 迭代歷史（最近 ${recent.length} 次，共 ${history.length} 次）\n以下是之前的修改請求。**如果用戶在重複抱怨同一問題，代表之前的修改沒有修復根因，你必須採取不同策略。**\n${lines.join('\n')}\n`
+  })()
+
   const systemPrompt = `你是一位專業的前端設計師和開發者。用戶對已完成的設計有修改意見，請根據反饋修改代碼。
 
 ${designSystemSection}
@@ -4754,6 +4766,7 @@ ${briefSection}
 
 ${refineConceptSection}
 ${designContext.moodId ? `\n## 設計風格（修改時不可丟失）\nMood: ${getMoodSummary(designContext.moodId)}\n` : ''}
+${iterationHistorySection}
 ${getStructureConstraints(tier)}
 
 ## 重要：輸入驗證（最高優先）
@@ -4775,6 +4788,15 @@ ${getStructureConstraints(tier)}
 6. 使用 Tailwind CSS classes
 7. 保持無障礙功能（aria-label、focus-visible 等）
 8. 保持現有的互動功能完好（Modal/Dialog 開關、表單 state、事件處理），不要移除 'use client'
+
+## 視覺問題診斷（「看不到」「消失」「沒效果」類反饋必讀）
+當用戶說某效果「看不到」「消失了」「沒有出現」時，不要只調顏色或透明度，依序排查：
+1. **SVG ID 衝突**：組件被多次渲染時，<defs> 內的 gradient/clipPath/filter id 會碰撞 → 用 useId() 確保唯一
+2. **z-index 遮擋**：效果被其他層蓋住？檢查 position 和 z-index
+3. **overflow 裁切**：父層 overflow-hidden 裁掉了效果？
+4. **opacity/visibility**：是否被設為 opacity-0 或 invisible？
+5. **SSR 水合問題**：window/Math.random 等動態值在 SSR 為空 → 需 useEffect+useState
+6. **條件渲染斷鏈**：觸發條件（hover/scroll/IntersectionObserver）是否正確連接？
 ${lockedUploadUrls.length ? `
 ## 圖片資產鎖定（最高優先）
 以下圖片 URL 屬於用戶剛上傳的資產，修改時必須原樣保留：
@@ -4854,7 +4876,7 @@ ${codeBlocks.join('\n\n')}
     [{ role: 'user', content: userContent }],
     {
       maxTokens: 32768,
-      temperature: 0.2,
+      temperature: designContext.temperatureOverride ?? 0.2,
       promptLabel: 'refine-code',
       contextSizeHint: generationProfile,
     },

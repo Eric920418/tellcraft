@@ -431,9 +431,9 @@ Server Action 錯誤訊息 + 工具模組中文字串國際化（+117 keys，2 n
 | **BDD 規格** | 5 階段釐清、Event Storming、提案模式、草稿批量、變更管理、規格回滾、Scenario Outline、OpenAPI 產出 |
 | **UIUX 設計** | 雙軌 Discovery、Design Tier、5 變體、三階段生成、串流即時預覽、BDD→UI 翻譯、Variant 概念注入 |
 | **快速建站** | 26 種產品類型、22 套產業配色、Haiku 概念生成（設計靈魂）、Tier 智能修正、vague 攔截引導、失敗重試、進度預估、手機全屏預覽、App/Website 佈局模式、模板風格整合、智能模板匹配 |
-| **品質** | Quality Gate 靜態檢查、LLM 自動修復、RWD 響應式安全網、Tailwind v4→v3 轉換 |
+| **品質** | Quality Gate 靜態檢查（含 SVG ID 碰撞偵測）、LLM 自動修復、RWD 響應式安全網、Tailwind v4→v3 轉換 |
 | **部署** | sanitize 6 類預檢、本地 build 驗證（3 輪 LLM 修復）、Vercel 部署、版本回滾 |
-| **迭代** | 對話內迭代修改、撤銷上一步、部署歷史回滾、迭代歷史追蹤 |
+| **迭代** | 對話內迭代修改、撤銷上一步、部署歷史回滾、迭代歷史追蹤、重複抱怨偵測+策略升級、視覺診斷指引 |
 | **預覽** | Sandpack 真實 React 渲染、串流增量更新、裝置切換、編輯模式、圖片上傳 |
 | **動畫** | BDD 需求藍圖面板（即時 Q&A 歷史視覺化）、3D 工廠流水線（Fast Build）、Remotion 驅動 |
 | **認證** | Google/LINE OAuth、JWT 雙軌（localStorage + Cookie）、訪客→帳號合併、帳號綁定（雙登入）、auth 頁面 i18n（next-intl） |
@@ -696,6 +696,15 @@ psql "$DATABASE_URL" -f tellcraft-backend/migrations/xxx.sql
 2. **Anthropic Client 統一**（`lib/anthropic.ts`）：全 codebase 唯一的 `getAnthropicClient()` + `MODEL.SONNET`/`MODEL.HAIKU` 常數。消除 7 份重複 `getAnthropicClient()`、59 處硬編碼模型 ID。SDK 用戶（6 檔）改 import 單例；fetch 用戶（10 檔）改用 `getAnthropicHeaders()` + MODEL 常數
 3. **Zod API 驗證**（`middleware/validate.ts` + `schemas/`）：`validateBody(schema)` 中間件工廠，高風險路由全覆蓋 — conversation（sendMessage/reply）、session（initialize）、operations（4 端點）、bdd（6 端點）、project（create/template-overrides），移除 ~100 行手動 `if (!req.body.xxx)` 驗證
 4. **BullMQ DLQ**（`services/job-failure-handler.ts` + `migrations/013`）：`job_failures` 表持久化最終失敗、Socket.io 推送用戶錯誤消息+重試按鈕、FATAL log 觸發告警、`removeOnFail.age` 24h→7d
+
+### 迭代反饋循環修復（2026-03-13）
+
+修復用戶反覆抱怨同一視覺問題（如「萬花筒花紋看不到」）但系統每次只做表層修改的問題。
+
+- **迭代歷史注入**：`refineCode` 現在接收最近 3 次迭代歷史，讓 LLM 知道之前試過什麼、為什麼沒用
+- **視覺診斷指引**：system prompt 新增 6 項排查清單（SVG ID 衝突、z-index、overflow、opacity、SSR 水合、條件渲染）
+- **重複抱怨偵測**：`detectRepeatedComplaint()` 零 LLM 關鍵詞相似度比對，連續 ≥2 次相同抱怨時升級策略（強化指令 + temperature 0.2→0.4）+ 差異化成功訊息
+- **SVG ID 碰撞檢查**：Quality Gate 新增 `checkIdUniqueness()`，掃描 components 中硬編碼的 SVG gradient/filter/clipPath ID，標記為 critical 由 Haiku 自動修復
 
 ### Seed 模板真實代碼（2026-03-12）
 

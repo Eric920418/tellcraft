@@ -76,6 +76,29 @@ function recordIterationHistory(
   }
 }
 
+/**
+ * 偵測重複抱怨：比較當前反饋與歷史，回傳連續相似次數（零 LLM）
+ */
+function detectRepeatedComplaint(
+  currentFeedback: string,
+  history: { feedback: string; filesChanged: string[] }[]
+): number {
+  if (!history.length) return 0
+  const normalize = (t: string) => t.toLowerCase().replace(/[^\u4e00-\u9fff\w]/g, '')
+  const currentTokens = new Set(normalize(currentFeedback).split(/\s+/).filter(w => w.length > 1))
+  if (currentTokens.size === 0) return 0
+
+  let count = 0
+  for (let i = history.length - 1; i >= Math.max(0, history.length - 5); i--) {
+    const pastTokens = new Set(normalize(history[i].feedback).split(/\s+/).filter(w => w.length > 1))
+    const intersection = [...currentTokens].filter(k => pastTokens.has(k)).length
+    const union = new Set([...currentTokens, ...pastTokens]).size
+    if (union > 0 && intersection / union > 0.3) count++
+    else break
+  }
+  return count
+}
+
 // ============================================================
 // 迭代修改
 // ============================================================
@@ -161,6 +184,16 @@ export async function executeIteration(input: {
       enrichedFeedback = `${userFeedback}\n\n[產品完整描述（用於理解上下文，不是修改指令）]\n${state.fastModeExpandedPrompt}`
     }
 
+    // 偵測重複抱怨 → 策略升級
+    const repeatCount = detectRepeatedComplaint(userFeedback, state.iterationHistory || [])
+    let escalationTemperature: number | undefined
+
+    if (repeatCount >= 2) {
+      enrichedFeedback = `⚠️ 用戶已第 ${repeatCount + 1} 次反饋同樣問題。之前 ${repeatCount} 次修改都未解決。\n你必須：1. 排查「視覺問題診斷」清單每一條 2. 採取與之前不同的策略 3. 檢查組件是否被多次實例化（ID 衝突）\n\n${enrichedFeedback}`
+      escalationTemperature = 0.4
+      logger.info({ repeatCount, conversationId }, '迭代重複抱怨偵測：策略升級')
+    }
+
     const result = await refineCode(
       currentCode,
       enrichedFeedback,
@@ -170,6 +203,8 @@ export async function executeIteration(input: {
         designBrief: state.uiuxDesignBrief,
         variantConcept: state.uiuxVariantConcept,
         moodId: state.uiuxDesignMood,
+        iterationHistory: state.iterationHistory,
+        temperatureOverride: escalationTemperature,
       },
       { userId: state.userId || userId, conversationId, purpose: 'uiux_refine' },
       input.imageUrls,
@@ -241,8 +276,12 @@ export async function executeIteration(input: {
       quickReplies.push({ label: '撤銷修改', value: '撤銷', style: 'ghost' })
     }
 
+    const iterMsg = repeatCount >= 2
+      ? `**設計已更新！** (第 ${state.iterationCount} 次迭代)\n\n本次針對重複問題進行了深層修復，請仔細確認效果。\n\n---\n\n輸入「**部署**」重新上線，或繼續提供修改建議。`
+      : `**設計已更新！** (第 ${state.iterationCount} 次迭代)\n\n請在預覽面板查看修改效果。\n\n---\n\n輸入「**部署**」重新上線，或繼續提供修改建議。`
+
     await sendMessage(conversationId, io, {
-      content: `**設計已更新！** (第 ${state.iterationCount} 次迭代)\n\n請在預覽面板查看修改效果。\n\n---\n\n輸入「**部署**」重新上線，或繼續提供修改建議。`,
+      content: iterMsg,
       stage: 'uiux_iteration_complete',
       layoutHint: 'split',
       richContent: {

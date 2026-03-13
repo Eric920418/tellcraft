@@ -15,7 +15,7 @@ import {
 import { AnimatedThemeToggler } from '@/app/components/AnimatedThemeToggler'
 import LocaleSwitcher from '@/app/components/LocaleSwitcher'
 import GlowButton from '@/app/components/GlowButton'
-import { getDashboardStats } from '@/app/lib/vps-api'
+import { getUserConversations } from '@/app/lib/vps-api'
 import { useAuth, getAuthToken } from '@/app/hooks/useAuth'
 import LoginPrompt from '@/app/components/LoginPrompt'
 import ProjectReminder from '@/app/components/ProjectReminder'
@@ -73,14 +73,20 @@ function HomeContent() {
     setAnonymousId(id)
   }, [])
 
-  // 已登入時取得最近專案（用於 Hero 快捷入口）
+  // 已登入時取得最近對話過的專案（用於 Hero 快捷入口）
   useEffect(() => {
     if (!auth.isAuthenticated) return
     const token = getAuthToken()
     if (!token) return
-    getDashboardStats({ token }).then((result) => {
+    getUserConversations({ token }).then((result) => {
       if (result.success && result.data) {
-        setRecentProjects(result.data.recentProjects.filter(p => p.latestConversationId))
+        // 依對話 updatedAt 排序，去重後取前 3 個專案
+        const seen = new Set<string>()
+        const projects = result.data.conversations
+          .filter(c => { if (seen.has(c.projectId)) return false; seen.add(c.projectId); return true })
+          .slice(0, 3)
+          .map(c => ({ id: c.projectId, name: c.projectName, status: '', latestConversationId: c.id }))
+        setRecentProjects(projects)
       }
     }).catch(() => {})
   }, [auth.isAuthenticated])
