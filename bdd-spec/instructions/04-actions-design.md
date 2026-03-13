@@ -10,7 +10,7 @@ description: 分析 sdd.os ISA Feature Files 中的功能與規則，設計對�
 
 **核心目標：建立 Server Action 與 Feature File 之間的明確關聯，確保每個 Action 都可追溯到對應的業務規則。**
 
-**注意**：本流程的輸入為 **sdd.os ISA Gherkin (Server Actions 版)** 格式的 Feature Files，詳見 [`formulation-rules.md`](../rules/formulation-rules.md)。
+**注意**：本流程的輸入為 **sdd.os ISA Gherkin (SpecFormula 標準)** 格式的 Feature Files，詳見 [`formulation-rules.md`](../rules/formulation-rules.md)。
 
 ---
 
@@ -38,16 +38,18 @@ description: 分析 sdd.os ISA Feature Files 中的功能與規則，設計對�
 
 #### 1.2 從 Feature 註解識別 Action
 
-sdd.os ISA 格式的 Feature File 已在開頭標註 Action 資訊：
+sdd.os ISA SpecFormula 標準的 Feature File 已在開頭標註 Action 資訊：
 
 ```gherkin
 # Action: createOrder
+# [POST] /api/orders
 # Summary: 建立訂單
 Feature: 建立訂單
 ```
 
 從這些註解直接提取：
 - **Action Name**：`createOrder`（函數名稱，camelCase）
+- **HTTP Endpoint**：`POST /api/orders`（HTTP method + path）
 - **Summary**：Feature 名稱（如「建立訂單」）
 
 **備註**：若 Feature File 缺少這些註解，依照以下對應推斷：
@@ -132,6 +134,8 @@ actions:
 actions:
   - name: createOrder
     summary: 建立訂單   # 必須與 Feature 名稱一致
+    method: POST
+    path: /api/orders
     description: |
       建立一筆新的訂單記錄。
 
@@ -145,7 +149,7 @@ actions:
     rules:
       - rule: 後置（狀態）- 訂單總額應為所有品項小計加總
         type: 後置（狀態）
-        step: "Then 建立訂單成功, with table:"
+        step: "Then 建立訂單(201)回應, with table:"
       - rule: 前置（狀態）- 建立訂單前商品庫存必須充足
         type: 前置（狀態）
         step: "Then 操作失敗"
@@ -170,7 +174,7 @@ actions:
         type: ActionError
 ```
 
-#### 3.3 rules 欄位格式規範（sdd.os ISA - Server Actions 版，四類規則）
+#### 3.3 rules 欄位格式規範（sdd.os ISA - SpecFormula 標準，四類規則）
 
 每個 `rules` 項目必須包含：
 
@@ -178,21 +182,24 @@ actions:
 |------|------|------|
 | `rule` | Rule 的中文描述（與 Feature File 中的 Rule 名稱一致，含四類前綴標註） | `後置（狀態）- 訂單總額應為所有品項小計加總` |
 | `type` | 規則類型（四類之一） | `前置（狀態）` / `前置（參數）` / `後置（回應）` / `後置（狀態）` |
-| `step` | 對應的 sdd.os ISA step statement | `Then 建立訂單成功, with table:` |
+| `step` | 對應的 sdd.os ISA step statement | `Then 建立訂單(201)回應, with table:` |
 
-**step statement 格式要求（sdd.os ISA - Server Actions 版）**：
-- When 步驟使用 `{summary}, call table:` 格式
-- 成功 Then 使用 `{summary}成功, with table:` 格式
+**step statement 格式要求（sdd.os ISA SpecFormula 標準）**：
+- When 步驟使用 `(No Actor|UID="$var") {summary}, call table:` 格式
+- 成功 Then 使用 `{summary}(STATUS)回應, with table:` 格式
 - 失敗 Then 使用 `操作失敗`
-- Entity 驗證使用 `存在一個{entity}, with table:` 格式
+- Entity 驗證使用 `應該存在一個{entity}, with table:` 格式
+- DataTable 使用 VAR 系統（`>/$/<`）取代硬編碼 UUID
 - DataTable 欄位名稱與 `spec/data/schema.sql` 中的欄位一致
 
-#### 3.4 完整 Action 範例（sdd.os ISA - Server Actions 版）
+#### 3.4 完整 Action 範例（sdd.os ISA SpecFormula 標準）
 
 ```yaml
 actions:
   - name: createOrder
     summary: 建立訂單   # 與 Feature 名稱一致
+    method: POST
+    path: /api/orders
     description: |
       建立一筆新的訂單，包含顧客資訊與訂購品項。
       系統會自動計算訂單總額並檢查庫存。
@@ -201,7 +208,7 @@ actions:
     rules:
       - rule: 後置（狀態）- 訂單總額應為所有品項小計加總
         type: 後置（狀態）
-        step: "Then 建立訂單成功, with table:"
+        step: "Then 建立訂單(201)回應, with table:"
       - rule: 前置（狀態）- 建立訂單前商品庫存必須充足
         type: 前置（狀態）
         step: "Then 操作失敗"
@@ -249,13 +256,15 @@ actions:
 
   - name: getOrderById
     summary: 查詢訂單   # 與 Feature 名稱一致
+    method: GET
+    path: /api/orders/:id
     description: 根據訂單 ID 查詢訂單詳細資訊
 
     featureFile: spec/features/查詢訂單.feature
     rules:
       - rule: 後置（回應）- 查詢結果應包含訂單詳情
         type: 後置（回應）
-        step: "Then 查詢訂單成功, with table:"
+        step: "Then 查詢訂單(200)回應, with table:"
       - rule: 前置（狀態）- 訂單必須存在
         type: 前置（狀態）
         step: "Then 操作失敗"
@@ -427,17 +436,17 @@ spec/
 
 ## 與其他 Prompt 的關係
 
-- **前置階段**：`formulation.md` 已產出 `spec/data/schema.sql`、`spec/data/entity_to_table_mapping.yml` 和 `spec/features/*.feature`（sdd.os ISA 格式 - Server Actions 版）
+- **前置階段**：`formulation.md` 已產出 `spec/data/schema.sql`、`spec/data/entity_to_table_mapping.yml` 和 `spec/features/*.feature`（sdd.os ISA 格式 - SpecFormula 標準）
 - **本階段角色**：Actions 設計階段，從 Feature Files 產出 Server Actions 規格
 - **後續階段**：
-  1. `isa-config.md` - 產出 sdd.os 的 ISA 配置檔案（`isa_codegen.yml`）
+  1. `isa-config.md` - 產出 sdd.os 的 ISA 配置檔案（`isa.yml`）
   2. `automation-ts.md` - 將參考 `spec/actions/actions.yml` 實作 Next.js Server Actions
 
 **工作流程**：
 ```
 formulation.md → actions-design.md → isa-config.md → automation-ts.md
      ↓                 ↓                  ↓               ↓
-spec/data/        spec/actions/     isa_codegen.yml   可部署應用
+spec/data/        spec/actions/     isa.yml           可部署應用
 spec/features/     actions.yml                        + 測試程式碼
 (sdd.os ISA)
 ```
@@ -452,12 +461,12 @@ spec/features/     actions.yml                        + 測試程式碼
 - [ ] `spec/actions/actions.yml` 檔案已建立
 - [ ] YAML 語法正確無誤
 
-**Feature 關聯（sdd.os ISA - Server Actions 版）：**
+**Feature 關聯（sdd.os ISA - SpecFormula 標準）：**
 - [ ] 每個 Feature File 至少有一個對應的 Action
 - [ ] 每個 Action 都有 `featureFile` 欄位
 - [ ] 每個 Action 的 `summary` 與 Feature 名稱一致
 - [ ] 每個 Action 都有 `rules` 欄位，列出所有相關 Rules（含四類前綴標註 + type 欄位）
-- [ ] rules 中的 step 使用 sdd.os ISA 格式（Server Actions 版）
+- [ ] rules 中的 step 使用 sdd.os ISA 格式（SpecFormula 標準）
 - [ ] rules 中的 type 欄位為四類之一（前置（狀態）/前置（參數）/後置（回應）/後置（狀態））
 
 **Types 完整性：**

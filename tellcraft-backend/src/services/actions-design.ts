@@ -285,11 +285,12 @@ const SYSTEM_PROMPT = `你是一位 sdd.os ISA 專家，負責從 Feature Files 
    - \`前置（參數）\`：輸入參數約束（如數量>0、必填欄位）
    - \`後置（回應）\`：API 回傳資料預期（查詢類功能）
    - \`後置（狀態）\`：資料庫狀態變化（命令類功能）
-5. **step 格式**：
-   - When: \`{summary}, call table:\`
-   - Then 成功: \`{summary}成功, with table:\`
+5. **step 格式（SpecFormula 標準）**：
+   - When: \`(No Actor|UID="$var") {summary}, call table:\`
+   - Then 成功: \`{summary}(STATUS)回應, with table:\`
    - Then 失敗: \`操作失敗\`
-   - Entity 驗證: \`存在一個{entity}, with table:\`
+   - Entity 驗證: \`應該存在一個{entity}, with table:\`
+   - Entity 不存在: \`應該不存在一個{entity}, with table:\`
 6. **Types 對應 Schema**：所有 SQL Schema 主表都有 Type 定義，SQL→TS 類型映射正確
 
 ## SQL → TypeScript 類型映射

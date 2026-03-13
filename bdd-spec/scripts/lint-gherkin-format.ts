@@ -2,11 +2,11 @@
 /**
  * lint-gherkin-format.ts
  *
- * 嚴格 Linter：確保生成的 .feature 檔案 100% 符合 isa-config 中定義的 Regex 規範
+ * 嚴格 Linter：確保生成的 .feature 檔案 100% 符合 isa.yml 中定義的 Regex 規範（SpecFormula 標準）
  *
  * 此腳本解決「Regex 與生成內容的脆弱耦合」問題：
- * - LLM 可能生成 `call table :` (多空格) 或 `call_table:` (底線)
- * - 這些變體會導致 isa-config 的 Regex 匹配失敗
+ * - LLM 可能生成格式不正確的步驟
+ * - 這些變體會導致 isa.yml 的 Regex 匹配失敗
  * - 此腳本在 Formulation 階段結束前強制執行，確保 100% 相容
  *
  * 使用方式：
@@ -19,8 +19,8 @@ import * as fs from 'fs'
 import * as path from 'path'
 
 // ============================================================
-// ISA Config 定義的精確 Regex 模式
-// 這些模式必須與 05-isa-config.md 完全一致
+// ISA Config 定義的精確 Regex 模式（SpecFormula 標準）
+// 這些模式必須與 05-isa-config.md / isa.yml 完全一致
 // ============================================================
 
 const ISA_PATTERNS = {
@@ -29,7 +29,7 @@ const ISA_PATTERNS = {
     name: 'Entity setup',
     stepType: 'Given',
     // 精確格式：準備一個{entity}, with table:
-    regex: /^準備一個[\u4e00-\u9fffa-zA-Z]+, with table:$/,
+    regex: /^準備一個[\u4e00-\u9fffa-zA-Z0-9_]+, with table:$/,
     template: '準備一個{entity}, with table:',
     commonErrors: [
       { pattern: /準備一個.+,\s{2,}with table:/, fix: '移除多餘空格', suggestion: '`, with table:` 中逗號後只能有一個空格' },
@@ -38,35 +38,61 @@ const ISA_PATTERNS = {
     ],
   },
 
-  // When 步驟 - Action 呼叫
-  actionCall: {
-    name: 'Action call',
-    stepType: 'When',
-    // 精確格式：{summary}, call table:
-    regex: /^.+, call table:$/,
-    template: '{summary}, call table:',
+  // Given 步驟 - 時間控制
+  timeControl: {
+    name: 'Time control',
+    stepType: 'Given',
+    // 精確格式：現在時間為 "{datetime}"
+    regex: /^現在時間為 "[^"]+"$/,
+    template: '現在時間為 "{datetime}"',
     commonErrors: [
-      { pattern: /.+,\s{2,}call table:/, fix: '移除多餘空格', suggestion: '`, call table:` 中逗號後只能有一個空格' },
-      { pattern: /.+，call table:/, fix: '使用半形逗號', suggestion: '使用半形逗號 `,` 而非全形 `，`' },
-      { pattern: /.+,call table:/, fix: '加入空格', suggestion: '逗號後需要一個空格' },
-      { pattern: /.+, call_table:/, fix: '使用空格', suggestion: '使用 `call table:` 而非 `call_table:`' },
-      { pattern: /.+, call table\s*$/, fix: '加入冒號', suggestion: '結尾需要冒號 `:`' },
-      { pattern: /.+,\s*calltable:/, fix: '加入空格', suggestion: '`call` 和 `table` 之間需要空格' },
+      { pattern: /現在時間為"[^"]+"/, fix: '加入空格', suggestion: '「現在時間為」後需要一個空格' },
+      { pattern: /現在時間為 [^"]+/, fix: '加入引號', suggestion: '日期時間需要用雙引號包圍' },
     ],
   },
 
-  // Then 步驟 - 成功回應驗證
-  actionSuccess: {
-    name: 'Action success validation',
-    stepType: 'Then',
-    // 精確格式：{summary}成功, with table: 或 {summary}成功,with table:
-    regex: /^.+成功,?\s*with table:$/,
-    template: '{summary}成功, with table:',
+  // When 步驟 - Action 呼叫（含 Actor 前綴）
+  actionCall: {
+    name: 'Action call',
+    stepType: 'When',
+    // 精確格式：(No Actor|UID="...") {summary}, call table:
+    regex: /^\((?:No Actor|UID="[^"]+")\) .+, call table:$/,
+    template: '(No Actor|UID="$var") {summary}, call table:',
     commonErrors: [
-      { pattern: /.+成功\s+, with table:/, fix: '移除空格', suggestion: '`成功` 和逗號之間不應有空格' },
-      { pattern: /.+成功，with table:/, fix: '使用半形逗號', suggestion: '使用半形逗號 `,` 而非全形 `，`' },
-      { pattern: /.+成功,\s{2,}with table:/, fix: '移除多餘空格', suggestion: '逗號後最多一個空格' },
-      { pattern: /.+成功, with_table:/, fix: '使用空格', suggestion: '使用 `with table:` 而非 `with_table:`' },
+      { pattern: /^\(.+\)\s*.+,\s{2,}call table:/, fix: '移除多餘空格', suggestion: '`, call table:` 中逗號後只能有一個空格' },
+      { pattern: /^\(.+\)\s*.+，call table:/, fix: '使用半形逗號', suggestion: '使用半形逗號 `,` 而非全形 `，`' },
+      { pattern: /^\(.+\)\s*.+,call table:/, fix: '加入空格', suggestion: '逗號後需要一個空格' },
+      { pattern: /^\(.+\)\s*.+, call_table:/, fix: '使用空格', suggestion: '使用 `call table:` 而非 `call_table:`' },
+      { pattern: /^\(.+\)\s*.+, call table\s*$/, fix: '加入冒號', suggestion: '結尾需要冒號 `:`' },
+      // 缺少 Actor 前綴（舊格式）
+      { pattern: /^[^(].+, call table:$/, fix: '加入 Actor 前綴', suggestion: '必須有 `(No Actor)` 或 `(UID="$var")` 前綴' },
+    ],
+  },
+
+  // Then 步驟 - 成功回應驗證（含 HTTP status code）
+  responseValidate: {
+    name: 'Response validation',
+    stepType: 'Then',
+    // 精確格式：{summary}(STATUS)回應, with table:
+    regex: /^.+\(\d{3}\)回應,?\s*with table:$/,
+    template: '{summary}(STATUS)回應, with table:',
+    commonErrors: [
+      { pattern: /.+\(\d{3}\)回應,\s{2,}with table:/, fix: '移除多餘空格', suggestion: '逗號後最多一個空格' },
+      { pattern: /.+\(\d{3}\)回應，with table:/, fix: '使用半形逗號', suggestion: '使用半形逗號 `,` 而非全形 `，`' },
+      // 舊格式：{summary}成功, with table:
+      { pattern: /.+成功,?\s*with table:$/, fix: '改用新格式', suggestion: '請將 `{summary}成功, with table:` 改為 `{summary}(STATUS)回應, with table:`' },
+    ],
+  },
+
+  // Then 步驟 - 成功回應 JSON 驗證
+  responseValidateJson: {
+    name: 'Response validation JSON',
+    stepType: 'Then',
+    // 精確格式：{summary}(STATUS)回應為, with JSON:
+    regex: /^.+\(\d{3}\)回應為,?\s*with JSON:$/,
+    template: '{summary}(STATUS)回應為, with JSON:',
+    commonErrors: [
+      { pattern: /.+\(\d{3}\)回應為,\s{2,}with JSON:/, fix: '移除多餘空格', suggestion: '逗號後最多一個空格' },
     ],
   },
 
@@ -83,17 +109,33 @@ const ISA_PATTERNS = {
     ],
   },
 
-  // Then 步驟 - Entity 驗證
+  // Then 步驟 - Entity 存在驗證
   entityValidate: {
     name: 'Entity validate',
     stepType: 'Then',
-    // 精確格式：存在一個{entity}, with table:
-    regex: /^存在一個[\u4e00-\u9fffa-zA-Z]+, with table:$/,
-    template: '存在一個{entity}, with table:',
+    // 精確格式：應該存在一個{entity}, with table:
+    regex: /^應該存在一個[\u4e00-\u9fffa-zA-Z0-9_]+, with table:$/,
+    template: '應該存在一個{entity}, with table:',
     commonErrors: [
-      { pattern: /存在一個.+,\s{2,}with table:/, fix: '移除多餘空格', suggestion: '逗號後只能有一個空格' },
-      { pattern: /存在一個.+，with table:/, fix: '使用半形逗號', suggestion: '使用半形逗號 `,` 而非全形 `，`' },
-      { pattern: /存在一個.+,with table:/, fix: '加入空格', suggestion: '逗號後需要一個空格' },
+      { pattern: /應該存在一個.+,\s{2,}with table:/, fix: '移除多餘空格', suggestion: '逗號後只能有一個空格' },
+      { pattern: /應該存在一個.+，with table:/, fix: '使用半形逗號', suggestion: '使用半形逗號 `,` 而非全形 `，`' },
+      { pattern: /應該存在一個.+,with table:/, fix: '加入空格', suggestion: '逗號後需要一個空格' },
+      // 舊格式：存在一個{entity}, with table:
+      { pattern: /^存在一個[\u4e00-\u9fffa-zA-Z0-9_]+, with table:$/, fix: '加入「應該」', suggestion: '請將 `存在一個` 改為 `應該存在一個`' },
+    ],
+  },
+
+  // Then 步驟 - Entity 不存在驗證
+  entityNonExistence: {
+    name: 'Entity non-existence',
+    stepType: 'Then',
+    // 精確格式：應該不存在一個{entity}, with table:
+    regex: /^應該不存在一個[\u4e00-\u9fffa-zA-Z0-9_]+, with table:$/,
+    template: '應該不存在一個{entity}, with table:',
+    commonErrors: [
+      { pattern: /應該不存在一個.+,\s{2,}with table:/, fix: '移除多餘空格', suggestion: '逗號後只能有一個空格' },
+      { pattern: /應該不存在一個.+，with table:/, fix: '使用半形逗號', suggestion: '使用半形逗號 `,` 而非全形 `，`' },
+      { pattern: /應該不存在一個.+,with table:/, fix: '加入空格', suggestion: '逗號後需要一個空格' },
     ],
   },
 }
@@ -146,27 +188,49 @@ function extractStepContent(line: string): { keyword: string; content: string } 
 }
 
 function determineExpectedPattern(keyword: string, content: string): typeof ISA_PATTERNS[keyof typeof ISA_PATTERNS] | null {
-  // 根據 keyword 和 content 特徵判斷應該匹配哪個 pattern
-  if (keyword === 'Given' || (keyword === 'And' && content.startsWith('準備一個'))) {
+  // And/But 繼承前一步驟語義，根據 content 特徵判斷應匹配哪個 pattern
+  const isGivenLike = keyword === 'Given' || keyword === 'And' || keyword === 'But'
+  const isWhenLike  = keyword === 'When'  || keyword === 'And' || keyword === 'But'
+  const isThenLike  = keyword === 'Then'  || keyword === 'And' || keyword === 'But'
+
+  if (isGivenLike) {
     if (content.startsWith('準備一個')) {
       return ISA_PATTERNS.entitySetup
     }
+    if (content.startsWith('現在時間為')) {
+      return ISA_PATTERNS.timeControl
+    }
   }
 
-  if (keyword === 'When') {
+  if (isWhenLike) {
     if (content.includes('call table')) {
       return ISA_PATTERNS.actionCall
     }
   }
 
-  if (keyword === 'Then' || keyword === 'And') {
+  if (isThenLike) {
     if (content === '操作失敗' || content.trim() === '操作失敗') {
       return ISA_PATTERNS.operationFailure
     }
-    if (content.includes('成功') && content.includes('with table')) {
-      return ISA_PATTERNS.actionSuccess
+    // 必須先判斷「回應為」再判斷「回應」，因為「回應為」包含「回應」
+    if (content.includes('回應為') && content.includes('with JSON')) {
+      return ISA_PATTERNS.responseValidateJson
     }
-    if (content.startsWith('存在一個')) {
+    if (content.includes('回應') && content.includes('with table')) {
+      return ISA_PATTERNS.responseValidate
+    }
+    // 舊格式兼容偵測：{summary}成功, with table:
+    if (content.includes('成功') && content.includes('with table')) {
+      return ISA_PATTERNS.responseValidate
+    }
+    if (content.startsWith('應該存在一個')) {
+      return ISA_PATTERNS.entityValidate
+    }
+    if (content.startsWith('應該不存在一個')) {
+      return ISA_PATTERNS.entityNonExistence
+    }
+    // 舊格式兼容偵測：存在一個 / 不存在一個
+    if (content.startsWith('存在一個') || content.startsWith('不存在一個')) {
       return ISA_PATTERNS.entityValidate
     }
   }
@@ -189,7 +253,7 @@ function lintStep(lineNum: number, keyword: string, content: string): LintError 
       original: content,
       errorType: 'pattern_mismatch',
       message: '未支援的 ISA 步驟格式',
-      suggestion: '僅支援：準備一個{entity}, with table: / {summary}, call table: / {summary}成功, with table: / 操作失敗 / 存在一個{entity}, with table:',
+      suggestion: '僅支援：準備一個{entity}, with table: / 現在時間為 "..." / (No Actor|UID="$var") {summary}, call table: / {summary}(STATUS)回應, with table: / {summary}(STATUS)回應為, with JSON: / 操作失敗 / 應該存在一個{entity}, with table: / 應該不存在一個{entity}, with table:',
     }
   }
 
@@ -323,14 +387,14 @@ function generateSummary(results: LintResult[]): LintSummary {
 }
 
 function printHumanReadable(results: LintResult[], summary: LintSummary): void {
-  console.log('\n🔍 ISA Format Linter - 檢查 Gherkin 步驟是否符合 isa-config Regex\n')
+  console.log('\n🔍 ISA Format Linter (SpecFormula) - 檢查 Gherkin 步驟是否符合 isa.yml Regex\n')
 
   for (const result of results) {
     console.log(`📄 ${result.file}`)
     console.log(`   步驟統計: ${result.stats.validSteps}/${result.stats.totalSteps} 通過`)
 
     if (result.passed) {
-      console.log('   ✅ 所有步驟符合 ISA 格式\n')
+      console.log('   ✅ 所有步驟符合 ISA SpecFormula 格式\n')
     } else {
       console.log('   ❌ 發現格式問題:\n')
       for (const error of result.errors) {
@@ -352,7 +416,7 @@ function printHumanReadable(results: LintResult[], summary: LintSummary): void {
   console.log(`錯誤總數: ${summary.totalErrors}`)
 
   if (summary.passed) {
-    console.log('\n✅ ISA Format Lint 通過 - 所有步驟符合 isa-config Regex 規範')
+    console.log('\n✅ ISA Format Lint 通過 - 所有步驟符合 SpecFormula 標準')
   } else {
     console.log('\n❌ ISA Format Lint 失敗')
     console.log('   這些格式錯誤會導致 sdd.os 無法解析步驟')
@@ -413,7 +477,7 @@ if (!targetPath) {
   console.log('  --fix     嘗試自動修復格式問題（實驗性）')
   console.log('')
   console.log('說明:')
-  console.log('  此腳本確保生成的 .feature 檔案 100% 符合 isa-config 中定義的 Regex 規範')
+  console.log('  此腳本確保生成的 .feature 檔案 100% 符合 isa.yml 中定義的 Regex 規範（SpecFormula 標準）')
   console.log('  在 Formulation 階段結束前必須執行，否則 sdd.os 無法解析步驟')
   process.exit(1)
 }

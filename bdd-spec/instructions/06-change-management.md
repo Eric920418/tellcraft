@@ -39,7 +39,7 @@ description: |
 - `spec/data/schema.sql`
 - `spec/data/entity_to_table_mapping.yml`
 - `spec/actions/actions.yml`（若存在）
-- `isa_codegen.yml`（若存在）
+- `isa.yml`（若存在）
 
 ### 2. 分類變更類型
 
@@ -80,7 +80,7 @@ description: |
   Actions 層（actions.yml）：
   - <ActionName>: <預計變更說明>
 
-  ISA 配置（isa_codegen.yml）：
+  ISA 配置（isa.yml）：
   - <影響說明>（若有新步驟類型）
 
 不受影響的項目：（略）
@@ -107,7 +107,7 @@ ES 層 → 行為層 → 資料層 → Actions 層 → ISA 配置
    - 新增的 Aggregate 映射為新 Table
    - 或補充既有 Table 的屬性
 4. **Actions 層**：依照 `04-actions-design.md`，將新增的 Feature File 映射為 Action，更新 `actions.yml`。
-5. **ISA 配置**：若新增了新的步驟類型，更新 `isa_codegen.yml`。
+5. **ISA 配置**：若新增了新的步驟類型，更新 `isa.yml`。
 
 #### 修改需求
 
@@ -218,6 +218,6 @@ ES 層 → 行為層 → 資料層 → Actions 層 → ISA 配置
 | 行為層 | `03-formulation.md` 行為探索流程 | `spec/features/*.feature` |
 | 資料層 | `03-formulation.md` 實體推導流程 | `spec/data/schema.sql` + mapping |
 | Actions 層 | `04-actions-design.md` | `spec/actions/actions.yml` |
-| ISA 配置 | `05-isa-config.md` | `isa_codegen.yml` |
+| ISA 配置 | `05-isa-config.md` | `isa.yml` |
 | 格式規範 | `formulation-rules.md` | 四類規則、命名句型、ISA 格式 |
 

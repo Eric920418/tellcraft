@@ -1,9 +1,9 @@
-# Formulation：從規格文本產出規格模型（sdd.os ISA 格式 - Server Actions 版）
+# Formulation：從規格文本產出規格模型（sdd.os ISA 格式 - SpecFormula 標準）
 
 ## 目標
 從原始規格文本（或 ES 規格）中萃取並結構化為規格模型，包含：
 1. **資料模型 (Data Model)**：產出 SQL Schema 和 Entity 映射（供 Supabase 使用）
-2. **功能模型 (Functional Model)**：以 **sdd.os ISA Gherkin (Server Actions 版)** 描述功能規格
+2. **功能模型 (Functional Model)**：以 **sdd.os ISA SpecFormula 標準** 描述功能規格
 
 支援**三關注點分離**與**草稿批量生成**模式。
 
@@ -68,19 +68,45 @@
 
 ---
 
-## sdd.os ISA 格式說明（Server Actions 版）
+## sdd.os ISA 格式說明（SpecFormula 標準）
 
-本流程產出的規格採用 **sdd.os ISA** 格式，針對 **Next.js Server Actions + Supabase** 技術棧設計：
+本流程產出的規格採用 **sdd.os ISA SpecFormula 標準** 格式，針對 **Next.js Server Actions + Supabase** 技術棧設計：
 
 | 格式 | 說明 | 範例 |
 |------|------|------|
-| Action 呼叫 | `{summary}, call table:` | `建立訂單, call table:` |
-| 成功回應 | `{summary}成功, with table:` | `建立訂單成功, with table:` |
+| Action 呼叫 | `(No Actor\|UID="$var") {summary}, call table:` | `(No Actor) 建立訂單, call table:` |
+| 成功回應 | `{summary}(STATUS)回應, with table:` | `建立訂單(201)回應, with table:` |
+| 成功回應（JSON） | `{summary}(STATUS)回應為, with JSON:` | `查詢訂單(200)回應為, with JSON:` |
 | 操作失敗 | `操作失敗` | 錯誤情境時使用 |
-| Entity 驗證 | `存在一個{entity}, with table:` | `存在一個訂單, with table:` |
+| Entity 存在驗證 | `應該存在一個{entity}, with table:` | `應該存在一個訂單, with table:` |
+| Entity 不存在驗證 | `應該不存在一個{entity}, with table:` | `應該不存在一個訂單, with table:` |
 | 資料準備 | `準備一個{entity}, with table:` | `準備一個商品, with table:` |
+| 時間控制 | `現在時間為 "{datetime}"` | `現在時間為 "2026-01-15T10:00:00Z"` |
 
-**核心價值**：產出的 Gherkin 可直接透過 sdd.os 生成測試程式碼（呼叫 Server Actions + Supabase 驗證）。
+### VAR 系統
+
+SpecFormula 使用三種變數前綴取代硬編碼值：
+
+| 前綴 | 名稱 | 用途 | 範例 |
+|------|------|------|------|
+| `>` | Context Key | Given 中宣告上下文鍵 | `>TestUser.id` |
+| `$` | Variable | 引用已宣告的值 | `$TestUser.id` |
+| `<` | Execution Key | 捕捉執行結果 | `<userId` |
+
+**規則**：
+- `>ContextName.field` 在 Given 宣告時使用（DataTable header），對應值用 `<executionKey` 捕捉
+- `$ContextName.field` 在 When/Then 引用之前宣告的值
+- `$notnull` 表示「非空即可」，不檢查具體值
+
+### Feature 註解（擴充）
+
+```gherkin
+# Action: actionFunctionName
+# [POST] /api/action-path
+# Summary: 功能名稱
+```
+
+**核心價值**：產出的 Gherkin 可直接透過 sdd.os SpecFormula 生成測試程式碼（呼叫 Server Actions + Supabase 驗證）。
 
 ---
 
@@ -198,17 +224,21 @@
 
 ---
 
-## sdd.os ISA Feature File 格式範本（Server Actions 版，四類規則）
+## sdd.os ISA Feature File 格式範本（SpecFormula 標準，四類規則）
 
 ```gherkin
 # Action: actionFunctionName
+# [POST] /api/action-path
 # Summary: 功能名稱
 Feature: 功能名稱
 
   Background:
-    Given 準備一個{entity}, with table:
-      | column1 | column2 |
-      | value1  | value2  |
+    Given 準備一個{entity1}, with table:
+      | >Entity1.id | column2 |
+      | <entity1Id  | value2  |
+    And 準備一個{entity2}, with table:
+      | >Entity2.id | column2     |
+      | <entity2Id  | $Entity1.id |
 
   # ========== 前置條件 ==========
 
@@ -217,9 +247,9 @@ Feature: 功能名稱
   #------------------------------------------------------------
 
     Example: 例子名稱
-      When {功能名稱}, call table:
-        | param1 | param2 |
-        | value1 | value2 |
+      When (UID="$Entity1.id") {功能名稱}, call table:
+        | param1       | param2 |
+        | $Entity2.id  | value2 |
       Then 操作失敗
 
   #------------------------------------------------------------
@@ -227,7 +257,7 @@ Feature: 功能名稱
   #------------------------------------------------------------
 
     Example: 例子名稱
-      When {功能名稱}, call table:
+      When (No Actor) {功能名稱}, call table:
         | param1 | param2 |
         | value1 | value2 |
       Then 操作失敗
@@ -239,15 +269,15 @@ Feature: 功能名稱
   #------------------------------------------------------------
 
     Example: 例子名稱
-      When {功能名稱}, call table:
-        | param1 | param2 |
-        | value1 | value2 |
-      Then {功能名稱}成功, with table:
-        | field1 | field2 |
-        | value1 | value2 |
-      And 存在一個{entity}, with table:
-        | column1 | column2 |
-        | value1  | value2  |
+      When (UID="$Entity1.id") {功能名稱}, call table:
+        | param1       | param2 |
+        | $Entity2.id  | value2 |
+      Then {功能名稱}(201)回應, with table:
+        | >result.field1 | field2 |
+        | <resultField1  | value2 |
+      And 應該存在一個{entity}, with table:
+        | entityId     | column2 |
+        | $Entity1.id  | value2  |
 ```
 
 ### 完整範例
@@ -267,10 +297,10 @@ Feature: 功能名稱
 - **嚴格命名句型**：`<四類前綴> - <主詞> 必須/應 <單一條件>`
 - **Given 設定方式選擇**：簡單 Invariant 用選擇 A，複雜用選擇 B
 
-### sdd.os ISA 特有原則（Server Actions 版）
+### sdd.os ISA 特有原則（SpecFormula 標準）
 - **Action 綁定**：Feature 必須標註對應的 Server Action 函數名稱
 - **summary 一致**：Feature 名稱必須與 actions.yml summary 一致
-- **格式統一**：使用 sdd.os ISA 的固定語法格式（Server Actions 版）
+- **格式統一**：使用 sdd.os ISA 的固定語法格式（SpecFormula 標準）
 
 ---
 
@@ -320,7 +350,7 @@ spec/
 - **前置階段**：
   - `00-event-storming.md`（可選）已產出 `${ES_SPEC_PATH}`
   - `01-discovery.md` 和 `02-clarify.md` 已完成規格釐清
-- **本階段角色**：規格表達階段，產出 sdd.os ISA 格式的規格模型（Server Actions 版）
+- **本階段角色**：規格表達階段，產出 sdd.os ISA 格式的規格模型（SpecFormula 標準）
 - **後續階段**：
   1. `04-actions-design.md` - 從 Feature Files 產出 Server Actions 規格
   2. `05-isa-config.md` - 產出 sdd.os 的 ISA 配置檔案（Server Actions + Supabase）
@@ -344,18 +374,20 @@ spec/
 - [ ] 每個屬性都有 COMMENT 說明
 - [ ] 限制條件已用 CHECK constraint 表達
 
-### 功能模型（sdd.os ISA - Server Actions 版，四類規則）
+### 功能模型（sdd.os ISA SpecFormula 標準，四類規則）
 - [ ] 每個 Feature 檔案開頭有 `# Action: functionName` 註解
+- [ ] 每個 Feature 檔案開頭有 `# [METHOD] /path` 註解
 - [ ] 每個 Feature 檔案開頭有 `# Summary:` 註解
 - [ ] 每個 Rule 都標註四類之一（前置（狀態）/前置（參數）/後置（回應）/後置（狀態））
 - [ ] 每個 Rule 命名遵循嚴格句型
 - [ ] 至少有一條前置（參數）Rule
-- [ ] 每個 When 使用 `{summary}, call table:` 格式
-- [ ] 成功 Then 使用 `{summary}成功, with table:` 格式
+- [ ] 每個 When 使用 `(No Actor|UID="$var") {summary}, call table:` 格式
+- [ ] 成功 Then 使用 `{summary}(STATUS)回應, with table:` 格式
 - [ ] 失敗 Then 使用 `操作失敗`
-- [ ] Entity 驗證使用 `存在一個{entity}, with table:` 格式
+- [ ] Entity 驗證使用 `應該存在一個{entity}, with table:` 格式
 - [ ] Entity 名稱與 `entity_to_table_mapping.yml` 一致
 - [ ] Given 設定方式選擇合理
+- [ ] DataTable 使用 VAR 系統（`>contextKey` / `$variable` / `<executionKey`）取代硬編碼 UUID
 
 ### 知識地圖
 - [ ] 所有行為項目為 clear

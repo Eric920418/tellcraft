@@ -154,13 +154,16 @@ export async function executeChange(
 ## 變更影響分析
 ${JSON.stringify(impact, null, 2)}
 
-## sdd.os ISA 格式規範
-- 檔案開頭：\`# Action: actionName\` + \`# Summary: xxx\`
-- Given：\`準備一個{entity}, with table:\`
-- When：\`{summary}, call table:\`
-- Then 成功：\`{summary}成功, with table:\`
+## sdd.os ISA 格式規範（SpecFormula 標準）
+- 檔案開頭：\`# Action: actionName\` + \`# [METHOD] /path\` + \`# Summary: xxx\`
+- Given 資料準備：\`準備一個{entity}, with table:\`（DataTable 使用 VAR 系統）
+- Given 時間控制：\`現在時間為 "{datetime}"\`
+- When：\`(No Actor|UID="$var") {summary}, call table:\`（必須有 Actor 前綴）
+- Then 成功：\`{summary}(STATUS)回應, with table:\`（STATUS 為 HTTP 狀態碼）
 - Then 失敗：\`操作失敗\`
-- Entity 驗證：\`存在一個{entity}, with table:\`
+- Entity 驗證：\`應該存在一個{entity}, with table:\`
+- Entity 不存在：\`應該不存在一個{entity}, with table:\`
+- VAR 系統：\`>contextKey\` 宣告、\`$variable\` 引用、\`<executionKey\` 捕捉
 - Rule 四類前綴：前置（狀態）/前置（參數）/後置（回應）/後置（狀態）
 
 ## 無腦補原則

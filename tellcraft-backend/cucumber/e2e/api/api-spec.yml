@@ -1,0 +1,71 @@
+openapi: "3.0.0"
+info:
+  title: SpecFormula E2E Test API
+  version: "1.0.0"
+
+paths:
+  /api/notes:
+    post:
+      summary: 建立筆記
+      operationId: createNote
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                title:
+                  type: string
+                content:
+                  type: string
+                author:
+                  type: string
+      responses:
+        "201":
+          description: 筆記建立成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id:
+                    type: string
+                    format: uuid
+                  title:
+                    type: string
+                  status:
+                    type: string
+
+  /api/notes/{id}:
+    get:
+      summary: 取得筆記
+      operationId: getNote
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: 筆記詳情
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id:
+                    type: string
+                    format: uuid
+                  title:
+                    type: string
+                  content:
+                    type: string
+                  author:
+                    type: string
+                  status:
+                    type: string
+        "404":
+          description: 筆記不存在

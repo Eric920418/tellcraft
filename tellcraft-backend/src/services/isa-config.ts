@@ -14,7 +14,7 @@ export interface IsaConfigInput {
 }
 
 interface StepPattern {
-  type: 'entity_setup' | 'action_call' | 'action_success' | 'operation_failure' | 'entity_validate'
+  type: 'entity_setup' | 'time_control' | 'action_call' | 'response_validate' | 'response_validate_json' | 'operation_failure' | 'entity_validate' | 'entity_non_existence'
   count: number
   examples: string[] // 前幾個匹配的原始行（用於 debug）
 }
@@ -23,44 +23,41 @@ interface IsaInstruction {
   name: string
   format: string
   step_type: string
-  executor: {
-    type: 'plugin' | 'skip'
-    plugin_python_path?: string
-  }
-  linters?: Array<{
-    python_plugin_path: string
-    config: Record<string, string>
-  }>
+  instruction_type: string
   constraints?: string[]
   subpackage: string
   situation: string
 }
 
 // ============================================================
-// 5 種步驟模式的 Regex
+// 8 種步驟模式的 Regex（SpecFormula 標準）
 // 與 lint-gherkin-format.ts 和 05-isa-config.md 完全一致
 // ============================================================
 
 const STEP_REGEXES = {
-  entity_setup: /^\s*(?:Given|And)\s+準備一個([\u4e00-\u9fffa-zA-Z]+), with table:\s*$/,
-  action_call: /^\s*When\s+(.+), call table:\s*$/,
-  action_success: /^\s*(?:Then|And)\s+(.+)成功,?\s*with table:\s*$/,
+  entity_setup: /^\s*(?:Given|And)\s+準備一個([\u4e00-\u9fffa-zA-Z0-9_]+), with table:\s*$/,
+  time_control: /^\s*(?:Given|And)\s+現在時間為 "([^"]+)"\s*$/,
+  action_call: /^\s*When\s+\((?:No Actor|UID="([^"]+)")\) (.+), call table:\s*$/,
+  response_validate: /^\s*(?:Then|And)\s+(.+)\((\d{3})\)回應,?\s*with table:\s*$/,
+  response_validate_json: /^\s*(?:Then|And)\s+(.+)\((\d{3})\)回應為,?\s*with JSON:\s*$/,
   operation_failure: /^\s*(?:Then|And)\s+操作失敗\s*$/,
-  entity_validate: /^\s*(?:Then|And)\s+存在一個([\u4e00-\u9fffa-zA-Z]+), with table:\s*$/,
+  entity_validate: /^\s*(?:Then|And)\s+應該存在一個([\u4e00-\u9fffa-zA-Z0-9_]+), with table:\s*$/,
+  entity_non_existence: /^\s*(?:Then|And)\s+應該不存在一個([\u4e00-\u9fffa-zA-Z0-9_]+), with table:\s*$/,
 }
 
 // ============================================================
-// Executor 路徑模板（使用 <sdd_os_path> 佔位符）
+// Instruction Type 映射（SpecFormula 標準）
 // ============================================================
 
-const EXECUTOR_PATHS = {
-  supabase_setup: '<sdd_os_path>/src/sdd_os/features/executors/typescript/backend/setup/codegen/candidates/supabase_setup/executor.py',
-  cucumberjs_server_action: '<sdd_os_path>/src/sdd_os/features/executors/typescript/backend/action_call/codegen/candidates/cucumberjs_server_action/executor.py',
-  supabase_entity: '<sdd_os_path>/src/sdd_os/features/executors/typescript/backend/validator/codegen/candidates/supabase_entity/executor.py',
-}
-
-const LINTER_PATHS = {
-  action_response_validation: '<sdd_os_path>/src/isa_linters/plugins/extensions/action_response_validation/action_response_validation_linter.py',
+const INSTRUCTION_TYPES = {
+  entity_setup: 'supabase_setup',
+  time_control: 'time_control',
+  action_call: 'cucumberjs_server_action',
+  response_validate: 'response_validate',
+  response_validate_json: 'response_validate_json',
+  operation_failure: 'skip',
+  entity_validate: 'supabase_entity',
+  entity_non_existence: 'supabase_entity_non_existence',
 }
 
 // ============================================================
@@ -124,12 +121,14 @@ function deriveConstraints(
   for (const feature of features) {
     const lines = feature.content.split('\n')
 
-    // 掃描 entity 名稱
+    // 掃描 entity 名稱（SpecFormula 標準）
     for (const line of lines) {
-      const setupMatch = line.match(/準備一個([\u4e00-\u9fffa-zA-Z]+),/)
+      const setupMatch = line.match(/準備一個([\u4e00-\u9fffa-zA-Z0-9_]+),/)
       if (setupMatch) entityNames.add(setupMatch[1])
-      const validateMatch = line.match(/存在一個([\u4e00-\u9fffa-zA-Z]+),/)
+      const validateMatch = line.match(/應該存在一個([\u4e00-\u9fffa-zA-Z0-9_]+),/)
       if (validateMatch) entityNames.add(validateMatch[1])
+      const nonExistMatch = line.match(/應該不存在一個([\u4e00-\u9fffa-zA-Z0-9_]+),/)
+      if (nonExistMatch) entityNames.add(nonExistMatch[1])
     }
 
     // 掃描 DataTable headers（| col1 | col2 | 格式的第一行）
@@ -189,8 +188,9 @@ function buildInstructions(detectedPatterns: Map<string, StepPattern>, derived?:
     const entityConstraints = [
       '<entity> must be a valid entity defined in entity_to_table_mapping.yml',
       'All column headers in the DataTable must be valid schema fields',
+      'Context Keys (>) must follow >ContextName.field format',
+      'Execution Keys (<) capture generated values for later reference',
     ]
-    // 動態列出實際使用的 entity 和 table
     if (derived && derived.entityNames.length > 0) {
       entityConstraints.push(`Valid entities: ${derived.entityNames.join(', ')}`)
     }
@@ -206,19 +206,28 @@ function buildInstructions(detectedPatterns: Map<string, StepPattern>, derived?:
     }
     instructions.push({
       name: 'Entity setup',
-      format: '^準備一個(?P<entity>[\\u4e00-\\u9fffa-zA-Z]+), with table:$',
+      format: '^準備一個(?P<entity>[\\u4e00-\\u9fffa-zA-Z0-9_]+), with table:$',
       step_type: 'Given',
-      executor: {
-        type: 'plugin',
-        plugin_python_path: EXECUTOR_PATHS.supabase_setup,
-      },
+      instruction_type: INSTRUCTION_TYPES.entity_setup,
       constraints: entityConstraints,
       subpackage: 'given',
       situation: 'to prepare test data in the database before Server Action calls',
     })
   }
 
-  // 2. Action Call (When)
+  // 2. Time Control (Given)
+  if (detectedPatterns.get('time_control')!.count > 0) {
+    instructions.push({
+      name: 'Time control',
+      format: '^現在時間為 "(?P<datetime>[^"]+)"$',
+      step_type: 'Given',
+      instruction_type: INSTRUCTION_TYPES.time_control,
+      subpackage: 'given',
+      situation: 'to set the system time for time-dependent test scenarios',
+    })
+  }
+
+  // 3. Action Call (When) — with Actor prefix
   if (detectedPatterns.get('action_call')!.count > 0) {
     const actionConstraints: string[] = []
     if (derived && derived.tableNames.length > 0) {
@@ -226,58 +235,58 @@ function buildInstructions(detectedPatterns: Map<string, StepPattern>, derived?:
     }
     instructions.push({
       name: 'Action call',
-      format: '^(?P<summary>.+?), call table:$',
+      format: '^\\((?:No Actor|UID="(?P<actor>[^"]+)")\\) (?P<summary>.+?), call table:$',
       step_type: 'When',
-      executor: {
-        type: 'plugin',
-        plugin_python_path: EXECUTOR_PATHS.cucumberjs_server_action,
-      },
+      instruction_type: INSTRUCTION_TYPES.action_call,
       ...(actionConstraints.length > 0 ? { constraints: actionConstraints } : {}),
       subpackage: 'action',
-      situation: 'to invoke the Server Action with the given parameters',
+      situation: 'to invoke the Server Action with the given parameters and optional actor identity',
     })
   }
 
-  // 3. Action Success Validation (Then)
-  if (detectedPatterns.get('action_success')!.count > 0) {
+  // 4. Response Validation (Then) — with status code
+  if (detectedPatterns.get('response_validate')!.count > 0) {
     instructions.push({
-      name: 'Action success validation',
-      format: '^(?P<summary>.+?)成功,?\\s*with table:$',
+      name: 'Response validation',
+      format: '^(?P<summary>.+?)\\((?P<status>\\d{3})\\)回應,?\\s*with table:$',
       step_type: 'Then',
-      executor: {
-        type: 'skip',
-      },
-      linters: [{
-        python_plugin_path: LINTER_PATHS.action_response_validation,
-        config: {
-          actions_spec_path: 'spec/actions',
-        },
-      }],
+      instruction_type: INSTRUCTION_TYPES.response_validate,
       subpackage: 'then',
-      situation: 'to validate the Server Action success response using table',
+      situation: 'to validate the Server Action success response status code and table data',
     })
   }
 
-  // 4. Operation Failure (Then)
+  // 5. Response Validation JSON (Then)
+  if (detectedPatterns.get('response_validate_json')!.count > 0) {
+    instructions.push({
+      name: 'Response validation JSON',
+      format: '^(?P<summary>.+?)\\((?P<status>\\d{3})\\)回應為,?\\s*with JSON:$',
+      step_type: 'Then',
+      instruction_type: INSTRUCTION_TYPES.response_validate_json,
+      subpackage: 'then',
+      situation: 'to validate the Server Action success response status code and JSON body',
+    })
+  }
+
+  // 6. Operation Failure (Then)
   if (detectedPatterns.get('operation_failure')!.count > 0) {
     instructions.push({
       name: 'Operation failure',
       format: '^操作失敗$',
       step_type: 'Then',
-      executor: {
-        type: 'skip',
-      },
+      instruction_type: INSTRUCTION_TYPES.operation_failure,
       subpackage: 'then',
       situation: 'to validate that the Server Action returned an error',
     })
   }
 
-  // 5. Entity Validate (Then)
+  // 7. Entity Validate (Then) — 應該存在一個
   if (detectedPatterns.get('entity_validate')!.count > 0) {
     const validateConstraints = [
       '<entity> must be a valid entity defined in entity_to_table_mapping.yml',
       'the entity\'s properties defined in the DataTable must match the entity spec',
       'All column headers in the DataTable must be valid schema structure paths',
+      'Variable references ($) must resolve to previously declared context values',
     ]
     if (derived && derived.entityNames.length > 0) {
       validateConstraints.push(`Valid entities: ${derived.entityNames.join(', ')}`)
@@ -287,15 +296,27 @@ function buildInstructions(detectedPatterns: Map<string, StepPattern>, derived?:
     }
     instructions.push({
       name: 'Entity validate',
-      format: '^存在一個(?P<entity>[\\u4e00-\\u9fffa-zA-Z]+), with table:$',
+      format: '^應該存在一個(?P<entity>[\\u4e00-\\u9fffa-zA-Z0-9_]+), with table:$',
       step_type: 'Then',
-      executor: {
-        type: 'plugin',
-        plugin_python_path: EXECUTOR_PATHS.supabase_entity,
-      },
+      instruction_type: INSTRUCTION_TYPES.entity_validate,
       constraints: validateConstraints,
       subpackage: 'then',
-      situation: 'to validate the entity in the database with the given parameters',
+      situation: 'to validate the entity exists in the database with the given parameters',
+    })
+  }
+
+  // 8. Entity Non-existence (Then) — 應該不存在一個
+  if (detectedPatterns.get('entity_non_existence')!.count > 0) {
+    instructions.push({
+      name: 'Entity non-existence',
+      format: '^應該不存在一個(?P<entity>[\\u4e00-\\u9fffa-zA-Z0-9_]+), with table:$',
+      step_type: 'Then',
+      instruction_type: INSTRUCTION_TYPES.entity_non_existence,
+      constraints: [
+        '<entity> must be a valid entity defined in entity_to_table_mapping.yml',
+      ],
+      subpackage: 'then',
+      situation: 'to validate the entity does not exist in the database',
     })
   }
 
@@ -398,12 +419,26 @@ export function generateIsaConfig(
       return { success: false, error: '沒有偵測到任何 ISA 步驟模式' }
     }
 
-    // Step 3: 組裝 YAML
+    // Step 3: 組裝 YAML（SpecFormula 標準）
     const configObj = {
+      config: {
+        api: {
+          base_url: '${API_BASE_URL}',
+          framework: 'nextjs_server_actions',
+        },
+        data: {
+          database: 'supabase',
+          schema_path: 'spec/data/schema.sql',
+          entity_mapping_path: 'spec/data/entity_to_table_mapping.yml',
+        },
+        actions: {
+          spec_path: 'spec/actions/actions.yml',
+        },
+      },
       instructions,
     }
 
-    const header = `# isa_codegen.yml - sdd.os ISA 配置檔案
+    const header = `# isa.yml - sdd.os ISA 配置檔案（SpecFormula 標準）
 # 自動生成，基於 ${features.length} 個 Feature Files
 # 專案技術棧：Next.js Server Actions + Supabase + PostgreSQL
 `

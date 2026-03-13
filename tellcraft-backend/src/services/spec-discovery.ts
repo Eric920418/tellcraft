@@ -182,17 +182,22 @@ export async function runSpecDiscovery(
 ### Given 步驟格式
 - 資料準備：\`準備一個{entity}, with table:\`
 
-### When 步驟格式
-- Action 呼叫：\`{summary}, call table:\`
+### When 步驟格式（SpecFormula 標準）
+- Action 呼叫：\`(No Actor|UID="$var") {summary}, call table:\`（必須有 Actor 前綴）
 
 ### Then 步驟格式
-- 成功回應：\`{summary}成功, with table:\`
+- 成功回應：\`{summary}(STATUS)回應, with table:\`（STATUS 為 HTTP 狀態碼）
 - 操作失敗：\`操作失敗\`
-- Entity 驗證：\`存在一個{entity}, with table:\`
+- Entity 驗證：\`應該存在一個{entity}, with table:\`
+- Entity 不存在：\`應該不存在一個{entity}, with table:\`
+
+### VAR 系統
+- \`>ContextName.field\`：宣告 Context Key
+- \`<executionKey\`：捕獲執行時值
+- \`$ContextName.field\`：引用先前宣告的值
 
 ### 必要元素
-- \`# Action: actionName\` 標頭（不是舊的 \`@Action()\`）
-- \`# Summary: xxx\` 註解
+- \`# Action: actionName\` + \`# [METHOD] /path\` + \`# Summary: xxx\` 標頭
 - 每條 Rule 標註四類之一（前置（狀態）/前置（參數）/後置（回應）/後置（狀態））
 
 ## 輸出規則

@@ -1,17 +1,17 @@
-# ISA Config：產出 sdd.os ISA 配置檔案（Server Actions 版）
+# ISA Config：產出 sdd.os ISA 配置檔案（SpecFormula 標準）
 
 ---
-description: 根據 sdd.os ISA Feature Files（Server Actions 版）和專案架構，產出 ISA 配置檔案（isa_codegen.yml），讓 sdd.os 可自動生成測試程式碼。
+description: 根據 sdd.os ISA Feature Files（SpecFormula 標準）和專案架構，產出 ISA 配置檔案（isa.yml），讓 sdd.os 可自動生成測試程式碼。
 ---
 
 ## 目標
 
-從 `spec/features/` 資料夾中的 sdd.os ISA Feature Files 和專案設定，產出 `isa_codegen.yml` 配置檔案，使 sdd.os 工具可以：
+從 `spec/features/` 資料夾中的 sdd.os ISA Feature Files 和專案設定，產出 `isa.yml` 配置檔案，使 sdd.os 工具可以：
 1. 解析 Feature Files 中的步驟定義
 2. 生成對應的測試程式碼（Cucumber.js + Server Actions + Supabase）
 3. 執行自動化功能測試
 
-**核心目標：建立 sdd.os 與 Next.js Server Actions + Supabase 專案的整合配置。**
+**核心目標：建立 sdd.os SpecFormula 與 Next.js Server Actions + Supabase 專案的整合配置。**
 
 ---
 
@@ -20,7 +20,7 @@ description: 根據 sdd.os ISA Feature Files（Server Actions 版）和專案架
 本階段需要以下檔案已存在：
 - `spec/data/schema.sql` - SQL DDL 定義
 - `spec/data/entity_to_table_mapping.yml` - Entity 與表映射
-- `spec/features/*.feature` - sdd.os ISA Gherkin 格式（Server Actions 版）
+- `spec/features/*.feature` - sdd.os ISA SpecFormula 標準格式
 - `spec/actions/actions.yml` - Server Actions 規格
 
 ---
@@ -35,42 +35,53 @@ description: 根據 sdd.os ISA Feature Files（Server Actions 版）和專案架
 
 | 步驟模式 | 正規表示式 | 說明 |
 |---------|-----------|------|
-| Action 呼叫 | `^(?P<summary>.+?), call table:$` | When 步驟，呼叫 Server Action |
-| 成功回應驗證 | `^(?P<summary>.+?)成功,?\s*with table:$` | Then 步驟，驗證成功回應 |
+| Action 呼叫 | `^\((?:No Actor\|UID="[^"]+")\) (?P<summary>.+?), call table:$` | When 步驟，帶 Actor 前綴呼叫 Server Action |
+| 成功回應驗證 | `^(?P<summary>.+?)\((?P<status>\d{3})\)回應,?\s*with table:$` | Then 步驟，驗證成功回應（DataTable） |
+| 成功回應 JSON | `^(?P<summary>.+?)\((?P<status>\d{3})\)回應為,?\s*with JSON:$` | Then 步驟，驗證成功回應（JSON） |
 | 操作失敗 | `^操作失敗$` | Then 步驟，驗證操作失敗 |
-| Entity 驗證 | `^存在一個(?P<entity>[\u4e00-\u9fffa-zA-Z]+), with table:$` | Then 步驟，驗證資料庫狀態 |
-| 資料準備 | `^準備一個(?P<entity>[\u4e00-\u9fffa-zA-Z]+), with table:$` | Given 步驟，準備測試資料 |
+| Entity 存在驗證 | `^應該存在一個(?P<entity>[\u4e00-\u9fffa-zA-Z0-9_]+), with table:$` | Then 步驟，驗證 Entity 存在 |
+| Entity 不存在驗證 | `^應該不存在一個(?P<entity>[\u4e00-\u9fffa-zA-Z0-9_]+), with table:$` | Then 步驟，驗證 Entity 不存在 |
+| 資料準備 | `^準備一個(?P<entity>[\u4e00-\u9fffa-zA-Z0-9_]+), with table:$` | Given 步驟，準備測試資料 |
+| 時間控制 | `^現在時間為 "(?P<datetime>[^"]+)"$` | Given 步驟，設定系統時間 |
 
-#### 1.2 對應 Executor 類型
+#### 1.2 對應 Instruction 類型
 
-根據專案技術棧（Next.js Server Actions + Supabase），選擇適當的 Executor：
+根據專案技術棧（Next.js Server Actions + Supabase），選擇適當的 instruction：
 
-| 步驟模式 | Executor 類型 | 說明 |
-|---------|--------------|------|
-| Action 呼叫 | `cucumberjs_server_action` | 直接呼叫 Server Action 函數 |
-| 成功回應驗證 | `skip` + Linter | 由 Action 呼叫步驟處理，使用 Linter 驗證格式 |
-| 操作失敗 | `skip` | 由 Action 呼叫步驟處理 |
-| Entity 驗證 | `supabase_entity` | 使用 Supabase Client 查詢資料庫 |
+| 步驟模式 | instruction_type | 說明 |
+|---------|-----------------|------|
 | 資料準備 | `supabase_setup` | 使用 Supabase Client 插入測試資料 |
+| 時間控制 | `time_control` | Mock 系統時間 |
+| Action 呼叫 | `cucumberjs_server_action` | 直接呼叫 Server Action 函數 |
+| 成功回應驗證 | `response_validate` | 驗證回應 DataTable |
+| 成功回應 JSON | `response_validate_json` | 驗證回應 JSON |
+| 操作失敗 | `skip` | 由 Action 呼叫步驟處理 |
+| Entity 存在驗證 | `supabase_entity` | 使用 Supabase Client 查詢資料庫 |
+| Entity 不存在驗證 | `supabase_entity_non_existence` | 驗證 Entity 不存在 |
 
 ---
 
-### 階段 2：產出 isa_codegen.yml
+### 階段 2：產出 isa.yml
 
-#### 2.1 基本結構
+#### 2.1 基本結構（SpecFormula 標準）
 
 ```yaml
+config:
+  api:
+    base_url: "${API_BASE_URL}"
+    framework: nextjs_server_actions
+  data:
+    database: supabase
+    schema_path: spec/data/schema.sql
+    entity_mapping_path: spec/data/entity_to_table_mapping.yml
+  actions:
+    spec_path: spec/actions/actions.yml
+
 instructions:
   - name: <指令名稱>
     format: <正規表示式>
-    step_type: <Given/When/Then>（可選）
-    executor:
-      type: <plugin/skip>
-      plugin_python_path: <Executor 路徑>（若 type=plugin）
-    linters:（可選）
-      - python_plugin_path: <Linter 路徑>
-        config:
-          <配置項>
+    step_type: <Given/When/Then>
+    instruction_type: <指令類型>
     constraints:（可選）
       - <限制條件>
     subpackage: <子套件名稱>
@@ -80,8 +91,19 @@ instructions:
 #### 2.2 完整配置範本（Next.js Server Actions + Supabase）
 
 ```yaml
-# isa_codegen.yml - sdd.os ISA 配置檔案
+# isa.yml - sdd.os ISA 配置檔案（SpecFormula 標準）
 # 專案技術棧：Next.js Server Actions + Supabase + PostgreSQL
+
+config:
+  api:
+    base_url: "${API_BASE_URL}"
+    framework: nextjs_server_actions
+  data:
+    database: supabase
+    schema_path: spec/data/schema.sql
+    entity_mapping_path: spec/data/entity_to_table_mapping.yml
+  actions:
+    spec_path: spec/actions/actions.yml
 
 instructions:
   # ============================================
@@ -89,51 +111,57 @@ instructions:
   # ============================================
 
   - name: Entity setup
-    format: ^準備一個(?P<entity>[\u4e00-\u9fffa-zA-Z]+), with table:$
+    format: ^準備一個(?P<entity>[\u4e00-\u9fffa-zA-Z0-9_]+), with table:$
     step_type: Given
-    executor:
-      type: plugin
-      plugin_python_path: <sdd_os_path>/src/sdd_os/features/executors/typescript/backend/setup/codegen/candidates/supabase_setup/executor.py
+    instruction_type: supabase_setup
     constraints:
       - <entity> must be a valid entity defined in entity_to_table_mapping.yml
       - All column headers in the DataTable must be valid schema fields
+      - Context Keys (>) must follow >ContextName.field format
+      - Execution Keys (<) capture generated values for later reference
     subpackage: given
     situation: to prepare test data in the database before Server Action calls
+
+  - name: Time control
+    format: ^現在時間為 "(?P<datetime>[^"]+)"$
+    step_type: Given
+    instruction_type: time_control
+    subpackage: given
+    situation: to set the system time for time-dependent test scenarios
 
   # ============================================
   # When 步驟 - Server Action 呼叫
   # ============================================
 
   - name: Action call
-    format: ^(?P<summary>.+?), call table:$
+    format: ^\((?:No Actor|UID="(?P<actor>[^"]+)")\) (?P<summary>.+?), call table:$
     step_type: When
-    executor:
-      type: plugin
-      plugin_python_path: <sdd_os_path>/src/sdd_os/features/executors/typescript/backend/action_call/codegen/candidates/cucumberjs_server_action/executor.py
+    instruction_type: cucumberjs_server_action
     subpackage: action
-    situation: to invoke the Server Action with the given parameters
+    situation: to invoke the Server Action with the given parameters and optional actor identity
 
   # ============================================
   # Then 步驟 - 回應驗證
   # ============================================
 
-  - name: Action success validation
-    format: ^(?P<summary>.+?)成功,?\s*with table:$
+  - name: Response validation
+    format: ^(?P<summary>.+?)\((?P<status>\d{3})\)回應,?\s*with table:$
     step_type: Then
-    executor:
-      type: skip
-    linters:
-      - python_plugin_path: <sdd_os_path>/src/isa_linters/plugins/extensions/action_response_validation/action_response_validation_linter.py
-        config:
-          actions_spec_path: spec/actions
+    instruction_type: response_validate
     subpackage: then
-    situation: to validate the Server Action success response using table
+    situation: to validate the Server Action success response status code and table data
+
+  - name: Response validation JSON
+    format: ^(?P<summary>.+?)\((?P<status>\d{3})\)回應為,?\s*with JSON:$
+    step_type: Then
+    instruction_type: response_validate_json
+    subpackage: then
+    situation: to validate the Server Action success response status code and JSON body
 
   - name: Operation failure
     format: ^操作失敗$
     step_type: Then
-    executor:
-      type: skip
+    instruction_type: skip
     subpackage: then
     situation: to validate that the Server Action returned an error
 
@@ -142,29 +170,38 @@ instructions:
   # ============================================
 
   - name: Entity validate
-    format: ^存在一個(?P<entity>[\u4e00-\u9fffa-zA-Z]+), with table:$
+    format: ^應該存在一個(?P<entity>[\u4e00-\u9fffa-zA-Z0-9_]+), with table:$
     step_type: Then
-    executor:
-      type: plugin
-      plugin_python_path: <sdd_os_path>/src/sdd_os/features/executors/typescript/backend/validator/codegen/candidates/supabase_entity/executor.py
+    instruction_type: supabase_entity
     constraints:
       - <entity> must be a valid entity defined in entity_to_table_mapping.yml
       - the entity's properties defined in the DataTable must match the entity spec
       - All column headers in the DataTable must be valid schema structure paths
+      - Variable references ($) must resolve to previously declared context values
     subpackage: then
-    situation: to validate the entity in the database with the given parameters
+    situation: to validate the entity exists in the database with the given parameters
+
+  - name: Entity non-existence
+    format: ^應該不存在一個(?P<entity>[\u4e00-\u9fffa-zA-Z0-9_]+), with table:$
+    step_type: Then
+    instruction_type: supabase_entity_non_existence
+    constraints:
+      - <entity> must be a valid entity defined in entity_to_table_mapping.yml
+    subpackage: then
+    situation: to validate the entity does not exist in the database
 ```
 
 #### 2.3 配置項說明
 
 | 欄位 | 說明 | 範例 |
 |------|------|------|
+| `config.api` | API 配置（base URL、框架） | `framework: nextjs_server_actions` |
+| `config.data` | 資料庫配置（類型、schema 路徑） | `database: supabase` |
+| `config.actions` | Actions 規格路徑 | `spec_path: spec/actions/actions.yml` |
 | `name` | 指令名稱，描述此步驟的用途 | `Action call` |
-| `format` | 正規表示式，用於匹配步驟文字 | `^(?P<summary>.+?), call table:$` |
+| `format` | 正規表示式，用於匹配步驟文字 | `^\((?:No Actor\|UID="...")\) ...` |
 | `step_type` | 步驟類型（Given/When/Then） | `When` |
-| `executor.type` | Executor 類型（plugin/skip） | `plugin` |
-| `executor.plugin_python_path` | Executor Python 模組路徑 | `<path>/executor.py` |
-| `linters` | Linter 配置列表（可選） | 見範例 |
+| `instruction_type` | 指令類型（取代舊的 executor.type） | `cucumberjs_server_action` |
 | `constraints` | 限制條件列表（可選） | 見範例 |
 | `subpackage` | 生成程式碼的子套件目錄 | `action`, `then`, `given` |
 | `situation` | 情境說明，描述此步驟的執行時機 | `to invoke the Server Action...` |
@@ -179,11 +216,13 @@ instructions:
 
 ```
 檢查清單：
-[ ] 每個 When 步驟都匹配 Action call 格式
-[ ] 每個成功 Then 步驟都匹配 Action success validation 格式
+[ ] 每個 When 步驟都匹配 Action call 格式（含 Actor 前綴）
+[ ] 每個成功 Then 步驟都匹配 Response validation 格式（含 status code）
 [ ] 每個失敗 Then 步驟都匹配 Operation failure 格式
-[ ] 每個 Entity 驗證步驟都匹配 Entity validate 格式
+[ ] 每個 Entity 存在驗證步驟都匹配 Entity validate 格式
+[ ] 每個 Entity 不存在驗證步驟都匹配 Entity non-existence 格式
 [ ] 每個資料準備步驟都匹配 Entity setup 格式
+[ ] 每個時間控制步驟都匹配 Time control 格式
 ```
 
 #### 3.2 Entity 對應檢查
@@ -222,26 +261,10 @@ project/
 │   │   └── *.feature
 │   └── actions/
 │       └── actions.yml
-├── isa_codegen.yml              # 本階段產出
+├── isa.yml                          # 本階段產出（SpecFormula 標準）
 └── src/
     └── tests/
-        └── features/            # sdd.os 生成的測試程式碼目錄
-```
-
-### 路徑配置
-
-根據 sdd.os 安裝位置，調整 `plugin_python_path`：
-
-```yaml
-# 若 sdd.os 在 /Users/eric/Desktop/sdd.os
-executor:
-  type: plugin
-  plugin_python_path: /Users/eric/Desktop/sdd.os/src/sdd_os/features/executors/typescript/backend/action_call/codegen/candidates/cucumberjs_server_action/executor.py
-
-# 若使用相對路徑（專案在 sdd.os/benchmark 下）
-executor:
-  type: plugin
-  plugin_python_path: ../../../src/sdd_os/features/executors/typescript/backend/action_call/codegen/candidates/cucumberjs_server_action/executor.py
+        └── features/                # sdd.os 生成的測試程式碼目錄
 ```
 
 ---
@@ -250,15 +273,13 @@ executor:
 
 ### 設計階段規則
 1. **完整覆蓋**：確保所有步驟模式都有對應的配置
-2. **正規表示式精準**：format 必須精確匹配 sdd.os ISA 格式（Server Actions 版）
-3. **路徑正確**：Executor 和 Linter 路徑必須指向有效的 Python 模組
-4. **Entity 一致**：Entity 名稱必須與 `entity_to_table_mapping.yml` 一致
+2. **正規表示式精準**：format 必須精確匹配 sdd.os ISA SpecFormula 標準格式
+3. **Entity 一致**：Entity 名稱必須與 `entity_to_table_mapping.yml` 一致
 
 ### 禁止事項
 1. 不要遺漏任何步驟類型的配置
-2. 不要使用不存在的 Executor 類型
-3. 不要硬編碼絕對路徑（使用相對路徑或環境變數）
-4. 不要在 format 中使用無效的正規表示式
+2. 不要使用不存在的 instruction_type
+3. 不要在 format 中使用無效的正規表示式
 
 ---
 
@@ -267,16 +288,16 @@ executor:
 - **前置階段**：
   1. `formulation.md` - 已產出 `spec/data/` 和 `spec/features/`
   2. `actions-design.md` - 已產出 `spec/actions/actions.yml`
-- **本階段角色**：ISA 配置階段，產出 sdd.os 的配置檔案
+- **本階段角色**：ISA 配置階段，產出 sdd.os SpecFormula 標準的配置檔案
 - **後續階段**：`automation-ts.md` - 使用 sdd.os 生成測試程式碼，開發 Next.js Server Actions 應用
 
 **工作流程**：
 ```
 formulation.md → actions-design.md → isa-config.md → automation-ts.md
      ↓                 ↓                  ↓               ↓
-spec/data/        spec/actions/     isa_codegen.yml   可部署應用
+spec/data/        spec/actions/       isa.yml         可部署應用
 spec/features/     actions.yml                        + 測試程式碼
-(sdd.os ISA)
+(SpecFormula)
 ```
 
 ---
@@ -286,20 +307,20 @@ spec/features/     actions.yml                        + 測試程式碼
 任務完成必須滿足以下所有條件：
 
 **配置產出：**
-- [ ] `isa_codegen.yml` 檔案已建立
+- [ ] `isa.yml` 檔案已建立
 - [ ] YAML 語法正確無誤
+- [ ] 包含 `config` section（api + data + actions）
 - [ ] 所有步驟模式都有對應的 instruction
 
 **步驟覆蓋：**
-- [ ] Action 呼叫（When）配置完成
-- [ ] 成功回應驗證（Then）配置完成
-- [ ] 操作失敗（Then）配置完成
-- [ ] Entity 驗證（Then）配置完成
-- [ ] 資料準備（Given）配置完成
-
-**路徑驗證：**
-- [ ] 所有 `plugin_python_path` 指向有效檔案
-- [ ] `actions_spec_path` 正確指向 `spec/actions`
+- [ ] Entity setup（Given）配置完成
+- [ ] Time control（Given）配置完成
+- [ ] Action call（When，含 Actor 前綴）配置完成
+- [ ] Response validation（Then，含 status code）配置完成
+- [ ] Response validation JSON（Then）配置完成
+- [ ] Operation failure（Then）配置完成
+- [ ] Entity validate（Then，「應該存在」）配置完成
+- [ ] Entity non-existence（Then，「應該不存在」）配置完成
 
 **整合驗證：**
 - [ ] Entity 名稱與 `entity_to_table_mapping.yml` 一致

@@ -1,68 +1,71 @@
-# sdd.os ISA Feature File 模板（Server Actions 版）
+# sdd.os ISA Feature File 模板（SpecFormula 標準）
 #
 # 使用說明：
 # 1. 將 {action_name} 替換為實際的 Server Action 函數名稱（camelCase）
-# 2. 將 {summary} 替換為功能的中文描述（與 Feature 名稱一致）
-# 3. 根據實際需求修改 Background、Rule、Example
+# 2. 將 {http_method} 和 {api_path} 替換為 API 端點
+# 3. 將 {summary} 替換為功能的中文描述（與 Feature 名稱一致）
+# 4. 使用 VAR 系統（>/$/<）取代硬編碼 ID
 #
 # ============================================================
 
 # Action: {action_name}
+# [{http_method}] {api_path}
 # Summary: {summary}
 Feature: {summary}
 
   # Background 用於準備測試所需的基礎資料
   # 每個 Example 執行前都會先執行 Background
+  # 使用 > 宣告 Context Key，< 捕捉 Execution Key
   Background:
     Given 準備一個{entity1}, with table:
-      | id   | {field1} | {field2} |
-      | E001 | value1   | value2   |
+      | >{Entity1}.id | {field1} | {field2} |
+      | <entity1Id    | value1   | value2   |
     And 準備一個{entity2}, with table:
-      | id   | {field1} | {field2} |
-      | E002 | value1   | value2   |
+      | >{Entity2}.id | {field1}      | {field2} |
+      | <entity2Id    | ${Entity1}.id | value2   |
 
   #------------------------------------------------------------
-  # Rule 格式：{前置|後置} - {規則描述}
+  # Rule 格式：{前置|後置}（{子類}）- {規則描述}
   # 前置：執行前的驗證條件，失敗時回傳錯誤
   # 後置：執行成功後的系統狀態變更
   #------------------------------------------------------------
-  Rule: 後置 - {規則描述}
+  Rule: 後置（狀態）- {規則描述}
   #------------------------------------------------------------
 
     # Example 名稱應清楚描述測試場景
     Example: 成功{action_description}
-      # When 步驟：呼叫 Server Action
-      # 格式：{summary}, call table:
-      When {summary}, call table:
-        | {input_field1} | {input_field2} |
-        | value1         | value2         |
+      # When 步驟：呼叫 Server Action（必須有 Actor 前綴）
+      # 格式：(No Actor|UID="$var") {summary}, call table:
+      When (UID="${Entity1}.id") {summary}, call table:
+        | {input_field1}  | {input_field2} |
+        | ${Entity2}.id   | value2         |
 
-      # Then 步驟（成功）：驗證回應
-      # 格式：{summary}成功, with table:
-      Then {summary}成功, with table:
-        | {output_field1} | {output_field2} |
-        | expected1       | expected2       |
+      # Then 步驟（成功）：驗證回應（含 HTTP status code）
+      # 格式：{summary}(STATUS)回應, with table:
+      Then {summary}(201)回應, with table:
+        | >{result}.{field1} | {output_field2} |
+        | <resultField1      | expected2       |
 
       # 可選：驗證資料庫狀態
-      # 格式：存在一個{entity}, with table:
-      And 存在一個{entity}, with table:
-        | id   | {field1}  | {field2}  |
-        | E003 | expected1 | expected2 |
+      # 格式：應該存在一個{entity}, with table:
+      And 應該存在一個{entity}, with table:
+        | entityId      | {field1}  | {field2}  |
+        | ${Entity1}.id | expected1 | expected2 |
 
   #------------------------------------------------------------
-  Rule: 前置 - {驗證條件描述}
+  Rule: 前置（狀態）- {驗證條件描述}
   #------------------------------------------------------------
 
     # 失敗場景範例
     Example: {validation_description}時拒絕操作
       # Given 可用於覆寫 Background 中的資料
       Given 準備一個{entity}, with table:
-        | id   | {field1}       | {field2} |
-        | E004 | invalid_value  | value    |
+        | >{Entity3}.id | {field1}       | {field2} |
+        | <entity3Id    | invalid_value  | value    |
 
-      When {summary}, call table:
-        | {input_field1} | {input_field2} |
-        | invalid_input  | value          |
+      When (UID="${Entity1}.id") {summary}, call table:
+        | {input_field1}  | {input_field2} |
+        | ${Entity3}.id   | value          |
 
       # Then 步驟（失敗）：驗證操作失敗
       Then 操作失敗
@@ -71,10 +74,13 @@ Feature: {summary}
 # 檢查清單（完成後刪除此區塊）
 # ============================================================
 # [ ] Action 名稱為 camelCase（如 createOrder）
+# [ ] 有 [METHOD] /path HTTP 端點註解
 # [ ] Summary 與 Feature 名稱一致
-# [ ] 所有 Rule 都標註前置或後置
-# [ ] When 步驟使用 "{summary}, call table:" 格式
-# [ ] 成功 Then 使用 "{summary}成功, with table:" 格式
+# [ ] 所有 Rule 都標註四類前綴（前置/後置 + 子類）
+# [ ] When 步驟有 Actor 前綴 (No Actor|UID="$var")
+# [ ] 成功 Then 使用 "{summary}(STATUS)回應, with table:" 格式
 # [ ] 失敗 Then 使用 "操作失敗"
+# [ ] Entity 驗證使用 "應該存在一個{entity}, with table:"
+# [ ] DataTable 使用 VAR 系統（>/$/<）取代硬編碼 UUID
 # [ ] DataTable 欄位與 schema.sql 一致
 # [ ] Entity 名稱與 entity_to_table_mapping.yml 一致

@@ -2,7 +2,7 @@
 /**
  * validate-feature.ts
  *
- * 驗證 Gherkin Feature File 是否符合 sdd.os ISA 格式（Server Actions 版）
+ * 驗證 Gherkin Feature File 是否符合 sdd.os ISA SpecFormula 標準
  *
  * 此腳本是 Quality Gate 的硬性閘門，Formulation 階段完成後必須執行。
  * 若驗證失敗（exit code 1），Skill 必須進入修正模式。
@@ -75,11 +75,12 @@ const WARNING_CODES = {
 }
 
 // ============================================================
-// sdd.os ISA 格式正規表示式（Server Actions 版）
+// sdd.os ISA 格式正規表示式（SpecFormula 標準）
 // ============================================================
 
 const PATTERNS = {
   actionAnnotation: /^#\s*Action:\s*(\w+)\s*$/m,
+  httpAnnotation: /^#\s*\[(GET|POST|PUT|PATCH|DELETE)\]\s+\S+\s*$/m,
   summaryAnnotation: /^#\s*Summary:\s*(.+)\s*$/m,
   featureDeclaration: /^Feature:\s*(.+)\s*$/m,
   ruleDeclaration: /^\s*Rule:\s*(.+)\s*$/gm,
@@ -88,12 +89,18 @@ const PATTERNS = {
   scenarioDeclaration: /^\s*Scenario(?:\s+Outline)?:\s*(.+)\s*$/gm,
   examplesTable: /^\s*Examples:\s*$/gm,
   whenStep: /^\s*When\s+(.+)\s*$/gm,
-  whenCallTable: /^\s*When\s+(.+),\s*call\s+table:\s*$/,
+  // SpecFormula: (No Actor|UID="...") {summary}, call table:
+  whenCallTable: /^\s*When\s+\((?:No Actor|UID="[^"]+")\)\s+(.+), call table:\s*$/,
   thenStep: /^\s*Then\s+(.+)\s*$/gm,
-  thenSuccess: /^\s*Then\s+(.+)成功,?\s*with\s+table:\s*$/,
-  thenFailure: /^\s*Then\s+操作失敗\s*$/,
-  entityValidation: /^\s*(?:And|Then)\s+存在一個(.+),\s*with\s+table:\s*$/,
-  dataPreparation: /^\s*Given\s+準備一個(.+),\s*with\s+table:\s*$/,
+  // SpecFormula: {summary}(STATUS)回應, with table:
+  thenResponse: /^\s*(?:Then|And)\s+(.+)\(\d{3}\)回應,?\s*with table:\s*$/,
+  thenResponseJson: /^\s*(?:Then|And)\s+(.+)\(\d{3}\)回應為,?\s*with JSON:\s*$/,
+  thenFailure: /^\s*(?:Then|And)\s+操作失敗\s*$/,
+  // SpecFormula: 應該存在一個 / 應該不存在一個
+  entityValidation: /^\s*(?:And|Then)\s+應該存在一個([\u4e00-\u9fffa-zA-Z0-9_]+),\s*with table:\s*$/,
+  entityNonExistence: /^\s*(?:And|Then)\s+應該不存在一個([\u4e00-\u9fffa-zA-Z0-9_]+),\s*with table:\s*$/,
+  dataPreparation: /^\s*(?:Given|And)\s+準備一個([\u4e00-\u9fffa-zA-Z0-9_]+),\s*with table:\s*$/,
+  timeControl: /^\s*(?:Given|And)\s+現在時間為 "[^"]+"\s*$/,
   background: /^\s*Background:\s*$/m,
   dataTable: /^\s*\|.+\|\s*$/gm,
 }
@@ -206,33 +213,63 @@ function validateFeatureFile(filePath: string): ValidationResult {
     }
   }
 
-  // 6. 檢查 When 步驟格式
+  // 6. 檢查 When 步驟格式（SpecFormula：需有 Actor 前綴）
   lines.forEach((line, index) => {
     const whenMatch = line.match(/^\s*When\s+(.+)\s*$/)
     if (whenMatch) {
       const whenContent = whenMatch[1]
-      if (!whenContent.includes(', call table:')) {
+      // 必須有 (No Actor|UID="...") 前綴 + , call table: 後綴
+      const hasActorPrefix = /^\((?:No Actor|UID="[^"]+")\)\s+/.test(whenContent)
+      const hasCallTable = whenContent.includes(', call table:')
+
+      if (!hasActorPrefix || !hasCallTable) {
         result.valid = false
+        const issues: string[] = []
+        if (!hasActorPrefix) issues.push('缺少 Actor 前綴 (No Actor|UID="$var")')
+        if (!hasCallTable) issues.push('缺少 ", call table:" 後綴')
         result.errors.push({
           code: ERROR_CODES.WHEN_FORMAT_INVALID,
-          message: `When 步驟格式錯誤: "${whenContent}"`,
+          message: `When 步驟格式錯誤: "${whenContent}" — ${issues.join('; ')}`,
           line: index + 1,
-          suggestion: '格式應為: When {summary}, call table:',
+          suggestion: '格式應為: When (No Actor|UID="$var") {summary}, call table:',
         })
       }
     }
   })
 
-  // 7. 檢查 Then 步驟格式
+  // 7. 檢查 Then 步驟格式（SpecFormula）
   lines.forEach((line, index) => {
     const thenMatch = line.match(/^\s*Then\s+(.+)\s*$/)
     if (thenMatch) {
       const thenContent = thenMatch[1].trim()
-      const isSuccess = thenContent.includes('成功') && thenContent.includes('with table:')
+      // SpecFormula 格式
+      const isResponse = /\(\d{3}\)回應/.test(thenContent) && thenContent.includes('with table:')
+      const isResponseJson = /\(\d{3}\)回應為/.test(thenContent) && thenContent.includes('with JSON:')
       const isFailure = thenContent === '操作失敗'
-      const isEntityValidation = thenContent.startsWith('存在一個')
+      const isEntityValidation = thenContent.startsWith('應該存在一個')
+      const isEntityNonExistence = thenContent.startsWith('應該不存在一個')
 
-      if (!isSuccess && !isFailure && !isEntityValidation) {
+      // 舊格式偵測
+      const isOldSuccess = thenContent.includes('成功') && thenContent.includes('with table:')
+      const isOldEntity = (thenContent.startsWith('存在一個') || thenContent.startsWith('不存在一個')) && !thenContent.startsWith('應該')
+
+      if (isOldSuccess) {
+        result.valid = false
+        result.errors.push({
+          code: ERROR_CODES.THEN_FORMAT_INVALID,
+          message: `Then 步驟使用舊格式: "${thenContent}"`,
+          line: index + 1,
+          suggestion: '請將 `{summary}成功, with table:` 改為 `{summary}(STATUS)回應, with table:`',
+        })
+      } else if (isOldEntity) {
+        result.valid = false
+        result.errors.push({
+          code: ERROR_CODES.THEN_FORMAT_INVALID,
+          message: `Entity 驗證使用舊格式: "${thenContent}"`,
+          line: index + 1,
+          suggestion: '請將 `存在一個` 改為 `應該存在一個`',
+        })
+      } else if (!isResponse && !isResponseJson && !isFailure && !isEntityValidation && !isEntityNonExistence) {
         result.warnings.push({
           code: WARNING_CODES.THEN_FORMAT_AMBIGUOUS,
           message: `Then 步驟格式可能不正確: "${thenContent}"`,

@@ -1020,48 +1020,50 @@ ${previousFeatures.map((f, i) => `${i + 1}. **${f.name}** (${f.actionName})
 - Action：${featureInfo.actionName}
 - 描述：${featureInfo.description}
 
-${previousFeaturesContext}## sdd.os ISA Gherkin 格式
+${previousFeaturesContext}## sdd.os ISA Gherkin 格式（SpecFormula 標準）
 
 \`\`\`gherkin
 # Action: ${featureInfo.actionName}
+# [POST] /api/path
 # Summary: ${featureInfo.name}
 Feature: ${featureInfo.name}
 
   Background:
     Given 準備一個{entity}, with table:
-      | column1 | column2 |
-      | value1  | value2  |
+      | >Entity.id | column2 |
+      | <entityId  | value2  |
 
   #------------------------------------------------------------
-  Rule: 前置/後置 - 規則描述
+  Rule: 前置（狀態）/前置（參數）/後置（回應）/後置（狀態） - 規則描述
   #------------------------------------------------------------
 
     Example: 例子名稱
-      When ${featureInfo.name}, call table:
-        | param1 | param2 |
-        | value1 | value2 |
-      Then ${featureInfo.name}成功, with table:
-        | field1 | field2 |
-        | value1 | value2 |
-      And 存在一個{entity}, with table:
-        | column1 | column2 |
-        | value1  | value2  |
+      When (UID="$Entity.id") ${featureInfo.name}, call table:
+        | param1      | param2 |
+        | $Entity.id  | value2 |
+      Then ${featureInfo.name}(201)回應, with table:
+        | >result.id | field2 |
+        | <resultId  | value2 |
+      And 應該存在一個{entity}, with table:
+        | id         | column2 |
+        | $Entity.id | value2  |
 
     Example: 錯誤情境
-      When ${featureInfo.name}, call table:
+      When (No Actor) ${featureInfo.name}, call table:
         | param1 | param2 |
         | value1 | value2 |
       Then 操作失敗
 \`\`\`
 
 ## 格式規則
-1. **Action 綁定**：檔案開頭必須有 \`# Action:\` 和 \`# Summary:\` 註解
-2. **Rule 標註**：每個 Rule 必須標註 \`前置\` 或 \`後置\`
-3. **When 格式**：\`${featureInfo.name}, call table:\`
-4. **Then 成功格式**：\`${featureInfo.name}成功, with table:\`
+1. **Action 綁定**：檔案開頭必須有 \`# Action:\`、\`# [METHOD] /path\` 和 \`# Summary:\` 註解
+2. **Rule 標註**：每個 Rule 必須標註四類之一（前置（狀態）/前置（參數）/後置（回應）/後置（狀態））
+3. **When 格式**：\`(No Actor|UID="$var") ${featureInfo.name}, call table:\`
+4. **Then 成功格式**：\`${featureInfo.name}(STATUS)回應, with table:\`
 5. **Then 失敗格式**：\`操作失敗\`
-6. **Entity 驗證格式**：\`存在一個{entity}, with table:\`
+6. **Entity 驗證格式**：\`應該存在一個{entity}, with table:\`
 7. **summary 一致**：Feature 名稱必須與 When/Then 中的 summary 一致
+8. **VAR 系統**：\`>contextKey\` 宣告、\`$variable\` 引用、\`<executionKey\` 捕捉，禁止硬編碼 UUID
 
 ## Entity 映射
 ${entityMapping}
@@ -1418,7 +1420,7 @@ ${featuresContent}`
 }
 
 /**
- * Phase 5: ISA Config - 產出 isa_codegen.yml
+ * Phase 5: ISA Config - 產出 isa.yml
  */
 export async function generateIsaConfig(
   features: Array<{ name: string; actionName: string; content: string }>,
@@ -1430,48 +1432,56 @@ export async function generateIsaConfig(
   isaConfig?: string
   error?: string
 }> {
-  const systemPrompt = `你是一位 sdd.os ISA 配置專家。根據 Feature Files 和 Actions 規格，產出 isa_codegen.yml 配置。
+  const systemPrompt = `你是一位 sdd.os ISA 配置專家。根據 Feature Files 和 Actions 規格，產出 isa.yml 配置（SpecFormula 標準）。
 
 ## 輸出格式 (YAML)
 \`\`\`yaml
-isa_codegen:
-  target: nextjs-server-actions
-  database: db
-
-  entity_mapping:
-    # 從 entity_to_table_mapping.yml 複製
-
-  step_patterns:
-    action_call:
-      pattern: "{summary}, call table:"
-      executor: server-action
-      action_resolver: by-summary
-
-    action_success:
-      pattern: "{summary}成功, with table:"
-      executor: assertion
-      mode: response-validation
-
-    action_failure:
-      pattern: "操作失敗"
-      executor: assertion
-      mode: error-expected
-
-    entity_verify:
-      pattern: "存在一個{entity}, with table:"
-      executor: db-query
-      mode: existence-check
-
-    entity_prepare:
-      pattern: "準備一個{entity}, with table:"
-      executor: db-insert
-      mode: test-fixture
-
+config:
+  api:
+    base_url: "\${API_BASE_URL}"
+    framework: nextjs_server_actions
+  data:
+    database: supabase
+    schema_path: spec/data/schema.sql
+    entity_mapping_path: spec/data/entity_to_table_mapping.yml
   actions:
-    # 從 Feature 檔案的 # Action: 註解提取
-    - name: actionName
-      summary: 功能名稱
-      file: spec/features/功能名稱.feature
+    spec_path: spec/actions/actions.yml
+
+instructions:
+  - name: Entity setup
+    format: ^準備一個(?P<entity>[\\u4e00-\\u9fffa-zA-Z0-9_]+), with table:$
+    step_type: Given
+    instruction_type: supabase_setup
+    subpackage: given
+    situation: to prepare test data in the database
+
+  - name: Action call
+    format: ^\\((?:No Actor|UID="(?P<actor>[^"]+)")\\) (?P<summary>.+?), call table:$
+    step_type: When
+    instruction_type: cucumberjs_server_action
+    subpackage: action
+    situation: to invoke the Server Action with parameters
+
+  - name: Response validation
+    format: ^(?P<summary>.+?)\\((?P<status>\\d{3})\\)回應,?\\s*with table:$
+    step_type: Then
+    instruction_type: response_validate
+    subpackage: then
+    situation: to validate the response status code and data
+
+  - name: Operation failure
+    format: ^操作失敗$
+    step_type: Then
+    instruction_type: skip
+    subpackage: then
+    situation: to validate that the operation returned an error
+
+  - name: Entity validate
+    format: ^應該存在一個(?P<entity>[\\u4e00-\\u9fffa-zA-Z0-9_]+), with table:$
+    step_type: Then
+    instruction_type: supabase_entity
+    subpackage: then
+    situation: to validate the entity exists in the database
 \`\`\`
 
 直接輸出 YAML 內容，不要包含 \`\`\`yaml 標記。`
@@ -1532,13 +1542,14 @@ export async function fixMultipleFeatures(
 
   const systemPrompt = `你是一位 sdd.os ISA Gherkin 專家。請修正以下多個 Feature Files 的格式錯誤。
 
-## sdd.os ISA 格式規範
-1. 檔案開頭必須有 \`# Action:\` 和 \`# Summary:\` 註解
-2. 每個 Rule 必須標註 \`前置\` 或 \`後置\`
-3. When 格式：\`{summary}, call table:\`
-4. Then 成功格式：\`{summary}成功, with table:\`
+## sdd.os ISA 格式規範（SpecFormula 標準）
+1. 檔案開頭必須有 \`# Action:\`、\`# [METHOD] /path\` 和 \`# Summary:\` 註解
+2. 每個 Rule 必須標註四類之一（前置（狀態）/前置（參數）/後置（回應）/後置（狀態））
+3. When 格式：\`(No Actor|UID="$var") {summary}, call table:\`
+4. Then 成功格式：\`{summary}(STATUS)回應, with table:\`
 5. Then 失敗格式：\`操作失敗\`
-6. Entity 驗證格式：\`存在一個{entity}, with table:\`
+6. Entity 驗證格式：\`應該存在一個{entity}, with table:\`
+7. DataTable 使用 VAR 系統：\`>contextKey\` 宣告、\`$variable\` 引用、\`<executionKey\` 捕捉
 
 ## 重要約束
 修復格式時，必須嚴格遵守用戶在釐清階段做出的所有決策。不要擅自添加或修改用戶已明確拒絕的功能。

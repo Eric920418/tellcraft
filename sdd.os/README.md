@@ -39,8 +39,4 @@ ISA 規格白皮書統一由 [specformula-docs](specformula-docs/) 維護，包�
 
 ## LICENSE
 
-此原始碼雖然即將在明年會開源，但是在開源之前，此原始碼仍受版權保護，請尊重版權，請勿分享和公開此原始碼給非 Repository 成員，僅可在個人專案中使用，請勿在企業中商用。
 
-如需商用，請聯絡 contact@waterballsa.tw。
-
-© 2025 水球球特務有限公司版權所有。

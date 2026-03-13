@@ -266,12 +266,12 @@ description: |
   - 更新跨屬性不變條件
   - 新增狀態轉換規則
 
-- **功能模型釐清** → 更新 `spec/features/<功能名>.feature`（依照 `formulation-rules.md` 的 **sdd.os ISA Gherkin (Server Actions 版)** 格式規範）
+- **功能模型釐清** → 更新 `spec/features/<功能名>.feature`（依照 `formulation-rules.md` 的 **sdd.os ISA Gherkin（SpecFormula 標準）** 格式規範）
   - 新增或修改 Rule（必須標註四類之一：前置（狀態）/ 前置（參數）/ 後置（回應）/ 後置（狀態））
-  - 新增或修改 Example（**sdd.os ISA 格式 - Server Actions 版**）：
-    - When 步驟使用 `{summary}, call table:` 格式
-    - Then 步驟使用 `{summary}成功, with table:` 或 `操作失敗`
-    - Entity 驗證使用 `存在一個{entity}, with table:`
+  - 新增或修改 Example（**sdd.os ISA 格式 - SpecFormula 標準**）：
+    - When 步驟使用 `(No Actor|UID="$var") {summary}, call table:` 格式
+    - Then 步驟使用 `{summary}(STATUS)回應, with table:` 或 `操作失敗`
+    - Entity 驗證使用 `應該存在一個{entity}, with table:`
   - 更新前置/後置條件
   - 補充錯誤處理情境（使用 `操作失敗`）
 
@@ -324,7 +324,7 @@ CREATE TABLE menu_items (
 ) COMMENT '菜品實體';
 ```
 
-### 3.5 Gherkin 更新範例（sdd.os ISA - Server Actions 版，四類規則）
+### 3.5 Gherkin 更新範例（sdd.os ISA - SpecFormula 標準，四類規則）
 
 Gherkin 格式詳見 [`../rules/formulation-rules.md`](../rules/formulation-rules.md)。
 
@@ -412,14 +412,15 @@ Gherkin 格式詳見 [`../rules/formulation-rules.md`](../rules/formulation-rule
 - [ ] 格式有效：
   - `spec/data/schema.sql` 遵守 SQL DDL 語法，每個欄位都有 COMMENT
   - `spec/data/entity_to_table_mapping.yml` 與 schema.sql 一致
-  - `spec/features/*.feature` 遵守 **sdd.os ISA Gherkin (Server Actions 版)** 語法：
-    - 檔案開頭有 `# Action: functionName` 和 `# Summary:` 註解
+  - `spec/features/*.feature` 遵守 **sdd.os ISA Gherkin（SpecFormula 標準）** 語法：
+    - 檔案開頭有 `# Action: functionName`、`# [METHOD] /path` 和 `# Summary:` 註解
     - 嚴格階層 Feature > Rule > Example
     - 每個 Rule 都標註四類之一（前置（狀態）/ 前置（參數）/ 後置（回應）/ 後置（狀態））
-    - When 步驟使用 `{summary}, call table:` 格式
-    - 成功 Then 使用 `{summary}成功, with table:` 格式
+    - When 步驟使用 `(No Actor|UID="$var") {summary}, call table:` 格式
+    - 成功 Then 使用 `{summary}(STATUS)回應, with table:` 格式
     - 失敗 Then 使用 `操作失敗`
-    - Entity 驗證使用 `存在一個{entity}, with table:` 格式
+    - Entity 驗證使用 `應該存在一個{entity}, with table:` 格式
+    - DataTable 使用 VAR 系統（`>/$/<`）取代硬編碼 UUID
 - [ ] 術語一致性：更新後的內容使用標準術語，Entity 名稱與 `entity_to_table_mapping.yml` 一致
 - [ ] 釐清項目狀態已更新：
   - 釐清項目檔案底部已追加解決記錄（包含模式、回答、更新的規格檔、變更內容）
@@ -430,13 +431,14 @@ Gherkin 格式詳見 [`../rules/formulation-rules.md`](../rules/formulation-rule
 ### 4.2 最終驗證（釐清流程結束後）
 
 - [ ] 每個 Resolved 的釐清項目都對應一次規格更新
-- [ ] Feature 檔案中的 Step 句型一致（sdd.os ISA 格式 - Server Actions 版）
+- [ ] Feature 檔案中的 Step 句型一致（sdd.os ISA 格式 - SpecFormula 標準）
 - [ ] 所有 SQL Schema 的欄位都有 COMMENT 說明
 - [ ] 所有 Feature 的 Rule 都標註四類之一（前置（狀態）/ 前置（參數）/ 後置（回應）/ 後置（狀態））
 - [ ] 所有 Feature 的 Rule 都至少有一個 Example（或標記 #TODO）
-- [ ] 所有 Feature 都標註 `# Action: functionName` 和 `# Summary:`
-- [ ] 所有 When 步驟都使用 `{summary}, call table:` 格式
-- [ ] 所有成功 Then 使用 `{summary}成功, with table:`，失敗使用 `操作失敗`
+- [ ] 所有 Feature 都標註 `# Action: functionName`、`# [METHOD] /path` 和 `# Summary:`
+- [ ] 所有 When 步驟都使用 `(No Actor|UID="$var") {summary}, call table:` 格式
+- [ ] 所有成功 Then 使用 `{summary}(STATUS)回應, with table:`，失敗使用 `操作失敗`
+- [ ] DataTable 使用 VAR 系統（`>/$/<`），無硬編碼 UUID
 - [ ] Entity 名稱與 `entity_to_table_mapping.yml` 一致
 - [ ] 跨檔案的術語保持一致
 
@@ -628,10 +630,11 @@ items:
 - **術語一致**：全文使用統一術語，必要時正規化先前的不一致用詞
 - **句型統一**：Feature 檔案中的 Step 定義保持 sdd.os ISA 句型一致
 - **四類規則分類**：Gherkin 中的 Rule 必須標註四類之一（前置（狀態）/ 前置（參數）/ 後置（回應）/ 後置（狀態））
-- **sdd.os ISA 格式（Server Actions 版）**：Gherkin 必須採用 sdd.os ISA 格式：
-  - When 使用 `{summary}, call table:`
-  - Then 使用 `{summary}成功, with table:` 或 `操作失敗`
-  - Entity 驗證使用 `存在一個{entity}, with table:`
+- **sdd.os ISA 格式（SpecFormula 標準）**：Gherkin 必須採用 sdd.os ISA SpecFormula 格式：
+  - When 使用 `(No Actor|UID="$var") {summary}, call table:`
+  - Then 使用 `{summary}(STATUS)回應, with table:` 或 `操作失敗`
+  - Entity 驗證使用 `應該存在一個{entity}, with table:`
+  - DataTable 使用 VAR 系統（`>/$/<`）
 - **避免重複**：若釐清使先前敘述失效，直接取代，不保留矛盾內容
 - **可測試性**：所有插入的釐清內容都應精煉且可直接透過 sdd.os 生成測試程式碼
 

@@ -33,9 +33,9 @@ actions:
     # Feature 關聯（核心）
     featureFile: "spec/features/{Feature名稱}.feature"
     rules:
-      - rule: "後置 - {規則描述}"
-        step: "Then {summary}成功, with table:"
-      - rule: "前置 - {驗證條件}"
+      - rule: "後置（狀態）- {規則描述}"
+        step: "Then {summary}(201)回應, with table:"
+      - rule: "前置（參數）- {驗證條件}"
         step: "Then 操作失敗"
 
     # 輸入參數定義
@@ -97,9 +97,9 @@ actions:
 
     featureFile: "spec/features/查詢{Entity中文名}.feature"
     rules:
-      - rule: "後置 - 可根據 ID 查詢詳情"
-        step: "Then 查詢{Entity中文名}成功, with table:"
-      - rule: "前置 - {Entity中文名}必須存在"
+      - rule: "後置（回應）- 可根據 ID 查詢詳情"
+        step: "Then 查詢{Entity中文名}(200)回應, with table:"
+      - rule: "前置（狀態）- {Entity中文名}必須存在"
         step: "Then 操作失敗"
 
     input:

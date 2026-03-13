@@ -538,33 +538,44 @@ export async function generateSingleFeature(
 - Action：${featureInfo.actionName}
 - 描述：${featureInfo.description}
 
-## sdd.os ISA 格式規範
+## sdd.os ISA SpecFormula 標準格式規範
 
 ### ⚠️ 無腦補原則（最高優先）
 **嚴格遵守需求和釐清決策，不擅自假設任何功能、欄位或行為。** 如果需求沒提到的東西，就不要加。
+
+### VAR 系統（取代硬編碼 UUID）
+| 前綴 | 用途 | 範例 |
+|------|------|------|
+| \`>\` | Given 中宣告 Context Key | \`>TestUser.id\` |
+| \`$\` | 引用之前宣告的值 | \`$TestUser.id\` |
+| \`<\` | 捕捉執行結果 | \`<userId\` |
+- \`$notnull\` 表示非空即可
 
 ### Given 設定方式選擇指引
 | 判定條件 | 選擇 | 範例 |
 |----------|------|------|
 | 簡單 Invariant（單一欄位約束） | Choice A: 直接用 \`準備一個{entity}, with table:\` | price >= 0、status = 'active' |
-| 複雜 Invariant（跨屬性計算） | Choice B: 用 \`{summary}, call table:\` 透過 Action 設定 | 總額 = 單價 × 數量 |
+| 複雜 Invariant（跨屬性計算） | Choice B: 用 \`(UID="$var") {summary}, call table:\` 透過 Action 設定 | 總額 = 單價 × 數量 |
 | 狀態流轉（需前置 Action 建立狀態） | Choice B: 用 Action 設定 | 訂單需先經過「建立」才能「取消」 |
 
 ### Given 步驟格式（資料準備）
-- 資料準備：\`準備一個{entity}, with table:\`
-- **簡單 Invariant**（如 price >= 0）→ 直接用 \`準備一個{entity}, with table:\` 設定資料
-- **複雜 Invariant**（跨屬性計算、狀態流轉）→ 用 \`{summary}, call table:\` 透過 Action 設定
+- 資料準備：\`準備一個{entity}, with table:\`（使用 \`>contextKey\` / \`<executionKey\`）
+- 時間控制：\`現在時間為 "{datetime}"\`
 
-### When 步驟格式（Action 呼叫）
-- Action 呼叫：\`{summary}, call table:\`
+### When 步驟格式（Action 呼叫，必須有 Actor 前綴）
+- 無身份：\`(No Actor) {summary}, call table:\`
+- 帶身份：\`(UID="$var") {summary}, call table:\`
 
-### Then 步驟格式（回應驗證）
-- 成功回應：\`{summary}成功, with table:\`
+### Then 步驟格式（回應驗證，含 HTTP status code）
+- 成功回應：\`{summary}(STATUS)回應, with table:\`（如 201、200）
+- 成功回應 JSON：\`{summary}(STATUS)回應為, with JSON:\`
 - 操作失敗：\`操作失敗\`
-- Entity 驗證：\`存在一個{entity}, with table:\`
+- Entity 存在驗證：\`應該存在一個{entity}, with table:\`
+- Entity 不存在驗證：\`應該不存在一個{entity}, with table:\`
 
 ### 必要 Header（檔案開頭）
 - \`# Action: actionName\`：標註這是哪個 Action（camelCase 或 snake_case）
+- \`# [METHOD] /path\`：HTTP method 和 API 路徑
 - \`# Summary: xxx\`：Action 的一句話說明
 
 ## 四類規則分類法（關鍵 ⚠️）
@@ -575,8 +586,8 @@ export async function generateSingleFeature(
 |------|------|------------|
 | \`前置（狀態）\` | 系統既有狀態約束（如庫存>0） | \`Then 操作失敗\` |
 | \`前置（參數）\` | 輸入參數約束（如數量>0、必填） | \`Then 操作失敗\` |
-| \`後置（回應）\` | 回傳資料預期（查詢類功能用） | \`Then {summary}成功, with table:\` |
-| \`後置（狀態）\` | 資料庫狀態變化（命令類功能用） | \`Then {summary}成功, with table:\` + Entity 驗證 |
+| \`後置（回應）\` | 回傳資料預期（查詢類功能用） | \`Then {summary}(200)回應, with table:\` |
+| \`後置（狀態）\` | 資料庫狀態變化（命令類功能用） | \`Then {summary}(201)回應, with table:\` + Entity 驗證 |
 
 ### Rule 命名句型（嚴格遵守）
 
@@ -604,55 +615,71 @@ Rule: <四類前綴> - <主詞> 必須/應 <單一條件>
 
 \`\`\`gherkin
 # Action: ${featureInfo.actionName}
-# Summary: ${featureInfo.description}
+# [POST] /api/path
+# Summary: ${featureInfo.name}
 Feature: ${featureInfo.name}
 
   Background:
     Given 準備一個{entity}, with table:
-      | 欄位 | 值 |
+      | >Entity.id | 欄位 |
+      | <entityId  | 值   |
 
   # ========== 前置條件 ==========
 
   Rule: 前置（狀態）- 規則描述
 
     Example: 情境說明
-      When {summary}, call table:
-        | 欄位 | 值 |
+      When (UID="$Entity.id") {summary}, call table:
+        | 欄位        | 值 |
+        | $Entity2.id | 值 |
       Then 操作失敗
 
   Rule: 前置（參數）- 規則描述
 
     Example: 情境說明
-      When {summary}, call table:
+      When (No Actor) {summary}, call table:
         | 欄位 | 值 |
       Then 操作失敗
 
   # ========== 後置條件 ==========
 
+  Rule: 後置（回應）- 規則描述
+
+    Example: 情境說明
+      When (UID="$Entity.id") {summary}, call table:
+        | 欄位 | 值 |
+      Then {summary}(200)回應, with table:
+        | id         | 欄位     |
+        | $Entity.id | $notnull |
+
   Rule: 後置（狀態）- 規則描述
 
     Example: 情境說明
-      When {summary}, call table:
+      When (UID="$Entity.id") {summary}, call table:
         | 欄位 | 值 |
-      Then {summary}成功, with table:
-        | 欄位 | 值 |
-      And 存在一個{entity}, with table:
-        | 欄位 | 值 |
+      Then {summary}(201)回應, with table:
+        | >result.id | 欄位 |
+        | <resultId  | 值   |
+      And 應該存在一個{entity}, with table:
+        | id         | 欄位 |
+        | $Entity.id | 值   |
 \`\`\`
 
 ## 規則
-- 檔案開頭必須用 \`# Action: actionName\` 而非 \`@Action()\`
+- 檔案開頭必須用 \`# Action: actionName\`、\`# [METHOD] /path\`、\`# Summary: xxx\`
 - 每條 Rule 標註四類之一（前置（狀態）/前置（參數）/後置（回應）/後置（狀態）），**禁止使用舊的 @Pre/@Post**
 - Rule 命名遵循嚴格句型：\`<四類前綴> - <主詞> 必須/應 <單一條件>\`
 - 每條 Rule 只驗證一件事（原子化）— 包含「且/和/並且」必須拆分
 - 每條 Rule 至少有一個 Example
 - 邊界條件要有對應的 Example
 - 使用 Entity Mapping 中的中文實體名
+- **必須使用 VAR 系統**：\`>contextKey\` 在 Given 宣告、\`$variable\` 引用、\`<executionKey\` 捕捉結果，禁止硬編碼 UUID
+- **When 必須有 Actor 前綴**：\`(No Actor)\` 或 \`(UID="$var")\`
+- **Then 成功必須有 HTTP status code**：\`{summary}(201)回應, with table:\`
+- **Entity 驗證**：使用 \`應該存在一個\`（非舊的「存在一個」）
 - DataTable 命名慣例：
-  - Actor（人物）用 name 當 Key：\`| name | Alice |\`，不用 \`| userId | 1 |\`
-  - 資源/物件用語義 ID：\`| productId | P001 |\`、\`| orderId | ORD-001 |\`
   - 欄位名用 camelCase（\`totalAmount\`、\`memberLevel\`）
-  - JSON 值整體用雙引號：\`[{"productId":"P001","quantity":2}]\`
+  - JSON 值整體用雙引號：\`[{"productId":"$Product1.id","quantity":2}]\`
   - 布林值用 true/false，列舉值用原始大寫（如 PENDING、ACTIVE）
   - 禁止模糊描述（如「某商品」「一些數量」），必須用具體值
 - **無腦補原則**：嚴格按需求和決策來，不擅自添加需求中沒提到的欄位或功能
@@ -664,7 +691,7 @@ Feature: ${featureInfo.name}
   Rule: 前置（參數）- 必要參數必須提供
 
     Scenario Outline: 缺少 <缺少參數> 時操作失敗
-      When {summary}, call table:
+      When (No Actor) {summary}, call table:
         | 欄位1 | 欄位2  |
         | <值1> | <值2>  |
       Then 操作失敗
@@ -938,18 +965,19 @@ export async function fixMultipleFeatures(
     batch: FeatureFixInput[],
     batchLabel: string
   ): Promise<{ success: boolean; fixedFeatures?: GeneratedFeature[]; error?: string }> {
-    const systemPrompt = `你是一位 sdd.os ISA Gherkin 專家。請根據用戶反饋修正以下 Feature Files。
+    const systemPrompt = `你是一位 sdd.os ISA SpecFormula 標準 Gherkin 專家。請根據用戶反饋修正以下 Feature Files。
 
-## sdd.os ISA 格式規範
-1. 檔案開頭必須有 \`# Action: actionName\` 和 \`# Summary:\` 註解
+## sdd.os ISA SpecFormula 標準格式規範
+1. 檔案開頭必須有 \`# Action: actionName\`、\`# [METHOD] /path\` 和 \`# Summary:\` 註解
 2. 每個 Rule 必須標註**四類之一**：\`前置（狀態）\`、\`前置（參數）\`、\`後置（回應）\`、\`後置（狀態）\`
 3. **禁止使用舊的 @Pre/@Post**，必須使用四類前綴
 4. Rule 命名句型：\`<四類前綴> - <主詞> 必須/應 <單一條件>\`
-5. When 格式：\`{summary}, call table:\`
-6. Then 成功格式：\`{summary}成功, with table:\`
+5. When 格式：\`(No Actor|UID="$var") {summary}, call table:\`（必須有 Actor 前綴）
+6. Then 成功格式：\`{summary}(STATUS)回應, with table:\`（必須有 HTTP status code）
 7. Then 失敗格式：\`操作失敗\`
-8. Entity 驗證格式：\`存在一個{entity}, with table:\`
+8. Entity 驗證格式：\`應該存在一個{entity}, with table:\` 或 \`應該不存在一個{entity}, with table:\`
 9. Given 資料準備：\`準備一個{entity}, with table:\`
+10. VAR 系統：\`>contextKey\` 宣告、\`$variable\` 引用、\`<executionKey\` 捕捉
 
 ## 四類規則分類
 - **前置（狀態）**：系統既有狀態約束（如庫存>0）
@@ -1106,15 +1134,24 @@ export async function generateDraftBatch(
 4. 為每個 clear 的 Command/ReadModel 生成一個 Feature File
 5. 標記不確定的項目（ES 中標記為「待澄清」的）
 
-## sdd.os ISA 格式規範
-- 檔案開頭：\`# Action: actionName\` + \`# Summary: xxx\`
-- Given：\`準備一個{entity}, with table:\`
-- When：\`{summary}, call table:\`
-- Then 成功：\`{summary}成功, with table:\`
+## sdd.os ISA 格式規範（SpecFormula 標準）
+- 檔案開頭：\`# Action: actionName\` + \`# [METHOD] /path\` + \`# Summary: xxx\`
+- Given 資料準備：\`準備一個{entity}, with table:\`（DataTable 使用 VAR 系統）
+- Given 時間控制：\`現在時間為 "{datetime}"\`
+- When：\`(No Actor|UID="$var") {summary}, call table:\`（必須有 Actor 前綴）
+- Then 成功：\`{summary}(STATUS)回應, with table:\`（STATUS 為 HTTP 狀態碼如 200/201）
+- Then 成功 JSON：\`{summary}(STATUS)回應為, with JSON:\`
 - Then 失敗：\`操作失敗\`
-- Entity 驗證：\`存在一個{entity}, with table:\`
+- Entity 驗證：\`應該存在一個{entity}, with table:\`
+- Entity 不存在：\`應該不存在一個{entity}, with table:\`
 - Rule 四類前綴：前置（狀態）/前置（參數）/後置（回應）/後置（狀態）
 - Rule 命名：\`<四類前綴> - <主詞> 必須/應 <單一條件>\`
+
+## VAR 系統
+- \`>ContextName.field\`：Context Key，宣告一個可被後續引用的上下文物件
+- \`<executionKey\`：Execution Key，捕獲執行時產生的值（如自動生成的 ID）
+- \`$ContextName.field\`：Variable Reference，引用先前宣告的 Context Key 值
+- \`$notnull\`：特殊值，驗證欄位不為 null
 
 ## 無腦補原則
 嚴格按 ES 分析結果和需求來，不擅自假設。

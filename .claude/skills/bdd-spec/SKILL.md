@@ -27,7 +27,7 @@ description: |
 
 author: AI x BDD Team
 output_format:
-  - sdd.os ISA Gherkin (Server Actions 版, 四類規則)
+  - sdd.os ISA Gherkin (SpecFormula 標準, 四類規則)
   - SQL Schema
   - Entity Mapping YAML
   - Actions Spec YAML
@@ -88,10 +88,10 @@ output_format:
 - 從自然語言需求萃取結構化規格（SQL Schema、Gherkin Feature）
 - 識別規格歧義與遺漏，產生釐清項目
 - 與用戶迭代式釐清，支援「提案優先」模式減少提問輪數
-- 產出符合 sdd.os ISA 格式的 Feature Files（Server Actions 版，四類規則分類）
+- 產出符合 sdd.os ISA 格式的 Feature Files（SpecFormula 標準，四類規則分類）
 - 產出 SQL Schema（schema.sql）和 Entity Mapping（entity_to_table_mapping.yml）
 - 設計 Server Actions 規格（actions.yml）
-- 產出 sdd.os ISA 配置檔案（isa_codegen.yml）
+- 產出 sdd.os ISA 配置檔案（isa.yml）
 - 協調需求變更的跨規格影響分析與連鎖更新
 
 ### 不解決的問題
@@ -350,7 +350,7 @@ output_format:
 ┌─────────────────────────────────────────────────────────────────────┐
 │                    Phase 5: ISA 配置                                 │
 │                                                                     │
-│    所有規格 ──▶ 產出 isa_codegen.yml ──▶ 可供 sdd.os 使用            │
+│    所有規格 ──▶ 產出 isa.yml ──▶ 可供 sdd.os 使用            │
 │                                                                     │
 └─────────────────────────────────────────────────────────────────────┘
                                     │
@@ -385,7 +385,7 @@ PRD/ES → Discovery → Clarify → Formulation（初版 spec / 草稿批量生
                                     ↓
                     Actions Design → actions.yml
                                     ↓
-                    ISA Config → isa_codegen.yml ✅
+                    ISA Config → isa.yml ✅
 ```
 
 ### 迭代釐清機制詳解
@@ -511,7 +511,7 @@ Agent 本質上是無狀態的（Stateless），但迭代式釐清需要跨輪�
 **階段說明**：
 - **階段 0**：從零開始的業務探索（可選）
 - **階段 1-3**：需求釐清與規格產出
-- **階段 4-5**：規格轉換為開發規格（actions.yml + isa_codegen.yml）
+- **階段 4-5**：規格轉換為開發規格（actions.yml + isa.yml）
 - **階段 6**：需求變更的跨規格協調
 
 ---
@@ -553,7 +553,7 @@ npx ts-node bdd-spec/scripts/validate-feature.ts spec/features/
 |------|------|----------|
 | `bdd-spec/resources/templates/feature.template` | Feature File 模板（四類規則） | 撰寫 Feature 時 |
 | `bdd-spec/resources/templates/actions.template.yml` | actions.yml 模板 | Actions 設計時 |
-| `bdd-spec/resources/templates/isa-config.template.yml` | isa_codegen.yml 模板 | ISA 配置時 |
+| `bdd-spec/resources/templates/isa-config.template.yml` | isa.yml 模板 | ISA 配置時 |
 | `bdd-spec/resources/examples/` | 完整範例參考 | 需要參考時 |
 
 ---

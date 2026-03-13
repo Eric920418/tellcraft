@@ -1,24 +1,37 @@
-# 規格表達規則（sdd.os ISA 格式 - Server Actions 版）
+# 規格表達規則（sdd.os ISA SpecFormula 標準）
 
 ## 核心原則：無腦補或任意假設原則
 **嚴格遵守原始規格文本內容，如果需求中沒有明確寫出的欄位、規則、條件或行為，就不要加入。不要擅自假設、推測或補充任何需求中不存在的內容。**
 
 ---
 
-## sdd.os ISA Gherkin 說明（Server Actions 版）
+## sdd.os ISA Gherkin 說明（SpecFormula 標準）
 
-本規範採用 **sdd.os ISA (Implementation-Specific Abstraction)** Gherkin 格式，針對 **Next.js Server Actions + Supabase** 技術棧設計：
+本規範採用 **sdd.os ISA SpecFormula 標準** Gherkin 格式，針對 **Next.js Server Actions + Supabase** 技術棧設計：
 
 | 特點 | 說明 |
 |------|------|
-| Action 呼叫格式 | `{summary}, call table:` |
-| 成功回應格式 | `{summary}成功, with table:` |
-| Entity 驗證格式 | `存在一個{entity}, with table:` |
+| Action 呼叫格式 | `(No Actor\|UID="$var") {summary}, call table:` |
+| 成功回應格式 | `{summary}(STATUS)回應, with table:` |
+| 成功回應 JSON 格式 | `{summary}(STATUS)回應為, with JSON:` |
+| Entity 存在驗證格式 | `應該存在一個{entity}, with table:` |
+| Entity 不存在驗證格式 | `應該不存在一個{entity}, with table:` |
 | 操作失敗格式 | `操作失敗` |
+| 時間控制格式 | `現在時間為 "{datetime}"` |
+
+### VAR 系統
+
+| 前綴 | 名稱 | 用途 | 範例 |
+|------|------|------|------|
+| `>` | Context Key | Given 中宣告上下文鍵 | `>TestUser.id` |
+| `$` | Variable | 引用已宣告的值 | `$TestUser.id` |
+| `<` | Execution Key | 捕捉執行結果 | `<userId` |
+
+特殊值：`$notnull`（非空即可）
 
 **核心價值**：
-- 直接對應 sdd.os 的 ISA 配置（`isa_codegen.yml`）
-- 可透過 sdd.os 自動生成測試程式碼（呼叫 Server Actions）
+- 直接對應 sdd.os 的 ISA 配置（`isa.yml`）
+- 可透過 sdd.os SpecFormula 自動生成測試程式碼（呼叫 Server Actions）
 - 與 Actions 規格（`spec/actions/actions.yml`）整合
 - 使用 Supabase Client 進行 Entity 驗證
 
@@ -125,20 +138,20 @@ Rule: 前置（參數）- 數量必須大於 0 且購物車應更新
 
     Scenario Outline: 缺少 <缺少參數> 時操作失敗
       Given 準備一個用戶, with table:
-        | userId | name  |
-        | 1      | Alice |
+        | >User1.id | name  |
+        | <userId   | Alice |
       And 準備一個商品, with table:
-        | productId | name | price | stock |
-        | 1         | 蘋果 | 50    | 10    |
-      When 將商品加入購物車, call table:
-        | userId | productId | quantity |
-        | 1      | <商品ID>  | <數量>   |
+        | >Prod1.id  | name | price | stock |
+        | <productId | 蘋果 | 50    | 10    |
+      When (UID="$User1.id") 將商品加入購物車, call table:
+        | userId    | productId | quantity |
+        | $User1.id | <商品ID>  | <數量>   |
       Then 操作失敗
 
       Examples:
-        | 缺少參數 | 商品ID | 數量 |
-        | 商品 ID  |        | 1    |
-        | 數量     | 1      |      |
+        | 缺少參數 | 商品ID      | 數量 |
+        | 商品 ID  |             | 1    |
+        | 數量     | $Prod1.id   |      |
 ```
 
 此為原子化的常見例外：多個缺少參數的情境共享同一驗證模式（必要參數缺少 → 失敗），合併可減少冗餘。
@@ -162,7 +175,7 @@ Rule: 前置（參數）- 數量必須大於 0 且購物車應更新
 - **CHECK**：屬性值約束
 - **Foreign Key**：實體間的關聯
 
-## Gherkin Language 格式（功能模型 - sdd.os ISA Server Actions 版）
+## Gherkin Language 格式（功能模型 - sdd.os ISA SpecFormula 標準）
 
 用於描述功能規格，採用三層式結構：Feature > Rule > Example。每個功能獨立一份文件於 `spec/features/<中文功能簡稱>.feature`。
 
@@ -171,6 +184,7 @@ Rule: 前置（參數）- 數量必須大於 0 且購物車應更新
 - **必須在檔案開頭註解 Action 資訊**：
   ```gherkin
   # Action: actionFunctionName
+  # [POST] /api/action-path
   # Summary: 功能名稱
   Feature: 功能名稱
   ```
@@ -215,23 +229,23 @@ Given 有兩種方式建立前置狀態，Command 與 Query 類型的 Feature �
 
 ```gherkin
 Given 準備一個訂單, with table:
-  | id        | status | totalAmount |
-  | ORDER-123 | 已付款  | 1500        |
+  | >Order1.id | status | totalAmount |
+  | <orderId   | 已付款  | 1500        |
 ```
 
 **適用時機**：Aggregate 的不變條件（Invariant）簡單、手動設值不易出錯。
 
 ## 選擇 B：透過 Commands 設定
 
-使用 `{summary}, call table:` 語法透過 Server Action 建立資料：
+使用 `(UID="$var") {summary}, call table:` 語法透過 Server Action 建立資料：
 
 ```gherkin
-Given 建立訂單, call table:
-  | customerId | items                              |
-  | C001       | [{"productId":"P001","quantity":1}] |
-And 完成付款, call table:
-  | orderId   | amount |
-  | ORDER-123 | 1500   |
+Given (UID="$Customer1.id") 建立訂單, call table:
+  | customerId    | items                                       |
+  | $Customer1.id | [{"productId":"$Product1.id","quantity":1}]  |
+And (UID="$Customer1.id") 完成付款, call table:
+  | orderId     | amount |
+  | $Order1.id  | 1500   |
 ```
 
 **適用時機**：Aggregate 有複雜的 Invariant（如「總金額 = Σ品項金額 + 運費 - 折扣」），手動設值容易違反約束。透過 Commands 讓系統自動計算與守護 Invariant。
@@ -248,17 +262,17 @@ And 完成付款, call table:
 **推薦混合使用**：簡單的 Aggregate 用選擇 A，複雜的用選擇 B。
 
 ```gherkin
-Given 準備一個商品, with table:                              # 選擇 A（簡單）
-  | id       | name    | price | stock |
-  | PROD-001 | MacBook | 45000 | 10    |
-And 建立訂單, call table:                                    # 選擇 B（複雜）
-  | customerId | items                                  |
-  | C001       | [{"productId":"PROD-001","quantity":1}] |
+Given 準備一個商品, with table:                                                # 選擇 A（簡單）
+  | >Prod1.id   | name    | price | stock |
+  | <productId  | MacBook | 45000 | 10    |
+And (UID="$Customer1.id") 建立訂單, call table:                                # 選擇 B（複雜）
+  | customerId    | items                                     |
+  | $Customer1.id | [{"productId":"$Prod1.id","quantity":1}]  |
 ```
 
 ---
 
-# sdd.os ISA Gherkin 語法規範（Server Actions 版）
+# sdd.os ISA Gherkin 語法規範（SpecFormula 標準）
 
 ## Given 步驟（資料準備）
 
@@ -267,8 +281,15 @@ And 建立訂單, call table:                                    # 選擇 B（�
 ```gherkin
 # 格式：準備一個{Entity 中文名稱}, with table:
 Given 準備一個商品, with table:
-  | id   | name     | price | stock |
-  | P001 | 宮保雞丁  | 120   | 50    |
+  | >Product1.id | name     | price | stock |
+  | <productId   | 宮保雞丁  | 120   | 50    |
+```
+
+### 時間控制（可選）
+
+```gherkin
+# 格式：現在時間為 "{ISO datetime}"
+Given 現在時間為 "2026-01-15T10:00:00Z"
 ```
 
 ## When 步驟（Action 呼叫）
@@ -278,29 +299,35 @@ Given 準備一個商品, with table:
 **Server Action 呼叫必須使用以下格式**：
 
 ```gherkin
-# 格式：{Action Summary}, call table:
-When {功能名稱}, call table:
-  | param1 | param2 | param3 |
-  | value1 | value2 | value3 |
+# 格式：(No Actor|UID="$var") {Action Summary}, call table:
+When (No Actor) {功能名稱}, call table:
+  | param1       | param2 | param3 |
+  | $Context.id  | value2 | value3 |
+
+# 帶身份的呼叫：
+When (UID="$TestUser.id") {功能名稱}, call table:
+  | param1      | param2 |
+  | $Product.id | value2 |
 ```
 
 **注意**：
 - `{功能名稱}` 必須與 Feature 名稱一致（也對應 actions.yml 的 summary）
-- DataTable 的欄位名稱對應 Server Action 的輸入參數
+- Actor 前綴必須存在：`(No Actor)` 表示無需身份、`(UID="$var")` 表示帶使用者身份
+- DataTable 的欄位名稱對應 Server Action 的輸入參數，使用 `$` 引用 Given 中宣告的變數
 - Given 用於設定前置資料，When 用於執行測試操作
 
 ### 範例
 
 ```gherkin
-# 建立訂單 → 對應 Server Action: createOrder
-When 建立訂單, call table:
-  | customerId | items                                                        |
-  | C001       | [{"productId":"P001","quantity":2},{"productId":"P002","quantity":1}] |
+# 建立訂單 → 對應 Server Action: createOrder（帶身份）
+When (UID="$Customer1.id") 建立訂單, call table:
+  | customerId     | items                                                              |
+  | $Customer1.id  | [{"productId":"$Product1.id","quantity":2}]                         |
 
-# 查詢訂單 → 對應 Server Action: getOrder
-When 查詢訂單, call table:
-  | orderId |
-  | O001    |
+# 查詢訂單 → 對應 Server Action: getOrder（無需身份）
+When (No Actor) 查詢訂單, call table:
+  | orderId     |
+  | $Order1.id  |
 ```
 
 ---
@@ -309,12 +336,25 @@ When 查詢訂單, call table:
 
 ### 格式規範
 
-**成功回應驗證**：
+**成功回應驗證（DataTable）**：
 ```gherkin
-# 格式：{Action Summary}成功, with table:
-Then {功能名稱}成功, with table:
-  | field1 | field2 | field3 |
-  | value1 | value2 | value3 |
+# 格式：{Action Summary}(HTTP_STATUS)回應, with table:
+Then 建立訂單(201)回應, with table:
+  | >order.id  | totalAmount | status  |
+  | <orderId   | 340         | pending |
+```
+
+**成功回應驗證（JSON）**：
+```gherkin
+# 格式：{Action Summary}(HTTP_STATUS)回應為, with JSON:
+Then 查詢訂單(200)回應為, with JSON:
+  """
+  {
+    "orderId": "$Order1.id",
+    "totalAmount": 340,
+    "status": "pending"
+  }
+  """
 ```
 
 **操作失敗（錯誤情境）**：
@@ -322,13 +362,26 @@ Then {功能名稱}成功, with table:
 Then 操作失敗
 ```
 
+### 常用 HTTP Status Code
+
+| Status | 用途 |
+|--------|------|
+| `200` | 查詢/更新成功 |
+| `201` | 建立成功 |
+| `204` | 刪除成功（無回應 body） |
+
 ### 範例
 
 ```gherkin
-# 成功建立
-Then 建立訂單成功, with table:
-  | orderId | totalAmount | status  |
-  | O001    | 340         | pending |
+# 成功建立（201）
+Then 建立訂單(201)回應, with table:
+  | >order.id | totalAmount | status  |
+  | <orderId  | 340         | pending |
+
+# 成功查詢（200）
+Then 查詢訂單(200)回應, with table:
+  | orderId     | totalAmount |
+  | $Order1.id  | 340         |
 
 # 操作失敗
 Then 操作失敗
@@ -340,34 +393,47 @@ Then 操作失敗
 
 ### 格式規範
 
+**驗證 Entity 存在**：
 ```gherkin
-# 格式：存在一個{Entity 中文名稱}, with table:
-And 存在一個訂單, with table:
-  | id   | customerId | totalAmount | status  |
-  | O001 | C001       | 340         | pending |
+# 格式：應該存在一個{Entity 中文名稱}, with table:
+And 應該存在一個訂單, with table:
+  | orderId     | customerId     | totalAmount | status  |
+  | $order.id   | $Customer1.id  | 340         | pending |
+```
+
+**驗證 Entity 不存在**：
+```gherkin
+# 格式：應該不存在一個{Entity 中文名稱}, with table:
+And 應該不存在一個訂單, with table:
+  | orderId     |
+  | $order.id   |
 ```
 
 **注意**：
 - Entity 名稱必須與 `entity_to_table_mapping.yml` 中的定義一致
 - 欄位名稱對應資料庫 schema（`spec/data/schema.sql`）中的欄位
+- 使用 `$` 引用之前宣告的變數
 
 ---
 
-## 完整 sdd.os ISA Feature 範例（Server Actions 版，四類規則）
+## 完整 sdd.os ISA Feature 範例（SpecFormula 標準，四類規則）
 
 ```gherkin
 # Action: createOrder
+# [POST] /api/orders
 # Summary: 建立訂單
 Feature: 建立訂單
 
   Background:
     Given 準備一個商品, with table:
-      | id   | name     | price | stock |
-      | P001 | 宮保雞丁  | 120   | 50    |
-      | P002 | 麻婆豆腐  | 100   | 30    |
+      | >Product1.id | name     | price | stock |
+      | <product1Id  | 宮保雞丁  | 120   | 50    |
+    And 準備一個商品, with table:
+      | >Product2.id | name     | price | stock |
+      | <product2Id  | 麻婆豆腐  | 100   | 30    |
     And 準備一個顧客, with table:
-      | id   | name | memberLevel |
-      | C001 | 小明 | gold        |
+      | >Customer1.id | name | memberLevel |
+      | <customerId   | 小明 | gold        |
 
   # ========== 前置條件 ==========
 
@@ -376,23 +442,23 @@ Feature: 建立訂單
   #------------------------------------------------------------
 
     Example: 庫存充足時成功建立訂單
-      When 建立訂單, call table:
-        | customerId | items                              |
-        | C001       | [{"productId":"P001","quantity":2}] |
-      Then 建立訂單成功, with table:
-        | orderId | totalAmount |
-        | O002    | 240         |
-      And 存在一個商品, with table:
-        | id   | stock |
-        | P001 | 48    |
+      When (UID="$Customer1.id") 建立訂單, call table:
+        | customerId      | items                                        |
+        | $Customer1.id   | [{"productId":"$Product1.id","quantity":2}]   |
+      Then 建立訂單(201)回應, with table:
+        | >order1.id | totalAmount |
+        | <orderId   | 240         |
+      And 應該存在一個商品, with table:
+        | productId     | stock |
+        | $Product1.id  | 48    |
 
     Example: 庫存不足時拒絕建立訂單
       Given 準備一個商品, with table:
-        | id   | name   | price | stock |
-        | P003 | 紅燒肉  | 150   | 3     |
-      When 建立訂單, call table:
-        | customerId | items                              |
-        | C001       | [{"productId":"P003","quantity":10}] |
+        | >Product3.id | name   | price | stock |
+        | <product3Id  | 紅燒肉  | 150   | 3     |
+      When (UID="$Customer1.id") 建立訂單, call table:
+        | customerId    | items                                         |
+        | $Customer1.id | [{"productId":"$Product3.id","quantity":10}]   |
       Then 操作失敗
 
   #------------------------------------------------------------
@@ -400,9 +466,9 @@ Feature: 建立訂單
   #------------------------------------------------------------
 
     Example: 空訂單被拒絕
-      When 建立訂單, call table:
-        | customerId | items |
-        | C001       | []    |
+      When (UID="$Customer1.id") 建立訂單, call table:
+        | customerId    | items |
+        | $Customer1.id | []    |
       Then 操作失敗
 
   # ========== 後置條件 ==========
@@ -412,30 +478,30 @@ Feature: 建立訂單
   #------------------------------------------------------------
 
     Example: 成功建立包含多品項的訂單
-      When 建立訂單, call table:
-        | customerId | items                                                        |
-        | C001       | [{"productId":"P001","quantity":2},{"productId":"P002","quantity":1}] |
-      Then 建立訂單成功, with table:
-        | orderId | totalAmount | status  |
-        | O001    | 340         | pending |
-      And 存在一個訂單, with table:
-        | id   | customerId | totalAmount | status  |
-        | O001 | C001       | 340         | pending |
+      When (UID="$Customer1.id") 建立訂單, call table:
+        | customerId    | items                                                                       |
+        | $Customer1.id | [{"productId":"$Product1.id","quantity":2},{"productId":"$Product2.id","quantity":1}] |
+      Then 建立訂單(201)回應, with table:
+        | >order2.id | totalAmount | status  |
+        | <orderId   | 340         | pending |
+      And 應該存在一個訂單, with table:
+        | orderId    | customerId    | totalAmount | status  |
+        | $order2.id | $Customer1.id | 340         | pending |
 
   #------------------------------------------------------------
   Rule: 後置（狀態）- 建立訂單後商品庫存應減少對應數量
   #------------------------------------------------------------
 
     Example: 庫存正確扣減
-      When 建立訂單, call table:
-        | customerId | items                              |
-        | C001       | [{"productId":"P001","quantity":3}] |
-      Then 建立訂單成功, with table:
-        | orderId | totalAmount |
-        | O003    | 360         |
-      And 存在一個商品, with table:
-        | id   | stock |
-        | P001 | 47    |
+      When (UID="$Customer1.id") 建立訂單, call table:
+        | customerId    | items                                        |
+        | $Customer1.id | [{"productId":"$Product1.id","quantity":3}]   |
+      Then 建立訂單(201)回應, with table:
+        | >order3.id | totalAmount |
+        | <orderId   | 360         |
+      And 應該存在一個商品, with table:
+        | productId    | stock |
+        | $Product1.id | 47    |
 ```
 
 **更多完整範例**：見 [`resources/examples/example-feature.feature`](../resources/examples/example-feature.feature)
@@ -503,13 +569,13 @@ Rule: 後置（回應）- ...（Query 類型）
 Rule: 後置（狀態）- ...（Command 類型）
 ```
 
-## C. 萃取規則的「例子 (Example)」- sdd.os ISA 格式（Server Actions 版）
+## C. 萃取規則的「例子 (Example)」- sdd.os ISA 格式（SpecFormula 標準）
 
 ### 必要元素
-1. **Given**：資料準備（使用 `準備一個{entity}, with table:`）
-2. **When**：Action 呼叫（使用 `{summary}, call table:`）
-3. **Then**：回應驗證（使用 `{summary}成功, with table:` 或 `操作失敗`）
-4. **And**（可選）：Entity 驗證（使用 `存在一個{entity}, with table:`）
+1. **Given**：資料準備（使用 `準備一個{entity}, with table:`，DataTable 使用 VAR 系統）
+2. **When**：Action 呼叫（使用 `(No Actor|UID="$var") {summary}, call table:`）
+3. **Then**：回應驗證（使用 `{summary}(STATUS)回應, with table:` 或 `操作失敗`）
+4. **And**（可選）：Entity 驗證（使用 `應該存在一個{entity}, with table:`）
 
 ### 資料驅動原則
 
@@ -525,12 +591,12 @@ Then 進度已更新
 **正確示範：**
 ```gherkin
 Given 準備一個用戶, with table:
-  | id | name  | email          | level | exp |
-  | 1  | Alice | alice@test.com | 1     | 0   |
-When 更新課程進度, call table:
-  | userId | lessonId | progress |
-  | 1      | 1        | 80       |
-Then 更新課程進度成功, with table:
+  | >User1.id | name  | email          | level | exp |
+  | <userId   | Alice | alice@test.com | 1     | 0   |
+When (UID="$User1.id") 更新課程進度, call table:
+  | userId    | lessonId | progress |
+  | $User1.id | 1        | 80       |
+Then 更新課程進度(200)回應, with table:
   | lessonId | progress | status |
   | 1        | 80       | 進行中 |
 ```
@@ -571,28 +637,30 @@ entity_to_table_mapping:
 ## Gherkin 輸出（`spec/features/*.feature`）
 
 **格式要求**：
-- 檔案開頭必須有 Action 註解（`# Action:` 和 `# Summary:`）
+- 檔案開頭必須有 Action 註解（`# Action:`、`# [METHOD] /path` 和 `# Summary:`）
 - Rule 必須標註四類之一（前置（狀態）/ 前置（參數）/ 後置（回應）/ 後置（狀態））
 - Rule 命名遵循嚴格句型：`<四類前綴> - <主詞> 必須/應 <單一條件>`
-- When 使用 `{summary}, call table:` 格式
-- Then 使用 `{summary}成功, with table:` 或 `操作失敗`
-- Entity 驗證使用 `存在一個{entity}, with table:`
+- When 使用 `(No Actor|UID="$var") {summary}, call table:` 格式
+- Then 使用 `{summary}(STATUS)回應, with table:` 或 `操作失敗`
+- Entity 驗證使用 `應該存在一個{entity}, with table:` 或 `應該不存在一個{entity}, with table:`
+- DataTable 使用 VAR 系統取代硬編碼 UUID
 
 ---
 
-# sdd.os ISA Gherkin 檢查清單（Server Actions 版，四類規則）
+# sdd.os ISA Gherkin 檢查清單（SpecFormula 標準，四類規則）
 
 在產出 Feature File 前，確認符合以下標準：
 
-- [ ] 檔案開頭有 `# Action: functionName` 和 `# Summary:` 註解
+- [ ] 檔案開頭有 `# Action: functionName`、`# [METHOD] /path` 和 `# Summary:` 註解
 - [ ] 每個 Rule 都標註四類之一（`前置（狀態）`/`前置（參數）`/`後置（回應）`/`後置（狀態）`）
 - [ ] 每個 Rule 命名遵循句型：`<四類前綴> - <主詞> 必須/應 <單一條件>`
 - [ ] 每個 Rule 只驗證一件事（原子化）
 - [ ] 至少有一條 `前置（參數）` Rule（必要參數檢查）
-- [ ] 每個 When 步驟使用 `{summary}, call table:` 格式
-- [ ] 成功情境使用 `{summary}成功, with table:` 格式
+- [ ] 每個 When 步驟使用 `(No Actor|UID="$var") {summary}, call table:` 格式
+- [ ] 成功情境使用 `{summary}(STATUS)回應, with table:` 格式
 - [ ] 失敗情境使用 `操作失敗`
-- [ ] Entity 驗證使用 `存在一個{entity}, with table:` 格式
+- [ ] Entity 驗證使用 `應該存在一個{entity}, with table:` 格式
 - [ ] Entity 名稱與 `entity_to_table_mapping.yml` 一致
+- [ ] DataTable 使用 VAR 系統（`>contextKey` / `$variable` / `<executionKey`）
 - [ ] DataTable 欄位名稱與 Supabase schema 定義一致
 - [ ] Given 設定方式選擇合理（簡單用 A、複雜用 B）

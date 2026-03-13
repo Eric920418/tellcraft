@@ -40,7 +40,7 @@
 - 完整 Types 對應 schema.sql
 
 ### Phase 5: ISA Config
-- 產出 `isa_codegen.yml`
+- 產出 `isa.yml`
 - 5 個 instruction 定義
 - 可供 sdd.os 工具使用
 
@@ -70,7 +70,7 @@
 - `spec/actions/actions.yml` - 8 個 Server Actions 定義
 
 ### ISA 配置
-- `isa_codegen.yml` - sdd.os 工具配置
+- `isa.yml` - sdd.os 工具配置
 
 ### Feature Files
 | Feature | Action | Rules | Examples |

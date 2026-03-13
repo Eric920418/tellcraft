@@ -1,0 +1,47 @@
+# SpecFormula E2E 驗證用 ISA Config
+# 完全自包含，不依賴生產環境
+
+config:
+  api:
+    resource_path: cucumber/e2e/api
+    project_path: .
+    time_format: iso
+
+  data:
+    permission: isolated
+    source:
+      - name: default
+        resource_path: cucumber/e2e/data
+        project_path: .
+        db_type: postgresql
+
+instructions:
+  - name: Entity setup
+    format: ^準備一個(?<entity>[\u4e00-\u9fffa-zA-Z0-9_]+), with table:$
+    instruction_type: entity_setup
+
+  - name: Time control
+    format: ^現在時間為 "(?<datetime>[^"]+)"$
+    instruction_type: time_control
+
+  - name: Action call
+    format: ^\((?:No Actor|UID="(?<actor>[^"]+)")\) (?<summary>.+?), call table:$
+    instruction_type: api_call
+
+  - name: Response validation (DataTable)
+    format: ^(?<summary>.+?)\((?<status_code>\d{3})\)回應,?\s*with table:$
+    instruction_type: response_validate
+    data_format: data_table
+
+  - name: Response validation (JSON)
+    format: ^(?<summary>.+?)\((?<status_code>\d{3})\)回應為,?\s*with JSON:$
+    instruction_type: response_validate
+    data_format: json
+
+  - name: Entity validate
+    format: ^應該存在一個(?<entity>[\u4e00-\u9fffa-zA-Z0-9_]+), with table:$
+    instruction_type: entity_validate
+
+  - name: Entity non-existence
+    format: ^應該不存在一個(?<entity>[\u4e00-\u9fffa-zA-Z0-9_]+), with table:$
+    instruction_type: entity_non_existence_validate

@@ -1,0 +1,63 @@
+# isa.yml - SpecFormula 標準配置
+# Tellcraft BDD 自動化測試
+
+config:
+  api:
+    resource_path: ../spec/api
+    project_path: .
+    time_format: iso
+
+  data:
+    permission: isolated
+    source:
+      - name: default
+        resource_path: ../spec/data
+        project_path: .
+        db_type: postgresql
+
+instructions:
+  # ============================================
+  # Given 步驟 - 資料準備
+  # ============================================
+
+  - name: Entity setup
+    format: ^準備一個(?<entity>[\u4e00-\u9fffa-zA-Z0-9_]+), with table:$
+    instruction_type: entity_setup
+
+  - name: Time control
+    format: ^現在時間為 "(?<datetime>[^"]+)"$
+    instruction_type: time_control
+
+  # ============================================
+  # When 步驟 - API 呼叫
+  # ============================================
+
+  - name: Action call
+    format: ^\((?:No Actor|UID="(?<actor>[^"]+)")\) (?<summary>.+?), call table:$
+    instruction_type: api_call
+
+  # ============================================
+  # Then 步驟 - 回應驗證
+  # ============================================
+
+  - name: Response validation (DataTable)
+    format: ^(?<summary>.+?)\((?<status_code>\d{3})\)回應,?\s*with table:$
+    instruction_type: response_validate
+    data_format: data_table
+
+  - name: Response validation (JSON)
+    format: ^(?<summary>.+?)\((?<status_code>\d{3})\)回應為,?\s*with JSON:$
+    instruction_type: response_validate
+    data_format: json
+
+  # ============================================
+  # Then 步驟 - Entity 驗證
+  # ============================================
+
+  - name: Entity validate
+    format: ^應該存在一個(?<entity>[\u4e00-\u9fffa-zA-Z0-9_]+), with table:$
+    instruction_type: entity_validate
+
+  - name: Entity non-existence
+    format: ^應該不存在一個(?<entity>[\u4e00-\u9fffa-zA-Z0-9_]+), with table:$
+    instruction_type: entity_non_existence_validate

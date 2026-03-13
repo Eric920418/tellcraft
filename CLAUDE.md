@@ -308,14 +308,22 @@ Layer 5: sanitizeCodeForDeploy 修復 7 — useSearchParams Suspense boundary �
 - ESLint（`pnpm lint`）
 - Quality Gate 靜態檢查（A11y/Performance/CodeQuality）
 
-## BDD 規格格式（sdd.os ISA）
+## BDD 規格格式（sdd.os ISA SpecFormula 標準）
 
 | 步驟類型 | 格式 |
 |----------|------|
-| Action 呼叫 | `{summary}, call table:` |
-| 成功回應 | `{summary}成功, with table:` |
+| 資料準備 | `準備一個{entity}, with table:` |
+| 時間控制 | `現在時間為 "{datetime}"` |
+| Action 呼叫 | `(No Actor\|UID="$var") {summary}, call table:` |
+| 成功回應 | `{summary}(STATUS)回應, with table:` |
+| 成功回應 JSON | `{summary}(STATUS)回應為, with JSON:` |
 | 操作失敗 | `操作失敗` |
-| Entity 驗證 | `存在一個{entity}, with table:` |
+| Entity 驗證 | `應該存在一個{entity}, with table:` |
+| Entity 不存在 | `應該不存在一個{entity}, with table:` |
+
+VAR 系統：`>ContextName.field`（宣告）/ `$ContextName.field`（引用）/ `<executionKey`（捕獲）/ `$notnull`（非空驗證）
+
+Feature 註解：`# Action: actionName` + `# [METHOD] /path` + `# Summary: xxx`
 
 驗證錯誤代碼：E001 缺 Action 註解、E002 缺 Summary、E003 缺 Feature、E004 Summary 不一致、E005 Rule 缺標註、E006 When 格式錯、E008 沒 Example
 

@@ -172,7 +172,7 @@ Phase 3: Spec Discovery + Clarify
     → DB 保留原始技術 question/options（供 Formulation 消費）
 
 Phase 4: Actions Design → actions.yml（Sonnet LLM）
-Phase 5: ISA Config → isa_codegen.yml（100% 規則式，零 LLM）
+Phase 5: ISA Config → isa.yml（SpecFormula 標準，100% 規則式，零 LLM）
 Phase 6: Change Management（需求變更 → 影響分析 → 執行修改 → 一致性驗證）
 ```
 
@@ -572,7 +572,23 @@ tellcraft-backend/
 │   │   ├── env.ts               # Zod 環境變數驗證，啟動時快速失敗
 │   │   ├── anthropic.ts         # 統一 Anthropic Client + MODEL 常數 + PRICING + trackLlmUsage
 │   │   ├── cache.ts             # 通用 Redis 快取（cached + invalidateCache）
-│   │   └── logger.ts            # Pino logger 工廠
+│   │   ├── logger.ts            # Pino logger 工廠
+│   │   └── specformula/         # SpecFormula TS（Java Reference Impl 移植，27 檔 ~3800 行）
+│   │       ├── index.ts             # Public API 匯出
+│   │       ├── context/             # ScenarioContext（per-scenario 狀態）
+│   │       ├── helper/              # ISAFeatureArgumentResolver（VAR/CAS/TIME 三系統核心）
+│   │       │                        # NamingConverter + TypeConverter
+│   │       ├── http/                # HttpClientAdapter + TestRequest/Response + SupertestAdapter
+│   │       ├── instruction/         # 7 個指令：TimeControl / EntitySetup / EntityValidate
+│   │       │                        # EntityNonExistenceValidate / ApiCall
+│   │       │                        # DataTableResponseValidate / JsonResponseValidate
+│   │       ├── dialect/             # DatabaseDialect（PostgreSQL only）
+│   │       ├── spec/                # ISA/API/DDL 讀取器 + Models
+│   │       └── cucumber/            # Cucumber.js 整合（bootstrap + registerSteps + factory）
+│   │
+│   │   # SpecFormula 驗證（8 測試檔 204 案例 + E2E Cucumber 2 scenarios 9 steps）
+│   │   # 執行：pnpm vitest run src/__tests__/specformula/
+│   │   # E2E：TEST_DATABASE_URL=postgresql://localhost/test_db pnpm bdd
 │   ├── schemas/                  # Zod API 請求 schema（conversation/session/operations/bdd/project/template-submit）
 │   ├── db/client.ts              # PostgreSQL 客戶端
 │   └── middleware/

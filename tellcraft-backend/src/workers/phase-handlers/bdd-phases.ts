@@ -2911,7 +2911,7 @@ export async function completeSpecPhase(
   if (featureCount > 0) outputs.push(`${featureCount} 個功能規格 (Feature Files)`)
   if (generatedActionsYml) outputs.push('Server Actions 規格 (actions.yml)')
   if (generatedOpenApiSpec) outputs.push('OpenAPI 3.0 規格 (openapi.yml)')
-  if (generatedIsaConfig) outputs.push('ISA 配置 (isa_codegen.yml)')
+  if (generatedIsaConfig) outputs.push('ISA 配置 (isa.yml)')
 
   await sendMessage(conversationId, io, {
     content: `規格產出完成！\n\n已生成：\n${outputs.map(o => `- ${o}`).join('\n')}\n\n你可以在專案詳情頁面查看完整規格。`,

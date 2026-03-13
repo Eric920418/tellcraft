@@ -26,13 +26,13 @@ actions:
 
     featureFile: spec/features/建立訂單.feature
     rules:
-      - rule: 後置 - 訂單總額為所有品項小計加總
-        step: "Then 建立訂單成功, with table:"
-      - rule: 前置 - 建立訂單前必須檢查庫存
+      - rule: 後置（狀態）- 訂單總額為所有品項小計加總
+        step: "Then 建立訂單(201)回應, with table:"
+      - rule: 前置（狀態）- 建立訂單前必須檢查庫存
         step: "Then 操作失敗"
-      - rule: 前置 - 訂單必須包含至少一個品項
+      - rule: 前置（參數）- 訂單必須包含至少一個品項
         step: "Then 操作失敗"
-      - rule: 前置 - 品項數量必須大於 0
+      - rule: 前置（參數）- 品項數量必須大於 0
         step: "Then 操作失敗"
 
     input:
@@ -82,9 +82,9 @@ actions:
 
     featureFile: spec/features/查詢訂單.feature
     rules:
-      - rule: 後置 - 可根據訂單編號查詢訂單詳情
-        step: "Then 查詢訂單成功, with table:"
-      - rule: 前置 - 訂單必須存在
+      - rule: 後置（回應）- 可根據訂單編號查詢訂單詳情
+        step: "Then 查詢訂單(200)回應, with table:"
+      - rule: 前置（狀態）- 訂單必須存在
         step: "Then 操作失敗"
 
     input:
@@ -124,11 +124,11 @@ actions:
 
     featureFile: spec/features/取消訂單.feature
     rules:
-      - rule: 後置 - 取消訂單後狀態變更為 cancelled
-        step: "Then 取消訂單成功, with table:"
-      - rule: 後置 - 取消訂單後恢復對應商品庫存
-        step: "And 存在一個商品, with table:"
-      - rule: 前置 - 只能取消 pending 狀態的訂單
+      - rule: 後置（狀態）- 取消訂單後狀態變更為 cancelled
+        step: "Then 取消訂單(200)回應, with table:"
+      - rule: 後置（狀態）- 取消訂單後恢復對應商品庫存
+        step: "And 應該存在一個商品, with table:"
+      - rule: 前置（狀態）- 只能取消 pending 狀態的訂單
         step: "Then 操作失敗"
 
     input:
@@ -155,8 +155,8 @@ actions:
 
     featureFile: spec/features/查詢商品列表.feature
     rules:
-      - rule: 後置 - 回傳所有上架商品
-        step: "Then 查詢商品列表成功, with table:"
+      - rule: 後置（回應）- 回傳所有上架商品
+        step: "Then 查詢商品列表(200)回應, with table:"
 
     input:
       type: ListProductsInput
