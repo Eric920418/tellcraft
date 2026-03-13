@@ -2671,7 +2671,11 @@ const font = DM_Sans({ subsets: ['latin'], variable: '--font-sans' })
 - 有 fixed navbar 時，main content 要加 padding-top 避免被遮擋
 - container max-width 全局統一（max-w-6xl 或 max-w-7xl），不要混用
 - Flex 子元素要加 min-w-0 — 否則 truncate/line-clamp 在 flex 容器裡不生效
-- <img> 必須有 explicit width + height 屬性（或用 next/image 的 fill）防止 CLS`
+- <img> 必須有 explicit width + height 屬性防止 CLS
+- 圖片佔位一律用 picsum seed URL：<img src="https://picsum.photos/seed/{英文關鍵字}/{寬}/{高}" width={寬} height={高} alt="描述" className="object-cover" />
+- 禁止用 /placeholder.png、/image.jpg 等本地路徑
+- seed 關鍵字用語義英文詞（hero、team-alice、product-shoes），同類型內容用同一 seed 保持一致
+- 常用尺寸：hero 1280×720、卡片 800×450、頭像 200×200、縮圖 400×300`
 }
 
 // ============================================================
@@ -2755,7 +2759,7 @@ function getBaseRulesFast(): string {
 ## 佈局防坑（常見 build/視覺 bug）
 - 有 fixed navbar 時 main content 加 padding-top
 - Flex 子元素加 min-w-0（否則 truncate 不生效）
-- <img> 必須有 width + height（防 CLS）
+- 圖片用 picsum seed：<img src="https://picsum.photos/seed/{關鍵字}/{寬}/{高}" width={寬} height={高} alt="..." className="object-cover" />（禁止本地路徑，必須有 width+height 防 CLS）
 - 所有可點擊元素 cursor-pointer`
 }
 
