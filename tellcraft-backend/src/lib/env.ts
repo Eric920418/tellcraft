@@ -47,6 +47,9 @@ const envSchema = z.object({
 
   // Supabase (used by deployer for storage)
   SUPABASE_SERVICE_ROLE_KEY: z.string().optional(),
+  // Supabase Management API（自動建立客戶 DB）
+  SUPABASE_ACCESS_TOKEN: z.string().optional(),
+  SUPABASE_ORG_ID: z.string().optional(),
   // Cloudflare / Porkbun (DNS)
   CLOUDFLARE_API_TOKEN: z.string().optional(),
   CLOUDFLARE_ACCOUNT_ID: z.string().optional(),

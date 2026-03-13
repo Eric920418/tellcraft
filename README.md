@@ -73,7 +73,7 @@ npx ts-node bdd-spec/scripts/validate-feature.ts spec/features/
 `VPS_API_URL` `NEXT_PUBLIC_VPS_API_URL` `NEXT_PUBLIC_VPS_WS_URL` `NEXT_PUBLIC_UPLOAD_BASE_URL` `NEXT_PUBLIC_SUPABASE_URL` `NEXT_PUBLIC_SUPABASE_ANON_KEY` `NEXT_PUBLIC_LIFF_ID` `NEXT_PUBLIC_SENTRY_DSN` `SENTRY_ORG` `SENTRY_PROJECT` `SENTRY_AUTH_TOKEN`
 
 **後端**（`tellcraft-backend/.env`）：
-`DATABASE_URL` `REDIS_URL` `JWT_SECRET` `ANTHROPIC_API_KEY` `GOOGLE_CLIENT_ID` `GOOGLE_CLIENT_SECRET` `LINE_CHANNEL_ID` `LINE_CHANNEL_SECRET` `LINE_BOT_CHANNEL_SECRET` `LINE_MESSAGING_CHANNEL_ACCESS_TOKEN` `LIFF_ID` `UPLOAD_DIR` `UPLOAD_BASE_URL` `SOCKET_VERBOSE_LOG`
+`DATABASE_URL` `REDIS_URL` `JWT_SECRET` `ANTHROPIC_API_KEY` `GOOGLE_CLIENT_ID` `GOOGLE_CLIENT_SECRET` `LINE_CHANNEL_ID` `LINE_CHANNEL_SECRET` `LINE_BOT_CHANNEL_SECRET` `LINE_MESSAGING_CHANNEL_ACCESS_TOKEN` `LIFF_ID` `UPLOAD_DIR` `UPLOAD_BASE_URL` `SOCKET_VERBOSE_LOG` `SUPABASE_ACCESS_TOKEN` `SUPABASE_ORG_ID`
 
 > `UPLOAD_BASE_URL` 必填（例如 `https://api.tellcraft.com/uploads/tellcraft`），未設定時 `/api/upload/image` 會回傳 `UPLOAD_BASE_URL_MISSING`。
 
@@ -111,6 +111,7 @@ npx ts-node bdd-spec/scripts/validate-feature.ts spec/features/
 | `domain-manager` | 域名管理：列出已有域名 / 引導購買或綁定 | — | 完成（VPS 後端 + Orchestrator） |
 | `domain-purchase` | 域名購買：RDAP 查詢 → Porkbun 註冊 → Cloudflare DNS → Vercel 綁定 | — | 完成（7 步 phase 狀態機 + 反向補償 rollback） |
 | `domain-dns` | 自有域名 DNS 綁定 + Cloudflare DNS CRUD | — | 完成（REST API + Orchestrator 對話流程） |
+| `supabase-provision` | BDD 完成後自動建立 Supabase DB + 套用推導的 Schema | — | 完成（fire-and-forget 背景建立，部署時自動注入 env） |
 
 ### 內部服務層
 
@@ -137,7 +138,7 @@ npx ts-node bdd-spec/scripts/validate-feature.ts spec/features/
 
 ### 兩種模式
 
-**精細模式（Fine）**：BDD 完成 → 模板匹配 → Discovery（Step 2 可上傳參考截圖，Vision 分析注入後續流程）→ Brief 確認 → 5 變體 → Structure → Animation → RWD → QG
+**精細模式（Fine）**：BDD 完成 → [Supabase DB 背景建立（付費用戶，從 BDD Entity 推導 Schema）] → 模板匹配 → Discovery（Step 2 可上傳參考截圖，Vision 分析注入後續流程）→ Brief 確認 → 5 變體 → Structure → Animation → RWD → QG → 部署（自動注入 Supabase env vars）
 
 **精細模式 + 自動採用**：PRD Clarify 第一題出現「全部自動採用 AI 建議」按鈕 → 自動回答所有 BDD 問題（propose→proposedAnswer / ask→建議選項或 A）→ 自動確認草稿 → 自動回答 Spec Clarify → 進入設計階段（手動）。BDD 互動從 7-11 次降到 1 次。`FlowState.autoAdoptMode` 在 `completeSpecPhase` 末尾清除，`autoAdoptAllPendingQuestions` 有 MAX_ITERATIONS=200 安全閥。
 
@@ -586,7 +587,7 @@ tellcraft-backend/
 │   │       ├── spec/                # ISA/API/DDL 讀取器 + Models
 │   │       └── cucumber/            # Cucumber.js 整合（bootstrap + registerSteps + factory）
 │   │
-│   │   # SpecFormula 驗證（8 測試檔 204 案例 + E2E Cucumber 2 scenarios 9 steps）
+│   │   # SpecFormula 驗證（8 測試檔 217 案例 + E2E Cucumber 2 scenarios 9 steps）
 │   │   # 執行：pnpm vitest run src/__tests__/specformula/
 │   │   # E2E：TEST_DATABASE_URL=postgresql://localhost/test_db pnpm bdd
 │   ├── schemas/                  # Zod API 請求 schema（conversation/session/operations/bdd/project/template-submit）
@@ -600,7 +601,8 @@ tellcraft-backend/
 
 bdd-spec/                 # BDD Skill 定義（instructions/ + rules/ + scripts/）
 uiux-skill/               # UIUX Skill 定義（instructions/ + rules/）
-spec/                     # BDD 規格產出（features/ + data/ + actions/）
+spec/                     # BDD 規格產出（features/ + data/ + actions/ + api/）
+│   └── api/              # OpenAPI Spec（4 檔 19 operations: conversation/session/project/bdd）
 ```
 
 ## 部署

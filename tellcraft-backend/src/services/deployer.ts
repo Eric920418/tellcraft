@@ -7,11 +7,13 @@ import { promisify } from 'util'
 import * as os from 'os'
 import * as path from 'path'
 import * as fsPromises from 'fs/promises'
+import type Redis from 'ioredis'
 import { getAnthropicClient, MODEL, trackLlmUsage } from '../lib/anthropic'
 import { getEnv } from '../lib/env'
 import * as db from '../db/client'
 import { createLogger } from '../lib/logger'
 import { repairMissingReactImports, repairBracketLookupAccess } from './uiux-generation'
+import { waitForSupabaseProvisioning } from './supabase-service'
 
 const logger = createLogger('deployer')
 const execFileAsync = promisify(execFile)
@@ -864,7 +866,8 @@ export async function executeDeployment(
     injectedFiles?: { file: string; data: string }[]
     siteMetadata?: SiteMetadata
   },
-  trackingContext?: { userId?: string; conversationId?: string }
+  trackingContext?: { userId?: string; conversationId?: string },
+  redis?: Redis
 ): Promise<DeployResult> {
   try {
     // 1. 取得專案名稱
@@ -904,6 +907,22 @@ export async function executeDeployment(
     if (!vercelProject) {
       // 已存在的話繼續部署
       logger.info({ projectName }, 'Vercel project 可能已存在，繼續部署')
+    }
+
+    // 3.5 Supabase env vars 注入（如有背景 provisioning 完成）
+    if (redis) {
+      try {
+        const supabaseInfo = await waitForSupabaseProvisioning(projectId, redis)
+        if (supabaseInfo) {
+          await injectVercelEnvVars(projectName, {
+            'NEXT_PUBLIC_SUPABASE_URL': supabaseInfo.url,
+            'NEXT_PUBLIC_SUPABASE_ANON_KEY': supabaseInfo.anonKey,
+          })
+          logger.info({ projectId, url: supabaseInfo.url }, 'Supabase env vars 已注入 Vercel')
+        }
+      } catch (err) {
+        logger.warn({ err, projectId }, 'Supabase env vars 注入失敗，繼續部署')
+      }
     }
 
     // 4. 部署檔案（70%）
@@ -2434,6 +2453,45 @@ async function verifyBuildLocally(
       await fsPromises.rm(tmpDir, { recursive: true, force: true })
     } catch (cleanupErr) {
       logger.error({ err: cleanupErr, tmpDir }, '清理臨時目錄失敗')
+    }
+  }
+}
+
+// ============================================================
+// Vercel Environment Variables 注入
+// ============================================================
+
+async function injectVercelEnvVars(
+  projectName: string,
+  envVars: Record<string, string>
+): Promise<void> {
+  const token = getEnv().VERCEL_ACCESS_TOKEN
+  if (!token) return
+
+  const teamId = getEnv().VERCEL_TEAM_ID
+  const params = new URLSearchParams()
+  if (teamId) params.append('teamId', teamId)
+
+  for (const [key, value] of Object.entries(envVars)) {
+    try {
+      const res = await fetch(`${VERCEL_API}/v10/projects/${encodeURIComponent(projectName)}/env?${params}`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          key,
+          value,
+          target: ['production', 'preview'],
+          type: 'encrypted',
+        }),
+      })
+      if (!res.ok && res.status !== 409) {
+        logger.warn({ key, status: res.status }, 'Vercel env var 注入失敗')
+      }
+    } catch (err) {
+      logger.warn({ err, key }, 'Vercel env var 注入異常')
     }
   }
 }

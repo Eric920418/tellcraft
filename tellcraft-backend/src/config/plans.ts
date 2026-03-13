@@ -46,6 +46,19 @@ export const PLAN_DOMAIN_LIMITS: Record<string, number> = {
   business: 3,
 }
 
+/** 方案 Supabase DB 數量上限（free 不可使用） */
+export const PLAN_SUPABASE_LIMITS: Record<string, number> = {
+  free: 0,
+  creator: 1,
+  pro: 3,
+  business: 5,
+}
+
+/** 取得方案 Supabase DB 上限 */
+export function getSupabaseLimit(plan: string): number {
+  return PLAN_SUPABASE_LIMITS[plan] ?? 0
+}
+
 /** 配額耗盡錯誤碼 */
 export const CREDIT_LIMIT_ERROR_CODE = 'CREDIT_LIMIT_REACHED'
 

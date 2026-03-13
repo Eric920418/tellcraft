@@ -1,0 +1,93 @@
+# Tellcraft Session API
+# SpecFormula BDD 自動化測試用
+
+openapi: "3.0.0"
+info:
+  title: Tellcraft Session API
+  version: "1.0.0"
+
+paths:
+  /api/session/initialize:
+    post:
+      summary: 建立對話
+      operationId: initializeSession
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                anonymousId:
+                  type: string
+                conversationId:
+                  type: string
+                createNew:
+                  type: boolean
+      responses:
+        "200":
+          description: 對話建立成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  userId:
+                    type: string
+                    format: uuid
+                  projectId:
+                    type: string
+                    format: uuid
+                  conversationId:
+                    type: string
+                    format: uuid
+                  messages:
+                    type: array
+                    items:
+                      type: object
+                  isNewUser:
+                    type: boolean
+                  isNewProject:
+                    type: boolean
+                  isNewConversation:
+                    type: boolean
+                  resumed:
+                    type: boolean
+        "400":
+          description: 缺少必要參數
+        "403":
+          description: 點數限制
+
+  /api/session/conversations:
+    get:
+      summary: 取得對話列表
+      operationId: getConversations
+      responses:
+        "200":
+          description: 對話列表
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  conversations:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id:
+                          type: string
+                          format: uuid
+                        projectId:
+                          type: string
+                          format: uuid
+                        projectName:
+                          type: string
+                        messageCount:
+                          type: integer
+                        lastMessage:
+                          type: string
+                        specComplete:
+                          type: boolean
+                        updatedAt:
+                          type: string

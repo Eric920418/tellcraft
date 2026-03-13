@@ -153,7 +153,8 @@ export async function handleDeployExecute(
         injectedFiles: preCheck.injectedFiles,
         siteMetadata,
       },
-      { userId: state.userId, conversationId }
+      { userId: state.userId, conversationId },
+      redis
     )
   } catch (err) {
     logger.error({ err: err }, 'handleDeployExecute 異常')
@@ -206,8 +207,22 @@ export async function handleDeployExecute(
       ? `\n\n目前是先上線已完成頁面；若要補完其餘頁面，可點「繼續生成（${remainingPages.length} 頁）」回到生成流程。`
       : ''
 
+    // 查詢 Supabase DB 資訊（如有）
+    let dbNote = ''
+    try {
+      const dbRow = await db.query<{ supabase_url: string; supabase_anon_key: string }>(
+        'SELECT supabase_url, supabase_anon_key FROM projects WHERE id = $1 AND supabase_url IS NOT NULL',
+        [projectId]
+      )
+      if (dbRow.rows[0]) {
+        dbNote = `\n\n**Supabase 資料庫已就緒**\n- URL: \`${dbRow.rows[0].supabase_url}\`\n- Anon Key: \`${dbRow.rows[0].supabase_anon_key.slice(0, 20)}...\``
+      }
+    } catch {
+      // 查詢失敗不影響部署成功訊息
+    }
+
     await sendMessage(conversationId, io, {
-      content: `**部署成功！**\n\n您的網站已上線：${result.deploymentUrl}\n\n---\n\n直接輸入修改建議即可迭代設計（如「把標題改大」「換個配色」）\n輸入「**回滾**」可恢復到之前的版本${continuationNote}`,
+      content: `**部署成功！**\n\n您的網站已上線：${result.deploymentUrl}${dbNote}\n\n---\n\n直接輸入修改建議即可迭代設計（如「把標題改大」「換個配色」）\n輸入「**回滾**」可恢復到之前的版本${continuationNote}`,
       stage: 'deployer_complete',
       richContent: {
         type: 'deploy_result',

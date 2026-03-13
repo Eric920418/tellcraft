@@ -1,0 +1,235 @@
+# Tellcraft BDD API
+# SpecFormula BDD 自動化測試用
+
+openapi: "3.0.0"
+info:
+  title: Tellcraft BDD API
+  version: "1.0.0"
+
+paths:
+  /api/bdd/session:
+    post:
+      summary: 建立BDD會話
+      operationId: createBddSession
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - conversationId
+                - originalRequirements
+              properties:
+                conversationId:
+                  type: string
+                originalRequirements:
+                  type: string
+                projectContext:
+                  type: string
+      responses:
+        "200":
+          description: BDD 會話建立成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  sessionId:
+                    type: string
+                    format: uuid
+
+  /api/bdd/session/{id}:
+    get:
+      summary: 取得BDD會話
+      operationId: getBddSession
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: BDD 會話詳情
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  session:
+                    type: object
+                    properties:
+                      id:
+                        type: string
+                        format: uuid
+                      projectId:
+                        type: string
+                        format: uuid
+                      conversationId:
+                        type: string
+                        format: uuid
+                      currentPhase:
+                        type: string
+                      currentRound:
+                        type: integer
+                      totalDiscovered:
+                        type: integer
+                      totalResolved:
+                        type: integer
+                      originalRequirements:
+                        type: string
+                      createdAt:
+                        type: string
+                      updatedAt:
+                        type: string
+
+  /api/bdd/session/{id}/answer:
+    post:
+      summary: 回答釐清問題
+      operationId: answerClarifyQuestion
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - itemId
+                - answer
+              properties:
+                itemId:
+                  type: string
+                answer:
+                  type: string
+      responses:
+        "200":
+          description: 回答成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  item:
+                    type: object
+                  remainingCount:
+                    type: integer
+
+  /api/bdd/session/{id}/confirm:
+    post:
+      summary: 確認規格
+      operationId: confirmSpec
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - itemIds
+              properties:
+                itemIds:
+                  type: array
+                  items:
+                    type: string
+      responses:
+        "200":
+          description: 確認成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  confirmedCount:
+                    type: integer
+                  remainingCount:
+                    type: integer
+
+  /api/bdd/session/{id}/revert:
+    post:
+      summary: 回退釐清項目
+      operationId: revertClarifyItem
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - itemId
+              properties:
+                itemId:
+                  type: string
+      responses:
+        "200":
+          description: 回退成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  item:
+                    type: object
+
+  /api/bdd/session/{id}/skip:
+    post:
+      summary: 跳過釐清問題
+      operationId: skipClarifyQuestion
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - itemId
+              properties:
+                itemId:
+                  type: string
+      responses:
+        "200":
+          description: 跳過成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  item:
+                    type: object

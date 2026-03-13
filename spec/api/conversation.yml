@@ -1,0 +1,166 @@
+# Tellcraft Conversation API
+# SpecFormula BDD 自動化測試用
+
+openapi: "3.0.0"
+info:
+  title: Tellcraft Conversation API
+  version: "1.0.0"
+
+paths:
+  /api/conversations/{id}/message:
+    post:
+      summary: 發送訊息
+      operationId: sendMessage
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - message
+                - projectId
+              properties:
+                message:
+                  type: string
+                projectId:
+                  type: string
+                userId:
+                  type: string
+                mode:
+                  type: string
+                  enum: [fast, fine]
+                locale:
+                  type: string
+                  enum: [zh, en]
+                imageUrls:
+                  type: array
+                  items:
+                    type: string
+      responses:
+        "200":
+          description: 訊息發送成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  messageId:
+                    type: string
+                    format: uuid
+                  jobId:
+                    type: string
+        "401":
+          description: 未認證
+        "403":
+          description: 權限不足
+        "404":
+          description: 對話不存在
+        "409":
+          description: 任務進行中
+        "429":
+          description: 請求過於頻繁
+
+  /api/conversations/{id}/reply:
+    post:
+      summary: 回覆訊息
+      operationId: replyMessage
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - message
+                - projectId
+              properties:
+                message:
+                  type: string
+                projectId:
+                  type: string
+                userId:
+                  type: string
+                taskId:
+                  type: string
+                specConfirmed:
+                  type: boolean
+                locale:
+                  type: string
+                  enum: [zh, en]
+                imageUrls:
+                  type: array
+                  items:
+                    type: string
+      responses:
+        "200":
+          description: 回覆成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  messageId:
+                    type: string
+                    format: uuid
+                  jobId:
+                    type: string
+
+  /api/conversations/{id}/messages:
+    get:
+      summary: 取得訊息列表
+      operationId: getMessages
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: lastUpdatedAt
+          in: query
+          required: false
+          schema:
+            type: string
+            description: ISO datetime for polling optimization
+      responses:
+        "200":
+          description: 訊息列表
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  messages:
+                    type: array
+                    items:
+                      type: object
+                  updatedAt:
+                    type: string
+                  hasChanges:
+                    type: boolean
+                  currentTaskId:
+                    type: string
+                    format: uuid
+                  taskStatus:
+                    type: string
+                  isComplete:
+                    type: boolean

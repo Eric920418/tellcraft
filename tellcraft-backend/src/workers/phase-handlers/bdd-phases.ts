@@ -28,6 +28,8 @@ import { generateIsaConfig } from '../../services/isa-config'
 import { validateAndFixFeatures } from '../../services/feature-validation'
 import { analyzeChangeImpact, executeChange, verifyConsistency, rollbackChange } from '../../services/change-management'
 import { matchTemplates } from '../../services/template-matcher'
+import { deriveSchemaFromBdd } from '../../services/schema-derivation'
+import { checkSupabaseQuota, provisionSupabaseDatabase } from '../../services/supabase-service'
 import { checkInputQuality } from '../../services/prefilter'
 import { sendMessage, saveFlowState, getFlowState, deleteFlowState, deductCredits } from '../orchestrator-utils'
 import { CREDIT_COSTS } from '../../config/plans'
@@ -2895,6 +2897,60 @@ export async function completeSpecPhase(
     }
   } catch (err) {
     logger.error({ err: err }, 'Phase 4/5 自動執行異常，降級跳過')
+  }
+
+  // ============================================================
+  // Supabase Database Provisioning（fire-and-forget）
+  // 從 BDD schemaSql 推導 DDL，背景建立 Supabase project
+  // 任何失敗都降級跳過，絕不阻塞 UIUX 流程
+  // ============================================================
+  try {
+    const env = (await import('../../lib/env')).getEnv()
+    if (schemaSql && state.userId && env.SUPABASE_ACCESS_TOKEN && env.SUPABASE_ORG_ID) {
+      const userRow = await db.query<{ plan: string }>(
+        'SELECT plan FROM users WHERE id = $1',
+        [state.userId]
+      )
+      const userPlan = userRow.rows[0]?.plan || 'free'
+      const quota = await checkSupabaseQuota(state.userId, userPlan)
+
+      if (quota.allowed) {
+        const derivedSchema = deriveSchemaFromBdd(schemaSql, entityMapping)
+
+        if (derivedSchema.entityCount > 0) {
+          const isZh = state.locale !== 'en'
+          await sendMessage(conversationId, io, {
+            content: isZh
+              ? `正在為你建立 Supabase 資料庫...\n\n偵測到 ${derivedSchema.entityCount} 個資料表：\n${derivedSchema.displaySummary}\n\n資料庫將在背景建立，你可以同時開始設計介面。`
+              : `Setting up your Supabase database...\n\nDetected ${derivedSchema.entityCount} tables:\n${derivedSchema.displaySummary}\n\nDatabase will be created in the background while you proceed with design.`,
+            stage: 'supabase_provisioning',
+            richContent: {
+              type: 'supabase_schema_preview',
+              data: { entities: derivedSchema.entities, entityCount: derivedSchema.entityCount },
+            },
+          })
+
+          // fire-and-forget — 不 await，不阻塞 UIUX 流程
+          provisionSupabaseDatabase({
+            projectId: state.projectId!,
+            projectName: `tc-${state.projectId!.slice(0, 8)}`,
+            schema: derivedSchema,
+            conversationId,
+            redis, io,
+            locale: state.locale,
+          }).catch(err => logger.error({ err }, 'Supabase provisioning 背景任務異常'))
+
+          state.supabaseProvisionStatus = 'provisioning'
+          state.supabaseProvisionStartedAt = Date.now()
+          state.supabaseDerivedSchema = {
+            displaySummary: derivedSchema.displaySummary,
+            entityCount: derivedSchema.entityCount,
+          }
+        }
+      }
+    }
+  } catch (err) {
+    logger.warn({ err }, 'Supabase provisioning 啟動失敗，降級跳過')
   }
 
   // 更新 session 為 spec_completed

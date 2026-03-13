@@ -130,6 +130,12 @@ export function hasDomainIntent(msg: string): boolean {
   return kw.some(k => msg.toLowerCase().includes(k))
 }
 
+export function hasDatabaseIntent(msg: string): boolean {
+  const kw = ['資料庫', '數據庫', 'database', 'supabase', 'db設定', '建資料庫']
+  const lower = msg.toLowerCase()
+  return kw.some(k => lower.includes(k))
+}
+
 export function hasChangeIntent(msg: string): boolean {
   const keywords = ['修改規格', '新增功能', '刪除功能', '變更需求', '調整規格', '改需求', '修改需求', '增加功能', '移除功能', '改規格']
   return keywords.some(k => msg.includes(k))

@@ -2,7 +2,7 @@
 // Skill 註冊表
 // ============================================================
 
-export type SkillName = 'bdd-spec' | 'coder' | 'uiux' | 'deployer' | 'domain-manager' | 'domain-purchase' | 'domain-dns' | 'quality-gate' | 'fast-build' | 'iteration'
+export type SkillName = 'bdd-spec' | 'coder' | 'uiux' | 'deployer' | 'domain-manager' | 'domain-purchase' | 'domain-dns' | 'quality-gate' | 'fast-build' | 'iteration' | 'supabase-provision'
 
 export interface SkillMetadata {
   name: SkillName
@@ -208,6 +208,22 @@ export const SKILL_REGISTRY: Record<SkillName, SkillMetadata> = {
       optional: [],
     },
   },
+
+  'supabase-provision': {
+    name: 'supabase-provision',
+    displayName: 'Supabase 資料庫',
+    description: '自動建立 Supabase 資料庫並套用 BDD 推導的 Schema',
+    triggerPatterns: [
+      '資料庫', 'database', 'supabase',
+    ],
+    minPlan: 'creator',
+    costLevel: 'low',
+    timeoutMs: 300000, // 5 分鐘
+    inputSchema: {
+      required: ['projectId'],
+      optional: [],
+    },
+  },
 }
 
 // ============================================================
@@ -246,7 +262,7 @@ export function canUserUseSkill(
 }
 
 // 內部 Skill：由狀態機或特殊模式觸發，不應出現在 Classifier 候選列表中
-const INTERNAL_SKILLS: Set<SkillName> = new Set(['uiux', 'quality-gate', 'fast-build', 'iteration'])
+const INTERNAL_SKILLS: Set<SkillName> = new Set(['uiux', 'quality-gate', 'fast-build', 'iteration', 'supabase-provision'])
 
 /**
  * 建立 Skill Registry 的文字描述（供 AI 分類用）
