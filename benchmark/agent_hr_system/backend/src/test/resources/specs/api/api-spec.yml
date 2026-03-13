@@ -1,0 +1,1395 @@
+openapi: 3.0.0
+info:
+  title: 特務人資系統 API
+  version: 1.0.0
+  description: |
+    彈性打卡出勤管理系統 API 規格
+
+    **時區說明**：所有時間欄位使用台灣時區 (UTC+8)
+    **工時精度**：工時計算以分鐘為單位，數值格式為小數點後兩位（符合台灣勞基法規定）
+    **認證說明**：使用 JWT Token，透過 HttpOnly Cookie 傳遞，除登入端點外所有 API 都需要認證
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: JWT Token 認證，登入後取得 token 填入此處
+
+security:
+  - bearerAuth: []
+
+paths:
+  /auth/register:
+    post:
+      summary: 特務註冊
+      description: 註冊新特務帳號
+      operationId: registerAgent
+      tags:
+        - Authentication
+      security: []  # 不需要認證
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - name
+                - email
+                - password
+              properties:
+                name:
+                  type: string
+                  description: 特務名稱
+                  example: "Alice"
+                email:
+                  type: string
+                  format: email
+                  description: 電子郵件（登入帳號）
+                  example: "alice@company.com"
+                password:
+                  type: string
+                  format: password
+                  description: 登入密碼
+                  example: "password123"
+                position:
+                  type: string
+                  description: 職位（可選）
+                  example: "Engineer"
+      responses:
+        "200":
+          description: 註冊成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  agentId:
+                    type: integer
+                    description: 特務編號
+                    example: 1
+                  name:
+                    type: string
+                    description: 特務名稱
+                    example: "Alice"
+                  email:
+                    type: string
+                    description: 電子郵件
+                    example: "alice@company.com"
+                  message:
+                    type: string
+                    description: 成功訊息
+                    example: "註冊成功"
+        "409":
+          description: Email 已被註冊
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                    description: 錯誤訊息
+                    example: "Email 已被註冊"
+        "400":
+          description: 輸入驗證失敗
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                    description: 錯誤訊息
+                    example: "email 格式錯誤"
+
+  /auth/login:
+    post:
+      summary: 特務登入
+      description: 使用 email 和密碼登入，成功後返回 JWT Token（透過 Set-Cookie）
+      operationId: loginAgent
+      tags:
+        - Authentication
+      security: []  # 不需要認證
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - email
+                - password
+              properties:
+                email:
+                  type: string
+                  format: email
+                  description: 登入帳號（特務 email）
+                  example: "alice@company.com"
+                password:
+                  type: string
+                  format: password
+                  description: 登入密碼
+                  example: "password123"
+      responses:
+        "200":
+          description: 登入成功
+          headers:
+            Set-Cookie:
+              description: JWT Token（HttpOnly Cookie）
+              schema:
+                type: string
+                example: "jwt=<token_value>; HttpOnly; Secure; SameSite=Lax; Max-Age=86400; Path=/"
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  token:
+                    type: string
+                    description: JWT Token（同時也會設定在 HttpOnly Cookie 中）
+                    example: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+                  agentId:
+                    type: integer
+                    description: 特務編號
+                    example: 1
+                  name:
+                    type: string
+                    description: 特務名稱
+                    example: "Alice"
+                  email:
+                    type: string
+                    description: 電子郵件
+                    example: "alice@company.com"
+                  message:
+                    type: string
+                    description: 成功訊息
+                    example: "登入成功"
+        "401":
+          description: 登入失敗（帳號或密碼錯誤）
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                    description: 錯誤訊息
+                    example: "帳號或密碼錯誤"
+        "400":
+          description: 輸入驗證失敗
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                    description: 錯誤訊息
+                    example: "email 格式錯誤"
+
+
+  /attendance/punch:
+    post:
+      summary: 打卡
+      description: 特務進行上班打卡（In）或下班打卡（Out）
+      operationId: punchAttendance
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - agentId
+                - punchType
+                - punchTime
+              properties:
+                agentId:
+                  type: integer
+                  description: 特務識別碼
+                  example: 1
+                punchType:
+                  type: string
+                  enum: [IN, OUT]
+                  description: 打卡類型（IN=上班, OUT=下班）
+                  example: "IN"
+                punchTime:
+                  type: integer
+                  format: int64
+                  description: 打卡時間戳記（毫秒，台灣時區 UTC+8）
+                  example: 1730678400000
+      responses:
+        "200":
+          description: 打卡成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  recordId:
+                    type: integer
+                    description: 打卡記錄 ID
+                    example: 1
+                  agentId:
+                    type: integer
+                    description: 特務識別碼
+                    example: 1
+                  punchType:
+                    type: string
+                    enum: [IN, OUT]
+                    description: 打卡類型
+                    example: "IN"
+                  punchTime:
+                    type: integer
+                    format: int64
+                    description: 打卡時間戳記（毫秒，台灣時區 UTC+8）
+                    example: 1730678400000
+                  dailyWorkHours:
+                    type: number
+                    format: float
+                    description: 當日累計工時（小時，小數點後兩位，以分鐘為單位計算）
+                    example: 2.25
+        "400":
+          description: 打卡失敗（業務規則違反）
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                    description: 錯誤訊息
+                    example: "必須先完成上一次的 Out 打卡"
+
+  /attendance/daily-summary:
+    get:
+      summary: 查詢當日工時摘要
+      description: 查詢特務當日的累計工時和打卡記錄
+      operationId: getDailySummary
+      parameters:
+        - name: agentId
+          in: query
+          required: true
+          schema:
+            type: integer
+          description: 特務識別碼
+          example: 1
+        - name: date
+          in: query
+          required: true
+          schema:
+            type: integer
+            format: int64
+          description: 查詢日期（毫秒時間戳記，台灣時區 UTC+8）
+          example: 1730678400000
+      responses:
+        "200":
+          description: 查詢成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  agentId:
+                    type: integer
+                    description: 特務識別碼
+                    example: 1
+                  date:
+                    type: integer
+                    format: int64
+                    description: 日期（毫秒時間戳記，台灣時區 UTC+8）
+                    example: 1730678400000
+                  totalWorkHours:
+                    type: number
+                    format: float
+                    description: 當日累計工時（小時）
+                    example: 8.0
+                  overtimeHours:
+                    type: number
+                    format: float
+                    description: 加班時數（小時）
+                    example: 0.0
+                  punchRecords:
+                    type: array
+                    description: 打卡記錄列表
+                    items:
+                      type: object
+                      properties:
+                        recordId:
+                          type: integer
+                          example: 1
+                        punchType:
+                          type: string
+                          enum: [IN, OUT]
+                          example: "IN"
+                        punchTime:
+                          type: integer
+                          format: int64
+                          description: 打卡時間戳記（毫秒）
+                          example: 1730678400000
+
+  /attendance/punch/{recordId}:
+    delete:
+      summary: 刪除打卡記錄
+      description: 刪除未完成的打卡記錄（只有 IN 沒有 OUT），IN 刪除時自動級聯刪除 OUT
+      operationId: deletePunchRecord
+      parameters:
+        - name: recordId
+          in: path
+          required: true
+          schema:
+            type: integer
+          description: 打卡記錄 ID
+          example: 1
+      responses:
+        "200":
+          description: 刪除成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                    description: 成功訊息
+                    example: "打卡記錄已刪除"
+                  deletedRecordIds:
+                    type: array
+                    description: 被刪除的記錄 ID 列表（包含級聯刪除）
+                    items:
+                      type: integer
+                    example: [1]
+        "400":
+          description: 刪除失敗
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                    description: 錯誤訊息
+                    example: "只能刪除未完成的打卡記錄"
+
+  /attendance/punch-records:
+    get:
+      summary: 查詢打卡紀錄
+      description: 查詢特務某一天的所有打卡記錄
+      operationId: getPunchRecords
+      parameters:
+        - name: agentId
+          in: query
+          required: true
+          schema:
+            type: integer
+          description: 特務識別碼
+          example: 1
+        - name: date
+          in: query
+          required: true
+          schema:
+            type: integer
+            format: int64
+          description: 查詢日期（毫秒時間戳記，台灣時區 UTC+8）
+          example: 1730678400000
+      responses:
+        "200":
+          description: 查詢成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  agentId:
+                    type: integer
+                    description: 特務識別碼
+                    example: 1
+                  date:
+                    type: integer
+                    format: int64
+                    description: 查詢日期（毫秒時間戳記，台灣時區 UTC+8）
+                    example: 1730678400000
+                  punchRecords:
+                    type: array
+                    description: 打卡記錄列表
+                    items:
+                      type: object
+                      properties:
+                        recordId:
+                          type: integer
+                          description: 打卡記錄 ID
+                          example: 1
+                        punchType:
+                          type: string
+                          enum: [IN, OUT]
+                          description: 打卡類型
+                          example: "IN"
+                        punchTime:
+                          type: integer
+                          format: int64
+                          description: 打卡時間戳記（毫秒）
+                          example: 1730678400000
+
+  /agents/{agentId}/leave-requests:
+    get:
+      summary: 查詢請假記錄
+      description: |
+        查詢特務的請假記錄，支援分頁、篩選、排序功能
+
+        **權限說明**：目前僅支援查詢本人記錄，JWT Token 中的 agentId 必須與路徑參數一致
+        **預設排序**：依請假日期降序（startDate DESC），最近的請假在最前面
+      operationId: getLeaveRequests
+      tags:
+        - Leave Management
+      parameters:
+        - name: agentId
+          in: path
+          required: true
+          schema:
+            type: integer
+          description: 特務編號
+          example: 1
+        - name: status
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [PENDING, APPROVED, REJECTED, CANCELLED]
+          description: 依狀態篩選（選填）
+          example: "PENDING"
+        - name: leaveType
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [SPECIAL_LEAVE, SICK_LEAVE, PERSONAL_LEAVE, MARRIAGE_LEAVE, FUNERAL_LEAVE]
+          description: 依假別類型篩選（選填）
+          example: "SPECIAL_LEAVE"
+        - name: startDate
+          in: query
+          required: false
+          schema:
+            type: integer
+            format: int64
+          description: 起始日期範圍篩選（選填，毫秒時間戳記）
+          example: 1730419200000
+        - name: endDate
+          in: query
+          required: false
+          schema:
+            type: integer
+            format: int64
+          description: 結束日期範圍篩選（選填，毫秒時間戳記）
+          example: 1733011200000
+        - name: page
+          in: query
+          required: false
+          schema:
+            type: integer
+            default: 1
+            minimum: 1
+          description: 頁碼（預設為 1）
+          example: 1
+        - name: pageSize
+          in: query
+          required: false
+          schema:
+            type: integer
+            default: 20
+            minimum: 1
+            maximum: 100
+          description: 每頁筆數（預設 20，最大 100）
+          example: 20
+        - name: sortBy
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [startDate, createdAt, status]
+            default: startDate
+          description: 排序欄位（預設為 startDate）
+          example: "startDate"
+        - name: order
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [ASC, DESC]
+            default: DESC
+          description: 排序方向（預設為 DESC）
+          example: "DESC"
+      responses:
+        "200":
+          description: 查詢成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  leaveRequests:
+                    type: array
+                    description: 請假記錄列表
+                    items:
+                      type: object
+                      properties:
+                        requestId:
+                          type: integer
+                          description: 申請編號
+                          example: 1
+                        agentId:
+                          type: integer
+                          description: 特務編號
+                          example: 1
+                        leaveType:
+                          type: string
+                          description: 假別類型
+                          example: "SPECIAL_LEAVE"
+                        startDate:
+                          type: integer
+                          format: int64
+                          description: 起假日期（毫秒時間戳記，台灣時區 UTC+8）
+                          example: 1731168000000
+                        endDate:
+                          type: integer
+                          format: int64
+                          description: 迄假日期（毫秒時間戳記，台灣時區 UTC+8）
+                          example: 1731168000000
+                        durationType:
+                          type: string
+                          description: 請假類型
+                          enum: [FULL_DAY, TIME_RANGE]
+                          example: "FULL_DAY"
+                        startTime:
+                          type: string
+                          format: time
+                          description: 起假時間（TIME_RANGE 時有值）
+                          example: "09:00:00"
+                        endTime:
+                          type: string
+                          format: time
+                          description: 迄假時間（TIME_RANGE 時有值）
+                          example: "17:00:00"
+                        reason:
+                          type: string
+                          description: 請假事由
+                          example: "年假休息"
+                        documentationPath:
+                          type: string
+                          description: 附件路徑
+                          example: "/uploads/medical-cert-001.pdf"
+                        status:
+                          type: string
+                          description: 申請狀態
+                          enum: [PENDING, APPROVED, REJECTED, CANCELLED]
+                          example: "PENDING"
+                        approvedBy:
+                          type: integer
+                          description: 核准人編號
+                          example: 5
+                        notes:
+                          type: string
+                          description: 備註
+                          example: "已確認附件"
+                        createdAt:
+                          type: integer
+                          format: int64
+                          description: 建立時間（毫秒時間戳記，台灣時區 UTC+8）
+                          example: 1730923800000
+                        updatedAt:
+                          type: integer
+                          format: int64
+                          description: 更新時間（毫秒時間戳記，台灣時區 UTC+8）
+                          example: 1730923800000
+                  total:
+                    type: integer
+                    description: 總筆數
+                    example: 10
+                  page:
+                    type: integer
+                    description: 當前頁碼
+                    example: 1
+                  pageSize:
+                    type: integer
+                    description: 每頁筆數
+                    example: 20
+        "401":
+          description: 未授權（JWT Token 無效或過期）
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                    description: 錯誤訊息
+                    example: "未授權，請重新登入"
+        "403":
+          description: 權限不足（嘗試查詢非本人記錄）
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                    description: 錯誤訊息
+                    example: "權限不足，僅能查詢本人記錄"
+
+  /leave-requests:
+    post:
+      summary: 提交請假申請
+      description: 特務提交請假申請，支援全日假和時段假
+      operationId: submitLeaveRequest
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - agentId
+                - leaveType
+                - startDate
+                - endDate
+                - durationType
+              properties:
+                agentId:
+                  type: integer
+                  description: 特務識別碼
+                  example: 1
+                leaveType:
+                  type: string
+                  description: 假別類型
+                  enum:
+                    [
+                      SPECIAL_LEAVE,
+                      SICK_LEAVE,
+                      PERSONAL_LEAVE,
+                      MARRIAGE_LEAVE,
+                      FUNERAL_LEAVE,
+                    ]
+                  example: "SPECIAL_LEAVE"
+                startDate:
+                  type: integer
+                  format: int64
+                  description: 起假日期（毫秒時間戳記，台灣時區 UTC+8）
+                  example: 1731168000000
+                endDate:
+                  type: integer
+                  format: int64
+                  description: 迄假日期（毫秒時間戳記，台灣時區 UTC+8）
+                  example: 1731168000000
+                durationType:
+                  type: string
+                  description: 請假類型（FULL_DAY=全日假，TIME_RANGE=時段假）
+                  enum: [FULL_DAY, TIME_RANGE]
+                  example: "FULL_DAY"
+                startTime:
+                  type: string
+                  format: time
+                  description: 起假時間（TIME_RANGE 時須填，HH:mm:ss 格式）
+                  example: "09:00:00"
+                endTime:
+                  type: string
+                  format: time
+                  description: 迄假時間（TIME_RANGE 時須填，HH:mm:ss 格式）
+                  example: "17:00:00"
+                reason:
+                  type: string
+                  description: 請假事由
+                  example: "年假休息"
+      responses:
+        "200":
+          description: 申請成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  requestId:
+                    type: integer
+                    description: 申請編號
+                    example: 1
+                  status:
+                    type: string
+                    description: 申請狀態
+                    enum: [PENDING, APPROVED, REJECTED, CANCELLED]
+                    example: "PENDING"
+                  message:
+                    type: string
+                    description: 訊息
+                    example: "請假申請已提交，待主管核准"
+        "400":
+          description: 申請失敗
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                    description: 錯誤訊息
+                    example: "該時段有打卡記錄，請先刪除打卡"
+
+  /managers/{managerId}/subordinates/leave-requests:
+    get:
+      summary: 查詢下屬請假記錄
+      description: |
+        主管查詢直屬下屬的請假記錄，支援分頁、篩選功能
+        
+        **權限說明**：僅主管身份可使用此功能，只能查詢直屬下屬的請假記錄
+        **預設排序**：依請假日期降序（startDate DESC），最近的請假在最前面
+      operationId: getSubordinatesLeaveRequests
+      tags:
+        - Leave Management
+        - Manager Functions
+      parameters:
+        - name: managerId
+          in: path
+          required: true
+          schema:
+            type: integer
+          description: 主管編號
+          example: 1
+        - name: agentId
+          in: query
+          required: false
+          schema:
+            type: integer
+          description: 特定下屬編號（選填，可用於篩選特定下屬）
+          example: 2
+        - name: status
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [PENDING, APPROVED, REJECTED, CANCELLED]
+          description: 依狀態篩選（選填）
+          example: "PENDING"
+        - name: leaveType
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [SPECIAL_LEAVE, SICK_LEAVE, PERSONAL_LEAVE, MARRIAGE_LEAVE, FUNERAL_LEAVE]
+          description: 依假別類型篩選（選填）
+          example: "SPECIAL_LEAVE"
+        - name: page
+          in: query
+          required: false
+          schema:
+            type: integer
+            default: 1
+            minimum: 1
+          description: 頁碼（預設為 1）
+          example: 1
+        - name: pageSize
+          in: query
+          required: false
+          schema:
+            type: integer
+            default: 20
+            minimum: 1
+            maximum: 100
+          description: 每頁筆數（預設 20，最大 100）
+          example: 20
+      responses:
+        "200":
+          description: 查詢成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  leaveRequests:
+                    type: array
+                    description: 請假記錄列表
+                    items:
+                      type: object
+                      properties:
+                        requestId:
+                          type: integer
+                          description: 申請編號
+                          example: 1
+                        agentId:
+                          type: integer
+                          description: 特務編號
+                          example: 2
+                        agentName:
+                          type: string
+                          description: 特務名稱
+                          example: "Alice"
+                        agentEmail:
+                          type: string
+                          description: 特務電子郵件
+                          example: "alice@company.com"
+                        leaveType:
+                          type: string
+                          description: 假別類型
+                          example: "SPECIAL_LEAVE"
+                        startDate:
+                          type: integer
+                          format: int64
+                          description: 起假日期（毫秒時間戳記，台灣時區 UTC+8）
+                          example: 1731168000000
+                        endDate:
+                          type: integer
+                          format: int64
+                          description: 迄假日期（毫秒時間戳記，台灣時區 UTC+8）
+                          example: 1731168000000
+                        durationType:
+                          type: string
+                          description: 請假類型
+                          enum: [FULL_DAY, TIME_RANGE]
+                          example: "FULL_DAY"
+                        startTime:
+                          type: string
+                          format: time
+                          description: 起假時間（TIME_RANGE 時有值，HH:mm:ss 格式）
+                          example: "09:00:00"
+                        endTime:
+                          type: string
+                          format: time
+                          description: 迄假時間（TIME_RANGE 時有值，HH:mm:ss 格式）
+                          example: "17:00:00"
+                        reason:
+                          type: string
+                          description: 請假事由
+                          example: "年假休息"
+                        status:
+                          type: string
+                          description: 申請狀態
+                          enum: [PENDING, APPROVED, REJECTED, CANCELLED]
+                          example: "PENDING"
+                        approvedBy:
+                          type: integer
+                          description: 核准人編號
+                          example: 1
+                        notes:
+                          type: string
+                          description: 備註
+                          example: "已確認"
+                        createdAt:
+                          type: integer
+                          format: int64
+                          description: 建立時間（毫秒時間戳，台灣時區 UTC+8）
+                          example: 1730923800000
+                        updatedAt:
+                          type: integer
+                          format: int64
+                          description: 更新時間（毫秒時間戳，台灣時區 UTC+8）
+                          example: 1730923800000
+                  total:
+                    type: integer
+                    description: 總筆數
+                    example: 10
+                  page:
+                    type: integer
+                    description: 當前頁碼
+                    example: 1
+                  pageSize:
+                    type: integer
+                    description: 每頁筆數
+                    example: 20
+        "401":
+          description: 未授權（JWT Token 無效或過期）
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                    description: 錯誤訊息
+                    example: "未授權，請重新登入"
+        "403":
+          description: 權限不足（非主管身份或嘗試查詢非直屬下屬）
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                    description: 錯誤訊息
+                    example: "權限不足，僅主管可查詢下屬記錄"
+
+  /attendance/overtime:
+    post:
+      summary: 申請加班
+      description: |
+        特務提交加班申請，支援三種加班類型（符合台灣勞基法）
+        
+        **加班類型說明**：
+        - WEEKDAY_OVERTIME: 平日延長工時（前 2 小時 1.34 倍，第 3 小時起 1.67 倍）
+        - REST_DAY_OVERTIME: 休息日出勤（前 2 小時 1.34 倍，3-8 小時 1.67 倍，第 9 小時起 2.67 倍）
+        - LEGAL_HOLIDAY_OVERTIME: 例假日/國定假日出勤（2 倍工資，需補假）
+        
+        **工時整合**：申請時不檢查打卡衝突，審核通過後系統會自動在 punch_records 表新增對應的 IN/OUT 打卡記錄，加班時數透過打卡記錄自然計入工時統計
+      operationId: submitOvertimeRequest
+      tags:
+        - Overtime Management
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - agentId
+                - overtimeType
+                - overtimeDate
+                - startTime
+                - endTime
+              properties:
+                agentId:
+                  type: integer
+                  description: 特務識別碼
+                  example: 1
+                overtimeType:
+                  type: string
+                  description: 加班類型
+                  enum:
+                    [
+                      WEEKDAY_OVERTIME,
+                      REST_DAY_OVERTIME,
+                      LEGAL_HOLIDAY_OVERTIME,
+                    ]
+                  example: "WEEKDAY_OVERTIME"
+                overtimeDate:
+                  type: integer
+                  format: int64
+                  description: 加班日期（毫秒時間戳記，台灣時區 UTC+8）
+                  example: 1731168000000
+                startTime:
+                  type: string
+                  format: time
+                  description: 開始時間（HH:mm:ss 格式）
+                  example: "18:00:00"
+                endTime:
+                  type: string
+                  format: time
+                  description: 結束時間（HH:mm:ss 格式）
+                  example: "20:00:00"
+                reason:
+                  type: string
+                  description: 加班事由
+                  example: "專案趕工"
+      responses:
+        "200":
+          description: 申請成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  requestId:
+                    type: integer
+                    description: 申請編號
+                    example: 1
+                  status:
+                    type: string
+                    description: 申請狀態
+                    enum: [PENDING, APPROVED, REJECTED, CANCELLED]
+                    example: "PENDING"
+                  message:
+                    type: string
+                    description: 訊息
+                    example: "加班申請已提交，待主管核准"
+        "400":
+          description: 申請失敗
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                    description: 錯誤訊息
+                    example: "該時段有打卡記錄，無法申請加班"
+
+  /leave-requests/{requestId}/review:
+    post:
+      summary: 審核請假申請
+      description: |
+        主管審核下屬的請假申請（批准或拒絕）
+        
+        **權限說明**：僅主管身份可使用此功能，只能審核直屬下屬的 PENDING 狀態請假
+        **批准檢查**：批准前需檢查請假時段內不能有打卡記錄
+        **拒絕規則**：拒絕請假時不檢查打卡記錄
+      operationId: reviewLeaveRequest
+      tags:
+        - Leave Management
+        - Manager Functions
+      parameters:
+        - name: requestId
+          in: path
+          required: true
+          schema:
+            type: integer
+          description: 請假申請編號
+          example: 1
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - action
+              properties:
+                action:
+                  type: string
+                  enum: [APPROVE, REJECT]
+                  description: 審核動作（APPROVE=批准，REJECT=拒絕）
+                  example: "APPROVE"
+                notes:
+                  type: string
+                  description: 審核備註（選填）
+                  example: "同意休假"
+      responses:
+        "200":
+          description: 審核成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  requestId:
+                    type: integer
+                    description: 申請編號
+                    example: 1
+                  status:
+                    type: string
+                    description: 審核後狀態
+                    enum: [APPROVED, REJECTED]
+                    example: "APPROVED"
+                  message:
+                    type: string
+                    description: 訊息
+                    example: "請假申請已批准"
+        "400":
+          description: 審核失敗（業務規則違反）
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                    description: 錯誤訊息
+                    example: "請假時段內有打卡記錄，無法批准"
+        "401":
+          description: 未授權（JWT Token 無效或過期）
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                    description: 錯誤訊息
+                    example: "未授權，請重新登入"
+        "403":
+          description: 權限不足（非主管身份或非直屬下屬或非 PENDING 狀態）
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                    description: 錯誤訊息
+                    example: "權限不足，僅能審核直屬下屬的待審核申請"
+        "404":
+          description: 請假申請不存在
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                    description: 錯誤訊息
+                    example: "請假申請不存在"
+
+  /managers/{managerId}/subordinates/overtime-requests:
+    get:
+      summary: 查詢下屬加班記錄
+      description: |
+        主管查詢直屬下屬的加班記錄，支援分頁、篩選功能
+        
+        **權限說明**：僅主管身份可使用此功能，只能查詢直屬下屬的加班記錄
+        **預設排序**：依加班日期降序（overtimeDate DESC），最近的加班在最前面
+      operationId: getSubordinatesOvertimeRequests
+      tags:
+        - Overtime Management
+        - Manager Functions
+      parameters:
+        - name: managerId
+          in: path
+          required: true
+          schema:
+            type: integer
+          description: 主管編號
+          example: 1
+        - name: agentId
+          in: query
+          required: false
+          schema:
+            type: integer
+          description: 特定下屬編號（選填，可用於篩選特定下屬）
+          example: 2
+        - name: status
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [PENDING, APPROVED, REJECTED, CANCELLED]
+          description: 依狀態篩選（選填）
+          example: "PENDING"
+        - name: overtimeType
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [WEEKDAY_OVERTIME, REST_DAY_OVERTIME, LEGAL_HOLIDAY_OVERTIME]
+          description: 依加班類型篩選（選填）
+          example: "WEEKDAY_OVERTIME"
+        - name: page
+          in: query
+          required: false
+          schema:
+            type: integer
+            default: 1
+            minimum: 1
+          description: 頁碼（預設為 1）
+          example: 1
+        - name: pageSize
+          in: query
+          required: false
+          schema:
+            type: integer
+            default: 20
+            minimum: 1
+            maximum: 100
+          description: 每頁筆數（預設 20，最大 100）
+          example: 20
+      responses:
+        "200":
+          description: 查詢成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  overtimeRequests:
+                    type: array
+                    description: 加班記錄列表
+                    items:
+                      type: object
+                      properties:
+                        requestId:
+                          type: integer
+                          description: 申請編號
+                          example: 1
+                        agentId:
+                          type: integer
+                          description: 特務編號
+                          example: 2
+                        agentName:
+                          type: string
+                          description: 特務名稱
+                          example: "Alice"
+                        agentEmail:
+                          type: string
+                          description: 特務電子郵件
+                          example: "alice@company.com"
+                        overtimeType:
+                          type: string
+                          description: 加班類型
+                          example: "WEEKDAY_OVERTIME"
+                        overtimeDate:
+                          type: integer
+                          format: int64
+                          description: 加班日期（毫秒時間戳記，台灣時區 UTC+8）
+                          example: 1731168000000
+                        startTime:
+                          type: string
+                          format: time
+                          description: 開始時間（HH:mm:ss 格式）
+                          example: "18:00:00"
+                        endTime:
+                          type: string
+                          format: time
+                          description: 結束時間（HH:mm:ss 格式）
+                          example: "20:00:00"
+                        reason:
+                          type: string
+                          description: 加班事由
+                          example: "專案趕工"
+                        status:
+                          type: string
+                          description: 申請狀態
+                          enum: [PENDING, APPROVED, REJECTED, CANCELLED]
+                          example: "PENDING"
+                        approvedBy:
+                          type: integer
+                          description: 核准人編號
+                          example: 1
+                        notes:
+                          type: string
+                          description: 備註
+                          example: "已確認"
+                        createdAt:
+                          type: integer
+                          format: int64
+                          description: 建立時間（毫秒時間戳記，台灣時區 UTC+8）
+                          example: 1730923800000
+                        updatedAt:
+                          type: integer
+                          format: int64
+                          description: 更新時間（毫秒時間戳記，台灣時區 UTC+8）
+                          example: 1730923800000
+                  total:
+                    type: integer
+                    description: 總筆數
+                    example: 10
+                  page:
+                    type: integer
+                    description: 當前頁碼
+                    example: 1
+                  pageSize:
+                    type: integer
+                    description: 每頁筆數
+                    example: 20
+        "401":
+          description: 未授權（JWT Token 無效或過期）
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                    description: 錯誤訊息
+                    example: "未授權，請重新登入"
+        "403":
+          description: 權限不足（非主管身份或嘗試查詢非直屬下屬）
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                    description: 錯誤訊息
+                    example: "權限不足，僅主管可查詢下屬記錄"
+
+  /overtime-requests/{requestId}/review:
+    post:
+      summary: 審核加班申請
+      description: |
+        主管審核下屬的加班申請（批准或拒絕）
+        
+        **權限說明**：僅主管身份可使用此功能，只能審核直屬下屬的 PENDING 狀態加班
+        **批准行為**：批准後系統會自動在 punch_records 表新增對應的 IN/OUT 打卡記錄，打卡時間為申請的 startTime 和 endTime
+        **拒絕行為**：拒絕加班時不新增打卡記錄
+      operationId: reviewOvertimeRequest
+      tags:
+        - Overtime Management
+        - Manager Functions
+      parameters:
+        - name: requestId
+          in: path
+          required: true
+          schema:
+            type: integer
+          description: 加班申請編號
+          example: 1
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - action
+              properties:
+                action:
+                  type: string
+                  enum: [APPROVE, REJECT]
+                  description: 審核動作（APPROVE=批准，REJECT=拒絕）
+                  example: "APPROVE"
+                notes:
+                  type: string
+                  description: 審核備註（選填）
+                  example: "同意加班"
+      responses:
+        "200":
+          description: 審核成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  requestId:
+                    type: integer
+                    description: 申請編號
+                    example: 1
+                  status:
+                    type: string
+                    description: 審核後狀態
+                    enum: [APPROVED, REJECTED]
+                    example: "APPROVED"
+                  message:
+                    type: string
+                    description: 訊息
+                    example: "加班申請已批准"
+        "400":
+          description: 審核失敗（業務規則違反）
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                    description: 錯誤訊息
+                    example: "加班時段內有打卡記錄，無法批准"
+        "401":
+          description: 未授權（JWT Token 無效或過期）
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                    description: 錯誤訊息
+                    example: "未授權，請重新登入"
+        "403":
+          description: 權限不足（非主管身份或非直屬下屬或非 PENDING 狀態）
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                    description: 錯誤訊息
+                    example: "權限不足，僅能審核直屬下屬的待審核申請"
+        "404":
+          description: 加班申請不存在
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                    description: 錯誤訊息
+                    example: "加班申請不存在"

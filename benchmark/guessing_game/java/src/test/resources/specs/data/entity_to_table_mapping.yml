@@ -1,0 +1,4 @@
+entity_to_table_mapping:
+  - 遊戲: games
+  - 玩家: players
+  - 猜測結果: guesses

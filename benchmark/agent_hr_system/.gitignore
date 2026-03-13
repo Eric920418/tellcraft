@@ -1,0 +1,56 @@
+
+# 依 Java 編譯生成的檔案
+*.class
+*.jar
+*.war
+*.ear
+
+# maven 產生的 target 資料夾
+/target/
+
+# IDE 有關檔案
+*.iml
+*.ipr
+*.iws
+.idea/
+*.classpath
+*.project
+*.settings/
+*.factorypath
+
+# OS 產生的垃圾
+.DS_Store
+Thumbs.db
+
+# 其他暫存、編譯紀錄
+logs/
+*.log
+
+# Spring Boot 可執行的 jar
+!src/main/resources/
+!src/test/resources/
+
+# 依不同 IDE 設定
+# VSCode
+.vscode/
+# Eclipse
+*.launch
+.metadata/
+bin/
+tmp/
+*.tmp
+*.bak
+*.swp
+
+# Local 環境 docker-compose、test db data
+docker-compose.override.yml
+.env
+*.env
+
+# 測試輸出
+/test-output/
+jacoco.exec
+
+
+# AI x BDD 相關
+.clarify

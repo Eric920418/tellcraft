@@ -1,0 +1,14 @@
+# Dummy isa.yml for Cucumber tests
+# Actual test data is provided inline in feature files
+config:
+  api:
+    resource_path: specs/api
+    project_path: path/to/api
+  data:
+    permission: isolated
+    source:
+      - name: test_db
+        resource_path: specs/data
+        project_path: path/to/data
+        db_type: h2
+instructions: []

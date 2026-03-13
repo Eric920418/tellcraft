@@ -1,0 +1,3 @@
+[submodule "specformula-docs"]
+	path = specformula-docs
+	url = https://github.com/SpecFormula/specformula-docs

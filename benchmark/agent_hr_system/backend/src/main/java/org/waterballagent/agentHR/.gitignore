@@ -1,0 +1,12 @@
+# 把 AI or SDD.os 生成的測試/程式碼忽略。
+**/*.java
+
+# 為專案的進入點，不必忽略。
+!Application.java
+
+# 為專案的基礎建設，測試程式會使用到 security 中的 JwtUtil 和 SecurityConfig。
+!security/**
+
+# 為專案的基礎建設，測試程式會使用到 service/time 中的 TimeService。
+!service/time/SystemTimeService.java
+!service/time/TimeService.java

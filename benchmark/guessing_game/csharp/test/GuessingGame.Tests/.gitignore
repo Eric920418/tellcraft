@@ -1,0 +1,28 @@
+# Assembler codegen files
+*.cs
+
+# BDD infrastructure files
+!ScenarioContext.cs
+!CustomWebApplicationFactory.cs
+!FeatureArgumentResolver.cs
+!Hooks/ScenarioHooks.cs
+!StepDefinitions/CommonThen.cs
+
+# Reqnroll generated files
+*.feature.cs
+
+
+# Build results
+bin/
+obj/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
