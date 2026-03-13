@@ -1,0 +1,74 @@
+name: Bug report
+description: 回報 SpecFormula 框架的問題或錯誤
+title: "[BUG] "
+labels: ["bug"]
+assignees: []
+body:
+  - type: markdown
+    attributes:
+      value: |
+        感謝您回報問題！請詳細填寫以下資訊，幫助我們快速定位和修復問題。
+
+  - type: textarea
+    id: bug-description
+    attributes:
+      label: 問題描述
+      description: 簡潔清楚地描述您遇到的問題
+      placeholder: 例如：執行 SpecFormula 測試時出現錯誤...
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduction-steps
+    attributes:
+      label: 重現步驟
+      description: 詳細描述如何重現這個問題
+      placeholder: |
+        1. 使用的 SpecFormula 語言實作（Java/C#/TS/Python）：...
+        2. 使用的 ISA 配置檔案：...
+        3. 預期的行為：...
+        4. 實際發生的情況：...
+    validations:
+      required: true
+
+  - type: textarea
+    id: error-output
+    attributes:
+      label: 錯誤輸出
+      description: 完整的錯誤訊息或 log 輸出
+      render: text
+      placeholder: 請貼上完整的錯誤訊息...
+    validations:
+      required: false
+
+  - type: textarea
+    id: configuration
+    attributes:
+      label: 相關配置
+      description: 相關的 ISA 配置、生成器參數、專案設定檔或其他設定
+      render: yaml
+      placeholder: |
+        # ISA 配置檔案內容
+        # 生成器參數
+        # 專案設定檔
+        # 或其他相關配置
+    validations:
+      required: false
+
+  - type: input
+    id: language-version
+    attributes:
+      label: 語言與框架版本
+      description: 使用的語言版本（例：Java 21、.NET 10）
+      placeholder: Java 21 + Spring Boot 3.x
+    validations:
+      required: false
+
+  - type: textarea
+    id: additional-context
+    attributes:
+      label: 其他相關資訊
+      description: 任何其他有助於理解問題的資訊
+      placeholder: 例如：特定的專案結構、使用的 SpecFormula 模組等...
+    validations:
+      required: false

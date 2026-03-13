@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>ai.specformula</groupId>
+        <artifactId>specformula</artifactId>
+        <version>1.0.0-SNAPSHOT</version>
+    </parent>
+
+    <artifactId>specformula-cucumber</artifactId>
+    <packaging>jar</packaging>
+
+    <name>SpecFormula Cucumber</name>
+    <description>Cucumber Backend SPI implementation - bridges Cucumber with SpecFormula core</description>
+
+    <dependencies>
+        <!-- SpecFormula Spring (transitively includes core) -->
+        <dependency>
+            <groupId>ai.specformula</groupId>
+            <artifactId>specformula-spring</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+
+        <!-- Cucumber Core - Backend SPI interfaces, FeatureParser, EventBus, Formatters -->
+        <dependency>
+            <groupId>io.cucumber</groupId>
+            <artifactId>cucumber-core</artifactId>
+        </dependency>
+
+        <!-- Spring Test - for MockMvc, MvcResult support (provided by user project) -->
+        <dependency>
+            <groupId>org.springframework</groupId>
+            <artifactId>spring-test</artifactId>
+            <version>6.1.3</version>
+            <scope>provided</scope>
+        </dependency>
+
+        <!-- Spring Web - for HttpMethod, MediaType (provided by user project) -->
+        <dependency>
+            <groupId>org.springframework</groupId>
+            <artifactId>spring-web</artifactId>
+            <version>6.1.3</version>
+            <scope>provided</scope>
+        </dependency>
+
+        <!-- Servlet API - required by spring-test MvcResult -->
+        <dependency>
+            <groupId>jakarta.servlet</groupId>
+            <artifactId>jakarta.servlet-api</artifactId>
+            <version>6.0.0</version>
+            <scope>provided</scope>
+        </dependency>
+    </dependencies>
+</project>

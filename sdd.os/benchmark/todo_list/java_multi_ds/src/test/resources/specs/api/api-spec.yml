@@ -1,0 +1,346 @@
+openapi: 3.0.0
+info:
+  title: 待辦事項系統 API
+  version: 1.0.0
+  description: |
+    簡單的待辦事項管理系統 API 規格
+    **認證說明**：使用 JWT Token，除登入端點外所有 API 都需要認證
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: JWT Token 認證，登入後取得 token 填入此處
+
+security:
+  - bearerAuth: []
+
+paths:
+  /auth/login:
+    post:
+      summary: 使用者登入
+      description: 使用 email 與密碼登入
+      operationId: loginUser
+      tags:
+        - Authentication
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - email
+                - password
+              properties:
+                email:
+                  type: string
+                  format: email
+                  description: 電子郵件（登入帳號）
+                  example: "alice@example.com"
+                password:
+                  type: string
+                  format: password
+                  description: 登入密碼
+                  example: "password123"
+      responses:
+        "200":
+          description: 登入成功
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - token
+                  - userId
+                  - name
+                  - email
+                  - message
+                properties:
+                  token:
+                    type: string
+                    description: JWT Token
+                  userId:
+                    type: integer
+                    description: 使用者編號
+                  name:
+                    type: string
+                    description: 使用者名稱
+                  email:
+                    type: string
+                    description: 電子郵件
+                  message:
+                    type: string
+                    description: 回應訊息
+                    example: "登入成功"
+        "401":
+          description: 登入失敗
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - error
+                properties:
+                  error:
+                    type: string
+                    example: "帳號或密碼錯誤"
+        "400":
+          description: 輸入驗證失敗
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - error
+                properties:
+                  error:
+                    type: string
+
+  /auth/logout:
+    post:
+      summary: 使用者登出
+      description: 登出目前使用者
+      operationId: logoutUser
+      tags:
+        - Authentication
+      responses:
+        "200":
+          description: 登出成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                    example: "登出成功"
+
+  /todos:
+    post:
+      summary: 新增待辦事項
+      description: 新增一筆待辦事項
+      operationId: createTodo
+      tags:
+        - Todo
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - title
+              properties:
+                title:
+                  type: string
+                  description: 待辦事項標題
+                  example: "買牛奶"
+                description:
+                  type: string
+                  description: 待辦事項描述
+                  example: "去全聯買兩瓶鮮奶"
+      responses:
+        "201":
+          description: 新增成功
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - todoId
+                  - userId
+                  - title
+                  - completed
+                properties:
+                  todoId:
+                    type: integer
+                    description: 待辦事項編號
+                  userId:
+                    type: integer
+                    description: 使用者編號
+                  title:
+                    type: string
+                    description: 標題
+                  description:
+                    type: string
+                    description: 描述
+                  completed:
+                    type: boolean
+                    description: 是否完成
+                    example: false
+                  createdAt:
+                    type: string
+                    format: date-time
+                    description: 建立時間
+                  updatedAt:
+                    type: string
+                    format: date-time
+                    description: 更新時間
+        "400":
+          description: 輸入驗證失敗
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - error
+                properties:
+                  error:
+                    type: string
+
+    get:
+      summary: 查詢待辦事項列表
+      description: 查詢目前使用者的所有待辦事項
+      operationId: listTodos
+      tags:
+        - Todo
+      responses:
+        "200":
+          description: 查詢成功
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  required:
+                    - todoId
+                    - userId
+                    - title
+                    - completed
+                  properties:
+                    todoId:
+                      type: integer
+                    userId:
+                      type: integer
+                    title:
+                      type: string
+                    description:
+                      type: string
+                    completed:
+                      type: boolean
+                    createdAt:
+                      type: string
+                      format: date-time
+                      description: 建立時間
+                    updatedAt:
+                      type: string
+                      format: date-time
+                      description: 更新時間
+
+  /todos/{todoId}:
+    put:
+      summary: 更新待辦事項
+      description: 更新指定的待辦事項
+      operationId: updateTodo
+      tags:
+        - Todo
+      parameters:
+        - name: todoId
+          in: path
+          required: true
+          schema:
+            type: integer
+          description: 待辦事項編號
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                title:
+                  type: string
+                  description: 待辦事項標題
+                description:
+                  type: string
+                  description: 待辦事項描述
+                completed:
+                  type: boolean
+                  description: 是否完成
+      responses:
+        "200":
+          description: 更新成功
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - todoId
+                  - userId
+                  - title
+                  - completed
+                properties:
+                  todoId:
+                    type: integer
+                  userId:
+                    type: integer
+                  title:
+                    type: string
+                  description:
+                    type: string
+                  completed:
+                    type: boolean
+                  createdAt:
+                    type: string
+                    format: date-time
+                    description: 建立時間
+                  updatedAt:
+                    type: string
+                    format: date-time
+                    description: 更新時間
+        "404":
+          description: 找不到待辦事項
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - error
+                properties:
+                  error:
+                    type: string
+                    example: "待辦事項不存在"
+
+    delete:
+      summary: 刪除待辦事項
+      description: 刪除指定的待辦事項
+      operationId: deleteTodo
+      tags:
+        - Todo
+      parameters:
+        - name: todoId
+          in: path
+          required: true
+          schema:
+            type: integer
+          description: 待辦事項編號
+      responses:
+        "200":
+          description: 刪除成功
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - message
+                properties:
+                  message:
+                    type: string
+                    example: "刪除成功"
+        "404":
+          description: 找不到待辦事項
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - error
+                properties:
+                  error:
+                    type: string
+                    example: "待辦事項不存在"

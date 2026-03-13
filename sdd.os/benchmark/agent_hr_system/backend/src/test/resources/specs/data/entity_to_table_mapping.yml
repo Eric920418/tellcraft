@@ -1,0 +1,8 @@
+entity_to_table_mapping:
+  - 特務: agents
+  - 打卡記錄: punch_records
+  - 請假申請: leave_requests
+  - 假期額度: leave_entitlements
+  - 額度變化歷史: leave_balance_history
+  - 加班申請: overtime_requests
+

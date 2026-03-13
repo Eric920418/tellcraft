@@ -1,0 +1,40 @@
+target-version = "py310"
+line-length = 88
+
+[lint]
+select = [
+    "E",   # pycodestyle Error
+    "W",   # pycodestyle Warning
+    "F",   # Pyflakes
+    "I",   # isort
+    "B",   # flake8-bugbear
+    "D",   # pydocstyle
+    "C4",  # flake8-comprehensions
+    "UP",  # pyupgrade
+    "RUF", # Ruff-specific rules
+]
+ignore = [
+    "D100",  # Missing docstring in public module
+    "D102",  # Missing docstring in public method
+    "D104",  # Missing docstring in public package
+    "D203",  # One-blank-line-before-class
+    "D211",  # No-blank-line-before-function
+    "D212",  # Multi-line-summary-first-line
+    "D213",  # Multi-line docstring (handled by formatter)
+    "D400",  # First-line-ends-with-period
+    "D415",  # First-line-should-be-capitalized
+    "E501",  # Line too long (Handled by formatter)
+    "W191",  # Indentation contains tabs (Handled by formatter)
+    "B024",  # Abstract-class-ABC-visit (abstract without abstractmethod)
+]
+
+[format]
+quote-style = "double"
+indent-style = "space"
+line-ending = "auto"
+
+[lint.per-file-ignores]
+"**/tests/**/test*.py" = ["D", "S101"]
+
+[lint.pyupgrade]
+keep-runtime-typing = true

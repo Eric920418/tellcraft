@@ -1,0 +1,22 @@
+name: 遊戲
+english_name: Game
+description: "遊戲實體，代表一個 1A2B 遊戲的狀態和資訊"
+primary_key:
+  - id
+properties:
+  id:
+    type: string
+    description: "遊戲的唯一識別碼"
+    example: "ABC"
+    pattern: "^[a-zA-Z0-9]{3,5}$"
+  status:
+    type: string
+    description: "遊戲當前狀態"
+    example: "Waiting for player"
+  winnerId:
+    type: string
+    description: "獲勝玩家的 ID（僅當遊戲結束時有值）"
+    enum:
+      - "P1"
+      - "P2"
+    nullable: true

@@ -1,0 +1,36 @@
+[project]
+name = "specformula-testcontainer"
+version = "0.1.0.a1"
+description = "Auto-configures Testcontainers and DataSources from isa.yml data source definitions"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "specformula-core",
+    "testcontainers[postgres,mysql,mssql]>=4.0.0",
+]
+
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Information Technology",
+    "Topic :: Database",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Topic :: Software Development :: Testing",
+    "Topic :: Software Development :: Quality Assurance",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Operating System :: OS Independent",
+    "Natural Language :: English",
+    "Natural Language :: Chinese (Traditional)",
+    "Typing :: Typed",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/specformula"]

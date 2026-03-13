@@ -1,0 +1,16 @@
+name: 猜測結果
+english_name: GuessResult
+description: "猜測結果實體，表示玩家猜測的結果"
+properties:
+  result:
+    type: string
+    description: "猜測結果，格式為 XAyB，其中 X 是正確位置的數字個數，y 是錯誤位置的數字個數"
+    examples:
+      - "1A0B"    # 1個數字位置正確，0個數字位置錯誤
+      - "0A2B"    # 0個數字位置正確，2個數字位置錯誤
+      - "4A0B"    # 4個數字位置正確，0個數字位置錯誤（完全正確）
+      - "0A4B"    # 0個數字位置正確，4個數字位置錯誤
+      - "0A0B"    # 沒有任何數字正確
+    pattern: "^[0-4]A[0-4]B$"
+    constraints:
+      - "A 和 B 的數字總和不能超過 4"

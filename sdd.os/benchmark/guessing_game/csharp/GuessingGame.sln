@@ -1,0 +1,50 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.0.31903.59
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "src", "src", "{59748453-0FD3-42BA-B4AF-B02C0D1B9C3D}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "GuessingGame.Repository", "src\GuessingGame.Repository\GuessingGame.Repository.csproj", "{9B747CE5-9993-4C35-86C0-7A7BA000EE96}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "GuessingGame.Service", "src\GuessingGame.Service\GuessingGame.Service.csproj", "{DE14873E-187D-4345-9161-E74681D508F6}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "GuessingGame.WebApi", "src\GuessingGame.WebApi\GuessingGame.WebApi.csproj", "{CFAC465C-BDCC-4BAF-B4C4-DAFA9F37C881}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "test", "test", "{7D4B374D-92AE-4A1F-994D-AD8CF1CD6DE6}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "GuessingGame.Tests", "test\GuessingGame.Tests\GuessingGame.Tests.csproj", "{0D9D554E-675E-4DB3-A5DD-EC3418DB64D0}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{9B747CE5-9993-4C35-86C0-7A7BA000EE96}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{9B747CE5-9993-4C35-86C0-7A7BA000EE96}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{9B747CE5-9993-4C35-86C0-7A7BA000EE96}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{9B747CE5-9993-4C35-86C0-7A7BA000EE96}.Release|Any CPU.Build.0 = Release|Any CPU
+		{DE14873E-187D-4345-9161-E74681D508F6}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{DE14873E-187D-4345-9161-E74681D508F6}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{DE14873E-187D-4345-9161-E74681D508F6}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{DE14873E-187D-4345-9161-E74681D508F6}.Release|Any CPU.Build.0 = Release|Any CPU
+		{CFAC465C-BDCC-4BAF-B4C4-DAFA9F37C881}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{CFAC465C-BDCC-4BAF-B4C4-DAFA9F37C881}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{CFAC465C-BDCC-4BAF-B4C4-DAFA9F37C881}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{CFAC465C-BDCC-4BAF-B4C4-DAFA9F37C881}.Release|Any CPU.Build.0 = Release|Any CPU
+		{0D9D554E-675E-4DB3-A5DD-EC3418DB64D0}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{0D9D554E-675E-4DB3-A5DD-EC3418DB64D0}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{0D9D554E-675E-4DB3-A5DD-EC3418DB64D0}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{0D9D554E-675E-4DB3-A5DD-EC3418DB64D0}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(NestedProjects) = preSolution
+		{9B747CE5-9993-4C35-86C0-7A7BA000EE96} = {59748453-0FD3-42BA-B4AF-B02C0D1B9C3D}
+		{DE14873E-187D-4345-9161-E74681D508F6} = {59748453-0FD3-42BA-B4AF-B02C0D1B9C3D}
+		{CFAC465C-BDCC-4BAF-B4C4-DAFA9F37C881} = {59748453-0FD3-42BA-B4AF-B02C0D1B9C3D}
+		{0D9D554E-675E-4DB3-A5DD-EC3418DB64D0} = {7D4B374D-92AE-4A1F-994D-AD8CF1CD6DE6}
+	EndGlobalSection
+EndGlobal

@@ -1,0 +1,165 @@
+openapi: 3.0.3
+info:
+  title: 1A2B Game API
+  version: 1.0.0
+  description: API specification for a 1A2B turn-based game.
+
+paths:
+
+  /games:
+    post:
+      summary: 玩家加入遊戲
+      description: |
+        - 玩家輸入一組 3~5 位字元組成的「遊戲 ID」進行配對
+        - 若系統中尚無此 ID，則創建新遊戲，該玩家的角色為 P1
+        - 若該 ID 已存在且遊戲尚未進入猜題階段，則玩家加入之角色為 P2
+        - 若該遊戲已有兩位玩家，則拒絕加入並顯示提示訊息
+        - 同一玩家不得重複加入同一場遊戲
+        - 當遊戲有兩位玩家時，進入設定秘密數字階段
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - gameId
+                - playerName
+              properties:
+                gameId:
+                  type: string
+                  pattern: "^[a-zA-Z0-9]{3,5}$"
+                  minLength: 3
+                  maxLength: 5
+                playerName:
+                  type: string
+      responses:
+        '200':
+          description: 遊戲成功被 P1 創建，或是 P2 成功加入此遊戲
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  gameId:
+                    type: string
+                  playerRole:
+                    type: string
+                    enum: [P1, P2]
+                    description: "玩家在遊戲中的角色"
+
+  /games:secret:
+    put:
+      summary: 玩家設定秘密
+      description: |
+        ### 前提
+        - 玩家必須已加入此場遊戲
+        - 遊戲必須尚未進入猜測階段
+        - 玩家設定答案的順序為 P1 先設定，然後是 P2
+        
+        ### 後置
+        - 此玩家的答案會被首次設定
+        - 當兩位玩家都設定好答案後，遊戲進入猜題階段
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - gameId
+                - playerRole
+                - secret
+              properties:
+                gameId:
+                  type: string
+                  pattern: "^[a-zA-Z0-9]{3,5}$"
+                  minLength: 3
+                  maxLength: 5
+                playerRole:
+                  type: string
+                  enum: [P1, P2]
+                  description: "玩家在遊戲中的角色"
+                secret:
+                  type: string
+                  pattern: "^(?!.*(.).*\\1)[0-9]{4}$"
+                  description: "需設定不重複的 4 位數字（0-9）作為答案"
+      responses:
+        '200':
+          description: 答案已成功設立
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  gameId:
+                    type: string
+                    description: "遊戲的 ID"
+                  yourSecret:
+                    type: string
+                    description: "玩家設定的秘密數字"
+                  yourOpponentSecret:
+                    type: string
+                    enum: ["READY", "NOT_READY"]
+                    description: "對手的秘密數字設定狀態"
+  
+  /games:guess:
+    post:
+      summary: 玩家猜測數字
+      description: |
+        ### 前提
+        - 玩家必須已加入此場遊戲
+        - 遊戲必須已進入猜測階段
+        - 每回合每名玩家只能猜測一次
+
+        ### 後置
+        - 雙方玩家猜測完後進入下一個回合
+        - 每次猜測會回傳「幾A幾B」的結果
+          * A 表示數字正確且位置也正確的個數
+          * B 表示數字正確但位置不正確的個數
+          * 系統將玩家猜的 4 位數與對手的秘密答案逐位比對
+          * 若某個數字在相同位置上與對手的數字相同，則累計 1A
+          * 若某個數字存在於對手的答案中但位置不同，則累計 1B
+        - 若玩家猜出的結果為「4A」，即代表猜中對手的秘密數字，該玩家立即獲勝
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - gameId
+                - guess
+                - playerRole
+              properties:
+                gameId:
+                  type: string
+                  pattern: "^[a-zA-Z0-9]{3,5}$"
+                  minLength: 3
+                  maxLength: 5
+                  description: "遊戲 ID"
+                playerRole:
+                  type: string
+                  enum: [P1, P2]
+                  description: "玩家在遊戲中的角色"
+                guess:
+                  type: string
+                  pattern: "^[0-9]{4}$"
+                  description: "猜測數字必須為 4 位數字（0-9）"
+      responses:
+        '200':
+          description: 猜測結果
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  result:
+                    type: object
+                    properties:
+                      a:
+                        type: integer
+                      b:
+                        type: integer
+                  gameStatus:
+                    type: string

@@ -1,0 +1,38 @@
+name: Test Java
+
+on:
+  push:
+    branches: [ '**' ]
+    paths:
+      - 'specformula-java/**'
+      - '.github/workflows/test-java.yml'
+  pull_request:
+    branches: [ '**' ]
+    paths:
+      - 'specformula-java/**'
+      - '.github/workflows/test-java.yml'
+
+jobs:
+  specformula-java:
+    name: SpecFormula Java (${{ matrix.profile }})
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        profile: [h2, postgresql, mysql, mssql]
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up JDK 21
+      uses: actions/setup-java@v4
+      with:
+        java-version: '21'
+        distribution: 'temurin'
+        cache: maven
+
+    - name: Verify Java version
+      run: java -version
+
+    - name: Run Java tests (-P ${{ matrix.profile }})
+      working-directory: specformula-java
+      run: mvn clean test -B -P ${{ matrix.profile }}

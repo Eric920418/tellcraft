@@ -1,0 +1,8 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/IsaTestLibrary/IsaTestLibrary.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/IsaTestLibrary.Tests/IsaTestLibrary.Tests.csproj" />
+  </Folder>
+</Solution>
