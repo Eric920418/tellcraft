@@ -3,6 +3,7 @@
  * 將 ISA 格式的 BDD Feature Files 翻譯為前端可消費的 UI 需求規格
  */
 
+import yaml from 'js-yaml'
 import { getAnthropicClient, MODEL, trackLlmUsage } from '../lib/anthropic'
 import { safeParseJson } from '../utils/safe-parse-json'
 import { createLogger } from '../lib/logger'
@@ -40,12 +41,19 @@ export interface UIPage {
   dataDisplays: UIDataDisplay[]
 }
 
+export interface UIEntityField {
+  name: string
+  type?: string        // 'string' | 'number' | 'boolean' | 'string (ISO 8601)' 等
+  required?: boolean
+  validation?: string  // 來自 actionsYml rules[type='前置（參數）']
+}
+
 export interface UIRequirementsSpec {
   productName: string
   productSummary: string
   pages: UIPage[]
   navigation: string[]
-  entities: Array<{ name: string; fields: string[] }>
+  entities: Array<{ name: string; fields: UIEntityField[] }>
   userFlows?: Array<{
     name: string          // e.g. "訂單建立流程"
     steps: string[]       // e.g. ["選擇商品", "填寫地址", "確認付款", "完成"]
@@ -66,6 +74,255 @@ interface TranslateResult {
 
 
 // ============================================================
+// Actions YAML 摘要（零 LLM）
+// ============================================================
+
+interface ActionProperty {
+  type?: string
+  description?: string
+}
+
+interface ParsedAction {
+  name?: string
+  summary?: string
+  input?: {
+    properties?: Record<string, ActionProperty>
+    required?: string[]
+  }
+  rules?: Array<{ rule?: string; type?: string }>
+}
+
+interface ParsedTypeDefinition {
+  description?: string
+  properties?: Record<string, { type?: string; description?: string }>
+  required?: string[]
+}
+
+interface ParsedActionsYml {
+  actions?: ParsedAction[]
+  types?: Record<string, ParsedTypeDefinition>
+}
+
+/**
+ * 將 actionsYml 解析為結構化摘要文本，供注入 BDD→UI 翻譯 prompt
+ * 零 LLM，純規則式提取。解析失敗返回 null（降級到現有行為）
+ */
+export function summarizeActionsForUI(actionsYml: string): string | null {
+  try {
+    const parsed = yaml.load(actionsYml) as ParsedActionsYml | null
+    if (!parsed || !Array.isArray(parsed.actions) || parsed.actions.length === 0) {
+      return null
+    }
+
+    const MAX_ACTIONS = 12
+    const actions = parsed.actions
+    const truncated = actions.length > MAX_ACTIONS
+    const toProcess = truncated ? actions.slice(0, MAX_ACTIONS) : actions
+
+    const sections: string[] = []
+
+    for (const action of toProcess) {
+      if (!action.name) continue
+
+      const lines: string[] = [`### ${action.name}${action.summary ? ` — ${action.summary}` : ''}`]
+
+      // 提取輸入欄位
+      if (action.input?.properties) {
+        const props = action.input.properties
+        const required = new Set(action.input.required || [])
+        const fieldDescs = Object.entries(props).map(([fieldName, fieldDef]) => {
+          const typePart = fieldDef?.type || 'unknown'
+          const reqPart = required.has(fieldName) ? ', 必填' : ''
+          return `${fieldName}(${typePart}${reqPart})`
+        })
+        if (fieldDescs.length > 0) {
+          lines.push(`輸入欄位：${fieldDescs.join('、')}`)
+        }
+      }
+
+      // 按 type 分類 rules
+      if (Array.isArray(action.rules) && action.rules.length > 0) {
+        const rulesByType: Record<string, string[]> = {}
+        for (const r of action.rules) {
+          if (!r.rule) continue
+          const ruleType = r.type || '其他'
+          if (!rulesByType[ruleType]) rulesByType[ruleType] = []
+          rulesByType[ruleType].push(r.rule)
+        }
+
+        const TYPE_LABELS: Record<string, string> = {
+          '前置（參數）': '驗證規則',
+          '前置（狀態）': '前置條件',
+          '後置（主要）': '操作效果',
+          '後置（副作用）': '副作用',
+        }
+
+        for (const [ruleType, rules] of Object.entries(rulesByType)) {
+          const label = TYPE_LABELS[ruleType] || ruleType
+          lines.push(`${label}：${rules.join('；')}`)
+        }
+      }
+
+      sections.push(lines.join('\n'))
+    }
+
+    if (sections.length === 0) return null
+
+    let result = sections.join('\n\n')
+    if (truncated) {
+      result += `\n\n（另有 ${actions.length - MAX_ACTIONS} 個 Actions，結構類似）`
+    }
+
+    return result
+  } catch (err) {
+    logger.warn({ err }, 'actionsYml 解析失敗，降級跳過')
+    return null
+  }
+}
+
+/**
+ * 將 Haiku 不精確的 entity fields 用 actionsYml 的 types + input.properties 覆寫
+ * 零 LLM，純規則式。解析失敗返回原 spec（降級）
+ */
+export function enrichEntitiesFromActionsYml(
+  spec: UIRequirementsSpec,
+  actionsYml: string
+): UIRequirementsSpec {
+  try {
+    const parsed = yaml.load(actionsYml) as ParsedActionsYml | null
+    if (!parsed) return spec
+
+    // ---- 1. 從 types 區塊建立 entity field 索引 ----
+    const typeFieldMap = new Map<string, { fields: UIEntityField[]; raw: ParsedTypeDefinition }>()
+    if (parsed.types) {
+      for (const [typeName, typeDef] of Object.entries(parsed.types)) {
+        if (!typeDef.properties) continue
+        const requiredSet = new Set(typeDef.required || [])
+        const fields: UIEntityField[] = Object.entries(typeDef.properties).map(([name, prop]) => ({
+          name,
+          type: prop.type,
+          required: requiredSet.has(name) || undefined,
+        }))
+        // 存兩種 key：原始名 + 小寫去空格（模糊匹配）
+        typeFieldMap.set(typeName, { fields, raw: typeDef })
+        typeFieldMap.set(typeName.toLowerCase().replace(/\s+/g, ''), { fields, raw: typeDef })
+      }
+    }
+
+    // ---- 2. 從 actions 建立 action 輸入索引（by name + summary） ----
+    const actionInputMap = new Map<string, ParsedAction>()
+    if (parsed.actions) {
+      for (const action of parsed.actions) {
+        if (action.name) actionInputMap.set(action.name.toLowerCase(), action)
+        if (action.summary) actionInputMap.set(action.summary, action)
+      }
+    }
+
+    // ---- 3. enrichment entity fields ----
+    const enrichedEntities = spec.entities.map(entity => {
+      // 正規化舊格式（string[] → UIEntityField[]）
+      const normalizedFields: UIEntityField[] = entity.fields.map(f =>
+        typeof f === 'string' ? { name: f } : f
+      )
+
+      // 嘗試從 types 匹配
+      const fuzzyKey = entity.name.toLowerCase().replace(/\s+/g, '')
+      const typeMatch = typeFieldMap.get(entity.name) || typeFieldMap.get(fuzzyKey)
+
+      if (typeMatch) {
+        // 用 types 定義覆寫：保留 Haiku 識別的欄位順序，補充 type/required
+        const typeFieldIndex = new Map(typeMatch.fields.map(f => [f.name, f]))
+        const enrichedFields = normalizedFields.map(f => {
+          const match = typeFieldIndex.get(f.name)
+          if (match) {
+            return { ...f, type: match.type || f.type, required: match.required ?? f.required }
+          }
+          return f
+        })
+        // types 中有但 Haiku 遺漏的欄位 → 補充
+        const existingNames = new Set(enrichedFields.map(f => f.name))
+        for (const tf of typeMatch.fields) {
+          if (!existingNames.has(tf.name)) {
+            enrichedFields.push(tf)
+          }
+        }
+        return { name: entity.name, fields: enrichedFields }
+      }
+
+      return { name: entity.name, fields: normalizedFields }
+    })
+
+    // ---- 4. types 中有但 spec.entities 沒有的 → 補充 ----
+    const existingEntityNames = new Set(enrichedEntities.map(e => e.name.toLowerCase().replace(/\s+/g, '')))
+    if (parsed.types) {
+      for (const [typeName, typeDef] of Object.entries(parsed.types)) {
+        const fuzzy = typeName.toLowerCase().replace(/\s+/g, '')
+        if (existingEntityNames.has(fuzzy)) continue
+        if (!typeDef.properties) continue
+        const requiredSet = new Set(typeDef.required || [])
+        enrichedEntities.push({
+          name: typeName,
+          fields: Object.entries(typeDef.properties).map(([name, prop]) => ({
+            name,
+            type: prop.type,
+            required: requiredSet.has(name) || undefined,
+          })),
+        })
+      }
+    }
+
+    // ---- 5. enrich action fields（pages 中的 action.fields） ----
+    const enrichedPages = spec.pages.map(page => ({
+      ...page,
+      actions: page.actions.map(action => {
+        if (!action.fields || action.fields.length === 0) return action
+
+        // 找對應的 actionsYml action
+        const matchKey = action.name.toLowerCase().replace(/\s+/g, '')
+        const actionDef = actionInputMap.get(matchKey) || actionInputMap.get(action.name)
+
+        if (!actionDef?.input?.properties) return action
+
+        const inputProps = actionDef.input.properties
+        const inputRequired = new Set(actionDef.input.required || [])
+        // 提取前置（參數）rules 作為 validation
+        const paramRules = (actionDef.rules || [])
+          .filter(r => r.type === '前置（參數）' && r.rule)
+          .map(r => r.rule!)
+
+        const enrichedFields = action.fields.map(field => {
+          const propMatch = inputProps[field.name]
+          if (propMatch) {
+            return {
+              ...field,
+              type: propMatch.type || field.type,
+              required: inputRequired.has(field.name) || field.required,
+            }
+          }
+          return field
+        })
+
+        // 如果有前置（參數）rules，附加到第一個 required field 的 validation
+        if (paramRules.length > 0 && enrichedFields.length > 0) {
+          const validationText = paramRules.join('；')
+          const firstRequired = enrichedFields.find(f => f.required)
+          if (firstRequired && !firstRequired.validation) {
+            firstRequired.validation = validationText
+          }
+        }
+
+        return { ...action, fields: enrichedFields }
+      }),
+    }))
+
+    return { ...spec, entities: enrichedEntities, pages: enrichedPages }
+  } catch (err) {
+    logger.warn({ err }, 'enrichEntitiesFromActionsYml 失敗，降級跳過')
+    return spec
+  }
+}
+
+// ============================================================
 // 核心函數
 // ============================================================
 
@@ -76,7 +333,8 @@ interface TranslateResult {
 export async function translateBddToUISpec(
   bddSpec: string,
   originalRequirements: string,
-  trackingContext?: { userId?: string; conversationId?: string }
+  trackingContext?: { userId?: string; conversationId?: string },
+  actionsYml?: string
 ): Promise<TranslateResult> {
   if (!bddSpec || bddSpec.trim().length === 0) {
     return { success: false, error: 'BDD spec 為空' }
@@ -100,6 +358,7 @@ export async function translateBddToUISpec(
 10. 跨頁面共享的資料（例如：購物車在多頁面可見）→ stateHints with scope='global'
 11. 具有「前置（狀態）」Rule 的 Feature → 表示有條件邏輯，需要在 UI 中反映（disabled button/warning）
 12. 同一 entity 在多個 Feature 中出現 → 可能需要 dashboard 式的統一管理頁面
+13. 如果提供了 Server Actions 定義，fields 的 name/type/required 必須以 Action 定義為準，validation 從前置（參數）rules 提取
 
 ## DataDisplay Type 映射
 - Feature 中有多欄位 entity + 列表展示 → table
@@ -152,7 +411,10 @@ export async function translateBddToUISpec(
   ],
   "navigation": ["頁面1", "頁面2"],
   "entities": [
-    { "name": "EntityName", "fields": ["field1", "field2"] }
+    { "name": "EntityName", "fields": [
+      { "name": "field1", "type": "string", "required": true },
+      { "name": "field2", "type": "number" }
+    ]}
   ],
   "userFlows": [
     { "name": "流程名稱", "steps": ["步驟1", "步驟2"], "triggerPage": "起始頁面" }
@@ -162,11 +424,23 @@ export async function translateBddToUISpec(
   ]
 }`
 
-    const userMessage = `## 產品需求
+    // 生成 actions 摘要（零 LLM）
+    const actionsSummary = actionsYml ? summarizeActionsForUI(actionsYml) : null
+
+    let userMessage = `## 產品需求
 ${originalRequirements}
 
 ## BDD Feature Files
-${bddSpec}
+${bddSpec}`
+
+    if (actionsSummary) {
+      userMessage += `
+
+## Server Actions 定義（欄位名/型別/驗證以此為準，優先於 Feature Files 推測）
+${actionsSummary}`
+    }
+
+    userMessage += `
 
 請翻譯為前端 UI 需求規格 JSON。`
 
@@ -222,9 +496,22 @@ ${bddSpec}
           return { success: false, error: '翻譯結果缺少頁面定義' }
         }
 
-        logger.info({ pages: spec.pages.length, entities: spec.entities?.length || 0, conversationId: trackingContext?.conversationId }, '翻譯完成')
+        // 正規化 entities（Haiku 可能輸出舊格式 string[]）
+        if (spec.entities?.length > 0) {
+          spec.entities = spec.entities.map(e => ({
+            name: e.name,
+            fields: Array.isArray(e.fields)
+              ? e.fields.map(f => (typeof f === 'string' ? { name: f } : f))
+              : [],
+          }))
+        }
 
-        return { success: true, spec }
+        // 零 LLM 後處理：用 actionsYml 精確覆寫 entity 欄位 type/required/validation
+        const enrichedSpec = actionsYml ? enrichEntitiesFromActionsYml(spec, actionsYml) : spec
+
+        logger.info({ pages: enrichedSpec.pages.length, entities: enrichedSpec.entities?.length || 0, conversationId: trackingContext?.conversationId }, '翻譯完成')
+
+        return { success: true, spec: enrichedSpec }
       } catch (innerErr) {
         lastError = innerErr
         const errMsg = String(innerErr)
@@ -319,7 +606,15 @@ export function formatUISpecForPrompt(spec: UIRequirementsSpec): string {
   if (spec.entities.length > 0) {
     lines.push('', '### 實體與欄位（用 useState 管理，初始值為模擬數據）')
     for (const entity of spec.entities) {
-      lines.push(`- **${entity.name}**：${entity.fields.join('、')}`)
+      const fieldDescs = entity.fields.map(f => {
+        if (typeof f === 'string') return f  // 向下相容舊格式
+        let desc = f.name
+        if (f.type) desc += `(${f.type})`
+        if (f.required) desc += '*'
+        if (f.validation) desc += ` [${f.validation}]`
+        return desc
+      })
+      lines.push(`- **${entity.name}**：${fieldDescs.join('、')}`)
     }
   }
 

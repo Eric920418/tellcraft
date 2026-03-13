@@ -45,11 +45,9 @@ const envSchema = z.object({
   CHROMIUM_PATH: z.string().optional(),
   CLAUDE_API_KEY: z.string().optional(),   // 歷史遺留，優先讀 ANTHROPIC_API_KEY
 
-  // Supabase (used by deployer for storage)
-  SUPABASE_SERVICE_ROLE_KEY: z.string().optional(),
-  // Supabase Management API（自動建立客戶 DB）
-  SUPABASE_ACCESS_TOKEN: z.string().optional(),
-  SUPABASE_ORG_ID: z.string().optional(),
+  // Neon Database Provisioning（自動建立客戶 DB）
+  NEON_API_KEY: z.string().optional(),
+  NEON_DEFAULT_REGION: z.string().default('aws-ap-northeast-1'),
   // Cloudflare / Porkbun (DNS)
   CLOUDFLARE_API_TOKEN: z.string().optional(),
   CLOUDFLARE_ACCOUNT_ID: z.string().optional(),

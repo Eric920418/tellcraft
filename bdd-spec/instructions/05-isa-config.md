@@ -71,7 +71,7 @@ config:
     base_url: "${API_BASE_URL}"
     framework: nextjs_server_actions
   data:
-    database: supabase
+    database: postgresql
     schema_path: spec/data/schema.sql
     entity_mapping_path: spec/data/entity_to_table_mapping.yml
   actions:
@@ -99,7 +99,7 @@ config:
     base_url: "${API_BASE_URL}"
     framework: nextjs_server_actions
   data:
-    database: supabase
+    database: postgresql
     schema_path: spec/data/schema.sql
     entity_mapping_path: spec/data/entity_to_table_mapping.yml
   actions:
@@ -196,7 +196,7 @@ instructions:
 | 欄位 | 說明 | 範例 |
 |------|------|------|
 | `config.api` | API 配置（base URL、框架） | `framework: nextjs_server_actions` |
-| `config.data` | 資料庫配置（類型、schema 路徑） | `database: supabase` |
+| `config.data` | 資料庫配置（類型、schema 路徑） | `database: postgresql` |
 | `config.actions` | Actions 規格路徑 | `spec_path: spec/actions/actions.yml` |
 | `name` | 指令名稱，描述此步驟的用途 | `Action call` |
 | `format` | 正規表示式，用於匹配步驟文字 | `^\((?:No Actor\|UID="...")\) ...` |

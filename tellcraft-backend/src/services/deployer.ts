@@ -7,13 +7,11 @@ import { promisify } from 'util'
 import * as os from 'os'
 import * as path from 'path'
 import * as fsPromises from 'fs/promises'
-import type Redis from 'ioredis'
 import { getAnthropicClient, MODEL, trackLlmUsage } from '../lib/anthropic'
 import { getEnv } from '../lib/env'
 import * as db from '../db/client'
 import { createLogger } from '../lib/logger'
 import { repairMissingReactImports, repairBracketLookupAccess } from './uiux-generation'
-import { waitForSupabaseProvisioning } from './supabase-service'
 
 const logger = createLogger('deployer')
 const execFileAsync = promisify(execFile)
@@ -867,7 +865,6 @@ export async function executeDeployment(
     siteMetadata?: SiteMetadata
   },
   trackingContext?: { userId?: string; conversationId?: string },
-  redis?: Redis
 ): Promise<DeployResult> {
   try {
     // 1. 取得專案名稱
@@ -909,20 +906,20 @@ export async function executeDeployment(
       logger.info({ projectName }, 'Vercel project 可能已存在，繼續部署')
     }
 
-    // 3.5 Supabase env vars 注入（如有背景 provisioning 完成）
-    if (redis) {
-      try {
-        const supabaseInfo = await waitForSupabaseProvisioning(projectId, redis)
-        if (supabaseInfo) {
-          await injectVercelEnvVars(projectName, {
-            'NEXT_PUBLIC_SUPABASE_URL': supabaseInfo.url,
-            'NEXT_PUBLIC_SUPABASE_ANON_KEY': supabaseInfo.anonKey,
-          })
-          logger.info({ projectId, url: supabaseInfo.url }, 'Supabase env vars 已注入 Vercel')
-        }
-      } catch (err) {
-        logger.warn({ err, projectId }, 'Supabase env vars 注入失敗，繼續部署')
+    // 3.5 Neon DB env vars 注入（同步查 DB，無需 Redis polling）
+    try {
+      const dbRow = await db.query<{ neon_connection_string: string }>(
+        'SELECT neon_connection_string FROM projects WHERE id = $1 AND neon_connection_string IS NOT NULL',
+        [projectId]
+      )
+      if (dbRow.rows[0]) {
+        await injectVercelEnvVars(projectName, {
+          'DATABASE_URL': dbRow.rows[0].neon_connection_string,
+        })
+        logger.info({ projectId }, 'Neon DATABASE_URL 已注入 Vercel')
       }
+    } catch (err) {
+      logger.warn({ err, projectId }, 'DB env vars 注入失敗，繼續部署')
     }
 
     // 4. 部署檔案（70%）

@@ -154,7 +154,6 @@ export async function handleDeployExecute(
         siteMetadata,
       },
       { userId: state.userId, conversationId },
-      redis
     )
   } catch (err) {
     logger.error({ err: err }, 'handleDeployExecute 異常')
@@ -207,15 +206,15 @@ export async function handleDeployExecute(
       ? `\n\n目前是先上線已完成頁面；若要補完其餘頁面，可點「繼續生成（${remainingPages.length} 頁）」回到生成流程。`
       : ''
 
-    // 查詢 Supabase DB 資訊（如有）
+    // 查詢 Neon DB 資訊（如有）
     let dbNote = ''
     try {
-      const dbRow = await db.query<{ supabase_url: string; supabase_anon_key: string }>(
-        'SELECT supabase_url, supabase_anon_key FROM projects WHERE id = $1 AND supabase_url IS NOT NULL',
+      const dbRow = await db.query<{ neon_host: string }>(
+        'SELECT neon_host FROM projects WHERE id = $1 AND neon_host IS NOT NULL',
         [projectId]
       )
       if (dbRow.rows[0]) {
-        dbNote = `\n\n**Supabase 資料庫已就緒**\n- URL: \`${dbRow.rows[0].supabase_url}\`\n- Anon Key: \`${dbRow.rows[0].supabase_anon_key.slice(0, 20)}...\``
+        dbNote = `\n\n**資料庫已就緒**\n- Host: \`${dbRow.rows[0].neon_host}\``
       }
     } catch {
       // 查詢失敗不影響部署成功訊息

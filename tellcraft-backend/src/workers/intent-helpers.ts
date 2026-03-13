@@ -131,7 +131,7 @@ export function hasDomainIntent(msg: string): boolean {
 }
 
 export function hasDatabaseIntent(msg: string): boolean {
-  const kw = ['資料庫', '數據庫', 'database', 'supabase', 'db設定', '建資料庫']
+  const kw = ['資料庫', '數據庫', 'database', 'neon', 'db設定', '建資料庫']
   const lower = msg.toLowerCase()
   return kw.some(k => lower.includes(k))
 }

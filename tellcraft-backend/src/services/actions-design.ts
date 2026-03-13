@@ -311,7 +311,7 @@ const SYSTEM_PROMPT = `你是一位 sdd.os ISA 專家，負責從 Feature Files 
 project:
   name: 專案名稱
   framework: next.js
-  database: supabase
+  database: postgresql
 
 actions:
   - name: actionFunctionName

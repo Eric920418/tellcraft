@@ -120,7 +120,7 @@ project:
   description: 基於 BDD Feature Files 設計的 Server Actions
   version: 1.0.0
   framework: next.js
-  database: supabase
+  database: postgresql
 
 actions:
   - name: [actionFunctionName]

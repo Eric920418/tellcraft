@@ -2,10 +2,10 @@
 
 > **用對話打造你的軟體產品** | [tellcraft.com](https://tellcraft.com)
 
-Tellcraft 是一個 AI 驅動的自動化開發平台。用戶只需描述需求，AI 會自動釐清細節、生成程式碼、部署上線。
+Tellcraft 是一個 AI 驅動的 **SDD（Specification-Driven Development）自動化開發平台**。用戶只需描述需求，AI 自動釐清細節、產出可執行規格、生成前後端程式碼、自動驗證業務邏輯、部署上線。
 
 ```
-描述需求 → AI 釐清 → 確認規格 → 自動生成 → 一鍵部署
+描述需求 → AI 釐清 → BDD 規格 → 建資料庫 → 生成代碼 → 自動驗證 → 一鍵部署
 ```
 
 ## 技術棧
@@ -73,7 +73,7 @@ npx ts-node bdd-spec/scripts/validate-feature.ts spec/features/
 `VPS_API_URL` `NEXT_PUBLIC_VPS_API_URL` `NEXT_PUBLIC_VPS_WS_URL` `NEXT_PUBLIC_UPLOAD_BASE_URL` `NEXT_PUBLIC_SUPABASE_URL` `NEXT_PUBLIC_SUPABASE_ANON_KEY` `NEXT_PUBLIC_LIFF_ID` `NEXT_PUBLIC_SENTRY_DSN` `SENTRY_ORG` `SENTRY_PROJECT` `SENTRY_AUTH_TOKEN`
 
 **後端**（`tellcraft-backend/.env`）：
-`DATABASE_URL` `REDIS_URL` `JWT_SECRET` `ANTHROPIC_API_KEY` `GOOGLE_CLIENT_ID` `GOOGLE_CLIENT_SECRET` `LINE_CHANNEL_ID` `LINE_CHANNEL_SECRET` `LINE_BOT_CHANNEL_SECRET` `LINE_MESSAGING_CHANNEL_ACCESS_TOKEN` `LIFF_ID` `UPLOAD_DIR` `UPLOAD_BASE_URL` `SOCKET_VERBOSE_LOG` `SUPABASE_ACCESS_TOKEN` `SUPABASE_ORG_ID`
+`DATABASE_URL` `REDIS_URL` `JWT_SECRET` `ANTHROPIC_API_KEY` `GOOGLE_CLIENT_ID` `GOOGLE_CLIENT_SECRET` `LINE_CHANNEL_ID` `LINE_CHANNEL_SECRET` `LINE_BOT_CHANNEL_SECRET` `LINE_MESSAGING_CHANNEL_ACCESS_TOKEN` `LIFF_ID` `UPLOAD_DIR` `UPLOAD_BASE_URL` `SOCKET_VERBOSE_LOG` `NEON_API_KEY` `NEON_DEFAULT_REGION`
 
 > `UPLOAD_BASE_URL` 必填（例如 `https://api.tellcraft.com/uploads/tellcraft`），未設定時 `/api/upload/image` 會回傳 `UPLOAD_BASE_URL_MISSING`。
 
@@ -97,21 +97,82 @@ npx ts-node bdd-spec/scripts/validate-feature.ts spec/features/
 
 > 詳細架構文檔見 [CLAUDE.md](./CLAUDE.md)（核心模組、Phase 狀態機、Pipeline 流程、API 路由、防雷清單）
 
+## SDD Pipeline（全棧自動開發）
+
+客戶描述需求後，平台自動完成**規格 → 資料庫 → 前端 → 後端 → 驗證 → 部署**全流程：
+
+```
+客戶：「我要做一個寵物預約系統」
+  │
+  ▼
+① BDD Skill（已完成）
+  ├─ 產出：Feature Files（可執行規格）
+  ├─ 產出：API Spec（OpenAPI YAML）
+  ├─ 產出：schema.sql + entity_to_table_mapping.yml
+  └─ 產出：isa.yml（SpecFormula 配置）
+  │
+  ▼
+② Neon DB Provision（已完成）
+  └─ BDD 完成後自動觸發
+     schema.sql → Neon API → 建 DB + 套 Schema + RLS（同步 < 10s）
+  │
+  ▼
+③ UIUX / Fast Build Skill（已完成）
+  └─ 設計 → 生成前端代碼 → Sandpack 即時預覽
+  │
+  ▼
+④ Coder Skill（❌ 未實作 — 下一步）
+  ├─ 讀取 BDD 產出（API Spec + Schema + Feature Files）
+  ├─ LLM 生成後端代碼（Supabase Edge Functions / Express）
+  ├─ 調用 SpecFormula 跑 Feature Files 驗證
+  ├─ 紅燈 → 錯誤回饋 LLM → 重新生成 → 再跑
+  └─ 綠燈 → 進入部署
+  │
+  ▼
+⑤ Deployer（已完成）
+  └─ 前端 → Vercel 部署（自動注入 DATABASE_URL）
+     後端 → TODO（Supabase Edge Functions 部署 / VPS 部署）
+```
+
+### sdd.os 與 SpecFormula 的關係
+
+```
+sdd.os/specformula-java/        ← Java Reference Implementation（上游原版，只讀參考）
+        │ 移植
+        ▼
+tellcraft-backend/src/lib/specformula/   ← TS 移植版（27 檔 ~3800 行，已能跑）
+        │ 被調用
+        ▼
+Coder Skill                              ← 生成代碼後，調用 SpecFormula 自動驗證
+```
+
+- **SpecFormula** 是 SDD 的核心驗證引擎：讀取 Feature Files → 打 HTTP API → 查 DB 驗證狀態
+- TS 版已通過 217 單元測試 + 2 E2E 場景（entity_setup → api_call → response_validate → entity_validate）
+- API Spec 已擴充到 4 檔 19 operations（conversation/session/project/bdd）
+
+### 為什麼需要 Coder Skill（不能只靠 Supabase PostgREST）
+
+Supabase PostgREST 只能做 CRUD + RLS，**搞不定**：
+- 第三方 API 串接（金流、寄信、SMS、OAuth）
+- 複雜業務邏輯（價格計算、庫存扣減、狀態機）
+- 排程任務 / 背景工作 / Webhook
+- 任何需要「先做 A，根據結果再做 B」的流程
+
 ## Skill 系統
 
 | Skill | 用途 | LLM | 狀態 |
 |-------|------|-----|------|
-| `bdd-spec` | 需求釐清 + BDD 規格產出（ES → Discovery → Formulation → Actions → ISA） | Sonnet | 完成 |
-| `uiux` | 前端介面設計（Design Discovery → Design Lab → Implementation） | Sonnet | 完成 |
-| `fast-build` | 一句話快速建站，Haiku 概念生成 + Tier 智能修正 + Sonnet 三階段生成 | Haiku ×1 + Sonnet ×3 | 完成 |
-| `quality-gate` | UIUX RWD 完成後自動觸發，靜態檢查 + LLM 自動修復 | Haiku | 完成 |
-| `deployer` | 代碼 → sanitize → 本地 build 驗證 → Vercel 部署 → 回滾 | Haiku（修復） | 完成 |
-| `iteration` | 迭代修改 + 撤銷上一步 + 版本回滾 | Sonnet | 完成 |
-| `coder` | 後端代碼生成 | — | **未實作**，Registry 有定義 |
-| `domain-manager` | 域名管理：列出已有域名 / 引導購買或綁定 | — | 完成（VPS 後端 + Orchestrator） |
-| `domain-purchase` | 域名購買：RDAP 查詢 → Porkbun 註冊 → Cloudflare DNS → Vercel 綁定 | — | 完成（7 步 phase 狀態機 + 反向補償 rollback） |
-| `domain-dns` | 自有域名 DNS 綁定 + Cloudflare DNS CRUD | — | 完成（REST API + Orchestrator 對話流程） |
-| `supabase-provision` | BDD 完成後自動建立 Supabase DB + 套用推導的 Schema | — | 完成（fire-and-forget 背景建立，部署時自動注入 env） |
+| `bdd-spec` | 需求釐清 + BDD 規格產出（ES → Discovery → Formulation → Actions → ISA） | Sonnet | ✅ 完成 |
+| `uiux` | 前端介面設計（Design Discovery → Design Lab → Implementation） | Sonnet | ✅ 完成 |
+| `fast-build` | 一句話快速建站，Haiku 概念生成 + Tier 智能修正 + Sonnet 三階段生成 | Haiku ×1 + Sonnet ×3 | ✅ 完成 |
+| `quality-gate` | UIUX RWD 完成後自動觸發，靜態檢查 + LLM 自動修復 | Haiku | ✅ 完成 |
+| `deployer` | 代碼 → sanitize → 本地 build 驗證 → Vercel 部署 → 回滾 | Haiku（修復） | ✅ 完成 |
+| `iteration` | 迭代修改 + 撤銷上一步 + 版本回滾 | Sonnet | ✅ 完成 |
+| `db-provision` | BDD 完成後自動建 Neon DB + 套用 Schema（同步 < 10s） | — | ✅ 完成 |
+| `coder` | 後端代碼生成 + SpecFormula 自動驗證（紅綠燈循環） | Sonnet | ❌ **未實作** |
+| `domain-manager` | 域名管理：列出已有域名 / 引導購買或綁定 | — | ✅ 完成 |
+| `domain-purchase` | 域名購買：RDAP → Porkbun → Cloudflare DNS → Vercel 綁定 | — | ✅ 完成 |
+| `domain-dns` | 自有域名 DNS 綁定 + Cloudflare DNS CRUD | — | ✅ 完成 |
 
 ### 內部服務層
 
@@ -120,7 +181,7 @@ npx ts-node bdd-spec/scripts/validate-feature.ts spec/features/
 | `classifier.ts` | Haiku | 每條新訊息 | 意圖分類（長文預過濾 ≥60字 → 規則式 → LLM + 後驗證覆寫）+ Content Policy 審查（contentFlag） |
 | `prefilter.ts` | 無 / Haiku | 每條訊息（最先）+ Fast Mode | 空訊息/長度/Injection(28 regex)/品質閘門(亂碼+髒話+垃圾)/Rate Limit + `checkBuildRelevance()` 語義相關性 + Content Policy |
 | `semantic-gateway.ts` | Sonnet | BDD 釐清 + 設計問卷 + 迭代修改 | 統一語義閘門：quickFilter 零 LLM 短路（BDD 中文 ≥2/英文 ≥5 + Design 中文/URL + Iteration 關鍵詞，~90%+ 放行）+ Sonnet 語義判斷（verdict + 引導訊息生成）。BDD/Design API 錯誤 fail-open，Iteration fail-closed |
-| `bdd-to-ui-spec.ts` | Haiku | UIUX Pipeline | BDD Feature Files → UIRequirementsSpec |
+| `bdd-to-ui-spec.ts` | Haiku | UIUX Pipeline | BDD Feature Files + actionsYml → UIRequirementsSpec（Haiku 翻譯 + `enrichEntitiesFromActionsYml` 零 LLM 後處理：types→entity field type/required，input.properties→action field type，前置（參數）rules→validation）|
 | `prd-discovery.ts` | Sonnet | bdd-spec | PRD 需求發掘（多輪） |
 | `clarify-dedup.ts` | Haiku ×2 | bdd-spec | Decision Summary + 語意去重 |
 | `spec-discovery.ts` | Sonnet | bdd-spec | 規格品質檢查（S1-S6） |
@@ -138,7 +199,7 @@ npx ts-node bdd-spec/scripts/validate-feature.ts spec/features/
 
 ### 兩種模式
 
-**精細模式（Fine）**：BDD 完成 → [Supabase DB 背景建立（付費用戶，從 BDD Entity 推導 Schema）] → 模板匹配 → Discovery（Step 2 可上傳參考截圖，Vision 分析注入後續流程）→ Brief 確認 → 5 變體 → Structure → Animation → RWD → QG → 部署（自動注入 Supabase env vars）
+**精細模式（Fine）**：BDD 完成 → [Neon DB 同步建立（付費用戶，從 BDD Entity 推導 Schema）] → 模板匹配 → Discovery（Step 2 可上傳參考截圖，Vision 分析注入後續流程）→ Brief 確認 → 5 變體 → Structure → Animation → RWD → QG → 部署（自動注入 DATABASE_URL）
 
 **精細模式 + 自動採用**：PRD Clarify 第一題出現「全部自動採用 AI 建議」按鈕 → 自動回答所有 BDD 問題（propose→proposedAnswer / ask→建議選項或 A）→ 自動確認草稿 → 自動回答 Spec Clarify → 進入設計階段（手動）。BDD 互動從 7-11 次降到 1 次。`FlowState.autoAdoptMode` 在 `completeSpecPhase` 末尾清除，`autoAdoptAllPendingQuestions` 有 MAX_ITERATIONS=200 安全閥。
 
@@ -430,7 +491,7 @@ Server Action 錯誤訊息 + 工具模組中文字串國際化（+117 keys，2 n
 | 分類 | 功能 |
 |------|------|
 | **BDD 規格** | 5 階段釐清、Event Storming、提案模式、草稿批量、變更管理、規格回滾、Scenario Outline、OpenAPI 產出 |
-| **UIUX 設計** | 雙軌 Discovery、Design Tier、5 變體、三階段生成、串流即時預覽、BDD→UI 翻譯、Variant 概念注入 |
+| **UIUX 設計** | 雙軌 Discovery、Design Tier、5 變體、三階段生成、串流即時預覽、BDD→UI 翻譯（含 actionsYml 欄位精確注入）、Variant 概念注入 |
 | **快速建站** | 26 種產品類型、22 套產業配色、Haiku 概念生成（設計靈魂）、Tier 智能修正、vague 攔截引導、失敗重試、進度預估、手機全屏預覽、App/Website 佈局模式、模板風格整合、智能模板匹配 |
 | **品質** | Quality Gate 靜態檢查（含 SVG ID 碰撞偵測）、LLM 自動修復、RWD 響應式安全網、Tailwind v4→v3 轉換 |
 | **部署** | sanitize 6 類預檢、本地 build 驗證（3 輪 LLM 修復）、Vercel 部署、版本回滾 |
@@ -602,8 +663,74 @@ tellcraft-backend/
 bdd-spec/                 # BDD Skill 定義（instructions/ + rules/ + scripts/）
 uiux-skill/               # UIUX Skill 定義（instructions/ + rules/）
 spec/                     # BDD 規格產出（features/ + data/ + actions/ + api/）
-│   └── api/              # OpenAPI Spec（4 檔 19 operations: conversation/session/project/bdd）
+│   ├── api/              # OpenAPI Spec（4 檔 19 operations: conversation/session/project/bdd）
+│   ├── data/             # schema.sql + entity_to_table_mapping.yml
+│   └── isa.yml           # SpecFormula 配置（instruction patterns + data/api 路徑）
+sdd.os/                   # SDD 上游 Reference Repo（git subtree，只讀參考）
+│   ├── specformula-java/ # Java Reference Implementation（TS 移植的來源）
+│   ├── specformula-python/  # Python 版（Placeholder）
+│   ├── specformula-ts/      # TS 版（Placeholder，實作在 tellcraft-backend/src/lib/specformula/）
+│   └── benchmark/           # 範例專案（guessing_game / todo_list / agent_hr_system）
 ```
+
+## Roadmap（待實作）
+
+### P0：Coder Skill — 後端代碼生成 + SpecFormula 驗證
+
+**核心目標**：LLM 根據 BDD 產出生成後端代碼，SpecFormula 自動跑 Feature Files 驗證，紅燈修、綠燈過。
+
+**待決定的架構問題**：
+| 問題 | 選項 | 影響 |
+|------|------|------|
+| 生成什麼形式的後端？ | Supabase Edge Functions / Express / Next.js API Routes | 決定代碼模板、部署方式 |
+| 後端跑在哪？ | Supabase Edge Functions / 客戶 VPS / Vercel Serverless | 決定 infra 編排 |
+| SpecFormula 測試環境 | Tellcraft VPS 上跑 / 客戶 Supabase 直連 | 決定 DB 連線、API 路由 |
+
+**需要建的東西**：
+| 項目 | 說明 | 預估 |
+|------|------|------|
+| Coder Skill 定義 | `coder-skill/instructions/`，LLM prompt 規範（讀 API Spec + Schema → 生成代碼） | 中 |
+| 代碼生成 Service | `services/coder-generation.ts`，LLM 生成 + 代碼解析 + 檔案拆分 | 高 |
+| SpecFormula 整合 | 生成代碼 → 啟動 app → SpecFormula 跑 Feature Files → 收集結果 | 高 |
+| 紅綠燈循環 | 測試失敗 → 錯誤訊息回饋 LLM → 重新生成 → 再跑（最多 N 輪） | 中 |
+| Phase 狀態機 | `coder_generating` / `coder_testing` / `coder_complete` + FlowState 欄位 | 低 |
+| 後端部署 | Supabase Edge Functions deploy / VPS deploy | 中 |
+| 前後端串接 | UIUX 生成的前端代碼注入 Supabase client / API base URL | 低 |
+
+### P1：SpecFormula 與真實 API 串接
+
+目前 SpecFormula E2E 測的是假的 test-app（`cucumber/support/test-app.ts` 的 notes API）。需要：
+
+- [ ] `SupertestAdapter` 連接 Coder Skill 生成的真實 Express app（或 HTTP adapter 連 Supabase Edge Functions）
+- [ ] `cucumber/cucumber.js` 的 `spec` profile 對接客戶的 Feature Files（路徑：`spec/features/**/*.feature`）
+- [ ] 客戶專案的 Supabase DB 連線注入（`TEST_DATABASE_URL` 動態設定）
+- [ ] 測試結果結構化回饋（哪個 Feature/Scenario 失敗、期望值 vs 實際值）
+
+### P2：BDD 格式遷移（ISA SpecFormula 標準）
+
+BDD Skill 的 Feature File 輸出格式需從 Tellcraft 舊格式升級到 SpecFormula 標準：
+
+- [ ] `bdd-spec/instructions/03-formulation.md` — LLM prompt 格式說明改寫（Actor 前綴、status code 回應、VAR 系統）
+- [ ] `bdd-spec/rules/formulation-rules.md` — 語法規範同步
+- [ ] `bdd-spec/resources/templates/` + `examples/` — 範例改寫
+- [ ] `bdd-spec/scripts/lint-gherkin-format.ts` — ISA_PATTERNS regex 更新
+- [ ] `bdd-spec/scripts/validate-feature.ts` — E006/E007 格式檢查更新
+- [ ] `tellcraft-backend/src/services/formulation.ts` — LLM prompt 全面更新（至少 3 處）
+- [ ] `tellcraft-backend/src/services/isa-config.ts` — `buildInstructions()` 輸出格式改為 SpecFormula 標準
+
+### P3：後端部署 Pipeline
+
+客戶生成的後端代碼需要部署到某個地方：
+
+- [ ] Supabase Edge Functions 部署（Deno runtime，最簡單的選項）
+- [ ] 或：獨立 VPS 部署（Express + PM2，類似 Tellcraft 自身後端）
+- [ ] 或：Vercel Serverless Functions（有超時限制，但免 infra）
+- [ ] Deployer Skill 擴展：支援後端代碼部署（不只是前端 Vercel）
+
+### P4：其他待辦
+
+- [ ] i18n Phase 3：VPS 後端錯誤訊息 error code 化 + LLM prompts i18n + Remotion 動畫標籤
+- [ ] `sdd.os/` 上游同步機制（SpecFormula Java 更新時，同步到 TS 版）
 
 ## 部署
 
@@ -714,6 +841,22 @@ psql "$DATABASE_URL" -f tellcraft-backend/migrations/xxx.sql
 2. **Anthropic Client 統一**（`lib/anthropic.ts`）：全 codebase 唯一的 `getAnthropicClient()` + `MODEL.SONNET`/`MODEL.HAIKU` 常數。消除 7 份重複 `getAnthropicClient()`、59 處硬編碼模型 ID。SDK 用戶（6 檔）改 import 單例；fetch 用戶（10 檔）改用 `getAnthropicHeaders()` + MODEL 常數
 3. **Zod API 驗證**（`middleware/validate.ts` + `schemas/`）：`validateBody(schema)` 中間件工廠，高風險路由全覆蓋 — conversation（sendMessage/reply）、session（initialize）、operations（4 端點）、bdd（6 端點）、project（create/template-overrides），移除 ~100 行手動 `if (!req.body.xxx)` 驗證
 4. **BullMQ DLQ**（`services/job-failure-handler.ts` + `migrations/013`）：`job_failures` 表持久化最終失敗、Socket.io 推送用戶錯誤消息+重試按鈕、FATAL log 觸發告警、`removeOnFail.age` 24h→7d
+
+### UIRequirementsSpec 結構化豐富 + actionsYml 注入（2026-03-13）
+
+兩階段改進 BDD→UI 翻譯管線，讓 Sonnet 的 Structure 生成看到精確的欄位型別和驗證規則：
+
+**階段 1：actionsYml 摘要注入 Haiku prompt**
+- `summarizeActionsForUI()`（零 LLM）解析 actionsYml → 結構化文本注入 Haiku 翻譯 prompt
+- systemPrompt 規則 13：Action 定義優先於 Feature File 推測
+- `getTemplateAndBddSpec()` 擴展返回 `actionsYml` 欄位
+
+**階段 2：UIRequirementsSpec 介面升級 + 零 LLM 後處理**
+- **`UIEntityField` 介面**：entities.fields 從 `string[]` 升級為 `{ name, type?, required?, validation? }[]`
+- **`enrichEntitiesFromActionsYml()`**（零 LLM）：Haiku 返回後用 actionsYml `types` 區塊精確覆寫 entity field type/required，用 `input.properties` 覆寫 action field type，用 `前置（參數）` rules 填充 validation
+- **`formatUISpecForPrompt()` 豐富輸出**：Sonnet 看到 `orderNumber(string)*、amount(number)* [金額必須>0]` 而非 `orderNumber、amount`
+- **Haiku JSON schema 更新**：entities 輸出改為 `{ name, type, required }` 物件格式
+- **向下相容**：自動偵測 Redis 中舊格式 `string[]` 並正規化為 `UIEntityField[]`
 
 ### 迭代反饋循環修復（2026-03-13）
 

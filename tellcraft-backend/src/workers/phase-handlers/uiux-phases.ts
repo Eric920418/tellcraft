@@ -968,7 +968,7 @@ export async function executeFullCodePipeline(
     return
   }
 
-  const { template: dbTemplate, bddSpec, originalRequirements } = await getTemplateAndBddSpec(sessionId)
+  const { template: dbTemplate, bddSpec, originalRequirements, actionsYml } = await getTemplateAndBddSpec(sessionId)
   const template = state.uiuxPreparedTemplate || dbTemplate
   const pages = template.pageStructure.pages || ['home']
   const twConfig = generateTailwindConfig(uiuxDesignSystem)
@@ -1000,7 +1000,7 @@ export async function executeFullCodePipeline(
   let uiSpec = state.uiuxUISpec
   if (!uiSpec && bddSpec) {
     logger.info('Pipeline 開始 BDD→UI 翻譯...')
-    const translateResult = await translateBddToUISpec(bddSpec, originalRequirements, { userId: state.userId, conversationId })
+    const translateResult = await translateBddToUISpec(bddSpec, originalRequirements, { userId: state.userId, conversationId }, actionsYml)
     if (translateResult.success && translateResult.spec) {
       uiSpec = translateResult.spec
       state.uiuxUISpec = uiSpec
@@ -1281,7 +1281,7 @@ async function executeCodePhaseStructure(
   })
 
   // 取得模板和 BDD 規格
-  const { template: dbTemplate, bddSpec, originalRequirements } = await getTemplateAndBddSpec(sessionId)
+  const { template: dbTemplate, bddSpec, originalRequirements, actionsYml } = await getTemplateAndBddSpec(sessionId)
 
   // 優先使用 FlowState 中的 uiuxPreparedTemplate（包含用戶的設計偏好和正確的頁面結構）
   const template = state.uiuxPreparedTemplate || dbTemplate
@@ -1289,7 +1289,7 @@ async function executeCodePhaseStructure(
   // BDD→UI 翻譯（有快取跳過）
   let structUISpec = state.uiuxUISpec
   if (!structUISpec && bddSpec) {
-    const translateResult = await translateBddToUISpec(bddSpec, originalRequirements, { userId: state.userId, conversationId })
+    const translateResult = await translateBddToUISpec(bddSpec, originalRequirements, { userId: state.userId, conversationId }, actionsYml)
     if (translateResult.success && translateResult.spec) {
       structUISpec = translateResult.spec
       state.uiuxUISpec = structUISpec
@@ -1769,6 +1769,7 @@ async function getTemplateAndBddSpec(sessionId: string): Promise<{
   template: TemplateData
   bddSpec: string
   originalRequirements: string
+  actionsYml?: string
 }> {
   const session = await getBddSession({ sessionId })
   if (!session.success || !session.data) {
@@ -1829,7 +1830,12 @@ async function getTemplateAndBddSpec(sessionId: string): Promise<{
     ? session.data.featuresContent.map(f => f.content).join('\n\n---\n\n')
     : ''
 
-  return { template, bddSpec, originalRequirements: session.data.originalRequirements || '' }
+  return {
+    template,
+    bddSpec,
+    originalRequirements: session.data.originalRequirements || '',
+    actionsYml: session.data.actionsYmlContent || undefined,
+  }
 }
 
 /**

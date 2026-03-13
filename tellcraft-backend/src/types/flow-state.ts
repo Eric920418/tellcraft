@@ -177,8 +177,7 @@ export interface FlowState {
   domainVercelProjectId?: string
   domainRegistrationStartedAt?: number
   domainRegistrant?: RegistrantInfo
-  // Supabase Provisioning 專用
-  supabaseProvisionStatus?: 'provisioning' | 'completed' | 'failed' | 'skipped'
-  supabaseProvisionStartedAt?: number
-  supabaseDerivedSchema?: { displaySummary: string; entityCount: number }
+  // Database Provisioning（provider-agnostic）
+  dbProvisionStatus?: 'completed' | 'failed' | 'skipped'
+  dbDerivedSchema?: { displaySummary: string; entityCount: number }
 }

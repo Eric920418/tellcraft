@@ -93,8 +93,8 @@ pm2 describe tellcraft-backend            # 詳細資訊（記憶體/重啟次�
 | **Customer Service** | `services/customer-service.ts` | 客服問答：detectFastModeIntent 意圖分類（greeting/question/chitchat/help）+ FAQ 零 LLM 匹配（9 主題）+ answerWithSonnet 開放問答 |
 | **Prefilter** | `services/prefilter.ts` | 全域輸入預過濾：checkInputQuality 亂碼/髒話/垃圾 + phase-aware 二次攔截（getPhaseStrictness）+ Redis anti-loop |
 | **Domain Service** | `services/domain-service.ts` | 域名 API 封裝（Porkbun 註冊 + Cloudflare DNS + Vercel 綁定 + RDAP 查詢）+ 購買/自有域名工作流 + 反向補償 rollback |
-| **Supabase Service** | `services/supabase-service.ts` | Supabase Management API 客戶端：建立 Project + 輪詢就緒 + 取得 API Keys + 執行 SQL DDL + fire-and-forget provisioning + deployer 等待整合 |
-| **Schema Derivation** | `services/schema-derivation.ts` | BDD schemaSql → Supabase-compatible PostgreSQL DDL（零 LLM，規則式轉換：ID→UUID、COMMENT 語法、RLS、created_at） |
+| **Neon Service** | `services/neon-service.ts` | Neon API 客戶端：同步建立 Neon PostgreSQL DB + 套用 BDD Schema，< 10s |
+| **Schema Derivation** | `services/schema-derivation.ts` | BDD schemaSql → Neon PostgreSQL DDL（零 LLM，規則式轉換：ID→UUID、COMMENT 語法、RLS、created_at） |
 | **FlowState Recovery** | `services/flowstate-recovery.ts` | 每 2 分鐘掃描 Redis flow:* key，逾時 phase 自動恢復（prd_discovery 5m / fast_generating 20m / uiux_iterating 5m / deployer_deploying 10m / domain_searching 3m / domain_registering 10m / domain_dns_verifying 5m）|
 | **Conversation Lock** | `services/conversation-lock.ts` | Redis SET NX EX 互斥鎖（TTL 5 分鐘），同一對話同時只允許一個 Worker job 執行 |
 | **LINE Notify** | `services/line-notify.ts` | LINE 推播通知（stage 白名單過濾，fire-and-forget） |
@@ -139,7 +139,7 @@ pm2 describe tellcraft-backend            # 詳細資訊（記憶體/重啟次�
 | `domain-manager` | 域名管理：列出已有域名 / 引導購買或綁定（付費會員限定） |
 | `domain-purchase` | 域名購買：RDAP 查詢可用性 → 確認 → Porkbun 註冊 → Cloudflare DNS → Vercel 綁定（付費會員限定，配額 creator:1/pro:2/business:3） |
 | `domain-dns` | 自有域名綁定：顯示 DNS 設定說明 → 用戶確認 → 驗證 DNS 傳播 → 完成（付費會員限定，共用域名配額） |
-| `supabase-provision` | BDD 完成後自動建立 Supabase DB：從 schemaSql 推導 DDL → fire-and-forget 背景建立 → 部署時注入 Vercel env vars（付費會員限定，creator:1/pro:3/business:5） |
+| `db-provision` | BDD 完成後自動建 Neon DB + 套用 Schema（同步 < 10s，無 Redis）（付費會員限定，creator:1/pro:3/business:5） |
 
 ### Orchestrator Phase 狀態機
 
@@ -281,6 +281,7 @@ Layer 5: sanitizeCodeForDeploy 修復 7 — useSearchParams Suspense boundary �
 | `021_add_uiux_columns.sql` | UIUX 相關欄位 |
 | `022_add_domain_records.sql` | 域名記錄表（domain_records：狀態追蹤 + Porkbun/Cloudflare/Vercel 欄位 + completed_steps rollback） |
 | `023_add_supabase_service_key.sql` | Supabase provisioning 支援（`supabase_service_role_key` 欄位 + quota 查詢索引） |
+| `024_add_neon_columns.sql` | Neon provisioning 支援（`neon_project_id`/`neon_connection_string`/`neon_host` 欄位 + quota 查詢索引） |
 
 新增 migration 後在 VPS 執行：`psql "$DATABASE_URL" -f tellcraft-backend/migrations/xxx.sql`
 
@@ -359,7 +360,7 @@ Feature 註解：`# Action: actionName` + `# [METHOD] /path` + `# Summary: xxx`
 - **Formulation checkpoint 每 3 個 feature 保存一次**：中斷恢復時跳過已完成的 feature，成功後必須清理所有 `formulation*` 暫存欄位
 - **DB 連線池**：`max: 15`（非 50）+ `keepAlive: true`，防止 PostgreSQL 斷開空閒連線。可用 `DB_POOL_MAX` 環境變數覆蓋
 - **Feature 驗證腳本用 `tsx` 不是 `ts-node`**：`feature-validation.ts` 的 `runScript()` 用 `npx tsx`。腳本解析失敗時視為通過（不觸發無效 LLM 修復循環），stderr/exitCode 會完整記錄供除錯
-- **Supabase provisioning 是 fire-and-forget**：任何失敗（env 未配、quota 不足、API 錯誤、DDL 執行失敗）都不阻塞 UIUX 或部署流程。Redis key `supabase-provision:{projectId}` 追蹤狀態（creating/completed/failed），TTL 24h。Deployer 等待最多 2min，超時直接跳過 env 注入。`executeSql` 失敗會 DELETE 已建立的空 Supabase project 避免佔用資源
+- **Neon provisioning 是同步的（< 10s）**：任何失敗都不阻塞 UIUX 或部署流程。Deployer 直接 SELECT `neon_connection_string` FROM projects 注入 DATABASE_URL，無需 Redis polling
 
 ## 核心原則
 
@@ -372,5 +373,5 @@ Feature 註解：`# Action: actionName` + `# [METHOD] /path` + `# Summary: xxx`
 
 前端（`.env.local`）：`VPS_API_URL`, `NEXT_PUBLIC_VPS_API_URL`, `NEXT_PUBLIC_VPS_WS_URL`, `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `NEXT_PUBLIC_LIFF_ID`, `NEXT_PUBLIC_SENTRY_DSN`, `SENTRY_ORG`, `SENTRY_PROJECT`, `SENTRY_AUTH_TOKEN`
 
-後端（`tellcraft-backend/.env`）：所有環境變數定義在 `lib/env.ts` 的 Zod schema 中，分三層（REQUIRED/OPTIONAL+預設/功能開關）。啟動時 `validateEnv()` 驗證，缺必要變數會立即 crash。關鍵 OPTIONAL 變數：`SUPABASE_ACCESS_TOKEN`（Management API Bearer Token，自動建立客戶 DB）、`SUPABASE_ORG_ID`（平台 Organization ID）。
+後端（`tellcraft-backend/.env`）：所有環境變數定義在 `lib/env.ts` 的 Zod schema 中，分三層（REQUIRED/OPTIONAL+預設/功能開關）。啟動時 `validateEnv()` 驗證，缺必要變數會立即 crash。關鍵 OPTIONAL 變數：`NEON_API_KEY`（Neon API Bearer Token，自動建立客戶 DB）、`NEON_DEFAULT_REGION`（預設 aws-ap-northeast-1）。
 

@@ -427,7 +427,7 @@ export function generateIsaConfig(
           framework: 'nextjs_server_actions',
         },
         data: {
-          database: 'supabase',
+          database: 'postgresql',
           schema_path: 'spec/data/schema.sql',
           entity_mapping_path: 'spec/data/entity_to_table_mapping.yml',
         },

@@ -351,8 +351,8 @@ export const ChatMessageItem = React.memo(function ChatMessageItem({
             <DomainSearchResult data={{ ...(message.richContent.data as { domain: string }), available: true }} />
           )}
 
-          {/* Supabase Schema Preview */}
-          {message.richContent?.type === 'supabase_schema_preview' && (
+          {/* DB Schema Preview */}
+          {message.richContent?.type === 'db_schema_preview' && (
             <div style={{ marginTop: 12, padding: '12px 16px', borderRadius: 8, background: 'rgba(56, 189, 248, 0.08)', border: '1px solid rgba(56, 189, 248, 0.2)' }}>
               <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-secondary)', marginBottom: 8 }}>
                 資料庫 Schema（{(message.richContent.data as { entityCount?: number }).entityCount || 0} 個資料表）
@@ -366,14 +366,14 @@ export const ChatMessageItem = React.memo(function ChatMessageItem({
             </div>
           )}
 
-          {/* Supabase Provision Result */}
-          {message.richContent?.type === 'supabase_provision_result' && (
+          {/* DB Provision Result */}
+          {message.richContent?.type === 'db_provision_result' && (
             <div style={{ marginTop: 12, padding: '12px 16px', borderRadius: 8, background: 'rgba(34, 197, 94, 0.08)', border: '1px solid rgba(34, 197, 94, 0.2)' }}>
               <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-secondary)', marginBottom: 4 }}>
-                Supabase 資料庫已就緒
+                資料庫已就緒
               </div>
               <div style={{ fontSize: 12, color: 'var(--text-tertiary)' }}>
-                {(message.richContent.data as { url?: string }).url}
+                {(message.richContent.data as { host?: string }).host}
               </div>
             </div>
           )}
