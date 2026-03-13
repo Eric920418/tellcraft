@@ -122,11 +122,11 @@ npx ts-node bdd-spec/scripts/validate-feature.ts spec/features/
 
 ### 兩種模式
 
-**精細模式（Fine）**：BDD 完成 → 模板匹配 → Discovery → Brief 確認 → 5 變體 → Structure → Animation → RWD → QG
+**精細模式（Fine）**：BDD 完成 → 模板匹配 → Discovery（Step 2 可上傳參考截圖，Vision 分析注入後續流程）→ Brief 確認 → 5 變體 → Structure → Animation → RWD → QG
 
 **精細模式 + 自動採用**：PRD Clarify 第一題出現「全部自動採用 AI 建議」按鈕 → 自動回答所有 BDD 問題（propose→proposedAnswer / ask→建議選項或 A）→ 自動確認草稿 → 自動回答 Spec Clarify → 進入設計階段（手動）。BDD 互動從 7-11 次降到 1 次。`FlowState.autoAdoptMode` 在 `completeSpecPhase` 末尾清除，`autoAdoptAllPendingQuestions` 有 MAX_ITERATIONS=200 安全閥。
 
-**快速模式（Fast）**：一句話描述 → 規則式推斷（tier/產品類型/配色/佈局） → Haiku 概念生成（含頁面推理 suggestedPages, 2-4 頁）→ `mergePages()` 合併預設+建議頁面（上限 4 頁）→ Prompt 擴展 → Structure（精簡 prompt，跳過 techniques/patterns/moodCode）→ Animation → RWD → 靜態 QG。所有類型上限 3-4 頁，4 頁以內單批完成（無暫停確認）。
+**快速模式（Fast）**：一句話描述（可附參考圖片）→ 規則式推斷（tier/產品類型/配色/佈局）→ 上傳圖片 Vision 分析（如有）→ Haiku 概念生成（含頁面推理 suggestedPages, 2-4 頁，注入參考分析）→ `mergePages()` 合併預設+建議頁面（上限 4 頁）→ Prompt 擴展 → Structure（精簡 prompt，跳過 techniques/patterns/moodCode，注入 referenceAnalysis）→ Animation → RWD → 靜態 QG。所有類型上限 3-4 頁，4 頁以內單批完成（無暫停確認）。
 
 ## BDD Spec 流程
 

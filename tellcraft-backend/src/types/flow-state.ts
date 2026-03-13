@@ -80,6 +80,7 @@ export interface FlowState {
   uiuxDesignClarifyStep?: number // 當前釐清步驟（1-4）
   uiuxDesignIdeas?: Array<{ step: string; answer: string }> // 用戶的設計想法
   uiuxReferenceAnalysis?: ReferenceAnalysis // 參考網站分析結果（截圖 + Vision）
+  uiuxReferenceImageUrls?: string[]  // 用戶上傳的參考圖片 URL
   // Design Brief 確認
   uiuxDesignBriefRound?: number
   uiuxDesignBrief?: DesignBrief

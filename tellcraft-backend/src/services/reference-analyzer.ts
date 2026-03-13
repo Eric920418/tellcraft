@@ -20,7 +20,7 @@ export interface ReferenceAnalysis {
     themeColor?: string
   }
   visionAnalysis?: string
-  analysisSource: 'vision' | 'metadata_only' | 'text_only'
+  analysisSource: 'vision' | 'uploaded_image' | 'metadata_only' | 'text_only'
   error?: string
 }
 
@@ -255,6 +255,133 @@ ${metadata.themeColor ? `- 主題色: ${metadata.themeColor}` : ''}
   } catch (err) {
     logger.warn({ error: String(err).slice(0, 200) }, 'Vision 分析失敗')
     return null
+  }
+}
+
+// ── 上傳圖片 Vision 分析 ──
+
+async function analyzeUploadedImageWithVision(
+  imageBuffer: Buffer,
+  mediaType: string,
+  trackingContext?: LlmTrackingContext
+): Promise<string | null> {
+  try {
+    const client = getAnthropicClient()
+    const base64 = imageBuffer.toString('base64')
+
+    const systemPrompt = `你是一位專業的 UI/UX 設計分析師。分析這張設計參考圖片的視覺設計特徵。
+
+## 分析要求
+用繁體中文，以簡潔專業的語氣分析以下方面（每項 1-2 句話）：
+
+1. **配色策略**：提取精確 HEX 色值（主色、背景色、文字色至少各 1 個），配色風格（單色/雙色/多色/漸層）
+2. **字體風格**：serif/sans-serif/mono、大小層次、字重使用
+3. **佈局策略**：整體結構（grid/flex/bento/不對稱）、導航方式、內容組織
+4. **留白程度**：tight/normal/spacious、呼吸感
+5. **視覺風格**：minimal/bold/elegant/playful/corporate/editorial
+6. **組件層級**：按鈕風格（圓角/方角/填充/描邊）、卡片樣式、表單風格、間距密度
+7. **特殊元素**：動畫暗示、特殊形狀、圖片處理方式、互動模式
+8. **設計氛圍**：1-2 個關鍵詞總結
+9. **Design Tier 建議**：functional（功能導向、克制）或 creative（表現力強、大膽）
+
+最後用 2-3 句話總結這張設計的精髓，說明哪些設計決策值得參考。`
+
+    const response = await client.messages.create({
+      model: MODEL.HAIKU,
+      max_tokens: 1024,
+      system: systemPrompt,
+      messages: [{
+        role: 'user',
+        content: [
+          {
+            type: 'image',
+            source: {
+              type: 'base64',
+              media_type: mediaType as 'image/jpeg' | 'image/png' | 'image/gif' | 'image/webp',
+              data: base64,
+            },
+          },
+          {
+            type: 'text',
+            text: '請分析這張設計參考圖片的視覺設計。',
+          },
+        ],
+      }],
+    })
+
+    if (response.usage) {
+      trackLlmUsage({
+        model: MODEL.HAIKU,
+        inputTokens: response.usage.input_tokens,
+        outputTokens: response.usage.output_tokens,
+        purpose: 'uploaded_image_vision_analysis',
+        conversationId: trackingContext?.conversationId,
+      })
+    }
+
+    const text = response.content[0]
+    if (text.type === 'text') return text.text.trim()
+    return null
+  } catch (err) {
+    logger.warn({ error: String(err).slice(0, 200) }, '上傳圖片 Vision 分析失敗')
+    return null
+  }
+}
+
+/**
+ * 分析用戶上傳的參考圖片
+ * fetch imageUrl → Buffer → Vision 分析
+ * 降級：fetch 或 Vision 失敗 → text_only
+ */
+export async function analyzeUploadedImage(
+  imageUrl: string,
+  trackingContext?: LlmTrackingContext
+): Promise<ReferenceAnalysis> {
+  try {
+    const controller = new AbortController()
+    const timeout = setTimeout(() => controller.abort(), 8000)
+
+    let buffer: Buffer
+    let mediaType: string
+    try {
+      const resp = await fetch(imageUrl, { signal: controller.signal })
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
+      const contentType = resp.headers.get('content-type') || 'image/jpeg'
+      mediaType = contentType.split(';')[0].trim()
+      // 驗證是圖片類型
+      if (!mediaType.startsWith('image/')) {
+        throw new Error(`不支援的內容類型: ${mediaType}`)
+      }
+      const arrayBuffer = await resp.arrayBuffer()
+      buffer = Buffer.from(arrayBuffer)
+    } finally {
+      clearTimeout(timeout)
+    }
+
+    const visionAnalysis = await analyzeUploadedImageWithVision(buffer, mediaType, trackingContext)
+    if (visionAnalysis) {
+      return {
+        url: imageUrl,
+        metadata: {},
+        visionAnalysis,
+        analysisSource: 'uploaded_image',
+      }
+    }
+
+    return {
+      url: imageUrl,
+      metadata: {},
+      analysisSource: 'text_only',
+      error: 'Vision 分析失敗',
+    }
+  } catch (err) {
+    logger.warn({ error: String(err).slice(0, 200), imageUrl }, '上傳圖片分析失敗')
+    return {
+      url: imageUrl,
+      metadata: {},
+      analysisSource: 'text_only',
+      error: `圖片分析失敗: ${err instanceof Error ? err.message : '未知錯誤'}`,
+    }
   }
 }
 

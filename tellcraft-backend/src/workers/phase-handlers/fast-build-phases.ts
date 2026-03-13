@@ -25,6 +25,7 @@ import { buildUISpecSummary } from '../../services/bdd-to-ui-spec'
 import { sendMessage, saveFlowState, getFlowState, deleteFlowState, makeStreamingCallback, generatedCodeToFileRows, deductCredits } from '../orchestrator-utils'
 import { CREDIT_COSTS } from '../../config/plans'
 import { recommendMoods } from '../../services/design-moods'
+import { analyzeUploadedImage, type ReferenceAnalysis } from '../../services/reference-analyzer'
 import { createLogger } from '../../lib/logger'
 import { safeParseJson } from '../../utils/safe-parse-json'
 
@@ -305,10 +306,11 @@ export async function executeFastBuildSkill(params: {
   userId: string
   message: string
   locale?: 'zh' | 'en'
+  imageUrls?: string[]
   redis: Redis
   io: SocketIOServer
 }) {
-  const { taskId, projectId, conversationId, userId, message, locale, redis, io } = params
+  const { taskId, projectId, conversationId, userId, message, locale, imageUrls, redis, io } = params
 
   try {
   // ── 推斷設計參數（零 LLM 成本）──
@@ -331,6 +333,19 @@ export async function executeFastBuildSkill(params: {
     logger.warn({ err: e }, '模板風格提示查詢失敗，降級跳過')
   }
 
+  // ── 分析上傳的參考圖片（如有）──
+  let referenceAnalysis: ReferenceAnalysis | undefined
+  if (imageUrls?.length) {
+    referenceAnalysis = await analyzeUploadedImage(imageUrls[0], { userId, conversationId })
+      .catch((err) => {
+        logger.warn({ err }, '快速模式圖片分析失敗，降級跳過')
+        return undefined
+      })
+    if (referenceAnalysis?.visionAnalysis) {
+      logger.info('快速模式參考圖片分析成功')
+    }
+  }
+
   // ── 順序執行：先概念生成（取 suggestedPages）→ 合併頁面 → Prompt 擴展 ──
   let variantConcept: VariantConcept | undefined
   let expandedPrompt: string | null = null
@@ -339,7 +354,8 @@ export async function executeFastBuildSkill(params: {
     const palette = designSystem.colorPalette as { primary?: string } | undefined
     const concept = await generateFastConcept(
       message, productType, tier, palette?.primary || '#6366f1',
-      { userId, conversationId }
+      { userId, conversationId },
+      referenceAnalysis?.visionAnalysis
     ).catch(() => null)
 
     if (concept) {
@@ -407,6 +423,8 @@ export async function executeFastBuildSkill(params: {
     fastModeCacheKey: fastModeCacheKey,
     uiuxVariantConcept: variantConcept,
     uiuxDesignMood: moodId,
+    uiuxReferenceAnalysis: referenceAnalysis,
+    uiuxReferenceImageUrls: imageUrls,
     userId,
     // 增量生成欄位
     fastBuildStage: 'generating',
@@ -560,6 +578,7 @@ export async function runFastBuildPipeline(params: {
       templateStyleHint: templateStyleHint || undefined,
       layoutGuardPrompt,
       layoutMode,
+      referenceAnalysis: state.uiuxReferenceAnalysis,
       moodId,
       existingComponentSummary,
       incrementalFirstBatch: isIncrementalFirstBatch,

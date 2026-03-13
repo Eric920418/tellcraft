@@ -266,6 +266,7 @@ async function handleProcessMessage(
       projectId, conversationId, userId,
       taskId: existingState.taskId,
       message, locale,
+      imageUrls: data.imageUrls,
     }, redis, io)
   }
 
@@ -403,7 +404,7 @@ async function handleProcessMessage(
     }
 
     await db.updateTask(taskId, { status: 'executing', plan: { skill: 'fast-build' } })
-    await executeFastBuildSkill({ taskId, projectId, conversationId, userId, message, locale, redis, io })
+    await executeFastBuildSkill({ taskId, projectId, conversationId, userId, message, locale, imageUrls: data.imageUrls, redis, io })
     return { taskId, skill: 'fast-build' as SkillName }
   }
 

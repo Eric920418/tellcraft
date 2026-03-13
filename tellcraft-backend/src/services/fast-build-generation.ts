@@ -1021,9 +1021,12 @@ export async function generateFastConcept(
   productType: string,
   tier: DesignTier,
   primaryColor: string,
-  context?: { userId?: string; conversationId?: string }
+  context?: { userId?: string; conversationId?: string },
+  referenceVisionAnalysis?: string
 ): Promise<FastConcept | null> {
-  const cacheKey = buildFastCacheKey('fast-concept', [description, productType, tier, primaryColor])
+  // 快取 key 包含參考分析文字的前 50 字（避免快取混淆）
+  const refHint = referenceVisionAnalysis ? referenceVisionAnalysis.slice(0, 50) : ''
+  const cacheKey = buildFastCacheKey('fast-concept', [description, productType, tier, primaryColor, refHint])
   const cached = FAST_CONCEPT_CACHE.get(cacheKey)
   if (cached) {
     logger.info({ productType }, 'FastConcept cache hit')
@@ -1044,9 +1047,15 @@ suggestedTier rules: dashboard/admin/SaaS tools → functional; brand/creative/p
 suggestedPages: List 2-4 core pages (homepage + key feature pages), max 4.
 Make the concept unique. signatureElement must be specific enough to code (e.g. "frosted glass hero cards with gradient border" not "modern design").`
 
-    const userMsg = isChinese
+    let userMsg = isChinese
       ? `產品：${description}\n類型：${productType}\n當前 tier：${tier}\n主色：${primaryColor}`
       : `Product: ${description}\nType: ${productType}\nCurrent tier: ${tier}\nPrimary color: ${primaryColor}`
+
+    if (referenceVisionAnalysis) {
+      userMsg += isChinese
+        ? `\n\n## 參考設計分析\n用戶提供了一張參考設計圖片，以下是分析結果，請讓概念風格與參考一致：\n${referenceVisionAnalysis}`
+        : `\n\n## Reference Design Analysis\nThe user provided a reference design image. Align the concept style with this analysis:\n${referenceVisionAnalysis}`
+    }
 
     const resp = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',

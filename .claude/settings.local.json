@@ -90,7 +90,11 @@
       "Bash(sips:*)",
       "Bash(echo === i18n Infrastructure ===:*)",
       "Bash(pnpm test:ci:*)",
-      "Bash(npx vitest:*)"
+      "Bash(npx vitest:*)",
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "WebFetch(domain:api.github.com)",
+      "WebFetch(domain:medium.com)",
+      "WebFetch(domain:arxiv.org)"
     ]
   }
 }

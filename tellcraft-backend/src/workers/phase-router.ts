@@ -75,7 +75,7 @@ export async function routePhase(
     return true
   }
   if (state.phase === 'uiux_design_clarify') {
-    try { await handleDesignClarifyReply(conversationId, state, message, redis, io) }
+    try { await handleDesignClarifyReply(conversationId, state, message, redis, io, data.imageUrls) }
     catch (err) { await handlePhaseError(conversationId, state, err, redis, io) }
     return true
   }

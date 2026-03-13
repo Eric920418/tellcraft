@@ -18,7 +18,7 @@ import {
 import { translateBddToUISpec, buildUISpecSummary } from '../../services/bdd-to-ui-spec'
 import { runQualityGate, autoFixCriticalIssues, autoFixCriticalIssuesRuleBased } from '../../services/quality-gate'
 import { getBddSession, updateBddSession } from '../../services/bdd-session'
-import { analyzeReference } from '../../services/reference-analyzer'
+import { analyzeReference, analyzeUploadedImage } from '../../services/reference-analyzer'
 import { recommendMoods, getMoodSummary } from '../../services/design-moods'
 import { executeIteration, executeUndoIteration } from '../../services/iteration-skill'
 import { semanticGateway } from '../../services/semantic-gateway'
@@ -1970,7 +1970,8 @@ export async function handleDesignClarifyReply(
   state: FlowState,
   message: string,
   redis: Redis,
-  io: SocketIOServer
+  io: SocketIOServer,
+  imageUrls?: string[]
 ) {
   const step = state.uiuxDesignClarifyStep || 1
   const ideas = state.uiuxDesignIdeas || []
@@ -1987,7 +1988,7 @@ export async function handleDesignClarifyReply(
       step: 2,
       key: 'reference',
       question: '你有沒有喜歡的網站或 App 可以參考？',
-      hint: '可以提供名稱或網址，例如：Notion、Stripe、Apple...',
+      hint: '可以提供名稱或網址，例如：Notion、Stripe、Apple...也可以直接上傳參考截圖',
     },
     {
       step: 3,
@@ -2041,6 +2042,11 @@ export async function handleDesignClarifyReply(
       state.semanticRejectCount = 0
       ideas.push({ step: currentQuestion.key, answer: trimmedMsg })
       state.uiuxDesignIdeas = ideas
+
+      // Step 2 (reference)：保存上傳的參考圖片 URL
+      if (currentQuestion.key === 'reference' && imageUrls?.length) {
+        state.uiuxReferenceImageUrls = imageUrls
+      }
     }
   }
 
@@ -2086,33 +2092,81 @@ export async function completeDesignClarify(
     stage: 'uiux_design_clarify_complete',
   })
 
-  // 分析參考網站（如有 URL）
+  // 分析參考圖片和/或參考網站（兩者都做，合併結果）
   const referenceIdea = ideas.find(i => i.step === 'reference')
-  if (referenceIdea?.answer) {
-    try {
-      const { analyzeReference } = await import('../../services/reference-analyzer')
-      const analysis = await analyzeReference(referenceIdea.answer, {
-        userId: state.userId,
-        conversationId,
-        purpose: 'reference_analysis',
-      })
-      state.uiuxReferenceAnalysis = analysis
-      await saveFlowState(redis, conversationId, state)
+  const hasUploadedImage = state.uiuxReferenceImageUrls?.length
+  const hasUrlInput = referenceIdea?.answer
 
-      if (analysis.analysisSource === 'vision' && analysis.visionAnalysis) {
-        await sendMessage(conversationId, io, {
-          content: `已分析 **${analysis.metadata?.title || analysis.url}** 的設計風格，會融入後續方案。`,
-          stage: 'uiux_design_clarify_complete',
+  // 並行分析上傳圖片 + URL（如果兩者都有）
+  const [imageAnalysisResult, urlAnalysisResult] = await Promise.allSettled([
+    hasUploadedImage
+      ? analyzeUploadedImage(state.uiuxReferenceImageUrls![0], {
+          userId: state.userId,
+          conversationId,
+          purpose: 'uploaded_image_analysis',
         })
-      } else if (analysis.analysisSource === 'metadata_only') {
-        await sendMessage(conversationId, io, {
-          content: `已取得 **${analysis.metadata?.title || analysis.url}** 的基本資訊。`,
-          stage: 'uiux_design_clarify_complete',
+      : Promise.resolve(null),
+    hasUrlInput
+      ? analyzeReference(referenceIdea!.answer, {
+          userId: state.userId,
+          conversationId,
+          purpose: 'reference_analysis',
         })
-      }
-    } catch (err) {
-      logger.warn({ err: err }, '參考網站分析失敗，降級為純文字')
+      : Promise.resolve(null),
+  ])
+
+  const imageAnalysis = imageAnalysisResult.status === 'fulfilled' ? imageAnalysisResult.value : null
+  const urlAnalysis = urlAnalysisResult.status === 'fulfilled' ? urlAnalysisResult.value : null
+
+  if (imageAnalysisResult.status === 'rejected') {
+    logger.warn({ err: imageAnalysisResult.reason }, '上傳圖片分析失敗，降級跳過')
+  }
+  if (urlAnalysisResult.status === 'rejected') {
+    logger.warn({ err: urlAnalysisResult.reason }, '參考網站分析失敗，降級跳過')
+  }
+
+  // 合併分析結果
+  if (imageAnalysis && urlAnalysis && imageAnalysis.visionAnalysis && urlAnalysis.visionAnalysis) {
+    // 兩者都有 Vision 結果 → 合併 visionAnalysis
+    state.uiuxReferenceAnalysis = {
+      url: urlAnalysis.url,
+      metadata: urlAnalysis.metadata,
+      visionAnalysis: `## 上傳參考圖片分析\n${imageAnalysis.visionAnalysis}\n\n## 參考網站分析（${urlAnalysis.metadata?.title || urlAnalysis.url}）\n${urlAnalysis.visionAnalysis}`,
+      analysisSource: 'uploaded_image',
     }
+    await saveFlowState(redis, conversationId, state)
+    await sendMessage(conversationId, io, {
+      content: `已分析您上傳的參考圖片和 **${urlAnalysis.metadata?.title || urlAnalysis.url}**，設計風格會融入後續方案。`,
+      stage: 'uiux_design_clarify_complete',
+    })
+  } else if (imageAnalysis?.visionAnalysis) {
+    // 只有圖片分析成功
+    state.uiuxReferenceAnalysis = imageAnalysis
+    await saveFlowState(redis, conversationId, state)
+    await sendMessage(conversationId, io, {
+      content: '已分析您上傳的參考圖片，設計風格會融入後續方案。',
+      stage: 'uiux_design_clarify_complete',
+    })
+  } else if (urlAnalysis) {
+    // 只有 URL 分析
+    state.uiuxReferenceAnalysis = urlAnalysis
+    await saveFlowState(redis, conversationId, state)
+
+    if ((urlAnalysis.analysisSource === 'vision' || urlAnalysis.analysisSource === 'uploaded_image') && urlAnalysis.visionAnalysis) {
+      await sendMessage(conversationId, io, {
+        content: `已分析 **${urlAnalysis.metadata?.title || urlAnalysis.url}** 的設計風格，會融入後續方案。`,
+        stage: 'uiux_design_clarify_complete',
+      })
+    } else if (urlAnalysis.analysisSource === 'metadata_only') {
+      await sendMessage(conversationId, io, {
+        content: `已取得 **${urlAnalysis.metadata?.title || urlAnalysis.url}** 的基本資訊。`,
+        stage: 'uiux_design_clarify_complete',
+      })
+    }
+  } else if (imageAnalysis) {
+    // 圖片分析有結果但無 visionAnalysis（text_only 降級）
+    state.uiuxReferenceAnalysis = imageAnalysis
+    await saveFlowState(redis, conversationId, state)
   }
 
   // 取得 BDD Session
