@@ -110,7 +110,12 @@ export function useLoginPrompt(
   const handleLogin = useCallback(() => {
     const anonymousId = localStorage.getItem('tellcraft_anonymous_id')
     if (anonymousId) {
-      window.location.href = localePath(`/auth/login?anonymousId=${encodeURIComponent(anonymousId)}`)
+      // 存 sessionStorage → post-login page 讀取並執行繼承
+      sessionStorage.setItem('tellcraft_pending_anonymous_id', anonymousId)
+      const postLoginPath = localePath('/auth/post-login')
+      window.location.href = localePath(
+        `/auth/login?next=${encodeURIComponent(postLoginPath)}`
+      )
     } else {
       window.location.href = localePath('/auth/login')
     }

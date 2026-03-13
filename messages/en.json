@@ -289,7 +289,9 @@
     "guestCompleteMessage": "Log in to save your work, make iterations, and deploy with one click. Your free trial has ended.",
     "guestLimitTitle": "Free trial ended",
     "guestLimitMessage": "You've experienced one free interface build. Log in to save projects and unlock fine mode for deeper AI-driven development.",
-    "guestInputLocked": "Log in to continue"
+    "guestInputLocked": "Log in to continue",
+    "deployGuestTitle": "Login to Deploy",
+    "deployGuestMessage": "Log in to go live. Your guest work is automatically transferred to your account — designs, version history, and rollback points all preserved. You can also connect a custom domain later."
   },
   "useCases": {
     "heading": "For",

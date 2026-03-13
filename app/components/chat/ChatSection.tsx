@@ -38,6 +38,12 @@ import ChatMessageList from './ChatMessageList'
 import ChatPreviewPanel from './ChatPreviewPanel'
 import MobilePreviewModal from './MobilePreviewModal'
 
+function isDeployCommand(content: string): boolean {
+  const trimmed = content.trim().toLowerCase()
+  const keywords = ['部署', 'deploy', 'publish', '上線', '發布']
+  return keywords.some(kw => trimmed === kw || trimmed.includes(kw))
+}
+
 export default function ChatSection({
   isActive,
   initialMessage,
@@ -405,6 +411,18 @@ export default function ChatSection({
       return false
     }
 
+    // 訪客嘗試部署 — 未登入者一律攔截
+    if (!session.sessionInfo?.isAuthenticated && isDeployCommand(content)) {
+      loginPromptHook.setLoginPromptConfig({
+        show: true,
+        variant: 'emphasized',
+        message: tLogin('deployGuestTitle'),
+        subMessage: tLogin('deployGuestMessage'),
+        promptId: 'guest_deploy'
+      })
+      return false
+    }
+
     if (isGuestLocked) {
       loginPromptHook.setLoginPromptConfig({
         show: true,
@@ -511,6 +529,18 @@ export default function ChatSection({
 
     if (session.quotaReadOnly) {
       session.setError(tChat('quotaReadonlyHint'))
+      return
+    }
+
+    // 訪客嘗試部署 — Enter 鍵路徑
+    if (!session.sessionInfo?.isAuthenticated && isDeployCommand(input.trim())) {
+      loginPromptHook.setLoginPromptConfig({
+        show: true,
+        variant: 'emphasized',
+        message: tLogin('deployGuestTitle'),
+        subMessage: tLogin('deployGuestMessage'),
+        promptId: 'guest_deploy'
+      })
       return
     }
 
@@ -895,6 +925,17 @@ export default function ChatSection({
       stablePreviewData={stablePreviewData}
       onClose={() => setShowMobilePreview(false)}
       onDeploy={() => {
+        if (!session.sessionInfo?.isAuthenticated) {
+          setShowMobilePreview(false)
+          loginPromptHook.setLoginPromptConfig({
+            show: true,
+            variant: 'emphasized',
+            message: tLogin('deployGuestTitle'),
+            subMessage: tLogin('deployGuestMessage'),
+            promptId: 'guest_deploy'
+          })
+          return
+        }
         setShowMobilePreview(false)
         handleSendMessage(locale === 'en' ? 'deploy' : '部署')
       }}

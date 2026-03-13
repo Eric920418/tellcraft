@@ -22,8 +22,11 @@ function PostLoginContent() {
 
   useEffect(() => {
     const handlePostLogin = async () => {
-      // 從 sessionStorage 獲取待合併的 anonymousId
-      const pendingAnonymousId = sessionStorage.getItem('tellcraft_pending_anonymous_id')
+      // 從 sessionStorage 獲取待合併的 anonymousId（fallback localStorage，防 OAuth 清除 sessionStorage）
+      const pendingAnonymousId =
+        sessionStorage.getItem('tellcraft_pending_anonymous_id') ||
+        localStorage.getItem('tellcraft_anonymous_id') ||
+        null
 
       try {
         // 調用 initializeSessionFromAuth 並傳入 anonymousId 進行合併

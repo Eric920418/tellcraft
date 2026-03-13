@@ -289,7 +289,9 @@
     "guestCompleteMessage": "登入以保存你的作品、進行迭代修改和一鍵部署。免費試用到此結束。",
     "guestLimitTitle": "免費試用已結束",
     "guestLimitMessage": "你已體驗過一次介面建站。登入後可保存專案，並解鎖精細模式深度打磨你的網站。",
-    "guestInputLocked": "登入以繼續使用"
+    "guestInputLocked": "登入以繼續使用",
+    "deployGuestTitle": "部署需要登入",
+    "deployGuestMessage": "登入後即可部署上線，你的訪客作品會自動繼承到帳號——設計稿、版本紀錄和回滾點全部保留。未來還可綁定自訂域名。"
   },
   "useCases": {
     "heading": "適合",

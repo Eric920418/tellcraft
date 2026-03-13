@@ -361,10 +361,3 @@ Layer 5: sanitizeCodeForDeploy 修復 7 — useSearchParams Suspense boundary �
 
 後端（`tellcraft-backend/.env`）：所有環境變數定義在 `lib/env.ts` 的 Zod schema 中，分三層（REQUIRED/OPTIONAL+預設/功能開關）。啟動時 `validateEnv()` 驗證，缺必要變數會立即 crash。
 
-## Phase 3 已完成：效能與可觀察性
-
-| 步驟 | 內容 | 說明 |
-|------|------|------|
-| **3-4** | LLM Usage 追蹤統一 | `PRICING` + `calculateLlmCost()` + `trackLlmUsage()` 集中在 `lib/anthropic.ts`，17 個 service 移除重複 PRICING |
-| **3-2** | Sentry 前端錯誤追蹤 | `@sentry/nextjs`，`sentry.*.config.ts` + `instrumentation.ts` + error boundary + vps-api.ts 錯誤上報 |
-| **3-1** | 消息列表虛擬化 | `ChatMessageItem`（React.memo）+ `@tanstack/react-virtual` 虛擬滾動，100+ 條消息 DOM < 30 個 |
