@@ -380,7 +380,7 @@ export async function executeFastBuildSkill(params: {
       }
 
       // 合併頁面（DEFAULT_PAGES + Haiku suggestedPages）
-      finalPages = mergePages(pages, concept.suggestedPages)
+      finalPages = mergePages(pages, concept.suggestedPages, 1)
       if (finalPages.length !== pages.length) {
         logger.info(`頁面合併: ${pages.length} → ${finalPages.length} [${finalPages.join(',')}]`)
       }
