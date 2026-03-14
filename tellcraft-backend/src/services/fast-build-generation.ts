@@ -271,10 +271,10 @@ export function inferPages(description: string, productType: string): string[] {
   })
 
   if (mentioned.length >= 2) {
-    return mentioned
+    return mentioned.slice(0, 1)  // 快速模式：只做首頁，section 豐富
   }
 
-  return DEFAULT_PAGES[productType] || ['首頁']
+  return (DEFAULT_PAGES[productType] || ['首頁']).slice(0, 1)
 }
 
 export function shouldExpandBriefPrompt(description: string, pages: string[]): boolean {
@@ -402,7 +402,7 @@ export function enforceFastBuildLayoutGuards(
  * - 去重用正規化 key（去空白+小寫）
  * - 上限 maxPages 個
  */
-export function mergePages(defaultPages: string[], suggestedPages?: string[], maxPages = 4): string[] {
+export function mergePages(defaultPages: string[], suggestedPages?: string[], maxPages = 1): string[] {
   if (!suggestedPages?.length) return defaultPages.slice(0, maxPages)
   const seen = new Map<string, string>()
   for (const p of defaultPages) seen.set(p.replace(/\s/g, '').toLowerCase(), p)
@@ -1050,12 +1050,12 @@ export async function generateFastConcept(
       ? `你是設計顧問。根據產品描述生成設計概念。回覆嚴格 JSON（無其他文字）：
 {"name":"概念名稱(2-4字)","vibe":"設計氛圍描述(1句話)","signatureElement":"一個招牌視覺元素(具體的設計手法)","keyFeatures":["設計特徵1","設計特徵2","設計特徵3"],"suggestedTier":"functional或creative","suggestedPages":["頁面1","頁面2",...]}
 suggestedTier 判斷規則：dashboard/admin/SaaS 工具型 → functional；品牌展示/創意/個性化 → creative。
-suggestedPages：列出最核心的 2-4 個頁面，不要超過 4 個。dashboard/admin/SaaS 工具型用功能頁面名（如 Dashboard、Users、Settings），不要加「首頁」「價格」等行銷頁面。品牌/官網型可以用「首頁」+功能頁。
+suggestedPages：只列 1 個最核心的頁面（首頁或主功能頁，如「首頁」或「Dashboard」）。
 讓概念獨特，避免泛用描述。signatureElement 要具體到能直接寫代碼（如「hero 區域的漸層玻璃態卡片」而非「現代設計」）。`
       : `You are a design consultant. Generate a design concept from the product description. Reply strictly JSON (no other text):
 {"name":"Concept name(2-4 words)","vibe":"Design vibe(1 sentence)","signatureElement":"One signature visual element(specific design technique)","keyFeatures":["Feature 1","Feature 2","Feature 3"],"suggestedTier":"functional or creative","suggestedPages":["Page 1","Page 2",...]}
 suggestedTier rules: dashboard/admin/SaaS tools → functional; brand/creative/personality → creative.
-suggestedPages: List 2-4 core pages, max 4. For dashboard/admin/SaaS tools use functional page names (e.g. Dashboard, Users, Settings) — do NOT add "Home", "Pricing" or other marketing pages. For brand/website types, use "Home" + feature pages.
+suggestedPages: List only 1 core page (e.g. "Home" or "Dashboard").
 Make the concept unique. signatureElement must be specific enough to code (e.g. "frosted glass hero cards with gradient border" not "modern design").`
 
     let userMsg = isChinese
@@ -1151,7 +1151,7 @@ Make the concept unique. signatureElement must be specific enough to code (e.g. 
     if (Array.isArray(parsed.suggestedPages)) {
       suggestedPages = parsed.suggestedPages
         .filter((p): p is string => typeof p === 'string' && p.trim().length > 0)
-        .slice(0, 4)
+        .slice(0, 1)
       if (suggestedPages.length === 0) suggestedPages = undefined
     }
 
@@ -1204,21 +1204,21 @@ export async function expandBriefPrompt(
     const label = PRODUCT_TYPE_LABELS[productType] || '網站'
 
     const systemPrompt = isChinese
-      ? `你是網站內容策劃師。根據用戶的簡短描述，擴展為完整的網站內容需求。
+      ? `你是網站內容策劃師。根據用戶的簡短描述，擴展為豐富的單頁網站內容需求。
 
 規則：
-1. 以提供的頁面列表為核心骨架，為每個頁面描述具體內容。可以微調頁面名稱，但不要刪除核心頁面
-2. 每個頁面描述具體的區塊內容（Hero、特色、列表、CTA 等）
-3. 提供具體的示範文案（真實的品名/價格/描述，不是 placeholder 如「項目1」「描述文字」）
+1. 只針對首頁規劃 5-8 個豐富的區塊（如 Hero、核心特色、詳細功能展示、使用流程/步驟、數據/成就、客戶評價/案例、CTA、頁尾資訊）
+2. 每個區塊描述具體內容和示範文案（真實的品名/價格/描述，不是 placeholder 如「項目1」「描述文字」）
+3. 內容要豐富具體，讓單一頁面有完整的敘事流和視覺層次
 4. 包含功能細節和 CTA 文案
 5. 輸出 400-600 中文字的純文字描述
 6. 不要輸出 JSON 或 markdown 格式標記`
-      : `You are a website content planner. Expand the user's brief description into a complete website content requirement.
+      : `You are a website content planner. Expand the user's brief description into a rich single-page website content requirement.
 
 Rules:
-1. Use the provided page list as the core skeleton, describe specific content for each page. You may fine-tune page names but do not remove core pages
-2. Describe specific sections for each page (Hero, Features, List, CTA, etc.)
-3. Provide concrete sample copy (real names/prices/descriptions, NOT placeholders like "Item 1" or "Description text")
+1. Plan 5-8 rich sections for the homepage (e.g. Hero, Core Features, Detailed Showcase, Process/Steps, Stats/Achievements, Testimonials/Cases, CTA, Footer Info)
+2. Provide concrete sample copy for each section (real names/prices/descriptions, NOT placeholders like "Item 1" or "Description text")
+3. Content should be rich and specific, creating a complete narrative flow and visual hierarchy on a single page
 4. Include functional details and CTA copy
 5. Output 200-300 words of plain text description
 6. Do not output JSON or markdown formatting`

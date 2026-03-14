@@ -190,13 +190,14 @@ Discovery（Path A 問卷 / Path B 篩選後模板）
   → checkBuildRelevance（vague 攔截 + quickReplies 引導）
   → detectDesignTier（規則式）→ inferProductType → buildDefaultDesignSystem → inferInteractionHint
   → analyzeUploadedImage（如有圖片，Haiku Vision 分析，降級跳過）
-  → generateFastConcept（1 次 Haiku，概念 + suggestedTier 修正，suggestedPages 2-4 頁，注入參考分析）
-  → mergePages（上限 4 頁）→ 單批生成 S+A+R+QG（referenceAnalysis 注入 generateStructure）→ 完成
+  → generateFastConcept（1 次 Haiku，概念 + suggestedTier 修正，suggestedPages 限 1 頁，注入參考分析）
+  → mergePages（上限 1 頁）→ 單批生成 S+A+R+QG（referenceAnalysis 注入 generateStructure）→ 完成
   → phase='uiux_complete'（複用所有迭代/部署/回滾邏輯）
-  ≤4 頁不暫停（大多數場景單批完成）
+  單頁深度模式：只做首頁，5-8 個 Section 內容豐富
 ```
 
-- **效能優化**：DEFAULT_PAGES 所有類型上限 3-4 頁，mergePages 上限 4，pickFirstBatchPages ≤4 頁一批完成（消除暫停確認）。Structure prompt 快速模式跳過 techniques/patterns/moodCode + 使用精簡版 craft/constraints/baseRules（systemPrompt ~7000→~4000 字）
+- **單頁深度模式**：inferPages/mergePages/suggestedPages 三層限制只返回 1 頁。Structure prompt 指引 5-8 個完整 Section + anchor link 導航。expandBriefPrompt 引導豐富內容規劃。token 全部集中在首頁品質上
+- **效能優化**：Structure prompt 快速模式使用精簡版 techniques（2 個 name+codeHint）+ 精簡版 mood code（3 行 className）+ 精選 1 個 pattern + 精簡版 craft/constraints/baseRules
 - **增量交互式生成**（>4 頁時才觸發，目前預設不會觸發）：`executeFastBuildSkill` 設定 `fastBuildAllPages` → `runFastBuildPipeline` 跑第 1 批 → 有剩餘頁面時暫停 → 用戶按「繼續生成」跑第 2 批 → `mergeGeneratedCode` 合併 → 完成
 - **FlowState 增量欄位**：`fastBuildStage`（generating/awaiting_continue/complete）、`fastBuildAllPages`、`fastBuildCompletedPages`、`fastBuildCurrentBatchIndex`
 - **`mergeGeneratedCode()`**：按 path 去重合併（新批次覆蓋同路徑），styles 保留首批
@@ -335,6 +336,7 @@ Feature 註解：`# Action: actionName` + `# [METHOD] /path` + `# Summary: xxx`
 ## 防雷清單（不看必踩）
 
 - **新增 phase 必須四處同步**：`handleContinueFlow` 路由（含超時偵測）+ `FlowState` 型別 + `flowstate-recovery.ts` RECOVERABLE_PHASES + 前端 `richContent.type` union
+- **Layout 切換禁止 opacity:0 入場動畫**：SplitLayout 左右兩側和 split-layout 外層不能用 `initial={{ opacity: 0 }}`，否則多層 opacity 疊加導致黑屏。Layout useEffect 依賴不能包含 `fastBuildChunks`（polling 每次 code_preview 都歸零再恢復，導致 layout 抖動）。一旦進入 split 模式，需檢查 `code_preview` 歷史消息才允許回退到 default
 - **動畫庫是 `motion/react`**，不是 `framer-motion`
 - **字體只能用 `next/font`**，禁止 `<link>` / `@import` Google Fonts
 - **Tailwind v4**：用 `@import "tailwindcss"`，不是 v3 的 `@tailwind`

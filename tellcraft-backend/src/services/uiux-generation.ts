@@ -2387,10 +2387,15 @@ function stripLlmMetaLines(code: string): string {
     if (INLINE_META.test(line)) { removedCount++; return false }
     return true
   })
-  if (removedCount > 0) {
+  if (removedCount > 1) {
     logger.warn(
       { removedLines: removedCount },
-      'stripLlmMetaLines: 從生成代碼中移除 LLM 元文字行'
+      'stripLlmMetaLines: 從生成代碼中移除多行 LLM 元文字'
+    )
+  } else if (removedCount === 1) {
+    logger.debug(
+      { removedLines: 1 },
+      'stripLlmMetaLines: 移除 1 行 LLM 元文字'
     )
   }
   return cleaned.join('\n')
@@ -3206,6 +3211,20 @@ ${productContext?.incrementalFirstBatch
 
 ${productContext?.incrementalFirstBatch
 ? '' // 增量首批已有明確限制，不需要額外策略段
+: isFastMode && productContext?.layoutMode !== 'app'
+? `**單頁深度模式（快速建站）**：
+- ⚠️ 只生成 1 個頁面（首頁），禁止自行增加其他頁面
+- 生成 5-8 個完整 Section（Hero → 核心特色 → 功能展示 → 使用流程/步驟 → 數據/成就 → 客戶評價 → CTA → Footer 資訊）
+- 每個 Section 內容豐富，使用真實模擬數據（和產品領域相關）
+- Section 之間有視覺節奏變化（交替背景色、不同佈局模式）
+- Header 導航連結用 anchor link 指向頁面內各 Section（#features, #pricing 等）
+- 不要只做 3 個 Section 就結束 — 內容要完整到讓用戶覺得這是一個正式上線的網站`
+: isFastMode && productContext?.layoutMode === 'app'
+? `**單頁深度模式（快速建站 — 工具型）**：
+- ⚠️ 只生成 1 個頁面（主功能頁），禁止自行增加其他頁面
+- 主頁面直接呈現核心功能界面，包含完整的互動元素
+- 不要生成形象官網的 Hero/CTA/Testimonials
+- 頁面中使用有意義的模擬數據（和工具功能相關）`
 : productContext?.layoutMode === 'app'
 ? `**工具型/應用型產品 — 頁面以功能為導向：**
 - 工具型產品通常只有 1-3 個功能頁面，不需要行銷頁面（Hero/CTA/Testimonials）
@@ -3221,7 +3240,7 @@ ${productContext?.incrementalFirstBatch
 - 可以增加、移除、合併、重新命名頁面 — 只要能完整覆蓋功能需求
 - Header/Footer 的導航連結要對應你最終決定的頁面結構
 - 頁面中使用有意義的模擬數據（和產品領域相關，不要用 Lorem ipsum）`}
-${variantConcept ? `- 每個頁面都必須體現「${variantConcept.name}」的創意概念，不是只有首頁` : ''}
+${variantConcept ? (isFastMode ? `- 整個頁面必須體現「${variantConcept.name}」的創意概念` : `- 每個頁面都必須體現「${variantConcept.name}」的創意概念，不是只有首頁`) : ''}
 ${pages.length >= 5 && !isLaterBatch && !productContext?.incrementalFirstBatch ? `
 **多頁面策略（${pages.length} 個頁面）**：
 - 主要頁面（首頁、核心功能頁）：完整 Section + 豐富互動
@@ -3567,7 +3586,8 @@ ${existingCodeStr}
     {
       maxTokens: incrementalOptions?.maxTokens || 32768,
       temperature: tier === 'creative' ? 0.35 : 0.2,
-      maxContinuations: incrementalOptions?.maxContinuations,
+      maxContinuations: incrementalOptions?.maxContinuations
+        ?? (generationProfile === 'fast' ? 1 : 2),
       promptLabel: 'uiux-animation',
       contextSizeHint: generationProfile,
     },

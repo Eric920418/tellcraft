@@ -64,11 +64,10 @@ export default function SplitLayout({
     >
       {/* 左側聊天區 */}
       <motion.div
-        initial={{ width: '100%', opacity: 0 }}
-        animate={{ width: chatWidth, opacity: 1 }}
+        initial={false}
+        animate={{ width: chatWidth }}
         transition={{
-          width: { duration: 0.5, ease: [0.32, 0.72, 0, 1], delay: 0.1 },
-          opacity: { duration: 0.3, ease: 'easeOut' }
+          width: { duration: 0.5, ease: [0.32, 0.72, 0, 1] },
         }}
         style={{
           minWidth: minChatWidth,
@@ -121,13 +120,7 @@ export default function SplitLayout({
       </div>
 
       {/* 右側預覽區 */}
-      <motion.div
-        initial={{ opacity: 0, scale: 0.98 }}
-        animate={{ opacity: 1, scale: 1 }}
-        transition={{
-          opacity: { duration: 0.4, delay: 0.2, ease: 'easeOut' },
-          scale: { duration: 0.5, delay: 0.15, ease: [0.32, 0.72, 0, 1] }
-        }}
+      <div
         style={{
           flex: 1,
           height: '100%',
@@ -139,7 +132,7 @@ export default function SplitLayout({
         }}
       >
         {previewPanel}
-      </motion.div>
+      </div>
 
       {/* 拖曳時的覆蓋層（防止 iframe 捕獲滑鼠事件） */}
       {isDragging && (

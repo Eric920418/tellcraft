@@ -34,6 +34,7 @@ import LoginPrompt from '@/app/components/LoginPrompt'
 import TemplateSubmitModal from '@/app/components/templates/TemplateSubmitModal'
 import { getTemplateById } from '@/app/actions/templates'
 
+import ErrorBoundary from '@/app/components/ErrorBoundary'
 import ChatMessageList from './ChatMessageList'
 import ChatPreviewPanel from './ChatPreviewPanel'
 import MobilePreviewModal from './MobilePreviewModal'
@@ -266,6 +267,8 @@ export default function ChatSection({
   }, [messages, session])
 
   // ── Layout mode tracking ──
+  // 注意：不要把 fastBuildChunks 放進依賴，它太容易抖動（polling 每次 code_preview 都會歸零再恢復）
+  // 會導致 layout split → default → split 反覆切換，每次觸發 SplitLayout 重新掛載和進場動畫 → 黑屏
   useEffect(() => {
     const isMobile = typeof window !== 'undefined' && window.innerWidth < 768
     let targetMode: 'default' | 'split' = 'default'
@@ -287,19 +290,41 @@ export default function ChatSection({
           || stage === 'uiux_quality_gate_running'
           || stage === 'uiux_quality_gate_fixing'
       })
-      const hasPreviewSignals = !!streamingPreview || !!codePreviewData || fastBuildChunks > 0
+      // 只用穩定的信號判斷（不用 fastBuildChunks，它在 phase 切換時歸零再回升）
+      const hasPreviewSignals = !!streamingPreview || !!codePreviewData
       const shouldForceSplit = hasUiuxMessage || hasGenerationMessage || hasPreviewSignals
 
-      const lastHintMessage = [...confirmedMessages].reverse().find(m => m.layoutHint)
+      // 防止從 split 回退到 default（一旦進入 split，只有明確無生成信號才回退）
+      // 這避免 phase 切換間隙的短暫信號丟失導致 layout 抖動
       if (shouldForceSplit) {
         targetMode = 'split'
-      } else if (lastHintMessage?.layoutHint) {
-        targetMode = lastHintMessage.layoutHint === 'split' ? 'split' : 'default'
+      } else if (layoutModeRef.current === 'split') {
+        // 已經在 split 模式，檢查是否真的應該回退
+        const hasCodePreview = confirmedMessages.some(m => m.richContent?.type === 'code_preview')
+        if (hasCodePreview || hasGenerationMessage) {
+          // 有代碼預覽或生成消息歷史 → 保持 split
+          targetMode = 'split'
+        } else {
+          const lastHintMessage = [...confirmedMessages].reverse().find(m => m.layoutHint)
+          if (lastHintMessage?.layoutHint === 'split') {
+            targetMode = 'split'
+          } else {
+            const hasClarifyMessage = confirmedMessages.some(m =>
+              m.stage === 'clarify_question' || m.stage === 'prd_discovery_complete' || m.stage === 'prd_discovery_continue'
+            )
+            if (hasClarifyMessage && !hasUiuxMessage) targetMode = 'split'
+          }
+        }
       } else {
-        const hasClarifyMessage = confirmedMessages.some(m =>
-          m.stage === 'clarify_question' || m.stage === 'prd_discovery_complete' || m.stage === 'prd_discovery_continue'
-        )
-        if (hasClarifyMessage && !hasUiuxMessage) targetMode = 'split'
+        const lastHintMessage = [...confirmedMessages].reverse().find(m => m.layoutHint)
+        if (lastHintMessage?.layoutHint) {
+          targetMode = lastHintMessage.layoutHint === 'split' ? 'split' : 'default'
+        } else {
+          const hasClarifyMessage = confirmedMessages.some(m =>
+            m.stage === 'clarify_question' || m.stage === 'prd_discovery_complete' || m.stage === 'prd_discovery_continue'
+          )
+          if (hasClarifyMessage && !hasUiuxMessage) targetMode = 'split'
+        }
       }
     }
 
@@ -307,7 +332,7 @@ export default function ChatSection({
       layoutModeRef.current = targetMode
       setLayoutMode(targetMode)
     }
-  }, [messages, streamingPreview, codePreviewData, fastBuildChunks])
+  }, [messages, streamingPreview, codePreviewData])
 
   // ── Template loading ──
   useEffect(() => {
@@ -1030,10 +1055,10 @@ export default function ChatSection({
       {isSplitView && (
         <motion.div
           key="split-layout"
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
+          initial={{ opacity: 1, scale: 0.99 }}
+          animate={{ opacity: 1, scale: 1 }}
           exit={{ opacity: 0, scale: 0.98, filter: 'blur(4px)' }}
-          transition={{ duration: 0.5, ease: smoothEasing }}
+          transition={{ duration: 0.25, ease: smoothEasing }}
           style={{ position: 'fixed', inset: 0, zIndex: 100 }}
         >
           <SplitLayout
@@ -1143,6 +1168,7 @@ export default function ChatSection({
                     )}
                   </div>
                 )}
+              <ErrorBoundary>
               <ChatPreviewPanel
                 messages={messages}
                 sessionInfo={session.sessionInfo}
@@ -1181,6 +1207,7 @@ export default function ChatSection({
                 selectedTemplate={selectedTemplate}
                 onRuntimeError={handleRuntimeError}
               />
+              </ErrorBoundary>
               </div>
             }
           />
@@ -1191,14 +1218,9 @@ export default function ChatSection({
       {isDefaultView && isActive && (
         <motion.div
           key="default-layout"
-          initial={{ opacity: 0, scale: 1.02 }}
-          animate={{ opacity: 1, scale: 1, filter: 'blur(0px)' }}
-          exit={{ opacity: 0, scale: 0.98, filter: 'blur(4px)' }}
-          transition={{
-            duration: 0.4,
-            ease: smoothEasing,
-            scale: { duration: 0.5, ease: smoothEasing }
-          }}
+          initial={{ opacity: 1, scale: 1 }}
+          animate={{ opacity: 1, scale: 1 }}
+          transition={{ duration: 0.2, ease: smoothEasing }}
           style={{
             position: 'fixed', inset: 0,
             background: 'var(--white)',

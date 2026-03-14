@@ -511,7 +511,7 @@ Server Action 錯誤訊息 + 工具模組中文字串國際化（+117 keys，2 n
 | **LINE Bot** | LINE 對話內完整 Fast Build 體驗（描述需求→生成→部署），Flex Message 卡片 + Quick Reply，客服問答（FAQ + Sonnet） |
 | **Telegram Bot** | Telegram 對話內完整 Fast Build 體驗（描述需求→生成→部署），MarkdownV2 + Inline Keyboard；Login Widget 帳號綁定；里程碑通知 |
 | **模板上傳** | 用戶提交專案為模板（preflight 自動檢查 + puppeteer 封面截圖 + 管理員審核），chatQuickReply + 專案管理入口 |
-| **UX** | 對話回退、錯誤恢復、自動恢復對話、專案自動命名、Markdown 渲染、專案對話快捷入口（1-click）、專案置頂/取消置頂 |
+| **UX** | 對話回退、錯誤恢復、自動恢復對話、專案自動命名、Markdown 渲染、專案對話快捷入口（1-click）、專案置頂/取消置頂、Layout 黑屏防護（移除三層 opacity 動畫疊加 + 防 layout 抖動 + 預覽區 ErrorBoundary） |
 | **穩定性** | FlowState 超時自動恢復（定時掃描 + LINE/Web 推送通知），伺服器重啟後自動恢復卡住的生成/部署任務 |
 | **資料治理** | 訪客資料自動清理（5 天無活動過期），匿名帳號 + 已遷移空殼帳號定時清除，保護正在執行的 FlowState |
 
@@ -843,6 +843,14 @@ psql "$DATABASE_URL" -f tellcraft-backend/migrations/xxx.sql
 2. **Anthropic Client 統一**（`lib/anthropic.ts`）：全 codebase 唯一的 `getAnthropicClient()` + `MODEL.SONNET`/`MODEL.HAIKU` 常數。消除 7 份重複 `getAnthropicClient()`、59 處硬編碼模型 ID。SDK 用戶（6 檔）改 import 單例；fetch 用戶（10 檔）改用 `getAnthropicHeaders()` + MODEL 常數
 3. **Zod API 驗證**（`middleware/validate.ts` + `schemas/`）：`validateBody(schema)` 中間件工廠，高風險路由全覆蓋 — conversation（sendMessage/reply）、session（initialize）、operations（4 端點）、bdd（6 端點）、project（create/template-overrides），移除 ~100 行手動 `if (!req.body.xxx)` 驗證
 4. **BullMQ DLQ**（`services/job-failure-handler.ts` + `migrations/013`）：`job_failures` 表持久化最終失敗、Socket.io 推送用戶錯誤消息+重試按鈕、FATAL log 觸發告警、`removeOnFail.age` 24h→7d
+
+### Fast Build 單頁深度模式 + Animation 截斷修復（2026-03-14）
+
+快速模式從多頁薄內容改為**單頁深度模式**，token 全部集中在首頁品質上：
+
+- **頁面數限縮到 1**：`inferPages()` + `mergePages()` + `generateFastConcept()` 三層限制，只生成首頁
+- **Section 豐富度指引**：`expandBriefPrompt` + Structure prompt 指引 5-8 個完整 Section（Hero→特色→功能→流程→數據→評價→CTA→Footer），Header 導航用 anchor link
+- **Animation 截斷修復**：`generateAnimations` 首批 `maxContinuations` 從 `undefined` 改為 `fast ? 1 : 2`，防止無限續寫到 32768 截斷
 
 ### Fast Mode 設計創意提升（2026-03-14）
 
