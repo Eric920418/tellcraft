@@ -59,6 +59,7 @@ function hasCodeTargets(code: GeneratedCode): boolean {
 }
 
 const APP_MARKETING_PATTERNS: Array<{ pattern: RegExp; label: string }> = [
+  // 注意：flattenBatchText 已預先移除 data-animate="..." 值，避免 "hero-entrance" 等動畫名誤觸發
   { pattern: /\bhero\b|主視覺|hero section/i, label: 'marketing hero' },
   { pattern: /testimonial|testimonials|用戶見證|客戶評價/i, label: 'testimonials' },
   { pattern: /pricing|price plan|價格方案|方案比較/i, label: 'pricing table' },
@@ -83,6 +84,8 @@ function flattenBatchText(code: GeneratedCode): string {
   return [...code.pages, ...code.components]
     .map(file => `${file.path}\n${file.content}`)
     .join('\n')
+    // 移除 data-animate 屬性值，避免 "hero-entrance" 等動畫名觸發行銷 pattern 誤判
+    .replace(/data-animate="[^"]*"/g, '')
     .toLowerCase()
 }
 
