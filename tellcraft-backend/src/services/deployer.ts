@@ -223,6 +223,7 @@ const BASE_DEPS: Record<string, string> = {
   tailwindcss: '^3.4.0',
   postcss: '^8.4.0',
   autoprefixer: '^10.0.0',
+  '@neondatabase/serverless': '^0.10.0',
 }
 
 const LEGACY_UPLOAD_BASE_URLS = [
@@ -727,12 +728,20 @@ export async function prepareDeployment(
   let code: GeneratedCode | null = null
   let tailwindConfig = ''
 
-  const projectFiles = await db.getProjectFiles(projectId, 'uiux')
+  const uiuxFiles = await db.getProjectFiles(projectId, 'uiux')
+  const coderFiles = await db.getProjectFiles(projectId, 'coder')
+
+  // 合併：coder 覆蓋同路徑 uiux 檔案
+  const fileMap = new Map<string, typeof uiuxFiles[0]>()
+  for (const f of uiuxFiles) fileMap.set(f.file_path, f)
+  for (const f of coderFiles) fileMap.set(f.file_path, f)
+  const projectFiles = Array.from(fileMap.values())
 
   if (projectFiles.length > 0) {
     // 從 project_files 重建 GeneratedCode
     const pages: GeneratedComponent[] = []
     const components: GeneratedComponent[] = []
+    const backendFiles: GeneratedComponent[] = []
     let styles = ''
 
     for (const f of projectFiles) {
@@ -744,11 +753,14 @@ export async function prepareDeployment(
         styles = f.content
       } else if (f.file_type === 'config' && f.file_path === 'tailwind.config.ts') {
         tailwindConfig = f.content
+      } else if (['service', 'api_route', 'config'].includes(f.file_type)) {
+        // Coder 生成的後端檔案（lib/db.ts, lib/actions/*, app/actions/*）
+        backendFiles.push({ path: f.file_path, content: f.content, description: f.description || '' })
       }
     }
 
     if (pages.length > 0) {
-      code = { pages, components, styles }
+      code = { pages, components: [...components, ...backendFiles], styles }
     }
   }
 

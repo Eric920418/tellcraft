@@ -11,6 +11,12 @@ importers:
       '@anthropic-ai/sdk':
         specifier: ^0.72.1
         version: 0.72.1(zod@4.3.6)
+      '@cucumber/gherkin':
+        specifier: ^39.0.0
+        version: 39.0.0
+      '@cucumber/messages':
+        specifier: ^32.2.0
+        version: 32.2.0
       '@line/bot-sdk':
         specifier: ^10.6.0
         version: 10.6.0
@@ -219,6 +225,9 @@ packages:
   '@cucumber/gherkin@38.0.0':
     resolution: {integrity: sha512-duEXK+KDfQUzu3vsSzXjkxQ2tirF5PRsc1Xrts6THKHJO6mjw4RjM8RV+vliuDasmhhrmdLcOcM7d9nurNTJKw==}
 
+  '@cucumber/gherkin@39.0.0':
+    resolution: {integrity: sha512-6tCR0ZIF0tVkd2iBqA3IcYUovwdpJM6oorACisgIdDJMsKufOq962qk9jncRUi5Bja1kEAAEKpxcRtvnp9k/dg==}
+
   '@cucumber/html-formatter@23.0.0':
     resolution: {integrity: sha512-WwcRzdM8Ixy4e53j+Frm3fKM5rNuIyWUfy4HajEN+Xk/YcjA6yW0ACGTFDReB++VDZz/iUtwYdTlPRY36NbqJg==}
     peerDependencies:
@@ -236,6 +245,9 @@ packages:
 
   '@cucumber/messages@32.0.1':
     resolution: {integrity: sha512-1OSoW+GQvFUNAl6tdP2CTBexTXMNJF0094goVUcvugtQeXtJ0K8sCP0xbq7GGoiezs/eJAAOD03+zAPT64orHQ==}
+
+  '@cucumber/messages@32.2.0':
+    resolution: {integrity: sha512-oYp1dgL2TByYWL51Z+rNm+/mFtJhiPU9WS03goes9EALb8d9GFcXRbG1JluFLFaChF1YDqIzLac0kkC3tv1DjQ==}
 
   '@cucumber/pretty-formatter@1.0.1':
     resolution: {integrity: sha512-A1lU4VVP0aUWdOTmpdzvXOyEYuPtBDI0xYwYJnmoMDplzxMdhcHk86lyyvYDoMoPzzq6OkOE3isuosvUU4X7IQ==}
@@ -2927,7 +2939,7 @@ snapshots:
       '@cucumber/gherkin-utils': 11.0.0
       '@cucumber/html-formatter': 23.0.0(@cucumber/messages@32.0.1)
       '@cucumber/junit-xml-formatter': 0.9.0(@cucumber/messages@32.0.1)
-      '@cucumber/message-streams': 4.0.1(@cucumber/messages@32.0.1)
+      '@cucumber/message-streams': 4.0.1(@cucumber/messages@32.2.0)
       '@cucumber/messages': 32.0.1
       '@cucumber/pretty-formatter': 1.0.1(@cucumber/cucumber@12.7.0)(@cucumber/messages@32.0.1)
       '@cucumber/tag-expressions': 9.1.0
@@ -2964,7 +2976,7 @@ snapshots:
   '@cucumber/gherkin-streams@6.0.0(@cucumber/gherkin@38.0.0)(@cucumber/message-streams@4.0.1(@cucumber/messages@32.0.1))(@cucumber/messages@32.0.1)':
     dependencies:
       '@cucumber/gherkin': 38.0.0
-      '@cucumber/message-streams': 4.0.1(@cucumber/messages@32.0.1)
+      '@cucumber/message-streams': 4.0.1(@cucumber/messages@32.2.0)
       '@cucumber/messages': 32.0.1
       commander: 14.0.0
       source-map-support: 0.5.21
@@ -2972,14 +2984,18 @@ snapshots:
   '@cucumber/gherkin-utils@11.0.0':
     dependencies:
       '@cucumber/gherkin': 38.0.0
-      '@cucumber/messages': 32.0.1
+      '@cucumber/messages': 32.2.0
       '@teppeis/multimaps': 3.0.0
       commander: 14.0.2
       source-map-support: 0.5.21
 
   '@cucumber/gherkin@38.0.0':
     dependencies:
-      '@cucumber/messages': 32.0.1
+      '@cucumber/messages': 32.2.0
+
+  '@cucumber/gherkin@39.0.0':
+    dependencies:
+      '@cucumber/messages': 32.2.0
 
   '@cucumber/html-formatter@23.0.0(@cucumber/messages@32.0.1)':
     dependencies:
@@ -2993,11 +3009,16 @@ snapshots:
       luxon: 3.7.2
       xmlbuilder: 15.1.1
 
-  '@cucumber/message-streams@4.0.1(@cucumber/messages@32.0.1)':
+  '@cucumber/message-streams@4.0.1(@cucumber/messages@32.2.0)':
     dependencies:
-      '@cucumber/messages': 32.0.1
+      '@cucumber/messages': 32.2.0
 
   '@cucumber/messages@32.0.1':
+    dependencies:
+      class-transformer: 0.5.1
+      reflect-metadata: 0.2.2
+
+  '@cucumber/messages@32.2.0':
     dependencies:
       class-transformer: 0.5.1
       reflect-metadata: 0.2.2

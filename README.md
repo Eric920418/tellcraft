@@ -123,17 +123,21 @@ npx ts-node bdd-spec/scripts/validate-feature.ts spec/features/
   └─ 設計 → 生成前端代碼 → Sandpack 即時預覽
   │
   ▼
-④ Coder Skill（❌ 未實作 — 下一步）
-  ├─ 讀取 BDD 產出（API Spec + Schema + Feature Files）
-  ├─ LLM 生成後端代碼（Supabase Edge Functions / Express）
-  ├─ 調用 SpecFormula 跑 Feature Files 驗證
-  ├─ 紅燈 → 錯誤回饋 LLM → 重新生成 → 再跑
-  └─ 綠燈 → 進入部署
+④ Coder Skill Stage A（✅ 已完成 — 純生成）
+  ├─ 讀取 BDD 產出（actionsYml + schemaSql + entityMapping）
+  ├─ 生成 lib/db.ts（Neon 連接，零 LLM）
+  ├─ 生成 lib/actions/*.ts（純邏輯函數，LLM 逐 action）
+  ├─ 生成 app/actions/*.ts（Server Actions，零 LLM 機械映射）
+  └─ 改寫 UIUX 組件（useState mock → Server Action 調用）
+  │
+  ▼
+④b Coder Skill Stage B（❌ 未實作）
+  ├─ 生成 API Routes（app/api/*/route.ts）
+  └─ SpecFormula 自動跑 Feature Files 驗證（紅燈修、綠燈過）
   │
   ▼
 ⑤ Deployer（已完成）
-  └─ 前端 → Vercel 部署（自動注入 DATABASE_URL）
-     後端 → TODO（Supabase Edge Functions 部署 / VPS 部署）
+  └─ 前端+後端 → 同一個 Vercel Next.js 部署（自動注入 DATABASE_URL）
 ```
 
 ### sdd.os 與 SpecFormula 的關係
@@ -145,7 +149,7 @@ sdd.os/specformula-java/        ← Java Reference Implementation（上游原版
 tellcraft-backend/src/lib/specformula/   ← TS 移植版（27 檔 ~3800 行，已能跑）
         │ 被調用
         ▼
-Coder Skill                              ← 生成代碼後，調用 SpecFormula 自動驗證
+Coder Skill Stage B                      ← 生成 API Routes 後，調用 SpecFormula 自動驗證
 ```
 
 - **SpecFormula** 是 SDD 的核心驗證引擎：讀取 Feature Files → 打 HTTP API → 查 DB 驗證狀態
@@ -677,52 +681,53 @@ sdd.os/                   # SDD 上游 Reference Repo（git subtree，只讀參�
 
 ## Roadmap（待實作）
 
-### P0：Coder Skill — 後端代碼生成 + SpecFormula 驗證
+### P0：Coder Skill Stage A — 後端代碼生成（✅ 已完成）
 
-**核心目標**：LLM 根據 BDD 產出生成後端代碼，SpecFormula 自動跑 Feature Files 驗證，紅燈修、綠燈過。
+**Stage A 範圍**：純生成（不含 SpecFormula 驗證循環）。從 BDD 產出生成後端邏輯，把 mock 前端改寫為連接 Neon DB 的完整應用。
 
-**已決定的架構：「雙面生成」（Dual Generation）**
+**觸發方式**：`uiux_complete` 時，若 BDD actionsYml 存在且 Neon DB 已就緒 → 顯示「接上資料庫」quickReply。也支援 Classifier 路由（`hasCoderIntent`）。Fast-build 模式不顯示（無 BDD 產出）。
 
-核心矛盾：SpecFormula 透過 HTTP 測試（需穩定 URL），但 Server Actions 是 RPC 調用（無穩定 URL）。解法是**同時生成 API Routes + Server Actions，共享同一份純邏輯函數**：
-
+**三層生成架構**：
 ```
-Coder Skill 三層生成：
+Stage A 已完成：
 ├── lib/db.ts                          ← Neon 連接（固定模板，零 LLM）
-├── lib/actions/<action>.ts            ← 純邏輯函數（LLM 生成，核心）
-├── app/api/<resource>/route.ts        ← API Routes（機械映射，零 LLM）→ SpecFormula 測試
-├── app/actions/<domain>.ts            ← Server Actions（機械映射，零 LLM）→ 前端調用
-└── 改寫 UIUX 組件                      ← useState mock → Server Action（LLM 生成）
+├── lib/actions/<action>.ts            ← 純邏輯函數（LLM 逐 action，核心）
+├── app/actions/<domain>.ts            ← Server Actions（零 LLM，按 entity 分組映射）
+└── 改寫 UIUX 組件                      ← useState mock → Server Action 調用（LLM）
 
-SpecFormula:  API Route → lib/actions/create-product.ts → Neon DB
-用戶瀏覽器:   Server Action → lib/actions/create-product.ts → Neon DB
-                              ↑ 同一份邏輯，兩個入口
+Stage B 待做：
+└── app/api/<resource>/route.ts        ← API Routes（SpecFormula 測試用）
 ```
 
-**不需要 Mock Server**：Mock Server 多一個 infra 且 Server Actions 場景下無意義。雙面生成用 API Routes 給 SpecFormula 測試、Server Actions 給前端，共享邏輯層即可。
+**核心檔案**：
+| 檔案 | 說明 |
+|------|------|
+| `services/coder-generation.ts` (~500 行) | Pipeline 入口 + 7 個生成函數（parseActionsYml/generateActionFunction/generateServerActions/identifyMockDataComponents/rewriteComponentForServerActions） |
+| `workers/phase-handlers/coder-phases.ts` (~200 行) | Phase handler：讀 BDD → 讀 UIUX → 執行 Pipeline → 保存 project_files(skill_source='coder') → 合併代碼 |
+| `types/flow-state.ts` | 新增 `coderGenerationStartedAt` / `coderCompleted` / `coderPreRewriteCode` |
 
-**需要建的東西**：
-| 項目 | 說明 | 預估 |
-|------|------|------|
-| Coder Skill 定義 | `coder-skill/instructions/`，LLM prompt 規範（讀 actionsYml + Schema → 生成純邏輯函數） | 中 |
-| 純邏輯函數生成 | `services/coder-generation.ts`，每個 ActionEntry → `lib/actions/<action>.ts`（LLM，核心） | 高 |
-| API Routes 機械映射 | 從 OpenAPI spec 的 path+method → `app/api/*/route.ts`（零 LLM，模板套用） | 低 |
-| Server Actions 機械映射 | 從 actionsYml → `app/actions/*.ts`（零 LLM，模板套用） | 低 |
-| DB 連接模板 | `lib/db.ts`（零 LLM，固定 `@neondatabase/serverless` 模板） | 低 |
-| 前端改寫 | UIUX 組件 `useState(mock)` → Server Action 調用（LLM，保留 UI 不變） | 高 |
-| SpecFormula 紅綠燈循環 | 生成代碼 → 啟動 app → SpecFormula 跑 Feature Files → 紅燈回饋 LLM → 再跑（最多 3 輪） | 高 |
-| Phase 狀態機 | `coder_generating` / `coder_testing` / `coder_complete`（四處同步） | 低 |
-| Deployer 微調 | 合併 `uiux`+`coder` skill_source、`BASE_DEPS` 加 `@neondatabase/serverless` | 低 |
+**四處同步**：`phase-router.ts`（coder_generating 攔截）+ `flowstate-recovery.ts`（15min 超時恢復）+ `intent-helpers.ts`（getPhaseStrictness: skip）+ `flow-state.ts`（3 個欄位）
 
-### P1：SpecFormula 與 Coder Skill 生成的 API Routes 串接
+**Deployer 整合**：`prepareDeployment()` 合併 uiux+coder 兩個 skill_source（coder 覆蓋同路徑），`BASE_DEPS` 已包含 `@neondatabase/serverless`
 
-目前 SpecFormula E2E 測的是假的 test-app（`cucumber/support/test-app.ts` 的 notes API）。Coder Skill 完成後需要：
+### P0b：Coder Skill Stage B — SpecFormula 驗證（✅ 已完成）
 
-- [ ] `SupertestAdapter` 連接 Coder Skill 生成的 Next.js API Routes（同一個 Next.js app，`app/api/*/route.ts`）
-- [ ] `cucumber/cucumber.js` 的 `spec` profile 對接客戶的 Feature Files（路徑：`spec/features/**/*.feature`）
-- [ ] Neon DB 連線注入（`TEST_DATABASE_URL` = `projects.neon_connection_string`）
-- [ ] 測試結果結構化回饋（哪個 Feature/Scenario 失敗、期望值 vs 實際值）
+**核心目標**：生成 API Routes + SpecFormula 紅綠燈自動驗證循環。
 
-### P2：BDD 格式遷移（ISA SpecFormula 標準）
+- [x] ISA config 模板遷移到 sdd.os 標準 instruction_types（`entity_setup`/`api_call`/`entity_validate`/`entity_non_existence_validate`）
+- [x] `isa-config.ts` instruction_type 映射 + config 結構更新到 sdd.os 格式
+- [x] 生成 `app/api/<resource>/route.ts`（機械映射，零 LLM，複用 `lib/actions/*.ts`）
+- [x] `UrlHttpAdapter`（native fetch）連接 Mini Express 測試伺服器
+- [x] Feature File Direct Runner（`@cucumber/gherkin` 解析，不依賴 Cucumber.js runtime）
+- [x] Mini Express Test Server（/tmp ~20MB，~3s 啟動，~50MB RAM，取代 Next.js build 500MB）
+- [x] Neon DB 連線注入（`projects.neon_connection_string`）
+- [x] SpecFormula 紅綠燈循環（測試 → LLM 修復 → 重測，最多 3 輪）
+- [x] 測試結果結構化回饋（Feature/Scenario 通過/失敗明細）
+- [x] `coder_testing` phase 狀態機（phase-router/flowstate-recovery/intent-helpers 四處同步）
+- [x] 用戶觸發：Coder 完成後「驗證後端」quickReply（`__verify_backend__`）
+- [x] `convertToOpenAPI()` 優化：優先使用 actionsYml 中的 method/path
+
+### P1：BDD 格式遷移（ISA SpecFormula 標準）
 
 BDD Skill 的 Feature File 輸出格式需從 Tellcraft 舊格式升級到 SpecFormula 標準：
 
@@ -734,20 +739,19 @@ BDD Skill 的 Feature File 輸出格式需從 Tellcraft 舊格式升級到 SpecF
 - [ ] `tellcraft-backend/src/services/formulation.ts` — LLM prompt 全面更新（至少 3 處）
 - [ ] `tellcraft-backend/src/services/isa-config.ts` — `buildInstructions()` 輸出格式改為 SpecFormula 標準
 
-### P3：部署 Pipeline 擴展
+### P2：部署 Pipeline 擴展（✅ 大部分已完成）
 
 後端代碼**部署在同一個 Vercel Next.js app**（不需要額外 infra）：
 - API Routes（`app/api/*`）和 Server Actions 都是 Next.js 內建，隨前端一起部署
 - `@neondatabase/serverless` 專為 Vercel edge/serverless 設計，冷啟動 <100ms
 - `DATABASE_URL` 由 Neon Provision Skill 自動注入 Vercel env vars
 
-待辦：
-- [ ] `deployer.ts` `prepareProjectFiles` 合併 `uiux` + `coder` 兩個 skill_source（coder 優先覆蓋同路徑）
-- [ ] `deployer.ts` `BASE_DEPS` 新增 `@neondatabase/serverless`
-- [ ] `project_files.skill_source` 新增 `'coder'` 值
+- [x] `deployer.ts` `prepareDeployment` 合併 `uiux` + `coder` 兩個 skill_source（coder 優先覆蓋同路徑）
+- [x] `deployer.ts` `BASE_DEPS` 新增 `@neondatabase/serverless`
+- [x] `project_files.skill_source` 新增 `'coder'` 值
 - [ ] 部署後 E2E 連通驗證（CRUD 操作 → Neon DB → 回應正確）
 
-### P4：其他待辦
+### P3：其他待辦
 
 - [ ] i18n Phase 3：VPS 後端錯誤訊息 error code 化 + LLM prompts i18n + Remotion 動畫標籤
 - [ ] `sdd.os/` 上游同步機制（SpecFormula Java 更新時，同步到 TS 版）

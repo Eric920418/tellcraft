@@ -12,6 +12,7 @@ export type { HttpClientAdapter } from './http/http-client-adapter';
 export { TestRequest, TestRequestBuilder } from './http/test-request';
 export { TestResponse } from './http/test-response';
 export { SupertestAdapter } from './http/supertest-adapter';
+export { UrlHttpAdapter } from './http/url-adapter';
 
 // ========== Instruction ==========
 export { TimeControl } from './instruction/time-control';

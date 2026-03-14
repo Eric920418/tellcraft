@@ -48,7 +48,7 @@ export const SKILL_REGISTRY: Record<SkillName, SkillMetadata> = {
   'coder': {
     name: 'coder',
     displayName: '程式碼生成',
-    description: '根據 BDD 規格生成 Next.js + Supabase 程式碼',
+    description: '根據 BDD 規格生成 Next.js + Neon 後端程式碼（Server Actions + 純邏輯函數 + 前端改寫）',
     triggerPatterns: [
       '生成程式碼', '寫程式', '實作', '開發',
       '產生代碼', 'code', 'implement',

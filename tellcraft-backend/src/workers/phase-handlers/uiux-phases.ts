@@ -27,7 +27,7 @@ import { sendMessage, saveFlowState, getFlowState, deleteFlowState, makeStreamin
 import { CREDIT_COSTS } from '../../config/plans'
 import {
   hasDeployIntent, hasRejectDeployIntent, hasUndoIntent,
-  hasChangeIntent, hasRollbackSpecIntent,
+  hasChangeIntent, hasRollbackSpecIntent, hasCoderIntent,
   DESIGN_BRIEF_LIMITS,
 } from '../intent-helpers'
 import { handlePhaseError } from '../phase-router'
@@ -38,6 +38,26 @@ const getDeployerSkill = () => import('./deploy-phases').then(m => m.executeDepl
 const getSpecChangeHandler = () => import('./bdd-phases').then(m => m.handleSpecChange)
 
 const logger = createLogger('uiux-phases')
+
+/**
+ * 判斷是否顯示「接上資料庫」quickReply
+ * 條件：有 BDD actionsYml + 有 Neon DB + 未完成 coder + 不是 fast-build
+ */
+async function shouldShowCoderButton(state: FlowState): Promise<boolean> {
+  if (state.coderCompleted) return false
+  if (state.fastMode) return false
+  if (!state.projectId) return false
+  const bdd = await db.queryOne<{ actions_yml_content: string }>(
+    'SELECT actions_yml_content FROM bdd_sessions WHERE project_id = $1 AND actions_yml_content IS NOT NULL ORDER BY updated_at DESC LIMIT 1',
+    [state.projectId]
+  )
+  if (!bdd) return false
+  const neon = await db.queryOne<{ neon_connection_string: string }>(
+    'SELECT neon_connection_string FROM projects WHERE id = $1 AND neon_connection_string IS NOT NULL',
+    [state.projectId]
+  )
+  return !!neon
+}
 
 // ============================================================
 // UIUX Phase Routing Handlers (called from phase-router.ts)
@@ -544,6 +564,20 @@ export async function handleUiuxMixedPhaseRouting(
       }
       if (hasUndoIntent(trimmed)) {
         await executeUndoIteration({ conversationId, projectId: data.projectId, redis, io })
+        return
+      }
+
+      // 接上資料庫（Coder Skill）
+      if (trimmed === '__connect_database__' || hasCoderIntent(trimmed)) {
+        const coderPhases = await import('./coder-phases')
+        await coderPhases.executeCoderSkill({
+          taskId: state.taskId || '',
+          projectId: data.projectId,
+          conversationId,
+          userId,
+          redis,
+          io,
+        })
         return
       }
 
@@ -1249,10 +1283,16 @@ export async function executeFullCodePipeline(
         currentPhase: 'complete',
       } as Record<string, unknown>,
     },
-    quickReplies: [
-      { label: '部署上線', value: '部署', style: 'primary' },
-      { label: '上傳到模板庫', value: '__upload_template__', style: 'ghost' },
-    ],
+    quickReplies: await (async () => {
+      const qr: { label: string; value: string; style: 'primary' | 'secondary' | 'ghost' }[] = [
+        { label: '部署上線', value: '部署', style: 'primary' },
+      ]
+      if (await shouldShowCoderButton(state)) {
+        qr.push({ label: '接上資料庫', value: '__connect_database__', style: 'secondary' })
+      }
+      qr.push({ label: '上傳到模板庫', value: '__upload_template__', style: 'ghost' })
+      return qr
+    })(),
   })
 
   logger.info(`Pipeline 完成: ${finalPageCount} pages, ${finalComponentCount} components, QG passed=${report.passed}`)

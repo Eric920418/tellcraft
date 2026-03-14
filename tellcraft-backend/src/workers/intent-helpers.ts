@@ -136,6 +136,11 @@ export function hasDatabaseIntent(msg: string): boolean {
   return kw.some(k => lower.includes(k))
 }
 
+export function hasCoderIntent(msg: string): boolean {
+  const kw = ['接上資料庫', '生成後端', '生成程式碼', '寫後端', 'connect database', 'generate backend']
+  return kw.some(k => msg.toLowerCase().includes(k))
+}
+
 export function hasChangeIntent(msg: string): boolean {
   const keywords = ['修改規格', '新增功能', '刪除功能', '變更需求', '調整規格', '改需求', '修改需求', '增加功能', '移除功能', '改規格']
   return keywords.some(k => msg.includes(k))
@@ -220,6 +225,9 @@ export function getPhaseStrictness(phase: string): QualityStrictness | 'skip' {
     case 'domain_complete':
     case 'domain_failed':
       return 'lenient'
+    case 'coder_generating':
+    case 'coder_testing':
+      return 'skip'
     case 'domain_confirm_purchase':
     case 'domain_own_setup':
       return 'normal'

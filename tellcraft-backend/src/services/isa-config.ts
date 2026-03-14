@@ -22,11 +22,12 @@ interface StepPattern {
 interface IsaInstruction {
   name: string
   format: string
-  step_type: string
   instruction_type: string
+  data_format?: string
+  step_type?: string
   constraints?: string[]
-  subpackage: string
-  situation: string
+  subpackage?: string
+  situation?: string
 }
 
 // ============================================================
@@ -50,14 +51,14 @@ const STEP_REGEXES = {
 // ============================================================
 
 const INSTRUCTION_TYPES = {
-  entity_setup: 'supabase_setup',
+  entity_setup: 'entity_setup',
   time_control: 'time_control',
-  action_call: 'cucumberjs_server_action',
+  action_call: 'api_call',
   response_validate: 'response_validate',
-  response_validate_json: 'response_validate_json',
+  response_validate_json: 'response_validate',
   operation_failure: 'skip',
-  entity_validate: 'supabase_entity',
-  entity_non_existence: 'supabase_entity_non_existence',
+  entity_validate: 'entity_validate',
+  entity_non_existence: 'entity_non_existence_validate',
 }
 
 // ============================================================
@@ -249,10 +250,8 @@ function buildInstructions(detectedPatterns: Map<string, StepPattern>, derived?:
     instructions.push({
       name: 'Response validation',
       format: '^(?P<summary>.+?)\\((?P<status>\\d{3})\\)回應,?\\s*with table:$',
-      step_type: 'Then',
       instruction_type: INSTRUCTION_TYPES.response_validate,
-      subpackage: 'then',
-      situation: 'to validate the Server Action success response status code and table data',
+      data_format: 'data_table',
     })
   }
 
@@ -261,10 +260,8 @@ function buildInstructions(detectedPatterns: Map<string, StepPattern>, derived?:
     instructions.push({
       name: 'Response validation JSON',
       format: '^(?P<summary>.+?)\\((?P<status>\\d{3})\\)回應為,?\\s*with JSON:$',
-      step_type: 'Then',
       instruction_type: INSTRUCTION_TYPES.response_validate_json,
-      subpackage: 'then',
-      situation: 'to validate the Server Action success response status code and JSON body',
+      data_format: 'json',
     })
   }
 
@@ -419,20 +416,24 @@ export function generateIsaConfig(
       return { success: false, error: '沒有偵測到任何 ISA 步驟模式' }
     }
 
-    // Step 3: 組裝 YAML（SpecFormula 標準）
+    // Step 3: 組裝 YAML（sdd.os ISA 標準）
     const configObj = {
       config: {
         api: {
-          base_url: '${API_BASE_URL}',
-          framework: 'nextjs_server_actions',
+          resource_path: 'specs/api',
+          project_path: 'specs/api',
+          time_format: 'iso',
         },
         data: {
-          database: 'postgresql',
-          schema_path: 'spec/data/schema.sql',
-          entity_mapping_path: 'spec/data/entity_to_table_mapping.yml',
-        },
-        actions: {
-          spec_path: 'spec/actions/actions.yml',
+          permission: 'isolated',
+          source: [
+            {
+              name: 'default',
+              resource_path: 'specs/data',
+              project_path: 'specs/data',
+              db_type: 'postgresql',
+            },
+          ],
         },
       },
       instructions,
@@ -440,7 +441,7 @@ export function generateIsaConfig(
 
     const header = `# isa.yml - sdd.os ISA 配置檔案（SpecFormula 標準）
 # 自動生成，基於 ${features.length} 個 Feature Files
-# 專案技術棧：Next.js Server Actions + Supabase + PostgreSQL
+# 專案技術棧：Next.js API Routes + Neon PostgreSQL
 `
 
     const yamlBody = yaml.dump(configObj, {

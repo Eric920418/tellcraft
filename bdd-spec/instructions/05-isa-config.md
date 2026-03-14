@@ -8,10 +8,10 @@ description: 根據 sdd.os ISA Feature Files（SpecFormula 標準）和專案架
 
 從 `spec/features/` 資料夾中的 sdd.os ISA Feature Files 和專案設定，產出 `isa.yml` 配置檔案，使 sdd.os 工具可以：
 1. 解析 Feature Files 中的步驟定義
-2. 生成對應的測試程式碼（Cucumber.js + Server Actions + Supabase）
+2. 生成對應的測試程式碼（SpecFormula TS + API Routes + Neon PostgreSQL）
 3. 執行自動化功能測試
 
-**核心目標：建立 sdd.os SpecFormula 與 Next.js Server Actions + Supabase 專案的整合配置。**
+**核心目標：建立 sdd.os SpecFormula 與 Next.js API Routes + Neon PostgreSQL 專案的整合配置。**
 
 ---
 
@@ -46,18 +46,18 @@ description: 根據 sdd.os ISA Feature Files（SpecFormula 標準）和專案架
 
 #### 1.2 對應 Instruction 類型
 
-根據專案技術棧（Next.js Server Actions + Supabase），選擇適當的 instruction：
+根據專案技術棧（Next.js API Routes + Neon PostgreSQL），選擇適當的 instruction：
 
 | 步驟模式 | instruction_type | 說明 |
 |---------|-----------------|------|
-| 資料準備 | `supabase_setup` | 使用 Supabase Client 插入測試資料 |
+| 資料準備 | `entity_setup` | 插入測試資料至 PostgreSQL |
 | 時間控制 | `time_control` | Mock 系統時間 |
-| Action 呼叫 | `cucumberjs_server_action` | 直接呼叫 Server Action 函數 |
+| Action 呼叫 | `api_call` | HTTP 呼叫 API Route |
 | 成功回應驗證 | `response_validate` | 驗證回應 DataTable |
-| 成功回應 JSON | `response_validate_json` | 驗證回應 JSON |
+| 成功回應 JSON | `response_validate` (data_format: json) | 驗證回應 JSON |
 | 操作失敗 | `skip` | 由 Action 呼叫步驟處理 |
-| Entity 存在驗證 | `supabase_entity` | 使用 Supabase Client 查詢資料庫 |
-| Entity 不存在驗證 | `supabase_entity_non_existence` | 驗證 Entity 不存在 |
+| Entity 存在驗證 | `entity_validate` | 查詢資料庫驗證 Entity 存在 |
+| Entity 不存在驗證 | `entity_non_existence_validate` | 驗證 Entity 不存在 |
 
 ---
 
@@ -68,42 +68,41 @@ description: 根據 sdd.os ISA Feature Files（SpecFormula 標準）和專案架
 ```yaml
 config:
   api:
-    base_url: "${API_BASE_URL}"
-    framework: nextjs_server_actions
+    resource_path: specs/api
+    project_path: specs/api
+    time_format: iso
   data:
-    database: postgresql
-    schema_path: spec/data/schema.sql
-    entity_mapping_path: spec/data/entity_to_table_mapping.yml
-  actions:
-    spec_path: spec/actions/actions.yml
+    permission: isolated
+    source:
+      - name: default
+        resource_path: specs/data
+        project_path: specs/data
+        db_type: postgresql
 
 instructions:
   - name: <指令名稱>
     format: <正規表示式>
-    step_type: <Given/When/Then>
     instruction_type: <指令類型>
-    constraints:（可選）
-      - <限制條件>
-    subpackage: <子套件名稱>
-    situation: <情境說明>
 ```
 
-#### 2.2 完整配置範本（Next.js Server Actions + Supabase）
+#### 2.2 完整配置範本（Next.js API Routes + Neon PostgreSQL）
 
 ```yaml
 # isa.yml - sdd.os ISA 配置檔案（SpecFormula 標準）
-# 專案技術棧：Next.js Server Actions + Supabase + PostgreSQL
+# 專案技術棧：Next.js API Routes + Neon PostgreSQL
 
 config:
   api:
-    base_url: "${API_BASE_URL}"
-    framework: nextjs_server_actions
+    resource_path: specs/api
+    project_path: specs/api
+    time_format: iso
   data:
-    database: postgresql
-    schema_path: spec/data/schema.sql
-    entity_mapping_path: spec/data/entity_to_table_mapping.yml
-  actions:
-    spec_path: spec/actions/actions.yml
+    permission: isolated
+    source:
+      - name: default
+        resource_path: specs/data
+        project_path: specs/data
+        db_type: postgresql
 
 instructions:
   # ============================================
@@ -112,33 +111,19 @@ instructions:
 
   - name: Entity setup
     format: ^準備一個(?P<entity>[\u4e00-\u9fffa-zA-Z0-9_]+), with table:$
-    step_type: Given
-    instruction_type: supabase_setup
-    constraints:
-      - <entity> must be a valid entity defined in entity_to_table_mapping.yml
-      - All column headers in the DataTable must be valid schema fields
-      - Context Keys (>) must follow >ContextName.field format
-      - Execution Keys (<) capture generated values for later reference
-    subpackage: given
-    situation: to prepare test data in the database before Server Action calls
+    instruction_type: entity_setup
 
   - name: Time control
     format: ^現在時間為 "(?P<datetime>[^"]+)"$
-    step_type: Given
     instruction_type: time_control
-    subpackage: given
-    situation: to set the system time for time-dependent test scenarios
 
   # ============================================
-  # When 步驟 - Server Action 呼叫
+  # When 步驟 - API 呼叫
   # ============================================
 
   - name: Action call
     format: ^\((?:No Actor|UID="(?P<actor>[^"]+)")\) (?P<summary>.+?), call table:$
-    step_type: When
-    instruction_type: cucumberjs_server_action
-    subpackage: action
-    situation: to invoke the Server Action with the given parameters and optional actor identity
+    instruction_type: api_call
 
   # ============================================
   # Then 步驟 - 回應驗證
@@ -146,24 +131,17 @@ instructions:
 
   - name: Response validation
     format: ^(?P<summary>.+?)\((?P<status>\d{3})\)回應,?\s*with table:$
-    step_type: Then
     instruction_type: response_validate
-    subpackage: then
-    situation: to validate the Server Action success response status code and table data
+    data_format: data_table
 
   - name: Response validation JSON
     format: ^(?P<summary>.+?)\((?P<status>\d{3})\)回應為,?\s*with JSON:$
-    step_type: Then
-    instruction_type: response_validate_json
-    subpackage: then
-    situation: to validate the Server Action success response status code and JSON body
+    instruction_type: response_validate
+    data_format: json
 
   - name: Operation failure
     format: ^操作失敗$
-    step_type: Then
     instruction_type: skip
-    subpackage: then
-    situation: to validate that the Server Action returned an error
 
   # ============================================
   # Then 步驟 - Entity 驗證
@@ -171,40 +149,23 @@ instructions:
 
   - name: Entity validate
     format: ^應該存在一個(?P<entity>[\u4e00-\u9fffa-zA-Z0-9_]+), with table:$
-    step_type: Then
-    instruction_type: supabase_entity
-    constraints:
-      - <entity> must be a valid entity defined in entity_to_table_mapping.yml
-      - the entity's properties defined in the DataTable must match the entity spec
-      - All column headers in the DataTable must be valid schema structure paths
-      - Variable references ($) must resolve to previously declared context values
-    subpackage: then
-    situation: to validate the entity exists in the database with the given parameters
+    instruction_type: entity_validate
 
   - name: Entity non-existence
     format: ^應該不存在一個(?P<entity>[\u4e00-\u9fffa-zA-Z0-9_]+), with table:$
-    step_type: Then
-    instruction_type: supabase_entity_non_existence
-    constraints:
-      - <entity> must be a valid entity defined in entity_to_table_mapping.yml
-    subpackage: then
-    situation: to validate the entity does not exist in the database
+    instruction_type: entity_non_existence_validate
 ```
 
 #### 2.3 配置項說明
 
 | 欄位 | 說明 | 範例 |
 |------|------|------|
-| `config.api` | API 配置（base URL、框架） | `framework: nextjs_server_actions` |
-| `config.data` | 資料庫配置（類型、schema 路徑） | `database: postgresql` |
-| `config.actions` | Actions 規格路徑 | `spec_path: spec/actions/actions.yml` |
+| `config.api` | API 配置（resource/project path、time format） | `time_format: iso` |
+| `config.data` | 資料庫配置（隔離策略、來源） | `db_type: postgresql` |
 | `name` | 指令名稱，描述此步驟的用途 | `Action call` |
 | `format` | 正規表示式，用於匹配步驟文字 | `^\((?:No Actor\|UID="...")\) ...` |
-| `step_type` | 步驟類型（Given/When/Then） | `When` |
-| `instruction_type` | 指令類型（取代舊的 executor.type） | `cucumberjs_server_action` |
-| `constraints` | 限制條件列表（可選） | 見範例 |
-| `subpackage` | 生成程式碼的子套件目錄 | `action`, `then`, `given` |
-| `situation` | 情境說明，描述此步驟的執行時機 | `to invoke the Server Action...` |
+| `instruction_type` | 指令類型 | `api_call` |
+| `data_format` | 資料格式（可選） | `data_table`, `json` |
 
 ---
 

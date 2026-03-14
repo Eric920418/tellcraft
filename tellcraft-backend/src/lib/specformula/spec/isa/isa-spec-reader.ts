@@ -135,9 +135,9 @@ export class IsaSpecReader {
     }
 
     if (type === 'response_validate') {
-      if (instruction.format && !hasNamedGroup(instruction.format, 'status_code')) {
+      if (instruction.format && !hasNamedGroup(instruction.format, 'status_code') && !hasNamedGroup(instruction.format, 'status')) {
         throw new Error(
-          `instruction_type 'response_validate' requires (?<status_code>...) in format, but instruction '${instruction.name}' is missing it`
+          `instruction_type 'response_validate' requires (?<status_code>...) or (?<status>...) in format, but instruction '${instruction.name}' is missing it`
         );
       }
       if (!instruction.data_format || !VALID_DATA_FORMATS.has(instruction.data_format)) {

@@ -563,8 +563,8 @@ export function convertToOpenAPI(actionsYml: string, projectName?: string): stri
   // 轉換 actions → paths
   for (const action of parsed.actions) {
     const isQuery = isQueryAction(action)
-    const method = isQuery ? 'get' : 'post'
-    const pathKey = `/api/${action.name}`
+    const method = (typeof action.method === 'string' ? action.method : (isQuery ? 'GET' : 'POST')).toLowerCase()
+    const pathKey = typeof action.path === 'string' ? action.path : `/api/${action.name}`
 
     // 分析 rules 判斷錯誤回應
     const has400 = action.rules?.some(r => r.type === '前置（參數）')
@@ -724,3 +724,4 @@ function buildInlineSchema(input: Record<string, unknown>): Record<string, unkno
   }
   return schema
 }
+

@@ -180,4 +180,12 @@ export interface FlowState {
   // Database Provisioning（provider-agnostic）
   dbProvisionStatus?: 'completed' | 'failed' | 'skipped'
   dbDerivedSchema?: { displaySummary: string; entityCount: number }
+  // Coder Skill 專用
+  coderGenerationStartedAt?: number       // 超時偵測
+  coderCompleted?: boolean                // 標記已完成（deployer/quickReply 可識別）
+  coderPreRewriteCode?: GeneratedCode     // 改寫前快照（供撤銷/失敗恢復）
+  // Coder Testing（SpecFormula 紅綠燈）
+  coderTestPassed?: boolean               // 測試是否全部通過
+  coderTestAttempts?: number              // 紅綠燈循環次數
+  coderTestStartedAt?: number             // 超時偵測
 }

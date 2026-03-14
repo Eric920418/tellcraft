@@ -491,6 +491,11 @@ async function handleProcessMessage(
       logger.warn('Classifier 返回 "uiux"，重導向到 bdd-spec')
       await executeBddSpecSkill({ taskId, projectId, conversationId, userId, message, locale, extractedEntities: classification.extractedEntities, redis, io })
       break
+    case 'coder': {
+      const { executeCoderSkill } = await import('./phase-handlers/coder-phases')
+      await executeCoderSkill({ taskId, projectId, conversationId, userId, redis, io })
+      break
+    }
     case 'deployer':
       await executeDeployerSkill({ taskId, projectId, conversationId, userId, message, redis, io })
       break
@@ -719,6 +724,24 @@ async function handleContinueFlow(
     await sendMessage(conversationId, io, {
       content: isChinese ? '已取消域名操作。' : 'Domain operation cancelled.',
       stage: 'info',
+    })
+    return
+  }
+  // __connect_database__：觸發 Coder Skill
+  if (trimmedMsg === '__connect_database__') {
+    const { executeCoderSkill } = await import('./phase-handlers/coder-phases')
+    await executeCoderSkill({
+      taskId: state.taskId || '',
+      projectId, conversationId, userId, redis, io,
+    })
+    return
+  }
+  // __verify_backend__：觸發 SpecFormula 測試
+  if (trimmedMsg === '__verify_backend__') {
+    const { executeCoderTesting } = await import('./phase-handlers/coder-phases')
+    await executeCoderTesting({
+      taskId: state.taskId || '',
+      projectId, conversationId, userId, redis, io,
     })
     return
   }

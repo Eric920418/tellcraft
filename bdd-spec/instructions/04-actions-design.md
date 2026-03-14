@@ -16,10 +16,10 @@ description: 分析 sdd.os ISA Feature Files 中的功能與規則，設計對�
 
 ## 技術堆疊
 
-本 prompt 專為 **Next.js Server Actions + Supabase** 設計：
+本 prompt 專為 **Next.js API Routes + Neon PostgreSQL** 設計：
 - Next.js 14+ App Router
-- Server Actions (use server)
-- Supabase Client（資料庫操作）
+- API Routes（HTTP endpoints）
+- Neon serverless PostgreSQL（資料庫操作）
 - TypeScript
 
 ---

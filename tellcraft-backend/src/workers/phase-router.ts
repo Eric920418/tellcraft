@@ -158,6 +158,26 @@ export async function routePhase(
     return true
   }
 
+  // ── Coder Generating ──
+  if (state.phase === 'coder_generating') {
+    const isChinese = state.locale !== 'en'
+    await sendMessage(conversationId, io, {
+      content: isChinese ? '正在生成後端代碼，請稍候...' : 'Generating backend code, please wait...',
+      stage: 'info',
+    })
+    return true
+  }
+
+  // ── Coder Testing ──
+  if (state.phase === 'coder_testing') {
+    const isChinese = state.locale !== 'en'
+    await sendMessage(conversationId, io, {
+      content: isChinese ? '正在執行 SpecFormula 測試，請稍候...' : 'Running SpecFormula tests, please wait...',
+      stage: 'info',
+    })
+    return true
+  }
+
   // ── Domain Phases ──
   if (state.phase === 'domain_searching' || state.phase === 'domain_registering') {
     const isChinese = state.locale !== 'en'

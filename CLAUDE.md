@@ -75,13 +75,15 @@ pm2 describe tellcraft-backend            # 詳細資訊（記憶體/重啟次�
 | **UIUX Phases** | `workers/phase-handlers/uiux-phases.ts`（~2420 行） | UIUX 全流程：Discovery/Brief/Variant/CodePipeline/Mixed routing |
 | **Deploy Phases** | `workers/phase-handlers/deploy-phases.ts`（~240 行） | 部署執行：prepareDeployment + executeDeployment |
 | **Fast Build Phases** | `workers/phase-handlers/fast-build-phases.ts`（~480 行） | 快速建站：增量交互式生成（executeFastBuildSkill + runFastBuildPipeline + mergeGeneratedCode） |
+| **Coder Phases** | `workers/phase-handlers/coder-phases.ts`（~400 行） | Coder Skill：讀 BDD 產出 → executeCoderPipeline → 保存 project_files(coder) → 合併代碼 + executeCoderTesting（SpecFormula 紅綠燈） |
 | **Domain Phases** | `workers/phase-handlers/domain-phases.ts` | 域名全流程：搜尋/確認購買/註冊/自有域名設定/DNS 驗證/完成/失敗 |
 | **Orchestrator Utils** | `workers/orchestrator-utils.ts` | 共用基礎設施：sendMessage/saveFlowState/getFlowState 等 |
 | **FlowState 型別** | `types/flow-state.ts` | FlowState 介面 + 子型別（避免循環 import） |
 | **Classifier** | `services/classifier.ts` | 三層防禦：Prefilter → Meta Intent → Skill 分類 |
 | **UIUX Generation** | `services/uiux-generation.ts` | 設計生成核心（Brief/Variants/Structure/Animation/RWD/Refine） |
 | **Quality Gate** | `services/quality-gate.ts` | A11y/Performance/CodeQuality 靜態檢查 + LLM 自動修復 |
-| **Deployer** | `services/deployer.ts` | sanitize → build 驗證 → Vercel 部署 → 回滾 |
+| **Coder Generation** | `services/coder-generation.ts`（~500 行） | 後端代碼生成核心：parseActionsYml → generateActionFunction(LLM) → generateServerActions(零LLM) → identifyMockDataComponents → rewriteComponentForServerActions(LLM) |
+| **Deployer** | `services/deployer.ts` | sanitize → build 驗證 → Vercel 部署 → 回滾（合併 uiux+coder skill_source） |
 | **Iteration Skill** | `services/iteration-skill.ts` | 迭代修改 + 撤銷 + 版本回滾（從 orchestrator 抽出） |
 | **Fast Build** | `services/fast-build-generation.ts` | 快速模式輔助：tier 偵測、產品推斷、默認 DesignSystem（零 LLM）、surface-1/2/3 色階 |
 | **Design Techniques** | `services/design-techniques.ts` | 視覺技法庫（30 個 Layout/Surface/Typography/Interaction 技法），按 tier+productType 加權隨機注入 Structure prompt |
@@ -95,7 +97,7 @@ pm2 describe tellcraft-backend            # 詳細資訊（記憶體/重啟次�
 | **Domain Service** | `services/domain-service.ts` | 域名 API 封裝（Porkbun 註冊 + Cloudflare DNS + Vercel 綁定 + RDAP 查詢）+ 購買/自有域名工作流 + 反向補償 rollback |
 | **Neon Service** | `services/neon-service.ts` | Neon API 客戶端：同步建立 Neon PostgreSQL DB + 套用 BDD Schema，< 10s |
 | **Schema Derivation** | `services/schema-derivation.ts` | BDD schemaSql → Neon PostgreSQL DDL（零 LLM，規則式轉換：ID→UUID、COMMENT 語法、RLS、created_at） |
-| **FlowState Recovery** | `services/flowstate-recovery.ts` | 每 2 分鐘掃描 Redis flow:* key，逾時 phase 自動恢復（prd_discovery 5m / fast_generating 20m / uiux_iterating 5m / deployer_deploying 10m / domain_searching 3m / domain_registering 10m / domain_dns_verifying 5m）|
+| **FlowState Recovery** | `services/flowstate-recovery.ts` | 每 2 分鐘掃描 Redis flow:* key，逾時 phase 自動恢復（prd_discovery 5m / fast_generating 20m / uiux_iterating 5m / coder_generating 15m / deployer_deploying 10m / domain_searching 3m / domain_registering 10m / domain_dns_verifying 5m）|
 | **Conversation Lock** | `services/conversation-lock.ts` | Redis SET NX EX 互斥鎖（TTL 5 分鐘），同一對話同時只允許一個 Worker job 執行 |
 | **LINE Notify** | `services/line-notify.ts` | LINE 推播通知（stage 白名單過濾，fire-and-forget） |
 | **LINE Bot Handler** | `services/line-bot-handler.ts` | LINE Bot 業務邏輯（Follow/Text/Postback 處理） |
@@ -133,7 +135,8 @@ pm2 describe tellcraft-backend            # 詳細資訊（記憶體/重啟次�
 | `bdd-spec` | 需求釐清 + BDD 規格產出（5 階段：Discovery → Clarify → Formulation → Actions Design → ISA Config）|
 | `uiux` | 前端介面設計（3 階段：Design Discovery → Design Lab → Implementation）|
 | `quality-gate` | UIUX RWD 完成後**自動觸發**，critical 問題 LLM 自動修復（最多 3 輪）|
-| `deployer` | UIUX 代碼 → Next.js → Vercel 部署（用戶說「部署」觸發） |
+| `coder` | 後端代碼生成（Stage A）：BDD actionsYml → lib/actions/*.ts(LLM) + app/actions/*.ts(零LLM) + 改寫 UIUX 組件 mock→Server Action（`uiux_complete` 時「接上資料庫」quickReply 觸發，需有 BDD + Neon DB）|
+| `deployer` | UIUX+Coder 代碼 → Next.js → Vercel 部署（用戶說「部署」觸發） |
 | `iteration` | 迭代修改 + 撤銷上一步 + 版本回滾（`uiux_complete`/`deployer_complete` 自動路由） |
 | `fast-build` | 快速建站：一句話 → 跳過 BDD/Discovery → inferInteractionHint → 增量生成（首頁先預覽 → 用戶確認 → 剩餘頁面）→ 靜態 QG → Preview |
 | `domain-manager` | 域名管理：列出已有域名 / 引導購買或綁定（付費會員限定） |
@@ -157,6 +160,7 @@ pm2 describe tellcraft-backend            # 詳細資訊（記憶體/重啟次�
 | `uiux_quality_gate` | Quality Gate 執行中 |
 | `uiux_complete` / `uiux_iterating` | UIUX 完成（可迭代或部署）/ 迭代修改中 |
 | `fast_generating` | 快速模式生成中（攔截用戶輸入；`fastBuildStage=awaiting_continue` 時暫停等用戶確認繼續/完成/迭代） |
+| `coder_generating` | Coder Skill 生成後端代碼中（攔截用戶輸入，15min 超時恢復到 uiux_complete） |
 | `deployer_deploying` / `deployer_failed` / `deployer_complete` | 部署流程（用戶說「部署」直接執行，無二次確認） |
 | `deployer_rollback_select` | 等待用戶選擇回滾版本 |
 | `domain_searching` | 域名查詢中（攔截用戶輸入） |

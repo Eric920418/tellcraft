@@ -35,6 +35,8 @@ const DEPLOYER_TIMEOUT_MS = 10 * 60 * 1000
 const DOMAIN_SEARCHING_TIMEOUT_MS = 3 * 60 * 1000
 const DOMAIN_REGISTERING_TIMEOUT_MS = 10 * 60 * 1000
 const DOMAIN_DNS_VERIFYING_TIMEOUT_MS = 5 * 60 * 1000
+const CODER_GENERATING_TIMEOUT_MS = 15 * 60 * 1000
+const CODER_TESTING_TIMEOUT_MS = 20 * 60 * 1000
 
 // 需要掃描的 phase → 超時閾值
 const RECOVERABLE_PHASES: Record<string, number> = {
@@ -47,6 +49,8 @@ const RECOVERABLE_PHASES: Record<string, number> = {
   domain_searching: DOMAIN_SEARCHING_TIMEOUT_MS,
   domain_registering: DOMAIN_REGISTERING_TIMEOUT_MS,
   domain_dns_verifying: DOMAIN_DNS_VERIFYING_TIMEOUT_MS,
+  coder_generating: CODER_GENERATING_TIMEOUT_MS,
+  coder_testing: CODER_TESTING_TIMEOUT_MS,
 }
 
 function getPhaseTimeoutMs(state: FlowState): number | undefined {
@@ -96,6 +100,8 @@ export async function scanAndRecoverStuckFlowStates(
         ? (state.prdDiscoveryStartedAt || 0)
         : state.phase === 'domain_registering' || state.phase === 'domain_searching' || state.phase === 'domain_dns_verifying'
         ? (state.domainRegistrationStartedAt || 0)
+        : state.phase === 'coder_generating'
+        ? (state.coderGenerationStartedAt || 0)
         : (state.uiuxCodeGenerationStartedAt || 0)
 
       // 早期恢復：lock 不存在 = Worker 已死，縮短等待至 5 分鐘（取代完整超時）
@@ -109,7 +115,8 @@ export async function scanAndRecoverStuckFlowStates(
         state.phase === 'fast_generating' ||
         state.phase === 'uiux_iterating' ||
         state.phase === 'uiux_code_generation' ||
-        state.phase === 'uiux_quality_gate'
+        state.phase === 'uiux_quality_gate' ||
+        state.phase === 'coder_generating'
       ) {
         const hasRecentActivity = await hasRecentFlowActivity(redis, conversationId)
         if (hasRecentActivity) continue
@@ -186,6 +193,12 @@ async function recoverFlowState(
       break
     case 'domain_dns_verifying':
       await recoverDomainDnsVerifying(redis, io, conversationId, state)
+      break
+    case 'coder_generating':
+      await recoverCoderGenerating(redis, io, conversationId, state)
+      break
+    case 'coder_testing':
+      await recoverCoderTesting(redis, io, conversationId, state)
       break
   }
 }
@@ -542,6 +555,56 @@ async function recoverDeployer(
     quickReplies: [
       { label: '重試部署', value: '部署', style: 'primary' },
       { label: '返回修改', value: '返回修改', style: 'secondary' },
+    ],
+  })
+}
+
+/**
+ * coder_generating 恢復：回退到 uiux_complete + 恢復快照
+ */
+async function recoverCoderGenerating(
+  redis: Redis, io: SocketIOServer, conversationId: string, state: FlowState
+) {
+  const isChinese = state.locale !== 'en'
+
+  if (state.coderPreRewriteCode) {
+    state.uiuxGeneratedCode = state.coderPreRewriteCode
+  }
+  state.phase = 'uiux_complete'
+  state.coderGenerationStartedAt = undefined
+  state.waitingForReply = false
+  await saveFlowState(redis, conversationId, state)
+
+  await sendMessage(conversationId, io, {
+    content: isChinese
+      ? '後端代碼生成中斷了。您可以重試「接上資料庫」或直接部署現有前端。'
+      : 'Backend code generation was interrupted. You can retry or deploy existing frontend.',
+    stage: 'uiux_complete',
+    quickReplies: [
+      { label: isChinese ? '重試' : 'Retry', value: '__connect_database__', style: 'primary' },
+      { label: isChinese ? '直接部署' : 'Deploy as-is', value: '部署', style: 'secondary' },
+    ],
+  })
+}
+
+async function recoverCoderTesting(
+  redis: Redis, io: SocketIOServer, conversationId: string, state: FlowState
+) {
+  const isChinese = state.locale !== 'en'
+
+  state.phase = 'uiux_complete'
+  state.coderTestStartedAt = undefined
+  state.waitingForReply = false
+  await saveFlowState(redis, conversationId, state)
+
+  await sendMessage(conversationId, io, {
+    content: isChinese
+      ? '測試執行中斷了。您可以重試測試或直接部署。'
+      : 'Test execution was interrupted. You can retry or deploy as-is.',
+    stage: 'uiux_complete',
+    quickReplies: [
+      { label: isChinese ? '重試測試' : 'Retry Tests', value: '__verify_backend__', style: 'primary' },
+      { label: isChinese ? '直接部署' : 'Deploy as-is', value: '部署', style: 'secondary' },
     ],
   })
 }
