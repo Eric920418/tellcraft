@@ -228,8 +228,19 @@ const DEFAULT_PAGES: Record<string, string[]> = {
  * 推斷頁面列表
  */
 export function inferPages(description: string, productType: string): string[] {
-  // 先嘗試從描述中提取明確提到的頁面
-  const pageKeywords = ['首頁', '關於', '聯繫', '菜單', '作品', '價格', '功能', '文章', '產品', '服務', '團隊', '常見問題', 'FAQ', '課表', '教練', '醫師', '科別', '物件', '行程', '案例', '預約', '門市', '房型', '設施', '訂房', '捐款', '演出', '方案', '師資', '課程', '聯絡', '新聞', '最新消息', '下載', '支援', '幫助', '會員', '儀表板']
+  // 先嘗試從描述中提取明確提到的頁面（中英文雙語 + 常見 SaaS/app 頁面名）
+  const pageKeywords = [
+    // 中文
+    '首頁', '關於', '聯繫', '菜單', '作品', '價格', '功能', '文章', '產品', '服務',
+    '團隊', '常見問題', '課表', '教練', '醫師', '科別', '物件', '行程', '案例',
+    '預約', '門市', '房型', '設施', '訂房', '捐款', '演出', '方案', '師資', '課程',
+    '聯絡', '新聞', '最新消息', '下載', '支援', '幫助', '會員', '儀表板', '設定', '商品',
+    // 英文（常見 SaaS/Dashboard 頁面）
+    'Dashboard', 'Users', 'Orders', 'Products', 'Analytics', 'Chat', 'Files',
+    'Settings', 'Profile', 'Billing', 'FAQ', 'Pricing', 'About', 'Contact',
+    'Home', 'Overview', 'Reports', 'Notifications', 'Messages', 'Calendar',
+    'Inventory', 'Customers', 'Invoices', 'Teams', 'Projects', 'Tasks',
+  ]
   const negativePatterns = ['不要', '不需要', '不用', '沒有', '去掉', '移除']
   // 子句分隔符（中英文標點）
   const clauseSeparators = /[，。,.、；;！!？?]/
@@ -1039,12 +1050,12 @@ export async function generateFastConcept(
       ? `你是設計顧問。根據產品描述生成設計概念。回覆嚴格 JSON（無其他文字）：
 {"name":"概念名稱(2-4字)","vibe":"設計氛圍描述(1句話)","signatureElement":"一個招牌視覺元素(具體的設計手法)","keyFeatures":["設計特徵1","設計特徵2","設計特徵3"],"suggestedTier":"functional或creative","suggestedPages":["頁面1","頁面2",...]}
 suggestedTier 判斷規則：dashboard/admin/SaaS 工具型 → functional；品牌展示/創意/個性化 → creative。
-suggestedPages：列出最核心的 2-4 個頁面（首頁 + 最能展現產品特色的功能頁），不要超過 4 個。
+suggestedPages：列出最核心的 2-4 個頁面，不要超過 4 個。dashboard/admin/SaaS 工具型用功能頁面名（如 Dashboard、Users、Settings），不要加「首頁」「價格」等行銷頁面。品牌/官網型可以用「首頁」+功能頁。
 讓概念獨特，避免泛用描述。signatureElement 要具體到能直接寫代碼（如「hero 區域的漸層玻璃態卡片」而非「現代設計」）。`
       : `You are a design consultant. Generate a design concept from the product description. Reply strictly JSON (no other text):
 {"name":"Concept name(2-4 words)","vibe":"Design vibe(1 sentence)","signatureElement":"One signature visual element(specific design technique)","keyFeatures":["Feature 1","Feature 2","Feature 3"],"suggestedTier":"functional or creative","suggestedPages":["Page 1","Page 2",...]}
 suggestedTier rules: dashboard/admin/SaaS tools → functional; brand/creative/personality → creative.
-suggestedPages: List 2-4 core pages (homepage + key feature pages), max 4.
+suggestedPages: List 2-4 core pages, max 4. For dashboard/admin/SaaS tools use functional page names (e.g. Dashboard, Users, Settings) — do NOT add "Home", "Pricing" or other marketing pages. For brand/website types, use "Home" + feature pages.
 Make the concept unique. signatureElement must be specific enough to code (e.g. "frosted glass hero cards with gradient border" not "modern design").`
 
     let userMsg = isChinese

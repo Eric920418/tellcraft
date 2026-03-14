@@ -1062,6 +1062,7 @@ Fast mode 入口新增客服問答層，解決 LINE 用戶非建站輸入（問�
 - **wiring**：`index.ts` 新增 `setInterval` 每 2 分鐘調用，與現有 `cleanupOrphanBuildDirs` 同模式
 - **deployer 時間戳**：`orchestrator.ts` 進入 `deployer_deploying` 時設置 `uiuxCodeGenerationStartedAt`，供超時偵測使用
 - **03-14 修復：post-processing 心跳**：streaming 結束後的 LLM 修復（fix_syntax/fix_truncated/repair_missing）現在透過 `callClaude` 的 `heartbeatFn` 每 30 秒刷新 Redis 活動心跳 + `onPartialCode` 步驟間刷新，避免 recovery 誤殺活躍 job。`FLOW_ACTIVITY_TTL_SECONDS` 60→180 秒。`repairMissingComponents` 禁止自動續寫（`maxContinuations: 0`）防止 4 次 8192-token 連續呼叫
+- **03-14 修復：batch audit 誤判 + 頁面推斷**：`flattenBatchText` 預先移除 `data-animate="..."` 值避免 `hero-entrance` 觸發行銷 pattern；`inferPages` 新增英文頁面關鍵字（Dashboard/Users/Orders/Products/Analytics/Chat/Files/Settings 等 26 個）；`generateFastConcept` prompt 區分 app 型（不建議首頁/價格等行銷頁）vs 官網型（保留首頁+功能頁）
 
 ### 修復 Event Storming 確認語意辨識（2026-03-01）
 
