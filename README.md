@@ -56,6 +56,8 @@ npx ts-node bdd-spec/scripts/validate-feature.ts spec/features/
 
 | 項目 | 檔案 | 說明 |
 |------|------|------|
+| i18n Proxy | `proxy.ts` | next-intl proxy（Next.js 16 取代 middleware），攔截無 locale 前綴的請求 rewrite 到 `app/[locale]/`（`/` = en、`/zh` = 中文，瀏覽器語言自動偵測）。排除 `api/`、`_next/`、`monitoring`、`uploads/`、靜態檔案 |
+| 安全 Headers | `vercel.json` | `X-Content-Type-Options: nosniff`、`X-Frame-Options: DENY`、`Referrer-Policy: strict-origin-when-cross-origin`、`Permissions-Policy` |
 | robots.txt | `app/robots.ts` | 允許公開頁面，禁止 dashboard/auth/api/test/liff |
 | sitemap.xml | `app/sitemap.ts` | 公開頁面 + hreflang（en/zh-TW） |
 | manifest.json | `app/manifest.ts` | PWA manifest（standalone） |
@@ -358,7 +360,7 @@ Dashboard 帳號設定 → /api/auth/link/google（從 cookie 讀 JWT → 提取
 
 基於 `next-intl` v4，`localePrefix: 'as-needed'`，`localeDetection: true`。
 
-**語言偵測優先順序**（middleware）：
+**語言偵測優先順序**（proxy）：
 1. URL locale prefix（最高，顯式導航）
 2. `NEXT_LOCALE` cookie（持久化的手動選擇，1 年有效期）
 3. `Accept-Language` header（瀏覽器語言自動偵測）
