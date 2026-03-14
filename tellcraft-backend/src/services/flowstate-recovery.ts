@@ -102,6 +102,8 @@ export async function scanAndRecoverStuckFlowStates(
         ? (state.domainRegistrationStartedAt || 0)
         : state.phase === 'coder_generating'
         ? (state.coderGenerationStartedAt || 0)
+        : state.phase === 'coder_testing'
+        ? (state.coderTestStartedAt || 0)
         : (state.uiuxCodeGenerationStartedAt || 0)
 
       // 早期恢復：lock 不存在 = Worker 已死，縮短等待至 5 分鐘（取代完整超時）
@@ -116,7 +118,8 @@ export async function scanAndRecoverStuckFlowStates(
         state.phase === 'uiux_iterating' ||
         state.phase === 'uiux_code_generation' ||
         state.phase === 'uiux_quality_gate' ||
-        state.phase === 'coder_generating'
+        state.phase === 'coder_generating' ||
+        state.phase === 'coder_testing'
       ) {
         const hasRecentActivity = await hasRecentFlowActivity(redis, conversationId)
         if (hasRecentActivity) continue

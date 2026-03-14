@@ -230,21 +230,21 @@ export async function executeCoderTesting(input: CoderSkillInput): Promise<void>
 
   // 1. 讀取所需資料
   const bddSession = await db.queryOne<{
-    feature_files: string | null
+    features_content: unknown[] | null
     actions_yml_content: string | null
     open_api_spec_content: string | null
     isa_config_content: string | null
-    schema_sql: string | null
-    entity_mapping: string | null
+    schema_sql_content: string | null
+    entity_mapping_content: string | null
   }>(
-    `SELECT feature_files, actions_yml_content, open_api_spec_content,
-            isa_config_content, schema_sql, entity_mapping
+    `SELECT features_content, actions_yml_content, open_api_spec_content,
+            isa_config_content, schema_sql_content, entity_mapping_content
      FROM bdd_sessions WHERE project_id = $1
      ORDER BY updated_at DESC LIMIT 1`,
     [projectId]
   )
 
-  if (!bddSession?.feature_files || !bddSession?.actions_yml_content) {
+  if (!bddSession?.features_content || !bddSession?.actions_yml_content) {
     await sendMessage(conversationId, io, {
       content: isChinese ? '缺少 BDD 規格，無法執行測試。' : 'Missing BDD specs, cannot run tests.',
       stage: 'error',
@@ -288,18 +288,20 @@ export async function executeCoderTesting(input: CoderSkillInput): Promise<void>
     description: r.description || '',
   }))
 
-  // 解析 featureFiles
-  let featureFiles: { name: string; content: string }[]
-  try {
-    const parsed = JSON.parse(bddSession.feature_files)
-    featureFiles = Array.isArray(parsed)
-      ? parsed.map((f: { name?: string; content?: string; featureName?: string; featureContent?: string }) => ({
-          name: f.name || f.featureName || 'unknown',
-          content: f.content || f.featureContent || '',
-        }))
-      : []
-  } catch {
-    await sendMessage(conversationId, io, { content: 'Feature Files 解析失敗', stage: 'error' })
+  // 解析 featureFiles（features_content 是 JSONB，pg driver 自動解析為陣列）
+  const rawFeatures = bddSession.features_content
+  const featureFiles: { name: string; content: string }[] = Array.isArray(rawFeatures)
+    ? rawFeatures.map((f: unknown) => {
+        const obj = f as Record<string, unknown>
+        return {
+          name: (obj.name as string) || (obj.featureName as string) || 'unknown',
+          content: (obj.content as string) || (obj.featureContent as string) || '',
+        }
+      })
+    : []
+
+  if (featureFiles.length === 0) {
+    await sendMessage(conversationId, io, { content: 'Feature Files 為空', stage: 'error' })
     return
   }
 
@@ -314,6 +316,11 @@ export async function executeCoderTesting(input: CoderSkillInput): Promise<void>
     stage: 'info',
   })
 
+  // 定時心跳：每 15 秒觸發一次，確保長時間操作（pnpm install、LLM 修復）期間不被超時恢復誤殺
+  const heartbeatInterval = setInterval(() => {
+    void touchFlowActivity(redis, conversationId)
+  }, 15_000)
+
   try {
     const { runRedGreenCycle, formatTestResults } = await import('../../services/specformula-runner')
 
@@ -324,8 +331,8 @@ export async function executeCoderTesting(input: CoderSkillInput): Promise<void>
       actionsYml: bddSession.actions_yml_content,
       openApiSpec: bddSession.open_api_spec_content || '',
       isaConfigYml: bddSession.isa_config_content || '',
-      schemaSql: bddSession.schema_sql || '',
-      entityMapping: bddSession.entity_mapping || '',
+      schemaSql: bddSession.schema_sql_content || '',
+      entityMapping: bddSession.entity_mapping_content || '',
       neonConnectionString: project.neon_connection_string,
       maxAttempts: 3,
       trackingContext: { userId, conversationId },
@@ -408,6 +415,8 @@ export async function executeCoderTesting(input: CoderSkillInput): Promise<void>
         { label: isChinese ? '直接部署' : 'Deploy as-is', value: '部署', style: 'secondary' as const },
       ],
     })
+  } finally {
+    clearInterval(heartbeatInterval)
   }
 }
 
