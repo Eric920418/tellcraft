@@ -1050,17 +1050,18 @@ Fast mode 入口新增客服問答層，解決 LINE 用戶非建站輸入（問�
 - **`checkBuildRelevance` fail-closed**：API 錯誤 / 空回應 / JSON 解析失敗 / catch → 拒絕而非放行（保留無 API key 時的 fail-open）
 - **成本**：Sonnet ~$0.003/次，但 quickFilter 放行率高，每個 session 預估 ~$0.01-0.03
 
-### FlowState 超時自動恢復（2026-03-01）
+### FlowState 超時自動恢復（2026-03-01，03-14 修復心跳）
 
 伺服器重啟後，卡在「生成中」phase 的對話不再永久卡死。新增定時掃描（每 2 分鐘），主動偵測超時的 FlowState 並自動恢復 + 透過 `sendMessage()` 推送通知（Web Socket.io + LINE pushMessage）。
 
 - **新增 `services/flowstate-recovery.ts`**：`scanAndRecoverStuckFlowStates()` 掃描所有 `flow:*` Redis keys，逐個檢查 phase + 超時
-- **覆蓋 4 個 phase**：`fast_generating`(5min) / `uiux_iterating`(5min) / `uiux_code_generation`(10min) / `deployer_deploying`(10min)
+- **覆蓋 4 個 phase**：`fast_generating`(25min) / `uiux_iterating`(5min) / `uiux_code_generation`(20min) / `deployer_deploying`(10min)
 - **恢復策略**：有代碼 → `uiux_complete`（保留進度）；無代碼 → 回到上一個穩定狀態；部署中斷 → `deployer_failed`
 - **推送機制**：複用 `sendMessage()`，自動走 LINE/Web 管道（LINE 用戶也能收到恢復通知）
 - **不掃描的 phase**：`formulation`（已有 checkpoint 恢復）、`spec_discovery`（已有超時跳過）、`waitingForReply=true` 的 phase
 - **wiring**：`index.ts` 新增 `setInterval` 每 2 分鐘調用，與現有 `cleanupOrphanBuildDirs` 同模式
 - **deployer 時間戳**：`orchestrator.ts` 進入 `deployer_deploying` 時設置 `uiuxCodeGenerationStartedAt`，供超時偵測使用
+- **03-14 修復：post-processing 心跳**：streaming 結束後的 LLM 修復（fix_syntax/fix_truncated/repair_missing）現在透過 `callClaude` 的 `heartbeatFn` 每 30 秒刷新 Redis 活動心跳 + `onPartialCode` 步驟間刷新，避免 recovery 誤殺活躍 job。`FLOW_ACTIVITY_TTL_SECONDS` 60→180 秒。`repairMissingComponents` 禁止自動續寫（`maxContinuations: 0`）防止 4 次 8192-token 連續呼叫
 
 ### 修復 Event Storming 確認語意辨識（2026-03-01）
 
