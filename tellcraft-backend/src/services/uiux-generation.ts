@@ -3586,8 +3586,7 @@ ${existingCodeStr}
     {
       maxTokens: incrementalOptions?.maxTokens || 32768,
       temperature: tier === 'creative' ? 0.35 : 0.2,
-      maxContinuations: incrementalOptions?.maxContinuations
-        ?? (generationProfile === 'fast' ? 1 : 2),
+      maxContinuations: incrementalOptions?.maxContinuations ?? 2,
       promptLabel: 'uiux-animation',
       contextSizeHint: generationProfile,
     },
