@@ -724,6 +724,48 @@ export function getMoodCodeFragment(moodId: string): string {
   return MOOD_CODE_FRAGMENTS[moodId] || ''
 }
 
+// ============================================================
+// 快速模式精簡版風格錨點（3 行核心 className，~40 tokens/個）
+// ============================================================
+
+const MOOD_CODE_COMPACT: Record<string, string> = {
+  'glassmorphic-dark': `// 毛玻璃卡片：backdrop-blur-xl bg-white/5 border border-white/10 rounded-2xl shadow-[0_8px_32px_rgba(0,0,0,0.4)]
+// 漸層文字：bg-gradient-to-r from-cyan-400 to-violet-400 bg-clip-text text-transparent
+// 霓虹按鈕：border border-cyan-400/30 bg-cyan-400/10 text-cyan-400 hover:bg-cyan-400/20`,
+
+  'brutalist': `// 粗邊框卡片：border-4 border-black shadow-[4px_4px_0_black] hover:bg-yellow-400
+// 超大字：font-black text-8xl uppercase leading-none tracking-tighter
+// CTA：border-4 border-black bg-black text-white hover:bg-yellow-400 hover:text-black`,
+
+  'organic-warm': `// 暖色卡片：bg-amber-50 rounded-3xl shadow-xl shadow-amber-100/50 border border-amber-100
+// 標題：font-light text-6xl text-stone-800 leading-relaxed (Cormorant Garamond)
+// CTA：rounded-full bg-amber-700 text-amber-50 hover:bg-amber-800`,
+
+  'editorial-clean': `// 無框區塊：py-32 border-t border-stone-200，背景純白
+// 大標題：text-7xl font-light text-stone-900 leading-tight (Instrument Serif)
+// CTA：text-stone-900 border-b border-stone-900 text-sm uppercase tracking-wider`,
+
+  'neo-corporate': `// 數據卡片：bg-white rounded-lg border border-slate-200 shadow-sm hover:shadow-md
+// 數字：text-3xl font-semibold tabular-nums text-slate-900
+// CTA：bg-gradient-to-r from-blue-600 to-indigo-600 text-white rounded-lg`,
+
+  'playful-pop': `// 彩色卡片：rounded-3xl bg-gradient-to-br from-purple-50 to-pink-50 border-2 border-purple-200
+// Hero：bg-gradient-to-br from-purple-500 via-pink-500 to-orange-400 text-white
+// CTA：rounded-full bg-gradient-to-r from-purple-500 to-pink-500 text-white font-bold`,
+
+  'luxury-minimal': `// 留白區塊：py-40 px-20，背景奶油白 bg-[#F5F0EB]
+// 大標題：text-8xl font-extralight tracking-wide text-stone-900 (Cormorant Garamond)
+// CTA：border border-stone-900 text-xs uppercase tracking-[0.2em] hover:bg-stone-900 hover:text-white`,
+
+  'tech-dark': `// 終端卡片：bg-slate-900 rounded-lg border border-slate-700，三色圓點裝飾
+// 代碼風：font-mono text-sm text-slate-300，$符號 text-green-400
+// CTA：bg-transparent border border-slate-600 font-mono hover:border-green-400 hover:text-green-400`,
+}
+
+export function getMoodCodeFragmentCompact(moodId: string): string {
+  return MOOD_CODE_COMPACT[moodId] || ''
+}
+
 export function getMoodById(moodId: string): DesignMood | undefined {
   return DESIGN_MOODS[moodId]
 }

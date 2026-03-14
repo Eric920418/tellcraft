@@ -10,8 +10,8 @@ import { getAnthropicClient, MODEL, trackLlmUsage } from '../lib/anthropic'
 import { getEnv } from '../lib/env'
 import { formatUISpecForPrompt, UIRequirementsSpec } from './bdd-to-ui-spec'
 import { safeParseJson } from '../utils/safe-parse-json'
-import { selectTechniques, formatTechniquesForPrompt } from './design-techniques'
-import { getMoodPromptBlock, getMoodAnimationHint, getMoodRwdHint, getMoodSummary, getMoodCodeFragment, getMoodById } from './design-moods'
+import { selectTechniques, formatTechniquesForPrompt, formatTechniquesForPromptFast } from './design-techniques'
+import { getMoodPromptBlock, getMoodAnimationHint, getMoodRwdHint, getMoodSummary, getMoodCodeFragment, getMoodCodeFragmentCompact, getMoodById } from './design-moods'
 import { selectCompositionPatterns, formatPatternsForPrompt, listPatternsForVariants } from './composition-patterns'
 import { createLogger } from '../lib/logger'
 
@@ -187,6 +187,7 @@ export async function callClaude(
     maxContinuations?: number
     promptLabel?: string
     contextSizeHint?: string
+    heartbeatFn?: () => void  // 長時間 LLM 呼叫中定期刷新外部心跳（如 Redis flow activity）
   },
   trackingContext?: LlmTrackingContext,
   onTextDelta?: (accumulatedText: string) => void
@@ -220,12 +221,19 @@ export async function callClaude(
 
           let chunkCount = 0
           let currentSegment = ''
+          let lastHeartbeatAt = 0
           stream.on('text', (text) => {
             currentSegment += text
             accumulated += text
             chunkCount++
             if (chunkCount % 50 === 1) {
               logger.info({ chunkCount, accumulatedLength: accumulated.length }, 'streaming chunk')
+            }
+            // 所有 LLM 呼叫（含 post-processing fix/repair）每 30 秒刷新外部心跳
+            const now = Date.now()
+            if (options?.heartbeatFn && now - lastHeartbeatAt >= 30_000) {
+              lastHeartbeatAt = now
+              options.heartbeatFn()
             }
             onTextDelta?.(accumulated)
           })
@@ -1376,6 +1384,69 @@ ${getMoodSummary(designSystem.mood)}（完整風格指引已在生成指令中�
 - 半透明白色卡片（bg-white/50 以上）→ 偏亮 → 用深色文字；bg-white/10 以下 → 依底層顏色決定文字色`
 }
 
+/**
+ * 快速模式專用 Design System prompt — 去重精簡版
+ * 差異：移除和 CSS Variables 重複的顏色列表、typography scale JSON、間距 scale
+ * 保留：CSS Variables（唯一顏色源）、surface layering 語義指引、字體名、圓角、陰影策略、depth、漸層 primary、mood、輸出格式、顏色規則
+ */
+export function buildDesignSystemPromptFast(designSystem: DesignSystem): string {
+  return `## Design System（必須嚴格遵守）
+
+### CSS Variables（顏色唯一來源 — 對照 Tailwind utility 使用）
+\`\`\`css
+${designSystem.cssVariables}
+\`\`\`
+${designSystem.colorPalette.surface1 ? `
+### 表面層級（Surface Layering）
+- surface-1（底層）→ surface-2（卡片）→ surface-3（hover/active）
+- 色差微妙但可辨識（Subtle Layering 原則）` : ''}
+
+### 字體規範
+- 主要字體 (font-sans): ${designSystem.typography.fontFamily}
+${designSystem.tailwindExtend.fontFamily?.display ? `- 標題字體 (font-display): ${(designSystem.tailwindExtend.fontFamily.display as string[])[0]}\n` : ''}\
+${designSystem.tailwindExtend.fontFamily?.mono ? `- 等寬字體 (font-mono): ${(designSystem.tailwindExtend.fontFamily.mono as string[])[0]}\n` : ''}\
+- 使用方式：正文用 font-sans${designSystem.tailwindExtend.fontFamily?.display ? '，標題/大字用 font-display' : ''}${designSystem.tailwindExtend.fontFamily?.mono ? '，程式碼用 font-mono' : ''}
+
+### 圓角規範
+${JSON.stringify(designSystem.borderRadius, null, 2)}
+${designSystem.shadows ? `
+### 陰影策略
+${designSystem.shadows.strategy === 'borders-only'
+  ? '- borders-only → 用 border 建立層次，禁止 shadow-*'
+  : designSystem.shadows.strategy === 'subtle-shadows'
+  ? '- subtle-shadows → 低調單層陰影'
+  : '- layered-shadows → 多層次 sm→lg'}
+${designSystem.shadows.values.sm ? `- shadow-sm: ${designSystem.shadows.values.sm}` : ''}` : ''}
+${designSystem.depth ? `
+### 卡片深度
+\`${designSystem.depth.cardStyle}\`` : ''}
+${designSystem.gradients ? `
+### 漸層
+${designSystem.gradients.primary ? `- primary: ${designSystem.gradients.primary}` : ''}` : ''}
+${designSystem.mood ? `
+### 設計情緒
+${getMoodSummary(designSystem.mood)}` : ''}
+
+## 技術棧
+- Next.js 16 App Router + Tailwind CSS + TypeScript
+
+## 輸出格式
+每個檔案使用以下格式：
+
+\`\`\`tsx:path/to/file.tsx
+// 檔案內容
+\`\`\`
+
+⚠️ code fence 規則：每個 code block 的第一行必須直接是代碼（import、'use client'、const 等），禁止在代碼前加任何說明文字。
+
+## 顏色使用規則
+- 只使用 Design System 定義的顏色（bg-primary, text-foreground, border-border 等）
+- 禁止 bg-[var(--color-primary)] arbitrary value 語法
+- 禁止 Tailwind 默認顏色（bg-blue-500 等）
+- 對比配對：亮底（background/surface-1/2/3）→ text-foreground；深底（slate-950/black）→ text-white
+- 半透明白色卡片（bg-white/50 以上）→ 用深色文字；bg-white/10 以下 → 依底層顏色決定`
+}
+
 export function buildCompactDesignPrompt(
   designSystem: DesignSystem,
   options?: { includeTypography?: boolean; includeMood?: boolean }
@@ -1755,7 +1826,7 @@ ${contextLines.join('\n')}
   const response = await callClaude(
     '你是 Next.js 組件生成專家，專門修復缺失的組件引用。',
     [{ role: 'user', content: prompt }],
-    { maxTokens: 8192, temperature: 0.1 },
+    { maxTokens: 8192, temperature: 0.1, maxContinuations: 0 }, // 禁止自動續寫：修復少量缺失組件不應需要 >8192 tokens
     { ...trackingContext, purpose: 'repair_missing_components' }
   )
 
@@ -2810,7 +2881,7 @@ export async function generateStructure(
   const generationProfile = productContext?.generationProfile || 'balanced'
   const isFastMode = generationProfile === 'fast'
 
-  // 快速模式：輕量版 patterns（名稱+描述，無代碼骨架），跳過 techniques
+  // 快速模式：精簡版 techniques（name+codeHint）+ 精選 1 pattern（含 skeleton）
   // 完整模式：完整 techniques + patterns（含 Tailwind 骨架）
   let techniquesSection = ''
   let patternsSection = ''
@@ -2825,8 +2896,21 @@ export async function generateStructure(
     )
     patternsSection = formatPatternsForPrompt(patterns)
   } else {
-    // 快速模式：只列 pattern 名稱+描述（~150 tokens），避免千篇一律佈局
-    patternsSection = `## 可參考的佈局模式\n從以下模式中選擇適合的佈局，避免千篇一律的 hero→features→pricing：\n${listPatternsForVariants(tier)}`
+    // 快速模式：2 個精簡技法（name + code hint，~100 tokens）
+    const fastTechniques = selectTechniques(tier, template.category, 2)
+    techniquesSection = formatTechniquesForPromptFast(fastTechniques)
+
+    // 快速模式：精選 1 個 pattern + skeleton 第一行（~80 tokens）
+    const fastPatterns = selectCompositionPatterns(
+      tier, template.category, pages, productContext?.moodId,
+      1,  // count: 1 個精選
+      designSystem.layoutArchetype
+    )
+    if (fastPatterns.length > 0) {
+      const p = fastPatterns[0]
+      const skeleton = p.tailwindHint?.split('\n')[0] || ''
+      patternsSection = `## 佈局參考模式\n- **${p.name}**：${p.description}\n  skeleton: \`${skeleton}\``
+    }
   }
 
   const moodSystemSection = productContext?.moodId
@@ -2848,7 +2932,7 @@ ${constraintsBlock}
 
 ${techniquesSection}
 
-${buildDesignSystemPrompt(designSystem)}
+${isFastMode ? buildDesignSystemPromptFast(designSystem) : buildDesignSystemPrompt(designSystem)}
 
 ## 本階段任務：結構與互動生成（Structure + Interaction）
 這是第一階段，需要生成：
@@ -2872,7 +2956,15 @@ ${getDataAnimateSpec()}
 - 純展示組件（無 state、無事件處理）**不要**加 'use client'
 - layout.tsx 和純 metadata 的 page.tsx **不要**加 'use client'
 
-## 互動完整性規則（Critical — 按鈕必須有功能）
+${isFastMode && productContext?.layoutMode === 'website'
+? `## 互動完整性規則（Website 模式）
+- CTA 按鈕需 hover 狀態 + cursor-pointer
+- 表單提交需 success toast 或提示（用 useState 控制）
+- Navigation 當前頁面連結需 active 標記
+- Modal/Sheet 需背景 overlay + Escape 關閉
+- FAQ 手風琴用 useState 控制展開/收合
+- 圖片輪播用 useState + 左右箭頭控制`
+: `## 互動完整性規則（Critical — 按鈕必須有功能）
 每個 UI 操作都必須有完整的互動實作，不能只是靜態佔位：
 
 ### create 類操作（新增/建立/記錄）
@@ -2900,7 +2992,7 @@ ${getDataAnimateSpec()}
 ### 資料管理模式
 - 使用 useState 管理列表資料（初始值為有意義的模擬數據）
 - CRUD 操作直接操作 state（前端 demo，不需要 API）
-- 例如：\`const [items, setItems] = useState(initialData)\`
+- 例如：\`const [items, setItems] = useState(initialData)\``}
 
 ${baseRulesBlock}
 `
@@ -3052,9 +3144,17 @@ ${sections.join('\n\n')}
 `
   }
 
-  // 快速模式跳過 moodCodeSection（省 ~500-800 字），mood prompt block 仍在 systemPrompt 保留方向
-  const moodCodeSection = !isFastMode && productContext?.moodId && getMoodCodeFragment(productContext.moodId)
-    ? `## 風格錨點（Style Reference — 目標視覺風格代碼示範）
+  // mood code：完整模式用完整代碼片段，快速模式用精簡版（3 行核心 className）
+  const moodCodeSection = productContext?.moodId
+    ? (isFastMode
+      ? (getMoodCodeFragmentCompact(productContext.moodId)
+        ? `## 風格錨點（核心 className 示範）
+\`\`\`
+${getMoodCodeFragmentCompact(productContext.moodId)}
+\`\`\``
+        : '')
+      : (getMoodCodeFragment(productContext.moodId)
+        ? `## 風格錨點（Style Reference — 目標視覺風格代碼示範）
 以下片段展示了 ${getMoodById(productContext.moodId)?.name || productContext.moodId} 風格的視覺表現。
 你的輸出應體現相同的設計語言（為本產品量身定製，不要複製結構）：
 
@@ -3062,6 +3162,7 @@ ${sections.join('\n\n')}
 ${getMoodCodeFragment(productContext.moodId)}
 \`\`\`
 `
+        : ''))
     : ''
 
   // ── buildUserMsg：userMessage 工廠，供單次和分批生成共用 ──
@@ -3268,6 +3369,11 @@ ${isLaterBatch
   const generatedPages = syntaxFixed.filter(f => rawPagePaths.has(f.path))
   const generatedComponents = syntaxFixed.filter(f => !rawPagePaths.has(f.path))
 
+  // post-processing 心跳：streaming 結束後仍需刷新 Redis 活動標記，避免被 flowstate-recovery 誤判超時
+  if (onPartialCode) {
+    onPartialCode({ pages: generatedPages, components: generatedComponents, styles: styles || '' })
+  }
+
   // ── Layer 1 防禦：驗證組件引用完整性 + LLM 自修復 ──
   const finalPages = generatedPages
   let finalComponents = generatedComponents
@@ -3280,6 +3386,11 @@ ${isLaterBatch
     const repairedComponents = await repairMissingComponents(
       missingRefs, generatedPages, generatedComponents, trackingContext
     )
+
+    // 修復後刷新心跳
+    if (onPartialCode) {
+      onPartialCode({ pages: generatedPages, components: [...generatedComponents, ...repairedComponents], styles: styles || '' })
+    }
 
     if (repairedComponents.length > 0) {
       logger.info({ count: repairedComponents.length, paths: repairedComponents.map(c => c.path) }, '已修復缺失組件')

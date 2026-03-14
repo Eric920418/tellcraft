@@ -371,6 +371,16 @@ export function selectTechniques(
 }
 
 /**
+ * 快速模式：精簡版技法格式化（只列 name + codeHint，~50 tokens/個）
+ */
+export function formatTechniquesForPromptFast(techniques: DesignTechnique[]): string {
+  if (techniques.length === 0) return ''
+  const lines = techniques.map(t => `- **${t.name}**：\`${t.codeHint}\``)
+  return `## 視覺技法（至少使用 1 個，讓設計有辨識度）
+${lines.join('\n')}`
+}
+
+/**
  * 格式化技法為 prompt 注入段落
  */
 export function formatTechniquesForPrompt(techniques: DesignTechnique[]): string {

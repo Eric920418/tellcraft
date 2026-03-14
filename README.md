@@ -844,6 +844,22 @@ psql "$DATABASE_URL" -f tellcraft-backend/migrations/xxx.sql
 3. **Zod API 驗證**（`middleware/validate.ts` + `schemas/`）：`validateBody(schema)` 中間件工廠，高風險路由全覆蓋 — conversation（sendMessage/reply）、session（initialize）、operations（4 端點）、bdd（6 端點）、project（create/template-overrides），移除 ~100 行手動 `if (!req.body.xxx)` 驗證
 4. **BullMQ DLQ**（`services/job-failure-handler.ts` + `migrations/013`）：`job_failures` 表持久化最終失敗、Socket.io 推送用戶錯誤消息+重試按鈕、FATAL log 觸發告警、`removeOnFail.age` 24h→7d
 
+### Fast Mode 設計創意提升（2026-03-14）
+
+回填快速模式被砍掉的視覺錨點，讓生成結果從「能用」到「有辨識度」。淨 token 增量 ≤ 200：
+
+- **精簡版 Techniques**：`formatTechniquesForPromptFast()` 只列 name + codeHint（一行），2 個技法 ~100 tokens（vs 完整版 3 個 ~400 tokens）
+- **精簡版 Mood Code**：`getMoodCodeFragmentCompact()` 每個 mood 3 行核心 className 示範 ~40 tokens（vs 完整版 ~200 tokens），8 個 mood 全覆蓋
+- **精選 Pattern**：快速模式從列出所有 pattern 名稱改為 `selectCompositionPatterns()` 精選 1 個 + skeleton 第一行 ~80 tokens
+- **Temperature**：確認 `productContext.moodId` 在快速模式已正確傳遞，creative+mood 的 0.5 temperature 已生效
+
+### Fast Mode Structure Prompt 瘦身（2026-03-14）
+
+快速模式 `generateStructure()` system prompt 去重 + 場景感知，省 ~600-800 tokens（website 場景），不增加 LLM 調用：
+
+- **`buildDesignSystemPromptFast()`**：移除和 CSS Variables 重複的顏色列表、typography scale JSON、間距 scale，精簡 shadows/gradients。CSS Variables 作為唯一顏色源
+- **互動規則按 layoutMode 分支**：`layoutMode === 'website'` 使用 6 行 website 互動規則（CTA hover/表單 toast/FAQ 手風琴等），取代 28 行 CRUD 規則（create→Modal/delete→AlertDialog 等）。`layoutMode === 'app'` 和 normal UIUX 流程保留完整 CRUD 規則不變
+
 ### UIRequirementsSpec 結構化豐富 + actionsYml 注入（2026-03-13）
 
 兩階段改進 BDD→UI 翻譯管線，讓 Sonnet 的 Structure 生成看到精確的欄位型別和驗證規則：

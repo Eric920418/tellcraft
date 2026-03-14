@@ -17,7 +17,7 @@ import { getCreditLimit } from '../config/plans'
 import { createLogger } from '../lib/logger'
 
 const logger = createLogger('orchestrator-utils')
-const FLOW_ACTIVITY_TTL_SECONDS = 60
+const FLOW_ACTIVITY_TTL_SECONDS = 180 // 3 分鐘 — 需覆蓋 post-processing LLM 呼叫（fix_syntax 60-70s + fix_truncated 50-60s）
 const FLOW_ACTIVITY_PING_INTERVAL_MS = 15_000
 
 function getFlowActivityKey(conversationId: string): string {
