@@ -727,17 +727,23 @@ function generateTestServerCode(
       )
       if (!hasFile) continue
 
+      // snake_case → camelCase（與 LLM 生成的 export 名稱一致）
+      const fnName = action.name
+        .split(/[_\s-]+/)
+        .map((w: string, i: number) => i === 0 ? w.toLowerCase() : w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())
+        .join('')
+
       const isQuery = action.rules?.some(r => r.type === '後置（回應）') && !action.rules?.some(r => r.type === '後置（狀態）')
       const method = (action.method || (isQuery ? 'GET' : 'POST')).toUpperCase()
       const apiPath = action.path || `/api/${action.name}`
       const statusCode = method === 'POST' ? 201 : 200
 
-      actionImports.push(`import { ${action.name} } from './lib/actions/${kebabName}'`)
+      actionImports.push(`import { ${fnName} } from './lib/actions/${kebabName}'`)
 
       if (method === 'GET') {
         actionRoutes.push(`app.get('${apiPath}', async (req, res) => {
   try {
-    const result = await ${action.name}(req.query as any)
+    const result = await ${fnName}(req.query as any)
     res.status(200).json(result)
   } catch (e: any) {
     res.status(400).json({ error: e?.message || 'Unknown error' })
@@ -746,7 +752,7 @@ function generateTestServerCode(
       } else {
         actionRoutes.push(`app.${method.toLowerCase()}('${apiPath}', async (req, res) => {
   try {
-    const result = await ${action.name}(req.body)
+    const result = await ${fnName}(req.body)
     res.status(${statusCode}).json(result)
   } catch (e: any) {
     res.status(400).json({ error: e?.message || 'Unknown error' })

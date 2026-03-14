@@ -247,7 +247,9 @@ ${schemaSql}
 ${entityMapping}
 ${typesText}
 
-請根據以上定義實作 ${action.name} 函數。檔名：lib/actions/${toKebabCase(action.name)}.ts`
+請根據以上定義實作函數。
+函數名必須使用 camelCase：export async function ${toCamelCase(action.name)}(input: ${toPascalCase(action.name)}Input)
+檔名：lib/actions/${toKebabCase(action.name)}.ts`
 }
 
 export async function generateActionFunction(
@@ -287,21 +289,22 @@ export function generateServerActions(
 
   for (const [domain, domainActions] of Object.entries(groups)) {
     const imports = domainActions
-      .map(a => `import { ${a.name} } from '@/lib/actions/${toKebabCase(a.name)}'`)
+      .map(a => `import { ${toCamelCase(a.name)} } from '@/lib/actions/${toKebabCase(a.name)}'`)
       .join('\n')
 
     const exports = domainActions
       .map(a => {
-        const inputType = `${capitalize(a.name)}Input`
-        return `export async function ${a.name}Action(input: ${inputType}) {
-  return ${a.name}(input)
+        const fnName = toCamelCase(a.name)
+        const inputType = `${toPascalCase(a.name)}Input`
+        return `export async function ${fnName}Action(input: ${inputType}) {
+  return ${fnName}(input)
 }`
       })
       .join('\n\n')
 
     // 從對應 lib/actions 匯入型別
     const typeImports = domainActions
-      .map(a => `import type { ${capitalize(a.name)}Input } from '@/lib/actions/${toKebabCase(a.name)}'`)
+      .map(a => `import type { ${toPascalCase(a.name)}Input } from '@/lib/actions/${toKebabCase(a.name)}'`)
       .join('\n')
 
     const content = `'use server'
@@ -363,7 +366,8 @@ export function generateApiRoutes(
     }
 
     const importPath = `@/lib/actions/${toKebabCase(action.name)}`
-    const inputType = `${capitalize(action.name)}Input`
+    const fnName = toCamelCase(action.name)
+    const inputType = `${toPascalCase(action.name)}Input`
 
     // Derive the route file path from the API path
     // /api/orders/:id → app/api/orders/[id]/route.ts
@@ -374,12 +378,12 @@ export function generateApiRoutes(
     let content: string
     if (meta.method === 'GET') {
       content = `import { NextRequest, NextResponse } from 'next/server'
-import { ${action.name} } from '${importPath}'
+import { ${fnName} } from '${importPath}'
 
 export async function GET(req: NextRequest) {
   try {
     const params = Object.fromEntries(req.nextUrl.searchParams.entries())
-    const result = await ${action.name}(params as unknown as Parameters<typeof ${action.name}>[0])
+    const result = await ${fnName}(params as unknown as Parameters<typeof ${fnName}>[0])
     return NextResponse.json(result, { status: 200 })
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : 'Unknown error'
@@ -391,13 +395,13 @@ export async function GET(req: NextRequest) {
       // POST/PUT/DELETE/PATCH
       const statusCode = meta.method === 'POST' ? 201 : 200
       content = `import { NextRequest, NextResponse } from 'next/server'
-import { ${action.name} } from '${importPath}'
+import { ${fnName} } from '${importPath}'
 import type { ${inputType} } from '${importPath}'
 
 export async function ${meta.method}(req: NextRequest) {
   try {
     const body: ${inputType} = await req.json()
-    const result = await ${action.name}(body)
+    const result = await ${fnName}(body)
     return NextResponse.json(result, { status: ${statusCode} })
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : 'Unknown error'
@@ -614,8 +618,20 @@ function toKebabCase(str: string): string {
     .toLowerCase()
 }
 
-function capitalize(str: string): string {
-  return str.charAt(0).toUpperCase() + str.slice(1)
+/** snake_case/kebab-case → camelCase: manage_auth → manageAuth */
+function toCamelCase(str: string): string {
+  return str
+    .split(/[_\s-]+/)
+    .map((word, i) => i === 0 ? word.toLowerCase() : word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
+    .join('')
+}
+
+/** snake_case/kebab-case → PascalCase: manage_auth → ManageAuth */
+function toPascalCase(str: string): string {
+  return str
+    .split(/[_\s-]+/)
+    .map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
+    .join('')
 }
 
 /**
