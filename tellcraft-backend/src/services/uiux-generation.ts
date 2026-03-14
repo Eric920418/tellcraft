@@ -3766,7 +3766,8 @@ ${existingCodeStr}
     {
       maxTokens: incrementalOptions?.maxTokens || 32768,
       temperature: 0.2,
-      maxContinuations: incrementalOptions?.maxContinuations ?? 2,
+      maxContinuations: incrementalOptions?.maxContinuations
+        ?? (generationProfile === 'fast' ? 1 : 2),
       promptLabel: 'uiux-rwd',
       contextSizeHint: generationProfile,
     },

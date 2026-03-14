@@ -681,31 +681,45 @@ sdd.os/                   # SDD 上游 Reference Repo（git subtree，只讀參�
 
 **核心目標**：LLM 根據 BDD 產出生成後端代碼，SpecFormula 自動跑 Feature Files 驗證，紅燈修、綠燈過。
 
-**待決定的架構問題**：
-| 問題 | 選項 | 影響 |
-|------|------|------|
-| 生成什麼形式的後端？ | Supabase Edge Functions / Express / Next.js API Routes | 決定代碼模板、部署方式 |
-| 後端跑在哪？ | Supabase Edge Functions / 客戶 VPS / Vercel Serverless | 決定 infra 編排 |
-| SpecFormula 測試環境 | Tellcraft VPS 上跑 / 客戶 Supabase 直連 | 決定 DB 連線、API 路由 |
+**已決定的架構：「雙面生成」（Dual Generation）**
+
+核心矛盾：SpecFormula 透過 HTTP 測試（需穩定 URL），但 Server Actions 是 RPC 調用（無穩定 URL）。解法是**同時生成 API Routes + Server Actions，共享同一份純邏輯函數**：
+
+```
+Coder Skill 三層生成：
+├── lib/db.ts                          ← Neon 連接（固定模板，零 LLM）
+├── lib/actions/<action>.ts            ← 純邏輯函數（LLM 生成，核心）
+├── app/api/<resource>/route.ts        ← API Routes（機械映射，零 LLM）→ SpecFormula 測試
+├── app/actions/<domain>.ts            ← Server Actions（機械映射，零 LLM）→ 前端調用
+└── 改寫 UIUX 組件                      ← useState mock → Server Action（LLM 生成）
+
+SpecFormula:  API Route → lib/actions/create-product.ts → Neon DB
+用戶瀏覽器:   Server Action → lib/actions/create-product.ts → Neon DB
+                              ↑ 同一份邏輯，兩個入口
+```
+
+**不需要 Mock Server**：Mock Server 多一個 infra 且 Server Actions 場景下無意義。雙面生成用 API Routes 給 SpecFormula 測試、Server Actions 給前端，共享邏輯層即可。
 
 **需要建的東西**：
 | 項目 | 說明 | 預估 |
 |------|------|------|
-| Coder Skill 定義 | `coder-skill/instructions/`，LLM prompt 規範（讀 API Spec + Schema → 生成代碼） | 中 |
-| 代碼生成 Service | `services/coder-generation.ts`，LLM 生成 + 代碼解析 + 檔案拆分 | 高 |
-| SpecFormula 整合 | 生成代碼 → 啟動 app → SpecFormula 跑 Feature Files → 收集結果 | 高 |
-| 紅綠燈循環 | 測試失敗 → 錯誤訊息回饋 LLM → 重新生成 → 再跑（最多 N 輪） | 中 |
-| Phase 狀態機 | `coder_generating` / `coder_testing` / `coder_complete` + FlowState 欄位 | 低 |
-| 後端部署 | Supabase Edge Functions deploy / VPS deploy | 中 |
-| 前後端串接 | UIUX 生成的前端代碼注入 Supabase client / API base URL | 低 |
+| Coder Skill 定義 | `coder-skill/instructions/`，LLM prompt 規範（讀 actionsYml + Schema → 生成純邏輯函數） | 中 |
+| 純邏輯函數生成 | `services/coder-generation.ts`，每個 ActionEntry → `lib/actions/<action>.ts`（LLM，核心） | 高 |
+| API Routes 機械映射 | 從 OpenAPI spec 的 path+method → `app/api/*/route.ts`（零 LLM，模板套用） | 低 |
+| Server Actions 機械映射 | 從 actionsYml → `app/actions/*.ts`（零 LLM，模板套用） | 低 |
+| DB 連接模板 | `lib/db.ts`（零 LLM，固定 `@neondatabase/serverless` 模板） | 低 |
+| 前端改寫 | UIUX 組件 `useState(mock)` → Server Action 調用（LLM，保留 UI 不變） | 高 |
+| SpecFormula 紅綠燈循環 | 生成代碼 → 啟動 app → SpecFormula 跑 Feature Files → 紅燈回饋 LLM → 再跑（最多 3 輪） | 高 |
+| Phase 狀態機 | `coder_generating` / `coder_testing` / `coder_complete`（四處同步） | 低 |
+| Deployer 微調 | 合併 `uiux`+`coder` skill_source、`BASE_DEPS` 加 `@neondatabase/serverless` | 低 |
 
-### P1：SpecFormula 與真實 API 串接
+### P1：SpecFormula 與 Coder Skill 生成的 API Routes 串接
 
-目前 SpecFormula E2E 測的是假的 test-app（`cucumber/support/test-app.ts` 的 notes API）。需要：
+目前 SpecFormula E2E 測的是假的 test-app（`cucumber/support/test-app.ts` 的 notes API）。Coder Skill 完成後需要：
 
-- [ ] `SupertestAdapter` 連接 Coder Skill 生成的真實 Express app（或 HTTP adapter 連 Supabase Edge Functions）
+- [ ] `SupertestAdapter` 連接 Coder Skill 生成的 Next.js API Routes（同一個 Next.js app，`app/api/*/route.ts`）
 - [ ] `cucumber/cucumber.js` 的 `spec` profile 對接客戶的 Feature Files（路徑：`spec/features/**/*.feature`）
-- [ ] 客戶專案的 Supabase DB 連線注入（`TEST_DATABASE_URL` 動態設定）
+- [ ] Neon DB 連線注入（`TEST_DATABASE_URL` = `projects.neon_connection_string`）
 - [ ] 測試結果結構化回饋（哪個 Feature/Scenario 失敗、期望值 vs 實際值）
 
 ### P2：BDD 格式遷移（ISA SpecFormula 標準）
@@ -720,19 +734,24 @@ BDD Skill 的 Feature File 輸出格式需從 Tellcraft 舊格式升級到 SpecF
 - [ ] `tellcraft-backend/src/services/formulation.ts` — LLM prompt 全面更新（至少 3 處）
 - [ ] `tellcraft-backend/src/services/isa-config.ts` — `buildInstructions()` 輸出格式改為 SpecFormula 標準
 
-### P3：後端部署 Pipeline
+### P3：部署 Pipeline 擴展
 
-客戶生成的後端代碼需要部署到某個地方：
+後端代碼**部署在同一個 Vercel Next.js app**（不需要額外 infra）：
+- API Routes（`app/api/*`）和 Server Actions 都是 Next.js 內建，隨前端一起部署
+- `@neondatabase/serverless` 專為 Vercel edge/serverless 設計，冷啟動 <100ms
+- `DATABASE_URL` 由 Neon Provision Skill 自動注入 Vercel env vars
 
-- [ ] Supabase Edge Functions 部署（Deno runtime，最簡單的選項）
-- [ ] 或：獨立 VPS 部署（Express + PM2，類似 Tellcraft 自身後端）
-- [ ] 或：Vercel Serverless Functions（有超時限制，但免 infra）
-- [ ] Deployer Skill 擴展：支援後端代碼部署（不只是前端 Vercel）
+待辦：
+- [ ] `deployer.ts` `prepareProjectFiles` 合併 `uiux` + `coder` 兩個 skill_source（coder 優先覆蓋同路徑）
+- [ ] `deployer.ts` `BASE_DEPS` 新增 `@neondatabase/serverless`
+- [ ] `project_files.skill_source` 新增 `'coder'` 值
+- [ ] 部署後 E2E 連通驗證（CRUD 操作 → Neon DB → 回應正確）
 
 ### P4：其他待辦
 
 - [ ] i18n Phase 3：VPS 後端錯誤訊息 error code 化 + LLM prompts i18n + Remotion 動畫標籤
 - [ ] `sdd.os/` 上游同步機制（SpecFormula Java 更新時，同步到 TS 版）
+- [ ] ISA config 統一為 `api_call`（取代 `cucumberjs_server_action`，與 SpecFormula HTTP 測試對齊）
 
 ## 部署
 

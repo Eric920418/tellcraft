@@ -128,6 +128,12 @@ export default function ChatPreviewPanel({
 
   // stablePreviewData is passed as prop from ChatSection
 
+  // ── 所有 hooks 必須在 early return 之前 ──
+  const codeVersion = useMemo(() => {
+    if (!stablePreviewData) return ''
+    return (stablePreviewData.pages[0]?.content?.slice(0, 100) ?? '') + String(stablePreviewData.components.length)
+  }, [stablePreviewData])
+
   // ── BDD Q&A 蓋房子場景 ──
   // 用 messages.some() 判斷是否在 BDD 階段，避免用戶回答後 latestMsg 沒 stage 導致動畫消失
   const BDD_STAGES = new Set([
@@ -189,11 +195,6 @@ export default function ChatPreviewPanel({
       />
     )
   }
-
-  const codeVersion = useMemo(() => {
-    if (!stablePreviewData) return ''
-    return (stablePreviewData.pages[0]?.content?.slice(0, 100) ?? '') + String(stablePreviewData.components.length)
-  }, [stablePreviewData])
 
   // 使用穩定的預覽數據（避免每次 render 都搜索 messages + 建立新陣列）
   if (stablePreviewData) {
