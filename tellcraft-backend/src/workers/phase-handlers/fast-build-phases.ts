@@ -22,7 +22,7 @@ import {
   mergePages,
 } from '../../services/fast-build-generation'
 import { buildUISpecSummary } from '../../services/bdd-to-ui-spec'
-import { sendMessage, saveFlowState, getFlowState, deleteFlowState, makeStreamingCallback, generatedCodeToFileRows, deductCredits } from '../orchestrator-utils'
+import { sendMessage, saveFlowState, getFlowState, deleteFlowState, makeStreamingCallback, generatedCodeToFileRows, deductCredits, touchFlowActivity } from '../orchestrator-utils'
 import { CREDIT_COSTS } from '../../config/plans'
 import { recommendMoods } from '../../services/design-moods'
 import { analyzeUploadedImage, type ReferenceAnalysis } from '../../services/reference-analyzer'
@@ -585,7 +585,8 @@ export async function runFastBuildPipeline(params: {
       generationProfile: 'fast',
     },
     { userId, conversationId, purpose: isLaterBatch ? 'fast-build-structure-batch' : 'fast-build-structure' },
-    structureStreamingCallback
+    structureStreamingCallback,
+    () => void touchFlowActivity(redis, conversationId),
   )
 
   if (!structureResult.success) {

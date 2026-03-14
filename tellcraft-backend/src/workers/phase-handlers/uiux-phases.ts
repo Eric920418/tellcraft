@@ -23,7 +23,7 @@ import { recommendMoods, getMoodSummary } from '../../services/design-moods'
 import { executeIteration, executeUndoIteration } from '../../services/iteration-skill'
 import { semanticGateway } from '../../services/semantic-gateway'
 import { detectFastModeIntent, getFaqReply, answerWithSonnet } from '../../services/customer-service'
-import { sendMessage, saveFlowState, getFlowState, deleteFlowState, makeStreamingCallback, generatedCodeToFileRows, deductCredits, hasRecentFlowActivity } from '../orchestrator-utils'
+import { sendMessage, saveFlowState, getFlowState, deleteFlowState, makeStreamingCallback, generatedCodeToFileRows, deductCredits, hasRecentFlowActivity, touchFlowActivity } from '../orchestrator-utils'
 import { CREDIT_COSTS } from '../../config/plans'
 import {
   hasDeployIntent, hasRejectDeployIntent, hasUndoIntent,
@@ -1042,7 +1042,8 @@ export async function executeFullCodePipeline(
         generationProfile: 'balanced',
       },
       { userId: state.userId, conversationId, purpose: 'uiux_structure' },
-      makeStreamingCallback(conversationId, io, redis, 'structure', twConfig)
+      makeStreamingCallback(conversationId, io, redis, 'structure', twConfig),
+      () => void touchFlowActivity(redis, conversationId),
     )
 
     if (!structureResult.success) {
@@ -1317,7 +1318,8 @@ async function executeCodePhaseStructure(
       generationProfile: 'balanced',
     },
     { userId: state.userId, conversationId, purpose: 'uiux_structure' },
-    makeStreamingCallback(conversationId, io, redis, 'structure', twCfg)
+    makeStreamingCallback(conversationId, io, redis, 'structure', twCfg),
+    () => void touchFlowActivity(redis, conversationId),
   )
 
   if (!structureResult.success) {

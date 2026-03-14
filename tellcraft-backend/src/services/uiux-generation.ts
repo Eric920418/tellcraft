@@ -1752,7 +1752,8 @@ async function repairMissingComponents(
   missingRefs: MissingReference[],
   pages: GeneratedComponent[],
   components: GeneratedComponent[],
-  trackingContext?: LlmTrackingContext
+  trackingContext?: LlmTrackingContext,
+  heartbeatFn?: () => void,
 ): Promise<GeneratedComponent[]> {
   if (missingRefs.length === 0) return []
 
@@ -1826,7 +1827,7 @@ ${contextLines.join('\n')}
   const response = await callClaude(
     '你是 Next.js 組件生成專家，專門修復缺失的組件引用。',
     [{ role: 'user', content: prompt }],
-    { maxTokens: 8192, temperature: 0.1, maxContinuations: 0 }, // 禁止自動續寫：修復少量缺失組件不應需要 >8192 tokens
+    { maxTokens: 8192, temperature: 0.1, maxContinuations: 0, heartbeatFn }, // 禁止自動續寫：修復少量缺失組件不應需要 >8192 tokens
     { ...trackingContext, purpose: 'repair_missing_components' }
   )
 
@@ -2203,7 +2204,8 @@ function isTruncatedFile(content: string, errors: string[]): boolean {
 
 async function checkAndFixSyntaxErrors(
   files: GeneratedComponent[],
-  trackingContext?: LlmTrackingContext
+  trackingContext?: LlmTrackingContext,
+  heartbeatFn?: () => void,
 ): Promise<GeneratedComponent[]> {
   // 先修復 motion/react 誤導入 React hooks（必須在 repairMissingReactImports 之前）
   const withMotionFixed = files.map(f => {
@@ -2280,7 +2282,7 @@ async function checkAndFixSyntaxErrors(
     const response = await callClaude(
       systemPrompt,
       [{ role: 'user', content: `Fix these syntax errors:\n\n${errorSummary}\n\nFiles:\n\n${brokenCode}` }],
-      { maxTokens: 32768, temperature: 0 },
+      { maxTokens: 32768, temperature: 0, heartbeatFn },
       { ...trackingContext, purpose: 'fix_syntax_errors' }
     )
     if (response.success && response.content) {
@@ -2320,7 +2322,7 @@ async function checkAndFixSyntaxErrors(
     const response = await callClaude(
       systemPrompt,
       [{ role: 'user', content: `Truncated files to regenerate:\n\n${brokenCode}${contextSection}` }],
-      { maxTokens: 16384, temperature: 0 },
+      { maxTokens: 16384, temperature: 0, heartbeatFn },
       { ...trackingContext, purpose: 'fix_truncated_file' }
     )
     if (response.success && response.content) {
@@ -2875,7 +2877,8 @@ export async function generateStructure(
     generationProfile?: GenerationProfile
   },
   trackingContext?: LlmTrackingContext,
-  onPartialCode?: PartialCodeCallback
+  onPartialCode?: PartialCodeCallback,
+  heartbeatFn?: () => void,  // 長時間 post-processing 期間刷新 Redis 活動心跳
 ): Promise<GenerationResult> {
   const tier = designTier || 'functional'
   const generationProfile = productContext?.generationProfile || 'balanced'
@@ -3364,7 +3367,7 @@ ${isLaterBatch
   }
 
   // ── Layer 0 防禦：TSX 語法檢查 + LLM 自動修復 ──
-  const syntaxFixed = await checkAndFixSyntaxErrors([...allRawPages, ...allRawComponents], trackingContext)
+  const syntaxFixed = await checkAndFixSyntaxErrors([...allRawPages, ...allRawComponents], trackingContext, heartbeatFn)
   const rawPagePaths = new Set(allRawPages.map(p => p.path))
   const generatedPages = syntaxFixed.filter(f => rawPagePaths.has(f.path))
   const generatedComponents = syntaxFixed.filter(f => !rawPagePaths.has(f.path))
@@ -3384,7 +3387,7 @@ ${isLaterBatch
 
     // LLM 修復（最多 1 次）
     const repairedComponents = await repairMissingComponents(
-      missingRefs, generatedPages, generatedComponents, trackingContext
+      missingRefs, generatedPages, generatedComponents, trackingContext, heartbeatFn
     )
 
     // 修復後刷新心跳
