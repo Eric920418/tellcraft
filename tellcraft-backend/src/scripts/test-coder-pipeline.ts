@@ -109,7 +109,7 @@ async function runStageA(bdd: BddSessionRow) {
       schemaSql: bdd.schema_sql_content!,
       entityMapping: bdd.entity_mapping_content || '',
       existingUiuxCode: { pages: [], components: [], styles: '' }, // 測試不含 UIUX
-      trackingContext: { userId: '00000000-0000-0000-0000-000000000000', conversationId: '00000000-0000-0000-0000-000000000000' },
+      trackingContext: { userId: undefined, conversationId: undefined },
     },
     {
       onProgress: async (step, percent) => {
@@ -206,7 +206,7 @@ async function runStageB(
     entityMapping: bdd.entity_mapping_content || '',
     neonConnectionString,
     maxAttempts: 3,
-    trackingContext: { userId: '00000000-0000-0000-0000-000000000000', conversationId: '00000000-0000-0000-0000-000000000000' },
+    trackingContext: { userId: undefined, conversationId: undefined },
     onProgress: async (step, percent) => {
       process.stdout.write(`\r  [${percent}%] ${step}                    `)
     },

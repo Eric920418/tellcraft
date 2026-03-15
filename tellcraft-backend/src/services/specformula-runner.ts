@@ -86,6 +86,14 @@ interface ParsedFeature {
 }
 
 async function parseFeatureFile(content: string): Promise<ParsedFeature> {
+  // Node 18 沒有全域 crypto（需要 19+ 或 --experimental-global-webcrypto）
+  // @cucumber/messages IdGenerator.uuid() 內部呼叫 crypto.randomUUID()
+  if (!globalThis.crypto) {
+    const { webcrypto } = await import('node:crypto')
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    globalThis.crypto = webcrypto as any
+  }
+
   const { Parser, AstBuilder, GherkinClassicTokenMatcher } = await import('@cucumber/gherkin')
   const { IdGenerator } = await import('@cucumber/messages')
 
