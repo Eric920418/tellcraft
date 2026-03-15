@@ -7,6 +7,7 @@ import * as yaml from 'js-yaml'
 import * as fs from 'fs'
 import * as path from 'path'
 import * as os from 'os'
+import { createHash } from 'crypto'
 import { ChildProcess, spawn } from 'child_process'
 import { Pool } from 'pg'
 import { createLogger } from '../lib/logger'
@@ -346,6 +347,10 @@ function fillMissingNotNullColumns(
   for (const col of pair.table.columns) {
     if (!col.notNull || col.defaultValue || col.primaryKey || col.autoIncrement) continue
     if (existingCols.has(col.name.toLowerCase())) continue
+    // 跳過 FK 欄位 — 填 placeholder UUID 會觸發 FK constraint violation
+    // foreignKey 來自 CONSTRAINT 行；name 以 _id 結尾 + UUID 型別 → 幾乎肯定是 FK
+    if (col.foreignKey) continue
+    if (col.name.toLowerCase().endsWith('_id') && col.type.toUpperCase().includes('UUID')) continue
 
     // 根據欄位名稱 + 型別推導佔位值
     const placeholder = inferPlaceholder(col.name, col.type)
@@ -372,6 +377,73 @@ function inferPlaceholder(name: string, type: string): string {
   return 'placeholder'
 }
 
+// ============================================================
+// UUID 型別修正
+// ============================================================
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
+function isValidUuid(value: string): boolean {
+  return UUID_RE.test(value.trim())
+}
+
+/**
+ * 從任意字串生成確定性 UUID（MD5 hash → UUID v4 格式）。
+ * 同一字串永遠產生相同 UUID，確保 PK/FK 引用一致。
+ */
+function deterministicUuid(value: string): string {
+  const hex = createHash('md5').update(value).digest('hex')
+  return [
+    hex.slice(0, 8),
+    hex.slice(8, 12),
+    '4' + hex.slice(13, 16),
+    ((parseInt(hex.slice(16, 17), 16) & 0x3) | 0x8).toString(16) + hex.slice(17, 20),
+    hex.slice(20, 32),
+  ].join('-')
+}
+
+/**
+ * entity_setup / entity_validate 的 DataTable 中，
+ * UUID 型別欄位若值不是合法 UUID（如 'EP-001'），自動轉換為確定性 UUID。
+ * 保持 PK/FK 參照一致性（同一字串 → 同一 UUID）。
+ */
+function fixNonUuidValues(
+  dataTable: { headers: string[]; rows: Record<string, string>[] },
+  entityName: string,
+  schemas: DatabaseSchema[]
+): { headers: string[]; rows: Record<string, string>[] } {
+  const pair = DatabaseSchema.findSchemaAndTable(schemas, entityName)
+  if (!pair) return dataTable
+
+  // 收集所有 UUID 型別的欄位名
+  const uuidColumns = new Set(
+    pair.table.columns
+      .filter(c => c.type.toUpperCase().includes('UUID'))
+      .map(c => c.name.toLowerCase())
+  )
+  if (uuidColumns.size === 0) return dataTable
+
+  for (const row of dataTable.rows) {
+    for (const header of dataTable.headers) {
+      // 跳過 VAR-System headers（>, <, $）
+      const trimmedH = header.trim()
+      if (trimmedH.startsWith('>') || trimmedH.startsWith('<') || trimmedH.startsWith('$')) continue
+
+      const snake = toSnakeCase(trimmedH).toLowerCase()
+      if (!uuidColumns.has(snake) && !uuidColumns.has(trimmedH.toLowerCase())) continue
+
+      const value = row[header]
+      // 跳過空值、VAR 引用（$、<）、已合法的 UUID
+      if (!value || value.startsWith('$') || value.startsWith('<') || isValidUuid(value)) continue
+
+      // 非 UUID 值 → 確定性轉換
+      row[header] = deterministicUuid(value)
+    }
+  }
+
+  return dataTable
+}
+
 /**
  * Feature 常用 {entityName}Id（如 episodeId）指代 entity 的 PK，
  * 但 DDL 的 PK 通常叫 id。此函數把找不到的 {entity}Id 映射為 id。
@@ -396,19 +468,21 @@ function resolveEntityIdHeaders(
 
   let changed = false
   const newHeaders = dataTable.headers.map(h => {
-    const clean = h.trim().replace(/^[><$]/, '').split('.').pop() || ''
-    const snake = toSnakeCase(clean).toLowerCase()
+    const trimmed = h.trim()
+    // 跳過 VAR-System headers（>, <, $）— 它們是上下文路徑，不是欄位名
+    // EntitySetup 已將 > 和 < headers 排除出 INSERT
+    if (trimmed.startsWith('>') || trimmed.startsWith('<') || trimmed.startsWith('$')) return h
+
+    const snake = toSnakeCase(trimmed).toLowerCase()
 
     // 已存在 → 不改
-    if (columnNames.has(snake) || columnNames.has(clean.toLowerCase())) return h
+    if (columnNames.has(snake) || columnNames.has(trimmed.toLowerCase())) return h
 
     // 檢查是否是 {entitySingular}_id 模式（自身 PK 引用）
     for (const s of singulars) {
       if (snake === s + '_id') {
         changed = true
-        return h.trim().startsWith('>') || h.trim().startsWith('<') || h.trim().startsWith('$')
-          ? h.trim()[0] + 'id'  // 保留 VAR 前綴
-          : 'id'
+        return 'id'
       }
     }
     return h
@@ -450,10 +524,11 @@ async function executeStep(
         const setupDt = fixDataTableBySchema(step.dataTable, captures.entity, schemas)
         const idFixedDt = resolveEntityIdHeaders(setupDt, captures.entity, schemas)
         const filledDt = fillMissingNotNullColumns(idFixedDt, captures.entity, schemas)
+        const uuidFixedDt = fixNonUuidValues(filledDt, captures.entity, schemas)
         await instructionSet.entitySetup.setup(
           captures.entity,
-          filledDt.headers,
-          filledDt.rows
+          uuidFixedDt.headers,
+          uuidFixedDt.rows
         )
         break
       }
@@ -513,19 +588,23 @@ async function executeStep(
         if (!step.dataTable) throw new Error('entity_validate 需要 DataTable')
         const validateDt = fixDataTableBySchema(step.dataTable, captures.entity, schemas)
         const validateIdDt = resolveEntityIdHeaders(validateDt, captures.entity, schemas)
+        const validateUuidDt = fixNonUuidValues(validateIdDt, captures.entity, schemas)
         await instructionSet.entityValidate.assertExists(
           captures.entity,
-          validateIdDt.headers,
-          validateIdDt.rows
+          validateUuidDt.headers,
+          validateUuidDt.rows
         )
         break
       }
 
       case 'entity_non_existence_validate': {
         if (!step.dataTable) throw new Error('entity_non_existence_validate 需要 DataTable')
+        const nonExDt = fixDataTableBySchema(step.dataTable, captures.entity, schemas)
+        const nonExIdDt = resolveEntityIdHeaders(nonExDt, captures.entity, schemas)
+        const nonExUuidDt = fixNonUuidValues(nonExIdDt, captures.entity, schemas)
         await instructionSet.entityNonExistenceValidate.assertNotExists(
           captures.entity,
-          step.dataTable.rows
+          nonExUuidDt.rows
         )
         break
       }
