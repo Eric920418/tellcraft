@@ -155,31 +155,24 @@ function extractScenario(gherkinScenario: any): ParsedScenario {
 
 /**
  * 偵測垂直 key-value DataTable 並轉置為水平格式。
- * 垂直格式：每行 = [欄位名, 值]，2 列 N 行
+ *
+ * LLM 生成的 Feature 一律使用垂直格式（每行 = [欄位名, 值]）：
  *   | email         | alice@example.com |
  *   | password_hash | hashed_value      |
- * 水平格式（標準）：第一行 = 欄位名，後續行 = 值
+ *
+ * ISA 標準期望水平格式（第一行 = 欄位名，後續行 = 值）：
  *   | email             | password_hash |
  *   | alice@example.com | hashed_value  |
+ *
+ * 策略：所有 2 欄 DataTable 一律轉置。
+ * 理由：水平 2 欄表格的「0 資料行」解讀毫無意義；而 LLM 生成的 Feature 全部使用垂直格式。
  */
 function maybeTransposeVerticalDataTable(
   raw: string[][]
 ): { headers: string[]; rows: Record<string, string>[] } | null {
-  if (raw[0].length !== 2 || raw.length < 2) return null
+  if (raw[0].length !== 2) return null
 
-  // 合法欄位名：字母/底線開頭 + 可選 VAR 前綴（>/$/<）+ 可含 dot（$Ctx.field）
-  const isIdentifier = (s: string) =>
-    /^[<>$]?[a-zA-Z_\u4e00-\u9fff][a-zA-Z0-9_.\u4e00-\u9fff]*$/.test(s.trim())
-
-  // 垂直格式條件：
-  // 1. 所有第一列 cell 都像欄位名（identifier）
-  // 2. 至少一個第二列 cell 不像欄位名（是實際值，如含 @、空格、://）
-  const allFirstColIdentifiers = raw.every(r => isIdentifier(r[0] || ''))
-  const someSecondColNotIdentifier = raw.some(r => !isIdentifier(r[1] || ''))
-
-  if (!allFirstColIdentifiers || !someSecondColNotIdentifier) return null
-
-  // 轉置：第一列 → headers，第二列 → 單筆資料
+  // 所有 2 欄 DataTable → 第一列當 headers，第二列當 values（單筆資料）
   const headers: string[] = []
   const row: Record<string, string> = {}
   for (const [key, value] of raw) {
