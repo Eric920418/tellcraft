@@ -152,6 +152,7 @@ export async function handleTextMessage(
   }
 
   // 4. 投入 BullMQ
+  const jobMessageId = crypto.randomUUID()
   await orchestratorQueue.add('process-message', {
     projectId,
     conversationId,
@@ -160,6 +161,7 @@ export async function handleTextMessage(
     mode: mode === 'fast' ? 'fast' : 'fine',
     messageSource: 'line',
   }, {
+    jobId: `line:${conversationId}:${jobMessageId}`,
     attempts: 3,
     backoff: { type: 'exponential', delay: 2000 },
   })
@@ -713,6 +715,7 @@ async function handleQuickReply(userId: string, value: string, _replyToken: stri
   }
 
   // 投入 BullMQ
+  const jobMessageId = crypto.randomUUID()
   await orchestratorQueue.add('process-message', {
     projectId,
     conversationId,
@@ -721,6 +724,7 @@ async function handleQuickReply(userId: string, value: string, _replyToken: stri
     mode: mode === 'fast' ? 'fast' : 'fine',
     messageSource: 'line',
   }, {
+    jobId: `line:${conversationId}:${jobMessageId}`,
     attempts: 3,
     backoff: { type: 'exponential', delay: 2000 },
   })

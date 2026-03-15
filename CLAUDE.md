@@ -16,12 +16,16 @@ pnpm install              # 安裝依賴
 pnpm dev                  # 啟動 Next.js（http://localhost:3000）
 pnpm lint                 # ESLint
 pnpm typecheck            # TypeScript 型別檢查
+pnpm test                 # Vitest（watch mode）
+pnpm test:ci              # 前端+後端 Vitest 全跑（CI 用）
 
 # VPS 後端開發（tellcraft-backend/）
 cd tellcraft-backend
 pnpm install && pnpm dev  # 啟動開發伺服器（http://localhost:3100，tsx watch 熱更新）
 pnpm build                # TypeScript 編譯（tsc → dist/）
 pnpm typecheck            # 型別檢查
+pnpm test                 # 後端 Vitest（watch mode）
+pnpm test:ci              # 後端 Vitest（CI 用）
 
 # BDD 規格驗證（修改 Feature Files 後必須依序執行）
 npx ts-node bdd-spec/scripts/lint-gherkin-format.ts spec/features/   # ISA Format Lint
@@ -107,6 +111,10 @@ pm2 describe tellcraft-backend            # 詳細資訊（記憶體/重啟次�
 | **Anthropic** | `lib/anthropic.ts` | 統一 Client 單例 + MODEL 常數（SONNET/HAIKU） |
 | **Validate** | `middleware/validate.ts` | Zod 請求驗證中間件（validateBody/Query/Params） |
 | **Schemas** | `schemas/*.ts` | API 路由 Zod schema 定義（conversation/session/operations/bdd/project/domain） |
+| **Telegram Notify** | `services/telegram-notify.ts` | Telegram 里程碑推播通知（stage 白名單，非 Bot 對話才推） |
+| **Telegram Bot Handler** | `services/telegram-bot-handler.ts` | Telegram Bot 業務邏輯（/start/文字/Callback Query） |
+| **Telegram Full Push** | `services/telegram-full-push.ts` | Telegram Bot 全量翻譯推送 |
+| **SpecFormula** | `lib/specformula/`（27 檔 ~3800 行） | SDD 核心驗證引擎（TS 移植自 Java）：讀 Feature Files → 打 HTTP API → 查 DB 驗證狀態。Coder Stage B 用此自動驗證生成的 API Routes |
 | **Job Failure** | `services/job-failure-handler.ts` | BullMQ 最終失敗持久化 + 用戶通知 |
 
 **前端（`app/`）— 大檔案優先閱讀**
@@ -312,7 +320,20 @@ Layer 5: sanitizeCodeForDeploy 修復 7 — useSearchParams Suspense boundary �
 
 ### 測試
 
-目前**無自動化測試框架**（前端 `test` script 是佔位符）。品質保障依賴：
+後端使用 **Vitest**，測試檔案在 `tellcraft-backend/src/__tests__/`（19 個檔案）：
+- 核心服務測試：`intent-helpers.test.ts`（107 條）、`semantic-gateway.test.ts`（56 條）、`deployer-sanitize.test.ts`（41 條）、`log-parser.test.ts`（33 條）
+- 設計系統測試：`design-moods.test.ts`、`composition-patterns.test.ts`、`design-system-v2.test.ts`、`prompt-architecture.test.ts`、`uiux-optimization.test.ts`
+- SpecFormula 測試：`specformula/naming-converter.test.ts`、`type-converter.test.ts`、`isa-spec-reader.test.ts`、`entity-ddl-reader.test.ts` 等（8 檔）
+- 快速模式測試：`merge-pages.test.ts`
+
+```bash
+# 跑單一測試檔案
+cd tellcraft-backend && pnpm test -- src/__tests__/intent-helpers.test.ts
+# 跑指定 pattern
+cd tellcraft-backend && pnpm test -- --grep "hasDeployIntent"
+```
+
+前端目前無測試檔案。其他品質保障：
 - BDD 規格驗證腳本（lint-gherkin-format + validate-feature）
 - TypeScript 型別檢查（`pnpm typecheck`）
 - ESLint（`pnpm lint`）

@@ -7,8 +7,8 @@ validateEnv()
 import express from 'express'
 import { createServer } from 'http'
 import { Server as SocketIOServer } from 'socket.io'
-import { Queue } from 'bullmq'
-import Redis from 'ioredis'
+import { Queue, QueueEvents } from 'bullmq'
+import Redis, { type RedisOptions } from 'ioredis'
 import cors from 'cors'
 import helmet from 'helmet'
 import rateLimit, { ipKeyGenerator } from 'express-rate-limit'
@@ -340,25 +340,32 @@ io.on('connection', (socket) => {
 // Redis 和 BullMQ
 // ============================================================
 
-const redis = new Redis(REDIS_URL, {
-  maxRetriesPerRequest: null, // BullMQ 要求
-  retryStrategy: (times) => Math.min(times * 50, 2000),
-  enableReadyCheck: true,
-  keepAlive: 30000,
-  connectTimeout: 10000,
-})
+// ── Redis 連線工廠（Producer/Worker/Events/General 分離）──
+function createRedisConnection(name: string, overrides: Partial<RedisOptions> = {}): Redis {
+  const conn = new Redis(REDIS_URL, {
+    retryStrategy: (times) => Math.min(times * 50, 2000),
+    enableReadyCheck: true,
+    keepAlive: 30000,
+    connectTimeout: 10000,
+    ...overrides,
+  })
+  conn.on('connect', () => logger.info(`Redis [${name}] 已連接`))
+  conn.on('error', (err) => logger.error({ err }, `Redis [${name}] 錯誤`))
+  return conn
+}
 
-redis.on('connect', () => {
-  logger.info('Redis 已連接')
-})
-
-redis.on('error', (err) => {
-  logger.error({ err }, 'Redis 錯誤')
-})
+// Worker 連線 — BullMQ Worker 專用（阻塞命令，maxRetriesPerRequest: null）
+const workerRedis = createRedisConnection('worker', { maxRetriesPerRequest: null })
+// Queue 連線 — BullMQ 生產者（離線時快速失敗，讓 HTTP 請求返回 500）
+const queueRedis = createRedisConnection('queue', { maxRetriesPerRequest: null, enableOfflineQueue: false })
+// QueueEvents 連線 — 事件監聽專用（阻塞命令）
+const eventsRedis = createRedisConnection('events', { maxRetriesPerRequest: null })
+// 通用連線 — FlowState/lock/cache/rate-limit/auth（API 層快速失敗）
+const generalRedis = createRedisConnection('general', { maxRetriesPerRequest: 3 })
 
 // BullMQ 隊列
 const orchestratorQueue = new Queue('orchestrator', {
-  connection: redis,
+  connection: queueRedis,
   defaultJobOptions: {
     attempts: 3,
     backoff: {
@@ -375,9 +382,18 @@ const orchestratorQueue = new Queue('orchestrator', {
   },
 })
 
+// QueueEvents — 可觀測性（stalled/error 監控）
+const queueEvents = new QueueEvents('orchestrator', { connection: eventsRedis })
+queueEvents.on('stalled', ({ jobId }) => {
+  logger.warn({ jobId }, '[STALLED] Job stalled — 可能 event loop 阻塞')
+})
+queueEvents.on('error', (err) => {
+  logger.error({ err }, 'QueueEvents error')
+})
+
 // 設置隊列到路由
 setOrchestratorQueue(orchestratorQueue)
-setRedisClient(redis)
+setRedisClient(generalRedis)
 
 // 初始化 LINE Bot Handler（注入 Messaging Client + 隊列）
 if (env.LINE_MESSAGING_CHANNEL_ACCESS_TOKEN) {
@@ -401,22 +417,22 @@ if (env.TELEGRAM_BOT_TOKEN) {
 }
 
 // 設置 Redis 到認證模組（用於 token 黑名單）
-setAuthRedisClient(redis)
-setMiddlewareRedisClient(redis)
-setDashboardRedisClient(redis)
-setCacheRedisClient(redis)
+setAuthRedisClient(generalRedis)
+setMiddlewareRedisClient(generalRedis)
+setDashboardRedisClient(generalRedis)
+setCacheRedisClient(generalRedis)
 
 // 啟動清理：刪除上次程序崩潰/重啟留下的孤立 lock
 // 安全：單一實例部署，啟動時不可能有活躍 Worker，所有鎖皆為殘留
 // fire-and-forget，不阻塞 Worker 啟動
 Promise.all([
-  redis.keys('conv-lock:*'),
-  redis.keys('user-active:*'),
-  redis.keys('flow:activity:*'),
+  generalRedis.keys('conv-lock:*'),
+  generalRedis.keys('user-active:*'),
+  generalRedis.keys('flow:activity:*'),
 ]).then(async ([staleConvLocks, staleUserLocks, staleActivity]) => {
   const stale = [...staleConvLocks, ...staleUserLocks, ...staleActivity]
   if (stale.length > 0) {
-    await redis.del(...stale)
+    await generalRedis.del(...stale)
     logger.warn({
       convLocks: staleConvLocks.length,
       userLocks: staleUserLocks.length,
@@ -425,8 +441,8 @@ Promise.all([
   }
 }).catch((err) => logger.error({ err }, '啟動清理失敗'))
 
-// 創建 Worker
-const orchestratorWorker = createOrchestratorWorker(redis, io)
+// 創建 Worker（workerRedis: BullMQ 連線, generalRedis: 業務邏輯連線）
+const orchestratorWorker = createOrchestratorWorker(workerRedis, generalRedis, io)
 
 // ============================================================
 // 路由
@@ -534,13 +550,13 @@ async function start() {
 
   // 每 2 分鐘掃描超時的 FlowState 並自動恢復
   setInterval(() => {
-    scanAndRecoverStuckFlowStates(redis, io).catch(err => {
+    scanAndRecoverStuckFlowStates(generalRedis, io).catch(err => {
       logger.error({ err }, 'FlowState Recovery 掃描失敗')
     })
   }, 2 * 60 * 1000)
 
   // 啟動時一次性修復舊代碼（非同步，不影響啟動時間）
-  runStartupCodeRepair(redis).catch(err =>
+  runStartupCodeRepair(generalRedis).catch(err =>
     logger.error({ err }, 'startup code repair 失敗')
   )
 
@@ -555,10 +571,10 @@ async function start() {
   }), 150 * 1000)
 
   // 訪客資料清理：啟動 30 秒後執行一次，之後每 6 小時執行
-  setTimeout(() => cleanupExpiredGuestUsers(redis).catch(err => {
+  setTimeout(() => cleanupExpiredGuestUsers(generalRedis).catch(err => {
     logger.error({ err }, '訪客清理 啟動清理失敗')
   }), 30 * 1000)
-  setInterval(() => cleanupExpiredGuestUsers(redis).catch(err => {
+  setInterval(() => cleanupExpiredGuestUsers(generalRedis).catch(err => {
     logger.error({ err }, '訪客清理 定時清理失敗')
   }), 6 * 60 * 60 * 1000)
 
@@ -589,24 +605,31 @@ async function shutdown() {
 
   // 清理 flow:activity keys（進程死後心跳不應殘留）
   try {
-    const activityKeys = await redis.keys('flow:activity:*')
+    const activityKeys = await generalRedis.keys('flow:activity:*')
     if (activityKeys.length > 0) {
-      await redis.del(...activityKeys)
+      await generalRedis.del(...activityKeys)
       logger.info({ count: activityKeys.length }, '關閉時清理 flow:activity keys')
     }
   } catch { /* 不影響關閉 */ }
 
-  // 關閉 Worker
+  // 關閉 Worker（等待進行中 jobs 完成）
   await orchestratorWorker.close()
   logger.info('Worker 已關閉')
+
+  // 關閉 QueueEvents
+  await queueEvents.close()
+  logger.info('QueueEvents 已關閉')
 
   // 關閉隊列
   await orchestratorQueue.close()
   logger.info('隊列已關閉')
 
-  // 關閉 Redis
-  redis.disconnect()
-  logger.info('Redis 已斷開')
+  // 關閉所有 Redis 連線
+  workerRedis.disconnect()
+  queueRedis.disconnect()
+  eventsRedis.disconnect()
+  generalRedis.disconnect()
+  logger.info('Redis 已斷開（4 連線）')
 
   // 關閉資料庫連接池
   await closePool()

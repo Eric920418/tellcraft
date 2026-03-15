@@ -10,6 +10,7 @@ import { detectFastModeIntent, getFaqReply, answerWithSonnet } from '../services
 import { sendMessage, saveFlowState, getFlowState, deleteFlowState, deductCredits } from './orchestrator-utils'
 import { CREDIT_COSTS, isFairUsePlan } from '../config/plans'
 import { createLogger } from '../lib/logger'
+import { getEnv } from '../lib/env'
 import { executeIteration } from '../services/iteration-skill'
 import { handleJobFinalFailure } from '../services/job-failure-handler'
 
@@ -127,7 +128,8 @@ async function renameProjectSafely(params: {
 // ============================================================
 
 export function createOrchestratorWorker(
-  redis: Redis,
+  workerConnection: Redis,  // BullMQ Worker 專用連線（maxRetriesPerRequest: null）
+  redis: Redis,             // FlowState/lock/activity 所有業務邏輯（generalRedis）
   io: SocketIOServer
 ): Worker {
   const worker = new Worker(
@@ -165,8 +167,12 @@ export function createOrchestratorWorker(
       return lockResult.result
     },
     {
-      connection: redis,
-      concurrency: parseInt(process.env.WORKER_CONCURRENCY || '20', 10),
+      connection: workerConnection,
+      concurrency: getEnv().WORKER_CONCURRENCY,
+      // Stalled job 保護（LLM 任務 event loop jitter 安全餘量）
+      lockDuration: 120_000,      // 2min（預設 30s）
+      stalledInterval: 120_000,   // 每 2min 檢查（配合 FlowState recovery 頻率）
+      maxStalledCount: 2,         // 允許 stall 2 次再 fail（預設 1）
     }
   )
 
@@ -187,6 +193,10 @@ export function createOrchestratorWorker(
     handleJobFinalFailure(job, err, io).catch(fatalErr => {
       logger.error({ err: fatalErr }, 'handleJobFinalFailure itself failed')
     })
+  })
+
+  worker.on('error', (err) => {
+    logger.error({ err }, 'Worker error (Redis 連線或內部錯誤)')
   })
 
   return worker

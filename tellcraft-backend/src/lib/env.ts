@@ -22,7 +22,7 @@ const envSchema = z.object({
   DB_POOL_MAX: z.coerce.number().default(15),
   LOG_LEVEL: z.string().default('info'),
   NODE_ENV: z.string().default('production'),
-  WORKER_CONCURRENCY: z.coerce.number().default(20),
+  WORKER_CONCURRENCY: z.coerce.number().default(8),
   LLM_MAX_CONCURRENT: z.coerce.number().default(10),
   DEPLOY_MAX_CONCURRENT: z.coerce.number().default(3),
   UPLOAD_DIR: z.string().default('/var/www/uploads/tellcraft'),

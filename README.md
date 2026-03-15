@@ -832,10 +832,19 @@ sudo sysctl --system
 # 套用設定
 sudo nginx -t && sudo systemctl restart nginx
 
-# 6. 上傳目錄（圖片上傳功能）
+# 6. Redis 生產配置（BullMQ 必要）
+redis-cli CONFIG SET appendonly yes            # AOF 持久化
+redis-cli CONFIG SET appendfsync everysec
+redis-cli CONFIG SET maxmemory 512mb           # 防 OOM
+redis-cli CONFIG SET maxmemory-policy noeviction  # BullMQ 要求
+redis-cli CONFIG SET save ""                   # 禁用 RDB（AOF 已足夠）
+redis-cli CONFIG REWRITE                       # 寫回配置檔
+# 驗證：redis-cli INFO persistence | grep aof_enabled → 應為 1
+
+# 7. 上傳目錄（圖片上傳功能）
 mkdir -p /var/www/uploads/tellcraft
 
-# 7. 啟動服務
+# 8. 啟動服務
 pm2 start ecosystem.config.js
 pm2 save
 ```
@@ -861,6 +870,28 @@ cd tellcraft-backend && pnpm install && pnpm build
 pm2 restart tellcraft-backend
 curl -s http://localhost:8080/health
 ```
+
+### BullMQ 生產配置
+
+**Redis 4 連線分離架構**（`index.ts`）：
+
+| 連線 | 用途 | maxRetriesPerRequest |
+|------|------|---------------------|
+| `workerRedis` | BullMQ Worker（阻塞命令） | `null` |
+| `queueRedis` | BullMQ Queue 生產者（`enableOfflineQueue: false`） | `null` |
+| `eventsRedis` | QueueEvents 監聽 | `null` |
+| `generalRedis` | FlowState/lock/cache/rate-limit/auth | `3`（快速失敗） |
+
+**Worker 配置**（`orchestrator.ts`）：
+- `concurrency`: env `WORKER_CONCURRENCY`（預設 8）
+- `lockDuration`: 120s（預設 30s，LLM event loop jitter 安全餘量）
+- `stalledInterval`: 120s（配合 FlowState recovery 2min 頻率）
+- `maxStalledCount`: 2
+- Job ID 去重：`msg:${conversationId}:${messageId}`
+
+**Redis Server 必要設定**：
+- `appendonly yes` + `appendfsync everysec`（AOF 持久化）
+- `maxmemory 512mb` + `maxmemory-policy noeviction`（BullMQ 要求）
 
 ### 驗證
 

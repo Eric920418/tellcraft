@@ -245,6 +245,7 @@ router.post('/:id/message', optionalAuth, validateBody(sendMessageSchema), async
         locale,
         imageUrls: imageUrls || undefined,
       }, {
+        jobId: `msg:${conversationId}:${messageId}`,
         attempts: 3,
         backoff: {
           type: 'exponential',
@@ -382,6 +383,7 @@ router.post('/:id/reply', optionalAuth, validateBody(replyMessageSchema), async 
       locale,
       imageUrls: imageUrls || undefined,
     }, {
+      jobId: `reply:${conversationId}:${messageId}`,
       attempts: 3,
       backoff: {
         type: 'exponential',
