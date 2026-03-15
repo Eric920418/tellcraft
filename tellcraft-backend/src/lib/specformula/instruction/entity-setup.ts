@@ -138,9 +138,15 @@ export class EntitySetup {
     }
     const valJoiner = valParts.join(', ');
 
+    // ON CONFLICT DO UPDATE 防止重複 PK 導致 INSERT 失敗
+    const hasIdColumn = columns.includes('id');
+    const updateCols = columns.filter(c => c !== 'id');
+    const conflictClause = hasIdColumn && updateCols.length > 0
+      ? ` ON CONFLICT (id) DO UPDATE SET ${updateCols.map(c => `${c} = EXCLUDED.${c}`).join(', ')}`
+      : hasIdColumn ? ' ON CONFLICT (id) DO NOTHING' : '';
     const sql = needsSelect
-      ? `INSERT INTO ${tableName} (${colJoiner}) VALUES (${valJoiner}) RETURNING *`
-      : `INSERT INTO ${tableName} (${colJoiner}) VALUES (${valJoiner})`;
+      ? `INSERT INTO ${tableName} (${colJoiner}) VALUES (${valJoiner})${conflictClause} RETURNING *`
+      : `INSERT INTO ${tableName} (${colJoiner}) VALUES (${valJoiner})${conflictClause}`;
 
     const pgValues = values.map(v => TypeConverter.toQueryParam(v));
     const result = await pool.query(sql, pgValues);

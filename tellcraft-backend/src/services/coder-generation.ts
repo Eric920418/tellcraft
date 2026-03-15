@@ -769,7 +769,18 @@ import { hash, compare } from 'bcryptjs'
 
 ## 認證檢查（常見錯誤！）
 如果錯誤是 "操作者必須已登入"，移除函數內的認證/登入檢查。
-不要檢查 userId 是否存在。呼叫者已處理認證。`
+不要檢查 userId 是否存在。呼叫者已處理認證。
+
+## HTTP Status Code（常見錯誤！）
+每個子操作必須返回正確的 __status：
+- 建立/新增 → __status: 201
+- 查詢/列表/更新/刪除/登入/登出 → __status: 200
+不要只在某些 branch 返回 __status，每個 return 都要帶 __status。
+
+## 回應欄位名稱（常見錯誤！）
+回傳欄位名稱必須與測試 DataTable 的 header 完全一致（camelCase）。
+如果測試驗證 episodeId，必須 return { episodeId: xxx }，不能是 id 或 episode_id。
+如果測試驗證 showId，必須 return { showId: xxx }。以此類推。`
 
 /**
  * 用 LLM 修復失敗的 action 函數
