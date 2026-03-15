@@ -634,11 +634,16 @@ async function executeStep(
           // DataTable 驗證
           if (!step.dataTable) throw new Error('response_validate (data_table) 需要 DataTable')
           const statusCode = captures.status || captures.status_code || '200'
+          // 預期值中的非 UUID 字串 ID 也需要轉換，否則比對不到（Feature 寫 "show-001"，API 回 UUID）
+          const respDt = fixApiCallUuidValues(
+            { headers: [...step.dataTable.headers], rows: step.dataTable.rows.map(r => ({ ...r })) },
+            schemas
+          )
           instructionSet.dataTableResponseValidate.validate(
             captures.summary,
             statusCode,
-            step.dataTable.headers,
-            step.dataTable.rows
+            respDt.headers,
+            respDt.rows
           )
         }
         break
@@ -1303,7 +1308,7 @@ function waitForReady(proc: ChildProcess, timeoutMs: number): Promise<number> {
 
     proc.stderr?.on('data', (data) => {
       const errText = data.toString()
-      logger.warn({ stderr: errText.slice(0, 200) }, 'test server stderr')
+      logger.warn({ stderr: errText.slice(0, 500) }, 'test server stderr')
     })
 
     proc.on('close', (code) => {

@@ -198,6 +198,9 @@ function buildActionSystemPrompt(): string {
 - SQL 查詢必須使用 parameterized query（$1, $2...），嚴禁字串拼接 SQL
 - 所有日期用 ISO 8601 字串
 - ID 欄位使用 UUID（gen_random_uuid()）
+- bcryptjs 必須用 named import：import { hash, compare } from 'bcryptjs'（不要用 default import）
+- 不要做認證/登入檢查（如檢查 userId 是否存在）。呼叫者已處理認證，函數只做業務邏輯
+- 前置（狀態）規則中的「使用者必須已登入」由 SpecFormula 測試框架處理（透過 UID actor），函數內不需驗證
 
 ## 子操作派發（重要！）
 一個 Action 可能包含多個子操作（如 manage_auth 包含 註冊/登入/登出）。
@@ -757,7 +760,16 @@ const op = input._stepSummary || ''
 if (op.includes('註冊')) { ... }
 else if (op.includes('登入')) { ... }
 \`\`\`
-不要用 input.action，只用 input._stepSummary 做 includes 匹配。`
+不要用 input.action，只用 input._stepSummary 做 includes 匹配。
+
+## bcrypt import（常見錯誤！）
+如果錯誤是 "bcrypt.hash is not a function"，改為 named import：
+import { hash, compare } from 'bcryptjs'
+不要用 import bcrypt from 'bcryptjs'。
+
+## 認證檢查（常見錯誤！）
+如果錯誤是 "操作者必須已登入"，移除函數內的認證/登入檢查。
+不要檢查 userId 是否存在。呼叫者已處理認證。`
 
 /**
  * 用 LLM 修復失敗的 action 函數
