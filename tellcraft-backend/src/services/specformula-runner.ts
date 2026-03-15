@@ -372,6 +372,61 @@ function inferPlaceholder(name: string, type: string): string {
   return 'placeholder'
 }
 
+/**
+ * Feature 常用 {entityName}Id（如 episodeId）指代 entity 的 PK，
+ * 但 DDL 的 PK 通常叫 id。此函數把找不到的 {entity}Id 映射為 id。
+ */
+function resolveEntityIdHeaders(
+  dataTable: { headers: string[]; rows: Record<string, string>[] },
+  entityName: string,
+  schemas: DatabaseSchema[]
+): { headers: string[]; rows: Record<string, string>[] } {
+  const pair = DatabaseSchema.findSchemaAndTable(schemas, entityName)
+  if (!pair) return dataTable
+
+  const tableName = pair.table.tableName.toLowerCase()
+  const columnNames = new Set(pair.table.columns.map(c => c.name.toLowerCase()))
+  if (!columnNames.has('id')) return dataTable // 無 id PK，不做映射
+
+  // 建立 singular 形式：episodes → episode, shows → show, categories → categorie/category
+  const singulars = new Set<string>()
+  singulars.add(tableName)
+  if (tableName.endsWith('s')) singulars.add(tableName.slice(0, -1))
+  if (tableName.endsWith('ies')) singulars.add(tableName.slice(0, -3) + 'y')
+
+  let changed = false
+  const newHeaders = dataTable.headers.map(h => {
+    const clean = h.trim().replace(/^[><$]/, '').split('.').pop() || ''
+    const snake = toSnakeCase(clean).toLowerCase()
+
+    // 已存在 → 不改
+    if (columnNames.has(snake) || columnNames.has(clean.toLowerCase())) return h
+
+    // 檢查是否是 {entitySingular}_id 模式（自身 PK 引用）
+    for (const s of singulars) {
+      if (snake === s + '_id') {
+        changed = true
+        return h.trim().startsWith('>') || h.trim().startsWith('<') || h.trim().startsWith('$')
+          ? h.trim()[0] + 'id'  // 保留 VAR 前綴
+          : 'id'
+      }
+    }
+    return h
+  })
+
+  if (!changed) return dataTable
+
+  // 同步更新 row keys
+  const newRows = dataTable.rows.map(row => {
+    const newRow: Record<string, string> = {}
+    for (let i = 0; i < dataTable.headers.length; i++) {
+      newRow[newHeaders[i]] = row[dataTable.headers[i]] ?? ''
+    }
+    return newRow
+  })
+  return { headers: newHeaders, rows: newRows }
+}
+
 // ============================================================
 // 步驟執行
 // ============================================================
@@ -393,7 +448,8 @@ async function executeStep(
       case 'entity_setup': {
         if (!step.dataTable) throw new Error('entity_setup 需要 DataTable')
         const setupDt = fixDataTableBySchema(step.dataTable, captures.entity, schemas)
-        const filledDt = fillMissingNotNullColumns(setupDt, captures.entity, schemas)
+        const idFixedDt = resolveEntityIdHeaders(setupDt, captures.entity, schemas)
+        const filledDt = fillMissingNotNullColumns(idFixedDt, captures.entity, schemas)
         await instructionSet.entitySetup.setup(
           captures.entity,
           filledDt.headers,
@@ -456,10 +512,11 @@ async function executeStep(
       case 'entity_validate': {
         if (!step.dataTable) throw new Error('entity_validate 需要 DataTable')
         const validateDt = fixDataTableBySchema(step.dataTable, captures.entity, schemas)
+        const validateIdDt = resolveEntityIdHeaders(validateDt, captures.entity, schemas)
         await instructionSet.entityValidate.assertExists(
           captures.entity,
-          validateDt.headers,
-          validateDt.rows
+          validateIdDt.headers,
+          validateIdDt.rows
         )
         break
       }
