@@ -7,6 +7,7 @@ module.exports = {
       autorestart: true,
       watch: false,
       max_memory_restart: '4G',
+      node_args: '--max-old-space-size=3072 --max-semi-space-size=64',
       env: {
         NODE_ENV: 'production',
         PORT: 3100,
