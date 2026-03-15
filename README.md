@@ -131,9 +131,9 @@ npx ts-node bdd-spec/scripts/validate-feature.ts spec/features/
   └─ 改寫 UIUX 組件（useState mock → Server Action 調用）
   │
   ▼
-④b Coder Skill Stage B（❌ 未實作）
+④b Coder Skill Stage B（✅ 已完成 — 63/91 scenarios 通過，69%）
   ├─ 生成 API Routes（app/api/*/route.ts）
-  └─ SpecFormula 自動跑 Feature Files 驗證（紅燈修、綠燈過）
+  └─ SpecFormula 自動跑 Feature Files 驗證（紅燈修、綠燈過，最多 3 輪）
   │
   ▼
 ⑤ Deployer（已完成）
@@ -175,7 +175,7 @@ Supabase PostgREST 只能做 CRUD + RLS，**搞不定**：
 | `deployer` | 代碼 → sanitize → 本地 build 驗證 → Vercel 部署 → 回滾 | Haiku（修復） | ✅ 完成 |
 | `iteration` | 迭代修改 + 撤銷上一步 + 版本回滾 | Sonnet | ✅ 完成 |
 | `db-provision` | BDD 完成後自動建 Neon DB + 套用 Schema（同步 < 10s） | — | ✅ 完成 |
-| `coder` | 後端代碼生成 + SpecFormula 自動驗證（紅綠燈循環） | Sonnet | ❌ **未實作** |
+| `coder` | 後端代碼生成 + SpecFormula 自動驗證（紅綠燈循環） | Sonnet | ✅ 完成（69% 通過率） |
 | `domain-manager` | 域名管理：列出已有域名 / 引導購買或綁定 | — | ✅ 完成 |
 | `domain-purchase` | 域名購買：RDAP → Porkbun → Cloudflare DNS → Vercel 綁定 | — | ✅ 完成 |
 | `domain-dns` | 自有域名 DNS 綁定 + Cloudflare DNS CRUD | — | ✅ 完成 |
@@ -689,14 +689,14 @@ sdd.os/                   # SDD 上游 Reference Repo（git subtree，只讀參�
 
 **三層生成架構**：
 ```
-Stage A 已完成：
+Stage A：
 ├── lib/db.ts                          ← Neon 連接（固定模板，零 LLM）
 ├── lib/actions/<action>.ts            ← 純邏輯函數（LLM 逐 action，核心）
 ├── app/actions/<domain>.ts            ← Server Actions（零 LLM，按 entity 分組映射）
 └── 改寫 UIUX 組件                      ← useState mock → Server Action 調用（LLM）
 
-Stage B 待做：
-└── app/api/<resource>/route.ts        ← API Routes（SpecFormula 測試用）
+Stage B：
+└── app/api/<resource>/route.ts        ← API Routes + SpecFormula 紅綠燈驗證（✅ 63/91 通過）
 ```
 
 **核心檔案**：
@@ -714,6 +714,20 @@ Stage B 待做：
 
 **核心目標**：生成 API Routes + SpecFormula 紅綠燈自動驗證循環。
 
+**端到端測試結果（2026-03-15，Podcast 專案 7 Features / 91 Scenarios）**：
+```
+使用者註冊與登入  12/12  ✅ 全部通過
+節目管理          15/15  ✅ 全部通過
+單集管理          20/20  ✅ 全部通過
+頻道設定管理       9/9   ✅ 全部通過
+留言功能           8/13  （JOIN 查詢 + 權限邏輯）
+訂閱節目           4/9   （重複檢查 + 列表查詢）
+播放進度記錄       7/13  （邊界值 + UPSERT 邏輯）
+────────────────────────
+總計              63/91  69.2% 通過（3 輪紅綠燈，~636s）
+```
+
+**基礎設施功能**：
 - [x] ISA config 模板遷移到 sdd.os 標準 instruction_types（`entity_setup`/`api_call`/`entity_validate`/`entity_non_existence_validate`）
 - [x] `isa-config.ts` instruction_type 映射 + config 結構更新到 sdd.os 格式
 - [x] 生成 `app/api/<resource>/route.ts`（機械映射，零 LLM，複用 `lib/actions/*.ts`）
@@ -726,6 +740,15 @@ Stage B 待做：
 - [x] `coder_testing` phase 狀態機（phase-router/flowstate-recovery/intent-helpers 四處同步）
 - [x] 用戶觸發：Coder 完成後「驗證後端」quickReply（`__verify_backend__`）
 - [x] `convertToOpenAPI()` 優化：優先使用 actionsYml 中的 method/path
+
+**Runner 修復歷程**（從 0% → 69%）：
+- [x] `_stepSummary` 注入：Feature 內多個 When 步驟的子操作名稱傳遞給 action 函數做分派
+- [x] `db.ts` 雙模式：tagged template (`sql\`...\``) + function call (`sql('...', [params])`) 相容
+- [x] UUID 確定性轉換：`deterministicUuid()` MD5 hash → UUID v4，entity_setup/api_call/response_validate 三處統一
+- [x] CJS/ESM 互通：`bcryptjs`/`jsonwebtoken` CJS 模組自動改寫為 `createRequire()` 模式
+- [x] esbuild 語法驗證：LLM 修復代碼語法錯誤時自動回退原始版本
+- [x] FK 自動建立：`ensureFkReferencesExist()` 遞歸建立被引用行（episodes→shows→users），inline REFERENCES DDL 解析
+- [x] `EntityDdlReader` 擴展：支援 inline `REFERENCES table(col)` → `col.foreignKey` 設定
 
 ### P1：BDD 格式遷移（ISA SpecFormula 標準）（✅ 在 P0b 開發中已完成）
 
