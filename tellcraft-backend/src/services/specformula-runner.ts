@@ -1344,21 +1344,40 @@ export async function runRedGreenCycle(input: {
     const attemptPercent = Math.floor(((attempt - 1) / maxAttempts) * 80)
     await input.onProgress(`第 ${attempt}/${maxAttempts} 輪測試...`, 5 + attemptPercent)
 
-    // 跑測試
-    lastResult = await runSpecFormulaValidation({
-      backendFiles: currentFiles,
-      featureFiles: input.featureFiles,
-      actionsYml: input.actionsYml,
-      openApiSpec: input.openApiSpec,
-      isaConfigYml: input.isaConfigYml,
-      schemaSql: input.schemaSql,
-      entityMapping: input.entityMapping,
-      neonConnectionString: input.neonConnectionString,
-      onProgress: async (step, pct) => {
-        const scaledPct = attemptPercent + Math.floor(pct * 0.8 / maxAttempts)
-        await input.onProgress(`[${attempt}/${maxAttempts}] ${step}`, 5 + scaledPct)
-      },
-    })
+    // 跑測試（test server crash 時降級為全部失敗，繼續下一輪修復）
+    try {
+      lastResult = await runSpecFormulaValidation({
+        backendFiles: currentFiles,
+        featureFiles: input.featureFiles,
+        actionsYml: input.actionsYml,
+        openApiSpec: input.openApiSpec,
+        isaConfigYml: input.isaConfigYml,
+        schemaSql: input.schemaSql,
+        entityMapping: input.entityMapping,
+        neonConnectionString: input.neonConnectionString,
+        onProgress: async (step, pct) => {
+          const scaledPct = attemptPercent + Math.floor(pct * 0.8 / maxAttempts)
+          await input.onProgress(`[${attempt}/${maxAttempts}] ${step}`, 5 + scaledPct)
+        },
+      })
+    } catch (testErr) {
+      logger.error({ attempt, err: testErr }, '測試執行失敗（test server crash），視為全部失敗')
+      lastResult = {
+        totalScenarios: input.featureFiles.length,
+        passed: 0,
+        failed: input.featureFiles.length,
+        skipped: 0,
+        scenarios: input.featureFiles.map(f => ({
+          featureName: f.name,
+          ruleName: '',
+          scenarioName: '(test server crash)',
+          status: 'failed' as const,
+          error: `Test server crash: ${testErr instanceof Error ? testErr.message : String(testErr)}`,
+          steps: [],
+        })),
+        durationMs: 0,
+      }
+    }
 
     logger.info({
       attempt,

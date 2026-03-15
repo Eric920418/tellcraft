@@ -773,11 +773,24 @@ ${schemaSql}
     return currentCode // 降級返回原始代碼
   }
 
-  const fixed = extractCodeFromResponse(response.content)
+  let fixed = extractCodeFromResponse(response.content)
   if (!fixed || fixed.length < 50) {
     logger.warn({ actionName }, 'LLM 修復結果過短，使用原始代碼')
     return currentCode
   }
+
+  // 修正 LLM 偶爾混入的中文標點
+  fixed = fixed
+    .replace(/；/g, ';')
+    .replace(/。/g, ';')
+    .replace(/，/g, ',')
+    .replace(/（/g, '(')
+    .replace(/）/g, ')')
+    .replace(/：/g, ':')
+    .replace(/｛/g, '{')
+    .replace(/｝/g, '}')
+    .replace(/【/g, '[')
+    .replace(/】/g, ']')
 
   logger.info({ actionName }, 'LLM 修復完成')
   return fixed
