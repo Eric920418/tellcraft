@@ -199,19 +199,34 @@ function buildActionSystemPrompt(): string {
 - 所有日期用 ISO 8601 字串
 - ID 欄位使用 UUID（gen_random_uuid()）
 
+## 子操作派發（重要！）
+一個 Action 可能包含多個子操作（如 manage_auth 包含 註冊/登入/登出）。
+呼叫時 input 會包含 _stepSummary 欄位，值是中文子操作名稱（如 "使用者註冊"、"使用者登入"）。
+必須用 input._stepSummary 來判斷要執行哪個子操作：
+\`\`\`typescript
+const op = input._stepSummary || ''
+if (op.includes('註冊')) { /* 註冊邏輯 */ }
+else if (op.includes('登入')) { /* 登入邏輯 */ }
+else if (op.includes('登出')) { /* 登出邏輯 */ }
+else { throw new Error('不支援的操作') }
+\`\`\`
+不要依賴 input.action 或其他自定義派發欄位，只用 _stepSummary。
+
 ## 程式碼結構
 \`\`\`typescript
 import { sql } from '@/lib/db'
 
 // 型別定義
-interface XxxInput { ... }
-interface XxxOutput { ... }
+interface XxxInput { _stepSummary?: string; ... }
+interface XxxOutput { __status?: number; ... }
 
 export async function actionName(input: XxxInput): Promise<XxxOutput> {
+  const op = input._stepSummary || ''
+  // 根據 op 判斷子操作
   // 1. 前置（參數）驗證 → 來自 rules
   // 2. 前置（狀態）檢查 → DB 查詢
   // 3. 核心邏輯 → INSERT/UPDATE/DELETE
-  // 4. 後置（回應）→ return
+  // 4. 後置（回應）→ return { __status: 201, ...data }
 }
 \`\`\`
 
@@ -732,7 +747,17 @@ const FIX_SYSTEM_PROMPT = `你是一位 TypeScript 後端專家。根據測試�
 2. 使用 parameterized queries（$1, $2）防 SQL injection
 3. 確保 import 完整（特別是 sql from '@/lib/db'）
 4. 根據失敗的場景和 error message 推斷需要修改的邏輯
-5. 輸出完整的修正後檔案內容（用 \`\`\`typescript\`\`\` 包裹）`
+5. 輸出完整的修正後檔案內容（用 \`\`\`typescript\`\`\` 包裹）
+
+## 子操作派發（常見錯誤！）
+如果錯誤是 "不支援的操作類型" 或類似的派發問題，是因為函數用了 input.action 來判斷子操作。
+正確做法：使用 input._stepSummary（中文子操作名稱，如 "使用者註冊"、"建立節目"）來派發。
+\`\`\`typescript
+const op = input._stepSummary || ''
+if (op.includes('註冊')) { ... }
+else if (op.includes('登入')) { ... }
+\`\`\`
+不要用 input.action，只用 input._stepSummary 做 includes 匹配。`
 
 /**
  * 用 LLM 修復失敗的 action 函數

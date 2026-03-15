@@ -543,16 +543,28 @@ async function executeStep(
         // Feature name = OpenAPI summary；step summary 可能是子操作名（如「使用者註冊」≠「使用者註冊與登入」）
         // 優先用 featureSummary 保證與 OpenAPI spec 一致
         const summary = featureSummary || captures.summary
+
+        // 注入 _stepSummary — 子操作名稱（如「使用者註冊」）
+        // action 函數用此欄位判斷要執行哪個子操作（register / login / logout 等）
+        const apiHeaders = [...step.dataTable.headers]
+        const apiRows = step.dataTable.rows.map(row => ({ ...row }))
+        if (captures.summary) {
+          apiHeaders.push('_stepSummary')
+          for (const row of apiRows) {
+            row['_stepSummary'] = captures.summary
+          }
+        }
+
         if (captures.actor) {
           await instructionSet.apiCall.invokeWithActor(
-            step.dataTable.headers,
-            step.dataTable.rows,
+            apiHeaders,
+            apiRows,
             summary
           )
         } else {
           await instructionSet.apiCall.invokeWithoutActor(
-            step.dataTable.headers,
-            step.dataTable.rows,
+            apiHeaders,
+            apiRows,
             summary
           )
         }
