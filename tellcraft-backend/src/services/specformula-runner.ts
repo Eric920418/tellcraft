@@ -445,6 +445,49 @@ function fixNonUuidValues(
 }
 
 /**
+ * api_call DataTable 中的 UUID 值轉換。
+ * 不同於 fixNonUuidValues（需要 entityName），此函數掃描 ALL tables 的 UUID 欄位，
+ * 加上 *Id / _id 後綴啟發式規則，將非 UUID 字串轉為確定性 UUID。
+ */
+function fixApiCallUuidValues(
+  dataTable: { headers: string[]; rows: Record<string, string>[] },
+  schemas: DatabaseSchema[]
+): { headers: string[]; rows: Record<string, string>[] } {
+  // 收集所有表的 UUID 欄位名
+  const uuidColumns = new Set<string>()
+  for (const schema of schemas) {
+    for (const table of schema.tables) {
+      for (const col of table.columns) {
+        if (col.type.toUpperCase().includes('UUID')) {
+          uuidColumns.add(col.name.toLowerCase())
+        }
+      }
+    }
+  }
+
+  for (const row of dataTable.rows) {
+    for (const header of dataTable.headers) {
+      const trimmedH = header.trim()
+      if (trimmedH.startsWith('>') || trimmedH.startsWith('<') || trimmedH.startsWith('$')) continue
+      if (trimmedH === '_stepSummary') continue
+
+      const snake = toSnakeCase(trimmedH).toLowerCase()
+      // 匹配 UUID 欄位：精確匹配 or *Id / *_id 啟發式
+      const isUuidCol = uuidColumns.has(snake) || uuidColumns.has(trimmedH.toLowerCase())
+      const isIdField = /(?:Id|_id)$/.test(trimmedH) || trimmedH === 'id'
+      if (!isUuidCol && !isIdField) continue
+
+      const value = row[header]
+      if (!value || value.startsWith('$') || value.startsWith('<') || isValidUuid(value)) continue
+
+      row[header] = deterministicUuid(value)
+    }
+  }
+
+  return dataTable
+}
+
+/**
  * Feature 常用 {entityName}Id（如 episodeId）指代 entity 的 PK，
  * 但 DDL 的 PK 通常叫 id。此函數把找不到的 {entity}Id 映射為 id。
  */
@@ -555,16 +598,21 @@ async function executeStep(
           }
         }
 
+        // 將 API 請求資料中的非 UUID 字串 ID 轉為確定性 UUID
+        // entity_setup 已用 deterministicUuid 插入（如 "SHOW-001" → UUID），
+        // API 參數也必須做相同轉換才能查到
+        const apiDt = fixApiCallUuidValues({ headers: apiHeaders, rows: apiRows }, schemas)
+
         if (captures.actor) {
           await instructionSet.apiCall.invokeWithActor(
-            apiHeaders,
-            apiRows,
+            apiDt.headers,
+            apiDt.rows,
             summary
           )
         } else {
           await instructionSet.apiCall.invokeWithoutActor(
-            apiHeaders,
-            apiRows,
+            apiDt.headers,
+            apiDt.rows,
             summary
           )
         }
