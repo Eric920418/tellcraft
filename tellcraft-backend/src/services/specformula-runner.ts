@@ -326,6 +326,111 @@ function fixDataTableBySchema(
 }
 
 /**
+ * 確保 FK placeholder UUID 引用的行存在。
+ * 對每個 FK 欄位的 placeholder UUID，在被引用的表中 INSERT ... ON CONFLICT DO NOTHING。
+ */
+/**
+ * 確保某個 entity 的 FK 欄位引用的行都存在。
+ * 遞歸處理：如 episodes 引用 shows，shows 引用 users → 先建 users，再建 shows。
+ */
+async function ensureFkReferencesExist(
+  dataTable: { headers: string[]; rows: Record<string, string>[] },
+  entityName: string,
+  schemas: DatabaseSchema[],
+  pool: Pool,
+  depth: number = 0
+): Promise<void> {
+  if (depth > 3) return // 防無限遞歸
+  const pair = DatabaseSchema.findSchemaAndTable(schemas, entityName)
+  if (!pair) return
+
+  for (const col of pair.table.columns) {
+    const isFk = col.foreignKey || (col.name.toLowerCase().endsWith('_id') && col.type.toUpperCase().includes('UUID'))
+    if (!isFk) continue
+
+    // 找到這個 FK 欄位在 DataTable 中的值
+    const colIdx = dataTable.headers.findIndex(h => {
+      const clean = h.trim().replace(/^[><$]/, '').split('.').pop() || ''
+      return toSnakeCase(clean).toLowerCase() === col.name.toLowerCase()
+    })
+    if (colIdx === -1) continue
+
+    for (const row of dataTable.rows) {
+      const value = row[dataTable.headers[colIdx]]
+      if (!value || !isValidUuid(value)) continue
+
+      // 推測被引用的表名
+      let refTable = ''
+      if (col.foreignKey) {
+        refTable = col.foreignKey.split('(')[0].trim()
+      } else {
+        const base = col.name.replace(/_id$/i, '')
+        for (const suffix of ['s', 'es']) {
+          const candidate = base + suffix
+          if (schemas.some(s => s.tables.some(t => t.tableName.toLowerCase() === candidate.toLowerCase()))) {
+            refTable = candidate
+            break
+          }
+        }
+      }
+
+      if (!refTable) continue
+
+      // 構建完整 INSERT — 包含被引用表的 NOT NULL 欄位
+      const refTableSchema = schemas.flatMap(s => s.tables).find(t => t.tableName.toLowerCase() === refTable.toLowerCase())
+      const columns = ['id']
+      const values: unknown[] = [value]
+
+      if (refTableSchema) {
+        // 先遞歸確保被引用表自身的 FK 引用存在
+        const refFkHeaders: string[] = []
+        const refFkRow: Record<string, string> = {}
+
+        for (const refCol of refTableSchema.columns) {
+          if (refCol.primaryKey || refCol.name.toLowerCase() === 'id') continue
+          if (!refCol.notNull || refCol.defaultValue) continue
+
+          const placeholder = inferPlaceholder(refCol.name, refCol.type)
+          columns.push(refCol.name)
+          values.push(placeholder)
+
+          // 收集 FK 欄位以便遞歸
+          const isRefFk = refCol.foreignKey || (refCol.name.toLowerCase().endsWith('_id') && refCol.type.toUpperCase().includes('UUID'))
+          if (isRefFk) {
+            refFkHeaders.push(refCol.name)
+            refFkRow[refCol.name] = placeholder
+          }
+        }
+
+        // 遞歸：先建立被引用表的 FK 引用（如 shows.user_id → users）
+        if (refFkHeaders.length > 0) {
+          // 找出被引用表對應的 entity name（表名的單數形式）
+          const refEntityName = refTableSchema.tableName
+          await ensureFkReferencesExist(
+            { headers: refFkHeaders, rows: [refFkRow] },
+            refEntityName,
+            schemas,
+            pool,
+            depth + 1
+          )
+        }
+      }
+
+      const placeholders = columns.map((_, i) => `$${i + 1}`).join(', ')
+
+      try {
+        await pool.query(
+          `INSERT INTO ${refTable} (${columns.join(', ')}) VALUES (${placeholders}) ON CONFLICT (id) DO NOTHING`,
+          values
+        )
+      } catch (err) {
+        logger.debug({ refTable, fkCol: col.name, err: String(err).slice(0, 100) }, 'FK reference auto-insert 失敗')
+      }
+    }
+  }
+}
+
+/**
  * entity_setup 前，自動補齊缺少的 NOT NULL（無 DEFAULT）欄位。
  * 避免 Feature file 因省略前置資料的非關鍵欄位而導致 INSERT 失敗。
  */
@@ -347,10 +452,17 @@ function fillMissingNotNullColumns(
   for (const col of pair.table.columns) {
     if (!col.notNull || col.defaultValue || col.primaryKey || col.autoIncrement) continue
     if (existingCols.has(col.name.toLowerCase())) continue
-    // 跳過 FK 欄位 — 填 placeholder UUID 會觸發 FK constraint violation
-    // foreignKey 來自 CONSTRAINT 行；name 以 _id 結尾 + UUID 型別 → 幾乎肯定是 FK
-    if (col.foreignKey) continue
-    if (col.name.toLowerCase().endsWith('_id') && col.type.toUpperCase().includes('UUID')) continue
+
+    // FK UUID 欄位：填入確定性 placeholder UUID（後續 ensureFkReferencesExist 會建立被引用的行）
+    const isFk = col.foreignKey || (col.name.toLowerCase().endsWith('_id') && col.type.toUpperCase().includes('UUID'))
+    if (isFk) {
+      const fkPlaceholder = deterministicUuid(`__fk_placeholder_${col.name}`)
+      dataTable.headers.push(col.name)
+      for (const row of dataTable.rows) {
+        row[col.name] = fkPlaceholder
+      }
+      continue
+    }
 
     // 根據欄位名稱 + 型別推導佔位值
     const placeholder = inferPlaceholder(col.name, col.type)
@@ -554,6 +666,7 @@ async function executeStep(
   instructionSet: InstructionSet,
   scenarioContext: ScenarioContext,
   schemas: DatabaseSchema[],
+  pool: Pool,
   featureSummary?: string
 ): Promise<StepResult> {
   const start = Date.now()
@@ -568,6 +681,8 @@ async function executeStep(
         const idFixedDt = resolveEntityIdHeaders(setupDt, captures.entity, schemas)
         const filledDt = fillMissingNotNullColumns(idFixedDt, captures.entity, schemas)
         const uuidFixedDt = fixNonUuidValues(filledDt, captures.entity, schemas)
+        // 自動建立 FK 引用的行（如 episodes 引用 shows → 先建立 shows 行）
+        await ensureFkReferencesExist(uuidFixedDt, captures.entity, schemas, pool)
         await instructionSet.entitySetup.setup(
           captures.entity,
           uuidFixedDt.headers,
@@ -717,7 +832,8 @@ async function executeScenario(
   instructions: IsaInstruction[],
   instructionSet: InstructionSet,
   scenarioContext: ScenarioContext,
-  schemas: DatabaseSchema[]
+  schemas: DatabaseSchema[],
+  pool: Pool
 ): Promise<ScenarioResult> {
   scenarioContext.reset()
 
@@ -763,7 +879,7 @@ async function executeScenario(
       continue
     }
 
-    const stepResult = await executeStep(step, matched, instructionSet, scenarioContext, schemas, feature.name)
+    const stepResult = await executeStep(step, matched, instructionSet, scenarioContext, schemas, pool, feature.name)
     result.steps.push(stepResult)
 
     if (stepResult.status === 'failed') {
@@ -876,7 +992,8 @@ export async function runAllFeatures(input: {
         isaSpec.instructions,
         instructionSet,
         scenarioContext,
-        schemas
+        schemas,
+        input.pool
       )
       allResults.push(result)
     }
