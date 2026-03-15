@@ -237,6 +237,11 @@ async function main() {
 
   const startTime = Date.now()
 
+  const skipStageA = process.argv.includes('--skip-stage-a')
+  if (skipStageA) {
+    console.log('  ⚡ 跳過 Stage A（從 DB 讀取已保存的 coder files）')
+  }
+
   try {
     // Step 1: 讀取 BDD 資料
     const bdd = await loadBddData()
@@ -244,16 +249,37 @@ async function main() {
     // Step 2: 讀取 Neon 連線
     const neonConnectionString = await loadNeonConnection()
 
-    // Step 3: Stage A — 代碼生成
-    const stageAResult = await runStageA(bdd)
+    let backendFiles: Array<{ path: string; content: string; description: string }>
 
-    // Step 4: 保存到 DB
-    await saveToDb(stageAResult.backendFiles)
+    if (skipStageA) {
+      // 從 DB 讀取已保存的 coder files
+      console.log('\n📂 [Step 3] 從 DB 讀取 coder files...')
+      const rows = await pool.query<{ file_path: string; content: string; description: string | null }>(
+        `SELECT file_path, content, description FROM project_files
+         WHERE project_id = $1 AND skill_source = 'coder'
+         AND (file_path LIKE 'lib/%' OR file_path LIKE 'api/%' OR file_path LIKE 'app/api/%')`,
+        [PROJECT_ID]
+      )
+      backendFiles = rows.rows.map(r => ({
+        path: r.file_path,
+        content: r.content,
+        description: r.description || '',
+      }))
+      console.log(`  ✅ 讀取了 ${backendFiles.length} 個檔案`)
+      for (const f of backendFiles) {
+        console.log(`    ${f.path} (${f.content.split('\n').length} 行)`)
+      }
+    } else {
+      // Stage A — 代碼生成
+      const stageAResult = await runStageA(bdd)
+      await saveToDb(stageAResult.backendFiles)
+      backendFiles = stageAResult.backendFiles
+    }
 
     // Step 5: Stage B — SpecFormula 測試
     const stageBResult = await runStageB(
       bdd,
-      stageAResult.backendFiles,
+      backendFiles,
       neonConnectionString,
     )
 
