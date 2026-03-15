@@ -971,8 +971,25 @@ export async function runSpecFormulaValidation(input: {
     // 2. 建立 HTTP adapter
     const httpAdapter = new UrlHttpAdapter(`http://localhost:${testServer.port}`)
 
-    // 3. 建立 DB pool（直接連 Neon）
+    // 3. 建立 DB pool（直接連 Neon）+ monkey-patch 偵測 @ 錯誤來源
     const pool = new Pool({ connectionString: input.neonConnectionString })
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    const origQuery = pool.query.bind(pool)
+    const _origQuery = pool.query.bind(pool) as (...a: unknown[]) => Promise<any>
+    ;(pool as any).query = async (...args: unknown[]) => {
+      try {
+        return await _origQuery(...args)
+      } catch (err: any) {
+        if (err?.message?.includes('@')) {
+          logger.error({
+            sql: typeof args[0] === 'string' ? args[0].substring(0, 300) : 'non-string',
+            params: JSON.stringify(args[1])?.substring(0, 300),
+            error: err.message,
+          }, '❌ @ 錯誤 SQL 偵測')
+        }
+        throw err
+      }
+    }
 
     try {
       // 4. 將 MySQL DDL 轉換為 PostgreSQL DDL（EntityDdlReader 需要正確的 PG 型別）
