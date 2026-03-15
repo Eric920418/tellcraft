@@ -10,6 +10,7 @@ import * as os from 'os'
 import { ChildProcess, spawn } from 'child_process'
 import { Pool } from 'pg'
 import { createLogger } from '../lib/logger'
+import { deriveSchemaFromBdd } from './schema-derivation'
 import type { GeneratedComponent } from './uiux-generation'
 import type { IsaSpec, IsaInstruction } from '../lib/specformula/spec/isa/models'
 import type { ApiSpec } from '../lib/specformula/spec/api/models'
@@ -952,13 +953,18 @@ export async function runSpecFormulaValidation(input: {
     const pool = new Pool({ connectionString: input.neonConnectionString })
 
     try {
-      // 4. 執行所有 Feature Files
+      // 4. 將 MySQL DDL 轉換為 PostgreSQL DDL（EntityDdlReader 需要正確的 PG 型別）
+      const derived = deriveSchemaFromBdd(input.schemaSql, input.entityMapping)
+      const pgSchemaSql = derived.postgresqlDDL
+      logger.info({ entityCount: derived.entityCount }, 'MySQL DDL → PostgreSQL DDL 轉換完成')
+
+      // 5. 執行所有 Feature Files
       await input.onProgress('開始執行測試...', 30)
       const result = await runAllFeatures({
         features: input.featureFiles,
         isaConfigYml: input.isaConfigYml,
         openApiSpec: input.openApiSpec,
-        schemaSql: input.schemaSql,
+        schemaSql: pgSchemaSql,
         entityMapping: input.entityMapping,
         httpAdapter,
         pool,
