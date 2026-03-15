@@ -340,7 +340,7 @@ async function executeStep(
       keyword,
       text: step.text,
       status: 'failed',
-      error: err instanceof Error ? err.message : String(err),
+      error: `[${instruction.instruction_type}] ${err instanceof Error ? err.message : String(err)}`,
       durationMs: Date.now() - start,
     }
   }
@@ -684,10 +684,16 @@ export async function startTestServer(config: TestServerConfig): Promise<TestSer
     //    neon() 的 function-call 模式 sql('query', [params]) 可能做字串替換而非真正 parameterized query
     //    在 test server 中用 pg Pool 確保正確的參數化查詢
     const pgDbContent = `import { Pool } from 'pg'
+console.log('[db.ts] pg Pool 版本已載入 — DATABASE_URL:', process.env.DATABASE_URL?.substring(0, 30) + '...')
 const pool = new Pool({ connectionString: process.env.DATABASE_URL, ssl: { rejectUnauthorized: false } })
 export async function sql<T = any>(query: string, params?: any[]): Promise<T[]> {
-  const result = await pool.query(query, params)
-  return result.rows as T[]
+  try {
+    const result = await pool.query(query, params)
+    return result.rows as T[]
+  } catch (err: any) {
+    console.error('[db.ts] SQL ERROR:', err.message, '\\nQuery:', typeof query === 'string' ? query.substring(0, 200) : 'NON-STRING:' + JSON.stringify(query).substring(0, 200), '\\nParams:', JSON.stringify(params)?.substring(0, 200))
+    throw err
+  }
 }
 export default sql
 `
