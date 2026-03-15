@@ -829,6 +829,15 @@ ${schemaSql}
     .replace(/【/g, '[')
     .replace(/】/g, ']')
 
+  // 語法驗證：用 esbuild 快速檢查 TypeScript 語法
+  try {
+    const esbuild = await import('esbuild')
+    await esbuild.transform(fixed, { loader: 'ts' })
+  } catch (syntaxErr) {
+    logger.warn({ actionName, error: String(syntaxErr).slice(0, 200) }, 'LLM 修復代碼有語法錯誤，使用原始代碼')
+    return currentCode
+  }
+
   logger.info({ actionName }, 'LLM 修復完成')
   return fixed
 }
