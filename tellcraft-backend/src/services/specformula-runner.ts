@@ -424,7 +424,7 @@ async function ensureFkReferencesExist(
           `INSERT INTO ${refTable} (${columns.join(', ')}) VALUES (${placeholders}) ON CONFLICT (id) DO NOTHING`,
           values
         )
-        logger.info({ refTable, fkCol: col.name, id: value, columns: columns.length }, 'FK reference auto-insert 成功')
+        logger.debug({ refTable, fkCol: col.name, id: value, columns: columns.length }, 'FK reference auto-insert 成功')
       } catch (err) {
         logger.warn({ refTable, fkCol: col.name, columns, err: String(err).slice(0, 200) }, 'FK reference auto-insert 失敗')
       }
