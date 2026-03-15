@@ -602,24 +602,34 @@ function detectExtraDependencies(files: GeneratedComponent[]): Record<string, st
   // Node.js 內建模組（不需安裝）
   const BUILTIN = new Set(['crypto', 'fs', 'path', 'os', 'url', 'util', 'http', 'https', 'buffer', 'stream', 'events', 'querystring', 'child_process', 'net', 'tls', 'dns', 'assert', 'zlib'])
 
+  // 只掃描 lib/ 開頭的檔案（action 代碼）；api/*/route.ts 會 import next/server 和 @/ alias，不需安裝
+  const SKIP_PACKAGES = new Set(['express', 'next', 'react', 'react-dom'])
   const deps: Record<string, string> = {}
 
   for (const file of files) {
-    // 匹配 import ... from 'pkg' 和 require('pkg')
-    const importRegex = /(?:import\s+.*?\s+from\s+['"]([^./][^'"]*?)(?:\/[^'"]*)?['"]|require\s*\(\s*['"]([^./][^'"]*?)(?:\/[^'"]*)?['"]\s*\))/g
+    if (!file.path.startsWith('lib/')) continue
+
+    // 匹配 import ... from 'pkg' 和 require('pkg')——捕獲完整的 module specifier
+    const importRegex = /(?:import\s+.*?\s+from\s+['"]([^'"]+)['"]|require\s*\(\s*['"]([^'"]+)['"]\s*\))/g
     let m: RegExpExecArray | null
     while ((m = importRegex.exec(file.content)) !== null) {
-      const pkg = m[1] || m[2]
-      if (!pkg) continue
-      // 跳過相對路徑、@/ alias、內建模組、已有的 express/@neondatabase
-      if (pkg.startsWith('.') || pkg.startsWith('@/') || BUILTIN.has(pkg)) continue
-      if (pkg === 'express' || pkg.startsWith('@neondatabase')) continue
-      // scoped package: @scope/name
-      const pkgName = pkg.startsWith('@') ? pkg.split('/').slice(0, 2).join('/') : pkg.split('/')[0]
+      const raw = m[1] || m[2]
+      if (!raw) continue
+      // 跳過相對路徑、@/ alias、node: prefix
+      if (raw.startsWith('.') || raw.startsWith('@/') || raw.startsWith('node:')) continue
+
+      // 提取 package name（scoped: @scope/name，non-scoped: name）
+      const parts = raw.split('/')
+      const pkgName = raw.startsWith('@') && parts.length >= 2
+        ? `${parts[0]}/${parts[1]}`
+        : parts[0]
+
+      if (!pkgName || BUILTIN.has(pkgName) || SKIP_PACKAGES.has(pkgName)) continue
+      if (pkgName.startsWith('@neondatabase')) continue
+
       if (KNOWN_PACKAGES[pkgName]) {
         deps[pkgName] = KNOWN_PACKAGES[pkgName]
       } else {
-        // 未知套件，用 latest
         deps[pkgName] = 'latest'
       }
     }
