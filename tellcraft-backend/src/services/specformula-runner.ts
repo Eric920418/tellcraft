@@ -324,6 +324,54 @@ function fixDataTableBySchema(
   return dataTable
 }
 
+/**
+ * entity_setup 前，自動補齊缺少的 NOT NULL（無 DEFAULT）欄位。
+ * 避免 Feature file 因省略前置資料的非關鍵欄位而導致 INSERT 失敗。
+ */
+function fillMissingNotNullColumns(
+  dataTable: { headers: string[]; rows: Record<string, string>[] },
+  entityName: string,
+  schemas: DatabaseSchema[]
+): { headers: string[]; rows: Record<string, string>[] } {
+  const pair = DatabaseSchema.findSchemaAndTable(schemas, entityName)
+  if (!pair) return dataTable
+
+  const existingCols = new Set(
+    dataTable.headers.map(h => {
+      const clean = h.trim().replace(/^[><$]/, '').split('.').pop() || ''
+      return toSnakeCase(clean).toLowerCase()
+    })
+  )
+
+  for (const col of pair.table.columns) {
+    if (!col.notNull || col.defaultValue || col.primaryKey || col.autoIncrement) continue
+    if (existingCols.has(col.name.toLowerCase())) continue
+
+    // 根據欄位名稱 + 型別推導佔位值
+    const placeholder = inferPlaceholder(col.name, col.type)
+    dataTable.headers.push(col.name)
+    for (const row of dataTable.rows) {
+      row[col.name] = placeholder
+    }
+  }
+  return dataTable
+}
+
+function inferPlaceholder(name: string, type: string): string {
+  const n = name.toLowerCase()
+  const t = type.toUpperCase()
+  if (n.includes('hash') || n.includes('password')) return 'placeholder_hash'
+  if (n.includes('email')) return 'placeholder@example.com'
+  if (n.includes('url') || n.includes('image') || n.includes('photo')) return 'https://example.com/placeholder'
+  if (n.includes('slug')) return 'placeholder-slug'
+  if (t.includes('UUID')) return '00000000-0000-0000-0000-000000000000'
+  if (t.includes('INT') || t.includes('NUMERIC') || t.includes('DECIMAL')) return '0'
+  if (t.includes('BOOL')) return 'false'
+  if (t.includes('TIMESTAMP') || t.includes('DATE')) return '2024-01-01T00:00:00Z'
+  if (t.includes('JSON')) return '{}'
+  return 'placeholder'
+}
+
 // ============================================================
 // 步驟執行
 // ============================================================
@@ -345,10 +393,11 @@ async function executeStep(
       case 'entity_setup': {
         if (!step.dataTable) throw new Error('entity_setup 需要 DataTable')
         const setupDt = fixDataTableBySchema(step.dataTable, captures.entity, schemas)
+        const filledDt = fillMissingNotNullColumns(setupDt, captures.entity, schemas)
         await instructionSet.entitySetup.setup(
           captures.entity,
-          setupDt.headers,
-          setupDt.rows
+          filledDt.headers,
+          filledDt.rows
         )
         break
       }
