@@ -992,18 +992,38 @@ export async function startTestServer(config: TestServerConfig): Promise<TestSer
     // 2. 覆寫 lib/db.ts — 用 pg Pool 取代 neon tagged template
     //    neon() 的 function-call 模式 sql('query', [params]) 可能做字串替換而非真正 parameterized query
     //    在 test server 中用 pg Pool 確保正確的參數化查詢
+    // db.ts 需要同時支持兩種呼叫方式：
+    //   1. neon tagged template: sql\`SELECT ... WHERE id = \${value}\`
+    //   2. 普通函數呼叫: sql('SELECT ... WHERE id = $1', [value])
     const pgDbContent = `import { Pool } from 'pg'
-console.log('[db.ts] pg Pool 版本已載入 — DATABASE_URL:', process.env.DATABASE_URL?.substring(0, 30) + '...')
 const pool = new Pool({ connectionString: process.env.DATABASE_URL, ssl: { rejectUnauthorized: false } })
-export async function sql<T = any>(query: string, params?: any[]): Promise<T[]> {
+
+async function execQuery<T = any>(query: string, params?: any[]): Promise<T[]> {
   try {
     const result = await pool.query(query, params)
     return result.rows as T[]
   } catch (err: any) {
-    console.error('[db.ts] SQL ERROR:', err.message, '\\nQuery:', typeof query === 'string' ? query.substring(0, 200) : 'NON-STRING:' + JSON.stringify(query).substring(0, 200), '\\nParams:', JSON.stringify(params)?.substring(0, 200))
+    console.error('[db.ts] SQL ERROR:', err.message, '\\nQuery:', query?.substring?.(0, 200), '\\nParams:', JSON.stringify(params)?.substring(0, 200))
     throw err
   }
 }
+
+// 支持 tagged template 和普通函數呼叫
+export function sql<T = any>(stringsOrQuery: TemplateStringsArray | string, ...values: any[]): Promise<T[]> {
+  if (typeof stringsOrQuery === 'string') {
+    // 普通呼叫: sql('SELECT ... $1', [params])
+    return execQuery<T>(stringsOrQuery, values[0])
+  }
+  // Tagged template: sql\\\`SELECT ... WHERE id = \\\${value}\\\`
+  const strings = stringsOrQuery as TemplateStringsArray
+  let query = ''
+  for (let i = 0; i < strings.length; i++) {
+    query += strings[i]
+    if (i < values.length) query += '$' + (i + 1)
+  }
+  return execQuery<T>(query, values)
+}
+
 export default sql
 `
     const dbFilePath = path.join(tmpDir, 'lib/db.ts')
