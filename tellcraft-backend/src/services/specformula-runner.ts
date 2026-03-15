@@ -576,6 +576,62 @@ async function cleanupTables(pool: Pool, schemas: DatabaseSchema[]): Promise<voi
 // Mini Express Test Server Manager
 // ============================================================
 
+/**
+ * 掃描 action 檔案的 import，偵測需要額外安裝的 npm 套件
+ * LLM 生成的代碼可能 import bcryptjs, jsonwebtoken, uuid 等
+ */
+function detectExtraDependencies(files: GeneratedComponent[]): Record<string, string> {
+  // 常見套件白名單（名稱 → 版本）
+  const KNOWN_PACKAGES: Record<string, string> = {
+    'bcryptjs': '^2.4.3',
+    'bcrypt': '^5.1.1',
+    'jsonwebtoken': '^9.0.2',
+    'uuid': '^10.0.0',
+    'crypto-js': '^4.2.0',
+    'dayjs': '^1.11.13',
+    'date-fns': '^4.1.0',
+    'lodash': '^4.17.21',
+    'validator': '^13.12.0',
+    'zod': '^3.24.0',
+    'nanoid': '^5.0.0',
+    'slugify': '^1.6.6',
+    'marked': '^15.0.0',
+    'sanitize-html': '^2.14.0',
+  }
+
+  // Node.js 內建模組（不需安裝）
+  const BUILTIN = new Set(['crypto', 'fs', 'path', 'os', 'url', 'util', 'http', 'https', 'buffer', 'stream', 'events', 'querystring', 'child_process', 'net', 'tls', 'dns', 'assert', 'zlib'])
+
+  const deps: Record<string, string> = {}
+
+  for (const file of files) {
+    // 匹配 import ... from 'pkg' 和 require('pkg')
+    const importRegex = /(?:import\s+.*?\s+from\s+['"]([^./][^'"]*?)(?:\/[^'"]*)?['"]|require\s*\(\s*['"]([^./][^'"]*?)(?:\/[^'"]*)?['"]\s*\))/g
+    let m: RegExpExecArray | null
+    while ((m = importRegex.exec(file.content)) !== null) {
+      const pkg = m[1] || m[2]
+      if (!pkg) continue
+      // 跳過相對路徑、@/ alias、內建模組、已有的 express/@neondatabase
+      if (pkg.startsWith('.') || pkg.startsWith('@/') || BUILTIN.has(pkg)) continue
+      if (pkg === 'express' || pkg.startsWith('@neondatabase')) continue
+      // scoped package: @scope/name
+      const pkgName = pkg.startsWith('@') ? pkg.split('/').slice(0, 2).join('/') : pkg.split('/')[0]
+      if (KNOWN_PACKAGES[pkgName]) {
+        deps[pkgName] = KNOWN_PACKAGES[pkgName]
+      } else {
+        // 未知套件，用 latest
+        deps[pkgName] = 'latest'
+      }
+    }
+  }
+
+  if (Object.keys(deps).length > 0) {
+    logger.info({ extraDeps: Object.keys(deps) }, '偵測到額外依賴')
+  }
+
+  return deps
+}
+
 export interface TestServerConfig {
   backendFiles: GeneratedComponent[]  // lib/db.ts + lib/actions/*.ts
   actionsYml: string                  // 用於生成 test-server.ts 路由
@@ -622,7 +678,8 @@ export async function startTestServer(config: TestServerConfig): Promise<TestSer
       },
     }, null, 2), 'utf-8')
 
-    // 4. package.json（最小依賴）
+    // 4. package.json（最小依賴 + 掃描 action import 動態加入）
+    const extraDeps = detectExtraDependencies(config.backendFiles)
     fs.writeFileSync(path.join(tmpDir, 'package.json'), JSON.stringify({
       name: 'tellcraft-test',
       private: true,
@@ -630,6 +687,7 @@ export async function startTestServer(config: TestServerConfig): Promise<TestSer
       dependencies: {
         'express': '^4.21.0',
         '@neondatabase/serverless': '^0.10.0',
+        ...extraDeps,
       },
       devDependencies: {
         'tsx': '^4.19.0',
