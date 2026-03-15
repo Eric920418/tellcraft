@@ -203,6 +203,12 @@ export class EntityDdlReader {
       col.checkConstraint = checkMatch[1];
     }
 
+    // Inline REFERENCES: e.g., "show_id UUID NOT NULL REFERENCES shows(id)"
+    const inlineRefMatch = /REFERENCES\s+(\w+)\s*\((\w+)\)/i.exec(constraints);
+    if (inlineRefMatch) {
+      col.foreignKey = `${inlineRefMatch[1]}.${inlineRefMatch[2]}`;
+    }
+
     return col;
   }
 

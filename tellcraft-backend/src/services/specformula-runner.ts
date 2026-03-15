@@ -362,7 +362,8 @@ async function ensureFkReferencesExist(
       // 推測被引用的表名
       let refTable = ''
       if (col.foreignKey) {
-        refTable = col.foreignKey.split('(')[0].trim()
+        // foreignKey 格式: "table.column" 或 "table(column)"
+        refTable = col.foreignKey.split(/[.(]/)[0].trim()
       } else {
         const base = col.name.replace(/_id$/i, '')
         for (const suffix of ['s', 'es']) {
@@ -423,8 +424,9 @@ async function ensureFkReferencesExist(
           `INSERT INTO ${refTable} (${columns.join(', ')}) VALUES (${placeholders}) ON CONFLICT (id) DO NOTHING`,
           values
         )
+        logger.info({ refTable, fkCol: col.name, id: value, columns: columns.length }, 'FK reference auto-insert 成功')
       } catch (err) {
-        logger.debug({ refTable, fkCol: col.name, err: String(err).slice(0, 100) }, 'FK reference auto-insert 失敗')
+        logger.warn({ refTable, fkCol: col.name, columns, err: String(err).slice(0, 200) }, 'FK reference auto-insert 失敗')
       }
     }
   }
