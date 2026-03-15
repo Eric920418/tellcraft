@@ -215,6 +215,15 @@ export async function actionName(input: XxxInput): Promise<XxxOutput> {
 }
 \`\`\`
 
+## HTTP Status Code
+成功回應時，必須在返回物件中加入 __status 欄位表示 HTTP 狀態碼。
+- 建立/新增操作：__status: 201
+- 查詢/列表操作：__status: 200
+- 更新操作：__status: 200
+- 刪除操作：__status: 200
+- 登入/登出等操作：__status: 200
+例如：return { __status: 201, email, role }
+
 ## 輸出
 只輸出 TypeScript 代碼，不要任何解釋或 markdown 包裹。`
 }

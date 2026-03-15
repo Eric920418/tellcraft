@@ -216,7 +216,8 @@ async function executeStep(
   step: ParsedStep,
   matched: MatchResult,
   instructionSet: InstructionSet,
-  scenarioContext: ScenarioContext
+  scenarioContext: ScenarioContext,
+  featureSummary?: string
 ): Promise<StepResult> {
   const start = Date.now()
   const keyword = step.keyword.trim()
@@ -241,7 +242,9 @@ async function executeStep(
 
       case 'api_call': {
         if (!step.dataTable) throw new Error('api_call 需要 DataTable')
-        const summary = captures.summary
+        // Feature name = OpenAPI summary；step summary 可能是子操作名（如「使用者註冊」≠「使用者註冊與登入」）
+        // 優先用 featureSummary 保證與 OpenAPI spec 一致
+        const summary = featureSummary || captures.summary
         if (captures.actor) {
           await instructionSet.apiCall.invokeWithActor(
             step.dataTable.headers,
@@ -390,7 +393,7 @@ async function executeScenario(
       continue
     }
 
-    const stepResult = await executeStep(step, matched, instructionSet, scenarioContext)
+    const stepResult = await executeStep(step, matched, instructionSet, scenarioContext, feature.name)
     result.steps.push(stepResult)
 
     if (stepResult.status === 'failed') {
@@ -740,25 +743,23 @@ function generateTestServerCode(
 
       actionImports.push(`import { ${fnName} } from './lib/actions/${kebabName}'`)
 
-      if (method === 'GET') {
-        actionRoutes.push(`app.get('${apiPath}', async (req, res) => {
+      // 註冊所有 HTTP 方法 — 同一 Feature 內可能有 POST/GET/PUT/DELETE 操作
+      // status code 由 action 函數的 __status 欄位控制
+      actionRoutes.push(`app.all('${apiPath}', async (req, res) => {
   try {
-    const result = await ${fnName}(req.query as any)
-    res.status(200).json(result)
+    const input = req.method === 'GET' ? req.query : req.body
+    const result = await ${fnName}(input as any)
+    const status = result?.__status || ${statusCode}
+    if (result?.__status) {
+      const { __status, ...data } = result
+      res.status(status).json(data)
+    } else {
+      res.status(status).json(result)
+    }
   } catch (e: any) {
     res.status(400).json({ error: e?.message || 'Unknown error' })
   }
 })`)
-      } else {
-        actionRoutes.push(`app.${method.toLowerCase()}('${apiPath}', async (req, res) => {
-  try {
-    const result = await ${fnName}(req.body)
-    res.status(${statusCode}).json(result)
-  } catch (e: any) {
-    res.status(400).json({ error: e?.message || 'Unknown error' })
-  }
-})`)
-      }
     }
   }
 
