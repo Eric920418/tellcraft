@@ -47,7 +47,7 @@ const envSchema = z.object({
 
   // Neon Database Provisioning（自動建立客戶 DB）
   NEON_API_KEY: z.string().optional(),
-  NEON_DEFAULT_REGION: z.string().default('aws-ap-northeast-1'),
+  NEON_DEFAULT_REGION: z.string().default('aws-ap-southeast-1'),
   // Cloudflare / Porkbun (DNS)
   CLOUDFLARE_API_TOKEN: z.string().optional(),
   CLOUDFLARE_ACCOUNT_ID: z.string().optional(),

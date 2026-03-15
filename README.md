@@ -727,17 +727,26 @@ Stage B 待做：
 - [x] 用戶觸發：Coder 完成後「驗證後端」quickReply（`__verify_backend__`）
 - [x] `convertToOpenAPI()` 優化：優先使用 actionsYml 中的 method/path
 
-### P1：BDD 格式遷移（ISA SpecFormula 標準）
+### P1：BDD 格式遷移（ISA SpecFormula 標準）（✅ 在 P0b 開發中已完成）
 
-BDD Skill 的 Feature File 輸出格式需從 Tellcraft 舊格式升級到 SpecFormula 標準：
+BDD Skill 的 Feature File 輸出格式已從 Tellcraft 舊格式升級到 SpecFormula 標準：
 
-- [ ] `bdd-spec/instructions/03-formulation.md` — LLM prompt 格式說明改寫（Actor 前綴、status code 回應、VAR 系統）
-- [ ] `bdd-spec/rules/formulation-rules.md` — 語法規範同步
-- [ ] `bdd-spec/resources/templates/` + `examples/` — 範例改寫
-- [ ] `bdd-spec/scripts/lint-gherkin-format.ts` — ISA_PATTERNS regex 更新
-- [ ] `bdd-spec/scripts/validate-feature.ts` — E006/E007 格式檢查更新
-- [ ] `tellcraft-backend/src/services/formulation.ts` — LLM prompt 全面更新（至少 3 處）
-- [ ] `tellcraft-backend/src/services/isa-config.ts` — `buildInstructions()` 輸出格式改為 SpecFormula 標準
+- [x] `bdd-spec/instructions/03-formulation.md` — LLM prompt 格式說明改寫（Actor 前綴、status code 回應、VAR 系統）
+- [x] `bdd-spec/rules/formulation-rules.md` — 語法規範同步
+- [x] `bdd-spec/resources/templates/` + `examples/` — 範例改寫
+- [x] `bdd-spec/scripts/lint-gherkin-format.ts` — ISA_PATTERNS regex 更新
+- [x] `bdd-spec/scripts/validate-feature.ts` — E006/E007 格式檢查更新
+- [x] `tellcraft-backend/src/services/formulation.ts` — LLM prompt 全面更新（至少 3 處）
+- [x] `tellcraft-backend/src/services/isa-config.ts` — `buildInstructions()` 輸出格式改為 SpecFormula 標準
+
+**端到端驗證（2026-03-15）**：三層格式一致性已確認 + DB 遷移 + Neon DB Provision 測試
+- lint（8 種 ISA regex）+ validate（E001-E010）+ `generateIsaConfig()` + `matchStepToInstruction()` 全部對齊
+- 模擬 Feature Files（3 檔 36 步驟）lint/validate/ISA Config/步驟匹配 100% 通過
+- 真實 Podcast DB Feature Files（7 檔）已遷移至 ISA 格式：features_content（154 fixes）+ actions_yml_content（79 fixes）
+- ISA Config 重新生成（`generateIsaConfig()`）：6 instructions、91 action_call + 41 entity_setup + 36 response_validate、覆蓋率 100%
+- `schema-derivation.ts` 修復：支持 MySQL TABLE COMMENT / ENUM / DATETIME / REGEXP / 複合主鍵 / 分離 FK CONSTRAINT
+- Neon DB Provision 端到端測試通過：建立 project（~2s）→ 7 張表 DDL 套用 → UUID/FK 驗證 → 測試插入成功
+- Neon `aws-ap-northeast-1` 區域已移除，預設改為 `aws-ap-southeast-1`（env.ts + VPS .env）
 
 ### P2：部署 Pipeline 擴展（✅ 大部分已完成）
 
@@ -755,7 +764,7 @@ BDD Skill 的 Feature File 輸出格式需從 Tellcraft 舊格式升級到 SpecF
 
 - [ ] i18n Phase 3：VPS 後端錯誤訊息 error code 化 + LLM prompts i18n + Remotion 動畫標籤
 - [ ] `sdd.os/` 上游同步機制（SpecFormula Java 更新時，同步到 TS 版）
-- [ ] ISA config 統一為 `api_call`（取代 `cucumberjs_server_action`，與 SpecFormula HTTP 測試對齊）
+- [x] ISA config 統一為 `api_call`（取代 `cucumberjs_server_action`，與 SpecFormula HTTP 測試對齊）— `isa-config.ts` L56
 
 ## 部署
 

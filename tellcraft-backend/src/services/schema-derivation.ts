@@ -19,7 +19,7 @@ export interface DerivedEntity {
 
 export interface DerivedSchema {
   displaySummary: string     // 給用戶看的可讀中文摘要
-  postgresqlDDL: string      // 可直接在 Supabase 執行的 SQL
+  postgresqlDDL: string      // 可直接在 Neon PostgreSQL 執行的 SQL
   entityCount: number
   entities: DerivedEntity[]
 }
@@ -50,18 +50,49 @@ interface ParsedTable {
   columns: string[]
 }
 
+/**
+ * 括號平衡的逗號分割，正確處理 ENUM('a', 'b') 和 PRIMARY KEY (col1, col2)
+ */
+function splitColumnsBalanced(body: string): string[] {
+  const parts: string[] = []
+  let depth = 0
+  let current = ''
+  let inString = false
+
+  for (const ch of body) {
+    if (inString) {
+      current += ch
+      if (ch === "'") inString = false
+      continue
+    }
+    if (ch === "'") {
+      inString = true
+      current += ch
+      continue
+    }
+    if (ch === '(') { depth++; current += ch; continue }
+    if (ch === ')') { depth--; current += ch; continue }
+    if (ch === ',' && depth === 0) {
+      if (current.trim()) parts.push(current.trim())
+      current = ''
+      continue
+    }
+    current += ch
+  }
+  if (current.trim()) parts.push(current.trim())
+  return parts
+}
+
 function parseCreateTables(schemaSql: string): ParsedTable[] {
   const tables: ParsedTable[] = []
-  const regex = /CREATE\s+TABLE\s+(\w+)\s*\(([\s\S]*?)\);/gi
+  // 支持 MySQL TABLE COMMENT 語法：) COMMENT '...'; 或直接 );
+  const regex = /CREATE\s+TABLE\s+(\w+)\s*\(([\s\S]*?)\)\s*(?:COMMENT\s+'[^']*')?\s*;/gi
   let match: RegExpExecArray | null
 
   while ((match = regex.exec(schemaSql)) !== null) {
     const tableName = match[1].toLowerCase()
     const body = match[2]
-    const columns = body
-      .split(',')
-      .map(c => c.trim())
-      .filter(c => c.length > 0)
+    const columns = splitColumnsBalanced(body)
     tables.push({ tableName, originalBlock: match[0], columns })
   }
 
@@ -77,7 +108,22 @@ function transformToPostgresqlDDL(tables: ParsedTable[]): string {
     const transformedColumns: string[] = []
     let hasCreatedAt = false
     let hasId = false
+    let hasPrimaryKey = false
 
+    // === Pass 1: 收集 FK 欄位（CONSTRAINT ... FOREIGN KEY (col) REFERENCES ...）===
+    const fkColumns = new Set<string>()
+    for (const col of table.columns) {
+      const fkMatch = col.match(/CONSTRAINT\s+\w+\s+FOREIGN\s+KEY\s*\((\w+)\)\s+REFERENCES\s+(\w+)\((\w+)\)/i)
+      if (fkMatch) {
+        fkColumns.add(fkMatch[1].toLowerCase())
+      }
+      // 偵測複合 PRIMARY KEY
+      if (/^\s*PRIMARY\s+KEY\s*\(/i.test(col)) {
+        hasPrimaryKey = true
+      }
+    }
+
+    // === Pass 2: 逐欄轉換 ===
     for (const col of table.columns) {
       let transformed = col
 
@@ -85,7 +131,6 @@ function transformToPostgresqlDDL(tables: ParsedTable[]): string {
       const commentMatch = transformed.match(/COMMENT\s+'([^']+)'/i)
       if (commentMatch) {
         transformed = transformed.replace(/\s*COMMENT\s+'[^']+'/i, '')
-        // 提取欄位名稱用於 COMMENT ON
         const colNameMatch = transformed.match(/^\s*(\w+)/)
         if (colNameMatch) {
           commentStatements.push(
@@ -94,7 +139,7 @@ function transformToPostgresqlDDL(tables: ParsedTable[]): string {
         }
       }
 
-      // 檢測 ID 欄位：如果用 VARCHAR PRIMARY KEY → 改為 UUID
+      // 檢測 ID 欄位：VARCHAR PRIMARY KEY → UUID
       if (/^\s*id\s+VARCHAR/i.test(transformed)) {
         transformed = '  id UUID PRIMARY KEY DEFAULT gen_random_uuid()'
         hasId = true
@@ -102,22 +147,57 @@ function transformToPostgresqlDDL(tables: ParsedTable[]): string {
         hasId = true
       }
 
-      // 檢測 created_at
+      // 檢測 created_at / updated_at
       if (/^\s*created_at\s/i.test(transformed)) {
         hasCreatedAt = true
       }
 
-      // VARCHAR(n) 的外鍵引用 → UUID REFERENCES
+      // 檢測複合 PRIMARY KEY → 標記不需要自動加 id
+      if (/^\s*PRIMARY\s+KEY\s*\(/i.test(transformed)) {
+        hasPrimaryKey = true
+        // 轉換裡面的欄位不需要改，直接保留
+      }
+
+      // VARCHAR(n) 的內聯外鍵引用 → UUID REFERENCES
       transformed = transformed.replace(
         /VARCHAR\(\d+\)\s+(NOT\s+NULL\s+)?REFERENCES\s+(\w+)\((\w+)\)/gi,
         'UUID $1REFERENCES $2($3)'
       )
 
+      // FK 欄位（CONSTRAINT 行分離的情況）：VARCHAR(n) → UUID
+      const colNameForFk = transformed.match(/^\s*(\w+)\s+VARCHAR/i)
+      if (colNameForFk && fkColumns.has(colNameForFk[1].toLowerCase())) {
+        transformed = transformed.replace(/VARCHAR\(\d+\)/i, 'UUID')
+      }
+
+      // CONSTRAINT ... FOREIGN KEY → 保留但把 VARCHAR 引用改為 UUID 相容
+      // （CONSTRAINT 行本身不需要改型別，只是聲明關係）
+
+      // MySQL ENUM → VARCHAR + CHECK
+      const enumMatch = transformed.match(/^\s*(\w+)\s+ENUM\(([^)]+)\)/i)
+      if (enumMatch) {
+        const colName = enumMatch[1]
+        const values = enumMatch[2]
+        transformed = transformed.replace(/ENUM\([^)]+\)/i, 'VARCHAR(50)')
+        transformedColumns.push(transformed)
+        transformedColumns.push(`  CONSTRAINT chk_${table.tableName}_${colName}_enum CHECK (${colName} IN (${values}))`)
+        continue
+      }
+
+      // MySQL DATETIME → TIMESTAMPTZ
+      transformed = transformed.replace(/\bDATETIME\b/gi, 'TIMESTAMPTZ')
+
+      // 移除 MySQL ON UPDATE CURRENT_TIMESTAMP（PostgreSQL 用 trigger）
+      transformed = transformed.replace(/\s*ON\s+UPDATE\s+CURRENT_TIMESTAMP/gi, '')
+
+      // MySQL REGEXP → PostgreSQL ~
+      transformed = transformed.replace(/\bREGEXP\b/gi, '~')
+
       transformedColumns.push(transformed)
     }
 
-    // 加入缺少的標準欄位
-    if (!hasId) {
+    // 加入缺少的標準欄位（有複合主鍵時不自動加 id）
+    if (!hasId && !hasPrimaryKey) {
       transformedColumns.unshift('  id UUID PRIMARY KEY DEFAULT gen_random_uuid()')
     }
     if (!hasCreatedAt) {

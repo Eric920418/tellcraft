@@ -379,5 +379,5 @@ Feature 註解：`# Action: actionName` + `# [METHOD] /path` + `# Summary: xxx`
 
 前端（`.env.local`）：`VPS_API_URL`, `NEXT_PUBLIC_VPS_API_URL`, `NEXT_PUBLIC_VPS_WS_URL`, `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `NEXT_PUBLIC_LIFF_ID`, `NEXT_PUBLIC_SENTRY_DSN`, `SENTRY_ORG`, `SENTRY_PROJECT`, `SENTRY_AUTH_TOKEN`
 
-後端（`tellcraft-backend/.env`）：所有環境變數定義在 `lib/env.ts` 的 Zod schema 中，分三層（REQUIRED/OPTIONAL+預設/功能開關）。啟動時 `validateEnv()` 驗證，缺必要變數會立即 crash。關鍵 OPTIONAL 變數：`NEON_API_KEY`（Neon API Bearer Token，自動建立客戶 DB）、`NEON_DEFAULT_REGION`（預設 aws-ap-northeast-1）。
+後端（`tellcraft-backend/.env`）：所有環境變數定義在 `lib/env.ts` 的 Zod schema 中，分三層（REQUIRED/OPTIONAL+預設/功能開關）。啟動時 `validateEnv()` 驗證，缺必要變數會立即 crash。關鍵 OPTIONAL 變數：`NEON_API_KEY`（Neon API Bearer Token，自動建立客戶 DB）、`NEON_DEFAULT_REGION`（預設 aws-ap-southeast-1，注意 aws-ap-northeast-1 已從 Neon 移除）。
 

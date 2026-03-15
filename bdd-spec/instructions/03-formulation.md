@@ -2,7 +2,7 @@
 
 ## 目標
 從原始規格文本（或 ES 規格）中萃取並結構化為規格模型，包含：
-1. **資料模型 (Data Model)**：產出 SQL Schema 和 Entity 映射（供 Supabase 使用）
+1. **資料模型 (Data Model)**：產出 SQL Schema 和 Entity 映射（供 Neon PostgreSQL 使用）
 2. **功能模型 (Functional Model)**：以 **sdd.os ISA SpecFormula 標準** 描述功能規格
 
 支援**三關注點分離**與**草稿批量生成**模式。
@@ -70,7 +70,7 @@
 
 ## sdd.os ISA 格式說明（SpecFormula 標準）
 
-本流程產出的規格採用 **sdd.os ISA SpecFormula 標準** 格式，針對 **Next.js Server Actions + Supabase** 技術棧設計：
+本流程產出的規格採用 **sdd.os ISA SpecFormula 標準** 格式，針對 **Next.js API Routes + Neon PostgreSQL** 技術棧設計：
 
 | 格式 | 說明 | 範例 |
 |------|------|------|
@@ -106,7 +106,7 @@ SpecFormula 使用三種變數前綴取代硬編碼值：
 # Summary: 功能名稱
 ```
 
-**核心價值**：產出的 Gherkin 可直接透過 sdd.os SpecFormula 生成測試程式碼（呼叫 Server Actions + Supabase 驗證）。
+**核心價值**：產出的 Gherkin 可直接透過 sdd.os SpecFormula 生成測試程式碼（呼叫 API Routes + Neon PostgreSQL 驗證）。
 
 ---
 
@@ -333,7 +333,7 @@ Feature: 功能名稱
 ```
 spec/
 ├── data/
-│   ├── schema.sql                    # SQL DDL 定義（供 Supabase 使用）
+│   ├── schema.sql                    # SQL DDL 定義（供 Neon PostgreSQL 使用）
 │   └── entity_to_table_mapping.yml   # Entity 與表映射
 ├── features/
 │   ├── 建立訂單.feature              # sdd.os ISA Gherkin (四類規則)
@@ -353,7 +353,7 @@ spec/
 - **本階段角色**：規格表達階段，產出 sdd.os ISA 格式的規格模型（SpecFormula 標準）
 - **後續階段**：
   1. `04-actions-design.md` - 從 Feature Files 產出 Server Actions 規格
-  2. `05-isa-config.md` - 產出 sdd.os 的 ISA 配置檔案（Server Actions + Supabase）
+  2. `05-isa-config.md` - 產出 sdd.os 的 ISA 配置檔案（API Routes + Neon PostgreSQL）
 
 **工作流程**：
 ```
