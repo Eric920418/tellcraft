@@ -205,7 +205,7 @@ async function runStageB(
     schemaSql: bdd.schema_sql_content || '',
     entityMapping: bdd.entity_mapping_content || '',
     neonConnectionString,
-    maxAttempts: 1,
+    maxAttempts: 3,
     trackingContext: { userId: undefined, conversationId: undefined },
     onProgress: async (step, percent) => {
       process.stdout.write(`\r  [${percent}%] ${step}                    `)

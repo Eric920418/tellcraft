@@ -153,6 +153,43 @@ function extractScenario(gherkinScenario: any): ParsedScenario {
   }
 }
 
+/**
+ * 偵測垂直 key-value DataTable 並轉置為水平格式。
+ * 垂直格式：每行 = [欄位名, 值]，2 列 N 行
+ *   | email         | alice@example.com |
+ *   | password_hash | hashed_value      |
+ * 水平格式（標準）：第一行 = 欄位名，後續行 = 值
+ *   | email             | password_hash |
+ *   | alice@example.com | hashed_value  |
+ */
+function maybeTransposeVerticalDataTable(
+  raw: string[][]
+): { headers: string[]; rows: Record<string, string>[] } | null {
+  if (raw[0].length !== 2 || raw.length < 2) return null
+
+  // 合法欄位名：字母/底線開頭 + 可選 VAR 前綴（>/$/<）+ 可含 dot（$Ctx.field）
+  const isIdentifier = (s: string) =>
+    /^[<>$]?[a-zA-Z_\u4e00-\u9fff][a-zA-Z0-9_.\u4e00-\u9fff]*$/.test(s.trim())
+
+  // 垂直格式條件：
+  // 1. 所有第一列 cell 都像欄位名（identifier）
+  // 2. 至少一個第二列 cell 不像欄位名（是實際值，如含 @、空格、://）
+  const allFirstColIdentifiers = raw.every(r => isIdentifier(r[0] || ''))
+  const someSecondColNotIdentifier = raw.some(r => !isIdentifier(r[1] || ''))
+
+  if (!allFirstColIdentifiers || !someSecondColNotIdentifier) return null
+
+  // 轉置：第一列 → headers，第二列 → 單筆資料
+  const headers: string[] = []
+  const row: Record<string, string> = {}
+  for (const [key, value] of raw) {
+    const k = (key || '').trim()
+    headers.push(k)
+    row[k] = (value || '').trim()
+  }
+  return { headers, rows: [row] }
+}
+
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function extractSteps(gherkinSteps: any[]): ParsedStep[] {
   return gherkinSteps.map(s => {
@@ -164,16 +201,26 @@ function extractSteps(gherkinSteps: any[]): ParsedStep[] {
     if (s.dataTable) {
       const rows = s.dataTable.rows || []
       if (rows.length > 0) {
-        const headers = (rows[0].cells || []).map((c: { value: string }) => c.value)
-        const dataRows = rows.slice(1).map((row: { cells: Array<{ value: string }> }) => {
-          const obj: Record<string, string> = {}
-          const cells = row.cells || []
-          headers.forEach((h: string, i: number) => {
-            obj[h] = cells[i]?.value ?? ''
+        const raw = rows.map((r: { cells: Array<{ value: string }> }) =>
+          (r.cells || []).map((c: { value: string }) => c.value)
+        )
+
+        // 偵測垂直 key-value DataTable（2 列 N 行）並自動轉置
+        const transposed = maybeTransposeVerticalDataTable(raw)
+        if (transposed) {
+          step.dataTable = transposed
+        } else {
+          // 標準水平格式：第一行 = headers
+          const headers = raw[0]
+          const dataRows = raw.slice(1).map((cells: string[]) => {
+            const obj: Record<string, string> = {}
+            headers.forEach((h: string, i: number) => {
+              obj[h] = cells[i] ?? ''
+            })
+            return obj
           })
-          return obj
-        })
-        step.dataTable = { headers, rows: dataRows }
+          step.dataTable = { headers, rows: dataRows }
+        }
       }
     }
 
@@ -971,25 +1018,8 @@ export async function runSpecFormulaValidation(input: {
     // 2. 建立 HTTP adapter
     const httpAdapter = new UrlHttpAdapter(`http://localhost:${testServer.port}`)
 
-    // 3. 建立 DB pool（直接連 Neon）+ monkey-patch 偵測 @ 錯誤來源
+    // 3. 建立 DB pool（直接連 Neon）
     const pool = new Pool({ connectionString: input.neonConnectionString })
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    const origQuery = pool.query.bind(pool)
-    const _origQuery = pool.query.bind(pool) as (...a: unknown[]) => Promise<any>
-    ;(pool as any).query = async (...args: unknown[]) => {
-      try {
-        return await _origQuery(...args)
-      } catch (err: any) {
-        if (err?.message?.includes('@')) {
-          logger.error({
-            sql: typeof args[0] === 'string' ? args[0].substring(0, 300) : 'non-string',
-            params: JSON.stringify(args[1])?.substring(0, 300),
-            error: err.message,
-          }, '❌ @ 錯誤 SQL 偵測')
-        }
-        throw err
-      }
-    }
 
     try {
       // 4. 將 MySQL DDL 轉換為 PostgreSQL DDL（EntityDdlReader 需要正確的 PG 型別）
