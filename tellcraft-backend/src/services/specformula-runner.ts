@@ -265,6 +265,73 @@ function matchStepToInstruction(
 }
 
 // ============================================================
+// DataTable 垂直格式修正（Schema-Aware）
+// ============================================================
+
+/**
+ * 簡易 camelCase → snake_case 轉換
+ */
+function toSnakeCase(s: string): string {
+  return s.replace(/([a-z])([A-Z])/g, '$1_$2').toLowerCase()
+}
+
+/**
+ * 檢查 header 是否能匹配到 table 的某個 column（忽略 VAR 前綴）
+ */
+function headerMatchesColumn(header: string, columnNames: Set<string>): boolean {
+  const clean = header.trim().replace(/^[><$]/, '').split('.').pop() || ''
+  return columnNames.has(clean.toLowerCase()) || columnNames.has(toSnakeCase(clean).toLowerCase())
+}
+
+/**
+ * 對 entity_setup / entity_validate 的 DataTable 做 schema-aware 垂直格式偵測。
+ * 如果 headers 大部分不匹配 DDL 欄位名，但轉置後大部分匹配，則自動轉置。
+ */
+function fixDataTableBySchema(
+  dataTable: { headers: string[]; rows: Record<string, string>[] },
+  entityName: string,
+  schemas: DatabaseSchema[]
+): { headers: string[]; rows: Record<string, string>[] } {
+  // 只處理 2 欄的表格（垂直格式的特徵）
+  if (dataTable.headers.length !== 2) return dataTable
+
+  const pair = DatabaseSchema.findSchemaAndTable(schemas, entityName)
+  if (!pair) return dataTable
+
+  const columnNames = new Set(pair.table.columns.map(c => c.name.toLowerCase()))
+
+  // 檢查當前 headers 有多少匹配 DDL 欄位
+  const currentMatchCount = dataTable.headers.filter(h => headerMatchesColumn(h, columnNames)).length
+
+  // 如果所有 headers 都匹配 → 已經是正確格式
+  if (currentMatchCount === dataTable.headers.length) return dataTable
+
+  // 嘗試轉置：從 headers + rows 重建 raw，然後第一列當 headers，第二列當 values
+  // 原始水平解析：headers=[raw[0][0], raw[0][1]], rows=[{h0: raw[1][0], h1: raw[1][1]}, ...]
+  // 重建 raw → 轉置為垂直格式
+  const raw: [string, string][] = [[dataTable.headers[0], dataTable.headers[1]]]
+  for (const row of dataTable.rows) {
+    raw.push([row[dataTable.headers[0]] ?? '', row[dataTable.headers[1]] ?? ''])
+  }
+
+  // 轉置後 headers = 每行第一列
+  const transposedHeaders = raw.map(r => r[0].trim())
+  const transposedMatchCount = transposedHeaders.filter(h => headerMatchesColumn(h, columnNames)).length
+
+  // 轉置後匹配度更高 → 採用轉置結果
+  if (transposedMatchCount > currentMatchCount) {
+    const newRow: Record<string, string> = {}
+    for (const [key, value] of raw) {
+      const k = key.trim()
+      newRow[k] = value.trim()
+    }
+    return { headers: transposedHeaders, rows: [newRow] }
+  }
+
+  return dataTable
+}
+
+// ============================================================
 // 步驟執行
 // ============================================================
 
@@ -273,6 +340,7 @@ async function executeStep(
   matched: MatchResult,
   instructionSet: InstructionSet,
   scenarioContext: ScenarioContext,
+  schemas: DatabaseSchema[],
   featureSummary?: string
 ): Promise<StepResult> {
   const start = Date.now()
@@ -283,10 +351,11 @@ async function executeStep(
     switch (instruction.instruction_type) {
       case 'entity_setup': {
         if (!step.dataTable) throw new Error('entity_setup 需要 DataTable')
+        const setupDt = fixDataTableBySchema(step.dataTable, captures.entity, schemas)
         await instructionSet.entitySetup.setup(
           captures.entity,
-          step.dataTable.headers,
-          step.dataTable.rows
+          setupDt.headers,
+          setupDt.rows
         )
         break
       }
@@ -344,10 +413,11 @@ async function executeStep(
 
       case 'entity_validate': {
         if (!step.dataTable) throw new Error('entity_validate 需要 DataTable')
+        const validateDt = fixDataTableBySchema(step.dataTable, captures.entity, schemas)
         await instructionSet.entityValidate.assertExists(
           captures.entity,
-          step.dataTable.headers,
-          step.dataTable.rows
+          validateDt.headers,
+          validateDt.rows
         )
         break
       }
@@ -403,7 +473,8 @@ async function executeScenario(
   ruleName: string,
   instructions: IsaInstruction[],
   instructionSet: InstructionSet,
-  scenarioContext: ScenarioContext
+  scenarioContext: ScenarioContext,
+  schemas: DatabaseSchema[]
 ): Promise<ScenarioResult> {
   scenarioContext.reset()
 
@@ -449,7 +520,7 @@ async function executeScenario(
       continue
     }
 
-    const stepResult = await executeStep(step, matched, instructionSet, scenarioContext, feature.name)
+    const stepResult = await executeStep(step, matched, instructionSet, scenarioContext, schemas, feature.name)
     result.steps.push(stepResult)
 
     if (stepResult.status === 'failed') {
@@ -561,7 +632,8 @@ export async function runAllFeatures(input: {
         ruleName,
         isaSpec.instructions,
         instructionSet,
-        scenarioContext
+        scenarioContext,
+        schemas
       )
       allResults.push(result)
     }
