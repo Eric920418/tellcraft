@@ -680,7 +680,23 @@ export async function startTestServer(config: TestServerConfig): Promise<TestSer
       fs.writeFileSync(filePath, file.content, 'utf-8')
     }
 
-    // 2. 生成 test-server.ts
+    // 2. 覆寫 lib/db.ts — 用 pg Pool 取代 neon tagged template
+    //    neon() 的 function-call 模式 sql('query', [params]) 可能做字串替換而非真正 parameterized query
+    //    在 test server 中用 pg Pool 確保正確的參數化查詢
+    const pgDbContent = `import { Pool } from 'pg'
+const pool = new Pool({ connectionString: process.env.DATABASE_URL, ssl: { rejectUnauthorized: false } })
+export async function sql<T = any>(query: string, params?: any[]): Promise<T[]> {
+  const result = await pool.query(query, params)
+  return result.rows as T[]
+}
+export default sql
+`
+    const dbFilePath = path.join(tmpDir, 'lib/db.ts')
+    fs.mkdirSync(path.dirname(dbFilePath), { recursive: true })
+    fs.writeFileSync(dbFilePath, pgDbContent, 'utf-8')
+    logger.info('lib/db.ts 已覆寫為 pg Pool 版本')
+
+    // 3. 生成 test-server.ts
     const testServerCode = generateTestServerCode(config.actionsYml, config.backendFiles)
     fs.writeFileSync(path.join(tmpDir, 'test-server.ts'), testServerCode, 'utf-8')
 
@@ -705,7 +721,7 @@ export async function startTestServer(config: TestServerConfig): Promise<TestSer
       type: 'module',
       dependencies: {
         'express': '^4.21.0',
-        '@neondatabase/serverless': '^0.10.0',
+        'pg': '^8.13.0',
         ...extraDeps,
       },
       devDependencies: {
