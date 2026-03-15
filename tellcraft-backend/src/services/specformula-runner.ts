@@ -1084,6 +1084,36 @@ export default sql
     fs.writeFileSync(dbFilePath, pgDbContent, 'utf-8')
     logger.info('lib/db.ts 已覆寫為 pg Pool 版本')
 
+    // 2b. 修復 CJS 模組 import（bcryptjs, jsonwebtoken 等在 "type":"module" 下不支持 ESM named import）
+    for (const file of config.backendFiles) {
+      if (!file.path.startsWith('lib/actions/')) continue
+      const filePath = path.join(tmpDir, file.path)
+      let content = fs.readFileSync(filePath, 'utf-8')
+      let changed = false
+
+      // bcryptjs: CJS module → 用 createRequire
+      if (content.includes('bcryptjs')) {
+        content = content.replace(
+          /import\s+(?:\*\s+as\s+\w+|(\w+)|\{[^}]*\})\s+from\s+['"]bcryptjs['"]/g,
+          "import { createRequire } from 'module'\nconst require = createRequire(import.meta.url)\nconst bcrypt = require('bcryptjs')"
+        )
+        changed = true
+      }
+
+      // jsonwebtoken: 同樣是 CJS
+      if (content.includes('jsonwebtoken')) {
+        content = content.replace(
+          /import\s+(?:\*\s+as\s+\w+|(\w+)|\{[^}]*\})\s+from\s+['"]jsonwebtoken['"]/g,
+          "import { createRequire } from 'module'\nconst require2 = createRequire(import.meta.url)\nconst jwt = require2('jsonwebtoken')"
+        )
+        changed = true
+      }
+
+      if (changed) {
+        fs.writeFileSync(filePath, content, 'utf-8')
+      }
+    }
+
     // 3. 生成 test-server.ts
     const testServerCode = generateTestServerCode(config.actionsYml, config.backendFiles)
     fs.writeFileSync(path.join(tmpDir, 'test-server.ts'), testServerCode, 'utf-8')
