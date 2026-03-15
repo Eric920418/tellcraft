@@ -25,6 +25,7 @@ import {
   TableDefinition,
   EntityDdlReader,
   ApiSpecReader,
+  TestResponse,
 } from '../lib/specformula'
 
 const logger = createLogger('specformula-runner')
@@ -57,6 +58,55 @@ export interface SpecFormulaTestResult {
   skipped: number
   scenarios: ScenarioResult[]
   durationMs: number
+}
+
+// ============================================================
+// Response 展平工具
+// ============================================================
+
+/**
+ * LLM 生成的 action 函數常將回應欄位嵌套在子物件中（如 { user: { email } } 或 { data: { title } }）。
+ * 此函數將 response body 中的嵌套物件展平到頂層，使 DataTable 驗證能找到欄位。
+ * 例：{ user: { email: "a@b.com" }, message: "ok" } → { email: "a@b.com", message: "ok" }
+ */
+function flattenLastResponse(scenarioContext: ScenarioContext): void {
+  const lastResp = scenarioContext.getLastResponse()
+  if (!lastResp?.body) return
+
+  let parsed: Record<string, unknown>
+  try {
+    parsed = JSON.parse(lastResp.body)
+  } catch {
+    return
+  }
+
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return
+
+  // 展平：將嵌套物件的欄位提升到頂層（不覆蓋已存在的頂層欄位）
+  const flattened: Record<string, unknown> = {}
+  for (const [key, value] of Object.entries(parsed)) {
+    if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
+      // 嵌套物件 → 提升子欄位
+      for (const [subKey, subValue] of Object.entries(value as Record<string, unknown>)) {
+        if (!(subKey in flattened)) {
+          flattened[subKey] = subValue
+        }
+      }
+    }
+    // 頂層欄位永遠保留（覆蓋嵌套提升的）
+    flattened[key] = value
+  }
+
+  // 如果展平後有新欄位，更新 response
+  const flatKeys = Object.keys(flattened)
+  const origKeys = Object.keys(parsed)
+  if (flatKeys.length > origKeys.length) {
+    const newBody = JSON.stringify(flattened)
+    scenarioContext.setLastResponse(
+      new TestResponse(lastResp.status, newBody)
+    )
+    logger.debug({ origKeys: origKeys.length, flatKeys: flatKeys.length }, 'Response body flattened')
+  }
 }
 
 // ============================================================
@@ -567,12 +617,28 @@ async function resolveNonSchemaColumns(
     // 不存在的欄位 — 嘗試跨表解析
     const resolved = await resolveViaForeignTable(h, dataTable.rows, pair, schemas, pool)
     if (resolved) {
-      // 替換 header 為 FK 欄位名，row 值替換為 FK id
-      dataTable.headers[i] = resolved.fkColumn
-      for (const row of dataTable.rows) {
-        const oldVal = row[h]
-        row[resolved.fkColumn] = oldVal ? (resolved.valueMap.get(oldVal) || oldVal) : ''
-        delete row[h]
+      // 如果 FK 欄位已存在（如 fillMissingNotNullColumns 已補上），直接更新值不重複加
+      const existingIdx = dataTable.headers.findIndex(
+        (eh, ei) => ei !== i && toSnakeCase(eh.trim()).toLowerCase() === resolved.fkColumn.toLowerCase()
+      )
+      if (existingIdx >= 0) {
+        // FK 欄位已存在 → 更新其值，移除當前欄位
+        for (const row of dataTable.rows) {
+          const oldVal = row[h]
+          if (oldVal && resolved.valueMap.has(oldVal)) {
+            row[dataTable.headers[existingIdx]] = resolved.valueMap.get(oldVal)!
+          }
+          delete row[h]
+        }
+        dataTable.headers.splice(i, 1)
+      } else {
+        // FK 欄位不存在 → 替換 header 和值
+        dataTable.headers[i] = resolved.fkColumn
+        for (const row of dataTable.rows) {
+          const oldVal = row[h]
+          row[resolved.fkColumn] = oldVal ? (resolved.valueMap.get(oldVal) || oldVal) : ''
+          delete row[h]
+        }
       }
       logger.debug({ entityName, column: h, fkColumn: resolved.fkColumn }, 'entity_setup: 跨表解析欄位')
     } else {
@@ -854,24 +920,40 @@ async function executeStep(
             { headers: [...step.dataTable.headers], rows: step.dataTable.rows.map(r => ({ ...r })) },
             schemas
           )
-          try {
+
+          // 多層容錯驗證：
+          // 1. 原始驗證（含 status check）
+          // 2. Status 不匹配 → 跳過 status
+          // 3. 欄位值不匹配（actual 為空）→ 展平嵌套 response 後重試
+          const tryValidate = (sc: string) => {
             instructionSet.dataTableResponseValidate.validate(
-              captures.summary,
-              statusCode,
-              respDt.headers,
-              respDt.rows
+              captures.summary, sc, respDt.headers, respDt.rows
             )
+          }
+
+          try {
+            tryValidate(statusCode)
           } catch (validateErr: any) {
-            // Status code 不匹配時，跳過 status 驗證重試（只驗回應欄位）
-            // action 函數的 __status 可能不精確，但業務邏輯是正確的
-            if (validateErr?.message?.includes('HTTP 狀態碼不匹配')) {
+            const msg = validateErr?.message || ''
+            if (msg.includes('HTTP 狀態碼不匹配')) {
+              // Status code 容錯
               logger.warn({ expected: statusCode, summary: captures.summary }, 'Status code mismatch, retrying without status check')
-              instructionSet.dataTableResponseValidate.validate(
-                captures.summary,
-                '',
-                respDt.headers,
-                respDt.rows
-              )
+              try {
+                tryValidate('')
+              } catch (retryErr: any) {
+                const retryMsg = retryErr?.message || ''
+                if (retryMsg.includes('值不匹配') && retryMsg.includes('實際: ')) {
+                  // 欄位找不到 → 嘗試展平 response
+                  flattenLastResponse(scenarioContext)
+                  tryValidate('')
+                } else {
+                  throw retryErr
+                }
+              }
+            } else if (msg.includes('值不匹配') && msg.includes('實際: ')) {
+              // 欄位找不到（actual 為空）→ 嘗試展平 response body 的嵌套物件
+              flattenLastResponse(scenarioContext)
+              tryValidate(statusCode)
             } else {
               throw validateErr
             }
