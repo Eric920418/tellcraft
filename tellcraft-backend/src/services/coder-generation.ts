@@ -861,6 +861,20 @@ if (op.includes('查詢') || op.includes('列表')) {
 }
 \`\`\`
 
+## 單一設定表操作（常見錯誤！）
+如果表只有一筆記錄（如 channel_config，id 固定為 1），查詢就是 SELECT * WHERE id = 1，
+更新就是 UPDATE ... WHERE id = 1。不要要求 action/type 參數。
+直接用 _stepSummary 判斷是查詢還是更新：
+\`\`\`typescript
+if (op.includes('查詢') || op.includes('取得')) {
+  const row = await sql\`SELECT * FROM channel_config WHERE id = 1\`
+  return { __status: 200, ...row[0] }
+}
+// 更新：把所有輸入欄位 SET 進去
+const setCols = Object.keys(input).filter(k => k !== '_stepSummary' && k !== 'userId')
+// ... UPDATE channel_config SET ... WHERE id = 1
+\`\`\`
+
 ## 登出操作（常見錯誤！）
 登出操作不需要驗證 token/session 是否有效。直接返回成功：
 \`\`\`typescript

@@ -670,12 +670,25 @@ async function resolveViaForeignTable(
             logger.debug({ refTable: refTableName, column: refCol.name, value: val }, 'resolveViaForeignTable: 自動建立 FK 引用行')
           }
         }
-      } catch (err) {
-        logger.warn({ err: String(err).slice(0, 200), refTable: refTableName, column: refCol.name, value: val }, 'resolveViaForeignTable: 查詢/建立 FK 引用失敗')
+      } catch (err: any) {
+        // unique_violation = 記錄已存在 → 重試 SELECT 取得 id
+        if (err?.code === '23505') {
+          try {
+            const retry = await pool.query(
+              `SELECT id FROM ${refTableName} WHERE ${refCol.name} = $1 LIMIT 1`,
+              [val]
+            )
+            if (retry.rows.length > 0) {
+              valueMap.set(val, String(retry.rows[0].id))
+              logger.debug({ refTable: refTableName, column: refCol.name, value: val }, 'resolveViaForeignTable: unique_violation 後重試 SELECT 成功')
+            }
+          } catch { /* ignore retry failure */ }
+        } else {
+          logger.warn({ err: String(err).slice(0, 200), refTable: refTableName, column: refCol.name, value: val }, 'resolveViaForeignTable: 查詢/建立 FK 引用失敗')
+        }
       }
     }
 
-    logger.warn({ fkCol: col.name, refTableName, refColName: refCol.name, valueMapSize: valueMap.size, valueMapEntries: [...valueMap.entries()].slice(0, 3) }, 'resolveViaForeignTable: FK 解析完成')
     if (valueMap.size > 0) {
       return { fkColumn: col.name, valueMap }
     }
@@ -747,7 +760,7 @@ async function resolveNonSchemaColumns(
   pool: Pool
 ): Promise<{ headers: string[]; rows: Record<string, string>[] }> {
   const pair = DatabaseSchema.findSchemaAndTable(schemas, entityName)
-  if (!pair) { logger.warn({ entityName }, 'resolveNonSchemaColumns: findSchemaAndTable returned null'); return dataTable }
+  if (!pair) return dataTable
 
   const columnNames = new Set(pair.table.columns.map(c => c.name.toLowerCase()))
 
@@ -760,9 +773,7 @@ async function resolveNonSchemaColumns(
     if (columnNames.has(snake) || columnNames.has(h.toLowerCase())) continue
 
     // 不存在的欄位 — 嘗試跨表解析
-    logger.warn({ entityName, header: h, snake, columnNames: [...columnNames] }, 'resolveNonSchemaColumns: 嘗試跨表解析')
     const resolved = await resolveViaForeignTable(h, dataTable.rows, pair, schemas, pool)
-    logger.warn({ entityName, header: h, resolved: resolved ? { fkColumn: resolved.fkColumn, mapSize: resolved.valueMap.size } : null }, 'resolveNonSchemaColumns: 解析結果')
     if (resolved) {
       // 如果 FK 欄位已存在（如 fillMissingNotNullColumns 已補上），直接更新值不重複加
       const existingIdx = dataTable.headers.findIndex(
