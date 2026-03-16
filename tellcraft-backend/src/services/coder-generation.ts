@@ -201,6 +201,7 @@ function buildActionSystemPrompt(): string {
 - 密碼雜湊用 bcryptjs（import bcrypt from 'bcryptjs'），JWT 用 jsonwebtoken
 - 不要做認證/登入檢查（如檢查 userId 是否存在、要求 token）。呼叫者已處理認證，函數只做業務邏輯
 - 前置（狀態）規則中的「使用者必須已登入」由測試框架的 UID actor 處理，函數內不需驗證
+- 如果測試傳 email 作為使用者識別：先用 input.userId（如果存在），否則用 email 查 users 表取得 userId。不要把 userId 當必要輸入參數驗證
 
 ## 子操作派發（重要！）
 一個 Action 可能包含多個子操作（如 manage_auth 包含 註冊/登入/登出）。
@@ -789,7 +790,17 @@ userId 由呼叫者注入，可直接使用，不需驗證是否存在。
 ## 回應欄位名稱（常見錯誤！）
 回傳欄位名稱必須與測試 DataTable 的 header 完全一致（camelCase）。
 如果測試驗證 episodeId，必須 return { episodeId: xxx }，不能是 id 或 episode_id。
-如果測試驗證 showId，必須 return { showId: xxx }。以此類推。`
+如果測試驗證 showId，必須 return { showId: xxx }。以此類推。
+
+## email → userId（常見錯誤！）
+測試傳入 email 參數時，函數必須自行查詢 userId：
+\`\`\`typescript
+const users = await sql\`SELECT id FROM users WHERE email = \${input.email}\`
+const userId = users[0]?.id
+if (!userId) throw new Error('使用者不存在')
+\`\`\`
+不要 require input.userId 作為必要參數。
+如果 input.userId 已經存在就直接用，否則用 email 查詢。`
 
 /**
  * 用 LLM 修復失敗的 action 函數

@@ -932,8 +932,6 @@ async function executeStep(
         }
 
         // 注入 Actor UID — 將 captures.actor（如 $UserAlice）解析為 userId 並注入 request body
-        // Feature 用 UID="$UserAlice" 指定操作者，但 invokeWithActor 只設 Authorization header
-        // action 函數需要 input.userId 才能知道是誰在操作
         if (captures.actor) {
           const actorResolver = new ISAFeatureArgumentResolver(() => scenarioContext)
           const resolvedActorId = actorResolver.resolveVariable(captures.actor)
@@ -942,6 +940,27 @@ async function executeStep(
             for (const row of apiRows) {
               row['userId'] = String(resolvedActorId)
             }
+          }
+        }
+
+        // email → userId 自動注入
+        // Feature 通常用 email 識別使用者（如 alice@example.com），但 action 函數需要 userId (UUID FK)
+        // 如果請求有 email 但沒有 userId，自動查詢 users 表解析
+        if (apiHeaders.includes('email') && !apiHeaders.includes('userId')) {
+          for (const row of apiRows) {
+            const email = row['email']
+            if (email && email.includes('@') && !email.startsWith('$') && !email.startsWith('<')) {
+              try {
+                const result = await pool.query('SELECT id FROM users WHERE email = $1 LIMIT 1', [email])
+                if (result.rows.length > 0) {
+                  row['userId'] = String(result.rows[0].id)
+                }
+              } catch { /* ignore — 使用者不存在是正常的（如測試失敗場景） */ }
+            }
+          }
+          // 有任何 row 成功解析 userId → 加入 header
+          if (apiRows.some(r => r['userId'])) {
+            apiHeaders.push('userId')
           }
         }
 
