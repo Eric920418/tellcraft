@@ -293,7 +293,11 @@ export async function generateActionFunction(
     throw new Error(`生成 ${action.name} 失敗：${result.error}`)
   }
 
-  const code = extractCodeFromResponse(result.content)
+  let code = extractCodeFromResponse(result.content)
+
+  // 移除 LLM 偶爾加入的認證檢查
+  code = code.replace(/if\s*\(\s*!(?:input\.)?userId\s*\)\s*\{[^}]*(?:throw|return)[^}]*\}/g, '')
+  code = code.replace(/if\s*\(\s*!(?:input\.)?userId\s*\)\s*(?:throw|return)[^\n]*/g, '')
 
   return {
     path: `lib/actions/${toKebabCase(action.name)}.ts`,
@@ -767,9 +771,14 @@ else if (op.includes('登入')) { ... }
 import { hash, compare } from 'bcryptjs'
 不要用 import bcrypt from 'bcryptjs'。
 
-## 認證檢查（常見錯誤！）
-如果錯誤是 "操作者必須已登入"，移除函數內的認證/登入檢查。
-不要檢查 userId 是否存在。呼叫者已處理認證。
+## 認證檢查（嚴重錯誤 — 絕對禁止！）
+絕對不要在函數內檢查認證/登入/角色：
+- 禁止寫 if (!userId) throw/return
+- 禁止寫 if (!input.userId) 任何東西
+- 禁止寫 "操作者必須已登入" "must be logged in" "unauthorized" 等錯誤訊息
+- 禁止檢查 token、session、角色、權限
+- 如果現有代碼有認證檢查，必須完全刪除
+userId 由呼叫者注入，可直接使用，不需驗證是否存在。
 
 ## HTTP Status Code（常見錯誤！）
 每個子操作必須返回正確的 __status：
@@ -839,6 +848,10 @@ ${schemaSql}
     .replace(/｝/g, '}')
     .replace(/【/g, '[')
     .replace(/】/g, ']')
+
+  // 移除 LLM 偶爾加入的認證檢查（儘管 prompt 禁止，LLM 仍可能添加）
+  fixed = fixed.replace(/if\s*\(\s*!(?:input\.)?userId\s*\)\s*\{[^}]*(?:throw|return)[^}]*\}/g, '')
+  fixed = fixed.replace(/if\s*\(\s*!(?:input\.)?userId\s*\)\s*(?:throw|return)[^\n]*/g, '')
 
   // 語法驗證：用 esbuild 快速檢查 TypeScript 語法
   try {
