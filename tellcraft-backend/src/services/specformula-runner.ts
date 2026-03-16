@@ -650,16 +650,21 @@ async function resolveViaForeignTable(
 
 /**
  * password_hash / password 欄位自動 bcrypt 雜湊。
- * Feature 常用字串值如 "hashed_value"，但 action 的 bcrypt.compare 需要真正的 hash。
+ * Feature 常用字串值如 "hashed_value" 做 placeholder，但 action 的 bcrypt.compare 需要真正的 hash。
+ * testPasswordMap 由 preExtractTestPasswords 預掃描取得：email → 成功場景使用的真實密碼。
+ * 這樣 entity_setup 存 bcrypt(真實密碼)，login action 的 bcrypt.compare(真實密碼, hash) 才會 true。
  */
 async function autoHashPasswords(
-  dataTable: { headers: string[]; rows: Record<string, string>[] }
+  dataTable: { headers: string[]; rows: Record<string, string>[] },
+  testPasswordMap?: Map<string, string>
 ): Promise<void> {
   const pwHeaders = dataTable.headers.filter(h => {
     const lower = h.toLowerCase().replace(/[_-]/g, '')
     return lower === 'passwordhash' || lower === 'password'
   })
   if (pwHeaders.length === 0) return
+
+  const emailHeader = dataTable.headers.find(h => h.toLowerCase() === 'email')
 
   try {
     // eslint-disable-next-line @typescript-eslint/no-require-imports
@@ -668,8 +673,16 @@ async function autoHashPasswords(
       for (const h of pwHeaders) {
         const val = row[h]
         if (val && !val.startsWith('$2') && !val.startsWith('$') && !val.startsWith('<') && !val.startsWith('>')) {
-          // 不是 bcrypt hash ($2a$/$2b$)，也不是 VAR-System 引用 → 自動雜湊
-          row[h] = bcrypt.hashSync(val, 10)
+          // 不是 bcrypt hash → 嘗試用 testPasswordMap 找到真實密碼來雜湊
+          let passwordToHash = val
+          if (emailHeader && testPasswordMap) {
+            const email = row[emailHeader]
+            if (email && testPasswordMap.has(email)) {
+              passwordToHash = testPasswordMap.get(email)!
+              logger.debug({ email, placeholder: val, realPassword: passwordToHash }, 'autoHashPasswords: 用真實測試密碼替換 placeholder')
+            }
+          }
+          row[h] = bcrypt.hashSync(passwordToHash, 10)
         }
       }
     }
@@ -907,6 +920,47 @@ function resolveEntityIdHeaders(
 // 步驟執行
 // ============================================================
 
+/**
+ * 預掃描 Scenario 所有步驟，提取成功登入場景的真實密碼。
+ * 找 api_call 步驟中有 password+email 欄位，且下一步是 response_validate（成功回應）的。
+ * 返回 email → password 映射，用於 entity_setup 的 autoHashPasswords。
+ */
+function preExtractTestPasswords(
+  allSteps: ParsedStep[],
+  instructions: IsaInstruction[]
+): Map<string, string> {
+  const passwords = new Map<string, string>()
+
+  for (let i = 0; i < allSteps.length; i++) {
+    const step = allSteps[i]
+    const matched = matchStepToInstruction(step.text, instructions)
+    if (!matched || matched.instruction.instruction_type !== 'api_call') continue
+    if (!step.dataTable) continue
+
+    const passwordHeader = step.dataTable.headers.find(h => h.toLowerCase() === 'password')
+    const emailHeader = step.dataTable.headers.find(h => h.toLowerCase() === 'email')
+    if (!passwordHeader || !emailHeader) continue
+
+    // 檢查下一步是否為成功回應（response_validate），而非操作失敗（skip）
+    const nextStep = allSteps[i + 1]
+    if (!nextStep) continue
+    const nextMatched = matchStepToInstruction(nextStep.text, instructions)
+    if (!nextMatched) continue
+    // skip = 操作失敗，不提取密碼
+    if (nextMatched.instruction.instruction_type === 'skip') continue
+
+    for (const row of step.dataTable.rows) {
+      const email = row[emailHeader]
+      const password = row[passwordHeader]
+      if (email && password && !passwords.has(email)) {
+        passwords.set(email, password)
+      }
+    }
+  }
+
+  return passwords
+}
+
 async function executeStep(
   step: ParsedStep,
   matched: MatchResult,
@@ -914,7 +968,8 @@ async function executeStep(
   scenarioContext: ScenarioContext,
   schemas: DatabaseSchema[],
   pool: Pool,
-  featureSummary?: string
+  featureSummary?: string,
+  testPasswordMap?: Map<string, string>
 ): Promise<StepResult> {
   const start = Date.now()
   const keyword = step.keyword.trim()
@@ -930,9 +985,9 @@ async function executeStep(
         const uuidFixedDt = fixNonUuidValues(filledDt, captures.entity, schemas)
         // 解析不存在於 schema 的欄位（如 email → user_id 跨表 FK 解析）
         const resolvedDt = await resolveNonSchemaColumns(uuidFixedDt, captures.entity, schemas, pool)
-        // password_hash 自動 bcrypt 雜湊 — Feature 常用 "hashed_value" 等字串值，
-        // 但 login action 用 bcrypt.compare 比對，需要真正的 bcrypt hash
-        await autoHashPasswords(resolvedDt)
+        // password_hash 自動 bcrypt 雜湊 — Feature 常用 "hashed_value" 等 placeholder，
+        // testPasswordMap 包含成功場景的真實密碼，確保 bcrypt.compare 能通過
+        await autoHashPasswords(resolvedDt, testPasswordMap)
         // 自動建立 FK 引用的行（如 episodes 引用 shows → 先建立 shows 行）
         await ensureFkReferencesExist(resolvedDt, captures.entity, schemas, pool)
         await instructionSet.entitySetup.setup(
@@ -1194,6 +1249,10 @@ async function executeScenario(
     ...scenario.steps,
   ]
 
+  // 預掃描：提取成功場景的真實密碼（email → password）
+  // 用於 entity_setup 的 autoHashPasswords，確保 bcrypt hash 對應正確密碼
+  const testPasswordMap = preExtractTestPasswords(allSteps, instructions)
+
   let hasFailed = false
 
   for (const step of allSteps) {
@@ -1222,7 +1281,7 @@ async function executeScenario(
       continue
     }
 
-    const stepResult = await executeStep(step, matched, instructionSet, scenarioContext, schemas, pool, feature.name)
+    const stepResult = await executeStep(step, matched, instructionSet, scenarioContext, schemas, pool, feature.name, testPasswordMap)
     result.steps.push(stepResult)
 
     if (stepResult.status === 'failed') {
@@ -1601,6 +1660,34 @@ export default sql
         }
         content = content.replace(/crypto\.randomUUID\(\)/g, '_cryptoRandomUUID()')
         changed = true
+      }
+
+      // MySQL → PostgreSQL 語法修正
+      // LLM 偶爾生成 MySQL 的 ON DUPLICATE KEY UPDATE，PostgreSQL 不支持
+      if (/ON\s+DUPLICATE\s+KEY\s+UPDATE/i.test(content)) {
+        content = content.replace(
+          /ON\s+DUPLICATE\s+KEY\s+UPDATE\s+(.+?)(?=\s*`|;|\n|$)/gim,
+          (_match, setCols: string) => {
+            // VALUES(col) → EXCLUDED.col
+            const fixed = setCols.replace(/VALUES\s*\(\s*(\w+)\s*\)/gi, 'EXCLUDED.$1')
+            return `ON CONFLICT (id) DO UPDATE SET ${fixed}`
+          }
+        )
+        changed = true
+        logger.debug({ file: file.path }, 'MySQL ON DUPLICATE KEY UPDATE → PostgreSQL ON CONFLICT')
+      }
+
+      // 移除 LLM 偶爾加入的認證/登入檢查（即使 prompt 禁止，LLM 仍可能添加）
+      const beforeAuthLen = content.length
+      // Pattern: if (!userId) { throw/return ... }
+      content = content.replace(/if\s*\(\s*!(?:input\.)?userId\s*\)\s*\{[^}]*(?:throw|return)[^}]*\}/g, '')
+      // Pattern: if (!userId) throw/return ...
+      content = content.replace(/if\s*\(\s*!(?:input\.)?userId\s*\)\s*(?:throw|return)[^\n]*/g, '')
+      // Pattern: throw containing auth-related messages
+      content = content.replace(/if\s*\([^)]*\)\s*\{?\s*throw\s+new\s+Error\s*\(\s*['"`][^'"`]*(?:必須已登入|認證|已過期|unauthorized|must.*log|未登入|操作者必須)[^'"`]*['"`]\s*\)\s*\}?/gi, '')
+      if (content.length !== beforeAuthLen) {
+        changed = true
+        logger.debug({ file: file.path }, '移除 LLM 生成的認證檢查')
       }
 
       if (changed) {

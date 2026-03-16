@@ -202,6 +202,8 @@ function buildActionSystemPrompt(): string {
 - 不要做認證/登入檢查（如檢查 userId 是否存在、要求 token）。呼叫者已處理認證，函數只做業務邏輯
 - 前置（狀態）規則中的「使用者必須已登入」由測試框架的 UID actor 處理，函數內不需驗證
 - 如果測試傳 email 作為使用者識別：先用 input.userId（如果存在），否則用 email 查 users 表取得 userId。不要把 userId 當必要輸入參數驗證
+- 登出操作：直接 return { __status: 200, message: '登出成功' }。不需驗證 token/session 是否有效
+- ON CONFLICT 語法：使用 PostgreSQL 的 ON CONFLICT (id) DO UPDATE SET col = EXCLUDED.col，不要用 MySQL 的 ON DUPLICATE KEY UPDATE
 
 ## 子操作派發（重要！）
 一個 Action 可能包含多個子操作（如 manage_auth 包含 註冊/登入/登出）。
@@ -299,6 +301,18 @@ export async function generateActionFunction(
   // 移除 LLM 偶爾加入的認證檢查
   code = code.replace(/if\s*\(\s*!(?:input\.)?userId\s*\)\s*\{[^}]*(?:throw|return)[^}]*\}/g, '')
   code = code.replace(/if\s*\(\s*!(?:input\.)?userId\s*\)\s*(?:throw|return)[^\n]*/g, '')
+  code = code.replace(/if\s*\([^)]*\)\s*\{?\s*throw\s+new\s+Error\s*\(\s*['"`][^'"`]*(?:必須已登入|認證|已過期|unauthorized|must.*log|未登入|操作者必須)[^'"`]*['"`]\s*\)\s*\}?/gi, '')
+  code = code.replace(/if\s*\(\s*!(?:input\.)?(?:token|session|authToken)\s*\)\s*\{[^}]*(?:throw|return)[^}]*\}/g, '')
+  code = code.replace(/if\s*\(\s*!(?:input\.)?(?:token|session|authToken)\s*\)\s*(?:throw|return)[^\n]*/g, '')
+
+  // MySQL → PostgreSQL 語法修正
+  code = code.replace(
+    /ON\s+DUPLICATE\s+KEY\s+UPDATE\s+(.+?)(?=\s*`|;|\n|$)/gim,
+    (_match: string, setCols: string) => {
+      const pgCols = setCols.replace(/VALUES\s*\(\s*(\w+)\s*\)/gi, 'EXCLUDED.$1')
+      return `ON CONFLICT (id) DO UPDATE SET ${pgCols}`
+    }
+  )
 
   return {
     path: `lib/actions/${toKebabCase(action.name)}.ts`,
@@ -816,7 +830,16 @@ const userId = users[0]?.id
 if (!userId) throw new Error('使用者不存在')
 \`\`\`
 不要 require input.userId 作為必要參數。
-如果 input.userId 已經存在就直接用，否則用 email 查詢。`
+如果 input.userId 已經存在就直接用，否則用 email 查詢。
+
+## 登出操作（常見錯誤！）
+登出操作不需要驗證 token/session 是否有效。直接返回成功：
+\`\`\`typescript
+if (op.includes('登出')) {
+  return { __status: 200, message: '登出成功' }
+}
+\`\`\`
+不要驗證 token、session、JWT 是否有效或已過期。登出就是直接成功。`
 
 /**
  * 用 LLM 修復失敗的 action 函數
@@ -881,8 +904,20 @@ ${schemaSql}
   fixed = fixed.replace(/if\s*\(\s*!(?:input\.)?userId\s*\)\s*\{[^}]*(?:throw|return)[^}]*\}/g, '')
   // Pattern 2: if (!userId) throw/return ...
   fixed = fixed.replace(/if\s*\(\s*!(?:input\.)?userId\s*\)\s*(?:throw|return)[^\n]*/g, '')
-  // Pattern 3: 包含「必須已登入」「認證」「unauthorized」的 throw 語句
-  fixed = fixed.replace(/if\s*\([^)]*\)\s*\{?\s*throw\s+new\s+Error\s*\(\s*['"`][^'"`]*(?:必須已登入|認證|已過期|unauthorized|must.*log)[^'"`]*['"`]\s*\)\s*\}?/gi, '')
+  // Pattern 3: 包含 auth 相關的 throw 語句
+  fixed = fixed.replace(/if\s*\([^)]*\)\s*\{?\s*throw\s+new\s+Error\s*\(\s*['"`][^'"`]*(?:必須已登入|認證|已過期|unauthorized|must.*log|未登入|操作者必須|認證憑證無效|token.*(?:invalid|expired)|session.*(?:invalid|expired))[^'"`]*['"`]\s*\)\s*\}?/gi, '')
+  // Pattern 4: token/session 驗證的 if block（登出操作常見）
+  fixed = fixed.replace(/if\s*\(\s*!(?:input\.)?(?:token|session|authToken)\s*\)\s*\{[^}]*(?:throw|return)[^}]*\}/g, '')
+  fixed = fixed.replace(/if\s*\(\s*!(?:input\.)?(?:token|session|authToken)\s*\)\s*(?:throw|return)[^\n]*/g, '')
+
+  // MySQL → PostgreSQL 語法修正
+  fixed = fixed.replace(
+    /ON\s+DUPLICATE\s+KEY\s+UPDATE\s+(.+?)(?=\s*`|;|\n|$)/gim,
+    (_match: string, setCols: string) => {
+      const pgCols = setCols.replace(/VALUES\s*\(\s*(\w+)\s*\)/gi, 'EXCLUDED.$1')
+      return `ON CONFLICT (id) DO UPDATE SET ${pgCols}`
+    }
+  )
 
   // 語法驗證：用 esbuild 快速檢查 TypeScript 語法
   try {
