@@ -10,6 +10,7 @@ import * as os from 'os'
 import { createHash } from 'crypto'
 import { ChildProcess, spawn } from 'child_process'
 import { Pool } from 'pg'
+import { hashSync } from 'bcryptjs'
 import { createLogger } from '../lib/logger'
 import { deriveSchemaFromBdd } from './schema-derivation'
 import type { GeneratedComponent } from './uiux-generation'
@@ -610,8 +611,22 @@ async function resolveViaForeignTable(
   const snake = toSnakeCase(columnName).toLowerCase()
 
   for (const col of currentPair.table.columns) {
-    if (!col.foreignKey) continue
-    const refTableName = col.foreignKey.split(/[.(]/)[0].trim()
+    // 支援明確 FK 和啟發式 FK（user_id UUID → users 表）
+    let refTableName = ''
+    if (col.foreignKey) {
+      refTableName = col.foreignKey.split(/[.(]/)[0].trim()
+    } else if (col.name.toLowerCase().endsWith('_id') && col.type.toUpperCase().includes('UUID')) {
+      // 啟發式：user_id → users, show_id → shows, episode_id → episodes
+      const base = col.name.replace(/_id$/i, '')
+      for (const suffix of ['s', 'es', '']) {
+        const candidate = base + suffix
+        if (schemas.flatMap(s => s.tables).some(t => t.tableName.toLowerCase() === candidate.toLowerCase())) {
+          refTableName = candidate
+          break
+        }
+      }
+    }
+    if (!refTableName) continue
     const refTable = schemas.flatMap(s => s.tables).find(t => t.tableName.toLowerCase() === refTableName.toLowerCase())
     if (!refTable) continue
 
@@ -672,36 +687,30 @@ async function autoHashPasswords(
     hasMap: testPasswordMap ? testPasswordMap.size : 0,
   }, 'autoHashPasswords: 開始處理')
 
-  try {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const bcrypt = require('bcryptjs') as { hashSync: (s: string, salt: number) => string }
-    for (const row of dataTable.rows) {
-      for (const h of pwHeaders) {
-        const val = row[h]
-        if (val && !val.startsWith('$2') && !val.startsWith('$') && !val.startsWith('<') && !val.startsWith('>')) {
-          // 不是 bcrypt hash → 嘗試用 testPasswordMap 找到真實密碼來雜湊
-          let passwordToHash = val
-          if (emailHeader && testPasswordMap && testPasswordMap.size > 0) {
-            const email = row[emailHeader]
-            if (email && testPasswordMap.has(email)) {
-              passwordToHash = testPasswordMap.get(email)!
-              logger.debug({ email, placeholder: val, realPassword: passwordToHash }, 'autoHashPasswords: 用真實測試密碼替換 placeholder')
-            } else {
-              // Fallback: 如果有 testPasswordMap 但找不到此 email，
-              // 用第一個 password 值作為 fallback（同一 Feature 通常用同一組測試密碼）
-              const firstPassword = [...testPasswordMap.values()][0]
-              if (firstPassword) {
-                passwordToHash = firstPassword
-                logger.debug({ email: email || '(none)', fallbackPassword: firstPassword }, 'autoHashPasswords: 使用 Feature 預設密碼')
-              }
+  for (const row of dataTable.rows) {
+    for (const h of pwHeaders) {
+      const val = row[h]
+      if (val && !val.startsWith('$2') && !val.startsWith('$') && !val.startsWith('<') && !val.startsWith('>')) {
+        // 不是 bcrypt hash → 嘗試用 testPasswordMap 找到真實密碼來雜湊
+        let passwordToHash = val
+        if (emailHeader && testPasswordMap && testPasswordMap.size > 0) {
+          const email = row[emailHeader]
+          if (email && testPasswordMap.has(email)) {
+            passwordToHash = testPasswordMap.get(email)!
+            logger.debug({ email, placeholder: val, realPassword: passwordToHash }, 'autoHashPasswords: 用真實測試密碼替換 placeholder')
+          } else {
+            // Fallback: 如果有 testPasswordMap 但找不到此 email，
+            // 用第一個 password 值作為 fallback（同一 Feature 通常用同一組測試密碼）
+            const firstPassword = [...testPasswordMap.values()][0]
+            if (firstPassword) {
+              passwordToHash = firstPassword
+              logger.debug({ email: email || '(none)', fallbackPassword: firstPassword }, 'autoHashPasswords: 使用 Feature 預設密碼')
             }
           }
-          row[h] = bcrypt.hashSync(passwordToHash, 10)
         }
+        row[h] = hashSync(passwordToHash, 10)
       }
     }
-  } catch (err) {
-    logger.warn({ error: String(err) }, 'autoHashPasswords: bcryptjs 載入失敗')
   }
 }
 
@@ -1750,7 +1759,9 @@ export default sql
 
       // crypto.randomUUID: Node 18 沒有 globalThis.crypto，替換為 node:crypto import
       if (content.includes('crypto.randomUUID')) {
-        if (!content.includes("from 'node:crypto'") && !content.includes("from 'crypto'")) {
+        // 無論是否已有 crypto import，都加入 _cryptoRandomUUID import
+        // （LLM 可能 import crypto from 'crypto' 但 globalThis.crypto 不可用）
+        if (!content.includes('_cryptoRandomUUID')) {
           content = "import { randomUUID as _cryptoRandomUUID } from 'node:crypto'\n" + content
         }
         content = content.replace(/crypto\.randomUUID\(\)/g, '_cryptoRandomUUID()')
