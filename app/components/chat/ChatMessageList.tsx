@@ -109,7 +109,10 @@ export default function ChatMessageList({
     return (layoutMode === 'split' && uiuxStartIndex !== -1
       ? messages.slice(uiuxStartIndex)
       : messages
-    ).filter(m => !(m.stage === 'deployer_code_sync' && !m.content?.trim()))
+    ).filter(m =>
+      !(m.stage === 'deployer_code_sync' && !m.content?.trim()) &&
+      !(m.role === 'user' && m.content?.startsWith('__auto_repair_preview__:'))
+    )
   }, [messages, layoutMode])
 
   const lastMessageStage = messages[messages.length - 1]?.stage || ''
