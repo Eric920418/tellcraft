@@ -70,9 +70,24 @@ export async function handleUiuxCodeGenerating(
     const startedAt = state.uiuxCodeGenerationStartedAt || 0
     const elapsed = Date.now() - startedAt
 
+    // ── 過期 lock 偵測（stalled job re-processing 自己持有 lock 的情境）──
+    const STALE_UIUX_THRESHOLD_MS = 5 * 60 * 1000
+    let isStale = false
+    if (startedAt > 0 && elapsed > STALE_UIUX_THRESHOLD_MS) {
+      const lockExists = (await redis.exists(`conv-lock:${conversationId}`)) === 1
+      if (lockExists) {
+        const hasActivity = await hasRecentFlowActivity(redis, conversationId)
+        if (!hasActivity) {
+          logger.warn({ conversationId, elapsed: Math.round(elapsed / 1000) + 's' },
+            'UIUX 代碼生成過期偵測：lock 存在但無心跳，觸發恢復')
+          isStale = true
+        }
+      }
+    }
+
     const isTimedOut = startedAt === 0 || elapsed > GENERATION_TIMEOUT_MS
 
-    if (isTimedOut) {
+    if (isTimedOut || isStale) {
       const hasRecentActivity = await hasRecentFlowActivity(redis, conversationId)
       if (hasRecentActivity) {
         logger.info('代碼生成檢查超時但近期仍有活動心跳，跳過恢復')
@@ -194,6 +209,21 @@ export async function handleFastGenerating(
       await redis.del(`flow:activity:${conversationId}`).catch(() => {})
       await recoverFastBuildFromInterruption(conversationId, state, redis, io)
       return
+    }
+
+    // ── 過期 lock 偵測（stalled job re-processing 自己持有 lock 的情境）──
+    // conv-lock 存在但 startedAt 已很舊 + 無活動心跳 → 原始 Worker 已死，
+    // 當前 lock 是重新處理的 job 自己持有的，不代表有人在生成
+    const STALE_GENERATION_THRESHOLD_MS = 5 * 60 * 1000
+    if (lockExists && orphanStartedAt > 0 && elapsedMs > STALE_GENERATION_THRESHOLD_MS) {
+      const hasRecentActivity = await hasRecentFlowActivity(redis, conversationId)
+      if (!hasRecentActivity) {
+        logger.warn({ conversationId, elapsedMs, codePhase: state.uiuxCodePhase },
+          'Fast Build 過期偵測：lock 存在但無活動心跳，觸發恢復')
+        await redis.del(`flow:activity:${conversationId}`).catch(() => {})
+        await recoverFastBuildFromInterruption(conversationId, state, redis, io)
+        return
+      }
     }
 
     const FAST_BUILD_TIMEOUT_MS = 20 * 60 * 1000
@@ -1078,6 +1108,11 @@ export async function executeFullCodePipeline(
       { userId: state.userId, conversationId, purpose: 'uiux_structure' },
       makeStreamingCallback(conversationId, io, redis, 'structure', twConfig),
       () => void touchFlowActivity(redis, conversationId),
+      // Checkpoint：Structure 生成中途持久化到 FlowState
+      async (partial) => {
+        state.uiuxGeneratedCode = { pages: partial.pages, components: partial.components, styles: partial.styles }
+        await saveFlowState(redis, conversationId, state)
+      },
     )
 
     if (!structureResult.success) {
@@ -1360,6 +1395,11 @@ async function executeCodePhaseStructure(
     { userId: state.userId, conversationId, purpose: 'uiux_structure' },
     makeStreamingCallback(conversationId, io, redis, 'structure', twCfg),
     () => void touchFlowActivity(redis, conversationId),
+    // Checkpoint：Structure 生成中途持久化到 FlowState
+    async (partial) => {
+      state.uiuxGeneratedCode = { pages: partial.pages, components: partial.components, styles: partial.styles }
+      await saveFlowState(redis, conversationId, state)
+    },
   )
 
   if (!structureResult.success) {

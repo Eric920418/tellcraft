@@ -2884,6 +2884,7 @@ export async function generateStructure(
   trackingContext?: LlmTrackingContext,
   onPartialCode?: PartialCodeCallback,
   heartbeatFn?: () => void,  // 長時間 post-processing 期間刷新 Redis 活動心跳
+  onCheckpoint?: (partial: { pages: GeneratedComponent[]; components: GeneratedComponent[]; styles: string }) => Promise<void>,
 ): Promise<GenerationResult> {
   const tier = designTier || 'functional'
   const generationProfile = productContext?.generationProfile || 'balanced'
@@ -3364,6 +3365,12 @@ ${isLaterBatch
       }
 
       logger.info({ batchIdx: batchIdx + 1, pages: bPages.length, components: bComps.length }, 'generateStructure 批次完成')
+
+      // Checkpoint：批次完成後持久化中途結果，防止進程崩潰時遺失
+      if (onCheckpoint && allRawPages.length > 0) {
+        await onCheckpoint({ pages: allRawPages, components: allRawComponents, styles: styles || '' })
+          .catch(err => logger.warn({ err }, 'Structure batch checkpoint failed'))
+      }
     }
   } else {
     // 單次生成
@@ -3396,6 +3403,12 @@ ${isLaterBatch
     onPartialCode({ pages: generatedPages, components: generatedComponents, styles: styles || '' })
   }
 
+  // Checkpoint：語法修復完成後持久化，防止後續 reference repair 期間崩潰遺失
+  if (onCheckpoint) {
+    await onCheckpoint({ pages: generatedPages, components: generatedComponents, styles: styles || '' })
+      .catch(err => logger.warn({ err }, 'Post-syntax-fix checkpoint failed'))
+  }
+
   // ── Layer 1 防禦：驗證組件引用完整性 + LLM 自修復 ──
   const finalPages = generatedPages
   let finalComponents = generatedComponents
@@ -3417,6 +3430,12 @@ ${isLaterBatch
     if (repairedComponents.length > 0) {
       logger.info({ count: repairedComponents.length, paths: repairedComponents.map(c => c.path) }, '已修復缺失組件')
       finalComponents = [...generatedComponents, ...repairedComponents]
+
+      // Checkpoint：修復完成後持久化最終結果
+      if (onCheckpoint) {
+        await onCheckpoint({ pages: finalPages, components: finalComponents, styles: styles || '' })
+          .catch(err => logger.warn({ err }, 'Post-repair checkpoint failed'))
+      }
 
       // 二次校驗（只 log，不再 LLM）
       const remainingMissing = validateComponentReferences(finalPages, finalComponents)

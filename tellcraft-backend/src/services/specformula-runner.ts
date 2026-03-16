@@ -65,6 +65,58 @@ export interface SpecFormulaTestResult {
 // ============================================================
 
 /**
+ * 日期格式正規化：Response 回 ISO datetime（如 "2024-01-15T00:00:00.000Z"）
+ * 但 DataTable 期望 date-only（如 "2024-01-15"）→ 截斷 response 中的日期欄位
+ */
+function normalizeDateValuesInResponse(
+  scenarioContext: ScenarioContext,
+  expectedHeaders: string[],
+  expectedRows: Record<string, string>[]
+): void {
+  const lastResp = scenarioContext.getLastResponse()
+  if (!lastResp?.body) return
+
+  const dateOnlyFields = new Set<string>()
+  for (const row of expectedRows) {
+    for (const h of expectedHeaders) {
+      const v = row[h]
+      if (v && /^\d{4}-\d{2}-\d{2}$/.test(v)) {
+        dateOnlyFields.add(h)
+      }
+    }
+  }
+  if (dateOnlyFields.size === 0) return
+
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(lastResp.body)
+  } catch { return }
+
+  if (!parsed || typeof parsed !== 'object') return
+
+  const items = Array.isArray(parsed) ? parsed : [parsed]
+  let changed = false
+
+  for (const item of items) {
+    if (!item || typeof item !== 'object') continue
+    const rec = item as Record<string, unknown>
+    for (const field of dateOnlyFields) {
+      const val = rec[field]
+      if (typeof val === 'string' && /^\d{4}-\d{2}-\d{2}T/.test(val)) {
+        rec[field] = val.split('T')[0]
+        changed = true
+      }
+    }
+  }
+
+  if (changed) {
+    scenarioContext.setLastResponse(
+      new TestResponse(lastResp.status, JSON.stringify(parsed))
+    )
+  }
+}
+
+/**
  * LLM 生成的 action 函數常將回應欄位嵌套在子物件中（如 { user: { email } } 或 { data: { title } }）。
  * 此函數將 response body 中的嵌套物件展平到頂層，使 DataTable 驗證能找到欄位。
  * 例：{ user: { email: "a@b.com" }, message: "ok" } → { email: "a@b.com", message: "ok" }
@@ -879,6 +931,20 @@ async function executeStep(
           }
         }
 
+        // 注入 Actor UID — 將 captures.actor（如 $UserAlice）解析為 userId 並注入 request body
+        // Feature 用 UID="$UserAlice" 指定操作者，但 invokeWithActor 只設 Authorization header
+        // action 函數需要 input.userId 才能知道是誰在操作
+        if (captures.actor) {
+          const actorResolver = new ISAFeatureArgumentResolver(() => scenarioContext)
+          const resolvedActorId = actorResolver.resolveVariable(captures.actor)
+          if (resolvedActorId != null && String(resolvedActorId) !== captures.actor) {
+            apiHeaders.push('userId')
+            for (const row of apiRows) {
+              row['userId'] = String(resolvedActorId)
+            }
+          }
+        }
+
         // 將 API 請求資料中的非 UUID 字串 ID 轉為確定性 UUID
         // entity_setup 已用 deterministicUuid 插入（如 "SHOW-001" → UUID），
         // API 參數也必須做相同轉換才能查到
@@ -920,6 +986,9 @@ async function executeStep(
             { headers: [...step.dataTable.headers], rows: step.dataTable.rows.map(r => ({ ...r })) },
             schemas
           )
+
+          // 預處理：正規化日期格式（ISO datetime → date-only）
+          normalizeDateValuesInResponse(scenarioContext, respDt.headers, respDt.rows)
 
           // 多層容錯驗證：
           // 1. 原始驗證（含 status check）
@@ -1433,19 +1502,51 @@ export default sql
 
       // bcrypt / bcryptjs: CJS module → 統一用 createRequire + bcryptjs（純 JS，無需 native build）
       if (/['"]bcrypt(?:js)?['"]/.test(content)) {
+        // 擷取 named imports（如 { hash, compare }）以便修復引用
+        const bcryptNamedMatch = content.match(/import\s+\{([^}]*)\}\s+from\s+['"]bcrypt(?:js)?['"]/)
+        const bcryptNamedImports = bcryptNamedMatch
+          ? bcryptNamedMatch[1].split(',').map(s => s.trim()).filter(Boolean)
+          : []
         content = content.replace(
           /import\s+(?:\*\s+as\s+\w+|\w+|\{[^}]*\})\s+from\s+['"]bcrypt(?:js)?['"]/g,
           "import { createRequire } from 'module'\nconst _cjsRequire = createRequire(import.meta.url)\nconst bcrypt = _cjsRequire('bcryptjs')"
         )
+        // 修復 named import 引用：hash() → bcrypt.hash(), compare() → bcrypt.compare()
+        for (const imp of bcryptNamedImports) {
+          const parts = imp.split(/\s+as\s+/)
+          const localName = (parts[1] || parts[0]).trim()
+          const originalName = parts[0].trim()
+          content = content.replace(new RegExp(`(?<![.\\w])${localName}\\s*\\(`, 'g'), `bcrypt.${originalName}(`)
+        }
         changed = true
       }
 
       // jsonwebtoken: 同樣是 CJS
       if (content.includes('jsonwebtoken')) {
+        const jwtNamedMatch = content.match(/import\s+\{([^}]*)\}\s+from\s+['"]jsonwebtoken['"]/)
+        const jwtNamedImports = jwtNamedMatch
+          ? jwtNamedMatch[1].split(',').map(s => s.trim()).filter(Boolean)
+          : []
         content = content.replace(
           /import\s+(?:\*\s+as\s+\w+|\w+|\{[^}]*\})\s+from\s+['"]jsonwebtoken['"]/g,
           "import { createRequire } from 'module'\nconst _cjsRequire2 = createRequire(import.meta.url)\nconst jwt = _cjsRequire2('jsonwebtoken')"
         )
+        // 修復 named import 引用：sign() → jwt.sign(), verify() → jwt.verify()
+        for (const imp of jwtNamedImports) {
+          const parts = imp.split(/\s+as\s+/)
+          const localName = (parts[1] || parts[0]).trim()
+          const originalName = parts[0].trim()
+          content = content.replace(new RegExp(`(?<![.\\w])${localName}\\s*\\(`, 'g'), `jwt.${originalName}(`)
+        }
+        changed = true
+      }
+
+      // crypto.randomUUID: Node 18 沒有 globalThis.crypto，替換為 node:crypto import
+      if (content.includes('crypto.randomUUID')) {
+        if (!content.includes("from 'node:crypto'") && !content.includes("from 'crypto'")) {
+          content = "import { randomUUID as _cryptoRandomUUID } from 'node:crypto'\n" + content
+        }
+        content = content.replace(/crypto\.randomUUID\(\)/g, '_cryptoRandomUUID()')
         changed = true
       }
 
@@ -1614,7 +1715,11 @@ function generateTestServerCode(
     }
   }
 
-  return `import express from 'express'
+  return `// Polyfill globalThis.crypto for Node 18 (crypto.randomUUID needs it)
+import { webcrypto as _webcrypto } from 'node:crypto'
+if (!globalThis.crypto) { (globalThis as any).crypto = _webcrypto }
+
+import express from 'express'
 ${actionImports.join('\n')}
 
 const app = express()

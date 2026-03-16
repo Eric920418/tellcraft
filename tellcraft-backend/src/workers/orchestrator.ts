@@ -278,6 +278,7 @@ async function handleProcessMessage(
       taskId: existingState.taskId,
       message, locale,
       imageUrls: data.imageUrls,
+      skipPrefilterAndCredit: true,
     }, redis, io)
   }
 
@@ -536,7 +537,7 @@ async function handleContinueFlow(
   const state = await getFlowState(redis, conversationId)
   const effectiveLocale = data.locale || state?.locale
 
-  if (!isAutoRepair) {
+  if (!isAutoRepair && !data.skipPrefilterAndCredit) {
     // Prefilter
     const prefilterResult = await prefilterMessage(message, userId, redis, effectiveLocale)
     if (!prefilterResult.allowed) {

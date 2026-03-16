@@ -48,6 +48,7 @@ export interface ContinueFlowData {
   specConfirmed?: boolean
   locale?: 'zh' | 'en'
   imageUrls?: string[]
+  skipPrefilterAndCredit?: boolean  // handleProcessMessage 已執行 prefilter + credit 後的內部轉發
 }
 
 /**

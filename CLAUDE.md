@@ -360,6 +360,9 @@ Feature 註解：`# Action: actionName` + `# [METHOD] /path` + `# Summary: xxx`
 
 ## 防雷清單（不看必踩）
 
+- **handleProcessMessage 轉發到 handleContinueFlow 時必須帶 `skipPrefilterAndCredit: true`**：否則 prefilter + credit deduction 會執行兩次（雙重扣款）。只有 BullMQ `continue-flow` job 直接呼叫 `handleContinueFlow` 時才不帶此旗標
+- **`handleFastGenerating`/`handleUiuxCodeGenerating` 的孤兒偵測有三層**：(1) conv-lock 不存在 + 60s → 立即恢復；(2) conv-lock 存在但 startedAt > 5min + 無心跳 → 過期 lock 恢復（防 stalled job re-processing 自己持有 lock 的假象）；(3) 20min 完整超時。新增生成中 phase handler 時必須考慮這三層
+- **`generateStructure` 的 `onCheckpoint` callback**：在 multi-pass 批次完成、syntax fix 後、reference repair 後三處觸發。呼叫端必須傳入 checkpoint callback 將中途代碼存入 FlowState，防止進程崩潰遺失串流中代碼
 - **新增 phase 必須四處同步**：`handleContinueFlow` 路由（含超時偵測）+ `FlowState` 型別 + `flowstate-recovery.ts` RECOVERABLE_PHASES + 前端 `richContent.type` union
 - **Layout 切換禁止 opacity:0 入場動畫**：SplitLayout 左右兩側和 split-layout 外層不能用 `initial={{ opacity: 0 }}`，否則多層 opacity 疊加導致黑屏。Layout useEffect 依賴不能包含 `fastBuildChunks`（polling 每次 code_preview 都歸零再恢復，導致 layout 抖動）。一旦進入 split 模式，需檢查 `code_preview` 歷史消息才允許回退到 default
 - **動畫庫是 `motion/react`**，不是 `framer-motion`

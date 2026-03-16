@@ -590,6 +590,15 @@ export async function runFastBuildPipeline(params: {
     { userId, conversationId, purpose: isLaterBatch ? 'fast-build-structure-batch' : 'fast-build-structure' },
     structureStreamingCallback,
     () => void touchFlowActivity(redis, conversationId),
+    // Checkpoint：Structure 生成中途持久化到 FlowState，防止進程崩潰遺失代碼
+    async (partial) => {
+      const merged = isLaterBatch && existingCode
+        ? mergeGeneratedCode(existingCode, { pages: partial.pages, components: partial.components, styles: partial.styles })
+        : { pages: partial.pages, components: partial.components, styles: partial.styles }
+      state.uiuxGeneratedCode = merged
+      await saveFlowState(redis, conversationId, state)
+      logger.info({ pages: merged.pages.length, components: merged.components.length }, 'Structure checkpoint saved')
+    },
   )
 
   if (!structureResult.success) {
