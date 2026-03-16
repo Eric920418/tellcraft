@@ -2117,10 +2117,21 @@ export function repairMissingReactImports(
  */
 export function repairUndeclaredRefs(file: GeneratedComponent): { content: string; repaired: boolean } {
   const content = file.content
-  // 找出所有 xyzRef.current 用法
-  const usageMatches = [...content.matchAll(/\b(\w+Ref)\.current\b/g)]
-  if (usageMatches.length === 0) return { content, repaired: false }
-  const usedRefs = new Set(usageMatches.map(m => m[1]))
+  // 找出所有 xyzRef 用法：.current、ref={xyzRef}、xyzRef.anyProp、作為參數傳遞
+  const usedRefs = new Set<string>()
+  // Pattern 1: xyzRef.current / xyzRef.x / xyzRef.anyProp
+  for (const m of content.matchAll(/\b(\w+Ref)\.\w+/g)) usedRefs.add(m[1])
+  // Pattern 2: ref={xyzRef} / ref = {xyzRef}
+  for (const m of content.matchAll(/ref\s*=\s*\{?\s*(\w+Ref)\b/g)) usedRefs.add(m[1])
+  // Pattern 3: xyzRef alone（函數參數、賦值右側等，排除宣告行和 import）
+  for (const m of content.matchAll(/(?<!const\s+)(?<!let\s+)(?<!var\s+)(?<!import\s.*)\b(\w+Ref)\b(?!\s*[=:])/g)) {
+    // 排除在 import/export/type 行的
+    const lineStart = content.lastIndexOf('\n', m.index) + 1
+    const line = content.slice(lineStart, content.indexOf('\n', m.index))
+    if (/^\s*(import|export|type|interface)\b/.test(line)) continue
+    usedRefs.add(m[1])
+  }
+  if (usedRefs.size === 0) return { content, repaired: false }
 
   // 找出已宣告的 useRef（const xyzRef = useRef...）
   const declaredRefs = new Set<string>()
