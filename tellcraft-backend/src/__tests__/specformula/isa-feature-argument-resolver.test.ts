@@ -519,7 +519,7 @@ describe('ISAFeatureArgumentResolver', () => {
 
     it('validates $notnull fails for null', () => {
       expect(() => resolver.resolveAndValidate('$notnull', null, 'field', 'entity'))
-        .toThrow('應該不為 null')
+        .toThrow('應該不為空')
     })
 
     it('evaluates CAS constraint', () => {
