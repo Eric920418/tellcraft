@@ -931,6 +931,17 @@ async function executeStep(
             )
           }
 
+          // 診斷：記錄 response body 以便分析失敗原因
+          const logResponseOnError = (err: any) => {
+            const lastResp = scenarioContext.getLastResponse()
+            logger.warn({
+              summary: captures.summary,
+              status: lastResp?.status,
+              body: lastResp?.body?.substring(0, 500),
+              error: (err?.message || '').substring(0, 200),
+            }, 'response_validate 失敗 — 完整 response')
+          }
+
           try {
             tryValidate(statusCode)
           } catch (validateErr: any) {
@@ -945,16 +956,28 @@ async function executeStep(
                 if (retryMsg.includes('值不匹配') && retryMsg.includes('實際: ')) {
                   // 欄位找不到 → 嘗試展平 response
                   flattenLastResponse(scenarioContext)
-                  tryValidate('')
+                  try {
+                    tryValidate('')
+                  } catch (flatErr: any) {
+                    logResponseOnError(flatErr)
+                    throw flatErr
+                  }
                 } else {
+                  logResponseOnError(retryErr)
                   throw retryErr
                 }
               }
             } else if (msg.includes('值不匹配') && msg.includes('實際: ')) {
               // 欄位找不到（actual 為空）→ 嘗試展平 response body 的嵌套物件
               flattenLastResponse(scenarioContext)
-              tryValidate(statusCode)
+              try {
+                tryValidate(statusCode)
+              } catch (flatErr: any) {
+                logResponseOnError(flatErr)
+                throw flatErr
+              }
             } else {
+              logResponseOnError(validateErr)
               throw validateErr
             }
           }
