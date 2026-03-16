@@ -419,3 +419,31 @@ describe('toVercelSlug', () => {
     expect(toVercelSlug('-hello-world-')).toBe('hello-world')
   })
 })
+
+// ============================================================
+// Coder Skill 後端依賴偵測
+// ============================================================
+
+describe('Coder Skill 後端依賴偵測', () => {
+  it('應該偵測 bcryptjs 和 jsonwebtoken 為 extraDependencies', () => {
+    const code = makeCode({
+      components: [makeFile('lib/actions/manage-auth.ts',
+        `import { hash, compare } from 'bcryptjs'\nimport jwt from 'jsonwebtoken'\nexport async function manageAuth() {}`
+      )],
+    })
+    const result = sanitizeCodeForDeploy(code)
+    expect(result.extraDependencies['bcryptjs']).toBeDefined()
+    expect(result.extraDependencies['jsonwebtoken']).toBeDefined()
+  })
+
+  it('不應該對 use server 檔案加入 use client', () => {
+    const code = makeCode({
+      components: [makeFile('app/actions/auth.ts',
+        `'use server'\n\nimport { manageAuth } from '@/lib/actions/manage-auth'\n\nexport async function manageAuthAction(input: any) { return manageAuth(input) }`
+      )],
+    })
+    const result = sanitizeCodeForDeploy(code)
+    expect(result.code.components[0].content).toMatch(/^'use server'/)
+    expect(result.code.components[0].content).not.toContain("'use client'")
+  })
+})

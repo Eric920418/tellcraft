@@ -191,6 +191,9 @@ const KNOWN_PACKAGES: Record<string, string> = {
   'vaul': '^1.0.0',
   'input-otp': '^1.2.0',
   'next-themes': '^0.3.0',
+  // Coder Skill 常用（後端邏輯）
+  'bcryptjs': '^2.4.3',
+  'jsonwebtoken': '^9.0.2',
 }
 
 /**
@@ -336,7 +339,8 @@ export function sanitizeCodeForDeploy(code: GeneratedCode): SanitizeResult {
       /\b(useState|useEffect|useRef|useCallback|useMemo|useContext|useReducer)\b/.test(file.content) ||
       /from\s+['"]motion\/react['"]/.test(file.content)
     const hasUseClient = /^['"]use client['"]/.test(file.content.trimStart())
-    if (needsClient && !hasUseClient) {
+    const hasUseServer = /^['"]use server['"]/.test(file.content.trimStart())
+    if (needsClient && !hasUseClient && !hasUseServer) {
       file.content = "'use client'\n\n" + file.content
       fixes.push(`${file.path}: 自動加入 'use client'`)
     }
@@ -551,6 +555,8 @@ export function safeMotionProps<T extends Record<string, unknown>>(props: T) {
           extraDependencies[pkg] = KNOWN_PACKAGES[pkg]
         } else if (pkg.startsWith('@radix-ui/')) {
           extraDependencies[pkg] = '^1.1.0' // Radix 通用 fallback 版本
+        } else if (!pkg.startsWith('@types/') && !pkg.startsWith('node:')) {
+          fixes.push(`⚠️ 未知依賴 ${pkg}（不在 KNOWN_PACKAGES 中）`)
         }
       }
     }
@@ -558,8 +564,12 @@ export function safeMotionProps<T extends Record<string, unknown>>(props: T) {
     while ((m = requireRegex.exec(file.content)) !== null) {
       const raw = m[1]
       const pkg = raw.startsWith('@') ? raw.split('/').slice(0, 2).join('/') : raw.split('/')[0]
-      if (!basePkgs.has(pkg) && KNOWN_PACKAGES[pkg]) {
-        extraDependencies[pkg] = KNOWN_PACKAGES[pkg]
+      if (!basePkgs.has(pkg)) {
+        if (KNOWN_PACKAGES[pkg]) {
+          extraDependencies[pkg] = KNOWN_PACKAGES[pkg]
+        } else if (!pkg.startsWith('@types/') && !pkg.startsWith('node:')) {
+          fixes.push(`⚠️ 未知依賴 ${pkg}（不在 KNOWN_PACKAGES 中）`)
+        }
       }
     }
   }
