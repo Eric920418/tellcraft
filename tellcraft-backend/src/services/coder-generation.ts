@@ -197,7 +197,7 @@ function buildActionSystemPrompt(): string {
 - 回傳型別明確（不用 any）
 - SQL 查詢必須使用 parameterized query（$1, $2...），嚴禁字串拼接 SQL
 - 所有日期用 ISO 8601 字串
-- ID 欄位使用 UUID（gen_random_uuid()）
+- ID 欄位使用 UUID。如果輸入有 ID 值（如 input.episodeId）→ 用它；沒有才用 gen_random_uuid()
 - 密碼雜湊用 bcryptjs（import bcrypt from 'bcryptjs'），JWT 用 jsonwebtoken
 - 不要做認證/登入檢查（如檢查 userId 是否存在、要求 token）。呼叫者已處理認證，函數只做業務邏輯
 - 前置（狀態）規則中的「使用者必須已登入」由測試框架的 UID actor 處理，函數內不需驗證
@@ -792,6 +792,22 @@ userId 由呼叫者注入，可直接使用，不需驗證是否存在。
 如果測試驗證 episodeId，必須 return { episodeId: xxx }，不能是 id 或 episode_id。
 如果測試驗證 showId，必須 return { showId: xxx }。以此類推。
 
+## ID 欄位（常見錯誤！）
+如果輸入包含 episodeId/showId/commentId 等 ID 值，INSERT 時必須使用輸入的 ID：
+\`\`\`typescript
+const id = input.episodeId || crypto.randomUUID()
+await sql\`INSERT INTO episodes (id, ...) VALUES (\${id}, ...)\`
+return { episodeId: id, ... }
+\`\`\`
+不要忽略輸入的 ID 而用 gen_random_uuid() 或 DEFAULT 生成新 ID。
+
+## PostgreSQL 語法（常見錯誤！）
+使用 PostgreSQL 語法，不要用 MySQL：
+- ✅ ON CONFLICT (id) DO UPDATE SET col = EXCLUDED.col
+- ❌ ON DUPLICATE KEY UPDATE（MySQL 語法，PostgreSQL 不支持）
+- ✅ gen_random_uuid()
+- ❌ UUID()
+
 ## email → userId（常見錯誤！）
 測試傳入 email 參數時，函數必須自行查詢 userId：
 \`\`\`typescript
@@ -861,8 +877,12 @@ ${schemaSql}
     .replace(/】/g, ']')
 
   // 移除 LLM 偶爾加入的認證檢查（儘管 prompt 禁止，LLM 仍可能添加）
+  // Pattern 1: if (!userId) { throw/return ... }
   fixed = fixed.replace(/if\s*\(\s*!(?:input\.)?userId\s*\)\s*\{[^}]*(?:throw|return)[^}]*\}/g, '')
+  // Pattern 2: if (!userId) throw/return ...
   fixed = fixed.replace(/if\s*\(\s*!(?:input\.)?userId\s*\)\s*(?:throw|return)[^\n]*/g, '')
+  // Pattern 3: 包含「必須已登入」「認證」「unauthorized」的 throw 語句
+  fixed = fixed.replace(/if\s*\([^)]*\)\s*\{?\s*throw\s+new\s+Error\s*\(\s*['"`][^'"`]*(?:必須已登入|認證|已過期|unauthorized|must.*log)[^'"`]*['"`]\s*\)\s*\}?/gi, '')
 
   // 語法驗證：用 esbuild 快速檢查 TypeScript 語法
   try {

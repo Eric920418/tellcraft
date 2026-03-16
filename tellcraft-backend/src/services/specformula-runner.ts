@@ -647,6 +647,37 @@ async function resolveViaForeignTable(
  * 如果欄位是跨表識別符（如 email），自動解析為 FK 引用（如 user_id）。
  * 無法解析的欄位直接移除，避免 SQL INSERT 失敗。
  */
+
+/**
+ * password_hash / password 欄位自動 bcrypt 雜湊。
+ * Feature 常用字串值如 "hashed_value"，但 action 的 bcrypt.compare 需要真正的 hash。
+ */
+async function autoHashPasswords(
+  dataTable: { headers: string[]; rows: Record<string, string>[] }
+): Promise<void> {
+  const pwHeaders = dataTable.headers.filter(h => {
+    const lower = h.toLowerCase().replace(/[_-]/g, '')
+    return lower === 'passwordhash' || lower === 'password'
+  })
+  if (pwHeaders.length === 0) return
+
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const bcrypt = require('bcryptjs') as { hashSync: (s: string, salt: number) => string }
+    for (const row of dataTable.rows) {
+      for (const h of pwHeaders) {
+        const val = row[h]
+        if (val && !val.startsWith('$2') && !val.startsWith('$') && !val.startsWith('<') && !val.startsWith('>')) {
+          // 不是 bcrypt hash ($2a$/$2b$)，也不是 VAR-System 引用 → 自動雜湊
+          row[h] = bcrypt.hashSync(val, 10)
+        }
+      }
+    }
+  } catch {
+    // bcryptjs 未安裝 — 跳過（runner 環境通常有）
+  }
+}
+
 async function resolveNonSchemaColumns(
   dataTable: { headers: string[]; rows: Record<string, string>[] },
   entityName: string,
@@ -899,6 +930,9 @@ async function executeStep(
         const uuidFixedDt = fixNonUuidValues(filledDt, captures.entity, schemas)
         // 解析不存在於 schema 的欄位（如 email → user_id 跨表 FK 解析）
         const resolvedDt = await resolveNonSchemaColumns(uuidFixedDt, captures.entity, schemas, pool)
+        // password_hash 自動 bcrypt 雜湊 — Feature 常用 "hashed_value" 等字串值，
+        // 但 login action 用 bcrypt.compare 比對，需要真正的 bcrypt hash
+        await autoHashPasswords(resolvedDt)
         // 自動建立 FK 引用的行（如 episodes 引用 shows → 先建立 shows 行）
         await ensureFkReferencesExist(resolvedDt, captures.entity, schemas, pool)
         await instructionSet.entitySetup.setup(
