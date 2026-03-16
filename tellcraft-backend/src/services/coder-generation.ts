@@ -837,7 +837,8 @@ if (!userId) throw new Error('使用者不存在')
 如果 input.userId 已經存在就直接用，否則用 email 查詢。
 
 ## 查詢列表操作（常見錯誤！）
-查詢列表時只需要 userId（由呼叫者注入），不要額外要求 showId/episodeId 等：
+查詢「使用者的」訂閱列表/播放記錄等，只需要 userId。
+不要要求 showId/episodeId 等額外參數。
 \`\`\`typescript
 if (op.includes('查詢') && op.includes('列表')) {
   const userId = input.userId
@@ -845,17 +846,6 @@ if (op.includes('查詢') && op.includes('列表')) {
   return { __status: 200, items: rows }
 }
 \`\`\`
-
-## 更新操作（常見錯誤！）
-更新操作不需要驗證「至少提供一個欄位」。直接用傳入的欄位更新即可：
-\`\`\`typescript
-if (op.includes('更新')) {
-  await sql\`UPDATE table SET col1 = COALESCE(\${input.col1}, col1), col2 = COALESCE(\${input.col2}, col2) WHERE id = \${id}\`
-  const result = await sql\`SELECT * FROM table WHERE id = \${id}\`
-  return { __status: 200, ...result[0] }
-}
-\`\`\`
-不要 throw "至少必須提供一個欄位"，用 COALESCE 讓未傳入的欄位保持原值。
 
 ## 登出操作（常見錯誤！）
 登出操作不需要驗證 token/session 是否有效。直接返回成功：

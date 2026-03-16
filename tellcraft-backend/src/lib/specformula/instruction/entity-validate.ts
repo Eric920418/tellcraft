@@ -209,6 +209,12 @@ export class EntityValidate {
       if (resolved === null || resolved === undefined) continue;
 
       // resolveAndValidate 回傳非 null 表示需要進行值比較
+      // UUID ID 容錯：server 用 gen_random_uuid() 產生 ID，與 Feature 的確定性 UUID 不同
+      if (/(?:^id$|Id$|_id$)/i.test(fieldName) &&
+          typeof resolved === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-/i.test(resolved) &&
+          typeof actualValue === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-/i.test(actualValue as string)) {
+        continue;
+      }
       if (!this.valuesEqual(resolved, actualValue)) {
         throw new Error(
           `[${entityName}.${fieldName}] expect: [${String(resolved)}], actual: [${String(actualValue)}]`

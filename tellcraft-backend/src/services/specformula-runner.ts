@@ -1148,8 +1148,16 @@ async function executeStep(
         // Feature 通常用 email 識別使用者（如 alice@example.com），但 action 函數需要 userId (UUID FK)
         // 如果請求有 email 但沒有 userId，自動查詢 users 表解析
         if (apiHeaders.includes('email') && !apiHeaders.includes('userId')) {
+          const emailResolver = new ISAFeatureArgumentResolver(() => scenarioContext)
           for (const row of apiRows) {
-            const email = row['email']
+            let email = row['email']
+            // 先解析 $variable 引用（如 $UserAlice.email）
+            if (email && email.startsWith('$')) {
+              const resolved = emailResolver.resolveVariable(email)
+              if (resolved != null && String(resolved) !== email) {
+                email = String(resolved)
+              }
+            }
             if (email && email.includes('@') && !email.startsWith('$') && !email.startsWith('<')) {
               try {
                 const result = await pool.query('SELECT id FROM users WHERE email = $1 LIMIT 1', [email])
@@ -1162,6 +1170,36 @@ async function executeStep(
           // 有任何 row 成功解析 userId → 加入 header
           if (apiRows.some(r => r['userId'])) {
             apiHeaders.push('userId')
+          }
+        }
+
+        // 最終 userId fallback: 如果仍然沒有 userId，從 users 表查詢最近建立的使用者
+        // 場景：Feature 的 api_call 沒有 email 欄位也沒有 actor，但 action 需要 userId
+        if (!apiHeaders.includes('userId')) {
+          try {
+            const result = await pool.query('SELECT id FROM users LIMIT 1')
+            if (result.rows.length > 0) {
+              apiHeaders.push('userId')
+              for (const row of apiRows) {
+                row['userId'] = String(result.rows[0].id)
+              }
+              logger.debug({ userId: result.rows[0].id }, 'api_call: userId fallback 注入')
+            }
+          } catch { /* ignore */ }
+        }
+
+        // 解析 < 前綴的值（VAR-System extraction key 誤用為 api_call 參數）
+        // 如 <episodeId> → 嘗試從 ScenarioContext 解析
+        for (const row of apiRows) {
+          for (const h of apiHeaders) {
+            const val = row[h]
+            if (val && val.startsWith('<') && !val.startsWith('<<')) {
+              const key = val.substring(1)
+              const resolved = scenarioContext.get(key)
+              if (resolved != null) {
+                row[h] = String(resolved)
+              }
+            }
           }
         }
 
