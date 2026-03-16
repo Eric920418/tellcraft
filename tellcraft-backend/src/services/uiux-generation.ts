@@ -2170,36 +2170,47 @@ export function repairUndeclaredRefs(file: GeneratedComponent): { content: strin
 /**
  * 偵測並修復「變數名 shadow React hook」的致命錯誤
  * 例：const useRef = useRef(null) → TDZ 導致 Cannot access 'useRef' before initialization
+ * 多個 shadow 時用計數器產生唯一名稱（ref1, ref2, ...）
  */
 export function repairHookShadowing(file: GeneratedComponent): { content: string; repaired: boolean } {
-  const REACT_HOOKS = ['useRef', 'useState', 'useEffect', 'useCallback', 'useMemo', 'useContext', 'useReducer', 'useLayoutEffect', 'useId', 'useTransition']
+  const HOOK_BASE_NAMES: Record<string, string> = {
+    useRef: 'ref', useState: 'state', useEffect: 'effect',
+    useCallback: 'cb', useMemo: 'memo', useContext: 'ctx',
+    useReducer: 'reducer', useLayoutEffect: 'layoutEffect',
+    useId: 'id', useTransition: 'transition',
+  }
   let content = file.content
   let repaired = false
 
-  for (const hook of REACT_HOOKS) {
-    // 匹配 const useRef = useRef(...) 或 let useRef = useRef(...)
-    const pattern = new RegExp(`(const|let)\\s+${hook}\\s*=\\s*${hook}\\s*(<[^>]*>)?\\s*\\(`, 'g')
-    if (pattern.test(content)) {
-      // 根據 hook 類型推斷合理替代名
-      const replacement = hook === 'useRef' ? 'containerRef'
-        : hook === 'useState' ? 'localState'
-        : hook === 'useEffect' ? 'effectCleanup'
-        : hook === 'useCallback' ? 'memoizedCallback'
-        : hook === 'useMemo' ? 'memoizedValue'
-        : 'hookValue'
-      // 替換宣告行的變數名
-      content = content.replace(
-        new RegExp(`(const|let)\\s+${hook}(\\s*=\\s*${hook}\\s*(?:<[^>]*>)?\\s*\\()`, 'g'),
-        `$1 ${replacement}$2`
-      )
-      // 替換後續所有對這個被 shadow 變數的引用（不含 hook 呼叫本身）
-      // 只替換作為獨立識別符的引用（非 hook 調用模式）
-      // 用 . 或 作為 JSX ref= 的地方
-      content = content.replace(
-        new RegExp(`\\b${replacement}\\.current\\b`, 'g'),
-        `${replacement}.current`
-      )
-      logger.warn({ path: file.path, hook, replacement }, 'repairHookShadowing: 修復 hook 名稱 shadow')
+  for (const [hook, baseName] of Object.entries(HOOK_BASE_NAMES)) {
+    const testPattern = new RegExp(`(?:const|let)\\s+${hook}\\s*=\\s*${hook}\\s*(?:<[^>]*>)?\\s*\\(`)
+    if (!testPattern.test(content)) continue
+
+    // 收集檔案中已存在的變數名，避免命名衝突
+    const existingNames = new Set<string>()
+    for (const m of content.matchAll(/(?:const|let|var)\s+(\w+)\s*=/g)) {
+      existingNames.add(m[1])
+    }
+
+    let counter = 0
+    content = content.replace(
+      new RegExp(`((?:const|let)\\s+)${hook}(\\s*=\\s*${hook}\\s*(?:<[^>]*>)?\\s*\\()`, 'g'),
+      (_match, prefix, rest) => {
+        counter++
+        // 產生不衝突的唯一名稱
+        let name: string
+        do {
+          name = counter === 1 ? `${baseName}${counter}` : `${baseName}${counter}`
+          counter++
+        } while (existingNames.has(name))
+        counter-- // 回退多加的 1
+        existingNames.add(name)
+        return `${prefix}${name}${rest}`
+      }
+    )
+
+    if (counter > 0) {
+      logger.warn({ path: file.path, hook, count: counter }, 'repairHookShadowing: 修復 hook 名稱 shadow')
       repaired = true
     }
   }
