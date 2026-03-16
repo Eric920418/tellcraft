@@ -666,6 +666,13 @@ async function autoHashPasswords(
 
   const emailHeader = dataTable.headers.find(h => h.toLowerCase() === 'email')
 
+  logger.info({
+    pwHeaders,
+    emailHeader: emailHeader || '(none)',
+    headers: dataTable.headers,
+    hasMap: testPasswordMap ? testPasswordMap.size : 0,
+  }, 'autoHashPasswords: 開始處理')
+
   try {
     // eslint-disable-next-line @typescript-eslint/no-require-imports
     const bcrypt = require('bcryptjs') as { hashSync: (s: string, salt: number) => string }
@@ -680,14 +687,16 @@ async function autoHashPasswords(
             if (email && testPasswordMap.has(email)) {
               passwordToHash = testPasswordMap.get(email)!
               logger.info({ email, placeholder: val, realPassword: passwordToHash }, 'autoHashPasswords: 用真實測試密碼替換 placeholder')
+            } else {
+              logger.info({ email: email || '(none)', mapEntries: testPasswordMap ? [...testPasswordMap.keys()] : [] }, 'autoHashPasswords: 未找到密碼映射')
             }
           }
           row[h] = bcrypt.hashSync(passwordToHash, 10)
         }
       }
     }
-  } catch {
-    // bcryptjs 未安裝 — 跳過（runner 環境通常有）
+  } catch (err) {
+    logger.warn({ error: String(err) }, 'autoHashPasswords: bcryptjs 載入失敗')
   }
 }
 

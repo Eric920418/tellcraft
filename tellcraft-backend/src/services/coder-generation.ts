@@ -919,6 +919,24 @@ ${schemaSql}
     }
   )
 
+  // 確保 export function 名稱正確（LLM 偶爾會重命名函數）
+  const expectedFnName = toCamelCase(actionName)
+  const exportRegex = new RegExp(`export\\s+async\\s+function\\s+${expectedFnName}\\b`)
+  if (!exportRegex.test(fixed)) {
+    // 嘗試修復：找到任何 export async function 並重命名
+    const anyExportMatch = fixed.match(/export\s+async\s+function\s+(\w+)/)
+    if (anyExportMatch) {
+      fixed = fixed.replace(
+        /export\s+async\s+function\s+\w+/,
+        `export async function ${expectedFnName}`
+      )
+      logger.warn({ actionName, original: anyExportMatch[1], expected: expectedFnName }, 'LLM 修復重命名了函數，已自動修正')
+    } else {
+      logger.warn({ actionName }, 'LLM 修復缺少 export async function，使用原始代碼')
+      return currentCode
+    }
+  }
+
   // 語法驗證：用 esbuild 快速檢查 TypeScript 語法
   try {
     const esbuild = await import('esbuild')
