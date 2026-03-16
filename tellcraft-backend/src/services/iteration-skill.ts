@@ -259,7 +259,7 @@ ${enrichedFeedback}`
       state.uiuxPreIterationCode = previousSnapshot
       state.phase = 'uiux_complete'
       state.uiuxCodeGenerationStartedAt = undefined
-      state.autoRepairCount = 0  // 修復失敗也重置，允許下次（手動或 codeVersion 更新後）重試
+      // autoRepairCount 不在此重置 — 由 handleContinueFlow 在收到手動用戶輸入時重置
       await saveFlowState(redis, conversationId, state)
       return
     }
@@ -277,7 +277,7 @@ ${enrichedFeedback}`
     state.iterationCount = (state.iterationCount || 0) + 1
     state.lastIterationFeedback = undefined
     state.lastIterationImageUrls = undefined
-    state.autoRepairCount = 0  // 新代碼版本，重置 auto-repair 計數
+    // autoRepairCount 不在此重置 — 由 handleContinueFlow 在收到手動用戶輸入時重置
 
     // 6. 記錄迭代歷史
     const changedFiles = result.pages.map(p => p.path)

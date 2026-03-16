@@ -42,6 +42,65 @@ function buildCreditLimitReachedMessage(plan: string, creditsUsed: number, credi
   return `已達 Credit 配額上限（${creditsUsed}/${creditLimit}），請升級方案以繼續使用。`
 }
 
+/** 根據執行錯誤類型產生更精準的修復指引 */
+function buildAutoRepairHints(
+  errorInfo: { name: string; message: string; path: string },
+  isChinese: boolean
+): string {
+  const hints: string[] = []
+  const msg = errorInfo.message.toLowerCase()
+
+  if (errorInfo.name === 'ReferenceError') {
+    // 提取未定義的變數名
+    const varMatch = errorInfo.message.match(/(\w+) is not defined/)
+    const varName = varMatch?.[1]
+    if (isChinese) {
+      hints.push(`這是 ReferenceError：代碼使用了未宣告的變數「${varName || '?'}」。`)
+      hints.push('你必須：')
+      hints.push(`1. 在 ${errorInfo.path || '出錯的檔案'} 中找到所有使用 ${varName} 的地方`)
+      if (varName && /ref$/i.test(varName)) {
+        hints.push(`2. 這很可能是一個缺失的 useRef 宣告。在組件頂層加上 const ${varName} = useRef(null)，並確保 import { useRef } from 'react'`)
+      } else if (varName && /state|set[A-Z]/i.test(varName)) {
+        hints.push(`2. 這很可能是一個缺失的 useState 宣告。加上對應的 useState hook`)
+      } else {
+        hints.push(`2. 宣告缺失的變數，或從正確的模組 import 它`)
+      }
+      hints.push('3. 檢查整個檔案是否還有其他未宣告的變數（一次修完，不要遺漏）')
+    } else {
+      hints.push(`ReferenceError: variable "${varName || '?'}" is used but never declared.`)
+      hints.push(`1. Find ALL usages of ${varName} in ${errorInfo.path || 'the file'}`)
+      if (varName && /ref$/i.test(varName)) {
+        hints.push(`2. Likely a missing useRef. Add: const ${varName} = useRef(null) and import useRef`)
+      } else {
+        hints.push(`2. Declare the missing variable or import it from the correct module`)
+      }
+      hints.push('3. Check the entire file for any other undeclared variables — fix them all at once')
+    }
+  } else if (errorInfo.name === 'TypeError') {
+    if (isChinese) {
+      hints.push('這是 TypeError：可能是讀取 undefined/null 的屬性、呼叫非函數、或型別不匹配。')
+      hints.push('1. 檢查是否有 optional chaining 缺失（應用 ?. 和 ?? 運算子）')
+      hints.push('2. 確認所有 props 傳遞和解構是否正確')
+      hints.push('3. 確保初始值不是 undefined（useState 給預設值、useRef 給 null）')
+    } else {
+      hints.push('TypeError: likely accessing property of undefined/null or calling non-function.')
+      hints.push('1. Add optional chaining (?.) where needed')
+      hints.push('2. Verify all props are passed and destructured correctly')
+      hints.push('3. Ensure initial values are not undefined (useState defaults, useRef(null))')
+    }
+  } else {
+    if (isChinese) {
+      hints.push('確保所有 import 正確、所有使用的變數都已宣告、所有 props 型別正確。')
+      hints.push('檢查整個檔案是否有類似問題，一次全部修完。')
+    } else {
+      hints.push('Ensure all imports are correct, all referenced variables are declared, and all prop types match.')
+      hints.push('Check the entire file for similar issues — fix them all at once.')
+    }
+  }
+
+  return hints.join('\n')
+}
+
 // ============================================================
 // 類型定義
 // ============================================================
@@ -593,7 +652,7 @@ async function handleContinueFlow(
       return
     }
 
-    const MAX_AUTO_REPAIRS = 1
+    const MAX_AUTO_REPAIRS = 2
     if ((state.autoRepairCount || 0) >= MAX_AUTO_REPAIRS) {
       logger.info({ conversationId }, 'Auto-repair limit reached')
       return
@@ -602,9 +661,11 @@ async function handleContinueFlow(
     await saveFlowState(redis, conversationId, state)
 
     const isChinese = state.locale !== 'en'
+    // 針對錯誤類型給出更具體的修復指引
+    const errorSpecificHints = buildAutoRepairHints(errorInfo, isChinese)
     const userFeedback = isChinese
-      ? `請修復以下執行錯誤：${errorInfo.name}: ${errorInfo.message}${errorInfo.path ? ` (${errorInfo.path})` : ''}。確保所有 import 正確、所有使用的變數都已宣告、所有 props 型別正確。`
-      : `Fix this runtime error: ${errorInfo.name}: ${errorInfo.message}${errorInfo.path ? ` (${errorInfo.path})` : ''}. Ensure all imports are correct, all referenced variables are declared, and all prop types match.`
+      ? `請修復以下執行錯誤：${errorInfo.name}: ${errorInfo.message}${errorInfo.path ? ` (${errorInfo.path})` : ''}。\n\n${errorSpecificHints}`
+      : `Fix this runtime error: ${errorInfo.name}: ${errorInfo.message}${errorInfo.path ? ` (${errorInfo.path})` : ''}.\n\n${errorSpecificHints}`
 
     logger.info({ errorInfo, phase: state.phase }, 'Auto-repair triggered')
     await executeIteration({ conversationId, projectId, userId, userFeedback, redis, io })
