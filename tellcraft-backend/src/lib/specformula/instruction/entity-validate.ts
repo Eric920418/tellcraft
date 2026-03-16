@@ -90,10 +90,10 @@ export class EntityValidate {
 
     if (hasAllPks) {
       const result = await this.queryByPk(tableDef, pkValues, pool);
-      if (!result) {
-        throw new Error(`${entityName} with ${JSON.stringify(Object.fromEntries(pkValues))} should exist`);
-      }
-      return result;
+      if (result) return result;
+      // PK 查詢失敗 → 不立即 throw，繼續嘗試 Probe 查詢。
+      // 常見場景：Feature 用確定性 UUID（如 EP-001 → md5 UUID），
+      // 但 action 代碼用 gen_random_uuid()，DB 中的實際 PK 不同。
     }
 
     // Probe 查詢
