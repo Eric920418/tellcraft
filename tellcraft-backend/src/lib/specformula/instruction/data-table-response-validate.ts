@@ -84,6 +84,9 @@ export class DataTableResponseValidate {
 
       const expectedValue = row[header];
       if (!expectedValue) continue;
+      // VAR-System: < 前綴的 cell value 是 extraction key（如 <token、<non-empty>），
+      // 不做值比較。提取由 extractAndStoreVariables 處理。
+      if (expectedValue.trim().startsWith('<')) continue;
 
       const actualValue = getNestedValue(responseMap, cleanHeader);
 
@@ -99,8 +102,11 @@ export class DataTableResponseValidate {
           : (actualValue != null ? String(actualValue) : '');
 
         if (resolvedStr !== actualStr) {
-          // 嘗試 JSON 語義比較（忽略欄位順序和多餘欄位）
-          if (!jsonSemanticallyEqual(resolvedStr, actualStr) &&
+          // UUID ID 容錯：server 用 gen_random_uuid() 生成 ID，
+          // 與 Feature 的確定性 UUID 不同。ID 欄位只要是合法 UUID 就算通過。
+          if (isIdField(cleanHeader) && isUuidLike(resolvedStr) && isUuidLike(actualStr)) {
+            // skip — both are valid UUIDs for an ID field
+          } else if (!jsonSemanticallyEqual(resolvedStr, actualStr) &&
               !(typeof actualValue === 'number' && numericEquals(resolvedStr, actualStr))) {
             throw new Error(
               `[ResponseValidate:DataTable] ${summary}.${cleanHeader} 值不匹配。\n  預期: ${resolvedStr}\n  實際: ${actualStr}`
@@ -171,6 +177,12 @@ function jsonSubsetMatch(expected: unknown, actual: unknown): boolean {
     const act = actual as Record<string, unknown>;
     // 預期的每個欄位都必須在 actual 中匹配（actual 可以有多餘欄位）
     for (const key of Object.keys(exp)) {
+      // UUID ID 容錯：嵌套 JSON 中的 ID 欄位用 gen_random_uuid()，允許不同 UUID
+      if (isIdField(key) &&
+          typeof exp[key] === 'string' && isUuidLike(exp[key] as string) &&
+          typeof act[key] === 'string' && isUuidLike(act[key] as string)) {
+        continue;
+      }
       if (!jsonSubsetMatch(exp[key], act[key])) return false;
     }
     return true;
@@ -212,4 +224,16 @@ function getNestedValue(map: Record<string, unknown>, path: string): unknown {
   }
 
   return current;
+}
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/** 欄位名稱是否為 ID 類型（episodeId, comment_id, id 等） */
+function isIdField(name: string): boolean {
+  return /(?:^id$|Id$|_id$)/i.test(name);
+}
+
+/** 字串是否為合法 UUID 格式 */
+function isUuidLike(value: string): boolean {
+  return UUID_RE.test(value.trim());
 }

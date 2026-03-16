@@ -825,12 +825,37 @@ return { episodeId: id, ... }
 ## email → userId（常見錯誤！）
 測試傳入 email 參數時，函數必須自行查詢 userId：
 \`\`\`typescript
-const users = await sql\`SELECT id FROM users WHERE email = \${input.email}\`
-const userId = users[0]?.id
+// 先用 input.userId（如果有的話），否則用 email 查詢
+let userId = input.userId
+if (!userId && input.email) {
+  const users = await sql\`SELECT id FROM users WHERE email = \${input.email}\`
+  userId = users[0]?.id
+}
 if (!userId) throw new Error('使用者不存在')
 \`\`\`
 不要 require input.userId 作為必要參數。
 如果 input.userId 已經存在就直接用，否則用 email 查詢。
+
+## 查詢列表操作（常見錯誤！）
+查詢列表時只需要 userId（由呼叫者注入），不要額外要求 showId/episodeId 等：
+\`\`\`typescript
+if (op.includes('查詢') && op.includes('列表')) {
+  const userId = input.userId
+  const rows = await sql\`SELECT ... FROM table WHERE user_id = \${userId}\`
+  return { __status: 200, items: rows }
+}
+\`\`\`
+
+## 更新操作（常見錯誤！）
+更新操作不需要驗證「至少提供一個欄位」。直接用傳入的欄位更新即可：
+\`\`\`typescript
+if (op.includes('更新')) {
+  await sql\`UPDATE table SET col1 = COALESCE(\${input.col1}, col1), col2 = COALESCE(\${input.col2}, col2) WHERE id = \${id}\`
+  const result = await sql\`SELECT * FROM table WHERE id = \${id}\`
+  return { __status: 200, ...result[0] }
+}
+\`\`\`
+不要 throw "至少必須提供一個欄位"，用 COALESCE 讓未傳入的欄位保持原值。
 
 ## 登出操作（常見錯誤！）
 登出操作不需要驗證 token/session 是否有效。直接返回成功：
