@@ -2167,6 +2167,46 @@ export function repairUndeclaredRefs(file: GeneratedComponent): { content: strin
   return { content: fixed, repaired: true }
 }
 
+/**
+ * 偵測並修復「變數名 shadow React hook」的致命錯誤
+ * 例：const useRef = useRef(null) → TDZ 導致 Cannot access 'useRef' before initialization
+ */
+export function repairHookShadowing(file: GeneratedComponent): { content: string; repaired: boolean } {
+  const REACT_HOOKS = ['useRef', 'useState', 'useEffect', 'useCallback', 'useMemo', 'useContext', 'useReducer', 'useLayoutEffect', 'useId', 'useTransition']
+  let content = file.content
+  let repaired = false
+
+  for (const hook of REACT_HOOKS) {
+    // 匹配 const useRef = useRef(...) 或 let useRef = useRef(...)
+    const pattern = new RegExp(`(const|let)\\s+${hook}\\s*=\\s*${hook}\\s*(<[^>]*>)?\\s*\\(`, 'g')
+    if (pattern.test(content)) {
+      // 根據 hook 類型推斷合理替代名
+      const replacement = hook === 'useRef' ? 'containerRef'
+        : hook === 'useState' ? 'localState'
+        : hook === 'useEffect' ? 'effectCleanup'
+        : hook === 'useCallback' ? 'memoizedCallback'
+        : hook === 'useMemo' ? 'memoizedValue'
+        : 'hookValue'
+      // 替換宣告行的變數名
+      content = content.replace(
+        new RegExp(`(const|let)\\s+${hook}(\\s*=\\s*${hook}\\s*(?:<[^>]*>)?\\s*\\()`, 'g'),
+        `$1 ${replacement}$2`
+      )
+      // 替換後續所有對這個被 shadow 變數的引用（不含 hook 呼叫本身）
+      // 只替換作為獨立識別符的引用（非 hook 調用模式）
+      // 用 . 或 作為 JSX ref= 的地方
+      content = content.replace(
+        new RegExp(`\\b${replacement}\\.current\\b`, 'g'),
+        `${replacement}.current`
+      )
+      logger.warn({ path: file.path, hook, replacement }, 'repairHookShadowing: 修復 hook 名稱 shadow')
+      repaired = true
+    }
+  }
+
+  return { content, repaired }
+}
+
 export function getSyntaxErrors(filename: string, content: string): string[] {
   if (content.length < 50) return []
   // 只檢查 TS/TSX 檔案，CSS/JSON 等非 TS 檔案跳過
@@ -2218,8 +2258,13 @@ async function checkAndFixSyntaxErrors(
   trackingContext?: LlmTrackingContext,
   heartbeatFn?: () => void,
 ): Promise<GeneratedComponent[]> {
+  // 最優先：修復 hook 名稱 shadow（const useRef = useRef(null) → TDZ 致命錯誤）
+  const withHookFixed = files.map(f => {
+    const { content, repaired } = repairHookShadowing(f)
+    return repaired ? { ...f, content } : f
+  })
   // 先修復 motion/react 誤導入 React hooks（必須在 repairMissingReactImports 之前）
-  const withMotionFixed = files.map(f => {
+  const withMotionFixed = withHookFixed.map(f => {
     const { content, repaired } = repairMotionReactHookImports(f)
     return repaired ? { ...f, content } : f
   })

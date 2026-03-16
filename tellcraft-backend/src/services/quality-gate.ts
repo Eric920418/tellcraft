@@ -5,7 +5,7 @@
  */
 
 import { getAnthropicClient, MODEL, trackLlmUsage } from '../lib/anthropic'
-import { GeneratedComponent, repairUndeclaredRefs } from './uiux-generation'
+import { GeneratedComponent, repairUndeclaredRefs, repairHookShadowing } from './uiux-generation'
 import { createLogger } from '../lib/logger'
 
 const logger = createLogger('quality-gate')
@@ -749,17 +749,19 @@ ${codeBlocks.join('\n\n')}
     // 解析修復後的檔案
     const result = parseFixedFiles(content, scopedCode)
     const merged = mergeGeneratedCode(code, result)
-    // LLM 修復後再跑一次 repairUndeclaredRefs，防止 Haiku 引入新的未宣告 ref
+    // LLM 修復後再跑一輪靜態 repair，防止 Haiku 引入新問題
+    const applyRepairs = (f: GeneratedComponent) => {
+      let current = f
+      const h = repairHookShadowing(current)
+      if (h.repaired) current = { ...current, content: h.content }
+      const r = repairUndeclaredRefs(current)
+      if (r.repaired) current = { ...current, content: r.content }
+      return current
+    }
     return {
       ...merged,
-      pages: merged.pages.map(f => {
-        const { content: c, repaired } = repairUndeclaredRefs(f)
-        return repaired ? { ...f, content: c } : f
-      }),
-      components: merged.components.map(f => {
-        const { content: c, repaired } = repairUndeclaredRefs(f)
-        return repaired ? { ...f, content: c } : f
-      }),
+      pages: merged.pages.map(applyRepairs),
+      components: merged.components.map(applyRepairs),
     }
   } catch (error) {
     logger.error({ err: error }, 'autoFix 失敗')

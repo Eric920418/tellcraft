@@ -1,6 +1,6 @@
 import { createLogger } from '../lib/logger'
 import * as db from '../db/client'
-import { repairUndeclaredRefs, repairMissingReactImports, repairBracketLookupAccess, repairNullIndexAccess, repairMotionReactHookImports, getSyntaxErrors } from './uiux-generation'
+import { repairUndeclaredRefs, repairMissingReactImports, repairBracketLookupAccess, repairNullIndexAccess, repairMotionReactHookImports, repairHookShadowing, getSyntaxErrors } from './uiux-generation'
 import type { Redis } from 'ioredis'
 
 const logger = createLogger('code-repair')
@@ -89,6 +89,9 @@ export function applyFixersToContent(filePath: string, content: string): { conte
   if (!/\.(tsx?|jsx?)$/.test(filePath)) return { content, changed: false }
   const f = { path: filePath, content, description: '' }
   let current = content
+
+  const rHook = repairHookShadowing({ ...f, content: current })
+  if (rHook.repaired) current = rHook.content
 
   const r0 = repairMotionReactHookImports({ ...f, content: current })
   if (r0.repaired) current = r0.content
