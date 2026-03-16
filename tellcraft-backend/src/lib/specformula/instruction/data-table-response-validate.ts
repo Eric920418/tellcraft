@@ -180,7 +180,21 @@ function jsonSubsetMatch(expected: unknown, actual: unknown): boolean {
   if (Array.isArray(expected)) {
     if (!Array.isArray(actual)) return false;
     if (expected.length !== actual.length) return false;
-    return expected.every((item, i) => jsonSubsetMatch(item, actual[i]));
+    // Order-independent matching：先嘗試位置匹配，失敗則嘗試任意順序匹配
+    const positionalMatch = expected.every((item, i) => jsonSubsetMatch(item, actual[i]));
+    if (positionalMatch) return true;
+    // 任意順序：每個 expected item 必須匹配某個未使用的 actual item
+    const used = new Set<number>();
+    return expected.every(exp => {
+      for (let i = 0; i < actual.length; i++) {
+        if (used.has(i)) continue;
+        if (jsonSubsetMatch(exp, actual[i])) {
+          used.add(i);
+          return true;
+        }
+      }
+      return false;
+    });
   }
   if (typeof expected === 'object' && expected !== null) {
     if (typeof actual !== 'object' || actual === null || Array.isArray(actual)) return false;
