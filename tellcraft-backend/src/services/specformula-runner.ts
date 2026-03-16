@@ -1708,34 +1708,6 @@ export default sql
         changed = true
       }
 
-      // MySQL → PostgreSQL 語法修正
-      // LLM 偶爾生成 MySQL 的 ON DUPLICATE KEY UPDATE，PostgreSQL 不支持
-      if (/ON\s+DUPLICATE\s+KEY\s+UPDATE/i.test(content)) {
-        content = content.replace(
-          /ON\s+DUPLICATE\s+KEY\s+UPDATE\s+(.+?)(?=\s*`|;|\n|$)/gim,
-          (_match, setCols: string) => {
-            // VALUES(col) → EXCLUDED.col
-            const fixed = setCols.replace(/VALUES\s*\(\s*(\w+)\s*\)/gi, 'EXCLUDED.$1')
-            return `ON CONFLICT (id) DO UPDATE SET ${fixed}`
-          }
-        )
-        changed = true
-        logger.debug({ file: file.path }, 'MySQL ON DUPLICATE KEY UPDATE → PostgreSQL ON CONFLICT')
-      }
-
-      // 移除 LLM 偶爾加入的認證/登入檢查（即使 prompt 禁止，LLM 仍可能添加）
-      const beforeAuthLen = content.length
-      // Pattern: if (!userId) { throw/return ... }
-      content = content.replace(/if\s*\(\s*!(?:input\.)?userId\s*\)\s*\{[^}]*(?:throw|return)[^}]*\}/g, '')
-      // Pattern: if (!userId) throw/return ...
-      content = content.replace(/if\s*\(\s*!(?:input\.)?userId\s*\)\s*(?:throw|return)[^\n]*/g, '')
-      // Pattern: throw containing auth-related messages
-      content = content.replace(/if\s*\([^)]*\)\s*\{?\s*throw\s+new\s+Error\s*\(\s*['"`][^'"`]*(?:必須已登入|認證|已過期|unauthorized|must.*log|未登入|操作者必須)[^'"`]*['"`]\s*\)\s*\}?/gi, '')
-      if (content.length !== beforeAuthLen) {
-        changed = true
-        logger.debug({ file: file.path }, '移除 LLM 生成的認證檢查')
-      }
-
       if (changed) {
         fs.writeFileSync(filePath, content, 'utf-8')
       }
