@@ -836,11 +836,25 @@ if (!userId) throw new Error('使用者不存在')
 不要 require input.userId 作為必要參數。
 如果 input.userId 已經存在就直接用，否則用 email 查詢。
 
+## 子操作分支順序（常見嚴重 Bug！）
+_stepSummary includes 匹配有交叉時，更具體的分支必須排在前面！
+例如「查詢訂閱列表」包含「訂閱」二字，如果「訂閱」分支在「查詢」前面就會錯誤匹配。
+正確順序範例：
+\`\`\`typescript
+if (op.includes('取消訂閱')) { ... }
+else if (op.includes('查詢') || op.includes('列表')) { // ← 必須在「訂閱」前面！
+  const rows = await sql\`SELECT ... FROM table WHERE user_id = \${userId}\`
+  return { __status: 200, subscriptions: rows }
+}
+else if (op.includes('訂閱')) { ... }
+\`\`\`
+通用規則：「查詢/列表」分支必須排在「建立/新增/訂閱」分支之前。
+
 ## 查詢列表操作（常見錯誤！）
 查詢「使用者的」訂閱列表/播放記錄等，只需要 userId。
 不要要求 showId/episodeId 等額外參數。
 \`\`\`typescript
-if (op.includes('查詢') && op.includes('列表')) {
+if (op.includes('查詢') || op.includes('列表')) {
   const userId = input.userId
   const rows = await sql\`SELECT ... FROM table WHERE user_id = \${userId}\`
   return { __status: 200, items: rows }
