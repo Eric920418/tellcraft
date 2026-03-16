@@ -525,7 +525,7 @@ function BrutalistCard({ title, content }: { title: string; content: string }) {
 // Hero 區塊
 // <section className="min-h-screen bg-white border-b-8 border-black flex items-center px-16">
 //   <div className="max-w-4xl">
-//     <p className="font-mono text-sm uppercase tracking-widest mb-4">Est. 2024</p>
+//     <p className="font-mono text-sm uppercase tracking-widest mb-4">Est. 2026</p>
 //     <h1 className="font-black text-8xl uppercase leading-none tracking-tighter">
 //       MAKE<br/>THINGS<br/>HAPPEN
 //     </h1>

@@ -318,7 +318,7 @@ export default function Page() {
         </div>
       </nav>
       <div style={{ background: 'linear-gradient(135deg, ${primary}, ${accent})', padding: '60px 48px', textAlign: 'center', color: 'white' }}>
-        <div style={{ fontSize: 11, letterSpacing: '0.2em', marginBottom: 12, opacity: 0.85, textTransform: 'uppercase' }}>2024 春夏新品</div>
+        <div style={{ fontSize: 11, letterSpacing: '0.2em', marginBottom: 12, opacity: 0.85, textTransform: 'uppercase' }}>2026 春夏新品</div>
         <h1 style={{ fontSize: 48, fontWeight: 800, letterSpacing: '-0.03em', margin: '0 0 14px' }}>${name}</h1>
         <p style={{ fontSize: 16, opacity: 0.85, margin: '0 0 28px' }}>探索最新設計，引領潮流風尚</p>
         <button style={{ background: 'white', color: '${primary}', border: 'none', padding: '14px 32px', borderRadius: 999, fontSize: 15, fontWeight: 700, cursor: 'pointer' }}>立即選購</button>
@@ -414,7 +414,7 @@ function genBlog(name: string, c: TemplateColors): string {
 export default function Page() {
   const articles = [
     { title: '如何用設計思維解決複雜問題', date: '3月10日', tag: '設計', min: 5 },
-    { title: '2024 年值得關注的視覺趨勢', date: '3月5日', tag: '趨勢', min: 7 },
+    { title: '2026 年值得關注的視覺趨勢', date: '3月5日', tag: '趨勢', min: 7 },
     { title: '字型選擇對品牌傳達的重要性', date: '2月28日', tag: '排版', min: 4 },
   ]
   return (
@@ -432,7 +432,7 @@ export default function Page() {
         <div>
           <div style={{ fontSize: 10, fontFamily: '-apple-system, sans-serif', letterSpacing: '0.12em', color: 'rgba(255,255,255,0.75)', marginBottom: 10, textTransform: 'uppercase' }}>精選文章</div>
           <h1 style={{ fontSize: 36, fontWeight: 700, color: 'white', margin: '0 0 10px', lineHeight: 1.2, maxWidth: 680 }}>${name}：關於設計與創意的深度思考</h1>
-          <div style={{ fontSize: 13, color: 'rgba(255,255,255,0.75)', fontFamily: '-apple-system, sans-serif' }}>2024年3月15日 · 閱讀時間 8 分鐘</div>
+          <div style={{ fontSize: 13, color: 'rgba(255,255,255,0.75)', fontFamily: '-apple-system, sans-serif' }}>2026年3月15日 · 閱讀時間 8 分鐘</div>
         </div>
       </div>
       <div style={{ maxWidth: 800, margin: '0 auto', padding: '36px 48px' }}>

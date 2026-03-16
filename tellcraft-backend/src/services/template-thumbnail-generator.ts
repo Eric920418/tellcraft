@@ -301,7 +301,7 @@ function genEcommerceHtml(name: string, c: TemplateColors, seed: number): string
     <div style="display: flex; gap: 18px; font-size: 20px"><span>🔍</span><span>🛒</span><span>👤</span></div>
   </nav>
   <div style="background: linear-gradient(135deg, ${primary}, ${accent}); padding: 60px 48px; text-align: center; color: white">
-    <div style="font-size: 11px; letter-spacing: 0.2em; margin-bottom: 12px; opacity: 0.85; text-transform: uppercase">2024 Spring / Summer</div>
+    <div style="font-size: 11px; letter-spacing: 0.2em; margin-bottom: 12px; opacity: 0.85; text-transform: uppercase">2026 Spring / Summer</div>
     <h1 style="font-size: 48px; font-weight: 800; letter-spacing: -0.03em; margin: 0 0 14px">${name}</h1>
     <p style="font-size: 16px; opacity: 0.85; margin: 0 0 28px">Explore the latest designs and lead the trend.</p>
     <button style="background: white; color: ${primary}; border: none; padding: 14px 32px; border-radius: 999px; font-size: 15px; font-weight: 700">Shop Now</button>
@@ -367,7 +367,7 @@ function genBlogHtml(name: string, c: TemplateColors, seed: number): string {
 
   const articles = [
     { title: 'How Design Thinking Solves Complex Problems', date: 'Mar 10', tag: 'Design', min: 5 },
-    { title: 'Visual Trends Worth Watching in 2024', date: 'Mar 5', tag: 'Trends', min: 7 },
+    { title: 'Visual Trends Worth Watching in 2026', date: 'Mar 5', tag: 'Trends', min: 7 },
     { title: 'Why Typography Matters for Brand Communication', date: 'Feb 28', tag: 'Typography', min: 4 },
   ]
 
@@ -390,7 +390,7 @@ function genBlogHtml(name: string, c: TemplateColors, seed: number): string {
     <div>
       <div style="font-size: 10px; font-family: -apple-system, sans-serif; letter-spacing: 0.12em; color: rgba(255,255,255,0.75); margin-bottom: 10px; text-transform: uppercase">FEATURED</div>
       <h1 style="font-size: 36px; font-weight: 700; color: white; margin: 0 0 10px; line-height: 1.2; max-width: 680px">${name}: Deep Thoughts on Design and Creativity</h1>
-      <div style="font-size: 13px; color: rgba(255,255,255,0.75); font-family: -apple-system, sans-serif">March 15, 2024 · 8 min read</div>
+      <div style="font-size: 13px; color: rgba(255,255,255,0.75); font-family: -apple-system, sans-serif">March 15, 2026 · 8 min read</div>
     </div>
   </div>
   <div style="max-width: 800px; margin: 0 auto; padding: 36px 48px">${articleRows}</div>

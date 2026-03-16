@@ -2711,7 +2711,11 @@ function getTierCreativePhilosophy(tier: DesignTier): string {
 }
 
 function getBaseRules(): string {
-  return `## 組件規則
+  const currentYear = new Date().getFullYear()
+  return `## 當前年份
+現在是 ${currentYear} 年。所有生成的內容中出現的年份（copyright footer、文章日期、活動日期、「Est. XXXX」等）都必須使用 ${currentYear}，禁止使用 2024 或其他過去的年份。
+
+## 組件規則
 - 有鍵盤/focus 行為的組件使用 Radix 或 React Aria
 - 破壞性操作用 AlertDialog 確認
 - loading state 用 skeleton
@@ -2869,7 +2873,11 @@ function getStructureConstraintsFast(tier: DesignTier): string {
 }
 
 function getBaseRulesFast(): string {
-  return `## React Hooks 宣告規則（Critical）
+  const currentYear = new Date().getFullYear()
+  return `## 當前年份
+現在是 ${currentYear} 年。所有年份（copyright、日期等）必須使用 ${currentYear}。
+
+## React Hooks 宣告規則（Critical）
 - **React hooks（useState/useEffect/useRef/useCallback/useMemo）只能從 'react' import，禁止從 'motion/react' import**
 - 所有使用的 ref 必須在 component body 頂層宣告
 - 所有使用的 state 必須宣告
