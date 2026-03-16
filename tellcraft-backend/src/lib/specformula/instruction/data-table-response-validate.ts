@@ -93,11 +93,19 @@ export class DataTableResponseValidate {
 
       if (resolved !== null && resolved !== undefined) {
         const resolvedStr = String(resolved);
-        const actualStr = actualValue != null ? String(actualValue) : '';
-        if (resolvedStr !== actualStr && !(typeof actualValue === 'number' && numericEquals(resolvedStr, actualStr))) {
-          throw new Error(
-            `[ResponseValidate:DataTable] ${summary}.${cleanHeader} 值不匹配。\n  預期: ${resolvedStr}\n  實際: ${actualStr}`
-          );
+        // 物件/陣列用 JSON.stringify 比較，避免 String([...]) 變成 [object Object]
+        const actualStr = (actualValue != null && typeof actualValue === 'object')
+          ? JSON.stringify(actualValue)
+          : (actualValue != null ? String(actualValue) : '');
+
+        if (resolvedStr !== actualStr) {
+          // 嘗試 JSON 語義比較（忽略欄位順序和多餘欄位）
+          if (!jsonSemanticallyEqual(resolvedStr, actualStr) &&
+              !(typeof actualValue === 'number' && numericEquals(resolvedStr, actualStr))) {
+            throw new Error(
+              `[ResponseValidate:DataTable] ${summary}.${cleanHeader} 值不匹配。\n  預期: ${resolvedStr}\n  實際: ${actualStr}`
+            );
+          }
         }
       }
     }
@@ -127,6 +135,47 @@ function numericEquals(a: string, b: string): boolean {
   } catch {
     return false;
   }
+}
+
+/**
+ * JSON 語義比較：預期的欄位必須全部匹配，但 actual 可以有多餘欄位。
+ * 支援巢狀物件和陣列。
+ */
+function jsonSemanticallyEqual(expectedStr: string, actualStr: string): boolean {
+  try {
+    const expected = JSON.parse(expectedStr);
+    const actual = JSON.parse(actualStr);
+    return jsonSubsetMatch(expected, actual);
+  } catch {
+    return false;
+  }
+}
+
+function jsonSubsetMatch(expected: unknown, actual: unknown): boolean {
+  if (expected === null || expected === undefined) {
+    return actual === null || actual === undefined || actual === '';
+  }
+  if (typeof expected !== typeof actual) {
+    // 數值型態容錯：'2' vs 2
+    if (String(expected) === String(actual)) return true;
+    return false;
+  }
+  if (Array.isArray(expected)) {
+    if (!Array.isArray(actual)) return false;
+    if (expected.length !== actual.length) return false;
+    return expected.every((item, i) => jsonSubsetMatch(item, actual[i]));
+  }
+  if (typeof expected === 'object' && expected !== null) {
+    if (typeof actual !== 'object' || actual === null || Array.isArray(actual)) return false;
+    const exp = expected as Record<string, unknown>;
+    const act = actual as Record<string, unknown>;
+    // 預期的每個欄位都必須在 actual 中匹配（actual 可以有多餘欄位）
+    for (const key of Object.keys(exp)) {
+      if (!jsonSubsetMatch(exp[key], act[key])) return false;
+    }
+    return true;
+  }
+  return String(expected) === String(actual);
 }
 
 /**

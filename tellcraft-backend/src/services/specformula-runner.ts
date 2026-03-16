@@ -679,7 +679,7 @@ async function autoHashPasswords(
             const email = row[emailHeader]
             if (email && testPasswordMap.has(email)) {
               passwordToHash = testPasswordMap.get(email)!
-              logger.debug({ email, placeholder: val, realPassword: passwordToHash }, 'autoHashPasswords: 用真實測試密碼替換 placeholder')
+              logger.info({ email, placeholder: val, realPassword: passwordToHash }, 'autoHashPasswords: 用真實測試密碼替換 placeholder')
             }
           }
           row[h] = bcrypt.hashSync(passwordToHash, 10)
@@ -821,6 +821,32 @@ function fixNonUuidValues(
  * 不同於 fixNonUuidValues（需要 entityName），此函數掃描 ALL tables 的 UUID 欄位，
  * 加上 *Id / _id 後綴啟發式規則，將非 UUID 字串轉為確定性 UUID。
  */
+/**
+ * 遞迴轉換 JSON 值中的非 UUID 字串 ID（如 "SHOW-001" → deterministic UUID）。
+ * 處理巢狀物件和陣列中的 *Id / *_id 欄位。
+ */
+function convertUuidsInJson(value: unknown, uuidColumns: Set<string>): unknown {
+  if (Array.isArray(value)) {
+    return value.map(item => convertUuidsInJson(item, uuidColumns))
+  }
+  if (value && typeof value === 'object') {
+    const obj = value as Record<string, unknown>
+    const result: Record<string, unknown> = {}
+    for (const [k, v] of Object.entries(obj)) {
+      const snake = toSnakeCase(k).toLowerCase()
+      const isUuidCol = uuidColumns.has(snake) || uuidColumns.has(k.toLowerCase())
+      const isIdField = /(?:Id|_id)$/.test(k) || k === 'id'
+      if ((isUuidCol || isIdField) && typeof v === 'string' && v && !v.startsWith('$') && !v.startsWith('<') && !isValidUuid(v)) {
+        result[k] = deterministicUuid(v)
+      } else {
+        result[k] = convertUuidsInJson(v, uuidColumns)
+      }
+    }
+    return result
+  }
+  return value
+}
+
 function fixApiCallUuidValues(
   dataTable: { headers: string[]; rows: Record<string, string>[] },
   schemas: DatabaseSchema[]
@@ -843,16 +869,33 @@ function fixApiCallUuidValues(
       if (trimmedH.startsWith('>') || trimmedH.startsWith('<') || trimmedH.startsWith('$')) continue
       if (trimmedH === '_stepSummary') continue
 
+      const value = row[header]
+      if (!value) continue
+
       const snake = toSnakeCase(trimmedH).toLowerCase()
       // 匹配 UUID 欄位：精確匹配 or *Id / *_id 啟發式
       const isUuidCol = uuidColumns.has(snake) || uuidColumns.has(trimmedH.toLowerCase())
       const isIdField = /(?:Id|_id)$/.test(trimmedH) || trimmedH === 'id'
-      if (!isUuidCol && !isIdField) continue
 
-      const value = row[header]
-      if (!value || value.startsWith('$') || value.startsWith('<') || isValidUuid(value)) continue
+      if ((isUuidCol || isIdField) && !value.startsWith('$') && !value.startsWith('<') && !isValidUuid(value)) {
+        row[header] = deterministicUuid(value)
+        continue
+      }
 
-      row[header] = deterministicUuid(value)
+      // 巢狀 JSON 值（如 subscriptions: [{"showId":"SHOW-001"}]）
+      // 解析 JSON 並遞迴轉換 UUID 欄位
+      if (value.startsWith('[') || value.startsWith('{')) {
+        try {
+          const parsed = JSON.parse(value)
+          const converted = convertUuidsInJson(parsed, uuidColumns)
+          const serialized = JSON.stringify(converted)
+          if (serialized !== value) {
+            row[header] = serialized
+          }
+        } catch {
+          // 不是有效 JSON — 跳過
+        }
+      }
     }
   }
 
@@ -1252,6 +1295,9 @@ async function executeScenario(
   // 預掃描：提取成功場景的真實密碼（email → password）
   // 用於 entity_setup 的 autoHashPasswords，確保 bcrypt hash 對應正確密碼
   const testPasswordMap = preExtractTestPasswords(allSteps, instructions)
+  if (testPasswordMap.size > 0) {
+    logger.info({ passwords: Object.fromEntries(testPasswordMap), scenario: scenario.name }, 'preExtractTestPasswords: 找到測試密碼映射')
+  }
 
   let hasFailed = false
 
