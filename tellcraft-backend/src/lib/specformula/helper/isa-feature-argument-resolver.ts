@@ -251,10 +251,10 @@ export class ISAFeatureArgumentResolver {
       return null;
     }
 
-    // $notnull special check
-    if (resolvedStr === '$notnull') {
-      if (actualValue === null || actualValue === undefined) {
-        throw new Error(`${entityName}.${fieldName} 應該不為 null，但實際值為 null`);
+    // $notnull / <non-empty> special check
+    if (resolvedStr === '$notnull' || resolvedStr === '<non-empty>' || resolvedStr === '<notempty>') {
+      if (actualValue === null || actualValue === undefined || actualValue === '') {
+        throw new Error(`${entityName}.${fieldName} 應該不為空，但實際值為 ${String(actualValue)}`);
       }
       return null;
     }

@@ -138,18 +138,47 @@ export class EntitySetup {
     }
     const valJoiner = valParts.join(', ');
 
-    // ON CONFLICT DO UPDATE 防止重複 PK 導致 INSERT 失敗
+    // ON CONFLICT 防止重複鍵導致 INSERT 失敗
+    // 1. 有 id 欄位 → ON CONFLICT (id) DO UPDATE
+    // 2. 沒有 id 但表有 PK → ON CONFLICT (pk_cols) DO UPDATE
+    // 3. 都沒有 → ON CONFLICT DO NOTHING（有唯一約束時用 catch fallback）
     const hasIdColumn = columns.includes('id');
-    const updateCols = columns.filter(c => c !== 'id');
-    const conflictClause = hasIdColumn && updateCols.length > 0
-      ? ` ON CONFLICT (id) DO UPDATE SET ${updateCols.map(c => `${c} = EXCLUDED.${c}`).join(', ')}`
-      : hasIdColumn ? ' ON CONFLICT (id) DO NOTHING' : '';
+    const pkCols = [...tableDef.pkColumns];
+    const updateCols = columns.filter(c => !pkCols.includes(c) && c !== 'id');
+    let conflictClause = '';
+    if (hasIdColumn && updateCols.length > 0) {
+      conflictClause = ` ON CONFLICT (id) DO UPDATE SET ${updateCols.map(c => `${c} = EXCLUDED.${c}`).join(', ')}`;
+    } else if (hasIdColumn) {
+      conflictClause = ' ON CONFLICT (id) DO NOTHING';
+    } else if (pkCols.length > 0 && updateCols.length > 0) {
+      conflictClause = ` ON CONFLICT (${pkCols.join(', ')}) DO UPDATE SET ${updateCols.map(c => `${c} = EXCLUDED.${c}`).join(', ')}`;
+    }
     const sql = needsSelect
       ? `INSERT INTO ${tableName} (${colJoiner}) VALUES (${valJoiner})${conflictClause} RETURNING *`
       : `INSERT INTO ${tableName} (${colJoiner}) VALUES (${valJoiner})${conflictClause}`;
 
     const pgValues = values.map(v => TypeConverter.toQueryParam(v));
-    const result = await pool.query(sql, pgValues);
+    let result;
+    try {
+      result = await pool.query(sql, pgValues);
+    } catch (insertErr: any) {
+      // 唯一約束衝突 → 嘗試 SELECT 已存在的記錄（測試場景中同一 email 可能被多個 Scenario 準備）
+      if (insertErr?.code === '23505') { // unique_violation
+        if (needsSelect) {
+          // 用插入欄位組合 WHERE 條件查已存在的記錄
+          const whereClause = columns.map((c, i) => `${c} = $${i + 1}`).join(' AND ');
+          const selectResult = await pool.query(
+            `SELECT * FROM ${tableName} WHERE ${whereClause} LIMIT 1`,
+            pgValues
+          );
+          if (selectResult.rows.length > 0) {
+            return selectResult.rows[0] as Record<string, unknown>;
+          }
+        }
+        return null; // 記錄已存在，不需要插入
+      }
+      throw insertErr;
+    }
 
     if (!needsSelect) return null;
 

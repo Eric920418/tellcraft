@@ -84,9 +84,20 @@ export class DataTableResponseValidate {
 
       const expectedValue = row[header];
       if (!expectedValue) continue;
-      // VAR-System: < 前綴的 cell value 是 extraction key（如 <token、<non-empty>），
+      // <non-empty> / <notempty> — 非空斷言，只要 actual 非空即通過
+      const trimExpected = expectedValue.trim();
+      if (trimExpected === '<non-empty>' || trimExpected === '<notempty>') {
+        const av = getNestedValue(responseMap, cleanHeader);
+        if (av === null || av === undefined || av === '') {
+          throw new Error(
+            `[ResponseValidate:DataTable] ${summary}.${cleanHeader} 應為非空值，但實際為空`
+          );
+        }
+        continue;
+      }
+      // VAR-System: < 前綴的 cell value 是 extraction key（如 <contextKey），
       // 不做值比較。提取由 extractAndStoreVariables 處理。
-      if (expectedValue.trim().startsWith('<')) continue;
+      if (trimExpected.startsWith('<')) continue;
 
       const actualValue = getNestedValue(responseMap, cleanHeader);
 
