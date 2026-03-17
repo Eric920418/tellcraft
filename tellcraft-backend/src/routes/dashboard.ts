@@ -66,7 +66,7 @@ router.get('/stats', requireAuth, async (req, res) => {
          ORDER BY updated_at DESC LIMIT 1
        ) lc ON true
        WHERE p.user_id = $1
-       ORDER BY p.is_pinned DESC, p.pinned_at DESC NULLS LAST, COALESCE(lc.updated_at, p.updated_at) DESC
+       ORDER BY COALESCE(lc.updated_at, p.updated_at) DESC
        LIMIT 5`,
       [userId]
     )

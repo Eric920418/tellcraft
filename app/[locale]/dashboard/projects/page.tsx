@@ -62,6 +62,7 @@ export default function ProjectsPage() {
   const [statusFilter, setStatusFilter] = useState<string>('')
   const [isMobile, setIsMobile] = useState(false)
 
+  const [isSelectMode, setIsSelectMode] = useState(false)
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
   const [showDeleteModal, setShowDeleteModal] = useState(false)
   const [isDeleting, setIsDeleting] = useState(false)
@@ -97,9 +98,10 @@ export default function ProjectsPage() {
     return () => clearTimeout(timer)
   }, [search])
 
-  // 換頁/篩選/搜尋時清空選取
+  // 換頁/篩選/搜尋時清空選取並離開複選模式
   useEffect(() => {
     setSelectedIds(new Set())
+    setIsSelectMode(false)
   }, [page, statusFilter, debouncedSearch])
 
   useEffect(() => {
@@ -271,6 +273,13 @@ export default function ProjectsPage() {
     } else {
       setSelectedIds(new Set(projects.map(p => p.id)))
     }
+  }
+
+  const handleToggleSelectMode = () => {
+    if (isSelectMode) {
+      setSelectedIds(new Set())
+    }
+    setIsSelectMode(prev => !prev)
   }
 
   const handleBatchDelete = async () => {
@@ -481,13 +490,15 @@ export default function ProjectsPage() {
       truncate: false,
       render: (project: Project) => (
         <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-          <input
-            type="checkbox"
-            checked={selectedIds.has(project.id)}
-            onChange={() => handleToggleSelect(project.id)}
-            onClick={(e) => e.stopPropagation()}
-            style={{ width: 16, height: 16, cursor: 'pointer', accentColor: 'var(--black)', flexShrink: 0 }}
-          />
+          {isSelectMode && (
+            <input
+              type="checkbox"
+              checked={selectedIds.has(project.id)}
+              onChange={() => handleToggleSelect(project.id)}
+              onClick={(e) => e.stopPropagation()}
+              style={{ width: 16, height: 16, cursor: 'pointer', accentColor: 'var(--black)', flexShrink: 0 }}
+            />
+          )}
           <button
             onClick={(e) => {
               e.stopPropagation()
@@ -603,13 +614,15 @@ export default function ProjectsPage() {
       truncate: false,
       render: (project: Project) => (
         <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-          <input
-            type="checkbox"
-            checked={selectedIds.has(project.id)}
-            onChange={() => handleToggleSelect(project.id)}
-            onClick={(e) => e.stopPropagation()}
-            style={{ width: 16, height: 16, cursor: 'pointer', accentColor: 'var(--black)', flexShrink: 0 }}
-          />
+          {isSelectMode && (
+            <input
+              type="checkbox"
+              checked={selectedIds.has(project.id)}
+              onChange={() => handleToggleSelect(project.id)}
+              onClick={(e) => e.stopPropagation()}
+              style={{ width: 16, height: 16, cursor: 'pointer', accentColor: 'var(--black)', flexShrink: 0 }}
+            />
+          )}
           <button
             onClick={(e) => {
               e.stopPropagation()
@@ -760,8 +773,44 @@ export default function ProjectsPage() {
           <option value="deployed">{t('statusDeployed')}</option>
           <option value="failed">{t('statusFailed')}</option>
         </select>
+        <button
+          onClick={handleToggleSelectMode}
+          style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: 6,
+            padding: '10px 14px',
+            fontSize: 14,
+            fontWeight: 500,
+            background: isSelectMode ? 'var(--gray-100)' : 'var(--white)',
+            color: isSelectMode ? 'var(--gray-700)' : 'var(--gray-500)',
+            border: '1px solid var(--border-color)',
+            cursor: 'pointer',
+            flexShrink: 0,
+            transition: 'all 0.15s',
+          }}
+        >
+          {isSelectMode ? (
+            <>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M18 6L6 18M6 6l12 12" />
+              </svg>
+              取消複選
+            </>
+          ) : (
+            <>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <rect x="3" y="3" width="7" height="7" rx="1" />
+                <rect x="14" y="3" width="7" height="7" rx="1" />
+                <rect x="3" y="14" width="7" height="7" rx="1" />
+                <path d="M17 17h.01M14 17h.01M17 14h.01" />
+              </svg>
+              複選
+            </>
+          )}
+        </button>
         <AnimatePresence>
-          {selectedIds.size > 0 && (
+          {isSelectMode && selectedIds.size > 0 && (
             <motion.button
               key="batch-delete-btn"
               initial={{ opacity: 0, scale: 0.9 }}
@@ -825,7 +874,7 @@ export default function ProjectsPage() {
         transition={{ duration: 0.4, delay: 0.2 }}
       >
         {/* 全選行 */}
-        {projects.length > 0 && (
+        {projects.length > 0 && isSelectMode && (
           <div
             style={{
               display: 'flex',

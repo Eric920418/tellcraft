@@ -190,6 +190,7 @@ export async function DELETE(
   try {
     const url = new URL(request.url)
     const queryString = url.search
+    const text = await request.text()
     const response = await fetch(`${VPS_API_URL}${targetPath}${queryString}`, {
       method: 'DELETE',
       cache: 'no-store',
@@ -197,6 +198,7 @@ export async function DELETE(
         'Content-Type': 'application/json',
         'Authorization': request.headers.get('authorization') || '',
       },
+      body: text || undefined,
     })
 
     const { data, status } = await safeParseResponse(response)
