@@ -122,7 +122,7 @@ export const ChatMessageItem = React.memo(function ChatMessageItem({
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.3, delay: animationDelay }}
       style={{
-        marginBottom: layoutMode === 'split' ? 16 : 28,
+        paddingBottom: layoutMode === 'split' ? 16 : 28,
         display: 'flex',
         flexDirection: 'column',
         alignItems: message.role === 'user' ? 'flex-end' : 'flex-start'
@@ -465,6 +465,9 @@ export const ChatMessageItem = React.memo(function ChatMessageItem({
 }, (prev, next) => {
   return prev.message.id === next.message.id
     && prev.message.content === next.message.content
+    && prev.message.stage === next.message.stage
+    && prev.message.richContent?.type === next.message.richContent?.type
+    && (prev.message.quickReplies?.length ?? 0) === (next.message.quickReplies?.length ?? 0)
     && prev.isLast === next.isLast
     && prev.showProgressBar === next.showProgressBar
     && prev.typingStage === next.typingStage

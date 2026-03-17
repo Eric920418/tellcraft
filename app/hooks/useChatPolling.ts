@@ -207,6 +207,8 @@ export function useChatPolling(
                   const a = result[i], b = prev[i]
                   if (a.id === b.id && a.content === b.content && a.role === b.role &&
                       a.stage === b.stage &&
+                      a.richContent?.type === b.richContent?.type &&
+                      (a.quickReplies?.length ?? 0) === (b.quickReplies?.length ?? 0) &&
                       a.progress?.current === b.progress?.current &&
                       a.progress?.total === b.progress?.total &&
                       a.progress?.step === b.progress?.step) {
