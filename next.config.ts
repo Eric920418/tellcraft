@@ -14,6 +14,18 @@ const nextConfig: NextConfig = {
       },
     ];
   },
+  async headers() {
+    return [
+      {
+        // WebContainers 需要 Cross-Origin Isolation（SharedArrayBuffer）
+        source: '/(.*)',
+        headers: [
+          { key: 'Cross-Origin-Opener-Policy', value: 'same-origin' },
+          { key: 'Cross-Origin-Embedder-Policy', value: 'credentialless' },
+        ],
+      },
+    ];
+  },
 };
 
 const withNextIntl = createNextIntlPlugin('./i18n/request.ts');
