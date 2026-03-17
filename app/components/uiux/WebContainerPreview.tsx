@@ -190,7 +190,7 @@ export default function WebContainerPreview({
     if (pages.length > 0) {
       const input: WebContainerFilesInput = {
         pages, components, styles, tailwindConfig,
-        serverActions, apiRoutes, dbLib,
+        serverActions, apiRoutes, dbLib, neonConnectionString,
       }
       return buildWebContainerFiles(input)
     }
@@ -240,7 +240,7 @@ export default function WebContainerPreview({
       hasFullMountRef.current = true
       const input: WebContainerFilesInput = {
         pages, components, styles, tailwindConfig,
-        serverActions, apiRoutes, dbLib,
+        serverActions, apiRoutes, dbLib, neonConnectionString,
       }
       const fullTree = buildWebContainerFiles(input)
       // mount 會覆蓋整個 fs，比 writeFiles 更乾淨

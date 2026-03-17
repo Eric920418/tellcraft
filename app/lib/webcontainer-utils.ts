@@ -25,6 +25,8 @@ export interface WebContainerFilesInput {
   serverActions?: GeneratedFile[]
   apiRoutes?: GeneratedFile[]
   dbLib?: GeneratedFile[]
+  // 有 DB 連線時保留真實 lib/db.ts，沒有時注入 mock
+  neonConnectionString?: string
 }
 
 // ── Known Package Versions ──
@@ -673,9 +675,13 @@ export function buildWebContainerFiles(input: WebContainerFilesInput): FileSyste
     }
   }
 
-  // Mock lib/db.ts — WebContainer 沒有真實 DB，覆蓋為 no-op 防止 Server Actions crash 導致整個頁面壞掉
-  if (input.serverActions?.length || input.dbLib?.length) {
-    setFileInTree(tree, 'lib/db.ts', MOCK_DB)
+  // Mock lib/db.ts — 沒有 DB 連線時，覆蓋為 no-op 防止 Server Actions crash
+  // 有 neonConnectionString 時保留真實 lib/db.ts（讓 Server Actions 連真正的 DB）
+  if (!input.neonConnectionString) {
+    const allCode = allFiles.map(f => f.content).join('\n')
+    if (allCode.includes('@neondatabase/serverless') || allCode.includes('lib/db')) {
+      setFileInTree(tree, 'lib/db.ts', MOCK_DB)
+    }
   }
 
   // If no layout was provided, use minimal layout with edit bridge
