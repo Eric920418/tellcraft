@@ -363,6 +363,21 @@ export function prepareCss(rawStyles: string | undefined, _hasTailwindConfig: bo
 }
 
 /**
+ * Convert TypeScript tailwind.config.ts to CommonJS tailwind.config.js
+ * WebContainer 的 Tailwind v3 PostCSS plugin 可能不支援 .ts config
+ */
+function convertTailwindConfigToJs(tsConfig: string): string {
+  let js = tsConfig
+  // Remove TypeScript type imports
+  js = js.replace(/import\s+type\s*\{[^}]*\}\s*from\s*['"][^'"]*['"]\s*;?\s*/g, '')
+  // Convert `const config: Config =` to `const config =`
+  js = js.replace(/const\s+(\w+)\s*:\s*\w+\s*=/g, 'const $1 =')
+  // Convert `export default config` to `module.exports = config`
+  js = js.replace(/export\s+default\s+(\w+)\s*;?/, 'module.exports = $1')
+  return js
+}
+
+/**
  * Scan all files for package imports and build a deps map
  */
 function scanDependencies(files: GeneratedFile[]): Record<string, string> {
@@ -586,9 +601,10 @@ export function buildWebContainerFiles(input: WebContainerFilesInput): FileSyste
   // Edit bridge
   setFileInTree(tree, 'public/edit-bridge.js', EDIT_BRIDGE_SCRIPT)
 
-  // Tailwind config (v4: referenced via @config in CSS)
+  // Tailwind config — 轉為 CJS .js 格式（WebContainer 的 Tailwind v3 PostCSS 不一定支援 .ts）
   if (input.tailwindConfig) {
-    setFileInTree(tree, 'tailwind.config.ts', input.tailwindConfig)
+    const jsConfig = convertTailwindConfigToJs(input.tailwindConfig)
+    setFileInTree(tree, 'tailwind.config.js', jsConfig)
   }
 
   // Global styles
