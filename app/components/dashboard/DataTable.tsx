@@ -146,11 +146,8 @@ export default function DataTable<T extends object>({
               const isHovered = hoveredRow === key
 
               return (
-                <motion.div
+                <div
                   key={key}
-                  initial={{ opacity: 0, y: 10 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ duration: 0.2, delay: index * 0.02 }}
                   onMouseEnter={(e) => { setHoveredRow(key); onRowMouseEnter?.(item, e) }}
                   onMouseLeave={(e) => { setHoveredRow(null); onRowMouseLeave?.(item, e) }}
                   onClick={() => onRowClick?.(item)}
@@ -184,7 +181,7 @@ export default function DataTable<T extends object>({
                       </div>
                     )
                   })}
-                </motion.div>
+                </div>
               )
             })
           )}
@@ -256,9 +253,7 @@ function PaginationButton({
   active?: boolean
 }) {
   return (
-    <motion.button
-      whileHover={!disabled ? { scale: 1.02 } : undefined}
-      whileTap={!disabled ? { scale: 0.98 } : undefined}
+    <button
       onClick={onClick}
       disabled={disabled}
       style={{
@@ -273,7 +268,7 @@ function PaginationButton({
       }}
     >
       {children}
-    </motion.button>
+    </button>
   )
 }
 

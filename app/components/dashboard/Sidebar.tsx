@@ -1,6 +1,5 @@
 'use client'
 
-import { motion } from 'framer-motion'
 import { Link, usePathname } from '@/i18n/navigation'
 import { useTranslations } from 'next-intl'
 
@@ -197,8 +196,7 @@ export default function Sidebar({ isAdmin = false, user, className = '' }: Sideb
 function NavLink({ item, label, isActive }: { item: NavItem; label: string; isActive: boolean }) {
   return (
     <Link href={item.href} style={{ textDecoration: 'none' }}>
-      <motion.div
-        whileHover={{ x: 2 }}
+      <div
         style={{
           display: 'flex',
           alignItems: 'center',
@@ -227,7 +225,7 @@ function NavLink({ item, label, isActive }: { item: NavItem; label: string; isAc
         >
           {label}
         </span>
-      </motion.div>
+      </div>
     </Link>
   )
 }

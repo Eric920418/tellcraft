@@ -1,9 +1,3 @@
-'use client'
-
-import { motion } from 'framer-motion'
-import { useRef } from 'react'
-import { useInView } from 'framer-motion'
-
 interface StatsCardProps {
   title: string
   value: number | string
@@ -22,17 +16,9 @@ export default function StatsCard({
   subtitle,
   trend,
   icon,
-  delay = 0,
 }: StatsCardProps) {
-  const ref = useRef(null)
-  const isInView = useInView(ref, { once: true })
-
   return (
-    <motion.div
-      ref={ref}
-      initial={{ opacity: 0, y: 20 }}
-      animate={isInView ? { opacity: 1, y: 0 } : {}}
-      transition={{ duration: 0.4, delay }}
+    <div
       style={{
         padding: 24,
         background: 'var(--white)',
@@ -63,10 +49,7 @@ export default function StatsCard({
       </div>
 
       <div style={{ display: 'flex', alignItems: 'baseline', gap: 12 }}>
-        <motion.span
-          initial={{ opacity: 0 }}
-          animate={isInView ? { opacity: 1 } : {}}
-          transition={{ duration: 0.6, delay: delay + 0.2 }}
+        <span
           style={{
             fontSize: 32,
             fontWeight: 300,
@@ -75,7 +58,7 @@ export default function StatsCard({
           }}
         >
           {typeof value === 'number' ? value.toLocaleString() : value}
-        </motion.span>
+        </span>
 
         {trend && (
           <span
@@ -105,7 +88,7 @@ export default function StatsCard({
           {subtitle}
         </p>
       )}
-    </motion.div>
+    </div>
   )
 }
 

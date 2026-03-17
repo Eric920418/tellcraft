@@ -1,6 +1,5 @@
 'use client'
 
-import { motion } from 'framer-motion'
 import { Link, useRouter } from '@/i18n/navigation'
 import { useTranslations } from 'next-intl'
 import StatsCard from './StatsCard'
@@ -65,12 +64,7 @@ export function DashboardContent({
   return (
     <div>
       {/* Header */}
-      <motion.div
-        initial={{ opacity: 0, y: -20 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.4 }}
-        style={{ marginBottom: 32 }}
-      >
+      <div style={{ marginBottom: 32 }}>
         <h1
           style={{
             fontSize: 28,
@@ -84,7 +78,7 @@ export function DashboardContent({
         <p style={{ fontSize: 14, color: 'var(--gray-500)' }}>
           {t('subtitle')}
         </p>
-      </motion.div>
+      </div>
 
       {/* Stats Grid */}
       <div
@@ -124,10 +118,7 @@ export function DashboardContent({
       </div>
 
       {/* Message Usage */}
-      <motion.div
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.4, delay: 0.2 }}
+      <div
         style={{
           padding: 24,
           background: 'var(--white)',
@@ -150,13 +141,10 @@ export function DashboardContent({
           label={t('quotaUsage')}
           maxLabel={stats.creditUsage.isFairUse ? t('fairUseLabel') : undefined}
         />
-      </motion.div>
+      </div>
 
       {/* Recent Projects */}
-      <motion.div
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.4, delay: 0.3 }}
+      <div
         style={{
           padding: 24,
           background: 'var(--white)',
@@ -213,12 +201,8 @@ export function DashboardContent({
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 1, overflow: 'hidden' }}>
             {recentProjects.map((project, index) => (
-              <motion.div
+              <div
                 key={project.id}
-                initial={{ opacity: 0, x: -10 }}
-                animate={{ opacity: 1, x: 0 }}
-                transition={{ duration: 0.3, delay: index * 0.05 }}
-                whileHover={{ x: 4 }}
                 role="button"
                 tabIndex={0}
                 onClick={() => {
@@ -314,11 +298,11 @@ export function DashboardContent({
                     </svg>
                   </Link>
                 </div>
-              </motion.div>
+              </div>
             ))}
           </div>
         )}
-      </motion.div>
+      </div>
     </div>
   )
 }

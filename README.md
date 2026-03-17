@@ -844,7 +844,7 @@ psql "$DATABASE_URL" -f tellcraft-backend/migrations/xxx.sql
 ### 近期更新（2026-03-13 ~ 2026-03-17）
 
 - **預覽空白三修**（03-17）：(1) Sandpack `index.html` 補 `html,body,#root{height:100%}`，修復全屏 canvas/intro 組件父容器高度坍塌導致空白；(2) `customer-service.ts` 新增 `platform_issue` 意圖偵測，用戶回報「預覽空白/看不到頁面」時回覆操作指引而非誤跑 refineCode；(3) 手機版收到 `code_preview` 時自動彈出 `MobilePreviewModal`，不需手動點按鈕
-- **LLM 即時串流回覆**（03-17）：AI 對話文字 token-by-token 即時串流到前端（非假打字機動畫），`streamLlmMessage()` + `answerWithSonnet` 改 SDK streaming + 前端 `useMessageStreaming` hook + `StreamingMessageBubble` 組件，客服回覆先上線
+- **AI 回覆打字機動畫**（03-17）：AI 對話文字逐字顯示（~2 秒跑完），polling 拿到完整訊息後前端 `ChatMessageItem` 內部動畫 + 閃爍游標，打字完成才顯示 quickReplies。後端 `answerWithSonnet` 改為 SDK streaming + `streamLlmMessage`（為未來 WSS 準備）
 - **Coder Stage B 100%**（03-16）：91/91 scenarios 全過，Runner 修復歷程 0%→69%→100%（bcryptjs hash/FK 自動建立/UUID tolerance/array matching 等）
 - **Deployer 防爆修復**（03-16）：KNOWN_PACKAGES +bcryptjs/jsonwebtoken、'use server' 保護、未知依賴警告
 - **Fast Build 單頁深度**（03-14）：多頁→只做首頁 5-8 Section，Animation 截斷修復

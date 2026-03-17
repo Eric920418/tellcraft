@@ -18,6 +18,7 @@ export function useChatPolling(
     onCodePreviewData: (data: Record<string, unknown> | null) => void
     onLayoutModeChange: (mode: 'split') => void
     onSessionTaskIdUpdate: (taskId: string | null) => void
+    onTypewriterTarget: (id: string | null) => void
   }
 ) {
   const [lastTimestamp, setLastTimestamp] = useState<string | null>(null)
@@ -156,6 +157,14 @@ export function useChatPolling(
                 !['init_progress', 'formulation_start', 'formulation_progress'].includes(m.stage || '')
               )
               if (hasNonProgressAiMessage) {
+                // 觸發打字機動畫（找最後一條新 assistant 訊息）
+                const lastNewAssistant = [...newMessagesToAdd].reverse().find(m =>
+                  m.role === 'assistant' &&
+                  !['init_progress', 'formulation_start', 'formulation_progress'].includes(m.stage || '')
+                )
+                if (lastNewAssistant) {
+                  callbacksRef.current.onTypewriterTarget(lastNewAssistant.id)
+                }
                 callbacksRef.current.onIsTyping(false)
               }
 

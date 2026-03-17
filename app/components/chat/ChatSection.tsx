@@ -21,7 +21,6 @@ import { useCodePreviewEditor } from '@/app/hooks/useCodePreviewEditor'
 import { useLoginPrompt } from '@/app/hooks/useLoginPrompt'
 import { useChatSession } from '@/app/hooks/useChatSession'
 import { useChatPolling } from '@/app/hooks/useChatPolling'
-import { useMessageStreaming } from '@/app/hooks/useMessageStreaming'
 import { useCompletionAlert } from '@/app/hooks/useCompletionAlert'
 import { useTabSync } from '@/app/hooks/useTabSync'
 
@@ -258,6 +257,7 @@ export default function ChatSection({
         return prev.currentTaskId ? { ...prev, currentTaskId: undefined } : prev
       })
     },
+    onTypewriterTarget: (id: string | null) => setTypewriterMessageId(id),
   }), [])
 
   const polling = useChatPolling(
@@ -267,21 +267,8 @@ export default function ChatSection({
   )
   pollingRef.current = polling
 
-  // ── LLM 即時串流（文字訊息 token-by-token） ──
-  const streaming = useMessageStreaming({
-    conversationId: session.sessionInfo?.conversationId,
-    onStreamStart: useCallback(() => {
-      setIsTyping(false)
-    }, []),
-    onStreamComplete: useCallback((msg: Message) => {
-      setMessages(prev => {
-        // 去重：polling 可能已經拿到同一條完整訊息
-        if (prev.some(m => m.id === msg.id)) return prev
-        return [...prev, msg]
-      })
-      setIsTyping(false)
-    }, []),
-  })
+  // ── 打字機動畫目標 ──
+  const [typewriterMessageId, setTypewriterMessageId] = useState<string | null>(null)
 
   const completionAlert = useCompletionAlert({
     conversationId: session.sessionInfo?.conversationId,
@@ -1159,7 +1146,8 @@ export default function ChatSection({
                   onShowMobilePreview={() => setShowMobilePreview(true)}
                   isGuestLocked={isGuestLocked}
                   quotaReadOnly={session.quotaReadOnly}
-                  streamingMessage={streaming.streamingMessage}
+                  typewriterMessageId={typewriterMessageId}
+                  onTypewriterComplete={() => setTypewriterMessageId(null)}
                 />
               </div>
             }
@@ -1417,7 +1405,8 @@ export default function ChatSection({
             onShowMobilePreview={() => setShowMobilePreview(true)}
             isGuestLocked={isGuestLocked}
             quotaReadOnly={session.quotaReadOnly}
-            streamingMessage={streaming.streamingMessage}
+            typewriterMessageId={typewriterMessageId}
+            onTypewriterComplete={() => setTypewriterMessageId(null)}
           />
 
           {/* Emphasized login prompt (Modal) */}

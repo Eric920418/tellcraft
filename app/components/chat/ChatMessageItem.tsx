@@ -1,6 +1,6 @@
 'use client'
 
-import React from 'react'
+import React, { useState, useEffect } from 'react'
 import { motion } from 'framer-motion'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
@@ -65,6 +65,8 @@ export interface ChatMessageItemProps {
   onShowMobilePreview: () => void
   getCommandLabel: (content: string) => string
   tChat: (key: string) => string
+  isTypewriterTarget?: boolean
+  onTypewriterComplete?: () => void
 }
 
 export const ChatMessageItem = React.memo(function ChatMessageItem({
@@ -86,7 +88,34 @@ export const ChatMessageItem = React.memo(function ChatMessageItem({
   onShowMobilePreview,
   getCommandLabel,
   tChat,
+  isTypewriterTarget,
+  onTypewriterComplete,
 }: ChatMessageItemProps) {
+  // ── 打字機動畫 ──
+  const [typewriterLen, setTypewriterLen] = useState(0)
+  const typewriterActive = isTypewriterTarget && typewriterLen < message.content.length
+  const displayContent = isTypewriterTarget ? message.content.slice(0, typewriterLen) : message.content
+
+  useEffect(() => {
+    if (!isTypewriterTarget) return
+    setTypewriterLen(0)
+    const len = message.content.length
+    if (len === 0) { onTypewriterComplete?.(); return }
+    // 自適應速度：~2 秒跑完
+    const charsPerTick = Math.max(1, Math.ceil(len / 60))
+    const timer = setInterval(() => {
+      setTypewriterLen(prev => {
+        const next = Math.min(prev + charsPerTick, len)
+        if (next >= len) {
+          clearInterval(timer)
+          onTypewriterComplete?.()
+        }
+        return next
+      })
+    }, 30)
+    return () => clearInterval(timer)
+  }, [isTypewriterTarget, message.content, onTypewriterComplete])
+
   return (
     <motion.div
       initial={isRecentMessage ? { opacity: 0, y: 15 } : false}
@@ -150,8 +179,15 @@ export const ChatMessageItem = React.memo(function ChatMessageItem({
                     ),
                   }}
                 >
-                  {message.content}
+                  {displayContent}
                 </ReactMarkdown>
+                {typewriterActive && (
+                  <motion.span
+                    animate={{ opacity: [1, 0] }}
+                    transition={{ duration: 0.5, repeat: Infinity, repeatType: 'reverse' }}
+                    style={{ display: 'inline-block', width: 2, height: '1em', background: 'var(--black)', marginLeft: 2, verticalAlign: 'text-bottom' }}
+                  />
+                )}
               </div>
             )}
           </div>
@@ -411,7 +447,8 @@ export const ChatMessageItem = React.memo(function ChatMessageItem({
            message.quickReplies &&
            message.quickReplies.length > 0 &&
            isLast &&
-           typingStage === 'none' && (
+           typingStage === 'none' &&
+           !typewriterActive && (
             <QuickReplies
               replies={message.quickReplies}
               onSelect={(value) => {

@@ -132,8 +132,6 @@ pm2 describe tellcraft-backend            # 詳細資訊（記憶體/重啟次�
 | **Server Actions** | `app/actions/index.ts` | ~1800 | 對話/訊息/專案等 Server Actions 入口 |
 | **Sandpack 預覽** | `app/lib/sandpack-utils.ts` + `app/components/uiux/SandpackPreview.tsx` | | UIUX 預覽核心，Sandpack 真實 React 渲染 |
 | **WebSocket Hook** | `app/hooks/useVpsWebSocket.ts` | | 即時訊息推送（型別定義） |
-| **串流訊息 Hook** | `app/hooks/useMessageStreaming.ts` | | LLM 文字串流接收（Socket.io message_stream_* 事件） |
-| **串流訊息氣泡** | `app/components/chat/StreamingMessageBubble.tsx` | | 串流中的訊息渲染（閃爍游標 + ReactMarkdown） |
 | **Fast Build 動畫** | `app/components/FastBuildPlayer.tsx` + `app/components/remotion/fast-build/` | | Remotion + @remotion/three 3D 工廠流水線動畫（Structure/Animation/RWD 三站）|
 | **3D 蓋房子** | `app/components/building-scene/` + `app/components/remotion/building-scene/` | | Remotion + @remotion/three 低多邊形 3D 場景（BDD Q&A 視覺回饋）|
 | **Landing 組件** | `app/components/landing/` | ~1978 | 15 個自包含 Landing Page 組件 |
@@ -393,7 +391,7 @@ Feature 註解：`# Action: actionName` + `# [METHOD] /path` + `# Summary: xxx`
 - **DB 連線池**：`max: 15`（非 50）+ `keepAlive: true`，防止 PostgreSQL 斷開空閒連線。可用 `DB_POOL_MAX` 環境變數覆蓋
 - **Feature 驗證腳本用 `tsx` 不是 `ts-node`**：`feature-validation.ts` 的 `runScript()` 用 `npx tsx`。腳本解析失敗時視為通過（不觸發無效 LLM 修復循環），stderr/exitCode 會完整記錄供除錯
 - **Neon provisioning 是同步的（< 10s）**：任何失敗都不阻塞 UIUX 或部署流程。Deployer 直接 SELECT `neon_connection_string` FROM projects 注入 DATABASE_URL，無需 Redis polling
-- **`streamLlmMessage` vs `sendMessage`**：LLM 生成的對話文字用 `streamLlmMessage`（token-by-token 串流到前端），模板文字/進度/richContent 用 `sendMessage`。`streamLlmMessage` 失敗時自動降級為 `sendMessage`。前端 `useMessageStreaming` hook 監聽 `message_stream_start/chunk/end` 三個 Socket.io 事件，串流完成後 polling 會拿到同一條完整訊息（id 去重）
+- **`streamLlmMessage` vs `sendMessage`**：LLM 生成的對話文字用 `streamLlmMessage`（後端 SDK streaming + Socket.io 事件，為未來 WSS 準備），模板文字/進度/richContent 用 `sendMessage`。`streamLlmMessage` 失敗時自動降級為 `sendMessage`。前端透過 polling 拿到完整訊息後在 `ChatMessageItem` 內做打字機動畫（`isTypewriterTarget` prop + `onTypewriterComplete` callback）
 
 ## 核心原則
 

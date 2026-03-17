@@ -8,9 +8,7 @@ import ConversationPicker from '@/app/components/ConversationPicker'
 import type { ElementInfo } from '@/app/components/uiux/PreviewPanel'
 
 import type { Message, SessionInfo, ConversationItem } from '@/app/types/chat'
-import type { StreamingMessage } from '@/app/hooks/useMessageStreaming'
 import { ChatMessageItem } from './ChatMessageItem'
-import { StreamingMessageBubble } from './StreamingMessageBubble'
 
 export interface ChatMessageListProps {
   messages: Message[]
@@ -53,7 +51,8 @@ export interface ChatMessageListProps {
   inputRef: React.RefObject<HTMLTextAreaElement | null>
   isGuestLocked: boolean
   quotaReadOnly: boolean
-  streamingMessage?: StreamingMessage | null
+  typewriterMessageId?: string | null
+  onTypewriterComplete?: () => void
 }
 
 export default function ChatMessageList({
@@ -97,7 +96,8 @@ export default function ChatMessageList({
   inputRef,
   isGuestLocked,
   quotaReadOnly,
-  streamingMessage,
+  typewriterMessageId,
+  onTypewriterComplete,
 }: ChatMessageListProps) {
   const tChat = useTranslations('chat')
   const tCodePreview = useTranslations('codePreview')
@@ -144,8 +144,8 @@ export default function ChatMessageList({
     handleChatScroll()
   }, [handleChatScroll])
 
-  // Typing indicator should show? — 串流中不顯示（用串流文字取代）
-  const showTypingIndicator = typingStage !== 'none' && !streamingMessage &&
+  // Typing indicator should show?
+  const showTypingIndicator = typingStage !== 'none' &&
     !['init_progress', 'formulation_start', 'formulation_progress'].includes(messages[messages.length - 1]?.stage || '')
 
   return (
@@ -255,20 +255,13 @@ export default function ChatMessageList({
                       onShowMobilePreview={onShowMobilePreview}
                       getCommandLabel={getCommandLabel}
                       tChat={tChat}
+                      isTypewriterTarget={message.id === typewriterMessageId}
+                      onTypewriterComplete={onTypewriterComplete}
                     />
                   </div>
                 )
               })}
             </div>
-
-            {/* LLM 串流訊息 */}
-            {streamingMessage && (
-              <StreamingMessageBubble
-                streaming={streamingMessage}
-                layoutMode={layoutMode}
-                tChat={tChat}
-              />
-            )}
 
             {/* Typing indicator */}
             {showTypingIndicator && (

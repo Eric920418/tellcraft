@@ -1,8 +1,7 @@
 'use client'
 
-import { motion } from 'framer-motion'
+import { motion, useInView } from 'framer-motion'
 import { useRef, useEffect, useState } from 'react'
-import { useInView } from 'framer-motion'
 import { useTranslations } from 'next-intl'
 
 interface ChartData {

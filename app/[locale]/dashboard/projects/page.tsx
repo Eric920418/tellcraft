@@ -58,6 +58,7 @@ export default function ProjectsPage() {
   const [page, setPage] = useState(1)
   const [isLoading, setIsLoading] = useState(true)
   const [search, setSearch] = useState('')
+  const [debouncedSearch, setDebouncedSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState<string>('')
   const [isMobile, setIsMobile] = useState(false)
 
@@ -90,10 +91,16 @@ export default function ProjectsPage() {
   const showTimeoutRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
   const hideTimeoutRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
 
+  // 搜尋防抖 300ms
+  useEffect(() => {
+    const timer = setTimeout(() => setDebouncedSearch(search), 300)
+    return () => clearTimeout(timer)
+  }, [search])
+
   // 換頁/篩選/搜尋時清空選取
   useEffect(() => {
     setSelectedIds(new Set())
-  }, [page, statusFilter, search])
+  }, [page, statusFilter, debouncedSearch])
 
   useEffect(() => {
     const fetchProjects = async () => {
@@ -108,7 +115,7 @@ export default function ProjectsPage() {
         token,
         page,
         pageSize,
-        search: search || undefined,
+        search: debouncedSearch || undefined,
         status: statusFilter || undefined,
       })
 
@@ -120,7 +127,7 @@ export default function ProjectsPage() {
     }
 
     fetchProjects()
-  }, [page, statusFilter, search, router, refetchFlag])
+  }, [page, statusFilter, debouncedSearch, router, refetchFlag])
 
   useEffect(() => {
     if (typeof window === 'undefined') return
