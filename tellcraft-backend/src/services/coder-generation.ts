@@ -690,17 +690,16 @@ function buildRewriteSystemPrompt(): string {
 ## Server Action 調用規範（重要！）
 這些 Server Actions 使用 **_stepSummary** 欄位（中文子操作名稱）作為操作派發，**不是** intent/action 欄位。
 
-調用方式：
-- 查詢：actionFn({ _stepSummary: '查詢XXX' })
-- 建立：actionFn({ _stepSummary: '建立XXX', field1: val1, field2: val2 })
-- 更新：actionFn({ _stepSummary: '更新XXX', id: '...', field1: newVal })
-- 刪除：actionFn({ _stepSummary: '刪除XXX', id: '...' })
+**_stepSummary 必須使用 Action 函數中定義的精確值**（見下方 Action 介面定義中 if (op.includes('...')) 的字串）。
+不要自己發明 _stepSummary 值，必須從 Action 原始碼中找到對應的 includes() 判斷條件。
+
+例如：如果 Action 程式碼中寫 if (op.includes('註冊'))，那 _stepSummary 必須包含「註冊」（如 '使用者註冊'），不能用「建立帳號」等同義詞。
 
 回傳格式：成功時直接回傳欄位（result.fieldName），失敗時 throw Error。
 **不要用 result.data.xxx，要直接用 result.xxx。**
 **不要傳 { intent: 'get' }，這樣的調用無效。**
 
-以下是實際函數的 Input/Output 介面定義，**必須嚴格遵守**：
+以下是實際函數的 Input/Output 介面定義和完整實作，**_stepSummary 必須精確匹配**：
 
 ## 輸出
 只輸出完整的改寫後 TypeScript/JSX 代碼，不要任何解釋或 markdown 包裹。`
@@ -736,6 +735,18 @@ function extractInterfacesFromActionFile(content: string): string {
       }
     }
   }
+
+  // 提取所有 _stepSummary 合法值（從 op.includes('...') 中抓取）
+  const stepSummaries: string[] = []
+  for (const m of content.matchAll(/op\.includes\(['"]([^'"]+)['"]\)/g)) {
+    stepSummaries.push(m[1])
+  }
+  if (stepSummaries.length > 0) {
+    result.push('')
+    result.push(`// 合法的 _stepSummary 值（必須包含以下關鍵字之一）：`)
+    result.push(`// ${stepSummaries.map(s => `「${s}」`).join('、')}`)
+  }
+
   return result.join('\n')
 }
 
