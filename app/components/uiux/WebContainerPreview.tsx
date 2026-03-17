@@ -1,6 +1,6 @@
 'use client'
 
-import React, { useRef, useEffect, useState, useCallback, useMemo } from 'react'
+import React, { useRef, useEffect, useState, useMemo } from 'react'
 import { useWebContainer } from '@/app/hooks/useWebContainer'
 import type { WCStatus } from '@/app/hooks/useWebContainer'
 import {
@@ -10,7 +10,6 @@ import {
   isWebContainerSupported,
 } from '@/app/lib/webcontainer-utils'
 import type { GeneratedFile, WebContainerFilesInput } from '@/app/lib/webcontainer-utils'
-import { getDepsFingerprint, saveDepsFingerprint, shouldSkipInstall } from '@/app/lib/webcontainer-cache'
 import type { ElementInfo } from './PreviewPanel'
 
 // ── Types ──
@@ -26,7 +25,7 @@ interface WebContainerPreviewProps {
   apiRoutes?: GeneratedFile[]
   dbLib?: GeneratedFile[]
   neonConnectionString?: string
-  // Edit bridge props (same interface as SandpackPreview)
+  // Edit bridge props (same interface as former SandpackPreview)
   editMode?: boolean
   onSelectionChanged?: (elements: ElementInfo[]) => void
   onElementSelected?: (element: ElementInfo | null) => void
@@ -40,7 +39,7 @@ interface WebContainerPreviewProps {
   codeVersion?: string
 }
 
-// ── Progress UI Component ──
+// ── Progress UI ──
 
 function ProgressOverlay({ status, detail }: { status: WCStatus; detail?: string }) {
   const steps = [
@@ -49,27 +48,20 @@ function ProgressOverlay({ status, detail }: { status: WCStatus; detail?: string
     { key: 'starting', label: '編譯中' },
     { key: 'ready', label: '就緒' },
   ]
-
   const currentIdx = steps.findIndex(s => s.key === status)
 
   return (
     <div style={{
       position: 'absolute', inset: 0, zIndex: 50,
       display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
-      background: '#fafafa',
-      gap: 20,
+      background: '#fafafa', gap: 20,
     }}>
-      {/* Spinner */}
       <div style={{
         width: 40, height: 40,
-        border: '3px solid #e5e7eb',
-        borderTopColor: '#1a1a1a',
-        borderRadius: '50%',
-        animation: 'spin 0.8s linear infinite',
+        border: '3px solid #e5e7eb', borderTopColor: '#1a1a1a',
+        borderRadius: '50%', animation: 'spin 0.8s linear infinite',
       }} />
       <style>{`@keyframes spin { to { transform: rotate(360deg) } }`}</style>
-
-      {/* Steps */}
       <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
         {steps.map((step, i) => (
           <React.Fragment key={step.key}>
@@ -93,8 +85,6 @@ function ProgressOverlay({ status, detail }: { status: WCStatus; detail?: string
           </React.Fragment>
         ))}
       </div>
-
-      {/* Label */}
       <div style={{ textAlign: 'center' }}>
         <div style={{ fontSize: 14, fontWeight: 600, color: '#1a1a1a' }}>
           {steps[Math.max(0, currentIdx)]?.label || '準備中'}
@@ -109,15 +99,14 @@ function ProgressOverlay({ status, detail }: { status: WCStatus; detail?: string
   )
 }
 
-// ── Error UI Component ──
+// ── Error UI ──
 
 function ErrorOverlay({ message, onRetry }: { message: string; onRetry: () => void }) {
   return (
     <div style={{
       position: 'absolute', inset: 0, zIndex: 60,
       display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
-      background: 'rgba(255,255,255,0.95)', backdropFilter: 'blur(4px)',
-      gap: 16,
+      background: 'rgba(255,255,255,0.95)', backdropFilter: 'blur(4px)', gap: 16,
     }}>
       <svg width="36" height="36" viewBox="0 0 24 24" fill="none" style={{ color: '#ef4444' }}>
         <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="2" />
@@ -126,33 +115,26 @@ function ErrorOverlay({ message, onRetry }: { message: string; onRetry: () => vo
       </svg>
       <div style={{ textAlign: 'center' }}>
         <div style={{ fontSize: 14, fontWeight: 600, color: '#1a1a1a' }}>預覽啟動失敗</div>
-        <div style={{ fontSize: 12, color: '#666', marginTop: 4, maxWidth: 400, wordBreak: 'break-word' }}>
-          {message}
-        </div>
+        <div style={{ fontSize: 12, color: '#666', marginTop: 4, maxWidth: 400, wordBreak: 'break-word' }}>{message}</div>
       </div>
-      <button
-        onClick={onRetry}
-        style={{
-          padding: '8px 20px', borderRadius: 8, border: 'none',
-          background: '#1a1a1a', color: '#fff', fontSize: 13, fontWeight: 500,
-          cursor: 'pointer',
-        }}
-      >
+      <button onClick={onRetry} style={{
+        padding: '8px 20px', borderRadius: 8, border: 'none',
+        background: '#1a1a1a', color: '#fff', fontSize: 13, fontWeight: 500, cursor: 'pointer',
+      }}>
         重試
       </button>
     </div>
   )
 }
 
-// ── Browser Not Supported UI ──
+// ── Unsupported Browser UI ──
 
 function UnsupportedBrowserOverlay() {
   return (
     <div style={{
       position: 'absolute', inset: 0, zIndex: 60,
       display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
-      background: '#fafafa',
-      gap: 16,
+      background: '#fafafa', gap: 16,
     }}>
       <svg width="48" height="48" viewBox="0 0 24 24" fill="none" style={{ color: '#f59e0b' }}>
         <path d="M12 9v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
@@ -194,66 +176,48 @@ export default function WebContainerPreview({
   const [progressDetail, setProgressDetail] = useState<string>()
   const iframeRef = useRef<HTMLIFrameElement | null>(null)
   const prevFilesRef = useRef<GeneratedFile[]>([])
-  const hasBootedRef = useRef(false)
-  const hasMountedRef = useRef(false)
+  const hasFullMountRef = useRef(false)
 
-  // ── WebContainer Hook ──
+  // ── Build initial files for the hook ──
+  // On first render, use skeleton. Once we have real pages, build full tree.
+  const initialFiles = useMemo(() => {
+    if (pages.length > 0) {
+      const input: WebContainerFilesInput = {
+        pages, components, styles, tailwindConfig,
+        serverActions, apiRoutes, dbLib,
+      }
+      return buildWebContainerFiles(input)
+    }
+    return buildSkeletonFiles()
+  // Only compute once on first meaningful data
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pages.length > 0 ? 'has-pages' : 'skeleton'])
+
+  // ── Env vars ──
+  const envVars = useMemo(() => {
+    if (!neonConnectionString) return undefined
+    return { DATABASE_URL: neonConnectionString }
+  }, [neonConnectionString])
+
+  // ── WebContainer Hook — handles full lifecycle ──
   const {
     status,
     iframeUrl,
     error,
-    mountFiles,
     writeFile,
     writeFiles,
     restart,
   } = useWebContainer({
     enabled: supported,
+    initialFiles,
+    envVars,
     onProgress: (_status, detail) => setProgressDetail(detail),
     onPreviewError: (err) => {
       onRuntimeError?.({ name: err.type, message: err.message, path: undefined })
     },
   })
 
-  // ── Boot + mount skeleton on first enable ──
-  useEffect(() => {
-    if (!supported || status !== 'booting' || hasBootedRef.current) return
-    hasBootedRef.current = true
-    ;(async () => {
-      try {
-        // Mount minimal skeleton first (so npm install can start immediately)
-        const skeleton = buildSkeletonFiles()
-        await mountFiles(skeleton)
-
-        // Write .env if we have a DB connection
-        if (neonConnectionString) {
-          await writeFile('.env', `DATABASE_URL=${neonConnectionString}`)
-        }
-
-        // Check deps cache to potentially skip install
-        const pkgJson = JSON.stringify({
-          dependencies: {
-            next: '^15.0.0', react: '^19.0.0', 'react-dom': '^19.0.0',
-            motion: '^11.0.0', tailwindcss: '^3.4.0', postcss: '^8.4.0', autoprefixer: '^10.0.0',
-          }
-        })
-        const fingerprint = getDepsFingerprint(pkgJson)
-        const canSkip = await shouldSkipInstall(fingerprint)
-
-        if (!canSkip) {
-          // Run npm install + next dev via the restart method
-          await restart()
-          await saveDepsFingerprint(fingerprint)
-        } else {
-          setProgressDetail('快取命中，跳過安裝')
-          await restart()
-        }
-      } catch (err) {
-        console.error('[WC] Boot failed:', err)
-      }
-    })()
-  }, [supported, status, mountFiles, writeFile, neonConnectionString, restart])
-
-  // ── Mount full files when code arrives ──
+  // ── Incremental file updates (streaming / iteration) ──
   const allFiles = useMemo(() => [
     ...pages, ...components,
     ...(serverActions || []),
@@ -262,65 +226,51 @@ export default function WebContainerPreview({
   ], [pages, components, serverActions, apiRoutes, dbLib])
 
   useEffect(() => {
-    if (status !== 'ready' && status !== 'starting') return
+    // Only do incremental writes once the dev server is running
+    if (status !== 'ready') return
     if (allFiles.length === 0) return
 
-    const input: WebContainerFilesInput = {
-      pages, components, styles, tailwindConfig,
-      serverActions, apiRoutes, dbLib,
+    // Skip the first run if initialFiles already covered these
+    if (!hasFullMountRef.current) {
+      hasFullMountRef.current = true
+      prevFilesRef.current = allFiles
+      return
     }
 
-    if (!hasMountedRef.current) {
-      // First time: mount complete file tree
-      hasMountedRef.current = true
-      ;(async () => {
-        try {
-          const tree = buildWebContainerFiles(input)
-          await mountFiles(tree)
+    // Diff and write only changed files
+    const changes = diffFiles(prevFilesRef.current, allFiles)
+    const allChanges = { ...changes }
 
-          // Write .env again (mount overwrites the fs)
-          if (neonConnectionString) {
-            await writeFile('.env', `DATABASE_URL=${neonConnectionString}`)
-          }
-        } catch (err) {
-          console.error('[WC] Mount failed:', err)
-        }
-      })()
-    } else {
-      // Incremental: diff and write only changed files
-      const changes = diffFiles(prevFilesRef.current, allFiles)
-      if (Object.keys(changes).length > 0) {
-        // Also check styles/tailwindConfig changes
-        const allChanges = { ...changes }
-        if (styles) allChanges['app/globals.css'] = styles
-        if (tailwindConfig) allChanges['tailwind.config.ts'] = tailwindConfig
+    // Also write styles/tailwindConfig if they might have changed
+    if (styles && prevFilesRef.current.length > 0) {
+      allChanges['app/globals.css'] = styles
+    }
+    if (tailwindConfig && prevFilesRef.current.length > 0) {
+      allChanges['tailwind.config.ts'] = tailwindConfig
+    }
 
-        writeFiles(allChanges).catch(err => {
-          console.error('[WC] Write failed:', err)
-        })
-      }
+    if (Object.keys(allChanges).length > 0) {
+      writeFiles(allChanges).catch(err => {
+        console.error('[WC] Incremental write failed:', err)
+      })
     }
 
     prevFilesRef.current = allFiles
-  }, [allFiles, styles, tailwindConfig, status, pages, components, serverActions, apiRoutes, dbLib, mountFiles, writeFile, writeFiles, neonConnectionString])
+  }, [allFiles, styles, tailwindConfig, status, writeFiles])
 
-  // ── Edit Bridge: postMessage communication ──
-  // Same protocol as SandpackPreview (tc_* messages)
+  // ── Edit Bridge: postMessage protocol (tc_*) ──
 
   const effectiveEditMode = editMode && !isStreaming
   const effectiveEditModeRef = useRef(effectiveEditMode)
   effectiveEditModeRef.current = effectiveEditMode
 
-  // Sync editMode to iframe
   useEffect(() => {
     if (!iframeRef.current?.contentWindow) return
     iframeRef.current.contentWindow.postMessage({
-      type: 'tc_setEditMode',
-      enabled: effectiveEditMode,
+      type: 'tc_setEditMode', enabled: effectiveEditMode,
     }, '*')
   }, [effectiveEditMode])
 
-  // Refs for stable callbacks
   const onSelectionChangedRef = useRef(onSelectionChanged)
   onSelectionChangedRef.current = onSelectionChanged
   const onElementSelectedRef = useRef(onElementSelected)
@@ -332,7 +282,6 @@ export default function WebContainerPreview({
   const annotationsRef = useRef(annotations)
   annotationsRef.current = annotations
 
-  // Listen for iframe messages
   useEffect(() => {
     const handleMessage = (e: MessageEvent) => {
       const msg = e.data
@@ -354,24 +303,14 @@ export default function WebContainerPreview({
           }
         }
       }
-
-      if (msg.type === 'tc_selectionChanged') {
-        onSelectionChangedRef.current?.(msg.data as ElementInfo[])
-      }
-      if (msg.type === 'tc_elementSelected') {
-        onElementSelectedRef.current?.(msg.data as ElementInfo)
-      }
-      if (msg.type === 'tc_elementDeselected') {
-        onElementSelectedRef.current?.(null)
-      }
-      if (msg.type === 'tc_elementResized') {
-        onElementResizedRef.current?.(msg.elementId, msg.width, msg.height)
-      }
+      if (msg.type === 'tc_selectionChanged') onSelectionChangedRef.current?.(msg.data as ElementInfo[])
+      if (msg.type === 'tc_elementSelected') onElementSelectedRef.current?.(msg.data as ElementInfo)
+      if (msg.type === 'tc_elementDeselected') onElementSelectedRef.current?.(null)
+      if (msg.type === 'tc_elementResized') onElementResizedRef.current?.(msg.elementId, msg.width, msg.height)
       if (msg.type === 'tc_runtimeError') {
         onRuntimeError?.({ name: msg.name || 'Error', message: msg.message || 'Unknown', path: msg.path })
       }
     }
-
     window.addEventListener('message', handleMessage)
     return () => window.removeEventListener('message', handleMessage)
   }, [onRuntimeError])
@@ -380,34 +319,23 @@ export default function WebContainerPreview({
   useEffect(() => {
     if (!pendingUpdate || !iframeRef.current?.contentWindow) return
     iframeRef.current.contentWindow.postMessage({
-      type: 'tc_applyUpdate',
-      elementId: pendingUpdate.elementId,
-      changes: pendingUpdate.changes,
+      type: 'tc_applyUpdate', elementId: pendingUpdate.elementId, changes: pendingUpdate.changes,
     }, '*')
   }, [pendingUpdate])
 
   useEffect(() => {
     if (!pendingReset || !iframeRef.current?.contentWindow) return
-    iframeRef.current.contentWindow.postMessage({
-      type: 'tc_resetElement',
-      elementId: pendingReset,
-    }, '*')
+    iframeRef.current.contentWindow.postMessage({ type: 'tc_resetElement', elementId: pendingReset }, '*')
   }, [pendingReset])
 
   useEffect(() => {
     if (!pendingOverrides || !iframeRef.current?.contentWindow) return
-    iframeRef.current.contentWindow.postMessage({
-      type: 'tc_applyOverrides',
-      overrides: pendingOverrides,
-    }, '*')
+    iframeRef.current.contentWindow.postMessage({ type: 'tc_applyOverrides', overrides: pendingOverrides }, '*')
   }, [pendingOverrides])
 
   useEffect(() => {
     if (!annotations || !iframeRef.current?.contentWindow) return
-    iframeRef.current.contentWindow.postMessage({
-      type: 'tc_setAnnotations',
-      annotations: annotations,
-    }, '*')
+    iframeRef.current.contentWindow.postMessage({ type: 'tc_setAnnotations', annotations }, '*')
   }, [annotations])
 
   // ── Render ──
@@ -422,29 +350,18 @@ export default function WebContainerPreview({
 
   return (
     <div style={{ height: '100%', width: '100%', position: 'relative', display: 'flex', flexDirection: 'column' }}>
-      {/* Progress overlay (shown during boot/install/start) */}
       {status !== 'ready' && status !== 'error' && (
         <ProgressOverlay status={status} detail={progressDetail} />
       )}
-
-      {/* Error overlay */}
       {status === 'error' && error && (
-        <ErrorOverlay message={error} onRetry={restart} />
+        <ErrorOverlay message={error} onRetry={() => restart()} />
       )}
-
-      {/* Preview iframe (shown when ready) */}
       {iframeUrl && (
         <iframe
           ref={iframeRef}
           src={iframeUrl}
-          style={{
-            width: '100%',
-            height: '100%',
-            border: 'none',
-            flex: 1,
-          }}
+          style={{ width: '100%', height: '100%', border: 'none', flex: 1 }}
           allow="cross-origin-isolated"
-          sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-modals"
         />
       )}
     </div>
