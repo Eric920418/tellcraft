@@ -13,6 +13,7 @@ import type { GeneratedComponent } from './uiux-generation'
 import type { GeneratedCode } from '../types/flow-state'
 import { createLogger } from '../lib/logger'
 import { safeParseJson } from '../utils/safe-parse-json'
+import { sanitizeNamedImports } from '../utils/sanitize-named-imports'
 
 const logger = createLogger('coder-generation')
 
@@ -832,7 +833,7 @@ export async function executeCoderPipeline(
 
   // Step 5: 識別需改寫的組件（Haiku LLM + regex fallback）
   await callbacks.onProgress('分析前端組件...', 55)
-  const { needsRewrite, unchanged } = await identifyMockDataComponents(existingUiuxCode, {
+  let { needsRewrite, unchanged } = await identifyMockDataComponents(existingUiuxCode, {
     availableActions: actions.map(a => ({ name: a.name, summary: a.summary })),
     trackingContext,
   })
@@ -858,9 +859,38 @@ export async function executeCoderPipeline(
     )
   }
 
+  // Step 7: Named import 驗證與修復（零 LLM）
+  await callbacks.onProgress('驗證 import 引用...', 96)
+  const allFrontendFiles = [...rewrittenFrontend, ...unchanged]
+  const backendFilesRaw = [dbFile, ...actionFiles, ...serverActionFiles, ...apiRouteFiles]
+  const { sanitized: sanitizedFrontend, fixes } = sanitizeNamedImports([...allFrontendFiles, ...backendFilesRaw])
+
+  // 分離回前端和後端
+  const frontendPaths = new Set(allFrontendFiles.map(f => f.path))
+  const backendPaths = new Set(backendFilesRaw.map(f => f.path))
+  const finalRewritten: GeneratedComponent[] = []
+  const finalUnchanged: GeneratedComponent[] = []
+  const rewrittenPathSet = new Set(rewrittenFrontend.map(f => f.path))
+
+  for (const f of sanitizedFrontend) {
+    if (backendPaths.has(f.path)) continue
+    if (rewrittenPathSet.has(f.path)) {
+      finalRewritten.push(f as GeneratedComponent)
+    } else if (frontendPaths.has(f.path)) {
+      finalUnchanged.push(f as GeneratedComponent)
+    }
+  }
+  rewrittenFrontend = finalRewritten
+  unchanged = finalUnchanged
+
+  if (fixes.length > 0) {
+    logger.info({ fixCount: fixes.length }, 'Named import 修復完成')
+  }
+
   await callbacks.onProgress('完成！', 98)
 
-  const backendFiles = [dbFile, ...actionFiles, ...serverActionFiles, ...apiRouteFiles]
+  const backendFiles = sanitizedFrontend.filter(f => backendPaths.has(f.path)) as typeof backendFilesRaw
+  if (backendFiles.length === 0) backendFiles.push(...backendFilesRaw) // fallback
   const summary = `生成了 ${actionFiles.length} 個後端函數、${serverActionFiles.length} 個 Server Action、${apiRouteFiles.length} 個 API Route，改寫了 ${rewrittenFrontend.length} 個前端組件（${unchanged.length} 個保持不變）。`
 
   logger.info({

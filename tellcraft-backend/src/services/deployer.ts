@@ -12,6 +12,7 @@ import { getEnv } from '../lib/env'
 import * as db from '../db/client'
 import { createLogger } from '../lib/logger'
 import { repairMissingReactImports, repairBracketLookupAccess } from './uiux-generation'
+import { sanitizeNamedImports } from '../utils/sanitize-named-imports'
 
 const logger = createLogger('deployer')
 const execFileAsync = promisify(execFile)
@@ -703,6 +704,25 @@ export function safeMotionProps<T extends Record<string, unknown>>(props: T) {
 
     logger.info({ file: broken.file, importPath: broken.importPath, stubPath }, 'Broken import，生成 stub 組件')
     fixes.push(`${broken.file}: broken import ${broken.importPath} → 生成 stub 組件`)
+  }
+
+  // Named import 驗證：檔案存在但 named export 不存在的情況
+  const allSanitizedFiles = [...sanitized.pages, ...sanitized.components]
+  const { sanitized: namedFixed, fixes: namedFixes } = sanitizeNamedImports(allSanitizedFiles)
+  if (namedFixes.length > 0) {
+    // 將修復後的內容寫回
+    const fixedMap = new Map(namedFixed.map(f => [f.path, f.content]))
+    for (const page of sanitized.pages) {
+      const fixed = fixedMap.get(page.path)
+      if (fixed !== undefined) page.content = fixed
+    }
+    for (const comp of sanitized.components) {
+      const fixed = fixedMap.get(comp.path)
+      if (fixed !== undefined) comp.content = fixed
+    }
+    for (const nf of namedFixes) {
+      fixes.push(`${nf.file}: named import "${nf.removed}" 不存在於 ${nf.from}，已移除`)
+    }
   }
 
   return { code: sanitized, fixes, injectedFiles, extraDependencies }
