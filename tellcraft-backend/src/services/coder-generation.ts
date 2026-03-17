@@ -430,7 +430,8 @@ export async function GET(req: NextRequest) {
   try {
     const params = Object.fromEntries(req.nextUrl.searchParams.entries())
     const result = await ${fnName}(params as unknown as Parameters<typeof ${fnName}>[0])
-    return NextResponse.json(result, { status: 200 })
+    const status = (result as any).__status || 200
+    return NextResponse.json(result, { status })
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : 'Unknown error'
     return NextResponse.json({ error: message }, { status: 400 })
@@ -439,7 +440,7 @@ export async function GET(req: NextRequest) {
 `
     } else {
       // POST/PUT/DELETE/PATCH
-      const statusCode = meta.method === 'POST' ? 201 : 200
+      const defaultStatus = meta.method === 'POST' ? 201 : 200
       content = `import { NextRequest, NextResponse } from 'next/server'
 import { ${fnName} } from '${importPath}'
 import type { ${inputType} } from '${importPath}'
@@ -448,7 +449,8 @@ export async function ${meta.method}(req: NextRequest) {
   try {
     const body: ${inputType} = await req.json()
     const result = await ${fnName}(body)
-    return NextResponse.json(result, { status: ${statusCode} })
+    const status = (result as any).__status || ${defaultStatus}
+    return NextResponse.json(result, { status })
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : 'Unknown error'
     return NextResponse.json({ error: message }, { status: 400 })

@@ -6,7 +6,7 @@
 import type Redis from 'ioredis'
 import type { Server as SocketIOServer } from 'socket.io'
 import type { FlowState } from '../types/flow-state'
-import { sendMessage, saveFlowState, deleteFlowState } from './orchestrator-utils'
+import { sendMessage, saveFlowState, deleteFlowState, hasRecentFlowActivity } from './orchestrator-utils'
 import { executeIteration, executeUndoIteration, executeRollbackQuery, executeRollbackSelection } from '../services/iteration-skill'
 import { semanticGateway } from '../services/semantic-gateway'
 import { detectFastModeIntent, getFaqReply, answerWithSonnet } from '../services/customer-service'
@@ -159,9 +159,79 @@ export async function routePhase(
     return true
   }
 
-  // ── Coder Generating ──
+  // ── Coder Generating（三層孤兒偵測）──
   if (state.phase === 'coder_generating') {
     const isChinese = state.locale !== 'en'
+    const coderStartedAt = state.coderGenerationStartedAt || 0
+    const coderElapsedMs = coderStartedAt > 0 ? Date.now() - coderStartedAt : 0
+
+    // Layer 1: conv-lock 不存在 + 60s → Worker 已死，立即恢復
+    const coderLockExists = (await redis.exists(`conv-lock:${conversationId}`)) === 1
+    if (!coderLockExists && coderStartedAt > 0 && coderElapsedMs > 60_000) {
+      logger.warn({ conversationId, elapsedMs: coderElapsedMs }, 'Coder 孤兒偵測：conv-lock 不存在，立即恢復')
+      if (state.coderPreRewriteCode) state.uiuxGeneratedCode = state.coderPreRewriteCode
+      state.phase = 'uiux_complete'
+      state.coderGenerationStartedAt = undefined
+      state.waitingForReply = false
+      await saveFlowState(redis, conversationId, state)
+      await sendMessage(conversationId, io, {
+        content: isChinese ? '後端代碼生成中斷了。您可以重試或直接部署。' : 'Backend code generation was interrupted. You can retry or deploy as-is.',
+        stage: 'uiux_complete',
+        quickReplies: [
+          { label: isChinese ? '重試' : 'Retry', value: '__connect_database__', style: 'primary' as const },
+          { label: isChinese ? '直接部署' : 'Deploy as-is', value: '部署', style: 'secondary' as const },
+        ],
+      })
+      return true
+    }
+
+    // Layer 2: conv-lock 存在 + startedAt > 5min + 無心跳 → 過期 lock 恢復
+    const CODER_STALE_THRESHOLD_MS = 5 * 60 * 1000
+    if (coderLockExists && coderStartedAt > 0 && coderElapsedMs > CODER_STALE_THRESHOLD_MS) {
+      const hasActivity = await hasRecentFlowActivity(redis, conversationId)
+      if (!hasActivity) {
+        logger.warn({ conversationId, elapsedMs: coderElapsedMs }, 'Coder 過期偵測：lock 存在但無心跳，觸發恢復')
+        if (state.coderPreRewriteCode) state.uiuxGeneratedCode = state.coderPreRewriteCode
+        state.phase = 'uiux_complete'
+        state.coderGenerationStartedAt = undefined
+        state.waitingForReply = false
+        await saveFlowState(redis, conversationId, state)
+        await sendMessage(conversationId, io, {
+          content: isChinese ? '後端代碼生成中斷了。您可以重試或直接部署。' : 'Backend code generation was interrupted. You can retry or deploy as-is.',
+          stage: 'uiux_complete',
+          quickReplies: [
+            { label: isChinese ? '重試' : 'Retry', value: '__connect_database__', style: 'primary' as const },
+            { label: isChinese ? '直接部署' : 'Deploy as-is', value: '部署', style: 'secondary' as const },
+          ],
+        })
+        return true
+      }
+    }
+
+    // Layer 3: 15min 完整超時
+    const CODER_FULL_TIMEOUT_MS = 15 * 60 * 1000
+    if (coderStartedAt === 0 || coderElapsedMs > CODER_FULL_TIMEOUT_MS) {
+      const hasActivity = await hasRecentFlowActivity(redis, conversationId)
+      if (!hasActivity) {
+        logger.warn({ conversationId, elapsedMs: coderElapsedMs }, 'Coder 完整超時，觸發恢復')
+        if (state.coderPreRewriteCode) state.uiuxGeneratedCode = state.coderPreRewriteCode
+        state.phase = 'uiux_complete'
+        state.coderGenerationStartedAt = undefined
+        state.waitingForReply = false
+        await saveFlowState(redis, conversationId, state)
+        await sendMessage(conversationId, io, {
+          content: isChinese ? '後端代碼生成超時了。您可以重試或直接部署。' : 'Backend code generation timed out. You can retry or deploy as-is.',
+          stage: 'uiux_complete',
+          quickReplies: [
+            { label: isChinese ? '重試' : 'Retry', value: '__connect_database__', style: 'primary' as const },
+            { label: isChinese ? '直接部署' : 'Deploy as-is', value: '部署', style: 'secondary' as const },
+          ],
+        })
+        return true
+      }
+    }
+
+    // 有心跳，正常生成中
     await sendMessage(conversationId, io, {
       content: isChinese ? '正在生成後端代碼，請稍候...' : 'Generating backend code, please wait...',
       stage: 'info',
@@ -169,9 +239,76 @@ export async function routePhase(
     return true
   }
 
-  // ── Coder Testing ──
+  // ── Coder Testing（三層孤兒偵測）──
   if (state.phase === 'coder_testing') {
     const isChinese = state.locale !== 'en'
+    const testStartedAt = state.coderTestStartedAt || 0
+    const testElapsedMs = testStartedAt > 0 ? Date.now() - testStartedAt : 0
+
+    // Layer 1: conv-lock 不存在 + 60s → 立即恢復
+    const testLockExists = (await redis.exists(`conv-lock:${conversationId}`)) === 1
+    if (!testLockExists && testStartedAt > 0 && testElapsedMs > 60_000) {
+      logger.warn({ conversationId, elapsedMs: testElapsedMs }, 'Coder Testing 孤兒偵測：conv-lock 不存在，立即恢復')
+      state.phase = 'uiux_complete'
+      state.coderTestStartedAt = undefined
+      state.waitingForReply = false
+      await saveFlowState(redis, conversationId, state)
+      await sendMessage(conversationId, io, {
+        content: isChinese ? '測試執行中斷了。您可以重試或直接部署。' : 'Test execution was interrupted. You can retry or deploy as-is.',
+        stage: 'uiux_complete',
+        quickReplies: [
+          { label: isChinese ? '重試測試' : 'Retry Tests', value: '__verify_backend__', style: 'primary' as const },
+          { label: isChinese ? '直接部署' : 'Deploy as-is', value: '部署', style: 'secondary' as const },
+        ],
+      })
+      return true
+    }
+
+    // Layer 2: conv-lock 存在 + startedAt > 5min + 無心跳 → 過期 lock 恢復
+    const TEST_STALE_THRESHOLD_MS = 5 * 60 * 1000
+    if (testLockExists && testStartedAt > 0 && testElapsedMs > TEST_STALE_THRESHOLD_MS) {
+      const hasActivity = await hasRecentFlowActivity(redis, conversationId)
+      if (!hasActivity) {
+        logger.warn({ conversationId, elapsedMs: testElapsedMs }, 'Coder Testing 過期偵測：lock 存在但無心跳，觸發恢復')
+        state.phase = 'uiux_complete'
+        state.coderTestStartedAt = undefined
+        state.waitingForReply = false
+        await saveFlowState(redis, conversationId, state)
+        await sendMessage(conversationId, io, {
+          content: isChinese ? '測試執行中斷了。您可以重試或直接部署。' : 'Test execution was interrupted. You can retry or deploy as-is.',
+          stage: 'uiux_complete',
+          quickReplies: [
+            { label: isChinese ? '重試測試' : 'Retry Tests', value: '__verify_backend__', style: 'primary' as const },
+            { label: isChinese ? '直接部署' : 'Deploy as-is', value: '部署', style: 'secondary' as const },
+          ],
+        })
+        return true
+      }
+    }
+
+    // Layer 3: 20min 完整超時
+    const TEST_FULL_TIMEOUT_MS = 20 * 60 * 1000
+    if (testStartedAt === 0 || testElapsedMs > TEST_FULL_TIMEOUT_MS) {
+      const hasActivity = await hasRecentFlowActivity(redis, conversationId)
+      if (!hasActivity) {
+        logger.warn({ conversationId, elapsedMs: testElapsedMs }, 'Coder Testing 完整超時，觸發恢復')
+        state.phase = 'uiux_complete'
+        state.coderTestStartedAt = undefined
+        state.waitingForReply = false
+        await saveFlowState(redis, conversationId, state)
+        await sendMessage(conversationId, io, {
+          content: isChinese ? '測試執行超時了。您可以重試或直接部署。' : 'Test execution timed out. You can retry or deploy as-is.',
+          stage: 'uiux_complete',
+          quickReplies: [
+            { label: isChinese ? '重試測試' : 'Retry Tests', value: '__verify_backend__', style: 'primary' as const },
+            { label: isChinese ? '直接部署' : 'Deploy as-is', value: '部署', style: 'secondary' as const },
+          ],
+        })
+        return true
+      }
+    }
+
+    // 有心跳，正常測試中
     await sendMessage(conversationId, io, {
       content: isChinese ? '正在執行 SpecFormula 測試，請稍候...' : 'Running SpecFormula tests, please wait...',
       stage: 'info',

@@ -40,6 +40,14 @@ export async function executeCoderSkill(input: CoderSkillInput): Promise<void> {
   )
 
   if (!bddSession || !bddSession.actions_yml_content || !bddSession.schema_sql_content) {
+    // 恢復 FlowState 防止卡死（從重試進入時 phase 可能已是 coder_generating）
+    const state = await getFlowState(redis, conversationId)
+    if (state && state.phase === 'coder_generating') {
+      state.phase = 'uiux_complete'
+      state.coderGenerationStartedAt = undefined
+      state.waitingForReply = false
+      await saveFlowState(redis, conversationId, state)
+    }
     await sendMessage(conversationId, io, {
       content: '此專案缺少 BDD 規格（actionsYml 或 schemaSql），無法生成後端代碼。請先完成 BDD 需求釐清。',
       stage: 'coder_error',
@@ -53,6 +61,14 @@ export async function executeCoderSkill(input: CoderSkillInput): Promise<void> {
   // 2. 讀取 UIUX 代碼
   const uiuxFiles = await db.getProjectFiles(projectId, 'uiux')
   if (uiuxFiles.length === 0) {
+    // 恢復 FlowState 防止卡死
+    const state = await getFlowState(redis, conversationId)
+    if (state && state.phase === 'coder_generating') {
+      state.phase = 'uiux_complete'
+      state.coderGenerationStartedAt = undefined
+      state.waitingForReply = false
+      await saveFlowState(redis, conversationId, state)
+    }
     await sendMessage(conversationId, io, {
       content: '此專案沒有 UIUX 代碼，無法進行前端改寫。請先完成 UIUX 設計。',
       stage: 'coder_error',
@@ -220,13 +236,13 @@ export async function executeCoderSkill(input: CoderSkillInput): Promise<void> {
 
 export async function executeCoderTesting(input: CoderSkillInput): Promise<void> {
   const { projectId, conversationId, userId, redis, io } = input
-  const isChinese = true // TODO: 從 state.locale 判斷
 
   let state = await getFlowState(redis, conversationId)
   if (!state) {
     await sendMessage(conversationId, io, { content: '找不到對話狀態', stage: 'error' })
     return
   }
+  const isChinese = state.locale !== 'en'
 
   // 1. 讀取所需資料
   const bddSession = await db.queryOne<{
