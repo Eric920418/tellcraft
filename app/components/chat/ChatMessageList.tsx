@@ -1,9 +1,8 @@
 'use client'
 
-import React, { useRef, useMemo, useCallback } from 'react'
+import React, { useMemo } from 'react'
 import { useTranslations } from 'next-intl'
 import { motion } from 'framer-motion'
-import { useVirtualizer } from '@tanstack/react-virtual'
 import ConversationPicker from '@/app/components/ConversationPicker'
 import type { ElementInfo } from '@/app/components/uiux/PreviewPanel'
 
@@ -103,8 +102,6 @@ export default function ChatMessageList({
   const tCodePreview = useTranslations('codePreview')
   const tLogin = useTranslations('login')
 
-  const parentRef = useRef<HTMLDivElement>(null)
-
   // Compute displayMessages (filter logic from original)
   const displayMessages = useMemo(() => {
     const uiuxStartIndex = messages.findIndex(m =>
@@ -121,28 +118,6 @@ export default function ChatMessageList({
 
   const lastMessageStage = messages[messages.length - 1]?.stage || ''
   const isShowingProgress = ['init_progress', 'formulation_start', 'formulation_progress', 'fast_generating'].includes(lastMessageStage)
-
-  // Virtualizer
-  const virtualizer = useVirtualizer({
-    count: displayMessages.length,
-    getScrollElement: () => parentRef.current,
-    estimateSize: () => 120,
-    overscan: 5,
-    measureElement: (el) => el.getBoundingClientRect().height,
-  })
-
-  // Combined ref callback for parent: set parentRef + chatScrollStickyRef
-  const combinedParentRef = useCallback((el: HTMLDivElement | null) => {
-    if (el) {
-      (parentRef as React.MutableRefObject<HTMLDivElement | null>).current = el
-    }
-    chatScrollStickyRef(el)
-  }, [chatScrollStickyRef])
-
-  // Scroll handler that also feeds virtualizer
-  const onScroll = useCallback(() => {
-    handleChatScroll()
-  }, [handleChatScroll])
 
   // Typing indicator should show?
   const showTypingIndicator = typingStage !== 'none' &&
@@ -162,11 +137,11 @@ export default function ChatMessageList({
         </div>
       )}
 
-      {/* 對話內容（虛擬化） */}
+      {/* 對話內容 */}
       {!showConversationPicker && (
         <div
-          ref={combinedParentRef}
-          onScroll={onScroll}
+          ref={chatScrollStickyRef}
+          onScroll={handleChatScroll}
           style={{ flex: 1, overflow: 'auto', padding: layoutMode === 'split' ? '16px 0' : '32px 0' }}
         >
           <div style={{ maxWidth: layoutMode === 'split' ? '100%' : 680, margin: '0 auto', padding: layoutMode === 'split' ? '0 16px' : '0 24px' }}>
@@ -206,62 +181,40 @@ export default function ChatMessageList({
               </motion.div>
             )}
 
-            {/* 虛擬化消息列表 */}
-            <div
-              style={{
-                height: virtualizer.getTotalSize(),
-                width: '100%',
-                position: 'relative',
-              }}
-            >
-              {virtualizer.getVirtualItems().map(virtualRow => {
-                const message = displayMessages[virtualRow.index]
-                const index = virtualRow.index
-                const isLast = index === displayMessages.length - 1
-                const isRecentMessage = index >= displayMessages.length - 3
-                const animationDelay = isRecentMessage ? (index - (displayMessages.length - 3)) * 0.05 : 0
-                const showProgressBar = isShowingProgress && isLast
+            {/* 消息列表 */}
+            {displayMessages.map((message, index) => {
+              const isLast = index === displayMessages.length - 1
+              const isRecentMessage = index >= displayMessages.length - 3
+              const animationDelay = isRecentMessage ? (index - (displayMessages.length - 3)) * 0.05 : 0
+              const showProgressBar = isShowingProgress && isLast
 
-                return (
-                  <div
-                    key={message.id}
-                    ref={virtualizer.measureElement}
-                    data-index={virtualRow.index}
-                    style={{
-                      position: 'absolute',
-                      top: 0,
-                      left: 0,
-                      width: '100%',
-                      transform: `translateY(${virtualRow.start}px)`,
-                    }}
-                  >
-                    <ChatMessageItem
-                      message={message}
-                      index={index}
-                      isLast={isLast}
-                      isRecentMessage={isRecentMessage}
-                      animationDelay={animationDelay}
-                      showProgressBar={showProgressBar}
-                      layoutMode={layoutMode}
-                      typingStage={typingStage}
-                      isTyping={isTyping || isShowingProgress}
-                      sendCooldown={sendCooldown}
-                      isInitializing={isInitializing}
-                      sessionInfo={sessionInfo}
-                      isReadOnlyMode={isReadOnlyMode}
-                      selectedTemplateId={selectedTemplateId}
-                      handleSendMessage={handleSendMessage}
-                      handleTemplateSelect={handleTemplateSelect}
-                      onShowMobilePreview={onShowMobilePreview}
-                      getCommandLabel={getCommandLabel}
-                      tChat={tChat}
-                      isTypewriterTarget={message.id === typewriterMessageId}
-                      onTypewriterComplete={onTypewriterComplete}
-                    />
-                  </div>
-                )
-              })}
-            </div>
+              return (
+                <ChatMessageItem
+                  key={message.id}
+                  message={message}
+                  index={index}
+                  isLast={isLast}
+                  isRecentMessage={isRecentMessage}
+                  animationDelay={animationDelay}
+                  showProgressBar={showProgressBar}
+                  layoutMode={layoutMode}
+                  typingStage={typingStage}
+                  isTyping={isTyping || isShowingProgress}
+                  sendCooldown={sendCooldown}
+                  isInitializing={isInitializing}
+                  sessionInfo={sessionInfo}
+                  isReadOnlyMode={isReadOnlyMode}
+                  selectedTemplateId={selectedTemplateId}
+                  handleSendMessage={handleSendMessage}
+                  handleTemplateSelect={handleTemplateSelect}
+                  onShowMobilePreview={onShowMobilePreview}
+                  getCommandLabel={getCommandLabel}
+                  tChat={tChat}
+                  isTypewriterTarget={message.id === typewriterMessageId}
+                  onTypewriterComplete={onTypewriterComplete}
+                />
+              )
+            })}
 
             {/* Typing indicator */}
             {showTypingIndicator && (

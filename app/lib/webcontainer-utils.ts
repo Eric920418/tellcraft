@@ -30,7 +30,7 @@ export interface WebContainerFilesInput {
 // ── Known Package Versions ──
 // Synced with deployer.ts KNOWN_PACKAGES + BASE_DEPS
 
-// 與 Deployer 同步：Next.js 16 + Tailwind v4
+// Next.js 16 統一版本（WebContainer 用 --webpack flag 繞過 Turbopack WASM 限制）
 const BASE_DEPS: Record<string, string> = {
   next: '^16.0.0',
   react: '^19.0.0',
@@ -403,7 +403,7 @@ function buildPackageJson(allFiles: GeneratedFile[]): string {
     version: '0.1.0',
     private: true,
     scripts: {
-      dev: 'next dev --no-turbopack --port 3000',
+      dev: 'next dev --webpack --port 3000',
     },
     dependencies: {
       ...BASE_DEPS,

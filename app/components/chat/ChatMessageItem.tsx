@@ -122,7 +122,7 @@ export const ChatMessageItem = React.memo(function ChatMessageItem({
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.3, delay: animationDelay }}
       style={{
-        paddingBottom: layoutMode === 'split' ? 16 : 28,
+        marginBottom: layoutMode === 'split' ? 16 : 28,
         display: 'flex',
         flexDirection: 'column',
         alignItems: message.role === 'user' ? 'flex-end' : 'flex-start'
