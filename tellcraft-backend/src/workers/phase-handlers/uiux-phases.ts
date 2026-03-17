@@ -599,6 +599,16 @@ export async function handleUiuxMixedPhaseRouting(
 
       // 接上資料庫（Coder Skill）
       if (trimmed === '__connect_database__' || hasCoderIntent(trimmed)) {
+        if (state.coderCompleted) {
+          await sendMessage(conversationId, io, {
+            content: '資料庫已經接好了！如果有功能需要調整，可以直接告訴我修改內容。',
+            quickReplies: [
+              { label: '部署上線', value: '部署', style: 'primary' as const },
+              { label: '修改設計', value: '我想修改', style: 'secondary' as const },
+            ],
+          })
+          return
+        }
         const coderPhases = await import('./coder-phases')
         await coderPhases.executeCoderSkill({
           taskId: state.taskId || '',
