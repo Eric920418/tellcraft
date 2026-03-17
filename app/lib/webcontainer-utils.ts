@@ -384,7 +384,7 @@ function buildPackageJson(allFiles: GeneratedFile[]): string {
     version: '0.1.0',
     private: true,
     scripts: {
-      dev: 'next dev --turbopack --port 3000',
+      dev: 'next dev --port 3000',
     },
     dependencies: {
       ...BASE_DEPS,
