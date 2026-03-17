@@ -725,7 +725,10 @@ export function buildWebContainerFiles(input: WebContainerFilesInput): FileSyste
   }
 
   // Global styles
-  setFileInTree(tree, 'app/globals.css', prepareCss(input.styles, !!input.tailwindConfig))
+  const processedCss = prepareCss(input.styles, !!input.tailwindConfig)
+  console.log('[WC] globals.css first 200 chars:', processedCss.slice(0, 200))
+  console.log('[WC] tailwindConfig present:', !!input.tailwindConfig, 'pages:', input.pages.length, 'components:', input.components.length)
+  setFileInTree(tree, 'app/globals.css', processedCss)
 
   // Pages
   for (const page of input.pages) {
