@@ -179,19 +179,21 @@ export default function WebContainerPreview({
   const hasFullMountRef = useRef(false)
 
   // ── Build initial files for the hook ──
-  // On first render, use skeleton. Once we have real pages, build full tree.
   const initialFiles = useMemo(() => {
     if (pages.length > 0) {
+      console.log('[WC Preview] Building full files:', pages.length, 'pages,', components.length, 'components')
       const input: WebContainerFilesInput = {
         pages, components, styles, tailwindConfig,
         serverActions, apiRoutes, dbLib,
       }
       return buildWebContainerFiles(input)
     }
+    console.log('[WC Preview] Building skeleton (no pages yet)')
     return buildSkeletonFiles()
-  // Only compute once on first meaningful data
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pages.length > 0 ? 'has-pages' : 'skeleton'])
+
+  console.log('[WC Preview] render — supported:', supported, 'status:', status, 'pages:', pages.length, 'iframeUrl:', !!iframeUrl)
 
   // ── Env vars ──
   const envVars = useMemo(() => {

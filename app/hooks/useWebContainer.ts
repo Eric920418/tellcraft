@@ -88,8 +88,10 @@ export function useWebContainer(options: UseWebContainerOptions): UseWebContaine
   // ── Full lifecycle: boot → mount → install → start ──
   // Runs once when enabled + initialFiles are both available
   useEffect(() => {
+    console.log('[WC Hook] effect check — enabled:', enabled, 'initialFiles:', !!initialFiles, 'hasStarted:', hasStartedRef.current)
     if (!enabled || !initialFiles || hasStartedRef.current) return
     hasStartedRef.current = true
+    console.log('[WC Hook] starting boot sequence')
 
     let cancelled = false
 
