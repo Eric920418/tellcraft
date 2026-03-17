@@ -403,7 +403,7 @@ function buildPackageJson(allFiles: GeneratedFile[]): string {
     version: '0.1.0',
     private: true,
     scripts: {
-      dev: 'next dev --port 3000',
+      dev: 'next dev --no-turbopack --port 3000',
     },
     dependencies: {
       ...BASE_DEPS,
@@ -470,7 +470,6 @@ const NEXT_CONFIG = `import type { NextConfig } from 'next'
 
 const nextConfig: NextConfig = {
   typescript: { ignoreBuildErrors: true },
-  eslint: { ignoreDuringBuilds: true },
   images: { unoptimized: true },
 }
 
