@@ -524,21 +524,78 @@ function buildRewriteSystemPrompt(): string {
 10. 不要引入任何新的 npm 套件
 11. 如果組件只是純 UI 展示（沒有資料操作），保持原樣不改
 
+## Server Action 調用規範（重要！）
+這些 Server Actions 使用 **_stepSummary** 欄位（中文子操作名稱）作為操作派發，**不是** intent/action 欄位。
+
+調用方式：
+- 查詢：actionFn({ _stepSummary: '查詢XXX' })
+- 建立：actionFn({ _stepSummary: '建立XXX', field1: val1, field2: val2 })
+- 更新：actionFn({ _stepSummary: '更新XXX', id: '...', field1: newVal })
+- 刪除：actionFn({ _stepSummary: '刪除XXX', id: '...' })
+
+回傳格式：成功時直接回傳欄位（result.fieldName），失敗時 throw Error。
+**不要用 result.data.xxx，要直接用 result.xxx。**
+**不要傳 { intent: 'get' }，這樣的調用無效。**
+
+以下是實際函數的 Input/Output 介面定義，**必須嚴格遵守**：
+
 ## 輸出
 只輸出完整的改寫後 TypeScript/JSX 代碼，不要任何解釋或 markdown 包裹。`
 }
 
+function extractInterfacesFromActionFile(content: string): string {
+  const lines = content.split('\n')
+  const result: string[] = []
+  let inInterface = false
+  let braceDepth = 0
+
+  for (const line of lines) {
+    if (!inInterface && (line.startsWith('interface ') || line.startsWith('export interface '))) {
+      inInterface = true
+      braceDepth = 0
+      result.push(line)
+      continue
+    }
+    if (!inInterface && line.startsWith('export async function ')) {
+      // 只取函數簽名第一行
+      result.push(line.split('{')[0].trimEnd())
+      result.push('...')
+      result.push('}')
+      result.push('')
+      continue
+    }
+    if (inInterface) {
+      result.push(line)
+      braceDepth += (line.match(/\{/g) || []).length - (line.match(/\}/g) || []).length
+      if (braceDepth <= 0 && line.includes('}')) {
+        inInterface = false
+        result.push('')
+      }
+    }
+  }
+  return result.join('\n')
+}
+
 function buildRewriteUserPrompt(
   component: GeneratedComponent,
-  availableActions: { path: string; exports: string[] }[]
+  availableActions: { path: string; exports: string[] }[],
+  actionImplementations?: { path: string; content: string }[]
 ): string {
   const actionsText = availableActions
     .map(a => `- ${a.path}: ${a.exports.join(', ')}`)
     .join('\n')
 
+  let interfacesText = ''
+  if (actionImplementations && actionImplementations.length > 0) {
+    interfacesText = '\n## Action 介面定義\n' +
+      actionImplementations
+        .map(a => `// ${a.path}\n${extractInterfacesFromActionFile(a.content)}`)
+        .join('\n')
+  }
+
   return `## 可用的 Server Actions
 ${actionsText}
-
+${interfacesText}
 ## 原始組件（路徑：${component.path}）
 ${component.content}
 
@@ -548,10 +605,11 @@ ${component.content}
 export async function rewriteComponentForServerActions(
   component: GeneratedComponent,
   availableActions: { path: string; exports: string[] }[],
+  actionImplementations?: { path: string; content: string }[],
   trackingContext?: { userId?: string; conversationId?: string }
 ): Promise<GeneratedComponent> {
   const systemPrompt = buildRewriteSystemPrompt()
-  const userPrompt = buildRewriteUserPrompt(component, availableActions)
+  const userPrompt = buildRewriteUserPrompt(component, availableActions, actionImplementations)
 
   const result = await callClaude(systemPrompt, userPrompt, { maxTokens: 8192 }, trackingContext)
 
@@ -634,7 +692,7 @@ export async function executeCoderPipeline(
       async (comp, idx) => {
         const percent = 58 + Math.floor((idx / needsRewrite.length) * 37)
         await callbacks.onProgress(`改寫 ${comp.path}...`, percent)
-        return rewriteComponentForServerActions(comp, availableActions, trackingContext)
+        return rewriteComponentForServerActions(comp, availableActions, actionFiles, trackingContext)
       },
       3
     )
