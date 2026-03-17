@@ -479,8 +479,12 @@ const MOCK_DATA_PATTERNS = [
   /useState\(\s*\[\s*\{[^}]+\}/,
   // useState({ key: value, ... }) 且非簡單的 boolean/string/number
   /useState\(\s*\{\s*\w+\s*:\s*['"][^'"]{10,}/,
-  // 大段硬編碼陣列 const xxx = [{ ... }]
-  /(?:const|let)\s+\w+\s*=\s*\[\s*\{\s*(?:id|name|title|label)\s*:/,
+  // 大段硬編碼陣列 const xxx = [{ ... }]（任意 key，不限特定名稱）
+  /(?:const|let)\s+\w+\s*(?::\s*\w+(?:\[\])?\s*)?=\s*\[\s*\{/,
+  // 大段硬編碼物件陣列含 3+ 個物件（明確 mock 特徵）
+  /(?:const|let)\s+\w+\s*=\s*\[[\s\S]*?\{[\s\S]*?\}[\s\S]*?\{[\s\S]*?\}[\s\S]*?\{/,
+  // import from mock/data/seed 檔案
+  /import\s+.*from\s+['"].*(?:mock|seed|fake|dummy|sample)[^'"]*['"]/i,
 ]
 
 export function identifyMockDataComponents(

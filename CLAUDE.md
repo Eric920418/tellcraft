@@ -57,7 +57,9 @@ pm2 describe tellcraft-backend            # 詳細資訊（記憶體/重啟次�
                             └─────────────────────────────────────┘
 ```
 
-前端**不直連資料庫**：`Vercel Server Actions → app/lib/vps-api.ts → VPS Express API → PostgreSQL`
+**Tellcraft 平台自身**前端不直連資料庫：`Vercel Server Actions → app/lib/vps-api.ts → VPS Express API → PostgreSQL`
+
+**Coder Skill 生成的客戶 app** 使用 Server Actions + Neon 直連（`Server Actions → lib/actions/*.ts → Neon PostgreSQL`），這是合法且推薦的現代架構，不受此限制。
 
 **為什麼用 VPS**：Vercel Serverless 超時限制（10-60 秒）無法處理長時間 LLM 任務。
 
@@ -398,7 +400,7 @@ Feature 註解：`# Action: actionName` + `# [METHOD] /path` + `# Summary: xxx`
 1. **無腦補原則**：嚴格遵守規格，不擅自假設
 2. **summary 一致**：Action summary 必須與 Feature 名稱一致
 3. **自我修復**：驗證失敗時進入修正迴圈（最多 3 次）
-4. **不直連資料庫**：前端透過 VPS API 操作資料，禁止 `accept-data-loss`
+4. **Tellcraft 平台不直連資料庫**：Tellcraft 平台自身前端透過 VPS API 操作資料。Coder Skill 生成的客戶 app 用 Server Actions + Neon 直連，禁止 `accept-data-loss`
 
 ## 環境變數
 
