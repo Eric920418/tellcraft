@@ -8,6 +8,7 @@ import {
   buildSkeletonFiles,
   diffFiles,
   isWebContainerSupported,
+  prepareCss,
 } from '@/app/lib/webcontainer-utils'
 import type { GeneratedFile, WebContainerFilesInput } from '@/app/lib/webcontainer-utils'
 import type { ElementInfo } from './PreviewPanel'
@@ -245,7 +246,7 @@ export default function WebContainerPreview({
 
     // Also write styles/tailwindConfig if they might have changed
     if (styles && prevFilesRef.current.length > 0) {
-      allChanges['app/globals.css'] = styles
+      allChanges['app/globals.css'] = prepareCss(styles, !!tailwindConfig)
     }
     if (tailwindConfig && prevFilesRef.current.length > 0) {
       allChanges['tailwind.config.ts'] = tailwindConfig

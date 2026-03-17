@@ -337,6 +337,28 @@ const EDIT_BRIDGE_SCRIPT = `
 // ── Core Functions ──
 
 /**
+ * Ensure globals.css has @import "tailwindcss" at the very top + @config if needed.
+ * Used by both initial mount and incremental writes.
+ */
+export function prepareCss(rawStyles: string | undefined, hasTailwindConfig: boolean): string {
+  let css = rawStyles || MINIMAL_CSS
+
+  // Strip any existing @import "tailwindcss" (may be in wrong position)
+  css = css.replace(/@import\s*["']tailwindcss(?:\/[^"']*)?["']\s*;?\s*/g, '')
+
+  // Strip @config if present (we'll re-add it)
+  css = css.replace(/@config\s*["'][^"']*["']\s*;?\s*/g, '')
+
+  // Build header: @import "tailwindcss" must be first, then @config
+  let header = '@import "tailwindcss";\n'
+  if (hasTailwindConfig) {
+    header += '@config "../tailwind.config.ts";\n'
+  }
+
+  return header + css
+}
+
+/**
  * Scan all files for package imports and build a deps map
  */
 function scanDependencies(files: GeneratedFile[]): Record<string, string> {
@@ -562,19 +584,8 @@ export function buildWebContainerFiles(input: WebContainerFilesInput): FileSyste
     setFileInTree(tree, 'tailwind.config.ts', input.tailwindConfig)
   }
 
-  // Global styles — ensure @import "tailwindcss" is present + @config reference
-  let cssContent = input.styles || MINIMAL_CSS
-  if (!cssContent.includes('@import') || !cssContent.includes('tailwindcss')) {
-    cssContent = '@import "tailwindcss";\n' + cssContent
-  }
-  if (input.tailwindConfig && !cssContent.includes('@config')) {
-    // Insert @config after @import "tailwindcss"
-    cssContent = cssContent.replace(
-      /(@import\s*["']tailwindcss["'][^;]*;?)/,
-      '$1\n@config "../tailwind.config.ts";'
-    )
-  }
-  setFileInTree(tree, 'app/globals.css', cssContent)
+  // Global styles
+  setFileInTree(tree, 'app/globals.css', prepareCss(input.styles, !!input.tailwindConfig))
 
   // Pages
   for (const page of input.pages) {
