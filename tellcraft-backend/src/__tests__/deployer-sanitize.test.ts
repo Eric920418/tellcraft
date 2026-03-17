@@ -158,43 +158,40 @@ describe('Fix 4: Google Fonts link 移除', () => {
 // Fix 5: Tailwind v4 CSS
 // ============================================================
 
-describe('Fix 5: Tailwind v4 CSS 清理', () => {
-  it('應該移除 @import "tailwindcss"', () => {
+describe('Fix 5: Tailwind v4 CSS（保留 v4 語法）', () => {
+  it('應該保留 @import "tailwindcss"', () => {
     const code = makeCode({
       styles: `@import "tailwindcss";\n.main { color: red; }`,
     })
     const result = sanitizeCodeForDeploy(code)
-    expect(result.code.styles).not.toContain('@import "tailwindcss"')
+    expect(result.code.styles).toContain('@import "tailwindcss"')
     expect(result.code.styles).toContain('.main { color: red; }')
   })
 
-  it('應該把 @theme {} 轉為 :root {}', () => {
+  it('應該保留 @theme {}（v4 合法語法）', () => {
     const code = makeCode({
       styles: `@theme {\n  --color-primary: #3b82f6;\n}`,
     })
     const result = sanitizeCodeForDeploy(code)
-    expect(result.code.styles).toContain(':root')
+    expect(result.code.styles).toContain('@theme')
     expect(result.code.styles).toContain('--color-primary: #3b82f6')
-    expect(result.code.styles).not.toContain('@theme')
   })
 
-  it('應該移除 @custom-variant', () => {
+  it('應該保留 @custom-variant（v4 合法語法）', () => {
     const code = makeCode({
-      // @custom-variant 的正確語法：@custom-variant name { selector { ... } }
       styles: `@custom-variant dark { &:where(.dark, .dark *) { color: white; } }\n.main { color: red; }`,
     })
     const result = sanitizeCodeForDeploy(code)
-    expect(result.code.styles).not.toContain('@custom-variant')
+    expect(result.code.styles).toContain('@custom-variant')
     expect(result.code.styles).toContain('.main { color: red; }')
   })
 
-  it('應該把 @apply font-custom 轉為 CSS font-family', () => {
+  it('應該保留 @apply font-custom（v4 原生支援）', () => {
     const code = makeCode({
       styles: `.heading { @apply font-display; }`,
     })
     const result = sanitizeCodeForDeploy(code)
-    expect(result.code.styles).toContain('font-family: var(--font-display, inherit)')
-    expect(result.code.styles).not.toContain('@apply font-display')
+    expect(result.code.styles).toContain('@apply font-display')
   })
 })
 
