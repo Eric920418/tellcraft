@@ -552,6 +552,26 @@ const MINIMAL_PAGE = `export default function Page() {
 }
 `
 
+// Mock DB for WebContainer — 所有 sql`` 查詢回傳空結果，不 crash
+const MOCK_DB = `// WebContainer preview mock — no real database
+const handler = {
+  get(target, prop) {
+    // neon() 回傳的 sql tagged template 函數
+    return () => Promise.resolve([])
+  },
+  apply(target, thisArg, args) {
+    return Promise.resolve([])
+  }
+}
+const sql = new Proxy(function(){}, {
+  apply: () => Promise.resolve([]),
+  get: (t, p) => p === 'then' ? undefined : () => Promise.resolve([])
+})
+module.exports = { sql }
+export { sql }
+export default sql
+`
+
 const MINIMAL_CSS = `@tailwind base;
 @tailwind components;
 @tailwind utilities;
@@ -651,6 +671,11 @@ export function buildWebContainerFiles(input: WebContainerFilesInput): FileSyste
       const path = db.path.startsWith('/') ? db.path.slice(1) : db.path
       setFileInTree(tree, path, db.content)
     }
+  }
+
+  // Mock lib/db.ts — WebContainer 沒有真實 DB，覆蓋為 no-op 防止 Server Actions crash 導致整個頁面壞掉
+  if (input.serverActions?.length || input.dbLib?.length) {
+    setFileInTree(tree, 'lib/db.ts', MOCK_DB)
   }
 
   // If no layout was provided, use minimal layout with edit bridge
