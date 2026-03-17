@@ -1436,16 +1436,20 @@ export function buildSandpackSetup(
 
     if (hasLayout) {
       entryBody.push(`createRoot(document.getElementById("root")!).render(`)
-      entryBody.push(`  React.createElement(SandpackRouterProvider, null,`)
-      entryBody.push(`    React.createElement(Layout, null,`)
-      entryBody.push(`      React.createElement(SandpackRouter)`)
+      entryBody.push(`  React.createElement(SandpackErrorBoundary, null,`)
+      entryBody.push(`    React.createElement(SandpackRouterProvider, null,`)
+      entryBody.push(`      React.createElement(Layout, null,`)
+      entryBody.push(`        React.createElement(SandpackRouter)`)
+      entryBody.push(`      )`)
       entryBody.push(`    )`)
       entryBody.push(`  )`)
       entryBody.push(`)`)
     } else {
       entryBody.push(`createRoot(document.getElementById("root")!).render(`)
-      entryBody.push(`  React.createElement(SandpackRouterProvider, null,`)
-      entryBody.push(`    React.createElement(SandpackRouter)`)
+      entryBody.push(`  React.createElement(SandpackErrorBoundary, null,`)
+      entryBody.push(`    React.createElement(SandpackRouterProvider, null,`)
+      entryBody.push(`      React.createElement(SandpackRouter)`)
+      entryBody.push(`    )`)
       entryBody.push(`  )`)
       entryBody.push(`)`)
     }
@@ -1453,17 +1457,35 @@ export function buildSandpackSetup(
     // ── 單頁模式（向後兼容）──
     entryImports.push("import Layout from './Layout'")
     entryImports.push("import App from './App'")
-    entryBody.push('createRoot(document.getElementById("root")).render(<Layout><App /></Layout>)')
+    entryBody.push('createRoot(document.getElementById("root")).render(<SandpackErrorBoundary><Layout><App /></Layout></SandpackErrorBoundary>)')
   } else if (hasApp) {
     entryImports.push("import App from './App'")
-    entryBody.push('createRoot(document.getElementById("root")).render(<App />)')
+    entryBody.push('createRoot(document.getElementById("root")).render(<SandpackErrorBoundary><App /></SandpackErrorBoundary>)')
   } else if (pages.length > 0) {
     const firstPagePath = mapToSandpackPath(pages[0].path)
     entryImports.push(`import Page from '${firstPagePath.replace(/\.tsx$/, '')}'`)
-    entryBody.push(`createRoot(document.getElementById("root")).render(<Page />)`)
+    entryBody.push(`createRoot(document.getElementById("root")).render(<SandpackErrorBoundary><Page /></SandpackErrorBoundary>)`)
   }
 
-  files['/index.tsx'] = entryImports.join('\n') + '\n\n' + entryBody.join('\n') + '\n'
+  // ErrorBoundary 防止渲染錯誤導致空白（錯誤會顯示在預覽中）
+  const errorBoundaryCode = `
+class SandpackErrorBoundary extends React.Component<{children: React.ReactNode}, {error: Error | null}> {
+  constructor(props: any) { super(props); this.state = { error: null } }
+  static getDerivedStateFromError(error: Error) { return { error } }
+  componentDidCatch(error: Error, info: any) { console.error('[Sandpack Render Error]', error, info) }
+  render() {
+    if (this.state.error) {
+      return React.createElement('div', { style: { padding: 24, fontFamily: 'system-ui', color: '#dc2626', background: '#fef2f2', height: '100%', overflow: 'auto' } },
+        React.createElement('h2', { style: { margin: '0 0 8px', fontSize: 16 } }, 'Preview Error'),
+        React.createElement('pre', { style: { fontSize: 12, whiteSpace: 'pre-wrap', wordBreak: 'break-all' } }, this.state.error.message),
+        React.createElement('pre', { style: { fontSize: 11, color: '#666', marginTop: 8, whiteSpace: 'pre-wrap' } }, this.state.error.stack)
+      )
+    }
+    return this.props.children
+  }
+}
+`
+  files['/index.tsx'] = entryImports.join('\n') + '\n\n' + errorBoundaryCode + '\n' + entryBody.join('\n') + '\n'
 
   // 12. index.html（Tailwind CDN 由 SandpackProvider externalResources 載入，config 在 index.tsx JS 中設定）
   // 注意：Sandpack 不執行自訂 HTML 中的 <script> 標籤，所有外部腳本必須透過 externalResources
