@@ -306,6 +306,12 @@ ${enrichedFeedback}`
       ? `**設計已更新！** (第 ${state.iterationCount} 次迭代)\n\n本次針對重複問題進行了深層修復，請仔細確認效果。\n\n---\n\n輸入「**部署**」重新上線，或繼續提供修改建議。`
       : `**設計已更新！** (第 ${state.iterationCount} 次迭代)\n\n請在預覽面板查看修改效果。\n\n---\n\n輸入「**部署**」重新上線，或繼續提供修改建議。`
 
+    // 取得 Coder 後端檔案供 WebContainer 預覽
+    const coderFiles = pid ? await db.getProjectFiles(pid, 'coder') : []
+    const serverActions = coderFiles.filter(f => f.file_path.startsWith('app/actions/')).map(f => ({ path: f.file_path, content: f.content, description: f.description || '' }))
+    const apiRoutes = coderFiles.filter(f => f.file_path.startsWith('app/api/')).map(f => ({ path: f.file_path, content: f.content, description: f.description || '' }))
+    const dbLib = coderFiles.filter(f => f.file_path.startsWith('lib/')).map(f => ({ path: f.file_path, content: f.content, description: f.description || '' }))
+
     await sendMessage(conversationId, io, {
       content: iterMsg,
       stage: 'uiux_iteration_complete',
@@ -318,6 +324,7 @@ ${enrichedFeedback}`
           styles: updatedCode.styles,
           tailwindConfig,
           currentPhase: 'complete',
+          ...(coderFiles.length > 0 ? { serverActions, apiRoutes, dbLib, hasServerActions: true } : {}),
         } as Record<string, unknown>,
       },
       quickReplies,
@@ -404,6 +411,13 @@ export async function executeUndoIteration(input: {
       ? generateTailwindConfig(state.uiuxDesignSystem)
       : ''
 
+    // 取得 Coder 後端檔案供 WebContainer 預覽
+    const undoPid = state.projectId || projectId
+    const undoCoderFiles = undoPid ? await db.getProjectFiles(undoPid, 'coder') : []
+    const undoServerActions = undoCoderFiles.filter(f => f.file_path.startsWith('app/actions/')).map(f => ({ path: f.file_path, content: f.content, description: f.description || '' }))
+    const undoApiRoutes = undoCoderFiles.filter(f => f.file_path.startsWith('app/api/')).map(f => ({ path: f.file_path, content: f.content, description: f.description || '' }))
+    const undoDbLib = undoCoderFiles.filter(f => f.file_path.startsWith('lib/')).map(f => ({ path: f.file_path, content: f.content, description: f.description || '' }))
+
     await sendMessage(conversationId, io, {
       content: `**已撤銷上一次修改。**\n\n預覽已恢復到修改前的版本。\n\n---\n\n輸入「**部署**」上線，或繼續提供修改建議。`,
       stage: 'uiux_iteration_complete',
@@ -416,6 +430,7 @@ export async function executeUndoIteration(input: {
           styles: state.uiuxGeneratedCode.styles,
           tailwindConfig,
           currentPhase: 'complete',
+          ...(undoCoderFiles.length > 0 ? { serverActions: undoServerActions, apiRoutes: undoApiRoutes, dbLib: undoDbLib, hasServerActions: true } : {}),
         } as Record<string, unknown>,
       },
       quickReplies: [

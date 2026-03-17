@@ -449,7 +449,7 @@ export async function updateMyTemplateThumbnail(
 }
 
 /**
- * 公開取得用戶提交模板的 project files（用於 Sandpack 渲染）
+ * 公開取得用戶提交模板的 project files（用於預覽渲染）
  */
 export async function getTemplateFiles(
   templateId: string

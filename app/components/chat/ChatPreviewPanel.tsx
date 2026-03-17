@@ -12,8 +12,8 @@ import AIGenerationWaitingScene from './AIGenerationWaitingScene'
 import type { StreamingPreview } from '@/app/hooks/useVpsWebSocket'
 import type { Template } from '@/app/lib/templates'
 
-const SandpackPreviewComponent = dynamic(
-  () => import('@/app/components/uiux/SandpackPreview'),
+const WebContainerPreviewComponent = dynamic(
+  () => import('@/app/components/uiux/WebContainerPreview'),
   { ssr: false, loading: () => <div style={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--gray-50)' }}><p style={{ color: 'var(--gray-400)', fontSize: 14 }}>Loading preview...</p></div> }
 )
 
@@ -206,19 +206,8 @@ export default function ChatPreviewPanel({
     const DEVICE_HEIGHTS: Record<DeviceType, number> = { desktop: 0, tablet: 960, mobile: 812 }
     const previewHeight = DEVICE_HEIGHTS[codePreviewDevice]
 
-    // Streaming 期間一律顯示等待動畫，避免早期 chunk 尚不可渲染造成白屏
-    if (isStreaming) {
-      const spPhase = stablePreviewData.phase
-      const phaseMap: Record<string, number> = { structure: 1, animation: 2, rwd: 3 }
-      return (
-        <AIGenerationWaitingScene
-          stage={latestMsg?.stage}
-          streamingPhase={spPhase as 'structure' | 'animation' | 'rwd'}
-          progress={{ current: phaseMap[spPhase] || 1, total: 3, step: spPhase === 'structure' ? tPreview('phaseStructure') : spPhase === 'animation' ? tPreview('phaseAnimation') : tPreview('phaseRwd') }}
-          streamingChunks={fastBuildChunks}
-        />
-      )
-    }
+    // WebContainers 在 streaming 期間也顯示預覽（boot + HMR 增量更新）
+    // 不再需要等待動畫，WebContainerPreview 自帶進度 UI
 
     return (
       <div style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
@@ -346,7 +335,7 @@ export default function ChatPreviewPanel({
             }}
           >
             {codePreviewDevice === 'mobile' ? (
-              /* 手機外框 Phone Frame — 固定高度避免 Sandpack 撐開 */
+              /* 手機外框 Phone Frame — 固定高度 */
               <div
                 style={{
                   width: previewWidth + 24,
@@ -366,7 +355,7 @@ export default function ChatPreviewPanel({
                 <div style={{ width: '100%', height: 30, flexShrink: 0, display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
                   <div style={{ width: 100, height: 24, background: '#000', borderRadius: 12 }} />
                 </div>
-                {/* 螢幕區域 — position: relative + absolute 隔離 Sandpack 高度 */}
+                {/* 螢幕區域 */}
                 <div
                   style={{
                     width: previewWidth,
@@ -379,7 +368,7 @@ export default function ChatPreviewPanel({
                   }}
                 >
                   <div style={{ position: 'absolute', inset: 0 }}>
-                    <SandpackPreviewComponent
+                    <WebContainerPreviewComponent
                       pages={pagesData}
                       components={componentsData}
                       styles={stylesData}
@@ -420,7 +409,7 @@ export default function ChatPreviewPanel({
               >
                 {codePreviewDevice === 'tablet' ? (
                   <div style={{ position: 'absolute', inset: 0 }}>
-                    <SandpackPreviewComponent
+                    <WebContainerPreviewComponent
                       pages={pagesData}
                       components={componentsData}
                       styles={stylesData}
@@ -440,7 +429,7 @@ export default function ChatPreviewPanel({
                     />
                   </div>
                 ) : (
-                <SandpackPreviewComponent
+                <WebContainerPreviewComponent
                   pages={pagesData}
                   components={componentsData}
                   styles={stylesData}

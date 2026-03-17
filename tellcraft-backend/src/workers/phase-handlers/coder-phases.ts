@@ -7,7 +7,7 @@ import type Redis from 'ioredis'
 import type { Server as SocketIOServer } from 'socket.io'
 import * as db from '../../db/client'
 import type { FlowState, GeneratedCode } from '../../types/flow-state'
-import type { GeneratedComponent } from '../../services/uiux-generation'
+import { type GeneratedComponent, generateTailwindConfig } from '../../services/uiux-generation'
 import { executeCoderPipeline } from '../../services/coder-generation'
 import { sendMessage, saveFlowState, getFlowState, touchFlowActivity } from '../orchestrator-utils'
 import { createLogger } from '../../lib/logger'
@@ -178,6 +178,14 @@ export async function executeCoderSkill(input: CoderSkillInput): Promise<void> {
     state.waitingForReply = false
     await saveFlowState(redis, conversationId, state)
 
+    // 分類後端檔案供 WebContainer 預覽
+    const serverActions = result.backendFiles.filter(f => f.path.startsWith('app/actions/'))
+    const apiRoutes = result.backendFiles.filter(f => f.path.startsWith('app/api/'))
+    const dbLib = result.backendFiles.filter(f => f.path.startsWith('lib/'))
+    const tailwindConfig = state.uiuxDesignSystem
+      ? generateTailwindConfig(state.uiuxDesignSystem)
+      : ''
+
     // 發送完成訊息
     await sendMessage(conversationId, io, {
       content: isChinese
@@ -191,7 +199,12 @@ export async function executeCoderSkill(input: CoderSkillInput): Promise<void> {
           pages: mergedPages,
           components: mergedComponents,
           styles,
+          tailwindConfig,
           currentPhase: 'uiux_complete',
+          serverActions,
+          apiRoutes,
+          dbLib,
+          hasServerActions: true,
         } as Record<string, unknown>,
       },
       quickReplies: [

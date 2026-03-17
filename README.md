@@ -20,7 +20,7 @@ Tellcraft 是一個 AI 驅動的 **SDD（Specification-Driven Development）自�
 | **動畫** | motion/react + Remotion | 需求藍圖面板 + 串流動畫 |
 | **i18n** | next-intl v4 | 中/英雙語，`[locale]` 路由 |
 | **樣式** | Tailwind CSS v4 | `@import "tailwindcss"` 語法 |
-| **預覽** | Sandpack（@codesandbox） | 瀏覽器內真實 React 渲染 |
+| **預覽** | WebContainers（@webcontainer/api） | 瀏覽器內完整 Node.js + Next.js dev server |
 | **部署** | Vercel API | 代碼 → Next.js → Vercel 自動部署 |
 | **CI/CD** | GitHub Actions | push main → VPS 自動部署 |
 
@@ -120,7 +120,7 @@ npx ts-node bdd-spec/scripts/validate-feature.ts spec/features/
   │
   ▼
 ③ UIUX / Fast Build Skill（已完成）
-  └─ 設計 → 生成前端代碼 → Sandpack 即時預覽
+  └─ 設計 → 生成前端代碼 → WebContainers 即時預覽
   │
   ▼
 ④ Coder Skill Stage A（✅ 已完成 — 純生成）
@@ -502,7 +502,7 @@ Server Action 錯誤訊息 + 工具模組中文字串國際化（+117 keys，2 n
 | **品質** | Quality Gate 靜態檢查（含 SVG ID 碰撞偵測）、LLM 自動修復、RWD 響應式安全網、Tailwind v4→v3 轉換 |
 | **部署** | sanitize 7 類預檢（含 'use server' 保護 + 未知依賴警告）、本地 build 驗證（3 輪 LLM 修復）、Vercel 部署、版本回滾 |
 | **迭代** | 對話內迭代修改、撤銷上一步、部署歷史回滾、迭代歷史追蹤、重複抱怨偵測+策略升級、視覺診斷指引 |
-| **預覽** | Sandpack 真實 React 渲染、串流增量更新、裝置切換、編輯模式、圖片上傳 |
+| **預覽** | WebContainers 完整 Next.js 預覽（Server Actions + DB 連線）、HMR 增量更新、裝置切換、編輯模式、圖片上傳 |
 | **動畫** | BDD 需求藍圖面板（即時 Q&A 歷史視覺化）、3D 工廠流水線（Fast Build）、Remotion 驅動 |
 | **認證** | Google/LINE OAuth、JWT 雙軌（localStorage + Cookie）、訪客→帳號合併、帳號綁定（雙登入）、auth 頁面 i18n（next-intl） |
 | **儀表板** | 用戶統計、專案管理、版本歷史、管理員面板、LLM 用量追蹤（統一 PRICING + trackLlmUsage）、即時系統日誌監控（Socket.io tail -F）、Dashboard 元件 i18n（next-intl） |
@@ -539,7 +539,8 @@ app/
 │   ├── vps-api.ts        # VPS HTTP 客戶端（~1900 行）
 │   ├── llm.ts            # LLM 封裝（~2200 行）
 │   ├── chat-utils.ts     # 聊天純函數（smoothEasing/STAGES/mapBackendStageToFrontend）
-│   └── sandpack-utils.ts # Sandpack 預覽工具
+│   ├── webcontainer-utils.ts  # WebContainer 檔案轉換
+│   └── webcontainer-cache.ts  # WebContainer deps 快取
 ├── hooks/
 │   ├── useAuth.ts        # JWT 認證
 │   ├── useChatScroll.ts  # 聊天滾動邏輯（auto-scroll/MutationObserver）
@@ -551,7 +552,7 @@ app/
 │   ├── useLocalePath.ts  # locale-aware window.location.href
 │   └── useVpsWebSocket.ts # WebSocket
 ├── components/
-│   ├── uiux/             # UIUX 元件（SandpackPreview/PreviewPanel/TemplatePicker）
+│   ├── uiux/             # UIUX 元件（WebContainerPreview/PreviewPanel/TemplatePicker）
 │   ├── dashboard/        # 儀表板元件
 │   ├── remotion/         # Remotion 動畫（fast-build/ + building-scene/）
 │   ├── building-scene/   # 3D 場景入口（dynamic import）
@@ -843,7 +844,8 @@ psql "$DATABASE_URL" -f tellcraft-backend/migrations/xxx.sql
 
 ### 近期更新（2026-03-13 ~ 2026-03-17）
 
-- **預覽空白三修**（03-17）：(1) Sandpack `index.html` 補 `html,body,#root{height:100%}`，修復全屏 canvas/intro 組件父容器高度坍塌導致空白；(2) `customer-service.ts` 新增 `platform_issue` 意圖偵測，用戶回報「預覽空白/看不到頁面」時回覆操作指引而非誤跑 refineCode；(3) 手機版收到 `code_preview` 時自動彈出 `MobilePreviewModal`，不需手動點按鈕
+- **Sandpack → WebContainers 全面替換**（03-17）：預覽引擎從 Sandpack（瀏覽器端 React bundler）遷移到 WebContainers（瀏覽器端完整 Node.js），支援 Server Actions + Neon DB 連線。刪除 sandpack-utils.ts（1540 行）+ SandpackPreview.tsx（420 行）
+- **預覽空白三修**（03-17）：(1) 預覽 `index.html` 補 `html,body,#root{height:100%}`，修復全屏 canvas/intro 組件父容器高度坍塌導致空白；(2) `customer-service.ts` 新增 `platform_issue` 意圖偵測，用戶回報「預覽空白/看不到頁面」時回覆操作指引而非誤跑 refineCode；(3) 手機版收到 `code_preview` 時自動彈出 `MobilePreviewModal`，不需手動點按鈕
 - **AI 回覆打字機動畫**（03-17）：AI 對話文字逐字顯示（~2 秒跑完），polling 拿到完整訊息後前端 `ChatMessageItem` 內部動畫 + 閃爍游標，打字完成才顯示 quickReplies。後端 `answerWithSonnet` 改為 SDK streaming + `streamLlmMessage`（為未來 WSS 準備）
 - **Coder Stage B 100%**（03-16）：91/91 scenarios 全過，Runner 修復歷程 0%→69%→100%（bcryptjs hash/FK 自動建立/UUID tolerance/array matching 等）
 - **Deployer 防爆修復**（03-16）：KNOWN_PACKAGES +bcryptjs/jsonwebtoken、'use server' 保護、未知依賴警告
@@ -862,7 +864,7 @@ psql "$DATABASE_URL" -f tellcraft-backend/migrations/xxx.sql
 - **Phase 5-D/C/B**（03-08）：Prompt 架構重構（創意優先）+ DesignSystem 2.0（shadows/depth/gradients/animationPersonality）+ 組合模式庫 20 個 + 視覺技法庫 30 個
 - **後端基礎設施統一**（03-07）：env.ts Zod 驗證 + anthropic.ts 單例 + Zod middleware + BullMQ DLQ
 - **UIUX 全面修復**（03-07）：2C+3H+4M（richContent 渲染缺失/deployer 異常路徑/variant 早期 return 等）
-- **Sandpack 多頁路由**（03-06）：hash-based routing 模擬 App Router
+- **Sandpack 多頁路由**（03-06，已移除）：hash-based routing 模擬 App Router（已被 WebContainers 原生路由取代）
 - **客服問答**（03-06）：customer-service.ts detectFastModeIntent + FAQ 9 主題 + Sonnet 開放問答
 - **Fast Build 門面升級**（03-06）：Haiku 概念生成 + Tier 修正 + Vague 攔截 + 失敗重試 + 手機 Modal + 進度預估
 - **Pipeline 失真修復**（03-05）：8 項（PRD 權重感知 + Discovery 上限調降 + Variant 注入原始需求 + Brief Fallback 等）
@@ -881,8 +883,8 @@ psql "$DATABASE_URL" -f tellcraft-backend/migrations/xxx.sql
 - **帳號綁定**（02-27）：user_providers 表 + Google↔LINE 雙綁 + 解綁保護
 - **LINE LIFF + 推播**（02-27）：Flex Message 卡片 + LIFF 深度連結 + Stage 配色
 - **BDD 需求藍圖面板**（02-27）：純 React Q&A 歷史面板（取代 3D 鍛造場景）
-- **Sandpack 串流防閃爍**（02-28）：providerKey 凍結 + 增量 updateFile + 輪詢去重
-- **SandpackPreview 編輯模式**（02-26，03-01 升級）：多選 toggle + PropertyEditor + Undo/Redo + 聊天附圖迭代
+- **Sandpack 串流防閃爍**（02-28，已移除）：providerKey 凍結 + 增量 updateFile + 輪詢去重（已被 WebContainers HMR 取代）
+- **預覽編輯模式**（02-26，03-01 升級）：多選 toggle + PropertyEditor + Undo/Redo + 聊天附圖迭代
 - **Classifier 防禦體系**（02-08，03-04 重構）：9 層防禦 + Content Policy + Phase-aware 品質閘門 + 違規升級
 - **防刷三層防護**（02-26）：前端冷卻 + Redis Lua 限速 + Worker 對話鎖
 
@@ -892,7 +894,7 @@ psql "$DATABASE_URL" -f tellcraft-backend/migrations/xxx.sql
 - **UIUX 生成重構**（02-05）：5 變體 + Design System + Structure→Animation→RWD 三階段
 - **Fast Build**（02-09，02-25 升級）：一句話建站 + 25 產品類型 + 22 配色 + Tier 偵測 + App/Website 佈局
 - **Quality Gate**（02-06）：A11y/Performance/Code Quality 靜態檢查 + Haiku 自動修復
-- **Sandpack 即時預覽**（02-06~08）：串流增量更新 + 裝置切換 + BDD→UI 翻譯 + VariantConcept
+- **即時預覽**（02-06~08，03-17 遷移至 WebContainers）：串流增量更新 + 裝置切換 + BDD→UI 翻譯 + VariantConcept
 - **3D 動畫**（02-24~25）：BDD 低多邊形城堡 + Fast Build 3D 工廠流水線（Remotion + Three.js）
 - **VPS 後端遷移**（02-03）：Vercel Serverless → Express + BullMQ + Socket.io
 - **認證系統**：Google/LINE OAuth + JWT 雙軌 + 訪客帳號合併

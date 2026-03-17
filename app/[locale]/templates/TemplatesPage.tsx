@@ -150,14 +150,14 @@ const CATEGORY_ORDER: TemplateCategory[] = [
   'landing', 'saas', 'ecommerce', 'blog', 'portfolio', 'event', 'dashboard', 'content', 'tool',
 ]
 
-// ── Sandpack 動態載入（只給用戶提交模板用） ──────────────────────────────────────
+// ── WebContainer 預覽動態載入（只給用戶提交模板用） ──────────────────────────────────────
 
-const SandpackPreview = dynamic(
-  () => import('@/app/components/uiux/SandpackPreview'),
-  { ssr: false, loading: () => <SandpackSkeleton /> }
+const WebContainerPreview = dynamic(
+  () => import('@/app/components/uiux/WebContainerPreview'),
+  { ssr: false, loading: () => <PreviewSkeleton /> }
 )
 
-function SandpackSkeleton() {
+function PreviewSkeleton() {
   return (
     <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#0f0f0f' }}>
       <div style={{ textAlign: 'center', color: '#666' }}>
@@ -515,7 +515,7 @@ function TemplatesContent() {
                 {selectedTemplate?.sourceProjectId ? (
                   // 用戶提交模板 → Sandpack 渲染
                   sandpackLoading ? (
-                    <SandpackSkeleton />
+                    <PreviewSkeleton />
                   ) : sandpackError ? (
                     <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#f8fafc' }}>
                       <div style={{ textAlign: 'center', color: '#94a3b8' }}>
@@ -525,7 +525,7 @@ function TemplatesContent() {
                       </div>
                     </div>
                   ) : sandpackData ? (
-                    <SandpackPreview
+                    <WebContainerPreview
                       pages={sandpackData.pages}
                       components={sandpackData.components}
                       styles={sandpackData.styles}

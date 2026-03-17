@@ -8,8 +8,8 @@ import { useTranslations } from 'next-intl'
 import { getAdminTemplates, getProjectFiles } from '@/app/lib/vps-api'
 import { reviewTemplate } from '@/app/actions/templates'
 
-const SandpackPreview = dynamic(
-  () => import('@/app/components/uiux/SandpackPreview'),
+const WebContainerPreview = dynamic(
+  () => import('@/app/components/uiux/WebContainerPreview'),
   { ssr: false }
 )
 
@@ -665,7 +665,7 @@ export default function AdminTemplatesPage() {
               </div>
             ) : sandpackData ? (
               <div style={{ flex: 1, overflow: 'hidden' }}>
-                <SandpackPreview
+                <WebContainerPreview
                   pages={sandpackData.pages}
                   components={sandpackData.components}
                   styles={sandpackData.styles}

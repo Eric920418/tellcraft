@@ -1047,6 +1047,38 @@ router.get('/:id/files', requireAuth, async (req, res) => {
 })
 
 /**
+ * GET /api/project/:id/db-url
+ * 取得專案的 Neon 資料庫連線字串（供 WebContainer 預覽注入）
+ */
+router.get('/:id/db-url', requireAuth, async (req, res) => {
+  try {
+    const { id } = req.params
+    const userId = req.user!.id
+
+    const project = await db.queryOne<{ user_id: string; neon_connection_string: string | null }>(
+      'SELECT user_id, neon_connection_string FROM projects WHERE id = $1',
+      [id]
+    )
+
+    if (!project) {
+      return res.status(404).json({ error: 'Project not found' })
+    }
+    if (project.user_id !== userId) {
+      return res.status(403).json({ error: 'Access denied' })
+    }
+
+    if (!project.neon_connection_string) {
+      return res.json({ neonConnectionString: null })
+    }
+
+    res.json({ neonConnectionString: project.neon_connection_string })
+  } catch (error) {
+    logger.error({ err: error }, '取得 DB URL 失敗')
+    res.status(500).json({ error: 'Failed to get database URL' })
+  }
+})
+
+/**
  * DELETE /api/project/batch
  * 批量刪除專案（最多 50 個）
  */

@@ -14,8 +14,8 @@ import DeployResult from '@/app/components/deployer/DeployResult'
 import DeploymentHistory from '@/app/components/deployer/DeploymentHistory'
 import { getAdminConversationMessages } from '@/app/lib/vps-api'
 
-const SandpackPreviewComponent = dynamic(
-  () => import('@/app/components/uiux/SandpackPreview'),
+const WebContainerPreviewComponent = dynamic(
+  () => import('@/app/components/uiux/WebContainerPreview'),
   {
     ssr: false,
     loading: () => (
@@ -317,7 +317,7 @@ export default function AdminConversationViewerPage() {
               {previewWidth}px
             </span>
           </div>
-          {/* Sandpack 預覽區域 */}
+          {/* 預覽區域 */}
           <div
             ref={codePreviewContainerRef}
             style={{
@@ -333,7 +333,7 @@ export default function AdminConversationViewerPage() {
               boxShadow: codePreviewDevice === 'desktop' ? 'none' : '0 8px 32px rgba(0,0,0,0.12), 0 2px 8px rgba(0,0,0,0.08)',
               background: '#fff', overflow: 'hidden',
             }}>
-              <SandpackPreviewComponent
+              <WebContainerPreviewComponent
                 pages={pagesData}
                 components={componentsData}
                 styles={stylesData}

@@ -904,6 +904,12 @@ export default function ChatSection({
       tailwindConfig: (activeData.tailwindConfig || '') as string,
       isStreaming: !!streamingPreview,
       phase: ((streamingPreview as StreamingPreview | null)?.phase || 'structure') as 'structure' | 'animation' | 'rwd',
+      // Server-side files (from Coder Skill, for WebContainer full preview)
+      // These only exist in codePreviewData (Record<string, unknown>), not StreamingPreview
+      serverActions: ((activeData as Record<string, unknown>).serverActions || undefined) as { path: string; content: string; description: string }[] | undefined,
+      apiRoutes: ((activeData as Record<string, unknown>).apiRoutes || undefined) as { path: string; content: string; description: string }[] | undefined,
+      dbLib: ((activeData as Record<string, unknown>).dbLib || undefined) as { path: string; content: string; description: string }[] | undefined,
+      hasServerActions: !!((activeData as Record<string, unknown>).hasServerActions),
     }
   }, [streamingPreview, codePreviewData])
 

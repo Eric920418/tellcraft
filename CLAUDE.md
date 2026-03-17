@@ -132,7 +132,7 @@ pm2 describe tellcraft-backend            # 詳細資訊（記憶體/重啟次�
 | **LLM 工具** | `app/lib/llm.ts` | ~2200 | LLM 呼叫封裝、prompt 工具 |
 | **VPS API Client** | `app/lib/vps-api.ts` | ~1900 | 前端呼叫 VPS 的 HTTP 客戶端 |
 | **Server Actions** | `app/actions/index.ts` | ~1800 | 對話/訊息/專案等 Server Actions 入口 |
-| **Sandpack 預覽** | `app/lib/sandpack-utils.ts` + `app/components/uiux/SandpackPreview.tsx` | | UIUX 預覽核心，Sandpack 真實 React 渲染 |
+| **WebContainer 預覽** | `app/lib/webcontainer-utils.ts` + `app/components/uiux/WebContainerPreview.tsx` + `app/hooks/useWebContainer.ts` | | 預覽核心，WebContainers 跑完整 Node.js + Next.js dev server（支援 Server Actions + DB） |
 | **WebSocket Hook** | `app/hooks/useVpsWebSocket.ts` | | 即時訊息推送（型別定義） |
 | **Fast Build 動畫** | `app/components/FastBuildPlayer.tsx` + `app/components/remotion/fast-build/` | | Remotion + @remotion/three 3D 工廠流水線動畫（Structure/Animation/RWD 三站）|
 | **3D 蓋房子** | `app/components/building-scene/` + `app/components/remotion/building-scene/` | | Remotion + @remotion/three 低多邊形 3D 場景（BDD Q&A 視覺回饋）|
@@ -219,10 +219,10 @@ Discovery（Path A 問卷 / Path B 篩選後模板）
 - **Haiku 概念生成**：`generateFastConcept()` 生成 `FastConcept`（name/vibe/signatureElement/keyFeatures/suggestedTier），轉換為 `VariantConcept` 注入三階段 prompt
 - **Tier 智能修正**：Haiku suggestedTier 與規則不一致時覆蓋 tier + 重建 designSystem
 - **Design Tier**：`functional`（dashboard/SaaS，禁漸層/glow）vs `creative`（landing page，允許大膽設計）
-- **串流預覽**：生成時 Socket.io `preview_update` 即時推送，前端 Sandpack 增量更新（`useSandpack().sandpack.updateFile()`）
+- **串流預覽**：生成時 Socket.io `preview_update` 即時推送，前端 WebContainer `fs.writeFile()` → Next.js HMR 自動刷新
 - **Variant 概念**：`VariantConcept` 注入所有生成 prompt，確保創意方向一致
 - **失敗重試**：`__retry_fast_build__` quickReply，handleContinueFlow 攔截用 `fastModeOriginalMessage` 重新生成
-- **手機預覽**：< 768px 顯示全屏 SandpackPreview Modal（含裝置切換/部署/修改按鈕）。`onCodePreviewData` callback 在手機版收到 code_preview 時自動 `setShowMobilePreview(true)`，不需用戶手動點按鈕
+- **手機預覽**：< 768px 顯示全屏 WebContainerPreview Modal（含裝置切換/部署/修改按鈕）。`onCodePreviewData` callback 在手機版收到 code_preview 時自動 `setShowMobilePreview(true)`，不需用戶手動點按鈕
 - **進度預估**：每階段推送 `estimatedSecondsRemaining`（240→120→60），前端顯示 `~X min`
 
 ### Deployer Pipeline（五層防禦）
@@ -371,7 +371,7 @@ Feature 註解：`# Action: actionName` + `# [METHOD] /path` + `# Summary: xxx`
 - **字體只能用 `next/font`**，禁止 `<link>` / `@import` Google Fonts
 - **Tailwind v4**：用 `@import "tailwindcss"`，不是 v3 的 `@tailwind`
 - **Tailwind config 禁止 CSS 變數引用**：`generateTailwindConfig()` 必須用硬編碼值（`'9999px'` 非 `'var(--radius-full)'`），否則部署後 CSS 變數可能遺失導致樣式失效
-- **`app/components/templates/` 已廢棄**，PreviewPanel 用 Sandpack 渲染
+- **`app/components/templates/` 已廢棄**，PreviewPanel 用 WebContainers 渲染
 - **deployer_complete 路由順序**：先檢查「部署」→ 再檢查「回滾」→ 再檢查「域名」(`hasDomainIntent`) → `isGreetingOrChitchat` 問候攔截 → `semanticGateway({ phase: 'iteration' })` 預驗證 → 最後才是迭代修改
 - **complete/failed 問候攔截**：`uiux_complete`/`deployer_complete`/`deployer_failed` 三處 `semanticGateway` 前插入 `isGreetingOrChitchat()` 零 LLM 攔截，回覆友善上下文引導 + quickReplies。`__new_project__` 在 `handleContinueFlow` 入口處理（清 FlowState + LINE 映射）
 - **迭代輸入四層防禦**：`prefilterMessage()`（全域）→ `detectFastModeIntent()`（問候/閒聊/平台問題攔截，`platform_issue` 回覆操作指引而非跑 refineCode）→ `semanticGateway({ phase: 'iteration' })`（Sonnet 語義審核，quickFilter 零 LLM 短路 ~80%）→ `refineCode [NO_CHANGE]`（LLM 兜底）。`isDesignFeedback()` 僅用於 fast mode 入口

@@ -6,8 +6,8 @@ import DeviceSwitcher, { type DeviceType, getDeviceWidth } from '@/app/component
 import dynamic from 'next/dynamic'
 import { useTranslations } from 'next-intl'
 
-const SandpackPreviewComponent = dynamic(
-  () => import('@/app/components/uiux/SandpackPreview'),
+const WebContainerPreviewComponent = dynamic(
+  () => import('@/app/components/uiux/WebContainerPreview'),
   { ssr: false, loading: () => <div style={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--gray-50)' }}><p style={{ color: 'var(--gray-400)', fontSize: 14 }}>Loading preview...</p></div> }
 )
 
@@ -78,7 +78,7 @@ export default function MobilePreviewModal({ show, stablePreviewData, onClose, o
           {/* Preview */}
           <div style={{ flex: 1, overflow: 'hidden', display: 'flex', justifyContent: 'center' }}>
             <div style={{ width: mobilePreviewDevice === 'desktop' ? '100%' : getDeviceWidth(mobilePreviewDevice), maxWidth: '100%', height: '100%', overflow: 'hidden' }}>
-              <SandpackPreviewComponent
+              <WebContainerPreviewComponent
                 pages={stablePreviewData.pages}
                 components={stablePreviewData.components}
                 styles={stablePreviewData.styles}
