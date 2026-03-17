@@ -159,7 +159,13 @@ export default function ChatSection({
     onMessagesUpdate: (updater: (prev: Message[]) => Message[]) => setMessages(updater),
     onIsTyping: (v: boolean) => setIsTyping(v),
     onCurrentStage: (s: Message['stage']) => setCurrentStage(s),
-    onCodePreviewData: (data: Record<string, unknown> | null) => setCodePreviewData(data),
+    onCodePreviewData: (data: Record<string, unknown> | null) => {
+      setCodePreviewData(data)
+      // 手機版：恢復對話時有 code_preview 自動彈出預覽
+      if (data && typeof window !== 'undefined' && window.innerWidth < 768) {
+        setShowMobilePreview(true)
+      }
+    },
     onLastTimestamp: (ts: string) => pollingRef.current?.setLastTimestamp(ts),
     onGuestBuildCompleted: (_v: boolean) => { /* handled by session hook */ },
     onQuotaReadOnly: (_v: boolean) => { /* handled by session hook */ },
@@ -232,7 +238,13 @@ export default function ChatSection({
       })
     },
     onFastBuildChunks: (n: number) => setFastBuildChunks(prev => prev !== n ? n : prev),
-    onCodePreviewData: (data: Record<string, unknown> | null) => setCodePreviewData(data),
+    onCodePreviewData: (data: Record<string, unknown> | null) => {
+      setCodePreviewData(data)
+      // 手機版：收到 code_preview 時自動彈出全螢幕預覽
+      if (data && typeof window !== 'undefined' && window.innerWidth < 768) {
+        setShowMobilePreview(true)
+      }
+    },
     onLayoutModeChange: (mode: 'split') => {
       if (layoutModeRef.current !== mode) {
         setLayoutMode(mode)

@@ -518,12 +518,22 @@ async function routeDeployerComplete(
     return
   }
 
-  // 問候/問題/閒聊攔截
+  // 問候/問題/閒聊/平台問題回報攔截
   const intentCheck = detectFastModeIntent(trimmed)
   if (intentCheck.match) {
     const isChinese = /[\u4e00-\u9fff]/.test(trimmed) || state.locale === 'zh'
     const qr = buildPostDeployFastBuildQuickReplies(state, { includeDeploy: true, includeNewProject: true })
     qr.push({ label: isChinese ? '綁定自訂網域' : 'Bind Custom Domain', value: '綁定網域', style: 'ghost' as const })
+    if (intentCheck.type === 'platform_issue') {
+      await sendMessage(conversationId, io, {
+        content: isChinese
+          ? '如果預覽沒有顯示，請嘗試以下操作：\n\n1. **電腦版**：預覽面板在右側，請確認瀏覽器視窗足夠寬（≥768px）\n2. **手機版**：請點擊訊息下方的「查看預覽」按鈕開啟全螢幕預覽\n3. **重新載入**：刷新頁面後，點擊左側對話記錄重新開啟此對話\n\n如果問題持續，請描述您想修改的內容，我可以幫您調整設計。'
+          : 'If the preview isn\'t showing, try these steps:\n\n1. **Desktop**: The preview panel is on the right side. Make sure your browser window is wide enough (≥768px)\n2. **Mobile**: Tap the "View Preview" button below the message to open fullscreen preview\n3. **Reload**: Refresh the page and click the conversation in the sidebar to reopen it\n\nIf the issue persists, describe what you\'d like to change and I can help adjust the design.',
+        stage: 'customer_service',
+        quickReplies: qr,
+      })
+      return
+    }
     if (intentCheck.type === 'question') {
       const faqResult = getFaqReply(trimmed, state.locale)
       if (faqResult) {

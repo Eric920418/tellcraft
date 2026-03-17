@@ -10,7 +10,7 @@ const logger = createLogger('customer-service')
 
 // ── 型別定義 ──
 
-export type FastModeIntentType = 'greeting' | 'chitchat' | 'acknowledgment' | 'question' | 'help' | null
+export type FastModeIntentType = 'greeting' | 'chitchat' | 'acknowledgment' | 'question' | 'help' | 'platform_issue' | null
 
 export interface FastModeIntentResult {
   match: boolean
@@ -98,7 +98,32 @@ export function detectFastModeIntent(msg: string): FastModeIntentResult {
     }
   }
 
-  // 5. chitchat（純閒聊）
+  // 5. platform_issue（用戶回報預覽/平台問題，非設計修改）
+  const platformIssuePatterns = [
+    // 中文 — 預覽相關
+    /沒有(出現|顯示|看到|載入|加載).*(網站|頁面|預覽|畫面|東西)/,
+    /(網站|頁面|預覽|畫面).*(沒有|沒出來|不見|消失|空白|看不到|不顯示)/,
+    /變成空白/,
+    /什麼都沒(有|出現)/,
+    /沒有任何(東西|內容|畫面)(出現|顯示)/,
+    /一片(空白|黑|白)/,
+    /(空白|白屏|黑屏|黑畫面|白畫面)/,
+    /看不到(網站|頁面|預覽|畫面|東西|任何)/,
+    /(按|點)(了|下|完).*(送出|發送|確認).*(沒有|不見|消失|空白)/,
+    /送出(後|之後).*(沒有|空白|不見|消失)/,
+    /(預覽|畫面|頁面)(壞了|掛了|不動|卡住|跑不出來)/,
+    // 英文 — preview related
+    /nothing (appears|shows|loads|displayed|happened)/i,
+    /(preview|page|website|screen).*(blank|empty|gone|missing|disappeared|broken|not showing|not loading)/i,
+    /(blank|empty|white|black) (screen|page|preview)/i,
+    /can'?t see (the )?(preview|page|website|anything)/i,
+    /where('?s| is) (the )?(preview|page|website)/i,
+  ]
+  if (platformIssuePatterns.some(r => r.test(trimmed))) {
+    return { match: true, type: 'platform_issue' }
+  }
+
+  // 6. chitchat（純閒聊）
   const chitchatZh = [
     '天氣', '幾點', '講笑話', '說笑話', '幾歲',
     '吃什麼', '吃飯', '掰掰', '再見',

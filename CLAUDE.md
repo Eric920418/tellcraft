@@ -96,7 +96,7 @@ pm2 describe tellcraft-backend            # 詳細資訊（記憶體/重啟次�
 | **Template Matcher** | `services/template-matcher.ts` | 三層評分智能匹配（關鍵詞 40 + Category 30 + UISpec 30，零 LLM） |
 | **Design Moods** | `services/design-moods.ts` | 8 個設計情緒預設 + `recommendMoods()` 規則推薦（feeling 50 + productType 30 + tier 過濾）+ prompt 注入 getter |
 | **Semantic Gateway** | `services/semantic-gateway.ts` | 統一語義閘門：quickFilter 零 LLM 短路 + Sonnet 六元 verdict（bdd_clarify/design_clarify/iteration），取代 keyword array |
-| **Customer Service** | `services/customer-service.ts` | 客服問答：detectFastModeIntent 意圖分類（greeting/question/chitchat/help）+ FAQ 零 LLM 匹配（9 主題）+ answerWithSonnet 開放問答 |
+| **Customer Service** | `services/customer-service.ts` | 客服問答：detectFastModeIntent 意圖分類（greeting/question/chitchat/help/platform_issue）+ FAQ 零 LLM 匹配（9 主題）+ answerWithSonnet 開放問答 |
 | **Prefilter** | `services/prefilter.ts` | 全域輸入預過濾：checkInputQuality 亂碼/髒話/垃圾 + phase-aware 二次攔截（getPhaseStrictness）+ Redis anti-loop |
 | **Domain Service** | `services/domain-service.ts` | 域名 API 封裝（Porkbun 註冊 + Cloudflare DNS + Vercel 綁定 + RDAP 查詢）+ 購買/自有域名工作流 + 反向補償 rollback |
 | **Neon Service** | `services/neon-service.ts` | Neon API 客戶端：同步建立 Neon PostgreSQL DB + 套用 BDD Schema，< 10s |
@@ -222,7 +222,7 @@ Discovery（Path A 問卷 / Path B 篩選後模板）
 - **串流預覽**：生成時 Socket.io `preview_update` 即時推送，前端 Sandpack 增量更新（`useSandpack().sandpack.updateFile()`）
 - **Variant 概念**：`VariantConcept` 注入所有生成 prompt，確保創意方向一致
 - **失敗重試**：`__retry_fast_build__` quickReply，handleContinueFlow 攔截用 `fastModeOriginalMessage` 重新生成
-- **手機預覽**：< 768px 顯示全屏 SandpackPreview Modal（含裝置切換/部署/修改按鈕）
+- **手機預覽**：< 768px 顯示全屏 SandpackPreview Modal（含裝置切換/部署/修改按鈕）。`onCodePreviewData` callback 在手機版收到 code_preview 時自動 `setShowMobilePreview(true)`，不需用戶手動點按鈕
 - **進度預估**：每階段推送 `estimatedSecondsRemaining`（240→120→60），前端顯示 `~X min`
 
 ### Deployer Pipeline（五層防禦）
@@ -374,7 +374,7 @@ Feature 註解：`# Action: actionName` + `# [METHOD] /path` + `# Summary: xxx`
 - **`app/components/templates/` 已廢棄**，PreviewPanel 用 Sandpack 渲染
 - **deployer_complete 路由順序**：先檢查「部署」→ 再檢查「回滾」→ 再檢查「域名」(`hasDomainIntent`) → `isGreetingOrChitchat` 問候攔截 → `semanticGateway({ phase: 'iteration' })` 預驗證 → 最後才是迭代修改
 - **complete/failed 問候攔截**：`uiux_complete`/`deployer_complete`/`deployer_failed` 三處 `semanticGateway` 前插入 `isGreetingOrChitchat()` 零 LLM 攔截，回覆友善上下文引導 + quickReplies。`__new_project__` 在 `handleContinueFlow` 入口處理（清 FlowState + LINE 映射）
-- **迭代輸入三層防禦**：`prefilterMessage()`（全域）→ `isGreetingOrChitchat()`（問候攔截）→ `semanticGateway({ phase: 'iteration' })`（Sonnet 語義審核，quickFilter 零 LLM 短路 ~80%）→ `refineCode [NO_CHANGE]`（LLM 兜底）。`isDesignFeedback()` 僅用於 fast mode 入口
+- **迭代輸入四層防禦**：`prefilterMessage()`（全域）→ `detectFastModeIntent()`（問候/閒聊/平台問題攔截，`platform_issue` 回覆操作指引而非跑 refineCode）→ `semanticGateway({ phase: 'iteration' })`（Sonnet 語義審核，quickFilter 零 LLM 短路 ~80%）→ `refineCode [NO_CHANGE]`（LLM 兜底）。`isDesignFeedback()` 僅用於 fast mode 入口
 - **`checkBuildRelevance` fail-closed**：API 錯誤/空回應/JSON 解析/catch 全部降級拒絕（不是放行），保留無 API key 時的 fail-open
 - **輸入品質閘門（Universal Input Quality Gate）**：`prefilterMessage()` 內 `checkInputQuality()` 全域攔截亂碼/髒話/垃圾 + `handleContinueFlow` phase-aware 二次攔截（`getPhaseStrictness()` 映射 strict/normal/lenient/skip）+ `analyzeAnswerRelevance` 前置檢查。Redis anti-loop `quality_reject:{conversationId}` 連續 3 次強制放行防卡死
 - **參考網站分析（`reference-analyzer.ts`）**：puppeteer-core 需要系統 Chromium（`/usr/bin/chromium-browser`），VPS 須 `apt install chromium-browser`。截圖 JPEG 75 quality、15s timeout、buffer 不存 FlowState（只存文字分析結果）。SSRF 防護禁 localhost/內網 IP

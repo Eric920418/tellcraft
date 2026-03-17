@@ -1474,7 +1474,8 @@ export function buildSandpackSetup(
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   ${fontLinksHtml}
   <style>
-    body { font-family: '${primaryFont}', system-ui, sans-serif; margin: 0; }
+    html, body, #root { height: 100%; margin: 0; }
+    body { font-family: '${primaryFont}', system-ui, sans-serif; }
   </style>
 </head>
 <body>

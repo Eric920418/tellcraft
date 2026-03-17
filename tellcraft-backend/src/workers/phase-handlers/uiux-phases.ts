@@ -611,10 +611,28 @@ export async function handleUiuxMixedPhaseRouting(
         return
       }
 
-      // 問候/問題/閒聊攔截 — 在 semanticGateway 前
+      // 問候/問題/閒聊/平台問題回報攔截 — 在 semanticGateway 前
       const intentCheck2 = detectFastModeIntent(trimmed)
       if (intentCheck2.match) {
         const isChinese = /[\u4e00-\u9fff]/.test(trimmed) || state.locale === 'zh'
+        // 平台問題回報（「預覽空白」「看不到頁面」）→ 回覆操作指引，不跑 refineCode
+        if (intentCheck2.type === 'platform_issue') {
+          const qr = [
+            { label: isChinese ? '部署上線' : 'Deploy', value: '部署', style: 'primary' as const },
+            { label: isChinese ? '開始新專案' : 'New Project', value: '__new_project__', style: 'ghost' as const },
+          ]
+          if (state.uiuxPreIterationCode) {
+            qr.push({ label: isChinese ? '撤銷修改' : 'Undo', value: '撤銷', style: 'ghost' as const })
+          }
+          await sendMessage(conversationId, io, {
+            content: isChinese
+              ? '如果預覽沒有顯示，請嘗試以下操作：\n\n1. **電腦版**：預覽面板在右側，請確認瀏覽器視窗足夠寬（≥768px）\n2. **手機版**：請點擊訊息下方的「查看預覽」按鈕開啟全螢幕預覽\n3. **重新載入**：刷新頁面後，點擊左側對話記錄重新開啟此對話\n\n如果網站顯示為深色/黑色畫面，那可能是網站的 Intro 動畫——請在預覽中等待幾秒或與頁面互動。\n\n如果問題持續，請描述您想修改的內容，我可以幫您調整設計。'
+              : 'If the preview isn\'t showing, try these steps:\n\n1. **Desktop**: The preview panel is on the right side. Make sure your browser window is wide enough (≥768px)\n2. **Mobile**: Tap the "View Preview" button below the message to open fullscreen preview\n3. **Reload**: Refresh the page and click the conversation in the sidebar to reopen it\n\nIf the site shows a dark/black screen, it might be the website\'s intro animation — wait a few seconds or interact with the page.\n\nIf the issue persists, describe what you\'d like to change and I can help adjust the design.',
+            stage: 'customer_service',
+            quickReplies: qr,
+          })
+          return
+        }
         if (intentCheck2.type === 'question') {
           const faqResult = getFaqReply(trimmed, state.locale)
           const qr = [

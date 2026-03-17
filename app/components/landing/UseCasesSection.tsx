@@ -284,7 +284,7 @@ const TargetCursor: React.FC<TargetCursorProps> = ({
           left: '50%',
           width: 6,
           height: 6,
-          background: '#000',
+          background: 'var(--black)',
           borderRadius: '50%',
           transform: 'translate(-50%, -50%)',
           willChange: 'transform',
@@ -292,10 +292,10 @@ const TargetCursor: React.FC<TargetCursorProps> = ({
       />
       {/* 四個角：左上、右上、右下、左下 */}
       {[
-        { borderTop: '3px solid #000', borderLeft: '3px solid #000', tx: -18, ty: -18 },
-        { borderTop: '3px solid #000', borderRight: '3px solid #000', tx: 6, ty: -18 },
-        { borderBottom: '3px solid #000', borderRight: '3px solid #000', tx: 6, ty: 6 },
-        { borderBottom: '3px solid #000', borderLeft: '3px solid #000', tx: -18, ty: 6 },
+        { borderTop: '3px solid var(--black)', borderLeft: '3px solid var(--black)', tx: -18, ty: -18 },
+        { borderTop: '3px solid var(--black)', borderRight: '3px solid var(--black)', tx: 6, ty: -18 },
+        { borderBottom: '3px solid var(--black)', borderRight: '3px solid var(--black)', tx: 6, ty: 6 },
+        { borderBottom: '3px solid var(--black)', borderLeft: '3px solid var(--black)', tx: -18, ty: 6 },
       ].map((s, i) => (
         <div
           key={i}
