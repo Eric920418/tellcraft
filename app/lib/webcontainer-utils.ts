@@ -30,14 +30,17 @@ export interface WebContainerFilesInput {
 // ── Known Package Versions ──
 // Synced with deployer.ts KNOWN_PACKAGES + BASE_DEPS
 
+// WebContainers 用 WASM Node.js，Next.js 15 的 AsyncLocalStorage 不完整支援
+// 降級到 14.2.x（App Router + Server Actions 都正常，無 async params 問題）
+// Tailwind 用 v3（與 Next.js 14 內建 PostCSS 支援匹配）
 const BASE_DEPS: Record<string, string> = {
-  next: '^15.0.0',
-  react: '^19.0.0',
-  'react-dom': '^19.0.0',
+  next: '14.2.28',
+  react: '^18.3.0',
+  'react-dom': '^18.3.0',
   motion: '^11.0.0',
-  tailwindcss: '^4.0.0',
-  '@tailwindcss/postcss': '^4.0.0',
+  tailwindcss: '^3.4.0',
   postcss: '^8.4.0',
+  autoprefixer: '^10.0.0',
 }
 
 const KNOWN_PACKAGES: Record<string, string> = {
@@ -337,23 +340,24 @@ const EDIT_BRIDGE_SCRIPT = `
 // ── Core Functions ──
 
 /**
- * Ensure globals.css has @import "tailwindcss" at the very top + @config if needed.
- * Used by both initial mount and incremental writes.
+ * Convert Tailwind v4 CSS syntax to v3 for WebContainer preview.
+ * Generated code uses v4 (@import "tailwindcss") but preview runs v3.
+ * Same approach as deployer.ts cleanTailwindV4Syntax.
  */
-export function prepareCss(rawStyles: string | undefined, hasTailwindConfig: boolean): string {
+export function prepareCss(rawStyles: string | undefined, _hasTailwindConfig: boolean): string {
   let css = rawStyles || MINIMAL_CSS
 
-  // Strip any existing @import "tailwindcss" (may be in wrong position)
+  // Strip Tailwind v4 directives
   css = css.replace(/@import\s*["']tailwindcss(?:\/[^"']*)?["']\s*;?\s*/g, '')
-
-  // Strip @config if present (we'll re-add it)
   css = css.replace(/@config\s*["'][^"']*["']\s*;?\s*/g, '')
+  // Strip @theme {} blocks (v4 only)
+  css = css.replace(/@theme\s*\{[^}]*\}/g, '')
+  // Strip @utility / @variant (v4 only)
+  css = css.replace(/@utility\s+[\w-]+\s*\{[^}]*\}/g, '')
+  css = css.replace(/@variant\s+[\w-]+\s*\{[^}]*\}/g, '')
 
-  // Build header: @import "tailwindcss" must be first, then @config
-  let header = '@import "tailwindcss";\n'
-  if (hasTailwindConfig) {
-    header += '@config "../tailwind.config.ts";\n'
-  }
+  // Prepend v3 directives
+  const header = '@tailwind base;\n@tailwind components;\n@tailwind utilities;\n\n'
 
   return header + css
 }
@@ -503,7 +507,8 @@ const TS_CONFIG = `{
 
 const POSTCSS_CONFIG = `module.exports = {
   plugins: {
-    '@tailwindcss/postcss': {},
+    tailwindcss: {},
+    autoprefixer: {},
   },
 }
 `
@@ -532,7 +537,9 @@ const MINIMAL_PAGE = `export default function Page() {
 }
 `
 
-const MINIMAL_CSS = `@import "tailwindcss";
+const MINIMAL_CSS = `@tailwind base;
+@tailwind components;
+@tailwind utilities;
 `
 
 // ── Main Export Functions ──
