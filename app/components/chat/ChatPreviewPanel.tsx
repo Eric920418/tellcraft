@@ -334,101 +334,53 @@ export default function ChatPreviewPanel({
               position: 'relative',
             }}
           >
-            {codePreviewDevice === 'mobile' ? (
-              /* 手機外框 Phone Frame — 固定高度 */
-              <div
-                style={{
-                  width: previewWidth + 24,
-                  height: 30 + previewHeight + 18,
-                  background: '#1a1a1a',
-                  borderRadius: 44,
-                  padding: '0 12px',
-                  display: 'flex',
-                  flexDirection: 'column',
-                  alignItems: 'center',
-                  boxShadow: '0 12px 40px rgba(0,0,0,0.18), 0 4px 12px rgba(0,0,0,0.1)',
-                  flexShrink: 0,
-                  overflow: 'hidden',
-                }}
-              >
-                {/* Dynamic Island */}
-                <div style={{ width: '100%', height: 30, flexShrink: 0, display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
-                  <div style={{ width: 100, height: 24, background: '#000', borderRadius: 12 }} />
-                </div>
-                {/* 螢幕區域 */}
+            {/* 裝置外框（mobile 有 phone frame，tablet/desktop 只有容器） */}
+            {codePreviewDevice === 'mobile' && (
+              <>
+                {/* Phone Frame 外殼（不含預覽內容） */}
                 <div
                   style={{
-                    width: previewWidth,
-                    height: previewHeight,
+                    width: previewWidth + 24,
+                    height: 30 + previewHeight + 18,
+                    background: '#1a1a1a',
+                    borderRadius: 44,
+                    padding: '0 12px',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    alignItems: 'center',
+                    boxShadow: '0 12px 40px rgba(0,0,0,0.18), 0 4px 12px rgba(0,0,0,0.1)',
                     flexShrink: 0,
-                    borderRadius: 4,
                     overflow: 'hidden',
-                    background: '#fff',
-                    position: 'relative',
                   }}
                 >
-                  <div style={{ position: 'absolute', inset: 0 }}>
-                    <WebContainerPreviewComponent
-                      pages={pagesData}
-                      components={componentsData}
-                      styles={stylesData}
-                      tailwindConfig={tailwindConfigData}
-                      isStreaming={isStreaming}
-                      editMode={codePreviewEditMode}
-                      onSelectionChanged={handleCodePreviewSelectionChanged}
-                      onElementSelected={handleCodePreviewElementSelected}
-                      pendingUpdate={codePreviewPendingUpdate}
-                      pendingReset={codePreviewPendingReset}
-                      pendingOverrides={codePreviewPendingOverrides}
-                      overrides={codePreviewOverrides}
-                      annotations={codePreviewAnnotations}
-                      onElementResized={handleCodePreviewElementResized}
-                      onRuntimeError={onRuntimeError}
-                      codeVersion={codeVersion}
-                    />
+                  <div style={{ width: '100%', height: 30, flexShrink: 0, display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
+                    <div style={{ width: 100, height: 24, background: '#000', borderRadius: 12 }} />
+                  </div>
+                  <div style={{ width: previewWidth, height: previewHeight, flexShrink: 0, borderRadius: 4, overflow: 'hidden', background: '#fff', position: 'relative' }}>
+                    <div style={{ position: 'absolute', inset: 0 }} data-wc-slot />
+                  </div>
+                  <div style={{ width: '100%', height: 18, flexShrink: 0, display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
+                    <div style={{ width: 134, height: 5, background: 'rgba(255,255,255,0.3)', borderRadius: 3 }} />
                   </div>
                 </div>
-                {/* Home Indicator */}
-                <div style={{ width: '100%', height: 18, flexShrink: 0, display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
-                  <div style={{ width: 134, height: 5, background: 'rgba(255,255,255,0.3)', borderRadius: 3 }} />
-                </div>
-              </div>
-            ) : (
-              /* Desktop / Tablet */
-              <div
-                style={{
-                  width: codePreviewDevice === 'desktop' ? '100%' : previewWidth,
-                  height: codePreviewDevice === 'desktop' ? '100%' : previewHeight,
-                  borderRadius: codePreviewDevice === 'desktop' ? 0 : 8,
-                  boxShadow: codePreviewDevice === 'desktop' ? 'none' : '0 8px 32px rgba(0,0,0,0.12), 0 2px 8px rgba(0,0,0,0.08)',
-                  background: '#fff',
-                  overflow: 'hidden',
-                  flexShrink: 0,
-                  position: codePreviewDevice === 'tablet' ? 'relative' : undefined,
-                }}
-              >
-                {codePreviewDevice === 'tablet' ? (
-                  <div style={{ position: 'absolute', inset: 0 }}>
-                    <WebContainerPreviewComponent
-                      pages={pagesData}
-                      components={componentsData}
-                      styles={stylesData}
-                      tailwindConfig={tailwindConfigData}
-                      isStreaming={isStreaming}
-                      editMode={codePreviewEditMode}
-                      onSelectionChanged={handleCodePreviewSelectionChanged}
-                      onElementSelected={handleCodePreviewElementSelected}
-                      pendingUpdate={codePreviewPendingUpdate}
-                      pendingReset={codePreviewPendingReset}
-                      pendingOverrides={codePreviewPendingOverrides}
-                      overrides={codePreviewOverrides}
-                      annotations={codePreviewAnnotations}
-                      onElementResized={handleCodePreviewElementResized}
-                      onRuntimeError={onRuntimeError}
-                      codeVersion={codeVersion}
-                    />
-                  </div>
-                ) : (
+              </>
+            )}
+            {/* 單一 WebContainerPreview 實例 — 切換裝置不 unmount */}
+            <div
+              style={{
+                width: codePreviewDevice === 'desktop' ? '100%' : previewWidth,
+                height: codePreviewDevice === 'desktop' ? '100%' : previewHeight,
+                borderRadius: codePreviewDevice === 'mobile' ? 4 : codePreviewDevice === 'tablet' ? 8 : 0,
+                boxShadow: codePreviewDevice === 'desktop' ? 'none' : codePreviewDevice === 'mobile' ? 'none' : '0 8px 32px rgba(0,0,0,0.12), 0 2px 8px rgba(0,0,0,0.08)',
+                background: '#fff',
+                overflow: 'hidden',
+                flexShrink: 0,
+                // mobile 時用 absolute 定位到 phone frame 的螢幕區域
+                ...(codePreviewDevice === 'mobile' ? { position: 'absolute' as const, top: 30, left: 12, zIndex: 1 } : {}),
+                ...(codePreviewDevice === 'tablet' ? { position: 'relative' as const } : {}),
+              }}
+            >
+              <div style={codePreviewDevice !== 'desktop' ? { position: 'absolute', inset: 0 } : { height: '100%' }}>
                 <WebContainerPreviewComponent
                   pages={pagesData}
                   components={componentsData}
@@ -447,9 +399,8 @@ export default function ChatPreviewPanel({
                   onRuntimeError={onRuntimeError}
                   codeVersion={codeVersion}
                 />
-                )}
               </div>
-            )}
+            </div>
             {/* 編輯模式提示浮層 */}
             {codePreviewEditMode && codePreviewSelectedElements.length === 0 && !isStreaming && (
               <div style={{

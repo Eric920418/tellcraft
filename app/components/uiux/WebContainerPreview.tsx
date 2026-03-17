@@ -180,6 +180,12 @@ export default function WebContainerPreview({
   const hasFullMountRef = useRef(false)
 
   // ── Build initial files for the hook ──
+  // 用所有檔案內容的 fingerprint 做 memo key，確保 components 變化時重新計算
+  const filesFingerprint = useMemo(() => {
+    if (pages.length === 0) return 'skeleton'
+    return `pages:${pages.length},comp:${components.length},sa:${serverActions?.length ?? 0},styles:${styles?.length ?? 0}`
+  }, [pages, components, serverActions, styles])
+
   const initialFiles = useMemo(() => {
     if (pages.length > 0) {
       console.log('[WC Preview] Building full files:', pages.length, 'pages,', components.length, 'components')
@@ -192,7 +198,7 @@ export default function WebContainerPreview({
     console.log('[WC Preview] Building skeleton (no pages yet)')
     return buildSkeletonFiles()
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pages.length > 0 ? 'has-pages' : 'skeleton'])
+  }, [filesFingerprint])
 
   // ── Env vars ──
   const envVars = useMemo(() => {
@@ -233,18 +239,36 @@ export default function WebContainerPreview({
     if (status !== 'ready') return
     if (allFiles.length === 0) return
 
-    // Skip the first run if initialFiles already covered these
     if (!hasFullMountRef.current) {
+      // 第一次 ready：完整寫入所有檔案（initialFiles 可能用了 skeleton 或不完整的 capture）
       hasFullMountRef.current = true
+      const input: WebContainerFilesInput = {
+        pages, components, styles, tailwindConfig,
+        serverActions, apiRoutes, dbLib,
+      }
+      const fullTree = buildWebContainerFiles(input)
+      // mount 會覆蓋整個 fs，比 writeFiles 更乾淨
+      const container = (window as unknown as Record<string, unknown>).__wcContainer
+      if (container && typeof (container as { mount?: unknown }).mount === 'function') {
+        // Can't access container from here, use writeFiles instead
+      }
+      // 用 writeFiles 逐一寫入
+      const flatFiles: Record<string, string> = {}
+      for (const f of [...pages, ...components, ...(serverActions || []), ...(apiRoutes || []), ...(dbLib || [])]) {
+        const p = f.path.startsWith('/') ? f.path.slice(1) : f.path
+        flatFiles[p] = f.content
+      }
+      if (styles) flatFiles['app/globals.css'] = prepareCss(styles, !!tailwindConfig)
+      if (tailwindConfig) flatFiles['tailwind.config.ts'] = tailwindConfig
+      writeFiles(flatFiles).catch(err => console.error('[WC] Full write failed:', err))
       prevFilesRef.current = allFiles
       return
     }
 
-    // Diff and write only changed files
+    // 增量更新：diff 後只寫變化的檔案
     const changes = diffFiles(prevFilesRef.current, allFiles)
     const allChanges = { ...changes }
 
-    // Also write styles/tailwindConfig if they might have changed
     if (styles && prevFilesRef.current.length > 0) {
       allChanges['app/globals.css'] = prepareCss(styles, !!tailwindConfig)
     }
