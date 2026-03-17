@@ -88,7 +88,7 @@ pm2 describe tellcraft-backend            # 詳細資訊（記憶體/重啟次�
 | **Classifier** | `services/classifier.ts` | 三層防禦：Prefilter → Meta Intent → Skill 分類 |
 | **UIUX Generation** | `services/uiux-generation.ts` | 設計生成核心（Brief/Variants/Structure/Animation/RWD/Refine） |
 | **Quality Gate** | `services/quality-gate.ts` | A11y/Performance/CodeQuality 靜態檢查 + LLM 自動修復 |
-| **Coder Generation** | `services/coder-generation.ts`（~500 行） | 後端代碼生成核心：parseActionsYml → generateActionFunction(LLM) → generateServerActions(零LLM) → identifyMockDataComponents → rewriteComponentForServerActions(LLM) |
+| **Coder Generation** | `services/coder-generation.ts`（~600 行） | 後端代碼生成核心：parseActionsYml → generateActionFunction(LLM) → generateServerActions(零LLM) → identifyMockDataComponents(Haiku LLM batch 識別 + regex fallback) → rewriteComponentForServerActions(LLM) |
 | **Deployer** | `services/deployer.ts` | sanitize → build 驗證 → Vercel 部署 → 回滾（合併 uiux+coder skill_source） |
 | **Iteration Skill** | `services/iteration-skill.ts` | 迭代修改 + 撤銷 + 版本回滾（從 orchestrator 抽出） |
 | **Fast Build** | `services/fast-build-generation.ts` | 快速模式輔助：tier 偵測、產品推斷、默認 DesignSystem（零 LLM）、surface-1/2/3 色階 |
@@ -394,6 +394,7 @@ Feature 註解：`# Action: actionName` + `# [METHOD] /path` + `# Summary: xxx`
 - **Feature 驗證腳本用 `tsx` 不是 `ts-node`**：`feature-validation.ts` 的 `runScript()` 用 `npx tsx`。腳本解析失敗時視為通過（不觸發無效 LLM 修復循環），stderr/exitCode 會完整記錄供除錯
 - **Neon provisioning 是同步的（< 10s）**：任何失敗都不阻塞 UIUX 或部署流程。Deployer 直接 SELECT `neon_connection_string` FROM projects 注入 DATABASE_URL，無需 Redis polling
 - **`streamLlmMessage` vs `sendMessage`**：LLM 生成的對話文字用 `streamLlmMessage`（後端 SDK streaming + Socket.io 事件，為未來 WSS 準備），模板文字/進度/richContent 用 `sendMessage`。`streamLlmMessage` 失敗時自動降級為 `sendMessage`。前端透過 polling 拿到完整訊息後在 `ChatMessageItem` 內做打字機動畫（`isTypewriterTarget` prop + `onTypewriterComplete` callback）
+- **`identifyMockDataComponents` 用 Haiku LLM 識別**：一次 batch call 發送所有組件摘要 + availableActions 列表，Haiku 回傳需改寫的組件 indices。失敗自動降級到 regex fallback。Haiku 能區分「業務假資料」vs「UI 結構靜態配置」，regex 做不到。System prompt 明確列出不需改寫的類型（nav items、footer、feature lists）
 
 ## 核心原則
 

@@ -12,6 +12,7 @@ import { getAnthropicHeaders, MODEL, trackLlmUsage } from '../lib/anthropic'
 import type { GeneratedComponent } from './uiux-generation'
 import type { GeneratedCode } from '../types/flow-state'
 import { createLogger } from '../lib/logger'
+import { safeParseJson } from '../utils/safe-parse-json'
 
 const logger = createLogger('coder-generation')
 
@@ -470,42 +471,191 @@ export async function ${meta.method}(req: NextRequest) {
 }
 
 // ============================================================
-// 5. 識別需改寫的 UIUX 組件（零 LLM）
+// 5. 識別需改寫的 UIUX 組件（Haiku LLM + regex fallback）
 // ============================================================
 
-// 掃描 useState 初始化為硬編碼陣列或物件的模式
+// Regex fallback 模式（Haiku 失敗時使用）
 const MOCK_DATA_PATTERNS = [
-  // useState([{ key: value, ... }])
   /useState\(\s*\[\s*\{[^}]+\}/,
-  // useState({ key: value, ... }) 且非簡單的 boolean/string/number
   /useState\(\s*\{\s*\w+\s*:\s*['"][^'"]{10,}/,
-  // 大段硬編碼陣列 const xxx = [{ ... }]（任意 key，不限特定名稱）
   /(?:const|let)\s+\w+\s*(?::\s*\w+(?:\[\])?\s*)?=\s*\[\s*\{/,
-  // 大段硬編碼物件陣列含 3+ 個物件（明確 mock 特徵）
   /(?:const|let)\s+\w+\s*=\s*\[[\s\S]*?\{[\s\S]*?\}[\s\S]*?\{[\s\S]*?\}[\s\S]*?\{/,
-  // import from mock/data/seed 檔案
   /import\s+.*from\s+['"].*(?:mock|seed|fake|dummy|sample)[^'"]*['"]/i,
 ]
 
-export function identifyMockDataComponents(
-  code: GeneratedCode
+/** 從組件中截取摘要供 Haiku 判斷（前 80 行 + 後段關鍵行） */
+function extractComponentSummary(content: string): string {
+  const lines = content.split('\n')
+  if (lines.length <= 80) return content
+
+  const head = lines.slice(0, 80).join('\n')
+
+  const KEYWORDS = /useState|const\s+\w+\s*=\s*\[|data|items|mock|sample|dummy|\.map\s*\(/i
+  const extraLines: string[] = []
+  for (let i = 80; i < lines.length && extraLines.length < 20; i++) {
+    if (KEYWORDS.test(lines[i])) {
+      extraLines.push(`L${i + 1}: ${lines[i]}`)
+    }
+  }
+
+  let summary = head
+  if (extraLines.length > 0) {
+    summary += '\n// ... (後段關鍵行摘錄)\n' + extraLines.join('\n')
+  }
+  summary += `\n// [共 ${lines.length} 行]`
+  return summary
+}
+
+const MOCK_IDENTIFICATION_SYSTEM_PROMPT = `你是前端代碼分析專家。判斷 React 組件中是否包含「需要替換為 Server Action 呼叫的 mock/硬編碼業務資料」。
+
+## 需要改寫（標記）
+- useState 初始化為硬編碼的業務資料陣列（如產品列表、訂單列表、用戶資料、節目列表）
+- const/let 宣告的大段業務假資料陣列（如 const episodes = [{ id: 'ep-001', title: '...' }, ...]）
+- 表單提交只做 console.log/alert/setState，沒有真實後端呼叫
+- 從 mock/seed/fake/dummy 檔案 import 資料
+
+## 不需要改寫（不標記）
+- 導航選單項目（nav items）、Footer 連結 — 純 UI 結構
+- Feature/優勢/服務展示列表 — 行銷靜態內容
+- icon/route/theme 映射物件 — UI 配置
+- 動畫配置/樣式常數 — 純前端
+- 已使用 fetch/Server Action/API 的組件
+- 空的 useState 初始化（useState([])、useState(null)）
+
+只回覆 JSON：{"indices":[0,2,5]}
+indices 為需改寫的組件索引（從 0 開始）。無組件需改寫則 {"indices":[]}`
+
+/** 用 Haiku 一次 batch 識別所有需改寫的組件，失敗回傳 null */
+async function classifyComponentsWithHaiku(
+  allComponents: GeneratedComponent[],
+  availableActions: Array<{ name: string; summary: string }>,
+  trackingContext?: { userId?: string; conversationId?: string },
+): Promise<number[] | null> {
+  try {
+    const actionsText = availableActions
+      .map(a => `- ${a.name}: ${a.summary}`)
+      .join('\n')
+
+    const componentSummaries = allComponents
+      .map((comp, i) => `### [${i}] ${comp.path}\n\`\`\`tsx\n${extractComponentSummary(comp.content)}\n\`\`\``)
+      .join('\n\n')
+
+    const userMessage = `## 此專案的業務操作（Server Actions）\n${actionsText}\n\n## 組件列表（共 ${allComponents.length} 個）\n\n${componentSummaries}`
+
+    const resp = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: getAnthropicHeaders(),
+      body: JSON.stringify({
+        model: MODEL.HAIKU,
+        max_tokens: 200,
+        temperature: 0,
+        system: MOCK_IDENTIFICATION_SYSTEM_PROMPT,
+        messages: [{ role: 'user', content: userMessage }],
+      }),
+    })
+
+    if (!resp.ok) {
+      logger.warn({ status: resp.status }, 'Haiku mock 識別 API 失敗')
+      return null
+    }
+
+    const data = await resp.json() as {
+      content: Array<{ type: string; text?: string }>
+      usage: { input_tokens: number; output_tokens: number }
+    }
+
+    trackLlmUsage({
+      model: MODEL.HAIKU,
+      inputTokens: data.usage?.input_tokens || 0,
+      outputTokens: data.usage?.output_tokens || 0,
+      purpose: 'coder_mock_identification',
+      userId: trackingContext?.userId,
+      conversationId: trackingContext?.conversationId,
+    })
+
+    const text = data.content?.[0]?.type === 'text' ? data.content[0].text : null
+    if (!text) {
+      logger.warn('Haiku mock 識別回應為空')
+      return null
+    }
+
+    const parsed = safeParseJson<{ indices: number[] }>(text)
+    if (!parsed || !Array.isArray(parsed.indices)) {
+      logger.warn({ text }, 'Haiku mock 識別 JSON 解析失敗')
+      return null
+    }
+
+    // 驗證 indices 範圍 + 去重
+    const valid = [...new Set(parsed.indices)].filter(
+      i => typeof i === 'number' && i >= 0 && i < allComponents.length
+    )
+
+    logger.info(
+      { raw: parsed.indices.length, valid: valid.length, total: allComponents.length },
+      'Haiku mock 識別完成',
+    )
+    return valid
+  } catch (err) {
+    logger.warn({ err }, 'Haiku mock 識別異常')
+    return null
+  }
+}
+
+/** Regex fallback 識別 */
+function identifyByRegex(
+  allComponents: GeneratedComponent[],
 ): { needsRewrite: GeneratedComponent[]; unchanged: GeneratedComponent[] } {
   const needsRewrite: GeneratedComponent[] = []
   const unchanged: GeneratedComponent[] = []
-
-  const allComponents = [...code.pages, ...code.components]
-
   for (const comp of allComponents) {
-    const hasMockData = MOCK_DATA_PATTERNS.some(pattern => pattern.test(comp.content))
-    if (hasMockData) {
+    if (MOCK_DATA_PATTERNS.some(p => p.test(comp.content))) {
       needsRewrite.push(comp)
     } else {
       unchanged.push(comp)
     }
   }
-
-  logger.info({ needsRewrite: needsRewrite.length, unchanged: unchanged.length }, '組件分類完成')
   return { needsRewrite, unchanged }
+}
+
+export async function identifyMockDataComponents(
+  code: GeneratedCode,
+  options?: {
+    availableActions?: Array<{ name: string; summary: string }>
+    trackingContext?: { userId?: string; conversationId?: string }
+  },
+): Promise<{ needsRewrite: GeneratedComponent[]; unchanged: GeneratedComponent[] }> {
+  const allComponents = [...code.pages, ...code.components]
+
+  // Haiku LLM 識別（需要 availableActions）
+  if (options?.availableActions && options.availableActions.length > 0) {
+    const indices = await classifyComponentsWithHaiku(
+      allComponents,
+      options.availableActions,
+      options.trackingContext,
+    )
+
+    if (indices !== null) {
+      const indexSet = new Set(indices)
+      const needsRewrite: GeneratedComponent[] = []
+      const unchanged: GeneratedComponent[] = []
+      for (let i = 0; i < allComponents.length; i++) {
+        if (indexSet.has(i)) {
+          needsRewrite.push(allComponents[i])
+        } else {
+          unchanged.push(allComponents[i])
+        }
+      }
+      logger.info({ needsRewrite: needsRewrite.length, unchanged: unchanged.length, method: 'haiku' }, '組件分類完成')
+      return { needsRewrite, unchanged }
+    }
+
+    logger.warn('Haiku 識別失敗，降級到 regex')
+  }
+
+  // Fallback: regex
+  const result = identifyByRegex(allComponents)
+  logger.info({ needsRewrite: result.needsRewrite.length, unchanged: result.unchanged.length, method: 'regex' }, '組件分類完成')
+  return result
 }
 
 // ============================================================
@@ -677,9 +827,12 @@ export async function executeCoderPipeline(
   const apiRouteFiles = generateApiRoutes(actions, actionsYml)
   logger.info({ count: apiRouteFiles.length }, 'API Routes 生成完成')
 
-  // Step 5: 識別需改寫的組件
+  // Step 5: 識別需改寫的組件（Haiku LLM + regex fallback）
   await callbacks.onProgress('分析前端組件...', 55)
-  const { needsRewrite, unchanged } = identifyMockDataComponents(existingUiuxCode)
+  const { needsRewrite, unchanged } = await identifyMockDataComponents(existingUiuxCode, {
+    availableActions: actions.map(a => ({ name: a.name, summary: a.summary })),
+    trackingContext,
+  })
 
   // 構建 availableActions（供前端改寫 LLM 參考）
   const availableActions = serverActionFiles.map(f => ({
