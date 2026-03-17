@@ -669,6 +669,19 @@ export { sql }
 export default sql
 `
 
+// 沒有 tailwindConfig 時的預設 config — 掃描所有檔案路徑
+const DEFAULT_TAILWIND_CONFIG = `/** @type {import('tailwindcss').Config} */
+module.exports = {
+  content: [
+    './app/**/*.{js,ts,jsx,tsx,mdx}',
+    './components/**/*.{js,ts,jsx,tsx,mdx}',
+    './lib/**/*.{js,ts,jsx,tsx}',
+  ],
+  theme: { extend: {} },
+  plugins: [],
+}
+`
+
 const MINIMAL_CSS = `@tailwind base;
 @tailwind components;
 @tailwind utilities;
@@ -718,10 +731,13 @@ export function buildWebContainerFiles(input: WebContainerFilesInput): FileSyste
   // Edit bridge
   setFileInTree(tree, 'public/edit-bridge.js', EDIT_BRIDGE_SCRIPT)
 
-  // Tailwind config — 轉為 CJS .js 格式（WebContainer 的 Tailwind v3 PostCSS 不一定支援 .ts）
+  // Tailwind config — 轉為 CJS .js 格式
   if (input.tailwindConfig) {
     const jsConfig = convertTailwindConfigToJs(input.tailwindConfig)
     setFileInTree(tree, 'tailwind.config.js', jsConfig)
+  } else {
+    // 沒有 config（舊的 code_preview 消息）→ 生成基本的，確保 Tailwind 掃描所有檔案
+    setFileInTree(tree, 'tailwind.config.js', DEFAULT_TAILWIND_CONFIG)
   }
 
   // Global styles
