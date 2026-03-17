@@ -380,6 +380,101 @@ function convertTailwindConfigToJs(tsConfig: string): string {
 }
 
 /**
+ * 掃描所有檔案的 @/ import，為缺失的模組生成 stub。
+ * 防止 webpack 因找不到模組而 500（舊的 code_preview 資料可能不含 server-side 檔案）。
+ */
+function generateMissingStubs(tree: FileSystemTree, files: GeneratedFile[]): void {
+  // 收集已有的檔案路徑
+  const existingPaths = new Set<string>()
+  for (const f of files) {
+    const p = f.path.startsWith('/') ? f.path.slice(1) : f.path
+    existingPaths.add(p)
+    // Also add without extension for resolution
+    existingPaths.add(p.replace(/\.(tsx?|jsx?)$/, ''))
+  }
+
+  // 掃描所有 import（@/ 路徑別名和相對路徑）
+  const importRegex = /from\s+['"](@\/[^'"]+)['"]/g
+  const missingPaths = new Set<string>()
+
+  for (const file of files) {
+    let m
+    importRegex.lastIndex = 0
+    while ((m = importRegex.exec(file.content)) !== null) {
+      const importPath = m[1].replace('@/', '') // @/lib/db → lib/db
+
+      // 檢查是否已有（考慮 .ts/.tsx 副檔名）
+      const candidates = [
+        importPath,
+        importPath + '.ts',
+        importPath + '.tsx',
+        importPath + '/index.ts',
+        importPath + '/index.tsx',
+      ]
+      const found = candidates.some(c => existingPaths.has(c))
+      if (!found) {
+        missingPaths.add(importPath)
+      }
+    }
+  }
+
+  // 為每個缺失路徑生成 stub
+  for (const mp of missingPaths) {
+    // 判斷是 Server Action ('use server') 還是普通模組
+    const isAction = mp.startsWith('app/actions/') || mp.includes('/actions/')
+    const isDbRelated = mp.includes('lib/db') || mp.includes('lib/actions/')
+
+    let stub: string
+    if (isAction) {
+      // Server Action stub — 所有 export 的函數回傳空物件
+      stub = `'use server'\n\n// Auto-generated stub (original file not in preview data)\nexport default async function stub() { return {} }\n`
+      // 掃描 import 這個模組的檔案，找出 named imports 並 export 它們
+      const namedExports = new Set<string>()
+      for (const file of files) {
+        const namedRe = new RegExp(`import\\s*\\{([^}]+)\\}\\s*from\\s*['"]@/${mp.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}['"]`)
+        const nm = namedRe.exec(file.content)
+        if (nm) {
+          nm[1].split(',').map(s => s.trim().split(' as ')[0].trim()).filter(Boolean).forEach(n => namedExports.add(n))
+        }
+      }
+      if (namedExports.size > 0) {
+        stub = `'use server'\n\n// Auto-generated stub\n`
+        for (const name of namedExports) {
+          stub += `export async function ${name}(...args) { return {} }\n`
+        }
+      }
+    } else if (isDbRelated) {
+      stub = MOCK_DB
+    } else {
+      // 普通模組 stub
+      const namedExports = new Set<string>()
+      for (const file of files) {
+        const namedRe = new RegExp(`import\\s*\\{([^}]+)\\}\\s*from\\s*['"]@/${mp.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}['"]`)
+        const nm = namedRe.exec(file.content)
+        if (nm) {
+          nm[1].split(',').map(s => s.trim().split(' as ')[0].trim()).filter(Boolean).forEach(n => namedExports.add(n))
+        }
+      }
+      stub = `// Auto-generated stub\n`
+      for (const name of namedExports) {
+        // PascalCase → component, camelCase → function/data
+        if (name[0] === name[0].toUpperCase()) {
+          stub += `export function ${name}() { return null }\n`
+        } else {
+          stub += `export const ${name} = []\n`
+        }
+      }
+      if (namedExports.size === 0) {
+        stub += `export default function Stub() { return null }\n`
+      }
+    }
+
+    const filePath = mp.endsWith('.ts') || mp.endsWith('.tsx') ? mp : mp + '.ts'
+    setFileInTree(tree, filePath, stub)
+  }
+}
+
+/**
  * Scan all files for package imports and build a deps map
  */
 function scanDependencies(files: GeneratedFile[]): Record<string, string> {
@@ -676,13 +771,15 @@ export function buildWebContainerFiles(input: WebContainerFilesInput): FileSyste
   }
 
   // Mock lib/db.ts — 沒有 DB 連線時，覆蓋為 no-op 防止 Server Actions crash
-  // 有 neonConnectionString 時保留真實 lib/db.ts（讓 Server Actions 連真正的 DB）
   if (!input.neonConnectionString) {
     const allCode = allFiles.map(f => f.content).join('\n')
     if (allCode.includes('@neondatabase/serverless') || allCode.includes('lib/db')) {
       setFileInTree(tree, 'lib/db.ts', MOCK_DB)
     }
   }
+
+  // 自動為缺失的 @/ import 生成 stub，防止 webpack 編譯失敗
+  generateMissingStubs(tree, allFiles)
 
   // If no layout was provided, use minimal layout with edit bridge
   const hasLayout = input.pages.some(p =>
