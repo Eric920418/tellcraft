@@ -13,7 +13,6 @@ export async function GET(
       headers: {
         'Accept': 'text/html',
       },
-      redirect: 'manual', // 不跟隨 redirect（deployed sites 有 X-Frame-Options: deny）
     })
 
     if (response.ok) {
