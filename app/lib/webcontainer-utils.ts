@@ -30,17 +30,14 @@ export interface WebContainerFilesInput {
 // ── Known Package Versions ──
 // Synced with deployer.ts KNOWN_PACKAGES + BASE_DEPS
 
-// WebContainers 用 WASM Node.js，Next.js 15 的 AsyncLocalStorage 不完整支援
-// 降級到 14.2.x（App Router + Server Actions 都正常，無 async params 問題）
-// Tailwind 用 v3（與 Next.js 14 內建 PostCSS 支援匹配）
+// 與 Deployer 同步：Next.js 16 + Tailwind v4
 const BASE_DEPS: Record<string, string> = {
-  next: '14.2.28',
-  react: '^18.3.0',
-  'react-dom': '^18.3.0',
+  next: '^16.0.0',
+  react: '^19.0.0',
+  'react-dom': '^19.0.0',
   motion: '^11.0.0',
-  tailwindcss: '^3.4.0',
-  postcss: '^8.4.0',
-  autoprefixer: '^10.0.0',
+  tailwindcss: '^4.0.0',
+  '@tailwindcss/postcss': '^4.0.0',
 }
 
 const KNOWN_PACKAGES: Record<string, string> = {
@@ -340,26 +337,22 @@ const EDIT_BRIDGE_SCRIPT = `
 // ── Core Functions ──
 
 /**
- * Convert Tailwind v4 CSS syntax to v3 for WebContainer preview.
- * Generated code uses v4 (@import "tailwindcss") but preview runs v3.
- * Same approach as deployer.ts cleanTailwindV4Syntax.
+ * Ensure globals.css has @import "tailwindcss" at the top.
+ * Tailwind v4 native — no conversion needed.
  */
 export function prepareCss(rawStyles: string | undefined, _hasTailwindConfig: boolean): string {
   let css = rawStyles || MINIMAL_CSS
 
-  // Strip Tailwind v4 directives
-  css = css.replace(/@import\s*["']tailwindcss(?:\/[^"']*)?["']\s*;?\s*/g, '')
-  css = css.replace(/@config\s*["'][^"']*["']\s*;?\s*/g, '')
-  // Strip @theme {} blocks (v4 only)
-  css = css.replace(/@theme\s*\{[^}]*\}/g, '')
-  // Strip @utility / @variant (v4 only)
-  css = css.replace(/@utility\s+[\w-]+\s*\{[^}]*\}/g, '')
-  css = css.replace(/@variant\s+[\w-]+\s*\{[^}]*\}/g, '')
+  // If CSS already has @import "tailwindcss", return as-is
+  if (css.includes('@import') && css.includes('tailwindcss')) {
+    return css
+  }
 
-  // Prepend v3 directives
-  const header = '@tailwind base;\n@tailwind components;\n@tailwind utilities;\n\n'
+  // Strip legacy v3 directives if present (from old projects)
+  css = css.replace(/@tailwind\s+(base|components|utilities)\s*;?\s*/g, '')
 
-  return header + css
+  // Prepend v4 import
+  return '@import "tailwindcss";\n\n' + css
 }
 
 /**
@@ -473,12 +466,14 @@ function injectEditBridge(layoutContent: string): string {
 
 // ── Static Config Files ──
 
-const NEXT_CONFIG = `/** @type {import('next').NextConfig} */
-const nextConfig = {
+const NEXT_CONFIG = `import type { NextConfig } from 'next'
+
+const nextConfig: NextConfig = {
   typescript: { ignoreBuildErrors: true },
   eslint: { ignoreDuringBuilds: true },
   images: { unoptimized: true },
 }
+
 export default nextConfig
 `
 
@@ -507,8 +502,7 @@ const TS_CONFIG = `{
 
 const POSTCSS_CONFIG = `module.exports = {
   plugins: {
-    tailwindcss: {},
-    autoprefixer: {},
+    '@tailwindcss/postcss': {},
   },
 }
 `
@@ -537,9 +531,7 @@ const MINIMAL_PAGE = `export default function Page() {
 }
 `
 
-const MINIMAL_CSS = `@tailwind base;
-@tailwind components;
-@tailwind utilities;
+const MINIMAL_CSS = `@import "tailwindcss";
 `
 
 // ── Main Export Functions ──

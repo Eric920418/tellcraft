@@ -220,13 +220,12 @@ export function toVercelSlug(name: string, projectId?: string): string {
 
 /** 基礎 dependencies（一定會包含在 package.json 中） */
 const BASE_DEPS: Record<string, string> = {
-  next: '^15.0.0',
+  next: '^16.0.0',
   react: '^19.0.0',
   'react-dom': '^19.0.0',
   motion: '^11.0.0',
-  tailwindcss: '^3.4.0',
-  postcss: '^8.4.0',
-  autoprefixer: '^10.0.0',
+  tailwindcss: '^4.0.0',
+  '@tailwindcss/postcss': '^4.0.0',
   '@neondatabase/serverless': '^0.10.0',
 }
 
@@ -512,13 +511,6 @@ export default function Page() {
       /@import\s+url\(['"]*https:\/\/fonts\.googleapis\.com[^)]*\)['"]*\s*;?\s*/g, ''
     )
     fixes.push(`globals.css: 移除 Google Fonts @import`)
-  }
-
-  // ── 修復 5: Tailwind v4 CSS 語法 → v3 相容（@theme→:root, @apply font-custom→CSS, etc）──
-  const beforeClean = sanitized.styles
-  sanitized.styles = cleanTailwindV4Syntax(sanitized.styles)
-  if (sanitized.styles !== beforeClean) {
-    fixes.push(`globals.css: 清理 Tailwind v4 語法（@theme/@import/@apply font-*）`)
   }
 
   // ── 注入 motion helper ──
@@ -1113,13 +1105,12 @@ export default nextConfig
 `,
   })
 
-  // postcss.config.js（Tailwind v3 必需）
+  // postcss.config.js（Tailwind v4）
   files.push({
     file: 'postcss.config.js',
     data: `module.exports = {
   plugins: {
-    tailwindcss: {},
-    autoprefixer: {},
+    '@tailwindcss/postcss': {},
   },
 }
 `,
@@ -1150,26 +1141,29 @@ export default nextConfig
     }, null, 2),
   })
 
-  // app/globals.css — Tailwind v3
-  // 統一清理 Tailwind v4 語法 + 非標準 @apply font-* 轉換
-  let stylesContent = cleanTailwindV4Syntax(code.styles)
+  // app/globals.css — Tailwind v4（@import "tailwindcss" 是入口）
+  let stylesContent = code.styles
 
   // 安全網：如果 tailwind config 引用了 CSS 變數但 styles 中缺少定義，注入 fallback
-  // 舊 project_files 中的 tailwind config 可能仍用 var(--radius-*) / var(--color-*)
   if (tailwindConfig.includes('var(--radius-') && !stylesContent.includes('--radius-')) {
     const fallbackRadiusVars = `\n/* Fallback radius variables */\n:root {\n  --radius-none: 0;\n  --radius-sm: 0.125rem;\n  --radius-md: 0.375rem;\n  --radius-lg: 0.5rem;\n  --radius-full: 9999px;\n}\n`
     stylesContent = stylesContent + fallbackRadiusVars
   }
   if (tailwindConfig.includes('var(--color-') && !stylesContent.includes('--color-primary')) {
-    // 顏色變數通常由 LLM 生成在 globals.css 中，若缺失則使用中性灰作 fallback
     const fallbackColorVars = `\n/* Fallback color variables */\n:root {\n  --color-primary: #2563eb;\n  --color-secondary: #4f46e5;\n  --color-accent: #06b6d4;\n  --color-background: #ffffff;\n  --color-foreground: #0f172a;\n  --color-muted: #f1f5f9;\n  --color-border: #e2e8f0;\n}\n`
     stylesContent = stylesContent + fallbackColorVars
   }
 
-  const hasTailwindDirectives = stylesContent.includes('@tailwind base')
-  const globalsCss = hasTailwindDirectives
+  // 確保 @import "tailwindcss" 在最頂部
+  const hasTailwindImport = stylesContent.includes('@import') && stylesContent.includes('tailwindcss')
+  const hasLegacyDirectives = stylesContent.includes('@tailwind base')
+  if (hasLegacyDirectives) {
+    // 清理舊的 v3 指令
+    stylesContent = stylesContent.replace(/@tailwind\s+(base|components|utilities)\s*;?\s*/g, '')
+  }
+  const globalsCss = hasTailwindImport
     ? stylesContent
-    : `@tailwind base;\n@tailwind components;\n@tailwind utilities;\n\n${stylesContent}`
+    : `@import "tailwindcss";\n\n${stylesContent}`
   files.push({ file: 'app/globals.css', data: globalsCss })
 
   // tailwind.config.ts（Tailwind v3 必需 content 路徑）
@@ -1975,33 +1969,7 @@ function parseBuildErrors(output: string): BuildError[] {
   return errors
 }
 
-/**
- * 清理 CSS 中的 Tailwind v4 語法（可重複調用）
- * - @import "tailwindcss" 移除
- * - @theme {} → :root {}
- * - @utility/@variant/@custom-variant 移除
- * - @apply font-{custom} → font-family: var(--font-{custom})（非標準 Tailwind font utility）
- */
-function cleanTailwindV4Syntax(styles: string): string {
-  let result = styles
-  // @import "tailwindcss" 及子路徑
-  result = result.replace(/@import\s*["']tailwindcss(?:\/[^"']*)?["']\s*;?\s*/g, '')
-  // @theme {} → :root {}
-  result = result.replace(/@theme\s*\{([^}]*(?:\{[^}]*\}[^}]*)*)\}/g, (_m, inner: string) => {
-    const trimmed = inner.trim()
-    return trimmed.length > 0 ? `:root {\n${trimmed}\n}` : ''
-  })
-  // @utility/@variant/@custom-variant 移除
-  result = result.replace(/@(?:utility|variant|custom-variant)\s+[\w-]+\s*\{[^}]*(?:\{[^}]*\}[^}]*)*\}/g, '')
-  // @apply font-{name}：非標準 Tailwind font utility 轉為直接 CSS
-  // 標準 Tailwind font utilities: font-sans, font-serif, font-mono
-  const standardFonts = new Set(['sans', 'serif', 'mono'])
-  result = result.replace(/@apply\s+font-([\w-]+)\s*;/g, (match, fontName: string) => {
-    if (standardFonts.has(fontName)) return match // 保留標準 Tailwind utility
-    return `font-family: var(--font-${fontName}, inherit);`
-  })
-  return result
-}
+// cleanTailwindV4Syntax 已移除 — Tailwind v4 是新標準，不再清理
 
 /**
  * 解析 npm install 錯誤中的壞依賴
@@ -2111,10 +2079,9 @@ async function fixBuildErrors(
      export default function Page() { return <Suspense><SearchClient /></Suspense> }
      \`\`\`
 11. **如果錯誤是 CSS/PostCSS 處理失敗**（webpack errors related to globals.css）：
-   - 移除所有 Tailwind v4 語法：\`@theme {}\`、\`@import "tailwindcss"\`、\`@utility\`、\`@variant\`
-   - 將 \`@theme { --color-xxx: ...; }\` 轉換為 \`:root { --color-xxx: ...; }\`
-   - 確保使用 Tailwind v3 指令：\`@tailwind base;\`、\`@tailwind components;\`、\`@tailwind utilities;\`
-   - \`@apply\` 語法可以保留（Tailwind v3 支援）
+   - 專案使用 Tailwind v4：確保 \`@import "tailwindcss";\` 在 globals.css 最頂部
+   - \`@theme {}\`、\`@utility\`、\`@variant\`、\`@apply\` 都是合法的 Tailwind v4 語法
+   - 若有舊的 \`@tailwind base;\`、\`@tailwind components;\`、\`@tailwind utilities;\` 替換為 \`@import "tailwindcss";\`
    - 移除任何不合法的 CSS 語法
 
 ## Build 錯誤
@@ -2455,10 +2422,7 @@ async function verifyBuildLocally(
         }
 
         currentCode = fixResult.code
-        // LLM 可能在修復中重新引入 Tailwind v4 語法，每次修復後再清理一遍
-        if (currentCode.styles) {
-          currentCode.styles = cleanTailwindV4Syntax(currentCode.styles)
-        }
+        // Tailwind v4 語法是標準，不再清理
         if (Object.keys(fixResult.newDependencies).length > 0) {
           currentExtraDeps = { ...currentExtraDeps, ...fixResult.newDependencies }
           fixes.push(`AI 新增依賴: ${Object.keys(fixResult.newDependencies).join(', ')}`)
