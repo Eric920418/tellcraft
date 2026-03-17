@@ -23,7 +23,7 @@ import { recommendMoods, getMoodSummary } from '../../services/design-moods'
 import { executeIteration, executeUndoIteration } from '../../services/iteration-skill'
 import { semanticGateway } from '../../services/semantic-gateway'
 import { detectFastModeIntent, getFaqReply, answerWithSonnet } from '../../services/customer-service'
-import { sendMessage, saveFlowState, getFlowState, deleteFlowState, makeStreamingCallback, generatedCodeToFileRows, deductCredits, hasRecentFlowActivity, touchFlowActivity } from '../orchestrator-utils'
+import { sendMessage, streamLlmMessage, saveFlowState, getFlowState, deleteFlowState, makeStreamingCallback, generatedCodeToFileRows, deductCredits, hasRecentFlowActivity, touchFlowActivity } from '../orchestrator-utils'
 import { CREDIT_COSTS } from '../../config/plans'
 import {
   hasDeployIntent, hasRejectDeployIntent, hasUndoIntent,
@@ -629,11 +629,10 @@ export async function handleUiuxMixedPhaseRouting(
               quickReplies: qr,
             })
           } else {
-            const sonnetReply = await answerWithSonnet(trimmed, { conversationId, locale: state.locale })
-            await sendMessage(conversationId, io, {
-              content: sonnetReply,
+            await streamLlmMessage(conversationId, io, {
               stage: 'customer_service',
               quickReplies: qr,
+              llmFn: (onDelta) => answerWithSonnet(trimmed, { conversationId, locale: state.locale }, onDelta),
             })
           }
           return

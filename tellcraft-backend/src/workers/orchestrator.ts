@@ -7,7 +7,7 @@ import { classifyIntent, isSkillIntent } from '../services/classifier'
 import { SkillName } from '../services/registry'
 import { prefilterMessage, checkBuildRelevance, recordAbuseViolation, checkInputQuality } from '../services/prefilter'
 import { detectFastModeIntent, getFaqReply, answerWithSonnet } from '../services/customer-service'
-import { sendMessage, saveFlowState, getFlowState, deleteFlowState, deductCredits } from './orchestrator-utils'
+import { sendMessage, streamLlmMessage, saveFlowState, getFlowState, deleteFlowState, deductCredits } from './orchestrator-utils'
 import { CREDIT_COSTS, isFairUsePlan } from '../config/plans'
 import { createLogger } from '../lib/logger'
 import { getEnv } from '../lib/env'
@@ -390,9 +390,12 @@ async function handleProcessMessage(
           await sendMessage(conversationId, io, { content: faqResult.reply, stage: 'customer_service', quickReplies: buildQuickReplies })
           return { taskId: null, skill: null }
         }
-        logger.info('FAQ 未命中，使用 Sonnet 回答')
-        const sonnetReply = await answerWithSonnet(message, { conversationId, locale })
-        await sendMessage(conversationId, io, { content: sonnetReply, stage: 'customer_service', quickReplies: buildQuickReplies })
+        logger.info('FAQ 未命中，使用 Sonnet 串流回答')
+        await streamLlmMessage(conversationId, io, {
+          stage: 'customer_service',
+          quickReplies: buildQuickReplies,
+          llmFn: (onDelta) => answerWithSonnet(message, { conversationId, locale }, onDelta),
+        })
         return { taskId: null, skill: null }
       }
 

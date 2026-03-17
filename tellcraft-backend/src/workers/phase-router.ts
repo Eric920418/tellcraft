@@ -6,7 +6,7 @@
 import type Redis from 'ioredis'
 import type { Server as SocketIOServer } from 'socket.io'
 import type { FlowState } from '../types/flow-state'
-import { sendMessage, saveFlowState, deleteFlowState, hasRecentFlowActivity } from './orchestrator-utils'
+import { sendMessage, streamLlmMessage, saveFlowState, deleteFlowState, hasRecentFlowActivity } from './orchestrator-utils'
 import { executeIteration, executeUndoIteration, executeRollbackQuery, executeRollbackSelection } from '../services/iteration-skill'
 import { semanticGateway } from '../services/semantic-gateway'
 import { detectFastModeIntent, getFaqReply, answerWithSonnet } from '../services/customer-service'
@@ -441,8 +441,11 @@ async function routeDeployerFailed(
       if (faqResult) {
         await sendMessage(conversationId, io, { content: faqResult.reply, stage: 'customer_service', quickReplies: qr })
       } else {
-        const reply = await answerWithSonnet(trimmed, { conversationId, locale: state.locale })
-        await sendMessage(conversationId, io, { content: reply, stage: 'customer_service', quickReplies: qr })
+        await streamLlmMessage(conversationId, io, {
+          stage: 'customer_service',
+          quickReplies: qr,
+          llmFn: (onDelta) => answerWithSonnet(trimmed, { conversationId, locale: state.locale }, onDelta),
+        })
       }
       return
     }
@@ -526,8 +529,11 @@ async function routeDeployerComplete(
       if (faqResult) {
         await sendMessage(conversationId, io, { content: faqResult.reply, stage: 'customer_service', quickReplies: qr })
       } else {
-        const reply = await answerWithSonnet(trimmed, { conversationId, locale: state.locale })
-        await sendMessage(conversationId, io, { content: reply, stage: 'customer_service', quickReplies: qr })
+        await streamLlmMessage(conversationId, io, {
+          stage: 'customer_service',
+          quickReplies: qr,
+          llmFn: (onDelta) => answerWithSonnet(trimmed, { conversationId, locale: state.locale }, onDelta),
+        })
       }
       return
     }

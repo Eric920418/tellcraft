@@ -195,6 +195,101 @@ export async function sendMessage(
     .catch(() => {})
 }
 
+/**
+ * LLM 串流訊息推送 — 將 LLM token-by-token 的輸出即時推送到前端
+ * 與 sendMessage 並存，專用於 LLM 生成的對話文字。
+ *
+ * 協議：
+ * 1. message_stream_start → 前端建立串流訊息氣泡
+ * 2. message_stream_chunk → 前端逐步渲染累積文字
+ * 3. message_stream_end → 前端確認完成，顯示 quickReplies
+ *
+ * 錯誤時自動降級為 sendMessage（完整文字一次推送）
+ */
+export async function streamLlmMessage(
+  conversationId: string,
+  io: SocketIOServer,
+  options: {
+    stage?: string
+    quickReplies?: { label: string; value: string; style?: 'primary' | 'secondary' | 'ghost' }[]
+    layoutHint?: 'default' | 'split' | 'full_preview'
+    llmFn: (onDelta: (accumulated: string) => void) => Promise<string>
+  }
+): Promise<string> {
+  const THROTTLE_MS = 80
+  const messageId = crypto.randomUUID()
+  const room = `conversation:${conversationId}`
+
+  try {
+    // 1. 通知前端開始串流
+    io.to(room).emit('message_stream_start', {
+      messageId,
+      stage: options.stage,
+    })
+
+    // 2. 呼叫 LLM，節流推送 accumulated 文字
+    let lastEmitAt = 0
+    const onDelta = (accumulated: string) => {
+      const now = Date.now()
+      if (now - lastEmitAt >= THROTTLE_MS) {
+        lastEmitAt = now
+        io.to(room).emit('message_stream_chunk', {
+          messageId,
+          accumulated,
+        })
+      }
+    }
+
+    const finalText = await options.llmFn(onDelta)
+    const normalizedContent = finalText.trim() || ''
+
+    // 3. 組裝完整 message，寫 DB
+    const message = {
+      id: messageId,
+      role: 'assistant',
+      content: normalizedContent,
+      timestamp: new Date().toISOString(),
+      stage: options.stage,
+      layoutHint: options.layoutHint,
+      quickReplies: options.quickReplies,
+    }
+
+    const conversation = await db.getConversation(conversationId)
+    if (conversation) {
+      const messages = [...(conversation.messages as unknown[]), message]
+      await db.updateConversationMessages(conversationId, messages)
+    }
+
+    // 4. 通知前端串流結束（含完整 message）
+    io.to(room).emit('message_stream_end', message)
+
+    // 5. 同時 emit 標準 message 事件（供 polling fallback）
+    io.to(room).emit('message', message)
+
+    // 6. LINE / Telegram 推播
+    sendLineNotifyIfNeeded(conversationId, options.stage, normalizedContent)
+      .catch(() => {})
+    sendLineFullMessage(conversationId, { ...options, content: normalizedContent })
+      .catch(() => {})
+    sendTelegramNotifyIfNeeded(conversationId, options.stage, normalizedContent)
+      .catch(() => {})
+    sendTelegramFullMessage(conversationId, { ...options, content: normalizedContent })
+      .catch(() => {})
+
+    return normalizedContent
+  } catch (err) {
+    // 串流失敗 → 降級為 sendMessage
+    logger.error({ err, conversationId }, 'streamLlmMessage 失敗，降級為 sendMessage')
+    const fallback = (err instanceof Error && err.message) || ''
+    await sendMessage(conversationId, io, {
+      content: fallback || '抱歉，回覆時發生錯誤。請再試一次。',
+      stage: options.stage,
+      quickReplies: options.quickReplies,
+    })
+    return fallback
+  }
+}
+
 export async function touchFlowActivity(
   redis: Redis,
   conversationId: string,

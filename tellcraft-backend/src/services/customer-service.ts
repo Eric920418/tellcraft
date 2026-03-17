@@ -4,7 +4,7 @@
 // ============================================================
 
 import { createLogger } from '../lib/logger'
-import { getAnthropicHeaders, MODEL, trackLlmUsage } from '../lib/anthropic'
+import { getAnthropicClient, MODEL, trackLlmUsage } from '../lib/anthropic'
 
 const logger = createLogger('customer-service')
 
@@ -268,7 +268,8 @@ export function getFaqReply(msg: string, locale?: 'zh' | 'en'): { reply: string;
  */
 export async function answerWithSonnet(
   msg: string,
-  context: { conversationId?: string; locale?: 'zh' | 'en' }
+  context: { conversationId?: string; locale?: 'zh' | 'en' },
+  onTextDelta?: (accumulated: string) => void
 ): Promise<string> {
   const isChinese = context.locale === 'zh' || (context.locale !== 'en' && /[\u4e00-\u9fff\u3400-\u4dbf]/.test(msg))
 
@@ -308,39 +309,34 @@ Rules:
 - End with a prompt to start building`
 
   try {
-    const resp = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: getAnthropicHeaders(),
-      body: JSON.stringify({
-        model: MODEL.SONNET,
-        max_tokens: 300,
-        system: systemPrompt,
-        messages: [{ role: 'user', content: msg }],
-      }),
+    const client = getAnthropicClient()
+    const stream = client.messages.stream({
+      model: MODEL.SONNET,
+      max_tokens: 300,
+      system: systemPrompt,
+      messages: [{ role: 'user', content: msg }],
     })
 
-    if (!resp.ok) {
-      logger.warn({ status: resp.status }, 'Sonnet API 錯誤，降級回覆')
-      return fallbackReply
-    }
+    let accumulated = ''
+    stream.on('text', (textDelta) => {
+      accumulated += textDelta
+      onTextDelta?.(accumulated)
+    })
 
-    const data = await resp.json() as {
-      content?: Array<{ text?: string }>
-      usage?: { input_tokens?: number; output_tokens?: number }
-    }
+    const finalMessage = await stream.finalMessage()
 
     // 記錄使用量
-    if (data.usage) {
+    if (finalMessage.usage) {
       trackLlmUsage({
         model: MODEL.SONNET,
-        inputTokens: data.usage.input_tokens || 0,
-        outputTokens: data.usage.output_tokens || 0,
+        inputTokens: finalMessage.usage.input_tokens || 0,
+        outputTokens: finalMessage.usage.output_tokens || 0,
         purpose: 'customer_service',
         conversationId: context.conversationId,
       })
     }
 
-    const text = data.content?.[0]?.text?.trim()
+    const text = accumulated.trim()
     if (!text) return fallbackReply
 
     return text

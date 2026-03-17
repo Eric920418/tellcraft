@@ -841,8 +841,9 @@ psql "$DATABASE_URL" -f tellcraft-backend/migrations/xxx.sql
 <details>
 <summary><h2>開發更新紀錄（點擊展開）</h2></summary>
 
-### 近期更新（2026-03-13 ~ 2026-03-16）
+### 近期更新（2026-03-13 ~ 2026-03-17）
 
+- **LLM 即時串流回覆**（03-17）：AI 對話文字 token-by-token 即時串流到前端（非假打字機動畫），`streamLlmMessage()` + `answerWithSonnet` 改 SDK streaming + 前端 `useMessageStreaming` hook + `StreamingMessageBubble` 組件，客服回覆先上線
 - **Coder Stage B 100%**（03-16）：91/91 scenarios 全過，Runner 修復歷程 0%→69%→100%（bcryptjs hash/FK 自動建立/UUID tolerance/array matching 等）
 - **Deployer 防爆修復**（03-16）：KNOWN_PACKAGES +bcryptjs/jsonwebtoken、'use server' 保護、未知依賴警告
 - **Fast Build 單頁深度**（03-14）：多頁→只做首頁 5-8 Section，Animation 截斷修復
