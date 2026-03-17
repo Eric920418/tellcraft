@@ -175,7 +175,7 @@ export function useWebContainer(options: UseWebContainerOptions): UseWebContaine
 
         // 5. Start next dev
         updateStatus('starting', '啟動 Next.js 開發伺服器...')
-        devProcess = await container.spawn('npx', ['next', 'dev', '--webpack', '--port', '3000'])
+        devProcess = await container.spawn('npx', ['next', 'dev', '--port', '3000'])
 
         const devLogs: string[] = []
         devProcess.output.pipeTo(new WritableStream({
@@ -285,7 +285,7 @@ export function useWebContainer(options: UseWebContainerOptions): UseWebContaine
       }
 
       updateStatus('starting', '啟動 Next.js...')
-      devProcess = await container.spawn('npx', ['next', 'dev', '--webpack', '--port', '3000'])
+      devProcess = await container.spawn('npx', ['next', 'dev', '--port', '3000'])
       devProcess.output.pipeTo(new WritableStream({
         write(data) {
           if (data.includes('Error') || data.includes('error')) {

@@ -30,11 +30,12 @@ export interface WebContainerFilesInput {
 // ── Known Package Versions ──
 // Synced with deployer.ts KNOWN_PACKAGES + BASE_DEPS
 
-// Next.js 16 統一版本（WebContainer 用 --webpack flag 繞過 Turbopack WASM 限制）
+// WebContainer 用 Next.js 14（15/16 的 AsyncLocalStorage 在 WASM 不完整，StackBlitz 官方也用 14）
+// 部署端 deployer 用 Next.js 16（Vercel 原生 Node.js 一切正常）
 const BASE_DEPS: Record<string, string> = {
-  next: '^16.0.0',
-  react: '^19.0.0',
-  'react-dom': '^19.0.0',
+  next: '14.2.28',
+  react: '^18.3.0',
+  'react-dom': '^18.3.0',
   motion: '^11.0.0',
   tailwindcss: '^4.0.0',
   '@tailwindcss/postcss': '^4.0.0',
@@ -403,7 +404,7 @@ function buildPackageJson(allFiles: GeneratedFile[]): string {
     version: '0.1.0',
     private: true,
     scripts: {
-      dev: 'next dev --webpack --port 3000',
+      dev: 'next dev --port 3000',
     },
     dependencies: {
       ...BASE_DEPS,
@@ -466,14 +467,13 @@ function injectEditBridge(layoutContent: string): string {
 
 // ── Static Config Files ──
 
-const NEXT_CONFIG = `import type { NextConfig } from 'next'
-
-const nextConfig: NextConfig = {
+const NEXT_CONFIG = `/** @type {import('next').NextConfig} */
+const nextConfig = {
   typescript: { ignoreBuildErrors: true },
+  eslint: { ignoreDuringBuilds: true },
   images: { unoptimized: true },
 }
-
-export default nextConfig
+module.exports = nextConfig
 `
 
 const TS_CONFIG = `{
@@ -542,7 +542,7 @@ export function buildSkeletonFiles(): FileSystemTree {
   const tree: FileSystemTree = {}
 
   setFileInTree(tree, 'package.json', buildPackageJson([]))
-  setFileInTree(tree, 'next.config.ts', NEXT_CONFIG)
+  setFileInTree(tree, 'next.config.js', NEXT_CONFIG)
   setFileInTree(tree, 'tsconfig.json', TS_CONFIG)
   setFileInTree(tree, 'postcss.config.js', POSTCSS_CONFIG)
   setFileInTree(tree, 'app/layout.tsx', MINIMAL_LAYOUT)
@@ -570,7 +570,7 @@ export function buildWebContainerFiles(input: WebContainerFilesInput): FileSyste
   setFileInTree(tree, 'package.json', buildPackageJson(allFiles))
 
   // Config files
-  setFileInTree(tree, 'next.config.ts', NEXT_CONFIG)
+  setFileInTree(tree, 'next.config.js', NEXT_CONFIG)
   setFileInTree(tree, 'tsconfig.json', TS_CONFIG)
   setFileInTree(tree, 'postcss.config.js', POSTCSS_CONFIG)
 
