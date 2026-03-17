@@ -350,6 +350,9 @@ function scanDependencies(files: GeneratedFile[]): Record<string, string> {
       let m
       while ((m = regex.exec(file.content)) !== null) {
         const raw = m[1]
+        // Skip path aliases (@/ is Next.js tsconfig paths alias)
+        if (raw.startsWith('@/')) continue
+
         const pkg = raw.startsWith('@') ? raw.split('/').slice(0, 2).join('/') : raw.split('/')[0]
 
         if (basePkgs.has(pkg)) continue
