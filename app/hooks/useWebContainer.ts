@@ -175,15 +175,29 @@ export function useWebContainer(options: UseWebContainerOptions): UseWebContaine
         updateStatus('starting', '啟動 Next.js 開發伺服器...')
         devProcess = await container.spawn('npx', ['next', 'dev', '--turbopack', '--port', '3000'])
 
+        const devLogs: string[] = []
         devProcess.output.pipeTo(new WritableStream({
           write(data) {
-            if (data.includes('Error') || data.includes('error')) {
-              console.warn('[WC dev]', data)
-            }
+            devLogs.push(data)
+            console.log('[WC dev]', data)
           }
         })).catch(() => {})
 
+        // Timeout: if server-ready doesn't fire within 60s, show error with dev logs
+        const devTimeout = setTimeout(() => {
+          if (cancelled) return
+          const logTail = devLogs.join('').slice(-800)
+          console.error('[WC] next dev timed out. Logs:\n', logTail)
+          setError(`Next.js 啟動逾時（60 秒）\n\n${logTail}`)
+          updateStatus('error', 'Next.js 啟動逾時')
+        }, 60000)
+
         // server-ready event will fire and set status to 'ready'
+        // Clean up timeout when server is ready
+        const unsubReady = container.on('server-ready', () => {
+          clearTimeout(devTimeout)
+          unsubReady()
+        })
 
       } catch (err) {
         if (cancelled) return

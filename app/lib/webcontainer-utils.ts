@@ -37,6 +37,7 @@ const BASE_DEPS: Record<string, string> = {
   motion: '^11.0.0',
   tailwindcss: '^4.0.0',
   '@tailwindcss/postcss': '^4.0.0',
+  postcss: '^8.4.0',
 }
 
 const KNOWN_PACKAGES: Record<string, string> = {
