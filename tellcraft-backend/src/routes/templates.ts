@@ -599,16 +599,7 @@ router.get('/preview/:id', async (req, res) => {
       return res.send(cached.html_content)
     }
 
-    // 3. 無快取 → 若有 source project 的 vercel_url，直接 redirect 展示真實站台
-    if (template.project_vercel_url) {
-      const deployedUrl = template.project_vercel_url.startsWith('http')
-        ? template.project_vercel_url
-        : `https://${template.project_vercel_url}`
-      logger.info({ templateName: template.name, deployedUrl }, '模板無預覽快取，redirect 到 deployed site')
-      return res.redirect(302, deployedUrl)
-    }
-
-    // 4. 無快取且無 deployed URL → 返回佔位頁面
+    // 3. 無快取 → 返回佔位頁面（不 redirect，deployed site 有 X-Frame-Options: deny 無法 iframe 嵌入）
     logger.info({ templateName: template.name, slug: template.slug }, '模板無預覽快取')
 
     const designDefaults = template.design_defaults
