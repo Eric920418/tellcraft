@@ -193,8 +193,6 @@ export default function WebContainerPreview({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pages.length > 0 ? 'has-pages' : 'skeleton'])
 
-  console.log('[WC Preview] render — supported:', supported, 'status:', status, 'pages:', pages.length, 'iframeUrl:', !!iframeUrl)
-
   // ── Env vars ──
   const envVars = useMemo(() => {
     if (!neonConnectionString) return undefined
@@ -218,6 +216,8 @@ export default function WebContainerPreview({
       onRuntimeError?.({ name: err.type, message: err.message, path: undefined })
     },
   })
+
+  console.log('[WC Preview] render — supported:', supported, 'status:', status, 'pages:', pages.length, 'iframeUrl:', !!iframeUrl)
 
   // ── Incremental file updates (streaming / iteration) ──
   const allFiles = useMemo(() => [
