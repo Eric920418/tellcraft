@@ -2513,6 +2513,7 @@ async function injectVercelEnvVars(
 
   for (const [key, value] of Object.entries(envVars)) {
     try {
+      // 先嘗試建立
       const res = await fetch(`${VERCEL_API}/v10/projects/${encodeURIComponent(projectName)}/env?${params}`, {
         method: 'POST',
         headers: {
@@ -2526,7 +2527,32 @@ async function injectVercelEnvVars(
           type: 'encrypted',
         }),
       })
-      if (!res.ok && res.status !== 409) {
+
+      // 已存在（400 或 409）→ 查詢 env id 後 PATCH 更新
+      if (res.status === 400 || res.status === 409) {
+        const listRes = await fetch(`${VERCEL_API}/v9/projects/${encodeURIComponent(projectName)}/env?${params}`, {
+          headers: { 'Authorization': `Bearer ${token}` },
+        })
+        if (listRes.ok) {
+          const listData = await listRes.json() as { envs: Array<{ id: string; key: string }> }
+          const existing = listData.envs?.find((e: { key: string }) => e.key === key)
+          if (existing) {
+            const patchRes = await fetch(`${VERCEL_API}/v9/projects/${encodeURIComponent(projectName)}/env/${existing.id}?${params}`, {
+              method: 'PATCH',
+              headers: {
+                'Authorization': `Bearer ${token}`,
+                'Content-Type': 'application/json',
+              },
+              body: JSON.stringify({ value, target: ['production', 'preview'], type: 'encrypted' }),
+            })
+            if (!patchRes.ok) {
+              logger.warn({ key, status: patchRes.status }, 'Vercel env var 更新失敗')
+            } else {
+              logger.info({ key }, 'Vercel env var 已更新（覆寫）')
+            }
+          }
+        }
+      } else if (!res.ok) {
         logger.warn({ key, status: res.status }, 'Vercel env var 注入失敗')
       }
     } catch (err) {

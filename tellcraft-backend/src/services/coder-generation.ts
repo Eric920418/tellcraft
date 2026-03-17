@@ -158,11 +158,30 @@ export function generateDbConnection(): GeneratedComponent {
     path: 'lib/db.ts',
     content: `import { neon } from '@neondatabase/serverless'
 
-const sql = neon(process.env.DATABASE_URL!)
+// Lazy initialization：避免 build 階段因缺少環境變數而 crash
+let _sql: ReturnType<typeof neon> | null = null
 
-export { sql }
+export function getDb() {
+  if (!_sql) {
+    if (!process.env.DATABASE_URL) {
+      throw new Error('DATABASE_URL is not set')
+    }
+    _sql = neon(process.env.DATABASE_URL)
+  }
+  return _sql
+}
+
+// 向後相容：直接 import { sql } 也能用（runtime 才初始化）
+export const sql = new Proxy({} as ReturnType<typeof neon>, {
+  apply(_target, _thisArg, args) {
+    return getDb()(...(args as [TemplateStringsArray, ...unknown[]]))
+  },
+  get(_target, prop) {
+    return (getDb() as unknown as Record<string | symbol, unknown>)[prop]
+  },
+})
 `,
-    description: 'Neon PostgreSQL 資料庫連接',
+    description: 'Neon PostgreSQL 資料庫連接（lazy init）',
   }
 }
 
