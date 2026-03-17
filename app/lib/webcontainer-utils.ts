@@ -32,13 +32,15 @@ export interface WebContainerFilesInput {
 
 // WebContainer 用 Next.js 14（15/16 的 AsyncLocalStorage 在 WASM 不完整，StackBlitz 官方也用 14）
 // 部署端 deployer 用 Next.js 16（Vercel 原生 Node.js 一切正常）
+// 全系統統一 Tailwind v3
 const BASE_DEPS: Record<string, string> = {
   next: '14.2.28',
   react: '^18.3.0',
   'react-dom': '^18.3.0',
   motion: '^11.0.0',
-  tailwindcss: '^4.0.0',
-  '@tailwindcss/postcss': '^4.0.0',
+  tailwindcss: '^3.4.0',
+  postcss: '^8.4.0',
+  autoprefixer: '^10.0.0',
 }
 
 const KNOWN_PACKAGES: Record<string, string> = {
@@ -338,22 +340,26 @@ const EDIT_BRIDGE_SCRIPT = `
 // ── Core Functions ──
 
 /**
- * Ensure globals.css has @import "tailwindcss" at the top.
- * Tailwind v4 native — no conversion needed.
+ * 清理 Tailwind v4 語法，確保 CSS 使用 v3 directives。
+ * 與 deployer.ts 的 cleanTailwindV4Syntax 同邏輯。
  */
 export function prepareCss(rawStyles: string | undefined, _hasTailwindConfig: boolean): string {
   let css = rawStyles || MINIMAL_CSS
 
-  // If CSS already has @import "tailwindcss", return as-is
-  if (css.includes('@import') && css.includes('tailwindcss')) {
-    return css
-  }
+  // Strip v4 語法
+  css = css.replace(/@import\s*["']tailwindcss(?:\/[^"']*)?["']\s*;?\s*/g, '')
+  css = css.replace(/@config\s*["'][^"']*["']\s*;?\s*/g, '')
+  css = css.replace(/@theme\s*\{([^}]*(?:\{[^}]*\}[^}]*)*)\}/g, (_m, inner: string) => {
+    const trimmed = inner.trim()
+    return trimmed.length > 0 ? `:root {\n${trimmed}\n}` : ''
+  })
+  css = css.replace(/@(?:utility|variant|custom-variant)\s+[\w-]+\s*\{[^}]*(?:\{[^}]*\}[^}]*)*\}/g, '')
 
-  // Strip legacy v3 directives if present (from old projects)
+  // Strip existing v3 directives (avoid duplicates)
   css = css.replace(/@tailwind\s+(base|components|utilities)\s*;?\s*/g, '')
 
-  // Prepend v4 import
-  return '@import "tailwindcss";\n\n' + css
+  // Prepend v3 directives
+  return '@tailwind base;\n@tailwind components;\n@tailwind utilities;\n\n' + css
 }
 
 /**
@@ -501,7 +507,8 @@ const TS_CONFIG = `{
 
 const POSTCSS_CONFIG = `module.exports = {
   plugins: {
-    '@tailwindcss/postcss': {},
+    tailwindcss: {},
+    autoprefixer: {},
   },
 }
 `
@@ -530,7 +537,9 @@ const MINIMAL_PAGE = `export default function Page() {
 }
 `
 
-const MINIMAL_CSS = `@import "tailwindcss";
+const MINIMAL_CSS = `@tailwind base;
+@tailwind components;
+@tailwind utilities;
 `
 
 // ── Main Export Functions ──

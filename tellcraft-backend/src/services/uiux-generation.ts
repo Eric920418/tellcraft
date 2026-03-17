@@ -1363,7 +1363,7 @@ ${getMoodSummary(designSystem.mood)}（完整風格指引已在生成指令中�
 
 ## 技術棧
 - Next.js App Router（14+ 相容，優先使用 Server Components，禁止使用 async params 或 React 19 專屬 API）
-- Tailwind CSS（使用 CSS variables）
+- Tailwind CSS v3（使用 CSS variables）
 - TypeScript
 
 ## 輸出格式
@@ -1428,7 +1428,7 @@ ${designSystem.mood ? `
 ${getMoodSummary(designSystem.mood)}` : ''}
 
 ## 技術棧
-- Next.js App Router（14+ 相容）+ Tailwind CSS + TypeScript
+- Next.js App Router（14+ 相容）+ Tailwind CSS v3 + TypeScript
 
 ## 輸出格式
 每個檔案使用以下格式：

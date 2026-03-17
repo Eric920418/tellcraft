@@ -224,8 +224,9 @@ const BASE_DEPS: Record<string, string> = {
   react: '^19.0.0',
   'react-dom': '^19.0.0',
   motion: '^11.0.0',
-  tailwindcss: '^4.0.0',
-  '@tailwindcss/postcss': '^4.0.0',
+  tailwindcss: '^3.4.0',
+  postcss: '^8.4.0',
+  autoprefixer: '^10.0.0',
   '@neondatabase/serverless': '^0.10.0',
 }
 
@@ -511,6 +512,13 @@ export default function Page() {
       /@import\s+url\(['"]*https:\/\/fonts\.googleapis\.com[^)]*\)['"]*\s*;?\s*/g, ''
     )
     fixes.push(`globals.css: 移除 Google Fonts @import`)
+  }
+
+  // ── 修復 5: Tailwind v4 CSS 語法 → v3 ──
+  const beforeClean = sanitized.styles
+  sanitized.styles = cleanTailwindV4Syntax(sanitized.styles)
+  if (sanitized.styles !== beforeClean) {
+    fixes.push(`globals.css: 清理 Tailwind v4 語法（@theme/@import/@apply font-*）`)
   }
 
   // ── 注入 motion helper ──
@@ -1102,12 +1110,13 @@ export default nextConfig
 `,
   })
 
-  // postcss.config.js（Tailwind v4）
+  // postcss.config.js（Tailwind v3）
   files.push({
     file: 'postcss.config.js',
     data: `module.exports = {
   plugins: {
-    '@tailwindcss/postcss': {},
+    tailwindcss: {},
+    autoprefixer: {},
   },
 }
 `,
@@ -1151,16 +1160,13 @@ export default nextConfig
     stylesContent = stylesContent + fallbackColorVars
   }
 
-  // 確保 @import "tailwindcss" 在最頂部
-  const hasTailwindImport = stylesContent.includes('@import') && stylesContent.includes('tailwindcss')
-  const hasLegacyDirectives = stylesContent.includes('@tailwind base')
-  if (hasLegacyDirectives) {
-    // 清理舊的 v3 指令
-    stylesContent = stylesContent.replace(/@tailwind\s+(base|components|utilities)\s*;?\s*/g, '')
-  }
-  const globalsCss = hasTailwindImport
+  // Tailwind v3：清理 v4 語法 + 確保 @tailwind directives
+  stylesContent = cleanTailwindV4Syntax(stylesContent)
+
+  const hasTailwindDirectives = stylesContent.includes('@tailwind base')
+  const globalsCss = hasTailwindDirectives
     ? stylesContent
-    : `@import "tailwindcss";\n\n${stylesContent}`
+    : `@tailwind base;\n@tailwind components;\n@tailwind utilities;\n\n${stylesContent}`
   files.push({ file: 'app/globals.css', data: globalsCss })
 
   // tailwind.config.ts（Tailwind v3 必需 content 路徑）
@@ -1966,7 +1972,30 @@ function parseBuildErrors(output: string): BuildError[] {
   return errors
 }
 
-// cleanTailwindV4Syntax 已移除 — Tailwind v4 是新標準，不再清理
+/**
+ * 清理 CSS 中的 Tailwind v4 語法（統一為 v3）
+ */
+function cleanTailwindV4Syntax(styles: string): string {
+  let result = styles
+  // @import "tailwindcss" 及子路徑
+  result = result.replace(/@import\s*["']tailwindcss(?:\/[^"']*)?["']\s*;?\s*/g, '')
+  // @config 指令
+  result = result.replace(/@config\s*["'][^"']*["']\s*;?\s*/g, '')
+  // @theme {} → :root {}
+  result = result.replace(/@theme\s*\{([^}]*(?:\{[^}]*\}[^}]*)*)\}/g, (_m, inner: string) => {
+    const trimmed = inner.trim()
+    return trimmed.length > 0 ? `:root {\n${trimmed}\n}` : ''
+  })
+  // @utility/@variant/@custom-variant 移除
+  result = result.replace(/@(?:utility|variant|custom-variant)\s+[\w-]+\s*\{[^}]*(?:\{[^}]*\}[^}]*)*\}/g, '')
+  // @apply font-{name}：非標準 Tailwind font utility 轉為直接 CSS
+  const standardFonts = new Set(['sans', 'serif', 'mono'])
+  result = result.replace(/@apply\s+font-([\w-]+)\s*;/g, (match, fontName: string) => {
+    if (standardFonts.has(fontName)) return match
+    return `font-family: var(--font-${fontName}, inherit);`
+  })
+  return result
+}
 
 /**
  * 解析 npm install 錯誤中的壞依賴
@@ -2076,9 +2105,10 @@ async function fixBuildErrors(
      export default function Page() { return <Suspense><SearchClient /></Suspense> }
      \`\`\`
 11. **如果錯誤是 CSS/PostCSS 處理失敗**（webpack errors related to globals.css）：
-   - 專案使用 Tailwind v4：確保 \`@import "tailwindcss";\` 在 globals.css 最頂部
-   - \`@theme {}\`、\`@utility\`、\`@variant\`、\`@apply\` 都是合法的 Tailwind v4 語法
-   - 若有舊的 \`@tailwind base;\`、\`@tailwind components;\`、\`@tailwind utilities;\` 替換為 \`@import "tailwindcss";\`
+   - 移除所有 Tailwind v4 語法：\`@theme {}\`、\`@import "tailwindcss"\`、\`@utility\`、\`@variant\`
+   - 將 \`@theme { --color-xxx: ...; }\` 轉換為 \`:root { --color-xxx: ...; }\`
+   - 確保使用 Tailwind v3 指令：\`@tailwind base;\`、\`@tailwind components;\`、\`@tailwind utilities;\`
+   - \`@apply\` 語法可以保留（Tailwind v3 支援）
    - 移除任何不合法的 CSS 語法
 
 ## Build 錯誤
@@ -2416,7 +2446,10 @@ async function verifyBuildLocally(
         }
 
         currentCode = fixResult.code
-        // Tailwind v4 語法是標準，不再清理
+        // LLM 可能在修復中重新引入 Tailwind v4 語法，每次修復後再清理一遍
+        if (currentCode.styles) {
+          currentCode.styles = cleanTailwindV4Syntax(currentCode.styles)
+        }
         if (Object.keys(fixResult.newDependencies).length > 0) {
           currentExtraDeps = { ...currentExtraDeps, ...fixResult.newDependencies }
           fixes.push(`AI 新增依賴: ${Object.keys(fixResult.newDependencies).join(', ')}`)
