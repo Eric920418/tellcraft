@@ -35,9 +35,8 @@ const BASE_DEPS: Record<string, string> = {
   react: '^19.0.0',
   'react-dom': '^19.0.0',
   motion: '^11.0.0',
-  tailwindcss: '^3.4.0',
-  postcss: '^8.4.0',
-  autoprefixer: '^10.0.0',
+  tailwindcss: '^4.0.0',
+  '@tailwindcss/postcss': '^4.0.0',
 }
 
 const KNOWN_PACKAGES: Record<string, string> = {
@@ -478,8 +477,7 @@ const TS_CONFIG = `{
 
 const POSTCSS_CONFIG = `module.exports = {
   plugins: {
-    tailwindcss: {},
-    autoprefixer: {},
+    '@tailwindcss/postcss': {},
   },
 }
 `
@@ -555,13 +553,24 @@ export function buildWebContainerFiles(input: WebContainerFilesInput): FileSyste
   // Edit bridge
   setFileInTree(tree, 'public/edit-bridge.js', EDIT_BRIDGE_SCRIPT)
 
-  // Tailwind config
+  // Tailwind config (v4: referenced via @config in CSS)
   if (input.tailwindConfig) {
     setFileInTree(tree, 'tailwind.config.ts', input.tailwindConfig)
   }
 
-  // Global styles
-  setFileInTree(tree, 'app/globals.css', input.styles || MINIMAL_CSS)
+  // Global styles — ensure @import "tailwindcss" is present + @config reference
+  let cssContent = input.styles || MINIMAL_CSS
+  if (!cssContent.includes('@import') || !cssContent.includes('tailwindcss')) {
+    cssContent = '@import "tailwindcss";\n' + cssContent
+  }
+  if (input.tailwindConfig && !cssContent.includes('@config')) {
+    // Insert @config after @import "tailwindcss"
+    cssContent = cssContent.replace(
+      /(@import\s*["']tailwindcss["'][^;]*;?)/,
+      '$1\n@config "../tailwind.config.ts";'
+    )
+  }
+  setFileInTree(tree, 'app/globals.css', cssContent)
 
   // Pages
   for (const page of input.pages) {

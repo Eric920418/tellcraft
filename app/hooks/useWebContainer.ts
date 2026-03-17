@@ -148,22 +148,27 @@ export function useWebContainer(options: UseWebContainerOptions): UseWebContaine
           devProcess = null
         }
 
-        const installProcess = await container.spawn('npm', ['install', '--prefer-offline'])
+        const installProcess = await container.spawn('npm', ['install', '--no-audit', '--no-fund'])
         if (cancelled) return
 
+        const installLogs: string[] = []
         installProcess.output.pipeTo(new WritableStream({
           write(data) {
             if (cancelled) return
+            installLogs.push(data)
+            console.log('[WC npm]', data)
             if (data.includes('added') || data.includes('packages')) {
               updateStatus('installing', data.trim().slice(0, 60))
             }
           }
-        })).catch(() => {}) // Ignore stream errors on cancel
+        })).catch(() => {})
 
         const installExitCode = await installProcess.exit
         if (cancelled) return
         if (installExitCode !== 0) {
-          throw new Error(`npm install failed (exit code ${installExitCode})`)
+          const errorOutput = installLogs.join('\n').slice(-500)
+          console.error('[WC] npm install failed:\n', errorOutput)
+          throw new Error(`npm install failed (exit code ${installExitCode}):\n${errorOutput}`)
         }
 
         // 5. Start next dev
@@ -257,7 +262,7 @@ export function useWebContainer(options: UseWebContainerOptions): UseWebContaine
       }
 
       updateStatus('installing', '安裝套件...')
-      const installProcess = await container.spawn('npm', ['install', '--prefer-offline'])
+      const installProcess = await container.spawn('npm', ['install', '--no-audit', '--no-fund'])
       const exitCode = await installProcess.exit
       if (exitCode !== 0) {
         throw new Error(`npm install failed (exit code ${exitCode})`)
