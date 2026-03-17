@@ -228,6 +228,21 @@ else { throw new Error('不支援的操作') }
 \`\`\`
 不要依賴 input.action 或其他自定義派發欄位，只用 _stepSummary。
 
+## 必須包含的標準操作（重要！）
+
+每個 Action 必須根據管理的 entity 自動包含以下操作分支，**即使 BDD 規則沒有明確定義**：
+
+1. **列表查詢**：\`if (op.includes('列表') || op.includes('全部'))\` — SELECT 全部記錄（可選 WHERE 過濾），**不要求 ID 參數**。前端頁面載入時必定需要此操作。
+2. **單筆查詢**：\`else if (op.includes('查詢') || op.includes('詳情'))\` — 需要 entity 主鍵 ID
+3. **建立**：\`else if (op.includes('建立') || op.includes('新增') || op.includes('註冊'))\` — INSERT
+4. **更新**：\`else if (op.includes('更新') || op.includes('修改') || op.includes('編輯'))\` — UPDATE by ID
+5. **刪除**：\`else if (op.includes('刪除') || op.includes('移除'))\` — DELETE by ID
+
+**判斷順序很重要**：先判斷「列表」再判斷「查詢」，因為「查詢列表」同時包含兩個關鍵字。
+
+每個分支的 _stepSummary 關鍵字**必須用上述括號中的中文詞**，不要用其他同義詞（如不要用「檢索」代替「查詢」）。
+前端改寫時會用這些精確的關鍵字，不一致會導致 500 error。
+
 ## 程式碼結構
 \`\`\`typescript
 import { sql } from '@/lib/db'
@@ -695,8 +710,17 @@ function buildRewriteSystemPrompt(): string {
 
 例如：如果 Action 程式碼中寫 if (op.includes('註冊'))，那 _stepSummary 必須包含「註冊」（如 '使用者註冊'），不能用「建立帳號」等同義詞。
 
-回傳格式：成功時直接回傳欄位（result.fieldName），失敗時 throw Error。
-**不要用 result.data.xxx，要直接用 result.xxx。**
+標準調用方式：
+- **列表查詢**（頁面初始載入）：actionFn({ _stepSummary: '查詢列表' }) — **不傳 ID**
+- **單筆查詢**（詳情頁）：actionFn({ _stepSummary: '查詢詳情', entityId: '...' }) — 傳 ID
+- **建立**：actionFn({ _stepSummary: '建立XXX', ...fields })
+- **更新**：actionFn({ _stepSummary: '更新XXX', id: '...', ...fields })
+- **刪除**：actionFn({ _stepSummary: '刪除XXX', id: '...' })
+
+**頁面初始載入資料時，必須使用包含「列表」或「全部」的 _stepSummary，不要用「查詢」（那是單筆，需要 ID）。**
+
+回傳格式：成功時直接回傳欄位（result.fieldName 或 result 本身是陣列），失敗時 throw Error。
+**不要用 result.data.xxx，要直接用 result.xxx。** 列表查詢回傳陣列時直接用 result（它就是陣列）。
 **不要傳 { intent: 'get' }，這樣的調用無效。**
 
 以下是實際函數的 Input/Output 介面定義和完整實作，**_stepSummary 必須精確匹配**：
