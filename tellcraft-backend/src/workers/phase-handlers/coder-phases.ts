@@ -205,6 +205,7 @@ export async function executeCoderSkill(input: CoderSkillInput): Promise<void> {
           apiRoutes,
           dbLib,
           hasServerActions: true,
+          neonConnectionString: (await db.queryOne<{ neon_connection_string: string | null }>('SELECT neon_connection_string FROM projects WHERE id = $1', [projectId]))?.neon_connection_string || undefined,
         } as Record<string, unknown>,
       },
       quickReplies: [

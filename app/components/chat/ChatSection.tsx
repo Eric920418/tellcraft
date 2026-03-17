@@ -910,6 +910,7 @@ export default function ChatSection({
       apiRoutes: ((activeData as Record<string, unknown>).apiRoutes || undefined) as { path: string; content: string; description: string }[] | undefined,
       dbLib: ((activeData as Record<string, unknown>).dbLib || undefined) as { path: string; content: string; description: string }[] | undefined,
       hasServerActions: !!((activeData as Record<string, unknown>).hasServerActions),
+      neonConnectionString: ((activeData as Record<string, unknown>).neonConnectionString || undefined) as string | undefined,
     }
   }, [streamingPreview, codePreviewData])
 

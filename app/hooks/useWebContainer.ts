@@ -88,10 +88,8 @@ export function useWebContainer(options: UseWebContainerOptions): UseWebContaine
   // ── Full lifecycle: boot → mount → install → start ──
   // Runs once when enabled + initialFiles are both available
   useEffect(() => {
-    console.log('[WC Hook] effect check — enabled:', enabled, 'initialFiles:', !!initialFiles, 'hasStarted:', hasStartedRef.current)
     if (!enabled || !initialFiles || hasStartedRef.current) return
     hasStartedRef.current = true
-    console.log('[WC Hook] starting boot sequence')
 
     let cancelled = false
 
@@ -158,7 +156,7 @@ export function useWebContainer(options: UseWebContainerOptions): UseWebContaine
           write(data) {
             if (cancelled) return
             installLogs.push(data)
-            console.log('[WC npm]', data)
+            // npm output (silent in production)
             if (data.includes('added') || data.includes('packages')) {
               updateStatus('installing', data.trim().slice(0, 60))
             }
@@ -181,7 +179,7 @@ export function useWebContainer(options: UseWebContainerOptions): UseWebContaine
         devProcess.output.pipeTo(new WritableStream({
           write(data) {
             devLogs.push(data)
-            console.log('[WC dev]', data)
+            // dev server output (silent in production)
           }
         })).catch(() => {})
 

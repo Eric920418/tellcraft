@@ -188,14 +188,12 @@ export default function WebContainerPreview({
 
   const initialFiles = useMemo(() => {
     if (pages.length > 0) {
-      console.log('[WC Preview] Building full files:', pages.length, 'pages,', components.length, 'components')
       const input: WebContainerFilesInput = {
         pages, components, styles, tailwindConfig,
         serverActions, apiRoutes, dbLib,
       }
       return buildWebContainerFiles(input)
     }
-    console.log('[WC Preview] Building skeleton (no pages yet)')
     return buildSkeletonFiles()
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [filesFingerprint])
@@ -223,8 +221,6 @@ export default function WebContainerPreview({
       onRuntimeError?.({ name: err.type, message: err.message, path: undefined })
     },
   })
-
-  console.log('[WC Preview] render — supported:', supported, 'status:', status, 'pages:', pages.length, 'iframeUrl:', !!iframeUrl)
 
   // ── Incremental file updates (streaming / iteration) ──
   const allFiles = useMemo(() => [
