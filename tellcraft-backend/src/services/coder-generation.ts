@@ -765,7 +765,10 @@ export async function rewriteComponentForServerActions(
   const systemPrompt = buildRewriteSystemPrompt()
   const userPrompt = buildRewriteUserPrompt(component, availableActions, actionImplementations)
 
-  const result = await callClaude(systemPrompt, userPrompt, { maxTokens: 8192 }, trackingContext)
+  // 根據組件大小動態設定 max_tokens（1 token ≈ 3 字元，改寫後通常比原始稍長）
+  const estimatedTokens = Math.ceil(component.content.length / 3) + 512
+  const maxTokens = Math.max(8192, Math.min(estimatedTokens, 16384))
+  const result = await callClaude(systemPrompt, userPrompt, { maxTokens }, trackingContext)
 
   if (!result.success || !result.content) {
     logger.warn({ path: component.path, error: result.error }, '組件改寫失敗，保留原始版本')
