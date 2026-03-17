@@ -339,6 +339,10 @@ export default function AdminConversationViewerPage() {
                 styles={stylesData}
                 tailwindConfig={tailwindConfigData}
                 isStreaming={isStreaming}
+                serverActions={(activePreviewData as Record<string, unknown>).serverActions as { path: string; content: string; description: string }[] | undefined}
+                apiRoutes={(activePreviewData as Record<string, unknown>).apiRoutes as { path: string; content: string; description: string }[] | undefined}
+                dbLib={(activePreviewData as Record<string, unknown>).dbLib as { path: string; content: string; description: string }[] | undefined}
+                neonConnectionString={(activePreviewData as Record<string, unknown>).neonConnectionString as string | undefined}
               />
             </div>
           </div>
