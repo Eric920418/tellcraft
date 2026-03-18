@@ -96,7 +96,8 @@
       "WebFetch(domain:medium.com)",
       "WebFetch(domain:arxiv.org)",
       "Bash(ls /Users/eric/Desktop/tellcraft/tellcraft-backend/src/services/*.ts | xargs -I{} basename {} | sort)",
-      "Bash(pnpm test:*)"
+      "Bash(pnpm test:*)",
+      "Bash(bun --version)"
     ]
   }
 }

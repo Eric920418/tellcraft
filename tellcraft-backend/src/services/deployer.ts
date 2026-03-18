@@ -326,7 +326,12 @@ export function sanitizeCodeForDeploy(code: GeneratedCode): SanitizeResult {
   let needsMotionHelper = false
 
   for (const file of allFiles) {
-    // ── 修復 1: framer-motion → motion/react ──
+    // 後端檔案（Server Actions / lib / API Routes）跳過 React 特定修復
+    const isBackendFile = /^['"]use server['"]/.test(file.content.trimStart())
+      || file.path.startsWith('lib/')
+      || file.path.startsWith('app/api/')
+
+    // ── 修復 1: framer-motion → motion/react ──（對所有檔案安全）
     if (/from\s+['"]framer-motion['"]/.test(file.content)) {
       file.content = file.content.replace(
         /from\s+['"]framer-motion['"]/g,
@@ -335,22 +340,26 @@ export function sanitizeCodeForDeploy(code: GeneratedCode): SanitizeResult {
       fixes.push(`${file.path}: framer-motion → motion/react`)
     }
 
-    // ── 修復 2: 缺少 'use client' ──
-    const needsClient =
-      /\b(useState|useEffect|useRef|useCallback|useMemo|useContext|useReducer)\b/.test(file.content) ||
-      /from\s+['"]motion\/react['"]/.test(file.content)
-    const hasUseClient = /^['"]use client['"]/.test(file.content.trimStart())
-    const hasUseServer = /^['"]use server['"]/.test(file.content.trimStart())
-    if (needsClient && !hasUseClient && !hasUseServer) {
-      file.content = "'use client'\n\n" + file.content
-      fixes.push(`${file.path}: 自動加入 'use client'`)
+    // ── 修復 2: 缺少 'use client' ──（跳過後端檔案）
+    if (!isBackendFile) {
+      const needsClient =
+        /\b(useState|useEffect|useRef|useCallback|useMemo|useContext|useReducer)\b/.test(file.content) ||
+        /from\s+['"]motion\/react['"]/.test(file.content)
+      const hasUseClient = /^['"]use client['"]/.test(file.content.trimStart())
+      const hasUseServer = /^['"]use server['"]/.test(file.content.trimStart())
+      if (needsClient && !hasUseClient && !hasUseServer) {
+        file.content = "'use client'\n\n" + file.content
+        fixes.push(`${file.path}: 自動加入 'use client'`)
+      }
     }
 
-    // ── 修復 2.5: 缺少 React hooks import ──
-    const { content: importFixed, repaired: importRepaired } = repairMissingReactImports(file)
-    if (importRepaired) {
-      file.content = importFixed
-      fixes.push(`${file.path}: 補缺失 React hooks import`)
+    // ── 修復 2.5: 缺少 React hooks import ──（跳過後端檔案）
+    if (!isBackendFile) {
+      const { content: importFixed, repaired: importRepaired } = repairMissingReactImports(file)
+      if (importRepaired) {
+        file.content = importFixed
+        fixes.push(`${file.path}: 補缺失 React hooks import`)
+      }
     }
 
     // ── 修復 2.7: bracket lookup 可能回傳 undefined → 補 optional chaining ──
@@ -360,9 +369,9 @@ export function sanitizeCodeForDeploy(code: GeneratedCode): SanitizeResult {
       fixes.push(`${file.path}: 補 optional chaining（bracket lookup）`)
     }
 
-    // ── 修復 3: motion.* 上的 spread props（TypeScript 類型衝突）──
+    // ── 修復 3: motion.* 上的 spread props（TypeScript 類型衝突）──（跳過後端檔案）
     // motion.button 的 onAnimationStart 與 React 的不相容，spread 所有 HTML props 會報錯
-    if (/motion\.\w+/.test(file.content)) {
+    if (!isBackendFile && /motion\.\w+/.test(file.content)) {
       const motionSpreadRegex = /<motion\.\w+[^>]*\{\.\.\.(\w+)\}/g
       let match
       const spreadVars = new Set<string>()

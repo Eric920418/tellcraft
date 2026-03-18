@@ -29,6 +29,7 @@ interface E2EError {
 
 interface E2EResult {
   passed: boolean
+  softFail?: boolean  // true = 失敗但不阻塞流程（基礎設施問題，非代碼問題）
   errors: E2EError[]
   fixedFiles: Array<{ path: string; content: string }>
   summary: string
@@ -248,7 +249,7 @@ export async function runCoderE2ETests(input: {
     const installResult = await runNpmInstall(tmpDir)
     if (!installResult.success) {
       logger.warn({ output: installResult.output.slice(-500) }, 'E2E npm install 失敗')
-      return { passed: true, errors: [], fixedFiles: [], summary: 'npm install 失敗，跳過 E2E' }
+      return { passed: false, softFail: true, errors: [], fixedFiles: [], summary: 'npm install 失敗' }
     }
 
     // 3. 啟動 next dev
@@ -268,7 +269,7 @@ export async function runCoderE2ETests(input: {
     if (!serverReady) {
       const logTail = devLogs.join('').slice(-500)
       logger.warn({ port, logTail }, 'E2E dev server 啟動超時')
-      return { passed: true, errors: [], fixedFiles: [], summary: 'dev server 啟動超時，跳過 E2E' }
+      return { passed: false, softFail: true, errors: [], fixedFiles: [], summary: `dev server 啟動超時：${logTail.slice(-200)}` }
     }
 
     logger.info({ port }, 'E2E dev server ready')
@@ -336,7 +337,7 @@ export async function runCoderE2ETests(input: {
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
     logger.error({ err }, 'E2E 測試異常')
-    return { passed: true, errors: [], fixedFiles: [], summary: `E2E 測試異常，跳過：${msg.slice(0, 100)}` }
+    return { passed: false, softFail: true, errors: [], fixedFiles: [], summary: `E2E 測試異常：${msg.slice(0, 200)}` }
   } finally {
     // 清理
     if (devProcess && !devProcess.killed) {

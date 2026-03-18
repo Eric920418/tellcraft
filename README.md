@@ -127,11 +127,12 @@ npx ts-node bdd-spec/scripts/validate-feature.ts spec/features/
   ├─ 讀取 BDD 產出（actionsYml + schemaSql + entityMapping）
   ├─ 生成 lib/db.ts（Neon 連接，零 LLM）
   ├─ 生成 lib/actions/*.ts（純邏輯函數，LLM 逐 action）
-  ├─ 生成 app/actions/*.ts（Server Actions，零 LLM 機械映射）
+  ├─ 生成 app/actions/*.ts（Server Actions，零 LLM 機械映射，cookies try-catch 相容 WebContainer）
   └─ 改寫 UIUX 組件（useState mock → Server Action 調用）
   │
   ▼
-④b Coder Skill Stage B（✅ 已完成 — 91/91 scenarios 通過，100%）
+④b Coder Skill Stage B（✅ 已完成 — 自動觸發，91/91 scenarios 通過，100%）
+  ├─ E2E 測試（/tmp Next.js dev + Puppeteer 掃描，失敗不阻塞但通知用戶）
   ├─ 生成 API Routes（app/api/*/route.ts）
   └─ SpecFormula 自動跑 Feature Files 驗證（紅燈修、綠燈過，最多 3 輪）
   │
@@ -842,7 +843,9 @@ psql "$DATABASE_URL" -f tellcraft-backend/migrations/xxx.sql
 <details>
 <summary><h2>開發更新紀錄（點擊展開）</h2></summary>
 
-### 近期更新（2026-03-13 ~ 2026-03-17）
+### 近期更新（2026-03-13 ~ 2026-03-19）
+
+- **Coder Skill 完整性修復**（03-19）：(1) cookies() try-catch 修復 WebContainer WASM 的 AsyncLocalStorage 不完整問題；(2) SpecFormula BDD 規格驗證改為自動觸發（不再需要用戶手動點按鈕）；(3) E2E 測試停止隱藏失敗（softFail 機制，通知用戶但不阻塞）；(4) LLM prompt 加強 DELETE/UPDATE ID 參數驗證；(5) deployer sanitizeCodeForDeploy 防禦性加固（跳過後端檔案的 React 修復）
 
 - **Sandpack → WebContainers 全面替換**（03-17）：預覽引擎從 Sandpack（瀏覽器端 React bundler）遷移到 WebContainers（瀏覽器端完整 Node.js），支援 Server Actions + Neon DB 連線。刪除 sandpack-utils.ts（1540 行）+ SandpackPreview.tsx（420 行）
 - **預覽空白三修**（03-17）：(1) 預覽 `index.html` 補 `html,body,#root{height:100%}`，修復全屏 canvas/intro 組件父容器高度坍塌導致空白；(2) `customer-service.ts` 新增 `platform_issue` 意圖偵測，用戶回報「預覽空白/看不到頁面」時回覆操作指引而非誤跑 refineCode；(3) 手機版收到 `code_preview` 時自動彈出 `MobilePreviewModal`，不需手動點按鈕

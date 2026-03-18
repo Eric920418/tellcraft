@@ -211,6 +211,7 @@ function buildActionSystemPrompt(): string {
 - 密碼雜湊用 bcryptjs（import bcrypt from 'bcryptjs'），JWT 用 jsonwebtoken
 - 不要做認證/登入檢查（如檢查 userId 是否存在、要求 token）。呼叫者（Server Action）已處理認證並注入 userId，函數只做業務邏輯
 - 前置（狀態）規則中的「使用者必須已登入」由測試框架的 UID actor 處理，函數內不需驗證
+- 如果 schema 有 email_verified_at 欄位但專案沒有實際的郵件發送機制（如 SendGrid/Resend 等第三方服務），則：註冊時 email_verified_at 設為 NOW()（自動通過驗證），登入時不檢查 email_verified_at。這確保應用開箱即用，未來接入真實郵件服務時再改為 NULL + 驗證流程
 - 如果測試傳 email 作為使用者識別：先用 input.userId（如果存在），否則用 email 查 users 表取得 userId。不要把 userId 當必要輸入參數驗證
 - 登出操作：直接 return { __status: 200, message: '登出成功' }。不需驗證 token/session 是否有效
 
@@ -243,6 +244,11 @@ else { throw new Error('不支援的操作') }
 3. **建立**：\`else if (op.includes('建立') || op.includes('新增') || op.includes('註冊'))\` — INSERT
 4. **更新**：\`else if (op.includes('更新') || op.includes('修改') || op.includes('編輯'))\` — UPDATE by ID
 5. **刪除**：\`else if (op.includes('刪除') || op.includes('移除'))\` — DELETE by ID
+6. **ID 參數驗證**：單筆查詢/更新/刪除操作必須在第一行驗證 ID 存在，缺失時拋錯：
+\`\`\`typescript
+const entityId = input.id || input.xxxId  // 匹配 schema 主鍵欄位名
+if (!entityId) throw new Error('缺少 ID 參數')
+\`\`\`
 
 **判斷順序很重要**：先判斷「列表」再判斷「查詢」，因為「查詢列表」同時包含兩個關鍵字。
 
@@ -386,8 +392,10 @@ export function generateServerActions(
         if (authType === 'logout') {
           // 登出：清除 cookie
           return `export async function ${fnName}Action(input: ${inputType}) {
-  const cookieStore = await cookies()
-  cookieStore.delete('userId')
+  try {
+    const cookieStore = await cookies()
+    cookieStore.delete('userId')
+  } catch { /* WebContainer WASM 環境無 AsyncLocalStorage，跳過 cookie 操作 */ }
   return ${fnName}(input)
 }`
         }
@@ -398,8 +406,10 @@ export function generateServerActions(
   const result = await ${fnName}(input)
   const uid = (result as any).userId || (result as any).createdUserId || (result as any).user_id
   if (uid && result.__status && result.__status < 300) {
-    const cookieStore = await cookies()
-    cookieStore.set('userId', String(uid), { httpOnly: true, path: '/', maxAge: 60 * 60 * 24 * 7 })
+    try {
+      const cookieStore = await cookies()
+      cookieStore.set('userId', String(uid), { httpOnly: true, path: '/', maxAge: 60 * 60 * 24 * 7 })
+    } catch { /* WebContainer WASM 環境無 AsyncLocalStorage，跳過 cookie 操作 */ }
   }
   return result
 }`
@@ -407,8 +417,11 @@ export function generateServerActions(
 
         // 一般 action：讀 cookie 注入 userId
         return `export async function ${fnName}Action(input: ${inputType}) {
-  const cookieStore = await cookies()
-  const userId = cookieStore.get('userId')?.value
+  let userId: string | undefined
+  try {
+    const cookieStore = await cookies()
+    userId = cookieStore.get('userId')?.value
+  } catch { /* WebContainer WASM 環境無 AsyncLocalStorage，跳過 cookie 讀取 */ }
   return ${fnName}({ ...input, ...(userId ? { userId } : {}) })
 }`
       })

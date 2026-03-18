@@ -211,7 +211,17 @@ export async function executeCoderSkill(input: CoderSkillInput): Promise<void> {
         },
       })
 
-      logger.info({ passed: e2eResult.passed, summary: e2eResult.summary, fixCount: e2eResult.fixedFiles.length }, 'E2E 測試結果')
+      logger.info({ passed: e2eResult.passed, softFail: e2eResult.softFail, summary: e2eResult.summary, fixCount: e2eResult.fixedFiles.length }, 'E2E 測試結果')
+
+      // E2E softFail（基礎設施問題）→ 通知用戶但不阻塞
+      if (!e2eResult.passed && e2eResult.softFail) {
+        await sendMessage(conversationId, io, {
+          content: isChinese
+            ? `⚠️ E2E 檢查遇到問題：${e2eResult.summary}（不影響後續流程）`
+            : `⚠️ E2E check encountered issues: ${e2eResult.summary} (does not block pipeline)`,
+          stage: 'info',
+        })
+      }
 
       // 如果有修正，寫回 DB + 更新 FlowState
       if (e2eResult.fixedFiles.length > 0) {
@@ -237,7 +247,47 @@ export async function executeCoderSkill(input: CoderSkillInput): Promise<void> {
       }
     }
 
-    // 發送完成訊息
+    // 自動執行 SpecFormula BDD 規格驗證（Coder 完成後立即觸發，不需用戶手動點按鈕）
+    if (neonConnectionString) {
+      try {
+        // 先發送預覽代碼（讓用戶在等待測試期間可以預覽）
+        await sendMessage(conversationId, io, {
+          content: isChinese
+            ? `**後端代碼生成完成！**\n\n${result.summary}\n\n正在自動執行 BDD 規格驗證...`
+            : `**Backend code generation complete!**\n\n${result.summary}\n\nRunning BDD spec validation automatically...`,
+          stage: 'coder_testing',
+          layoutHint: 'split',
+          richContent: {
+            type: 'code_preview',
+            data: {
+              pages: mergedPages,
+              components: mergedComponents,
+              styles,
+              tailwindConfig,
+              currentPhase: 'coder_testing',
+              serverActions,
+              apiRoutes,
+              dbLib,
+              hasServerActions: true,
+              neonConnectionString,
+            } as Record<string, unknown>,
+          },
+        })
+
+        await executeCoderTesting({
+          taskId: input.taskId,
+          projectId, conversationId, userId, redis, io,
+        })
+
+        logger.info({ projectId, conversationId, ...summarizeResult(result) }, 'Coder Skill + SpecFormula 完成')
+        return  // executeCoderTesting 內部已處理完成訊息和 FlowState
+      } catch (testErr) {
+        logger.warn({ err: testErr, projectId }, 'SpecFormula 自動測試失敗，降級為手動觸發')
+        // 降級：走下面原有的完成訊息邏輯（顯示 __verify_backend__ 按鈕）
+      }
+    }
+
+    // 發送完成訊息（無 Neon DB 或 SpecFormula 自動觸發失敗時的降級路徑）
     await sendMessage(conversationId, io, {
       content: isChinese
         ? `**後端代碼生成完成！**\n\n${result.summary}\n\n您的網站現在已連接真實的 Neon PostgreSQL 資料庫。\n\n- 輸入「**部署**」部署上線\n- 或描述想調整的地方`
