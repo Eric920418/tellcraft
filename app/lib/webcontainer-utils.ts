@@ -651,21 +651,10 @@ const MINIMAL_PAGE = `export default function Page() {
 
 // Mock DB for WebContainer — 所有 sql`` 查詢回傳空結果，不 crash
 const MOCK_DB = `// WebContainer preview mock — no real database
-const handler = {
-  get(target, prop) {
-    // neon() 回傳的 sql tagged template 函數
-    return () => Promise.resolve([])
-  },
-  apply(target, thisArg, args) {
-    return Promise.resolve([])
-  }
+// sql tagged template function 回傳空陣列，不 crash
+export function sql(strings: TemplateStringsArray, ...values: unknown[]): Promise<any[]> {
+  return Promise.resolve([])
 }
-const sql = new Proxy(function(){}, {
-  apply: () => Promise.resolve([]),
-  get: (t, p) => p === 'then' ? undefined : () => Promise.resolve([])
-})
-module.exports = { sql }
-export { sql }
 export default sql
 `
 
