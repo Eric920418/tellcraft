@@ -45,6 +45,24 @@ const DomainRegistrantForm = dynamic(
   { ssr: false }
 )
 
+export type GroupPosition = 'standalone' | 'first' | 'middle' | 'last'
+
+function getBubbleRadius(role: string, pos: GroupPosition, isMobile: boolean): string {
+  if (!isMobile) return '18px'
+  const R = 20, r = 6
+  if (pos === 'standalone') return `${R}px`
+  if (role === 'user') {
+    if (pos === 'first')  return `${R}px ${R}px ${r}px ${R}px`
+    if (pos === 'middle') return `${R}px ${r}px ${r}px ${R}px`
+    if (pos === 'last')   return `${R}px ${r}px ${R}px ${R}px`
+  } else {
+    if (pos === 'first')  return `${R}px ${R}px ${R}px ${r}px`
+    if (pos === 'middle') return `${r}px ${R}px ${R}px ${r}px`
+    if (pos === 'last')   return `${r}px ${R}px ${R}px ${R}px`
+  }
+  return `${R}px`
+}
+
 export interface ChatMessageItemProps {
   message: Message
   index: number
@@ -53,6 +71,8 @@ export interface ChatMessageItemProps {
   animationDelay: number
   showProgressBar: boolean
   layoutMode: 'default' | 'split'
+  isMobile: boolean
+  groupPosition: GroupPosition
   typingStage: string
   isTyping: boolean
   sendCooldown: boolean
@@ -76,6 +96,8 @@ export const ChatMessageItem = React.memo(function ChatMessageItem({
   animationDelay,
   showProgressBar,
   layoutMode,
+  isMobile,
+  groupPosition,
   typingStage,
   isTyping,
   sendCooldown,
@@ -122,7 +144,9 @@ export const ChatMessageItem = React.memo(function ChatMessageItem({
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.3, delay: animationDelay }}
       style={{
-        marginBottom: layoutMode === 'split' ? 16 : 28,
+        marginBottom: (groupPosition === 'first' || groupPosition === 'middle')
+          ? (isMobile ? 3 : 4)
+          : (isMobile ? 16 : (layoutMode === 'split' ? 16 : 28)),
         display: 'flex',
         flexDirection: 'column',
         alignItems: message.role === 'user' ? 'flex-end' : 'flex-start'
@@ -146,27 +170,31 @@ export const ChatMessageItem = React.memo(function ChatMessageItem({
         </div>
       ) : (
         <>
-          <div style={{
-            fontSize: 11,
-            color: 'var(--gray-400)',
-            marginBottom: 8,
-            textTransform: 'uppercase',
-            letterSpacing: '0.05em'
-          }}>
-            {message.role === 'user' ? tChat('senderYou') : tChat('senderAssistant')}
-          </div>
+          {(groupPosition === 'standalone' || groupPosition === 'first') && (
+            <div style={{
+              fontSize: isMobile ? 12 : 11,
+              color: 'var(--gray-400)',
+              marginBottom: isMobile ? 6 : 8,
+              textTransform: isMobile ? 'none' as const : 'uppercase' as const,
+              fontWeight: isMobile ? 500 : undefined,
+              letterSpacing: isMobile ? 'normal' : '0.05em',
+            }}>
+              {message.role === 'user' ? tChat('senderYou') : tChat('senderAssistant')}
+            </div>
+          )}
           <div
-            className={message.role === 'user' ? 'chat-bubble-user' : 'chat-bubble-assistant'}
+            className={`${message.role === 'user' ? 'chat-bubble-user' : 'chat-bubble-assistant'}${isMobile && (groupPosition === 'first' || groupPosition === 'middle') ? ` chat-bubble-group-${groupPosition}` : ''}`}
             style={{
-            padding: layoutMode === 'split' ? '12px 16px' : '18px 22px',
+            padding: isMobile ? '12px 16px' : (layoutMode === 'split' ? '12px 16px' : '18px 22px'),
             background: message.role === 'user' ? 'var(--black)' : 'var(--gray-50)',
             color: message.role === 'user' ? 'var(--white)' : 'var(--black)',
-            border: '1px solid',
-            borderColor: message.role === 'user' ? 'var(--black)' : 'var(--border-color)',
-            borderRadius: 18,
-            maxWidth: layoutMode === 'split' ? '95%' : '85%',
-            fontSize: layoutMode === 'split' ? 14 : 15,
-            lineHeight: 1.75,
+            border: isMobile ? 'none' : '1px solid',
+            borderColor: isMobile ? undefined : (message.role === 'user' ? 'var(--black)' : 'var(--border-color)'),
+            boxShadow: isMobile ? '0 1px 2px rgba(0,0,0,0.06)' : undefined,
+            borderRadius: getBubbleRadius(message.role, groupPosition, isMobile),
+            maxWidth: isMobile ? '88%' : (layoutMode === 'split' ? '95%' : '85%'),
+            fontSize: isMobile ? 15 : (layoutMode === 'split' ? 14 : 15),
+            lineHeight: isMobile ? 1.7 : 1.75,
             position: 'relative',
           }}>
             {message.role === 'user' ? (
@@ -460,6 +488,7 @@ export const ChatMessageItem = React.memo(function ChatMessageItem({
                 handleSendMessage(value, { displayLabel: reply?.label })
               }}
               disabled={isTyping || sendCooldown || isInitializing || !sessionInfo || isReadOnlyMode}
+              isMobile={isMobile}
             />
           )}
         </>
@@ -481,5 +510,7 @@ export const ChatMessageItem = React.memo(function ChatMessageItem({
     && prev.isReadOnlyMode === next.isReadOnlyMode
     && prev.selectedTemplateId === next.selectedTemplateId
     && prev.layoutMode === next.layoutMode
+    && prev.isMobile === next.isMobile
+    && prev.groupPosition === next.groupPosition
     && prev.message.progress?.current === next.message.progress?.current
 })

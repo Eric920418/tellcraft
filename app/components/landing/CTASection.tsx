@@ -42,13 +42,11 @@ function CTASection({ onStartChat }: { onStartChat: () => void }) {
             window.scrollTo({ top: 0, behavior: 'smooth' })
             setTimeout(onStartChat, 500)
           }}
-          onMouseEnter={e => { e.currentTarget.style.background = 'var(--accent)' }}
-          onMouseLeave={e => { e.currentTarget.style.background = 'var(--black)' }}
           style={{
             padding: '18px 48px',
             fontSize: 15,
             fontWeight: 500,
-            background: 'var(--black)',
+            background: 'var(--accent)',
             color: 'var(--white)',
             border: 'none',
             cursor: 'pointer',

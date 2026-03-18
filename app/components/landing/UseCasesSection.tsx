@@ -363,7 +363,7 @@ function UseCasesSection() {
         >
           <div style={{
             fontSize: 11,
-            color: 'var(--gray-400)',
+            color: 'var(--accent)',
             textTransform: 'uppercase',
             letterSpacing: '0.1em',
             marginBottom: 16,
@@ -389,7 +389,7 @@ function UseCasesSection() {
               style={{
                 color: 'var(--black)',
                 fontWeight: 500,
-                borderBottom: '2px solid var(--black)',
+                borderBottom: '2px solid var(--accent)',
                 paddingBottom: 2
               }}
             />

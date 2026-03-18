@@ -1,16 +1,18 @@
 /* AI-Genesis - Refined Minimal */
 
 :root {
-  --black: #1a1a1a;
-  --white: #ffffff;
-  --gray-50: #fafafa;
-  --gray-100: #f5f5f5;
-  --gray-200: #e8e8e8;
-  --gray-300: #d4d4d4;
-  --gray-400: #a3a3a3;
-  --gray-500: #737373;
-  --gray-600: #525252;
-  --border-color: #e0e0e0;
+  --black: #1c1917;
+  --white: #fefcfa;
+  --gray-50: #faf8f5;
+  --gray-100: #f5f2ef;
+  --gray-200: #e8e5e2;
+  --gray-300: #d4d0cd;
+  --gray-400: #a39f9c;
+  --gray-500: #736f6c;
+  --gray-600: #524e4b;
+  --gray-700: #3b3836;
+  --gray-800: #292623;
+  --border-color: #e0ddda;
   --border: 1px solid var(--border-color);
   --border-dark: 1px solid var(--black);
   --font-sans: 'Noto Sans TC', -apple-system, sans-serif;
@@ -19,57 +21,59 @@
   --shadow: 0 1px 3px rgba(0,0,0,0.06);
 
   /* Background colors */
-  --bg-primary: #ffffff;
-  --bg-secondary: #fafafa;
-  --bg-tertiary: #f5f5f5;
+  --bg-primary: #fefcfa;
+  --bg-secondary: #faf8f5;
+  --bg-tertiary: #f5f2ef;
 
   /* Text colors */
-  --text-primary: #1a1a1a;
-  --text-secondary: #525252;
-  --text-muted: #737373;
-  --text-light: #a3a3a3;
+  --text-primary: #1c1917;
+  --text-secondary: #524e4b;
+  --text-muted: #736f6c;
+  --text-light: #a39f9c;
 
   /* Accent */
   --accent: #C9512F;
   --accent-muted: rgba(201, 81, 47, 0.12);
 
   /* Header glass */
-  --header-glass: rgba(255, 255, 255, 0.72);
-  --header-border: rgba(0, 0, 0, 0.06);
+  --header-glass: rgba(255, 255, 255, 0.88);
+  --header-border: rgba(0, 0, 0, 0.12);
 }
 
 .dark {
-  --black: #ffffff;
-  --white: #0a0a0a;
-  --gray-50: #171717;
-  --gray-100: #1f1f1f;
-  --gray-200: #2a2a2a;
-  --gray-300: #3d3d3d;
-  --gray-400: #6b6b6b;
-  --gray-500: #8c8c8c;
-  --gray-600: #a8a8a8;
-  --border-color: #2a2a2a;
+  --black: #fefcfa;
+  --white: #0c0a09;
+  --gray-50: #191614;
+  --gray-100: #211e1b;
+  --gray-200: #2c2926;
+  --gray-300: #3f3c39;
+  --gray-400: #6d6a67;
+  --gray-500: #8e8b88;
+  --gray-600: #aaa7a4;
+  --gray-700: #c4c1be;
+  --gray-800: #d9d6d3;
+  --border-color: #2c2926;
   --shadow-sm: 0 1px 2px rgba(0,0,0,0.3);
   --shadow: 0 1px 3px rgba(0,0,0,0.4);
 
   /* Background colors */
-  --bg-primary: #0a0a0a;
-  --bg-secondary: #111111;
-  --bg-tertiary: #171717;
+  --bg-primary: #0c0a09;
+  --bg-secondary: #121010;
+  --bg-tertiary: #191614;
 
   /* Text colors */
-  --text-primary: #f5f5f5;
-  --text-secondary: #d4d4d4;
-  --text-muted: #a3a3a3;
-  --text-light: #737373;
+  --text-primary: #fefcfa;
+  --text-secondary: #d4d0cd;
+  --text-muted: #a39f9c;
+  --text-light: #736f6c;
 
   /* Accent */
   --accent: #D4735A;
   --accent-muted: rgba(212, 115, 90, 0.15);
 
   /* Header glass */
-  --header-glass: rgba(10, 10, 10, 0.72);
-  --header-border: rgba(255, 255, 255, 0.08);
+  --header-glass: rgba(10, 10, 10, 0.88);
+  --header-border: rgba(255, 255, 255, 0.12);
 }
 
 * {
@@ -467,6 +471,30 @@ textarea {
   border: 8px solid transparent;
   border-top-color: var(--black);
   border-bottom: 0;
+}
+
+/* 手機版氣泡優化 */
+@media (max-width: 767px) {
+  .chat-bubble-assistant,
+  .chat-bubble-user {
+    border: none !important;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.06);
+  }
+
+  .chat-bubble-assistant::before,
+  .chat-bubble-assistant::after,
+  .chat-bubble-user::before,
+  .chat-bubble-user::after {
+    display: none !important;
+  }
+}
+
+/* 連續消息隱藏尾巴（分組 first/middle 位置） */
+.chat-bubble-group-first::before,
+.chat-bubble-group-first::after,
+.chat-bubble-group-middle::before,
+.chat-bubble-group-middle::after {
+  display: none !important;
 }
 
 /* Markdown Content Styles */

@@ -11,9 +11,8 @@ const logger = createLogger('iteration-skill')
 import type { FlowState } from '../types/flow-state'
 import { sendMessage, saveFlowState, getFlowState, generatedCodeToFileRows, deductCredits, makeStreamingCallback } from '../workers/orchestrator-utils'
 import { CREDIT_COSTS } from '../config/plans'
-import { refineCode, generateTailwindConfig, GeneratedComponent, buildStreamingHandler } from './uiux-generation'
+import { refineCode, refineFullStackCode, generateTailwindConfig, GeneratedComponent, buildStreamingHandler } from './uiux-generation'
 import { listProjectDeployments, rollbackToDeployment, toVercelSlug } from './deployer'
-import { hasBackendModifyIntent } from '../workers/intent-helpers'
 
 const MAX_ITERATIONS_PER_SESSION = 50
 
@@ -53,6 +52,67 @@ async function resolveCurrentCode(state: FlowState): Promise<{
   }
 
   return null
+}
+
+/**
+ * 從 FlowState 或 project_files 取得全棧代碼（前端 + 後端）
+ */
+async function resolveFullStackCode(state: FlowState): Promise<{
+  frontend: { pages: GeneratedComponent[]; components: GeneratedComponent[]; styles: string }
+  backend: GeneratedComponent[]
+} | null> {
+  const frontend = await resolveCurrentCode(state)
+  if (!frontend) return null
+
+  const coderFiles = state.projectId
+    ? await db.getProjectFiles(state.projectId, 'coder')
+    : []
+
+  const backend: GeneratedComponent[] = coderFiles
+    .filter(f => ['service', 'api_route', 'config'].includes(f.file_type))
+    .map(f => ({ path: f.file_path, content: f.content, description: f.description || '' }))
+
+  return { frontend, backend }
+}
+
+/**
+ * 判斷迭代範圍：純前端 or 全棧
+ */
+function classifyIterationScope(
+  feedback: string,
+  coderCompleted: boolean
+): 'frontend' | 'fullstack' {
+  if (!coderCompleted) return 'frontend'
+
+  const lower = feedback.toLowerCase()
+  const fullstackSignals = [
+    // 功能級操作（跨層）
+    '拿掉', '移除功能', '刪除功能', '去掉功能', '不要這個功能', '移除',
+    'remove feature', 'delete feature', 'remove the',
+    // 後端明確
+    '驗證邏輯', '登入邏輯', '註冊邏輯', 'api邏輯', '後端邏輯',
+    '修改api', '改api', '新增api', '刪除api',
+    '資料庫', 'database', 'server action',
+    '後端', 'backend',
+  ]
+
+  if (fullstackSignals.some(s => lower.includes(s))) return 'fullstack'
+
+  // 長文本且包含「功能」→ 可能是功能級描述
+  if (feedback.length >= 20 && lower.includes('功能')) return 'fullstack'
+
+  return 'frontend'
+}
+
+/**
+ * 推斷 coder 檔案類型
+ */
+function inferCoderFileType(path: string): string {
+  if (path.startsWith('api/') || path.includes('/api/')) return 'api_route'
+  if (path.startsWith('lib/') || path.startsWith('app/actions/')) return 'service'
+  if (path === 'lib/db.ts') return 'config'
+  if (path.includes('/page.')) return 'page'
+  return 'component'
 }
 
 /**
@@ -158,22 +218,6 @@ export async function executeIteration(input: {
     return
   }
 
-  // 0.5 後端修改意圖攔截：Coder 完成後，偵測到後端修改需求時攔截
-  if (state.coderCompleted && hasBackendModifyIntent(userFeedback)) {
-    const isChinese = state.locale !== 'en'
-    await sendMessage(conversationId, io, {
-      content: isChinese
-        ? '目前迭代修改僅支援前端設計調整（顏色、佈局、動畫等）。\n\n如需修改後端功能（API 邏輯、資料庫查詢、驗證規則），建議重新生成後端代碼。\n\n如果您想修改的其實是前端顯示，請更具體地描述，例如：「登入表單加一個忘記密碼連結」。'
-        : 'Iteration currently supports frontend design changes (colors, layout, animations).\n\nTo modify backend logic (API, database queries, validation), please regenerate the backend.\n\nIf you meant a frontend change, please be more specific, e.g., "add a forgot password link to the login form".',
-      stage: 'info',
-      quickReplies: [
-        { label: isChinese ? '重新生成後端' : 'Regenerate Backend', value: '__connect_database__', style: 'primary' as const },
-        { label: isChinese ? '部署上線' : 'Deploy', value: '部署', style: 'secondary' as const },
-      ],
-    })
-    return
-  }
-
   // 1. 設定 iterating phase 防止並行訊息 + 保存反饋供重試
   state.phase = 'uiux_iterating'
   state.uiuxCodeGenerationStartedAt = Date.now()
@@ -213,8 +257,7 @@ export async function executeIteration(input: {
       makeStreamingCallback(conversationId, io, redis, 'iteration', tailwindConfig)
     )
 
-    // 3. 呼叫 refineCode（快照延後到成功後才覆蓋）
-    // Fast Build 擴展 prompt 注入為產品上下文，讓 LLM 理解網站全貌
+    // 3. 準備反饋文字
     let enrichedFeedback = userFeedback
     if (state.fastMode && state.fastModeExpandedPrompt) {
       enrichedFeedback = `${userFeedback}\n\n[產品完整描述（用於理解上下文，不是修改指令）]\n${state.fastModeExpandedPrompt}`
@@ -237,80 +280,182 @@ ${enrichedFeedback}`
       logger.info({ repeatCount, conversationId }, '迭代重複抱怨偵測：策略升級')
     }
 
-    const result = await refineCode(
-      currentCode,
-      enrichedFeedback,
-      {
-        designSystem: state.uiuxDesignSystem,
-        designTier: state.uiuxDesignTier,
-        designBrief: state.uiuxDesignBrief,
-        variantConcept: state.uiuxVariantConcept,
-        moodId: state.uiuxDesignMood,
-        iterationHistory: state.iterationHistory,
-        temperatureOverride: escalationTemperature,
-      },
-      { userId: state.userId || userId, conversationId, purpose: 'uiux_refine' },
-      input.imageUrls,
-      streamingCallback
-    )
-
-    // 清理 streaming preview key（無論成功/失敗）
-    await redis.del(`streaming:preview:${conversationId}`).catch(() => {})
-
-    if (!result.success || !result.pages) {
-      // 區分「無法理解」和「系統錯誤」
-      const isNoChange = result.error && !result.error.includes('未知錯誤') && !result.error.includes('無法修改')
-      await sendMessage(conversationId, io, {
-        content: isNoChange
-          ? `${result.error}`
-          : `修改失敗：${result.error || '未知錯誤，請稍後重試。'}`,
-        stage: isNoChange ? 'info' : 'error',
-        quickReplies: isNoChange
-          ? [{ label: '部署上線', value: '部署', style: 'primary' as const }]
-          : [
-              { label: '重試修改', value: '__retry_iteration__', style: 'primary' as const },
-              { label: '部署上線', value: '部署', style: 'secondary' as const },
-            ],
-      })
-      // 恢復之前的快照（沒有實際改動，不應覆蓋有效快照）
-      state.uiuxPreIterationCode = previousSnapshot
-      state.phase = 'uiux_complete'
-      state.uiuxCodeGenerationStartedAt = undefined
-      // autoRepairCount 不在此重置 — 由 handleContinueFlow 在收到手動用戶輸入時重置
-      await saveFlowState(redis, conversationId, state)
-      return
-    }
-
-    // 4. refineCode 成功，保存迭代前快照（此時才安全覆蓋）
-    state.uiuxPreIterationCode = JSON.parse(JSON.stringify(currentCode))
-
-    // 5. 更新代碼
-    const updatedCode = {
-      pages: result.pages,
-      components: result.components || currentCode.components,
-      styles: result.styles || currentCode.styles,
-    }
-    state.uiuxGeneratedCode = updatedCode
-    state.iterationCount = (state.iterationCount || 0) + 1
-    state.lastIterationFeedback = undefined
-    state.lastIterationImageUrls = undefined
-    // autoRepairCount 不在此重置 — 由 handleContinueFlow 在收到手動用戶輸入時重置
-
-    // 6. 記錄迭代歷史
-    const changedFiles = result.pages.map(p => p.path)
-    if (result.components) {
-      changedFiles.push(...result.components.map(c => c.path))
-    }
-    if (result.styles && result.styles !== currentCode.styles) {
-      changedFiles.push('app/globals.css')
-    }
-    recordIterationHistory(state, userFeedback, changedFiles)
-
-    // 7. 保存到 project_files
     const pid = state.projectId || projectId
-    if (pid) {
-      await db.upsertProjectFiles(pid, 'uiux',
-        generatedCodeToFileRows(updatedCode, state.uiuxDesignSystem))
+
+    // 4. 判斷迭代範圍
+    const scope = classifyIterationScope(userFeedback, !!state.coderCompleted)
+
+    let updatedCode: { pages: GeneratedComponent[]; components: GeneratedComponent[]; styles: string }
+    let changedFiles: string[]
+    let deletedPaths: string[] | undefined
+
+    if (scope === 'fullstack') {
+      // ── 全棧迭代分支 ──
+      const fullCode = await resolveFullStackCode(state)
+      if (!fullCode || fullCode.backend.length === 0) {
+        // 無後端代碼 → fallback 到前端迭代
+        logger.info({ conversationId }, '全棧迭代 fallback：無後端代碼')
+        // 下方走 frontend 分支
+      } else {
+        logger.info({ conversationId, backendFiles: fullCode.backend.length }, '啟動全棧迭代')
+        const fsResult = await refineFullStackCode(
+          { ...fullCode.frontend, backendFiles: fullCode.backend },
+          enrichedFeedback,
+          {
+            designSystem: state.uiuxDesignSystem,
+            designTier: state.uiuxDesignTier,
+            designBrief: state.uiuxDesignBrief,
+            variantConcept: state.uiuxVariantConcept,
+            iterationHistory: state.iterationHistory,
+            temperatureOverride: escalationTemperature,
+          },
+          { userId: state.userId || userId, conversationId, purpose: 'fullstack_refine' },
+          input.imageUrls,
+          streamingCallback
+        )
+
+        await redis.del(`streaming:preview:${conversationId}`).catch(() => {})
+
+        if (!fsResult.success) {
+          const isNoChange = fsResult.error && !fsResult.error.includes('未知錯誤')
+          await sendMessage(conversationId, io, {
+            content: isNoChange ? `${fsResult.error}` : `修改失敗：${fsResult.error || '未知錯誤，請稍後重試。'}`,
+            stage: isNoChange ? 'info' : 'error',
+            quickReplies: isNoChange
+              ? [{ label: '部署上線', value: '部署', style: 'primary' as const }]
+              : [
+                  { label: '重試修改', value: '__retry_iteration__', style: 'primary' as const },
+                  { label: '部署上線', value: '部署', style: 'secondary' as const },
+                ],
+          })
+          state.uiuxPreIterationCode = previousSnapshot
+          state.phase = 'uiux_complete'
+          state.uiuxCodeGenerationStartedAt = undefined
+          await saveFlowState(redis, conversationId, state)
+          return
+        }
+
+        // 全棧成功 → 保存快照
+        state.uiuxPreIterationCode = JSON.parse(JSON.stringify(currentCode))
+
+        updatedCode = {
+          pages: fsResult.pages || currentCode.pages,
+          components: fsResult.components || currentCode.components,
+          styles: fsResult.styles || currentCode.styles,
+        }
+        deletedPaths = fsResult.deletedPaths
+
+        // 處理刪除
+        if (deletedPaths?.length && pid) {
+          await db.deleteProjectFilesByPaths(pid, deletedPaths)
+          // 從 updatedCode 移除被刪除的檔案
+          updatedCode.pages = updatedCode.pages.filter(p => !deletedPaths!.includes(p.path))
+          updatedCode.components = updatedCode.components.filter(c => !deletedPaths!.includes(c.path))
+        }
+
+        // 儲存前端
+        state.uiuxGeneratedCode = updatedCode
+        if (pid) {
+          await db.upsertProjectFiles(pid, 'uiux',
+            generatedCodeToFileRows(updatedCode, state.uiuxDesignSystem))
+        }
+
+        // 儲存後端修改
+        if (fsResult.backendFiles?.length && pid) {
+          const backendRows = fsResult.backendFiles.map(f => ({
+            filePath: f.path,
+            content: f.content,
+            description: f.description || '',
+            fileType: inferCoderFileType(f.path),
+          }))
+          await db.upsertProjectFiles(pid, 'coder', backendRows)
+        }
+
+        // 記錄歷史
+        changedFiles = [
+          ...(fsResult.pages || []).map(p => p.path),
+          ...(fsResult.components || []).map(c => c.path),
+          ...(fsResult.backendFiles || []).map(f => f.path),
+          ...(deletedPaths || []).map(p => `[deleted] ${p}`),
+        ]
+        state.iterationCount = (state.iterationCount || 0) + 1
+        state.lastIterationFeedback = undefined
+        state.lastIterationImageUrls = undefined
+        recordIterationHistory(state, userFeedback, changedFiles)
+
+        // 跳到預覽發送（下方共用邏輯）
+        // updatedCode, changedFiles, deletedPaths 已設定
+        // 繼續到 step 8
+      }
+    }
+
+    // ── 前端迭代分支（scope === 'frontend' 或 fullstack fallback） ──
+    if (!updatedCode!) {
+      const result = await refineCode(
+        currentCode,
+        enrichedFeedback,
+        {
+          designSystem: state.uiuxDesignSystem,
+          designTier: state.uiuxDesignTier,
+          designBrief: state.uiuxDesignBrief,
+          variantConcept: state.uiuxVariantConcept,
+          moodId: state.uiuxDesignMood,
+          iterationHistory: state.iterationHistory,
+          temperatureOverride: escalationTemperature,
+        },
+        { userId: state.userId || userId, conversationId, purpose: 'uiux_refine' },
+        input.imageUrls,
+        streamingCallback
+      )
+
+      await redis.del(`streaming:preview:${conversationId}`).catch(() => {})
+
+      if (!result.success || !result.pages) {
+        const isNoChange = result.error && !result.error.includes('未知錯誤') && !result.error.includes('無法修改')
+        await sendMessage(conversationId, io, {
+          content: isNoChange
+            ? `${result.error}`
+            : `修改失敗：${result.error || '未知錯誤，請稍後重試。'}`,
+          stage: isNoChange ? 'info' : 'error',
+          quickReplies: isNoChange
+            ? [{ label: '部署上線', value: '部署', style: 'primary' as const }]
+            : [
+                { label: '重試修改', value: '__retry_iteration__', style: 'primary' as const },
+                { label: '部署上線', value: '部署', style: 'secondary' as const },
+              ],
+        })
+        state.uiuxPreIterationCode = previousSnapshot
+        state.phase = 'uiux_complete'
+        state.uiuxCodeGenerationStartedAt = undefined
+        await saveFlowState(redis, conversationId, state)
+        return
+      }
+
+      state.uiuxPreIterationCode = JSON.parse(JSON.stringify(currentCode))
+
+      updatedCode = {
+        pages: result.pages,
+        components: result.components || currentCode.components,
+        styles: result.styles || currentCode.styles,
+      }
+      state.uiuxGeneratedCode = updatedCode
+      state.iterationCount = (state.iterationCount || 0) + 1
+      state.lastIterationFeedback = undefined
+      state.lastIterationImageUrls = undefined
+
+      changedFiles = result.pages.map(p => p.path)
+      if (result.components) {
+        changedFiles.push(...result.components.map(c => c.path))
+      }
+      if (result.styles && result.styles !== currentCode.styles) {
+        changedFiles.push('app/globals.css')
+      }
+      recordIterationHistory(state, userFeedback, changedFiles!)
+
+      if (pid) {
+        await db.upsertProjectFiles(pid, 'uiux',
+          generatedCodeToFileRows(updatedCode, state.uiuxDesignSystem))
+      }
     }
 
     // 8. 發送預覽（tailwindConfig 已在上方計算）

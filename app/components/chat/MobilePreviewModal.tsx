@@ -34,10 +34,10 @@ export default function MobilePreviewModal({ show, stablePreviewData, onClose, o
       {show && stablePreviewData && (
         <motion.div
           key="mobile-preview-modal"
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          exit={{ opacity: 0 }}
-          transition={{ duration: 0.25 }}
+          initial={{ y: '100%' }}
+          animate={{ y: 0 }}
+          exit={{ y: '100%' }}
+          transition={{ type: 'spring', damping: 30, stiffness: 300 }}
           style={{
             position: 'fixed',
             inset: 0,
@@ -55,6 +55,7 @@ export default function MobilePreviewModal({ show, stablePreviewData, onClose, o
             alignItems: 'center',
             justifyContent: 'space-between',
             padding: '0 16px',
+            paddingTop: 'env(safe-area-inset-top, 0px)',
             flexShrink: 0,
           }}>
             <span style={{ fontSize: 14, fontWeight: 600 }}>{tChat('previewTitle') || 'Preview'}</span>
@@ -88,23 +89,26 @@ export default function MobilePreviewModal({ show, stablePreviewData, onClose, o
           </div>
           {/* Bottom actions */}
           <div style={{
-            height: 60,
+            minHeight: 60,
             borderTop: '1px solid var(--border-color)',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
             gap: 12,
             padding: '0 16px',
+            paddingBottom: 'env(safe-area-inset-bottom, 0px)',
             flexShrink: 0,
           }}>
             <button
               onClick={onDeploy}
               style={{
                 flex: 1,
+                minHeight: 44,
                 padding: '10px 0',
                 background: 'var(--black)',
                 color: 'var(--white)',
                 border: 'none',
+                borderRadius: 12,
                 fontSize: 14,
                 fontWeight: 500,
                 cursor: 'pointer',
@@ -116,10 +120,12 @@ export default function MobilePreviewModal({ show, stablePreviewData, onClose, o
               onClick={onClose}
               style={{
                 flex: 1,
+                minHeight: 44,
                 padding: '10px 0',
                 background: 'var(--white)',
                 color: 'var(--black)',
                 border: '1px solid var(--border-color)',
+                borderRadius: 12,
                 fontSize: 14,
                 cursor: 'pointer',
               }}

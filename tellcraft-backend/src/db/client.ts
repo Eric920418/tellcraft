@@ -419,6 +419,20 @@ export async function deleteProjectFiles(
 }
 
 /**
+ * 按路徑刪除專案檔案（跨 skill_source）
+ */
+export async function deleteProjectFilesByPaths(
+  projectId: string,
+  paths: string[]
+): Promise<void> {
+  if (paths.length === 0) return
+  await query(
+    'DELETE FROM project_files WHERE project_id = $1 AND file_path = ANY($2)',
+    [projectId, paths]
+  )
+}
+
+/**
  * 記錄 LLM 使用量
  */
 export async function recordLlmUsage(data: {

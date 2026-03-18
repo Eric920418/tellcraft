@@ -369,7 +369,7 @@ function HeroSection({
           <motion.div
             animate={{
               boxShadow: isFocused
-                ? '0 0 0 1px var(--black), 0 8px 32px rgba(0,0,0,0.08)'
+                ? '0 0 0 1px var(--accent), 0 8px 32px rgba(201,81,47,0.1)'
                 : '0 0 0 1px var(--border-color), 0 2px 8px rgba(0,0,0,0.04)',
             }}
             transition={{ duration: 0.2 }}
@@ -472,7 +472,7 @@ function HeroSection({
                   padding: '8px 20px',
                   fontSize: 13,
                   fontWeight: 500,
-                  background: canSubmit ? 'var(--black)' : 'var(--gray-200)',
+                  background: canSubmit ? 'var(--accent)' : 'var(--gray-200)',
                   color: canSubmit ? 'var(--white)' : 'var(--gray-400)',
                   border: 'none',
                   cursor: canSubmit ? 'pointer' : 'not-allowed',

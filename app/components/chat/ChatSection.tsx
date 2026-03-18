@@ -145,7 +145,8 @@ export default function ChatSection({
       const textarea = inputRef.current
       if (!textarea) return
       textarea.style.height = 'auto'
-      const maxHeight = 200
+      const isMobileScreen = window.innerWidth < 768
+      const maxHeight = isMobileScreen ? 120 : 200
       const newHeight = Math.min(textarea.scrollHeight, maxHeight)
       textarea.style.height = `${newHeight}px`
       textarea.style.overflowY = textarea.scrollHeight > maxHeight ? 'auto' : 'hidden'

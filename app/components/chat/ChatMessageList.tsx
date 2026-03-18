@@ -5,9 +5,24 @@ import { useTranslations } from 'next-intl'
 import { motion } from 'framer-motion'
 import ConversationPicker from '@/app/components/ConversationPicker'
 import type { ElementInfo } from '@/app/components/uiux/PreviewPanel'
+import { useIsMobile } from '@/app/hooks/useIsMobile'
 
 import type { Message, SessionInfo, ConversationItem } from '@/app/types/chat'
 import { ChatMessageItem } from './ChatMessageItem'
+import type { GroupPosition } from './ChatMessageItem'
+
+function getGroupPosition(msgs: Message[], idx: number): GroupPosition {
+  const cur = msgs[idx]
+  if (cur.role === 'system') return 'standalone'
+  const prev = idx > 0 ? msgs[idx - 1] : null
+  const next = idx < msgs.length - 1 ? msgs[idx + 1] : null
+  const samePrev = prev != null && prev.role === cur.role
+  const sameNext = next != null && next.role === cur.role
+  if (samePrev && sameNext) return 'middle'
+  if (samePrev) return 'last'
+  if (sameNext) return 'first'
+  return 'standalone'
+}
 
 export interface ChatMessageListProps {
   messages: Message[]
@@ -101,6 +116,7 @@ export default function ChatMessageList({
   const tChat = useTranslations('chat')
   const tCodePreview = useTranslations('codePreview')
   const tLogin = useTranslations('login')
+  const isMobile = useIsMobile()
 
   // Compute displayMessages (filter logic from original)
   const displayMessages = useMemo(() => {
@@ -142,9 +158,9 @@ export default function ChatMessageList({
         <div
           ref={chatScrollStickyRef}
           onScroll={handleChatScroll}
-          style={{ flex: 1, overflow: 'auto', padding: layoutMode === 'split' ? '16px 0' : '32px 0' }}
+          style={{ flex: 1, overflow: 'auto', padding: isMobile ? '20px 0' : (layoutMode === 'split' ? '16px 0' : '32px 0') }}
         >
-          <div style={{ maxWidth: layoutMode === 'split' ? '100%' : 680, margin: '0 auto', padding: layoutMode === 'split' ? '0 16px' : '0 24px' }}>
+          <div style={{ maxWidth: isMobile ? '100%' : (layoutMode === 'split' ? '100%' : 680), margin: '0 auto', padding: isMobile ? '0 12px' : (layoutMode === 'split' ? '0 16px' : '0 24px') }}>
             {/* 錯誤提示 */}
             {error && (
               <motion.div
@@ -198,6 +214,8 @@ export default function ChatMessageList({
                   animationDelay={animationDelay}
                   showProgressBar={showProgressBar}
                   layoutMode={layoutMode}
+                  isMobile={isMobile}
+                  groupPosition={getGroupPosition(displayMessages, index)}
                   typingStage={typingStage}
                   isTyping={isTyping || isShowingProgress}
                   sendCooldown={sendCooldown}
@@ -222,19 +240,22 @@ export default function ChatMessageList({
                 initial={{ opacity: 0, y: 10 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ duration: 0.25 }}
-                style={{ marginBottom: layoutMode === 'split' ? 16 : 28 }}
+                style={{ marginBottom: isMobile ? 16 : (layoutMode === 'split' ? 16 : 28) }}
               >
                 <div style={{
-                  fontSize: 11,
+                  fontSize: isMobile ? 12 : 11,
                   color: 'var(--gray-400)',
-                  marginBottom: 8,
-                  textTransform: 'uppercase',
-                  letterSpacing: '0.05em'
+                  marginBottom: isMobile ? 6 : 8,
+                  textTransform: isMobile ? 'none' as const : 'uppercase' as const,
+                  fontWeight: isMobile ? 500 : undefined,
+                  letterSpacing: isMobile ? 'normal' : '0.05em',
                 }}>{tChat('typingIndicatorName')}</div>
                 <div style={{
-                  padding: layoutMode === 'split' ? '12px 16px' : '18px 22px',
+                  padding: isMobile ? '10px 14px' : (layoutMode === 'split' ? '12px 16px' : '18px 22px'),
                   background: 'var(--gray-50)',
-                  border: '1px solid var(--border-color)',
+                  border: isMobile ? 'none' : '1px solid var(--border-color)',
+                  boxShadow: isMobile ? '0 1px 2px rgba(0,0,0,0.06)' : undefined,
+                  borderRadius: isMobile ? 16 : undefined,
                   display: 'inline-flex',
                   alignItems: 'center',
                   gap: 4,
@@ -267,9 +288,14 @@ export default function ChatMessageList({
           initial={{ y: 20, opacity: 0 }}
           animate={{ y: 0, opacity: 1 }}
           transition={{ duration: 0.4, delay: 0.2 }}
-          style={{ borderTop: '1px solid var(--border-color)', padding: layoutMode === 'split' ? '12px 16px' : '20px 24px', background: 'var(--white)' }}
+          style={{
+            borderTop: isMobile ? 'none' : '1px solid var(--border-color)',
+            boxShadow: isMobile ? '0 -1px 8px rgba(0,0,0,0.06)' : undefined,
+            padding: isMobile ? '12px 12px calc(12px + env(safe-area-inset-bottom, 0px))' : (layoutMode === 'split' ? '12px 16px' : '20px 24px'),
+            background: 'var(--white)',
+          }}
         >
-          <div style={{ maxWidth: layoutMode === 'split' ? '100%' : 680, margin: '0 auto' }}>
+          <div style={{ maxWidth: isMobile ? '100%' : (layoutMode === 'split' ? '100%' : 680), margin: '0 auto' }}>
             {/* 選取元素 chips */}
             {codePreviewEditMode && codePreviewSelectedElements.length > 0 && (
               <div style={{
@@ -379,7 +405,7 @@ export default function ChatMessageList({
                 </div>
               )
             })()}
-            <div style={{ display: 'flex', gap: layoutMode === 'split' ? 8 : 12, alignItems: 'flex-end' }}>
+            <div style={{ display: 'flex', gap: isMobile ? 8 : (layoutMode === 'split' ? 8 : 12), alignItems: 'flex-end' }}>
               {/* 附圖按鈕 */}
               <input
                 ref={chatImageInputRef}
@@ -397,11 +423,11 @@ export default function ChatMessageList({
                 title={tChat('attachImage')}
                 style={{
                   padding: 0,
-                  width: layoutMode === 'split' ? 40 : 48,
-                  height: layoutMode === 'split' ? 40 : 48,
+                  width: isMobile ? 44 : (layoutMode === 'split' ? 40 : 48),
+                  height: isMobile ? 44 : (layoutMode === 'split' ? 40 : 48),
                   background: 'none',
                   border: '1px solid var(--border-color)',
-                  borderRadius: 6,
+                  borderRadius: isMobile ? 12 : 6,
                   cursor: (isInitializing || !sessionInfo || isReadOnlyMode || attachedImages.length >= 3) ? 'not-allowed' : 'pointer',
                   display: 'flex',
                   alignItems: 'center',
@@ -451,16 +477,17 @@ export default function ChatMessageList({
                 style={{
                   flex: 1,
                   resize: 'none',
-                  padding: layoutMode === 'split' ? '10px 14px' : '14px 18px',
-                  fontSize: layoutMode === 'split' ? 14 : 15,
+                  padding: isMobile ? '10px 14px' : (layoutMode === 'split' ? '10px 14px' : '14px 18px'),
+                  fontSize: isMobile ? 16 : (layoutMode === 'split' ? 14 : 15),
                   border: '1px solid var(--border-color)',
+                  borderRadius: isMobile ? 16 : undefined,
                   outline: 'none',
                   fontFamily: 'inherit',
                   lineHeight: 1.5,
                   transition: 'border-color 0.2s ease, height 0.15s ease',
                   opacity: (isInitializing || !sessionInfo || isReadOnlyMode) ? 0.5 : 1,
-                  minHeight: layoutMode === 'split' ? 40 : 48,
-                  maxHeight: layoutMode === 'split' ? 120 : 200,
+                  minHeight: isMobile ? 44 : (layoutMode === 'split' ? 40 : 48),
+                  maxHeight: isMobile ? 120 : (layoutMode === 'split' ? 120 : 200),
                   overflowY: 'hidden',
                 }}
                 onFocus={(e) => e.currentTarget.style.borderColor = 'var(--black)'}
@@ -488,9 +515,10 @@ export default function ChatMessageList({
                       onClick={handleGoBack}
                       disabled={isBusy}
                       style={{
-                        padding: layoutMode === 'split' ? '0 16px' : '0 20px',
-                        height: layoutMode === 'split' ? 40 : 48,
-                        fontSize: layoutMode === 'split' ? 13 : 14,
+                        padding: isMobile ? '0 16px' : (layoutMode === 'split' ? '0 16px' : '0 20px'),
+                        height: isMobile ? 44 : (layoutMode === 'split' ? 40 : 48),
+                        borderRadius: isMobile ? 12 : undefined,
+                        fontSize: isMobile ? 14 : (layoutMode === 'split' ? 13 : 14),
                         fontWeight: 500,
                         border: '1px solid var(--border-color)',
                         background: isBusy ? 'var(--gray-100)' : 'var(--white)',
@@ -512,9 +540,10 @@ export default function ChatMessageList({
                     onClick={handleSend}
                     disabled={!hasInput || isBusy}
                     style={{
-                      padding: layoutMode === 'split' ? '0 20px' : '0 28px',
-                      height: layoutMode === 'split' ? 40 : 48,
-                      fontSize: layoutMode === 'split' ? 13 : 14,
+                      padding: isMobile ? '0 20px' : (layoutMode === 'split' ? '0 20px' : '0 28px'),
+                      height: isMobile ? 44 : (layoutMode === 'split' ? 40 : 48),
+                      borderRadius: isMobile ? 12 : undefined,
+                      fontSize: isMobile ? 14 : (layoutMode === 'split' ? 13 : 14),
                       fontWeight: 500,
                       border: '1px solid var(--black)',
                       background: !hasInput || isBusy ? 'var(--gray-100)' : 'var(--black)',

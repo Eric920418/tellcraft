@@ -52,7 +52,7 @@ function HowItWorksSection() {
               display: 'grid',
               gridTemplateColumns: isEven ? '1fr 1fr' : '1fr 1fr',
               minHeight: 200,
-              background: isEven ? 'var(--black)' : 'var(--white)',
+              background: isEven ? 'var(--gray-800)' : 'var(--white)',
               color: isEven ? 'var(--white)' : 'var(--black)',
               position: 'relative',
             }}

@@ -12,6 +12,7 @@ interface QuickRepliesProps {
   replies: QuickReply[]
   onSelect: (value: string) => void
   disabled?: boolean
+  isMobile?: boolean
 }
 
 const styles: Record<string, React.CSSProperties> = {
@@ -38,7 +39,7 @@ const hoverStyles: Record<string, React.CSSProperties> = {
   ghost: { background: 'var(--gray-50)' },
 }
 
-export default function QuickReplies({ replies, onSelect, disabled }: QuickRepliesProps) {
+export default function QuickReplies({ replies, onSelect, disabled, isMobile }: QuickRepliesProps) {
   if (!replies || replies.length === 0) return null
 
   return (
@@ -56,16 +57,21 @@ export default function QuickReplies({ replies, onSelect, disabled }: QuickRepli
             disabled={disabled}
             style={{
               ...styles[variant],
-              padding: variant === 'primary' ? '10px 20px' : '8px 14px',
-              borderRadius: 4,
-              fontSize: variant === 'primary' ? 14 : 13,
+              padding: isMobile
+                ? (variant === 'primary' ? '12px 20px' : '10px 16px')
+                : (variant === 'primary' ? '10px 20px' : '8px 14px'),
+              borderRadius: isMobile ? 12 : 4,
+              fontSize: isMobile
+                ? (variant === 'primary' ? 15 : 14)
+                : (variant === 'primary' ? 14 : 13),
               fontWeight: variant === 'primary' ? 600 : 500,
               cursor: disabled ? 'not-allowed' : 'pointer',
               opacity: disabled ? 0.5 : 1,
-              maxWidth: 320,
+              minHeight: isMobile ? 44 : undefined,
+              maxWidth: isMobile ? '100%' : 320,
               overflow: 'hidden',
               textOverflow: 'ellipsis',
-              whiteSpace: 'nowrap',
+              whiteSpace: isMobile ? 'normal' : 'nowrap',
               transition: 'background 0.15s',
               lineHeight: 1.4,
             }}

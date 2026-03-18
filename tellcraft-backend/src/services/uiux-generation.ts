@@ -870,6 +870,19 @@ export interface GenerationResult {
   error?: string
 }
 
+/**
+ * 全棧迭代結果（前端 + 後端 + 刪除）
+ */
+export interface FullStackGenerationResult {
+  success: boolean
+  pages?: GeneratedComponent[]
+  components?: GeneratedComponent[]
+  styles?: string
+  backendFiles?: GeneratedComponent[]
+  deletedPaths?: string[]
+  error?: string
+}
+
 interface CodeBundle {
   pages: GeneratedComponent[]
   components: GeneratedComponent[]
@@ -5294,4 +5307,286 @@ ${codeBlocks.join('\n\n')}
     components: mergedCode.components,
     styles: mergedCode.styles,
   }
+}
+
+// ============================================================
+// 全棧迭代修改（前端 + 後端 + 刪除）
+// ============================================================
+
+const BACKEND_PATH_PREFIXES = ['lib/', 'app/actions/', 'api/']
+
+function isBackendPath(path: string): boolean {
+  return BACKEND_PATH_PREFIXES.some(p => path.startsWith(p))
+}
+
+export async function refineFullStackCode(
+  currentCode: {
+    pages: GeneratedComponent[]
+    components: GeneratedComponent[]
+    styles: string
+    backendFiles: GeneratedComponent[]
+  },
+  userFeedback: string,
+  designContext: {
+    designSystem?: DesignSystem
+    designTier?: DesignTier
+    designBrief?: DesignBrief
+    variantConcept?: VariantConcept
+    moodId?: string
+    iterationHistory?: Array<{ feedback: string; filesChanged: string[] }>
+    temperatureOverride?: number
+  },
+  trackingContext?: { userId?: string; conversationId?: string; purpose?: string },
+  imageUrls?: string[],
+  onTextDelta?: (text: string) => void
+): Promise<FullStackGenerationResult> {
+  const logger = createLogger('refine-fullstack')
+
+  // ── 構建系統 prompt ──
+  const systemPrompt = buildFullStackSystemPrompt(currentCode, userFeedback, designContext)
+
+  // ── 構建用戶訊息 ──
+  const allFiles = [
+    ...currentCode.pages.map(p => `\`\`\`tsx:${p.path}\n${p.content}\n\`\`\``),
+    ...currentCode.components.map(c => `\`\`\`tsx:${c.path}\n${c.content}\n\`\`\``),
+    ...(currentCode.styles ? [`\`\`\`css:app/globals.css\n${currentCode.styles}\n\`\`\``] : []),
+    ...currentCode.backendFiles.map(f => {
+      const ext = f.path.endsWith('.ts') ? 'ts' : 'tsx'
+      return `\`\`\`${ext}:${f.path}\n${f.content}\n\`\`\``
+    }),
+  ]
+
+  const textContent = `## 用戶修改需求\n${userFeedback}\n\n## 當前項目代碼\n\n${allFiles.join('\n\n')}`
+
+  // 構建用戶訊息（有圖片時用 content blocks，否則純文字）
+  let userMessage: string | Anthropic.MessageCreateParams['messages'][number]['content']
+  if (imageUrls?.length) {
+    const blocks: Anthropic.ContentBlockParam[] = []
+    for (const url of imageUrls) {
+      blocks.push({
+        type: 'image',
+        source: { type: 'url', url },
+      } as Anthropic.ImageBlockParam)
+    }
+    blocks.push({ type: 'text', text: `用戶上傳了參考圖片，請結合圖片內容理解修改需求。\n\n${textContent}` })
+    userMessage = blocks
+  } else {
+    userMessage = textContent
+  }
+
+  // ── 呼叫 LLM ──
+  const temperature = designContext.temperatureOverride ?? 0.3
+  const response = await callClaude(
+    systemPrompt,
+    [{ role: 'user', content: userMessage }],
+    { maxTokens: 16000, temperature, promptLabel: 'refine-fullstack', maxContinuations: 2 },
+    trackingContext,
+    onTextDelta
+  )
+
+  if (!response.success || !response.content) {
+    return { success: false, error: response.error || '全棧修改失敗，請稍後重試。' }
+  }
+
+  // ── 檢查 [NO_CHANGE] ──
+  const noChangeMatch = response.content.match(/\[NO_CHANGE\]\s*(.*)/)
+  if (noChangeMatch) {
+    return { success: false, error: noChangeMatch[1].trim() || '無法理解您的修改需求，請更具體地描述。' }
+  }
+
+  // ── 解析 [DELETE:path] ──
+  const deletedPaths: string[] = []
+  const deleteRegex = /\[DELETE:([^\]]+)\]/g
+  let delMatch: RegExpExecArray | null
+  while ((delMatch = deleteRegex.exec(response.content)) !== null) {
+    deletedPaths.push(delMatch[1].trim())
+  }
+
+  // ── 解析 code blocks ──
+  const tsxRegex = /```(?:tsx|ts|typescript):([^\n]+)\n([\s\S]*?)\n```/g
+  const cssRegex = /```css:([^\n]+)\n([\s\S]*?)\n```/g
+
+  const modifiedFrontendPages = new Map<string, string>()
+  const modifiedFrontendComponents = new Map<string, string>()
+  const modifiedBackend = new Map<string, string>()
+  let modifiedStyles = ''
+
+  let match: RegExpExecArray | null
+  while ((match = tsxRegex.exec(response.content)) !== null) {
+    const path = match[1].trim()
+    const content = match[2]
+
+    if (isBackendPath(path)) {
+      modifiedBackend.set(path, content)
+    } else {
+      // 分類前端：是否為已知 page
+      const isPage = currentCode.pages.some(p => p.path === path) || path.includes('/page.')
+      if (isPage) {
+        modifiedFrontendPages.set(path, content)
+      } else {
+        modifiedFrontendComponents.set(path, content)
+      }
+    }
+  }
+
+  while ((match = cssRegex.exec(response.content)) !== null) {
+    modifiedStyles = match[2]
+  }
+
+  // 無任何修改也無刪除 → 失敗
+  if (modifiedFrontendPages.size === 0 && modifiedFrontendComponents.size === 0 &&
+      modifiedBackend.size === 0 && !modifiedStyles && deletedPaths.length === 0) {
+    return { success: false, error: '無法理解您的修改需求，請更具體地描述想要的變更。' }
+  }
+
+  // ── 合併前端代碼 ──
+  const mergedPages = currentCode.pages
+    .filter(p => !deletedPaths.includes(p.path))
+    .map(p => modifiedFrontendPages.has(p.path)
+      ? { ...p, content: modifiedFrontendPages.get(p.path)! }
+      : p
+    )
+  // 新增的前端頁面
+  for (const [path, content] of modifiedFrontendPages) {
+    if (!mergedPages.some(p => p.path === path)) {
+      mergedPages.push({ path, content, description: '' })
+    }
+  }
+
+  const mergedComponents = currentCode.components
+    .filter(c => !deletedPaths.includes(c.path))
+    .map(c => modifiedFrontendComponents.has(c.path)
+      ? { ...c, content: modifiedFrontendComponents.get(c.path)! }
+      : c
+    )
+  for (const [path, content] of modifiedFrontendComponents) {
+    if (!mergedComponents.some(c => c.path === path)) {
+      mergedComponents.push({ path, content, description: '' })
+    }
+  }
+
+  // ── 合併後端代碼 ──
+  const mergedBackend = currentCode.backendFiles
+    .filter(f => !deletedPaths.includes(f.path))
+    .map(f => modifiedBackend.has(f.path)
+      ? { ...f, content: modifiedBackend.get(f.path)! }
+      : f
+    )
+  for (const [path, content] of modifiedBackend) {
+    if (!mergedBackend.some(f => f.path === path)) {
+      mergedBackend.push({ path, content, description: '' })
+    }
+  }
+
+  // ── 簡易截斷偵測 ──
+  for (const [path, newContent] of [...modifiedFrontendPages.entries(), ...modifiedBackend.entries()]) {
+    const original = [...currentCode.pages, ...currentCode.components, ...currentCode.backendFiles].find(f => f.path === path)
+    if (!original) continue
+    const origLines = original.content.split('\n').length
+    const newLines = newContent.split('\n').length
+    if (origLines > 30 && newLines < origLines * 0.6) {
+      logger.warn({ path, origLines, newLines }, '全棧迭代偵測到可疑截斷')
+    }
+  }
+
+  logger.info({
+    deletedPaths: deletedPaths.length,
+    modifiedFrontend: modifiedFrontendPages.size + modifiedFrontendComponents.size,
+    modifiedBackend: modifiedBackend.size,
+    modifiedStyles: !!modifiedStyles,
+  }, '全棧迭代完成')
+
+  return {
+    success: true,
+    pages: mergedPages,
+    components: mergedComponents,
+    styles: modifiedStyles || currentCode.styles,
+    backendFiles: mergedBackend,
+    deletedPaths: deletedPaths.length > 0 ? deletedPaths : undefined,
+  }
+}
+
+function buildFullStackSystemPrompt(
+  currentCode: {
+    pages: GeneratedComponent[]
+    components: GeneratedComponent[]
+    backendFiles: GeneratedComponent[]
+  },
+  userFeedback: string,
+  designContext: {
+    designSystem?: DesignSystem
+    designTier?: DesignTier
+    variantConcept?: VariantConcept
+    iterationHistory?: Array<{ feedback: string; filesChanged: string[] }>
+  }
+): string {
+  const fileList = [
+    '### 前端頁面',
+    ...currentCode.pages.map(p => `- ${p.path}`),
+    '### 前端組件',
+    ...currentCode.components.map(c => `- ${c.path}`),
+    '### 後端檔案',
+    ...currentCode.backendFiles.map(f => `- ${f.path}`),
+  ].join('\n')
+
+  const historySection = designContext.iterationHistory?.length
+    ? `\n## 迭代歷史（最近 ${Math.min(designContext.iterationHistory.length, 3)} 次）\n` +
+      designContext.iterationHistory.slice(-3).map((h, i) =>
+        `${i + 1}. 用戶：「${h.feedback}」→ 修改：${h.filesChanged.join(', ')}`
+      ).join('\n')
+    : ''
+
+  return `你是一位全棧開發者。用戶的項目使用 Next.js App Router + Server Actions + PostgreSQL（Neon）。
+用戶對已完成的項目有修改意見，你需要同時修改前端和後端代碼。
+
+## 項目檔案結構
+${fileList}
+
+## 項目架構
+- 前端頁面：app/.../page.tsx（'use client'，使用 Tailwind CSS + motion/react 動畫）
+- 前端組件：components/...（純 UI 組件）
+- Server Actions：app/actions/*.ts（'use server'，調用 lib/actions/）
+- 業務邏輯：lib/actions/*.ts（純函數，操作數據庫，通過 _stepSummary 分派子操作）
+- API Routes：api/*/route.ts（與 Server Actions 平行，供 SpecFormula 測試用）
+- 數據庫連接：lib/db.ts（禁止修改）
+
+## Server Action 調用約定
+前端調用格式：\`actionFn({ _stepSummary: '操作描述', ...data })\`
+lib/actions 內部用 \`if (op.includes('...'))\` 分派子操作。修改時必須保持 _stepSummary 與 dispatch 一致。
+
+## 修改規則
+1. **只修改用戶要求的部分**，不要改動不相關的檔案
+2. 前端保持 'use client' 指令、motion/react 動畫、next/font 字體、Tailwind CSS
+3. 後端保持 _stepSummary dispatch 模式，保持參數化查詢（$1, $2...），禁止字串拼接 SQL
+4. **禁止修改 lib/db.ts**
+5. 移除功能時：前端頁面 + app/actions + lib/actions + api route 必須一起處理
+6. 移除功能後：更新相關的導航連結、路由跳轉、條件判斷
+7. 保持無障礙功能（aria-label 等）
+
+## 輸入驗證
+如果用戶的修改需求含糊不清、是閒聊、或無法理解，輸出：
+[NO_CHANGE] 原因說明
+
+## 刪除文件
+用 [DELETE:path] 標記要刪除的文件（每行一個，放在代碼區塊之前）。
+只有整個文件不再需要時才使用 DELETE。如果只是修改文件內容，直接輸出修改後的完整代碼。
+
+## 輸出格式
+先列出所有需要刪除的文件（如有），然後列出所有需要修改的文件：
+
+[DELETE:path/to/removed-file.tsx]
+
+\`\`\`tsx:path/to/modified-frontend.tsx
+// 完整修改後的代碼（不是 diff）
+\`\`\`
+
+\`\`\`ts:lib/actions/modified-backend.ts
+// 完整修改後的代碼
+\`\`\`
+
+重要：
+- code fence 第一行必須直接是代碼，禁止 "Here is the code" 類說明文字
+- 未修改的文件不要輸出
+- 每個文件必須輸出完整內容（不是 diff 或片段）
+${historySection}`
 }
