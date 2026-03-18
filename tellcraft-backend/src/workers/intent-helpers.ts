@@ -141,6 +141,23 @@ export function hasCoderIntent(msg: string): boolean {
   return kw.some(k => msg.toLowerCase().includes(k))
 }
 
+export function hasBackendModifyIntent(msg: string): boolean {
+  const lower = msg.toLowerCase()
+  const kw = [
+    // 中文
+    '驗證邏輯', '登入邏輯', '註冊邏輯', 'api邏輯', '後端邏輯',
+    '修改api', '改api', '新增api', '刪除api',
+    '資料庫查詢', '修改查詢', 'sql', '資料表',
+    'server action',
+    '後端功能', '改後端', '修改後端',
+    // 英文
+    'backend logic', 'api logic',
+    'database query', 'modify api', 'change api', 'add api',
+    'authentication logic', 'validation logic',
+  ]
+  return kw.some(k => lower.includes(k))
+}
+
 export function hasChangeIntent(msg: string): boolean {
   const keywords = ['修改規格', '新增功能', '刪除功能', '變更需求', '調整規格', '改需求', '修改需求', '增加功能', '移除功能', '改規格']
   return keywords.some(k => msg.includes(k))

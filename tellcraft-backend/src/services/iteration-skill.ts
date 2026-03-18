@@ -13,6 +13,7 @@ import { sendMessage, saveFlowState, getFlowState, generatedCodeToFileRows, dedu
 import { CREDIT_COSTS } from '../config/plans'
 import { refineCode, generateTailwindConfig, GeneratedComponent, buildStreamingHandler } from './uiux-generation'
 import { listProjectDeployments, rollbackToDeployment, toVercelSlug } from './deployer'
+import { hasBackendModifyIntent } from '../workers/intent-helpers'
 
 const MAX_ITERATIONS_PER_SESSION = 50
 
@@ -152,6 +153,22 @@ export async function executeIteration(input: {
       quickReplies: [
         { label: isChinese ? '部署上線' : 'Deploy', value: '部署', style: 'primary' as const },
         { label: isChinese ? '開始新專案' : 'New Project', value: '__new_project__', style: 'ghost' as const },
+      ],
+    })
+    return
+  }
+
+  // 0.5 後端修改意圖攔截：Coder 完成後，偵測到後端修改需求時攔截
+  if (state.coderCompleted && hasBackendModifyIntent(userFeedback)) {
+    const isChinese = state.locale !== 'en'
+    await sendMessage(conversationId, io, {
+      content: isChinese
+        ? '目前迭代修改僅支援前端設計調整（顏色、佈局、動畫等）。\n\n如需修改後端功能（API 邏輯、資料庫查詢、驗證規則），建議重新生成後端代碼。\n\n如果您想修改的其實是前端顯示，請更具體地描述，例如：「登入表單加一個忘記密碼連結」。'
+        : 'Iteration currently supports frontend design changes (colors, layout, animations).\n\nTo modify backend logic (API, database queries, validation), please regenerate the backend.\n\nIf you meant a frontend change, please be more specific, e.g., "add a forgot password link to the login form".',
+      stage: 'info',
+      quickReplies: [
+        { label: isChinese ? '重新生成後端' : 'Regenerate Backend', value: '__connect_database__', style: 'primary' as const },
+        { label: isChinese ? '部署上線' : 'Deploy', value: '部署', style: 'secondary' as const },
       ],
     })
     return
