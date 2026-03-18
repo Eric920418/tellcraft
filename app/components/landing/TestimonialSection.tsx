@@ -22,7 +22,7 @@ function TestimonialSection() {
   }, [quotes.length])
 
   return (
-    <section style={{ padding: '80px 24px', background: 'var(--black)', color: 'var(--white)' }}>
+    <section style={{ padding: '80px 24px', background: 'var(--gray-800)', color: 'var(--white)' }}>
       <div style={{ maxWidth: 800, margin: '0 auto', textAlign: 'center' }}>
         <motion.div
           initial={{ opacity: 0 }}

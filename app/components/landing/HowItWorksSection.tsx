@@ -68,7 +68,7 @@ function HowItWorksSection() {
                 justifyContent: isEven ? 'flex-end' : 'flex-start',
                 padding: '48px 40px',
                 order: isEven ? 0 : 1,
-                borderRight: isEven ? `1px solid var(--gray-600)` : 'none',
+                borderRight: isEven ? `1px solid var(--gray-700)` : 'none',
                 borderLeft: !isEven ? `1px solid var(--gray-200)` : 'none',
               }}
             >

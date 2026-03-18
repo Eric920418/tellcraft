@@ -20,7 +20,7 @@ function ShowcaseSection() {
   ]
 
   return (
-    <section ref={ref} className="showcase-section" style={{ padding: '80px 24px', background: 'var(--white)', overflow: 'hidden' }}>
+    <section ref={ref} className="showcase-section" style={{ padding: '80px 24px', background: 'var(--gray-50)', overflow: 'hidden' }}>
       <div style={{ maxWidth: 1200, margin: '0 auto' }}>
         <div className="showcase-grid" style={{
           display: 'grid',
