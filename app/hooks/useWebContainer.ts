@@ -213,6 +213,19 @@ export function useWebContainer(options: UseWebContainerOptions): UseWebContaine
     }
   }, [enabled, initialFiles, envVars, updateStatus])
 
+  // ── envVars 後續更新：WebContainer 已啟動後 envVars 才有值時，補寫 .env ──
+  useEffect(() => {
+    if (!envVars || Object.keys(envVars).length === 0) return
+    const container = containerRef.current
+    if (!container) return // WebContainer 還沒 boot
+
+    const envContent = Object.entries(envVars)
+      .map(([k, v]) => `${k}=${v}`)
+      .join('\n')
+
+    container.fs.writeFile('.env', envContent).catch(() => {})
+  }, [envVars])
+
   // Cleanup on unmount
   useEffect(() => {
     mountedRef.current = true
