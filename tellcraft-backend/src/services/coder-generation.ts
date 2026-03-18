@@ -930,6 +930,17 @@ export async function executeCoderPipeline(
     logger.info({ fixCount: fixes.length }, 'Named import 修復完成')
   }
 
+  // Step 8: 驗證前端 _stepSummary 呼叫 vs 後端 action 分支（零 LLM）
+  await callbacks.onProgress('驗證前後端一致性...', 97)
+  const actionCallFixes = validateAndFixActionCalls(
+    [...rewrittenFrontend, ...unchanged],
+    actionFiles,
+    serverActionFiles,
+  )
+  if (actionCallFixes.length > 0) {
+    logger.info({ fixCount: actionCallFixes.length, fixes: actionCallFixes }, 'Action call 修正完成')
+  }
+
   await callbacks.onProgress('完成！', 98)
 
   const backendFiles = sanitizedFrontend.filter(f => backendPaths.has(f.path)) as typeof backendFilesRaw
@@ -944,6 +955,226 @@ export async function executeCoderPipeline(
   }, 'Coder Pipeline 完成')
 
   return { backendFiles, rewrittenFrontend, unchangedFrontend: unchanged, summary }
+}
+
+// ============================================================
+// 8. 前後端 _stepSummary 一致性驗證（零 LLM）
+// ============================================================
+
+interface ActionBranch {
+  keywords: string[]        // op.includes('XXX') 的所有關鍵字
+  requiredParams: string[]  // if (!input.xxx) throw 中的 xxx
+  order: number             // if/else if 順序
+}
+
+interface ActionBranchMap {
+  functionName: string
+  branches: ActionBranch[]
+}
+
+/** 從 action 檔案提取所有 if/else if 分支和必要參數 */
+function extractActionBranches(actionContent: string): ActionBranch[] {
+  const branches: ActionBranch[] = []
+
+  // 用行掃描法提取分支
+  const lines = actionContent.split('\n')
+  let currentBranch: ActionBranch | null = null
+  let order = 0
+
+  for (const line of lines) {
+    const trimmed = line.trim()
+
+    // 偵測 if/else if (op.includes('...'))
+    const branchMatch = trimmed.match(/^(?:}\s*else\s+)?if\s*\(/)
+    if (branchMatch && trimmed.includes('op.includes')) {
+      // 提取所有 op.includes('...') 關鍵字
+      const keywords: string[] = []
+      for (const m of trimmed.matchAll(/op\.includes\(['"]([^'"]+)['"]\)/g)) {
+        keywords.push(m[1])
+      }
+      if (keywords.length > 0) {
+        currentBranch = { keywords, requiredParams: [], order: order++ }
+        branches.push(currentBranch)
+      }
+      continue
+    }
+
+    // 在當前分支內偵測必要參數：if (!input.xxx) { throw
+    if (currentBranch && /if\s*\(\s*!input\.(\w+)\s*\)/.test(trimmed)) {
+      const paramMatch = trimmed.match(/if\s*\(\s*!input\.(\w+)\s*\)/)
+      if (paramMatch) {
+        currentBranch.requiredParams.push(paramMatch[1])
+      }
+    }
+
+    // 偵測分支結束（遇到下一個 } else if 或 } else { throw）
+    if (trimmed.startsWith('} else {') || trimmed === '}') {
+      // 可能是最後的 else { throw } 或函數結束
+    }
+  }
+
+  return branches
+}
+
+/** 從 server action 檔案建立 actionNameAction → lib/actions 函數名的映射 */
+function buildActionNameMap(
+  serverActionFiles: { path: string; content: string }[],
+  actionFiles: { path: string; content: string }[],
+): Map<string, { functionName: string; content: string }> {
+  const map = new Map<string, { functionName: string; content: string }>()
+
+  for (const sa of serverActionFiles) {
+    // 提取 export async function xxxAction
+    const exportMatch = sa.content.match(/export\s+async\s+function\s+(\w+Action)/)
+    if (!exportMatch) continue
+    const actionFnName = exportMatch[1] // e.g. manageAuthAction
+
+    // 提取 import { yyy } from '@/lib/actions/zzz'
+    const importMatch = sa.content.match(/import\s*\{\s*(\w+)\s*\}\s*from\s*['"]@\/lib\/actions\/([^'"]+)['"]/)
+    if (!importMatch) continue
+    const libFnName = importMatch[1] // e.g. manageAuth
+    const libPath = `lib/actions/${importMatch[2]}.ts`
+
+    // 找到對應的 action 實作檔案
+    const actionFile = actionFiles.find(f =>
+      f.path === libPath || f.path === libPath.replace('.ts', '.tsx')
+    )
+    if (actionFile) {
+      map.set(actionFnName, { functionName: libFnName, content: actionFile.content })
+    }
+  }
+
+  return map
+}
+
+/** 驗證並修正前端組件中的 _stepSummary 呼叫 */
+function validateAndFixActionCalls(
+  frontendFiles: Array<{ path: string; content: string; description?: string }>,
+  actionFiles: Array<{ path: string; content: string; description?: string }>,
+  serverActionFiles: Array<{ path: string; content: string; description?: string }>,
+): Array<{ file: string; original: string; fixed: string; reason: string }> {
+  const fixes: Array<{ file: string; original: string; fixed: string; reason: string }> = []
+
+  // 建立 actionNameAction → branches 映射
+  const actionMap = buildActionNameMap(serverActionFiles, actionFiles)
+
+  for (let fi = 0; fi < frontendFiles.length; fi++) {
+    const file = frontendFiles[fi]
+    let content = file.content
+    let modified = false
+
+    // 提取所有 xxxAction({ _stepSummary: '...', ...}) 呼叫
+    const callRegex = /(\w+Action)\(\s*\{([^}]*?)_stepSummary:\s*['"]([^'"]+)['"]/g
+    let match
+
+    while ((match = callRegex.exec(content)) !== null) {
+      const actionFnName = match[1]         // e.g. manageSubscriptionAction
+      const paramsBeforeSummary = match[2]   // e.g. "" or "showId, "
+      const stepSummary = match[3]           // e.g. "查詢訂閱"
+      const fullMatch = match[0]
+
+      // 找到對應的 action 分支
+      const actionInfo = actionMap.get(actionFnName)
+      if (!actionInfo) continue
+
+      const branches = extractActionBranches(actionInfo.content)
+      if (branches.length === 0) continue
+
+      // 模擬匹配：依序找到第一個匹配的分支
+      let matchedBranch: ActionBranch | null = null
+      for (const branch of branches) {
+        if (branch.keywords.some(kw => stepSummary.includes(kw))) {
+          matchedBranch = branch
+          break
+        }
+      }
+
+      // 提取這個呼叫傳了哪些參數（在 _stepSummary 之後）
+      const afterSummary = content.slice(match.index! + fullMatch.length, match.index! + fullMatch.length + 200)
+      const passedParams = new Set<string>()
+      // 前面的參數
+      for (const pm of paramsBeforeSummary.matchAll(/(\w+)\s*[,:]/g)) {
+        passedParams.add(pm[1])
+      }
+      // 後面的參數
+      for (const pm of afterSummary.matchAll(/,\s*(\w+)\s*[,:}]/g)) {
+        passedParams.add(pm[1])
+      }
+
+      if (!matchedBranch) {
+        // 完全不匹配 → 找列表分支或第一個分支
+        const listBranch = branches.find(b => b.keywords.some(kw => kw === '列表' || kw === '全部'))
+        const targetBranch = listBranch || branches[0]
+        const newSummary = targetBranch.keywords[0]
+
+        const oldCall = `_stepSummary: '${stepSummary}'`
+        const newCall = `_stepSummary: '${newSummary}'`
+        content = content.replace(oldCall, newCall)
+        modified = true
+        fixes.push({
+          file: file.path,
+          original: stepSummary,
+          fixed: newSummary,
+          reason: `不匹配任何分支，改為「${newSummary}」`,
+        })
+        continue
+      }
+
+      // 檢查是否匹配到錯誤的分支
+      const hasIdParam = [...passedParams].some(p =>
+        p.endsWith('Id') || p === 'id'
+      )
+      const branchNeedsId = matchedBranch.requiredParams.some(p =>
+        p.endsWith('Id') || p === 'id'
+      )
+
+      // 情況 1：不傳 ID 但匹配到需要 ID 的分支 → 應該走列表分支
+      if (!hasIdParam && branchNeedsId) {
+        const listBranch = branches.find(b => b.keywords.some(kw => kw === '列表' || kw === '全部'))
+        if (listBranch) {
+          const newSummary = `查詢${listBranch.keywords[0]}`
+          const oldCall = `_stepSummary: '${stepSummary}'`
+          const newCall = `_stepSummary: '${newSummary}'`
+          content = content.replace(oldCall, newCall)
+          modified = true
+          fixes.push({
+            file: file.path,
+            original: stepSummary,
+            fixed: newSummary,
+            reason: `未傳 ID 但匹配到需要 ID 的「${matchedBranch.keywords.join('/')}」分支，改為列表查詢`,
+          })
+        }
+        continue
+      }
+
+      // 情況 2：傳了 ID 但匹配到列表分支 → 應該走單筆查詢分支
+      if (hasIdParam && matchedBranch.keywords.some(kw => kw === '列表' || kw === '全部')) {
+        const queryBranch = branches.find(b =>
+          b.keywords.some(kw => kw === '查詢' || kw === '詳情') &&
+          !b.keywords.some(kw => kw === '列表' || kw === '全部')
+        )
+        if (queryBranch) {
+          const newSummary = `查詢${queryBranch.keywords[0]}`
+          const oldCall = `_stepSummary: '${stepSummary}'`
+          const newCall = `_stepSummary: '${newSummary}'`
+          content = content.replace(oldCall, newCall)
+          modified = true
+          fixes.push({
+            file: file.path,
+            original: stepSummary,
+            fixed: newSummary,
+            reason: `傳了 ID 但匹配到列表分支，改為單筆查詢`,
+          })
+        }
+      }
+    }
+
+    if (modified) {
+      frontendFiles[fi] = { ...file, content }
+    }
+  }
+
+  return fixes
 }
 
 // ============================================================
