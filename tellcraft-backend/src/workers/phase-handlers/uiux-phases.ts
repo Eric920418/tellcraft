@@ -648,9 +648,25 @@ export async function handleUiuxMixedPhaseRouting(
       }
 
       // 問候/問題/閒聊攔截 — 在 semanticGateway 前
-      // 注意：platform_issue 不攔截，讓它穿透到 semanticGateway/refineCode 嘗試修復代碼
       const intentCheck2 = detectFastModeIntent(trimmed)
-      if (intentCheck2.match && intentCheck2.type !== 'platform_issue') {
+      if (intentCheck2.match && intentCheck2.type === 'platform_issue') {
+        const isChinese = /[\u4e00-\u9fff]/.test(trimmed) || state.locale === 'zh'
+        const qr: { label: string; value: string; style: 'primary' | 'ghost' }[] = [
+          { label: isChinese ? '部署上線' : 'Deploy', value: '部署', style: 'primary' },
+        ]
+        if (state.uiuxPreIterationCode) {
+          qr.push({ label: isChinese ? '撤銷修改' : 'Undo', value: '撤銷', style: 'ghost' })
+        }
+        await sendMessage(conversationId, io, {
+          content: isChinese
+            ? '看起來預覽出現了問題。請試試：\n1. 重新整理頁面\n2. 清除瀏覽器快取\n\n如果問題持續，描述您看到的具體狀況，我會嘗試修復。'
+            : 'Looks like the preview has an issue. Try:\n1. Refresh the page\n2. Clear browser cache\n\nIf it persists, describe what you see and I\'ll try to fix it.',
+          stage: 'customer_service',
+          quickReplies: qr,
+        })
+        return
+      }
+      if (intentCheck2.match) {
         const isChinese = /[\u4e00-\u9fff]/.test(trimmed) || state.locale === 'zh'
         if (intentCheck2.type === 'question') {
           const faqResult = getFaqReply(trimmed, state.locale)

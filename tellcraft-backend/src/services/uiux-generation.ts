@@ -888,13 +888,23 @@ export interface SuspiciousRefineShrink {
   newLines: number
 }
 
+/**
+ * 偵測用戶是否有刪除/移除功能的意圖
+ * 有刪除意圖時，代碼大幅縮減是合理的（不是截斷）
+ */
+function hasRemovalIntent(userFeedback: string): boolean {
+  return /拿掉|移除|刪除|取消|去掉|不要|不需要|砍掉|remove|delete|drop|get rid of/i.test(userFeedback)
+}
+
 export function findSuspiciousRefineShrinks(
   baseCode: CodeBundle,
   patches: RefinePatchSet,
   threshold = 0.4,
+  userFeedback?: string,
 ): SuspiciousRefineShrink[] {
   const issues: SuspiciousRefineShrink[] = []
   const allOriginal = [...baseCode.pages, ...baseCode.components]
+  const removalIntent = userFeedback ? hasRemovalIntent(userFeedback) : false
 
   for (const [path, newContent] of [
     ...patches.modifiedPages.entries(),
@@ -905,6 +915,10 @@ export function findSuspiciousRefineShrinks(
 
     const originalLines = original.content.split('\n').length
     const newLines = newContent.split('\n').length
+
+    // 用戶有刪除意圖時，只要新代碼 >= 3 行（至少有 export default）就放行
+    if (removalIntent && newLines >= 3) continue
+
     if (originalLines > 30 && newLines < originalLines * (1 - threshold)) {
       issues.push({ path, originalLines, newLines })
     }
@@ -5134,7 +5148,7 @@ ${codeBlocks.join('\n\n')}
   // ── 縮水偵測：大檔案先嘗試單檔修復，再決定是否取消 ──
   const SHRINK_THRESHOLD = 0.4
   let effectivePatches = initialPatches
-  let shrinkIssues = findSuspiciousRefineShrinks(currentCode, effectivePatches, SHRINK_THRESHOLD)
+  let shrinkIssues = findSuspiciousRefineShrinks(currentCode, effectivePatches, SHRINK_THRESHOLD, userFeedback)
   if (shrinkIssues.length > 0) {
     logger.warn(
       { shrinkIssues },
@@ -5144,7 +5158,7 @@ ${codeBlocks.join('\n\n')}
     const recoveredPatches = await recoverSuspiciousShrinkPatches(currentCode, effectivePatches, shrinkIssues)
     if (recoveredPatches) {
       effectivePatches = recoveredPatches
-      shrinkIssues = findSuspiciousRefineShrinks(currentCode, effectivePatches, SHRINK_THRESHOLD)
+      shrinkIssues = findSuspiciousRefineShrinks(currentCode, effectivePatches, SHRINK_THRESHOLD, userFeedback)
     }
   }
 

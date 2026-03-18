@@ -112,7 +112,7 @@ function detectRepeatedComplaint(
     const intersection = [...currentTokens].filter(k => pastTokens.has(k)).length
     const minSize = Math.min(currentTokens.size, pastTokens.size)
     // overlap coefficient（intersection / min_size）比 Jaccard 更適合長短句比對
-    if (minSize > 0 && intersection / minSize >= 0.2) count++
+    if (minSize > 0 && intersection / minSize >= 0.35) count++
     else break
   }
   return count
@@ -283,6 +283,9 @@ ${enrichedFeedback}`
     const changedFiles = result.pages.map(p => p.path)
     if (result.components) {
       changedFiles.push(...result.components.map(c => c.path))
+    }
+    if (result.styles && result.styles !== currentCode.styles) {
+      changedFiles.push('app/globals.css')
     }
     recordIterationHistory(state, userFeedback, changedFiles)
 

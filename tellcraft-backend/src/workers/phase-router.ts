@@ -137,8 +137,66 @@ export async function routePhase(
     return true
   }
   if (state.phase === 'fast_generating') {
-    // awaiting_continue 時用戶輸入普通文字 → 視為「想先修改」→ 轉 uiux_complete + 迭代
+    // awaiting_continue 時用戶輸入 → 先驗證再決定是否迭代
     if (state.waitingForReply && state.fastBuildStage === 'awaiting_continue') {
+      const isChinese = /[\u4e00-\u9fff]/.test(trimmedMsg) || state.locale === 'zh'
+
+      // Layer 1: 問候/閒聊/問題攔截（零 LLM）
+      const intentCheck = detectFastModeIntent(trimmedMsg)
+      if (intentCheck.match && intentCheck.type !== 'platform_issue') {
+        const qr = buildPostDeployFastBuildQuickReplies(state, { includeDeploy: false })
+        qr.push({ label: isChinese ? '開始新專案' : 'New Project', value: '__new_project__', style: 'ghost' as const })
+        if (intentCheck.type === 'question') {
+          const faqResult = getFaqReply(trimmedMsg, state.locale)
+          if (faqResult) {
+            await sendMessage(conversationId, io, { content: faqResult.reply, stage: 'customer_service', quickReplies: qr })
+          } else {
+            await streamLlmMessage(conversationId, io, {
+              stage: 'customer_service', quickReplies: qr,
+              llmFn: (onDelta) => answerWithSonnet(trimmedMsg, { conversationId, locale: state.locale }, onDelta),
+            })
+          }
+          return true
+        }
+        await sendMessage(conversationId, io, {
+          content: isChinese
+            ? '嗨！您的網站已生成完成。您可以：\n- 描述修改需求來調整設計\n- 點擊「部署上線」發布網站'
+            : 'Hi! Your site is ready. You can:\n- Describe changes to adjust the design\n- Click "Deploy" to publish',
+          stage: 'info', quickReplies: qr,
+        })
+        return true
+      }
+
+      // Layer 1.5: platform_issue 攔截
+      if (intentCheck.match && intentCheck.type === 'platform_issue') {
+        await sendMessage(conversationId, io, {
+          content: isChinese
+            ? '看起來預覽出現了問題。請試試：\n1. 重新整理頁面\n2. 清除瀏覽器快取\n\n如果問題持續，描述您看到的具體狀況，我會嘗試修復。'
+            : 'Looks like the preview has an issue. Try:\n1. Refresh the page\n2. Clear browser cache\n\nIf it persists, describe what you see and I\'ll try to fix it.',
+          stage: 'customer_service',
+          quickReplies: buildPostDeployFastBuildQuickReplies(state, { includeDeploy: false }),
+        })
+        return true
+      }
+
+      // Layer 2: semanticGateway 語義驗證
+      const gwResult = await semanticGateway(
+        { phase: 'iteration', userMessage: trimmedMsg, conversationId, userId: data.userId, locale: data.locale || state.locale },
+        state
+      )
+      if (!gwResult.accept) {
+        state.semanticRejectCount = (state.semanticRejectCount || 0) + 1
+        await saveFlowState(redis, conversationId, state)
+        await sendMessage(conversationId, io, {
+          content: gwResult.guidanceMessage || (isChinese ? '請描述您想修改的設計內容。' : 'Please describe what you\'d like to change.'),
+          stage: 'info',
+          quickReplies: buildPostDeployFastBuildQuickReplies(state, { includeDeploy: false }),
+        })
+        return true
+      }
+
+      // 通過驗證 → 轉向迭代
+      state.semanticRejectCount = 0
       state.phase = 'uiux_complete'
       state.fastBuildStage = 'complete'
       state.uiuxCodePhase = 'complete'
@@ -518,9 +576,20 @@ async function routeDeployerComplete(
     return
   }
 
-  // 問候/問題/閒聊攔截（platform_issue 不攔截，讓它走 semanticGateway/refineCode）
+  // 問候/問題/閒聊攔截
   const intentCheck = detectFastModeIntent(trimmed)
-  if (intentCheck.match && intentCheck.type !== 'platform_issue') {
+  if (intentCheck.match && intentCheck.type === 'platform_issue') {
+    const isChinese = /[\u4e00-\u9fff]/.test(trimmed) || state.locale === 'zh'
+    await sendMessage(conversationId, io, {
+      content: isChinese
+        ? '看起來預覽出現了問題。請試試：\n1. 重新整理頁面\n2. 清除瀏覽器快取\n\n如果問題持續，描述您看到的具體狀況，我會嘗試修復。'
+        : 'Looks like the preview has an issue. Try:\n1. Refresh the page\n2. Clear browser cache\n\nIf it persists, describe what you see and I\'ll try to fix it.',
+      stage: 'customer_service',
+      quickReplies: buildPostDeployFastBuildQuickReplies(state, { includeDeploy: true, includeRollback: true }),
+    })
+    return
+  }
+  if (intentCheck.match) {
     const isChinese = /[\u4e00-\u9fff]/.test(trimmed) || state.locale === 'zh'
     const qr = buildPostDeployFastBuildQuickReplies(state, { includeDeploy: true, includeNewProject: true })
     qr.push({ label: isChinese ? '綁定自訂網域' : 'Bind Custom Domain', value: '綁定網域', style: 'ghost' as const })

@@ -86,6 +86,13 @@ export async function handleDeployExecute(
     return
   }
 
+  // 前置檢查：project 是否還存在（防止 stale FlowState 操作已刪除的資料）
+  const projectExists = await db.getProject(projectId)
+  if (!projectExists) {
+    logger.warn({ projectId, conversationId }, '部署取消：project 已不存在')
+    return
+  }
+
   state.phase = 'deployer_deploying'
   state.waitingForReply = false
   state.uiuxCodeGenerationStartedAt = Date.now()
