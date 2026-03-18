@@ -239,7 +239,7 @@ Phase 3: Spec Discovery + Clarify
     → 前端展示純白話文字
     → DB 保留原始技術 question/options（供 Formulation 消費）
 
-Phase 4: Actions Design → actions.yml（Sonnet LLM）
+Phase 4: Actions Design → actions.yml（Sonnet LLM，三層防禦：autoCorrectSummaries 零 LLM 修正 + 動態 maxTokens 防截斷 + generateMissingActions targeted 補齊）
 Phase 5: ISA Config → isa.yml（SpecFormula 標準，100% 規則式，零 LLM）
 Phase 6: Change Management（需求變更 → 影響分析 → 執行修改 → 一致性驗證）
 ```

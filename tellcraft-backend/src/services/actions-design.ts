@@ -194,6 +194,65 @@ export function validateActionsYml(
   return { valid: errors.length === 0, errors }
 }
 
+// ============================================================
+// 零 LLM 自動修正 Summary
+// ============================================================
+
+/**
+ * 用 action.name ↔ feature.actionName 映射，強制將 summary 修正為 feature.name。
+ * action.name（camelCase 函數名）幾乎不會出錯，出錯的都是 summary（中文措辭）。
+ */
+export function autoCorrectSummaries(
+  actionsYml: string,
+  features: Array<{ name: string; actionName: string }>
+): { correctedYml: string; corrections: string[]; missingFeatures: string[] } {
+  const corrections: string[] = []
+  const missingFeatures: string[] = []
+
+  let parsed: ActionsYmlStructure
+  try {
+    parsed = yaml.load(actionsYml) as ActionsYmlStructure
+  } catch {
+    return { correctedYml: actionsYml, corrections, missingFeatures: features.map(f => f.name) }
+  }
+
+  if (!parsed?.actions || !Array.isArray(parsed.actions)) {
+    return { correctedYml: actionsYml, corrections, missingFeatures: features.map(f => f.name) }
+  }
+
+  // 建立 actionName → featureName 映射
+  const actionNameToFeatureName = new Map<string, string>()
+  for (const f of features) {
+    actionNameToFeatureName.set(f.actionName, f.name)
+  }
+
+  // 遍歷 actions，修正 summary
+  const matchedActionNames = new Set<string>()
+  for (const action of parsed.actions) {
+    if (!action.name) continue
+    const expectedName = actionNameToFeatureName.get(action.name)
+    if (expectedName) {
+      matchedActionNames.add(action.name)
+      if (action.summary !== expectedName) {
+        corrections.push(`"${action.summary}" → "${expectedName}" (action: ${action.name})`)
+        action.summary = expectedName
+        // 同步修正 featureFile 路徑
+        action.featureFile = `spec/features/${expectedName}.feature`
+      }
+    }
+  }
+
+  // 偵測缺失的 features（action.name 完全不存在）
+  for (const f of features) {
+    if (!matchedActionNames.has(f.actionName)) {
+      missingFeatures.push(f.name)
+    }
+  }
+
+  const correctedYml = yaml.dump(parsed, { indent: 2, lineWidth: 120, noRefs: true })
+  return { correctedYml, corrections, missingFeatures }
+}
+
 function hasActionsArray(parsed: unknown): parsed is ActionsYmlStructure {
   if (!parsed || typeof parsed !== 'object') {
     return false
@@ -351,10 +410,160 @@ types:
 3. 不要讓 Action summary 與 Feature 名稱不一致
 4. 不要省略 featureFile 和 rules 欄位`
 
+// ============================================================
+// 動態 maxTokens 計算
+// ============================================================
+
+function calculateMaxTokens(featureCount: number): number {
+  // 每個 action 平均 ~1500 output tokens（name/summary/description/featureFile/rules/input/output）
+  // types 區段 ~300 tokens/feature，project 頭部 + 安全邊距 ~2000
+  const estimated = featureCount * 1500 + 2000
+  return Math.min(Math.max(estimated, 16384), 65536)
+}
+
+// ============================================================
+// 缺失 Action 補齊生成
+// ============================================================
+
+const MISSING_ACTIONS_SYSTEM_PROMPT = `你是一位 sdd.os ISA 專家。你需要為缺失的 Feature 補充生成 actions.yml 中的 action 條目。
+
+## 核心規範
+1. **summary 一致**：每個 Action 的 summary 必須與 Feature 名稱**完全一致**（逐字匹配，不可改寫、簡化、加字）
+2. **name 一致**：每個 Action 的 name 必須與 Feature 開頭的 \`# Action:\` 註解一致
+3. **rules 完整**：從 Feature File 提取所有 Rule
+4. **type 四類**：前置（狀態）/ 前置（參數）/ 後置（回應）/ 後置（狀態）
+5. **step 格式（SpecFormula 標準）**：
+   - When: \`(No Actor|UID="$var") {summary}, call table:\`
+   - Then 成功: \`{summary}(STATUS)回應, with table:\`
+   - Then 失敗: \`操作失敗\`
+   - Entity 驗證: \`應該存在一個{entity}, with table:\`
+
+## 輸出格式
+只輸出 \`\`\`yaml\`\`\` 包裹的 YAML，只包含 actions 和 types（不需要 project 區段）。`
+
+/**
+ * 只為缺失的 Feature 生成補充 action，合併到已有 YAML 中。
+ */
+async function generateMissingActions(
+  existingYml: string,
+  allFeatures: Array<{ name: string; actionName: string; content: string }>,
+  missingFeatureNames: string[],
+  schemaSql: string,
+  entityMapping: string,
+  trackingContext?: LlmTrackingContext
+): Promise<{ success: boolean; mergedYml?: string; error?: string }> {
+  const missingSet = new Set(missingFeatureNames)
+  const missingFeatures = allFeatures.filter(f => missingSet.has(f.name))
+
+  if (missingFeatures.length === 0) {
+    return { success: true, mergedYml: existingYml }
+  }
+
+  // 構建已有 action 清單（告知 LLM 不要重複）
+  let existingParsed: ActionsYmlStructure
+  try {
+    existingParsed = yaml.load(existingYml) as ActionsYmlStructure
+  } catch {
+    return { success: false, error: '現有 YAML 解析失敗' }
+  }
+  const existingNames = (existingParsed?.actions || []).map(a => a.name).filter(Boolean)
+
+  const featuresContent = missingFeatures.map(f =>
+    `### ${f.name} (${f.actionName})\n\`\`\`gherkin\n${f.content}\n\`\`\``
+  ).join('\n\n---\n\n')
+
+  const summaryChecklist = missingFeatures.map(f =>
+    `- ${f.actionName} → summary 必須是「${f.name}」`
+  ).join('\n')
+
+  const userMessage = `## 已存在的 Action（不要重複生成）
+${existingNames.map(n => `- ${n}`).join('\n')}
+
+## 需要補充的 Feature Files
+
+${featuresContent}
+
+## SQL Schema
+\`\`\`sql
+${schemaSql}
+\`\`\`
+
+## Entity Mapping
+\`\`\`yaml
+${entityMapping}
+\`\`\`
+
+## 必須完全匹配的 summary 清單
+${summaryChecklist}
+
+請為上述缺失的 Feature 生成對應的 action 條目和相關 types。`
+
+  const maxTokens = calculateMaxTokens(missingFeatures.length)
+  logger.info({ missingCount: missingFeatures.length }, '補充生成缺失 actions')
+  const response = await callClaude(MISSING_ACTIONS_SYSTEM_PROMPT, userMessage, { maxTokens, temperature: 0.1 })
+
+  if (!response.success) {
+    return { success: false, error: response.error }
+  }
+
+  if (response.inputTokens && response.outputTokens) {
+    trackLlmUsage({
+      model: MODEL.SONNET,
+      inputTokens: response.inputTokens,
+      outputTokens: response.outputTokens,
+      purpose: 'actions_design_missing',
+      userId: trackingContext?.userId,
+      conversationId: trackingContext?.conversationId,
+    })
+  }
+
+  const extracted = extractYamlFromLlmResponse(response.content)
+  if (!extracted) {
+    return { success: false, error: '補充生成的 YAML 無法提取' }
+  }
+
+  // 合併到已有結構
+  let newParsed: ActionsYmlStructure
+  try {
+    newParsed = yaml.load(extracted.yamlText) as ActionsYmlStructure
+  } catch {
+    return { success: false, error: '補充 YAML 解析失敗' }
+  }
+
+  if (!existingParsed) {
+    return { success: false, error: '現有 YAML 結構為空' }
+  }
+
+  // 合併 actions（按 name 去重，新的補充到末尾）
+  const existingNameSet = new Set(existingNames)
+  if (newParsed?.actions) {
+    for (const action of newParsed.actions) {
+      if (action.name && !existingNameSet.has(action.name)) {
+        existingParsed.actions!.push(action)
+        existingNameSet.add(action.name)
+      }
+    }
+  }
+
+  // 合併 types（已有優先，新的只補充不存在的）
+  if (newParsed?.types && existingParsed.types) {
+    for (const [typeName, typeDef] of Object.entries(newParsed.types)) {
+      if (!(typeName in existingParsed.types)) {
+        (existingParsed.types as Record<string, unknown>)[typeName] = typeDef
+      }
+    }
+  } else if (newParsed?.types && !existingParsed.types) {
+    existingParsed.types = newParsed.types
+  }
+
+  const mergedYml = yaml.dump(existingParsed, { indent: 2, lineWidth: 120, noRefs: true })
+  return { success: true, mergedYml }
+}
+
 /**
  * 從 Feature Files + Schema 生成 actions.yml
  *
- * LLM 驅動（Sonnet），~1 次調用，~$0.05
+ * 三層防禦：autoCorrectSummaries（零 LLM）→ 動態 maxTokens → generateMissingActions（targeted LLM）
  */
 export async function generateActionsYml(
   input: ActionsDesignInput,
@@ -366,10 +575,17 @@ export async function generateActionsYml(
     return { success: false, error: '沒有 Feature Files' }
   }
 
-  // 構建 user message
+  // 動態 maxTokens：防止 Feature 多時 YAML 截斷
+  const maxTokens = calculateMaxTokens(features.length)
+
+  // 構建 user message（附加顯眼的 summary 清單）
   const featuresContent = features.map(f =>
     `### ${f.name} (${f.actionName})\n\`\`\`gherkin\n${f.content}\n\`\`\``
   ).join('\n\n---\n\n')
+
+  const summaryChecklist = features.map(f =>
+    `- ${f.actionName} → summary 必須是「${f.name}」`
+  ).join('\n')
 
   const userMessage = `## 專案${projectName ? `: ${projectName}` : ''}
 
@@ -389,10 +605,13 @@ ${schemaSql}
 ${entityMapping}
 \`\`\`
 
-請根據以上內容生成 actions.yml。`
+## 必須完全匹配的 summary 清單（逐字複製，不可改寫）
+${summaryChecklist}
 
-  logger.info({ featureCount: features.length }, '生成 actions.yml')
-  const response = await callClaude(SYSTEM_PROMPT, userMessage, { maxTokens: 16384, temperature: 0.1 })
+請根據以上內容生成 actions.yml。每個 action 的 summary 必須與上方清單完全一致。`
+
+  logger.info({ featureCount: features.length, maxTokens }, '生成 actions.yml')
+  const response = await callClaude(SYSTEM_PROMPT, userMessage, { maxTokens, temperature: 0.1 })
 
   if (!response.success) {
     return { success: false, error: response.error }
@@ -425,7 +644,7 @@ ${entityMapping}
 \`\`\`
 ${(response.content || '').slice(0, 2000)}
 \`\`\``
-    const reformatResponse = await callClaude(SYSTEM_PROMPT, reformatPrompt, { maxTokens: 16384, temperature: 0.1 })
+    const reformatResponse = await callClaude(SYSTEM_PROMPT, reformatPrompt, { maxTokens, temperature: 0.1 })
     if (reformatResponse.success) {
       extracted = extractYamlFromLlmResponse(reformatResponse.content)
       if (extracted) {
@@ -442,55 +661,104 @@ ${(response.content || '').slice(0, 2000)}
     logger.warn({ strategy: extracted.strategy }, 'LLM YAML 以容錯模式提取')
   }
 
-  const actionsYml = extracted.yamlText
+  // Layer 1: 零 LLM 自動修正 summary（用 action.name 映射）
+  const { correctedYml, corrections, missingFeatures } = autoCorrectSummaries(extracted.yamlText, features)
+  if (corrections.length > 0) {
+    logger.info({ count: corrections.length, corrections }, 'Summary 自動修正')
+  }
 
-  // 驗證
-  const validation = validateActionsYml(actionsYml, features)
-  if (!validation.valid) {
-    logger.warn({ errors: validation.errors }, '初次生成驗證失敗')
+  // 驗證修正後的版本
+  let currentYml = correctedYml
+  let validation = validateActionsYml(currentYml, features)
 
-    // 修復重試（1 次）
-    const fixPrompt = `你之前生成的 actions.yml 有以下問題，請修正後重新輸出完整 YAML：
+  if (validation.valid) {
+    logger.info({ actionCount: features.length, autoCorrections: corrections.length }, '生成完成')
+    return buildSuccessResult(currentYml, projectName)
+  }
 
-## 問題
-${validation.errors.map((e, i) => `${i + 1}. ${e}`).join('\n')}
+  logger.warn({ errors: validation.errors, missingFeatures }, '驗證失敗，進入修復流程')
 
-## 原始 YAML
-\`\`\`yaml
-${actionsYml}
-\`\`\`
+  // Layer 3: 增強修復（最多 2 輪）
+  const MAX_FIX_ROUNDS = 2
+  for (let round = 1; round <= MAX_FIX_ROUNDS; round++) {
+    // 區分錯誤類型
+    const summaryMissingErrors = validation.errors.filter(e => e.includes('沒有對應的 Action（summary 不匹配）'))
+    const otherErrors = validation.errors.filter(e => !e.includes('沒有對應的 Action（summary 不匹配）'))
 
-請修正上述問題，輸出完整的修正版 YAML（用 \`\`\`yaml\`\`\` 包裹）。`
+    // 3a: 如果有缺失的 Feature（截斷導致 action 完全不存在），targeted 補齊
+    if (summaryMissingErrors.length > 0) {
+      // 從錯誤訊息提取缺失的 Feature name
+      const missingNames = summaryMissingErrors
+        .map(e => e.match(/Feature "(.+)" 沒有對應的 Action/)?.[1])
+        .filter((n): n is string => !!n)
 
-    logger.info('修復重試...')
-    const fixResponse = await callClaude(SYSTEM_PROMPT, fixPrompt, { maxTokens: 16384, temperature: 0.1 })
-
-    if (fixResponse.success) {
-      const fixExtracted = extractYamlFromLlmResponse(fixResponse.content)
-      if (fixExtracted) {
-        if (fixExtracted.strategy !== 'fenced-yaml') {
-          logger.warn({ strategy: fixExtracted.strategy }, '修復回應 YAML 以容錯模式提取')
+      if (missingNames.length > 0) {
+        logger.info({ round, missingCount: missingNames.length, missingNames }, '補齊缺失 actions')
+        const missingResult = await generateMissingActions(
+          currentYml, features, missingNames, schemaSql, entityMapping, trackingContext
+        )
+        if (missingResult.success && missingResult.mergedYml) {
+          // 合併後再次 autoCorrect
+          const merged = autoCorrectSummaries(missingResult.mergedYml, features)
+          if (merged.corrections.length > 0) {
+            logger.info({ count: merged.corrections.length }, '補齊後 Summary 再次修正')
+          }
+          currentYml = merged.correctedYml
         }
-        const fixedYml = fixExtracted.yamlText
-        const fixValidation = validateActionsYml(fixedYml, features)
-        if (fixValidation.valid) {
-          logger.info('修復後驗證通過')
-          return { success: true, actionsYml: fixedYml }
-        }
-        logger.warn({ errors: fixValidation.errors }, '修復後仍有問題')
-        // 降級：使用修復版（可能部分正確）
-        return { success: true, actionsYml: fixedYml }
       }
     }
 
-    // 降級：使用初始版本
-    logger.warn('修復失敗，使用初始版本')
-    return { success: true, actionsYml }
+    // 3b: 如果有其他錯誤（rules type 等），用改進的 fix prompt
+    if (otherErrors.length > 0) {
+      const fixPrompt = `你之前生成的 actions.yml 有以下問題，請修正後重新輸出完整 YAML：
+
+## 問題
+${otherErrors.map((e, i) => `${i + 1}. ${e}`).join('\n')}
+
+## 現有 YAML
+\`\`\`yaml
+${currentYml}
+\`\`\`
+
+## 必須完全匹配的 summary 清單
+${summaryChecklist}
+
+請修正上述問題，輸出完整的修正版 YAML（用 \`\`\`yaml\`\`\` 包裹）。`
+
+      logger.info({ round, errorCount: otherErrors.length }, '修復 non-summary 錯誤')
+      const fixResponse = await callClaude(SYSTEM_PROMPT, fixPrompt, { maxTokens, temperature: 0.1 })
+      if (fixResponse.success) {
+        const fixExtracted = extractYamlFromLlmResponse(fixResponse.content)
+        if (fixExtracted) {
+          // 修復後也要 autoCorrect
+          const fixed = autoCorrectSummaries(fixExtracted.yamlText, features)
+          if (fixed.corrections.length > 0) {
+            logger.info({ count: fixed.corrections.length }, '修復後 Summary 再次修正')
+          }
+          currentYml = fixed.correctedYml
+        }
+      }
+    }
+
+    // 重新驗證
+    validation = validateActionsYml(currentYml, features)
+    if (validation.valid) {
+      logger.info({ round, autoCorrections: corrections.length }, `第 ${round} 輪修復後驗證通過`)
+      return buildSuccessResult(currentYml, projectName)
+    }
+
+    logger.warn({ round, errors: validation.errors }, `第 ${round} 輪修復後仍有問題`)
   }
 
-  logger.info({ actionCount: features.length }, '生成完成')
+  // 降級：使用最後的修復版本（可能部分正確）
+  logger.warn({ remainingErrors: validation.errors.length }, '修復輪次用盡，使用最後修復版本')
+  return buildSuccessResult(currentYml, projectName)
+}
 
-  // 自動生成 OpenAPI 3.0 spec
+function buildSuccessResult(
+  actionsYml: string,
+  projectName?: string
+): { success: boolean; actionsYml: string; openApiSpec?: string } {
   let openApiSpec: string | undefined
   try {
     openApiSpec = convertToOpenAPI(actionsYml, projectName)
@@ -498,7 +766,6 @@ ${actionsYml}
   } catch (err) {
     logger.warn({ err }, 'OpenAPI 生成失敗，降級跳過')
   }
-
   return { success: true, actionsYml, openApiSpec }
 }
 

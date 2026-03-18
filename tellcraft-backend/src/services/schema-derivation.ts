@@ -112,16 +112,22 @@ function transformToPostgresqlDDL(tables: ParsedTable[]): string {
     let hasId = false
     let hasPrimaryKey = false
 
-    // === Pass 1: 收集 FK 欄位（CONSTRAINT ... FOREIGN KEY (col) REFERENCES ...）===
+    // === Pass 1: 收集 FK 欄位 + PK 欄位 ===
     const fkColumns = new Set<string>()
+    const pkColumns = new Set<string>()
     for (const col of table.columns) {
       const fkMatch = col.match(/CONSTRAINT\s+(\w+)\s+FOREIGN\s+KEY\s*\((\w+)\)\s+REFERENCES\s+(\w+)\s*\((\w+)\)/i)
       if (fkMatch) {
         fkColumns.add(fkMatch[2].toLowerCase())
       }
-      // 偵測複合 PRIMARY KEY
-      if (/^\s*PRIMARY\s+KEY\s*\(/i.test(col)) {
+      // 偵測 PRIMARY KEY（含 CONSTRAINT ... PRIMARY KEY）
+      if (/PRIMARY\s+KEY/i.test(col)) {
         hasPrimaryKey = true
+        // 收集 PK 欄位名（用於 VARCHAR→UUID 轉換）
+        const pkMatch = col.match(/PRIMARY\s+KEY\s*\((\w+)\)/i)
+        if (pkMatch) {
+          pkColumns.add(pkMatch[1].toLowerCase())
+        }
       }
     }
 
@@ -154,8 +160,8 @@ function transformToPostgresqlDDL(tables: ParsedTable[]): string {
         hasCreatedAt = true
       }
 
-      // 檢測複合 PRIMARY KEY → 標記不需要自動加 id
-      if (/^\s*PRIMARY\s+KEY\s*\(/i.test(transformed)) {
+      // 檢測 PRIMARY KEY（含 CONSTRAINT ... PRIMARY KEY）→ 標記不需要自動加 id
+      if (/PRIMARY\s+KEY/i.test(transformed)) {
         hasPrimaryKey = true
       }
 
@@ -188,10 +194,13 @@ function transformToPostgresqlDDL(tables: ParsedTable[]): string {
         )
       }
 
-      // FK 欄位（CONSTRAINT 行分離的情況）：VARCHAR(n) → UUID
-      const colNameForFk = transformed.match(/^\s*(\w+)\s+VARCHAR/i)
-      if (colNameForFk && fkColumns.has(colNameForFk[1].toLowerCase())) {
-        transformed = transformed.replace(/VARCHAR\(\d+\)/i, 'UUID')
+      // FK / PK 欄位（CONSTRAINT 行分離的情況）：VARCHAR(n) → UUID
+      const colNameForTypeConvert = transformed.match(/^\s*(\w+)\s+VARCHAR/i)
+      if (colNameForTypeConvert) {
+        const colNameLower = colNameForTypeConvert[1].toLowerCase()
+        if (fkColumns.has(colNameLower) || pkColumns.has(colNameLower)) {
+          transformed = transformed.replace(/VARCHAR\(\d+\)/i, 'UUID')
+        }
       }
 
       // MySQL ENUM → VARCHAR + CHECK
