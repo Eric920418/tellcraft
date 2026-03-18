@@ -1052,7 +1052,7 @@ export async function executeDeployment(
 /**
  * 將 UIUX 生成的代碼包裝成完整 Next.js 專案
  */
-function wrapInNextJs(
+export function wrapInNextJs(
   code: GeneratedCode,
   projectName: string,
   tailwindConfig: string,
@@ -1793,7 +1793,7 @@ async function writeSourceFilesOnly(dir: string, files: VercelFile[]): Promise<v
 /**
  * 執行 npm install（timeout 120s）
  */
-async function runNpmInstall(dir: string): Promise<{ success: boolean; output: string }> {
+export async function runNpmInstall(dir: string): Promise<{ success: boolean; output: string }> {
   try {
     const { stdout, stderr } = await execFileAsync('npm', ['install', '--no-audit', '--no-fund'], {
       cwd: dir,

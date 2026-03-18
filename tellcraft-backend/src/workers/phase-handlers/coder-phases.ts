@@ -10,6 +10,7 @@ import type { FlowState, GeneratedCode } from '../../types/flow-state'
 import { type GeneratedComponent, generateTailwindConfig } from '../../services/uiux-generation'
 import { executeCoderPipeline } from '../../services/coder-generation'
 import { sendMessage, saveFlowState, getFlowState, touchFlowActivity } from '../orchestrator-utils'
+import { runCoderE2ETests } from '../../services/coder-e2e-test'
 import { createLogger } from '../../lib/logger'
 
 const logger = createLogger('coder-phases')
@@ -186,6 +187,56 @@ export async function executeCoderSkill(input: CoderSkillInput): Promise<void> {
       ? generateTailwindConfig(state.uiuxDesignSystem)
       : ''
 
+    // 查詢 Neon 連線字串
+    const neonRow = await db.queryOne<{ neon_connection_string: string | null }>(
+      'SELECT neon_connection_string FROM projects WHERE id = $1', [projectId]
+    )
+    const neonConnectionString = neonRow?.neon_connection_string || undefined
+
+    // E2E 端到端測試（Coder 完成後、sendMessage 前）
+    if (neonConnectionString) {
+      await sendMessage(conversationId, io, {
+        content: isChinese ? '執行端到端測試，確認所有頁面可用...' : 'Running E2E tests to verify all pages...',
+        stage: 'coder_testing',
+      })
+
+      const e2eResult = await runCoderE2ETests({
+        code: { pages: mergedPages, components: mergedComponents, styles },
+        tailwindConfig,
+        extraDependencies: { '@neondatabase/serverless': '^0.10.0', bcryptjs: '^2.4.3', jsonwebtoken: '^9.0.0' },
+        neonConnectionString,
+        trackingContext: { userId, conversationId },
+        onProgress: (step: string) => {
+          io.to(`conversation:${conversationId}`).emit('coder_progress', { step, percent: 92 })
+        },
+      })
+
+      logger.info({ passed: e2eResult.passed, summary: e2eResult.summary, fixCount: e2eResult.fixedFiles.length }, 'E2E 測試結果')
+
+      // 如果有修正，寫回 DB + 更新 FlowState
+      if (e2eResult.fixedFiles.length > 0) {
+        const fixedDbFiles = e2eResult.fixedFiles.map((f: { path: string; content: string }) => ({
+          filePath: f.path,
+          content: f.content,
+          description: '',
+          fileType: f.path.endsWith('page.tsx') ? 'page' : 'component',
+        }))
+        await db.upsertProjectFiles(projectId, 'coder', fixedDbFiles)
+
+        // 更新 mergedPages/mergedComponents
+        for (const fix of e2eResult.fixedFiles) {
+          const pageIdx = mergedPages.findIndex(p => p.path === fix.path)
+          if (pageIdx >= 0) mergedPages[pageIdx] = { ...mergedPages[pageIdx], content: fix.content }
+          const compIdx = mergedComponents.findIndex(c => c.path === fix.path)
+          if (compIdx >= 0) mergedComponents[compIdx] = { ...mergedComponents[compIdx], content: fix.content }
+        }
+
+        // 更新 FlowState
+        state.uiuxGeneratedCode = { pages: mergedPages, components: mergedComponents, styles }
+        await saveFlowState(redis, conversationId, state)
+      }
+    }
+
     // 發送完成訊息
     await sendMessage(conversationId, io, {
       content: isChinese
@@ -205,7 +256,7 @@ export async function executeCoderSkill(input: CoderSkillInput): Promise<void> {
           apiRoutes,
           dbLib,
           hasServerActions: true,
-          neonConnectionString: (await db.queryOne<{ neon_connection_string: string | null }>('SELECT neon_connection_string FROM projects WHERE id = $1', [projectId]))?.neon_connection_string || undefined,
+          neonConnectionString,
         } as Record<string, unknown>,
       },
       quickReplies: [
