@@ -213,17 +213,35 @@ export function useWebContainer(options: UseWebContainerOptions): UseWebContaine
     }
   }, [enabled, initialFiles, envVars, updateStatus])
 
-  // ── envVars 後續更新：WebContainer 已啟動後 envVars 才有值時，補寫 .env ──
+  // ── envVars 後續更新：WebContainer 已啟動後 envVars 才有值時，補寫 .env + restart dev server ──
+  const envVarsWrittenRef = useRef(false)
   useEffect(() => {
     if (!envVars || Object.keys(envVars).length === 0) return
+    if (envVarsWrittenRef.current) return // 已寫過，不重複 restart
     const container = containerRef.current
-    if (!container) return // WebContainer 還沒 boot
+    if (!container || !hasStartedRef.current) return
+
+    envVarsWrittenRef.current = true
 
     const envContent = Object.entries(envVars)
       .map(([k, v]) => `${k}=${v}`)
       .join('\n')
 
-    container.fs.writeFile('.env', envContent).catch(() => {})
+    ;(async () => {
+      try {
+        await container.fs.writeFile('.env', envContent)
+        // Next.js dev server 需要 restart 才能讀到新的 .env
+        if (devProcess) {
+          devProcess.kill()
+          devProcess = null
+          const proc = await container.spawn('npx', ['next', 'dev', '--port', '3000'])
+          devProcess = proc
+          proc.output.pipeTo(new WritableStream({ write() {} })).catch(() => {})
+        }
+      } catch {
+        // ignore
+      }
+    })()
   }, [envVars])
 
   // Cleanup on unmount
