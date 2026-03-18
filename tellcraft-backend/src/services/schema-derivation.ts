@@ -115,7 +115,7 @@ function transformToPostgresqlDDL(tables: ParsedTable[]): string {
     // === Pass 1: 收集 FK 欄位（CONSTRAINT ... FOREIGN KEY (col) REFERENCES ...）===
     const fkColumns = new Set<string>()
     for (const col of table.columns) {
-      const fkMatch = col.match(/CONSTRAINT\s+(\w+)\s+FOREIGN\s+KEY\s*\((\w+)\)\s+REFERENCES\s+(\w+)\((\w+)\)/i)
+      const fkMatch = col.match(/CONSTRAINT\s+(\w+)\s+FOREIGN\s+KEY\s*\((\w+)\)\s+REFERENCES\s+(\w+)\s*\((\w+)\)/i)
       if (fkMatch) {
         fkColumns.add(fkMatch[2].toLowerCase())
       }
@@ -160,7 +160,7 @@ function transformToPostgresqlDDL(tables: ParsedTable[]): string {
       }
 
       // CONSTRAINT ... FOREIGN KEY → 抽出延後執行（避免表順序問題）
-      const constraintFkMatch = transformed.match(/^\s*CONSTRAINT\s+(\w+)\s+FOREIGN\s+KEY\s*\((\w+)\)\s+REFERENCES\s+(\w+)\((\w+)\)/i)
+      const constraintFkMatch = transformed.match(/^\s*CONSTRAINT\s+(\w+)\s+FOREIGN\s+KEY\s*\((\w+)\)\s+REFERENCES\s+(\w+)\s*\((\w+)\)/i)
       if (constraintFkMatch) {
         deferredFkStatements.push(
           `ALTER TABLE ${table.tableName} ADD CONSTRAINT ${constraintFkMatch[1]} FOREIGN KEY (${constraintFkMatch[2]}) REFERENCES ${constraintFkMatch[3]}(${constraintFkMatch[4]});`
@@ -170,20 +170,20 @@ function transformToPostgresqlDDL(tables: ParsedTable[]): string {
       }
 
       // 內聯 REFERENCES → 拆成欄位定義 + 延後 FK
-      const inlineRefMatch = transformed.match(/^\s*(\w+)\s+.*?(UUID|VARCHAR\(\d+\))\s+(NOT\s+NULL\s+)?REFERENCES\s+(\w+)\((\w+)\)/i)
+      const inlineRefMatch = transformed.match(/^\s*(\w+)\s+.*?(UUID|VARCHAR\(\d+\))\s+(NOT\s+NULL\s+)?REFERENCES\s+(\w+)\s*\((\w+)\)/i)
       if (inlineRefMatch) {
         const colName = inlineRefMatch[1]
         const refTable = inlineRefMatch[4]
         const refCol = inlineRefMatch[5]
         // 移除 REFERENCES 子句，只留欄位定義
-        transformed = transformed.replace(/\s*REFERENCES\s+\w+\(\w+\)/i, '')
+        transformed = transformed.replace(/\s*REFERENCES\s+\w+\s*\(\w+\)/i, '')
         deferredFkStatements.push(
           `ALTER TABLE ${table.tableName} ADD CONSTRAINT fk_${table.tableName}_${colName} FOREIGN KEY (${colName}) REFERENCES ${refTable}(${refCol});`
         )
       } else {
         // VARCHAR(n) 的內聯外鍵引用（舊路徑，已被上面攔截，保留 fallback）
         transformed = transformed.replace(
-          /VARCHAR\(\d+\)\s+(NOT\s+NULL\s+)?REFERENCES\s+(\w+)\((\w+)\)/gi,
+          /VARCHAR\(\d+\)\s+(NOT\s+NULL\s+)?REFERENCES\s+(\w+)\s*\((\w+)\)/gi,
           'UUID $1REFERENCES $2($3)'
         )
       }

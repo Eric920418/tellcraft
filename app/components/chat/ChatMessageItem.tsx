@@ -155,15 +155,19 @@ export const ChatMessageItem = React.memo(function ChatMessageItem({
           }}>
             {message.role === 'user' ? tChat('senderYou') : tChat('senderAssistant')}
           </div>
-          <div style={{
+          <div
+            className={message.role === 'user' ? 'chat-bubble-user' : 'chat-bubble-assistant'}
+            style={{
             padding: layoutMode === 'split' ? '12px 16px' : '18px 22px',
             background: message.role === 'user' ? 'var(--black)' : 'var(--gray-50)',
             color: message.role === 'user' ? 'var(--white)' : 'var(--black)',
             border: '1px solid',
             borderColor: message.role === 'user' ? 'var(--black)' : 'var(--border-color)',
+            borderRadius: 18,
             maxWidth: layoutMode === 'split' ? '95%' : '85%',
             fontSize: layoutMode === 'split' ? 14 : 15,
             lineHeight: 1.75,
+            position: 'relative',
           }}>
             {message.role === 'user' ? (
               <span style={{ whiteSpace: 'pre-wrap', overflowWrap: 'break-word', wordBreak: 'break-word' }}>{getCommandLabel(message.content)}</span>

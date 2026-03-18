@@ -428,6 +428,47 @@ textarea {
   border-width: 0;
 }
 
+/* Chat Bubble Tails */
+.chat-bubble-assistant::before,
+.chat-bubble-assistant::after {
+  content: '';
+  position: absolute;
+  bottom: -8px;
+  left: 18px;
+}
+.chat-bubble-assistant::before {
+  border: 9px solid transparent;
+  border-top-color: var(--border-color);
+  border-bottom: 0;
+  margin-left: -1px;
+  bottom: -9px;
+}
+.chat-bubble-assistant::after {
+  border: 8px solid transparent;
+  border-top-color: var(--gray-50);
+  border-bottom: 0;
+}
+
+.chat-bubble-user::before,
+.chat-bubble-user::after {
+  content: '';
+  position: absolute;
+  bottom: -8px;
+  right: 18px;
+}
+.chat-bubble-user::before {
+  border: 9px solid transparent;
+  border-top-color: var(--black);
+  border-bottom: 0;
+  margin-right: -1px;
+  bottom: -9px;
+}
+.chat-bubble-user::after {
+  border: 8px solid transparent;
+  border-top-color: var(--black);
+  border-bottom: 0;
+}
+
 /* Markdown Content Styles */
 .markdown-content {
   line-height: 1.75;

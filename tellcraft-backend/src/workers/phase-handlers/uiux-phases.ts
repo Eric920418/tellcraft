@@ -561,6 +561,18 @@ export async function handleUiuxMixedPhaseRouting(
     if (state.phase === 'uiux_complete') {
       const trimmed = message.trim()
       if (hasDeployIntent(trimmed)) {
+        // 攔截：有 DB 但還沒跑 Coder → 提醒用戶先接上資料庫
+        if (!state.coderCompleted && await shouldShowCoderButton(state)) {
+          await sendMessage(conversationId, io, {
+            content: '你的網站目前使用假資料，部署後功能不會真正運作。\n\n建議先「**接上資料庫**」，讓 AI 自動把假資料替換成真實的後端邏輯，再部署上線。',
+            stage: 'uiux_complete',
+            quickReplies: [
+              { label: '接上資料庫（建議）', value: '__connect_database__', style: 'primary' },
+              { label: '仍然部署（僅前端）', value: '__deploy_without_coder__', style: 'secondary' },
+            ],
+          })
+          return
+        }
         const deployerSkill = await getDeployerSkill()
         await deployerSkill({
           taskId: state.taskId || '',
@@ -568,6 +580,20 @@ export async function handleUiuxMixedPhaseRouting(
           conversationId,
           userId,
           message,
+          redis,
+          io,
+        })
+        return
+      }
+      // 用戶確認跳過 Coder 直接部署
+      if (trimmed === '__deploy_without_coder__') {
+        const deployerSkill = await getDeployerSkill()
+        await deployerSkill({
+          taskId: state.taskId || '',
+          projectId: data.projectId,
+          conversationId,
+          userId,
+          message: '部署',
           redis,
           io,
         })
@@ -1314,7 +1340,13 @@ export async function executeFullCodePipeline(
   const finalComponentCount = currentCode.components.length
 
   await sendMessage(conversationId, io, {
-    content: `設計完成！共 ${finalPageCount} 個頁面、${finalComponentCount} 個組件。輸入「**部署**」即可上線。`,
+    content: await (async () => {
+      const base = `設計完成！共 ${finalPageCount} 個頁面、${finalComponentCount} 個組件。`
+      if (await shouldShowCoderButton(state)) {
+        return base + `\n\n下一步：點擊「**接上資料庫**」將假資料替換為真實後端，再部署上線。`
+      }
+      return base + `輸入「**部署**」即可上線。`
+    })(),
     stage: 'uiux_generation_complete',
     progress: { current: 3, total: 3, step: '完成' },
     layoutHint: 'split',
@@ -1329,14 +1361,19 @@ export async function executeFullCodePipeline(
       } as Record<string, unknown>,
     },
     quickReplies: await (async () => {
-      const qr: { label: string; value: string; style: 'primary' | 'secondary' | 'ghost' }[] = [
-        { label: '部署上線', value: '部署', style: 'primary' },
-      ]
-      if (await shouldShowCoderButton(state)) {
-        qr.push({ label: '接上資料庫', value: '__connect_database__', style: 'secondary' })
+      const showCoder = await shouldShowCoderButton(state)
+      if (showCoder) {
+        // 有 DB 時：接上資料庫優先，部署次要
+        return [
+          { label: '接上資料庫', value: '__connect_database__', style: 'primary' as const },
+          { label: '先部署前端', value: '部署', style: 'secondary' as const },
+          { label: '上傳到模板庫', value: '__upload_template__', style: 'ghost' as const },
+        ]
       }
-      qr.push({ label: '上傳到模板庫', value: '__upload_template__', style: 'ghost' })
-      return qr
+      return [
+        { label: '部署上線', value: '部署', style: 'primary' as const },
+        { label: '上傳到模板庫', value: '__upload_template__', style: 'ghost' as const },
+      ]
     })(),
   })
 
