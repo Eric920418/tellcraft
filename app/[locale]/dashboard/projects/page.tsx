@@ -912,10 +912,14 @@ export default function ProjectsPage() {
           isLoading={isLoading}
           emptyMessage={t('noProjectsYet')}
           onRowClick={(project) => {
+            if (isSelectMode) {
+              handleToggleSelect(project.id)
+              return
+            }
             router.push(getProjectPrimaryPath(project))
           }}
-          onRowMouseEnter={isMobile ? undefined : handleRowMouseEnter}
-          onRowMouseLeave={isMobile ? undefined : handleRowMouseLeave}
+          onRowMouseEnter={isMobile || isSelectMode ? undefined : handleRowMouseEnter}
+          onRowMouseLeave={isMobile || isSelectMode ? undefined : handleRowMouseLeave}
           pagination={{
             page,
             pageSize,

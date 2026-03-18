@@ -68,7 +68,7 @@ function ComparisonSection() {
             letterSpacing: '0.05em',
           }}>
             <span>{t('columnFeature')}</span>
-            <span style={{ textAlign: 'center' }}>{t('columnTraditional')}</span>
+            <span style={{ textAlign: 'center', color: 'var(--white)' }}>{t('columnTraditional')}</span>
             <span style={{ textAlign: 'center', color: 'var(--white)' }}>Tellcraft</span>
           </div>
           {comparisons.map((row, i) => (

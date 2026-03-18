@@ -209,10 +209,16 @@ function buildActionSystemPrompt(): string {
 - 所有日期用 ISO 8601 字串
 - ID 欄位使用 UUID。如果輸入有 ID 值（如 input.episodeId）→ 用它；沒有才用 gen_random_uuid()
 - 密碼雜湊用 bcryptjs（import bcrypt from 'bcryptjs'），JWT 用 jsonwebtoken
-- 不要做認證/登入檢查（如檢查 userId 是否存在、要求 token）。呼叫者已處理認證，函數只做業務邏輯
+- 不要做認證/登入檢查（如檢查 userId 是否存在、要求 token）。呼叫者（Server Action）已處理認證並注入 userId，函數只做業務邏輯
 - 前置（狀態）規則中的「使用者必須已登入」由測試框架的 UID actor 處理，函數內不需驗證
 - 如果測試傳 email 作為使用者識別：先用 input.userId（如果存在），否則用 email 查 users 表取得 userId。不要把 userId 當必要輸入參數驗證
 - 登出操作：直接 return { __status: 200, message: '登出成功' }。不需驗證 token/session 是否有效
+
+## 認證欄位
+- Server Action 層會自動從 cookie 注入 userId，非登入操作不用擔心認證
+- **不要在 lib/actions 裡 import 'next/headers' 或操作 cookie** — 這由上層 Server Action 處理
+- 登入/註冊成功時，回傳物件**必須包含 \`userId\` 欄位**（值為用戶 UUID），欄位名**必須是 \`userId\`**（不要用 createdUserId/user_id 等）
+- 登出操作：直接 return，不需操作 cookie
 - ON CONFLICT 語法：使用 PostgreSQL 的 ON CONFLICT (id) DO UPDATE SET col = EXCLUDED.col，不要用 MySQL 的 ON DUPLICATE KEY UPDATE
 
 ## 子操作派發（重要！）
@@ -350,6 +356,14 @@ export async function generateActionFunction(
 // 4. Server Actions 機械映射（零 LLM）
 // ============================================================
 
+/** 判斷 action 的認證類型（零 LLM，按 name 關鍵字） */
+function getActionAuthType(name: string): 'login' | 'logout' | 'normal' {
+  const lower = name.toLowerCase()
+  if (/log_?out|sign_?out/.test(lower)) return 'logout'
+  if (/log_?in|sign_?in|register|sign_?up/.test(lower)) return 'login'
+  return 'normal'
+}
+
 export function generateServerActions(
   actions: ActionEntry[],
   entityMapping: string
@@ -367,8 +381,35 @@ export function generateServerActions(
       .map(a => {
         const fnName = toCamelCase(a.name)
         const inputType = `${toPascalCase(a.name)}Input`
-        return `export async function ${fnName}Action(input: ${inputType}) {
+        const authType = getActionAuthType(a.name)
+
+        if (authType === 'logout') {
+          // 登出：清除 cookie
+          return `export async function ${fnName}Action(input: ${inputType}) {
+  const cookieStore = await cookies()
+  cookieStore.delete('userId')
   return ${fnName}(input)
+}`
+        }
+
+        if (authType === 'login') {
+          // 登入/註冊：呼叫後設 cookie（多欄位名 fallback）
+          return `export async function ${fnName}Action(input: ${inputType}) {
+  const result = await ${fnName}(input)
+  const uid = (result as any).userId || (result as any).createdUserId || (result as any).user_id
+  if (uid && result.__status && result.__status < 300) {
+    const cookieStore = await cookies()
+    cookieStore.set('userId', String(uid), { httpOnly: true, path: '/', maxAge: 60 * 60 * 24 * 7 })
+  }
+  return result
+}`
+        }
+
+        // 一般 action：讀 cookie 注入 userId
+        return `export async function ${fnName}Action(input: ${inputType}) {
+  const cookieStore = await cookies()
+  const userId = cookieStore.get('userId')?.value
+  return ${fnName}({ ...input, ...(userId ? { userId } : {}) })
 }`
       })
       .join('\n\n')
@@ -380,6 +421,7 @@ export function generateServerActions(
 
     const content = `'use server'
 
+import { cookies } from 'next/headers'
 ${imports}
 ${typeImports}
 
@@ -711,11 +753,15 @@ function buildRewriteSystemPrompt(): string {
 例如：如果 Action 程式碼中寫 if (op.includes('註冊'))，那 _stepSummary 必須包含「註冊」（如 '使用者註冊'），不能用「建立帳號」等同義詞。
 
 標準調用方式：
-- **列表查詢**（頁面初始載入）：actionFn({ _stepSummary: '查詢列表' }) — **不傳 ID**
+- **列表查詢**（頁面初始載入）：actionFn({ _stepSummary: '查詢列表' }) — **不傳 ID，不傳 userId**
 - **單筆查詢**（詳情頁）：actionFn({ _stepSummary: '查詢詳情', entityId: '...' }) — 傳 ID
 - **建立**：actionFn({ _stepSummary: '建立XXX', ...fields })
 - **更新**：actionFn({ _stepSummary: '更新XXX', id: '...', ...fields })
 - **刪除**：actionFn({ _stepSummary: '刪除XXX', id: '...' })
+
+**認證已自動處理**：Server Action 會從 cookie 自動注入 userId，**組件絕對不需要手動傳 userId**。登入成功後 cookie 自動設定，你只需管理 UI 狀態（如 setIsLoggedIn(true)）。
+
+**不要重複 key**：每個參數只寫一次（JS 物件中重複 key 只保留最後一個，浪費且易混淆）。
 
 **頁面初始載入資料時，必須使用包含「列表」或「全部」的 _stepSummary，不要用「查詢」（那是單筆，需要 ID）。**
 
