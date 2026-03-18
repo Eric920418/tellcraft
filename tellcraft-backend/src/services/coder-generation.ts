@@ -1199,9 +1199,39 @@ function validateAndFixActionCalls(
       const { params } = extractCallParams(content, callMatch.index + callMatch[0].length - 1)
 
       // 提取 _stepSummary 值
-      const summaryMatch = content.slice(callMatch.index, callMatch.index + 500)
-        .match(/_stepSummary:\s*['"]([^'"]+)['"]/)
-      if (!summaryMatch) continue
+      const callSlice = content.slice(callMatch.index, callMatch.index + 500)
+      const summaryMatch = callSlice.match(/_stepSummary:\s*['"]([^'"]+)['"]/)
+
+      // 沒有 _stepSummary → LLM 用了 intent/action/type 等錯誤格式，需要整段替換
+      if (!summaryMatch) {
+        const intentMatch = callSlice.match(/(?:intent|action|type)\s*:\s*['"](\w+)['"]/)
+        if (!intentMatch) continue
+
+        const wrongKey = intentMatch[0] // e.g. intent: 'get'
+        const wrongValue = intentMatch[1] // e.g. 'get'
+
+        // 從錯誤的 intent 值推斷意圖
+        const intentMap: Record<string, string> = {
+          get: 'list', list: 'list', fetch: 'list', query: 'query', read: 'query',
+          create: 'create', add: 'create', post: 'create', register: 'create',
+          update: 'update', put: 'update', patch: 'update', edit: 'update', save: 'update',
+          delete: 'delete', remove: 'delete', destroy: 'delete', cancel: 'delete',
+        }
+        const guessedIntent = intentMap[wrongValue.toLowerCase()] || 'list'
+        const safeSummary = generateSafeSummary(guessedIntent)
+
+        // 替換整個錯誤的 key: value 為 _stepSummary: 'xxx'
+        content = content.split(wrongKey).join(`_stepSummary: '${safeSummary}'`)
+        frontendFiles[fi] = { ...frontendFiles[fi], content }
+        fixes.push({
+          file: file.path,
+          original: wrongKey,
+          fixed: `_stepSummary: '${safeSummary}'`,
+          reason: `未使用 _stepSummary（用了 ${wrongKey}），替換為標準格式`,
+        })
+        continue
+      }
+
       const stepSummary = summaryMatch[1]
 
       // 模擬 JS runtime 匹配：依序找第一個匹配的分支
