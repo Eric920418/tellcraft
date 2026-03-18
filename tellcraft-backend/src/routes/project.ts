@@ -5,6 +5,7 @@ import { validateBody } from '../middleware/validate'
 import { createProjectSchema, templateOverridesSchema, batchDeleteSchema } from '../schemas/project'
 import * as db from '../db/client'
 import { toVercelSlug, deleteVercelProject } from '../services/deployer'
+import { deleteNeonProject } from '../services/neon-service'
 import { repairProjectFiles, applyFixersToContent } from '../services/code-repair'
 import { getProjectLimit } from '../config/plans'
 import { createLogger } from '../lib/logger'
@@ -1110,6 +1111,23 @@ router.delete('/batch', requireAuth, validateBody(batchDeleteSchema), async (req
         })
     )
 
+    // 並行清理 Neon DB（失敗不阻擋）
+    const neonRows = await db.queryMany<{ id: string; neon_project_id: string }>(
+      'SELECT id, neon_project_id FROM projects WHERE id = ANY($1::uuid[]) AND neon_project_id IS NOT NULL',
+      [ids]
+    )
+    if (neonRows.length > 0) {
+      await Promise.allSettled(
+        neonRows.map(async (row) => {
+          try {
+            await deleteNeonProject(row.neon_project_id)
+          } catch (err) {
+            logger.warn({ err, projectId: row.id }, '批量刪除：清理 Neon DB 失敗（不阻擋）')
+          }
+        })
+      )
+    }
+
     // 事務級聯刪除
     await db.transaction(async (client) => {
       await client.query('DELETE FROM deployments WHERE project_id = ANY($1::uuid[])', [ids])
@@ -1158,6 +1176,19 @@ router.delete('/:id', requireAuth, async (req, res) => {
       if (!vercelResult.success) {
         logger.warn({ error: vercelResult.error }, '刪除 Vercel 專案失敗（不阻擋刪除）')
       }
+    }
+
+    // 刪除 Neon DB（失敗不阻擋刪除）
+    try {
+      const neonRow = await db.query<{ neon_project_id: string }>(
+        'SELECT neon_project_id FROM projects WHERE id = $1 AND neon_project_id IS NOT NULL',
+        [id]
+      )
+      if (neonRow.rows[0]) {
+        await deleteNeonProject(neonRow.rows[0].neon_project_id)
+      }
+    } catch (err) {
+      logger.warn({ err, projectId: id }, 'Neon project 刪除失敗（不阻擋刪除）')
     }
 
     // 使用事務刪除相關資料

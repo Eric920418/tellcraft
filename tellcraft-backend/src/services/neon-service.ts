@@ -145,7 +145,7 @@ async function createNeonProject(params: {
   }
 }
 
-async function deleteNeonProject(projectId: string): Promise<void> {
+export async function deleteNeonProject(projectId: string): Promise<void> {
   try {
     await fetchWithRetry(
       `${NEON_API}/projects/${projectId}`,

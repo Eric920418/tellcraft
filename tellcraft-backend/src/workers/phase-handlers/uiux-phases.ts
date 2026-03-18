@@ -564,10 +564,10 @@ export async function handleUiuxMixedPhaseRouting(
         // 攔截：有 DB 但還沒跑 Coder → 提醒用戶先接上資料庫
         if (!state.coderCompleted && await shouldShowCoderButton(state)) {
           await sendMessage(conversationId, io, {
-            content: '你的網站目前使用假資料，部署後功能不會真正運作。\n\n建議先「**接上資料庫**」，讓 AI 自動把假資料替換成真實的後端邏輯，再部署上線。',
+            content: '你的網站目前使用假資料，部署後功能不會真正運作。\n\n建議先「**生成後端**」，讓 AI 自動開發後端邏輯並連接資料庫，再部署上線。',
             stage: 'uiux_complete',
             quickReplies: [
-              { label: '接上資料庫（建議）', value: '__connect_database__', style: 'primary' },
+              { label: '生成後端（建議）', value: '__connect_database__', style: 'primary' },
               { label: '仍然部署（僅前端）', value: '__deploy_without_coder__', style: 'secondary' },
             ],
           })
@@ -627,7 +627,7 @@ export async function handleUiuxMixedPhaseRouting(
       if (trimmed === '__connect_database__' || hasCoderIntent(trimmed)) {
         if (state.coderCompleted) {
           await sendMessage(conversationId, io, {
-            content: '資料庫已經接好了！如果有功能需要調整，可以直接告訴我修改內容。',
+            content: '後端已經開發完成了！如果有功能需要調整，可以直接告訴我修改內容。',
             quickReplies: [
               { label: '部署上線', value: '部署', style: 'primary' as const },
               { label: '修改設計', value: '我想修改', style: 'secondary' as const },
@@ -1343,7 +1343,7 @@ export async function executeFullCodePipeline(
     content: await (async () => {
       const base = `設計完成！共 ${finalPageCount} 個頁面、${finalComponentCount} 個組件。`
       if (await shouldShowCoderButton(state)) {
-        return base + `\n\n下一步：點擊「**接上資料庫**」將假資料替換為真實後端，再部署上線。`
+        return base + `\n\n下一步：點擊「**生成後端**」讓 AI 自動開發後端邏輯並連接資料庫，再部署上線。`
       }
       return base + `輸入「**部署**」即可上線。`
     })(),
@@ -1365,7 +1365,7 @@ export async function executeFullCodePipeline(
       if (showCoder) {
         // 有 DB 時：接上資料庫優先，部署次要
         return [
-          { label: '接上資料庫', value: '__connect_database__', style: 'primary' as const },
+          { label: '生成後端', value: '__connect_database__', style: 'primary' as const },
           { label: '先部署前端', value: '部署', style: 'secondary' as const },
           { label: '上傳到模板庫', value: '__upload_template__', style: 'ghost' as const },
         ]

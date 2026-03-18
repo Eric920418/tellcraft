@@ -292,7 +292,9 @@ export async function runCoderE2ETests(input: {
         }
       }
 
-      logger.warn({ round, errorCount: errors.length, errors: errors.map(e => `${e.route}: ${e.error.slice(0, 80)}`) }, 'E2E 發現錯誤')
+      // 記錄 dev server 日誌以診斷 500 根因
+      const devLogTail = devLogs.join('').slice(-2000)
+      logger.warn({ round, errorCount: errors.length, errors: errors.map(e => `${e.route}: ${e.error.slice(0, 80)}`), devLogTail }, 'E2E 發現錯誤')
 
       // 最後一輪不修了
       if (round === MAX_FIX_ROUNDS) {

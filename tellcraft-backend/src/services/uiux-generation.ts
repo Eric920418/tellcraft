@@ -2452,15 +2452,15 @@ function stripLlmMetaLines(code: string): string {
     if (INLINE_META.test(line)) { removedCount++; return false }
     return true
   })
-  if (removedCount > 1) {
+  if (removedCount > 5) {
     logger.warn(
       { removedLines: removedCount },
-      'stripLlmMetaLines: 從生成代碼中移除多行 LLM 元文字'
+      'stripLlmMetaLines: 從生成代碼中移除大量 LLM 元文字'
     )
-  } else if (removedCount === 1) {
+  } else if (removedCount > 0) {
     logger.debug(
-      { removedLines: 1 },
-      'stripLlmMetaLines: 移除 1 行 LLM 元文字'
+      { removedLines: removedCount },
+      'stripLlmMetaLines: 移除 LLM 元文字'
     )
   }
   return cleaned.join('\n')

@@ -580,7 +580,7 @@ async function recoverCoderGenerating(
 
   await sendMessage(conversationId, io, {
     content: isChinese
-      ? '後端代碼生成中斷了。您可以重試「接上資料庫」或直接部署現有前端。'
+      ? '後端代碼生成中斷了。您可以重試「生成後端」或直接部署現有前端。'
       : 'Backend code generation was interrupted. You can retry or deploy existing frontend.',
     stage: 'uiux_complete',
     quickReplies: [

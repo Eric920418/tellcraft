@@ -1186,7 +1186,10 @@ ${esDocumentContent}
 ${decisions || '（無額外決策）'}`
 
   logger.info('Draft Batch: 開始一次性生成草稿...')
-  const response = await callClaude(systemPrompt, userMessage, { maxTokens: 16384 })
+  // 動態 maxTokens：每個 Feature 的 Gherkin 內容 ~1500 tokens + schema/entityMapping ~3000
+  const estimatedFeatureCount = (esDocumentContent.match(/Command|ReadModel/gi) || []).length || 10
+  const maxTokens = Math.min(Math.max(estimatedFeatureCount * 2000 + 5000, 16384), 65536)
+  const response = await callClaude(systemPrompt, userMessage, { maxTokens })
 
   if (!response.success) {
     return { success: false, error: response.error }
@@ -1207,7 +1210,7 @@ ${decisions || '（無額外決策）'}`
   try {
     const parsed = safeParseJson<{ features?: GeneratedFeature[]; uncertainItems?: string[]; schemaSql?: string; entityMapping?: string }>(response.content || '')
     if (!parsed) {
-      logger.error('Draft Batch LLM 回應無法解析為 JSON')
+      logger.error({ rawResponse: response.content?.substring(0, 500) }, 'Draft Batch LLM 回應無法解析為 JSON')
       return { success: false, error: '無法解析 LLM 回應' }
     }
 

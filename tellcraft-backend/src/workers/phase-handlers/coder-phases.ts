@@ -357,7 +357,7 @@ export async function executeCoderTesting(input: CoderSkillInput): Promise<void>
 
   if (backendFileRows.length === 0) {
     await sendMessage(conversationId, io, {
-      content: isChinese ? '找不到後端代碼，請先執行「接上資料庫」。' : 'No backend code found.',
+      content: isChinese ? '找不到後端代碼，請先執行「生成後端」。' : 'No backend code found.',
       stage: 'error',
     })
     return
