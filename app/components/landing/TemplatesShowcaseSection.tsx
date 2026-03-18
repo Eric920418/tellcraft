@@ -313,7 +313,7 @@ export default function TemplatesShowcaseSection() {
 
       <div style={{ padding: '0 24px', textAlign: 'center', marginBottom: 48 }}>
         <motion.div {...fadeUp(0)} style={{
-          fontSize: 11, color: 'var(--gray-400)',
+          fontSize: 11, color: 'var(--accent)',
           textTransform: 'uppercase', letterSpacing: '0.1em',
           marginBottom: 16, fontFamily: 'var(--font-mono)',
         }}>
@@ -353,7 +353,7 @@ export default function TemplatesShowcaseSection() {
             textDecoration: 'none', borderBottom: '1px solid var(--border-color)',
             paddingBottom: 2, transition: 'color 0.2s',
           }}
-          onMouseEnter={e => (e.currentTarget.style.color = 'var(--black)')}
+          onMouseEnter={e => (e.currentTarget.style.color = 'var(--accent)')}
           onMouseLeave={e => (e.currentTarget.style.color = 'var(--gray-400)')}
         >
           瀏覽所有模板 →

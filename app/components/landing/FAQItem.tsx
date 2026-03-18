@@ -47,7 +47,7 @@ function FAQItem({
       }}>
         <motion.span
           animate={{
-            color: isOpen ? 'var(--black)' : 'var(--gray-300)',
+            color: isOpen ? 'var(--accent)' : 'var(--gray-300)',
             scale: isOpen ? 1.1 : 1,
           }}
           transition={{ duration: 0.3 }}
@@ -72,7 +72,7 @@ function FAQItem({
             top: 0,
             bottom: 0,
             width: 2,
-            background: 'var(--black)',
+            background: 'var(--accent)',
             transformOrigin: 'top',
           }}
         />
@@ -164,7 +164,8 @@ function FAQItem({
                 <div style={{
                   width: 40,
                   height: 1,
-                  background: 'var(--gray-200)',
+                  background: 'var(--accent)',
+                  opacity: 0.4,
                   marginBottom: 16,
                 }} />
                 <p style={{

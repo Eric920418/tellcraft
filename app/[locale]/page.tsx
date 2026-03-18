@@ -267,6 +267,12 @@ function HomeContent() {
               display: 'flex',
               alignItems: 'center',
               gap: 8,
+              background: 'var(--header-glass)',
+              backdropFilter: 'blur(12px)',
+              WebkitBackdropFilter: 'blur(12px)',
+              borderRadius: 12,
+              padding: '6px 12px',
+              border: '1px solid var(--header-border)',
             }}
           >
             <AnimatedThemeToggler />
@@ -292,6 +298,12 @@ function HomeContent() {
               display: 'flex',
               alignItems: 'center',
               gap: 12,
+              background: 'var(--header-glass)',
+              backdropFilter: 'blur(12px)',
+              WebkitBackdropFilter: 'blur(12px)',
+              borderRadius: 12,
+              padding: '6px 14px',
+              border: '1px solid var(--header-border)',
             }}
           >
         {auth.isLoading ? (

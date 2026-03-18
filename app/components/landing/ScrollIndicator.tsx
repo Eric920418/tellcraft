@@ -39,7 +39,7 @@ function ScrollIndicator({ visible }: { visible: boolean }) {
             style={{
               width: 1,
               height: 32,
-              background: 'linear-gradient(to bottom, var(--gray-400), transparent)',
+              background: 'linear-gradient(to bottom, var(--accent), transparent)',
             }}
           />
         </motion.div>

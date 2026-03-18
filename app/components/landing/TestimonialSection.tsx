@@ -55,7 +55,7 @@ function TestimonialSection() {
                 marginBottom: 32,
                 letterSpacing: '-0.02em',
               }}>
-                {'\u300C'}{quotes[current].text}{'\u300D'}
+                <span style={{ color: 'var(--accent)', opacity: 0.6 }}>{'\u300C'}</span>{quotes[current].text}<span style={{ color: 'var(--accent)', opacity: 0.6 }}>{'\u300D'}</span>
               </blockquote>
               <div style={{ fontSize: 14, color: 'var(--gray-400)' }}>
                 <span style={{ color: 'var(--white)', fontWeight: 500 }}>{quotes[current].author}</span>
@@ -76,7 +76,7 @@ function TestimonialSection() {
               style={{
                 width: 8,
                 height: 8,
-                background: i === current ? 'var(--white)' : 'var(--gray-600)',
+                background: i === current ? 'var(--accent)' : 'var(--gray-600)',
                 border: 'none',
                 cursor: 'pointer',
                 transition: 'background 0.3s ease',

@@ -37,7 +37,7 @@ function ShowcaseSection() {
           >
             <div style={{
               fontSize: 11,
-              color: 'var(--gray-400)',
+              color: 'var(--accent)',
               textTransform: 'uppercase',
               letterSpacing: '0.1em',
               marginBottom: 16,
@@ -76,6 +76,7 @@ function ShowcaseSection() {
                   fontWeight: 300,
                   fontFamily: 'var(--font-mono)',
                   letterSpacing: '-0.02em',
+                  color: 'var(--accent)',
                 }}>
                   <AnimatedCounter target={50} suffix="+" />
                 </div>
@@ -87,6 +88,7 @@ function ShowcaseSection() {
                   fontWeight: 300,
                   fontFamily: 'var(--font-mono)',
                   letterSpacing: '-0.02em',
+                  color: 'var(--accent)',
                 }}>
                   <AnimatedCounter target={12} suffix={t('suffixTypes')} />
                 </div>

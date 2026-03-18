@@ -28,6 +28,14 @@
   --text-secondary: #525252;
   --text-muted: #737373;
   --text-light: #a3a3a3;
+
+  /* Accent */
+  --accent: #C9512F;
+  --accent-muted: rgba(201, 81, 47, 0.12);
+
+  /* Header glass */
+  --header-glass: rgba(255, 255, 255, 0.72);
+  --header-border: rgba(0, 0, 0, 0.06);
 }
 
 .dark {
@@ -54,6 +62,14 @@
   --text-secondary: #d4d4d4;
   --text-muted: #a3a3a3;
   --text-light: #737373;
+
+  /* Accent */
+  --accent: #D4735A;
+  --accent-muted: rgba(212, 115, 90, 0.15);
+
+  /* Header glass */
+  --header-glass: rgba(10, 10, 10, 0.72);
+  --header-border: rgba(255, 255, 255, 0.08);
 }
 
 * {
@@ -229,7 +245,7 @@ textarea {
 
 /* Selection */
 ::selection {
-  background: #3b82f6;
+  background: var(--accent);
   color: #ffffff;
 }
 

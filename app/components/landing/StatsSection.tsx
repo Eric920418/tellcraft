@@ -18,7 +18,7 @@ function StatsSection() {
   ]
 
   return (
-    <section ref={ref} style={{ padding: '80px 24px', background: 'var(--black)', color: 'var(--white)' }}>
+    <section ref={ref} style={{ padding: '80px 24px', background: 'var(--black)', color: 'var(--white)', borderTop: '3px solid var(--accent)' }}>
       <div style={{ maxWidth: 1000, margin: '0 auto' }}>
         <motion.div
           initial={{ opacity: 0, y: 20 }}
@@ -57,6 +57,7 @@ function StatsSection() {
               }}>
                 <AnimatedCounter target={stat.value} suffix={stat.suffix} />
               </div>
+              <div style={{ width: 24, height: 2, background: 'var(--accent)', margin: '12px auto', opacity: 0.8 }} />
               <div style={{
                 fontSize: 14,
                 fontWeight: 500,

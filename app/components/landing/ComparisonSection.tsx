@@ -69,7 +69,7 @@ function ComparisonSection() {
           }}>
             <span>{t('columnFeature')}</span>
             <span style={{ textAlign: 'center' }}>{t('columnTraditional')}</span>
-            <span style={{ textAlign: 'center', color: 'var(--black)' }}>Tellcraft</span>
+            <span style={{ textAlign: 'center', color: 'var(--accent)' }}>Tellcraft</span>
           </div>
           {comparisons.map((row, i) => (
             <div
@@ -85,7 +85,7 @@ function ComparisonSection() {
             >
               <span style={{ fontWeight: 500 }}>{row.feature}</span>
               <span style={{ textAlign: 'center', color: 'var(--gray-500)' }}>{row.traditional}</span>
-              <span style={{ textAlign: 'center', fontWeight: 500 }}>{row.tellcraft}</span>
+              <span style={{ textAlign: 'center', fontWeight: 500, color: 'var(--accent)' }}>{row.tellcraft}</span>
             </div>
           ))}
         </motion.div>

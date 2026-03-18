@@ -147,7 +147,7 @@ function FAQSection() {
           transition={{ duration: 0.8, delay: 0.6, ease: [0.4, 0, 0.2, 1] }}
           style={{
             height: 1,
-            background: 'linear-gradient(90deg, var(--black) 0%, transparent 100%)',
+            background: 'linear-gradient(90deg, var(--accent) 0%, transparent 100%)',
             marginTop: 48,
             transformOrigin: 'left',
             maxWidth: 200,

@@ -78,7 +78,8 @@ function HowItWorksSection() {
                 fontWeight: 200,
                 lineHeight: 0.85,
                 letterSpacing: '-0.05em',
-                opacity: 0.15,
+                opacity: isEven ? 0.2 : 0.15,
+                color: isEven ? 'var(--accent)' : undefined,
               }}>
                 {step.number}
               </span>
@@ -103,9 +104,10 @@ function HowItWorksSection() {
               <div style={{
                 fontFamily: 'var(--font-mono)',
                 fontSize: 11,
-                opacity: 0.5,
+                opacity: isEven ? 0.7 : 0.5,
                 letterSpacing: '0.15em',
                 marginBottom: 16,
+                color: isEven ? 'var(--accent)' : undefined,
               }}>
                 STEP {step.number}
               </div>
@@ -140,7 +142,7 @@ function HowItWorksSection() {
                   transform: 'translateX(-50%)',
                   width: 1,
                   height: 40,
-                  background: isEven ? 'var(--gray-600)' : 'var(--gray-300)',
+                  background: isEven ? 'var(--accent)' : 'var(--gray-300)',
                   transformOrigin: 'top',
                   zIndex: 10,
                 }}

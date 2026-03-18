@@ -103,6 +103,8 @@ function transformToPostgresqlDDL(tables: ParsedTable[]): string {
   const statements: string[] = []
   const commentStatements: string[] = []
   const rlsStatements: string[] = []
+  // FK 約束延後到所有表建完後再加（避免表順序導致 FK 失敗）
+  const deferredFkStatements: string[] = []
 
   for (const table of tables) {
     const transformedColumns: string[] = []
@@ -113,9 +115,9 @@ function transformToPostgresqlDDL(tables: ParsedTable[]): string {
     // === Pass 1: 收集 FK 欄位（CONSTRAINT ... FOREIGN KEY (col) REFERENCES ...）===
     const fkColumns = new Set<string>()
     for (const col of table.columns) {
-      const fkMatch = col.match(/CONSTRAINT\s+\w+\s+FOREIGN\s+KEY\s*\((\w+)\)\s+REFERENCES\s+(\w+)\((\w+)\)/i)
+      const fkMatch = col.match(/CONSTRAINT\s+(\w+)\s+FOREIGN\s+KEY\s*\((\w+)\)\s+REFERENCES\s+(\w+)\((\w+)\)/i)
       if (fkMatch) {
-        fkColumns.add(fkMatch[1].toLowerCase())
+        fkColumns.add(fkMatch[2].toLowerCase())
       }
       // 偵測複合 PRIMARY KEY
       if (/^\s*PRIMARY\s+KEY\s*\(/i.test(col)) {
@@ -155,23 +157,42 @@ function transformToPostgresqlDDL(tables: ParsedTable[]): string {
       // 檢測複合 PRIMARY KEY → 標記不需要自動加 id
       if (/^\s*PRIMARY\s+KEY\s*\(/i.test(transformed)) {
         hasPrimaryKey = true
-        // 轉換裡面的欄位不需要改，直接保留
       }
 
-      // VARCHAR(n) 的內聯外鍵引用 → UUID REFERENCES
-      transformed = transformed.replace(
-        /VARCHAR\(\d+\)\s+(NOT\s+NULL\s+)?REFERENCES\s+(\w+)\((\w+)\)/gi,
-        'UUID $1REFERENCES $2($3)'
-      )
+      // CONSTRAINT ... FOREIGN KEY → 抽出延後執行（避免表順序問題）
+      const constraintFkMatch = transformed.match(/^\s*CONSTRAINT\s+(\w+)\s+FOREIGN\s+KEY\s*\((\w+)\)\s+REFERENCES\s+(\w+)\((\w+)\)/i)
+      if (constraintFkMatch) {
+        deferredFkStatements.push(
+          `ALTER TABLE ${table.tableName} ADD CONSTRAINT ${constraintFkMatch[1]} FOREIGN KEY (${constraintFkMatch[2]}) REFERENCES ${constraintFkMatch[3]}(${constraintFkMatch[4]});`
+        )
+        // 不加入 CREATE TABLE，跳過
+        continue
+      }
+
+      // 內聯 REFERENCES → 拆成欄位定義 + 延後 FK
+      const inlineRefMatch = transformed.match(/^\s*(\w+)\s+.*?(UUID|VARCHAR\(\d+\))\s+(NOT\s+NULL\s+)?REFERENCES\s+(\w+)\((\w+)\)/i)
+      if (inlineRefMatch) {
+        const colName = inlineRefMatch[1]
+        const refTable = inlineRefMatch[4]
+        const refCol = inlineRefMatch[5]
+        // 移除 REFERENCES 子句，只留欄位定義
+        transformed = transformed.replace(/\s*REFERENCES\s+\w+\(\w+\)/i, '')
+        deferredFkStatements.push(
+          `ALTER TABLE ${table.tableName} ADD CONSTRAINT fk_${table.tableName}_${colName} FOREIGN KEY (${colName}) REFERENCES ${refTable}(${refCol});`
+        )
+      } else {
+        // VARCHAR(n) 的內聯外鍵引用（舊路徑，已被上面攔截，保留 fallback）
+        transformed = transformed.replace(
+          /VARCHAR\(\d+\)\s+(NOT\s+NULL\s+)?REFERENCES\s+(\w+)\((\w+)\)/gi,
+          'UUID $1REFERENCES $2($3)'
+        )
+      }
 
       // FK 欄位（CONSTRAINT 行分離的情況）：VARCHAR(n) → UUID
       const colNameForFk = transformed.match(/^\s*(\w+)\s+VARCHAR/i)
       if (colNameForFk && fkColumns.has(colNameForFk[1].toLowerCase())) {
         transformed = transformed.replace(/VARCHAR\(\d+\)/i, 'UUID')
       }
-
-      // CONSTRAINT ... FOREIGN KEY → 保留但把 VARCHAR 引用改為 UUID 相容
-      // （CONSTRAINT 行本身不需要改型別，只是聲明關係）
 
       // MySQL ENUM → VARCHAR + CHECK
       const enumMatch = transformed.match(/^\s*(\w+)\s+ENUM\(([^)]+)\)/i)
@@ -219,6 +240,9 @@ function transformToPostgresqlDDL(tables: ParsedTable[]): string {
     '-- Neon PostgreSQL DDL',
     '',
     ...statements,
+    '',
+    '-- Foreign Key Constraints（延後建立，避免表順序問題）',
+    ...deferredFkStatements,
     '',
     '-- Row Level Security',
     ...rlsStatements,
