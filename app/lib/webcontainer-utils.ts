@@ -778,12 +778,22 @@ export function buildWebContainerFiles(input: WebContainerFilesInput): FileSyste
     }
   }
 
-  // Mock lib/db.ts — 沒有 DB 連線時，覆蓋為 no-op 防止 Server Actions crash
-  if (!input.neonConnectionString) {
-    const allCode = allFiles.map(f => f.content).join('\n')
-    if (allCode.includes('@neondatabase/serverless') || allCode.includes('lib/db')) {
-      setFileInTree(tree, 'lib/db.ts', MOCK_DB)
-    }
+  // DB 連線處理
+  const allCode = allFiles.map(f => f.content).join('\n')
+  const needsDb = allCode.includes('@neondatabase/serverless') || allCode.includes('lib/db')
+
+  if (input.neonConnectionString && needsDb) {
+    // 有 DB 連線 → 硬編碼 connection string（WebContainer 不可靠讀 .env）
+    setFileInTree(tree, 'lib/db.ts', [
+      `import { neon } from '@neondatabase/serverless'`,
+      ``,
+      `const sql = neon('${input.neonConnectionString}')`,
+      ``,
+      `export { sql }`,
+    ].join('\n'))
+  } else if (needsDb) {
+    // 沒有 DB 連線 → mock 防止 crash
+    setFileInTree(tree, 'lib/db.ts', MOCK_DB)
   }
 
   // 自動為缺失的 @/ import 生成 stub，防止 webpack 編譯失敗
