@@ -183,8 +183,8 @@ export default function WebContainerPreview({
   // 用所有檔案內容的 fingerprint 做 memo key，確保 components 變化時重新計算
   const filesFingerprint = useMemo(() => {
     if (pages.length === 0) return 'skeleton'
-    return `pages:${pages.length},comp:${components.length},sa:${serverActions?.length ?? 0},styles:${styles?.length ?? 0}`
-  }, [pages, components, serverActions, styles])
+    return `pages:${pages.length},comp:${components.length},sa:${serverActions?.length ?? 0},styles:${styles?.length ?? 0},db:${neonConnectionString ? '1' : '0'}`
+  }, [pages, components, serverActions, styles, neonConnectionString])
 
   const initialFiles = useMemo(() => {
     if (pages.length > 0) {
@@ -221,6 +221,24 @@ export default function WebContainerPreview({
       onRuntimeError?.({ name: err.type, message: err.message, path: undefined })
     },
   })
+
+  // ── Restart when neonConnectionString appears (coder 完成後) ──
+  const prevNeonRef = useRef<string | undefined>(undefined)
+  useEffect(() => {
+    if (status !== 'ready') return
+    // neonConnectionString 從 undefined 變成有值 → 需要 restart（lib/db.ts 不同了）
+    if (neonConnectionString && !prevNeonRef.current) {
+      prevNeonRef.current = neonConnectionString
+      const input: WebContainerFilesInput = {
+        pages, components, styles, tailwindConfig,
+        serverActions, apiRoutes, dbLib, neonConnectionString,
+      }
+      const newTree = buildWebContainerFiles(input)
+      hasFullMountRef.current = false // 重新觸發完整寫入
+      restart(newTree).catch(err => console.error('[WC] Restart after coder failed:', err))
+    }
+    prevNeonRef.current = neonConnectionString
+  }, [neonConnectionString, status, pages, components, styles, tailwindConfig, serverActions, apiRoutes, dbLib, restart])
 
   // ── Incremental file updates (streaming / iteration) ──
   const allFiles = useMemo(() => [
