@@ -7,6 +7,7 @@ import { useTranslations } from 'next-intl'
 import { gsap } from 'gsap'
 import RotatingText from '@/app/components/RotatingText'
 import GlareHover from '@/app/components/GlareHover'
+import { useIsMobile } from '@/app/hooks/useIsMobile'
 
 /* ─── TargetCursor（Portal 渲染到 body，避免祖先 transform 干擾 fixed） ─── */
 
@@ -323,6 +324,7 @@ function UseCasesSection() {
   const t = useTranslations('useCases')
   const ref = useRef<HTMLElement>(null)
   const isInView = useInView(ref, { once: true, margin: '-100px' })
+  const isMobile = useIsMobile()
 
   const useCases = [
     {
@@ -352,14 +354,14 @@ function UseCasesSection() {
   ]
 
   return (
-    <section ref={ref} style={{ padding: '80px 24px', background: 'var(--gray-50)' }}>
+    <section ref={ref} style={{ padding: isMobile ? '48px 16px' : '80px 24px', background: 'var(--gray-50)' }}>
       <TargetCursor containerRef={ref} targetSelector=".cursor-target" />
       <div style={{ maxWidth: 1000, margin: '0 auto' }}>
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={isInView ? { opacity: 1, y: 0 } : {}}
           transition={{ duration: 0.6 }}
-          style={{ textAlign: 'center', marginBottom: 80 }}
+          style={{ textAlign: 'center', marginBottom: isMobile ? 40 : 80 }}
         >
           <div style={{
             fontSize: 11,
@@ -401,8 +403,8 @@ function UseCasesSection() {
 
         <div style={{
           display: 'grid',
-          gridTemplateColumns: 'repeat(2, 1fr)',
-          gap: 24,
+          gridTemplateColumns: isMobile ? '1fr' : 'repeat(2, 1fr)',
+          gap: isMobile ? 16 : 24,
         }}>
           {useCases.map((useCase, i) => (
             <motion.div
@@ -423,7 +425,7 @@ function UseCasesSection() {
                 transitionDuration={800}
                 className="cursor-target"
               >
-                <article style={{ padding: 32, height: '100%' }}>
+                <article style={{ padding: isMobile ? 20 : 32, height: '100%' }}>
                   <div style={{
                     fontSize: 11,
                     color: 'var(--gray-400)',
