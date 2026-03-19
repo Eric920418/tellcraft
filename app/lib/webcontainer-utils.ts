@@ -365,6 +365,18 @@ export function prepareCss(rawStyles: string | undefined, _hasTailwindConfig: bo
 }
 
 /**
+ * Sanitize TSX/TS file content before writing to WebContainer.
+ * 修復 LLM 生成的常見語法錯誤，防止 Build Error 顯示給用戶。
+ * 在前端最後一道防線執行，不依賴後端修復。
+ */
+export function sanitizeFileContent(path: string, content: string): string {
+  if (!/\.(tsx?|jsx?)$/.test(path)) return content
+  // 修復可選鏈左側賦值（n?.x += value → n.x += value）
+  // LLM 常在 canvas 動畫/物理模擬代碼中產生此模式，SWC/TS 不允許
+  return content.replace(/(\b\w+)\?\.([\w]+)\s*([+\-*/%]?=)(?!=)/g, '$1.$2 $3')
+}
+
+/**
  * Convert TypeScript tailwind.config.ts to CommonJS tailwind.config.js
  * WebContainer 的 Tailwind v3 PostCSS plugin 可能不支援 .ts config
  */
@@ -735,10 +747,10 @@ export function buildWebContainerFiles(input: WebContainerFilesInput): FileSyste
   console.log('[WC] tailwindConfig present:', !!input.tailwindConfig, 'pages:', input.pages.length, 'components:', input.components.length)
   setFileInTree(tree, 'app/globals.css', processedCss)
 
-  // Pages
+  // Pages（sanitize 修復 LLM 常見語法錯誤，防止 Build Error 顯示給用戶）
   for (const page of input.pages) {
     const path = page.path.startsWith('/') ? page.path.slice(1) : page.path
-    let content = page.content
+    let content = sanitizeFileContent(path, page.content)
 
     // Inject edit bridge into layout.tsx
     if (path === 'app/layout.tsx' || path.endsWith('/layout.tsx')) {
@@ -751,14 +763,14 @@ export function buildWebContainerFiles(input: WebContainerFilesInput): FileSyste
   // Components
   for (const comp of input.components) {
     const path = comp.path.startsWith('/') ? comp.path.slice(1) : comp.path
-    setFileInTree(tree, path, comp.content)
+    setFileInTree(tree, path, sanitizeFileContent(path, comp.content))
   }
 
   // Server Actions (from Coder Skill)
   if (input.serverActions) {
     for (const sa of input.serverActions) {
       const path = sa.path.startsWith('/') ? sa.path.slice(1) : sa.path
-      setFileInTree(tree, path, sa.content)
+      setFileInTree(tree, path, sanitizeFileContent(path, sa.content))
     }
   }
 
@@ -766,7 +778,7 @@ export function buildWebContainerFiles(input: WebContainerFilesInput): FileSyste
   if (input.apiRoutes) {
     for (const ar of input.apiRoutes) {
       const path = ar.path.startsWith('/') ? ar.path.slice(1) : ar.path
-      setFileInTree(tree, path, ar.content)
+      setFileInTree(tree, path, sanitizeFileContent(path, ar.content))
     }
   }
 
@@ -774,7 +786,7 @@ export function buildWebContainerFiles(input: WebContainerFilesInput): FileSyste
   if (input.dbLib) {
     for (const db of input.dbLib) {
       const path = db.path.startsWith('/') ? db.path.slice(1) : db.path
-      setFileInTree(tree, path, db.content)
+      setFileInTree(tree, path, sanitizeFileContent(path, db.content))
     }
   }
 
@@ -825,7 +837,7 @@ export function diffFiles(
     const oldContent = oldMap.get(file.path)
     if (oldContent !== file.content) {
       const path = file.path.startsWith('/') ? file.path.slice(1) : file.path
-      changes[path] = file.content
+      changes[path] = sanitizeFileContent(path, file.content)
     }
   }
 

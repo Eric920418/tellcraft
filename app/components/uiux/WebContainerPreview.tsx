@@ -9,6 +9,7 @@ import {
   diffFiles,
   isWebContainerSupported,
   prepareCss,
+  sanitizeFileContent,
 } from '@/app/lib/webcontainer-utils'
 import type { GeneratedFile, WebContainerFilesInput } from '@/app/lib/webcontainer-utils'
 import type { ElementInfo } from './PreviewPanel'
@@ -266,11 +267,11 @@ export default function WebContainerPreview({
       if (container && typeof (container as { mount?: unknown }).mount === 'function') {
         // Can't access container from here, use writeFiles instead
       }
-      // 用 writeFiles 逐一寫入
+      // 用 writeFiles 逐一寫入（sanitize 修復 LLM 常見語法錯誤）
       const flatFiles: Record<string, string> = {}
       for (const f of [...pages, ...components, ...(serverActions || []), ...(apiRoutes || []), ...(dbLib || [])]) {
         const p = f.path.startsWith('/') ? f.path.slice(1) : f.path
-        flatFiles[p] = f.content
+        flatFiles[p] = sanitizeFileContent(p, f.content)
       }
       if (styles) flatFiles['app/globals.css'] = prepareCss(styles, !!tailwindConfig)
       if (tailwindConfig) flatFiles['tailwind.config.ts'] = tailwindConfig
