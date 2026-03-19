@@ -2211,18 +2211,149 @@ export async function runRedGreenCycle(input: {
   allPassed: boolean
 }> {
   const { fixFailingAction } = await import('./coder-generation')
-  const maxAttempts = input.maxAttempts ?? 3
+  const maxAttemptsPerFeature = input.maxAttempts ?? 3
   let currentFiles = [...input.backendFiles]
-  let lastResult: SpecFormulaTestResult | undefined
-  let attempt = 0
+  let totalAttempts = 0
 
-  for (attempt = 1; attempt <= maxAttempts; attempt++) {
-    const attemptPercent = Math.floor(((attempt - 1) / maxAttempts) * 80)
-    await input.onProgress(`第 ${attempt}/${maxAttempts} 輪測試...`, 5 + attemptPercent)
+  // ============================================================
+  // Phase 1: 逐 Feature 精準測試 + 修復
+  // 每個 Feature 獨立測試，失敗只修對應的 action，最多 3 輪
+  // ============================================================
+  const totalFeatures = input.featureFiles.length
+  for (let fi = 0; fi < totalFeatures; fi++) {
+    const feature = input.featureFiles[fi]
+    const featureLabel = `Feature ${fi + 1}/${totalFeatures}: ${feature.name}`
+    const basePercent = Math.floor((fi / totalFeatures) * 70)
 
-    // 跑測試（test server crash 時降級為全部失敗，繼續下一輪修復）
+    for (let attempt = 1; attempt <= maxAttemptsPerFeature; attempt++) {
+      totalAttempts++
+      const attemptLabel = attempt > 1 ? ` (修復第 ${attempt - 1} 輪)` : ''
+      await input.onProgress(`${featureLabel}${attemptLabel} — 測試中...`, 5 + basePercent)
+
+      let result: SpecFormulaTestResult
+      try {
+        result = await runSpecFormulaValidation({
+          backendFiles: currentFiles,
+          featureFiles: [feature],  // 只測這一個 Feature
+          actionsYml: input.actionsYml,
+          openApiSpec: input.openApiSpec,
+          isaConfigYml: input.isaConfigYml,
+          schemaSql: input.schemaSql,
+          entityMapping: input.entityMapping,
+          neonConnectionString: input.neonConnectionString,
+          onProgress: async (step, pct) => {
+            await input.onProgress(`${featureLabel} — ${step}`, 5 + basePercent + Math.floor(pct * 0.1))
+          },
+        })
+      } catch (testErr) {
+        logger.error({ feature: feature.name, attempt, err: testErr }, '單 Feature 測試 crash')
+        result = {
+          totalScenarios: 1, passed: 0, failed: 1, skipped: 0,
+          scenarios: [{ featureName: feature.name, ruleName: '', scenarioName: '(crash)', status: 'failed', error: String(testErr), steps: [] }],
+          durationMs: 0,
+        }
+      }
+
+      logger.info({ feature: feature.name, attempt, passed: result.passed, failed: result.failed }, '逐 Feature 測試結果')
+
+      // 通過 → 下一個 Feature
+      if (result.failed === 0) {
+        await input.onProgress(`${featureLabel} — ✅ ${result.passed} scenario 通過`, 5 + basePercent + 10)
+        break
+      }
+
+      // 最後一輪不修復
+      if (attempt >= maxAttemptsPerFeature) {
+        logger.warn({ feature: feature.name, failed: result.failed }, '逐 Feature 修復後仍有失敗')
+        break
+      }
+
+      // 精準修復：只修這個 Feature 對應的 action
+      const actionName = getActionNameFromFeature(feature.content)
+      if (!actionName) {
+        logger.warn({ feature: feature.name }, '找不到 # Action 註解，無法修復')
+        break
+      }
+
+      await input.onProgress(`${featureLabel} — 修復 ${actionName} (${attempt}/${maxAttemptsPerFeature})...`, 5 + basePercent + 5)
+
+      const kebabName = actionName.replace(/([a-z])([A-Z])/g, '$1-$2').replace(/[_\s]+/g, '-').toLowerCase()
+      const filePath = `lib/actions/${kebabName}.ts`
+      const fileIdx = currentFiles.findIndex(f => f.path === filePath)
+
+      if (fileIdx === -1) {
+        logger.warn({ actionName, filePath }, '找不到 action 檔案')
+        break
+      }
+
+      const failedScenarios = result.scenarios
+        .filter(s => s.status === 'failed')
+        .map(s => ({ scenarioName: s.scenarioName, ruleName: s.ruleName, error: s.error }))
+
+      const fixedCode = await fixFailingAction(
+        actionName,
+        currentFiles[fileIdx].content,
+        failedScenarios,
+        input.schemaSql,
+        input.trackingContext
+      )
+
+      currentFiles[fileIdx] = { ...currentFiles[fileIdx], content: fixedCode }
+    }
+  }
+
+  // ============================================================
+  // Phase 2: 全量回歸測試（抓 cross-feature regression）
+  // ============================================================
+  await input.onProgress('最終回歸測試...', 75)
+
+  let finalResult: SpecFormulaTestResult
+  try {
+    finalResult = await runSpecFormulaValidation({
+      backendFiles: currentFiles,
+      featureFiles: input.featureFiles,
+      actionsYml: input.actionsYml,
+      openApiSpec: input.openApiSpec,
+      isaConfigYml: input.isaConfigYml,
+      schemaSql: input.schemaSql,
+      entityMapping: input.entityMapping,
+      neonConnectionString: input.neonConnectionString,
+      onProgress: async (step, pct) => {
+        await input.onProgress(`回歸測試 — ${step}`, 75 + Math.floor(pct * 0.15))
+      },
+    })
+  } catch (testErr) {
+    logger.error({ err: testErr }, '全量回歸測試 crash')
+    finalResult = {
+      totalScenarios: input.featureFiles.length,
+      passed: 0, failed: input.featureFiles.length, skipped: 0,
+      scenarios: input.featureFiles.map(f => ({
+        featureName: f.name, ruleName: '', scenarioName: '(crash)', status: 'failed' as const, error: String(testErr), steps: [],
+      })),
+      durationMs: 0,
+    }
+  }
+
+  logger.info({ passed: finalResult.passed, failed: finalResult.failed, total: finalResult.totalScenarios }, '全量回歸測試結果')
+
+  // Phase 2.5: 回歸測試有失敗 → 最後一輪修復
+  if (finalResult.failed > 0) {
+    await input.onProgress(`回歸修復 — ${finalResult.failed} 個失敗...`, 90)
+    const failedByAction = groupFailedByAction(finalResult, input.featureFiles, input.actionsYml)
+
+    for (const [actionName, scenarios] of failedByAction) {
+      const kebabName = actionName.replace(/([a-z])([A-Z])/g, '$1-$2').replace(/[_\s]+/g, '-').toLowerCase()
+      const filePath = `lib/actions/${kebabName}.ts`
+      const fileIdx = currentFiles.findIndex(f => f.path === filePath)
+      if (fileIdx === -1) continue
+
+      const fixedCode = await fixFailingAction(actionName, currentFiles[fileIdx].content, scenarios, input.schemaSql, input.trackingContext)
+      currentFiles[fileIdx] = { ...currentFiles[fileIdx], content: fixedCode }
+    }
+
+    // 最終確認
     try {
-      lastResult = await runSpecFormulaValidation({
+      finalResult = await runSpecFormulaValidation({
         backendFiles: currentFiles,
         featureFiles: input.featureFiles,
         actionsYml: input.actionsYml,
@@ -2232,86 +2363,27 @@ export async function runRedGreenCycle(input: {
         entityMapping: input.entityMapping,
         neonConnectionString: input.neonConnectionString,
         onProgress: async (step, pct) => {
-          const scaledPct = attemptPercent + Math.floor(pct * 0.8 / maxAttempts)
-          await input.onProgress(`[${attempt}/${maxAttempts}] ${step}`, 5 + scaledPct)
+          await input.onProgress(`最終驗證 — ${step}`, 93 + Math.floor(pct * 0.05))
         },
       })
-    } catch (testErr) {
-      logger.error({ attempt, err: testErr }, '測試執行失敗（test server crash），視為全部失敗')
-      lastResult = {
-        totalScenarios: input.featureFiles.length,
-        passed: 0,
-        failed: input.featureFiles.length,
-        skipped: 0,
-        scenarios: input.featureFiles.map(f => ({
-          featureName: f.name,
-          ruleName: '',
-          scenarioName: '(test server crash)',
-          status: 'failed' as const,
-          error: `Test server crash: ${testErr instanceof Error ? testErr.message : String(testErr)}`,
-          steps: [],
-        })),
-        durationMs: 0,
-      }
-    }
-
-    logger.info({
-      attempt,
-      passed: lastResult.passed,
-      failed: lastResult.failed,
-      total: lastResult.totalScenarios,
-    }, '紅綠燈循環結果')
-
-    // 全部通過？
-    if (lastResult.failed === 0) {
-      break
-    }
-
-    // 最後一輪不需要修復
-    if (attempt >= maxAttempts) {
-      break
-    }
-
-    // 收集失敗的 action → 修復
-    await input.onProgress(`修復失敗的 action...`, 5 + attemptPercent + 15)
-    const failedByAction = groupFailedByAction(lastResult, input.featureFiles, input.actionsYml)
-
-    for (const [actionName, scenarios] of failedByAction) {
-      // 找到對應的 lib/actions/<name>.ts 檔案
-      const kebabName = actionName
-        .replace(/([a-z])([A-Z])/g, '$1-$2')
-        .replace(/[_\s]+/g, '-')
-        .toLowerCase()
-      const filePath = `lib/actions/${kebabName}.ts`
-      const fileIdx = currentFiles.findIndex(f => f.path === filePath)
-
-      if (fileIdx === -1) {
-        logger.warn({ actionName, filePath }, '找不到對應的 action 檔案，跳過修復')
-        continue
-      }
-
-      const fixedCode = await fixFailingAction(
-        actionName,
-        currentFiles[fileIdx].content,
-        scenarios,
-        input.schemaSql,
-        input.trackingContext
-      )
-
-      // 替換
-      currentFiles[fileIdx] = {
-        ...currentFiles[fileIdx],
-        content: fixedCode,
-      }
+      totalAttempts++
+    } catch {
+      // keep previous finalResult
     }
   }
 
   return {
     finalFiles: currentFiles,
-    testResults: lastResult!,
-    attempts: attempt,
-    allPassed: lastResult!.failed === 0,
+    testResults: finalResult,
+    attempts: totalAttempts,
+    allPassed: finalResult.failed === 0,
   }
+}
+
+/** 從 Feature content 提取 # Action: xxx 註解 */
+function getActionNameFromFeature(featureContent: string): string | null {
+  const match = featureContent.match(/^#\s*Action:\s*(\S+)/m)
+  return match?.[1] || null
 }
 
 /**

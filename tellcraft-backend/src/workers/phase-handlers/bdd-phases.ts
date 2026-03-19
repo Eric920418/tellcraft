@@ -2945,6 +2945,7 @@ export async function completeSpecPhase(
             displaySummary: derivedSchema.displaySummary,
             entityCount: derivedSchema.entityCount,
           }
+          await saveFlowState(redis, conversationId, state)
         }
       }
     }

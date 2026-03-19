@@ -1421,14 +1421,13 @@ function extractResponseFieldsFromFeatures(
           if (!headerLine) {
             headerLine = trimmed // header row
           } else {
-            // data row — 提取 <executionKey
+            // data row — 提取 <executionKey（支援多行 data）
             const cells = trimmed.split('|').map(c => c.trim()).filter(Boolean)
             for (const cell of cells) {
               if (cell.startsWith('<')) {
                 fields.add(cell.substring(1)) // 去掉 < 前綴
               }
             }
-            inResponseTable = false // data row 結束
           }
         } else {
           inResponseTable = false
