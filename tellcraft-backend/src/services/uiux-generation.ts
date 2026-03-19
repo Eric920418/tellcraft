@@ -2086,6 +2086,32 @@ export function repairNullIndexAccess(
   return { content: fixed, repaired: true }
 }
 
+/**
+ * 修復可選鏈左側賦值（n?.x += value → SWC/TS 編譯錯誤）
+ * LLM 常在 canvas 動畫、物理模擬等代碼中產生此模式
+ * 例：n?.x += n?.vx → n.x += n.vx（forEach callback 中 n 必定非 null）
+ */
+export function repairOptionalChainAssignment(
+  file: GeneratedComponent
+): { content: string; repaired: boolean } {
+  if (!/\.(tsx?|jsx?)$/.test(file.path)) return { content: file.content, repaired: false }
+
+  // 匹配左側可選鏈賦值：identifier?.prop <assign-op> value
+  // 包含 +=, -=, *=, /=, %=, = (但排除 == 和 ===)
+  const pattern = /(\b\w+)\?\.([\w]+)\s*([+\-*/%]?=)(?!=)/g
+  let fixed = file.content
+  let count = 0
+
+  fixed = fixed.replace(pattern, (match, obj, prop, op) => {
+    count++
+    return `${obj}.${prop} ${op}`
+  })
+
+  if (count === 0) return { content: file.content, repaired: false }
+  logger.warn({ path: file.path, count }, 'repairOptionalChainAssignment: 修復可選鏈左側賦值')
+  return { content: fixed, repaired: true }
+}
+
 const REACT_HOOKS = [
   'useState', 'useEffect', 'useRef', 'useCallback', 'useMemo',
   'useContext', 'useReducer', 'useLayoutEffect', 'useId',
@@ -2342,13 +2368,18 @@ async function checkAndFixSyntaxErrors(
     const { content, repaired } = repairNullIndexAccess(f)
     return repaired ? { ...f, content } : f
   })
+  // 修復可選鏈左側賦值（n?.x += value → SWC/TS 編譯錯誤）
+  const withOptionalChainFixed = withNullIndexRepaired.map(f => {
+    const { content, repaired } = repairOptionalChainAssignment(f)
+    return repaired ? { ...f, content } : f
+  })
 
   const broken: Array<{ file: GeneratedComponent; errors: string[]; truncated: boolean }> = []
-  for (const file of withNullIndexRepaired) {
+  for (const file of withOptionalChainFixed) {
     const errors = getSyntaxErrors(file.path, file.content)
     if (errors.length > 0) broken.push({ file, errors, truncated: isTruncatedFile(file.content, errors) })
   }
-  if (broken.length === 0) return withNullIndexRepaired
+  if (broken.length === 0) return withOptionalChainFixed
 
   logger.warn(
     { count: broken.length, paths: broken.map(b => b.file.path), truncated: broken.filter(b => b.truncated).map(b => b.file.path) },
@@ -2356,7 +2387,7 @@ async function checkAndFixSyntaxErrors(
   )
 
   // 收集非破損檔案的前 20 行作為 import context（供截斷型修復使用）
-  const healthyImportContext = withNullIndexRepaired
+  const healthyImportContext = withOptionalChainFixed
     .filter(f => !broken.some(b => b.file.path === f.path))
     .map(f => {
       const head = f.content.split('\n').slice(0, 20).join('\n')
@@ -2453,7 +2484,7 @@ async function checkAndFixSyntaxErrors(
 
   const brokenPaths = new Set(broken.map(b => b.file.path))
 
-  return withNullIndexRepaired
+  return withOptionalChainFixed
     .map(file => {
       if (!brokenPaths.has(file.path)) return file
 
@@ -4955,8 +4986,9 @@ ${retryFileBlocks}
       retrySystemPrompt,
       [{ role: 'user', content: retryUserMessage }],
       {
-        maxTokens: 24576,
+        maxTokens: 32768,
         temperature: 0.1,
+        maxContinuations: 2,
         promptLabel: 'refine-code-shrink-recovery',
         contextSizeHint: generationProfile,
       },
@@ -5022,6 +5054,12 @@ ${retryFileBlocks}
 
   const promptCodeBundle = pickRefineTargetBundle(currentCode)
   const codeBlocks = buildCodeBlocks(promptCodeBundle)
+
+  // 計算大檔案行數，注入防截斷提示
+  const largeFileWarnings = [...promptCodeBundle.pages, ...promptCodeBundle.components]
+    .filter(f => f.content.split('\n').length > 300)
+    .map(f => `- ${f.path}（${f.content.split('\n').length} 行）`)
+    .join('\n')
 
   const designSystemSection = designContext.designSystem
     ? buildCompactDesignPrompt(designContext.designSystem, { includeMood: true })
@@ -5122,6 +5160,12 @@ ${targetPreviewRoute ? `
 
 未修改的檔案不需要輸出。
 ⚠️ code fence 規則：每個 code block 的第一行必須直接是代碼，禁止在代碼前加任何說明文字（如 "Here is..."、"This component..."）。
+${largeFileWarnings ? `
+⚠️ **大檔案防截斷（Critical）**：以下檔案行數較多，修改時必須輸出完整內容：
+${largeFileWarnings}
+- 禁止省略、壓縮、或用註釋替代未修改的代碼段（如 "// ... rest of the code"）
+- 即使只改了幾行，也要輸出該檔案的完整內容（包含所有未修改的部分）
+- 如果檔案超過 300 行，請特別注意不要在中途停止輸出` : ''}
 ${imageUrls?.length ? `
 ## 用戶附加的圖片（${imageUrls.length} 張）
 用戶附加了參考圖片。請根據用戶的文字指示決定如何使用：
