@@ -997,9 +997,9 @@ export async function executeDeployment(
     await onProgress({ percent: 95, step: '更新專案狀態...' })
 
     // 寫入 deployments 表
-    await db.query(
+    const deploymentRow = await db.queryOne<{ id: string }>(
       `INSERT INTO deployments (project_id, vercel_deployment_id, url, status)
-       VALUES ($1, $2, $3, $4)`,
+       VALUES ($1, $2, $3, $4) RETURNING id`,
       [projectId, deployment.id, deploymentUrl, finalStatus === 'READY' ? 'success' : 'deploying']
     )
 
@@ -1038,6 +1038,28 @@ export async function executeDeployment(
       }).catch(err => logger.warn({ err, projectId }, '部署後模板縮圖更新失敗（不影響部署）'))
     } catch (syncErr) {
       logger.error({ err: syncErr }, '同步代碼到 project_files 失敗（不影響部署）')
+    }
+
+    // 保存代碼快照到 deployment 記錄（在 build fix sync 之後，確保是最終版本）
+    if (deploymentRow?.id) {
+      try {
+        const snapshotFiles = await db.getProjectFiles(projectId)
+        if (snapshotFiles.length > 0) {
+          const snapshot = JSON.stringify(snapshotFiles.map(f => ({
+            filePath: f.file_path,
+            content: f.content,
+            skillSource: f.skill_source,
+            fileType: f.file_type,
+          })))
+          await db.query(
+            'UPDATE deployments SET code_snapshot = $1 WHERE id = $2',
+            [snapshot, deploymentRow.id]
+          )
+          logger.info({ deploymentId: deploymentRow.id, fileCount: snapshotFiles.length }, '部署代碼快照已保存')
+        }
+      } catch (snapErr) {
+        logger.warn({ err: snapErr }, '部署代碼快照保存失敗（不影響部署）')
+      }
     }
 
     await onProgress({ percent: 100, step: '部署完成！' })

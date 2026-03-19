@@ -36,6 +36,7 @@ interface ProjectDetail {
     url: string | null
     status: string
     createdAt: string
+    hasCodeSnapshot: boolean
   }>
   generations: Array<{
     id: string
@@ -80,6 +81,7 @@ export default function ProjectDetailPage() {
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
   const [isDeleting, setIsDeleting] = useState(false)
   const [deleteConfirmName, setDeleteConfirmName] = useState('')
+  const [isDownloading, setIsDownloading] = useState<string | null>(null)
 
   const getStatusLabel = (status: string) => {
     const key = statusLabelKeys[status]
@@ -138,6 +140,36 @@ export default function ProjectDetailPage() {
       setError((err as Error).message)
     } finally {
       setIsIterating(false)
+    }
+  }
+
+  // 下載部署代碼
+  const handleDownloadDeployment = async (deploymentId: string) => {
+    if (!token) return
+    setIsDownloading(deploymentId)
+    try {
+      const res = await fetch(
+        `/api/projects/${projectId}/deployments/${deploymentId}/download-code`,
+        { headers: { Authorization: `Bearer ${token}` } }
+      )
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}))
+        setError(err.error || t('downloadFailed'))
+        return
+      }
+      const blob = await res.blob()
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `${data?.project.name || 'project'}-code.zip`
+      document.body.appendChild(a)
+      a.click()
+      document.body.removeChild(a)
+      URL.revokeObjectURL(url)
+    } catch {
+      setError(t('downloadFailed'))
+    } finally {
+      setIsDownloading(null)
     }
   }
 
@@ -536,8 +568,27 @@ export default function ProjectDetailPage() {
                     </a>
                   )}
                 </div>
-                <div style={{ fontSize: 12, color: 'var(--gray-400)' }}>
-                  {new Date(deploy.createdAt).toLocaleDateString('zh-TW')}
+                <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                  {deploy.hasCodeSnapshot && (
+                    <button
+                      onClick={() => handleDownloadDeployment(deploy.id)}
+                      disabled={isDownloading === deploy.id}
+                      style={{
+                        padding: '4px 10px',
+                        fontSize: 11,
+                        background: 'transparent',
+                        color: isDownloading === deploy.id ? 'var(--gray-400)' : 'var(--gray-600)',
+                        border: '1px solid var(--border-color)',
+                        cursor: isDownloading === deploy.id ? 'not-allowed' : 'pointer',
+                        whiteSpace: 'nowrap',
+                      }}
+                    >
+                      {isDownloading === deploy.id ? t('downloading') : t('downloadCode')}
+                    </button>
+                  )}
+                  <span style={{ fontSize: 12, color: 'var(--gray-400)' }}>
+                    {new Date(deploy.createdAt).toLocaleDateString('zh-TW')}
+                  </span>
                 </div>
               </div>
             ))}

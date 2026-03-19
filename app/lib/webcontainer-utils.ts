@@ -125,6 +125,27 @@ const EDIT_BRIDGE_SCRIPT = `
   let editMode = false;
   let selectedElements = [];
 
+  // Inject selection styles
+  var styleEl = document.createElement('style');
+  styleEl.textContent = [
+    '[data-tc-id].tc-selected { outline: 2px solid #2563eb !important; outline-offset: 2px; }',
+    '[data-tc-id].tc-hover { outline: 2px dashed #93c5fd !important; outline-offset: 2px; }',
+  ].join('\\n');
+  document.head.appendChild(styleEl);
+
+  // Hover handler
+  function handleMouseOver(e) {
+    if (!editMode) return;
+    var target = e.target.closest('[data-tc-id]');
+    if (!target || target.classList.contains('tc-selected')) return;
+    target.classList.add('tc-hover');
+  }
+  function handleMouseOut(e) {
+    if (!editMode) return;
+    var target = e.target.closest('[data-tc-id]');
+    if (target) target.classList.remove('tc-hover');
+  }
+
   // Tag counters
   let tagCounters = {};
   function resetCounters() { tagCounters = {}; }
@@ -221,7 +242,18 @@ const EDIT_BRIDGE_SCRIPT = `
     return info;
   }
 
-  // Click handler
+  // Update visual selection outlines
+  function syncSelectionOutlines() {
+    document.querySelectorAll('.tc-selected').forEach(function(el) {
+      if (selectedElements.indexOf(el.dataset.tcId) < 0) el.classList.remove('tc-selected');
+    });
+    selectedElements.forEach(function(id) {
+      var el = document.querySelector('[data-tc-id="' + id + '"]');
+      if (el) { el.classList.add('tc-selected'); el.classList.remove('tc-hover'); }
+    });
+  }
+
+  // Click handler (Shift/Ctrl for multi-select)
   function handleClick(e) {
     if (!editMode) return;
     var target = e.target.closest('[data-tc-id]');
@@ -229,17 +261,28 @@ const EDIT_BRIDGE_SCRIPT = `
     e.preventDefault();
     e.stopPropagation();
 
+    var id = target.dataset.tcId;
     var info = getElementInfo(target);
-    var idx = selectedElements.indexOf(target.dataset.tcId);
+    var isMulti = e.shiftKey || e.ctrlKey || e.metaKey;
+    var idx = selectedElements.indexOf(id);
+
     if (idx >= 0) {
+      // Deselect
       selectedElements.splice(idx, 1);
       postToParent({ type: 'tc_elementDeselected', data: info });
+    } else if (isMulti) {
+      // Add to selection
+      selectedElements.push(id);
+      postToParent({ type: 'tc_elementSelected', data: info });
     } else {
-      selectedElements = [target.dataset.tcId];
+      // Replace selection
+      selectedElements = [id];
       postToParent({ type: 'tc_elementSelected', data: info });
     }
-    postToParent({ type: 'tc_selectionChanged', data: selectedElements.map(function(id) {
-      var el = document.querySelector('[data-tc-id="' + id + '"]');
+
+    syncSelectionOutlines();
+    postToParent({ type: 'tc_selectionChanged', data: selectedElements.map(function(selId) {
+      var el = document.querySelector('[data-tc-id="' + selId + '"]');
       return el ? getElementInfo(el) : null;
     }).filter(Boolean) });
   }
@@ -254,6 +297,7 @@ const EDIT_BRIDGE_SCRIPT = `
       if (!editMode) {
         selectedElements = [];
         document.querySelectorAll('.tc-selected').forEach(function(el) { el.classList.remove('tc-selected'); });
+        document.querySelectorAll('.tc-hover').forEach(function(el) { el.classList.remove('tc-hover'); });
       }
     }
 
@@ -326,6 +370,8 @@ const EDIT_BRIDGE_SCRIPT = `
   // Initial setup
   function init() {
     document.addEventListener('click', handleClick, true);
+    document.addEventListener('mouseover', handleMouseOver, true);
+    document.addEventListener('mouseout', handleMouseOut, true);
     tagElements();
     observer.observe(document.body, { childList: true, subtree: true });
     postToParent({ type: 'tc_iframeReady' });

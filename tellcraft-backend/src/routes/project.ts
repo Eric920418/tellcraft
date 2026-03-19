@@ -356,14 +356,16 @@ router.get('/:id/detail', requireAuth, async (req, res) => {
       [id]
     )
 
-    // 取得部署
+    // 取得部署（不 SELECT code_snapshot 本體，只判斷是否存在）
     const deployments = await db.queryMany<{
       id: string
       url: string | null
       status: string
       created_at: string
+      has_code_snapshot: boolean
     }>(
-      'SELECT id, url, status, created_at FROM deployments WHERE project_id = $1 ORDER BY created_at DESC LIMIT 5',
+      `SELECT id, url, status, created_at, (code_snapshot IS NOT NULL) as has_code_snapshot
+       FROM deployments WHERE project_id = $1 ORDER BY created_at DESC LIMIT 5`,
       [id]
     )
 
@@ -402,6 +404,7 @@ router.get('/:id/detail', requireAuth, async (req, res) => {
         url: d.url,
         status: d.status,
         createdAt: d.created_at,
+        hasCodeSnapshot: d.has_code_snapshot,
       })),
       generations: generations.map(g => ({
         id: g.id,
@@ -1054,6 +1057,74 @@ router.get('/:id/versions/:versionNumber/download-code', requireAuth, requirePla
     logger.error({ err: error }, `下載版本代碼失敗: ${msg}`)
     if (!res.headersSent) {
       res.status(500).json({ error: `Failed to download version code: ${msg}` })
+    }
+  }
+})
+
+/**
+ * GET /api/project/:id/deployments/:deploymentId/download-code
+ * 下載指定部署的代碼快照（ZIP）— 付費方案限定
+ */
+router.get('/:id/deployments/:deploymentId/download-code', requireAuth, requirePlan('creator', 'pro', 'business'), async (req, res) => {
+  try {
+    const { id, deploymentId } = req.params
+    const userId = req.user!.id
+
+    const project = await db.queryOne<{ user_id: string; name: string }>(
+      'SELECT user_id, name FROM projects WHERE id = $1',
+      [id]
+    )
+    if (!project || project.user_id !== userId) {
+      return res.status(404).json({ error: 'Project not found' })
+    }
+
+    const deploy = await db.queryOne<{ code_snapshot: unknown; url: string | null }>(
+      'SELECT code_snapshot, url FROM deployments WHERE id = $1 AND project_id = $2',
+      [deploymentId, id]
+    )
+
+    if (!deploy || !deploy.code_snapshot) {
+      return res.status(404).json({ error: '此部署無代碼快照' })
+    }
+
+    const files = deploy.code_snapshot as Array<{ filePath: string; content: string }>
+    if (!Array.isArray(files) || files.length === 0) {
+      return res.status(400).json({ error: 'No files found in snapshot' })
+    }
+
+    // 用部署 URL 的前綴作為檔名（更有辨識度）
+    const urlSlug = deploy.url
+      ? deploy.url.replace('https://', '').split('.')[0].slice(0, 30)
+      : 'deploy'
+    const asciiName = project.name.replace(/[^a-z0-9-]/gi, '-').replace(/-+/g, '-').replace(/^-|-$/g, '').slice(0, 30) || 'project'
+
+    const archive = archiver('zip', { zlib: { level: 6 } })
+    const chunks: Buffer[] = []
+
+    await new Promise<void>((resolve, reject) => {
+      archive.on('data', (chunk: Buffer) => chunks.push(chunk))
+      archive.on('end', resolve)
+      archive.on('error', reject)
+      archive.on('warning', (warn) => logger.warn({ warn }, 'archiver warning'))
+
+      for (const file of files) {
+        archive.append(Buffer.from(file.content), { name: file.filePath })
+      }
+
+      archive.finalize().catch(reject)
+    })
+
+    const zipBuffer = Buffer.concat(chunks)
+    const fileName = `${asciiName}-${urlSlug}-code.zip`
+    res.setHeader('Content-Type', 'application/zip')
+    res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`)
+    res.setHeader('Content-Length', String(zipBuffer.length))
+    res.send(zipBuffer)
+  } catch (error) {
+    const msg = error instanceof Error ? error.message : String(error)
+    logger.error({ err: error }, `下載部署代碼失敗: ${msg}`)
+    if (!res.headersSent) {
+      res.status(500).json({ error: `Failed to download deployment code: ${msg}` })
     }
   }
 })

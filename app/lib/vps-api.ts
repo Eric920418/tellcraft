@@ -1603,6 +1603,7 @@ export async function getProjectDetail(input: {
     url: string | null
     status: string
     createdAt: string
+    hasCodeSnapshot: boolean
   }>
   generations: Array<{
     id: string

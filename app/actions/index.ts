@@ -1187,6 +1187,7 @@ export async function getProjectDetail(projectId: string): Promise<ActionResult<
     url: string | null
     status: string
     createdAt: string
+    hasCodeSnapshot: boolean
   }>
   generations: Array<{
     id: string
