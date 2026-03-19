@@ -221,6 +221,36 @@ function transformToPostgresqlDDL(tables: ParsedTable[]): string {
         }
       }
 
+      // ── MySQL → PostgreSQL 型別轉換（安全網）──
+      // TINYINT(1) → BOOLEAN（必須在通用 TINYINT 之前）
+      transformed = transformed.replace(/\bTINYINT\s*\(\s*1\s*\)/gi, 'BOOLEAN')
+      // TINYINT → SMALLINT
+      transformed = transformed.replace(/\bTINYINT(?:\s*\(\s*\d+\s*\))?/gi, 'SMALLINT')
+      // MEDIUMINT → INTEGER
+      transformed = transformed.replace(/\bMEDIUMINT(?:\s*\(\s*\d+\s*\))?/gi, 'INTEGER')
+      // INT(n) 顯示寬度 → INTEGER
+      transformed = transformed.replace(/\bINT\s*\(\s*\d+\s*\)/gi, 'INTEGER')
+      // BIGINT(n) 顯示寬度 → BIGINT
+      transformed = transformed.replace(/\bBIGINT\s*\(\s*\d+\s*\)/gi, 'BIGINT')
+      // DOUBLE → DOUBLE PRECISION（不影響已經正確的 DOUBLE PRECISION）
+      transformed = transformed.replace(/\bDOUBLE\b(?!\s+PRECISION)/gi, 'DOUBLE PRECISION')
+      // FLOAT(p,s) / FLOAT → REAL
+      transformed = transformed.replace(/\bFLOAT(?:\s*\(\s*\d+(?:\s*,\s*\d+)?\s*\))?/gi, 'REAL')
+      // MEDIUMTEXT / LONGTEXT / TINYTEXT → TEXT
+      transformed = transformed.replace(/\b(?:MEDIUM|LONG|TINY)TEXT\b/gi, 'TEXT')
+      // BLOB 家族 → BYTEA
+      transformed = transformed.replace(/\b(?:MEDIUM|LONG|TINY)?BLOB\b/gi, 'BYTEA')
+      // AUTO_INCREMENT → 移除
+      transformed = transformed.replace(/\s*AUTO_INCREMENT/gi, '')
+      // UNSIGNED → 移除
+      transformed = transformed.replace(/\s*UNSIGNED/gi, '')
+      // DATETIME → TIMESTAMPTZ
+      transformed = transformed.replace(/\bDATETIME\b/gi, 'TIMESTAMPTZ')
+      // ON UPDATE CURRENT_TIMESTAMP → 移除
+      transformed = transformed.replace(/\s*ON\s+UPDATE\s+CURRENT_TIMESTAMP/gi, '')
+      // REGEXP → ~
+      transformed = transformed.replace(/\bREGEXP\b/gi, '~')
+
       // MySQL ENUM → VARCHAR + CHECK
       const enumMatch = transformed.match(/^\s*(\w+)\s+ENUM\(([^)]+)\)/i)
       if (enumMatch) {
@@ -231,15 +261,6 @@ function transformToPostgresqlDDL(tables: ParsedTable[]): string {
         transformedColumns.push(`  CONSTRAINT chk_${table.tableName}_${colName}_enum CHECK (${colName} IN (${values}))`)
         continue
       }
-
-      // MySQL DATETIME → TIMESTAMPTZ
-      transformed = transformed.replace(/\bDATETIME\b/gi, 'TIMESTAMPTZ')
-
-      // 移除 MySQL ON UPDATE CURRENT_TIMESTAMP（PostgreSQL 用 trigger）
-      transformed = transformed.replace(/\s*ON\s+UPDATE\s+CURRENT_TIMESTAMP/gi, '')
-
-      // MySQL REGEXP → PostgreSQL ~
-      transformed = transformed.replace(/\bREGEXP\b/gi, '~')
 
       transformedColumns.push(transformed)
     }

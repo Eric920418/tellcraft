@@ -305,4 +305,112 @@ describe('schema-derivation', () => {
     expect(ddl).toContain('ALTER TABLE guardian_relationships ADD CONSTRAINT fk_gr_walker')
     expect(ddl).toContain('ALTER TABLE guardian_relationships ADD CONSTRAINT fk_gr_guardian')
   })
+
+  // ============================================================
+  // MySQL → PostgreSQL 型別轉換安全網
+  // ============================================================
+
+  it('TINYINT(1) → BOOLEAN', () => {
+    const sql = `CREATE TABLE users (id VARCHAR(36) PRIMARY KEY, is_active TINYINT(1) DEFAULT 1);`
+    const ddl = deriveSchemaFromBdd(sql, '').postgresqlDDL
+    expect(ddl).toContain('BOOLEAN')
+    expect(ddl).not.toMatch(/TINYINT/i)
+  })
+
+  it('TINYINT → SMALLINT', () => {
+    const sql = `CREATE TABLE users (id VARCHAR(36) PRIMARY KEY, age TINYINT NOT NULL);`
+    const ddl = deriveSchemaFromBdd(sql, '').postgresqlDDL
+    expect(ddl).toContain('SMALLINT')
+    expect(ddl).not.toMatch(/TINYINT/i)
+  })
+
+  it('MEDIUMINT → INTEGER', () => {
+    const sql = `CREATE TABLE users (id VARCHAR(36) PRIMARY KEY, score MEDIUMINT);`
+    const ddl = deriveSchemaFromBdd(sql, '').postgresqlDDL
+    expect(ddl).toContain('INTEGER')
+    expect(ddl).not.toMatch(/MEDIUMINT/i)
+  })
+
+  it('INT(11) 顯示寬度 → INTEGER', () => {
+    const sql = `CREATE TABLE users (id VARCHAR(36) PRIMARY KEY, count INT(11) NOT NULL);`
+    const ddl = deriveSchemaFromBdd(sql, '').postgresqlDDL
+    expect(ddl).toContain('INTEGER')
+    expect(ddl).not.toMatch(/INT\s*\(/i)
+  })
+
+  it('DOUBLE → DOUBLE PRECISION', () => {
+    const sql = `CREATE TABLE users (id VARCHAR(36) PRIMARY KEY, latitude DOUBLE NOT NULL);`
+    const ddl = deriveSchemaFromBdd(sql, '').postgresqlDDL
+    expect(ddl).toContain('DOUBLE PRECISION')
+  })
+
+  it('FLOAT(8,2) → REAL', () => {
+    const sql = `CREATE TABLE users (id VARCHAR(36) PRIMARY KEY, price FLOAT(8,2));`
+    const ddl = deriveSchemaFromBdd(sql, '').postgresqlDDL
+    expect(ddl).toContain('REAL')
+    expect(ddl).not.toMatch(/FLOAT/i)
+  })
+
+  it('LONGTEXT / MEDIUMTEXT / TINYTEXT → TEXT', () => {
+    const sql = `CREATE TABLE posts (id VARCHAR(36) PRIMARY KEY, body LONGTEXT, excerpt TINYTEXT, content MEDIUMTEXT);`
+    const ddl = deriveSchemaFromBdd(sql, '').postgresqlDDL
+    expect(ddl).not.toMatch(/LONGTEXT|MEDIUMTEXT|TINYTEXT/i)
+    expect((ddl.match(/\bTEXT\b/gi) || []).length).toBeGreaterThanOrEqual(3)
+  })
+
+  it('BLOB → BYTEA', () => {
+    const sql = `CREATE TABLE files (id VARCHAR(36) PRIMARY KEY, data BLOB, thumbnail TINYBLOB);`
+    const ddl = deriveSchemaFromBdd(sql, '').postgresqlDDL
+    expect(ddl).not.toMatch(/BLOB/i)
+    expect((ddl.match(/BYTEA/gi) || []).length).toBeGreaterThanOrEqual(2)
+  })
+
+  it('AUTO_INCREMENT 移除', () => {
+    const sql = `CREATE TABLE users (id INT AUTO_INCREMENT PRIMARY KEY, name VARCHAR(100));`
+    const ddl = deriveSchemaFromBdd(sql, '').postgresqlDDL
+    expect(ddl).not.toMatch(/AUTO_INCREMENT/i)
+  })
+
+  it('UNSIGNED 移除', () => {
+    const sql = `CREATE TABLE users (id VARCHAR(36) PRIMARY KEY, age INT UNSIGNED NOT NULL);`
+    const ddl = deriveSchemaFromBdd(sql, '').postgresqlDDL
+    expect(ddl).not.toMatch(/UNSIGNED/i)
+    expect(ddl).toContain('NOT NULL')
+  })
+
+  it('綜合 MySQL schema 完整轉換', () => {
+    const sql = `
+    CREATE TABLE users (
+      id VARCHAR(36) PRIMARY KEY COMMENT '用戶ID',
+      name VARCHAR(100) NOT NULL COMMENT '姓名',
+      is_admin TINYINT(1) DEFAULT 0 COMMENT '管理員',
+      age TINYINT UNSIGNED COMMENT '年齡',
+      score MEDIUMINT DEFAULT 0,
+      balance DOUBLE NOT NULL,
+      rating FLOAT(5,2),
+      bio LONGTEXT,
+      avatar BLOB,
+      login_count INT(11) UNSIGNED DEFAULT 0,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      status ENUM('active', 'banned')
+    ) COMMENT '用戶表';`
+
+    const ddl = deriveSchemaFromBdd(sql, '').postgresqlDDL
+
+    // 所有 MySQL 型別應被轉換
+    expect(ddl).not.toMatch(/TINYINT|MEDIUMINT|UNSIGNED|AUTO_INCREMENT|LONGTEXT|\bBLOB\b|\bDOUBLE\b(?!\s+PRECISION)|\bFLOAT\b|\bDATETIME\b|\bENUM\b/i)
+    // 應包含正確的 PG 型別
+    expect(ddl).toContain('BOOLEAN')
+    expect(ddl).toContain('SMALLINT')
+    expect(ddl).toContain('DOUBLE PRECISION')
+    expect(ddl).toContain('REAL')
+    expect(ddl).toContain('TEXT')
+    expect(ddl).toContain('BYTEA')
+    expect(ddl).toContain('TIMESTAMPTZ')
+    expect(ddl).toContain('VARCHAR(50)') // ENUM → VARCHAR(50)
+    expect(ddl).toContain('CHECK')
+    // COMMENT 應被轉為 COMMENT ON COLUMN
+    expect(ddl).toContain('COMMENT ON COLUMN')
+    expect(ddl).not.toMatch(/COMMENT\s+'/i) // 內聯 COMMENT 已移除
+  })
 })

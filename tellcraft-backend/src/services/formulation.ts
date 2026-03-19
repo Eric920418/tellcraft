@@ -276,19 +276,21 @@ export async function generateSchemaSql(
 
   const schemaHints = extractSchemaHints(resolvedItems)
 
-  const systemPrompt = `你是一位資深的資料庫架構師。根據需求和釐清決策，產出 SQL Schema 和 Entity 映射。
+  const systemPrompt = `你是一位資深的資料庫架構師。根據需求和釐清決策，產出 **PostgreSQL** SQL Schema 和 Entity 映射。
 
 ## 輸出格式
 
-### 1. SQL Schema (schema.sql)
+### 1. SQL Schema (schema.sql) — PostgreSQL（Neon）
 \`\`\`sql
--- 實體名稱
 CREATE TABLE table_name (
-    id VARCHAR(10) PRIMARY KEY COMMENT '唯一識別碼',
-    column_name TYPE NOT NULL COMMENT '欄位說明',
-    -- 約束條件
-    CONSTRAINT chk_name CHECK (condition)
-) COMMENT '實體說明';
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    name VARCHAR(100) NOT NULL,
+    is_active BOOLEAN DEFAULT true,
+    amount NUMERIC(10, 2),
+    status VARCHAR(50),
+    CONSTRAINT chk_status CHECK (status IN ('active', 'inactive')),
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
 \`\`\`
 
 ### 2. Entity Mapping (YAML)
@@ -297,8 +299,19 @@ entity_to_table_mapping:
   - 中文實體名: table_name
 \`\`\`
 
-## 規則
-- 每個欄位必須有 COMMENT 說明
+## PostgreSQL 型別規則（嚴格遵守）
+- 目標資料庫是 **PostgreSQL（Neon）**，禁止使用 MySQL 語法
+- ID 欄位一律用 \`UUID PRIMARY KEY DEFAULT gen_random_uuid()\`
+- 字串用 \`VARCHAR(n)\` 或 \`TEXT\`
+- 整數用 \`INTEGER\` 或 \`SMALLINT\` 或 \`BIGINT\`
+- 布林用 \`BOOLEAN\`
+- 小數用 \`NUMERIC(precision, scale)\`
+- 浮點用 \`DOUBLE PRECISION\` 或 \`REAL\`
+- 時間用 \`TIMESTAMPTZ\`
+- 枚舉用 \`VARCHAR(50) + CHECK\` constraint
+- 禁止：TINYINT、MEDIUMINT、DOUBLE（不帶 PRECISION）、FLOAT、AUTO_INCREMENT、UNSIGNED、COMMENT '...'、ENUM()、DATETIME
+
+## 其他規則
 - 限制條件用 CHECK constraint 表達
 - 使用 snake_case 命名
 - 不要假設需求中沒有的欄位
@@ -306,7 +319,7 @@ entity_to_table_mapping:
 輸出 JSON 格式：
 \`\`\`json
 {
-  "schemaSql": "完整的 SQL DDL",
+  "schemaSql": "完整的 PostgreSQL DDL",
   "entityMapping": "完整的 YAML"
 }
 \`\`\``
@@ -1153,13 +1166,23 @@ export async function generateDraftBatch(
 - \`$ContextName.field\`：Variable Reference，引用先前宣告的 Context Key 值
 - \`$notnull\`：特殊值，驗證欄位不為 null
 
+## PostgreSQL 型別規則（嚴格遵守）
+- 目標資料庫是 **PostgreSQL（Neon）**，禁止使用 MySQL 語法
+- ID：\`UUID PRIMARY KEY DEFAULT gen_random_uuid()\`
+- 整數：\`INTEGER\` / \`SMALLINT\` / \`BIGINT\`（禁止 TINYINT/MEDIUMINT）
+- 布林：\`BOOLEAN\`（禁止 TINYINT(1)）
+- 時間：\`TIMESTAMPTZ\`（禁止 DATETIME）
+- 浮點：\`DOUBLE PRECISION\` / \`REAL\`（禁止 DOUBLE/FLOAT）
+- 枚舉：\`VARCHAR(50) + CHECK\`（禁止 ENUM()）
+- 禁止：AUTO_INCREMENT、UNSIGNED、COMMENT '...'
+
 ## 無腦補原則
 嚴格按 ES 分析結果和需求來，不擅自假設。
 
 ## 輸出格式
 \`\`\`json
 {
-  "schemaSql": "完整的 SQL DDL",
+  "schemaSql": "完整的 PostgreSQL DDL",
   "entityMapping": "YAML 格式",
   "features": [
     {

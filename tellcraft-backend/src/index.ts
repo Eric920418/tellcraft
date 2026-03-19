@@ -624,6 +624,14 @@ async function shutdown() {
   await orchestratorQueue.close()
   logger.info('隊列已關閉')
 
+  // 先關閉 HTTP 伺服器（停止接受新請求，避免 pool 關閉後仍有請求進來）
+  await new Promise<void>((resolve) => {
+    server.close(() => {
+      logger.info('HTTP 服務器已關閉')
+      resolve()
+    })
+  })
+
   // 關閉所有 Redis 連線
   workerRedis.disconnect()
   queueRedis.disconnect()
@@ -631,15 +639,11 @@ async function shutdown() {
   generalRedis.disconnect()
   logger.info('Redis 已斷開（4 連線）')
 
-  // 關閉資料庫連接池
+  // 最後關閉資料庫連接池（此時已無活躍請求）
   await closePool()
   logger.info('資料庫連接池已關閉')
 
-  // 關閉 HTTP 服務器
-  server.close(() => {
-    logger.info('HTTP 服務器已關閉')
-    process.exit(0)
-  })
+  process.exit(0)
 
   // 超時強制退出（85s，比 PM2 kill_timeout 90s 早 5s，確保日誌能寫出）
   setTimeout(() => {
