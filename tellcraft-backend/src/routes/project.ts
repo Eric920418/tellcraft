@@ -356,18 +356,30 @@ router.get('/:id/detail', requireAuth, async (req, res) => {
       [id]
     )
 
-    // 取得部署（不 SELECT code_snapshot 本體，只判斷是否存在）
-    const deployments = await db.queryMany<{
+    // 取得部署（向下相容：code_snapshot 欄位可能尚未建立）
+    let deployments: Array<{
       id: string
       url: string | null
       status: string
       created_at: string
       has_code_snapshot: boolean
-    }>(
-      `SELECT id, url, status, created_at, (code_snapshot IS NOT NULL) as has_code_snapshot
-       FROM deployments WHERE project_id = $1 ORDER BY created_at DESC LIMIT 5`,
-      [id]
-    )
+    }> = []
+    try {
+      deployments = await db.queryMany(
+        `SELECT id, url, status, created_at, (code_snapshot IS NOT NULL) as has_code_snapshot
+         FROM deployments WHERE project_id = $1 ORDER BY created_at DESC LIMIT 5`,
+        [id]
+      )
+    } catch {
+      // code_snapshot 欄位尚未建立，fallback 不帶 has_code_snapshot
+      const rows = await db.queryMany<{
+        id: string; url: string | null; status: string; created_at: string
+      }>(
+        'SELECT id, url, status, created_at FROM deployments WHERE project_id = $1 ORDER BY created_at DESC LIMIT 5',
+        [id]
+      )
+      deployments = rows.map(r => ({ ...r, has_code_snapshot: false }))
+    }
 
     // 取得生成記錄
     const generations = await db.queryMany<{
@@ -487,8 +499,8 @@ router.get('/:id/versions', requireAuth, async (req, res) => {
       return res.status(403).json({ error: 'Access denied' })
     }
 
-    // 查詢版本歷史（不 SELECT code_snapshot 本體，只判斷是否存在）
-    const versions = await db.queryMany<{
+    // 查詢版本歷史（向下相容：code_snapshot 欄位可能尚未建立）
+    type VersionRow = {
       id: string
       version_number: number
       version_label: string | null
@@ -499,15 +511,29 @@ router.get('/:id/versions', requireAuth, async (req, res) => {
       schema_snapshot: string | null
       features_snapshot: unknown | null
       has_code_snapshot: boolean
-    }>(
-      `SELECT id, version_number, version_label, status, change_summary,
-              conversation_id, created_at, schema_snapshot, features_snapshot,
-              (code_snapshot IS NOT NULL) as has_code_snapshot
-       FROM generations
-       WHERE project_id = $1
-       ORDER BY version_number DESC`,
-      [id]
-    )
+    }
+    let versions: VersionRow[] = []
+    try {
+      versions = await db.queryMany(
+        `SELECT id, version_number, version_label, status, change_summary,
+                conversation_id, created_at, schema_snapshot, features_snapshot,
+                (code_snapshot IS NOT NULL) as has_code_snapshot
+         FROM generations
+         WHERE project_id = $1
+         ORDER BY version_number DESC`,
+        [id]
+      )
+    } catch {
+      const rows = await db.queryMany<Omit<VersionRow, 'has_code_snapshot'>>(
+        `SELECT id, version_number, version_label, status, change_summary,
+                conversation_id, created_at, schema_snapshot, features_snapshot
+         FROM generations
+         WHERE project_id = $1
+         ORDER BY version_number DESC`,
+        [id]
+      )
+      versions = rows.map(r => ({ ...r, has_code_snapshot: false }))
+    }
 
     res.json({
       versions: versions.map(v => ({

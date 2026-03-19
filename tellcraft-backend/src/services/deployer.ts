@@ -1056,6 +1056,18 @@ export async function executeDeployment(
             [snapshot, deploymentRow.id]
           )
           logger.info({ deploymentId: deploymentRow.id, fileCount: snapshotFiles.length }, '部署代碼快照已保存')
+
+          // 只保留最近 5 個部署的快照，清除更舊的
+          await db.query(
+            `UPDATE deployments SET code_snapshot = NULL
+             WHERE project_id = $1 AND code_snapshot IS NOT NULL
+             AND id NOT IN (
+               SELECT id FROM deployments
+               WHERE project_id = $1 AND code_snapshot IS NOT NULL
+               ORDER BY created_at DESC LIMIT 5
+             )`,
+            [projectId]
+          )
         }
       } catch (snapErr) {
         logger.warn({ err: snapErr }, '部署代碼快照保存失敗（不影響部署）')
