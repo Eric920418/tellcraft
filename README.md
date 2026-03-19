@@ -473,8 +473,12 @@ Server Action 錯誤訊息 + 工具模組中文字串國際化（+117 keys，2 n
 | **代碼下載 (ZIP)** | 下載專案全部 `project_files` 打包為 ZIP | creator / pro / business |
 
 - **API**：`GET /api/project/:id/download-code`（後端 archiver ZIP 串流）
+- **版本代碼下載 API**：`GET /api/project/:id/versions/:versionNumber/download-code`（從 `generations.code_snapshot` JSONB 讀取指定版本的代碼快照打包 ZIP）
 - **前端 Route**：`/api/projects/[id]/download-code`（binary 透傳，不走 vps proxy，避免 JSON 解析損壞 binary）
+- **版本下載前端 Route**：`/api/projects/[id]/versions/[versionNumber]/download-code`
 - **UI**：Dashboard 專案列表每列加下載按鈕，免費方案 `opacity:0.4` + `cursor:not-allowed` + title 提示升級
+- **版本下載 UI**：VersionHistory 組件每個有 `code_snapshot` 的版本顯示「下載代碼」按鈕
+- **代碼快照**：`snapshotCodeToGeneration()` 在 UIUX/FastBuild/Coder/部署/迭代完成時自動快照 `project_files` 到 `generations.code_snapshot`（JSONB），失敗不阻塞主流程。舊版本無快照不顯示下載按鈕
 
 ### 核心檔案
 

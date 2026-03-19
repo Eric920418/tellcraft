@@ -22,7 +22,7 @@ import {
   mergePages,
 } from '../../services/fast-build-generation'
 import { buildUISpecSummary } from '../../services/bdd-to-ui-spec'
-import { sendMessage, saveFlowState, getFlowState, deleteFlowState, makeStreamingCallback, generatedCodeToFileRows, deductCredits, touchFlowActivity } from '../orchestrator-utils'
+import { sendMessage, saveFlowState, getFlowState, deleteFlowState, makeStreamingCallback, generatedCodeToFileRows, deductCredits, touchFlowActivity, snapshotCodeToGeneration } from '../orchestrator-utils'
 import { CREDIT_COSTS } from '../../config/plans'
 import { recommendMoods } from '../../services/design-moods'
 import { analyzeUploadedImage, type ReferenceAnalysis } from '../../services/reference-analyzer'
@@ -1048,6 +1048,10 @@ export async function runFastBuildPipeline(params: {
   if (projectId) {
     await db.upsertProjectFiles(projectId, 'uiux',
       generatedCodeToFileRows(currentCode, designSystem))
+    await snapshotCodeToGeneration(projectId, {
+      changeSummary: '快速建站完成',
+      conversationId,
+    })
   }
   await redis.del(`streaming:preview:${conversationId}`).catch(() => {})
 

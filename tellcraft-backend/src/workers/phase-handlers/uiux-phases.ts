@@ -23,7 +23,7 @@ import { recommendMoods, getMoodSummary } from '../../services/design-moods'
 import { executeIteration, executeUndoIteration } from '../../services/iteration-skill'
 import { semanticGateway } from '../../services/semantic-gateway'
 import { detectFastModeIntent, getFaqReply, answerWithSonnet } from '../../services/customer-service'
-import { sendMessage, streamLlmMessage, saveFlowState, getFlowState, deleteFlowState, makeStreamingCallback, generatedCodeToFileRows, deductCredits, hasRecentFlowActivity, touchFlowActivity } from '../orchestrator-utils'
+import { sendMessage, streamLlmMessage, saveFlowState, getFlowState, deleteFlowState, makeStreamingCallback, generatedCodeToFileRows, deductCredits, hasRecentFlowActivity, touchFlowActivity, snapshotCodeToGeneration } from '../orchestrator-utils'
 import { CREDIT_COSTS } from '../../config/plans'
 import {
   hasDeployIntent, hasRejectDeployIntent, hasUndoIntent,
@@ -1499,6 +1499,10 @@ export async function executeFullCodePipeline(
   if (state.projectId) {
     await db.upsertProjectFiles(state.projectId, 'uiux',
       generatedCodeToFileRows(currentCode, state.uiuxDesignSystem))
+    await snapshotCodeToGeneration(state.projectId, {
+      changeSummary: 'UIUX 設計完成',
+      conversationId,
+    })
   }
 
   // ===== 清除 streaming preview =====

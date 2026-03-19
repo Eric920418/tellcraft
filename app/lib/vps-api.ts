@@ -1499,6 +1499,7 @@ export async function getProjectVersions(input: {
     conversationId: string | null
     createdAt: string
     hasBackup: boolean
+    hasCodeSnapshot: boolean
   }>
 }>> {
   return apiRequest(`/api/project/${input.projectId}/versions`, {

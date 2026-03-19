@@ -783,7 +783,10 @@
     "versionFeatureChanges": "Feature Files Changes",
     "versionFeatureAdded": "Added",
     "versionFeatureRemoved": "Removed",
-    "versionFeatureModified": "Modified"
+    "versionFeatureModified": "Modified",
+    "versionDownloadCode": "Download",
+    "versionDownloading": "Downloading...",
+    "versionDownloadFailed": "Download failed"
   },
   "deploy": {
     "deploying": "Deploying...",

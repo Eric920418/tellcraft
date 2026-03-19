@@ -783,7 +783,10 @@
     "versionFeatureChanges": "Feature Files 變更",
     "versionFeatureAdded": "新增",
     "versionFeatureRemoved": "刪除",
-    "versionFeatureModified": "修改"
+    "versionFeatureModified": "修改",
+    "versionDownloadCode": "下載代碼",
+    "versionDownloading": "下載中...",
+    "versionDownloadFailed": "下載失敗"
   },
   "deploy": {
     "deploying": "部署中...",

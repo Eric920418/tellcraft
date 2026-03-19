@@ -9,7 +9,7 @@ import * as db from '../../db/client'
 import type { FlowState, GeneratedCode } from '../../types/flow-state'
 import { type GeneratedComponent, generateTailwindConfig } from '../../services/uiux-generation'
 import { executeCoderPipeline } from '../../services/coder-generation'
-import { sendMessage, saveFlowState, getFlowState, touchFlowActivity } from '../orchestrator-utils'
+import { sendMessage, saveFlowState, getFlowState, touchFlowActivity, snapshotCodeToGeneration } from '../orchestrator-utils'
 import { runCoderE2ETests } from '../../services/coder-e2e-test'
 import { createLogger } from '../../lib/logger'
 
@@ -167,6 +167,12 @@ export async function executeCoderSkill(input: CoderSkillInput): Promise<void> {
     ]
 
     await db.upsertProjectFiles(projectId, 'coder', allCoderFiles)
+
+    // 快照代碼到 generation（Coder 完成後的完整代碼）
+    await snapshotCodeToGeneration(projectId, {
+      changeSummary: 'Coder 後端生成完成',
+      conversationId,
+    })
 
     // 合併代碼到 FlowState（rewritten 覆蓋 uiux，backendFiles 加入 components）
     const mergedPages = mergeComponents(existingUiuxCode.pages, result.rewrittenFrontend.filter(f => pages.some(p => p.path === f.path)))

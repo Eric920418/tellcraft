@@ -484,7 +484,7 @@ router.get('/:id/versions', requireAuth, async (req, res) => {
       return res.status(403).json({ error: 'Access denied' })
     }
 
-    // 查詢版本歷史
+    // 查詢版本歷史（不 SELECT code_snapshot 本體，只判斷是否存在）
     const versions = await db.queryMany<{
       id: string
       version_number: number
@@ -495,9 +495,11 @@ router.get('/:id/versions', requireAuth, async (req, res) => {
       created_at: string
       schema_snapshot: string | null
       features_snapshot: unknown | null
+      has_code_snapshot: boolean
     }>(
       `SELECT id, version_number, version_label, status, change_summary,
-              conversation_id, created_at, schema_snapshot, features_snapshot
+              conversation_id, created_at, schema_snapshot, features_snapshot,
+              (code_snapshot IS NOT NULL) as has_code_snapshot
        FROM generations
        WHERE project_id = $1
        ORDER BY version_number DESC`,
@@ -514,6 +516,7 @@ router.get('/:id/versions', requireAuth, async (req, res) => {
         conversationId: v.conversation_id,
         createdAt: v.created_at,
         hasBackup: !!(v.schema_snapshot || v.features_snapshot),
+        hasCodeSnapshot: v.has_code_snapshot,
       }))
     })
   } catch (error) {
@@ -987,6 +990,70 @@ router.get('/:id/download-code', requireAuth, requirePlan('creator', 'pro', 'bus
     logger.error({ err: error }, `下載代碼失敗: ${msg}`)
     if (!res.headersSent) {
       res.status(500).json({ error: `Failed to download project code: ${msg}` })
+    }
+  }
+})
+
+/**
+ * GET /api/project/:id/versions/:versionNumber/download-code
+ * 下載指定版本的代碼快照（ZIP）— 付費方案限定
+ */
+router.get('/:id/versions/:versionNumber/download-code', requireAuth, requirePlan('creator', 'pro', 'business'), async (req, res) => {
+  try {
+    const { id, versionNumber } = req.params
+    const userId = req.user!.id
+
+    const project = await db.queryOne<{ user_id: string; name: string }>(
+      'SELECT user_id, name FROM projects WHERE id = $1',
+      [id]
+    )
+    if (!project || project.user_id !== userId) {
+      return res.status(404).json({ error: 'Project not found' })
+    }
+
+    const generation = await db.queryOne<{ code_snapshot: unknown }>(
+      'SELECT code_snapshot FROM generations WHERE project_id = $1 AND version_number = $2',
+      [id, Number(versionNumber)]
+    )
+
+    if (!generation || !generation.code_snapshot) {
+      return res.status(404).json({ error: '此版本無代碼快照' })
+    }
+
+    const files = generation.code_snapshot as Array<{ filePath: string; content: string }>
+    if (!Array.isArray(files) || files.length === 0) {
+      return res.status(400).json({ error: 'No files found in snapshot' })
+    }
+
+    const asciiName = project.name.replace(/[^a-z0-9-]/gi, '-').replace(/-+/g, '-').replace(/^-|-$/g, '').slice(0, 50) || 'project'
+    const encodedName = encodeURIComponent(`${project.name.slice(0, 50)}-v${versionNumber}-code.zip`)
+
+    const archive = archiver('zip', { zlib: { level: 6 } })
+    const chunks: Buffer[] = []
+
+    await new Promise<void>((resolve, reject) => {
+      archive.on('data', (chunk: Buffer) => chunks.push(chunk))
+      archive.on('end', resolve)
+      archive.on('error', reject)
+      archive.on('warning', (warn) => logger.warn({ warn }, 'archiver warning'))
+
+      for (const file of files) {
+        archive.append(Buffer.from(file.content), { name: file.filePath })
+      }
+
+      archive.finalize().catch(reject)
+    })
+
+    const zipBuffer = Buffer.concat(chunks)
+    res.setHeader('Content-Type', 'application/zip')
+    res.setHeader('Content-Disposition', `attachment; filename="${asciiName}-v${versionNumber}-code.zip"; filename*=UTF-8''${encodedName}`)
+    res.setHeader('Content-Length', String(zipBuffer.length))
+    res.send(zipBuffer)
+  } catch (error) {
+    const msg = error instanceof Error ? error.message : String(error)
+    logger.error({ err: error }, `下載版本代碼失敗: ${msg}`)
+    if (!res.headersSent) {
+      res.status(500).json({ error: `Failed to download version code: ${msg}` })
     }
   }
 })

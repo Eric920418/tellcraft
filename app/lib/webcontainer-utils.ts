@@ -570,7 +570,7 @@ function setFileInTree(tree: FileSystemTree, filePath: string, contents: string)
 /**
  * Inject edit bridge <Script> tag into layout.tsx content
  */
-function injectEditBridge(layoutContent: string): string {
+export function injectEditBridge(layoutContent: string): string {
   // If layout already has the edit bridge, skip
   if (layoutContent.includes('edit-bridge.js')) return layoutContent
 
@@ -837,7 +837,11 @@ export function diffFiles(
     const oldContent = oldMap.get(file.path)
     if (oldContent !== file.content) {
       const path = file.path.startsWith('/') ? file.path.slice(1) : file.path
-      changes[path] = sanitizeFileContent(path, file.content)
+      let content = sanitizeFileContent(path, file.content)
+      if (path === 'app/layout.tsx' || path.endsWith('/layout.tsx')) {
+        content = injectEditBridge(content)
+      }
+      changes[path] = content
     }
   }
 

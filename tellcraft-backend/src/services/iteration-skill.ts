@@ -9,7 +9,7 @@ import { createLogger } from '../lib/logger'
 
 const logger = createLogger('iteration-skill')
 import type { FlowState } from '../types/flow-state'
-import { sendMessage, saveFlowState, getFlowState, generatedCodeToFileRows, deductCredits, makeStreamingCallback } from '../workers/orchestrator-utils'
+import { sendMessage, saveFlowState, getFlowState, generatedCodeToFileRows, deductCredits, makeStreamingCallback, snapshotCodeToGeneration } from '../workers/orchestrator-utils'
 import { CREDIT_COSTS } from '../config/plans'
 import { refineCode, refineFullStackCode, generateTailwindConfig, GeneratedComponent, buildStreamingHandler } from './uiux-generation'
 import { listProjectDeployments, rollbackToDeployment, toVercelSlug } from './deployer'
@@ -371,6 +371,14 @@ ${enrichedFeedback}`
           await db.upsertProjectFiles(pid, 'coder', backendRows)
         }
 
+        // 快照代碼到 generation
+        if (pid) {
+          await snapshotCodeToGeneration(pid, {
+            changeSummary: `迭代修改 #${(state.iterationCount || 0) + 1}`,
+            conversationId: input.conversationId,
+          })
+        }
+
         // 記錄歷史
         changedFiles = [
           ...(fsResult.pages || []).map(p => p.path),
@@ -455,6 +463,10 @@ ${enrichedFeedback}`
       if (pid) {
         await db.upsertProjectFiles(pid, 'uiux',
           generatedCodeToFileRows(updatedCode, state.uiuxDesignSystem))
+        await snapshotCodeToGeneration(pid, {
+          changeSummary: `迭代修改 #${state.iterationCount || 1}`,
+          conversationId: input.conversationId,
+        })
       }
     }
 
@@ -567,6 +579,10 @@ export async function executeUndoIteration(input: {
     if (pid && state.uiuxGeneratedCode) {
       await db.upsertProjectFiles(pid, 'uiux',
         generatedCodeToFileRows(state.uiuxGeneratedCode, state.uiuxDesignSystem))
+      await snapshotCodeToGeneration(pid, {
+        changeSummary: '撤銷迭代修改',
+        conversationId,
+      })
     }
 
     await saveFlowState(redis, conversationId, state)

@@ -9,7 +9,7 @@ import * as db from '../../db/client'
 import type { FlowState } from '../../types/flow-state'
 import type { GeneratedComponent } from '../../services/uiux-generation'
 import { prepareDeployment, executeDeployment, type SiteMetadata } from '../../services/deployer'
-import { sendMessage, saveFlowState, getFlowState, deductCredits } from '../orchestrator-utils'
+import { sendMessage, saveFlowState, getFlowState, deductCredits, snapshotCodeToGeneration } from '../orchestrator-utils'
 import { CREDIT_COSTS } from '../../config/plans'
 import { createLogger } from '../../lib/logger'
 import { buildPostDeployFastBuildQuickReplies, getRemainingFastBuildPages } from './fast-build-phases'
@@ -182,6 +182,15 @@ export async function handleDeployExecute(
     state.deployerPreCheck = undefined
     state.phase = 'deployer_complete'
     await saveFlowState(redis, conversationId, state)
+
+    // 快照代碼到 generation（部署後的代碼可能經過 build 修復，是最終確認版本）
+    const deployProjectId = state.projectId || projectId
+    if (deployProjectId) {
+      await snapshotCodeToGeneration(deployProjectId, {
+        changeSummary: '部署成功',
+        conversationId,
+      })
+    }
 
     // Credit 扣除：Deploy 額外成本
     if (state.userId) {

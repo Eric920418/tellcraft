@@ -392,6 +392,66 @@ export function generatedCodeToFileRows(
 }
 
 // ============================================================
+// 代碼快照：保存當前 project_files 到最新 generation 記錄
+// ============================================================
+
+/**
+ * 快照當前 project_files 到最新的 generation 記錄。
+ * - 總是覆蓋最新 generation 的 code_snapshot
+ * - 如果沒有 generation 記錄（Fast Build 跳過 BDD），自動創建一筆
+ * - 失敗不阻塞主流程（try/catch + warn log）
+ */
+export async function snapshotCodeToGeneration(
+  projectId: string,
+  options?: { changeSummary?: string; conversationId?: string }
+): Promise<void> {
+  try {
+    const files = await db.getProjectFiles(projectId)
+    if (files.length === 0) return
+
+    const snapshot = files.map(f => ({
+      filePath: f.file_path,
+      content: f.content,
+      skillSource: f.skill_source,
+      fileType: f.file_type,
+    }))
+
+    const snapshotJson = JSON.stringify(snapshot)
+
+    // 嘗試更新最新 generation 的 code_snapshot（總是覆蓋）
+    const updated = await db.query(
+      `UPDATE generations SET code_snapshot = $1, updated_at = NOW()
+       WHERE project_id = $2
+       AND version_number = (SELECT MAX(version_number) FROM generations WHERE project_id = $2)`,
+      [snapshotJson, projectId]
+    )
+
+    // 如果沒有 generation 記錄（Fast Build 跳過 BDD），自動創建
+    if (updated.rowCount === 0) {
+      await db.query(
+        `INSERT INTO generations (
+           id, project_id, status, attempt_count,
+           version_number, conversation_id,
+           change_summary, code_snapshot,
+           created_at, updated_at
+         ) VALUES ($1, $2, 'success', 1, 1, $3, $4, $5, NOW(), NOW())`,
+        [
+          crypto.randomUUID(),
+          projectId,
+          options?.conversationId || null,
+          options?.changeSummary || null,
+          snapshotJson,
+        ]
+      )
+    }
+
+    logger.info({ projectId, fileCount: files.length }, '代碼快照已保存')
+  } catch (err) {
+    logger.warn({ err, projectId }, '代碼快照保存失敗（不影響主流程）')
+  }
+}
+
+// ============================================================
 // Credit 扣除
 // ============================================================
 

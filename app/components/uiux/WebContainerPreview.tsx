@@ -7,6 +7,7 @@ import {
   buildWebContainerFiles,
   buildSkeletonFiles,
   diffFiles,
+  injectEditBridge,
   isWebContainerSupported,
   prepareCss,
   sanitizeFileContent,
@@ -257,21 +258,16 @@ export default function WebContainerPreview({
     if (!hasFullMountRef.current) {
       // 第一次 ready：完整寫入所有檔案（initialFiles 可能用了 skeleton 或不完整的 capture）
       hasFullMountRef.current = true
-      const input: WebContainerFilesInput = {
-        pages, components, styles, tailwindConfig,
-        serverActions, apiRoutes, dbLib, neonConnectionString,
-      }
-      const fullTree = buildWebContainerFiles(input)
-      // mount 會覆蓋整個 fs，比 writeFiles 更乾淨
-      const container = (window as unknown as Record<string, unknown>).__wcContainer
-      if (container && typeof (container as { mount?: unknown }).mount === 'function') {
-        // Can't access container from here, use writeFiles instead
-      }
       // 用 writeFiles 逐一寫入（sanitize 修復 LLM 常見語法錯誤）
       const flatFiles: Record<string, string> = {}
       for (const f of [...pages, ...components, ...(serverActions || []), ...(apiRoutes || []), ...(dbLib || [])]) {
         const p = f.path.startsWith('/') ? f.path.slice(1) : f.path
-        flatFiles[p] = sanitizeFileContent(p, f.content)
+        let content = sanitizeFileContent(p, f.content)
+        // layout 必須注入 edit-bridge Script tag，否則編輯模式無法運作
+        if (p === 'app/layout.tsx' || p.endsWith('/layout.tsx')) {
+          content = injectEditBridge(content)
+        }
+        flatFiles[p] = content
       }
       if (styles) flatFiles['app/globals.css'] = prepareCss(styles, !!tailwindConfig)
       if (tailwindConfig) flatFiles['tailwind.config.ts'] = tailwindConfig

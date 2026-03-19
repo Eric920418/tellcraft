@@ -233,7 +233,7 @@ export default function ChatPreviewPanel({
       <div style={{ height: '100%', display: 'flex', flexDirection: 'column', position: 'relative' }}>
         {/* 生成中 overlay：WebContainer 繼續掛載接收 HMR，但被等待畫面遮住 */}
         {isUiuxPipelineGenerating && (
-          <div style={{ position: 'absolute', inset: 0, zIndex: 50 }}>
+          <div style={{ position: 'absolute', inset: 0, zIndex: 50, pointerEvents: 'none' }}>
             <AIGenerationWaitingScene
               stage={lastGeneratingMsg?.stage}
               progress={lastGeneratingMsg?.progress}

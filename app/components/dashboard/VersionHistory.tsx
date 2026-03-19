@@ -14,6 +14,7 @@ interface Version {
   conversationId: string | null
   createdAt: string
   hasBackup: boolean
+  hasCodeSnapshot: boolean
 }
 
 interface VersionHistoryProps {
@@ -52,6 +53,7 @@ export function VersionHistory({ projectId, token, onError }: VersionHistoryProp
     featuresDiff: Array<{ name: string; status: string; diff?: string }>
   } | null>(null)
   const [isRollingBack, setIsRollingBack] = useState(false)
+  const [isDownloading, setIsDownloading] = useState<number | null>(null)
 
   // 載入版本歷史
   useEffect(() => {
@@ -138,6 +140,35 @@ export function VersionHistory({ projectId, token, onError }: VersionHistoryProp
 
     setIsRollingBack(false)
     setShowRollbackConfirm(null)
+  }
+
+  // 下載版本代碼
+  const handleDownloadVersion = async (versionNumber: number) => {
+    setIsDownloading(versionNumber)
+    try {
+      const res = await fetch(
+        `/api/projects/${projectId}/versions/${versionNumber}/download-code`,
+        { headers: { Authorization: `Bearer ${token}` } }
+      )
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}))
+        onError?.(err.error || t('versionDownloadFailed'))
+        return
+      }
+      const blob = await res.blob()
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `v${versionNumber}-code.zip`
+      document.body.appendChild(a)
+      a.click()
+      document.body.removeChild(a)
+      URL.revokeObjectURL(url)
+    } catch {
+      onError?.(t('versionDownloadFailed'))
+    } finally {
+      setIsDownloading(null)
+    }
   }
 
   if (isLoading) {
@@ -343,6 +374,30 @@ export function VersionHistory({ projectId, token, onError }: VersionHistoryProp
                   >
                     {selectedForCompare.includes(version.versionNumber) ? t('versionCompareSelected') : t('versionCompareSelect')}
                   </button>
+
+                  {/* 下載代碼按鈕 */}
+                  {version.hasCodeSnapshot && (
+                    <button
+                      onClick={() => handleDownloadVersion(version.versionNumber)}
+                      disabled={isDownloading === version.versionNumber}
+                      style={{
+                        padding: '4px 8px',
+                        fontSize: 11,
+                        background: 'transparent',
+                        color: isDownloading === version.versionNumber
+                          ? 'var(--gray-400)'
+                          : 'var(--gray-600)',
+                        border: '1px solid var(--border-color)',
+                        cursor: isDownloading === version.versionNumber
+                          ? 'not-allowed'
+                          : 'pointer',
+                      }}
+                    >
+                      {isDownloading === version.versionNumber
+                        ? t('versionDownloading')
+                        : t('versionDownloadCode')}
+                    </button>
+                  )}
 
                   {/* 回滾按鈕 */}
                   {version.hasBackup && index > 0 && (
