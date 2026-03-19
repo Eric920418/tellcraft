@@ -392,6 +392,7 @@ Feature 註解：`# Action: actionName` + `# [METHOD] /path` + `# Summary: xxx`
 - **Formulation checkpoint 每 3 個 feature 保存一次**：中斷恢復時跳過已完成的 feature，成功後必須清理所有 `formulation*` 暫存欄位
 - **DB 連線池**：`max: 15`（非 50）+ `keepAlive: true`，防止 PostgreSQL 斷開空閒連線。可用 `DB_POOL_MAX` 環境變數覆蓋
 - **Feature 驗證腳本用 `tsx` 不是 `ts-node`**：`feature-validation.ts` 的 `runScript()` 用 `npx tsx`。腳本解析失敗時視為通過（不觸發無效 LLM 修復循環），stderr/exitCode 會完整記錄供除錯
+- **Feature Dry-Run（SDD RED phase）**：`feature-dry-run.ts` 在 BDD spec_completed 之前、Neon provisioning 之後，用真實 Neon DB 執行 Feature 的 entity_setup 步驟。驗證 entity/column/VAR 格式對真實 DB 是否正確。失敗觸發 LLM 修復（最多 2 輪）。跳過 api_call/response_validate（Coder 還沒生成後端）。復用 specformula-runner 的容錯修正層（fixDataTableBySchema/fillMissingNotNullColumns/ensureFkReferencesExist）
 - **Neon provisioning 是同步的（< 10s）**：任何失敗都不阻塞 UIUX 或部署流程。Deployer 直接 SELECT `neon_connection_string` FROM projects 注入 DATABASE_URL，無需 Redis polling
 - **`streamLlmMessage` vs `sendMessage`**：LLM 生成的對話文字用 `streamLlmMessage`（後端 SDK streaming + Socket.io 事件，為未來 WSS 準備），模板文字/進度/richContent 用 `sendMessage`。`streamLlmMessage` 失敗時自動降級為 `sendMessage`。前端透過 polling 拿到完整訊息後在 `ChatMessageItem` 內做打字機動畫（`isTypewriterTarget` prop + `onTypewriterComplete` callback）
 - **`identifyMockDataComponents` 用 Haiku LLM 識別**：一次 batch call 發送所有組件摘要 + availableActions 列表，Haiku 回傳需改寫的組件 indices。失敗自動降級到 regex fallback。Haiku 能區分「業務假資料」vs「UI 結構靜態配置」，regex 做不到。System prompt 明確列出不需改寫的類型（nav items、footer、feature lists）

@@ -40,11 +40,24 @@ function parseEntityMapping(entityMapping: string): Map<string, string> {
   return map
 }
 
+/** 解析 entity mapping（中文 → table name），供外部驗證用 */
+export function parseEntityToTableMapping(entityMapping: string): Map<string, string> {
+  const map = new Map<string, string>() // chinese → english_table
+  const lines = entityMapping.split('\n')
+  for (const line of lines) {
+    const match = line.match(/[-\s]*(.+?):\s*(\w+)/)
+    if (match && match[1] && match[2] && match[1] !== 'entity_to_table_mapping') {
+      map.set(match[1].trim(), match[2].trim().toLowerCase())
+    }
+  }
+  return map
+}
+
 // ============================================================
 // SQL 解析 + 轉換
 // ============================================================
 
-interface ParsedTable {
+export interface ParsedTable {
   tableName: string
   originalBlock: string
   columns: string[]
@@ -83,7 +96,7 @@ function splitColumnsBalanced(body: string): string[] {
   return parts
 }
 
-function parseCreateTables(schemaSql: string): ParsedTable[] {
+export function parseCreateTables(schemaSql: string): ParsedTable[] {
   const tables: ParsedTable[] = []
   // 支持 MySQL TABLE COMMENT 語法：) COMMENT '...'; 或直接 );
   const regex = /CREATE\s+TABLE\s+(\w+)\s*\(([\s\S]*?)\)\s*(?:COMMENT\s+'[^']*')?\s*;/gi

@@ -2952,6 +2952,82 @@ export async function completeSpecPhase(
     logger.warn({ err }, 'Neon provisioning 失敗，降級跳過')
   }
 
+  // ============================================================
+  // Step 5/5: Feature Dry-Run（entity_setup 對真實 DB 驗證）
+  // 在 Neon DB 建好後、spec_completed 之前執行
+  // ============================================================
+  try {
+    if (features.length > 0 && state.dbProvisionStatus === 'completed' && state.projectId) {
+      const neonRow = await db.query<{ neon_connection_string: string }>(
+        'SELECT neon_connection_string FROM projects WHERE id = $1 AND neon_connection_string IS NOT NULL',
+        [state.projectId]
+      )
+      if (neonRow.rows[0]?.neon_connection_string) {
+        await sendMessage(conversationId, io, {
+          content: '驗證 BDD 規格與資料庫一致性...',
+          stage: 'spec_dry_run',
+          progress: { current: 3, total: 3, step: '規格驗證' },
+        })
+
+        const { runFeatureDryRun } = await import('../../services/feature-dry-run')
+        let dryRunResult = await runFeatureDryRun({
+          features: features.map(f => ({ name: f.name, actionName: f.actionName, content: f.content })),
+          schemaSql,
+          entityMapping,
+          neonConnectionString: neonRow.rows[0].neon_connection_string,
+        })
+
+        // Dry-run 失敗 → LLM 修復 → 重跑（最多 2 輪）
+        if (!dryRunResult.passed) {
+          for (let round = 0; round < 2; round++) {
+            logger.info({ round: round + 1, failedCount: dryRunResult.failedFeatures.length }, 'Dry-run 失敗，嘗試修復...')
+            const fixInput = dryRunResult.failedFeatures.map(f => ({
+              name: f.name,
+              actionName: features.find(feat => feat.name === f.name)?.actionName || '',
+              content: features.find(feat => feat.name === f.name)?.content || '',
+              issues: f.errors,
+            }))
+
+            const dryRunResolvedItems = session.data?.resolvedItems || []
+            const fixResult = await fixMultipleFeatures(fixInput, dryRunResolvedItems, schemaSql, entityMapping, trackingContext)
+            if (!fixResult.success || !fixResult.fixedFeatures) break
+
+            // 更新 features 陣列
+            for (const fixed of fixResult.fixedFeatures) {
+              const idx = features.findIndex(f => f.name === fixed.name)
+              if (idx >= 0) {
+                features[idx] = { ...features[idx], content: fixed.content }
+              }
+            }
+
+            // 重跑 dry-run
+            dryRunResult = await runFeatureDryRun({
+              features: features.map(f => ({ name: f.name, actionName: f.actionName, content: f.content })),
+              schemaSql,
+              entityMapping,
+              neonConnectionString: neonRow.rows[0].neon_connection_string,
+            })
+            if (dryRunResult.passed) {
+              // 修復成功，更新 DB 中的 features
+              await updateBddSession({
+                sessionId: state.sessionId!,
+                updates: { featuresContent: features },
+              })
+              logger.info({ round: round + 1 }, 'Dry-run 修復後通過')
+              break
+            }
+          }
+
+          if (!dryRunResult.passed) {
+            logger.warn({ failedCount: dryRunResult.failedFeatures.length, summary: dryRunResult.summary }, 'Feature dry-run 修復後仍有失敗')
+          }
+        }
+      }
+    }
+  } catch (err) {
+    logger.warn({ err }, 'Feature dry-run 失敗，降級跳過')
+  }
+
   // 更新 session 為 spec_completed
   await updateBddSession({
     sessionId: state.sessionId!,

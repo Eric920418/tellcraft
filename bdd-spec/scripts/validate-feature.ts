@@ -65,6 +65,9 @@ const ERROR_CODES = {
   NO_EXAMPLE: 'E008',
   RULE_WITHOUT_EXAMPLE: 'E009',
   DUPLICATE_RULE: 'E010',
+  VAR_CONTEXT_WITHOUT_EXECUTION: 'E011',
+  VAR_EXECUTION_WITHOUT_CONTEXT: 'E012',
+  DATATABLE_EMPTY_DATA: 'E013',
 }
 
 const WARNING_CODES = {
@@ -332,6 +335,80 @@ function validateFeatureFile(filePath: string): ValidationResult {
       message: '沒有 Background 區塊（建議用於設置共用測試資料）',
     })
   }
+
+  // 11. VAR-System DataTable 對齊驗證（E011-E013）
+  // 找出所有 DataTable（連續的 | 開頭行），檢查 > / < 配對
+  let tableStartLine = -1
+  let tableLines: { content: string; lineNum: number }[] = []
+
+  const flushTable = () => {
+    if (tableLines.length < 2) { tableLines = []; return } // 至少 header + 1 data row
+
+    // 解析 header
+    const headerCells = tableLines[0].content.split('|').map(c => c.trim()).filter(Boolean)
+
+    // 檢查每個 data row
+    for (let rowIdx = 1; rowIdx < tableLines.length; rowIdx++) {
+      const dataCells = tableLines[rowIdx].content.split('|').map(c => c.trim()).filter(Boolean)
+
+      // E011: Header 有 >contextKey 但 data 不是 <executionKey
+      for (let col = 0; col < headerCells.length && col < dataCells.length; col++) {
+        if (headerCells[col].startsWith('>')) {
+          if (dataCells[col] && !dataCells[col].startsWith('<') && !dataCells[col].startsWith('$')) {
+            result.valid = false
+            result.errors.push({
+              code: ERROR_CODES.VAR_CONTEXT_WITHOUT_EXECUTION,
+              message: `Header 有 >${headerCells[col].substring(1)}，但 data row 對應位置不是 <executionKey 或 $variable（實際值：${dataCells[col]}）`,
+              line: tableLines[rowIdx].lineNum,
+              suggestion: `data row 第 ${col + 1} 欄應改為 <executionKeyName 格式`,
+            })
+          }
+        }
+      }
+
+      // E012: Data 有 <executionKey 但 header 沒有 >contextKey
+      for (let col = 0; col < dataCells.length && col < headerCells.length; col++) {
+        if (dataCells[col].startsWith('<')) {
+          if (!headerCells[col].startsWith('>')) {
+            result.valid = false
+            result.errors.push({
+              code: ERROR_CODES.VAR_EXECUTION_WITHOUT_CONTEXT,
+              message: `Data row 有 <${dataCells[col].substring(1)}，但 header 對應位置沒有 >contextKey（header 值：${headerCells[col]}）`,
+              line: tableLines[rowIdx].lineNum,
+              suggestion: `header 第 ${col + 1} 欄應改為 >ContextName.field 格式`,
+            })
+          }
+        }
+      }
+
+      // E013: Entity setup DataTable data row 全空
+      const isEntitySetup = tableStartLine > 0 && lines[tableStartLine - 1]?.trim().match(/準備一個/)
+      if (isEntitySetup) {
+        const nonEmptyCells = dataCells.filter(c => c !== '' && !c.startsWith('>'))
+        if (nonEmptyCells.length === 0) {
+          result.valid = false
+          result.errors.push({
+            code: ERROR_CODES.DATATABLE_EMPTY_DATA,
+            message: 'Entity 準備的 DataTable data row 沒有有效資料欄位',
+            line: tableLines[rowIdx].lineNum,
+            suggestion: 'DataTable 的 data row 至少要有一個非空欄位值',
+          })
+        }
+      }
+    }
+
+    tableLines = []
+  }
+
+  lines.forEach((line, index) => {
+    if (line.trim().startsWith('|')) {
+      if (tableLines.length === 0) tableStartLine = index
+      tableLines.push({ content: line, lineNum: index + 1 })
+    } else {
+      if (tableLines.length > 0) flushTable()
+    }
+  })
+  if (tableLines.length > 0) flushTable()
 
   // 更新 valid 狀態
   result.valid = result.errors.length === 0

@@ -5,6 +5,7 @@ import { fixMultipleFeatures, FeatureFixInput } from './formulation'
 import { ClarifyItem } from './bdd-session'
 import { LlmTrackingContext } from './classifier'
 import { createLogger } from '../lib/logger'
+import { parseCreateTables, parseEntityToTableMapping } from './schema-derivation'
 
 const logger = createLogger('feature-validation')
 
@@ -73,6 +74,158 @@ function cleanupTmpDir(tmpDir: string): void {
 }
 
 // ============================================================
+// VAR-System 對齊快檢（內建，不依賴外部腳本）
+// ============================================================
+
+function checkVarAlignment(content: string, featureName: string): string[] {
+  const errors: string[] = []
+  const lines = content.split('\n')
+  let tableLines: string[] = []
+  let tableStartIdx = -1
+
+  const flushTable = () => {
+    if (tableLines.length < 2) { tableLines = []; return }
+
+    const parseRow = (line: string) => line.split('|').map(c => c.trim()).filter(Boolean)
+    const headerCells = parseRow(tableLines[0])
+    for (let rowIdx = 1; rowIdx < tableLines.length; rowIdx++) {
+      const dataCells = parseRow(tableLines[rowIdx])
+      for (let col = 0; col < Math.min(headerCells.length, dataCells.length); col++) {
+        // E011: Header >contextKey 但 data 不是 <executionKey
+        if (headerCells[col].startsWith('>') && dataCells[col] && !dataCells[col].startsWith('<') && !dataCells[col].startsWith('$')) {
+          errors.push(`[${featureName}] L${tableStartIdx + rowIdx + 1}: Header >${headerCells[col].substring(1)} 對應的 data 不是 <executionKey（實際值：${dataCells[col]}）`)
+        }
+        // E012: Data <executionKey 但 header 沒有 >contextKey
+        if (dataCells[col].startsWith('<') && !headerCells[col].startsWith('>')) {
+          errors.push(`[${featureName}] L${tableStartIdx + rowIdx + 1}: Data <${dataCells[col].substring(1)} 但 header 沒有 >contextKey（header：${headerCells[col]}）`)
+        }
+      }
+    }
+    tableLines = []
+  }
+
+  lines.forEach((line, idx) => {
+    if (line.trim().startsWith('|')) {
+      if (tableLines.length === 0) tableStartIdx = idx
+      tableLines.push(line)
+    } else {
+      if (tableLines.length > 0) flushTable()
+    }
+  })
+  if (tableLines.length > 0) flushTable()
+
+  return errors
+}
+
+// ============================================================
+// Schema-Aware Feature 靜態分析（三層檢查）
+// ============================================================
+
+function checkFeatureSchemaAlignment(
+  content: string,
+  featureName: string,
+  schemaSql: string,
+  entityMapping: string
+): string[] {
+  const errors: string[] = []
+  const lines = content.split('\n')
+
+  // 解析 schema
+  const entityToTable = parseEntityToTableMapping(entityMapping)
+  const tables = parseCreateTables(schemaSql)
+
+  // 建立 table → column names 映射
+  const tableColumns = new Map<string, Set<string>>()
+  for (const table of tables) {
+    const cols = new Set<string>()
+    for (const colDef of table.columns) {
+      // 取 column 定義的第一個 word 作為 column name（跳過 CONSTRAINT/PRIMARY KEY 等）
+      const trimmed = colDef.trim()
+      if (/^\s*CONSTRAINT\s/i.test(trimmed) || /^\s*PRIMARY\s+KEY/i.test(trimmed) || /^\s*UNIQUE\s/i.test(trimmed) || /^\s*CHECK\s/i.test(trimmed) || /^\s*FOREIGN\s/i.test(trimmed)) continue
+      const colNameMatch = trimmed.match(/^(\w+)\s+/)
+      if (colNameMatch) {
+        cols.add(colNameMatch[1].toLowerCase())
+      }
+    }
+    tableColumns.set(table.tableName.toLowerCase(), cols)
+  }
+
+  // === Layer 1 + 2: Entity 存在性 + Column 存在性 ===
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i].trim()
+    // 匹配 `準備一個X` 或 `應該存在一個X` 或 `應該不存在一個X`
+    const entityMatch = line.match(/(?:準備一個|應該存在一個|應該不存在一個)([\u4e00-\u9fffa-zA-Z0-9_]+)/)
+    if (!entityMatch) continue
+
+    const entityName = entityMatch[1]
+    const tableName = entityToTable.get(entityName)
+
+    // Layer 1: Entity 不存在
+    if (!tableName) {
+      errors.push(`[${featureName}] L${i + 1}: Entity「${entityName}」不在 entity_to_table_mapping 中（可能不存在於 Schema）`)
+      continue
+    }
+
+    const cols = tableColumns.get(tableName.toLowerCase())
+    if (!cols) {
+      errors.push(`[${featureName}] L${i + 1}: Entity「${entityName}」映射到 table「${tableName}」，但 Schema 中沒有此表`)
+      continue
+    }
+
+    // Layer 2: 找後面的 DataTable header，檢查欄位
+    // 向下搜尋 DataTable（| 開頭的行）
+    let headerLine = ''
+    for (let j = i + 1; j < lines.length && j <= i + 3; j++) {
+      if (lines[j].trim().startsWith('|')) {
+        headerLine = lines[j]
+        break
+      }
+    }
+    if (!headerLine) continue
+
+    const headers = headerLine.split('|').map(c => c.trim()).filter(Boolean)
+    for (const header of headers) {
+      // 跳過 VAR-System 前綴
+      if (header.startsWith('>') || header.startsWith('<') || header.startsWith('$')) continue
+      // camelCase → snake_case
+      const snake = header.replace(/([a-z])([A-Z])/g, '$1_$2').toLowerCase()
+      if (!cols.has(snake) && !cols.has(header.toLowerCase())) {
+        errors.push(`[${featureName}] L${i + 1}: Entity「${entityName}」(table: ${tableName}) 沒有欄位「${header}」（snake_case: ${snake}）`)
+      }
+    }
+  }
+
+  // === Layer 3: VAR 變數流 — 宣告/引用比對 ===
+  const declaredVars = new Set<string>()
+
+  // 掃描所有 >ContextName.field 宣告
+  const declarePattern = />\s*([\w.]+)/g
+  let match: RegExpExecArray | null
+  while ((match = declarePattern.exec(content)) !== null) {
+    // >User.id → "User" (只取 ContextName，不含 .field)
+    const contextName = match[1].split('.')[0]
+    declaredVars.add(contextName)
+  }
+
+  // 掃描所有 $ContextName.field 引用，檢查 ContextName 是否已宣告
+  const refPattern = /\$\s*([\w.]+)/g
+  while ((match = refPattern.exec(content)) !== null) {
+    const fullRef = match[1]
+    // 跳過 $notnull（特殊值）
+    if (fullRef === 'notnull') continue
+    const contextName = fullRef.split('.')[0]
+    if (!declaredVars.has(contextName)) {
+      // 找到 line number
+      const beforeMatch = content.substring(0, match.index)
+      const lineNum = (beforeMatch.match(/\n/g) || []).length + 1
+      errors.push(`[${featureName}] L${lineNum}: 引用 $${fullRef}，但「${contextName}」從未被 > 宣告`)
+    }
+  }
+
+  return errors
+}
+
+// ============================================================
 // 腳本路徑（相對於專案根目錄）
 // ============================================================
 
@@ -137,7 +290,9 @@ function parseValidateOutput(stdout: string): ValidateSummary | null {
  * 驗證 Feature Files（不修復）
  */
 export async function validateFeatures(
-  features: FeatureInput[]
+  features: FeatureInput[],
+  schemaSql?: string,
+  entityMapping?: string
 ): Promise<FeatureValidationResult> {
   if (features.length === 0) {
     return { lintPassed: true, validatePassed: true, errors: [] }
@@ -148,6 +303,20 @@ export async function validateFeatures(
     writeFeaturesToTmp(tmpDir, features)
 
     const allErrors: string[] = []
+
+    // Step 0: 內建 VAR-System 對齊快檢（不依賴外部腳本）
+    for (const feature of features) {
+      const varErrors = checkVarAlignment(feature.content, feature.name)
+      allErrors.push(...varErrors)
+    }
+
+    // Step 0.5: Schema-Aware 靜態分析（entity/column/VAR 流）
+    if (schemaSql && entityMapping) {
+      for (const feature of features) {
+        const schemaErrors = checkFeatureSchemaAlignment(feature.content, feature.name, schemaSql, entityMapping)
+        allErrors.push(...schemaErrors)
+      }
+    }
 
     // Step 1: ISA Format Lint
     const lintResult = runScript(LINT_SCRIPT, tmpDir)
@@ -206,9 +375,9 @@ export async function validateAndFixFeatures(
   let lastResult: FeatureValidationResult = { lintPassed: true, validatePassed: true, errors: [] }
 
   for (let round = 0; round < MAX_FIX_ROUNDS; round++) {
-    lastResult = await validateFeatures(currentFeatures)
+    lastResult = await validateFeatures(currentFeatures, schemaSql, entityMapping)
 
-    if (lastResult.lintPassed && lastResult.validatePassed) {
+    if (lastResult.lintPassed && lastResult.validatePassed && lastResult.errors.length === 0) {
       logger.info({ round: round + 1 }, '驗證通過')
       return {
         success: true,

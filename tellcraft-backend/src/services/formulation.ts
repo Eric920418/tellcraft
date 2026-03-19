@@ -687,6 +687,13 @@ Feature: ${featureInfo.name}
 - 邊界條件要有對應的 Example
 - 使用 Entity Mapping 中的中文實體名
 - **必須使用 VAR 系統**：\`>contextKey\` 在 Given 宣告、\`$variable\` 引用、\`<executionKey\` 捕捉結果，禁止硬編碼 UUID
+- **VAR 對齊規則（關鍵 ⚠️）**：
+  - DataTable 中 Header 有 \`>contextKey\` → 同一欄的 Data **必須**是 \`<executionKey\`（配對捕獲）
+  - Data 有 \`<executionKey\` → 同一欄的 Header **必須**有 \`>contextKey\`
+  - 正確：\`| >User.id | name |\` → \`| <userId | "John" |\`
+  - 錯誤：\`| >User.id | name |\` → \`| email | "John" |\`（data 缺 \`<\` 前綴）
+  - 錯誤：\`| id | name |\` → \`| <userId | "John" |\`（header 缺 \`>\` 前綴）
+  - Entity 準備（\`準備一個\`）的 DataTable data row **至少要有一個非空欄位值**，不可全空
 - **When 必須有 Actor 前綴**：\`(No Actor)\` 或 \`(UID="$var")\`
 - **Then 成功必須有 HTTP status code**：\`{summary}(201)回應, with table:\`
 - **Entity 驗證**：使用 \`應該存在一個\`（非舊的「存在一個」）
@@ -696,6 +703,8 @@ Feature: ${featureInfo.name}
   - 布林值用 true/false，列舉值用原始大寫（如 PENDING、ACTIVE）
   - 禁止模糊描述（如「某商品」「一些數量」），必須用具體值
 - **無腦補原則**：嚴格按需求和決策來，不擅自添加需求中沒提到的欄位或功能
+- **Entity 必須存在於 Schema**：\`準備一個{entity}\` 和 \`應該存在一個{entity}\` 的 entity 名稱必須是 Schema 中已定義的資料表（透過 Entity Mapping 映射）。禁止發明 Schema 中不存在的 table（如 Schema 沒有 sessions 表就不能 \`準備一個sessions\`）
+- **DataTable 欄位必須存在於 Schema**：DataTable 的 header 欄位名稱（camelCase）必須能映射到對應 table 的實際 column name（snake_case）。禁止使用 Schema 中不存在的欄位
 
 ## Scenario Outline（合併同模式的參數驗證）
 當多個 Example 共享同一驗證模式（例如「缺少必要參數 → 失敗」），**可以考慮**使用 Scenario Outline 合併：
@@ -991,6 +1000,9 @@ export async function fixMultipleFeatures(
 8. Entity 驗證格式：\`應該存在一個{entity}, with table:\` 或 \`應該不存在一個{entity}, with table:\`
 9. Given 資料準備：\`準備一個{entity}, with table:\`
 10. VAR 系統：\`>contextKey\` 宣告、\`$variable\` 引用、\`<executionKey\` 捕捉
+11. **VAR 對齊規則**：Header 有 \`>contextKey\` → 同一欄 Data **必須**是 \`<executionKey\`；Data 有 \`<executionKey\` → 同一欄 Header **必須**有 \`>contextKey\`。範例：\`| >User.id | name |\` → \`| <userId | "John" |\` ✅。\`| >User.id | name |\` → \`| email | "John" |\` ❌
+12. Entity 準備（\`準備一個\`）的 DataTable data row **至少要有一個非空欄位值**，不可全空
+13. **DataTable 欄位必須存在於 Schema 中**：\`準備一個{entity}\` 的欄位名必須是對應資料表中的實際欄位（camelCase → snake_case 映射）
 
 ## 四類規則分類
 - **前置（狀態）**：系統既有狀態約束（如庫存>0）

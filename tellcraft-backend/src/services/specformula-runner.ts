@@ -166,32 +166,32 @@ function flattenLastResponse(scenarioContext: ScenarioContext): void {
 // Gherkin 解析（@cucumber/gherkin）
 // ============================================================
 
-interface ParsedStep {
+export interface ParsedStep {
   keyword: string   // 'Given ' | 'When ' | 'Then ' | 'And ' | 'But '
   text: string
   dataTable?: { headers: string[]; rows: Record<string, string>[] }
   docString?: string
 }
 
-interface ParsedScenario {
+export interface ParsedScenario {
   name: string
   steps: ParsedStep[]
   tags: string[]
 }
 
-interface ParsedRule {
+export interface ParsedRule {
   name: string
   scenarios: ParsedScenario[]
 }
 
-interface ParsedFeature {
+export interface ParsedFeature {
   name: string
   background?: ParsedStep[]
   rules: ParsedRule[]
   scenarios: ParsedScenario[]  // scenarios directly under feature (no rule)
 }
 
-async function parseFeatureFile(content: string): Promise<ParsedFeature> {
+export async function parseFeatureFile(content: string): Promise<ParsedFeature> {
   // Node 18 沒有全域 crypto（需要 19+ 或 --experimental-global-webcrypto）
   // @cucumber/messages IdGenerator.uuid() 內部呼叫 crypto.randomUUID()
   if (!globalThis.crypto) {
@@ -272,7 +272,7 @@ function extractScenario(gherkinScenario: any): ParsedScenario {
  * 策略：所有 2 欄 DataTable 一律轉置。
  * 理由：水平 2 欄表格的「0 資料行」解讀毫無意義；而 LLM 生成的 Feature 全部使用垂直格式。
  */
-function maybeTransposeVerticalDataTable(
+export function maybeTransposeVerticalDataTable(
   raw: string[][]
 ): { headers: string[]; rows: Record<string, string>[] } | null {
   if (raw[0].length !== 2) return null
@@ -385,7 +385,7 @@ function headerMatchesColumn(header: string, columnNames: Set<string>): boolean 
  * 對 entity_setup / entity_validate 的 DataTable 做 schema-aware 垂直格式偵測。
  * 如果 headers 大部分不匹配 DDL 欄位名，但轉置後大部分匹配，則自動轉置。
  */
-function fixDataTableBySchema(
+export function fixDataTableBySchema(
   dataTable: { headers: string[]; rows: Record<string, string>[] },
   entityName: string,
   schemas: DatabaseSchema[]
@@ -437,7 +437,7 @@ function fixDataTableBySchema(
  * 確保某個 entity 的 FK 欄位引用的行都存在。
  * 遞歸處理：如 episodes 引用 shows，shows 引用 users → 先建 users，再建 shows。
  */
-async function ensureFkReferencesExist(
+export async function ensureFkReferencesExist(
   dataTable: { headers: string[]; rows: Record<string, string>[] },
   entityName: string,
   schemas: DatabaseSchema[],
@@ -540,7 +540,7 @@ async function ensureFkReferencesExist(
  * entity_setup 前，自動補齊缺少的 NOT NULL（無 DEFAULT）欄位。
  * 避免 Feature file 因省略前置資料的非關鍵欄位而導致 INSERT 失敗。
  */
-function fillMissingNotNullColumns(
+export function fillMissingNotNullColumns(
   dataTable: { headers: string[]; rows: Record<string, string>[] },
   entityName: string,
   schemas: DatabaseSchema[]
@@ -1621,7 +1621,7 @@ export async function runAllFeatures(input: {
 // DDL 字串解析（不讀 filesystem）
 // ============================================================
 
-function parseSchemasFromString(schemaSql: string, entityMappingYml: string): DatabaseSchema[] {
+export function parseSchemasFromString(schemaSql: string, entityMappingYml: string): DatabaseSchema[] {
   // 寫入臨時目錄供 EntityDdlReader 使用
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'specformula-ddl-'))
   try {
