@@ -132,7 +132,7 @@ pm2 describe tellcraft-backend            # 詳細資訊（記憶體/重啟次�
 | **LLM 工具** | `app/lib/llm.ts` | ~2200 | LLM 呼叫封裝、prompt 工具 |
 | **VPS API Client** | `app/lib/vps-api.ts` | ~1900 | 前端呼叫 VPS 的 HTTP 客戶端 |
 | **Server Actions** | `app/actions/index.ts` | ~1800 | 對話/訊息/專案等 Server Actions 入口 |
-| **WebContainer 預覽** | `app/lib/webcontainer-utils.ts` + `app/components/uiux/WebContainerPreview.tsx` + `app/hooks/useWebContainer.ts` | | 預覽核心，WebContainers 跑完整 Node.js + Next.js dev server（支援 Server Actions + DB） |
+| **WebContainer 預覽** | `app/lib/webcontainer-utils.ts` + `app/components/uiux/WebContainerPreview.tsx` + `app/hooks/useWebContainer.ts` + `app/hooks/useWebContainerPreloader.ts` | | 預覽核心，WebContainers 跑完整 Node.js + Next.js dev server（支援 Server Actions + DB）。`useWebContainerPreloader` 在生成期間 pre-boot + pre-install BASE_DEPS，`writeFilesToContainer` 逐檔寫入避免 mount() 清除 node_modules |
 | **WebSocket Hook** | `app/hooks/useVpsWebSocket.ts` | | 即時訊息推送（型別定義） |
 | **Fast Build 動畫** | `app/components/FastBuildPlayer.tsx` + `app/components/remotion/fast-build/` | | Remotion + @remotion/three 3D 工廠流水線動畫（Structure/Animation/RWD 三站）|
 | **3D 蓋房子** | `app/components/building-scene/` + `app/components/remotion/building-scene/` | | Remotion + @remotion/three 低多邊形 3D 場景（BDD Q&A 視覺回饋）|
@@ -400,6 +400,7 @@ Feature 註解：`# Action: actionName` + `# [METHOD] /path` + `# Summary: xxx`
 - **`rewriteComponentForServerActions` maxTokens 上限 32768**：大組件（>1000 行）需要足夠 token。改寫後偵測 JSX 標籤平衡，截斷時回退原始組件
 - **Prompt caching system prompt 順序重要**：`buildCacheableSystemBlocks` 將 static 部分（tier philosophy + task definition + base rules）放在第一個 block 並加 `cache_control: { type: 'ephemeral' }`，dynamic 部分（mood、designSystem、constraints）放在第二個 block。修改 system prompt 時不要把 per-request 內容放進 static block，否則 cache hit 率歸零
 - **`FAST_BUILD_MERGED_ANIM_RWD` 只影響首批生成**：`isLaterBatch`（增量批次）仍用分離的 Animation + RWD，因為增量批次有特殊的 `buildIncrementalCode` 處理邏輯
+- **WebContainer preload 後禁止 `container.mount()`**：preloader 預裝 BASE_DEPS 到 node_modules，之後 `useWebContainer` hook 用 `writeFilesToContainer()` 逐檔寫入（不用 `mount()`）。`mount()` 會清除整個 fs 包括 node_modules。`restart()` 例外（用戶觸發的重啟允許 mount + 全量重裝）。`preloadPromise` 是 module-level，hook 自動偵測不需 prop drilling
 
 ## 核心原則
 

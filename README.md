@@ -503,7 +503,7 @@ Server Action 錯誤訊息 + 工具模組中文字串國際化（+117 keys，2 n
 | **品質** | Quality Gate 靜態檢查（含 SVG ID 碰撞偵測）、LLM 自動修復、RWD 響應式安全網、Tailwind v4→v3 轉換 |
 | **部署** | sanitize 7 類預檢（含 'use server' 保護 + 未知依賴警告）、本地 build 驗證（3 輪 LLM 修復）、Vercel 部署、版本回滾 |
 | **迭代** | 對話內迭代修改、撤銷上一步、部署歷史回滾、迭代歷史追蹤、重複抱怨偵測+策略升級、視覺診斷指引 |
-| **預覽** | WebContainers 完整 Next.js 預覽（Server Actions + DB 連線）、HMR 增量更新、裝置切換、編輯模式、圖片上傳 |
+| **預覽** | WebContainers 完整 Next.js 預覽（Server Actions + DB 連線）、HMR 增量更新、裝置切換、編輯模式、圖片上傳、Pre-boot + Pre-install 載入優化 |
 | **動畫** | BDD 需求藍圖面板（即時 Q&A 歷史視覺化）、3D 工廠流水線（Fast Build）、Remotion 驅動 |
 | **認證** | Google/LINE OAuth、JWT 雙軌（localStorage + Cookie）、訪客→帳號合併、帳號綁定（雙登入）、auth 頁面 i18n（next-intl） |
 | **儀表板** | 用戶統計、專案管理、版本歷史、管理員面板、LLM 用量追蹤（統一 PRICING + trackLlmUsage）、即時系統日誌監控（Socket.io tail -F）、Dashboard 元件 i18n（next-intl） |
@@ -549,6 +549,7 @@ app/
 │   ├── useChatPolling.ts # 消息輪詢（智慧退避 3s-15s）
 │   ├── useChatSession.ts # 會話初始化 + 對話切換
 │   ├── useLoginPrompt.ts # 登入提示觸發邏輯
+│   ├── useWebContainerPreloader.ts # WebContainer 預載（生成時 pre-boot + pre-install）
 │   ├── useAdminLogs.ts   # 管理員日誌串流 (Socket.io)
 │   ├── useLocalePath.ts  # locale-aware window.location.href
 │   └── useVpsWebSocket.ts # WebSocket
@@ -844,6 +845,8 @@ psql "$DATABASE_URL" -f tellcraft-backend/migrations/xxx.sql
 <summary><h2>開發更新紀錄（點擊展開）</h2></summary>
 
 ### 近期更新（2026-03-13 ~ 2026-03-19）
+
+- **WebContainer 載入優化**（03-19）：Pre-boot + Pre-install 機制 — 代碼生成期間自動預啟 WebContainer 並安裝 BASE_DEPS（next/react/tailwindcss 等 7 個核心包），生成完成時 node_modules 已就位，只需增量安裝額外依賴。`useWebContainerPreloader` 監聽生成階段觸發（`fast_generating`/`uiux_code_generation`/`uiux_variant_selection` 等），module-level singleton 跨對話復用。`writeFilesToContainer()` 逐檔寫入替代 `mount()`（後者會清除整個 fs 包括 node_modules）。預期首次預覽載入從 ~60s 降到 ~10-15s
 
 - **Coder Skill 完整性修復**（03-19）：(1) cookies() try-catch 修復 WebContainer WASM 的 AsyncLocalStorage 不完整問題；(2) SpecFormula BDD 規格驗證改為自動觸發（不再需要用戶手動點按鈕）；(3) E2E 測試停止隱藏失敗（softFail 機制，通知用戶但不阻塞）；(4) LLM prompt 加強 DELETE/UPDATE ID 參數驗證；(5) deployer sanitizeCodeForDeploy 防禦性加固（跳過後端檔案的 React 修復）
 

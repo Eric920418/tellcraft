@@ -39,7 +39,7 @@ let containerInstance: WebContainer | null = null
 let bootPromise: Promise<WebContainer> | null = null
 let devProcess: WebContainerProcess | null = null
 
-async function getOrBootContainer(): Promise<WebContainer> {
+export async function getOrBootContainer(): Promise<WebContainer> {
   if (containerInstance) return containerInstance
   if (bootPromise) return bootPromise
 
@@ -54,6 +54,14 @@ async function getOrBootContainer(): Promise<WebContainer> {
   })()
 
   return bootPromise
+}
+
+// ── Preload tracking ──
+// Set by useWebContainerPreloader when BASE_DEPS are pre-installed during code generation
+let preloadPromise: Promise<boolean> | null = null
+
+export function setPreloadPromise(p: Promise<boolean>) {
+  preloadPromise = p
 }
 
 // ── Hook ──
@@ -129,11 +137,26 @@ export function useWebContainer(options: UseWebContainerOptions): UseWebContaine
           onErrorRef.current?.(new Error(message))
         })
 
-        // 2. Mount files
-        await container.mount(initialFiles)
+        // 2. Check preload status (did useWebContainerPreloader pre-install BASE_DEPS?)
+        let preloaded = false
+        if (preloadPromise) {
+          try { preloaded = await preloadPromise } catch { preloaded = false }
+        }
         if (cancelled) return
 
-        // 3. Write .env
+        // 3. Mount/write files
+        if (preloaded) {
+          // Incremental path: write files individually to preserve pre-installed node_modules
+          updateStatus('installing', '寫入代碼...')
+          const { writeFilesToContainer } = await import('@/app/lib/webcontainer-utils')
+          await writeFilesToContainer(container, initialFiles!)
+        } else {
+          // Full path: mount replaces entire filesystem
+          await container.mount(initialFiles)
+        }
+        if (cancelled) return
+
+        // 4. Write .env
         if (envVars && Object.keys(envVars).length > 0) {
           const envContent = Object.entries(envVars)
             .map(([k, v]) => `${k}=${v}`)
@@ -141,8 +164,8 @@ export function useWebContainer(options: UseWebContainerOptions): UseWebContaine
           await container.fs.writeFile('.env', envContent)
         }
 
-        // 4. npm install
-        updateStatus('installing', '安裝套件...')
+        // 5. npm install (incremental if preloaded — npm only installs missing packages)
+        updateStatus('installing', preloaded ? '安裝額外套件...' : '安裝套件...')
         if (devProcess) {
           devProcess.kill()
           devProcess = null
@@ -156,7 +179,6 @@ export function useWebContainer(options: UseWebContainerOptions): UseWebContaine
           write(data) {
             if (cancelled) return
             installLogs.push(data)
-            // npm output (silent in production)
             if (data.includes('added') || data.includes('packages')) {
               updateStatus('installing', data.trim().slice(0, 60))
             }

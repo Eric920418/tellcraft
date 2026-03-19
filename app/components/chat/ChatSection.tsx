@@ -23,6 +23,7 @@ import { useChatSession } from '@/app/hooks/useChatSession'
 import { useChatPolling } from '@/app/hooks/useChatPolling'
 import { useCompletionAlert } from '@/app/hooks/useCompletionAlert'
 import { useTabSync } from '@/app/hooks/useTabSync'
+import { useWebContainerPreloader } from '@/app/hooks/useWebContainerPreloader'
 
 import { ProcessStep } from '@/app/components/landing'
 import { AnimatedThemeToggler } from '@/app/components/AnimatedThemeToggler'
@@ -198,6 +199,9 @@ export default function ChatSection({
   const { isOtherTabBusy, broadcastTaskStarted, broadcastTaskCompleted } = useTabSync(
     session.sessionInfo?.userId
   )
+
+  // ── WebContainer pre-boot + pre-install (runs during code generation) ──
+  useWebContainerPreloader(currentStage)
 
   // 同步 conversationId 到 ref + 廣播任務完成
   useEffect(() => {

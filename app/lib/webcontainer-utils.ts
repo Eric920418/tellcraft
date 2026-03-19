@@ -875,3 +875,55 @@ export function isWebContainerSupported(): boolean {
   const hasServiceWorker = 'serviceWorker' in navigator
   return isChromium && hasServiceWorker
 }
+
+/**
+ * Write files from a FileSystemTree to a WebContainer without using mount().
+ * Unlike mount(), this preserves existing files (e.g., node_modules from pre-install).
+ * Used by the preload optimization to avoid destroying pre-installed dependencies.
+ */
+export async function writeFilesToContainer(
+  container: {
+    fs: {
+      mkdir(path: string, opts?: { recursive?: boolean }): Promise<void>
+      writeFile(path: string, data: string | Uint8Array): Promise<void>
+    }
+  },
+  tree: FileSystemTree,
+  prefix?: string,
+): Promise<void> {
+  const files: { path: string; contents: string | Uint8Array }[] = []
+  const dirs = new Set<string>()
+
+  function collect(node: FileSystemTree, base: string) {
+    for (const [name, entry] of Object.entries(node)) {
+      const fullPath = base ? `${base}/${name}` : name
+      if ('directory' in entry) {
+        dirs.add(fullPath)
+        collect(entry.directory, fullPath)
+      } else if ('file' in entry && 'contents' in entry.file) {
+        const parts = fullPath.split('/')
+        if (parts.length > 1) {
+          dirs.add(parts.slice(0, -1).join('/'))
+        }
+        files.push({ path: fullPath, contents: entry.file.contents })
+      }
+    }
+  }
+
+  collect(tree, prefix || '')
+
+  // Create all directories first (recursive handles nesting)
+  await Promise.all(
+    Array.from(dirs).map(dir => container.fs.mkdir(dir, { recursive: true }))
+  )
+
+  // Write files in parallel batches to avoid overwhelming the WASM filesystem
+  const BATCH = 15
+  for (let i = 0; i < files.length; i += BATCH) {
+    await Promise.all(
+      files.slice(i, i + BATCH).map(f =>
+        container.fs.writeFile(f.path, f.contents)
+      )
+    )
+  }
+}
