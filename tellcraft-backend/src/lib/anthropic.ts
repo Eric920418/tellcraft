@@ -30,14 +30,26 @@ export const PRICING: Record<string, { input: number; output: number }> = {
   [MODEL.HAIKU]: { input: 0.8, output: 4 },
 }
 
+/** Prompt caching 定價（USD per 1M tokens） */
+export const CACHE_PRICING: Record<string, { write: number; read: number }> = {
+  [MODEL.SONNET]: { write: 3.75, read: 0.3 },   // 125% input, 10% input
+  [MODEL.HAIKU]:  { write: 1.0,  read: 0.08 },
+}
+
 export function calculateLlmCost(
   model: string,
   inputTokens: number,
   outputTokens: number,
+  cacheCreationTokens?: number,
+  cacheReadTokens?: number,
 ): number {
   const p = PRICING[model]
   if (!p) return 0
-  return (inputTokens * p.input + outputTokens * p.output) / 1_000_000
+  let cost = (inputTokens * p.input + outputTokens * p.output) / 1_000_000
+  const cp = CACHE_PRICING[model]
+  if (cp && cacheCreationTokens) cost += (cacheCreationTokens * cp.write) / 1_000_000
+  if (cp && cacheReadTokens) cost += (cacheReadTokens * cp.read) / 1_000_000
+  return cost
 }
 
 /**
@@ -51,8 +63,13 @@ export function trackLlmUsage(params: {
   purpose: string
   userId?: string
   conversationId?: string
+  cacheCreationTokens?: number
+  cacheReadTokens?: number
 }): void {
-  const cost = calculateLlmCost(params.model, params.inputTokens, params.outputTokens)
+  const cost = calculateLlmCost(
+    params.model, params.inputTokens, params.outputTokens,
+    params.cacheCreationTokens, params.cacheReadTokens,
+  )
   recordLlmUsage({
     model: params.model,
     inputTokens: params.inputTokens,

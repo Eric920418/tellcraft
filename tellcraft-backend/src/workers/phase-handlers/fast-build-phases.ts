@@ -8,7 +8,7 @@ import Redis from 'ioredis'
 import * as db from '../../db/client'
 import type { FlowState, GeneratedCode } from '../../types/flow-state'
 import {
-  generateStructure, generateAnimations, generateRwd,
+  generateStructure, generateAnimations, generateRwd, generateAnimationsAndRwd,
   generateTailwindConfig, ensureResponsiveClasses,
   VariantConcept, GeneratedComponent, callClaude,
 } from '../../services/uiux-generation'
@@ -26,6 +26,7 @@ import { sendMessage, saveFlowState, getFlowState, deleteFlowState, makeStreamin
 import { CREDIT_COSTS } from '../../config/plans'
 import { recommendMoods } from '../../services/design-moods'
 import { analyzeUploadedImage, type ReferenceAnalysis } from '../../services/reference-analyzer'
+import { getEnv } from '../../lib/env'
 import { createLogger } from '../../lib/logger'
 import { safeParseJson } from '../../utils/safe-parse-json'
 
@@ -693,164 +694,223 @@ export async function runFastBuildPipeline(params: {
       generatedCodeToFileRows(currentCode, designSystem))
   }
 
-  // ===== 階段 2/3：動畫 =====
-  await sendMessage(conversationId, io, {
-    content: isChinese ? '結構生成完成，正在添加動畫效果...' : 'Structure done, adding animations...',
-    stage: 'fast_generating',
-    progress: { current: 2, total: 3, step: isChinese ? '添加動畫' : 'Adding animations' },
-    richContent: {
-      type: 'fast_build_progress' as const,
-      data: { phase: 'animation', progress: { current: 2, total: 3, step: isChinese ? '添加動畫' : 'Adding animations' }, estimatedSecondsRemaining: 120 } as unknown as Record<string, unknown>,
-    },
-  })
-
-  // 第 2+ 批：只傳新增檔案給 animation（減少 ~60% token）
-  const animInput = (isLaterBatch && existingCode)
-    ? buildIncrementalCode(currentCode, existingCode)
-    : currentCode
-
-  const animStreamingBase = makeStreamingCallback(conversationId, io, redis, 'animation', twConfig)
-  const animStreamingCallback = (isLaterBatch && existingCode)
-    ? (partial: { pages: GeneratedComponent[]; components: GeneratedComponent[]; styles: string }) => {
-        // 合併：已有檔案（不變）+ partial 新增檔案
-        const existingPagePaths = new Set(existingCode.pages.map(p => p.path))
-        const existingCompPaths = new Set(existingCode.components.map(c => c.path))
-        animStreamingBase({
-          pages: [
-            ...currentCode.pages.filter(p => existingPagePaths.has(p.path) || !partial.pages.some(pp => pp.path === p.path)),
-            ...partial.pages,
-          ],
-          components: [
-            ...currentCode.components.filter(c => existingCompPaths.has(c.path) || !partial.components.some(pc => pc.path === c.path)),
-            ...partial.components,
-          ],
-          styles: currentCode.styles || partial.styles,
-        })
-      }
-    : animStreamingBase
-
   const fastUiSpecSummary = state.uiuxUISpec ? buildUISpecSummary(state.uiuxUISpec)
     : (interactionHint ? `產品互動概覽：\n${interactionHint}` : undefined)
-  if (hasCodeTargets(animInput)) {
-    const animationResult = await generateAnimations(
+
+  // ===== 階段 2：動畫 + 響應式（合併模式 or 分離模式）=====
+  const useMergedAnimRwd = getEnv().FAST_BUILD_MERGED_ANIM_RWD && !isLaterBatch
+
+  if (useMergedAnimRwd) {
+    // ── 合併模式：Animation + RWD 一次完成（省 1 次 Sonnet 往返）──
+    await sendMessage(conversationId, io, {
+      content: isChinese ? '結構生成完成，正在添加動畫和響應式...' : 'Structure done, adding animations and responsive design...',
+      stage: 'fast_generating',
+      progress: { current: 2, total: 2, step: isChinese ? '動畫 + 響應式' : 'Animations + RWD' },
+      richContent: {
+        type: 'fast_build_progress' as const,
+        data: { phase: 'animation', progress: { current: 2, total: 2, step: isChinese ? '動畫 + 響應式' : 'Animations + RWD' }, estimatedSecondsRemaining: 90 } as unknown as Record<string, unknown>,
+      },
+    })
+
+    const mergedStreamingCallback = makeStreamingCallback(conversationId, io, redis, 'animation', twConfig)
+
+    const mergedResult = await generateAnimationsAndRwd(
       designSystem,
-      animInput,
+      currentCode,
       tier,
-      { userId, conversationId, purpose: isLaterBatch ? 'fast-build-animation-batch' : 'fast-build-animation' },
-      animStreamingCallback,
-      variantConcept,
-      fastUiSpecSummary,
-      moodId,
-      isLaterBatch ? { maxTokens: calcIncrementalMaxTokens(animInput), maxContinuations: 1 } : undefined,
-      'fast',
-    )
-
-    if (animationResult.success) {
-      if (isLaterBatch && existingCode) {
-        // 增量合併：只覆蓋新增檔案的動畫版本，保留已有檔案不變
-        currentCode = mergeGeneratedCode(currentCode, {
-          pages: animationResult.pages || [],
-          components: animationResult.components || [],
-          styles: animationResult.styles || currentCode.styles,
-        })
-      } else {
-        currentCode = {
-          pages: animationResult.pages || currentCode.pages,
-          components: animationResult.components || currentCode.components,
-          styles: animationResult.styles || currentCode.styles,
-        }
-      }
-    } else {
-      logger.warn({ err: animationResult.error }, '動畫生成失敗，使用結構代碼繼續')
-    }
-  } else {
-    logger.info({ batch: state.fastBuildCurrentBatchIndex }, '動畫階段跳過：無新增檔案目標')
-  }
-
-  // ── Animation 中途存檔 ──
-  state.uiuxGeneratedCode = currentCode
-  state.uiuxAnimationCode = isLaterBatch ? state.uiuxAnimationCode : currentCode
-  state.uiuxCodePhase = 'rwd'
-  state.uiuxCodeGenerationStartedAt = Date.now()
-  await saveFlowState(redis, conversationId, state)
-  if (projectId) {
-    await db.upsertProjectFiles(projectId, 'uiux',
-      generatedCodeToFileRows(currentCode, designSystem))
-  }
-
-  // ===== 階段 3/3：響應式 =====
-  await sendMessage(conversationId, io, {
-    content: isChinese ? '動畫添加完成，正在優化響應式佈局...' : 'Animations done, optimizing responsive layout...',
-    stage: 'fast_generating',
-    progress: { current: 3, total: 3, step: isChinese ? '響應式優化' : 'Responsive optimization' },
-    richContent: {
-      type: 'fast_build_progress' as const,
-      data: { phase: 'rwd', progress: { current: 3, total: 3, step: isChinese ? '響應式優化' : 'Responsive optimization' }, estimatedSecondsRemaining: 60 } as unknown as Record<string, unknown>,
-    },
-  })
-
-  // 第 2+ 批：只傳新增檔案給 RWD
-  const rwdInput = (isLaterBatch && existingCode)
-    ? buildIncrementalCode(currentCode, existingCode)
-    : currentCode
-
-  const rwdStreamingBase = makeStreamingCallback(conversationId, io, redis, 'rwd', twConfig)
-  const rwdStreamingCallback = (isLaterBatch && existingCode)
-    ? (partial: { pages: GeneratedComponent[]; components: GeneratedComponent[]; styles: string }) => {
-        const existingPagePaths = new Set(existingCode.pages.map(p => p.path))
-        const existingCompPaths = new Set(existingCode.components.map(c => c.path))
-        rwdStreamingBase({
-          pages: [
-            ...currentCode.pages.filter(p => existingPagePaths.has(p.path) || !partial.pages.some(pp => pp.path === p.path)),
-            ...partial.pages,
-          ],
-          components: [
-            ...currentCode.components.filter(c => existingCompPaths.has(c.path) || !partial.components.some(pc => pc.path === c.path)),
-            ...partial.components,
-          ],
-          styles: currentCode.styles || partial.styles,
-        })
-      }
-    : rwdStreamingBase
-
-  if (hasCodeTargets(rwdInput)) {
-    const rwdResult = await generateRwd(
-      designSystem,
-      rwdInput,
-      tier,
-      { userId, conversationId, purpose: isLaterBatch ? 'fast-build-rwd-batch' : 'fast-build-rwd' },
-      rwdStreamingCallback,
+      { userId, conversationId, purpose: 'fast-build-animation-rwd-merged' },
+      mergedStreamingCallback,
       variantConcept,
       fastUiSpecSummary,
       layoutMode,
       moodId,
-      isLaterBatch ? { maxTokens: calcIncrementalMaxTokens(rwdInput), maxContinuations: 1 } : undefined,
+      undefined,
       'fast',
     )
 
-    if (rwdResult.success) {
-      if (isLaterBatch && existingCode) {
-        currentCode = mergeGeneratedCode(currentCode, {
-          pages: rwdResult.pages || [],
-          components: rwdResult.components || [],
-          styles: rwdResult.styles || currentCode.styles,
-        })
-      } else {
-        currentCode = {
-          pages: rwdResult.pages || currentCode.pages,
-          components: rwdResult.components || currentCode.components,
-          styles: rwdResult.styles || currentCode.styles,
-        }
+    if (mergedResult.success) {
+      currentCode = {
+        pages: mergedResult.pages || currentCode.pages,
+        components: mergedResult.components || currentCode.components,
+        styles: mergedResult.styles || currentCode.styles,
       }
     } else {
-      logger.warn({ err: rwdResult.error }, 'RWD 生成失敗，套用 ensureResponsiveClasses')
+      logger.warn({ err: mergedResult.error }, 'Animation+RWD 合併生成失敗，套用 ensureResponsiveClasses')
       const fixed = ensureResponsiveClasses(currentCode.pages, currentCode.components)
       currentCode.pages = fixed.pages
       currentCode.components = fixed.components
     }
+
+    // 存檔（合併模式統一存）
+    state.uiuxGeneratedCode = currentCode
+    state.uiuxAnimationCode = currentCode  // redo 回退用
+    state.uiuxCodePhase = 'rwd'  // 標記已完成
+    state.uiuxCodeGenerationStartedAt = Date.now()
+    await saveFlowState(redis, conversationId, state)
+    if (projectId) {
+      await db.upsertProjectFiles(projectId, 'uiux',
+        generatedCodeToFileRows(currentCode, designSystem))
+    }
   } else {
-    logger.info({ batch: state.fastBuildCurrentBatchIndex }, 'RWD 階段跳過：無新增檔案目標')
-  }
+    // ── 分離模式（預設）：Animation 和 RWD 分開 ──
+
+    // ===== 階段 2/3：動畫 =====
+    await sendMessage(conversationId, io, {
+      content: isChinese ? '結構生成完成，正在添加動畫效果...' : 'Structure done, adding animations...',
+      stage: 'fast_generating',
+      progress: { current: 2, total: 3, step: isChinese ? '添加動畫' : 'Adding animations' },
+      richContent: {
+        type: 'fast_build_progress' as const,
+        data: { phase: 'animation', progress: { current: 2, total: 3, step: isChinese ? '添加動畫' : 'Adding animations' }, estimatedSecondsRemaining: 120 } as unknown as Record<string, unknown>,
+      },
+    })
+
+    // 第 2+ 批：只傳新增檔案給 animation（減少 ~60% token）
+    const animInput = (isLaterBatch && existingCode)
+      ? buildIncrementalCode(currentCode, existingCode)
+      : currentCode
+
+    const animStreamingBase = makeStreamingCallback(conversationId, io, redis, 'animation', twConfig)
+    const animStreamingCallback = (isLaterBatch && existingCode)
+      ? (partial: { pages: GeneratedComponent[]; components: GeneratedComponent[]; styles: string }) => {
+          // 合併：已有檔案（不變）+ partial 新增檔案
+          const existingPagePaths = new Set(existingCode.pages.map(p => p.path))
+          const existingCompPaths = new Set(existingCode.components.map(c => c.path))
+          animStreamingBase({
+            pages: [
+              ...currentCode.pages.filter(p => existingPagePaths.has(p.path) || !partial.pages.some(pp => pp.path === p.path)),
+              ...partial.pages,
+            ],
+            components: [
+              ...currentCode.components.filter(c => existingCompPaths.has(c.path) || !partial.components.some(pc => pc.path === c.path)),
+              ...partial.components,
+            ],
+            styles: currentCode.styles || partial.styles,
+          })
+        }
+      : animStreamingBase
+
+    if (hasCodeTargets(animInput)) {
+      const animationResult = await generateAnimations(
+        designSystem,
+        animInput,
+        tier,
+        { userId, conversationId, purpose: isLaterBatch ? 'fast-build-animation-batch' : 'fast-build-animation' },
+        animStreamingCallback,
+        variantConcept,
+        fastUiSpecSummary,
+        moodId,
+        isLaterBatch ? { maxTokens: calcIncrementalMaxTokens(animInput), maxContinuations: 1 } : undefined,
+        'fast',
+      )
+
+      if (animationResult.success) {
+        if (isLaterBatch && existingCode) {
+          // 增量合併：只覆蓋新增檔案的動畫版本，保留已有檔案不變
+          currentCode = mergeGeneratedCode(currentCode, {
+            pages: animationResult.pages || [],
+            components: animationResult.components || [],
+            styles: animationResult.styles || currentCode.styles,
+          })
+        } else {
+          currentCode = {
+            pages: animationResult.pages || currentCode.pages,
+            components: animationResult.components || currentCode.components,
+            styles: animationResult.styles || currentCode.styles,
+          }
+        }
+      } else {
+        logger.warn({ err: animationResult.error }, '動畫生成失敗，使用結構代碼繼續')
+      }
+    } else {
+      logger.info({ batch: state.fastBuildCurrentBatchIndex }, '動畫階段跳過：無新增檔案目標')
+    }
+
+    // ── Animation 中途存檔 ──
+    state.uiuxGeneratedCode = currentCode
+    state.uiuxAnimationCode = isLaterBatch ? state.uiuxAnimationCode : currentCode
+    state.uiuxCodePhase = 'rwd'
+    state.uiuxCodeGenerationStartedAt = Date.now()
+    await saveFlowState(redis, conversationId, state)
+    if (projectId) {
+      await db.upsertProjectFiles(projectId, 'uiux',
+        generatedCodeToFileRows(currentCode, designSystem))
+    }
+
+    // ===== 階段 3/3：響應式 =====
+    await sendMessage(conversationId, io, {
+      content: isChinese ? '動畫添加完成，正在優化響應式佈局...' : 'Animations done, optimizing responsive layout...',
+      stage: 'fast_generating',
+      progress: { current: 3, total: 3, step: isChinese ? '響應式優化' : 'Responsive optimization' },
+      richContent: {
+        type: 'fast_build_progress' as const,
+        data: { phase: 'rwd', progress: { current: 3, total: 3, step: isChinese ? '響應式優化' : 'Responsive optimization' }, estimatedSecondsRemaining: 60 } as unknown as Record<string, unknown>,
+      },
+    })
+
+    // 第 2+ 批：只傳新增檔案給 RWD
+    const rwdInput = (isLaterBatch && existingCode)
+      ? buildIncrementalCode(currentCode, existingCode)
+      : currentCode
+
+    const rwdStreamingBase = makeStreamingCallback(conversationId, io, redis, 'rwd', twConfig)
+    const rwdStreamingCallback = (isLaterBatch && existingCode)
+      ? (partial: { pages: GeneratedComponent[]; components: GeneratedComponent[]; styles: string }) => {
+          const existingPagePaths = new Set(existingCode.pages.map(p => p.path))
+          const existingCompPaths = new Set(existingCode.components.map(c => c.path))
+          rwdStreamingBase({
+            pages: [
+              ...currentCode.pages.filter(p => existingPagePaths.has(p.path) || !partial.pages.some(pp => pp.path === p.path)),
+              ...partial.pages,
+            ],
+            components: [
+              ...currentCode.components.filter(c => existingCompPaths.has(c.path) || !partial.components.some(pc => pc.path === c.path)),
+              ...partial.components,
+            ],
+            styles: currentCode.styles || partial.styles,
+          })
+        }
+      : rwdStreamingBase
+
+    if (hasCodeTargets(rwdInput)) {
+      const rwdResult = await generateRwd(
+        designSystem,
+        rwdInput,
+        tier,
+        { userId, conversationId, purpose: isLaterBatch ? 'fast-build-rwd-batch' : 'fast-build-rwd' },
+        rwdStreamingCallback,
+        variantConcept,
+        fastUiSpecSummary,
+        layoutMode,
+        moodId,
+        isLaterBatch ? { maxTokens: calcIncrementalMaxTokens(rwdInput), maxContinuations: 1 } : undefined,
+        'fast',
+      )
+
+      if (rwdResult.success) {
+        if (isLaterBatch && existingCode) {
+          currentCode = mergeGeneratedCode(currentCode, {
+            pages: rwdResult.pages || [],
+            components: rwdResult.components || [],
+            styles: rwdResult.styles || currentCode.styles,
+          })
+        } else {
+          currentCode = {
+            pages: rwdResult.pages || currentCode.pages,
+            components: rwdResult.components || currentCode.components,
+            styles: rwdResult.styles || currentCode.styles,
+          }
+        }
+      } else {
+        logger.warn({ err: rwdResult.error }, 'RWD 生成失敗，套用 ensureResponsiveClasses')
+        const fixed = ensureResponsiveClasses(currentCode.pages, currentCode.components)
+        currentCode.pages = fixed.pages
+        currentCode.components = fixed.components
+      }
+    } else {
+      logger.info({ batch: state.fastBuildCurrentBatchIndex }, 'RWD 階段跳過：無新增檔案目標')
+    }
+  } // end of 分離模式
 
   // ===== Quality Gate（靜態檢查 + 最多 2 輪 LLM 修復）=====
   // 先確認用戶尚未按「完成/部署」讓 phase 被外部改掉

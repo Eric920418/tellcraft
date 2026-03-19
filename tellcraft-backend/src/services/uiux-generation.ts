@@ -178,8 +178,25 @@ function extractTextContent(content: Anthropic.Message['content']): string {
     .trim()
 }
 
+/**
+ * 將 system prompt 拆分為 static（cacheable）+ dynamic block。
+ * ENABLE_PROMPT_CACHING=false 時回退為 plain string。
+ */
+function buildCacheableSystemBlocks(
+  staticPart: string,
+  dynamicPart: string,
+): string | Array<Anthropic.Messages.TextBlockParam> {
+  if (!getEnv().ENABLE_PROMPT_CACHING) {
+    return staticPart + '\n\n' + dynamicPart
+  }
+  return [
+    { type: 'text' as const, text: staticPart, cache_control: { type: 'ephemeral' as const } },
+    { type: 'text' as const, text: dynamicPart },
+  ]
+}
+
 export async function callClaude(
-  systemPrompt: string,
+  systemPrompt: string | Array<Anthropic.Messages.TextBlockParam>,
   messages: Array<{ role: 'user' | 'assistant'; content: string | Anthropic.MessageCreateParams['messages'][number]['content'] }>,
   options?: {
     maxTokens?: number
@@ -208,7 +225,10 @@ export async function callClaude(
         let requestMessages = [...baseMessages]
         let lastContinuationSeed = ''
         const requestStartedAt = Date.now()
-        const inputCharEstimate = systemPrompt.length + requestMessages.reduce((sum, msg) => sum + estimateContentChars(msg.content), 0)
+        const systemPromptChars = typeof systemPrompt === 'string'
+          ? systemPrompt.length
+          : systemPrompt.reduce((sum, block) => sum + (block.text?.length || 0), 0)
+        const inputCharEstimate = systemPromptChars + requestMessages.reduce((sum, msg) => sum + estimateContentChars(msg.content), 0)
 
         while (true) {
           const stream = anthropic.messages.stream({
@@ -240,9 +260,12 @@ export async function callClaude(
 
           const finalMessage = await stream.finalMessage()
 
-          // 記錄 LLM 用量
+          // 記錄 LLM 用量（含 prompt caching metrics）
           const usage = finalMessage.usage
           if (usage) {
+            const usageAny = usage as unknown as Record<string, unknown>
+            const cacheCreation = usageAny.cache_creation_input_tokens as number | undefined
+            const cacheRead = usageAny.cache_read_input_tokens as number | undefined
             trackLlmUsage({
               model: MODEL.SONNET,
               inputTokens: usage.input_tokens || 0,
@@ -250,6 +273,8 @@ export async function callClaude(
               purpose: trackingContext?.purpose || 'uiux_generation',
               userId: trackingContext?.userId,
               conversationId: trackingContext?.conversationId,
+              cacheCreationTokens: cacheCreation || 0,
+              cacheReadTokens: cacheRead || 0,
             })
             logger.info({
               purpose: trackingContext?.purpose,
@@ -257,6 +282,8 @@ export async function callClaude(
               contextSizeHint: options?.contextSizeHint,
               inputTokens: usage.input_tokens || 0,
               outputTokens: usage.output_tokens || 0,
+              cacheCreationTokens: cacheCreation || 0,
+              cacheReadTokens: cacheRead || 0,
               inputCharEstimate,
               durationMs: Date.now() - requestStartedAt,
             }, 'LLM 請求完成')
@@ -3097,40 +3124,8 @@ export async function generateStructure(
   const constraintsBlock = isFastMode ? getStructureConstraintsFast(tier) : getStructureConstraints(tier)
   const baseRulesBlock = isFastMode ? getBaseRulesFast() : getBaseRules()
 
-  const systemPrompt = `${getTierCreativePhilosophy(tier)}
-${moodSystemSection}
-${moodConflictWarning}
-${patternsSection}
-
-${constraintsBlock}
-
-${techniquesSection}
-
-${isFastMode ? buildDesignSystemPromptFast(designSystem) : buildDesignSystemPrompt(designSystem)}
-
-## 本階段任務：結構與互動生成（Structure + Interaction）
-這是第一階段，需要生成：
-1. 完整的 HTML 結構
-2. 基礎 CSS 樣式（顏色、字體、間距、圓角）
-3. 可交互的組件（含 state 管理和事件處理）
-
-## 本階段禁止
-- 不要使用 motion/react API（import from 'motion/react' 禁止）
-- 不要使用 CSS transition/animation class（動畫在下一階段添加）
-- 不要添加響應式設計（md:, lg:, @media）（RWD 在第三階段）
-- 假設寬度為 1280px 桌面版
-
-## 動畫意圖標記（data-animate）—— 取代「禁止動畫」
-對需要動畫的關鍵元素加 data-animate 屬性，Animation 階段會實作這些意圖。
-
-${getDataAnimateSpec()}
-
-## 'use client' 使用規則
-- 需要 useState/useEffect/useRef/事件處理的組件**必須**加 'use client'
-- 純展示組件（無 state、無事件處理）**不要**加 'use client'
-- layout.tsx 和純 metadata 的 page.tsx **不要**加 'use client'
-
-${isFastMode && productContext?.layoutMode === 'website'
+  // ── Prompt Caching：拆分 static（跨 flow 可重用）+ dynamic（每次不同） ──
+  const interactionRules = isFastMode && productContext?.layoutMode === 'website'
 ? `## 互動完整性規則（Website 模式）
 - CTA 按鈕需 hover 狀態 + cursor-pointer
 - 表單提交需 success toast 或提示（用 useState 控制）
@@ -3166,10 +3161,49 @@ ${isFastMode && productContext?.layoutMode === 'website'
 ### 資料管理模式
 - 使用 useState 管理列表資料（初始值為有意義的模擬數據）
 - CRUD 操作直接操作 state（前端 demo，不需要 API）
-- 例如：\`const [items, setItems] = useState(initialData)\``}
+- 例如：\`const [items, setItems] = useState(initialData)\``
 
-${baseRulesBlock}
-`
+  // Static block：只取決於 tier + isFastMode（4 種組合），跨 flow 高度可重用
+  const structureStaticPrompt = `${getTierCreativePhilosophy(tier)}
+
+## 本階段任務：結構與互動生成（Structure + Interaction）
+這是第一階段，需要生成：
+1. 完整的 HTML 結構
+2. 基礎 CSS 樣式（顏色、字體、間距、圓角）
+3. 可交互的組件（含 state 管理和事件處理）
+
+## 本階段禁止
+- 不要使用 motion/react API（import from 'motion/react' 禁止）
+- 不要使用 CSS transition/animation class（動畫在下一階段添加）
+- 不要添加響應式設計（md:, lg:, @media）（RWD 在第三階段）
+- 假設寬度為 1280px 桌面版
+
+## 動畫意圖標記（data-animate）—— 取代「禁止動畫」
+對需要動畫的關鍵元素加 data-animate 屬性，Animation 階段會實作這些意圖。
+
+${getDataAnimateSpec()}
+
+## 'use client' 使用規則
+- 需要 useState/useEffect/useRef/事件處理的組件**必須**加 'use client'
+- 純展示組件（無 state、無事件處理）**不要**加 'use client'
+- layout.tsx 和純 metadata 的 page.tsx **不要**加 'use client'
+
+${baseRulesBlock}`
+
+  // Dynamic block：每次不同（mood、patterns、constraints、techniques、designSystem、interaction rules）
+  const structureDynamicPrompt = `${moodSystemSection}
+${moodConflictWarning}
+${patternsSection}
+
+${constraintsBlock}
+
+${techniquesSection}
+
+${isFastMode ? buildDesignSystemPromptFast(designSystem) : buildDesignSystemPrompt(designSystem)}
+
+${interactionRules}`
+
+  const systemPrompt = buildCacheableSystemBlocks(structureStaticPrompt, structureDynamicPrompt)
 
   // 構建產品上下文
   const productDesc = productContext?.originalRequirements || ''
@@ -3648,9 +3682,8 @@ export async function generateAnimations(
   const targetCode = selectAnimationTargets(existingCode, generationProfile)
   const promptCode = targetCode.pages.length > 0 || targetCode.components.length > 0 ? targetCode : existingCode
 
-  const systemPrompt = `你是一位專業的前端動畫專家。在現有代碼基礎上添加適當的動畫效果。
-
-${buildCompactDesignPrompt(designSystem, { includeMood: true })}
+  // ── Prompt Caching：拆分 static + dynamic ──
+  const animStaticPrompt = `你是一位專業的前端動畫專家。在現有代碼基礎上添加適當的動畫效果。
 
 ## 本階段任務：動畫增強（Animations）
 這是第二階段，需要：
@@ -3726,6 +3759,10 @@ ${getAnimationConstraints(tier)}
 - "slide-in-left/right" → initial={{ opacity:0, x:±50 }} animate={{ opacity:1, x:0 }}
 - "hover-lift" → whileHover={{ y:-4 }} transition={{ type:'spring', stiffness:300 }}
 - "parallax" → useScroll + useTransform(scrollY, [0,500], [0,-100])`
+
+  const animDynamicPrompt = buildCompactDesignPrompt(designSystem, { includeMood: true })
+
+  const systemPrompt = buildCacheableSystemBlocks(animStaticPrompt, animDynamicPrompt)
 
   const existingCodeStr = [
     ...promptCode.pages.map(p => `\`\`\`tsx:${p.path}\n${p.content}\n\`\`\``),
@@ -3847,11 +3884,8 @@ export async function generateRwd(
 - 斷點切換以堆疊和簡化為主
 - 保持乾淨、功能優先的移動端體驗`
 
-  const systemPrompt = `你是一位專業的響應式設計專家。在現有代碼基礎上添加完整的響應式設計。
-
-${buildCompactDesignPrompt(designSystem, { includeMood: true })}
-
-${rwdTierHint}
+  // ── Prompt Caching：拆分 static + dynamic ──
+  const rwdStaticPrompt = `你是一位專業的響應式設計專家。在現有代碼基礎上添加完整的響應式設計。
 
 ## 本階段任務：響應式設計（RWD）
 這是第三階段，需要：
@@ -3905,6 +3939,12 @@ ${layoutMode === 'app'
 - [ ] Modal/Drawer 有 overscroll-behavior: contain
 - [ ] 尊重 prefers-reduced-motion，禁止 transition-all
 - [ ] ${layoutMode === 'app' ? '移動端功能完整可用' : '移動端漢堡選單可用且可關閉'}`
+
+  const rwdDynamicPrompt = `${buildCompactDesignPrompt(designSystem, { includeMood: true })}
+
+${rwdTierHint}`
+
+  const systemPrompt = buildCacheableSystemBlocks(rwdStaticPrompt, rwdDynamicPrompt)
 
   const existingCodeStr = [
     ...promptCode.pages.map(p => `\`\`\`tsx:${p.path}\n${p.content}\n\`\`\``),
@@ -3988,6 +4028,253 @@ ${existingCodeStr}
   const finalStyles = parsedStyles || existingCode.styles
 
   // Safety net: 如果 LLM 沒有產出響應式 class，自動注入基本響應式模式
+  const responsiveCode = ensureResponsiveClasses(finalPages, finalComps)
+
+  return {
+    success: true,
+    pages: responsiveCode.pages,
+    components: responsiveCode.components,
+    styles: finalStyles,
+  }
+}
+
+/**
+ * 合併版 Animation + RWD（Fast Build 專用）
+ * 將 3 次 Sonnet 降為 2 次，節省 ~$0.05-0.09/次 + 30-60 秒延遲。
+ * 由 env FAST_BUILD_MERGED_ANIM_RWD 控制，預設 OFF。
+ */
+export async function generateAnimationsAndRwd(
+  designSystem: DesignSystem,
+  existingCode: CodeBundle,
+  designTier?: DesignTier,
+  trackingContext?: LlmTrackingContext,
+  onPartialCode?: PartialCodeCallback,
+  variantConcept?: VariantConcept,
+  uiSpecSummary?: string,
+  layoutMode?: 'app' | 'website',
+  moodId?: string,
+  incrementalOptions?: { maxTokens?: number; maxContinuations?: number },
+  generationProfile: GenerationProfile = 'fast',
+): Promise<GenerationResult> {
+  const tier = designTier || 'functional'
+
+  // 如果兩個階段都該跳過，直接返回
+  const skipAnim = shouldSkipAnimationStage(existingCode, generationProfile)
+  const skipRwd = shouldSkipRwdStage(existingCode, generationProfile)
+  if (skipAnim && skipRwd) {
+    logger.info({ purpose: trackingContext?.purpose }, 'Animation+RWD 合併階段跳過：無需動畫且響應式已足夠')
+    return { success: true, pages: existingCode.pages, components: existingCode.components, styles: existingCode.styles }
+  }
+
+  // 聯集 target：需要動畫或 RWD 的檔案
+  const animTargets = selectAnimationTargets(existingCode, generationProfile)
+  const rwdTargets = selectRwdTargets(existingCode, generationProfile)
+  const allTargetPaths = new Set([
+    ...animTargets.pages.map(p => p.path),
+    ...animTargets.components.map(c => c.path),
+    ...rwdTargets.pages.map(p => p.path),
+    ...rwdTargets.components.map(c => c.path),
+  ])
+  const promptCode: CodeBundle = {
+    pages: existingCode.pages.filter(p => allTargetPaths.has(p.path)),
+    components: existingCode.components.filter(c => allTargetPaths.has(c.path)),
+    styles: existingCode.styles,
+  }
+  // 如果 target 為空，用完整代碼
+  if (promptCode.pages.length === 0 && promptCode.components.length === 0) {
+    promptCode.pages = existingCode.pages
+    promptCode.components = existingCode.components
+  }
+
+  // ── 動態構建任務描述 ──
+  const taskDescription = skipAnim
+    ? '本次只需添加響應式設計（動畫已足夠）。'
+    : skipRwd
+    ? '本次只需添加動畫效果（響應式已足夠）。'
+    : '本次需同時完成動畫增強和響應式適配。'
+
+  // ── Static prompt（跨 flow cacheable）──
+  const mergedStaticPrompt = `你是一位專業的前端工程師。在現有代碼基礎上完成動畫增強與響應式適配。
+
+${taskDescription}
+
+${!skipAnim ? `## 任務 A：動畫增強（Animations）
+1. 添加頁面進入動畫（fade in, slide in）
+2. 添加互動反饋動畫（hover, press）
+3. 添加狀態轉換動畫（loading, success, error）
+4. 添加微動畫（subtle motion）
+
+### 使用 motion/react
+必須使用 motion/react（原 framer-motion）：
+\`\`\`tsx
+'use client'
+import { motion } from 'motion/react'
+
+// 入場動畫
+<motion.div
+  initial={{ opacity: 0, y: 20 }}
+  animate={{ opacity: 1, y: 0 }}
+  transition={{ duration: 0.3, ease: 'easeOut' }}
+>
+
+// 互動動畫
+<motion.button
+  whileHover={{ scale: 1.02 }}
+  whileTap={{ scale: 0.98 }}
+>
+\`\`\`
+
+${getAnimationConstraints(tier)}
+
+### 動畫效能規則（Critical）
+- 禁止在同一 frame 內交錯讀寫 layout
+- 禁止連續動畫 layout 屬性（width, height, top, left, margin, padding）
+- 禁止混合多套動畫系統（統一用 motion/react）
+- blur 動畫 ≤8px，只用於短暫效果
+- hover 用 color/opacity transition，禁止 transition-all
+- 離屏元素用 whileInView 暫停
+
+### data-animate 意圖實作（優先執行）
+結構代碼中帶 data-animate 屬性的元素代表動畫意圖，你必須實作它們：
+1. 找到所有 data-animate 元素
+2. 用 motion/react 實作對應動畫
+3. **移除 data-animate 屬性**
+
+對應實作：
+- "fade-up" → initial={{ opacity:0, y:20 }} animate={{ opacity:1, y:0 }}
+- "stagger-children" → variants + staggerChildren: 0.1
+- "hero-entrance" → initial={{ opacity:0, y:-30, scale:0.95 }}
+- "reveal-on-scroll" → whileInView="visible" viewport={{ once:true }}
+- "count-up" → useMotionValue + useSpring + useTransform
+- "slide-in-left/right" → initial={{ opacity:0, x:±50 }}
+- "hover-lift" → whileHover={{ y:-4 }}
+- "parallax" → useScroll + useTransform
+` : ''}
+
+${!skipRwd ? `## 任務 B：響應式適配（RWD）
+1. 添加移動端佈局（< 768px）
+2. 添加平板佈局（768px - 1024px）
+3. ${layoutMode === 'app' ? '側邊欄移動端折疊（底部導航或抽屜）' : '添加移動端導航（漢堡選單）'}
+4. 添加觸控優化
+
+### Tailwind 響應式斷點
+sm: 640px / md: 768px / lg: 1024px / xl: 1280px
+
+### 響應式設計規則
+- Mobile-first：從小螢幕開始
+- 使用 Tailwind 前綴：md:, lg:, xl:
+- 觸控目標至少 44px × 44px
+- 移動端字體最小 16px
+
+${layoutMode === 'app'
+? `### 應用型移動端導航
+- 側邊欄移動端折疊為底部導航或抽屜`
+: `### 移動端導航
+- 提供漢堡選單（Radix Dialog 或 Sheet）
+- 選單打開時鎖定背景滾動`}
+
+### Pre-Delivery Checklist
+- 觸控目標 44×44px, touch-action: manipulation
+- Flex 子元素 min-w-0
+- 固定元素 safe-area-inset
+- 圖片 aspect-ratio 防 CLS
+- focus-visible ring
+- 表單 inputmode 正確
+- prefers-reduced-motion
+` : ''}
+
+## 禁止
+- 不要修改現有的結構和樣式邏輯
+- 不要修改現有的互動邏輯（Modal 開關、表單 state、事件處理、useState）
+- 不要移除任何 'use client' 聲明
+- 不要使用 CSS animation（使用 motion/react）
+- 不要使用 display: none 隱藏重要內容
+
+## 重要
+- 移動端動畫可以簡化（reduce motion for small screens）
+- 輸出完整檔案（不是 diff）`
+
+  // ── Dynamic prompt（每次不同）──
+  const mergedDynamicPrompt = buildCompactDesignPrompt(designSystem, { includeMood: true })
+
+  const systemPrompt = buildCacheableSystemBlocks(mergedStaticPrompt, mergedDynamicPrompt)
+
+  const existingCodeStr = [
+    ...promptCode.pages.map(p => `\`\`\`tsx:${p.path}\n${p.content}\n\`\`\``),
+    ...promptCode.components.map(c => `\`\`\`tsx:${c.path}\n${c.content}\n\`\`\``),
+    `\`\`\`css:globals.css\n${promptCode.styles}\n\`\`\``,
+  ].join('\n\n')
+
+  const conceptReminder = variantConcept
+    ? `\n## 設計概念提醒\n動畫和響應式風格必須服務於「${variantConcept.name}」的設計概念。${variantConcept.signatureElement ? `Signature Element「${variantConcept.signatureElement}」尤其重要。` : ''}\n`
+    : ''
+
+  const uiSpecHint = uiSpecSummary
+    ? `\n## 互動上下文\n${uiSpecSummary}\n`
+    : ''
+
+  const moodSection = moodId
+    ? `\n## Mood 指引\n動畫：${getMoodAnimationHint(moodId)}\nRWD：${getMoodRwdHint(moodId)}\n`
+    : ''
+
+  const userMessage = `請在以下代碼基礎上同時添加動畫效果和響應式設計：
+${conceptReminder}${moodSection}${uiSpecHint}
+## 專案檔案清單（未列出內容的檔案視為只讀）
+${buildCodeManifest(existingCode)}
+
+## 現有代碼
+${existingCodeStr}
+
+⚠️ 選擇性輸出（重要效率規則）：
+只輸出你實際修改的檔案。沒有修改的檔案完全省略。
+若你新增了 import 引用內部模組（@/ 或 ./），你必須同時輸出該檔案。
+⚠️ code fence 規則：每個 code block 的第一行必須直接是代碼，禁止在代碼前加任何說明文字。
+保持相同的檔案路徑格式。`
+
+  // Temperature：取兩階段中較高的（creative animation 0.35 > rwd 0.2）
+  const temperature = tier === 'creative' ? 0.35 : 0.2
+
+  const response = await callClaude(
+    systemPrompt,
+    [{ role: 'user', content: userMessage }],
+    {
+      maxTokens: incrementalOptions?.maxTokens || 32768,
+      temperature,
+      maxContinuations: incrementalOptions?.maxContinuations ?? 1,
+      promptLabel: 'uiux-animation-rwd-merged',
+      contextSizeHint: generationProfile,
+    },
+    { ...trackingContext, purpose: 'generate_animation_rwd_merged' },
+    buildStreamingHandler(onPartialCode)
+  )
+
+  if (!response.success || !response.content) {
+    return { success: false, error: response.error || '無法生成動畫+響應式代碼' }
+  }
+
+  const { pages: rawPages, components: rawComps, styles: parsedStyles } = parseGeneratedFiles(response.content, designSystem)
+
+  // TSX 語法檢查 + LLM 自動修復
+  const syntaxFixed = await checkAndFixSyntaxErrors([...rawPages, ...rawComps], trackingContext)
+  const rawPagePaths = new Set(rawPages.map(p => p.path))
+  const parsedPages = syntaxFixed.filter(f => rawPagePaths.has(f.path))
+  const parsedComps = syntaxFixed.filter(f => !rawPagePaths.has(f.path))
+
+  // Per-file merge：用修改版覆蓋，未修改的保留原版
+  const pageMap = new Map(parsedPages.map(p => [p.path, p]))
+  const compMap = new Map(parsedComps.map(c => [c.path, c]))
+
+  const finalPages = [
+    ...existingCode.pages.map(p => pageMap.get(p.path) ?? p),
+    ...parsedPages.filter(p => !existingCode.pages.find(e => e.path === p.path)),
+  ]
+  const finalComps = [
+    ...existingCode.components.map(c => compMap.get(c.path) ?? c),
+    ...parsedComps.filter(c => !existingCode.components.find(e => e.path === c.path)),
+  ]
+  const finalStyles = parsedStyles || existingCode.styles
+
+  // Safety net: RWD fallback
   const responsiveCode = ensureResponsiveClasses(finalPages, finalComps)
 
   return {

@@ -57,6 +57,10 @@ const envSchema = z.object({
   TELEGRAM_BOT_TOKEN: z.string().optional(),
   TELEGRAM_BOT_USERNAME: z.string().optional(), // 不含 @，Login Widget 必須
   TELEGRAM_WEBHOOK_SECRET: z.string().optional(), // Header 驗證密鑰
+
+  // Token 優化
+  ENABLE_PROMPT_CACHING: z.stringbool().default(true),           // Anthropic prompt caching
+  FAST_BUILD_MERGED_ANIM_RWD: z.stringbool().default(true),      // 合併 Animation + RWD（kill switch: 設 false 回退分離模式）
 })
 
 // ============================================================

@@ -205,13 +205,13 @@ Discovery（Path A 問卷 / Path B 篩選後模板）
   → detectDesignTier（規則式）→ inferProductType → buildDefaultDesignSystem → inferInteractionHint
   → analyzeUploadedImage（如有圖片，Haiku Vision 分析，降級跳過）
   → generateFastConcept（1 次 Haiku，概念 + suggestedTier 修正，suggestedPages 限 1 頁，注入參考分析）
-  → mergePages（上限 1 頁）→ 單批生成 S+A+R+QG（referenceAnalysis 注入 generateStructure）→ 完成
+  → mergePages（上限 1 頁）→ 單批生成 S+A(+R)+QG（FAST_BUILD_MERGED_ANIM_RWD=true 時 A+R 合併為一次 Sonnet）→ 完成
   → phase='uiux_complete'（複用所有迭代/部署/回滾邏輯）
   單頁深度模式：只做首頁，5-8 個 Section 內容豐富
 ```
 
 - **單頁深度模式**：inferPages/mergePages/suggestedPages 三層限制只返回 1 頁。Structure prompt 指引 5-8 個完整 Section + anchor link 導航。expandBriefPrompt 引導豐富內容規劃。token 全部集中在首頁品質上
-- **效能優化**：Structure prompt 快速模式使用精簡版 techniques（2 個 name+codeHint）+ 精簡版 mood code（3 行 className）+ 精選 1 個 pattern + 精簡版 craft/constraints/baseRules
+- **效能優化**：Structure prompt 快速模式使用精簡版 techniques（2 個 name+codeHint）+ 精簡版 mood code（3 行 className）+ 精選 1 個 pattern + 精簡版 craft/constraints/baseRules。Prompt caching（`ENABLE_PROMPT_CACHING`）將 system prompt 拆分 static/dynamic block，跨 flow 重用 static 部分省 90% input token。`FAST_BUILD_MERGED_ANIM_RWD` 合併 Animation+RWD 為單次 Sonnet 呼叫（3→2 次）
 - **增量交互式生成**（>4 頁時才觸發，目前預設不會觸發）：`executeFastBuildSkill` 設定 `fastBuildAllPages` → `runFastBuildPipeline` 跑第 1 批 → 有剩餘頁面時暫停 → 用戶按「繼續生成」跑第 2 批 → `mergeGeneratedCode` 合併 → 完成
 - **FlowState 增量欄位**：`fastBuildStage`（generating/awaiting_continue/complete）、`fastBuildAllPages`、`fastBuildCompletedPages`、`fastBuildCurrentBatchIndex`
 - **`mergeGeneratedCode()`**：按 path 去重合併（新批次覆蓋同路徑），styles 保留首批
@@ -398,6 +398,8 @@ Feature 註解：`# Action: actionName` + `# [METHOD] /path` + `# Summary: xxx`
 - **Coder action response field 必須對齊 BDD execution key**：`generateActionFunction` 從 Feature 文件提取 `<executionKey`（如 `<newUserId`），注入 prompt 要求 LLM 使用精確欄位名。不對齊會導致 SpecFormula VAR-System 連鎖失敗（47/52 場景）。Features 從 `bdd_sessions.features_content` 讀取
 - **Coder E2E 測試必須包含 backendFiles**：`runCoderE2ETests` 的 code 必須含 `result.backendFiles`（`lib/actions/*`、`app/actions/*`、`lib/db.ts`），否則改寫後的組件 import Server Action 會全部 Module not found → 500
 - **`rewriteComponentForServerActions` maxTokens 上限 32768**：大組件（>1000 行）需要足夠 token。改寫後偵測 JSX 標籤平衡，截斷時回退原始組件
+- **Prompt caching system prompt 順序重要**：`buildCacheableSystemBlocks` 將 static 部分（tier philosophy + task definition + base rules）放在第一個 block 並加 `cache_control: { type: 'ephemeral' }`，dynamic 部分（mood、designSystem、constraints）放在第二個 block。修改 system prompt 時不要把 per-request 內容放進 static block，否則 cache hit 率歸零
+- **`FAST_BUILD_MERGED_ANIM_RWD` 只影響首批生成**：`isLaterBatch`（增量批次）仍用分離的 Animation + RWD，因為增量批次有特殊的 `buildIncrementalCode` 處理邏輯
 
 ## 核心原則
 
@@ -410,5 +412,5 @@ Feature 註解：`# Action: actionName` + `# [METHOD] /path` + `# Summary: xxx`
 
 前端（`.env.local`）：`VPS_API_URL`, `NEXT_PUBLIC_VPS_API_URL`, `NEXT_PUBLIC_VPS_WS_URL`, `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `NEXT_PUBLIC_LIFF_ID`, `NEXT_PUBLIC_SENTRY_DSN`, `SENTRY_ORG`, `SENTRY_PROJECT`, `SENTRY_AUTH_TOKEN`
 
-後端（`tellcraft-backend/.env`）：所有環境變數定義在 `lib/env.ts` 的 Zod schema 中，分三層（REQUIRED/OPTIONAL+預設/功能開關）。啟動時 `validateEnv()` 驗證，缺必要變數會立即 crash。關鍵 OPTIONAL 變數：`NEON_API_KEY`（Neon API Bearer Token，自動建立客戶 DB）、`NEON_DEFAULT_REGION`（預設 aws-ap-southeast-1，注意 aws-ap-northeast-1 已從 Neon 移除）。
+後端（`tellcraft-backend/.env`）：所有環境變數定義在 `lib/env.ts` 的 Zod schema 中，分三層（REQUIRED/OPTIONAL+預設/功能開關）。啟動時 `validateEnv()` 驗證，缺必要變數會立即 crash。關鍵 OPTIONAL 變數：`NEON_API_KEY`（Neon API Bearer Token，自動建立客戶 DB）、`NEON_DEFAULT_REGION`（預設 aws-ap-southeast-1，注意 aws-ap-northeast-1 已從 Neon 移除）。Token 優化開關：`ENABLE_PROMPT_CACHING`（預設 true，Anthropic prompt caching 降 input token 成本）、`FAST_BUILD_MERGED_ANIM_RWD`（預設 true，合併 Animation+RWD 為單次 Sonnet 呼叫；品質異常時設 false 回退分離模式）。
 
