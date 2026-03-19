@@ -137,7 +137,11 @@ export function hasDatabaseIntent(msg: string): boolean {
 }
 
 export function hasCoderIntent(msg: string): boolean {
-  const kw = ['接上資料庫', '生成後端', '生成程式碼', '寫後端', 'connect database', 'generate backend']
+  const kw = [
+    '接上資料庫', '連上資料庫', '連結資料庫', '連接資料庫', '串接資料庫',
+    '生成後端', '生成程式碼', '寫後端', '建立後端',
+    'connect database', 'generate backend', 'setup database', 'link database',
+  ]
   return kw.some(k => msg.toLowerCase().includes(k))
 }
 

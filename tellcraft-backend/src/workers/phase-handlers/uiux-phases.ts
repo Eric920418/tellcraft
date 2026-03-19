@@ -585,6 +585,86 @@ export async function handleUiuxMixedPhaseRouting(
         })
         return
       }
+      // 重試 DB Provisioning
+      if (trimmed === '__retry_db_provision__') {
+        const isChinese = state.locale !== 'en'
+        try {
+          // 從 BDD session 讀取 schemaSql + entityMapping
+          const bddRow = await db.queryOne<{ schema_sql_content: string; entity_mapping_content: string }>(
+            'SELECT schema_sql_content, entity_mapping_content FROM bdd_sessions WHERE project_id = $1 AND schema_sql_content IS NOT NULL ORDER BY updated_at DESC LIMIT 1',
+            [data.projectId]
+          )
+          if (!bddRow) {
+            await sendMessage(conversationId, io, {
+              content: isChinese ? '找不到 BDD 規格，無法建立資料庫。' : 'BDD spec not found, cannot create database.',
+              stage: 'uiux_complete',
+            })
+            return
+          }
+          const { deriveSchemaFromBdd } = await import('../../services/schema-derivation')
+          const { provisionNeonDatabase } = await import('../../services/neon-service')
+          const derivedSchema = deriveSchemaFromBdd(bddRow.schema_sql_content, bddRow.entity_mapping_content || '')
+          if (derivedSchema.entityCount === 0) {
+            await sendMessage(conversationId, io, {
+              content: isChinese ? 'Schema 推導結果為空，無法建立資料庫。' : 'Schema derivation yielded no tables.',
+              stage: 'uiux_complete',
+            })
+            return
+          }
+          await sendMessage(conversationId, io, {
+            content: isChinese
+              ? `正在重新建立資料庫...\n\n偵測到 ${derivedSchema.entityCount} 個資料表：\n${derivedSchema.displaySummary}`
+              : `Retrying database setup...\n\nDetected ${derivedSchema.entityCount} tables:\n${derivedSchema.displaySummary}`,
+            stage: 'db_provisioning',
+          })
+          const result = await provisionNeonDatabase({
+            projectId: data.projectId,
+            projectName: `tc-${data.projectId.slice(0, 8)}`,
+            schema: derivedSchema,
+            conversationId,
+            io,
+            locale: state.locale,
+          })
+          state.dbProvisionStatus = result ? 'completed' : 'failed'
+          await saveFlowState(redis, conversationId, state)
+          if (result) {
+            // DB 建立成功，自動觸發 Coder
+            const coderPhases = await import('./coder-phases')
+            await coderPhases.executeCoderSkill({
+              taskId: state.taskId || '',
+              projectId: data.projectId,
+              conversationId,
+              userId,
+              redis,
+              io,
+            })
+          } else {
+            await sendMessage(conversationId, io, {
+              content: isChinese
+                ? '資料庫建立再次失敗，請稍後重試或先部署純前端版本。'
+                : 'Database setup failed again. Please try later or deploy frontend only.',
+              stage: 'uiux_complete',
+              quickReplies: [
+                { label: isChinese ? '重試' : 'Retry', value: '__retry_db_provision__', style: 'primary' as const },
+                { label: isChinese ? '部署純前端' : 'Deploy frontend only', value: '__deploy_without_coder__', style: 'secondary' as const },
+              ],
+            })
+          }
+        } catch (err) {
+          logger.error({ err, conversationId }, 'DB provision 重試失敗')
+          await sendMessage(conversationId, io, {
+            content: isChinese
+              ? '資料庫建立過程發生錯誤，請稍後重試。'
+              : 'An error occurred during database setup. Please try again later.',
+            stage: 'uiux_complete',
+            quickReplies: [
+              { label: isChinese ? '重試' : 'Retry', value: '__retry_db_provision__', style: 'primary' as const },
+              { label: isChinese ? '部署純前端' : 'Deploy frontend only', value: '__deploy_without_coder__', style: 'secondary' as const },
+            ],
+          })
+        }
+        return
+      }
       // 用戶確認跳過 Coder 直接部署
       if (trimmed === '__deploy_without_coder__') {
         const deployerSkill = await getDeployerSkill()
@@ -631,6 +711,25 @@ export async function handleUiuxMixedPhaseRouting(
             quickReplies: [
               { label: '部署上線', value: '部署', style: 'primary' as const },
               { label: '修改設計', value: '我想修改', style: 'secondary' as const },
+            ],
+          })
+          return
+        }
+        // 檢查 Neon DB 是否可用（provision 成功）
+        const neonRow = await db.queryOne<{ neon_connection_string: string }>(
+          'SELECT neon_connection_string FROM projects WHERE id = $1 AND neon_connection_string IS NOT NULL',
+          [data.projectId]
+        )
+        if (!neonRow) {
+          const isChinese = state.locale !== 'en'
+          await sendMessage(conversationId, io, {
+            content: isChinese
+              ? '資料庫建立尚未完成或建立失敗，無法生成後端代碼。\n\n你可以先部署純前端版本，或稍後重試。如果問題持續發生，請聯繫客服。'
+              : 'Database setup is not ready or failed. Cannot generate backend code.\n\nYou can deploy the frontend-only version, or try again later.',
+            stage: 'uiux_complete',
+            quickReplies: [
+              { label: isChinese ? '重試建立資料庫' : 'Retry DB Setup', value: '__retry_db_provision__', style: 'primary' as const },
+              { label: isChinese ? '部署純前端' : 'Deploy frontend only', value: '__deploy_without_coder__', style: 'secondary' as const },
             ],
           })
           return

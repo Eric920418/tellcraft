@@ -7,6 +7,7 @@ import {
   hasGoBackIntent,
   hasChangeIntent,
   hasRollbackSpecIntent,
+  hasCoderIntent,
   computeDiscoveryLimits,
   isDesignFeedback,
   checkFastModeMessageLength,
@@ -82,6 +83,42 @@ describe('hasRejectDeployIntent', () => {
     '今天天氣好',
   ])('非拒絕不應觸發: "%s"', (msg) => {
     expect(hasRejectDeployIntent(msg)).toBe(false)
+  })
+})
+
+// ============================================================
+// hasCoderIntent
+// ============================================================
+
+describe('hasCoderIntent', () => {
+  it.each([
+    '接上資料庫',
+    '連上資料庫',
+    '連結資料庫',
+    '連接資料庫',
+    '串接資料庫',
+    '生成後端',
+    '生成程式碼',
+    '寫後端',
+    '建立後端',
+    '幫我連上資料庫',
+    '我要連接資料庫',
+    'connect database',
+    'generate backend',
+    'setup database',
+    'link database',
+  ])('"%s" → true', (msg) => {
+    expect(hasCoderIntent(msg)).toBe(true)
+  })
+
+  it.each([
+    '部署',
+    '改顏色',
+    '你好',
+    '資料',
+    '庫存管理',
+  ])('"%s" → false', (msg) => {
+    expect(hasCoderIntent(msg)).toBe(false)
   })
 })
 
