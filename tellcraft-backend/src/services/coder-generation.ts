@@ -47,6 +47,7 @@ export interface CoderInput {
   schemaSql: string
   entityMapping: string
   existingUiuxCode: GeneratedCode
+  features?: Array<{ actionName: string; content: string }>
   trackingContext?: { userId?: string; conversationId?: string }
 }
 
@@ -290,7 +291,8 @@ function buildActionUserPrompt(
   action: ActionEntry,
   schemaSql: string,
   entityMapping: string,
-  types: Record<string, unknown>
+  types: Record<string, unknown>,
+  requiredResponseFields?: string[]
 ): string {
   const rulesText = (action.rules || [])
     .map(r => `- [${r.type}] ${r.rule}`)
@@ -298,6 +300,14 @@ function buildActionUserPrompt(
 
   const typesText = Object.keys(types).length > 0
     ? `\n## 型別參考\n${yaml.dump(types)}`
+    : ''
+
+  const responseFieldsText = requiredResponseFields && requiredResponseFields.length > 0
+    ? `\n## 必須返回的欄位名稱（嚴格遵守，不可改名）
+BDD 規格驗證會從 response body 精確提取以下欄位，名稱不一致會導致測試失敗：
+${requiredResponseFields.map(f => `- \`${f}\``).join('\n')}
+例如建立操作成功時：return { __status: 201, ${requiredResponseFields.join(', ')}, ...其他欄位 }
+這些欄位名稱是 BDD 規格硬編碼的，必須完全一致（區分大小寫）。`
     : ''
 
   return `## Action 定義
@@ -312,7 +322,7 @@ ${schemaSql}
 
 ## Entity Mapping（中文實體 → 表名）
 ${entityMapping}
-${typesText}
+${typesText}${responseFieldsText}
 
 請根據以上定義實作函數。
 函數名必須使用 camelCase：export async function ${toCamelCase(action.name)}(input: ${toPascalCase(action.name)}Input)
@@ -321,11 +331,17 @@ ${typesText}
 
 export async function generateActionFunction(
   action: ActionEntry,
-  ctx: { schemaSql: string; entityMapping: string; types: Record<string, unknown> },
+  ctx: { schemaSql: string; entityMapping: string; types: Record<string, unknown>; features?: Array<{ actionName: string; content: string }> },
   trackingContext?: { userId?: string; conversationId?: string }
 ): Promise<GeneratedComponent> {
   const systemPrompt = buildActionSystemPrompt()
-  const userPrompt = buildActionUserPrompt(action, ctx.schemaSql, ctx.entityMapping, ctx.types)
+  const requiredResponseFields = ctx.features
+    ? extractResponseFieldsFromFeatures(ctx.features, action.name)
+    : undefined
+  if (requiredResponseFields && requiredResponseFields.length > 0) {
+    logger.info({ actionName: action.name, fields: requiredResponseFields }, 'BDD response fields 注入')
+  }
+  const userPrompt = buildActionUserPrompt(action, ctx.schemaSql, ctx.entityMapping, ctx.types, requiredResponseFields)
 
   const result = await callClaude(systemPrompt, userPrompt, { maxTokens: 4096 }, trackingContext)
 
@@ -869,8 +885,8 @@ export async function rewriteComponentForServerActions(
   const userPrompt = buildRewriteUserPrompt(component, availableActions, actionImplementations)
 
   // 根據組件大小動態設定 max_tokens（1 token ≈ 3 字元，改寫後通常比原始稍長）
-  const estimatedTokens = Math.ceil(component.content.length / 3) + 512
-  const maxTokens = Math.max(8192, Math.min(estimatedTokens, 16384))
+  const estimatedTokens = Math.ceil(component.content.length / 3) + 1024
+  const maxTokens = Math.max(8192, Math.min(estimatedTokens, 32768))
   const result = await callClaude(systemPrompt, userPrompt, { maxTokens }, trackingContext)
 
   if (!result.success || !result.content) {
@@ -879,6 +895,14 @@ export async function rewriteComponentForServerActions(
   }
 
   const code = extractCodeFromResponse(result.content)
+
+  // 截斷偵測：JSX 開閉標籤不平衡 → 回退原始組件
+  const openTags = (code.match(/<[A-Z]\w*/g) || []).length
+  const closeTags = (code.match(/<\/[A-Z]\w*>/g) || []).length
+  if (openTags > 0 && Math.abs(openTags - closeTags) > 2) {
+    logger.warn({ path: component.path, openTags, closeTags }, '改寫後 JSX 標籤不平衡（可能截斷），回退原始版本')
+    return component
+  }
 
   return {
     path: component.path,
@@ -897,7 +921,7 @@ export async function executeCoderPipeline(
     onProgress: (step: string, percent: number) => Promise<void>
   }
 ): Promise<CoderOutput> {
-  const { actionsYml, schemaSql, entityMapping, existingUiuxCode, trackingContext } = input
+  const { actionsYml, schemaSql, entityMapping, existingUiuxCode, features, trackingContext } = input
 
   // Step 1: 解析 actionsYml
   await callbacks.onProgress('解析 BDD 規格...', 2)
@@ -919,7 +943,7 @@ export async function executeCoderPipeline(
     async (action, idx) => {
       const percent = 8 + Math.floor((idx / actions.length) * 42)
       await callbacks.onProgress(`生成 ${action.name}...`, percent)
-      return generateActionFunction(action, { schemaSql, entityMapping, types }, trackingContext)
+      return generateActionFunction(action, { schemaSql, entityMapping, types, features }, trackingContext)
     },
     3
   )
@@ -1357,6 +1381,63 @@ function validateAndFixActionCalls(
   }
 
   return fixes
+}
+
+// ============================================================
+// Feature Execution Key 提取
+// ============================================================
+
+/**
+ * 從 BDD Feature 文件提取 SpecFormula execution key（<executionKey），
+ * 這些是 API response 必須返回的欄位名稱。
+ * 不包含 __status（由系統自動處理）。
+ */
+function extractResponseFieldsFromFeatures(
+  features: Array<{ actionName: string; content: string }>,
+  actionName: string
+): string[] {
+  const matched = features.filter(f => f.actionName === actionName)
+  if (matched.length === 0) return []
+
+  const fields = new Set<string>()
+  for (const feature of matched) {
+    // 找 response 驗證步驟後的 data table（Then ...回應, with table:）
+    const lines = feature.content.split('\n')
+    let inResponseTable = false
+    let headerLine = ''
+
+    for (const line of lines) {
+      const trimmed = line.trim()
+
+      // 偵測 response 驗證步驟
+      if (/(?:Then|And)\s+.+\(\d+\)回應/.test(trimmed)) {
+        inResponseTable = true
+        headerLine = ''
+        continue
+      }
+
+      if (inResponseTable) {
+        if (trimmed.startsWith('|')) {
+          if (!headerLine) {
+            headerLine = trimmed // header row
+          } else {
+            // data row — 提取 <executionKey
+            const cells = trimmed.split('|').map(c => c.trim()).filter(Boolean)
+            for (const cell of cells) {
+              if (cell.startsWith('<')) {
+                fields.add(cell.substring(1)) // 去掉 < 前綴
+              }
+            }
+            inResponseTable = false // data row 結束
+          }
+        } else {
+          inResponseTable = false
+        }
+      }
+    }
+  }
+
+  return [...fields]
 }
 
 // ============================================================

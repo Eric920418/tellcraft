@@ -27,13 +27,14 @@ export interface CoderSkillInput {
 export async function executeCoderSkill(input: CoderSkillInput): Promise<void> {
   const { projectId, conversationId, userId, redis, io } = input
 
-  // 1. 讀取 BDD 產出
+  // 1. 讀取 BDD 產出（含 features_content 供 response field 名稱對齊）
   const bddSession = await db.queryOne<{
     actions_yml_content: string | null
     schema_sql_content: string | null
     entity_mapping_content: string | null
+    features_content: Array<{ actionName: string; content: string }> | null
   }>(
-    `SELECT actions_yml_content, schema_sql_content, entity_mapping_content
+    `SELECT actions_yml_content, schema_sql_content, entity_mapping_content, features_content
      FROM bdd_sessions
      WHERE project_id = $1 AND actions_yml_content IS NOT NULL
      ORDER BY updated_at DESC LIMIT 1`,
@@ -137,6 +138,7 @@ export async function executeCoderSkill(input: CoderSkillInput): Promise<void> {
         schemaSql: bddSession.schema_sql_content,
         entityMapping: bddSession.entity_mapping_content || '',
         existingUiuxCode,
+        features: bddSession.features_content || undefined,
         trackingContext: { userId, conversationId },
       },
       {
@@ -166,9 +168,12 @@ export async function executeCoderSkill(input: CoderSkillInput): Promise<void> {
 
     await db.upsertProjectFiles(projectId, 'coder', allCoderFiles)
 
-    // 合併代碼到 FlowState（rewritten 覆蓋 uiux）
+    // 合併代碼到 FlowState（rewritten 覆蓋 uiux，backendFiles 加入 components）
     const mergedPages = mergeComponents(existingUiuxCode.pages, result.rewrittenFrontend.filter(f => pages.some(p => p.path === f.path)))
-    const mergedComponents = mergeComponents(existingUiuxCode.components, result.rewrittenFrontend.filter(f => components.some(c => c.path === f.path)))
+    const mergedComponents = mergeComponents(
+      [...existingUiuxCode.components, ...result.backendFiles],
+      result.rewrittenFrontend.filter(f => components.some(c => c.path === f.path))
+    )
 
     state = await getFlowState(redis, conversationId) || state
     state.uiuxGeneratedCode = { pages: mergedPages, components: mergedComponents, styles }
