@@ -4486,9 +4486,9 @@ const config: Config = {
       fontFamily: {
         ${(designSystem.tailwindExtend.fontFamily && Object.keys(designSystem.tailwindExtend.fontFamily).length > 0)
           ? Object.entries(designSystem.tailwindExtend.fontFamily).map(
-              ([key, fonts]) => `${key}: [${(fonts as string[]).map(f => `'${f}'`).join(', ')}]`
+              ([key, fonts]) => `${key}: [${(fonts as string[]).map(f => `'${f.replace(/['"]/g, '')}'`).join(', ')}]`
             ).join(',\n        ')
-          : `sans: ['${designSystem.typography.fontFamily.split(',')[0].trim()}', 'system-ui', 'sans-serif']`
+          : `sans: ['${designSystem.typography.fontFamily.split(',')[0].trim().replace(/['"]/g, '')}', 'system-ui', 'sans-serif']`
         },
       },
       borderRadius: {

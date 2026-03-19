@@ -434,6 +434,8 @@ function convertTailwindConfigToJs(tsConfig: string): string {
   js = js.replace(/const\s+(\w+)\s*:\s*\w+\s*=/g, 'const $1 =')
   // Convert `export default config` to `module.exports = config`
   js = js.replace(/export\s+default\s+(\w+)\s*;?/, 'module.exports = $1')
+  // Fix double-quoted font names: ''Inter'' → 'Inter'（LLM/generateTailwindConfig 常見錯誤）
+  js = js.replace(/''+([^']+)''+/g, "'$1'")
   return js
 }
 
