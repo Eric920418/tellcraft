@@ -2256,15 +2256,32 @@ export function getSyntaxErrors(filename: string, content: string): string[] {
     fileName: tsxName,
     reportDiagnostics: true,
   })
-  if (!result.diagnostics?.length) return []
-  return result.diagnostics.map(d => {
-    const msg = ts.flattenDiagnosticMessageText(d.messageText, '\n')
-    if (d.file && d.start !== undefined) {
-      const pos = d.file.getLineAndCharacterOfPosition(d.start)
-      return `Line ${pos.line + 1}:${pos.character + 1} — ${msg}`
+  const errors: string[] = []
+  if (result.diagnostics?.length) {
+    errors.push(...result.diagnostics.map(d => {
+      const msg = ts.flattenDiagnosticMessageText(d.messageText, '\n')
+      if (d.file && d.start !== undefined) {
+        const pos = d.file.getLineAndCharacterOfPosition(d.start)
+        return `Line ${pos.line + 1}:${pos.character + 1} — ${msg}`
+      }
+      return msg
+    }))
+  }
+
+  // 補充 heuristic：捕捉 transpileModule 漏掉的截斷/結構問題
+  if (tsxName.endsWith('.tsx') && errors.length === 0) {
+    const openBraces = (content.match(/\{/g) || []).length
+    const closeBraces = (content.match(/\}/g) || []).length
+    if (Math.abs(openBraces - closeBraces) > 2) {
+      errors.push(`Unbalanced braces: ${openBraces} open vs ${closeBraces} close`)
     }
-    return msg
-  })
+    const hasExport = /export\s+(default|function|const|class)\b/.test(content)
+    if (!hasExport && content.length > 100) {
+      errors.push('Missing export statement in component file')
+    }
+  }
+
+  return errors
 }
 
 /**
@@ -2293,6 +2310,7 @@ async function checkAndFixSyntaxErrors(
   files: GeneratedComponent[],
   trackingContext?: LlmTrackingContext,
   heartbeatFn?: () => void,
+  pagePathsToPreserve?: Set<string>,
 ): Promise<GeneratedComponent[]> {
   // 最優先：修復 hook 名稱 shadow（const useRef = useRef(null) → TDZ 致命錯誤）
   const withHookFixed = files.map(f => {
@@ -2330,7 +2348,7 @@ async function checkAndFixSyntaxErrors(
     const errors = getSyntaxErrors(file.path, file.content)
     if (errors.length > 0) broken.push({ file, errors, truncated: isTruncatedFile(file.content, errors) })
   }
-  if (broken.length === 0) return withLookupRepaired
+  if (broken.length === 0) return withNullIndexRepaired
 
   logger.warn(
     { count: broken.length, paths: broken.map(b => b.file.path), truncated: broken.filter(b => b.truncated).map(b => b.file.path) },
@@ -2338,7 +2356,7 @@ async function checkAndFixSyntaxErrors(
   )
 
   // 收集非破損檔案的前 20 行作為 import context（供截斷型修復使用）
-  const healthyImportContext = withLookupRepaired
+  const healthyImportContext = withNullIndexRepaired
     .filter(f => !broken.some(b => b.file.path === f.path))
     .map(f => {
       const head = f.content.split('\n').slice(0, 20).join('\n')
@@ -2433,17 +2451,33 @@ async function checkAndFixSyntaxErrors(
     return files
   }
 
-  return withLookupRepaired.map(file => {
-    const fixed = result.get(file.path)
-    if (!fixed) return file
-    const remaining = getSyntaxErrors(file.path, fixed)
-    if (remaining.length > 0) {
-      logger.warn({ path: file.path, errors: remaining }, '修復後仍有語法錯誤，保留原始代碼')
-      return file
-    }
-    logger.info({ path: file.path }, 'TSX 語法修復成功')
-    return { ...file, content: fixed }
-  })
+  const brokenPaths = new Set(broken.map(b => b.file.path))
+
+  return withNullIndexRepaired
+    .map(file => {
+      if (!brokenPaths.has(file.path)) return file
+
+      const fixed = result.get(file.path)
+      if (fixed) {
+        const remaining = getSyntaxErrors(file.path, fixed)
+        if (remaining.length === 0) {
+          logger.info({ path: file.path }, 'TSX 語法修復成功')
+          return { ...file, content: fixed }
+        }
+        logger.warn({ path: file.path, errors: remaining }, '修復後仍有語法錯誤')
+      }
+
+      // page 檔案不能移除（repairMissingComponents 不處理 page）
+      if (pagePathsToPreserve?.has(file.path)) {
+        logger.warn({ path: file.path }, '頁面檔案語法修復失敗，保留原始代碼')
+        return file
+      }
+
+      // 修復失敗 → 移除，交給 repairMissingComponents 重新生成
+      logger.warn({ path: file.path }, '語法修復失敗，移除破損檔案（將由 repairMissingComponents 重新生成）')
+      return null
+    })
+    .filter((f): f is GeneratedComponent => f !== null)
 }
 
 /**
@@ -3315,6 +3349,9 @@ ${productContext?.incrementalFirstBatch
 : isFastMode && productContext?.layoutMode !== 'app'
 ? `**單頁深度模式（快速建站）**：
 - ⚠️ 只生成 1 個頁面（首頁），禁止自行增加其他頁面
+- ⚠️ 組件檔案總數上限 12 個（含 page.tsx + NavBar + Footer + 各 Section 組件）
+- 簡單的 Section（如 CTA、合作夥伴 Logo 牆）直接寫在 page.tsx 內，不需拆成獨立組件
+- 只有超過 80 行或需要複用的 Section 才拆成獨立組件檔案
 - 生成 5-8 個完整 Section（Hero → 核心特色 → 功能展示 → 使用流程/步驟 → 數據/成就 → 客戶評價 → CTA → Footer 資訊）
 - 每個 Section 內容豐富，使用真實模擬數據（和產品領域相關）
 - Section 之間有視覺節奏變化（交替背景色、不同佈局模式）
@@ -3382,7 +3419,7 @@ ${isLaterBatch
   }
 
   const baseTemperature = designTier === 'creative' ? (productContext?.moodId ? 0.5 : 0.4) : 0.3
-  const singlePassLlmOpts = { maxTokens: 32768, temperature: baseTemperature, promptLabel: 'uiux-structure-single', contextSizeHint: generationProfile }
+  const singlePassLlmOpts = { maxTokens: 32768, temperature: baseTemperature, maxContinuations: MAX_TOKEN_CONTINUATIONS, promptLabel: 'uiux-structure-single', contextSizeHint: generationProfile }
   const multiPassLlmOpts = {
     maxTokens: 32768,
     temperature: baseTemperature,
@@ -3493,8 +3530,8 @@ ${isLaterBatch
   }
 
   // ── Layer 0 防禦：TSX 語法檢查 + LLM 自動修復 ──
-  const syntaxFixed = await checkAndFixSyntaxErrors([...allRawPages, ...allRawComponents], trackingContext, heartbeatFn)
   const rawPagePaths = new Set(allRawPages.map(p => p.path))
+  const syntaxFixed = await checkAndFixSyntaxErrors([...allRawPages, ...allRawComponents], trackingContext, heartbeatFn, rawPagePaths)
   const generatedPages = syntaxFixed.filter(f => rawPagePaths.has(f.path))
   const generatedComponents = syntaxFixed.filter(f => !rawPagePaths.has(f.path))
 

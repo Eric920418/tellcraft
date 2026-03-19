@@ -197,6 +197,23 @@ export default function ChatPreviewPanel({
     )
   }
 
+  // 偵測是否正在生成代碼（精細模式 pipeline stages）
+  // 必須在 stablePreviewData 判斷之前：串流中的代碼是三階段管線的中間產物，WebContainer 會顯示錯誤
+  const generatingStages = ['uiux_pipeline_progress', 'uiux_structure_generating', 'uiux_animation_generating', 'uiux_rwd_generating', 'uiux_quality_gate_running', 'uiux_quality_gate_fixing']
+  const lastGeneratingMsg = [...messages].reverse().find(m => m.role === 'assistant' && m.stage)
+  const isUiuxPipelineGenerating = lastGeneratingMsg && generatingStages.includes(lastGeneratingMsg.stage || '')
+
+  if (isUiuxPipelineGenerating) {
+    return (
+      <AIGenerationWaitingScene
+        stage={lastGeneratingMsg?.stage}
+        progress={lastGeneratingMsg?.progress}
+        streamingPhase={(streamingPreview?.phase as 'structure' | 'animation' | 'rwd') || null}
+        streamingChunks={fastBuildChunks}
+      />
+    )
+  }
+
   // 使用穩定的預覽數據（避免每次 render 都搜索 messages + 建立新陣列）
   if (stablePreviewData) {
     const { pages: pagesData, components: componentsData, styles: stylesData, tailwindConfig: tailwindConfigData, isStreaming, neonConnectionString } = stablePreviewData
@@ -461,21 +478,6 @@ export default function ChatPreviewPanel({
           </AnimatePresence>
         </div>
       </div>
-    )
-  }
-
-  // 偵測是否正在生成代碼（有 pipeline/generating stage 訊息）
-  const generatingStages = ['uiux_pipeline_progress', 'uiux_structure_generating', 'uiux_animation_generating', 'uiux_rwd_generating', 'uiux_quality_gate_running', 'uiux_quality_gate_fixing']
-  const lastMsg = [...messages].reverse().find(m => m.role === 'assistant' && m.stage)
-  const isGenerating = lastMsg && generatingStages.includes(lastMsg.stage || '')
-
-  if (isGenerating) {
-    return (
-      <AIGenerationWaitingScene
-        stage={lastMsg?.stage}
-        progress={lastMsg?.progress}
-        streamingChunks={fastBuildChunks}
-      />
     )
   }
 

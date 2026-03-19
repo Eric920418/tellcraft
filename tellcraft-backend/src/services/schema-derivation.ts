@@ -165,7 +165,25 @@ function transformToPostgresqlDDL(tables: ParsedTable[]): string {
         hasPrimaryKey = true
       }
 
-      // CONSTRAINT ... FOREIGN KEY → 抽出延後執行（避免表順序問題）
+      // CONSTRAINT ... PRIMARY KEY → 跳過（id 欄位已有內聯 PRIMARY KEY，避免 multiple primary keys）
+      if (/^\s*CONSTRAINT\s+\w+\s+PRIMARY\s+KEY/i.test(transformed)) {
+        continue
+      }
+
+      // 獨立 PRIMARY KEY (col) 行（非 CONSTRAINT 形式）→ 如果該欄位已有內聯 PK，跳過
+      if (/^\s*PRIMARY\s+KEY\s*\(/i.test(transformed)) {
+        // 檢查對應欄位是否已在 transformedColumns 中帶 PRIMARY KEY
+        const pkColMatch = transformed.match(/PRIMARY\s+KEY\s*\((\w+)\)/i)
+        if (pkColMatch) {
+          const pkCol = pkColMatch[1].toLowerCase()
+          const alreadyInline = transformedColumns.some(c =>
+            new RegExp(`^\\s*${pkCol}\\s+.*PRIMARY\\s+KEY`, 'i').test(c)
+          )
+          if (alreadyInline) continue
+        }
+      }
+
+      // CONSTRAINT ... FOREIGN KEY → 抽出延後執行（避免表順序導致 FK 失敗）
       const constraintFkMatch = transformed.match(/^\s*CONSTRAINT\s+(\w+)\s+FOREIGN\s+KEY\s*\((\w+)\)\s+REFERENCES\s+(\w+)\s*\((\w+)\)/i)
       if (constraintFkMatch) {
         deferredFkStatements.push(

@@ -238,6 +238,41 @@ describe('schema-derivation', () => {
     }
   })
 
+  it('id VARCHAR PK + CONSTRAINT PK 不應產生 multiple primary keys', () => {
+    const sql = `
+    CREATE TABLE users (
+      id VARCHAR(36) PRIMARY KEY,
+      email VARCHAR(255) NOT NULL,
+      CONSTRAINT pk_users PRIMARY KEY (id)
+    );`
+
+    const result = deriveSchemaFromBdd(sql, '')
+    const ddl = result.postgresqlDDL
+
+    // 只應有 1 個 PRIMARY KEY
+    const usersBlock = ddl.split('CREATE TABLE IF NOT EXISTS')[1] || ''
+    const pkCount = (usersBlock.match(/PRIMARY KEY/gi) || []).length
+    expect(pkCount).toBe(1)
+    // id 應被轉成 UUID
+    expect(ddl).toContain('id UUID PRIMARY KEY')
+  })
+
+  it('id UUID PK + 獨立 PRIMARY KEY (id) 不應重複', () => {
+    const sql = `
+    CREATE TABLE users (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      email VARCHAR(255) NOT NULL,
+      PRIMARY KEY (id)
+    );`
+
+    const result = deriveSchemaFromBdd(sql, '')
+    const ddl = result.postgresqlDDL
+
+    const usersBlock = ddl.split('CREATE TABLE IF NOT EXISTS')[1] || ''
+    const pkCount = (usersBlock.match(/PRIMARY KEY/gi) || []).length
+    expect(pkCount).toBe(1)
+  })
+
   it('夜間導航 schema — CONSTRAINT PK 非 id 欄位', () => {
     const sql = `
     CREATE TABLE users (
