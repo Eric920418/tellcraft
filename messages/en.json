@@ -272,7 +272,11 @@
     "reject": "Disagree",
     "skipEs": "Skip ES",
     "autoAdopt": "Auto-adopt all AI suggestions",
-    "uploadTemplate": "Upload as Template"
+    "uploadTemplate": "Upload as Template",
+    "retryDbProvision": "Retry Database Setup",
+    "deployFrontendOnly": "Deploy Frontend Only",
+    "connectDatabase": "Connect Database",
+    "verifyBackend": "Verify Backend"
   },
   "login": {
     "subtleAfterRounds": "Log in to resume this conversation anytime",

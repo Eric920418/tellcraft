@@ -272,7 +272,11 @@
     "reject": "不同意",
     "skipEs": "跳過 ES",
     "autoAdopt": "全部自動採用 AI 建議",
-    "uploadTemplate": "上傳到模板庫"
+    "uploadTemplate": "上傳到模板庫",
+    "retryDbProvision": "重試建立資料庫",
+    "deployFrontendOnly": "部署純前端",
+    "connectDatabase": "連上資料庫",
+    "verifyBackend": "驗證後端"
   },
   "login": {
     "subtleAfterRounds": "登入後可隨時恢復這個對話",

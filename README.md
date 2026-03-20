@@ -115,8 +115,14 @@ npx ts-node bdd-spec/scripts/validate-feature.ts spec/features/
   │
   ▼
 ② Neon DB Provision（已完成）
-  └─ BDD 完成後自動觸發
+  └─ BDD 完成後自動觸發（失敗時用戶說「連上資料庫」自動重試）
      schema.sql → Neon API → 建 DB + 套 Schema + RLS（同步 < 10s）
+  │
+  ▼
+②b Feature Dry-Run（已完成 — SDD RED Phase）
+  └─ Neon DB 建好後自動觸發
+     用真實 DB 執行 Feature entity_setup → 驗證 entity/column/VAR 格式
+     失敗 → LLM 修復 Feature → 重跑（最多 2 輪）
   │
   ▼
 ③ UIUX / Fast Build Skill（已完成）
@@ -131,10 +137,11 @@ npx ts-node bdd-spec/scripts/validate-feature.ts spec/features/
   └─ 改寫 UIUX 組件（useState mock → Server Action 調用）
   │
   ▼
-④b Coder Skill Stage B（✅ 已完成 — 自動觸發，91/91 scenarios 通過，100%）
-  ├─ E2E 測試（/tmp Next.js dev + Puppeteer 掃描，失敗不阻塞但通知用戶）
+④b Coder Skill Stage B（✅ 已完成 — 自動觸發，逐 Feature 精準驗證）
+  ├─ BDD execution key 注入 Coder prompt（response field 名稱對齊）
+  ├─ E2E 測試（/tmp Next.js dev + Puppeteer，含 backendFiles + JSX 截斷偵測）
   ├─ 生成 API Routes（app/api/*/route.ts）
-  └─ SpecFormula 自動跑 Feature Files 驗證（紅燈修、綠燈過，最多 3 輪）
+  └─ SpecFormula 逐 Feature 精準驗證（每 Feature 獨立 3 輪修復 → 全量回歸 + 1 輪最終修復）
   │
   ▼
 ⑤ Deployer（已完成）
@@ -176,7 +183,7 @@ Supabase PostgREST 只能做 CRUD + RLS，**搞不定**：
 | `deployer` | 代碼 → sanitize → 本地 build 驗證 → Vercel 部署 → 回滾 | Haiku（修復） | ✅ 完成 |
 | `iteration` | 迭代修改 + 撤銷上一步 + 版本回滾 | Sonnet | ✅ 完成 |
 | `db-provision` | BDD 完成後自動建 Neon DB + 套用 Schema（同步 < 10s） | — | ✅ 完成 |
-| `coder` | 後端代碼生成 + SpecFormula 自動驗證（紅綠燈循環） | Sonnet | ✅ 完成（100% 通過率） |
+| `coder` | 後端代碼生成 + 逐 Feature SpecFormula 精準驗證（每 Feature 3 輪修復 + 全量回歸） | Sonnet | ✅ 完成 |
 | `domain-manager` | 域名管理：列出已有域名 / 引導購買或綁定 | — | ✅ 完成 |
 | `domain-purchase` | 域名購買：RDAP → Porkbun → Cloudflare DNS → Vercel 綁定 | — | ✅ 完成 |
 | `domain-dns` | 自有域名 DNS 綁定 + Cloudflare DNS CRUD | — | ✅ 完成 |
@@ -228,7 +235,11 @@ Phase 2: Formulation（需求驅動 + 智能分組）
     ↓ 同一實體 CRUD 合併為 1 個 Feature，狀態轉換/跨實體保持獨立
     ↓ 產出 schema.sql + entity_to_table_mapping.yml + feature files
     ↓ Checkpoint 每 3 個 feature 保存，中斷後可恢復（15 分鐘超時偵測）
-    ↓ 驗證腳本（lint + validate）+ 自癒修復（最多 3 次）
+    ↓ 10 層驗證防禦：
+       L1-L2: VAR 對齊快檢 + Schema-aware 靜態分析（entity/column/VAR 流）
+       L3-L4: ISA Format Lint（E001-E010）+ Validate（E011-E013 VAR 對齊 + 空 DataTable）
+       L5: LLM 格式修復（最多 3 輪）
+       L6: Feature Dry-Run（真實 Neon DB entity_setup + 2 輪修復）
 
 Phase 3: Spec Discovery + Clarify
     ↓ S1-S6 品質審查（規則完整性/Example 覆蓋/邊界條件/格式/跨 Feature 一致/Schema 對應）

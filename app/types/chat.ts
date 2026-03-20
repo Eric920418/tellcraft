@@ -24,6 +24,8 @@ export interface Message {
     | 'deployer_checking' | 'deployer_deploying' | 'deployer_code_sync' | 'deployer_complete' | 'deployer_error' | 'deployer_cancelled' | 'deployer_rolling_back' | 'deployer_rollback_select'
     | 'domain_searching' | 'domain_confirm_purchase' | 'domain_registering' | 'domain_own_setup' | 'domain_dns_verifying' | 'domain_complete' | 'domain_failed'
     | 'db_provisioning' | 'db_complete' | 'db_failed'
+    | 'spec_dry_run' | 'spec_dry_run_warning'
+    | 'coder_error' | 'coder_testing' | 'coder_generating'
   progress?: { current: number; total: number; step: string }
   layoutHint?: 'default' | 'split' | 'full_preview'
   richContent?: {
@@ -69,4 +71,8 @@ export const COMMAND_KEYS: Record<string, string> = {
   '__reject_proposal__': 'reject',
   '__auto_adopt_all__': 'autoAdopt',
   '__upload_template__': 'uploadTemplate',
+  '__retry_db_provision__': 'retryDbProvision',
+  '__deploy_without_coder__': 'deployFrontendOnly',
+  '__connect_database__': 'connectDatabase',
+  '__verify_backend__': 'verifyBackend',
 }

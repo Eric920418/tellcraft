@@ -212,7 +212,6 @@ export default function ChatSection({
     if (!isTyping && conversationIdRef.current) {
       broadcastTaskCompleted(conversationIdRef.current)
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isTyping])
 
   const pollingRef = useRef<{ setLastTimestamp: (ts: string) => void }>({ setLastTimestamp: () => {} })

@@ -197,7 +197,6 @@ export default function WebContainerPreview({
       return buildWebContainerFiles(input)
     }
     return buildSkeletonFiles()
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [filesFingerprint])
 
   // ── Env vars ──

@@ -42,7 +42,7 @@ function extractColors(tags: string[], description: string): TemplateColors {
   for (const [kw, color] of Object.entries(COLOR_MAP)) {
     if (allText.includes(kw)) found.push(color)
   }
-  let primary = found[0] ?? '#3b82f6'
+  const primary = found[0] ?? '#3b82f6'
   let accent = found[1] ?? '#8b5cf6'
   if (found.length === 1) {
     const map: Record<string, string> = {

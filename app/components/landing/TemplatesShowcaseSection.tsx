@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react'
 import { motion, useInView } from 'framer-motion'
+import Link from 'next/link'
 import { useRouter } from '@/i18n/navigation'
 import { getTemplates } from '@/app/actions/templates'
 import { INITIAL_TEMPLATES, toTemplateCardData, type TemplateCardData } from '@/app/lib/templates'
@@ -346,7 +347,7 @@ export default function TemplatesShowcaseSection() {
       </motion.div>
 
       <motion.div {...fadeUp(0.5)} style={{ textAlign: 'center', marginTop: 40 }}>
-        <a
+        <Link
           href="/templates"
           style={{
             fontSize: 14, color: 'var(--gray-400)',
@@ -357,7 +358,7 @@ export default function TemplatesShowcaseSection() {
           onMouseLeave={e => (e.currentTarget.style.color = 'var(--gray-400)')}
         >
           瀏覽所有模板 →
-        </a>
+        </Link>
       </motion.div>
     </section>
   )

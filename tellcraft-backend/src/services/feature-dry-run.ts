@@ -14,7 +14,6 @@ import {
   fixDataTableBySchema,
   fillMissingNotNullColumns,
   ensureFkReferencesExist,
-  maybeTransposeVerticalDataTable,
   type ParsedFeature,
   type ParsedStep,
 } from './specformula-runner'
