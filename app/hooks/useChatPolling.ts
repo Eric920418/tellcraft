@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback, useRef } from 'react'
 import { getAuthToken } from '@/app/hooks/useAuth'
 import { getConversationMessages as vpsGetConversationMessages } from '@/app/lib/vps-api'
 import type { Message } from '@/app/types/chat'
-import type { StreamingPreview } from '@/app/hooks/useVpsWebSocket'
+import type { StreamingPreview } from '@/app/types/chat'
 
 export function useChatPolling(
   conversationId: string | undefined,
@@ -64,7 +64,7 @@ export function useChatPolling(
           callbacksRef.current.onStreamingPreview(sp)
           const newChunks = (sp.pages?.length || 0) + (sp.components?.length || 0)
           callbacksRef.current.onFastBuildChunks(newChunks)
-          pollInterval = 1500
+          pollInterval = 3000  // streaming preview 已存 Redis，3s 足夠
           if (typeof window !== 'undefined' && window.innerWidth >= 768) {
             callbacksRef.current.onLayoutModeChange('split')
           }

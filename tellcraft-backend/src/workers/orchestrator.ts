@@ -199,6 +199,7 @@ export function createOrchestratorWorker(
       const data = job.data as ProcessMessageData | ContinueFlowData
       const { conversationId } = data
 
+      const userId = (data as { userId?: string }).userId
       const lockResult = await withConversationLock(redis, conversationId, async () => {
         switch (job.name) {
           case 'process-message':
@@ -208,7 +209,7 @@ export function createOrchestratorWorker(
           default:
             throw new Error(`未知的 Job 類型: ${job.name}`)
         }
-      })
+      }, { userId })
 
       if (lockResult.locked) {
         logger.info({ conversationId, jobId: job.id, jobName: job.name }, '對話已鎖定，丟棄 job 並通知用戶')

@@ -12,7 +12,7 @@ import { smoothEasing, mapBackendStageToFrontend, STAGES } from '@/app/lib/chat-
 import { normalizeLegacyUploadUrl } from '@/app/lib/upload-url'
 import { COMMAND_KEYS } from '@/app/types/chat'
 import type { Message } from '@/app/types/chat'
-import type { StreamingPreview } from '@/app/hooks/useVpsWebSocket'
+import type { StreamingPreview } from '@/app/types/chat'
 import type { Template } from '@/app/lib/templates'
 import type { DeviceType } from '@/app/components/uiux/DeviceSwitcher'
 

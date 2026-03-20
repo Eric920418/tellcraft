@@ -31,7 +31,7 @@ import { matchTemplates } from '../../services/template-matcher'
 import { deriveSchemaFromBdd } from '../../services/schema-derivation'
 import { checkDbQuota, provisionNeonDatabase } from '../../services/neon-service'
 import { checkInputQuality } from '../../services/prefilter'
-import { sendMessage, saveFlowState, getFlowState, deleteFlowState, deductCredits } from '../orchestrator-utils'
+import { sendMessage, saveFlowState, saveFlowStateLight, getFlowState, deleteFlowState, deductCredits } from '../orchestrator-utils'
 import { CREDIT_COSTS } from '../../config/plans'
 import { sanitizeClarifyForDisplay, sanitizeForDisplay } from '../../utils/white-text-sanitizer'
 import { semanticGateway } from '../../services/semantic-gateway'
@@ -1083,7 +1083,7 @@ export async function processUserReply(input: ProcessReplyInput) {
   // 自動採用 AI 建議
   if (userMessage === '__auto_adopt_all__') {
     state.autoAdoptMode = true
-    await saveFlowState(redis, conversationId, state)
+    await saveFlowStateLight(redis, conversationId, state)
     await sendMessage(conversationId, io, {
       content: '已啟動自動模式！AI 將自動採用最佳建議完成所有釐清問題...',
       stage: 'auto_adopt_progress',
@@ -1093,7 +1093,7 @@ export async function processUserReply(input: ProcessReplyInput) {
     } catch (err) {
       logger.error({ err }, '自動模式異常，降級手動')
       state.autoAdoptMode = false
-      await saveFlowState(redis, conversationId, state)
+      await saveFlowStateLight(redis, conversationId, state)
       await sendMessage(conversationId, io, {
         content: `自動模式遇到錯誤，已切回手動模式。請繼續回答問題。`,
         stage: 'error',
@@ -1143,7 +1143,7 @@ export async function processUserReply(input: ProcessReplyInput) {
       await sendClarifyQuestion(conversationId, io, lastItem, stagingItems.length - 1, stagingItems.length)
       state.currentItemId = lastItem.id
       state.waitingForReply = true
-      await saveFlowState(redis, conversationId, state)
+      await saveFlowStateLight(redis, conversationId, state)
     } else {
       await sendMessage(conversationId, io, {
         content: '目前沒有可以返回的問題。',
@@ -1190,7 +1190,7 @@ export async function processUserReply(input: ProcessReplyInput) {
       await sendClarifyQuestion(conversationId, io, { ...matchedItem, status: 'pending', answer: undefined }, 0, 1)
       state.currentItemId = matchedItem.id
       state.waitingForReply = true
-      await saveFlowState(redis, conversationId, state)
+      await saveFlowStateLight(redis, conversationId, state)
       return
     } else {
       await sendMessage(conversationId, io, {
@@ -1333,7 +1333,7 @@ export async function processUserReply(input: ProcessReplyInput) {
 
         if (!gatewayResult.accept) {
           state.semanticRejectCount = (state.semanticRejectCount || 0) + 1
-          await saveFlowState(redis, conversationId, state)
+          await saveFlowStateLight(redis, conversationId, state)
           await sendMessage(conversationId, io, {
             content: gatewayResult.guidanceMessage || '請更明確地回答這個問題。',
             stage: 'clarify_question',
@@ -1785,7 +1785,7 @@ async function continueToNextQuestion(
 
   state.currentItemId = nextItem.id
   state.waitingForReply = true
-  await saveFlowState(redis, conversationId, state)
+  await saveFlowStateLight(redis, conversationId, state)
 }
 
 async function sendBatchConfirmation(
@@ -1978,7 +1978,7 @@ async function completeClärifyPhase(
 
   state.currentItemId = newItems[0].id
   state.waitingForReply = true
-  await saveFlowState(redis, conversationId, state)
+  await saveFlowStateLight(redis, conversationId, state)
 }
 
 // ============================================================

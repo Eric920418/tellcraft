@@ -133,7 +133,6 @@ pm2 describe tellcraft-backend            # 詳細資訊（記憶體/重啟次�
 | **VPS API Client** | `app/lib/vps-api.ts` | ~1900 | 前端呼叫 VPS 的 HTTP 客戶端 |
 | **Server Actions** | `app/actions/index.ts` | ~1800 | 對話/訊息/專案等 Server Actions 入口 |
 | **WebContainer 預覽** | `app/lib/webcontainer-utils.ts` + `app/components/uiux/WebContainerPreview.tsx` + `app/hooks/useWebContainer.ts` + `app/hooks/useWebContainerPreloader.ts` | | 預覽核心，WebContainers 跑完整 Node.js + Next.js dev server（支援 Server Actions + DB）。`useWebContainerPreloader` 在生成期間 pre-boot + pre-install BASE_DEPS，`writeFilesToContainer` 逐檔寫入避免 mount() 清除 node_modules |
-| **WebSocket Hook** | `app/hooks/useVpsWebSocket.ts` | | 即時訊息推送（型別定義） |
 | **Fast Build 動畫** | `app/components/FastBuildPlayer.tsx` + `app/components/remotion/fast-build/` | | Remotion + @remotion/three 3D 工廠流水線動畫（Structure/Animation/RWD 三站）|
 | **3D 蓋房子** | `app/components/building-scene/` + `app/components/remotion/building-scene/` | | Remotion + @remotion/three 低多邊形 3D 場景（BDD Q&A 視覺回饋）|
 | **Landing 組件** | `app/components/landing/` | ~1978 | 15 個自包含 Landing Page 組件 |
@@ -229,7 +228,7 @@ Discovery（Path A 問卷 / Path B 篩選後模板）
 
 ```
 Layer 1: generateStructure 後 validateComponentReferences → repairMissingComponents（LLM 修復）
-Layer 2: sanitizeCodeForDeploy（7 類自動修復 + broken import 自動生成 stub 組件）
+Layer 2: sanitizeCodeForDeploy（8 類自動修復 + broken import 自動生成 stub 組件 + ?? 與 ||/&& 混用加括號）
 Layer 3: fixBuildErrors（API 指數退避重試 3 次，覆蓋 overloaded/rate_limit）
 Layer 4: verifyBuildLocally（3 次 LLM 修復 + 1 次驗證 build，共 4 次 build）
 Layer 5: sanitizeCodeForDeploy 修復 7 — useSearchParams Suspense boundary 自動拆分
@@ -374,7 +373,7 @@ Feature 註解：`# Action: actionName` + `# [METHOD] /path` + `# Summary: xxx`
 - **`app/components/templates/` 已廢棄**，PreviewPanel 用 WebContainers 渲染
 - **deployer_complete 路由順序**：先檢查「部署」→ 再檢查「回滾」→ 再檢查「域名」(`hasDomainIntent`) → `isGreetingOrChitchat` 問候攔截 → `semanticGateway({ phase: 'iteration' })` 預驗證 → 最後才是迭代修改
 - **complete/failed 問候攔截**：`uiux_complete`/`deployer_complete`/`deployer_failed` 三處 `semanticGateway` 前插入 `isGreetingOrChitchat()` 零 LLM 攔截，回覆友善上下文引導 + quickReplies。`__new_project__` 在 `handleContinueFlow` 入口處理（清 FlowState + LINE 映射）
-- **迭代輸入四層防禦**：`prefilterMessage()`（全域）→ `detectFastModeIntent()`（問候/閒聊/平台問題攔截，`platform_issue` 回覆操作指引而非跑 refineCode）→ `semanticGateway({ phase: 'iteration' })`（Sonnet 語義審核，quickFilter 零 LLM 短路 ~80%）→ `refineCode [NO_CHANGE]`（LLM 兜底）。`isDesignFeedback()` 僅用於 fast mode 入口
+- **迭代輸入四層防禦**：`prefilterMessage()`（全域）→ `detectFastModeIntent()`（問候/閒聊/平台問題攔截，`platform_issue` 回覆操作指引而非跑 refineCode）→ `semanticGateway({ phase: 'iteration' })`（Sonnet 語義審核，quickFilter 零 LLM 短路 ~80%）→ `refineCode [NO_CHANGE]`（LLM 兜底）。`isDesignFeedback()` 僅用於 fast mode 入口。**ITER_DESIGN_SIGNALS 必須包含錯誤修復詞**：'修復'/'錯誤'/'error'/'bug' 等，否則用戶貼錯誤訊息會被 quickFilter 拒絕
 - **`checkBuildRelevance` fail-closed**：API 錯誤/空回應/JSON 解析/catch 全部降級拒絕（不是放行），保留無 API key 時的 fail-open
 - **輸入品質閘門（Universal Input Quality Gate）**：`prefilterMessage()` 內 `checkInputQuality()` 全域攔截亂碼/髒話/垃圾 + `handleContinueFlow` phase-aware 二次攔截（`getPhaseStrictness()` 映射 strict/normal/lenient/skip）+ `analyzeAnswerRelevance` 前置檢查。Redis anti-loop `quality_reject:{conversationId}` 連續 3 次強制放行防卡死
 - **參考網站分析（`reference-analyzer.ts`）**：puppeteer-core 需要系統 Chromium（`/usr/bin/chromium-browser`），VPS 須 `apt install chromium-browser`。同一 Puppeteer session 中先截圖再 `page.evaluate(BROWSER_EXTRACTION_SCRIPT)` 提取 DOM 結構/CSS computed styles/色板/字體/佈局骨架（5 秒超時保護）。結構化數據 JSON ~5KB 存入 FlowState。`analyzeWithVisionEnhanced` 將結構化數據注入 Haiku Vision prompt 做精確分析。四個注入點用 `formatStructuredDataForPrompt()` 統一格式化。DOM 提取失敗不影響截圖（獨立 try-catch），降級為純 Vision 分析。色板取樣最多 500 元素（步進取樣）。SSRF 防護禁 localhost/內網 IP
@@ -384,7 +383,7 @@ Feature 註解：`# Action: actionName` + `# [METHOD] /path` + `# Summary: xxx`
 - **文檔與實作同步**：改後端流程 → 同步更新 `uiux-skill/instructions/` + 此文件
 - **`handleCodePhaseRedo` 需要快照**：`uiuxStructureCode`/`uiuxAnimationCode`，否則 redo 在已修改代碼上重做
 - **`verifyBuildLocally` 的修復結果必須同步回 DB**：否則預覽和部署代碼分岔
-- **部署五層防禦**：L1 generateStructure 後驗證引用 → L2 sanitizeCodeForDeploy stub 生成 → L3 fixBuildErrors API 重試 → L4 build 循環 3+1 次 → L5 useSearchParams Suspense 拆分
+- **部署五層防禦**：L1 generateStructure 後驗證引用 → L2 sanitizeCodeForDeploy stub 生成 + `??` 與 `||/&&` 混用自動加括號 → L3 fixBuildErrors API 重試 → L4 build 循環 3+1 次 → L5 useSearchParams Suspense 拆分
 - **Anthropic 模型 ID**：一律用 `claude-sonnet-4-6`（不加日期後綴），`claude-sonnet-4-6-20250514` 不存在會 404。全 codebase 用 `semantic-gateway.ts` 定義的常數而非手打
 - **Anthropic SDK v0.72+**：大 `max_tokens` 必須用 `messages.stream()` + `await stream.finalMessage()`
 - **Skill 函數提前 return 必須保存 FlowState**：否則 `handleContinueFlow` 找不到 state → 用戶對話永久卡死

@@ -23,7 +23,7 @@ import { recommendMoods, getMoodSummary } from '../../services/design-moods'
 import { executeIteration, executeUndoIteration } from '../../services/iteration-skill'
 import { semanticGateway } from '../../services/semantic-gateway'
 import { detectFastModeIntent, getFaqReply, answerWithSonnet } from '../../services/customer-service'
-import { sendMessage, streamLlmMessage, saveFlowState, getFlowState, deleteFlowState, makeStreamingCallback, generatedCodeToFileRows, deductCredits, hasRecentFlowActivity, touchFlowActivity, snapshotCodeToGeneration } from '../orchestrator-utils'
+import { sendMessage, streamLlmMessage, saveFlowState, saveFlowStateLight, getFlowState, deleteFlowState, makeStreamingCallback, generatedCodeToFileRows, deductCredits, hasRecentFlowActivity, touchFlowActivity, snapshotCodeToGeneration } from '../orchestrator-utils'
 import { CREDIT_COSTS } from '../../config/plans'
 import {
   hasDeployIntent, hasRejectDeployIntent, hasUndoIntent,
@@ -560,6 +560,14 @@ export async function handleUiuxMixedPhaseRouting(
     // ── UIUX 完成後檢查是否要部署、撤銷或迭代修改 ──
     if (state.phase === 'uiux_complete') {
       const trimmed = message.trim()
+      const isChinese = /[\u4e00-\u9fff]/.test(trimmed) || state.locale === 'zh'
+
+      // 預先計算 Coder 按鈕（所有回覆路徑共用）
+      const showCoder = !state.coderCompleted && await shouldShowCoderButton(state)
+      const coderQr = showCoder
+        ? { label: isChinese ? '生成後端（接上資料庫）' : 'Generate Backend', value: '__connect_database__', style: 'primary' as const }
+        : null
+
       if (hasDeployIntent(trimmed)) {
         // 攔截：有 DB 但還沒跑 Coder → 提醒用戶先接上資料庫
         if (!state.coderCompleted && await shouldShowCoderButton(state)) {
@@ -681,10 +689,9 @@ export async function handleUiuxMixedPhaseRouting(
       }
       // 拒絕部署（「我不要部署」「先不上線」）→ 確認並提示其他選項
       if (hasRejectDeployIntent(trimmed)) {
-        const isChinese = /[\u4e00-\u9fff]/.test(trimmed)
-        const qr: { label: string; value: string; style: 'primary' | 'ghost' }[] = [
-          { label: isChinese ? '部署上線' : 'Deploy', value: '部署', style: 'primary' },
-        ]
+        const qr: { label: string; value: string; style: 'primary' | 'secondary' | 'ghost' }[] = []
+        if (coderQr) qr.push(coderQr)
+        qr.push({ label: isChinese ? '部署上線' : 'Deploy', value: '部署', style: coderQr ? 'secondary' : 'primary' })
         if (state.uiuxPreIterationCode) {
           qr.push({ label: isChinese ? '撤銷修改' : 'Undo', value: '撤銷', style: 'ghost' })
         }
@@ -804,10 +811,9 @@ export async function handleUiuxMixedPhaseRouting(
       // 問候/問題/閒聊攔截 — 在 semanticGateway 前
       const intentCheck2 = detectFastModeIntent(trimmed)
       if (intentCheck2.match && intentCheck2.type === 'platform_issue') {
-        const isChinese = /[\u4e00-\u9fff]/.test(trimmed) || state.locale === 'zh'
-        const qr: { label: string; value: string; style: 'primary' | 'ghost' }[] = [
-          { label: isChinese ? '部署上線' : 'Deploy', value: '部署', style: 'primary' },
-        ]
+        const qr: { label: string; value: string; style: 'primary' | 'secondary' | 'ghost' }[] = []
+        if (coderQr) qr.push(coderQr)
+        qr.push({ label: isChinese ? '部署上線' : 'Deploy', value: '部署', style: coderQr ? 'secondary' : 'primary' })
         if (state.uiuxPreIterationCode) {
           qr.push({ label: isChinese ? '撤銷修改' : 'Undo', value: '撤銷', style: 'ghost' })
         }
@@ -821,14 +827,13 @@ export async function handleUiuxMixedPhaseRouting(
         return
       }
       if (intentCheck2.match) {
-        const isChinese = /[\u4e00-\u9fff]/.test(trimmed) || state.locale === 'zh'
         if (intentCheck2.type === 'question') {
           const faqResult = getFaqReply(trimmed, state.locale)
-          const qr = [
-            { label: isChinese ? '部署上線' : 'Deploy', value: '部署', style: 'primary' as const },
-            { label: isChinese ? '開始新專案' : 'New Project', value: '__new_project__', style: 'ghost' as const },
-            { label: isChinese ? '上傳到模板庫' : 'Upload as Template', value: '__upload_template__', style: 'ghost' as const },
-          ]
+          const qr: { label: string; value: string; style: 'primary' | 'secondary' | 'ghost' }[] = []
+          if (coderQr) qr.push(coderQr)
+          qr.push({ label: isChinese ? '部署上線' : 'Deploy', value: '部署', style: coderQr ? 'secondary' : 'primary' as const })
+          qr.push({ label: isChinese ? '開始新專案' : 'New Project', value: '__new_project__', style: 'ghost' as const })
+          qr.push({ label: isChinese ? '上傳到模板庫' : 'Upload as Template', value: '__upload_template__', style: 'ghost' as const })
           if (faqResult) {
             await sendMessage(conversationId, io, {
               content: faqResult.reply,
@@ -850,7 +855,8 @@ export async function handleUiuxMixedPhaseRouting(
             : 'Hi! Your design is ready. You can:\n- Describe changes to adjust the design\n- Click "Deploy" to publish your site\n- Click "New Project" to start fresh',
           stage: 'info',
           quickReplies: [
-            { label: isChinese ? '部署上線' : 'Deploy', value: '部署', style: 'primary' as const },
+            ...(coderQr ? [coderQr] : []),
+            { label: isChinese ? '部署上線' : 'Deploy', value: '部署', style: coderQr ? 'secondary' as const : 'primary' as const },
             { label: isChinese ? '開始新專案' : 'New Project', value: '__new_project__', style: 'ghost' as const },
             { label: isChinese ? '上傳到模板庫' : 'Upload as Template', value: '__upload_template__', style: 'ghost' as const },
           ],
@@ -869,10 +875,10 @@ export async function handleUiuxMixedPhaseRouting(
         }, state)
         if (!gwResult2.accept) {
           state.semanticRejectCount = (state.semanticRejectCount || 0) + 1
-          await saveFlowState(redis, conversationId, state)
-          const qr: { label: string; value: string; style: 'primary' | 'ghost' }[] = [
-            { label: '部署上線', value: '部署', style: 'primary' },
-          ]
+          await saveFlowStateLight(redis, conversationId, state)
+          const qr: { label: string; value: string; style: 'primary' | 'secondary' | 'ghost' }[] = []
+          if (coderQr) qr.push(coderQr)
+          qr.push({ label: '部署上線', value: '部署', style: coderQr ? 'secondary' : 'primary' })
           if (state.uiuxPreIterationCode) {
             qr.push({ label: '撤銷修改', value: '撤銷', style: 'ghost' })
           }
@@ -884,7 +890,7 @@ export async function handleUiuxMixedPhaseRouting(
           return
         }
         state.semanticRejectCount = 0
-        await saveFlowState(redis, conversationId, state)
+        await saveFlowStateLight(redis, conversationId, state)
         await executeIteration({ conversationId, projectId: data.projectId, userId, userFeedback: message, redis, io, imageUrls: data.imageUrls })
         return
       }
@@ -2240,7 +2246,7 @@ async function startDesignClarify(
   state.uiuxDesignClarifyStep = 1
   state.uiuxDesignIdeas = []
   state.waitingForReply = true
-  await saveFlowState(redis, conversationId, state)
+  await saveFlowStateLight(redis, conversationId, state)
 }
 
 /**
@@ -2267,7 +2273,7 @@ async function startDesignClarifyWithInitialIdea(
   })
 
   state.waitingForReply = true
-  await saveFlowState(redis, conversationId, state)
+  await saveFlowStateLight(redis, conversationId, state)
 }
 
 
@@ -2335,7 +2341,7 @@ export async function handleDesignClarifyReply(
       if (!gatewayResult.accept) {
         state.semanticRejectCount = (state.semanticRejectCount || 0) + 1
         state.waitingForReply = true
-        await saveFlowState(redis, conversationId, state)
+        await saveFlowStateLight(redis, conversationId, state)
         await sendMessage(conversationId, io, {
           content: gatewayResult.guidanceMessage || '請重新回答。',
           stage: 'uiux_design_clarify',
@@ -2375,7 +2381,7 @@ export async function handleDesignClarifyReply(
 
     state.uiuxDesignClarifyStep = step + 1
     state.waitingForReply = true
-    await saveFlowState(redis, conversationId, state)
+    await saveFlowStateLight(redis, conversationId, state)
   } else {
     // 釐清完成，生成設計方案
     await completeDesignClarify(conversationId, state, redis, io)

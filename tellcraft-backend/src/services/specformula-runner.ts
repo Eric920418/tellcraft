@@ -2225,6 +2225,17 @@ export async function runRedGreenCycle(input: {
     const featureLabel = `Feature ${fi + 1}/${totalFeatures}: ${feature.name}`
     const basePercent = Math.floor((fi / totalFeatures) * 70)
 
+    // 備份修復前的 action code（如果修復最終失敗則回退，避免壞修復污染回歸測試）
+    const actionNameForBackup = getActionNameFromFeature(feature.content)
+    let backupFileIdx = -1
+    let backupCode = ''
+    if (actionNameForBackup) {
+      const kebab = actionNameForBackup.replace(/([a-z])([A-Z])/g, '$1-$2').replace(/[_\s]+/g, '-').toLowerCase()
+      backupFileIdx = currentFiles.findIndex(f => f.path === `lib/actions/${kebab}.ts`)
+      if (backupFileIdx !== -1) backupCode = currentFiles[backupFileIdx].content
+    }
+    let featurePassed = false
+
     for (let attempt = 1; attempt <= maxAttemptsPerFeature; attempt++) {
       totalAttempts++
       const attemptLabel = attempt > 1 ? ` (修復第 ${attempt - 1} 輪)` : ''
@@ -2259,6 +2270,7 @@ export async function runRedGreenCycle(input: {
       // 通過 → 下一個 Feature
       if (result.failed === 0) {
         await input.onProgress(`${featureLabel} — ✅ ${result.passed} scenario 通過`, 5 + basePercent + 10)
+        featurePassed = true
         break
       }
 
@@ -2286,6 +2298,9 @@ export async function runRedGreenCycle(input: {
         break
       }
 
+      // 修復前備份（修復失敗時回退，避免壞修復污染其他 Feature）
+      const backupCode = currentFiles[fileIdx].content
+
       const failedScenarios = result.scenarios
         .filter(s => s.status === 'failed')
         .map(s => ({ scenarioName: s.scenarioName, ruleName: s.ruleName, error: s.error }))
@@ -2299,6 +2314,12 @@ export async function runRedGreenCycle(input: {
       )
 
       currentFiles[fileIdx] = { ...currentFiles[fileIdx], content: fixedCode }
+    }
+
+    // 逐 Feature 修復結束：如果仍失敗，回退到修復前版本（避免壞修復影響回歸測試）
+    if (!featurePassed && backupFileIdx !== -1 && backupCode) {
+      currentFiles[backupFileIdx] = { ...currentFiles[backupFileIdx], content: backupCode }
+      logger.info({ actionName: actionNameForBackup, feature: feature.name }, '修復失敗，回退到修復前版本')
     }
   }
 

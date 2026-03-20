@@ -373,8 +373,8 @@ const orchestratorQueue = new Queue('orchestrator', {
       delay: 2000,
     },
     removeOnComplete: {
-      age: 3600, // 1 小時後刪除
-      count: 1000,
+      age: 600, // 10 分鐘後刪除
+      count: 200,
     },
     removeOnFail: {
       age: 604800, // 7 天後刪除

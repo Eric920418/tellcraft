@@ -6,7 +6,7 @@
 import type Redis from 'ioredis'
 import type { Server as SocketIOServer } from 'socket.io'
 import type { FlowState } from '../types/flow-state'
-import { sendMessage, streamLlmMessage, saveFlowState, deleteFlowState, hasRecentFlowActivity } from './orchestrator-utils'
+import { sendMessage, streamLlmMessage, saveFlowState, saveFlowStateLight, deleteFlowState, hasRecentFlowActivity } from './orchestrator-utils'
 import { executeIteration, executeUndoIteration, executeRollbackQuery, executeRollbackSelection } from '../services/iteration-skill'
 import { semanticGateway } from '../services/semantic-gateway'
 import { detectFastModeIntent, getFaqReply, answerWithSonnet } from '../services/customer-service'
@@ -186,7 +186,7 @@ export async function routePhase(
       )
       if (!gwResult.accept) {
         state.semanticRejectCount = (state.semanticRejectCount || 0) + 1
-        await saveFlowState(redis, conversationId, state)
+        await saveFlowStateLight(redis, conversationId, state)
         await sendMessage(conversationId, io, {
           content: gwResult.guidanceMessage || (isChinese ? '請描述您想修改的設計內容。' : 'Please describe what you\'d like to change.'),
           stage: 'info',
@@ -520,7 +520,7 @@ async function routeDeployerFailed(
   const gwResult = await semanticGateway({ phase: 'iteration', userMessage: trimmed, conversationId, userId, locale: data.locale || state.locale }, state)
   if (!gwResult.accept) {
     state.semanticRejectCount = (state.semanticRejectCount || 0) + 1
-    await saveFlowState(redis, conversationId, state)
+    await saveFlowStateLight(redis, conversationId, state)
     await sendMessage(conversationId, io, {
       content: gwResult.guidanceMessage || '請描述您想修改的設計內容。',
       stage: 'info',
@@ -532,7 +532,7 @@ async function routeDeployerFailed(
     return
   }
   state.semanticRejectCount = 0
-  await saveFlowState(redis, conversationId, state)
+  await saveFlowStateLight(redis, conversationId, state)
   await executeIteration({ conversationId, projectId, userId, userFeedback: message, redis, io, imageUrls: data.imageUrls })
 }
 
@@ -659,5 +659,5 @@ export async function handlePhaseError(
   })
 
   state.waitingForReply = true
-  await saveFlowState(redis, conversationId, state)
+  await saveFlowStateLight(redis, conversationId, state)
 }

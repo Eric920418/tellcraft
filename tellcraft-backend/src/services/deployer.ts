@@ -407,6 +407,25 @@ export function sanitizeCodeForDeploy(code: GeneratedCode): SanitizeResult {
       }
     }
 
+    // ── 修復 3.5: ?? 與 ||/&& 混用加括號（SWC 語法錯誤）──
+    // SWC 要求 ?? 與 || / && 混用時必須加括號，否則 syntax error
+    // Common LLM pattern: const x = A || B ?? fallback → const x = (A || B) ?? fallback
+    {
+      const origContent = file.content
+      file.content = file.content.replace(
+        /^(\s*(?:const|let|var)\s+\w+\s*=\s*)(.+?\s*(?:\|\||&&)\s*.+?)\s*(\?\?\s*.+)$/gm,
+        (_match, prefix: string, logicalExpr: string, nullishPart: string) => {
+          const trimExpr = logicalExpr.trim()
+          // 已有外層括號則跳過
+          if (trimExpr.startsWith('(') && trimExpr.endsWith(')')) return _match
+          return `${prefix}(${trimExpr}) ${nullishPart.trim()}`
+        }
+      )
+      if (file.content !== origContent) {
+        fixes.push(`${file.path}: ?? 與 ||/&& 混用加括號修復`)
+      }
+    }
+
     // ── 修復 4: Google Fonts <link> 或 @import（應用 next/font）──
     if (/<link[^>]*fonts\.googleapis\.com/.test(file.content)) {
       file.content = file.content.replace(/<link[^>]*fonts\.googleapis\.com[^>]*\/?>/g, '')

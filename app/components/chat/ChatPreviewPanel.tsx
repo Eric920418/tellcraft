@@ -9,7 +9,7 @@ import PreviewPanel, { type ElementInfo } from '@/app/components/uiux/PreviewPan
 import PropertyEditor from '@/app/components/uiux/PropertyEditor'
 import DeviceSwitcher, { type DeviceType, getDeviceWidth } from '@/app/components/uiux/DeviceSwitcher'
 import AIGenerationWaitingScene from './AIGenerationWaitingScene'
-import type { StreamingPreview } from '@/app/hooks/useVpsWebSocket'
+import type { StreamingPreview } from '@/app/types/chat'
 import type { Template } from '@/app/lib/templates'
 
 const WebContainerPreviewComponent = dynamic(

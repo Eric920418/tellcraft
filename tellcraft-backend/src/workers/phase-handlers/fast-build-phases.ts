@@ -22,7 +22,7 @@ import {
   mergePages,
 } from '../../services/fast-build-generation'
 import { buildUISpecSummary } from '../../services/bdd-to-ui-spec'
-import { sendMessage, saveFlowState, getFlowState, deleteFlowState, makeStreamingCallback, generatedCodeToFileRows, deductCredits, touchFlowActivity, snapshotCodeToGeneration } from '../orchestrator-utils'
+import { sendMessage, saveFlowState, saveFlowStateLight, getFlowState, deleteFlowState, makeStreamingCallback, generatedCodeToFileRows, deductCredits, touchFlowActivity, snapshotCodeToGeneration } from '../orchestrator-utils'
 import { CREDIT_COSTS } from '../../config/plans'
 import { recommendMoods } from '../../services/design-moods'
 import { analyzeUploadedImage, type ReferenceAnalysis } from '../../services/reference-analyzer'

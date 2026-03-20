@@ -55,6 +55,7 @@ function normalizeMessageContent(content: unknown): string {
  * 保存流程狀態（雙寫：Redis + PostgreSQL）
  * - Redis: 主要存儲，快速讀寫，24 小時過期
  * - PostgreSQL: 備份存儲，用於 Redis 故障恢復
+ * 用於 phase 轉換、checkpoint 等關鍵節點
  */
 export async function saveFlowState(redis: Redis, conversationId: string, state: FlowState) {
   const stateKey = `flow:${conversationId}`
@@ -69,6 +70,16 @@ export async function saveFlowState(redis: Redis, conversationId: string, state:
       logger.error({ err }, 'PostgreSQL 備份寫入失敗')
     }),
   ])
+}
+
+/**
+ * 輕量保存流程狀態（只寫 Redis，跳過 PostgreSQL）
+ * 用於非關鍵的中間狀態更新：waitingForReply 翻轉、semanticRejectCount 遞增等
+ * Phase 轉換和 checkpoint 仍應使用 saveFlowState（雙寫）
+ */
+export async function saveFlowStateLight(redis: Redis, conversationId: string, state: FlowState) {
+  const stateKey = `flow:${conversationId}`
+  await redis.set(stateKey, JSON.stringify(state), 'EX', 86400)
 }
 
 /**

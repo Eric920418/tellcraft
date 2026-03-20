@@ -256,6 +256,46 @@ if (!entityId) throw new Error('缺少 ID 參數')
 每個分支的 _stepSummary 關鍵字**必須用上述括號中的中文詞**，不要用其他同義詞（如不要用「檢索」代替「查詢」）。
 前端改寫時會用這些精確的關鍵字，不一致會導致 500 error。
 
+## Array/Batch 操作（重要！）
+
+如果 action 需要接收多個 ID（如拖曳排序、批次刪除、批次操作）：
+1. 輸入欄位會是**逗號分隔字串**（如 "uuid-1,uuid-2,uuid-3"），必須自行 split：
+   \`const ids = (input.orderedItemIds || '').split(',').map(s => s.trim()).filter(Boolean)\`
+2. PostgreSQL array 查詢用 ANY，不用 IN：
+   \`await sql\`SELECT * FROM todos WHERE id = ANY(\${ids}::uuid[])\`\`
+3. 批次 UPDATE 保留順序（拖曳排序）：逐筆 UPDATE
+   \`\`\`typescript
+   for (let i = 0; i < ids.length; i++) {
+     await sql\`UPDATE todos SET sort_order = \${i + 1} WHERE id = \${ids[i]}\`
+   }
+   \`\`\`
+4. 如果 input 欄位名含 Ids/Items/List（複數），一律先 split(',')
+
+## Multi-table JOIN 查詢
+
+列表查詢如果需要關聯資料（如訂單列表含用戶名、商品名），用 JOIN：
+\`\`\`typescript
+const rows = await sql\`
+  SELECT o.*, u.name as user_name, p.title as product_title
+  FROM orders o
+  JOIN users u ON o.user_id = u.id
+  JOIN products p ON o.product_id = p.id
+  WHERE o.deleted_at IS NULL
+  ORDER BY o.created_at DESC
+\`
+\`\`\`
+
+## Transaction（多表原子操作）
+
+如果一個操作需要更新多張表（如建立訂單同時扣庫存），用 sql.begin：
+\`\`\`typescript
+const result = await sql.begin(async (tx) => {
+  const [order] = await tx\`INSERT INTO orders (...) VALUES (...) RETURNING *\`
+  await tx\`UPDATE products SET stock = stock - \${qty} WHERE id = \${productId}\`
+  return order
+})
+\`\`\`
+
 ## 程式碼結構
 \`\`\`typescript
 import { sql } from '@/lib/db'
@@ -343,7 +383,10 @@ export async function generateActionFunction(
   }
   const userPrompt = buildActionUserPrompt(action, ctx.schemaSql, ctx.entityMapping, ctx.types, requiredResponseFields)
 
-  const result = await callClaude(systemPrompt, userPrompt, { maxTokens: 4096 }, trackingContext)
+  // 複雜 action（多規則）自動獲得更多 token
+  const ruleCount = (action.rules || []).length
+  const actionMaxTokens = Math.max(4096, Math.min(4096 + ruleCount * 512, 8192))
+  const result = await callClaude(systemPrompt, userPrompt, { maxTokens: actionMaxTokens }, trackingContext)
 
   if (!result.success || !result.content) {
     throw new Error(`生成 ${action.name} 失敗：${result.error}`)
@@ -1668,7 +1711,24 @@ if (op.includes('登出')) {
   return { __status: 200, message: '登出成功' }
 }
 \`\`\`
-不要驗證 token、session、JWT 是否有效或已過期。登出就是直接成功。`
+不要驗證 token、session、JWT 是否有效或已過期。登出就是直接成功。
+
+## Array/Batch 常見修復
+
+如果錯誤是 "invalid input syntax for type uuid" 且 SQL params 含逗號分隔值或 $variable 字面字串：
+→ 輸入是逗號分隔字串，需要 split(',').map(s => s.trim()).filter(Boolean)
+→ SQL 用 ANY(\${array}::uuid[])，不用 IN
+→ 不要直接把字串傳入 uuid 欄位
+
+如果錯誤涉及拖曳排序/批次更新/重新排列：
+→ 先 split 取得 ID 陣列，再逐筆 UPDATE（for loop），每個 UPDATE 一個 ID + 一個 sort_order
+→ 確保 sort_order 從 1 開始連續遞增
+
+如果錯誤含 "column X is of type uuid but expression is of type text"：
+→ 加 ::uuid cast：\`WHERE id = \${value}::uuid\`
+
+如果錯誤含 "operand of WHERE must not return a set"：
+→ 把 IN (\${array}) 改為 = ANY(\${array}::uuid[])`
 
 /**
  * 用 LLM 修復失敗的 action 函數

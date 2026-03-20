@@ -147,8 +147,9 @@ export function hasSubstantiveContent(text: string): boolean {
   }
 
   // 純拉丁字母無母音且不在白名單（如 "BBBCCCAAA" 的字母部分 — 但 "BBBCCCAAA" 有母音 A，所以要更嚴格）
+  // 只對短字串（≤50 字母）檢查 ratio — 長文本自然語言只有 26 個字母，ratio 必然低，會誤殺錯誤訊息
   const latinPart = text.replace(/[^a-zA-Z]/g, '')
-  if (latinPart.length >= 4) {
+  if (latinPart.length >= 4 && latinPart.length <= 50) {
     // unique chars ratio 過低 → 重複填充（如 "BBBCCCAAA" unique=3, ratio=3/9=0.33）
     const uniqueChars = new Set(latinPart.toLowerCase()).size
     if (uniqueChars / latinPart.length < 0.4) return false
@@ -251,13 +252,14 @@ export function quickFilter(input: SemanticGatewayInput): SemanticGatewayResult 
   if (input.phase === 'iteration') {
     // 設計關鍵詞（從 isDesignFeedback 精簡移植）→ accept（零 LLM）
     const ITER_DESIGN_SIGNALS_ZH = [
-      '改', '換', '加', '刪', '移除', '調整', '修改', '更新', '增加', '替換', '縮小', '放大',
+      '改', '換', '加', '刪', '移除', '調整', '修改', '修復', '更新', '增加', '替換', '縮小', '放大',
       '顏色', '色', '字體', '大小', '間距', '圓角', '陰影', '透明', '粗細',
       '標題', '按鈕', '圖片', '背景', '邊框', '文字', '連結', '導航', '選單', '卡片', '表格', '表單',
       '風格', '排版', '佈局', '動畫', '樣式', '響應式', '手機版', '深色', '淺色',
       '功能', '搜尋', '篩選', '彈窗', '下拉', '滾動', '切換',
       '太大', '太小', '太粗', '太細', '太淡', '太深', '太亮', '太暗', '太窄', '太寬', '太醜',
       '跑版', '壞了', '不見了', '消失', '重疊', '偏了', '不好看', '不對', '不行', '不夠',
+      '錯誤', '報錯', '出錯', '故障',
     ]
     const ITER_DESIGN_SIGNALS_EN = [
       'change', 'modify', 'update', 'add', 'remove', 'delete', 'replace', 'move', 'resize', 'align',
@@ -269,6 +271,7 @@ export function quickFilter(input: SemanticGatewayInput): SemanticGatewayResult 
       'broken', 'misaligned', 'overlapping', 'missing', 'wrong',
       'bigger', 'smaller', 'larger', 'wider', 'darker', 'lighter', 'bolder',
       'make', 'set', 'fix', 'adjust', 'increase', 'decrease',
+      'error', 'bug', 'crash', 'syntax',
     ]
     const hasDesignKw = ITER_DESIGN_SIGNALS_ZH.some(k => trimmed.includes(k))
       || ITER_DESIGN_SIGNALS_EN.some(k => lower.includes(k))
@@ -401,7 +404,7 @@ export async function semanticGateway(
       method: 'POST',
       headers: getAnthropicHeaders(),
       body: JSON.stringify({
-        model: MODEL.SONNET,
+        model: MODEL.HAIKU,
         max_tokens: 200,
         system: buildPrompt(input),
         messages: [{ role: 'user', content: input.userMessage }],
@@ -434,7 +437,7 @@ export async function semanticGateway(
     // 記錄 LLM 使用量
     if (data.usage) {
       trackLlmUsage({
-        model: MODEL.SONNET,
+        model: MODEL.HAIKU,
         inputTokens: data.usage.input_tokens || 0,
         outputTokens: data.usage.output_tokens || 0,
         purpose: 'semantic_gateway',

@@ -63,6 +63,23 @@ export interface ConversationItem {
   createdAt: string
 }
 
+// ============================================================
+// Streaming 型別（原 useVpsWebSocket.ts，前端透過 HTTP polling 取得）
+// ============================================================
+
+export interface StreamingPreview {
+  pages: { path: string; content: string; description: string }[]
+  components: { path: string; content: string; description: string }[]
+  styles: string
+  tailwindConfig: string
+  phase: 'structure' | 'animation' | 'rwd'
+}
+
+export interface FastBuildChunks {
+  phase: 'structure' | 'animation' | 'rwd'
+  chunkCount: number
+}
+
 // INTERNAL_COMMAND_LABELS keys -> command namespace keys
 export const COMMAND_KEYS: Record<string, string> = {
   '__go_back__': 'goBack',

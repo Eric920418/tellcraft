@@ -706,6 +706,16 @@ Feature: ${featureInfo.name}
 - **Entity 必須存在於 Schema**：\`準備一個{entity}\` 和 \`應該存在一個{entity}\` 的 entity 名稱必須是 Schema 中已定義的資料表（透過 Entity Mapping 映射）。禁止發明 Schema 中不存在的 table（如 Schema 沒有 sessions 表就不能 \`準備一個sessions\`）
 - **DataTable 欄位必須存在於 Schema**：DataTable 的 header 欄位名稱（camelCase）必須能映射到對應 table 的實際 column name（snake_case）。禁止使用 Schema 中不存在的欄位
 
+## Array 類型參數（如拖曳排序、批次操作）
+
+如果 action 需要接收多個 ID（如 orderedItemIds），在 DataTable 中用**逗號分隔 $variable**：
+\`\`\`
+| orderedItemIds                       |
+| $Todo1.id,$Todo2.id,$Todo3.id        |
+\`\`\`
+禁止用 JSON array 格式（\`["...","..."]\`），因為 VAR-System 無法在 JSON 內解析 $variable。
+Action 函數會自行 \`split(',')\` 處理。
+
 ## Scenario Outline（合併同模式的參數驗證）
 當多個 Example 共享同一驗證模式（例如「缺少必要參數 → 失敗」），**可以考慮**使用 Scenario Outline 合併：
 

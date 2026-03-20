@@ -524,6 +524,23 @@ export function sanitizeFileContent(path: string, content: string): string {
     code = code.replace(/<link[^>]*fonts\.googleapis\.com[^>]*\/?>/g, '')
   }
 
+  // ── Fix 5: 陣列 .map/.filter/.forEach 前加 optional chaining 防禦 ──
+  // `items.map(` → `items?.map(`（避免 undefined.map 運行時 crash）
+  // 排除已有 ?.map、已有 ].map、).map（這些已經安全）
+  code = code.replace(/(\b\w+)\.map\s*\(/g, (m, varName) => {
+    // 排除常見安全來源：Object/Array/數字常量
+    if (['Object', 'Array', 'JSON', 'Math', 'console', 'window', 'document', 'Promise'].includes(varName)) return m
+    return `${varName}?.map(`
+  })
+  code = code.replace(/(\b\w+)\.filter\s*\(/g, (m, varName) => {
+    if (['Object', 'Array', 'JSON'].includes(varName)) return m
+    return `${varName}?.filter(`
+  })
+  code = code.replace(/(\b\w+)\.forEach\s*\(/g, (m, varName) => {
+    if (['Object', 'Array', 'JSON'].includes(varName)) return m
+    return `${varName}?.forEach(`
+  })
+
   return code
 }
 

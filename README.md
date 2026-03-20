@@ -566,8 +566,7 @@ app/
 │   ├── useLoginPrompt.ts # 登入提示觸發邏輯
 │   ├── useWebContainerPreloader.ts # WebContainer 預載（生成時 pre-boot + pre-install）
 │   ├── useAdminLogs.ts   # 管理員日誌串流 (Socket.io)
-│   ├── useLocalePath.ts  # locale-aware window.location.href
-│   └── useVpsWebSocket.ts # WebSocket
+│   └── useLocalePath.ts  # locale-aware window.location.href
 ├── components/
 │   ├── uiux/             # UIUX 元件（WebContainerPreview/PreviewPanel/TemplatePicker）
 │   ├── dashboard/        # 儀表板元件
