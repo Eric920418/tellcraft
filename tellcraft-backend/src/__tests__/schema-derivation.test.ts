@@ -371,6 +371,34 @@ describe('schema-derivation', () => {
     expect(ddl).not.toMatch(/AUTO_INCREMENT/i)
   })
 
+  it('內聯 REFERENCES ON DELETE CASCADE 正確移除', () => {
+    const sql = `
+    CREATE TABLE users (id VARCHAR(36) PRIMARY KEY, name VARCHAR(100));
+    CREATE TABLE todo_items (
+      id VARCHAR(36) PRIMARY KEY,
+      user_id VARCHAR(36) NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      title VARCHAR(200) NOT NULL
+    );`
+    const ddl = deriveSchemaFromBdd(sql, '').postgresqlDDL
+    // ON DELETE CASCADE 不應殘留在欄位定義中
+    expect(ddl).not.toMatch(/ON\s+DELETE/i)
+    // FK 應被延後
+    expect(ddl).toContain('ALTER TABLE todo_items ADD CONSTRAINT fk_todo_items_user_id')
+  })
+
+  it('CONSTRAINT FK ON DELETE CASCADE 保留到 ALTER TABLE', () => {
+    const sql = `
+    CREATE TABLE users (id VARCHAR(36) PRIMARY KEY, name VARCHAR(100));
+    CREATE TABLE todos (
+      id VARCHAR(36) PRIMARY KEY,
+      user_id VARCHAR(36) NOT NULL,
+      CONSTRAINT fk_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+    );`
+    const ddl = deriveSchemaFromBdd(sql, '').postgresqlDDL
+    // ALTER TABLE 應包含 ON DELETE CASCADE
+    expect(ddl).toContain('ALTER TABLE todos ADD CONSTRAINT fk_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE')
+  })
+
   it('UNSIGNED 移除', () => {
     const sql = `CREATE TABLE users (id VARCHAR(36) PRIMARY KEY, age INT UNSIGNED NOT NULL);`
     const ddl = deriveSchemaFromBdd(sql, '').postgresqlDDL

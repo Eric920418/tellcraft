@@ -197,10 +197,11 @@ function transformToPostgresqlDDL(tables: ParsedTable[]): string {
       }
 
       // CONSTRAINT ... FOREIGN KEY → 抽出延後執行（避免表順序導致 FK 失敗）
-      const constraintFkMatch = transformed.match(/^\s*CONSTRAINT\s+(\w+)\s+FOREIGN\s+KEY\s*\((\w+)\)\s+REFERENCES\s+(\w+)\s*\((\w+)\)/i)
+      const constraintFkMatch = transformed.match(/^\s*CONSTRAINT\s+(\w+)\s+FOREIGN\s+KEY\s*\((\w+)\)\s+REFERENCES\s+(\w+)\s*\((\w+)\)(\s+ON\s+(?:DELETE|UPDATE)\s+(?:CASCADE|SET\s+NULL|SET\s+DEFAULT|RESTRICT|NO\s+ACTION))*/i)
       if (constraintFkMatch) {
+        const onClause = constraintFkMatch[5] || ''
         deferredFkStatements.push(
-          `ALTER TABLE ${table.tableName} ADD CONSTRAINT ${constraintFkMatch[1]} FOREIGN KEY (${constraintFkMatch[2]}) REFERENCES ${constraintFkMatch[3]}(${constraintFkMatch[4]});`
+          `ALTER TABLE ${table.tableName} ADD CONSTRAINT ${constraintFkMatch[1]} FOREIGN KEY (${constraintFkMatch[2]}) REFERENCES ${constraintFkMatch[3]}(${constraintFkMatch[4]})${onClause};`
         )
         // 不加入 CREATE TABLE，跳過
         continue
@@ -212,16 +213,16 @@ function transformToPostgresqlDDL(tables: ParsedTable[]): string {
         const colName = inlineRefMatch[1]
         const refTable = inlineRefMatch[4]
         const refCol = inlineRefMatch[5]
-        // 移除 REFERENCES 子句，只留欄位定義
-        transformed = transformed.replace(/\s*REFERENCES\s+\w+\s*\(\w+\)/i, '')
+        // 移除 REFERENCES 子句 + ON DELETE/UPDATE（完整移除外鍵相關語法）
+        transformed = transformed.replace(/\s*REFERENCES\s+\w+\s*\(\w+\)(\s+ON\s+(?:DELETE|UPDATE)\s+(?:CASCADE|SET\s+NULL|SET\s+DEFAULT|RESTRICT|NO\s+ACTION))*/gi, '')
         deferredFkStatements.push(
           `ALTER TABLE ${table.tableName} ADD CONSTRAINT fk_${table.tableName}_${colName} FOREIGN KEY (${colName}) REFERENCES ${refTable}(${refCol});`
         )
       } else {
         // VARCHAR(n) 的內聯外鍵引用（舊路徑，已被上面攔截，保留 fallback）
         transformed = transformed.replace(
-          /VARCHAR\(\d+\)\s+(NOT\s+NULL\s+)?REFERENCES\s+(\w+)\s*\((\w+)\)/gi,
-          'UUID $1REFERENCES $2($3)'
+          /VARCHAR\(\d+\)\s+(NOT\s+NULL\s+)?REFERENCES\s+(\w+)\s*\((\w+)\)(\s+ON\s+(?:DELETE|UPDATE)\s+(?:CASCADE|SET\s+NULL|SET\s+DEFAULT|RESTRICT|NO\s+ACTION))*/gi,
+          'UUID $1REFERENCES $2($3)$4'
         )
       }
 

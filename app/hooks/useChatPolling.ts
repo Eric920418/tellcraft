@@ -152,15 +152,19 @@ export function useChatPolling(
                 return hasPreview ? filteredPrev : prev
               }
 
+              const PROGRESS_STAGES = [
+                'init_progress', 'formulation_start', 'formulation_progress',
+                'auto_adopt_progress',
+              ]
               const hasNonProgressAiMessage = newMessagesToAdd.some(m =>
                 m.role === 'assistant' &&
-                !['init_progress', 'formulation_start', 'formulation_progress'].includes(m.stage || '')
+                !PROGRESS_STAGES.includes(m.stage || '')
               )
               if (hasNonProgressAiMessage) {
                 // 觸發打字機動畫（找最後一條新 assistant 訊息）
                 const lastNewAssistant = [...newMessagesToAdd].reverse().find(m =>
                   m.role === 'assistant' &&
-                  !['init_progress', 'formulation_start', 'formulation_progress'].includes(m.stage || '')
+                  !PROGRESS_STAGES.includes(m.stage || '')
                 )
                 if (lastNewAssistant) {
                   callbacksRef.current.onTypewriterTarget(lastNewAssistant.id)
