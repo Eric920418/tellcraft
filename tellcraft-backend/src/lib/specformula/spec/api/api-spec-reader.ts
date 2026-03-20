@@ -25,7 +25,13 @@ export class ApiSpecReader {
   }
 
   readFromString(content: string): ApiSpec {
+    if (!content || !content.trim()) {
+      return { operations: [] };
+    }
     const root = yaml.load(content) as Record<string, unknown>;
+    if (!root || typeof root !== 'object') {
+      return { operations: [] };
+    }
     return this.parseSpec(root, new Map());
   }
 

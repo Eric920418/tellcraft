@@ -1505,7 +1505,8 @@ export async function runAllFeatures(input: {
   }
 
   // 2. 解析 API spec
-  const apiSpecReader = new ApiSpecReader(isaSpec.config.api)
+  const apiConfig = isaSpec.config?.api || {}
+  const apiSpecReader = new ApiSpecReader(apiConfig)
   const apiSpec: ApiSpec = apiSpecReader.readFromString(input.openApiSpec)
 
   // 3. 解析 DDL → DatabaseSchema
@@ -1521,7 +1522,7 @@ export async function runAllFeatures(input: {
     () => input.pool,
     input.httpAdapter,
     apiSpec,
-    isaSpec.config.api.time_format
+    apiConfig.time_format
   )
 
   // 5. 逐 Feature → 逐 Scenario 執行
