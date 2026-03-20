@@ -417,9 +417,114 @@ export function prepareCss(rawStyles: string | undefined, _hasTailwindConfig: bo
  */
 export function sanitizeFileContent(path: string, content: string): string {
   if (!/\.(tsx?|jsx?)$/.test(path)) return content
-  // 修復可選鏈左側賦值（n?.x += value → n.x += value）
-  // LLM 常在 canvas 動畫/物理模擬代碼中產生此模式，SWC/TS 不允許
-  return content.replace(/(\b\w+)\?\.([\w]+)\s*([+\-*/%]?=)(?!=)/g, '$1.$2 $3')
+  let code = content
+  const isBackendFile = path.startsWith('lib/actions/') || path.startsWith('app/actions/') || path.startsWith('app/api/') || path === 'lib/db.ts'
+
+  // ── Fix 1: framer-motion → motion/react ──
+  if (/from\s+['"]framer-motion['"]/.test(code)) {
+    code = code.replace(/from\s+['"]framer-motion['"]/g, "from 'motion/react'")
+  }
+
+  // ── Fix 2: 缺少 'use client'（有 hooks/motion 但沒宣告）──
+  if (!isBackendFile) {
+    const needsClient =
+      /\b(useState|useEffect|useRef|useCallback|useMemo|useContext|useReducer)\b/.test(code) ||
+      /from\s+['"]motion\/react['"]/.test(code)
+    const hasUseClient = /^['"]use client['"]/.test(code.trimStart())
+    const hasUseServer = /^['"]use server['"]/.test(code.trimStart())
+    if (needsClient && !hasUseClient && !hasUseServer) {
+      code = "'use client'\n\n" + code
+    }
+  }
+
+  // ── Fix 2.5: 缺少 React hooks import ──
+  if (!isBackendFile) {
+    const HOOKS = ['useState', 'useEffect', 'useRef', 'useCallback', 'useMemo', 'useContext', 'useReducer', 'useLayoutEffect', 'useId']
+    const codeWithoutImports = code.replace(/^import\s+.+from\s+['"].+['"]\s*;?\s*$/gm, '')
+    const usedHooks = HOOKS.filter(h => new RegExp(`\\b${h}\\s*[(<]`).test(codeWithoutImports))
+    if (usedHooks.length > 0) {
+      const reactImportMatch = code.match(/^(import\s+(?:React\s*,?\s*)?(?:\{([^}]*)\})?\s*from\s+['"]react['"];?)$/m)
+      const alreadyImported = reactImportMatch?.[2]
+        ? reactImportMatch[2].split(',').map(s => s.trim()).filter(Boolean)
+        : []
+      const missing = usedHooks.filter(h => !alreadyImported.includes(h))
+      if (missing.length > 0) {
+        if (reactImportMatch) {
+          const allNamed = [...new Set([...alreadyImported, ...missing])].sort()
+          const hasDefault = /import\s+React\s*,/.test(reactImportMatch[0])
+          const newImport = hasDefault
+            ? `import React, { ${allNamed.join(', ')} } from 'react'`
+            : `import { ${allNamed.join(', ')} } from 'react'`
+          code = code.replace(reactImportMatch[0], newImport)
+        } else {
+          const ucMatch = code.match(/^['"]use client['"]\s*\n/)
+          const insertAfter = ucMatch ? ucMatch[0].length : 0
+          code = code.slice(0, insertAfter) + `import { ${missing.join(', ')} } from 'react'\n` + code.slice(insertAfter)
+        }
+      }
+    }
+  }
+
+  // ── Fix 2.7: ?? 混用 || 無括號（SWC 語法錯誤）──
+  // JavaScript 不允許 `a || b ?? c`，必須加括號
+  // 策略：找到 `||` 和 `??` 共存的行，把 `=` 之後到 `??` 之前的部分用括號包起來
+  code = code.split('\n').map(line => {
+    if (!line.includes('||') || !line.includes('??')) return line
+    const orIdx = line.indexOf('||')
+    const ncIdx = line.indexOf('??', orIdx)
+    if (ncIdx < 0) return line
+    // 確認 ?? 不是 ?. 的一部分（?? 後面不能是 .）
+    if (line[ncIdx + 2] === '.') return line
+    // 找到 = 號（賦值起始點）
+    const eqIdx = line.indexOf('=')
+    if (eqIdx < 0 || eqIdx >= orIdx) return line
+    // 跳過 === / !==
+    const afterEq = line[eqIdx + 1]
+    if (afterEq === '=' || afterEq === '>') return line
+    // 包括 = 後的空白
+    const start = eqIdx + 1
+    const beforeNc = line.slice(start, ncIdx).trimEnd()
+    const afterNc = line.slice(ncIdx)
+    return line.slice(0, start) + ' (' + beforeNc.trimStart() + ') ' + afterNc
+  }).join('\n')
+
+  // ── Fix 2.8: 可選鏈左側賦值（n?.x += value → n.x += value）──
+  code = code.replace(/(\b\w+)\?\.([\w]+)\s*([+\-*/%]?=)(?!=)/g, '$1.$2 $3')
+
+  // ── Fix 3: motion.* spread props 類型衝突 ──
+  if (!isBackendFile && /motion\.\w+/.test(code)) {
+    const motionSpreadRegex = /<motion\.\w+[^>]*\{\.\.\.(\w+)\}/g
+    const spreadVars = new Set<string>()
+    let match
+    motionSpreadRegex.lastIndex = 0
+    while ((match = motionSpreadRegex.exec(code)) !== null) {
+      spreadVars.add(match[1])
+    }
+    if (spreadVars.size > 0 && !code.includes('safeMotionProps')) {
+      const lines = code.split('\n')
+      let lastImportLine = -1
+      for (let i = 0; i < lines.length; i++) {
+        if (/^import\s/.test(lines[i].trim())) lastImportLine = i
+      }
+      if (lastImportLine >= 0) {
+        lines.splice(lastImportLine + 1, 0, "import { safeMotionProps } from '@/lib/motion-safe-props'")
+        code = lines.join('\n')
+      }
+      for (const v of spreadVars) {
+        code = code.replace(
+          new RegExp(`(<motion\\.\\w+[^>]*)\\{\\.\\.\\.${v}\\}`, 'g'),
+          `$1{...safeMotionProps(${v})}`
+        )
+      }
+    }
+  }
+
+  // ── Fix 4: Google Fonts <link> 標籤移除 ──
+  if (/<link[^>]*fonts\.googleapis\.com/.test(code)) {
+    code = code.replace(/<link[^>]*fonts\.googleapis\.com[^>]*\/?>/g, '')
+  }
+
+  return code
 }
 
 /**
