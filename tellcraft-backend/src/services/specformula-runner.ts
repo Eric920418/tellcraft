@@ -28,6 +28,7 @@ import {
   ApiSpecReader,
   TestResponse,
 } from '../lib/specformula'
+import type { HttpClientAdapter } from '../lib/specformula/http/http-client-adapter'
 
 const logger = createLogger('specformula-runner')
 
@@ -1491,7 +1492,7 @@ export async function runAllFeatures(input: {
   openApiSpec: string
   schemaSql: string
   entityMapping: string
-  httpAdapter: UrlHttpAdapter
+  httpAdapter: HttpClientAdapter
   pool: Pool
   onProgress?: (step: string, percent: number) => Promise<void>
 }): Promise<SpecFormulaTestResult> {

@@ -184,6 +184,10 @@ export interface FlowState {
   coderGenerationStartedAt?: number       // 超時偵測
   coderCompleted?: boolean                // 標記已完成（deployer/quickReply 可識別）
   coderPreRewriteCode?: GeneratedCode     // 改寫前快照（供撤銷/失敗恢復）
+  // RED Phase（SDD 靜態規格驗證，Coder 生成前執行）
+  coderRedPhasePassed?: boolean           // RED Phase 是否通過（errors=0）
+  coderRedPhaseIssueCount?: number        // 發現的問題數量
+  coderRedPhaseFixRounds?: number         // LLM 修復輪數（0=一次通過）
   // Coder Testing（SpecFormula 紅綠燈）
   coderTestPassed?: boolean               // 測試是否全部通過
   coderTestAttempts?: number              // 紅綠燈循環次數

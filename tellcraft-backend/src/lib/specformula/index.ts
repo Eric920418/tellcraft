@@ -13,6 +13,7 @@ export { TestRequest, TestRequestBuilder } from './http/test-request';
 export { TestResponse } from './http/test-response';
 export { SupertestAdapter } from './http/supertest-adapter';
 export { UrlHttpAdapter } from './http/url-adapter';
+export { StubHttpAdapter } from './http/stub-adapter';
 
 // ========== Instruction ==========
 export { TimeControl } from './instruction/time-control';

@@ -81,7 +81,9 @@ pm2 describe tellcraft-backend            # 詳細資訊（記憶體/重啟次�
 | **UIUX Phases** | `workers/phase-handlers/uiux-phases.ts`（~2420 行） | UIUX 全流程：Discovery/Brief/Variant/CodePipeline/Mixed routing |
 | **Deploy Phases** | `workers/phase-handlers/deploy-phases.ts`（~240 行） | 部署執行：prepareDeployment + executeDeployment |
 | **Fast Build Phases** | `workers/phase-handlers/fast-build-phases.ts`（~480 行） | 快速建站：增量交互式生成（executeFastBuildSkill + runFastBuildPipeline + mergeGeneratedCode） |
-| **Coder Phases** | `workers/phase-handlers/coder-phases.ts`（~400 行） | Coder Skill：讀 BDD 產出 → executeCoderPipeline → 保存 project_files(coder) → 合併代碼 + executeCoderTesting（SpecFormula 紅綠燈） |
+| **Coder Phases** | `workers/phase-handlers/coder-phases.ts`（~490 行） | Coder Skill：讀 BDD 產出 → RED Phase（靜態 + Stub 全場景）→ executeCoderPipeline → 保存 project_files(coder) → 合併代碼 + executeCoderTesting（GREEN Phase 紅綠燈） |
+| **RED Phase Validator** | `services/red-phase-validator.ts`（~500 行） | SDD RED Phase 雙層驗證：Layer 1 靜態規格檢查（8 個零 LLM 檢查，~2ms）+ Layer 2 Stub 全場景驗證（StubHttpAdapter + 真實 Neon DB 跑完整 SpecFormula，~1-2s）|
+| **StubHttpAdapter** | `lib/specformula/http/stub-adapter.ts`（~20 行） | RED Phase 用的 HTTP stub，所有路由回 501，替代 Mini Express test server（~100ms vs ~12s）|
 | **Domain Phases** | `workers/phase-handlers/domain-phases.ts` | 域名全流程：搜尋/確認購買/註冊/自有域名設定/DNS 驗證/完成/失敗 |
 | **Orchestrator Utils** | `workers/orchestrator-utils.ts` | 共用基礎設施：sendMessage/streamLlmMessage/saveFlowState/getFlowState 等 |
 | **FlowState 型別** | `types/flow-state.ts` | FlowState 介面 + 子型別（避免循環 import） |
@@ -391,7 +393,8 @@ Feature 註解：`# Action: actionName` + `# [METHOD] /path` + `# Summary: xxx`
 - **Formulation checkpoint 每 3 個 feature 保存一次**：中斷恢復時跳過已完成的 feature，成功後必須清理所有 `formulation*` 暫存欄位
 - **DB 連線池**：`max: 15`（非 50）+ `keepAlive: true`，防止 PostgreSQL 斷開空閒連線。可用 `DB_POOL_MAX` 環境變數覆蓋
 - **Feature 驗證腳本用 `tsx` 不是 `ts-node`**：`feature-validation.ts` 的 `runScript()` 用 `npx tsx`。腳本解析失敗時視為通過（不觸發無效 LLM 修復循環），stderr/exitCode 會完整記錄供除錯
-- **Feature Dry-Run（SDD RED phase）**：`feature-dry-run.ts` 在 BDD spec_completed 之前、Neon provisioning 之後，用真實 Neon DB 執行 Feature 的 entity_setup 步驟。驗證 entity/column/VAR 格式對真實 DB 是否正確。失敗觸發 LLM 修復（最多 2 輪）。跳過 api_call/response_validate（Coder 還沒生成後端）。復用 specformula-runner 的容錯修正層（fixDataTableBySchema/fillMissingNotNullColumns/ensureFkReferencesExist）
+- **Feature Dry-Run（SDD RED phase Layer 2）**：`feature-dry-run.ts` 在 BDD spec_completed 之前、Neon provisioning 之後，用真實 Neon DB 執行 Feature 的 entity_setup 步驟。驗證 entity/column/VAR 格式對真實 DB 是否正確。失敗觸發 LLM 修復（最多 2 輪）。跳過 api_call/response_validate（Coder 還沒生成後端）。復用 specformula-runner 的容錯修正層（fixDataTableBySchema/fillMissingNotNullColumns/ensureFkReferencesExist）
+- **RED Phase 雙層驗證（SDD RED phase）**：`red-phase-validator.ts` 在 Coder 代碼生成前執行兩層驗證。**Layer 1 靜態檢查**（~2ms）：8 個零 LLM 檢查（Action 存在性/HTTP Method/Path/Summary 一致性/Response 欄位/Status Code/Entity/Step 可解析性）。**Layer 2 Stub 全場景**（~1-2s）：用 `StubHttpAdapter`（回 501）+ 真實 Neon DB 跑完整 SpecFormula 場景，驗證 Gherkin 解析、VAR 跨步驟解析、api_call 請求組裝、DataTable 格式。區分「預期 RED」（response_validate 因 501 失敗）和「非預期失敗」（entity_setup/API spec mismatch/VAR 解析失敗）。Layer 2 需要 `open_api_spec_content` + `isa_config_content` + `neon_connection_string`，缺少任一則降級跳過。兩層都不阻塞 Pipeline
 - **Neon provisioning 是同步的（< 10s）**：任何失敗都不阻塞 UIUX 或部署流程。Deployer 直接 SELECT `neon_connection_string` FROM projects 注入 DATABASE_URL，無需 Redis polling
 - **`streamLlmMessage` vs `sendMessage`**：LLM 生成的對話文字用 `streamLlmMessage`（後端 SDK streaming + Socket.io 事件，為未來 WSS 準備），模板文字/進度/richContent 用 `sendMessage`。`streamLlmMessage` 失敗時自動降級為 `sendMessage`。前端透過 polling 拿到完整訊息後在 `ChatMessageItem` 內做打字機動畫（`isTypewriterTarget` prop + `onTypewriterComplete` callback）
 - **`identifyMockDataComponents` 用 Haiku LLM 識別**：一次 batch call 發送所有組件摘要 + availableActions 列表，Haiku 回傳需改寫的組件 indices。失敗自動降級到 regex fallback。Haiku 能區分「業務假資料」vs「UI 結構靜態配置」，regex 做不到。System prompt 明確列出不需改寫的類型（nav items、footer、feature lists）

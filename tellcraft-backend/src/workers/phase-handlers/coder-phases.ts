@@ -11,6 +11,7 @@ import { type GeneratedComponent, generateTailwindConfig } from '../../services/
 import { executeCoderPipeline } from '../../services/coder-generation'
 import { sendMessage, saveFlowState, getFlowState, touchFlowActivity, snapshotCodeToGeneration } from '../orchestrator-utils'
 import { runCoderE2ETests } from '../../services/coder-e2e-test'
+import { executeRedPhase, formatRedPhaseReport, runRedPhaseFullValidation } from '../../services/red-phase-validator'
 import { createLogger } from '../../lib/logger'
 
 const logger = createLogger('coder-phases')
@@ -32,9 +33,12 @@ export async function executeCoderSkill(input: CoderSkillInput): Promise<void> {
     actions_yml_content: string | null
     schema_sql_content: string | null
     entity_mapping_content: string | null
-    features_content: Array<{ actionName: string; content: string }> | null
+    features_content: Array<{ actionName: string; content: string; name?: string }> | null
+    open_api_spec_content: string | null
+    isa_config_content: string | null
   }>(
-    `SELECT actions_yml_content, schema_sql_content, entity_mapping_content, features_content
+    `SELECT actions_yml_content, schema_sql_content, entity_mapping_content, features_content,
+            open_api_spec_content, isa_config_content
      FROM bdd_sessions
      WHERE project_id = $1 AND actions_yml_content IS NOT NULL
      ORDER BY updated_at DESC LIMIT 1`,
@@ -129,7 +133,109 @@ export async function executeCoderSkill(input: CoderSkillInput): Promise<void> {
     progress: { current: 0, total: 100, step: isChinese ? '準備中' : 'Preparing' },
   })
 
-  // 5. 執行 Pipeline
+  // 5. RED Phase — SDD 靜態規格驗證（Feature ↔ actionsYml ↔ Schema 一致性）
+  if (bddSession.features_content && bddSession.features_content.length > 0) {
+    try {
+      const redResult = executeRedPhase({
+        features: bddSession.features_content,
+        actionsYml: bddSession.actions_yml_content,
+        schemaSql: bddSession.schema_sql_content,
+        entityMapping: bddSession.entity_mapping_content || '',
+      })
+
+      // 更新 FlowState
+      state = await getFlowState(redis, conversationId) || state
+      state.coderRedPhasePassed = redResult.passed
+      state.coderRedPhaseIssueCount = redResult.errors + redResult.warnings
+      state.coderRedPhaseFixRounds = 0
+      await saveFlowState(redis, conversationId, state)
+
+      if (!redResult.passed) {
+        // 有 error 級問題 — 記錄但不阻塞（後續 GREEN Phase 的 fixFailingAction 會修）
+        // 日後可在此加入 LLM 自動修復 Feature 的邏輯
+        logger.warn({
+          errors: redResult.errors,
+          warnings: redResult.warnings,
+          issues: redResult.issues.filter(i => i.severity === 'error').map(i => ({
+            feature: i.featureName,
+            type: i.issueType,
+            desc: i.description,
+          })),
+        }, 'RED Phase 發現規格問題')
+
+        const report = formatRedPhaseReport(redResult)
+        await sendMessage(conversationId, io, {
+          content: isChinese
+            ? `⚠ 規格預檢發現 ${redResult.errors} 個問題，將嘗試在代碼生成後自動修復：\n${report}`
+            : `⚠ Spec pre-check found ${redResult.errors} issue(s), will attempt auto-fix after code generation:\n${report}`,
+          stage: 'coder_generating',
+        })
+      } else {
+        logger.info({ warnings: redResult.warnings, durationMs: redResult.durationMs }, 'RED Phase 通過')
+      }
+    } catch (e) {
+      // RED Phase 失敗不阻塞 Pipeline — 降級跳過
+      logger.error({ error: e }, 'RED Phase 執行失敗，降級跳過')
+    }
+  }
+
+  // 6. RED Phase Stub — 全場景 SpecFormula 驗證（用 StubHttpAdapter 跑完整場景）
+  if (bddSession.features_content && bddSession.features_content.length > 0
+      && bddSession.open_api_spec_content && bddSession.isa_config_content) {
+    try {
+      // 查詢 Neon 連線字串
+      const project = await db.queryOne<{ neon_connection_string: string | null }>(
+        `SELECT neon_connection_string FROM projects WHERE id = $1`,
+        [projectId]
+      )
+
+      if (project?.neon_connection_string) {
+        const stubResult = await runRedPhaseFullValidation({
+          features: bddSession.features_content,
+          actionsYml: bddSession.actions_yml_content,
+          openApiSpec: bddSession.open_api_spec_content,
+          isaConfigYml: bddSession.isa_config_content,
+          schemaSql: bddSession.schema_sql_content,
+          entityMapping: bddSession.entity_mapping_content || '',
+          neonConnectionString: project.neon_connection_string,
+        })
+
+        // 更新 FlowState
+        state = await getFlowState(redis, conversationId) || state
+        state.coderRedPhasePassed = stubResult.passed
+        state.coderRedPhaseIssueCount = stubResult.unexpectedFailures.length
+        await saveFlowState(redis, conversationId, state)
+
+        if (!stubResult.passed) {
+          logger.warn({
+            unexpectedFailures: stubResult.unexpectedFailures.length,
+            expectedRed: stubResult.expectedRedCount,
+          }, 'RED Phase Stub 發現非預期失敗')
+
+          const failureSummary = stubResult.unexpectedFailures
+            .map(f => `- [${f.failureType}] ${f.featureName} / ${f.scenarioName}: ${f.error.substring(0, 80)}`)
+            .join('\n')
+          await sendMessage(conversationId, io, {
+            content: isChinese
+              ? `⚠ SDD RED Phase 發現 ${stubResult.unexpectedFailures.length} 個測試基礎設施問題：\n${failureSummary}`
+              : `⚠ SDD RED Phase found ${stubResult.unexpectedFailures.length} test infrastructure issue(s):\n${failureSummary}`,
+            stage: 'coder_generating',
+          })
+        } else {
+          logger.info({
+            expectedRed: stubResult.expectedRedCount,
+            totalScenarios: stubResult.totalScenarios,
+            durationMs: stubResult.durationMs,
+          }, 'RED Phase Stub 通過 — 所有測試正確，全部預期 RED')
+        }
+      }
+    } catch (e) {
+      // Stub RED Phase 失敗不阻塞 Pipeline — 降級跳過
+      logger.error({ error: e }, 'RED Phase Stub 執行失敗，降級跳過')
+    }
+  }
+
+  // 7. 執行 Pipeline
   try {
     const result = await executeCoderPipeline(
       {
