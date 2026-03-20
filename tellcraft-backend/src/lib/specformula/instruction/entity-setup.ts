@@ -105,7 +105,7 @@ export class EntitySetup {
 
     for (const header of dataHeaders) {
       const value = row[header];
-      if (value === undefined || value === null || value === '') continue;
+      if (value === undefined || value === null || value === '' || value === 'null' || value === 'NULL' || value === 'Null') continue;
 
       const actualColName = this.resolveColumnName(tableDef, header);
       const snakeCol = actualColName.toLowerCase();

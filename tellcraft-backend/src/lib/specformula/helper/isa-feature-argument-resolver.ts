@@ -118,17 +118,72 @@ export class ISAFeatureArgumentResolver {
       if (columnIndex < row.length) {
         const executionKey = row[columnIndex];
         if (executionKey && executionKey.startsWith('<')) {
-          const executionKeyName = executionKey.substring(1);
+          let executionKeyName = executionKey.substring(1);
           if (!this.containsNestedKey(executionMap, executionKeyName)) {
-            throw new Error(
-              `VAR-System 錯誤：找不到 execution key '${executionKeyName}'。請確認 executionVariable 中包含此 key。`
-            );
+            // Fallback: LLM 常用 <userId / <testUserId 等，但 RETURNING * 的 column 是 id
+            // 嘗試常見映射：xxxId → id, xxxUserId → user_id, xxx_id → id
+            const fallbackKey = this.findFallbackKey(executionKeyName, executionMap);
+            if (fallbackKey) {
+              executionKeyName = fallbackKey;
+            } else {
+              throw new Error(
+                `VAR-System 錯誤：找不到 execution key '${executionKeyName}'。請確認 executionVariable 中包含此 key。`
+              );
+            }
           }
           const value = this.getNestedValue(executionMap, executionKeyName);
           this.getContext().putObject(contextKey, value);
         }
       }
     }
+  }
+
+  // ========== Execution Key Fallback ==========
+
+  /**
+   * LLM 生成的 Feature 常用 <userId / <testUserId / <newUserId 等 execution key，
+   * 但 RETURNING * 的 column name 是 id（DB column name）。
+   * 嘗試常見映射找到正確的 key。
+   */
+  private findFallbackKey(executionKeyName: string, executionMap: Record<string, unknown>): string | null {
+    // 直接找到 → 不需要 fallback
+    if (this.containsNestedKey(executionMap, executionKeyName)) return executionKeyName;
+
+    // dot notation: <User.id / <UnverifiedUser.id → 取最後一段 "id"
+    if (executionKeyName.includes('.')) {
+      const lastSegment = executionKeyName.split('.').pop()!;
+      if (this.containsNestedKey(executionMap, lastSegment)) return lastSegment;
+      // 也嘗試 camelCase → snake_case: lastSegment "userId" → "user_id"
+      const lastSnake = lastSegment.replace(/([a-z])([A-Z])/g, '$1_$2').toLowerCase();
+      if (lastSnake !== lastSegment && this.containsNestedKey(executionMap, lastSnake)) return lastSnake;
+    }
+
+    // 常見模式：<userId, <newUserId, <testUserId, <createdUserId → 嘗試 "id"
+    if (/(?:user)?id$/i.test(executionKeyName) && this.containsNestedKey(executionMap, 'id')) {
+      return 'id';
+    }
+
+    // 通用模式：<xxxId → 嘗試去掉前綴取 "id"
+    if (/Id$/.test(executionKeyName) && this.containsNestedKey(executionMap, 'id')) {
+      return 'id';
+    }
+
+    // camelCase → snake_case：<userId → user_id
+    const snakeCase = executionKeyName.replace(/([a-z])([A-Z])/g, '$1_$2').toLowerCase();
+    if (snakeCase !== executionKeyName && this.containsNestedKey(executionMap, snakeCase)) {
+      return snakeCase;
+    }
+
+    // snake_case 中取最後的部分：<new_user_id → user_id → id
+    const parts = snakeCase.split('_');
+    if (parts.length > 1) {
+      const lastPart = parts[parts.length - 1]; // "id"
+      if (this.containsNestedKey(executionMap, lastPart)) return lastPart;
+      const lastTwo = parts.slice(-2).join('_'); // "user_id"
+      if (this.containsNestedKey(executionMap, lastTwo)) return lastTwo;
+    }
+
+    return null;
   }
 
   // ========== Nested path access ==========
