@@ -758,14 +758,10 @@ ${summaryChecklist}
 function buildSuccessResult(
   actionsYml: string,
   projectName?: string
-): { success: boolean; actionsYml: string; openApiSpec?: string } {
-  let openApiSpec: string | undefined
-  try {
-    openApiSpec = convertToOpenAPI(actionsYml, projectName)
-    logger.info('OpenAPI 3.0 spec 生成完成')
-  } catch (err) {
-    logger.warn({ err }, 'OpenAPI 生成失敗，降級跳過')
-  }
+): { success: boolean; actionsYml: string; openApiSpec: string } {
+  // convertToOpenAPI 是零 LLM 機械映射，actionsYml 已通過驗證，不應失敗
+  const openApiSpec = convertToOpenAPI(actionsYml, projectName)
+  logger.info('OpenAPI 3.0 spec 生成完成')
   return { success: true, actionsYml, openApiSpec }
 }
 

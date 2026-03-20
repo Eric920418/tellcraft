@@ -17,7 +17,7 @@
 
 import * as yaml from 'js-yaml'
 import { Pool } from 'pg'
-import { isQueryAction } from './actions-design'
+import { isQueryAction, convertToOpenAPI } from './actions-design'
 import { parseSchemasFromString, runAllFeatures, type ScenarioResult, type StepResult, type SpecFormulaTestResult } from './specformula-runner'
 import { deriveSchemaFromBdd } from './schema-derivation'
 import { StubHttpAdapter } from '../lib/specformula/http/stub-adapter'
@@ -649,11 +649,23 @@ export async function runRedPhaseFullValidation(input: RedPhaseFullInput): Promi
       content: f.content,
     }))
 
+    // 如果 openApiSpec 為空，從 actionsYml 動態生成
+    let effectiveOpenApiSpec = input.openApiSpec
+    if (!effectiveOpenApiSpec || !effectiveOpenApiSpec.trim()) {
+      try {
+        effectiveOpenApiSpec = convertToOpenAPI(input.actionsYml)
+        logger.info('RED Phase Stub: openApiSpec 為空，從 actionsYml 動態生成')
+      } catch (e) {
+        logger.warn({ error: e }, 'RED Phase Stub: convertToOpenAPI 失敗')
+        effectiveOpenApiSpec = ''
+      }
+    }
+
     // 用 stub 跑完整 SpecFormula
     const testResult: SpecFormulaTestResult = await runAllFeatures({
       features: featureFiles,
       isaConfigYml: input.isaConfigYml,
-      openApiSpec: input.openApiSpec,
+      openApiSpec: effectiveOpenApiSpec,
       schemaSql: pgSchemaSql,
       entityMapping: input.entityMapping,
       httpAdapter: stubAdapter,

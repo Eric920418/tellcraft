@@ -13,6 +13,7 @@ import { Pool } from 'pg'
 import { hashSync } from 'bcryptjs'
 import { createLogger } from '../lib/logger'
 import { deriveSchemaFromBdd } from './schema-derivation'
+import { convertToOpenAPI } from './actions-design'
 import type { GeneratedComponent } from './uiux-generation'
 import type { IsaSpec, IsaInstruction } from '../lib/specformula/spec/isa/models'
 import type { ApiSpec } from '../lib/specformula/spec/api/models'
@@ -2161,12 +2162,24 @@ export async function runSpecFormulaValidation(input: {
       const pgSchemaSql = derived.postgresqlDDL
       logger.info({ entityCount: derived.entityCount }, 'MySQL DDL → PostgreSQL DDL 轉換完成')
 
-      // 5. 執行所有 Feature Files
+      // 5. 如果 openApiSpec 為空，從 actionsYml 動態生成
+      let effectiveOpenApiSpec = input.openApiSpec
+      if (!effectiveOpenApiSpec || !effectiveOpenApiSpec.trim()) {
+        try {
+          effectiveOpenApiSpec = convertToOpenAPI(input.actionsYml)
+          logger.info('openApiSpec 為空，從 actionsYml 動態生成')
+        } catch (e) {
+          logger.warn({ error: e }, 'convertToOpenAPI 失敗，使用空 spec')
+          effectiveOpenApiSpec = ''
+        }
+      }
+
+      // 6. 執行所有 Feature Files
       await input.onProgress('開始執行測試...', 30)
       const result = await runAllFeatures({
         features: input.featureFiles,
         isaConfigYml: input.isaConfigYml,
-        openApiSpec: input.openApiSpec,
+        openApiSpec: effectiveOpenApiSpec,
         schemaSql: pgSchemaSql,
         entityMapping: input.entityMapping,
         httpAdapter,
