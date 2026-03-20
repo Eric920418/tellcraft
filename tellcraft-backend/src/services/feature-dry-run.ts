@@ -14,6 +14,10 @@ import {
   fixDataTableBySchema,
   fillMissingNotNullColumns,
   ensureFkReferencesExist,
+  resolveEntityIdHeaders,
+  fixNonUuidValues,
+  resolveNonSchemaColumns,
+  autoHashPasswords,
   type ParsedFeature,
   type ParsedStep,
 } from './specformula-runner'
@@ -171,10 +175,14 @@ export async function runFeatureDryRun(input: DryRunInput): Promise<DryRunResult
               }
               const entityName = entityMatch[1]
 
-              // 應用容錯修正（複用 specformula-runner 的修正層）
+              // 應用完整修正鏈（對齊 specformula-runner executeStep entity_setup）
               let dt = step.dataTable
               dt = fixDataTableBySchema(dt, entityName, schemas)
+              dt = resolveEntityIdHeaders(dt, entityName, schemas)
               dt = fillMissingNotNullColumns(dt, entityName, schemas)
+              dt = fixNonUuidValues(dt, entityName, schemas)
+              dt = await resolveNonSchemaColumns(dt, entityName, schemas, pool)
+              await autoHashPasswords(dt)
               await ensureFkReferencesExist(dt, entityName, schemas, pool)
 
               await entitySetup.setup(entityName, dt.headers, dt.rows)

@@ -5,6 +5,7 @@
  */
 
 import type { DesignTier, DesignSystem, TemplateData } from './uiux-generation'
+import type { ReferenceAnalysis } from './reference-analyzer'
 import { matchTemplates } from './template-matcher'
 import { queryOne } from '../db/client'
 import { getAnthropicHeaders, MODEL, calculateLlmCost, trackLlmUsage } from '../lib/anthropic'
@@ -1033,10 +1034,10 @@ export async function generateFastConcept(
   tier: DesignTier,
   primaryColor: string,
   context?: { userId?: string; conversationId?: string },
-  referenceVisionAnalysis?: string
+  referenceAnalysis?: ReferenceAnalysis
 ): Promise<FastConcept | null> {
   // 快取 key 包含參考分析文字的前 50 字（避免快取混淆）
-  const refHint = referenceVisionAnalysis ? referenceVisionAnalysis.slice(0, 50) : ''
+  const refHint = referenceAnalysis?.visionAnalysis ? referenceAnalysis.visionAnalysis.slice(0, 50) : ''
   const cacheKey = buildFastCacheKey('fast-concept', [description, productType, tier, primaryColor, refHint])
   const cached = FAST_CONCEPT_CACHE.get(cacheKey)
   if (cached) {
@@ -1062,10 +1063,16 @@ Make the concept unique. signatureElement must be specific enough to code (e.g. 
       ? `產品：${description}\n類型：${productType}\n當前 tier：${tier}\n主色：${primaryColor}`
       : `Product: ${description}\nType: ${productType}\nCurrent tier: ${tier}\nPrimary color: ${primaryColor}`
 
-    if (referenceVisionAnalysis) {
+    if (referenceAnalysis?.visionAnalysis) {
       userMsg += isChinese
-        ? `\n\n## 參考設計分析\n用戶提供了一張參考設計圖片，以下是分析結果，請讓概念風格與參考一致：\n${referenceVisionAnalysis}`
-        : `\n\n## Reference Design Analysis\nThe user provided a reference design image. Align the concept style with this analysis:\n${referenceVisionAnalysis}`
+        ? `\n\n## 參考設計分析\n用戶提供了一張參考設計圖片，以下是分析結果，請讓概念風格與參考一致：\n${referenceAnalysis.visionAnalysis}`
+        : `\n\n## Reference Design Analysis\nThe user provided a reference design image. Align the concept style with this analysis:\n${referenceAnalysis.visionAnalysis}`
+      // 注入精確主色（如有 DOM 提取的 accent 色）
+      if (referenceAnalysis.colorPalette?.accents.length) {
+        userMsg += isChinese
+          ? `\n精確主色（從 DOM 提取）: ${referenceAnalysis.colorPalette.accents[0]}`
+          : `\nExact accent color (from DOM): ${referenceAnalysis.colorPalette.accents[0]}`
+      }
     }
 
     const resp = await fetch('https://api.anthropic.com/v1/messages', {

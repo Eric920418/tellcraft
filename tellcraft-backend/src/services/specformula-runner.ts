@@ -708,7 +708,7 @@ async function resolveViaForeignTable(
  * testPasswordMap 由 preExtractTestPasswords 預掃描取得：email → 成功場景使用的真實密碼。
  * 這樣 entity_setup 存 bcrypt(真實密碼)，login action 的 bcrypt.compare(真實密碼, hash) 才會 true。
  */
-async function autoHashPasswords(
+export async function autoHashPasswords(
   dataTable: { headers: string[]; rows: Record<string, string>[] },
   testPasswordMap?: Map<string, string>
 ): Promise<void> {
@@ -753,7 +753,7 @@ async function autoHashPasswords(
   }
 }
 
-async function resolveNonSchemaColumns(
+export async function resolveNonSchemaColumns(
   dataTable: { headers: string[]; rows: Record<string, string>[] },
   entityName: string,
   schemas: DatabaseSchema[],
@@ -841,7 +841,7 @@ function deterministicUuid(value: string): string {
  * UUID 型別欄位若值不是合法 UUID（如 'EP-001'），自動轉換為確定性 UUID。
  * 保持 PK/FK 參照一致性（同一字串 → 同一 UUID）。
  */
-function fixNonUuidValues(
+export function fixNonUuidValues(
   dataTable: { headers: string[]; rows: Record<string, string>[] },
   entityName: string,
   schemas: DatabaseSchema[]
@@ -968,7 +968,7 @@ function fixApiCallUuidValues(
  * Feature 常用 {entityName}Id（如 episodeId）指代 entity 的 PK，
  * 但 DDL 的 PK 通常叫 id。此函數把找不到的 {entity}Id 映射為 id。
  */
-function resolveEntityIdHeaders(
+export function resolveEntityIdHeaders(
   dataTable: { headers: string[]; rows: Record<string, string>[] },
   entityName: string,
   schemas: DatabaseSchema[]

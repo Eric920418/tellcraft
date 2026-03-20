@@ -359,7 +359,7 @@ export async function executeFastBuildSkill(params: {
     const concept = await generateFastConcept(
       message, productType, tier, palette?.primary || '#6366f1',
       { userId, conversationId },
-      referenceAnalysis?.visionAnalysis
+      referenceAnalysis
     ).catch(() => null)
 
     if (concept) {

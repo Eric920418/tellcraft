@@ -94,7 +94,7 @@ pm2 describe tellcraft-backend            # 詳細資訊（記憶體/重啟次�
 | **Fast Build** | `services/fast-build-generation.ts` | 快速模式輔助：tier 偵測、產品推斷、默認 DesignSystem（零 LLM）、surface-1/2/3 色階 |
 | **Design Techniques** | `services/design-techniques.ts` | 視覺技法庫（30 個 Layout/Surface/Typography/Interaction 技法），按 tier+productType 加權隨機注入 Structure prompt |
 | **Composition Patterns** | `services/composition-patterns.ts` | 20 個 section-level 佈局組合模式（hero/content/data/shell）+ `selectCompositionPatterns()` page-type-aware 選擇 + prompt 注入 |
-| **Reference Analyzer** | `services/reference-analyzer.ts` | 參考網站真實分析：URL→截圖(puppeteer-core)→Haiku Vision→設計風格分析，三層降級 + `analyzeUploadedImage` 上傳圖片 Vision 分析 |
+| **Reference Analyzer** | `services/reference-analyzer.ts` | 參考網站真實分析：URL→截圖+DOM/CSS結構化提取(puppeteer-core)→Haiku Vision（注入精確色板/字體/佈局數據）→設計風格分析，四層降級（vision+structured → vision → structured_only → metadata_only → text_only）+ `analyzeUploadedImage` 上傳圖片 Vision 分析 + `formatStructuredDataForPrompt()` 結構化數據注入生成 prompt |
 | **Template Matcher** | `services/template-matcher.ts` | 三層評分智能匹配（關鍵詞 40 + Category 30 + UISpec 30，零 LLM） |
 | **Design Moods** | `services/design-moods.ts` | 8 個設計情緒預設 + `recommendMoods()` 規則推薦（feeling 50 + productType 30 + tier 過濾）+ prompt 注入 getter |
 | **Semantic Gateway** | `services/semantic-gateway.ts` | 統一語義閘門：quickFilter 零 LLM 短路 + Sonnet 六元 verdict（bdd_clarify/design_clarify/iteration），取代 keyword array |
@@ -377,7 +377,7 @@ Feature 註解：`# Action: actionName` + `# [METHOD] /path` + `# Summary: xxx`
 - **迭代輸入四層防禦**：`prefilterMessage()`（全域）→ `detectFastModeIntent()`（問候/閒聊/平台問題攔截，`platform_issue` 回覆操作指引而非跑 refineCode）→ `semanticGateway({ phase: 'iteration' })`（Sonnet 語義審核，quickFilter 零 LLM 短路 ~80%）→ `refineCode [NO_CHANGE]`（LLM 兜底）。`isDesignFeedback()` 僅用於 fast mode 入口
 - **`checkBuildRelevance` fail-closed**：API 錯誤/空回應/JSON 解析/catch 全部降級拒絕（不是放行），保留無 API key 時的 fail-open
 - **輸入品質閘門（Universal Input Quality Gate）**：`prefilterMessage()` 內 `checkInputQuality()` 全域攔截亂碼/髒話/垃圾 + `handleContinueFlow` phase-aware 二次攔截（`getPhaseStrictness()` 映射 strict/normal/lenient/skip）+ `analyzeAnswerRelevance` 前置檢查。Redis anti-loop `quality_reject:{conversationId}` 連續 3 次強制放行防卡死
-- **參考網站分析（`reference-analyzer.ts`）**：puppeteer-core 需要系統 Chromium（`/usr/bin/chromium-browser`），VPS 須 `apt install chromium-browser`。截圖 JPEG 75 quality、15s timeout、buffer 不存 FlowState（只存文字分析結果）。SSRF 防護禁 localhost/內網 IP
+- **參考網站分析（`reference-analyzer.ts`）**：puppeteer-core 需要系統 Chromium（`/usr/bin/chromium-browser`），VPS 須 `apt install chromium-browser`。同一 Puppeteer session 中先截圖再 `page.evaluate(BROWSER_EXTRACTION_SCRIPT)` 提取 DOM 結構/CSS computed styles/色板/字體/佈局骨架（5 秒超時保護）。結構化數據 JSON ~5KB 存入 FlowState。`analyzeWithVisionEnhanced` 將結構化數據注入 Haiku Vision prompt 做精確分析。四個注入點用 `formatStructuredDataForPrompt()` 統一格式化。DOM 提取失敗不影響截圖（獨立 try-catch），降級為純 Vision 分析。色板取樣最多 500 元素（步進取樣）。SSRF 防護禁 localhost/內網 IP
 - **上傳圖片參考分析**：`analyzeUploadedImage` 不存 Buffer 到 FlowState（只存文字分析結果）。`completeDesignClarify` 並行分析圖片+URL，兩者都有則合併 visionAnalysis（`## 上傳參考圖片分析` + `## 參考網站分析`）。`analysisSource: 'uploaded_image'` 需在消息分支中覆蓋。imageUrls 管道：`handleProcessMessage` → `handleContinueFlow` → `routePhase` → `handleDesignClarifyReply` / `executeFastBuildSkill`
 - **Mood 與 tier 互補不衝突**：mood 描述視覺方向（「做什麼」），tier 描述技術限制（「不做什麼」）。`recommendMoods` 的 tier 過濾防止不相容組合。Mood prompt 優先級：`variantConcept` > `mood` > `tier constraints`
 - **Patterns 與 techniques 互補**：techniques 是 element-level（怎麼 style 一張卡片），patterns 是 section-level（hero/content/data/shell 怎麼組合）。prompt 中分開注入、分別標題。patterns 不教動畫（tailwindHint 不含 transition/animate）

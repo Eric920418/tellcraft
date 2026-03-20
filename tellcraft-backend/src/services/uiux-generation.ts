@@ -13,6 +13,7 @@ import { safeParseJson } from '../utils/safe-parse-json'
 import { selectTechniques, formatTechniquesForPrompt, formatTechniquesForPromptFast } from './design-techniques'
 import { getMoodPromptBlock, getMoodAnimationHint, getMoodRwdHint, getMoodSummary, getMoodCodeFragment, getMoodCodeFragmentCompact, getMoodById } from './design-moods'
 import { selectCompositionPatterns, formatPatternsForPrompt, listPatternsForVariants } from './composition-patterns'
+import { formatStructuredDataForPrompt } from './reference-analyzer'
 import { createLogger } from '../lib/logger'
 
 const logger = createLogger('uiux-generation')
@@ -1057,6 +1058,7 @@ export async function generateDesignVariants(
   const tier = designTier || 'functional'
   const axes = getVariantAxes(tier)
 
+  const structuredRef = referenceAnalysis ? formatStructuredDataForPrompt(referenceAnalysis) : ''
   const referenceSection = referenceAnalysis?.visionAnalysis
     ? `\n\n## 參考網站設計分析（真實數據 — 指導風格方向）
 URL: ${referenceAnalysis.url}
@@ -1064,7 +1066,9 @@ ${referenceAnalysis.metadata?.title ? `網站: ${referenceAnalysis.metadata.titl
 
 ${referenceAnalysis.visionAnalysis}
 
-設計變體應參考但不照搬這些設計特徵。提取其設計精神，結合產品需求做差異化。`
+${structuredRef}
+
+設計變體應參考但不照搬這些設計特徵。提取其設計精神，結合產品需求做差異化。${structuredRef ? '\n至少 2-3 個變體的主色應接近參考色板。' : ''}`
     : ''
 
   const systemPrompt = `你是一位資深的 UI/UX 設計師和前端架構師。你的任務是為一個產品生成 5 個不同方向的設計變體。
@@ -3242,6 +3246,7 @@ ${variantConcept.signatureElement ? `Signature Element：${variantConcept.signat
 
   // 參考網站真實分析
   const refAnalysis = productContext?.referenceAnalysis
+  const structuredRefData = refAnalysis ? formatStructuredDataForPrompt(refAnalysis) : ''
   const referenceSection = refAnalysis?.visionAnalysis
     ? `## 參考網站設計分析（真實數據 — 指導風格方向）
 URL: ${refAnalysis.url}
@@ -3250,8 +3255,12 @@ ${refAnalysis.metadata?.title ? `網站: ${refAnalysis.metadata.title}` : ''}
 ${refAnalysis.visionAnalysis}
 
 參考這些設計特徵但不照搬。提取設計精神，融入本產品的獨特定位。
+
+${structuredRefData}
+${structuredRefData ? `**精確色彩對齊**：上方精確色板來自 DOM 實際 computed styles，配色方案應以此為基準。
+**字體對齊**：如果偵測到 Google Fonts，優先使用相同字體。` : ''}
 `
-    : ''
+    : (structuredRefData ? `## 參考網站結構化數據（DOM 提取）\n${structuredRefData}\n` : '')
 
   const briefSection = brief
     ? `## 設計方向（AI 設計顧問確認）
@@ -4559,7 +4568,8 @@ ${userIdeas.map(i => `- **${i.step}**: ${i.answer}`).join('\n')}`
 - 描述：${template.description}
 - 設計默認值：${JSON.stringify(template.designDefaults, null, 2)}`
 
-  // 參考網站真實分析（截圖 + Vision）
+  // 參考網站真實分析（截圖 + Vision + 結構化數據）
+  const structuredBriefRef = referenceAnalysis ? formatStructuredDataForPrompt(referenceAnalysis) : ''
   const referenceContext = referenceAnalysis?.visionAnalysis
     ? `## 參考網站真實分析（基於截圖的 AI 視覺分析 — 高優先）
 URL: ${referenceAnalysis.url}
@@ -4569,13 +4579,16 @@ ${referenceAnalysis.metadata?.description ? `網站描述: ${referenceAnalysis.m
 ### 視覺設計分析
 ${referenceAnalysis.visionAnalysis}
 
-**重要**：以上分析基於真實截圖，你的 referenceAnalysis 輸出必須基於這些真實數據，不要編造或推測參考網站的設計特徵。`
+${structuredBriefRef}
+
+**重要**：以上分析基於真實截圖和 DOM 提取，你的 referenceAnalysis 輸出必須基於這些真實數據，不要編造或推測參考網站的設計特徵。`
     : referenceAnalysis?.analysisSource === 'metadata_only' && referenceAnalysis.metadata?.title
       ? `## 參考網站資訊（Metadata）
 URL: ${referenceAnalysis.url}
 標題: ${referenceAnalysis.metadata.title}
 ${referenceAnalysis.metadata?.description ? `描述: ${referenceAnalysis.metadata.description}` : ''}
-${referenceAnalysis.metadata?.themeColor ? `主題色: ${referenceAnalysis.metadata.themeColor}` : ''}`
+${referenceAnalysis.metadata?.themeColor ? `主題色: ${referenceAnalysis.metadata.themeColor}` : ''}
+${structuredBriefRef}`
       : ''
 
   const systemPrompt = `你是一位資深 UI/UX 設計顧問。你的任務是根據用戶提供的資訊，總結設計方向並給出專業建議。
