@@ -13,6 +13,7 @@ import type { GeneratedComponent } from './uiux-generation'
 import type { GeneratedCode } from '../types/flow-state'
 import { createLogger } from '../lib/logger'
 import { safeParseJson } from '../utils/safe-parse-json'
+import { isQueryAction } from './actions-design'
 import { sanitizeNamedImports } from '../utils/sanitize-named-imports'
 
 const logger = createLogger('coder-generation')
@@ -323,6 +324,20 @@ export async function actionName(input: XxxInput): Promise<XxxOutput> {
 - 登入/登出等操作：__status: 200
 例如：return { __status: 201, email, role }
 
+## Response 回傳規則（重要！）
+每種操作必須回傳完整資料，不能只回傳 { __status: 200 }：
+- **建立操作（INSERT）**：\`const [row] = await sql\`INSERT INTO ... RETURNING *\`; return { __status: 201, ...row }\`
+- **更新操作（UPDATE）**：\`const [row] = await sql\`UPDATE ... RETURNING *\`; return { __status: 200, ...row }\`（**必須 RETURNING ***）
+- **刪除操作（DELETE）**：\`return { __status: 200, message: '刪除成功' }\`
+- **列表查詢**：\`const rows = await sql\`SELECT ...\`; return rows\`（直接回傳 pg 陣列，**禁止**包裝成 \`{ items: rows }\` 或 \`{ todos: rows }\`）
+- **單筆查詢**：\`return { __status: 200, ...row }\`
+
+## 日期欄位處理
+PostgreSQL DATE/TIMESTAMP 欄位從 pg driver 取出是 JS Date 物件，回傳前必須轉成字串：
+- DATE 欄位：\`row.due_date instanceof Date ? row.due_date.toISOString().split('T')[0] : row.due_date\`
+- TIMESTAMP 欄位：\`row.created_at instanceof Date ? row.created_at.toISOString() : row.created_at\`
+- **絕不能直接回傳 Date 物件**（JSON 序列化後會變成 "Wed Dec 31 2025..." 格式而非 ISO）
+
 ## 輸出
 只輸出 TypeScript 代碼，不要任何解釋或 markdown 包裹。`
 }
@@ -534,9 +549,8 @@ export function generateApiRoutes(
   const actionMeta = new Map<string, { method: string; path: string }>()
   if (parsed?.actions) {
     for (const a of parsed.actions) {
-      const isQuery = a.rules?.some(r => r.type === '後置（回應）') && !a.rules?.some(r => r.type === '後置（狀態）')
       actionMeta.set(a.name, {
-        method: (typeof a.method === 'string' ? a.method : (isQuery ? 'GET' : 'POST')).toUpperCase(),
+        method: (typeof a.method === 'string' ? a.method : (isQueryAction(a) ? 'GET' : 'POST')).toUpperCase(),
         path: typeof a.path === 'string' ? a.path : `/api/${a.name}`,
       })
     }
@@ -1462,13 +1476,18 @@ function extractResponseFieldsFromFeatures(
       if (inResponseTable) {
         if (trimmed.startsWith('|')) {
           if (!headerLine) {
-            headerLine = trimmed // header row
+            headerLine = trimmed // header row（暫存，等 data row 來配對）
           } else {
-            // data row — 提取 <executionKey（支援多行 data）
+            // data row — 提取 <executionKey + $notnull/&isNotNull 對應的 header 欄位名
+            const headers = headerLine.split('|').map(c => c.trim()).filter(Boolean)
             const cells = trimmed.split('|').map(c => c.trim()).filter(Boolean)
-            for (const cell of cells) {
+            for (let ci = 0; ci < cells.length && ci < headers.length; ci++) {
+              const cell = cells[ci]
+              const header = headers[ci]
               if (cell.startsWith('<')) {
-                fields.add(cell.substring(1)) // 去掉 < 前綴
+                fields.add(cell.substring(1)) // <executionKey → 去掉 < 前綴
+              } else if ((cell === '$notnull' || cell === '&isNotNull') && header && !header.startsWith('>') && !header.startsWith('<')) {
+                fields.add(header) // 驗證非空的欄位 → LLM 必須回傳
               }
             }
           }
@@ -1673,7 +1692,7 @@ _stepSummary includes 匹配有交叉時，更具體的分支必須排在前面�
 if (op.includes('取消訂閱')) { ... }
 else if (op.includes('查詢') || op.includes('列表')) { // ← 必須在「訂閱」前面！
   const rows = await sql\`SELECT ... FROM table WHERE user_id = \${userId}\`
-  return { __status: 200, subscriptions: rows }
+  return rows  // 列表查詢直接回傳陣列，不要包裝
 }
 else if (op.includes('訂閱')) { ... }
 \`\`\`
@@ -1686,7 +1705,7 @@ else if (op.includes('訂閱')) { ... }
 if (op.includes('查詢') || op.includes('列表')) {
   const userId = input.userId
   const rows = await sql\`SELECT ... FROM table WHERE user_id = \${userId}\`
-  return { __status: 200, items: rows }
+  return rows  // 列表查詢直接回傳陣列，不要包裝
 }
 \`\`\`
 

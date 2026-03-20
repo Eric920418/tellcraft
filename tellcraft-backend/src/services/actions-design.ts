@@ -950,12 +950,14 @@ export function convertToOpenAPI(actionsYml: string, projectName?: string): stri
 // OpenAPI 轉換輔助函數
 // ============================================================
 
-function isQueryAction(action: ActionEntry): boolean {
-  // 後置（回應）型 = 查詢類；後置（狀態）型 = 命令類
+/** 判斷 action 是否為查詢類（GET），共用於 OpenAPI spec 和 API route 生成 */
+export function isQueryAction(action: { name?: string; summary?: string; rules?: Array<{ type: string }> }): boolean {
   if (!action.rules || action.rules.length === 0) return false
+  // 認證/密碼相關操作即使只有回應規則也必須 POST（有 request body）
+  const nameHint = ((action.name || '') + ' ' + (action.summary || '')).toLowerCase()
+  if (/login|signin|register|signup|logout|signout|auth|password|reset/.test(nameHint)) return false
   const hasResponseRule = action.rules.some(r => r.type === '後置（回應）')
   const hasStateRule = action.rules.some(r => r.type === '後置（狀態）')
-  // 只有回應沒有狀態變化 → 查詢
   return hasResponseRule && !hasStateRule
 }
 

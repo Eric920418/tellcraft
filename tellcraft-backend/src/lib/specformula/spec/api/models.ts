@@ -58,10 +58,11 @@ export function findBySummary(spec: ApiSpec, summary: string): ApiOperation | nu
   const exact = spec.operations.find(op => op.summary === summary);
   if (exact) return exact;
 
-  // Fallback: 部分匹配（Feature 子操作名 ↔ 合併 Action summary）
-  // 例如：summary="使用者登入" → 匹配 op.summary="使用者註冊與登入"（包含關係）
+  // Fallback: 單向部分匹配（operation summary 包含傳入的 summary）
+  // 例如：summary="使用者登入" → 匹配 op.summary="使用者註冊與登入"
+  // 只允許 op.summary 包含 summary，不允許反向（避免短 summary 誤匹配長 summary）
   const partial = spec.operations.find(op =>
-    op.summary && (op.summary.includes(summary) || summary.includes(op.summary))
+    op.summary && op.summary.includes(summary)
   );
   if (partial) return partial;
 

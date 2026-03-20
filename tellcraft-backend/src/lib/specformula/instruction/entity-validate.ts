@@ -81,6 +81,11 @@ export class EntityValidate {
         break;
       }
       const resolvedPk = this.resolver.resolveVariable(pkRaw);
+      // fail-closed：$variable 未解析（返回 null）時不要用字面字串查 DB
+      if (resolvedPk === null && pkRaw.startsWith('$')) {
+        hasAllPks = false;
+        break;
+      }
       const typed = TypeConverter.convertToColumnType(
         resolvedPk != null ? resolvedPk : pkRaw,
         tableDef.findColumnType(pkCol)
@@ -107,6 +112,8 @@ export class EntityValidate {
       if (!trim || trim.startsWith('&')) continue;
 
       const rv = this.resolver.resolveVariable(expected);
+      // 跳過未解析的 $variable（rv === null 且原始值以 $ 開頭）
+      if (rv === null && expected.trim().startsWith('$')) continue;
       if (rv != null) {
         const typed = TypeConverter.convertToColumnType(rv, tableDef.findColumnType(fieldName));
         probeConditions.set(fieldName, typed);

@@ -285,6 +285,12 @@ export function maybeTransposeVerticalDataTable(
     headers.push(k)
     row[k] = (value || '').trim()
   }
+
+  // 驗證：轉置後 header 必須是合法欄位名（ASCII 或 VAR 前綴）
+  // 如果 header 含中文（如 "買牛奶"），代表轉置方向錯了，放棄
+  const VALID_HEADER = /^[A-Za-z_$>][A-Za-z0-9_.]*$|^[PQH]:/
+  if (!headers.every(h => VALID_HEADER.test(h))) return null
+
   return { headers, rows: [row] }
 }
 
@@ -2297,9 +2303,6 @@ export async function runRedGreenCycle(input: {
         logger.warn({ actionName, filePath }, '找不到 action 檔案')
         break
       }
-
-      // 修復前備份（修復失敗時回退，避免壞修復污染其他 Feature）
-      const backupCode = currentFiles[fileIdx].content
 
       const failedScenarios = result.scenarios
         .filter(s => s.status === 'failed')
