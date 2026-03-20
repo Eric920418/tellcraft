@@ -393,10 +393,13 @@ export class ISAFeatureArgumentResolver {
   private resolveSingleVariable(value: string): unknown {
     if (!value || !value.startsWith('$')) return value;
     const varName = value.substring(1);
+    // 保留特殊值
+    if (varName === 'notnull' || varName === 'Notnull') return value;
     const resolved = this.getContext().get(varName);
     if (resolved !== null && resolved !== undefined) return resolved;
     if (varName === 'now') return this.getNow();
-    return value; // unresolved - return original
+    // fail-closed：未解析的 $variable 返回 null（不返回字面字串，避免 SQL type error）
+    return null;
   }
 
   private interpolateString(str: string): string {
@@ -432,16 +435,18 @@ export class ISAFeatureArgumentResolver {
 
   parseTimeExpression(expr: string): Date {
     const cleaned = expr.replace(/^"|"$/g, '').trim();
+    // 支持空格分隔的日期時間（LLM 常見格式）：2025-06-15 12:00:00 → 2025-06-15T12:00:00
+    const normalized = cleaned.replace(/^(\d{4}-\d{2}-\d{2}) (\d{2}:\d{2}:\d{2})/, '$1T$2');
 
-    if (cleaned === 'now') return this.getNow();
-    if (cleaned.startsWith('now')) return this.parseRelativeTime(cleaned);
+    if (normalized === 'now') return this.getNow();
+    if (normalized.startsWith('now')) return this.parseRelativeTime(normalized);
 
     try {
-      if (cleaned.includes('T')) {
-        return new Date(cleaned);
+      if (normalized.includes('T')) {
+        return new Date(normalized);
       }
       // Date only → start of day
-      const d = new Date(cleaned + 'T00:00:00');
+      const d = new Date(normalized + 'T00:00:00');
       if (isNaN(d.getTime())) throw new Error();
       return d;
     } catch {

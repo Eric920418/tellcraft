@@ -168,8 +168,8 @@ describe('ISAFeatureArgumentResolver', () => {
         expect(result).toBeInstanceOf(Date)
       })
 
-      it('returns original value for unresolved $variable', () => {
-        expect(resolver.resolveVariable('$NonExistent.id')).toBe('$NonExistent.id')
+      it('returns null for unresolved $variable (fail-closed)', () => {
+        expect(resolver.resolveVariable('$NonExistent.id')).toBeNull()
       })
 
       it('resolves @time() expression', () => {

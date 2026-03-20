@@ -54,5 +54,20 @@ export interface ApiSchema {
 
 // Helper: find operation by summary
 export function findBySummary(spec: ApiSpec, summary: string): ApiOperation | null {
-  return spec.operations.find(op => op.summary === summary) ?? null;
+  // 精確匹配
+  const exact = spec.operations.find(op => op.summary === summary);
+  if (exact) return exact;
+
+  // Fallback: 部分匹配（Feature 子操作名 ↔ 合併 Action summary）
+  // 例如：summary="使用者登入" → 匹配 op.summary="使用者註冊與登入"（包含關係）
+  const partial = spec.operations.find(op =>
+    op.summary && (op.summary.includes(summary) || summary.includes(op.summary))
+  );
+  if (partial) return partial;
+
+  // Fallback: operationId 匹配（action name → kebab-case API route）
+  const normalizedSummary = summary.toLowerCase().replace(/\s+/g, '');
+  return spec.operations.find(op =>
+    op.operationId && op.operationId.toLowerCase().replace(/[_-]/g, '') === normalizedSummary
+  ) ?? null;
 }
