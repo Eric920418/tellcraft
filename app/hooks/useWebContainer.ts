@@ -3,6 +3,31 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
 import type { WebContainer, FileSystemTree, WebContainerProcess } from '@webcontainer/api'
 
+// ── Helpers ──
+
+/** 從 npm install 錯誤輸出中解析無效的套件名稱 */
+function parseBadPackages(output: string): string[] {
+  const bad: string[] = []
+  // npm ERR! 404 Not Found - GET https://registry.npmjs.org/some-package
+  const notFound = /npm\s+(?:ERR!|error)\s+404[^\n]*registry\.npmjs\.org\/([^\s/\n]+)/gi
+  let m
+  while ((m = notFound.exec(output)) !== null) {
+    bad.push(m[1])
+  }
+  // EINVALIDPACKAGENAME
+  const invalid = /Invalid package name "([^"]+)"/gi
+  while ((m = invalid.exec(output)) !== null) {
+    bad.push(m[1])
+  }
+  // ERESOLVE peer dependency conflict
+  const resolve = /npm\s+(?:ERR!|error)\s+ERESOLVE[^\n]*\n[^\n]*(\S+@\S+)/gi
+  while ((m = resolve.exec(output)) !== null) {
+    const pkg = m[1].split('@')[0]
+    if (pkg) bad.push(pkg)
+  }
+  return [...new Set(bad)]
+}
+
 // ── Types ──
 
 export type WCStatus = 'idle' | 'booting' | 'installing' | 'starting' | 'ready' | 'error'
@@ -188,9 +213,35 @@ export function useWebContainer(options: UseWebContainerOptions): UseWebContaine
         const installExitCode = await installProcess.exit
         if (cancelled) return
         if (installExitCode !== 0) {
-          const errorOutput = installLogs.join('\n').slice(-500)
-          console.error('[WC] npm install failed:\n', errorOutput)
-          throw new Error(`npm install failed (exit code ${installExitCode}):\n${errorOutput}`)
+          const errorOutput = installLogs.join('\n')
+          // 嘗試移除壞依賴後重試一次
+          const badPkgs = parseBadPackages(errorOutput)
+          if (badPkgs.length > 0) {
+            updateStatus('installing', `移除無效套件 (${badPkgs.join(', ')})...`)
+            // 讀取 package.json，移除壞依賴，重寫
+            try {
+              const pkgRaw = await container.fs.readFile('package.json', 'utf-8')
+              const pkg = JSON.parse(pkgRaw)
+              for (const bad of badPkgs) {
+                delete pkg.dependencies?.[bad]
+              }
+              await container.fs.writeFile('package.json', JSON.stringify(pkg, null, 2))
+              // 重試 install
+              const retryProcess = await container.spawn('npm', ['install', '--no-audit', '--no-fund'])
+              retryProcess.output.pipeTo(new WritableStream({ write() {} })).catch(() => {})
+              const retryCode = await retryProcess.exit
+              if (retryCode === 0) {
+                // 重試成功，繼續啟動 dev server
+              } else {
+                throw new Error(`npm install failed after removing ${badPkgs.join(', ')}`)
+              }
+            } catch {
+              throw new Error(`npm install failed (exit code ${installExitCode}):\n${errorOutput.slice(-500)}`)
+            }
+          } else {
+            console.error('[WC] npm install failed:\n', errorOutput.slice(-500))
+            throw new Error(`npm install failed (exit code ${installExitCode}):\n${errorOutput.slice(-500)}`)
+          }
         }
 
         // 5. Start next dev

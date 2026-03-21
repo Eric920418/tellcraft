@@ -121,9 +121,33 @@ export class EntityValidate {
     }
 
     if (probeConditions.size === 0) {
-      const hasExtractionColumns = Object.keys(row).some(k => k.startsWith('>'));
-      if (!hasExtractionColumns) {
-        throw new Error('缺少查詢條件：請提供至少一個非約束欄位或主鍵');
+      // 嘗試用約束欄位（& 前綴值）做查詢條件
+      for (const fieldName of probeFields) {
+        const expected = NamingConverter.getRowValue(row, fieldName);
+        if (!expected) continue;
+        const trim = expected.trim();
+        if (!trim.startsWith('&')) continue;
+        // 解析約束值（去掉 & 前綴，可能含運算符如 &isTrue, &>0 等）
+        const constraintValue = trim.substring(1);
+        // 簡單布林/字串約束直接用作查詢條件
+        if (constraintValue === 'isTrue' || constraintValue === 'true') {
+          probeConditions.set(fieldName, true);
+        } else if (constraintValue === 'isFalse' || constraintValue === 'false') {
+          probeConditions.set(fieldName, false);
+        } else if (constraintValue === 'isNull' || constraintValue === 'null') {
+          // NULL 不能做 = 查詢，跳過
+        } else if (!constraintValue.includes('>') && !constraintValue.includes('<') && !constraintValue.includes('!')) {
+          // 純值約束
+          const typed = TypeConverter.convertToColumnType(constraintValue, tableDef.findColumnType(fieldName));
+          probeConditions.set(fieldName, typed);
+        }
+      }
+
+      if (probeConditions.size === 0) {
+        const hasExtractionColumns = Object.keys(row).some(k => k.startsWith('>'));
+        if (!hasExtractionColumns) {
+          throw new Error('缺少查詢條件：請提供至少一個非約束欄位或主鍵');
+        }
       }
     }
 

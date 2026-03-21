@@ -94,6 +94,19 @@ const KNOWN_PACKAGES: Record<string, string> = {
   '@neondatabase/serverless': '^0.10.0',
   'bcryptjs': '^2.4.3',
   'jsonwebtoken': '^9.0.2',
+  'geist': '^1.3.0',
+  '@next/font': '^14.0.0',
+  'sharp': '^0.33.0',
+  'uuid': '^9.0.0',
+  'nanoid': '^5.0.0',
+  'dayjs': '^1.11.0',
+  'axios': '^1.7.0',
+  'swr': '^2.2.0',
+  'zustand': '^4.5.0',
+  'jotai': '^2.8.0',
+  'react-hot-toast': '^2.4.0',
+  '@tanstack/react-query': '^5.0.0',
+  '@tanstack/react-table': '^8.20.0',
 }
 
 // Packages that are built-in or sub-exports (don't install separately)
@@ -109,12 +122,35 @@ const EDIT_BRIDGE_SCRIPT = `
 (function() {
   'use strict';
 
+  // 防線 2：隱藏 Next.js error overlay（Build Error / Runtime Error 紅色頁面）
+  // 讓頁面盡可能渲染出來，而不是被錯誤頁面遮擋
+  var style = document.createElement('style');
+  style.textContent = 'nextjs-portal { display: none !important; } body > nextjs-portal ~ * { display: block !important; }';
+  document.head.appendChild(style);
+  // 持續監控：Next.js 會動態插入 error overlay
+  var overlayObserver = new MutationObserver(function(mutations) {
+    mutations.forEach(function(m) {
+      m.addedNodes.forEach(function(node) {
+        if (node.tagName === 'NEXTJS-PORTAL') {
+          node.style.display = 'none';
+        }
+      });
+    });
+  });
+  if (document.body) {
+    overlayObserver.observe(document.body, { childList: true });
+  } else {
+    document.addEventListener('DOMContentLoaded', function() {
+      overlayObserver.observe(document.body, { childList: true });
+    });
+  }
+
   function postToParent(msg) {
     try { window.parent.postMessage(msg, '*'); } catch(e) {}
     try { if (window.top !== window.parent) window.top.postMessage(msg, '*'); } catch(e) {}
   }
 
-  // Runtime error capture
+  // Runtime error capture — 靜默捕獲，不顯示給用戶
   window.onerror = function(msg, src, line, col, err) {
     postToParent({ type: 'tc_runtimeError', name: (err && err.name) || 'Error', message: String(msg), path: src });
   };

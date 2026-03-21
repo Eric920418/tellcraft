@@ -99,7 +99,17 @@ export class DataTableResponseValidate {
       // 不做值比較。提取由 extractAndStoreVariables 處理。
       if (trimExpected.startsWith('<')) continue;
 
-      const actualValue = getNestedValue(responseMap, cleanHeader);
+      let actualValue = getNestedValue(responseMap, cleanHeader);
+
+      // VAR 容錯：$Var.field 格式的 header（如 $Todo.id）在 response 中找不到時，
+      // 用 field 部分（如 id）直接匹配。Feature 常用 $Var.field 引用 entity_setup 的欄位，
+      // 但 response JSON 的 key 是純欄位名（id, isCompleted 等），不含 $Var 前綴。
+      if (actualValue === null || actualValue === undefined) {
+        if (cleanHeader.startsWith('$') && cleanHeader.includes('.')) {
+          const fieldPart = cleanHeader.split('.').pop()!;
+          actualValue = getNestedValue(responseMap, fieldPart);
+        }
+      }
 
       const resolved = this.resolver.resolveAndValidate(
         expectedValue, actualValue, cleanHeader, summary

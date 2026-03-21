@@ -105,27 +105,45 @@ function ProgressOverlay({ status, detail }: { status: WCStatus; detail?: string
 // ── Error UI ──
 
 function ErrorOverlay({ message, onRetry }: { message: string; onRetry: () => void }) {
+  const [showDetails, setShowDetails] = React.useState(false)
   return (
     <div style={{
       position: 'absolute', inset: 0, zIndex: 60,
       display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
       background: 'rgba(255,255,255,0.95)', backdropFilter: 'blur(4px)', gap: 16,
     }}>
-      <svg width="36" height="36" viewBox="0 0 24 24" fill="none" style={{ color: '#ef4444' }}>
-        <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="2" />
-        <line x1="15" y1="9" x2="9" y2="15" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
-        <line x1="9" y1="9" x2="15" y2="15" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+      <svg width="36" height="36" viewBox="0 0 24 24" fill="none" style={{ color: '#f59e0b' }}>
+        <path d="M12 9v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
       </svg>
-      <div style={{ textAlign: 'center' }}>
-        <div style={{ fontSize: 14, fontWeight: 600, color: '#1a1a1a' }}>預覽啟動失敗</div>
-        <div style={{ fontSize: 12, color: '#666', marginTop: 4, maxWidth: 400, wordBreak: 'break-word' }}>{message}</div>
+      <div style={{ textAlign: 'center', maxWidth: 320 }}>
+        <div style={{ fontSize: 14, fontWeight: 600, color: '#1a1a1a' }}>預覽載入遇到問題</div>
+        <div style={{ fontSize: 13, color: '#666', marginTop: 6, lineHeight: 1.5 }}>
+          部分功能可能不完整。您可以直接部署查看完整效果，或重試載入。
+        </div>
       </div>
-      <button onClick={onRetry} style={{
-        padding: '8px 20px', borderRadius: 8, border: 'none',
-        background: '#1a1a1a', color: '#fff', fontSize: 13, fontWeight: 500, cursor: 'pointer',
-      }}>
-        重試
+      <div style={{ display: 'flex', gap: 8 }}>
+        <button onClick={onRetry} style={{
+          padding: '8px 20px', borderRadius: 8, border: '1px solid #e5e7eb',
+          background: '#fff', color: '#1a1a1a', fontSize: 13, fontWeight: 500, cursor: 'pointer',
+        }}>
+          重試
+        </button>
+      </div>
+      <button
+        onClick={() => setShowDetails(!showDetails)}
+        style={{ background: 'none', border: 'none', color: '#9ca3af', fontSize: 11, cursor: 'pointer', padding: 4 }}
+      >
+        {showDetails ? '收起技術細節' : '查看技術細節'}
       </button>
+      {showDetails && (
+        <div style={{
+          maxWidth: 400, maxHeight: 120, overflow: 'auto',
+          background: '#f9fafb', borderRadius: 6, padding: '8px 12px',
+          fontSize: 11, color: '#6b7280', fontFamily: 'monospace', whiteSpace: 'pre-wrap', wordBreak: 'break-all',
+        }}>
+          {message}
+        </div>
+      )}
     </div>
   )
 }

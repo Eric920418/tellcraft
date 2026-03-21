@@ -347,7 +347,8 @@ function buildActionUserPrompt(
   schemaSql: string,
   entityMapping: string,
   types: Record<string, unknown>,
-  requiredResponseFields?: string[]
+  requiredResponseFields?: string[],
+  stepSummaries?: string[]
 ): string {
   const rulesText = (action.rules || [])
     .map(r => `- [${r.type}] ${r.rule}`)
@@ -365,6 +366,13 @@ ${requiredResponseFields.map(f => `- \`${f}\``).join('\n')}
 這些欄位名稱是 BDD 規格硬編碼的，必須完全一致（區分大小寫）。`
     : ''
 
+  const stepSummariesText = stepSummaries && stepSummaries.length > 0
+    ? `\n## _stepSummary 精確派發值（嚴格遵守，禁止改寫）
+BDD 測試會用以下精確的 _stepSummary 值呼叫此函數。你的 if/else 分支的 includes() 條件必須能匹配這些值：
+${stepSummaries.map(s => `- "${s}"`).join('\n')}
+重要：使用這些精確的文字作為 includes() 條件，不要用同義詞替換（例如：如果 summary 是「建立待辦事項」，就用 op.includes('建立待辦事項')，不要改成 op.includes('新增')）。`
+    : ''
+
   return `## Action 定義
 名稱：${action.name}
 摘要：${action.summary}
@@ -377,7 +385,7 @@ ${schemaSql}
 
 ## Entity Mapping（中文實體 → 表名）
 ${entityMapping}
-${typesText}${responseFieldsText}
+${typesText}${responseFieldsText}${stepSummariesText}
 
 請根據以上定義實作函數。
 函數名必須使用 camelCase：export async function ${toCamelCase(action.name)}(input: ${toPascalCase(action.name)}Input)
@@ -393,10 +401,16 @@ export async function generateActionFunction(
   const requiredResponseFields = ctx.features
     ? extractResponseFieldsFromFeatures(ctx.features, action.name)
     : undefined
+  const stepSummaries = ctx.features
+    ? extractStepSummariesFromFeatures(ctx.features, action.name)
+    : undefined
   if (requiredResponseFields && requiredResponseFields.length > 0) {
     logger.info({ actionName: action.name, fields: requiredResponseFields }, 'BDD response fields 注入')
   }
-  const userPrompt = buildActionUserPrompt(action, ctx.schemaSql, ctx.entityMapping, ctx.types, requiredResponseFields)
+  if (stepSummaries && stepSummaries.length > 0) {
+    logger.info({ actionName: action.name, summaries: stepSummaries }, 'BDD step summaries 注入')
+  }
+  const userPrompt = buildActionUserPrompt(action, ctx.schemaSql, ctx.entityMapping, ctx.types, requiredResponseFields, stepSummaries)
 
   // 複雜 action（多規則）自動獲得更多 token
   const ruleCount = (action.rules || []).length
@@ -1499,6 +1513,33 @@ function extractResponseFieldsFromFeatures(
   }
 
   return [...fields]
+}
+
+/**
+ * 從 Feature 文件提取所有 When 步驟的 summary（即 _stepSummary 值）
+ * 這些值是 action 代碼的 `if (op.includes('xxx'))` 必須精確匹配的
+ */
+function extractStepSummariesFromFeatures(
+  features: Array<{ actionName: string; content: string }>,
+  actionName: string
+): string[] {
+  const matched = features.filter(f => f.actionName === actionName)
+  if (matched.length === 0) return []
+
+  const summaries = new Set<string>()
+  for (const feature of matched) {
+    const lines = feature.content.split('\n')
+    for (const line of lines) {
+      const trimmed = line.trim()
+      // 匹配 When/And 步驟中的 api_call：(UID="...") summary, call table: 或 (No Actor) summary, call table:
+      const match = trimmed.match(/(?:When|And)\s+(?:\((?:No Actor|UID="[^"]*")\)\s+)?(.+?),\s*call\s+table:/i)
+      if (match) {
+        summaries.add(match[1].trim())
+      }
+    }
+  }
+
+  return [...summaries]
 }
 
 // ============================================================

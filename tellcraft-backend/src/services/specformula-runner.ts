@@ -1809,6 +1809,36 @@ export function sql<T = any>(stringsOrQuery: TemplateStringsArray | string, ...v
   return execQuery<T>(query, values)
 }
 
+// sql.begin() polyfill — 模擬 neon 的交易語法
+// 用法: await sql.begin(async (tx) => { await tx\`...\`; await tx\`...\`; })
+sql.begin = async function beginTransaction<T = any>(callback: (tx: typeof sql) => Promise<T>): Promise<T> {
+  const client = await pool.connect()
+  try {
+    await client.query('BEGIN')
+    // 建立 tx proxy：tagged template 和函數呼叫都走同一個 client
+    const tx = function txSql<R = any>(stringsOrQuery: TemplateStringsArray | string, ...vals: any[]): Promise<R[]> {
+      if (typeof stringsOrQuery === 'string') {
+        return client.query(stringsOrQuery, vals[0]).then((r: any) => r.rows as R[])
+      }
+      const strs = stringsOrQuery as TemplateStringsArray
+      let q = ''
+      for (let i = 0; i < strs.length; i++) {
+        q += strs[i]
+        if (i < vals.length) q += '$' + (i + 1)
+      }
+      return client.query(q, vals).then((r: any) => r.rows as R[])
+    } as typeof sql
+    const result = await callback(tx)
+    await client.query('COMMIT')
+    return result
+  } catch (err) {
+    await client.query('ROLLBACK')
+    throw err
+  } finally {
+    client.release()
+  }
+}
+
 export default sql
 `
     const dbFilePath = path.join(tmpDir, 'lib/db.ts')
