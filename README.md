@@ -518,7 +518,7 @@ Server Action 錯誤訊息 + 工具模組中文字串國際化（+117 keys，2 n
 | **品質** | Quality Gate 靜態檢查（含 SVG ID 碰撞偵測）、LLM 自動修復、RWD 響應式安全網、Tailwind v4→v3 轉換 |
 | **部署** | sanitize 7 類預檢（含 'use server' 保護 + 未知依賴警告）、本地 build 驗證（3 輪 LLM 修復）、Vercel 部署、版本回滾 |
 | **迭代** | 對話內迭代修改、撤銷上一步、部署歷史回滾、迭代歷史追蹤、重複抱怨偵測+策略升級、視覺診斷指引 |
-| **預覽** | WebContainers 完整 Next.js 預覽（Server Actions + DB 連線）、HMR 增量更新、裝置切換、編輯模式、圖片上傳、Pre-boot + Pre-install 載入優化 |
+| **預覽** | WebContainers 完整 Next.js 預覽（Server Actions + DB 連線）、HMR 增量更新、裝置切換、編輯模式、圖片上傳、Pre-boot + Pre-install 載入優化、生成期間禁止渲染（UIUX/Coder 生成時只顯示等待動畫）、路由衝突去重（strip route groups 防 parallel pages 錯誤） |
 | **動畫** | BDD 需求藍圖面板（即時 Q&A 歷史視覺化）、3D 工廠流水線（Fast Build）、Remotion 驅動 |
 | **認證** | Google/LINE OAuth、JWT 雙軌（localStorage + Cookie）、訪客→帳號合併、帳號綁定（雙登入）、auth 頁面 i18n（next-intl） |
 | **儀表板** | 用戶統計、專案管理、版本歷史、管理員面板、LLM 用量追蹤（統一 PRICING + trackLlmUsage）、即時系統日誌監控（Socket.io tail -F）、Dashboard 元件 i18n（next-intl） |

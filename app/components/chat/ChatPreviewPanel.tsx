@@ -197,21 +197,24 @@ export default function ChatPreviewPanel({
     )
   }
 
-  // 偵測是否正在生成代碼（精細模式 pipeline stages）
-  // 不能 early return：會卸載 WebContainer，完成後需重新 boot（10-20s）
-  // 改用 overlay：WebContainer 保持掛載（接收 HMR），等待畫面蓋在上層
-  const generatingStages = ['uiux_pipeline_progress', 'uiux_structure_generating', 'uiux_animation_generating', 'uiux_rwd_generating', 'uiux_quality_gate_running', 'uiux_quality_gate_fixing']
+  // 偵測是否正在生成代碼（精細模式 UIUX pipeline + Coder）
+  // 生成期間直接 early return 等待畫面，不掛載 WebContainer（避免渲染不完整代碼和 build error）
+  const generatingStages = [
+    'uiux_pipeline_progress', 'uiux_structure_generating', 'uiux_animation_generating',
+    'uiux_rwd_generating', 'uiux_quality_gate_running', 'uiux_quality_gate_fixing',
+    'coder_generating', 'coder_testing',
+  ]
   const lastGeneratingMsg = [...messages].reverse().find(m => m.role === 'assistant' && m.stage)
-  const isUiuxStageGenerating = lastGeneratingMsg && generatingStages.includes(lastGeneratingMsg.stage || '')
+  const isGeneratingByStage = lastGeneratingMsg && generatingStages.includes(lastGeneratingMsg.stage || '')
   // Fallback：streaming 中但尚無 code_preview 消息 → 首次生成的競態保護
   // 排除 fast build（有 fast_generating stage）和迭代（已有 code_preview）
   const isFastBuildMode = messages.some(m => m.stage === 'fast_generating')
   const hasCodePreviewMessage = messages.some(m => m.richContent?.type === 'code_preview')
   const isStreamingFirstGen = stablePreviewData?.isStreaming && !hasCodePreviewMessage && !isFastBuildMode
-  const isUiuxPipelineGenerating = isUiuxStageGenerating || isStreamingFirstGen
+  const isCodeGenerating = isGeneratingByStage || isStreamingFirstGen
 
-  // 生成中且尚無預覽數據 → 純等待畫面
-  if (isUiuxPipelineGenerating && !stablePreviewData) {
+  // 生成期間（不管有無 streaming 數據）→ 純等待畫面，不掛載 WebContainer
+  if (isCodeGenerating) {
     return (
       <AIGenerationWaitingScene
         stage={lastGeneratingMsg?.stage}
@@ -232,22 +235,8 @@ export default function ChatPreviewPanel({
     const DEVICE_HEIGHTS: Record<DeviceType, number> = { desktop: 0, tablet: 960, mobile: 812 }
     const previewHeight = DEVICE_HEIGHTS[codePreviewDevice]
 
-    // WebContainers 在 streaming 期間也顯示預覽（boot + HMR 增量更新）
-    // 不再需要等待動畫，WebContainerPreview 自帶進度 UI
-
     return (
       <div style={{ height: '100%', display: 'flex', flexDirection: 'column', position: 'relative' }}>
-        {/* 生成中 overlay：WebContainer 繼續掛載接收 HMR，但被等待畫面遮住 */}
-        {isUiuxPipelineGenerating && (
-          <div style={{ position: 'absolute', inset: 0, zIndex: 50, pointerEvents: 'none' }}>
-            <AIGenerationWaitingScene
-              stage={lastGeneratingMsg?.stage}
-              progress={lastGeneratingMsg?.progress}
-              streamingPhase={(streamingPreview?.phase as 'structure' | 'animation' | 'rwd') || null}
-              streamingChunks={fastBuildChunks}
-            />
-          </div>
-        )}
         {/* 工具列 */}
         <div
           style={{

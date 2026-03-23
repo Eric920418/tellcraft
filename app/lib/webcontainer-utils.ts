@@ -915,6 +915,22 @@ export function buildSkeletonFiles(): FileSystemTree {
 }
 
 /**
+ * Next.js 路由衝突去重：strip route groups `(groupName)` 取得真實路由路徑
+ * 例如 `app/(auth)/login/page.tsx` 和 `app/login/page.tsx` 解析到同一路由 `/login`
+ * 保留後者（覆蓋），防止 "two parallel pages that resolve to the same path" 錯誤
+ */
+function deduplicateRouteConflicts<T extends { path: string }>(files: T[]): T[] {
+  const routeMap = new Map<string, T>()
+  for (const f of files) {
+    const normalized = f.path
+      .replace(/^\//, '')                    // strip leading /
+      .replace(/\([^)]+\)\//g, '')           // strip route groups: (auth)/ → ''
+    routeMap.set(normalized, f)              // 後者覆蓋前者
+  }
+  return Array.from(routeMap.values())
+}
+
+/**
  * Build the complete WebContainer FileSystemTree from generated code
  */
 export function buildWebContainerFiles(input: WebContainerFilesInput): FileSystemTree {
@@ -954,7 +970,9 @@ export function buildWebContainerFiles(input: WebContainerFilesInput): FileSyste
   setFileInTree(tree, 'app/globals.css', processedCss)
 
   // Pages（sanitize 修復 LLM 常見語法錯誤，防止 Build Error 顯示給用戶）
-  for (const page of input.pages) {
+  // 路由衝突去重：strip route groups 後同路由只保留一份（防止 "two parallel pages" 錯誤）
+  const dedupedPages = deduplicateRouteConflicts(input.pages)
+  for (const page of dedupedPages) {
     const path = page.path.startsWith('/') ? page.path.slice(1) : page.path
     let content = sanitizeFileContent(path, page.content)
 
@@ -980,9 +998,10 @@ export function buildWebContainerFiles(input: WebContainerFilesInput): FileSyste
     }
   }
 
-  // API Routes (from Coder Skill)
+  // API Routes (from Coder Skill) — 也做路由去重
   if (input.apiRoutes) {
-    for (const ar of input.apiRoutes) {
+    const dedupedApiRoutes = deduplicateRouteConflicts(input.apiRoutes)
+    for (const ar of dedupedApiRoutes) {
       const path = ar.path.startsWith('/') ? ar.path.slice(1) : ar.path
       setFileInTree(tree, path, sanitizeFileContent(path, ar.content))
     }

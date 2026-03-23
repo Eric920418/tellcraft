@@ -410,6 +410,8 @@ Feature 註解：`# Action: actionName` + `# [METHOD] /path` + `# Summary: xxx`
 - **`ENABLE_DIFF_OUTPUT` diff 輸出模式**：Animation/RWD/Merged 階段用 SEARCH/REPLACE block 格式輸出修改（省 60-70% output token）。`parseSearchReplaceBlocks()` 解析 → `applySearchReplace()` 應用到 baseCode → `fuzzySearch()` 容忍縮排差異。解析失敗時自動 fallback 到 `parseGeneratedFiles()` full-file 模式。串流預覽用 `buildDiffStreamingHandler()` 在每個完整 block 閉合時 apply 到 baseCode 副本再 emit。SEARCH 多處匹配會拒絕替換（安全起見）。注意 diff 模式不影響 `generateStructure`（從零生成不需要 diff）
 - **`FAST_BUILD_MERGED_ANIM_RWD` 只影響首批生成**：`isLaterBatch`（增量批次）仍用分離的 Animation + RWD，因為增量批次有特殊的 `buildIncrementalCode` 處理邏輯
 - **WebContainer preload 後禁止 `container.mount()`**：preloader 預裝 BASE_DEPS 到 node_modules，之後 `useWebContainer` hook 用 `writeFilesToContainer()` 逐檔寫入（不用 `mount()`）。`mount()` 會清除整個 fs 包括 node_modules。`restart()` 例外（用戶觸發的重啟允許 mount + 全量重裝）。`preloadPromise` 是 module-level，hook 自動偵測不需 prop drilling
+- **生成期間禁止渲染 WebContainer**：`ChatPreviewPanel` 在 UIUX pipeline（`uiux_pipeline_progress`/`uiux_structure_generating`/...）和 Coder（`coder_generating`/`coder_testing`）生成期間直接 early return `AIGenerationWaitingScene`，不掛載 `WebContainerPreviewComponent`。只有 fast build 模式的 streaming preview 才即時渲染。`handleUiuxCodeGenerating` 回覆用 `stage: 'uiux_pipeline_progress'`（不是 `'info'`），避免 overlay 偵測失效
+- **WebContainer 路由衝突去重**：`buildWebContainerFiles()` 對 pages 和 apiRoutes 做 `deduplicateRouteConflicts()`，strip route groups `(groupName)/` 後按真實路由路徑去重（後者覆蓋前者），防止 Next.js "two parallel pages that resolve to the same path" 編譯錯誤
 
 ## 核心原則
 
