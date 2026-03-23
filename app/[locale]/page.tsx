@@ -36,6 +36,7 @@ import {
 } from '@/app/components/landing'
 
 import ChatSection from '@/app/components/chat/ChatSection'
+import SmoothScroll from '@/app/components/SmoothScroll'
 
 function HomeContent() {
   const tChat = useTranslations('chat')
@@ -238,6 +239,9 @@ function HomeContent() {
 
   return (
     <main>
+      {/* 展示頁面啟用 smooth scroll 重量感（chat 模式不啟用） */}
+      {!isChatActive && <SmoothScroll />}
+
       <script
         type="application/ld+json"
         dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLdData) }}

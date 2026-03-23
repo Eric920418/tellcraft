@@ -1096,6 +1096,16 @@ export async function executeCoderPipeline(
     logger.info({ fixCount: actionCallFixes.length, fixes: actionCallFixes }, 'Action call 修正完成')
   }
 
+  // Step 8: Post-generation response 驗證（零 LLM）
+  const { files: validatedActionFiles, fixes: responseFixes } = validateActionResponses(actionFiles)
+  if (responseFixes.length > 0) {
+    // 用修復後的版本替換原始 action files
+    for (const vf of validatedActionFiles) {
+      const idx = actionFiles.findIndex(f => f.path === vf.path)
+      if (idx !== -1) actionFiles[idx] = vf
+    }
+  }
+
   await callbacks.onProgress('完成！', 98)
 
   const backendFiles = sanitizedFrontend.filter(f => backendPaths.has(f.path)) as typeof backendFilesRaw
@@ -1113,7 +1123,87 @@ export async function executeCoderPipeline(
 }
 
 // ============================================================
-// 8. 前後端 _stepSummary 一致性驗證（零 LLM）
+// 8. Post-generation response 驗證 + 自動修復（零 LLM）
+// ============================================================
+
+/**
+ * 掃描 LLM 生成的 action 代碼，修復常見的 response 格式問題：
+ * - 列表查詢包成 Object 而非回 Array
+ * - UPDATE 缺 RETURNING *
+ * - 批次操作缺 success: true
+ */
+export function validateActionResponses(actionFiles: GeneratedComponent[]): { files: GeneratedComponent[]; fixes: string[] } {
+  const fixes: string[] = []
+  const result = actionFiles.map(file => {
+    if (!file.path.startsWith('lib/actions/')) return file
+    let code = file.content
+    let modified = false
+
+    // Rule 1: 列表查詢回 Array（不要包成 { items: rows }）
+    // 找 return { __status: 200, items: rows } 或 { __status: 200, data: rows } 模式
+    const listWrapperPattern = /return\s*\{\s*__status:\s*200\s*,\s*(?:items|data|results|list|lists|todos|records)\s*:\s*(\w+)\s*\}/g
+    let match: RegExpExecArray | null
+    while ((match = listWrapperPattern.exec(code)) !== null) {
+      const rowsVar = match[1]
+      const original = match[0]
+      const replacement = `;(${rowsVar} as any).__status = 200; return ${rowsVar}`
+      code = code.replace(original, replacement)
+      fixes.push(`${file.path}: 列表查詢 Object wrapper → bare Array（${rowsVar}）`)
+      modified = true
+    }
+
+    // Rule 2: UPDATE 語句必須有 RETURNING *
+    // 找 await sql`UPDATE ... ` 後面沒有 RETURNING
+    const updateNoReturning = /const\s+\[?\s*(\w+)\s*\]?\s*=\s*await\s+sql\s*`\s*UPDATE\s+[^`]*?WHERE\s+[^`]*?(?<!RETURNING\s+\*)\s*`/gi
+    const updateBlocks = code.match(updateNoReturning)
+    if (updateBlocks) {
+      for (const block of updateBlocks) {
+        if (!block.includes('RETURNING')) {
+          const fixed = block.replace(/`\s*$/, ' RETURNING *`')
+          code = code.replace(block, fixed)
+          fixes.push(`${file.path}: UPDATE 加 RETURNING *`)
+          modified = true
+        }
+      }
+    }
+
+    // Rule 3: 批次操作（for 循環 + UPDATE）後必須有 success: true
+    // 找 for 循環結束後的 return 如果缺 success
+    const batchPattern = /for\s*\([^)]*\)\s*\{[^}]*await\s+sql\s*`\s*UPDATE[^}]*\}\s*\n\s*return\s*\{([^}]*)\}/g
+    let batchMatch: RegExpExecArray | null
+    while ((batchMatch = batchPattern.exec(code)) !== null) {
+      const returnBody = batchMatch[1]
+      if (!returnBody.includes('success')) {
+        const originalReturn = `return {${returnBody}}`
+        const fixedReturn = `return {${returnBody}${returnBody.trim() ? ', ' : ''}success: true}`
+        code = code.replace(originalReturn, fixedReturn)
+        fixes.push(`${file.path}: 批次操作加 success: true`)
+        modified = true
+      }
+    }
+
+    // Rule 3b: 簡化匹配 — return { __status: 200 } 在 for 循環後
+    if (code.includes('sort_order') || code.includes('sortOrder') || code.includes('reorder')) {
+      const simpleReturn = /return\s*\{\s*__status:\s*200\s*\}(?!\s*[,;]?\s*success)/g
+      if (simpleReturn.test(code) && !code.includes('success: true')) {
+        code = code.replace(/return\s*\{\s*__status:\s*200\s*\}/g, 'return { __status: 200, success: true }')
+        fixes.push(`${file.path}: 排序操作加 success: true`)
+        modified = true
+      }
+    }
+
+    return modified ? { ...file, content: code } : file
+  })
+
+  if (fixes.length > 0) {
+    logger.info({ fixCount: fixes.length, fixes }, 'Action response 自動修復完成')
+  }
+
+  return { files: result, fixes }
+}
+
+// ============================================================
+// 9. 前後端 _stepSummary 一致性驗證（零 LLM）
 // ============================================================
 
 interface ActionBranch {

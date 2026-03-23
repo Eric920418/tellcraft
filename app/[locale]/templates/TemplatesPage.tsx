@@ -7,6 +7,7 @@ import { useRouter } from '@/i18n/navigation'
 import { motion, AnimatePresence, useInView, useScroll, useTransform } from 'framer-motion'
 import { useTranslations } from 'next-intl'
 import { HEAVY } from '@/app/lib/chat-utils'
+import SmoothScroll from '@/app/components/SmoothScroll'
 import { getTemplates, getTemplateFiles } from '@/app/actions/templates'
 import {
   type TemplateCardData,
@@ -283,6 +284,8 @@ function TemplatesContent() {
         type="application/ld+json"
         dangerouslySetInnerHTML={{ __html: JSON.stringify(breadcrumbJsonLd) }}
       />
+
+      <SmoothScroll />
 
       {/* 返回鍵 */}
       <div style={{ padding: '20px 24px 0', maxWidth: 1200, margin: '0 auto' }}>
