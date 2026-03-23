@@ -93,7 +93,7 @@ export async function handleUiuxCodeGenerating(
         logger.info('代碼生成檢查超時但近期仍有活動心跳，跳過恢復')
         await sendMessage(conversationId, io, {
           content: '正在生成中，請稍候...',
-          stage: 'info',
+          stage: 'uiux_pipeline_progress',
         })
         return
       }
@@ -145,7 +145,7 @@ export async function handleUiuxCodeGenerating(
 
     await sendMessage(conversationId, io, {
       content: '正在生成中，請稍候...',
-      stage: 'info',
+      stage: 'uiux_pipeline_progress',
     })
     return
 }

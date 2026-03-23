@@ -1,15 +1,18 @@
 'use client'
 
 import { useRef } from 'react'
-import { motion, useInView } from 'framer-motion'
+import { motion, useInView, useScroll, useTransform } from 'framer-motion'
 import { useTranslations } from 'next-intl'
 import AnimatedCounter from './AnimatedCounter'
-import { heavyEasing, HEAVY } from '@/app/lib/chat-utils'
+import { HEAVY } from '@/app/lib/chat-utils'
 
 function StatsSection() {
   const t = useTranslations('stats')
   const ref = useRef(null)
   const isInView = useInView(ref, { once: true, margin: HEAVY.viewMargin })
+
+  const { scrollYProgress } = useScroll({ target: ref, offset: ['start end', 'end start'] })
+  const parallaxY = useTransform(scrollYProgress, [0, 1], HEAVY.parallaxY)
 
   const stats = [
     { value: 90, suffix: '%', label: t('label1'), description: t('desc1') },
@@ -20,11 +23,11 @@ function StatsSection() {
 
   return (
     <section ref={ref} style={{ padding: '80px 24px', background: 'var(--black)', color: 'var(--white)', borderTop: '3px solid var(--accent)' }}>
-      <div style={{ maxWidth: 1000, margin: '0 auto' }}>
+      <motion.div style={{ maxWidth: 1000, margin: '0 auto', y: parallaxY }}>
         <motion.div
           initial={{ opacity: 0, y: HEAVY.y }}
           animate={isInView ? { opacity: 1, y: 0 } : {}}
-          transition={{ duration: HEAVY.durationHeader, ease: heavyEasing }}
+          transition={{ ...HEAVY.springHeader }}
           style={{ textAlign: 'center', marginBottom: 64 }}
         >
           <h2 style={{
@@ -44,9 +47,9 @@ function StatsSection() {
           {stats.map((stat, i) => (
             <motion.div
               key={stat.label}
-              initial={{ opacity: 0, y: 36 }}
+              initial={{ opacity: 0, y: HEAVY.y + 4 }}
               animate={isInView ? { opacity: 1, y: 0 } : {}}
-              transition={{ duration: HEAVY.duration, delay: i * HEAVY.stagger, ease: heavyEasing }}
+              transition={{ delay: i * HEAVY.stagger, ...HEAVY.spring }}
               style={{ textAlign: 'center' }}
             >
               <div style={{
@@ -75,7 +78,7 @@ function StatsSection() {
             </motion.div>
           ))}
         </div>
-      </div>
+      </motion.div>
     </section>
   )
 }

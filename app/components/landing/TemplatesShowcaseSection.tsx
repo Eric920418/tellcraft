@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useRef, useState } from 'react'
-import { motion, useInView } from 'framer-motion'
+import { motion, useInView, useScroll, useTransform } from 'framer-motion'
 import Link from 'next/link'
 import { useRouter } from '@/i18n/navigation'
 import { getTemplates } from '@/app/actions/templates'
@@ -280,6 +280,9 @@ export default function TemplatesShowcaseSection() {
   const sectionRef = useRef(null)
   const isInView = useInView(sectionRef, { once: true, margin: HEAVY.viewMargin })
 
+  const { scrollYProgress } = useScroll({ target: sectionRef, offset: ['start end', 'end start'] })
+  const parallaxY = useTransform(scrollYProgress, [0, 1], HEAVY.parallaxY)
+
   // Hydration 後：shuffle 靜態資料，再嘗試取得 API 資料
   useEffect(() => {
     const applyData = (cards: TemplateCardData[]) => {
@@ -304,7 +307,7 @@ export default function TemplatesShowcaseSection() {
   const fadeUp = (delay: number) => ({
     initial: { opacity: 0, y: HEAVY.y },
     animate: isInView ? { opacity: 1, y: 0 } : {},
-    transition: { duration: HEAVY.duration, delay, ease: heavyEasing },
+    transition: { delay, ...HEAVY.spring },
   })
 
   if (row1.length === 0) return null
@@ -313,7 +316,7 @@ export default function TemplatesShowcaseSection() {
     <section ref={sectionRef} style={{ padding: '80px 0', overflow: 'hidden' }}>
       <style>{MARQUEE_STYLES}</style>
 
-      <div style={{ padding: '0 24px', textAlign: 'center', marginBottom: 48 }}>
+      <motion.div style={{ y: parallaxY, padding: '0 24px', textAlign: 'center', marginBottom: 48 }}>
         <motion.div {...fadeUp(0)} style={{
           fontSize: 11, color: 'var(--accent)',
           textTransform: 'uppercase', letterSpacing: '0.1em',
@@ -335,12 +338,12 @@ export default function TemplatesShowcaseSection() {
         }}>
           精選設計模板，一句話描述需求即可套用並完整客製化
         </motion.p>
-      </div>
+      </motion.div>
 
       <motion.div
         initial={{ opacity: 0 }}
         animate={isInView ? { opacity: 1 } : {}}
-        transition={{ duration: HEAVY.durationSecondary, delay: 0.35, ease: heavyEasing }}
+        transition={{ delay: 0.35, ...HEAVY.springSecondary }}
         style={{ display: 'flex', flexDirection: 'column', gap: 16 }}
       >
         <MarqueeRow cards={row1} direction="left" duration={45} />

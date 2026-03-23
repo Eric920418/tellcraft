@@ -2,13 +2,13 @@
 
 import React, { useRef, useState, useEffect, useCallback, useMemo } from 'react'
 import { createPortal } from 'react-dom'
-import { motion, useInView } from 'framer-motion'
+import { motion, useInView, useScroll, useTransform } from 'framer-motion'
 import { useTranslations } from 'next-intl'
 import { gsap } from 'gsap'
 import RotatingText from '@/app/components/RotatingText'
 import GlareHover from '@/app/components/GlareHover'
 import { useIsMobile } from '@/app/hooks/useIsMobile'
-import { heavyEasing, HEAVY } from '@/app/lib/chat-utils'
+import { HEAVY } from '@/app/lib/chat-utils'
 
 /* ─── TargetCursor（Portal 渲染到 body，避免祖先 transform 干擾 fixed） ─── */
 
@@ -327,6 +327,9 @@ function UseCasesSection() {
   const isInView = useInView(ref, { once: true, margin: HEAVY.viewMargin })
   const isMobile = useIsMobile()
 
+  const { scrollYProgress } = useScroll({ target: ref, offset: ['start end', 'end start'] })
+  const parallaxY = useTransform(scrollYProgress, [0, 1], HEAVY.parallaxY)
+
   const useCases = [
     {
       audience: t('audience1'),
@@ -357,11 +360,11 @@ function UseCasesSection() {
   return (
     <section ref={ref} style={{ padding: isMobile ? '48px 16px' : '80px 24px', background: 'var(--gray-50)' }}>
       <TargetCursor containerRef={ref} targetSelector=".cursor-target" />
-      <div style={{ maxWidth: 1000, margin: '0 auto' }}>
+      <motion.div style={{ maxWidth: 1000, margin: '0 auto', y: parallaxY }}>
         <motion.div
           initial={{ opacity: 0, y: HEAVY.y }}
           animate={isInView ? { opacity: 1, y: 0 } : {}}
-          transition={{ duration: HEAVY.durationHeader, ease: heavyEasing }}
+          transition={{ ...HEAVY.springHeader }}
           style={{ textAlign: 'center', marginBottom: isMobile ? 40 : 80 }}
         >
           <div style={{
@@ -412,7 +415,7 @@ function UseCasesSection() {
               key={useCase.audience}
               initial={{ opacity: 0, y: HEAVY.y }}
               animate={isInView ? { opacity: 1, y: 0 } : {}}
-              transition={{ duration: HEAVY.duration, delay: 0.2 + i * HEAVY.stagger, ease: heavyEasing }}
+              transition={{ delay: 0.2 + i * HEAVY.stagger, ...HEAVY.spring }}
               style={{ height: '100%' }}
             >
               <GlareHover
@@ -473,7 +476,7 @@ function UseCasesSection() {
             </motion.div>
           ))}
         </div>
-      </div>
+      </motion.div>
     </section>
   )
 }

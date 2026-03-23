@@ -609,8 +609,23 @@ export function classifyRedPhaseFailure(step: StepResult): 'expected_red' | RedP
   }
 
   // 其他 response_validate 失敗（如 VAR 無法解析、JSON 解析失敗）
-  if (err.includes('ResponseValidate') || err.includes('回應')) {
+  if (err.includes('ResponseValidate') || err.includes('response_validate') || err.includes('回應')) {
     return 'expected_red' // 501 body 不是 valid JSON → 也算預期 RED
+  }
+
+  // $notnull / 非空驗證失敗（stub 回 501 沒有預期欄位 → 預期的 RED）
+  if (err.includes('應該不為空，但實際值為') || err.includes('應為非空值，但實際為空')) {
+    return 'expected_red'
+  }
+
+  // VAR-System 錯誤（stub 回 501 無法捕獲 execution key → 預期的 RED）
+  if (err.includes('VAR-System') || err.includes('execution key')) {
+    return 'expected_red'
+  }
+
+  // 值不匹配（stub 回 501 欄位值不對 → 預期的 RED）
+  if (err.includes('值不匹配')) {
+    return 'expected_red'
   }
 
   // 未知類型的失敗

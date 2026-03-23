@@ -81,6 +81,8 @@ pm2 describe tellcraft-backend            # 詳細資訊（記憶體/重啟次�
 | **UIUX Phases** | `workers/phase-handlers/uiux-phases.ts`（~2420 行） | UIUX 全流程：Discovery/Brief/Variant/CodePipeline/Mixed routing |
 | **Deploy Phases** | `workers/phase-handlers/deploy-phases.ts`（~240 行） | 部署執行：prepareDeployment + executeDeployment |
 | **Fast Build Phases** | `workers/phase-handlers/fast-build-phases.ts`（~480 行） | 快速建站：增量交互式生成（executeFastBuildSkill + runFastBuildPipeline + mergeGeneratedCode） |
+| **Clone Phases** | `workers/phase-handlers/clone-phases.ts` | 網站復刻：executeCloneSkill（URL 分析 → 逐 section Sonnet Vision 生成 → 合併 → uiux_complete） |
+| **Web Clone Service** | `services/web-clone-service.ts` | Clone 核心：增強版 DOM/CSS 提取（CLONE_EXTRACTION_SCRIPT）、section 切割（splitSections）、逐 section Sonnet Vision 生成（generateSectionCode）、代碼合併（assembleSections） |
 | **Coder Phases** | `workers/phase-handlers/coder-phases.ts`（~490 行） | Coder Skill：讀 BDD 產出 → RED Phase（靜態 + Stub 全場景）→ executeCoderPipeline → 保存 project_files(coder) → 合併代碼 + executeCoderTesting（GREEN Phase 紅綠燈） |
 | **RED Phase Validator** | `services/red-phase-validator.ts`（~500 行） | SDD RED Phase 雙層驗證：Layer 1 靜態規格檢查（8 個零 LLM 檢查，~2ms）+ Layer 2 Stub 全場景驗證（StubHttpAdapter + 真實 Neon DB 跑完整 SpecFormula，~1-2s）|
 | **StubHttpAdapter** | `lib/specformula/http/stub-adapter.ts`（~20 行） | RED Phase 用的 HTTP stub，所有路由回 501，替代 Mini Express test server（~100ms vs ~12s）|
@@ -154,6 +156,7 @@ pm2 describe tellcraft-backend            # 詳細資訊（記憶體/重啟次�
 | `domain-purchase` | 域名購買：RDAP 查詢可用性 → 確認 → Porkbun 註冊 → Cloudflare DNS → Vercel 綁定（付費會員限定，配額 creator:1/pro:2/business:3） |
 | `domain-dns` | 自有域名綁定：顯示 DNS 設定說明 → 用戶確認 → 驗證 DNS 傳播 → 完成（付費會員限定，共用域名配額） |
 | `db-provision` | BDD 完成後自動建 Neon DB + 套用 Schema（同步 < 10s，無 Redis）（付費會員限定，creator:1/pro:3/business:5） |
+| `clone` | 網站復刻：URL → Puppeteer 增強版 DOM/CSS 提取 + section 切割 → 逐 section Sonnet Vision 生成 React/Tailwind → 合併 → QG → 預覽/迭代/部署。首頁第三個模式按鈕（mode='clone'）。完成後 phase='uiux_complete'，複用迭代/部署。`web-clone-service.ts` + `clone-phases.ts` |
 
 ### Orchestrator Phase 狀態機
 
@@ -181,6 +184,8 @@ pm2 describe tellcraft-backend            # 詳細資訊（記憶體/重啟次�
 | `domain_dns_verifying` | 驗證 DNS 傳播中（攔截用戶輸入） |
 | `domain_complete` | 域名綁定完成（quickReplies 引導管理） |
 | `domain_failed` | 域名操作失敗 + 重試/放棄選項 |
+| `clone_analyzing` | Clone Skill 分析中（截圖+DOM 提取+section 切割，攔截用戶輸入，5min 超時） |
+| `clone_generating` | Clone Skill 逐 section 生成中（Sonnet Vision，攔截用戶輸入，20min 超時） |
 
 ### UIUX Pipeline 概覽
 
@@ -401,7 +406,8 @@ Feature 註解：`# Action: actionName` + `# [METHOD] /path` + `# Summary: xxx`
 - **Coder action response field 必須對齊 BDD execution key**：`generateActionFunction` 從 Feature 文件提取 `<executionKey`（如 `<newUserId`），注入 prompt 要求 LLM 使用精確欄位名。不對齊會導致 SpecFormula VAR-System 連鎖失敗（47/52 場景）。Features 從 `bdd_sessions.features_content` 讀取
 - **Coder E2E 測試必須包含 backendFiles**：`runCoderE2ETests` 的 code 必須含 `result.backendFiles`（`lib/actions/*`、`app/actions/*`、`lib/db.ts`），否則改寫後的組件 import Server Action 會全部 Module not found → 500
 - **`rewriteComponentForServerActions` maxTokens 上限 32768**：大組件（>1000 行）需要足夠 token。改寫後偵測 JSX 標籤平衡，截斷時回退原始組件
-- **Prompt caching system prompt 順序重要**：`buildCacheableSystemBlocks` 將 static 部分（tier philosophy + task definition + base rules）放在第一個 block 並加 `cache_control: { type: 'ephemeral' }`，dynamic 部分（mood、designSystem、constraints）放在第二個 block。修改 system prompt 時不要把 per-request 內容放進 static block，否則 cache hit 率歸零
+- **Prompt caching system prompt 順序重要**：`buildCacheableSystemBlocks` 將 static 部分（tier philosophy + task definition + base rules）放在第一個 block 並加 `cache_control: { type: 'ephemeral' }`，dynamic 部分（mood、designSystem、constraints）放在第二個 block。`buildCacheableUserMessage` 將 user message 的代碼區塊加 `cache_control`，使 continuation call 能 cache hit。修改 system prompt 時不要把 per-request 內容放進 static block，否則 cache hit 率歸零
+- **`ENABLE_DIFF_OUTPUT` diff 輸出模式**：Animation/RWD/Merged 階段用 SEARCH/REPLACE block 格式輸出修改（省 60-70% output token）。`parseSearchReplaceBlocks()` 解析 → `applySearchReplace()` 應用到 baseCode → `fuzzySearch()` 容忍縮排差異。解析失敗時自動 fallback 到 `parseGeneratedFiles()` full-file 模式。串流預覽用 `buildDiffStreamingHandler()` 在每個完整 block 閉合時 apply 到 baseCode 副本再 emit。SEARCH 多處匹配會拒絕替換（安全起見）。注意 diff 模式不影響 `generateStructure`（從零生成不需要 diff）
 - **`FAST_BUILD_MERGED_ANIM_RWD` 只影響首批生成**：`isLaterBatch`（增量批次）仍用分離的 Animation + RWD，因為增量批次有特殊的 `buildIncrementalCode` 處理邏輯
 - **WebContainer preload 後禁止 `container.mount()`**：preloader 預裝 BASE_DEPS 到 node_modules，之後 `useWebContainer` hook 用 `writeFilesToContainer()` 逐檔寫入（不用 `mount()`）。`mount()` 會清除整個 fs 包括 node_modules。`restart()` 例外（用戶觸發的重啟允許 mount + 全量重裝）。`preloadPromise` 是 module-level，hook 自動偵測不需 prop drilling
 
@@ -416,5 +422,5 @@ Feature 註解：`# Action: actionName` + `# [METHOD] /path` + `# Summary: xxx`
 
 前端（`.env.local`）：`VPS_API_URL`, `NEXT_PUBLIC_VPS_API_URL`, `NEXT_PUBLIC_VPS_WS_URL`, `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `NEXT_PUBLIC_LIFF_ID`, `NEXT_PUBLIC_SENTRY_DSN`, `SENTRY_ORG`, `SENTRY_PROJECT`, `SENTRY_AUTH_TOKEN`
 
-後端（`tellcraft-backend/.env`）：所有環境變數定義在 `lib/env.ts` 的 Zod schema 中，分三層（REQUIRED/OPTIONAL+預設/功能開關）。啟動時 `validateEnv()` 驗證，缺必要變數會立即 crash。關鍵 OPTIONAL 變數：`NEON_API_KEY`（Neon API Bearer Token，自動建立客戶 DB）、`NEON_DEFAULT_REGION`（預設 aws-ap-southeast-1，注意 aws-ap-northeast-1 已從 Neon 移除）。Token 優化開關：`ENABLE_PROMPT_CACHING`（預設 true，Anthropic prompt caching 降 input token 成本）、`FAST_BUILD_MERGED_ANIM_RWD`（預設 true，合併 Animation+RWD 為單次 Sonnet 呼叫；品質異常時設 false 回退分離模式）。
+後端（`tellcraft-backend/.env`）：所有環境變數定義在 `lib/env.ts` 的 Zod schema 中，分三層（REQUIRED/OPTIONAL+預設/功能開關）。啟動時 `validateEnv()` 驗證，缺必要變數會立即 crash。關鍵 OPTIONAL 變數：`NEON_API_KEY`（Neon API Bearer Token，自動建立客戶 DB）、`NEON_DEFAULT_REGION`（預設 aws-ap-southeast-1，注意 aws-ap-northeast-1 已從 Neon 移除）。Token 優化開關：`ENABLE_PROMPT_CACHING`（預設 true，Anthropic prompt caching 降 input token 成本）、`FAST_BUILD_MERGED_ANIM_RWD`（預設 true，合併 Animation+RWD 為單次 Sonnet 呼叫；品質異常時設 false 回退分離模式）、`ENABLE_DIFF_OUTPUT`（預設 false，Animation/RWD 用 SEARCH/REPLACE diff 輸出省 60-70% output token；開啟後 LLM 只輸出修改的代碼片段而非完整檔案，解析失敗時自動 fallback 到 full-file 模式）。
 

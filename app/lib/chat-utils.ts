@@ -3,18 +3,24 @@ import type { Message } from '@/app/types/chat'
 // Apple-style smooth easing
 export const smoothEasing: [number, number, number, number] = [0.32, 0.72, 0, 1]
 
-// 厚重感 easing：快起強減速，模擬重物落定
+// 厚重感 easing：快起強減速，模擬重物落定（fallback 用，主要用 spring）
 export const heavyEasing: [number, number, number, number] = [0.22, 1, 0.36, 1]
 
 // Landing 厚重動畫預設
 export const HEAVY = {
-  duration: 0.9,
-  durationHeader: 1.0,
-  durationSecondary: 0.7,
-  y: 30,
-  x: 40,
+  // Spring 物理：重物落地 + 微幅回彈
+  spring: { type: 'spring' as const, damping: 22, stiffness: 90, mass: 1.2 },
+  // 標題用：更重、更慢
+  springHeader: { type: 'spring' as const, damping: 18, stiffness: 70, mass: 1.5 },
+  // 副元素：稍輕
+  springSecondary: { type: 'spring' as const, damping: 24, stiffness: 120, mass: 1.0 },
+  // 位移（重物移動距離短）
+  y: 20,
+  x: 30,
   stagger: 0.15,
   viewMargin: '-80px' as const,
+  // Scroll parallax 偏移量
+  parallaxY: [40, -10] as [number, number],
 } as const
 
 export const STAGES = [

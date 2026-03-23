@@ -1,7 +1,7 @@
 'use client'
 
 import { useRef, useState } from 'react'
-import { motion, useInView } from 'framer-motion'
+import { motion, useInView, useScroll, useTransform } from 'framer-motion'
 import { useTranslations } from 'next-intl'
 import FAQItem from './FAQItem'
 import { heavyEasing, HEAVY } from '@/app/lib/chat-utils'
@@ -11,6 +11,9 @@ function FAQSection() {
   const ref = useRef(null)
   const isInView = useInView(ref, { once: true, margin: HEAVY.viewMargin })
   const [openIndex, setOpenIndex] = useState<number | null>(0)
+
+  const { scrollYProgress } = useScroll({ target: ref, offset: ['start end', 'end start'] })
+  const parallaxY = useTransform(scrollYProgress, [0, 1], HEAVY.parallaxY)
 
   const faqs = [
     { question: t('q1'), answer: t('a1') },
@@ -56,7 +59,7 @@ function FAQSection() {
         pointerEvents: 'none',
       }} />
 
-      <div style={{ maxWidth: 900, margin: '0 auto' }}>
+      <motion.div style={{ maxWidth: 900, margin: '0 auto', y: parallaxY }}>
         {/* Header with asymmetric layout */}
         <div style={{
           display: 'grid',
@@ -74,7 +77,7 @@ function FAQSection() {
             <motion.span
               initial={{ opacity: 0, y: HEAVY.y }}
               animate={isInView ? { opacity: 1, y: 0 } : {}}
-              transition={{ duration: HEAVY.duration, ease: heavyEasing }}
+              transition={{ ...HEAVY.spring }}
               style={{
                 writingMode: 'vertical-rl',
                 textOrientation: 'mixed',
@@ -91,7 +94,7 @@ function FAQSection() {
             <motion.h2
               initial={{ opacity: 0, y: HEAVY.y }}
               animate={isInView ? { opacity: 1, y: 0 } : {}}
-              transition={{ duration: HEAVY.durationHeader, delay: 0.1, ease: heavyEasing }}
+              transition={{ delay: 0.1, ...HEAVY.springHeader }}
               style={{
                 fontSize: 'clamp(32px, 5vw, 48px)',
                 fontWeight: 300,
@@ -105,7 +108,7 @@ function FAQSection() {
             <motion.p
               initial={{ opacity: 0, y: HEAVY.y }}
               animate={isInView ? { opacity: 1, y: 0 } : {}}
-              transition={{ duration: HEAVY.durationSecondary, delay: 0.2, ease: heavyEasing }}
+              transition={{ delay: 0.2, ...HEAVY.springSecondary }}
               style={{
                 fontSize: 15,
                 color: 'var(--gray-500)',
@@ -121,7 +124,7 @@ function FAQSection() {
         <motion.div
           initial={{ opacity: 0 }}
           animate={isInView ? { opacity: 1 } : {}}
-          transition={{ duration: HEAVY.duration, delay: 0.3, ease: heavyEasing }}
+          transition={{ delay: 0.3, ...HEAVY.spring }}
           style={{
             background: 'var(--white)',
             border: '1px solid var(--border-color)',
@@ -145,7 +148,7 @@ function FAQSection() {
         <motion.div
           initial={{ scaleX: 0 }}
           animate={isInView ? { scaleX: 1 } : {}}
-          transition={{ duration: HEAVY.durationHeader, delay: 0.6, ease: heavyEasing }}
+          transition={{ delay: 0.6, duration: 1.0, ease: heavyEasing }}
           style={{
             height: 1,
             background: 'linear-gradient(90deg, var(--accent) 0%, transparent 100%)',
@@ -154,7 +157,7 @@ function FAQSection() {
             maxWidth: 200,
           }}
         />
-      </div>
+      </motion.div>
     </section>
   )
 }

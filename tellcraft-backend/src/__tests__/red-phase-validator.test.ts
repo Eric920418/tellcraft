@@ -542,6 +542,18 @@ describe('classifyRedPhaseFailure', () => {
     expect(classifyRedPhaseFailure(makeStep('failed', error))).toBe('expected_red')
   })
 
+  it('$notnull 失敗（stub 無欄位）→ expected_red', () => {
+    expect(classifyRedPhaseFailure(makeStep('failed', '使用者註冊成功.message 應該不為空，但實際值為 undefined'))).toBe('expected_red')
+  })
+
+  it('VAR-System 錯誤 → expected_red', () => {
+    expect(classifyRedPhaseFailure(makeStep('failed', "[response_validate] VAR-System 錯誤：找不到 execution key 'authToken'"))).toBe('expected_red')
+  })
+
+  it('值不匹配 → expected_red', () => {
+    expect(classifyRedPhaseFailure(makeStep('failed', '切換待辦完成狀態.$Todo.id 值不匹配。\n  預期: true\n  實際: '))).toBe('expected_red')
+  })
+
   it('未知錯誤 → unknown', () => {
     expect(classifyRedPhaseFailure(makeStep('failed', 'Some random error'))).toBe('unknown')
   })

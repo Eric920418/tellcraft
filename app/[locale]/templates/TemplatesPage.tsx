@@ -4,9 +4,9 @@ import { useEffect, useRef, useState, Suspense } from 'react'
 import dynamic from 'next/dynamic'
 import { useSearchParams } from 'next/navigation'
 import { useRouter } from '@/i18n/navigation'
-import { motion, AnimatePresence, useInView } from 'framer-motion'
+import { motion, AnimatePresence, useInView, useScroll, useTransform } from 'framer-motion'
 import { useTranslations } from 'next-intl'
-import { heavyEasing, HEAVY } from '@/app/lib/chat-utils'
+import { HEAVY } from '@/app/lib/chat-utils'
 import { getTemplates, getTemplateFiles } from '@/app/actions/templates'
 import {
   type TemplateCardData,
@@ -195,6 +195,8 @@ function TemplatesContent() {
   const [sandpackLoading, setSandpackLoading] = useState(false)
   const gridRef = useRef(null)
   const isGridInView = useInView(gridRef, { once: true, margin: HEAVY.viewMargin })
+  const { scrollYProgress } = useScroll({ target: gridRef, offset: ['start end', 'end start'] })
+  const parallaxY = useTransform(scrollYProgress, [0, 1], HEAVY.parallaxY)
   const [sandpackError, setSandpackError] = useState<string | null>(null)
 
   // 載入模板資料
@@ -303,7 +305,7 @@ function TemplatesContent() {
       <motion.div
         initial={{ opacity: 0, y: HEAVY.y }}
         animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: HEAVY.durationHeader, ease: heavyEasing }}
+        transition={{ ...HEAVY.springHeader }}
         style={{
           padding: '32px 24px 40px',
           maxWidth: 1200,
@@ -387,9 +389,10 @@ function TemplatesContent() {
       </div>
 
       {/* 模板 Grid */}
-      <div
+      <motion.div
         ref={gridRef}
         style={{
+          y: parallaxY,
           maxWidth: 1200,
           margin: '0 auto',
           padding: '0 24px 80px',
@@ -403,7 +406,7 @@ function TemplatesContent() {
             key={card.id}
             initial={{ opacity: 0, y: HEAVY.y }}
             animate={isGridInView ? { opacity: 1, y: 0 } : {}}
-            transition={{ duration: HEAVY.duration, delay: Math.min(i * HEAVY.stagger, 0.9), ease: heavyEasing }}
+            transition={{ delay: Math.min(i * HEAVY.stagger, 0.9), ...HEAVY.spring }}
           >
             <TemplateCard
               card={card}
@@ -414,7 +417,7 @@ function TemplatesContent() {
             />
           </motion.div>
         ))}
-      </div>
+      </motion.div>
 
       {/* 預覽 Modal */}
       <AnimatePresence>

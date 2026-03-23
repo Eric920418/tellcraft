@@ -196,6 +196,23 @@ function buildCacheableSystemBlocks(
   ]
 }
 
+/**
+ * 將 user message 拆為可快取的代碼區塊 + 不快取的任務指令
+ * 在 continuation call 時，代碼區塊可命中 cache（省 ~90% input token）
+ */
+function buildCacheableUserMessage(
+  codeBlock: string,
+  taskBlock: string,
+): string | Array<Anthropic.Messages.TextBlockParam> {
+  if (!getEnv().ENABLE_PROMPT_CACHING) {
+    return codeBlock + '\n\n' + taskBlock
+  }
+  return [
+    { type: 'text' as const, text: codeBlock, cache_control: { type: 'ephemeral' as const } },
+    { type: 'text' as const, text: taskBlock },
+  ]
+}
+
 export async function callClaude(
   systemPrompt: string | Array<Anthropic.Messages.TextBlockParam>,
   messages: Array<{ role: 'user' | 'assistant'; content: string | Anthropic.MessageCreateParams['messages'][number]['content'] }>,
@@ -1563,6 +1580,201 @@ function mergeCodeBundle(base: CodeBundle, patch: Partial<CodeBundle>): CodeBund
   }
 }
 
+// ============================================================
+// Search/Replace diff 模式（ENABLE_DIFF_OUTPUT）
+// ============================================================
+
+interface SearchReplaceBlock {
+  filePath: string
+  searchContent: string
+  replaceContent: string
+  isCreate: boolean
+}
+
+interface ApplyResult {
+  success: boolean
+  updatedCode: CodeBundle
+  failedBlocks: SearchReplaceBlock[]
+  appliedCount: number
+}
+
+/**
+ * 解析 LLM 輸出的 SEARCH/REPLACE blocks
+ * 回傳 null 代表沒有找到任何 block（應 fallback 到 full-file 解析）
+ */
+export function parseSearchReplaceBlocks(content: string): SearchReplaceBlock[] | null {
+  const BLOCK_REGEX = /<<<<<<< (?:SEARCH|CREATE):([^\n]+)\n([\s\S]*?)=======\n([\s\S]*?)>>>>>>> REPLACE/g
+  const blocks: SearchReplaceBlock[] = []
+  let match
+
+  while ((match = BLOCK_REGEX.exec(content)) !== null) {
+    const filePath = match[1].trim()
+    const searchContent = match[2]
+    const replaceContent = match[3]
+    // SEARCH 為空（只有空白）= CREATE 模式
+    const isCreate = searchContent.trim() === ''
+    blocks.push({ filePath, searchContent, replaceContent, isCreate })
+  }
+
+  return blocks.length > 0 ? blocks : null
+}
+
+/**
+ * 模糊搜尋：壓縮空白後匹配，容忍 LLM 微調縮排
+ * 回傳原始字串中的 { start, end } 位置
+ */
+export function fuzzySearch(haystack: string, needle: string): { start: number; end: number } | null {
+  if (!needle.trim()) return null
+
+  const needleLines = needle.split('\n').filter(l => l.trim())
+  if (needleLines.length === 0) return null
+
+  const firstLine = needleLines[0].trim()
+  const lastLine = needleLines[needleLines.length - 1].trim()
+
+  // 在 haystack 中找 firstLine
+  const haystackLines = haystack.split('\n')
+  let startLineIdx = -1
+  for (let i = 0; i < haystackLines.length; i++) {
+    if (haystackLines[i].trim() === firstLine) {
+      startLineIdx = i
+      break
+    }
+  }
+  if (startLineIdx === -1) return null
+
+  // 從 startLineIdx 往下找 lastLine
+  let endLineIdx = -1
+  for (let i = startLineIdx + needleLines.length - 1; i < Math.min(startLineIdx + needleLines.length + 5, haystackLines.length); i++) {
+    if (haystackLines[i].trim() === lastLine) {
+      endLineIdx = i
+      break
+    }
+  }
+  if (endLineIdx === -1) return null
+
+  // 驗證中間行數大致匹配（允許 ±2 行差異）
+  const matchedLineCount = endLineIdx - startLineIdx + 1
+  if (Math.abs(matchedLineCount - needleLines.length) > 2) return null
+
+  // 計算原始字串中的 char offset
+  let start = 0
+  for (let i = 0; i < startLineIdx; i++) {
+    start += haystackLines[i].length + 1 // +1 for \n
+  }
+  let end = start
+  for (let i = startLineIdx; i <= endLineIdx; i++) {
+    end += haystackLines[i].length + (i < endLineIdx ? 1 : 0)
+  }
+
+  return { start, end }
+}
+
+/**
+ * 將 search/replace blocks 應用到 CodeBundle
+ * 精確匹配 → fuzzy 匹配 → 標記失敗
+ */
+export function applySearchReplace(baseCode: CodeBundle, blocks: SearchReplaceBlock[]): ApplyResult {
+  // 建立 path → content 映射
+  const fileMap = new Map<string, string>()
+  for (const p of baseCode.pages) fileMap.set(p.path, p.content)
+  for (const c of baseCode.components) fileMap.set(c.path, c.content)
+  if (baseCode.styles) fileMap.set('globals.css', baseCode.styles)
+
+  const failedBlocks: SearchReplaceBlock[] = []
+  let appliedCount = 0
+
+  for (const block of blocks) {
+    if (block.isCreate) {
+      fileMap.set(block.filePath, block.replaceContent)
+      appliedCount++
+      continue
+    }
+
+    const currentContent = fileMap.get(block.filePath)
+    if (!currentContent) {
+      failedBlocks.push(block)
+      continue
+    }
+
+    const searchNormalized = block.searchContent.trimEnd()
+
+    // 1. 精確匹配
+    const idx = currentContent.indexOf(searchNormalized)
+    if (idx !== -1) {
+      // 確認唯一性
+      const secondIdx = currentContent.indexOf(searchNormalized, idx + searchNormalized.length)
+      if (secondIdx !== -1) {
+        // 多處匹配 → 標記失敗
+        failedBlocks.push(block)
+        continue
+      }
+      const before = currentContent.slice(0, idx)
+      const after = currentContent.slice(idx + searchNormalized.length)
+      fileMap.set(block.filePath, before + block.replaceContent.trimEnd() + after)
+      appliedCount++
+      continue
+    }
+
+    // 2. Fuzzy 匹配（壓縮空白）
+    const fuzzyResult = fuzzySearch(currentContent, searchNormalized)
+    if (fuzzyResult) {
+      const before = currentContent.slice(0, fuzzyResult.start)
+      const after = currentContent.slice(fuzzyResult.end)
+      fileMap.set(block.filePath, before + block.replaceContent.trimEnd() + after)
+      appliedCount++
+      continue
+    }
+
+    // 3. 匹配失敗
+    failedBlocks.push(block)
+  }
+
+  // 重建 CodeBundle
+  const updatedPages = baseCode.pages.map(p => ({
+    ...p,
+    content: fileMap.get(p.path) ?? p.content,
+  }))
+  const updatedComponents = baseCode.components.map(c => ({
+    ...c,
+    content: fileMap.get(c.path) ?? c.content,
+  }))
+
+  // 處理 CREATE 的新檔案（不在 baseCode 中的）
+  for (const block of blocks) {
+    if (!block.isCreate) continue
+    const path = block.filePath
+    const alreadyInPages = updatedPages.some(p => p.path === path)
+    const alreadyInComponents = updatedComponents.some(c => c.path === path)
+    if (alreadyInPages || alreadyInComponents) continue
+
+    const newFile: GeneratedComponent = {
+      path,
+      content: block.replaceContent,
+      description: path.includes('/page.tsx') || path.includes('/page.ts')
+        ? `頁面: ${path.split('/').slice(-2, -1)[0]}`
+        : `組件: ${path.split('/').pop()?.replace(/\.tsx?$/, '') || path}`,
+    }
+
+    if (path.includes('/page.tsx') || path.includes('/page.ts')) {
+      updatedPages.push(newFile)
+    } else {
+      updatedComponents.push(newFile)
+    }
+  }
+
+  return {
+    success: failedBlocks.length === 0,
+    updatedCode: {
+      pages: updatedPages,
+      components: updatedComponents,
+      styles: fileMap.get('globals.css') ?? baseCode.styles,
+    },
+    failedBlocks,
+    appliedCount,
+  }
+}
+
 function buildCodeManifest(code: CodeBundle): string {
   const pageList = code.pages.map(page => `- page: ${page.path}`).join('\n')
   const componentList = code.components.map(component => `- component: ${component.path}`).join('\n')
@@ -2815,6 +3027,38 @@ export function buildStreamingHandler(
   }
 }
 
+/**
+ * Diff 模式串流處理：解析已完成的 search/replace blocks，apply 到 baseCode 後 emit
+ * 前端不需改動 — emit 的仍是完整 CodeBundle
+ */
+export function buildDiffStreamingHandler(
+  baseCode: CodeBundle,
+  onPartialCode: PartialCodeCallback | undefined,
+): ((accumulated: string) => void) | undefined {
+  if (!onPartialCode) return undefined
+
+  let lastAppliedCount = 0
+  let lastEmitTime = Date.now()
+
+  return (accumulated: string) => {
+    const now = Date.now()
+    if (now - lastEmitTime < 2000) return
+
+    const blocks = parseSearchReplaceBlocks(accumulated)
+    if (!blocks || blocks.length <= lastAppliedCount) return
+
+    const result = applySearchReplace(baseCode, blocks)
+    lastAppliedCount = blocks.length
+    lastEmitTime = now
+
+    onPartialCode({
+      pages: result.updatedCode.pages,
+      components: result.updatedCode.components,
+      styles: result.updatedCode.styles,
+    })
+  }
+}
+
 // ============================================================
 // Prompt 架構輔助函數（Phase 5-D）
 // ============================================================
@@ -3793,14 +4037,43 @@ ${getAnimationConstraints(tier)}
     ? `\n## 動畫個性（補充指引）\n${getAnimationPersonalityHint(designSystem.animationPersonality)}\n`
     : ''
 
-  const userMessage = `請在以下代碼基礎上添加動畫效果：
-${conceptReminder}${moodAnimSection}${uiSpecHint}
-## 專案檔案清單（未列出內容的檔案視為只讀）
+  const isDiffMode = getEnv().ENABLE_DIFF_OUTPUT
+
+  const outputFormatInstructions = isDiffMode
+    ? `## 輸出格式（SEARCH/REPLACE）
+使用精確的 SEARCH/REPLACE block 輸出每一處修改：
+
+<<<<<<< SEARCH:path/to/file.tsx
+要修改的原始代碼片段（必須與現有代碼精確匹配，包含縮排）
+=======
+修改後的代碼片段
+>>>>>>> REPLACE
+
+規則：
+1. SEARCH 部分必須精確匹配現有代碼（包含空白和縮排），確保唯一定位
+2. 每個 block 修改一處位置，同一檔案多處修改用多個 block
+3. SEARCH 包含 3-5 行上下文確保唯一匹配
+4. 新增 import 時，SEARCH 匹配原始 import 區段
+5. 新建檔案用 CREATE 格式（SEARCH 留空）：
+<<<<<<< CREATE:path/to/new-file.tsx
+=======
+新檔案完整內容
+>>>>>>> REPLACE
+6. CSS 修改用 <<<<<<< SEARCH:globals.css
+7. 不要輸出任何 code fence 格式，只用 SEARCH/REPLACE block`
+    : `⚠️ code fence 規則：每個 code block 的第一行必須直接是代碼，禁止在代碼前加任何說明文字。
+
+請輸出完整的修改後代碼，保持相同的檔案路徑格式。`
+
+  // Plan D: 拆分 user message 為 cached code block + task block
+  const codeBlock = `## 專案檔案清單（未列出內容的檔案視為只讀）
 ${buildCodeManifest(existingCode)}
 
 ## 現有代碼
-${existingCodeStr}
+${existingCodeStr}`
 
+  const taskBlock = `請在以上代碼基礎上添加動畫效果：
+${conceptReminder}${moodAnimSection}${uiSpecHint}
 ## 需要添加的動畫
 1. 頁面/區塊入場動畫（stagger effect）
 2. 按鈕 hover/tap 動畫
@@ -3809,13 +4082,13 @@ ${existingCodeStr}
 5. 表單輸入 focus 動畫
 
 ⚠️ 自給自足規則：如果你新增了 import 引用內部模組（@/ 或 ./），你必須同時輸出該檔案。禁止引用不存在的內部模組。
-⚠️ code fence 規則：每個 code block 的第一行必須直接是代碼，禁止在代碼前加任何說明文字。
+${outputFormatInstructions}`
 
-請輸出完整的修改後代碼，保持相同的檔案路徑格式。`
+  const userContent = buildCacheableUserMessage(codeBlock, taskBlock)
 
   const response = await callClaude(
     systemPrompt,
-    [{ role: 'user', content: userMessage }],
+    [{ role: 'user', content: userContent }],
     {
       maxTokens: incrementalOptions?.maxTokens || 32768,
       temperature: tier === 'creative' ? 0.35 : 0.2,
@@ -3824,35 +4097,59 @@ ${existingCodeStr}
       contextSizeHint: generationProfile,
     },
     { ...trackingContext, purpose: 'generate_animations' },
-    buildStreamingHandler(onPartialCode)
+    isDiffMode ? buildDiffStreamingHandler(existingCode, onPartialCode) : buildStreamingHandler(onPartialCode)
   )
 
   if (!response.success || !response.content) {
     return { success: false, error: response.error || '無法生成動畫代碼' }
   }
 
-  const { pages: rawAnimPages, components: rawAnimComps, styles } = parseGeneratedFiles(response.content, designSystem)
+  // ── 解析回應：diff 模式或 full-file 模式 ──
+  let mergedResult: CodeBundle
+
+  if (isDiffMode) {
+    const srBlocks = parseSearchReplaceBlocks(response.content)
+    if (srBlocks && srBlocks.length > 0) {
+      const applyResult = applySearchReplace(existingCode, srBlocks)
+      if (applyResult.failedBlocks.length > 0) {
+        logger.warn({
+          applied: applyResult.appliedCount,
+          failed: applyResult.failedBlocks.length,
+          failedPaths: applyResult.failedBlocks.map(b => b.filePath),
+        }, 'Animation diff 部分失敗')
+      }
+      if (applyResult.appliedCount > 0) {
+        mergedResult = applyResult.updatedCode
+      } else {
+        // 全部失敗 → fallback full-file
+        logger.warn('Animation diff 全部失敗，fallback full-file 解析')
+        const parsed = parseGeneratedFiles(response.content, designSystem)
+        mergedResult = mergeCodeBundle(existingCode, parsed)
+      }
+    } else {
+      // 沒有 diff blocks → LLM 可能無視指令，fallback full-file
+      logger.info('Animation 未偵測到 diff blocks，fallback full-file 解析')
+      const parsed = parseGeneratedFiles(response.content, designSystem)
+      mergedResult = mergeCodeBundle(existingCode, parsed)
+    }
+  } else {
+    const { pages: rawAnimPages, components: rawAnimComps, styles } = parseGeneratedFiles(response.content, designSystem)
+    const finalStyles = styles || existingCode.styles
+    mergedResult = mergeCodeBundle(existingCode, { pages: rawAnimPages, components: rawAnimComps, styles: finalStyles })
+  }
 
   // ── Layer 0 防禦：TSX 語法檢查 + LLM 自動修復 ──
-  const animSyntaxFixed = await checkAndFixSyntaxErrors([...rawAnimPages, ...rawAnimComps], trackingContext)
-  const rawAnimPagePaths = new Set(rawAnimPages.map(p => p.path))
-  const pages = animSyntaxFixed.filter(f => rawAnimPagePaths.has(f.path))
-  const components = animSyntaxFixed.filter(f => !rawAnimPagePaths.has(f.path))
-
-  // 如果沒有解析到新的 styles，保留原有的
-  const finalStyles = styles || existingCode.styles
-
-  const merged = mergeCodeBundle(existingCode, {
-    pages,
-    components,
-    styles: finalStyles,
-  })
+  const allFiles = [...mergedResult.pages, ...mergedResult.components]
+  const syntaxFixed = await checkAndFixSyntaxErrors(allFiles, trackingContext)
+  const pagePathSet = new Set(mergedResult.pages.map(p => p.path))
+  const pages = syntaxFixed.filter(f => pagePathSet.has(f.path))
+  const components = syntaxFixed.filter(f => !pagePathSet.has(f.path))
 
   return {
     success: true,
-    pages: merged.pages,
-    components: merged.components,
-    styles: merged.styles,
+    pages,
+    components,
+    styles: mergedResult.styles,
   }
 }
 
@@ -3973,14 +4270,41 @@ ${rwdTierHint}`
     ? `\n## Mood RWD 指引\n${getMoodRwdHint(moodId)}\n`
     : ''
 
-  const userMessage = `請在以下代碼基礎上添加響應式設計：
-${rwdConceptReminder}${moodRwdSection}${rwdUiSpecHint}
-## 專案檔案清單（未列出內容的檔案視為只讀）
+  const isDiffMode = getEnv().ENABLE_DIFF_OUTPUT
+
+  const rwdOutputFormatInstructions = isDiffMode
+    ? `## 輸出格式（SEARCH/REPLACE）
+使用精確的 SEARCH/REPLACE block 輸出每一處修改：
+
+<<<<<<< SEARCH:path/to/file.tsx
+要修改的原始代碼片段（必須與現有代碼精確匹配，包含縮排）
+=======
+修改後的代碼片段
+>>>>>>> REPLACE
+
+規則：
+1. SEARCH 部分必須精確匹配現有代碼（包含空白和縮排），確保唯一定位
+2. 每個 block 修改一處位置，同一檔案多處修改用多個 block
+3. SEARCH 包含 3-5 行上下文確保唯一匹配
+4. 新增 import 時，SEARCH 匹配原始 import 區段
+5. 新建檔案用 CREATE 格式（SEARCH 留空）
+6. CSS 修改用 <<<<<<< SEARCH:globals.css
+7. 不要輸出任何 code fence 格式，只用 SEARCH/REPLACE block`
+    : `⚠️ 選擇性輸出（重要效率規則）：
+只輸出你實際添加了響應式 class 的檔案。沒有修改的檔案完全省略（不輸出 code block）。
+若你新增了 import 引用內部模組（@/ 或 ./），你必須同時輸出該檔案。
+⚠️ code fence 規則：每個 code block 的第一行必須直接是代碼，禁止在代碼前加任何說明文字。
+保持相同的檔案路徑格式。`
+
+  // Plan D: 拆分 user message 為 cached code block + task block
+  const rwdCodeBlock = `## 專案檔案清單（未列出內容的檔案視為只讀）
 ${buildCodeManifest(existingCode)}
 
 ## 現有代碼
-${existingCodeStr}
+${existingCodeStr}`
 
+  const rwdTaskBlock = `請在以上代碼基礎上添加響應式設計：
+${rwdConceptReminder}${moodRwdSection}${rwdUiSpecHint}
 ## 需要添加的響應式功能
 1. ${layoutMode === 'app' ? '功能面板響應式堆疊（側邊欄折疊或底部導航）' : 'Header 移動端漢堡選單'}
 2. 網格佈局響應式調整（4列→2列→1列）
@@ -3989,15 +4313,13 @@ ${existingCodeStr}
 5. 卡片堆疊佈局
 6. 字體和間距響應式調整
 
-⚠️ 選擇性輸出（重要效率規則）：
-只輸出你實際添加了響應式 class 的檔案。沒有修改的檔案完全省略（不輸出 code block）。
-若你新增了 import 引用內部模組（@/ 或 ./），你必須同時輸出該檔案。
-⚠️ code fence 規則：每個 code block 的第一行必須直接是代碼，禁止在代碼前加任何說明文字。
-保持相同的檔案路徑格式。`
+${rwdOutputFormatInstructions}`
+
+  const rwdUserContent = buildCacheableUserMessage(rwdCodeBlock, rwdTaskBlock)
 
   const response = await callClaude(
     systemPrompt,
-    [{ role: 'user', content: userMessage }],
+    [{ role: 'user', content: rwdUserContent }],
     {
       maxTokens: incrementalOptions?.maxTokens || 32768,
       temperature: 0.2,
@@ -4007,34 +4329,65 @@ ${existingCodeStr}
       contextSizeHint: generationProfile,
     },
     { ...trackingContext, purpose: 'generate_rwd' },
-    buildStreamingHandler(onPartialCode)
+    isDiffMode ? buildDiffStreamingHandler(existingCode, onPartialCode) : buildStreamingHandler(onPartialCode)
   )
 
   if (!response.success || !response.content) {
     return { success: false, error: response.error || '無法生成響應式代碼' }
   }
 
-  const { pages: rawRwdPages, components: rawRwdComps, styles: parsedStyles } = parseGeneratedFiles(response.content, designSystem)
+  // ── 解析回應：diff 模式或 full-file 模式 ──
+  let mergedResult: CodeBundle
+
+  if (isDiffMode) {
+    const srBlocks = parseSearchReplaceBlocks(response.content)
+    if (srBlocks && srBlocks.length > 0) {
+      const applyResult = applySearchReplace(existingCode, srBlocks)
+      if (applyResult.failedBlocks.length > 0) {
+        logger.warn({
+          applied: applyResult.appliedCount,
+          failed: applyResult.failedBlocks.length,
+          failedPaths: applyResult.failedBlocks.map(b => b.filePath),
+        }, 'RWD diff 部分失敗')
+      }
+      if (applyResult.appliedCount > 0) {
+        mergedResult = applyResult.updatedCode
+      } else {
+        logger.warn('RWD diff 全部失敗，fallback full-file 解析')
+        const parsed = parseGeneratedFiles(response.content, designSystem)
+        mergedResult = mergeCodeBundle(existingCode, parsed)
+      }
+    } else {
+      logger.info('RWD 未偵測到 diff blocks，fallback full-file 解析')
+      const parsed = parseGeneratedFiles(response.content, designSystem)
+      mergedResult = mergeCodeBundle(existingCode, parsed)
+    }
+  } else {
+    const { pages: rawRwdPages, components: rawRwdComps, styles: parsedStyles } = parseGeneratedFiles(response.content, designSystem)
+    const finalStyles = parsedStyles || existingCode.styles
+
+    // Per-file merge
+    const rwdPageMap = new Map(rawRwdPages.map(p => [p.path, p]))
+    const rwdCompMap = new Map(rawRwdComps.map(c => [c.path, c]))
+    mergedResult = {
+      pages: [
+        ...existingCode.pages.map(p => rwdPageMap.get(p.path) ?? p),
+        ...rawRwdPages.filter(p => !existingCode.pages.find(e => e.path === p.path)),
+      ],
+      components: [
+        ...existingCode.components.map(c => rwdCompMap.get(c.path) ?? c),
+        ...rawRwdComps.filter(c => !existingCode.components.find(e => e.path === c.path)),
+      ],
+      styles: finalStyles,
+    }
+  }
 
   // ── Layer 0 防禦：TSX 語法檢查 + LLM 自動修復 ──
-  const rwdSyntaxFixed = await checkAndFixSyntaxErrors([...rawRwdPages, ...rawRwdComps], trackingContext)
-  const rawRwdPagePaths = new Set(rawRwdPages.map(p => p.path))
-  const parsedPages = rwdSyntaxFixed.filter(f => rawRwdPagePaths.has(f.path))
-  const parsedComps = rwdSyntaxFixed.filter(f => !rawRwdPagePaths.has(f.path))
-
-  // Per-file merge：原始 map → 用 RWD 修改版覆蓋，未修改的保留原版
-  const rwdPageMap = new Map(parsedPages.map(p => [p.path, p]))
-  const rwdCompMap = new Map(parsedComps.map(c => [c.path, c]))
-
-  const finalPages = [
-    ...existingCode.pages.map(p => rwdPageMap.get(p.path) ?? p),
-    ...parsedPages.filter(p => !existingCode.pages.find(e => e.path === p.path)),
-  ]
-  const finalComps = [
-    ...existingCode.components.map(c => rwdCompMap.get(c.path) ?? c),
-    ...parsedComps.filter(c => !existingCode.components.find(e => e.path === c.path)),
-  ]
-  const finalStyles = parsedStyles || existingCode.styles
+  const allRwdFiles = [...mergedResult.pages, ...mergedResult.components]
+  const rwdSyntaxFixed = await checkAndFixSyntaxErrors(allRwdFiles, trackingContext)
+  const rwdPagePathSet = new Set(mergedResult.pages.map(p => p.path))
+  const finalPages = rwdSyntaxFixed.filter(f => rwdPagePathSet.has(f.path))
+  const finalComps = rwdSyntaxFixed.filter(f => !rwdPagePathSet.has(f.path))
 
   // Safety net: 如果 LLM 沒有產出響應式 class，自動注入基本響應式模式
   const responsiveCode = ensureResponsiveClasses(finalPages, finalComps)
@@ -4043,7 +4396,7 @@ ${existingCodeStr}
     success: true,
     pages: responsiveCode.pages,
     components: responsiveCode.components,
-    styles: finalStyles,
+    styles: mergedResult.styles,
   }
 }
 
@@ -4200,8 +4553,7 @@ ${layoutMode === 'app'
 - 不要使用 display: none 隱藏重要內容
 
 ## 重要
-- 移動端動畫可以簡化（reduce motion for small screens）
-- 輸出完整檔案（不是 diff）`
+- 移動端動畫可以簡化（reduce motion for small screens）`
 
   // ── Dynamic prompt（每次不同）──
   const mergedDynamicPrompt = buildCompactDesignPrompt(designSystem, { includeMood: true })
@@ -4226,26 +4578,51 @@ ${layoutMode === 'app'
     ? `\n## Mood 指引\n動畫：${getMoodAnimationHint(moodId)}\nRWD：${getMoodRwdHint(moodId)}\n`
     : ''
 
-  const userMessage = `請在以下代碼基礎上同時添加動畫效果和響應式設計：
-${conceptReminder}${moodSection}${uiSpecHint}
-## 專案檔案清單（未列出內容的檔案視為只讀）
-${buildCodeManifest(existingCode)}
+  const isDiffMode = getEnv().ENABLE_DIFF_OUTPUT
 
-## 現有代碼
-${existingCodeStr}
+  const mergedOutputInstructions = isDiffMode
+    ? `## 輸出格式（SEARCH/REPLACE）
+使用精確的 SEARCH/REPLACE block 輸出每一處修改：
 
-⚠️ 選擇性輸出（重要效率規則）：
+<<<<<<< SEARCH:path/to/file.tsx
+要修改的原始代碼片段（必須與現有代碼精確匹配，包含縮排）
+=======
+修改後的代碼片段
+>>>>>>> REPLACE
+
+規則：
+1. SEARCH 部分必須精確匹配現有代碼（包含空白和縮排），確保唯一定位
+2. 每個 block 修改一處位置，同一檔案多處修改用多個 block
+3. SEARCH 包含 3-5 行上下文確保唯一匹配
+4. 新增 import 時，SEARCH 匹配原始 import 區段
+5. 新建檔案用 CREATE 格式（SEARCH 留空）
+6. CSS 修改用 <<<<<<< SEARCH:globals.css
+7. 不要輸出任何 code fence 格式，只用 SEARCH/REPLACE block`
+    : `⚠️ 選擇性輸出（重要效率規則）：
 只輸出你實際修改的檔案。沒有修改的檔案完全省略。
 若你新增了 import 引用內部模組（@/ 或 ./），你必須同時輸出該檔案。
 ⚠️ code fence 規則：每個 code block 的第一行必須直接是代碼，禁止在代碼前加任何說明文字。
 保持相同的檔案路徑格式。`
+
+  // Plan D: 拆分 user message
+  const mergedCodeBlock = `## 專案檔案清單（未列出內容的檔案視為只讀）
+${buildCodeManifest(existingCode)}
+
+## 現有代碼
+${existingCodeStr}`
+
+  const mergedTaskBlock = `請在以上代碼基礎上同時添加動畫效果和響應式設計：
+${conceptReminder}${moodSection}${uiSpecHint}
+${mergedOutputInstructions}`
+
+  const mergedUserContent = buildCacheableUserMessage(mergedCodeBlock, mergedTaskBlock)
 
   // Temperature：取兩階段中較高的（creative animation 0.35 > rwd 0.2）
   const temperature = tier === 'creative' ? 0.35 : 0.2
 
   const response = await callClaude(
     systemPrompt,
-    [{ role: 'user', content: userMessage }],
+    [{ role: 'user', content: mergedUserContent }],
     {
       maxTokens: incrementalOptions?.maxTokens || 32768,
       temperature,
@@ -4254,34 +4631,64 @@ ${existingCodeStr}
       contextSizeHint: generationProfile,
     },
     { ...trackingContext, purpose: 'generate_animation_rwd_merged' },
-    buildStreamingHandler(onPartialCode)
+    isDiffMode ? buildDiffStreamingHandler(existingCode, onPartialCode) : buildStreamingHandler(onPartialCode)
   )
 
   if (!response.success || !response.content) {
     return { success: false, error: response.error || '無法生成動畫+響應式代碼' }
   }
 
-  const { pages: rawPages, components: rawComps, styles: parsedStyles } = parseGeneratedFiles(response.content, designSystem)
+  // ── 解析回應：diff 模式或 full-file 模式 ──
+  let mergedResult: CodeBundle
+
+  if (isDiffMode) {
+    const srBlocks = parseSearchReplaceBlocks(response.content)
+    if (srBlocks && srBlocks.length > 0) {
+      const applyResult = applySearchReplace(existingCode, srBlocks)
+      if (applyResult.failedBlocks.length > 0) {
+        logger.warn({
+          applied: applyResult.appliedCount,
+          failed: applyResult.failedBlocks.length,
+          failedPaths: applyResult.failedBlocks.map(b => b.filePath),
+        }, 'Merged anim+rwd diff 部分失敗')
+      }
+      if (applyResult.appliedCount > 0) {
+        mergedResult = applyResult.updatedCode
+      } else {
+        logger.warn('Merged anim+rwd diff 全部失敗，fallback full-file 解析')
+        const parsed = parseGeneratedFiles(response.content, designSystem)
+        mergedResult = mergeCodeBundle(existingCode, parsed)
+      }
+    } else {
+      logger.info('Merged anim+rwd 未偵測到 diff blocks，fallback full-file 解析')
+      const parsed = parseGeneratedFiles(response.content, designSystem)
+      mergedResult = mergeCodeBundle(existingCode, parsed)
+    }
+  } else {
+    const { pages: rawPages, components: rawComps, styles: parsedStyles } = parseGeneratedFiles(response.content, designSystem)
+    const finalStyles = parsedStyles || existingCode.styles
+
+    const pageMap = new Map(rawPages.map(p => [p.path, p]))
+    const compMap = new Map(rawComps.map(c => [c.path, c]))
+    mergedResult = {
+      pages: [
+        ...existingCode.pages.map(p => pageMap.get(p.path) ?? p),
+        ...rawPages.filter(p => !existingCode.pages.find(e => e.path === p.path)),
+      ],
+      components: [
+        ...existingCode.components.map(c => compMap.get(c.path) ?? c),
+        ...rawComps.filter(c => !existingCode.components.find(e => e.path === c.path)),
+      ],
+      styles: finalStyles,
+    }
+  }
 
   // TSX 語法檢查 + LLM 自動修復
-  const syntaxFixed = await checkAndFixSyntaxErrors([...rawPages, ...rawComps], trackingContext)
-  const rawPagePaths = new Set(rawPages.map(p => p.path))
-  const parsedPages = syntaxFixed.filter(f => rawPagePaths.has(f.path))
-  const parsedComps = syntaxFixed.filter(f => !rawPagePaths.has(f.path))
-
-  // Per-file merge：用修改版覆蓋，未修改的保留原版
-  const pageMap = new Map(parsedPages.map(p => [p.path, p]))
-  const compMap = new Map(parsedComps.map(c => [c.path, c]))
-
-  const finalPages = [
-    ...existingCode.pages.map(p => pageMap.get(p.path) ?? p),
-    ...parsedPages.filter(p => !existingCode.pages.find(e => e.path === p.path)),
-  ]
-  const finalComps = [
-    ...existingCode.components.map(c => compMap.get(c.path) ?? c),
-    ...parsedComps.filter(c => !existingCode.components.find(e => e.path === c.path)),
-  ]
-  const finalStyles = parsedStyles || existingCode.styles
+  const allMergedFiles = [...mergedResult.pages, ...mergedResult.components]
+  const syntaxFixed = await checkAndFixSyntaxErrors(allMergedFiles, trackingContext)
+  const mergedPagePathSet = new Set(mergedResult.pages.map(p => p.path))
+  const finalPages = syntaxFixed.filter(f => mergedPagePathSet.has(f.path))
+  const finalComps = syntaxFixed.filter(f => !mergedPagePathSet.has(f.path))
 
   // Safety net: RWD fallback
   const responsiveCode = ensureResponsiveClasses(finalPages, finalComps)
@@ -4290,7 +4697,7 @@ ${existingCodeStr}
     success: true,
     pages: responsiveCode.pages,
     components: responsiveCode.components,
-    styles: finalStyles,
+    styles: mergedResult.styles,
   }
 }
 

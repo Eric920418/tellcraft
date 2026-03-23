@@ -1,17 +1,20 @@
 'use client'
 
 import { useRef } from 'react'
-import { motion, useInView } from 'framer-motion'
+import { motion, useInView, useScroll, useTransform } from 'framer-motion'
 import { useTranslations } from 'next-intl'
 import BlurRevealText from './BlurRevealText'
 import AnimatedCounter from './AnimatedCounter'
 import CardSwap, { Card } from '@/app/components/CardSwap'
-import { heavyEasing, HEAVY } from '@/app/lib/chat-utils'
+import { HEAVY } from '@/app/lib/chat-utils'
 
 function ShowcaseSection() {
   const t = useTranslations('showcase')
   const ref = useRef(null)
   const isInView = useInView(ref, { once: true, margin: HEAVY.viewMargin })
+
+  const { scrollYProgress } = useScroll({ target: ref, offset: ['start end', 'end start'] })
+  const parallaxY = useTransform(scrollYProgress, [0, 1], HEAVY.parallaxY)
 
   const showcases = [
     { title: t('item1Title'), category: t('item1Category'), description: t('item1Desc'), stats: t('item1Stats'), color: '#f5f5f5' },
@@ -22,7 +25,7 @@ function ShowcaseSection() {
 
   return (
     <section ref={ref} className="showcase-section" style={{ padding: '80px 24px', background: 'var(--gray-50)', overflow: 'hidden' }}>
-      <div style={{ maxWidth: 1200, margin: '0 auto' }}>
+      <motion.div style={{ maxWidth: 1200, margin: '0 auto', y: parallaxY }}>
         <div className="showcase-grid" style={{
           display: 'grid',
           gridTemplateColumns: '1fr 1fr',
@@ -33,7 +36,7 @@ function ShowcaseSection() {
           <motion.div
             initial={{ opacity: 0, x: -HEAVY.x }}
             animate={isInView ? { opacity: 1, x: 0 } : {}}
-            transition={{ duration: HEAVY.duration, ease: heavyEasing }}
+            transition={{ ...HEAVY.spring }}
             className="showcase-text"
           >
             <div style={{
@@ -102,7 +105,7 @@ function ShowcaseSection() {
           <motion.div
             initial={{ opacity: 0, x: HEAVY.x }}
             animate={isInView ? { opacity: 1, x: 0 } : {}}
-            transition={{ duration: HEAVY.duration, delay: 0.2, ease: heavyEasing }}
+            transition={{ delay: 0.2, ...HEAVY.spring }}
             className="showcase-cards"
             style={{
               display: 'flex',
@@ -187,7 +190,7 @@ function ShowcaseSection() {
             </CardSwap>
           </motion.div>
         </div>
-      </div>
+      </motion.div>
     </section>
   )
 }

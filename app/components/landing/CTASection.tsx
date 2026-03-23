@@ -1,22 +1,25 @@
 'use client'
 
 import { useRef } from 'react'
-import { motion, useInView } from 'framer-motion'
+import { motion, useInView, useScroll, useTransform } from 'framer-motion'
 import { useTranslations } from 'next-intl'
-import { heavyEasing, HEAVY } from '@/app/lib/chat-utils'
+import { HEAVY } from '@/app/lib/chat-utils'
 
 function CTASection({ onStartChat }: { onStartChat: () => void }) {
   const t = useTranslations('cta')
   const ref = useRef(null)
   const isInView = useInView(ref, { once: true, margin: HEAVY.viewMargin })
 
+  const { scrollYProgress } = useScroll({ target: ref, offset: ['start end', 'end start'] })
+  const parallaxY = useTransform(scrollYProgress, [0, 1], HEAVY.parallaxY)
+
   return (
     <section ref={ref} style={{ padding: '100px 24px', background: 'var(--white)', textAlign: 'center' }}>
       <motion.div
-        initial={{ opacity: 0, y: 40 }}
+        initial={{ opacity: 0, y: 30 }}
         animate={isInView ? { opacity: 1, y: 0 } : {}}
-        transition={{ duration: HEAVY.durationHeader, ease: heavyEasing }}
-        style={{ maxWidth: 600, margin: '0 auto' }}
+        transition={{ ...HEAVY.springHeader }}
+        style={{ maxWidth: 600, margin: '0 auto', y: parallaxY }}
       >
         <h2 style={{
           fontSize: 'clamp(28px, 5vw, 40px)',

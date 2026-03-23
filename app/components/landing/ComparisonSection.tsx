@@ -1,14 +1,18 @@
 'use client'
 
 import { useRef } from 'react'
-import { motion, useInView } from 'framer-motion'
+import { motion, useInView, useScroll, useTransform } from 'framer-motion'
 import { useTranslations } from 'next-intl'
-import { heavyEasing, HEAVY } from '@/app/lib/chat-utils'
+import { HEAVY } from '@/app/lib/chat-utils'
 
 function ComparisonSection() {
   const t = useTranslations('comparison')
   const ref = useRef(null)
   const isInView = useInView(ref, { once: true, margin: HEAVY.viewMargin })
+
+  // Scroll parallax：元素移動慢於滾動 → 重量感
+  const { scrollYProgress } = useScroll({ target: ref, offset: ['start end', 'end start'] })
+  const parallaxY = useTransform(scrollYProgress, [0, 1], HEAVY.parallaxY)
 
   const comparisons = [
     { feature: t('feature1'), traditional: t('traditional1'), tellcraft: t('tellcraft1') },
@@ -21,11 +25,11 @@ function ComparisonSection() {
 
   return (
     <section ref={ref} className="comparison-section" style={{ padding: '80px 24px', background: 'var(--white)' }}>
-      <div style={{ maxWidth: 800, margin: '0 auto' }}>
+      <motion.div style={{ maxWidth: 800, margin: '0 auto', y: parallaxY }}>
         <motion.div
           initial={{ opacity: 0, y: HEAVY.y }}
           animate={isInView ? { opacity: 1, y: 0 } : {}}
-          transition={{ duration: HEAVY.durationHeader, ease: heavyEasing }}
+          transition={{ ...HEAVY.springHeader }}
           style={{ textAlign: 'center', marginBottom: 64 }}
         >
           <div style={{
@@ -53,7 +57,7 @@ function ComparisonSection() {
         <motion.div
           initial={{ opacity: 0, y: HEAVY.y }}
           animate={isInView ? { opacity: 1, y: 0 } : {}}
-          transition={{ duration: HEAVY.duration, delay: 0.2, ease: heavyEasing }}
+          transition={{ delay: 0.2, ...HEAVY.spring }}
           className="comparison-table"
           style={{ border: '1px solid var(--border-color)', overflow: 'hidden' }}
         >
@@ -90,7 +94,7 @@ function ComparisonSection() {
             </div>
           ))}
         </motion.div>
-      </div>
+      </motion.div>
     </section>
   )
 }

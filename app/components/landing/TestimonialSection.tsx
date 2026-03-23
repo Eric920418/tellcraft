@@ -1,12 +1,13 @@
 'use client'
 
-import { useState, useEffect } from 'react'
-import { motion, AnimatePresence } from 'framer-motion'
+import { useRef, useState, useEffect } from 'react'
+import { motion, AnimatePresence, useScroll, useTransform } from 'framer-motion'
 import { useTranslations } from 'next-intl'
-import { heavyEasing, HEAVY } from '@/app/lib/chat-utils'
+import { HEAVY } from '@/app/lib/chat-utils'
 
 function TestimonialSection() {
   const t = useTranslations('testimonial')
+  const ref = useRef(null)
   const quotes = [
     { text: t('quote1'), author: t('author1'), role: t('role1'), company: t('company1') },
     { text: t('quote2'), author: t('author2'), role: t('role2'), company: t('company2') },
@@ -14,6 +15,9 @@ function TestimonialSection() {
   ]
 
   const [current, setCurrent] = useState(0)
+
+  const { scrollYProgress } = useScroll({ target: ref, offset: ['start end', 'end start'] })
+  const parallaxY = useTransform(scrollYProgress, [0, 1], HEAVY.parallaxY)
 
   useEffect(() => {
     const timer = setInterval(() => {
@@ -23,13 +27,13 @@ function TestimonialSection() {
   }, [quotes.length])
 
   return (
-    <section style={{ padding: '80px 24px', background: 'var(--gray-800)', color: 'var(--white)' }}>
-      <div style={{ maxWidth: 800, margin: '0 auto', textAlign: 'center' }}>
+    <section ref={ref} style={{ padding: '80px 24px', background: 'var(--gray-800)', color: 'var(--white)' }}>
+      <motion.div style={{ maxWidth: 800, margin: '0 auto', textAlign: 'center', y: parallaxY }}>
         <motion.div
           initial={{ opacity: 0, y: HEAVY.y }}
           whileInView={{ opacity: 1, y: 0 }}
           viewport={{ once: true, margin: HEAVY.viewMargin }}
-          transition={{ duration: HEAVY.duration, ease: heavyEasing }}
+          transition={{ ...HEAVY.spring }}
           style={{
             fontSize: 11,
             color: 'var(--gray-500)',
@@ -45,10 +49,10 @@ function TestimonialSection() {
           <AnimatePresence mode="wait">
             <motion.div
               key={current}
-              initial={{ opacity: 0, y: 24 }}
+              initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -24 }}
-              transition={{ duration: HEAVY.durationSecondary, ease: heavyEasing }}
+              exit={{ opacity: 0, y: -20 }}
+              transition={{ ...HEAVY.springSecondary }}
             >
               <blockquote style={{
                 fontSize: 'clamp(20px, 3vw, 28px)',
@@ -86,7 +90,7 @@ function TestimonialSection() {
             />
           ))}
         </div>
-      </div>
+      </motion.div>
     </section>
   )
 }

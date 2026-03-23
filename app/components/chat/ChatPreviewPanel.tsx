@@ -202,7 +202,13 @@ export default function ChatPreviewPanel({
   // 改用 overlay：WebContainer 保持掛載（接收 HMR），等待畫面蓋在上層
   const generatingStages = ['uiux_pipeline_progress', 'uiux_structure_generating', 'uiux_animation_generating', 'uiux_rwd_generating', 'uiux_quality_gate_running', 'uiux_quality_gate_fixing']
   const lastGeneratingMsg = [...messages].reverse().find(m => m.role === 'assistant' && m.stage)
-  const isUiuxPipelineGenerating = lastGeneratingMsg && generatingStages.includes(lastGeneratingMsg.stage || '')
+  const isUiuxStageGenerating = lastGeneratingMsg && generatingStages.includes(lastGeneratingMsg.stage || '')
+  // Fallback：streaming 中但尚無 code_preview 消息 → 首次生成的競態保護
+  // 排除 fast build（有 fast_generating stage）和迭代（已有 code_preview）
+  const isFastBuildMode = messages.some(m => m.stage === 'fast_generating')
+  const hasCodePreviewMessage = messages.some(m => m.richContent?.type === 'code_preview')
+  const isStreamingFirstGen = stablePreviewData?.isStreaming && !hasCodePreviewMessage && !isFastBuildMode
+  const isUiuxPipelineGenerating = isUiuxStageGenerating || isStreamingFirstGen
 
   // 生成中且尚無預覽數據 → 純等待畫面
   if (isUiuxPipelineGenerating && !stablePreviewData) {
