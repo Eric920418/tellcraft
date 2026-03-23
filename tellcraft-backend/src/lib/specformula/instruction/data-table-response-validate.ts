@@ -65,7 +65,16 @@ export class DataTableResponseValidate {
 
     let responseMap: Record<string, unknown>;
     try {
-      responseMap = JSON.parse(responseBody);
+      const parsed = JSON.parse(responseBody);
+      // 列表查詢 API 回傳 Array — 自動取第一個元素做欄位驗證
+      // 空陣列 [] 的情況由下方欄位比對處理（actual 為 undefined）
+      if (Array.isArray(parsed)) {
+        responseMap = parsed.length > 0
+          ? (parsed[0] as Record<string, unknown>)
+          : {} as Record<string, unknown>;
+      } else {
+        responseMap = parsed;
+      }
     } catch {
       throw new Error(
         `[ResponseValidate:DataTable] 回應內容非合法 JSON 物件。\n  API: ${summary}\n  回應: ${responseBody}`
@@ -122,7 +131,10 @@ export class DataTableResponseValidate {
           ? JSON.stringify(actualValue)
           : (actualValue != null ? String(actualValue) : '');
 
-        if (resolvedStr !== actualStr) {
+        // null 語義統一：Feature 的 "null" / "" 和 response 的 null/undefined 視為等價
+        if ((resolvedStr === 'null' || resolvedStr === '') && (actualStr === '' || actualStr === 'null' || actualValue === null || actualValue === undefined)) {
+          // pass — null 和空字串在 response 比對中等價
+        } else if (resolvedStr !== actualStr) {
           // UUID ID 容錯：server 用 gen_random_uuid() 生成 ID，
           // 與 Feature 的確定性 UUID 不同。ID 欄位只要是合法 UUID 就算通過。
           if (isIdField(cleanHeader) && isUuidLike(resolvedStr) && isUuidLike(actualStr)) {

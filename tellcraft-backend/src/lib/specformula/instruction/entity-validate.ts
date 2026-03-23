@@ -110,6 +110,8 @@ export class EntityValidate {
       if (!expected) continue;
       const trim = expected.trim();
       if (!trim || trim.startsWith('&')) continue;
+      // 跳過特殊語義值（不能當查詢條件）
+      if (trim === 'null' || trim === '$null' || trim === '$notnull' || trim === '&isNotNull' || trim === '&isNull') continue;
 
       const rv = this.resolver.resolveVariable(expected);
       // 跳過未解析的 $variable（rv === null 且原始值以 $ 開頭）
@@ -146,7 +148,14 @@ export class EntityValidate {
       if (probeConditions.size === 0) {
         const hasExtractionColumns = Object.keys(row).some(k => k.startsWith('>'));
         if (!hasExtractionColumns) {
-          throw new Error('缺少查詢條件：請提供至少一個非約束欄位或主鍵');
+          // 降級：無查詢條件時取最新一筆記錄
+          const fallbackResult = await pool.query(
+            `SELECT * FROM ${tableDef.tableName} ORDER BY created_at DESC LIMIT 1`
+          );
+          if (fallbackResult.rows.length > 0) {
+            return fallbackResult.rows[0] as Record<string, unknown>;
+          }
+          throw new Error('缺少查詢條件且表中無資料');
         }
       }
     }
@@ -234,6 +243,15 @@ export class EntityValidate {
       if (!fieldName || !fieldName.trim()) continue;
       if (fieldName.startsWith('>') || fieldName.startsWith('<')) continue;
       if (expected === null || expected === undefined) continue;
+      // 空字串 / "null" 字面值 → 驗證 actual 是 null（DB NULL 語義）
+      const trimExpected = expected.trim();
+      if (trimExpected === '' || trimExpected === 'null') {
+        const actualValue = this.getActualValue(actual, fieldName);
+        if (actualValue !== null && actualValue !== undefined && actualValue !== '') {
+          throw new Error(`[${entityName}.${fieldName}] 預期 null，實際: [${String(actualValue)}]`);
+        }
+        continue;
+      }
 
       const actualValue = this.getActualValue(actual, fieldName);
       const resolved = this.resolver.resolveAndValidate(expected, actualValue, fieldName, entityName);
