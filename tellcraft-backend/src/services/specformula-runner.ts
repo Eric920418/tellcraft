@@ -2056,8 +2056,9 @@ function generateTestServerCode(
   try {
     const input = req.method === 'GET' ? req.query : req.body
     const result = await ${fnName}(input as any)
-    const status = result?.__status || ${statusCode}
-    if (result?.__status) {
+    // Array response（列表查詢）強制 200，不用 POST 預設的 201
+    const status = Array.isArray(result) ? 200 : (result?.__status || ${statusCode})
+    if (result?.__status && !Array.isArray(result)) {
       const { __status, ...data } = result
       res.status(status).json(data)
     } else {
