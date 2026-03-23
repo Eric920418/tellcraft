@@ -671,11 +671,11 @@ Feature: ${featureInfo.name}
       When (UID="$Entity.id") {summary}, call table:
         | 欄位 | 值 |
       Then {summary}(201)回應, with table:
-        | >result.id | 欄位 |
-        | <resultId  | 值   |
+        | >result.id | 欄位         |
+        | <resultId  | 值           |
       And 應該存在一個{entity}, with table:
-        | id         | 欄位 |
-        | $Entity.id | 值   |
+        | id        | 欄位     | 狀態欄位 |
+        | $resultId | 預期值   | 預期狀態 |
 \`\`\`
 
 ## 規則
@@ -705,6 +705,8 @@ Feature: ${featureInfo.name}
 - **無腦補原則**：嚴格按需求和決策來，不擅自添加需求中沒提到的欄位或功能
 - **Entity 必須存在於 Schema**：\`準備一個{entity}\` 和 \`應該存在一個{entity}\` 的 entity 名稱必須是 Schema 中已定義的資料表（透過 Entity Mapping 映射）。禁止發明 Schema 中不存在的 table（如 Schema 沒有 sessions 表就不能 \`準備一個sessions\`）
 - **DataTable 欄位必須存在於 Schema**：DataTable 的 header 欄位名稱（camelCase）必須能映射到對應 table 的實際 column name（snake_case）。禁止使用 Schema 中不存在的欄位
+- **回應驗證（Then 回應）DataTable 的 header 必須用純欄位名**：header 用 camelCase 欄位名（如 \`id\`、\`isCompleted\`、\`totalAmount\`），**禁止用 \`$Var.field\` 格式**（如 \`$Todo.id\`）。\`$variable\` 只能出現在 data row 的值中（引用之前宣告的變數），不能當 header。正確：\`| id | isCompleted |\` → \`| $Todo.id | true |\`。錯誤：\`| $Todo.id | $Todo.isCompleted |\` → \`| true | true |\`
+- **Entity 驗證（應該存在一個）DataTable 必須包含至少一個主鍵或唯一識別欄位**：\`應該存在一個{entity}\` 的 DataTable header 至少要有一個 \`id\` 或可查詢欄位，讓 SpecFormula 能用 WHERE 條件查到精確的記錄。只有約束欄位（\`&isTrue\`、\`&isNotNull\`）不夠 — 需要至少一個具體值欄位。正確：\`| id | isDeleted |\` → \`| $Todo.id | &isTrue |\`。錯誤：\`| isDeleted |\` → \`| &isTrue |\`（缺少 ID，無法精確查詢）
 
 ## Array 類型參數（如拖曳排序、批次操作）
 

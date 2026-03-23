@@ -192,4 +192,26 @@ export interface FlowState {
   coderTestPassed?: boolean               // 測試是否全部通過
   coderTestAttempts?: number              // 紅綠燈循環次數
   coderTestStartedAt?: number             // 超時偵測
+  // Clone Skill（網站復刻）
+  cloneMode?: boolean
+  cloneSourceUrl?: string
+  cloneSections?: CloneSectionMeta[]
+  cloneTotalSections?: number
+  cloneCompletedSections?: number
+  cloneDesignSystem?: {
+    colors: import('../services/reference-analyzer').ExtractedColors
+    typography: import('../services/reference-analyzer').ExtractedTypography
+    layout: import('../services/reference-analyzer').ExtractedLayout
+  }
+  cloneAnalyzingStartedAt?: number        // 超時偵測
+  cloneGeneratingStartedAt?: number       // 超時偵測
+}
+
+export interface CloneSectionMeta {
+  index: number
+  type: 'header' | 'footer' | 'content'
+  tag: string
+  componentName: string
+  estimatedHeight: number
+  status: 'pending' | 'generating' | 'completed' | 'failed'
 }

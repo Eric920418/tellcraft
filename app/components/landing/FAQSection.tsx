@@ -4,11 +4,12 @@ import { useRef, useState } from 'react'
 import { motion, useInView } from 'framer-motion'
 import { useTranslations } from 'next-intl'
 import FAQItem from './FAQItem'
+import { heavyEasing, HEAVY } from '@/app/lib/chat-utils'
 
 function FAQSection() {
   const t = useTranslations('faq')
   const ref = useRef(null)
-  const isInView = useInView(ref, { once: true, margin: '-100px' })
+  const isInView = useInView(ref, { once: true, margin: HEAVY.viewMargin })
   const [openIndex, setOpenIndex] = useState<number | null>(0)
 
   const faqs = [
@@ -71,9 +72,9 @@ function FAQSection() {
             justifyContent: 'center',
           }}>
             <motion.span
-              initial={{ opacity: 0, y: 20 }}
+              initial={{ opacity: 0, y: HEAVY.y }}
               animate={isInView ? { opacity: 1, y: 0 } : {}}
-              transition={{ duration: 0.6 }}
+              transition={{ duration: HEAVY.duration, ease: heavyEasing }}
               style={{
                 writingMode: 'vertical-rl',
                 textOrientation: 'mixed',
@@ -88,9 +89,9 @@ function FAQSection() {
           </div>
           <div style={{ paddingLeft: 24 }}>
             <motion.h2
-              initial={{ opacity: 0, y: 20 }}
+              initial={{ opacity: 0, y: HEAVY.y }}
               animate={isInView ? { opacity: 1, y: 0 } : {}}
-              transition={{ duration: 0.6, delay: 0.1 }}
+              transition={{ duration: HEAVY.durationHeader, delay: 0.1, ease: heavyEasing }}
               style={{
                 fontSize: 'clamp(32px, 5vw, 48px)',
                 fontWeight: 300,
@@ -102,9 +103,9 @@ function FAQSection() {
               {t('heading')}
             </motion.h2>
             <motion.p
-              initial={{ opacity: 0, y: 20 }}
+              initial={{ opacity: 0, y: HEAVY.y }}
               animate={isInView ? { opacity: 1, y: 0 } : {}}
-              transition={{ duration: 0.6, delay: 0.2 }}
+              transition={{ duration: HEAVY.durationSecondary, delay: 0.2, ease: heavyEasing }}
               style={{
                 fontSize: 15,
                 color: 'var(--gray-500)',
@@ -120,7 +121,7 @@ function FAQSection() {
         <motion.div
           initial={{ opacity: 0 }}
           animate={isInView ? { opacity: 1 } : {}}
-          transition={{ duration: 0.6, delay: 0.3 }}
+          transition={{ duration: HEAVY.duration, delay: 0.3, ease: heavyEasing }}
           style={{
             background: 'var(--white)',
             border: '1px solid var(--border-color)',
@@ -144,7 +145,7 @@ function FAQSection() {
         <motion.div
           initial={{ scaleX: 0 }}
           animate={isInView ? { scaleX: 1 } : {}}
-          transition={{ duration: 0.8, delay: 0.6, ease: [0.4, 0, 0.2, 1] }}
+          transition={{ duration: HEAVY.durationHeader, delay: 0.6, ease: heavyEasing }}
           style={{
             height: 1,
             background: 'linear-gradient(90deg, var(--accent) 0%, transparent 100%)',

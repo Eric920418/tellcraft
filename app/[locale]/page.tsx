@@ -50,7 +50,7 @@ function HomeContent() {
   const [initialMessage, setInitialMessage] = useState('')
   const [resumeConversationId, setResumeConversationId] = useState<string | null>(null)
   const [anonymousId, setAnonymousId] = useState<string | undefined>(undefined)
-  const [buildMode, setBuildMode] = useState<'fast' | 'fine'>('fast')
+  const [buildMode, setBuildMode] = useState<'fast' | 'fine' | 'clone'>('fast')
   const [showGuestLimitModal, setShowGuestLimitModal] = useState(false)
   const [openedFromUrl, setOpenedFromUrl] = useState(false)
   const [recentProjects, setRecentProjects] = useState<Array<{ id: string; name: string; status: string; latestConversationId: string | null }>>([])

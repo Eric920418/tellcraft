@@ -99,16 +99,16 @@ interface LlmTrackingContext {
 
 // ── URL 偵測 + SSRF 防護 ──
 
-function isUrl(input: string): boolean {
+export function isUrl(input: string): boolean {
   return /^https?:\/\/\S+/i.test(input.trim())
 }
 
-function extractFirstUrl(input: string): string | null {
+export function extractFirstUrl(input: string): string | null {
   const match = input.match(/https?:\/\/[^\s,，、;；]+/i)
   return match ? match[0] : null
 }
 
-function isSafeUrl(url: string): boolean {
+export function isSafeUrl(url: string): boolean {
   try {
     const parsed = new URL(url)
     if (!['http:', 'https:'].includes(parsed.protocol)) return false
@@ -232,7 +232,7 @@ export async function screenshotHtmlContent(html: string): Promise<Buffer | null
 
 // ── DOM/CSS 結構化提取 ──
 
-const PUPPETEER_ARGS = [
+export const PUPPETEER_ARGS = [
   '--no-sandbox',
   '--disable-gpu',
   '--disable-dev-shm-usage',

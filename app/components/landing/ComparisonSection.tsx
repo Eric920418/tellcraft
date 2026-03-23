@@ -3,11 +3,12 @@
 import { useRef } from 'react'
 import { motion, useInView } from 'framer-motion'
 import { useTranslations } from 'next-intl'
+import { heavyEasing, HEAVY } from '@/app/lib/chat-utils'
 
 function ComparisonSection() {
   const t = useTranslations('comparison')
   const ref = useRef(null)
-  const isInView = useInView(ref, { once: true, margin: '-100px' })
+  const isInView = useInView(ref, { once: true, margin: HEAVY.viewMargin })
 
   const comparisons = [
     { feature: t('feature1'), traditional: t('traditional1'), tellcraft: t('tellcraft1') },
@@ -22,9 +23,9 @@ function ComparisonSection() {
     <section ref={ref} className="comparison-section" style={{ padding: '80px 24px', background: 'var(--white)' }}>
       <div style={{ maxWidth: 800, margin: '0 auto' }}>
         <motion.div
-          initial={{ opacity: 0, y: 20 }}
+          initial={{ opacity: 0, y: HEAVY.y }}
           animate={isInView ? { opacity: 1, y: 0 } : {}}
-          transition={{ duration: 0.6 }}
+          transition={{ duration: HEAVY.durationHeader, ease: heavyEasing }}
           style={{ textAlign: 'center', marginBottom: 64 }}
         >
           <div style={{
@@ -50,9 +51,9 @@ function ComparisonSection() {
         </motion.div>
 
         <motion.div
-          initial={{ opacity: 0, y: 30 }}
+          initial={{ opacity: 0, y: HEAVY.y }}
           animate={isInView ? { opacity: 1, y: 0 } : {}}
-          transition={{ duration: 0.6, delay: 0.2 }}
+          transition={{ duration: HEAVY.duration, delay: 0.2, ease: heavyEasing }}
           className="comparison-table"
           style={{ border: '1px solid var(--border-color)', overflow: 'hidden' }}
         >

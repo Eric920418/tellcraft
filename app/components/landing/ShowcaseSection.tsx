@@ -6,11 +6,12 @@ import { useTranslations } from 'next-intl'
 import BlurRevealText from './BlurRevealText'
 import AnimatedCounter from './AnimatedCounter'
 import CardSwap, { Card } from '@/app/components/CardSwap'
+import { heavyEasing, HEAVY } from '@/app/lib/chat-utils'
 
 function ShowcaseSection() {
   const t = useTranslations('showcase')
   const ref = useRef(null)
-  const isInView = useInView(ref, { once: true, margin: '-100px' })
+  const isInView = useInView(ref, { once: true, margin: HEAVY.viewMargin })
 
   const showcases = [
     { title: t('item1Title'), category: t('item1Category'), description: t('item1Desc'), stats: t('item1Stats'), color: '#f5f5f5' },
@@ -30,9 +31,9 @@ function ShowcaseSection() {
         }}>
           {/* Left: Text */}
           <motion.div
-            initial={{ opacity: 0, x: -30 }}
+            initial={{ opacity: 0, x: -HEAVY.x }}
             animate={isInView ? { opacity: 1, x: 0 } : {}}
-            transition={{ duration: 0.6 }}
+            transition={{ duration: HEAVY.duration, ease: heavyEasing }}
             className="showcase-text"
           >
             <div style={{
@@ -99,9 +100,9 @@ function ShowcaseSection() {
 
           {/* Right: Card Swap */}
           <motion.div
-            initial={{ opacity: 0, x: 30 }}
+            initial={{ opacity: 0, x: HEAVY.x }}
             animate={isInView ? { opacity: 1, x: 0 } : {}}
-            transition={{ duration: 0.6, delay: 0.2 }}
+            transition={{ duration: HEAVY.duration, delay: 0.2, ease: heavyEasing }}
             className="showcase-cards"
             style={{
               display: 'flex',

@@ -4,11 +4,12 @@ import { useRef } from 'react'
 import { motion, useInView } from 'framer-motion'
 import { useTranslations } from 'next-intl'
 import AnimatedCounter from './AnimatedCounter'
+import { heavyEasing, HEAVY } from '@/app/lib/chat-utils'
 
 function StatsSection() {
   const t = useTranslations('stats')
   const ref = useRef(null)
-  const isInView = useInView(ref, { once: true, margin: '-100px' })
+  const isInView = useInView(ref, { once: true, margin: HEAVY.viewMargin })
 
   const stats = [
     { value: 90, suffix: '%', label: t('label1'), description: t('desc1') },
@@ -21,9 +22,9 @@ function StatsSection() {
     <section ref={ref} style={{ padding: '80px 24px', background: 'var(--black)', color: 'var(--white)', borderTop: '3px solid var(--accent)' }}>
       <div style={{ maxWidth: 1000, margin: '0 auto' }}>
         <motion.div
-          initial={{ opacity: 0, y: 20 }}
+          initial={{ opacity: 0, y: HEAVY.y }}
           animate={isInView ? { opacity: 1, y: 0 } : {}}
-          transition={{ duration: 0.6 }}
+          transition={{ duration: HEAVY.durationHeader, ease: heavyEasing }}
           style={{ textAlign: 'center', marginBottom: 64 }}
         >
           <h2 style={{
@@ -43,9 +44,9 @@ function StatsSection() {
           {stats.map((stat, i) => (
             <motion.div
               key={stat.label}
-              initial={{ opacity: 0, y: 30 }}
+              initial={{ opacity: 0, y: 36 }}
               animate={isInView ? { opacity: 1, y: 0 } : {}}
-              transition={{ duration: 0.6, delay: i * 0.1 }}
+              transition={{ duration: HEAVY.duration, delay: i * HEAVY.stagger, ease: heavyEasing }}
               style={{ textAlign: 'center' }}
             >
               <div style={{

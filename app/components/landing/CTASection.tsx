@@ -3,18 +3,19 @@
 import { useRef } from 'react'
 import { motion, useInView } from 'framer-motion'
 import { useTranslations } from 'next-intl'
+import { heavyEasing, HEAVY } from '@/app/lib/chat-utils'
 
 function CTASection({ onStartChat }: { onStartChat: () => void }) {
   const t = useTranslations('cta')
   const ref = useRef(null)
-  const isInView = useInView(ref, { once: true, margin: '-100px' })
+  const isInView = useInView(ref, { once: true, margin: HEAVY.viewMargin })
 
   return (
     <section ref={ref} style={{ padding: '100px 24px', background: 'var(--white)', textAlign: 'center' }}>
       <motion.div
         initial={{ opacity: 0, y: 40 }}
         animate={isInView ? { opacity: 1, y: 0 } : {}}
-        transition={{ duration: 0.8 }}
+        transition={{ duration: HEAVY.durationHeader, ease: heavyEasing }}
         style={{ maxWidth: 600, margin: '0 auto' }}
       >
         <h2 style={{

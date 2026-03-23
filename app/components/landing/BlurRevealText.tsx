@@ -2,6 +2,7 @@
 
 import { useRef } from 'react'
 import { motion, useInView } from 'framer-motion'
+import { heavyEasing, HEAVY } from '@/app/lib/chat-utils'
 
 function BlurRevealText({
   text,
@@ -18,7 +19,7 @@ function BlurRevealText({
       ref={ref}
       initial={{ opacity: 0, filter: 'blur(10px)', y: 20 }}
       animate={isInView ? { opacity: 1, filter: 'blur(0px)', y: 0 } : {}}
-      transition={{ duration: 0.8, delay, ease: [0.25, 0.46, 0.45, 0.94] }}
+      transition={{ duration: HEAVY.durationHeader, delay, ease: heavyEasing }}
       style={{ display: 'inline-block' }}
     >
       {text}

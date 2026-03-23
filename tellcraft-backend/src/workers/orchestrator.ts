@@ -30,8 +30,10 @@ import {
 } from './phase-handlers/fast-build-phases'
 import { executeDeployerSkill } from './phase-handlers/deploy-phases'
 import { executeDomainSkill } from './phase-handlers/domain-phases'
+import { executeCloneSkill } from './phase-handlers/clone-phases'
 import { handleGoBack } from './phase-handlers/bdd-phases'
 import { handleBddWaitingForReply } from './phase-handlers/bdd-phases'
+import { extractFirstUrl, isSafeUrl } from '../services/reference-analyzer'
 
 const logger = createLogger('orchestrator')
 
@@ -110,7 +112,7 @@ interface ProcessMessageData {
   conversationId: string
   userId: string
   message: string
-  mode?: 'fast' | 'fine'
+  mode?: 'fast' | 'fine' | 'clone'
   locale?: 'zh' | 'en'
   imageUrls?: string[]
 }
@@ -340,6 +342,26 @@ async function handleProcessMessage(
       imageUrls: data.imageUrls,
       skipPrefilterAndCredit: true,
     }, redis, io)
+  }
+
+  // Step 1.4: Clone Mode 復刻路由
+  if (mode === 'clone') {
+    const isChinese = /[\u4e00-\u9fff\u3400-\u4dbf]/.test(message) || locale === 'zh'
+    const cloneUrl = extractFirstUrl(message)
+    if (!cloneUrl || !isSafeUrl(cloneUrl)) {
+      await sendMessage(conversationId, io, {
+        content: isChinese
+          ? '請輸入有效的網址（https://...），例如：https://stripe.com'
+          : 'Please enter a valid URL (https://...), e.g. https://stripe.com',
+        stage: 'customer_service',
+      })
+      return { taskId: null, skill: null }
+    }
+    await executeCloneSkill({
+      projectId, conversationId, userId,
+      url: cloneUrl, locale, redis, io,
+    })
+    return { taskId: null, skill: 'clone' as SkillName }
   }
 
   // Step 1.5: Fast Mode 快速路由

@@ -136,6 +136,17 @@ export async function routePhase(
     await handleSpecDiscoveryGenerating(conversationId, state, redis, io)
     return true
   }
+  // Clone Skill：分析中/生成中 → 攔截用戶輸入
+  if (state.phase === 'clone_analyzing' || state.phase === 'clone_generating') {
+    const isChinese = /[\u4e00-\u9fff]/.test(trimmedMsg) || state.locale === 'zh'
+    await sendMessage(conversationId, io, {
+      content: isChinese
+        ? '正在復刻網站中，請稍候...'
+        : 'Cloning in progress, please wait...',
+      stage: state.phase as 'clone_analyzing' | 'clone_generating',
+    })
+    return true
+  }
   if (state.phase === 'fast_generating') {
     // awaiting_continue 時用戶輸入 → 先驗證再決定是否迭代
     if (state.waitingForReply && state.fastBuildStage === 'awaiting_continue') {

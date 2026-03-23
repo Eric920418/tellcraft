@@ -6,6 +6,7 @@ import Link from 'next/link'
 import { useRouter } from '@/i18n/navigation'
 import { getTemplates } from '@/app/actions/templates'
 import { INITIAL_TEMPLATES, toTemplateCardData, type TemplateCardData } from '@/app/lib/templates'
+import { heavyEasing, HEAVY } from '@/app/lib/chat-utils'
 
 // CSS 放在組件外，避免每次 render 重新注入
 const MARQUEE_STYLES = `
@@ -277,7 +278,7 @@ export default function TemplatesShowcaseSection() {
   const [row2, setRow2] = useState<TemplateCardData[]>(INIT_ROW2)
 
   const sectionRef = useRef(null)
-  const isInView = useInView(sectionRef, { once: true, margin: '-80px' })
+  const isInView = useInView(sectionRef, { once: true, margin: HEAVY.viewMargin })
 
   // Hydration 後：shuffle 靜態資料，再嘗試取得 API 資料
   useEffect(() => {
@@ -301,9 +302,9 @@ export default function TemplatesShowcaseSection() {
   }, [])
 
   const fadeUp = (delay: number) => ({
-    initial: { opacity: 0, y: 20 },
+    initial: { opacity: 0, y: HEAVY.y },
     animate: isInView ? { opacity: 1, y: 0 } : {},
-    transition: { duration: 0.6, delay, ease: [0.25, 0.46, 0.45, 0.94] as [number, number, number, number] },
+    transition: { duration: HEAVY.duration, delay, ease: heavyEasing },
   })
 
   if (row1.length === 0) return null
@@ -339,7 +340,7 @@ export default function TemplatesShowcaseSection() {
       <motion.div
         initial={{ opacity: 0 }}
         animate={isInView ? { opacity: 1 } : {}}
-        transition={{ duration: 0.5, delay: 0.35 }}
+        transition={{ duration: HEAVY.durationSecondary, delay: 0.35, ease: heavyEasing }}
         style={{ display: 'flex', flexDirection: 'column', gap: 16 }}
       >
         <MarqueeRow cards={row1} direction="left" duration={45} />

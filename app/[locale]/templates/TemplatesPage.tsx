@@ -1,11 +1,12 @@
 'use client'
 
-import { useEffect, useState, Suspense } from 'react'
+import { useEffect, useRef, useState, Suspense } from 'react'
 import dynamic from 'next/dynamic'
 import { useSearchParams } from 'next/navigation'
 import { useRouter } from '@/i18n/navigation'
-import { motion, AnimatePresence } from 'framer-motion'
+import { motion, AnimatePresence, useInView } from 'framer-motion'
 import { useTranslations } from 'next-intl'
+import { heavyEasing, HEAVY } from '@/app/lib/chat-utils'
 import { getTemplates, getTemplateFiles } from '@/app/actions/templates'
 import {
   type TemplateCardData,
@@ -192,6 +193,8 @@ function TemplatesContent() {
   const [iframeLoading, setIframeLoading] = useState(false)
   const [sandpackData, setSandpackData] = useState<SandpackData | null>(null)
   const [sandpackLoading, setSandpackLoading] = useState(false)
+  const gridRef = useRef(null)
+  const isGridInView = useInView(gridRef, { once: true, margin: HEAVY.viewMargin })
   const [sandpackError, setSandpackError] = useState<string | null>(null)
 
   // 載入模板資料
@@ -297,12 +300,17 @@ function TemplatesContent() {
       </div>
 
       {/* Nav 區塊 */}
-      <div style={{
-        padding: '32px 24px 40px',
-        maxWidth: 1200,
-        margin: '0 auto',
-        textAlign: 'center',
-      }}>
+      <motion.div
+        initial={{ opacity: 0, y: HEAVY.y }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: HEAVY.durationHeader, ease: heavyEasing }}
+        style={{
+          padding: '32px 24px 40px',
+          maxWidth: 1200,
+          margin: '0 auto',
+          textAlign: 'center',
+        }}
+      >
         <div style={{
           fontSize: 11, color: 'var(--gray-400, #94a3b8)',
           textTransform: 'uppercase', letterSpacing: '0.1em',
@@ -322,7 +330,7 @@ function TemplatesContent() {
         }}>
           {t('pageDescription')}
         </p>
-      </div>
+      </motion.div>
 
       {/* 分類 Tabs */}
       <div style={{
@@ -379,23 +387,32 @@ function TemplatesContent() {
       </div>
 
       {/* 模板 Grid */}
-      <div style={{
-        maxWidth: 1200,
-        margin: '0 auto',
-        padding: '0 24px 80px',
-        display: 'grid',
-        gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))',
-        gap: 24,
-      }}>
-        {filtered.map(card => (
-          <TemplateCard
+      <div
+        ref={gridRef}
+        style={{
+          maxWidth: 1200,
+          margin: '0 auto',
+          padding: '0 24px 80px',
+          display: 'grid',
+          gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))',
+          gap: 24,
+        }}
+      >
+        {filtered.map((card, i) => (
+          <motion.div
             key={card.id}
-            card={card}
-            onClick={() => {
-              setIframeLoading(true)
-              setSelectedId(card.id)
-            }}
-          />
+            initial={{ opacity: 0, y: HEAVY.y }}
+            animate={isGridInView ? { opacity: 1, y: 0 } : {}}
+            transition={{ duration: HEAVY.duration, delay: Math.min(i * HEAVY.stagger, 0.9), ease: heavyEasing }}
+          >
+            <TemplateCard
+              card={card}
+              onClick={() => {
+                setIframeLoading(true)
+                setSelectedId(card.id)
+              }}
+            />
+          </motion.div>
         ))}
       </div>
 

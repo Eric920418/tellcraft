@@ -8,6 +8,7 @@ import { gsap } from 'gsap'
 import RotatingText from '@/app/components/RotatingText'
 import GlareHover from '@/app/components/GlareHover'
 import { useIsMobile } from '@/app/hooks/useIsMobile'
+import { heavyEasing, HEAVY } from '@/app/lib/chat-utils'
 
 /* ─── TargetCursor（Portal 渲染到 body，避免祖先 transform 干擾 fixed） ─── */
 
@@ -323,7 +324,7 @@ const TargetCursor: React.FC<TargetCursorProps> = ({
 function UseCasesSection() {
   const t = useTranslations('useCases')
   const ref = useRef<HTMLElement>(null)
-  const isInView = useInView(ref, { once: true, margin: '-100px' })
+  const isInView = useInView(ref, { once: true, margin: HEAVY.viewMargin })
   const isMobile = useIsMobile()
 
   const useCases = [
@@ -358,9 +359,9 @@ function UseCasesSection() {
       <TargetCursor containerRef={ref} targetSelector=".cursor-target" />
       <div style={{ maxWidth: 1000, margin: '0 auto' }}>
         <motion.div
-          initial={{ opacity: 0, y: 20 }}
+          initial={{ opacity: 0, y: HEAVY.y }}
           animate={isInView ? { opacity: 1, y: 0 } : {}}
-          transition={{ duration: 0.6 }}
+          transition={{ duration: HEAVY.durationHeader, ease: heavyEasing }}
           style={{ textAlign: 'center', marginBottom: isMobile ? 40 : 80 }}
         >
           <div style={{
@@ -409,9 +410,9 @@ function UseCasesSection() {
           {useCases.map((useCase, i) => (
             <motion.div
               key={useCase.audience}
-              initial={{ opacity: 0, y: 30 }}
+              initial={{ opacity: 0, y: HEAVY.y }}
               animate={isInView ? { opacity: 1, y: 0 } : {}}
-              transition={{ duration: 0.6, delay: i * 0.1 }}
+              transition={{ duration: HEAVY.duration, delay: 0.2 + i * HEAVY.stagger, ease: heavyEasing }}
               style={{ height: '100%' }}
             >
               <GlareHover

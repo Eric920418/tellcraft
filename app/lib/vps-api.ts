@@ -141,7 +141,7 @@ export async function sendMessage(input: {
   message: string
   projectId: string
   userId?: string
-  mode?: 'fast' | 'fine'
+  mode?: 'fast' | 'fine' | 'clone'
   locale?: string
   token?: string
   imageUrls?: string[]

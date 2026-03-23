@@ -3,6 +3,20 @@ import type { Message } from '@/app/types/chat'
 // Apple-style smooth easing
 export const smoothEasing: [number, number, number, number] = [0.32, 0.72, 0, 1]
 
+// 厚重感 easing：快起強減速，模擬重物落定
+export const heavyEasing: [number, number, number, number] = [0.22, 1, 0.36, 1]
+
+// Landing 厚重動畫預設
+export const HEAVY = {
+  duration: 0.9,
+  durationHeader: 1.0,
+  durationSecondary: 0.7,
+  y: 30,
+  x: 40,
+  stagger: 0.15,
+  viewMargin: '-80px' as const,
+} as const
+
 export const STAGES = [
   { key: 'discovery' },
   { key: 'clarify' },

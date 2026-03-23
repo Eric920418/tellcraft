@@ -2,6 +2,7 @@
 
 import { useRef } from 'react'
 import { motion, AnimatePresence, useInView } from 'framer-motion'
+import { heavyEasing, HEAVY } from '@/app/lib/chat-utils'
 
 function FAQItem({
   question,
@@ -24,9 +25,9 @@ function FAQItem({
   return (
     <motion.div
       ref={itemRef}
-      initial={{ opacity: 0, x: -20 }}
+      initial={{ opacity: 0, x: -24 }}
       animate={isInView ? { opacity: 1, x: 0 } : {}}
-      transition={{ duration: 0.5, delay }}
+      transition={{ duration: HEAVY.durationSecondary, delay, ease: heavyEasing }}
       style={{
         display: 'grid',
         gridTemplateColumns: '80px 1fr',

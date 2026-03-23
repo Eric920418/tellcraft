@@ -47,8 +47,8 @@ function HeroSection({
   inputValue: string
   onInputChange: (value: string) => void
   isChatActive: boolean
-  buildMode: 'fast' | 'fine'
-  onBuildModeChange: (mode: 'fast' | 'fine') => void
+  buildMode: 'fast' | 'fine' | 'clone'
+  onBuildModeChange: (mode: 'fast' | 'fine' | 'clone') => void
   isAuthenticated: boolean
   onLoginRequired: () => void
   recentProjects: Array<{ id: string; name: string; status: string; latestConversationId: string | null }>
@@ -381,7 +381,9 @@ function HeroSection({
               onChange={(e) => onInputChange(e.target.value)}
               onFocus={() => setIsFocused(true)}
               onBlur={() => setIsFocused(false)}
-              placeholder={buildMode === 'fast'
+              placeholder={buildMode === 'clone'
+                ? tHero('placeholderClone')
+                : buildMode === 'fast'
                 ? tHero('placeholderFast')
                 : tHero('placeholderFine')}
               rows={3}
@@ -455,12 +457,37 @@ function HeroSection({
                 >
                   {tHero('modeFine')}
                 </button>
+                <button
+                  onClick={() => {
+                    if (!isAuthenticated) {
+                      onLoginRequired()
+                      return
+                    }
+                    onBuildModeChange('clone')
+                  }}
+                  style={{
+                    padding: '4px 10px',
+                    fontSize: 12,
+                    fontWeight: 500,
+                    background: buildMode === 'clone' ? 'var(--black)' : 'transparent',
+                    color: buildMode === 'clone' ? 'var(--white)' : 'var(--gray-500)',
+                    border: 'none',
+                    borderRadius: 4,
+                    cursor: isAuthenticated ? 'pointer' : 'default',
+                    transition: 'all 0.2s ease',
+                    whiteSpace: 'nowrap',
+                    opacity: isAuthenticated ? 1 : 0.5,
+                  }}
+                >
+                  Clone
+                </button>
               </div>
               <span style={{ fontSize: 12, color: isFastModeShortWarning ? 'var(--amber-500, #f59e0b)' : 'var(--gray-400)', flex: 1, textAlign: 'center', transition: 'color 0.2s ease' }}>
                 {!isAuthenticated
                   ? tHero('guestHint')
                   : isFastModeShortWarning
                     ? tHero('shortWarning')
+                    : buildMode === 'clone' ? tHero('cloneHint')
                     : buildMode === 'fast' ? tHero('fastHint') : tHero('fineHint')}
               </span>
               <motion.button

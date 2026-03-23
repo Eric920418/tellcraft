@@ -57,7 +57,7 @@ export default function ChatSection({
   initialMessage: string
   resumeConversationId?: string | null
   onBack: () => void
-  buildMode?: 'fast' | 'fine'
+  buildMode?: 'fast' | 'fine' | 'clone'
 }) {
   const tChat = useTranslations('chat')
   const tStage = useTranslations('stage')

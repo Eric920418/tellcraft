@@ -15,7 +15,7 @@ export function useChatSession(
   isActive: boolean,
   initialMessage: string,
   resumeConversationId: string | null | undefined,
-  buildMode: 'fast' | 'fine' | undefined,
+  buildMode: 'fast' | 'fine' | 'clone' | undefined,
   callbacks: {
     onMessagesSet: (msgs: Message[]) => void
     onMessagesUpdate: (updater: (prev: Message[]) => Message[]) => void

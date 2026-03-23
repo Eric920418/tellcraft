@@ -37,6 +37,8 @@ const DOMAIN_REGISTERING_TIMEOUT_MS = 10 * 60 * 1000
 const DOMAIN_DNS_VERIFYING_TIMEOUT_MS = 5 * 60 * 1000
 const CODER_GENERATING_TIMEOUT_MS = 15 * 60 * 1000
 const CODER_TESTING_TIMEOUT_MS = 20 * 60 * 1000
+const CLONE_ANALYZING_TIMEOUT_MS = 5 * 60 * 1000
+const CLONE_GENERATING_TIMEOUT_MS = 20 * 60 * 1000
 
 // 需要掃描的 phase → 超時閾值
 const RECOVERABLE_PHASES: Record<string, number> = {
@@ -51,6 +53,8 @@ const RECOVERABLE_PHASES: Record<string, number> = {
   domain_dns_verifying: DOMAIN_DNS_VERIFYING_TIMEOUT_MS,
   coder_generating: CODER_GENERATING_TIMEOUT_MS,
   coder_testing: CODER_TESTING_TIMEOUT_MS,
+  clone_analyzing: CLONE_ANALYZING_TIMEOUT_MS,
+  clone_generating: CLONE_GENERATING_TIMEOUT_MS,
 }
 
 function getPhaseTimeoutMs(state: FlowState): number | undefined {
@@ -58,7 +62,7 @@ function getPhaseTimeoutMs(state: FlowState): number | undefined {
   if (!baseTimeout) return undefined
 
   // RWD 階段輸出通常最大，給更寬鬆的恢復窗口，避免誤判活躍生成為超時。
-  if (state.phase === 'fast_generating' && state.uiuxCodePhase === 'rwd') {
+  if (state.uiuxCodePhase === 'rwd' && (state.phase === 'fast_generating' || state.phase === 'uiux_code_generation')) {
     return FAST_BUILD_RWD_TIMEOUT_MS
   }
 

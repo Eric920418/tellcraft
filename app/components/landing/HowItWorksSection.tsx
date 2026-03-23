@@ -3,6 +3,7 @@
 import { useRef } from 'react'
 import { motion, useInView } from 'framer-motion'
 import { useTranslations } from 'next-intl'
+import { heavyEasing, HEAVY } from '@/app/lib/chat-utils'
 
 function HowItWorksSection() {
   const t = useTranslations('howItWorks')
@@ -47,7 +48,7 @@ function HowItWorksSection() {
             key={step.number}
             initial={{ opacity: 0 }}
             animate={isInView ? { opacity: 1 } : {}}
-            transition={{ duration: 0.8, delay: i * 0.15 }}
+            transition={{ duration: HEAVY.duration, delay: i * HEAVY.stagger, ease: heavyEasing }}
             style={{
               display: 'grid',
               gridTemplateColumns: isEven ? '1fr 1fr' : '1fr 1fr',
@@ -59,9 +60,9 @@ function HowItWorksSection() {
           >
             {/* Number side */}
             <motion.div
-              initial={{ x: isEven ? -100 : 100, opacity: 0 }}
+              initial={{ x: isEven ? -80 : 80, opacity: 0 }}
               animate={isInView ? { x: 0, opacity: 1 } : {}}
-              transition={{ duration: 0.8, delay: 0.2 + i * 0.15, ease: [0.25, 0.46, 0.45, 0.94] }}
+              transition={{ duration: HEAVY.durationHeader, delay: 0.2 + i * HEAVY.stagger, ease: heavyEasing }}
               style={{
                 display: 'flex',
                 alignItems: 'center',
@@ -87,9 +88,9 @@ function HowItWorksSection() {
 
             {/* Content side */}
             <motion.div
-              initial={{ x: isEven ? 100 : -100, opacity: 0 }}
+              initial={{ x: isEven ? 80 : -80, opacity: 0 }}
               animate={isInView ? { x: 0, opacity: 1 } : {}}
-              transition={{ duration: 0.8, delay: 0.3 + i * 0.15, ease: [0.25, 0.46, 0.45, 0.94] }}
+              transition={{ duration: HEAVY.durationHeader, delay: 0.3 + i * HEAVY.stagger, ease: heavyEasing }}
               style={{
                 display: 'flex',
                 flexDirection: 'column',
@@ -134,7 +135,7 @@ function HowItWorksSection() {
               <motion.div
                 initial={{ scaleY: 0 }}
                 animate={isInView ? { scaleY: 1 } : {}}
-                transition={{ duration: 0.6, delay: 0.5 + i * 0.15 }}
+                transition={{ duration: HEAVY.durationSecondary, delay: 0.5 + i * HEAVY.stagger, ease: heavyEasing }}
                 style={{
                   position: 'absolute',
                   bottom: 0,
