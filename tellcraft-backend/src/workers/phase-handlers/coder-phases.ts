@@ -336,7 +336,7 @@ export async function executeCoderSkill(input: CoderSkillInput): Promise<void> {
           content: isChinese
             ? `⚠️ E2E 檢查遇到問題：${e2eResult.summary}（不影響後續流程）`
             : `⚠️ E2E check encountered issues: ${e2eResult.summary} (does not block pipeline)`,
-          stage: 'info',
+          stage: 'coder_testing',
         })
       }
 
@@ -561,7 +561,7 @@ export async function executeCoderTesting(input: CoderSkillInput): Promise<void>
 
   await sendMessage(conversationId, io, {
     content: isChinese ? '開始執行 SpecFormula 測試...' : 'Starting SpecFormula tests...',
-    stage: 'info',
+    stage: 'coder_testing',
   })
 
   // 定時心跳：每 15 秒觸發一次，確保長時間操作（pnpm install、LLM 修復）期間不被超時恢復誤殺
@@ -588,7 +588,7 @@ export async function executeCoderTesting(input: CoderSkillInput): Promise<void>
         await touchFlowActivity(redis, conversationId)
         await sendMessage(conversationId, io, {
           content: `${step} (${percent}%)`,
-          stage: 'info',
+          stage: 'coder_testing',
         })
       },
     })
