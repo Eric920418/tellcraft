@@ -324,18 +324,14 @@ export async function actionName(input: XxxInput): Promise<XxxOutput> {
 - 登入/登出等操作：__status: 200
 例如：return { __status: 201, email, role }
 
-## Response 回傳規則（重要！嚴格遵守）
+## Response 回傳規則（重要！）
 每種操作必須回傳完整資料，不能只回傳 { __status: 200 }：
 - **建立操作（INSERT）**：\`const [row] = await sql\`INSERT INTO ... RETURNING *\`; return { __status: 201, ...row }\`
 - **更新操作（UPDATE）**：\`const [row] = await sql\`UPDATE ... RETURNING *\`; return { __status: 200, ...row }\`（**必須 RETURNING *** 並展開到回傳物件中）
-- **刪除操作（軟刪除 UPDATE is_deleted）**：\`const [row] = await sql\`UPDATE ... SET is_deleted=true, deleted_at=now() WHERE id=$1 RETURNING *\`; return { __status: 200, ...row }\`
-- **列表查詢**：\`const rows = await sql\`SELECT ...\`; return { __status: 200, items: rows }\`
-- **單筆查詢**：\`const [row] = await sql\`SELECT ... WHERE id=$1\`; return { __status: 200, ...row }\`
+- **刪除操作（DELETE）**：\`return { __status: 200, message: '刪除成功' }\`
+- **列表查詢**：\`const rows = await sql\`SELECT ...\`; (rows as any).__status = 200; return rows\`（直接回傳 pg 陣列，在陣列上設 __status 確保 route handler 用 200）
+- **單筆查詢**：\`return { __status: 200, ...row }\`
 - **批次操作（排序/拖曳）**：逐筆 UPDATE 後 \`return { __status: 200, success: true }\`
-- **登入成功**：\`return { __status: 200, userId, accessToken: jwt.sign({...}), message: '登入成功' }\`
-- **登出成功**：\`return { __status: 200, message: '登出成功' }\`
-- **驗證類操作（Email 驗證、密碼重設）**：操作完成後 \`return { __status: 200, message: '操作成功' }\`
-重要：所有 200/201 操作必須包含 __status。列表查詢用 { __status: 200, items: rows }，不要直接 return rows（Array 沒有 __status 屬性會導致 API route 使用錯誤的預設 status code）
 
 ## 日期欄位處理
 PostgreSQL DATE/TIMESTAMP 欄位從 pg driver 取出是 JS Date 物件，回傳前必須轉成字串：
@@ -1507,9 +1503,6 @@ function extractResponseFieldsFromFeatures(
                 fields.add(cell.substring(1)) // <executionKey → 去掉 < 前綴
               } else if ((cell === '$notnull' || cell === '&isNotNull') && header && !header.startsWith('>') && !header.startsWith('<')) {
                 fields.add(header) // 驗證非空的欄位 → LLM 必須回傳
-              } else if (header && !header.startsWith('>') && !header.startsWith('<') && !header.startsWith('$')) {
-                // 所有非 VAR 前綴的 header → LLM response 必須包含此欄位
-                fields.add(header)
               }
             }
           }
@@ -1741,7 +1734,7 @@ _stepSummary includes 匹配有交叉時，更具體的分支必須排在前面�
 if (op.includes('取消訂閱')) { ... }
 else if (op.includes('查詢') || op.includes('列表')) { // ← 必須在「訂閱」前面！
   const rows = await sql\`SELECT ... FROM table WHERE user_id = \${userId}\`
-  return rows  // 列表查詢直接回傳陣列，不要包裝
+  ;(rows as any).__status = 200; return rows  // 列表查詢：設 __status 確保 route handler 用 200
 }
 else if (op.includes('訂閱')) { ... }
 \`\`\`
@@ -1754,7 +1747,7 @@ else if (op.includes('訂閱')) { ... }
 if (op.includes('查詢') || op.includes('列表')) {
   const userId = input.userId
   const rows = await sql\`SELECT ... FROM table WHERE user_id = \${userId}\`
-  return rows  // 列表查詢直接回傳陣列，不要包裝
+  ;(rows as any).__status = 200; return rows  // 列表查詢：設 __status 確保 route handler 用 200
 }
 \`\`\`
 

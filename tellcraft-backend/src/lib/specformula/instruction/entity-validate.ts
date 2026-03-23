@@ -148,14 +148,7 @@ export class EntityValidate {
       if (probeConditions.size === 0) {
         const hasExtractionColumns = Object.keys(row).some(k => k.startsWith('>'));
         if (!hasExtractionColumns) {
-          // 降級：無查詢條件時取最新一筆記錄
-          const fallbackResult = await pool.query(
-            `SELECT * FROM ${tableDef.tableName} ORDER BY created_at DESC LIMIT 1`
-          );
-          if (fallbackResult.rows.length > 0) {
-            return fallbackResult.rows[0] as Record<string, unknown>;
-          }
-          throw new Error('缺少查詢條件且表中無資料');
+          throw new Error('缺少查詢條件：請提供至少一個非約束欄位或主鍵');
         }
       }
     }
