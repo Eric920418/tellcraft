@@ -1129,9 +1129,3 @@ textarea {
   pointer-events: none;
 }
 
-/* Mobile Preview Button: only show on small screens */
-@media (max-width: 767px) {
-  .mobile-preview-btn {
-    display: flex !important;
-  }
-}

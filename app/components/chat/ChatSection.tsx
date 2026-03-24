@@ -38,7 +38,6 @@ import { getTemplateById } from '@/app/actions/templates'
 import ErrorBoundary from '@/app/components/ErrorBoundary'
 import ChatMessageList from './ChatMessageList'
 import ChatPreviewPanel from './ChatPreviewPanel'
-import MobilePreviewModal from './MobilePreviewModal'
 
 function isDeployCommand(content: string): boolean {
   const trimmed = content.trim().toLowerCase()
@@ -97,9 +96,6 @@ export default function ChatSection({
   const [streamingPreview, setStreamingPreview] = useState<StreamingPreview | null>(null)
   const [codePreviewData, setCodePreviewData] = useState<Record<string, unknown> | null>(null)
   const [fastBuildChunks, setFastBuildChunks] = useState(0)
-
-  // ── Mobile Preview ──
-  const [showMobilePreview, setShowMobilePreview] = useState(false)
 
   // ── Template Submit Modal ──
   const [showTemplateSubmitModal, setShowTemplateSubmitModal] = useState(false)
@@ -162,10 +158,6 @@ export default function ChatSection({
     onCurrentStage: (s: Message['stage']) => setCurrentStage(s),
     onCodePreviewData: (data: Record<string, unknown> | null) => {
       setCodePreviewData(data)
-      // 手機版：恢復對話時有 code_preview 自動彈出預覽
-      if (data && typeof window !== 'undefined' && window.innerWidth < 768) {
-        setShowMobilePreview(true)
-      }
     },
     onLastTimestamp: (ts: string) => pollingRef.current?.setLastTimestamp(ts),
     onGuestBuildCompleted: (_v: boolean) => { /* handled by session hook */ },
@@ -243,10 +235,6 @@ export default function ChatSection({
     onFastBuildChunks: (n: number) => setFastBuildChunks(prev => prev !== n ? n : prev),
     onCodePreviewData: (data: Record<string, unknown> | null) => {
       setCodePreviewData(data)
-      // 手機版：收到 code_preview 時自動彈出全螢幕預覽
-      if (data && typeof window !== 'undefined' && window.innerWidth < 768) {
-        setShowMobilePreview(true)
-      }
     },
     onLayoutModeChange: (mode: 'split') => {
       if (layoutModeRef.current !== mode) {
@@ -381,7 +369,6 @@ export default function ChatSection({
       layoutModeRef.current = 'default'
       setSelectedTemplateId(null)
       setSelectedTemplate(null)
-      setShowMobilePreview(false)
       setAttachedImages([])
       loginPromptHook.resetLoginPrompt()
       editorHook.resetEditor()
@@ -971,28 +958,6 @@ export default function ChatSection({
 
   return (
     <>
-    {/* Mobile Preview Modal */}
-    <MobilePreviewModal
-      show={showMobilePreview}
-      stablePreviewData={stablePreviewData}
-      onClose={() => setShowMobilePreview(false)}
-      onDeploy={() => {
-        if (!session.sessionInfo?.isAuthenticated) {
-          setShowMobilePreview(false)
-          loginPromptHook.setLoginPromptConfig({
-            show: true,
-            variant: 'emphasized',
-            message: tLogin('deployGuestTitle'),
-            subMessage: tLogin('deployGuestMessage'),
-            promptId: 'guest_deploy'
-          })
-          return
-        }
-        setShowMobilePreview(false)
-        handleSendMessage(locale === 'en' ? 'deploy' : '部署')
-      }}
-    />
-
     <TemplateSubmitModal
       isOpen={showTemplateSubmitModal}
       onClose={() => setShowTemplateSubmitModal(false)}
@@ -1154,7 +1119,7 @@ export default function ChatSection({
                   getCommandLabel={getCommandLabel}
                   handleSelectConversation={session.handleSelectConversation}
                   handleStartNewConversation={handleStartNewConversation}
-                  onShowMobilePreview={() => setShowMobilePreview(true)}
+
                   isGuestLocked={isGuestLocked}
                   quotaReadOnly={session.quotaReadOnly}
                   typewriterMessageId={typewriterMessageId}
@@ -1413,7 +1378,6 @@ export default function ChatSection({
             getCommandLabel={getCommandLabel}
             handleSelectConversation={session.handleSelectConversation}
             handleStartNewConversation={handleStartNewConversation}
-            onShowMobilePreview={() => setShowMobilePreview(true)}
             isGuestLocked={isGuestLocked}
             quotaReadOnly={session.quotaReadOnly}
             typewriterMessageId={typewriterMessageId}

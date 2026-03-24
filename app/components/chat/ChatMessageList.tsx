@@ -61,7 +61,6 @@ export interface ChatMessageListProps {
   getCommandLabel: (content: string) => string
   handleSelectConversation: (conversationId: string) => void
   handleStartNewConversation: () => void
-  onShowMobilePreview: () => void
   inputRef: React.RefObject<HTMLTextAreaElement | null>
   isGuestLocked: boolean
   quotaReadOnly: boolean
@@ -106,7 +105,6 @@ export default function ChatMessageList({
   getCommandLabel,
   handleSelectConversation,
   handleStartNewConversation,
-  onShowMobilePreview,
   inputRef,
   isGuestLocked,
   quotaReadOnly,
@@ -225,7 +223,6 @@ export default function ChatMessageList({
                   selectedTemplateId={selectedTemplateId}
                   handleSendMessage={handleSendMessage}
                   handleTemplateSelect={handleTemplateSelect}
-                  onShowMobilePreview={onShowMobilePreview}
                   getCommandLabel={getCommandLabel}
                   tChat={tChat}
                   isTypewriterTarget={message.id === typewriterMessageId}

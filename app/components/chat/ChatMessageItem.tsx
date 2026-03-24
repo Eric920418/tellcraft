@@ -82,7 +82,6 @@ export interface ChatMessageItemProps {
   selectedTemplateId: string | null
   handleSendMessage: (message: string, options?: { displayLabel?: string }) => void
   handleTemplateSelect: (templateId: string) => void
-  onShowMobilePreview: () => void
   getCommandLabel: (content: string) => string
   tChat: (key: string) => string
   isTypewriterTarget?: boolean
@@ -107,7 +106,6 @@ export const ChatMessageItem = React.memo(function ChatMessageItem({
   selectedTemplateId,
   handleSendMessage,
   handleTemplateSelect,
-  onShowMobilePreview,
   getCommandLabel,
   tChat,
   isTypewriterTarget,
@@ -444,34 +442,6 @@ export const ChatMessageItem = React.memo(function ChatMessageItem({
                 {(message.richContent.data as { host?: string }).host}
               </div>
             </div>
-          )}
-
-          {/* Mobile Preview Button */}
-          {message.richContent?.type === 'code_preview' && layoutMode !== 'split' && (
-            <motion.button
-              initial={{ opacity: 0, y: 8 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: 0.3 }}
-              onClick={() => onShowMobilePreview()}
-              className="mobile-preview-btn"
-              style={{
-                display: 'none',
-                marginTop: 12,
-                padding: '12px 20px',
-                background: 'var(--black)',
-                color: 'var(--white)',
-                border: 'none',
-                cursor: 'pointer',
-                fontSize: 14,
-                fontWeight: 500,
-                width: '100%',
-                alignItems: 'center',
-                justifyContent: 'center',
-                gap: 8,
-              }}
-            >
-              {tChat('viewPreview') || 'View Preview'}
-            </motion.button>
           )}
 
           {/* Quick Replies */}
