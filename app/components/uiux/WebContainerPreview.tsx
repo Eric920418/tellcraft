@@ -304,10 +304,24 @@ export default function WebContainerPreview({
       }
     }
 
-    if (Object.keys(changes).length > 0) {
-      writeFiles(changes).catch(err => {
-        console.error('[WC] Incremental write failed:', err)
-      })
+    const changedCount = Object.keys(changes).length
+    if (changedCount > 0) {
+      console.log(`[WC] Incremental write: ${changedCount} files changed`, Object.keys(changes))
+      writeFiles(changes)
+        .then(() => {
+          // HMR 可能不會自動觸發（WebContainer fs.writeFile 限制）
+          // 寫入後強制 reload iframe 確保預覽更新
+          if (iframeRef.current) {
+            const src = iframeRef.current.src
+            if (src && src !== 'about:blank') {
+              console.log('[WC] Force iframe reload after incremental write')
+              iframeRef.current.src = src
+            }
+          }
+        })
+        .catch(err => {
+          console.error('[WC] Incremental write failed:', err)
+        })
     }
 
     prevProcessedRef.current = processed

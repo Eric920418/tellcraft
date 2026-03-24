@@ -9,7 +9,7 @@ import * as db from '../../db/client'
 import type { FlowState, GeneratedCode } from '../../types/flow-state'
 import { type GeneratedComponent, generateTailwindConfig } from '../../services/uiux-generation'
 import { executeCoderPipeline } from '../../services/coder-generation'
-import { sendMessage, saveFlowState, getFlowState, touchFlowActivity, snapshotCodeToGeneration } from '../orchestrator-utils'
+import { sendMessage, saveFlowState, getFlowState, touchFlowActivity, snapshotCodeToGeneration, inferFileType } from '../orchestrator-utils'
 import { runCoderE2ETests } from '../../services/coder-e2e-test'
 import { executeRedPhase, formatRedPhaseReport, runRedPhaseFullValidation } from '../../services/red-phase-validator'
 import { createLogger } from '../../lib/logger'
@@ -268,7 +268,7 @@ export async function executeCoderSkill(input: CoderSkillInput): Promise<void> {
         filePath: f.path,
         content: f.content,
         description: f.description,
-        fileType: f.path.startsWith('app/') && !f.path.includes('/components/') ? 'page' : 'component',
+        fileType: inferFileType(f.path),
       })),
     ]
 
@@ -346,7 +346,7 @@ export async function executeCoderSkill(input: CoderSkillInput): Promise<void> {
           filePath: f.path,
           content: f.content,
           description: '',
-          fileType: f.path.endsWith('page.tsx') ? 'page' : 'component',
+          fileType: inferFileType(f.path),
         }))
         await db.upsertProjectFiles(projectId, 'coder', fixedDbFiles)
 
@@ -671,14 +671,6 @@ export async function executeCoderTesting(input: CoderSkillInput): Promise<void>
 // ============================================================
 // 工具函數
 // ============================================================
-
-function inferFileType(path: string): string {
-  if (path.startsWith('lib/db')) return 'config'
-  if (path.startsWith('lib/actions/')) return 'service'
-  if (path.startsWith('app/actions/')) return 'service'
-  if (path.startsWith('app/api/')) return 'api_route'
-  return 'component'
-}
 
 /**
  * 合併組件列表：rewritten 覆蓋同路徑的原始組件

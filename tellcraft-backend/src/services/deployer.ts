@@ -13,6 +13,7 @@ import * as db from '../db/client'
 import { createLogger } from '../lib/logger'
 import { repairMissingReactImports, repairBracketLookupAccess } from './uiux-generation'
 import { sanitizeNamedImports } from '../utils/sanitize-named-imports'
+import { inferFileType } from '../workers/orchestrator-utils'
 
 const logger = createLogger('deployer')
 const execFileAsync = promisify(execFile)
@@ -280,6 +281,25 @@ function normalizeGeneratedCodeUploadUrls(code: GeneratedCode, targetBaseUrl: st
 }
 
 /**
+ * Strip Next.js route groups from file paths: app/(auth)/login/page.tsx → app/login/page.tsx
+ */
+function stripRouteGroups(filePath: string): string {
+  return filePath.replace(/\([^)]+\)\//g, '')
+}
+
+/**
+ * 去重路由衝突：strip route groups 後同路由的頁面只保留一份（後者覆蓋前者）
+ */
+function deduplicateRouteConflicts<T extends { path: string }>(files: T[]): T[] {
+  const routeMap = new Map<string, T>()
+  for (const f of files) {
+    const normalized = stripRouteGroups(f.path).replace(/^\//, '')
+    routeMap.set(normalized, f)
+  }
+  return Array.from(routeMap.values())
+}
+
+/**
  * 部署前代碼預檢 + 自動修復
  * 掃描所有已知的 build 失敗模式，自動修復後返回乾淨的代碼
  */
@@ -306,9 +326,10 @@ export function sanitizeCodeForDeploy(code: GeneratedCode): SanitizeResult {
     if (f.path !== n) pathFixes.push(`${f.path} → ${n}`)
   }
 
+  // Route group 去重（pages 和 components 都處理）+ 路徑正規化
   const sanitized: GeneratedCode = {
-    pages: deduplicateByNormalizedPath(code.pages.map(p => ({ ...p, content: p.content }))),
-    components: deduplicateByNormalizedPath(code.components.map(c => ({ ...c, content: c.content }))),
+    pages: deduplicateRouteConflicts(deduplicateByNormalizedPath(code.pages.map(p => ({ ...p, content: p.content })))),
+    components: deduplicateRouteConflicts(deduplicateByNormalizedPath(code.components.map(c => ({ ...c, content: c.content })))),
     styles: code.styles,
   }
 
@@ -820,6 +841,15 @@ export async function prepareDeployment(
     if (pages.length > 0) {
       code = { pages, components: [...components, ...backendFiles], styles }
     }
+
+    logger.info({
+      projectId,
+      pageCount: pages.length,
+      componentCount: components.length,
+      backendFileCount: backendFiles.length,
+      pagePaths: pages.map(p => p.path),
+      componentPaths: components.map(c => c.path).slice(0, 30),
+    }, 'Deploy 檔案合併結果')
   }
 
   // Fallback：從 bdd_sessions 讀取（舊專案相容）
@@ -1033,13 +1063,13 @@ export async function executeDeployment(
     try {
       const fileRows: { filePath: string; content: string; description?: string; fileType: string }[] = []
       for (const p of deployedCode.pages) {
-        fileRows.push({ filePath: p.path, content: p.content, description: p.description, fileType: 'page' })
+        fileRows.push({ filePath: p.path, content: p.content, description: p.description, fileType: inferFileType(p.path) })
       }
       for (const c of deployedCode.components) {
-        fileRows.push({ filePath: c.path, content: c.content, description: c.description, fileType: 'component' })
+        fileRows.push({ filePath: c.path, content: c.content, description: c.description, fileType: inferFileType(c.path) })
       }
       if (deployedCode.styles) {
-        fileRows.push({ filePath: 'globals.css', content: deployedCode.styles, fileType: 'style' })
+        fileRows.push({ filePath: 'app/globals.css', content: deployedCode.styles, fileType: 'style' })
       }
       await db.upsertProjectFiles(projectId, 'uiux', fileRows)
       logger.info({ fileCount: fileRows.length }, '已同步 build 修復後的代碼到 project_files')
@@ -1292,10 +1322,10 @@ export default config
 
   // 生成的 components — 智慧路徑處理
   // 這些頂層目錄直接放根目錄，不加 components/ 前綴
-  const ROOT_LEVEL_DIRS = ['app/', 'lib/', 'hooks/', 'utils/', 'types/', 'context/', 'stores/', 'data/', 'config/']
+  const ROOT_LEVEL_DIRS = ['app/', 'lib/', 'hooks/', 'utils/', 'types/', 'context/', 'stores/', 'data/', 'config/', 'api/']
   let hasCustomLayout = false
   for (const comp of code.components) {
-    const cleanPath = comp.path.replace(/^(components\/)?/, '')
+    const cleanPath = stripRouteGroups(comp.path.replace(/^(components\/)?/, ''))
 
     if (cleanPath === 'app/layout.tsx' || cleanPath === 'app/layout.ts') {
       hasCustomLayout = true
@@ -1419,7 +1449,7 @@ export default function RootLayout({
     })
 
     for (const page of otherPages) {
-      const pagePath = page.path
+      const pagePath = stripRouteGroups(page.path)
         .replace(/^(app\/|pages\/)?/, '')        // 去掉 app/ 或 pages/ 前綴
         .replace(/\/page\.(tsx|ts|jsx|js)$/, '')  // 去掉尾部 /page.tsx
         .replace(/\.(tsx|ts|jsx|js)$/, '')        // 去掉副檔名
@@ -1450,6 +1480,8 @@ export default function RootLayout({
       }
     }
   }
+
+  logger.info({ fileCount: files.length, paths: files.map(f => f.file) }, 'wrapInNextJs 最終檔案清單')
 
   return files
 }

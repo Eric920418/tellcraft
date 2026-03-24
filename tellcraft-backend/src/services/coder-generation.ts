@@ -674,9 +674,11 @@ export function generateApiRoutes(
 
     // Derive the route file path from the API path
     // /api/orders/:id → app/api/orders/[id]/route.ts
-    const routeDir = meta.path
+    const rawRouteDir = meta.path
       .replace(/^\//, '')  // remove leading slash
       .replace(/:(\w+)/g, '[$1]')  // :id → [id]
+    // 確保路徑以 app/ 開頭（Next.js App Router 規範）
+    const routeDir = rawRouteDir.startsWith('app/') ? rawRouteDir : `app/${rawRouteDir}`
 
     let content: string
     if (meta.method === 'GET') {

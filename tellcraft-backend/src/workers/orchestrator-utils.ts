@@ -402,6 +402,37 @@ export function generatedCodeToFileRows(
   return rows
 }
 
+/**
+ * 統一的檔案類型推斷（共用於 coder-phases、deployer、iteration-skill）
+ * 根據檔案路徑推斷 file_type，用於 project_files 表的 file_type 欄位
+ */
+export function inferFileType(filePath: string): string {
+  const p = filePath.replace(/^\//, '')
+
+  // 樣式
+  if (p === 'app/globals.css' || p.endsWith('.css')) return 'style'
+
+  // 設定檔
+  if (p === 'tailwind.config.ts') return 'config'
+
+  // Next.js 特殊檔案（layout/error/loading/not-found/template/providers）— 不是 page
+  const SPECIAL_BASENAMES = ['layout', 'error', 'loading', 'not-found', 'template', 'providers']
+  const basename = p.split('/').pop()?.replace(/\.(tsx?|jsx?)$/, '')
+  if (basename && SPECIAL_BASENAMES.includes(basename) && p.startsWith('app/')) return 'component'
+
+  // 後端檔案
+  if (p.startsWith('lib/db') || (p.startsWith('lib/') && !p.startsWith('lib/actions/'))) return 'config'
+  if (p.startsWith('lib/actions/')) return 'service'
+  if (p.startsWith('app/actions/')) return 'service'
+  if (p.startsWith('app/api/') || p.startsWith('api/')) return 'api_route'
+
+  // 頁面：路徑以 page.tsx/ts/jsx/js 結尾
+  if (/\/page\.(tsx?|jsx?)$/.test(p)) return 'page'
+
+  // 其餘都是 component
+  return 'component'
+}
+
 // ============================================================
 // 代碼快照：保存當前 project_files 到最新 generation 記錄
 // ============================================================

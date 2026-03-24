@@ -3,6 +3,7 @@ export type InsightSlotId = 'nav' | 'hero-title' | 'hero-media' | 'cta' | 'cards
 export type ForgeAction = 'heating' | 'shaping' | 'striking' | 'trimming' | 'polishing'
 export type ForgeZone = 'intake' | 'anvil' | 'assembly' | 'refine' | 'finish'
 export type ModuleFinish = 'raw' | 'heated' | 'shaped' | 'trimmed' | 'polished'
+export type WorkflowContext = 'uiux' | 'fast' | 'coder'
 
 export interface GenerationProgress {
   current: number
@@ -23,10 +24,10 @@ export interface GenerationVisualState {
   phaseNumber: number
   totalPhases: number
   progressPercent: number
-  phaseLabelKey: 'phaseReasoning' | 'phaseStructure' | 'phaseAnimation' | 'phaseRwd' | 'phaseQuality'
-  statusLabelKey: 'aiStatusReasoning' | 'aiStatusStructure' | 'aiStatusAnimation' | 'aiStatusRwd' | 'aiStatusQuality'
-  sceneActionKey: 'aiActionReasoning' | 'aiActionAssembling' | 'aiActionInjecting' | 'aiActionResponsive' | 'aiActionPolishing'
-  activeModuleKey: 'aiModuleSemanticMap' | 'aiModuleHeaderHero' | 'aiModuleContentGrid' | 'aiModuleInteractionLayer' | 'aiModuleResponsiveMatrix' | 'aiModuleQualityGuard'
+  phaseLabelKey: string
+  statusLabelKey: string
+  sceneActionKey: string
+  activeModuleKey: string
   taskIndex: number
   assembledModules: number
   totalModules: number
@@ -39,6 +40,7 @@ export interface GenerationVisualState {
   forgeTemperature: number
   moduleFinish: ModuleFinish
   activeWorkbenchZone: ForgeZone
+  workflowContext: WorkflowContext
 }
 
 const PHASES: GenerationPhase[] = ['reasoning', 'structure', 'animation', 'rwd', 'quality']
@@ -94,8 +96,16 @@ function getProgressPercent(input: GenerationVisualInput, phase: GenerationPhase
   return clamp(percent + chunkBoost, 5, 99)
 }
 
+function resolveWorkflowContext(input: GenerationVisualInput): WorkflowContext {
+  const stage = input.stage || ''
+  if (stage.includes('coder')) return 'coder'
+  if (input.fastBuildPhase || stage === 'fast_generating') return 'fast'
+  return 'uiux'
+}
+
 export function resolveGenerationVisualState(input: GenerationVisualInput): GenerationVisualState {
   const phase = mapPhaseFromInputs(input)
+  const workflowContext = resolveWorkflowContext(input)
   const phaseIndex = PHASES.indexOf(phase)
   const phaseNumber = phaseIndex + 1
   const progressPercent = getProgressPercent(input, phase)
@@ -212,5 +222,6 @@ export function resolveGenerationVisualState(input: GenerationVisualInput): Gene
     forgeTemperature,
     moduleFinish: finishMap[phase],
     activeWorkbenchZone: forgeZoneMap[phase],
+    workflowContext,
   }
 }

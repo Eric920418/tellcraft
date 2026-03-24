@@ -16,6 +16,21 @@ import { listProjectDeployments, rollbackToDeployment, toVercelSlug } from './de
 
 const MAX_ITERATIONS_PER_SESSION = 50
 
+/** Strip Next.js route groups: app/(auth)/login → app/login */
+function stripRouteGroups(filePath: string): string {
+  return filePath.replace(/\([^)]+\)\//g, '')
+}
+
+/** 去重路由衝突的頁面：迭代 LLM 可能同時產生 app/(auth)/login 和 app/login */
+function deduplicateRouteConflictPages<T extends { path: string }>(pages: T[]): T[] {
+  const routeMap = new Map<string, T>()
+  for (const p of pages) {
+    const normalized = stripRouteGroups(p.path).replace(/^\//, '')
+    routeMap.set(normalized, p)
+  }
+  return Array.from(routeMap.values())
+}
+
 // ============================================================
 // 內部 Helper
 // ============================================================
@@ -339,7 +354,7 @@ ${enrichedFeedback}`
         state.uiuxPreIterationCode = JSON.parse(JSON.stringify(currentCode))
 
         updatedCode = {
-          pages: fsResult.pages || currentCode.pages,
+          pages: deduplicateRouteConflictPages(fsResult.pages || currentCode.pages),
           components: fsResult.components || currentCode.components,
           styles: fsResult.styles || currentCode.styles,
         }
@@ -442,7 +457,7 @@ ${enrichedFeedback}`
       state.uiuxPreIterationCode = JSON.parse(JSON.stringify(currentCode))
 
       updatedCode = {
-        pages: result.pages,
+        pages: deduplicateRouteConflictPages(result.pages),
         components: result.components || currentCode.components,
         styles: result.styles || currentCode.styles,
       }

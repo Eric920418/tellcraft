@@ -12,6 +12,7 @@ import {
   type GenerationProgress,
   type InsightSlotId,
   type ModuleFinish,
+  type WorkflowContext,
   resolveGenerationVisualState,
 } from './generation-visual-state'
 
@@ -74,14 +75,42 @@ const INSIGHT_PREFIX_BY_SLOT: Record<InsightSlotId, 'aiInsightHero' | 'aiInsight
   'form-block': 'aiInsightForm',
 }
 
-const TASKS = [
+// ── 三套情境任務 ──
+interface TaskDef {
+  titleKey: string
+  actionKey: string
+  moduleKey: string
+}
+
+const UIUX_TASKS: TaskDef[] = [
   { titleKey: 'aiTaskSmelting', actionKey: 'aiActionReasoning', moduleKey: 'aiModuleSemanticMap' },
   { titleKey: 'aiTaskFraming', actionKey: 'aiActionAssembling', moduleKey: 'aiModuleHeaderHero' },
   { titleKey: 'aiTaskForging', actionKey: 'aiActionInjecting', moduleKey: 'aiModuleContentGrid' },
   { titleKey: 'aiTaskRefining', actionKey: 'aiActionResponsive', moduleKey: 'aiModuleResponsiveMatrix' },
   { titleKey: 'aiTaskPolishing', actionKey: 'aiActionPolishing', moduleKey: 'aiModuleInteractionLayer' },
   { titleKey: 'aiTaskCalibration', actionKey: 'aiActionCalibration', moduleKey: 'aiModuleQualityGuard' },
-] as const
+]
+
+const FAST_TASKS: TaskDef[] = [
+  { titleKey: 'aiTaskFastInfer', actionKey: 'aiActionFastInfer', moduleKey: 'aiModuleFastInfer' },
+  { titleKey: 'aiTaskFastGenerate', actionKey: 'aiActionFastGenerate', moduleKey: 'aiModuleFastGenerate' },
+  { titleKey: 'aiTaskFastAnimate', actionKey: 'aiActionFastAnimate', moduleKey: 'aiModuleFastAnimate' },
+  { titleKey: 'aiTaskFastCheck', actionKey: 'aiActionFastCheck', moduleKey: 'aiModuleFastCheck' },
+]
+
+const CODER_TASKS: TaskDef[] = [
+  { titleKey: 'aiTaskCoderAnalyze', actionKey: 'aiActionCoderAnalyze', moduleKey: 'aiModuleCoderAnalyze' },
+  { titleKey: 'aiTaskCoderGenerate', actionKey: 'aiActionCoderGenerate', moduleKey: 'aiModuleCoderGenerate' },
+  { titleKey: 'aiTaskCoderWire', actionKey: 'aiActionCoderWire', moduleKey: 'aiModuleCoderWire' },
+  { titleKey: 'aiTaskCoderTest', actionKey: 'aiActionCoderTest', moduleKey: 'aiModuleCoderTest' },
+  { titleKey: 'aiTaskCoderVerify', actionKey: 'aiActionCoderVerify', moduleKey: 'aiModuleCoderVerify' },
+]
+
+const TASKS_BY_CONTEXT: Record<WorkflowContext, TaskDef[]> = {
+  uiux: UIUX_TASKS,
+  fast: FAST_TASKS,
+  coder: CODER_TASKS,
+}
 
 const PHASE_COLORS: Record<GenerationPhase, string> = {
   reasoning: '#f97316',
@@ -128,6 +157,15 @@ const MODULE_ROTATION: Record<ForgeModule['kind'], number> = {
   list: -1.8,
   feature: 1.4,
   footer: -1.2,
+}
+
+// ── 鐵鎚敲打週期（秒）──
+const HAMMER_CYCLE: Record<ForgeAction, number> = {
+  heating: 0,        // 加熱時不敲
+  shaping: 1.5,
+  striking: 0.9,
+  trimming: 1.3,
+  polishing: 0,      // 拋光時不敲
 }
 
 function clamp(value: number, min: number, max: number): number {
@@ -397,6 +435,181 @@ function getHoverCardPosition(module: ForgeModule | null, stageWidth: number, st
   return { x, y, width, anchor }
 }
 
+// ── 鍛造場景 SVG 元素 ──
+
+function AnvilSvg({ color: _color }: { color: string }) {
+  return (
+    <svg width="100%" height="100%" viewBox="0 0 120 60" fill="none" style={{ display: 'block' }}>
+      {/* 砧體 — T 型 */}
+      <path
+        d="M20 20 L100 20 L105 28 L95 28 L95 50 L80 54 L40 54 L25 50 L25 28 L15 28 Z"
+        fill="url(#anvilGrad)"
+        stroke="rgba(255,255,255,0.06)"
+        strokeWidth="0.5"
+      />
+      {/* 砧角（右側突出） */}
+      <path
+        d="M100 20 L118 16 L116 24 L105 28 Z"
+        fill="url(#anvilHornGrad)"
+        stroke="rgba(255,255,255,0.04)"
+        strokeWidth="0.5"
+      />
+      {/* 頂面高光 */}
+      <rect x="28" y="20" width="64" height="2" rx="1" fill="rgba(255,255,255,0.08)" />
+      <defs>
+        <linearGradient id="anvilGrad" x1="60" y1="16" x2="60" y2="56" gradientUnits="userSpaceOnUse">
+          <stop offset="0" stopColor="rgba(100,90,82,0.9)" />
+          <stop offset="0.3" stopColor="rgba(58,52,48,0.95)" />
+          <stop offset="1" stopColor="rgba(28,24,22,1)" />
+        </linearGradient>
+        <linearGradient id="anvilHornGrad" x1="100" y1="16" x2="118" y2="24" gradientUnits="userSpaceOnUse">
+          <stop offset="0" stopColor="rgba(80,72,66,0.9)" />
+          <stop offset="1" stopColor="rgba(50,44,40,0.95)" />
+        </linearGradient>
+      </defs>
+    </svg>
+  )
+}
+
+function HammerSvg() {
+  return (
+    <svg width="100%" height="100%" viewBox="0 0 40 80" fill="none" style={{ display: 'block' }}>
+      {/* 把手 */}
+      <rect x="17" y="24" width="6" height="56" rx="3" fill="url(#handleGrad)" />
+      {/* 錘頭 */}
+      <rect x="4" y="4" width="32" height="22" rx="4" fill="url(#headGrad)" stroke="rgba(255,255,255,0.06)" strokeWidth="0.5" />
+      {/* 錘頭高光 */}
+      <rect x="8" y="6" width="24" height="3" rx="1.5" fill="rgba(255,255,255,0.1)" />
+      {/* 錘面 */}
+      <rect x="6" y="22" width="28" height="4" rx="1" fill="rgba(90,82,76,0.9)" />
+      <defs>
+        <linearGradient id="handleGrad" x1="20" y1="24" x2="20" y2="80" gradientUnits="userSpaceOnUse">
+          <stop offset="0" stopColor="rgba(120,80,50,0.95)" />
+          <stop offset="1" stopColor="rgba(70,45,28,0.9)" />
+        </linearGradient>
+        <linearGradient id="headGrad" x1="20" y1="2" x2="20" y2="26" gradientUnits="userSpaceOnUse">
+          <stop offset="0" stopColor="rgba(110,100,92,0.95)" />
+          <stop offset="0.5" stopColor="rgba(72,66,60,0.98)" />
+          <stop offset="1" stopColor="rgba(44,40,36,1)" />
+        </linearGradient>
+      </defs>
+    </svg>
+  )
+}
+
+function FurnaceSvg({ glowIntensity }: { glowIntensity: number }) {
+  const glowOpacity = 0.3 + glowIntensity * 0.7
+  return (
+    <svg width="100%" height="100%" viewBox="0 0 56 64" fill="none" style={{ display: 'block' }}>
+      {/* 爐體 */}
+      <rect x="4" y="12" width="48" height="44" rx="4" fill="url(#furnaceGrad)" stroke="rgba(255,255,255,0.04)" strokeWidth="0.5" />
+      {/* 煙囪 */}
+      <rect x="20" y="0" width="16" height="16" rx="2" fill="rgba(62,48,38,0.9)" />
+      {/* 爐口 */}
+      <rect x="12" y="22" width="32" height="20" rx="3" fill="rgba(8,6,5,0.95)" />
+      {/* 爐內火光 */}
+      <ellipse cx="28" cy="32" rx="12" ry="8" fill={`rgba(255,140,40,${glowOpacity})`} />
+      <ellipse cx="28" cy="34" rx="8" ry="5" fill={`rgba(255,200,80,${glowOpacity * 0.6})`} />
+      {/* 爐口頂部反光 */}
+      <rect x="14" y="22" width="28" height="2" rx="1" fill={`rgba(255,160,60,${glowOpacity * 0.3})`} />
+      <defs>
+        <linearGradient id="furnaceGrad" x1="28" y1="10" x2="28" y2="58" gradientUnits="userSpaceOnUse">
+          <stop offset="0" stopColor="rgba(82,52,36,0.92)" />
+          <stop offset="0.6" stopColor="rgba(54,38,28,0.96)" />
+          <stop offset="1" stopColor="rgba(30,22,18,1)" />
+        </linearGradient>
+      </defs>
+    </svg>
+  )
+}
+
+// ── 火花粒子 ──
+function ForgeSparkBurst({ accentColor, active }: { accentColor: string; active: boolean }) {
+  if (!active) return null
+  const sparks = useMemo(() => Array.from({ length: 7 }).map((_, i) => ({
+    angle: -30 + (i * 30) + (Math.random() * 16 - 8),
+    speed: 0.6 + Math.random() * 0.5,
+    size: 3 + Math.random() * 3,
+    delay: Math.random() * 0.12,
+    color: i % 3 === 0 ? '#ffd6a1' : i % 3 === 1 ? accentColor : '#ffeccc',
+  })), [accentColor])
+
+  return (
+    <>
+      {sparks.map((spark, i) => {
+        const radians = (spark.angle * Math.PI) / 180
+        const dx = Math.cos(radians) * spark.speed * 60
+        const dy = Math.sin(radians) * spark.speed * 60
+        return (
+          <motion.span
+            key={i}
+            aria-hidden="true"
+            initial={{ x: 0, y: 0, opacity: 0, scale: 1 }}
+            animate={{
+              x: [0, dx * 0.5, dx],
+              y: [0, dy - 20, dy + 10],
+              opacity: [0, 0.9, 0],
+              scale: [1, 0.8, 0.3],
+            }}
+            transition={{
+              duration: 0.7 + spark.speed * 0.3,
+              repeat: Infinity,
+              ease: 'easeOut',
+              delay: spark.delay,
+              repeatDelay: 0.3,
+            }}
+            style={{
+              position: 'absolute',
+              left: '50%',
+              top: '30%',
+              width: spark.size,
+              height: spark.size,
+              borderRadius: '50%',
+              background: spark.color,
+              boxShadow: `0 0 8px ${spark.color}, 0 0 16px ${accentColor}60`,
+              pointerEvents: 'none',
+              zIndex: 8,
+            }}
+          />
+        )
+      })}
+    </>
+  )
+}
+
+// ── 煙氣粒子 ──
+function FurnaceSmoke({ intensity }: { intensity: number }) {
+  if (intensity < 0.2) return null
+  return (
+    <>
+      {Array.from({ length: 3 }).map((_, i) => (
+        <motion.div
+          key={i}
+          aria-hidden="true"
+          initial={{ y: 0, opacity: 0, x: 0 }}
+          animate={{
+            y: [0, -18, -38],
+            opacity: [0, intensity * 0.2, 0],
+            x: [0, (i - 1) * 4, (i - 1) * 6],
+          }}
+          transition={{ duration: 2.5 + i * 0.5, repeat: Infinity, ease: 'easeOut', delay: i * 0.6 }}
+          style={{
+            position: 'absolute',
+            left: `${44 + i * 4}%`,
+            top: '-6%',
+            width: 8 + i * 2,
+            height: 8 + i * 2,
+            borderRadius: '50%',
+            background: 'rgba(180,160,140,0.12)',
+            filter: 'blur(3px)',
+            pointerEvents: 'none',
+          }}
+        />
+      ))}
+    </>
+  )
+}
+
 export default function AIGenerationWaitingScene({
   stage,
   progress,
@@ -449,6 +662,16 @@ export default function AIGenerationWaitingScene({
         `${tAny('aiHoverLineImpact')}${tAny(`${insightPrefix}Impact`)}`,
       ]
     : []
+
+  // ── 情境任務卡片 ──
+  const contextTasks = TASKS_BY_CONTEXT[visual.workflowContext]
+  const systemLabelKey = visual.workflowContext === 'fast' ? 'aiSystemLabelFast' : visual.workflowContext === 'coder' ? 'aiSystemLabelCoder' : 'aiSystemLabel'
+  const waitingTitleKey = visual.workflowContext === 'fast' ? 'aiWaitingTitleFast' : visual.workflowContext === 'coder' ? 'aiWaitingTitleCoder' : 'aiWaitingTitle'
+
+  // 鐵鎚是否敲打中
+  const hammerActive = HAMMER_CYCLE[visual.forgeAction] > 0
+  const hammerDuration = HAMMER_CYCLE[visual.forgeAction] || 1.2
+  const furnaceGlowIntensity = visual.forgeAction === 'heating' ? 0.9 : visual.forgeAction === 'polishing' ? 0.2 : 0.5
 
   useEffect(() => {
     if (typeof window === 'undefined') return
@@ -529,6 +752,23 @@ export default function AIGenerationWaitingScene({
     switchHoverCard(slotId)
   }
 
+  // ── Coder 情境指標 ──
+  const coderMetrics = visual.workflowContext === 'coder' ? [
+    { key: 'aiMetricActions', value: `${clamp(Math.round(visual.progressPercent * 0.08), 0, 8)}` },
+    { key: 'aiMetricScenarios', value: `${clamp(Math.round(visual.progressPercent * 0.15), 0, 15)}` },
+    { key: 'aiMetricServerActions', value: `${clamp(Math.round(visual.progressPercent * 0.06), 0, 6)}` },
+    { key: 'aiMetricPassRate', value: `${clamp(Math.round(visual.progressPercent * 0.92), 0, 99)}%` },
+  ] : null
+
+  const defaultMetrics = [
+    { key: 'aiMetricModules', value: `${visual.assembledModules}/${visual.totalModules}` },
+    { key: 'aiMetricStability', value: `${visual.stabilityScore}%` },
+    { key: 'aiMetricStyles', value: `${visual.styleInjectionCount}` },
+    { key: 'aiMetricInteractions', value: `${visual.interactionComponents}` },
+  ]
+
+  const metrics = coderMetrics || defaultMetrics
+
   return (
     <div
       style={{
@@ -551,14 +791,15 @@ export default function AIGenerationWaitingScene({
         }}
       />
 
+      {/* ── 頂部標題（分情境） ── */}
       <div style={{ position: 'relative', zIndex: 2, padding: '14px 18px 10px 18px', borderBottom: '1px solid rgba(184, 140, 102, 0.14)' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}>
           <div>
             <p style={{ margin: 0, fontSize: 11, color: 'rgba(242, 196, 151, 0.88)', letterSpacing: '0.12em', textTransform: 'uppercase', fontFamily: 'var(--font-mono)' }}>
-              {tAny('aiSystemLabel')}
+              {tAny(systemLabelKey)}
             </p>
             <h3 style={{ margin: '4px 0 0 0', fontSize: 18, fontWeight: 600, color: '#f6efe6' }}>
-              {tAny('aiWaitingTitle')}
+              {tAny(waitingTitleKey)}
             </h3>
             <p style={{ margin: '4px 0 0 0', fontSize: 12, color: 'rgba(231, 205, 180, 0.9)' }}>
               {tAny(visual.sceneActionKey)}
@@ -576,6 +817,7 @@ export default function AIGenerationWaitingScene({
         </div>
       </div>
 
+      {/* ── 主內容：工作台 + 任務卡 ── */}
       <div style={{ position: 'relative', zIndex: 2, display: 'grid', gridTemplateColumns: '1fr 300px', gap: 14, flex: 1, minHeight: 0, padding: '12px 16px 10px 16px' }}>
         <div
           ref={stageRef}
@@ -598,6 +840,7 @@ export default function AIGenerationWaitingScene({
             }}
           />
 
+          {/* ── 三層梯形工作台 ── */}
           <div
             aria-hidden="true"
             style={{
@@ -638,6 +881,102 @@ export default function AIGenerationWaitingScene({
             }}
           />
 
+          {/* ── 熔爐（左側） ── */}
+          <div style={{ position: 'absolute', left: '3%', top: '18%', width: '10%', zIndex: 6 }}>
+            <motion.div
+              animate={reduceMotion ? {} : { filter: [`brightness(${0.9 + furnaceGlowIntensity * 0.2})`, `brightness(${1 + furnaceGlowIntensity * 0.3})`, `brightness(${0.9 + furnaceGlowIntensity * 0.2})`] }}
+              transition={{ duration: 2, repeat: Infinity, ease: 'easeInOut' }}
+            >
+              <FurnaceSvg glowIntensity={furnaceGlowIntensity} />
+            </motion.div>
+            <FurnaceSmoke intensity={furnaceGlowIntensity} />
+            {/* 熔爐地面光暈 */}
+            <div
+              aria-hidden="true"
+              style={{
+                position: 'absolute',
+                left: '-20%',
+                right: '-20%',
+                bottom: '-8%',
+                height: '30%',
+                background: `radial-gradient(ellipse, rgba(255,140,40,${furnaceGlowIntensity * 0.12}) 0%, transparent 70%)`,
+                pointerEvents: 'none',
+              }}
+            />
+          </div>
+
+          {/* ── 鐵砧（底部中央） ── */}
+          <div style={{ position: 'absolute', left: '50%', bottom: '10%', width: '18%', transform: 'translateX(-50%)', zIndex: 6 }}>
+            <AnvilSvg color={phaseColor} />
+            {/* 砧面反光隨溫度變化 */}
+            <motion.div
+              aria-hidden="true"
+              animate={reduceMotion ? {} : { opacity: [0.04, 0.08 + furnaceGlowIntensity * 0.06, 0.04] }}
+              transition={{ duration: 3, repeat: Infinity, ease: 'easeInOut' }}
+              style={{
+                position: 'absolute',
+                left: '20%',
+                right: '12%',
+                top: '30%',
+                height: '6%',
+                background: `linear-gradient(90deg, transparent, ${phaseColor}40, transparent)`,
+                pointerEvents: 'none',
+              }}
+            />
+          </div>
+
+          {/* ── 鐵鎚（鐵砧上方，擺動動畫） ── */}
+          <div style={{ position: 'absolute', left: '50%', bottom: '22%', width: '6%', transform: 'translateX(-50%)', transformOrigin: 'top center', zIndex: 7 }}>
+            <motion.div
+              animate={
+                reduceMotion
+                  ? {}
+                  : hammerActive
+                    ? { rotate: ['-25deg', '8deg', '-25deg'], y: [0, 6, 0] }
+                    : { rotate: '-30deg', y: 0 }
+              }
+              transition={
+                hammerActive
+                  ? { duration: hammerDuration, repeat: Infinity, ease: [0.36, 0, 0.66, 1], times: [0, 0.55, 1] }
+                  : { duration: 0.6, ease: 'easeOut' }
+              }
+              style={{ transformOrigin: 'top center' }}
+            >
+              <HammerSvg />
+            </motion.div>
+          </div>
+
+          {/* ── 敲擊衝擊波紋 ── */}
+          {!reduceMotion && hammerActive && (
+            <motion.div
+              aria-hidden="true"
+              initial={{ scale: 0.3, opacity: 0 }}
+              animate={{ scale: [0.3, 2.2], opacity: [0.35, 0] }}
+              transition={{ duration: hammerDuration * 0.6, repeat: Infinity, ease: 'easeOut', delay: hammerDuration * 0.5 }}
+              style={{
+                position: 'absolute',
+                left: '50%',
+                bottom: '18%',
+                width: 40,
+                height: 16,
+                marginLeft: -20,
+                borderRadius: '50%',
+                border: `1px solid ${phaseColor}60`,
+                background: `radial-gradient(ellipse, ${phaseColor}20, transparent 70%)`,
+                pointerEvents: 'none',
+                zIndex: 7,
+              }}
+            />
+          )}
+
+          {/* ── 火花爆發（從鐵砧位置） ── */}
+          {!reduceMotion && (
+            <div style={{ position: 'absolute', left: '50%', bottom: '18%', width: 0, height: 0, zIndex: 8 }}>
+              <ForgeSparkBurst accentColor={phaseColor} active={hammerActive} />
+            </div>
+          )}
+
+          {/* 工作台裝飾線 */}
           {WORKTABLE_GUIDES.map((guide, index) => (
             <div
               key={index}
@@ -655,10 +994,11 @@ export default function AIGenerationWaitingScene({
             />
           ))}
 
+          {/* heating 掃描線（弱化版，熔爐已表達加熱） */}
           <motion.div
             aria-hidden="true"
             initial={false}
-            animate={reduceMotion ? { opacity: 0.3 } : { opacity: [0.16, 0.34, 0.16], x: ['-2%', '3%', '-2%'] }}
+            animate={reduceMotion ? { opacity: 0.3 } : { opacity: [0.1, 0.22, 0.1], x: ['-2%', '3%', '-2%'] }}
             transition={{ duration: 2.8, repeat: Infinity, ease: 'easeInOut' }}
             style={{
               position: 'absolute',
@@ -667,12 +1007,13 @@ export default function AIGenerationWaitingScene({
               width: '28%',
               height: 3,
               borderRadius: 999,
-              background: `linear-gradient(90deg, transparent 0%, ${phaseColor}ae 50%, transparent 100%)`,
-              boxShadow: `0 0 8px ${phaseColor}20`,
-              opacity: visual.forgeAction === 'heating' ? 1 : 0.18,
+              background: `linear-gradient(90deg, transparent 0%, ${phaseColor}80 50%, transparent 100%)`,
+              boxShadow: `0 0 8px ${phaseColor}14`,
+              opacity: visual.forgeAction === 'heating' ? 1 : 0.12,
             }}
           />
 
+          {/* ── Module Plates ── */}
           <div style={{ position: 'absolute', left: '12%', right: '12%', top: '23%', bottom: '22%' }}>
             {FORGE_MODULES.map((module, index) => {
               const isVisible = module.appearAt <= visual.taskIndex + 1
@@ -768,104 +1109,62 @@ export default function AIGenerationWaitingScene({
                   />
                   {renderModuleBody(module, phaseColor, finishState)}
 
-                  {!reduceMotion && isActive && (
-                    <>
-                      {visual.forgeAction === 'heating' && (
-                        <motion.div
-                          aria-hidden="true"
-                          initial={{ x: '-20%', opacity: 0.12 }}
-                          animate={{ x: ['-12%', '76%'], opacity: [0.12, 0.3, 0.12] }}
-                          transition={{ duration: 1.7, repeat: Infinity, ease: 'easeInOut', delay: index * 0.08 }}
-                          style={{
-                            position: 'absolute',
-                            top: '12%',
-                            width: '20%',
-                            height: 3,
-                            borderRadius: 999,
-                            background: `linear-gradient(90deg, transparent 0%, ${phaseColor}b2 50%, transparent 100%)`,
-                            boxShadow: `0 0 6px ${phaseColor}24`,
-                            pointerEvents: 'none',
-                          }}
-                        />
-                      )}
+                  {/* ── 被鐵鎚敲打的模組震動效果 ── */}
+                  {!reduceMotion && isActive && hammerActive && (
+                    <motion.div
+                      aria-hidden="true"
+                      initial={{ opacity: 0 }}
+                      animate={{ opacity: [0, 0.5, 0] }}
+                      transition={{ duration: hammerDuration * 0.3, repeat: Infinity, ease: 'easeOut', delay: hammerDuration * 0.5 }}
+                      style={{
+                        position: 'absolute',
+                        inset: -1,
+                        borderRadius: module.kind === 'cta' ? 999 : 18,
+                        border: `1px solid ${phaseColor}80`,
+                        boxShadow: `0 0 12px ${phaseColor}30`,
+                        pointerEvents: 'none',
+                      }}
+                    />
+                  )}
 
-                      {(visual.forgeAction === 'shaping' || visual.forgeAction === 'trimming') && (
-                        <motion.div
-                          aria-hidden="true"
-                          initial={{ opacity: 0.06, y: -10 }}
-                          animate={{ opacity: [0.06, 0.22, 0.06], y: [-10, 2, -10] }}
-                          transition={{ duration: 1.35, repeat: Infinity, ease: 'easeInOut', delay: index * 0.06 }}
-                          style={{
-                            position: 'absolute',
-                            left: '16%',
-                            right: '16%',
-                            top: '-12%',
-                            height: '36%',
-                            background: 'linear-gradient(180deg, rgba(0,0,0,0.34) 0%, rgba(0,0,0,0.14) 38%, transparent 100%)',
-                            pointerEvents: 'none',
-                          }}
-                        />
-                      )}
+                  {/* polishing 光澤掃過 */}
+                  {!reduceMotion && isActive && visual.forgeAction === 'polishing' && (
+                    <motion.div
+                      aria-hidden="true"
+                      initial={{ x: '-18%', opacity: 0.08 }}
+                      animate={{ x: ['-8%', '84%'], opacity: [0.08, 0.48, 0.12] }}
+                      transition={{ duration: 2.3, repeat: Infinity, ease: 'easeInOut', delay: index * 0.06 }}
+                      style={{
+                        position: 'absolute',
+                        top: '9%',
+                        width: '18%',
+                        height: 2,
+                        borderRadius: 999,
+                        background: 'linear-gradient(90deg, transparent 0%, rgba(255,244,232,0.72) 50%, transparent 100%)',
+                        boxShadow: '0 0 8px rgba(255,244,232,0.12)',
+                        pointerEvents: 'none',
+                      }}
+                    />
+                  )}
 
-                      {(visual.forgeAction === 'polishing' || visual.forgeAction === 'heating') && (
-                        <motion.div
-                          aria-hidden="true"
-                          initial={{ x: '-18%', opacity: 0.08 }}
-                          animate={{ x: ['-8%', '84%'], opacity: visual.forgeAction === 'polishing' ? [0.08, 0.48, 0.12] : [0.08, 0.2, 0.08] }}
-                          transition={{ duration: visual.forgeAction === 'polishing' ? 2.3 : 1.9, repeat: Infinity, ease: 'easeInOut', delay: index * 0.06 }}
-                          style={{
-                            position: 'absolute',
-                            top: visual.forgeAction === 'polishing' ? '9%' : '13%',
-                            width: visual.forgeAction === 'polishing' ? '18%' : '10%',
-                            height: 2,
-                            borderRadius: 999,
-                            background: `linear-gradient(90deg, transparent 0%, ${visual.forgeAction === 'polishing' ? 'rgba(255,244,232,0.72)' : `${phaseColor}7a`} 50%, transparent 100%)`,
-                            boxShadow: visual.forgeAction === 'polishing' ? '0 0 8px rgba(255,244,232,0.12)' : `0 0 6px ${phaseColor}20`,
-                            pointerEvents: 'none',
-                          }}
-                        />
-                      )}
-
-                      {(visual.forgeAction === 'striking' || visual.forgeAction === 'trimming') && (
-                        <motion.div
-                          aria-hidden="true"
-                          initial={{ scale: 0.42, opacity: 0.16 }}
-                          animate={{ scale: [0.52, 1.6], opacity: [0.22, 0] }}
-                          transition={{ duration: 1.05, repeat: Infinity, ease: 'easeOut', delay: 0.18 + index * 0.08 }}
-                          style={{
-                            position: 'absolute',
-                            left: '18%',
-                            top: '18%',
-                            width: 22,
-                            height: 22,
-                            borderRadius: '50%',
-                            background: `radial-gradient(circle, rgba(255,236,212,0.88) 0%, ${phaseColor}64 42%, transparent 72%)`,
-                            pointerEvents: 'none',
-                          }}
-                        />
-                      )}
-
-                      {Array.from({ length: visual.forgeAction === 'striking' ? 3 : visual.forgeAction === 'trimming' ? 2 : 0 }).map((_, sparkIndex) => (
-                        <motion.span
-                          key={sparkIndex}
-                          aria-hidden="true"
-                          initial={{ x: 0, y: 0, opacity: 0 }}
-                          animate={{ x: [0, 5 - sparkIndex * 2], y: [0, -16 - sparkIndex * 5], opacity: [0, 0.58, 0] }}
-                          transition={{ duration: 0.8, repeat: Infinity, ease: 'easeOut', delay: index * 0.08 + sparkIndex * 0.16 }}
-                          style={{
-                            position: 'absolute',
-                            right: `${16 + sparkIndex * 9}%`,
-                            top: `${18 + sparkIndex * 6}%`,
-                            width: 3,
-                            height: 3,
-                            borderRadius: '50%',
-                            background: sparkIndex % 2 === 0 ? '#ffd6a1' : phaseColor,
-                            boxShadow: `0 0 6px ${phaseColor}`,
-                            pointerEvents: 'none',
-                          }}
-                        />
-                      ))}
-                    </>
+                  {/* heating 微弱掃描 */}
+                  {!reduceMotion && isActive && visual.forgeAction === 'heating' && (
+                    <motion.div
+                      aria-hidden="true"
+                      initial={{ x: '-20%', opacity: 0.08 }}
+                      animate={{ x: ['-12%', '76%'], opacity: [0.08, 0.18, 0.08] }}
+                      transition={{ duration: 1.9, repeat: Infinity, ease: 'easeInOut', delay: index * 0.08 }}
+                      style={{
+                        position: 'absolute',
+                        top: '13%',
+                        width: '10%',
+                        height: 3,
+                        borderRadius: 999,
+                        background: `linear-gradient(90deg, transparent 0%, ${phaseColor}7a 50%, transparent 100%)`,
+                        boxShadow: `0 0 6px ${phaseColor}20`,
+                        pointerEvents: 'none',
+                      }}
+                    />
                   )}
 
                   <div
@@ -917,6 +1216,7 @@ export default function AIGenerationWaitingScene({
               />
             )}
 
+            {/* Hover card */}
             <motion.div
               initial={false}
               animate={{ opacity: hoverCardPosition ? 1 : 0, scale: hoverCardPosition ? 1 : 0.96, y: hoverCardPosition ? 0 : 8 }}
@@ -983,6 +1283,7 @@ export default function AIGenerationWaitingScene({
             </motion.div>
           </div>
 
+          {/* 工作台底部厚度 */}
           <div
             aria-hidden="true"
             style={{
@@ -1012,12 +1313,17 @@ export default function AIGenerationWaitingScene({
           </div>
         </div>
 
+        {/* ── 右側任務卡片（分情境） ── */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10, minHeight: 0, overflow: 'auto', paddingRight: 4 }}>
-          {TASKS.map((task, index) => {
-            const virtualTaskIndex = visual.phase === 'quality' && visual.progressPercent > 95 ? 5 : visual.taskIndex
+          {contextTasks.map((task, index) => {
+            const totalTasks = contextTasks.length
+            const virtualTaskIndex = visual.phase === 'quality' && visual.progressPercent > 95 ? totalTasks - 1 : Math.min(visual.taskIndex, totalTasks - 1)
             const status = index < virtualTaskIndex ? 'done' : index === virtualTaskIndex ? 'active' : 'pending'
             const statusColor = status === 'done' ? '#f6c35f' : status === 'active' ? phaseColor : 'rgba(177, 153, 132, 0.72)'
-            const statusLabel = status === 'done' ? tAny('aiStateCompleted') : status === 'active' ? tAny('aiStateActive') : tAny('aiStatePending')
+            const doneLabel = visual.workflowContext === 'coder' ? tAny('aiStateCoderCompleted') : tAny('aiStateCompleted')
+            const activeLabel = visual.workflowContext === 'coder' ? tAny('aiStateCoderActive') : tAny('aiStateActive')
+            const pendingLabel = visual.workflowContext === 'coder' ? tAny('aiStateCoderPending') : tAny('aiStatePending')
+            const statusLabel = status === 'done' ? doneLabel : status === 'active' ? activeLabel : pendingLabel
 
             return (
               <motion.div
@@ -1052,14 +1358,10 @@ export default function AIGenerationWaitingScene({
         </div>
       </div>
 
+      {/* ── 底部指標（分情境） ── */}
       <div style={{ position: 'relative', zIndex: 2, padding: '0 16px 14px 16px' }}>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, minmax(0, 1fr))', gap: 8 }}>
-          {[
-            { key: 'aiMetricModules', value: `${visual.assembledModules}/${visual.totalModules}` },
-            { key: 'aiMetricStability', value: `${visual.stabilityScore}%` },
-            { key: 'aiMetricStyles', value: `${visual.styleInjectionCount}` },
-            { key: 'aiMetricInteractions', value: `${visual.interactionComponents}` },
-          ].map((metric) => (
+          {metrics.map((metric) => (
             <div key={metric.key} style={{ borderRadius: 14, border: '1px solid rgba(194, 167, 142, 0.16)', background: 'linear-gradient(180deg, rgba(33, 26, 23, 0.88) 0%, rgba(17, 14, 13, 0.94) 100%)', boxShadow: 'inset 0 0 0 1px rgba(255,255,255,0.03)', padding: '10px 12px' }}>
               <p style={{ margin: 0, fontSize: 11, color: 'rgba(227, 191, 156, 0.86)' }}>{tAny(metric.key)}</p>
               <p style={{ margin: '4px 0 0 0', fontSize: 15, fontFamily: 'var(--font-mono)', color: '#f5efe7' }}>{metric.value}</p>
