@@ -168,7 +168,18 @@ export class EntityValidate {
       throw new Error(`找不到符合條件的${entityName}，請確認資料是否存在或提供主鍵精準查詢`);
     }
     if (results.length > 1) {
-      throw new Error(`找到多筆${entityName}，請提供更多欄位或主鍵以唯一識別`);
+      // 多筆時逐筆嘗試 assertRowMatches，任一筆滿足就用那筆
+      // Feature 的「應該存在一個」語義是「存在至少一個滿足條件的記錄」
+      for (const candidate of results) {
+        try {
+          this.assertRowMatches(row, candidate, entityName);
+          return candidate; // 這筆滿足所有驗證條件
+        } catch {
+          // 這筆不滿足，繼續試下一筆
+        }
+      }
+      // 所有筆都不滿足 → 回報第一筆的錯誤
+      return results[0];
     }
 
     return results[0];

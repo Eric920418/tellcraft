@@ -415,6 +415,7 @@ Feature 註解：`# Action: actionName` + `# [METHOD] /path` + `# Summary: xxx`
 - **WebContainer preload 後禁止 `container.mount()`**：preloader 預裝 BASE_DEPS 到 node_modules，之後 `useWebContainer` hook 用 `writeFilesToContainer()` 逐檔寫入（不用 `mount()`）。`mount()` 會清除整個 fs 包括 node_modules。`restart()` 例外（用戶觸發的重啟允許 mount + 全量重裝）。`preloadPromise` 是 module-level，hook 自動偵測不需 prop drilling
 - **生成期間禁止渲染 WebContainer**：`ChatPreviewPanel` 在 UIUX pipeline（`uiux_pipeline_progress`/`uiux_structure_generating`/...）和 Coder（`coder_generating`/`coder_testing`）生成期間直接 early return `AIGenerationWaitingScene`，不掛載 `WebContainerPreviewComponent`。只有 fast build 模式的 streaming preview 才即時渲染。`handleUiuxCodeGenerating` 回覆用 `stage: 'uiux_pipeline_progress'`（不是 `'info'`），避免 overlay 偵測失效
 - **WebContainer 路由衝突去重**：`buildWebContainerFiles()` 對 pages 和 apiRoutes 做 `deduplicateRouteConflicts()`，strip route groups `(groupName)/` 後按真實路由路徑去重（後者覆蓋前者），防止 Next.js "two parallel pages that resolve to the same path" 編譯錯誤
+- **WebContainer 增量寫入必須統一處理**：`WebContainerPreview.tsx` 的 full write 和 incremental write 必須都經過 `deduplicateRouteConflicts` + `stripRouteGroups` + `sanitizeFileContent` + `injectEditBridge`。`prevProcessedRef` 存的是處理後的 `Record<string, string>`（path→content），diff 基於處理後的內容。漏掉任何一步會導致：(1) route group 路徑不匹配 → 寫到錯路徑 → HMR 不觸發，(2) 未 sanitize → framer-motion/缺 use client → build error → 預覽卡在舊版
 
 ## 核心原則
 

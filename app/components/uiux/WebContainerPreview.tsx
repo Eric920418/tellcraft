@@ -6,7 +6,6 @@ import type { WCStatus } from '@/app/hooks/useWebContainer'
 import {
   buildWebContainerFiles,
   buildSkeletonFiles,
-  diffFiles,
   deduplicateRouteConflicts,
   stripRouteGroups,
   injectEditBridge,
@@ -198,7 +197,7 @@ export default function WebContainerPreview({
   const [supported] = useState(() => isWebContainerSupported())
   const [progressDetail, setProgressDetail] = useState<string>()
   const iframeRef = useRef<HTMLIFrameElement | null>(null)
-  const prevFilesRef = useRef<GeneratedFile[]>([])
+  const prevProcessedRef = useRef<Record<string, string>>({})
   const hasFullMountRef = useRef(false)
 
   // ── Build initial files for the hook ──
@@ -262,6 +261,7 @@ export default function WebContainerPreview({
   }, [neonConnectionString, status, pages, components, styles, tailwindConfig, serverActions, apiRoutes, dbLib, restart])
 
   // ── Incremental file updates (streaming / iteration) ──
+  // 統一處理函數：dedup + stripRouteGroups + sanitize + editBridge
   const allFiles = useMemo(() => [
     ...pages, ...components,
     ...(serverActions || []),
@@ -274,46 +274,43 @@ export default function WebContainerPreview({
     if (status !== 'ready') return
     if (allFiles.length === 0) return
 
-    if (!hasFullMountRef.current) {
-      // 第一次 ready：完整寫入所有檔案（initialFiles 可能用了 skeleton 或不完整的 capture）
-      hasFullMountRef.current = true
-      // pages + components 合併去重 + strip route groups
-      const dedupedAll = deduplicateRouteConflicts([...pages, ...components])
-      const flatFiles: Record<string, string> = {}
-      for (const f of [...dedupedAll, ...(serverActions || []), ...(apiRoutes || []), ...(dbLib || [])]) {
-        const p = stripRouteGroups(f.path.startsWith('/') ? f.path.slice(1) : f.path)
-        let content = sanitizeFileContent(p, f.content)
-        // layout 必須注入 edit-bridge Script tag，否則編輯模式無法運作
-        if (p === 'app/layout.tsx' || p.endsWith('/layout.tsx')) {
-          content = injectEditBridge(content)
-        }
-        flatFiles[p] = content
+    // 統一處理：dedup + stripRouteGroups + sanitizeFileContent + injectEditBridge
+    const dedupedAll = deduplicateRouteConflicts([...pages, ...components])
+    const processed: Record<string, string> = {}
+    for (const f of [...dedupedAll, ...(serverActions || []), ...(apiRoutes || []), ...(dbLib || [])]) {
+      const p = stripRouteGroups(f.path.startsWith('/') ? f.path.slice(1) : f.path)
+      let content = sanitizeFileContent(p, f.content)
+      if (p === 'app/layout.tsx' || p.endsWith('/layout.tsx')) {
+        content = injectEditBridge(content)
       }
-      if (styles) flatFiles['app/globals.css'] = prepareCss(styles, !!tailwindConfig)
-      if (tailwindConfig) flatFiles['tailwind.config.ts'] = tailwindConfig
-      writeFiles(flatFiles).catch(err => console.error('[WC] Full write failed:', err))
-      prevFilesRef.current = allFiles
+      processed[p] = content
+    }
+    if (styles) processed['app/globals.css'] = prepareCss(styles, !!tailwindConfig)
+    if (tailwindConfig) processed['tailwind.config.ts'] = tailwindConfig
+
+    if (!hasFullMountRef.current) {
+      // 第一次 ready：完整寫入所有檔案
+      hasFullMountRef.current = true
+      writeFiles(processed).catch(err => console.error('[WC] Full write failed:', err))
+      prevProcessedRef.current = processed
       return
     }
 
-    // 增量更新：diff 後只寫變化的檔案
-    const changes = diffFiles(prevFilesRef.current, allFiles)
-    const allChanges = { ...changes }
-
-    if (styles && prevFilesRef.current.length > 0) {
-      allChanges['app/globals.css'] = prepareCss(styles, !!tailwindConfig)
-    }
-    if (tailwindConfig && prevFilesRef.current.length > 0) {
-      allChanges['tailwind.config.ts'] = tailwindConfig
+    // 增量更新：diff processed content，只寫變化的檔案
+    const changes: Record<string, string> = {}
+    for (const [path, content] of Object.entries(processed)) {
+      if (prevProcessedRef.current[path] !== content) {
+        changes[path] = content
+      }
     }
 
-    if (Object.keys(allChanges).length > 0) {
-      writeFiles(allChanges).catch(err => {
+    if (Object.keys(changes).length > 0) {
+      writeFiles(changes).catch(err => {
         console.error('[WC] Incremental write failed:', err)
       })
     }
 
-    prevFilesRef.current = allFiles
+    prevProcessedRef.current = processed
   }, [allFiles, styles, tailwindConfig, status, writeFiles])
 
   // ── Edit Bridge: postMessage protocol (tc_*) ──
