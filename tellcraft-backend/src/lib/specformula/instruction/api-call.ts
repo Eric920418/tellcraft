@@ -113,6 +113,11 @@ export class ApiCall {
       const resolvedValue = this.resolver.resolveVariable(value);
       const actualValue = this.resolveValue(resolvedValue, this.timeFormat);
 
+      // Debug: 追蹤 $Variable 解析失敗
+      if (actualValue == null && value && value.trim().startsWith('$')) {
+        console.warn(`[ApiCall] VAR 解析為 null: header=${cleanHeader}, value=${value}, resolved=${String(resolvedValue)}`);
+      }
+
       if (columnInfo.prefix) {
         switch (columnInfo.prefix) {
           case 'P': if (actualValue != null) pathParams.set(columnInfo.name, actualValue); break;

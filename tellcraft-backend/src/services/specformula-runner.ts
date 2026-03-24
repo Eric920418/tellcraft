@@ -741,7 +741,9 @@ export async function autoHashPasswords(
         // 不是 bcrypt hash → 嘗試用 testPasswordMap 找到真實密碼來雜湊
         let passwordToHash = val
         if (emailHeader && testPasswordMap && testPasswordMap.size > 0) {
-          const email = row[emailHeader]
+          let email = row[emailHeader]
+          // 剝除引號（entity_setup DataTable raw 值可能帶引號）
+          if (email && email.startsWith('"') && email.endsWith('"')) email = email.slice(1, -1)
           if (email && testPasswordMap.has(email)) {
             passwordToHash = testPasswordMap.get(email)!
             logger.debug({ email, placeholder: val, realPassword: passwordToHash }, 'autoHashPasswords: 用真實測試密碼替換 placeholder')
@@ -1063,8 +1065,13 @@ function preExtractTestPasswords(
     if (nextMatched.instruction.instruction_type === 'skip') continue
 
     for (const row of step.dataTable.rows) {
-      const email = row[emailHeader]
-      const password = row[passwordHeader]
+      let email = row[emailHeader]
+      let password = row[passwordHeader]
+      // 剝除引號 — DataTable raw 值可能帶引號（如 "user@example.com"），
+      // 但 entity_setup 插入 DB 前 resolveVariable 會剝除引號，
+      // 所以 testPasswordMap 的 key 也需要剝除才能匹配
+      if (email && email.startsWith('"') && email.endsWith('"')) email = email.slice(1, -1)
+      if (password && password.startsWith('"') && password.endsWith('"')) password = password.slice(1, -1)
       if (email && password && !passwords.has(email)) {
         passwords.set(email, password)
       }
