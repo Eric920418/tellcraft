@@ -1116,6 +1116,13 @@ async function executeStep(
           resolvedDt.headers,
           resolvedDt.rows
         )
+        // Debug: log entity_setup 插入的 ID（追蹤 VAR 捕獲）
+        for (const row of resolvedDt.rows) {
+          const idVal = row['id'] || row['Id']
+          if (idVal) {
+            logger.debug({ entity: captures.entity, id: idVal, scenario: scenarioName }, 'entity_setup: inserted ID')
+          }
+        }
         break
       }
 
@@ -2065,6 +2072,7 @@ function generateTestServerCode(
       actionRoutes.push(`app.all('${apiPath}', async (req, res) => {
   try {
     const input = req.method === 'GET' ? req.query : req.body
+    console.log('[TestServer DEBUG] ${apiPath}', req.method, JSON.stringify(input).substring(0, 300))
     const result = await ${fnName}(input as any)
     // Array response（列表查詢）強制 200，不用 POST 預設的 201
     const status = Array.isArray(result) ? 200 : (result?.__status || ${statusCode})

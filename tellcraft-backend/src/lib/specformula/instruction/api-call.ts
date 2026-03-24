@@ -167,6 +167,8 @@ export class ApiCall {
       for (const [key, val] of bodyParams) {
         setJson(body, key, val);
       }
+      // Debug: 追蹤 api_call 發送的 request body
+      console.log(`[ApiCall DEBUG] ${method} ${url} body=${JSON.stringify(body).substring(0, 300)}`);
       requestBuilder.header('Content-Type', 'application/json');
       requestBuilder.body(JSON.stringify(body));
     }
