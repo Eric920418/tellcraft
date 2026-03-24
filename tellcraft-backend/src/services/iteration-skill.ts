@@ -489,6 +489,12 @@ ${enrichedFeedback}`
     const apiRoutes = coderFiles.filter(f => f.file_path.startsWith('app/api/')).map(f => ({ path: f.file_path, content: f.content, description: f.description || '' }))
     const dbLib = coderFiles.filter(f => f.file_path.startsWith('lib/')).map(f => ({ path: f.file_path, content: f.content, description: f.description || '' }))
 
+    // 查詢 Neon 連線字串，注入 WebContainer 預覽
+    const neonRow = pid ? await db.queryOne<{ neon_connection_string: string | null }>(
+      'SELECT neon_connection_string FROM projects WHERE id = $1', [pid]
+    ) : null
+    const neonConnectionString = neonRow?.neon_connection_string || undefined
+
     await sendMessage(conversationId, io, {
       content: iterMsg,
       stage: 'uiux_iteration_complete',
@@ -501,7 +507,7 @@ ${enrichedFeedback}`
           styles: updatedCode.styles,
           tailwindConfig,
           currentPhase: 'complete',
-          ...(coderFiles.length > 0 ? { serverActions, apiRoutes, dbLib, hasServerActions: true } : {}),
+          ...(coderFiles.length > 0 ? { serverActions, apiRoutes, dbLib, hasServerActions: true, neonConnectionString } : {}),
         } as Record<string, unknown>,
       },
       quickReplies,
@@ -599,6 +605,12 @@ export async function executeUndoIteration(input: {
     const undoApiRoutes = undoCoderFiles.filter(f => f.file_path.startsWith('app/api/')).map(f => ({ path: f.file_path, content: f.content, description: f.description || '' }))
     const undoDbLib = undoCoderFiles.filter(f => f.file_path.startsWith('lib/')).map(f => ({ path: f.file_path, content: f.content, description: f.description || '' }))
 
+    // 查詢 Neon 連線字串
+    const undoNeonRow = undoPid ? await db.queryOne<{ neon_connection_string: string | null }>(
+      'SELECT neon_connection_string FROM projects WHERE id = $1', [undoPid]
+    ) : null
+    const undoNeonConnStr = undoNeonRow?.neon_connection_string || undefined
+
     await sendMessage(conversationId, io, {
       content: `**已撤銷上一次修改。**\n\n預覽已恢復到修改前的版本。\n\n---\n\n輸入「**部署**」上線，或繼續提供修改建議。`,
       stage: 'uiux_iteration_complete',
@@ -611,7 +623,7 @@ export async function executeUndoIteration(input: {
           styles: state.uiuxGeneratedCode.styles,
           tailwindConfig,
           currentPhase: 'complete',
-          ...(undoCoderFiles.length > 0 ? { serverActions: undoServerActions, apiRoutes: undoApiRoutes, dbLib: undoDbLib, hasServerActions: true } : {}),
+          ...(undoCoderFiles.length > 0 ? { serverActions: undoServerActions, apiRoutes: undoApiRoutes, dbLib: undoDbLib, hasServerActions: true, neonConnectionString: undoNeonConnStr } : {}),
         } as Record<string, unknown>,
       },
       quickReplies: [
