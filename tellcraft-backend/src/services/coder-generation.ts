@@ -1036,16 +1036,25 @@ ${component.content}
 請改寫此組件，將 mock 數據替換為 Server Action 調用。路徑保持不變：${component.path}`
 }
 
+/**
+ * 大組件（>20KB）用 SEARCH/REPLACE diff 模式改寫，只輸出修改的部分。
+ * 小組件照舊全文改寫。
+ */
 export async function rewriteComponentForServerActions(
   component: GeneratedComponent,
   availableActions: { path: string; exports: string[] }[],
   actionImplementations?: { path: string; content: string }[],
   trackingContext?: { userId?: string; conversationId?: string }
 ): Promise<GeneratedComponent> {
+  const isLargeComponent = component.content.length > 20000 // > 20KB 用 diff 模式
+
+  if (isLargeComponent) {
+    return rewriteWithDiffMode(component, availableActions, actionImplementations, trackingContext)
+  }
+
   const systemPrompt = buildRewriteSystemPrompt()
   const userPrompt = buildRewriteUserPrompt(component, availableActions, actionImplementations)
 
-  // 根據組件大小動態設定 max_tokens（1 token ≈ 3 字元，改寫後通常比原始稍長）
   const estimatedTokens = Math.ceil(component.content.length / 3) + 2048
   const maxTokens = Math.max(8192, Math.min(estimatedTokens, 64000))
   const result = await callClaude(systemPrompt, userPrompt, { maxTokens }, trackingContext)
@@ -1068,6 +1077,139 @@ export async function rewriteComponentForServerActions(
   return {
     path: component.path,
     content: code,
+    description: component.description,
+  }
+}
+
+/**
+ * 大組件的 SEARCH/REPLACE diff 改寫模式。
+ * LLM 只輸出 mock 數據替換為 Server Action 的修改片段，不輸出整個檔案。
+ * 大幅減少 output tokens（68KB 組件 → ~3-5KB diff）。
+ */
+async function rewriteWithDiffMode(
+  component: GeneratedComponent,
+  availableActions: { path: string; exports: string[] }[],
+  actionImplementations?: { path: string; content: string }[],
+  trackingContext?: { userId?: string; conversationId?: string }
+): Promise<GeneratedComponent> {
+  const systemPrompt = buildRewriteSystemPrompt() + `
+
+## 重要：使用 SEARCH/REPLACE 格式輸出（大組件模式）
+此組件很大（${Math.round(component.content.length / 1024)}KB），不要輸出完整檔案。
+只輸出需要修改的部分，使用以下格式：
+
+<<<<<<< SEARCH
+需要被替換的原始代碼（精確匹配，包括空白和縮排）
+=======
+替換後的新代碼
+>>>>>>> REPLACE
+
+每個 SEARCH/REPLACE block 修改一處。可以有多個 block。
+SEARCH 部分必須精確匹配原始代碼（逐字元對應）。
+只修改 mock 數據相關的部分（import、useState 初始值、fetch/API 調用），保留所有 UI/動畫/樣式不變。
+
+典型修改：
+1. 新增 import：在檔案頂部 import Server Action
+2. 替換 useState 初始值：mock 陣列 → 空陣列 + useEffect fetch
+3. 替換 CRUD 操作：直接修改 state → 呼叫 Server Action`
+
+  const userPrompt = buildRewriteUserPrompt(component, availableActions, actionImplementations)
+
+  // diff 模式不需要很多 output tokens（只輸出修改部分）
+  const maxTokens = Math.min(16384, 64000)
+  const result = await callClaude(systemPrompt, userPrompt, { maxTokens }, trackingContext)
+
+  if (!result.success || !result.content) {
+    logger.warn({ path: component.path, error: result.error }, '大組件 diff 改寫失敗，保留原始版本')
+    return component
+  }
+
+  // 解析 SEARCH/REPLACE blocks
+  const BLOCK_REGEX = /<<<<<<< SEARCH\n([\s\S]*?)=======\n([\s\S]*?)>>>>>>> REPLACE/g
+  const blocks: Array<{ search: string; replace: string }> = []
+  let match: RegExpExecArray | null
+  while ((match = BLOCK_REGEX.exec(result.content)) !== null) {
+    blocks.push({ search: match[1], replace: match[2] })
+  }
+
+  if (blocks.length === 0) {
+    // LLM 沒有輸出 SEARCH/REPLACE 格式 → 嘗試當全文處理
+    const code = extractCodeFromResponse(result.content)
+    const openTags = (code.match(/<[A-Z]\w*/g) || []).length
+    const closeTags = (code.match(/<\/[A-Z]\w*>/g) || []).length
+    if (openTags > 0 && Math.abs(openTags - closeTags) > 2) {
+      logger.warn({ path: component.path, openTags, closeTags }, '大組件 fallback 全文模式也截斷，回退原始版本')
+      return component
+    }
+    return { path: component.path, content: code, description: component.description }
+  }
+
+  // 逐個 block 應用到原始代碼
+  let modifiedContent = component.content
+  let appliedCount = 0
+  let failedCount = 0
+
+  for (const block of blocks) {
+    const searchTrimmed = block.search.trim()
+    if (!searchTrimmed) continue
+
+    // 精確匹配
+    if (modifiedContent.includes(searchTrimmed)) {
+      modifiedContent = modifiedContent.replace(searchTrimmed, block.replace.trim())
+      appliedCount++
+    } else {
+      // 容錯：忽略前後空白差異
+      const fuzzySearch = searchTrimmed.split('\n').map(l => l.trim()).join('\n')
+      const fuzzyContent = modifiedContent.split('\n').map(l => l.trim()).join('\n')
+      if (fuzzyContent.includes(fuzzySearch)) {
+        // 找到原始代碼中的位置
+        const lines = modifiedContent.split('\n')
+        const searchLines = searchTrimmed.split('\n')
+        let startIdx = -1
+        for (let i = 0; i <= lines.length - searchLines.length; i++) {
+          let match = true
+          for (let j = 0; j < searchLines.length; j++) {
+            if (lines[i + j].trim() !== searchLines[j].trim()) {
+              match = false
+              break
+            }
+          }
+          if (match) {
+            startIdx = i
+            break
+          }
+        }
+        if (startIdx >= 0) {
+          const replaceLines = block.replace.trim().split('\n')
+          lines.splice(startIdx, searchLines.length, ...replaceLines)
+          modifiedContent = lines.join('\n')
+          appliedCount++
+        } else {
+          failedCount++
+        }
+      } else {
+        failedCount++
+      }
+    }
+  }
+
+  logger.info({
+    path: component.path,
+    totalBlocks: blocks.length,
+    applied: appliedCount,
+    failed: failedCount,
+    sizeBefore: component.content.length,
+    sizeAfter: modifiedContent.length,
+  }, '大組件 SEARCH/REPLACE diff 改寫完成')
+
+  if (appliedCount === 0) {
+    logger.warn({ path: component.path }, '所有 SEARCH/REPLACE block 都失敗，回退原始版本')
+    return component
+  }
+
+  return {
+    path: component.path,
+    content: modifiedContent,
     description: component.description,
   }
 }
