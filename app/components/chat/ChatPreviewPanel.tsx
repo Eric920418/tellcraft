@@ -31,6 +31,9 @@ export interface ChatPreviewPanelProps {
     tailwindConfig: string
     isStreaming: boolean
     neonConnectionString?: string
+    serverActions?: { path: string; content: string; description: string }[]
+    apiRoutes?: { path: string; content: string; description: string }[]
+    dbLib?: { path: string; content: string; description: string }[]
     phase: 'structure' | 'animation' | 'rwd'
   } | null
   codePreviewEditMode: boolean
@@ -227,7 +230,7 @@ export default function ChatPreviewPanel({
 
   // 使用穩定的預覽數據（避免每次 render 都搜索 messages + 建立新陣列）
   if (stablePreviewData) {
-    const { pages: pagesData, components: componentsData, styles: stylesData, tailwindConfig: tailwindConfigData, isStreaming, neonConnectionString } = stablePreviewData
+    const { pages: pagesData, components: componentsData, styles: stylesData, tailwindConfig: tailwindConfigData, isStreaming, neonConnectionString, serverActions, apiRoutes, dbLib } = stablePreviewData
     // 響應式渲染：容器寬度用於設備切換的外層限制
     const containerW = codePreviewContainerWidth > 0 ? codePreviewContainerWidth : 800
     const maxDeviceWidth = getDeviceWidth(codePreviewDevice)
@@ -413,6 +416,9 @@ export default function ChatPreviewPanel({
                   styles={stylesData}
                   tailwindConfig={tailwindConfigData}
                   neonConnectionString={neonConnectionString}
+                  serverActions={serverActions}
+                  apiRoutes={apiRoutes}
+                  dbLib={dbLib}
                   isStreaming={isStreaming}
                   editMode={codePreviewEditMode}
                   onSelectionChanged={handleCodePreviewSelectionChanged}

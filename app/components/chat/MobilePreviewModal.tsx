@@ -19,6 +19,10 @@ interface MobilePreviewModalProps {
     styles: string
     tailwindConfig: string
     isStreaming: boolean
+    neonConnectionString?: string
+    serverActions?: { path: string; content: string; description: string }[]
+    apiRoutes?: { path: string; content: string; description: string }[]
+    dbLib?: { path: string; content: string; description: string }[]
     phase: 'structure' | 'animation' | 'rwd'
   } | null
   onClose: () => void
@@ -84,6 +88,10 @@ export default function MobilePreviewModal({ show, stablePreviewData, onClose, o
                 components={stablePreviewData.components}
                 styles={stablePreviewData.styles}
                 tailwindConfig={stablePreviewData.tailwindConfig}
+                neonConnectionString={stablePreviewData.neonConnectionString}
+                serverActions={stablePreviewData.serverActions}
+                apiRoutes={stablePreviewData.apiRoutes}
+                dbLib={stablePreviewData.dbLib}
               />
             </div>
           </div>
