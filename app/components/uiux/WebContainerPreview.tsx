@@ -8,6 +8,7 @@ import {
   buildSkeletonFiles,
   diffFiles,
   deduplicateRouteConflicts,
+  stripRouteGroups,
   injectEditBridge,
   isWebContainerSupported,
   prepareCss,
@@ -276,11 +277,11 @@ export default function WebContainerPreview({
     if (!hasFullMountRef.current) {
       // 第一次 ready：完整寫入所有檔案（initialFiles 可能用了 skeleton 或不完整的 capture）
       hasFullMountRef.current = true
-      // pages + components 合併去重（舊 code_preview 可能把 page.tsx 放在 components 裡）
+      // pages + components 合併去重 + strip route groups
       const dedupedAll = deduplicateRouteConflicts([...pages, ...components])
       const flatFiles: Record<string, string> = {}
       for (const f of [...dedupedAll, ...(serverActions || []), ...(apiRoutes || []), ...(dbLib || [])]) {
-        const p = f.path.startsWith('/') ? f.path.slice(1) : f.path
+        const p = stripRouteGroups(f.path.startsWith('/') ? f.path.slice(1) : f.path)
         let content = sanitizeFileContent(p, f.content)
         // layout 必須注入 edit-bridge Script tag，否則編輯模式無法運作
         if (p === 'app/layout.tsx' || p.endsWith('/layout.tsx')) {

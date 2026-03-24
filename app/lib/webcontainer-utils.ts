@@ -915,17 +915,20 @@ export function buildSkeletonFiles(): FileSystemTree {
 }
 
 /**
- * Next.js 路由衝突去重：strip route groups `(groupName)` 取得真實路由路徑
- * 例如 `app/(auth)/login/page.tsx` 和 `app/login/page.tsx` 解析到同一路由 `/login`
- * 保留後者（覆蓋），防止 "two parallel pages that resolve to the same path" 錯誤
+ * Strip route groups from path: `app/(auth)/login/page.tsx` → `app/login/page.tsx`
+ */
+export function stripRouteGroups(filePath: string): string {
+  return filePath.replace(/\([^)]+\)\//g, '')
+}
+
+/**
+ * Next.js 路由衝突去重：strip route groups 後按真實路由路徑去重（後者覆蓋前者）
  */
 export function deduplicateRouteConflicts<T extends { path: string }>(files: T[]): T[] {
   const routeMap = new Map<string, T>()
   for (const f of files) {
-    const normalized = f.path
-      .replace(/^\//, '')                    // strip leading /
-      .replace(/\([^)]+\)\//g, '')           // strip route groups: (auth)/ → ''
-    routeMap.set(normalized, f)              // 後者覆蓋前者
+    const normalized = stripRouteGroups(f.path).replace(/^\//, '')
+    routeMap.set(normalized, f)
   }
   return Array.from(routeMap.values())
 }
@@ -969,12 +972,12 @@ export function buildWebContainerFiles(input: WebContainerFilesInput): FileSyste
   console.log('[WC] tailwindConfig present:', !!input.tailwindConfig, 'pages:', input.pages.length, 'components:', input.components.length)
   setFileInTree(tree, 'app/globals.css', processedCss)
 
-  // Pages + Components 合併後做路由衝突去重
-  // 舊的 code_preview 資料可能把 page.tsx 放在 components 陣列裡，必須一起去重
+  // Pages + Components：合併去重 + strip route groups（永遠不在 WebContainer 裡建立 route group 目錄）
   const allPageAndComp = [...input.pages, ...input.components]
   const dedupedAll = deduplicateRouteConflicts(allPageAndComp)
   for (const file of dedupedAll) {
-    const path = file.path.startsWith('/') ? file.path.slice(1) : file.path
+    // 關鍵：strip route groups from actual path，不只是去重
+    const path = stripRouteGroups(file.path.startsWith('/') ? file.path.slice(1) : file.path)
     let content = sanitizeFileContent(path, file.content)
 
     if (path === 'app/layout.tsx' || path.endsWith('/layout.tsx')) {
