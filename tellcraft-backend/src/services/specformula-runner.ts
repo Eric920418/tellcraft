@@ -278,8 +278,23 @@ export function maybeTransposeVerticalDataTable(
   raw: string[][]
 ): { headers: string[]; rows: Record<string, string>[] } | null {
   if (raw[0].length !== 2) return null
+  if (raw.length < 2) return null  // 只有 1 行不需要轉置
 
-  // 所有 2 欄 DataTable → 第一列當 headers，第二列當 values（單筆資料）
+  const VALID_HEADER = /^[A-Za-z_$>][A-Za-z0-9_.]*$|^[PQH]:/
+
+  // 先檢查第一行是否已經是合法的水平 header
+  // 如果第一行的兩個 cell 都是合法欄位名，且第二行有 $Variable 或具體值 → 保持水平格式
+  const firstRow = raw[0].map(c => (c || '').trim())
+  const secondRow = raw[1].map(c => (c || '').trim())
+  const firstRowAllValidHeaders = firstRow.every(h => VALID_HEADER.test(h))
+  const secondRowHasValues = secondRow.some(v => v.startsWith('$') || v.startsWith('<') || v.startsWith('>') || v === 'true' || v === 'false' || /^\d/.test(v) || v.startsWith('"'))
+
+  if (firstRowAllValidHeaders && secondRowHasValues) {
+    // 第一行是 header，第二行是 data → 水平格式，不轉置
+    return null
+  }
+
+  // 垂直格式轉置：第一列當 headers，第二列當 values
   const headers: string[] = []
   const row: Record<string, string> = {}
   for (const [key, value] of raw) {
@@ -288,9 +303,7 @@ export function maybeTransposeVerticalDataTable(
     row[k] = (value || '').trim()
   }
 
-  // 驗證：轉置後 header 必須是合法欄位名（ASCII 或 VAR 前綴）
-  // 如果 header 含中文（如 "買牛奶"），代表轉置方向錯了，放棄
-  const VALID_HEADER = /^[A-Za-z_$>][A-Za-z0-9_.]*$|^[PQH]:/
+  // 驗證：轉置後 header 必須是合法欄位名
   if (!headers.every(h => VALID_HEADER.test(h))) return null
 
   return { headers, rows: [row] }
