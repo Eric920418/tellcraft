@@ -1483,7 +1483,10 @@ async function executeScenario(
     if (stepResult.status === 'failed') {
       hasFailed = true
       result.status = 'failed'
-      result.error = stepResult.error
+      // 只記錄第一個失敗步驟的 error（根因），不被後續連鎖失敗覆蓋
+      if (!result.error) {
+        result.error = stepResult.error
+      }
     }
   }
 
@@ -2359,7 +2362,18 @@ export async function runRedGreenCycle(input: {
 
       const failedScenarios = result.scenarios
         .filter(s => s.status === 'failed')
-        .map(s => ({ scenarioName: s.scenarioName, ruleName: s.ruleName, error: s.error }))
+        .map(s => {
+          // 從步驟中提取所有失敗的 error（按順序，第一個是根因）
+          const stepErrors = s.steps
+            .filter(step => step.status === 'failed')
+            .map(step => `[${step.keyword}] ${step.error || 'unknown'}`)
+          return {
+            scenarioName: s.scenarioName,
+            ruleName: s.ruleName,
+            error: stepErrors[0] || s.error || 'unknown',
+            allErrors: stepErrors.length > 1 ? stepErrors.join('\n') : undefined,
+          }
+        })
 
       const fixedCode = await fixFailingAction(
         actionName,

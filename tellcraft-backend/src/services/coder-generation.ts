@@ -198,149 +198,218 @@ export function parseActionsYml(actionsYml: string): {
 // 3. LLM 生成純邏輯函數
 // ============================================================
 
-function buildActionSystemPrompt(): string {
-  return `你是一位 Next.js + PostgreSQL 後端工程師。你的任務是根據 Action 定義實作一個純邏輯函數。
+// ============================================================
+// Handler 化 System Prompt（按操作類型拆分，只注入相關的 handler）
+// ============================================================
+
+const BASE_PROMPT = `你是一位 Next.js + PostgreSQL 後端工程師。你的任務是根據 Action 定義和 BDD Feature 規格實作一個純邏輯函數。
 
 ## 技術約束
-- 使用 @neondatabase/serverless 的 neon SQL tagged template
-- import { sql } from '@/lib/db'
-- 函數必須 export + async
+- import { sql } from '@/lib/db'（@neondatabase/serverless 的 neon SQL tagged template）
+- 函數必須 export + async，回傳型別明確
 - 錯誤處理：驗證失敗時 throw new Error(中文錯誤描述)
-- 回傳型別明確（不用 any）
-- SQL 查詢必須使用 parameterized query（$1, $2...），嚴禁字串拼接 SQL
-- 所有日期用 ISO 8601 字串
-- ID 欄位使用 UUID。如果輸入有 ID 值（如 input.episodeId）→ 用它；沒有才用 gen_random_uuid()
-- 密碼雜湊用 bcryptjs（import bcrypt from 'bcryptjs'），JWT 用 jsonwebtoken
-- 不要做認證/登入檢查（如檢查 userId 是否存在、要求 token）。呼叫者（Server Action）已處理認證並注入 userId，函數只做業務邏輯
-- 前置（狀態）規則中的「使用者必須已登入」由測試框架的 UID actor 處理，函數內不需驗證
-- 如果 schema 有 email_verified_at 欄位但專案沒有實際的郵件發送機制（如 SendGrid/Resend 等第三方服務），則：註冊時 email_verified_at 設為 NOW()（自動通過驗證），登入時不檢查 email_verified_at。這確保應用開箱即用，未來接入真實郵件服務時再改為 NULL + 驗證流程
-- 如果測試傳 email 作為使用者識別：先用 input.userId（如果存在），否則用 email 查 users 表取得 userId。不要把 userId 當必要輸入參數驗證
-- 登出操作：直接 return { __status: 200, message: '登出成功' }。不需驗證 token/session 是否有效
+- SQL 必須用 parameterized query（$1, $2...），嚴禁字串拼接
+- ID 欄位用 UUID，日期用 ISO 8601 字串
+- 密碼用 bcryptjs（import bcrypt from 'bcryptjs'），JWT 用 jsonwebtoken
+- 不做認證檢查 — Server Action 層已處理，userId 由呼叫者注入
+- 不要 import 'next/headers' 或操作 cookie
+- ON CONFLICT 用 PostgreSQL 語法（不用 MySQL 的 ON DUPLICATE KEY）
+- 如果測試傳 email 識別使用者：先用 input.userId，沒有再查 users 表
 
-## 認證欄位
-- Server Action 層會自動從 cookie 注入 userId，非登入操作不用擔心認證
-- **不要在 lib/actions 裡 import 'next/headers' 或操作 cookie** — 這由上層 Server Action 處理
-- 登入/註冊成功時，回傳物件**必須包含 \`userId\` 欄位**（值為用戶 UUID），欄位名**必須是 \`userId\`**（不要用 createdUserId/user_id 等）
-- 登出操作：直接 return，不需操作 cookie
-- ON CONFLICT 語法：使用 PostgreSQL 的 ON CONFLICT (id) DO UPDATE SET col = EXCLUDED.col，不要用 MySQL 的 ON DUPLICATE KEY UPDATE
-
-## 子操作派發（重要！）
-一個 Action 可能包含多個子操作（如 manage_auth 包含 註冊/登入/登出）。
-呼叫時 input 會包含 _stepSummary 欄位，值是中文子操作名稱（如 "使用者註冊"、"使用者登入"）。
-必須用 input._stepSummary 來判斷要執行哪個子操作：
+## 子操作派發
 \`\`\`typescript
 const op = input._stepSummary || ''
-if (op.includes('註冊')) { /* 註冊邏輯 */ }
-else if (op.includes('登入')) { /* 登入邏輯 */ }
-else if (op.includes('登出')) { /* 登出邏輯 */ }
+if (op.includes('...')) { /* 子操作 1 */ }
+else if (op.includes('...')) { /* 子操作 2 */ }
 else { throw new Error('不支援的操作') }
 \`\`\`
-不要依賴 input.action 或其他自定義派發欄位，只用 _stepSummary。
+用 BDD Feature 的 When 步驟 summary 精確文字作為 includes() 條件。
 
-## 必須包含的標準操作（重要！）
-
-每個 Action 必須根據管理的 entity 自動包含以下操作分支，**即使 BDD 規則沒有明確定義**：
-
-1. **列表查詢**：\`if (op.includes('列表') || op.includes('全部'))\` — SELECT 全部記錄（可選 WHERE 過濾），**不要求 ID 參數**。前端頁面載入時必定需要此操作。
-2. **單筆查詢**：\`else if (op.includes('查詢') || op.includes('詳情'))\` — 需要 entity 主鍵 ID
-3. **建立**：\`else if (op.includes('建立') || op.includes('新增') || op.includes('註冊'))\` — INSERT
-4. **更新**：\`else if (op.includes('更新') || op.includes('修改') || op.includes('編輯'))\` — UPDATE by ID
-5. **刪除**：\`else if (op.includes('刪除') || op.includes('移除'))\` — DELETE by ID
-6. **ID 參數驗證**：單筆查詢/更新/刪除操作必須在第一行驗證 ID 存在，缺失時拋錯：
-\`\`\`typescript
-const entityId = input.id || input.xxxId  // 匹配 schema 主鍵欄位名
-if (!entityId) throw new Error('缺少 ID 參數')
-\`\`\`
-
-**判斷順序很重要**：先判斷「列表」再判斷「查詢」，因為「查詢列表」同時包含兩個關鍵字。
-
-每個分支的 _stepSummary 關鍵字**必須用上述括號中的中文詞**，不要用其他同義詞（如不要用「檢索」代替「查詢」）。
-前端改寫時會用這些精確的關鍵字，不一致會導致 500 error。
-
-## Array/Batch 操作（重要！）
-
-如果 action 需要接收多個 ID（如拖曳排序、批次刪除、批次操作）：
-1. 輸入欄位會是**逗號分隔字串**（如 "uuid-1,uuid-2,uuid-3"），必須自行 split：
-   \`const ids = (input.orderedItemIds || '').split(',').map(s => s.trim()).filter(Boolean)\`
-2. PostgreSQL array 查詢用 ANY，不用 IN：
-   \`await sql\`SELECT * FROM todos WHERE id = ANY(\${ids}::uuid[])\`\`
-3. 批次 UPDATE 保留順序（拖曳排序）：逐筆 UPDATE
-   \`\`\`typescript
-   for (let i = 0; i < ids.length; i++) {
-     await sql\`UPDATE todos SET sort_order = \${i + 1} WHERE id = \${ids[i]}\`
-   }
-   \`\`\`
-4. 如果 input 欄位名含 Ids/Items/List（複數），一律先 split(',')
-
-## Multi-table JOIN 查詢
-
-列表查詢如果需要關聯資料（如訂單列表含用戶名、商品名），用 JOIN：
-\`\`\`typescript
-const rows = await sql\`
-  SELECT o.*, u.name as user_name, p.title as product_title
-  FROM orders o
-  JOIN users u ON o.user_id = u.id
-  JOIN products p ON o.product_id = p.id
-  WHERE o.deleted_at IS NULL
-  ORDER BY o.created_at DESC
-\`
-\`\`\`
-
-## Transaction（多表原子操作）
-
-如果一個操作需要更新多張表（如建立訂單同時扣庫存），用 sql.begin：
-\`\`\`typescript
-const result = await sql.begin(async (tx) => {
-  const [order] = await tx\`INSERT INTO orders (...) VALUES (...) RETURNING *\`
-  await tx\`UPDATE products SET stock = stock - \${qty} WHERE id = \${productId}\`
-  return order
-})
-\`\`\`
-
-## 程式碼結構
-\`\`\`typescript
-import { sql } from '@/lib/db'
-
-// 型別定義
-interface XxxInput { _stepSummary?: string; ... }
-interface XxxOutput { __status?: number; ... }
-
-export async function actionName(input: XxxInput): Promise<XxxOutput> {
-  const op = input._stepSummary || ''
-  // 根據 op 判斷子操作
-  // 1. 前置（參數）驗證 → 來自 rules
-  // 2. 前置（狀態）檢查 → DB 查詢
-  // 3. 核心邏輯 → INSERT/UPDATE/DELETE
-  // 4. 後置（回應）→ return { __status: 201, ...data }
-}
-\`\`\`
-
-## HTTP Status Code
-成功回應時，必須在返回物件中加入 __status 欄位表示 HTTP 狀態碼。
-- 建立/新增操作：__status: 201
-- 查詢/列表操作：__status: 200
-- 更新操作：__status: 200
-- 刪除操作：__status: 200
-- 登入/登出等操作：__status: 200
-例如：return { __status: 201, email, role }
-
-## Response 回傳規則（重要！）
-每種操作必須回傳完整資料，不能只回傳 { __status: 200 }：
-- **建立操作（INSERT）**：\`const [row] = await sql\`INSERT INTO ... RETURNING *\`; return { __status: 201, ...row }\`
-- **更新操作（UPDATE）**：\`const [row] = await sql\`UPDATE ... RETURNING *\`; return { __status: 200, ...row }\`（**必須 RETURNING *** 並展開到回傳物件中）
-- **刪除操作（DELETE）**：\`return { __status: 200, message: '刪除成功' }\`
-- **列表查詢**：\`const rows = await sql\`SELECT ...\`; (rows as any).__status = 200; return rows\`（直接回傳 pg 陣列，在陣列上設 __status 確保 route handler 用 200）
-- **單筆查詢**：\`return { __status: 200, ...row }\`
-- **批次操作（排序/拖曳）**：逐筆 UPDATE 後 \`return { __status: 200, success: true }\`
-
-## 日期欄位處理
-PostgreSQL DATE/TIMESTAMP 欄位從 pg driver 取出是 JS Date 物件，回傳前必須轉成字串：
-- DATE 欄位：\`row.due_date instanceof Date ? row.due_date.toISOString().split('T')[0] : row.due_date\`
-- TIMESTAMP 欄位：\`row.created_at instanceof Date ? row.created_at.toISOString() : row.created_at\`
-- **絕不能直接回傳 Date 物件**（JSON 序列化後會變成 "Wed Dec 31 2025..." 格式而非 ISO）
+## 日期欄位
+DATE → \`row.x instanceof Date ? row.x.toISOString().split('T')[0] : row.x\`
+TIMESTAMP → \`row.x instanceof Date ? row.x.toISOString() : row.x\`
 
 ## 輸出
 只輸出 TypeScript 代碼，不要任何解釋或 markdown 包裹。`
+
+// --- Handler: 建立操作 (INSERT) ---
+const CREATE_HANDLER = `
+## 建立操作 Handler
+\`\`\`typescript
+// 前置（參數）驗證
+if (!input.xxx) throw new Error('xxx 必須提供')
+
+// INSERT + RETURNING *（必須展開 row 到回傳物件）
+const [row] = await sql\`
+  INSERT INTO table_name (id, user_id, ..., created_at, updated_at)
+  VALUES (gen_random_uuid(), \${userId}, ..., NOW(), NOW())
+  RETURNING *
+\`
+return { __status: 201, ...row }
+\`\`\`
+重點：__status: 201，RETURNING * 展開到 return。`
+
+// --- Handler: 列表查詢 (SELECT 多筆) ---
+const QUERY_LIST_HANDLER = `
+## 列表查詢 Handler
+\`\`\`typescript
+const rows = await sql\`
+  SELECT * FROM table_name
+  WHERE user_id = \${userId} AND deleted_at IS NULL
+  ORDER BY sort_order ASC
+\`
+;(rows as any).__status = 200
+return rows
+\`\`\`
+重點：回傳 Array（不要包成 { items: rows }），在 Array 上設 __status = 200。`
+
+// --- Handler: 單筆查詢 (SELECT 一筆) ---
+const QUERY_SINGLE_HANDLER = `
+## 單筆查詢 Handler
+\`\`\`typescript
+const entityId = input.id || input.xxxId
+if (!entityId) throw new Error('缺少 ID 參數')
+const [row] = await sql\`SELECT * FROM table_name WHERE id = \${entityId}\`
+if (!row) throw new Error('找不到資料')
+return { __status: 200, ...row }
+\`\`\``
+
+// --- Handler: 更新操作 (UPDATE) ---
+const UPDATE_HANDLER = `
+## 更新操作 Handler
+\`\`\`typescript
+const entityId = input.id || input.xxxId
+if (!entityId) throw new Error('缺少 ID 參數')
+
+// 前置（狀態）驗證：必須存在且屬於當前使用者
+const existing = await sql\`SELECT * FROM table_name WHERE id = \${entityId} AND user_id = \${userId}\`
+if (existing.length === 0) throw new Error('不存在或不屬於當前使用者')
+
+// UPDATE + RETURNING *（必須展開 row 到回傳物件）
+const [row] = await sql\`
+  UPDATE table_name SET col = \${val}, updated_at = NOW()
+  WHERE id = \${entityId}
+  RETURNING *
+\`
+return { __status: 200, ...row }
+\`\`\`
+重點：__status: 200，RETURNING * 展開到 return。`
+
+// --- Handler: 刪除操作 (DELETE/軟刪除) ---
+const DELETE_HANDLER = `
+## 刪除操作 Handler
+\`\`\`typescript
+const entityId = input.id || input.xxxId
+if (!entityId) throw new Error('缺少 ID 參數')
+
+// 軟刪除（如果 schema 有 deleted_at 欄位）
+const [row] = await sql\`
+  UPDATE table_name SET deleted_at = NOW(), updated_at = NOW()
+  WHERE id = \${entityId} AND user_id = \${userId}
+  RETURNING *
+\`
+return { __status: 200, ...row }
+\`\`\``
+
+// --- Handler: 批次操作 (排序/拖曳) ---
+const BATCH_HANDLER = `
+## 批次操作 Handler
+\`\`\`typescript
+// 輸入：逗號分隔字串 → split 成陣列
+const ids = (input.orderedItemIds || '').split(',').map(s => s.trim()).filter(Boolean)
+if (ids.length === 0) throw new Error('缺少 orderedItemIds 參數')
+
+// 逐筆 UPDATE
+for (let i = 0; i < ids.length; i++) {
+  await sql\`UPDATE table_name SET sort_order = \${i + 1}, updated_at = NOW() WHERE id = \${ids[i]}\`
+}
+return { __status: 200, success: true }
+\`\`\`
+重點：回傳 { success: true }，PostgreSQL array 查詢用 ANY(\${ids}::uuid[])。`
+
+// --- Handler: 認證操作 (登入/註冊/登出) ---
+const AUTH_HANDLER = `
+## 認證操作 Handler
+\`\`\`typescript
+// 註冊：INSERT + bcrypt hash + 回傳 userId
+const hashedPassword = await bcrypt.hash(input.password, 10)
+const [user] = await sql\`INSERT INTO users (...) VALUES (...) RETURNING *\`
+return { __status: 201, userId: user.id, message: '註冊成功' }
+
+// 登入：bcrypt.compare + JWT
+const [user] = await sql\`SELECT * FROM users WHERE email = \${input.email}\`
+if (!user) throw new Error('使用者不存在')
+const valid = await bcrypt.compare(input.password, user.password_hash)
+if (!valid) throw new Error('密碼不正確')
+const accessToken = jwt.sign({ userId: user.id }, process.env.JWT_SECRET || 'secret', { expiresIn: '7d' })
+return { __status: 200, userId: user.id, accessToken, message: '登入成功' }
+
+// 登出：直接回傳
+return { __status: 200, message: '登出成功' }
+\`\`\`
+重點：註冊/登入必須回 userId + message。登入必須回 accessToken。`
+
+// --- Handler: Transaction ---
+const TRANSACTION_HANDLER = `
+## Transaction Handler
+\`\`\`typescript
+const result = await sql.begin(async (tx) => {
+  const [row] = await tx\`INSERT INTO ... RETURNING *\`
+  await tx\`UPDATE ... WHERE ...\`
+  return row
+})
+return { __status: 201, ...result }
+\`\`\``
+
+/**
+ * 根據 action 的 rules 類型，選擇性注入相關 handler。
+ * 不再用一個巨大的 system prompt 教 LLM 所有操作類型。
+ */
+function buildActionSystemPrompt(action?: ActionEntry): string {
+  if (!action) return BASE_PROMPT
+
+  const handlers: string[] = []
+  const rules = action.rules || []
+  const nameHint = ((action.name || '') + ' ' + (action.summary || '')).toLowerCase()
+
+  // 認證相關
+  if (/auth|login|register|signup|signin|logout|password|token|verify/i.test(nameHint)) {
+    handlers.push(AUTH_HANDLER)
+  }
+
+  // 批次操作
+  if (/reorder|sort|batch|drag|拖曳|排序|批次/i.test(nameHint)) {
+    handlers.push(BATCH_HANDLER)
+  }
+
+  // 從 rules 類型判斷需要的 handler
+  const hasStateRules = rules.some(r => r.type === '後置（狀態）')
+  const hasResponseRules = rules.some(r => r.type === '後置（回應）')
+
+  // 有後置（狀態）→ 可能有 INSERT/UPDATE/DELETE
+  if (hasStateRules) {
+    handlers.push(CREATE_HANDLER)
+    handlers.push(UPDATE_HANDLER)
+    handlers.push(DELETE_HANDLER)
+  }
+
+  // 有後置（回應）→ 有查詢操作
+  if (hasResponseRules) {
+    handlers.push(QUERY_LIST_HANDLER)
+    handlers.push(QUERY_SINGLE_HANDLER)
+  }
+
+  // 如果沒有匹配到任何 handler（兜底），注入所有
+  if (handlers.length === 0) {
+    handlers.push(CREATE_HANDLER, QUERY_LIST_HANDLER, QUERY_SINGLE_HANDLER, UPDATE_HANDLER, DELETE_HANDLER, BATCH_HANDLER)
+  }
+
+  // Transaction handler（如果有多表操作暗示）
+  if (/order.*item|cart.*product|transfer|transaction|原子/i.test(nameHint) || rules.length > 8) {
+    handlers.push(TRANSACTION_HANDLER)
+  }
+
+  return `${BASE_PROMPT}\n\n${handlers.join('\n')}`
 }
 
 function buildActionUserPrompt(
@@ -349,7 +418,8 @@ function buildActionUserPrompt(
   entityMapping: string,
   types: Record<string, unknown>,
   requiredResponseFields?: string[],
-  stepSummaries?: string[]
+  stepSummaries?: string[],
+  featureContent?: string
 ): string {
   const rulesText = (action.rules || [])
     .map(r => `- [${r.type}] ${r.rule}`)
@@ -386,7 +456,18 @@ ${schemaSql}
 
 ## Entity Mapping（中文實體 → 表名）
 ${entityMapping}
-${typesText}${responseFieldsText}${stepSummariesText}
+${typesText}${responseFieldsText}${stepSummariesText}${featureContent ? `
+
+## BDD Feature 規格（最重要！你的代碼必須通過這些測試場景）
+以下是 SpecFormula 測試會執行的完整 Feature 文件。仔細閱讀每個 Scenario 的：
+- When 步驟的 DataTable → 這是你的函數會收到的 request 參數
+- Then 步驟的 DataTable → 這是你的函數必須返回的 response 格式和欄位
+- Then 回應為 JSON → 回應必須是 Array 格式，不能包成 Object
+- 操作失敗 → 這些情境你的函數必須 throw Error
+
+\`\`\`gherkin
+${featureContent}
+\`\`\`` : ''}
 
 請根據以上定義實作函數。
 函數名必須使用 camelCase：export async function ${toCamelCase(action.name)}(input: ${toPascalCase(action.name)}Input)
@@ -398,7 +479,7 @@ export async function generateActionFunction(
   ctx: { schemaSql: string; entityMapping: string; types: Record<string, unknown>; features?: Array<{ actionName: string; content: string }> },
   trackingContext?: { userId?: string; conversationId?: string }
 ): Promise<GeneratedComponent> {
-  const systemPrompt = buildActionSystemPrompt()
+  const systemPrompt = buildActionSystemPrompt(action)
   const requiredResponseFields = ctx.features
     ? extractResponseFieldsFromFeatures(ctx.features, action.name)
     : undefined
@@ -411,11 +492,19 @@ export async function generateActionFunction(
   if (stepSummaries && stepSummaries.length > 0) {
     logger.info({ actionName: action.name, summaries: stepSummaries }, 'BDD step summaries 注入')
   }
-  const userPrompt = buildActionUserPrompt(action, ctx.schemaSql, ctx.entityMapping, ctx.types, requiredResponseFields, stepSummaries)
+  // 找到對應的 Feature 文件內容
+  const featureContent = ctx.features
+    ? ctx.features.find(f => f.actionName === action.name)?.content
+    : undefined
+  if (featureContent) {
+    logger.info({ actionName: action.name, featureLen: featureContent.length }, 'BDD Feature 內容注入')
+  }
+  const userPrompt = buildActionUserPrompt(action, ctx.schemaSql, ctx.entityMapping, ctx.types, requiredResponseFields, stepSummaries, featureContent)
 
-  // 複雜 action（多規則）自動獲得更多 token
+  // 複雜 action（多規則）→ 更多 token（Feature 注入後 prompt 更長，output 也需更多空間）
   const ruleCount = (action.rules || []).length
-  const actionMaxTokens = Math.max(4096, Math.min(4096 + ruleCount * 512, 8192))
+  const featureTokenEstimate = featureContent ? Math.ceil(featureContent.length / 4) : 0
+  const actionMaxTokens = Math.max(4096, Math.min(4096 + ruleCount * 512 + Math.min(featureTokenEstimate, 2048), 16384))
   const result = await callClaude(systemPrompt, userPrompt, { maxTokens: actionMaxTokens }, trackingContext)
 
   if (!result.success || !result.content) {
@@ -957,8 +1046,8 @@ export async function rewriteComponentForServerActions(
   const userPrompt = buildRewriteUserPrompt(component, availableActions, actionImplementations)
 
   // 根據組件大小動態設定 max_tokens（1 token ≈ 3 字元，改寫後通常比原始稍長）
-  const estimatedTokens = Math.ceil(component.content.length / 3) + 1024
-  const maxTokens = Math.max(8192, Math.min(estimatedTokens, 32768))
+  const estimatedTokens = Math.ceil(component.content.length / 3) + 2048
+  const maxTokens = Math.max(8192, Math.min(estimatedTokens, 64000))
   const result = await callClaude(systemPrompt, userPrompt, { maxTokens }, trackingContext)
 
   if (!result.success || !result.content) {
@@ -1894,7 +1983,11 @@ export async function fixFailingAction(
   const failureDetails = failedScenarios
     .map(s => {
       const label = s.ruleName ? `${s.ruleName} - ${s.scenarioName}` : s.scenarioName
-      return `- ${label}\n  Error: ${s.error || 'unknown'}`
+      let errorText = `  Root Cause: ${s.error || 'unknown'}`
+      if ((s as any).allErrors) {
+        errorText += `\n  Chain Errors:\n    ${(s as any).allErrors.split('\n').join('\n    ')}`
+      }
+      return `- ${label}\n${errorText}`
     })
     .join('\n')
 

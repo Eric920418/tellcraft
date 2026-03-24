@@ -92,7 +92,7 @@ pm2 describe tellcraft-backend            # 詳細資訊（記憶體/重啟次�
 | **Classifier** | `services/classifier.ts` | 三層防禦：Prefilter → Meta Intent → Skill 分類 |
 | **UIUX Generation** | `services/uiux-generation.ts` | 設計生成核心（Brief/Variants/Structure/Animation/RWD/Refine） |
 | **Quality Gate** | `services/quality-gate.ts` | A11y/Performance/CodeQuality 靜態檢查 + LLM 自動修復 |
-| **Coder Generation** | `services/coder-generation.ts`（~650 行） | 後端代碼生成核心：parseActionsYml → generateActionFunction(LLM，注入 BDD Feature execution key 確保 response field 名稱一致) → generateServerActions(零LLM) → identifyMockDataComponents(Haiku LLM batch 識別 + regex fallback) → rewriteComponentForServerActions(LLM，截斷偵測回退) |
+| **Coder Generation** | `services/coder-generation.ts`（~800 行） | 後端代碼生成核心：parseActionsYml → generateActionFunction(LLM，Handler 化 prompt + BDD Feature 全文注入 + execution key 注入 + stepSummary 注入) → generateServerActions(零LLM) → identifyMockDataComponents(Haiku LLM batch 識別 + regex fallback) → rewriteComponentForServerActions(LLM，截斷偵測回退，maxTokens 64000) → validateActionResponses(零LLM post-generation 修復) |
 | **Deployer** | `services/deployer.ts` | sanitize → build 驗證 → Vercel 部署 → 回滾（合併 uiux+coder skill_source） |
 | **Iteration Skill** | `services/iteration-skill.ts` | 迭代修改 + 撤銷 + 版本回滾（從 orchestrator 抽出） |
 | **Fast Build** | `services/fast-build-generation.ts` | 快速模式輔助：tier 偵測、產品推斷、默認 DesignSystem（零 LLM）、surface-1/2/3 色階 |
@@ -403,7 +403,10 @@ Feature 註解：`# Action: actionName` + `# [METHOD] /path` + `# Summary: xxx`
 - **Neon provisioning 是同步的（< 10s）**：任何失敗都不阻塞 UIUX 或部署流程。Deployer 直接 SELECT `neon_connection_string` FROM projects 注入 DATABASE_URL，無需 Redis polling
 - **`streamLlmMessage` vs `sendMessage`**：LLM 生成的對話文字用 `streamLlmMessage`（後端 SDK streaming + Socket.io 事件，為未來 WSS 準備），模板文字/進度/richContent 用 `sendMessage`。`streamLlmMessage` 失敗時自動降級為 `sendMessage`。前端透過 polling 拿到完整訊息後在 `ChatMessageItem` 內做打字機動畫（`isTypewriterTarget` prop + `onTypewriterComplete` callback）
 - **`identifyMockDataComponents` 用 Haiku LLM 識別**：一次 batch call 發送所有組件摘要 + availableActions 列表，Haiku 回傳需改寫的組件 indices。失敗自動降級到 regex fallback。Haiku 能區分「業務假資料」vs「UI 結構靜態配置」，regex 做不到。System prompt 明確列出不需改寫的類型（nav items、footer、feature lists）
-- **Coder action response field 必須對齊 BDD execution key**：`generateActionFunction` 從 Feature 文件提取 `<executionKey`（如 `<newUserId`），注入 prompt 要求 LLM 使用精確欄位名。不對齊會導致 SpecFormula VAR-System 連鎖失敗（47/52 場景）。Features 從 `bdd_sessions.features_content` 讀取
+- **Coder action response field 必須對齊 BDD execution key**：`generateActionFunction` 從 Feature 文件提取 `<executionKey`（如 `<newUserId`）+ stepSummary + **完整 Feature 內容**注入 prompt。不對齊會導致 SpecFormula VAR-System 連鎖失敗。Features 從 `bdd_sessions.features_content` 讀取
+- **Handler 化 System Prompt**：`buildActionSystemPrompt(action)` 根據 action 的 name + rules 類型選擇性注入 handler（CREATE/QUERY_LIST/QUERY_SINGLE/UPDATE/DELETE/BATCH/AUTH/TRANSACTION）。每個 handler ~15 行精確的 code pattern，LLM 照著 pattern 實作。不再用 140 行巨大 prompt 教所有操作類型
+- **fixFailingAction 根因錯誤**：`executeScenario` 只記錄第一個失敗步驟的 error（根因），不被後續連鎖失敗覆蓋。`runRedGreenCycle` 從 steps 提取根因 error + chain errors 傳給 fixFailingAction，prompt 標註 Root Cause
+- **preExtractTestPasswords 引號剝除**：DataTable raw 值帶引號（`"user@example.com"`），entity_setup 的 resolveVariable 剝除引號，但 testPasswordMap 的 key 也必須剝除才能匹配。否則 bcrypt hash 的密碼帶引號 → login 的 bcrypt.compare 不帶引號 → 不匹配
 - **Coder E2E 測試必須包含 backendFiles**：`runCoderE2ETests` 的 code 必須含 `result.backendFiles`（`lib/actions/*`、`app/actions/*`、`lib/db.ts`），否則改寫後的組件 import Server Action 會全部 Module not found → 500
 - **`rewriteComponentForServerActions` maxTokens 上限 32768**：大組件（>1000 行）需要足夠 token。改寫後偵測 JSX 標籤平衡，截斷時回退原始組件
 - **Prompt caching system prompt 順序重要**：`buildCacheableSystemBlocks` 將 static 部分（tier philosophy + task definition + base rules）放在第一個 block 並加 `cache_control: { type: 'ephemeral' }`，dynamic 部分（mood、designSystem、constraints）放在第二個 block。`buildCacheableUserMessage` 將 user message 的代碼區塊加 `cache_control`，使 continuation call 能 cache hit。修改 system prompt 時不要把 per-request 內容放進 static block，否則 cache hit 率歸零

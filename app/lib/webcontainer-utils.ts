@@ -919,7 +919,7 @@ export function buildSkeletonFiles(): FileSystemTree {
  * 例如 `app/(auth)/login/page.tsx` 和 `app/login/page.tsx` 解析到同一路由 `/login`
  * 保留後者（覆蓋），防止 "two parallel pages that resolve to the same path" 錯誤
  */
-function deduplicateRouteConflicts<T extends { path: string }>(files: T[]): T[] {
+export function deduplicateRouteConflicts<T extends { path: string }>(files: T[]): T[] {
   const routeMap = new Map<string, T>()
   for (const f of files) {
     const normalized = f.path
@@ -969,25 +969,19 @@ export function buildWebContainerFiles(input: WebContainerFilesInput): FileSyste
   console.log('[WC] tailwindConfig present:', !!input.tailwindConfig, 'pages:', input.pages.length, 'components:', input.components.length)
   setFileInTree(tree, 'app/globals.css', processedCss)
 
-  // Pages（sanitize 修復 LLM 常見語法錯誤，防止 Build Error 顯示給用戶）
-  // 路由衝突去重：strip route groups 後同路由只保留一份（防止 "two parallel pages" 錯誤）
-  const dedupedPages = deduplicateRouteConflicts(input.pages)
-  for (const page of dedupedPages) {
-    const path = page.path.startsWith('/') ? page.path.slice(1) : page.path
-    let content = sanitizeFileContent(path, page.content)
+  // Pages + Components 合併後做路由衝突去重
+  // 舊的 code_preview 資料可能把 page.tsx 放在 components 陣列裡，必須一起去重
+  const allPageAndComp = [...input.pages, ...input.components]
+  const dedupedAll = deduplicateRouteConflicts(allPageAndComp)
+  for (const file of dedupedAll) {
+    const path = file.path.startsWith('/') ? file.path.slice(1) : file.path
+    let content = sanitizeFileContent(path, file.content)
 
-    // Inject edit bridge into layout.tsx
     if (path === 'app/layout.tsx' || path.endsWith('/layout.tsx')) {
       content = injectEditBridge(content)
     }
 
     setFileInTree(tree, path, content)
-  }
-
-  // Components
-  for (const comp of input.components) {
-    const path = comp.path.startsWith('/') ? comp.path.slice(1) : comp.path
-    setFileInTree(tree, path, sanitizeFileContent(path, comp.content))
   }
 
   // Server Actions (from Coder Skill)

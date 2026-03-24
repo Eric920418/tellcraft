@@ -7,6 +7,7 @@ import {
   buildWebContainerFiles,
   buildSkeletonFiles,
   diffFiles,
+  deduplicateRouteConflicts,
   injectEditBridge,
   isWebContainerSupported,
   prepareCss,
@@ -275,9 +276,10 @@ export default function WebContainerPreview({
     if (!hasFullMountRef.current) {
       // 第一次 ready：完整寫入所有檔案（initialFiles 可能用了 skeleton 或不完整的 capture）
       hasFullMountRef.current = true
-      // 用 writeFiles 逐一寫入（sanitize 修復 LLM 常見語法錯誤）
+      // pages + components 合併去重（舊 code_preview 可能把 page.tsx 放在 components 裡）
+      const dedupedAll = deduplicateRouteConflicts([...pages, ...components])
       const flatFiles: Record<string, string> = {}
-      for (const f of [...pages, ...components, ...(serverActions || []), ...(apiRoutes || []), ...(dbLib || [])]) {
+      for (const f of [...dedupedAll, ...(serverActions || []), ...(apiRoutes || []), ...(dbLib || [])]) {
         const p = f.path.startsWith('/') ? f.path.slice(1) : f.path
         let content = sanitizeFileContent(p, f.content)
         // layout 必須注入 edit-bridge Script tag，否則編輯模式無法運作
