@@ -108,6 +108,10 @@ export async function scanAndRecoverStuckFlowStates(
         ? (state.coderGenerationStartedAt || 0)
         : state.phase === 'coder_testing'
         ? (state.coderTestStartedAt || 0)
+        : state.phase === 'clone_analyzing'
+        ? (state.cloneAnalyzingStartedAt || 0)
+        : state.phase === 'clone_generating'
+        ? (state.cloneGeneratingStartedAt || 0)
         : (state.uiuxCodeGenerationStartedAt || 0)
 
       // 早期恢復：lock 不存在 = Worker 已死，縮短等待至 5 分鐘（取代完整超時）
@@ -123,7 +127,8 @@ export async function scanAndRecoverStuckFlowStates(
         state.phase === 'uiux_code_generation' ||
         state.phase === 'uiux_quality_gate' ||
         state.phase === 'coder_generating' ||
-        state.phase === 'coder_testing'
+        state.phase === 'coder_testing' ||
+        state.phase === 'clone_generating'
       ) {
         const hasRecentActivity = await hasRecentFlowActivity(redis, conversationId)
         if (hasRecentActivity) continue
@@ -206,6 +211,12 @@ async function recoverFlowState(
       break
     case 'coder_testing':
       await recoverCoderTesting(redis, io, conversationId, state)
+      break
+    case 'clone_analyzing':
+      await recoverCloneAnalyzing(redis, io, conversationId, state)
+      break
+    case 'clone_generating':
+      await recoverCloneGenerating(redis, io, conversationId, state)
       break
   }
 }
@@ -614,4 +625,78 @@ async function recoverCoderTesting(
       { label: isChinese ? '直接部署' : 'Deploy as-is', value: '部署', style: 'secondary' },
     ],
   })
+}
+
+/**
+ * clone_analyzing 恢復：轉入 clone_failed + 重試按鈕
+ */
+async function recoverCloneAnalyzing(
+  redis: Redis, io: SocketIOServer, conversationId: string, state: FlowState
+) {
+  const isChinese = state.locale !== 'en'
+
+  state.phase = 'clone_failed'
+  state.waitingForReply = true
+  state.cloneFailedReason = 'Analyzing timed out'
+  state.cloneAnalyzingStartedAt = undefined
+  await saveFlowState(redis, conversationId, state)
+
+  await sendMessage(conversationId, io, {
+    content: isChinese
+      ? '網站分析逾時了。請重試或嘗試其他網址/截圖。'
+      : 'Website analysis timed out. Please retry or try a different URL/screenshot.',
+    stage: 'error',
+    quickReplies: [
+      { label: isChinese ? '重試' : 'Retry', value: '__retry_clone__', style: 'primary' },
+      { label: isChinese ? '新專案' : 'New Project', value: '__new_project__', style: 'ghost' },
+    ],
+  })
+}
+
+/**
+ * clone_generating 恢復：有已完成 section → 合併 → uiux_complete；否則 → clone_failed
+ */
+async function recoverCloneGenerating(
+  redis: Redis, io: SocketIOServer, conversationId: string, state: FlowState
+) {
+  const isChinese = state.locale !== 'en'
+  const completedSections = state.cloneCompletedSections || 0
+
+  if (completedSections > 0 && state.uiuxGeneratedCode) {
+    // 有部分代碼 → 直接完成
+    state.phase = 'uiux_complete'
+    state.waitingForReply = true
+    state.uiuxCodePhase = 'complete'
+    state.cloneGeneratingStartedAt = undefined
+    await saveFlowState(redis, conversationId, state)
+
+    await sendMessage(conversationId, io, {
+      content: isChinese
+        ? `生成中斷了，已還原 ${completedSections} 個區塊。你可以繼續修改或部署。`
+        : `Generation was interrupted. ${completedSections} sections were recovered. You can modify or deploy.`,
+      stage: 'uiux_complete',
+      quickReplies: [
+        { label: isChinese ? '部署上線' : 'Deploy', value: '部署', style: 'primary' },
+        { label: isChinese ? '新專案' : 'New Project', value: '__new_project__', style: 'ghost' },
+      ],
+    })
+  } else {
+    // 無代碼 → 失敗
+    state.phase = 'clone_failed'
+    state.waitingForReply = true
+    state.cloneFailedReason = 'Generating timed out with no completed sections'
+    state.cloneGeneratingStartedAt = undefined
+    await saveFlowState(redis, conversationId, state)
+
+    await sendMessage(conversationId, io, {
+      content: isChinese
+        ? '代碼生成逾時了，請重試。'
+        : 'Code generation timed out. Please retry.',
+      stage: 'error',
+      quickReplies: [
+        { label: isChinese ? '重試' : 'Retry', value: '__retry_clone__', style: 'primary' },
+        { label: isChinese ? '新專案' : 'New Project', value: '__new_project__', style: 'ghost' },
+      ],
+    })
+  }
 }

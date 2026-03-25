@@ -344,22 +344,39 @@ async function handleProcessMessage(
     }, redis, io)
   }
 
-  // Step 1.4: Clone Mode 復刻路由
+  // Step 1.4: Clone Mode 復刻路由（URL / 圖片 / 混合）
   if (mode === 'clone') {
     const isChinese = /[\u4e00-\u9fff\u3400-\u4dbf]/.test(message) || locale === 'zh'
     const cloneUrl = extractFirstUrl(message)
-    if (!cloneUrl || !isSafeUrl(cloneUrl)) {
+    const cloneImageUrls = data.imageUrls
+
+    // 沒 URL 也沒圖片 → 引導訊息
+    if (!cloneUrl && (!cloneImageUrls || cloneImageUrls.length === 0)) {
       await sendMessage(conversationId, io, {
         content: isChinese
-          ? '請輸入有效的網址（https://...），例如：https://stripe.com'
-          : 'Please enter a valid URL (https://...), e.g. https://stripe.com',
+          ? '請輸入網址（https://...），或上傳網站截圖（最多 5 張），我會根據它來生成。'
+          : 'Please enter a URL (https://...), or upload screenshots (up to 5), and I\'ll recreate it.',
         stage: 'customer_service',
       })
       return { taskId: null, skill: null }
     }
+
+    // 有 URL → 安全性檢查
+    if (cloneUrl && !isSafeUrl(cloneUrl)) {
+      await sendMessage(conversationId, io, {
+        content: isChinese
+          ? '此網址無法存取（內部網路或無效網址）。請輸入有效的公開網址。'
+          : 'This URL cannot be accessed (internal network or invalid). Please enter a valid public URL.',
+        stage: 'customer_service',
+      })
+      return { taskId: null, skill: null }
+    }
+
     await executeCloneSkill({
       projectId, conversationId, userId,
-      url: cloneUrl, locale, redis, io,
+      url: cloneUrl || undefined,
+      imageUrls: cloneImageUrls,
+      locale, redis, io,
     })
     return { taskId: null, skill: 'clone' as SkillName }
   }

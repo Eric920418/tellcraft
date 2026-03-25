@@ -397,7 +397,7 @@ export default function ChatSection({
   // ── Image attachment ──
   const handleAttachImage = useCallback((files: FileList | null) => {
     if (!files) return
-    const MAX_ATTACHED = 3
+    const MAX_ATTACHED = buildMode === 'clone' ? 5 : 3
     const ACCEPTED_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'image/gif']
     const MAX_SIZE = 5 * 1024 * 1024
 
@@ -410,7 +410,7 @@ export default function ChatSection({
         return [...prev, { file, previewUrl: URL.createObjectURL(file) }]
       })
     }
-  }, [])
+  }, [buildMode])
 
   const handleRemoveAttachedImage = useCallback((index: number) => {
     setAttachedImages(prev => {

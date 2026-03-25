@@ -8,7 +8,7 @@ export const sendMessageSchema = z.object({
   userId: z.string().optional(),
   mode: z.enum(['fast', 'fine', 'clone']).optional(),
   locale: z.enum(['zh', 'en']).optional(),
-  imageUrls: z.array(imageUrlItem).max(3).optional(),
+  imageUrls: z.array(imageUrlItem).max(5).optional(),
 }).passthrough()
 
 export const replyMessageSchema = z.object({
@@ -18,5 +18,5 @@ export const replyMessageSchema = z.object({
   taskId: z.string().optional(),
   specConfirmed: z.boolean().optional(),
   locale: z.enum(['zh', 'en']).optional(),
-  imageUrls: z.array(imageUrlItem).max(3).optional(),
+  imageUrls: z.array(imageUrlItem).max(5).optional(),
 }).passthrough()

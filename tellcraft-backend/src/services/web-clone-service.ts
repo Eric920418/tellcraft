@@ -336,7 +336,8 @@ const CLONE_SYSTEM_PROMPT = `你是前端工程師。根據截圖和 DOM 結構�
 export async function generateSectionCode(
   section: CloneSection,
   designSystem: CloneDesignSystem,
-  trackingContext?: LlmTrackingContext
+  trackingContext?: LlmTrackingContext,
+  referenceHint?: string,
 ): Promise<{ componentName: string; code: string } | null> {
   try {
     const client = getAnthropicClient()
@@ -383,7 +384,7 @@ ${imagesText}
 3. 保持原始間距（padding/margin/gap）
 4. 文字內容完整保留
 5. 組件命名：${section.componentName}
-6. export default function ${section.componentName}()`
+6. export default function ${section.componentName}()${referenceHint ? `\n\n## 額外設計參考（來自用戶上傳的參考圖片）\n${referenceHint}` : ''}`
 
     const response = await client.messages.create({
       model: MODEL.SONNET,
@@ -513,4 +514,364 @@ export function toSectionMetas(sections: CloneSection[]): CloneSectionMeta[] {
     estimatedHeight: s.boundingRect.height,
     status: 'pending' as const,
   }))
+}
+
+// ── 圖片模式：分析 + 生成 + 組裝 ──
+
+export interface CloneImageAnalysis {
+  imageUrl: string
+  designHints: {
+    colors: string[]
+    fontStyle: string
+    layoutDescription: string
+  }
+  sectionDescriptions: Array<{ name: string; type: 'header' | 'hero' | 'content' | 'footer'; description: string }>
+  pageTitle: string
+}
+
+const CLONE_IMAGE_ANALYSIS_PROMPT = `你是設計分析師。分析這張網頁截圖，提取設計系統和區塊結構。
+
+以 JSON 格式回覆（不要包裝在 code block 中）：
+{
+  "designHints": {
+    "colors": ["#hex1", "#hex2", ...],  // 辨識出的主要色彩（背景、文字、強調色，最多 8 個）
+    "fontStyle": "描述字體風格（如 modern sans-serif, elegant serif 等）",
+    "layoutDescription": "簡短描述整體佈局（如 centered single-column, two-column grid 等）"
+  },
+  "sectionDescriptions": [
+    { "name": "Header", "type": "header", "description": "導航列，包含 logo + 選單連結 + CTA 按鈕" },
+    { "name": "Hero", "type": "hero", "description": "大標題 + 副標題 + 背景圖 + 兩個按鈕" },
+    ...
+  ],
+  "pageTitle": "從截圖推斷的頁面標題"
+}`
+
+/**
+ * 分析多張用戶上傳的圖片，提取設計系統和區塊結構
+ */
+export async function analyzeCloneImages(
+  imageUrls: string[],
+  trackingContext?: LlmTrackingContext
+): Promise<CloneImageAnalysis[]> {
+  const results: CloneImageAnalysis[] = []
+
+  for (const imageUrl of imageUrls) {
+    try {
+      const controller = new AbortController()
+      const timeout = setTimeout(() => controller.abort(), 10000)
+
+      let buffer: Buffer
+      let mediaType: string
+      try {
+        const resp = await fetch(imageUrl, { signal: controller.signal })
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
+        const contentType = resp.headers.get('content-type') || 'image/jpeg'
+        mediaType = contentType.split(';')[0].trim()
+        if (!mediaType.startsWith('image/')) throw new Error(`不支援: ${mediaType}`)
+        buffer = Buffer.from(await resp.arrayBuffer())
+      } finally {
+        clearTimeout(timeout)
+      }
+
+      const client = getAnthropicClient()
+      const base64 = buffer.toString('base64')
+
+      const response = await client.messages.create({
+        model: MODEL.HAIKU,
+        max_tokens: 2048,
+        system: CLONE_IMAGE_ANALYSIS_PROMPT,
+        messages: [{
+          role: 'user',
+          content: [
+            { type: 'image', source: { type: 'base64', media_type: mediaType as 'image/jpeg', data: base64 } },
+            { type: 'text', text: '分析這張截圖。' },
+          ],
+        }],
+      })
+
+      if (response.usage) {
+        trackLlmUsage({
+          model: MODEL.HAIKU,
+          inputTokens: response.usage.input_tokens,
+          outputTokens: response.usage.output_tokens,
+          purpose: 'clone_image_analysis',
+          conversationId: trackingContext?.conversationId,
+        })
+      }
+
+      const text = response.content[0]
+      if (text.type !== 'text') {
+        results.push({ imageUrl, designHints: { colors: [], fontStyle: 'sans-serif', layoutDescription: '' }, sectionDescriptions: [], pageTitle: '' })
+        continue
+      }
+
+      // 解析 JSON（容忍 code block 包裝）
+      let raw = text.text.trim()
+      const jsonMatch = raw.match(/```(?:json)?\s*\n?([\s\S]*?)```/)
+      if (jsonMatch) raw = jsonMatch[1].trim()
+
+      const parsed = JSON.parse(raw) as Omit<CloneImageAnalysis, 'imageUrl'>
+      results.push({ imageUrl, ...parsed })
+    } catch (err) {
+      logger.warn({ error: String(err).slice(0, 200), imageUrl }, '圖片分析失敗')
+      results.push({
+        imageUrl,
+        designHints: { colors: [], fontStyle: 'sans-serif', layoutDescription: '' },
+        sectionDescriptions: [],
+        pageTitle: '',
+      })
+    }
+  }
+
+  return results
+}
+
+/**
+ * 合併多張圖片的 designHints 為統一 CloneDesignSystem
+ */
+export function mergeImageDesignSystems(analyses: CloneImageAnalysis[]): CloneDesignSystem {
+  const allColors = analyses.flatMap(a => a.designHints.colors)
+  // 去重取前幾個
+  const unique = [...new Set(allColors)]
+  return {
+    colors: {
+      backgrounds: unique.slice(0, 3),
+      texts: unique.slice(3, 6).length > 0 ? unique.slice(3, 6) : ['#111827', '#6b7280'],
+      accents: unique.slice(6, 9).length > 0 ? unique.slice(6, 9) : ['#6366f1'],
+      borders: [],
+    },
+    typography: {
+      headingFont: analyses[0]?.designHints.fontStyle || 'sans-serif',
+      bodyFont: analyses[0]?.designHints.fontStyle || 'sans-serif',
+    },
+    layout: {
+      sectionCount: analyses.reduce((sum, a) => sum + a.sectionDescriptions.length, 0),
+      heroPresent: analyses.some(a => a.sectionDescriptions.some(s => s.type === 'hero')),
+      footerPresent: analyses.some(a => a.sectionDescriptions.some(s => s.type === 'footer')),
+      dominantLayout: 'flex-column',
+      spacingDensity: 'normal',
+    },
+  }
+}
+
+const CLONE_IMAGE_PAGE_SYSTEM_PROMPT = `你是前端工程師。根據截圖精確重建完整頁面。
+
+## 技術規範
+- React 18 + TypeScript
+- Tailwind CSS v4（@import "tailwindcss" 語法）
+- 動畫庫：motion/react（不是 framer-motion）
+- 字體：不要 import，由 layout.tsx 統一設定
+- 圖片：使用 placeholder（https://placehold.co/WIDTHxHEIGHT 或描述性 SVG placeholder）
+- Icons：lucide-react
+
+## 輸出格式
+把頁面拆成多個組件。每個組件用以下格式輸出：
+
+=== COMPONENT: ComponentName ===
+\`\`\`tsx
+// 完整的 React 組件代碼
+\`\`\`
+
+最後輸出頁面主檔案：
+
+=== PAGE ===
+\`\`\`tsx
+// import 所有組件並組合
+\`\`\`
+
+規則：
+- 每個 section 拆成獨立組件（Header, Hero, Features, Footer 等）
+- 使用 Tailwind 類名精確復刻截圖的樣式（用 arbitrary values 如 bg-[#hex]）
+- 保持截圖中可見的所有文字內容
+- 不要新增互動邏輯（onClick handler 等留空）
+- 不要使用 CSS-in-JS 或 inline styles`
+
+export interface ImagePageResult {
+  pageName: string
+  components: Array<{ componentName: string; code: string }>
+  pageCode: string
+}
+
+/**
+ * 純圖片模式：一張圖生成一個完整 page（含多個組件）
+ */
+export async function generatePageFromImage(
+  imageUrl: string,
+  analysis: CloneImageAnalysis,
+  pageIndex: number,
+  trackingContext?: LlmTrackingContext
+): Promise<ImagePageResult | null> {
+  try {
+    const controller = new AbortController()
+    const timeout = setTimeout(() => controller.abort(), 10000)
+
+    let buffer: Buffer
+    let mediaType: string
+    try {
+      const resp = await fetch(imageUrl, { signal: controller.signal })
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
+      const contentType = resp.headers.get('content-type') || 'image/jpeg'
+      mediaType = contentType.split(';')[0].trim()
+      buffer = Buffer.from(await resp.arrayBuffer())
+    } finally {
+      clearTimeout(timeout)
+    }
+
+    const client = getAnthropicClient()
+    const base64 = buffer.toString('base64')
+
+    const sectionsHint = analysis.sectionDescriptions.length > 0
+      ? `\n## 偵測到的區塊\n${analysis.sectionDescriptions.map((s, i) => `${i + 1}. ${s.name}（${s.type}）：${s.description}`).join('\n')}`
+      : ''
+
+    const designHint = `## 設計參考
+- 色彩：${analysis.designHints.colors.join(', ') || '從截圖辨識'}
+- 字體風格：${analysis.designHints.fontStyle}
+- 佈局：${analysis.designHints.layoutDescription}`
+
+    const pageName = pageIndex === 0 ? 'Home' : (analysis.pageTitle || `Page${pageIndex + 1}`)
+
+    const userMsg = `精確重建截圖中的完整頁面「${pageName}」。
+
+${designHint}
+${sectionsHint}
+
+要求：
+1. 每個可見的 section 拆為獨立組件
+2. 使用 Tailwind 精確復刻色彩、間距、佈局
+3. 文字內容完整保留
+4. 組件放在 components/clone/ 目錄`
+
+    const response = await client.messages.create({
+      model: MODEL.SONNET,
+      max_tokens: 16384,
+      system: CLONE_IMAGE_PAGE_SYSTEM_PROMPT,
+      messages: [{
+        role: 'user',
+        content: [
+          { type: 'image', source: { type: 'base64', media_type: mediaType as 'image/jpeg', data: base64 } },
+          { type: 'text', text: userMsg },
+        ],
+      }],
+    })
+
+    if (response.usage) {
+      trackLlmUsage({
+        model: MODEL.SONNET,
+        inputTokens: response.usage.input_tokens,
+        outputTokens: response.usage.output_tokens,
+        purpose: 'clone_image_page_generation',
+        conversationId: trackingContext?.conversationId,
+      })
+    }
+
+    const text = response.content[0]
+    if (text.type !== 'text') return null
+
+    // 解析多個 === COMPONENT: Xxx === 和 === PAGE ===
+    const output = text.text
+    const components: Array<{ componentName: string; code: string }> = []
+
+    const componentRegex = /=== COMPONENT:\s*(\w+)\s*===\s*```(?:tsx?|jsx?)?\s*\n([\s\S]*?)```/g
+    let match
+    while ((match = componentRegex.exec(output)) !== null) {
+      components.push({ componentName: match[1], code: match[2].trim() })
+    }
+
+    const pageMatch = output.match(/=== PAGE ===\s*```(?:tsx?|jsx?)?\s*\n([\s\S]*?)```/)
+    let pageCode = ''
+    if (pageMatch) {
+      pageCode = pageMatch[1].trim()
+    } else if (components.length === 0) {
+      // LLM 沒有按格式輸出，嘗試提取整個 code block 作為 page
+      const fallbackMatch = output.match(/```(?:tsx?|jsx?)?\s*\n([\s\S]*?)```/)
+      if (fallbackMatch) {
+        pageCode = fallbackMatch[1].trim()
+      } else {
+        return null
+      }
+    }
+
+    // 如果沒有組件但有 pageCode，當作整個頁面
+    if (components.length === 0 && pageCode) {
+      components.push({ componentName: `${pageName}Content`, code: pageCode })
+      pageCode = `import ${pageName}Content from '@/components/clone/${pageName}Content'\n\nexport default function Page() {\n  return <${pageName}Content />\n}`
+    }
+
+    return { pageName, components, pageCode }
+  } catch (err) {
+    logger.warn({ error: String(err).slice(0, 200), imageUrl }, '圖片頁面生成失敗')
+    return null
+  }
+}
+
+/**
+ * 純圖片模式：組裝多頁面
+ */
+export function assembleImagePages(
+  pages: ImagePageResult[],
+  designSystem: CloneDesignSystem,
+  mainTitle?: string,
+): { pages: Array<{ path: string; code: string }>; components: Array<{ path: string; code: string }>; styles: string } {
+  const allComponents: Array<{ path: string; code: string }> = []
+  const allPages: Array<{ path: string; code: string }> = []
+
+  for (let i = 0; i < pages.length; i++) {
+    const p = pages[i]
+    // 組件
+    for (const comp of p.components) {
+      allComponents.push({
+        path: `components/clone/${comp.componentName}.tsx`,
+        code: comp.code,
+      })
+    }
+    // 頁面
+    if (i === 0) {
+      allPages.push({ path: 'app/page.tsx', code: p.pageCode })
+    } else {
+      const slug = p.pageName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || `page${i + 1}`
+      allPages.push({ path: `app/${slug}/page.tsx`, code: p.pageCode })
+    }
+  }
+
+  // globals.css
+  const bg = designSystem.colors.backgrounds[0] || '#ffffff'
+  const text = designSystem.colors.texts[0] || '#111827'
+  const accent = designSystem.colors.accents[0] || '#6366f1'
+
+  const styles = `@import "tailwindcss";
+
+:root {
+  --background: ${bg};
+  --foreground: ${text};
+  --accent: ${accent};
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-body, system-ui, sans-serif);
+}
+`
+
+  // layout.tsx
+  const title = mainTitle || pages[0]?.pageName || 'Cloned Site'
+  const layoutCode = `import type { Metadata } from 'next'
+import './globals.css'
+
+export const metadata: Metadata = {
+  title: '${title.replace(/'/g, "\\'")}',
+}
+
+export default function RootLayout({ children }: { children: React.ReactNode }) {
+  return (
+    <html lang="en">
+      <body>{children}</body>
+    </html>
+  )
+}`
+
+  allPages.push({ path: 'app/layout.tsx', code: layoutCode })
+
+  return { pages: allPages, components: allComponents, styles }
 }

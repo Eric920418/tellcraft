@@ -2285,6 +2285,7 @@ export async function runRedGreenCycle(input: {
   entityMapping: string
   neonConnectionString: string
   maxAttempts?: number
+  maxRegressionRounds?: number
   trackingContext?: { userId?: string; conversationId?: string }
   onProgress: (step: string, percent: number) => Promise<void>
 }): Promise<{
@@ -2292,6 +2293,7 @@ export async function runRedGreenCycle(input: {
   testResults: SpecFormulaTestResult
   attempts: number
   allPassed: boolean
+  regressionRounds: number
 }> {
   const { fixFailingAction } = await import('./coder-generation')
   const maxAttemptsPerFeature = input.maxAttempts ?? 3
@@ -2415,55 +2417,25 @@ export async function runRedGreenCycle(input: {
   }
 
   // ============================================================
-  // Phase 2: 全量回歸測試（抓 cross-feature regression）
+  // Phase 2: 多輪回歸修復迴圈（抓 cross-feature regression）
+  // 最多 maxRegressionRounds 輪：測試 → 修復 → 重測
+  // 智能跳過：失敗集合與上輪相同則停止（修復無效）
   // ============================================================
-  await input.onProgress('最終回歸測試...', 75)
-
-  let finalResult: SpecFormulaTestResult
-  try {
-    finalResult = await runSpecFormulaValidation({
-      backendFiles: currentFiles,
-      featureFiles: input.featureFiles,
-      actionsYml: input.actionsYml,
-      openApiSpec: input.openApiSpec,
-      isaConfigYml: input.isaConfigYml,
-      schemaSql: input.schemaSql,
-      entityMapping: input.entityMapping,
-      neonConnectionString: input.neonConnectionString,
-      onProgress: async (step, pct) => {
-        await input.onProgress(`回歸測試 — ${step}`, 75 + Math.floor(pct * 0.15))
-      },
-    })
-  } catch (testErr) {
-    logger.error({ err: testErr }, '全量回歸測試 crash')
-    finalResult = {
-      totalScenarios: input.featureFiles.length,
-      passed: 0, failed: input.featureFiles.length, skipped: 0,
-      scenarios: input.featureFiles.map(f => ({
-        featureName: f.name, ruleName: '', scenarioName: '(crash)', status: 'failed' as const, error: String(testErr), steps: [],
-      })),
-      durationMs: 0,
-    }
+  const maxRegressionRounds = Math.max(1, input.maxRegressionRounds ?? 2)
+  let regressionRounds = 0
+  let previousFailedNames: Set<string> | null = null
+  let finalResult: SpecFormulaTestResult = {
+    totalScenarios: 0, passed: 0, failed: 0, skipped: 0, scenarios: [], durationMs: 0,
   }
 
-  logger.info({ passed: finalResult.passed, failed: finalResult.failed, total: finalResult.totalScenarios }, '全量回歸測試結果')
+  for (let round = 0; round < maxRegressionRounds; round++) {
+    regressionRounds++
+    const progressBase = 75 + Math.floor(round * (23 / maxRegressionRounds))
+    const progressRange = Math.floor(23 / maxRegressionRounds)
+    const isLastRound = round >= maxRegressionRounds - 1
 
-  // Phase 2.5: 回歸測試有失敗 → 最後一輪修復
-  if (finalResult.failed > 0) {
-    await input.onProgress(`回歸修復 — ${finalResult.failed} 個失敗...`, 90)
-    const failedByAction = groupFailedByAction(finalResult, input.featureFiles, input.actionsYml)
+    await input.onProgress(round === 0 ? '全量回歸測試...' : `回歸修復後重測（第 ${round + 1} 輪）...`, progressBase)
 
-    for (const [actionName, scenarios] of failedByAction) {
-      const kebabName = actionName.replace(/([a-z])([A-Z])/g, '$1-$2').replace(/[_\s]+/g, '-').toLowerCase()
-      const filePath = `lib/actions/${kebabName}.ts`
-      const fileIdx = currentFiles.findIndex(f => f.path === filePath)
-      if (fileIdx === -1) continue
-
-      const fixedCode = await fixFailingAction(actionName, currentFiles[fileIdx].content, scenarios, input.schemaSql, input.trackingContext)
-      currentFiles[fileIdx] = { ...currentFiles[fileIdx], content: fixedCode }
-    }
-
-    // 最終確認
     try {
       finalResult = await runSpecFormulaValidation({
         backendFiles: currentFiles,
@@ -2475,12 +2447,59 @@ export async function runRedGreenCycle(input: {
         entityMapping: input.entityMapping,
         neonConnectionString: input.neonConnectionString,
         onProgress: async (step, pct) => {
-          await input.onProgress(`最終驗證 — ${step}`, 93 + Math.floor(pct * 0.05))
+          await input.onProgress(`回歸測試 — ${step}`, progressBase + Math.floor(pct * progressRange * 0.6 / 100))
         },
       })
       totalAttempts++
-    } catch {
-      // keep previous finalResult
+    } catch (testErr) {
+      logger.error({ err: testErr, round }, '全量回歸測試 crash')
+      finalResult = {
+        totalScenarios: input.featureFiles.length,
+        passed: 0, failed: input.featureFiles.length, skipped: 0,
+        scenarios: input.featureFiles.map(f => ({
+          featureName: f.name, ruleName: '', scenarioName: '(crash)', status: 'failed' as const, error: String(testErr), steps: [],
+        })),
+        durationMs: 0,
+      }
+      break // crash 不重試
+    }
+
+    logger.info({ passed: finalResult.passed, failed: finalResult.failed, total: finalResult.totalScenarios, round }, '回歸測試結果')
+
+    // 全部通過 → 停止
+    if (finalResult.failed === 0) break
+
+    // 最後一輪只測試不修復
+    if (isLastRound) break
+
+    // 智能跳過：失敗集合與上輪完全相同 → 修復無效，停止
+    const currentFailedNames = new Set(
+      finalResult.scenarios
+        .filter(s => s.status === 'failed')
+        .map(s => s.featureName)
+    )
+    if (previousFailedNames && setsEqual(currentFailedNames, previousFailedNames)) {
+      logger.info({ failedFeatures: [...currentFailedNames] }, '回歸失敗集合與上輪相同，停止修復迴圈')
+      break
+    }
+    previousFailedNames = currentFailedNames
+
+    // 按 action 分組修復
+    await input.onProgress(`回歸修復 — ${finalResult.failed} 個失敗...`, progressBase + Math.floor(progressRange * 0.6))
+    const failedByAction = groupFailedByAction(finalResult, input.featureFiles, input.actionsYml)
+
+    for (const [actionName, scenarios] of failedByAction) {
+      const kebabName = actionName.replace(/([a-z])([A-Z])/g, '$1-$2').replace(/[_\s]+/g, '-').toLowerCase()
+      const filePath = `lib/actions/${kebabName}.ts`
+      const fileIdx = currentFiles.findIndex(f => f.path === filePath)
+      if (fileIdx === -1) continue
+
+      try {
+        const fixedCode = await fixFailingAction(actionName, currentFiles[fileIdx].content, scenarios, input.schemaSql, input.trackingContext)
+        currentFiles[fileIdx] = { ...currentFiles[fileIdx], content: fixedCode }
+      } catch (fixErr) {
+        logger.warn({ actionName, err: fixErr }, '回歸修復 fixFailingAction 失敗，跳過此 action')
+      }
     }
   }
 
@@ -2489,7 +2508,17 @@ export async function runRedGreenCycle(input: {
     testResults: finalResult,
     attempts: totalAttempts,
     allPassed: finalResult.failed === 0,
+    regressionRounds,
   }
+}
+
+/** 比較兩個 Set<string> 是否相等 */
+function setsEqual(a: Set<string>, b: Set<string>): boolean {
+  if (a.size !== b.size) return false
+  for (const item of a) {
+    if (!b.has(item)) return false
+  }
+  return true
 }
 
 /** 從 Feature content 提取 # Action: xxx 註解 */

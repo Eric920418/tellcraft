@@ -444,6 +444,34 @@ export const ChatMessageItem = React.memo(function ChatMessageItem({
             </div>
           )}
 
+          {message.richContent?.type === 'clone_progress' && (() => {
+            const d = message.richContent!.data as { phase?: string; totalSections?: number; completedSections?: number; totalImages?: number; completedImages?: number; currentSectionName?: string; estimatedSecondsRemaining?: number }
+            const total = d.totalSections || d.totalImages || 0
+            const completed = d.completedSections || d.completedImages || 0
+            const pct = total > 0 ? Math.round((completed / total) * 100) : 0
+            const estMin = d.estimatedSecondsRemaining ? Math.ceil(d.estimatedSecondsRemaining / 60) : undefined
+            return (
+              <div style={{ marginTop: 12, padding: '12px 16px', borderRadius: 8, background: 'rgba(99, 102, 241, 0.06)', border: '1px solid rgba(99, 102, 241, 0.15)' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+                  <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-secondary)' }}>
+                    {d.phase === 'analyzing' || d.phase === 'analyzing_images' ? '🔍 分析中...' : `⚡ 生成中 ${completed}/${total}`}
+                  </span>
+                  {estMin !== undefined && estMin > 0 && (
+                    <span style={{ fontSize: 11, color: 'var(--text-tertiary)' }}>~{estMin} min</span>
+                  )}
+                </div>
+                {total > 0 && d.phase === 'generating' && (
+                  <div style={{ height: 4, borderRadius: 2, background: 'rgba(99, 102, 241, 0.12)', overflow: 'hidden' }}>
+                    <div style={{ height: '100%', width: `${pct}%`, background: '#6366f1', borderRadius: 2, transition: 'width 0.3s ease' }} />
+                  </div>
+                )}
+                {d.currentSectionName && (
+                  <div style={{ fontSize: 11, color: 'var(--text-tertiary)', marginTop: 4 }}>{d.currentSectionName}</div>
+                )}
+              </div>
+            )
+          })()}
+
           {/* Quick Replies */}
           {message.role === 'assistant' &&
            message.quickReplies &&

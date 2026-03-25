@@ -30,6 +30,7 @@ import {
   handleUiuxMixedPhaseRouting,
 } from './phase-handlers/uiux-phases'
 import { executeDeployerSkill } from './phase-handlers/deploy-phases'
+import { executeCloneSkill } from './phase-handlers/clone-phases'
 import { buildPostDeployFastBuildQuickReplies } from './phase-handlers/fast-build-phases'
 import {
   executeDomainSkill,
@@ -144,6 +145,85 @@ export async function routePhase(
         ? '正在復刻網站中，請稍候...'
         : 'Cloning in progress, please wait...',
       stage: state.phase as 'clone_analyzing' | 'clone_generating',
+    })
+    return true
+  }
+  // Clone Skill：失敗 → 重試 / 新專案
+  if (state.phase === 'clone_failed') {
+    const isChinese = /[\u4e00-\u9fff]/.test(trimmedMsg) || state.locale === 'zh'
+
+    // __new_project__ 由 handleContinueFlow 入口統一處理
+    if (trimmedMsg === '__retry_clone__' || trimmedMsg.includes('重試') || trimmedMsg.includes('retry')) {
+      // 用原始 URL 或圖片重試
+      await executeCloneSkill({
+        projectId: data.projectId,
+        conversationId,
+        userId: data.userId,
+        url: state.cloneSourceUrl,
+        imageUrls: state.cloneImageUrls,
+        locale: state.locale,
+        redis,
+        io,
+      })
+      return true
+    }
+
+    // 問候/閒聊攔截
+    const intentCheck = detectFastModeIntent(trimmedMsg)
+    if (intentCheck.match) {
+      await sendMessage(conversationId, io, {
+        content: isChinese
+          ? `復刻失敗了。你可以重試或開始新專案。`
+          : `Clone failed. You can retry or start a new project.`,
+        stage: 'clone_failed' as const,
+        quickReplies: [
+          { label: isChinese ? '重試' : 'Retry', value: '__retry_clone__', style: 'primary' as const },
+          { label: isChinese ? '新專案' : 'New Project', value: '__new_project__' },
+        ],
+      })
+      return true
+    }
+
+    // 預設：視為新的 URL 或描述 → 重試
+    const { extractFirstUrl, isSafeUrl } = await import('../services/reference-analyzer')
+    const newUrl = extractFirstUrl(trimmedMsg)
+    if (newUrl && isSafeUrl(newUrl)) {
+      await executeCloneSkill({
+        projectId: data.projectId,
+        conversationId,
+        userId: data.userId,
+        url: newUrl,
+        imageUrls: data.imageUrls,
+        locale: state.locale,
+        redis,
+        io,
+      })
+      return true
+    }
+
+    // 有圖片 → 用圖片重試
+    if (data.imageUrls?.length) {
+      await executeCloneSkill({
+        projectId: data.projectId,
+        conversationId,
+        userId: data.userId,
+        imageUrls: data.imageUrls,
+        locale: state.locale,
+        redis,
+        io,
+      })
+      return true
+    }
+
+    // 無法解析 → 提示
+    await sendMessage(conversationId, io, {
+      content: isChinese
+        ? '請輸入網址或上傳截圖重試，或按「新專案」重新開始。'
+        : 'Please enter a URL or upload screenshots to retry, or click "New Project" to start over.',
+      stage: 'clone_failed' as const,
+      quickReplies: [
+        { label: isChinese ? '新專案' : 'New Project', value: '__new_project__' },
+      ],
     })
     return true
   }

@@ -205,6 +205,15 @@ export interface FlowState {
   }
   cloneAnalyzingStartedAt?: number        // 超時偵測
   cloneGeneratingStartedAt?: number       // 超時偵測
+  // Clone 圖片模式擴充
+  cloneImageUrls?: string[]               // 用戶上傳的圖片 URL
+  cloneInputMode?: 'url' | 'hybrid' | 'image_only'
+  cloneImageAnalyses?: Array<{
+    imageUrl: string
+    pageTitle?: string
+    status: 'pending' | 'analyzed' | 'generated' | 'failed'
+  }>
+  cloneFailedReason?: string              // 失敗原因（供 clone_failed 顯示）
 }
 
 export interface CloneSectionMeta {

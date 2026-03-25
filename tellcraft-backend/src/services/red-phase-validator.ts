@@ -4,7 +4,7 @@
  * 在 Coder 代碼生成前執行，提前抓出 Feature ↔ actionsYml ↔ Schema 的不一致。
  * 零 LLM 零 IO（純靜態分析），~2 秒完成。
  *
- * 8 個檢查：
+ * 11 個檢查：
  *   1. Action 存在性
  *   2. HTTP Method 一致性
  *   3. Path 一致性
@@ -13,6 +13,9 @@
  *   6. Status Code 合理性
  *   7. Entity 對應性（entity name vs schema table）
  *   8. Step 可解析性（step text → ISA instruction regex 匹配）
+ *   9. DataTable Column Coverage（entity_setup 的 DataTable 欄位是否都能映射到 schema column）
+ *  10. NOT NULL Column Completeness（NOT NULL 且無 DEFAULT 的 column 是否在 DataTable 中提供）
+ *  11. FK Reference Table Validity（entity_setup 的 FK 欄位引用的表是否存在）
  */
 
 import * as yaml from 'js-yaml'
@@ -21,7 +24,7 @@ import { isQueryAction, convertToOpenAPI } from './actions-design'
 import { parseSchemasFromString, runAllFeatures, type ScenarioResult, type StepResult, type SpecFormulaTestResult } from './specformula-runner'
 import { deriveSchemaFromBdd } from './schema-derivation'
 import { StubHttpAdapter } from '../lib/specformula/http/stub-adapter'
-import type { DatabaseSchema } from '../lib/specformula/spec/data/models'
+import { DatabaseSchema } from '../lib/specformula/spec/data/models'
 import { createLogger } from '../lib/logger'
 
 const logger = createLogger('red-phase-validator')
@@ -46,6 +49,9 @@ export type RedPhaseIssueType =
   | 'status_mismatch'
   | 'entity_mismatch'
   | 'step_not_parseable'
+  | 'column_not_found'
+  | 'not_null_missing'
+  | 'fk_table_not_found'
 
 export interface RedPhaseIssue {
   featureName: string
@@ -246,7 +252,82 @@ function isStepParseable(stepText: string): boolean {
 }
 
 // ============================================================
-// 核心：8 個靜態檢查
+// Entity Setup DataTable 提取（從 Feature 原始文本）
+// ============================================================
+
+interface EntitySetupStep {
+  entityName: string
+  headers: string[]  // DataTable headers，已去除 VAR 前綴
+}
+
+/**
+ * 從 Feature 原始文本提取所有 entity_setup 步驟的 entity 名稱 + DataTable headers。
+ * 同步函數（regex-based），不依賴 @cucumber/gherkin。
+ */
+export function extractEntitySetupSteps(content: string): EntitySetupStep[] {
+  const results: EntitySetupStep[] = []
+  const lines = content.split('\n')
+
+  for (let i = 0; i < lines.length; i++) {
+    const trimmed = lines[i].trim()
+    // 匹配 entity_setup 步驟：準備一個{entity}, with table: 或 準備一個{entity}，with table:
+    const match = trimmed.match(/(?:Given|When|Then|And|But)\s+準備一個\s*(.+?)\s*[,，]\s*with\s+table:/i)
+    if (!match) continue
+
+    const entityName = match[1].trim()
+
+    // 收集後續 DataTable 行（| 開頭）
+    const tableLines: string[] = []
+    for (let j = i + 1; j < lines.length; j++) {
+      const tl = lines[j].trim()
+      if (tl.startsWith('|')) {
+        tableLines.push(tl)
+      } else {
+        break
+      }
+    }
+
+    if (tableLines.length === 0) continue
+
+    // 第一行是 headers
+    const rawHeaders = tableLines[0].split('|').map(c => c.trim()).filter(Boolean)
+    // 去除 VAR 前綴（>, <, $）取欄位名
+    const headers = rawHeaders.map(h => {
+      // >ContextName.field → field
+      // <executionKey → executionKey
+      // $Variable → Variable
+      let clean = h
+      if (clean.startsWith('>') || clean.startsWith('<') || clean.startsWith('$')) {
+        clean = clean.substring(1)
+      }
+      // Context.field → field（取最後一段）
+      const dotIdx = clean.lastIndexOf('.')
+      if (dotIdx >= 0) clean = clean.substring(dotIdx + 1)
+      return clean
+    })
+
+    results.push({ entityName, headers })
+  }
+
+  return results
+}
+
+/**
+ * 查找 column name 在 table 的 columns 中是否存在（支援 camelCase ↔ snake_case）
+ */
+function findColumnInTable(columnName: string, table: { columns: Array<{ name: string }> }): boolean {
+  const snake = toSnakeCase(columnName).toLowerCase()
+  const camel = toCamelCase(columnName).toLowerCase()
+  const lower = columnName.toLowerCase()
+  for (const col of table.columns) {
+    const cn = col.name.toLowerCase()
+    if (cn === lower || cn === snake || cn === camel) return true
+  }
+  return false
+}
+
+// ============================================================
+// 核心：11 個靜態檢查
 // ============================================================
 
 export function executeRedPhase(input: RedPhaseInput): RedPhaseResult {
@@ -435,6 +516,112 @@ export function executeRedPhase(input: RedPhaseInput): RedPhaseResult {
         })
       }
     }
+
+    // ---- Checks 9-11: Schema-Aware DataTable 深度驗證 ----
+    if (schemas.length > 0) {
+      const setupSteps = extractEntitySetupSteps(feature.content)
+
+      for (const step of setupSteps) {
+        const found = DatabaseSchema.findSchemaAndTable(schemas, step.entityName)
+        if (!found) continue // Check 7 已處理 entity 不存在的情況
+
+        const { table } = found
+        // 建立所有 table column 的 name set（小寫）用於快速查詢
+        const tableColumnNames = new Set(table.columns.map(c => c.name.toLowerCase()))
+
+        // ---- Check 9: DataTable Column Coverage ----
+        for (const header of step.headers) {
+          if (findColumnInTable(header, table)) continue
+
+          // 檢查是否存在於其他表（跨表 FK 解析場景）
+          let existsInOtherTable = false
+          for (const schema of schemas) {
+            for (const [, otherTable] of schema.getTablesByEntityName()) {
+              if (otherTable.tableName === table.tableName) continue
+              if (findColumnInTable(header, otherTable)) {
+                existsInOtherTable = true
+                break
+              }
+            }
+            if (existsInOtherTable) break
+          }
+
+          issues.push({
+            featureName: displayName,
+            issueType: 'column_not_found',
+            severity: existsInOtherTable ? 'warning' : 'error',
+            description: existsInOtherTable
+              ? `entity_setup "${step.entityName}" 的 DataTable 欄位 "${header}" 不在此表中，但存在於其他表（可能是跨表 FK 解析）`
+              : `entity_setup "${step.entityName}" 的 DataTable 欄位 "${header}" 在 schema 中找不到任何匹配的 column`,
+            suggestion: existsInOtherTable
+              ? `運行時 resolveNonSchemaColumns 會嘗試跨表 FK 解析，但建議確認 FK 關係是否正確`
+              : `確認欄位名是否正確（支援 camelCase ↔ snake_case），或在 schema 中新增對應 column`,
+          })
+        }
+
+        // ---- Check 10: NOT NULL Column Completeness ----
+        const providedColumns = new Set(
+          step.headers.map(h => toSnakeCase(h).toLowerCase())
+        )
+
+        for (const col of table.columns) {
+          if (!col.notNull) continue
+          if (col.defaultValue) continue
+          if (col.primaryKey) continue
+          if (col.autoIncrement) continue
+          // FK 欄位由 fillMissingNotNullColumns + ensureFkReferencesExist 自動處理
+          // 欄位名以 _id 結尾即視為 FK，無論型別（UUID/VARCHAR/INT 都可能）
+          if (col.name.endsWith('_id')) continue
+
+          const colLower = col.name.toLowerCase()
+          if (providedColumns.has(colLower)) continue
+          // 也檢查 camelCase 版本
+          if (providedColumns.has(toCamelCase(col.name).toLowerCase())) continue
+
+          issues.push({
+            featureName: displayName,
+            issueType: 'not_null_missing',
+            severity: 'warning',
+            description: `entity_setup "${step.entityName}" 缺少 NOT NULL column "${col.name}"（型別: ${col.type}）`,
+            suggestion: `運行時 fillMissingNotNullColumns 會自動填充 placeholder，但建議在 Feature DataTable 中明確提供`,
+          })
+        }
+
+        // ---- Check 11: FK Reference Table Validity ----
+        for (const header of step.headers) {
+          const snakeName = toSnakeCase(header).toLowerCase()
+          if (!snakeName.endsWith('_id')) continue
+
+          const baseName = snakeName.replace(/_id$/, '')
+          // 嘗試多種表名格式（含英文不規則複數 y→ies）
+          const candidates = [
+            baseName + 's',
+            baseName + 'es',
+            baseName,
+            ...(baseName.endsWith('y') ? [baseName.slice(0, -1) + 'ies'] : []),
+          ]
+          const fkTableExists = candidates.some(c => allTableNames.has(c))
+
+          // 也檢查 column 定義中的 foreignKey 是否合法
+          const colDef = table.columns.find(c => c.name.toLowerCase() === snakeName)
+          if (colDef?.foreignKey) {
+            // foreignKey format: 'table.column' or 'table(column)'
+            const fkTable = colDef.foreignKey.split(/[.(]/)[0].toLowerCase()
+            if (allTableNames.has(fkTable)) continue // FK 有明確定義且表存在
+          }
+
+          if (!fkTableExists) {
+            issues.push({
+              featureName: displayName,
+              issueType: 'fk_table_not_found',
+              severity: 'warning',
+              description: `entity_setup "${step.entityName}" 的 FK 欄位 "${header}" 引用的表 "${candidates.join('/')}" 在 schema 中找不到`,
+              suggestion: `確認 FK 關係是否正確，或在 schema 中新增被引用的表`,
+            })
+          }
+        }
+      }
+    }
   }
 
   const errors = issues.filter(i => i.severity === 'error').length
@@ -553,7 +740,7 @@ export interface RedPhaseFullInput {
   neonConnectionString: string
 }
 
-export type RedPhaseFailureType = 'entity_setup' | 'step_parsing' | 'api_spec_mismatch' | 'var_resolution' | 'unknown'
+export type RedPhaseFailureType = 'entity_setup' | 'step_parsing' | 'api_spec_mismatch' | 'var_resolution' | 'routing_mismatch' | 'unknown'
 
 export interface RedPhaseUnexpectedFailure {
   featureName: string
@@ -601,6 +788,11 @@ export function classifyRedPhaseFailure(step: StepResult): 'expected_red' | RedP
   // response_validate 因 501 失敗 → 預期的 RED（stub 回 501，Feature 期望 200/201）
   if (err.includes('HTTP 狀態碼不匹配') && err.includes('實際: 501')) {
     return 'expected_red'
+  }
+
+  // response_validate 因 404 失敗 → 路由不匹配（RoutingStubAdapter 獨有）
+  if (err.includes('HTTP 狀態碼不匹配') && err.includes('實際: 404')) {
+    return 'routing_mismatch'
   }
 
   // 操作失敗（skip）步驟在 RED Phase 中容錯通過
@@ -743,6 +935,146 @@ export async function runRedPhaseFullValidation(input: RedPhaseFullInput): Promi
       passed,
       expectedRedCount,
       unexpectedFailures,
+      totalScenarios: testResult.totalScenarios,
+      durationMs,
+    }
+  } finally {
+    await pool.end()
+  }
+}
+
+// ============================================================
+// RED Phase Layer 2.5: Routing-Aware Stub 驗證
+// ============================================================
+
+export interface RedPhaseRoutingResult {
+  passed: boolean
+  routingMismatches: Array<{
+    featureName: string
+    scenarioName: string
+    stepText: string
+    error: string
+  }>
+  expectedRedCount: number
+  totalScenarios: number
+  durationMs: number
+}
+
+/**
+ * RED Phase Layer 2.5: Routing-Aware Stub 驗證
+ *
+ * 與 Layer 2 (StubHttpAdapter) 的區別：
+ * - Layer 2：所有 HTTP 請求統一回 501，無法發現路由不匹配
+ * - Layer 2.5：in-process Express app 做真實路由匹配，匹配 → 501，不匹配 → 404
+ *
+ * 捕捉的額外問題：
+ * - Feature summary 對應的 API path 在 OpenAPI spec 中不匹配
+ * - HTTP method 定義錯誤（GET vs POST）
+ * - URL path 參數格式問題
+ */
+export async function runRedPhaseRoutingValidation(input: RedPhaseFullInput): Promise<RedPhaseRoutingResult> {
+  const start = Date.now()
+
+  // 從 actionsYml 提取路由定義
+  const actionsMeta = parseActionsYmlMeta(input.actionsYml)
+  const routes: import('../lib/specformula/http/routing-stub-adapter').RouteDefinition[] = actionsMeta.map(a => ({
+    method: a.method,
+    path: a.path,
+    actionName: a.name,
+  }))
+
+  if (routes.length === 0) {
+    return {
+      passed: true,
+      routingMismatches: [],
+      expectedRedCount: 0,
+      totalScenarios: 0,
+      durationMs: Date.now() - start,
+    }
+  }
+
+  // 動態 import 避免 express 成為必要依賴（已在 VPS 後端環境中可用）
+  const { RoutingStubAdapter } = await import('../lib/specformula/http/routing-stub-adapter')
+  const routingAdapter = new RoutingStubAdapter(routes)
+
+  // 連接 Neon DB（entity_setup 需要真實 DB）
+  const pool = new Pool({
+    connectionString: input.neonConnectionString,
+    max: 3,
+    idleTimeoutMillis: 10_000,
+  })
+
+  try {
+    // MySQL DDL → PostgreSQL DDL
+    const derived = deriveSchemaFromBdd(input.schemaSql, input.entityMapping)
+    const pgSchemaSql = derived.postgresqlDDL
+
+    const featureFiles = input.features.map(f => ({
+      name: f.name || f.actionName,
+      content: f.content,
+    }))
+
+    // 如果 openApiSpec 為空，從 actionsYml 動態生成
+    let effectiveOpenApiSpec = input.openApiSpec
+    if (!effectiveOpenApiSpec || !effectiveOpenApiSpec.trim()) {
+      try {
+        effectiveOpenApiSpec = convertToOpenAPI(input.actionsYml)
+      } catch {
+        effectiveOpenApiSpec = ''
+      }
+    }
+
+    // 用 RoutingStubAdapter 跑 SpecFormula
+    const testResult: SpecFormulaTestResult = await runAllFeatures({
+      features: featureFiles,
+      isaConfigYml: input.isaConfigYml,
+      openApiSpec: effectiveOpenApiSpec,
+      schemaSql: pgSchemaSql,
+      entityMapping: input.entityMapping,
+      httpAdapter: routingAdapter,
+      pool,
+    })
+
+    // 分類結果 — 只關注 routing_mismatch
+    let expectedRedCount = 0
+    const routingMismatches: RedPhaseRoutingResult['routingMismatches'] = []
+
+    for (const scenario of testResult.scenarios) {
+      if (scenario.status === 'passed') continue
+
+      for (const step of scenario.steps) {
+        if (step.status !== 'failed') continue
+
+        const classification = classifyRedPhaseFailure(step)
+        if (classification === 'routing_mismatch') {
+          routingMismatches.push({
+            featureName: scenario.featureName,
+            scenarioName: scenario.scenarioName,
+            stepText: step.text.substring(0, 100),
+            error: (step.error || '').substring(0, 300),
+          })
+        } else if (classification === 'expected_red') {
+          expectedRedCount++
+        }
+        // 其他類型的失敗（entity_setup 等）忽略 — Layer 2 已經處理過
+      }
+    }
+
+    const durationMs = Date.now() - start
+    const passed = routingMismatches.length === 0
+
+    logger.info({
+      passed,
+      routingMismatches: routingMismatches.length,
+      expectedRedCount,
+      totalScenarios: testResult.totalScenarios,
+      durationMs,
+    }, 'RED Phase Routing 驗證完成')
+
+    return {
+      passed,
+      routingMismatches,
+      expectedRedCount,
       totalScenarios: testResult.totalScenarios,
       durationMs,
     }

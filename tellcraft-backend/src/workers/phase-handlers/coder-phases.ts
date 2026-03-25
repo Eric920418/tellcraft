@@ -11,7 +11,7 @@ import { type GeneratedComponent, generateTailwindConfig } from '../../services/
 import { executeCoderPipeline } from '../../services/coder-generation'
 import { sendMessage, saveFlowState, getFlowState, touchFlowActivity, snapshotCodeToGeneration, inferFileType } from '../orchestrator-utils'
 import { runCoderE2ETests } from '../../services/coder-e2e-test'
-import { executeRedPhase, formatRedPhaseReport, runRedPhaseFullValidation } from '../../services/red-phase-validator'
+import { executeRedPhase, formatRedPhaseReport, runRedPhaseFullValidation, runRedPhaseRoutingValidation } from '../../services/red-phase-validator'
 import { createLogger } from '../../lib/logger'
 
 const logger = createLogger('coder-phases')
@@ -232,6 +232,54 @@ export async function executeCoderSkill(input: CoderSkillInput): Promise<void> {
     } catch (e) {
       // Stub RED Phase 失敗不阻塞 Pipeline — 降級跳過
       logger.error({ error: e }, 'RED Phase Stub 執行失敗，降級跳過')
+    }
+  }
+
+  // 6.5 RED Phase Routing — 路由匹配驗證（in-process Express + SupertestAdapter）
+  if (bddSession.features_content && bddSession.features_content.length > 0
+      && bddSession.open_api_spec_content && bddSession.isa_config_content) {
+    try {
+      const project = await db.queryOne<{ neon_connection_string: string | null }>(
+        `SELECT neon_connection_string FROM projects WHERE id = $1`, [projectId]
+      )
+
+      if (project?.neon_connection_string) {
+        const routingResult = await runRedPhaseRoutingValidation({
+          features: bddSession.features_content,
+          actionsYml: bddSession.actions_yml_content,
+          openApiSpec: bddSession.open_api_spec_content,
+          isaConfigYml: bddSession.isa_config_content,
+          schemaSql: bddSession.schema_sql_content,
+          entityMapping: bddSession.entity_mapping_content || '',
+          neonConnectionString: project.neon_connection_string,
+        })
+
+        if (!routingResult.passed && routingResult.routingMismatches.length > 0) {
+          logger.warn({
+            mismatches: routingResult.routingMismatches.length,
+            details: routingResult.routingMismatches.map(m => ({
+              feature: m.featureName,
+              step: m.stepText.substring(0, 60),
+            })),
+          }, 'RED Phase Routing 發現路由不匹配')
+
+          const mismatchSummary = routingResult.routingMismatches
+            .map(m => `- ${m.featureName}: ${m.stepText.substring(0, 60)}`)
+            .join('\n')
+          await sendMessage(conversationId, io, {
+            content: `⚠ Routing 驗證發現 ${routingResult.routingMismatches.length} 個路由不匹配（不阻塞生成）：\n${mismatchSummary}`,
+            stage: 'coder_generating',
+          })
+        } else {
+          logger.info({
+            expectedRed: routingResult.expectedRedCount,
+            totalScenarios: routingResult.totalScenarios,
+            durationMs: routingResult.durationMs,
+          }, 'RED Phase Routing 通過')
+        }
+      }
+    } catch (e) {
+      logger.error({ error: e }, 'RED Phase Routing 執行失敗，降級跳過')
     }
   }
 
