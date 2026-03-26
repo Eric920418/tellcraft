@@ -161,11 +161,11 @@ const MODULE_ROTATION: Record<ForgeModule['kind'], number> = {
 
 // ── 鐵鎚敲打週期（秒）──
 const HAMMER_CYCLE: Record<ForgeAction, number> = {
-  heating: 0,        // 加熱時不敲
-  shaping: 1.5,
-  striking: 0.9,
-  trimming: 1.3,
-  polishing: 0,      // 拋光時不敲
+  heating: 2.0,      // 慢節奏預熱敲
+  shaping: 1.4,
+  striking: 0.8,     // 最快
+  trimming: 1.2,
+  polishing: 1.8,    // 輕節奏收尾敲
 }
 
 function clamp(value: number, min: number, max: number): number {
@@ -906,7 +906,7 @@ export default function AIGenerationWaitingScene({
           </div>
 
           {/* ── 鐵砧（底部中央） ── */}
-          <div style={{ position: 'absolute', left: '50%', bottom: '10%', width: '18%', transform: 'translateX(-50%)', zIndex: 6 }}>
+          <div style={{ position: 'absolute', left: '50%', bottom: '10%', width: '22%', transform: 'translateX(-50%)', zIndex: 6 }}>
             <AnvilSvg color={phaseColor} />
             {/* 砧面反光隨溫度變化 */}
             <motion.div
@@ -926,20 +926,22 @@ export default function AIGenerationWaitingScene({
           </div>
 
           {/* ── 鐵鎚（鐵砧上方，擺動動畫） ── */}
-          <div style={{ position: 'absolute', left: '50%', bottom: '22%', width: '6%', transform: 'translateX(-50%)', transformOrigin: 'top center', zIndex: 7 }}>
+          <div style={{ position: 'absolute', left: '50%', bottom: '24%', width: '10%', transform: 'translateX(-50%)', transformOrigin: 'top center', zIndex: 7 }}>
             <motion.div
               animate={
                 reduceMotion
                   ? {}
-                  : hammerActive
-                    ? { rotate: ['-25deg', '8deg', '-25deg'], y: [0, 6, 0] }
-                    : { rotate: '-30deg', y: 0 }
+                  : {
+                      rotate: ['-50deg', '-55deg', '15deg', '10deg', '-50deg'],
+                      y: [0, -4, 12, 8, 0],
+                    }
               }
-              transition={
-                hammerActive
-                  ? { duration: hammerDuration, repeat: Infinity, ease: [0.36, 0, 0.66, 1], times: [0, 0.55, 1] }
-                  : { duration: 0.6, ease: 'easeOut' }
-              }
+              transition={{
+                duration: hammerDuration,
+                repeat: Infinity,
+                ease: 'linear',
+                times: [0, 0.3, 0.52, 0.6, 1],
+              }}
               style={{ transformOrigin: 'top center' }}
             >
               <HammerSvg />

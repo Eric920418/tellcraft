@@ -7,7 +7,9 @@ import {
   initializeSession as vpsInitializeSession,
   getConversationMessages as vpsGetConversationMessages,
   sendMessage as vpsSendMessage,
+  uploadImage,
 } from '@/app/lib/vps-api'
+import { normalizeLegacyUploadUrl } from '@/app/lib/upload-url'
 import { formatBackendMessage } from '@/app/lib/chat-utils'
 import type { Message, SessionInfo } from '@/app/types/chat'
 
@@ -33,7 +35,8 @@ export function useChatSession(
       promptId: string
     }) => void
     onError: (err: string | null) => void
-  }
+  },
+  initialImages?: File[],
 ) {
   const tChat = useTranslations('chat')
   const tLogin = useTranslations('login')
@@ -171,11 +174,13 @@ export function useChatSession(
         const previewMsg: Message = {
           id: 'preview-analyzing',
           role: 'assistant',
-          content: buildMode === 'fast'
+          content: buildMode === 'clone'
+            ? tChat('clonePreview')
+            : buildMode === 'fast'
             ? tChat('fastBuildPreview')
             : tChat('analyzePreview'),
           timestamp: new Date(),
-          stage: buildMode === 'fast' ? 'fast_generating' : 'clarify',
+          stage: buildMode === 'clone' ? 'clone_analyzing' : buildMode === 'fast' ? 'fast_generating' : 'clarify',
           pending: true
         }
 
@@ -184,6 +189,21 @@ export function useChatSession(
         callbacks.onIsTyping(true)
         callbacks.onCurrentStage('clarify')
 
+        // Upload initial images (clone mode)
+        let imageUrls: string[] | undefined
+        if (initialImages && initialImages.length > 0 && token) {
+          const urls: string[] = []
+          for (const file of initialImages) {
+            try {
+              const uploadResult = await uploadImage({ file, token })
+              if (uploadResult.success && uploadResult.data?.url) {
+                urls.push(normalizeLegacyUploadUrl(uploadResult.data.url))
+              }
+            } catch { /* skip failed uploads */ }
+          }
+          if (urls.length > 0) imageUrls = urls
+        }
+
         const sendResult = await vpsSendMessage({
           conversationId: session.conversationId,
           message: initialMessage,
@@ -191,7 +211,8 @@ export function useChatSession(
           userId: session.userId,
           mode: buildMode,
           locale,
-          token: token || undefined
+          token: token || undefined,
+          imageUrls,
         })
 
         if (!sendResult.success) {

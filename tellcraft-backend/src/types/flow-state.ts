@@ -192,6 +192,8 @@ export interface FlowState {
   coderTestPassed?: boolean               // 測試是否全部通過
   coderTestAttempts?: number              // 紅綠燈循環次數
   coderTestStartedAt?: number             // 超時偵測
+  coderTestFailedScenarios?: number       // 失敗場景數（供部署風險提示）
+  deployedWithFailingTests?: boolean      // 是否帶風險部署（測試未全通過即部署）
   // Clone Skill（網站復刻）
   cloneMode?: boolean
   cloneSourceUrl?: string

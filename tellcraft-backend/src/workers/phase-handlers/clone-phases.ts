@@ -19,6 +19,7 @@ import {
   type CloneImageAnalysis,
 } from '../../services/web-clone-service'
 import { runQualityGate, autoFixCriticalIssuesRuleBased, autoFixCriticalIssues } from '../../services/quality-gate'
+import { buildPostDeployFastBuildQuickReplies } from './fast-build-phases'
 import { createLogger } from '../../lib/logger'
 
 const logger = createLogger('clone-phases')
@@ -527,10 +528,7 @@ async function finalizeMergedCode(
       ? `復刻完成！成功還原 **${successCount}/${totalCount}** 個${unitLabel}。${failCount > 0 ? `（${failCount} 個${unitLabel}生成失敗）` : ''}\n\n你可以：\n- 描述修改需求（例如「把背景改成深色」）\n- 直接部署上線`
       : `Clone complete! Successfully reconstructed **${successCount}/${totalCount}** ${unitLabel}.${failCount > 0 ? ` (${failCount} ${unitLabel} failed)` : ''}\n\nYou can:\n- Describe modifications\n- Deploy directly`,
     stage: 'uiux_complete',
-    quickReplies: [
-      { label: isChinese ? '部署上線' : 'Deploy', value: isChinese ? '部署' : 'Deploy', style: 'primary' as const },
-      { label: isChinese ? '新專案' : 'New Project', value: '__new_project__' },
-    ],
+    quickReplies: buildPostDeployFastBuildQuickReplies(state, { includeDeploy: true }),
   })
 
   logger.info({

@@ -163,14 +163,19 @@ export class ApiCall {
     }
 
     if (bodyParams.size > 0) {
-      const body: Record<string, unknown> = {};
-      for (const [key, val] of bodyParams) {
-        setJson(body, key, val);
+      // GET/HEAD 不能帶 body，將 body params 轉為 query params
+      if (method === 'GET' || method === 'HEAD') {
+        for (const [key, val] of bodyParams) {
+          if (val != null) requestBuilder.queryParam(key, val);
+        }
+      } else {
+        const body: Record<string, unknown> = {};
+        for (const [key, val] of bodyParams) {
+          setJson(body, key, val);
+        }
+        requestBuilder.header('Content-Type', 'application/json');
+        requestBuilder.body(JSON.stringify(body));
       }
-      // Debug: 追蹤 api_call 發送的 request body
-      console.log(`[ApiCall DEBUG] ${method} ${url} body=${JSON.stringify(body).substring(0, 300)}`);
-      requestBuilder.header('Content-Type', 'application/json');
-      requestBuilder.body(JSON.stringify(body));
     }
 
     // 執行請求

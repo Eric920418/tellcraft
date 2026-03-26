@@ -42,6 +42,8 @@ function HeroSection({
   onLoginRequired,
   recentProjects,
   onResumeProject,
+  heroImages,
+  onHeroImagesChange,
 }: {
   onStartChat: () => void
   inputValue: string
@@ -53,6 +55,8 @@ function HeroSection({
   onLoginRequired: () => void
   recentProjects: Array<{ id: string; name: string; status: string; latestConversationId: string | null }>
   onResumeProject: (conversationId: string) => void
+  heroImages: File[]
+  onHeroImagesChange: (files: File[]) => void
 }) {
   const tHero = useTranslations('hero')
   const [isFocused, setIsFocused] = useState(false)
@@ -61,6 +65,7 @@ function HeroSection({
   const [activePresetKey, setActivePresetKey] = useState<string | null>(null)
   const [isPresetOpen, setIsPresetOpen] = useState(true)
   const inputRef = useRef<HTMLTextAreaElement>(null)
+  const heroImageInputRef = useRef<HTMLInputElement>(null)
   const presetIdRef = useRef(0)
   const presetActiveTimeoutRef = useRef<number | null>(null)
 
@@ -181,7 +186,7 @@ function HeroSection({
 
   const trimmedInput = inputValue.trim()
   const isFastModeShortWarning = buildMode === 'fast' && trimmedInput.length > 0 && trimmedInput.length < 15
-  const canSubmit = trimmedInput.length > 0 && !isTransitioning
+  const canSubmit = (trimmedInput.length > 0 || (buildMode === 'clone' && heroImages.length > 0)) && !isTransitioning
 
   const handlePresetApply = (preset: PresetDefinition) => {
     onInputChange(preset.prompt)
@@ -399,6 +404,63 @@ function HeroSection({
                 background: 'transparent',
               }}
             />
+            {/* Clone 模式：圖片上傳 + 預覽 */}
+            {buildMode === 'clone' && (
+              <>
+                <input
+                  ref={heroImageInputRef}
+                  type="file"
+                  multiple
+                  accept="image/jpeg,image/png,image/webp,image/gif"
+                  onChange={(e) => {
+                    const files = e.target.files
+                    if (!files) return
+                    const accepted = ['image/jpeg', 'image/png', 'image/webp', 'image/gif']
+                    const newFiles = Array.from(files).filter(f => accepted.includes(f.type) && f.size <= 5 * 1024 * 1024)
+                    onHeroImagesChange([...heroImages, ...newFiles].slice(0, 5))
+                    e.target.value = ''
+                  }}
+                  style={{ display: 'none' }}
+                />
+                {heroImages.length > 0 && (
+                  <div style={{
+                    padding: '8px 16px',
+                    borderTop: '1px solid var(--border-color)',
+                    display: 'flex',
+                    gap: 8,
+                    flexWrap: 'wrap',
+                    background: 'var(--gray-50)',
+                  }}>
+                    {heroImages.map((file, idx) => (
+                      <div key={`${file.name}-${idx}`} style={{ position: 'relative', width: 56, height: 56, borderRadius: 6, overflow: 'hidden', border: '1px solid var(--border-color)' }}>
+                        <img
+                          src={URL.createObjectURL(file)}
+                          alt={file.name}
+                          style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                          onLoad={(e) => URL.revokeObjectURL((e.target as HTMLImageElement).src)}
+                        />
+                        <button
+                          onClick={() => onHeroImagesChange(heroImages.filter((_, i) => i !== idx))}
+                          style={{
+                            position: 'absolute', top: 2, right: 2,
+                            width: 16, height: 16, borderRadius: '50%',
+                            background: 'rgba(0,0,0,0.6)', color: '#fff',
+                            border: 'none', cursor: 'pointer',
+                            fontSize: 10, lineHeight: '16px', textAlign: 'center',
+                            padding: 0,
+                          }}
+                        >
+                          ×
+                        </button>
+                      </div>
+                    ))}
+                    <span style={{ fontSize: 11, color: 'var(--gray-400)', alignSelf: 'center' }}>
+                      {heroImages.length}/5
+                    </span>
+                  </div>
+                )}
+              </>
+            )}
             <div style={{
               padding: '10px 16px 10px 10px',
               borderTop: '1px solid var(--border-color)',
@@ -482,6 +544,30 @@ function HeroSection({
                   Clone
                 </button>
               </div>
+              {buildMode === 'clone' && (
+                <button
+                  onClick={() => heroImageInputRef.current?.click()}
+                  disabled={heroImages.length >= 5}
+                  title={tHero('attachScreenshot')}
+                  style={{
+                    padding: 0, width: 32, height: 32,
+                    background: 'none',
+                    border: '1px solid var(--border-color)',
+                    borderRadius: 6,
+                    cursor: heroImages.length >= 5 ? 'not-allowed' : 'pointer',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    flexShrink: 0,
+                    opacity: heroImages.length >= 5 ? 0.4 : 0.7,
+                    transition: 'opacity 0.15s ease',
+                  }}
+                >
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--gray-500)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                    <rect x="3" y="3" width="18" height="18" rx="2" />
+                    <circle cx="8.5" cy="8.5" r="1.5" />
+                    <path d="m21 15-5-5L5 21" />
+                  </svg>
+                </button>
+              )}
               <span style={{ fontSize: 12, color: isFastModeShortWarning ? 'var(--amber-500, #f59e0b)' : 'var(--gray-400)', flex: 1, textAlign: 'center', transition: 'color 0.2s ease' }}>
                 {!isAuthenticated
                   ? tHero('guestHint')

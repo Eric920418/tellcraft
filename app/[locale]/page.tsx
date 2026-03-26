@@ -52,6 +52,7 @@ function HomeContent() {
   const [resumeConversationId, setResumeConversationId] = useState<string | null>(null)
   const [anonymousId, setAnonymousId] = useState<string | undefined>(undefined)
   const [buildMode, setBuildMode] = useState<'fast' | 'fine' | 'clone'>('fast')
+  const [heroImages, setHeroImages] = useState<File[]>([])
   const [showGuestLimitModal, setShowGuestLimitModal] = useState(false)
   const [openedFromUrl, setOpenedFromUrl] = useState(false)
   const [recentProjects, setRecentProjects] = useState<Array<{ id: string; name: string; status: string; latestConversationId: string | null }>>([])
@@ -185,7 +186,9 @@ function HomeContent() {
   }, [localePath])
 
   const handleStartChat = useCallback(() => {
-    if (heroInput.trim()) {
+    const hasText = heroInput.trim().length > 0
+    const hasImages = buildMode === 'clone' && heroImages.length > 0
+    if (hasText || hasImages) {
       if (!auth.isAuthenticated && !auth.isLoading) {
         const guestUsed = localStorage.getItem('tellcraft_guest_fast_used') === 'true'
         if (guestUsed) {
@@ -193,16 +196,17 @@ function HomeContent() {
           return
         }
       }
-      setInitialMessage(heroInput)
+      setInitialMessage(hasText ? heroInput : (locale === 'zh' ? '復刻這個網站' : 'Clone this site'))
       setIsChatActive(true)
       window.history.pushState({ tellcraftChat: true }, '')
     }
-  }, [heroInput, auth.isAuthenticated, auth.isLoading])
+  }, [heroInput, heroImages, buildMode, auth.isAuthenticated, auth.isLoading, locale])
 
   const handleBackToHome = useCallback(() => {
     setIsChatActive(false)
     setHeroInput('')
     setInitialMessage('')
+    setHeroImages([])
     setResumeConversationId(null)
     setOpenedFromUrl(false)
     if (window.history.state?.tellcraftChat || openedFromUrl) {
@@ -358,6 +362,8 @@ function HomeContent() {
         onLoginRequired={handleLoginFromHero}
         recentProjects={recentProjects}
         onResumeProject={handleContinueFromReminder}
+        heroImages={heroImages}
+        onHeroImagesChange={setHeroImages}
       />
 
       {/* Chat Overlay */}
@@ -368,6 +374,7 @@ function HomeContent() {
           resumeConversationId={resumeConversationId}
           onBack={handleBackToHome}
           buildMode={buildMode}
+          initialImages={heroImages}
         />
       </ErrorBoundary>
 

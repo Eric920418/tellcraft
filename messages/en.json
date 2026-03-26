@@ -38,7 +38,8 @@
     "shortWarning": "Description too short, results may not be optimal",
     "fastHint": "The more detail you provide, the better the result",
     "fineHint": "Describe your idea for AI to deeply clarify",
-    "cloneHint": "Enter a URL and AI will clone it",
+    "cloneHint": "Enter a URL or upload screenshots for AI to clone",
+    "attachScreenshot": "Upload screenshots (max 5)",
     "guestHint": "Log in to unlock fine mode and save projects",
     "startButton": "Start",
     "scrollIndicator": "Scroll to explore",
@@ -61,6 +62,7 @@
   "chat": {
     "initializing": "Initializing...",
     "fastBuildPreview": "Generating your website, estimated 5 minutes...",
+    "clonePreview": "Analyzing the website, preparing to clone...",
     "analyzePreview": "Analyzing your requirements, please wait...",
     "initError": "Initialization failed",
     "sendError": "Failed to send message",

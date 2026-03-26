@@ -50,13 +50,15 @@ export default function ChatSection({
   initialMessage,
   resumeConversationId,
   onBack,
-  buildMode
+  buildMode,
+  initialImages,
 }: {
   isActive: boolean
   initialMessage: string
   resumeConversationId?: string | null
   onBack: () => void
   buildMode?: 'fast' | 'fine' | 'clone'
+  initialImages?: File[]
 }) {
   const tChat = useTranslations('chat')
   const tStage = useTranslations('stage')
@@ -174,6 +176,7 @@ export default function ChatSection({
     resumeConversationId,
     buildMode,
     sessionCallbacks,
+    initialImages,
   )
 
   // Re-create editor with actual conversationId

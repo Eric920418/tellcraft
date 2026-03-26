@@ -860,6 +860,47 @@ async function handleContinueFlow(
     })
     return
   }
+  // __deploy_with_risk__：測試未全通過時的帶風險部署（二次確認）
+  if (trimmedMsg === '__deploy_with_risk__') {
+    const isChinese = state.locale === 'zh' || /[\u4e00-\u9fff]/.test(message)
+    const failedCount = state.coderTestFailedScenarios || 0
+    await sendMessage(conversationId, io, {
+      content: isChinese
+        ? `⚠ **帶風險部署確認**\n\n目前有 ${failedCount} 個 BDD 測試場景未通過。部署後部分功能可能無法正常運作。\n\n確定要繼續部署嗎？`
+        : `⚠ **Deploy with Risk Confirmation**\n\n${failedCount} BDD test scenario(s) are still failing. Some features may not work correctly after deployment.\n\nAre you sure you want to proceed?`,
+      stage: 'uiux_complete',
+      quickReplies: [
+        { label: isChinese ? '確認部署' : 'Confirm Deploy', value: '__confirm_risky_deploy__', style: 'primary' as const },
+        { label: isChinese ? '取消' : 'Cancel', value: '__cancel_risky_deploy__', style: 'ghost' as const },
+      ],
+    })
+    return
+  }
+  // __confirm_risky_deploy__：二次確認後執行部署
+  if (trimmedMsg === '__confirm_risky_deploy__') {
+    state.deployedWithFailingTests = true
+    await saveFlowState(redis, conversationId, state)
+    // 走正常部署流程
+    const { executeDeployerSkill } = await import('./phase-handlers/deploy-phases')
+    await executeDeployerSkill({ taskId: state.taskId || '', projectId, conversationId, userId, message, redis, io })
+    return
+  }
+  // __cancel_risky_deploy__：取消帶風險部署
+  if (trimmedMsg === '__cancel_risky_deploy__') {
+    const isChinese = state.locale === 'zh' || /[\u4e00-\u9fff]/.test(message)
+    await sendMessage(conversationId, io, {
+      content: isChinese
+        ? '已取消部署。您可以重試測試修復問題，或進行其他操作。'
+        : 'Deployment cancelled. You can retry tests to fix issues, or take other actions.',
+      stage: 'uiux_complete',
+      quickReplies: [
+        { label: isChinese ? '重試測試' : 'Retry Tests', value: '__verify_backend__', style: 'primary' as const },
+        { label: isChinese ? '部署上線' : 'Deploy', value: '部署', style: 'secondary' as const },
+        { label: isChinese ? '開始新專案' : 'New Project', value: '__new_project__', style: 'ghost' as const },
+      ],
+    })
+    return
+  }
   if (trimmedMsg === '__retry_iteration__' && state.lastIterationFeedback) {
     logger.info({ conversationId }, '迭代重試')
     await executeIteration({ conversationId, projectId, userId, userFeedback: state.lastIterationFeedback, redis, io, imageUrls: state.lastIterationImageUrls })

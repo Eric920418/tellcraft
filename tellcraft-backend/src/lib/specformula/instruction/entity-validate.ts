@@ -138,6 +138,8 @@ export class EntityValidate {
           probeConditions.set(fieldName, false);
         } else if (constraintValue === 'isNull' || constraintValue === 'null') {
           // NULL 不能做 = 查詢，跳過
+        } else if (constraintValue === 'isNotNull' || constraintValue === 'notNull') {
+          // NOT NULL 不能做 = 查詢，跳過（在 assertRowMatches 中驗證）
         } else if (!constraintValue.includes('>') && !constraintValue.includes('<') && !constraintValue.includes('!')) {
           // 純值約束
           const typed = TypeConverter.convertToColumnType(constraintValue, tableDef.findColumnType(fieldName));
@@ -252,6 +254,23 @@ export class EntityValidate {
       if (trimExpected === '' || trimExpected === 'null') {
         const actualValue = this.getActualValue(actual, fieldName);
         if (actualValue !== null && actualValue !== undefined && actualValue !== '') {
+          throw new Error(`[${entityName}.${fieldName}] 預期 null，實際: [${String(actualValue)}]`);
+        }
+        continue;
+      }
+
+      // &isNotNull / $notnull 約束：只驗證非空，不比對值
+      if (trimExpected === '&isNotNull' || trimExpected === '$notnull') {
+        const actualValue = this.getActualValue(actual, fieldName);
+        if (actualValue === null || actualValue === undefined) {
+          throw new Error(`[${entityName}.${fieldName}] 預期非 null，但實際值為 ${String(actualValue)}`);
+        }
+        continue;
+      }
+      // &isNull 約束：驗證為空
+      if (trimExpected === '&isNull' || trimExpected === '$null') {
+        const actualValue = this.getActualValue(actual, fieldName);
+        if (actualValue !== null && actualValue !== undefined) {
           throw new Error(`[${entityName}.${fieldName}] 預期 null，實際: [${String(actualValue)}]`);
         }
         continue;

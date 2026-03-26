@@ -473,6 +473,12 @@ export function sanitizeFileContent(path: string, content: string): string {
     }
   }
 
+  // ── Fix 2.1: 'use client' 檔案不能 export metadata（Next.js 規則）──
+  if (/^['"]use client['"]/.test(code.trimStart())) {
+    code = code.replace(/^export\s+const\s+metadata\s*[=:][^\n]*\n?/gm, '')
+    code = code.replace(/^export\s+(const|let|var)\s+metadata\s*=\s*\{[\s\S]*?\}\s*;?\s*\n/gm, '')
+  }
+
   // ── Fix 2.5: 缺少 React hooks import ──
   if (!isBackendFile) {
     const HOOKS = ['useState', 'useEffect', 'useRef', 'useCallback', 'useMemo', 'useContext', 'useReducer', 'useLayoutEffect', 'useId']

@@ -646,6 +646,7 @@ export async function executeCoderTesting(input: CoderSkillInput): Promise<void>
     state.phase = 'uiux_complete'
     state.coderTestPassed = result.allPassed
     state.coderTestAttempts = result.attempts
+    state.coderTestFailedScenarios = result.testResults.failed
     state.coderTestStartedAt = undefined
     state.waitingForReply = false
 
@@ -669,11 +670,14 @@ export async function executeCoderTesting(input: CoderSkillInput): Promise<void>
       ? (isChinese ? '所有測試通過！' : 'All tests passed!')
       : (isChinese ? `${result.testResults.failed} 個場景仍然失敗（${result.attempts} 輪修復後）` : `${result.testResults.failed} scenarios still failing after ${result.attempts} attempts`)
 
-    const quickReplies: Array<{ label: string; value: string; style: 'primary' | 'secondary' | 'ghost' }> = [
-      { label: isChinese ? '部署上線' : 'Deploy', value: '部署', style: 'primary' },
-    ]
-    if (!result.allPassed) {
-      quickReplies.push({ label: isChinese ? '重試測試' : 'Retry Tests', value: '__verify_backend__', style: 'secondary' })
+    const quickReplies: Array<{ label: string; value: string; style: 'primary' | 'secondary' | 'ghost' }> = []
+    if (result.allPassed) {
+      // 測試全通過 → 部署為主要選項
+      quickReplies.push({ label: isChinese ? '部署上線' : 'Deploy', value: '部署', style: 'primary' })
+    } else {
+      // 測試有失敗 → 重試為主要、帶風險部署為次要
+      quickReplies.push({ label: isChinese ? '重試測試' : 'Retry Tests', value: '__verify_backend__', style: 'primary' })
+      quickReplies.push({ label: isChinese ? '帶風險部署' : 'Deploy (risky)', value: '__deploy_with_risk__', style: 'secondary' })
     }
     quickReplies.push({ label: isChinese ? '開始新專案' : 'New Project', value: '__new_project__', style: 'ghost' })
 

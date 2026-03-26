@@ -38,7 +38,8 @@
     "shortWarning": "描述太短，生成效果可能不理想",
     "fastHint": "描述越詳細，生成效果越好",
     "fineHint": "描述你的想法，AI 深度釐清",
-    "cloneHint": "輸入網址，AI 幫你復刻",
+    "cloneHint": "輸入網址或上傳截圖，AI 幫你復刻",
+    "attachScreenshot": "上傳截圖（最多 5 張）",
     "guestHint": "登入以解鎖精細模式並保存專案",
     "startButton": "開始",
     "scrollIndicator": "往下探索",
@@ -61,6 +62,7 @@
   "chat": {
     "initializing": "正在初始化...",
     "fastBuildPreview": "正在生成您的網站，預計 5 分鐘...",
+    "clonePreview": "正在分析網站，準備復刻...",
     "analyzePreview": "正在分析您的需求，請稍候...",
     "initError": "初始化失敗",
     "sendError": "發送消息失敗",

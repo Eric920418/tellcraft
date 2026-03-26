@@ -144,7 +144,8 @@ npx ts-node bdd-spec/scripts/validate-feature.ts spec/features/
   ├─ BDD execution key 注入 Coder prompt（response field 名稱對齊）
   ├─ E2E 測試（/tmp Next.js dev + Puppeteer，含 backendFiles + JSX 截斷偵測）
   ├─ 生成 API Routes（app/api/*/route.ts）
-  └─ SpecFormula 逐 Feature 精準驗證（每 Feature 獨立 3 輪修復 → 多輪回歸修復 + 智能跳過）
+  ├─ SpecFormula 逐 Feature 精準驗證（每 Feature 獨立 3 輪修復 → 多輪回歸修復 + 智能跳過）
+  └─ 雙層完成驗證：測試全通過→部署(primary)；測試有失敗→重試(primary)+帶風險部署(secondary)+二次確認
   │
   ▼
 ⑤ Deployer（已完成）
@@ -864,7 +865,7 @@ psql "$DATABASE_URL" -f tellcraft-backend/migrations/xxx.sql
 
 ### 近期更新（2026-03-13 ~ 2026-03-25）
 
-- **RED Phase 三層驗證 + 回歸保護強化**（03-25）：(1) Layer 1 從 8→11 個靜態檢查，新增 Schema DataTable 深度對齊（Check 9 Column Coverage + Check 10 NOT NULL Completeness + Check 11 FK Reference Validity）；(2) 新增 Layer 2.5 RoutingStubAdapter — in-process Express 真實路由匹配（匹配→501，不匹配→404），透過 SupertestAdapter 做零啟動成本的 HTTP 驗證；(3) Stage B Phase 2 全量回歸從「修一次」升級為最多 2 輪智能修復迴圈，失敗集合相同自動跳過
+- **RED Phase 三層驗證 + 回歸保護 + 雙層完成驗證**（03-26）：(1) Layer 1 從 8→11 個靜態檢查，新增 Schema DataTable 深度對齊（Check 9 Column Coverage + Check 10 NOT NULL Completeness + Check 11 FK Reference Validity）；(2) 新增 Layer 2.5 RoutingStubAdapter — in-process Express 真實路由匹配（匹配→501，不匹配→404），透過 SupertestAdapter 做零啟動成本的 HTTP 驗證；(3) Stage B Phase 2 全量回歸從「修一次」升級為最多 2 輪智能修復迴圈，失敗集合相同自動跳過；(4) 雙層完成驗證：測試全通過→部署(primary)，測試有失敗→重試(primary)+帶風險部署(secondary)+二次確認閘門
 
 - **WebContainer 載入優化**（03-19）：Pre-boot + Pre-install 機制 — 代碼生成期間自動預啟 WebContainer 並安裝 BASE_DEPS（next/react/tailwindcss 等 7 個核心包），生成完成時 node_modules 已就位，只需增量安裝額外依賴。`useWebContainerPreloader` 監聽生成階段觸發（`fast_generating`/`uiux_code_generation`/`uiux_variant_selection` 等），module-level singleton 跨對話復用。`writeFilesToContainer()` 逐檔寫入替代 `mount()`（後者會清除整個 fs 包括 node_modules）。預期首次預覽載入從 ~60s 降到 ~10-15s
 

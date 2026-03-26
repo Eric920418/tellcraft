@@ -206,6 +206,7 @@ export default function ChatPreviewPanel({
     'uiux_pipeline_progress', 'uiux_structure_generating', 'uiux_animation_generating',
     'uiux_rwd_generating', 'uiux_quality_gate_running', 'uiux_quality_gate_fixing',
     'coder_generating', 'coder_testing',
+    'clone_analyzing', 'clone_generating',
   ]
   const lastGeneratingMsg = [...messages].reverse().find(m => m.role === 'assistant' && m.stage)
   const isGeneratingByStage = lastGeneratingMsg && generatingStages.includes(lastGeneratingMsg.stage || '')
