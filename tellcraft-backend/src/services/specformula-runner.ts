@@ -958,11 +958,10 @@ function fixApiCallUuidValues(
       if (!value) continue
 
       const snake = toSnakeCase(trimmedH).toLowerCase()
-      // 匹配 UUID 欄位：精確匹配 or *Id / *_id 啟發式
+      // 只轉實際 UUID 型別欄位（與 fixNonUuidValues 一致，不用 *Id 啟發式）
       const isUuidCol = uuidColumns.has(snake) || uuidColumns.has(trimmedH.toLowerCase())
-      const isIdField = /(?:Id|_id)$/.test(trimmedH) || trimmedH === 'id'
 
-      if ((isUuidCol || isIdField) && !value.startsWith('$') && !value.startsWith('<') && !isValidUuid(value)) {
+      if (isUuidCol && !value.startsWith('$') && !value.startsWith('<') && !isValidUuid(value)) {
         row[header] = deterministicUuid(value)
         continue
       }
