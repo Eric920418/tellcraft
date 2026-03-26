@@ -794,9 +794,13 @@ ${subOp.relevantGherkin}
 
 /** 移除 LLM 偶爾加入的認證檢查（共用） */
 function removeAuthChecks(code: string): string {
+  // Pattern 1: if (!userId) { throw/return ... }
   code = code.replace(/if\s*\(\s*!(?:input\.)?userId\s*\)\s*\{[^}]*(?:throw|return)[^}]*\}/g, '')
+  // Pattern 2: if (!userId) throw/return ...
   code = code.replace(/if\s*\(\s*!(?:input\.)?userId\s*\)\s*(?:throw|return)[^\n]*/g, '')
-  code = code.replace(/if\s*\([^)]*\)\s*\{?\s*throw\s+new\s+Error\s*\(\s*['"`][^'"`]*(?:必須已登入|認證|已過期|unauthorized|must.*log|未登入|操作者必須)[^'"`]*['"`]\s*\)\s*\}?/gi, '')
+  // Pattern 3: 包含 auth 相關的 throw 語句（完整模式）
+  code = code.replace(/if\s*\([^)]*\)\s*\{?\s*throw\s+new\s+Error\s*\(\s*['"`][^'"`]*(?:必須已登入|認證|已過期|unauthorized|must.*log|未登入|操作者必須|認證憑證無效|token.*(?:invalid|expired)|session.*(?:invalid|expired))[^'"`]*['"`]\s*\)\s*\}?/gi, '')
+  // Pattern 4: token/session 驗證的 if block
   code = code.replace(/if\s*\(\s*!(?:input\.)?(?:token|session|authToken)\s*\)\s*\{[^}]*(?:throw|return)[^}]*\}/g, '')
   code = code.replace(/if\s*\(\s*!(?:input\.)?(?:token|session|authToken)\s*\)\s*(?:throw|return)[^\n]*/g, '')
   return code
@@ -2799,6 +2803,15 @@ ${entityMapping ? `\n## Entity Mapping\n\`\`\`yaml\n${entityMapping}\n\`\`\`\n` 
         } catch (fixErr) {
           logger.warn({ actionName, funcName, err: fixErr }, 'Per-SubOp 修復 LLM 呼叫失敗')
         }
+      }
+
+      // esbuild 語法驗證（與原有路徑一致）
+      try {
+        const esbuild = await import('esbuild')
+        await esbuild.transform(fixedCode, { loader: 'ts' })
+      } catch (syntaxErr) {
+        logger.warn({ actionName, syntaxErr }, 'Per-SubOp 修復後語法錯誤，回退到修復前代碼')
+        return currentCode
       }
 
       return fixedCode
