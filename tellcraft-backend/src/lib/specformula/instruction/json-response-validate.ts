@@ -159,10 +159,20 @@ export class JsonResponseValidate {
     }
     // Number, Boolean, Null direct comparison
     else {
-      if (typeof expected === 'number' && typeof actual === 'number') {
-        // JSON RFC 8259: 數值語義比較（3000 == 3000.0）
-        if (expected === actual) return;
-        if (Math.abs(expected - actual) < 1e-10) return;
+      // 數值比較：容許 number vs string（API 常回 "500" 而 Feature JSON 用 500）
+      if (typeof expected === 'number') {
+        const actualNum = typeof actual === 'string' ? parseFloat(actual) : (typeof actual === 'number' ? actual : NaN);
+        if (!isNaN(actualNum)) {
+          if (expected === actualNum) return;
+          if (Math.abs(expected - actualNum) < 1e-10) return;
+        }
+      }
+      if (typeof actual === 'number' && typeof expected === 'string') {
+        const expectedNum = parseFloat(expected);
+        if (!isNaN(expectedNum)) {
+          if (expectedNum === actual) return;
+          if (Math.abs(expectedNum - actual) < 1e-10) return;
+        }
       }
 
       if (expected !== actual) {

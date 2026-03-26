@@ -149,14 +149,28 @@ export class EntityValidate {
 
       if (probeConditions.size === 0) {
         const hasExtractionColumns = Object.keys(row).some(k => k.startsWith('>'));
-        if (!hasExtractionColumns) {
+        // 允許純約束驗證（如只有 &isNotNull / &isNull）— 查詢最新一筆記錄做驗證
+        const hasOnlyConstraints = Object.values(row).some(v => {
+          const t = (v || '').trim()
+          return t.startsWith('&') || t === '$notnull' || t === '$null'
+        })
+        if (!hasExtractionColumns && !hasOnlyConstraints) {
           throw new Error('缺少查詢條件：請提供至少一個非約束欄位或主鍵');
         }
       }
     }
 
     tableDef.setQueryColumns([...probeConditions.keys()]);
-    let results = await this.queryByProbe(tableDef, probeConditions, pool);
+    let results: Record<string, unknown>[];
+    if (probeConditions.size === 0) {
+      // 無 probe 條件（純約束驗證）→ 查詢最新一筆記錄
+      const fallbackResult = await pool.query(
+        `SELECT * FROM ${tableDef.tableName.toLowerCase()} ORDER BY created_at DESC LIMIT 5`
+      );
+      results = fallbackResult.rows as Record<string, unknown>[];
+    } else {
+      results = await this.queryByProbe(tableDef, probeConditions, pool);
+    }
 
     // 多筆時用 CAS 後置篩選
     if (results.length > 1) {
