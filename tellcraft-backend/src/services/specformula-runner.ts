@@ -1129,13 +1129,7 @@ async function executeStep(
           resolvedDt.headers,
           resolvedDt.rows
         )
-        // Debug: log entity_setup 插入的 ID（追蹤 VAR 捕獲）
-        for (const row of resolvedDt.rows) {
-          const idVal = row['id'] || row['Id']
-          if (idVal) {
-            logger.debug({ entity: captures.entity, id: idVal, scenario: scenarioName }, 'entity_setup: inserted ID')
-          }
-        }
+        logger.info({ entity: captures.entity, headers: resolvedDt.headers.filter(h => !h.startsWith('>') && !h.startsWith('<')), rowCount: resolvedDt.rows.length, scenario: scenarioName }, 'entity_setup INSERT 完成')
         break
       }
 
@@ -1257,6 +1251,7 @@ async function executeStep(
         // API 參數也必須做相同轉換才能查到
         const apiDt = fixApiCallUuidValues({ headers: apiHeaders, rows: apiRows }, schemas)
 
+        logger.info({ summary, stepSummary: captures.summary, headers: apiDt.headers, row0: apiDt.rows[0] ? Object.fromEntries(Object.entries(apiDt.rows[0]).filter(([,v]) => v)) : {}, scenario: scenarioName }, 'api_call 發送')
         if (captures.actor) {
           await instructionSet.apiCall.invokeWithActor(
             apiDt.headers,
@@ -1269,6 +1264,11 @@ async function executeStep(
             apiDt.rows,
             summary
           )
+        }
+        // Log response
+        const lastResp = scenarioContext.getLastResponse()
+        if (lastResp) {
+          logger.info({ summary, status: lastResp.status, body: lastResp.body?.substring(0, 300), scenario: scenarioName }, 'api_call 回應')
         }
         break
       }
@@ -1992,6 +1992,20 @@ export default sql
         PORT: '0',
       },
       stdio: ['ignore', 'pipe', 'pipe'],
+    })
+
+    // 7b. 轉發 test server stdout/stderr 到 logger（debug 用）
+    proc.stdout?.on('data', (chunk: Buffer) => {
+      for (const line of chunk.toString().split('\n')) {
+        const t = line.trim()
+        if (t && !t.startsWith('READY:')) logger.info({ src: 'test-server' }, t)
+      }
+    })
+    proc.stderr?.on('data', (chunk: Buffer) => {
+      for (const line of chunk.toString().split('\n')) {
+        const t = line.trim()
+        if (t) logger.warn({ src: 'test-server' }, t)
+      }
     })
 
     // 8. 等待 READY:{port}
