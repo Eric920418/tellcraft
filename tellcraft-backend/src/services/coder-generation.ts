@@ -42,6 +42,22 @@ interface ActionsYmlStructure {
   types?: Record<string, unknown>
 }
 
+// 預設啟用 per-sub-operation 生成，設 CODER_PER_SUBOP=false 回退到舊模式
+const USE_PER_SUBOP = process.env.CODER_PER_SUBOP !== 'false'
+
+interface SubOperation {
+  /** _stepSummary 值，如 "建立記帳記錄" */
+  summary: string
+  /** 推斷的操作類型 */
+  operationType: 'create' | 'update' | 'delete' | 'query_list' | 'query_single' | 'aggregate' | 'cascade' | 'auth' | 'batch' | 'export' | 'unknown'
+  /** 此子操作相關的 Rule + Example 區塊（含 Background） */
+  relevantGherkin: string
+  /** 此子操作必須回傳的欄位 */
+  requiredResponseFields: string[]
+  /** 此子操作對應的 ActionRule[] */
+  actionRules: ActionRule[]
+}
+
 export interface CoderInput {
   projectId: string
   actionsYml: string
@@ -361,6 +377,87 @@ const result = await sql.begin(async (tx) => {
 return { __status: 201, ...result }
 \`\`\``
 
+// --- Handler: 聚合/摘要查詢 ---
+const AGGREGATE_HANDLER = `
+## 聚合/摘要查詢 Handler
+\`\`\`typescript
+// 聚合查詢必須用 COALESCE 防止 NULL，非聚合欄位必須 GROUP BY
+const rows = await sql\`
+  SELECT
+    COALESCE(SUM(CASE WHEN type = 'income' THEN amount ELSE 0 END), 0) as "totalIncome",
+    COALESCE(SUM(CASE WHEN type = 'expense' THEN amount ELSE 0 END), 0) as "totalExpense"
+  FROM table_name
+  WHERE device_id = \${deviceId} AND deleted_at IS NULL
+    AND date_trunc('month', transaction_date) = date_trunc('month', \${month}::date)
+\`
+const result = rows[0] || { totalIncome: 0, totalExpense: 0 }
+// 數值欄位必須轉 Number（PostgreSQL 回傳 string）
+return { __status: 200, totalIncome: Number(result.totalIncome), totalExpense: Number(result.totalExpense) }
+\`\`\`
+規則：
+- SELECT 中非聚合函數的欄位**必須**出現在 GROUP BY
+- 用 COALESCE(..., 0) 防止空結果回傳 NULL
+- 用 Number() 轉型（PostgreSQL SUM/COUNT 回傳 string）
+- 用 date_trunc() 做月份比較，不要拼字串
+- 分組查詢（GROUP BY）回傳 Array 設 __status；單一聚合取 rows[0] 回傳 Object
+- 無資料時回傳零值物件，不要回傳 404
+- WHERE 必須加 deleted_at IS NULL 排除軟刪除記錄`
+
+// --- Handler: 級聯刪除/更新 ---
+const CASCADE_HANDLER = `
+## 級聯刪除/更新 Handler
+當刪除父實體時，如果有子實體透過 FK 引用它，必須同時更新子記錄：
+\`\`\`typescript
+const result = await sql.begin(async (tx) => {
+  // Step 1: 軟刪除父實體
+  const [parent] = await tx\`
+    UPDATE parent_table SET deleted_at = NOW(), updated_at = NOW()
+    WHERE id = \${entityId} RETURNING *
+  \`
+  if (!parent) throw new Error('找不到資料')
+  // Step 2: 級聯更新子實體的 FK 為 NULL（代表「未分類」）
+  await tx\`UPDATE child_table SET parent_id = NULL, updated_at = NOW() WHERE parent_id = \${entityId}\`
+  return parent
+})
+return { __status: 200, ...result }
+\`\`\`
+規則：
+- 刪除被 FK 引用的實體時，必須 transaction 內同時更新子記錄的 FK 為 NULL
+- 子記錄不要刪除，只把 FK 設為 NULL
+- 用 sql.begin() 確保原子性`
+
+// --- Handler: 欄位別名（snake_case → camelCase）---
+const COLUMN_ALIAS_HANDLER = `
+## 欄位別名（PostgreSQL snake_case → camelCase）
+PostgreSQL 回傳的欄位名是 snake_case（category_id, created_at, deleted_at, transaction_date）。
+BDD 測試驗證的欄位名是 camelCase（categoryId, createdAt, deletedAt, transactionDate）。
+必須在回傳前轉換，否則測試一定失敗！
+\`\`\`typescript
+// 方法 1: SQL AS 別名（推薦）
+SELECT category_id as "categoryId", created_at as "createdAt", deleted_at as "deletedAt" FROM ...
+
+// 方法 2: 程式碼轉換（適合 RETURNING * 展開場景）
+function snakeToCamel(row: any) {
+  if (!row) return row
+  const result: any = {}
+  for (const [key, value] of Object.entries(row)) {
+    const camelKey = key.replace(/_([a-z])/g, (_, c: string) => c.toUpperCase())
+    result[camelKey] = value
+  }
+  return result
+}
+// 用在 INSERT/UPDATE/DELETE RETURNING * 後
+const [row] = await sql\`UPDATE ... RETURNING *\`
+return { __status: 200, ...snakeToCamel(row) }
+
+// 列表查詢
+const rows = await sql\`SELECT * FROM ...\`
+const camelRows = rows.map(snakeToCamel)
+;(camelRows as any).__status = 200
+return camelRows
+\`\`\`
+重點：BDD requiredResponseFields 列表中的名稱是精確的 camelCase，你的回傳必須完全匹配。`
+
 /**
  * 根據 action 的 rules 類型，選擇性注入相關 handler。
  * 不再用一個巨大的 system prompt 教 LLM 所有操作類型。
@@ -407,6 +504,25 @@ function buildActionSystemPrompt(action?: ActionEntry): string {
   // Transaction handler（如果有多表操作暗示）
   if (/order.*item|cart.*product|transfer|transaction|原子/i.test(nameHint) || rules.length > 8) {
     handlers.push(TRANSACTION_HANDLER)
+  }
+
+  // --- 語義感知 handler 選擇（補充 rule-type 之外的模式）---
+  const allRuleText = rules.map(r => (r as any).rule || (r as any).description || '').join(' ')
+  const allText = nameHint + ' ' + allRuleText
+
+  // 聚合/摘要查詢（SUM, GROUP BY, 統計）
+  if (/摘要|統計|彙總|加總|合計|summary|aggregate|total|count|average|平均/i.test(allText)) {
+    handlers.push(AGGREGATE_HANDLER)
+  }
+
+  // 級聯操作（刪除父實體需要更新子記錄）
+  if (rules.some(r => /未分類|相關.*應|級聯|cascade|歸入|改為/i.test((r as any).rule || (r as any).description || ''))) {
+    handlers.push(CASCADE_HANDLER)
+  }
+
+  // camelCase 欄位別名（所有有回應或狀態驗證的 action 都需要）
+  if (hasResponseRules || hasStateRules) {
+    handlers.push(COLUMN_ALIAS_HANDLER)
   }
 
   return `${BASE_PROMPT}\n\n${handlers.join('\n')}`
@@ -474,11 +590,412 @@ ${featureContent}
 檔名：lib/actions/${toKebabCase(action.name)}.ts`
 }
 
+// ============================================================
+// Per-SubOperation 生成系統
+// ============================================================
+
+/** 從 Feature 文件提取子操作（按 When 步驟的 summary 分組 Rule 區塊） */
+function extractSubOperations(featureContent: string, action: ActionEntry): SubOperation[] {
+  const lines = featureContent.split('\n')
+
+  // 1. 提取 Background 區塊
+  let backgroundStart = -1
+  let backgroundEnd = -1
+  for (let i = 0; i < lines.length; i++) {
+    if (/^\s*Background:/i.test(lines[i])) {
+      backgroundStart = i
+    } else if (backgroundStart >= 0 && backgroundEnd < 0 && /^\s*(?:Rule:|#-{3,})/.test(lines[i]) && i > backgroundStart) {
+      backgroundEnd = i
+    }
+  }
+  const background = backgroundStart >= 0
+    ? lines.slice(backgroundStart, backgroundEnd >= 0 ? backgroundEnd : lines.length).join('\n')
+    : ''
+
+  // 2. 用 Rule: 分割成區塊
+  const ruleBlocks: Array<{ content: string }> = []
+  let currentRuleStart = -1
+  for (let i = 0; i < lines.length; i++) {
+    if (/^\s*Rule:/.test(lines[i])) {
+      if (currentRuleStart >= 0) {
+        ruleBlocks.push({ content: lines.slice(currentRuleStart, i).join('\n') })
+      }
+      currentRuleStart = i
+    }
+  }
+  if (currentRuleStart >= 0) {
+    ruleBlocks.push({ content: lines.slice(currentRuleStart).join('\n') })
+  }
+
+  if (ruleBlocks.length === 0) return []
+
+  // 3. 對每個 Rule 區塊找 When 步驟的 summary
+  const summaryRegex = /(?:When|And)\s+(?:\((?:No Actor|UID="[^"]*")\)\s+)?(.+?),\s*call\s+table:/i
+  const groups = new Map<string, string[]>()
+
+  for (const block of ruleBlocks) {
+    const match = block.content.match(summaryRegex)
+    const summary = match?.[1]?.trim() || '__default__'
+    if (!groups.has(summary)) groups.set(summary, [])
+    groups.get(summary)!.push(block.content)
+  }
+
+  // 單一 summary → 不需要拆分，走原路徑
+  const validGroups = new Map([...groups].filter(([k]) => k !== '__default__'))
+  if (validGroups.size <= 1) return []
+
+  // 4. 構建 SubOperation 列表
+  const subOps: SubOperation[] = []
+  for (const [summary, blocks] of validGroups) {
+    const combinedGherkin = background + '\n\n' + blocks.join('\n\n')
+    const operationType = inferOperationType(summary, blocks.join(' '))
+    const requiredResponseFields = extractResponseFieldsFromGherkin(blocks.join('\n'))
+
+    const matchedRules = (action.rules || []).filter(r =>
+      blocks.some(b => b.includes(r.rule || ''))
+    )
+
+    subOps.push({
+      summary,
+      operationType,
+      relevantGherkin: combinedGherkin,
+      requiredResponseFields,
+      actionRules: matchedRules,
+    })
+  }
+
+  return subOps
+}
+
+/** 從 summary 文字推斷操作類型 */
+function inferOperationType(summary: string, ruleText: string): SubOperation['operationType'] {
+  const s = summary + ' ' + ruleText
+  if (/摘要|統計|彙總|加總|合計|summary|aggregate|total/i.test(s)) return 'aggregate'
+  if (/匯出|export/i.test(s)) return 'export'
+  if (/未分類|相關.*應|級聯|cascade/i.test(s)) return 'cascade'
+  if (/auth|login|register|signup|signin|logout|password/i.test(s)) return 'auth'
+  if (/reorder|batch|拖曳|批次/i.test(s)) return 'batch'
+  if (DELETE_KEYWORDS.some(k => summary.includes(k))) return 'delete'
+  if (UPDATE_KEYWORDS.some(k => summary.includes(k))) return 'update'
+  if (CREATE_KEYWORDS.some(k => summary.includes(k))) return 'create'
+  if (LIST_KEYWORDS.some(k => summary.includes(k))) return 'query_list'
+  if (QUERY_KEYWORDS.some(k => summary.includes(k))) return 'query_single'
+  return 'unknown'
+}
+
+/** 從 Gherkin 文字提取必須回傳的欄位 */
+function extractResponseFieldsFromGherkin(gherkinText: string): string[] {
+  const fields = new Set<string>()
+  const lines = gherkinText.split('\n')
+  let inResponseTable = false
+  let headerCells: string[] = []
+
+  for (const line of lines) {
+    const trimmed = line.trim()
+    if (/(?:Then|And)\s+.+\(\d+\)回應/.test(trimmed)) {
+      inResponseTable = true
+      headerCells = []
+      continue
+    }
+    if (inResponseTable && trimmed.startsWith('|')) {
+      const cells = trimmed.split('|').map(c => c.trim()).filter(Boolean)
+      if (headerCells.length === 0) {
+        headerCells = cells
+      } else {
+        for (let i = 0; i < cells.length && i < headerCells.length; i++) {
+          if (cells[i].startsWith('<')) fields.add(cells[i].substring(1))
+          if (cells[i] === '$notnull' || cells[i] === '&isNotNull') {
+            if (!headerCells[i].startsWith('>') && !headerCells[i].startsWith('<')) {
+              fields.add(headerCells[i])
+            }
+          }
+        }
+      }
+    } else if (inResponseTable && !trimmed.startsWith('|')) {
+      inResponseTable = false
+      headerCells = []
+    }
+  }
+  return [...fields]
+}
+
+/** 精準 handler 選擇（每個子操作只注入 1 個主 handler） */
+function buildSubOpSystemPrompt(subOp: SubOperation): string {
+  const handlers: string[] = []
+  switch (subOp.operationType) {
+    case 'create':      handlers.push(CREATE_HANDLER); break
+    case 'update':      handlers.push(UPDATE_HANDLER); break
+    case 'delete':      handlers.push(DELETE_HANDLER); break
+    case 'query_list':  handlers.push(QUERY_LIST_HANDLER); break
+    case 'query_single': handlers.push(QUERY_SINGLE_HANDLER); break
+    case 'aggregate':   handlers.push(AGGREGATE_HANDLER); break
+    case 'cascade':     handlers.push(CASCADE_HANDLER); break
+    case 'auth':        handlers.push(AUTH_HANDLER); break
+    case 'batch':       handlers.push(BATCH_HANDLER); break
+    case 'export':      handlers.push(QUERY_LIST_HANDLER); break
+    default:
+      handlers.push(CREATE_HANDLER, QUERY_LIST_HANDLER, UPDATE_HANDLER, DELETE_HANDLER)
+  }
+  handlers.push(COLUMN_ALIAS_HANDLER)
+  return `${BASE_PROMPT}\n\n${handlers.join('\n')}`
+}
+
+/** 生成單個子操作的代碼 */
+async function generateSubOperationCode(
+  action: ActionEntry,
+  subOp: SubOperation,
+  ctx: { schemaSql: string; entityMapping: string; types: Record<string, unknown> },
+  trackingContext?: { userId?: string; conversationId?: string }
+): Promise<{ summary: string; code: string }> {
+  const systemPrompt = buildSubOpSystemPrompt(subOp)
+
+  const responseFieldsText = subOp.requiredResponseFields.length > 0
+    ? `\n## 必須返回的欄位名稱（嚴格遵守，不可改名）\n${subOp.requiredResponseFields.map(f => `- \`${f}\``).join('\n')}`
+    : ''
+
+  const handleName = `handle${toPascalCase(subOp.summary)}`
+  const userPrompt = `## 子操作定義
+Action 名稱：${action.name}
+子操作：${subOp.summary}
+操作類型：${subOp.operationType}
+
+## 規則
+${(subOp.actionRules || []).map(r => `- [${r.type}] ${r.rule}`).join('\n') || '（無特定規則）'}
+
+## 相關資料表 DDL
+${ctx.schemaSql}
+
+## Entity Mapping（中文實體 → 表名）
+${ctx.entityMapping}
+${responseFieldsText}
+
+## BDD Scenario（你的代碼必須通過這些測試）
+\`\`\`gherkin
+${subOp.relevantGherkin}
+\`\`\`
+
+請實作一個 async function ${handleName}(input: any)。
+只實作「${subOp.summary}」這一個操作，不要 _stepSummary 分派。
+函數內直接寫核心邏輯。只輸出 TypeScript 代碼。`
+
+  const maxTokens = Math.max(2048, Math.min(2048 + (subOp.actionRules?.length || 0) * 512, 8192))
+  const result = await callClaude(systemPrompt, userPrompt, { maxTokens }, trackingContext)
+
+  if (!result.success || !result.content) {
+    throw new Error(`生成子操作 ${subOp.summary} 失敗：${result.error}`)
+  }
+
+  let code = extractCodeFromResponse(result.content)
+  code = removeAuthChecks(code)
+  code = fixMySqlSyntax(code)
+
+  return { summary: subOp.summary, code }
+}
+
+/** 移除 LLM 偶爾加入的認證檢查（共用） */
+function removeAuthChecks(code: string): string {
+  code = code.replace(/if\s*\(\s*!(?:input\.)?userId\s*\)\s*\{[^}]*(?:throw|return)[^}]*\}/g, '')
+  code = code.replace(/if\s*\(\s*!(?:input\.)?userId\s*\)\s*(?:throw|return)[^\n]*/g, '')
+  code = code.replace(/if\s*\([^)]*\)\s*\{?\s*throw\s+new\s+Error\s*\(\s*['"`][^'"`]*(?:必須已登入|認證|已過期|unauthorized|must.*log|未登入|操作者必須)[^'"`]*['"`]\s*\)\s*\}?/gi, '')
+  code = code.replace(/if\s*\(\s*!(?:input\.)?(?:token|session|authToken)\s*\)\s*\{[^}]*(?:throw|return)[^}]*\}/g, '')
+  code = code.replace(/if\s*\(\s*!(?:input\.)?(?:token|session|authToken)\s*\)\s*(?:throw|return)[^\n]*/g, '')
+  return code
+}
+
+/** 修正 MySQL → PostgreSQL 語法（共用） */
+function fixMySqlSyntax(code: string): string {
+  return code.replace(
+    /ON\s+DUPLICATE\s+KEY\s+UPDATE\s+(.+?)(?=\s*`|;|\n|$)/gim,
+    (_match: string, setCols: string) => {
+      const pgCols = setCols.replace(/VALUES\s*\(\s*(\w+)\s*\)/gi, 'EXCLUDED.$1')
+      return `ON CONFLICT (id) DO UPDATE SET ${pgCols}`
+    }
+  )
+}
+
+/** 移除 import 語句 */
+function removeImports(code: string): string {
+  return code.split('\n').filter(l => !l.trim().startsWith('import ')).join('\n')
+}
+
+/** 從位置提取完整函數體（brace matching） */
+function extractFunctionBody(code: string, startIdx: number): string | null {
+  if (startIdx < 0 || startIdx >= code.length) return null
+  const firstBrace = code.indexOf('{', startIdx)
+  if (firstBrace < 0) return null
+
+  let depth = 0
+  for (let i = firstBrace; i < code.length; i++) {
+    if (code[i] === '{') depth++
+    if (code[i] === '}') {
+      depth--
+      if (depth === 0) {
+        return code.slice(startIdx, i + 1)
+      }
+    }
+  }
+  return null
+}
+
+/** 零 LLM 機械組裝子操作為最終 action 函數 */
+function composeActionFunction(
+  action: ActionEntry,
+  subOps: SubOperation[],
+  subOpCodes: Array<{ summary: string; code: string }>
+): GeneratedComponent {
+  // 1. 收集所有 import 語句，去重
+  const namedImports = new Map<string, Set<string>>()
+  const defaultImports = new Map<string, string>()
+  const processedDefaultMods = new Set<string>()
+
+  for (const { code } of subOpCodes) {
+    for (const line of code.split('\n')) {
+      const trimmed = line.trim()
+      // import { x, y } from 'module'
+      const namedMatch = trimmed.match(/^import\s+\{([^}]+)\}\s+from\s+['"]([^'"]+)['"]/)
+      if (namedMatch) {
+        const names = namedMatch[1].split(',').map(s => s.trim()).filter(Boolean)
+        const mod = namedMatch[2]
+        if (!namedImports.has(mod)) namedImports.set(mod, new Set())
+        names.forEach(n => namedImports.get(mod)!.add(n))
+        continue
+      }
+      // import x from 'module'
+      const defaultMatch = trimmed.match(/^import\s+(\w+)\s+from\s+['"]([^'"]+)['"]/)
+      if (defaultMatch && !processedDefaultMods.has(defaultMatch[2])) {
+        defaultImports.set(defaultMatch[2], defaultMatch[1])
+        processedDefaultMods.add(defaultMatch[2])
+      }
+    }
+  }
+
+  // 2. 組裝 import 區塊
+  const importLines: string[] = []
+  const emittedMods = new Set<string>()
+  for (const [mod, defName] of defaultImports) {
+    const named = namedImports.get(mod)
+    if (named && named.size > 0) {
+      importLines.push(`import ${defName}, { ${[...named].join(', ')} } from '${mod}'`)
+      namedImports.delete(mod)
+    } else {
+      importLines.push(`import ${defName} from '${mod}'`)
+    }
+    emittedMods.add(mod)
+  }
+  for (const [mod, names] of namedImports) {
+    if (!emittedMods.has(mod)) {
+      importLines.push(`import { ${[...names].join(', ')} } from '${mod}'`)
+    }
+  }
+
+  // 3. 提取 helper 函數（如 snakeToCamel），去重
+  const helperFunctions = new Map<string, string>()
+  for (const { code } of subOpCodes) {
+    const cleaned = removeImports(code)
+    const helperRegex = /(?:^|\n)((?:async\s+)?function\s+(?!handle)(\w+)\s*\([^)]*\)[^{]*\{)/g
+    let match: RegExpExecArray | null
+    while ((match = helperRegex.exec(cleaned)) !== null) {
+      const funcName = match[2]
+      if (!helperFunctions.has(funcName)) {
+        const body = extractFunctionBody(cleaned, match.index + (match[0].startsWith('\n') ? 1 : 0))
+        if (body) helperFunctions.set(funcName, body.trim())
+      }
+    }
+  }
+
+  // 4. 提取每個子操作的 handle 函數
+  const handleFunctions: string[] = []
+  for (const { summary, code } of subOpCodes) {
+    let cleaned = removeImports(code)
+    // 移除已提升的 helper
+    for (const [, fullHelper] of helperFunctions) {
+      cleaned = cleaned.replace(fullHelper, '')
+    }
+    // 確保函數名稱正確
+    const handleName = `handle${toPascalCase(summary)}`
+    cleaned = cleaned.replace(
+      /(?:export\s+)?(?:async\s+)?function\s+\w+/,
+      `async function ${handleName}`
+    )
+    const trimmed = cleaned.trim()
+    if (trimmed) handleFunctions.push(trimmed)
+  }
+
+  // 5. 組裝 _stepSummary 分派（長 summary 在前，避免子字串衝突）
+  const sortedOps = [...subOps].sort((a, b) => b.summary.length - a.summary.length)
+  const dispatchBranches = sortedOps.map((op, i) => {
+    const handleName = `handle${toPascalCase(op.summary)}`
+    const prefix = i === 0 ? 'if' : 'else if'
+    return `  ${prefix} (op.includes('${op.summary}')) return ${handleName}(input)`
+  }).join('\n')
+
+  // 6. 組裝最終檔案
+  const fnName = toCamelCase(action.name)
+  const finalCode = `${importLines.join('\n')}
+
+${[...helperFunctions.values()].join('\n\n')}
+
+${handleFunctions.join('\n\n')}
+
+export async function ${fnName}(input: any) {
+  const op = input._stepSummary || ''
+${dispatchBranches}
+  else { throw new Error('不支援的操作') }
+}`
+
+  return {
+    path: `lib/actions/${toKebabCase(action.name)}.ts`,
+    content: finalCode,
+    description: action.summary,
+  }
+}
+
+// ============================================================
+// 主要 Action 生成函數
+// ============================================================
+
 export async function generateActionFunction(
   action: ActionEntry,
   ctx: { schemaSql: string; entityMapping: string; types: Record<string, unknown>; features?: Array<{ actionName: string; content: string }> },
   trackingContext?: { userId?: string; conversationId?: string }
 ): Promise<GeneratedComponent> {
+  // === Per-SubOperation 生成模式（manage_ 等多子操作 action） ===
+  if (USE_PER_SUBOP) {
+    const featureContentForSubOp = ctx.features?.find(f => f.actionName === action.name)?.content
+    if (featureContentForSubOp) {
+      const subOps = extractSubOperations(featureContentForSubOp, action)
+      if (subOps.length > 1) {
+        logger.info({ actionName: action.name, subOpCount: subOps.length, summaries: subOps.map(s => `${s.summary}(${s.operationType})`) }, 'Per-SubOp 生成模式')
+
+        try {
+          const subOpCodes = await runWithConcurrencyLimit(
+            subOps,
+            async (subOp, idx) => {
+              logger.info({ actionName: action.name, subOp: subOp.summary, idx }, `生成子操作 ${idx + 1}/${subOps.length}`)
+              return generateSubOperationCode(action, subOp, ctx, trackingContext)
+            },
+            3
+          )
+
+          let result = composeActionFunction(action, subOps, subOpCodes)
+
+          // 組裝後跑 validateActionResponses（復用現有 post-fix）
+          const { files, fixes } = validateActionResponses([result])
+          if (fixes.length > 0) {
+            logger.info({ actionName: action.name, fixes }, 'Per-SubOp 組裝後 post-fix')
+          }
+          result = files[0] as GeneratedComponent
+
+          return result
+        } catch (subOpErr) {
+          logger.warn({ actionName: action.name, err: subOpErr }, 'Per-SubOp 生成失敗，回退到整體生成')
+          // 回退到下方的原有邏輯
+        }
+      }
+    }
+  }
+
+  // === 原有的單次生成邏輯（單操作 feature 或 fallback） ===
   const systemPrompt = buildActionSystemPrompt(action)
   const requiredResponseFields = ctx.features
     ? extractResponseFieldsFromFeatures(ctx.features, action.name)
@@ -512,22 +1029,8 @@ export async function generateActionFunction(
   }
 
   let code = extractCodeFromResponse(result.content)
-
-  // 移除 LLM 偶爾加入的認證檢查
-  code = code.replace(/if\s*\(\s*!(?:input\.)?userId\s*\)\s*\{[^}]*(?:throw|return)[^}]*\}/g, '')
-  code = code.replace(/if\s*\(\s*!(?:input\.)?userId\s*\)\s*(?:throw|return)[^\n]*/g, '')
-  code = code.replace(/if\s*\([^)]*\)\s*\{?\s*throw\s+new\s+Error\s*\(\s*['"`][^'"`]*(?:必須已登入|認證|已過期|unauthorized|must.*log|未登入|操作者必須)[^'"`]*['"`]\s*\)\s*\}?/gi, '')
-  code = code.replace(/if\s*\(\s*!(?:input\.)?(?:token|session|authToken)\s*\)\s*\{[^}]*(?:throw|return)[^}]*\}/g, '')
-  code = code.replace(/if\s*\(\s*!(?:input\.)?(?:token|session|authToken)\s*\)\s*(?:throw|return)[^\n]*/g, '')
-
-  // MySQL → PostgreSQL 語法修正
-  code = code.replace(
-    /ON\s+DUPLICATE\s+KEY\s+UPDATE\s+(.+?)(?=\s*`|;|\n|$)/gim,
-    (_match: string, setCols: string) => {
-      const pgCols = setCols.replace(/VALUES\s*\(\s*(\w+)\s*\)/gi, 'EXCLUDED.$1')
-      return `ON CONFLICT (id) DO UPDATE SET ${pgCols}`
-    }
-  )
+  code = removeAuthChecks(code)
+  code = fixMySqlSyntax(code)
 
   return {
     path: `lib/actions/${toKebabCase(action.name)}.ts`,
@@ -1425,6 +1928,46 @@ export function validateActionResponses(actionFiles: GeneratedComponent[]): { fi
       }
     }
 
+    // Rule 4: 物理 DELETE → 軟刪除（偵測 DELETE FROM 且代碼其他地方有 deleted_at 暗示）
+    const hasDeleteFrom = /await\s+(?:sql|tx)\s*`\s*DELETE\s+FROM\s+/i.test(code)
+    const hasDeletedAtUsage = /deleted_at/i.test(code)
+    const hasDeletedAtInSql = /deleted_at\s+IS\s+NULL/i.test(code)
+    if (hasDeleteFrom && (hasDeletedAtUsage || hasDeletedAtInSql)) {
+      // 只在同一個 action 已經在其他地方用了 deleted_at（暗示表有此欄位）時才修復
+      code = code.replace(
+        /await\s+(sql|tx)\s*`\s*DELETE\s+FROM\s+(\w+)\s+WHERE\s+([^`]*?)\s*`/gi,
+        (match, driver, table, whereClause) => {
+          fixes.push(`${file.path}: DELETE FROM ${table} → 軟刪除 (SET deleted_at = NOW())`)
+          modified = true
+          return `await ${driver}\`UPDATE ${table} SET deleted_at = NOW(), updated_at = NOW() WHERE ${whereClause} RETURNING *\``
+        }
+      )
+    }
+
+    // Rule 5: 裸 SUM/COUNT 沒包 COALESCE → 自動加上
+    const nakedAggregatePattern = /(?<!COALESCE\s*\(\s*)(SUM|COUNT|AVG)\s*\(/gi
+    if (nakedAggregatePattern.test(code)) {
+      // 重置 lastIndex
+      nakedAggregatePattern.lastIndex = 0
+      // 用更精確的 pattern 替換（只處理 SQL template literal 內的）
+      const sqlBlockPattern = /sql\s*`([^`]*)`/g
+      let sqlMatch: RegExpExecArray | null
+      while ((sqlMatch = sqlBlockPattern.exec(code)) !== null) {
+        const sqlContent = sqlMatch[1]
+        if (/(?<!COALESCE\s*\(\s*)(SUM|COUNT|AVG)\s*\(/i.test(sqlContent)) {
+          const fixedSql = sqlContent.replace(
+            /(?<!COALESCE\s*\(\s*)((?:SUM|COUNT|AVG)\s*\([^)]*\))/gi,
+            'COALESCE($1, 0)'
+          )
+          if (fixedSql !== sqlContent) {
+            code = code.replace(sqlContent, fixedSql)
+            fixes.push(`${file.path}: 聚合函數加 COALESCE 防 NULL`)
+            modified = true
+          }
+        }
+      }
+    }
+
     return modified ? { ...file, content: code } : file
   })
 
@@ -2112,7 +2655,52 @@ if (op.includes('登出')) {
 → 加 ::uuid cast：\`WHERE id = \${value}::uuid\`
 
 如果錯誤含 "operand of WHERE must not return a set"：
-→ 把 IN (\${array}) 改為 = ANY(\${array}::uuid[])`
+→ 把 IN (\${array}) 改為 = ANY(\${array}::uuid[])
+
+## 聚合查詢（常見錯誤！）
+如果錯誤含 "must appear in the GROUP BY clause"：
+→ SELECT 中非聚合函數（SUM/COUNT/AVG 以外）的欄位必須出現在 GROUP BY
+→ 例如：SELECT category_id, SUM(amount) FROM ... GROUP BY category_id
+如果回應值為空（"預期: XXX 實際:" 後面是空的）但預期有數字：
+→ 聚合函數必須用 COALESCE：COALESCE(SUM(amount), 0)
+→ 回傳值必須用 Number() 轉型：Number(result.totalIncome)（PostgreSQL SUM/COUNT 回傳 string）
+→ 無資料時回傳零值物件 { totalIncome: 0, totalExpense: 0 }，不要 404 或空
+→ 日期範圍過濾用 date_trunc：date_trunc('month', transaction_date) = date_trunc('month', \${month}::date)
+→ 必須加 deleted_at IS NULL 排除軟刪除記錄
+
+## 軟刪除（常見錯誤！）
+如果錯誤含 "deletedAt 預期非 null，但實際值為 null"：
+→ 刪除操作**必須**用 UPDATE SET deleted_at = NOW()，**絕對不能**用 DELETE FROM
+→ 查詢操作**必須**加 WHERE deleted_at IS NULL 排除已刪除記錄
+→ 摘要/統計查詢也必須排除 deleted_at IS NOT NULL 的記錄
+
+## camelCase 欄位名稱（常見錯誤！）
+如果錯誤含 "值不匹配" 且 "實際:" 後面是空的（不是值錯，是欄位找不到）：
+→ PostgreSQL RETURNING * 回傳 snake_case（category_id），BDD 期望 camelCase（categoryId）
+→ 解法 1: SQL AS 別名：SELECT category_id as "categoryId", deleted_at as "deletedAt"
+→ 解法 2: 回傳前轉換：key.replace(/_([a-z])/g, (_, c) => c.toUpperCase())
+→ 常見欄位：category_id→categoryId, created_at→createdAt, deleted_at→deletedAt, transaction_date→transactionDate, device_id→deviceId
+
+## 級聯操作（常見錯誤！）
+如果錯誤含 "找不到符合條件的" 且是刪除父實體後驗證子實體：
+→ 刪除被 FK 引用的實體時，必須同時更新子記錄的 FK 為 NULL
+→ 用 sql.begin() transaction 包裹多步驟操作
+→ 例如：刪除類別 → UPDATE transactions SET category_id = NULL WHERE category_id = \${categoryId}
+
+## 步驟上下文（Steps Context）— 最重要的修復線索！
+測試失敗時會附帶完整的 BDD 步驟（Given/When/Then + DataTable）。
+這些步驟告訴你測試「到底在驗什麼」：
+
+- **Given 準備一個{entity}** → 測試前置資料（INSERT 到 DB）
+- **When {summary}, call table:** → 實際傳入的參數和欄位
+- **Then {summary}(STATUS)回應, with table:** → **你的回應必須包含這些欄位！**
+- **And 應該存在一個{entity}, with table:** → DB 驗證，確保你的 INSERT/UPDATE 是正確的
+
+**修復關鍵**：
+1. 看 Then 的 DataTable headers → 你的 return 物件「必須」包含這些欄位（camelCase）
+2. 看 Then 的 DataTable values → 預期值，判斷你的 SQL 和回應映射是否正確
+3. 看 And 的 entity_validate DataTable → DB 應有的狀態，確認 INSERT/UPDATE/soft-delete 正確
+4. Entity Mapping（如有）→ entity 中文名稱對應的實際 DB table 名`
 
 /**
  * 用 LLM 修復失敗的 action 函數
@@ -2120,16 +2708,113 @@ if (op.includes('登出')) {
 export async function fixFailingAction(
   actionName: string,
   currentCode: string,
-  failedScenarios: Array<{ scenarioName: string; ruleName: string; error?: string }>,
+  failedScenarios: Array<{ scenarioName: string; ruleName: string; error?: string; stepsContext?: string }>,
   schemaSql: string,
-  trackingContext?: { userId?: string; conversationId?: string }
+  trackingContext?: { userId?: string; conversationId?: string },
+  featureContent?: string,
+  entityMapping?: string
 ): Promise<string> {
+  // === Per-SubOp 精準修復：偵測組裝式程式碼結構 ===
+  const handleFuncMatches = [...currentCode.matchAll(/async function (handle\w+)\s*\(/g)]
+  if (handleFuncMatches.length > 1) {
+    // 從 dispatch 區塊提取 summary → handleFunc 映射
+    const dispatchMap = new Map<string, string>()
+    const dispatchRegex = /op\.includes\('([^']+)'\)\s*\)\s*return\s+(handle\w+)/g
+    let dm: RegExpExecArray | null
+    while ((dm = dispatchRegex.exec(currentCode)) !== null) {
+      dispatchMap.set(dm[1], dm[2])
+    }
+
+    if (dispatchMap.size > 0) {
+      // 根據失敗 scenario 的 ruleName/scenarioName 匹配到子操作
+      const failedBySubOp = new Map<string, typeof failedScenarios>()
+      for (const s of failedScenarios) {
+        const text = (s.ruleName || '') + ' ' + (s.scenarioName || '')
+        let matched = false
+        for (const [summary, funcName] of dispatchMap) {
+          if (text.includes(summary)) {
+            if (!failedBySubOp.has(funcName)) failedBySubOp.set(funcName, [])
+            failedBySubOp.get(funcName)!.push(s)
+            matched = true
+            break
+          }
+        }
+        if (!matched) {
+          // 無法匹配 → 加到第一個子操作（保守策略）
+          const firstFunc = handleFuncMatches[0][1]
+          if (!failedBySubOp.has(firstFunc)) failedBySubOp.set(firstFunc, [])
+          failedBySubOp.get(firstFunc)!.push(s)
+        }
+      }
+
+      // 逐個修復失敗的子操作
+      let fixedCode = currentCode
+      for (const [funcName, scenarios] of failedBySubOp) {
+        const funcStartIdx = fixedCode.indexOf(`async function ${funcName}`)
+        const funcBody = extractFunctionBody(fixedCode, funcStartIdx)
+        if (!funcBody) continue
+
+        const subFixDetails = scenarios
+          .map(s => {
+            let detail = `- ${s.ruleName ? `${s.ruleName} - ` : ''}${s.scenarioName}\n  Error: ${s.error || 'unknown'}`
+            if ((s as any).stepsContext) {
+              detail += `\n  Steps:\n${(s as any).stepsContext.split('\n').map((l: string) => '    ' + l).join('\n')}`
+            }
+            return detail
+          })
+          .join('\n')
+
+        logger.info({ actionName, funcName, scenarioCount: scenarios.length }, 'Per-SubOp 精準修復')
+
+        try {
+          const fixedFunc = await callClaude(FIX_SYSTEM_PROMPT, `## 當前子操作函數（${funcName}）
+\`\`\`typescript
+${funcBody}
+\`\`\`
+
+## 測試失敗
+${subFixDetails}
+
+## SQL Schema
+\`\`\`sql
+${schemaSql}
+\`\`\`
+${entityMapping ? `\n## Entity Mapping\n\`\`\`yaml\n${entityMapping}\n\`\`\`\n` : ''}
+
+只修復這個子操作函數，不要改函數名稱（${funcName}）。輸出修正後的完整函數。`,
+            { maxTokens: 4096, temperature: 0.1 }, trackingContext)
+
+          if (fixedFunc.success && fixedFunc.content) {
+            let newFunc = extractCodeFromResponse(fixedFunc.content)
+            if (newFunc && newFunc.length > 50) {
+              newFunc = removeAuthChecks(newFunc)
+              newFunc = fixMySqlSyntax(newFunc)
+              // 確保函數名不被 LLM 改掉
+              if (!newFunc.includes(`function ${funcName}`)) {
+                newFunc = newFunc.replace(/(?:async\s+)?function\s+\w+/, `async function ${funcName}`)
+              }
+              fixedCode = fixedCode.replace(funcBody, newFunc)
+            }
+          }
+        } catch (fixErr) {
+          logger.warn({ actionName, funcName, err: fixErr }, 'Per-SubOp 修復 LLM 呼叫失敗')
+        }
+      }
+
+      return fixedCode
+    }
+  }
+  // === END Per-SubOp 精準修復 ===
+
   const failureDetails = failedScenarios
     .map(s => {
       const label = s.ruleName ? `${s.ruleName} - ${s.scenarioName}` : s.scenarioName
       let errorText = `  Root Cause: ${s.error || 'unknown'}`
       if ((s as any).allErrors) {
         errorText += `\n  Chain Errors:\n    ${(s as any).allErrors.split('\n').join('\n    ')}`
+      }
+      if (s.stepsContext) {
+        errorText += `\n  Steps:\n${s.stepsContext.split('\n').map(l => '    ' + l).join('\n')}`
       }
       return `- ${label}\n${errorText}`
     })
@@ -2147,7 +2832,7 @@ ${failureDetails}
 \`\`\`sql
 ${schemaSql}
 \`\`\`
-
+${entityMapping ? `\n## Entity Mapping\n\`\`\`yaml\n${entityMapping}\n\`\`\`\n` : ''}
 請修復代碼使所有測試通過。輸出完整的修正後檔案。`
 
   const response = await callClaude(FIX_SYSTEM_PROMPT, userMessage, { maxTokens: 8192, temperature: 0.1 }, trackingContext)

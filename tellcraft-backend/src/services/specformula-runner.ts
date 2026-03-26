@@ -2403,11 +2403,16 @@ export async function runRedGreenCycle(input: {
           const stepErrors = s.steps
             .filter(step => step.status === 'failed')
             .map(step => `[${step.keyword}] ${step.error || 'unknown'}`)
+          // 完整步驟上下文（含 DataTable），讓 LLM 知道測試預期什麼
+          const stepsContext = s.steps
+            .map(step => `${step.keyword} ${step.text} [${step.status}]`)
+            .join('\n')
           return {
             scenarioName: s.scenarioName,
             ruleName: s.ruleName,
             error: stepErrors[0] || s.error || 'unknown',
             allErrors: stepErrors.length > 1 ? stepErrors.join('\n') : undefined,
+            stepsContext,
           }
         })
 
@@ -2416,7 +2421,9 @@ export async function runRedGreenCycle(input: {
         currentFiles[fileIdx].content,
         failedScenarios,
         input.schemaSql,
-        input.trackingContext
+        input.trackingContext,
+        feature.content,
+        input.entityMapping
       )
 
       currentFiles[fileIdx] = { ...currentFiles[fileIdx], content: fixedCode }
@@ -2508,7 +2515,12 @@ export async function runRedGreenCycle(input: {
       if (fileIdx === -1) continue
 
       try {
-        const fixedCode = await fixFailingAction(actionName, currentFiles[fileIdx].content, scenarios, input.schemaSql, input.trackingContext)
+        // 找到對應的 feature content 供 per-sub-op 修復
+        const featureFile = input.featureFiles.find(f => {
+          const match = f.content.match(/^#\s*Action:\s*(\S+)/m)
+          return match?.[1] === actionName
+        })
+        const fixedCode = await fixFailingAction(actionName, currentFiles[fileIdx].content, scenarios, input.schemaSql, input.trackingContext, featureFile?.content, input.entityMapping)
         currentFiles[fileIdx] = { ...currentFiles[fileIdx], content: fixedCode }
       } catch (fixErr) {
         logger.warn({ actionName, err: fixErr }, '回歸修復 fixFailingAction 失敗，跳過此 action')
@@ -2571,7 +2583,7 @@ function groupFailedByAction(
     }
   }
 
-  const grouped = new Map<string, Array<{ scenarioName: string; ruleName: string; error?: string }>>()
+  const grouped = new Map<string, Array<{ scenarioName: string; ruleName: string; error?: string; stepsContext?: string }>>()
 
   for (const s of result.scenarios) {
     if (s.status !== 'failed') continue
@@ -2581,11 +2593,16 @@ function groupFailedByAction(
       || summaryToAction.get(s.featureName)
       || 'unknown'
 
+    const stepsContext = s.steps
+      .map(step => `${step.keyword} ${step.text} [${step.status}]`)
+      .join('\n')
+
     const list = grouped.get(actionName) || []
     list.push({
       scenarioName: s.scenarioName,
       ruleName: s.ruleName,
       error: s.error,
+      stepsContext,
     })
     grouped.set(actionName, list)
   }
