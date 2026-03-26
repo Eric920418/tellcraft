@@ -6,7 +6,7 @@
  */
 
 import { sanitizeCodeForDeploy } from './deployer'
-import type { GeneratedCode, GeneratedComponent } from './uiux-generation'
+import type { GeneratedCode } from '../types/flow-state'
 import { getAnthropicClient, MODEL } from '../lib/anthropic'
 import { createLogger } from '../lib/logger'
 
@@ -132,19 +132,17 @@ function parseFixedFiles(text: string): { path: string; content: string }[] {
 function applyFixes(original: GeneratedCode, fixedFiles: { path: string; content: string }[]): GeneratedCode {
   const fixMap = new Map(fixedFiles.map(f => [f.path, f.content]))
 
-  const pages: GeneratedComponent[] = original.pages.map(p => {
-    const fixed = fixMap.get(p.path)
-    return fixed ? { ...p, content: fixed } : p
-  })
+  const pages = original.pages.map(p => ({
+    ...p,
+    content: fixMap.get(p.path) ?? p.content,
+  }))
 
-  const components: GeneratedComponent[] = original.components.map(c => {
-    const fixed = fixMap.get(c.path)
-    return fixed ? { ...c, content: fixed } : c
-  })
+  const components = original.components.map(c => ({
+    ...c,
+    content: fixMap.get(c.path) ?? c.content,
+  }))
 
-  // 處理 styles
   const fixedStyles = fixMap.get('app/globals.css')
-  const styles = fixedStyles || original.styles
 
-  return { pages, components, styles }
+  return { pages, components, styles: fixedStyles || original.styles }
 }

@@ -1212,4 +1212,48 @@ router.post('/webhooks', requireAuth, validateBody(createWebhookSchema), async (
   }
 })
 
+// ============================================================
+// WebContainer 預覽 Build Error 自動修復
+// ============================================================
+
+/**
+ * POST /api/operations/fix-build-error
+ * WebContainer 的 next dev 編譯失敗時，前端呼叫此 API 用 Haiku LLM 修復
+ */
+router.post('/fix-build-error', requireAuth, async (req: Request, res: Response) => {
+  try {
+    const userId = req.user!.id
+    const { buildError, code, tailwindConfig } = req.body as {
+      buildError: string
+      code: { pages: { path: string; content: string; description?: string }[]; components: { path: string; content: string; description?: string }[]; styles: string }
+      tailwindConfig?: string
+    }
+
+    if (!buildError || !code?.pages) {
+      return res.status(400).json({ error: 'Missing buildError or code' })
+    }
+
+    const { fixPreviewBuildError } = await import('../services/code-verify')
+    const result = await fixPreviewBuildError({
+      buildError,
+      code: {
+        pages: (code.pages || []).map((p: { path: string; content: string; description?: string }) => ({ path: p.path, content: p.content, description: p.description || '' })),
+        components: (code.components || []).map((c: { path: string; content: string; description?: string }) => ({ path: c.path, content: c.content, description: c.description || '' })),
+        styles: code.styles || '',
+      },
+      tailwindConfig,
+      trackingContext: { userId },
+    })
+
+    if (!result) {
+      return res.json({ fixedCode: null, fixes: [] })
+    }
+
+    res.json({ fixedCode: result.fixedCode, fixes: result.fixes })
+  } catch (error) {
+    logger.error({ err: error }, 'fix-build-error 失敗')
+    res.status(500).json({ error: 'Fix build error failed' })
+  }
+})
+
 export default router

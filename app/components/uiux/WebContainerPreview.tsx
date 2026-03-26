@@ -1,6 +1,6 @@
 'use client'
 
-import React, { useRef, useEffect, useState, useMemo } from 'react'
+import React, { useRef, useEffect, useState, useMemo, useCallback } from 'react'
 import { useWebContainer } from '@/app/hooks/useWebContainer'
 import type { WCStatus } from '@/app/hooks/useWebContainer'
 import {
@@ -224,6 +224,39 @@ export default function WebContainerPreview({
     return { DATABASE_URL: neonConnectionString }
   }, [neonConnectionString])
 
+  // ── Build error 自動修復循環 ──
+  const repairAttemptRef = useRef(0)
+  const isRepairingRef = useRef(false)
+  const writeFilesRef = useRef<((files: Record<string, string>) => Promise<void>) | null>(null)
+
+  const handleBuildError = useCallback(async (errorLog: string) => {
+    if (isRepairingRef.current || repairAttemptRef.current >= 3) return
+    isRepairingRef.current = true
+    repairAttemptRef.current += 1
+    setProgressDetail(`自動修復 build error（第 ${repairAttemptRef.current} 次）...`)
+
+    try {
+      const token = typeof window !== 'undefined' ? localStorage.getItem('auth_token') : null
+      const res = await fetch('/api/vps/operations/fix-build-error', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+        body: JSON.stringify({ buildError: errorLog, code: { pages, components, styles }, tailwindConfig }),
+      })
+      if (!res.ok) { isRepairingRef.current = false; return }
+      const { fixedCode } = await res.json()
+      if (!fixedCode) { isRepairingRef.current = false; return }
+
+      const fixedFiles: Record<string, string> = {}
+      for (const f of [...(fixedCode.pages || []), ...(fixedCode.components || [])]) {
+        const p = stripRouteGroups(f.path?.startsWith('/') ? f.path.slice(1) : f.path)
+        fixedFiles[p] = sanitizeFileContent(p, f.content)
+      }
+      if (fixedCode.styles) fixedFiles['app/globals.css'] = prepareCss(fixedCode.styles, !!tailwindConfig)
+      await writeFilesRef.current?.(fixedFiles)
+      setProgressDetail(undefined)
+    } catch { /* 修復失敗，靜默 */ } finally { isRepairingRef.current = false }
+  }, [pages, components, styles, tailwindConfig])
+
   // ── WebContainer Hook — handles full lifecycle ──
   const {
     status,
@@ -240,7 +273,11 @@ export default function WebContainerPreview({
     onPreviewError: (err) => {
       onRuntimeError?.({ name: err.type, message: err.message, path: undefined })
     },
+    onBuildError: handleBuildError,
   })
+
+  // 更新 ref 以供 handleBuildError 使用（避免循環依賴）
+  writeFilesRef.current = writeFiles
 
   // ── Restart when neonConnectionString appears (coder 完成後) ──
   const prevNeonRef = useRef<string | undefined>(undefined)

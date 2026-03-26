@@ -43,6 +43,8 @@ export interface UseWebContainerOptions {
   onError?: (error: Error) => void
   onProgress?: (status: WCStatus, detail?: string) => void
   onPreviewError?: (error: { type: string; message: string; stack?: string }) => void
+  /** Build error callback — 偵測到 next dev 編譯失敗時觸發 */
+  onBuildError?: (errorLog: string) => void
 }
 
 export interface UseWebContainerReturn {
@@ -92,7 +94,7 @@ export function setPreloadPromise(p: Promise<boolean>) {
 // ── Hook ──
 
 export function useWebContainer(options: UseWebContainerOptions): UseWebContainerReturn {
-  const { enabled, initialFiles, envVars, onReady, onError, onProgress, onPreviewError } = options
+  const { enabled, initialFiles, envVars, onReady, onError, onProgress, onPreviewError, onBuildError } = options
 
   const [status, setStatus] = useState<WCStatus>('idle')
   const [iframeUrl, setIframeUrl] = useState<string | null>(null)
@@ -107,6 +109,8 @@ export function useWebContainer(options: UseWebContainerOptions): UseWebContaine
   onProgressRef.current = onProgress
   const onPreviewErrorRef = useRef(onPreviewError)
   onPreviewErrorRef.current = onPreviewError
+  const onBuildErrorRef = useRef(onBuildError)
+  onBuildErrorRef.current = onBuildError
 
   const mountedRef = useRef(true)
   const containerRef = useRef<WebContainer | null>(null)
@@ -249,10 +253,20 @@ export function useWebContainer(options: UseWebContainerOptions): UseWebContaine
         devProcess = await container.spawn('npx', ['next', 'dev', '--port', '3000'])
 
         const devLogs: string[] = []
+        let buildErrorDebounce: ReturnType<typeof setTimeout> | null = null
         devProcess.output.pipeTo(new WritableStream({
           write(data) {
             devLogs.push(data)
-            // dev server output (silent in production)
+            // 偵測 build error 模式 — debounce 500ms 收集完整錯誤後再觸發
+            if (data.includes('Failed to compile') || data.includes('Module not found') ||
+                data.includes('Syntax error') || data.includes('SyntaxError') ||
+                data.includes('cannot have two parallel pages')) {
+              if (buildErrorDebounce) clearTimeout(buildErrorDebounce)
+              buildErrorDebounce = setTimeout(() => {
+                const errorLog = devLogs.slice(-20).join('')
+                onBuildErrorRef.current?.(errorLog)
+              }, 500)
+            }
           }
         })).catch(() => {})
 
