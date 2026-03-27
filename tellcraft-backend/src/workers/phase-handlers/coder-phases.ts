@@ -621,7 +621,7 @@ export async function executeCoderTesting(input: CoderSkillInput): Promise<void>
     const { runRedGreenCycle, formatTestResults } = await import('../../services/specformula-runner')
 
     // 3. 執行紅綠燈循環
-    const result = await runRedGreenCycle({
+    const rgcInput = {
       backendFiles,
       featureFiles,
       actionsYml: bddSession.actions_yml_content,
@@ -632,14 +632,41 @@ export async function executeCoderTesting(input: CoderSkillInput): Promise<void>
       neonConnectionString: project.neon_connection_string,
       maxAttempts: 3,
       trackingContext: { userId, conversationId },
-      onProgress: async (step, percent) => {
+      onProgress: async (step: string, percent: number) => {
         await touchFlowActivity(redis, conversationId)
         await sendMessage(conversationId, io, {
           content: `${step} (${percent}%)`,
           stage: 'coder_testing',
         })
       },
-    })
+    }
+
+    let result = await runRedGreenCycle(rgcInput)
+
+    // 3b. 自動重試：測試沒全過且有進展就繼續（最多 3 輪，不需用戶手動按重試）
+    const MAX_AUTO_RETRIES = 3
+    let autoRetry = 0
+    let previousFailed = result.testResults.failed
+
+    while (!result.allPassed && autoRetry < MAX_AUTO_RETRIES) {
+      autoRetry++
+      logger.info({ autoRetry, failed: previousFailed, conversationId }, '自動重試修復')
+      await sendMessage(conversationId, io, {
+        content: isChinese
+          ? `自動重試修復（第 ${autoRetry} 輪）— ${previousFailed} 個場景待修...`
+          : `Auto-retry fix (round ${autoRetry}) — ${previousFailed} scenarios remaining...`,
+        stage: 'coder_testing',
+      })
+      await touchFlowActivity(redis, conversationId)
+
+      result = await runRedGreenCycle({ ...rgcInput, backendFiles: result.finalFiles })
+
+      if (result.testResults.failed >= previousFailed) {
+        logger.info({ autoRetry, failed: result.testResults.failed, previousFailed }, '自動重試無進展，停止')
+        break
+      }
+      previousFailed = result.testResults.failed
+    }
 
     // 4. 更新結果
     state = await getFlowState(redis, conversationId) || state

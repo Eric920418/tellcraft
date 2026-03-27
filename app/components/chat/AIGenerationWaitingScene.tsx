@@ -930,7 +930,7 @@ export default function AIGenerationWaitingScene({
           </div>
 
           {/* ── 鐵鎚（橫向，把手右側延伸，錘頭左側砸鐵砧） ── */}
-          <div style={{ position: 'absolute', left: '42%', bottom: '17%', width: '18%', zIndex: 7 }}>
+          <div style={{ position: 'absolute', left: '44%', bottom: '24%', width: '18%', zIndex: 7 }}>
             <motion.div
               animate={
                 reduceMotion

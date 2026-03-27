@@ -8,6 +8,7 @@
 // ============================================================
 
 import * as yaml from 'js-yaml'
+import { z } from 'zod'
 import { getAnthropicHeaders, MODEL, trackLlmUsage } from '../lib/anthropic'
 import type { GeneratedComponent } from './uiux-generation'
 import type { GeneratedCode } from '../types/flow-state'
@@ -419,15 +420,29 @@ const result = await sql.begin(async (tx) => {
     WHERE id = \${entityId} RETURNING *
   \`
   if (!parent) throw new Error('找不到資料')
-  // Step 2: 級聯更新子實體的 FK 為 NULL（代表「未分類」）
-  await tx\`UPDATE child_table SET parent_id = NULL, updated_at = NOW() WHERE parent_id = \${entityId}\`
+
+  // Step 2: 找到「未分類」或預設類別（如果 BDD 測試預期指定未分類類別 ID）
+  const [defaultCategory] = await tx\`
+    SELECT id FROM categories
+    WHERE (name = '未分類' OR name = 'Uncategorized') AND device_id = \${deviceId}
+    LIMIT 1
+  \`
+  const fallbackId = defaultCategory?.id || null
+
+  // Step 3: 級聯更新子實體的 FK 為未分類 ID（或 NULL）
+  await tx\`
+    UPDATE child_table SET parent_id = \${fallbackId}, updated_at = NOW()
+    WHERE parent_id = \${entityId}
+  \`
   return parent
 })
 return { __status: 200, ...result }
 \`\`\`
 規則：
-- 刪除被 FK 引用的實體時，必須 transaction 內同時更新子記錄的 FK 為 NULL
-- 子記錄不要刪除，只把 FK 設為 NULL
+- 刪除被 FK 引用的實體時，必須 transaction 內同時更新子記錄
+- 如果 BDD 測試提到「未分類」，先查找未分類類別的 ID，用它來替換（不是 NULL）
+- 如果找不到未分類類別，才設為 NULL
+- 子記錄不要刪除
 - 用 sql.begin() 確保原子性`
 
 // --- Handler: 欄位別名（snake_case → camelCase）---
@@ -644,9 +659,10 @@ function extractSubOperations(featureContent: string, action: ActionEntry): SubO
     groups.get(summary)!.push(block.content)
   }
 
-  // 單一 summary → 不需要拆分，走原路徑
+  // 過濾掉無法解析 summary 的 rule blocks
   const validGroups = new Map([...groups].filter(([k]) => k !== '__default__'))
-  if (validGroups.size <= 1) return []
+  if (validGroups.size === 0) return []
+  // 即使只有 1 個 summary，也返回 SubOperation 以享受精準 Handler 選擇
 
   // 4. 構建 SubOperation 列表
   const subOps: SubOperation[] = []
@@ -744,20 +760,491 @@ function buildSubOpSystemPrompt(subOp: SubOperation): string {
   return `${BASE_PROMPT}\n\n${handlers.join('\n')}`
 }
 
-/** 生成單個子操作的代碼 */
+// ============================================================
+// Code Template 系統：確定性代碼生成（LLM 填槽位，模板保證 SQL 正確）
+// ============================================================
+
+const AggregateSlotSchema = z.object({
+  table: z.string(),
+  scopeColumn: z.string(),
+  scopeParam: z.string(),
+  dateColumn: z.string().optional(),
+  dateParam: z.string().optional(),
+  dateGranularity: z.enum(['month', 'day', 'year']).default('month'),
+  softDeleteColumn: z.string().default('deleted_at'),
+  aggregations: z.array(z.object({
+    fn: z.enum(['SUM', 'COUNT', 'AVG']),
+    column: z.string(),
+    condition: z.string().optional(),
+    alias: z.string(),
+  })),
+  groupBy: z.array(z.object({
+    column: z.string(),
+    alias: z.string(),
+  })).optional(),
+})
+
+const ExportSlotSchema = z.object({
+  table: z.string(),
+  scopeColumn: z.string(),
+  scopeParam: z.string(),
+  softDeleteColumn: z.string().default('deleted_at'),
+  selectColumns: z.array(z.object({
+    column: z.string(),
+    alias: z.string(),
+  })),
+  orderBy: z.array(z.object({
+    column: z.string(),
+    direction: z.enum(['ASC', 'DESC']),
+  })),
+  filters: z.array(z.object({
+    column: z.string(),
+    param: z.string(),
+  })).optional(),
+})
+
+const CascadeSlotSchema = z.object({
+  parentTable: z.string(),
+  childTable: z.string(),
+  fkColumn: z.string(),
+  scopeColumn: z.string(),
+  scopeParam: z.string(),
+  entityIdParam: z.string(),
+  defaultEntityQuery: z.string().optional(),
+  defaultEntityTable: z.string().optional(),
+})
+
+const CreateSlotSchema = z.object({
+  table: z.string(),
+  columns: z.array(z.object({
+    column: z.string(),
+    param: z.string(),
+    alias: z.string(),
+    defaultValue: z.string().optional(),
+  })),
+  scopeColumn: z.string().optional(),
+  scopeParam: z.string().optional(),
+})
+
+const UpdateSlotSchema = z.object({
+  table: z.string(),
+  entityIdParam: z.string(),
+  scopeColumn: z.string().optional(),
+  scopeParam: z.string().optional(),
+  updateColumns: z.array(z.object({
+    column: z.string(),
+    param: z.string(),
+    alias: z.string(),
+  })),
+})
+
+const DeleteSlotSchema = z.object({
+  table: z.string(),
+  entityIdParam: z.string(),
+  scopeColumn: z.string().optional(),
+  scopeParam: z.string().optional(),
+})
+
+const QueryListSlotSchema = z.object({
+  table: z.string(),
+  scopeColumn: z.string(),
+  scopeParam: z.string(),
+  softDeleteColumn: z.string().default('deleted_at'),
+  selectColumns: z.array(z.object({
+    column: z.string(),
+    alias: z.string(),
+  })).optional(),
+  orderBy: z.array(z.object({
+    column: z.string(),
+    direction: z.enum(['ASC', 'DESC']),
+  })).optional(),
+})
+
+// --- Template Render Functions ---
+
+function renderAggregateTemplate(slots: z.infer<typeof AggregateSlotSchema>, fnName: string): string {
+  const selectClauses = slots.aggregations.map(a => {
+    const expr = a.condition
+      ? `CASE WHEN ${a.condition} THEN ${a.column} ELSE 0 END`
+      : a.column
+    return `      COALESCE(${a.fn}(${expr}), 0) as "${a.alias}"`
+  })
+
+  const groupByCols = (slots.groupBy || []).map(g => `      ${g.column} as "${g.alias}"`)
+  const allSelect = [...groupByCols, ...selectClauses].join(',\n')
+  const groupByClause = slots.groupBy ? `\n    GROUP BY ${slots.groupBy.map(g => g.column).join(', ')}` : ''
+  const dateFilter = slots.dateColumn && slots.dateParam
+    ? `\n      AND date_trunc('${slots.dateGranularity}', ${slots.dateColumn}) = date_trunc('${slots.dateGranularity}', \${${slots.dateParam}}::date)`
+    : ''
+
+  const tag = `// @generated-by-template: aggregate`
+
+  if (slots.groupBy) {
+    return `import { sql } from '@/lib/db'
+${tag}
+
+export async function ${fnName}(input: any) {
+  const ${slots.scopeParam} = input.${slots.scopeParam}
+${slots.dateParam ? `  const ${slots.dateParam} = input.${slots.dateParam}\n` : ''}
+  const rows = await sql\`
+    SELECT
+${allSelect}
+    FROM ${slots.table}
+    WHERE ${slots.scopeColumn} = \${${slots.scopeParam}}
+      AND ${slots.softDeleteColumn} IS NULL${dateFilter}${groupByClause}
+  \`
+  const result = rows.map((r: any) => ({
+    ${[...(slots.groupBy || []).map(g => `${g.alias}: r.${g.alias}`), ...slots.aggregations.map(a => `${a.alias}: Number(r.${a.alias})`)].join(',\n    ')}
+  }))
+  ;(result as any).__status = 200
+  return result
+}`
+  }
+
+  return `import { sql } from '@/lib/db'
+${tag}
+
+export async function ${fnName}(input: any) {
+  const ${slots.scopeParam} = input.${slots.scopeParam}
+${slots.dateParam ? `  const ${slots.dateParam} = input.${slots.dateParam}\n` : ''}
+  const rows = await sql\`
+    SELECT
+${allSelect}
+    FROM ${slots.table}
+    WHERE ${slots.scopeColumn} = \${${slots.scopeParam}}
+      AND ${slots.softDeleteColumn} IS NULL${dateFilter}
+  \`
+  const row = rows[0] || {}
+  return {
+    __status: 200,
+    ${slots.aggregations.map(a => `${a.alias}: Number(row.${a.alias} ?? 0)`).join(',\n    ')}
+  }
+}`
+}
+
+function renderExportTemplate(slots: z.infer<typeof ExportSlotSchema>, fnName: string): string {
+  const selectCols = slots.selectColumns.map(c =>
+    c.column === c.alias ? `      ${c.column}` : `      ${c.column} as "${c.alias}"`
+  ).join(',\n')
+  const orderCols = slots.orderBy.map(o => `${o.column} ${o.direction}`).join(', ')
+  const filterClauses = (slots.filters || []).map(f =>
+    `\n      AND ${f.column} = \${input.${f.param}}`
+  ).join('')
+  const tag = `// @generated-by-template: export`
+
+  return `import { sql } from '@/lib/db'
+${tag}
+
+export async function ${fnName}(input: any) {
+  const ${slots.scopeParam} = input.${slots.scopeParam}
+
+  const rows = await sql\`
+    SELECT
+${selectCols}
+    FROM ${slots.table}
+    WHERE ${slots.scopeColumn} = \${${slots.scopeParam}}
+      AND ${slots.softDeleteColumn} IS NULL${filterClauses}
+    ORDER BY ${orderCols}
+  \`
+  ;(rows as any).__status = 200
+  return rows
+}`
+}
+
+function renderCascadeTemplate(slots: z.infer<typeof CascadeSlotSchema>, fnName: string): string {
+  const tag = `// @generated-by-template: cascade`
+  const defaultLookup = slots.defaultEntityQuery && slots.defaultEntityTable
+    ? `
+    // 查找預設實體（如「未分類」）
+    const [defaultEntity] = await tx\`
+      SELECT id FROM ${slots.defaultEntityTable}
+      WHERE ${slots.defaultEntityQuery} AND ${slots.scopeColumn} = \${${slots.scopeParam}}
+      LIMIT 1
+    \`
+    const fallbackId = defaultEntity?.id || null`
+    : `
+    const fallbackId = null`
+
+  return `import { sql } from '@/lib/db'
+${tag}
+
+export async function ${fnName}(input: any) {
+  const ${slots.entityIdParam} = input.${slots.entityIdParam}
+  const ${slots.scopeParam} = input.${slots.scopeParam}
+
+  const result = await sql.begin(async (tx: any) => {
+    const [parent] = await tx\`
+      UPDATE ${slots.parentTable} SET deleted_at = NOW(), updated_at = NOW()
+      WHERE id = \${${slots.entityIdParam}} AND ${slots.scopeColumn} = \${${slots.scopeParam}}
+      RETURNING *
+    \`
+    if (!parent) throw new Error('找不到資料')
+${defaultLookup}
+
+    await tx\`
+      UPDATE ${slots.childTable} SET ${slots.fkColumn} = \${fallbackId}, updated_at = NOW()
+      WHERE ${slots.fkColumn} = \${${slots.entityIdParam}}
+    \`
+    return parent
+  })
+
+  function snakeToCamel(row: any) {
+    if (!row) return row
+    const r: any = {}
+    for (const [k, v] of Object.entries(row)) {
+      r[k.replace(/_([a-z])/g, (_: any, c: string) => c.toUpperCase())] = v
+    }
+    return r
+  }
+  return { __status: 200, ...snakeToCamel(result) }
+}`
+}
+
+function renderCreateTemplate(slots: z.infer<typeof CreateSlotSchema>, fnName: string): string {
+  const tag = `// @generated-by-template: create`
+  const insertCols = slots.columns.map(c => c.column).join(', ')
+  const insertVals = slots.columns.map(c =>
+    c.defaultValue ? c.defaultValue : `\${input.${c.param}}`
+  ).join(', ')
+
+  return `import { sql } from '@/lib/db'
+${tag}
+
+export async function ${fnName}(input: any) {
+  const [row] = await sql\`
+    INSERT INTO ${slots.table} (${insertCols}, created_at, updated_at)
+    VALUES (${insertVals}, NOW(), NOW())
+    RETURNING *
+  \`
+
+  function snakeToCamel(row: any) {
+    if (!row) return row
+    const r: any = {}
+    for (const [k, v] of Object.entries(row)) {
+      r[k.replace(/_([a-z])/g, (_: any, c: string) => c.toUpperCase())] = v
+    }
+    return r
+  }
+  return { __status: 201, ...snakeToCamel(row) }
+}`
+}
+
+function renderUpdateTemplate(slots: z.infer<typeof UpdateSlotSchema>, fnName: string): string {
+  const tag = `// @generated-by-template: update`
+  const setClauses = slots.updateColumns.map(c => `${c.column} = \${input.${c.param}}`).join(', ')
+  const scopeCheck = slots.scopeColumn && slots.scopeParam
+    ? ` AND ${slots.scopeColumn} = \${input.${slots.scopeParam}}` : ''
+
+  return `import { sql } from '@/lib/db'
+${tag}
+
+export async function ${fnName}(input: any) {
+  const existing = await sql\`SELECT * FROM ${slots.table} WHERE id = \${input.${slots.entityIdParam}}${scopeCheck}\`
+  if (existing.length === 0) throw new Error('不存在或不屬於當前使用者')
+
+  const [row] = await sql\`
+    UPDATE ${slots.table} SET ${setClauses}, updated_at = NOW()
+    WHERE id = \${input.${slots.entityIdParam}}
+    RETURNING *
+  \`
+
+  function snakeToCamel(row: any) {
+    if (!row) return row
+    const r: any = {}
+    for (const [k, v] of Object.entries(row)) {
+      r[k.replace(/_([a-z])/g, (_: any, c: string) => c.toUpperCase())] = v
+    }
+    return r
+  }
+  return { __status: 200, ...snakeToCamel(row) }
+}`
+}
+
+function renderDeleteTemplate(slots: z.infer<typeof DeleteSlotSchema>, fnName: string): string {
+  const tag = `// @generated-by-template: delete`
+  const scopeCheck = slots.scopeColumn && slots.scopeParam
+    ? ` AND ${slots.scopeColumn} = \${input.${slots.scopeParam}}` : ''
+
+  return `import { sql } from '@/lib/db'
+${tag}
+
+export async function ${fnName}(input: any) {
+  const [row] = await sql\`
+    UPDATE ${slots.table} SET deleted_at = NOW(), updated_at = NOW()
+    WHERE id = \${input.${slots.entityIdParam}}${scopeCheck}
+    RETURNING *
+  \`
+
+  function snakeToCamel(row: any) {
+    if (!row) return row
+    const r: any = {}
+    for (const [k, v] of Object.entries(row)) {
+      r[k.replace(/_([a-z])/g, (_: any, c: string) => c.toUpperCase())] = v
+    }
+    return r
+  }
+  return { __status: 200, ...snakeToCamel(row) }
+}`
+}
+
+function renderQueryListTemplate(slots: z.infer<typeof QueryListSlotSchema>, fnName: string): string {
+  const tag = `// @generated-by-template: query_list`
+  const selectPart = slots.selectColumns
+    ? slots.selectColumns.map(c => c.column === c.alias ? c.column : `${c.column} as "${c.alias}"`).join(', ')
+    : '*'
+  const orderPart = slots.orderBy ? `\n    ORDER BY ${slots.orderBy.map(o => `${o.column} ${o.direction}`).join(', ')}` : ''
+
+  return `import { sql } from '@/lib/db'
+${tag}
+
+export async function ${fnName}(input: any) {
+  const ${slots.scopeParam} = input.${slots.scopeParam}
+
+  const rows = await sql\`
+    SELECT ${selectPart}
+    FROM ${slots.table}
+    WHERE ${slots.scopeColumn} = \${${slots.scopeParam}}
+      AND ${slots.softDeleteColumn} IS NULL${orderPart}
+  \`
+
+  ${slots.selectColumns ? `const result = rows.map((r: any) => {
+    const camel: any = {}
+    for (const [k, v] of Object.entries(r)) {
+      camel[k.replace(/_([a-z])/g, (_: any, c: string) => c.toUpperCase())] = v
+    }
+    return camel
+  })
+  ;(result as any).__status = 200
+  return result` : `;(rows as any).__status = 200
+  return rows`}
+}`
+}
+
+// --- Slot Extraction ---
+
+async function extractSlots<T>(
+  schema: z.ZodType<T>,
+  subOp: SubOperation,
+  schemaSql: string,
+  entityMapping: string,
+  trackingContext?: { userId?: string; conversationId?: string },
+): Promise<T | null> {
+  const prompt = `根據 BDD Feature 和 SQL Schema，提取以下 JSON 結構的槽位值。
+只輸出 JSON，不要解釋、不要 markdown 包裹。
+
+## SQL Schema
+${schemaSql}
+
+## Entity Mapping（中文實體 → 表名）
+${entityMapping}
+
+## BDD Feature Scenario
+${subOp.relevantGherkin}
+
+## 必須回傳的欄位（camelCase，回應中必須包含）
+${subOp.requiredResponseFields.map(f => `- ${f}`).join('\n') || '（無特定欄位要求）'}
+
+## 提取規則
+- table/column 用 SQL 真實的 snake_case 名稱
+- alias 用 camelCase（跟 BDD 欄位名一致）
+- scopeColumn 是限定資料範圍的欄位（如 device_id, user_id）
+- scopeParam 是 input 對應的參數名（如 deviceId, userId）
+- condition 用 SQL WHERE 語法（如 "type = 'income'"）
+- 如果 BDD 提到「未分類」，defaultEntityQuery 填查詢條件（如 "name = '未分類'"）
+
+只輸出 JSON：`
+
+  const result = await callClaude(
+    '你是一個結構化資料提取專家。從 BDD Feature 和 SQL Schema 中提取精確的 JSON 槽位。只輸出 JSON，不要任何其他文字。',
+    prompt,
+    { maxTokens: 2048, temperature: 0 },
+    trackingContext,
+  )
+
+  if (!result.success || !result.content) return null
+
+  try {
+    const cleaned = result.content.replace(/```json?\n?/g, '').replace(/```/g, '').trim()
+    const json = JSON.parse(cleaned)
+    return schema.parse(json) as T
+  } catch (err) {
+    logger.warn({ operationType: subOp.operationType, err }, 'Slot extraction 解析/驗證失敗')
+    return null
+  }
+}
+
+async function tryTemplateGeneration(
+  subOp: SubOperation,
+  ctx: { schemaSql: string; entityMapping: string },
+  fnName: string,
+  trackingContext?: { userId?: string; conversationId?: string },
+): Promise<string | null> {
+  switch (subOp.operationType) {
+    case 'aggregate': {
+      const slots = await extractSlots(AggregateSlotSchema, subOp, ctx.schemaSql, ctx.entityMapping, trackingContext)
+      return slots ? renderAggregateTemplate(slots, fnName) : null
+    }
+    case 'export': {
+      const slots = await extractSlots(ExportSlotSchema, subOp, ctx.schemaSql, ctx.entityMapping, trackingContext)
+      return slots ? renderExportTemplate(slots, fnName) : null
+    }
+    case 'cascade': {
+      const slots = await extractSlots(CascadeSlotSchema, subOp, ctx.schemaSql, ctx.entityMapping, trackingContext)
+      return slots ? renderCascadeTemplate(slots, fnName) : null
+    }
+    case 'create': {
+      const slots = await extractSlots(CreateSlotSchema, subOp, ctx.schemaSql, ctx.entityMapping, trackingContext)
+      return slots ? renderCreateTemplate(slots, fnName) : null
+    }
+    case 'update': {
+      const slots = await extractSlots(UpdateSlotSchema, subOp, ctx.schemaSql, ctx.entityMapping, trackingContext)
+      return slots ? renderUpdateTemplate(slots, fnName) : null
+    }
+    case 'delete': {
+      const slots = await extractSlots(DeleteSlotSchema, subOp, ctx.schemaSql, ctx.entityMapping, trackingContext)
+      return slots ? renderDeleteTemplate(slots, fnName) : null
+    }
+    case 'query_list': {
+      const slots = await extractSlots(QueryListSlotSchema, subOp, ctx.schemaSql, ctx.entityMapping, trackingContext)
+      return slots ? renderQueryListTemplate(slots, fnName) : null
+    }
+    default:
+      return null
+  }
+}
+
+// ============================================================
+
+/** 生成單個子操作的代碼（優先用 template，fallback 到 free-form LLM） */
 async function generateSubOperationCode(
   action: ActionEntry,
   subOp: SubOperation,
   ctx: { schemaSql: string; entityMapping: string; types: Record<string, unknown> },
   trackingContext?: { userId?: string; conversationId?: string }
 ): Promise<{ summary: string; code: string }> {
+  const handleName = `handle${toPascalCase(subOp.summary)}`
+
+  // === 優先嘗試 template 生成（確定性） ===
+  if (subOp.operationType !== 'unknown' && subOp.operationType !== 'auth' && subOp.operationType !== 'batch') {
+    try {
+      const templateCode = await tryTemplateGeneration(subOp, ctx, handleName, trackingContext)
+      if (templateCode) {
+        logger.info({ summary: subOp.summary, operationType: subOp.operationType }, 'Template 生成成功')
+        return { summary: subOp.summary, code: templateCode }
+      }
+    } catch (templateErr) {
+      logger.warn({ summary: subOp.summary, err: templateErr }, 'Template 生成異常，fallback 到 LLM')
+    }
+    logger.info({ summary: subOp.summary, operationType: subOp.operationType }, 'Template slot 提取失敗，fallback 到 free-form LLM')
+  }
+
+  // === Free-form LLM 生成（fallback） ===
   const systemPrompt = buildSubOpSystemPrompt(subOp)
 
   const responseFieldsText = subOp.requiredResponseFields.length > 0
     ? `\n## 必須返回的欄位名稱（嚴格遵守，不可改名）\n${subOp.requiredResponseFields.map(f => `- \`${f}\``).join('\n')}`
     : ''
 
-  const handleName = `handle${toPascalCase(subOp.summary)}`
   const userPrompt = `## 子操作定義
 Action 名稱：${action.name}
 子操作：${subOp.summary}
@@ -972,34 +1459,64 @@ export async function generateActionFunction(
     const featureContentForSubOp = ctx.features?.find(f => f.actionName === action.name)?.content
     if (featureContentForSubOp) {
       const subOps = extractSubOperations(featureContentForSubOp, action)
-      if (subOps.length > 1) {
-        logger.info({ actionName: action.name, subOpCount: subOps.length, summaries: subOps.map(s => `${s.summary}(${s.operationType})`) }, 'Per-SubOp 生成模式')
+      if (subOps.length >= 1) {
+        const mode = subOps.length === 1 ? '精準 Handler' : 'Per-SubOp'
+        logger.info({ actionName: action.name, mode, subOpCount: subOps.length, summaries: subOps.map(s => `${s.summary}(${s.operationType})`) }, `${mode} 生成模式`)
 
         try {
           const subOpCodes = await runWithConcurrencyLimit(
             subOps,
             async (subOp, idx) => {
-              logger.info({ actionName: action.name, subOp: subOp.summary, idx }, `生成子操作 ${idx + 1}/${subOps.length}`)
+              logger.info({ actionName: action.name, subOp: subOp.summary, operationType: subOp.operationType, idx }, `生成子操作 ${idx + 1}/${subOps.length}`)
               return generateSubOperationCode(action, subOp, ctx, trackingContext)
             },
             3
           )
 
-          let result = composeActionFunction(action, subOps, subOpCodes)
+          let result: GeneratedComponent
+          if (subOps.length === 1) {
+            // 單操作：直接用生成的代碼，不需要 dispatch 組裝
+            const { code } = subOpCodes[0]
+            // 確保 export 正確的函數名
+            const fnName = toCamelCase(action.name)
+            let finalCode = code
+            // 將 handle 函數重命名為 action 函數名並 export
+            const handleFuncMatch = finalCode.match(new RegExp(`(?:async\\s+)?function\\s+(handle${ID_PATTERN})`))
+            if (handleFuncMatch) {
+              finalCode = finalCode.replace(
+                new RegExp(`(?:export\\s+)?(?:async\\s+)?function\\s+${handleFuncMatch[1].replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`),
+                `export async function ${fnName}`
+              )
+            } else {
+              // LLM 沒用 handle 前綴，直接確保 export
+              finalCode = finalCode.replace(
+                new RegExp(`(?:export\\s+)?(?:async\\s+)?function\\s+${ID_PATTERN}`),
+                `export async function ${fnName}`
+              )
+            }
+            result = {
+              path: `lib/actions/${toKebabCase(action.name)}.ts`,
+              content: finalCode,
+              description: action.summary,
+            }
+          } else {
+            // 多操作：組裝
+            result = composeActionFunction(action, subOps, subOpCodes)
+          }
 
-          // esbuild 語法驗證：組裝後確認語法正確
+          // esbuild 語法驗證：確認語法正確
           try {
             const esbuild = await import('esbuild')
             await esbuild.transform(result.content, { loader: 'ts' })
           } catch (syntaxErr) {
-            logger.warn({ actionName: action.name, syntaxErr }, 'Per-SubOp 組裝後語法錯誤，回退到整體生成')
+            logger.warn({ actionName: action.name, syntaxErr }, '精準 Handler 生成語法錯誤，回退到整體生成')
             throw syntaxErr  // 觸發外層 catch → 回退到原有邏輯
           }
 
           // 組裝後跑 validateActionResponses（復用現有 post-fix）
           const { files, fixes } = validateActionResponses([result])
           if (fixes.length > 0) {
-            logger.info({ actionName: action.name, fixes }, 'Per-SubOp 組裝後 post-fix')
+            logger.info({ actionName: action.name, fixes }, '精準 Handler 生成 post-fix')
           }
           result = files[0] as GeneratedComponent
 
