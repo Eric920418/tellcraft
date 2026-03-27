@@ -6,6 +6,7 @@
 import { Server as SocketIOServer } from 'socket.io'
 import Redis from 'ioredis'
 import * as db from '../../db/client'
+import { sanitizeForPreview } from '../../services/code-verify'
 import type { FlowState, GeneratedCode } from '../../types/flow-state'
 import {
   generateStructure, generateAnimations, generateRwd, generateAnimationsAndRwd,
@@ -1109,13 +1110,10 @@ export async function sendFastBuildCompleteMessage(
     layoutHint: 'split',
     richContent: {
       type: 'code_preview',
-      data: {
-        pages: currentCode.pages,
-        components: currentCode.components,
-        styles: currentCode.styles,
-        tailwindConfig: twConfig,
-        currentPhase: 'complete',
-      } as Record<string, unknown>,
+      data: (() => {
+        const s = sanitizeForPreview({ pages: currentCode.pages, components: currentCode.components, styles: currentCode.styles })
+        return { pages: s.code.pages, components: s.code.components, styles: s.code.styles, tailwindConfig: twConfig, currentPhase: 'complete' }
+      })() as Record<string, unknown>,
     },
     quickReplies: buildPostDeployFastBuildQuickReplies(state, { includeDeploy: true }),
   })

@@ -7,6 +7,8 @@ import Redis from 'ioredis'
 import * as db from '../db/client'
 import { createLogger } from '../lib/logger'
 
+import { sanitizeForPreview } from './code-verify'
+
 const logger = createLogger('iteration-skill')
 import type { FlowState } from '../types/flow-state'
 import { sendMessage, saveFlowState, getFlowState, generatedCodeToFileRows, deductCredits, makeStreamingCallback, snapshotCodeToGeneration } from '../workers/orchestrator-utils'
@@ -516,14 +518,10 @@ ${enrichedFeedback}`
       layoutHint: 'split',
       richContent: {
         type: 'code_preview',
-        data: {
-          pages: updatedCode.pages,
-          components: updatedCode.components,
-          styles: updatedCode.styles,
-          tailwindConfig,
-          currentPhase: 'complete',
-          ...(coderFiles.length > 0 ? { serverActions, apiRoutes, dbLib, hasServerActions: true, neonConnectionString } : {}),
-        } as Record<string, unknown>,
+        data: (() => {
+          const s = sanitizeForPreview({ pages: updatedCode.pages, components: updatedCode.components, styles: updatedCode.styles })
+          return { pages: s.code.pages, components: s.code.components, styles: s.code.styles, tailwindConfig, currentPhase: 'complete', ...(coderFiles.length > 0 ? { serverActions, apiRoutes, dbLib, hasServerActions: true, neonConnectionString } : {}) }
+        })() as Record<string, unknown>,
       },
       quickReplies,
     })
@@ -632,14 +630,10 @@ export async function executeUndoIteration(input: {
       layoutHint: 'split',
       richContent: {
         type: 'code_preview',
-        data: {
-          pages: state.uiuxGeneratedCode.pages,
-          components: state.uiuxGeneratedCode.components,
-          styles: state.uiuxGeneratedCode.styles,
-          tailwindConfig,
-          currentPhase: 'complete',
-          ...(undoCoderFiles.length > 0 ? { serverActions: undoServerActions, apiRoutes: undoApiRoutes, dbLib: undoDbLib, hasServerActions: true, neonConnectionString: undoNeonConnStr } : {}),
-        } as Record<string, unknown>,
+        data: (() => {
+          const s = sanitizeForPreview({ pages: state.uiuxGeneratedCode.pages, components: state.uiuxGeneratedCode.components, styles: state.uiuxGeneratedCode.styles })
+          return { pages: s.code.pages, components: s.code.components, styles: s.code.styles, tailwindConfig, currentPhase: 'complete', ...(undoCoderFiles.length > 0 ? { serverActions: undoServerActions, apiRoutes: undoApiRoutes, dbLib: undoDbLib, hasServerActions: true, neonConnectionString: undoNeonConnStr } : {}) }
+        })() as Record<string, unknown>,
       },
       quickReplies: [
         { label: '部署上線', value: '部署', style: 'primary' },

@@ -13,6 +13,7 @@ import { sendMessage, saveFlowState, getFlowState, touchFlowActivity, snapshotCo
 import { runCoderE2ETests } from '../../services/coder-e2e-test'
 import { executeRedPhase, formatRedPhaseReport, runRedPhaseFullValidation, runRedPhaseRoutingValidation } from '../../services/red-phase-validator'
 import { createLogger } from '../../lib/logger'
+import { sanitizeForPreview } from '../../services/code-verify'
 
 const logger = createLogger('coder-phases')
 
@@ -442,7 +443,18 @@ export async function executeCoderSkill(input: CoderSkillInput): Promise<void> {
         await executeCoderTesting({
           taskId: input.taskId,
           projectId, conversationId, userId, redis, io,
-        })
+          codePreviewData: {
+            pages: mergedPages,
+            components: mergedComponents,
+            styles,
+            tailwindConfig,
+            serverActions,
+            apiRoutes,
+            dbLib,
+            hasServerActions: true,
+            neonConnectionString,
+          },
+        } as any)
 
         logger.info({ projectId, conversationId, ...summarizeResult(result) }, 'Coder Skill + SpecFormula 完成')
         return  // executeCoderTesting 內部已處理完成訊息和 FlowState
@@ -461,18 +473,10 @@ export async function executeCoderSkill(input: CoderSkillInput): Promise<void> {
       layoutHint: 'split',
       richContent: {
         type: 'code_preview',
-        data: {
-          pages: mergedPages,
-          components: mergedComponents,
-          styles,
-          tailwindConfig,
-          currentPhase: 'uiux_complete',
-          serverActions,
-          apiRoutes,
-          dbLib,
-          hasServerActions: true,
-          neonConnectionString,
-        } as Record<string, unknown>,
+        data: (() => {
+          const s = sanitizeForPreview({ pages: mergedPages, components: mergedComponents, styles })
+          return { pages: s.code.pages, components: s.code.components, styles: s.code.styles, tailwindConfig, currentPhase: 'uiux_complete', serverActions, apiRoutes, dbLib, hasServerActions: true, neonConnectionString }
+        })() as Record<string, unknown>,
       },
       quickReplies: [
         { label: isChinese ? '部署上線' : 'Deploy', value: '部署', style: 'primary' as const },
@@ -708,11 +712,41 @@ export async function executeCoderTesting(input: CoderSkillInput): Promise<void>
     }
     quickReplies.push({ label: isChinese ? '開始新專案' : 'New Project', value: '__new_project__', style: 'ghost' })
 
-    await sendMessage(conversationId, io, {
-      content: `${statusEmoji} **${summary}**\n\n${reportText}`,
-      stage: 'uiux_complete',
-      quickReplies,
-    })
+    // 用修復後的 backend files 重建 code_preview，讓 WebContainer 更新
+    if (result.attempts > 1 && (input as any).codePreviewData) {
+      const cpd = (input as any).codePreviewData as Record<string, unknown>
+      // 用修復後的 finalFiles 替換原始 backend files
+      const updatedServerActions = result.finalFiles.filter(f => f.path.startsWith('app/actions/'))
+      const updatedApiRoutes = result.finalFiles.filter(f => f.path.startsWith('app/api/'))
+      const updatedDbLib = result.finalFiles.filter(f => f.path.startsWith('lib/'))
+
+      const sanitizedCpd = sanitizeForPreview({ pages: cpd.pages as GeneratedComponent[], components: cpd.components as GeneratedComponent[], styles: (cpd.styles as string) || '' })
+      await sendMessage(conversationId, io, {
+        content: `${statusEmoji} **${summary}**\n\n${reportText}`,
+        stage: 'uiux_complete',
+        layoutHint: 'split',
+        richContent: {
+          type: 'code_preview',
+          data: {
+            ...cpd,
+            pages: sanitizedCpd.code.pages,
+            components: sanitizedCpd.code.components,
+            styles: sanitizedCpd.code.styles,
+            currentPhase: 'uiux_complete',
+            serverActions: updatedServerActions.length > 0 ? updatedServerActions : cpd.serverActions,
+            apiRoutes: updatedApiRoutes.length > 0 ? updatedApiRoutes : cpd.apiRoutes,
+            dbLib: updatedDbLib.length > 0 ? updatedDbLib : cpd.dbLib,
+          },
+        },
+        quickReplies,
+      })
+    } else {
+      await sendMessage(conversationId, io, {
+        content: `${statusEmoji} **${summary}**\n\n${reportText}`,
+        stage: 'uiux_complete',
+        quickReplies,
+      })
+    }
 
     logger.info({
       projectId, conversationId,

@@ -33,107 +33,115 @@ router.get('/stats', requireAuth, async (req, res) => {
   try {
     const userId = req.user!.id
 
-    // 查詢用戶信息
-    const user = await queryOne<{
-      plan: string
-      credits_used_this_period: number
-    }>(
-      'SELECT plan, credits_used_this_period FROM users WHERE id = $1',
-      [userId]
-    )
+    const data = await cached(`cache:dashboard:stats:${userId}`, 60, async () => {
+      // 查詢用戶信息
+      const user = await queryOne<{
+        plan: string
+        credits_used_this_period: number
+      }>(
+        'SELECT plan, credits_used_this_period FROM users WHERE id = $1',
+        [userId]
+      )
 
-    if (!user) {
+      if (!user) {
+        return null
+      }
+
+      // 查詢專案數量和最近的專案（含最新對話 ID）— LATERAL JOIN 取代 N+1 子查詢
+      const projectsResult = await query<{
+        id: string
+        name: string
+        status: string
+        is_pinned: boolean
+        created_at: string
+        updated_at: string
+        latest_conversation_id: string | null
+        latest_conversation_at: string | null
+      }>(
+        `SELECT p.id, p.name, p.status, p.is_pinned, p.created_at, p.updated_at,
+                lc.id as latest_conversation_id, lc.updated_at as latest_conversation_at
+         FROM projects p
+         LEFT JOIN LATERAL (
+           SELECT id, updated_at FROM conversations
+           WHERE project_id = p.id
+           ORDER BY updated_at DESC LIMIT 1
+         ) lc ON true
+         WHERE p.user_id = $1
+         ORDER BY COALESCE(lc.updated_at, p.updated_at) DESC
+         LIMIT 5`,
+        [userId]
+      )
+
+      // 查詢專案總數
+      const projectCountResult = await queryOne<{ count: string }>(
+        'SELECT COUNT(*) as count FROM projects WHERE user_id = $1',
+        [userId]
+      )
+
+      const projects = projectsResult.rows
+      const projectCount = parseInt(projectCountResult?.count || '0', 10)
+      const projectIds = projects.map(p => p.id)
+
+      // 如果有專案，查詢對話和部署數量
+      let convCount = 0
+      let deployCount = 0
+      const convCountMap = new Map<string, number>()
+
+      if (projectIds.length > 0) {
+        const [convCountResult, deployCountResult, convCountsResult] = await Promise.all([
+          queryOne<{ count: string }>(
+            `SELECT COUNT(*) as count FROM conversations WHERE project_id = ANY($1)`,
+            [projectIds]
+          ),
+          queryOne<{ count: string }>(
+            `SELECT COUNT(*) as count FROM deployments WHERE project_id = ANY($1) AND status = 'success'`,
+            [projectIds]
+          ),
+          query<{ project_id: string; count: string }>(
+            `SELECT project_id, COUNT(*) as count FROM conversations WHERE project_id = ANY($1) GROUP BY project_id`,
+            [projectIds]
+          )
+        ])
+
+        convCount = parseInt(convCountResult?.count || '0', 10)
+        deployCount = parseInt(deployCountResult?.count || '0', 10)
+
+        convCountsResult.rows.forEach(c => {
+          convCountMap.set(c.project_id, parseInt(c.count, 10))
+        })
+      }
+
+      const plan = user.plan || 'free'
+      const stats = {
+        totalProjects: projectCount,
+        totalConversations: convCount,
+        totalDeployments: deployCount,
+        creditUsage: {
+          used: user.credits_used_this_period || 0,
+          limit: getCreditLimit(plan),
+          plan,
+          isFairUse: isFairUsePlan(plan),
+        }
+      }
+
+      const recentProjects = projects.map(p => ({
+        id: p.id,
+        name: p.name,
+        status: p.status,
+        isPinned: p.is_pinned,
+        conversationCount: convCountMap.get(p.id) || 0,
+        latestConversationId: p.latest_conversation_id,
+        updatedAt: p.updated_at
+      }))
+
+      return { stats, recentProjects }
+    })
+
+    if (!data) {
       return res.status(404).json({ error: '用戶不存在' })
     }
 
-    // 查詢專案數量和最近的專案（含最新對話 ID）— LATERAL JOIN 取代 N+1 子查詢
-    const projectsResult = await query<{
-      id: string
-      name: string
-      status: string
-      is_pinned: boolean
-      created_at: string
-      updated_at: string
-      latest_conversation_id: string | null
-      latest_conversation_at: string | null
-    }>(
-      `SELECT p.id, p.name, p.status, p.is_pinned, p.created_at, p.updated_at,
-              lc.id as latest_conversation_id, lc.updated_at as latest_conversation_at
-       FROM projects p
-       LEFT JOIN LATERAL (
-         SELECT id, updated_at FROM conversations
-         WHERE project_id = p.id
-         ORDER BY updated_at DESC LIMIT 1
-       ) lc ON true
-       WHERE p.user_id = $1
-       ORDER BY COALESCE(lc.updated_at, p.updated_at) DESC
-       LIMIT 5`,
-      [userId]
-    )
-
-    // 查詢專案總數
-    const projectCountResult = await queryOne<{ count: string }>(
-      'SELECT COUNT(*) as count FROM projects WHERE user_id = $1',
-      [userId]
-    )
-
-    const projects = projectsResult.rows
-    const projectCount = parseInt(projectCountResult?.count || '0', 10)
-    const projectIds = projects.map(p => p.id)
-
-    // 如果有專案，查詢對話和部署數量
-    let convCount = 0
-    let deployCount = 0
-    const convCountMap = new Map<string, number>()
-
-    if (projectIds.length > 0) {
-      const [convCountResult, deployCountResult, convCountsResult] = await Promise.all([
-        queryOne<{ count: string }>(
-          `SELECT COUNT(*) as count FROM conversations WHERE project_id = ANY($1)`,
-          [projectIds]
-        ),
-        queryOne<{ count: string }>(
-          `SELECT COUNT(*) as count FROM deployments WHERE project_id = ANY($1) AND status = 'success'`,
-          [projectIds]
-        ),
-        query<{ project_id: string; count: string }>(
-          `SELECT project_id, COUNT(*) as count FROM conversations WHERE project_id = ANY($1) GROUP BY project_id`,
-          [projectIds]
-        )
-      ])
-
-      convCount = parseInt(convCountResult?.count || '0', 10)
-      deployCount = parseInt(deployCountResult?.count || '0', 10)
-
-      convCountsResult.rows.forEach(c => {
-        convCountMap.set(c.project_id, parseInt(c.count, 10))
-      })
-    }
-
-    const plan = user.plan || 'free'
-    const stats = {
-      totalProjects: projectCount,
-      totalConversations: convCount,
-      totalDeployments: deployCount,
-      creditUsage: {
-        used: user.credits_used_this_period || 0,
-        limit: getCreditLimit(plan),
-        plan,
-        isFairUse: isFairUsePlan(plan),
-      }
-    }
-
-    const recentProjects = projects.map(p => ({
-      id: p.id,
-      name: p.name,
-      status: p.status,
-      isPinned: p.is_pinned,
-      conversationCount: convCountMap.get(p.id) || 0,
-      latestConversationId: p.latest_conversation_id,
-      updatedAt: p.updated_at
-    }))
-
-    res.json({ stats, recentProjects })
+    res.json(data)
   } catch (error) {
     logger.error({ err: error }, '獲取統計失敗')
     res.status(500).json({ error: '獲取統計數據失敗' })
@@ -210,115 +218,130 @@ router.get('/admin/usage', requireAdmin, async (req, res) => {
     const start = startDate || defaultStartDate
     const end = endDate ? `${endDate}T23:59:59.999Z` : new Date().toISOString()
 
-    const result = await query<{
-      id: string
-      user_id: string
-      conversation_id: string
-      model: string
-      input_tokens: number
-      output_tokens: number
-      cost_usd: string
-      created_at: string
-      user_name: string | null
-      user_email: string | null
-    }>(
-      `SELECT llm_usage.id, llm_usage.user_id, llm_usage.conversation_id, llm_usage.model,
-              llm_usage.input_tokens, llm_usage.output_tokens, llm_usage.cost_usd, llm_usage.created_at,
-              users.name AS user_name, users.email AS user_email
-       FROM llm_usage
-       LEFT JOIN users ON llm_usage.user_id = users.id
-       WHERE llm_usage.created_at >= $1 AND llm_usage.created_at <= $2
-       ORDER BY llm_usage.created_at ASC`,
-      [start, end]
-    )
+    const cacheKey = `cache:admin:usage:${groupBy}:${start.slice(0, 10)}:${end.slice(0, 10)}`
 
-    // 計算總計和分組
-    let totalInputTokens = 0
-    let totalOutputTokens = 0
-    let totalCost = 0
-
-    const breakdownMap = new Map<string, {
-      inputTokens: number
-      outputTokens: number
-      cost: number
-      count: number
-      userName?: string
-      userId?: string
-      latestAt?: string
-    }>()
-
-    for (const row of result.rows) {
-      totalInputTokens += row.input_tokens || 0
-      totalOutputTokens += row.output_tokens || 0
-      totalCost += parseFloat(row.cost_usd) || 0
-
-      // 分組
-      let key: string
-      const date = new Date(row.created_at)
+    const data = await cached(cacheKey, 60, async () => {
+      // 根據 groupBy 構建 SQL breakdown 查詢
+      let breakdownSql: string
+      const isConversation = groupBy === 'conversation'
 
       switch (groupBy) {
-        case 'day':
-          key = date.toISOString().split('T')[0]
+        case 'week':
+          breakdownSql = `SELECT
+            DATE_TRUNC('week', created_at)::date::text AS key,
+            COALESCE(SUM(input_tokens), 0)::int AS input_tokens,
+            COALESCE(SUM(output_tokens), 0)::int AS output_tokens,
+            COALESCE(SUM(cost_usd), 0) AS cost,
+            COUNT(*)::int AS count
+          FROM llm_usage
+          WHERE created_at >= $1 AND created_at <= $2
+          GROUP BY DATE_TRUNC('week', created_at)
+          ORDER BY key ASC`
           break
-        case 'week': {
-          const weekStart = new Date(date)
-          weekStart.setDate(date.getDate() - date.getDay())
-          key = weekStart.toISOString().split('T')[0]
-          break
-        }
         case 'month':
-          key = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`
+          breakdownSql = `SELECT
+            TO_CHAR(created_at, 'YYYY-MM') AS key,
+            COALESCE(SUM(input_tokens), 0)::int AS input_tokens,
+            COALESCE(SUM(output_tokens), 0)::int AS output_tokens,
+            COALESCE(SUM(cost_usd), 0) AS cost,
+            COUNT(*)::int AS count
+          FROM llm_usage
+          WHERE created_at >= $1 AND created_at <= $2
+          GROUP BY TO_CHAR(created_at, 'YYYY-MM')
+          ORDER BY key ASC`
           break
         case 'model':
-          key = row.model
+          breakdownSql = `SELECT
+            model AS key,
+            COALESCE(SUM(input_tokens), 0)::int AS input_tokens,
+            COALESCE(SUM(output_tokens), 0)::int AS output_tokens,
+            COALESCE(SUM(cost_usd), 0) AS cost,
+            COUNT(*)::int AS count
+          FROM llm_usage
+          WHERE created_at >= $1 AND created_at <= $2
+          GROUP BY model
+          ORDER BY count DESC`
           break
         case 'conversation':
-          key = row.conversation_id || '(無對話)'
+          breakdownSql = `SELECT
+            COALESCE(l.conversation_id::text, '(無對話)') AS key,
+            COALESCE(SUM(l.input_tokens), 0)::int AS input_tokens,
+            COALESCE(SUM(l.output_tokens), 0)::int AS output_tokens,
+            COALESCE(SUM(l.cost_usd), 0) AS cost,
+            COUNT(*)::int AS count,
+            COALESCE(u.name, u.email) AS user_name,
+            l.user_id,
+            MAX(l.created_at) AS latest_at
+          FROM llm_usage l
+          LEFT JOIN users u ON l.user_id = u.id
+          WHERE l.created_at >= $1 AND l.created_at <= $2
+          GROUP BY l.conversation_id, l.user_id, u.name, u.email
+          ORDER BY latest_at DESC`
           break
-        default:
-          key = date.toISOString().split('T')[0]
+        default: // 'day'
+          breakdownSql = `SELECT
+            DATE(created_at)::text AS key,
+            COALESCE(SUM(input_tokens), 0)::int AS input_tokens,
+            COALESCE(SUM(output_tokens), 0)::int AS output_tokens,
+            COALESCE(SUM(cost_usd), 0) AS cost,
+            COUNT(*)::int AS count
+          FROM llm_usage
+          WHERE created_at >= $1 AND created_at <= $2
+          GROUP BY DATE(created_at)
+          ORDER BY key ASC`
       }
 
-      const existing = breakdownMap.get(key) || { inputTokens: 0, outputTokens: 0, cost: 0, count: 0 }
-      const entry: typeof existing = {
-        inputTokens: existing.inputTokens + (row.input_tokens || 0),
-        outputTokens: existing.outputTokens + (row.output_tokens || 0),
-        cost: existing.cost + (parseFloat(row.cost_usd) || 0),
-        count: existing.count + 1,
-      }
-      // conversation 分組時記錄用戶資訊和最新活動時間
-      if (groupBy === 'conversation') {
-        if (!existing.userName) {
-          entry.userName = row.user_name || row.user_email || undefined
-          entry.userId = row.user_id || undefined
+      const [totalsResult, breakdownResult] = await Promise.all([
+        queryOne<{
+          total_input_tokens: string
+          total_output_tokens: string
+          total_cost: string
+        }>(
+          `SELECT
+            COALESCE(SUM(input_tokens), 0) AS total_input_tokens,
+            COALESCE(SUM(output_tokens), 0) AS total_output_tokens,
+            COALESCE(SUM(cost_usd), 0) AS total_cost
+          FROM llm_usage
+          WHERE created_at >= $1 AND created_at <= $2`,
+          [start, end]
+        ),
+        query<{
+          key: string
+          input_tokens: number
+          output_tokens: number
+          cost: string
+          count: number
+          user_name?: string | null
+          user_id?: string | null
+          latest_at?: string | null
+        }>(breakdownSql, [start, end]),
+      ])
+
+      const breakdown = breakdownResult.rows.map(row => {
+        const entry: Record<string, unknown> = {
+          key: row.key,
+          inputTokens: row.input_tokens,
+          outputTokens: row.output_tokens,
+          cost: parseFloat(row.cost as string) || 0,
+          count: row.count,
         }
-        // 追蹤該分組的最新活動時間（SQL 已按 ASC，所以最後一條最新）
-        // pg 驅動對 TIMESTAMPTZ 返回 Date 物件，用 new Date() 統一處理
-        entry.latestAt = new Date(row.created_at).toISOString()
-      }
-      breakdownMap.set(key, entry)
-    }
-
-    let breakdown = Array.from(breakdownMap.entries()).map(([key, value]) => ({
-      key,
-      ...value
-    }))
-
-    // conversation 分組按最新活動時間降序排列（最近活動在前）
-    if (groupBy === 'conversation') {
-      breakdown = breakdown.sort((a, b) => {
-        const timeA = new Date(a.latestAt || 0).getTime()
-        const timeB = new Date(b.latestAt || 0).getTime()
-        return timeB - timeA
+        if (isConversation) {
+          entry.userName = row.user_name || undefined
+          entry.userId = row.user_id || undefined
+          entry.latestAt = row.latest_at ? new Date(row.latest_at as string).toISOString() : undefined
+        }
+        return entry
       })
-    }
 
-    res.json({
-      totalInputTokens,
-      totalOutputTokens,
-      totalCost,
-      breakdown
+      return {
+        totalInputTokens: parseInt(totalsResult?.total_input_tokens || '0', 10),
+        totalOutputTokens: parseInt(totalsResult?.total_output_tokens || '0', 10),
+        totalCost: parseFloat(totalsResult?.total_cost || '0'),
+        breakdown,
+      }
     })
+
+    res.json(data)
   } catch (error) {
     logger.error({ err: error }, '獲取 LLM 用量失敗')
     res.status(500).json({ error: '獲取用量數據失敗' })
@@ -389,9 +412,10 @@ router.get('/admin/users', requireAdmin, async (req, res) => {
         u.id, u.email, u.name, u.plan, u.subscription_status, u.is_admin,
         u.credits_used_this_period, u.created_at, u.provider,
         COUNT(DISTINCT p.id) as project_count,
-        (SELECT string_agg(up.provider, ',') FROM user_providers up WHERE up.user_id = u.id) as linked_providers
+        string_agg(DISTINCT up.provider, ',') as linked_providers
        FROM users u
        LEFT JOIN projects p ON p.user_id = u.id
+       LEFT JOIN user_providers up ON up.user_id = u.id
        ${whereClause}
        GROUP BY u.id
        ORDER BY ${sortField === 'project_count' ? 'project_count' : `u.${sortField}`} ${order}
@@ -469,26 +493,25 @@ router.get('/admin/users/:userId', requireAdmin, async (req, res) => {
        FROM conversations c
        JOIN projects p ON c.project_id = p.id
        WHERE p.user_id = $1
-       ORDER BY c.updated_at DESC`,
+       ORDER BY c.updated_at DESC
+       LIMIT 20`,
       [userId]
     )
 
-    // 獲取統計數據
-    const [projectCount, convCount, deployCount, llmCost] = await Promise.all([
-      queryOne<{ count: string }>('SELECT COUNT(*) as count FROM projects WHERE user_id = $1', [userId]),
-      queryOne<{ count: string }>(
-        'SELECT COUNT(*) as count FROM conversations c JOIN projects p ON c.project_id = p.id WHERE p.user_id = $1',
-        [userId]
-      ),
-      queryOne<{ count: string }>(
-        `SELECT COUNT(*) as count FROM deployments d JOIN projects p ON d.project_id = p.id WHERE p.user_id = $1 AND d.status = 'success'`,
-        [userId]
-      ),
-      queryOne<{ total: string }>(
-        'SELECT COALESCE(SUM(cost_usd), 0) as total FROM llm_usage WHERE user_id = $1',
-        [userId]
-      ),
-    ])
+    // 獲取統計數據（合併為單一查詢減少 round trip）
+    const statsResult = await queryOne<{
+      project_count: string
+      conv_count: string
+      deploy_count: string
+      llm_cost: string
+    }>(
+      `SELECT
+        (SELECT COUNT(*) FROM projects WHERE user_id = $1) AS project_count,
+        (SELECT COUNT(*) FROM conversations c JOIN projects p ON c.project_id = p.id WHERE p.user_id = $1) AS conv_count,
+        (SELECT COUNT(*) FROM deployments d JOIN projects p ON d.project_id = p.id WHERE p.user_id = $1 AND d.status = 'success') AS deploy_count,
+        (SELECT COALESCE(SUM(cost_usd), 0) FROM llm_usage WHERE user_id = $1) AS llm_cost`,
+      [userId]
+    )
 
     res.json({
       user: {
@@ -514,10 +537,10 @@ router.get('/admin/users/:userId', requireAdmin, async (req, res) => {
         updatedAt: c.updated_at
       })),
       stats: {
-        totalProjects: parseInt(projectCount?.count || '0', 10),
-        totalConversations: parseInt(convCount?.count || '0', 10),
-        totalDeployments: parseInt(deployCount?.count || '0', 10),
-        totalLLMCost: parseFloat(llmCost?.total || '0')
+        totalProjects: parseInt(statsResult?.project_count || '0', 10),
+        totalConversations: parseInt(statsResult?.conv_count || '0', 10),
+        totalDeployments: parseInt(statsResult?.deploy_count || '0', 10),
+        totalLLMCost: parseFloat(statsResult?.llm_cost || '0')
       }
     })
   } catch (error) {
@@ -693,7 +716,7 @@ router.get('/admin/conversations', requireAdmin, async (req, res) => {
       project_name: string
       user_id: string
       user_email: string
-      messages: any[]
+      message_count: string
       spec_complete: boolean
       created_at: string
       updated_at: string
@@ -701,7 +724,7 @@ router.get('/admin/conversations', requireAdmin, async (req, res) => {
       `SELECT
         c.id, c.project_id, p.name as project_name,
         p.user_id, u.email as user_email,
-        c.messages, c.spec_complete, c.created_at, c.updated_at
+        jsonb_array_length(c.messages) as message_count, c.spec_complete, c.created_at, c.updated_at
        FROM conversations c
        JOIN projects p ON c.project_id = p.id
        LEFT JOIN users u ON p.user_id = u.id
@@ -718,7 +741,7 @@ router.get('/admin/conversations', requireAdmin, async (req, res) => {
       projectName: conv.project_name || '',
       userId: conv.user_id || '',
       userEmail: conv.user_email || '',
-      messageCount: (conv.messages || []).length,
+      messageCount: parseInt(conv.message_count, 10),
       specComplete: conv.spec_complete,
       createdAt: conv.created_at,
       updatedAt: conv.updated_at

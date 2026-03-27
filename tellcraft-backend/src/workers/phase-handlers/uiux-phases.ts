@@ -8,6 +8,7 @@ import { Server as SocketIOServer } from 'socket.io'
 import Redis from 'ioredis'
 import * as db from '../../db/client'
 import type { FlowState } from '../../types/flow-state'
+import { sanitizeForPreview } from '../../services/code-verify'
 import {
   generateDesignVariants, synthesizeVariants, extractVariantConcept,
   generateStructure, generateAnimations, generateRwd,
@@ -263,13 +264,10 @@ export async function handleFastGenerating(
           layoutHint: 'split',
           richContent: {
             type: 'code_preview',
-            data: {
-              pages: state.uiuxGeneratedCode!.pages,
-              components: state.uiuxGeneratedCode!.components,
-              styles: state.uiuxGeneratedCode!.styles,
-              tailwindConfig: twConfig,
-              currentPhase: 'complete',
-            } as Record<string, unknown>,
+            data: (() => {
+              const s = sanitizeForPreview({ pages: state.uiuxGeneratedCode!.pages, components: state.uiuxGeneratedCode!.components, styles: state.uiuxGeneratedCode!.styles })
+              return { pages: s.code.pages, components: s.code.components, styles: s.code.styles, tailwindConfig: twConfig, currentPhase: 'complete' }
+            })() as Record<string, unknown>,
           },
           quickReplies: [
             { label: isChinese ? '部署上線' : 'Deploy', value: '部署', style: 'primary' },
@@ -384,13 +382,10 @@ export async function recoverFastBuildFromInterruption(
       layoutHint: 'split',
       richContent: {
         type: 'code_preview',
-        data: {
-          pages: state.uiuxGeneratedCode!.pages,
-          components: state.uiuxGeneratedCode!.components,
-          styles: state.uiuxGeneratedCode!.styles,
-          tailwindConfig: twConfig,
-          currentPhase: 'complete',
-        } as Record<string, unknown>,
+        data: (() => {
+          const s = sanitizeForPreview({ pages: state.uiuxGeneratedCode!.pages, components: state.uiuxGeneratedCode!.components, styles: state.uiuxGeneratedCode!.styles })
+          return { pages: s.code.pages, components: s.code.components, styles: s.code.styles, tailwindConfig: twConfig, currentPhase: 'complete' }
+        })() as Record<string, unknown>,
       },
       quickReplies: [
         { label: isChinese ? '部署上線' : 'Deploy', value: '部署', style: 'primary' },
@@ -1532,13 +1527,10 @@ export async function executeFullCodePipeline(
     layoutHint: 'split',
     richContent: {
       type: 'code_preview',
-      data: {
-        pages: currentCode.pages,
-        components: currentCode.components,
-        styles: currentCode.styles,
-        tailwindConfig,
-        currentPhase: 'complete',
-      } as Record<string, unknown>,
+      data: (() => {
+        const s = sanitizeForPreview({ pages: currentCode.pages, components: currentCode.components, styles: currentCode.styles })
+        return { pages: s.code.pages, components: s.code.components, styles: s.code.styles, tailwindConfig, currentPhase: 'complete' }
+      })() as Record<string, unknown>,
     },
     quickReplies: await (async () => {
       const showCoder = await shouldShowCoderButton(state)
@@ -1988,13 +1980,10 @@ export async function executeQualityGate(
     layoutHint: 'split',
     richContent: {
       type: 'code_preview',
-      data: {
-        pages: currentCode.pages,
-        components: currentCode.components,
-        styles: currentCode.styles,
-        tailwindConfig,
-        currentPhase: 'complete',
-      } as Record<string, unknown>,
+      data: (() => {
+        const s = sanitizeForPreview({ pages: currentCode.pages, components: currentCode.components, styles: currentCode.styles })
+        return { pages: s.code.pages, components: s.code.components, styles: s.code.styles, tailwindConfig, currentPhase: 'complete' }
+      })() as Record<string, unknown>,
     },
   })
 
