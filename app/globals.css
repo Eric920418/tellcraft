@@ -723,6 +723,10 @@ textarea {
   .chat-header .mobile-progress {
     display: flex !important;
   }
+
+  .chat-header .locale-switcher {
+    display: none !important;
+  }
 }
 
 /* 手機版：精煉設計 */

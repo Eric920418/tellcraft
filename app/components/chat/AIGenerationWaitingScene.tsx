@@ -927,24 +927,24 @@ export default function AIGenerationWaitingScene({
             />
           </div>
 
-          {/* ── 鐵鎚（鐵砧上方，從手握處擺動，錘頭向下砸） ── */}
-          <div style={{ position: 'absolute', left: '50%', bottom: '26%', width: '10%', transform: 'translateX(-50%)', zIndex: 7 }}>
+          {/* ── 鐵鎚（緊貼鐵砧上方，從手握處擺動，錘頭向下砸） ── */}
+          <div style={{ position: 'absolute', left: '50%', bottom: '15%', width: '10%', transform: 'translateX(-50%)', zIndex: 7 }}>
             <motion.div
               animate={
                 reduceMotion
                   ? {}
                   : {
-                      // 0° = 垂直懸掛（錘頭正下方）
-                      // 負角 = 舉起（錘頭往左上擺）
-                      // 正角 = 過擺（擊中後微過）
-                      rotate: ['-35deg', '-42deg', '3deg', '0deg', '-35deg'],
+                      // 0° = 垂直（錘頭在正下方貼鐵砧）
+                      // -18° = 舉起（小幅度，不會甩太遠）
+                      // +1° = 砸下微過
+                      rotate: ['-18deg', '-22deg', '1deg', '-1deg', '-18deg'],
                     }
               }
               transition={{
                 duration: hammerDuration,
                 repeat: Infinity,
                 ease: 'linear',
-                times: [0, 0.3, 0.55, 0.62, 1],
+                times: [0, 0.28, 0.52, 0.58, 1],
               }}
               style={{ transformOrigin: 'top center' }}
             >
@@ -962,7 +962,7 @@ export default function AIGenerationWaitingScene({
               style={{
                 position: 'absolute',
                 left: '50%',
-                bottom: '16%',
+                bottom: '14%',
                 width: 50,
                 height: 20,
                 marginLeft: -25,
@@ -977,7 +977,7 @@ export default function AIGenerationWaitingScene({
 
           {/* ── 火花爆發（從鐵砧打擊面位置） ── */}
           {!reduceMotion && (
-            <div style={{ position: 'absolute', left: '50%', bottom: '16%', width: 0, height: 0, zIndex: 8 }}>
+            <div style={{ position: 'absolute', left: '50%', bottom: '14%', width: 0, height: 0, zIndex: 8 }}>
               <ForgeSparkBurst accentColor={phaseColor} active={hammerActive} />
             </div>
           )}

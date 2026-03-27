@@ -45,6 +45,10 @@ interface ActionsYmlStructure {
 // 預設啟用 per-sub-operation 生成，設 CODER_PER_SUBOP=false 回退到舊模式
 const USE_PER_SUBOP = process.env.CODER_PER_SUBOP !== 'false'
 
+// Unicode-aware identifier pattern（\w 不匹配中文，需要手動加 CJK 範圍）
+const ID_CHAR = '[\\w\\u4e00-\\u9fff\\u3400-\\u4dbf\\u00c0-\\u024f]'
+const ID_PATTERN = `${ID_CHAR}+`
+
 interface SubOperation {
   /** _stepSummary 值，如 "建立記帳記錄" */
   summary: string
@@ -896,7 +900,7 @@ function composeActionFunction(
   const helperFunctions = new Map<string, string>()
   for (const { code } of subOpCodes) {
     const cleaned = removeImports(code)
-    const helperRegex = /(?:^|\n)((?:async\s+)?function\s+(?!handle)(\w+)\s*\([^)]*\)[^{]*\{)/g
+    const helperRegex = new RegExp(`(?:^|\\n)((?:async\\s+)?function\\s+(?!handle)(${ID_PATTERN})\\s*\\([^)]*\\)[^{]*\\{)`, 'g')
     let match: RegExpExecArray | null
     while ((match = helperRegex.exec(cleaned)) !== null) {
       const funcName = match[2]
@@ -915,10 +919,10 @@ function composeActionFunction(
     for (const [, fullHelper] of helperFunctions) {
       cleaned = cleaned.replace(fullHelper, '')
     }
-    // 確保函數名稱正確
+    // 確保函數名稱正確（使用 Unicode-aware pattern 匹配中文函數名）
     const handleName = `handle${toPascalCase(summary)}`
     cleaned = cleaned.replace(
-      /(?:export\s+)?(?:async\s+)?function\s+\w+/,
+      new RegExp(`(?:export\\s+)?(?:async\\s+)?function\\s+${ID_PATTERN}`),
       `async function ${handleName}`
     )
     const trimmed = cleaned.trim()
@@ -982,6 +986,15 @@ export async function generateActionFunction(
           )
 
           let result = composeActionFunction(action, subOps, subOpCodes)
+
+          // esbuild 語法驗證：組裝後確認語法正確
+          try {
+            const esbuild = await import('esbuild')
+            await esbuild.transform(result.content, { loader: 'ts' })
+          } catch (syntaxErr) {
+            logger.warn({ actionName: action.name, syntaxErr }, 'Per-SubOp 組裝後語法錯誤，回退到整體生成')
+            throw syntaxErr  // 觸發外層 catch → 回退到原有邏輯
+          }
 
           // 組裝後跑 validateActionResponses（復用現有 post-fix）
           const { files, fixes } = validateActionResponses([result])
@@ -2719,11 +2732,12 @@ export async function fixFailingAction(
   entityMapping?: string
 ): Promise<string> {
   // === Per-SubOp 精準修復：偵測組裝式程式碼結構 ===
-  const handleFuncMatches = [...currentCode.matchAll(/async function (handle\w+)\s*\(/g)]
+  const handleFuncRegex = new RegExp(`async function (handle${ID_PATTERN})\\s*\\(`, 'g')
+  const handleFuncMatches = [...currentCode.matchAll(handleFuncRegex)]
   if (handleFuncMatches.length > 1) {
     // 從 dispatch 區塊提取 summary → handleFunc 映射
     const dispatchMap = new Map<string, string>()
-    const dispatchRegex = /op\.includes\('([^']+)'\)\s*\)\s*return\s+(handle\w+)/g
+    const dispatchRegex = new RegExp(`op\\.includes\\('([^']+)'\\)\\s*\\)\\s*return\\s+(handle${ID_PATTERN})`, 'g')
     let dm: RegExpExecArray | null
     while ((dm = dispatchRegex.exec(currentCode)) !== null) {
       dispatchMap.set(dm[1], dm[2])
@@ -2793,9 +2807,9 @@ ${entityMapping ? `\n## Entity Mapping\n\`\`\`yaml\n${entityMapping}\n\`\`\`\n` 
             if (newFunc && newFunc.length > 50) {
               newFunc = removeAuthChecks(newFunc)
               newFunc = fixMySqlSyntax(newFunc)
-              // 確保函數名不被 LLM 改掉
+              // 確保函數名不被 LLM 改掉（Unicode-aware）
               if (!newFunc.includes(`function ${funcName}`)) {
-                newFunc = newFunc.replace(/(?:async\s+)?function\s+\w+/, `async function ${funcName}`)
+                newFunc = newFunc.replace(new RegExp(`(?:async\\s+)?function\\s+${ID_PATTERN}`), `async function ${funcName}`)
               }
               fixedCode = fixedCode.replace(funcBody, newFunc)
             }

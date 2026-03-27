@@ -33,7 +33,7 @@ export default function LocaleSwitcher() {
   }
 
   return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+    <div className="locale-switcher" style={{ display: 'flex', alignItems: 'center', gap: 2 }}>
       <button
         onClick={() => switchLocale('zh')}
         style={{
