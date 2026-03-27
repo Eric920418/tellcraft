@@ -30,6 +30,24 @@ export class ScenarioContext {
   }
 
   get(key: string): unknown {
-    return this.contextData.get(key) ?? null;
+    // 精確匹配
+    const exact = this.contextData.get(key);
+    if (exact !== undefined) return exact;
+
+    // Fallback: $transactionId → 查找所有 *.transactionId 或 *Id 結尾的 context key
+    // BDD 的 >Transaction.id 存為 "Transaction.id"，但 $transactionId 查 "transactionId"
+    for (const [storedKey, value] of this.contextData) {
+      // Case 1: "Transaction.id" → key "transactionId" matches via entity prefix + field
+      if (storedKey.includes('.')) {
+        const [entity, field] = storedKey.split('.')
+        // transactionId → Transaction + id（首字母大寫 entity + field）
+        const combined = entity.charAt(0).toLowerCase() + entity.slice(1) + field.charAt(0).toUpperCase() + field.slice(1)
+        if (combined === key) return value
+        // 也匹配 field 直接相等的情况（如 key="id", storedKey="Transaction.id"）
+        if (field === key) return value
+      }
+    }
+
+    return null;
   }
 }

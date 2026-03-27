@@ -472,27 +472,29 @@ function AnvilSvg({ color: _color }: { color: string }) {
 }
 
 function HammerSvg() {
-  // 把手在上（y=0 起點，手握處），錘頭在下（y=54，打擊面）
-  // transformOrigin: 'top center' → 從手握處旋轉，錘頭往下擺動
+  // 橫向錘子：錘頭在左，把手往右延伸（手握處在右端）
+  // transformOrigin: 'right center' → 從手握處為軸旋轉，錘頭在左側弧線擺動
   return (
-    <svg width="100%" height="100%" viewBox="0 0 40 80" fill="none" style={{ display: 'block' }}>
-      {/* 把手（上方，手握處在最上端） */}
-      <rect x="17" y="0" width="6" height="56" rx="3" fill="url(#handleGrad)" />
-      {/* 錘頭（下方，打擊面朝下） */}
-      <rect x="4" y="54" width="32" height="22" rx="4" fill="url(#headGrad)" stroke="rgba(255,255,255,0.06)" strokeWidth="0.5" />
-      {/* 錘面（底部打擊面） */}
-      <rect x="6" y="72" width="28" height="4" rx="1" fill="rgba(90,82,76,0.9)" />
-      {/* 錘頭頂部高光 */}
-      <rect x="8" y="56" width="24" height="3" rx="1.5" fill="rgba(255,255,255,0.1)" />
+    <svg width="100%" height="100%" viewBox="0 0 90 44" fill="none" style={{ display: 'block' }}>
+      {/* 錘頭（左側） */}
+      <rect x="0" y="0" width="26" height="44" rx="3" fill="url(#hammerHeadGrad)" stroke="rgba(255,255,255,0.06)" strokeWidth="0.5" />
+      {/* 錘頭底部打擊面 */}
+      <rect x="1" y="38" width="24" height="5" rx="1" fill="rgba(100,92,84,0.95)" />
+      {/* 錘頭高光 */}
+      <rect x="4" y="2" width="18" height="3" rx="1.5" fill="rgba(255,255,255,0.1)" />
+      {/* 把手（右側，手握處在最右端） */}
+      <rect x="24" y="15" width="64" height="14" rx="7" fill="url(#hammerHandleGrad)" />
+      {/* 把手高光 */}
+      <rect x="30" y="16" width="52" height="3" rx="1.5" fill="rgba(255,255,255,0.04)" />
       <defs>
-        <linearGradient id="handleGrad" x1="20" y1="0" x2="20" y2="56" gradientUnits="userSpaceOnUse">
-          <stop offset="0" stopColor="rgba(70,45,28,0.9)" />
-          <stop offset="1" stopColor="rgba(120,80,50,0.95)" />
+        <linearGradient id="hammerHandleGrad" x1="24" y1="22" x2="88" y2="22" gradientUnits="userSpaceOnUse">
+          <stop offset="0" stopColor="rgba(120,80,50,0.95)" />
+          <stop offset="1" stopColor="rgba(80,52,32,0.9)" />
         </linearGradient>
-        <linearGradient id="headGrad" x1="20" y1="52" x2="20" y2="78" gradientUnits="userSpaceOnUse">
+        <linearGradient id="hammerHeadGrad" x1="13" y1="0" x2="13" y2="44" gradientUnits="userSpaceOnUse">
           <stop offset="0" stopColor="rgba(110,100,92,0.95)" />
-          <stop offset="0.5" stopColor="rgba(72,66,60,0.98)" />
-          <stop offset="1" stopColor="rgba(44,40,36,1)" />
+          <stop offset="0.4" stopColor="rgba(72,66,60,0.98)" />
+          <stop offset="1" stopColor="rgba(50,44,40,1)" />
         </linearGradient>
       </defs>
     </svg>
@@ -927,26 +929,26 @@ export default function AIGenerationWaitingScene({
             />
           </div>
 
-          {/* ── 鐵鎚（緊貼鐵砧上方，從手握處擺動，錘頭向下砸） ── */}
-          <div style={{ position: 'absolute', left: '50%', bottom: '15%', width: '10%', transform: 'translateX(-50%)', zIndex: 7 }}>
+          {/* ── 鐵鎚（橫向，把手右側延伸，錘頭左側砸鐵砧） ── */}
+          <div style={{ position: 'absolute', left: '42%', bottom: '17%', width: '18%', zIndex: 7 }}>
             <motion.div
               animate={
                 reduceMotion
                   ? {}
                   : {
-                      // 0° = 垂直（錘頭在正下方貼鐵砧）
-                      // -18° = 舉起（小幅度，不會甩太遠）
-                      // +1° = 砸下微過
-                      rotate: ['-18deg', '-22deg', '1deg', '-1deg', '-18deg'],
+                      // 軸心在右端（手握處）
+                      // 負角 = 錘頭往左上舉起
+                      // 正角 = 錘頭往左下砸
+                      rotate: ['-28deg', '-34deg', '4deg', '1deg', '-28deg'],
                     }
               }
               transition={{
                 duration: hammerDuration,
                 repeat: Infinity,
                 ease: 'linear',
-                times: [0, 0.28, 0.52, 0.58, 1],
+                times: [0, 0.28, 0.53, 0.6, 1],
               }}
-              style={{ transformOrigin: 'top center' }}
+              style={{ transformOrigin: 'right center' }}
             >
               <HammerSvg />
             </motion.div>
@@ -961,8 +963,8 @@ export default function AIGenerationWaitingScene({
               transition={{ duration: hammerDuration * 0.5, repeat: Infinity, ease: 'easeOut', delay: hammerDuration * 0.52 }}
               style={{
                 position: 'absolute',
-                left: '50%',
-                bottom: '14%',
+                left: '47%',
+                bottom: '15%',
                 width: 50,
                 height: 20,
                 marginLeft: -25,
@@ -975,9 +977,9 @@ export default function AIGenerationWaitingScene({
             />
           )}
 
-          {/* ── 火花爆發（從鐵砧打擊面位置） ── */}
+          {/* ── 火花爆發（從錘頭落點位置） ── */}
           {!reduceMotion && (
-            <div style={{ position: 'absolute', left: '50%', bottom: '14%', width: 0, height: 0, zIndex: 8 }}>
+            <div style={{ position: 'absolute', left: '47%', bottom: '15%', width: 0, height: 0, zIndex: 8 }}>
               <ForgeSparkBurst accentColor={phaseColor} active={hammerActive} />
             </div>
           )}
