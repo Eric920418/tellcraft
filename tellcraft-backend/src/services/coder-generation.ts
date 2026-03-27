@@ -2410,7 +2410,7 @@ export function validateActionResponses(actionFiles: GeneratedComponent[]): { fi
     let modified = false
 
     // Rule 1: 列表查詢回 Array（不要包成 { items: rows }）
-    // 找 return { __status: 200, items: rows } 或 { __status: 200, data: rows } 模式
+    // Pattern A: return { __status: 200, items: rows }
     const listWrapperPattern = /return\s*\{\s*__status:\s*200\s*,\s*(?:items|data|results|list|lists|todos|records)\s*:\s*(\w+)\s*\}/g
     let match: RegExpExecArray | null
     while ((match = listWrapperPattern.exec(code)) !== null) {
@@ -2420,6 +2420,21 @@ export function validateActionResponses(actionFiles: GeneratedComponent[]): { fi
       code = code.replace(original, replacement)
       fixes.push(`${file.path}: 列表查詢 Object wrapper → bare Array（${rowsVar}）`)
       modified = true
+    }
+    // Pattern B: return { __status: 200, recordCount: X, records: rows }（含額外欄位的 wrapper）
+    const extendedWrapperPattern = /return\s*\{[^}]*(?:records|items|data|results)\s*:\s*(\w+)[^}]*\}/g
+    let extMatch: RegExpExecArray | null
+    while ((extMatch = extendedWrapperPattern.exec(code)) !== null) {
+      const fullMatch = extMatch[0]
+      if (fullMatch.includes('__status: 201') || fullMatch.includes('success:')) continue // 不是列表查詢
+      const rowsVar = extMatch[1]
+      // 確認 rowsVar 是 Array 類型（前面有 sql` 查詢或 .map()）
+      const varDeclPattern = new RegExp(`(?:const|let)\\s+${rowsVar}\\s*=\\s*(?:await\\s+sql|.*\\.map)`)
+      if (varDeclPattern.test(code)) {
+        code = code.replace(fullMatch, `;(${rowsVar} as any).__status = 200; return ${rowsVar}`)
+        fixes.push(`${file.path}: 擴展 wrapper { records: ${rowsVar} } → bare Array`)
+        modified = true
+      }
     }
 
     // Rule 2: UPDATE 語句必須有 RETURNING *
@@ -3215,11 +3230,29 @@ if (op.includes('登出')) {
 → 解法 2: 回傳前轉換：key.replace(/_([a-z])/g, (_, c) => c.toUpperCase())
 → 常見欄位：category_id→categoryId, created_at→createdAt, deleted_at→deletedAt, transaction_date→transactionDate, device_id→deviceId
 
+## 匯出/列表查詢必須回傳 bare Array（常見嚴重錯誤！）
+如果錯誤含 "id 值不匹配" 且 "實際:" 後面是空的，且是匯出/列表操作：
+→ 回傳格式**必須**是 bare Array：\`return rows\`（在 Array 上設 __status）
+→ **絕對禁止**包成 Object：\`return { records: rows }\` 或 \`return { items: rows }\` 或 \`return { data: rows, recordCount: N }\`
+→ 正確做法：
+\`\`\`typescript
+;(rows as any).__status = 200
+return rows  // 直接回傳 Array，不要包成 Object
+\`\`\`
+
 ## 級聯操作（常見錯誤！）
-如果錯誤含 "找不到符合條件的" 且是刪除父實體後驗證子實體：
-→ 刪除被 FK 引用的實體時，必須同時更新子記錄的 FK 為 NULL
-→ 用 sql.begin() transaction 包裹多步驟操作
-→ 例如：刪除類別 → UPDATE transactions SET category_id = NULL WHERE category_id = \${categoryId}
+如果錯誤含 "找不到符合條件的" 或 "categoryId" expect 不等於 null 但 actual 是 null：
+→ 刪除被 FK 引用的實體時，必須查找「未分類」預設實體的 ID，用它替換（不是設 NULL）
+→ 用 sql.begin() transaction 包裹：(1) 軟刪除父實體 (2) 查找未分類類別 ID (3) 更新子記錄 FK 為該 ID
+→ 例如：
+\`\`\`typescript
+const result = await sql.begin(async (tx) => {
+  const [parent] = await tx\`UPDATE categories SET deleted_at = NOW() WHERE id = \${categoryId} RETURNING *\`
+  const [defaultCat] = await tx\`SELECT id FROM categories WHERE name = '未分類' AND device_id = \${deviceId} LIMIT 1\`
+  await tx\`UPDATE transactions SET category_id = \${defaultCat?.id || null} WHERE category_id = \${categoryId}\`
+  return parent
+})
+\`\`\`
 
 ## 步驟上下文（Steps Context）— 最重要的修復線索！
 測試失敗時會附帶完整的 BDD 步驟（Given/When/Then + DataTable）。
