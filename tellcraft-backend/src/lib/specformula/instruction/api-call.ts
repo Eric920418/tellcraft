@@ -114,7 +114,8 @@ export class ApiCall {
       const actualValue = this.resolveValue(resolvedValue, this.timeFormat);
 
       // fail-closed：$variable 解析為 null 時立即報錯，避免靜默傳 null 導致誤導性的下游錯誤
-      if (actualValue == null && value && value.trim().startsWith('$')) {
+      // 注意：只有 $letter 開頭才是 VAR 引用；$digit 開頭是 bcrypt hash（$2b$10$...）
+      if (actualValue == null && value && /^\$[a-zA-Z]/.test(value.trim())) {
         throw new Error(
           `[ApiCall] VAR 解析失敗：參數 ${columnInfo.prefix ? `${columnInfo.prefix}:` : ''}${columnInfo.name} 的值 ${value} 無法解析。請確認 Background 或先前步驟已正確宣告此變數。`
         );

@@ -113,7 +113,8 @@ export class EntitySetup {
       // 解析變數引用
       const resolved = this.resolver.resolveVariable(value);
       // fail-closed：$variable 未解析時不 fallback 到字面字串（會導致 SQL type error，如 uuid 欄位收到 "$listId"）
-      if (resolved === null && value.trim().startsWith('$')) {
+      // 注意：只有 $letter 開頭才是 VAR 引用（$userId, $Todo1.id）；$digit 開頭是 bcrypt hash（$2b$10$...）
+      if (resolved === null && /^\$[a-zA-Z]/.test(value.trim())) {
         throw new Error(
           `[EntitySetup] VAR 解析失敗：${value} 無法解析為有效值。請確認 Background 或先前步驟已正確宣告此變數。`
         );
