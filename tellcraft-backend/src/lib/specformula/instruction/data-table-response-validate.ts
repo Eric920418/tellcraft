@@ -63,37 +63,66 @@ export class DataTableResponseValidate {
       );
     }
 
-    let responseMap: Record<string, unknown>;
+    let parsed: unknown;
     try {
-      const parsed = JSON.parse(responseBody);
-      // 列表查詢 API 回傳 Array — 自動取第一個元素做欄位驗證
-      // 空陣列 [] 的情況由下方欄位比對處理（actual 為 undefined）
-      if (Array.isArray(parsed)) {
-        responseMap = parsed.length > 0
-          ? (parsed[0] as Record<string, unknown>)
-          : {} as Record<string, unknown>;
-      } else {
-        responseMap = parsed;
-      }
+      parsed = JSON.parse(responseBody);
     } catch {
       throw new Error(
         `[ResponseValidate:DataTable] 回應內容非合法 JSON 物件。\n  API: ${summary}\n  回應: ${responseBody}`
       );
     }
 
-    const row = rows[0];
-
     // 解析 context key 映射
     const contextKeyMap = this.resolver.parseContextKeys(headers);
 
-    // 欄位層級驗證
+    // 過濾出實際驗證用的 header（排除 index 位置標記欄位）
+    const validateHeaders = headers.filter(h => h.trim() !== 'index');
+
+    if (Array.isArray(parsed) && rows.length > 1) {
+      // ===== 多行 Array 回應驗證：每行對應 array 中的一個元素（按位置對齊）=====
+      for (let rowIdx = 0; rowIdx < rows.length; rowIdx++) {
+        const row = rows[rowIdx];
+        const elementMap: Record<string, unknown> = rowIdx < parsed.length
+          ? (parsed[rowIdx] as Record<string, unknown>)
+          : {};
+
+        this.validateSingleRow(summary, validateHeaders, row, elementMap);
+
+        // VAR-System 變數擷取（每行各自對應的 array 元素）
+        if (contextKeyMap.size > 0) {
+          const dataRow = headers.map(h => row[h] ?? '');
+          this.resolver.extractAndStoreVariables(dataRow, contextKeyMap, elementMap);
+        }
+      }
+    } else {
+      // ===== 單行驗證（原有邏輯）=====
+      const responseMap: Record<string, unknown> = Array.isArray(parsed)
+        ? (parsed.length > 0 ? (parsed[0] as Record<string, unknown>) : {})
+        : (parsed as Record<string, unknown>);
+
+      const row = rows[0];
+      this.validateSingleRow(summary, validateHeaders, row, responseMap);
+
+      // VAR-System 變數擷取
+      if (contextKeyMap.size > 0) {
+        const dataRow = headers.map(h => row[h] ?? '');
+        this.resolver.extractAndStoreVariables(dataRow, contextKeyMap, responseMap);
+      }
+    }
+  }
+
+  private validateSingleRow(
+    summary: string,
+    headers: string[],
+    row: Record<string, string>,
+    responseMap: Record<string, unknown>
+  ): void {
     for (const header of headers) {
       const cleanHeader = header.trim();
       if (cleanHeader.startsWith('>') || cleanHeader.startsWith('<')) continue;
 
       const expectedValue = row[header];
       if (!expectedValue) continue;
-      // <non-empty> / <notempty> — 非空斷言，只要 actual 非空即通過
       const trimExpected = expectedValue.trim();
       if (trimExpected === '<non-empty>' || trimExpected === '<notempty>') {
         const av = getNestedValue(responseMap, cleanHeader);
@@ -104,15 +133,10 @@ export class DataTableResponseValidate {
         }
         continue;
       }
-      // VAR-System: < 前綴的 cell value 是 extraction key（如 <contextKey），
-      // 不做值比較。提取由 extractAndStoreVariables 處理。
       if (trimExpected.startsWith('<')) continue;
 
       let actualValue = getNestedValue(responseMap, cleanHeader);
 
-      // VAR 容錯：$Var.field 格式的 header（如 $Todo.id）在 response 中找不到時，
-      // 用 field 部分（如 id）直接匹配。Feature 常用 $Var.field 引用 entity_setup 的欄位，
-      // 但 response JSON 的 key 是純欄位名（id, isCompleted 等），不含 $Var 前綴。
       if (actualValue === null || actualValue === undefined) {
         if (cleanHeader.startsWith('$') && cleanHeader.includes('.')) {
           const fieldPart = cleanHeader.split('.').pop()!;
@@ -126,22 +150,17 @@ export class DataTableResponseValidate {
 
       if (resolved !== null && resolved !== undefined) {
         const resolvedStr = String(resolved);
-        // 物件/陣列用 JSON.stringify 比較，避免 String([...]) 變成 [object Object]
         const actualStr = (actualValue != null && typeof actualValue === 'object')
           ? JSON.stringify(actualValue)
           : (actualValue != null ? String(actualValue) : '');
 
-        // null 語義統一：Feature 的 "null" / "" 和 response 的 null/undefined 視為等價
         if ((resolvedStr === 'null' || resolvedStr === '') && (actualStr === '' || actualStr === 'null' || actualValue === null || actualValue === undefined)) {
-          // pass — null 和空字串在 response 比對中等價
+          // pass
         } else if (resolvedStr !== actualStr) {
-          // UUID ID 容錯：server 用 gen_random_uuid() 生成 ID，
-          // 與 Feature 的確定性 UUID 不同。ID 欄位只要是合法 UUID 就算通過。
           if (isIdField(cleanHeader) && isUuidLike(resolvedStr) && isUuidLike(actualStr)) {
-            // skip — both are valid UUIDs for an ID field
+            // skip — both valid UUIDs
           } else if (!jsonSemanticallyEqual(resolvedStr, actualStr) &&
               !(typeof actualValue === 'number' && numericEquals(resolvedStr, actualStr))) {
-            // 當 actual 為空時附帶 HTTP 回應上下文，幫助修復 LLM 判斷根因
             const httpContext = (actualStr === '' || actualValue === null || actualValue === undefined)
               ? (() => {
                   const resp = this.contextSupplier().getLastResponse();
@@ -154,12 +173,6 @@ export class DataTableResponseValidate {
           }
         }
       }
-    }
-
-    // VAR-System 變數擷取
-    if (contextKeyMap.size > 0) {
-      const dataRow = headers.map(h => row[h] ?? '');
-      this.resolver.extractAndStoreVariables(dataRow, contextKeyMap, responseMap);
     }
   }
 

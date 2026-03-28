@@ -702,6 +702,8 @@ Feature: ${featureInfo.name}
   - Entity 準備（\`準備一個\`）的 DataTable data row **至少要有一個非空欄位值**，不可全空
 - **When 必須有 Actor 前綴**：\`(No Actor)\` 或 \`(UID="$var")\`
 - **Then 成功必須有 HTTP status code**：\`{summary}(201)回應, with table:\`
+- **Then 的 summary 必須與 When 完全一致**：When 用 \`切換待辦事項完成狀態\`，Then 也用 \`切換待辦事項完成狀態(200)回應\`，不可縮寫
+- **Array 回應多行驗證**：列表查詢的 Then 回應 DataTable 可以有多行來驗證多個陣列元素。行順序 = 陣列元素順序（第一行=第一個元素）。**禁止用 \`index\` 欄位**表示位置，直接用行順序。正確：\`| id | name | \\n | $list1Id | 工作 | \\n | $list2Id | 生活 |\`。錯誤：\`| index | name | \\n | 0 | 工作 |\`
 - **Entity 驗證**：使用 \`應該存在一個\`（非舊的「存在一個」）
 - DataTable 命名慣例：
   - 欄位名用 camelCase（\`totalAmount\`、\`memberLevel\`）

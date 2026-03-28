@@ -3066,9 +3066,9 @@ const FIX_SYSTEM_PROMPT = `你是一位 TypeScript 後端專家。根據測試�
 ## 規則
 1. 只修改函數內部邏輯，不要改 function signature 或 export
 2. 使用 parameterized queries（$1, $2）防 SQL injection
-3. 確保 import 完整（特別是 sql from '@/lib/db'）
+3. **不要重新定義已存在的 import 或 helper 函數**（如 snakeToCamel、sql）。這些已經在檔案頂部定義，重複宣告會導致語法錯誤
 4. 根據失敗的場景和 error message 推斷需要修改的邏輯
-5. 輸出完整的修正後檔案內容（用 \`\`\`typescript\`\`\` 包裹）
+5. 只輸出修正後的函數本體（用 \`\`\`typescript\`\`\` 包裹），不要輸出 import 語句
 
 ## 子操作派發（常見錯誤！）
 如果錯誤是 "不支援的操作類型" 或類似的派發問題，是因為函數用了 input.action 來判斷子操作。
