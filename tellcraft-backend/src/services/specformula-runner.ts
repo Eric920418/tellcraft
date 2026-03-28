@@ -551,7 +551,11 @@ export async function ensureFkReferencesExist(
         )
         logger.debug({ refTable, fkCol: col.name, id: value, columns: columns.length }, 'FK reference auto-insert 成功')
       } catch (err) {
-        logger.warn({ refTable, fkCol: col.name, columns, err: String(err).slice(0, 200) }, 'FK reference auto-insert 失敗')
+        // FK 引用建立失敗不再靜默跳過 — 後續 INSERT 會因 FK constraint 失敗並報出難以理解的錯誤
+        throw new Error(
+          `[EntitySetup] FK 引用準備失敗：無法在 ${refTable} 中建立 id=${String(value).slice(0, 36)} 的記錄。` +
+          `原因：${String(err).slice(0, 200)}。請檢查 Schema DDL 的 FK 定義和 NOT NULL 約束。`
+        )
       }
     }
   }
@@ -1322,8 +1326,10 @@ async function executeStep(
           } catch (validateErr: any) {
             const msg = validateErr?.message || ''
             if (msg.includes('HTTP 狀態碼不匹配')) {
-              // Status code 容錯
-              logger.warn({ expected: statusCode, summary: captures.summary }, 'Status code mismatch, retrying without status check')
+              // Status code 容錯：降級重試不檢查 status，但記錄 mismatch 資訊
+              const lastResp = scenarioContext.getLastResponse()
+              const statusMismatchNote = `[注意] HTTP 狀態碼不匹配（預期 ${statusCode} 實際 ${lastResp?.status}），降級檢查欄位。`
+              logger.warn({ expected: statusCode, actual: lastResp?.status, summary: captures.summary }, 'Status code mismatch, retrying without status check')
               try {
                 tryValidate('')
               } catch (retryErr: any) {
@@ -1335,10 +1341,13 @@ async function executeStep(
                     tryValidate('')
                   } catch (flatErr: any) {
                     logResponseOnError(flatErr)
+                    // 注入 status mismatch 上下文讓修復 LLM 知道根因
+                    flatErr.message = `${statusMismatchNote}\n${flatErr.message}`
                     throw flatErr
                   }
                 } else {
                   logResponseOnError(retryErr)
+                  retryErr.message = `${statusMismatchNote}\n${retryErr.message}`
                   throw retryErr
                 }
               }

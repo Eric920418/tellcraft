@@ -747,6 +747,7 @@ sdd.os/                   # SDD 上游 Reference Repo（git subtree，只讀參�
 - **Handler 模板全面修復**：QUERY_LIST_HANDLER 加 snake_to_camel 轉換；DELETE_HANDLER/CASCADE_HANDLER 改為條件式（Schema 有 deleted_at → soft delete，沒有 → hard delete）；AGGREGATE_HANDLER 移除 deleted_at 硬編碼；COLUMN_ALIAS_HANDLER 移除 deleted_at 範例；Troubleshooting Guide 改為條件式規則；BASE_PROMPT + FIX_SYSTEM_PROMPT 加 deleted_at 防護
 - **多行 Array 回應驗證**：`data-table-response-validate.ts` 從只驗 `rows[0]` 升級為逐行對齊 array 元素驗證（多行 DataTable 的每行對應 array 中的一個元素）；自動跳過 `index` 位置標記欄位
 - **formulation.ts** 加規則：禁止 `index` 欄位 + Then summary 必須與 When 完全一致 + 多行 Array 格式說明
+- **specformula-runner.ts** status code mismatch 資訊注入 step error（降級重試後失敗時附帶「預期 201 實際 400」上下文）；`ensureFkReferencesExist` FK 引用失敗改 throw（不再靜默跳過）
 
 **WebContainer 預覽修復**（2026-03-27）：測試完成後重發 `code_preview` + `neonConnectionString`（修復後代碼），不再顯示修復前的舊版本。
 
