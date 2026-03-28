@@ -113,9 +113,11 @@ export class ApiCall {
       const resolvedValue = this.resolver.resolveVariable(value);
       const actualValue = this.resolveValue(resolvedValue, this.timeFormat);
 
-      // Debug: 追蹤 $Variable 解析失敗
+      // fail-closed：$variable 解析為 null 時立即報錯，避免靜默傳 null 導致誤導性的下游錯誤
       if (actualValue == null && value && value.trim().startsWith('$')) {
-        console.warn(`[ApiCall] VAR 解析為 null: header=${cleanHeader}, value=${value}, resolved=${String(resolvedValue)}`);
+        throw new Error(
+          `[ApiCall] VAR 解析失敗：參數 ${columnInfo.prefix ? `${columnInfo.prefix}:` : ''}${columnInfo.name} 的值 ${value} 無法解析。請確認 Background 或先前步驟已正確宣告此變數。`
+        );
       }
 
       if (columnInfo.prefix) {

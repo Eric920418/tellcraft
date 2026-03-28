@@ -634,8 +634,8 @@ Feature: ${featureInfo.name}
 
   Background:
     Given 準備一個{entity}, with table:
-      | >Entity.id | 欄位 |
-      | <entityId  | 值   |
+      | >Entity1.id | 欄位 |
+      | <entity1Id  | 值   |
 
   # ========== 前置條件 ==========
 
@@ -687,6 +687,12 @@ Feature: ${featureInfo.name}
 - 邊界條件要有對應的 Example
 - 使用 Entity Mapping 中的中文實體名
 - **必須使用 VAR 系統**：\`>contextKey\` 在 Given 宣告、\`$variable\` 引用、\`<executionKey\` 捕捉結果，禁止硬編碼 UUID
+- **>contextKey 命名規則（關鍵 ⚠️）**：
+  - 用**首字母大寫的概念名 + 數字後綴**：\`>List1.id\`、\`>Todo1.id\`、\`>User1.id\`
+  - **禁止用 table name（複數）**：\`>lists.id\`（❌）、\`>todos.id\`（❌）、\`>users.id\`（❌）
+  - 同類型多個實體用數字區分：\`>Product1.id\`、\`>Product2.id\`
+  - 只有一個實體時也要用概念名：\`>List1.id\`（不是 \`>lists.id\`）
+  - \`<executionKey\` 的名稱必須與後續 \`$variable\` 引用匹配：\`<listId\` → \`$listId\`、\`<list1Id\` → \`$list1Id\`
 - **VAR 對齊規則（關鍵 ⚠️）**：
   - DataTable 中 Header 有 \`>contextKey\` → 同一欄的 Data **必須**是 \`<executionKey\`（配對捕獲）
   - Data 有 \`<executionKey\` → 同一欄的 Header **必須**有 \`>contextKey\`

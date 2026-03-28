@@ -736,7 +736,14 @@ sdd.os/                   # SDD 上游 Reference Repo（git subtree，只讀參�
 
 **Per-SubOp 精準修復**（2026-03-27）：偵測組裝式代碼（`handle*` 子函數）→ 只修失敗的子操作 → 不影響已通過的。esbuild 語法驗證 + 不通過則回退原碼。
 
-**SpecFormula VAR 解析修復**（2026-03-28）：`ScenarioContext.get()` 支援數字後綴 entity 名（`List1.id` → `listId`）。
+**SpecFormula VAR 系統全面修復**（2026-03-28）：解決 Coder Skill 26/44 場景失敗的根因 — 五層錯誤疊加修復：
+- **Layer 1**：`extractAndStoreVariables` 同時存 executionKey 別名（`>lists.id` + `<listId` → 也存 `"listId"` → uuid）
+- **Layer 2**：`ScenarioContext.get()` 支援數字後綴（`List1.id` → `listId`）+ 複數表名（`lists.id` → `listId`）
+- **Layer 3**：`entity-setup`/`entity-non-existence-validate` fail-closed 防護（$variable null 時 throw 而非用字面字串）
+- **Layer 4**：`api-call` $variable null fail-closed（所有參數類型，取代靜默 console.warn）
+- **Layer 5**：`response-validate` 欄位不匹配時附帶 HTTP 回應（status + body），修復 LLM 能看到 400 錯誤根因
+- **FIX_SYSTEM_PROMPT** 加 HTTP 診斷 + VAR 錯誤指引（教修復 LLM 識別框架錯誤 vs 代碼錯誤）
+- **formulation.ts** 明確 `>contextKey` 命名規則：禁用表名（`>lists.id` ❌），必須用概念名（`>List1.id` ✅）
 
 **WebContainer 預覽修復**（2026-03-27）：測試完成後重發 `code_preview` + `neonConnectionString`（修復後代碼），不再顯示修復前的舊版本。
 

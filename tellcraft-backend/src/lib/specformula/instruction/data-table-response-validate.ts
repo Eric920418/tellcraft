@@ -141,8 +141,15 @@ export class DataTableResponseValidate {
             // skip — both are valid UUIDs for an ID field
           } else if (!jsonSemanticallyEqual(resolvedStr, actualStr) &&
               !(typeof actualValue === 'number' && numericEquals(resolvedStr, actualStr))) {
+            // 當 actual 為空時附帶 HTTP 回應上下文，幫助修復 LLM 判斷根因
+            const httpContext = (actualStr === '' || actualValue === null || actualValue === undefined)
+              ? (() => {
+                  const resp = this.contextSupplier().getLastResponse();
+                  return resp ? `\n  HTTP: ${resp.status} ${(resp.body || '').substring(0, 200)}` : '';
+                })()
+              : '';
             throw new Error(
-              `[ResponseValidate:DataTable] ${summary}.${cleanHeader} 值不匹配。\n  預期: ${resolvedStr}\n  實際: ${actualStr}`
+              `[ResponseValidate:DataTable] ${summary}.${cleanHeader} 值不匹配。\n  預期: ${resolvedStr}\n  實際: ${actualStr}${httpContext}`
             );
           }
         }
