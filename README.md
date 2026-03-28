@@ -744,6 +744,7 @@ sdd.os/                   # SDD 上游 Reference Repo（git subtree，只讀參�
 - **Layer 5**：`response-validate` 欄位不匹配時附帶 HTTP 回應（status + body），修復 LLM 能看到 400 錯誤根因
 - **FIX_SYSTEM_PROMPT** 加 HTTP 診斷 + VAR 錯誤指引（教修復 LLM 識別框架錯誤 vs 代碼錯誤）
 - **formulation.ts** 明確 `>contextKey` 命名規則：禁用表名（`>lists.id` ❌），必須用概念名（`>List1.id` ✅）
+- **Handler 模板全面修復**：QUERY_LIST_HANDLER 加 snake_to_camel 轉換；DELETE_HANDLER/CASCADE_HANDLER 改為條件式（Schema 有 deleted_at → soft delete，沒有 → hard delete）；AGGREGATE_HANDLER 移除 deleted_at 硬編碼；COLUMN_ALIAS_HANDLER 移除 deleted_at 範例；Troubleshooting Guide 改為條件式規則；BASE_PROMPT + FIX_SYSTEM_PROMPT 加 deleted_at 防護
 
 **WebContainer 預覽修復**（2026-03-27）：測試完成後重發 `code_preview` + `neonConnectionString`（修復後代碼），不再顯示修復前的舊版本。
 

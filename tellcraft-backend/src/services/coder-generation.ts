@@ -236,6 +236,7 @@ const BASE_PROMPT = `你是一位 Next.js + PostgreSQL 後端工程師。你的�
 - 不要 import 'next/headers' 或操作 cookie
 - ON CONFLICT 用 PostgreSQL 語法（不用 MySQL 的 ON DUPLICATE KEY）
 - 如果測試傳 email 識別使用者：先用 input.userId，沒有再查 users 表
+- **禁止腦補 deleted_at**：只有 Schema DDL 明確定義 deleted_at 欄位時才加 WHERE deleted_at IS NULL。Schema 沒有就不加，否則 SQL 報 "column does not exist"
 
 ## 子操作派發
 \`\`\`typescript
@@ -274,15 +275,28 @@ return { __status: 201, ...row }
 const QUERY_LIST_HANDLER = `
 ## 列表查詢 Handler
 \`\`\`typescript
+function _c(row: any) {
+  if (!row) return row
+  const r: any = {}
+  for (const [k, v] of Object.entries(row)) {
+    r[k.replace(/_([a-z])/g, (_: any, c: string) => c.toUpperCase())] = v
+  }
+  return r
+}
+
 const rows = await sql\`
   SELECT * FROM table_name
-  WHERE user_id = \${userId} AND deleted_at IS NULL
+  WHERE user_id = \${userId}
   ORDER BY sort_order ASC
 \`
-;(rows as any).__status = 200
-return rows
+const result = Array.from(rows).map(_c)
+;(result as any).__status = 200
+return result
 \`\`\`
-重點：回傳 Array（不要包成 { items: rows }），在 Array 上設 __status = 200。`
+重點：
+- 回傳 Array（不要包成 { items: rows }），在 Array 上設 __status = 200
+- 必須用 _c() 做 snake_to_camel 轉換（PostgreSQL 回傳 snake_case，BDD 期望 camelCase）
+- 只有 Schema DDL 明確定義了 deleted_at 欄位時才加 WHERE deleted_at IS NULL。Schema 沒有 deleted_at 就不加！`
 
 // --- Handler: 單筆查詢 (SELECT 一筆) ---
 const QUERY_SINGLE_HANDLER = `
@@ -323,14 +337,18 @@ const DELETE_HANDLER = `
 const entityId = input.id || input.xxxId
 if (!entityId) throw new Error('缺少 ID 參數')
 
-// 軟刪除（如果 schema 有 deleted_at 欄位）
+// ⚠️ 先看 Schema DDL：
+// 如果 Schema 有 deleted_at 欄位 → 軟刪除：
+//   UPDATE table_name SET deleted_at = NOW(), updated_at = NOW() WHERE id = \${entityId} RETURNING *
+// 如果 Schema 沒有 deleted_at 欄位 → 硬刪除：
 const [row] = await sql\`
-  UPDATE table_name SET deleted_at = NOW(), updated_at = NOW()
-  WHERE id = \${entityId} AND user_id = \${userId}
+  DELETE FROM table_name
+  WHERE id = \${entityId}
   RETURNING *
 \`
 return { __status: 200, ...row }
-\`\`\``
+\`\`\`
+重點：先檢查 Schema DDL 是否有 deleted_at 欄位。沒有就用 DELETE FROM，不要腦補 soft delete。`
 
 // --- Handler: 批次操作 (排序/拖曳) ---
 const BATCH_HANDLER = `
@@ -392,7 +410,7 @@ const rows = await sql\`
     COALESCE(SUM(CASE WHEN type = 'income' THEN amount ELSE 0 END), 0) as "totalIncome",
     COALESCE(SUM(CASE WHEN type = 'expense' THEN amount ELSE 0 END), 0) as "totalExpense"
   FROM table_name
-  WHERE device_id = \${deviceId} AND deleted_at IS NULL
+  WHERE device_id = \${deviceId}
     AND date_trunc('month', transaction_date) = date_trunc('month', \${month}::date)
 \`
 const result = rows[0] || { totalIncome: 0, totalExpense: 0 }
@@ -406,54 +424,43 @@ return { __status: 200, totalIncome: Number(result.totalIncome), totalExpense: N
 - 用 date_trunc() 做月份比較，不要拼字串
 - 分組查詢（GROUP BY）回傳 Array 設 __status；單一聚合取 rows[0] 回傳 Object
 - 無資料時回傳零值物件，不要回傳 404
-- WHERE 必須加 deleted_at IS NULL 排除軟刪除記錄`
+- 只有 Schema 有 deleted_at 欄位時才加 WHERE deleted_at IS NULL。Schema 沒有就不加！`
 
 // --- Handler: 級聯刪除/更新 ---
 const CASCADE_HANDLER = `
 ## 級聯刪除/更新 Handler
-當刪除父實體時，如果有子實體透過 FK 引用它，必須同時更新子記錄：
+當刪除父實體時，如果有子實體透過 FK 引用它，必須同時處理子記錄：
 \`\`\`typescript
 const result = await sql.begin(async (tx) => {
-  // Step 1: 軟刪除父實體
+  // ⚠️ 先看 Schema DDL：有 deleted_at → 軟刪除；沒有 → 硬刪除
+  // 如果 Schema 有 ON DELETE CASCADE，硬刪除 parent 會自動刪子記錄，不需手動處理
   const [parent] = await tx\`
-    UPDATE parent_table SET deleted_at = NOW(), updated_at = NOW()
-    WHERE id = \${entityId} RETURNING *
+    DELETE FROM parent_table WHERE id = \${entityId} RETURNING *
   \`
   if (!parent) throw new Error('找不到資料')
 
-  // Step 2: 找到「未分類」或預設類別（如果 BDD 測試預期指定未分類類別 ID）
-  const [defaultCategory] = await tx\`
-    SELECT id FROM categories
-    WHERE (name = '未分類' OR name = 'Uncategorized') AND device_id = \${deviceId}
-    LIMIT 1
-  \`
-  const fallbackId = defaultCategory?.id || null
-
-  // Step 3: 級聯更新子實體的 FK 為未分類 ID（或 NULL）
-  await tx\`
-    UPDATE child_table SET parent_id = \${fallbackId}, updated_at = NOW()
-    WHERE parent_id = \${entityId}
-  \`
+  // 如果 BDD 測試提到「未分類」且 Schema 沒有 CASCADE：
+  // const [defaultCategory] = await tx\`SELECT id FROM categories WHERE name = '未分類' LIMIT 1\`
+  // await tx\`UPDATE child_table SET parent_id = \${defaultCategory?.id} WHERE parent_id = \${entityId}\`
   return parent
 })
 return { __status: 200, ...result }
 \`\`\`
 規則：
-- 刪除被 FK 引用的實體時，必須 transaction 內同時更新子記錄
-- 如果 BDD 測試提到「未分類」，先查找未分類類別的 ID，用它來替換（不是 NULL）
-- 如果找不到未分類類別，才設為 NULL
-- 子記錄不要刪除
+- 先看 Schema DDL：如果 FK 有 ON DELETE CASCADE，直接 DELETE parent（子記錄自動刪除）
+- 如果 Schema 有 deleted_at 欄位，用 UPDATE SET deleted_at = NOW() 代替 DELETE
+- 如果 BDD 測試提到「未分類」，先查找未分類類別 ID 來替換 FK
 - 用 sql.begin() 確保原子性`
 
 // --- Handler: 欄位別名（snake_case → camelCase）---
 const COLUMN_ALIAS_HANDLER = `
 ## 欄位別名（PostgreSQL snake_case → camelCase）
-PostgreSQL 回傳的欄位名是 snake_case（category_id, created_at, deleted_at, transaction_date）。
-BDD 測試驗證的欄位名是 camelCase（categoryId, createdAt, deletedAt, transactionDate）。
+PostgreSQL 回傳的欄位名是 snake_case（category_id, created_at, transaction_date）。
+BDD 測試驗證的欄位名是 camelCase（categoryId, createdAt, transactionDate）。
 必須在回傳前轉換，否則測試一定失敗！
 \`\`\`typescript
 // 方法 1: SQL AS 別名（推薦）
-SELECT category_id as "categoryId", created_at as "createdAt", deleted_at as "deletedAt" FROM ...
+SELECT category_id as "categoryId", created_at as "createdAt", updated_at as "updatedAt" FROM ...
 
 // 方法 2: 程式碼轉換（適合 RETURNING * 展開場景）
 function snakeToCamel(row: any) {
@@ -3125,6 +3132,11 @@ return { episodeId: id, ... }
 如果測試失敗訊息包含 "VAR 解析失敗"，這是**測試框架無法找到變數**，不是你的函數有 bug。
 此時不要修改函數邏輯 — 直接原樣輸出現有代碼。
 
+## 軟刪除 deleted_at（常見嚴重 Bug！）
+如果 Schema DDL 中沒有定義 deleted_at 或 is_deleted 欄位，
+**絕對不要**在 SQL 查詢中加 \`WHERE deleted_at IS NULL\` 或 \`AND deleted_at IS NULL\`。
+先閱讀 Schema DDL 確認欄位是否存在。不存在就不加，否則會觸發 "column does not exist" SQL 錯誤。
+
 ## email → userId（常見錯誤！）
 測試傳入 email 參數時，函數必須自行查詢 userId：
 \`\`\`typescript
@@ -3213,20 +3225,23 @@ if (op.includes('登出')) {
 → 回傳值必須用 Number() 轉型：Number(result.totalIncome)（PostgreSQL SUM/COUNT 回傳 string）
 → 無資料時回傳零值物件 { totalIncome: 0, totalExpense: 0 }，不要 404 或空
 → 日期範圍過濾用 date_trunc：date_trunc('month', transaction_date) = date_trunc('month', \${month}::date)
-→ 必須加 deleted_at IS NULL 排除軟刪除記錄
+→ 只有 Schema 有 deleted_at 欄位時才加 deleted_at IS NULL
 
-## 軟刪除（常見錯誤！）
-如果錯誤含 "deletedAt 預期非 null，但實際值為 null"：
-→ 刪除操作**必須**用 UPDATE SET deleted_at = NOW()，**絕對不能**用 DELETE FROM
-→ 查詢操作**必須**加 WHERE deleted_at IS NULL 排除已刪除記錄
-→ 摘要/統計查詢也必須排除 deleted_at IS NOT NULL 的記錄
+## 軟刪除 vs 硬刪除（常見錯誤！）
+**先看 Schema DDL 是否有 deleted_at 欄位！**
+如果 Schema **有** deleted_at：
+→ 刪除操作用 UPDATE SET deleted_at = NOW()
+→ 查詢操作加 WHERE deleted_at IS NULL
+如果 Schema **沒有** deleted_at：
+→ 刪除操作用 DELETE FROM（如果 FK 有 ON DELETE CASCADE 會自動刪子記錄）
+→ 查詢操作**不要**加 deleted_at（否則 SQL 報 "column does not exist"）
 
 ## camelCase 欄位名稱（常見錯誤！）
 如果錯誤含 "值不匹配" 且 "實際:" 後面是空的（不是值錯，是欄位找不到）：
 → PostgreSQL RETURNING * 回傳 snake_case（category_id），BDD 期望 camelCase（categoryId）
-→ 解法 1: SQL AS 別名：SELECT category_id as "categoryId", deleted_at as "deletedAt"
+→ 解法 1: SQL AS 別名：SELECT category_id as "categoryId", created_at as "createdAt"
 → 解法 2: 回傳前轉換：key.replace(/_([a-z])/g, (_, c) => c.toUpperCase())
-→ 常見欄位：category_id→categoryId, created_at→createdAt, deleted_at→deletedAt, transaction_date→transactionDate, device_id→deviceId
+→ 常見欄位：category_id→categoryId, created_at→createdAt, updated_at→updatedAt, transaction_date→transactionDate, device_id→deviceId, list_id→listId, is_completed→isCompleted, due_date→dueDate
 
 ## 匯出/列表查詢必須回傳 bare Array（常見嚴重錯誤！）
 如果錯誤含 "id 值不匹配" 且 "實際:" 後面是空的，且是匯出/列表操作：
