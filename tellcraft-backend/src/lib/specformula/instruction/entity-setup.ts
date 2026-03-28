@@ -112,6 +112,12 @@ export class EntitySetup {
 
       // 解析變數引用
       const resolved = this.resolver.resolveVariable(value);
+      // fail-closed：$variable 未解析時不 fallback 到字面字串（會導致 SQL type error，如 uuid 欄位收到 "$listId"）
+      if (resolved === null && value.trim().startsWith('$')) {
+        throw new Error(
+          `[EntitySetup] VAR 解析失敗：${value} 無法解析為有效值。請確認 Background 或先前步驟已正確宣告此變數。`
+        );
+      }
       const resolvedValue = resolved != null ? resolved : value;
       const colType = columnTypes.get(snakeCol) ?? null;
 

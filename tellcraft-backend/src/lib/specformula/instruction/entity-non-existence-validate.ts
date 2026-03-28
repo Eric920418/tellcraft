@@ -47,6 +47,12 @@ export class EntityNonExistenceValidate {
           break;
         }
         const resolvedPk = this.resolver.resolveVariable(pkRaw);
+        // fail-closed：$variable 未解析時不要用字面字串查 DB（會導致 SQL type error）
+        if (resolvedPk === null && pkRaw.trim().startsWith('$')) {
+          throw new Error(
+            `[EntityNonExistenceValidate] VAR 解析失敗：${pkRaw} 無法解析。請確認 Background 或先前步驟已正確宣告此變數。`
+          );
+        }
         const typed = TypeConverter.convertToColumnType(
           resolvedPk != null ? resolvedPk : pkRaw,
           tableDef.findColumnType(pkCol)

@@ -154,6 +154,50 @@ describe('ISAFeatureArgumentResolver', () => {
         expect(() => resolver.extractAndStoreVariables(['<id'], contextKeyMap, executionResult))
           .toThrow("找不到 execution key 'id'")
       })
+
+      // executionKey 別名存儲測試
+      it('stores value under both contextKey and executionKey alias', () => {
+        const contextKeyMap = new Map([[0, 'lists.id']])
+        const executionResult = { id: 'uuid-abc', name: '工作' }
+        resolver.extractAndStoreVariables(['<listId'], contextKeyMap, executionResult)
+        // contextKey 存儲
+        expect(ctx.get('lists.id')).toBe('uuid-abc')
+        // executionKey 別名（精確匹配）
+        expect(ctx.get('listId')).toBe('uuid-abc')
+      })
+
+      it('stores numbered executionKey alias for multiple entities', () => {
+        const contextKeyMap1 = new Map([[0, 'lists.id']])
+        resolver.extractAndStoreVariables(['<list1Id'], contextKeyMap1, { id: 'uuid-1' })
+        const contextKeyMap2 = new Map([[0, 'lists.id']])
+        resolver.extractAndStoreVariables(['<list2Id'], contextKeyMap2, { id: 'uuid-2' })
+        // 各自的別名都能找到
+        expect(ctx.get('list1Id')).toBe('uuid-1')
+        expect(ctx.get('list2Id')).toBe('uuid-2')
+        // contextKey 被第二個覆蓋（預期行為）
+        expect(ctx.get('lists.id')).toBe('uuid-2')
+      })
+
+      it('does not store alias when executionKey matches contextKey', () => {
+        const contextKeyMap = new Map([[0, 'userId']])
+        const executionResult = { userId: 'uuid-same' }
+        resolver.extractAndStoreVariables(['<userId'], contextKeyMap, executionResult)
+        expect(ctx.get('userId')).toBe('uuid-same')
+      })
+
+      it('alias enables $listId resolution for >lists.id + <listId pattern', () => {
+        // 模擬 BDD Feature 的 entity_setup
+        const contextKeyMap = new Map([[0, 'lists.id']])
+        resolver.extractAndStoreVariables(['<listId'], contextKeyMap, { id: 'uuid-real' })
+        // $listId 能透過精確匹配別名找到
+        expect(resolver.resolveVariable('$listId')).toBe('uuid-real')
+      })
+
+      it('alias enables $todoId resolution for >todos.id + <todoId pattern', () => {
+        const contextKeyMap = new Map([[0, 'todos.id']])
+        resolver.extractAndStoreVariables(['<todoId'], contextKeyMap, { id: 'uuid-todo' })
+        expect(resolver.resolveVariable('$todoId')).toBe('uuid-todo')
+      })
     })
 
     describe('resolveVariable', () => {

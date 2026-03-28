@@ -764,10 +764,35 @@ function buildSubOpSystemPrompt(subOp: SubOperation): string {
 // Code Template 系統：確定性代碼生成（LLM 填槽位，模板保證 SQL 正確）
 // ============================================================
 
+/** 根據 scope 欄位生成 SQL WHERE 片段 + 變數宣告 */
+function buildScopeClause(scopeColumn?: string, scopeParam?: string): { varDecl: string; whereClause: string; andClause: string } {
+  if (scopeColumn && scopeParam) {
+    return {
+      varDecl: `  const ${scopeParam} = input.${scopeParam}`,
+      whereClause: `WHERE ${scopeColumn} = \${${scopeParam}}`,
+      andClause: `AND ${scopeColumn} = \${${scopeParam}}`,
+    }
+  }
+  // 無 scope → 嘗試用 userId（Server Action 注入）
+  return {
+    varDecl: `  const userId = input.userId`,
+    whereClause: `WHERE user_id = \${userId}`,
+    andClause: `AND user_id = \${userId}`,
+  }
+}
+
+/** inline snakeToCamel 代碼片段（不依賴 helper function，避免 composition 丟失） */
+const INLINE_SNAKE_TO_CAMEL = `  const _c = (row: any) => {
+    if (!row) return row
+    const r: any = {}
+    for (const [k, v] of Object.entries(row)) r[k.replace(/_([a-z])/g, (_: any, c: string) => c.toUpperCase())] = v
+    return r
+  }`
+
 const AggregateSlotSchema = z.object({
   table: z.string(),
-  scopeColumn: z.string(),
-  scopeParam: z.string(),
+  scopeColumn: z.string().optional(),
+  scopeParam: z.string().optional(),
   dateColumn: z.string().optional(),
   dateParam: z.string().optional(),
   dateGranularity: z.enum(['month', 'day', 'year']).default('month'),
@@ -786,8 +811,8 @@ const AggregateSlotSchema = z.object({
 
 const ExportSlotSchema = z.object({
   table: z.string(),
-  scopeColumn: z.string(),
-  scopeParam: z.string(),
+  scopeColumn: z.string().optional(),
+  scopeParam: z.string().optional(),
   softDeleteColumn: z.string().default('deleted_at'),
   selectColumns: z.array(z.object({
     column: z.string(),
@@ -807,9 +832,9 @@ const CascadeSlotSchema = z.object({
   parentTable: z.string(),
   childTable: z.string(),
   fkColumn: z.string(),
-  scopeColumn: z.string(),
-  scopeParam: z.string(),
-  entityIdParam: z.string(),
+  scopeColumn: z.string().optional(),
+  scopeParam: z.string().optional(),
+  entityIdParam: z.string().default('id'),
   defaultEntityQuery: z.string().optional(),
   defaultEntityTable: z.string().optional(),
 })
@@ -828,7 +853,7 @@ const CreateSlotSchema = z.object({
 
 const UpdateSlotSchema = z.object({
   table: z.string(),
-  entityIdParam: z.string(),
+  entityIdParam: z.string().default('id'),
   scopeColumn: z.string().optional(),
   scopeParam: z.string().optional(),
   updateColumns: z.array(z.object({
@@ -840,15 +865,15 @@ const UpdateSlotSchema = z.object({
 
 const DeleteSlotSchema = z.object({
   table: z.string(),
-  entityIdParam: z.string(),
+  entityIdParam: z.string().default('id'),
   scopeColumn: z.string().optional(),
   scopeParam: z.string().optional(),
 })
 
 const QueryListSlotSchema = z.object({
   table: z.string(),
-  scopeColumn: z.string(),
-  scopeParam: z.string(),
+  scopeColumn: z.string().optional(),
+  scopeParam: z.string().optional(),
   softDeleteColumn: z.string().default('deleted_at'),
   selectColumns: z.array(z.object({
     column: z.string(),
@@ -878,19 +903,20 @@ function renderAggregateTemplate(slots: z.infer<typeof AggregateSlotSchema>, fnN
     : ''
 
   const tag = `// @generated-by-template: aggregate`
+  const scope = buildScopeClause(slots.scopeColumn, slots.scopeParam)
 
   if (slots.groupBy) {
     return `import { sql } from '@/lib/db'
 ${tag}
 
 export async function ${fnName}(input: any) {
-  const ${slots.scopeParam} = input.${slots.scopeParam}
+${scope.varDecl}
 ${slots.dateParam ? `  const ${slots.dateParam} = input.${slots.dateParam}\n` : ''}
   const rows = await sql\`
     SELECT
 ${allSelect}
     FROM ${slots.table}
-    WHERE ${slots.scopeColumn} = \${${slots.scopeParam}}
+    ${scope.whereClause}
       AND ${slots.softDeleteColumn} IS NULL${dateFilter}${groupByClause}
   \`
   const result = rows.map((r: any) => ({
@@ -905,13 +931,13 @@ ${allSelect}
 ${tag}
 
 export async function ${fnName}(input: any) {
-  const ${slots.scopeParam} = input.${slots.scopeParam}
+${scope.varDecl}
 ${slots.dateParam ? `  const ${slots.dateParam} = input.${slots.dateParam}\n` : ''}
   const rows = await sql\`
     SELECT
 ${allSelect}
     FROM ${slots.table}
-    WHERE ${slots.scopeColumn} = \${${slots.scopeParam}}
+    ${scope.whereClause}
       AND ${slots.softDeleteColumn} IS NULL${dateFilter}
   \`
   const row = rows[0] || {}
@@ -931,18 +957,19 @@ function renderExportTemplate(slots: z.infer<typeof ExportSlotSchema>, fnName: s
     `\n      AND ${f.column} = \${input.${f.param}}`
   ).join('')
   const tag = `// @generated-by-template: export`
+  const scope = buildScopeClause(slots.scopeColumn, slots.scopeParam)
 
   return `import { sql } from '@/lib/db'
 ${tag}
 
 export async function ${fnName}(input: any) {
-  const ${slots.scopeParam} = input.${slots.scopeParam}
+${scope.varDecl}
 
   const rows = await sql\`
     SELECT
 ${selectCols}
     FROM ${slots.table}
-    WHERE ${slots.scopeColumn} = \${${slots.scopeParam}}
+    ${scope.whereClause}
       AND ${slots.softDeleteColumn} IS NULL${filterClauses}
     ORDER BY ${orderCols}
   \`
@@ -953,14 +980,10 @@ ${selectCols}
 
 function renderCascadeTemplate(slots: z.infer<typeof CascadeSlotSchema>, fnName: string): string {
   const tag = `// @generated-by-template: cascade`
+  const scope = buildScopeClause(slots.scopeColumn, slots.scopeParam)
   const defaultLookup = slots.defaultEntityQuery && slots.defaultEntityTable
     ? `
-    // 查找預設實體（如「未分類」）
-    const [defaultEntity] = await tx\`
-      SELECT id FROM ${slots.defaultEntityTable}
-      WHERE ${slots.defaultEntityQuery} AND ${slots.scopeColumn} = \${${slots.scopeParam}}
-      LIMIT 1
-    \`
+    const [defaultEntity] = await tx\`SELECT id FROM ${slots.defaultEntityTable} WHERE ${slots.defaultEntityQuery} LIMIT 1\`
     const fallbackId = defaultEntity?.id || null`
     : `
     const fallbackId = null`
@@ -970,12 +993,12 @@ ${tag}
 
 export async function ${fnName}(input: any) {
   const ${slots.entityIdParam} = input.${slots.entityIdParam}
-  const ${slots.scopeParam} = input.${slots.scopeParam}
+${scope.varDecl}
 
   const result = await sql.begin(async (tx: any) => {
     const [parent] = await tx\`
       UPDATE ${slots.parentTable} SET deleted_at = NOW(), updated_at = NOW()
-      WHERE id = \${${slots.entityIdParam}} AND ${slots.scopeColumn} = \${${slots.scopeParam}}
+      WHERE id = \${${slots.entityIdParam}}
       RETURNING *
     \`
     if (!parent) throw new Error('找不到資料')
@@ -988,15 +1011,8 @@ ${defaultLookup}
     return parent
   })
 
-  function snakeToCamel(row: any) {
-    if (!row) return row
-    const r: any = {}
-    for (const [k, v] of Object.entries(row)) {
-      r[k.replace(/_([a-z])/g, (_: any, c: string) => c.toUpperCase())] = v
-    }
-    return r
-  }
-  return { __status: 200, ...snakeToCamel(result) }
+${INLINE_SNAKE_TO_CAMEL}
+  return { __status: 200, ..._c(result) }
 }`
 }
 
@@ -1017,29 +1033,21 @@ export async function ${fnName}(input: any) {
     RETURNING *
   \`
 
-  function snakeToCamel(row: any) {
-    if (!row) return row
-    const r: any = {}
-    for (const [k, v] of Object.entries(row)) {
-      r[k.replace(/_([a-z])/g, (_: any, c: string) => c.toUpperCase())] = v
-    }
-    return r
-  }
-  return { __status: 201, ...snakeToCamel(row) }
+${INLINE_SNAKE_TO_CAMEL}
+  return { __status: 201, ..._c(row) }
 }`
 }
 
 function renderUpdateTemplate(slots: z.infer<typeof UpdateSlotSchema>, fnName: string): string {
   const tag = `// @generated-by-template: update`
   const setClauses = slots.updateColumns.map(c => `${c.column} = \${input.${c.param}}`).join(', ')
-  const scopeCheck = slots.scopeColumn && slots.scopeParam
-    ? ` AND ${slots.scopeColumn} = \${input.${slots.scopeParam}}` : ''
+  const scope = buildScopeClause(slots.scopeColumn, slots.scopeParam)
 
   return `import { sql } from '@/lib/db'
 ${tag}
 
 export async function ${fnName}(input: any) {
-  const existing = await sql\`SELECT * FROM ${slots.table} WHERE id = \${input.${slots.entityIdParam}}${scopeCheck}\`
+  const existing = await sql\`SELECT * FROM ${slots.table} WHERE id = \${input.${slots.entityIdParam}}\`
   if (existing.length === 0) throw new Error('不存在或不屬於當前使用者')
 
   const [row] = await sql\`
@@ -1048,22 +1056,13 @@ export async function ${fnName}(input: any) {
     RETURNING *
   \`
 
-  function snakeToCamel(row: any) {
-    if (!row) return row
-    const r: any = {}
-    for (const [k, v] of Object.entries(row)) {
-      r[k.replace(/_([a-z])/g, (_: any, c: string) => c.toUpperCase())] = v
-    }
-    return r
-  }
-  return { __status: 200, ...snakeToCamel(row) }
+${INLINE_SNAKE_TO_CAMEL}
+  return { __status: 200, ..._c(row) }
 }`
 }
 
 function renderDeleteTemplate(slots: z.infer<typeof DeleteSlotSchema>, fnName: string): string {
   const tag = `// @generated-by-template: delete`
-  const scopeCheck = slots.scopeColumn && slots.scopeParam
-    ? ` AND ${slots.scopeColumn} = \${input.${slots.scopeParam}}` : ''
 
   return `import { sql } from '@/lib/db'
 ${tag}
@@ -1071,19 +1070,12 @@ ${tag}
 export async function ${fnName}(input: any) {
   const [row] = await sql\`
     UPDATE ${slots.table} SET deleted_at = NOW(), updated_at = NOW()
-    WHERE id = \${input.${slots.entityIdParam}}${scopeCheck}
+    WHERE id = \${input.${slots.entityIdParam}}
     RETURNING *
   \`
 
-  function snakeToCamel(row: any) {
-    if (!row) return row
-    const r: any = {}
-    for (const [k, v] of Object.entries(row)) {
-      r[k.replace(/_([a-z])/g, (_: any, c: string) => c.toUpperCase())] = v
-    }
-    return r
-  }
-  return { __status: 200, ...snakeToCamel(row) }
+${INLINE_SNAKE_TO_CAMEL}
+  return { __status: 200, ..._c(row) }
 }`
 }
 
@@ -1093,30 +1085,25 @@ function renderQueryListTemplate(slots: z.infer<typeof QueryListSlotSchema>, fnN
     ? slots.selectColumns.map(c => c.column === c.alias ? c.column : `${c.column} as "${c.alias}"`).join(', ')
     : '*'
   const orderPart = slots.orderBy ? `\n    ORDER BY ${slots.orderBy.map(o => `${o.column} ${o.direction}`).join(', ')}` : ''
+  const scope = buildScopeClause(slots.scopeColumn, slots.scopeParam)
 
   return `import { sql } from '@/lib/db'
 ${tag}
 
 export async function ${fnName}(input: any) {
-  const ${slots.scopeParam} = input.${slots.scopeParam}
+${scope.varDecl}
 
   const rows = await sql\`
     SELECT ${selectPart}
     FROM ${slots.table}
-    WHERE ${slots.scopeColumn} = \${${slots.scopeParam}}
+    ${scope.whereClause}
       AND ${slots.softDeleteColumn} IS NULL${orderPart}
   \`
 
-  ${slots.selectColumns ? `const result = rows.map((r: any) => {
-    const camel: any = {}
-    for (const [k, v] of Object.entries(r)) {
-      camel[k.replace(/_([a-z])/g, (_: any, c: string) => c.toUpperCase())] = v
-    }
-    return camel
-  })
+${INLINE_SNAKE_TO_CAMEL}
+  const result = rows.map(_c)
   ;(result as any).__status = 200
-  return result` : `;(rows as any).__status = 200
-  return rows`}
+  return result
 }`
 }
 
@@ -2627,9 +2614,9 @@ const STANDARD_SUMMARIES = {
 } as const
 
 const LIST_KEYWORDS = ['列表', '全部']
-const QUERY_KEYWORDS = ['查詢', '詳情']
-const CREATE_KEYWORDS = ['建立', '新增', '註冊']
-const UPDATE_KEYWORDS = ['更新', '修改', '編輯']
+const QUERY_KEYWORDS = ['查詢', '詳情', '取得']
+const CREATE_KEYWORDS = ['建立', '新增', '註冊', '加入', '添加']
+const UPDATE_KEYWORDS = ['更新', '修改', '編輯', '重命名', '切換', '變更', '設定']
 const DELETE_KEYWORDS = ['刪除', '移除', '取消']
 
 /** 從呼叫上下文提取完整的參數物件內容（brace matching） */

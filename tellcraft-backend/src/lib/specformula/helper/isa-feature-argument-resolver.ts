@@ -118,7 +118,8 @@ export class ISAFeatureArgumentResolver {
       if (columnIndex < row.length) {
         const executionKey = row[columnIndex];
         if (executionKey && executionKey.startsWith('<')) {
-          let executionKeyName = executionKey.substring(1);
+          const originalExecKeyName = executionKey.substring(1);
+          let executionKeyName = originalExecKeyName;
           if (!this.containsNestedKey(executionMap, executionKeyName)) {
             // Fallback: LLM 常用 <userId / <testUserId 等，但 RETURNING * 的 column 是 id
             // 嘗試常見映射：xxxId → id, xxxUserId → user_id, xxx_id → id
@@ -133,6 +134,12 @@ export class ISAFeatureArgumentResolver {
           }
           const value = this.getNestedValue(executionMap, executionKeyName);
           this.getContext().putObject(contextKey, value);
+          // 同時將值存在原始 executionKey 名稱下作為直接別名
+          // 這樣 >lists.id + <listId 存了 "lists.id" → uuid 也存了 "listId" → uuid
+          // $listId 可以透過精確匹配 "listId" 直接找到
+          if (originalExecKeyName && originalExecKeyName !== contextKey) {
+            this.getContext().putObject(originalExecKeyName, value);
+          }
         }
       }
     }

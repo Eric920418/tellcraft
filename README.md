@@ -129,11 +129,16 @@ npx ts-node bdd-spec/scripts/validate-feature.ts spec/features/
   └─ 設計 → 生成前端代碼 → WebContainers 即時預覽
   │
   ▼
-④ Coder Skill Stage A（✅ 已完成 — 純生成）
-  ├─ 讀取 BDD 產出（actionsYml + schemaSql + entityMapping）
+④ Coder Skill Stage A（✅ 已完成 — Per-SubOp 生成 + Code Template 模板化）
+  ├─ 讀取 BDD 產出（actionsYml + schemaSql + entityMapping + features_content）
   ├─ 生成 lib/db.ts（Neon 連接，零 LLM）
-  ├─ 生成 lib/actions/*.ts（純邏輯函數，LLM 逐 action）
-  ├─ 生成 app/actions/*.ts（Server Actions，零 LLM 機械映射，cookies try-catch 相容 WebContainer）
+  ├─ Per-SubOp 生成：Feature 按 When 步驟拆分子操作 → 每個子操作精準 Handler 選擇
+  │   ├─ 已知 pattern（aggregate/create/update/delete/query_list/export/cascade）→ Code Template 模板化
+  │   │   └─ LLM 只提取 JSON 槽位（表名/欄位/條件）→ 模板保證 SQL 正確（COALESCE/GROUP BY/camelCase）
+  │   └─ 未知 pattern → free-form LLM 生成（fallback）
+  ├─ 零 LLM 機械組裝：import 去重 + helper 提升 + _stepSummary dispatch 排序
+  ├─ 生成 app/actions/*.ts（Server Actions，零 LLM 機械映射）
+  ├─ 生成 app/api/*/route.ts（API Routes，零 LLM）
   └─ 改寫 UIUX 組件（useState mock → Server Action 調用）
   │
   ▼
@@ -143,8 +148,9 @@ npx ts-node bdd-spec/scripts/validate-feature.ts spec/features/
   ├─ RED Phase Layer 2.5: RoutingStubAdapter（in-process Express 真實路由匹配，404 捕捉路由定義錯誤）
   ├─ BDD execution key 注入 Coder prompt（response field 名稱對齊）
   ├─ E2E 測試（/tmp Next.js dev + Puppeteer，含 backendFiles + JSX 截斷偵測）
-  ├─ 生成 API Routes（app/api/*/route.ts）
   ├─ SpecFormula 逐 Feature 精準驗證（每 Feature 獨立 3 輪修復 → 多輪回歸修復 + 智能跳過）
+  ├─ Per-SubOp 精準修復：偵測組裝式代碼 → 只修失敗的子操作函數（不影響已通過的）
+  ├─ 測試完成後重發 code_preview（含修復後代碼 + neonConnectionString）→ WebContainer 即時更新
   └─ 雙層完成驗證：測試全通過→部署(primary)；測試有失敗→重試(primary)+帶風險部署(secondary)+二次確認
   │
   ▼
@@ -705,13 +711,34 @@ sdd.os/                   # SDD 上游 Reference Repo（git subtree，只讀參�
 
 ## Roadmap（待實作）
 
-### P0：Coder Skill Stage A — 後端代碼生成（✅ 已完成）
+### P0：Coder Skill Stage A — 後端代碼生成（✅ 已完成，Per-SubOp + Code Template）
 
-從 BDD 產出生成後端邏輯（lib/actions → Server Actions → 改寫 UIUX 組件），把 mock 前端改寫為連接 Neon DB 的完整應用。觸發：`uiux_complete` 時顯示「接上資料庫」quickReply。
+從 BDD 產出生成後端邏輯，把 mock 前端改寫為連接 Neon DB 的完整應用。
+
+**Per-SubOp 生成架構**（2026-03-27）：
+- Feature 按 When 步驟的 `_stepSummary` 拆分子操作（建立/編輯/刪除/查詢/聚合 等）
+- 每個子操作用 `inferOperationType()` 推斷操作類型 → 精準注入 1 個 Handler（非全部 5 個混打）
+- 多操作 Feature（如 manage_todo）→ 並行生成各子操作 → `composeActionFunction()` 零 LLM 機械組裝
+- 單操作 Feature（如 get_monthly_summary）→ 直接用精準 Handler 生成
+- Unicode-aware 正則（`ID_PATTERN`）支援中文函數名
+
+**Code Template 模板化**（2026-03-27）：
+- 已知 SQL pattern 不讓 LLM 自由發揮，改用 LLM 提取 JSON 槽位 → Zod 驗證 → 模板渲染確定性代碼
+- 7 個模板：`aggregate`（SUM/COALESCE/GROUP BY）、`export`（SELECT+ORDER BY）、`cascade`（transaction+FK 更新）、`create`（INSERT+RETURNING）、`update`（UPDATE+RETURNING）、`delete`（軟刪除）、`query_list`（SELECT+WHERE）
+- `buildScopeClause()` 自動處理有/無 scope 欄位（fallback user_id）
+- `INLINE_SNAKE_TO_CAMEL`（`_c` 函數）內嵌在每個模板中，不可被 composition helper 提取器拔走
+- Slot 提取失敗 → 自動 fallback 到 free-form LLM（向後相容）
+- `CODER_PER_SUBOP=false` 環境變數可一鍵關閉
 
 ### P0b：Coder Skill Stage B — SpecFormula 驗證（✅ 已完成）
 
-生成 API Routes + SpecFormula 紅綠燈自動驗證循環。**91/91 scenarios 100% 通過**（Podcast 專案 7 Features，Round 1 直接全過 ~58s）。
+生成 API Routes + SpecFormula 紅綠燈自動驗證循環。
+
+**Per-SubOp 精準修復**（2026-03-27）：偵測組裝式代碼（`handle*` 子函數）→ 只修失敗的子操作 → 不影響已通過的。esbuild 語法驗證 + 不通過則回退原碼。
+
+**SpecFormula VAR 解析修復**（2026-03-28）：`ScenarioContext.get()` 支援數字後綴 entity 名（`List1.id` → `listId`）。
+
+**WebContainer 預覽修復**（2026-03-27）：測試完成後重發 `code_preview` + `neonConnectionString`（修復後代碼），不再顯示修復前的舊版本。
 
 ### P1：BDD 格式遷移到 ISA SpecFormula 標準（✅ 在 P0b 開發中已完成）
 

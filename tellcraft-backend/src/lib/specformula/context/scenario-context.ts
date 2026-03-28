@@ -43,7 +43,25 @@ export class ScenarioContext {
         // transactionId → Transaction + id（首字母大寫 entity + field）
         const combined = entity.charAt(0).toLowerCase() + entity.slice(1) + field.charAt(0).toUpperCase() + field.slice(1)
         if (combined === key) return value
-        // 也匹配 field 直接相等的情况（如 key="id", storedKey="Transaction.id"）
+
+        // Case 2: "List1.id" → strip trailing digits → "list" + "Id" = "listId"
+        // BDD 常用 List1/User2 等帶數字後綴的 entity，但 $listId 引用不帶數字
+        const entityNoDigits = entity.replace(/\d+$/, '')
+        if (entityNoDigits !== entity) {
+          const combinedNoDigits = entityNoDigits.charAt(0).toLowerCase() + entityNoDigits.slice(1) + field.charAt(0).toUpperCase() + field.slice(1)
+          if (combinedNoDigits === key) return value
+        }
+
+        // Case 2.5: "lists.id" → strip trailing 's' → "list" + "Id" = "listId"
+        // BDD 常用表名（複數）作為 entity name，但 $variable 用單數
+        const base = entityNoDigits.charAt(0).toLowerCase() + entityNoDigits.slice(1)
+        if (base.endsWith('s') && base.length > 1) {
+          const entitySingular = base.slice(0, -1)
+          const combinedSingular = entitySingular + field.charAt(0).toUpperCase() + field.slice(1)
+          if (combinedSingular === key) return value
+        }
+
+        // Case 3: field 直接相等（如 key="id", storedKey="Transaction.id"）
         if (field === key) return value
       }
     }
