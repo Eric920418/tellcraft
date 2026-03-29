@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState, useRef, useCallback, useMemo } from 'react'
+import { useEffect, useState, useRef, useCallback } from 'react'
 import { useRouter } from '@/i18n/navigation'
 import { motion } from 'framer-motion'
 import { useTranslations } from 'next-intl'
@@ -52,8 +52,9 @@ export default function AdminUsersPage() {
   const t = useTranslations('dashboard')
   const ta = useTranslations('dashboard.admin')
   const tc = useTranslations('common')
-  const [allUsers, setAllUsers] = useState<User[]>([])
+  const [users, setUsers] = useState<User[]>([])
   const [total, setTotal] = useState(0)
+  const [page, setPage] = useState(1)
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [searchInput, setSearchInput] = useState('')
@@ -73,9 +74,7 @@ export default function AdminUsersPage() {
     { key: 'guest', label: ta('providerGuest') },
   ]
 
-  // 一次載入全部用戶（不分頁查後端），前端做分類 + 分頁
-  // 用戶量不大的情況下這樣最簡單，避免後端也要加 provider filter
-  const pageSize = 500
+  const pageSize = 20
 
   // Debounced search
   const handleSearchChange = useCallback((value: string) => {
@@ -83,6 +82,7 @@ export default function AdminUsersPage() {
     if (debounceTimerRef.current) clearTimeout(debounceTimerRef.current)
     debounceTimerRef.current = setTimeout(() => {
       setSearchQuery(value)
+      setPage(1)
     }, 300)
   }, [])
 
@@ -91,6 +91,11 @@ export default function AdminUsersPage() {
       if (debounceTimerRef.current) clearTimeout(debounceTimerRef.current)
     }
   }, [])
+
+  // Tab 切換時重置頁碼
+  useEffect(() => {
+    setPage(1)
+  }, [activeTab])
 
   useEffect(() => {
     const fetchUsers = async () => {
@@ -103,11 +108,12 @@ export default function AdminUsersPage() {
       setIsLoading(true)
       const result = await listAllUsers({
         token,
-        page: 1,
+        page,
         pageSize,
         sortBy,
         sortOrder,
         search: searchQuery || undefined,
+        provider: activeTab,
       })
 
       if (!result.success) {
@@ -121,37 +127,14 @@ export default function AdminUsersPage() {
       }
 
       if (result.data) {
-        setAllUsers(result.data.items)
+        setUsers(result.data.items)
         setTotal(result.data.total)
       }
       setIsLoading(false)
     }
 
     fetchUsers()
-  }, [sortBy, sortOrder, searchQuery, router])
-
-  // 按 provider 分類
-  const categorizedUsers = useMemo(() => {
-    const oauth: User[] = []
-    const guest: User[] = []
-
-    for (const u of allUsers) {
-      if (u.provider === 'google' || u.provider === 'line') oauth.push(u)
-      else guest.push(u)
-    }
-
-    return { oauth, guest }
-  }, [allUsers])
-
-  const displayUsers = useMemo(() => {
-    if (activeTab === 'oauth') return categorizedUsers.oauth
-    return categorizedUsers.guest
-  }, [activeTab, categorizedUsers])
-
-  const tabCounts = useMemo(() => ({
-    oauth: categorizedUsers.oauth.length,
-    guest: categorizedUsers.guest.length,
-  }), [categorizedUsers])
+  }, [page, sortBy, sortOrder, searchQuery, activeTab, router])
 
   const handleToggleAdmin = async (userId: string, currentIsAdmin: boolean) => {
     const token = getAuthToken()
@@ -162,7 +145,7 @@ export default function AdminUsersPage() {
 
     const result = await setUserAdmin({ token, userId, isAdmin: !currentIsAdmin })
     if (result.success) {
-      setAllUsers((prev) =>
+      setUsers((prev) =>
         prev.map((u) => (u.id === userId ? { ...u, isAdmin: !currentIsAdmin } : u))
       )
     } else {
@@ -388,15 +371,17 @@ export default function AdminUsersPage() {
               }}
             >
               {tab.label}
-              <span
-                style={{
-                  marginLeft: 6,
-                  fontSize: 11,
-                  opacity: 0.7,
-                }}
-              >
-                {tabCounts[tab.key]}
-              </span>
+              {activeTab === tab.key && (
+                <span
+                  style={{
+                    marginLeft: 6,
+                    fontSize: 11,
+                    opacity: 0.7,
+                  }}
+                >
+                  {total}
+                </span>
+              )}
             </button>
           ))}
         </div>
@@ -410,7 +395,7 @@ export default function AdminUsersPage() {
       >
         <DataTable
           columns={columns}
-          data={displayUsers}
+          data={users}
           keyField="id"
           isLoading={isLoading}
           emptyMessage={t('noUsers')}
@@ -421,6 +406,12 @@ export default function AdminUsersPage() {
             sortBy,
             sortOrder,
             onSort: handleSort,
+          }}
+          pagination={{
+            page,
+            pageSize,
+            total,
+            onPageChange: setPage,
           }}
         />
       </motion.div>

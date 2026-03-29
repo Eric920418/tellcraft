@@ -555,6 +555,7 @@ export async function listAllUsers(input: {
   sortBy?: string
   sortOrder?: 'asc' | 'desc'
   search?: string
+  provider?: 'oauth' | 'guest'
 }): Promise<ApiResponse<{
   items: Array<{
     id: string
@@ -578,6 +579,7 @@ export async function listAllUsers(input: {
   if (input.sortBy) params.set('sortBy', input.sortBy)
   if (input.sortOrder) params.set('sortOrder', input.sortOrder)
   if (input.search) params.set('search', input.search)
+  if (input.provider) params.set('provider', input.provider)
 
   const query = params.toString() ? `?${params.toString()}` : ''
 

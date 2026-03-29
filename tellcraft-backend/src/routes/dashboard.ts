@@ -276,7 +276,8 @@ router.get('/admin/usage', requireAdmin, async (req, res) => {
           LEFT JOIN users u ON l.user_id = u.id
           WHERE l.created_at >= $1 AND l.created_at <= $2
           GROUP BY l.conversation_id, l.user_id, u.name, u.email
-          ORDER BY latest_at DESC`
+          ORDER BY latest_at DESC
+          LIMIT 200`
           break
         default: // 'day'
           breakdownSql = `SELECT
@@ -354,12 +355,13 @@ router.get('/admin/usage', requireAdmin, async (req, res) => {
  */
 router.get('/admin/users', requireAdmin, async (req, res) => {
   try {
-    const { page = '1', pageSize = '20', sortBy = 'created_at', sortOrder = 'desc', search } = req.query as {
+    const { page = '1', pageSize = '20', sortBy = 'created_at', sortOrder = 'desc', search, provider } = req.query as {
       page?: string
       pageSize?: string
       sortBy?: string
       sortOrder?: string
       search?: string
+      provider?: string
     }
 
     const pageNum = parseInt(page, 10)
@@ -378,66 +380,82 @@ router.get('/admin/users', requireAdmin, async (req, res) => {
     const sortField = allowedSortFields[sortBy] || 'created_at'
     const order = sortOrder === 'asc' ? 'ASC' : 'DESC'
 
-    // 構建查詢
-    let whereClause = ''
+    // 構建 WHERE 條件
+    const conditions: string[] = []
     const params: (string | number)[] = []
+    let paramIndex = 1
 
     if (search) {
-      whereClause = 'WHERE (u.email ILIKE $1 OR u.name ILIKE $1)'
+      conditions.push(`(u.email ILIKE $${paramIndex} OR u.name ILIKE $${paramIndex})`)
       params.push(`%${search}%`)
+      paramIndex++
     }
 
-    // 查詢總數
-    const countResult = await queryOne<{ count: string }>(
-      `SELECT COUNT(*) as count FROM users u ${whereClause}`,
-      params
-    )
-    const total = parseInt(countResult?.count || '0', 10)
+    if (provider === 'oauth') {
+      conditions.push('u.provider IS NOT NULL')
+    } else if (provider === 'guest') {
+      conditions.push('u.provider IS NULL')
+    }
 
-    // 查詢用戶列表（包含專案數量）
-    const usersResult = await query<{
-      id: string
-      email: string
-      name: string | null
-      plan: string
-      subscription_status: string
-      is_admin: boolean
-      credits_used_this_period: number
-      created_at: string
-      project_count: string
-      provider: string | null
-      linked_providers: string | null
-    }>(
-      `SELECT
-        u.id, u.email, u.name, u.plan, u.subscription_status, u.is_admin,
-        u.credits_used_this_period, u.created_at, u.provider,
-        COUNT(DISTINCT p.id) as project_count,
-        string_agg(DISTINCT up.provider, ',') as linked_providers
-       FROM users u
-       LEFT JOIN projects p ON p.user_id = u.id
-       LEFT JOIN user_providers up ON up.user_id = u.id
-       ${whereClause}
-       GROUP BY u.id
-       ORDER BY ${sortField === 'project_count' ? 'project_count' : `u.${sortField}`} ${order}
-       LIMIT $${params.length + 1} OFFSET $${params.length + 2}`,
-      [...params, limit, offset]
-    )
+    const whereClause = conditions.length > 0 ? 'WHERE ' + conditions.join(' AND ') : ''
 
-    const items = usersResult.rows.map(u => ({
-      id: u.id,
-      email: u.email,
-      name: u.name,
-      plan: u.plan,
-      subscriptionStatus: u.subscription_status,
-      isAdmin: u.is_admin,
-      projectCount: parseInt(u.project_count, 10),
-      creditsUsed: u.credits_used_this_period,
-      createdAt: u.created_at,
-      provider: u.provider || null,
-      providers: u.linked_providers ? u.linked_providers.split(',') : (u.provider ? [u.provider] : []),
-    }))
+    const cacheKey = `cache:admin:users:${pageNum}:${limit}:${sortField}:${order}:${search || ''}:${provider || ''}`
 
-    res.json({ items, total, page: pageNum, pageSize: limit })
+    const data = await cached(cacheKey, 60, async () => {
+      // 並行查詢總數 + 用戶列表
+      const [countResult, usersResult] = await Promise.all([
+        queryOne<{ count: string }>(
+          `SELECT COUNT(*) as count FROM users u ${whereClause}`,
+          params
+        ),
+        query<{
+          id: string
+          email: string
+          name: string | null
+          plan: string
+          subscription_status: string
+          is_admin: boolean
+          credits_used_this_period: number
+          created_at: string
+          project_count: string
+          provider: string | null
+          linked_providers: string | null
+        }>(
+          `SELECT
+            u.id, u.email, u.name, u.plan, u.subscription_status, u.is_admin,
+            u.credits_used_this_period, u.created_at, u.provider,
+            COUNT(DISTINCT p.id) as project_count,
+            string_agg(DISTINCT up.provider, ',') as linked_providers
+           FROM users u
+           LEFT JOIN projects p ON p.user_id = u.id
+           LEFT JOIN user_providers up ON up.user_id = u.id
+           ${whereClause}
+           GROUP BY u.id
+           ORDER BY ${sortField === 'project_count' ? 'project_count' : `u.${sortField}`} ${order}
+           LIMIT $${paramIndex} OFFSET $${paramIndex + 1}`,
+          [...params, limit, offset]
+        ),
+      ])
+
+      const total = parseInt(countResult?.count || '0', 10)
+      const items = usersResult.rows.map(u => ({
+        id: u.id,
+        email: u.email,
+        name: u.name,
+        plan: u.plan,
+        subscriptionStatus: u.subscription_status,
+        isAdmin: u.is_admin,
+        projectCount: parseInt(u.project_count, 10),
+        creditsUsed: u.credits_used_this_period,
+        createdAt: u.created_at,
+        provider: u.provider || null,
+        providers: u.linked_providers ? u.linked_providers.split(',') : (u.provider ? [u.provider] : []),
+      }))
+
+      return { items, total, page: pageNum, pageSize: limit }
+    })
+
+    res.json(data)
   } catch (error) {
     logger.error({ err: error }, '獲取用戶列表失敗')
     res.status(500).json({ error: '獲取用戶列表失敗' })
@@ -452,7 +470,7 @@ router.get('/admin/users/:userId', requireAdmin, async (req, res) => {
   try {
     const { userId } = req.params
 
-    // 獲取用戶基本資料
+    // 獲取用戶基本資料（需先確認存在才繼續）
     const user = await queryOne<{
       id: string
       email: string
@@ -471,78 +489,80 @@ router.get('/admin/users/:userId', requireAdmin, async (req, res) => {
       return res.status(404).json({ error: '用戶不存在' })
     }
 
-    // 獲取專案列表
-    const projectsResult = await query<{
-      id: string
-      name: string
-      status: string
-      created_at: string
-    }>(
-      'SELECT id, name, status, created_at FROM projects WHERE user_id = $1 ORDER BY created_at DESC',
-      [userId]
-    )
+    const data = await cached(`cache:admin:user:${userId}`, 120, async () => {
+      // 並行查詢專案、對話、統計
+      const [projectsResult, conversationsResult, statsResult] = await Promise.all([
+        query<{
+          id: string
+          name: string
+          status: string
+          created_at: string
+        }>(
+          'SELECT id, name, status, created_at FROM projects WHERE user_id = $1 ORDER BY created_at DESC',
+          [userId]
+        ),
+        query<{
+          id: string
+          project_name: string
+          message_count: string
+          updated_at: string
+        }>(
+          `SELECT c.id, p.name as project_name, jsonb_array_length(c.messages) as message_count, c.updated_at
+           FROM conversations c
+           JOIN projects p ON c.project_id = p.id
+           WHERE p.user_id = $1
+           ORDER BY c.updated_at DESC
+           LIMIT 20`,
+          [userId]
+        ),
+        queryOne<{
+          project_count: string
+          conv_count: string
+          deploy_count: string
+          llm_cost: string
+        }>(
+          `SELECT
+            (SELECT COUNT(*) FROM projects WHERE user_id = $1) AS project_count,
+            (SELECT COUNT(*) FROM conversations c JOIN projects p ON c.project_id = p.id WHERE p.user_id = $1) AS conv_count,
+            (SELECT COUNT(*) FROM deployments d JOIN projects p ON d.project_id = p.id WHERE p.user_id = $1 AND d.status = 'success') AS deploy_count,
+            (SELECT COALESCE(SUM(cost_usd), 0) FROM llm_usage WHERE user_id = $1) AS llm_cost`,
+          [userId]
+        ),
+      ])
 
-    // 獲取最近對話
-    const conversationsResult = await query<{
-      id: string
-      project_name: string
-      message_count: string
-      updated_at: string
-    }>(
-      `SELECT c.id, p.name as project_name, jsonb_array_length(c.messages) as message_count, c.updated_at
-       FROM conversations c
-       JOIN projects p ON c.project_id = p.id
-       WHERE p.user_id = $1
-       ORDER BY c.updated_at DESC
-       LIMIT 20`,
-      [userId]
-    )
-
-    // 獲取統計數據（合併為單一查詢減少 round trip）
-    const statsResult = await queryOne<{
-      project_count: string
-      conv_count: string
-      deploy_count: string
-      llm_cost: string
-    }>(
-      `SELECT
-        (SELECT COUNT(*) FROM projects WHERE user_id = $1) AS project_count,
-        (SELECT COUNT(*) FROM conversations c JOIN projects p ON c.project_id = p.id WHERE p.user_id = $1) AS conv_count,
-        (SELECT COUNT(*) FROM deployments d JOIN projects p ON d.project_id = p.id WHERE p.user_id = $1 AND d.status = 'success') AS deploy_count,
-        (SELECT COALESCE(SUM(cost_usd), 0) FROM llm_usage WHERE user_id = $1) AS llm_cost`,
-      [userId]
-    )
-
-    res.json({
-      user: {
-        id: user.id,
-        email: user.email,
-        name: user.name,
-        plan: user.plan,
-        subscriptionStatus: user.subscription_status,
-        isAdmin: user.is_admin,
-        creditsUsed: user.credits_used_this_period,
-        createdAt: user.created_at
-      },
-      projects: projectsResult.rows.map(p => ({
-        id: p.id,
-        name: p.name,
-        status: p.status,
-        createdAt: p.created_at
-      })),
-      recentConversations: conversationsResult.rows.map(c => ({
-        id: c.id,
-        projectName: c.project_name,
-        messageCount: parseInt(c.message_count, 10),
-        updatedAt: c.updated_at
-      })),
-      stats: {
-        totalProjects: parseInt(statsResult?.project_count || '0', 10),
-        totalConversations: parseInt(statsResult?.conv_count || '0', 10),
-        totalDeployments: parseInt(statsResult?.deploy_count || '0', 10),
-        totalLLMCost: parseFloat(statsResult?.llm_cost || '0')
+      return {
+        user: {
+          id: user.id,
+          email: user.email,
+          name: user.name,
+          plan: user.plan,
+          subscriptionStatus: user.subscription_status,
+          isAdmin: user.is_admin,
+          creditsUsed: user.credits_used_this_period,
+          createdAt: user.created_at
+        },
+        projects: projectsResult.rows.map(p => ({
+          id: p.id,
+          name: p.name,
+          status: p.status,
+          createdAt: p.created_at
+        })),
+        recentConversations: conversationsResult.rows.map(c => ({
+          id: c.id,
+          projectName: c.project_name,
+          messageCount: parseInt(c.message_count, 10),
+          updatedAt: c.updated_at
+        })),
+        stats: {
+          totalProjects: parseInt(statsResult?.project_count || '0', 10),
+          totalConversations: parseInt(statsResult?.conv_count || '0', 10),
+          totalDeployments: parseInt(statsResult?.deploy_count || '0', 10),
+          totalLLMCost: parseFloat(statsResult?.llm_cost || '0')
+        }
       }
     })
+
+    res.json(data)
   } catch (error) {
     logger.error({ err: error }, '獲取用戶詳情失敗')
     res.status(500).json({ error: '獲取用戶詳情失敗' })
@@ -607,53 +627,59 @@ router.get('/admin/projects', requireAdmin, async (req, res) => {
 
     const whereClause = conditions.length > 0 ? 'WHERE ' + conditions.join(' AND ') : ''
 
-    // 查詢總數
-    const countResult = await queryOne<{ count: string }>(
-      `SELECT COUNT(*) as count FROM projects p ${whereClause}`,
-      params
-    )
-    const total = parseInt(countResult?.count || '0', 10)
+    const cacheKey = `cache:admin:projects:${pageNum}:${limit}:${sortField}:${order}:${search || ''}:${status || ''}:${userId || ''}`
 
-    // 查詢專案列表（包含用戶 email 和對話數量）
-    const projectsResult = await query<{
-      id: string
-      name: string
-      status: string
-      user_id: string
-      user_email: string
-      vercel_url: string | null
-      created_at: string
-      updated_at: string
-      conversation_count: string
-    }>(
-      `SELECT
-        p.id, p.name, p.status, p.user_id, u.email as user_email,
-        p.vercel_url, p.created_at, p.updated_at,
-        COUNT(c.id) as conversation_count
-       FROM projects p
-       LEFT JOIN users u ON p.user_id = u.id
-       LEFT JOIN conversations c ON c.project_id = p.id
-       ${whereClause}
-       GROUP BY p.id, u.email
-       ORDER BY p.${sortField} ${order}
-       LIMIT $${paramIndex} OFFSET $${paramIndex + 1}`,
-      // Note: sortField comes from allowedSortFields whitelist, order from ternary - no SQL injection
-      [...params, limit, offset]
-    )
+    const data = await cached(cacheKey, 60, async () => {
+      // 並行查詢總數 + 專案列表
+      const [countResult, projectsResult] = await Promise.all([
+        queryOne<{ count: string }>(
+          `SELECT COUNT(*) as count FROM projects p ${whereClause}`,
+          params
+        ),
+        query<{
+          id: string
+          name: string
+          status: string
+          user_id: string
+          user_email: string
+          vercel_url: string | null
+          created_at: string
+          updated_at: string
+          conversation_count: string
+        }>(
+          `SELECT
+            p.id, p.name, p.status, p.user_id, u.email as user_email,
+            p.vercel_url, p.created_at, p.updated_at,
+            COUNT(c.id) as conversation_count
+           FROM projects p
+           LEFT JOIN users u ON p.user_id = u.id
+           LEFT JOIN conversations c ON c.project_id = p.id
+           ${whereClause}
+           GROUP BY p.id, u.email
+           ORDER BY p.${sortField} ${order}
+           LIMIT $${paramIndex} OFFSET $${paramIndex + 1}`,
+          // Note: sortField comes from allowedSortFields whitelist, order from ternary - no SQL injection
+          [...params, limit, offset]
+        ),
+      ])
 
-    const items = projectsResult.rows.map(p => ({
-      id: p.id,
-      name: p.name,
-      status: p.status,
-      userId: p.user_id,
-      userEmail: p.user_email || '',
-      conversationCount: parseInt(p.conversation_count, 10),
-      vercelUrl: p.vercel_url,
-      createdAt: p.created_at,
-      updatedAt: p.updated_at
-    }))
+      const total = parseInt(countResult?.count || '0', 10)
+      const items = projectsResult.rows.map(p => ({
+        id: p.id,
+        name: p.name,
+        status: p.status,
+        userId: p.user_id,
+        userEmail: p.user_email || '',
+        conversationCount: parseInt(p.conversation_count, 10),
+        vercelUrl: p.vercel_url,
+        createdAt: p.created_at,
+        updatedAt: p.updated_at
+      }))
 
-    res.json({ items, total, page: pageNum, pageSize: limit, totalPages: Math.ceil(total / limit) })
+      return { items, total, page: pageNum, pageSize: limit, totalPages: Math.ceil(total / limit) }
+    })
+
+    res.json(data)
   } catch (error) {
     logger.error({ err: error }, '獲取專案列表失敗')
     res.status(500).json({ error: '獲取專案列表失敗' })
@@ -702,52 +728,58 @@ router.get('/admin/conversations', requireAdmin, async (req, res) => {
 
     const whereClause = conditions.length > 0 ? 'WHERE ' + conditions.join(' AND ') : ''
 
-    // 查詢總數
-    const countResult = await queryOne<{ count: string }>(
-      `SELECT COUNT(*) as count FROM conversations c ${whereClause}`,
-      params
-    )
-    const total = parseInt(countResult?.count || '0', 10)
+    const cacheKey = `cache:admin:conversations:${pageNum}:${limit}:${sortField}:${order}:${projectId || ''}`
 
-    // 查詢對話列表（包含專案和用戶資訊）
-    const conversationsResult = await query<{
-      id: string
-      project_id: string
-      project_name: string
-      user_id: string
-      user_email: string
-      message_count: string
-      spec_complete: boolean
-      created_at: string
-      updated_at: string
-    }>(
-      `SELECT
-        c.id, c.project_id, p.name as project_name,
-        p.user_id, u.email as user_email,
-        jsonb_array_length(c.messages) as message_count, c.spec_complete, c.created_at, c.updated_at
-       FROM conversations c
-       JOIN projects p ON c.project_id = p.id
-       LEFT JOIN users u ON p.user_id = u.id
-       ${whereClause}
-       ORDER BY c.${sortField} ${order}
-       LIMIT $${paramIndex} OFFSET $${paramIndex + 1}`,
-      // Note: sortField from allowedSortFields whitelist, order from ternary - no SQL injection
-      [...params, limit, offset]
-    )
+    const data = await cached(cacheKey, 60, async () => {
+      // 並行查詢總數 + 對話列表
+      const [countResult, conversationsResult] = await Promise.all([
+        queryOne<{ count: string }>(
+          `SELECT COUNT(*) as count FROM conversations c ${whereClause}`,
+          params
+        ),
+        query<{
+          id: string
+          project_id: string
+          project_name: string
+          user_id: string
+          user_email: string
+          message_count: string
+          spec_complete: boolean
+          created_at: string
+          updated_at: string
+        }>(
+          `SELECT
+            c.id, c.project_id, p.name as project_name,
+            p.user_id, u.email as user_email,
+            jsonb_array_length(c.messages) as message_count, c.spec_complete, c.created_at, c.updated_at
+           FROM conversations c
+           JOIN projects p ON c.project_id = p.id
+           LEFT JOIN users u ON p.user_id = u.id
+           ${whereClause}
+           ORDER BY c.${sortField} ${order}
+           LIMIT $${paramIndex} OFFSET $${paramIndex + 1}`,
+          // Note: sortField from allowedSortFields whitelist, order from ternary - no SQL injection
+          [...params, limit, offset]
+        ),
+      ])
 
-    const items = conversationsResult.rows.map(conv => ({
-      id: conv.id,
-      projectId: conv.project_id,
-      projectName: conv.project_name || '',
-      userId: conv.user_id || '',
-      userEmail: conv.user_email || '',
-      messageCount: parseInt(conv.message_count, 10),
-      specComplete: conv.spec_complete,
-      createdAt: conv.created_at,
-      updatedAt: conv.updated_at
-    }))
+      const total = parseInt(countResult?.count || '0', 10)
+      const items = conversationsResult.rows.map(conv => ({
+        id: conv.id,
+        projectId: conv.project_id,
+        projectName: conv.project_name || '',
+        userId: conv.user_id || '',
+        userEmail: conv.user_email || '',
+        messageCount: parseInt(conv.message_count, 10),
+        specComplete: conv.spec_complete,
+        createdAt: conv.created_at,
+        updatedAt: conv.updated_at
+      }))
 
-    res.json({ items, total, page: pageNum, pageSize: limit, totalPages: Math.ceil(total / limit) })
+      return { items, total, page: pageNum, pageSize: limit, totalPages: Math.ceil(total / limit) }
+    })
+
+    res.json(data)
   } catch (error) {
     logger.error({ err: error }, '獲取對話列表失敗')
     res.status(500).json({ error: '獲取對話列表失敗' })
@@ -772,6 +804,9 @@ router.post('/admin/users/:userId/admin', requireAdmin, async (req, res) => {
       'UPDATE users SET is_admin = $1 WHERE id = $2',
       [isAdmin, userId]
     )
+
+    // 清除該用戶的快取
+    await invalidateCache(`cache:admin:user:${userId}`)
 
     res.json({ success: true })
   } catch (error) {

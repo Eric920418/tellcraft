@@ -4,7 +4,9 @@ import { useEffect, useRef, useState, useCallback } from 'react'
 import { clearAdminLogs, getAdminLogs, type ParsedLogLine } from '@/app/lib/vps-api'
 
 const MAX_LINES = 2000
-const POLL_INTERVAL = 3000
+const MIN_POLL_INTERVAL = 3000   // 有新數據時 3s
+const MAX_POLL_INTERVAL = 30000  // 閒置時最慢 30s
+const BACKOFF_FACTOR = 1.5
 
 interface UseAdminLogsOptions {
   enabled: boolean
@@ -63,13 +65,22 @@ export function useAdminLogs(options: UseAdminLogsOptions): UseAdminLogsReturn {
 
     loadInitial()
 
-    // 輪詢新日誌
-    const interval = setInterval(async () => {
-      if (!active || isPausedRef.current || !initialLoadDone.current) return
+    // 自適應退避輪詢：有新數據 → 3s，無新數據 → ×1.5 退避到 30s
+    let pollInterval = MIN_POLL_INTERVAL
+    let timerId: ReturnType<typeof setTimeout>
+
+    async function poll() {
+      if (!active) return
+
+      if (isPausedRef.current || !initialLoadDone.current) {
+        timerId = setTimeout(poll, pollInterval)
+        return
+      }
 
       const token = localStorage.getItem('auth_token')
       if (!token) {
         setIsConnected(false)
+        timerId = setTimeout(poll, pollInterval)
         return
       }
 
@@ -88,26 +99,34 @@ export function useAdminLogs(options: UseAdminLogsOptions): UseAdminLogsReturn {
         const newLines = result.data.lines
 
         if (newLines.length > 0) {
-          // 更新最新時間戳
+          // 有新數據 → 重置為快速輪詢
+          pollInterval = MIN_POLL_INTERVAL
           lastTimestampRef.current = newLines[newLines.length - 1].timestamp
 
           setLines(prev => {
-            // 用 raw 去重（同一秒內可能有多行相同時間戳）
             const existingRaws = new Set(prev.slice(-200).map(l => l.raw))
             const deduped = newLines.filter(l => !existingRaws.has(l.raw))
             if (deduped.length === 0) return prev
             const merged = [...prev, ...deduped]
             return merged.length > MAX_LINES ? merged.slice(-MAX_LINES) : merged
           })
+        } else {
+          // 無新數據 → 退避
+          pollInterval = Math.min(pollInterval * BACKOFF_FACTOR, MAX_POLL_INTERVAL)
         }
       } else {
         setIsConnected(false)
+        pollInterval = Math.min(pollInterval * BACKOFF_FACTOR, MAX_POLL_INTERVAL)
       }
-    }, POLL_INTERVAL)
+
+      timerId = setTimeout(poll, pollInterval)
+    }
+
+    timerId = setTimeout(poll, MIN_POLL_INTERVAL)
 
     return () => {
       active = false
-      clearInterval(interval)
+      clearTimeout(timerId)
     }
   }, [enabled, source])
 
