@@ -78,6 +78,7 @@ export interface CoderOutput {
   rewrittenFrontend: GeneratedComponent[]
   unchangedFrontend: GeneratedComponent[]
   summary: string
+  mockDataWarnings?: string[]
 }
 
 // ============================================================
@@ -1787,6 +1788,163 @@ const MOCK_DATA_PATTERNS = [
   /import\s+.*from\s+['"].*(?:mock|seed|fake|dummy|sample)[^'"]*['"]/i,
 ]
 
+/**
+ * 從 unchanged 組件中識別 mock data 來源檔案（如 lib/todos.ts）。
+ * 規則：lib/ 下、非 lib/db.ts 或 lib/actions/*、export 大型陣列或 INITIAL_/MOCK_ 常數。
+ */
+function identifyMockDataFiles(unchanged: GeneratedComponent[]): string[] {
+  return unchanged
+    .filter(f => {
+      if (!f.path.startsWith('lib/')) return false
+      if (f.path === 'lib/db.ts' || f.path.startsWith('lib/actions/')) return false
+      return /export\s+(?:const|let)\s+\w+\s*(?::\s*\w+(?:\[\])?\s*)?=\s*\[/.test(f.content)
+        || /export\s+(?:const|let)\s+(?:INITIAL_|MOCK_|SAMPLE_|DEFAULT_|FAKE_)/i.test(f.content)
+        || /export\s+(?:type|interface)\s+\w+/.test(f.content) && /export\s+(?:const|let)\s+\w+.*=\s*\[/.test(f.content)
+    })
+    .map(f => f.path)
+}
+
+/**
+ * 掃描已改寫的組件是否仍殘留 mock data（import mock 檔案、硬編碼陣列等）。
+ * 零 LLM，純 regex。
+ */
+function scanForRemainingMockData(
+  components: GeneratedComponent[],
+  mockDataFiles: string[]
+): { path: string; issues: string[] }[] {
+  const results: { path: string; issues: string[] }[] = []
+
+  for (const comp of components) {
+    const issues: string[] = []
+
+    // 1. 檢查是否仍 import 了 mock data 檔案
+    for (const mockFile of mockDataFiles) {
+      const baseName = mockFile.replace(/^.*\//, '').replace(/\.tsx?$/, '')
+      const escaped = baseName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+      if (new RegExp(`import\\s+.*from\\s+['"].*${escaped}['"]`).test(comp.content)) {
+        issues.push(`仍然 import 了 mock data 檔案: ${mockFile}`)
+      }
+    }
+
+    // 2. 用 MOCK_DATA_PATTERNS regex 掃描硬編碼陣列
+    for (const pattern of MOCK_DATA_PATTERNS) {
+      if (pattern.test(comp.content)) {
+        issues.push(`偵測到 mock data 模式`)
+        break
+      }
+    }
+
+    if (issues.length > 0) results.push({ path: comp.path, issues })
+  }
+
+  return results
+}
+
+/**
+ * 對仍殘留 mock data 的組件用 diff 模式重試改寫。
+ * 在 prompt 中附帶殘留問題描述，引導 LLM 精準修正。
+ */
+async function retryRewriteForMockData(
+  component: GeneratedComponent,
+  issues: string[],
+  availableActions: { path: string; exports: string[] }[],
+  actionImplementations?: { path: string; content: string }[],
+  trackingContext?: { userId?: string; conversationId?: string }
+): Promise<GeneratedComponent> {
+  const issueText = issues.map(i => `- ${i}`).join('\n')
+  logger.info({ path: component.path, issues }, '二次改寫：修復殘留 mock data')
+
+  // 構造帶有殘留問題描述的改寫 prompt
+  const systemPrompt = buildRewriteSystemPrompt() + `
+
+## 重要：使用 SEARCH/REPLACE 格式輸出（mock data 修復模式）
+此組件的上一次改寫未完全移除 mock data。以下是偵測到的問題：
+${issueText}
+
+請用以下格式輸出修正：
+
+<<<<<<< SEARCH
+需要被替換的原始代碼（精確匹配，包括空白和縮排）
+=======
+替換後的新代碼
+>>>>>>> REPLACE
+
+重點：
+1. 移除所有 mock data 的 import（如 import {...} from '@/lib/todos'）
+2. 替換為 Server Action 的 import（如 import { manageTodoAction } from '@/app/actions/manage_todo'）
+3. 將 useState 的硬編碼初始值替換為空值 + useEffect fetch
+4. 保留所有 UI/動畫/樣式不變`
+
+  const userPrompt = buildRewriteUserPrompt(component, availableActions, actionImplementations)
+
+  const maxTokens = Math.min(16384, 64000)
+  const result = await callClaude(systemPrompt, userPrompt, { maxTokens }, trackingContext)
+
+  if (!result.success || !result.content) {
+    logger.warn({ path: component.path }, '二次改寫失敗，保留上一版本')
+    return component
+  }
+
+  // 解析 SEARCH/REPLACE blocks
+  const BLOCK_REGEX = /<<<<<<< SEARCH\n([\s\S]*?)=======\n([\s\S]*?)>>>>>>> REPLACE/g
+  const blocks: Array<{ search: string; replace: string }> = []
+  let match: RegExpExecArray | null
+  while ((match = BLOCK_REGEX.exec(result.content)) !== null) {
+    blocks.push({ search: match[1], replace: match[2] })
+  }
+
+  if (blocks.length === 0) {
+    // LLM 沒輸出 SEARCH/REPLACE 格式，嘗試全文提取
+    const code = extractCodeFromResponse(result.content)
+    const openTags = (code.match(/<[A-Z]\w*/g) || []).length
+    const closeTags = (code.match(/<\/[A-Z]\w*>/g) || []).length
+    if (openTags > 0 && Math.abs(openTags - closeTags) > 2) {
+      logger.warn({ path: component.path }, '二次改寫也截斷，保留上一版本')
+      return component
+    }
+    if (code.length > component.content.length * 0.5) {
+      return { path: component.path, content: code, description: component.description }
+    }
+    return component
+  }
+
+  // 逐個 block 應用
+  let modifiedContent = component.content
+  let appliedCount = 0
+  for (const block of blocks) {
+    const trimmedSearch = block.search.trim()
+    if (modifiedContent.includes(trimmedSearch)) {
+      modifiedContent = modifiedContent.replace(trimmedSearch, block.replace.trim())
+      appliedCount++
+    } else {
+      // fuzzy：忽略縮排差異
+      const normalizedContent = modifiedContent.replace(/^[ \t]+/gm, '')
+      const normalizedSearch = trimmedSearch.replace(/^[ \t]+/gm, '')
+      if (normalizedContent.includes(normalizedSearch)) {
+        const lines = modifiedContent.split('\n')
+        const searchLines = trimmedSearch.split('\n')
+        const normalizedSearchLines = searchLines.map(l => l.trim())
+        for (let i = 0; i <= lines.length - searchLines.length; i++) {
+          const match = lines.slice(i, i + searchLines.length).every(
+            (l, j) => l.trim() === normalizedSearchLines[j]
+          )
+          if (match) {
+            const before = lines.slice(0, i).join('\n')
+            const after = lines.slice(i + searchLines.length).join('\n')
+            modifiedContent = before + (before ? '\n' : '') + block.replace.trim() + (after ? '\n' : '') + after
+            appliedCount++
+            break
+          }
+        }
+      }
+    }
+  }
+
+  logger.info({ path: component.path, totalBlocks: blocks.length, applied: appliedCount }, '二次改寫 diff 應用完成')
+
+  return { path: component.path, content: modifiedContent, description: component.description }
+}
+
 /** 從組件中截取摘要供 Haiku 判斷（前 80 行 + 後段關鍵行） */
 function extractComponentSummary(content: string): string {
   const lines = content.split('\n')
@@ -2103,8 +2261,8 @@ export async function rewriteComponentForServerActions(
   const systemPrompt = buildRewriteSystemPrompt()
   const userPrompt = buildRewriteUserPrompt(component, availableActions, actionImplementations)
 
-  const estimatedTokens = Math.ceil(component.content.length / 3) + 2048
-  const maxTokens = Math.max(8192, Math.min(estimatedTokens, 64000))
+  const estimatedTokens = Math.ceil(component.content.length / 2) + 4096
+  const maxTokens = Math.max(16384, Math.min(estimatedTokens, 64000))
   const result = await callClaude(systemPrompt, userPrompt, { maxTokens }, trackingContext)
 
   if (!result.success || !result.content) {
@@ -2114,12 +2272,12 @@ export async function rewriteComponentForServerActions(
 
   const code = extractCodeFromResponse(result.content)
 
-  // 截斷偵測：JSX 開閉標籤不平衡 → 回退原始組件
+  // 截斷偵測：JSX 開閉標籤不平衡 → 用 diff 模式重試（不直接回退原始版本）
   const openTags = (code.match(/<[A-Z]\w*/g) || []).length
   const closeTags = (code.match(/<\/[A-Z]\w*>/g) || []).length
   if (openTags > 0 && Math.abs(openTags - closeTags) > 2) {
-    logger.warn({ path: component.path, openTags, closeTags }, '改寫後 JSX 標籤不平衡（可能截斷），回退原始版本')
-    return component
+    logger.warn({ path: component.path, openTags, closeTags }, '改寫後 JSX 標籤不平衡（可能截斷），改用 diff 模式重試')
+    return rewriteWithDiffMode(component, availableActions, actionImplementations, trackingContext)
   }
 
   return {
@@ -2336,6 +2494,30 @@ export async function executeCoderPipeline(
     )
   }
 
+  // Step 6.5: 掃描改寫結果是否仍殘留 mock data → 二次改寫
+  const mockDataFiles = identifyMockDataFiles(unchanged)
+  if (mockDataFiles.length > 0) {
+    logger.info({ mockDataFiles }, '識別到 mock data 來源檔案')
+  }
+  const mockScanResults = scanForRemainingMockData(rewrittenFrontend, mockDataFiles)
+  if (mockScanResults.length > 0) {
+    await callbacks.onProgress(`修復 ${mockScanResults.length} 個組件殘留 mock data...`, 96)
+    for (const { path, issues } of mockScanResults) {
+      const comp = rewrittenFrontend.find(f => f.path === path)
+      if (!comp) continue
+      const retried = await retryRewriteForMockData(comp, issues, availableActions, actionFiles, trackingContext)
+      const idx = rewrittenFrontend.findIndex(f => f.path === path)
+      if (idx !== -1) rewrittenFrontend[idx] = retried
+    }
+  }
+
+  // 二次掃描：記錄仍殘留的 mock data 組件（用於警告用戶）
+  const finalMockScan = scanForRemainingMockData(rewrittenFrontend, mockDataFiles)
+  const mockDataWarnings = finalMockScan.map(r => r.path)
+  if (mockDataWarnings.length > 0) {
+    logger.warn({ components: mockDataWarnings }, '二次改寫後仍有組件殘留 mock data')
+  }
+
   // Step 7: Named import 驗證與修復（零 LLM）
   await callbacks.onProgress('驗證 import 引用...', 96)
   const allFrontendFiles = [...rewrittenFrontend, ...unchanged]
@@ -2398,7 +2580,7 @@ export async function executeCoderPipeline(
     unchangedFrontend: unchanged.length,
   }, 'Coder Pipeline 完成')
 
-  return { backendFiles, rewrittenFrontend, unchangedFrontend: unchanged, summary }
+  return { backendFiles, rewrittenFrontend, unchangedFrontend: unchanged, summary, mockDataWarnings: mockDataWarnings.length > 0 ? mockDataWarnings : undefined }
 }
 
 // ============================================================

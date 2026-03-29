@@ -417,10 +417,16 @@ export async function executeCoderSkill(input: CoderSkillInput): Promise<void> {
     if (neonConnectionString) {
       try {
         // 先發送預覽代碼（讓用戶在等待測試期間可以預覽）
+        const autoTestMockWarnings = result.mockDataWarnings || []
+        const autoTestMockWarningText = autoTestMockWarnings.length > 0
+          ? (isChinese
+            ? `\n\n⚠️ ${autoTestMockWarnings.length} 個組件仍使用假資料：${autoTestMockWarnings.map(w => `\`${w}\``).join('、')}`
+            : `\n\n⚠️ ${autoTestMockWarnings.length} component(s) still use mock data: ${autoTestMockWarnings.join(', ')}`)
+          : ''
         await sendMessage(conversationId, io, {
           content: isChinese
-            ? `**後端代碼生成完成！**\n\n${result.summary}\n\n正在自動執行 BDD 規格驗證...`
-            : `**Backend code generation complete!**\n\n${result.summary}\n\nRunning BDD spec validation automatically...`,
+            ? `**後端代碼生成完成！**\n\n${result.summary}${autoTestMockWarningText}\n\n正在自動執行 BDD 規格驗證...`
+            : `**Backend code generation complete!**\n\n${result.summary}${autoTestMockWarningText}\n\nRunning BDD spec validation automatically...`,
           stage: 'coder_testing',
           layoutHint: 'split',
           richContent: {
@@ -465,10 +471,16 @@ export async function executeCoderSkill(input: CoderSkillInput): Promise<void> {
     }
 
     // 發送完成訊息（無 Neon DB 或 SpecFormula 自動觸發失敗時的降級路徑）
+    const mockWarnings = result.mockDataWarnings || []
+    const mockWarningText = mockWarnings.length > 0
+      ? (isChinese
+        ? `\n\n⚠️ 以下 ${mockWarnings.length} 個組件仍使用假資料，可能需要手動調整：\n${mockWarnings.map(w => `- \`${w}\``).join('\n')}`
+        : `\n\n⚠️ ${mockWarnings.length} component(s) still use mock data and may need manual adjustment:\n${mockWarnings.map(w => `- \`${w}\``).join('\n')}`)
+      : ''
     await sendMessage(conversationId, io, {
       content: isChinese
-        ? `**後端代碼生成完成！**\n\n${result.summary}\n\n您的網站現在已連接真實的 Neon PostgreSQL 資料庫。\n\n- 輸入「**部署**」部署上線\n- 或描述想調整的地方`
-        : `**Backend code generation complete!**\n\n${result.summary}\n\nYour site is now connected to a real Neon PostgreSQL database.\n\n- Type "**Deploy**" to go live\n- Or describe what you'd like to adjust`,
+        ? `**後端代碼生成完成！**\n\n${result.summary}${mockWarningText}\n\n您的網站現在已連接真實的 Neon PostgreSQL 資料庫。\n\n- 輸入「**部署**」部署上線\n- 或描述想調整的地方`
+        : `**Backend code generation complete!**\n\n${result.summary}${mockWarningText}\n\nYour site is now connected to a real Neon PostgreSQL database.\n\n- Type "**Deploy**" to go live\n- Or describe what you'd like to adjust`,
       stage: 'uiux_complete',
       layoutHint: 'split',
       richContent: {
