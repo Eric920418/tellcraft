@@ -1377,6 +1377,15 @@ function composeActionFunction(
     }
   }
 
+  // 2.5 安全網：如果子操作代碼用了 sql 但沒 import，自動注入
+  const allSubOpCode = subOpCodes.map(s => s.code).join('\n')
+  const usesSql = /\bsql\s*`/.test(allSubOpCode) || /\bsql\.begin/.test(allSubOpCode)
+  const hasSqlImport = namedImports.has('@/lib/db') && namedImports.get('@/lib/db')!.has('sql')
+  if (usesSql && !hasSqlImport) {
+    if (!namedImports.has('@/lib/db')) namedImports.set('@/lib/db', new Set())
+    namedImports.get('@/lib/db')!.add('sql')
+  }
+
   // 3. 提取 helper 函數（如 snakeToCamel），去重
   const helperFunctions = new Map<string, string>()
   for (const { code } of subOpCodes) {
@@ -1470,7 +1479,13 @@ export async function generateActionFunction(
           let result: GeneratedComponent
           if (subOps.length === 1) {
             // 單操作：直接用生成的代碼，不需要 dispatch 組裝
-            const { code } = subOpCodes[0]
+            let { code } = subOpCodes[0]
+            // 安全網：如果代碼用了 sql 但沒 import，自動注入
+            const singleUsesSql = /\bsql\s*`/.test(code) || /\bsql\.begin/.test(code)
+            const singleHasImport = /import\s*\{[^}]*\bsql\b[^}]*\}\s*from\s*['"]@\/lib\/db['"]/.test(code)
+            if (singleUsesSql && !singleHasImport) {
+              code = `import { sql } from '@/lib/db'\n\n${code}`
+            }
             // 確保 export 正確的函數名
             const fnName = toCamelCase(action.name)
             let finalCode = code

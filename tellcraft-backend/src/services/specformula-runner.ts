@@ -183,6 +183,7 @@ export interface ParsedScenario {
 
 export interface ParsedRule {
   name: string
+  background?: ParsedStep[]
   scenarios: ParsedScenario[]
 }
 
@@ -240,7 +241,9 @@ function processGherkinFeature(gherkinFeature: GherkinFeature, feature: ParsedFe
         scenarios: [],
       }
       for (const ruleChild of child.rule.children || []) {
-        if (ruleChild.scenario) {
+        if (ruleChild.background) {
+          rule.background = extractSteps(ruleChild.background.steps || [])
+        } else if (ruleChild.scenario) {
           rule.scenarios.push(extractScenario(ruleChild.scenario))
         }
       }
@@ -1447,7 +1450,8 @@ async function executeScenario(
   scenarioContext: ScenarioContext,
   schemas: DatabaseSchema[],
   pool: Pool,
-  featurePasswordMap?: Map<string, string>
+  featurePasswordMap?: Map<string, string>,
+  ruleBackground?: ParsedStep[]
 ): Promise<ScenarioResult> {
   scenarioContext.reset()
 
@@ -1460,8 +1464,12 @@ async function executeScenario(
   }
 
   // 收集所有要執行的步驟（Background + Scenario）
+  // Rule-level Background 優先，沒有才 fallback 到 Feature-level Background
+  const backgroundSteps = ruleBackground && ruleBackground.length > 0
+    ? ruleBackground
+    : (feature.background || [])
   const allSteps = [
-    ...(feature.background || []),
+    ...backgroundSteps,
     ...scenario.steps,
   ]
 
@@ -1597,10 +1605,10 @@ export async function runAllFeatures(input: {
     }
 
     // 收集所有 scenarios（包含 rule 下的和直接在 feature 下的）
-    const allScenarios: { scenario: ParsedScenario; ruleName: string }[] = []
+    const allScenarios: { scenario: ParsedScenario; ruleName: string; ruleBackground?: ParsedStep[] }[] = []
     for (const rule of feature.rules) {
       for (const scenario of rule.scenarios) {
-        allScenarios.push({ scenario, ruleName: rule.name })
+        allScenarios.push({ scenario, ruleName: rule.name, ruleBackground: rule.background })
       }
     }
     for (const scenario of feature.scenarios) {
@@ -1611,9 +1619,10 @@ export async function runAllFeatures(input: {
     // 找出成功登入場景的真實密碼。這樣非登入 Scenario（如「新增節目」）
     // 的 entity_setup 也能拿到正確的 email→password 映射。
     const featurePasswordMap = new Map<string, string>()
-    for (const { scenario: s } of allScenarios) {
+    for (const { scenario: s, ruleBackground } of allScenarios) {
+      const bgSteps = ruleBackground && ruleBackground.length > 0 ? ruleBackground : (feature.background || [])
       const stepsForScan = [
-        ...(feature.background || []),
+        ...bgSteps,
         ...s.steps,
       ]
       const scenarioPasswords = preExtractTestPasswords(stepsForScan, isaSpec.instructions)
@@ -1627,7 +1636,7 @@ export async function runAllFeatures(input: {
       logger.info({ passwords: Object.fromEntries(featurePasswordMap), feature: name }, 'Feature-level password map')
     }
 
-    for (const { scenario, ruleName } of allScenarios) {
+    for (const { scenario, ruleName, ruleBackground } of allScenarios) {
       // Cleanup between scenarios
       try {
         await cleanupTables(input.pool, schemas)
@@ -1644,7 +1653,8 @@ export async function runAllFeatures(input: {
         scenarioContext,
         schemas,
         input.pool,
-        featurePasswordMap
+        featurePasswordMap,
+        ruleBackground
       )
       allResults.push(result)
     }

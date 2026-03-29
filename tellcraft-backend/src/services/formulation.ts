@@ -700,6 +700,7 @@ Feature: ${featureInfo.name}
   - 錯誤：\`| >User.id | name |\` → \`| email | "John" |\`（data 缺 \`<\` 前綴）
   - 錯誤：\`| id | name |\` → \`| <userId | "John" |\`（header 缺 \`>\` 前綴）
   - Entity 準備（\`準備一個\`）的 DataTable data row **至少要有一個非空欄位值**，不可全空
+  - **\`>contextKey\`/\`<executionKey\` 只用於 Given 準備（\`準備一個\`）和 Then 回應（\`(STATUS)回應\`）**：\`應該存在一個{entity}\` 的 DataTable header 用**純欄位名**（如 \`id\`、\`isCompleted\`），**禁止加 \`>\` 前綴**。正確：\`| id | isCompleted |\` → \`| $todo1Id | true |\`。錯誤：\`| >id | isCompleted |\` → \`| $todo1Id | true |\`（entity 驗證不需要擷取變數）
 - **When 必須有 Actor 前綴**：\`(No Actor)\` 或 \`(UID="$var")\`
 - **Then 成功必須有 HTTP status code**：\`{summary}(201)回應, with table:\`
 - **Then 的 summary 必須與 When 完全一致**：When 用 \`切換待辦事項完成狀態\`，Then 也用 \`切換待辦事項完成狀態(200)回應\`，不可縮寫

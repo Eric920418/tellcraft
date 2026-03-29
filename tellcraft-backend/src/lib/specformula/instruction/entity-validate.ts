@@ -42,21 +42,28 @@ export class EntityValidate {
       const actual = await this.findActual(row, entityName, tableDef, pool);
       this.assertRowMatches(row, actual, entityName);
 
-      // VAR-System 變數擷取
+      // VAR-System 變數擷取（只在 data row 都符合 <executionKey 格式時執行）
       const contextKeyMap = this.resolver.parseContextKeys(headers);
       if (contextKeyMap.size > 0) {
-        const camelCaseActual: Record<string, unknown> = {};
-        for (const col of tableDef.columns) {
-          const colName = col.name;
-          const camelName = NamingConverter.snakeToCamel(colName);
-          const value = this.getActualValue(actual, colName);
-          camelCaseActual[camelName] = value;
-          if (camelName !== colName) {
-            camelCaseActual[colName] = value;
-          }
-        }
         const dataRow = headers.map(h => row[h] ?? '');
-        this.resolver.extractAndStoreVariables(dataRow, contextKeyMap, camelCaseActual);
+        // 檢查是否所有 >contextKey 對應的 data row 都是 <executionKey
+        // 如果 data row 是 $variable（引用）或普通值，跳過擷取（entity_validate 主要目的是驗證，不是存變數）
+        const allHaveExecKey = [...contextKeyMap.keys()].every(
+          idx => idx < dataRow.length && dataRow[idx]?.trim().startsWith('<')
+        );
+        if (allHaveExecKey) {
+          const camelCaseActual: Record<string, unknown> = {};
+          for (const col of tableDef.columns) {
+            const colName = col.name;
+            const camelName = NamingConverter.snakeToCamel(colName);
+            const value = this.getActualValue(actual, colName);
+            camelCaseActual[camelName] = value;
+            if (camelName !== colName) {
+              camelCaseActual[colName] = value;
+            }
+          }
+          this.resolver.extractAndStoreVariables(dataRow, contextKeyMap, camelCaseActual);
+        }
       }
     }
   }
@@ -82,7 +89,8 @@ export class EntityValidate {
       }
       const resolvedPk = this.resolver.resolveVariable(pkRaw);
       // fail-closed：$variable 未解析（返回 null）時不要用字面字串查 DB
-      if (resolvedPk === null && pkRaw.startsWith('$')) {
+      // 注意：只有 $letter 開頭才是 VAR 引用；$digit 開頭是 bcrypt hash（$2b$10$...）
+      if (resolvedPk === null && /^\$[a-zA-Z]/.test(pkRaw.trim())) {
         hasAllPks = false;
         break;
       }
