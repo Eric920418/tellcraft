@@ -159,6 +159,8 @@ export class DataTableResponseValidate {
         } else if (resolvedStr !== actualStr) {
           if (isIdField(cleanHeader) && isUuidLike(resolvedStr) && isUuidLike(actualStr)) {
             // skip — both valid UUIDs
+          } else if (/^\d{4}-\d{2}-\d{2}$/.test(resolvedStr) && actualStr.startsWith(resolvedStr)) {
+            // Date prefix match: "2099-12-31" matches "2099-12-31T00:00:00.000Z"
           } else if (!jsonSemanticallyEqual(resolvedStr, actualStr) &&
               !(typeof actualValue === 'number' && numericEquals(resolvedStr, actualStr))) {
             const httpContext = (actualStr === '' || actualValue === null || actualValue === undefined)

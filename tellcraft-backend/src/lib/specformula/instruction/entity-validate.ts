@@ -82,7 +82,11 @@ export class EntityValidate {
     let hasAllPks = pkColumns.size > 0;
 
     for (const pkCol of pkColumns) {
-      const pkRaw = NamingConverter.getRowValue(row, pkCol);
+      let pkRaw = NamingConverter.getRowValue(row, pkCol);
+      // Fallback：BDD spec 可能用 >id 作為 entity_validate header，嘗試帶 > 前綴查找
+      if (pkRaw === null) {
+        pkRaw = row[`>${pkCol}`] ?? null;
+      }
       if (!pkRaw || !pkRaw.trim() || pkRaw.trim().startsWith('&')) {
         hasAllPks = false;
         break;
