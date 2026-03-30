@@ -54,7 +54,7 @@ interface SubOperation {
   /** _stepSummary 值，如 "建立記帳記錄" */
   summary: string
   /** 推斷的操作類型 */
-  operationType: 'create' | 'update' | 'delete' | 'query_list' | 'query_single' | 'aggregate' | 'cascade' | 'auth' | 'batch' | 'export' | 'unknown'
+  operationType: 'create' | 'update' | 'delete' | 'query_list' | 'query_single' | 'toggle' | 'restore' | 'aggregate' | 'cascade' | 'auth' | 'batch' | 'export' | 'unknown'
   /** 此子操作相關的 Rule + Example 區塊（含 Background） */
   relevantGherkin: string
   /** 此子操作必須回傳的欄位 */
@@ -350,6 +350,47 @@ const [row] = await sql\`
 return { __status: 200, ...row }
 \`\`\`
 重點：先檢查 Schema DDL 是否有 deleted_at 欄位。沒有就用 DELETE FROM，不要腦補 soft delete。`
+
+// --- Handler: 切換操作 (TOGGLE) ---
+const TOGGLE_HANDLER = `
+## 切換操作 Handler
+\`\`\`typescript
+const entityId = input.id || input.xxxId
+if (!entityId) throw new Error('缺少 ID 參數')
+
+// 查找當前狀態
+const [existing] = await sql\`SELECT * FROM table_name WHERE id = \${entityId} AND deleted_at IS NULL\`
+if (!existing) throw new Error('不存在或已被刪除')
+
+// 切換布林欄位（如 is_completed）
+const [row] = await sql\`
+  UPDATE table_name SET is_xxx = NOT is_xxx, updated_at = NOW()
+  WHERE id = \${entityId}
+  RETURNING *
+\`
+return { __status: 200, ...row }
+\`\`\`
+重點：先 SELECT 確認存在且未刪除，再 UPDATE SET field = NOT field。`
+
+// --- Handler: 復原操作 (RESTORE soft-deleted) ---
+const RESTORE_HANDLER = `
+## 復原操作 Handler
+\`\`\`typescript
+const entityId = input.id || input.xxxId
+if (!entityId) throw new Error('缺少 ID 參數')
+
+// 確認已被軟刪除
+const [existing] = await sql\`SELECT * FROM table_name WHERE id = \${entityId} AND deleted_at IS NOT NULL\`
+if (!existing) throw new Error('該記錄未被刪除或不存在')
+
+const [row] = await sql\`
+  UPDATE table_name SET deleted_at = NULL, updated_at = NOW()
+  WHERE id = \${entityId}
+  RETURNING *
+\`
+return { __status: 200, ...row }
+\`\`\`
+重點：復原 = 將 deleted_at 設為 NULL。必須先確認 deleted_at IS NOT NULL。`
 
 // --- Handler: 批次操作 (排序/拖曳) ---
 const BATCH_HANDLER = `
@@ -703,6 +744,8 @@ function inferOperationType(summary: string, ruleText: string): SubOperation['op
   if (/未分類|相關.*應|級聯|cascade/i.test(s)) return 'cascade'
   if (/auth|login|register|signup|signin|logout|password/i.test(s)) return 'auth'
   if (/reorder|batch|拖曳|批次/i.test(s)) return 'batch'
+  if (RESTORE_KEYWORDS.some(k => summary.includes(k))) return 'restore'
+  if (TOGGLE_KEYWORDS.some(k => summary.includes(k))) return 'toggle'
   if (DELETE_KEYWORDS.some(k => summary.includes(k))) return 'delete'
   if (UPDATE_KEYWORDS.some(k => summary.includes(k))) return 'update'
   if (CREATE_KEYWORDS.some(k => summary.includes(k))) return 'create'
@@ -757,6 +800,8 @@ function buildSubOpSystemPrompt(subOp: SubOperation): string {
     case 'query_list':  handlers.push(QUERY_LIST_HANDLER); break
     case 'query_single': handlers.push(QUERY_SINGLE_HANDLER); break
     case 'aggregate':   handlers.push(AGGREGATE_HANDLER); break
+    case 'toggle':      handlers.push(TOGGLE_HANDLER); break
+    case 'restore':     handlers.push(RESTORE_HANDLER); break
     case 'cascade':     handlers.push(CASCADE_HANDLER); break
     case 'auth':        handlers.push(AUTH_HANDLER); break
     case 'batch':       handlers.push(BATCH_HANDLER); break
@@ -878,6 +923,30 @@ const DeleteSlotSchema = z.object({
   scopeParam: z.string().optional(),
 })
 
+const QuerySingleSlotSchema = z.object({
+  table: z.string(),
+  entityIdParam: z.string().default('id'),
+  scopeColumn: z.string().optional(),
+  scopeParam: z.string().optional(),
+  softDeleteColumn: z.string().default('deleted_at'),
+})
+
+const ToggleSlotSchema = z.object({
+  table: z.string(),
+  entityIdParam: z.string().default('id'),
+  toggleColumn: z.string(),
+  scopeColumn: z.string().optional(),
+  scopeParam: z.string().optional(),
+  softDeleteColumn: z.string().default('deleted_at'),
+})
+
+const RestoreSlotSchema = z.object({
+  table: z.string(),
+  entityIdParam: z.string().default('id'),
+  scopeColumn: z.string().optional(),
+  scopeParam: z.string().optional(),
+})
+
 const QueryListSlotSchema = z.object({
   table: z.string(),
   scopeColumn: z.string().optional(),
@@ -890,6 +959,12 @@ const QueryListSlotSchema = z.object({
   orderBy: z.array(z.object({
     column: z.string(),
     direction: z.enum(['ASC', 'DESC']),
+  })).optional(),
+  filters: z.array(z.object({
+    column: z.string(),
+    operator: z.enum(['=', '!=', '<', '>', '<=', '>=', 'IS NULL', 'IS NOT NULL']),
+    param: z.string().optional(),
+    literal: z.string().optional(),
   })).optional(),
 })
 
@@ -1095,6 +1170,21 @@ function renderQueryListTemplate(slots: z.infer<typeof QueryListSlotSchema>, fnN
   const orderPart = slots.orderBy ? `\n    ORDER BY ${slots.orderBy.map(o => `${o.column} ${o.direction}`).join(', ')}` : ''
   const scope = buildScopeClause(slots.scopeColumn, slots.scopeParam)
 
+  // 動態篩選條件
+  const filterParts: string[] = []
+  if (slots.filters && slots.filters.length > 0) {
+    for (const f of slots.filters) {
+      if (f.operator === 'IS NULL' || f.operator === 'IS NOT NULL') {
+        filterParts.push(`AND ${f.column} ${f.operator}`)
+      } else if (f.literal) {
+        filterParts.push(`AND ${f.column} ${f.operator} ${f.literal}`)
+      } else if (f.param) {
+        filterParts.push(`AND ${f.column} ${f.operator} \${input.${f.param}}`)
+      }
+    }
+  }
+  const filterClause = filterParts.length > 0 ? '\n      ' + filterParts.join('\n      ') : ''
+
   return `import { sql } from '@/lib/db'
 ${tag}
 
@@ -1105,13 +1195,93 @@ ${scope.varDecl}
     SELECT ${selectPart}
     FROM ${slots.table}
     ${scope.whereClause}
-      AND ${slots.softDeleteColumn} IS NULL${orderPart}
+      AND ${slots.softDeleteColumn} IS NULL${filterClause}${orderPart}
   \`
 
 ${INLINE_SNAKE_TO_CAMEL}
   const result = rows.map(_c)
   ;(result as any).__status = 200
   return result
+}`
+}
+
+function renderQuerySingleTemplate(slots: z.infer<typeof QuerySingleSlotSchema>, fnName: string): string {
+  const tag = `// @generated-by-template: query_single`
+
+  return `import { sql } from '@/lib/db'
+${tag}
+
+export async function ${fnName}(input: any) {
+  const entityId = input.${slots.entityIdParam}
+  if (!entityId) throw new Error('缺少 ID 參數')
+
+  const [row] = await sql\`
+    SELECT * FROM ${slots.table}
+    WHERE id = \${entityId}
+      AND ${slots.softDeleteColumn} IS NULL
+  \`
+  if (!row) throw new Error('找不到資料')
+
+${INLINE_SNAKE_TO_CAMEL}
+  return { __status: 200, ..._c(row) }
+}`
+}
+
+function renderToggleTemplate(slots: z.infer<typeof ToggleSlotSchema>, fnName: string): string {
+  const tag = `// @generated-by-template: toggle`
+
+  return `import { sql } from '@/lib/db'
+${tag}
+
+export async function ${fnName}(input: any) {
+  const entityId = input.${slots.entityIdParam}
+  if (!entityId) throw new Error('缺少 ID 參數')
+
+  const [existing] = await sql\`
+    SELECT * FROM ${slots.table}
+    WHERE id = \${entityId}
+      AND ${slots.softDeleteColumn} IS NULL
+  \`
+  if (!existing) throw new Error('不存在或已被刪除')
+
+  const [row] = await sql\`
+    UPDATE ${slots.table}
+    SET ${slots.toggleColumn} = NOT ${slots.toggleColumn}, updated_at = NOW()
+    WHERE id = \${entityId}
+    RETURNING *
+  \`
+
+${INLINE_SNAKE_TO_CAMEL}
+  return { __status: 200, ..._c(row) }
+}`
+}
+
+function renderRestoreTemplate(slots: z.infer<typeof RestoreSlotSchema>, fnName: string): string {
+  const tag = `// @generated-by-template: restore`
+
+  return `import { sql } from '@/lib/db'
+${tag}
+
+export async function ${fnName}(input: any) {
+  const entityId = input.${slots.entityIdParam}
+  if (!entityId) throw new Error('缺少 ID 參數')
+
+  const [existing] = await sql\`
+    SELECT * FROM ${slots.table}
+    WHERE id = \${entityId}
+      AND deleted_at IS NOT NULL
+  \`
+  if (!existing) throw new Error('該記錄未被刪除或不存在')
+
+  const [row] = await sql\`
+    UPDATE ${slots.table}
+    SET deleted_at = NULL, updated_at = NOW()
+    WHERE id = \${entityId}
+    RETURNING *
+  \`
+
+${INLINE_SNAKE_TO_CAMEL}
+  return { __status: 200, ..._c(row) }
 }`
 }
 
@@ -1202,6 +1372,18 @@ async function tryTemplateGeneration(
     case 'query_list': {
       const slots = await extractSlots(QueryListSlotSchema, subOp, ctx.schemaSql, ctx.entityMapping, trackingContext)
       return slots ? renderQueryListTemplate(slots, fnName) : null
+    }
+    case 'query_single': {
+      const slots = await extractSlots(QuerySingleSlotSchema, subOp, ctx.schemaSql, ctx.entityMapping, trackingContext)
+      return slots ? renderQuerySingleTemplate(slots, fnName) : null
+    }
+    case 'toggle': {
+      const slots = await extractSlots(ToggleSlotSchema, subOp, ctx.schemaSql, ctx.entityMapping, trackingContext)
+      return slots ? renderToggleTemplate(slots, fnName) : null
+    }
+    case 'restore': {
+      const slots = await extractSlots(RestoreSlotSchema, subOp, ctx.schemaSql, ctx.entityMapping, trackingContext)
+      return slots ? renderRestoreTemplate(slots, fnName) : null
     }
     default:
       return null
@@ -2628,6 +2810,21 @@ export function validateActionResponses(actionFiles: GeneratedComponent[]): { fi
       }
     }
 
+    // Rule 1.5: 通用 wrapper 偵測 — return { anyKey: rows } 其中 rows 是 sql 查詢或 .map 結果
+    const genericWrapperPattern = /return\s*\{\s*(\w+)\s*:\s*(\w+)\s*\}/g
+    let genericMatch: RegExpExecArray | null
+    while ((genericMatch = genericWrapperPattern.exec(code)) !== null) {
+      const key = genericMatch[1]
+      const rowsVar = genericMatch[2]
+      if (['success', 'error', 'message', 'status', '__status', 'statusCode'].includes(key)) continue
+      const varDecl = new RegExp(`(?:const|let)\\s+${rowsVar}\\s*=\\s*(?:await\\s+sql|.*\\.map)`)
+      if (varDecl.test(code)) {
+        code = code.replace(genericMatch[0], `;(${rowsVar} as any).__status = 200; return ${rowsVar}`)
+        fixes.push(`${file.path}: 通用 wrapper { ${key}: ${rowsVar} } → bare Array`)
+        modified = true
+      }
+    }
+
     // Rule 2: UPDATE 語句必須有 RETURNING *
     // 找 await sql`UPDATE ... ` 後面沒有 RETURNING
     const updateNoReturning = /const\s+\[?\s*(\w+)\s*\]?\s*=\s*await\s+sql\s*`\s*UPDATE\s+[^`]*?WHERE\s+[^`]*?(?<!RETURNING\s+\*)\s*`/gi
@@ -2820,8 +3017,10 @@ const STANDARD_SUMMARIES = {
 const LIST_KEYWORDS = ['列表', '全部']
 const QUERY_KEYWORDS = ['查詢', '詳情', '取得']
 const CREATE_KEYWORDS = ['建立', '新增', '註冊', '加入', '添加']
-const UPDATE_KEYWORDS = ['更新', '修改', '編輯', '重命名', '切換', '變更', '設定']
-const DELETE_KEYWORDS = ['刪除', '移除', '取消']
+const UPDATE_KEYWORDS = ['更新', '修改', '編輯', '重命名', '變更', '設定']
+const DELETE_KEYWORDS = ['刪除', '移除']
+const TOGGLE_KEYWORDS = ['切換', 'toggle']
+const RESTORE_KEYWORDS = ['復原', '恢復', 'restore', '取消刪除', '取消軟刪除']
 
 /** 從呼叫上下文提取完整的參數物件內容（brace matching） */
 function extractCallParams(content: string, callStart: number): { params: Set<string>; fullCallEnd: number } {

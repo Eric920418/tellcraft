@@ -367,9 +367,9 @@ function matchStepToInstruction(
   stepText: string,
   instructions: IsaInstruction[]
 ): MatchResult | null {
+  // 第一輪：原始 stepText 匹配
   for (const instruction of instructions) {
     try {
-      // Convert Python (?P<name>...) to JS (?<name>...)
       const jsPattern = instruction.format.replace(/\(\?P<(\w+)>/g, '(?<$1>')
       const regex = new RegExp(jsPattern)
       const match = regex.exec(stepText)
@@ -383,6 +383,23 @@ function matchStepToInstruction(
       // Skip invalid regex
     }
   }
+
+  // 第二輪：常見 BDD spec 格式容錯
+  // 「回應, with JSON:」→「回應為, with JSON:」（LLM 常混淆）
+  const normalized = stepText.replace(/回應,\s*with JSON:/g, '回應為, with JSON:')
+  if (normalized !== stepText) {
+    for (const instruction of instructions) {
+      try {
+        const jsPattern = instruction.format.replace(/\(\?P<(\w+)>/g, '(?<$1>')
+        const regex = new RegExp(jsPattern)
+        const match = regex.exec(normalized)
+        if (match) {
+          return { instruction, captures: match.groups || {} }
+        }
+      } catch { /* skip */ }
+    }
+  }
+
   return null
 }
 

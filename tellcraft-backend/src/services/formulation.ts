@@ -22,6 +22,45 @@ export interface GeneratedFeature {
   content: string
 }
 
+/**
+ * BDD Feature 後置驗證：零 LLM，自動修正 LLM 常犯的格式錯誤。
+ * 在 Feature 生成後、保存到 DB 前執行。
+ */
+export function sanitizeFeatureContent(content: string): { content: string; fixes: string[] } {
+  const fixes: string[] = []
+  let result = content
+
+  // 1. 回應, with JSON: → 回應, with table:（DataTable 格式是標準，JSON 格式容易匹配失敗）
+  result = result.replace(/回應,\s*with JSON:/g, () => {
+    fixes.push('回應, with JSON: → 回應, with table:')
+    return '回應, with table:'
+  })
+
+  // 2. 回應為, with JSON: → 回應, with table:（統一用 DataTable 格式）
+  result = result.replace(/回應為,\s*with JSON:/g, () => {
+    fixes.push('回應為, with JSON: → 回應, with table:')
+    return '回應, with table:'
+  })
+
+  // 3. entity_validate header 中的 > 前綴移除（>id → id）
+  // 匹配: 應該存在/不存在一個..., with table:\n    | >field | → | field |
+  const entityValidateHeaderRegex = /((?:應該(?:不)?存在一個)[^\n]+with\s+table:\s*\n\s*\|[^\n]*?)(\|)\s*>(\w[\w.]*)/g
+  let entityValidateMatch: RegExpExecArray | null
+  const entityValidateReplacements: Array<{ original: string; replacement: string }> = []
+  while ((entityValidateMatch = entityValidateHeaderRegex.exec(result)) !== null) {
+    entityValidateReplacements.push({
+      original: entityValidateMatch[0],
+      replacement: `${entityValidateMatch[1]}${entityValidateMatch[2]} ${entityValidateMatch[3]}`,
+    })
+    fixes.push(`entity_validate header >${entityValidateMatch[3]} → ${entityValidateMatch[3]}`)
+  }
+  for (const { original, replacement } of entityValidateReplacements) {
+    result = result.replace(original, replacement)
+  }
+
+  return { content: result, fixes }
+}
+
 export interface FormulationResult {
   success: boolean
   schemaSql?: string
@@ -1103,10 +1142,19 @@ ${decisions}` : ''}
         return { success: false, error: '無法解析 LLM 回應' }
       }
 
-      logger.info({ batchLabel, fixedCount: parsed.features?.length || 0 }, '修復完成')
+      const fixedFeatures = (parsed.features || []) as GeneratedFeature[]
+      // 後置驗證
+      for (const feature of fixedFeatures) {
+        const { content: sanitized, fixes: featureFixes } = sanitizeFeatureContent(feature.content)
+        if (featureFixes.length > 0) {
+          feature.content = sanitized
+          logger.info({ feature: feature.name, fixes: featureFixes }, '修復後 Feature 後置修正')
+        }
+      }
+      logger.info({ batchLabel, fixedCount: fixedFeatures.length }, '修復完成')
       return {
         success: true,
-        fixedFeatures: parsed.features || [],
+        fixedFeatures,
       }
     } catch (err) {
       return { success: false, error: `解析回應時發生錯誤: ${err}` }
@@ -1272,6 +1320,20 @@ ${decisions || '（無額外決策）'}`
 
     const features = (parsed.features || []) as GeneratedFeature[]
     const uncertainItems = (parsed.uncertainItems || []) as string[]
+
+    // 後置驗證：自動修正 LLM 常犯的格式錯誤
+    let totalFixes = 0
+    for (const feature of features) {
+      const { content: sanitized, fixes: featureFixes } = sanitizeFeatureContent(feature.content)
+      if (featureFixes.length > 0) {
+        feature.content = sanitized
+        totalFixes += featureFixes.length
+        logger.info({ feature: feature.name, fixes: featureFixes }, 'Feature 後置修正')
+      }
+    }
+    if (totalFixes > 0) {
+      logger.info({ totalFixes, featureCount: features.length }, 'Feature 後置驗證完成')
+    }
 
     logger.info({ featureCount: features.length, uncertainCount: uncertainItems.length }, 'Draft Batch 完成')
 

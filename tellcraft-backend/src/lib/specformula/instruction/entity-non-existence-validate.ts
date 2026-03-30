@@ -130,7 +130,14 @@ export class EntityNonExistenceValidate {
     }
 
     const result = await pool.query(sql, params);
-    return result.rows.length > 0;
+    if (result.rows.length === 0) return false;
+
+    // Soft-delete 感知：如果表有 deleted_at 欄位，已軟刪除的記錄（deleted_at IS NOT NULL）視為「不存在」
+    const hasDeletedAt = tableDef.columns.some(c => c.name === 'deleted_at');
+    if (hasDeletedAt) {
+      return result.rows.some(r => r.deleted_at === null || r.deleted_at === undefined);
+    }
+    return true;
   }
 
   private async existsByProbe(
@@ -157,6 +164,13 @@ export class EntityNonExistenceValidate {
     }
 
     const result = await pool.query(sql, params);
-    return result.rows.length > 0;
+    if (result.rows.length === 0) return false;
+
+    // Soft-delete 感知
+    const hasDeletedAt = tableDef.columns.some(c => c.name === 'deleted_at');
+    if (hasDeletedAt) {
+      return result.rows.some(r => r.deleted_at === null || r.deleted_at === undefined);
+    }
+    return true;
   }
 }
