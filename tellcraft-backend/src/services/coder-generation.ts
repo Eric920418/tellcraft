@@ -297,7 +297,9 @@ return result
 重點：
 - 回傳 Array（不要包成 { items: rows }），在 Array 上設 __status = 200
 - 必須用 _c() 做 snake_to_camel 轉換（PostgreSQL 回傳 snake_case，BDD 期望 camelCase）
-- 只有 Schema DDL 明確定義了 deleted_at 欄位時才加 WHERE deleted_at IS NULL。Schema 沒有 deleted_at 就不加！`
+- 只有 Schema DDL 明確定義了 deleted_at 欄位時才加 WHERE deleted_at IS NULL。Schema 沒有 deleted_at 就不加！
+- **篩選/排序參數都是選填的**：不提供 filter/status 時查全部（不 throw），不提供 orderBy 時用預設排序
+- **禁止** \`if (!input.filter) throw\`，改用 \`const filter = input.filter || 'all'\` 提供預設值`
 
 // --- Handler: 單筆查詢 (SELECT 一筆) ---
 const QUERY_SINGLE_HANDLER = `
@@ -2331,7 +2333,7 @@ function buildRewriteSystemPrompt(): string {
 例如：如果 Action 程式碼中寫 if (op.includes('註冊'))，那 _stepSummary 必須包含「註冊」（如 '使用者註冊'），不能用「建立帳號」等同義詞。
 
 標準調用方式：
-- **列表查詢**（頁面初始載入）：actionFn({ _stepSummary: '查詢列表' }) — **不傳 ID，不傳 userId**
+- **列表查詢**（頁面初始載入）：查看 Action 介面定義中「需要的參數」註解，如果分支需要 filter/status 等篩選參數，前端載入時傳合理預設值。例如 actionFn({ _stepSummary: '查詢列表', filter: 'all' })。**不傳 ID，不傳 userId**
 - **單筆查詢**（詳情頁）：actionFn({ _stepSummary: '查詢詳情', entityId: '...' }) — 傳 ID
 - **建立**：actionFn({ _stepSummary: '建立XXX', ...fields })
 - **更新**：actionFn({ _stepSummary: '更新XXX', id: '...', ...fields })
@@ -2393,6 +2395,22 @@ function extractInterfacesFromActionFile(content: string): string {
     result.push('')
     result.push(`// 合法的 _stepSummary 值（必須包含以下關鍵字之一）：`)
     result.push(`// ${stepSummaries.map(s => `「${s}」`).join('、')}`)
+  }
+
+  // 提取每個 dispatch 分支需要的參數（從 input.xxx 引用中推斷）
+  const branchParamRegex = /(?:if|else if)\s*\(op\.includes\(['"]([^'"]+)['"]\)\)\s*\{/g
+  let branchMatch: RegExpExecArray | null
+  while ((branchMatch = branchParamRegex.exec(content)) !== null) {
+    const branchName = branchMatch[1]
+    const branchStart = branchMatch.index + branchMatch[0].length
+    const branchSlice = content.substring(branchStart, branchStart + 600)
+    const params = [...branchSlice.matchAll(/input\.(\w+)/g)].map(m => m[1])
+    const uniqueParams = [...new Set(params)].filter(p => p !== '_stepSummary' && p !== 'userId')
+    if (uniqueParams.length > 0) {
+      result.push(`// 「${branchName}」需要的參數：${uniqueParams.join(', ')}`)
+    } else {
+      result.push(`// 「${branchName}」不需要額外參數`)
+    }
   }
 
   return result.join('\n')
@@ -2821,6 +2839,19 @@ export function validateActionResponses(actionFiles: GeneratedComponent[]): { fi
       if (varDecl.test(code)) {
         code = code.replace(genericMatch[0], `;(${rowsVar} as any).__status = 200; return ${rowsVar}`)
         fixes.push(`${file.path}: 通用 wrapper { ${key}: ${rowsVar} } → bare Array`)
+        modified = true
+      }
+    }
+
+    // Rule 1.8: 列表查詢分支中的篩選參數不應 throw（前端初始載入可能不傳）
+    // Pattern: 在含「列表」/「全部」的 dispatch 分支中，if (!input.xxx) throw → 移除 throw，改預設值
+    const listThrowPattern = /if\s*\(\s*!input\.(\w+)\s*(?:\|\|[^)]+)?\)\s*\{?\s*throw\s+new\s+Error\s*\([^)]*(?:篩選|filter|排序|order|sort)[^)]*\)\s*\}?/g
+    let listThrowMatch: RegExpExecArray | null
+    while ((listThrowMatch = listThrowPattern.exec(code)) !== null) {
+      const paramName = listThrowMatch[1]
+      if (['filter', 'status', 'orderBy', 'sortBy', 'sort', 'order'].includes(paramName)) {
+        code = code.replace(listThrowMatch[0], '')
+        fixes.push(`${file.path}: 移除列表篩選參數 ${paramName} 的 throw（改為選填）`)
         modified = true
       }
     }
