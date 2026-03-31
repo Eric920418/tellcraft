@@ -320,8 +320,7 @@ export async function executeIteration(input: {
     }
 
     // 2.3 偵測 stub 組件 → 從 DB 還原原版（打破 stub 死循環）
-    const pid = state.projectId || projectId
-    currentCode = await restoreStubComponents(currentCode, pid)
+    currentCode = await restoreStubComponents(currentCode, state.projectId || projectId)
 
     // 2.5 建構 streaming callback（迭代時即時預覽）
     const tailwindConfig = state.uiuxDesignSystem
