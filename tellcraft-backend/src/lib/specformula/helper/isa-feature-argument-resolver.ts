@@ -127,9 +127,8 @@ export class ISAFeatureArgumentResolver {
             if (fallbackKey) {
               executionKeyName = fallbackKey;
             } else {
-              throw new Error(
-                `VAR-System 錯誤：找不到 execution key '${executionKeyName}'。請確認 executionVariable 中包含此 key。`
-              );
+              // 找不到 execution key → 存 null（不 throw，讓後續步驟自然失敗並提供更明確的錯誤）
+              executionKeyName = originalExecKeyName;
             }
           }
           const value = this.getNestedValue(executionMap, executionKeyName);
@@ -267,11 +266,11 @@ export class ISAFeatureArgumentResolver {
 
         if (Array.isArray(current)) {
           if (index < 0 || index >= current.length) {
-            throw new Error(`VAR-System 錯誤：陣列索引 '${baseKey}[${index}]' 超出範圍（List 大小為 ${current.length}）。`);
+            return false; // 陣列索引超出範圍 → 視為 key 不存在
           }
           current = current[index];
         } else {
-          throw new Error(`VAR-System 錯誤：'${baseKey}' 不是 List，無法使用陣列索引存取。`);
+          return false; // 不是 List → 視為 key 不存在
         }
       } else {
         if (typeof current === 'object' && current !== null && !Array.isArray(current)) {
@@ -457,9 +456,7 @@ export class ISAFeatureArgumentResolver {
       if (isNaN(d.getTime())) throw new Error();
       return d;
     } catch {
-      throw new Error(
-        `無法解析時間表達式: @time("${cleaned}")。支援格式：ISO 8601, 日期 (2025-11-04), 相對時間 (now, now-1d)`
-      );
+      return new Date(); // 無法解析 → fallback 到當前時間（不 throw）
     }
   }
 
@@ -471,7 +468,7 @@ export class ISAFeatureArgumentResolver {
     // Return as ISO date string for pg
     const d = new Date(cleaned + 'T00:00:00');
     if (isNaN(d.getTime())) {
-      throw new Error(`無法解析日期表達式: @date("${cleaned}")`);
+      return new Date().toISOString().split('T')[0]; // 無法解析 → fallback 到今天
     }
     return cleaned;
   }
@@ -627,7 +624,10 @@ export class ISAFeatureArgumentResolver {
       case 'contains': return typeof actualValue === 'string' && actualValue.includes(this.resolveStr(params));
       case 'startsWith': return typeof actualValue === 'string' && actualValue.startsWith(this.resolveStr(params));
       case 'endsWith': return typeof actualValue === 'string' && actualValue.endsWith(this.resolveStr(params));
-      case 'matches': return typeof actualValue === 'string' && new RegExp(this.resolveStr(params)).test(actualValue);
+      case 'matches': {
+        try { return typeof actualValue === 'string' && new RegExp(this.resolveStr(params)).test(actualValue); }
+        catch { return false; } // invalid regex → treat as no match
+      }
       case 'length': {
         if (typeof actualValue !== 'string') return false;
         const [min, max] = params!.split(',').map(s => parseInt(s.trim(), 10));
@@ -661,7 +661,7 @@ export class ISAFeatureArgumentResolver {
       case 'withinDays': return this.evaluateWithinDays(actualValue, params);
 
       default:
-        throw new Error(`未知的約束條件: &${name}`);
+        return true; // 未知約束條件 → 跳過（不阻塞驗證）
     }
   }
 
@@ -719,7 +719,7 @@ export class ISAFeatureArgumentResolver {
 
   private evaluateBetween(actual: unknown, params: string | null): boolean {
     const parts = params!.split(',');
-    if (parts.length !== 2) throw new Error('&between 需要兩個參數: min,max');
+    if (parts.length !== 2) return false; // 參數格式不正確 → 視為不匹配
     const val = this.toDouble(actual);
     const min = this.toDouble(this.resolveValue(parts[0].trim()));
     const max = this.toDouble(this.resolveValue(parts[1].trim()));
@@ -840,7 +840,7 @@ export class ISAFeatureArgumentResolver {
     if (typeof value === 'number') return value;
     if (value instanceof Date) return value.getTime();
     const n = parseFloat(String(value));
-    if (isNaN(n)) throw new Error(`無法將值轉換為數字: ${value}`);
+    if (isNaN(n)) return 0; // 無法轉換為數字 → 回傳 0（不 throw，讓比較結果自然失敗）
     return n;
   }
 

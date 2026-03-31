@@ -260,7 +260,7 @@ function setJson(root: Record<string, unknown>, path: string, value: string | nu
 
   for (let i = 0; i < parts.length; i++) {
     const match = SEG.exec(parts[i]);
-    if (!match) throw new Error(`Bad path: ${path}`);
+    if (!match) return; // malformed path segment → 跳過（不 throw）
     const name = match[1];
     const idxStr = match[2];
     const last = i === parts.length - 1;

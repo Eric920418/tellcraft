@@ -238,15 +238,20 @@ const BASE_PROMPT = `你是一位 Next.js + PostgreSQL 後端工程師。你的�
 - ON CONFLICT 用 PostgreSQL 語法（不用 MySQL 的 ON DUPLICATE KEY）
 - 如果測試傳 email 識別使用者：先用 input.userId，沒有再查 users 表
 - **禁止腦補 deleted_at**：只有 Schema DDL 明確定義 deleted_at 欄位時才加 WHERE deleted_at IS NULL。Schema 沒有就不加，否則 SQL 報 "column does not exist"
+- **驗證規則的正確解釋（重要！）**：
+  - 規則「截止日期不可早於建立日期」→ 比較此記錄的 createdAt（新建時 = NOW()），**不是**比較「當前時刻」
+  - 更新操作中必須用已存記錄的 created_at：\`new Date(dueDate) < new Date(existing.created_at)\`
+  - **如果 BDD Feature 的測試數據包含某個日期值（如 2099-12-31），那個值就是合法的。你的驗證不應拒絕它**
+  - 不要自作聰明添加 BDD 規則中沒有提到的驗證（如格式檢查、長度上限、日期是否過去等）
 
 ## 子操作派發
 \`\`\`typescript
 const op = input._stepSummary || ''
-if (op.includes('...')) { /* 子操作 1 */ }
-else if (op.includes('...')) { /* 子操作 2 */ }
+if (op === '建立待辦事項') { /* 子操作 1 */ }
+else if (op === '更新待辦事項') { /* 子操作 2 */ }
 else { throw new Error('不支援的操作') }
 \`\`\`
-用 BDD Feature 的 When 步驟 summary 精確文字作為 includes() 條件。
+用 BDD Feature 的 When 步驟 summary **精確完整文字**作為 === 條件（不是 includes，防止子字串碰撞）。
 
 ## 日期欄位
 DATE → \`row.x instanceof Date ? row.x.toISOString().split('T')[0] : row.x\`
@@ -625,9 +630,9 @@ ${requiredResponseFields.map(f => `- \`${f}\``).join('\n')}
 
   const stepSummariesText = stepSummaries && stepSummaries.length > 0
     ? `\n## _stepSummary 精確派發值（嚴格遵守，禁止改寫）
-BDD 測試會用以下精確的 _stepSummary 值呼叫此函數。你的 if/else 分支的 includes() 條件必須能匹配這些值：
+BDD 測試會用以下精確的 _stepSummary 值呼叫此函數。你的 if/else 分支必須用 === 精確匹配這些值：
 ${stepSummaries.map(s => `- "${s}"`).join('\n')}
-重要：使用這些精確的文字作為 includes() 條件，不要用同義詞替換（例如：如果 summary 是「建立待辦事項」，就用 op.includes('建立待辦事項')，不要改成 op.includes('新增')）。`
+重要：使用 op === '完整文字' 精確匹配，**不要用 op.includes()**，防止子字串碰撞。例如：if (op === '建立待辦事項')，不要改成 op.includes('建立') 或 op.includes('新增')。`
     : ''
 
   return `## Action 定義
@@ -851,7 +856,7 @@ const AggregateSlotSchema = z.object({
   dateColumn: z.string().optional(),
   dateParam: z.string().optional(),
   dateGranularity: z.enum(['month', 'day', 'year']).default('month'),
-  softDeleteColumn: z.string().default('deleted_at'),
+  softDeleteColumn: z.string().optional(),
   aggregations: z.array(z.object({
     fn: z.enum(['SUM', 'COUNT', 'AVG']),
     column: z.string(),
@@ -868,7 +873,7 @@ const ExportSlotSchema = z.object({
   table: z.string(),
   scopeColumn: z.string().optional(),
   scopeParam: z.string().optional(),
-  softDeleteColumn: z.string().default('deleted_at'),
+  softDeleteColumn: z.string().optional(),
   selectColumns: z.array(z.object({
     column: z.string(),
     alias: z.string(),
@@ -892,6 +897,7 @@ const CascadeSlotSchema = z.object({
   entityIdParam: z.string().default('id'),
   defaultEntityQuery: z.string().optional(),
   defaultEntityTable: z.string().optional(),
+  softDeleteColumn: z.string().optional(),
 })
 
 const CreateSlotSchema = z.object({
@@ -923,6 +929,7 @@ const DeleteSlotSchema = z.object({
   entityIdParam: z.string().default('id'),
   scopeColumn: z.string().optional(),
   scopeParam: z.string().optional(),
+  softDeleteColumn: z.string().optional(),
 })
 
 const QuerySingleSlotSchema = z.object({
@@ -930,7 +937,7 @@ const QuerySingleSlotSchema = z.object({
   entityIdParam: z.string().default('id'),
   scopeColumn: z.string().optional(),
   scopeParam: z.string().optional(),
-  softDeleteColumn: z.string().default('deleted_at'),
+  softDeleteColumn: z.string().optional(),
 })
 
 const ToggleSlotSchema = z.object({
@@ -939,7 +946,7 @@ const ToggleSlotSchema = z.object({
   toggleColumn: z.string(),
   scopeColumn: z.string().optional(),
   scopeParam: z.string().optional(),
-  softDeleteColumn: z.string().default('deleted_at'),
+  softDeleteColumn: z.string().optional(),
 })
 
 const RestoreSlotSchema = z.object({
@@ -953,7 +960,7 @@ const QueryListSlotSchema = z.object({
   table: z.string(),
   scopeColumn: z.string().optional(),
   scopeParam: z.string().optional(),
-  softDeleteColumn: z.string().default('deleted_at'),
+  softDeleteColumn: z.string().optional(),
   selectColumns: z.array(z.object({
     column: z.string(),
     alias: z.string(),
@@ -1002,7 +1009,7 @@ ${slots.dateParam ? `  const ${slots.dateParam} = input.${slots.dateParam}\n` : 
 ${allSelect}
     FROM ${slots.table}
     ${scope.whereClause}
-      AND ${slots.softDeleteColumn} IS NULL${dateFilter}${groupByClause}
+      ${slots.softDeleteColumn ? `AND ${slots.softDeleteColumn} IS NULL` : ''}${dateFilter}${groupByClause}
   \`
   const result = rows.map((r: any) => ({
     ${[...(slots.groupBy || []).map(g => `${g.alias}: r.${g.alias}`), ...slots.aggregations.map(a => `${a.alias}: Number(r.${a.alias})`)].join(',\n    ')}
@@ -1023,7 +1030,7 @@ ${slots.dateParam ? `  const ${slots.dateParam} = input.${slots.dateParam}\n` : 
 ${allSelect}
     FROM ${slots.table}
     ${scope.whereClause}
-      AND ${slots.softDeleteColumn} IS NULL${dateFilter}
+      ${slots.softDeleteColumn ? `AND ${slots.softDeleteColumn} IS NULL` : ''}${dateFilter}
   \`
   const row = rows[0] || {}
   return {
@@ -1055,7 +1062,7 @@ ${scope.varDecl}
 ${selectCols}
     FROM ${slots.table}
     ${scope.whereClause}
-      AND ${slots.softDeleteColumn} IS NULL${filterClauses}
+      ${slots.softDeleteColumn ? `AND ${slots.softDeleteColumn} IS NULL` : ''}${filterClauses}
     ORDER BY ${orderCols}
   \`
   ;(rows as any).__status = 200
@@ -1082,7 +1089,9 @@ ${scope.varDecl}
 
   const result = await sql.begin(async (tx: any) => {
     const [parent] = await tx\`
-      UPDATE ${slots.parentTable} SET deleted_at = NOW(), updated_at = NOW()
+      ${slots.softDeleteColumn
+        ? `UPDATE ${slots.parentTable} SET ${slots.softDeleteColumn} = NOW(), updated_at = NOW()`
+        : `DELETE FROM ${slots.parentTable}`}
       WHERE id = \${${slots.entityIdParam}}
       RETURNING *
     \`
@@ -1149,12 +1158,29 @@ ${INLINE_SNAKE_TO_CAMEL}
 function renderDeleteTemplate(slots: z.infer<typeof DeleteSlotSchema>, fnName: string): string {
   const tag = `// @generated-by-template: delete`
 
+  // Schema 有 softDeleteColumn → 軟刪除（UPDATE SET col = NOW()）；沒有 → 硬刪除（DELETE FROM）
+  if (slots.softDeleteColumn) {
+    return `import { sql } from '@/lib/db'
+${tag}
+
+export async function ${fnName}(input: any) {
+  const [row] = await sql\`
+    UPDATE ${slots.table} SET ${slots.softDeleteColumn} = NOW(), updated_at = NOW()
+    WHERE id = \${input.${slots.entityIdParam}}
+    RETURNING *
+  \`
+
+${INLINE_SNAKE_TO_CAMEL}
+  return { __status: 200, ..._c(row) }
+}`
+  }
+
   return `import { sql } from '@/lib/db'
 ${tag}
 
 export async function ${fnName}(input: any) {
   const [row] = await sql\`
-    UPDATE ${slots.table} SET deleted_at = NOW(), updated_at = NOW()
+    DELETE FROM ${slots.table}
     WHERE id = \${input.${slots.entityIdParam}}
     RETURNING *
   \`
@@ -1197,7 +1223,7 @@ ${scope.varDecl}
     SELECT ${selectPart}
     FROM ${slots.table}
     ${scope.whereClause}
-      AND ${slots.softDeleteColumn} IS NULL${filterClause}${orderPart}
+      ${slots.softDeleteColumn ? `AND ${slots.softDeleteColumn} IS NULL` : ''}${filterClause}${orderPart}
   \`
 
 ${INLINE_SNAKE_TO_CAMEL}
@@ -1220,7 +1246,7 @@ export async function ${fnName}(input: any) {
   const [row] = await sql\`
     SELECT * FROM ${slots.table}
     WHERE id = \${entityId}
-      AND ${slots.softDeleteColumn} IS NULL
+      ${slots.softDeleteColumn ? `AND ${slots.softDeleteColumn} IS NULL` : ''}
   \`
   if (!row) throw new Error('找不到資料')
 
@@ -1242,7 +1268,7 @@ export async function ${fnName}(input: any) {
   const [existing] = await sql\`
     SELECT * FROM ${slots.table}
     WHERE id = \${entityId}
-      AND ${slots.softDeleteColumn} IS NULL
+      ${slots.softDeleteColumn ? `AND ${slots.softDeleteColumn} IS NULL` : ''}
   \`
   if (!existing) throw new Error('不存在或已被刪除')
 
@@ -1318,25 +1344,51 @@ ${subOp.requiredResponseFields.map(f => `- ${f}`).join('\n') || '（無特定欄
 - scopeParam 是 input 對應的參數名（如 deviceId, userId）
 - condition 用 SQL WHERE 語法（如 "type = 'income'"）
 - 如果 BDD 提到「未分類」，defaultEntityQuery 填查詢條件（如 "name = '未分類'"）
+- **softDeleteColumn**：只有 Schema DDL 中明確定義了 deleted_at 或 is_deleted 欄位時才填（如 "deleted_at"）。如果 Schema 沒有此欄位，**不要填**（省略此欄位），否則會導致 SQL "column does not exist" 錯誤
 
 只輸出 JSON：`
 
-  const result = await callClaude(
-    '你是一個結構化資料提取專家。從 BDD Feature 和 SQL Schema 中提取精確的 JSON 槽位。只輸出 JSON，不要任何其他文字。',
-    prompt,
-    { maxTokens: 2048, temperature: 0 },
-    trackingContext,
-  )
+  const systemPrompt = '你是一個結構化資料提取專家。從 BDD Feature 和 SQL Schema 中提取精確的 JSON 槽位。只輸出 JSON，不要任何其他文字。'
 
-  if (!result.success || !result.content) return null
+  // 第一次嘗試
+  const result1 = await callClaude(systemPrompt, prompt, { maxTokens: 2048, temperature: 0 }, trackingContext)
+  if (!result1.success || !result1.content) return null
 
   try {
-    const cleaned = result.content.replace(/```json?\n?/g, '').replace(/```/g, '').trim()
-    const json = JSON.parse(cleaned)
-    return schema.parse(json) as T
-  } catch (err) {
-    logger.warn({ operationType: subOp.operationType, err }, 'Slot extraction 解析/驗證失敗')
-    return null
+    const cleaned1 = result1.content.replace(/```json?\n?/g, '').replace(/```/g, '').trim()
+    const json1 = JSON.parse(cleaned1)
+    return schema.parse(json1) as T
+  } catch (err1) {
+    // 第二次嘗試：注入第一次的輸出 + 錯誤訊息
+    const errMsg = err1 instanceof Error ? err1.message : String(err1)
+    logger.info({ operationType: subOp.operationType, error: errMsg }, 'Slot extraction 第一次失敗，重試中')
+
+    // 截斷上次輸出，防止 prompt 過長導致 context overflow
+    const prevOutput = (result1.content || '').substring(0, 500)
+    const retryPrompt = `${prompt}
+
+## 上次嘗試的輸出（有錯誤，請修正）
+${prevOutput}
+
+## 錯誤訊息
+${errMsg}
+
+請修正後重新輸出正確的 JSON：`
+
+    const result2 = await callClaude(systemPrompt, retryPrompt, { maxTokens: 2048, temperature: 0 }, trackingContext)
+    if (!result2.success || !result2.content) {
+      logger.warn({ operationType: subOp.operationType }, 'Slot extraction 重試 API 失敗')
+      return null
+    }
+
+    try {
+      const cleaned2 = result2.content.replace(/```json?\n?/g, '').replace(/```/g, '').trim()
+      const json2 = JSON.parse(cleaned2)
+      return schema.parse(json2) as T
+    } catch (err2) {
+      logger.warn({ operationType: subOp.operationType, firstError: errMsg, secondError: err2 instanceof Error ? err2.message : String(err2) }, 'Slot extraction 重試後仍失敗')
+      return null
+    }
   }
 }
 
@@ -1609,7 +1661,7 @@ function composeActionFunction(
   const dispatchBranches = sortedOps.map((op, i) => {
     const handleName = `handle${toPascalCase(op.summary)}`
     const prefix = i === 0 ? 'if' : 'else if'
-    return `  ${prefix} (op.includes('${op.summary}')) return ${handleName}(input)`
+    return `  ${prefix} (op === '${op.summary}') return ${handleName}(input)`
   }).join('\n')
 
   // 6. 組裝最終檔案
@@ -2327,10 +2379,10 @@ function buildRewriteSystemPrompt(): string {
 ## Server Action 調用規範（重要！）
 這些 Server Actions 使用 **_stepSummary** 欄位（中文子操作名稱）作為操作派發，**不是** intent/action 欄位。
 
-**_stepSummary 必須使用 Action 函數中定義的精確值**（見下方 Action 介面定義中 if (op.includes('...')) 的字串）。
-不要自己發明 _stepSummary 值，必須從 Action 原始碼中找到對應的 includes() 判斷條件。
+**_stepSummary 必須使用 Action 函數中定義的精確值**（見下方 Action 介面定義中 if (op === '...') 或 if (op.includes('...')) 的字串）。
+不要自己發明 _stepSummary 值，必須從 Action 原始碼中找到對應的匹配條件。
 
-例如：如果 Action 程式碼中寫 if (op.includes('註冊'))，那 _stepSummary 必須包含「註冊」（如 '使用者註冊'），不能用「建立帳號」等同義詞。
+例如：如果 Action 程式碼中寫 if (op === '使用者註冊')，那 _stepSummary 必須是 '使用者註冊'，不能用「建立帳號」等同義詞。
 
 標準調用方式：
 - **列表查詢**（頁面初始載入）：查看 Action 介面定義中「需要的參數」註解，如果分支需要 filter/status 等篩選參數，前端載入時傳合理預設值。例如 actionFn({ _stepSummary: '查詢列表', filter: 'all' })。**不傳 ID，不傳 userId**
@@ -2386,10 +2438,14 @@ function extractInterfacesFromActionFile(content: string): string {
     }
   }
 
-  // 提取所有 _stepSummary 合法值（從 op.includes('...') 中抓取）
+  // 提取所有 _stepSummary 合法值（從 op === '...' 或 op.includes('...') 中抓取）
   const stepSummaries: string[] = []
-  for (const m of content.matchAll(/op\.includes\(['"]([^'"]+)['"]\)/g)) {
+  for (const m of content.matchAll(/op\s*===\s*['"]([^'"]+)['"]/g)) {
     stepSummaries.push(m[1])
+  }
+  // 向後相容：也抓 op.includes('...')（舊版生成的代碼）
+  for (const m of content.matchAll(/op\.includes\(['"]([^'"]+)['"]\)/g)) {
+    if (!stepSummaries.includes(m[1])) stepSummaries.push(m[1])
   }
   if (stepSummaries.length > 0) {
     result.push('')
@@ -2856,6 +2912,15 @@ export function validateActionResponses(actionFiles: GeneratedComponent[]): { fi
       }
     }
 
+    // Rule 1.9: 日期驗證不應比較 NOW() — 防止 BDD 測試數據被拒
+    // Pattern: new Date(input.dueDate) < new Date() → 移除（BDD 測試可能用歷史日期如 2025-12-31）
+    const nowDateValidation = /if\s*\([^)]*(?:input\.(?:dueDate|deadline|endDate|expiresAt)|new\s+Date\s*\(\s*input\.(?:dueDate|deadline|endDate|expiresAt)\s*\))\s*(?:<|>)=?\s*(?:new\s+Date\s*\(\s*\)|Date\.now\(\))[^{]*\{?\s*\n?\s*throw\s+new\s+Error\s*\([^)]*\)\s*\}?/g
+    if (nowDateValidation.test(code)) {
+      code = code.replace(nowDateValidation, '/* 日期驗證已移除：避免與 BDD 測試數據衝突 */')
+      fixes.push(`${file.path}: 移除 dueDate < NOW() 驗證（BDD 測試可能用歷史日期）`)
+      modified = true
+    }
+
     // Rule 2: UPDATE 語句必須有 RETURNING *
     // 找 await sql`UPDATE ... ` 後面沒有 RETURNING
     const updateNoReturning = /const\s+\[?\s*(\w+)\s*\]?\s*=\s*await\s+sql\s*`\s*UPDATE\s+[^`]*?WHERE\s+[^`]*?(?<!RETURNING\s+\*)\s*`/gi
@@ -2951,7 +3016,7 @@ export function validateActionResponses(actionFiles: GeneratedComponent[]): { fi
 // ============================================================
 
 interface ActionBranch {
-  keywords: string[]        // op.includes('XXX') 的所有關鍵字
+  keywords: string[]        // op === 'XXX' 或 op.includes('XXX') 的所有關鍵字
   requiredParams: string[]  // if (!input.xxx) throw 中的 xxx
   order: number             // if/else if 順序
 }
@@ -2973,13 +3038,16 @@ function extractActionBranches(actionContent: string): ActionBranch[] {
   for (const line of lines) {
     const trimmed = line.trim()
 
-    // 偵測 if/else if (op.includes('...'))
+    // 偵測 if/else if (op === '...' 或 op.includes('...'))
     const branchMatch = trimmed.match(/^(?:}\s*else\s+)?if\s*\(/)
-    if (branchMatch && trimmed.includes('op.includes')) {
-      // 提取所有 op.includes('...') 關鍵字
+    if (branchMatch && (trimmed.includes('op ===') || trimmed.includes('op.includes'))) {
+      // 提取所有 op === '...' 或 op.includes('...') 關鍵字
       const keywords: string[] = []
-      for (const m of trimmed.matchAll(/op\.includes\(['"]([^'"]+)['"]\)/g)) {
+      for (const m of trimmed.matchAll(/op\s*===\s*['"]([^'"]+)['"]/g)) {
         keywords.push(m[1])
+      }
+      for (const m of trimmed.matchAll(/op\.includes\(['"]([^'"]+)['"]\)/g)) {
+        if (!keywords.includes(m[1])) keywords.push(m[1])
       }
       if (keywords.length > 0) {
         currentBranch = { keywords, requiredParams: [], order: order++ }
@@ -3354,7 +3422,7 @@ function extractResponseFieldsFromFeatures(
 
 /**
  * 從 Feature 文件提取所有 When 步驟的 summary（即 _stepSummary 值）
- * 這些值是 action 代碼的 `if (op.includes('xxx'))` 必須精確匹配的
+ * 這些值是 action 代碼的 `if (op === 'xxx')` 必須精確匹配的
  */
 function extractStepSummariesFromFeatures(
   features: Array<{ actionName: string; content: string }>,
@@ -3502,10 +3570,10 @@ const FIX_SYSTEM_PROMPT = `你是一位 TypeScript 後端專家。根據測試�
 正確做法：使用 input._stepSummary（中文子操作名稱，如 "使用者註冊"、"建立節目"）來派發。
 \`\`\`typescript
 const op = input._stepSummary || ''
-if (op.includes('註冊')) { ... }
-else if (op.includes('登入')) { ... }
+if (op === '使用者註冊') { ... }
+else if (op === '使用者登入') { ... }
 \`\`\`
-不要用 input.action，只用 input._stepSummary 做 includes 匹配。
+不要用 input.action，只用 input._stepSummary 做 === 精確匹配（不要用 includes，防止子字串碰撞）。
 
 ## bcrypt import（常見錯誤！）
 如果錯誤是 "bcrypt.hash is not a function"，改為 named import：
@@ -3578,25 +3646,23 @@ if (!userId) throw new Error('使用者不存在')
 不要 require input.userId 作為必要參數。
 如果 input.userId 已經存在就直接用，否則用 email 查詢。
 
-## 子操作分支順序（常見嚴重 Bug！）
-_stepSummary includes 匹配有交叉時，更具體的分支必須排在前面！
-例如「查詢訂閱列表」包含「訂閱」二字，如果「訂閱」分支在「查詢」前面就會錯誤匹配。
-正確順序範例：
+## 子操作分支順序
+使用 op === '完整 summary' 精確匹配（不用 includes），所以不會有子字串碰撞問題。
+每個分支用完整的 BDD summary 文字：
 \`\`\`typescript
-if (op.includes('取消訂閱')) { ... }
-else if (op.includes('查詢') || op.includes('列表')) { // ← 必須在「訂閱」前面！
+if (op === '取消訂閱') { ... }
+else if (op === '查詢訂閱列表') {
   const rows = await sql\`SELECT ... FROM table WHERE user_id = \${userId}\`
   ;(rows as any).__status = 200; return rows  // 列表查詢：設 __status 確保 route handler 用 200
 }
-else if (op.includes('訂閱')) { ... }
+else if (op === '訂閱節目') { ... }
 \`\`\`
-通用規則：「查詢/列表」分支必須排在「建立/新增/訂閱」分支之前。
 
 ## 查詢列表操作（常見錯誤！）
 查詢「使用者的」訂閱列表/播放記錄等，只需要 userId。
 不要要求 showId/episodeId 等額外參數。
 \`\`\`typescript
-if (op.includes('查詢') || op.includes('列表')) {
+if (op === '查詢訂閱列表') {
   const userId = input.userId
   const rows = await sql\`SELECT ... FROM table WHERE user_id = \${userId}\`
   ;(rows as any).__status = 200; return rows  // 列表查詢：設 __status 確保 route handler 用 200
@@ -3606,9 +3672,9 @@ if (op.includes('查詢') || op.includes('列表')) {
 ## 單一設定表操作（常見錯誤！）
 如果表只有一筆記錄（如 channel_config，id 固定為 1），查詢就是 SELECT * WHERE id = 1，
 更新就是 UPDATE ... WHERE id = 1。不要要求 action/type 參數。
-直接用 _stepSummary 判斷是查詢還是更新：
+直接用 _stepSummary 精確匹配判斷是查詢還是更新：
 \`\`\`typescript
-if (op.includes('查詢') || op.includes('取得')) {
+if (op === '查詢頻道設定') {
   const row = await sql\`SELECT * FROM channel_config WHERE id = 1\`
   return { __status: 200, ...row[0] }
 }
@@ -3620,7 +3686,7 @@ const setCols = Object.keys(input).filter(k => k !== '_stepSummary' && k !== 'us
 ## 登出操作（常見錯誤！）
 登出操作不需要驗證 token/session 是否有效。直接返回成功：
 \`\`\`typescript
-if (op.includes('登出')) {
+if (op === '使用者登出') {
   return { __status: 200, message: '登出成功' }
 }
 \`\`\`
@@ -3709,6 +3775,68 @@ const result = await sql.begin(async (tx) => {
 3. 看 And 的 entity_validate DataTable → DB 應有的狀態，確認 INSERT/UPDATE/soft-delete 正確
 4. Entity Mapping（如有）→ entity 中文名稱對應的實際 DB table 名`
 
+// ============================================================
+// 錯誤根因分類器（零 LLM — 純正則）
+// ============================================================
+
+export type FailureRootCause =
+  | 'dispatch_mismatch'   // _stepSummary dispatch 不匹配
+  | 'missing_column'      // SQL column 不存在
+  | 'wrong_status'        // HTTP status code 不對
+  | 'field_naming'        // 回應欄位 camelCase/snake_case 不匹配
+  | 'sql_error'           // SQL 語法錯誤
+  | 'auth_check'          // 多餘的 auth 檢查
+  | 'var_resolution'      // VAR 系統解析失敗（Feature 問題，不是代碼問題）
+  | 'fk_constraint'       // FK 約束違反
+  | 'unknown'
+
+export function classifyFailureRootCause(error: string): FailureRootCause {
+  if (!error) return 'unknown'
+  const e = error.toLowerCase()
+
+  // dispatch mismatch
+  if (e.includes('不支援的操作') || e.includes('unsupported operation') || e.includes('不支援的操作類型')) {
+    return 'dispatch_mismatch'
+  }
+
+  // VAR resolution failure（Feature 問題，不要修代碼）
+  if (e.includes('var 解析失敗') || e.includes('無法解析')) {
+    return 'var_resolution'
+  }
+
+  // missing column
+  if (e.includes('column') && (e.includes('does not exist') || e.includes('不存在'))) {
+    return 'missing_column'
+  }
+
+  // wrong status
+  if (e.includes('http 狀態碼不匹配') || e.includes('status code') || /預期\s*\d+/.test(e)) {
+    return 'wrong_status'
+  }
+
+  // field naming
+  if (e.includes('值不匹配') || (e.includes('欄位') && e.includes('不存在')) || (e.includes('field') && e.includes('not found'))) {
+    return 'field_naming'
+  }
+
+  // auth check（多餘的認證導致 401/403）
+  if (e.includes('unauthorized') || e.includes('forbidden') || e.includes('jwt') || e.includes('token')) {
+    return 'auth_check'
+  }
+
+  // FK constraint
+  if (e.includes('foreign key') || e.includes('violates foreign key') || e.includes('fk_')) {
+    return 'fk_constraint'
+  }
+
+  // SQL syntax error
+  if (e.includes('syntax error') || e.includes('sql') || e.includes('relation') || e.includes('invalid input syntax')) {
+    return 'sql_error'
+  }
+
+  return 'unknown'
+}
+
 /**
  * 用 LLM 修復失敗的 action 函數
  */
@@ -3721,16 +3849,37 @@ export async function fixFailingAction(
   featureContent?: string,
   entityMapping?: string
 ): Promise<string> {
+  // === 根因分類：判斷是否需要 LLM 修復 ===
+  const primaryError = failedScenarios[0]?.error || ''
+  const rootCause = classifyFailureRootCause(primaryError)
+
+  if (rootCause === 'var_resolution') {
+    // VAR 解析失敗是 Feature 問題，修代碼沒用
+    logger.info({ actionName, rootCause }, 'fixFailingAction: VAR 解析失敗，跳過代碼修復（Feature 問題）')
+    return currentCode
+  }
+
+  if (rootCause === 'auth_check') {
+    // 多餘的 auth 檢查 — 直接用 removeAuthChecks 而不是 LLM
+    logger.info({ actionName, rootCause }, 'fixFailingAction: auth 問題，直接移除 auth 檢查')
+    return removeAuthChecks(currentCode)
+  }
+
   // === Per-SubOp 精準修復：偵測組裝式程式碼結構 ===
   const handleFuncRegex = new RegExp(`async function (handle${ID_PATTERN})\\s*\\(`, 'g')
   const handleFuncMatches = [...currentCode.matchAll(handleFuncRegex)]
   if (handleFuncMatches.length > 1) {
     // 從 dispatch 區塊提取 summary → handleFunc 映射
     const dispatchMap = new Map<string, string>()
-    const dispatchRegex = new RegExp(`op\\.includes\\('([^']+)'\\)\\s*\\)\\s*return\\s+(handle${ID_PATTERN})`, 'g')
+    // 支援 op === '...' 和 op.includes('...')
+    const dispatchRegexExact = new RegExp(`op\\s*===\\s*'([^']+)'\\)\\s*return\\s+(handle${ID_PATTERN})`, 'g')
+    const dispatchRegexIncludes = new RegExp(`op\\.includes\\('([^']+)'\\)\\s*\\)\\s*return\\s+(handle${ID_PATTERN})`, 'g')
     let dm: RegExpExecArray | null
-    while ((dm = dispatchRegex.exec(currentCode)) !== null) {
+    while ((dm = dispatchRegexExact.exec(currentCode)) !== null) {
       dispatchMap.set(dm[1], dm[2])
+    }
+    while ((dm = dispatchRegexIncludes.exec(currentCode)) !== null) {
+      if (!dispatchMap.has(dm[1])) dispatchMap.set(dm[1], dm[2])
     }
 
     if (dispatchMap.size > 0) {

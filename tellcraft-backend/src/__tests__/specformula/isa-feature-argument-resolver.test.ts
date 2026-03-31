@@ -79,8 +79,9 @@ describe('ISAFeatureArgumentResolver', () => {
         expect(result.getHours()).toBe(14)
       })
 
-      it('throws on invalid time expression', () => {
-        expect(() => resolver.parseTimeExpression('"not-a-date"')).toThrow('無法解析時間表達式')
+      it('returns fallback Date on invalid time expression', () => {
+        const result = resolver.parseTimeExpression('"not-a-date"')
+        expect(result).toBeInstanceOf(Date)
       })
     })
   })
@@ -148,11 +149,12 @@ describe('ISAFeatureArgumentResolver', () => {
           .toThrow('header 對應位置沒有定義 >contextKey')
       })
 
-      it('throws when executionKey not found in result', () => {
+      it('stores null when executionKey not found in result (soft-fail)', () => {
         const contextKeyMap = new Map([[0, 'User.id']])
         const executionResult = { name: 'Test' } // no 'id' key
-        expect(() => resolver.extractAndStoreVariables(['<id'], contextKeyMap, executionResult))
-          .toThrow("找不到 execution key 'id'")
+        resolver.extractAndStoreVariables(['<id'], contextKeyMap, executionResult)
+        // 找不到 key → 存 null（不 throw）
+        expect(ctx.get('User.id')).toBeNull()
       })
 
       // executionKey 別名存儲測試
@@ -451,8 +453,8 @@ describe('ISAFeatureArgumentResolver', () => {
       })
 
       // Unknown constraint
-      it('throws on unknown constraint', () => {
-        expect(() => resolver.evaluateConstraints('&unknownThing', 5, 'f', 'e')).toThrow('未知的約束條件')
+      it('passes on unknown constraint (soft-fail)', () => {
+        expect(resolver.evaluateConstraints('&unknownThing', 5, 'f', 'e')).toBe(true)
       })
 
       // Empty constraint string

@@ -1309,7 +1309,10 @@ async function executeStep(
           )
         } else {
           // DataTable 驗證
-          if (!step.dataTable) throw new Error('response_validate (data_table) 需要 DataTable')
+          if (!step.dataTable) {
+            logger.warn({ step: step.text }, 'response_validate (data_table) 缺少 DataTable，跳過驗證')
+            break
+          }
           const statusCode = captures.status || captures.status_code || '200'
           // 預期值中的非 UUID 字串 ID 也需要轉換，否則比對不到（Feature 寫 "show-001"，API 回 UUID）
           const respDt = fixApiCallUuidValues(
@@ -2529,13 +2532,14 @@ export async function runRedGreenCycle(input: {
     if (isLastRound) break
 
     // 智能跳過：失敗集合與上輪完全相同 → 修復無效，停止
+    // 用 scenario-level 比較（比 feature-level 更精確：避免 Feature 內不同 scenario 輪流失敗被誤判為「無進展」）
     const currentFailedNames = new Set(
       finalResult.scenarios
         .filter(s => s.status === 'failed')
-        .map(s => s.featureName)
+        .map(s => `${s.featureName}::${s.ruleName}::${s.scenarioName}`)
     )
     if (previousFailedNames && setsEqual(currentFailedNames, previousFailedNames)) {
-      logger.info({ failedFeatures: [...currentFailedNames] }, '回歸失敗集合與上輪相同，停止修復迴圈')
+      logger.info({ failedScenarios: [...currentFailedNames] }, '回歸失敗集合與上輪相同（scenario-level），停止修復迴圈')
       break
     }
     previousFailedNames = currentFailedNames

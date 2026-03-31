@@ -12,6 +12,7 @@ import { executeCoderPipeline } from '../../services/coder-generation'
 import { sendMessage, saveFlowState, getFlowState, touchFlowActivity, snapshotCodeToGeneration, inferFileType } from '../orchestrator-utils'
 import { runCoderE2ETests } from '../../services/coder-e2e-test'
 import { executeRedPhase, formatRedPhaseReport, runRedPhaseFullValidation, runRedPhaseRoutingValidation } from '../../services/red-phase-validator'
+import { runFeatureAlignmentGate } from '../../services/feature-alignment-gate'
 import { createLogger } from '../../lib/logger'
 import { sanitizeForPreview } from '../../services/code-verify'
 
@@ -31,6 +32,7 @@ export async function executeCoderSkill(input: CoderSkillInput): Promise<void> {
 
   // 1. 讀取 BDD 產出（含 features_content 供 response field 名稱對齊）
   const bddSession = await db.queryOne<{
+    id: string
     actions_yml_content: string | null
     schema_sql_content: string | null
     entity_mapping_content: string | null
@@ -38,7 +40,7 @@ export async function executeCoderSkill(input: CoderSkillInput): Promise<void> {
     open_api_spec_content: string | null
     isa_config_content: string | null
   }>(
-    `SELECT actions_yml_content, schema_sql_content, entity_mapping_content, features_content,
+    `SELECT id, actions_yml_content, schema_sql_content, entity_mapping_content, features_content,
             open_api_spec_content, isa_config_content
      FROM bdd_sessions
      WHERE project_id = $1 AND actions_yml_content IS NOT NULL
@@ -281,6 +283,59 @@ export async function executeCoderSkill(input: CoderSkillInput): Promise<void> {
       }
     } catch (e) {
       logger.error({ error: e }, 'RED Phase Routing 執行失敗，降級跳過')
+    }
+  }
+
+  // 6.8 Feature Alignment Gate — 阻斷式 Feature 品質閘門
+  if (bddSession.features_content && bddSession.features_content.length > 0) {
+    try {
+      const gateResult = await runFeatureAlignmentGate({
+        features: bddSession.features_content,
+        actionsYml: bddSession.actions_yml_content,
+        schemaSql: bddSession.schema_sql_content,
+        entityMapping: bddSession.entity_mapping_content || '',
+        trackingContext: { userId, conversationId },
+      })
+
+      if (gateResult.fixedFeatures) {
+        // 用修復後的 Features 更新 DB + 後續流程
+        bddSession.features_content = gateResult.fixedFeatures
+        await db.query(
+          `UPDATE bdd_sessions SET features_content = $1 WHERE id = $2`,
+          [JSON.stringify(gateResult.fixedFeatures), bddSession.id]
+        )
+        logger.info({ fixedCount: gateResult.fixedIssueCount }, 'Alignment Gate: 已自動修復 Features 並更新 DB')
+      }
+
+      if (gateResult.blocked) {
+        // 阻塞：告訴用戶問題無法自動修復，回退到 uiux_complete
+        state = await getFlowState(redis, conversationId) || state
+        state.phase = 'uiux_complete'
+        state.waitingForReply = true
+        await saveFlowState(redis, conversationId, state)
+        await sendMessage(conversationId, io, {
+          content: gateResult.blockMessage || 'Feature 對齊檢查失敗，請修正 BDD 規格後重試。',
+          stage: 'coder_error',
+          quickReplies: [
+            { label: isChinese ? '重試' : 'Retry', value: '__retry_coder__' },
+          ],
+        })
+        return
+      }
+
+      if (gateResult.fixedIssueCount > 0) {
+        await sendMessage(conversationId, io, {
+          content: isChinese
+            ? `✓ Feature 對齊閘門：自動修復了 ${gateResult.fixedIssueCount} 個問題（${gateResult.durationMs}ms）`
+            : `✓ Feature Alignment Gate: auto-fixed ${gateResult.fixedIssueCount} issue(s) (${gateResult.durationMs}ms)`,
+          stage: 'coder_generating',
+        })
+      } else {
+        logger.info({ durationMs: gateResult.durationMs }, 'Alignment Gate: 通過（無需修復）')
+      }
+    } catch (e) {
+      // Alignment Gate 失敗不阻塞 Pipeline — 降級跳過
+      logger.error({ error: e }, 'Alignment Gate 執行失敗，降級跳過')
     }
   }
 

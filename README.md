@@ -133,9 +133,9 @@ npx ts-node bdd-spec/scripts/validate-feature.ts spec/features/
   ├─ 讀取 BDD 產出（actionsYml + schemaSql + entityMapping + features_content）
   ├─ 生成 lib/db.ts（Neon 連接，零 LLM）
   ├─ Per-SubOp 生成：Feature 按 When 步驟拆分子操作 → 每個子操作精準 Handler 選擇
-  │   ├─ 已知 pattern（aggregate/create/update/delete/query_list/export/cascade）→ Code Template 模板化
-  │   │   └─ LLM 只提取 JSON 槽位（表名/欄位/條件）→ 模板保證 SQL 正確（COALESCE/GROUP BY/camelCase）
-  │   └─ 未知 pattern → free-form LLM 生成（fallback）
+  │   ├─ 已知 pattern（aggregate/create/update/delete/query_list/query_single/toggle/restore/export/cascade）→ Code Template 模板化
+  │   │   └─ LLM 只提取 JSON 槽位（表名/欄位/條件）→ 模板保證 SQL 正確（COALESCE/GROUP BY/camelCase/_c()）
+  │   └─ 未知 pattern → free-form LLM 生成（fallback），validateActionResponses 零 LLM 後置修正
   ├─ 零 LLM 機械組裝：import 去重 + helper 提升 + _stepSummary dispatch 排序
   ├─ 生成 app/actions/*.ts（Server Actions，零 LLM 機械映射）
   ├─ 生成 app/api/*/route.ts（API Routes，零 LLM）
@@ -143,12 +143,17 @@ npx ts-node bdd-spec/scripts/validate-feature.ts spec/features/
   │
   ▼
 ④b Coder Skill Stage B（✅ 已完成 — 自動觸發，逐 Feature 精準驗證）
+  ├─ **Feature Alignment Gate**（阻斷式閘門，6 項深度對齊檢查 + LLM 自動修復，2 輪修不好阻塞 pipeline）
   ├─ RED Phase Layer 1: 11 個靜態檢查（零 LLM ~2ms）— Feature×actionsYml + Feature×Schema DataTable 深度對齊
   ├─ RED Phase Layer 2: StubHttpAdapter(501) + 真實 Neon DB 全場景驗證
   ├─ RED Phase Layer 2.5: RoutingStubAdapter（in-process Express 真實路由匹配，404 捕捉路由定義錯誤）
   ├─ BDD execution key 注入 Coder prompt（response field 名稱對齊）
+  ├─ Template slot extraction 重試機制（失敗注入錯誤訊息重試，減少 free-form LLM fallback）
+  ├─ _stepSummary dispatch 用 `===` 精確匹配（取代 `includes()`，防止子字串碰撞）
+  ├─ Schema-aware deleted_at（softDeleteColumn optional，只有 Schema 有才加條件）
+  ├─ 錯誤根因分類器（零 LLM）：VAR 解析失敗跳過代碼修復、auth 問題直接移除、SQL/dispatch/field 精準分流
   ├─ E2E 測試（/tmp Next.js dev + Puppeteer，含 backendFiles + JSX 截斷偵測）
-  ├─ SpecFormula 逐 Feature 精準驗證（每 Feature 獨立 3 輪修復 → 多輪回歸修復 + 智能跳過）
+  ├─ SpecFormula 逐 Feature 精準驗證（每 Feature 獨立 3 輪修復 → 多輪回歸修復 + scenario-level 智能跳過）
   ├─ Per-SubOp 精準修復：偵測組裝式代碼 → 只修失敗的子操作函數（不影響已通過的）
   ├─ 測試完成後重發 code_preview（含修復後代碼 + neonConnectionString）→ WebContainer 即時更新
   └─ 雙層完成驗證：測試全通過→部署(primary)；測試有失敗→重試(primary)+帶風險部署(secondary)+二次確認
@@ -939,6 +944,51 @@ psql "$DATABASE_URL" -f tellcraft-backend/migrations/xxx.sql
 - **ES 確認語意修復**（03-01）：is-confirmation.ts 三層匹配
 - **Guest 限制**（03-03）：Fast Mode Only + 一次使用 + 雙重防繞過
 - **專案快捷入口**（03-03）：Dashboard/首頁一鍵進入對話
+
+### Coder Pipeline 可靠性提升（2026-03-31）
+
+**Feature Alignment Gate（阻斷式閘門）**：
+- **新服務 `feature-alignment-gate.ts`**：在 RED Phase 之後、代碼生成之前，執行 6 項深度對齊檢查 + LLM 自動修復（最多 2 輪），修不好則阻塞 pipeline 而非帶病生成
+- **6 項檢查**：Summary 唯一性（子字串碰撞偵測）、Entity Setup Column Coverage、FK Reference 完整性、Response Field 命名一致性、VAR-System 對齊、Summary ↔ actionsYml 精確匹配
+
+**代碼生成確定性增強**：
+- **Slot extraction 重試**：`extractSlots()` 第一次 JSON/Zod 失敗後注入錯誤訊息 + 上次輸出重試一次，大幅減少 free-form LLM fallback
+- **`===` 精確匹配 dispatch**：`composeActionFunction` 和所有 prompt 從 `op.includes('xxx')` 改為 `op === 'xxx'`，徹底消除子字串碰撞。parser 向後相容兩種格式
+- **Schema-aware `deleted_at`**：`softDeleteColumn` 從 `.default('deleted_at')` 改為 `.optional()`，slot extraction prompt 指示只有 Schema 有此欄位才填。template 條件生成 `AND deleted_at IS NULL`
+
+**Fix Loop 收斂性增強**：
+- **錯誤根因分類器**（零 LLM）：`classifyFailureRootCause()` 區分 dispatch/column/status/field/sql/auth/var/fk 8 類根因。VAR 解析失敗跳過代碼修復（Feature 問題）、auth 問題直接 `removeAuthChecks()`
+- **Scenario-level 收斂偵測**：回歸修復的「無進展」偵測從 feature-level 升級為 `featureName::scenarioName` level，避免同 Feature 內不同 scenario 輪流失敗被誤判
+
+### SpecFormula + Coder Pipeline 全鏈路修復（2026-03-29 ~ 2026-03-30）
+
+**SpecFormula 測試引擎修復（14 個確定性修復）**：
+- **Rule-level Background 解析**：`specformula-runner.ts` 的 `processGherkinFeature()` 忽略了 Gherkin Rule 內的 Background 步驟，導致 Rule-level entity_setup 不執行 → VAR 永遠存不進 ScenarioContext
+- **`import { sql }` 安全網**：`coder-generation.ts` 的 `composeActionFunction()` + 單操作路徑，自動偵測代碼使用 `sql` 但沒 import 時注入 `import { sql } from '@/lib/db'`
+- **entity_validate `>id` 容錯**：`entity-validate.ts` 的 `extractAndStoreVariables()` 當 data row 不是 `<executionKey` 格式時跳過而非 throw；`findActual()` PK 查詢加 `>` 前綴 fallback
+- **bcrypt hash 防護**：`entity-setup.ts`/`api-call.ts`/`entity-non-existence-validate.ts`/`entity-validate.ts` 的 fail-closed 檢查從 `startsWith('$')` 改為 `/^\$[a-zA-Z]/`，避免 `$2b$10$...` bcrypt hash 被誤判為 VAR 引用
+- **日期格式容錯**：`data-table-response-validate.ts` 加入日期前綴匹配（`"2099-12-31"` 匹配 `"2099-12-31T00:00:00.000Z"`）
+- **`回應, with JSON:` 步驟匹配**：`specformula-runner.ts` 的 `matchStepToInstruction()` 加二輪容錯，自動將 `回應, with JSON:` 正規化為 `回應為, with JSON:`
+- **entity_non_existence_validate soft-delete 感知**：`existsByPk()`/`existsByProbe()` 檢查 `deleted_at` 欄位，已軟刪除的記錄視為「不存在」
+- **通用 response wrapper 偵測**：`validateActionResponses()` 加 Rule 1.5，偵測任何 `return { key: rows }` 模式（不限 `items`/`data`/`records`）自動拆為 bare Array
+
+**Coder 代碼生成確定性模板擴充**：
+- **3 個新模板**：`query_single`（SELECT WHERE id + 404 處理）、`toggle`（UPDATE SET field = NOT field）、`restore`（UPDATE SET deleted_at = NULL）— 搭配 Zod slot schema + render function
+- **關鍵字修正**：`'切換'` 從 UPDATE → 獨立 TOGGLE 類型；`'取消'` 從 DELETE 移除避免「取消刪除=復原」誤判；新增 TOGGLE_KEYWORDS/RESTORE_KEYWORDS
+- **QueryList filters 擴充**：`QueryListSlotSchema` 新增 `filters` 欄位支援動態 WHERE 條件（=, <, >, IS NULL 等）
+- **列表 handler 參數防禦**：`QUERY_LIST_HANDLER` prompt 禁止 `if (!input.filter) throw`；`validateActionResponses` Rule 1.8 自動移除列表篩選參數的 throw
+
+**Coder 組件改寫強化**：
+- **截斷 → diff 重試**：`rewriteComponentForServerActions()` 全文改寫截斷（JSX 標籤不平衡）後自動用 SEARCH/REPLACE diff 模式重試，不再靜默回退原始版本
+- **token 估算提高**：`/3 + 2048` → `/2 + 4096`，最低 maxTokens 從 8192 提高到 16384
+- **mock data 掃描 + 二次改寫**：`scanForRemainingMockData()` 零 LLM 掃描改寫結果是否仍有 mock import/硬編碼陣列 → `retryRewriteForMockData()` 用 diff 模式修復 → 二次掃描仍殘留則記入 `mockDataWarnings`
+- **用戶通知**：`CoderOutput.mockDataWarnings` + 完成訊息附加 ⚠️ 警告，不再靜默吞掉改寫失敗
+- **分支參數提取**：`extractInterfacesFromActionFile()` 額外提取每個 dispatch 分支的 `input.xxx` 參數引用，改寫 LLM 知道每個操作需要哪些參數
+- **列表查詢指引**：`buildRewriteSystemPrompt()` 加強列表查詢指引，告知改寫 LLM 傳合理預設值
+
+**BDD Feature 後置驗證**：
+- **`sanitizeFeatureContent()`**：零 LLM 自動修正 — `回應, with JSON:` → `回應, with table:`、`回應為, with JSON:` → `回應, with table:`、entity_validate header `>id` → `id`
+- **formulation prompt 強化**：明確禁止 entity_validate 使用 `>contextKey`；`>contextKey`/`<executionKey` 只用於 Given 準備和 Then 回應
 
 ### 核心功能建設（2026-02-24 ~ 2026-02-28）
 

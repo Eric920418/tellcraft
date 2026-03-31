@@ -740,6 +740,7 @@ Feature: ${featureInfo.name}
   - 錯誤：\`| id | name |\` → \`| <userId | "John" |\`（header 缺 \`>\` 前綴）
   - Entity 準備（\`準備一個\`）的 DataTable data row **至少要有一個非空欄位值**，不可全空
   - **\`>contextKey\`/\`<executionKey\` 只用於 Given 準備（\`準備一個\`）和 Then 回應（\`(STATUS)回應\`）**：\`應該存在一個{entity}\` 的 DataTable header 用**純欄位名**（如 \`id\`、\`isCompleted\`），**禁止加 \`>\` 前綴**。正確：\`| id | isCompleted |\` → \`| $todo1Id | true |\`。錯誤：\`| >id | isCompleted |\` → \`| $todo1Id | true |\`（entity 驗證不需要擷取變數）
+  - **\`&\` 約束標記（\`&isNull\`/\`&isNotNull\`/\`&isTrue\`/\`&isFalse\`）只用於 Then 驗證步驟**：Given 準備（\`準備一個\`）的 DataTable **禁止使用 \`&isNull\`**。要表達「欄位為空」→ 直接不填該欄位（DB 用 DEFAULT 或 NULL）。錯誤：\`| deleted_at |\` → \`| &isNull |\`。正確：不包含 \`deleted_at\` 欄位
 - **When 必須有 Actor 前綴**：\`(No Actor)\` 或 \`(UID="$var")\`
 - **Then 成功必須有 HTTP status code**：\`{summary}(201)回應, with table:\`
 - **Then 的 summary 必須與 When 完全一致**：When 用 \`切換待辦事項完成狀態\`，Then 也用 \`切換待辦事項完成狀態(200)回應\`，不可縮寫
@@ -750,6 +751,8 @@ Feature: ${featureInfo.name}
   - JSON 值整體用雙引號：\`[{"productId":"$Product1.id","quantity":2}]\`
   - 布林值用 true/false，列舉值用原始大寫（如 PENDING、ACTIVE）
   - 禁止模糊描述（如「某商品」「一些數量」），必須用具體值
+- **級聯刪除後的 FK 驗證**：如果刪除了父實體（如清單），子實體（如待辦事項）的 FK 欄位（如 listId）會變為 null。entity_validate 應該用 \`&isNull\` 驗證 FK，不是用原來的 \`$variable\`。正確：\`| id | listId |\` → \`| $todo1Id | &isNull |\`。錯誤：\`| id | listId |\` → \`| $todo1Id | $list1Id |\`（list1Id 已被刪除，值不再是它的 UUID）
+- **測試數據日期必須用未來日期**：截止日期、到期日等 DataTable 值用 \`2099-12-31\` 而非具體的過去日期，避免與 handler 的時間驗證衝突。正確：\`| dueDate | 2099-12-31 |\`。錯誤：\`| dueDate | 2025-12-31 |\`（可能早於 handler 執行時的 NOW()）
 - **無腦補原則**：嚴格按需求和決策來，不擅自添加需求中沒提到的欄位或功能
 - **Entity 必須存在於 Schema**：\`準備一個{entity}\` 和 \`應該存在一個{entity}\` 的 entity 名稱必須是 Schema 中已定義的資料表（透過 Entity Mapping 映射）。禁止發明 Schema 中不存在的 table（如 Schema 沒有 sessions 表就不能 \`準備一個sessions\`）
 - **DataTable 欄位必須存在於 Schema**：DataTable 的 header 欄位名稱（camelCase）必須能映射到對應 table 的實際 column name（snake_case）。禁止使用 Schema 中不存在的欄位

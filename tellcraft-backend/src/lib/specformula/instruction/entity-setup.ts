@@ -104,8 +104,21 @@ export class EntitySetup {
     const valueColumnTypes: (string | null)[] = [];
 
     for (const header of dataHeaders) {
-      const value = row[header];
+      let value = row[header];
       if (value === undefined || value === null || value === '' || value === 'null' || value === 'NULL' || value === 'Null') continue;
+
+      // 處理 & 前綴 constraint markers（這些是驗證約束，不是資料值）
+      const trimmedValue = (typeof value === 'string') ? value.trim() : '';
+      if (trimmedValue.startsWith('&')) {
+        if (trimmedValue === '&isTrue') {
+          value = 'true';
+        } else if (trimmedValue === '&isFalse') {
+          value = 'false';
+        } else {
+          // &isNull, &isNotNull 等 → 跳過此欄位（不插入，DB 用 DEFAULT 或 NULL）
+          continue;
+        }
+      }
 
       const actualColName = this.resolveColumnName(tableDef, header);
       const snakeCol = actualColName.toLowerCase();
