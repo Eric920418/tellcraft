@@ -2454,10 +2454,10 @@ function extractInterfacesFromActionFile(content: string): string {
   }
 
   // 提取每個 dispatch 分支需要的參數（從 input.xxx 引用中推斷）
-  const branchParamRegex = /(?:if|else if)\s*\(op\.includes\(['"]([^'"]+)['"]\)\)\s*\{/g
+  const branchParamRegex = /(?:if|else if)\s*\((?:op\s*===\s*['"]([^'"]+)['"]|op\.includes\(['"]([^'"]+)['"]\))\)\s*\{/g
   let branchMatch: RegExpExecArray | null
   while ((branchMatch = branchParamRegex.exec(content)) !== null) {
-    const branchName = branchMatch[1]
+    const branchName = branchMatch[1] || branchMatch[2]
     const branchStart = branchMatch.index + branchMatch[0].length
     const branchSlice = content.substring(branchStart, branchStart + 600)
     const params = [...branchSlice.matchAll(/input\.(\w+)/g)].map(m => m[1])
@@ -2499,6 +2499,22 @@ ${component.content}
 }
 
 /**
+ * esbuild TSX 語法驗證 — 捕捉 LLM 改寫後的截斷/壞 JSX。
+ * 返回 true 表示語法正確，false 表示有語法錯誤。
+ */
+async function validateComponentSyntax(code: string, filePath: string): Promise<boolean> {
+  try {
+    const esbuild = await import('esbuild')
+    const isTsx = filePath.endsWith('.tsx') || filePath.endsWith('.jsx') || code.includes('</') || code.includes('/>') || /<[A-Z]/.test(code)
+    await esbuild.transform(code, { loader: isTsx ? 'tsx' : 'ts', jsx: 'preserve' })
+    return true
+  } catch (err) {
+    logger.warn({ path: filePath, error: err instanceof Error ? err.message : String(err) }, '組件 TSX 語法驗證失敗')
+    return false
+  }
+}
+
+/**
  * 大組件（>20KB）用 SEARCH/REPLACE diff 模式改寫，只輸出修改的部分。
  * 小組件照舊全文改寫。
  */
@@ -2533,6 +2549,13 @@ export async function rewriteComponentForServerActions(
   const closeTags = (code.match(/<\/[A-Z]\w*>/g) || []).length
   if (openTags > 0 && Math.abs(openTags - closeTags) > 2) {
     logger.warn({ path: component.path, openTags, closeTags }, '改寫後 JSX 標籤不平衡（可能截斷），改用 diff 模式重試')
+    return rewriteWithDiffMode(component, availableActions, actionImplementations, trackingContext)
+  }
+
+  // esbuild TSX 語法驗證 — 捕捉截斷/壞 JSX（tag count 漏網的情況）
+  const validated = await validateComponentSyntax(code, component.path)
+  if (!validated) {
+    logger.warn({ path: component.path }, '改寫後 TSX 語法驗證失敗，改用 diff 模式重試')
     return rewriteWithDiffMode(component, availableActions, actionImplementations, trackingContext)
   }
 
@@ -2603,6 +2626,12 @@ SEARCH 部分必須精確匹配原始代碼（逐字元對應）。
       logger.warn({ path: component.path, openTags, closeTags }, '大組件 fallback 全文模式也截斷，回退原始版本')
       return component
     }
+    // esbuild TSX 語法驗證
+    const valid = await validateComponentSyntax(code, component.path)
+    if (!valid) {
+      logger.warn({ path: component.path }, '大組件 fallback 全文模式 TSX 語法錯誤，回退原始版本')
+      return component
+    }
     return { path: component.path, content: code, description: component.description }
   }
 
@@ -2666,6 +2695,13 @@ SEARCH 部分必須精確匹配原始代碼（逐字元對應）。
 
   if (appliedCount === 0) {
     logger.warn({ path: component.path }, '所有 SEARCH/REPLACE block 都失敗，回退原始版本')
+    return component
+  }
+
+  // esbuild TSX 語法驗證 — SEARCH/REPLACE 可能引入語法錯誤
+  const valid = await validateComponentSyntax(modifiedContent, component.path)
+  if (!valid) {
+    logger.warn({ path: component.path, applied: appliedCount, failed: failedCount }, 'SEARCH/REPLACE 後 TSX 語法錯誤，回退原始版本')
     return component
   }
 
