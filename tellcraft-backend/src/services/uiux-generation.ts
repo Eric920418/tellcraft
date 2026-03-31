@@ -6330,7 +6330,7 @@ export async function refineFullStackCode(
   const response = await callClaude(
     systemPrompt,
     [{ role: 'user', content: userMessage }],
-    { maxTokens: 16000, temperature, promptLabel: 'refine-fullstack', maxContinuations: 2 },
+    { maxTokens: 32768, temperature, promptLabel: 'refine-fullstack', maxContinuations: 2 },
     trackingContext,
     onTextDelta
   )
@@ -6365,12 +6365,11 @@ export async function refineFullStackCode(
   let match: RegExpExecArray | null
   while ((match = tsxRegex.exec(response.content)) !== null) {
     const path = match[1].trim()
-    const content = match[2]
+    const content = stripLlmMetaLines(match[2].trim())
 
     if (isBackendPath(path)) {
       modifiedBackend.set(path, content)
     } else {
-      // 分類前端：是否為已知 page
       const isPage = currentCode.pages.some(p => p.path === path) || path.includes('/page.')
       if (isPage) {
         modifiedFrontendPages.set(path, content)
@@ -6381,7 +6380,7 @@ export async function refineFullStackCode(
   }
 
   while ((match = cssRegex.exec(response.content)) !== null) {
-    modifiedStyles = match[2]
+    modifiedStyles = stripLlmMetaLines(match[2].trim())
   }
 
   // 無任何修改也無刪除 → 失敗
@@ -6429,29 +6428,86 @@ export async function refineFullStackCode(
     }
   }
 
-  // ── 簡易截斷偵測 ──
-  for (const [path, newContent] of [...modifiedFrontendPages.entries(), ...modifiedBackend.entries()]) {
+  // ── 截斷偵測（截斷 → 終止，不是只 log） ──
+  for (const [path, newContent] of [...modifiedFrontendPages.entries(), ...modifiedFrontendComponents.entries(), ...modifiedBackend.entries()]) {
     const original = [...currentCode.pages, ...currentCode.components, ...currentCode.backendFiles].find(f => f.path === path)
     if (!original) continue
     const origLines = original.content.split('\n').length
     const newLines = newContent.split('\n').length
     if (origLines > 30 && newLines < origLines * 0.6) {
-      logger.warn({ path, origLines, newLines }, '全棧迭代偵測到可疑截斷')
+      logger.error({ path, origLines, newLines }, '全棧迭代偵測到代碼截斷，取消本次迭代')
+      return {
+        success: false,
+        error: `修改後的 ${path.split('/').pop()} 內容大幅縮減（${origLines} → ${newLines} 行），疑似代碼截斷。已取消本次修改，請重新嘗試或描述更小範圍的修改。`,
+      }
     }
+  }
+
+  // ── Props Interface 保護（前端檔案） ──
+  const frontendPatches: RefinePatchSet = {
+    modifiedPages: modifiedFrontendPages,
+    modifiedComponents: modifiedFrontendComponents,
+    modifiedStyles,
+  }
+  const filteredFrontend = filterInterfaceBreakingChanges(
+    { pages: currentCode.pages, components: currentCode.components, styles: currentCode.styles },
+    frontendPatches,
+    userFeedback,
+  )
+  // 用過濾後的版本重建 mergedPages/mergedComponents
+  const finalPages = currentCode.pages
+    .filter(p => !deletedPaths.includes(p.path))
+    .map(p => filteredFrontend.modifiedPages.has(p.path) ? { ...p, content: filteredFrontend.modifiedPages.get(p.path)! } : p)
+  for (const [path, content] of filteredFrontend.modifiedPages) {
+    if (!finalPages.some(p => p.path === path)) finalPages.push({ path, content, description: '' })
+  }
+  const finalComponents = currentCode.components
+    .filter(c => !deletedPaths.includes(c.path))
+    .map(c => filteredFrontend.modifiedComponents.has(c.path) ? { ...c, content: filteredFrontend.modifiedComponents.get(c.path)! } : c)
+  for (const [path, content] of filteredFrontend.modifiedComponents) {
+    if (!finalComponents.some(c => c.path === path)) finalComponents.push({ path, content, description: '' })
+  }
+
+  // ── 語法驗證（前端修改的檔案） ──
+  const modifiedFrontendPaths = new Set([...filteredFrontend.modifiedPages.keys(), ...filteredFrontend.modifiedComponents.keys()])
+  const frontendForCheck = [...finalPages, ...finalComponents].filter(f => modifiedFrontendPaths.has(f.path))
+  if (frontendForCheck.length > 0) {
+    const syntaxChecked = await checkAndFixSyntaxErrors(frontendForCheck, trackingContext)
+    let stillBroken = syntaxChecked.filter(f => getSyntaxErrors(f.path, f.content).length > 0)
+    if (stillBroken.length > 0) {
+      const esbuildFixed = await validateAndFixFiles(
+        stillBroken.map(f => ({ path: f.path, content: f.content })),
+        trackingContext,
+      )
+      stillBroken = esbuildFixed.filter(r => r.hadError && !r.fixed).map(r => ({ path: r.path, content: r.content, description: '' }))
+      for (const r of esbuildFixed.filter(r => r.fixed)) {
+        const idx = syntaxChecked.findIndex(f => f.path === r.path)
+        if (idx >= 0) syntaxChecked[idx] = { ...syntaxChecked[idx], content: r.content }
+      }
+    }
+    if (stillBroken.length > 0) {
+      return {
+        success: false,
+        error: `全棧修改後出現語法錯誤（${stillBroken.map(f => f.path.split('/').pop()).join('、')}），已自動取消。請重新描述修改需求。`,
+      }
+    }
+    const fixedMap = new Map(syntaxChecked.map(f => [f.path, f.content]))
+    for (const p of finalPages) { if (fixedMap.has(p.path)) p.content = fixedMap.get(p.path)! }
+    for (const c of finalComponents) { if (fixedMap.has(c.path)) c.content = fixedMap.get(c.path)! }
   }
 
   logger.info({
     deletedPaths: deletedPaths.length,
-    modifiedFrontend: modifiedFrontendPages.size + modifiedFrontendComponents.size,
+    modifiedFrontend: modifiedFrontendPaths.size,
     modifiedBackend: modifiedBackend.size,
     modifiedStyles: !!modifiedStyles,
   }, '全棧迭代完成')
 
   return {
     success: true,
-    pages: mergedPages,
-    components: mergedComponents,
-    styles: modifiedStyles || currentCode.styles,
+    pages: finalPages,
+    components: finalComponents,
+    styles: filteredFrontend.modifiedStyles || currentCode.styles,
     backendFiles: mergedBackend,
     deletedPaths: deletedPaths.length > 0 ? deletedPaths : undefined,
   }
@@ -6503,16 +6559,26 @@ ${fileList}
 
 ## Server Action 調用約定
 前端調用格式：\`actionFn({ _stepSummary: '操作描述', ...data })\`
-lib/actions 內部用 \`if (op.includes('...'))\` 分派子操作。修改時必須保持 _stepSummary 與 dispatch 一致。
+lib/actions 內部用 \`if (op === '...')\` 精確匹配子操作（不要用 includes，防止子字串碰撞）。修改時必須保持 _stepSummary 與 dispatch 一致。
+
+## 偵測與修復 Mock Data 組件（重要！）
+如果發現前端組件使用 useState 硬編碼假數據（如 \`const [todos, setTodos] = useState([{ id: 1, title: '範例' }])\`）而非呼叫 Server Action：
+1. 找到對應的 Server Action（app/actions/*.ts）和業務邏輯（lib/actions/*.ts）
+2. 查看 lib/actions 的 dispatch 分支，找到正確的 _stepSummary 值
+3. 將 mock data 替換為 Server Action 呼叫：\`const data = await actionFn({ _stepSummary: '查詢XXX列表' })\`
+4. 新增/修改/刪除操作同理：呼叫對應的 _stepSummary 分支
+5. 保持 'use client' 和原有 UI 結構不變
 
 ## 修改規則
 1. **只修改用戶要求的部分**，不要改動不相關的檔案
-2. 前端保持 'use client' 指令、motion/react 動畫、next/font 字體、Tailwind CSS
-3. 後端保持 _stepSummary dispatch 模式，保持參數化查詢（$1, $2...），禁止字串拼接 SQL
-4. **禁止修改 lib/db.ts**
-5. 移除功能時：前端頁面 + app/actions + lib/actions + api route 必須一起處理
-6. 移除功能後：更新相關的導航連結、路由跳轉、條件判斷
-7. 保持無障礙功能（aria-label 等）
+2. **最小改動原則**：runtime error（undefined/null）→ 加 \`?.\` optional chaining，不要重構資料流
+3. 前端保持 'use client' 指令、motion/react 動畫、next/font 字體、Tailwind CSS
+4. 後端保持 _stepSummary dispatch 模式，保持參數化查詢（$1, $2...），禁止字串拼接 SQL
+5. **禁止修改 lib/db.ts**
+6. 移除功能時：前端頁面 + app/actions + lib/actions + api route 必須一起處理
+7. 移除功能後：更新相關的導航連結、路由跳轉、條件判斷
+8. 保持無障礙功能（aria-label 等）
+9. **嚴禁修改 Props Interface / export 簽名**（除非用戶明確要求）
 
 ## 輸入驗證（最高優先）
 在修改代碼之前，先判斷用戶的訊息是否為**明確且可執行的修改請求**。

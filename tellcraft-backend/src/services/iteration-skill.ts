@@ -154,24 +154,10 @@ function classifyIterationScope(
 ): 'frontend' | 'fullstack' {
   if (!coderCompleted) return 'frontend'
 
-  const lower = feedback.toLowerCase()
-  const fullstackSignals = [
-    // 功能級操作（跨層）
-    '拿掉', '移除功能', '刪除功能', '去掉功能', '不要這個功能', '移除',
-    'remove feature', 'delete feature', 'remove the',
-    // 後端明確
-    '驗證邏輯', '登入邏輯', '註冊邏輯', 'api邏輯', '後端邏輯',
-    '修改api', '改api', '新增api', '刪除api',
-    '資料庫', 'database', 'server action',
-    '後端', 'backend',
-  ]
-
-  if (fullstackSignals.some(s => lower.includes(s))) return 'fullstack'
-
-  // 長文本且包含「功能」→ 可能是功能級描述
-  if (feedback.length >= 20 && lower.includes('功能')) return 'fullstack'
-
-  return 'frontend'
+  // coderCompleted=true → 永遠走 fullstack
+  // LLM 收到完整代碼（前端+後端），純 CSS 問題它自然只改 CSS
+  // 不需要靠 keyword 猜測，避免「新增功能沒反應」被誤路由到 frontend-only
+  return 'fullstack'
 }
 
 /**
@@ -370,9 +356,11 @@ ${enrichedFeedback}`
         logger.info({ conversationId }, '全棧迭代 fallback：無後端代碼')
         // 下方走 frontend 分支
       } else {
+        // stub 還原（全棧路徑也需要，防止 LLM 收到紅色 stub）
+        const restoredFrontend = await restoreStubComponents(fullCode.frontend, state.projectId || projectId)
         logger.info({ conversationId, backendFiles: fullCode.backend.length }, '啟動全棧迭代')
         const fsResult = await refineFullStackCode(
-          { ...fullCode.frontend, backendFiles: fullCode.backend },
+          { ...restoredFrontend, backendFiles: fullCode.backend },
           enrichedFeedback,
           {
             designSystem: state.uiuxDesignSystem,
@@ -426,7 +414,12 @@ ${enrichedFeedback}`
           updatedCode.components = updatedCode.components.filter(c => !deletedPaths!.includes(c.path))
         }
 
-        // 儲存前端
+        // 儲存前端（sanitize 先於 DB 寫入）
+        const fsSanitized = sanitizeCodeForDeploy(updatedCode)
+        if (fsSanitized.fixes.length > 0) {
+          logger.info({ fixes: fsSanitized.fixes }, '全棧迭代結果存入 DB 前 sanitize 修復')
+          updatedCode = fsSanitized.code
+        }
         state.uiuxGeneratedCode = updatedCode
         if (pid) {
           await db.upsertProjectFiles(pid, 'uiux',
@@ -560,8 +553,8 @@ ${enrichedFeedback}`
     }
 
     const iterMsg = repeatCount >= 1
-      ? `**設計已更新！** (第 ${state.iterationCount} 次迭代)\n\n本次針對重複問題進行了深層修復，請仔細確認效果。\n\n---\n\n輸入「**部署**」重新上線，或繼續提供修改建議。`
-      : `**設計已更新！** (第 ${state.iterationCount} 次迭代)\n\n請在預覽面板查看修改效果。\n\n---\n\n輸入「**部署**」重新上線，或繼續提供修改建議。`
+      ? `**已嘗試修改** (第 ${state.iterationCount} 次迭代)\n\n本次針對重複問題進行了深層修復，請在預覽面板確認效果。如果問題仍在，請繼續描述。\n\n---\n\n輸入「**部署**」重新上線，或繼續提供修改建議。`
+      : `**已嘗試修改** (第 ${state.iterationCount} 次迭代)\n\n請在預覽面板確認效果。如果問題仍在，請繼續描述。\n\n---\n\n輸入「**部署**」重新上線，或繼續提供修改建議。`
 
     // 取得 Coder 後端檔案供 WebContainer 預覽
     const coderFiles = pid ? await db.getProjectFiles(pid, 'coder') : []
