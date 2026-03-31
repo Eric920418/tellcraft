@@ -85,6 +85,7 @@ pm2 describe tellcraft-backend            # 詳細資訊（記憶體/重啟次�
 | **Web Clone Service** | `services/web-clone-service.ts` | Clone 核心：增強版 DOM/CSS 提取（CLONE_EXTRACTION_SCRIPT）、section 切割、逐 section Sonnet Vision 生成（generateSectionCode+referenceHint）、代碼合併（assembleSections）+ 圖片模式：analyzeCloneImages（Haiku Vision 分析）、generatePageFromImage（Sonnet Vision 整頁生成）、assembleImagePages（多頁組裝）、mergeImageDesignSystems |
 | **Coder Phases** | `workers/phase-handlers/coder-phases.ts`（~490 行） | Coder Skill：讀 BDD 產出 → RED Phase（靜態 + Stub 全場景）→ executeCoderPipeline → 保存 project_files(coder) → 合併代碼 + executeCoderTesting（GREEN Phase 紅綠燈） |
 | **Feature Alignment Gate** | `services/feature-alignment-gate.ts`（~500 行） | 阻斷式 Feature 品質閘門：6 項深度對齊檢查（Summary 唯一性/Column Coverage/FK Reference/Response Field 命名/VAR-System/Summary↔actionsYml）+ LLM 自動修復（2 輪），修不好阻塞 pipeline |
+| **Syntax Validator** | `services/syntax-validator.ts`（~180 行） | 共用 esbuild TSX 語法驗證 + Haiku LLM 修復。被 coder-generation（組件改寫）和 uiux-generation（迭代 refineCode）共用 |
 | **RED Phase Validator** | `services/red-phase-validator.ts`（~1050 行） | SDD RED Phase 三層驗證：Layer 1 靜態規格檢查（11 個零 LLM 檢查，~2ms，含 Schema DataTable 深度對齊）+ Layer 2 StubHttpAdapter 全場景驗證（~1-2s）+ Layer 2.5 RoutingStubAdapter 路由匹配驗證（in-process Express，~1-2s）|
 | **StubHttpAdapter** | `lib/specformula/http/stub-adapter.ts`（~20 行） | RED Phase Layer 2 用的 HTTP stub，所有路由回 501 |
 | **RoutingStubAdapter** | `lib/specformula/http/routing-stub-adapter.ts`（~65 行） | RED Phase Layer 2.5 用的路由感知 stub，in-process Express 真實路由匹配（匹配→501，不匹配→404），透過 SupertestAdapter 做 in-process HTTP 測試 |

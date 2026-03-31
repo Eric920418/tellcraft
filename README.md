@@ -945,6 +945,22 @@ psql "$DATABASE_URL" -f tellcraft-backend/migrations/xxx.sql
 - **Guest 限制**（03-03）：Fast Mode Only + 一次使用 + 雙重防繞過
 - **專案快捷入口**（03-03）：Dashboard/首頁一鍵進入對話
 
+### 迭代 Skill 強化 + 組件語法驗證（2026-03-31）
+
+**共用語法驗證模組 `syntax-validator.ts`**：
+- **esbuild TSX 驗證**：比 TypeScript `transpileModule()` 更嚴格，能捕捉更多 JSX 結構性問題
+- **LLM 語法修復**（Haiku，~$0.002/次）：esbuild 驗證失敗 → 取得具體錯誤 → Haiku 修復 → 再驗證
+- **批量修復**：`validateAndFixFiles()` 支援多檔案同時修復
+
+**迭代 Skill（refineCode）強化**：
+- **二次驗證門**：TypeScript transpiler 驗證失敗 → esbuild + Haiku 修復再試一次 → 仍失敗才取消
+- **既有壞組件修復（取代 stub）**：非修改檔案的語法錯誤先嘗試 esbuild + LLM 修復，修不好才替換為紅色 stub
+- **sanitize 提前到 DB 存入前**：`sanitizeCodeForDeploy()` 在 `upsertProjectFiles()` 之前執行，確保 DB 存入乾淨代碼
+
+**組件改寫語法驗證（rewriteComponentForServerActions）**：
+- 全文改寫、diff fallback、SEARCH/REPLACE 三個出口都加入 esbuild TSX 驗證
+- 驗證失敗 → 回退到 diff 模式重試或原始組件
+
 ### Coder Pipeline 可靠性提升（2026-03-31）
 
 **Feature Alignment Gate（阻斷式閘門）**：

@@ -8,6 +8,7 @@ import * as db from '../db/client'
 import { createLogger } from '../lib/logger'
 
 import { sanitizeForPreview } from './code-verify'
+import { sanitizeCodeForDeploy } from './deployer'
 
 const logger = createLogger('iteration-skill')
 import type { FlowState } from '../types/flow-state'
@@ -476,6 +477,13 @@ ${enrichedFeedback}`
         changedFiles.push('app/globals.css')
       }
       recordIterationHistory(state, userFeedback, changedFiles!)
+
+      // sanitize 在存入 DB 之前（不是之後），確保 DB 裡的代碼是乾淨的
+      const preSaveSanitized = sanitizeCodeForDeploy(updatedCode)
+      if (preSaveSanitized.fixes.length > 0) {
+        logger.info({ fixes: preSaveSanitized.fixes }, '迭代結果存入 DB 前 sanitize 修復')
+        updatedCode = preSaveSanitized.code
+      }
 
       if (pid) {
         await db.upsertProjectFiles(pid, 'uiux',

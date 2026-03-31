@@ -16,6 +16,7 @@ import { createLogger } from '../lib/logger'
 import { safeParseJson } from '../utils/safe-parse-json'
 import { isQueryAction } from './actions-design'
 import { sanitizeNamedImports } from '../utils/sanitize-named-imports'
+import { validateComponentSyntax } from './syntax-validator'
 
 const logger = createLogger('coder-generation')
 
@@ -2496,22 +2497,6 @@ ${interfacesText}
 ${component.content}
 
 請改寫此組件，將 mock 數據替換為 Server Action 調用。路徑保持不變：${component.path}`
-}
-
-/**
- * esbuild TSX 語法驗證 — 捕捉 LLM 改寫後的截斷/壞 JSX。
- * 返回 true 表示語法正確，false 表示有語法錯誤。
- */
-async function validateComponentSyntax(code: string, filePath: string): Promise<boolean> {
-  try {
-    const esbuild = await import('esbuild')
-    const isTsx = filePath.endsWith('.tsx') || filePath.endsWith('.jsx') || code.includes('</') || code.includes('/>') || /<[A-Z]/.test(code)
-    await esbuild.transform(code, { loader: isTsx ? 'tsx' : 'ts', jsx: 'preserve' })
-    return true
-  } catch (err) {
-    logger.warn({ path: filePath, error: err instanceof Error ? err.message : String(err) }, '組件 TSX 語法驗證失敗')
-    return false
-  }
 }
 
 /**

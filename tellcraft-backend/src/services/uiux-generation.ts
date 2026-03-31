@@ -15,6 +15,7 @@ import { getMoodPromptBlock, getMoodAnimationHint, getMoodRwdHint, getMoodSummar
 import { selectCompositionPatterns, formatPatternsForPrompt, listPatternsForVariants } from './composition-patterns'
 import { formatStructuredDataForPrompt } from './reference-analyzer'
 import { createLogger } from '../lib/logger'
+import { validateAndFixFiles } from './syntax-validator'
 
 const logger = createLogger('uiux-generation')
 
@@ -5989,9 +5990,27 @@ ${codeBlocks.join('\n\n')}
   )
   if (modifiedForSyntaxCheck.length > 0) {
     const syntaxChecked = await checkAndFixSyntaxErrors(modifiedForSyntaxCheck, trackingContext)
-    const stillBroken = syntaxChecked.filter(f => getSyntaxErrors(f.path, f.content).length > 0)
+    let stillBroken = syntaxChecked.filter(f => getSyntaxErrors(f.path, f.content).length > 0)
+
+    // 二次驗證：esbuild TSX 驗證 + Haiku LLM 修復（checkAndFixSyntaxErrors 漏網的）
     if (stillBroken.length > 0) {
-      logger.error({ paths: stillBroken.map(f => f.path) }, 'refineCode：語法修復失敗，取消本次迭代')
+      logger.info({ paths: stillBroken.map(f => f.path) }, 'refineCode：TypeScript 語法修復失敗，嘗試 esbuild + LLM 修復')
+      const esbuildFixed = await validateAndFixFiles(
+        stillBroken.map(f => ({ path: f.path, content: f.content })),
+        trackingContext,
+      )
+      // 更新修復結果
+      for (const r of esbuildFixed) {
+        if (r.fixed) {
+          const idx = syntaxChecked.findIndex(f => f.path === r.path)
+          if (idx >= 0) syntaxChecked[idx] = { ...syntaxChecked[idx], content: r.content }
+        }
+      }
+      stillBroken = esbuildFixed.filter(r => r.hadError && !r.fixed).map(r => ({ path: r.path, content: r.content, description: '' }))
+    }
+
+    if (stillBroken.length > 0) {
+      logger.error({ paths: stillBroken.map(f => f.path) }, 'refineCode：所有語法修復手段均失敗，取消本次迭代')
       return {
         success: false,
         error: `代碼修改後出現語法錯誤（${stillBroken.map(f => f.path.split('/').pop()).join('、')}），已自動取消。請重新描述修改需求，或嘗試更小範圍的修改。`,
@@ -6005,20 +6024,49 @@ ${codeBlocks.join('\n\n')}
     }
   }
 
-  // ── 非修改檔案的既有語法錯誤掃描：stub 替換，避免夾帶舊錯誤進 DB ──
+  // ── 非修改檔案的既有語法錯誤掃描：先嘗試修復，修不好才 stub ──
   const unstubbed = [...mergedCode.pages, ...mergedCode.components].filter(
     f => !patchedPaths.has(f.path) && getSyntaxErrors(f.path, f.content).length > 0
   )
   if (unstubbed.length > 0) {
-    logger.warn({ paths: unstubbed.map(f => f.path) }, 'refineCode：非修改檔案有既有語法錯誤，替換為 stub')
-    const stubMap = new Map(unstubbed.map(f => {
+    logger.warn({ paths: unstubbed.map(f => f.path) }, 'refineCode：非修改檔案有既有語法錯誤，嘗試修復')
+
+    // 先嘗試 esbuild + LLM 修復
+    const repairResults = await validateAndFixFiles(
+      unstubbed.map(f => ({ path: f.path, content: f.content })),
+      trackingContext,
+    )
+
+    const repairedMap = new Map<string, string>()
+    const unrepairable: Array<{ path: string }> = []
+    for (const r of repairResults) {
+      if (r.fixed) {
+        repairedMap.set(r.path, r.content)
+      } else if (r.hadError) {
+        unrepairable.push({ path: r.path })
+      }
+    }
+
+    if (repairedMap.size > 0) {
+      logger.info({ paths: [...repairedMap.keys()] }, 'refineCode：成功修復既有語法錯誤')
+    }
+
+    // 修不好的才 stub
+    const stubMap = new Map<string, string>()
+    for (const f of unrepairable) {
       const name = (f.path.split('/').pop() || 'Component').replace(/\.\w+$/, '').replace(/[^a-zA-Z0-9]/g, '')
-      const stub = `import React from 'react'\nexport default function ${name || 'ErrorStub'}() {\n  return (\n    <div style={{ border: '2px dashed #ef4444', borderRadius: '8px', padding: '24px', margin: '16px', backgroundColor: '#fef2f2', color: '#991b1b', fontFamily: 'system-ui, sans-serif', textAlign: 'center' as const }}>\n      <p style={{ fontWeight: 600, marginBottom: '8px' }}>此組件有語法錯誤</p>\n      <p style={{ fontSize: '14px', color: '#b91c1c' }}>需要重新生成：${f.path.split('/').pop()}</p>\n    </div>\n  )\n}`
-      return [f.path, stub]
-    }))
+      stubMap.set(f.path, `import React from 'react'\nexport default function ${name || 'ErrorStub'}() {\n  return (\n    <div style={{ border: '2px dashed #ef4444', borderRadius: '8px', padding: '24px', margin: '16px', backgroundColor: '#fef2f2', color: '#991b1b', fontFamily: 'system-ui, sans-serif', textAlign: 'center' as const }}>\n      <p style={{ fontWeight: 600, marginBottom: '8px' }}>此組件有語法錯誤</p>\n      <p style={{ fontSize: '14px', color: '#b91c1c' }}>需要重新生成：${f.path.split('/').pop()}</p>\n    </div>\n  )\n}`)
+    }
+
+    if (unrepairable.length > 0) {
+      logger.warn({ paths: unrepairable.map(f => f.path) }, 'refineCode：既有語法錯誤修復失敗，替換為 stub')
+    }
+
+    // 合併：修復的 + stub 的
+    const allFixMap = new Map([...repairedMap, ...stubMap])
     mergedCode = {
-      pages: mergedCode.pages.map(p => ({ ...p, content: stubMap.get(p.path) ?? p.content })),
-      components: mergedCode.components.map(c => ({ ...c, content: stubMap.get(c.path) ?? c.content })),
+      pages: mergedCode.pages.map(p => ({ ...p, content: allFixMap.get(p.path) ?? p.content })),
+      components: mergedCode.components.map(c => ({ ...c, content: allFixMap.get(c.path) ?? c.content })),
       styles: mergedCode.styles,
     }
   }
