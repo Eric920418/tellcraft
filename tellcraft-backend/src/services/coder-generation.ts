@@ -1921,6 +1921,34 @@ ${exports}
  * 每個 action → app/api/<path>/route.ts
  * 用於 SpecFormula 測試（Mini Express test server 也會參照此映射）
  */
+/**
+ * 從 action 生成的代碼中提取所有 _stepSummary dispatch 值
+ * 用於 API route 自動注入 _stepSummary
+ */
+function extractDispatchSummaries(actionContent: string): string[] {
+  const summaries: string[] = []
+  // 匹配 op === '...' 或 op.includes('...')
+  for (const m of actionContent.matchAll(/op\s*===\s*['"]([^'"]+)['"]/g)) {
+    summaries.push(m[1])
+  }
+  for (const m of actionContent.matchAll(/op\.includes\(['"]([^'"]+)['"]\)/g)) {
+    if (!summaries.includes(m[1])) summaries.push(m[1])
+  }
+  return summaries
+}
+
+/**
+ * 猜測 _stepSummary 對應的 HTTP method
+ * 查詢/列表 → GET，建立/新增 → POST，編輯/更新 → PUT，刪除/移除 → DELETE
+ */
+function guessHttpMethodForSummary(summary: string): string {
+  if (/查詢|列表|取得|獲取|搜尋|list|query|get|search|fetch/i.test(summary)) return 'GET'
+  if (/建立|新增|註冊|create|add|register|sign.?up/i.test(summary)) return 'POST'
+  if (/編輯|更新|修改|update|edit|modify/i.test(summary)) return 'PUT'
+  if (/刪除|移除|delete|remove/i.test(summary)) return 'DELETE'
+  return 'POST' // 預設
+}
+
 export function generateApiRoutes(
   actions: ActionEntry[],
   actionsYml: string
@@ -1954,44 +1982,30 @@ export function generateApiRoutes(
 
     const importPath = `@/lib/actions/${toKebabCase(action.name)}`
     const fnName = toCamelCase(action.name)
-    const inputType = `${toPascalCase(action.name)}Input`
 
-    // Derive the route file path from the API path
-    // /api/orders/:id → app/api/orders/[id]/route.ts
     const rawRouteDir = meta.path
-      .replace(/^\//, '')  // remove leading slash
-      .replace(/:(\w+)/g, '[$1]')  // :id → [id]
-    // 確保路徑以 app/ 開頭（Next.js App Router 規範）
+      .replace(/^\//, '')
+      .replace(/:(\w+)/g, '[$1]')
     const routeDir = rawRouteDir.startsWith('app/') ? rawRouteDir : `app/${rawRouteDir}`
 
+    // 從 action 代碼中提取所有 _stepSummary dispatch 值
+    const summaries = extractDispatchSummaries(action.content)
+
     let content: string
-    if (meta.method === 'GET') {
-      content = `import { NextRequest, NextResponse } from 'next/server'
+    if (summaries.length <= 1) {
+      // 單操作 action → 簡單路由（自動注入唯一的 _stepSummary）
+      const singleSummary = summaries[0] || action.summary || ''
+      const isQuery = meta.method === 'GET'
+      const defaultStatus = isQuery ? 200 : (meta.method === 'POST' ? 201 : 200)
+
+      if (isQuery) {
+        content = `import { NextRequest, NextResponse } from 'next/server'
 import { ${fnName} } from '${importPath}'
 
 export async function GET(req: NextRequest) {
   try {
     const params = Object.fromEntries(req.nextUrl.searchParams.entries())
-    const result = await ${fnName}(params as unknown as Parameters<typeof ${fnName}>[0])
-    const status = (result as any).__status || 200
-    return NextResponse.json(result, { status })
-  } catch (error: unknown) {
-    const message = error instanceof Error ? error.message : 'Unknown error'
-    return NextResponse.json({ error: message }, { status: 400 })
-  }
-}
-`
-    } else {
-      // POST/PUT/DELETE/PATCH
-      const defaultStatus = meta.method === 'POST' ? 201 : 200
-      content = `import { NextRequest, NextResponse } from 'next/server'
-import { ${fnName} } from '${importPath}'
-import type { ${inputType} } from '${importPath}'
-
-export async function ${meta.method}(req: NextRequest) {
-  try {
-    const body: ${inputType} = await req.json()
-    const result = await ${fnName}(body)
+    const result = await ${fnName}({ _stepSummary: '${singleSummary}', ...params } as any)
     const status = (result as any).__status || ${defaultStatus}
     return NextResponse.json(result, { status })
   } catch (error: unknown) {
@@ -1999,6 +2013,102 @@ export async function ${meta.method}(req: NextRequest) {
     return NextResponse.json({ error: message }, { status: 400 })
   }
 }
+`
+      } else {
+        content = `import { NextRequest, NextResponse } from 'next/server'
+import { ${fnName} } from '${importPath}'
+
+export async function ${meta.method}(req: NextRequest) {
+  try {
+    const body = await req.json()
+    const result = await ${fnName}({ _stepSummary: '${singleSummary}', ...body })
+    const status = (result as any).__status || ${defaultStatus}
+    return NextResponse.json(result, { status })
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : 'Unknown error'
+    return NextResponse.json({ error: message }, { status: 400 })
+  }
+}
+`
+      }
+    } else {
+      // 多操作 action → 多方法路由，按 HTTP method 自動注入 _stepSummary
+      // 前端只需要用正確的 HTTP method，不需要知道 _stepSummary
+      const methodHandlers: string[] = []
+      const usedMethods = new Set<string>()
+
+      // 按 summary 推斷 HTTP method 並生成 handler
+      for (const summary of summaries) {
+        const method = guessHttpMethodForSummary(summary)
+        if (usedMethods.has(method)) continue // 同一 method 只取第一個
+        usedMethods.add(method)
+
+        if (method === 'GET') {
+          methodHandlers.push(`export async function GET(req: NextRequest) {
+  try {
+    const params = Object.fromEntries(req.nextUrl.searchParams.entries())
+    const result = await ${fnName}({ _stepSummary: '${summary}', ...params } as any)
+    const status = (result as any).__status || 200
+    return NextResponse.json(result, { status })
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : 'Unknown error'
+    return NextResponse.json({ error: message }, { status: 500 })
+  }
+}`)
+        } else if (method === 'DELETE') {
+          methodHandlers.push(`export async function DELETE(req: NextRequest) {
+  try {
+    const { searchParams } = new URL(req.url)
+    const id = searchParams.get('id')
+    const result = await ${fnName}({ _stepSummary: '${summary}', ${meta.path.includes(':id') ? 'id: id!' : 'id'} } as any)
+    const status = (result as any).__status || 200
+    return NextResponse.json(result, { status })
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : 'Unknown error'
+    return NextResponse.json({ error: message }, { status: 400 })
+  }
+}`)
+        } else {
+          const defaultStatus = method === 'POST' ? 201 : 200
+          methodHandlers.push(`export async function ${method}(req: NextRequest) {
+  try {
+    const body = await req.json()
+    const result = await ${fnName}({ _stepSummary: '${summary}', ...body })
+    const status = (result as any).__status || ${defaultStatus}
+    return NextResponse.json(result, { status })
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : 'Unknown error'
+    return NextResponse.json({ error: message }, { status: 400 })
+  }
+}`)
+        }
+      }
+
+      // 如果有 summary 但 method 重複（例如兩個都是 POST），用 _stepSummary body 派發
+      // 檢查是否有未使用的 summaries
+      const unmapped = summaries.filter(s => {
+        const m = guessHttpMethodForSummary(s)
+        return [...usedMethods].filter(u => u === m).length > 1
+      })
+      if (unmapped.length > 0 && !usedMethods.has('POST')) {
+        // 加一個 POST handler 接受前端傳入的 _stepSummary
+        methodHandlers.push(`export async function POST(req: NextRequest) {
+  try {
+    const body = await req.json()
+    const result = await ${fnName}(body)
+    const status = (result as any).__status || 200
+    return NextResponse.json(result, { status })
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : 'Unknown error'
+    return NextResponse.json({ error: message }, { status: 400 })
+  }
+}`)
+      }
+
+      content = `import { NextRequest, NextResponse } from 'next/server'
+import { ${fnName} } from '${importPath}'
+
+${methodHandlers.join('\n\n')}
 `
     }
 
@@ -2544,11 +2654,88 @@ export async function rewriteComponentForServerActions(
     return rewriteWithDiffMode(component, availableActions, actionImplementations, trackingContext)
   }
 
+  // fetch('/api/...') 偵測：LLM 應該用 Server Action import 而非 fetch
+  // 如果用了 fetch → 自動注入 _stepSummary 到 fetch body，防止 dispatch 失敗
+  const fixedCode = fixFetchCallsWithStepSummary(code, actionImplementations)
+
   return {
     path: component.path,
-    content: code,
+    content: fixedCode,
     description: component.description,
   }
+}
+
+/**
+ * 偵測 fetch('/api/...') 呼叫並自動注入 _stepSummary。
+ * LLM 應該用 Server Action import，但有時會用 fetch — 這時 body 缺少 _stepSummary
+ * 會導致 action dispatch 找不到分支 → throw → 功能「沒反應」。
+ */
+function fixFetchCallsWithStepSummary(
+  code: string,
+  actionImplementations?: { path: string; content: string }[],
+): string {
+  if (!actionImplementations?.length) return code
+  if (!/fetch\s*\(\s*['"`]\/api\//.test(code)) return code
+
+  // 從 action implementations 提取 {actionName → stepSummaries by method}
+  const actionSummaries = new Map<string, { get?: string; post?: string; put?: string; delete?: string }>()
+  for (const impl of actionImplementations) {
+    const actionName = impl.path.replace(/.*\//, '').replace(/\.\w+$/, '') // lib/actions/manage-todo.ts → manage-todo
+    const summaries = extractDispatchSummaries(impl.content)
+    const methods: { get?: string; post?: string; put?: string; delete?: string } = {}
+    for (const s of summaries) {
+      const method = guessHttpMethodForSummary(s).toLowerCase() as 'get' | 'post' | 'put' | 'delete'
+      if (!methods[method]) methods[method] = s
+    }
+    actionSummaries.set(actionName, methods)
+    // 也用 underscore 版本（manage_todo）
+    actionSummaries.set(actionName.replace(/-/g, '_'), methods)
+  }
+
+  let result = code
+
+  // 匹配 fetch('/api/xxx', { method: 'POST', ... body: JSON.stringify({ ... }) })
+  // 在 JSON.stringify({ 之後注入 _stepSummary
+  const fetchRegex = /fetch\s*\(\s*['"`](\/api\/([^'"`]+?))['"`]\s*,\s*\{([^}]*?)body\s*:\s*JSON\.stringify\s*\(\s*\{/g
+  let match: RegExpExecArray | null
+  const replacements: Array<{ start: number; end: number; replacement: string }> = []
+
+  while ((match = fetchRegex.exec(result)) !== null) {
+    const apiPath = match[2] // e.g. "manage_todo" or "toggle_todo_completion"
+    const methodMatch = match[3].match(/method\s*:\s*['"`](\w+)['"`]/)
+    const httpMethod = (methodMatch?.[1] || 'POST').toLowerCase()
+
+    // 找到對應的 action
+    const actionName = apiPath.replace(/\//g, '_').replace(/\[.*?\]/g, '') // manage_todo/[id] → manage_todo_
+    const summaryMap = actionSummaries.get(actionName) || actionSummaries.get(apiPath)
+    if (!summaryMap) continue
+
+    const stepSummary = summaryMap[httpMethod as keyof typeof summaryMap]
+    if (!stepSummary) continue
+
+    // 檢查是否已經有 _stepSummary
+    const afterBrace = result.substring(match.index + match[0].length, match.index + match[0].length + 200)
+    if (afterBrace.includes('_stepSummary')) continue
+
+    // 在 JSON.stringify({ 後面注入 _stepSummary
+    const insertPos = match.index + match[0].length
+    replacements.push({
+      start: insertPos,
+      end: insertPos,
+      replacement: ` _stepSummary: '${stepSummary}',`,
+    })
+  }
+
+  // 倒序替換（避免 index 偏移）
+  for (const r of replacements.reverse()) {
+    result = result.substring(0, r.start) + r.replacement + result.substring(r.end)
+  }
+
+  if (replacements.length > 0) {
+    logger.info({ path: 'component', injected: replacements.length }, 'fixFetchCallsWithStepSummary：注入 _stepSummary 到 fetch body')
+  }
+
+  return result
 }
 
 /**
@@ -2690,9 +2877,12 @@ SEARCH 部分必須精確匹配原始代碼（逐字元對應）。
     return component
   }
 
+  // fetch('/api/...') 偵測 + _stepSummary 自動注入
+  const fixedContent = fixFetchCallsWithStepSummary(modifiedContent, actionImplementations)
+
   return {
     path: component.path,
-    content: modifiedContent,
+    content: fixedContent,
     description: component.description,
   }
 }
@@ -2741,6 +2931,19 @@ export async function executeCoderPipeline(
   // Step 4.5: 生成 API Routes（零 LLM，SpecFormula 測試用）
   await callbacks.onProgress('生成 API Routes...', 53)
   const apiRouteFiles = generateApiRoutes(actions, actionsYml)
+
+  // Step 4.6: API Route 靜態驗證 — 確認每個 route 都有 _stepSummary 注入
+  const routesMissingSummary = apiRouteFiles.filter(f => {
+    const hasDispatch = actionFiles.some(a => {
+      const summaries = extractDispatchSummaries(a.content)
+      return summaries.length > 0 && f.path.includes(toKebabCase(a.path.replace('lib/actions/', '').replace('.ts', '')))
+    })
+    return hasDispatch && !f.content.includes('_stepSummary')
+  })
+  if (routesMissingSummary.length > 0) {
+    logger.error({ paths: routesMissingSummary.map(f => f.path) }, 'API Route 缺少 _stepSummary 注入！')
+  }
+
   logger.info({ count: apiRouteFiles.length }, 'API Routes 生成完成')
 
   // Step 5: 識別需改寫的組件（Haiku LLM + regex fallback）

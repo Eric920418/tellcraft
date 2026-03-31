@@ -5949,6 +5949,13 @@ ${getStructureConstraints(tier)}
 4. **opacity/visibility**：是否被設為 opacity-0 或 invisible？
 5. **SSR 水合問題**：window/Math.random 等動態值在 SSR 為空 → 需 useEffect+useState
 6. **條件渲染斷鏈**：觸發條件（hover/scroll/IntersectionObserver）是否正確連接？
+
+## 功能問題診斷（「沒反應」「無法新增」「不能用」類反饋必讀）
+當用戶說功能「沒反應」「無法新增」「按了沒效果」時，依序排查：
+1. **fetch body 缺少 _stepSummary**：找到 fetch 呼叫 → 檢查 body 有沒有 \`_stepSummary\` → 沒有就加上對應的操作名稱（從 lib/actions 的 \`op === '...'\` 分支找）
+2. **catch 吞掉錯誤**：\`catch (e) { console.error(e) }\` 用戶看不到 → 改成顯示在 UI 上（toast/alert）
+3. **API route 回傳格式不匹配**：fetch 回傳的 JSON 結構跟前端取值不一致 → 檢查 \`result.xxx\` 是否存在
+4. **Server Action 未 import**：組件用了 mock data（useState 硬編碼陣列）而非呼叫 Server Action → 替換為 action 呼叫
 ${lockedUploadUrls.length ? `
 ## 圖片資產鎖定（最高優先）
 以下圖片 URL 屬於用戶剛上傳的資產，修改時必須原樣保留：
@@ -6557,9 +6564,33 @@ ${fileList}
 - API Routes：api/*/route.ts（與 Server Actions 平行，供 SpecFormula 測試用）
 - 數據庫連接：lib/db.ts（禁止修改）
 
-## Server Action 調用約定
-前端調用格式：\`actionFn({ _stepSummary: '操作描述', ...data })\`
-lib/actions 內部用 \`if (op === '...')\` 精確匹配子操作（不要用 includes，防止子字串碰撞）。修改時必須保持 _stepSummary 與 dispatch 一致。
+## Server Action / API Route 調用約定（最重要！）
+lib/actions 內部用 \`if (op === '...')\` 精確匹配子操作，\`op = input._stepSummary || ''\`。
+
+**前端調用方式一：Server Action**
+\`actionFn({ _stepSummary: '操作描述', ...data })\`
+
+**前端調用方式二：fetch API Route（更常見）**
+fetch 呼叫 API Route 時，**body 必須包含 _stepSummary**，否則 lib/actions 的 dispatch 找不到分支 → \`throw Error('不支援的操作')\` → 功能「沒反應」。
+
+正確範例：
+\`\`\`typescript
+// 建立
+fetch('/api/manage_todo', { method: 'POST', body: JSON.stringify({ _stepSummary: '建立待辦事項', title, priority }) })
+// 查詢列表
+fetch('/api/manage_todo', { method: 'POST', body: JSON.stringify({ _stepSummary: '查詢待辦事項列表' }) })
+// 編輯
+fetch('/api/manage_todo', { method: 'POST', body: JSON.stringify({ _stepSummary: '編輯待辦事項', id, title }) })
+// 刪除
+fetch('/api/manage_todo', { method: 'POST', body: JSON.stringify({ _stepSummary: '刪除待辦事項', id }) })
+\`\`\`
+
+**診斷「沒反應」問題**：如果用戶說某功能「沒反應」「沒有用」「按了沒效果」：
+1. 找到前端的 fetch 呼叫
+2. 檢查 body 是否有 _stepSummary
+3. 檢查 _stepSummary 的值是否精確匹配 lib/actions 的 \`op === '...'\` 分支
+4. 如果沒有 _stepSummary → 加上正確的值
+5. 如果 catch 只有 console.error → 加 UI 錯誤提示讓用戶看到
 
 ## 偵測與修復 Mock Data 組件（重要！）
 如果發現前端組件使用 useState 硬編碼假數據（如 \`const [todos, setTodos] = useState([{ id: 1, title: '範例' }])\`）而非呼叫 Server Action：

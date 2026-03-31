@@ -945,21 +945,30 @@ psql "$DATABASE_URL" -f tellcraft-backend/migrations/xxx.sql
 - **Guest 限制**（03-03）：Fast Mode Only + 一次使用 + 雙重防繞過
 - **專案快捷入口**（03-03）：Dashboard/首頁一鍵進入對話
 
-### 迭代 Skill 強化 + 組件語法驗證（2026-03-31）
+### 迭代 Skill + Coder 全鏈路正確性大修（2026-03-31）
 
-**共用語法驗證模組 `syntax-validator.ts`**：
-- **esbuild TSX 驗證**：比 TypeScript `transpileModule()` 更嚴格，能捕捉更多 JSX 結構性問題
-- **LLM 語法修復**（Haiku，~$0.002/次）：esbuild 驗證失敗 → 取得具體錯誤 → Haiku 修復 → 再驗證
-- **批量修復**：`validateAndFixFiles()` 支援多檔案同時修復
+**根本修復：`generateApiRoutes` 多方法路由 + `_stepSummary` 自動注入**：
+- **根因**：舊版 API route 模板生成 `manageTodo(body)` 但 body 缺少 `_stepSummary` → action dispatch 找不到分支 → `throw Error('不支援的操作')` → 增刪改查全壞但 SpecFormula 測試 100%（因為測試繞過 API route 直接測 action）
+- **修復**：`generateApiRoutes` 改為多方法路由，從 action 代碼提取 `_stepSummary` dispatch 值，按 HTTP method 自動注入（GET→查詢、POST→建立、PUT→編輯、DELETE→刪除）。前端只需用正確的 HTTP method，不需知道 `_stepSummary`
+- **API route 靜態驗證**：生成後立即檢查每個 route 是否有 `_stepSummary` 注入
+- **`fixFetchCallsWithStepSummary`**：LLM 改寫組件用了 `fetch('/api/...')` 時自動偵測並在 body 注入對應的 `_stepSummary`
 
-**迭代 Skill（refineCode）強化**：
-- **二次驗證門**：TypeScript transpiler 驗證失敗 → esbuild + Haiku 修復再試一次 → 仍失敗才取消
-- **既有壞組件修復（取代 stub）**：非修改檔案的語法錯誤先嘗試 esbuild + LLM 修復，修不好才替換為紅色 stub
-- **sanitize 提前到 DB 存入前**：`sanitizeCodeForDeploy()` 在 `upsertProjectFiles()` 之前執行，確保 DB 存入乾淨代碼
+**迭代 Skill 全棧化**：
+- **`coderCompleted=true` → 永遠走 fullstack**：不再靠 keyword 猜測，LLM 永遠看到完整前後端代碼
+- **fullstack maxTokens 16000→32768**：大專案不截斷
+- **fullstack prompt 大幅強化**：教 fetch + `_stepSummary` 對應關係 + mock data→Server Action 改寫指引 + `===` dispatch 語法
+- **誠實成功訊息**：「設計已更新！」→「已嘗試修改，請確認效果」
 
-**組件改寫語法驗證（rewriteComponentForServerActions）**：
-- 全文改寫、diff fallback、SEARCH/REPLACE 三個出口都加入 esbuild TSX 驗證
-- 驗證失敗 → 回退到 diff 模式重試或原始組件
+**迭代 Skill 防禦體系（前端+全棧雙路徑統一）**：
+- **esbuild TSX 語法驗證**：`syntax-validator.ts` 共用模組，coder 改寫 + 迭代 refineCode + 全棧迭代三處共用
+- **既有壞組件修復**：非修改檔案的語法錯誤先嘗試 esbuild + Haiku 修復，修不好才 stub
+- **stub 偵測 + DB 原版還原**：`restoreStubComponents()` 偵測紅色 stub → 從 `project_files` 的 `skill_source='uiux'` 讀取原版，前端+全棧路徑都有
+- **sanitize 在 DB 存入前**：前端+全棧路徑都在 `upsertProjectFiles` 前執行 `sanitizeCodeForDeploy`
+- **Props Interface 保護**：`filterInterfaceBreakingChanges()` 撤回用戶沒提到的組件的 props/export 修改，前端+全棧路徑都有
+- **反向依賴感知**：`findFilesDependingOn()` 收集 import 了目標組件的上游檔案一起送入 LLM 上下文
+- **最小改動原則**：runtime error 只加 `?.` 防禦，嚴禁重構資料流/改 props 命名/移除 state 變數
+- **功能問題診斷 prompt**：「沒反應」→ 查 fetch body `_stepSummary`、catch 吞錯誤、API 回傳格式、mock data 未替換
+- **全棧路徑 5 層防禦補齊**：`stripLlmMetaLines`、截斷偵測改為終止、語法驗證、Props 保護、sanitize（與前端路徑完全一致）
 
 ### Coder Pipeline 可靠性提升（2026-03-31）
 
