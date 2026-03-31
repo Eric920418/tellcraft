@@ -955,6 +955,73 @@ function hasRemovalIntent(userFeedback: string): boolean {
   return /拿掉|移除|刪除|取消|去掉|不要|不需要|砍掉|remove|delete|drop|get rid of/i.test(userFeedback)
 }
 
+/**
+ * Props Interface 保護：檢查 LLM 是否修改了用戶沒提到的組件的 props interface。
+ * 如果是 → 撤回該檔案的修改，防止「修 A 壞 B」。
+ */
+function extractPropsInterface(content: string): string | null {
+  // 匹配 interface XxxProps { ... } 或 type XxxProps = { ... }
+  const match = content.match(/(?:interface|type)\s+\w*Props\s*[={][\s\S]*?(?:\n\}|\n\))/)
+  return match ? match[0] : null
+}
+
+function extractExportSignature(content: string): string | null {
+  // 匹配 export default function Xxx(...) 或 export function Xxx(...)
+  const match = content.match(/export\s+(?:default\s+)?function\s+\w+\s*\([^)]*\)/)
+  return match ? match[0] : null
+}
+
+function isFileNameMentionedInFeedback(filePath: string, feedback: string): boolean {
+  const basename = (filePath.split('/').pop() || '').replace(/\.\w+$/, '').toLowerCase()
+  if (!basename) return false
+  return feedback.toLowerCase().includes(basename)
+}
+
+export function filterInterfaceBreakingChanges(
+  baseCode: CodeBundle,
+  patches: RefinePatchSet,
+  userFeedback: string,
+): RefinePatchSet {
+  const filteredPages = new Map(patches.modifiedPages)
+  const filteredComponents = new Map(patches.modifiedComponents)
+  const reverted: string[] = []
+
+  const checkAndFilter = (map: Map<string, string>, baseFiles: GeneratedComponent[]) => {
+    for (const [path, newContent] of map) {
+      // 如果用戶明確提到了這個檔案，允許任何修改
+      if (isFileNameMentionedInFeedback(path, userFeedback)) continue
+
+      const baseFile = baseFiles.find(f => f.path === path)
+      if (!baseFile) continue
+
+      const oldProps = extractPropsInterface(baseFile.content)
+      const newProps = extractPropsInterface(newContent)
+      const oldExport = extractExportSignature(baseFile.content)
+      const newExport = extractExportSignature(newContent)
+
+      // Props interface 或 export 簽名被改了 → 撤回
+      const propsChanged = oldProps && newProps && oldProps !== newProps
+      const exportChanged = oldExport && newExport && oldExport !== newExport
+
+      if (propsChanged || exportChanged) {
+        logger.warn({ path, propsChanged: !!propsChanged, exportChanged: !!exportChanged },
+          'filterInterfaceBreakingChanges：撤回未經用戶要求的 interface 修改')
+        map.delete(path)
+        reverted.push(path)
+      }
+    }
+  }
+
+  checkAndFilter(filteredPages, baseCode.pages)
+  checkAndFilter(filteredComponents, baseCode.components)
+
+  if (reverted.length > 0) {
+    logger.info({ reverted }, `filterInterfaceBreakingChanges：撤回 ${reverted.length} 個檔案的 interface 修改`)
+  }
+
+  return { modifiedPages: filteredPages, modifiedComponents: filteredComponents, modifiedStyles: patches.modifiedStyles }
+}
+
 export function findSuspiciousRefineShrinks(
   baseCode: CodeBundle,
   patches: RefinePatchSet,
@@ -5865,6 +5932,15 @@ ${getStructureConstraints(tier)}
 7. 保持無障礙功能（aria-label、focus-visible 等）
 8. 保持現有的互動功能完好（Modal/Dialog 開關、表單 state、事件處理），不要移除 'use client'
 
+## 最小改動原則（最高優先 — 違反此規則的修改會被系統自動撤回）
+9. **runtime error（undefined/null/crash）→ 只加防禦性代碼**：
+   - \`Cannot read properties of undefined\` → 加 \`?.\` optional chaining 或 \`?? defaultValue\`
+   - 例：\`stats.total\` → \`stats?.total ?? 0\`，**不要重構資料傳遞流程**
+10. **樣式問題 → 只改 CSS/className**，不動 JS 邏輯和 state
+11. **嚴禁修改 Props Interface**：不要改任何組件的 \`interface XXXProps\`、函數參數型別、export 簽名（除非用戶明確要求改 props）
+12. **嚴禁修改資料流**：不要改 useState 初始值、useEffect 依賴、Server Action 呼叫方式、props 傳遞結構（除非用戶明確要求）
+13. **嚴禁修改用戶沒提到的組件的功能邏輯**：如果用戶說「修復 StatsBar」，只改 StatsBar.tsx，不要動 page.tsx 的資料獲取邏輯
+
 ## 視覺問題診斷（「看不到」「消失」「沒效果」類反饋必讀）
 當用戶說某效果「看不到」「消失了」「沒有出現」時，不要只調顏色或透明度，依序排查：
 1. **SVG ID 衝突**：組件被多次渲染時，<defs> 內的 gradient/clipPath/filter id 會碰撞 → 用 useId() 確保唯一
@@ -6011,6 +6087,9 @@ ${codeBlocks.join('\n\n')}
       error: `修改後的 ${issue.path.split('/').pop()} 內容大幅縮減（${issue.originalLines} → ${issue.newLines} 行），疑似代碼截斷。已取消本次修改，請重新嘗試或描述更小範圍的修改。`,
     }
   }
+
+  // ── Props Interface 保護：撤回用戶沒提到的組件的 interface 修改 ──
+  effectivePatches = filterInterfaceBreakingChanges(currentCode, effectivePatches, userFeedback)
 
   let mergedCode = mergeCodeBundle(currentCode, effectivePatches)
 
