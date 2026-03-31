@@ -5396,6 +5396,30 @@ export async function refineCode(
     return resolvedPaths
   }
 
+  /**
+   * 反向依賴：找出所有 import 了 targetPath 的檔案。
+   * 讓 LLM 在修改組件 A 時也能看到呼叫端 B，避免改壞 props 介面。
+   */
+  const findFilesDependingOn = (targetPath: string, code: CodeBundle): Set<string> => {
+    const dependents = new Set<string>()
+    const baseName = targetPath.replace(/\.\w+$/, '')
+
+    for (const file of [...code.pages, ...code.components]) {
+      if (file.path === targetPath) continue
+      const importMatches = [...file.content.matchAll(/from\s+['"](@\/[^'"]+|\.\.?\/[^'"]+)['"]/g)]
+      for (const match of importMatches) {
+        const resolved = resolveImportPath(file.path, match[1])
+        if (!resolved) continue
+        const candidates = [resolved, `${resolved}.tsx`, `${resolved}.ts`, `${resolved}/index.tsx`, `${resolved}/index.ts`]
+        if (candidates.some(c => c === targetPath || c === baseName)) {
+          dependents.add(file.path)
+          break
+        }
+      }
+    }
+    return dependents
+  }
+
   const pickRefineTargetBundle = (code: CodeBundle): CodeBundle => {
     const generationProfile = designContext.generationProfile || 'balanced'
     if (generationProfile === 'quality') {
@@ -5437,6 +5461,16 @@ export async function refineCode(
       }
       if (/hero/.test(component.path.toLowerCase()) && /hero|banner/.test(normalizedFeedback)) {
         targetComponentPaths.add(component.path)
+      }
+    }
+
+    // 反向依賴：找出所有 import 了目標組件的檔案，一起放進 LLM 上下文
+    // 防止 LLM 改了組件 A 的 props 介面但不知道父組件 B 怎麼呼叫 A
+    for (const targetPath of [...targetComponentPaths]) {
+      const dependents = findFilesDependingOn(targetPath, code)
+      for (const dep of dependents) {
+        if (code.pages.some(p => p.path === dep)) targetPagePaths.add(dep)
+        else targetComponentPaths.add(dep)
       }
     }
 
