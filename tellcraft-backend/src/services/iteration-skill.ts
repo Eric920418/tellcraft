@@ -72,6 +72,58 @@ async function resolveCurrentCode(state: FlowState): Promise<{
   return null
 }
 
+// ============================================================
+// Stub 偵測 + DB 原版還原
+// ============================================================
+
+const STUB_MARKER = '此組件有語法錯誤'
+
+function isStubComponent(content: string): boolean {
+  return content.includes(STUB_MARKER) && content.includes('需要重新生成')
+}
+
+/**
+ * 偵測 currentCode 中的 stub 組件（紅色錯誤框），從 DB 的 uiux 原版還原。
+ * 解決「壞組件 → stub → LLM 收到 stub → 永遠修不好」的死循環。
+ */
+async function restoreStubComponents(
+  code: { pages: GeneratedComponent[]; components: GeneratedComponent[]; styles: string },
+  projectId: string,
+): Promise<{ pages: GeneratedComponent[]; components: GeneratedComponent[]; styles: string }> {
+  const stubs: string[] = []
+  for (const f of [...code.pages, ...code.components]) {
+    if (isStubComponent(f.content)) stubs.push(f.path)
+  }
+  if (stubs.length === 0) return code
+
+  logger.warn({ stubs }, 'detectStubs：發現 stub 組件，嘗試從 DB 還原原版')
+
+  const restored = {
+    pages: [...code.pages],
+    components: [...code.components],
+    styles: code.styles,
+  }
+
+  for (const stubPath of stubs) {
+    const original = await db.getProjectFile(projectId, 'uiux', stubPath)
+    if (original && !isStubComponent(original.content)) {
+      const pageIdx = restored.pages.findIndex(p => p.path === stubPath)
+      if (pageIdx >= 0) {
+        restored.pages[pageIdx] = { ...restored.pages[pageIdx], content: original.content }
+      }
+      const compIdx = restored.components.findIndex(c => c.path === stubPath)
+      if (compIdx >= 0) {
+        restored.components[compIdx] = { ...restored.components[compIdx], content: original.content }
+      }
+      logger.info({ path: stubPath }, 'stub → 已從 DB uiux 原版還原')
+    } else {
+      logger.warn({ path: stubPath }, 'stub → DB 也無可用原版，保留 stub')
+    }
+  }
+
+  return restored
+}
+
 /**
  * 從 FlowState 或 project_files 取得全棧代碼（前端 + 後端）
  */
@@ -254,7 +306,7 @@ export async function executeIteration(input: {
     })
 
     // 2. 取得現有代碼
-    const currentCode = await resolveCurrentCode(state)
+    let currentCode = await resolveCurrentCode(state)
 
     if (!currentCode) {
       await sendMessage(conversationId, io, {
@@ -266,6 +318,10 @@ export async function executeIteration(input: {
       await saveFlowState(redis, conversationId, state)
       return
     }
+
+    // 2.3 偵測 stub 組件 → 從 DB 還原原版（打破 stub 死循環）
+    const pid = state.projectId || projectId
+    currentCode = await restoreStubComponents(currentCode, pid)
 
     // 2.5 建構 streaming callback（迭代時即時預覽）
     const tailwindConfig = state.uiuxDesignSystem
