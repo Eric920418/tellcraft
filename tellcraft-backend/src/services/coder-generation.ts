@@ -1951,7 +1951,8 @@ function guessHttpMethodForSummary(summary: string): string {
 
 export function generateApiRoutes(
   actions: ActionEntry[],
-  actionsYml: string
+  actionsYml: string,
+  actionFiles?: GeneratedComponent[]
 ): GeneratedComponent[] {
   // 解析 actionsYml 取得 method/path
   let parsed: ActionsYmlStructure | undefined
@@ -1988,8 +1989,9 @@ export function generateApiRoutes(
       .replace(/:(\w+)/g, '[$1]')
     const routeDir = rawRouteDir.startsWith('app/') ? rawRouteDir : `app/${rawRouteDir}`
 
-    // 從 action 代碼中提取所有 _stepSummary dispatch 值
-    const summaries = extractDispatchSummaries(action.content)
+    // 從 action 生成的代碼中提取所有 _stepSummary dispatch 值
+    const actionFile = actionFiles?.find(f => f.path === `lib/actions/${toKebabCase(action.name)}.ts`)
+    const summaries = actionFile ? extractDispatchSummaries(actionFile.content) : []
 
     let content: string
     if (summaries.length <= 1) {
@@ -2930,7 +2932,7 @@ export async function executeCoderPipeline(
 
   // Step 4.5: 生成 API Routes（零 LLM，SpecFormula 測試用）
   await callbacks.onProgress('生成 API Routes...', 53)
-  const apiRouteFiles = generateApiRoutes(actions, actionsYml)
+  const apiRouteFiles = generateApiRoutes(actions, actionsYml, actionFiles)
 
   // Step 4.6: API Route 靜態驗證 — 確認每個 route 都有 _stepSummary 注入
   const routesMissingSummary = apiRouteFiles.filter(f => {
