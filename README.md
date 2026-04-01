@@ -859,14 +859,14 @@ Schema 欄位名包含 image/photo/cover/avatar 等 → 自動生成圖片上傳
 - [x] Upload API 雙模式：Vercel Blob（生產，需 `BLOB_READ_WRITE_TOKEN`）/ 本地 `/public/uploads/`（開發 + WebContainer）
 - [x] `deployer.ts` + `webcontainer-utils.ts` KNOWN_PACKAGES 加 `@vercel/blob`
 
-#### M5：進階 UI Pattern（⬜ 待開發，獨立）
+#### M5：進階 UI Pattern（✅ 已完成 2026-04-01，Prompt 改善）
 
-輪播、相簿、分頁、Modal、排序。
+純 prompt 改善，讓 LLM 生成前端頁面時主動使用輪播/分頁/相簿網格。不加新檔案。
 
-- [ ] 新增 `ui-pattern-templates/`：carousel.ts、gallery.ts、pagination.ts、modal.ts
-- [ ] Structure prompt 增加進階 pattern 指引
-- [ ] BDD entity 有 sort_order/order 欄位 → 拖放排序功能
-- [ ] `inferInteractionHint` 增加 CMS pattern 偵測
+- [x] `bdd-to-ui-spec.ts` UIDataDisplay type 擴展：+`carousel`（活動/推薦）+`gallery`（相簿/作品集）+`paginated_list`（大量資料列表）
+- [x] Haiku 翻譯 prompt 加入判斷指引（何時用 carousel vs paginated_list vs gallery）
+- [x] `formatUISpecForPrompt` 對新 type 加實作提示（useState pattern、grid layout、Modal lightbox）
+- [x] `generateStructure` system prompt 加「進階資料呈現模式」段落：carousel/paginated_list/gallery 的完整 useState + JSX 範例 + 通用規則（>8 項考慮分頁）
 
 #### M6：整合驗證 — 復刻 Learn 專案（⬜ 待開發，依賴 M1-M5）
 

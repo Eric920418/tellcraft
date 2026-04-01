@@ -3584,7 +3584,34 @@ export async function generateStructure(
 ### 資料管理模式
 - 使用 useState 管理列表資料（初始值為有意義的模擬數據）
 - CRUD 操作直接操作 state（前端 demo，不需要 API）
-- 例如：\`const [items, setItems] = useState(initialData)\``
+- 例如：\`const [items, setItems] = useState(initialData)\`
+
+## 進階資料呈現模式（根據 UISpec dataDisplay type 選擇）
+
+### carousel（走馬燈 — 活動/推薦/產品展示）
+- useState 管理 currentIndex
+- 左右箭頭：\`onClick={() => setIndex(prev => (prev + 1) % items.length)}\`
+- 底部指示器（dots）：\`{items.map((_, i) => <button onClick={() => setIndex(i)} className={i === currentIndex ? 'bg-primary' : 'bg-gray-300'} />)}\`
+- data-animate="stagger-children" 入場
+- 自動輪播：\`useEffect(() => { const t = setInterval(() => setIndex(i => (i+1) % len), 5000); return () => clearInterval(t) }, [])\`
+
+### paginated_list（分頁列表 — 會員/文章/訂單）
+- \`const [page, setPage] = useState(1)\`
+- \`const PAGE_SIZE = 10\`
+- \`const totalPages = Math.ceil(items.length / PAGE_SIZE)\`
+- \`const paged = items.slice((page-1) * PAGE_SIZE, page * PAGE_SIZE)\`
+- 底部分頁器：Prev 按鈕 + 頁碼按鈕（當前頁高亮）+ Next 按鈕
+
+### gallery（相簿網格 — 照片/作品集/圖片集）
+- CSS Grid：\`grid grid-cols-3 gap-4\`（響應式欄數 RWD 階段處理，Structure 只做桌面版）
+- 圖片：\`aspect-square object-cover rounded-lg cursor-pointer\`
+- 點擊放大：\`const [selected, setSelected] = useState<number | null>(null)\`
+- Modal overlay：背景灰 + 大圖 + 左右切換 + Escape/背景點擊關閉
+
+### 通用規則
+- 超過 8 項的列表/卡片 → 考慮分頁或「顯示更多」按鈕
+- 圖片密集 → gallery grid
+- 時間序列（活動/文章） → carousel 或 timeline`
 
   // Static block：只取決於 tier + isFastMode（4 種組合），跨 flow 高度可重用
   const structureStaticPrompt = `${getTierCreativePhilosophy(tier)}

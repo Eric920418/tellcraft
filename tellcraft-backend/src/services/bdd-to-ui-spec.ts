@@ -29,7 +29,7 @@ export interface UIAction {
 
 export interface UIDataDisplay {
   name: string
-  type: 'table' | 'list' | 'cards' | 'chart' | 'stat_card'
+  type: 'table' | 'list' | 'cards' | 'chart' | 'stat_card' | 'carousel' | 'gallery' | 'paginated_list'
   columns?: string[]
 }
 
@@ -366,6 +366,9 @@ export async function translateBddToUISpec(
 - 統計數字（總數/金額/百分比）→ stat_card
 - 時間序列/趨勢數據 → chart
 - 簡單清單（無多欄位）→ list
+- 橫向滾動展示（活動/推薦/產品輪播）→ carousel
+- 圖片密集展示（作品集/相簿/圖片集）→ gallery
+- 大量條目列表（預期 >20 項，如會員/文章/訂單歷史）→ paginated_list
 
 ## Action Type 映射
 - "新增/建立/記錄/添加" → create
@@ -403,7 +406,7 @@ export async function translateBddToUISpec(
       "dataDisplays": [
         {
           "name": "展示名稱",
-          "type": "table|list|cards|chart|stat_card",
+          "type": "table|list|cards|chart|stat_card|carousel|gallery|paginated_list",
           "columns": ["col1", "col2"]
         }
       ]
@@ -589,6 +592,12 @@ export function formatUISpecForPrompt(spec: UIRequirementsSpec): string {
 
     if (page.dataDisplays.length > 0) {
       lines.push(`資料展示：${page.dataDisplays.map(d => `${d.name}(${d.type}${d.columns ? ': ' + d.columns.join('/') : ''})`).join('、')}`)
+      // M5：進階 display type 加入實作提示
+      for (const d of page.dataDisplays) {
+        if (d.type === 'carousel') lines.push(`  → 實作為走馬燈：useState index + 左右箭頭 + dots 指示器 + 自動輪播（useEffect + setInterval）`)
+        if (d.type === 'paginated_list') lines.push(`  → 實作為分頁列表：每頁 10-20 項 + 底部分頁器（Prev/頁碼/Next）`)
+        if (d.type === 'gallery') lines.push(`  → 實作為相簿網格：grid-cols-3 gap-4（響應式欄數 RWD 階段處理）+ 點擊放大 Modal + 上一張/下一張`)
+      }
     }
 
     if (page.actions.length > 0) {
