@@ -774,6 +774,106 @@ Feature File 輸出格式從 Tellcraft 舊格式升級到 SpecFormula 標準（i
 - [ ] i18n Phase 3：VPS 後端錯誤訊息 error code 化 + LLM prompts i18n + Remotion 動畫標籤
 - [ ] `sdd.os/` 上游同步機制（SpecFormula Java 更新時，同步到 TS 版）
 
+### P4：進階能力路線圖 — 復刻中型 CMS 專案
+
+**目標**：從「一句話 → 簡單 CRUD app」升級到能復刻中型 CMS 專案（基準：15 張表 / 37+ 路由 / Admin 後台 / 認證 / 圖片上傳）。
+
+**里程碑依賴關係**：
+```
+M1 多頁生成 ──────┐
+                   ├──→ M3 Admin Panel ──→ M4 檔案上傳 ──→ M6 整合驗證
+M2 Auth Skill ────┘                                          ↑
+                                                              │
+M5 進階 UI ──────────────────────────────────────────────────┘
+```
+
+#### M1：多頁生成能力（✅ 已完成 2026-04-01，僅精細模式）
+
+精細模式 Animation/RWD 階段支援多頁批次處理。**快速模式不受影響**。
+
+- [x] 新增 `buildAdaptiveAnimRwdBatches()`：≤5 頁單批、>5 頁按 token 權重分批（balanced 每批 5 頁 / quality 4 頁），共用 Layout 組件強制放入第一批
+- [x] `generateAnimations()` 多批次路徑：自動啟用 diff mode、順序累積合併、越界修改過濾、onCheckpoint 持久化
+- [x] `generateRwd()` 同樣多批次路徑
+- [x] `uiux-phases.ts` 四處呼叫端傳入 onCheckpoint callback
+- [x] Structure 階段已有批次（`buildAdaptiveStructureBatches()`），無需修改
+- [x] Coder 改寫已有並行（`runWithConcurrencyLimit(3)`），無需修改
+
+| 檔案 | 改動 |
+|------|------|
+| `tellcraft-backend/src/services/uiux-generation.ts` | 新增 `buildAdaptiveAnimRwdBatches()` + `pageImportsComponent()`；Animation/RWD 加入多批次路徑 |
+| `tellcraft-backend/src/workers/phase-handlers/uiux-phases.ts` | 4 處 generateAnimations/generateRwd 呼叫傳入 onCheckpoint |
+
+#### M2：認證系統生成 — Auth Skill（✅ 已完成 2026-04-01）
+
+BDD schema 偵測到 users 表 + password 欄位 → Coder 自動生成 NextAuth v5 認證系統。**零 LLM 純模板**。
+
+- [x] `coder-generation.ts` 新增 `detectAuthInSchema()` + `generateAuthSystem()`（7 個檔案模板）+ `injectSessionProvider()`
+- [x] `executeCoderPipeline()` step 2.5 注入 auth 生成 + 最後注入 SessionProvider 到 root layout（path 精確比對）
+- [x] `neon-service.ts` DDL 後自動 seed admin 帳號（admin@admin.com / admin123，SSL 連線，動態判斷 role 欄位）
+- [x] `deployer.ts` KNOWN_PACKAGES 新增 `next-auth@5.0.0-beta.30`；`AUTH_SECRET` 用 `injectVercelEnvVarIfNotExists`（只建立一次不覆蓋，避免迭代部署後強制登出）
+- [x] `deployer.ts` `wrapInNextJs` 支援根目錄裸檔案（`auth.ts` 不再被誤放到 `components/`）
+- [x] `webcontainer-utils.ts` KNOWN_PACKAGES 新增 `next-auth`；auth.ts 硬編碼 DB 連線 + .env.local 注入 AUTH_SECRET
+- [x] 全域 `bcryptjs` 版本統一為 `^3.0.3`（deployer + webcontainer + coder-phases + specformula-runner）
+
+生成產物（零 LLM，純模板）：
+| 檔案 | 說明 |
+|------|------|
+| `auth.ts` | NextAuth v5 config（Credentials + JWT + raw SQL，不用 DrizzleAdapter） |
+| `app/api/auth/[...nextauth]/route.ts` | NextAuth handler（2 行） |
+| `app/(auth)/admin/login/page.tsx` | 登入頁面（client component） |
+| `app/admin/layout.tsx` | Admin layout（server-side auth check + role 檢查） |
+| `lib/auth-check.ts` | `requireAdmin()` helper（server action 用） |
+| `app/providers.tsx` | SessionProvider wrapper |
+| `types/next-auth.d.ts` | TypeScript 型別擴展（role + id） |
+
+#### M3：Admin Panel 自動生成（⬜ 待開發，依賴 M1+M2）
+
+從 BDD Schema 零 LLM 模板生成完整 CRUD 後台。**最高價值里程碑**。
+
+- [ ] 新增 `admin-templates/` 目錄：layout.ts、list-page.ts、form-page.ts、components.ts
+- [ ] `coder-generation.ts` 新增 `generateAdminPanel(schema, entities)`
+- [ ] SQL Type → 表單元素映射（VARCHAR→input、TEXT→textarea、BOOLEAN→checkbox、FK→select、TIMESTAMP→datetime-local）
+- [ ] `coder-phases.ts` Coder pipeline 加入 Admin 生成步驟
+- [ ] Auth 保護（未登入 → /login）
+
+每 entity 生成：`/admin/[entity]/page.tsx`（列表）+ `/admin/[entity]/[id]/page.tsx`（編輯）+ `/admin/[entity]/new/page.tsx`（新增）
+共用組件：Sidebar + AdminHeader + FormField + DeleteButton + SubmitButton
+
+#### M4：檔案上傳 Pattern（⬜ 待開發，依賴 M3）
+
+圖片上傳功能，使用 Vercel Blob 儲存。
+
+- [ ] Schema 偵測 image/photo/cover/avatar 欄位 → 標記需要上傳
+- [ ] 生成 `app/api/upload/route.ts`（Vercel Blob，5MB 限制）
+- [ ] 生成 `components/admin/ImageUpload.tsx`（拖放+預覽）+ `MultiImageUpload.tsx`（多圖）
+- [ ] `deployer.ts` BASE_DEPS 新增 `@vercel/blob`
+
+#### M5：進階 UI Pattern（⬜ 待開發，獨立）
+
+輪播、相簿、分頁、Modal、排序。
+
+- [ ] 新增 `ui-pattern-templates/`：carousel.ts、gallery.ts、pagination.ts、modal.ts
+- [ ] Structure prompt 增加進階 pattern 指引
+- [ ] BDD entity 有 sort_order/order 欄位 → 拖放排序功能
+- [ ] `inferInteractionHint` 增加 CMS pattern 偵測
+
+#### M6：整合驗證 — 復刻 Learn 專案（⬜ 待開發，依賴 M1-M5）
+
+用 Tellcraft 完整復刻基準專案，驗證所有能力。
+
+驗收標準：
+| 項目 | 基準 | Tellcraft 生成 |
+|------|------|---------------|
+| DB 表 | 15 張 | ≥12 張 |
+| 公開頁面 | 14 | ≥10 |
+| Admin 頁面 | 23 | ≥15 |
+| 認證 | NextAuth + admin | NextAuth + admin |
+| 圖片上傳 | Vercel Blob | Vercel Blob |
+| 進階 UI | 輪播/相簿/分頁 | 輪播/相簿/分頁 |
+| 部署 | Vercel | Vercel 一鍵 |
+
+合理取捨（不追求）：雙語內容（後續 i18n）、Drizzle ORM（用 raw SQL + Neon）、Seed data（Admin 面板輸入）
+
 ## 部署
 
 ### CI/CD

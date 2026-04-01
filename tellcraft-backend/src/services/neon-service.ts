@@ -4,11 +4,13 @@
 // ============================================================
 
 import { Client } from 'pg'
+import bcrypt from 'bcryptjs'
 import { getEnv } from '../lib/env'
 import * as db from '../db/client'
 import { createLogger } from '../lib/logger'
 import { getDbLimit } from '../config/plans'
 import { sendMessage } from '../workers/orchestrator-utils'
+import { detectAuthInSchema } from './coder-generation'
 import type { DerivedSchema } from './schema-derivation'
 import type { Server as SocketIOServer } from 'socket.io'
 
@@ -212,6 +214,31 @@ export async function provisionNeonDatabase(params: {
         logger.error({ neonProjectId, error: sqlResult.error }, 'Schema 執行失敗，回滾 project')
         await deleteNeonProject(neonProjectId)
         return null
+      }
+    }
+
+    // 2.5 Seed admin 帳號（如果 schema 有 auth）
+    if (schema.postgresqlDDL && detectAuthInSchema(schema.postgresqlDDL)) {
+      try {
+        const hashedPassword = await bcrypt.hash('admin123', 10)
+        const hasRole = /\brole\s+(?:VARCHAR|TEXT)/i.test(schema.postgresqlDDL)
+        const seedClient = new Client({ connectionString: connectionUri, ssl: { rejectUnauthorized: false } })
+        await seedClient.connect()
+        const columns = hasRole
+          ? 'id, name, email, password, role, created_at'
+          : 'id, name, email, password, created_at'
+        const values = hasRole
+          ? `(gen_random_uuid(), 'Admin', 'admin@admin.com', $1, 'admin', NOW())`
+          : `(gen_random_uuid(), 'Admin', 'admin@admin.com', $1, NOW())`
+        await seedClient.query(
+          `INSERT INTO users (${columns}) VALUES ${values} ON CONFLICT (email) DO NOTHING`,
+          [hashedPassword]
+        )
+        await seedClient.end()
+        logger.info('Admin 帳號 seed 完成（admin@admin.com / admin123）')
+      } catch (seedErr) {
+        // Seed 失敗不阻塞 provisioning
+        logger.warn({ err: seedErr }, 'Admin 帳號 seed 失敗（不阻塞）')
       }
     }
 

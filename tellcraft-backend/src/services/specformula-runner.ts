@@ -1752,7 +1752,7 @@ async function cleanupTables(pool: Pool, schemas: DatabaseSchema[]): Promise<voi
 function detectExtraDependencies(files: GeneratedComponent[]): Record<string, string> {
   // 常見套件白名單（名稱 → 版本）
   const KNOWN_PACKAGES: Record<string, string> = {
-    'bcryptjs': '^2.4.3',
+    'bcryptjs': '^3.0.3',
     'bcrypt': '^5.1.1',
     'jsonwebtoken': '^9.0.2',
     'uuid': '^10.0.0',

@@ -424,7 +424,7 @@ export async function executeCoderSkill(input: CoderSkillInput): Promise<void> {
       const e2eResult = await runCoderE2ETests({
         code: { pages: mergedPages, components: mergedComponents, styles },
         tailwindConfig,
-        extraDependencies: { '@neondatabase/serverless': '^0.10.0', bcryptjs: '^2.4.3', jsonwebtoken: '^9.0.0' },
+        extraDependencies: { '@neondatabase/serverless': '^0.10.0', bcryptjs: '^3.0.3', jsonwebtoken: '^9.0.0', 'next-auth': '5.0.0-beta.30' },
         neonConnectionString,
         trackingContext: { userId, conversationId },
         onProgress: (step: string) => {

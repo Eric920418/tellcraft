@@ -92,8 +92,9 @@ const KNOWN_PACKAGES: Record<string, string> = {
   'input-otp': '^1.2.0',
   'next-themes': '^0.3.0',
   '@neondatabase/serverless': '^0.10.0',
-  'bcryptjs': '^2.4.3',
+  'bcryptjs': '^3.0.3',
   'jsonwebtoken': '^9.0.2',
+  'next-auth': '5.0.0-beta.30',
   'geist': '^1.3.0',
   '@next/font': '^14.0.0',
   'sharp': '^0.33.0',
@@ -1024,16 +1025,62 @@ export function buildWebContainerFiles(input: WebContainerFilesInput): FileSyste
 
   if (input.neonConnectionString && needsDb) {
     // 有 DB 連線 → 硬編碼 connection string（WebContainer 不可靠讀 .env）
+    // 掃描所有檔案對 lib/db 的非 sql import（如 getAllTodos），生成 proxy 函數
+    const dbImports = new Set<string>()
+    for (const file of allFiles) {
+      const matches = [...file.content.matchAll(/import\s*\{([^}]+)\}\s*from\s*['"]@\/lib\/db['"]/g)]
+      for (const m of matches) {
+        for (const name of m[1].split(',').map((s: string) => s.trim())) {
+          if (name && name !== 'sql' && !name.startsWith('type ')) dbImports.add(name)
+        }
+      }
+    }
+
+    const proxyLines: string[] = []
+    if (dbImports.size > 0) {
+      proxyLines.push('', '// Auto-generated proxy functions for WebContainer preview')
+      for (const fn of dbImports) {
+        const tableGuess = fn.replace(/^getAll/, '').replace(/^get/, '').toLowerCase()
+        const tableName = tableGuess.endsWith('s') ? tableGuess : tableGuess + 's'
+        proxyLines.push(`export async function ${fn}(..._args: any[]) { return sql\`SELECT * FROM ${tableName} ORDER BY created_at DESC\` }`)
+      }
+    }
+
     setFileInTree(tree, 'lib/db.ts', [
       `import { neon } from '@neondatabase/serverless'`,
       ``,
       `const sql = neon('${input.neonConnectionString}')`,
       ``,
       `export { sql }`,
+      ...proxyLines,
     ].join('\n'))
   } else if (needsDb) {
     // 沒有 DB 連線 → mock 防止 crash
     setFileInTree(tree, 'lib/db.ts', MOCK_DB)
+  }
+
+  // Auth 系統：WebContainer 內硬編碼 AUTH_SECRET（.env 不可靠）
+  const hasAuthFile = allFiles.some(f => f.path === 'auth.ts' || f.path === '/auth.ts')
+  if (hasAuthFile) {
+    // 找到 auth.ts 並替換 process.env.DATABASE_URL 為硬編碼（如有 neonConnectionString）
+    const authFileEntry = allFiles.find(f => f.path === 'auth.ts' || f.path === '/auth.ts')
+    if (authFileEntry) {
+      let authContent = authFileEntry.content
+      // WebContainer 用 .env.local 注入 AUTH_SECRET
+      if (input.neonConnectionString) {
+        authContent = authContent.replace(
+          /neon\(process\.env\.DATABASE_URL!\)/,
+          `neon('${input.neonConnectionString}')`
+        )
+      }
+      setFileInTree(tree, 'auth.ts', authContent)
+    }
+    // 注入 .env.local 給 NextAuth 讀取 AUTH_SECRET
+    setFileInTree(tree, '.env.local', [
+      'AUTH_SECRET=webcontainer-dev-secret-do-not-use-in-production',
+      'AUTH_URL=http://localhost:3000',
+      input.neonConnectionString ? `DATABASE_URL=${input.neonConnectionString}` : '',
+    ].filter(Boolean).join('\n'))
   }
 
   // 自動為缺失的 @/ import 生成 stub，防止 webpack 編譯失敗

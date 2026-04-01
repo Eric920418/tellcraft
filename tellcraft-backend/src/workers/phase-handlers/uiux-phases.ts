@@ -1375,7 +1375,8 @@ export async function executeFullCodePipeline(
       pipelineUiSpecSummary,
       state.uiuxDesignMood,
       undefined,
-      'balanced'
+      'balanced',
+      async (partial) => { state.uiuxGeneratedCode = partial; await saveFlowState(redis, conversationId, state) },
     )
 
     if (animationResult.success) {
@@ -1420,7 +1421,8 @@ export async function executeFullCodePipeline(
     undefined,
     state.uiuxDesignMood,
     undefined,
-    'balanced'
+    'balanced',
+    async (partial) => { state.uiuxGeneratedCode = partial; await saveFlowState(redis, conversationId, state) },
   )
 
   if (rwdResult.success) {
@@ -1722,7 +1724,8 @@ async function executeCodePhaseAnimation(
     stepUiSpecSummary,
     state.uiuxDesignMood,
     undefined,
-    'balanced'
+    'balanced',
+    async (partial) => { state.uiuxGeneratedCode = partial; await saveFlowState(redis, conversationId, state) },
   )
 
   if (!animationResult.success) {
@@ -1824,7 +1827,8 @@ async function executeCodePhaseRwd(
     undefined,
     state.uiuxDesignMood,
     undefined,
-    'balanced'
+    'balanced',
+    async (partial) => { state.uiuxGeneratedCode = partial; await saveFlowState(redis, conversationId, state) },
   )
 
   if (!rwdResult.success) {

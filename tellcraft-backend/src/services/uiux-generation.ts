@@ -1956,6 +1956,113 @@ export function buildAdaptiveStructureBatches(
   return batches
 }
 
+// ============================================================
+// Animation/RWD 多頁批次處理（M1：精細模式多頁生成）
+// ============================================================
+
+interface AnimRwdBatch {
+  pages: GeneratedComponent[]
+  componentPaths: Set<string>
+}
+
+/**
+ * 檢查頁面內容是否 import 了指定組件路徑
+ * 例：page 內容有 `from '@/components/Header'` → 匹配 `components/Header.tsx`
+ */
+function pageImportsComponent(pageContent: string, componentPath: string): boolean {
+  // components/ui/Header.tsx → 匹配 from '@/components/ui/Header' 或 from '../components/ui/Header'
+  const withoutExt = componentPath.replace(/\.(tsx?|jsx?)$/, '')
+  // 嘗試精確匹配 import path
+  return pageContent.includes(`'@/${withoutExt}'`) || pageContent.includes(`"@/${withoutExt}"`)
+    // 也匹配相對路徑的末段
+    || pageContent.includes(`'../${withoutExt}'`) || pageContent.includes(`"./${withoutExt.split('/').pop()}"`)
+    || pageContent.includes(`'../${withoutExt.split('/').pop()}'`)
+}
+
+/**
+ * Animation/RWD 階段的多頁分批函數
+ * ≤5 target pages → 單批（不觸發分批）
+ * >5 target pages → 按 token 權重分批，每批 ~5 頁
+ * 共用 Layout 組件強制放入第一批
+ */
+export function buildAdaptiveAnimRwdBatches(
+  targetPages: GeneratedComponent[],
+  allComponents: GeneratedComponent[],
+  options?: {
+    profile?: GenerationProfile
+    maxPagesPerBatch?: number
+  }
+): AnimRwdBatch[] {
+  const profile = options?.profile || 'balanced'
+  const maxPages = options?.maxPagesPerBatch
+    || (profile === 'quality' ? 4 : profile === 'fast' ? 6 : 5)
+
+  // ≤ maxPages：單批，包含所有組件
+  if (targetPages.length <= maxPages) {
+    return [{ pages: targetPages, componentPaths: new Set(allComponents.map(c => c.path)) }]
+  }
+
+  // 估算每頁權重（基於內容長度）
+  const weighted = targetPages.map(page => ({
+    page,
+    weight: Math.ceil(page.content.length / 4)
+      + (/(home|dashboard|首頁|主頁)/i.test(page.path) ? 500 : 0),
+  }))
+
+  const MAX_BATCH_WEIGHT = profile === 'quality' ? 16000 : 20000
+  const batches: AnimRwdBatch[] = []
+  let currentBatch: GeneratedComponent[] = []
+  let currentWeight = 0
+
+  for (const { page, weight } of weighted) {
+    if (currentBatch.length > 0 && (currentWeight + weight > MAX_BATCH_WEIGHT || currentBatch.length >= maxPages)) {
+      batches.push({ pages: currentBatch, componentPaths: new Set() })
+      currentBatch = [page]
+      currentWeight = weight
+    } else {
+      currentBatch.push(page)
+      currentWeight += weight
+    }
+  }
+  if (currentBatch.length > 0) {
+    batches.push({ pages: currentBatch, componentPaths: new Set() })
+  }
+
+  // 分配組件：掃描 import → 指派給引用它的第一個批次
+  // 共用 Layout 組件強制放入第一批
+  const assignedComponents = new Set<string>()
+  const layoutPattern = /(layout|header|footer|navbar|sidebar|nav)/i
+
+  // 第一批強制包含 Layout 組件
+  for (const comp of allComponents) {
+    if (layoutPattern.test(comp.path)) {
+      batches[0].componentPaths.add(comp.path)
+      assignedComponents.add(comp.path)
+    }
+  }
+
+  // 掃描每個批次頁面的 import，指派未分配的組件
+  for (const batch of batches) {
+    for (const page of batch.pages) {
+      for (const comp of allComponents) {
+        if (!assignedComponents.has(comp.path) && pageImportsComponent(page.content, comp.path)) {
+          batch.componentPaths.add(comp.path)
+          assignedComponents.add(comp.path)
+        }
+      }
+    }
+  }
+
+  // 未被任何頁面引用的組件放入第一批
+  for (const comp of allComponents) {
+    if (!assignedComponents.has(comp.path)) {
+      batches[0].componentPaths.add(comp.path)
+    }
+  }
+
+  return batches
+}
+
 /**
  * Safety net: 如果代碼沒有 Tailwind 響應式前綴，自動注入基本 Mobile-first 模式
  * 只在代碼完全沒有 sm:/md:/lg: 時觸發（避免干擾已有 RWD 的代碼）
@@ -3993,6 +4100,7 @@ export async function generateAnimations(
   moodId?: string,
   incrementalOptions?: { maxTokens?: number; maxContinuations?: number },
   generationProfile: GenerationProfile = 'balanced',
+  onCheckpoint?: (partial: CodeBundle) => Promise<void>,
 ): Promise<GenerationResult> {
   const tier = designTier || 'functional'
   if (shouldSkipAnimationStage(existingCode, generationProfile)) {
@@ -4085,12 +4193,6 @@ ${getAnimationConstraints(tier)}
 
   const systemPrompt = buildCacheableSystemBlocks(animStaticPrompt, animDynamicPrompt)
 
-  const existingCodeStr = [
-    ...promptCode.pages.map(p => `\`\`\`tsx:${p.path}\n${p.content}\n\`\`\``),
-    ...promptCode.components.map(c => `\`\`\`tsx:${c.path}\n${c.content}\n\`\`\``),
-    `\`\`\`css:globals.css\n${promptCode.styles}\n\`\`\``,
-  ].join('\n\n')
-
   const conceptReminder = variantConcept
     ? `\n## 設計概念提醒\n動畫風格必須服務於「${variantConcept.name}」的設計概念。${variantConcept.signatureElement ? `Signature Element「${variantConcept.signatureElement}」的動畫尤其重要。` : ''}\n`
     : ''
@@ -4105,7 +4207,12 @@ ${getAnimationConstraints(tier)}
     ? `\n## 動畫個性（補充指引）\n${getAnimationPersonalityHint(designSystem.animationPersonality)}\n`
     : ''
 
-  const isDiffMode = getEnv().ENABLE_DIFF_OUTPUT
+  const envDiffMode = getEnv().ENABLE_DIFF_OUTPUT
+
+  // ── 多頁批次處理（M1：精細模式多頁生成）──
+  const animBatches = buildAdaptiveAnimRwdBatches(promptCode.pages, promptCode.components, { profile: generationProfile })
+  // 多批次時強制使用 diff mode（更高效 + 正確的累積合併）
+  const isDiffMode = animBatches.length > 1 ? true : envDiffMode
 
   const outputFormatInstructions = isDiffMode
     ? `## 輸出格式（SEARCH/REPLACE）
@@ -4133,14 +4240,7 @@ ${getAnimationConstraints(tier)}
 
 請輸出完整的修改後代碼，保持相同的檔案路徑格式。`
 
-  // Plan D: 拆分 user message 為 cached code block + task block
-  const codeBlock = `## 專案檔案清單（未列出內容的檔案視為只讀）
-${buildCodeManifest(existingCode)}
-
-## 現有代碼
-${existingCodeStr}`
-
-  const taskBlock = `請在以上代碼基礎上添加動畫效果：
+  const baseTaskBlock = `請在以上代碼基礎上添加動畫效果：
 ${conceptReminder}${moodAnimSection}${uiSpecHint}
 ## 需要添加的動畫
 1. 頁面/區塊入場動畫（stagger effect）
@@ -4152,7 +4252,126 @@ ${conceptReminder}${moodAnimSection}${uiSpecHint}
 ⚠️ 自給自足規則：如果你新增了 import 引用內部模組（@/ 或 ./），你必須同時輸出該檔案。禁止引用不存在的內部模組。
 ${outputFormatInstructions}`
 
-  const userContent = buildCacheableUserMessage(codeBlock, taskBlock)
+  // 構建 code block（用 existingCode，跨批次可 cache）
+  const animExistingCodeStr = [
+    ...promptCode.pages.map(p => `\`\`\`tsx:${p.path}\n${p.content}\n\`\`\``),
+    ...promptCode.components.map(c => `\`\`\`tsx:${c.path}\n${c.content}\n\`\`\``),
+    `\`\`\`css:globals.css\n${promptCode.styles}\n\`\`\``,
+  ].join('\n\n')
+
+  const animCodeBlock = `## 專案檔案清單（未列出內容的檔案視為只讀）\n${buildCodeManifest(existingCode)}\n\n## 現有代碼\n${animExistingCodeStr}`
+
+  // ── 多批次路徑（>5 target pages）──
+  if (animBatches.length > 1) {
+    logger.info({ totalPages: promptCode.pages.length, batchCount: animBatches.length, generationProfile }, 'generateAnimations multi-batch mode')
+
+    let currentCode: CodeBundle = { pages: [...existingCode.pages], components: [...existingCode.components], styles: existingCode.styles }
+
+    for (let batchIdx = 0; batchIdx < animBatches.length; batchIdx++) {
+      const batch = animBatches[batchIdx]
+      const isFirstBatch = batchIdx === 0
+      const batchPagePaths = batch.pages.map(p => p.path)
+      const batchComponentPaths = [...batch.componentPaths]
+      // globals.css 只給第一批修改，避免後續批次覆蓋前批的 CSS
+      const targetPaths = new Set([...batchPagePaths, ...batchComponentPaths, ...(isFirstBatch ? ['globals.css'] : [])])
+
+      const batchTargetInstruction = `
+## 本批次目標檔案（ONLY modify these files）
+本批次負責以下頁面及其組件的動畫修改：
+- Pages: ${batchPagePaths.join(', ')}
+${batchComponentPaths.length > 0 ? `- Components: ${batchComponentPaths.join(', ')}` : ''}
+${isFirstBatch ? '- globals.css（動畫相關 CSS）' : ''}
+
+⚠️ 只輸出以上列出的檔案的 SEARCH/REPLACE blocks。禁止修改未列出的檔案，它們由其他批次處理。`
+
+      // 用 existingCode（原始）作為 cached code block → 批次 2+ 命中 prompt cache 省 90% input tokens
+      // 這是安全的：每批只修改自己的 target files，其他批次的檔案內容不變
+      const batchUserContent = buildCacheableUserMessage(animCodeBlock, `${baseTaskBlock}\n${batchTargetInstruction}`)
+
+      logger.info({ batchIdx: batchIdx + 1, totalBatches: animBatches.length, pages: batchPagePaths }, 'Animation batch 開始')
+
+      const batchResponse = await callClaude(
+        systemPrompt,
+        [{ role: 'user', content: batchUserContent }],
+        {
+          maxTokens: incrementalOptions?.maxTokens || 32768,
+          temperature: tier === 'creative' ? 0.35 : 0.2,
+          maxContinuations: incrementalOptions?.maxContinuations ?? 2,
+          promptLabel: `uiux-animation-b${batchIdx + 1}`,
+          contextSizeHint: generationProfile,
+        },
+        { ...trackingContext, purpose: `generate_animations_b${batchIdx + 1}` },
+        buildDiffStreamingHandler(currentCode, onPartialCode),
+      )
+
+      if (!batchResponse.success || !batchResponse.content) {
+        if (isFirstBatch) return { success: false, error: batchResponse.error || '無法生成動畫代碼（batch 1 失敗）' }
+        logger.warn({ batchIdx, error: batchResponse.error }, 'Animation batch 失敗，跳過')
+        continue
+      }
+
+      // 解析 diff → 過濾越界修改 → 應用到 currentCode
+      const srBlocks = parseSearchReplaceBlocks(batchResponse.content)
+      if (srBlocks && srBlocks.length > 0) {
+        const filteredBlocks = srBlocks.filter(b => {
+          if (!targetPaths.has(b.filePath)) {
+            logger.warn({ filePath: b.filePath, batchIdx }, 'Animation batch: 過濾越界修改')
+            return false
+          }
+          return true
+        })
+        if (filteredBlocks.length > 0) {
+          const applyResult = applySearchReplace(currentCode, filteredBlocks)
+          if (applyResult.appliedCount > 0) {
+            currentCode = applyResult.updatedCode
+          } else {
+            // diff 全部失敗 → fallback full-file，但必須過濾邊界
+            const parsed = parseGeneratedFiles(batchResponse.content, designSystem)
+            const bounded = {
+              pages: parsed.pages.filter(p => targetPaths.has(p.path)),
+              components: parsed.components.filter(c => targetPaths.has(c.path)),
+              styles: isFirstBatch ? parsed.styles : undefined,
+            }
+            currentCode = mergeCodeBundle(currentCode, bounded)
+          }
+        }
+      } else {
+        // fallback full-file，過濾邊界防止覆蓋其他批次
+        const parsed = parseGeneratedFiles(batchResponse.content, designSystem)
+        const bounded = {
+          pages: parsed.pages.filter(p => targetPaths.has(p.path)),
+          components: parsed.components.filter(c => targetPaths.has(c.path)),
+          styles: isFirstBatch ? parsed.styles : undefined,
+        }
+        currentCode = mergeCodeBundle(currentCode, bounded)
+      }
+
+      // streaming 推送累積結果
+      if (onPartialCode) {
+        onPartialCode({ pages: currentCode.pages, components: currentCode.components, styles: currentCode.styles })
+      }
+      // checkpoint 持久化
+      if (onCheckpoint) {
+        await onCheckpoint(currentCode).catch(err => logger.warn({ err }, 'Animation batch checkpoint failed'))
+      }
+
+      logger.info({ batchIdx: batchIdx + 1, totalBatches: animBatches.length }, 'Animation batch 完成')
+    }
+
+    // 最終語法檢查
+    const allFiles = [...currentCode.pages, ...currentCode.components]
+    const syntaxFixed = await checkAndFixSyntaxErrors(allFiles, trackingContext)
+    const pagePathSet = new Set(currentCode.pages.map(p => p.path))
+    return {
+      success: true,
+      pages: syntaxFixed.filter(f => pagePathSet.has(f.path)),
+      components: syntaxFixed.filter(f => !pagePathSet.has(f.path)),
+      styles: currentCode.styles,
+    }
+  }
+
+  // ── 單批次路徑（≤5 target pages，現有邏輯不動）──
+  const userContent = buildCacheableUserMessage(animCodeBlock, baseTaskBlock)
 
   const response = await callClaude(
     systemPrompt,
@@ -4237,6 +4456,7 @@ export async function generateRwd(
   moodId?: string,
   incrementalOptions?: { maxTokens?: number; maxContinuations?: number },
   generationProfile: GenerationProfile = 'balanced',
+  onCheckpoint?: (partial: CodeBundle) => Promise<void>,
 ): Promise<GenerationResult> {
   const tier = designTier || 'functional'
   if (shouldSkipRwdStage(existingCode, generationProfile)) {
@@ -4320,12 +4540,6 @@ ${rwdTierHint}`
 
   const systemPrompt = buildCacheableSystemBlocks(rwdStaticPrompt, rwdDynamicPrompt)
 
-  const existingCodeStr = [
-    ...promptCode.pages.map(p => `\`\`\`tsx:${p.path}\n${p.content}\n\`\`\``),
-    ...promptCode.components.map(c => `\`\`\`tsx:${c.path}\n${c.content}\n\`\`\``),
-    `\`\`\`css:globals.css\n${promptCode.styles}\n\`\`\``,
-  ].join('\n\n')
-
   const rwdConceptReminder = variantConcept
     ? `\n## 設計概念提醒\n移動端適配時保持「${variantConcept.name}」的設計概念完整性，不要在小螢幕上退化為通用佈局。\n`
     : ''
@@ -4338,7 +4552,11 @@ ${rwdTierHint}`
     ? `\n## Mood RWD 指引\n${getMoodRwdHint(moodId)}\n`
     : ''
 
-  const isDiffMode = getEnv().ENABLE_DIFF_OUTPUT
+  const envDiffMode = getEnv().ENABLE_DIFF_OUTPUT
+
+  // ── 多頁批次處理（M1：精細模式多頁生成）──
+  const rwdBatches = buildAdaptiveAnimRwdBatches(promptCode.pages, promptCode.components, { profile: generationProfile })
+  const isDiffMode = rwdBatches.length > 1 ? true : envDiffMode
 
   const rwdOutputFormatInstructions = isDiffMode
     ? `## 輸出格式（SEARCH/REPLACE）
@@ -4364,14 +4582,7 @@ ${rwdTierHint}`
 ⚠️ code fence 規則：每個 code block 的第一行必須直接是代碼，禁止在代碼前加任何說明文字。
 保持相同的檔案路徑格式。`
 
-  // Plan D: 拆分 user message 為 cached code block + task block
-  const rwdCodeBlock = `## 專案檔案清單（未列出內容的檔案視為只讀）
-${buildCodeManifest(existingCode)}
-
-## 現有代碼
-${existingCodeStr}`
-
-  const rwdTaskBlock = `請在以上代碼基礎上添加響應式設計：
+  const rwdBaseTaskBlock = `請在以上代碼基礎上添加響應式設計：
 ${rwdConceptReminder}${moodRwdSection}${rwdUiSpecHint}
 ## 需要添加的響應式功能
 1. ${layoutMode === 'app' ? '功能面板響應式堆疊（側邊欄折疊或底部導航）' : 'Header 移動端漢堡選單'}
@@ -4383,7 +4594,126 @@ ${rwdConceptReminder}${moodRwdSection}${rwdUiSpecHint}
 
 ${rwdOutputFormatInstructions}`
 
-  const rwdUserContent = buildCacheableUserMessage(rwdCodeBlock, rwdTaskBlock)
+  // 構建 code block（用 existingCode，跨批次可 cache）
+  const rwdExistingCodeStr = [
+    ...promptCode.pages.map(p => `\`\`\`tsx:${p.path}\n${p.content}\n\`\`\``),
+    ...promptCode.components.map(c => `\`\`\`tsx:${c.path}\n${c.content}\n\`\`\``),
+    `\`\`\`css:globals.css\n${promptCode.styles}\n\`\`\``,
+  ].join('\n\n')
+
+  const rwdCodeBlock = `## 專案檔案清單（未列出內容的檔案視為只讀）\n${buildCodeManifest(existingCode)}\n\n## 現有代碼\n${rwdExistingCodeStr}`
+
+  // ── 多批次路徑（>5 target pages）──
+  if (rwdBatches.length > 1) {
+    logger.info({ totalPages: promptCode.pages.length, batchCount: rwdBatches.length, generationProfile }, 'generateRwd multi-batch mode')
+
+    let currentCode: CodeBundle = { pages: [...existingCode.pages], components: [...existingCode.components], styles: existingCode.styles }
+
+    for (let batchIdx = 0; batchIdx < rwdBatches.length; batchIdx++) {
+      const batch = rwdBatches[batchIdx]
+      const isFirstBatch = batchIdx === 0
+      const batchPagePaths = batch.pages.map(p => p.path)
+      const batchComponentPaths = [...batch.componentPaths]
+      // globals.css 只給第一批修改，避免後續批次覆蓋前批的 CSS
+      const targetPaths = new Set([...batchPagePaths, ...batchComponentPaths, ...(isFirstBatch ? ['globals.css'] : [])])
+
+      const batchTargetInstruction = `
+## 本批次目標檔案（ONLY modify these files）
+本批次負責以下頁面及其組件的響應式修改：
+- Pages: ${batchPagePaths.join(', ')}
+${batchComponentPaths.length > 0 ? `- Components: ${batchComponentPaths.join(', ')}` : ''}
+${isFirstBatch ? '- globals.css（響應式相關 CSS）' : ''}
+
+⚠️ 只輸出以上列出的檔案的 SEARCH/REPLACE blocks。禁止修改未列出的檔案，它們由其他批次處理。`
+
+      // 用 existingCode（原始）作為 cached code block → 批次 2+ 命中 prompt cache 省 90% input tokens
+      const batchUserContent = buildCacheableUserMessage(rwdCodeBlock, `${rwdBaseTaskBlock}\n${batchTargetInstruction}`)
+
+      logger.info({ batchIdx: batchIdx + 1, totalBatches: rwdBatches.length, pages: batchPagePaths }, 'RWD batch 開始')
+
+      const batchResponse = await callClaude(
+        systemPrompt,
+        [{ role: 'user', content: batchUserContent }],
+        {
+          maxTokens: incrementalOptions?.maxTokens || 32768,
+          temperature: 0.2,
+          maxContinuations: incrementalOptions?.maxContinuations ?? 2,
+          promptLabel: `uiux-rwd-b${batchIdx + 1}`,
+          contextSizeHint: generationProfile,
+        },
+        { ...trackingContext, purpose: `generate_rwd_b${batchIdx + 1}` },
+        buildDiffStreamingHandler(currentCode, onPartialCode),
+      )
+
+      if (!batchResponse.success || !batchResponse.content) {
+        if (isFirstBatch) return { success: false, error: batchResponse.error || '無法生成響應式代碼（batch 1 失敗）' }
+        logger.warn({ batchIdx, error: batchResponse.error }, 'RWD batch 失敗，跳過')
+        continue
+      }
+
+      const srBlocks = parseSearchReplaceBlocks(batchResponse.content)
+      if (srBlocks && srBlocks.length > 0) {
+        const filteredBlocks = srBlocks.filter(b => {
+          if (!targetPaths.has(b.filePath)) {
+            logger.warn({ filePath: b.filePath, batchIdx }, 'RWD batch: 過濾越界修改')
+            return false
+          }
+          return true
+        })
+        if (filteredBlocks.length > 0) {
+          const applyResult = applySearchReplace(currentCode, filteredBlocks)
+          if (applyResult.appliedCount > 0) {
+            currentCode = applyResult.updatedCode
+          } else {
+            // diff 全部失敗 → fallback full-file，但必須過濾邊界
+            const parsed = parseGeneratedFiles(batchResponse.content, designSystem)
+            const bounded = {
+              pages: parsed.pages.filter(p => targetPaths.has(p.path)),
+              components: parsed.components.filter(c => targetPaths.has(c.path)),
+              styles: isFirstBatch ? parsed.styles : undefined,
+            }
+            currentCode = mergeCodeBundle(currentCode, bounded)
+          }
+        }
+      } else {
+        // fallback full-file，過濾邊界防止覆蓋其他批次
+        const parsed = parseGeneratedFiles(batchResponse.content, designSystem)
+        const bounded = {
+          pages: parsed.pages.filter(p => targetPaths.has(p.path)),
+          components: parsed.components.filter(c => targetPaths.has(c.path)),
+          styles: isFirstBatch ? parsed.styles : undefined,
+        }
+        currentCode = mergeCodeBundle(currentCode, bounded)
+      }
+
+      if (onPartialCode) {
+        onPartialCode({ pages: currentCode.pages, components: currentCode.components, styles: currentCode.styles })
+      }
+      if (onCheckpoint) {
+        await onCheckpoint(currentCode).catch(err => logger.warn({ err }, 'RWD batch checkpoint failed'))
+      }
+
+      logger.info({ batchIdx: batchIdx + 1, totalBatches: rwdBatches.length }, 'RWD batch 完成')
+    }
+
+    // 最終語法檢查 + responsive safety net
+    const allRwdFiles = [...currentCode.pages, ...currentCode.components]
+    const rwdSyntaxFixed = await checkAndFixSyntaxErrors(allRwdFiles, trackingContext)
+    const rwdPagePathSet = new Set(currentCode.pages.map(p => p.path))
+    const finalPages = rwdSyntaxFixed.filter(f => rwdPagePathSet.has(f.path))
+    const finalComps = rwdSyntaxFixed.filter(f => !rwdPagePathSet.has(f.path))
+    const responsiveCode = ensureResponsiveClasses(finalPages, finalComps)
+
+    return {
+      success: true,
+      pages: responsiveCode.pages,
+      components: responsiveCode.components,
+      styles: currentCode.styles,
+    }
+  }
+
+  // ── 單批次路徑（≤5 target pages，現有邏輯不動）──
+  const rwdUserContent = buildCacheableUserMessage(rwdCodeBlock, rwdBaseTaskBlock)
 
   const response = await callClaude(
     systemPrompt,

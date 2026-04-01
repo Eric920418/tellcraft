@@ -194,8 +194,9 @@ const KNOWN_PACKAGES: Record<string, string> = {
   'input-otp': '^1.2.0',
   'next-themes': '^0.3.0',
   // Coder Skill 常用（後端邏輯）
-  'bcryptjs': '^2.4.3',
+  'bcryptjs': '^3.0.3',
   'jsonwebtoken': '^9.0.2',
+  'next-auth': '5.0.0-beta.30',
 }
 
 /**
@@ -1013,10 +1014,17 @@ export async function executeDeployment(
         [projectId]
       )
       if (dbRow.rows[0]) {
-        await injectVercelEnvVars(projectName, {
+        const envVars: Record<string, string> = {
           'DATABASE_URL': dbRow.rows[0].neon_connection_string,
-        })
-        logger.info({ projectId }, 'Neon DATABASE_URL 已注入 Vercel')
+        }
+        await injectVercelEnvVars(projectName, envVars)
+        // Auth 系統：AUTH_SECRET 只建立一次，不覆蓋（避免迭代部署後用戶被強制登出）
+        const hasAuthFile = files.some(f => f.file === 'auth.ts')
+        if (hasAuthFile) {
+          const crypto = await import('crypto')
+          await injectVercelEnvVarIfNotExists(projectName, 'AUTH_SECRET', crypto.randomBytes(32).toString('base64'))
+        }
+        logger.info({ projectId, hasAuth: hasAuthFile }, 'Vercel env vars 已注入')
       }
     } catch (err) {
       logger.warn({ err, projectId }, 'DB env vars 注入失敗，繼續部署')
@@ -1333,6 +1341,10 @@ export default config
 
     // 頂層目錄放到對應位置（不加 components/ 前綴）
     if (ROOT_LEVEL_DIRS.some(dir => cleanPath.startsWith(dir))) {
+      files.push({ file: cleanPath, data: comp.content })
+    }
+    // 根目錄裸檔案（如 auth.ts）直接放根目錄
+    else if (!cleanPath.includes('/')) {
       files.push({ file: cleanPath, data: comp.content })
     }
     // 其他才放到 components/
@@ -2643,5 +2655,39 @@ async function injectVercelEnvVars(
     } catch (err) {
       logger.warn({ err, key }, 'Vercel env var 注入異常')
     }
+  }
+}
+
+/**
+ * 只在 Vercel 環境變數不存在時建立（不覆蓋已有值）
+ * 用於 AUTH_SECRET 等一次性生成的密鑰，避免每次部署後使所有 session 失效
+ */
+async function injectVercelEnvVarIfNotExists(
+  projectName: string,
+  key: string,
+  value: string,
+): Promise<void> {
+  const token = getEnv().VERCEL_ACCESS_TOKEN
+  if (!token) return
+
+  const teamId = getEnv().VERCEL_TEAM_ID
+  const params = new URLSearchParams()
+  if (teamId) params.append('teamId', teamId)
+
+  try {
+    const res = await fetch(`${VERCEL_API}/v10/projects/${encodeURIComponent(projectName)}/env?${params}`, {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ key, value, target: ['production', 'preview'], type: 'encrypted' }),
+    })
+    if (res.status === 400 || res.status === 409) {
+      logger.info({ key }, 'Vercel env var 已存在，跳過（保留原值）')
+    } else if (!res.ok) {
+      logger.warn({ key, status: res.status }, 'Vercel env var 建立失敗')
+    } else {
+      logger.info({ key }, 'Vercel env var 首次建立')
+    }
+  } catch (err) {
+    logger.warn({ err, key }, 'Vercel env var 注入異常')
   }
 }
