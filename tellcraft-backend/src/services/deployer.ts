@@ -197,6 +197,7 @@ const KNOWN_PACKAGES: Record<string, string> = {
   'bcryptjs': '^3.0.3',
   'jsonwebtoken': '^9.0.2',
   'next-auth': '5.0.0-beta.30',
+  '@vercel/blob': '^0.20.0',
 }
 
 /**

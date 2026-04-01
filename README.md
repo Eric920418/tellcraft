@@ -807,7 +807,7 @@ M5 進階 UI ──────────────────────�
 
 BDD schema 偵測到 users 表 + password 欄位 → Coder 自動生成 NextAuth v5 認證系統。**零 LLM 純模板**。
 
-- [x] `coder-generation.ts` 新增 `detectAuthInSchema()` + `generateAuthSystem()`（7 個檔案模板）+ `injectSessionProvider()`
+- [x] `coder-auth-templates.ts`（獨立檔案）新增 `detectAuthInSchema()` + `generateAuthSystem()`（7 個檔案模板）+ `injectSessionProvider()`
 - [x] `executeCoderPipeline()` step 2.5 注入 auth 生成 + 最後注入 SessionProvider 到 root layout（path 精確比對）
 - [x] `neon-service.ts` DDL 後自動 seed admin 帳號（admin@admin.com / admin123，SSL 連線，動態判斷 role 欄位）
 - [x] `deployer.ts` KNOWN_PACKAGES 新增 `next-auth@5.0.0-beta.30`；`AUTH_SECRET` 用 `injectVercelEnvVarIfNotExists`（只建立一次不覆蓋，避免迭代部署後強制登出）
@@ -826,27 +826,38 @@ BDD schema 偵測到 users 表 + password 欄位 → Coder 自動生成 NextAuth
 | `app/providers.tsx` | SessionProvider wrapper |
 | `types/next-auth.d.ts` | TypeScript 型別擴展（role + id） |
 
-#### M3：Admin Panel 自動生成（⬜ 待開發，依賴 M1+M2）
+#### M3：Admin Panel 自動生成（✅ 已完成 2026-04-01，依賴 M1+M2）
 
-從 BDD Schema 零 LLM 模板生成完整 CRUD 後台。**最高價值里程碑**。
+從 BDD Schema 零 LLM 模板生成完整 CRUD 後台。
 
-- [ ] 新增 `admin-templates/` 目錄：layout.ts、list-page.ts、form-page.ts、components.ts
-- [ ] `coder-generation.ts` 新增 `generateAdminPanel(schema, entities)`
-- [ ] SQL Type → 表單元素映射（VARCHAR→input、TEXT→textarea、BOOLEAN→checkbox、FK→select、TIMESTAMP→datetime-local）
-- [ ] `coder-phases.ts` Coder pipeline 加入 Admin 生成步驟
-- [ ] Auth 保護（未登入 → /login）
+- [x] M2+M3 模板從 `coder-generation.ts`（5187→4385 行）拆分為獨立檔案：`coder-auth-templates.ts`（274 行）+ `coder-admin-templates.ts`（554 行），re-export 保持 API 相容
+- [x] `coder-admin-templates.ts` 新增 `parseColumnDefinitions()`（SQL → 結構化 ColumnInfo）+ `generateAdminPanel()` 主函數
+- [x] 5 個共用組件模板：Sidebar（動態 nav）、AdminHeader（登出）、FormField（6 種 type）、DeleteButton（兩階段確認）、SubmitButton（loading）
+- [x] 每 entity 生成 4 檔：列表頁（表格+刪除）、編輯頁（id=new→新增，form+FK select）、查詢函數、Server Actions（CRUD+revalidatePath）
+- [x] SQL Type → 表單映射：VARCHAR→text、TEXT→textarea、INTEGER→number、BOOLEAN→checkbox、TIMESTAMPTZ→datetime、FK→select
+- [x] Auth 保護：有 auth 時 actions 自動加 `requireAdmin()`，AdminHeader 顯示登出
+- [x] Admin Dashboard 卡片網格（entity 列表導航）
+- [x] `executeCoderPipeline()` step 2.7 注入 admin 生成
 
-每 entity 生成：`/admin/[entity]/page.tsx`（列表）+ `/admin/[entity]/[id]/page.tsx`（編輯）+ `/admin/[entity]/new/page.tsx`（新增）
-共用組件：Sidebar + AdminHeader + FormField + DeleteButton + SubmitButton
+生成產物（以 11 個 entity 為例，共 50 個檔案）：
+| 類型 | 路徑 | 數量 |
+|------|------|------|
+| 共用組件 | `components/admin/*.tsx` | 5 |
+| Dashboard | `app/admin/page.tsx` | 1 |
+| 列表頁 | `app/admin/[entity]/page.tsx` | ×11 |
+| 編輯頁 | `app/admin/[entity]/[id]/page.tsx` | ×11 |
+| 查詢函數 | `lib/admin-queries/[entity].ts` | ×11 |
+| CRUD Actions | `lib/admin-actions/[entity].ts` | ×11 |
 
-#### M4：檔案上傳 Pattern（⬜ 待開發，依賴 M3）
+#### M4：檔案上傳 Pattern（✅ 已完成 2026-04-01，依賴 M3）
 
-圖片上傳功能，使用 Vercel Blob 儲存。
+Schema 欄位名包含 image/photo/cover/avatar 等 → 自動生成圖片上傳功能。
 
-- [ ] Schema 偵測 image/photo/cover/avatar 欄位 → 標記需要上傳
-- [ ] 生成 `app/api/upload/route.ts`（Vercel Blob，5MB 限制）
-- [ ] 生成 `components/admin/ImageUpload.tsx`（拖放+預覽）+ `MultiImageUpload.tsx`（多圖）
-- [ ] `deployer.ts` BASE_DEPS 新增 `@vercel/blob`
+- [x] 獨立檔案 `coder-upload-templates.ts`（143 行）：`detectImageColumnsInSchema()` + `generateUploadFiles()` + ImageUpload 組件 + Upload API 模板
+- [x] `coder-admin-templates.ts` import `IMAGE_COLUMN_PATTERN`，`columnToFieldType` 偵測 image 欄位，`buildEditPage` 加 ImageUpload case
+- [x] `executeCoderPipeline` step 2.8 獨立觸發 upload（不依賴 Admin Panel，任何有 image 欄位的專案都生成）
+- [x] Upload API 雙模式：Vercel Blob（生產，需 `BLOB_READ_WRITE_TOKEN`）/ 本地 `/public/uploads/`（開發 + WebContainer）
+- [x] `deployer.ts` + `webcontainer-utils.ts` KNOWN_PACKAGES 加 `@vercel/blob`
 
 #### M5：進階 UI Pattern（⬜ 待開發，獨立）
 
