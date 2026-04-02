@@ -2,7 +2,6 @@
 // 迭代修改 + 回滾 Skill（從 orchestrator.ts 抽出）
 // ============================================================
 
-import { Server as SocketIOServer } from 'socket.io'
 import Redis from 'ioredis'
 import * as db from '../db/client'
 import { createLogger } from '../lib/logger'
@@ -11,7 +10,7 @@ import { sanitizeForPreview } from './code-verify'
 import { sanitizeCodeForDeploy } from './deployer'
 
 const logger = createLogger('iteration-skill')
-import type { FlowState } from '../types/flow-state'
+import type { FlowState, IoEmitter } from '../types/flow-state'
 import { sendMessage, saveFlowState, getFlowState, generatedCodeToFileRows, deductCredits, makeStreamingCallback, snapshotCodeToGeneration } from '../workers/orchestrator-utils'
 import { CREDIT_COSTS } from '../config/plans'
 import { refineCode, refineFullStackCode, generateTailwindConfig, GeneratedComponent, buildStreamingHandler } from './uiux-generation'
@@ -245,7 +244,7 @@ export async function executeIteration(input: {
   userId: string
   userFeedback: string
   redis: Redis
-  io: SocketIOServer
+  io: IoEmitter
   imageUrls?: string[]
 }): Promise<void> {
   const { conversationId, projectId, userId, userFeedback, redis, io } = input
@@ -617,7 +616,7 @@ export async function executeUndoIteration(input: {
   conversationId: string
   projectId: string
   redis: Redis
-  io: SocketIOServer
+  io: IoEmitter
 }): Promise<void> {
   const { conversationId, projectId, redis, io } = input
   const state = await getFlowState(redis, conversationId)
@@ -712,7 +711,7 @@ export async function executeRollbackQuery(input: {
   conversationId: string
   projectId: string
   redis: Redis
-  io: SocketIOServer
+  io: IoEmitter
 }): Promise<void> {
   const { conversationId, projectId, redis, io } = input
   const state = await getFlowState(redis, conversationId)
@@ -786,7 +785,7 @@ export async function executeRollbackSelection(input: {
   projectId: string
   userMessage: string
   redis: Redis
-  io: SocketIOServer
+  io: IoEmitter
 }): Promise<void> {
   const { conversationId, projectId, userMessage, redis, io } = input
   const state = await getFlowState(redis, conversationId)

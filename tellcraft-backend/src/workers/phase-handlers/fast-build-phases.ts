@@ -3,11 +3,10 @@
 // 從 orchestrator.ts 提取
 // ============================================================
 
-import { Server as SocketIOServer } from 'socket.io'
 import Redis from 'ioredis'
 import * as db from '../../db/client'
 import { sanitizeForPreview } from '../../services/code-verify'
-import type { FlowState, GeneratedCode } from '../../types/flow-state'
+import type { FlowState, GeneratedCode, IoEmitter } from '../../types/flow-state'
 import {
   generateStructure, generateAnimations, generateRwd, generateAnimationsAndRwd,
   generateTailwindConfig, ensureResponsiveClasses,
@@ -313,7 +312,7 @@ export async function executeFastBuildSkill(params: {
   locale?: 'zh' | 'en'
   imageUrls?: string[]
   redis: Redis
-  io: SocketIOServer
+  io: IoEmitter
 }) {
   const { taskId, projectId, conversationId, userId, message, locale, imageUrls, redis, io } = params
 
@@ -523,7 +522,7 @@ export async function runFastBuildPipeline(params: {
   projectId: string
   userId: string
   redis: Redis
-  io: SocketIOServer
+  io: IoEmitter
 }) {
   const { state, targetPages, conversationId, projectId, userId, redis, io } = params
   const isChinese = state.locale === 'zh'
@@ -1067,7 +1066,7 @@ export async function runFastBuildPipeline(params: {
 export async function sendFastBuildCompleteMessage(
   conversationId: string,
   state: FlowState,
-  io: SocketIOServer,
+  io: IoEmitter,
   redis: Redis,
 ) {
   const isChinese = state.locale === 'zh'
@@ -1129,7 +1128,7 @@ export async function resumeFastBuildPipeline(params: {
   projectId: string
   userId: string
   redis: Redis
-  io: SocketIOServer
+  io: IoEmitter
 }) {
   const { state, conversationId, projectId, userId, redis, io } = params
   const isChinese = state.locale === 'zh'

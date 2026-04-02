@@ -12,7 +12,7 @@ import { getDbLimit } from '../config/plans'
 import { sendMessage } from '../workers/orchestrator-utils'
 import { detectAuthInSchema } from './coder-generation'
 import type { DerivedSchema } from './schema-derivation'
-import type { Server as SocketIOServer } from 'socket.io'
+import type { IoEmitter } from '../types/flow-state'
 
 const logger = createLogger('neon-service')
 
@@ -195,7 +195,7 @@ export async function provisionNeonDatabase(params: {
   projectName: string
   schema: DerivedSchema
   conversationId: string
-  io: SocketIOServer
+  io: IoEmitter
   locale?: 'zh' | 'en'
 }): Promise<NeonProvisionResult | null> {
   const { projectId, projectName, schema, conversationId, io, locale } = params

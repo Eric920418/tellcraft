@@ -4,7 +4,7 @@
  */
 
 import { Job } from 'bullmq'
-import { Server as SocketIOServer } from 'socket.io'
+import type { IoEmitter } from '../types/flow-state'
 import { query } from '../db/client'
 import { sendMessage } from '../workers/orchestrator-utils'
 import { createLogger } from '../lib/logger'
@@ -17,7 +17,7 @@ const logger = createLogger('job-failure')
 export async function handleJobFinalFailure(
   job: Job | undefined,
   err: Error,
-  io: SocketIOServer
+  io: IoEmitter
 ): Promise<void> {
   if (!job) return
 

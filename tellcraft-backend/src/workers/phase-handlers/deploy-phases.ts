@@ -3,10 +3,9 @@
 // 從 orchestrator.ts 提取
 // ============================================================
 
-import { Server as SocketIOServer } from 'socket.io'
 import Redis from 'ioredis'
 import * as db from '../../db/client'
-import type { FlowState } from '../../types/flow-state'
+import type { FlowState, IoEmitter } from '../../types/flow-state'
 import type { GeneratedComponent } from '../../services/uiux-generation'
 import { prepareDeployment, executeDeployment, type SiteMetadata } from '../../services/deployer'
 import { sendMessage, saveFlowState, getFlowState, deductCredits, snapshotCodeToGeneration } from '../orchestrator-utils'
@@ -23,7 +22,7 @@ export interface DeployerSkillInput {
   userId: string
   message: string
   redis: Redis
-  io: SocketIOServer
+  io: IoEmitter
 }
 
 export async function executeDeployerSkill(input: DeployerSkillInput) {
@@ -74,7 +73,7 @@ export async function handleDeployExecute(
   state: FlowState,
   projectId: string,
   redis: Redis,
-  io: SocketIOServer
+  io: IoEmitter
 ) {
   const preCheck = state.deployerPreCheck
 

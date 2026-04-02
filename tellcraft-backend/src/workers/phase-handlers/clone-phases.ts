@@ -9,9 +9,7 @@
  */
 
 import type Redis from 'ioredis'
-import type { Server as SocketIOServer } from 'socket.io'
-import type { FlowState } from '../../types/flow-state'
-import type { GeneratedCode } from '../../types/flow-state'
+import type { FlowState, GeneratedCode, IoEmitter } from '../../types/flow-state'
 import { sendMessage, saveFlowState } from '../orchestrator-utils'
 import {
   extractPageForClone, generateSectionCode, assembleSections, toSectionMetas,
@@ -50,7 +48,7 @@ export async function executeCloneSkill(params: {
   imageUrls?: string[]
   locale?: 'zh' | 'en'
   redis: Redis
-  io: SocketIOServer
+  io: IoEmitter
 }): Promise<void> {
   const { projectId, conversationId, userId, url, imageUrls, locale, redis, io } = params
   const isChinese = locale === 'zh' || /[\u4e00-\u9fff\u3400-\u4dbf]/.test(url || '')
@@ -77,7 +75,7 @@ export async function executeCloneSkill(params: {
 async function hybridCloneFlow(params: {
   projectId: string; conversationId: string; userId: string
   url: string; imageUrls?: string[]; inputMode: 'url' | 'hybrid'
-  locale?: 'zh' | 'en'; isChinese: boolean; redis: Redis; io: SocketIOServer
+  locale?: 'zh' | 'en'; isChinese: boolean; redis: Redis; io: IoEmitter
 }): Promise<void> {
   const { projectId, conversationId, userId, url, imageUrls, inputMode, locale, isChinese, redis, io } = params
 
@@ -265,7 +263,7 @@ async function hybridCloneFlow(params: {
 async function imageOnlyCloneFlow(params: {
   projectId: string; conversationId: string; userId: string
   imageUrls: string[]
-  locale?: 'zh' | 'en'; isChinese: boolean; redis: Redis; io: SocketIOServer
+  locale?: 'zh' | 'en'; isChinese: boolean; redis: Redis; io: IoEmitter
 }): Promise<void> {
   const { projectId, conversationId, userId, imageUrls, locale, isChinese, redis, io } = params
   const trackingContext = { userId, conversationId }
@@ -437,7 +435,7 @@ async function finalizeMergedCode(
   conversationId: string,
   userId: string,
   redis: Redis,
-  io: SocketIOServer,
+  io: IoEmitter,
   isChinese: boolean,
   totalCount: number,
   successCount: number,
@@ -548,7 +546,7 @@ async function transitionToFailed(
   state: FlowState,
   conversationId: string,
   redis: Redis,
-  io: SocketIOServer,
+  io: IoEmitter,
   isChinese: boolean,
   userMessage: string,
   reason: string,

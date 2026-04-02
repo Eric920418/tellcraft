@@ -4,10 +4,9 @@
 // 從 orchestrator.ts 提取
 // ============================================================
 
-import { Server as SocketIOServer } from 'socket.io'
 import Redis from 'ioredis'
 import * as db from '../../db/client'
-import type { FlowState } from '../../types/flow-state'
+import type { FlowState, IoEmitter } from '../../types/flow-state'
 import type { ClassificationResult } from '../../services/classifier'
 import {
   createBddSession, getBddSession, updateBddSession,
@@ -44,7 +43,7 @@ import {
 
 const logger = createLogger('bdd-phases')
 
-export async function resendDesignPreference(conversationId: string, state: FlowState, io: SocketIOServer) {
+export async function resendDesignPreference(conversationId: string, state: FlowState, io: IoEmitter) {
   const matchedCount = state.matchedTemplateIds?.length || 0
   if (matchedCount > 0) {
     await sendMessage(conversationId, io, {
@@ -66,7 +65,7 @@ export async function resendDesignPreference(conversationId: string, state: Flow
   }
 }
 
-export async function resendDesignBriefConfirm(conversationId: string, state: FlowState, io: SocketIOServer) {
+export async function resendDesignBriefConfirm(conversationId: string, state: FlowState, io: IoEmitter) {
   if (!state.uiuxDesignBrief) {
     // brief 不存在（不應發生），降級回偏好選擇
     state.phase = 'uiux_design_preference'
@@ -90,7 +89,7 @@ export async function handleGoBack(
   conversationId: string,
   state: FlowState,
   redis: Redis,
-  io: SocketIOServer
+  io: IoEmitter
 ): Promise<boolean> {
   const targetPhase = PHASE_BACKTRACK_MAP[state.phase]
   if (!targetPhase) return false
@@ -138,7 +137,7 @@ export async function handleFormulationDraftReview(
   state: FlowState,
   message: string,
   redis: Redis,
-  io: SocketIOServer
+  io: IoEmitter
 ) {
   // autoAdopt 模式下自動確認草稿
   if (state.autoAdoptMode) {
@@ -224,7 +223,7 @@ export async function handleFormulationDraftReview(
 }
 
 export async function handleSpecRollbackSelect(
-  conversationId: string, state: FlowState, message: string, redis: Redis, io: SocketIOServer
+  conversationId: string, state: FlowState, message: string, redis: Redis, io: IoEmitter
 ) {
     const trimmed = message.trim()
     if (trimmed === '取消' || trimmed.includes('取消')) {
@@ -294,7 +293,7 @@ export async function handleSpecRollbackSelect(
 }
 
 export async function handleSpecChangeConfirm(
-  conversationId: string, state: FlowState, message: string, redis: Redis, io: SocketIOServer
+  conversationId: string, state: FlowState, message: string, redis: Redis, io: IoEmitter
 ) {
     const trimmed = message.trim()
     const isConfirm = trimmed === '確認' || trimmed.includes('確認') || trimmed.includes('執行') || trimmed === 'Y' || trimmed === 'y'
@@ -473,7 +472,7 @@ export async function handleSpecChangeConfirm(
     return
 }
 
-export async function handleSpecChangeAnalyzing(conversationId: string, io: SocketIOServer) {
+export async function handleSpecChangeAnalyzing(conversationId: string, io: IoEmitter) {
   await sendMessage(conversationId, io, {
     content: '正在分析變更影響，請稍候...',
     stage: 'info',
@@ -481,7 +480,7 @@ export async function handleSpecChangeAnalyzing(conversationId: string, io: Sock
 }
 
 export async function handlePrdDiscoveryGenerating(
-  conversationId: string, state: FlowState, redis: Redis, io: SocketIOServer
+  conversationId: string, state: FlowState, redis: Redis, io: IoEmitter
 ) {
     const PRD_DISCOVERY_TIMEOUT_MS = 5 * 60 * 1000 // 5 分鐘
     const startedAt = state.prdDiscoveryStartedAt || 0
@@ -510,7 +509,7 @@ export async function handlePrdDiscoveryGenerating(
 }
 
 export async function handleFormulationGenerating(
-  conversationId: string, state: FlowState, redis: Redis, io: SocketIOServer
+  conversationId: string, state: FlowState, redis: Redis, io: IoEmitter
 ) {
     const FORMULATION_TIMEOUT_MS = 15 * 60 * 1000 // 15 分鐘
     const startedAt = state.formulationStartedAt || 0
@@ -544,7 +543,7 @@ export async function handleFormulationGenerating(
 }
 
 export async function handleSpecDiscoveryGenerating(
-  conversationId: string, state: FlowState, redis: Redis, io: SocketIOServer
+  conversationId: string, state: FlowState, redis: Redis, io: IoEmitter
 ) {
     const SPEC_DISCOVERY_TIMEOUT_MS = 5 * 60 * 1000 // 5 分鐘
     const startedAt = state.formulationStartedAt || 0 // 複用同一個時間戳
@@ -567,7 +566,7 @@ export async function handleSpecDiscoveryGenerating(
 }
 
 export async function handleBddWaitingForReply(
-  conversationId: string, state: FlowState, message: string, redis: Redis, io: SocketIOServer
+  conversationId: string, state: FlowState, message: string, redis: Redis, io: IoEmitter
 ) {
   if (!state.waitingForReply) {
     logger.warn({ phase: state.phase }, '流程不在等待回覆狀態')
@@ -619,7 +618,7 @@ export async function handleESInitReply(
   state: FlowState,
   message: string,
   redis: Redis,
-  io: SocketIOServer
+  io: IoEmitter
 ) {
   const trimmed = message.trim()
   const trackingContext = { userId: state.userId, conversationId }
@@ -706,7 +705,7 @@ export async function handleESExploreReply(
   state: FlowState,
   message: string,
   redis: Redis,
-  io: SocketIOServer
+  io: IoEmitter
 ) {
   const trimmed = message.trim()
   const trackingContext = { userId: state.userId, conversationId }
@@ -762,7 +761,7 @@ export async function handleESComplete(
   state: FlowState,
   result: { esDocument?: string; content: string; knowledgeMap: ESKnowledgeMap },
   redis: Redis,
-  io: SocketIOServer
+  io: IoEmitter
 ) {
   const esDocument = result.esDocument || generateESDocument(result.knowledgeMap)
 
@@ -790,7 +789,7 @@ export async function skipESAndStartDiscovery(
   conversationId: string,
   state: FlowState,
   redis: Redis,
-  io: SocketIOServer
+  io: IoEmitter
 ) {
   // 如果有部分 ES 結果，生成文檔保存
   let esDocument: string | undefined
@@ -820,7 +819,7 @@ export async function startPrdDiscoveryWithES(
   state: FlowState,
   esDocument: string | undefined,
   redis: Redis,
-  io: SocketIOServer
+  io: IoEmitter
 ) {
   const session = await getBddSession({ sessionId: state.sessionId! })
   const originalRequirements = session?.data?.originalRequirements || ''
@@ -906,7 +905,7 @@ export interface BddSpecSkillInput {
   locale?: 'zh' | 'en'
   extractedEntities?: ClassificationResult['extractedEntities']
   redis: Redis
-  io: SocketIOServer
+  io: IoEmitter
 }
 
 export async function executeBddSpecSkill(input: BddSpecSkillInput) {
@@ -1072,7 +1071,7 @@ export interface ProcessReplyInput {
     resolvedItems: ClarifyItem[]
   }
   redis: Redis
-  io: SocketIOServer
+  io: IoEmitter
 }
 
 export async function processUserReply(input: ProcessReplyInput) {
@@ -1403,7 +1402,7 @@ async function autoAdoptAllPendingQuestions(
   conversationId: string,
   state: FlowState,
   redis: Redis,
-  io: SocketIOServer
+  io: IoEmitter
 ) {
   const MAX_ITERATIONS = 200
   let iteration = 0
@@ -1577,7 +1576,7 @@ async function autoAdoptPostFormulation(
   conversationId: string,
   state: FlowState,
   redis: Redis,
-  io: SocketIOServer
+  io: IoEmitter
 ) {
   if (!state.autoAdoptMode) return
 
@@ -1633,7 +1632,7 @@ async function autoAdoptPostFormulation(
 
 export async function sendClarifyQuestion(
   conversationId: string,
-  io: SocketIOServer,
+  io: IoEmitter,
   item: ClarifyItem,
   index: number,
   total: number,
@@ -1747,7 +1746,7 @@ async function continueToNextQuestion(
   state: FlowState,
   session: { clarifyItems: ClarifyItem[]; stagingItems: ClarifyItem[]; resolvedItems: ClarifyItem[] },
   redis: Redis,
-  io: SocketIOServer
+  io: IoEmitter
 ) {
   // 重新取得 session 以獲得最新的 clarifyItems
   const updatedSession = await getBddSession({ sessionId: state.sessionId! })
@@ -1792,7 +1791,7 @@ async function sendBatchConfirmation(
   conversationId: string,
   state: FlowState,
   redis: Redis,
-  io: SocketIOServer
+  io: IoEmitter
 ) {
   const session = await getBddSession({ sessionId: state.sessionId! })
   if (!session.success || !session.data) {
@@ -1833,7 +1832,7 @@ async function completeClärifyPhase(
   conversationId: string,
   state: FlowState,
   redis: Redis,
-  io: SocketIOServer
+  io: IoEmitter
 ) {
   // 取得 session 和已回答的問題
   const session = await getBddSession({ sessionId: state.sessionId! })
@@ -1989,7 +1988,7 @@ async function resumeFormulation(
   conversationId: string,
   state: FlowState,
   redis: Redis,
-  io: SocketIOServer
+  io: IoEmitter
 ) {
   try {
     // 從 FlowState 讀取 checkpoint
@@ -2110,7 +2109,7 @@ async function restartFormulation(
   conversationId: string,
   state: FlowState,
   redis: Redis,
-  io: SocketIOServer
+  io: IoEmitter
 ) {
   // 清理所有 formulation 暫存欄位
   state.formulationStartedAt = undefined
@@ -2129,7 +2128,7 @@ async function finishClarifyAndStartFormulation(
   conversationId: string,
   state: FlowState,
   redis: Redis,
-  io: SocketIOServer
+  io: IoEmitter
 ) {
   await sendMessage(conversationId, io, {
     content: '釐清完成！正在產出規格文件...',
@@ -2412,7 +2411,7 @@ async function startSpecDiscovery(
   schemaSql: string,
   entityMapping: string,
   redis: Redis,
-  io: SocketIOServer
+  io: IoEmitter
 ) {
   state.phase = 'spec_discovery'
   state.specRound = (state.specRound || 0) + 1
@@ -2526,7 +2525,7 @@ async function completeSpecClarifyPhase(
   conversationId: string,
   state: FlowState,
   redis: Redis,
-  io: SocketIOServer
+  io: IoEmitter
 ) {
   // 取得 session
   const session = await getBddSession({ sessionId: state.sessionId! })
@@ -2564,7 +2563,7 @@ async function fixFeaturesAndComplete(
   state: FlowState,
   specAnswers: ClarifyItem[],
   redis: Redis,
-  io: SocketIOServer
+  io: IoEmitter
 ) {
   // 取得 session
   const session = await getBddSession({ sessionId: state.sessionId! })
@@ -2692,7 +2691,7 @@ export async function handleSpecChange(
   state: FlowState,
   changeDescription: string,
   redis: Redis,
-  io: SocketIOServer
+  io: IoEmitter
 ) {
   state.phase = 'spec_change_analyzing'
   await saveFlowState(redis, conversationId, state)
@@ -2768,7 +2767,7 @@ export async function completeSpecPhase(
   conversationId: string,
   state: FlowState,
   redis: Redis,
-  io: SocketIOServer
+  io: IoEmitter
 ) {
   // 取得 session 資料（Phase 4/5 需要）
   const session = await getBddSession({ sessionId: state.sessionId! })

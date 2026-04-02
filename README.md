@@ -947,9 +947,11 @@ redis-cli CONFIG REWRITE                       # 寫回配置檔
 # 7. 上傳目錄（圖片上傳功能）
 mkdir -p /var/www/uploads/tellcraft
 
-# 8. 啟動服務
+# 8. 啟動服務（雙進程：API + Worker）
+cd tellcraft-backend
 pm2 start ecosystem.config.js
 pm2 save
+# 驗證：pm2 status 應顯示 tellcraft-api + tellcraft-worker 兩個進程
 ```
 
 ### VPS 日常部署
@@ -958,7 +960,7 @@ pm2 save
 # 方法 1：SSH 到 VPS 後執行
 cd ~/tellcraft-repo && git pull origin main
 cd tellcraft-backend && pnpm install && pnpm build
-pm2 restart tellcraft-backend
+pm2 startOrReload ecosystem.config.js --wait-ready
 
 # 方法 2：本地直接執行（deploy.sh）
 ssh -i ~/Desktop/LightsailDefaultKey-ap-northeast-1.pem ubuntu@54.238.4.117 '~/deploy.sh'
@@ -970,8 +972,8 @@ ssh -i ~/Desktop/LightsailDefaultKey-ap-northeast-1.pem ubuntu@54.238.4.117 '~/d
 set -e
 cd ~/tellcraft-repo && git pull origin main
 cd tellcraft-backend && pnpm install && pnpm build
-pm2 restart tellcraft-backend
-curl -s http://localhost:8080/health
+pm2 startOrReload ecosystem.config.js --wait-ready
+curl -s http://localhost:3100/health
 ```
 
 ### BullMQ 生產配置

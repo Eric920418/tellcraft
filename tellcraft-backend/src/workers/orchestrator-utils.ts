@@ -2,11 +2,10 @@
 // Orchestrator 共用基礎設施函數（從 orchestrator.ts 抽出）
 // ============================================================
 
-import { Server as SocketIOServer } from 'socket.io'
 import Redis from 'ioredis'
 import crypto from 'crypto'
 import * as db from '../db/client'
-import type { FlowState } from '../types/flow-state'
+import type { FlowState, IoEmitter } from '../types/flow-state'
 import type { GeneratedComponent, DesignSystem, PartialCodeCallback } from '../services/uiux-generation'
 import { generateTailwindConfig } from '../services/uiux-generation'
 import { sendLineNotifyIfNeeded } from '../services/line-notify'
@@ -142,7 +141,7 @@ export async function deleteFlowState(redis: Redis, conversationId: string) {
 
 export async function sendMessage(
   conversationId: string,
-  io: SocketIOServer,
+  io: IoEmitter,
   options: {
     content: unknown
     stage?: string
@@ -219,7 +218,7 @@ export async function sendMessage(
  */
 export async function streamLlmMessage(
   conversationId: string,
-  io: SocketIOServer,
+  io: IoEmitter,
   options: {
     stage?: string
     quickReplies?: { label: string; value: string; style?: 'primary' | 'secondary' | 'ghost' }[]
@@ -335,7 +334,7 @@ export async function hasRecentFlowActivity(
  */
 export function makeStreamingCallback(
   conversationId: string,
-  io: SocketIOServer,
+  io: IoEmitter,
   redis: Redis,
   phase: 'structure' | 'animation' | 'rwd' | 'iteration',
   tailwindConfig: string

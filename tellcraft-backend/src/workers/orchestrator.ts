@@ -1,5 +1,5 @@
 import { Job, Worker } from 'bullmq'
-import { Server as SocketIOServer } from 'socket.io'
+import type { IoEmitter } from '../types/flow-state'
 import Redis from 'ioredis'
 import { withConversationLock, releaseUserActiveLock } from '../services/conversation-lock'
 import * as db from '../db/client'
@@ -191,7 +191,7 @@ async function renameProjectSafely(params: {
 export function createOrchestratorWorker(
   workerConnection: Redis,  // BullMQ Worker 專用連線（maxRetriesPerRequest: null）
   redis: Redis,             // FlowState/lock/activity 所有業務邏輯（generalRedis）
-  io: SocketIOServer
+  io: IoEmitter
 ): Worker {
   const worker = new Worker(
     'orchestrator',
@@ -271,7 +271,7 @@ export function createOrchestratorWorker(
 async function handleProcessMessage(
   data: ProcessMessageData,
   redis: Redis,
-  io: SocketIOServer
+  io: IoEmitter
 ) {
   const { projectId, conversationId, userId, message, mode, locale } = data
   const isAutoRepairMsg = message.trim().startsWith('__auto_repair_preview__:')
@@ -631,7 +631,7 @@ async function handleProcessMessage(
 async function handleContinueFlow(
   data: ContinueFlowData,
   redis: Redis,
-  io: SocketIOServer
+  io: IoEmitter
 ) {
   const { projectId, conversationId, userId, message } = data
   const isAutoRepair = message.trim().startsWith('__auto_repair_preview__:')

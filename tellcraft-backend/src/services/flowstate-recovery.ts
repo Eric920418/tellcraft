@@ -15,11 +15,10 @@
 // ============================================================
 
 import Redis from 'ioredis'
-import { Server as SocketIOServer } from 'socket.io'
 import { saveFlowState, deleteFlowState, sendMessage, hasRecentFlowActivity } from '../workers/orchestrator-utils'
 import { forceReleaseConversationLock, forceReleaseUserActiveLock } from './conversation-lock'
 import { generateTailwindConfig } from './uiux-generation'
-import type { FlowState } from '../types/flow-state'
+import type { FlowState, IoEmitter } from '../types/flow-state'
 import { createLogger } from '../lib/logger'
 
 const logger = createLogger('flowstate-recovery')
@@ -75,7 +74,7 @@ function getPhaseTimeoutMs(state: FlowState): number | undefined {
  */
 export async function scanAndRecoverStuckFlowStates(
   redis: Redis,
-  io: SocketIOServer
+  io: IoEmitter
 ): Promise<void> {
   let recovered = 0
   let totalScanned = 0
@@ -176,7 +175,7 @@ export async function scanAndRecoverStuckFlowStates(
 
 async function recoverFlowState(
   redis: Redis,
-  io: SocketIOServer,
+  io: IoEmitter,
   conversationId: string,
   state: FlowState
 ): Promise<void> {
@@ -226,7 +225,7 @@ async function recoverFlowState(
  * PRD Discovery 是初始階段，沒有可恢復的中途進度，直接重來最乾淨
  */
 async function recoverPrdDiscovery(
-  redis: Redis, io: SocketIOServer, conversationId: string, state: FlowState
+  redis: Redis, io: IoEmitter, conversationId: string, state: FlowState
 ) {
   await deleteFlowState(redis, conversationId)
 
@@ -244,7 +243,7 @@ async function recoverPrdDiscovery(
  * 有代碼 → uiux_complete + code_preview；無代碼 → idle + 提示重新描述
  */
 async function recoverFastGenerating(
-  redis: Redis, io: SocketIOServer, conversationId: string, state: FlowState
+  redis: Redis, io: IoEmitter, conversationId: string, state: FlowState
 ) {
   const isChinese = state.locale !== 'en'
   const hasRecentActivity = await hasRecentFlowActivity(redis, conversationId)
@@ -344,7 +343,7 @@ async function recoverFastGenerating(
  * → uiux_complete + 提示重新描述修改
  */
 async function recoverUiuxIterating(
-  redis: Redis, io: SocketIOServer, conversationId: string, state: FlowState
+  redis: Redis, io: IoEmitter, conversationId: string, state: FlowState
 ) {
   const isChinese = state.locale !== 'en'
   state.phase = 'uiux_complete'
@@ -366,7 +365,7 @@ async function recoverUiuxIterating(
  * 注意：定時掃描不重啟管線（避免併發風險），只恢復到穩定狀態讓用戶操作。
  */
 async function recoverCodeGeneration(
-  redis: Redis, io: SocketIOServer, conversationId: string, state: FlowState
+  redis: Redis, io: IoEmitter, conversationId: string, state: FlowState
 ) {
   const hasCode = state.uiuxGeneratedCode &&
     (state.uiuxGeneratedCode.pages.length > 0 || state.uiuxGeneratedCode.components.length > 0)
@@ -499,7 +498,7 @@ async function scanAndCleanOrphanedLocks(redis: Redis): Promise<void> {
 }
 
 async function recoverDomainSearching(
-  redis: Redis, io: SocketIOServer, conversationId: string, state: FlowState
+  redis: Redis, io: IoEmitter, conversationId: string, state: FlowState
 ) {
   await deleteFlowState(redis, conversationId)
   const isChinese = state.locale !== 'en'
@@ -512,7 +511,7 @@ async function recoverDomainSearching(
 }
 
 async function recoverDomainRegistering(
-  redis: Redis, io: SocketIOServer, conversationId: string, state: FlowState
+  redis: Redis, io: IoEmitter, conversationId: string, state: FlowState
 ) {
   const isChinese = state.locale !== 'en'
   state.phase = 'domain_failed'
@@ -534,7 +533,7 @@ async function recoverDomainRegistering(
 }
 
 async function recoverDomainDnsVerifying(
-  redis: Redis, io: SocketIOServer, conversationId: string, state: FlowState
+  redis: Redis, io: IoEmitter, conversationId: string, state: FlowState
 ) {
   const isChinese = state.locale !== 'en'
   state.phase = 'domain_own_setup'
@@ -554,7 +553,7 @@ async function recoverDomainDnsVerifying(
 }
 
 async function recoverDeployer(
-  redis: Redis, io: SocketIOServer, conversationId: string, state: FlowState
+  redis: Redis, io: IoEmitter, conversationId: string, state: FlowState
 ) {
   state.phase = 'deployer_failed'
   state.uiuxCodeGenerationStartedAt = undefined
@@ -581,7 +580,7 @@ async function recoverDeployer(
  * coder_generating 恢復：回退到 uiux_complete + 恢復快照
  */
 async function recoverCoderGenerating(
-  redis: Redis, io: SocketIOServer, conversationId: string, state: FlowState
+  redis: Redis, io: IoEmitter, conversationId: string, state: FlowState
 ) {
   const isChinese = state.locale !== 'en'
 
@@ -606,7 +605,7 @@ async function recoverCoderGenerating(
 }
 
 async function recoverCoderTesting(
-  redis: Redis, io: SocketIOServer, conversationId: string, state: FlowState
+  redis: Redis, io: IoEmitter, conversationId: string, state: FlowState
 ) {
   const isChinese = state.locale !== 'en'
 
@@ -631,7 +630,7 @@ async function recoverCoderTesting(
  * clone_analyzing 恢復：轉入 clone_failed + 重試按鈕
  */
 async function recoverCloneAnalyzing(
-  redis: Redis, io: SocketIOServer, conversationId: string, state: FlowState
+  redis: Redis, io: IoEmitter, conversationId: string, state: FlowState
 ) {
   const isChinese = state.locale !== 'en'
 
@@ -657,7 +656,7 @@ async function recoverCloneAnalyzing(
  * clone_generating 恢復：有已完成 section → 合併 → uiux_complete；否則 → clone_failed
  */
 async function recoverCloneGenerating(
-  redis: Redis, io: SocketIOServer, conversationId: string, state: FlowState
+  redis: Redis, io: IoEmitter, conversationId: string, state: FlowState
 ) {
   const isChinese = state.locale !== 'en'
   const completedSections = state.cloneCompletedSections || 0

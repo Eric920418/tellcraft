@@ -7,7 +7,7 @@ validateEnv()
 import express from 'express'
 import { createServer } from 'http'
 import { Server as SocketIOServer } from 'socket.io'
-import { Queue, QueueEvents } from 'bullmq'
+import { Queue } from 'bullmq'
 import Redis, { type RedisOptions } from 'ioredis'
 import cors from 'cors'
 import helmet from 'helmet'
@@ -18,8 +18,8 @@ import * as path from 'path'
 import * as fsPromises from 'fs/promises'
 
 import { spawn, type ChildProcessWithoutNullStreams } from 'child_process'
+import { createAdapter } from '@socket.io/redis-adapter'
 import { testConnection, closePool } from './db/client'
-import { createOrchestratorWorker } from './workers/orchestrator'
 import conversationRoutes, { setOrchestratorQueue, setRedisClient } from './routes/conversation'
 import projectRoutes from './routes/project'
 import healthRoutes from './routes/health'
@@ -38,8 +38,6 @@ import telegramBotRoutes from './routes/telegram-bot'
 import { initTelegramBotHandler } from './services/telegram-bot-handler'
 import { cleanupExpiredGuestUsers } from './services/guest-cleanup'
 import { resetExpiredCredits } from './services/credit-reset'
-import { scanAndRecoverStuckFlowStates } from './services/flowstate-recovery'
-import { runStartupCodeRepair } from './services/code-repair'
 import { recaptureAllMissingThumbnails, generateThumbnailsForSeedTemplates } from './services/thumbnail-recapture'
 import {
   recordSocketConnected,
@@ -140,6 +138,11 @@ const io = new SocketIOServer(server, {
   maxHttpBufferSize: 5e6,
   connectTimeout: 30000,
 })
+
+// Socket.io Redis Adapter — 接收 Worker 進程透過 @socket.io/redis-emitter 發送的消息
+const pubClient = createRedisConnection('io-pub')
+const subClient = createRedisConnection('io-sub')
+io.adapter(createAdapter(pubClient, subClient))
 
 // Socket.io 認證中間件
 const JWT_SECRET = env.JWT_SECRET
@@ -354,12 +357,8 @@ function createRedisConnection(name: string, overrides: Partial<RedisOptions> = 
   return conn
 }
 
-// Worker 連線 — BullMQ Worker 專用（阻塞命令，maxRetriesPerRequest: null）
-const workerRedis = createRedisConnection('worker', { maxRetriesPerRequest: null })
 // Queue 連線 — BullMQ 生產者（離線時快速失敗，讓 HTTP 請求返回 500）
 const queueRedis = createRedisConnection('queue', { maxRetriesPerRequest: null, enableOfflineQueue: false })
-// QueueEvents 連線 — 事件監聽專用（阻塞命令）
-const eventsRedis = createRedisConnection('events', { maxRetriesPerRequest: null })
 // 通用連線 — FlowState/lock/cache/rate-limit/auth（API 層快速失敗）
 const generalRedis = createRedisConnection('general', { maxRetriesPerRequest: 3 })
 
@@ -380,15 +379,6 @@ const orchestratorQueue = new Queue('orchestrator', {
       age: 604800, // 7 天後刪除
     },
   },
-})
-
-// QueueEvents — 可觀測性（stalled/error 監控）
-const queueEvents = new QueueEvents('orchestrator', { connection: eventsRedis })
-queueEvents.on('stalled', ({ jobId }) => {
-  logger.warn({ jobId }, '[STALLED] Job stalled — 可能 event loop 阻塞')
-})
-queueEvents.on('error', (err) => {
-  logger.error({ err }, 'QueueEvents error')
 })
 
 // 設置隊列到路由
@@ -422,27 +412,7 @@ setMiddlewareRedisClient(generalRedis)
 setDashboardRedisClient(generalRedis)
 setCacheRedisClient(generalRedis)
 
-// 啟動清理：刪除上次程序崩潰/重啟留下的孤立 lock
-// 安全：單一實例部署，啟動時不可能有活躍 Worker，所有鎖皆為殘留
-// fire-and-forget，不阻塞 Worker 啟動
-Promise.all([
-  generalRedis.keys('conv-lock:*'),
-  generalRedis.keys('user-active:*'),
-  generalRedis.keys('flow:activity:*'),
-]).then(async ([staleConvLocks, staleUserLocks, staleActivity]) => {
-  const stale = [...staleConvLocks, ...staleUserLocks, ...staleActivity]
-  if (stale.length > 0) {
-    await generalRedis.del(...stale)
-    logger.warn({
-      convLocks: staleConvLocks.length,
-      userLocks: staleUserLocks.length,
-      activityKeys: staleActivity.length,
-    }, '啟動清理：刪除殘留鎖和心跳')
-  }
-}).catch((err) => logger.error({ err }, '啟動清理失敗'))
-
-// 創建 Worker（workerRedis: BullMQ 連線, generalRedis: 業務邏輯連線）
-const orchestratorWorker = createOrchestratorWorker(workerRedis, generalRedis, io)
+// Worker 和 lock 清理已搬到獨立的 worker.ts 進程
 
 // ============================================================
 // 路由
@@ -548,17 +518,7 @@ async function start() {
   // 每 10 分鐘定時清理
   setInterval(cleanupOrphanBuildDirs, 10 * 60 * 1000)
 
-  // 每 2 分鐘掃描超時的 FlowState 並自動恢復
-  setInterval(() => {
-    scanAndRecoverStuckFlowStates(generalRedis, io).catch(err => {
-      logger.error({ err }, 'FlowState Recovery 掃描失敗')
-    })
-  }, 2 * 60 * 1000)
-
-  // 啟動時一次性修復舊代碼（非同步，不影響啟動時間）
-  runStartupCodeRepair(generalRedis).catch(err =>
-    logger.error({ err }, 'startup code repair 失敗')
-  )
+  // FlowState Recovery 和 code repair 已搬到 Worker 進程
 
   // 啟動 90 秒後自動補截圖（有 vercel_url 的模板）
   setTimeout(() => recaptureAllMissingThumbnails().catch(err => {
@@ -612,15 +572,7 @@ async function shutdown() {
     }
   } catch { /* 不影響關閉 */ }
 
-  // 關閉 Worker（等待進行中 jobs 完成）
-  await orchestratorWorker.close()
-  logger.info('Worker 已關閉')
-
-  // 關閉 QueueEvents
-  await queueEvents.close()
-  logger.info('QueueEvents 已關閉')
-
-  // 關閉隊列
+  // 關閉隊列（Worker 在獨立進程中自行關閉）
   await orchestratorQueue.close()
   logger.info('隊列已關閉')
 
@@ -633,9 +585,9 @@ async function shutdown() {
   })
 
   // 關閉所有 Redis 連線
-  workerRedis.disconnect()
+  pubClient.disconnect()
+  subClient.disconnect()
   queueRedis.disconnect()
-  eventsRedis.disconnect()
   generalRedis.disconnect()
   logger.info('Redis 已斷開（4 連線）')
 

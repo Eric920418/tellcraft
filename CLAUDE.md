@@ -33,10 +33,11 @@ npx ts-node bdd-spec/scripts/validate-feature.ts spec/features/      # 結構驗
 # 選項：--json, --strict, --fix
 
 # VPS 部署（SSH 到 VPS 後執行）
-git pull && pnpm build && pm2 restart tellcraft-backend
+git pull && pnpm build && pm2 startOrReload ecosystem.config.js --wait-ready
 
 # VPS 除錯（SSH）
-pm2 logs tellcraft-backend --lines 100   # 查看即時日誌
+pm2 logs tellcraft-api --lines 100       # API 進程日誌
+pm2 logs tellcraft-worker --lines 100   # Worker 進程日誌
 pm2 status                                # 進程狀態
 pm2 describe tellcraft-backend            # 詳細資訊（記憶體/重啟次數）
 # 日誌檔案：/var/log/tellcraft/out.log、/var/log/tellcraft/error.log
@@ -321,7 +322,7 @@ Layer 5: sanitizeCodeForDeploy 修復 7 — useSearchParams Suspense boundary �
 
 ### CI/CD
 
-- **VPS 後端自動部署**：push 到 `main` 分支 → GitHub Actions SSH 到 VPS → `git reset --hard origin/main` → `pnpm install --frozen-lockfile` → `pnpm build` → `pm2 restart tellcraft-backend`（`.github/workflows/deploy-vps.yml`）
+- **VPS 後端自動部署**：push 到 `main` 分支 → GitHub Actions SSH 到 VPS → `git reset --hard origin/main` → `pnpm install --frozen-lockfile` → `pnpm build` → `pm2 startOrReload ecosystem.config.js`（雙進程：`tellcraft-api` + `tellcraft-worker`）（`.github/workflows/deploy-vps.yml`）
 - **前端自動部署**：push 到 `main` → Vercel 自動偵測 Next.js 並部署
 
 ### 基礎設施配置

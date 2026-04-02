@@ -4,8 +4,7 @@
 // ============================================================
 
 import type Redis from 'ioredis'
-import type { Server as SocketIOServer } from 'socket.io'
-import type { FlowState } from '../types/flow-state'
+import type { FlowState, IoEmitter } from '../types/flow-state'
 import { sendMessage, streamLlmMessage, saveFlowState, saveFlowStateLight, deleteFlowState, hasRecentFlowActivity } from './orchestrator-utils'
 import { executeIteration, executeUndoIteration, executeRollbackQuery, executeRollbackSelection } from '../services/iteration-skill'
 import { semanticGateway } from '../services/semantic-gateway'
@@ -61,7 +60,7 @@ export async function routePhase(
   state: FlowState,
   trimmedMsg: string,
   redis: Redis,
-  io: SocketIOServer
+  io: IoEmitter
 ): Promise<boolean> {
   const { conversationId, projectId, userId, message } = data
 
@@ -533,7 +532,7 @@ export async function routePhase(
 // ============================================================
 
 async function routeDeployerFailed(
-  data: ContinueFlowData, state: FlowState, trimmed: string, redis: Redis, io: SocketIOServer
+  data: ContinueFlowData, state: FlowState, trimmed: string, redis: Redis, io: IoEmitter
 ) {
   const { conversationId, projectId, userId, message } = data
 
@@ -632,7 +631,7 @@ async function routeDeployerFailed(
 // ============================================================
 
 async function routeDeployerComplete(
-  data: ContinueFlowData, state: FlowState, trimmed: string, redis: Redis, io: SocketIOServer
+  data: ContinueFlowData, state: FlowState, trimmed: string, redis: Redis, io: IoEmitter
 ) {
   const { conversationId, projectId, userId, message } = data
 
@@ -728,7 +727,7 @@ async function routeDeployerComplete(
 // ============================================================
 
 export async function handlePhaseError(
-  conversationId: string, state: FlowState, err: unknown, redis: Redis, io: SocketIOServer
+  conversationId: string, state: FlowState, err: unknown, redis: Redis, io: IoEmitter
 ) {
   const errorMsg = err instanceof Error ? err.message : String(err)
   logger.error({ phase: state.phase, err: errorMsg }, 'Phase handler 錯誤')

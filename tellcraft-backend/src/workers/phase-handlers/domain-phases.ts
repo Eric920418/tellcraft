@@ -4,8 +4,7 @@
 // ============================================================
 
 import type Redis from 'ioredis'
-import type { Server as SocketIOServer } from 'socket.io'
-import type { FlowState, PhaseContext } from '../../types/flow-state'
+import type { FlowState, PhaseContext, IoEmitter } from '../../types/flow-state'
 import type { SkillName } from '../../services/registry'
 import { sendMessage, saveFlowState, deleteFlowState, getFlowState } from '../orchestrator-utils'
 import {
@@ -43,7 +42,7 @@ interface DomainSkillInput {
   message: string
   skillName: SkillName
   redis: Redis
-  io: SocketIOServer
+  io: IoEmitter
   locale?: 'zh' | 'en'
 }
 
@@ -215,7 +214,7 @@ async function startDomainSearch(
   domain: string,
   vercelProjectId: string,
   redis: Redis,
-  io: SocketIOServer,
+  io: IoEmitter,
   locale?: 'zh' | 'en'
 ): Promise<void> {
   const isChinese = locale !== 'en'
@@ -303,7 +302,7 @@ async function startOwnDomainSetup(
   domain: string,
   vercelProjectId: string,
   redis: Redis,
-  io: SocketIOServer,
+  io: IoEmitter,
   locale?: 'zh' | 'en',
   taskId?: string
 ): Promise<void> {

@@ -72,9 +72,11 @@ jobs:
           echo "Building TypeScript..."
           pnpm build
 
-          # 零停機熱更新（重新讀 ecosystem.config.js，新進程就緒後再關舊進程）
+          # 首次部署時 PM2 進程名可能從 tellcraft-backend 改為 tellcraft-api + tellcraft-worker
+          # 先刪除舊進程（如果存在），再用新 ecosystem.config.js 啟動
           echo "Reloading PM2..."
-          pm2 reload ecosystem.config.js --only tellcraft-backend --wait-ready
+          pm2 delete tellcraft-backend 2>/dev/null || true
+          pm2 startOrReload ecosystem.config.js --wait-ready
 
           # 顯示狀態
           echo "=========================================="

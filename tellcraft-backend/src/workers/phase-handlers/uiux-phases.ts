@@ -4,10 +4,9 @@
 // 從 orchestrator.ts 提取
 // ============================================================
 
-import { Server as SocketIOServer } from 'socket.io'
 import Redis from 'ioredis'
 import * as db from '../../db/client'
-import type { FlowState } from '../../types/flow-state'
+import type { FlowState, IoEmitter } from '../../types/flow-state'
 import { sanitizeForPreview } from '../../services/code-verify'
 import {
   generateDesignVariants, synthesizeVariants, extractVariantConcept,
@@ -65,7 +64,7 @@ async function shouldShowCoderButton(state: FlowState): Promise<boolean> {
 // ============================================================
 
 export async function handleUiuxCodeGenerating(
-  conversationId: string, state: FlowState, redis: Redis, io: SocketIOServer
+  conversationId: string, state: FlowState, redis: Redis, io: IoEmitter
 ) {
     const GENERATION_TIMEOUT_MS = 10 * 60 * 1000
     const startedAt = state.uiuxCodeGenerationStartedAt || 0
@@ -152,7 +151,7 @@ export async function handleUiuxCodeGenerating(
 }
 
 export async function handleUiuxIterating(
-  conversationId: string, state: FlowState, redis: Redis, io: SocketIOServer
+  conversationId: string, state: FlowState, redis: Redis, io: IoEmitter
 ) {
     const isChinese = state.locale !== 'en'
     const ITERATION_TIMEOUT_MS = 5 * 60 * 1000
@@ -180,7 +179,7 @@ export async function handleUiuxIterating(
 }
 
 export async function handleFastGenerating(
-  conversationId: string, state: FlowState, redis: Redis, io: SocketIOServer
+  conversationId: string, state: FlowState, redis: Redis, io: IoEmitter
 ) {
     // 結構生成失敗後等待用戶點重試，攔截隨機輸入
     if (state.waitingForReply) {
@@ -305,7 +304,7 @@ export async function recoverFastBuildFromInterruption(
   conversationId: string,
   state: FlowState,
   redis: Redis,
-  io: SocketIOServer
+  io: IoEmitter
 ) {
   const isChinese = state.locale !== 'en'
   const codePhase = state.uiuxCodePhase || 'structure'
@@ -410,7 +409,7 @@ export async function handleUiuxMixedPhaseRouting(
   trimmedMsg: string,
   message: string,
   redis: Redis,
-  io: SocketIOServer
+  io: IoEmitter
 ) {
   const { conversationId, projectId, userId } = data
 
@@ -977,7 +976,7 @@ async function handleTemplateNaturalSelection(
   state: FlowState,
   message: string,
   redis: Redis,
-  io: SocketIOServer
+  io: IoEmitter
 ) {
   const templates = state.displayedTemplates
   if (!templates || templates.length === 0) {
@@ -1032,7 +1031,7 @@ export async function handleTemplateSelection(
   state: FlowState,
   message: string,
   redis: Redis,
-  io: SocketIOServer
+  io: IoEmitter
 ) {
   // 從訊息中提取模板 ID
   // 訊息格式：「我選擇「xxx」這個模板」
@@ -1108,7 +1107,7 @@ export async function handleVariantSelection(
   state: FlowState,
   message: string,
   redis: Redis,
-  io: SocketIOServer
+  io: IoEmitter
 ) {
   // 解析用戶選擇
   // 支援格式：「選擇 A」、「選擇變體 A」、「我要 E」、「我選 B」、「A」、「合併 A+C」、「合併 A 和 C」
@@ -1230,7 +1229,7 @@ export async function executeFullCodePipeline(
   conversationId: string,
   state: FlowState,
   redis: Redis,
-  io: SocketIOServer
+  io: IoEmitter
 ) {
   const { sessionId, uiuxDesignSystem } = state
 
@@ -1561,7 +1560,7 @@ async function executeCodePhaseStructure(
   conversationId: string,
   state: FlowState,
   redis: Redis,
-  io: SocketIOServer
+  io: IoEmitter
 ) {
   const { sessionId, uiuxDesignSystem } = state
 
@@ -1695,7 +1694,7 @@ async function executeCodePhaseAnimation(
   conversationId: string,
   state: FlowState,
   redis: Redis,
-  io: SocketIOServer
+  io: IoEmitter
 ) {
   const { sessionId, uiuxDesignSystem, uiuxGeneratedCode } = state
 
@@ -1797,7 +1796,7 @@ async function executeCodePhaseRwd(
   conversationId: string,
   state: FlowState,
   redis: Redis,
-  io: SocketIOServer
+  io: IoEmitter
 ) {
   const { sessionId, uiuxDesignSystem, uiuxGeneratedCode } = state
 
@@ -1866,7 +1865,7 @@ export async function executeQualityGate(
   conversationId: string,
   state: FlowState,
   redis: Redis,
-  io: SocketIOServer
+  io: IoEmitter
 ) {
   const { sessionId, uiuxDesignSystem, uiuxGeneratedCode } = state
 
@@ -2001,7 +2000,7 @@ export async function handleCodePhaseConfirm(
   conversationId: string,
   state: FlowState,
   redis: Redis,
-  io: SocketIOServer
+  io: IoEmitter
 ) {
   const { uiuxCodePhase } = state
 
@@ -2038,7 +2037,7 @@ export async function handleCodePhaseRedo(
   conversationId: string,
   state: FlowState,
   redis: Redis,
-  io: SocketIOServer
+  io: IoEmitter
 ) {
   const { uiuxCodePhase } = state
 
@@ -2148,7 +2147,7 @@ export async function handleConfirmTemplate(
   conversationId: string,
   state: FlowState,
   redis: Redis,
-  io: SocketIOServer
+  io: IoEmitter
 ) {
   // 如果已經有選擇的模板，直接進入變體生成
   if (state.uiuxTemplateId) {
@@ -2187,7 +2186,7 @@ export async function handleDesignPreferenceReply(
   state: FlowState,
   message: string,
   redis: Redis,
-  io: SocketIOServer
+  io: IoEmitter
 ) {
   const trimmed = message.trim().toUpperCase()
 
@@ -2223,7 +2222,7 @@ async function startDesignClarify(
   conversationId: string,
   state: FlowState,
   redis: Redis,
-  io: SocketIOServer
+  io: IoEmitter
 ) {
   await sendMessage(conversationId, io, {
     content: `很好！讓我來了解你的設計想法。\n\n首先，請告訴我：\n\n**你希望產品給用戶什麼樣的感覺？**\n\n_例如：專業可靠、活潑有趣、簡約現代、溫暖親切..._`,
@@ -2250,7 +2249,7 @@ async function startDesignClarifyWithInitialIdea(
   state: FlowState,
   initialIdea: string,
   redis: Redis,
-  io: SocketIOServer
+  io: IoEmitter
 ) {
   // 保存初始想法
   state.phase = 'uiux_design_clarify'
@@ -2278,7 +2277,7 @@ export async function handleDesignClarifyReply(
   state: FlowState,
   message: string,
   redis: Redis,
-  io: SocketIOServer,
+  io: IoEmitter,
   imageUrls?: string[]
 ) {
   const step = state.uiuxDesignClarifyStep || 1
@@ -2388,7 +2387,7 @@ export async function completeDesignClarify(
   conversationId: string,
   state: FlowState,
   redis: Redis,
-  io: SocketIOServer
+  io: IoEmitter
 ) {
   const ideas = state.uiuxDesignIdeas || []
 
@@ -2553,7 +2552,7 @@ export async function startDesignBriefConfirm(
   template: TemplateData,
   sourceType: 'ideas' | 'template',
   redis: Redis,
-  io: SocketIOServer
+  io: IoEmitter
 ) {
   // 保存模板到 state
   state.uiuxPreparedTemplate = template
@@ -2672,7 +2671,7 @@ export async function handleDesignBriefReply(
   state: FlowState,
   message: string,
   redis: Redis,
-  io: SocketIOServer
+  io: IoEmitter
 ) {
   const msg = message.trim().toLowerCase()
 
@@ -2799,7 +2798,7 @@ export async function proceedToVariantGeneration(
   conversationId: string,
   state: FlowState,
   redis: Redis,
-  io: SocketIOServer
+  io: IoEmitter
 ) {
   const template = state.uiuxPreparedTemplate
   if (!template) {
@@ -2979,7 +2978,7 @@ export async function showTemplatePicker(
   conversationId: string,
   state: FlowState,
   redis: Redis,
-  io: SocketIOServer
+  io: IoEmitter
 ) {
   // 是否有智能匹配結果
   const hasMatchedIds = state.matchedTemplateIds && state.matchedTemplateIds.length > 0

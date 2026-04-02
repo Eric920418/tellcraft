@@ -13,6 +13,10 @@ import type { ImpactAnalysis } from '../services/change-management'
 import type { RegistrantInfo } from '../schemas/domain'
 import type Redis from 'ioredis'
 import type { Server as SocketIOServer } from 'socket.io'
+import type { Emitter } from '@socket.io/redis-emitter'
+
+/** Socket.io Server 或 Redis Emitter — Worker 進程用 Emitter，HTTP 進程用 Server */
+export type IoEmitter = SocketIOServer | Emitter<Record<string, any>>
 
 // ============================================================
 // Phase Handler Context（Phase 1-1 拆分用）
@@ -25,7 +29,7 @@ export interface PhaseContext {
   message: string
   state: FlowState
   redis: Redis
-  io: SocketIOServer
+  io: IoEmitter
   locale?: 'zh' | 'en'
   imageUrls?: string[]
 }

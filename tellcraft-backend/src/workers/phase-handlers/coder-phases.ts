@@ -4,9 +4,8 @@
 // ============================================================
 
 import type Redis from 'ioredis'
-import type { Server as SocketIOServer } from 'socket.io'
 import * as db from '../../db/client'
-import type { FlowState, GeneratedCode } from '../../types/flow-state'
+import type { FlowState, GeneratedCode, IoEmitter } from '../../types/flow-state'
 import { type GeneratedComponent, generateTailwindConfig } from '../../services/uiux-generation'
 import { executeCoderPipeline } from '../../services/coder-generation'
 import { sendMessage, saveFlowState, getFlowState, touchFlowActivity, snapshotCodeToGeneration, inferFileType } from '../orchestrator-utils'
@@ -24,7 +23,7 @@ export interface CoderSkillInput {
   conversationId: string
   userId: string
   redis: Redis
-  io: SocketIOServer
+  io: IoEmitter
 }
 
 export async function executeCoderSkill(input: CoderSkillInput): Promise<void> {

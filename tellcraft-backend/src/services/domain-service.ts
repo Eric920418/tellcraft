@@ -6,10 +6,9 @@
 import { getEnv } from '../lib/env'
 import * as db from '../db/client'
 import { createLogger } from '../lib/logger'
-import type { Server as SocketIOServer } from 'socket.io'
 import type Redis from 'ioredis'
 import { sendMessage, saveFlowState, getFlowState } from '../workers/orchestrator-utils'
-import type { FlowState } from '../types/flow-state'
+import type { FlowState, IoEmitter } from '../types/flow-state'
 import type { RegistrantInfo, CreateDnsRecordInput } from '../schemas/domain'
 
 const logger = createLogger('domain-service')
@@ -611,7 +610,7 @@ export async function executePurchaseWorkflow(params: {
   projectId: string
   userId: string
   redis: Redis
-  io: SocketIOServer
+  io: IoEmitter
   locale?: 'zh' | 'en'
 }): Promise<void> {
   const { domainId, domain, registrant, vercelProjectId, conversationId, redis, io, locale } = params
@@ -757,7 +756,7 @@ export async function executeOwnDomainWorkflow(params: {
   vercelProjectId: string
   conversationId: string
   redis: Redis
-  io: SocketIOServer
+  io: IoEmitter
   locale?: 'zh' | 'en'
 }): Promise<void> {
   const { domainId, domain, vercelProjectId, conversationId, redis, io, locale } = params
