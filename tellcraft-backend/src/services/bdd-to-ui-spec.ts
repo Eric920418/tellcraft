@@ -4,8 +4,9 @@
  */
 
 import yaml from 'js-yaml'
-import { getAnthropicClient, MODEL, trackLlmUsage } from '../lib/anthropic'
-import { safeParseJson } from '../utils/safe-parse-json'
+import { z } from 'zod'
+import { MODEL } from '../lib/anthropic'
+import { callStructured } from '../lib/structured-output'
 import { createLogger } from '../lib/logger'
 
 const logger = createLogger('bdd-to-ui-spec')
@@ -341,8 +342,6 @@ export async function translateBddToUISpec(
   }
 
   try {
-    const anthropic = getAnthropicClient()
-
     const systemPrompt = `你是一位前端架構師。你的任務是將 BDD Feature Files（ISA 格式）翻譯成前端 UI 需求規格。
 
 ## 翻譯規則
@@ -447,92 +446,110 @@ ${actionsSummary}`
 
 請翻譯為前端 UI 需求規格 JSON。`
 
-    const RETRY_MAX = 4
-    const RETRY_BASE_DELAY_MS = 5000
-    let lastError: unknown = null
+    const UIRequirementsSpecSchema = z.object({
+      productName: z.string(),
+      productSummary: z.string(),
+      pages: z.array(z.object({
+        name: z.string(),
+        route: z.string(),
+        purpose: z.string(),
+        actions: z.array(z.object({
+          name: z.string(),
+          type: z.enum(['create', 'update', 'delete', 'view', 'filter', 'toggle', 'batch', 'sort', 'export', 'navigate', 'upload']),
+          confirmRequired: z.boolean(),
+          fields: z.array(z.object({
+            name: z.string(),
+            label: z.string(),
+            type: z.string(),
+            required: z.boolean(),
+            validation: z.string().nullable(),
+          })).nullable(),
+        })),
+        dataDisplays: z.array(z.object({
+          name: z.string(),
+          type: z.enum(['table', 'list', 'cards', 'chart', 'stat_card', 'carousel', 'gallery', 'paginated_list']),
+          columns: z.array(z.string()).nullable(),
+        })),
+      })),
+      navigation: z.array(z.string()),
+      entities: z.array(z.object({
+        name: z.string(),
+        fields: z.array(z.object({
+          name: z.string(),
+          type: z.string().nullable(),
+          required: z.boolean().nullable(),
+          validation: z.string().nullable(),
+        })),
+      })),
+      userFlows: z.array(z.object({
+        name: z.string(),
+        steps: z.array(z.string()),
+        triggerPage: z.string(),
+      })).nullable(),
+      stateHints: z.array(z.object({
+        name: z.string(),
+        scope: z.enum(['page', 'global']),
+        description: z.string(),
+      })).nullable(),
+    })
 
-    for (let attempt = 1; attempt <= RETRY_MAX; attempt++) {
-      try {
-        const stream = anthropic.messages.stream({
-          model: MODEL.HAIKU,
-          max_tokens: 8192,
-          temperature: 0.1,
-          system: systemPrompt,
-          messages: [{ role: 'user', content: userMessage }],
-        })
+    const result = await callStructured({
+      schema: UIRequirementsSpecSchema,
+      model: MODEL.HAIKU,
+      system: systemPrompt,
+      messages: [{ role: 'user', content: userMessage }],
+      maxTokens: 8192,
+      temperature: 0.1,
+      purpose: 'bdd_to_ui_translation',
+      trackingContext,
+    })
 
-        const finalMessage = await stream.finalMessage()
-
-        // 記錄 LLM 用量
-        const usage = finalMessage.usage
-        if (usage) {
-          trackLlmUsage({
-            model: MODEL.HAIKU,
-            inputTokens: usage.input_tokens || 0,
-            outputTokens: usage.output_tokens || 0,
-            purpose: 'bdd_to_ui_translation',
-            userId: trackingContext?.userId,
-            conversationId: trackingContext?.conversationId,
-          })
-        }
-
-        const content = finalMessage.content[0]
-
-        if (content.type !== 'text') {
-          return { success: false, error: 'LLM 回應格式錯誤' }
-        }
-
-        // 安全解析 JSON（支援 3+ 反引號 code fence、尾隨逗號等）
-        const spec = safeParseJson<UIRequirementsSpec>(content.text)
-        if (!spec) {
-          // JSON 截斷/格式錯誤可重試（通常是 max_tokens 不足導致輸出截斷）
-          lastError = new Error('LLM 回應無法解析為有效 JSON')
-          if (attempt < RETRY_MAX) {
-            logger.warn({ attempt, outputLength: content.text.length }, 'JSON 解析失敗，重試中')
-            continue
-          }
-          return { success: false, error: 'LLM 回應無法解析為有效 JSON' }
-        }
-
-        // 基本驗證
-        if (!spec.pages || !Array.isArray(spec.pages) || spec.pages.length === 0) {
-          return { success: false, error: '翻譯結果缺少頁面定義' }
-        }
-
-        // 正規化 entities（Haiku 可能輸出舊格式 string[]）
-        if (spec.entities?.length > 0) {
-          spec.entities = spec.entities.map(e => ({
-            name: e.name,
-            fields: Array.isArray(e.fields)
-              ? e.fields.map(f => (typeof f === 'string' ? { name: f } : f))
-              : [],
-          }))
-        }
-
-        // 零 LLM 後處理：用 actionsYml 精確覆寫 entity 欄位 type/required/validation
-        const enrichedSpec = actionsYml ? enrichEntitiesFromActionsYml(spec, actionsYml) : spec
-
-        logger.info({ pages: enrichedSpec.pages.length, entities: enrichedSpec.entities?.length || 0, conversationId: trackingContext?.conversationId }, '翻譯完成')
-
-        return { success: true, spec: enrichedSpec }
-      } catch (innerErr) {
-        lastError = innerErr
-        const errMsg = String(innerErr)
-        const isRetryable = errMsg.includes('overloaded_error') || errMsg.includes('529') ||
-          errMsg.includes('rate_limit_error') || errMsg.includes('503') ||
-          errMsg.includes('ECONNRESET') || errMsg.includes('ETIMEDOUT')
-        if (attempt < RETRY_MAX && isRetryable) {
-          const delay = RETRY_BASE_DELAY_MS * Math.pow(2, attempt - 1)
-          logger.warn({ attempt, retryMax: RETRY_MAX, delayMs: delay, error: errMsg.slice(0, 150) }, '暫時性錯誤，重試中')
-          await new Promise(resolve => setTimeout(resolve, delay))
-          continue
-        }
-        break
-      }
+    if (!result.success) {
+      logger.error({ error: result.error }, '翻譯失敗')
+      return { success: false, error: `BDD→UI 翻譯失敗: ${result.error}` }
     }
 
-    logger.error({ err: lastError }, '翻譯失敗')
-    return { success: false, error: `BDD→UI 翻譯失敗: ${lastError}` }
+    // Map to UIRequirementsSpec (nullable → optional + field normalization)
+    const spec: UIRequirementsSpec = {
+      ...result.data,
+      pages: result.data.pages.map(p => ({
+        ...p,
+        actions: p.actions.map(a => ({
+          ...a,
+          fields: a.fields?.map(f => ({
+            ...f,
+            validation: f.validation || undefined,
+          })) || undefined,
+        })),
+        dataDisplays: p.dataDisplays.map(d => ({
+          ...d,
+          columns: d.columns || undefined,
+        })),
+      })),
+      entities: result.data.entities.map(e => ({
+        name: e.name,
+        fields: e.fields.map(f => ({
+          name: f.name,
+          type: f.type || undefined,
+          required: f.required ?? undefined,
+          validation: f.validation || undefined,
+        })),
+      })),
+      userFlows: result.data.userFlows || undefined,
+      stateHints: result.data.stateHints || undefined,
+    }
+
+    // 基本驗證
+    if (!spec.pages || spec.pages.length === 0) {
+      return { success: false, error: '翻譯結果缺少頁面定義' }
+    }
+
+    // 零 LLM 後處理：用 actionsYml 精確覆寫 entity 欄位 type/required/validation
+    const enrichedSpec = actionsYml ? enrichEntitiesFromActionsYml(spec, actionsYml) : spec
+
+    logger.info({ pages: enrichedSpec.pages.length, entities: enrichedSpec.entities?.length || 0, conversationId: trackingContext?.conversationId }, '翻譯完成')
+
+    return { success: true, spec: enrichedSpec }
   } catch (err) {
     logger.error({ err }, '翻譯初始化失敗')
     return { success: false, error: `BDD→UI 翻譯失敗: ${err}` }

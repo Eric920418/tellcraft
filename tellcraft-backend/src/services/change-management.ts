@@ -3,8 +3,9 @@
  * spec_completed 後，用戶可增量修改已完成的規格
  */
 
-import { getAnthropicClient, MODEL, calculateLlmCost, trackLlmUsage } from '../lib/anthropic'
-import { safeParseJson } from '../utils/safe-parse-json'
+import { z } from 'zod'
+import { MODEL } from '../lib/anthropic'
+import { callStructured } from '../lib/structured-output'
 import { LlmTrackingContext } from './classifier'
 import { GeneratedFeature } from './formulation'
 import { createLogger } from '../lib/logger'
@@ -57,8 +58,6 @@ export async function analyzeChangeImpact(
   trackingContext?: LlmTrackingContext
 ): Promise<{ success: boolean; impact?: ImpactAnalysis; error?: string }> {
   try {
-    const anthropic = getAnthropicClient()
-
     const featuresOverview = existingSpecs.features
       .map(f => `- ${f.name} (${f.actionName})`)
       .join('\n')
@@ -72,56 +71,46 @@ ${featuresOverview}
 **Schema**（前 500 字）：
 ${existingSpecs.schemaSql.substring(0, 500)}
 
-${existingSpecs.esDocument ? `**ES 文檔**（前 300 字）：\n${existingSpecs.esDocument.substring(0, 300)}` : ''}
+${existingSpecs.esDocument ? `**ES 文檔**（前 300 字）：\n${existingSpecs.esDocument.substring(0, 300)}` : ''}`
 
-## 輸出格式（嚴格 JSON）
-{
-  "changeType": "add" | "modify" | "delete",
-  "description": "變更摘要（一句話）",
-  "affectedLayers": {
-    "es": ["受影響的 ES 項目（Aggregate/Command 名稱）"],
-    "features": ["受影響的 Feature 名稱"],
-    "schema": ["受影響的 Table 名稱"],
-    "actions": ["受影響的 Action 名稱"],
-    "isa": true/false
-  },
-  "displayText": "給用戶看的影響分析文字（使用 markdown）"
-}`
-
-    const stream = anthropic.messages.stream({
-      model: MODEL.HAIKU,
-      max_tokens: 2048,
-      temperature: 0.1,
-      system: systemPrompt,
-      messages: [{ role: 'user', content: `變更請求：${changeDescription}` }],
+    const ImpactAnalysisSchema = z.object({
+      changeType: z.enum(['add', 'modify', 'delete']),
+      description: z.string(),
+      affectedLayers: z.object({
+        es: z.array(z.string()).nullable(),
+        features: z.array(z.string()).nullable(),
+        schema: z.array(z.string()).nullable(),
+        actions: z.array(z.string()).nullable(),
+        isa: z.boolean().nullable(),
+      }),
+      displayText: z.string(),
     })
 
-    const finalMessage = await stream.finalMessage()
+    const result = await callStructured({
+      schema: ImpactAnalysisSchema,
+      model: MODEL.HAIKU,
+      system: systemPrompt,
+      messages: [{ role: 'user', content: `變更請求：${changeDescription}` }],
+      maxTokens: 2048,
+      temperature: 0.1,
+      purpose: 'change_impact_analysis',
+      trackingContext,
+    })
 
-    // 記錄 LLM 用量
-    const usage = finalMessage.usage
-    if (usage) {
-      const cost = calculateLlmCost(MODEL.HAIKU, usage.input_tokens, usage.output_tokens)
-      trackLlmUsage({
-        model: MODEL.HAIKU,
-        inputTokens: usage.input_tokens,
-        outputTokens: usage.output_tokens,
-        purpose: 'change_impact_analysis',
-        userId: trackingContext?.userId,
-        conversationId: trackingContext?.conversationId,
-      })
-
-      logger.info({ inputTokens: usage.input_tokens, outputTokens: usage.output_tokens, cost: cost.toFixed(4) }, 'Impact Analysis 完成')
+    if (!result.success) {
+      return { success: false, error: result.error }
     }
 
-    const content = finalMessage.content[0]
-    if (content.type !== 'text') {
-      return { success: false, error: 'LLM 回應格式錯誤' }
-    }
-
-    const impact = safeParseJson<ImpactAnalysis>(content.text)
-    if (!impact || !impact.changeType || !impact.displayText) {
-      return { success: false, error: '影響分析結果格式不完整或無法解析' }
+    // Map nullable → optional for ImpactAnalysis interface
+    const impact: ImpactAnalysis = {
+      ...result.data,
+      affectedLayers: {
+        es: result.data.affectedLayers.es || undefined,
+        features: result.data.affectedLayers.features || undefined,
+        schema: result.data.affectedLayers.schema || undefined,
+        actions: result.data.affectedLayers.actions || undefined,
+        isa: result.data.affectedLayers.isa ?? undefined,
+      },
     }
 
     return { success: true, impact }
@@ -142,8 +131,6 @@ export async function executeChange(
   trackingContext?: LlmTrackingContext
 ): Promise<{ success: boolean; updatedSpecs?: UpdatedSpecs; error?: string }> {
   try {
-    const anthropic = getAnthropicClient()
-
     // 構建完整的規格上下文
     const featuresContent = existingSpecs.features
       .map(f => `### ${f.name} (${f.actionName})\n\`\`\`gherkin\n${f.content}\n\`\`\``)
@@ -204,51 +191,36 @@ ${existingSpecs.schemaSql}
 ${existingSpecs.entityMapping}
 \`\`\``
 
-    const stream = anthropic.messages.stream({
-      model: MODEL.SONNET,
-      max_tokens: 16384,
-      temperature: 0.2,
-      system: systemPrompt,
-      messages: [{ role: 'user', content: userMessage }],
+    const ExecuteChangeSchema = z.object({
+      features: z.array(z.object({
+        name: z.string(),
+        actionName: z.string(),
+        content: z.string(),
+      })).nullable(),
+      schemaSql: z.string().nullable(),
+      entityMapping: z.string().nullable(),
     })
 
-    const finalMessage = await stream.finalMessage()
+    const result = await callStructured({
+      schema: ExecuteChangeSchema,
+      model: MODEL.SONNET,
+      system: systemPrompt,
+      messages: [{ role: 'user', content: userMessage }],
+      maxTokens: 16384,
+      temperature: 0.2,
+      purpose: 'change_execute',
+      trackingContext,
+    })
 
-    // 記錄 LLM 用量
-    const usage = finalMessage.usage
-    if (usage) {
-      const cost = calculateLlmCost(MODEL.SONNET, usage.input_tokens, usage.output_tokens)
-      trackLlmUsage({
-        model: MODEL.SONNET,
-        inputTokens: usage.input_tokens,
-        outputTokens: usage.output_tokens,
-        purpose: 'change_execute',
-        userId: trackingContext?.userId,
-        conversationId: trackingContext?.conversationId,
-      })
-
-      logger.info({ inputTokens: usage.input_tokens, outputTokens: usage.output_tokens, cost: cost.toFixed(4) }, 'Execute Change 完成')
+    if (!result.success) {
+      return { success: false, error: result.error }
     }
 
-    const responseContent = finalMessage.content[0]
-    if (responseContent.type !== 'text') {
-      return { success: false, error: 'LLM 回應格式錯誤' }
-    }
-
-    const parsed = safeParseJson<{
-      features?: GeneratedFeature[]
-      schemaSql?: string | null
-      entityMapping?: string | null
-    }>(responseContent.text)
-
-    if (!parsed) {
-      return { success: false, error: 'LLM 回應無法解析為有效 JSON' }
-    }
-
+    const parsed = result.data
     const updatedSpecs: UpdatedSpecs = {}
 
-    if (parsed.features && Array.isArray(parsed.features)) {
-      updatedSpecs.features = parsed.features
+    if (parsed.features?.length) {
+      updatedSpecs.features = parsed.features as GeneratedFeature[]
     }
     if (parsed.schemaSql) {
       updatedSpecs.schemaSql = parsed.schemaSql

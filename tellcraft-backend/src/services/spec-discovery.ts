@@ -1,5 +1,6 @@
-import { safeParseJson } from '../utils/safe-parse-json'
-import { getAnthropicHeaders, MODEL, trackLlmUsage } from '../lib/anthropic'
+import { z } from 'zod'
+import { MODEL } from '../lib/anthropic'
+import { callStructured } from '../lib/structured-output'
 import { ClarifyItem } from './bdd-session'
 import { LlmTrackingContext } from './classifier'
 import { GeneratedFeature } from './formulation'
@@ -42,93 +43,22 @@ const SPEC_CHECK_CATEGORIES: Record<string, string> = {
 }
 
 // ============================================================
-// LLM 調用輔助函數
+// Structured Output Schema
 // ============================================================
 
-const RETRY_MAX = 3
-const RETRY_BASE_DELAY_MS = 2000
-
-function isRetryableStatus(status: number): boolean {
-  return status === 429 || status === 529 || status === 503
-}
-
-function isRetryableFetchError(err: unknown): boolean {
-  const msg = String(err)
-  return msg.includes('ECONNRESET') || msg.includes('ETIMEDOUT') || msg.includes('fetch failed')
-}
-
-async function callClaude(
-  systemPrompt: string,
-  userMessage: string,
-  options: { maxTokens?: number; temperature?: number } = {}
-): Promise<{
-  success: boolean
-  content?: string
-  inputTokens?: number
-  outputTokens?: number
-  truncated?: boolean
-  error?: string
-}> {
-  let lastError: string = 'Unknown error'
-
-  for (let attempt = 1; attempt <= RETRY_MAX; attempt++) {
-    try {
-      const response = await fetch('https://api.anthropic.com/v1/messages', {
-        method: 'POST',
-        headers: getAnthropicHeaders(),
-        body: JSON.stringify({
-          model: MODEL.SONNET,
-          max_tokens: options.maxTokens || 8192,
-          temperature: options.temperature || 0.2,
-          system: systemPrompt,
-          messages: [{ role: 'user', content: userMessage }],
-        }),
-      })
-
-      if (!response.ok) {
-        const errorText = await response.text()
-        if (attempt < RETRY_MAX && isRetryableStatus(response.status)) {
-          const delay = RETRY_BASE_DELAY_MS * Math.pow(2, attempt - 1)
-          logger.warn({ status: response.status, attempt, maxRetries: RETRY_MAX, delayMs: delay }, 'callClaude HTTP 錯誤，重試中')
-          await new Promise(resolve => setTimeout(resolve, delay))
-          continue
-        }
-        lastError = `API error: ${response.status} - ${errorText}`
-        break
-      }
-
-      const data = await response.json() as {
-        usage?: { input_tokens: number; output_tokens: number }
-        content?: Array<{ text: string }>
-        stop_reason?: string
-      }
-
-      const truncated = data.stop_reason === 'max_tokens'
-      if (truncated) {
-        logger.warn({ outputTokens: data.usage?.output_tokens }, 'callClaude 回應被截斷 (stop_reason=max_tokens)')
-      }
-
-      return {
-        success: true,
-        content: data.content?.[0]?.text || '',
-        inputTokens: data.usage?.input_tokens || 0,
-        outputTokens: data.usage?.output_tokens || 0,
-        truncated,
-      }
-    } catch (error) {
-      lastError = error instanceof Error ? error.message : 'Unknown error'
-      if (attempt < RETRY_MAX && isRetryableFetchError(error)) {
-        const delay = RETRY_BASE_DELAY_MS * Math.pow(2, attempt - 1)
-        logger.warn({ attempt, maxRetries: RETRY_MAX, delayMs: delay, error: lastError.slice(0, 100) }, 'callClaude 網路錯誤，重試中')
-        await new Promise(resolve => setTimeout(resolve, delay))
-        continue
-      }
-      break
-    }
-  }
-
-  return { success: false, error: lastError }
-}
+const SpecDiscoverySchema = z.object({
+  issues: z.array(z.object({
+    featureName: z.string(),
+    actionName: z.string(),
+    category: z.enum(['S1', 'S2', 'S3', 'S4', 'S5', 'S6', 'S7']),
+    severity: z.enum(['high', 'medium', 'low']),
+    description: z.string(),
+    question: z.string(),
+    whiteTextQuestion: z.string(),
+    suggestedFix: z.string().nullable(),
+    options: z.array(z.string()).nullable(),
+  })),
+})
 
 // ============================================================
 // Spec Discovery - 檢查 Feature Files 品質
@@ -287,77 +217,49 @@ ${existingQuestions ? `---
 請審查以上 Feature Files，找出需要與用戶確認的品質問題。`
 
   logger.info('開始審查 Feature Files...')
-  let response = await callClaude(systemPrompt, userMessage, { maxTokens: 12288 })
 
-  if (!response.success) {
-    return { success: false, error: response.error }
-  }
+  // 第一次嘗試 12288 tokens
+  let result = await callStructured({
+    schema: SpecDiscoverySchema,
+    model: MODEL.SONNET,
+    system: systemPrompt,
+    messages: [{ role: 'user', content: userMessage }],
+    maxTokens: 12288,
+    temperature: 0.2,
+    purpose: 'spec_discovery',
+    trackingContext,
+  })
 
   // 截斷時用更大的 maxTokens 重試一次
-  if (response.truncated) {
+  if (!result.success && result.stopReason === 'max_tokens') {
     logger.warn('回應被截斷，以 16384 tokens 重試')
-    response = await callClaude(systemPrompt, userMessage, { maxTokens: 16384 })
-    if (!response.success) {
-      return { success: false, error: response.error }
-    }
-  }
-
-  // 記錄使用量
-  if (response.inputTokens && response.outputTokens) {
-    trackLlmUsage({
+    result = await callStructured({
+      schema: SpecDiscoverySchema,
       model: MODEL.SONNET,
-      inputTokens: response.inputTokens,
-      outputTokens: response.outputTokens,
+      system: systemPrompt,
+      messages: [{ role: 'user', content: userMessage }],
+      maxTokens: 16384,
+      temperature: 0.2,
       purpose: 'spec_discovery',
-      userId: trackingContext?.userId,
-      conversationId: trackingContext?.conversationId,
+      trackingContext,
     })
   }
 
-  try {
-    // 先用 safeParseJson 嘗試解析
-    let parsed = safeParseJson<{ issues?: unknown[] }>(response.content || '')
-
-    if (!parsed) {
-      // safeParseJson 失敗：可能是截斷的 JSON，嘗試修復
-      const jsonMatch = response.content?.match(/`{3,}(?:json)?\s*\n?([\s\S]*?)\n?`{3,}/) ||
-                        response.content?.match(/\{[\s\S]*\}/)
-      if (!jsonMatch) {
-        if (response.truncated) {
-          logger.warn('截斷且無法提取 JSON，視為無問題繼續')
-          return { success: true, issues: [] }
-        }
-        return { success: false, error: '無法解析 LLM 回應' }
-      }
-
-      const jsonStr = jsonMatch[1] || jsonMatch[0]
-      logger.warn('safeParseJson 失敗，嘗試修復截斷的 JSON')
-      const lastCompleteObj = jsonStr.lastIndexOf('},')
-      if (lastCompleteObj > 0) {
-        const fixedStr = jsonStr.substring(0, lastCompleteObj + 1) + ']}'
-        parsed = safeParseJson<{ issues?: unknown[] }>(fixedStr)
-        if (parsed) {
-          logger.info('JSON 修復成功')
-        }
-      }
-
-      if (!parsed) {
-        logger.warn('JSON 無法修復，視為無問題繼續')
-        return { success: true, issues: [] }
-      }
-    }
-
-    // 為每個 issue 加上 id
-    const issues: SpecIssue[] = ((parsed.issues || []) as Array<Omit<SpecIssue, 'id'>>).map((issue, index) => ({
-      ...issue,
-      id: `spec_${Date.now()}_${index}`,
-    }))
-
-    logger.info({ issueCount: issues.length }, '審查完成')
-    return { success: true, issues }
-  } catch (err) {
-    return { success: false, error: `解析回應時發生錯誤: ${err}` }
+  if (!result.success) {
+    logger.warn({ error: result.error }, '審查失敗，視為無問題繼續')
+    return { success: true, issues: [] }
   }
+
+  // 為每個 issue 加上 id
+  const issues: SpecIssue[] = result.data.issues.map((issue, index) => ({
+    ...issue,
+    id: `spec_${Date.now()}_${index}`,
+    suggestedFix: issue.suggestedFix || undefined,
+    options: issue.options || undefined,
+  }))
+
+  logger.info({ issueCount: issues.length }, '審查完成')
+  return { success: true, issues }
 }
 
 // ============================================================

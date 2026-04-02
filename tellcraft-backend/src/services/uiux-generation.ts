@@ -5,11 +5,12 @@
 
 // LLM 函數需要從後端獨立實現
 import type Anthropic from '@anthropic-ai/sdk'
+import { z } from 'zod'
 import * as ts from 'typescript'
 import { getAnthropicClient, MODEL, trackLlmUsage } from '../lib/anthropic'
+import { callStructured, type StructuredOptions, type StructuredResult } from '../lib/structured-output'
 import { getEnv } from '../lib/env'
 import { formatUISpecForPrompt, UIRequirementsSpec } from './bdd-to-ui-spec'
-import { safeParseJson } from '../utils/safe-parse-json'
 import { selectTechniques, formatTechniquesForPrompt, formatTechniquesForPromptFast } from './design-techniques'
 import { getMoodPromptBlock, getMoodAnimationHint, getMoodRwdHint, getMoodSummary, getMoodCodeFragment, getMoodCodeFragmentCompact, getMoodById } from './design-moods'
 import { selectCompositionPatterns, formatPatternsForPrompt, listPatternsForVariants } from './composition-patterns'
@@ -51,6 +52,16 @@ function releaseLlmSlot(): void {
 /** 取得 LLM 並發狀態（供監控用） */
 export function getLlmConcurrencyStats() {
   return { active: llmActiveCount, queued: llmWaitQueue.length, max: LLM_MAX_CONCURRENT }
+}
+
+/** callStructured + semaphore 並發控制（給 JSON 輸出的 LLM 呼叫用） */
+async function callStructuredWithSlot<T>(opts: StructuredOptions<T>): Promise<StructuredResult<T>> {
+  await acquireLlmSlot()
+  try {
+    return await callStructured(opts)
+  } finally {
+    releaseLlmSlot()
+  }
 }
 
 // GeneratedComponent 本地定義
@@ -1296,35 +1307,81 @@ ${tier === 'functional' ? '- 不要使用漸層（除非明確要求）\n- 不�
 
   const userMessage = `請根據上述信息，生成 5 個設計變體。確保每個變體都有獨特的設計方向和完整的 Design System。`
 
-  const response = await callClaude(
-    systemPrompt,
-    [{ role: 'user', content: userMessage }],
-    { maxTokens: 16384, temperature: tier === 'creative' ? 0.6 : 0.4 }, // creative 更高 temperature 鼓勵差異化
-    { ...trackingContext, purpose: 'generate_design_variants' }
-  )
+  const DesignVariantsSchema = z.object({
+    variants: z.array(z.object({
+      id: z.string(),
+      name: z.string(),
+      axis: z.string(),
+      description: z.string(),
+      previewDescription: z.string(),
+      keyFeatures: z.array(z.string()),
+      signatureElement: z.string(),
+      designSystem: z.object({
+        cssVariables: z.string(),
+        tailwindExtend: z.object({
+          colors: z.record(z.string(), z.string()).nullable(),
+          spacing: z.record(z.string(), z.string()).nullable(),
+          borderRadius: z.record(z.string(), z.string()).nullable(),
+          fontFamily: z.record(z.string(), z.array(z.string())).nullable(),
+        }),
+        typography: z.object({
+          fontFamily: z.string(),
+          scale: z.record(z.string(), z.string()),
+        }),
+        colorPalette: z.record(z.string(), z.string()),
+        spacing: z.object({
+          unit: z.number(),
+          scale: z.record(z.string(), z.string()),
+        }),
+        borderRadius: z.record(z.string(), z.string()),
+        shadows: z.object({
+          strategy: z.string(),
+          values: z.record(z.string(), z.string()),
+        }),
+        depth: z.object({
+          strategy: z.string(),
+          cardStyle: z.string(),
+        }),
+        animationPersonality: z.string(),
+        layoutArchetype: z.string(),
+      }),
+    })),
+  })
 
-  if (!response.success || !response.content) {
-    return { success: false, error: response.error || '無法生成設計變體' }
+  const result = await callStructuredWithSlot({
+    schema: DesignVariantsSchema,
+    model: MODEL.SONNET,
+    system: systemPrompt,
+    messages: [{ role: 'user', content: userMessage }],
+    maxTokens: 16384,
+    temperature: tier === 'creative' ? 0.6 : 0.4,
+    purpose: 'generate_design_variants',
+    trackingContext,
+  })
+
+  if (!result.success) {
+    return { success: false, error: result.error || '無法生成設計變體' }
   }
 
-  try {
-    // 安全解析 JSON
-    const parsed = safeParseJson<{ variants?: unknown[] }>(response.content)
-    if (!parsed) {
-      return { success: false, error: '無法解析 LLM 回應' }
-    }
+  // 驗證變體數量（Structured Outputs 保證結構正確但不保證陣列長度）
+  if (result.data.variants.length !== 5) {
+    return { success: false, error: `變體數量不正確，預期 5 個，實際 ${result.data.variants.length} 個` }
+  }
 
-    // 驗證變體結構
-    if (!parsed.variants || !Array.isArray(parsed.variants) || parsed.variants.length !== 5) {
-      return { success: false, error: '變體數量不正確，預期 5 個' }
-    }
-
-    return {
-      success: true,
-      variants: parsed.variants as DesignVariant[],
-    }
-  } catch (err) {
-    return { success: false, error: `解析設計變體時發生錯誤: ${err}` }
+  return {
+    success: true,
+    variants: result.data.variants.map(v => ({
+      ...v,
+      designSystem: {
+        ...v.designSystem,
+        tailwindExtend: {
+          colors: v.designSystem.tailwindExtend.colors || undefined,
+          spacing: v.designSystem.tailwindExtend.spacing || undefined,
+          borderRadius: v.designSystem.tailwindExtend.borderRadius || undefined,
+          fontFamily: v.designSystem.tailwindExtend.fontFamily || undefined,
+        },
+      },
+    })) as DesignVariant[],
   }
 }
 
@@ -5502,56 +5559,53 @@ ${sourceType === 'ideas'
     ? '請根據用戶的設計想法，整理設計方向並給出專業建議。'
     : `請分析「${template.name}」模板的特色，並為這個${productType}產品提出設計建議。`
 
-  const response = await callClaude(
-    systemPrompt,
-    [{ role: 'user', content: userMessage }],
-    { maxTokens: 4096, temperature: 0.3 },
-    { ...trackingContext, purpose: 'generate_design_brief' }
-  )
+  const DesignBriefSchema = z.object({
+    styleSummary: z.string(),
+    colorDirection: z.string(),
+    layoutSuggestion: z.string(),
+    referenceAnalysis: z.string(),
+    professionalRecommendations: z.array(z.string()),
+    recommendedTier: z.enum(['functional', 'creative']),
+    tierReason: z.string(),
+    domainKeywords: z.array(z.string()).nullable(),
+    signature: z.string().nullable(),
+    displayText: z.string(),
+  })
 
-  if (!response.success || !response.content) {
-    return { success: false, error: response.error || '無法生成設計方向摘要' }
+  const result = await callStructuredWithSlot({
+    schema: DesignBriefSchema,
+    model: MODEL.SONNET,
+    system: systemPrompt,
+    messages: [{ role: 'user', content: userMessage }],
+    maxTokens: 4096,
+    temperature: 0.3,
+    purpose: 'generate_design_brief',
+    trackingContext,
+  })
+
+  if (!result.success) {
+    return { success: false, error: result.error || '無法生成設計方向摘要' }
   }
 
-  try {
-    // 安全解析 JSON（含尾隨逗號/控制字符清理）
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const parsed = safeParseJson<any>(response.content)
-    if (!parsed) {
-      logger.error({ rawResponse: response.content.substring(0, 500) }, 'Design Brief JSON 提取失敗')
-      return { success: false, error: '無法解析設計方向摘要' }
-    }
+  const parsed = result.data
 
-    // 推斷 tier（LLM 回傳 + fallback）
-    let recommendedTier: DesignTier = 'functional'
-    if (parsed.recommendedTier === 'creative' || parsed.recommendedTier === 'functional') {
-      recommendedTier = parsed.recommendedTier
-    } else {
-      // fallback：根據 template category 推斷
-      const creativeCats = ['landing', 'portfolio', 'marketing', 'brand']
-      recommendedTier = creativeCats.includes(template.category.toLowerCase()) ? 'creative' : 'functional'
-    }
+  const brief: DesignBrief = {
+    styleSummary: parsed.styleSummary,
+    colorDirection: parsed.colorDirection,
+    layoutSuggestion: parsed.layoutSuggestion,
+    referenceAnalysis: parsed.referenceAnalysis,
+    professionalRecommendations: parsed.professionalRecommendations,
+    sourceType,
+    recommendedTier: parsed.recommendedTier,
+    tierReason: parsed.tierReason,
+    domainKeywords: parsed.domainKeywords || undefined,
+    signature: parsed.signature || undefined,
+  }
 
-    const brief: DesignBrief = {
-      styleSummary: parsed.styleSummary,
-      colorDirection: parsed.colorDirection,
-      layoutSuggestion: parsed.layoutSuggestion,
-      referenceAnalysis: parsed.referenceAnalysis,
-      professionalRecommendations: parsed.professionalRecommendations || [],
-      sourceType,
-      recommendedTier,
-      tierReason: parsed.tierReason || '',
-      domainKeywords: parsed.domainKeywords || [],
-      signature: parsed.signature || '',
-    }
-
-    return {
-      success: true,
-      brief,
-      displayText: parsed.displayText,
-    }
-  } catch (err) {
-    return { success: false, error: `解析設計方向摘要時發生錯誤: ${err}` }
+  return {
+    success: true,
+    brief,
+    displayText: parsed.displayText,
   }
 }
 
@@ -5624,50 +5678,54 @@ ${currentBrief.signature ? `- Signature Element：${currentBrief.signature}` : '
     { role: 'user', content: `用戶的調整要求：${adjustmentRequest}\n\n請根據上述要求調整設計方向。` },
   ]
 
-  const response = await callClaude(
-    systemPrompt,
-    messages,
-    { maxTokens: 2048, temperature: 0.3 },
-    { ...trackingContext, purpose: 'adjust_design_brief' }
-  )
+  // 共用 DesignBriefSchema（與 generateDesignBrief 一致）
+  const AdjustBriefSchema = z.object({
+    styleSummary: z.string(),
+    colorDirection: z.string(),
+    layoutSuggestion: z.string(),
+    referenceAnalysis: z.string(),
+    professionalRecommendations: z.array(z.string()),
+    recommendedTier: z.enum(['functional', 'creative']),
+    tierReason: z.string(),
+    domainKeywords: z.array(z.string()).nullable(),
+    signature: z.string().nullable(),
+    displayText: z.string(),
+  })
 
-  if (!response.success || !response.content) {
-    return { success: false, error: response.error || '無法調整設計方向' }
+  const result = await callStructuredWithSlot({
+    schema: AdjustBriefSchema,
+    model: MODEL.SONNET,
+    system: systemPrompt,
+    messages: messages.map(m => ({ role: m.role, content: m.content })),
+    maxTokens: 2048,
+    temperature: 0.3,
+    purpose: 'adjust_design_brief',
+    trackingContext,
+  })
+
+  if (!result.success) {
+    return { success: false, error: result.error || '無法調整設計方向' }
   }
 
-  try {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const parsed = safeParseJson<any>(response.content)
-    if (!parsed) {
-      return { success: false, error: '無法解析調整後的設計方向' }
-    }
+  const parsed = result.data
 
-    // 解析 tier（保持當前 tier 如果 LLM 沒回傳）
-    let recommendedTier = currentBrief.recommendedTier
-    if (parsed.recommendedTier === 'creative' || parsed.recommendedTier === 'functional') {
-      recommendedTier = parsed.recommendedTier
-    }
+  const brief: DesignBrief = {
+    styleSummary: parsed.styleSummary,
+    colorDirection: parsed.colorDirection,
+    layoutSuggestion: parsed.layoutSuggestion,
+    referenceAnalysis: parsed.referenceAnalysis,
+    professionalRecommendations: parsed.professionalRecommendations,
+    sourceType: currentBrief.sourceType,
+    recommendedTier: parsed.recommendedTier,
+    tierReason: parsed.tierReason,
+    domainKeywords: parsed.domainKeywords || undefined,
+    signature: parsed.signature || undefined,
+  }
 
-    const brief: DesignBrief = {
-      styleSummary: parsed.styleSummary || currentBrief.styleSummary,
-      colorDirection: parsed.colorDirection || currentBrief.colorDirection,
-      layoutSuggestion: parsed.layoutSuggestion || currentBrief.layoutSuggestion,
-      referenceAnalysis: parsed.referenceAnalysis || currentBrief.referenceAnalysis,
-      professionalRecommendations: parsed.professionalRecommendations || [],
-      sourceType: currentBrief.sourceType,
-      recommendedTier,
-      tierReason: parsed.tierReason || currentBrief.tierReason,
-      domainKeywords: parsed.domainKeywords || currentBrief.domainKeywords,
-      signature: parsed.signature || currentBrief.signature,
-    }
-
-    return {
-      success: true,
-      brief,
-      displayText: parsed.displayText,
-    }
-  } catch (err) {
-    return { success: false, error: `解析調整後設計方向時發生錯誤: ${err}` }
+  return {
+    success: true,
+    brief,
+    displayText: parsed.displayText,
   }
 }
 

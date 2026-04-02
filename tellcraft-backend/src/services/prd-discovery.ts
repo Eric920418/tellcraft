@@ -1,6 +1,7 @@
-import { safeParseJson } from '../utils/safe-parse-json'
-import { getAnthropicHeaders, MODEL, calculateLlmCost, trackLlmUsage } from '../lib/anthropic'
-import { ClarifyItem } from './bdd-session'
+import { z } from 'zod'
+import { MODEL } from '../lib/anthropic'
+import { callStructured } from '../lib/structured-output'
+import { ClarifyItem, TechnicalContext } from './bdd-session'
 import { LlmTrackingContext } from './classifier'
 import { DecisionSummary } from './clarify-dedup'
 import { createLogger } from '../lib/logger'
@@ -18,46 +19,27 @@ interface PrdDiscoveryResult {
   error?: string
 }
 
-interface ParsedPrdPayload {
-  items?: unknown[]
-  coverageSummary?: Record<string, 'clear' | 'partial' | 'missing'>
-}
-
-interface ParsedPrdItem {
-  id?: string
-  question: string
-  whiteTextQuestion?: string
-  priority?: string
-  checklistItem?: string
-  options?: Array<string | { label: string; description: string }>
-  mode?: 'ask' | 'propose'
-  proposedAnswer?: string
-  confidence?: 'high' | 'medium'
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  technicalContext?: any
-  whiteTextOptions?: string[]
-}
-
-function parsePrdPayload(content: string): ParsedPrdPayload | null {
-  // 1) 直接安全解析
-  let parsed = safeParseJson<unknown>(content)
-
-  // 2) 失敗時，嘗試從 code fence 或大括號區段提取 JSON
-  if (!parsed) {
-    const jsonMatch = content.match(/`{3,}(?:json)?\s*\n?([\s\S]*?)\n?`{3,}/i) ||
-                      content.match(/\{[\s\S]*\}/)
-    if (jsonMatch) {
-      const jsonStr = jsonMatch[1] || jsonMatch[0]
-      parsed = safeParseJson<unknown>(jsonStr)
-    }
-  }
-
-  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-    return null
-  }
-
-  return parsed as ParsedPrdPayload
-}
+// Structured Output Schema for PRD Discovery
+const PrdDiscoverySchema = z.object({
+  items: z.array(z.object({
+    id: z.string(),
+    question: z.string(),
+    whiteTextQuestion: z.string(),
+    category: z.enum(['data', 'feature', 'terminology']),
+    priority: z.enum(['high', 'medium', 'low']),
+    checklistItem: z.string(),
+    ruleType: z.string().nullable(),
+    location: z.string(),
+    impact: z.string(),
+    options: z.array(z.string()),
+    mode: z.enum(['ask', 'propose']),
+    proposedAnswer: z.string().nullable(),
+    confidence: z.enum(['high', 'medium']).nullable(),
+    technicalContext: z.record(z.string(), z.any()).nullable(),
+    whiteTextOptions: z.array(z.string()).nullable(),
+  })),
+  coverageSummary: z.record(z.string(), z.enum(['clear', 'partial', 'missing'])),
+})
 
 function buildFallbackClarifyItem(content: string): ClarifyItem {
   const trimmed = content.trim()
@@ -78,14 +60,6 @@ function buildFallbackClarifyItem(content: string): ClarifyItem {
       'C. 先說明是創作平台、閱讀平台，或兩者兼具',
     ],
   }
-}
-
-function isParsedPrdItem(value: unknown): value is ParsedPrdItem {
-  if (!value || typeof value !== 'object') {
-    return false
-  }
-  const item = value as Record<string, unknown>
-  return typeof item.question === 'string'
 }
 
 // ============================================================
@@ -314,118 +288,45 @@ ${partialSpecContext}
   try {
     logger.info('調用 LLM 分析需求...')
 
-    const RETRY_MAX = 3
-    const RETRY_BASE_DELAY_MS = 2000
-    let response: Response | null = null
-
-    for (let attempt = 1; attempt <= RETRY_MAX; attempt++) {
-      try {
-        response = await fetch('https://api.anthropic.com/v1/messages', {
-          method: 'POST',
-          headers: getAnthropicHeaders(),
-          body: JSON.stringify({
-            model: MODEL.SONNET,
-            max_tokens: 8192,
-            temperature: 0.2,
-            system: systemPrompt,
-            messages: [{ role: 'user', content: userMessage }],
-          }),
-        })
-
-        if (response.ok) break
-
-        const isRetryable = response.status === 429 || response.status === 529 || response.status === 503
-        if (attempt < RETRY_MAX && isRetryable) {
-          const delay = RETRY_BASE_DELAY_MS * Math.pow(2, attempt - 1)
-          logger.warn({ status: response.status, attempt, maxRetries: RETRY_MAX, delayMs: delay }, 'HTTP 錯誤，重試中')
-          await new Promise(resolve => setTimeout(resolve, delay))
-          continue
-        }
-        break
-      } catch (fetchErr) {
-        const errMsg = String(fetchErr)
-        const isRetryable = errMsg.includes('ECONNRESET') || errMsg.includes('ETIMEDOUT') || errMsg.includes('fetch failed')
-        if (attempt < RETRY_MAX && isRetryable) {
-          const delay = RETRY_BASE_DELAY_MS * Math.pow(2, attempt - 1)
-          logger.warn({ attempt, maxRetries: RETRY_MAX, delayMs: delay, error: errMsg.slice(0, 100) }, '網路錯誤，重試中')
-          await new Promise(resolve => setTimeout(resolve, delay))
-          continue
-        }
-        throw fetchErr
-      }
-    }
-
-    if (!response || !response.ok) {
-      const errorText = response ? await response.text() : 'No response'
-      const status = response?.status || 0
-      logger.error({ status, errorText }, 'API 請求失敗')
-      if (status === 529 || status === 503) {
-        return { success: false, error: 'AI 伺服器目前繁忙，已自動重試但仍無法處理。請稍等 1-2 分鐘後再試。' }
-      }
-      if (status === 429) {
-        return { success: false, error: 'AI 請求過於頻繁，請稍等片刻再試。' }
-      }
-      return { success: false, error: `API error: ${status}` }
-    }
-
-    const data = await response.json() as {
-      usage?: { input_tokens: number; output_tokens: number }
-      content?: Array<{ text: string }>
-    }
-
-    // 記錄 LLM 使用量
-    const inputTokens = data.usage?.input_tokens || 0
-    const outputTokens = data.usage?.output_tokens || 0
-    const costUsd = calculateLlmCost(MODEL.SONNET, inputTokens, outputTokens)
-
-    trackLlmUsage({
+    const result = await callStructured({
+      schema: PrdDiscoverySchema,
       model: MODEL.SONNET,
-      inputTokens,
-      outputTokens,
+      system: systemPrompt,
+      messages: [{ role: 'user', content: userMessage }],
+      maxTokens: 8192,
+      temperature: 0.2,
       purpose: 'prd_discovery',
-      userId: trackingContext?.userId,
-      conversationId: trackingContext?.conversationId,
+      trackingContext,
     })
 
-    logger.info({ inputTokens, outputTokens, cost: costUsd.toFixed(4), conversationId: trackingContext?.conversationId }, 'LLM 回應完成')
-
-    // 安全解析回應（含容錯提取）
-    const content = data.content?.[0]?.text || ''
-    const parsed = parsePrdPayload(content)
-    if (!parsed) {
-      logger.warn({ responsePreview: content.slice(0, 500) }, '無法解析 LLM JSON，使用降級釐清題')
+    if (!result.success) {
+      logger.warn({ error: result.error }, '無法取得結構化回應，使用降級釐清題')
       return {
         success: true,
-        items: [buildFallbackClarifyItem(content)],
+        items: [buildFallbackClarifyItem(result.error)],
       }
     }
 
+    const parsed = result.data
+
     // 轉換格式（符合 bdd-session.ts 的 ClarifyItem 類型）
-     
-    const parsedItems = (parsed.items || []).filter(isParsedPrdItem)
-    const items: ClarifyItem[] = parsedItems.map((item: ParsedPrdItem) => ({
+    const items: ClarifyItem[] = parsed.items.map(item => ({
       id: item.id || crypto.randomUUID(),
       question: item.question,
       whiteTextQuestion: item.whiteTextQuestion || item.question,
-      priority: (item.priority as 'high' | 'medium' | 'low') || 'medium',
+      priority: item.priority,
       checklistItem: item.checklistItem || 'B1',
       status: 'pending' as const,
-      options: (item.options || []).map((opt: string | { label: string; description: string }) =>
-        typeof opt === 'string' ? opt : `${opt.label}. ${opt.description}`
-      ),
+      options: item.options,
       // 提案模式欄位
       ...(item.mode === 'propose' ? {
         mode: 'propose' as const,
-        proposedAnswer: item.proposedAnswer,
+        proposedAnswer: item.proposedAnswer || undefined,
         confidence: item.confidence || 'high',
       } : {}),
-      // 深度邏輯探測欄位（寬容解析：格式錯則捨棄）
-      ...(item.technicalContext && typeof item.technicalContext === 'object' && Array.isArray(item.technicalContext.entities) ? {
-        technicalContext: item.technicalContext,
-      } : {}),
-      ...(Array.isArray(item.whiteTextOptions) && item.whiteTextOptions.length > 0 ? {
-        whiteTextOptions: item.whiteTextOptions,
-      } : {}),
+      // 深度邏輯探測欄位（technicalContext 結構動態，Zod schema 用 z.record 寬容解析）
+      ...(item.technicalContext ? { technicalContext: item.technicalContext as TechnicalContext } : {}),
+      ...(item.whiteTextOptions?.length ? { whiteTextOptions: item.whiteTextOptions } : {}),
     }))
 
     logger.info({ itemCount: items.length }, '生成釐清問題')

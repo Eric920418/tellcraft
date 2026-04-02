@@ -4,11 +4,12 @@
 // 全部使用 Haiku，成本 ~$0.002/次
 // ============================================================
 
+import { z } from 'zod'
 import { isConfirmation } from '../utils/is-confirmation'
-import { safeParseJson } from '../utils/safe-parse-json'
 import { LlmTrackingContext } from './classifier'
 import { createLogger } from '../lib/logger'
-import { getAnthropicHeaders, MODEL, trackLlmUsage } from '../lib/anthropic'
+import { MODEL } from '../lib/anthropic'
+import { callStructured } from '../lib/structured-output'
 
 const logger = createLogger('event-storming')
 
@@ -92,96 +93,42 @@ export interface ESExploreResult {
 }
 
 // ============================================================
-// LLM 調用（Haiku）
+// Structured Output Schemas（Haiku JSON 呼叫用）
 // ============================================================
 
-const RETRY_MAX = 3
-const RETRY_BASE_DELAY_MS = 2000
+const ShouldRunESSchema = z.object({
+  needed: z.boolean(),
+  reasoning: z.string(),
+})
 
-async function callHaiku(
-  systemPrompt: string,
-  userMessage: string,
-  options: { maxTokens?: number; temperature?: number } = {},
-  trackingContext?: LlmTrackingContext
-): Promise<{
-  success: boolean
-  content?: string
-  inputTokens?: number
-  outputTokens?: number
-  error?: string
-}> {
-  let lastError = 'Unknown error'
+const InitESSchema = z.object({
+  systemName: z.string(),
+  actors: z.array(z.object({ name: z.string(), type: z.string(), description: z.string() })),
+  commands: z.array(z.object({ name: z.string(), actor: z.string(), aggregate: z.string() })),
+  readModels: z.array(z.object({ name: z.string(), actor: z.string(), aggregates: z.array(z.string()) })),
+  aggregates: z.array(z.object({ name: z.string(), description: z.string() })),
+})
 
-  for (let attempt = 1; attempt <= RETRY_MAX; attempt++) {
-    try {
-      const response = await fetch('https://api.anthropic.com/v1/messages', {
-        method: 'POST',
-        headers: getAnthropicHeaders(),
-        body: JSON.stringify({
-          model: MODEL.HAIKU,
-          max_tokens: options.maxTokens || 4096,
-          temperature: options.temperature ?? 0.3,
-          system: systemPrompt,
-          messages: [{ role: 'user', content: userMessage }],
-        }),
-      })
+const ExploreProposalSchema = z.object({
+  proposal: z.object({ what: z.string(), why: z.string(), when: z.string() }),
+  suggestedParams: z.array(z.string()),
+  question: z.string(),
+  questionOptions: z.array(z.string()),
+})
 
-      if (!response.ok) {
-        const errorText = await response.text()
-        const status = response.status
-        if (attempt < RETRY_MAX && (status === 429 || status === 529 || status === 503)) {
-          const delay = RETRY_BASE_DELAY_MS * Math.pow(2, attempt - 1)
-          logger.warn({ status, attempt, retryMax: RETRY_MAX, delayMs: delay }, 'callHaiku HTTP 錯誤，重試中')
-          await new Promise(resolve => setTimeout(resolve, delay))
-          continue
-        }
-        lastError = `API error: ${status} - ${errorText}`
-        break
-      }
+const AnswerResultSchema = z.object({
+  description: z.object({ what: z.string(), why: z.string(), when: z.string() }),
+  params: z.array(z.string()).nullable(),
+  returnFields: z.array(z.string()).nullable(),
+  rules: z.array(z.object({ type: z.string(), description: z.string() })).nullable(),
+  followUpQuestion: z.union([z.string(), z.array(z.string())]).nullable(),
+  isComplete: z.boolean().nullable(),
+})
 
-      const data = await response.json() as {
-        usage?: { input_tokens: number; output_tokens: number }
-        content?: Array<{ text: string }>
-      }
-
-      const inputTokens = data.usage?.input_tokens || 0
-      const outputTokens = data.usage?.output_tokens || 0
-
-      // 記錄使用量
-      if (trackingContext) {
-        trackLlmUsage({
-          model: MODEL.HAIKU,
-          inputTokens,
-          outputTokens,
-          purpose: 'event-storming',
-          userId: trackingContext.userId,
-          conversationId: trackingContext.conversationId,
-        })
-      }
-
-      return {
-        success: true,
-        content: data.content?.[0]?.text || '',
-        inputTokens,
-        outputTokens,
-      }
-    } catch (error) {
-      lastError = error instanceof Error ? error.message : 'Unknown error'
-      const msg = String(error)
-      if (attempt < RETRY_MAX && (msg.includes('ECONNRESET') || msg.includes('ETIMEDOUT') || msg.includes('fetch failed'))) {
-        const delay = RETRY_BASE_DELAY_MS * Math.pow(2, attempt - 1)
-        logger.warn({ attempt, retryMax: RETRY_MAX, delayMs: delay, error: msg.slice(0, 150) }, 'callHaiku 網路錯誤，重試中')
-        await new Promise(resolve => setTimeout(resolve, delay))
-        continue
-      }
-      break
-    }
-  }
-
-  return { success: false, error: lastError }
-}
-
-// safeParseJson 已移至 ../utils/safe-parse-json.ts 共用
+const RulesProposalSchema = z.object({
+  suggestedRules: z.array(z.object({ type: z.string(), description: z.string() })),
+  displayText: z.string(),
+})
 
 function normalizeQuestionText(value: unknown): string | null {
   if (typeof value === 'string') {
@@ -228,20 +175,23 @@ export async function shouldRunEventStorming(
 回覆 JSON：
 { "needed": true/false, "reasoning": "簡短說明原因" }`
 
-  const response = await callHaiku(systemPrompt, `用戶需求：${message}`, { maxTokens: 256 }, trackingContext)
+  const result = await callStructured({
+    schema: ShouldRunESSchema,
+    model: MODEL.HAIKU,
+    system: systemPrompt,
+    messages: [{ role: 'user', content: `用戶需求：${message}` }],
+    maxTokens: 256,
+    temperature: 0.3,
+    purpose: 'event-storming',
+    trackingContext,
+  })
 
-  if (!response.success || !response.content) {
-    logger.warn({ error: response.error }, 'shouldRunEventStorming LLM 失敗，默認跳過 ES')
+  if (!result.success) {
+    logger.warn({ error: result.error }, 'shouldRunEventStorming 失敗，默認跳過 ES')
     return { needed: false, reasoning: 'LLM 調用失敗，跳過 Event Storming' }
   }
 
-  const parsed = safeParseJson<{ needed: boolean; reasoning: string }>(response.content)
-  if (!parsed) {
-    logger.warn('shouldRunEventStorming 解析失敗，默認跳過 ES')
-    return { needed: false, reasoning: '解析失敗，跳過 Event Storming' }
-  }
-
-  return { needed: !!parsed.needed, reasoning: parsed.reasoning || '' }
+  return { needed: !!result.data.needed, reasoning: result.data.reasoning || '' }
 }
 
 // ============================================================
@@ -273,24 +223,22 @@ export async function initEventStorming(
   "aggregates": [{ "name": "聚合根名", "description": "簡短描述" }]
 }`
 
-  const response = await callHaiku(systemPrompt, `用戶需求：\n${message}`, { maxTokens: 4096 }, trackingContext)
+  const result = await callStructured({
+    schema: InitESSchema,
+    model: MODEL.HAIKU,
+    system: systemPrompt,
+    messages: [{ role: 'user', content: `用戶需求：\n${message}` }],
+    maxTokens: 4096,
+    temperature: 0.3,
+    purpose: 'event-storming',
+    trackingContext,
+  })
 
-  if (!response.success || !response.content) {
-    return { success: false, error: response.error || 'LLM 調用失敗' }
+  if (!result.success) {
+    return { success: false, error: result.error || 'LLM 調用失敗' }
   }
 
-  interface InitResult {
-    systemName: string
-    actors: Array<{ name: string; type: string; description: string }>
-    commands: Array<{ name: string; actor: string; aggregate: string }>
-    readModels: Array<{ name: string; actor: string; aggregates: string[] }>
-    aggregates: Array<{ name: string; description: string }>
-  }
-
-  const parsed = safeParseJson<InitResult>(response.content)
-  if (!parsed) {
-    return { success: false, error: 'LLM 輸出解析失敗' }
-  }
+  const parsed = result.data
 
   // 建構 KnowledgeMap
   const knowledgeMap: ESKnowledgeMap = {
@@ -452,32 +400,26 @@ ${clearedContext || '（尚無已澄清項目）'}
     ? `命令「${nextItem.name}」，由 ${cmd?.actor || '未知角色'} 觸發，關聯 ${cmd?.aggregate || '未知'} 聚合根。`
     : `查詢「${nextItem.name}」，由 ${rm?.actor || '未知角色'} 使用，關聯 ${rm?.aggregates?.join(', ') || '未知'} 聚合根。`
 
-  const response = await callHaiku(systemPrompt, userMsg, { maxTokens: 1024 }, trackingContext)
+  const result = await callStructured({
+    schema: ExploreProposalSchema,
+    model: MODEL.HAIKU,
+    system: systemPrompt,
+    messages: [{ role: 'user', content: userMsg }],
+    maxTokens: 1024,
+    temperature: 0.3,
+    purpose: 'event-storming',
+    trackingContext,
+  })
 
-  if (!response.success || !response.content) {
-    // 降級：標記為 partial 繼續下一個
-    logger.warn({ itemName: nextItem.name, error: response.error }, 'exploreNextItem 失敗')
+  if (!result.success) {
+    logger.warn({ itemName: nextItem.name, error: result.error }, 'exploreNextItem 失敗')
     markItemStatus(knowledgeMap, nextItem.name, 'partial')
     knowledgeMap.currentItemName = null
     knowledgeMap.currentSubStep = null
     return exploreNextItem(knowledgeMap, trackingContext)
   }
 
-  interface ExploreProposal {
-    proposal: { what: string; why: string; when: string }
-    suggestedParams: string[]
-    question: string
-    questionOptions: string[]
-  }
-
-  const parsed = safeParseJson<ExploreProposal>(response.content)
-  if (!parsed) {
-    logger.warn({ itemName: nextItem.name }, 'exploreNextItem 解析失敗')
-    markItemStatus(knowledgeMap, nextItem.name, 'partial')
-    knowledgeMap.currentItemName = null
-    knowledgeMap.currentSubStep = null
-    return exploreNextItem(knowledgeMap, trackingContext)
-  }
+  const parsed = result.data
 
   // 更新知識地圖
   if (isCommand && cmd) {
@@ -595,33 +537,26 @@ ${clearedContext || '（無）'}
   "isComplete": true/false
 }`
 
-  const response = await callHaiku(systemPrompt, `用戶反饋：${userMessage}`, { maxTokens: 1024 }, trackingContext)
+  const result = await callStructured({
+    schema: AnswerResultSchema,
+    model: MODEL.HAIKU,
+    system: systemPrompt,
+    messages: [{ role: 'user', content: `用戶反饋：${userMessage}` }],
+    maxTokens: 1024,
+    temperature: 0.3,
+    purpose: 'event-storming',
+    trackingContext,
+  })
 
-  if (!response.success || !response.content) {
-    logger.warn({ itemName: currentName, error: response.error }, 'handleESAnswer 失敗')
-    // 降級：標記 partial 繼續
+  if (!result.success) {
+    logger.warn({ itemName: currentName, error: result.error }, 'handleESAnswer 失敗')
     markItemStatus(knowledgeMap, currentName, 'partial')
     knowledgeMap.currentItemName = null
     knowledgeMap.currentSubStep = null
     return exploreNextItem(knowledgeMap, trackingContext)
   }
 
-  interface AnswerResult {
-    description: { what: string; why: string; when: string }
-    params?: string[]
-    returnFields?: string[]
-    rules?: Array<{ type: string; description: string }>
-    followUpQuestion?: unknown
-    isComplete?: boolean
-  }
-
-  const parsed = safeParseJson<AnswerResult>(response.content)
-  if (!parsed) {
-    markItemStatus(knowledgeMap, currentName, 'partial')
-    knowledgeMap.currentItemName = null
-    knowledgeMap.currentSubStep = null
-    return exploreNextItem(knowledgeMap, trackingContext)
-  }
+  const parsed = result.data
 
   // 更新知識地圖
   if (cmd) {
@@ -631,7 +566,7 @@ ${clearedContext || '（無）'}
       when: parsed.description?.when || cmd.description.when,
     }
     if (parsed.params) cmd.params = parsed.params
-    if (parsed.rules) {
+    if (parsed.rules?.length) {
       cmd.rules = parsed.rules.map(r => ({
         type: r.type as ESRule['type'],
         description: r.description,
@@ -644,7 +579,7 @@ ${clearedContext || '（無）'}
       when: parsed.description?.when || rm.description.when,
     }
     if (parsed.returnFields) rm.returnFields = parsed.returnFields
-    if (parsed.rules) {
+    if (parsed.rules?.length) {
       rm.rules = parsed.rules.map(r => ({
         type: r.type as ESRule['type'],
         description: r.description,
@@ -724,28 +659,25 @@ ${JSON.stringify(item, null, 2)}
   "displayText": "展示給用戶的說明文字"
 }`
 
-  const response = await callHaiku(systemPrompt, `請為「${itemName}」提出規則提案`, { maxTokens: 1024 }, trackingContext)
+  const result = await callStructured({
+    schema: RulesProposalSchema,
+    model: MODEL.HAIKU,
+    system: systemPrompt,
+    messages: [{ role: 'user', content: `請為「${itemName}」提出規則提案` }],
+    maxTokens: 1024,
+    temperature: 0.3,
+    purpose: 'event-storming',
+    trackingContext,
+  })
 
-  if (!response.success || !response.content) {
-    // 降級：跳過規則，標記 clear
+  if (!result.success || !result.data?.suggestedRules?.length) {
     markItemStatus(knowledgeMap, itemName, 'clear')
     knowledgeMap.currentItemName = null
     knowledgeMap.currentSubStep = null
     return exploreNextItem(knowledgeMap, trackingContext)
   }
 
-  interface RulesProposal {
-    suggestedRules: Array<{ type: string; description: string }>
-    displayText: string
-  }
-
-  const parsed = safeParseJson<RulesProposal>(response.content)
-  if (!parsed || !parsed.suggestedRules?.length) {
-    markItemStatus(knowledgeMap, itemName, 'clear')
-    knowledgeMap.currentItemName = null
-    knowledgeMap.currentSubStep = null
-    return exploreNextItem(knowledgeMap, trackingContext)
-  }
+  const parsed = result.data
 
   // 預設寫入建議規則
   const rules = parsed.suggestedRules.map(r => ({

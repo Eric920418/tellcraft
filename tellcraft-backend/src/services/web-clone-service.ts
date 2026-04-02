@@ -3,7 +3,9 @@
  * 增強版 DOM 提取 → section 切割 → 逐 section Sonnet Vision 生成 → 代碼合併
  */
 
+import { z } from 'zod'
 import { getAnthropicClient, MODEL, trackLlmUsage } from '../lib/anthropic'
+import { callStructured } from '../lib/structured-output'
 import { getEnv } from '../lib/env'
 import { createLogger } from '../lib/logger'
 import { PUPPETEER_ARGS, type ExtractedColors, type ExtractedTypography, type ExtractedLayout } from './reference-analyzer'
@@ -573,12 +575,25 @@ export async function analyzeCloneImages(
         clearTimeout(timeout)
       }
 
-      const client = getAnthropicClient()
       const base64 = buffer.toString('base64')
 
-      const response = await client.messages.create({
+      const CloneImageSchema = z.object({
+        designHints: z.object({
+          colors: z.array(z.string()),
+          fontStyle: z.string(),
+          layoutDescription: z.string(),
+        }),
+        sectionDescriptions: z.array(z.object({
+          name: z.string(),
+          type: z.enum(['header', 'hero', 'content', 'footer']),
+          description: z.string(),
+        })),
+        pageTitle: z.string(),
+      })
+
+      const result = await callStructured({
+        schema: CloneImageSchema,
         model: MODEL.HAIKU,
-        max_tokens: 2048,
         system: CLONE_IMAGE_ANALYSIS_PROMPT,
         messages: [{
           role: 'user',
@@ -587,31 +602,17 @@ export async function analyzeCloneImages(
             { type: 'text', text: '分析這張截圖。' },
           ],
         }],
+        maxTokens: 2048,
+        purpose: 'clone_image_analysis',
+        trackingContext,
       })
 
-      if (response.usage) {
-        trackLlmUsage({
-          model: MODEL.HAIKU,
-          inputTokens: response.usage.input_tokens,
-          outputTokens: response.usage.output_tokens,
-          purpose: 'clone_image_analysis',
-          conversationId: trackingContext?.conversationId,
-        })
-      }
-
-      const text = response.content[0]
-      if (text.type !== 'text') {
+      if (!result.success) {
         results.push({ imageUrl, designHints: { colors: [], fontStyle: 'sans-serif', layoutDescription: '' }, sectionDescriptions: [], pageTitle: '' })
         continue
       }
 
-      // 解析 JSON（容忍 code block 包裝）
-      let raw = text.text.trim()
-      const jsonMatch = raw.match(/```(?:json)?\s*\n?([\s\S]*?)```/)
-      if (jsonMatch) raw = jsonMatch[1].trim()
-
-      const parsed = JSON.parse(raw) as Omit<CloneImageAnalysis, 'imageUrl'>
-      results.push({ imageUrl, ...parsed })
+      results.push({ imageUrl, ...result.data })
     } catch (err) {
       logger.warn({ error: String(err).slice(0, 200), imageUrl }, '圖片分析失敗')
       results.push({

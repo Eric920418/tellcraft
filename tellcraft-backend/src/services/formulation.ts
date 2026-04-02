@@ -1,6 +1,7 @@
+import { z } from 'zod'
 import { createLogger } from '../lib/logger'
-import { getAnthropicHeaders, MODEL, calculateLlmCost, trackLlmUsage } from '../lib/anthropic'
-import { safeParseJson } from '../utils/safe-parse-json'
+import { getAnthropicHeaders, MODEL, trackLlmUsage } from '../lib/anthropic'
+import { callStructured } from '../lib/structured-output'
 import { ClarifyItem, TechnicalContext } from './bdd-session'
 import { LlmTrackingContext } from './classifier'
 
@@ -376,42 +377,32 @@ ${decisions || '（無額外決策）'}${schemaHints ? `
 ${schemaHints}` : ''}`
 
   logger.info('生成 SQL Schema...')
-  const response = await callClaude(systemPrompt, userMessage, { maxTokens: 8192 })
+  const SchemaResultSchema = z.object({
+    schemaSql: z.string(),
+    entityMapping: z.string(),
+  })
 
-  if (!response.success) {
-    return { success: false, error: response.error }
+  const result = await callStructured({
+    schema: SchemaResultSchema,
+    model: MODEL.SONNET,
+    system: systemPrompt,
+    messages: [{ role: 'user', content: userMessage }],
+    maxTokens: 8192,
+    temperature: 0.2,
+    purpose: 'formulation_schema',
+    trackingContext,
+  })
+
+  if (!result.success) {
+    logger.error({ error: result.error }, 'Schema LLM 回應失敗')
+    return { success: false, error: result.error }
   }
 
-  // 記錄使用量
-  if (response.inputTokens && response.outputTokens) {
-    const costUsd = calculateLlmCost(MODEL.SONNET, response.inputTokens, response.outputTokens)
-    logger.info({ inputTokens: response.inputTokens, outputTokens: response.outputTokens, cost: costUsd.toFixed(4) }, 'formulation_schema LLM usage')
-    trackLlmUsage({
-      model: MODEL.SONNET,
-      inputTokens: response.inputTokens,
-      outputTokens: response.outputTokens,
-      purpose: 'formulation_schema',
-      userId: trackingContext?.userId,
-      conversationId: trackingContext?.conversationId,
-    })
-  }
-
-  try {
-    const parsed = safeParseJson<{ schemaSql?: string; entityMapping?: string }>(response.content || '')
-    if (!parsed) {
-      logger.error({ rawResponse: response.content?.substring(0, 500) }, 'Schema LLM 回應無法解析為 JSON')
-      return { success: false, error: '無法解析 LLM 回應' }
-    }
-
-    logger.info('SQL Schema 生成完成')
-    return {
-      success: true,
-      schemaSql: parsed.schemaSql,
-      entityMapping: parsed.entityMapping,
-    }
-  } catch (err) {
-    logger.error({ err, rawResponse: response.content?.substring(0, 500) }, 'Schema JSON 解析失敗')
-    return { success: false, error: `解析回應時發生錯誤: ${err}` }
+  logger.info('SQL Schema 生成完成')
+  return {
+    success: true,
+    schemaSql: result.data.schemaSql,
+    entityMapping: result.data.entityMapping,
   }
 }
 
@@ -511,38 +502,34 @@ ${decisions || '（無額外決策）'}${schemaHints ? `
 ${schemaHints}` : ''}`
 
   logger.info('識別 Features...')
-  const response = await callClaude(systemPrompt, userMessage, { maxTokens: 8192 })
+  const IdentifyFeaturesSchema = z.object({
+    features: z.array(z.object({
+      name: z.string(),
+      actionName: z.string(),
+      description: z.string(),
+    })),
+  })
 
-  if (!response.success) {
-    return { success: false, error: response.error }
+  const result = await callStructured({
+    schema: IdentifyFeaturesSchema,
+    model: MODEL.SONNET,
+    system: systemPrompt,
+    messages: [{ role: 'user', content: userMessage }],
+    maxTokens: 8192,
+    temperature: 0.2,
+    purpose: 'formulation_identify_features',
+    trackingContext,
+  })
+
+  if (!result.success) {
+    logger.error({ error: result.error }, 'Features LLM 回應失敗')
+    return { success: false, error: result.error }
   }
 
-  // 記錄使用量
-  if (response.inputTokens && response.outputTokens) {
-    trackLlmUsage({
-      model: MODEL.SONNET,
-      inputTokens: response.inputTokens,
-      outputTokens: response.outputTokens,
-      purpose: 'formulation_identify_features',
-      userId: trackingContext?.userId,
-      conversationId: trackingContext?.conversationId,
-    })
-  }
-
-  try {
-    const parsed = safeParseJson<{ features?: FeatureInfo[] }>(response.content || '')
-    if (!parsed) {
-      logger.error({ rawResponse: response.content?.substring(0, 500) }, 'Features LLM 回應無法解析為 JSON')
-      return { success: false, error: '無法解析 LLM 回應' }
-    }
-
-    logger.info({ featureCount: parsed.features?.length || 0 }, '識別 Features 完成')
-    return {
-      success: true,
-      features: parsed.features,
-    }
-  } catch (err) {
-    return { success: false, error: `解析回應時發生錯誤: ${err}` }
+  logger.info({ featureCount: result.data.features.length }, '識別 Features 完成')
+  return {
+    success: true,
+    features: result.data.features,
   }
 }
 
@@ -836,10 +823,16 @@ ${featureSchemaHints}` : ''}`
 
   // 提取 Gherkin 內容
   const gherkinMatch = response.content?.match(/```gherkin\s*([\s\S]*?)\s*```/)
-  const content = gherkinMatch ? gherkinMatch[1].trim() : response.content?.trim() || ''
+  const rawContent = gherkinMatch ? gherkinMatch[1].trim() : response.content?.trim() || ''
 
-  if (!content) {
+  if (!rawContent) {
     return { success: false, error: '生成的 Feature 內容為空' }
+  }
+
+  // 後置修正：與 fixMultipleFeatures/generateDraftBatch 一致
+  const { content: sanitizedContent, fixes } = sanitizeFeatureContent(rawContent)
+  if (fixes.length > 0) {
+    logger.info({ featureName: featureInfo.name, fixes }, 'Feature 後置修正')
   }
 
   return {
@@ -847,7 +840,7 @@ ${featureSchemaHints}` : ''}`
     feature: {
       name: featureInfo.name,
       actionName: featureInfo.actionName,
-      content,
+      content: sanitizedContent,
     },
   }
 }
@@ -1120,47 +1113,43 @@ ${decisions}` : ''}
 重要：只輸出 JSON，不要加任何解釋。直接以 { 開頭，以 } 結尾。`
 
     logger.info({ batchLabel, featureCount: batch.length }, '修復 Features...')
-    const response = await callClaude(systemPrompt, userMessage, { maxTokens: 16384, temperature: 0.1 })
+    const FixFeaturesSchema = z.object({
+      features: z.array(z.object({
+        name: z.string(),
+        actionName: z.string(),
+        content: z.string(),
+      })),
+    })
 
-    if (!response.success) {
-      return { success: false, error: response.error }
+    const result = await callStructured({
+      schema: FixFeaturesSchema,
+      model: MODEL.SONNET,
+      system: systemPrompt,
+      messages: [{ role: 'user', content: userMessage }],
+      maxTokens: 16384,
+      temperature: 0.1,
+      purpose: 'formulation_fix_features',
+      trackingContext,
+    })
+
+    if (!result.success) {
+      logger.error({ batchLabel, error: result.error }, 'LLM 回應失敗')
+      return { success: false, error: result.error }
     }
 
-    // 記錄使用量
-    if (response.inputTokens && response.outputTokens) {
-      trackLlmUsage({
-        model: MODEL.SONNET,
-        inputTokens: response.inputTokens,
-        outputTokens: response.outputTokens,
-        purpose: 'formulation_fix_features',
-        userId: trackingContext?.userId,
-        conversationId: trackingContext?.conversationId,
-      })
+    const fixedFeatures = result.data.features as GeneratedFeature[]
+    // 後置驗證：sanitizeFeatureContent 修正 Gherkin 內容格式錯誤
+    for (const feature of fixedFeatures) {
+      const { content: sanitized, fixes: featureFixes } = sanitizeFeatureContent(feature.content)
+      if (featureFixes.length > 0) {
+        feature.content = sanitized
+        logger.info({ feature: feature.name, fixes: featureFixes }, '修復後 Feature 後置修正')
+      }
     }
-
-    try {
-      const parsed = safeParseJson<{ features?: GeneratedFeature[] }>(response.content || '')
-      if (!parsed) {
-        logger.error({ batchLabel, rawResponse: response.content?.substring(0, 500) }, 'LLM 回應無法解析為 JSON')
-        return { success: false, error: '無法解析 LLM 回應' }
-      }
-
-      const fixedFeatures = (parsed.features || []) as GeneratedFeature[]
-      // 後置驗證
-      for (const feature of fixedFeatures) {
-        const { content: sanitized, fixes: featureFixes } = sanitizeFeatureContent(feature.content)
-        if (featureFixes.length > 0) {
-          feature.content = sanitized
-          logger.info({ feature: feature.name, fixes: featureFixes }, '修復後 Feature 後置修正')
-        }
-      }
-      logger.info({ batchLabel, fixedCount: fixedFeatures.length }, '修復完成')
-      return {
-        success: true,
-        fixedFeatures,
-      }
-    } catch (err) {
-      return { success: false, error: `解析回應時發生錯誤: ${err}` }
+    logger.info({ batchLabel, fixedCount: fixedFeatures.length }, '修復完成')
+    return {
+      success: true,
+      fixedFeatures,
     }
   }
 
@@ -1296,59 +1285,59 @@ ${decisions || '（無額外決策）'}`
   // 動態 maxTokens：每個 Feature 的 Gherkin 內容 ~1500 tokens + schema/entityMapping ~3000
   const estimatedFeatureCount = (esDocumentContent.match(/Command|ReadModel/gi) || []).length || 10
   const maxTokens = Math.min(Math.max(estimatedFeatureCount * 2000 + 5000, 16384), 65536)
-  const response = await callClaude(systemPrompt, userMessage, { maxTokens })
 
-  if (!response.success) {
-    return { success: false, error: response.error }
+  const DraftBatchSchema = z.object({
+    schemaSql: z.string().nullable(),
+    entityMapping: z.string().nullable(),
+    features: z.array(z.object({
+      name: z.string(),
+      actionName: z.string(),
+      content: z.string(),
+    })),
+    uncertainItems: z.array(z.string()).nullable(),
+  })
+
+  const result = await callStructured({
+    schema: DraftBatchSchema,
+    model: MODEL.SONNET,
+    system: systemPrompt,
+    messages: [{ role: 'user', content: userMessage }],
+    maxTokens,
+    temperature: 0.2,
+    purpose: 'formulation_draft_batch',
+    trackingContext,
+  })
+
+  if (!result.success) {
+    logger.error({ error: result.error }, 'Draft Batch LLM 回應失敗')
+    return { success: false, error: result.error }
   }
 
-  // 記錄使用量
-  if (response.inputTokens && response.outputTokens) {
-    trackLlmUsage({
-      model: MODEL.SONNET,
-      inputTokens: response.inputTokens,
-      outputTokens: response.outputTokens,
-      purpose: 'formulation_draft_batch',
-      userId: trackingContext?.userId,
-      conversationId: trackingContext?.conversationId,
-    })
+  const parsed = result.data
+  const features = parsed.features as GeneratedFeature[]
+  const uncertainItems = parsed.uncertainItems || []
+
+  // 後置驗證：自動修正 LLM 常犯的格式錯誤
+  let totalFixes = 0
+  for (const feature of features) {
+    const { content: sanitized, fixes: featureFixes } = sanitizeFeatureContent(feature.content)
+    if (featureFixes.length > 0) {
+      feature.content = sanitized
+      totalFixes += featureFixes.length
+      logger.info({ feature: feature.name, fixes: featureFixes }, 'Feature 後置修正')
+    }
+  }
+  if (totalFixes > 0) {
+    logger.info({ totalFixes, featureCount: features.length }, 'Feature 後置驗證完成')
   }
 
-  try {
-    const parsed = safeParseJson<{ features?: GeneratedFeature[]; uncertainItems?: string[]; schemaSql?: string; entityMapping?: string }>(response.content || '')
-    if (!parsed) {
-      logger.error({ rawResponse: response.content?.substring(0, 500) }, 'Draft Batch LLM 回應無法解析為 JSON')
-      return { success: false, error: '無法解析 LLM 回應' }
-    }
+  logger.info({ featureCount: features.length, uncertainCount: uncertainItems.length }, 'Draft Batch 完成')
 
-    const features = (parsed.features || []) as GeneratedFeature[]
-    const uncertainItems = (parsed.uncertainItems || []) as string[]
-
-    // 後置驗證：自動修正 LLM 常犯的格式錯誤
-    let totalFixes = 0
-    for (const feature of features) {
-      const { content: sanitized, fixes: featureFixes } = sanitizeFeatureContent(feature.content)
-      if (featureFixes.length > 0) {
-        feature.content = sanitized
-        totalFixes += featureFixes.length
-        logger.info({ feature: feature.name, fixes: featureFixes }, 'Feature 後置修正')
-      }
-    }
-    if (totalFixes > 0) {
-      logger.info({ totalFixes, featureCount: features.length }, 'Feature 後置驗證完成')
-    }
-
-    logger.info({ featureCount: features.length, uncertainCount: uncertainItems.length }, 'Draft Batch 完成')
-
-    return {
-      success: true,
-      schemaSql: parsed.schemaSql,
-      entityMapping: parsed.entityMapping,
-      features,
-      uncertainItems,
-    }
-  } catch (err) {
-    logger.error({ err }, 'Draft Batch JSON 解析失敗')
-    return { success: false, error: `解析回應時發生錯誤: ${err}` }
+  return {
+    success: true,
+    schemaSql: parsed.schemaSql || undefined,
+    entityMapping: parsed.entityMapping || undefined,
+    features,
+    uncertainItems,
   }
 }

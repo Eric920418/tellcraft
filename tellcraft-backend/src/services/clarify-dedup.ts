@@ -4,8 +4,9 @@
  * 用 Haiku 做輕量語意判斷，失敗時全部降級不阻斷流程
  */
 
+import { z } from 'zod'
 import { getAnthropicClient, MODEL, calculateLlmCost, trackLlmUsage } from '../lib/anthropic'
-import { safeParseJson } from '../utils/safe-parse-json'
+import { callStructured } from '../lib/structured-output'
 import { ClarifyItem } from './bdd-session'
 import { createLogger } from '../lib/logger'
 
@@ -40,8 +41,6 @@ export async function generateDecisionSummary(
   if (resolvedItems.length === 0) return null
 
   try {
-    const anthropic = getAnthropicClient()
-
     const qaList = resolvedItems
       .filter(item => item.answer)
       .map((item, i) => `${i + 1}. Q: ${item.whiteTextQuestion || item.question}\n   A: ${item.answer}${item.checklistItem ? ` [${item.checklistItem}]` : ''}`)
@@ -55,61 +54,38 @@ export async function generateDecisionSummary(
 3. 標註相關的 checklist area（如 A1, B2 等）
 4. 找出被用戶明確排除的功能
 
-## 輸出格式（嚴格 JSON）
-{
-  "coveredTopics": [
-    {
-      "topic": "主題名稱 — 細項",
-      "decision": "一句話決策結果",
-      "checklistAreas": ["A1", "A5"]
-    }
-  ],
-  "excludedFeatures": ["被排除的功能1", "被排除的功能2"]
-}
-
 ## 規則
 - 主題命名要具體（「花束尺寸規格」而非「商品」）
 - 同一 Q&A 可能涵蓋多個主題
 - excludedFeatures 只列用戶明確說「不需要」「不要」的功能`
 
-    const stream = anthropic.messages.stream({
-      model: MODEL.HAIKU,
-      max_tokens: 2048,
-      temperature: 0.1,
-      system: systemPrompt,
-      messages: [{ role: 'user', content: `已回答的 Q&A 列表：\n${qaList}` }],
+    const DecisionSummarySchema = z.object({
+      coveredTopics: z.array(z.object({
+        topic: z.string(),
+        decision: z.string(),
+        checklistAreas: z.array(z.string()),
+      })),
+      excludedFeatures: z.array(z.string()),
     })
 
-    const finalMessage = await stream.finalMessage()
+    const result = await callStructured({
+      schema: DecisionSummarySchema,
+      model: MODEL.HAIKU,
+      system: systemPrompt,
+      messages: [{ role: 'user', content: `已回答的 Q&A 列表：\n${qaList}` }],
+      maxTokens: 2048,
+      temperature: 0.1,
+      purpose: 'clarify_decision_summary',
+      trackingContext,
+    })
 
-    // 記錄 LLM 用量
-    const usage = finalMessage.usage
-    if (usage) {
-      const cost = calculateLlmCost(MODEL.HAIKU, usage.input_tokens, usage.output_tokens)
-      trackLlmUsage({
-        model: MODEL.HAIKU,
-        inputTokens: usage.input_tokens,
-        outputTokens: usage.output_tokens,
-        purpose: 'clarify_decision_summary',
-        userId: trackingContext?.userId,
-        conversationId: trackingContext?.conversationId,
-      })
-
-      logger.info({ inputTokens: usage.input_tokens, outputTokens: usage.output_tokens, cost: cost.toFixed(4) }, 'Decision Summary 生成完成')
-    }
-
-    const content = finalMessage.content[0]
-    if (content.type !== 'text') return null
-
-    const parsed = safeParseJson<DecisionSummary>(content.text)
-    if (!parsed || !parsed.coveredTopics || !Array.isArray(parsed.coveredTopics)) {
-      logger.warn('Decision Summary 格式錯誤或無法解析')
+    if (!result.success) {
+      logger.warn({ error: result.error }, 'Decision Summary 失敗（降級跳過）')
       return null
     }
 
-    logger.info({ topicCount: parsed.coveredTopics.length, excludedCount: parsed.excludedFeatures?.length || 0 }, 'Decision Summary 完成')
-
-    return parsed
+    logger.info({ topicCount: result.data.coveredTopics.length, excludedCount: result.data.excludedFeatures.length }, 'Decision Summary 完成')
+    return result.data
   } catch (err) {
     logger.error({ err }, 'generateDecisionSummary 失敗（降級跳過）')
     return null
@@ -208,8 +184,6 @@ export async function deduplicateQuestions(
   if (newItems.length === 0 || existingItems.length === 0) return newItems
 
   try {
-    const anthropic = getAnthropicClient()
-
     const existingList = existingItems
       .map((item, i) => `E${i + 1}. ${item.whiteTextQuestion || item.question}${item.answer ? ` → ${item.answer}` : ''}`)
       .join('\n')
@@ -225,57 +199,36 @@ export async function deduplicateQuestions(
 - **已被回答覆蓋**：既有問題的回答已經隱含了新問題的答案
 - **邏輯上不可能**：根據已有回答，新問題的前提已不成立
 
-## 輸出格式（嚴格 JSON）
-{
-  "keep": [1, 3],
-  "remove": [
-    { "index": 2, "reason": "與 E5 重複：都在問商品規格結構" }
-  ]
-}
+index 是 N 編號（1-based）。keep 列出保留的 N 編號，remove 列出移除的。`
 
-其中 index 是 N 編號（1-based）。keep 列出保留的 N 編號，remove 列出移除的。`
+    const DedupResultSchema = z.object({
+      keep: z.array(z.number()),
+      remove: z.array(z.object({
+        index: z.number(),
+        reason: z.string(),
+      })),
+    })
 
-    const stream = anthropic.messages.stream({
+    const result = await callStructured({
+      schema: DedupResultSchema,
       model: MODEL.HAIKU,
-      max_tokens: 1024,
-      temperature: 0.1,
       system: systemPrompt,
       messages: [{
         role: 'user',
         content: `## 既有問題（已問過或已回答）\n${existingList}\n\n## 新生成的問題\n${newList}\n\n請判斷哪些新問題是重複的。`,
       }],
+      maxTokens: 1024,
+      temperature: 0.1,
+      purpose: 'clarify_dedup',
+      trackingContext,
     })
 
-    const finalMessage = await stream.finalMessage()
-
-    // 記錄 LLM 用量
-    const usage = finalMessage.usage
-    if (usage) {
-      const cost = calculateLlmCost(MODEL.HAIKU, usage.input_tokens, usage.output_tokens)
-      trackLlmUsage({
-        model: MODEL.HAIKU,
-        inputTokens: usage.input_tokens,
-        outputTokens: usage.output_tokens,
-        purpose: 'clarify_dedup',
-        userId: trackingContext?.userId,
-        conversationId: trackingContext?.conversationId,
-      })
-
-      logger.info({ inputTokens: usage.input_tokens, outputTokens: usage.output_tokens, cost: cost.toFixed(4) }, 'Dedup 完成')
-    }
-
-    const content = finalMessage.content[0]
-    if (content.type !== 'text') return newItems
-
-    const parsed = safeParseJson<{
-      keep: number[]
-      remove: Array<{ index: number; reason: string }>
-    }>(content.text)
-
-    if (!parsed || !parsed.keep || !Array.isArray(parsed.keep)) {
-      logger.warn('Dedup 結果格式錯誤或無法解析，保留所有問題')
+    if (!result.success) {
+      logger.warn({ error: result.error }, 'Dedup 失敗，保留所有問題')
       return newItems
     }
+
+    const parsed = result.data
 
     // 根據 keep 列表過濾
     const keepSet = new Set(parsed.keep)
@@ -283,7 +236,7 @@ export async function deduplicateQuestions(
 
     const removedCount = newItems.length - filtered.length
     if (removedCount > 0) {
-      const reasons = (parsed.remove || []).map(r => `  N${r.index}: ${r.reason}`).join('\n')
+      const reasons = parsed.remove.map(r => `  N${r.index}: ${r.reason}`).join('\n')
       logger.info({ removedCount, totalCount: newItems.length, reasons }, '去重移除問題')
     } else {
       logger.info({ totalCount: newItems.length }, '去重：全部保留')

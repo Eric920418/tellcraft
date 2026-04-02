@@ -10,10 +10,10 @@
 import * as yaml from 'js-yaml'
 import { z } from 'zod'
 import { getAnthropicHeaders, MODEL, trackLlmUsage } from '../lib/anthropic'
+import { callStructured } from '../lib/structured-output'
 import type { GeneratedComponent } from './uiux-generation'
 import type { GeneratedCode } from '../types/flow-state'
 import { createLogger } from '../lib/logger'
-import { safeParseJson } from '../utils/safe-parse-json'
 import { isQueryAction } from './actions-design'
 import { sanitizeNamedImports } from '../utils/sanitize-named-imports'
 import { validateComponentSyntax } from './syntax-validator'
@@ -1361,48 +1361,47 @@ ${subOp.requiredResponseFields.map(f => `- ${f}`).join('\n') || '（無特定欄
 
 只輸出 JSON：`
 
-  const systemPrompt = '你是一個結構化資料提取專家。從 BDD Feature 和 SQL Schema 中提取精確的 JSON 槽位。只輸出 JSON，不要任何其他文字。'
+  const systemPrompt = '你是一個結構化資料提取專家。從 BDD Feature 和 SQL Schema 中提取精確的 JSON 槽位。'
 
-  // 第一次嘗試
-  const result1 = await callClaude(systemPrompt, prompt, { maxTokens: 2048, temperature: 0 }, trackingContext)
-  if (!result1.success || !result1.content) return null
+  // 第一次嘗試（Structured Output 保證 JSON 合規 + Zod 驗證）
+  const result1 = await callStructured({
+    schema,
+    model: MODEL.SONNET,
+    system: systemPrompt,
+    messages: [{ role: 'user', content: prompt }],
+    maxTokens: 2048,
+    temperature: 0,
+    purpose: 'coder_slot_extraction',
+    trackingContext,
+  })
 
-  try {
-    const cleaned1 = result1.content.replace(/```json?\n?/g, '').replace(/```/g, '').trim()
-    const json1 = JSON.parse(cleaned1)
-    return schema.parse(json1) as T
-  } catch (err1) {
-    // 第二次嘗試：注入第一次的輸出 + 錯誤訊息
-    const errMsg = err1 instanceof Error ? err1.message : String(err1)
-    logger.info({ operationType: subOp.operationType, error: errMsg }, 'Slot extraction 第一次失敗，重試中')
+  if (result1.success) return result1.data
 
-    // 截斷上次輸出，防止 prompt 過長導致 context overflow
-    const prevOutput = (result1.content || '').substring(0, 500)
-    const retryPrompt = `${prompt}
+  // 第二次嘗試：注入第一次的錯誤訊息（罕見，因為 Structured Output 已保證 JSON 格式正確）
+  logger.info({ operationType: subOp.operationType, error: result1.error }, 'Slot extraction 第一次失敗，重試中')
 
-## 上次嘗試的輸出（有錯誤，請修正）
-${prevOutput}
+  const retryPrompt = `${prompt}
 
-## 錯誤訊息
-${errMsg}
+## 上次嘗試失敗
+錯誤：${result1.error}
 
-請修正後重新輸出正確的 JSON：`
+請重新提取正確的 JSON：`
 
-    const result2 = await callClaude(systemPrompt, retryPrompt, { maxTokens: 2048, temperature: 0 }, trackingContext)
-    if (!result2.success || !result2.content) {
-      logger.warn({ operationType: subOp.operationType }, 'Slot extraction 重試 API 失敗')
-      return null
-    }
+  const result2 = await callStructured({
+    schema,
+    model: MODEL.SONNET,
+    system: systemPrompt,
+    messages: [{ role: 'user', content: retryPrompt }],
+    maxTokens: 2048,
+    temperature: 0,
+    purpose: 'coder_slot_extraction',
+    trackingContext,
+  })
 
-    try {
-      const cleaned2 = result2.content.replace(/```json?\n?/g, '').replace(/```/g, '').trim()
-      const json2 = JSON.parse(cleaned2)
-      return schema.parse(json2) as T
-    } catch (err2) {
-      logger.warn({ operationType: subOp.operationType, firstError: errMsg, secondError: err2 instanceof Error ? err2.message : String(err2) }, 'Slot extraction 重試後仍失敗')
-      return null
-    }
-  }
+  if (result2.success) return result2.data
+
+  logger.warn({ operationType: subOp.operationType, firstError: result1.error, secondError: result2.error }, 'Slot extraction 重試後仍失敗')
+  return null
 }
 
 async function tryTemplateGeneration(
@@ -2365,56 +2364,33 @@ async function classifyComponentsWithHaiku(
 
     const userMessage = `## 此專案的業務操作（Server Actions）\n${actionsText}\n\n## 組件列表（共 ${allComponents.length} 個）\n\n${componentSummaries}`
 
-    const resp = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: getAnthropicHeaders(),
-      body: JSON.stringify({
-        model: MODEL.HAIKU,
-        max_tokens: 200,
-        temperature: 0,
-        system: MOCK_IDENTIFICATION_SYSTEM_PROMPT,
-        messages: [{ role: 'user', content: userMessage }],
-      }),
+    const ComponentIndicesSchema = z.object({
+      indices: z.array(z.number()),
     })
 
-    if (!resp.ok) {
-      logger.warn({ status: resp.status }, 'Haiku mock 識別 API 失敗')
-      return null
-    }
-
-    const data = await resp.json() as {
-      content: Array<{ type: string; text?: string }>
-      usage: { input_tokens: number; output_tokens: number }
-    }
-
-    trackLlmUsage({
+    const result = await callStructured({
+      schema: ComponentIndicesSchema,
       model: MODEL.HAIKU,
-      inputTokens: data.usage?.input_tokens || 0,
-      outputTokens: data.usage?.output_tokens || 0,
+      system: MOCK_IDENTIFICATION_SYSTEM_PROMPT,
+      messages: [{ role: 'user', content: userMessage }],
+      maxTokens: 200,
+      temperature: 0,
       purpose: 'coder_mock_identification',
-      userId: trackingContext?.userId,
-      conversationId: trackingContext?.conversationId,
+      trackingContext,
     })
 
-    const text = data.content?.[0]?.type === 'text' ? data.content[0].text : null
-    if (!text) {
-      logger.warn('Haiku mock 識別回應為空')
-      return null
-    }
-
-    const parsed = safeParseJson<{ indices: number[] }>(text)
-    if (!parsed || !Array.isArray(parsed.indices)) {
-      logger.warn({ text }, 'Haiku mock 識別 JSON 解析失敗')
+    if (!result.success) {
+      logger.warn({ error: result.error }, 'Haiku mock 識別失敗')
       return null
     }
 
     // 驗證 indices 範圍 + 去重
-    const valid = [...new Set(parsed.indices)].filter(
+    const valid = [...new Set(result.data.indices)].filter(
       i => typeof i === 'number' && i >= 0 && i < allComponents.length
     )
 
     logger.info(
-      { raw: parsed.indices.length, valid: valid.length, total: allComponents.length },
+      { raw: result.data.indices.length, valid: valid.length, total: allComponents.length },
       'Haiku mock 識別完成',
     )
     return valid
