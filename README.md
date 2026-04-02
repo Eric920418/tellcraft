@@ -144,7 +144,7 @@ npx ts-node bdd-spec/scripts/validate-feature.ts spec/features/
   ▼
 ④b Coder Skill Stage B（✅ 已完成 — 自動觸發，逐 Feature 精準驗證）
   ├─ **Feature Alignment Gate**（阻斷式閘門，6 項深度對齊檢查 + LLM 自動修復，2 輪修不好阻塞 pipeline）
-  ├─ RED Phase Layer 1: 11 個靜態檢查（零 LLM ~2ms）— Feature×actionsYml + Feature×Schema DataTable 深度對齊
+  ├─ RED Phase Layer 1: 12 個靜態檢查（零 LLM ~2ms）— Feature×actionsYml + Feature×Schema DataTable 深度對齊 + WHEN call table VAR 語法誤用偵測
   ├─ RED Phase Layer 2: StubHttpAdapter(501) + 真實 Neon DB 全場景驗證
   ├─ RED Phase Layer 2.5: RoutingStubAdapter（in-process Express 真實路由匹配，404 捕捉路由定義錯誤）
   ├─ BDD execution key 注入 Coder prompt（response field 名稱對齊）
@@ -194,7 +194,7 @@ Supabase PostgREST 只能做 CRUD + RLS，**搞不定**：
 | `bdd-spec` | 需求釐清 + BDD 規格產出（ES → Discovery → Formulation → Actions → ISA） | Sonnet | ✅ 完成 |
 | `uiux` | 前端介面設計（Design Discovery → Design Lab → Implementation） | Sonnet | ✅ 完成 |
 | `fast-build` | 一句話快速建站，Haiku 概念生成 + Tier 智能修正 + Sonnet 三階段生成 | Haiku ×1 + Sonnet ×3 | ✅ 完成 |
-| `quality-gate` | UIUX RWD 完成後自動觸發，靜態檢查 + LLM 自動修復 | Haiku | ✅ 完成 |
+| `quality-gate` | UIUX/Fast Build/Clone 完成後自動觸發，5 類靜態檢查（A11y+對比度+效能+代碼品質+SVG ID）+ Design Tier 合規 + Rule-based/LLM 雙層自動修復 | Haiku | ✅ 完成 |
 | `deployer` | 代碼 → sanitize → 本地 build 驗證 → Vercel 部署 → 回滾 | Haiku（修復） | ✅ 完成 |
 | `iteration` | 迭代修改 + 撤銷上一步 + 版本回滾 | Sonnet | ✅ 完成 |
 | `db-provision` | BDD 完成後自動建 Neon DB + 套用 Schema（同步 < 10s） | — | ✅ 完成 |
@@ -531,7 +531,7 @@ Server Action 錯誤訊息 + 工具模組中文字串國際化（+117 keys，2 n
 | **BDD 規格** | 5 階段釐清、Event Storming、提案模式、草稿批量、變更管理、規格回滾、Scenario Outline、OpenAPI 產出 |
 | **UIUX 設計** | 雙軌 Discovery、Design Tier、5 變體、三階段生成、串流即時預覽、BDD→UI 翻譯（含 actionsYml 欄位精確注入）、Variant 概念注入 |
 | **快速建站** | 26 種產品類型、22 套產業配色、Haiku 概念生成（設計靈魂）、Tier 智能修正、vague 攔截引導、失敗重試、進度預估、手機全屏預覽、App/Website 佈局模式、模板風格整合、智能模板匹配 |
-| **品質** | Quality Gate 靜態檢查（含 SVG ID 碰撞偵測）、LLM 自動修復、RWD 響應式安全網、Tailwind v4→v3 轉換 |
+| **品質** | Quality Gate 5 類靜態檢查（A11y per-element + 色彩對比度 + 效能動畫時長 + 代碼品質 + SVG ID 碰撞）、Design Tier 合規（functional 禁漸層/glow/spring）、Rule-based 確定性修復（5 規則）+ Haiku LLM fallback、RWD 響應式安全網 |
 | **部署** | sanitize 7 類預檢（含 'use server' 保護 + 未知依賴警告）、本地 build 驗證（3 輪 LLM 修復）、Vercel 部署、版本回滾 |
 | **迭代** | 對話內迭代修改、撤銷上一步、部署歷史回滾、迭代歷史追蹤、重複抱怨偵測+策略升級、視覺診斷指引 |
 | **預覽** | WebContainers 完整 Next.js 預覽（Server Actions + DB 連線）、HMR 增量更新、裝置切換、編輯模式、圖片上傳、Pre-boot + Pre-install 載入優化、生成期間禁止渲染（UIUX/Coder 生成時只顯示等待動畫）、路由衝突去重（strip route groups 防 parallel pages 錯誤） |
@@ -868,9 +868,16 @@ Schema 欄位名包含 image/photo/cover/avatar 等 → 自動生成圖片上傳
 - [x] `formatUISpecForPrompt` 對新 type 加實作提示（useState pattern、grid layout、Modal lightbox）
 - [x] `generateStructure` system prompt 加「進階資料呈現模式」段落：carousel/paginated_list/gallery 的完整 useState + JSX 範例 + 通用規則（>8 項考慮分頁）
 
-#### M6：整合驗證 — 復刻 Learn 專案（⬜ 待開發，依賴 M1-M5）
+#### M6：整合驗證測試（✅ 已完成 2026-04-02，依賴 M1-M5）
 
-用 Tellcraft 完整復刻基準專案，驗證所有能力。
+自動化測試驗證 M2-M4 模板生成邏輯（41 個測試案例）。
+
+- [x] `coder-generators.test.ts`：Learn 專案風格 schema fixture（5 表：users+posts+categories+events+gallery_albums）
+- [x] Auth（12 tests）: detectAuthInSchema + generateAuthSystem（role/no-role/bcrypt/neon） + injectSessionProvider
+- [x] Admin（10 tests）: parseColumnDefinitions + generateAdminPanel（auth 過濾、FK→select、image→ImageUpload、requireAdmin、Dashboard）
+- [x] Upload（7 tests）: detectImageColumnsInSchema + generateUploadFiles（雙模式、拖放預覽）
+- [x] 整合（4 tests）：全觸發 31 檔、無 auth、無 image、路徑唯一性
+- [x] 總計 877 測試全部通過（原 836 + 新增 41）
 
 驗收標準：
 | 項目 | 基準 | Tellcraft 生成 |
@@ -1144,7 +1151,7 @@ psql "$DATABASE_URL" -f tellcraft-backend/migrations/xxx.sql
 - **BDD Skill 完整流程**（02-24~25）：ES Phase 0 + Discovery/Clarify/Formulation + Actions Design + ISA Config + 變更管理 + 回退/恢復
 - **UIUX 生成重構**（02-05）：5 變體 + Design System + Structure→Animation→RWD 三階段
 - **Fast Build**（02-09，02-25 升級）：一句話建站 + 25 產品類型 + 22 配色 + Tier 偵測 + App/Website 佈局
-- **Quality Gate**（02-06）：A11y/Performance/Code Quality 靜態檢查 + Haiku 自動修復
+- **Quality Gate**（02-06，04-01 升級）：A11y per-element + 色彩對比度 + 效能 + 代碼品質 + SVG ID + Design Tier 合規 + Rule-based 5 規則確定性修復 + Haiku LLM fallback
 - **即時預覽**（02-06~08，03-17 遷移至 WebContainers）：串流增量更新 + 裝置切換 + BDD→UI 翻譯 + VariantConcept
 - **3D 動畫**（02-24~25）：BDD 低多邊形城堡 + Fast Build 3D 工廠流水線（Remotion + Three.js）
 - **VPS 後端遷移**（02-03）：Vercel Serverless → Express + BullMQ + Socket.io
