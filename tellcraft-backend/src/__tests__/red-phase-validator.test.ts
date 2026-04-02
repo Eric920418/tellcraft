@@ -96,7 +96,7 @@ entity_to_table_mapping:
 
 describe('RED Phase Validator', () => {
   describe('全部通過（no-op）', () => {
-    it('Feature 和 actionsYml 完全一致時，零問題通過', () => {
+    it('Feature 和 actionsYml 完全一致時，零問題通過', async () => {
       const input: RedPhaseInput = {
         features: [{
           name: '建立訂單',
@@ -122,7 +122,7 @@ describe('RED Phase Validator', () => {
         entityMapping: ENTITY_MAPPING,
       }
 
-      const result = executeRedPhase(input)
+      const result = await executeRedPhase(input)
       expect(result.passed).toBe(true)
       expect(result.errors).toBe(0)
       expect(result.checkedFeatures).toBe(1)
@@ -130,7 +130,7 @@ describe('RED Phase Validator', () => {
   })
 
   describe('Check 1: Action 存在性', () => {
-    it('Feature 的 Action 在 actionsYml 中找不到 → error', () => {
+    it('Feature 的 Action 在 actionsYml 中找不到 → error', async () => {
       const input: RedPhaseInput = {
         features: [{
           name: '建立訂單',
@@ -146,7 +146,7 @@ describe('RED Phase Validator', () => {
         entityMapping: ENTITY_MAPPING,
       }
 
-      const result = executeRedPhase(input)
+      const result = await executeRedPhase(input)
       expect(result.passed).toBe(false)
       expect(result.errors).toBe(1)
       expect(result.issues[0].issueType).toBe('missing_action')
@@ -154,7 +154,7 @@ describe('RED Phase Validator', () => {
   })
 
   describe('Check 2: HTTP Method 一致性', () => {
-    it('Feature 寫 POST 但 actionsYml 推導為 GET → error', () => {
+    it('Feature 寫 POST 但 actionsYml 推導為 GET → error', async () => {
       const input: RedPhaseInput = {
         features: [{
           name: '查詢訂單',
@@ -176,14 +176,14 @@ describe('RED Phase Validator', () => {
         entityMapping: ENTITY_MAPPING,
       }
 
-      const result = executeRedPhase(input)
+      const result = await executeRedPhase(input)
       expect(result.passed).toBe(false)
       expect(result.issues.some(i => i.issueType === 'method_mismatch')).toBe(true)
     })
   })
 
   describe('Check 3: Path 一致性', () => {
-    it('Feature path 與 actionsYml path 不同 → warning', () => {
+    it('Feature path 與 actionsYml path 不同 → warning', async () => {
       const input: RedPhaseInput = {
         features: [{
           name: '建立訂單',
@@ -207,7 +207,7 @@ describe('RED Phase Validator', () => {
         entityMapping: ENTITY_MAPPING,
       }
 
-      const result = executeRedPhase(input)
+      const result = await executeRedPhase(input)
       // path 不一致是 warning
       expect(result.warnings).toBeGreaterThanOrEqual(1)
       expect(result.issues.some(i => i.issueType === 'path_mismatch')).toBe(true)
@@ -215,7 +215,7 @@ describe('RED Phase Validator', () => {
   })
 
   describe('Check 4: Summary 一致性', () => {
-    it('Feature name 和 actionsYml summary 不同 → error', () => {
+    it('Feature name 和 actionsYml summary 不同 → error', async () => {
       const input: RedPhaseInput = {
         features: [{
           name: '新增訂單',
@@ -235,14 +235,14 @@ describe('RED Phase Validator', () => {
         entityMapping: ENTITY_MAPPING,
       }
 
-      const result = executeRedPhase(input)
+      const result = await executeRedPhase(input)
       expect(result.passed).toBe(false)
       expect(result.issues.some(i => i.issueType === 'summary_mismatch')).toBe(true)
     })
   })
 
   describe('Check 6: Status Code 合理性', () => {
-    it('GET action 預期 201 → error', () => {
+    it('GET action 預期 201 → error', async () => {
       const input: RedPhaseInput = {
         features: [{
           name: '查詢訂單',
@@ -265,11 +265,11 @@ describe('RED Phase Validator', () => {
         entityMapping: ENTITY_MAPPING,
       }
 
-      const result = executeRedPhase(input)
+      const result = await executeRedPhase(input)
       expect(result.issues.some(i => i.issueType === 'status_mismatch' && i.severity === 'error')).toBe(true)
     })
 
-    it('POST action 預期 200（登入）→ warning', () => {
+    it('POST action 預期 200（登入）→ warning', async () => {
       const input: RedPhaseInput = {
         features: [{
           name: '使用者登入',
@@ -292,7 +292,7 @@ describe('RED Phase Validator', () => {
         entityMapping: ENTITY_MAPPING,
       }
 
-      const result = executeRedPhase(input)
+      const result = await executeRedPhase(input)
       const statusIssues = result.issues.filter(i => i.issueType === 'status_mismatch')
       // POST + 200 is a warning, not error
       expect(statusIssues.every(i => i.severity === 'warning')).toBe(true)
@@ -300,7 +300,7 @@ describe('RED Phase Validator', () => {
   })
 
   describe('Check 7: Entity 對應性', () => {
-    it('Feature 引用不存在的 entity → error', () => {
+    it('Feature 引用不存在的 entity → error', async () => {
       const input: RedPhaseInput = {
         features: [{
           name: '建立訂單',
@@ -321,11 +321,11 @@ describe('RED Phase Validator', () => {
         entityMapping: ENTITY_MAPPING,
       }
 
-      const result = executeRedPhase(input)
+      const result = await executeRedPhase(input)
       expect(result.issues.some(i => i.issueType === 'entity_mismatch')).toBe(true)
     })
 
-    it('Feature 引用存在的 entity → 通過', () => {
+    it('Feature 引用存在的 entity → 通過', async () => {
       const input: RedPhaseInput = {
         features: [{
           name: '建立訂單',
@@ -346,13 +346,13 @@ describe('RED Phase Validator', () => {
         entityMapping: ENTITY_MAPPING,
       }
 
-      const result = executeRedPhase(input)
+      const result = await executeRedPhase(input)
       expect(result.issues.filter(i => i.issueType === 'entity_mismatch')).toHaveLength(0)
     })
   })
 
   describe('多 Feature 批次檢查', () => {
-    it('混合正確和錯誤的 Feature', () => {
+    it('混合正確和錯誤的 Feature', async () => {
       const input: RedPhaseInput = {
         features: [
           {
@@ -382,7 +382,7 @@ describe('RED Phase Validator', () => {
         entityMapping: ENTITY_MAPPING,
       }
 
-      const result = executeRedPhase(input)
+      const result = await executeRedPhase(input)
       expect(result.passed).toBe(false)
       expect(result.checkedFeatures).toBe(2)
       // 第二個 Feature 有 summary_mismatch
@@ -393,7 +393,7 @@ describe('RED Phase Validator', () => {
   })
 
   describe('降級場景', () => {
-    it('actionsYml 解析失敗 → 所有 Feature 報 missing_action', () => {
+    it('actionsYml 解析失敗 → 所有 Feature 報 missing_action', async () => {
       const input: RedPhaseInput = {
         features: [{
           name: '建立訂單',
@@ -405,12 +405,12 @@ describe('RED Phase Validator', () => {
         entityMapping: ENTITY_MAPPING,
       }
 
-      const result = executeRedPhase(input)
+      const result = await executeRedPhase(input)
       expect(result.passed).toBe(false)
       expect(result.issues[0].issueType).toBe('missing_action')
     })
 
-    it('schema 解析失敗 → 跳過 entity/field 檢查，其他正常', () => {
+    it('schema 解析失敗 → 跳過 entity/field 檢查，其他正常', async () => {
       const input: RedPhaseInput = {
         features: [{
           name: '建立訂單',
@@ -431,13 +431,13 @@ describe('RED Phase Validator', () => {
         entityMapping: '',
       }
 
-      const result = executeRedPhase(input)
+      const result = await executeRedPhase(input)
       // schema 解析失敗 → entity check 跳過 → 應該通過（除非有其他問題）
       expect(result.issues.filter(i => i.issueType === 'entity_mismatch')).toHaveLength(0)
     })
 
-    it('空 features → 直接通過', () => {
-      const result = executeRedPhase({
+    it('空 features → 直接通過', async () => {
+      const result = await executeRedPhase({
         features: [],
         actionsYml: 'project:\n  name: test',
         schemaSql: '',
@@ -449,7 +449,7 @@ describe('RED Phase Validator', () => {
   })
 
   describe('效能', () => {
-    it('10 個 Feature 在 100ms 內完成', () => {
+    it('10 個 Feature 在 100ms 內完成', async () => {
       const features = Array.from({ length: 10 }, (_, i) => ({
         name: `建立項目${i}`,
         actionName: `createItem${i}`,
@@ -466,7 +466,7 @@ describe('RED Phase Validator', () => {
         rules: [{ type: '後置（狀態）' }],
       })))
 
-      const result = executeRedPhase({
+      const result = await executeRedPhase({
         features,
         actionsYml,
         schemaSql: SCHEMA_SQL,

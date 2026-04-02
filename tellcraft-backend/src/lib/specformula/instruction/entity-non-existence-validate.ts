@@ -42,14 +42,14 @@ export class EntityNonExistenceValidate {
 
       for (const pkCol of pkColumns) {
         const pkRaw = NamingConverter.getRowValue(row, pkCol);
-        if (!pkRaw || !pkRaw.trim() || pkRaw.trim().startsWith('&')) {
+        if (!pkRaw || !pkRaw.trim() || pkRaw.trim().startsWith('&') || pkRaw.trim().startsWith('<')) {
           hasAllPks = false;
           break;
         }
         const resolvedPk = this.resolver.resolveVariable(pkRaw);
-        // fail-closed：$variable 未解析時不要用字面字串查 DB（會導致 SQL type error）
+        // fail-closed：$variable 或 <executionKey 未解析時不要用字面字串查 DB
         // 注意：只有 $letter 開頭才是 VAR 引用；$digit 開頭是 bcrypt hash（$2b$10$...）
-        if (resolvedPk === null && /^\$[a-zA-Z]/.test(pkRaw.trim())) {
+        if (resolvedPk === null && (/^\$[a-zA-Z]/.test(pkRaw.trim()) || pkRaw.trim().startsWith('<'))) {
           throw new Error(
             `[EntityNonExistenceValidate] VAR 解析失敗：${pkRaw} 無法解析。請確認 Background 或先前步驟已正確宣告此變數。`
           );
@@ -96,7 +96,7 @@ export class EntityNonExistenceValidate {
       const expected = NamingConverter.getRowValue(row, fieldName);
       if (!expected) continue;
       const trim = expected.trim();
-      if (!trim || trim.startsWith('&')) continue;
+      if (!trim || trim.startsWith('&') || trim.startsWith('<')) continue;
 
       const rv = this.resolver.resolveVariable(expected);
       if (rv != null) {

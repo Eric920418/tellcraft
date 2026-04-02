@@ -139,7 +139,7 @@ export async function executeCoderSkill(input: CoderSkillInput): Promise<void> {
   // 5. RED Phase — SDD 靜態規格驗證（Feature ↔ actionsYml ↔ Schema 一致性）
   if (bddSession.features_content && bddSession.features_content.length > 0) {
     try {
-      const redResult = executeRedPhase({
+      const redResult = await executeRedPhase({
         features: bddSession.features_content,
         actionsYml: bddSession.actions_yml_content,
         schemaSql: bddSession.schema_sql_content,

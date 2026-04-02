@@ -86,7 +86,7 @@ pm2 describe tellcraft-backend            # 詳細資訊（記憶體/重啟次�
 | **Coder Phases** | `workers/phase-handlers/coder-phases.ts`（~490 行） | Coder Skill：讀 BDD 產出 → RED Phase（靜態 + Stub 全場景）→ executeCoderPipeline → 保存 project_files(coder) → 合併代碼 + executeCoderTesting（GREEN Phase 紅綠燈） |
 | **Feature Alignment Gate** | `services/feature-alignment-gate.ts`（~500 行） | 阻斷式 Feature 品質閘門：6 項深度對齊檢查（Summary 唯一性/Column Coverage/FK Reference/Response Field 命名/VAR-System/Summary↔actionsYml）+ LLM 自動修復（2 輪），修不好阻塞 pipeline |
 | **Syntax Validator** | `services/syntax-validator.ts`（~180 行） | 共用 esbuild TSX 語法驗證 + Haiku LLM 修復。被 coder-generation（組件改寫）和 uiux-generation（迭代 refineCode）共用 |
-| **RED Phase Validator** | `services/red-phase-validator.ts`（~1050 行） | SDD RED Phase 三層驗證：Layer 1 靜態規格檢查（11 個零 LLM 檢查，~2ms，含 Schema DataTable 深度對齊）+ Layer 2 StubHttpAdapter 全場景驗證（~1-2s）+ Layer 2.5 RoutingStubAdapter 路由匹配驗證（in-process Express，~1-2s）|
+| **RED Phase Validator** | `services/red-phase-validator.ts`（~1050 行） | SDD RED Phase 三層驗證：Layer 1 靜態規格檢查（12 個零 LLM 檢查，~2ms，含 Schema DataTable 深度對齊 + WHEN call table VAR 語法誤用偵測）+ Layer 2 StubHttpAdapter 全場景驗證（~1-2s）+ Layer 2.5 RoutingStubAdapter 路由匹配驗證（in-process Express，~1-2s）|
 | **StubHttpAdapter** | `lib/specformula/http/stub-adapter.ts`（~20 行） | RED Phase Layer 2 用的 HTTP stub，所有路由回 501 |
 | **RoutingStubAdapter** | `lib/specformula/http/routing-stub-adapter.ts`（~65 行） | RED Phase Layer 2.5 用的路由感知 stub，in-process Express 真實路由匹配（匹配→501，不匹配→404），透過 SupertestAdapter 做 in-process HTTP 測試 |
 | **Domain Phases** | `workers/phase-handlers/domain-phases.ts` | 域名全流程：搜尋/確認購買/註冊/自有域名設定/DNS 驗證/完成/失敗 |
@@ -94,7 +94,7 @@ pm2 describe tellcraft-backend            # 詳細資訊（記憶體/重啟次�
 | **FlowState 型別** | `types/flow-state.ts` | FlowState 介面 + 子型別（避免循環 import） |
 | **Classifier** | `services/classifier.ts` | 三層防禦：Prefilter → Meta Intent → Skill 分類 |
 | **UIUX Generation** | `services/uiux-generation.ts` | 設計生成核心（Brief/Variants/Structure/Animation/RWD/Refine） |
-| **Quality Gate** | `services/quality-gate.ts` | A11y/Performance/CodeQuality 靜態檢查 + LLM 自動修復 |
+| **Quality Gate** | `services/quality-gate.ts` | 5 類靜態檢查（A11y per-element + 色彩對比度 + 效能 + 代碼品質 + SVG ID）+ Design Tier 合規（functional 禁漸層/glow/spring）+ Rule-based 確定性修復（5 規則：motion-import/tailwind-v4/focus-visible/form-labels/no-h-screen）+ Haiku LLM fallback |
 | **Coder Generation** | `services/coder-generation.ts`（~800 行） | 後端代碼生成核心：parseActionsYml → generateActionFunction(LLM，Handler 化 prompt + BDD Feature 全文注入 + execution key 注入 + stepSummary 注入) → generateServerActions(零LLM) → identifyMockDataComponents(Haiku LLM batch 識別 + regex fallback) → rewriteComponentForServerActions(LLM，截斷偵測回退，maxTokens 64000) → validateActionResponses(零LLM post-generation 修復) |
 | **Deployer** | `services/deployer.ts` | sanitize → build 驗證 → Vercel 部署 → 回滾（合併 uiux+coder skill_source） |
 | **Iteration Skill** | `services/iteration-skill.ts` | 迭代修改 + 撤銷 + 版本回滾（從 orchestrator 抽出） |
@@ -150,7 +150,7 @@ pm2 describe tellcraft-backend            # 詳細資訊（記憶體/重啟次�
 |-------|------|
 | `bdd-spec` | 需求釐清 + BDD 規格產出（5 階段：Discovery → Clarify → Formulation → Actions Design → ISA Config）|
 | `uiux` | 前端介面設計（3 階段：Design Discovery → Design Lab → Implementation）|
-| `quality-gate` | UIUX RWD 完成後**自動觸發**，critical 問題 LLM 自動修復（最多 3 輪）|
+| `quality-gate` | UIUX/Fast Build/Clone 完成後**自動觸發**，5 類靜態檢查 + Design Tier 合規 + Rule-based/LLM 雙層自動修復（UIUX 3 輪 / Fast Build+Clone 2 輪）|
 | `coder` | 後端代碼生成（Stage A）：BDD actionsYml → lib/actions/*.ts(LLM) + app/actions/*.ts(零LLM) + 改寫 UIUX 組件 mock→Server Action（`uiux_complete` 時「接上資料庫」quickReply 觸發，需有 BDD + Neon DB）|
 | `deployer` | UIUX+Coder 代碼 → Next.js → Vercel 部署（用戶說「部署」觸發） |
 | `iteration` | 迭代修改 + 撤銷上一步 + 版本回滾（`uiux_complete`/`deployer_complete` 自動路由） |
@@ -349,7 +349,7 @@ cd tellcraft-backend && pnpm test -- --grep "hasDeployIntent"
 - BDD 規格驗證腳本（lint-gherkin-format + validate-feature）
 - TypeScript 型別檢查（`pnpm typecheck`）
 - ESLint（`pnpm lint`）
-- Quality Gate 靜態檢查（A11y/Performance/CodeQuality）
+- Quality Gate 靜態檢查（A11y per-element/色彩對比度/Performance/CodeQuality/SVG ID/Design Tier 合規）+ Rule-based 5 規則 + Haiku LLM fallback
 
 ## BDD 規格格式（sdd.os ISA SpecFormula 標準）
 
@@ -404,7 +404,8 @@ Feature 註解：`# Action: actionName` + `# [METHOD] /path` + `# Summary: xxx`
 - **Feature 驗證腳本用 `tsx` 不是 `ts-node`**：`feature-validation.ts` 的 `runScript()` 用 `npx tsx`。腳本解析失敗時視為通過（不觸發無效 LLM 修復循環），stderr/exitCode 會完整記錄供除錯
 - **Feature Dry-Run（SDD RED phase Layer 2）**：`feature-dry-run.ts` 在 BDD spec_completed 之前、Neon provisioning 之後，用真實 Neon DB 執行 Feature 的 entity_setup 步驟。驗證 entity/column/VAR 格式對真實 DB 是否正確。失敗觸發 LLM 修復（最多 2 輪）。跳過 api_call/response_validate（Coder 還沒生成後端）。復用 specformula-runner 的容錯修正層（fixDataTableBySchema/fillMissingNotNullColumns/ensureFkReferencesExist）
 - **Feature Alignment Gate（阻斷式閘門）**：`feature-alignment-gate.ts` 在 RED Phase 之後、`executeCoderPipeline()` 之前執行。6 項深度對齊檢查（Summary 唯一性/Entity Column Coverage/FK Reference 完整性/Response Field 命名/VAR-System 對齊/Summary↔actionsYml 匹配）+ LLM 自動修復（呼叫 `fixMultipleFeatures()`，最多 2 輪）。修不好則**阻塞 pipeline**（回退到 `uiux_complete`，不像 RED Phase 的 advisory 模式）。修復後的 Features 自動更新 DB `bdd_sessions.features_content`
-- **RED Phase 三層驗證（SDD RED phase）**：`red-phase-validator.ts` 在 Coder 代碼生成前執行三層驗證。**Layer 1 靜態檢查**（~2ms）：11 個零 LLM 檢查（Action 存在性/HTTP Method/Path/Summary 一致性/Response 欄位/Status Code/Entity/Step 可解析性/**DataTable Column Coverage/NOT NULL Completeness/FK Reference Validity**）。Checks 9-11 從 Feature 的 entity_setup DataTable 提取 headers，與 Schema DDL 做深度交叉驗證（欄位是否存在、NOT NULL 是否都提供、FK 引用表是否存在）。**Layer 2 Stub 全場景**（~1-2s）：用 `StubHttpAdapter`（回 501）+ 真實 Neon DB 跑完整 SpecFormula 場景。區分「預期 RED」和「非預期失敗」。**Layer 2.5 Routing 驗證**（~1-2s）：用 `RoutingStubAdapter`（in-process Express，匹配路由→501，不匹配→404）+ 真實 Neon DB，驗證 Feature summary 能正確匹配 API 路由。Layer 2/2.5 需要 `open_api_spec_content` + `isa_config_content` + `neon_connection_string`，缺少任一則降級跳過。三層都不阻塞 Pipeline
+- **RED Phase 三層驗證（SDD RED phase）**：`red-phase-validator.ts` 在 Coder 代碼生成前執行三層驗證。**Layer 1 靜態檢查**（~2ms）：12 個零 LLM 檢查（Action 存在性/HTTP Method/Path/Summary 一致性/Response 欄位/Status Code/Entity/Step 可解析性/**DataTable Column Coverage/NOT NULL Completeness/FK Reference Validity/WHEN call table VAR 語法誤用**）。Check 12 偵測 LLM 在 WHEN call table headers 中誤用 `>/<` 前綴（正確應為 `id`/`$variable`），此錯誤會導致 request body 缺欄位。Checks 9-11 從 Feature 的 entity_setup DataTable 提取 headers，與 Schema DDL 做深度交叉驗證（欄位是否存在、NOT NULL 是否都提供、FK 引用表是否存在）。**Layer 2 Stub 全場景**（~1-2s）：用 `StubHttpAdapter`（回 501）+ 真實 Neon DB 跑完整 SpecFormula 場景。區分「預期 RED」和「非預期失敗」。**Layer 2.5 Routing 驗證**（~1-2s）：用 `RoutingStubAdapter`（in-process Express，匹配路由→501，不匹配→404）+ 真實 Neon DB，驗證 Feature summary 能正確匹配 API 路由。Layer 2/2.5 需要 `open_api_spec_content` + `isa_config_content` + `neon_connection_string`，缺少任一則降級跳過。三層都不阻塞 Pipeline
+- **SpecFormula entity_validate JSONB/Array 比較**：`entity-validate.ts:valuesEqual()` 支援 JSON 深度比較（string ↔ parsed JS array/object），解決 pg 回傳 JSONB 為 JS array 而 BDD 預期值為 JSON string 的比較失敗。同時 `resolveValue()` 支援 `<executionKey` 從 ScenarioContext 查找，`findActual()`/`assertRowMatches()` 跳過 `<` 值（與 `data-table-response-validate` 對齊）
 - **Stage B Phase 2 多輪回歸修復**：`runRedGreenCycle` 的 Phase 2（全量回歸）最多 2 輪迴圈（`maxRegressionRounds`）。scenario-level 智能跳過：`featureName::scenarioName` 集合與上輪完全相同則停止。Phase 2 crash 不重試
 - **`_stepSummary` dispatch 用 `===` 精確匹配**：`composeActionFunction` 生成 `op === 'xxx'` 而非 `op.includes('xxx')`，徹底消除子字串碰撞。所有 prompt（BASE_PROMPT、FIX_SYSTEM_PROMPT、前端改寫 prompt）同步更新。`parseActionBranches` 和 `validateAndFixActionCalls` 向後相容兩種格式
 - **Slot extraction 重試**：`extractSlots()` 第一次 JSON parse/Zod 驗證失敗後，注入錯誤訊息 + 上次輸出做第二次嘗試。大幅減少 template → free-form LLM fallback（非確定性代碼降級）

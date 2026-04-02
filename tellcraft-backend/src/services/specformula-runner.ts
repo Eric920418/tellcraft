@@ -5,6 +5,7 @@
 
 import * as yaml from 'js-yaml'
 import * as fs from 'fs'
+import * as fsPromises from 'fs/promises'
 import * as path from 'path'
 import * as os from 'os'
 import { createHash } from 'crypto'
@@ -1577,7 +1578,7 @@ export async function runAllFeatures(input: {
   const apiSpec: ApiSpec = apiSpecReader.readFromString(input.openApiSpec)
 
   // 3. 解析 DDL → DatabaseSchema
-  const schemas = parseSchemasFromString(input.schemaSql, input.entityMapping)
+  const schemas = await parseSchemasFromString(input.schemaSql, input.entityMapping)
 
   // 4. 建立 InstructionSet
   const scenarioContext = new ScenarioContext()
@@ -1698,12 +1699,12 @@ export async function runAllFeatures(input: {
 // DDL 字串解析（不讀 filesystem）
 // ============================================================
 
-export function parseSchemasFromString(schemaSql: string, entityMappingYml: string): DatabaseSchema[] {
+export async function parseSchemasFromString(schemaSql: string, entityMappingYml: string): Promise<DatabaseSchema[]> {
   // 寫入臨時目錄供 EntityDdlReader 使用
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'specformula-ddl-'))
+  const tmpDir = await fsPromises.mkdtemp(path.join(os.tmpdir(), 'specformula-ddl-'))
   try {
-    fs.writeFileSync(path.join(tmpDir, 'schema.sql'), schemaSql, 'utf-8')
-    fs.writeFileSync(path.join(tmpDir, 'entity_to_table_mapping.yml'), entityMappingYml, 'utf-8')
+    await fsPromises.writeFile(path.join(tmpDir, 'schema.sql'), schemaSql, 'utf-8')
+    await fsPromises.writeFile(path.join(tmpDir, 'entity_to_table_mapping.yml'), entityMappingYml, 'utf-8')
 
     const reader = new EntityDdlReader({
       name: 'default',
@@ -1713,12 +1714,8 @@ export function parseSchemasFromString(schemaSql: string, entityMappingYml: stri
     })
     return [reader.read()]
   } finally {
-    // 清理
-    try {
-      fs.rmSync(tmpDir, { recursive: true, force: true })
-    } catch {
-      // non-fatal
-    }
+    // 清理（fire-and-forget，不阻塞 event loop）
+    fsPromises.rm(tmpDir, { recursive: true, force: true }).catch(() => {})
   }
 }
 
@@ -1831,15 +1828,15 @@ interface TestServer {
  * /tmp 目錄只 ~20MB，啟動 ~3s
  */
 export async function startTestServer(config: TestServerConfig): Promise<TestServer> {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'tellcraft-test-'))
+  const tmpDir = await fsPromises.mkdtemp(path.join(os.tmpdir(), 'tellcraft-test-'))
   logger.info({ tmpDir }, '建立測試目錄')
 
   try {
     // 1. 寫入 action 檔案
     for (const file of config.backendFiles) {
       const filePath = path.join(tmpDir, file.path)
-      fs.mkdirSync(path.dirname(filePath), { recursive: true })
-      fs.writeFileSync(filePath, file.content, 'utf-8')
+      await fsPromises.mkdir(path.dirname(filePath), { recursive: true })
+      await fsPromises.writeFile(filePath, file.content, 'utf-8')
     }
 
     // 2. 覆寫 lib/db.ts — 用 pg Pool 取代 neon tagged template
@@ -1910,15 +1907,15 @@ sql.begin = async function beginTransaction<T = any>(callback: (tx: typeof sql) 
 export default sql
 `
     const dbFilePath = path.join(tmpDir, 'lib/db.ts')
-    fs.mkdirSync(path.dirname(dbFilePath), { recursive: true })
-    fs.writeFileSync(dbFilePath, pgDbContent, 'utf-8')
+    await fsPromises.mkdir(path.dirname(dbFilePath), { recursive: true })
+    await fsPromises.writeFile(dbFilePath, pgDbContent, 'utf-8')
     logger.info('lib/db.ts 已覆寫為 pg Pool 版本')
 
     // 2b. 修復 CJS 模組 import（bcrypt/bcryptjs/jsonwebtoken 在 "type":"module" 下不支持 ESM import）
     for (const file of config.backendFiles) {
       if (!file.path.startsWith('lib/actions/')) continue
       const filePath = path.join(tmpDir, file.path)
-      let content = fs.readFileSync(filePath, 'utf-8')
+      let content = await fsPromises.readFile(filePath, 'utf-8')
       let changed = false
 
       // bcrypt / bcryptjs: CJS module → 統一用 createRequire + bcryptjs（純 JS，無需 native build）
@@ -1974,16 +1971,16 @@ export default sql
       }
 
       if (changed) {
-        fs.writeFileSync(filePath, content, 'utf-8')
+        await fsPromises.writeFile(filePath, content, 'utf-8')
       }
     }
 
     // 3. 生成 test-server.ts
     const testServerCode = generateTestServerCode(config.actionsYml, config.backendFiles)
-    fs.writeFileSync(path.join(tmpDir, 'test-server.ts'), testServerCode, 'utf-8')
+    await fsPromises.writeFile(path.join(tmpDir, 'test-server.ts'), testServerCode, 'utf-8')
 
     // 3. tsconfig.json（解析 @/ path alias）
-    fs.writeFileSync(path.join(tmpDir, 'tsconfig.json'), JSON.stringify({
+    await fsPromises.writeFile(path.join(tmpDir, 'tsconfig.json'), JSON.stringify({
       compilerOptions: {
         baseUrl: '.',
         paths: { '@/*': ['./*'] },
@@ -1997,7 +1994,7 @@ export default sql
 
     // 4. package.json（最小依賴 + 掃描 action import 動態加入）
     const extraDeps = detectExtraDependencies(config.backendFiles)
-    fs.writeFileSync(path.join(tmpDir, 'package.json'), JSON.stringify({
+    await fsPromises.writeFile(path.join(tmpDir, 'package.json'), JSON.stringify({
       name: 'tellcraft-test',
       private: true,
       type: 'module',
@@ -2014,7 +2011,7 @@ export default sql
     }, null, 2), 'utf-8')
 
     // 5. .env
-    fs.writeFileSync(path.join(tmpDir, '.env'), `DATABASE_URL=${config.neonConnectionString}\n`, 'utf-8')
+    await fsPromises.writeFile(path.join(tmpDir, '.env'), `DATABASE_URL=${config.neonConnectionString}\n`, 'utf-8')
 
     // 6. pnpm install
     logger.info('pnpm install...')
@@ -2059,12 +2056,8 @@ export default sql
       },
     }
   } catch (err) {
-    // 清理失敗的臨時目錄
-    try {
-      fs.rmSync(tmpDir, { recursive: true, force: true })
-    } catch {
-      // non-fatal
-    }
+    // 清理失敗的臨時目錄（fire-and-forget，不阻塞 event loop）
+    fsPromises.rm(tmpDir, { recursive: true, force: true }).catch(() => {})
     throw err
   }
 }
@@ -2079,11 +2072,9 @@ async function stopTestServer(proc: ChildProcess, tmpDir: string): Promise<void>
     // non-fatal
   }
 
-  try {
-    fs.rmSync(tmpDir, { recursive: true, force: true })
-  } catch {
-    // non-fatal
-  }
+  // fire-and-forget 刪除臨時目錄（含 node_modules 上萬個檔案）
+  // 不用 await — 同步 rmSync 是 event loop 阻塞的最大元兇
+  fsPromises.rm(tmpDir, { recursive: true, force: true }).catch(() => {})
 }
 
 // ============================================================

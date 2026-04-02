@@ -374,6 +374,16 @@ export class ISAFeatureArgumentResolver {
       isQuoted = true;
     }
 
+    // <executionKey — 從 context 查找（LLM 常在 entity_validate 中用 <id> 代替 $id）
+    if (!isQuoted && unquoted.startsWith('<')) {
+      const keyName = unquoted.substring(1);
+      if (keyName) {
+        const resolved = this.getContext().get(keyName);
+        if (resolved !== null && resolved !== undefined) return resolved;
+      }
+      return null; // fail-closed：未找到的 <key 返回 null，避免字面字串造成 SQL type error
+    }
+
     // String interpolation: ${variable}
     if (!isQuoted && unquoted.includes('${')) {
       return this.interpolateString(unquoted);

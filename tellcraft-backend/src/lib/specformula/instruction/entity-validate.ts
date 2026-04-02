@@ -87,14 +87,14 @@ export class EntityValidate {
       if (pkRaw === null) {
         pkRaw = row[`>${pkCol}`] ?? null;
       }
-      if (!pkRaw || !pkRaw.trim() || pkRaw.trim().startsWith('&')) {
+      if (!pkRaw || !pkRaw.trim() || pkRaw.trim().startsWith('&') || pkRaw.trim().startsWith('<')) {
         hasAllPks = false;
         break;
       }
       const resolvedPk = this.resolver.resolveVariable(pkRaw);
-      // fail-closed：$variable 未解析（返回 null）時不要用字面字串查 DB
+      // fail-closed：$variable 或 <executionKey 未解析（返回 null）時不要用字面字串查 DB
       // 注意：只有 $letter 開頭才是 VAR 引用；$digit 開頭是 bcrypt hash（$2b$10$...）
-      if (resolvedPk === null && /^\$[a-zA-Z]/.test(pkRaw.trim())) {
+      if (resolvedPk === null && (/^\$[a-zA-Z]/.test(pkRaw.trim()) || pkRaw.trim().startsWith('<'))) {
         hasAllPks = false;
         break;
       }
@@ -121,7 +121,7 @@ export class EntityValidate {
       const expected = NamingConverter.getRowValue(row, fieldName);
       if (!expected) continue;
       const trim = expected.trim();
-      if (!trim || trim.startsWith('&')) continue;
+      if (!trim || trim.startsWith('&') || trim.startsWith('<')) continue;
       // 跳過特殊語義值（不能當查詢條件）
       if (trim === 'null' || trim === '$null' || trim === '$notnull' || trim === '&isNotNull' || trim === '&isNull') continue;
 
@@ -275,8 +275,10 @@ export class EntityValidate {
       if (!fieldName || !fieldName.trim()) continue;
       if (fieldName.startsWith('>') || fieldName.startsWith('<')) continue;
       if (expected === null || expected === undefined) continue;
-      // 空字串 / "null" 字面值 → 驗證 actual 是 null（DB NULL 語義）
       const trimExpected = expected.trim();
+      // 跳過 <executionKey 值（capture 指令，不是比較值）— 與 data-table-response-validate:136 對齊
+      if (trimExpected.startsWith('<')) continue;
+      // 空字串 / "null" 字面值 → 驗證 actual 是 null（DB NULL 語義）
       if (trimExpected === '' || trimExpected === 'null') {
         const actualValue = this.getActualValue(actual, fieldName);
         if (actualValue !== null && actualValue !== undefined && actualValue !== '') {
@@ -326,6 +328,20 @@ export class EntityValidate {
   private valuesEqual(expected: unknown, actual: unknown): boolean {
     if (expected === null || expected === undefined) return actual === null || actual === undefined;
     if (actual === null || actual === undefined) return false;
+
+    // JSON/Array 比較：string ↔ parsed JS value（JSONB 欄位 pg 回傳 JS array/object）
+    if (typeof expected === 'string' && (Array.isArray(actual) || (typeof actual === 'object' && actual !== null))) {
+      try {
+        const parsed = JSON.parse(expected);
+        return JSON.stringify(parsed) === JSON.stringify(actual);
+      } catch { /* fall through to default comparison */ }
+    }
+    if ((Array.isArray(expected) || (typeof expected === 'object' && expected !== null && !(expected instanceof Date))) && typeof actual === 'string') {
+      try {
+        const parsed = JSON.parse(actual);
+        return JSON.stringify(expected) === JSON.stringify(parsed);
+      } catch { /* fall through */ }
+    }
 
     // Date comparison (to-second precision)
     if (expected instanceof Date && actual instanceof Date) {

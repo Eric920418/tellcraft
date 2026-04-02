@@ -4,7 +4,7 @@
  * 在 Coder 代碼生成前執行，提前抓出 Feature ↔ actionsYml ↔ Schema 的不一致。
  * 零 LLM 零 IO（純靜態分析），~2 秒完成。
  *
- * 11 個檢查：
+ * 12 個檢查：
  *   1. Action 存在性
  *   2. HTTP Method 一致性
  *   3. Path 一致性
@@ -16,6 +16,7 @@
  *   9. DataTable Column Coverage（entity_setup 的 DataTable 欄位是否都能映射到 schema column）
  *  10. NOT NULL Column Completeness（NOT NULL 且無 DEFAULT 的 column 是否在 DataTable 中提供）
  *  11. FK Reference Table Validity（entity_setup 的 FK 欄位引用的表是否存在）
+ *  12. VAR in Call Table（WHEN call table headers 不應含 >/<  前綴）
  */
 
 import * as yaml from 'js-yaml'
@@ -52,6 +53,7 @@ export type RedPhaseIssueType =
   | 'column_not_found'
   | 'not_null_missing'
   | 'fk_table_not_found'
+  | 'var_in_call_table'
 
 export interface RedPhaseIssue {
   featureName: string
@@ -313,6 +315,38 @@ export function extractEntitySetupSteps(content: string): EntitySetupStep[] {
 }
 
 /**
+ * 從 Feature 原始文本提取 WHEN api_call 步驟的 call table headers（含原始前綴）。
+ * 用於 Check 12 偵測 >/<  VAR 語法誤用。
+ */
+function extractApiCallTableHeaders(content: string): Array<{ summary: string; headers: string[] }> {
+  const results: Array<{ summary: string; headers: string[] }> = []
+  const lines = content.split('\n')
+
+  for (let i = 0; i < lines.length; i++) {
+    const trimmed = lines[i].trim()
+    // 匹配 api_call 步驟：(UID=...) summary, call table: 或 summary, call table:
+    const match = trimmed.match(/(?:When|And|But)\s+(?:\(.*?\)\s+)?(.+?)\s*[,，]\s*call\s+table:/i)
+    if (!match) continue
+
+    const summary = match[1].trim()
+    // 收集 DataTable（下一行是 | header1 | header2 | ...）
+    for (let j = i + 1; j < lines.length; j++) {
+      const tl = lines[j].trim()
+      if (tl.startsWith('|')) {
+        // 第一行是 headers — 保留原始前綴
+        const rawHeaders = tl.split('|').map(c => c.trim()).filter(Boolean)
+        results.push({ summary, headers: rawHeaders })
+        break
+      } else {
+        break
+      }
+    }
+  }
+
+  return results
+}
+
+/**
  * 查找 column name 在 table 的 columns 中是否存在（支援 camelCase ↔ snake_case）
  */
 function findColumnInTable(columnName: string, table: { columns: Array<{ name: string }> }): boolean {
@@ -327,10 +361,10 @@ function findColumnInTable(columnName: string, table: { columns: Array<{ name: s
 }
 
 // ============================================================
-// 核心：11 個靜態檢查
+// 核心：12 個靜態檢查
 // ============================================================
 
-export function executeRedPhase(input: RedPhaseInput): RedPhaseResult {
+export async function executeRedPhase(input: RedPhaseInput): Promise<RedPhaseResult> {
   const start = Date.now()
   const issues: RedPhaseIssue[] = []
 
@@ -348,7 +382,7 @@ export function executeRedPhase(input: RedPhaseInput): RedPhaseResult {
   let allTableNames = new Set<string>()
   let allColumns = new Set<string>()
   try {
-    schemas = parseSchemasFromString(input.schemaSql, input.entityMapping)
+    schemas = await parseSchemasFromString(input.schemaSql, input.entityMapping)
     for (const schema of schemas) {
       for (const [entityName, table] of schema.getTablesByEntityName()) {
         allTableNames.add(entityName.toLowerCase())
@@ -514,6 +548,24 @@ export function executeRedPhase(input: RedPhaseInput): RedPhaseResult {
           description: `步驟 "${stepText.substring(0, 60)}..." 無法匹配任何 ISA instruction 格式`,
           suggestion: `確認步驟格式是否符合 ISA SpecFormula 標準（準備一個{entity}/操作失敗/(UID=...)...call table: 等）`,
         })
+      }
+    }
+
+    // ---- Check 12: WHEN call table 中的 >/<  VAR 語法誤用 ----
+    // LLM 常在 WHEN api_call 的 call table 中使用 >id/<id>，正確應為 id/$variable
+    {
+      const callTableSteps = extractApiCallTableHeaders(feature.content)
+      for (const step of callTableSteps) {
+        const badHeaders = step.headers.filter(h => h.startsWith('>') || h.startsWith('<'))
+        if (badHeaders.length > 0) {
+          issues.push({
+            featureName: displayName,
+            issueType: 'var_in_call_table',
+            severity: 'error',
+            description: `WHEN call table 的 headers 包含 VAR 語法 [${badHeaders.join(', ')}]，這會導致欄位被跳過不發送。正確用法：request 參數用 id/$variable，>/<  僅用於 THEN 回應擷取`,
+            suggestion: `將 ${badHeaders.map(h => `"${h}" → "${h.substring(1)}"`).join(', ')} 並用 $variable 引用已存變數值`,
+          })
+        }
       }
     }
 

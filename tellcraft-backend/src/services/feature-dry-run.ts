@@ -97,7 +97,7 @@ export async function runFeatureDryRun(input: DryRunInput): Promise<DryRunResult
 
   try {
     // 1. 解析 schema
-    const schemas = parseSchemasFromString(input.schemaSql, input.entityMapping)
+    const schemas = await parseSchemasFromString(input.schemaSql, input.entityMapping)
 
     // 2. 逐 Feature 驗證
     for (const feature of input.features) {

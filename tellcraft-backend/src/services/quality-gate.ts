@@ -174,18 +174,28 @@ function checkAccessibility(code: GeneratedCode): QualityIssue[] {
       }
     }
 
-    // 檢查互動元素是否有 focus-visible
-    const hasInteractive = content.includes('<button') || content.includes('<a ')
-    if (hasInteractive && !content.includes('focus-visible') && !content.includes('focus:')) {
-      issues.push({
-        id: `a11y-${++issueCounter}`,
-        category: 'a11y',
-        severity: 'critical',
-        rule: 'focus-visible',
-        message: '互動元素缺少可見的 focus 狀態',
-        file: file.path,
-        suggestion: '加入 focus-visible:ring-2 focus-visible:ring-offset-2',
-      })
+    // 檢查每個互動元素是否有 focus-visible（per-element，非 per-file）
+    const tagStartRegex = /<(button|a)\b/gi
+    let startMatch
+    while ((startMatch = tagStartRegex.exec(content)) !== null) {
+      const startIdx = startMatch.index
+      const closeIdx = content.indexOf('>', startIdx)
+      if (closeIdx === -1) continue
+      const fullTag = content.substring(startIdx, closeIdx + 1)
+      const tagLine = content.substring(0, startIdx).split('\n').length
+
+      if (!fullTag.includes('focus-visible') && !fullTag.includes('focus:')) {
+        issues.push({
+          id: `a11y-${++issueCounter}`,
+          category: 'a11y',
+          severity: 'critical',
+          rule: 'focus-visible',
+          message: `互動元素 <${startMatch[1]}> 缺少可見的 focus 狀態`,
+          file: file.path,
+          line: tagLine,
+          suggestion: '加入 focus-visible:ring-2 focus-visible:ring-offset-2',
+        })
+      }
     }
   }
 
@@ -258,8 +268,9 @@ function checkPerformance(code: GeneratedCode): QualityIssue[] {
       })
     }
 
-    // 檢查動畫時長過長（> 500ms）
-    issues.push(...scanLines(content, file.path, /duration[:-]\[?(\d+)ms/i, (match, line) => {
+    // 檢查動畫時長過長（> 500ms）— 三組 pattern
+    // Pattern 1: 自定義 Tailwind — duration-[800ms] 或 duration:[800ms]
+    issues.push(...scanLines(content, file.path, /duration[:-]\[(\d+)ms\]/i, (match, line) => {
       const duration = parseInt(match[1])
       if (duration > 500) {
         return {
@@ -275,6 +286,43 @@ function checkPerformance(code: GeneratedCode): QualityIssue[] {
       }
       return null
     }))
+
+    // Pattern 2: 標準 Tailwind class — duration-700
+    issues.push(...scanLines(content, file.path, /\bduration-(\d+)\b(?!ms])/i, (match, line) => {
+      const duration = parseInt(match[1])
+      if (duration > 500) {
+        return {
+          id: `perf-${++issueCounter}`,
+          category: 'performance',
+          severity: 'warning',
+          rule: 'animation-duration',
+          message: `動畫時長 ${duration}ms 過長（建議 ≤ 500ms）`,
+          file: file.path,
+          line,
+          suggestion: '縮短至 200-300ms',
+        }
+      }
+      return null
+    }))
+
+    // Pattern 3: motion/react — duration: 0.8（秒）
+    issues.push(...scanLines(content, file.path, /duration:\s*([\d.]+)/, (match, line) => {
+      const seconds = parseFloat(match[1])
+      const durationMs = Math.round(seconds * 1000)
+      if (durationMs > 500) {
+        return {
+          id: `perf-${++issueCounter}`,
+          category: 'performance',
+          severity: 'warning',
+          rule: 'animation-duration',
+          message: `動畫時長 ${durationMs}ms (${seconds}s) 過長（建議 ≤ 500ms）`,
+          file: file.path,
+          line,
+          suggestion: '縮短至 0.2-0.3s',
+        }
+      }
+      return null
+    }))
   }
 
   return issues
@@ -284,7 +332,7 @@ function checkPerformance(code: GeneratedCode): QualityIssue[] {
 // Checker 3: Code Quality
 // ============================================================
 
-function checkCodeQuality(code: GeneratedCode, _designTier?: DesignTier): QualityIssue[] {
+function checkCodeQuality(code: GeneratedCode, designTier?: DesignTier): QualityIssue[] {
   const issues: QualityIssue[] = []
   const allFiles = [...code.pages, ...code.components]
   let issueCounter = 0
@@ -327,7 +375,7 @@ function checkCodeQuality(code: GeneratedCode, _designTier?: DesignTier): Qualit
       return {
         id: `cq-${++issueCounter}`,
         category: 'code_quality',
-        severity: 'warning',
+        severity: 'critical',
         rule: 'no-h-screen',
         message: '使用了 h-screen，在移動端有地址欄遮擋問題',
         file: file.path,
@@ -382,6 +430,57 @@ function checkCodeQuality(code: GeneratedCode, _designTier?: DesignTier): Qualit
       }
       return null
     }))
+  }
+
+  // Functional tier 特定檢查（warning，不觸發 autofix）
+  if (designTier === 'functional') {
+    for (const file of allFiles) {
+      const content = file.content
+
+      // 檢測漸層（bg-gradient-to-*, from-*-NNN, via-*-NNN）
+      issues.push(...scanLines(content, file.path, /\b(bg-gradient-to-\w+|from-\w+-\d+|via-\w+-\d+)\b/, (match, line) => {
+        return {
+          id: `cq-${++issueCounter}`,
+          category: 'code_quality',
+          severity: 'warning',
+          rule: 'functional-no-gradient',
+          message: `Functional tier 不建議使用漸層（${match[1]}）`,
+          file: file.path,
+          line,
+          suggestion: '使用純色背景，如 bg-slate-50 或 bg-surface-1',
+        }
+      }))
+
+      // 檢測 glow 效果
+      issues.push(...scanLines(content, file.path, /shadow-\[0[_ ]0[_ ][^\]]*\]|drop-shadow-\w+/i, (match, line) => {
+        return {
+          id: `cq-${++issueCounter}`,
+          category: 'code_quality',
+          severity: 'warning',
+          rule: 'functional-no-glow',
+          message: 'Functional tier 不建議使用 glow/drop-shadow 效果',
+          file: file.path,
+          line,
+          suggestion: '移除 glow 效果，使用標準 shadow-sm / shadow-md',
+        }
+      }))
+
+      // 檢測 spring/bounce 動畫（跳過註釋行）
+      issues.push(...scanLines(content, file.path, /\b(spring|bounce|stiffness|damping)\b/i, (match, line) => {
+        const trimmedLine = content.split('\n')[line - 1]?.trimStart()
+        if (trimmedLine?.startsWith('//') || trimmedLine?.startsWith('*')) return null
+        return {
+          id: `cq-${++issueCounter}`,
+          category: 'code_quality',
+          severity: 'warning',
+          rule: 'functional-no-spring',
+          message: `Functional tier 不建議使用 spring/bounce 動畫（${match[1]}）`,
+          file: file.path,
+          line,
+          suggestion: '使用 ease-out 過渡，時長 150-300ms',
+        }
+      }))
+    }
   }
 
   // 檢查 styles 中的問題
@@ -497,7 +596,7 @@ function checkIdUniqueness(code: GeneratedCode): QualityIssue[] {
   let issueCounter = 0
   const SVG_DEFS_RE = /<(linearGradient|radialGradient|clipPath|mask|filter|pattern)\s[^>]*id=["']([^"']+)["']/gi
 
-  for (const file of code.components) {
+  for (const file of [...code.pages, ...code.components]) {
     SVG_DEFS_RE.lastIndex = 0
     let m
     while ((m = SVG_DEFS_RE.exec(file.content)) !== null) {
@@ -618,6 +717,8 @@ function applyRuleBasedFixToFile(content: string, issue: QualityIssue): string {
         }
         return match
       })
+    case 'no-h-screen':
+      return content.replace(/\bmin-h-screen\b/g, 'min-h-dvh').replace(/\bh-screen\b/g, 'h-dvh')
     default:
       return content
   }

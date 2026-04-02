@@ -189,7 +189,7 @@ function extractVarDeclarationsAndReferences(content: string): {
 // 6 項對齊檢查
 // ============================================================
 
-function runAlignmentChecks(input: AlignmentGateInput): AlignmentIssue[] {
+async function runAlignmentChecks(input: AlignmentGateInput): Promise<AlignmentIssue[]> {
   const issues: AlignmentIssue[] = []
   const actionsMeta = parseActionsMeta(input.actionsYml)
   const actionsByName = new Map(actionsMeta.map(a => [a.name, a]))
@@ -197,7 +197,7 @@ function runAlignmentChecks(input: AlignmentGateInput): AlignmentIssue[] {
   // 解析 Schema
   let schemas: DatabaseSchema[] = []
   try {
-    schemas = parseSchemasFromString(input.schemaSql, input.entityMapping)
+    schemas = await parseSchemasFromString(input.schemaSql, input.entityMapping)
   } catch (e) {
     logger.warn({ error: e }, 'Schema 解析失敗，部分對齊檢查將跳過')
   }
@@ -586,7 +586,7 @@ export async function runFeatureAlignmentGate(input: AlignmentGateInput): Promis
 
   for (let round = 0; round < MAX_FIX_ROUNDS; round++) {
     // 執行檢查
-    const issues = runAlignmentChecks({ ...input, features: currentFeatures })
+    const issues = await runAlignmentChecks({ ...input, features: currentFeatures })
     const errorIssues = issues.filter(i => i.severity === 'error')
 
     logger.info({
@@ -651,7 +651,7 @@ export async function runFeatureAlignmentGate(input: AlignmentGateInput): Promis
 
     currentFeatures = fixedFeatures
     // 重新檢查看修了多少
-    const postFixIssues = runAlignmentChecks({ ...input, features: currentFeatures })
+    const postFixIssues = await runAlignmentChecks({ ...input, features: currentFeatures })
     const postFixErrors = postFixIssues.filter(i => i.severity === 'error')
     const fixedThisRound = beforeCount - postFixErrors.length
     totalFixedCount += Math.max(0, fixedThisRound)
@@ -678,7 +678,7 @@ export async function runFeatureAlignmentGate(input: AlignmentGateInput): Promis
   }
 
   // 最終檢查
-  const finalIssues = runAlignmentChecks({ ...input, features: currentFeatures })
+  const finalIssues = await runAlignmentChecks({ ...input, features: currentFeatures })
   const finalErrors = finalIssues.filter(i => i.severity === 'error')
 
   if (finalErrors.length === 0) {

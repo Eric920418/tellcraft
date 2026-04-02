@@ -231,10 +231,10 @@ export function createOrchestratorWorker(
     {
       connection: workerConnection,
       concurrency: getEnv().WORKER_CONCURRENCY,
-      // Stalled job 保護（LLM 任務 event loop jitter 安全餘量）
-      lockDuration: 120_000,      // 2min（預設 30s）
-      stalledInterval: 120_000,   // 每 2min 檢查（配合 FlowState recovery 頻率）
-      maxStalledCount: 2,         // 允許 stall 2 次再 fail（預設 1）
+      // Stalled job 保護（Coder Testing + Deploy 長任務安全餘量）
+      lockDuration: 300_000,      // 5min（預設 30s，specformula sync I/O 需要大窗口）
+      stalledInterval: 300_000,   // 每 5min 檢查（配合 FlowState recovery 頻率）
+      maxStalledCount: 3,         // 允許 stall 3 次再 fail（預設 1）
     }
   )
 

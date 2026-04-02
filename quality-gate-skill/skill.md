@@ -4,16 +4,16 @@
 
 ```yaml
 name: quality-gate
-version: 1.0.0
+version: 2.0.0
 description: |
-  獨立品質檢查 Skill，自動在 UIUX/Coder Skill 完成後觸發。
+  獨立品質檢查 Skill，自動在 UIUX/Fast Build/Clone Skill 完成後觸發。
 
   檢查類別：
-  1. Accessibility (A11y) - WCAG 2.2 AA 無障礙標準
+  1. Accessibility (A11y) - WCAG 2.2 AA 無障礙標準 + 色彩對比度
   2. Performance - 效能優化檢查
-  3. SEO - 搜尋引擎優化
+  3. Code Quality - 代碼品質 + Design Tier 合規
 
-  輸出品質報告（JSON），供 universal-fixer Skill 讀取並修復。
+  發現 critical 問題時自動修復（Rule-based → LLM fallback，最多 3 輪）。
 
 author: Tellcraft Team
 output_format:
@@ -25,11 +25,9 @@ output_format:
 ## Trigger Conditions（觸發條件）
 
 **自動觸發**（不需用戶指令）：
-- UIUX Skill Phase 3 Implementation 完成後
-- Coder Skill 完成後（TODO）
-
-**手動觸發**（未來可支援）：
-- 「檢查品質」、「quality check」、「run quality gate」
+- UIUX Skill Phase 3 Implementation 完成後（3 輪 autofix）
+- Fast Build Skill 生成完成後（2 輪 autofix）
+- Clone Skill 生成完成後（2 輪 autofix）
 
 ---
 
@@ -37,12 +35,14 @@ output_format:
 
 ### 解決的問題
 - 檢查程式碼的無障礙性（WCAG 2.2 AA）
-- 檢查效能相關問題（動畫、layout thrashing）
-- 檢查 SEO 相關問題（metadata、semantic HTML）
-- 生成結構化品質報告
+- 檢查色彩對比度（亮底白字 + Dark Mood 深色容器）
+- 檢查效能相關問題（動畫屬性、時長、reduced-motion）
+- 檢查代碼品質（動畫庫、Tailwind 版本、字體載入、SVG ID 衝突、h-screen）
+- 檢查 Design Tier 合規（Functional tier 禁漸層/glow/spring）
+- 自動修復 critical 問題（Rule-based 確定性修復 + LLM fallback）
 
 ### 不解決的問題
-- ❌ 修復問題（由 universal-fixer Skill 負責）
+- ❌ SEO 檢查（未來獨立 Skill）
 - ❌ 程式碼生成（由 uiux/coder Skill 負責）
 - ❌ 部署（由 deployer Skill 負責）
 
@@ -55,26 +55,21 @@ output_format:
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "type": "object",
   "properties": {
-    "project_id": {
-      "type": "string",
-      "description": "專案 ID"
+    "code": {
+      "type": "object",
+      "description": "GeneratedCode（pages + components + styles）"
     },
-    "generation_id": {
+    "designTier": {
       "type": "string",
-      "description": "生成記錄 ID"
+      "enum": ["functional", "creative"],
+      "description": "設計層級，影響 code_quality 檢查規則"
     },
-    "files": {
-      "type": "array",
-      "items": { "type": "string" },
-      "description": "要檢查的檔案路徑列表"
-    },
-    "source_skill": {
+    "moodId": {
       "type": "string",
-      "enum": ["uiux", "coder"],
-      "description": "觸發來源 Skill"
+      "description": "設計情緒 ID，影響色彩對比度檢查"
     }
   },
-  "required": ["project_id", "generation_id"]
+  "required": ["code"]
 }
 ```
 
@@ -87,19 +82,13 @@ output_format:
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "type": "object",
   "properties": {
-    "timestamp": {
-      "type": "string",
-      "format": "date-time"
-    },
-    "project_id": {
-      "type": "string"
-    },
-    "generation_id": {
-      "type": "string"
-    },
     "passed": {
       "type": "boolean",
       "description": "是否通過品質檢查（無 critical 問題）"
+    },
+    "timestamp": {
+      "type": "string",
+      "format": "date-time"
     },
     "summary": {
       "type": "object",
@@ -107,13 +96,14 @@ output_format:
         "total": { "type": "integer" },
         "critical": { "type": "integer" },
         "warning": { "type": "integer" },
-        "info": { "type": "integer" }
+        "info": { "type": "integer" },
+        "autoFixed": { "type": "integer" }
       }
     },
     "categories": {
       "type": "object",
       "properties": {
-        "accessibility": {
+        "a11y": {
           "type": "object",
           "properties": {
             "passed": { "type": "boolean" },
@@ -127,7 +117,7 @@ output_format:
             "issues": { "type": "array" }
           }
         },
-        "seo": {
+        "code_quality": {
           "type": "object",
           "properties": {
             "passed": { "type": "boolean" },
@@ -135,26 +125,9 @@ output_format:
           }
         }
       }
-    },
-    "issues": {
-      "type": "array",
-      "items": {
-        "type": "object",
-        "properties": {
-          "id": { "type": "string" },
-          "category": { "type": "string", "enum": ["a11y", "performance", "seo"] },
-          "severity": { "type": "string", "enum": ["critical", "warning", "info"] },
-          "rule": { "type": "string" },
-          "message": { "type": "string" },
-          "file": { "type": "string" },
-          "line": { "type": "integer" },
-          "column": { "type": "integer" },
-          "suggestion": { "type": "string" }
-        }
-      }
     }
   },
-  "required": ["timestamp", "project_id", "generation_id", "passed", "summary", "issues"]
+  "required": ["passed", "timestamp", "summary", "categories"]
 }
 ```
 
@@ -164,39 +137,37 @@ output_format:
 
 ```
 ┌─────────────────────────────────────────────────────────────────────┐
-│                    Step 1: 接收檔案列表                              │
+│                    Step 1: 靜態分析                                  │
 │                                                                     │
-│    從 UIUX/Coder Skill 接收產出的檔案路徑                           │
-│                                                                     │
-└─────────────────────────────────────────────────────────────────────┘
-                                    │
-                                    ▼
-┌─────────────────────────────────────────────────────────────────────┐
-│                    Step 2: 執行檢查                                  │
-│                                                                     │
-│    並行執行三類檢查：                                                │
-│    ├─ Accessibility Checker                                        │
-│    ├─ Performance Checker                                          │
-│    └─ SEO Checker                                                  │
+│    並行執行五類檢查：                                                │
+│    ├─ Accessibility Checker（aria-label、form-labels、heading）     │
+│    ├─ Color Contrast Checker（亮底白字、Dark Mood 容器）            │
+│    ├─ Performance Checker（動畫屬性、時長、reduced-motion）         │
+│    ├─ Code Quality Checker（imports、語法、h-screen、tier 合規）    │
+│    └─ SVG ID Uniqueness Checker（硬編碼 ID 衝突）                  │
 │                                                                     │
 └─────────────────────────────────────────────────────────────────────┘
                                     │
                                     ▼
 ┌─────────────────────────────────────────────────────────────────────┐
-│                    Step 3: 生成報告                                  │
+│                    Step 2: 自動修復迴圈（最多 2-3 輪）               │
 │                                                                     │
-│    ├─ 匯總所有問題                                                  │
-│    ├─ 按嚴重程度分類                                                │
-│    ├─ 生成 JSON 報告                                                │
-│    └─ 儲存到 DB / 發送給 universal-fixer                            │
+│    ├─ Rule-based 確定性修復（零 LLM，~0ms）                        │
+│    │   motion-import / tailwind-v4 / focus-visible /                │
+│    │   form-labels / no-h-screen                                    │
+│    ├─ 重新檢查，仍有 critical → LLM 修復（Haiku）                  │
+│    └─ 重新檢查，直到通過或達上限                                    │
 │                                                                     │
 └─────────────────────────────────────────────────────────────────────┘
                                     │
                                     ▼
-                          ┌─────────────────┐
-                          │  觸發 Fixer     │
-                          │  或通知用戶     │
-                          └─────────────────┘
+┌─────────────────────────────────────────────────────────────────────┐
+│                    Step 3: 輸出報告                                  │
+│                                                                     │
+│    ├─ passed = true（無 critical）→ 進入預覽/部署                   │
+│    └─ passed = false → 通知用戶仍有問題                             │
+│                                                                     │
+└─────────────────────────────────────────────────────────────────────┘
 ```
 
 ---
@@ -213,113 +184,52 @@ output_format:
 
 ### Accessibility (A11y)
 
-| 嚴重度 | 規則 | 說明 |
-|--------|------|------|
-| Critical | color-contrast | 文字對比度 ≥ 4.5:1 |
-| Critical | focus-visible | 互動元素有可見 focus |
-| Critical | aria-label | icon-only buttons 有標籤 |
-| Critical | form-labels | 表單輸入有 label |
-| Warning | keyboard-access | 可鍵盤操作 |
-| Warning | alt-text | 圖片有 alt |
-| Warning | heading-hierarchy | 標題不跳級 |
+| 嚴重度 | 規則 | 說明 | 自動修復 |
+|--------|------|------|----------|
+| Critical | color-contrast | 亮色背景上白色文字 | LLM |
+| Critical | dark-mood-contrast | Dark mood 缺深色容器 | LLM |
+| Critical | focus-visible | 互動元素缺 focus 狀態（per-element） | Rule-based |
+| Critical | aria-label | icon-only button 缺標籤 | LLM |
+| Critical | form-labels | Input 缺 label 關聯 | Rule-based |
+| Warning | alt-text | 圖片缺 alt | — |
+| Warning | heading-hierarchy | 標題跳級 | — |
 
 ### Performance
 
-| 嚴重度 | 規則 | 說明 |
-|--------|------|------|
-| Critical | animation-properties | 只動畫 transform/opacity |
-| Warning | animation-duration | 微互動 ≤ 200ms |
-| Warning | reduced-motion | 支援 prefers-reduced-motion |
-| Info | will-change | 正確使用 will-change |
+| 嚴重度 | 規則 | 說明 | 自動修復 |
+|--------|------|------|----------|
+| Critical | animation-properties | 動畫了 layout 屬性 | LLM |
+| Warning | no-transition-all | 使用了 transition-all | — |
+| Warning | reduced-motion | 缺 prefers-reduced-motion | — |
+| Warning | animation-duration | 動畫時長 > 500ms（Tailwind/motion） | — |
 
-### SEO
+### Code Quality
 
-| 嚴重度 | 規則 | 說明 |
-|--------|------|------|
-| Critical | page-title | 每頁有 title |
-| Critical | meta-description | 有 description |
-| Warning | open-graph | 有 OG tags |
-| Warning | semantic-html | 使用語意化標籤 |
-| Info | canonical | 有 canonical URL |
+| 嚴重度 | 規則 | 說明 | 自動修復 |
+|--------|------|------|----------|
+| Critical | motion-import | framer-motion → motion/react | Rule-based |
+| Critical | tailwind-v4 | @tailwind → @import "tailwindcss" | Rule-based |
+| Critical | next-font | Google Fonts link/import | LLM |
+| Critical | svg-id-uniqueness | SVG 硬編碼 ID 衝突 | LLM |
+| Critical | no-h-screen | h-screen → h-dvh | Rule-based |
+| Warning | no-emoji-icons | Emoji 作 icon | — |
+| Warning | functional-no-gradient | Functional tier 使用漸層 | — |
+| Warning | functional-no-glow | Functional tier 使用 glow | — |
+| Warning | functional-no-spring | Functional tier 使用 spring/bounce | — |
+| Info | cursor-pointer | Button 缺 cursor-pointer | — |
 
 ---
 
 ## 與其他 Skill 的關係
 
 ```
-UIUX Skill (Phase 3 完成)
+UIUX / Fast Build / Clone Skill
          │
          ▼
-   Quality Gate ◄─── 本 Skill
+   Quality Gate ◄─── 本 Skill（自動觸發）
          │
-         │ 生成報告
-         ▼
-  Universal Fixer (TODO)
+         │ Rule-based + LLM 自動修復
          │
-         │ 修復後重新檢查
          ▼
-   Quality Gate (再次)
-         │
-         │ 通過
-         ▼
-     Deployer
-```
-
----
-
-## 報告範例
-
-```json
-{
-  "timestamp": "2026-02-05T12:00:00Z",
-  "project_id": "proj_123",
-  "generation_id": "gen_456",
-  "passed": false,
-  "summary": {
-    "total": 8,
-    "critical": 2,
-    "warning": 4,
-    "info": 2
-  },
-  "categories": {
-    "accessibility": {
-      "passed": false,
-      "issues": [
-        {
-          "id": "a11y-001",
-          "category": "a11y",
-          "severity": "critical",
-          "rule": "color-contrast",
-          "message": "文字與背景對比度不足 (2.1:1 < 4.5:1)",
-          "file": "components/Button.tsx",
-          "line": 15,
-          "column": 8,
-          "suggestion": "將文字顏色從 #999 改為 #666 或更深"
-        }
-      ]
-    },
-    "performance": {
-      "passed": true,
-      "issues": []
-    },
-    "seo": {
-      "passed": false,
-      "issues": [
-        {
-          "id": "seo-001",
-          "category": "seo",
-          "severity": "critical",
-          "rule": "page-title",
-          "message": "頁面缺少 title",
-          "file": "app/page.tsx",
-          "line": 1,
-          "suggestion": "在 metadata export 中加入 title"
-        }
-      ]
-    }
-  },
-  "issues": [
-    // 上面所有 issues 的扁平列表
-  ]
-}
+   passed = true → 預覽 / 部署 / 迭代
 ```

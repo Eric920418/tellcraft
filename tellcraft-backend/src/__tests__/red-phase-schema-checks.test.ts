@@ -156,7 +156,7 @@ Feature: test
 // ============================================================
 
 describe('Check 9: DataTable Column Coverage', () => {
-  it('合法欄位不應產生 issue', () => {
+  it('合法欄位不應產生 issue', async () => {
     const feature = makeFeature('createUser', `
 Feature: 建立使用者
   Rule: r
@@ -168,7 +168,7 @@ Feature: 建立使用者
         | email          | name    |
         | alice@test.com | Alice   |
 `)
-    const result = executeRedPhase({
+    const result = await executeRedPhase({
       features: [feature],
       actionsYml: ACTIONS_YML,
       schemaSql: SCHEMA_SQL,
@@ -178,7 +178,7 @@ Feature: 建立使用者
     expect(columnIssues).toHaveLength(0)
   })
 
-  it('camelCase 欄位應能映射到 snake_case column', () => {
+  it('camelCase 欄位應能映射到 snake_case column', async () => {
     const feature = makeFeature('createUser', `
 Feature: 建立使用者
   Rule: r
@@ -190,7 +190,7 @@ Feature: 建立使用者
         | email          | passwordHash |
         | alice@test.com | hashed       |
 `)
-    const result = executeRedPhase({
+    const result = await executeRedPhase({
       features: [feature],
       actionsYml: ACTIONS_YML,
       schemaSql: SCHEMA_SQL,
@@ -200,7 +200,7 @@ Feature: 建立使用者
     expect(columnIssues).toHaveLength(0)
   })
 
-  it('不存在的欄位應產生 error', () => {
+  it('不存在的欄位應產生 error', async () => {
     const feature = makeFeature('createUser', `
 Feature: 建立使用者
   Rule: r
@@ -212,7 +212,7 @@ Feature: 建立使用者
         | email          | nonExistentColumn |
         | alice@test.com | value             |
 `)
-    const result = executeRedPhase({
+    const result = await executeRedPhase({
       features: [feature],
       actionsYml: ACTIONS_YML,
       schemaSql: SCHEMA_SQL,
@@ -224,7 +224,7 @@ Feature: 建立使用者
     expect(columnIssues[0].description).toContain('nonExistentColumn')
   })
 
-  it('存在於其他表的欄位應產生 warning（跨表 FK 解析）', () => {
+  it('存在於其他表的欄位應產生 warning（跨表 FK 解析）', async () => {
     // 訂單表的 entity_setup 中包含 email（存在於 users 表）
     const feature = makeFeature('getOrders', `
 Feature: 查詢訂單列表
@@ -237,7 +237,7 @@ Feature: 查詢訂單列表
         | email          | total_amount |
         | alice@test.com | 100          |
 `)
-    const result = executeRedPhase({
+    const result = await executeRedPhase({
       features: [feature],
       actionsYml: ACTIONS_YML,
       schemaSql: SCHEMA_SQL,
@@ -256,7 +256,7 @@ Feature: 查詢訂單列表
 // ============================================================
 
 describe('Check 10: NOT NULL Column Completeness', () => {
-  it('缺少 NOT NULL column 應產生 warning', () => {
+  it('缺少 NOT NULL column 應產生 warning', async () => {
     // 使用者表有 email 和 password_hash 是 NOT NULL
     // 但 DataTable 只提供 email
     const feature = makeFeature('createUser', `
@@ -270,7 +270,7 @@ Feature: 建立使用者
         | email          |
         | alice@test.com |
 `)
-    const result = executeRedPhase({
+    const result = await executeRedPhase({
       features: [feature],
       actionsYml: ACTIONS_YML,
       schemaSql: SCHEMA_SQL,
@@ -282,7 +282,7 @@ Feature: 建立使用者
     expect(nullIssues.every(i => i.severity === 'warning')).toBe(true)
   })
 
-  it('有 DEFAULT 的 NOT NULL column 不應觸發 warning', () => {
+  it('有 DEFAULT 的 NOT NULL column 不應觸發 warning', async () => {
     // status 在 orders 表有 DEFAULT 'pending'
     const feature = makeFeature('getOrders', `
 Feature: 查詢訂單列表
@@ -295,7 +295,7 @@ Feature: 查詢訂單列表
         | user_id                              | total_amount |
         | 00000000-0000-0000-0000-000000000001 | 100          |
 `)
-    const result = executeRedPhase({
+    const result = await executeRedPhase({
       features: [feature],
       actionsYml: ACTIONS_YML,
       schemaSql: SCHEMA_SQL,
@@ -306,7 +306,7 @@ Feature: 查詢訂單列表
     expect(nullIssues.every(i => !i.description.includes('status'))).toBe(true)
   })
 
-  it('FK UUID 欄位（_id）不應觸發 warning', () => {
+  it('FK UUID 欄位（_id）不應觸發 warning', async () => {
     // 訂單表的 user_id 是 FK UUID，應被跳過
     const feature = makeFeature('getOrders', `
 Feature: 查詢訂單列表
@@ -319,7 +319,7 @@ Feature: 查詢訂單列表
         | total_amount |
         | 100          |
 `)
-    const result = executeRedPhase({
+    const result = await executeRedPhase({
       features: [feature],
       actionsYml: ACTIONS_YML,
       schemaSql: SCHEMA_SQL,
@@ -336,7 +336,7 @@ Feature: 查詢訂單列表
 // ============================================================
 
 describe('Check 11: FK Reference Table Validity', () => {
-  it('合法 FK 引用不應產生 issue', () => {
+  it('合法 FK 引用不應產生 issue', async () => {
     const feature = makeFeature('getOrders', `
 Feature: 查詢訂單列表
   Rule: r
@@ -348,7 +348,7 @@ Feature: 查詢訂單列表
         | user_id                              | total_amount |
         | 00000000-0000-0000-0000-000000000001 | 100          |
 `)
-    const result = executeRedPhase({
+    const result = await executeRedPhase({
       features: [feature],
       actionsYml: ACTIONS_YML,
       schemaSql: SCHEMA_SQL,
@@ -358,7 +358,7 @@ Feature: 查詢訂單列表
     expect(fkIssues).toHaveLength(0)
   })
 
-  it('引用不存在的表應產生 warning', () => {
+  it('引用不存在的表應產生 warning', async () => {
     const feature = makeFeature('getOrders', `
 Feature: 查詢訂單列表
   Rule: r
@@ -370,7 +370,7 @@ Feature: 查詢訂單列表
         | category_id                          | total_amount |
         | 00000000-0000-0000-0000-000000000001 | 100          |
 `)
-    const result = executeRedPhase({
+    const result = await executeRedPhase({
       features: [feature],
       actionsYml: ACTIONS_YML,
       schemaSql: SCHEMA_SQL,
@@ -388,7 +388,7 @@ Feature: 查詢訂單列表
 // ============================================================
 
 describe('executeRedPhase 整合 Schema Checks', () => {
-  it('所有欄位合法 + NOT NULL 完整 → 全通過', () => {
+  it('所有欄位合法 + NOT NULL 完整 → 全通過', async () => {
     const feature = makeFeature('createUser', `
 Feature: 建立使用者
   Rule: r
@@ -403,7 +403,7 @@ Feature: 建立使用者
         | email          | password_hash | name  |
         | alice@test.com | hashed123     | Alice |
 `)
-    const result = executeRedPhase({
+    const result = await executeRedPhase({
       features: [feature],
       actionsYml: ACTIONS_YML,
       schemaSql: SCHEMA_SQL,
@@ -415,7 +415,7 @@ Feature: 建立使用者
     expect(schemaIssues).toHaveLength(0)
   })
 
-  it('schema 為空時新 checks 不執行', () => {
+  it('schema 為空時新 checks 不執行', async () => {
     const feature = makeFeature('createUser', `
 Feature: 建立使用者
   Rule: r
@@ -427,7 +427,7 @@ Feature: 建立使用者
         | nonExistentColumn |
         | value             |
 `)
-    const result = executeRedPhase({
+    const result = await executeRedPhase({
       features: [feature],
       actionsYml: ACTIONS_YML,
       schemaSql: '', // 空 schema

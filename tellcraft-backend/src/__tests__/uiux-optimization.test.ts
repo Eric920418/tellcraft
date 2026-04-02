@@ -304,6 +304,158 @@ export default function Page() {
   })
 })
 
+describe('quality gate detection improvements', () => {
+  it('should detect SVG hardcoded IDs in both pages and components', () => {
+    const code = {
+      pages: [{
+        path: 'app/page.tsx',
+        description: 'home',
+        content: '<svg><linearGradient id="grad1" /><rect fill="url(#grad1)" /></svg>',
+      }],
+      components: [{
+        path: 'components/Card.tsx',
+        description: 'card',
+        content: '<svg><radialGradient id="grad2" /></svg>',
+      }],
+      styles: '',
+    }
+    const report = runQualityGate(code)
+    const idIssues = report.categories.code_quality.issues.filter(i => i.rule === 'svg-id-uniqueness')
+    expect(idIssues).toHaveLength(2)
+    expect(idIssues[0].file).toBe('app/page.tsx')
+    expect(idIssues[1].file).toBe('components/Card.tsx')
+  })
+
+  it('should detect white text on light background', () => {
+    const code = {
+      pages: [{
+        path: 'app/page.tsx',
+        description: 'home',
+        content: '<div className="bg-white text-white">Low contrast</div>',
+      }],
+      components: [],
+      styles: '',
+    }
+    const report = runQualityGate(code)
+    const contrastIssues = report.categories.a11y.issues.filter(i => i.rule === 'color-contrast')
+    expect(contrastIssues).toHaveLength(1)
+    expect(contrastIssues[0].severity).toBe('critical')
+  })
+
+  it('should detect missing dark container in glassmorphic-dark mood', () => {
+    const code = {
+      pages: [{
+        path: 'app/page.tsx',
+        description: 'home',
+        content: '<div className="backdrop-blur-xl text-white">Glass panel</div>',
+      }],
+      components: [],
+      styles: '',
+    }
+    const report = runQualityGate(code, undefined, 'glassmorphic-dark')
+    const darkIssues = report.categories.a11y.issues.filter(i => i.rule === 'dark-mood-contrast')
+    expect(darkIssues).toHaveLength(1)
+  })
+
+  it('should detect long animation durations in various formats', () => {
+    const code = {
+      pages: [{
+        path: 'app/page.tsx',
+        description: 'home',
+        content: [
+          '<div className="duration-[800ms]">custom</div>',
+          '<div className="duration-700">standard</div>',
+          '<motion.div transition={{ duration: 0.8 }}>motion</motion.div>',
+        ].join('\n'),
+      }],
+      components: [],
+      styles: '',
+    }
+    const report = runQualityGate(code)
+    const durationIssues = report.categories.performance.issues.filter(i => i.rule === 'animation-duration')
+    expect(durationIssues).toHaveLength(3)
+  })
+
+  it('should detect and auto-fix h-screen as critical', () => {
+    const code = {
+      pages: [{
+        path: 'app/page.tsx',
+        description: 'home',
+        content: '<main className="h-screen">\n<section className="min-h-screen">content</section>\n</main>',
+      }],
+      components: [],
+      styles: '',
+    }
+    const report = runQualityGate(code)
+    const hScreenIssues = report.categories.code_quality.issues.filter(i => i.rule === 'no-h-screen')
+    expect(hScreenIssues.length).toBeGreaterThanOrEqual(2)
+    expect(hScreenIssues[0].severity).toBe('critical')
+
+    const criticalIssues = [
+      ...report.categories.a11y.issues,
+      ...report.categories.performance.issues,
+      ...report.categories.code_quality.issues,
+    ].filter(i => i.severity === 'critical')
+
+    const fixed = autoFixCriticalIssuesRuleBased(code, criticalIssues)
+    expect(fixed).not.toBeNull()
+    expect(fixed!.pages[0].content).toContain('h-dvh')
+    expect(fixed!.pages[0].content).toContain('min-h-dvh')
+    expect(fixed!.pages[0].content).not.toContain('h-screen')
+  })
+
+  it('should detect per-element missing focus-visible', () => {
+    const code = {
+      pages: [{
+        path: 'app/page.tsx',
+        description: 'home',
+        content: [
+          '<button className="bg-blue-500 focus-visible:ring-2">OK</button>',
+          '<button className="bg-red-500">No focus</button>',
+          '<a href="/" className="text-blue-600">Link no focus</a>',
+        ].join('\n'),
+      }],
+      components: [],
+      styles: '',
+    }
+    const report = runQualityGate(code)
+    const focusIssues = report.categories.a11y.issues.filter(i => i.rule === 'focus-visible')
+    // 第一個 button 有 focus-visible，第二個 button 和 a 沒有 → 2 個 issue
+    expect(focusIssues).toHaveLength(2)
+  })
+
+  it('should warn on gradients in functional tier', () => {
+    const code = {
+      pages: [{
+        path: 'app/page.tsx',
+        description: 'home',
+        content: '<div className="bg-gradient-to-r from-blue-500 via-purple-500 to-pink-500">Gradient</div>',
+      }],
+      components: [],
+      styles: '',
+    }
+    const report = runQualityGate(code, 'functional')
+    const gradientIssues = report.categories.code_quality.issues.filter(i => i.rule === 'functional-no-gradient')
+    expect(gradientIssues.length).toBeGreaterThanOrEqual(1)
+    expect(gradientIssues[0].severity).toBe('warning')
+  })
+
+  it('should not warn on gradients in creative tier', () => {
+    const code = {
+      pages: [{
+        path: 'app/page.tsx',
+        description: 'home',
+        content: '<div className="bg-gradient-to-r from-blue-500 to-pink-500">Gradient</div>',
+      }],
+      components: [],
+      styles: '',
+    }
+    const report = runQualityGate(code, 'creative')
+    const gradientIssues = report.categories.code_quality.issues.filter(i => i.rule === 'functional-no-gradient')
+    expect(gradientIssues).toHaveLength(0)
+  })
+})
+
 describe('fast-build prompt expansion cache', () => {
   it('should reuse cached expanded prompt for the same brief', async () => {
     const fetchMock = vi.fn().mockResolvedValue({

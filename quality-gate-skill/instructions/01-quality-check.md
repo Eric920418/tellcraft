@@ -1,8 +1,8 @@
-# Phase 4: Quality Gate
+# Quality Gate 品質檢查
 
 ## 目標
 
-對產出的前端程式碼進行自動化品質檢查，確保符合無障礙、效能、SEO 標準。
+對產出的前端程式碼進行自動化品質檢查，確保符合無障礙、效能、代碼品質標準。
 
 ---
 
@@ -12,45 +12,42 @@
 
 | 規則 | 檢查方式 | 自動修復 |
 |------|----------|----------|
-| Color Contrast | 文字 ≥ 4.5:1，UI ≥ 3:1 | 調整色彩值 |
-| Focus States | 所有互動元素有可見 focus | 加 `focus-visible:ring-2` |
-| ARIA Labels | icon-only buttons 有 aria-label | 補充 `aria-label` |
-| Form Labels | 所有 inputs 有 label | 加 `<label>` 或 `aria-label` |
-| Keyboard Access | 所有功能可鍵盤操作 | 加 `tabindex`、`onKeyDown` |
-| Alt Text | 所有有意義的圖片有 alt | 補充 alt text |
-| Heading Hierarchy | 不跳過 heading levels | 調整 h1-h6 |
-| Link Purpose | 連結文字有意義 | 改善連結文字 |
+| Color Contrast | 亮色背景 + 白色文字偵測（5 行窗口） | LLM |
+| Dark Mood Contrast | Dark mood 缺深色容器（glassmorphic-dark/tech-dark） | LLM |
+| Focus States | 每個 `<button>` / `<a>` 元素獨立檢查 focus-visible | Rule-based：全域加 `focus-visible:ring-2` |
+| ARIA Labels | icon-only button 缺 aria-label | LLM |
+| Form Labels | input 缺 aria-label / id | Rule-based：用 placeholder 補 aria-label |
+| Alt Text | img 缺 alt | — |
+| Heading Hierarchy | 標題跳級（h1 → h3） | — |
 
 ### Priority 2: Performance（HIGH）
 
 | 規則 | 檢查方式 | 自動修復 |
 |------|----------|----------|
-| Animation Properties | 只動畫 transform/opacity | 重寫動畫 |
-| Animation Duration | 微互動 ≤ 200ms，轉場 ≤ 300ms | 調整時間 |
-| Reduced Motion | 有 prefers-reduced-motion 處理 | 加 media query |
-| will-change | 只在 active animation 時使用 | 移除多餘的 will-change |
-| Blur/Filter | 不在大表面動畫 blur | 限制 blur 範圍 |
+| Animation Properties | transition 動畫了 layout 屬性（width/height/margin 等） | LLM |
+| No Transition All | 使用了 `transition-all` | — |
+| Reduced Motion | 有動畫但缺 `prefers-reduced-motion` | — |
+| Animation Duration | 三組 pattern：自定義 `duration-[800ms]` / 標準 `duration-700` / motion `duration: 0.8` | — |
 
-### Priority 3: SEO（HIGH）
-
-| 規則 | 檢查方式 | 自動修復 |
-|------|----------|----------|
-| Page Title | 每頁有唯一 title | 補充 metadata |
-| Meta Description | 有 description | 補充 description |
-| Canonical URL | 有 canonical | 加 canonical |
-| Open Graph | 有 og:title, og:description, og:image | 補充 OG tags |
-| HTML Lang | 有 lang 屬性 | 加 `lang="zh-TW"` |
-| Semantic HTML | 使用語意化標籤 | 改用正確標籤 |
-
-### Priority 4: Code Quality（MEDIUM）
+### Priority 3: Code Quality（MEDIUM）
 
 | 規則 | 檢查方式 | 自動修復 |
 |------|----------|----------|
-| No Emoji Icons | 不使用 emoji 作為 icon | 替換為 SVG |
-| Cursor Pointer | 可點擊元素有 cursor-pointer | 加 cursor-pointer |
-| Consistent Spacing | 使用 Tailwind spacing scale | 統一間距 |
-| Z-Index Scale | 使用固定 z-index scale | 調整 z-index |
-| No h-screen | 使用 h-dvh 而非 h-screen | 替換 |
+| Motion Import | `from 'framer-motion'` | Rule-based：替換為 `motion/react` |
+| Tailwind V4 | CSS 中 `@tailwind` 語法 | Rule-based：替換為 `@import "tailwindcss"` |
+| Next Font | `<link>` / `@import` 載入 Google Fonts | LLM |
+| SVG ID Uniqueness | SVG defs 中硬編碼 ID（pages + components） | LLM |
+| No H-Screen | `h-screen` / `min-h-screen`（mobile Safari 問題） | Rule-based：替換為 `h-dvh` / `min-h-dvh` |
+| No Emoji Icons | Emoji 作 icon | — |
+| Cursor Pointer | Button 缺 cursor-pointer（info） | — |
+
+### Priority 4: Design Tier 合規（Functional only）
+
+| 規則 | 檢查方式 | 自動修復 |
+|------|----------|----------|
+| No Gradient | `bg-gradient-to-*` / `from-*-NNN` / `via-*-NNN` | —（warning） |
+| No Glow | `shadow-[0 0 ...]` / `drop-shadow-*` | —（warning） |
+| No Spring | `spring` / `bounce` / `stiffness` / `damping`（跳過註釋） | —（warning） |
 
 ---
 
@@ -59,331 +56,85 @@
 ```
 ┌─────────────────────────────────────────────┐
 │  Step 1: 靜態分析                            │
-│  - 掃描所有產出的 .tsx/.css 檔案             │
-│  - 檢查 Tailwind class patterns              │
-│  - 檢查 ARIA attributes                      │
+│  - 掃描所有 pages + components 的 .tsx 檔案  │
+│  - 掃描 globals.css                          │
+│  - 按 designTier / moodId 調整規則           │
 └─────────────────────────────────────────────┘
                     │
                     ▼
 ┌─────────────────────────────────────────────┐
 │  Step 2: 問題分類                            │
-│  - Critical（必須修復）                      │
-│  - Warning（建議修復）                       │
+│  - Critical（必須修復，進入 autofix 迴圈）   │
+│  - Warning（報告但不自動修復）               │
+│  - Info（參考資訊）                          │
 └─────────────────────────────────────────────┘
                     │
                     ▼
 ┌─────────────────────────────────────────────┐
-│  Step 3: 自動修復                            │
-│  - 修復所有 Critical 問題                    │
-│  - 最多 3 輪修復                             │
+│  Step 3: 自動修復迴圈                        │
+│  - Rule-based 確定性修復（零 LLM，~0ms）    │
+│  - 重新掃描，仍有 critical → LLM 修復       │
+│  - 重新掃描，直到通過或達上限                │
+│  - UIUX: 最多 3 輪                          │
+│  - Fast Build / Clone: 最多 2 輪            │
 └─────────────────────────────────────────────┘
                     │
                     ▼
 ┌─────────────────────────────────────────────┐
-│  Step 4: 重新驗證                            │
-│  - 確認修復成功                              │
-│  - 輸出最終報告                              │
+│  Step 4: 輸出報告                            │
+│  - passed = true → 進入預覽/部署             │
+│  - passed = false → 通知用戶仍有問題         │
 └─────────────────────────────────────────────┘
 ```
 
 ---
 
-## 檢查實作
+## Rule-Based 自動修復
 
-### Accessibility Checker
+以下 5 個規則有確定性修復（零 LLM，瞬間完成）：
 
+### Fix: Motion Import
 ```typescript
-interface AccessibilityIssue {
-  rule: string;
-  severity: 'critical' | 'warning';
-  file: string;
-  line: number;
-  element: string;
-  message: string;
-  fix?: string;
-}
-
-async function checkAccessibility(files: string[]): Promise<AccessibilityIssue[]> {
-  const issues: AccessibilityIssue[] = [];
-
-  for (const file of files) {
-    const content = await readFile(file);
-
-    // Check: icon-only buttons without aria-label
-    const iconButtonPattern = /<button[^>]*>[\s]*<[^>]*Icon[^>]*\/>[\s]*<\/button>/g;
-    // ... 檢查邏輯
-
-    // Check: inputs without labels
-    const inputPattern = /<input[^>]*(?!aria-label)[^>]*>/g;
-    // ... 檢查邏輯
-
-    // Check: images without alt
-    const imgPattern = /<img[^>]*(?!alt=)[^>]*>/g;
-    // ... 檢查邏輯
-  }
-
-  return issues;
-}
+// Before: from 'framer-motion'
+// After:  from 'motion/react'
 ```
 
-### Performance Checker
-
+### Fix: Tailwind V4
 ```typescript
-interface PerformanceIssue {
-  rule: string;
-  severity: 'critical' | 'warning';
-  file: string;
-  line: number;
-  message: string;
-  fix?: string;
-}
-
-async function checkPerformance(files: string[]): Promise<PerformanceIssue[]> {
-  const issues: PerformanceIssue[] = [];
-
-  for (const file of files) {
-    const content = await readFile(file);
-
-    // Check: animating layout properties
-    const layoutAnimationPattern = /animate-\[?(width|height|top|left|margin|padding)/g;
-    // ... 檢查邏輯
-
-    // Check: missing prefers-reduced-motion
-    const hasReducedMotion = content.includes('prefers-reduced-motion') ||
-                             content.includes('motion-reduce');
-    if (!hasReducedMotion && content.includes('animate-')) {
-      // ... 報告問題
-    }
-
-    // Check: animation duration > 300ms
-    const durationPattern = /duration-\[(\d+)ms\]/g;
-    // ... 檢查邏輯
-  }
-
-  return issues;
-}
+// Before: @tailwind base; @tailwind components; @tailwind utilities;
+// After:  @import "tailwindcss"
 ```
 
-### SEO Checker
-
+### Fix: Focus Visible
 ```typescript
-interface SEOIssue {
-  rule: string;
-  severity: 'critical' | 'warning';
-  file: string;
-  message: string;
-  fix?: string;
-}
+// Before: <button className="bg-blue-500">
+// After:  <button className="bg-blue-500 focus-visible:ring-2 focus-visible:ring-offset-2">
+```
 
-async function checkSEO(files: string[]): Promise<SEOIssue[]> {
-  const issues: SEOIssue[] = [];
+### Fix: Form Labels
+```typescript
+// Before: <input placeholder="Email" />
+// After:  <input placeholder="Email" aria-label="Email" />
+```
 
-  // Check layout.tsx for metadata
-  const layoutFile = files.find(f => f.endsWith('layout.tsx'));
-  if (layoutFile) {
-    const content = await readFile(layoutFile);
-
-    if (!content.includes('export const metadata')) {
-      issues.push({
-        rule: 'metadata-required',
-        severity: 'critical',
-        file: layoutFile,
-        message: 'Missing metadata export',
-        fix: 'Add metadata export with title and description',
-      });
-    }
-  }
-
-  return issues;
-}
+### Fix: No H-Screen
+```typescript
+// Before: <div className="h-screen">  /  <div className="min-h-screen">
+// After:  <div className="h-dvh">     /  <div className="min-h-dvh">
 ```
 
 ---
 
-## 自動修復實作
+## LLM Fallback 修復
 
-### Fix: Missing ARIA Label
+Rule-based 無法處理的 critical 問題（aria-label、color-contrast、dark-mood-contrast、animation-properties、next-font、svg-id-uniqueness）交由 Haiku LLM 修復。
 
-```typescript
-// Before
-<button><Icon /></button>
-
-// After
-<button aria-label="描述動作"><Icon /></button>
-```
-
-### Fix: Missing Focus State
-
-```typescript
-// Before
-<button className="bg-blue-500 hover:bg-blue-700">
-
-// After
-<button className="bg-blue-500 hover:bg-blue-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2">
-```
-
-### Fix: Missing Reduced Motion
-
-```typescript
-// Before
-<motion.div animate={{ opacity: 1 }}>
-
-// After
-const prefersReducedMotion = typeof window !== 'undefined'
-  ? window.matchMedia('(prefers-reduced-motion: reduce)').matches
-  : false;
-
-<motion.div
-  animate={{ opacity: 1 }}
-  transition={{ duration: prefersReducedMotion ? 0 : 0.3 }}
->
-```
-
-### Fix: Layout Animation
-
-```typescript
-// Before
-<div className="animate-[width_300ms]">
-
-// After
-// 使用 transform: scaleX() 替代 width 動畫
-<div className="animate-[scaleX_300ms] origin-left">
-```
+LLM 修復後會跑一輪靜態 repair（`repairHookShadowing` + `repairUndeclaredRefs`），防止 Haiku 引入新問題。
 
 ---
 
-## 自癒迴圈
+## 已知限制
 
-```typescript
-const MAX_FIX_ATTEMPTS = 3;
-
-async function runQualityGate(files: string[]): Promise<QualityResult> {
-  let attempt = 0;
-  let issues: Issue[] = [];
-
-  while (attempt < MAX_FIX_ATTEMPTS) {
-    // 檢查
-    const accessibilityIssues = await checkAccessibility(files);
-    const performanceIssues = await checkPerformance(files);
-    const seoIssues = await checkSEO(files);
-
-    issues = [
-      ...accessibilityIssues,
-      ...performanceIssues,
-      ...seoIssues,
-    ];
-
-    const criticalIssues = issues.filter(i => i.severity === 'critical');
-
-    if (criticalIssues.length === 0) {
-      return { passed: true, issues };
-    }
-
-    // 自動修復
-    await autoFix(criticalIssues);
-    attempt++;
-  }
-
-  // 超過最大嘗試次數
-  return {
-    passed: false,
-    issues,
-    message: `自動修復失敗，仍有 ${issues.filter(i => i.severity === 'critical').length} 個 critical 問題`,
-  };
-}
-```
-
----
-
-## 輸出報告
-
-```json
-{
-  "passed": true,
-  "summary": {
-    "total_issues": 15,
-    "critical": 0,
-    "warning": 15,
-    "auto_fixed": 8
-  },
-  "accessibility": {
-    "passed": true,
-    "issues": [
-      {
-        "rule": "color-contrast",
-        "severity": "warning",
-        "file": "components/ui/Card.tsx",
-        "line": 12,
-        "message": "Text contrast is 4.2:1, recommended 4.5:1"
-      }
-    ]
-  },
-  "performance": {
-    "passed": true,
-    "issues": []
-  },
-  "seo": {
-    "passed": true,
-    "issues": []
-  }
-}
-```
-
----
-
-## 用戶通知
-
-品質檢查完成後通知用戶：
-
-### 全部通過
-
-```
-✅ **品質檢查完成**
-
-所有檢查項目都已通過：
-- ✅ Accessibility (WCAG 2.2 AA)
-- ✅ Performance
-- ✅ SEO
-
-前端程式碼已準備好進行部署！
-```
-
-### 有 Warning
-
-```
-✅ **品質檢查完成**
-
-主要檢查項目已通過：
-- ✅ Accessibility
-- ✅ Performance
-- ✅ SEO
-
-⚠️ 有 3 個建議改善項目（非必要）：
-1. Card.tsx:12 - 建議提高文字對比度
-2. Button.tsx:8 - 建議加入 loading 狀態
-3. Header.tsx:5 - 建議加入 skip link
-
-前端程式碼已準備好進行部署！
-```
-
-### 自動修復後通過
-
-```
-✅ **品質檢查完成**
-
-發現 5 個問題，已自動修復 5 個：
-- 修復：3 個 ARIA label 缺失
-- 修復：2 個 focus state 缺失
-
-所有檢查項目現在都已通過！
-```
-
----
-
-## 下一步
-
-品質檢查通過後，前端程式碼已準備好：
-
-1. 可以交給 `deployer` skill 進行部署
-2. 可以與 `coder` skill 的後端 API 整合
-3. 產生 Design Memory 供未來使用
+- **Template literal className**：`addClassToken` 只處理 `className="..."` 格式，不處理 `` className={`...`} `` 模板語法。LLM fallback 可處理。
+- **focus-visible per-element 的 `>` 誤判**：如果 JSX tag 內有 `onClick={() => count > 0}` 這種表達式，`>` 可能被誤判為 tag 結束。實務中極少發生且不影響修復結果。
+- **Animation duration Pattern 3**：`/duration:\s*([\d.]+)/` 可能匹配非動畫的 `duration` 屬性，但 severity 是 warning 不觸發 autofix。
