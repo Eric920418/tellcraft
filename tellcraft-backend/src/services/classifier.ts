@@ -1,7 +1,8 @@
+import { z } from 'zod'
 import { SkillName, SKILL_REGISTRY, getSkillDescriptionsForClassifier } from './registry'
-import { safeParseJson } from '../utils/safe-parse-json'
 import { createLogger } from '../lib/logger'
-import { calculateLlmCost, getAnthropicHeaders, MODEL, trackLlmUsage } from '../lib/anthropic'
+import { MODEL } from '../lib/anthropic'
+import { callStructured } from '../lib/structured-output'
 
 const logger = createLogger('classifier')
 
@@ -47,6 +48,26 @@ export interface LlmTrackingContext {
   userId?: string
   conversationId?: string
 }
+
+// ============================================================
+// Structured Output Schema
+// ============================================================
+
+const ClassificationSchema = z.object({
+  intent: z.enum([
+    'bdd-spec', 'coder', 'uiux', 'deployer', 'domain-manager', 'domain-purchase', 'domain-dns',
+    'quality-gate', 'fast-build', 'iteration', 'db-provision',
+    'onboarding', 'chitchat', 'abuse', 'unknown', 'clarification_needed',
+  ]),
+  confidence: z.number(),
+  reasoning: z.string(),
+  contentFlag: z.enum(['harmful', 'illegal', 'adult', 'hate', 'privacy']).nullable(),
+  suggestedProjectName: z.string().nullable(),
+  extractedEntities: z.object({
+    projectType: z.string().nullable(),
+    features: z.array(z.string()).nullable(),
+  }).nullable(),
+})
 
 // ============================================================
 // 長文需求預過濾（跳過 Haiku，防止誤分類為 onboarding）
@@ -140,116 +161,31 @@ ${skillDescriptions}
 - 只需要核心概念，例如「寵物電商平台」、「健身課程預約系統」、「個人作品集網站」
 - 不要加「專案」二字
 - 只有 intent 是建立專案相關（bdd-spec）時才需要填
+- 沒有時填 null`
 
-## 輸出格式（JSON）:
-{
-  "intent": "bdd-spec" | "coder" | "deployer" | "domain-manager" | "domain-purchase" | "domain-dns" | "onboarding" | "chitchat" | "abuse" | "unknown" | "clarification_needed",
-  "confidence": 0.0-1.0,
-  "reasoning": "判斷理由",
-  "contentFlag": null | "harmful" | "illegal" | "adult" | "hate" | "privacy",
-  "suggestedProjectName": "簡短專案名稱（如有）",
-  "extractedEntities": {
-    "projectType": "提取的專案類型（如有）",
-    "features": ["提取的功能需求"]
-  }
-}`
-
-    const messages = [
+    const msgs: Array<{ role: 'user' | 'assistant'; content: string }> = [
       ...(conversationHistory || []),
       { role: 'user' as const, content: message }
     ]
 
-    const RETRY_MAX = 3
-    const RETRY_BASE_DELAY_MS = 2000
-    let response: Response | null = null
+    const result = await callStructured({
+      schema: ClassificationSchema,
+      model: MODEL.HAIKU,
+      system: systemPrompt,
+      messages: msgs.map(m => ({ role: m.role, content: m.content })),
+      maxTokens: 500,
+      purpose: 'intent_classification',
+      trackingContext,
+    })
 
-    for (let attempt = 1; attempt <= RETRY_MAX; attempt++) {
-      try {
-        response = await fetch('https://api.anthropic.com/v1/messages', {
-          method: 'POST',
-          headers: getAnthropicHeaders(),
-          body: JSON.stringify({
-            model: MODEL.HAIKU,
-            max_tokens: 500,
-            system: systemPrompt,
-            messages: messages.map(m => ({
-              role: m.role,
-              content: m.content,
-            })),
-          }),
-        })
-        if (response.ok) break
-        const isRetryable = response.status === 429 || response.status === 529 || response.status === 503
-        if (attempt < RETRY_MAX && isRetryable) {
-          const delay = RETRY_BASE_DELAY_MS * Math.pow(2, attempt - 1)
-          logger.warn({ status: response.status, attempt, maxRetry: RETRY_MAX, delay }, 'HTTP 錯誤，重試')
-          await new Promise(resolve => setTimeout(resolve, delay))
-          continue
-        }
-        break
-      } catch (fetchErr) {
-        const errMsg = String(fetchErr)
-        if (attempt < RETRY_MAX && (errMsg.includes('ECONNRESET') || errMsg.includes('ETIMEDOUT'))) {
-          const delay = RETRY_BASE_DELAY_MS * Math.pow(2, attempt - 1)
-          logger.warn({ attempt, maxRetry: RETRY_MAX, delay }, '網路錯誤，重試')
-          await new Promise(resolve => setTimeout(resolve, delay))
-          continue
-        }
-        throw fetchErr
-      }
-    }
-
-    if (!response || !response.ok) {
-      logger.error({ status: response?.status }, 'API 錯誤 (重試後仍失敗)')
+    if (!result.success) {
+      logger.warn({ error: result.error }, 'Structured output 失敗，降級規則分類')
       return ruleBasedClassification(message)
     }
 
-    const data = await response.json() as {
-      content?: Array<{ text?: string }>
-      usage?: { input_tokens?: number; output_tokens?: number }
-    }
-    const content = data.content?.[0]?.text
-
-    // 記錄 LLM 使用量
-    if (data.usage) {
-      const inputTokens = data.usage.input_tokens || 0
-      const outputTokens = data.usage.output_tokens || 0
-      const cost = calculateLlmCost(MODEL.HAIKU, inputTokens, outputTokens)
-
-      trackLlmUsage({
-        model: MODEL.HAIKU,
-        inputTokens,
-        outputTokens,
-        purpose: 'intent_classification',
-        userId: trackingContext?.userId,
-        conversationId: trackingContext?.conversationId,
-      })
-      logger.info({ inputTokens, outputTokens, cost: cost.toFixed(6), conversationId: trackingContext?.conversationId }, '已記錄使用量')
-    }
-
-    if (!content) {
-      return ruleBasedClassification(message)
-    }
-
-    // 安全解析 JSON 回應
-    const parsed = safeParseJson<{
-      intent?: string
-      confidence?: number
-      reasoning?: string
-      contentFlag?: string
-      suggestedProjectName?: string
-      extractedEntities?: { projectType?: string; features?: string[] }
-    }>(content)
-    if (!parsed) {
-      return ruleBasedClassification(message)
-    }
-
-    const validFlags = ['harmful', 'illegal', 'adult', 'hate', 'privacy']
-    const contentFlag = parsed.contentFlag && validFlags.includes(parsed.contentFlag)
-      ? parsed.contentFlag as ContentPolicyFlag
-      : undefined
-
-    const intent = (parsed.intent || 'unknown') as ClassifierIntent
+    const parsed = result.data
+    const contentFlag = parsed.contentFlag || undefined
+    const intent = parsed.intent as ClassifierIntent
 
     // 後驗證：Haiku 返回 meta-intent 但消息明顯是需求 → 覆寫為 bdd-spec
     // 保留 contentFlag（仍需要內容政策檢查）
@@ -263,7 +199,10 @@ ${skillDescriptions}
         reasoning: `Haiku 誤分類為 ${intent}，後驗證覆寫（${message.length} 字含需求關鍵詞）`,
         contentFlag,
         suggestedProjectName: parsed.suggestedProjectName || deriveProjectName(message, entities),
-        extractedEntities: parsed.extractedEntities || entities,
+        extractedEntities: parsed.extractedEntities ? {
+          projectType: parsed.extractedEntities.projectType || undefined,
+          features: parsed.extractedEntities.features || undefined,
+        } : entities,
       }
     }
 
@@ -273,7 +212,10 @@ ${skillDescriptions}
       reasoning: parsed.reasoning || '',
       contentFlag,
       suggestedProjectName: parsed.suggestedProjectName || undefined,
-      extractedEntities: parsed.extractedEntities,
+      extractedEntities: parsed.extractedEntities ? {
+        projectType: parsed.extractedEntities.projectType || undefined,
+        features: parsed.extractedEntities.features || undefined,
+      } : undefined,
     }
   } catch (error) {
     logger.error({ err: error }, '分類失敗')

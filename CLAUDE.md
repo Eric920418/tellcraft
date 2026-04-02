@@ -119,6 +119,7 @@ pm2 describe tellcraft-backend            # 詳細資訊（記憶體/重啟次�
 | **LINE Full Push** | `services/line-full-push.ts` | LINE 來源對話的全量翻譯推送 |
 | **Env** | `lib/env.ts` | Zod 環境變數驗證，啟動時快速失敗 |
 | **Anthropic** | `lib/anthropic.ts` | 統一 Client 單例 + MODEL 常數（SONNET/HAIKU） |
+| **Structured Output** | `lib/structured-output.ts` | `callStructured<T>()` — JSON 輸出 LLM 呼叫封裝（`messages.parse()` + `zodOutputFormat` + retry + usage tracking） |
 | **Validate** | `middleware/validate.ts` | Zod 請求驗證中間件（validateBody/Query/Params） |
 | **Schemas** | `schemas/*.ts` | API 路由 Zod schema 定義（conversation/session/operations/bdd/project/domain） |
 | **Telegram Notify** | `services/telegram-notify.ts` | Telegram 里程碑推播通知（stage 白名單，非 Bot 對話才推） |
@@ -373,6 +374,7 @@ Feature 註解：`# Action: actionName` + `# [METHOD] /path` + `# Summary: xxx`
 
 ## 防雷清單（不看必踩）
 
+- **Structured Outputs（`lib/structured-output.ts`）**：JSON 輸出的 LLM 呼叫使用 `callStructured<T>()` + Zod schema（保證 JSON Schema 合規，消除 `safeParseJson` fallback）。只適用於 JSON 輸出的呼叫；代碼/Gherkin/YAML/自然語言輸出不能用。`messages.parse()` 與 message prefilling **不相容**。`stop_reason: 'max_tokens'` 時 `parsed_output` 可能不完整，`callStructured` 已自動處理。改 `output_config.format` 的 schema 會使 prompt cache 失效（一次性代價）。目前已轉換：`classifier.ts`、`prefilter.ts`、`fast-build-generation.ts`（Phase 1）
 - **handleProcessMessage 轉發到 handleContinueFlow 時必須帶 `skipPrefilterAndCredit: true`**：否則 prefilter + credit deduction 會執行兩次（雙重扣款）。只有 BullMQ `continue-flow` job 直接呼叫 `handleContinueFlow` 時才不帶此旗標
 - **`handleFastGenerating`/`handleUiuxCodeGenerating` 的孤兒偵測有三層**：(1) conv-lock 不存在 + 60s → 立即恢復；(2) conv-lock 存在但 startedAt > 5min + 無心跳 → 過期 lock 恢復（防 stalled job re-processing 自己持有 lock 的假象）；(3) 20min 完整超時。新增生成中 phase handler 時必須考慮這三層
 - **`generateStructure` 的 `onCheckpoint` callback**：在 multi-pass 批次完成、syntax fix 後、reference repair 後三處觸發。呼叫端必須傳入 checkpoint callback 將中途代碼存入 FlowState，防止進程崩潰遺失串流中代碼

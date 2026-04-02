@@ -1,7 +1,8 @@
 import Redis from 'ioredis'
-import { safeParseJson } from '../utils/safe-parse-json'
+import { z } from 'zod'
 import { createLogger } from '../lib/logger'
-import { getAnthropicHeaders, MODEL, trackLlmUsage } from '../lib/anthropic'
+import { MODEL } from '../lib/anthropic'
+import { callStructured } from '../lib/structured-output'
 
 const logger = createLogger('prefilter')
 
@@ -354,71 +355,49 @@ export async function checkBuildRelevance(
   const hasWeakSignal = WEAK_SIGNALS.some(kw => lower.includes(kw))
 
   // Layer 2/3: 弱信號或無信號 → 微型 Haiku 判斷（相關性 + 具體性）
+  const RelevanceSchema = z.object({
+    relevant: z.boolean(),
+    vague: z.boolean().nullable(),
+    policy: z.enum(['harmful', 'illegal', 'adult', 'hate', 'privacy']).nullable(),
+  })
+
   try {
     const systemPrompt = hasWeakSignal
       ? `用戶想用介面建站工具。判斷描述是否具體到能知道「建什麼類型的網站」。同時檢查內容是否涉及有害/非法/成人/仇恨/隱私侵犯（正常的醫療資訊網站是允許的，只有診斷/測驗工具才算有害）。
 
-具體的例子（→ {"relevant":true}）：
+具體的例子（→ relevant=true）：
 - 有產業詞：「做咖啡廳網站」「餐廳訂位系統」「健身房官網」「卡啡廳網站」（含錯字也算）
 - 有功能描述：「有菜單和預約的網站」「電商購物平台」
 - 有產品類型：「個人作品集」「SaaS landing page」
 - 即使有錯字或縮寫，只要能辨識產業/功能 = 具體
 
-模糊的例子（→ {"relevant":true,"vague":true}）：
+模糊的例子（→ relevant=true, vague=true）：
 - 純泛用：「做一個很酷的網站」「建一個網頁」「做個很棒的東西」
 - 完全不知道建什麼：「做一個」「建立一個系統」（沒有領域詞）
 
-只回覆 JSON:
-- 夠具體：{"relevant":true}
-- 相關但太模糊：{"relevant":true,"vague":true}
-- 與建網站無關：{"relevant":false}
-- 內容不當：{"relevant":false,"policy":"harmful|illegal|adult|hate|privacy"}`
-      : '判斷用戶訊息是否與「建立網站/應用/數位產品」相關。同時檢查內容是否涉及有害/非法/成人/仇恨/隱私侵犯。只回覆 JSON: {"relevant":true} 或 {"relevant":false} 或 {"relevant":false,"policy":"harmful|illegal|adult|hate|privacy"}'
+回覆 JSON:
+- 夠具體：{"relevant":true,"vague":null,"policy":null}
+- 相關但太模糊：{"relevant":true,"vague":true,"policy":null}
+- 與建網站無關：{"relevant":false,"vague":null,"policy":null}
+- 內容不當：{"relevant":false,"vague":null,"policy":"harmful"}`
+      : '判斷用戶訊息是否與「建立網站/應用/數位產品」相關。同時檢查內容是否涉及有害/非法/成人/仇恨/隱私侵犯。回覆 JSON: {"relevant":true,"vague":null,"policy":null} 或 {"relevant":false,"vague":null,"policy":null} 或 {"relevant":false,"vague":null,"policy":"harmful"}'
 
-    const resp = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: getAnthropicHeaders(),
-      body: JSON.stringify({
-        model: MODEL.HAIKU,
-        max_tokens: 30,
-        system: systemPrompt,
-        messages: [{ role: 'user', content: message }],
-      }),
+    const result = await callStructured({
+      schema: RelevanceSchema,
+      model: MODEL.HAIKU,
+      system: systemPrompt,
+      messages: [{ role: 'user', content: message }],
+      maxTokens: 100,
+      purpose: 'fast_mode_relevance_check',
+      trackingContext: context,
     })
 
-    if (!resp.ok) {
-      logger.warn({ status: resp.status }, '相關性檢查 API 錯誤，降級放行（fail-open）')
+    if (!result.success) {
+      logger.warn({ error: result.error }, '相關性檢查失敗，降級放行（fail-open）')
       return { relevant: true }
     }
 
-    const data = await resp.json() as {
-      content?: Array<{ text?: string }>
-      usage?: { input_tokens?: number; output_tokens?: number }
-    }
-
-    // 記錄使用量
-    if (data.usage) {
-      trackLlmUsage({
-        model: MODEL.HAIKU,
-        inputTokens: data.usage.input_tokens || 0,
-        outputTokens: data.usage.output_tokens || 0,
-        purpose: 'fast_mode_relevance_check',
-        userId: context?.userId,
-        conversationId: context?.conversationId,
-      })
-    }
-
-    const text = data.content?.[0]?.text
-    if (!text) {
-      logger.warn('相關性檢查空回應，降級放行（fail-open）')
-      return { relevant: true }
-    }
-
-    const parsed = safeParseJson<{ relevant?: boolean; vague?: boolean; policy?: string }>(text)
-    if (!parsed) {
-      logger.warn('相關性檢查 JSON 解析失敗，降級放行（fail-open）')
-      return { relevant: true }
-    }
+    const parsed = result.data
 
     // 內容不當 → 拒絕（Content Policy）
     if (parsed.policy) {

@@ -8,9 +8,10 @@ import type { DesignTier, DesignSystem, TemplateData } from './uiux-generation'
 import type { ReferenceAnalysis } from './reference-analyzer'
 import { matchTemplates } from './template-matcher'
 import { queryOne } from '../db/client'
-import { getAnthropicHeaders, MODEL, calculateLlmCost, trackLlmUsage } from '../lib/anthropic'
+import { z } from 'zod'
+import { getAnthropicHeaders, MODEL, trackLlmUsage } from '../lib/anthropic'
 import { createLogger } from '../lib/logger'
-import { safeParseJson } from '../utils/safe-parse-json'
+import { callStructured } from '../lib/structured-output'
 
 const logger = createLogger('fast-build-generation')
 const FAST_BUILD_CACHE_LIMIT = 200
@@ -1075,100 +1076,45 @@ Make the concept unique. signatureElement must be specific enough to code (e.g. 
       }
     }
 
-    const resp = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: getAnthropicHeaders(),
-      body: JSON.stringify({
-        model: MODEL.HAIKU,
-        max_tokens: 600,
-        temperature: 0.5,
-        system: systemPrompt,
-        messages: [{ role: 'user', content: userMsg }],
-      }),
+    const FastConceptSchema = z.object({
+      name: z.string(),
+      vibe: z.string(),
+      signatureElement: z.string(),
+      keyFeatures: z.array(z.string()),
+      suggestedTier: z.enum(['functional', 'creative']).nullable(),
+      suggestedPages: z.array(z.string()),
     })
 
-    if (!resp.ok) {
-      logger.warn({ status: resp.status }, 'FastConcept API 錯誤，降級跳過')
+    const llmResult = await callStructured({
+      schema: FastConceptSchema,
+      model: MODEL.HAIKU,
+      system: systemPrompt,
+      messages: [{ role: 'user', content: userMsg }],
+      maxTokens: 600,
+      temperature: 0.5,
+      purpose: 'fast_build_concept',
+      trackingContext: context,
+    })
+
+    if (!llmResult.success) {
+      logger.warn({ error: llmResult.error }, 'FastConcept structured output 失敗，降級跳過')
       return null
     }
 
-    const data = await resp.json() as {
-      content?: Array<{ text?: string }>
-      usage?: { input_tokens?: number; output_tokens?: number }
-    }
+    const parsed = llmResult.data
 
-    if (data.usage) {
-      const inputTokens = data.usage.input_tokens || 0
-      const outputTokens = data.usage.output_tokens || 0
-      trackLlmUsage({
-        model: MODEL.HAIKU,
-        inputTokens,
-        outputTokens,
-        purpose: 'fast_build_concept',
-        userId: context?.userId,
-        conversationId: context?.conversationId,
-      })
-    }
-
-    const text = data.content?.[0]?.text
-    if (!text) {
-      logger.warn('FastConcept 空回應，降級跳過')
-      return null
-    }
-
-    // 解析 JSON（safeParseJson 四層防禦 + 截斷修復）
-    let parsed = safeParseJson<Partial<FastConcept>>(text)
-    if (!parsed) {
-      // 第五層：max_tokens 截斷修復 — 嘗試補齊未閉合的 JSON
-      const braceStart = text.indexOf('{')
-      if (braceStart >= 0) {
-        let truncated = text.slice(braceStart)
-          .replace(/,\s*$/, '')           // 移除尾隨逗號
-        // 補齊未閉合的陣列和物件
-        const openBrackets = (truncated.match(/\[/g) || []).length - (truncated.match(/\]/g) || []).length
-        const openBraces = (truncated.match(/\{/g) || []).length - (truncated.match(/\}/g) || []).length
-        // 截斷可能在字串值中間，嘗試關閉當前字串
-        if ((truncated.match(/"/g) || []).length % 2 !== 0) {
-          truncated += '"'
-        }
-        truncated += ']'.repeat(Math.max(0, openBrackets))
-        truncated += '}'.repeat(Math.max(0, openBraces))
-        parsed = safeParseJson<Partial<FastConcept>>(truncated)
-        if (parsed) {
-          logger.info('FastConcept JSON 截斷修復成功')
-        }
-      }
-    }
-    if (!parsed) {
-      logger.warn({ textPreview: text.slice(0, 200) }, 'FastConcept 無法解析 JSON，降級跳過')
-      return null
-    }
-    if (!parsed.name || !parsed.vibe || !parsed.signatureElement) {
-      logger.warn('FastConcept 缺少必要欄位，降級跳過')
-      return null
-    }
-
-    // 驗證 suggestedTier
-    if (parsed.suggestedTier && parsed.suggestedTier !== 'functional' && parsed.suggestedTier !== 'creative') {
-      parsed.suggestedTier = undefined
-    }
-
-    // 驗證 suggestedPages
-    let suggestedPages: string[] | undefined
-    if (Array.isArray(parsed.suggestedPages)) {
-      suggestedPages = parsed.suggestedPages
-        .filter((p): p is string => typeof p === 'string' && p.trim().length > 0)
-        .slice(0, 1)
-      if (suggestedPages.length === 0) suggestedPages = undefined
-    }
-
-    const result = {
+    const result: FastConcept = {
       name: parsed.name,
       vibe: parsed.vibe,
       signatureElement: parsed.signatureElement,
-      keyFeatures: Array.isArray(parsed.keyFeatures) ? parsed.keyFeatures.slice(0, 5) : [],
-      suggestedTier: parsed.suggestedTier,
-      suggestedPages,
+      keyFeatures: parsed.keyFeatures.slice(0, 5),
+      suggestedTier: parsed.suggestedTier || undefined,
+      suggestedPages: parsed.suggestedPages
+        .filter(p => p.trim().length > 0)
+        .slice(0, 1),
+    }
+    if (result.suggestedPages && result.suggestedPages.length === 0) {
+      result.suggestedPages = undefined
     }
     rememberCacheValue(FAST_CONCEPT_CACHE, cacheKey, result)
     return result
