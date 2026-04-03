@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useCallback } from 'react'
-import { motion, AnimatePresence } from 'framer-motion'
+import { motion, AnimatePresence } from 'motion/react'
 import { useTranslations } from 'next-intl'
 
 // ============================================================
@@ -49,7 +49,7 @@ const CARD_INTERACTION_VARIANTS = {
 }
 
 const COLOR_PREVIEW_VARIANTS = {
-  rest: { opacity: 0, y: 6 },
+  rest: { opacity: 1, y: 0 },
   hover: { opacity: 1, y: 0 },
 }
 
@@ -182,12 +182,15 @@ export default function VariantPicker({
               style={{
                 position: 'relative',
                 padding: 16,
-                background: isSelected ? axisConfig.bgColor : 'var(--white)',
+                background: 'var(--white)',
                 border: `2px solid ${isSelected ? axisConfig.color : 'var(--border-color)'}`,
                 borderRadius: 12,
                 cursor: 'pointer',
                 overflow: 'hidden',
-                transition: 'background-color 0.18s ease, border-color 0.18s ease',
+                boxShadow: isSelected
+                  ? `0 0 0 1px ${axisConfig.color}, 0 4px 16px ${axisConfig.color}30`
+                  : 'none',
+                transition: 'border-color 0.18s ease, box-shadow 0.18s ease',
                 willChange: 'transform',
               }}
             >
