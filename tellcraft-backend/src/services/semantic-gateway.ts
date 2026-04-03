@@ -4,9 +4,11 @@
 // 用 Sonnet 語義理解取代填鴨式 keyword arrays
 // ============================================================
 
+import { z } from 'zod'
 import type { FlowState } from '../types/flow-state'
 import { createLogger } from '../lib/logger'
-import { getAnthropicHeaders, MODEL, trackLlmUsage } from '../lib/anthropic'
+import { MODEL } from '../lib/anthropic'
+import { callStructured } from '../lib/structured-output'
 
 const logger = createLogger('semantic-gateway')
 
@@ -398,87 +400,25 @@ export async function semanticGateway(
     return { verdict: 'valid', accept: true }
   }
 
-  // ── Sonnet 語義判斷 ──
-  try {
-    const resp = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: getAnthropicHeaders(),
-      body: JSON.stringify({
-        model: MODEL.HAIKU,
-        max_tokens: 200,
-        system: buildPrompt(input),
-        messages: [{ role: 'user', content: input.userMessage }],
-      }),
-    })
+  // ── Haiku 語義判斷 ──
+  const SemanticVerdictSchema = z.object({
+    verdict: z.enum(['valid', 'ambiguous', 'off_topic', 'seeking_help', 'evasive', 'content_policy']),
+    guidance: z.string().nullable(),
+  })
 
-    if (!resp.ok) {
-      logger.warn({ status: resp.status }, 'Sonnet API 錯誤，降級')
-      // 設計偏好 + BDD 釐清：低風險，降級放行
-      // BDD 已通過 checkInputQuality(strict) + hasSubstantiveContent，到這步的輸入品質有保障
-      if (input.phase === 'design_clarify' || input.phase === 'bdd_clarify') {
-        return { verdict: 'valid', accept: true }
-      }
-      // iteration 保持 fail-closed（迭代修改需要更嚴格的把關）
-      const isZh = input.locale !== 'en'
-      return {
-        verdict: 'off_topic',
-        accept: false,
-        guidanceMessage: isZh
-          ? '系統暫時無法處理您的回答，請再輸入一次。'
-          : 'System temporarily unavailable. Please try again.',
-      }
-    }
+  const result = await callStructured({
+    schema: SemanticVerdictSchema,
+    model: MODEL.HAIKU,
+    system: buildPrompt(input),
+    messages: [{ role: 'user', content: input.userMessage }],
+    maxTokens: 200,
+    purpose: 'semantic_gateway',
+    trackingContext: { conversationId: input.conversationId },
+  })
 
-    const data = await resp.json() as {
-      content?: Array<{ text?: string }>
-      usage?: { input_tokens?: number; output_tokens?: number }
-    }
-
-    // 記錄 LLM 使用量
-    if (data.usage) {
-      trackLlmUsage({
-        model: MODEL.HAIKU,
-        inputTokens: data.usage.input_tokens || 0,
-        outputTokens: data.usage.output_tokens || 0,
-        purpose: 'semantic_gateway',
-        conversationId: input.conversationId,
-      })
-    }
-
-    const text = data.content?.[0]?.text?.trim()
-    if (!text) {
-      logger.warn('空回應，降級')
-      if (input.phase === 'design_clarify' || input.phase === 'bdd_clarify') {
-        return { verdict: 'valid', accept: true }
-      }
-      const isZh = input.locale !== 'en'
-      return {
-        verdict: 'off_topic',
-        accept: false,
-        guidanceMessage: isZh
-          ? '系統暫時無法處理您的回答，請再輸入一次。'
-          : 'System temporarily unavailable. Please try again.',
-      }
-    }
-
-    // 解析 JSON（容許 markdown code block 包裹）
-    const jsonStr = text.replace(/^```json?\s*/, '').replace(/\s*```$/, '')
-    const result = JSON.parse(jsonStr) as {
-      verdict?: SemanticVerdict
-      guidance?: string
-    }
-
-    if (!result.verdict || result.verdict === 'valid') {
-      return { verdict: 'valid', accept: true }
-    }
-
-    return {
-      verdict: result.verdict,
-      accept: false,
-      guidanceMessage: result.guidance,
-    }
-  } catch (err) {
-    logger.warn({ err }, '分析失敗，降級')
+  if (!result.success) {
+    logger.warn({ error: result.error }, '語義閘門失敗，降級')
+    // 設計偏好 + BDD 釐清：低風險，降級放行
     if (input.phase === 'design_clarify' || input.phase === 'bdd_clarify') {
       return { verdict: 'valid', accept: true }
     }
@@ -491,5 +431,15 @@ export async function semanticGateway(
         ? '系統暫時無法處理您的回答，請再輸入一次。'
         : 'System temporarily unavailable. Please try again.',
     }
+  }
+
+  if (!result.data.verdict || result.data.verdict === 'valid') {
+    return { verdict: 'valid', accept: true }
+  }
+
+  return {
+    verdict: result.data.verdict,
+    accept: false,
+    guidanceMessage: result.data.guidance || undefined,
   }
 }

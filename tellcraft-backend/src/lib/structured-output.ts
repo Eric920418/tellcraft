@@ -54,8 +54,11 @@ export async function callStructured<T>(
         output_config: { format: zodOutputFormat(schema) },
       })
 
-      // Track usage regardless of stop_reason
+      // Track usage regardless of stop_reason（含 prompt caching metrics）
       const usage = response.usage
+      const usageAny = usage as unknown as Record<string, unknown>
+      const cacheCreation = (usageAny.cache_creation_input_tokens as number) || 0
+      const cacheRead = (usageAny.cache_read_input_tokens as number) || 0
       trackLlmUsage({
         model,
         inputTokens: usage.input_tokens,
@@ -63,6 +66,8 @@ export async function callStructured<T>(
         purpose,
         userId: trackingContext?.userId,
         conversationId: trackingContext?.conversationId,
+        cacheCreationTokens: cacheCreation,
+        cacheReadTokens: cacheRead,
       })
 
       // Check stop_reason — only end_turn guarantees valid structured output

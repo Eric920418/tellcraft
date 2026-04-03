@@ -9,7 +9,7 @@
 
 import * as yaml from 'js-yaml'
 import { z } from 'zod'
-import { getAnthropicHeaders, MODEL, trackLlmUsage } from '../lib/anthropic'
+import { getAnthropicHeaders, MODEL, trackLlmUsage, buildCacheableSystem, type CacheableSystemPrompt } from '../lib/anthropic'
 import { callStructured } from '../lib/structured-output'
 import type { GeneratedComponent } from './uiux-generation'
 import type { GeneratedCode } from '../types/flow-state'
@@ -105,7 +105,7 @@ function isRetryableFetchError(err: unknown): boolean {
 }
 
 async function callClaude(
-  systemPrompt: string,
+  systemPrompt: CacheableSystemPrompt,
   userMessage: string,
   options: { maxTokens?: number; temperature?: number } = {},
   trackingContext?: { userId?: string; conversationId?: string }
@@ -145,7 +145,7 @@ async function callClaude(
       }
 
       const data = await response.json() as {
-        usage?: { input_tokens: number; output_tokens: number }
+        usage?: { input_tokens: number; output_tokens: number; cache_creation_input_tokens?: number; cache_read_input_tokens?: number }
         content?: Array<{ text: string }>
       }
 
@@ -155,6 +155,8 @@ async function callClaude(
           inputTokens: data.usage.input_tokens,
           outputTokens: data.usage.output_tokens,
           purpose: 'coder-generation',
+          cacheCreationTokens: data.usage.cache_creation_input_tokens || 0,
+          cacheReadTokens: data.usage.cache_read_input_tokens || 0,
           ...trackingContext,
         })
       }
@@ -550,8 +552,8 @@ return camelRows
  * 根據 action 的 rules 類型，選擇性注入相關 handler。
  * 不再用一個巨大的 system prompt 教 LLM 所有操作類型。
  */
-function buildActionSystemPrompt(action?: ActionEntry): string {
-  if (!action) return BASE_PROMPT
+function buildActionSystemPrompt(action?: ActionEntry): CacheableSystemPrompt {
+  if (!action) return buildCacheableSystem(BASE_PROMPT)
 
   const handlers: string[] = []
   const rules = action.rules || []
@@ -613,7 +615,7 @@ function buildActionSystemPrompt(action?: ActionEntry): string {
     handlers.push(COLUMN_ALIAS_HANDLER)
   }
 
-  return `${BASE_PROMPT}\n\n${handlers.join('\n')}`
+  return buildCacheableSystem(BASE_PROMPT, handlers.join('\n'))
 }
 
 function buildActionUserPrompt(
@@ -811,7 +813,7 @@ function extractResponseFieldsFromGherkin(gherkinText: string): string[] {
 }
 
 /** 精準 handler 選擇（每個子操作只注入 1 個主 handler） */
-function buildSubOpSystemPrompt(subOp: SubOperation): string {
+function buildSubOpSystemPrompt(subOp: SubOperation): CacheableSystemPrompt {
   const handlers: string[] = []
   switch (subOp.operationType) {
     case 'create':      handlers.push(CREATE_HANDLER); break
@@ -830,7 +832,7 @@ function buildSubOpSystemPrompt(subOp: SubOperation): string {
       handlers.push(CREATE_HANDLER, QUERY_LIST_HANDLER, UPDATE_HANDLER, DELETE_HANDLER)
   }
   handlers.push(COLUMN_ALIAS_HANDLER)
-  return `${BASE_PROMPT}\n\n${handlers.join('\n')}`
+  return buildCacheableSystem(BASE_PROMPT, handlers.join('\n'))
 }
 
 // ============================================================
@@ -2461,8 +2463,8 @@ export async function identifyMockDataComponents(
 // 6. LLM 改寫 UIUX 組件
 // ============================================================
 
-function buildRewriteSystemPrompt(): string {
-  return `你是一位 Next.js 前端工程師。你的任務是改寫一個 React 組件，將 mock 數據替換為 Server Action 調用。
+function buildRewriteSystemPrompt(): CacheableSystemPrompt {
+  return buildCacheableSystem(`你是一位 Next.js 前端工程師。你的任務是改寫一個 React 組件，將 mock 數據替換為 Server Action 調用。
 
 ## 改寫規則
 1. 保留所有 UI 結構、樣式（Tailwind class）、動畫（motion/react）不變
@@ -2505,7 +2507,7 @@ function buildRewriteSystemPrompt(): string {
 以下是實際函數的 Input/Output 介面定義和完整實作，**_stepSummary 必須精確匹配**：
 
 ## 輸出
-只輸出完整的改寫後 TypeScript/JSX 代碼，不要任何解釋或 markdown 包裹。`
+只輸出完整的改寫後 TypeScript/JSX 代碼，不要任何解釋或 markdown 包裹。`)
 }
 
 function extractInterfacesFromActionFile(content: string): string {

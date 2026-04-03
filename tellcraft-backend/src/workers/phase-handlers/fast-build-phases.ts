@@ -10,7 +10,7 @@ import type { FlowState, GeneratedCode, IoEmitter } from '../../types/flow-state
 import {
   generateStructure, generateAnimations, generateRwd, generateAnimationsAndRwd,
   generateTailwindConfig, ensureResponsiveClasses,
-  VariantConcept, GeneratedComponent, callClaude,
+  VariantConcept, GeneratedComponent,
 } from '../../services/uiux-generation'
 import { runQualityGate, autoFixCriticalIssues, autoFixCriticalIssuesRuleBased } from '../../services/quality-gate'
 import {
@@ -26,9 +26,11 @@ import { sendMessage, saveFlowState, saveFlowStateLight, getFlowState, deleteFlo
 import { CREDIT_COSTS } from '../../config/plans'
 import { recommendMoods } from '../../services/design-moods'
 import { analyzeUploadedImage, type ReferenceAnalysis } from '../../services/reference-analyzer'
+import { z } from 'zod'
 import { getEnv } from '../../lib/env'
+import { MODEL } from '../../lib/anthropic'
+import { callStructured } from '../../lib/structured-output'
 import { createLogger } from '../../lib/logger'
-import { safeParseJson } from '../../utils/safe-parse-json'
 
 const logger = createLogger('fast-build-phases')
 
@@ -258,37 +260,32 @@ ${buildBatchContentExcerpt(input.batchCode)}
 
 請只判斷是否偏離需求，輸出 JSON。`
 
-  const response = await callClaude(
-    systemPrompt,
-    [{ role: 'user', content: userMessage }],
-    {
-      maxTokens: 1200,
-      temperature: 0,
-      promptLabel: 'fast-build-batch-audit',
-      contextSizeHint: 'fast',
-    },
-    {
-      purpose: 'fast_build_batch_audit',
-      userId: input.userId,
-      conversationId: input.conversationId,
-    }
-  )
+  const BatchAuditSchema = z.object({
+    passed: z.boolean(),
+    severity: z.enum(['none', 'warning', 'critical']),
+    issues: z.array(z.string()),
+  })
 
-  if (!response.success || !response.content) {
-    logger.warn({ error: response.error }, 'fast build batch audit fallback 失敗')
-    return null
-  }
+  const result = await callStructured({
+    schema: BatchAuditSchema,
+    model: MODEL.SONNET,
+    system: systemPrompt,
+    messages: [{ role: 'user', content: userMessage }],
+    maxTokens: 1200,
+    temperature: 0,
+    purpose: 'fast_build_batch_audit',
+    trackingContext: { userId: input.userId, conversationId: input.conversationId },
+  })
 
-  const parsed = safeParseJson<{ passed?: boolean; severity?: BatchAuditSeverity; issues?: string[] }>(response.content)
-  if (!parsed || typeof parsed.passed !== 'boolean') {
-    logger.warn({ preview: response.content.slice(0, 200) }, 'fast build batch audit fallback JSON 解析失敗')
+  if (!result.success) {
+    logger.warn({ error: result.error }, 'fast build batch audit fallback 失敗')
     return null
   }
 
   return {
-    passed: parsed.passed,
-    severity: parsed.severity === 'warning' || parsed.severity === 'critical' ? parsed.severity : (parsed.passed ? 'none' : 'critical'),
-    issues: Array.isArray(parsed.issues) ? parsed.issues : input.issues,
+    passed: result.data.passed,
+    severity: result.data.severity,
+    issues: result.data.issues.length > 0 ? result.data.issues : input.issues,
     shouldRunLlmFallback: false,
   }
 }

@@ -106,5 +106,36 @@ export function getAnthropicHeaders(): Record<string, string> {
     'Content-Type': 'application/json',
     'x-api-key': getEnv().ANTHROPIC_API_KEY,
     'anthropic-version': '2023-06-01',
+    'anthropic-beta': 'prompt-caching-2024-07-31',
   }
+}
+
+// ============================================================
+// Prompt Caching 共用 helper
+// ============================================================
+
+/** system prompt 的可快取型別（string 或 TextBlockParam[]） */
+export type CacheableSystemPrompt = string | Anthropic.Messages.TextBlockParam[]
+
+/**
+ * 將 system prompt 拆分為 static（cacheable）+ dynamic block。
+ * ENABLE_PROMPT_CACHING=false 時回退為 plain string。
+ *
+ * static 部分必須放在最前面（prefix matching），跨呼叫不變的規則/模板放這裡。
+ * dynamic 部分放每次呼叫會變的內容（feature name、action info 等）。
+ */
+export function buildCacheableSystem(
+  staticPart: string,
+  dynamicPart?: string,
+): CacheableSystemPrompt {
+  if (!getEnv().ENABLE_PROMPT_CACHING) {
+    return dynamicPart ? staticPart + '\n\n' + dynamicPart : staticPart
+  }
+  const blocks: Anthropic.Messages.TextBlockParam[] = [
+    { type: 'text' as const, text: staticPart, cache_control: { type: 'ephemeral' as const } },
+  ]
+  if (dynamicPart) {
+    blocks.push({ type: 'text' as const, text: dynamicPart })
+  }
+  return blocks
 }

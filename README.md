@@ -16,7 +16,7 @@ Tellcraft 是一個 AI 驅動的 **SDD（Specification-Driven Development）自�
 | **後端** | Express + BullMQ + Socket.io | VPS 部署，PM2 管理 |
 | **資料庫** | PostgreSQL（VPS 本地） | 低延遲，自主控制 |
 | **佇列/狀態** | Redis | BullMQ 任務佇列 + 串流狀態 |
-| **LLM** | Claude Sonnet / Haiku | Anthropic SDK |
+| **LLM** | Claude Sonnet / Haiku | Anthropic SDK + Structured Outputs + Prompt Caching |
 | **動畫** | motion/react + Remotion | 需求藍圖面板 + 串流動畫 |
 | **i18n** | next-intl v4 | 中/英雙語，`[locale]` 路由 |
 | **樣式** | Tailwind CSS v4 | `@import "tailwindcss"` 語法 |
@@ -1026,8 +1026,10 @@ psql "$DATABASE_URL" -f tellcraft-backend/migrations/xxx.sql
 <details>
 <summary><h2>開發更新紀錄（點擊展開）</h2></summary>
 
-### 近期更新（2026-03-13 ~ 2026-03-25）
+### 近期更新（2026-03-13 ~ 2026-04-03）
 
+- **Prompt Caching 擴展**（04-03）：共用 `buildCacheableSystem()` helper（`lib/anthropic.ts`）+ `CacheableSystemPrompt` type。擴展到 4 個服務：formulation.ts（ISA SpecFormula 規則跨 5-20 個 feature 快取，省 ~84% system prompt input tokens）、coder-generation.ts（BASE_PROMPT 跨 action 快取 + rewrite prompt 全靜態快取）、web-clone-service.ts（CLONE_SYSTEM_PROMPT 跨 section 快取）。`callStructured()` 加入 cache metric tracking。raw fetch 加 `anthropic-beta: prompt-caching-2024-07-31` header
+- **Structured Outputs 全面遷移**（04-03）：25+ 個 JSON 輸出 LLM 呼叫從 `safeParseJson()` 遷移到 `callStructured<T>()` + Zod schema（4 Phase + 補漏），消除所有 JSON 解析失敗
 - **RED Phase 三層驗證 + 回歸保護 + 雙層完成驗證**（03-26）：(1) Layer 1 從 8→11 個靜態檢查，新增 Schema DataTable 深度對齊（Check 9 Column Coverage + Check 10 NOT NULL Completeness + Check 11 FK Reference Validity）；(2) 新增 Layer 2.5 RoutingStubAdapter — in-process Express 真實路由匹配（匹配→501，不匹配→404），透過 SupertestAdapter 做零啟動成本的 HTTP 驗證；(3) Stage B Phase 2 全量回歸從「修一次」升級為最多 2 輪智能修復迴圈，失敗集合相同自動跳過；(4) 雙層完成驗證：測試全通過→部署(primary)，測試有失敗→重試(primary)+帶風險部署(secondary)+二次確認閘門
 
 - **WebContainer 載入優化**（03-19）：Pre-boot + Pre-install 機制 — 代碼生成期間自動預啟 WebContainer 並安裝 BASE_DEPS（next/react/tailwindcss 等 7 個核心包），生成完成時 node_modules 已就位，只需增量安裝額外依賴。`useWebContainerPreloader` 監聽生成階段觸發（`fast_generating`/`uiux_code_generation`/`uiux_variant_selection` 等），module-level singleton 跨對話復用。`writeFilesToContainer()` 逐檔寫入替代 `mount()`（後者會清除整個 fs 包括 node_modules）。預期首次預覽載入從 ~60s 降到 ~10-15s

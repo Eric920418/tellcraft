@@ -4,7 +4,7 @@
  */
 
 import { z } from 'zod'
-import { getAnthropicClient, MODEL, trackLlmUsage } from '../lib/anthropic'
+import { getAnthropicClient, MODEL, trackLlmUsage, buildCacheableSystem } from '../lib/anthropic'
 import { callStructured } from '../lib/structured-output'
 import { getEnv } from '../lib/env'
 import { createLogger } from '../lib/logger'
@@ -391,7 +391,7 @@ ${imagesText}
     const response = await client.messages.create({
       model: MODEL.SONNET,
       max_tokens: 8192,
-      system: CLONE_SYSTEM_PROMPT,
+      system: buildCacheableSystem(CLONE_SYSTEM_PROMPT),
       messages: [{
         role: 'user',
         content: [
@@ -405,12 +405,15 @@ ${imagesText}
     })
 
     if (response.usage) {
+      const usageAny = response.usage as unknown as Record<string, unknown>
       trackLlmUsage({
         model: MODEL.SONNET,
         inputTokens: response.usage.input_tokens,
         outputTokens: response.usage.output_tokens,
         purpose: 'clone_section_generation',
         conversationId: trackingContext?.conversationId,
+        cacheCreationTokens: (usageAny.cache_creation_input_tokens as number) || 0,
+        cacheReadTokens: (usageAny.cache_read_input_tokens as number) || 0,
       })
     }
 
@@ -746,7 +749,7 @@ ${sectionsHint}
     const response = await client.messages.create({
       model: MODEL.SONNET,
       max_tokens: 16384,
-      system: CLONE_IMAGE_PAGE_SYSTEM_PROMPT,
+      system: buildCacheableSystem(CLONE_IMAGE_PAGE_SYSTEM_PROMPT),
       messages: [{
         role: 'user',
         content: [
@@ -757,12 +760,15 @@ ${sectionsHint}
     })
 
     if (response.usage) {
+      const usageAny = response.usage as unknown as Record<string, unknown>
       trackLlmUsage({
         model: MODEL.SONNET,
         inputTokens: response.usage.input_tokens,
         outputTokens: response.usage.output_tokens,
         purpose: 'clone_image_page_generation',
         conversationId: trackingContext?.conversationId,
+        cacheCreationTokens: (usageAny.cache_creation_input_tokens as number) || 0,
+        cacheReadTokens: (usageAny.cache_read_input_tokens as number) || 0,
       })
     }
 

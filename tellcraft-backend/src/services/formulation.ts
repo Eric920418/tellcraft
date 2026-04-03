@@ -1,6 +1,6 @@
 import { z } from 'zod'
 import { createLogger } from '../lib/logger'
-import { getAnthropicHeaders, MODEL, trackLlmUsage } from '../lib/anthropic'
+import { getAnthropicHeaders, MODEL, trackLlmUsage, buildCacheableSystem, type CacheableSystemPrompt } from '../lib/anthropic'
 import { callStructured } from '../lib/structured-output'
 import { ClarifyItem, TechnicalContext } from './bdd-session'
 import { LlmTrackingContext } from './classifier'
@@ -87,7 +87,7 @@ function isRetryableFetchError(err: unknown): boolean {
 }
 
 async function callClaude(
-  systemPrompt: string,
+  systemPrompt: CacheableSystemPrompt,
   userMessage: string,
   options: { maxTokens?: number; temperature?: number } = {}
 ): Promise<{
@@ -126,7 +126,7 @@ async function callClaude(
       }
 
       const data = await response.json() as {
-        usage?: { input_tokens: number; output_tokens: number }
+        usage?: { input_tokens: number; output_tokens: number; cache_creation_input_tokens?: number; cache_read_input_tokens?: number }
         content?: Array<{ text: string }>
       }
 
@@ -570,12 +570,8 @@ export async function generateSingleFeature(
     ? extractSchemaHints(relatedItems)
     : extractSchemaHints(resolvedItems)
 
-  const systemPrompt = `你是一位資深的 BDD 分析師。請為指定的功能產出 Gherkin Feature File。
-
-## 目標功能
-- 名稱：${featureInfo.name}
-- Action：${featureInfo.actionName}
-- 描述：${featureInfo.description}
+  // ── Prompt Caching: 靜態 ISA 規則放 Block 1（跨 feature 快取），動態 feature info 放 Block 2 ──
+  const staticSystemPrompt = `你是一位資深的 BDD 分析師。請為指定的功能產出 Gherkin Feature File。
 
 ## sdd.os ISA SpecFormula 標準格式規範
 
@@ -647,7 +643,12 @@ Rule: <四類前綴> - <主詞> 必須/應 <單一條件>
 
 ### 每個 Feature 至少必須有
 - 至少 1 條「前置（參數）」Rule（必要參數檢查）
-- 至少 1 條「後置」Rule（回應或狀態）
+- 至少 1 條「後置」Rule（回應或狀態）`
+
+  const dynamicSystemPrompt = `## 目標功能
+- 名稱：${featureInfo.name}
+- Action：${featureInfo.actionName}
+- 描述：${featureInfo.description}
 
 ## 輸出格式
 直接輸出完整的 .feature 檔案內容，不需要 JSON 包裝。
@@ -778,6 +779,8 @@ Action 函數會自行 \`split(',')\` 處理。
 - 適用：多個缺少必要參數的情境（模式完全相同，只是缺少的欄位不同）
 - 不適用：有領域特定約束的規則（如「數量>0」「金額≥最低消費」）→ 各自獨立 Rule
 - 不適用：成功路徑（後置規則）→ 通常各有不同驗證邏輯`
+
+  const systemPrompt = buildCacheableSystem(staticSystemPrompt, dynamicSystemPrompt)
 
   const userMessage = `${projectContext ? `專案背景：${projectContext}\n\n` : ''}需求描述：
 ${requirements}
