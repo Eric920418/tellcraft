@@ -296,14 +296,35 @@ export async function executeCoderSkill(input: CoderSkillInput): Promise<void> {
         trackingContext: { userId, conversationId },
       })
 
-      if (gateResult.fixedFeatures) {
-        // 用修復後的 Features 更新 DB + 後續流程
-        bddSession.features_content = gateResult.fixedFeatures
-        await db.query(
-          `UPDATE bdd_sessions SET features_content = $1 WHERE id = $2`,
-          [JSON.stringify(gateResult.fixedFeatures), bddSession.id]
-        )
-        logger.info({ fixedCount: gateResult.fixedIssueCount }, 'Alignment Gate: 已自動修復 Features 並更新 DB')
+      if (gateResult.fixedFeatures || gateResult.fixedSchemaSql || gateResult.fixedEntityMapping) {
+        // 用修復後的 Features + Schema + EntityMapping 更新 DB
+        const setClauses: string[] = []
+        const params: unknown[] = []
+
+        if (gateResult.fixedFeatures) {
+          bddSession.features_content = gateResult.fixedFeatures
+          params.push(JSON.stringify(gateResult.fixedFeatures))
+          setClauses.push(`features_content = $${params.length}`)
+        }
+        if (gateResult.fixedSchemaSql) {
+          bddSession.schema_sql_content = gateResult.fixedSchemaSql
+          params.push(gateResult.fixedSchemaSql)
+          setClauses.push(`schema_sql_content = $${params.length}`)
+        }
+        if (gateResult.fixedEntityMapping) {
+          bddSession.entity_mapping_content = gateResult.fixedEntityMapping
+          params.push(gateResult.fixedEntityMapping)
+          setClauses.push(`entity_mapping_content = $${params.length}`)
+        }
+
+        if (setClauses.length > 0) {
+          params.push(bddSession.id)
+          await db.query(
+            `UPDATE bdd_sessions SET ${setClauses.join(', ')} WHERE id = $${params.length}`,
+            params
+          )
+        }
+        logger.info({ fixedCount: gateResult.fixedIssueCount, schemaUpdated: !!gateResult.fixedSchemaSql }, 'Alignment Gate: 已自動修復並更新 DB')
       }
 
       if (gateResult.blocked) {

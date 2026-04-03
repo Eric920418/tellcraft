@@ -2653,19 +2653,30 @@ async function fixFeaturesAndComplete(
     return fixed || f
   })
 
+  // 條件更新 Schema + EntityMapping（品質檢查修復可能需要同步修改 Schema）
+  const dbUpdates: Record<string, unknown> = {
+    featuresContent: updatedFeatures,
+  }
+  if (fixResult.updatedSchemaSql && fixResult.updatedSchemaSql.trim() !== schemaSql.trim()) {
+    dbUpdates.schemaSqlContent = fixResult.updatedSchemaSql
+  }
+  if (fixResult.updatedEntityMapping && fixResult.updatedEntityMapping.trim() !== entityMapping.trim()) {
+    dbUpdates.entityMappingContent = fixResult.updatedEntityMapping
+  }
   await updateBddSession({
     sessionId: state.sessionId!,
-    updates: {
-      featuresContent: updatedFeatures,
-    },
+    updates: dbUpdates,
   })
 
+  const schemaUpdated = dbUpdates.schemaSqlContent ? '（含資料庫 Schema 更新）' : ''
   await sendMessage(conversationId, io, {
-    content: `已修正 ${fixResult.fixedFeatures.length} 個功能規格。`,
+    content: `已修正 ${fixResult.fixedFeatures.length} 個功能規格${schemaUpdated}。`,
     stage: 'spec_fix_complete',
   })
 
-  // 檢查是否需要更多輪 Spec Discovery
+  // 檢查是否需要更多輪 Spec Discovery（使用更新後的 Schema）
+  const nextSchemaSql = (dbUpdates.schemaSqlContent as string) || schemaSql
+  const nextEntityMapping = (dbUpdates.entityMappingContent as string) || entityMapping
   if (state.specRound! < SPEC_DISCOVERY_LIMITS.MAX_ROUNDS) {
     await sendMessage(conversationId, io, {
       content: '正在進行第二輪品質檢查...',
@@ -2673,7 +2684,7 @@ async function fixFeaturesAndComplete(
     })
     // 清除這一輪的 issues
     state.specIssues = undefined
-    await startSpecDiscovery(conversationId, state, updatedFeatures, schemaSql, entityMapping, redis, io)
+    await startSpecDiscovery(conversationId, state, updatedFeatures, nextSchemaSql, nextEntityMapping, redis, io)
   } else {
     await completeSpecPhase(conversationId, state, redis, io)
   }

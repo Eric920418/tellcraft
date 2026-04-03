@@ -1028,6 +1028,8 @@ export async function fixMultipleFeatures(
 ): Promise<{
   success: boolean
   fixedFeatures?: GeneratedFeature[]
+  updatedSchemaSql?: string
+  updatedEntityMapping?: string
   error?: string
 }> {
   if (features.length === 0) {
@@ -1052,7 +1054,7 @@ export async function fixMultipleFeatures(
   async function fixFeatureBatch(
     batch: FeatureFixInput[],
     batchLabel: string
-  ): Promise<{ success: boolean; fixedFeatures?: GeneratedFeature[]; error?: string }> {
+  ): Promise<{ success: boolean; fixedFeatures?: GeneratedFeature[]; updatedSchemaSql?: string; updatedEntityMapping?: string; error?: string }> {
     const systemPrompt = `你是一位 sdd.os ISA SpecFormula 標準 Gherkin 專家。請根據用戶反饋修正以下 Feature Files。
 
 ## sdd.os ISA SpecFormula 標準格式規範
@@ -1079,10 +1081,15 @@ export async function fixMultipleFeatures(
 ## 重要約束
 修復時必須嚴格遵守：
 1. 用戶在釐清階段做出的所有決策
-2. Schema 定義的欄位名稱和類型
-3. Entity Mapping 中的實體命名
-4. 若原有 @Pre → 改為「前置（狀態）」或「前置（參數）」（根據內容判斷）
-5. 若原有 @Post → 改為「後置（回應）」或「後置（狀態）」（根據內容判斷）
+2. 若原有 @Pre → 改為「前置（狀態）」或「前置（參數）」（根據內容判斷）
+3. 若原有 @Post → 改為「後置（回應）」或「後置（狀態）」（根據內容判斷）
+
+## Schema 修改權限
+- **預設情況**：Feature 修復應遵守現有 Schema 定義的欄位名稱和類型
+- **允許修改 Schema 的情況**：當用戶釐清決策明確要求新增欄位、新增表、或修改欄位類型時，你**必須**同時修改 Schema SQL 和 Entity Mapping
+- 修改 Schema 時，輸出完整的 SQL DDL（不是 diff），保留所有原有表和欄位
+- 修改 Entity Mapping 時，輸出完整的 YAML（不是 diff），保留所有原有映射
+- 如果不需要修改 Schema/Entity Mapping，對應欄位輸出 null
 
 ## 輸出格式
 只輸出 JSON，不要加任何解釋、分析、或前言文字。直接以 { 開頭。
@@ -1090,9 +1097,13 @@ export async function fixMultipleFeatures(
 {
   "features": [
     { "name": "Feature名稱", "actionName": "action_name", "content": "修正後的完整 gherkin 內容" }
-  ]
+  ],
+  "schemaSql": null,
+  "entityMapping": null
 }
-\`\`\``
+\`\`\`
+- \`schemaSql\`: 修改後的完整 SQL DDL，或 null（不需要修改時）
+- \`entityMapping\`: 修改後的完整 YAML，或 null（不需要修改時）`
 
     const featuresContent = batch.map(f =>
       `### Feature: ${f.name} (${f.actionName})\n\n**需修復的問題**:\n${f.issues.map((e, i) => `${i + 1}. ${e}`).join('\n')}\n\n**當前內容**:\n\`\`\`gherkin\n${f.content}\n\`\`\``
@@ -1129,6 +1140,8 @@ ${decisions}` : ''}
         actionName: z.string(),
         content: z.string(),
       })),
+      schemaSql: z.string().nullable(),
+      entityMapping: z.string().nullable(),
     })
 
     const result = await callStructured({
@@ -1157,10 +1170,17 @@ ${decisions}` : ''}
         logger.info({ feature: feature.name, fixes: featureFixes }, '修復後 Feature 後置修正')
       }
     }
+    const schemaChanged = !!result.data.schemaSql
+    const mappingChanged = !!result.data.entityMapping
+    if (schemaChanged || mappingChanged) {
+      logger.info({ batchLabel, schemaChanged, mappingChanged }, '修復含 Schema/EntityMapping 更新')
+    }
     logger.info({ batchLabel, fixedCount: fixedFeatures.length }, '修復完成')
     return {
       success: true,
       fixedFeatures,
+      updatedSchemaSql: result.data.schemaSql || undefined,
+      updatedEntityMapping: result.data.entityMapping || undefined,
     }
   }
 
@@ -1173,6 +1193,8 @@ ${decisions}` : ''}
   // 分批修復
   logger.info({ featureCount: features.length, batchSize: BATCH_SIZE }, '啟用分批修復')
   const allFixed: GeneratedFeature[] = []
+  let latestSchemaSql: string | undefined
+  let latestEntityMapping: string | undefined
   let batchIndex = 0
 
   for (let i = 0; i < features.length; i += BATCH_SIZE) {
@@ -1183,14 +1205,16 @@ ${decisions}` : ''}
     const result = await fixFeatureBatch(batch, batchLabel)
     if (result.success && result.fixedFeatures) {
       allFixed.push(...result.fixedFeatures)
+      if (result.updatedSchemaSql) latestSchemaSql = result.updatedSchemaSql
+      if (result.updatedEntityMapping) latestEntityMapping = result.updatedEntityMapping
     } else {
       logger.warn({ batchLabel, failedCount: batch.length }, '批次修復失敗，保留原始 Features')
       allFixed.push(...batch.map(f => ({ name: f.name, actionName: f.actionName, content: f.content })))
     }
   }
 
-  logger.info({ totalFixed: allFixed.length }, '分批修復完成')
-  return { success: true, fixedFeatures: allFixed }
+  logger.info({ totalFixed: allFixed.length, schemaUpdated: !!latestSchemaSql, mappingUpdated: !!latestEntityMapping }, '分批修復完成')
+  return { success: true, fixedFeatures: allFixed, updatedSchemaSql: latestSchemaSql, updatedEntityMapping: latestEntityMapping }
 }
 
 // ============================================================

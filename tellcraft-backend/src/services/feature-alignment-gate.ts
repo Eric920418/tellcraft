@@ -39,6 +39,8 @@ export interface AlignmentGateResult {
   passed: boolean
   blocked: boolean
   fixedFeatures?: Array<{ name?: string; actionName: string; content: string }>
+  fixedSchemaSql?: string
+  fixedEntityMapping?: string
   issues: AlignmentIssue[]
   fixedIssueCount: number
   remainingIssueCount: number
@@ -507,6 +509,8 @@ async function autoFixFeatures(
 ): Promise<{
   fixedFeatures: Array<{ name?: string; actionName: string; content: string }>
   fixApplied: boolean
+  updatedSchemaSql?: string
+  updatedEntityMapping?: string
 }> {
   // 按 feature 分組 issues
   const issuesByFeature = new Map<string, AlignmentIssue[]>()
@@ -570,7 +574,12 @@ async function autoFixFeatures(
     return f
   })
 
-  return { fixedFeatures: merged, fixApplied: true }
+  return {
+    fixedFeatures: merged,
+    fixApplied: true,
+    updatedSchemaSql: result.updatedSchemaSql,
+    updatedEntityMapping: result.updatedEntityMapping,
+  }
 }
 
 // ============================================================
@@ -582,11 +591,15 @@ const MAX_FIX_ROUNDS = 2
 export async function runFeatureAlignmentGate(input: AlignmentGateInput): Promise<AlignmentGateResult> {
   const start = Date.now()
   let currentFeatures = input.features
+  let currentSchemaSql = input.schemaSql
+  let currentEntityMapping = input.entityMapping
+  let latestFixedSchemaSql: string | undefined
+  let latestFixedEntityMapping: string | undefined
   let totalFixedCount = 0
 
   for (let round = 0; round < MAX_FIX_ROUNDS; round++) {
-    // 執行檢查
-    const issues = await runAlignmentChecks({ ...input, features: currentFeatures })
+    // 執行檢查（使用可能已更新的 schema）
+    const issues = await runAlignmentChecks({ ...input, features: currentFeatures, schemaSql: currentSchemaSql, entityMapping: currentEntityMapping })
     const errorIssues = issues.filter(i => i.severity === 'error')
 
     logger.info({
@@ -602,6 +615,8 @@ export async function runFeatureAlignmentGate(input: AlignmentGateInput): Promis
         passed: true,
         blocked: false,
         fixedFeatures: totalFixedCount > 0 ? currentFeatures : undefined,
+        fixedSchemaSql: latestFixedSchemaSql,
+        fixedEntityMapping: latestFixedEntityMapping,
         issues,
         fixedIssueCount: totalFixedCount,
         remainingIssueCount: issues.filter(i => i.severity === 'warning').length,
@@ -616,6 +631,8 @@ export async function runFeatureAlignmentGate(input: AlignmentGateInput): Promis
         passed: false,
         blocked: true,
         fixedFeatures: totalFixedCount > 0 ? currentFeatures : undefined,
+        fixedSchemaSql: latestFixedSchemaSql,
+        fixedEntityMapping: latestFixedEntityMapping,
         issues,
         fixedIssueCount: totalFixedCount,
         remainingIssueCount: errorIssues.length,
@@ -626,11 +643,11 @@ export async function runFeatureAlignmentGate(input: AlignmentGateInput): Promis
 
     // 嘗試自動修復
     const beforeCount = errorIssues.length
-    const { fixedFeatures, fixApplied } = await autoFixFeatures(
+    const { fixedFeatures, fixApplied, updatedSchemaSql, updatedEntityMapping } = await autoFixFeatures(
       currentFeatures,
       issues,
-      input.schemaSql,
-      input.entityMapping,
+      currentSchemaSql,
+      currentEntityMapping,
       input.trackingContext,
     )
 
@@ -650,8 +667,16 @@ export async function runFeatureAlignmentGate(input: AlignmentGateInput): Promis
     }
 
     currentFeatures = fixedFeatures
-    // 重新檢查看修了多少
-    const postFixIssues = await runAlignmentChecks({ ...input, features: currentFeatures })
+    if (updatedSchemaSql) {
+      currentSchemaSql = updatedSchemaSql
+      latestFixedSchemaSql = updatedSchemaSql
+    }
+    if (updatedEntityMapping) {
+      currentEntityMapping = updatedEntityMapping
+      latestFixedEntityMapping = updatedEntityMapping
+    }
+    // 重新檢查看修了多少（使用可能已更新的 schema）
+    const postFixIssues = await runAlignmentChecks({ ...input, features: currentFeatures, schemaSql: currentSchemaSql, entityMapping: currentEntityMapping })
     const postFixErrors = postFixIssues.filter(i => i.severity === 'error')
     const fixedThisRound = beforeCount - postFixErrors.length
     totalFixedCount += Math.max(0, fixedThisRound)
@@ -665,6 +690,8 @@ export async function runFeatureAlignmentGate(input: AlignmentGateInput): Promis
           passed: false,
           blocked: true,
           fixedFeatures: totalFixedCount > 0 ? currentFeatures : undefined,
+          fixedSchemaSql: latestFixedSchemaSql,
+          fixedEntityMapping: latestFixedEntityMapping,
           issues: postFixIssues,
           fixedIssueCount: totalFixedCount,
           remainingIssueCount: postFixErrors.length,
