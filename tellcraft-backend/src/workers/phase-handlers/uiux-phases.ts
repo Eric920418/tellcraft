@@ -1238,6 +1238,29 @@ export async function executeFullCodePipeline(
     return
   }
 
+  // ── 全程心跳：每 15 秒觸發，確保 post-processing 期間（syntax fix、QG）不被 recovery 誤殺 ──
+  const heartbeatInterval = setInterval(() => {
+    void touchFlowActivity(redis, conversationId)
+  }, 15_000)
+
+  // ── Pipeline guard：偵測 FlowState phase 被外部改變（recovery 或新 job），中止殭屍管線 ──
+  // 不能只查 conv-lock 是否存在（新 job 會拿到新鎖），必須查 phase 是否仍是 uiux_code_generation
+  const checkPipelineStillOwned = async (): Promise<boolean> => {
+    try {
+      const fresh = await getFlowState(redis, conversationId)
+      if (!fresh || (fresh.phase !== 'uiux_code_generation' && fresh.phase !== 'uiux_quality_gate')) {
+        logger.warn({ conversationId, currentPhase: fresh?.phase }, 'Pipeline guard: phase 已被外部改變（recovery/新 job），中止管線')
+        clearInterval(heartbeatInterval)
+        return false
+      }
+      return true
+    } catch {
+      return true // Redis 錯誤時不中止
+    }
+  }
+
+  try {
+
   const { template: dbTemplate, bddSpec, originalRequirements, actionsYml } = await getTemplateAndBddSpec(sessionId)
   const template = state.uiuxPreparedTemplate || dbTemplate
   const pages = template.pageStructure.pages || ['home']
@@ -1339,6 +1362,9 @@ export async function executeFullCodePipeline(
       styles: structureResult.styles || '',
     }
 
+    // ── Pipeline guard：Structure 完成後檢查 phase 是否仍由本 job 持有 ──
+    if (!(await checkPipelineStillOwned())) return
+
     // ── Structure 中途存檔（防止後續階段中斷丟失進度）──
     state.uiuxGeneratedCode = currentCode
     state.uiuxStructureCode = currentCode
@@ -1388,6 +1414,9 @@ export async function executeFullCodePipeline(
       logger.warn({ err: animationResult.error }, 'Pipeline 動畫生成失敗，使用結構代碼繼續')
     }
 
+    // ── Pipeline guard：Animation 完成後檢查 phase 是否仍由本 job 持有 ──
+    if (!(await checkPipelineStillOwned())) return
+
     // ── Animation 中途存檔 ──
     state.uiuxGeneratedCode = currentCode
     state.uiuxAnimationCode = currentCode
@@ -1433,6 +1462,9 @@ export async function executeFullCodePipeline(
   } else {
     logger.warn({ err: rwdResult.error }, 'Pipeline RWD 生成失敗，使用動畫代碼繼續')
   }
+
+  // ── Pipeline guard：RWD 完成後、QG 前檢查 phase 是否仍由本 job 持有 ──
+  if (!(await checkPipelineStillOwned())) return
 
   // ===== Quality Gate（靜默執行）=====
   const MAX_FIX_ATTEMPTS = 3
@@ -1551,6 +1583,10 @@ export async function executeFullCodePipeline(
   })
 
   logger.info(`Pipeline 完成: ${finalPageCount} pages, ${finalComponentCount} components, QG passed=${report.passed}`)
+
+  } finally {
+    clearInterval(heartbeatInterval)
+  }
 }
 
 /**

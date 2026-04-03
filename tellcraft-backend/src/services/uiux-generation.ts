@@ -3926,7 +3926,7 @@ ${interactionSection}
 ${productContext?.incrementalFirstBatch
 ? `**嚴格限制：本批次只生成以下頁面**：${targetPages.join(', ')}
 - ⚠️ 禁止生成上述列表以外的頁面（其他頁面會在後續批次生成）
-- 必須生成 Layout 組件（Header + Footer），Header 導航連結預留所有頁面
+- 必須生成 app/layout.tsx（root layout 必須含 \`<html lang="zh-TW">\` 和 \`<body>\` 標籤包裹 Header + children + Footer）
 - 必須生成 globals.css
 - 頁面中使用有意義的模擬數據（和產品領域相關）
 - 共用組件盡量抽取，後續批次可直接 import 複用`
@@ -3985,11 +3985,11 @@ ${isLaterBatch
 2. 這些頁面的專屬 UI 組件（共用 Layout/Header/Footer 已存在，不需輸出）`
 : productContext?.layoutMode === 'app'
 ? `1. 功能頁面的 page.tsx（完整互動功能，佔滿螢幕）
-2. App Shell Layout（如需側邊欄導航；單頁工具只需基本 layout，無 Header/Footer/Hero）
+2. app/layout.tsx — root layout 必須含 \`<html>\` 和 \`<body>\` 標籤（如需側邊欄導航；單頁工具只需基本 layout）
 3. 功能所需的 UI 組件
 4. globals.css（包含 CSS variables）`
 : `1. 每個頁面的 page.tsx（完整互動結構，根據需求規格決定具體內容）
-2. 共用的 Layout 組件（Header, Footer — 導航項對應實際頁面）
+2. app/layout.tsx — root layout 必須含 \`<html lang="zh-TW">\` 和 \`<body>\` 標籤，包裹 Header + {children} + Footer
 3. 頁面所需的 UI 組件（根據功能需求決定，不要為了生成而生成）
 4. globals.css（包含 CSS variables）`}
 

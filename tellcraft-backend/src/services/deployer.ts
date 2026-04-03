@@ -565,6 +565,73 @@ export default function Page() {
     fixes.push(`globals.css: 移除 Google Fonts @import`)
   }
 
+  // ── 修復 8: root layout 缺少 <html>/<body> 標籤 ──
+  // LLM 可能生成 app/layout.tsx 但只有 Header/Footer 包裹，缺少 Next.js 必要的 <html> 和 <body>
+  for (const file of [...sanitized.pages, ...sanitized.components]) {
+    if (file.path !== 'app/layout.tsx' && file.path !== 'app/layout.ts') continue
+    const hasHtml = /<html[\s>]/.test(file.content)
+    const hasBody = /<body[\s>]/.test(file.content)
+    if (hasHtml && hasBody) continue
+
+    if (hasHtml && !hasBody) {
+      // 有 <html> 沒 <body>：在 <html> 內層包一層 body
+      file.content = file.content.replace(
+        /(<html[^>]*>)([\s\S]*?)(<\/html>)/,
+        '$1\n      <body>$2</body>\n    $3'
+      )
+      fixes.push(`${file.path}: 自動補上缺失的 <body> 標籤`)
+    } else {
+      // 沒有 <html>（也可能沒 <body>）：替換 Fragment 或 div wrapper 為 html+body
+      let fixed = false
+
+      // 情況 A：return (<> ... </>)  →  return (<html><body> ... </body></html>)
+      if (!fixed && /return\s*\(\s*<>/.test(file.content)) {
+        file.content = file.content.replace(
+          /(<>)/,
+          '<html lang="zh-TW">\n      <body>'
+        )
+        file.content = file.content.replace(
+          /(<\/>)(\s*\)\s*$)/m,
+          '</body>\n    </html>$2'
+        )
+        fixed = true
+      }
+
+      // 情況 B：return (<div ...> ... </div>)  →  把外層 div 換成 html+body
+      if (!fixed && /return\s*\(\s*<div/.test(file.content)) {
+        file.content = file.content.replace(
+          /return\s*\(\s*<div[^>]*>/,
+          'return (\n    <html lang="zh-TW">\n      <body>'
+        )
+        // 替換最後一個 </div> 為 </body></html>
+        const lastDivIdx = file.content.lastIndexOf('</div>')
+        if (lastDivIdx !== -1) {
+          file.content = file.content.slice(0, lastDivIdx) + '</body>\n    </html>' + file.content.slice(lastDivIdx + 6)
+        }
+        fixed = true
+      }
+
+      // 情況 C：其他情況 — 在 return ( 之後和對應的 ) 之前包裹
+      if (!fixed) {
+        file.content = file.content.replace(
+          /return\s*\(/,
+          'return (\n    <html lang="zh-TW">\n      <body>'
+        )
+        // 找最後一個 ) 前加 </body></html>
+        const lastParen = file.content.lastIndexOf(')')
+        if (lastParen !== -1) {
+          file.content = file.content.slice(0, lastParen) + '\n      </body>\n    </html>\n  ' + file.content.slice(lastParen)
+        }
+        fixed = true
+      }
+
+      const fixedParts: string[] = []
+      if (!hasHtml) fixedParts.push('<html>')
+      if (!hasBody) fixedParts.push('<body>')
+      fixes.push(`${file.path}: 自動補上缺失的 ${fixedParts.join(' 和 ')} 標籤`)
+    }
+  }
+
   // ── 修復 5: Tailwind v4 CSS 語法 → v3 ──
   const beforeClean = sanitized.styles
   sanitized.styles = cleanTailwindV4Syntax(sanitized.styles)

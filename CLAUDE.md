@@ -352,7 +352,7 @@ Feature 註解：`# Action: actionName` + `# [METHOD] /path` + `# Summary: xxx`
 - **文檔與實作同步**：改後端流程 → 同步更新 `uiux-skill/instructions/` + 此文件
 - **`handleCodePhaseRedo` 需要快照**：`uiuxStructureCode`/`uiuxAnimationCode`，否則 redo 在已修改代碼上重做
 - **`verifyBuildLocally` 的修復結果必須同步回 DB**：否則預覽和部署代碼分岔
-- **部署五層防禦**：L1 generateStructure 後驗證引用 → L2 sanitizeCodeForDeploy stub 生成 + `??` 與 `||/&&` 混用自動加括號 → L3 fixBuildErrors API 重試 → L4 build 循環 3+1 次 → L5 useSearchParams Suspense 拆分
+- **部署五層防禦**：L1 generateStructure 後驗證引用 → L2 sanitizeCodeForDeploy stub 生成 + `??` 與 `||/&&` 混用自動加括號 + root layout html/body 自動補全 → L3 fixBuildErrors API 重試 → L4 build 循環 3+1 次 → L5 useSearchParams Suspense 拆分
 - **Anthropic 模型 ID**：一律用 `claude-sonnet-4-6`（不加日期後綴），`claude-sonnet-4-6-20250514` 不存在會 404。全 codebase 用 `semantic-gateway.ts` 定義的常數而非手打
 - **Anthropic SDK v0.72+**：大 `max_tokens` 必須用 `messages.stream()` + `await stream.finalMessage()`
 - **Skill 函數提前 return 必須保存 FlowState**：否則 `handleContinueFlow` 找不到 state → 用戶對話永久卡死

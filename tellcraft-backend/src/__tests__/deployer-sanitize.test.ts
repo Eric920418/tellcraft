@@ -420,6 +420,85 @@ describe('toVercelSlug', () => {
 })
 
 // ============================================================
+// Fix 8: root layout 缺少 <html>/<body>
+// ============================================================
+
+describe('Fix 8: root layout 缺少 html/body', () => {
+  it('Fragment wrapper 應被替換為 html+body', () => {
+    const code = makeCode({
+      components: [makeFile('app/layout.tsx', `import Header from './Header'
+import Footer from './Footer'
+
+export default function RootLayout({ children }: { children: React.ReactNode }) {
+  return (
+    <>
+      <Header />
+      {children}
+      <Footer />
+    </>
+  )
+}`)],
+    })
+    const result = sanitizeCodeForDeploy(code)
+    const layout = result.code.components[0].content
+    expect(layout).toContain('<html lang="zh-TW">')
+    expect(layout).toContain('<body>')
+    expect(layout).toContain('</body>')
+    expect(layout).toContain('</html>')
+    expect(layout).not.toContain('<>')
+    expect(layout).not.toContain('</>')
+    expect(result.fixes.some(f => f.includes('html') || f.includes('body'))).toBe(true)
+  })
+
+  it('已有 html+body 的 layout 不應被修改', () => {
+    const original = `export default function Layout({ children }: any) { return <html><body>{children}</body></html> }`
+    const code = makeCode({
+      pages: [makeFile('app/layout.tsx', original)],
+    })
+    const result = sanitizeCodeForDeploy(code)
+    const layout = result.code.pages[0].content
+    expect(layout).toContain('<html>')
+    expect(layout).toContain('<body>')
+    expect(result.fixes.every(f => !f.includes('自動補上'))).toBe(true)
+  })
+
+  it('有 html 但沒 body 應只補 body', () => {
+    const code = makeCode({
+      components: [makeFile('app/layout.tsx', `export default function RootLayout({ children }: { children: React.ReactNode }) {
+  return (
+    <html lang="en">
+      <Header />
+      {children}
+    </html>
+  )
+}`)],
+    })
+    const result = sanitizeCodeForDeploy(code)
+    const layout = result.code.components[0].content
+    expect(layout).toContain('<body>')
+    expect(layout).toContain('</body>')
+    expect(result.fixes.some(f => f.includes('<body>'))).toBe(true)
+  })
+
+  it('div wrapper 應被替換為 html+body', () => {
+    const code = makeCode({
+      components: [makeFile('app/layout.tsx', `export default function RootLayout({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="min-h-screen">
+      {children}
+    </div>
+  )
+}`)],
+    })
+    const result = sanitizeCodeForDeploy(code)
+    const layout = result.code.components[0].content
+    expect(layout).toContain('<html lang="zh-TW">')
+    expect(layout).toContain('<body>')
+    expect(layout).not.toMatch(/<div className="min-h-screen">/)
+  })
+})
+
+// ============================================================
 // Coder Skill 後端依賴偵測
 // ============================================================
 

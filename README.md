@@ -532,7 +532,7 @@ Server Action 錯誤訊息 + 工具模組中文字串國際化（+117 keys，2 n
 | **UIUX 設計** | 雙軌 Discovery、Design Tier、5 變體、三階段生成、串流即時預覽、BDD→UI 翻譯（含 actionsYml 欄位精確注入）、Variant 概念注入 |
 | **快速建站** | 26 種產品類型、22 套產業配色、Haiku 概念生成（設計靈魂）、Tier 智能修正、vague 攔截引導、失敗重試、進度預估、手機全屏預覽、App/Website 佈局模式、模板風格整合、智能模板匹配 |
 | **品質** | Quality Gate 5 類靜態檢查（A11y per-element + 色彩對比度 + 效能動畫時長 + 代碼品質 + SVG ID 碰撞）、Design Tier 合規（functional 禁漸層/glow/spring）、Rule-based 確定性修復（5 規則）+ Haiku LLM fallback、RWD 響應式安全網 |
-| **部署** | sanitize 7 類預檢（含 'use server' 保護 + 未知依賴警告）、本地 build 驗證（3 輪 LLM 修復）、Vercel 部署、版本回滾 |
+| **部署** | sanitize 8 類預檢（含 'use server' 保護 + 未知依賴警告 + root layout html/body 自動補全）、本地 build 驗證（3 輪 LLM 修復）、Vercel 部署、版本回滾 |
 | **迭代** | 對話內迭代修改、撤銷上一步、部署歷史回滾、迭代歷史追蹤、重複抱怨偵測+策略升級、視覺診斷指引 |
 | **預覽** | WebContainers 完整 Next.js 預覽（Server Actions + DB 連線）、HMR 增量更新、裝置切換、編輯模式、圖片上傳、Pre-boot + Pre-install 載入優化、生成期間禁止渲染（UIUX/Coder 生成時只顯示等待動畫）、路由衝突去重（strip route groups 防 parallel pages 錯誤） |
 | **動畫** | BDD 需求藍圖面板（即時 Q&A 歷史視覺化）、3D 工廠流水線（Fast Build）、Remotion 驅動 |
@@ -669,7 +669,7 @@ tellcraft-backend/
 │   ├── __tests__/               # 單元測試（Vitest，241 條用例）
 │   │   ├── intent-helpers.test.ts  # 意圖判斷純函數測試
 │   │   ├── log-parser.test.ts      # 日誌解析/遮罩測試
-│   │   ├── deployer-sanitize.test.ts # 部署預檢 7 層修復測試
+│   │   ├── deployer-sanitize.test.ts # 部署預檢 8 層修復測試
 │   │   └── semantic-gateway.test.ts  # 語義閘門零 LLM 短路測試
 │   ├── lib/
 │   │   ├── env.ts               # Zod 環境變數驗證，啟動時快速失敗
