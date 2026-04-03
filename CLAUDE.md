@@ -336,7 +336,7 @@ Feature 註解：`# Action: actionName` + `# [METHOD] /path` + `# Summary: xxx`
 - **`generateStructure` 的 `onCheckpoint` callback**：在 multi-pass 批次完成、syntax fix 後、reference repair 後三處觸發。呼叫端必須傳入 checkpoint callback 將中途代碼存入 FlowState，防止進程崩潰遺失串流中代碼
 - **新增 phase 必須四處同步**：`handleContinueFlow` 路由（含超時偵測）+ `FlowState` 型別 + `flowstate-recovery.ts` RECOVERABLE_PHASES + 前端 `richContent.type` union
 - **Layout 禁止 opacity:0**：SplitLayout/split-layout 外層不能用 `initial={{ opacity: 0 }}`（多層疊加→黑屏）。useEffect 依賴不含 `fastBuildChunks`。split→default 回退需檢查 code_preview 歷史
-- **動畫庫是 `motion/react`**，不是 `framer-motion`
+- **動畫庫是 `framer-motion`**（v12+），import 用 `from 'framer-motion'`
 - **字體只能用 `next/font`**，禁止 `<link>` / `@import` Google Fonts
 - **Tailwind v4**：用 `@import "tailwindcss"`，不是 v3 的 `@tailwind`
 - **Tailwind config 禁止 CSS 變數引用**：`generateTailwindConfig()` 必須用硬編碼值（`'9999px'` 非 `'var(--radius-full)'`），否則部署後 CSS 變數可能遺失導致樣式失效

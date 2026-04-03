@@ -48,11 +48,6 @@ const CARD_INTERACTION_VARIANTS = {
   hover: { scale: 1.015, y: -2 },
 }
 
-const COLOR_PREVIEW_VARIANTS = {
-  rest: { opacity: 1, y: 0 },
-  hover: { opacity: 1, y: 0 },
-}
-
 // 變體軸的圖標和顏色
 const AXIS_CONFIG: Record<string, { icon: string; color: string; bgColor: string }> = {
   hierarchy: { icon: '📊', color: '#3B82F6', bgColor: '#EFF6FF' },
@@ -308,36 +303,32 @@ export default function VariantPicker({
               </div>
 
               {/* 顏色預覽 */}
-              <motion.div
-                variants={COLOR_PREVIEW_VARIANTS}
-                transition={{ duration: 0.14, ease: 'easeOut' }}
+              <div
                 style={{
                   marginTop: 12,
-                  minHeight: 42,
                   paddingTop: 12,
                   borderTop: '1px solid var(--border-color)',
-                  pointerEvents: 'none',
                 }}
               >
                 <div style={{ fontSize: 10, color: 'var(--gray-500)', marginBottom: 6 }}>
                   {t('colorPreview')}
                 </div>
                 <div style={{ display: 'flex', gap: 4 }}>
-                  {Object.entries(variant.designSystem.colorPalette).slice(0, 5).map(([name, color]) => (
+                  {variant.designSystem?.colorPalette && Object.entries(variant.designSystem.colorPalette).slice(0, 5).map(([name, color]) => (
                     <div
                       key={name}
-                      title={name}
+                      title={`${name}: ${color}`}
                       style={{
                         width: 20,
                         height: 20,
-                        background: color,
+                        background: color as string,
                         borderRadius: 4,
-                        border: '1px solid rgba(0,0,0,0.1)',
+                        border: '1px solid rgba(128,128,128,0.3)',
                       }}
                     />
                   ))}
                 </div>
-              </motion.div>
+              </div>
             </motion.div>
           )
         })}
