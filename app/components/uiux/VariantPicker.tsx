@@ -314,40 +314,26 @@ export default function VariantPicker({
                   {t('colorPreview')}
                 </div>
                 <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-                  {(() => {
-                    const palette = variant.designSystem?.colorPalette
-                    if (!palette || typeof palette !== 'object') {
-                      return <span style={{ fontSize: 10, color: 'var(--gray-500)' }}>No palette data</span>
-                    }
-                    const entries = Object.entries(palette).slice(0, 5)
-                    if (entries.length === 0) {
-                      return <span style={{ fontSize: 10, color: 'var(--gray-500)' }}>Empty palette</span>
-                    }
-                    return entries.map(([name, color]) => (
+                  {Object.entries(variant.designSystem?.colorPalette ?? {}).slice(0, 7).map(([name, color]) => (
+                    <div
+                      key={name}
+                      style={{ display: 'flex', alignItems: 'center', gap: 4 }}
+                    >
                       <div
-                        key={name}
                         style={{
-                          display: 'flex',
-                          alignItems: 'center',
-                          gap: 4,
+                          width: 16,
+                          height: 16,
+                          backgroundColor: String(color),
+                          borderRadius: 3,
+                          border: '1px solid rgba(128,128,128,0.4)',
+                          flexShrink: 0,
                         }}
-                      >
-                        <div
-                          style={{
-                            width: 16,
-                            height: 16,
-                            backgroundColor: String(color),
-                            borderRadius: 3,
-                            border: '1px solid rgba(128,128,128,0.4)',
-                            flexShrink: 0,
-                          }}
-                        />
-                        <span style={{ fontSize: 9, color: 'var(--gray-500)' }}>
-                          {String(color)}
-                        </span>
-                      </div>
-                    ))
-                  })()}
+                      />
+                      <span style={{ fontSize: 9, color: 'var(--gray-500)' }}>
+                        {name}
+                      </span>
+                    </div>
+                  ))}
                 </div>
               </div>
             </motion.div>
