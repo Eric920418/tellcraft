@@ -1,6 +1,7 @@
 import { z } from 'zod'
 import { createLogger } from '../lib/logger'
 import { getAnthropicHeaders, MODEL, trackLlmUsage, buildCacheableSystem, type CacheableSystemPrompt } from '../lib/anthropic'
+import { getEnv } from '../lib/env'
 import { callStructured } from '../lib/structured-output'
 import { ClarifyItem, TechnicalContext } from './bdd-session'
 import { LlmTrackingContext } from './classifier'
@@ -1033,6 +1034,12 @@ export async function fixMultipleFeatures(
     return { success: true, fixedFeatures: [] }
   }
 
+  // Extended Thinking: 修復路徑用深度推理
+  const env = getEnv()
+  const thinkingConfig = env.ENABLE_EXTENDED_THINKING
+    ? { type: 'enabled' as const, budget_tokens: env.EXTENDED_THINKING_BUDGET }
+    : undefined
+
   // 構建用戶釐清決策（所有批次共用）
   const decisions = resolvedItems
     .filter(item => item.status === 'answered' && item.answer)
@@ -1131,6 +1138,7 @@ ${decisions}` : ''}
       messages: [{ role: 'user', content: userMessage }],
       maxTokens: 16384,
       temperature: 0.1,
+      thinking: thinkingConfig,
       purpose: 'formulation_fix_features',
       trackingContext,
     })

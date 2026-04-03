@@ -29,6 +29,7 @@ export interface StructuredOptions<T> {
   messages: Anthropic.Messages.MessageParam[]
   maxTokens: number
   temperature?: number
+  thinking?: { type: 'enabled'; budget_tokens: number }
   purpose: string
   trackingContext?: { userId?: string; conversationId?: string }
 }
@@ -40,17 +41,19 @@ export interface StructuredOptions<T> {
 export async function callStructured<T>(
   options: StructuredOptions<T>,
 ): Promise<StructuredResult<T>> {
-  const { schema, model, system, messages, maxTokens, temperature, purpose, trackingContext } = options
+  const { schema, model, system, messages, maxTokens, temperature, thinking, purpose, trackingContext } = options
   const client = getAnthropicClient()
+  const effectiveMaxTokens = thinking ? maxTokens + thinking.budget_tokens : maxTokens
 
   for (let attempt = 1; attempt <= RETRY_MAX; attempt++) {
     try {
       const response = await client.messages.parse({
         model,
-        max_tokens: maxTokens,
+        max_tokens: effectiveMaxTokens,
         system,
         messages,
         ...(temperature !== undefined && { temperature }),
+        ...(thinking && { thinking }),
         output_config: { format: zodOutputFormat(schema) },
       })
 
@@ -63,7 +66,7 @@ export async function callStructured<T>(
         model,
         inputTokens: usage.input_tokens,
         outputTokens: usage.output_tokens,
-        purpose,
+        purpose: thinking ? `${purpose}+thinking` : purpose,
         userId: trackingContext?.userId,
         conversationId: trackingContext?.conversationId,
         cacheCreationTokens: cacheCreation,

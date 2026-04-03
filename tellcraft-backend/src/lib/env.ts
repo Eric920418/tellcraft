@@ -62,6 +62,8 @@ const envSchema = z.object({
   ENABLE_PROMPT_CACHING: z.stringbool().default(true),           // Anthropic prompt caching
   FAST_BUILD_MERGED_ANIM_RWD: z.stringbool().default(true),      // 合併 Animation + RWD（kill switch: 設 false 回退分離模式）
   ENABLE_DIFF_OUTPUT: z.stringbool().default(false),             // Animation/RWD 用 SEARCH/REPLACE diff 輸出（kill switch: 設 false 回退完整檔案）
+  ENABLE_EXTENDED_THINKING: z.stringbool().default(false),       // 修復路徑 Extended Thinking（fixFailingAction + fixMultipleFeatures）
+  EXTENDED_THINKING_BUDGET: z.coerce.number().default(10000),    // Thinking budget tokens（最小 1024）
 })
 
 // ============================================================

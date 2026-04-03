@@ -10,6 +10,7 @@
 import * as yaml from 'js-yaml'
 import { z } from 'zod'
 import { getAnthropicHeaders, MODEL, trackLlmUsage, buildCacheableSystem, type CacheableSystemPrompt } from '../lib/anthropic'
+import { getEnv } from '../lib/env'
 import { callStructured } from '../lib/structured-output'
 import type { GeneratedComponent } from './uiux-generation'
 import type { GeneratedCode } from '../types/flow-state'
@@ -107,7 +108,7 @@ function isRetryableFetchError(err: unknown): boolean {
 async function callClaude(
   systemPrompt: CacheableSystemPrompt,
   userMessage: string,
-  options: { maxTokens?: number; temperature?: number } = {},
+  options: { maxTokens?: number; temperature?: number; thinking?: { type: 'enabled'; budget_tokens: number } } = {},
   trackingContext?: { userId?: string; conversationId?: string }
 ): Promise<{
   success: boolean
@@ -117,6 +118,8 @@ async function callClaude(
   error?: string
 }> {
   let lastError = 'Unknown error'
+  const baseMaxTokens = options.maxTokens || 8192
+  const effectiveMaxTokens = options.thinking ? baseMaxTokens + options.thinking.budget_tokens : baseMaxTokens
 
   for (let attempt = 1; attempt <= RETRY_MAX; attempt++) {
     try {
@@ -125,10 +128,11 @@ async function callClaude(
         headers: getAnthropicHeaders(),
         body: JSON.stringify({
           model: MODEL.SONNET,
-          max_tokens: options.maxTokens || 8192,
+          max_tokens: effectiveMaxTokens,
           temperature: options.temperature || 0.2,
           system: systemPrompt,
           messages: [{ role: 'user', content: userMessage }],
+          ...(options.thinking && { thinking: options.thinking }),
         }),
       })
 
@@ -146,7 +150,7 @@ async function callClaude(
 
       const data = await response.json() as {
         usage?: { input_tokens: number; output_tokens: number; cache_creation_input_tokens?: number; cache_read_input_tokens?: number }
-        content?: Array<{ text: string }>
+        content?: Array<{ type: string; text?: string; thinking?: string }>
       }
 
       if (trackingContext && data.usage) {
@@ -154,16 +158,25 @@ async function callClaude(
           model: MODEL.SONNET,
           inputTokens: data.usage.input_tokens,
           outputTokens: data.usage.output_tokens,
-          purpose: 'coder-generation',
+          purpose: options.thinking ? 'coder-generation+thinking' : 'coder-generation',
           cacheCreationTokens: data.usage.cache_creation_input_tokens || 0,
           cacheReadTokens: data.usage.cache_read_input_tokens || 0,
           ...trackingContext,
         })
       }
 
+      if (options.thinking) {
+        const thinkingBlock = data.content?.find(b => b.type === 'thinking')
+        if (thinkingBlock) {
+          logger.info({ thinkingLength: thinkingBlock.thinking?.length || 0, outputTokens: data.usage?.output_tokens }, 'Extended thinking response')
+        }
+      }
+
+      // 用 .find 取 text block（向後相容：thinking 關閉時 content[0] 就是 text，.find 也能找到）
+      const textBlock = data.content?.find(b => b.type === 'text')
       return {
         success: true,
-        content: data.content?.[0]?.text || '',
+        content: textBlock?.text || '',
         inputTokens: data.usage?.input_tokens || 0,
         outputTokens: data.usage?.output_tokens || 0,
       }
@@ -4114,6 +4127,12 @@ export async function fixFailingAction(
   featureContent?: string,
   entityMapping?: string
 ): Promise<string> {
+  // === Extended Thinking: 修復路徑用深度推理 ===
+  const env = getEnv()
+  const thinkingConfig = env.ENABLE_EXTENDED_THINKING
+    ? { type: 'enabled' as const, budget_tokens: env.EXTENDED_THINKING_BUDGET }
+    : undefined
+
   // === 根因分類：判斷是否需要 LLM 修復 ===
   const primaryError = failedScenarios[0]?.error || ''
   const rootCause = classifyFailureRootCause(primaryError)
@@ -4204,7 +4223,7 @@ ${schemaSql}
 ${entityMapping ? `\n## Entity Mapping\n\`\`\`yaml\n${entityMapping}\n\`\`\`\n` : ''}
 
 只修復這個子操作函數，不要改函數名稱（${funcName}）。輸出修正後的完整函數。`,
-            { maxTokens: 4096, temperature: 0.1 }, trackingContext)
+            { maxTokens: 4096, temperature: 0.1, thinking: thinkingConfig }, trackingContext)
 
           if (fixedFunc.success && fixedFunc.content) {
             let newFunc = extractCodeFromResponse(fixedFunc.content)
@@ -4266,7 +4285,7 @@ ${schemaSql}
 ${entityMapping ? `\n## Entity Mapping\n\`\`\`yaml\n${entityMapping}\n\`\`\`\n` : ''}
 請修復代碼使所有測試通過。輸出完整的修正後檔案。`
 
-  const response = await callClaude(FIX_SYSTEM_PROMPT, userMessage, { maxTokens: 8192, temperature: 0.1 }, trackingContext)
+  const response = await callClaude(FIX_SYSTEM_PROMPT, userMessage, { maxTokens: 8192, temperature: 0.1, thinking: thinkingConfig }, trackingContext)
 
   if (!response.success || !response.content) {
     logger.warn({ actionName, error: response.error }, 'LLM 修復失敗')
