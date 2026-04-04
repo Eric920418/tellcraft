@@ -1954,7 +1954,7 @@ ${exports}
  * 從 action 生成的代碼中提取所有 _stepSummary dispatch 值
  * 用於 API route 自動注入 _stepSummary
  */
-function extractDispatchSummaries(actionContent: string): string[] {
+export function extractDispatchSummaries(actionContent: string): string[] {
   const summaries: string[] = []
   // 匹配 op === '...' 或 op.includes('...')
   for (const m of actionContent.matchAll(/op\s*===\s*['"]([^'"]+)['"]/g)) {
@@ -1970,7 +1970,7 @@ function extractDispatchSummaries(actionContent: string): string[] {
  * 猜測 _stepSummary 對應的 HTTP method
  * 查詢/列表 → GET，建立/新增 → POST，編輯/更新 → PUT，刪除/移除 → DELETE
  */
-function guessHttpMethodForSummary(summary: string): string {
+export function guessHttpMethodForSummary(summary: string): string {
   if (/查詢|列表|取得|獲取|搜尋|list|query|get|search|fetch/i.test(summary)) return 'GET'
   if (/建立|新增|註冊|create|add|register|sign.?up/i.test(summary)) return 'POST'
   if (/編輯|更新|修改|update|edit|modify/i.test(summary)) return 'PUT'
