@@ -1707,12 +1707,75 @@ export async function runAllFeatures(input: {
 // DDL 字串解析（不讀 filesystem）
 // ============================================================
 
+/**
+ * 正規化 entity mapping YAML：支援兩種格式，統一輸出為 EntityDdlReader 要求的格式 A。
+ *
+ * 格式 A（標準，EntityDdlReader 要求的）:
+ *   entity_to_table_mapping:
+ *     - 會員: members
+ *     - 美容師: beauticians
+ *
+ * 格式 B（BDD Skill 常生成的擴充格式）:
+ *   member:
+ *     zh: 會員
+ *     table: members
+ *     fields: { ... }
+ */
+function normalizeEntityMapping(rawYml: string): string {
+  try {
+    const parsed = yaml.load(rawYml) as Record<string, unknown>
+    if (!parsed || typeof parsed !== 'object') return rawYml
+
+    // 已經是格式 A → 直接返回
+    if (Array.isArray((parsed as any).entity_to_table_mapping)) {
+      return rawYml
+    }
+
+    // 偵測格式 B：每個頂層 key 是 entity，有 zh/table 子欄位
+    const entries: Record<string, string>[] = []
+    for (const [, value] of Object.entries(parsed)) {
+      if (typeof value === 'object' && value !== null && 'table' in value && 'zh' in value) {
+        const v = value as { zh: string; table: string }
+        entries.push({ [v.zh]: v.table })
+      }
+    }
+
+    if (entries.length > 0) {
+      logger.info({ entryCount: entries.length }, 'Entity mapping 格式 B → 格式 A 正規化')
+      return yaml.dump({ entity_to_table_mapping: entries })
+    }
+
+    // 偵測格式 C：簡單的 { 會員: members, 美容師: beauticians }（平坦 key-value）
+    const flatEntries: Record<string, string>[] = []
+    for (const [key, value] of Object.entries(parsed)) {
+      if (typeof value === 'string') {
+        flatEntries.push({ [key]: value })
+      }
+    }
+
+    if (flatEntries.length > 0) {
+      logger.info({ entryCount: flatEntries.length }, 'Entity mapping 格式 C → 格式 A 正規化')
+      return yaml.dump({ entity_to_table_mapping: flatEntries })
+    }
+
+    return rawYml
+  } catch {
+    return rawYml
+  }
+}
+
 export async function parseSchemasFromString(schemaSql: string, entityMappingYml: string): Promise<DatabaseSchema[]> {
+  // 正規化 entity mapping 格式
+  // BDD Skill 可能生成兩種格式：
+  // 格式 A（標準）: entity_to_table_mapping: [{ 會員: members }, ...]
+  // 格式 B（擴充）: member: { zh: 會員, table: members, fields: {...} }
+  const normalizedMapping = normalizeEntityMapping(entityMappingYml)
+
   // 寫入臨時目錄供 EntityDdlReader 使用
   const tmpDir = await fsPromises.mkdtemp(path.join(os.tmpdir(), 'specformula-ddl-'))
   try {
     await fsPromises.writeFile(path.join(tmpDir, 'schema.sql'), schemaSql, 'utf-8')
-    await fsPromises.writeFile(path.join(tmpDir, 'entity_to_table_mapping.yml'), entityMappingYml, 'utf-8')
+    await fsPromises.writeFile(path.join(tmpDir, 'entity_to_table_mapping.yml'), normalizedMapping, 'utf-8')
 
     const reader = new EntityDdlReader({
       name: 'default',

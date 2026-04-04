@@ -3143,16 +3143,8 @@ export async function executeCoderPipeline(
  * - UPDATE 缺 RETURNING *
  * - 批次操作缺 success: true
  */
-export function validateActionResponses(actionFiles: GeneratedComponent[]): { files: GeneratedComponent[]; fixes: string[] } {
-
 /**
  * 從 DDL 解析所有 table → columns 映射。
- * 輸入：CREATE TABLE xxx (...) 格式的 SQL DDL
- * 輸出：Map<tableName, Set<columnName>>
- */
-/**
- * 生成結構化欄位清單文字，注入 LLM prompt 防止 schema 幻覺。
- * 明確標示每張表有哪些欄位，以及常見欄位（id/created_at/updated_at）的缺失。
  */
 function generateColumnListText(schemaSql: string): string {
   const tables = parseTableColumnsFromDDL(schemaSql)
@@ -3289,6 +3281,8 @@ export function validateSlotColumns(
     slots.scopeParam = undefined
   }
 }
+
+export function validateActionResponses(actionFiles: GeneratedComponent[]): { files: GeneratedComponent[]; fixes: string[] } {
   const fixes: string[] = []
   const result = actionFiles.map(file => {
     if (!file.path.startsWith('lib/actions/')) return file
