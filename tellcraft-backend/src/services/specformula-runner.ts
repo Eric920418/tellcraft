@@ -2110,11 +2110,15 @@ function generateTestServerCode(
       )
       if (!hasFile) continue
 
-      // snake_case → camelCase（與 LLM 生成的 export 名稱一致）
-      const fnName = action.name
-        .split(/[_\s-]+/)
-        .map((w: string, i: number) => i === 0 ? w.toLowerCase() : w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())
-        .join('')
+      // 從實際檔案內容提取 export function 名稱（不猜，直接讀）
+      const actionFile = backendFiles.find(f => f.path === `lib/actions/${kebabName}.ts`)
+      const exportMatch = actionFile?.content.match(/export\s+(?:async\s+)?function\s+([\w$\u4e00-\u9fff\u3400-\u4dbf]+)/)
+      const fnName = exportMatch
+        ? exportMatch[1]
+        : action.name  // fallback: 用 action name 原樣（幾乎不會到這裡）
+            .split(/[_\s-]+/)
+            .map((w: string, i: number) => i === 0 ? w.toLowerCase() : w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())
+            .join('')
 
       const isQuery = action.rules?.some(r => r.type === '後置（回應）') && !action.rules?.some(r => r.type === '後置（狀態）')
       const method = (action.method || (isQuery ? 'GET' : 'POST')).toUpperCase()
