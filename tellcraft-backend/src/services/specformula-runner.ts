@@ -16,6 +16,7 @@ import { createLogger } from '../lib/logger'
 import { deriveSchemaFromBdd } from './schema-derivation'
 import { convertToOpenAPI } from './actions-design'
 import type { GeneratedComponent } from './uiux-generation'
+import { extractDispatchSummaries, guessHttpMethodForSummary } from './coder-generation'
 import type { IsaSpec, IsaInstruction } from '../lib/specformula/spec/isa/models'
 import type { ApiSpec } from '../lib/specformula/spec/api/models'
 import type { InstructionSet } from '../lib/specformula/cucumber/step-definition-factory'
@@ -1563,6 +1564,8 @@ export async function runAllFeatures(input: {
   httpAdapter: HttpClientAdapter
   pool: Pool
   onProgress?: (step: string, percent: number) => Promise<void>
+  actionsYml?: string
+  backendFiles?: GeneratedComponent[]
 }): Promise<SpecFormulaTestResult> {
   const startTime = Date.now()
 
@@ -1576,6 +1579,11 @@ export async function runAllFeatures(input: {
   const apiConfig = isaSpec.config?.api || {}
   const apiSpecReader = new ApiSpecReader(apiConfig)
   const apiSpec: ApiSpec = apiSpecReader.readFromString(input.openApiSpec)
+
+  // 2.5 注入子操作到 ApiSpec（合併 CRUD action 的子操作 summary）
+  if (input.actionsYml && input.backendFiles?.length) {
+    enrichApiSpecWithSubOperations(apiSpec, input.actionsYml, input.backendFiles)
+  }
 
   // 3. 解析 DDL → DatabaseSchema
   const schemas = await parseSchemasFromString(input.schemaSql, input.entityMapping)
@@ -2240,6 +2248,57 @@ function waitForReady(proc: ChildProcess, timeoutMs: number): Promise<number> {
 }
 
 // ============================================================
+// 子操作 ApiSpec 注入（合併 CRUD action 的子操作 summary）
+// ============================================================
+
+/**
+ * 從 action 代碼提取子操作 summary，注入到 ApiSpec.operations[]。
+ * 解決：actions.yml summary="待辦事項管理" 但 Feature 找 "建立待辦事項" → 找不到的問題。
+ */
+function enrichApiSpecWithSubOperations(
+  apiSpec: ApiSpec,
+  actionsYml: string,
+  backendFiles: GeneratedComponent[]
+): void {
+  let parsed: { actions?: Array<{ name: string; summary?: string; method?: string; path?: string }> } | undefined
+  try {
+    parsed = yaml.load(actionsYml) as typeof parsed
+  } catch { return }
+  if (!parsed?.actions) return
+
+  let injected = 0
+  for (const action of parsed.actions) {
+    // 找到對應的 lib/actions/{kebab}.ts
+    const kebabName = action.name.replace(/([a-z])([A-Z])/g, '$1-$2').replace(/[_\s]+/g, '-').toLowerCase()
+    const actionFile = backendFiles.find(f => f.path === `lib/actions/${kebabName}.ts`)
+    if (!actionFile) continue
+
+    // 提取子操作 summary
+    const subSummaries = extractDispatchSummaries(actionFile.content)
+    if (subSummaries.length <= 1) continue // 只有一個操作 → 不需要注入
+
+    const basePath = action.path || `/api/${action.name}`
+
+    for (const sub of subSummaries) {
+      // 已存在精確匹配 → 跳過
+      if (apiSpec.operations.some(op => op.summary === sub)) continue
+
+      apiSpec.operations.push({
+        path: basePath,
+        method: guessHttpMethodForSummary(sub).toLowerCase(),
+        summary: sub,
+        operationId: `${action.name}_${sub.replace(/\s+/g, '_')}`,
+      })
+      injected++
+    }
+  }
+
+  if (injected > 0) {
+    logger.info({ injected, totalOps: apiSpec.operations.length }, '子操作注入到 ApiSpec')
+  }
+}
+
+// ============================================================
 // SpecFormula 驗證 Pipeline（整合入口）
 // ============================================================
 
@@ -2301,6 +2360,8 @@ export async function runSpecFormulaValidation(input: {
         httpAdapter,
         pool,
         onProgress: input.onProgress,
+        actionsYml: input.actionsYml,
+        backendFiles: input.backendFiles,
       })
 
       await input.onProgress('測試完成', 95)

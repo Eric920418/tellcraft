@@ -673,6 +673,8 @@ ${rulesText || '（無特定規則）'}
 ## 相關資料表 DDL
 ${schemaSql}
 
+${generateColumnListText(schemaSql)}
+
 ## Entity Mapping（中文實體 → 表名）
 ${entityMapping}
 ${typesText}${responseFieldsText}${stepSummariesText}${featureContent ? `
@@ -1516,6 +1518,8 @@ ${(subOp.actionRules || []).map(r => `- [${r.type}] ${r.rule}`).join('\n') || '�
 
 ## 相關資料表 DDL
 ${ctx.schemaSql}
+
+${generateColumnListText(ctx.schemaSql)}
 
 ## Entity Mapping（中文實體 → 表名）
 ${ctx.entityMapping}
@@ -3146,6 +3150,25 @@ export function validateActionResponses(actionFiles: GeneratedComponent[]): { fi
  * 輸入：CREATE TABLE xxx (...) 格式的 SQL DDL
  * 輸出：Map<tableName, Set<columnName>>
  */
+/**
+ * 生成結構化欄位清單文字，注入 LLM prompt 防止 schema 幻覺。
+ * 明確標示每張表有哪些欄位，以及常見欄位（id/created_at/updated_at）的缺失。
+ */
+function generateColumnListText(schemaSql: string): string {
+  const tables = parseTableColumnsFromDDL(schemaSql)
+  if (tables.size === 0) return ''
+
+  const COMMON_COLS = ['id', 'created_at', 'updated_at']
+  const lines = ['## 欄位清單（生成的 SQL 只能使用以下欄位，禁止使用未列出的欄位）']
+  for (const [table, cols] of tables) {
+    const colList = [...cols].join(', ')
+    const missing = COMMON_COLS.filter(c => !cols.has(c))
+    const note = missing.length > 0 ? `（注意：此表沒有 ${missing.join('、')}）` : ''
+    lines.push(`- ${table}: ${colList}${note}`)
+  }
+  return lines.join('\n')
+}
+
 function parseTableColumnsFromDDL(schemaSql: string): Map<string, Set<string>> {
   const tables = new Map<string, Set<string>>()
   const tableRegex = /CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?(\w+)\s*\(([\s\S]*?)\)\s*;/gi
@@ -3209,6 +3232,30 @@ export function validateSqlColumns(
         code = code.replace(/WHERE\s+user_id\s*=\s*\$\{[^}]+\}\s+AND/gi, 'WHERE')
         code = code.replace(/WHERE\s+user_id\s*=\s*\$\{[^}]+\}\s*$/gim, '')
         fixes.push(`${file.path}: 移除 user_id scope（表 ${tableName} 沒有此欄位）`)
+        modified = true
+      }
+
+      // 檢查 updated_at — 如果表沒有 updated_at 就從 INSERT/UPDATE 移除
+      if (/updated_at/i.test(sqlText) && !columns.has('updated_at')) {
+        // UPDATE SET ... updated_at = NOW() 或 updated_at = ${...}
+        code = code.replace(/,\s*updated_at\s*=\s*(?:NOW\(\)|\$\{[^}]*\})/gi, '')
+        code = code.replace(/updated_at\s*=\s*(?:NOW\(\)|\$\{[^}]*\})\s*,/gi, '')
+        // INSERT 欄位列表和 VALUES 中的 updated_at
+        code = code.replace(/,\s*updated_at(?=[\s,)])/gi, '')
+        code = code.replace(/updated_at\s*,/gi, '')
+        code = code.replace(/,\s*NOW\(\)(?=\s*\))/gi, (m, offset) => {
+          // 只移除對應 updated_at 位置的 NOW()（簡化：如果前面已移除 updated_at 欄位名則也移除對應值）
+          return m
+        })
+        fixes.push(`${file.path}: 移除 updated_at（表 ${tableName} 沒有此欄位）`)
+        modified = true
+      }
+
+      // 檢查 created_at — 如果表沒有 created_at 就從 INSERT 移除
+      if (/created_at/i.test(sqlText) && !columns.has('created_at')) {
+        code = code.replace(/,\s*created_at(?=[\s,)])/gi, '')
+        code = code.replace(/created_at\s*,/gi, '')
+        fixes.push(`${file.path}: 移除 created_at（表 ${tableName} 沒有此欄位）`)
         modified = true
       }
     }
