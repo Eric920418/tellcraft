@@ -931,15 +931,17 @@ router.get('/admin/conversations/:conversationId/messages', requireAdmin, async 
 const LOG_FILES = {
   out: '/var/log/tellcraft/out.log',
   error: '/var/log/tellcraft/error.log',
+  workerOut: '/var/log/tellcraft/worker-out.log',
+  workerError: '/var/log/tellcraft/worker-error.log',
 }
 
 function resolveLogFiles(source?: string): string[] {
   if (!source || source === 'all') {
-    return [LOG_FILES.out, LOG_FILES.error]
+    return [LOG_FILES.out, LOG_FILES.error, LOG_FILES.workerOut, LOG_FILES.workerError]
   }
-  if (source === 'out') return [LOG_FILES.out]
-  if (source === 'error') return [LOG_FILES.error]
-  return [LOG_FILES.out, LOG_FILES.error]
+  if (source === 'out') return [LOG_FILES.out, LOG_FILES.workerOut]
+  if (source === 'error') return [LOG_FILES.error, LOG_FILES.workerError]
+  return [LOG_FILES.out, LOG_FILES.error, LOG_FILES.workerOut, LOG_FILES.workerError]
 }
 
 /**

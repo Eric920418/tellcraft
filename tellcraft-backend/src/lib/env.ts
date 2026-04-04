@@ -19,12 +19,14 @@ const envSchema = z.object({
   PORT: z.coerce.number().default(3100),
   REDIS_URL: z.string().default('redis://localhost:6379'),
   CORS_ORIGIN: z.string().default('https://tellcraft.com'),
-  DB_POOL_MAX: z.coerce.number().default(15),
+  DB_POOL_MAX: z.coerce.number().default(20),
   LOG_LEVEL: z.string().default('info'),
   NODE_ENV: z.string().default('production'),
-  WORKER_CONCURRENCY: z.coerce.number().default(8),
-  LLM_MAX_CONCURRENT: z.coerce.number().default(10),
-  DEPLOY_MAX_CONCURRENT: z.coerce.number().default(3),
+  WORKER_CONCURRENCY: z.coerce.number().default(15),
+  LLM_MAX_CONCURRENT: z.coerce.number().default(20),
+  LLM_QUEUE_TIMEOUT_MS: z.coerce.number().default(120_000),       // LLM slot 排隊超時（2 分鐘）
+  DEPLOY_MAX_CONCURRENT: z.coerce.number().default(2),
+  DEPLOY_BUILD_MAX_MEMORY_MB: z.coerce.number().default(1024),    // next build 子進程記憶體上限
   UPLOAD_DIR: z.string().default('/var/www/uploads/tellcraft'),
   APP_URL: z.string().default('https://tellcraft.com'),
   API_URL: z.string().default('http://54.238.4.117:8080'),

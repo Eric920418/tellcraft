@@ -81,6 +81,25 @@ router.get('/stats', async (_req, res) => {
 })
 
 /**
+ * GET /health/pressure
+ * 快速壓力檢查（不需認證，供監控用）
+ */
+router.get('/pressure', (_req, res) => {
+  const mem = process.memoryUsage()
+  const rssMB = Math.round(mem.rss / 1024 / 1024)
+  const llm = getLlmConcurrencyStats()
+  const deploy = getDeployConcurrencyStats()
+
+  res.json({
+    accepting: rssMB < 1500,
+    rssMB,
+    heapUsedMB: Math.round(mem.heapUsed / 1024 / 1024),
+    llm,
+    deploy,
+  })
+})
+
+/**
  * POST /health/cleanup-tmp
  * 手動清理孤兒 build 目錄（超過 30 分鐘的）
  */

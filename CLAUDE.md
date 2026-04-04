@@ -357,7 +357,7 @@ Feature 註解：`# Action: actionName` + `# [METHOD] /path` + `# Summary: xxx`
 - **Anthropic SDK v0.72+**：大 `max_tokens` 必須用 `messages.stream()` + `await stream.finalMessage()`
 - **Skill 函數提前 return 必須保存 FlowState**：否則 `handleContinueFlow` 找不到 state → 用戶對話永久卡死
 - **Formulation phase**：必須設 `formulationStartedAt`（超時恢復依賴）。checkpoint 每 3 feature 保存，成功後清理所有 `formulation*` 暫存欄位
-- **DB 連線池**：`max: 15`（非 50）+ `keepAlive: true`，防止 PostgreSQL 斷開空閒連線。可用 `DB_POOL_MAX` 環境變數覆蓋
+- **DB 連線池**：`max: 20`（預設）+ `keepAlive: true`，防止 PostgreSQL 斷開空閒連線。可用 `DB_POOL_MAX` 環境變數覆蓋
 - **Feature 驗證腳本用 `tsx` 不是 `ts-node`**：`feature-validation.ts` 的 `runScript()` 用 `npx tsx`。腳本解析失敗時視為通過（不觸發無效 LLM 修復循環），stderr/exitCode 會完整記錄供除錯
 - **Feature Dry-Run**：spec_completed 前用真實 Neon DB 跑 entity_setup 驗證。失敗 LLM 修復（2 輪）。跳過 api_call/response_validate
 - **Feature Alignment Gate**：RED Phase 後、Coder 前執行。修不好**阻塞 pipeline**（回退 `uiux_complete`），不像 RED Phase 的 advisory 模式。修復後自動更新 DB `bdd_sessions.features_content`

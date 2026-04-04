@@ -1994,7 +1994,7 @@ async function runNextBuild(dir: string): Promise<{ success: boolean; output: st
         timeout: 180_000,
         env: {
           ...process.env,
-          NODE_OPTIONS: '--max-old-space-size=1536',
+          NODE_OPTIONS: `--max-old-space-size=${getEnv().DEPLOY_BUILD_MAX_MEMORY_MB}`,
           NODE_ENV: 'production',
         },
         maxBuffer: 10 * 1024 * 1024, // 10MB

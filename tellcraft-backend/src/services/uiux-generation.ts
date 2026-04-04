@@ -25,6 +25,7 @@ const logger = createLogger('uiux-generation')
 // ============================================================
 
 const LLM_MAX_CONCURRENT = getEnv().LLM_MAX_CONCURRENT
+const LLM_QUEUE_TIMEOUT_MS = getEnv().LLM_QUEUE_TIMEOUT_MS
 let llmActiveCount = 0
 const llmWaitQueue: Array<() => void> = []
 
@@ -33,11 +34,14 @@ async function acquireLlmSlot(): Promise<void> {
     llmActiveCount++
     return
   }
-  return new Promise<void>((resolve) => {
-    llmWaitQueue.push(() => {
-      llmActiveCount++
-      resolve()
-    })
+  return new Promise<void>((resolve, reject) => {
+    const timer = setTimeout(() => {
+      const idx = llmWaitQueue.indexOf(cb)
+      if (idx >= 0) llmWaitQueue.splice(idx, 1)
+      reject(new Error(`LLM slot timeout (${LLM_QUEUE_TIMEOUT_MS / 1000}s) — ${llmWaitQueue.length} queued`))
+    }, LLM_QUEUE_TIMEOUT_MS)
+    const cb = () => { clearTimeout(timer); llmActiveCount++; resolve() }
+    llmWaitQueue.push(cb)
   })
 }
 

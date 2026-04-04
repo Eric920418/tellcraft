@@ -988,7 +988,7 @@ curl -s http://localhost:3100/health
 | `generalRedis` | FlowState/lock/cache/rate-limit/auth | `3`（快速失敗） |
 
 **Worker 配置**（`orchestrator.ts`）：
-- `concurrency`: env `WORKER_CONCURRENCY`（預設 8）
+- `concurrency`: env `WORKER_CONCURRENCY`（預設 15）
 - `lockDuration`: 120s（預設 30s，LLM event loop jitter 安全餘量）
 - `stalledInterval`: 120s（配合 FlowState recovery 2min 頻率）
 - `maxStalledCount`: 2

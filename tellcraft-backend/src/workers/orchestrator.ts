@@ -196,6 +196,19 @@ export function createOrchestratorWorker(
   const worker = new Worker(
     'orchestrator',
     async (job: Job) => {
+      // 記憶體壓力斷路器：RSS > 85% of 3GB → 軟拒絕新 job（不 throw，不觸發 retry）
+      const rss = process.memoryUsage().rss
+      const MAX_RSS = 3 * 1024 * 1024 * 1024 * 0.85 // 2.55 GB
+      if (rss > MAX_RSS) {
+        logger.warn({ rssMB: Math.round(rss / 1024 / 1024) }, '記憶體壓力 — 暫緩處理')
+        const jobData = job.data as { conversationId: string; locale?: string }
+        const msg = jobData.locale === 'en'
+          ? 'Server is under heavy load. Please try again in a moment.'
+          : '伺服器目前負載較高，請稍後再試。'
+        await sendMessage(jobData.conversationId, io, { content: msg, stage: 'error' })
+        return
+      }
+
       logger.info({ jobName: job.name, jobId: job.id }, '處理 Job')
 
       const data = job.data as ProcessMessageData | ContinueFlowData
