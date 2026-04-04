@@ -129,7 +129,7 @@ async function callClaude(
         body: JSON.stringify({
           model: MODEL.SONNET,
           max_tokens: effectiveMaxTokens,
-          temperature: options.temperature || 0.2,
+          ...(options.thinking ? {} : { temperature: options.temperature || 0.2 }),
           system: systemPrompt,
           messages: [{ role: 'user', content: userMessage }],
           ...(options.thinking && { thinking: options.thinking }),
@@ -1452,14 +1452,17 @@ async function tryTemplateGeneration(
     }
     case 'query_list': {
       const slots = await extractSlots(QueryListSlotSchema, subOp, ctx.schemaSql, ctx.entityMapping, trackingContext)
+      if (slots) { validateSlotColumns(slots, ctx.schemaSql) }
       return slots ? renderQueryListTemplate(slots, fnName) : null
     }
     case 'query_single': {
       const slots = await extractSlots(QuerySingleSlotSchema, subOp, ctx.schemaSql, ctx.entityMapping, trackingContext)
+      if (slots) { validateSlotColumns(slots, ctx.schemaSql) }
       return slots ? renderQuerySingleTemplate(slots, fnName) : null
     }
     case 'toggle': {
       const slots = await extractSlots(ToggleSlotSchema, subOp, ctx.schemaSql, ctx.entityMapping, trackingContext)
+      if (slots) { validateSlotColumns(slots, ctx.schemaSql) }
       return slots ? renderToggleTemplate(slots, fnName) : null
     }
     case 'restore': {
@@ -3066,11 +3069,20 @@ export async function executeCoderPipeline(
   // Step 8: Post-generation response 驗證（零 LLM）
   const { files: validatedActionFiles, fixes: responseFixes } = validateActionResponses(actionFiles)
   if (responseFixes.length > 0) {
-    // 用修復後的版本替換原始 action files
     for (const vf of validatedActionFiles) {
       const idx = actionFiles.findIndex(f => f.path === vf.path)
       if (idx !== -1) actionFiles[idx] = vf
     }
+  }
+
+  // Step 8.5: SQL 欄位靜態驗證（零 LLM）— 檢查 deleted_at/user_id 等欄位是否真的存在於 DDL
+  const { files: sqlValidatedFiles, fixes: sqlFixes } = validateSqlColumns(actionFiles, schemaSql)
+  if (sqlFixes.length > 0) {
+    for (const vf of sqlValidatedFiles) {
+      const idx = actionFiles.findIndex(f => f.path === vf.path)
+      if (idx !== -1) actionFiles[idx] = vf
+    }
+    logger.info({ fixCount: sqlFixes.length, fixes: sqlFixes }, 'SQL 欄位驗證修正完成')
   }
 
   await callbacks.onProgress('完成！', 98)
@@ -3128,6 +3140,108 @@ export async function executeCoderPipeline(
  * - 批次操作缺 success: true
  */
 export function validateActionResponses(actionFiles: GeneratedComponent[]): { files: GeneratedComponent[]; fixes: string[] } {
+
+/**
+ * 從 DDL 解析所有 table → columns 映射。
+ * 輸入：CREATE TABLE xxx (...) 格式的 SQL DDL
+ * 輸出：Map<tableName, Set<columnName>>
+ */
+function parseTableColumnsFromDDL(schemaSql: string): Map<string, Set<string>> {
+  const tables = new Map<string, Set<string>>()
+  const tableRegex = /CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?(\w+)\s*\(([\s\S]*?)\)\s*;/gi
+  let match: RegExpExecArray | null
+  while ((match = tableRegex.exec(schemaSql)) !== null) {
+    const tableName = match[1].toLowerCase()
+    const body = match[2]
+    const columns = new Set<string>()
+    // 每行一個欄位定義（忽略 CONSTRAINT、PRIMARY KEY、UNIQUE 等）
+    for (const line of body.split('\n')) {
+      const colMatch = line.trim().match(/^(\w+)\s+(?:UUID|TEXT|VARCHAR|INT|INTEGER|BIGINT|SERIAL|BOOLEAN|DATE|TIMESTAMP|JSONB?|NUMERIC|FLOAT|DOUBLE|SMALLINT|REAL|DECIMAL)/i)
+      if (colMatch) {
+        columns.add(colMatch[1].toLowerCase())
+      }
+    }
+    tables.set(tableName, columns)
+  }
+  return tables
+}
+
+/**
+ * SQL 欄位靜態驗證：掃描生成的 handler 代碼，檢查 SQL 中引用的欄位是否存在於 DDL。
+ * 自動修正：deleted_at 不存在時移除、camelCase → snake_case。
+ */
+export function validateSqlColumns(
+  actionFiles: GeneratedComponent[],
+  schemaSql: string
+): { files: GeneratedComponent[]; fixes: string[] } {
+  const fixes: string[] = []
+  const tableColumns = parseTableColumnsFromDDL(schemaSql)
+
+  for (const file of actionFiles) {
+    let code = file.content
+    let modified = false
+
+    // 提取所有 sql`...` 中的 SQL（支援多行 tagged template）
+    const sqlBlockRegex = /sql\s*`([\s\S]*?)`/g
+    let sqlMatch: RegExpExecArray | null
+    while ((sqlMatch = sqlBlockRegex.exec(code)) !== null) {
+      const sqlText = sqlMatch[1]
+
+      // 提取表名
+      const tableMatch = sqlText.match(/(?:FROM|INTO|UPDATE)\s+(\w+)/i)
+      if (!tableMatch) continue
+      const tableName = tableMatch[1].toLowerCase()
+      const columns = tableColumns.get(tableName)
+      if (!columns) continue
+
+      // 檢查 deleted_at IS NULL — 如果表沒有 deleted_at 就移除
+      if (/deleted_at\s+IS\s+(?:NOT\s+)?NULL/i.test(sqlText) && !columns.has('deleted_at')) {
+        code = code.replace(/\s*AND\s+deleted_at\s+IS\s+(?:NOT\s+)?NULL/gi, '')
+        code = code.replace(/WHERE\s+deleted_at\s+IS\s+(?:NOT\s+)?NULL\s+AND/gi, 'WHERE')
+        code = code.replace(/WHERE\s+deleted_at\s+IS\s+(?:NOT\s+)?NULL\s*$/gim, '')
+        fixes.push(`${file.path}: 移除 deleted_at（表 ${tableName} 沒有此欄位）`)
+        modified = true
+      }
+
+      // 檢查 user_id scope — 如果表沒有 user_id 就移除
+      if (/user_id\s*=\s*\$\{/i.test(sqlText) && !columns.has('user_id')) {
+        code = code.replace(/\s*AND\s+user_id\s*=\s*\$\{[^}]+\}/gi, '')
+        code = code.replace(/WHERE\s+user_id\s*=\s*\$\{[^}]+\}\s+AND/gi, 'WHERE')
+        code = code.replace(/WHERE\s+user_id\s*=\s*\$\{[^}]+\}\s*$/gim, '')
+        fixes.push(`${file.path}: 移除 user_id scope（表 ${tableName} 沒有此欄位）`)
+        modified = true
+      }
+    }
+
+    if (modified) {
+      file.content = code
+    }
+  }
+
+  return { files: actionFiles, fixes }
+}
+
+/**
+ * 驗證 slot 提取的 softDeleteColumn/scopeColumn 是否存在於 DDL。
+ */
+export function validateSlotColumns(
+  slots: { table: string; softDeleteColumn?: string; scopeColumn?: string; scopeParam?: string },
+  schemaSql: string
+): void {
+  const tableColumns = parseTableColumnsFromDDL(schemaSql)
+  const columns = tableColumns.get(slots.table.toLowerCase())
+  if (!columns) return
+
+  if (slots.softDeleteColumn && !columns.has(slots.softDeleteColumn.toLowerCase())) {
+    logger.info({ table: slots.table, column: slots.softDeleteColumn }, 'slot softDeleteColumn 不存在，移除')
+    slots.softDeleteColumn = ''
+  }
+  if (slots.scopeColumn && !columns.has(slots.scopeColumn.toLowerCase())) {
+    logger.info({ table: slots.table, column: slots.scopeColumn }, 'slot scopeColumn 不存在，移除')
+    slots.scopeColumn = undefined
+    slots.scopeParam = undefined
+  }
+}
   const fixes: string[] = []
   const result = actionFiles.map(file => {
     if (!file.path.startsWith('lib/actions/')) return file

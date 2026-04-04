@@ -63,6 +63,42 @@ export function sanitizeFeatureContent(content: string): { content: string; fixe
   return { content: result, fixes }
 }
 
+/**
+ * Feature summary 自動對齊：確保 When 步驟中的 summary 與 feature.name 一致。
+ * 問題：LLM 可能把 feature.name=「建立待辦事項」縮寫成 When 步驟的「建立待辦」→ actionsYml 用 feature.name → OpenAPI summary 是「建立待辦事項」→ SpecFormula 用 When 步驟的「建立待辦」去找 → 找不到。
+ */
+function alignFeatureSummaries(features: GeneratedFeature[]): void {
+  for (const feature of features) {
+    const whenRegex = /((?:When|And)\s+(?:\(No Actor\)|\(UID="[^"]*"\))\s+)(.+?)(\s*[,，]\s*call\s+table:)/gi
+    let match: RegExpExecArray | null
+    const replacements: Array<{ full: string; replacement: string; oldSummary: string }> = []
+
+    while ((match = whenRegex.exec(feature.content)) !== null) {
+      const stepSummary = match[2].trim()
+      // 如果 summary 跟 feature.name 完全一致或互相包含 → 不用修
+      if (stepSummary === feature.name) continue
+      if (feature.name.includes(stepSummary) || stepSummary.includes(feature.name)) continue
+
+      // 也檢查 Then 步驟是否引用同樣的 summary（Then summary 必須跟 When 一致）
+      replacements.push({
+        full: match[0],
+        replacement: `${match[1]}${feature.name}${match[3]}`,
+        oldSummary: stepSummary,
+      })
+    }
+
+    for (const { full, replacement, oldSummary } of replacements) {
+      feature.content = feature.content.split(full).join(replacement)
+      // 同時修正 Then 步驟的 summary（Then summary 必須與 When 一致）
+      feature.content = feature.content.replace(
+        new RegExp(oldSummary.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\(', 'g'),
+        feature.name + '('
+      )
+      logger.info({ feature: feature.name, old: oldSummary }, 'Feature summary 自動對齊')
+    }
+  }
+}
+
 export interface FormulationResult {
   success: boolean
   schemaSql?: string
@@ -1213,6 +1249,9 @@ ${decisions}` : ''}
     }
   }
 
+  // Feature summary 自動對齊
+  alignFeatureSummaries(allFixed)
+
   logger.info({ totalFixed: allFixed.length, schemaUpdated: !!latestSchemaSql, mappingUpdated: !!latestEntityMapping }, '分批修復完成')
   return { success: true, fixedFeatures: allFixed, updatedSchemaSql: latestSchemaSql, updatedEntityMapping: latestEntityMapping }
 }
@@ -1365,6 +1404,9 @@ ${decisions || '（無額外決策）'}`
   if (totalFixes > 0) {
     logger.info({ totalFixes, featureCount: features.length }, 'Feature 後置驗證完成')
   }
+
+  // Feature summary 自動對齊：確保 When 步驟 summary 與 feature.name 一致
+  alignFeatureSummaries(features)
 
   logger.info({ featureCount: features.length, uncertainCount: uncertainItems.length }, 'Draft Batch 完成')
 

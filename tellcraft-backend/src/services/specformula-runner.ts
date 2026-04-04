@@ -1828,8 +1828,14 @@ interface TestServer {
  * /tmp 目錄只 ~20MB，啟動 ~3s
  */
 export async function startTestServer(config: TestServerConfig): Promise<TestServer> {
+  // 記憶體安全檢查：可用記憶體 < 1GB 時拒絕啟動（防止子進程 OOM 崩機）
+  const freeMemMB = Math.round(os.freemem() / 1024 / 1024)
+  if (freeMemMB < 1024) {
+    throw new Error(`記憶體不足（可用 ${freeMemMB}MB < 1024MB），跳過 SpecFormula 測試`)
+  }
+
   const tmpDir = await fsPromises.mkdtemp(path.join(os.tmpdir(), 'tellcraft-test-'))
-  logger.info({ tmpDir }, '建立測試目錄')
+  logger.info({ tmpDir, freeMemMB }, '建立測試目錄')
 
   try {
     // 1. 寫入 action 檔案
@@ -2025,6 +2031,7 @@ export default sql
         ...process.env,
         DATABASE_URL: config.neonConnectionString,
         PORT: '0',
+        NODE_OPTIONS: '--max-old-space-size=512',
       },
       stdio: ['ignore', 'pipe', 'pipe'],
     })

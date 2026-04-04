@@ -219,6 +219,13 @@ export async function runCoderE2ETests(input: {
 }): Promise<E2EResult> {
   const { code, tailwindConfig, extraDependencies, neonConnectionString, onProgress } = input
 
+  // 記憶體安全檢查：可用記憶體 < 1.5GB 時跳過（next dev + npm install 吃記憶體）
+  const freeMemMB = Math.round(os.freemem() / 1024 / 1024)
+  if (freeMemMB < 1536) {
+    logger.warn({ freeMemMB }, '記憶體不足，跳過 E2E 測試')
+    return { passed: false, softFail: true, errors: [], fixedFiles: [], summary: `記憶體不足（${freeMemMB}MB），跳過 E2E` }
+  }
+
   // 沒有 DB 連線 → 跳過（只有前端，不測後端）
   if (!neonConnectionString) {
     logger.info('無 neonConnectionString，跳過 E2E 測試')
@@ -257,7 +264,7 @@ export async function runCoderE2ETests(input: {
     const nextBin = path.join(tmpDir, 'node_modules', '.bin', 'next')
     devProcess = spawn(nextBin, ['dev', '--port', String(port)], {
       cwd: tmpDir,
-      env: { ...process.env, NODE_ENV: 'development', PORT: String(port) },
+      env: { ...process.env, NODE_ENV: 'development', PORT: String(port), NODE_OPTIONS: '--max-old-space-size=768' },
       stdio: ['ignore', 'pipe', 'pipe'],
     })
 

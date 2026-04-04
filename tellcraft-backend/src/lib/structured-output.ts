@@ -52,7 +52,7 @@ export async function callStructured<T>(
         max_tokens: effectiveMaxTokens,
         system,
         messages,
-        ...(temperature !== undefined && { temperature }),
+        ...(temperature !== undefined && !thinking && { temperature }),
         ...(thinking && { thinking }),
         output_config: { format: zodOutputFormat(schema) },
       })
