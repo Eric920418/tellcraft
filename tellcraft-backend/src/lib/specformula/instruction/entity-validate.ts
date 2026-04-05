@@ -408,14 +408,70 @@ export class EntityValidate {
   }
 
   /**
-   * 從 actual Map 中找值，支援 camelCase → snake_case 轉換。
+   * 從 actual Map 中找值，支援 camelCase → snake_case 轉換 + JSON 巢狀路徑導航。
+   * 從 Java EntityValidate.getActualValue() 移植，增加 dot notation + array indexing 支援。
    */
   private getActualValue(actual: Record<string, unknown>, fieldName: string): unknown {
+    // 直接匹配
     if (fieldName in actual) return actual[fieldName];
+    // camelCase → snake_case
     const snakeCase = NamingConverter.camelToSnake(fieldName);
     if (snakeCase in actual) return actual[snakeCase];
+    // lowercase
     const lower = fieldName.toLowerCase();
     if (lower in actual) return actual[lower];
+
+    // JSON 巢狀路徑導航（如 profile.city、items[0].name）
+    if (fieldName.includes('.') || fieldName.includes('[')) {
+      return this.navigateJson(actual, fieldName);
+    }
+
     return undefined;
+  }
+
+  /**
+   * JSON 巢狀路徑導航：支援 dot notation + bracket array indexing。
+   * 也處理 PostgreSQL JSON/JSONB 欄位（string → parse → navigate）。
+   */
+  private navigateJson(obj: Record<string, unknown>, path: string): unknown {
+    const parts = path.split('.');
+    const rootKey = parts[0];
+    let current: unknown = obj[rootKey] ?? obj[NamingConverter.camelToSnake(rootKey)];
+
+    // 如果 root 值是 JSON 字串，先解析
+    if (typeof current === 'string') {
+      try { current = JSON.parse(current); } catch { return undefined; }
+    }
+
+    // 導航剩餘路徑
+    for (let i = 1; i < parts.length; i++) {
+      if (current === null || current === undefined) return undefined;
+      const part = parts[i];
+
+      if (part.includes('[')) {
+        const bracketStart = part.indexOf('[');
+        const bracketEnd = part.indexOf(']');
+        const key = part.substring(0, bracketStart);
+        const index = parseInt(part.substring(bracketStart + 1, bracketEnd), 10);
+
+        if (key && typeof current === 'object' && !Array.isArray(current)) {
+          current = (current as Record<string, unknown>)[key];
+        }
+
+        if (Array.isArray(current) && index >= 0 && index < current.length) {
+          current = current[index];
+        } else {
+          return undefined;
+        }
+      } else {
+        if (typeof current === 'object' && current !== null && !Array.isArray(current)) {
+          current = (current as Record<string, unknown>)[part];
+        } else {
+          return undefined;
+        }
+      }
+    }
+
+    return current;
   }
 }

@@ -1,4 +1,5 @@
 import { ScenarioContext } from '../context/scenario-context';
+import { tokenize } from './path-tokenizer';
 
 interface Constraint {
   name: string;
@@ -194,14 +195,25 @@ export class ISAFeatureArgumentResolver {
 
   // ========== Nested path access ==========
 
+  /**
+   * 從任意根物件中取得巢狀路徑的值。
+   * 支援 PathTokenizer（ADR-0019 bracket escape + 陣列索引 + dot notation）。
+   * 從 Java reference implementation 忠實移植。
+   */
   private getNestedValue(map: Record<string, unknown>, path: string): unknown {
-    if (!map || !path) return null;
-    if (!path.includes('.') && !path.includes('[')) {
-      return map[path] ?? null;
+    return this.getNestedValueFromObject(map, path);
+  }
+
+  getNestedValueFromObject(root: unknown, path: string): unknown {
+    if (root === null || root === undefined || !path) return null;
+
+    // Fast path: simple key without nesting
+    if (typeof root === 'object' && !Array.isArray(root) && !path.includes('.') && !path.includes('[')) {
+      return (root as Record<string, unknown>)[path] ?? null;
     }
 
-    const keys = path.split('.');
-    let current: unknown = map;
+    const keys = tokenize(path);
+    let current: unknown = root;
 
     for (const key of keys) {
       if (current === null || current === undefined) return null;
@@ -212,10 +224,13 @@ export class ISAFeatureArgumentResolver {
         const baseKey = key.substring(0, bracketStart);
         const index = parseInt(key.substring(bracketStart + 1, bracketEnd), 10);
 
-        if (typeof current === 'object' && current !== null && !Array.isArray(current)) {
-          current = (current as Record<string, unknown>)[baseKey];
-        } else {
-          return null;
+        // top-level array: baseKey 為空，current 已是 Array
+        if (baseKey) {
+          if (typeof current === 'object' && !Array.isArray(current)) {
+            current = (current as Record<string, unknown>)[baseKey];
+          } else {
+            return null;
+          }
         }
 
         if (Array.isArray(current)) {
@@ -230,25 +245,36 @@ export class ISAFeatureArgumentResolver {
       } else {
         if (typeof current === 'object' && current !== null && !Array.isArray(current)) {
           current = (current as Record<string, unknown>)[key];
+          if (current === undefined) return null;
         } else {
           return null;
         }
       }
     }
+
     return current ?? null;
   }
 
-  private containsNestedKey(map: Record<string, unknown>, path: string): boolean {
-    if (!map || !path) return false;
-    if (!path.includes('.') && !path.includes('[')) {
-      return path in map;
+  /**
+   * 檢查任意根物件中是否存在巢狀路徑。
+   * 支援 PathTokenizer（ADR-0019 bracket escape + 陣列索引 + dot notation）。
+   */
+  containsNestedKey(map: Record<string, unknown>, path: string): boolean {
+    return this.containsNestedKeyFromObject(map, path);
+  }
+
+  private containsNestedKeyFromObject(root: unknown, path: string): boolean {
+    if (root === null || root === undefined || !path) return false;
+
+    // Fast path
+    if (typeof root === 'object' && !Array.isArray(root) && !path.includes('.') && !path.includes('[')) {
+      return path in (root as Record<string, unknown>);
     }
 
-    const keys = path.split('.');
-    let current: unknown = map;
+    const keys = tokenize(path);
+    let current: unknown = root;
 
-    for (let i = 0; i < keys.length; i++) {
-      const key = keys[i];
+    for (const key of keys) {
       if (current === null || current === undefined) return false;
 
       if (key.includes('[')) {
@@ -257,20 +283,20 @@ export class ISAFeatureArgumentResolver {
         const baseKey = key.substring(0, bracketStart);
         const index = parseInt(key.substring(bracketStart + 1, bracketEnd), 10);
 
-        if (typeof current === 'object' && current !== null && !Array.isArray(current)) {
-          if (!(baseKey in (current as Record<string, unknown>))) return false;
-          current = (current as Record<string, unknown>)[baseKey];
-        } else {
-          return false;
+        if (baseKey) {
+          if (typeof current === 'object' && !Array.isArray(current)) {
+            if (!(baseKey in (current as Record<string, unknown>))) return false;
+            current = (current as Record<string, unknown>)[baseKey];
+          } else {
+            return false;
+          }
         }
 
         if (Array.isArray(current)) {
-          if (index < 0 || index >= current.length) {
-            return false; // 陣列索引超出範圍 → 視為 key 不存在
-          }
+          if (index < 0 || index >= current.length) return false;
           current = current[index];
         } else {
-          return false; // 不是 List → 視為 key 不存在
+          return false;
         }
       } else {
         if (typeof current === 'object' && current !== null && !Array.isArray(current)) {
@@ -837,7 +863,7 @@ export class ISAFeatureArgumentResolver {
     if (colonIndex > 0 && colonIndex < trimmed.length - 1) {
       const prefix = trimmed.substring(0, colonIndex).toUpperCase();
       const name = trimmed.substring(colonIndex + 1);
-      if (prefix === 'P' || prefix === 'Q' || prefix === 'H') {
+      if (prefix === 'P' || prefix === 'Q' || prefix === 'H' || prefix === 'B') {
         return { prefix, name };
       }
     }

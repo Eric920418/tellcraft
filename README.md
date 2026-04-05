@@ -1138,6 +1138,36 @@ psql "$DATABASE_URL" -f tellcraft-backend/migrations/xxx.sql
 - **`sanitizeFeatureContent()`**：零 LLM 自動修正 — `回應, with JSON:` → `回應, with table:`、`回應為, with JSON:` → `回應, with table:`、entity_validate header `>id` → `id`
 - **formulation prompt 強化**：明確禁止 entity_validate 使用 `>contextKey`；`>contextKey`/`<executionKey` 只用於 Given 準備和 Then 回應
 
+### SpecFormula Java Reference 移植 + Coder Pipeline 根治（2026-04-04 ~ 2026-04-05）
+
+**Fix Loop 根治**：
+- **temperature + thinking API 衝突修復**：`callClaude` / `callStructured` 在 thinking 啟用時不傳 temperature（Anthropic API 要求 thinking 時 temperature=1）。此前 fix loop 14 輪全部 API 400 crash，LLM 根本未被呼叫
+- **Feature summary 自動對齊**：`alignFeatureSummaries()` 確保 When 步驟 summary 與 feature.name 100% 一致，消除 `找不到 API 操作` 錯誤（BDD Feature When 步驟寫「建立待辦」但 actionsYml summary 是「建立待辦事項」）
+- **SQL 欄位靜態驗證**：`validateSqlColumns()` 用 DDL 驗證生成代碼的 SQL 欄位引用，自動移除不存在的 `deleted_at IS NULL` / `user_id` scope
+- **Slot 欄位驗證**：`validateSlotColumns()` 在 template render 前驗證 `softDeleteColumn` / `scopeColumn` 是否存在於 DDL
+- **Test server export 名稱修復**：`generateTestServerCode()` 從 handler 檔案實際內容讀取 export 函數名稱（不再用 action name 猜）
+- **Entity mapping 多格式正規化**：`normalizeEntityMapping()` 支援三種 YAML 格式（標準 array / 擴充 object+zh+table / 平坦 key-value），修復 `entity_to_table_mapping is not iterable` crash
+
+**Java SpecFormula Reference Implementation 移植**（來源：`specformula-dev-framework/specformula-java/`）：
+- **PathTokenizer**（新建 `helper/path-tokenizer.ts`）：ADR-0019 bracket notation 逃脫語法（`["key.with.dot"]`），從 Java `PathTokenizer.java` 完整移植
+- **getNestedValue / containsNestedKey 升級**：用 PathTokenizer 取代 `path.split('.')`，支援 top-level array（`[0].field`）、bracket escape、dot notation 混合路徑
+- **EntitySetup JSON Path header reconstruction**（ADR-0022）：`rewriteJsonPathHeaders()` + `reconstructJson()` + `tokenizeSubPath()`，支援 `profile.address.city` 和 `items[0].productId` 巢狀結構自動重組為 JSON
+- **EntityValidate JSON 巢狀欄位導航**：`navigateJson()` 支援 dot notation + bracket array indexing + PostgreSQL JSON/JSONB 字串自動解析
+- **ApiCall B: prefix**（ADR-0018）：`parseColumnPrefix()` 支援 `B:` raw body 參數前綴
+- **TypeConverter 空字串 → null**：對齊 Java TypeConverter 行為
+- **PostgreSQL Cleanup Plan**：從 Java `PostgresDialect` 移植，逐表 DISABLE TRIGGER → TRUNCATE CASCADE → ENABLE TRIGGER
+
+**全面容錯審計（26 個脆弱 throw → soft-fail）**：
+- execution key 找不到 → 存 null（不 throw）
+- 陣列索引超界 → return false
+- 未知 constraint `&xxx` → return true（跳過）
+- 時間/日期解析失敗 → fallback 到 now/today
+- 數字轉換失敗 → return 0
+- malformed JSON path → 跳過
+- `&between` 參數不足 → return false
+- `&isNull` 在 entity_setup → 跳過欄位（DB 用 DEFAULT）
+- response_validate 缺 DataTable → warn + skip
+
 ### 核心功能建設（2026-02-24 ~ 2026-02-28）
 
 - **LLM JSON 解析統一**（02-28）：safeParseJson 四層防禦，12 service 替換

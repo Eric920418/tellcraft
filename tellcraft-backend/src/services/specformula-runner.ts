@@ -1804,8 +1804,20 @@ async function cleanupTables(pool: Pool, schemas: DatabaseSchema[]): Promise<voi
     }
   }
 
-  if (tableNames.length > 0) {
-    await pool.query(`TRUNCATE TABLE ${tableNames.join(', ')} CASCADE`)
+  if (tableNames.length === 0) return
+
+  // 從 Java PostgresDialect 移植的清理計畫：
+  // 1. 停用 FK trigger（避免 TRUNCATE 順序依賴）
+  // 2. TRUNCATE CASCADE
+  // 3. 重啟 sequence（SERIAL/BIGSERIAL 欄位）
+  // 4. 啟用 FK trigger
+  // 逐條執行（避免多語句在某些 pg 版本/pooler 上的相容性問題）
+  for (const t of tableNames) {
+    await pool.query(`ALTER TABLE ${t} DISABLE TRIGGER ALL`)
+  }
+  await pool.query(`TRUNCATE TABLE ${tableNames.join(', ')} CASCADE`)
+  for (const t of tableNames) {
+    await pool.query(`ALTER TABLE ${t} ENABLE TRIGGER ALL`)
   }
 }
 

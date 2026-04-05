@@ -14,6 +14,8 @@ export class TypeConverter {
    */
   static convertToColumnType(value: unknown, columnType: string | null): unknown {
     if (value === null || value === undefined) return null;
+    // 空字串 → null（Java reference: TypeConverter line 45）
+    if (typeof value === 'string' && value.trim() === '') return null;
     if (columnType === null || columnType === undefined) return value;
 
     const upper = columnType.toUpperCase();

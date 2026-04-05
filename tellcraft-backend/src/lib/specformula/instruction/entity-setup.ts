@@ -31,6 +31,13 @@ export class EntitySetup {
       throw new Error('[EntitySetup] 缺少 DataTable。');
     }
 
+    // ADR-0022: JSON Path header reconstruction
+    // 如果 header 含有 . 或 [（如 profile.address.city、items[0].productId），
+    // 將這些 JSON Path header 按 root key 分組重組為 JSON 字串
+    const rewritten = this.rewriteJsonPathHeaders(headers, rows);
+    headers = rewritten.headers;
+    rows = rewritten.rows;
+
     const pair = DatabaseSchema.findSchemaAndTable(this.schemas, entityName);
     if (!pair) {
       const availableEntities: string[] = [];
@@ -230,5 +237,161 @@ export class EntitySetup {
     const snakeLower = NamingConverter.camelToSnake(colName).toLowerCase();
     if (snakeLower in dbRow) return dbRow[snakeLower];
     return null;
+  }
+
+  /**
+   * ADR-0022: JSON Path header reconstruction。
+   * 從 Java EntitySetup.rewriteJsonPathHeaders() 忠實移植。
+   *
+   * 如果 header 含有 `.` 或 `[`（如 `profile.address.city`、`items[0].productId`），
+   * 按 root key 分組，將多個 JSON Path header 重組為單一 JSON 字串 header。
+   */
+  private rewriteJsonPathHeaders(
+    headers: string[],
+    rows: Record<string, string>[]
+  ): { headers: string[]; rows: Record<string, string>[] } {
+    const JSON_PATH_PATTERN = /^(\w+)([.\[].*)/;
+
+    // 偵測是否有 JSON Path header
+    let hasJsonPath = false;
+    for (const h of headers) {
+      if (h.startsWith('>') || h.startsWith('<')) continue;
+      if (h.includes('.') || h.includes('[')) {
+        hasJsonPath = true;
+        break;
+      }
+    }
+    if (!hasJsonPath) return { headers, rows };
+
+    // 分組：rootKey → { indices, subPaths }
+    const rootGroups = new Map<string, { indices: number[]; subPaths: string[] }>();
+    const plainIndices: number[] = [];
+
+    for (let i = 0; i < headers.length; i++) {
+      const h = headers[i];
+      if (h.startsWith('>') || h.startsWith('<')) {
+        plainIndices.push(i);
+        continue;
+      }
+      const m = JSON_PATH_PATTERN.exec(h);
+      if (m) {
+        const rootKey = m[1];
+        const subPath = m[2];
+        if (!rootGroups.has(rootKey)) rootGroups.set(rootKey, { indices: [], subPaths: [] });
+        rootGroups.get(rootKey)!.indices.push(i);
+        rootGroups.get(rootKey)!.subPaths.push(subPath);
+      } else {
+        plainIndices.push(i);
+      }
+    }
+
+    // 建構新 headers
+    const newHeaders: string[] = [];
+    for (const idx of plainIndices) {
+      newHeaders.push(headers[idx]);
+    }
+    const rootKeys = [...rootGroups.keys()];
+    newHeaders.push(...rootKeys);
+
+    // 建構新 rows
+    const newRows: Record<string, string>[] = [];
+    for (const row of rows) {
+      const newRow: Record<string, string> = {};
+      for (const idx of plainIndices) {
+        newRow[headers[idx]] = row[headers[idx]] ?? '';
+      }
+      for (const rootKey of rootKeys) {
+        const { indices, subPaths } = rootGroups.get(rootKey)!;
+        const json = this.reconstructJson(headers, row, indices, subPaths);
+        newRow[rootKey] = JSON.stringify(json);
+      }
+      newRows.push(newRow);
+    }
+
+    return { headers: newHeaders, rows: newRows };
+  }
+
+  /**
+   * 從 subPath + value 集合重組為 JSON 結構（Object 或 Array）。
+   */
+  private reconstructJson(
+    headers: string[],
+    row: Record<string, string>,
+    indices: number[],
+    subPaths: string[]
+  ): unknown {
+    let root: unknown = null;
+
+    for (let i = 0; i < indices.length; i++) {
+      const fullHeader = headers[indices[i]];
+      const value = row[fullHeader] ?? '';
+      const subPath = subPaths[i];
+
+      const tokens = this.tokenizeSubPath(subPath);
+      if (tokens.length === 0) continue;
+
+      if (root === null) {
+        root = tokens[0].startsWith('[') ? [] : {};
+      }
+
+      let current: any = root;
+      for (let t = 0; t < tokens.length; t++) {
+        const token = tokens[t];
+        const isLast = t === tokens.length - 1;
+
+        if (token.startsWith('[') && token.endsWith(']')) {
+          const idx = parseInt(token.substring(1, token.length - 1), 10);
+          const list = current as unknown[];
+          while (list.length <= idx) list.push(null);
+          if (isLast) {
+            list[idx] = value;
+          } else {
+            if (list[idx] === null) {
+              const nextToken = tokens[t + 1];
+              list[idx] = nextToken.startsWith('[') ? [] : {};
+            }
+            current = list[idx];
+          }
+        } else {
+          const map = current as Record<string, unknown>;
+          if (isLast) {
+            map[token] = value;
+          } else {
+            if (!(token in map) || map[token] === null) {
+              const nextToken = tokens[t + 1];
+              map[token] = nextToken.startsWith('[') ? [] : {};
+            }
+            current = map[token];
+          }
+        }
+      }
+    }
+
+    return root ?? {};
+  }
+
+  /**
+   * 將 subPath 如 `[0].productId` 或 `.address.city` 拆解為 token 列表。
+   */
+  private tokenizeSubPath(subPath: string): string[] {
+    const tokens: string[] = [];
+    let i = 0;
+    const len = subPath.length;
+    while (i < len) {
+      if (subPath[i] === '.') {
+        i++;
+      } else if (subPath[i] === '[') {
+        const close = subPath.indexOf(']', i);
+        if (close < 0) break;
+        tokens.push(subPath.substring(i, close + 1));
+        i = close + 1;
+      } else {
+        let end = i;
+        while (end < len && subPath[end] !== '.' && subPath[end] !== '[') end++;
+        tokens.push(subPath.substring(i, end));
+        i = end;
+      }
+    }
+    return tokens;
   }
 }
