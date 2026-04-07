@@ -224,27 +224,46 @@ export default function WebContainerPreview({
     return { DATABASE_URL: neonConnectionString }
   }, [neonConnectionString])
 
-  // ── Build error 自動修復循環 ──
-  const repairAttemptRef = useRef(0)
-  const isRepairingRef = useRef(false)
+  // ── Build / Runtime error 自動修復循環 ──
+  const buildRepairAttemptRef = useRef(0)
+  const runtimeRepairAttemptRef = useRef(0)
+  const isBuildRepairingRef = useRef(false)
+  const isRuntimeRepairingRef = useRef(false)
   const writeFilesRef = useRef<((files: Record<string, string>) => Promise<void>) | null>(null)
 
+  // Runtime error 去重 + 合併兩個來源
+  const recentRuntimeErrorsRef = useRef<Map<string, number>>(new Map())
+  const pendingRuntimeErrorRef = useRef<{ name: string; message: string; path?: string; stack?: string } | null>(null)
+  const runtimeErrorDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  // filesFingerprint 變化時重置所有 counter（新一輪生成 = 新的 repair budget）
+  useEffect(() => {
+    buildRepairAttemptRef.current = 0
+    runtimeRepairAttemptRef.current = 0
+    recentRuntimeErrorsRef.current.clear()
+  }, [filesFingerprint])
+
   const handleBuildError = useCallback(async (errorLog: string) => {
-    if (isRepairingRef.current || repairAttemptRef.current >= 3) return
-    isRepairingRef.current = true
-    repairAttemptRef.current += 1
-    setProgressDetail(`自動修復 build error（第 ${repairAttemptRef.current} 次）...`)
+    if (isBuildRepairingRef.current || buildRepairAttemptRef.current >= 3) return
+    isBuildRepairingRef.current = true
+    buildRepairAttemptRef.current += 1
+    setProgressDetail(`自動修復 build error（第 ${buildRepairAttemptRef.current} 次）...`)
 
     try {
       const token = typeof window !== 'undefined' ? localStorage.getItem('auth_token') : null
       const res = await fetch('/api/vps/operations/fix-build-error', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
-        body: JSON.stringify({ buildError: errorLog, code: { pages, components, styles }, tailwindConfig }),
+        body: JSON.stringify({
+          errorType: 'build',
+          errorMessage: errorLog,
+          code: { pages, components, styles },
+          tailwindConfig,
+        }),
       })
-      if (!res.ok) { isRepairingRef.current = false; return }
+      if (!res.ok) { isBuildRepairingRef.current = false; return }
       const { fixedCode } = await res.json()
-      if (!fixedCode) { isRepairingRef.current = false; return }
+      if (!fixedCode) { isBuildRepairingRef.current = false; return }
 
       const fixedFiles: Record<string, string> = {}
       for (const f of [...(fixedCode.pages || []), ...(fixedCode.components || [])]) {
@@ -254,8 +273,76 @@ export default function WebContainerPreview({
       if (fixedCode.styles) fixedFiles['app/globals.css'] = prepareCss(fixedCode.styles, !!tailwindConfig)
       await writeFilesRef.current?.(fixedFiles)
       setProgressDetail(undefined)
-    } catch { /* 修復失敗，靜默 */ } finally { isRepairingRef.current = false }
+    } catch { /* 修復失敗，靜默 */ } finally { isBuildRepairingRef.current = false }
   }, [pages, components, styles, tailwindConfig])
+
+  const handleRuntimeError = useCallback(async (
+    err: { name: string; message: string; path?: string; stack?: string }
+  ) => {
+    // Step 1: 1500ms hash 去重
+    const key = `${err.name}|${err.message}|${err.path ?? ''}`.slice(0, 200)
+    const now = Date.now()
+    const lastSeen = recentRuntimeErrorsRef.current.get(key)
+    if (lastSeen && now - lastSeen < 1500) return
+    recentRuntimeErrorsRef.current.set(key, now)
+
+    // Step 2: counter 檢查
+    if (isRuntimeRepairingRef.current || runtimeRepairAttemptRef.current >= 3) return
+    isRuntimeRepairingRef.current = true
+    runtimeRepairAttemptRef.current += 1
+    setProgressDetail(`自動修復 runtime error（第 ${runtimeRepairAttemptRef.current} 次）...`)
+
+    try {
+      const token = typeof window !== 'undefined' ? localStorage.getItem('auth_token') : null
+      const res = await fetch('/api/vps/operations/fix-build-error', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+        body: JSON.stringify({
+          errorType: 'runtime',
+          errorMessage: err.message,
+          errorStack: err.stack,
+          errorPath: err.path,
+          code: { pages, components, styles },
+          tailwindConfig,
+        }),
+      })
+      if (!res.ok) { isRuntimeRepairingRef.current = false; return }
+      const { fixedCode } = await res.json()
+      if (!fixedCode) { isRuntimeRepairingRef.current = false; return }
+
+      const fixedFiles: Record<string, string> = {}
+      for (const f of [...(fixedCode.pages || []), ...(fixedCode.components || [])]) {
+        const p = stripRouteGroups(f.path?.startsWith('/') ? f.path.slice(1) : f.path)
+        fixedFiles[p] = sanitizeFileContent(p, f.content)
+      }
+      if (fixedCode.styles) fixedFiles['app/globals.css'] = prepareCss(fixedCode.styles, !!tailwindConfig)
+      await writeFilesRef.current?.(fixedFiles)
+      setProgressDetail(undefined)
+    } catch { /* 修復失敗，靜默 */ } finally { isRuntimeRepairingRef.current = false }
+  }, [pages, components, styles, tailwindConfig])
+
+  // 合併兩個 runtime error 來源（preview-message + edit-bridge tc_runtimeError）
+  // 250ms debounce 內把 path/stack/name/message union 起來，避免重複呼叫 API
+  const dispatchRuntimeError = useCallback((
+    partial: { name?: string; message?: string; path?: string; stack?: string }
+  ) => {
+    const cur = pendingRuntimeErrorRef.current ?? { name: 'Error', message: '' }
+    pendingRuntimeErrorRef.current = {
+      name:    partial.name    || cur.name,
+      message: partial.message || cur.message,
+      path:    partial.path    || cur.path,
+      stack:   partial.stack   || cur.stack,
+    }
+    if (runtimeErrorDebounceRef.current) clearTimeout(runtimeErrorDebounceRef.current)
+    runtimeErrorDebounceRef.current = setTimeout(() => {
+      const merged = pendingRuntimeErrorRef.current
+      pendingRuntimeErrorRef.current = null
+      if (!merged || !merged.message) return
+      handleRuntimeError(merged)
+      // 同時 forward 給 chat-side 慢路徑（保留 __auto_repair_preview__ 作為 fallback）
+      onRuntimeError?.({ name: merged.name, message: merged.message, path: merged.path })
+    }, 250)
+  }, [handleRuntimeError, onRuntimeError])
 
   // ── WebContainer Hook — handles full lifecycle ──
   const {
@@ -271,12 +358,12 @@ export default function WebContainerPreview({
     envVars,
     onProgress: (_status, detail) => setProgressDetail(detail),
     onPreviewError: (err) => {
-      onRuntimeError?.({ name: err.type, message: err.message, path: undefined })
+      dispatchRuntimeError({ name: err.type, message: err.message, stack: err.stack })
     },
     onBuildError: handleBuildError,
   })
 
-  // 更新 ref 以供 handleBuildError 使用（避免循環依賴）
+  // 更新 ref 以供 handler 使用（避免循環依賴）
   writeFilesRef.current = writeFiles
 
   // ── Restart when neonConnectionString appears (coder 完成後) ──
@@ -387,6 +474,8 @@ export default function WebContainerPreview({
   overridesRef.current = overrides
   const annotationsRef = useRef(annotations)
   annotationsRef.current = annotations
+  const dispatchRuntimeErrorRef = useRef(dispatchRuntimeError)
+  dispatchRuntimeErrorRef.current = dispatchRuntimeError
 
   useEffect(() => {
     const handleMessage = (e: MessageEvent) => {
@@ -414,7 +503,8 @@ export default function WebContainerPreview({
       if (msg.type === 'tc_elementDeselected') onElementSelectedRef.current?.(null)
       if (msg.type === 'tc_elementResized') onElementResizedRef.current?.(msg.elementId, msg.width, msg.height)
       if (msg.type === 'tc_runtimeError') {
-        onRuntimeError?.({ name: msg.name || 'Error', message: msg.message || 'Unknown', path: msg.path })
+        // 丟進 dispatcher，會 debounce 合併 preview-message 的錯誤訊息後觸發修復
+        dispatchRuntimeErrorRef.current?.({ name: msg.name || 'Error', message: msg.message || 'Unknown', path: msg.path })
       }
     }
     window.addEventListener('message', handleMessage)

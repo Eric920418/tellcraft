@@ -1213,29 +1213,46 @@ router.post('/webhooks', requireAuth, validateBody(createWebhookSchema), async (
 })
 
 // ============================================================
-// WebContainer 預覽 Build Error 自動修復
+// WebContainer 預覽 Build / Runtime Error 自動修復
 // ============================================================
 
 /**
  * POST /api/operations/fix-build-error
- * WebContainer 的 next dev 編譯失敗時，前端呼叫此 API 用 Haiku LLM 修復
+ * WebContainer 的 next dev 編譯失敗 (errorType='build') 或運行時崩潰 (errorType='runtime') 時，
+ * 前端呼叫此 API 用 Haiku LLM 修復
  */
 router.post('/fix-build-error', requireAuth, async (req: Request, res: Response) => {
   try {
     const userId = req.user!.id
-    const { buildError, code, tailwindConfig } = req.body as {
-      buildError: string
+    const {
+      buildError,            // legacy field（向後相容）
+      errorMessage,          // new: 統一的錯誤訊息
+      errorStack,            // new: runtime only
+      errorPath,             // new: runtime only
+      errorType = 'build',   // new: 'build' | 'runtime'，預設 build 向後相容
+      code,
+      tailwindConfig,
+    } = req.body as {
+      buildError?: string
+      errorMessage?: string
+      errorStack?: string
+      errorPath?: string
+      errorType?: 'build' | 'runtime'
       code: { pages: { path: string; content: string; description?: string }[]; components: { path: string; content: string; description?: string }[]; styles: string }
       tailwindConfig?: string
     }
 
-    if (!buildError || !code?.pages) {
-      return res.status(400).json({ error: 'Missing buildError or code' })
+    const msg = errorMessage ?? buildError
+    if (!msg || !code?.pages) {
+      return res.status(400).json({ error: 'Missing error message or code' })
     }
 
-    const { fixPreviewBuildError } = await import('../services/code-verify')
-    const result = await fixPreviewBuildError({
-      buildError,
+    const { fixPreviewError } = await import('../services/code-verify')
+    const result = await fixPreviewError({
+      errorType,
+      errorMessage: msg,
+      errorStack,
+      errorPath,
       code: {
         pages: (code.pages || []).map((p: { path: string; content: string; description?: string }) => ({ path: p.path, content: p.content, description: p.description || '' })),
         components: (code.components || []).map((c: { path: string; content: string; description?: string }) => ({ path: c.path, content: c.content, description: c.description || '' })),
@@ -1252,7 +1269,7 @@ router.post('/fix-build-error', requireAuth, async (req: Request, res: Response)
     res.json({ fixedCode: result.fixedCode, fixes: result.fixes })
   } catch (error) {
     logger.error({ err: error }, 'fix-build-error 失敗')
-    res.status(500).json({ error: 'Fix build error failed' })
+    res.status(500).json({ error: 'Fix preview error failed' })
   }
 })
 

@@ -3343,13 +3343,23 @@ function getBaseRules(): string {
 - useEffect / useCallback 的依賴陣列必須完整：所有 callback 內用到的外部變數都要列出
 - 禁止在 event handler 或 animation frame 內直接讀未宣告的變數
 
-## 資料防禦規則（Critical — 必須遵守）
-- 所有陣列 .map()/.forEach() 迭代前必須做 null guard：\`(items ?? []).map(...)\`
-- 迭代回呼中的變數存取必須用 optional chaining：\`item?.property\`
-- 條件渲染陣列項目時用 \`{items?.length > 0 && items.map(...)}\`
-- 物件屬性存取若來源可能 undefined，必須用 \`?.\` 或提供 fallback：\`item?.name ?? ''\`
-- style 中引用的值必須防禦：\`style={{ background: item?.color ?? '#ccc' }}\`
-- 禁止假設 mock 資料陣列永遠非空 — 空陣列和 undefined 都必須安全處理
+## 資料防禦規則（Critical — 必須遵守，runtime crash 最大來源）
+- **陣列迭代必須 null guard**：\`(items ?? []).map(...)\`、\`.filter()\`、\`.forEach()\` 同理
+- **直接物件屬性存取也必須防禦**（不只是陣列）：
+  - \`obj.prop\` → \`obj?.prop ?? fallback\`
+  - \`arr[index].field\` → \`arr?.[index]?.field\`
+  - \`obj.nested.deep\` → \`obj?.nested?.deep\`
+- **stateful "current item" 模式是最危險的 pattern**：useState 初值若為 \`null\` 或 \`undefined\`，第一次 render 直接炸
+  - ❌ \`const [currentService, setCurrentService] = useState()\` → \`currentService.image\` 直接炸
+  - ✅ \`const [currentService, setCurrentService] = useState(services[0])\`  // 給合理初值
+  - ✅ \`{currentService && <img src={currentService.image} />}\`  // 守衛
+  - ✅ \`<img src={currentService?.image ?? '/placeholder.png'} />\`  // optional + fallback
+- **props 解構必須給預設值**：\`function Card({ items = [], title = '' })\`
+- **迭代回呼中的變數存取必須用 optional chaining**：\`items?.map(item => item?.property)\`
+- **條件渲染陣列項目**：\`{items?.length > 0 && items.map(...)}\`
+- **style 中引用的值必須防禦**：\`style={{ background: item?.color ?? '#ccc' }}\`
+- **禁止假設 mock 資料陣列永遠非空** — 空陣列和 undefined 都必須安全處理
+- **不確定的時候永遠加 ?. 和 ??**，token 成本可以忽略，runtime crash 代價極高
 
 ## 無障礙規則（必須遵守）
 ### Accessible Names（Critical）
@@ -3497,9 +3507,11 @@ function getBaseRulesFast(): string {
 - 所有使用的 state 必須宣告
 - useEffect / useCallback 的依賴陣列必須完整
 
-## 資料防禦規則（Critical）
-- 所有陣列 .map()/.forEach() 前必須做 null guard：\`(items ?? []).map(...)\`
-- 物件屬性存取用 \`?.\` 或提供 fallback
+## 資料防禦規則（Critical — runtime crash 最大來源）
+- 陣列 .map/.filter/.forEach 前：\`(items ?? []).map(...)\`
+- 物件屬性存取：\`obj?.prop ?? fallback\`、\`arr?.[i]?.field\`
+- useState 初值禁止 \`undefined\`：用 \`useState(data[0])\` 或加守衛 \`if (!x) return null\`
+- props 解構給預設值：\`{ items = [], title = '' }\`
 
 ## Font Loading 規則
 - 必須使用 next/font 載入字體（禁止 <link> / @import Google Fonts）
