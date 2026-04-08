@@ -365,7 +365,20 @@ export class EntityValidate {
       return String(actual) === expectedStr;
     }
 
-    // Cross-type: numeric semantic comparison
+    // 通用數值正規化（含同類型比較）
+    // 解決：DataTable "800" vs pg NUMERIC 回傳 "800.00" 的字串比較失敗
+    // 同時涵蓋 number vs number、number vs string、string vs string
+    {
+      const eStr = String(expected);
+      const aStr = String(actual);
+      if (/^-?\d+(\.\d+)?$/.test(eStr) && /^-?\d+(\.\d+)?$/.test(aStr)) {
+        const eNum = parseFloat(eStr);
+        const aNum = parseFloat(aStr);
+        if (!isNaN(eNum) && !isNaN(aNum) && eNum === aNum) return true;
+      }
+    }
+
+    // Cross-type: numeric semantic comparison（保留作為其他混合類型的 fallback）
     if (typeof expected !== typeof actual) {
       const eNum = parseFloat(String(expected));
       const aNum = parseFloat(String(actual));

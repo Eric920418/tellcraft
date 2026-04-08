@@ -1669,8 +1669,8 @@ export async function runAllFeatures(input: {
       // Cleanup between scenarios
       try {
         await cleanupTables(input.pool, schemas)
-      } catch {
-        // non-fatal
+      } catch (err) {
+        logger.warn({ err, feature: name, scenario: scenario.name }, 'Table cleanup 失敗，可能導致 test data 殘留')
       }
 
       const result = await executeScenario(
@@ -1806,18 +1806,24 @@ async function cleanupTables(pool: Pool, schemas: DatabaseSchema[]): Promise<voi
 
   if (tableNames.length === 0) return
 
-  // 從 Java PostgresDialect 移植的清理計畫：
-  // 1. 停用 FK trigger（避免 TRUNCATE 順序依賴）
-  // 2. TRUNCATE CASCADE
-  // 3. 重啟 sequence（SERIAL/BIGSERIAL 欄位）
-  // 4. 啟用 FK trigger
-  // 逐條執行（避免多語句在某些 pg 版本/pooler 上的相容性問題）
-  for (const t of tableNames) {
-    await pool.query(`ALTER TABLE ${t} DISABLE TRIGGER ALL`)
+  // 首選：TRUNCATE CASCADE（快、重置 sequence、處理 FK）
+  // Neon DB 不允許 ALTER TABLE ... DISABLE TRIGGER，但 TRUNCATE CASCADE 不需要
+  try {
+    await pool.query(`TRUNCATE TABLE ${tableNames.join(', ')} RESTART IDENTITY CASCADE`)
+    return
+  } catch (truncateErr) {
+    logger.warn({ err: truncateErr, tables: tableNames }, 'TRUNCATE 失敗，fallback 到 DELETE FROM')
   }
-  await pool.query(`TRUNCATE TABLE ${tableNames.join(', ')} CASCADE`)
-  for (const t of tableNames) {
-    await pool.query(`ALTER TABLE ${t} ENABLE TRIGGER ALL`)
+
+  // Fallback：逐表 DELETE FROM（child → parent 順序，避免 FK 衝突）
+  // 假設 schemas 順序大致是 parent 在前；反向迭代刪除子表
+  const reversed = [...tableNames].reverse()
+  for (const table of reversed) {
+    try {
+      await pool.query(`DELETE FROM ${table}`)
+    } catch (delErr) {
+      logger.warn({ err: delErr, table }, '單表 DELETE 失敗（可能仍有 FK 引用）')
+    }
   }
 }
 

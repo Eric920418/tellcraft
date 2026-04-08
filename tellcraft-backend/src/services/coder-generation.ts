@@ -285,6 +285,14 @@ else { throw new Error('不支援的操作') }
 DATE → \`row.x instanceof Date ? row.x.toISOString().split('T')[0] : row.x\`
 TIMESTAMP → \`row.x instanceof Date ? row.x.toISOString() : row.x\`
 
+## 複合主鍵表（多對多 junction table）
+- 偵測：欄位清單若標示「⚠️ 複合主鍵表」，該表**沒有 id 欄位**
+- WHERE/UPDATE/DELETE 必須用複合主鍵的所有欄位：
+  ❌ 錯誤：\`sql\\\`DELETE FROM todo_tags WHERE id = \${tagId}\\\`\`
+  ✅ 正確：\`sql\\\`DELETE FROM todo_tags WHERE todo_id = \${todoId} AND tag_id = \${tagId}\\\`\`
+- INSERT 不需要 id：\`sql\\\`INSERT INTO todo_tags (todo_id, tag_id) VALUES (\${a}, \${b})\\\`\`
+- 禁止對複合主鍵表使用 \`RETURNING id\`（沒有 id 欄位）；用 \`RETURNING *\` 或具體欄位
+
 ## 輸出
 只輸出 TypeScript 代碼，不要任何解釋或 markdown 包裹。`
 
@@ -3150,15 +3158,57 @@ function generateColumnListText(schemaSql: string): string {
   const tables = parseTableColumnsFromDDL(schemaSql)
   if (tables.size === 0) return ''
 
+  const pks = parseTablePrimaryKeys(schemaSql)
   const COMMON_COLS = ['id', 'created_at', 'updated_at']
   const lines = ['## 欄位清單（生成的 SQL 只能使用以下欄位，禁止使用未列出的欄位）']
   for (const [table, cols] of tables) {
     const colList = [...cols].join(', ')
-    const missing = COMMON_COLS.filter(c => !cols.has(c))
-    const note = missing.length > 0 ? `（注意：此表沒有 ${missing.join('、')}）` : ''
+    const pk = pks.get(table)
+    let note = ''
+    if (pk && pk.length > 1) {
+      // 複合主鍵表（junction table）→ 強警告
+      note = `（⚠️ 複合主鍵表：PK = (${pk.join(', ')})，**沒有 id 欄位**！WHERE/UPDATE/DELETE 必須用 ${pk.join(' AND ')} 而非 id）`
+    } else {
+      const missing = COMMON_COLS.filter(c => !cols.has(c))
+      if (missing.length > 0) note = `（注意：此表沒有 ${missing.join('、')}）`
+    }
     lines.push(`- ${table}: ${colList}${note}`)
   }
   return lines.join('\n')
+}
+
+/**
+ * 解析每個表的主鍵欄位（支援複合主鍵和 inline PRIMARY KEY）。
+ * 返回 Map<tableName, primaryKeyColumns[]>
+ */
+export function parseTablePrimaryKeys(schemaSql: string): Map<string, string[]> {
+  const pkInfo = new Map<string, string[]>()
+  const tableRegex = /CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?(\w+)\s*\(([\s\S]*?)\)\s*;/gi
+  let match: RegExpExecArray | null
+  while ((match = tableRegex.exec(schemaSql)) !== null) {
+    const table = match[1].toLowerCase()
+    const body = match[2]
+
+    // 1. 複合 PK：PRIMARY KEY (col1, col2)
+    const compositePk = body.match(/PRIMARY\s+KEY\s*\(([^)]+)\)/i)
+    if (compositePk) {
+      const cols = compositePk[1].split(',').map(c => c.trim().toLowerCase()).filter(Boolean)
+      if (cols.length > 0) {
+        pkInfo.set(table, cols)
+        continue
+      }
+    }
+
+    // 2. Inline PK：col TYPE ... PRIMARY KEY ...
+    for (const line of body.split('\n')) {
+      const inlinePk = line.match(/^\s*(\w+)\s+\w+(?:\([^)]*\))?\s+[^,\n]*PRIMARY\s+KEY/i)
+      if (inlinePk) {
+        pkInfo.set(table, [inlinePk[1].toLowerCase()])
+        break
+      }
+    }
+  }
+  return pkInfo
 }
 
 function parseTableColumnsFromDDL(schemaSql: string): Map<string, Set<string>> {
@@ -3249,6 +3299,14 @@ export function validateSqlColumns(
         code = code.replace(/created_at\s*,/gi, '')
         fixes.push(`${file.path}: 移除 created_at（表 ${tableName} 沒有此欄位）`)
         modified = true
+      }
+
+      // 檢查 WHERE id / RETURNING id 在無 id 欄位的表（junction table）
+      // 不自動修復（風險高，可能讓 DELETE 變成全表刪除），只 log 警告
+      if (!columns.has('id')) {
+        if (/\bWHERE\s+id\s*=/i.test(sqlText) || /\bRETURNING\s+id\b/i.test(sqlText)) {
+          fixes.push(`⚠️ ${file.path}: 表 ${tableName} 沒有 id 欄位，但 SQL 使用 WHERE id 或 RETURNING id（複合主鍵表，需手動改用 PK 欄位）`)
+        }
       }
     }
 

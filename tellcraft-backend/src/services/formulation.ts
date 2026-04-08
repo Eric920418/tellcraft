@@ -51,6 +51,22 @@ export function sanitizeFeatureContent(content: string): { content: string; fixe
     fixes.push(`移除 ${beforeStripCount} 個 --- 分隔行`)
   }
 
+  // 0c. 多 Feature 區塊 — 保留第一個區塊，截斷第二個及之後
+  // LLM 有時把多個相關操作生成為一個 content 裡的多個 Feature: 區塊，
+  // 但單個 feature.content 只能有一個 Feature 宣告。保留第一個，丟棄後續（避免 Gherkin parser 炸）。
+  // 後續內容應由 BDD Skill 拆分為獨立的 feature object 來處理。
+  const featureDeclMatches = [...result.matchAll(/^Feature:\s+/gm)]
+  if (featureDeclMatches.length > 1) {
+    // 截斷到第二個 Feature: 宣告之前
+    const secondFeatureIdx = featureDeclMatches[1].index!
+    // 找第二個 Feature 之前最近的 # Action 註解塊或空行作為截斷點
+    const beforeSecond = result.substring(0, secondFeatureIdx)
+    const truncateMatch = beforeSecond.match(/\n(?:(?:#[^\n]*\n)+|\s*)$/)
+    const truncateIdx = truncateMatch ? secondFeatureIdx - truncateMatch[0].length : secondFeatureIdx
+    result = result.substring(0, truncateIdx).trimEnd() + '\n'
+    fixes.push(`截斷 ${featureDeclMatches.length - 1} 個多餘 Feature: 區塊`)
+  }
+
   // 1. 回應, with JSON: → 回應, with table:（DataTable 格式是標準，JSON 格式容易匹配失敗）
   result = result.replace(/回應,\s*with JSON:/g, () => {
     fixes.push('回應, with JSON: → 回應, with table:')
@@ -763,6 +779,7 @@ Feature: ${featureInfo.name}
 
 ## 規則
 - 檔案開頭必須用 \`# Action: actionName\`、\`# [METHOD] /path\`、\`# Summary: xxx\`
+- **每個 feature content 只能有一個 \`Feature:\` 宣告**：禁止在同一個 content 裡放多個 Feature 區塊（即使用 \`---\` 分隔）。一個 action = 一個 feature = 一個 Feature: 宣告。如果需要多個相關操作（如登入+登出），拆成兩個獨立的 feature object，各自有獨立的 name、actionName、content
 - 每條 Rule 標註四類之一（前置（狀態）/前置（參數）/後置（回應）/後置（狀態）），**禁止使用舊的 @Pre/@Post**
 - Rule 命名遵循嚴格句型：\`<四類前綴> - <主詞> 必須/應 <單一條件>\`
 - 每條 Rule 只驗證一件事（原子化）— 包含「且/和/並且」必須拆分
