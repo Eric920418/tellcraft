@@ -2123,7 +2123,10 @@ export default sql
         NODE_OPTIONS: '--max-old-space-size=512',
       },
       stdio: ['ignore', 'pipe', 'pipe'],
+      detached: true, // 建立新的 process group，讓 kill(-pid) 能終止整個 npx→tsx→node 樹
     })
+    // 追蹤此進程，worker 退出時強制清理（防止殭屍）
+    trackActiveTestServer(proc, tmpDir)
 
     // 7b. 轉發 test server stdout/stderr 到 logger（debug 用）
     proc.stdout?.on('data', (chunk: Buffer) => {
@@ -2158,14 +2161,94 @@ export default sql
   }
 }
 
-async function stopTestServer(proc: ChildProcess, tmpDir: string): Promise<void> {
+// ============================================================
+// Test Server 進程追蹤（防止殭屍進程）
+// ============================================================
+
+/** 追蹤所有活躍的 test server 進程，用於 worker 退出時強制清理 */
+const activeTestServers = new Map<number, { proc: ChildProcess; tmpDir: string }>()
+
+function trackActiveTestServer(proc: ChildProcess, tmpDir: string): void {
+  if (!proc.pid) return
+  activeTestServers.set(proc.pid, { proc, tmpDir })
+  proc.on('exit', () => {
+    if (proc.pid) activeTestServers.delete(proc.pid)
+  })
+}
+
+/** Worker 退出時強制殺死所有殘留的 test server（整個 process group） */
+function cleanupAllActiveTestServers(): void {
+  for (const [pid, { proc }] of activeTestServers) {
+    try {
+      // 負數 pid → 殺整個 process group（npx → tsx → node）
+      process.kill(-pid, 'SIGKILL')
+    } catch {
+      try { proc.kill('SIGKILL') } catch { /* ignore */ }
+    }
+  }
+  activeTestServers.clear()
+}
+
+// 註冊 worker 退出時的清理（避免意外退出留下殭屍）
+process.on('exit', cleanupAllActiveTestServers)
+process.on('SIGTERM', () => { cleanupAllActiveTestServers(); process.exit(0) })
+process.on('SIGINT', () => { cleanupAllActiveTestServers(); process.exit(0) })
+
+/**
+ * 安全網：每 5 分鐘掃描 /tmp/tellcraft-test-* 目錄，刪除超過 15 分鐘的舊目錄。
+ * 測試 server 正常執行不超過 5 分鐘，超過 15 分鐘的必定是殭屍殘留（process 雖然 kill 但 tmp dir 可能沒清）。
+ * 注意：只清 tmp dir，不直接殺 process（process 清理靠 cleanupAllActiveTestServers + stopTestServer）
+ */
+const TMP_CLEANUP_INTERVAL_MS = 5 * 60 * 1000 // 5 分鐘
+const TMP_MAX_AGE_MS = 15 * 60 * 1000 // 15 分鐘
+setInterval(async () => {
   try {
-    proc.kill('SIGTERM')
+    const tmpRoot = os.tmpdir()
+    const entries = await fsPromises.readdir(tmpRoot)
+    const now = Date.now()
+    let cleaned = 0
+    for (const entry of entries) {
+      if (!entry.startsWith('tellcraft-test-')) continue
+      const full = path.join(tmpRoot, entry)
+      try {
+        const stat = await fsPromises.stat(full)
+        if (now - stat.mtimeMs > TMP_MAX_AGE_MS) {
+          await fsPromises.rm(full, { recursive: true, force: true })
+          cleaned++
+        }
+      } catch { /* skip */ }
+    }
+    if (cleaned > 0) {
+      logger.info({ cleaned }, '清理過期的 tellcraft-test tmp 目錄')
+    }
+  } catch (err) {
+    logger.warn({ err }, 'tmp cleanup 掃描失敗')
+  }
+}, TMP_CLEANUP_INTERVAL_MS).unref() // unref 避免這個 timer 阻止 worker 退出
+
+async function stopTestServer(proc: ChildProcess, tmpDir: string): Promise<void> {
+  const pid = proc.pid
+  try {
+    if (pid) {
+      // 殺整個 process group（包含 npx、tsx、node 所有子進程）
+      // detached: true 讓 spawn 建立了新的 process group
+      try { process.kill(-pid, 'SIGTERM') } catch { /* process already dead or not detached */ }
+    } else {
+      proc.kill('SIGTERM')
+    }
     // 等待 2 秒
     await new Promise(resolve => setTimeout(resolve, 2000))
-    if (!proc.killed) proc.kill('SIGKILL')
+    if (!proc.killed) {
+      if (pid) {
+        try { process.kill(-pid, 'SIGKILL') } catch { /* ignore */ }
+      } else {
+        try { proc.kill('SIGKILL') } catch { /* ignore */ }
+      }
+    }
   } catch {
     // non-fatal
+  } finally {
+    if (pid) activeTestServers.delete(pid)
   }
 
   // fire-and-forget 刪除臨時目錄（含 node_modules 上萬個檔案）
