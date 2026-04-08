@@ -930,7 +930,8 @@ export async function runFastBuildPipeline(params: {
 
     logger.info(`QG 第 ${attempt + 1} 輪修復：${criticalIssues.length} 個 critical`)
     try {
-      const ruleFixed = autoFixCriticalIssuesRuleBased(currentCode, criticalIssues)
+      const qgTrackingContext = { userId, conversationId, projectId: state.projectId }
+      const ruleFixed = autoFixCriticalIssuesRuleBased(currentCode, criticalIssues, qgTrackingContext)
       if (ruleFixed) {
         currentCode = ruleFixed
         report = runQualityGate(currentCode, tier, state.uiuxDesignMood)
@@ -942,7 +943,7 @@ export async function runFastBuildPipeline(params: {
         if (criticalIssues.length === 0) break
       }
 
-      const fixed = await autoFixCriticalIssues(currentCode, criticalIssues, { userId, conversationId })
+      const fixed = await autoFixCriticalIssues(currentCode, criticalIssues, qgTrackingContext)
       if (!fixed) break
       currentCode = fixed
       report = runQualityGate(currentCode, tier, state.uiuxDesignMood)
@@ -1248,7 +1249,8 @@ export async function resumeFastBuildPipeline(params: {
       if (criticalIssues.length === 0) break
 
       try {
-        const ruleFixed = autoFixCriticalIssuesRuleBased(currentCode, criticalIssues)
+        const qgTrackingContextRecovery = { userId, conversationId, projectId: state.projectId }
+        const ruleFixed = autoFixCriticalIssuesRuleBased(currentCode, criticalIssues, qgTrackingContextRecovery)
         if (ruleFixed) {
           currentCode = ruleFixed
           report = runQualityGate(currentCode, tier, state.uiuxDesignMood)
@@ -1260,7 +1262,7 @@ export async function resumeFastBuildPipeline(params: {
           if (criticalIssues.length === 0) break
         }
 
-        const fixed = await autoFixCriticalIssues(currentCode, criticalIssues, { userId, conversationId })
+        const fixed = await autoFixCriticalIssues(currentCode, criticalIssues, qgTrackingContextRecovery)
         if (!fixed) break
         currentCode = fixed
         report = runQualityGate(currentCode, tier, state.uiuxDesignMood)

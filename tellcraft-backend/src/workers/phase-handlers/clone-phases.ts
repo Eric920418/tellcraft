@@ -467,7 +467,8 @@ async function finalizeMergedCode(
       if (criticalIssues.length === 0) break
 
       // 先嘗試規則修復
-      const ruleFixed = autoFixCriticalIssuesRuleBased(currentCode, criticalIssues)
+      const cloneQgTrackingContext = { userId, conversationId, projectId: state.projectId }
+      const ruleFixed = autoFixCriticalIssuesRuleBased(currentCode, criticalIssues, cloneQgTrackingContext)
       if (ruleFixed) {
         currentCode = ruleFixed
         report = runQualityGate(currentCode)
@@ -481,7 +482,7 @@ async function finalizeMergedCode(
 
       // LLM 修復
       try {
-        const fixed = await autoFixCriticalIssues(currentCode, criticalIssues, { userId, conversationId })
+        const fixed = await autoFixCriticalIssues(currentCode, criticalIssues, cloneQgTrackingContext)
         if (!fixed) break
         currentCode = fixed
         report = runQualityGate(currentCode)

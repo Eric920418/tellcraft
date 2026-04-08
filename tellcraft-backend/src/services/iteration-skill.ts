@@ -8,6 +8,7 @@ import { createLogger } from '../lib/logger'
 
 import { sanitizeForPreview } from './code-verify'
 import { sanitizeCodeForDeploy } from './deployer'
+import { recordTelemetry, truncateFeedback } from './skill-telemetry'
 
 const logger = createLogger('iteration-skill')
 import type { FlowState, IoEmitter } from '../types/flow-state'
@@ -342,6 +343,26 @@ ${enrichedFeedback}`
 
     // 4. 判斷迭代範圍
     const scope = classifyIterationScope(userFeedback, !!state.coderCompleted)
+
+    // Telemetry: 記錄每次迭代（用戶在「完成」後還要求什麼 = 首次生成的缺漏）
+    // 這是 prompt 回灌的高價值訊號源 — payload.feedback 截斷 500 字便於人工 pattern 挖礦
+    recordTelemetry({
+      skillName: 'iteration',
+      eventType: 'iteration',
+      patternKey: `scope:${scope}`,
+      userId,
+      conversationId,
+      projectId: pid,
+      payload: {
+        feedback: truncateFeedback(userFeedback),
+        previousPhase: state.phase,
+        hasImages: !!input.imageUrls?.length,
+        fastMode: !!state.fastMode,
+        coderCompleted: !!state.coderCompleted,
+        afterDeploy: state.phase === 'deployer_complete',
+      },
+      fixRounds: repeatCount + 1,
+    }).catch(() => {})
 
     let updatedCode: { pages: GeneratedComponent[]; components: GeneratedComponent[]; styles: string }
     let changedFiles: string[]

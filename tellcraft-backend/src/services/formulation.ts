@@ -32,6 +32,25 @@ export function sanitizeFeatureContent(content: string): { content: string; fixe
   const fixes: string[] = []
   let result = content
 
+  // 0. 移除 YAML frontmatter（LLM 偶爾會在 Feature 開頭加 --- ... ---，Gherkin parser 不認識）
+  // 例：
+  //   ---
+  //   title: xxx
+  //   ---
+  //   Feature: ...
+  const frontmatterMatch = result.match(/^---\s*\n[\s\S]*?\n---\s*\n/)
+  if (frontmatterMatch) {
+    result = result.substring(frontmatterMatch[0].length)
+    fixes.push('移除 YAML frontmatter')
+  }
+
+  // 0b. 移除散落在內容中的單獨 --- 行（用作 horizontal rule 分隔符，Gherkin 不認識）
+  const beforeStripCount = (result.match(/^---\s*$/gm) || []).length
+  if (beforeStripCount > 0) {
+    result = result.replace(/^---\s*$\n?/gm, '')
+    fixes.push(`移除 ${beforeStripCount} 個 --- 分隔行`)
+  }
+
   // 1. 回應, with JSON: → 回應, with table:（DataTable 格式是標準，JSON 格式容易匹配失敗）
   result = result.replace(/回應,\s*with JSON:/g, () => {
     fixes.push('回應, with JSON: → 回應, with table:')

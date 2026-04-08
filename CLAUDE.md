@@ -32,6 +32,11 @@ npx ts-node bdd-spec/scripts/lint-gherkin-format.ts spec/features/   # ISA Forma
 npx ts-node bdd-spec/scripts/validate-feature.ts spec/features/      # 結構驗證
 # 選項：--json, --strict, --fix
 
+# Skill Telemetry 週報（人工回灌 prompt 用）
+cd tellcraft-backend && pnpm tsx src/scripts/telemetry-weekly-report.ts              # 預設 7 天 markdown
+cd tellcraft-backend && pnpm tsx src/scripts/telemetry-weekly-report.ts --days=1     # 1 天
+cd tellcraft-backend && pnpm tsx src/scripts/telemetry-weekly-report.ts --json       # JSON 輸出
+
 # VPS 部署（SSH 到 VPS 後執行）
 git pull && pnpm build && pm2 startOrReload ecosystem.config.js --wait-ready
 
@@ -120,6 +125,7 @@ pm2 describe tellcraft-backend            # 詳細資訊（記憶體/重啟次�
 | **Telegram 整合** | `services/telegram-*.ts`（3 檔） | Notify 推播 + Bot Handler + Full Push |
 | **SpecFormula** | `lib/specformula/`（27 檔） | SDD 驗證引擎：Feature Files → HTTP API → DB 驗證。Coder Stage B 自動驗證 |
 | **Job Failure** | `services/job-failure-handler.ts` | BullMQ 最終失敗持久化 + 用戶通知 |
+| **Skill Telemetry** | `services/skill-telemetry.ts` + `scripts/telemetry-weekly-report.ts` | 自我強化迴圈 MVP：3 個埋點（deployer sanitize / QG rule-based / iteration refineCode）→ `skill_telemetry` 表 → 週報腳本。Fire-and-forget 寫入，絕不阻塞 pipeline。人工看週報決定哪些 pattern 回灌 prompt，禁止自動回灌 |
 
 **前端（`app/`）— 大檔案優先閱讀**
 
@@ -330,6 +336,7 @@ Feature 註解：`# Action: actionName` + `# [METHOD] /path` + `# Summary: xxx`
 
 ## 防雷清單（不看必踩）
 
+- **Skill Telemetry 必須 fire-and-forget**：`recordTelemetry` / `recordTelemetryBatch` 的呼叫端一定要接 `.catch(() => {})`。任何 DB 寫入失敗都不能中斷生成 pipeline。禁止在 try/catch 裡 await 後讓異常向上冒。**禁止自動回灌 prompt**：週報產出後人工決定，手改對應 service 的 system prompt，避免炸掉 prompt cache 命中率。migration 編號用 `029_add_skill_telemetry.sql`
 - **Structured Outputs（`lib/structured-output.ts`）**：JSON 輸出用 `callStructured<T>()` + Zod schema。只適用 JSON 輸出；代碼/Gherkin/YAML/自然語言不能用。`messages.parse()` 與 message prefilling **不相容**。改 schema 會使 prompt cache 失效。Zod v4 `z.record()` 必須傳兩個參數。`formulation.ts`/`coder-generation.ts` 保留 local `callClaude` wrapper 給非 JSON 輸出用
 - **handleProcessMessage 轉發到 handleContinueFlow 時必須帶 `skipPrefilterAndCredit: true`**：否則 prefilter + credit deduction 會執行兩次（雙重扣款）。只有 BullMQ `continue-flow` job 直接呼叫 `handleContinueFlow` 時才不帶此旗標
 - **生成中 phase 孤兒偵測三層**：(1) conv-lock 不存在+60s→恢復 (2) lock 存在但 startedAt>5min+無心跳→過期恢復 (3) 20min 超時。新增生成中 phase 必須考慮這三層

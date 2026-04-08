@@ -102,4 +102,55 @@ describe('ScenarioContext', () => {
     ctx.putObject('listId', 'uuid-exact')
     expect(ctx.get('listId')).toBe('uuid-exact')
   })
+
+  // 新增：保留數字後綴的 fallback（修復 LLM 生成 $beautician1Id 引用 Beautician1.id 的問題）
+  describe('keep-digit fallback (LLM 數字後綴格式)', () => {
+    it('resolves Beautician1.id → beautician1Id (keep digit)', () => {
+      ctx.putObject('Beautician1.id', 'uuid-b1')
+      expect(ctx.get('beautician1Id')).toBe('uuid-b1')
+    })
+
+    it('resolves Category2.id → category2Id (keep digit)', () => {
+      ctx.putObject('Category2.id', 'uuid-c2')
+      expect(ctx.get('category2Id')).toBe('uuid-c2')
+    })
+
+    it('resolves Member5.name → member5Name (keep digit, multi-char field)', () => {
+      ctx.putObject('Member5.name', 'Charlie')
+      expect(ctx.get('member5Name')).toBe('Charlie')
+    })
+
+    // 反向：camelCase + digit lookup → reconstructed 為 PascalCase
+    it('resolves $beautician1Id when stored as Beautician1.id (case insensitive)', () => {
+      ctx.putObject('Beautician1.id', 'uuid-rev')
+      expect(ctx.get('beautician1Id')).toBe('uuid-rev')
+    })
+  })
+
+  // 大小寫不敏感
+  describe('case-insensitive matching', () => {
+    it('exact key match is case insensitive', () => {
+      ctx.putObject('userId', 'uuid-x')
+      expect(ctx.get('UserId')).toBe('uuid-x')
+      expect(ctx.get('USERID')).toBe('uuid-x')
+    })
+
+    it('PascalCase entity reference matches lowercase storage', () => {
+      ctx.putObject('beautician1.id', 'uuid-low')
+      expect(ctx.get('Beautician1.id')).toBe('uuid-low')
+    })
+  })
+
+  // 正規化匹配（移除 . _ -）
+  describe('normalized matching', () => {
+    it('beautician_1_id matches beautician1Id', () => {
+      ctx.putObject('beautician1Id', 'uuid-norm')
+      expect(ctx.get('beautician_1_id')).toBe('uuid-norm')
+    })
+
+    it('Beautician1.id matches beautician1id', () => {
+      ctx.putObject('Beautician1.id', 'uuid-norm2')
+      expect(ctx.get('beautician1id')).toBe('uuid-norm2')
+    })
+  })
 })

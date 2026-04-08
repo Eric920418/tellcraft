@@ -140,6 +140,29 @@ export class ISAFeatureArgumentResolver {
           if (originalExecKeyName && originalExecKeyName !== contextKey) {
             this.getContext().putObject(originalExecKeyName, value);
           }
+
+          // 額外別名：從 contextKey 衍生多種命名格式，提高 LLM 任意格式引用的匹配率
+          // 例：>Beautician1.id 衍生出
+          //   beautician1Id     (camelCase + 數字)
+          //   Beautician1Id     (PascalCase + 數字，無 dot)
+          //   beauticianId      (去除數字，camelCase)
+          //   beautician1.id    (lowercase + 數字 + dot)
+          if (contextKey.includes('.')) {
+            const [entity, field] = contextKey.split('.');
+            const entityLower = entity.charAt(0).toLowerCase() + entity.slice(1);
+            const fieldCamel = field.charAt(0).toUpperCase() + field.slice(1);
+            const aliases = [
+              entityLower + fieldCamel,                       // beautician1Id
+              entity + fieldCamel,                            // Beautician1Id
+              entity.toLowerCase() + '.' + field.toLowerCase(), // beautician1.id
+              entityLower.replace(/\d+$/, '') + fieldCamel,   // beauticianId（去數字）
+            ];
+            for (const alias of aliases) {
+              if (alias && alias !== contextKey && alias !== originalExecKeyName) {
+                this.getContext().putObject(alias, value);
+              }
+            }
+          }
         }
       }
     }

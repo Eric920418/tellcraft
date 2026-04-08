@@ -7,6 +7,11 @@
 import { getAnthropicClient, MODEL, trackLlmUsage } from '../lib/anthropic'
 import { GeneratedComponent, repairUndeclaredRefs, repairHookShadowing } from './uiux-generation'
 import { createLogger } from '../lib/logger'
+import {
+  recordTelemetryBatch,
+  recordTelemetry,
+  type TelemetryTrackingContext,
+} from './skill-telemetry'
 
 const logger = createLogger('quality-gate')
 
@@ -724,10 +729,40 @@ function applyRuleBasedFixToFile(content: string, issue: QualityIssue): string {
   }
 }
 
+const RULE_BASED_FIXABLE = new Set([
+  'motion-import',
+  'tailwind-v4',
+  'focus-visible',
+  'form-labels',
+  'no-h-screen',
+])
+
 export function autoFixCriticalIssuesRuleBased(
   code: GeneratedCode,
-  issues: QualityIssue[]
+  issues: QualityIssue[],
+  trackingContext?: TelemetryTrackingContext
 ): GeneratedCode | null {
+  // Telemetry: 每條進來的 issue 都記錄一次 rule 命中（不論最後是否真的改動檔案內容）
+  // 這樣可以統計「rule 每天被觸發幾次」，作為 prompt 回灌的高頻 pattern 來源
+  if (issues.length > 0) {
+    recordTelemetryBatch(
+      issues.map(issue => ({
+        skillName: 'quality_gate' as const,
+        eventType: 'qg_rule_fix' as const,
+        patternKey: issue.rule || 'unknown',
+        severity: issue.severity,
+        userId: trackingContext?.userId || null,
+        conversationId: trackingContext?.conversationId || null,
+        projectId: trackingContext?.projectId || null,
+        payload: {
+          file: issue.file,
+          category: issue.category,
+          fixable: RULE_BASED_FIXABLE.has(issue.rule || ''),
+        },
+      }))
+    ).catch(() => {})
+  }
+
   let changed = false
 
   const pages = code.pages.map(page => {
@@ -782,10 +817,30 @@ function pickIssueScopedCode(code: GeneratedCode, issues: QualityIssue[]): Gener
 export async function autoFixCriticalIssues(
   code: GeneratedCode,
   issues: QualityIssue[],
-  trackingContext?: { userId?: string; conversationId?: string }
+  trackingContext?: { userId?: string; conversationId?: string; projectId?: string }
 ): Promise<GeneratedCode | null> {
   const client = getAnthropicClient()
   const scopedCode = pickIssueScopedCode(code, issues)
+
+  // Telemetry: 進到 LLM fallback 代表 rule-based 沒救到 → 高成本修復事件
+  // patternKey 聚合所有剩餘 issue 的 rule，排序後去重
+  if (issues.length > 0) {
+    const rules = Array.from(new Set(issues.map(i => i.rule || 'unknown'))).sort()
+    recordTelemetry({
+      skillName: 'quality_gate',
+      eventType: 'qg_llm_fallback',
+      patternKey: rules.join(',') || 'unknown',
+      userId: trackingContext?.userId || null,
+      conversationId: trackingContext?.conversationId || null,
+      projectId: trackingContext?.projectId || null,
+      payload: {
+        issue_count: issues.length,
+        rules,
+        files: Array.from(new Set(issues.map(i => i.file))).slice(0, 10),
+      },
+      fixRounds: issues.length,
+    }).catch(() => {})
+  }
 
   // 組合所有代碼供 LLM 修復
   const codeBlocks: string[] = []

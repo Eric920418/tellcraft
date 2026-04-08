@@ -14,6 +14,7 @@ import { createLogger } from '../lib/logger'
 import { repairMissingReactImports, repairBracketLookupAccess } from './uiux-generation'
 import { sanitizeNamedImports } from '../utils/sanitize-named-imports'
 import { inferFileType } from '../workers/orchestrator-utils'
+import { recordTelemetryBatch, categorizeSanitizeFix } from './skill-telemetry'
 
 const logger = createLogger('deployer')
 const execFileAsync = promisify(execFile)
@@ -964,6 +965,19 @@ export async function prepareDeployment(
 
   if (sanitizeResult.fixes.length > 0) {
     logger.info({ count: sanitizeResult.fixes.length, fixes: sanitizeResult.fixes }, '預檢修復')
+
+    // Telemetry: 把 fixes 用 regex 分類器歸類 → 高頻 pattern 進週報
+    // 這是 MVP 最高 ROI 的訊號源之一：每次 LLM 生成完都會被 sanitize 擦一次屁股
+    recordTelemetryBatch(
+      sanitizeResult.fixes.map(fix => ({
+        skillName: 'deployer' as const,
+        eventType: 'sanitize_fix' as const,
+        patternKey: categorizeSanitizeFix(fix),
+        userId,
+        projectId,
+        payload: { rawLabel: fix.slice(0, 200) },
+      }))
+    ).catch(() => {})
   }
 
   const fileCount = sanitizedCode.pages.length + sanitizedCode.components.length + 1 // +1 for styles

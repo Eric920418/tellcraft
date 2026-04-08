@@ -1482,7 +1482,8 @@ export async function executeFullCodePipeline(
 
     logger.info(`Pipeline QG 修復 ${attempt + 1}/${MAX_FIX_ATTEMPTS}`)
 
-    const ruleFixed = autoFixCriticalIssuesRuleBased(currentCode, criticalIssues)
+    const qgTrackingContext = { userId: state.userId, conversationId, projectId: state.projectId }
+    const ruleFixed = autoFixCriticalIssuesRuleBased(currentCode, criticalIssues, qgTrackingContext)
     if (ruleFixed) {
       currentCode = ruleFixed
       report = runQualityGate(currentCode, state.uiuxDesignTier, state.uiuxDesignMood)
@@ -1497,7 +1498,7 @@ export async function executeFullCodePipeline(
       }
     }
 
-    const fixedCode = await autoFixCriticalIssues(currentCode, criticalIssues, { userId: state.userId, conversationId })
+    const fixedCode = await autoFixCriticalIssues(currentCode, criticalIssues, qgTrackingContext)
     if (!fixedCode) break
 
     totalAutoFixed += criticalIssues.length
@@ -1939,7 +1940,8 @@ export async function executeQualityGate(
       stage: 'uiux_quality_gate_fixing',
     })
 
-    const ruleFixed = autoFixCriticalIssuesRuleBased(currentCode, criticalIssues)
+    const qgTrackingContext2 = { userId: state.userId, conversationId, projectId: state.projectId }
+    const ruleFixed = autoFixCriticalIssuesRuleBased(currentCode, criticalIssues, qgTrackingContext2)
     if (ruleFixed) {
       currentCode = ruleFixed
       report = runQualityGate(currentCode, state.uiuxDesignTier, state.uiuxDesignMood)
@@ -1954,7 +1956,7 @@ export async function executeQualityGate(
       }
     }
 
-    const fixedCode = await autoFixCriticalIssues(currentCode, criticalIssues, { userId: state.userId, conversationId })
+    const fixedCode = await autoFixCriticalIssues(currentCode, criticalIssues, qgTrackingContext2)
     if (!fixedCode) {
       logger.error('Quality Gate autoFix 失敗')
       break
