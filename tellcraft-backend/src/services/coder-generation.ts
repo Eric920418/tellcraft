@@ -4446,11 +4446,21 @@ export async function fixFailingAction(
         logger.info({ actionName, funcName, scenarioCount: scenarios.length }, 'Per-SubOp 精準修復')
 
         try {
-          const fixedFunc = await callClaude(FIX_SYSTEM_PROMPT, `## 當前子操作函數（${funcName}）
+          // 提取 imports 區塊供 Per-SubOp LLM 看到（避免 sql is not defined）
+          const importsBlock = currentCode.split('\n').filter(l => l.startsWith('import ')).join('\n')
+          // 提取相關 feature content 供 LLM 看到測試期望
+          const featureHint = featureContent ? `\n## BDD 規格（測試期望）\n\`\`\`gherkin\n${featureContent.substring(0, 4000)}\n\`\`\`\n` : ''
+
+          const fixedFunc = await callClaude(FIX_SYSTEM_PROMPT, `## 檔案 import 區塊（已存在，不要重複宣告）
+\`\`\`typescript
+${importsBlock}
+\`\`\`
+
+## 當前子操作函數（${funcName}）
 \`\`\`typescript
 ${funcBody}
 \`\`\`
-
+${featureHint}
 ## 測試失敗
 ${subFixDetails}
 
@@ -4460,7 +4470,7 @@ ${schemaSql}
 \`\`\`
 ${entityMapping ? `\n## Entity Mapping\n\`\`\`yaml\n${entityMapping}\n\`\`\`\n` : ''}
 
-只修復這個子操作函數，不要改函數名稱（${funcName}）。輸出修正後的完整函數。`,
+只修復這個子操作函數，不要改函數名稱（${funcName}）。仔細看 BDD 規格的 Background（資料結構）和 Then（預期欄位）。輸出修正後的完整函數。`,
             { maxTokens: 4096, temperature: 0.1, thinking: thinkingConfig }, trackingContext)
 
           if (fixedFunc.success && fixedFunc.content) {
@@ -4508,11 +4518,15 @@ ${entityMapping ? `\n## Entity Mapping\n\`\`\`yaml\n${entityMapping}\n\`\`\`\n` 
     })
     .join('\n')
 
+  const featureSection = featureContent
+    ? `\n## BDD 規格（測試期望 — 看清楚 Background 的資料準備和 Then 的預期回應欄位）\n\`\`\`gherkin\n${featureContent.substring(0, 8000)}\n\`\`\`\n`
+    : ''
+
   const userMessage = `## 當前代碼（${actionName}）
 \`\`\`typescript
 ${currentCode}
 \`\`\`
-
+${featureSection}
 ## 測試失敗
 ${failureDetails}
 
@@ -4521,7 +4535,7 @@ ${failureDetails}
 ${schemaSql}
 \`\`\`
 ${entityMapping ? `\n## Entity Mapping\n\`\`\`yaml\n${entityMapping}\n\`\`\`\n` : ''}
-請修復代碼使所有測試通過。輸出完整的修正後檔案。`
+請修復代碼使所有測試通過。仔細閱讀 BDD 規格的 Background（了解測試資料）和 Then（了解預期回應欄位），確保你的 SQL 查詢回傳的是正確的表和欄位。輸出完整的修正後檔案。`
 
   const response = await callClaude(FIX_SYSTEM_PROMPT, userMessage, { maxTokens: 8192, temperature: 0.1, thinking: thinkingConfig }, trackingContext)
 

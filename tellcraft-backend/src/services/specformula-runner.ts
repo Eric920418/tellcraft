@@ -2695,7 +2695,16 @@ export async function runRedGreenCycle(input: {
         input.entityMapping
       )
 
-      currentFiles[fileIdx] = { ...currentFiles[fileIdx], content: fixedCode }
+      // Fix 後安全網：確保 sql import 存在
+      let safedCode = fixedCode
+      const usesSql = /\bsql\s*`/.test(safedCode) || /\bsql\.begin/.test(safedCode)
+      const hasImport = /import\s*\{[^}]*\bsql\b[^}]*\}\s*from\s*['"]@\/lib\/db['"]/.test(safedCode)
+      if (usesSql && !hasImport) {
+        safedCode = `import { sql } from '@/lib/db'\n\n${safedCode}`
+        logger.info({ actionName }, 'Fix 後安全網：注入 import { sql }')
+      }
+
+      currentFiles[fileIdx] = { ...currentFiles[fileIdx], content: safedCode }
     }
 
     // 逐 Feature 修復結束：如果仍失敗，回退到修復前版本（避免壞修復影響回歸測試）
@@ -2790,7 +2799,11 @@ export async function runRedGreenCycle(input: {
           const match = f.content.match(/^#\s*Action:\s*(\S+)/m)
           return match?.[1] === actionName
         })
-        const fixedCode = await fixFailingAction(actionName, currentFiles[fileIdx].content, scenarios, input.schemaSql, input.trackingContext, featureFile?.content, input.entityMapping)
+        let fixedCode = await fixFailingAction(actionName, currentFiles[fileIdx].content, scenarios, input.schemaSql, input.trackingContext, featureFile?.content, input.entityMapping)
+        // 回歸修復安全網：確保 sql import
+        if ((/\bsql\s*`/.test(fixedCode) || /\bsql\.begin/.test(fixedCode)) && !/import\s*\{[^}]*\bsql\b[^}]*\}\s*from\s*['"]@\/lib\/db['"]/.test(fixedCode)) {
+          fixedCode = `import { sql } from '@/lib/db'\n\n${fixedCode}`
+        }
         currentFiles[fileIdx] = { ...currentFiles[fileIdx], content: fixedCode }
       } catch (fixErr) {
         logger.warn({ actionName, err: fixErr }, '回歸修復 fixFailingAction 失敗，跳過此 action')
