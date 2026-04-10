@@ -17,6 +17,7 @@ import { deriveSchemaFromBdd } from './schema-derivation'
 import { convertToOpenAPI } from './actions-design'
 import type { GeneratedComponent } from './uiux-generation'
 import { extractDispatchSummaries, guessHttpMethodForSummary } from './coder-generation'
+import { sanitizeFeatureContent } from './formulation'
 import type { IsaSpec, IsaInstruction } from '../lib/specformula/spec/isa/models'
 import type { ApiSpec } from '../lib/specformula/spec/api/models'
 import type { InstructionSet } from '../lib/specformula/cucumber/step-definition-factory'
@@ -1612,7 +1613,9 @@ export async function runAllFeatures(input: {
 
     let feature: ParsedFeature
     try {
-      feature = await parseFeatureFile(content)
+      // Parse-time sanitize：清洗 DB 裡已存的 Feature（可能含 --- frontmatter 等 Gherkin 不認識的語法）
+      const { content: sanitizedContent } = sanitizeFeatureContent(content)
+      feature = await parseFeatureFile(sanitizedContent)
     } catch (err) {
       logger.warn({ feature: name, err }, 'Feature 解析失敗，跳過')
       allResults.push({

@@ -3097,6 +3097,15 @@ export async function executeCoderPipeline(
     logger.info({ fixCount: sqlFixes.length, fixes: sqlFixes }, 'SQL 欄位驗證修正完成')
   }
 
+  // Step 8.6: 確保所有 action 檔案有 sql import（LLM 偶爾忘記 import）
+  for (const file of actionFiles) {
+    if (!file.path.startsWith('lib/actions/')) continue
+    if (file.content.includes('sql`') && !file.content.match(/import\s+.*sql.*from/)) {
+      file.content = `import { sql } from '@/lib/db'\n${file.content}`
+      logger.info({ path: file.path }, '自動注入缺失的 sql import')
+    }
+  }
+
   await callbacks.onProgress('完成！', 98)
 
   let backendFiles = sanitizedFrontend.filter(f => backendPaths.has(f.path)) as typeof backendFilesRaw
@@ -4264,7 +4273,23 @@ const result = await sql.begin(async (tx) => {
 1. 看 Then 的 DataTable headers → 你的 return 物件「必須」包含這些欄位（camelCase）
 2. 看 Then 的 DataTable values → 預期值，判斷你的 SQL 和回應映射是否正確
 3. 看 And 的 entity_validate DataTable → DB 應有的狀態，確認 INSERT/UPDATE/soft-delete 正確
-4. Entity Mapping（如有）→ entity 中文名稱對應的實際 DB table 名`
+4. Entity Mapping（如有）→ entity 中文名稱對應的實際 DB table 名
+
+## 狀態更新操作（取消/確認/完成 — 常見嚴重錯誤！）
+如果測試失敗是 "status 值不匹配（預期: cancelled 實際: pending）" 或類似的狀態未更新：
+→ 你的代碼**沒有執行 UPDATE**，只做了 SELECT 或 throw
+→ 正確做法：必須有 \`UPDATE table SET status = 'cancelled', cancelled_at = NOW() WHERE id = \${id} RETURNING *\`
+→ 不是 SELECT 後 return，是 UPDATE 後 RETURNING
+→ 如果回傳的 status 仍是舊值，100% 是因為你 SELECT 了沒 UPDATE
+
+## 自定義 throw 錯誤（如「沒有可用的美容師」— 常見嚴重錯誤！）
+如果測試失敗且 HTTP 400 的 error 是你自己 throw 的中文訊息（如 "沒有可用的美容師"、"服務項目不存在"）：
+→ 問題出在你的**查詢條件太嚴格**，不是 DB 沒資料
+→ entity_setup 已經插入了完整的測試資料（美容師、班表、服務關聯）
+→ 仔細檢查你的 SQL WHERE 條件是否與 entity_setup 的資料匹配
+→ 常見錯誤：JOIN 條件用錯欄位名（beautician_id vs beautician_services.beautician_id）
+→ 常見錯誤：時間比較格式不匹配（'10:00:00' vs '10:00' vs TIMESTAMPTZ）
+→ 常見錯誤：多餘的 is_active = true 檢查（entity_setup 可能沒設 is_active）`
 
 // ============================================================
 // 錯誤根因分類器（零 LLM — 純正則）
