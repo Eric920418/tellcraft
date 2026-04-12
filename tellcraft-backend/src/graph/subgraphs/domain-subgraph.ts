@@ -523,8 +523,9 @@ async function dnsVerifyNode(state: TellcraftStateType): Promise<Partial<Tellcra
 // ============================================================
 
 async function completeNode(state: TellcraftStateType): Promise<Partial<TellcraftStateType>> {
-  // register node 和 dns_verify node 內部已發送完成訊息
-  return { phase: 'domain_complete' }
+  const redis = getRedis()
+  const updated = await getFlowState(redis, state.conversationId)
+  return { phase: updated?.phase ?? 'domain_complete' }
 }
 
 // ============================================================

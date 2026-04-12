@@ -153,6 +153,30 @@ async function start() {
     })
   }, 2 * 60 * 1000)
 
+  // 每 30 分鐘清理超過 7 天的 LangGraph checkpoint（防膨脹）
+  if (process.env.USE_LANGGRAPH === 'true') {
+    const CHECKPOINT_CLEANUP_INTERVAL = 30 * 60 * 1000
+    const CHECKPOINT_MAX_AGE_DAYS = 7
+    setInterval(async () => {
+      try {
+        const { getCheckpointer } = await import('./graph/checkpointer')
+        const checkpointer = await getCheckpointer()
+        // checkpoint_id 是 UUID v6（按時間排序），用 SQL 日期比較清理
+        const cutoff = new Date(Date.now() - CHECKPOINT_MAX_AGE_DAYS * 24 * 60 * 60 * 1000).toISOString()
+        const pool = (checkpointer as unknown as { pool: { query: (sql: string, params: unknown[]) => Promise<{ rowCount: number }> } }).pool
+        const r1 = await pool.query(`DELETE FROM checkpoint_writes WHERE thread_id IN (SELECT DISTINCT thread_id FROM checkpoints WHERE metadata->>'created_at' < $1)`, [cutoff])
+        const r2 = await pool.query(`DELETE FROM checkpoint_blobs WHERE thread_id IN (SELECT DISTINCT thread_id FROM checkpoints WHERE metadata->>'created_at' < $1)`, [cutoff])
+        const r3 = await pool.query(`DELETE FROM checkpoints WHERE metadata->>'created_at' < $1`, [cutoff])
+        if (r3.rowCount && r3.rowCount > 0) {
+          logger.info({ deleted: r3.rowCount, cutoff }, 'LangGraph checkpoint 清理完成')
+        }
+      } catch (err) {
+        // 清理失敗不影響正常運作
+        logger.warn({ err }, 'LangGraph checkpoint 清理失敗')
+      }
+    }, CHECKPOINT_CLEANUP_INTERVAL)
+  }
+
   // 啟動時一次性修復舊代碼
   runStartupCodeRepair(generalRedis).catch(err =>
     logger.error({ err }, 'startup code repair 失敗')

@@ -70,18 +70,19 @@ async function failedNode(state: TellcraftStateType): Promise<Partial<TellcraftS
   // ── interrupt：等用戶選擇重試/取消 ──
   const reply: string = interrupt({ type: 'clone_failed', reason })
 
+  const updated = await getFlowState(redis, state.conversationId)
+
   if (reply === '__retry_clone__' || /重試|retry/i.test(reply)) {
-    return { phase: 'clone_analyzing' }  // → 回到 execute
+    return { phase: updated?.phase ?? 'clone_analyzing' }  // → 回到 execute
   }
 
   // 檢查是否貼了新 URL 或新圖片
   const hasUrl = /https?:\/\//.test(reply)
   if (hasUrl) {
-    // 用新 URL 重試
-    return { phase: 'clone_analyzing', message: reply }
+    return { phase: updated?.phase ?? 'clone_analyzing', message: reply }
   }
 
-  return { phase: 'idle' }
+  return { phase: updated?.phase ?? 'idle' }
 }
 
 // ── Edge routing ──

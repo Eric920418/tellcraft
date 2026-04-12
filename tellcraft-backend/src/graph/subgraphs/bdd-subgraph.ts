@@ -288,7 +288,8 @@ async function completeSpecNode(state: TellcraftStateType): Promise<Partial<Tell
     await completeSpecPhase(state.conversationId, flowState, redis, io)
   }
 
-  return { bddStage: 'complete', phase: 'spec_completed' }
+  const updated = await getFlowState(redis, state.conversationId)
+  return { bddStage: 'complete', phase: updated?.phase ?? 'spec_completed' }
 }
 
 // ============================================================
@@ -306,7 +307,8 @@ async function specChangeWaitNode(state: TellcraftStateType): Promise<Partial<Te
 
   await handleSpecChangeConfirm(state.conversationId, flowState, reply, redis, io)
 
-  return { bddStage: 'complete', phase: 'spec_completed' }
+  const updated = await getFlowState(redis, state.conversationId)
+  return { bddStage: 'complete', phase: updated?.phase ?? 'spec_completed' }
 }
 
 // ============================================================
@@ -324,7 +326,8 @@ async function specRollbackWaitNode(state: TellcraftStateType): Promise<Partial<
 
   await handleSpecRollbackSelect(state.conversationId, flowState, reply, redis, io)
 
-  return { bddStage: 'complete', phase: 'spec_completed' }
+  const updated = await getFlowState(redis, state.conversationId)
+  return { bddStage: 'complete', phase: updated?.phase ?? 'spec_completed' }
 }
 
 // ============================================================

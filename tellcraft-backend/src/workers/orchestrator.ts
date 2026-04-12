@@ -294,24 +294,35 @@ export function createOrchestratorWorker(
             logger.debug({ conversationId }, 'Checkpoint exists but no pending interrupt — fresh invoke')
           }
 
-          if (hasInterrupt) {
-            // Resume from interrupt — 傳用戶的新訊息作為 resume 值
-            logger.info({ conversationId }, 'LangGraph resume from interrupt')
-            await _langGraph.invoke(
-              new Command({ resume: message }),
-              config
-            )
-          } else {
-            // 新 invoke — 傳完整 initial state
-            await _langGraph.invoke({
-              conversationId,
-              projectId: data.projectId,
-              userId: userId ?? '',
-              message,
-              mode: (data as ProcessMessageData).mode ?? 'fine',
-              locale,
-              imageUrls: (data as ProcessMessageData).imageUrls ?? [],
-            }, config)
+          const graphStart = Date.now()
+          try {
+            if (hasInterrupt) {
+              logger.info({ conversationId, graph: 'langgraph', action: 'resume' }, 'LangGraph resume from interrupt')
+              await _langGraph.invoke(
+                new Command({ resume: message }),
+                config
+              )
+            } else {
+              logger.info({ conversationId, graph: 'langgraph', action: 'invoke', mode: (data as ProcessMessageData).mode ?? 'fine' }, 'LangGraph fresh invoke')
+              await _langGraph.invoke({
+                conversationId,
+                projectId: data.projectId,
+                userId: userId ?? '',
+                message,
+                mode: (data as ProcessMessageData).mode ?? 'fine',
+                locale,
+                imageUrls: (data as ProcessMessageData).imageUrls ?? [],
+              }, config)
+            }
+            logger.info({ conversationId, graph: 'langgraph', durationMs: Date.now() - graphStart, isResume: !!hasInterrupt }, 'LangGraph 完成')
+          } catch (graphErr) {
+            logger.error({ conversationId, graph: 'langgraph', durationMs: Date.now() - graphStart, err: graphErr }, 'LangGraph 執行失敗')
+            // 錯誤恢復：通知用戶
+            const errLocale = locale === 'en' ? 'en' : 'zh'
+            await sendMessage(conversationId, io, {
+              content: errLocale === 'en' ? 'An error occurred. Please try again.' : '系統發生錯誤，請重試。',
+              stage: 'error',
+            })
           }
           return
         }

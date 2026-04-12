@@ -234,13 +234,6 @@ async function mixedRoutingNode(state: TellcraftStateType): Promise<Partial<Tell
 }
 
 // ============================================================
-// Node 9: complete — 終端
-// ============================================================
-
-async function completeNode(_state: TellcraftStateType): Promise<Partial<TellcraftStateType>> {
-  return { phase: 'uiux_complete' }
-}
-
 // ============================================================
 // Edge routing
 // ============================================================
