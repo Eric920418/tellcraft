@@ -56,19 +56,23 @@ function normalizeMessageContent(content: unknown): string {
  * - PostgreSQL: 備份存儲，用於 Redis 故障恢復
  * 用於 phase 轉換、checkpoint 等關鍵節點
  */
+// Phase 變更追蹤（用於 PG 寫入優化）
+const _lastPgPhase = new Map<string, string>()
+
 export async function saveFlowState(redis: Redis, conversationId: string, state: FlowState) {
   const stateKey = `flow:${conversationId}`
 
-  // 並行寫入 Redis 和 PostgreSQL
-  await Promise.all([
-    // Redis（主要）
-    redis.set(stateKey, JSON.stringify(state), 'EX', 86400), // 24 小時過期
-    // PostgreSQL（備份）
+  // Redis 每次都寫（主要存儲，1-3ms）
+  await redis.set(stateKey, JSON.stringify(state), 'EX', 86400) // 24 小時過期
+
+  // PostgreSQL 只在 phase 變更時寫（減少 ~80% PG 寫入壓力）
+  const lastPhase = _lastPgPhase.get(conversationId)
+  if (state.phase !== lastPhase) {
+    _lastPgPhase.set(conversationId, state.phase)
     db.saveFlowState(conversationId, state).catch(err => {
-      // PostgreSQL 寫入失敗不應阻塞流程，只記錄錯誤
       logger.error({ err }, 'PostgreSQL 備份寫入失敗')
-    }),
-  ])
+    })
+  }
 }
 
 /**
@@ -126,6 +130,9 @@ export async function getFlowState(redis: Redis, conversationId: string): Promis
  */
 export async function deleteFlowState(redis: Redis, conversationId: string) {
   const stateKey = `flow:${conversationId}`
+
+  // 清理 PG phase 追蹤 cache
+  _lastPgPhase.delete(conversationId)
 
   await Promise.all([
     redis.del(stateKey),

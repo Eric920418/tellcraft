@@ -13,11 +13,11 @@ Tellcraft 是一個 AI 驅動的 **SDD（Specification-Driven Development）自�
 | 層級 | 技術 | 說明 |
 |------|------|------|
 | **前端** | Next.js 16 + React 19 | Vercel 部署，Turbopack |
-| **後端** | Express + BullMQ + Socket.io | VPS 部署，PM2 管理 |
+| **後端** | Express + BullMQ + LangGraph + Socket.io | VPS 部署，PM2 管理（LangGraph 由 `USE_LANGGRAPH` feature flag 控制） |
 | **資料庫** | PostgreSQL（VPS 本地） | 低延遲，自主控制 |
 | **佇列/狀態** | Redis | BullMQ 任務佇列 + 串流狀態 |
 | **LLM** | Claude Sonnet / Haiku | Anthropic SDK + Structured Outputs + Prompt Caching |
-| **動畫** | motion/react + Remotion | 需求藍圖面板 + 串流動畫 |
+| **動畫** | framer-motion (v12+) + Remotion | 需求藍圖面板 + 串流動畫 |
 | **i18n** | next-intl v4 | 中/英雙語，`[locale]` 路由 |
 | **樣式** | Tailwind CSS v4 | `@import "tailwindcss"` 語法 |
 | **預覽** | WebContainers（@webcontainer/api） | 瀏覽器內完整 Node.js + Next.js dev server |
@@ -95,7 +95,7 @@ cd tellcraft-backend && pnpm tsx src/scripts/register-prompt-change.ts --retire 
 ┌─────────────────┐         ┌─────────────────────────────────────┐
 │  Vercel (前端)   │────────>│  VPS Backend                        │
 │  Next.js 16     │  HTTP   │  ├─ Express API (Port 3100)         │
-│  tellcraft.com  │  WS     │  ├─ BullMQ Worker（任務編排）        │
+│  tellcraft.com  │  WS     │  ├─ BullMQ Worker + LangGraph（編排）│
 └─────────────────┘         │  ├─ Socket.io（即時通訊）            │
                             │  ├─ PostgreSQL（資料庫）             │
                             │  └─ Redis（隊列 + 狀態）             │

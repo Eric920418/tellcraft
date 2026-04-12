@@ -18,6 +18,7 @@
 import { StateGraph, START, END, interrupt } from '@langchain/langgraph'
 import { TellcraftState, type TellcraftStateType } from '../state'
 import { getRedis, getIo } from '../context'
+import * as db from '../../db/client'
 import { sendMessage, saveFlowState, getFlowState } from '../../workers/orchestrator-utils'
 import { executeFastBuildSkill, resumeFastBuildPipeline, getRemainingFastBuildPages } from '../../workers/phase-handlers/fast-build-phases'
 import { createLogger } from '../../lib/logger'
@@ -30,8 +31,13 @@ async function executeNode(state: TellcraftStateType): Promise<Partial<Tellcraft
   const redis = getRedis()
   const io = getIo()
 
+  // 先建 task 取得真正的 UUID
+  const taskId = await db.createTask({ projectId: state.projectId, userId: state.userId, goal: state.message, status: 'planning' })
+  if (!taskId) throw new Error('創建任務失敗')
+  await db.updateTask(taskId, { status: 'executing', plan: { skill: 'fast-build' } })
+
   await executeFastBuildSkill({
-    taskId: '',
+    taskId,
     projectId: state.projectId,
     conversationId: state.conversationId,
     userId: state.userId,

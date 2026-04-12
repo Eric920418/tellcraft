@@ -61,7 +61,7 @@ pm2 describe tellcraft-backend            # 詳細資訊（記憶體/重啟次�
 ┌─────────────────┐         ┌─────────────────────────────────────┐
 │  Vercel (前端)   │────────>│  VPS Backend                        │
 │  Next.js 16     │  HTTP   │  ├─ Express API (Port 3100)         │
-│  tellcraft.com  │  WS     │  ├─ BullMQ Worker（任務編排）        │
+│  tellcraft.com  │  WS     │  ├─ BullMQ Worker + LangGraph（編排）│
 └─────────────────┘         │  ├─ Socket.io（即時通訊）            │
                             │  ├─ PostgreSQL（資料庫）             │
                             │  └─ Redis（隊列 + 狀態）             │
@@ -148,6 +148,18 @@ pm2 describe tellcraft-backend            # 詳細資訊（記憶體/重啟次�
 | **WebContainer 預覽** | `app/lib/webcontainer-utils.ts` + `WebContainerPreview.tsx` + hooks | | WebContainers 跑 Next.js dev server，preloader pre-boot + pre-install |
 | **Remotion 動畫** | `app/components/remotion/` + `FastBuildPlayer` + `building-scene/` | | 3D 動畫（Fast Build 工廠 + BDD 蓋房子）|
 | **Landing 組件** | `app/components/landing/` | ~1978 | 16 個自包含 Landing Page 組件 |
+
+### LangGraph 編排層（`graph/`，Feature Flag）
+
+BullMQ 的 `handleProcessMessage` + `handleContinueFlow` 是現行生產編排。`graph/` 目錄是基於 `@langchain/langgraph` StateGraph 的並行實作，由 `USE_LANGGRAPH=true` 環境變數啟用（預設 off）。
+
+```
+classify → phase_router → skill subgraph（bdd/uiux/fast/coder/deployer/domain/clone）→ END
+```
+
+**Pointer State Pattern**：State 只存路由 metadata（~1KB），大資料留在 Redis + PostgreSQL（`getFlowState()`）。`graph/context.ts` 用 singleton 注入 Redis + Socket.io，`graph/checkpointer.ts` 用 PostgresSaver 持久化（`032_langgraph_checkpoints.sql`）。
+
+**注意**：開啟後 LangGraph 接管整個訊息處理（取代 `handleProcessMessage`/`handleContinueFlow`），但 skill subgraph 內部仍呼叫現有 phase handler 函數。新增/修改 phase handler 時需同步更新 `graph/nodes/phase-router.ts` 的路由邏輯。
 
 ### Skill 系統
 
@@ -278,7 +290,7 @@ Layer 5: sanitizeCodeForDeploy 修復 7 — useSearchParams Suspense boundary �
 
 ### 資料庫 Migration（`tellcraft-backend/migrations/`）
 
-共 31 個 migration（`001_initial_schema` ~ `031_extend_skill_telemetry_for_failures`），檔名自說明。新增 migration 後在 VPS 執行：`psql "$DATABASE_URL" -f tellcraft-backend/migrations/xxx.sql`
+共 33 個 migration（`001_initial_schema` ~ `032_langgraph_checkpoints`），檔名自說明。新增 migration 後在 VPS 執行：`psql "$DATABASE_URL" -f tellcraft-backend/migrations/xxx.sql`
 
 ### Skill 定義目錄
 
@@ -302,11 +314,12 @@ Layer 5: sanitizeCodeForDeploy 修復 7 — useSearchParams Suspense boundary �
 
 ### 測試
 
-後端使用 **Vitest**，測試檔案在 `tellcraft-backend/src/__tests__/`（31 個檔案）：
+後端使用 **Vitest**，測試檔案在 `tellcraft-backend/src/__tests__/`（33 個測試檔）：
 - 核心服務測試：`intent-helpers.test.ts`（107 條）、`semantic-gateway.test.ts`（56 條）、`deployer-sanitize.test.ts`（41 條）、`log-parser.test.ts`（33 條）
 - 設計系統測試：`design-moods.test.ts`、`composition-patterns.test.ts`、`design-system-v2.test.ts`、`prompt-architecture.test.ts`、`uiux-optimization.test.ts`
 - SpecFormula 測試：`specformula/naming-converter.test.ts`、`type-converter.test.ts`、`isa-spec-reader.test.ts`、`entity-ddl-reader.test.ts`、`data-models.test.ts`、`api-spec-reader.test.ts`、`isa-feature-argument-resolver.test.ts`、`scenario-context.test.ts`、`values-equal.test.ts`（9 檔）
-- Coder/RED Phase 測試：`coder-generators.test.ts`、`red-phase-validator.test.ts`、`red-phase-schema-checks.test.ts`、`actions-design.test.ts`、`routing-stub-adapter.test.ts`、`parse-table-primary-keys.test.ts`
+- Coder/RED Phase 測試：`coder-generators.test.ts`、`coder-generation-rules.test.ts`、`red-phase-validator.test.ts`、`red-phase-schema-checks.test.ts`、`actions-design.test.ts`、`routing-stub-adapter.test.ts`、`parse-table-primary-keys.test.ts`
+- 生成規則測試：`uiux-generation-rules.test.ts`
 - 其他：`merge-pages.test.ts`、`search-replace.test.ts`、`reference-analyzer.test.ts`、`schema-derivation.test.ts`、`skill-telemetry.test.ts`、`skill-telemetry-failure.test.ts`、`smoke.test.ts`
 
 ```bash
@@ -350,7 +363,7 @@ Feature 註解：`# Action: actionName` + `# [METHOD] /path` + `# Summary: xxx`
 - **handleProcessMessage 轉發到 handleContinueFlow 時必須帶 `skipPrefilterAndCredit: true`**：否則 prefilter + credit deduction 會執行兩次（雙重扣款）。只有 BullMQ `continue-flow` job 直接呼叫 `handleContinueFlow` 時才不帶此旗標
 - **生成中 phase 孤兒偵測三層**：(1) conv-lock 不存在+60s→恢復 (2) lock 存在但 startedAt>5min+無心跳→過期恢復 (3) 20min 超時。新增生成中 phase 必須考慮這三層
 - **`generateStructure` 的 `onCheckpoint` callback**：在 multi-pass 批次完成、syntax fix 後、reference repair 後三處觸發。呼叫端必須傳入 checkpoint callback 將中途代碼存入 FlowState，防止進程崩潰遺失串流中代碼
-- **新增 phase 必須四處同步**：`handleContinueFlow` 路由（含超時偵測）+ `FlowState` 型別 + `flowstate-recovery.ts` RECOVERABLE_PHASES + 前端 `richContent.type` union
+- **新增 phase 必須五處同步**：`handleContinueFlow` 路由（含超時偵測）+ `FlowState` 型別 + `flowstate-recovery.ts` RECOVERABLE_PHASES + 前端 `richContent.type` union + `graph/nodes/phase-router.ts` 路由（LangGraph 啟用時）
 - **Layout 禁止 opacity:0**：SplitLayout/split-layout 外層不能用 `initial={{ opacity: 0 }}`（多層疊加→黑屏）。useEffect 依賴不含 `fastBuildChunks`。split→default 回退需檢查 code_preview 歷史
 - **動畫庫是 `framer-motion`**（v12+），import 用 `from 'framer-motion'`
 - `[CI]` **字體只能用 `next/font`**，禁止 `<link>` / `@import` Google Fonts
@@ -415,5 +428,5 @@ Feature 註解：`# Action: actionName` + `# [METHOD] /path` + `# Summary: xxx`
 
 前端（`.env.local`）：`VPS_API_URL`, `NEXT_PUBLIC_VPS_API_URL`, `NEXT_PUBLIC_VPS_WS_URL`, `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `NEXT_PUBLIC_LIFF_ID`, `NEXT_PUBLIC_SENTRY_DSN`, `SENTRY_ORG`, `SENTRY_PROJECT`, `SENTRY_AUTH_TOKEN`
 
-後端（`tellcraft-backend/.env`）：定義在 `lib/env.ts` Zod schema，三層（REQUIRED/OPTIONAL/功能開關）。關鍵：`NEON_API_KEY`、`NEON_DEFAULT_REGION`（預設 aws-ap-southeast-1，注意 aws-ap-northeast-1 已從 Neon 移除）。開關：`ENABLE_PROMPT_CACHING`（預設 true）、`FAST_BUILD_MERGED_ANIM_RWD`（預設 true，品質異常設 false）、`ENABLE_DIFF_OUTPUT`（預設 false，省 60-70% output token）。
+後端（`tellcraft-backend/.env`）：定義在 `lib/env.ts` Zod schema，三層（REQUIRED/OPTIONAL/功能開關）。關鍵：`NEON_API_KEY`、`NEON_DEFAULT_REGION`（預設 aws-ap-southeast-1，注意 aws-ap-northeast-1 已從 Neon 移除）。開關：`ENABLE_PROMPT_CACHING`（預設 true）、`FAST_BUILD_MERGED_ANIM_RWD`（預設 true，品質異常設 false）、`ENABLE_DIFF_OUTPUT`（預設 false，省 60-70% output token）、`USE_LANGGRAPH`（預設 false，啟用 LangGraph StateGraph 編排取代 BullMQ handleProcessMessage/handleContinueFlow）。
 

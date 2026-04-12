@@ -12,6 +12,7 @@
 import { StateGraph, START, END } from '@langchain/langgraph'
 import { TellcraftState, type TellcraftStateType } from '../state'
 import { getRedis, getIo } from '../context'
+import * as db from '../../db/client'
 import { getFlowState } from '../../workers/orchestrator-utils'
 import { executeDeployerSkill } from '../../workers/phase-handlers/deploy-phases'
 import { routePhase } from '../../workers/phase-router'
@@ -27,9 +28,13 @@ async function deployNode(state: TellcraftStateType): Promise<Partial<TellcraftS
   const flowState = await getFlowState(redis, state.conversationId)
 
   if (!flowState || !flowState.phase.startsWith('deployer_')) {
-    // 新的部署 → 呼叫 executeDeployerSkill
+    // 新的部署 → 先建 task 取得真正的 UUID
+    const taskId = await db.createTask({ projectId: state.projectId, userId: state.userId, goal: state.message, status: 'planning' })
+    if (!taskId) throw new Error('創建任務失敗')
+    await db.updateTask(taskId, { status: 'executing', plan: { skill: 'deployer' } })
+
     await executeDeployerSkill({
-      taskId: '',
+      taskId,
       projectId: state.projectId,
       conversationId: state.conversationId,
       userId: state.userId,

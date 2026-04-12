@@ -16,6 +16,7 @@ import { StateGraph, START, END, interrupt } from '@langchain/langgraph'
 import { TellcraftState, type TellcraftStateType } from '../state'
 import { getRedis, getIo } from '../context'
 import { getFlowState } from '../../workers/orchestrator-utils'
+import * as db from '../../db/client'
 import {
   executeBddSpecSkill,
   handleESInitReply,
@@ -59,9 +60,13 @@ async function entryNode(state: TellcraftStateType): Promise<Partial<TellcraftSt
     return { bddStage: flowState.phase }
   }
 
-  // 新 BDD flow
+  // 新 BDD flow — 先建 task 取得真正的 UUID
+  const taskId = await db.createTask({ projectId: state.projectId, userId: state.userId, goal: state.message, status: 'planning' })
+  if (!taskId) throw new Error('創建任務失敗')
+  await db.updateTask(taskId, { status: 'executing', plan: { skill: 'bdd-spec' } })
+
   await executeBddSpecSkill({
-    taskId: '', projectId: state.projectId, conversationId: state.conversationId,
+    taskId, projectId: state.projectId, conversationId: state.conversationId,
     userId: state.userId, message: state.message,
     locale: (state.locale || 'zh') as 'zh' | 'en', redis, io,
   })
