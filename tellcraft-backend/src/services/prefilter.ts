@@ -3,6 +3,7 @@ import { z } from 'zod'
 import { createLogger } from '../lib/logger'
 import { MODEL } from '../lib/anthropic'
 import { callStructured } from '../lib/structured-output'
+import { recordTelemetry } from './skill-telemetry'
 
 const logger = createLogger('prefilter')
 
@@ -558,6 +559,11 @@ export async function prefilterMessage(
   // 0. 冷卻期檢查（違規累計觸發的暫停）
   const cooldownTtl = await checkCooldown(userId, redis)
   if (cooldownTtl > 0) {
+    recordTelemetry({
+      skillName: 'prefilter', eventType: 'prefilter_antiloop',
+      patternKey: 'cooldown_active', outcome: 'blocked', phase: 'prefilter',
+      userId, payload: { cooldownTtl },
+    }).catch(() => {})
     const minutes = Math.ceil(cooldownTtl / 60)
     return {
       allowed: false,
@@ -593,6 +599,11 @@ export async function prefilterMessage(
   for (const pattern of INJECTION_PATTERNS) {
     if (pattern.test(trimmed)) {
       logger.warn({ userId, pattern: String(pattern) }, 'Prompt injection 偵測')
+      recordTelemetry({
+        skillName: 'prefilter', eventType: 'prefilter_reject',
+        patternKey: 'injection', outcome: 'blocked', phase: 'prefilter',
+        userId, severity: 'critical',
+      }).catch(() => {})
       // 記錄違規 + 可能觸發冷卻
       const cooldown = await recordViolation(userId, redis)
       const cooldownWarning = cooldown > 0
@@ -613,6 +624,11 @@ export async function prefilterMessage(
   const qualityResult = checkInputQuality(trimmed, 'normal', isChinese ? 'zh' : 'en')
   if (qualityResult.quality !== 'valid') {
     logger.warn({ userId, quality: qualityResult.quality, reason: qualityResult.reason }, '品質攔截')
+    recordTelemetry({
+      skillName: 'prefilter', eventType: 'prefilter_reject',
+      patternKey: qualityResult.quality, outcome: 'blocked', phase: 'prefilter',
+      userId, payload: { reason: qualityResult.reason, locale },
+    }).catch(() => {})
     if (qualityResult.quality === 'offensive') {
       const cooldown = await recordViolation(userId, redis)
       const cooldownWarning = cooldown > 0

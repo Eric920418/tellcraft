@@ -7,6 +7,7 @@
 
 import { createLogger } from '../lib/logger'
 import { getAnthropicHeaders, MODEL, trackLlmUsage } from '../lib/anthropic'
+import { recordTelemetry } from './skill-telemetry'
 
 const logger = createLogger('syntax-validator')
 
@@ -84,6 +85,12 @@ export async function validateAndFixComponent(
   // LLM 修復（Haiku，成本低）
   const fixedCode = await llmFixSyntax(code, filePath, errors, trackingContext)
   if (!fixedCode) {
+    recordTelemetry({
+      skillName: 'syntax_validator', eventType: 'syntax_repair', patternKey: 'llm_fix_null',
+      outcome: 'failed', phase: 'syntax_validator', errorType: 'syntax_error',
+      userId: trackingContext?.userId, conversationId: trackingContext?.conversationId,
+      payload: { filePath, errorCount: errors.length, firstError: errors[0]?.substring(0, 200) },
+    }).catch(() => {})
     return { content: code, fixed: false, hadError: true }
   }
 
@@ -91,10 +98,22 @@ export async function validateAndFixComponent(
   const isFixedValid = await validateComponentSyntax(fixedCode, filePath)
   if (isFixedValid) {
     logger.info({ path: filePath }, 'LLM 語法修復成功')
+    recordTelemetry({
+      skillName: 'syntax_validator', eventType: 'syntax_repair', patternKey: 'llm_fix_success',
+      outcome: 'repaired', phase: 'syntax_validator',
+      userId: trackingContext?.userId, conversationId: trackingContext?.conversationId,
+      payload: { filePath, errorCount: errors.length },
+    }).catch(() => {})
     return { content: fixedCode, fixed: true, hadError: true }
   }
 
   logger.warn({ path: filePath }, 'LLM 語法修復後仍有錯誤')
+  recordTelemetry({
+    skillName: 'syntax_validator', eventType: 'syntax_repair', patternKey: 'llm_fix_still_broken',
+    outcome: 'failed', phase: 'syntax_validator', errorType: 'syntax_error',
+    userId: trackingContext?.userId, conversationId: trackingContext?.conversationId,
+    payload: { filePath, errorCount: errors.length },
+  }).catch(() => {})
   return { content: code, fixed: false, hadError: true }
 }
 

@@ -17,6 +17,7 @@ import { selectCompositionPatterns, formatPatternsForPrompt, listPatternsForVari
 import { formatStructuredDataForPrompt } from './reference-analyzer'
 import { createLogger } from '../lib/logger'
 import { validateAndFixFiles } from './syntax-validator'
+import { recordTelemetry } from './skill-telemetry'
 
 const logger = createLogger('uiux-generation')
 
@@ -4158,6 +4159,13 @@ ${isLaterBatch
   if (missingRefs.length > 0) {
     logger.info({ count: missingRefs.length, refs: missingRefs.map(r => `${r.file} → ${r.importPath}`) }, 'generateStructure 發現缺失引用')
 
+    recordTelemetry({
+      skillName: 'deployer', eventType: 'deployer_layer_trigger', patternKey: 'l1_missing_component',
+      outcome: 'failed', phase: 'deployer_l1', severity: 'warning',
+      userId: trackingContext?.userId, conversationId: trackingContext?.conversationId,
+      payload: { missingCount: missingRefs.length, refs: missingRefs.slice(0, 5).map(r => `${r.file} → ${r.importPath}`) },
+    }).catch(() => {})
+
     // LLM 修復（最多 1 次）
     const repairedComponents = await repairMissingComponents(
       missingRefs, generatedPages, generatedComponents, trackingContext, heartbeatFn
@@ -4172,6 +4180,13 @@ ${isLaterBatch
       logger.info({ count: repairedComponents.length, paths: repairedComponents.map(c => c.path) }, '已修復缺失組件')
       finalComponents = [...generatedComponents, ...repairedComponents]
 
+      recordTelemetry({
+        skillName: 'deployer', eventType: 'deployer_layer_trigger', patternKey: 'l1_repair_success',
+        outcome: 'repaired', phase: 'deployer_l1',
+        userId: trackingContext?.userId, conversationId: trackingContext?.conversationId,
+        payload: { repairedCount: repairedComponents.length },
+      }).catch(() => {})
+
       // Checkpoint：修復完成後持久化最終結果
       if (onCheckpoint) {
         await onCheckpoint({ pages: finalPages, components: finalComponents, styles: styles || '' })
@@ -4185,6 +4200,11 @@ ${isLaterBatch
       }
     } else {
       logger.warn('LLM 修復失敗，交給下游 deployer 處理')
+      recordTelemetry({
+        skillName: 'deployer', eventType: 'deployer_layer_trigger', patternKey: 'l1_repair_failed',
+        outcome: 'failed', phase: 'deployer_l1',
+        userId: trackingContext?.userId, conversationId: trackingContext?.conversationId,
+      }).catch(() => {})
     }
   }
 

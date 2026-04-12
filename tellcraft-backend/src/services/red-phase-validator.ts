@@ -27,6 +27,7 @@ import { deriveSchemaFromBdd } from './schema-derivation'
 import { StubHttpAdapter } from '../lib/specformula/http/stub-adapter'
 import { DatabaseSchema } from '../lib/specformula/spec/data/models'
 import { createLogger } from '../lib/logger'
+import { recordTelemetryBatch, type TelemetryEvent } from './skill-telemetry'
 
 const logger = createLogger('red-phase-validator')
 
@@ -700,6 +701,17 @@ export async function executeRedPhase(input: RedPhaseInput): Promise<RedPhaseRes
     durationMs,
   }, 'RED Phase 完成')
 
+  if (errors > 0) {
+    const issueTypes = [...new Set(issues.filter(i => i.severity === 'error').map(i => i.issueType))]
+    const events: TelemetryEvent[] = issueTypes.map(t => ({
+      skillName: 'red_phase' as const, eventType: 'red_validation_fail' as const,
+      patternKey: t, outcome: 'failed' as const, phase: 'red_l1',
+      severity: 'warning' as const,
+      payload: { errorCount: issues.filter(i => i.issueType === t).length, checkedFeatures: input.features.length },
+    }))
+    recordTelemetryBatch(events).catch(() => {})
+  }
+
   return result
 }
 
@@ -981,6 +993,14 @@ export async function runRedPhaseFullValidation(input: RedPhaseFullInput): Promi
           error: f.error.substring(0, 100),
         })),
       }, 'RED Phase Stub 發現非預期失敗')
+
+      const failureTypes = [...new Set(unexpectedFailures.map(f => f.failureType))]
+      const events: TelemetryEvent[] = failureTypes.map(t => ({
+        skillName: 'red_phase' as const, eventType: 'red_validation_fail' as const,
+        patternKey: `l2_${t}`, outcome: 'failed' as const, phase: 'red_l2',
+        payload: { failureCount: unexpectedFailures.filter(f => f.failureType === t).length, expectedRedCount },
+      }))
+      recordTelemetryBatch(events).catch(() => {})
     }
 
     return {
@@ -1122,6 +1142,15 @@ export async function runRedPhaseRoutingValidation(input: RedPhaseFullInput): Pr
       totalScenarios: testResult.totalScenarios,
       durationMs,
     }, 'RED Phase Routing 驗證完成')
+
+    if (!passed) {
+      const events: TelemetryEvent[] = routingMismatches.slice(0, 10).map(m => ({
+        skillName: 'red_phase' as const, eventType: 'red_validation_fail' as const,
+        patternKey: 'l2_5_routing_mismatch', outcome: 'failed' as const, phase: 'red_l2_5',
+        payload: { featureName: m.featureName, scenarioName: m.scenarioName },
+      }))
+      recordTelemetryBatch(events).catch(() => {})
+    }
 
     return {
       passed,

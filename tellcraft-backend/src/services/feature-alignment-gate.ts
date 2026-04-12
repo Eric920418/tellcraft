@@ -13,6 +13,7 @@ import { fixMultipleFeatures, sanitizeFeatureContent, type FeatureFixInput, type
 import { extractEntitySetupSteps } from './red-phase-validator'
 import { DatabaseSchema } from '../lib/specformula/spec/data/models'
 import { createLogger } from '../lib/logger'
+import { recordTelemetry } from './skill-telemetry'
 
 const logger = createLogger('feature-alignment-gate')
 
@@ -611,6 +612,15 @@ export async function runFeatureAlignmentGate(input: AlignmentGateInput): Promis
 
     // 無 error 級問題 → 通過
     if (errorIssues.length === 0) {
+      if (totalFixedCount > 0) {
+        recordTelemetry({
+          skillName: 'feature_gate', eventType: 'alignment_fixed',
+          patternKey: 'gate_passed_after_fix', outcome: 'repaired', phase: 'feature_alignment_gate',
+          fixRounds: round + 1,
+          userId: input.trackingContext?.userId, conversationId: input.trackingContext?.conversationId,
+          payload: { fixedCount: totalFixedCount, warningCount: issues.filter(i => i.severity === 'warning').length },
+        }).catch(() => {})
+      }
       return {
         passed: true,
         blocked: false,
@@ -627,6 +637,14 @@ export async function runFeatureAlignmentGate(input: AlignmentGateInput): Promis
     // 最後一輪不修了
     if (round === MAX_FIX_ROUNDS - 1) {
       const blockMessage = formatBlockMessage(errorIssues)
+      const checkNames = [...new Set(errorIssues.map(i => i.checkName))]
+      recordTelemetry({
+        skillName: 'feature_gate', eventType: 'alignment_blocked',
+        patternKey: checkNames.join(','), outcome: 'blocked', phase: 'feature_alignment_gate',
+        fixRounds: MAX_FIX_ROUNDS, severity: 'critical',
+        userId: input.trackingContext?.userId, conversationId: input.trackingContext?.conversationId,
+        payload: { errorCount: errorIssues.length, checkNames, fixedTotal: totalFixedCount },
+      }).catch(() => {})
       return {
         passed: false,
         blocked: true,
@@ -654,6 +672,13 @@ export async function runFeatureAlignmentGate(input: AlignmentGateInput): Promis
     if (!fixApplied) {
       // LLM 修復失敗 → 阻塞
       const blockMessage = formatBlockMessage(errorIssues)
+      recordTelemetry({
+        skillName: 'feature_gate', eventType: 'alignment_blocked',
+        patternKey: 'llm_fix_failed', outcome: 'blocked', phase: 'feature_alignment_gate',
+        fixRounds: round + 1, severity: 'critical',
+        userId: input.trackingContext?.userId, conversationId: input.trackingContext?.conversationId,
+        payload: { errorCount: errorIssues.length },
+      }).catch(() => {})
       return {
         passed: false,
         blocked: true,

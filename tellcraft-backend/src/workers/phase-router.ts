@@ -14,6 +14,7 @@ import {
   PHASE_BACKTRACK_MAP, PHASE_LABELS,
 } from './intent-helpers'
 import { createLogger } from '../lib/logger'
+import { recordTelemetry, classifyPhaseError, truncateFeedback } from '../services/skill-telemetry'
 
 // Phase handlers
 import {
@@ -731,6 +732,14 @@ export async function handlePhaseError(
 ) {
   const errorMsg = err instanceof Error ? err.message : String(err)
   logger.error({ phase: state.phase, err: errorMsg }, 'Phase handler 錯誤')
+
+  recordTelemetry({
+    skillName: 'orchestrator', eventType: 'phase_failure',
+    patternKey: classifyPhaseError(err), outcome: 'failed',
+    phase: state.phase, errorType: err instanceof Error ? err.name : 'unknown',
+    userId: state.userId, conversationId,
+    payload: { errorMessage: truncateFeedback(errorMsg), stack: (err instanceof Error ? err.stack : '')?.slice(0, 500) },
+  }).catch(() => {})
 
   const targetPhase = PHASE_BACKTRACK_MAP[state.phase]
   const targetLabel = targetPhase ? PHASE_LABELS[targetPhase] : null

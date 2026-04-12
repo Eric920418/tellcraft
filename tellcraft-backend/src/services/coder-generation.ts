@@ -18,6 +18,7 @@ import { createLogger } from '../lib/logger'
 import { isQueryAction } from './actions-design'
 import { sanitizeNamedImports } from '../utils/sanitize-named-imports'
 import { validateComponentSyntax } from './syntax-validator'
+import { recordTelemetry, truncateFeedback } from './skill-telemetry'
 import { generateAuthSystem, injectSessionProvider } from './coder-auth-templates'
 import { generateAdminPanel } from './coder-admin-templates'
 import { generateUploadFiles } from './coder-upload-templates'
@@ -4375,6 +4376,20 @@ export async function fixFailingAction(
   const primaryError = failedScenarios[0]?.error || ''
   const rootCause = classifyFailureRootCause(primaryError)
 
+  recordTelemetry({
+    skillName: 'coder',
+    eventType: 'coder_test_fail',
+    patternKey: rootCause,
+    outcome: 'failed',
+    rootCauseCategory: rootCause,
+    phase: 'coder_green_phase',
+    errorType: 'test_fail',
+    severity: 'critical',
+    userId: trackingContext?.userId,
+    conversationId: trackingContext?.conversationId,
+    payload: { actionName, scenarioCount: failedScenarios.length, errorSummary: truncateFeedback(primaryError) },
+  }).catch(() => {})
+
   if (rootCause === 'var_resolution') {
     // VAR 解析失敗是 Feature 問題，修代碼沒用
     logger.info({ actionName, rootCause }, 'fixFailingAction: VAR 解析失敗，跳過代碼修復（Feature 問題）')
@@ -4499,6 +4514,12 @@ ${entityMapping ? `\n## Entity Mapping\n\`\`\`yaml\n${entityMapping}\n\`\`\`\n` 
         return currentCode
       }
 
+      recordTelemetry({
+        skillName: 'coder', eventType: 'coder_test_fix_success', patternKey: rootCause,
+        outcome: 'repaired', rootCauseCategory: rootCause, phase: 'coder_green_phase',
+        userId: trackingContext?.userId, conversationId: trackingContext?.conversationId,
+        payload: { actionName, fixMethod: 'per_subop' },
+      }).catch(() => {})
       return fixedCode
     }
   }
@@ -4610,6 +4631,12 @@ ${entityMapping ? `\n## Entity Mapping\n\`\`\`yaml\n${entityMapping}\n\`\`\`\n` 
     return currentCode
   }
 
+  recordTelemetry({
+    skillName: 'coder', eventType: 'coder_test_fix_success', patternKey: rootCause,
+    outcome: 'repaired', rootCauseCategory: rootCause, phase: 'coder_green_phase',
+    userId: trackingContext?.userId, conversationId: trackingContext?.conversationId,
+    payload: { actionName, fixMethod: 'full_llm' },
+  }).catch(() => {})
   logger.info({ actionName }, 'LLM 修復完成')
   return fixed
 }

@@ -20,6 +20,7 @@ import { forceReleaseConversationLock, forceReleaseUserActiveLock } from './conv
 import { generateTailwindConfig } from './uiux-generation'
 import type { FlowState, IoEmitter } from '../types/flow-state'
 import { createLogger } from '../lib/logger'
+import { recordTelemetry } from './skill-telemetry'
 
 const logger = createLogger('flowstate-recovery')
 
@@ -143,6 +144,16 @@ export async function scanAndRecoverStuckFlowStates(
         startedAt: startedAt ? new Date(startedAt).toISOString() : 'none',
         elapsedSec: startedAt ? Math.round((Date.now() - startedAt) / 1000) : undefined,
       }, '偵測到超時')
+
+      recordTelemetry({
+        skillName: 'flowstate_recovery', eventType: 'phase_timeout_recovered',
+        patternKey: state.phase || 'unknown', outcome: 'timeout', recovered: true,
+        phase: state.phase, userId: state.userId, conversationId,
+        payload: {
+          elapsedSec: startedAt ? Math.round((Date.now() - startedAt) / 1000) : undefined,
+          lockExists, codePhase: state.uiuxCodePhase,
+        },
+      }).catch(() => {})
 
       await recoverFlowState(redis, io, conversationId, state)
       // 強制釋放 conversation lock，讓後續訊息能正常處理

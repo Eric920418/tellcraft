@@ -33,20 +33,44 @@ export type SkillName =
   | 'iteration'
   | 'uiux'
   | 'coder'
+  | 'orchestrator'
+  | 'red_phase'
+  | 'feature_gate'
+  | 'prefilter'
+  | 'syntax_validator'
+  | 'flowstate_recovery'
 
 export type EventType =
   | 'sanitize_fix'
   | 'qg_rule_fix'
   | 'qg_llm_fallback'
   | 'iteration'
+  | 'phase_failure'
+  | 'phase_timeout_recovered'
+  | 'coder_test_fail'
+  | 'coder_test_fix_success'
+  | 'coder_test_fix_give_up'
+  | 'deployer_layer_trigger'
+  | 'red_validation_fail'
+  | 'alignment_blocked'
+  | 'alignment_fixed'
+  | 'prefilter_reject'
+  | 'prefilter_antiloop'
+  | 'syntax_repair'
 
 export type TelemetrySeverity = 'critical' | 'warning' | 'info'
+export type TelemetryOutcome = 'success' | 'failed' | 'repaired' | 'timeout' | 'blocked'
 
 export interface TelemetryEvent {
   skillName: SkillName
   eventType: EventType
   patternKey: string
   severity?: TelemetrySeverity
+  outcome?: TelemetryOutcome
+  rootCauseCategory?: string | null
+  phase?: string | null
+  errorType?: string | null
+  recovered?: boolean | null
   userId?: string | null
   conversationId?: string | null
   projectId?: string | null
@@ -131,8 +155,9 @@ export async function recordTelemetry(event: TelemetryEvent): Promise<void> {
     const payload = clampPayload(event.payload)
     await db.query(
       `INSERT INTO skill_telemetry
-         (skill_name, event_type, pattern_key, severity, user_id, conversation_id, project_id, payload, fix_rounds)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+         (skill_name, event_type, pattern_key, severity, user_id, conversation_id, project_id, payload, fix_rounds,
+          outcome, root_cause_category, phase, error_type, recovered)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)`,
       [
         event.skillName,
         event.eventType,
@@ -143,11 +168,25 @@ export async function recordTelemetry(event: TelemetryEvent): Promise<void> {
         event.projectId || null,
         payload ? JSON.stringify(payload) : null,
         event.fixRounds ?? 1,
+        event.outcome || 'success',
+        event.rootCauseCategory || null,
+        event.phase || null,
+        event.errorType || null,
+        event.recovered ?? null,
       ]
     )
   } catch (err) {
     logger.warn({ err, event: { ...event, payload: undefined } }, 'telemetry insert failed')
   }
+}
+
+/**
+ * Fire-and-forget failure 紀錄 — outcome 預設 'failed'，減少呼叫端漏填風險。
+ */
+export async function recordFailure(
+  event: Omit<TelemetryEvent, 'outcome'> & { outcome?: 'failed' | 'blocked' | 'timeout' }
+): Promise<void> {
+  return recordTelemetry({ ...event, outcome: event.outcome || 'failed' })
 }
 
 /**
@@ -213,6 +252,33 @@ export function categorizeSanitizeFix(fixLabel: string): string {
 /** 暴露給測試用 */
 export function getSanitizePatternKeys(): string[] {
   return SANITIZE_PATTERN_MAP.map(([, key]) => key)
+}
+
+// ============================================================
+// Phase error 分類器（零 LLM）
+// ============================================================
+
+const PHASE_ERROR_MAP: Array<[RegExp, string]> = [
+  [/timeout|timed?\s*out|ETIMEDOUT/i, 'timeout'],
+  [/ECONNREFUSED|ECONNRESET|ENOTFOUND|socket hang up/i, 'network'],
+  [/rate.?limit|429|overloaded|too many requests/i, 'rate_limit'],
+  [/anthropic|claude|llm|model|max_tokens/i, 'llm_error'],
+  [/ENOENT|EPERM|EACCES|no such file/i, 'filesystem'],
+  [/pg|postgres|database|relation.*does not exist|column.*does not exist|duplicate key/i, 'db_error'],
+  [/redis|WRONGTYPE|NOAUTH|CROSSSLOT/i, 'redis_error'],
+  [/out of memory|heap|allocation failed/i, 'oom'],
+]
+
+export function classifyPhaseError(err: unknown): string {
+  const msg = err instanceof Error ? `${err.name}: ${err.message}` : String(err)
+  for (const [re, key] of PHASE_ERROR_MAP) {
+    if (re.test(msg)) return key
+  }
+  return 'unknown'
+}
+
+export function getPhaseErrorPatternKeys(): string[] {
+  return PHASE_ERROR_MAP.map(([, key]) => key)
 }
 
 // ============================================================
@@ -501,6 +567,82 @@ export async function measurePromptChangeEffects(): Promise<PromptChangeEffect[]
   }
 
   return effects
+}
+
+// ============================================================
+// v3: Failure 聚合查詢
+// ============================================================
+
+export interface FailureOverviewRow {
+  outcome: string
+  skill_name: string
+  count: number
+}
+
+export interface FailureByPhaseRow {
+  phase: string
+  count: number
+  avg_fix_rounds: number
+}
+
+export interface RootCauseRow {
+  root_cause_category: string
+  count: number
+}
+
+export interface RecoveryRow {
+  phase: string
+  total: number
+  recovered_count: number
+  recovery_rate: number
+}
+
+export async function aggregateFailureOverview(days = 7): Promise<{
+  byOutcome: FailureOverviewRow[]
+  byPhase: FailureByPhaseRow[]
+  topRootCauses: RootCauseRow[]
+  recoveryStats: RecoveryRow[]
+}> {
+  const [byOutcome, byPhase, topRootCauses, recoveryStats] = await Promise.all([
+    db.queryMany<FailureOverviewRow>(
+      `SELECT outcome, skill_name, COUNT(*)::int as count
+       FROM skill_telemetry
+       WHERE created_at >= NOW() - ($1 || ' days')::interval AND outcome != 'success'
+       GROUP BY outcome, skill_name ORDER BY count DESC`,
+      [String(days)]
+    ),
+    db.queryMany<FailureByPhaseRow>(
+      `SELECT phase, COUNT(*)::int as count, ROUND(AVG(fix_rounds)::numeric, 2)::float as avg_fix_rounds
+       FROM skill_telemetry
+       WHERE created_at >= NOW() - ($1 || ' days')::interval AND outcome != 'success' AND phase IS NOT NULL
+       GROUP BY phase ORDER BY count DESC LIMIT 20`,
+      [String(days)]
+    ),
+    db.queryMany<RootCauseRow>(
+      `SELECT root_cause_category, COUNT(*)::int as count
+       FROM skill_telemetry
+       WHERE created_at >= NOW() - ($1 || ' days')::interval AND root_cause_category IS NOT NULL
+       GROUP BY root_cause_category ORDER BY count DESC LIMIT 10`,
+      [String(days)]
+    ),
+    db.queryMany<RecoveryRow>(
+      `SELECT phase,
+              COUNT(*)::int as total,
+              COUNT(*) FILTER (WHERE recovered = true)::int as recovered_count,
+              ROUND(COUNT(*) FILTER (WHERE recovered = true)::numeric / NULLIF(COUNT(*), 0) * 100, 1)::float as recovery_rate
+       FROM skill_telemetry
+       WHERE created_at >= NOW() - ($1 || ' days')::interval AND outcome = 'timeout'
+       GROUP BY phase ORDER BY total DESC`,
+      [String(days)]
+    ),
+  ])
+
+  return {
+    byOutcome: byOutcome || [],
+    byPhase: byPhase || [],
+    topRootCauses: topRootCauses || [],
+    recoveryStats: recoveryStats || [],
+  }
 }
 
 // ============================================================

@@ -14,7 +14,7 @@ import { createLogger } from '../lib/logger'
 import { repairMissingReactImports, repairBracketLookupAccess } from './uiux-generation'
 import { sanitizeNamedImports } from '../utils/sanitize-named-imports'
 import { inferFileType } from '../workers/orchestrator-utils'
-import { recordTelemetryBatch, categorizeSanitizeFix } from './skill-telemetry'
+import { recordTelemetry, recordTelemetryBatch, categorizeSanitizeFix, truncateFeedback } from './skill-telemetry'
 
 const logger = createLogger('deployer')
 const execFileAsync = promisify(execFile)
@@ -556,6 +556,11 @@ export default function Page() {
     })
 
     fixes.push(`${page.path}: useSearchParams Suspense boundary 修復（提取 ${clientComponentName}）`)
+    recordTelemetry({
+      skillName: 'deployer', eventType: 'deployer_layer_trigger', patternKey: 'l5_suspense_split',
+      outcome: 'repaired', phase: 'deployer_l5',
+      payload: { filePath: page.path, clientComponent: clientComponentName },
+    }).catch(() => {})
   }
 
   // CSS 中的 Google Fonts @import
@@ -2372,6 +2377,11 @@ ${codeBlocks.join('\n\n')}
         }
       }
 
+      recordTelemetry({
+        skillName: 'deployer', eventType: 'deployer_layer_trigger', patternKey: `l3_build_fix_success`,
+        outcome: 'repaired', phase: 'deployer_l3', fixRounds: retryAttempt,
+        userId: trackingContext?.userId, conversationId: trackingContext?.conversationId,
+      }).catch(() => {})
       return { code: fixedCode, newDependencies }
     } catch (error) {
       lastError = error
@@ -2392,11 +2402,23 @@ ${codeBlocks.join('\n\n')}
 
       // 非暫時性錯誤或重試用盡
       logger.error({ err: error, attempt: retryAttempt, maxRetries: FIX_RETRY_MAX }, 'fixBuildErrors LLM 呼叫失敗')
+      recordTelemetry({
+        skillName: 'deployer', eventType: 'deployer_layer_trigger', patternKey: `l3_build_fix_failed`,
+        outcome: 'failed', phase: 'deployer_l3', fixRounds: retryAttempt,
+        errorType: isRetryable ? 'retryable_api_error' : 'non_retryable_error',
+        userId: trackingContext?.userId, conversationId: trackingContext?.conversationId,
+        payload: { error: truncateFeedback(errMsg) },
+      }).catch(() => {})
       return null
     }
   }
 
   logger.error({ err: lastError }, 'fixBuildErrors 所有重試都失敗')
+  recordTelemetry({
+    skillName: 'deployer', eventType: 'deployer_layer_trigger', patternKey: 'l3_all_retries_exhausted',
+    outcome: 'failed', phase: 'deployer_l3', fixRounds: FIX_RETRY_MAX,
+    userId: trackingContext?.userId, conversationId: trackingContext?.conversationId,
+  }).catch(() => {})
   return null
 }
 
@@ -2597,6 +2619,12 @@ async function verifyBuildLocally(
         if (attempt > 1) {
           fixes.push(`第 ${attempt} 次構建通過（AI 自動修復成功）`)
         }
+        recordTelemetry({
+          skillName: 'deployer', eventType: 'deployer_layer_trigger',
+          patternKey: attempt === 1 ? 'l4_build_first_pass' : `l4_build_fixed_round_${attempt}`,
+          outcome: attempt === 1 ? 'success' : 'repaired', phase: 'deployer_l4', fixRounds: attempt,
+          userId: trackingContext?.userId, conversationId: trackingContext?.conversationId,
+        }).catch(() => {})
         await onProgress?.({ percent: 40, step: '構建驗證通過！' })
         return {
           files: wrapInNextJs(currentCode, projectName, tailwindConfig, currentExtraDeps, injectedFiles),
@@ -2649,6 +2677,11 @@ async function verifyBuildLocally(
     // 所有嘗試都失敗 → 降級
     logger.warn({ maxAttempts: MAX_ATTEMPTS }, 'LLM 修復 + 驗證 build 都失敗，降級為 ignoreBuildErrors 部署')
     fixes.push(`${MAX_ATTEMPTS} 次 AI 修復都失敗，降級為忽略構建錯誤部署`)
+    recordTelemetry({
+      skillName: 'deployer', eventType: 'deployer_layer_trigger', patternKey: 'l4_all_rounds_degrade',
+      outcome: 'failed', phase: 'deployer_l4', fixRounds: MAX_ATTEMPTS + 1,
+      userId: trackingContext?.userId, conversationId: trackingContext?.conversationId,
+    }).catch(() => {})
     return {
       files: wrapInNextJsWithIgnoreErrors(currentCode, projectName, tailwindConfig, currentExtraDeps, injectedFiles),
       buildVerified: false,
