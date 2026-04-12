@@ -331,8 +331,6 @@ export function buildUiuxSubgraph() {
     .addNode('variant_wait', variantWaitNode)              // interrupt
     .addNode('code_pipeline', codePipelineNode)
     .addNode('mixed_routing', mixedRoutingNode)
-    .addNode('complete', completeNode)
-
     .addEdge(START, 'entry')
     .addConditionalEdges('entry', afterEntry, {
       preference_wait: 'preference_wait',
@@ -390,6 +388,5 @@ export function buildUiuxSubgraph() {
       code_pipeline: 'code_pipeline',
       end: END,
     })
-    .addEdge('complete', END)
     .compile()
 }
