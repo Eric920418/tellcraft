@@ -196,6 +196,13 @@ async function shutdown() {
   emitterRedis.disconnect()
   logger.info('Redis 已斷開（4 連線）')
 
+  // 關閉 LangGraph checkpointer（如果初始化過）
+  try {
+    const { shutdownCheckpointer } = await import('./graph/checkpointer')
+    await shutdownCheckpointer()
+    logger.info('LangGraph checkpointer 已關閉')
+  } catch { /* checkpointer 可能未初始化 */ }
+
   // 關閉資料庫連接池
   await closePool()
   logger.info('資料庫連接池已關閉')

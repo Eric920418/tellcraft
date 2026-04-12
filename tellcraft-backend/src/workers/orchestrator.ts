@@ -241,20 +241,58 @@ export function createOrchestratorWorker(
       const userId = (data as { userId?: string }).userId
       const lockResult = await withConversationLock(redis, conversationId, async () => {
         // ── LangGraph Feature Flag ──
-        if (process.env.USE_LANGGRAPH === 'true' && _langGraph) {
+        if (process.env.USE_LANGGRAPH === 'true' && (_langGraph || _langGraphInitPromise)) {
           // 等待初始化完成（首次 job 可能在初始化期間到達）
           if (_langGraphInitPromise) await _langGraphInitPromise
           if (!_langGraph) throw new Error('LangGraph 初始化失敗')
 
-          const config = { configurable: { thread_id: conversationId } }
           const message = (data as ProcessMessageData).message ?? ''
+          const locale = ((data as ProcessMessageData).locale ?? 'zh') as 'zh' | 'en'
 
-          // 判斷是否有 pending interrupt（需要 resume）
+          // ── Safety Layer（graph 外部，所有訊息都跑）──
+
+          // 1. Prefilter（注入/髒話/限速/品質檢查）
+          const pfResult = await prefilterMessage(message, userId ?? '', redis, locale)
+          if (!pfResult.allowed) {
+            await sendMessage(conversationId, io, {
+              content: pfResult.errorMessage || (locale === 'en' ? 'Message filtered.' : '訊息被系統過濾。'),
+              stage: 'error',
+            })
+            return
+          }
+
+          // 2. Credit deduction
+          if (userId) {
+            const creditResult = await deductCredits(userId, CREDIT_COSTS.BASE_MESSAGE)
+            if (!creditResult.success) {
+              await sendMessage(conversationId, io, {
+                content: locale === 'en' ? 'Insufficient credits. Please upgrade your plan.' : '額度不足，請升級方案。',
+                stage: 'error',
+              })
+              return
+            }
+          }
+
+          // ── Graph invoke / resume ──
+          const config = { configurable: { thread_id: conversationId } }
           const checkpointer = await getCheckpointer()
           const existing = await checkpointer.getTuple(config)
           const hasInterrupt = existing?.pendingWrites?.some(
             ([, channel]) => channel === '__interrupt__'
           )
+
+          // 3. Special token 前置攔截（__new_project__ 清 checkpoint + FlowState）
+          if (message.includes('__new_project__')) {
+            try { await checkpointer.deleteThread(conversationId) } catch { /* ignore */ }
+            await deleteFlowState(redis, conversationId)
+            logger.info({ conversationId }, 'LangGraph __new_project__: checkpoint + FlowState 已清除')
+            return
+          }
+
+          // 防禦性 log
+          if (existing && !hasInterrupt) {
+            logger.debug({ conversationId }, 'Checkpoint exists but no pending interrupt — fresh invoke')
+          }
 
           if (hasInterrupt) {
             // Resume from interrupt — 傳用戶的新訊息作為 resume 值
@@ -271,7 +309,7 @@ export function createOrchestratorWorker(
               userId: userId ?? '',
               message,
               mode: (data as ProcessMessageData).mode ?? 'fine',
-              locale: (data as ProcessMessageData).locale ?? 'zh',
+              locale,
               imageUrls: (data as ProcessMessageData).imageUrls ?? [],
             }, config)
           }

@@ -1154,14 +1154,27 @@ psql "$DATABASE_URL" -f tellcraft-backend/migrations/xxx.sql
 
 ### LangGraph.js 狀態機遷移 + Fix Loop 根治 + SpecFormula 完善（2026-04-08 ~ 2026-04-12）
 
-**LangGraph.js StateGraph 架構（Phase 1 骨架）**：
+**LangGraph.js StateGraph 架構（Phase 1 骨架 + Phase 2 Subgraphs）**：
 - **依賴安裝**：`@langchain/langgraph` + `@langchain/langgraph-checkpoint-postgres` + `@langchain/core`
 - **Pointer State Pattern**：LangGraph state 只存路由 metadata（~1KB），大資料（generated code、FlowState 100+ 欄位）留在 Redis + PostgreSQL，避免 checkpoint 膨脹
-- **State Schema**：`graph/state.ts`（Annotation.Root + last-write-wins reducer）— conversationId / phase / waitingForReply / skillIntent / message / error 等 13 個欄位
-- **主 StateGraph**：`graph/main-graph.ts` — classify → phase_router → 7 skill nodes → complete，conditional edges 路由
+- **State Schema**：`graph/state.ts`（Annotation.Root + last-write-wins reducer）— conversationId / phase / waitingForReply / skillIntent / message / error / coderStage / domainSource / testRound 等 16 個欄位
+- **主 StateGraph**：`graph/main-graph.ts` — classify → phase_router → 7 skill subgraphs → complete，conditional edges 路由
 - **Runtime Context**：`graph/context.ts` — singleton 注入 Redis + Socket.io，所有 node 共用
-- **10 個 Node**：classify（意圖分類 + 特殊 token）、phase-router（FlowState 同步）、bdd-skill / uiux-skill / fast-build / coder-skill / deployer / domain-skill / clone-skill（wrapper 模式呼叫現有 handler）、complete（終止 node）
-- **Feature Flag**：`USE_LANGGRAPH=true` 切換新舊路徑，預設 off（不影響生產）。在 `orchestrator.ts` 的 BullMQ worker 內部，withConversationLock 內分支
+- **PostgresSaver Checkpointer**：`graph/checkpointer.ts` — 持久化 interrupt/resume 狀態到 PostgreSQL，`setup()` 自動建表（idempotent），支援 `Command.resume()` 恢復暫停的 graph
+- **Orchestrator resume 邏輯**：`orchestrator.ts` 在 LangGraph 分支內檢查 `checkpointer.getTuple()` 是否有 pending interrupt，有則用 `Command({ resume: message })` 恢復，無則 fresh invoke
+- **7 個 Skill Subgraph**（`graph/subgraphs/`）：每個 Skill 是獨立的 `StateGraph` 子圖
+  - **Coder Subgraph**（fully decomposed）：validate → generate → test → finalize，fix loop 作為 `test → test` conditional edge（最多 3 輪），afterTest 判斷 `test_passed` / `test_retry` / `test_failed`
+  - **BDD / UIUX / Domain / Deployer / Clone / Fast Build**：wrapper 模式（Phase 2A），Phase 2B 將拆分為多 node + `interrupt()` human-in-the-loop
+- **3 個保留 Node**：classify（意圖分類 + 特殊 token）、phase-router（FlowState 同步）、complete（終止 node）
+- **Feature Flag**：`USE_LANGGRAPH=true` 切換新舊路徑，預設 off。在 `orchestrator.ts` 的 BullMQ worker 內部，withConversationLock 內分支
+- **Safety Layer（生產就緒）**：LangGraph 路徑在 graph 外部（orchestrator）執行 `prefilterMessage()`（注入/髒話/限速）+ `deductCredits()`（扣費）。`__new_project__` 同時清除 checkpoint + FlowState。classifyNode 接入真實 `classifyIntent()`（Haiku LLM 三層分類）+ `detectFastModeIntent()`（Fast 模式客服偵測）+ `checkBuildRelevance()`（建站相關性）+ content policy 檢查。complete node 處理 meta-intent 回覆（greeting/chitchat/onboarding）
+- **Phase 2B interrupt 實裝**：Domain / Clone / Fast Build 三個 subgraph 從 wrapper 升級為多 node + `interrupt()` human-in-the-loop
+  - **Domain**（8 nodes, 3 interrupt, 2 loops）：entry → search → confirm（interrupt×2：確認/registrant 表單）→ register → complete。DNS path：dns_setup（interrupt）→ dns_verify → complete。retry_or_cancel interrupt + 換域名/DNS 未傳播 loop
+  - **Clone**（3 nodes, 1 interrupt）：execute（完整 clone pipeline）→ failed interrupt（重試/取消 loop）
+  - **Fast Build**（4 nodes, 2 interrupt）：execute（concept+pipeline）→ batch_decision interrupt（多頁繼續/完成）→ resume → batch loop。failed interrupt 重試
+- **Phase 2C BDD + UIUX 完全拆分**：兩個最複雜的 skill 從 wrapper 升級為多 node + interrupt subgraph（0 業務邏輯改動，純 graph 編排）
+  - **BDD**（11 nodes, 6 interrupt）：entry → es_init_wait → es_explore_wait（DFS loop）→ prd_clarify_wait（統一 prd/spec/batch clarify loop）→ prd_next_round → formulation → draft_review_wait → spec_discovery → complete_spec。Sidecar：spec_change_wait + spec_rollback_wait。auto_adopt 在 clarify node 內透明處理
+  - **UIUX**（9 nodes, 5 interrupt）：entry → preference_wait（Path A/B）→ clarify_wait（4-step loop）→ brief_confirm_wait（adjust loop max 3）→ template_wait → variant_wait → code_pipeline（自動化）→ mixed_routing（iteration/deploy/rollback）→ complete
 
 **Fix Loop 根治（96/114 → 目標 110+/114）**：
 - **Fix prompt 注入 BDD Feature content**：`fixFailingAction` 的 user message 加入完整 Gherkin（截取 8KB），讓 LLM 修復時能看到 Background 資料準備 + Then 預期回應欄位。此前 LLM 只看到 error message，不知道測試期望什麼

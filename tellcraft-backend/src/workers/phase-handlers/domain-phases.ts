@@ -27,7 +27,7 @@ const logger = createLogger('domain-phases')
 // 域名提取正則（從用戶訊息中提取域名）
 const DOMAIN_REGEX = /([a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}/g
 
-function extractDomain(message: string): string | null {
+export function extractDomain(message: string): string | null {
   const matches = message.match(DOMAIN_REGEX)
   if (!matches) return null
   // 過濾常見非域名 URL

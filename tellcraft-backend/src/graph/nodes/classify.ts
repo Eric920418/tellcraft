@@ -2,12 +2,23 @@
  * Classify Node — 意圖分類
  *
  * 職責：
- * 1. 如果已有進行中的 flow → 同步 FlowState 到 LangGraph state → 跳到 phase_router
- * 2. 如果 idle → 偵測特殊 token → 執行意圖分類 → 設定 skillIntent
+ * 1. 如果已有進行中的 flow → 同步 FlowState → 跳到 phase_router
+ * 2. Clone mode → 直接路由
+ * 3. Fast mode → detectFastModeIntent + checkBuildRelevance → 路由
+ * 4. Normal mode → classifyIntent（LLM 三層分類）→ 路由
+ *
+ * Safety layer（prefilter + credit）在 orchestrator.ts 已處理，不在此 node。
  */
 import type { TellcraftStateType } from '../state'
 import { getFlowState } from '../../workers/orchestrator-utils'
 import { getRedis } from '../context'
+import { classifyIntent, isSkillIntent } from '../../services/classifier'
+import { detectFastModeIntent } from '../../services/customer-service'
+import { checkBuildRelevance, recordAbuseViolation } from '../../services/prefilter'
+import * as db from '../../db/client'
+import { createLogger } from '../../lib/logger'
+
+const logger = createLogger('graph:classify')
 
 const SPECIAL_TOKENS = [
   '__new_project__',
@@ -28,18 +39,31 @@ const SPECIAL_TOKENS = [
   '__auto_repair_preview__',
 ] as const
 
+// Skill intent → graph route key 映射
+const INTENT_TO_ROUTE: Record<string, string> = {
+  'bdd-spec': 'bdd',
+  'uiux': 'uiux',
+  'coder': 'coder',
+  'deployer': 'deploy',
+  'domain-purchase': 'domain',
+  'domain-dns': 'domain',
+  'domain-manager': 'domain',
+}
+
 export async function classifyNode(
   state: TellcraftStateType
 ): Promise<Partial<TellcraftStateType>> {
   const redis = getRedis()
+  const message = state.message
+  const trimmed = message.trim()
 
-  // 偵測特殊 token
-  const token = SPECIAL_TOKENS.find(t => state.message.includes(t)) ?? ''
+  // ── 1. 偵測特殊 token ──
+  const token = SPECIAL_TOKENS.find(t => message.includes(t)) ?? ''
 
-  // 讀取現有 FlowState
+  // ── 2. 讀取現有 FlowState ──
   const flowState = await getFlowState(redis, state.conversationId)
 
-  // 如果已有進行中的 flow → 直接跳到 phase_router
+  // ── 3. 已有進行中的 flow → 直接跳到 phase_router ──
   if (flowState && flowState.phase && flowState.phase !== 'idle') {
     return {
       phase: flowState.phase,
@@ -50,28 +74,69 @@ export async function classifyNode(
     }
   }
 
-  // idle 狀態 → 執行意圖分類
-  // 暫時用簡單規則分類（之後可替換為 LLM classifier）
-  let intent = 'meta'
-
-  if (token === '__new_project__') {
-    intent = 'end'
-  } else if (state.mode === 'fast') {
-    intent = 'fast'
-  } else if (state.mode === 'clone' || state.imageUrls.length > 0) {
-    intent = 'clone'
-  } else if (state.message.includes('部署') || state.message.includes('deploy')) {
-    intent = 'deploy'
-  } else if (state.message.includes('域名') || state.message.includes('domain')) {
-    intent = 'domain'
-  } else {
-    // 預設走 BDD spec flow
-    intent = 'bdd'
+  // ── 4. Clone mode → 直接路由 ──
+  if (state.mode === 'clone' || (state.imageUrls.length > 0 && state.mode !== 'fast')) {
+    return { skillIntent: 'clone', specialToken: token, phase: 'idle' }
   }
 
-  return {
-    skillIntent: intent,
-    specialToken: token,
-    phase: 'idle',
+  // ── 5. Fast mode → detectFastModeIntent + checkBuildRelevance ──
+  if (state.mode === 'fast') {
+    const fastIntent = detectFastModeIntent(trimmed)
+    if (fastIntent.match && fastIntent.type !== null) {
+      // greeting/chitchat/acknowledgment → meta（不進 fast build）
+      if (['greeting', 'chitchat', 'acknowledgment'].includes(fastIntent.type)) {
+        return { skillIntent: 'meta', specialToken: token, phase: 'idle' }
+      }
+      // help/question/platform_issue → meta（客服回覆）
+      if (['help', 'question', 'platform_issue'].includes(fastIntent.type)) {
+        return { skillIntent: 'meta', specialToken: token, phase: 'idle' }
+      }
+    }
+
+    // 檢查是否與建站相關
+    try {
+      const relevance = await checkBuildRelevance(trimmed)
+      if (!relevance.relevant) {
+        return { skillIntent: 'meta', specialToken: token, phase: 'idle' }
+      }
+    } catch {
+      // checkBuildRelevance fail-closed（API 錯誤 → 拒絕），但無 API key 時 fail-open
+      logger.warn('checkBuildRelevance 失敗，降級放行')
+    }
+
+    return { skillIntent: 'fast', specialToken: token, phase: 'idle' }
+  }
+
+  // ── 6. Normal mode → LLM 三層分類 ──
+  try {
+    // 取得對話歷史（最近 10 條）
+    const conversation = await db.getConversation(state.conversationId)
+    const history = ((conversation?.messages || []) as Array<{ role: 'user' | 'assistant'; content: string }>).slice(-10)
+
+    const classification = await classifyIntent(
+      message, history,
+      { userId: state.userId, conversationId: state.conversationId }
+    )
+
+    // Content policy
+    if (classification.contentFlag) {
+      await recordAbuseViolation(state.userId, redis)
+      return { skillIntent: 'meta', specialToken: token, phase: 'idle', error: 'content_policy' }
+    }
+
+    // Meta-intent（非 skill：onboarding/chitchat/abuse/unknown/clarification_needed）
+    if (!isSkillIntent(classification.intent)) {
+      return { skillIntent: 'meta', specialToken: token, phase: 'idle' }
+    }
+
+    // Skill intent
+    const intent = INTENT_TO_ROUTE[classification.intent] || 'bdd'
+    logger.info({ conversationId: state.conversationId, intent: classification.intent, confidence: classification.confidence }, 'LangGraph classify')
+
+    return { skillIntent: intent, specialToken: token, phase: 'idle' }
+  } catch (err) {
+    // 分類失敗 → 降級為 BDD（和舊路徑一致）
+    logger.error({ err }, 'classifyIntent 失敗，降級為 bdd')
+    return { skillIntent: 'bdd', specialToken: token, phase: 'idle' }
   }
 }

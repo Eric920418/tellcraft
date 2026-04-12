@@ -4,7 +4,7 @@
  * 架構：
  * - classify → 意圖分類（idle 時）或 phase 同步（進行中）
  * - phase_router → 根據 phase 路由到具體 skill
- * - skill nodes → 包裝現有 phase handler
+ * - skill subgraphs → 每個 skill 是獨立的 StateGraph 子圖
  * - complete → graph 結束，等用戶下一個訊息
  *
  * 每個用戶訊息 = 一次 graph invocation。
@@ -17,14 +17,16 @@ import { TellcraftState, type TellcraftStateType } from './state'
 // Node imports
 import { classifyNode } from './nodes/classify'
 import { phaseRouterNode } from './nodes/phase-router'
-import { bddSkillNode } from './nodes/bdd-skill'
-import { uiuxSkillNode } from './nodes/uiux-skill'
-import { fastBuildNode } from './nodes/fast-build'
-import { coderSkillNode } from './nodes/coder-skill'
-import { deployerNode } from './nodes/deployer'
-import { domainSkillNode } from './nodes/domain-skill'
-import { cloneSkillNode } from './nodes/clone-skill'
 import { completeNode } from './nodes/complete'
+
+// Subgraph imports
+import { buildBddSubgraph } from './subgraphs/bdd-subgraph'
+import { buildUiuxSubgraph } from './subgraphs/uiux-subgraph'
+import { buildFastBuildSubgraph } from './subgraphs/fast-build-subgraph'
+import { buildCoderSubgraph } from './subgraphs/coder-subgraph'
+import { buildDeployerSubgraph } from './subgraphs/deployer-subgraph'
+import { buildDomainSubgraph } from './subgraphs/domain-subgraph'
+import { buildCloneSubgraph } from './subgraphs/clone-subgraph'
 
 // ── Edge routing functions ──
 
@@ -94,13 +96,13 @@ export function buildMainGraph(checkpointer?: PostgresSaver) {
     // ── Nodes ──
     .addNode('classify', classifyNode)
     .addNode('phase_router', phaseRouterNode)
-    .addNode('bdd_skill', bddSkillNode)
-    .addNode('uiux_skill', uiuxSkillNode)
-    .addNode('fast_build', fastBuildNode)
-    .addNode('coder_skill', coderSkillNode)
-    .addNode('deployer', deployerNode)
-    .addNode('domain_skill', domainSkillNode)
-    .addNode('clone_skill', cloneSkillNode)
+    .addNode('bdd_skill', buildBddSubgraph())
+    .addNode('uiux_skill', buildUiuxSubgraph())
+    .addNode('fast_build', buildFastBuildSubgraph())
+    .addNode('coder_skill', buildCoderSubgraph())
+    .addNode('deployer', buildDeployerSubgraph())
+    .addNode('domain_skill', buildDomainSubgraph())
+    .addNode('clone_skill', buildCloneSubgraph())
     .addNode('complete', completeNode)
 
     // ── Entry edge ──

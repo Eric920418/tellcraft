@@ -94,6 +94,18 @@ export const TellcraftState = Annotation.Root({
     default: () => 0,
   }),
   // Coder fix loop 當前輪次
+
+  bddStage: Annotation<string>({
+    value: lastValue,
+    default: () => '',
+  }),
+  // BDD subgraph 內部路由
+
+  uiuxStage: Annotation<string>({
+    value: lastValue,
+    default: () => '',
+  }),
+  // UIUX subgraph 內部路由
 })
 
 export type TellcraftStateType = typeof TellcraftState.State
