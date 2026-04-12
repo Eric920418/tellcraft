@@ -3,8 +3,10 @@ import type { IoEmitter } from '../types/flow-state'
 import Redis from 'ioredis'
 import { withConversationLock, releaseUserActiveLock } from '../services/conversation-lock'
 import * as db from '../db/client'
+import { Command } from '@langchain/langgraph'
 import { buildMainGraph } from '../graph/main-graph'
 import { setGraphContext } from '../graph/context'
+import { getCheckpointer } from '../graph/checkpointer'
 import { classifyIntent, isSkillIntent } from '../services/classifier'
 import { SkillName } from '../services/registry'
 import { prefilterMessage, checkBuildRelevance, recordAbuseViolation, checkInputQuality } from '../services/prefilter'
@@ -192,6 +194,15 @@ async function renameProjectSafely(params: {
 
 // ── LangGraph Graph Instance（feature flag 控制） ──
 let _langGraph: ReturnType<typeof buildMainGraph> | null = null
+let _langGraphInitPromise: Promise<void> | null = null
+
+async function initLangGraph(redis: Redis, io: IoEmitter): Promise<void> {
+  if (_langGraph) return
+  setGraphContext(redis, io)
+  const checkpointer = await getCheckpointer()
+  _langGraph = buildMainGraph(checkpointer)
+  logger.info('LangGraph StateGraph + PostgresSaver 已初始化')
+}
 
 export function createOrchestratorWorker(
   workerConnection: Redis,  // BullMQ Worker 專用連線（maxRetriesPerRequest: null）
@@ -199,10 +210,11 @@ export function createOrchestratorWorker(
   io: IoEmitter
 ): Worker {
   // LangGraph 初始化（feature flag 控制，預設 off）
-  if (process.env.USE_LANGGRAPH === 'true' && !_langGraph) {
-    setGraphContext(redis, io)
-    _langGraph = buildMainGraph()
-    logger.info('LangGraph StateGraph 已初始化')
+  if (process.env.USE_LANGGRAPH === 'true' && !_langGraphInitPromise) {
+    _langGraphInitPromise = initLangGraph(redis, io).catch(err => {
+      logger.error({ err }, 'LangGraph 初始化失敗')
+      _langGraphInitPromise = null
+    })
   }
 
   const worker = new Worker(
@@ -230,16 +242,39 @@ export function createOrchestratorWorker(
       const lockResult = await withConversationLock(redis, conversationId, async () => {
         // ── LangGraph Feature Flag ──
         if (process.env.USE_LANGGRAPH === 'true' && _langGraph) {
+          // 等待初始化完成（首次 job 可能在初始化期間到達）
+          if (_langGraphInitPromise) await _langGraphInitPromise
+          if (!_langGraph) throw new Error('LangGraph 初始化失敗')
+
           const config = { configurable: { thread_id: conversationId } }
-          await _langGraph.invoke({
-            conversationId,
-            projectId: data.projectId,
-            userId: userId ?? '',
-            message: (data as ProcessMessageData).message ?? '',
-            mode: (data as ProcessMessageData).mode ?? 'fine',
-            locale: (data as ProcessMessageData).locale ?? 'zh',
-            imageUrls: (data as ProcessMessageData).imageUrls ?? [],
-          }, config)
+          const message = (data as ProcessMessageData).message ?? ''
+
+          // 判斷是否有 pending interrupt（需要 resume）
+          const checkpointer = await getCheckpointer()
+          const existing = await checkpointer.getTuple(config)
+          const hasInterrupt = existing?.pendingWrites?.some(
+            ([, channel]) => channel === '__interrupt__'
+          )
+
+          if (hasInterrupt) {
+            // Resume from interrupt — 傳用戶的新訊息作為 resume 值
+            logger.info({ conversationId }, 'LangGraph resume from interrupt')
+            await _langGraph.invoke(
+              new Command({ resume: message }),
+              config
+            )
+          } else {
+            // 新 invoke — 傳完整 initial state
+            await _langGraph.invoke({
+              conversationId,
+              projectId: data.projectId,
+              userId: userId ?? '',
+              message,
+              mode: (data as ProcessMessageData).mode ?? 'fine',
+              locale: (data as ProcessMessageData).locale ?? 'zh',
+              imageUrls: (data as ProcessMessageData).imageUrls ?? [],
+            }, config)
+          }
           return
         }
 

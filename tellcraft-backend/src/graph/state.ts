@@ -75,6 +75,25 @@ export const TellcraftState = Annotation.Root({
     value: lastValue,
     default: () => '',
   }),
+
+  // ── Subgraph 路由用 ──
+  coderStage: Annotation<string>({
+    value: lastValue,
+    default: () => '',
+  }),
+  // 'idle' | 'red_phase_done' | 'blocked' | 'alignment_done' | 'generated' | 'test_passed' | 'test_failed' | 'fixed'
+
+  domainSource: Annotation<string>({
+    value: lastValue,
+    default: () => '',
+  }),
+  // 'purchase' | 'own' | 'confirmed' | ''
+
+  testRound: Annotation<number>({
+    value: lastValue,
+    default: () => 0,
+  }),
+  // Coder fix loop 當前輪次
 })
 
 export type TellcraftStateType = typeof TellcraftState.State
