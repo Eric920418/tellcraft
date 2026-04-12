@@ -41,6 +41,68 @@ async function entryNode(state: TellcraftStateType): Promise<Partial<TellcraftSt
   const { projectId, conversationId, userId, message } = state
   const isChinese = state.locale !== 'en'
 
+  // ── waitingForReply + fresh invoke → 直接處理用戶回覆 ──
+  // Entry node 只在 fresh invoke 時執行。若 checkpoint 遺失或跨 subgraph 轉場，
+  // 需直接處理用戶回覆而非重走前置條件。
+  const existingFlow = await getFlowState(redis, conversationId)
+  if (existingFlow?.waitingForReply && message) {
+    const p = existingFlow.phase
+    if (p === 'domain_confirm_purchase') {
+      // 購買確認回覆（確認/取消/換域名）
+      const reply = message.trim()
+      if (/取消|cancel|不要|不買|算了/i.test(reply) || reply === '__cancel_domain__') {
+        await deleteFlowState(redis, conversationId)
+        await sendMessage(conversationId, io, { content: isChinese ? '已取消域名操作。' : 'Cancelled.', stage: 'info' })
+        return { domainSource: 'cancelled' }
+      }
+      if (/換|另一個|try another|different|其他/i.test(reply)) {
+        const newDomain = extractDomain(reply)
+        if (newDomain) {
+          existingFlow.domainName = newDomain
+          existingFlow.domainPrice = undefined
+          existingFlow.domainId = undefined
+          await saveFlowState(redis, conversationId, existingFlow)
+        }
+        return { domainSource: 'purchase' }  // → search 重新查詢
+      }
+      // 確認購買 → 根據現有進度直接跳到正確步驟
+      if (existingFlow.domainRegistrant) {
+        return { domainSource: 'confirmed' }  // 已有 registrant → 直接 register
+      }
+      if (existingFlow.domainId) {
+        return { domainSource: 'need_registrant' }  // 已有 domainId → registrant 表單
+      }
+      return { domainSource: 'purchase' }  // 無 domainId → search 查詢
+    }
+    if (p === 'domain_own_setup') {
+      // DNS 確認回覆
+      const reply = message.trim()
+      if (/取消|cancel/i.test(reply) || reply === '__cancel_domain__') {
+        await deleteFlowState(redis, conversationId)
+        return { domainSource: 'cancelled' }
+      }
+      // 用戶確認「設定好了」→ 驗證 DNS
+      existingFlow.phase = 'domain_dns_verifying'
+      existingFlow.waitingForReply = false
+      await saveFlowState(redis, conversationId, existingFlow)
+      return { domainSource: 'own' }  // → dns_input → dns_confirm → dns_verify
+    }
+    if (p === 'domain_failed') {
+      // 失敗後重試/取消
+      const reply = message.trim()
+      if (/取消|cancel|放棄/i.test(reply) || reply === '__cancel_domain__') {
+        await deleteFlowState(redis, conversationId)
+        await sendMessage(conversationId, io, { content: isChinese ? '已取消。' : 'Cancelled.', stage: 'info' })
+        return { domainSource: 'cancelled' }
+      }
+      // 重試
+      if (existingFlow.domainSource === 'own') {
+        return { domainSource: 'own' }
+      }
+      return { domainSource: 'purchase' }
+    }
+  }
+
   // 檢查 Vercel project
   const project = await db.queryOne<{ vercel_url: string | null; vercel_project_id: string | null }>(
     'SELECT vercel_url, vercel_project_id FROM projects WHERE id = $1', [projectId]
@@ -578,6 +640,8 @@ function afterEntry(state: TellcraftStateType): string {
   const ds = state.domainSource
   if (ds === 'no_deploy' || ds === 'no_quota' || ds === 'manager' || ds === 'cancelled') return 'end'
   if (ds === 'purchase') return 'search'
+  if (ds === 'need_registrant') return 'confirm_registrant'  // fresh invoke 跳過 search
+  if (ds === 'confirmed') return 'register'                  // fresh invoke 跳過 search+registrant
   if (ds === 'own') return 'dns_setup'
   return 'end'
 }
@@ -652,6 +716,8 @@ export function buildDomainSubgraph() {
     .addEdge(START, 'entry')
     .addConditionalEdges('entry', afterEntry, {
       search: 'search',
+      confirm_registrant: 'confirm_registrant',  // fresh invoke 跳過 search
+      register: 'register',                      // fresh invoke 跳過 search+registrant
       dns_setup: 'dns_input',
       end: END,
     })

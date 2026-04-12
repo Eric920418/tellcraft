@@ -26,12 +26,38 @@ async function executeNode(state: TellcraftStateType): Promise<Partial<Tellcraft
   const redis = getRedis()
   const io = getIo()
 
+  // ── clone_failed 後 fresh invoke → 從 FlowState 取回原始 URL ──
+  // 用戶回覆 "重試" 或 __retry_clone__，state.message 不是 URL
+  const flowState = await getFlowState(redis, state.conversationId)
+  let cloneUrl = state.message
+  let cloneImageUrls = state.imageUrls
+
+  if (flowState?.phase === 'clone_failed' && flowState.waitingForReply) {
+    const reply = state.message.trim()
+    // 取消
+    if (/取消|cancel|放棄/i.test(reply) || reply === '__cancel_domain__') {
+      return { phase: 'idle' }
+    }
+    // 用戶貼了新 URL → 用新 URL
+    if (/https?:\/\//.test(reply)) {
+      cloneUrl = reply
+    } else {
+      // 重試 → 用 FlowState 中的原始 URL
+      const originalUrl = (flowState as unknown as Record<string, unknown>).cloneSourceUrl as string
+      if (originalUrl) cloneUrl = originalUrl
+    }
+    // 重置 phase
+    flowState.phase = 'clone_analyzing'
+    flowState.waitingForReply = false
+    await saveFlowState(redis, state.conversationId, flowState)
+  }
+
   await executeCloneSkill({
     projectId: state.projectId,
     conversationId: state.conversationId,
     userId: state.userId,
-    url: state.message,
-    imageUrls: state.imageUrls,
+    url: cloneUrl,
+    imageUrls: cloneImageUrls,
     locale: (state.locale || 'zh') as 'zh' | 'en',
     redis, io,
   })
@@ -73,16 +99,16 @@ async function failedNode(state: TellcraftStateType): Promise<Partial<TellcraftS
   const updated = await getFlowState(redis, state.conversationId)
 
   if (reply === '__retry_clone__' || /重試|retry/i.test(reply)) {
-    return { phase: updated?.phase ?? 'clone_analyzing' }  // → 回到 execute
+    return { phase: 'clone_analyzing' }  // 固定值，不從 FlowState 讀（已被設為 clone_failed）
   }
 
   // 檢查是否貼了新 URL 或新圖片
   const hasUrl = /https?:\/\//.test(reply)
   if (hasUrl) {
-    return { phase: updated?.phase ?? 'clone_analyzing', message: reply }
+    return { phase: 'clone_analyzing', message: reply }
   }
 
-  return { phase: updated?.phase ?? 'idle' }
+  return { phase: 'idle' }
 }
 
 // ── Edge routing ──

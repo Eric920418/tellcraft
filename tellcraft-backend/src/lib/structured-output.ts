@@ -1,6 +1,7 @@
 /**
  * Structured Outputs 共用封裝
  * 使用 Anthropic SDK messages.parse() + zodOutputFormat() 保證 JSON Schema 合規輸出
+ * 大 max_tokens 時自動切換 streaming（SDK v0.72+ 要求）
  */
 
 import type Anthropic from '@anthropic-ai/sdk'
@@ -13,6 +14,9 @@ const logger = createLogger('structured-output')
 
 const RETRY_MAX = 3
 const RETRY_BASE_MS = 2000
+
+// SDK v0.72+ 閾值：(60min * maxTokens) / 128000 > 10min → maxTokens > 21333
+const STREAMING_THRESHOLD = 21000
 
 // ============================================================
 // Public types
@@ -47,7 +51,7 @@ export async function callStructured<T>(
 
   for (let attempt = 1; attempt <= RETRY_MAX; attempt++) {
     try {
-      const response = await client.messages.parse({
+      const params = {
         model,
         max_tokens: effectiveMaxTokens,
         system,
@@ -55,7 +59,12 @@ export async function callStructured<T>(
         ...(temperature !== undefined && !thinking && { temperature }),
         ...(thinking && { thinking }),
         output_config: { format: zodOutputFormat(schema) },
-      })
+      }
+
+      // 大 maxTokens 用 streaming 避免 SDK v0.72+ 的 10 分鐘限制
+      const response = effectiveMaxTokens > STREAMING_THRESHOLD
+        ? await client.messages.stream(params).finalMessage()
+        : await client.messages.parse(params)
 
       // Track usage regardless of stop_reason（含 prompt caching metrics）
       const usage = response.usage
@@ -94,14 +103,16 @@ export async function callStructured<T>(
       }
 
       // parsed_output is guaranteed by SDK when stop_reason is end_turn
-      if (response.parsed_output == null) {
+      // Both .parse() and .stream().finalMessage() populate parsed_output with output_config
+      const parsedOutput = (response as unknown as { parsed_output: T | null }).parsed_output
+      if (parsedOutput == null) {
         logger.error({ purpose, model, stopReason }, 'parsed_output is null on end_turn')
         return { success: false, error: 'parsed_output is null' }
       }
 
       return {
         success: true,
-        data: response.parsed_output,
+        data: parsedOutput,
         usage: { inputTokens: usage.input_tokens, outputTokens: usage.output_tokens },
       }
     } catch (err: unknown) {

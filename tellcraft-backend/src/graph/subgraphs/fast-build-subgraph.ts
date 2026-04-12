@@ -31,10 +31,14 @@ async function executeNode(state: TellcraftStateType): Promise<Partial<Tellcraft
   const redis = getRedis()
   const io = getIo()
 
-  // 先建 task 取得真正的 UUID
-  const taskId = await db.createTask({ projectId: state.projectId, userId: state.userId, goal: state.message, status: 'planning' })
-  if (!taskId) throw new Error('創建任務失敗')
-  await db.updateTask(taskId, { status: 'executing', plan: { skill: 'fast-build' } })
+  // 只有全新的 fast build 才建 task（retry 路徑復用既有 FlowState）
+  const existingFlow = await getFlowState(redis, state.conversationId)
+  let taskId = (existingFlow as unknown as Record<string, unknown>)?.taskId as string | undefined
+  if (!taskId) {
+    taskId = await db.createTask({ projectId: state.projectId, userId: state.userId, goal: state.message, status: 'planning' })
+    if (!taskId) throw new Error('創建任務失敗')
+    await db.updateTask(taskId, { status: 'executing', plan: { skill: 'fast-build' } })
+  }
 
   await executeFastBuildSkill({
     taskId,

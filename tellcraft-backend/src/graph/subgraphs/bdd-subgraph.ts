@@ -45,13 +45,43 @@ async function entryNode(state: TellcraftStateType): Promise<Partial<TellcraftSt
   if (flowState?.phase === 'spec_rollback_select') return { bddStage: 'spec_rollback' }
   if (flowState?.phase === 'spec_change_analyzing') return { bddStage: 'spec_change' }
 
-  // 已有進行中的 BDD flow → 直接路由到對應 wait node
-  if (flowState?.waitingForReply) {
+  // ── waitingForReply + fresh invoke → 直接處理用戶回覆 ──
+  // Entry node 只在 fresh invoke 時執行（resume 直接跳到 interrupt node）。
+  // 若 checkpoint 遺失（重啟/清理），waitingForReply=true 時需直接處理回覆。
+  if (flowState?.waitingForReply && state.message) {
     const p = flowState.phase
-    if (p === 'es_init') return { bddStage: 'es_init' }
-    if (p === 'es_explore') return { bddStage: 'es_explore' }
-    if (p === 'prd_clarify' || p === 'spec_clarify') return { bddStage: 'prd_clarify' }
-    if (p === 'formulation_draft_review') return { bddStage: 'draft_review' }
+    if (p === 'es_init') {
+      await handleESInitReply(state.conversationId, flowState, state.message, redis, io)
+      const u = await getFlowState(redis, state.conversationId)
+      if (u?.phase === 'es_explore') return { bddStage: 'es_explore' }
+      if (u?.phase === 'prd_clarify') return { bddStage: 'prd_clarify' }
+      return { bddStage: u?.phase ?? 'error' }
+    }
+    if (p === 'es_explore') {
+      await handleESExploreReply(state.conversationId, flowState, state.message, redis, io)
+      const u = await getFlowState(redis, state.conversationId)
+      if (u?.phase === 'es_explore' && u.waitingForReply) return { bddStage: 'es_explore' }
+      if (u?.phase === 'prd_clarify') return { bddStage: 'prd_clarify' }
+      return { bddStage: u?.phase ?? 'error' }
+    }
+    if (p === 'prd_clarify' || p === 'spec_clarify') {
+      await handleBddWaitingForReply(state.conversationId, flowState, state.message, redis, io)
+      const u = await getFlowState(redis, state.conversationId)
+      if (u?.phase === 'prd_clarify' && u.waitingForReply) return { bddStage: 'prd_clarify' }
+      if (u?.phase === 'spec_clarify' && u.waitingForReply) return { bddStage: 'prd_clarify' }
+      if (u?.phase === 'prd_clarify' && !u.waitingForReply) return { bddStage: 'prd_discovery' }
+      if (u?.phase === 'formulation') return { bddStage: 'formulation' }
+      if (u?.phase === 'spec_completed' || u?.phase === 'uiux_design_preference') return { bddStage: 'complete' }
+      return { bddStage: u?.phase ?? 'error' }
+    }
+    if (p === 'formulation_draft_review') {
+      await handleFormulationDraftReview(state.conversationId, flowState, state.message, redis, io)
+      const u = await getFlowState(redis, state.conversationId)
+      if (u?.phase === 'spec_discovery') return { bddStage: 'spec_discovery' }
+      if (u?.phase === 'formulation') return { bddStage: 'formulation' }
+      if (u?.phase === 'spec_completed' || u?.phase === 'uiux_design_preference') return { bddStage: 'complete' }
+      return { bddStage: u?.phase ?? 'error' }
+    }
   }
 
   // 非 waitingForReply 的進行中 phase（stale recovery 場景）

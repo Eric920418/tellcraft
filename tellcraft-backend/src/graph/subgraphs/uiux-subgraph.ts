@@ -72,7 +72,44 @@ async function entryNode(state: TellcraftStateType): Promise<Partial<TellcraftSt
     return { uiuxStage: phaseToStage(u?.phase) }
   }
 
-  // 直接路由到對應 wait node
+  // ── waitingForReply + fresh invoke → 直接處理用戶回覆 ──
+  // BDD→UIUX 跨 subgraph 轉場時，checkpoint 無 pending interrupt，
+  // 用戶回覆會觸發 fresh invoke 而非 resume。
+  // 在 entry 直接處理回覆，讓後續步驟的 interrupt 在同一次 invocation 內設立。
+  if (flowState.waitingForReply && state.message) {
+    if (phase === 'uiux_design_preference') {
+      await handleDesignPreferenceReply(state.conversationId, flowState, state.message, redis, io)
+      const u = await getFlowState(redis, state.conversationId)
+      return { uiuxStage: phaseToStage(u?.phase) }
+    }
+    if (phase === 'uiux_design_clarify') {
+      await handleDesignClarifyReply(state.conversationId, flowState, state.message, redis, io, state.imageUrls)
+      const u = await getFlowState(redis, state.conversationId)
+      return { uiuxStage: phaseToStage(u?.phase) }
+    }
+    if (phase === 'uiux_design_brief_confirm') {
+      await handleDesignBriefReply(state.conversationId, flowState, state.message, redis, io)
+      const u = await getFlowState(redis, state.conversationId)
+      return { uiuxStage: phaseToStage(u?.phase) }
+    }
+    if (phase === 'uiux_template_selection') {
+      await routePhase(
+        { conversationId: state.conversationId, projectId: state.projectId,
+          userId: state.userId, message: state.message,
+          locale: (state.locale || 'zh') as 'zh' | 'en', imageUrls: state.imageUrls },
+        flowState, state.message.trim(), redis, io
+      )
+      const u = await getFlowState(redis, state.conversationId)
+      return { uiuxStage: phaseToStage(u?.phase) }
+    }
+    if (phase === 'uiux_variant_selection' || phase === 'uiux_generating_variants') {
+      await handleVariantSelection(state.conversationId, flowState, state.message, redis, io)
+      const u = await getFlowState(redis, state.conversationId)
+      return { uiuxStage: phaseToStage(u?.phase) }
+    }
+  }
+
+  // 直接路由到對應 wait node（resume 路徑會走這裡）
   return { uiuxStage: phaseToStage(phase) }
 }
 
