@@ -1,13 +1,18 @@
 /**
- * Skill Telemetry — 自我強化迴圈 v1
+ * Skill Telemetry — 自我強化迴圈 v2
  *
- * 從已經在「擦屁股」的修復點收集失敗訊號，供每週 markdown 報告人工回灌 prompt。
+ * v1: 收集失敗訊號 → 週報 → 人工回灌
+ * v2: + Week-over-week delta（對照組）
+ *     + Prompt change 註冊表（追蹤每次介入的效應）
+ *     + 汰換候選標記（防止 prompt 堆疊膨脹）
+ *     + Direction A 候選標記（高頻 pattern 轉 deterministic code 規則）
  *
  * 設計原則：
  * 1. Fire-and-forget — 任何寫入失敗都不能中斷生成 pipeline
  * 2. 零 LLM — 所有 pattern 分類用 regex
  * 3. Payload 上限 4KB — 避免巨大 blob 拖慢 DB
  * 4. 人工回灌 — 禁止自動改 prompt，週報 → 手工決策 → 手改 system prompt
+ * 5. 閉環量化 — 每次介入必須註冊，下週量化效應，無效 → 汰換或轉路徑
  */
 
 import * as db from '../db/client'
@@ -269,4 +274,284 @@ export async function aggregateWeeklyReport(days = 7, topN = 20): Promise<Weekly
     topPatterns: topPatterns || [],
     escalations: escalations || [],
   }
+}
+
+// ============================================================
+// v2: Week-over-week delta
+// ============================================================
+
+export interface DeltaRow {
+  skill_name: string
+  event_type: string
+  pattern_key: string
+  current_count: number
+  previous_count: number
+  /** 正 = 上升（壞），負 = 下降（好），null = 前一週不存在（新 pattern） */
+  delta_pct: number | null
+}
+
+export interface WeeklyReportWithDelta extends WeeklyReport {
+  previousPeriodTotal: number
+  deltas: DeltaRow[]
+}
+
+/**
+ * 同時查當前週和前一週，JS 側算 delta %。
+ * 比起兩次呼叫 aggregateWeeklyReport，這個函數只多一個 SQL 查前一週 top patterns。
+ */
+export async function aggregateWeeklyReportWithDelta(days = 7, topN = 20): Promise<WeeklyReportWithDelta> {
+  const current = await aggregateWeeklyReport(days, topN)
+
+  // 前一週 patterns
+  const prevPatterns = await db.queryMany<WeeklyReportRow>(
+    `SELECT
+       skill_name,
+       event_type,
+       pattern_key,
+       COUNT(*)::int as count,
+       ROUND(AVG(fix_rounds)::numeric, 2)::float as avg_fix_rounds,
+       ARRAY[]::text[] as sample_conversation_ids,
+       ARRAY[]::jsonb[] as sample_payloads
+     FROM skill_telemetry
+     WHERE created_at >= NOW() - ($1 || ' days')::interval * 2
+       AND created_at < NOW() - ($1 || ' days')::interval
+     GROUP BY skill_name, event_type, pattern_key
+     ORDER BY count DESC
+     LIMIT $2`,
+    [String(days), topN * 2] // 寬一點以 cover 新出現的 pattern
+  )
+
+  const prevTotalRow = await db.queryOne<{ total: number }>(
+    `SELECT COUNT(*)::int as total
+     FROM skill_telemetry
+     WHERE created_at >= NOW() - ($1 || ' days')::interval * 2
+       AND created_at < NOW() - ($1 || ' days')::interval`,
+    [String(days)]
+  )
+
+  // 建 lookup map: "skill|event|pattern" → prev count
+  const prevMap = new Map<string, number>()
+  for (const row of prevPatterns || []) {
+    prevMap.set(`${row.skill_name}|${row.event_type}|${row.pattern_key}`, row.count)
+  }
+
+  // 為當前 top patterns 算 delta
+  const deltas: DeltaRow[] = (current.topPatterns || []).map(row => {
+    const key = `${row.skill_name}|${row.event_type}|${row.pattern_key}`
+    const prev = prevMap.get(key)
+    return {
+      skill_name: row.skill_name,
+      event_type: row.event_type,
+      pattern_key: row.pattern_key,
+      current_count: row.count,
+      previous_count: prev ?? 0,
+      delta_pct: prev != null && prev > 0
+        ? Math.round(((row.count - prev) / prev) * 1000) / 10  // 一位小數
+        : prev == null ? null : (row.count > 0 ? 100 : 0),  // prev=0 → 100% 上升
+    }
+  })
+
+  return {
+    ...current,
+    previousPeriodTotal: prevTotalRow?.total || 0,
+    deltas,
+  }
+}
+
+// ============================================================
+// v2: Prompt Change 註冊表
+// ============================================================
+
+export type PromptChangeActionType = 'prompt_fewshot' | 'sanitize_rule' | 'qg_rule'
+
+export interface PromptChange {
+  id: number
+  pattern_key: string
+  skill_name: string
+  action_type: string
+  target_file: string
+  description: string | null
+  commit_hash: string | null
+  baseline_count: number
+  injected_at: string
+  retired_at: string | null
+}
+
+/**
+ * 註冊一次人工介入動作。
+ * 自動查 baseline_count = 該 pattern 近 7 天觸發數。
+ */
+export async function registerPromptChange(input: {
+  patternKey: string
+  skillName: string
+  actionType: PromptChangeActionType
+  targetFile: string
+  description?: string
+  commitHash?: string
+}): Promise<PromptChange> {
+  // 查 baseline：該 pattern 近 7 天觸發數
+  const baselineRow = await db.queryOne<{ count: number }>(
+    `SELECT COUNT(*)::int as count
+     FROM skill_telemetry
+     WHERE pattern_key = $1 AND skill_name = $2
+       AND created_at >= NOW() - INTERVAL '7 days'`,
+    [input.patternKey, input.skillName]
+  )
+  const baselineCount = baselineRow?.count || 0
+
+  const result = await db.queryOne<PromptChange>(
+    `INSERT INTO prompt_changes
+       (pattern_key, skill_name, action_type, target_file, description, commit_hash, baseline_count)
+     VALUES ($1, $2, $3, $4, $5, $6, $7)
+     RETURNING id, pattern_key, skill_name, action_type, target_file,
+               description, commit_hash, baseline_count,
+               injected_at::text as injected_at, retired_at::text as retired_at`,
+    [
+      input.patternKey,
+      input.skillName,
+      input.actionType,
+      input.targetFile,
+      input.description || null,
+      input.commitHash || null,
+      baselineCount,
+    ]
+  )
+
+  if (!result) throw new Error('Failed to insert prompt_change')
+  return result
+}
+
+/** Soft-delete：標記 retired_at，不刪行 */
+export async function retirePromptChange(id: number): Promise<void> {
+  await db.query(
+    `UPDATE prompt_changes SET retired_at = NOW() WHERE id = $1`,
+    [id]
+  )
+}
+
+/** 列出所有活躍（未汰換）的 prompt changes */
+export async function getActivePromptChanges(): Promise<PromptChange[]> {
+  return db.queryMany<PromptChange>(
+    `SELECT id, pattern_key, skill_name, action_type, target_file,
+            description, commit_hash, baseline_count,
+            injected_at::text as injected_at, retired_at::text as retired_at
+     FROM prompt_changes
+     WHERE retired_at IS NULL
+     ORDER BY injected_at DESC`
+  )
+}
+
+/** 列出所有 prompt changes（含已汰換） */
+export async function getAllPromptChanges(): Promise<PromptChange[]> {
+  return db.queryMany<PromptChange>(
+    `SELECT id, pattern_key, skill_name, action_type, target_file,
+            description, commit_hash, baseline_count,
+            injected_at::text as injected_at, retired_at::text as retired_at
+     FROM prompt_changes
+     ORDER BY injected_at DESC`
+  )
+}
+
+// ============================================================
+// v2: 效應量化
+// ============================================================
+
+export interface PromptChangeEffect {
+  change: PromptChange
+  currentWeeklyCount: number
+  reductionPct: number          // 正 = 下降（好），負 = 上升（壞）
+  weeksActive: number
+  retirementCandidate: boolean  // currentWeeklyCount < 5 且 weeksActive >= 4
+}
+
+/**
+ * 量化每條活躍 prompt change 的效應：注入前基線 vs 最近 7 天觸發數
+ */
+export async function measurePromptChangeEffects(): Promise<PromptChangeEffect[]> {
+  const active = await getActivePromptChanges()
+  if (active.length === 0) return []
+
+  const effects: PromptChangeEffect[] = []
+  for (const change of active) {
+    // 查該 pattern 最近 7 天觸發數
+    const row = await db.queryOne<{ count: number }>(
+      `SELECT COUNT(*)::int as count
+       FROM skill_telemetry
+       WHERE pattern_key = $1 AND skill_name = $2
+         AND created_at >= NOW() - INTERVAL '7 days'`,
+      [change.pattern_key, change.skill_name]
+    )
+    const currentWeeklyCount = row?.count || 0
+
+    const baseline = change.baseline_count
+    const reductionPct = baseline > 0
+      ? Math.round(((baseline - currentWeeklyCount) / baseline) * 1000) / 10
+      : 0  // baseline 0 → 無法計算
+
+    const injectedAt = new Date(change.injected_at)
+    const weeksActive = Math.max(1, Math.round((Date.now() - injectedAt.getTime()) / (7 * 24 * 60 * 60 * 1000)))
+
+    effects.push({
+      change,
+      currentWeeklyCount,
+      reductionPct,
+      weeksActive,
+      retirementCandidate: currentWeeklyCount < 5 && weeksActive >= 4,
+    })
+  }
+
+  return effects
+}
+
+// ============================================================
+// v2: Direction A 候選偵測
+// ============================================================
+
+/** 判斷一個 pattern_key 是否「已有 sanitize regex 能修」→ 可以轉為 code rule */
+export function isCodeFixablePattern(patternKey: string): boolean {
+  return SANITIZE_PATTERN_MAP.some(([, key]) => key === patternKey)
+}
+
+export interface DirectionACandidate {
+  pattern_key: string
+  event_type: string   // 出現在哪個 event（通常是 qg_rule_fix）
+  count: number
+  reason: string       // 為什麼是 Direction A 候選
+}
+
+/**
+ * 從 top patterns 中找出「高頻 + 可以用 regex 修 + 目前只在 QG 被抓但 deployer 已有修」的候選。
+ * 這意味著 LLM 在兩個 pipeline stage 都犯同樣錯誤，但只有一處有 deterministic 修復。
+ */
+export function findDirectionACandidates(
+  topPatterns: WeeklyReportRow[],
+  activeChanges: PromptChange[],
+  threshold = 10
+): DirectionACandidate[] {
+  const activePatterns = new Set(activeChanges.map(c => `${c.pattern_key}|${c.skill_name}`))
+  const candidates: DirectionACandidate[] = []
+
+  for (const row of topPatterns) {
+    if (row.count < threshold) continue
+    // 已有活躍的 prompt change → 跳過
+    if (activePatterns.has(`${row.pattern_key}|${row.skill_name}`)) continue
+
+    if (isCodeFixablePattern(row.pattern_key) && row.event_type === 'qg_rule_fix') {
+      candidates.push({
+        pattern_key: row.pattern_key,
+        event_type: row.event_type,
+        count: row.count,
+        reason: `已有 sanitize regex，但 QG 仍在觸發 → 同步到 QG rule-based`,
+      })
+    } else if (isCodeFixablePattern(row.pattern_key) && row.event_type !== 'sanitize_fix') {
+      candidates.push({
+        pattern_key: row.pattern_key,
+        event_type: row.event_type,
+        count: row.count,
+        reason: `可用 regex 修但目前無 code rule 覆蓋此路徑`,
+      })
+    }
+  }
+
+  return candidates
 }

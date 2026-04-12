@@ -33,9 +33,14 @@ npx ts-node bdd-spec/scripts/validate-feature.ts spec/features/      # 結構驗
 # 選項：--json, --strict, --fix
 
 # Skill Telemetry 週報（人工回灌 prompt 用）
-cd tellcraft-backend && pnpm tsx src/scripts/telemetry-weekly-report.ts              # 預設 7 天 markdown
+cd tellcraft-backend && pnpm tsx src/scripts/telemetry-weekly-report.ts              # 預設 7 天 markdown（含 delta + 效應追蹤）
 cd tellcraft-backend && pnpm tsx src/scripts/telemetry-weekly-report.ts --days=1     # 1 天
 cd tellcraft-backend && pnpm tsx src/scripts/telemetry-weekly-report.ts --json       # JSON 輸出
+
+# Prompt Change 註冊（改了 prompt 或加了 code rule 後執行）
+cd tellcraft-backend && pnpm tsx src/scripts/register-prompt-change.ts --pattern <key> --skill <name> --action <prompt_fewshot|sanitize_rule|qg_rule> --target <file>
+cd tellcraft-backend && pnpm tsx src/scripts/register-prompt-change.ts --list        # 列出活躍的
+cd tellcraft-backend && pnpm tsx src/scripts/register-prompt-change.ts --retire <id> # 汰換（畢業）
 
 # VPS 部署（SSH 到 VPS 後執行）
 git pull && pnpm build && pm2 startOrReload ecosystem.config.js --wait-ready
@@ -336,7 +341,7 @@ Feature 註解：`# Action: actionName` + `# [METHOD] /path` + `# Summary: xxx`
 
 ## 防雷清單（不看必踩）
 
-- **Skill Telemetry 必須 fire-and-forget**：`recordTelemetry` / `recordTelemetryBatch` 的呼叫端一定要接 `.catch(() => {})`。任何 DB 寫入失敗都不能中斷生成 pipeline。禁止在 try/catch 裡 await 後讓異常向上冒。**禁止自動回灌 prompt**：週報產出後人工決定，手改對應 service 的 system prompt，避免炸掉 prompt cache 命中率。migration 編號用 `029_add_skill_telemetry.sql`
+- **Skill Telemetry 必須 fire-and-forget**：`recordTelemetry` / `recordTelemetryBatch` 的呼叫端一定要接 `.catch(() => {})`。任何 DB 寫入失敗都不能中斷生成 pipeline。禁止在 try/catch 裡 await 後讓異常向上冒。**禁止自動回灌 prompt**：週報產出後人工決定，手改對應 service 的 system prompt，避免炸掉 prompt cache 命中率。migration 編號 `029_add_skill_telemetry.sql`（telemetry 表）+ `030_add_prompt_changes.sql`（回灌註冊表）。**閉環規範**：每次改 prompt 或加 code rule 後必須執行 `register-prompt-change.ts` 註冊，否則週報無法追蹤效應。Direction A 優先：能寫 regex/code rule 的 pattern 不回灌 prompt
 - **Structured Outputs（`lib/structured-output.ts`）**：JSON 輸出用 `callStructured<T>()` + Zod schema。只適用 JSON 輸出；代碼/Gherkin/YAML/自然語言不能用。`messages.parse()` 與 message prefilling **不相容**。改 schema 會使 prompt cache 失效。Zod v4 `z.record()` 必須傳兩個參數。`formulation.ts`/`coder-generation.ts` 保留 local `callClaude` wrapper 給非 JSON 輸出用
 - **handleProcessMessage 轉發到 handleContinueFlow 時必須帶 `skipPrefilterAndCredit: true`**：否則 prefilter + credit deduction 會執行兩次（雙重扣款）。只有 BullMQ `continue-flow` job 直接呼叫 `handleContinueFlow` 時才不帶此旗標
 - **生成中 phase 孤兒偵測三層**：(1) conv-lock 不存在+60s→恢復 (2) lock 存在但 startedAt>5min+無心跳→過期恢復 (3) 20min 超時。新增生成中 phase 必須考慮這三層

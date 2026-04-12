@@ -6,6 +6,14 @@ import {
   recordTelemetry,
   recordTelemetryBatch,
   aggregateWeeklyReport,
+  aggregateWeeklyReportWithDelta,
+  registerPromptChange,
+  retirePromptChange,
+  getActivePromptChanges,
+  measurePromptChangeEffects,
+  isCodeFixablePattern,
+  findDirectionACandidates,
+  type WeeklyReportRow,
 } from '../services/skill-telemetry'
 import * as db from '../db/client'
 
@@ -232,5 +240,317 @@ describe('aggregateWeeklyReport', () => {
       const params = call[1] as unknown[]
       expect(params[0]).toBe('14')
     }
+  })
+})
+
+// ============================================================
+// v2: aggregateWeeklyReportWithDelta — delta 計算
+// ============================================================
+
+describe('aggregateWeeklyReportWithDelta', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+  })
+
+  it('should return empty deltas when no data', async () => {
+    vi.spyOn(db, 'queryMany').mockResolvedValue([])
+    vi.spyOn(db, 'queryOne')
+      .mockResolvedValueOnce({ total: 0 }) // current total
+      .mockResolvedValueOnce({ total: 0 }) // prev total
+
+    const report = await aggregateWeeklyReportWithDelta(7)
+
+    expect(report.deltas).toEqual([])
+    expect(report.previousPeriodTotal).toBe(0)
+  })
+
+  it('should compute delta correctly for existing patterns', async () => {
+    const currentRow: WeeklyReportRow = {
+      skill_name: 'deployer',
+      event_type: 'sanitize_fix',
+      pattern_key: 'motion-import',
+      count: 80,
+      avg_fix_rounds: 1,
+      sample_conversation_ids: [],
+      sample_payloads: [],
+    }
+    const prevRow: WeeklyReportRow = {
+      skill_name: 'deployer',
+      event_type: 'sanitize_fix',
+      pattern_key: 'motion-import',
+      count: 100,
+      avg_fix_rounds: 1,
+      sample_conversation_ids: [],
+      sample_payloads: [],
+    }
+
+    // queryMany calls: current top, current escalations, prev top
+    vi.spyOn(db, 'queryMany')
+      .mockResolvedValueOnce([currentRow])   // current topPatterns
+      .mockResolvedValueOnce([])             // current escalations
+      .mockResolvedValueOnce([prevRow])      // prev topPatterns
+
+    vi.spyOn(db, 'queryOne')
+      .mockResolvedValueOnce({ total: 80 })  // current total
+      .mockResolvedValueOnce({ total: 100 }) // prev total
+
+    const report = await aggregateWeeklyReportWithDelta(7)
+
+    expect(report.deltas).toHaveLength(1)
+    expect(report.deltas[0].current_count).toBe(80)
+    expect(report.deltas[0].previous_count).toBe(100)
+    expect(report.deltas[0].delta_pct).toBe(-20) // -20%
+    expect(report.previousPeriodTotal).toBe(100)
+  })
+
+  it('should return null delta for new patterns', async () => {
+    const currentRow: WeeklyReportRow = {
+      skill_name: 'deployer',
+      event_type: 'sanitize_fix',
+      pattern_key: 'new-pattern',
+      count: 50,
+      avg_fix_rounds: 1,
+      sample_conversation_ids: [],
+      sample_payloads: [],
+    }
+
+    vi.spyOn(db, 'queryMany')
+      .mockResolvedValueOnce([currentRow])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([]) // no prev data
+
+    vi.spyOn(db, 'queryOne')
+      .mockResolvedValueOnce({ total: 50 })
+      .mockResolvedValueOnce({ total: 0 })
+
+    const report = await aggregateWeeklyReportWithDelta(7)
+
+    expect(report.deltas[0].delta_pct).toBeNull()
+  })
+})
+
+// ============================================================
+// v2: registerPromptChange + retirePromptChange
+// ============================================================
+
+describe('registerPromptChange', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+  })
+
+  it('should insert and return prompt change with baseline', async () => {
+    // First call: baseline count query
+    vi.spyOn(db, 'queryOne')
+      .mockResolvedValueOnce({ count: 42 })  // baseline
+      .mockResolvedValueOnce({               // INSERT RETURNING
+        id: 1,
+        pattern_key: 'motion-import',
+        skill_name: 'deployer',
+        action_type: 'sanitize_rule',
+        target_file: 'services/deployer.ts',
+        description: 'test',
+        commit_hash: 'abc123',
+        baseline_count: 42,
+        injected_at: '2026-04-08T00:00:00Z',
+        retired_at: null,
+      })
+
+    const result = await registerPromptChange({
+      patternKey: 'motion-import',
+      skillName: 'deployer',
+      actionType: 'sanitize_rule',
+      targetFile: 'services/deployer.ts',
+      description: 'test',
+      commitHash: 'abc123',
+    })
+
+    expect(result.baseline_count).toBe(42)
+    expect(result.pattern_key).toBe('motion-import')
+    expect(result.retired_at).toBeNull()
+  })
+
+  it('should throw when INSERT returns null', async () => {
+    vi.spyOn(db, 'queryOne')
+      .mockResolvedValueOnce({ count: 0 })  // baseline
+      .mockResolvedValueOnce(null)           // INSERT failed
+
+    await expect(
+      registerPromptChange({
+        patternKey: 'x',
+        skillName: 'deployer',
+        actionType: 'sanitize_rule',
+        targetFile: 'x.ts',
+      })
+    ).rejects.toThrow('Failed to insert')
+  })
+})
+
+describe('retirePromptChange', () => {
+  it('should call UPDATE with id', async () => {
+    const querySpy = vi.spyOn(db, 'query').mockResolvedValueOnce({
+      rows: [],
+      rowCount: 1,
+      command: 'UPDATE',
+      oid: 0,
+      fields: [],
+    } as Awaited<ReturnType<typeof db.query>>)
+
+    await retirePromptChange(5)
+
+    expect(querySpy).toHaveBeenCalledOnce()
+    const args = querySpy.mock.calls[0]?.[1] as unknown[]
+    expect(args[0]).toBe(5)
+  })
+})
+
+// ============================================================
+// v2: measurePromptChangeEffects
+// ============================================================
+
+describe('measurePromptChangeEffects', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+  })
+
+  it('should return empty when no active changes', async () => {
+    vi.spyOn(db, 'queryMany').mockResolvedValueOnce([])
+
+    const effects = await measurePromptChangeEffects()
+    expect(effects).toEqual([])
+  })
+
+  it('should calculate reduction and retirement candidate correctly', async () => {
+    const change = {
+      id: 1,
+      pattern_key: 'focus-visible',
+      skill_name: 'quality_gate',
+      action_type: 'qg_rule',
+      target_file: 'quality-gate.ts',
+      description: null,
+      commit_hash: null,
+      baseline_count: 100,
+      injected_at: new Date(Date.now() - 35 * 24 * 60 * 60 * 1000).toISOString(), // 5 weeks ago
+      retired_at: null,
+    }
+
+    vi.spyOn(db, 'queryMany').mockResolvedValueOnce([change])
+    vi.spyOn(db, 'queryOne').mockResolvedValueOnce({ count: 3 })
+
+    const effects = await measurePromptChangeEffects()
+
+    expect(effects).toHaveLength(1)
+    expect(effects[0].currentWeeklyCount).toBe(3)
+    expect(effects[0].reductionPct).toBe(97) // (100-3)/100 * 100
+    expect(effects[0].weeksActive).toBeGreaterThanOrEqual(4)
+    expect(effects[0].retirementCandidate).toBe(true) // <5 + >=4 weeks
+  })
+
+  it('should not flag retirement if count >= 5', async () => {
+    const change = {
+      id: 2,
+      pattern_key: 'use-client-missing',
+      skill_name: 'deployer',
+      action_type: 'prompt_fewshot',
+      target_file: 'uiux-generation.ts',
+      description: null,
+      commit_hash: null,
+      baseline_count: 200,
+      injected_at: new Date(Date.now() - 35 * 24 * 60 * 60 * 1000).toISOString(),
+      retired_at: null,
+    }
+
+    vi.spyOn(db, 'queryMany').mockResolvedValueOnce([change])
+    vi.spyOn(db, 'queryOne').mockResolvedValueOnce({ count: 180 })
+
+    const effects = await measurePromptChangeEffects()
+
+    expect(effects[0].retirementCandidate).toBe(false)
+    expect(effects[0].reductionPct).toBe(10) // (200-180)/200*100
+  })
+})
+
+// ============================================================
+// v2: isCodeFixablePattern + findDirectionACandidates
+// ============================================================
+
+describe('isCodeFixablePattern', () => {
+  it('should return true for patterns in SANITIZE_PATTERN_MAP', () => {
+    expect(isCodeFixablePattern('motion-import')).toBe(true)
+    expect(isCodeFixablePattern('use-client-missing')).toBe(true)
+    expect(isCodeFixablePattern('search-params-suspense')).toBe(true)
+  })
+
+  it('should return false for unknown patterns', () => {
+    expect(isCodeFixablePattern('scope:design')).toBe(false)
+    expect(isCodeFixablePattern('unknown-thing')).toBe(false)
+  })
+})
+
+describe('findDirectionACandidates', () => {
+  it('should flag QG patterns that have sanitize regex', () => {
+    const topPatterns: WeeklyReportRow[] = [
+      {
+        skill_name: 'quality_gate',
+        event_type: 'qg_rule_fix',
+        pattern_key: 'motion-import',
+        count: 50,
+        avg_fix_rounds: 1,
+        sample_conversation_ids: [],
+        sample_payloads: [],
+      },
+    ]
+
+    const candidates = findDirectionACandidates(topPatterns, [], 10)
+
+    expect(candidates).toHaveLength(1)
+    expect(candidates[0].pattern_key).toBe('motion-import')
+    expect(candidates[0].reason).toContain('QG')
+  })
+
+  it('should skip patterns with active prompt changes', () => {
+    const topPatterns: WeeklyReportRow[] = [
+      {
+        skill_name: 'quality_gate',
+        event_type: 'qg_rule_fix',
+        pattern_key: 'motion-import',
+        count: 50,
+        avg_fix_rounds: 1,
+        sample_conversation_ids: [],
+        sample_payloads: [],
+      },
+    ]
+    const activeChanges = [{
+      id: 1,
+      pattern_key: 'motion-import',
+      skill_name: 'quality_gate',
+      action_type: 'qg_rule',
+      target_file: 'quality-gate.ts',
+      description: null,
+      commit_hash: null,
+      baseline_count: 100,
+      injected_at: '2026-04-01',
+      retired_at: null,
+    }]
+
+    const candidates = findDirectionACandidates(topPatterns, activeChanges, 10)
+
+    expect(candidates).toHaveLength(0)
+  })
+
+  it('should skip patterns below threshold', () => {
+    const topPatterns: WeeklyReportRow[] = [
+      {
+        skill_name: 'quality_gate',
+        event_type: 'qg_rule_fix',
+        pattern_key: 'motion-import',
+        count: 5,
+        avg_fix_rounds: 1,
+        sample_conversation_ids: [],
+        sample_payloads: [],
+      },
+    ]
+
+    const candidates = findDirectionACandidates(topPatterns, [], 10)
+    expect(candidates).toHaveLength(0)
   })
 })

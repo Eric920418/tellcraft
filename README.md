@@ -51,10 +51,15 @@ cd tellcraft-backend && pnpm lint     # 後端（ESLint）
 npx ts-node bdd-spec/scripts/lint-gherkin-format.ts spec/features/
 npx ts-node bdd-spec/scripts/validate-feature.ts spec/features/
 
-# Skill Telemetry 週報（人工回灌 prompt 用）
+# Skill Telemetry 週報（人工回灌 prompt 用，含 delta + 效應追蹤）
 cd tellcraft-backend && pnpm tsx src/scripts/telemetry-weekly-report.ts              # 7 天 markdown
 cd tellcraft-backend && pnpm tsx src/scripts/telemetry-weekly-report.ts --days=1     # 1 天
 cd tellcraft-backend && pnpm tsx src/scripts/telemetry-weekly-report.ts --json       # JSON
+
+# Prompt Change 註冊（改了 prompt 或加了 code rule 後執行）
+cd tellcraft-backend && pnpm tsx src/scripts/register-prompt-change.ts --pattern <key> --skill <name> --action <type> --target <file>
+cd tellcraft-backend && pnpm tsx src/scripts/register-prompt-change.ts --list        # 列出
+cd tellcraft-backend && pnpm tsx src/scripts/register-prompt-change.ts --retire <id> # 汰換
 ```
 
 ### SEO 配置
@@ -1033,6 +1038,7 @@ psql "$DATABASE_URL" -f tellcraft-backend/migrations/xxx.sql
 
 ### 近期更新（2026-03-13 ~ 2026-04-08）
 
+- **Skill Telemetry v2 — 真閉環**（04-11）：升級自我強化迴圈。(1) **Week-over-week delta**：`aggregateWeeklyReportWithDelta` 同時查當前+前一週，每個 pattern 顯示 `↑/↓ N%` 對照，不再只有絕對數字；(2) **Prompt Change 註冊表**：`migrations/030_add_prompt_changes.sql` + `registerPromptChange()` / `retirePromptChange()` / `measurePromptChangeEffects()`。每次改 prompt 或加 code rule 後用 `register-prompt-change.ts` CLI 註冊，自動查 baseline_count（近 7 天觸發數），下週報顯示 `注入前基線 vs 最新觸發 → reduction %`；(3) **汰換候選**：`currentWeeklyCount < 5 && weeksActive >= 4` 自動標記「畢業候選」，防 prompt 堆疊膨脹；(4) **Direction A 候選**：`findDirectionACandidates()` 零 LLM 檢測「高頻 + 已有 sanitize regex 能修但 QG 路徑沒覆蓋」的 pattern，建議轉 deterministic code rule 而非教 LLM。**核心原則不變**：禁止自動回灌 prompt，人工看週報→決策→註冊→量化效應→汰換
 - **Skill Telemetry MVP**（04-08）：自我強化迴圈第一步。新增 `migrations/029_add_skill_telemetry.sql` + `services/skill-telemetry.ts` + `scripts/telemetry-weekly-report.ts`。在 3 個最高 ROI 修復點埋點：(1) Deployer L2 `sanitizeCodeForDeploy` caller 側用 `categorizeSanitizeFix()` 零 LLM regex 分類 15+ 種修復 label；(2) Quality Gate `autoFixCriticalIssuesRuleBased` 記錄每條 rule 命中（motion-import / tailwind-v4 / focus-visible / form-labels / no-h-screen），`autoFixCriticalIssues` LLM fallback 單獨記錄；(3) Iteration `executeIteration` 記錄用戶 feedback（截 500 字）+ scope + repeatCount。`recordTelemetry` 完全 fire-and-forget — DB 失敗吞錯不阻斷 pipeline，payload 超 4KB 自動截斷。週報 CLI 產出 markdown top patterns + action items + escalations，人工決定哪些高頻 pattern 要回灌對應 service 的 system prompt。**禁止自動回灌**（會炸 prompt cache 命中率）。MVP 覆蓋 deployer/quality_gate/iteration 三層，RED Phase / Feature Alignment Gate / L3 L4 / Variant selection 留待第二輪
 - **Extended Thinking 修復路徑**（04-03）：`ENABLE_EXTENDED_THINKING=false`（預設關閉）+ `EXTENDED_THINKING_BUDGET=10000`，只用在 `fixFailingAction()`（Coder RED-GREEN cycle 修復）和 `fixMultipleFeatures()`（Feature Alignment Gate 修復）。`callClaude` + `callStructured` 支援 `thinking` 參數，maxTokens 自動加上 budget_tokens。purpose 加 `+thinking` 後綴用於 A/B 比較修復成功率
 - **Prompt Caching 擴展**（04-03）：共用 `buildCacheableSystem()` helper（`lib/anthropic.ts`）+ `CacheableSystemPrompt` type。擴展到 4 個服務：formulation.ts（ISA SpecFormula 規則跨 5-20 個 feature 快取，省 ~84% system prompt input tokens）、coder-generation.ts（BASE_PROMPT 跨 action 快取 + rewrite prompt 全靜態快取）、web-clone-service.ts（CLONE_SYSTEM_PROMPT 跨 section 快取）。`callStructured()` 加入 cache metric tracking。raw fetch 加 `anthropic-beta: prompt-caching-2024-07-31` header。**待驗證：`ENABLE_DIFF_OUTPUT=true`（預設 false）** — Animation/RWD 階段改用 SEARCH/REPLACE diff 輸出，可省 60-70% output tokens（$15/MTok，主要成本），但會改變 LLM 的生成任務（完整檔案→差異片段），有匹配錯位/遺漏修改風險，解析失敗自動 fallback 到 full-file。需在 staging 跑真實案例驗證品質後再啟用
