@@ -272,6 +272,13 @@ const BASE_PROMPT = `你是一位 Next.js + PostgreSQL 後端工程師。你的�
   - 更新操作中必須用已存記錄的 created_at：\`new Date(dueDate) < new Date(existing.created_at)\`
   - **如果 BDD Feature 的測試數據包含某個日期值（如 2099-12-31），那個值就是合法的。你的驗證不應拒絕它**
   - 不要自作聰明添加 BDD 規則中沒有提到的驗證（如格式檢查、長度上限、日期是否過去等）
+- **複合主鍵表（多對多 junction table）**：
+  - 偵測：欄位清單若標示「⚠️ 複合主鍵表」，該表**沒有 id 欄位**
+  - WHERE/UPDATE/DELETE 必須用複合主鍵：
+    錯誤 ❌：\`sql\\\`DELETE FROM todo_tags WHERE id = \\\${tagId}\\\`\`
+    正確 ✅：\`sql\\\`DELETE FROM todo_tags WHERE todo_id = \\\${todoId} AND tag_id = \\\${tagId}\\\`\`
+  - INSERT 也不需要 id 欄位：\`sql\\\`INSERT INTO todo_tags (todo_id, tag_id) VALUES (\\\${a}, \\\${b})\\\`\`
+  - 禁止對複合主鍵表使用 RETURNING id（沒有 id）；用 RETURNING * 或具體欄位
 
 ## 子操作派發
 \`\`\`typescript

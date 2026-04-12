@@ -24,6 +24,8 @@ jobs:
           cache-dependency-path: tellcraft-backend/pnpm-lock.yaml
 
       - run: pnpm install --frozen-lockfile
+      - name: Pre-commit checks (防雷清單守衛)
+        run: bash ../scripts/pre-commit-checks.sh
       - run: pnpm typecheck
       - run: pnpm test:ci
 

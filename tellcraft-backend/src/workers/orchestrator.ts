@@ -3,6 +3,8 @@ import type { IoEmitter } from '../types/flow-state'
 import Redis from 'ioredis'
 import { withConversationLock, releaseUserActiveLock } from '../services/conversation-lock'
 import * as db from '../db/client'
+import { buildMainGraph } from '../graph/main-graph'
+import { setGraphContext } from '../graph/context'
 import { classifyIntent, isSkillIntent } from '../services/classifier'
 import { SkillName } from '../services/registry'
 import { prefilterMessage, checkBuildRelevance, recordAbuseViolation, checkInputQuality } from '../services/prefilter'
@@ -188,11 +190,21 @@ async function renameProjectSafely(params: {
 // Worker 工廠
 // ============================================================
 
+// ── LangGraph Graph Instance（feature flag 控制） ──
+let _langGraph: ReturnType<typeof buildMainGraph> | null = null
+
 export function createOrchestratorWorker(
   workerConnection: Redis,  // BullMQ Worker 專用連線（maxRetriesPerRequest: null）
   redis: Redis,             // FlowState/lock/activity 所有業務邏輯（generalRedis）
   io: IoEmitter
 ): Worker {
+  // LangGraph 初始化（feature flag 控制，預設 off）
+  if (process.env.USE_LANGGRAPH === 'true' && !_langGraph) {
+    setGraphContext(redis, io)
+    _langGraph = buildMainGraph()
+    logger.info('LangGraph StateGraph 已初始化')
+  }
+
   const worker = new Worker(
     'orchestrator',
     async (job: Job) => {
@@ -216,6 +228,22 @@ export function createOrchestratorWorker(
 
       const userId = (data as { userId?: string }).userId
       const lockResult = await withConversationLock(redis, conversationId, async () => {
+        // ── LangGraph Feature Flag ──
+        if (process.env.USE_LANGGRAPH === 'true' && _langGraph) {
+          const config = { configurable: { thread_id: conversationId } }
+          await _langGraph.invoke({
+            conversationId,
+            projectId: data.projectId,
+            userId: userId ?? '',
+            message: (data as ProcessMessageData).message ?? '',
+            mode: (data as ProcessMessageData).mode ?? 'fine',
+            locale: (data as ProcessMessageData).locale ?? 'zh',
+            imageUrls: (data as ProcessMessageData).imageUrls ?? [],
+          }, config)
+          return
+        }
+
+        // ── 現有路徑 ──
         switch (job.name) {
           case 'process-message':
             return handleProcessMessage(data as ProcessMessageData, redis, io)

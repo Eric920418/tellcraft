@@ -1038,6 +1038,7 @@ psql "$DATABASE_URL" -f tellcraft-backend/migrations/xxx.sql
 
 ### 近期更新（2026-03-13 ~ 2026-04-08）
 
+- **防雷清單 CI 守衛**（04-12）：Step 2 — 把 CLAUDE.md 60+ 條防雷清單轉化為自動化守衛。(1) **pre-commit hook**：`scripts/pre-commit-checks.sh`（6 條 grep 靜態檢查 + 1 條 telemetry .catch heuristic）+ husky + CI pipeline 整合；(2) **新增 48 個測試**（993→1041）：`coder-generation-rules.test.ts`（36 tests — classifyFailureRootCause 8+1 類覆蓋 + validateSlotColumns softDeleteColumn + _c snake_to_camel）、`uiux-generation-rules.test.ts`（5 tests — generateTailwindConfig 禁止 CSS var）、`semantic-gateway.test.ts` 擴充（7 tests — ITER_DESIGN_SIGNALS 錯誤修復詞 iteration 接受驗證）；(3) **CLAUDE.md 標注**：每條標記 `[CI]`/`[TEST]`/`[ARCH]`，區分 CI 守衛 vs 測試覆蓋 vs 需人工審查的架構約束
 - **Skill Telemetry v3 — Failure Telemetry Expansion**（04-12）：從「哪些成功模式在重複」擴充成「哪類失敗在重複、分佈在哪個 phase、多少被恢復了」。(1) **Schema 擴充** `migrations/031`：`outcome`（success/failed/repaired/timeout/blocked）+ `root_cause_category` + `phase` + `error_type` + `recovered` 五欄位 + 三個 partial index，向後相容既有 row 全為 success；(2) **Dead code 復活**：`coder-generation.ts` 的 `classifyFailureRootCause()` 8 類零 LLM 分類器接入 recordTelemetry（最高 ROI，原本寫好沒用）；(3) **Deployer L1/L3/L4/L5 分層埋點**：L1 validateComponentReferences 修復率、L3 fixBuildErrors 重試、L4 verifyBuildLocally 各輪、L5 useSearchParams Suspense 觸發率；(4) **Feature Alignment Gate**：alignment_blocked/fixed 追蹤，6 項檢查結果 + LLM 修復成敗；(5) **RED Phase L1/L2/L2.5**：靜態 12 檢查 + Stub/Routing 驗證失敗分佈；(6) **Syntax Validator**：esbuild 失敗 + Haiku 修復成功率；(7) **Prefilter**：reject（injection/gibberish/offensive/spam）+ antiloop 冷卻追蹤；(8) **Orchestrator 中心化 catch**：`handlePhaseError` 用 `classifyPhaseError()` 8 類零 LLM 分類（timeout/network/rate_limit/llm_error/filesystem/db_error/redis_error/oom）；(9) **FlowState Recovery**：超時偵測→恢復成功率按 phase 追蹤；(10) **週報 v3**：新增 Failure Overview（outcome×skill 分佈）+ Top Root Causes + Recovery Success Rate 三個 section。**目的**：讓週報直接回答「top 3 failure pattern 是什麼」「哪層防禦從來沒救過人」「同一類 bug 換型態再來比例」——打地鼠的前提是看清地鼠
 - **Skill Telemetry v2 — 真閉環**（04-11）：升級自我強化迴圈。(1) **Week-over-week delta**：`aggregateWeeklyReportWithDelta` 同時查當前+前一週，每個 pattern 顯示 `↑/↓ N%` 對照，不再只有絕對數字；(2) **Prompt Change 註冊表**：`migrations/030_add_prompt_changes.sql` + `registerPromptChange()` / `retirePromptChange()` / `measurePromptChangeEffects()`。每次改 prompt 或加 code rule 後用 `register-prompt-change.ts` CLI 註冊，自動查 baseline_count（近 7 天觸發數），下週報顯示 `注入前基線 vs 最新觸發 → reduction %`；(3) **汰換候選**：`currentWeeklyCount < 5 && weeksActive >= 4` 自動標記「畢業候選」，防 prompt 堆疊膨脹；(4) **Direction A 候選**：`findDirectionACandidates()` 零 LLM 檢測「高頻 + 已有 sanitize regex 能修但 QG 路徑沒覆蓋」的 pattern，建議轉 deterministic code rule 而非教 LLM。**核心原則不變**：禁止自動回灌 prompt，人工看週報→決策→註冊→量化效應→汰換
 - **Skill Telemetry MVP**（04-08）：自我強化迴圈第一步。新增 `migrations/029_add_skill_telemetry.sql` + `services/skill-telemetry.ts` + `scripts/telemetry-weekly-report.ts`。在 3 個最高 ROI 修復點埋點：(1) Deployer L2 `sanitizeCodeForDeploy` caller 側用 `categorizeSanitizeFix()` 零 LLM regex 分類 15+ 種修復 label；(2) Quality Gate `autoFixCriticalIssuesRuleBased` 記錄每條 rule 命中（motion-import / tailwind-v4 / focus-visible / form-labels / no-h-screen），`autoFixCriticalIssues` LLM fallback 單獨記錄；(3) Iteration `executeIteration` 記錄用戶 feedback（截 500 字）+ scope + repeatCount。`recordTelemetry` 完全 fire-and-forget — DB 失敗吞錯不阻斷 pipeline，payload 超 4KB 自動截斷。週報 CLI 產出 markdown top patterns + action items + escalations，人工決定哪些高頻 pattern 要回灌對應 service 的 system prompt。**禁止自動回灌**（會炸 prompt cache 命中率）。MVP 覆蓋 deployer/quality_gate/iteration 三層，RED Phase / Feature Alignment Gate / L3 L4 / Variant selection 留待第二輪
@@ -1150,6 +1151,28 @@ psql "$DATABASE_URL" -f tellcraft-backend/migrations/xxx.sql
 **BDD Feature 後置驗證**：
 - **`sanitizeFeatureContent()`**：零 LLM 自動修正 — `回應, with JSON:` → `回應, with table:`、`回應為, with JSON:` → `回應, with table:`、entity_validate header `>id` → `id`
 - **formulation prompt 強化**：明確禁止 entity_validate 使用 `>contextKey`；`>contextKey`/`<executionKey` 只用於 Given 準備和 Then 回應
+
+### LangGraph.js 狀態機遷移 + Fix Loop 根治 + SpecFormula 完善（2026-04-08 ~ 2026-04-12）
+
+**LangGraph.js StateGraph 架構（Phase 1 骨架）**：
+- **依賴安裝**：`@langchain/langgraph` + `@langchain/langgraph-checkpoint-postgres` + `@langchain/core`
+- **Pointer State Pattern**：LangGraph state 只存路由 metadata（~1KB），大資料（generated code、FlowState 100+ 欄位）留在 Redis + PostgreSQL，避免 checkpoint 膨脹
+- **State Schema**：`graph/state.ts`（Annotation.Root + last-write-wins reducer）— conversationId / phase / waitingForReply / skillIntent / message / error 等 13 個欄位
+- **主 StateGraph**：`graph/main-graph.ts` — classify → phase_router → 7 skill nodes → complete，conditional edges 路由
+- **Runtime Context**：`graph/context.ts` — singleton 注入 Redis + Socket.io，所有 node 共用
+- **10 個 Node**：classify（意圖分類 + 特殊 token）、phase-router（FlowState 同步）、bdd-skill / uiux-skill / fast-build / coder-skill / deployer / domain-skill / clone-skill（wrapper 模式呼叫現有 handler）、complete（終止 node）
+- **Feature Flag**：`USE_LANGGRAPH=true` 切換新舊路徑，預設 off（不影響生產）。在 `orchestrator.ts` 的 BullMQ worker 內部，withConversationLock 內分支
+
+**Fix Loop 根治（96/114 → 目標 110+/114）**：
+- **Fix prompt 注入 BDD Feature content**：`fixFailingAction` 的 user message 加入完整 Gherkin（截取 8KB），讓 LLM 修復時能看到 Background 資料準備 + Then 預期回應欄位。此前 LLM 只看到 error message，不知道測試期望什麼
+- **Fix 後 `import { sql }` 安全網**：初始生成有安全網，但 fix 後的代碼沒有 → `sql is not defined` 持續。現在兩處（逐 Feature + 回歸）都在 fix 回寫前檢查 + 注入
+- **Per-SubOp 模式加 imports + Feature context**：Per-SubOp 修復只傳單一函數體，LLM 看不到 import 區塊 → 加入 imports 區塊 + Feature content 到修復 prompt
+
+**SpecFormula 完善（剩餘失敗分類修復）**：
+- **NUMERIC 通用數值正規化**：`valuesEqual()` 加入 `parseFloat` 比較（`"800" == "800.00"` → true），解決 PostgreSQL NUMERIC 回傳 "800.00" vs DataTable "800" 的字串比較失敗
+- **Cleanup TRUNCATE + DELETE fallback**：`cleanupTables()` 首選 `TRUNCATE RESTART IDENTITY CASCADE`，失敗時 fallback 逐表 `DELETE FROM`（反向順序避免 FK 衝突）
+- **Junction table 複合 PK 警告**：`parseTablePrimaryKeys()` 偵測複合主鍵表 → `generateColumnListText()` 加 ⚠️ 警告 → `BASE_PROMPT` 加 junction table 指引 → `validateSqlColumns()` 偵測 `WHERE id =` 在無 id 的表
+- **Feature 多 Feature 區塊截斷**：`sanitizeFeatureContent()` 偵測單一 content 含多個 `Feature:` 宣告 → 截斷保留第一個 + formulation prompt 加規則禁止
 
 ### SpecFormula Java Reference 移植 + Coder Pipeline 根治（2026-04-04 ~ 2026-04-05）
 

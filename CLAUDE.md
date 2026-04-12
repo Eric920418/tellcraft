@@ -128,7 +128,7 @@ pm2 describe tellcraft-backend            # 詳細資訊（記憶體/重啟次�
 | **Validate** | `middleware/validate.ts` | Zod 請求驗證中間件（validateBody/Query/Params） |
 | **Schemas** | `schemas/*.ts` | API 路由 Zod schema 定義（conversation/session/operations/bdd/project/domain） |
 | **Telegram 整合** | `services/telegram-*.ts`（3 檔） | Notify 推播 + Bot Handler + Full Push |
-| **SpecFormula** | `lib/specformula/`（27 檔） | SDD 驗證引擎：Feature Files → HTTP API → DB 驗證。Coder Stage B 自動驗證 |
+| **SpecFormula** | `lib/specformula/`（31 檔） | SDD 驗證引擎：Feature Files → HTTP API → DB 驗證。Coder Stage B 自動驗證 |
 | **Job Failure** | `services/job-failure-handler.ts` | BullMQ 最終失敗持久化 + 用戶通知 |
 | **Skill Telemetry** | `services/skill-telemetry.ts` + `scripts/telemetry-weekly-report.ts` | 自我強化迴圈 MVP：3 個埋點（deployer sanitize / QG rule-based / iteration refineCode）→ `skill_telemetry` 表 → 週報腳本。Fire-and-forget 寫入，絕不阻塞 pipeline。人工看週報決定哪些 pattern 回灌 prompt，禁止自動回灌 |
 
@@ -147,7 +147,7 @@ pm2 describe tellcraft-backend            # 詳細資訊（記憶體/重啟次�
 | **Server Actions** | `app/actions/index.ts` | ~1800 | 對話/訊息/專案等 Server Actions 入口 |
 | **WebContainer 預覽** | `app/lib/webcontainer-utils.ts` + `WebContainerPreview.tsx` + hooks | | WebContainers 跑 Next.js dev server，preloader pre-boot + pre-install |
 | **Remotion 動畫** | `app/components/remotion/` + `FastBuildPlayer` + `building-scene/` | | 3D 動畫（Fast Build 工廠 + BDD 蓋房子）|
-| **Landing 組件** | `app/components/landing/` | ~1978 | 15 個自包含 Landing Page 組件 |
+| **Landing 組件** | `app/components/landing/` | ~1978 | 16 個自包含 Landing Page 組件 |
 
 ### Skill 系統
 
@@ -259,6 +259,7 @@ Layer 5: sanitizeCodeForDeploy 修復 7 — useSearchParams Suspense boundary �
 | `user.ts` | `/api/user` | 用戶資訊/帳號合併 |
 | `upload.ts` | `/api/upload` | 圖片上傳（5MB，JPEG/PNG） |
 | `line-bot.ts` | `/api/line/webhook` | LINE Webhook（raw body 在 express.json 前） |
+| `telegram-bot.ts` | `/api/telegram/webhook` | Telegram Webhook |
 | `domain.ts` | `/api/domain` | 域名 CRUD + DNS + pricing |
 
 前端 Proxy：`app/api/vps/[...path]/route.ts` 將 `/api/vps/*` 轉發到 VPS 後端。
@@ -277,7 +278,7 @@ Layer 5: sanitizeCodeForDeploy 修復 7 — useSearchParams Suspense boundary �
 
 ### 資料庫 Migration（`tellcraft-backend/migrations/`）
 
-共 24 個 migration（`001_initial_schema` ~ `024_add_neon_columns`），檔名自說明。新增 migration 後在 VPS 執行：`psql "$DATABASE_URL" -f tellcraft-backend/migrations/xxx.sql`
+共 31 個 migration（`001_initial_schema` ~ `031_extend_skill_telemetry_for_failures`），檔名自說明。新增 migration 後在 VPS 執行：`psql "$DATABASE_URL" -f tellcraft-backend/migrations/xxx.sql`
 
 ### Skill 定義目錄
 
@@ -301,11 +302,12 @@ Layer 5: sanitizeCodeForDeploy 修復 7 — useSearchParams Suspense boundary �
 
 ### 測試
 
-後端使用 **Vitest**，測試檔案在 `tellcraft-backend/src/__tests__/`（19 個檔案）：
+後端使用 **Vitest**，測試檔案在 `tellcraft-backend/src/__tests__/`（31 個檔案）：
 - 核心服務測試：`intent-helpers.test.ts`（107 條）、`semantic-gateway.test.ts`（56 條）、`deployer-sanitize.test.ts`（41 條）、`log-parser.test.ts`（33 條）
 - 設計系統測試：`design-moods.test.ts`、`composition-patterns.test.ts`、`design-system-v2.test.ts`、`prompt-architecture.test.ts`、`uiux-optimization.test.ts`
-- SpecFormula 測試：`specformula/naming-converter.test.ts`、`type-converter.test.ts`、`isa-spec-reader.test.ts`、`entity-ddl-reader.test.ts` 等（8 檔）
-- 快速模式測試：`merge-pages.test.ts`
+- SpecFormula 測試：`specformula/naming-converter.test.ts`、`type-converter.test.ts`、`isa-spec-reader.test.ts`、`entity-ddl-reader.test.ts`、`data-models.test.ts`、`api-spec-reader.test.ts`、`isa-feature-argument-resolver.test.ts`、`scenario-context.test.ts`、`values-equal.test.ts`（9 檔）
+- Coder/RED Phase 測試：`coder-generators.test.ts`、`red-phase-validator.test.ts`、`red-phase-schema-checks.test.ts`、`actions-design.test.ts`、`routing-stub-adapter.test.ts`、`parse-table-primary-keys.test.ts`
+- 其他：`merge-pages.test.ts`、`search-replace.test.ts`、`reference-analyzer.test.ts`、`schema-derivation.test.ts`、`skill-telemetry.test.ts`、`skill-telemetry-failure.test.ts`、`smoke.test.ts`
 
 ```bash
 # 跑單一測試檔案
@@ -341,31 +343,33 @@ Feature 註解：`# Action: actionName` + `# [METHOD] /path` + `# Summary: xxx`
 
 ## 防雷清單（不看必踩）
 
-- **Skill Telemetry 必須 fire-and-forget**：`recordTelemetry` / `recordTelemetryBatch` 的呼叫端一定要接 `.catch(() => {})`。任何 DB 寫入失敗都不能中斷生成 pipeline。禁止在 try/catch 裡 await 後讓異常向上冒。**禁止自動回灌 prompt**：週報產出後人工決定，手改對應 service 的 system prompt，避免炸掉 prompt cache 命中率。migration 編號 `029_add_skill_telemetry.sql`（telemetry 表）+ `030_add_prompt_changes.sql`（回灌註冊表）。**閉環規範**：每次改 prompt 或加 code rule 後必須執行 `register-prompt-change.ts` 註冊，否則週報無法追蹤效應。Direction A 優先：能寫 regex/code rule 的 pattern 不回灌 prompt
-- **Structured Outputs（`lib/structured-output.ts`）**：JSON 輸出用 `callStructured<T>()` + Zod schema。只適用 JSON 輸出；代碼/Gherkin/YAML/自然語言不能用。`messages.parse()` 與 message prefilling **不相容**。改 schema 會使 prompt cache 失效。Zod v4 `z.record()` 必須傳兩個參數。`formulation.ts`/`coder-generation.ts` 保留 local `callClaude` wrapper 給非 JSON 輸出用
+> **自動化覆蓋標記**：`[CI]` = pre-commit hook 或 CI 靜態檢查守衛（`scripts/pre-commit-checks.sh`）、`[TEST]` = 單元測試覆蓋（見 `__tests__/`）、`[ARCH]` = 無法自動化的架構約束（需人工審查）。未標記 = 尚未轉化。
+
+- `[CI]` **Skill Telemetry 必須 fire-and-forget**：`recordTelemetry` / `recordTelemetryBatch` 的呼叫端一定要接 `.catch(() => {})`。任何 DB 寫入失敗都不能中斷生成 pipeline。禁止在 try/catch 裡 await 後讓異常向上冒。**禁止自動回灌 prompt**：週報產出後人工決定，手改對應 service 的 system prompt，避免炸掉 prompt cache 命中率。migration 編號 `029_add_skill_telemetry.sql`（telemetry 表）+ `030_add_prompt_changes.sql`（回灌註冊表）。**閉環規範**：每次改 prompt 或加 code rule 後必須執行 `register-prompt-change.ts` 註冊，否則週報無法追蹤效應。Direction A 優先：能寫 regex/code rule 的 pattern 不回灌 prompt
+- `[ARCH]` **Structured Outputs（`lib/structured-output.ts`）**：JSON 輸出用 `callStructured<T>()` + Zod schema。只適用 JSON 輸出；代碼/Gherkin/YAML/自然語言不能用。`messages.parse()` 與 message prefilling **不相容**。改 schema 會使 prompt cache 失效。Zod v4 `z.record()` 必須傳兩個參數。`formulation.ts`/`coder-generation.ts` 保留 local `callClaude` wrapper 給非 JSON 輸出用
 - **handleProcessMessage 轉發到 handleContinueFlow 時必須帶 `skipPrefilterAndCredit: true`**：否則 prefilter + credit deduction 會執行兩次（雙重扣款）。只有 BullMQ `continue-flow` job 直接呼叫 `handleContinueFlow` 時才不帶此旗標
 - **生成中 phase 孤兒偵測三層**：(1) conv-lock 不存在+60s→恢復 (2) lock 存在但 startedAt>5min+無心跳→過期恢復 (3) 20min 超時。新增生成中 phase 必須考慮這三層
 - **`generateStructure` 的 `onCheckpoint` callback**：在 multi-pass 批次完成、syntax fix 後、reference repair 後三處觸發。呼叫端必須傳入 checkpoint callback 將中途代碼存入 FlowState，防止進程崩潰遺失串流中代碼
 - **新增 phase 必須四處同步**：`handleContinueFlow` 路由（含超時偵測）+ `FlowState` 型別 + `flowstate-recovery.ts` RECOVERABLE_PHASES + 前端 `richContent.type` union
 - **Layout 禁止 opacity:0**：SplitLayout/split-layout 外層不能用 `initial={{ opacity: 0 }}`（多層疊加→黑屏）。useEffect 依賴不含 `fastBuildChunks`。split→default 回退需檢查 code_preview 歷史
 - **動畫庫是 `framer-motion`**（v12+），import 用 `from 'framer-motion'`
-- **字體只能用 `next/font`**，禁止 `<link>` / `@import` Google Fonts
-- **Tailwind v4**：用 `@import "tailwindcss"`，不是 v3 的 `@tailwind`
-- **Tailwind config 禁止 CSS 變數引用**：`generateTailwindConfig()` 必須用硬編碼值（`'9999px'` 非 `'var(--radius-full)'`），否則部署後 CSS 變數可能遺失導致樣式失效
+- `[CI]` **字體只能用 `next/font`**，禁止 `<link>` / `@import` Google Fonts
+- `[CI]` **Tailwind v4**：用 `@import "tailwindcss"`，不是 v3 的 `@tailwind`
+- `[TEST]` **Tailwind config 禁止 CSS 變數引用**：`generateTailwindConfig()` 必須用硬編碼值（`'9999px'` 非 `'var(--radius-full)'`），否則部署後 CSS 變數可能遺失導致樣式失效
 - **`app/components/templates/` 已廢棄**，PreviewPanel 用 WebContainers 渲染
-- **deployer_complete 路由順序**：部署 → 回滾 → 域名 → 問候攔截 → semanticGateway → 迭代修改
+- `[ARCH]` **deployer_complete 路由順序**：部署 → 回滾 → 域名 → 問候攔截 → semanticGateway → 迭代修改
 - **complete/failed 問候攔截**：三處 `semanticGateway` 前插入 `isGreetingOrChitchat()` 零 LLM 攔截。`__new_project__` 在 `handleContinueFlow` 入口處理
-- **迭代輸入四層防禦**：prefilter → detectFastModeIntent（`platform_issue` 回覆操作指引）→ semanticGateway iteration → refineCode [NO_CHANGE]。**ITER_DESIGN_SIGNALS 必須含錯誤修復詞**（'修復'/'error'/'bug'），否則貼錯誤訊息被 quickFilter 拒絕
+- `[TEST]` **迭代輸入四層防禦**：prefilter → detectFastModeIntent（`platform_issue` 回覆操作指引）→ semanticGateway iteration → refineCode [NO_CHANGE]。**ITER_DESIGN_SIGNALS 必須含錯誤修復詞**（'修復'/'error'/'bug'），否則貼錯誤訊息被 quickFilter 拒絕
 - **`checkBuildRelevance` fail-closed**：API 錯誤/空回應/catch 全部拒絕（非放行），無 API key 時 fail-open
 - **輸入品質閘門**：`checkInputQuality()` 全域攔截 + `getPhaseStrictness()` phase-aware 二次攔截。Redis anti-loop 連續 3 次強制放行防卡死
-- **參考網站分析**：puppeteer-core 需系統 Chromium（VPS `apt install chromium-browser`）。SSRF 防護禁 localhost/內網 IP。DOM 提取失敗不影響截圖（獨立 try-catch），降級純 Vision。四個注入點統一用 `formatStructuredDataForPrompt()`
+- `[ARCH]` **參考網站分析**：puppeteer-core 需系統 Chromium（VPS `apt install chromium-browser`）。SSRF 防護禁 localhost/內網 IP。DOM 提取失敗不影響截圖（獨立 try-catch），降級純 Vision。四個注入點統一用 `formatStructuredDataForPrompt()`
 - **上傳圖片參考**：`analyzeUploadedImage` 只存文字結果不存 Buffer。`completeDesignClarify` 並行分析圖片+URL，合併 visionAnalysis。imageUrls 管道：`handleProcessMessage` → `handleContinueFlow` → `routePhase` → phase handler
-- **Mood/tier/techniques/patterns 互補**：mood=視覺方向，tier=技術限制，techniques=element-level，patterns=section-level。Mood 優先級：`variantConcept` > `mood` > `tier`。patterns 不含動畫
-- **文檔與實作同步**：改後端流程 → 同步更新 `uiux-skill/instructions/` + 此文件
+- `[ARCH]` **Mood/tier/techniques/patterns 互補**：mood=視覺方向，tier=技術限制，techniques=element-level，patterns=section-level。Mood 優先級：`variantConcept` > `mood` > `tier`。patterns 不含動畫
+- `[ARCH]` **文檔與實作同步**：改後端流程 → 同步更新 `uiux-skill/instructions/` + 此文件
 - **`handleCodePhaseRedo` 需要快照**：`uiuxStructureCode`/`uiuxAnimationCode`，否則 redo 在已修改代碼上重做
 - **`verifyBuildLocally` 的修復結果必須同步回 DB**：否則預覽和部署代碼分岔
-- **部署五層防禦**：L1 generateStructure 後驗證引用 → L2 sanitizeCodeForDeploy stub 生成 + `??` 與 `||/&&` 混用自動加括號 + root layout html/body 自動補全 → L3 fixBuildErrors API 重試 → L4 build 循環 3+1 次 → L5 useSearchParams Suspense 拆分
-- **Anthropic 模型 ID**：一律用 `claude-sonnet-4-6`（不加日期後綴），`claude-sonnet-4-6-20250514` 不存在會 404。全 codebase 用 `semantic-gateway.ts` 定義的常數而非手打
+- `[TEST]` **部署五層防禦**：L1 generateStructure 後驗證引用 → L2 sanitizeCodeForDeploy stub 生成 + `??` 與 `||/&&` 混用自動加括號 + root layout html/body 自動補全 → L3 fixBuildErrors API 重試 → L4 build 循環 3+1 次 → L5 useSearchParams Suspense 拆分
+- `[CI]` **Anthropic 模型 ID**：一律用 `claude-sonnet-4-6`（不加日期後綴），`claude-sonnet-4-6-20250514` 不存在會 404。全 codebase 用 `semantic-gateway.ts` 定義的常數而非手打
 - **Anthropic SDK v0.72+**：大 `max_tokens` 必須用 `messages.stream()` + `await stream.finalMessage()`
 - **Skill 函數提前 return 必須保存 FlowState**：否則 `handleContinueFlow` 找不到 state → 用戶對話永久卡死
 - **Formulation phase**：必須設 `formulationStartedAt`（超時恢復依賴）。checkpoint 每 3 feature 保存，成功後清理所有 `formulation*` 暫存欄位
@@ -374,12 +378,12 @@ Feature 註解：`# Action: actionName` + `# [METHOD] /path` + `# Summary: xxx`
 - **Feature Dry-Run**：spec_completed 前用真實 Neon DB 跑 entity_setup 驗證。失敗 LLM 修復（2 輪）。跳過 api_call/response_validate
 - **Feature Alignment Gate**：RED Phase 後、Coder 前執行。修不好**阻塞 pipeline**（回退 `uiux_complete`），不像 RED Phase 的 advisory 模式。修復後自動更新 DB `bdd_sessions.features_content`
 - **RED Phase 三層驗證**：L1 靜態（12 個零 LLM 檢查，含 Schema DataTable 深度對齊）、L2 Stub 全場景（StubHttpAdapter 回 501）、L2.5 Routing（RoutingStubAdapter in-process Express）。**Check 12**：偵測 WHEN call table headers 誤用 `>/<` 前綴（正確為 `id`/`$variable`）。L2/L2.5 需 `open_api_spec_content` + `isa_config_content` + `neon_connection_string`，缺則跳過。三層都不阻塞
-- **SpecFormula JSONB 比較**：`valuesEqual()` 支援 JSON 深度比較（string ↔ JS array/object）。`resolveValue()` 支援 `<executionKey`
+- `[TEST]` **SpecFormula JSONB 比較**：`valuesEqual()` 支援 JSON 深度比較（string ↔ JS array/object）。`resolveValue()` 支援 `<executionKey`
 - **Stage B 回歸修復**：Phase 2 最多 2 輪，scenario-level 智能跳過（集合不變則停），crash 不重試
 - **`_stepSummary` dispatch 用 `===`**：非 `op.includes()`，消除子字串碰撞。`parseActionBranches` 向後相容兩種格式
 - **Slot extraction 重試**：失敗後注入錯誤訊息做第二次嘗試，減少 fallback 到 free-form LLM
-- **Schema-aware `deleted_at`**：`softDeleteColumn` 為 `.optional()`，Schema 沒有此欄位不生成 `AND deleted_at IS NULL`
-- **錯誤根因分類器**：`classifyFailureRootCause()` 零 LLM 8 類。`var_resolution` 跳過代碼修復；`auth_check` 直接 `removeAuthChecks()`
+- `[TEST]` **Schema-aware `deleted_at`**：`softDeleteColumn` 為 `.optional()`，Schema 沒有此欄位不生成 `AND deleted_at IS NULL`
+- `[TEST]` **錯誤根因分類器**：`classifyFailureRootCause()` 零 LLM 8 類。`var_resolution` 跳過代碼修復；`auth_check` 直接 `removeAuthChecks()`
 - **雙層完成驗證**：`coderTestPassed` 區分 quickReplies（全通過→部署，有失敗→重試+帶風險部署）。`__deploy_with_risk__` 需二次確認，`deployedWithFailingTests=true` 寫入 FlowState
 - **Neon provisioning 同步（< 10s）**：失敗不阻塞。Deployer 直接 SELECT `neon_connection_string` 注入 DATABASE_URL
 - **`streamLlmMessage` vs `sendMessage`**：LLM 對話文字用 `streamLlmMessage`（streaming），模板/進度/richContent 用 `sendMessage`。失敗自動降級
@@ -387,15 +391,15 @@ Feature 註解：`# Action: actionName` + `# [METHOD] /path` + `# Summary: xxx`
 - **Coder action response field 必須對齊 BDD execution key**：`generateActionFunction` 注入 `<executionKey` + stepSummary + 完整 Feature。不對齊 → VAR-System 連鎖失敗
 - **Per-SubOp 生成**：按 When 步驟拆子操作，已知 pattern 走 template（7 個模板），未知走 free-form LLM。**`INLINE_SNAKE_TO_CAMEL`（`_c`）必須內嵌模板**，獨立 function 會被 helper 提取器拔出 → runtime undefined。`CODER_PER_SUBOP=false` 一鍵關閉
 - **Code Template Zod schema 必須寬鬆**：`scopeColumn`/`scopeParam` 用 `.optional()`，`entityIdParam` 用 `.default('id')`。否則 LLM 回 null → Zod 拒絕 → template 全掛
-- **ScenarioContext VAR 數字後綴**：`get("listId")` 需匹配 `"List1.id"`，fallback 去除末尾數字再 camelCase。否則 `$listId` 不解析 → `invalid input syntax for type uuid`
+- `[TEST]` **ScenarioContext VAR 數字後綴**：`get("listId")` 需匹配 `"List1.id"`，fallback 去除末尾數字再 camelCase。否則 `$listId` 不解析 → `invalid input syntax for type uuid`
 - **preExtractTestPasswords 引號剝除**：testPasswordMap 的 key 必須剝除引號才能匹配 entity_setup 的 resolveVariable 結果
 - **Coder E2E 必須含 backendFiles**：`runCoderE2ETests` 的 code 須含 `result.backendFiles`，否則 Module not found → 500
 - **`rewriteComponentForServerActions` maxTokens 32768**：截斷偵測 JSX 平衡，不平衡回退原始組件
-- **Prompt Caching**：`buildCacheableSystem()` 拆 system prompt 為 static+dynamic block。5 個服務已套用。**修改 system prompt 時不要把 per-request 內容放進 static block，否則 cache hit 率歸零**
+- `[ARCH]` **Prompt Caching**：`buildCacheableSystem()` 拆 system prompt 為 static+dynamic block。5 個服務已套用。**修改 system prompt 時不要把 per-request 內容放進 static block，否則 cache hit 率歸零**
 - **Extended Thinking（修復路徑）**：`ENABLE_EXTENDED_THINKING=false`（預設關閉）+ `EXTENDED_THINKING_BUDGET=10000`。只用在 `fixFailingAction()`（coder RED-GREEN cycle）和 `fixMultipleFeatures()`（Feature Alignment Gate）。`callClaude` 和 `callStructured` 都支援 `thinking` 參數，maxTokens 自動加上 budget_tokens。response 解析用 `.find(b => b.type === 'text')` 跳過 thinking blocks（向後相容）。purpose 加 `+thinking` 後綴用於 A/B 比較
 - **`ENABLE_DIFF_OUTPUT`**：Animation/RWD/Merged 用 SEARCH/REPLACE block（省 60-70% output token）。解析失敗 fallback full-file。SEARCH 多處匹配拒絕替換。不影響 `generateStructure`（從零生成）
 - **`FAST_BUILD_MERGED_ANIM_RWD` 只影響首批**：增量批次仍用分離 Animation + RWD
-- **WebContainer preload 後禁止 `mount()`**：用 `writeFilesToContainer()` 逐檔寫入，`mount()` 會清除 node_modules。`restart()` 例外
+- `[CI]` **WebContainer preload 後禁止 `mount()`**：用 `writeFilesToContainer()` 逐檔寫入，`mount()` 會清除 node_modules。`restart()` 例外
 - **生成期間禁止渲染 WebContainer**：UIUX/Coder 生成期間 early return `AIGenerationWaitingScene`，只有 fast build streaming 即時渲染。`handleUiuxCodeGenerating` 回覆用 `stage: 'uiux_pipeline_progress'`（非 `'info'`）
 - **WebContainer 路由衝突去重**：`deduplicateRouteConflicts()` strip route groups 後按真實路徑去重，防 Next.js parallel pages 錯誤
 - **WebContainer 增量寫入統一處理**：full/incremental write 都須經 `deduplicateRouteConflicts` + `stripRouteGroups` + `sanitizeFileContent` + `injectEditBridge`，漏掉任一步導致 HMR 不觸發或 build error

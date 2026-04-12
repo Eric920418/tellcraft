@@ -1633,7 +1633,7 @@ export async function runAllFeatures(input: {
     try {
       await cleanupTables(input.pool, schemas)
     } catch (err) {
-      logger.warn({ err }, 'Table cleanup 失敗')
+      logger.warn({ err, feature: name }, 'Feature-level table cleanup 失敗')
     }
 
     // 收集所有 scenarios（包含 rule 下的和直接在 feature 下的）

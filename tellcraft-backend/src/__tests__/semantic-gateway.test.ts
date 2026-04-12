@@ -363,3 +363,49 @@ describe('checkQuestionAnswerRelevance', () => {
     )).toBe('relevant')
   })
 })
+
+// ============================================================
+// 防雷清單：ITER_DESIGN_SIGNALS 必須含錯誤修復詞
+// 否則用戶貼錯誤訊息被 quickFilter 拒絕
+// ============================================================
+
+describe('quickFilter: Iteration phase 錯誤修復詞', () => {
+  it('中文「修復」應被 iteration 接受', () => {
+    const result = quickFilter(makeInput({ phase: 'iteration', userMessage: '修復這個按鈕的顏色' }))
+    expect(result?.accept).toBe(true)
+  })
+
+  it('中文「錯誤」應被 iteration 接受', () => {
+    const result = quickFilter(makeInput({ phase: 'iteration', userMessage: '頁面顯示錯誤' }))
+    expect(result?.accept).toBe(true)
+  })
+
+  it('中文「報錯」應被 iteration 接受', () => {
+    const result = quickFilter(makeInput({ phase: 'iteration', userMessage: '網站報錯了' }))
+    expect(result?.accept).toBe(true)
+  })
+
+  it('英文 "error" 應被 iteration 接受', () => {
+    const result = quickFilter(makeInput({ phase: 'iteration', userMessage: 'There is an error on the page' }))
+    expect(result?.accept).toBe(true)
+  })
+
+  it('英文 "bug" 應被 iteration 接受', () => {
+    const result = quickFilter(makeInput({ phase: 'iteration', userMessage: 'Fix this bug please' }))
+    expect(result?.accept).toBe(true)
+  })
+
+  it('英文 "fix" 應被 iteration 接受', () => {
+    const result = quickFilter(makeInput({ phase: 'iteration', userMessage: 'Fix the layout issue' }))
+    expect(result?.accept).toBe(true)
+  })
+
+  it('用戶貼完整 error stack 應被 iteration 接受', () => {
+    const result = quickFilter(makeInput({
+      phase: 'iteration',
+      userMessage: 'TypeError: Cannot read property of undefined\n  at Component (page.tsx:42)',
+    }))
+    // 'error' keyword in the error message should trigger accept
+    expect(result?.accept).toBe(true)
+  })
+})
