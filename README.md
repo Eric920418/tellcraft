@@ -62,22 +62,27 @@ cd tellcraft-backend && pnpm tsx src/scripts/register-prompt-change.ts --list   
 cd tellcraft-backend && pnpm tsx src/scripts/register-prompt-change.ts --retire <id> # 汰換
 ```
 
-### SEO 配置
+### SEO + GEO 配置
+
+**架構**：首頁 `page.tsx` 是 Server Component，JSON-LD 結構化資料和 SEO 文字內容在 SSR 階段渲染（爬蟲可直接抓取）。互動邏輯在 `HomeClient.tsx`（Client Component）中。
 
 | 項目 | 檔案 | 說明 |
 |------|------|------|
 | i18n Proxy | `proxy.ts` | next-intl proxy（Next.js 16 取代 middleware），攔截無 locale 前綴的請求 rewrite 到 `app/[locale]/`（`/` = en、`/zh` = 中文，瀏覽器語言自動偵測）。排除 `api/`、`_next/`、`monitoring`、`uploads/`、靜態檔案 |
-| 安全 Headers | `vercel.json` | `X-Content-Type-Options: nosniff`、`X-Frame-Options: DENY`、`Referrer-Policy: strict-origin-when-cross-origin`、`Permissions-Policy` |
-| robots.txt | `app/robots.ts` | 允許公開頁面，禁止 dashboard/auth/api/test/liff |
-| sitemap.xml | `app/sitemap.ts` | 公開頁面 + hreflang（en/zh-TW） |
+| 安全 Headers | `vercel.json` | `X-Content-Type-Options: nosniff`、`X-Frame-Options: DENY`、`Referrer-Policy: strict-origin-when-cross-origin`、`Permissions-Policy`、`COOP/COEP`（WebContainers 需要） |
+| robots.txt | `app/robots.ts` | 允許公開頁面 + **AI 爬蟲明確允許**（GPTBot、ChatGPT-User、ClaudeBot、PerplexityBot、Google-Extended），禁止 dashboard/auth/api/test/liff |
+| sitemap.xml | `app/sitemap.ts` | 公開頁面 + hreflang（en/zh-TW），lastModified 用固定日期（非 `new Date()`） |
 | manifest.json | `app/manifest.ts` | PWA manifest（standalone） |
 | favicon.ico | `app/favicon.ico` | 從 icon.png 轉換（16/32/48px） |
-| Metadata | `app/[locale]/layout.tsx` | metadataBase + title template + OG + Twitter Card + canonical + keywords |
+| Metadata | `app/[locale]/layout.tsx` | metadataBase + title template + OG（動態生成 1200x630）+ Twitter Card + canonical + 長尾關鍵詞 |
+| OG Image | `app/[locale]/opengraph-image.tsx` | 動態生成 1200x630 OG 圖片（Edge Runtime，含品牌色、tagline、locale 適配） |
 | noindex | `app/[locale]/{dashboard,auth,test,liff}/layout.tsx` | 非公開路由 noindex/nofollow |
-| JSON-LD | `app/[locale]/page.tsx` | Organization + WebSite + SoftwareApplication + FAQPage |
+| JSON-LD | `app/[locale]/page.tsx`（Server Component） | Organization + WebSite + SoftwareApplication + FAQPage + **HowTo** + **Speakable** |
 | Breadcrumb | `app/[locale]/templates/TemplatesPage.tsx` | BreadcrumbList（Home → Templates） |
 | 字體 | `app/[locale]/layout.tsx` | next/font（Noto Sans TC + IBM Plex Mono），消除 render-blocking |
-| 結構化資料工具 | `app/lib/structured-data.ts` | JSON-LD schema 生成函數 |
+| 結構化資料工具 | `app/lib/structured-data.ts` | JSON-LD schema 生成函數（7 個 schema type） |
+| **GEO: llms.txt** | `public/llms.txt` | AI 引擎專用站點說明（類似 robots.txt 但面向 LLM），描述產品功能、頁面、目標用戶 |
+| **GEO: SSR 內容** | `app/[locale]/page.tsx` | Server-side 渲染 SEO 隱藏內容（h1、產品描述、HowItWorks 步驟、FAQ details/summary），確保爬蟲不需 JS 即可讀取 |
 
 ### 環境變數
 
@@ -548,7 +553,7 @@ Server Action 錯誤訊息 + 工具模組中文字串國際化（+117 keys，2 n
 | **動畫** | BDD 需求藍圖面板（即時 Q&A 歷史視覺化）、3D 工廠流水線（Fast Build）、Remotion 驅動 |
 | **認證** | Google/LINE OAuth、JWT 雙軌（localStorage + Cookie）、訪客→帳號合併、帳號綁定（雙登入）、auth 頁面 i18n（next-intl） |
 | **儀表板** | 用戶統計、專案管理、版本歷史、管理員面板、LLM 用量追蹤（統一 PRICING + trackLlmUsage）、即時系統日誌監控（Socket.io tail -F）、Dashboard 元件 i18n（next-intl） |
-| **可觀察性** | Sentry 前端錯誤追蹤（@sentry/nextjs，error boundary + replay + tunnel）、消息列表虛擬化（@tanstack/react-virtual，100+ 條 DOM < 30）、ChatMessageItem React.memo |
+| **可觀察性** | Sentry 前端錯誤追蹤（@sentry/nextjs，error boundary + replay + tunnel）、ChatMessageItem React.memo |
 | **測試** | 關鍵路徑單元測試 241 條（intent-helpers/log-parser/deployer-sanitize/semantic-gateway），Vitest |
 | **效能** | Redis 快取工具（`cached()` + `invalidateCache()`）、Dashboard admin stats 快取（5min TTL）、LATERAL JOIN 取代子查詢、GROUP BY 取代迴圈計數、複合索引（conversations/deployments/messages/llm_usage） |
 | **i18n** | next-intl 多語系（zh/en）、UI 元件全量翻譯、Server Action 錯誤訊息 i18n（getTranslations）、lib 模組英文化、error code 機制、883 keys / 29 namespaces |
@@ -614,7 +619,7 @@ app/
 │   │   └── TemplateSubmitModal.tsx # 模板上傳 Modal（preflight 檢查 + 表單 + 提交審核）
 │   ├── chat/             # 對話相關元件
 │   │   ├── ChatSection.tsx      # 對話組合容器（5 hooks + 核心邏輯，~994 行）
-│   │   ├── ChatMessageList.tsx  # 消息列表（@tanstack/react-virtual 虛擬滾動）+ 輸入框
+│   │   ├── ChatMessageList.tsx  # 消息列表 + 輸入框
 │   │   ├── ChatMessageItem.tsx  # 獨立消息組件（React.memo，從 ChatMessageList 抽出）
 │   │   ├── ChatPreviewPanel.tsx # 右側預覽面板（BDD/FastBuild/CodePreview/Template）
 │   │   └── MobilePreviewModal.tsx # 手機預覽 Modal

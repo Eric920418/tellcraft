@@ -36,14 +36,19 @@ export function getSoftwareApplicationSchema(locale: string): JsonLd {
     '@type': 'SoftwareApplication',
     name: 'Tellcraft',
     applicationCategory: 'DeveloperApplication',
+    applicationSubCategory: 'AI Website Builder',
     operatingSystem: 'Web',
     description: isZh
       ? '描述你的想法，AI 釐清需求、生成程式碼、一鍵部署。不需要寫程式，幾分鐘內打造專業網站。'
       : 'Describe your idea, AI clarifies requirements, generates code, and deploys. No coding needed. Build professional websites in minutes.',
+    featureList: isZh
+      ? 'AI 對話式開發, 自動代碼生成, 一鍵雲端部署, 100% 代碼擁有權, BDD 規格驅動, 即時預覽'
+      : 'AI conversational development, automatic code generation, one-click cloud deploy, 100% code ownership, BDD specification-driven, real-time preview',
     offers: {
       '@type': 'Offer',
       price: '0',
       priceCurrency: 'USD',
+      category: 'Free Tier',
     },
   }
 }
@@ -60,6 +65,73 @@ export function getFAQSchema(faqs: { question: string; answer: string }[]): Json
         text: answer,
       },
     })),
+  }
+}
+
+export function getHowToSchema(locale: string): JsonLd {
+  const isZh = locale === 'zh'
+  return {
+    '@context': 'https://schema.org',
+    '@type': 'HowTo',
+    name: isZh ? '如何用 AI 建立網站' : 'How to Build a Website with AI',
+    description: isZh
+      ? '用 Tellcraft AI 平台，5 步驟從想法到上線'
+      : 'Build a website in 5 steps using the Tellcraft AI platform',
+    totalTime: 'PT24H',
+    step: [
+      {
+        '@type': 'HowToStep',
+        position: 1,
+        name: isZh ? '描述你的想法' : 'Describe Your Idea',
+        text: isZh
+          ? '用自然語言告訴 AI 你想做什麼，就像跟朋友聊天一樣。'
+          : 'Tell AI what you want to build in natural language, just like chatting with a friend.',
+      },
+      {
+        '@type': 'HowToStep',
+        position: 2,
+        name: isZh ? 'AI 主動釐清' : 'AI Clarifies Requirements',
+        text: isZh
+          ? 'AI 發現模糊地帶，主動提問確保規格明確可執行。'
+          : 'AI identifies ambiguities and proactively asks questions to ensure clear, actionable specifications.',
+      },
+      {
+        '@type': 'HowToStep',
+        position: 3,
+        name: isZh ? '確認規格' : 'Confirm Specifications',
+        text: isZh
+          ? '完整的系統規格呈現給你確認，確保認知一致。'
+          : 'Complete system specifications presented for your confirmation, ensuring shared understanding.',
+      },
+      {
+        '@type': 'HowToStep',
+        position: 4,
+        name: isZh ? '自動生成程式碼' : 'Auto-Generate Code',
+        text: isZh
+          ? '前端、後端、資料庫一次到位，自動測試確保品質。'
+          : 'Frontend, backend, and database built at once, with automated testing to ensure quality.',
+      },
+      {
+        '@type': 'HowToStep',
+        position: 5,
+        name: isZh ? '一鍵部署上線' : 'One-Click Deploy',
+        text: isZh
+          ? '自動部署到雲端，收到專屬網址，網站立即可用。'
+          : 'Automatically deployed to the cloud, receive your unique URL, website ready immediately.',
+      },
+    ],
+  }
+}
+
+export function getSpeakableSchema(url: string): JsonLd {
+  return {
+    '@context': 'https://schema.org',
+    '@type': 'WebPage',
+    url,
+    speakable: {
+      '@type': 'SpeakableSpecification',
+      cssSelector: ['h1', '[data-speakable="true"]'],
+    },
   }
 }
 

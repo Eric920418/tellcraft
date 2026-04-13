@@ -184,6 +184,20 @@ async function executeDDL(
 // 完整 Provisioning 流程（同步，< 10s）
 // ============================================================
 
+/**
+ * 從 DDL 中提取 users 表的欄位名列表
+ * 用於動態組裝 admin seed INSERT（避免 INSERT 不存在的欄位）
+ */
+function extractUsersColumns(ddl: string): string[] {
+  const match = ddl.match(/CREATE\s+TABLE\s+users\s*\(([\s\S]*?)\);/i)
+  if (!match) return []
+  return match[1]
+    .split('\n')
+    .map(line => line.trim().split(/\s+/)[0]?.toLowerCase() ?? '')
+    .filter(col => col && /^[a-z_]/.test(col)
+      && !['constraint', 'primary', 'unique', 'foreign', 'check'].includes(col))
+}
+
 export interface NeonProvisionResult {
   neonProjectId: string
   connectionUri: string
@@ -218,24 +232,38 @@ export async function provisionNeonDatabase(params: {
     }
 
     // 2.5 Seed admin 帳號（如果 schema 有 auth）
+    // 動態偵測 DDL 中 users 表的實際欄位，避免 INSERT 不存在的欄位
     if (schema.postgresqlDDL && detectAuthInSchema(schema.postgresqlDDL)) {
       try {
-        const hashedPassword = await bcrypt.hash('admin123', 10)
-        const hasRole = /\brole\s+(?:VARCHAR|TEXT)/i.test(schema.postgresqlDDL)
-        const seedClient = new Client({ connectionString: connectionUri, ssl: { rejectUnauthorized: false } })
-        await seedClient.connect()
-        const columns = hasRole
-          ? 'id, name, email, password, role, created_at'
-          : 'id, name, email, password, created_at'
-        const values = hasRole
-          ? `(gen_random_uuid(), 'Admin', 'admin@admin.com', $1, 'admin', NOW())`
-          : `(gen_random_uuid(), 'Admin', 'admin@admin.com', $1, NOW())`
-        await seedClient.query(
-          `INSERT INTO users (${columns}) VALUES ${values} ON CONFLICT (email) DO NOTHING`,
-          [hashedPassword]
-        )
-        await seedClient.end()
-        logger.info('Admin 帳號 seed 完成（admin@admin.com / admin123）')
+        const userCols = extractUsersColumns(schema.postgresqlDDL)
+        const hasEmail = userCols.includes('email')
+        const hasPassword = userCols.includes('password')
+
+        if (!hasEmail || !hasPassword) {
+          logger.info({ userCols }, 'users 表無 email/password 欄位，跳過 admin seed')
+        } else {
+          const hashedPassword = await bcrypt.hash('admin123', 10)
+          const nameCol = userCols.find(c => c === 'name' || c === 'username')
+          const hasRole = userCols.includes('role')
+          const hasCreatedAt = userCols.includes('created_at')
+
+          const cols: string[] = ['id']
+          const vals: string[] = ['gen_random_uuid()']
+          if (nameCol) { cols.push(nameCol); vals.push("'Admin'") }
+          cols.push('email'); vals.push("'admin@admin.com'")
+          cols.push('password'); vals.push('$1')
+          if (hasRole) { cols.push('role'); vals.push("'admin'") }
+          if (hasCreatedAt) { cols.push('created_at'); vals.push('NOW()') }
+
+          const seedClient = new Client({ connectionString: connectionUri, ssl: { rejectUnauthorized: false } })
+          await seedClient.connect()
+          await seedClient.query(
+            `INSERT INTO users (${cols.join(', ')}) VALUES (${vals.join(', ')}) ON CONFLICT (email) DO NOTHING`,
+            [hashedPassword]
+          )
+          await seedClient.end()
+          logger.info({ cols }, 'Admin 帳號 seed 完成（admin@admin.com / admin123）')
+        }
       } catch (seedErr) {
         // Seed 失敗不阻塞 provisioning
         logger.warn({ err: seedErr }, 'Admin 帳號 seed 失敗（不阻塞）')

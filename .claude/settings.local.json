@@ -98,7 +98,9 @@
       "Bash(ls /Users/eric/Desktop/tellcraft/tellcraft-backend/src/services/*.ts | xargs -I{} basename {} | sort)",
       "Bash(pnpm test:*)",
       "Bash(bun --version)",
-      "WebFetch(domain:docs.langchain.com)"
+      "WebFetch(domain:docs.langchain.com)",
+      "WebFetch(domain:llmrefs.com)",
+      "Bash(pnpm remove:*)"
     ]
   }
 }

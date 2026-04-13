@@ -1,0 +1,61 @@
+# Tellcraft
+
+> AI-powered website builder. Describe your idea in natural language — Tellcraft builds, tests, and deploys a professional website in minutes.
+
+## What Tellcraft Does
+
+- Accepts natural language descriptions of websites users want to build
+- AI proactively clarifies requirements through multi-round conversation
+- Generates production-ready code using Next.js, React, and TypeScript
+- Deploys to cloud automatically with a unique URL
+- Supports template-based and freeform website creation
+- Website categories: SaaS, Landing Page, E-commerce, Portfolio, Blog, Event, Booking System, Admin Dashboard
+
+## How It Works
+
+1. Describe your idea in natural language — like chatting with a friend
+2. AI identifies ambiguities and proactively asks questions to clarify requirements
+3. Complete system specifications presented for your confirmation
+4. AI generates frontend, backend, and database code with automated testing
+5. One-click deploy to cloud — receive your unique URL, website ready immediately
+
+## Key Facts
+
+- No coding required — anyone can build professional websites through conversation
+- Free tier available — start building immediately
+- Average time from idea to live site: under 24 hours
+- 100% code ownership — export full source code anytime
+- Tech stack: Next.js, React, TypeScript, PostgreSQL
+- Supports English and Traditional Chinese (zh-TW)
+- BDD (Behavior-Driven Development) specification-driven for complex projects
+
+## Pages
+
+- https://tellcraft.com/ — Homepage with product overview, how it works, use cases, comparison, FAQ
+- https://tellcraft.com/zh — 繁體中文首頁（Traditional Chinese homepage）
+- https://tellcraft.com/templates — Design template gallery with curated AI-powered templates
+- https://tellcraft.com/zh/templates — 設計模板庫（Chinese template gallery）
+
+## Target Users
+
+- Startups validating product concepts quickly without hiring developers
+- E-commerce sellers building brand websites and online stores
+- Freelancers and agencies multiplying project capacity with AI assistance
+- SMBs pursuing digital transformation without technical expertise
+- Independent developers prototyping ideas rapidly
+
+## Comparison with Traditional Development
+
+| Aspect | Traditional Development | Tellcraft |
+|--------|------------------------|-----------|
+| Coding skills required | Yes | No |
+| Development time | Weeks to months | Hours to days |
+| Cost of requirement changes | High (requires redevelopment) | Low (modify through conversation) |
+| Team size | Multi-person | One person |
+| Code ownership | Depends on contract | 100% owned |
+
+## Company
+
+- Name: Tellcraft
+- Website: https://tellcraft.com
+- Region: Asia-Pacific (Taiwan)

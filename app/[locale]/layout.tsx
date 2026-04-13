@@ -51,8 +51,8 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
     },
     description: t('description'),
     keywords: isZh
-      ? ['AI 建站', 'AI 網站生成', '自動化開發', 'Tellcraft', 'AI 開發平台', '對話式開發', '一鍵部署', '免費建站']
-      : ['AI website builder', 'AI code generation', 'automated development', 'Tellcraft', 'no-code', 'AI development platform', 'deploy website'],
+      ? ['Tellcraft', 'AI 建站', 'AI 網站生成器', 'AI 自動建站', '免費建站', '對話式建站', 'AI 網站製作', '不用寫程式做網站', 'AI 建站平台推薦', 'AI 網頁設計', '一鍵部署網站', '免費 AI 架站', 'AI 開發平台', '自動化網站開發']
+      : ['Tellcraft', 'AI website builder', 'AI website generator', 'build website without coding', 'no-code website builder', 'best AI website builder 2026', 'AI code generation', 'build website free', 'create website with AI', 'conversation-driven development', 'one-click deploy', 'Next.js AI builder', 'automated web development'],
     openGraph: {
       type: 'website',
       locale: isZh ? 'zh_TW' : 'en_US',
@@ -61,13 +61,23 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
       siteName: 'Tellcraft',
       title: t('title'),
       description: t('description'),
-      images: ['/logo.png'],
+      images: [{
+        url: `https://tellcraft.com/${isZh ? 'zh' : 'en'}/opengraph-image`,
+        width: 1200,
+        height: 630,
+        alt: isZh ? 'Tellcraft - AI 自動建站平台' : 'Tellcraft - AI Website Builder',
+      }],
     },
     twitter: {
       card: 'summary_large_image',
       title: t('title'),
       description: t('description'),
-      images: ['/logo.png'],
+      images: [{
+        url: `https://tellcraft.com/${isZh ? 'zh' : 'en'}/opengraph-image`,
+        width: 1200,
+        height: 630,
+        alt: isZh ? 'Tellcraft - AI 自動建站平台' : 'Tellcraft - AI Website Builder',
+      }],
     },
     alternates: {
       canonical: canonicalUrl,
