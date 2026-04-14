@@ -99,7 +99,13 @@ export async function runPrdDiscovery(
 - **A5. 關係與唯一性**：實體間的關聯關係是否完整？
 - **A6. 生命週期與狀態**：狀態轉換規則是否完整？
 - **A7. 計算公式**：衍生值（金額、百分比、排名）的計算公式是否明確？
-- **A8. 級聯效應**：實體狀態改變時，關聯實體如何同步？
+- **A8. 級聯效應（重要！影響 FK ON DELETE 行為）**：實體狀態改變時，關聯實體如何同步？
+  - 當需求涉及**多個 entity 之間有關聯**時（父-子、1-N 關係），**必須主動生成 Relationship Lifecycle 問題**
+  - 格式：「當刪除 {父 entity}（如分類）時，關聯的 {子 entity}（如交易記錄）應該如何處理？」
+  - 4 個選項：(A) 一起刪除（強耦合，如 user 刪 → settings 刪）；(B) FK 變 null（鬆耦合，子繼續存活）；(C) 禁止刪除（保護子記錄）；(D) 指派到預設值（e.g. 改為「未分類」）
+  - 此問題直接決定 Schema 的 FK ON DELETE 行為（CASCADE / SET NULL / NO ACTION），以及後續 Feature scenario 的期望值
+  - **若不問清楚，會導致 Feature 和 Schema 矛盾，測試永遠無法通過**
+  - 用 mode=propose + proposedAnswer=B（最常見的業務選擇）+ confidence=high
 - **A9. 時間約束**：有效期、超時、保留期限？
 - **A10. 並發衝突**：同一資源多人操作的處理？
 

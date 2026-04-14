@@ -10,8 +10,27 @@
 import * as yaml from 'js-yaml'
 import { parseSchemasFromString } from './specformula-runner'
 import { fixMultipleFeatures, sanitizeFeatureContent, type FeatureFixInput, type GeneratedFeature } from './formulation'
+import { enrichError, type EnrichableRootCause } from './error-enrichment'
+
+/**
+ * 把 AlignmentIssue.checkName 映射到 EnrichableRootCause。
+ * 未映射到的 checkName 回 'unknown'（harnessHint 為空字串，不影響 prompt）。
+ */
+function alignmentCheckToRootCause(checkName: string): EnrichableRootCause {
+  switch (checkName) {
+    case 'entity_column_coverage': return 'missing_column'
+    case 'not_null_missing': return 'entity_setup'
+    case 'fk_reference_integrity': return 'fk_constraint'
+    case 'response_field_naming': return 'field_naming'
+    case 'var_system_alignment': return 'var_resolution'
+    case 'summary_action_match': return 'api_spec_mismatch'
+    case 'semantic_consistency': return 'unknown'  // semantic 矛盾的修復策略由 issue description 本身提供，不走 rootCause 路徑
+    default: return 'unknown'
+  }
+}
 import { extractEntitySetupSteps } from './red-phase-validator'
 import { DatabaseSchema } from '../lib/specformula/spec/data/models'
+import { validateSemanticConsistency } from './semantic-consistency-validator'
 import { createLogger } from '../lib/logger'
 import { recordTelemetry } from './skill-telemetry'
 
@@ -494,6 +513,27 @@ async function runAlignmentChecks(input: AlignmentGateInput): Promise<AlignmentI
     }
   }
 
+  // ---- Check 7: Semantic Consistency（Feature 語義一致性：name vs DataTable / expectation vs Schema） ----
+  // 偵測 spec 內部矛盾（e.g. scenario 名稱說「應變為 null」但 DataTable 期望 UUID）
+  try {
+    const semanticResult = await validateSemanticConsistency({
+      features: input.features,
+      schemaSql: input.schemaSql,
+      entityMapping: input.entityMapping,
+    })
+    for (const issue of semanticResult.issues) {
+      issues.push({
+        featureName: issue.featureName,
+        checkName: 'semantic_consistency',
+        severity: issue.severity,
+        description: `[${issue.issueType}] ${issue.description}\n  建議：${issue.suggestedFix}`,
+      })
+    }
+  } catch (e) {
+    // Semantic validator 失敗不阻塞 pipeline（降級跳過）
+    logger.warn({ error: e }, 'Semantic consistency 驗證失敗，降級跳過')
+  }
+
   return issues
 }
 
@@ -532,11 +572,21 @@ async function autoFixFeatures(
     const errorIssues = featureIssues.filter(i => i.severity === 'error')
     if (errorIssues.length === 0) continue
 
+    // Harness 修復提示：把已知 checkName 轉成 rootCause hint 附加到 issue 描述
+    const issuesWithHints = errorIssues.map(i => {
+      const rootCause = alignmentCheckToRootCause(i.checkName)
+      const enriched = enrichError(i.description, rootCause, { phase: 'feature_alignment' })
+      if (!enriched.harnessHint) return `[${i.checkName}] ${i.description}`
+      // hint 取第一段（現象 + 根因那一行），完整 hint 過長會稀釋多個 issue 的資訊
+      const hintShort = enriched.harnessHint.split('\n').slice(0, 2).join(' ')
+      return `[${i.checkName}] ${i.description}\n  → Harness: ${hintShort}`
+    })
+
     featuresToFix.push({
       name: feature.name || feature.actionName,
       actionName: feature.actionName,
       content: feature.content,
-      issues: errorIssues.map(i => `[${i.checkName}] ${i.description}`),
+      issues: issuesWithHints,
     })
   }
 
@@ -759,20 +809,50 @@ export async function runFeatureAlignmentGate(input: AlignmentGateInput): Promis
 }
 
 function formatBlockMessage(errors: AlignmentIssue[]): string {
-  const grouped = new Map<string, AlignmentIssue[]>()
-  for (const e of errors) {
-    const arr = grouped.get(e.featureName) || []
-    arr.push(e)
-    grouped.set(e.featureName, arr)
-  }
+  // 優先顯示 semantic consistency 矛盾（最常導致 fix loop 卡死）
+  const semanticErrors = errors.filter(e => e.checkName === 'semantic_consistency')
+  const otherErrors = errors.filter(e => e.checkName !== 'semantic_consistency')
 
-  const lines: string[] = ['Feature 對齊檢查發現以下問題無法自動修復：\n']
-  for (const [featureName, featureErrors] of grouped) {
-    lines.push(`**${featureName}**:`)
-    for (const err of featureErrors) {
-      lines.push(`  - [${err.checkName}] ${err.description}`)
+  const lines: string[] = []
+
+  if (semanticErrors.length > 0) {
+    lines.push('**Feature 內部語義矛盾**（這類問題會導致測試永遠無法通過，必須先修正 Feature）：\n')
+    const groupedSemantic = new Map<string, AlignmentIssue[]>()
+    for (const e of semanticErrors) {
+      const arr = groupedSemantic.get(e.featureName) || []
+      arr.push(e)
+      groupedSemantic.set(e.featureName, arr)
+    }
+    for (const [featureName, featureErrors] of groupedSemantic) {
+      lines.push(`**${featureName}**:`)
+      for (const err of featureErrors) {
+        lines.push(`  - ${err.description}`)
+      }
+      lines.push('')
     }
   }
-  lines.push('\n建議回到 BDD 階段修正 Feature 規格後重試。')
+
+  if (otherErrors.length > 0) {
+    if (lines.length > 0) lines.push('---\n')
+    lines.push('**其他對齊問題**:\n')
+    const grouped = new Map<string, AlignmentIssue[]>()
+    for (const e of otherErrors) {
+      const arr = grouped.get(e.featureName) || []
+      arr.push(e)
+      grouped.set(e.featureName, arr)
+    }
+    for (const [featureName, featureErrors] of grouped) {
+      lines.push(`**${featureName}**:`)
+      for (const err of featureErrors) {
+        lines.push(`  - [${err.checkName}] ${err.description}`)
+      }
+    }
+  }
+
+  if (lines.length === 0) {
+    lines.push('Feature 對齊檢查發現無法自動修復的問題。')
+  }
+
+  lines.push('\n建議：回到 BDD 階段修正 Feature 規格後重試，或直接告訴我您想要的正確行為。')
   return lines.join('\n')
 }

@@ -371,7 +371,7 @@ describe('schema-derivation', () => {
     expect(ddl).not.toMatch(/AUTO_INCREMENT/i)
   })
 
-  it('內聯 REFERENCES ON DELETE CASCADE 正確移除', () => {
+  it('內聯 REFERENCES ON DELETE CASCADE 移出欄位定義，保留到 ALTER TABLE', () => {
     const sql = `
     CREATE TABLE users (id VARCHAR(36) PRIMARY KEY, name VARCHAR(100));
     CREATE TABLE todo_items (
@@ -380,10 +380,19 @@ describe('schema-derivation', () => {
       title VARCHAR(200) NOT NULL
     );`
     const ddl = deriveSchemaFromBdd(sql, '').postgresqlDDL
-    // ON DELETE CASCADE 不應殘留在欄位定義中
-    expect(ddl).not.toMatch(/ON\s+DELETE/i)
-    // FK 應被延後
+    // FK + ON DELETE 應被保留到 ALTER TABLE（不可靜默丟失，否則預設 NO ACTION 會與 Feature 期望矛盾）
     expect(ddl).toContain('ALTER TABLE todo_items ADD CONSTRAINT fk_todo_items_user_id')
+    expect(ddl).toMatch(/ALTER TABLE todo_items[\s\S]*?ON\s+DELETE\s+CASCADE/i)
+    // CREATE TABLE todo_items 內 user_id 欄位定義不應殘留 REFERENCES 或 ON DELETE
+    // 提取 CREATE TABLE 片段（支援 IF NOT EXISTS）到第一個結尾 `);`
+    const startIdx = ddl.search(/CREATE TABLE (?:IF NOT EXISTS )?todo_items/i)
+    expect(startIdx).toBeGreaterThan(-1)
+    const afterStart = ddl.slice(startIdx)
+    const endIdx = afterStart.indexOf(');')
+    expect(endIdx).toBeGreaterThan(-1)
+    const createBlock = afterStart.slice(0, endIdx + 2)
+    expect(createBlock).not.toMatch(/\bREFERENCES\b/i)
+    expect(createBlock).not.toMatch(/ON\s+DELETE/i)
   })
 
   it('CONSTRAINT FK ON DELETE CASCADE 保留到 ALTER TABLE', () => {

@@ -138,7 +138,7 @@ describe('classifyFailureRootCause', () => {
       'HTTP 狀態碼不匹配', '值不匹配', 'unauthorized',
       'violates foreign key', 'syntax error', 'random',
     ]
-    const results = inputs.map(classifyFailureRootCause)
+    const results = inputs.map((e) => classifyFailureRootCause(e))
     expect(new Set(results)).toEqual(new Set(allCategories))
   })
 })

@@ -28,6 +28,7 @@ import { StubHttpAdapter } from '../lib/specformula/http/stub-adapter'
 import { DatabaseSchema } from '../lib/specformula/spec/data/models'
 import { createLogger } from '../lib/logger'
 import { recordTelemetryBatch, type TelemetryEvent } from './skill-telemetry'
+import { enrichError, formatHintForRedPhase } from './error-enrichment'
 
 const logger = createLogger('red-phase-validator')
 
@@ -961,12 +962,14 @@ export async function runRedPhaseFullValidation(input: RedPhaseFullInput): Promi
         if (classification === 'expected_red') {
           expectedRedCount++
         } else {
+          // Harness 修復提示：把原始錯誤轉為 [rootCause] hint summary + 截斷原文
+          const enriched = enrichError(step.error || '', classification, { phase: 'red_phase' })
           unexpectedFailures.push({
             featureName: scenario.featureName,
             scenarioName: scenario.scenarioName,
             stepKeyword: step.keyword,
             stepText: step.text.substring(0, 100),
-            error: (step.error || '').substring(0, 300),
+            error: formatHintForRedPhase(enriched),
             failureType: classification,
           })
         }
@@ -1119,11 +1122,12 @@ export async function runRedPhaseRoutingValidation(input: RedPhaseFullInput): Pr
 
         const classification = classifyRedPhaseFailure(step)
         if (classification === 'routing_mismatch') {
+          const enriched = enrichError(step.error || '', classification, { phase: 'red_phase' })
           routingMismatches.push({
             featureName: scenario.featureName,
             scenarioName: scenario.scenarioName,
             stepText: step.text.substring(0, 100),
-            error: (step.error || '').substring(0, 300),
+            error: formatHintForRedPhase(enriched),
           })
         } else if (classification === 'expected_red') {
           expectedRedCount++

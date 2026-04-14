@@ -423,6 +423,41 @@ entity_to_table_mapping:
 - 枚舉用 \`VARCHAR(50) + CHECK\` constraint
 - 禁止：TINYINT、MEDIUMINT、DOUBLE（不帶 PRECISION）、FLOAT、AUTO_INCREMENT、UNSIGNED、COMMENT '...'、ENUM()、DATETIME
 
+## Foreign Key Delete Behavior（必讀）
+
+每個 FOREIGN KEY **必須明確指定** \`ON DELETE\` 行為，不可省略：
+
+| 需求語義 | ON DELETE | 範例 |
+|---------|-----------|------|
+| 「刪父同時刪子」/ 子無獨立生命週期 | \`CASCADE\` | user 刪除 → user_settings 一起刪 |
+| 「刪父後子 FK 變 null」/ 子可獨立存在 | \`SET NULL\` | category 刪除 → transaction.category_id 變 null |
+| 「禁止刪有子的父」/ 保守預設 | \`NO ACTION\` | 防止誤刪，強制先處理子記錄 |
+
+**硬性約束**：
+1. **用 \`SET NULL\` 時，FK 欄位必須是 nullable**（不可 NOT NULL，否則 SQL 執行會失敗）
+2. **每個 FK 都必須明確寫 \`ON DELETE\`**（省略會導致測試行為不可預期）
+3. **不確定時選 \`NO ACTION\`**（最安全，不會誤刪）
+
+**範例**：
+\`\`\`sql
+-- 鬆耦合：category 可刪除，transaction 繼續存活
+CREATE TABLE transactions (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  category_id UUID REFERENCES categories(id) ON DELETE SET NULL,  -- nullable + SET NULL
+  amount NUMERIC(10, 2) NOT NULL,
+  ...
+);
+
+-- 強耦合：user 刪除 → settings 連帶刪除
+CREATE TABLE user_settings (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  ...
+);
+\`\`\`
+
+**關鍵**：Feature 的 entity_validate 會根據 ON DELETE 行為驗證結果。寫錯會導致 Feature 與 Schema 矛盾，測試永遠無法通過。
+
 ## 其他規則
 - 限制條件用 CHECK constraint 表達
 - 使用 snake_case 命名

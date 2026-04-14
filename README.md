@@ -1173,6 +1173,18 @@ psql "$DATABASE_URL" -f tellcraft-backend/migrations/xxx.sql
 - **3 個保留 Node**：classify（意圖分類 + 特殊 token）、phase-router（FlowState 同步）、complete（終止 node）
 - **Feature Flag**：`USE_LANGGRAPH=true` 切換新舊路徑，預設 off。在 `orchestrator.ts` 的 BullMQ worker 內部，withConversationLock 內分支
 - **Safety Layer（生產就緒）**：LangGraph 路徑在 graph 外部（orchestrator）執行 `prefilterMessage()`（注入/髒話/限速）+ `deductCredits()`（扣費）。`__new_project__` 同時清除 checkpoint + FlowState。classifyNode 接入真實 `classifyIntent()`（Haiku LLM 三層分類）+ `detectFastModeIntent()`（Fast 模式客服偵測）+ `checkBuildRelevance()`（建站相關性）+ content policy 檢查。complete node 處理 meta-intent 回覆（greeting/chitchat/onboarding）
+
+### Spec 內部矛盾根治（7 層防禦）
+
+解決 Coder fix loop 卡在矛盾 Feature 的問題（案例：「categoryId 應變為 null」但 DataTable 寫 UUID，LLM 8 輪修不好）。從 Discovery 到 User Escalation 的多層防禦：
+
+- **層 1 Schema Prompt FK 指引**：`services/formulation.ts` 的 `generateSchemaSql` prompt 加入 FK Delete Behavior 決策表（CASCADE / SET NULL / NO ACTION），強制每個 FK 明確指定 ON DELETE
+- **層 2 Schema Derivation Fallback**：`services/schema-derivation.ts` 加入 `inferDefaultOnDelete()`——LLM 忘寫 ON DELETE 時，nullable FK 自動推導為 SET NULL，NOT NULL FK 推導為 CASCADE（不再靜默用 NO ACTION）。內聯 REFERENCES 的 ON DELETE 子句會被保留到 ALTER TABLE，不再丟失
+- **層 3 Semantic Consistency Validator**：新檔 `services/semantic-consistency-validator.ts`（~350 行）+ 7 個測試。3 類檢查：(A) Scenario 名稱 vs DataTable 期望值（「應變為 null」但 DataTable 寫 UUID → error）；(B) Scenario 期望 vs Schema FK 行為（期望 cascade null 但 Schema 沒 SET NULL → error）；(C) 同 Feature 跨 scenario 期望矛盾（warning）
+- **層 4 Feature Alignment Gate 整合**：`feature-alignment-gate.ts` 加第 7 項檢查（semantic_consistency），matches LLM 修復 + blockMessage 升級優先顯示 semantic 矛盾
+- **層 5 Fix Loop 跳過**：`coder-generation.ts` 的 `classifyFailureRootCause` 加 `spec_inconsistency` 類別（偵測 scenario 名說 null + expect 非 null + actual=null 的模式）。`fixFailingAction` 遇到此類別直接 return 原代碼，不浪費 tokens
+- **層 6 用戶訊息升級**：`coder-phases.ts` 的 Coder testing 結果訊息呼叫 `analyzeSpecIssuesInFailures`。若偵測到 spec 矛盾，顯示具體矛盾點 + 修復建議 + quickReply「審查並修改 Feature」
+- **層 7 Discovery 主動問**：`services/prd-discovery.ts` 的 A8 級聯效應檢查強化——當需求涉及多 entity 關聯時主動生成 Relationship Lifecycle 問題（「刪父時子如何處理？」4 選項），從源頭避免 Feature/Schema 矛盾
 - **Phase 2B interrupt 實裝**：Domain / Clone / Fast Build 三個 subgraph 從 wrapper 升級為多 node + `interrupt()` human-in-the-loop
   - **Domain**（8 nodes, 3 interrupt, 2 loops）：entry → search → confirm（interrupt×2：確認/registrant 表單）→ register → complete。DNS path：dns_setup（interrupt）→ dns_verify → complete。retry_or_cancel interrupt + 換域名/DNS 未傳播 loop
   - **Clone**（3 nodes, 1 interrupt）：execute（完整 clone pipeline）→ failed interrupt（重試/取消 loop）

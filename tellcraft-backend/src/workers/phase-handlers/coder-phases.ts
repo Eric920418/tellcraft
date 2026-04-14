@@ -12,6 +12,7 @@ import { sendMessage, saveFlowState, getFlowState, touchFlowActivity, snapshotCo
 import { runCoderE2ETests } from '../../services/coder-e2e-test'
 import { executeRedPhase, formatRedPhaseReport, runRedPhaseFullValidation, runRedPhaseRoutingValidation } from '../../services/red-phase-validator'
 import { runFeatureAlignmentGate } from '../../services/feature-alignment-gate'
+import { analyzeSpecIssuesInFailures } from '../../services/semantic-consistency-validator'
 import { createLogger } from '../../lib/logger'
 import { sanitizeForPreview } from '../../services/code-verify'
 
@@ -784,16 +785,43 @@ export async function executeCoderTesting(input: CoderSkillInput): Promise<void>
 
     const reportText = formatTestResults(result.testResults)
     const statusEmoji = result.allPassed ? '✅' : '❌'
-    const summary = result.allPassed
-      ? (isChinese ? '所有測試通過！' : 'All tests passed!')
-      : (isChinese ? `${result.testResults.failed} 個場景仍然失敗（${result.attempts} 輪修復後）` : `${result.testResults.failed} scenarios still failing after ${result.attempts} attempts`)
+
+    // 分析失敗的 scenarios 是否為 Feature 內部矛盾（修代碼永遠沒用）
+    let specAnalysis: { hasSpecIssues: boolean; humanReadableReport: string } = { hasSpecIssues: false, humanReadableReport: '' }
+    if (!result.allPassed) {
+      try {
+        const failedScenarios = result.testResults.scenarios
+          .filter((s) => s.status === 'failed')
+          .map((s) => ({ featureName: s.featureName, scenarioName: s.scenarioName, error: s.error }))
+        specAnalysis = analyzeSpecIssuesInFailures(failedScenarios, featureFiles)
+      } catch (e) {
+        logger.warn({ err: e }, 'Spec issue 分析失敗，降級為通用訊息')
+      }
+    }
+
+    let summary: string
+    if (result.allPassed) {
+      summary = isChinese ? '所有測試通過！' : 'All tests passed!'
+    } else if (specAnalysis.hasSpecIssues) {
+      // Feature 內部矛盾 → 明確告知用戶
+      summary = isChinese
+        ? `**Feature 內部矛盾，LLM 無法靠修改代碼解決**\n\n${specAnalysis.humanReadableReport}\n\n修了 ${result.attempts} 輪都失敗。需要您確認正確意圖才能繼續。`
+        : `**Feature contains internal contradictions, LLM cannot fix by modifying code**\n\n${specAnalysis.humanReadableReport}\n\nAfter ${result.attempts} fix rounds. Please confirm the correct intent.`
+    } else {
+      summary = isChinese
+        ? `${result.testResults.failed} 個場景仍然失敗（${result.attempts} 輪修復後）`
+        : `${result.testResults.failed} scenarios still failing after ${result.attempts} attempts`
+    }
 
     const quickReplies: Array<{ label: string; value: string; style: 'primary' | 'secondary' | 'ghost' }> = []
     if (result.allPassed) {
-      // 測試全通過 → 部署為主要選項
       quickReplies.push({ label: isChinese ? '部署上線' : 'Deploy', value: '部署', style: 'primary' })
+    } else if (specAnalysis.hasSpecIssues) {
+      // Spec 矛盾 → 主要選項是審查 Feature
+      quickReplies.push({ label: isChinese ? '審查並修改 Feature' : 'Review Features', value: isChinese ? '修改 Feature' : 'review features', style: 'primary' })
+      quickReplies.push({ label: isChinese ? '強制重試（我確認 Feature 正確）' : 'Force Retry', value: '__verify_backend__', style: 'secondary' })
+      quickReplies.push({ label: isChinese ? '帶風險部署' : 'Deploy (risky)', value: '__deploy_with_risk__', style: 'ghost' })
     } else {
-      // 測試有失敗 → 重試為主要、帶風險部署為次要
       quickReplies.push({ label: isChinese ? '重試測試' : 'Retry Tests', value: '__verify_backend__', style: 'primary' })
       quickReplies.push({ label: isChinese ? '帶風險部署' : 'Deploy (risky)', value: '__deploy_with_risk__', style: 'secondary' })
     }

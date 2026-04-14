@@ -8,6 +8,39 @@ import { createLogger } from '../lib/logger'
 const logger = createLogger('schema-derivation')
 
 // ============================================================
+// FK Delete Behavior 預設推導（安全網：LLM 沒明確寫 ON DELETE 時使用）
+// ============================================================
+
+/**
+ * 判斷 FK 欄位是否 nullable（掃描 table 所有欄位定義）
+ */
+function isColumnNullable(fkColName: string, allColumns: string[]): boolean {
+  const lowerFk = fkColName.toLowerCase()
+  for (const col of allColumns) {
+    const colNameMatch = col.match(/^\s*(\w+)\s+/)
+    if (colNameMatch && colNameMatch[1].toLowerCase() === lowerFk) {
+      return !/\bNOT\s+NULL\b/i.test(col)
+    }
+  }
+  // 找不到欄位定義 → 保守估計為 nullable
+  return true
+}
+
+/**
+ * 推導 FK 的預設 ON DELETE 行為（當 LLM 沒明確寫時）
+ * - nullable FK → SET NULL（鬆耦合，子可獨立存活）
+ * - NOT NULL FK → CASCADE（強耦合，子依賴父）
+ *
+ * 注意：這是保守 fallback。LLM 應該在 prompt 裡明確指定。
+ */
+function inferDefaultOnDelete(fkColName: string, allColumns: string[]): string {
+  const nullable = isColumnNullable(fkColName, allColumns)
+  const clause = nullable ? ' ON DELETE SET NULL' : ' ON DELETE CASCADE'
+  logger.info({ fkColName, nullable, inferred: clause.trim() }, 'FK ON DELETE fallback 推導')
+  return clause
+}
+
+// ============================================================
 // 型別定義
 // ============================================================
 
@@ -199,7 +232,8 @@ function transformToPostgresqlDDL(tables: ParsedTable[]): string {
       // CONSTRAINT ... FOREIGN KEY → 抽出延後執行（避免表順序導致 FK 失敗）
       const constraintFkMatch = transformed.match(/^\s*CONSTRAINT\s+(\w+)\s+FOREIGN\s+KEY\s*\((\w+)\)\s+REFERENCES\s+(\w+)\s*\((\w+)\)(\s+ON\s+(?:DELETE|UPDATE)\s+(?:CASCADE|SET\s+NULL|SET\s+DEFAULT|RESTRICT|NO\s+ACTION))*/i)
       if (constraintFkMatch) {
-        const onClause = constraintFkMatch[5] || ''
+        // LLM 沒寫 ON DELETE → 用 nullable 推導預設（SET NULL / CASCADE）
+        const onClause = constraintFkMatch[5] || inferDefaultOnDelete(constraintFkMatch[2], table.columns)
         deferredFkStatements.push(
           `ALTER TABLE ${table.tableName} ADD CONSTRAINT ${constraintFkMatch[1]} FOREIGN KEY (${constraintFkMatch[2]}) REFERENCES ${constraintFkMatch[3]}(${constraintFkMatch[4]})${onClause};`
         )
@@ -213,10 +247,13 @@ function transformToPostgresqlDDL(tables: ParsedTable[]): string {
         const colName = inlineRefMatch[1]
         const refTable = inlineRefMatch[4]
         const refCol = inlineRefMatch[5]
+        // 先提取原有的 ON DELETE/UPDATE 子句（replace 之前）
+        const onClauseMatch = transformed.match(/\s+(ON\s+(?:DELETE|UPDATE)\s+(?:CASCADE|SET\s+NULL|SET\s+DEFAULT|RESTRICT|NO\s+ACTION)(?:\s+ON\s+(?:DELETE|UPDATE)\s+(?:CASCADE|SET\s+NULL|SET\s+DEFAULT|RESTRICT|NO\s+ACTION))*)/i)
+        const preservedOnClause = onClauseMatch ? ` ${onClauseMatch[1]}` : inferDefaultOnDelete(colName, table.columns)
         // 移除 REFERENCES 子句 + ON DELETE/UPDATE（完整移除外鍵相關語法）
         transformed = transformed.replace(/\s*REFERENCES\s+\w+\s*\(\w+\)(\s+ON\s+(?:DELETE|UPDATE)\s+(?:CASCADE|SET\s+NULL|SET\s+DEFAULT|RESTRICT|NO\s+ACTION))*/gi, '')
         deferredFkStatements.push(
-          `ALTER TABLE ${table.tableName} ADD CONSTRAINT fk_${table.tableName}_${colName} FOREIGN KEY (${colName}) REFERENCES ${refTable}(${refCol});`
+          `ALTER TABLE ${table.tableName} ADD CONSTRAINT fk_${table.tableName}_${colName} FOREIGN KEY (${colName}) REFERENCES ${refTable}(${refCol})${preservedOnClause};`
         )
       } else {
         // VARCHAR(n) 的內聯外鍵引用（舊路徑，已被上面攔截，保留 fallback）

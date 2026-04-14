@@ -19,6 +19,7 @@ import { isQueryAction } from './actions-design'
 import { sanitizeNamedImports } from '../utils/sanitize-named-imports'
 import { validateComponentSyntax } from './syntax-validator'
 import { recordTelemetry, truncateFeedback } from './skill-telemetry'
+import { enrichError, formatHintForPrompt } from './error-enrichment'
 import { generateAuthSystem, injectSessionProvider } from './coder-auth-templates'
 import { generateAdminPanel } from './coder-admin-templates'
 import { generateUploadFiles } from './coder-upload-templates'
@@ -4312,11 +4313,41 @@ export type FailureRootCause =
   | 'auth_check'          // 多餘的 auth 檢查
   | 'var_resolution'      // VAR 系統解析失敗（Feature 問題，不是代碼問題）
   | 'fk_constraint'       // FK 約束違反
+  | 'spec_inconsistency'  // Feature 內部矛盾（scenario 名稱 vs DataTable 期望值衝突）
   | 'unknown'
 
-export function classifyFailureRootCause(error: string): FailureRootCause {
+/**
+ * 從 scenario name 偵測「null 意圖」，配合 error 的 expect/actual 判斷是否為 spec 矛盾
+ * 典型：scenario 名「應變為 null」+ expect:[UUID] + actual:[null] → spec 矛盾
+ */
+function detectSpecInconsistency(error: string, scenarioName?: string): boolean {
+  if (!scenarioName) return false
+  const nullIntentInName = /應變為\s*null|應為\s*null|應清空|應清除|become\s*null|should\s+be\s+null/i.test(scenarioName)
+  if (!nullIntentInName) return false
+
+  // error 格式: [entity.field] expect: [X], actual: [Y]
+  const expectMatch = error.match(/expect:\s*\[(.+?)\]/i)
+  const actualMatch = error.match(/actual:\s*\[(.+?)\]/i)
+  if (!expectMatch || !actualMatch) return false
+
+  const expect = expectMatch[1].trim().toLowerCase()
+  const actual = actualMatch[1].trim().toLowerCase()
+
+  // Scenario 名說 null，actual 是 null（符合描述），但 expect 非 null → DataTable 寫錯
+  if (actual === 'null' && expect !== 'null' && expect !== 'undefined' && expect.length > 0) {
+    return true
+  }
+  return false
+}
+
+export function classifyFailureRootCause(error: string, scenarioName?: string): FailureRootCause {
   if (!error) return 'unknown'
   const e = error.toLowerCase()
+
+  // Spec 內部矛盾偵測（優先級最高：修代碼絕對沒用，必須修 Feature）
+  if (detectSpecInconsistency(error, scenarioName)) {
+    return 'spec_inconsistency'
+  }
 
   // dispatch mismatch
   if (e.includes('不支援的操作') || e.includes('unsupported operation') || e.includes('不支援的操作類型')) {
@@ -4381,7 +4412,8 @@ export async function fixFailingAction(
 
   // === 根因分類：判斷是否需要 LLM 修復 ===
   const primaryError = failedScenarios[0]?.error || ''
-  const rootCause = classifyFailureRootCause(primaryError)
+  const primaryScenarioName = failedScenarios[0]?.scenarioName
+  const rootCause = classifyFailureRootCause(primaryError, primaryScenarioName)
 
   recordTelemetry({
     skillName: 'coder',
@@ -4400,6 +4432,12 @@ export async function fixFailingAction(
   if (rootCause === 'var_resolution') {
     // VAR 解析失敗是 Feature 問題，修代碼沒用
     logger.info({ actionName, rootCause }, 'fixFailingAction: VAR 解析失敗，跳過代碼修復（Feature 問題）')
+    return currentCode
+  }
+
+  if (rootCause === 'spec_inconsistency') {
+    // Feature 內部矛盾（scenario 名稱 vs DataTable 衝突）— 修代碼永遠沒用，LLM 會在兩個方向擺動
+    logger.warn({ actionName, rootCause, scenarioName: primaryScenarioName }, 'fixFailingAction: Feature 內部矛盾，跳過代碼修復（需用戶確認意圖）')
     return currentCode
   }
 
@@ -4473,6 +4511,11 @@ export async function fixFailingAction(
           // 提取相關 feature content 供 LLM 看到測試期望
           const featureHint = featureContent ? `\n## BDD 規格（測試期望）\n\`\`\`gherkin\n${featureContent.substring(0, 4000)}\n\`\`\`\n` : ''
 
+          // Harness 修復提示：把已分類的 rootCause 轉成結構化修復路徑
+          const perSubOpRootCause = classifyFailureRootCause(scenarios[0]?.error || '', scenarios[0]?.scenarioName)
+          const enrichedSubOp = enrichError(scenarios[0]?.error || '', perSubOpRootCause, { phase: 'coder_green', actionName })
+          const harnessHintBlock = formatHintForPrompt(enrichedSubOp)
+
           const fixedFunc = await callClaude(FIX_SYSTEM_PROMPT, `## 檔案 import 區塊（已存在，不要重複宣告）
 \`\`\`typescript
 ${importsBlock}
@@ -4482,7 +4525,7 @@ ${importsBlock}
 \`\`\`typescript
 ${funcBody}
 \`\`\`
-${featureHint}
+${featureHint}${harnessHintBlock}
 ## 測試失敗
 ${subFixDetails}
 
@@ -4550,11 +4593,15 @@ ${entityMapping ? `\n## Entity Mapping\n\`\`\`yaml\n${entityMapping}\n\`\`\`\n` 
     ? `\n## BDD 規格（測試期望 — 看清楚 Background 的資料準備和 Then 的預期回應欄位）\n\`\`\`gherkin\n${featureContent.substring(0, 8000)}\n\`\`\`\n`
     : ''
 
+  // Harness 修復提示：主修復路徑也注入結構化修復方向
+  const enrichedMain = enrichError(primaryError, rootCause, { phase: 'coder_green', actionName })
+  const harnessHintSection = formatHintForPrompt(enrichedMain)
+
   const userMessage = `## 當前代碼（${actionName}）
 \`\`\`typescript
 ${currentCode}
 \`\`\`
-${featureSection}
+${featureSection}${harnessHintSection}
 ## 測試失敗
 ${failureDetails}
 
