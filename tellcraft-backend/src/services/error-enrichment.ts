@@ -79,6 +79,10 @@ const ROOT_CAUSE_HINTS: Record<EnrichableRootCause, string> = {
 常見根因：(1) Scenario 名稱說「應變為 null」但 DataTable 期望具體 UUID；(2) 同一欄位在不同 scenario 被期望成不同類型值；(3) Scenario 描述與 Schema FK 行為不一致（e.g. 期望 cascade null 但 Schema 沒 ON DELETE SET NULL）。
 修復方向：這是 Feature 規格內部矛盾，修代碼永遠無效（LLM 會在兩個方向間擺動）。必須修 Feature 的 DataTable 或 scenario 名稱達成一致。`,
 
+  api_summary_mismatch: `Feature When 步驟 summary 在 actionsYml/api-spec 找不到對應 operation。
+常見根因：(1) Feature 生成時 LLM 給 When 步驟寫的 summary 與 actionsYml summary 不一致（兩次 LLM 生成用詞差異，e.g. 一次寫「新增收支記錄」另一次寫「新增一筆收支記錄」）；(2) actionsYml 沒有對應的 action。
+修復方向：這是 Feature ↔ actionsYml 對齊問題，修代碼永遠無效（handler 本身是對的，只是 summary 對不上）。必須修 Feature 的 When 步驟 summary 或 actionsYml summary，讓兩者完全一致。機械對齊工具：alignActionsYmlSummariesToFeatures（actions-design.ts）。`,
+
   unknown: '',
 
   // ── RED Phase 專屬 6 類（部分與 Coder 共用 key） ──
@@ -112,6 +116,7 @@ function shouldSkipLlmFix(rootCause: EnrichableRootCause): boolean {
   return rootCause === 'var_resolution'
     || rootCause === 'auth_check'
     || rootCause === 'spec_inconsistency'
+    || rootCause === 'api_summary_mismatch'
 }
 
 /**

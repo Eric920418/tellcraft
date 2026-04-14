@@ -199,6 +199,7 @@ const KNOWN_PACKAGES: Record<string, string> = {
   'jsonwebtoken': '^9.0.2',
   'next-auth': '5.0.0-beta.30',
   '@vercel/blob': '^0.20.0',
+  'resend': '^4.0.0',
 }
 
 /**
@@ -1094,27 +1095,60 @@ export async function executeDeployment(
       logger.info({ projectName }, 'Vercel project 可能已存在，繼續部署')
     }
 
-    // 3.5 Neon DB env vars 注入（同步查 DB，無需 Redis polling）
+    // 3.5 Env vars 注入（Neon DB + Auth + Email + Magic-link 一次完成）
     try {
-      const dbRow = await db.query<{ neon_connection_string: string }>(
-        'SELECT neon_connection_string FROM projects WHERE id = $1 AND neon_connection_string IS NOT NULL',
+      const cfgRow = await db.query<{
+        neon_connection_string: string | null
+        resend_api_key: string | null
+        email_from: string | null
+        custom_domain: string | null
+      }>(
+        'SELECT neon_connection_string, resend_api_key, email_from, custom_domain FROM projects WHERE id = $1',
         [projectId]
       )
-      if (dbRow.rows[0]) {
-        const envVars: Record<string, string> = {
-          'DATABASE_URL': dbRow.rows[0].neon_connection_string,
-        }
-        await injectVercelEnvVars(projectName, envVars)
-        // Auth 系統：AUTH_SECRET 只建立一次，不覆蓋（避免迭代部署後用戶被強制登出）
-        const hasAuthFile = files.some(f => f.file === 'auth.ts')
-        if (hasAuthFile) {
-          const crypto = await import('crypto')
-          await injectVercelEnvVarIfNotExists(projectName, 'AUTH_SECRET', crypto.randomBytes(32).toString('base64'))
-        }
-        logger.info({ projectId, hasAuth: hasAuthFile }, 'Vercel env vars 已注入')
+      const cfg = cfgRow.rows[0]
+      const envVars: Record<string, string> = {}
+
+      // Neon DB 連線字串
+      if (cfg?.neon_connection_string) {
+        envVars['DATABASE_URL'] = cfg.neon_connection_string
       }
+
+      // Email primitive：客戶有 lib/email.ts → 注入 Resend 配置
+      const hasEmailFile = files.some(f => f.file === 'lib/email.ts')
+      if (hasEmailFile) {
+        if (cfg?.resend_api_key) {
+          envVars['RESEND_API_KEY'] = cfg.resend_api_key
+        }
+        envVars['EMAIL_FROM'] = cfg?.email_from || 'onboarding@resend.dev'
+      }
+
+      // Magic-link：注入 APP_URL（優先 custom domain，fallback Vercel 預設）
+      const hasMagicLinkFile = files.some(f => f.file === 'lib/magic-link.ts')
+      if (hasMagicLinkFile) {
+        const appUrl = cfg?.custom_domain
+          ? `https://${cfg.custom_domain}`
+          : `https://${projectName}.vercel.app`
+        envVars['APP_URL'] = appUrl
+      }
+
+      if (Object.keys(envVars).length > 0) {
+        await injectVercelEnvVars(projectName, envVars)
+      }
+
+      // Auth 系統：AUTH_SECRET 只建立一次，不覆蓋（避免迭代部署後用戶被強制登出）
+      const hasAuthFile = files.some(f => f.file === 'auth.ts')
+      if (hasAuthFile) {
+        const crypto = await import('crypto')
+        await injectVercelEnvVarIfNotExists(projectName, 'AUTH_SECRET', crypto.randomBytes(32).toString('base64'))
+      }
+
+      logger.info(
+        { projectId, hasAuth: hasAuthFile, hasEmail: hasEmailFile, hasMagicLink: hasMagicLinkFile, hasResendKey: !!cfg?.resend_api_key },
+        'Vercel env vars 已注入'
+      )
     } catch (err) {
-      logger.warn({ err, projectId }, 'DB env vars 注入失敗，繼續部署')
+      logger.warn({ err, projectId }, 'Env vars 注入失敗，繼續部署')
     }
 
     // 4. 部署檔案（70%）

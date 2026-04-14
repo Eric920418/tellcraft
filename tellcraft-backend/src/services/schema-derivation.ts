@@ -55,6 +55,34 @@ export interface DerivedSchema {
   postgresqlDDL: string      // 可直接在 Neon PostgreSQL 執行的 SQL
   entityCount: number
   entities: DerivedEntity[]
+  hasMagicLink: boolean      // 偵測到 users.email 欄位，自動附加 magic_link_tokens 表
+}
+
+// ============================================================
+// Magic-link Tokens 表（自動加入，支援 passwordless 登入）
+// ============================================================
+
+export const MAGIC_LINK_TOKENS_DDL = `
+-- Magic-link Tokens（passwordless 登入，自動附加）
+CREATE TABLE IF NOT EXISTS magic_link_tokens (
+  token TEXT PRIMARY KEY,
+  email TEXT NOT NULL,
+  expires_at TIMESTAMPTZ NOT NULL,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_magic_link_tokens_email ON magic_link_tokens(email);
+CREATE INDEX IF NOT EXISTS idx_magic_link_tokens_expires_at ON magic_link_tokens(expires_at);
+ALTER TABLE magic_link_tokens ENABLE ROW LEVEL SECURITY;
+`.trim()
+
+/**
+ * 偵測 tables 是否含 magic-link 能力
+ * 條件：存在 users 表且含 email 欄位（VARCHAR/TEXT/CITEXT）
+ */
+export function detectMagicLinkInTables(tables: ParsedTable[]): boolean {
+  const usersTable = tables.find(t => t.tableName.toLowerCase() === 'users')
+  if (!usersTable) return false
+  return usersTable.columns.some(col => /^\s*email\s+(VARCHAR|TEXT|CITEXT)/i.test(col))
 }
 
 // ============================================================
@@ -367,11 +395,18 @@ export function deriveSchemaFromBdd(schemaSql: string, entityMapping: string): D
         postgresqlDDL: '',
         entityCount: 0,
         entities: [],
+        hasMagicLink: false,
       }
     }
 
     const entityMap = parseEntityMapping(entityMapping)
-    const postgresqlDDL = transformToPostgresqlDDL(tables)
+    let postgresqlDDL = transformToPostgresqlDDL(tables)
+
+    const hasMagicLink = detectMagicLinkInTables(tables)
+    if (hasMagicLink) {
+      postgresqlDDL += '\n\n' + MAGIC_LINK_TOKENS_DDL
+      logger.info({ table: 'magic_link_tokens' }, '偵測到 users.email → 自動附加 magic_link_tokens 表')
+    }
 
     const entities: DerivedEntity[] = tables.map(t => ({
       chineseName: entityMap.get(t.tableName) || t.tableName,
@@ -383,13 +418,14 @@ export function deriveSchemaFromBdd(schemaSql: string, entityMapping: string): D
       .map(e => `- **${e.chineseName}**（${e.tableName}）：${e.columnCount} 個欄位`)
       .join('\n')
 
-    logger.info({ entityCount: entities.length, tables: entities.map(e => e.tableName) }, 'Schema 推導完成')
+    logger.info({ entityCount: entities.length, tables: entities.map(e => e.tableName), hasMagicLink }, 'Schema 推導完成')
 
     return {
       displaySummary,
       postgresqlDDL,
       entityCount: entities.length,
       entities,
+      hasMagicLink,
     }
   } catch (err) {
     logger.error({ err }, 'Schema 推導失敗')
@@ -398,6 +434,7 @@ export function deriveSchemaFromBdd(schemaSql: string, entityMapping: string): D
       postgresqlDDL: '',
       entityCount: 0,
       entities: [],
+      hasMagicLink: false,
     }
   }
 }

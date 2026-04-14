@@ -60,6 +60,7 @@ export const CODER_HANDLER_IDS = [
   'aggregate',
   'cascade',
   'column-alias',
+  'email-sender',
 ] as const
 
 export type CoderHandlerId = typeof CODER_HANDLER_IDS[number]

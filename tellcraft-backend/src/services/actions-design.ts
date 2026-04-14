@@ -673,7 +673,7 @@ ${(response.content || '').slice(0, 2000)}
 
   if (validation.valid) {
     logger.info({ actionCount: features.length, autoCorrections: corrections.length }, '生成完成')
-    return buildSuccessResult(currentYml, projectName)
+    return buildSuccessResult(currentYml, projectName, features)
   }
 
   logger.warn({ errors: validation.errors, missingFeatures }, '驗證失敗，進入修復流程')
@@ -744,7 +744,7 @@ ${summaryChecklist}
     validation = validateActionsYml(currentYml, features)
     if (validation.valid) {
       logger.info({ round, autoCorrections: corrections.length }, `第 ${round} 輪修復後驗證通過`)
-      return buildSuccessResult(currentYml, projectName)
+      return buildSuccessResult(currentYml, projectName, features)
     }
 
     logger.warn({ round, errors: validation.errors }, `第 ${round} 輪修復後仍有問題`)
@@ -752,17 +752,79 @@ ${summaryChecklist}
 
   // 降級：使用最後的修復版本（可能部分正確）
   logger.warn({ remainingErrors: validation.errors.length }, '修復輪次用盡，使用最後修復版本')
-  return buildSuccessResult(currentYml, projectName)
+  return buildSuccessResult(currentYml, projectName, features)
+}
+
+/**
+ * 機械強制對齊 actionsYml 的 summary 到 features.name。
+ *
+ * 即使 LLM prompt 已說明「summary 必須等於 feature.name」，LLM 仍可能
+ * 改寫措辭（多/少修飾詞、同義替換）。此函數作為機械保險，確保
+ * actionsYml.summary === features.name 100% 對齊，避免 SpecFormula
+ * findBySummary 失敗。
+ */
+export function alignActionsYmlSummariesToFeatures(
+  actionsYml: string,
+  features: Array<{ name: string; actionName: string; content?: string }>
+): { aligned: string; corrections: number } {
+  let parsed: unknown
+  try {
+    parsed = yaml.load(actionsYml)
+  } catch (e) {
+    logger.warn({ err: e }, 'actionsYml 解析失敗，跳過 summary 對齊')
+    return { aligned: actionsYml, corrections: 0 }
+  }
+  if (!parsed || typeof parsed !== 'object') return { aligned: actionsYml, corrections: 0 }
+  const root = parsed as { actions?: Array<{ name?: string; summary?: string }> }
+  if (!Array.isArray(root.actions)) return { aligned: actionsYml, corrections: 0 }
+
+  const nameByAction = new Map<string, string>()
+  for (const f of features) {
+    if (f.actionName && f.name) nameByAction.set(f.actionName, f.name)
+  }
+
+  let corrections = 0
+  for (const action of root.actions) {
+    if (!action.name) continue
+    const expectedSummary = nameByAction.get(action.name)
+    if (!expectedSummary) continue
+    if (action.summary !== expectedSummary) {
+      logger.info({
+        actionName: action.name,
+        oldSummary: action.summary,
+        newSummary: expectedSummary,
+      }, 'actionsYml summary 機械對齊到 feature.name')
+      action.summary = expectedSummary
+      corrections++
+    }
+  }
+
+  if (corrections === 0) return { aligned: actionsYml, corrections: 0 }
+  return {
+    aligned: yaml.dump(parsed, { lineWidth: -1, noRefs: true }),
+    corrections,
+  }
 }
 
 function buildSuccessResult(
   actionsYml: string,
-  projectName?: string
+  projectName?: string,
+  features?: Array<{ name: string; actionName: string; content?: string }>
 ): { success: boolean; actionsYml: string; openApiSpec: string } {
+  // 機械對齊 summary（在 convertToOpenAPI 之前，確保 OpenAPI spec 也用對齊後的 summary）
+  let finalYml = actionsYml
+  if (features && features.length > 0) {
+    const { aligned, corrections } = alignActionsYmlSummariesToFeatures(actionsYml, features)
+    if (corrections > 0) {
+      logger.info({ corrections }, `actionsYml: 機械對齊 ${corrections} 個 summary 到 features.name`)
+      finalYml = aligned
+    }
+  }
+
   // convertToOpenAPI 是零 LLM 機械映射，actionsYml 已通過驗證，不應失敗
-  const openApiSpec = convertToOpenAPI(actionsYml, projectName)
+  const openApiSpec = convertToOpenAPI(finalYml, projectName)
   logger.info('OpenAPI 3.0 spec 生成完成')
-  return { success: true, actionsYml, openApiSpec }
+  return { success: true, actionsYml: finalYml, openApiSpec }
 }
 
 // ============================================================

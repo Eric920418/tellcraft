@@ -29,8 +29,15 @@ describe('getCoderHandler — 全部 handler 可載入', () => {
     })
   }
 
-  it('13 個 handler 全部有註冊', () => {
-    expect(CODER_HANDLER_IDS).toHaveLength(13)
+  it('14 個 handler 全部有註冊', () => {
+    expect(CODER_HANDLER_IDS).toHaveLength(14)
+  })
+
+  it('email-sender handler 已註冊', () => {
+    expect(CODER_HANDLER_IDS).toContain('email-sender' as CoderHandlerId)
+    const content = getCoderHandler('email-sender')
+    expect(content).toContain('sendEmail')
+    expect(content).toContain('escapeHtml')
   })
 })
 

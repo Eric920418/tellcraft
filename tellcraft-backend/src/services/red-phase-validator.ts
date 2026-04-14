@@ -48,6 +48,7 @@ export type RedPhaseIssueType =
   | 'method_mismatch'
   | 'path_mismatch'
   | 'summary_mismatch'
+  | 'when_summary_mismatch'
   | 'field_mismatch'
   | 'status_mismatch'
   | 'entity_mismatch'
@@ -320,6 +321,22 @@ export function extractEntitySetupSteps(content: string): EntitySetupStep[] {
  * 從 Feature 原始文本提取 WHEN api_call 步驟的 call table headers（含原始前綴）。
  * 用於 Check 12 偵測 >/<  VAR 語法誤用。
  */
+/**
+ * 從 Feature 文本提取所有 When 步驟的 summary（SpecFormula 用它查 api-spec）
+ */
+function extractWhenSummariesFromContent(content: string): string[] {
+  const summaries: string[] = []
+  const lines = content.split('\n')
+  for (const line of lines) {
+    const trimmed = line.trim()
+    const match = trimmed.match(
+      /^(?:When|And)\s+(?:\(No Actor\)|\(UID="[^"]*"\))\s+(.+?)\s*[,，]\s*call\s+table:/i
+    )
+    if (match) summaries.push(match[1].trim())
+  }
+  return summaries
+}
+
 function extractApiCallTableHeaders(content: string): Array<{ summary: string; headers: string[] }> {
   const results: Array<{ summary: string; headers: string[] }> = []
   const lines = content.split('\n')
@@ -459,6 +476,26 @@ export async function executeRedPhase(input: RedPhaseInput): Promise<RedPhaseRes
         severity: 'error',
         description: `Feature name/summary "${featureSummary}" 與 actionsYml summary "${action.summary}" 不一致 → _stepSummary 派發會失敗`,
         suggestion: `確保 Feature name 和 actionsYml summary 完全相同："${action.summary}"`,
+      })
+    }
+
+    // ---- Check 4b: When 步驟 summary 必須在 actionsYml 找得到 ----
+    // SpecFormula 用 Feature 的 When summary 查 api-spec（findBySummary）。
+    // 找不到 → scenario 100% 失敗。這個檢查比 Check 4 更嚴格（檢查每個 When 步驟而非只檢查 Feature 名稱）。
+    const whenSummaries = extractWhenSummariesFromContent(feature.content)
+    const allActionSummaries = new Set(
+      Array.from(actionsByName.values()).map(a => a.summary).filter(Boolean)
+    )
+    for (const whenSum of whenSummaries) {
+      if (allActionSummaries.has(whenSum)) continue
+      // 精確比對不到 → 嘗試看是否是同一個 action 的 summary（action.summary === whenSum 已在上面檢查過）
+      if (action.summary === whenSum) continue
+      issues.push({
+        featureName: displayName,
+        issueType: 'when_summary_mismatch',
+        severity: 'error',
+        description: `Feature 的 When 步驟 summary "${whenSum}" 在 actionsYml 找不到對應 operation → SpecFormula findBySummary 失敗，scenario 100% 失敗`,
+        suggestion: `將 When 步驟 summary 改為 "${action.summary}" (actionsYml 中此 action 的 summary)`,
       })
     }
 

@@ -100,7 +100,7 @@ function parseActionsMeta(actionsYml: string): ActionMeta[] {
 /**
  * 從 Feature 文本提取所有 When 步驟的 summary（_stepSummary 的值）
  */
-function extractWhenSummaries(content: string): string[] {
+export function extractWhenSummaries(content: string): string[] {
   const summaries: string[] = []
   const lines = content.split('\n')
   for (const line of lines) {
@@ -510,6 +510,25 @@ async function runAlignmentChecks(input: AlignmentGateInput): Promise<AlignmentI
           }
         }
       }
+    }
+
+    // ---- Check 6b: When 步驟 summary 必須在 actionsYml 找得到 ----
+    // SpecFormula 用 When summary 查 api-spec 找 operation。如果找不到 → 整個 scenario 100% 失敗。
+    // 這個檢查是 Check 6 的擴展：Check 6 只比對 Feature 註解，6b 比對每個 When 步驟的實際 summary。
+    const whenSummariesInFeature = extractWhenSummaries(feature.content)
+    const allActionSummaries = new Set(actionsMeta.map(a => a.summary).filter(Boolean))
+    const allActionNames = new Set(actionsMeta.map(a => a.name).filter(Boolean))
+    for (const whenSum of whenSummariesInFeature) {
+      // 完全相等才算找到（與 SpecFormula findBySummary 第一層匹配一致）
+      if (allActionSummaries.has(whenSum)) continue
+      // 容錯：如果 whenSum === actionName（罕見，但有些 LLM 會這樣寫）→ 視為等價
+      if (allActionNames.has(whenSum)) continue
+      issues.push({
+        featureName: displayName,
+        checkName: 'when_summary_mismatch',
+        severity: 'error',
+        description: `Feature 的 When 步驟 summary "${whenSum}" 在 actionsYml 找不到對應 operation。SpecFormula findBySummary 會失敗 → 整個 scenario 100% 失敗。actionsYml 現有的 summary：${Array.from(allActionSummaries).slice(0, 5).join(', ')}${allActionSummaries.size > 5 ? ` ...(共 ${allActionSummaries.size} 個)` : ''}`,
+      })
     }
   }
 

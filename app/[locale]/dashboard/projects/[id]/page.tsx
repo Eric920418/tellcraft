@@ -355,6 +355,25 @@ export default function ProjectDetailPage() {
               {t('visitSite')}
             </a>
           )}
+
+          {/* Email 設定 */}
+          <Link
+            href={`/dashboard/projects/${project.id}/settings/email`}
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 8,
+              padding: '10px 20px',
+              fontSize: 14,
+              fontWeight: 500,
+              background: 'transparent',
+              color: 'var(--black)',
+              textDecoration: 'none',
+              border: '1px solid var(--border-color)',
+            }}
+          >
+            Email 設定
+          </Link>
         </div>
       </motion.div>
 

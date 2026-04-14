@@ -21,10 +21,12 @@ import { validateComponentSyntax } from './syntax-validator'
 import { recordTelemetry, truncateFeedback } from './skill-telemetry'
 import { enrichError, formatHintForPrompt } from './error-enrichment'
 import { getCoderHandlersJoined, type CoderHandlerId } from '../lib/skill-loader'
-import { generateAuthSystem, injectSessionProvider } from './coder-auth-templates'
+import { generateAuthSystem, injectSessionProvider, detectAuthCapabilities } from './coder-auth-templates'
+import { generateEmailInfrastructure, generateMagicLinkSystem } from './coder-email-templates'
 import { generateAdminPanel } from './coder-admin-templates'
 import { generateUploadFiles } from './coder-upload-templates'
-export { detectAuthInSchema, generateAuthSystem, injectSessionProvider } from './coder-auth-templates'
+export { detectAuthInSchema, detectAuthCapabilities, generateAuthSystem, injectSessionProvider } from './coder-auth-templates'
+export { generateEmailInfrastructure, generateMagicLinkSystem } from './coder-email-templates'
 export { generateAdminPanel } from './coder-admin-templates'
 export { generateUploadFiles } from './coder-upload-templates'
 
@@ -325,6 +327,11 @@ function buildActionSystemPrompt(action?: ActionEntry): CacheableSystemPrompt {
   // 認證相關
   if (/auth|login|register|signup|signin|logout|password|token|verify/i.test(nameHint)) {
     handlers.push('auth')
+  }
+
+  // Email 發送（驗證信、通知信、magic-link）
+  if (/email|寄信|通知|notify|verify|confirm|mail|發信/i.test(nameHint)) {
+    handlers.push('email-sender')
   }
 
   // 批次操作
@@ -2674,11 +2681,24 @@ export async function executeCoderPipeline(
   await callbacks.onProgress('建立資料庫連接...', 5)
   const dbFile = generateDbConnection()
 
-  // Step 2.5: Auth 系統生成（零 LLM，純模板偵測）
-  const authFiles = generateAuthSystem(schemaSql)
+  // Step 2.5: Auth 系統生成（零 LLM，schema 驅動三種變體）
+  const authCaps = detectAuthCapabilities(schemaSql)
+  const authFiles = generateAuthSystem(schemaSql, authCaps)
   if (authFiles) {
     await callbacks.onProgress('生成認證系統...', 7)
-    logger.info({ fileCount: authFiles.length }, 'Auth 系統生成完成')
+    logger.info({ fileCount: authFiles.length, ...authCaps }, 'Auth 系統生成完成')
+  }
+
+  // Step 2.6: Email primitive + Magic-link 子系統（零 LLM）
+  const actionNames = actions.map(a => a.name || '')
+  const emailFiles = generateEmailInfrastructure(schemaSql, actionNames)
+  const magicLinkFiles = generateMagicLinkSystem(schemaSql)
+  if (emailFiles.length > 0 || magicLinkFiles) {
+    await callbacks.onProgress('生成 Email / Magic-link 系統...', 8)
+    logger.info(
+      { emailCount: emailFiles.length, magicLinkCount: magicLinkFiles?.length || 0, hasMagicLink: authCaps.hasMagicLink },
+      'Email 系統生成完成'
+    )
   }
 
   // Step 2.7: Admin Panel generation (zero-LLM)
@@ -2876,11 +2896,13 @@ export async function executeCoderPipeline(
     }
   }
 
-  // Admin Panel + Upload：注入到 backendFiles
+  // Admin Panel + Upload + Email primitive + Magic-link：注入到 backendFiles
   if (adminFiles.length > 0) backendFiles.push(...adminFiles)
   if (uploadFiles) backendFiles.push(...uploadFiles)
+  if (emailFiles.length > 0) backendFiles.push(...emailFiles)
+  if (magicLinkFiles) backendFiles.push(...magicLinkFiles)
 
-  const summary = `生成了 ${actionFiles.length} 個後端函數、${serverActionFiles.length} 個 Server Action、${apiRouteFiles.length} 個 API Route，改寫了 ${rewrittenFrontend.length} 個前端組件（${unchanged.length} 個保持不變）。${adminFiles.length > 0 ? ` Admin Panel ${adminFiles.length} 個檔案。` : ''}${uploadFiles ? ' Upload 系統。' : ''}`
+  const summary = `生成了 ${actionFiles.length} 個後端函數、${serverActionFiles.length} 個 Server Action、${apiRouteFiles.length} 個 API Route，改寫了 ${rewrittenFrontend.length} 個前端組件（${unchanged.length} 個保持不變）。${adminFiles.length > 0 ? ` Admin Panel ${adminFiles.length} 個檔案。` : ''}${uploadFiles ? ' Upload 系統。' : ''}${emailFiles.length > 0 ? ' Email primitive。' : ''}${magicLinkFiles ? ` Magic-link ${magicLinkFiles.length} 個檔案。` : ''}`
 
   logger.info({
     actionFiles: actionFiles.length,
@@ -4038,15 +4060,16 @@ const result = await sql.begin(async (tx) => {
 // ============================================================
 
 export type FailureRootCause =
-  | 'dispatch_mismatch'   // _stepSummary dispatch 不匹配
-  | 'missing_column'      // SQL column 不存在
-  | 'wrong_status'        // HTTP status code 不對
-  | 'field_naming'        // 回應欄位 camelCase/snake_case 不匹配
-  | 'sql_error'           // SQL 語法錯誤
-  | 'auth_check'          // 多餘的 auth 檢查
-  | 'var_resolution'      // VAR 系統解析失敗（Feature 問題，不是代碼問題）
-  | 'fk_constraint'       // FK 約束違反
-  | 'spec_inconsistency'  // Feature 內部矛盾（scenario 名稱 vs DataTable 期望值衝突）
+  | 'dispatch_mismatch'    // _stepSummary dispatch 不匹配
+  | 'missing_column'       // SQL column 不存在
+  | 'wrong_status'         // HTTP status code 不對
+  | 'field_naming'         // 回應欄位 camelCase/snake_case 不匹配
+  | 'sql_error'            // SQL 語法錯誤
+  | 'auth_check'           // 多餘的 auth 檢查
+  | 'var_resolution'       // VAR 系統解析失敗（Feature 問題，不是代碼問題）
+  | 'fk_constraint'        // FK 約束違反
+  | 'spec_inconsistency'   // Feature 內部矛盾（scenario 名稱 vs DataTable 期望值衝突）
+  | 'api_summary_mismatch' // Feature When summary 在 api-spec/actionsYml 找不到（修代碼絕對沒用）
   | 'unknown'
 
 /**
@@ -4077,7 +4100,13 @@ export function classifyFailureRootCause(error: string, scenarioName?: string): 
   if (!error) return 'unknown'
   const e = error.toLowerCase()
 
-  // Spec 內部矛盾偵測（優先級最高：修代碼絕對沒用，必須修 Feature）
+  // API summary mismatch 偵測（優先級最高：修代碼絕對沒用，必須修 Feature/actionsYml summary）
+  // 典型：Feature When summary "新增一筆收支記錄" 在 api-spec 找不到 → 所有 scenario 100% 失敗
+  if (e.includes('找不到 api 操作') || e.includes('api operation not found')) {
+    return 'api_summary_mismatch'
+  }
+
+  // Spec 內部矛盾偵測（scenario 名稱 vs DataTable 矛盾，修代碼無效）
   if (detectSpecInconsistency(error, scenarioName)) {
     return 'spec_inconsistency'
   }
@@ -4171,6 +4200,12 @@ export async function fixFailingAction(
   if (rootCause === 'spec_inconsistency') {
     // Feature 內部矛盾（scenario 名稱 vs DataTable 衝突）— 修代碼永遠沒用，LLM 會在兩個方向擺動
     logger.warn({ actionName, rootCause, scenarioName: primaryScenarioName }, 'fixFailingAction: Feature 內部矛盾，跳過代碼修復（需用戶確認意圖）')
+    return currentCode
+  }
+
+  if (rootCause === 'api_summary_mismatch') {
+    // Feature When summary 在 api-spec 找不到 — 修 handler 永遠沒用，必須修 Feature/actionsYml 對齊
+    logger.warn({ actionName, rootCause, scenarioName: primaryScenarioName }, 'fixFailingAction: api summary 不匹配（Feature ↔ actionsYml），跳過代碼修復')
     return currentCode
   }
 

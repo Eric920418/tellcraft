@@ -336,6 +336,48 @@ export async function getProject(input: {
 }
 
 /**
+ * 讀取專案 email 配置（Resend API key masked + From 信箱）
+ */
+export async function getProjectEmailConfig(input: {
+  projectId: string
+  token: string
+}): Promise<ApiResponse<{
+  hasResendApiKey: boolean
+  resendApiKeyMask: string | null
+  emailFrom: string | null
+}>> {
+  return apiRequest(`/api/project/${input.projectId}/email-config`, {
+    method: 'GET',
+    headers: {
+      Authorization: `Bearer ${input.token}`,
+    },
+  })
+}
+
+/**
+ * 更新專案 email 配置（Resend API key + From 信箱）
+ * 傳 null 清除欄位；undefined 不更新
+ */
+export async function updateProjectEmailConfig(input: {
+  projectId: string
+  token: string
+  resendApiKey?: string | null
+  emailFrom?: string | null
+}): Promise<ApiResponse<{ success: boolean }>> {
+  const body: Record<string, unknown> = {}
+  if (input.resendApiKey !== undefined) body.resendApiKey = input.resendApiKey
+  if (input.emailFrom !== undefined) body.emailFrom = input.emailFrom
+  return apiRequest(`/api/project/${input.projectId}/email-config`, {
+    method: 'PATCH',
+    headers: {
+      Authorization: `Bearer ${input.token}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(body),
+  })
+}
+
+/**
  * 健康檢查
  */
 export async function healthCheck(): Promise<ApiResponse<{

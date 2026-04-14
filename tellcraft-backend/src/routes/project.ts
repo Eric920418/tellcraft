@@ -2,7 +2,7 @@ import { Router, type Router as RouterType } from 'express'
 import archiver from 'archiver'
 import { requireAuth, requireActiveSubscription, requirePlan } from '../middleware/auth'
 import { validateBody } from '../middleware/validate'
-import { createProjectSchema, templateOverridesSchema, batchDeleteSchema } from '../schemas/project'
+import { createProjectSchema, templateOverridesSchema, batchDeleteSchema, emailConfigSchema } from '../schemas/project'
 import * as db from '../db/client'
 import { toVercelSlug, deleteVercelProject } from '../services/deployer'
 import { deleteNeonProject } from '../services/neon-service'
@@ -308,6 +308,93 @@ router.patch('/:id', requireAuth, async (req, res) => {
   } catch (error) {
     logger.error({ err: error }, '更新專案失敗')
     res.status(500).json({ error: 'Failed to update project' })
+  }
+})
+
+/**
+ * GET /api/project/:id/email-config
+ * 讀取 email 配置（Resend API key masked、From 信箱）
+ * 安全：API key 只回傳後 4 碼與 hasKey 旗標
+ */
+router.get('/:id/email-config', requireAuth, async (req, res) => {
+  try {
+    const { id } = req.params
+    const userId = req.user!.id
+
+    const row = await db.queryOne<{
+      user_id: string
+      resend_api_key: string | null
+      email_from: string | null
+    }>(
+      'SELECT user_id, resend_api_key, email_from FROM projects WHERE id = $1',
+      [id]
+    )
+    if (!row || row.user_id !== userId) {
+      return res.status(404).json({ error: 'Project not found' })
+    }
+
+    const hasKey = !!row.resend_api_key
+    const keyMask = row.resend_api_key ? `••••${row.resend_api_key.slice(-4)}` : null
+
+    res.json({
+      hasResendApiKey: hasKey,
+      resendApiKeyMask: keyMask,
+      emailFrom: row.email_from,
+    })
+  } catch (error) {
+    logger.error({ err: error }, '讀取 email 配置失敗')
+    res.status(500).json({ error: 'Failed to load email config' })
+  }
+})
+
+/**
+ * PATCH /api/project/:id/email-config
+ * 更新 email 配置（Resend API key + From 信箱）
+ * body: { resendApiKey?: string | null, emailFrom?: string | null }
+ */
+router.patch('/:id/email-config', requireAuth, validateBody(emailConfigSchema), async (req, res) => {
+  try {
+    const { id } = req.params
+    const userId = req.user!.id
+    const { resendApiKey, emailFrom } = req.body as {
+      resendApiKey?: string | null
+      emailFrom?: string | null
+    }
+
+    const project = await db.getProject(id)
+    if (!project || project.user_id !== userId) {
+      return res.status(404).json({ error: 'Project not found' })
+    }
+
+    const updates: string[] = []
+    const params: unknown[] = []
+    let paramIndex = 1
+
+    if (resendApiKey !== undefined) {
+      updates.push(`resend_api_key = $${paramIndex++}`)
+      params.push(resendApiKey)
+    }
+    if (emailFrom !== undefined) {
+      updates.push(`email_from = $${paramIndex++}`)
+      params.push(emailFrom)
+    }
+
+    if (updates.length === 0) {
+      return res.status(400).json({ error: 'No updates provided' })
+    }
+
+    updates.push(`updated_at = NOW()`)
+    params.push(id)
+
+    await db.query(
+      `UPDATE projects SET ${updates.join(', ')} WHERE id = $${paramIndex}`,
+      params
+    )
+
+    res.json({ success: true })
+  } catch (error) {
+    logger.error({ err: error }, '更新 email 配置失敗')
+    res.status(500).json({ error: 'Failed to update email config' })
   }
 })
 

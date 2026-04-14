@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { deriveSchemaFromBdd } from '../services/schema-derivation'
+import { deriveSchemaFromBdd, detectMagicLinkInTables, parseCreateTables, MAGIC_LINK_TOKENS_DDL } from '../services/schema-derivation'
 
 describe('schema-derivation', () => {
   // ============================================================
@@ -413,6 +413,75 @@ describe('schema-derivation', () => {
     const ddl = deriveSchemaFromBdd(sql, '').postgresqlDDL
     expect(ddl).not.toMatch(/UNSIGNED/i)
     expect(ddl).toContain('NOT NULL')
+  })
+
+  // ============================================================
+  // Magic-link 自動附加 magic_link_tokens 表
+  // ============================================================
+
+  describe('magic_link_tokens 自動附加', () => {
+    it('users 表有 email → 自動附加 magic_link_tokens', () => {
+      const sql = `CREATE TABLE users (
+        id VARCHAR(36) PRIMARY KEY,
+        email VARCHAR(255) NOT NULL,
+        name VARCHAR(100)
+      );`
+      const result = deriveSchemaFromBdd(sql, '')
+      expect(result.hasMagicLink).toBe(true)
+      expect(result.postgresqlDDL).toContain('CREATE TABLE IF NOT EXISTS magic_link_tokens')
+      expect(result.postgresqlDDL).toContain('token TEXT PRIMARY KEY')
+      expect(result.postgresqlDDL).toContain('expires_at TIMESTAMPTZ NOT NULL')
+    })
+
+    it('users 表無 email → 不附加 magic_link_tokens', () => {
+      const sql = `CREATE TABLE users (
+        id VARCHAR(36) PRIMARY KEY,
+        username VARCHAR(100),
+        password_hash VARCHAR(255)
+      );`
+      const result = deriveSchemaFromBdd(sql, '')
+      expect(result.hasMagicLink).toBe(false)
+      expect(result.postgresqlDDL).not.toContain('magic_link_tokens')
+    })
+
+    it('無 users 表 → 不附加 magic_link_tokens', () => {
+      const sql = `CREATE TABLE products (
+        id VARCHAR(36) PRIMARY KEY,
+        email VARCHAR(255)
+      );`
+      const result = deriveSchemaFromBdd(sql, '')
+      expect(result.hasMagicLink).toBe(false)
+      expect(result.postgresqlDDL).not.toContain('magic_link_tokens')
+    })
+
+    it('users 表 + password_hash + email（credentials + magic-link 並存）→ 附加', () => {
+      const sql = `CREATE TABLE users (
+        id VARCHAR(36) PRIMARY KEY,
+        email VARCHAR(255) NOT NULL,
+        password_hash VARCHAR(255) NOT NULL
+      );`
+      const result = deriveSchemaFromBdd(sql, '')
+      expect(result.hasMagicLink).toBe(true)
+      expect(result.postgresqlDDL).toContain('magic_link_tokens')
+    })
+
+    it('detectMagicLinkInTables 直接測試', () => {
+      const withEmail = parseCreateTables('CREATE TABLE users (id UUID, email VARCHAR(255));')
+      expect(detectMagicLinkInTables(withEmail)).toBe(true)
+
+      const withoutEmail = parseCreateTables('CREATE TABLE users (id UUID, name VARCHAR(100));')
+      expect(detectMagicLinkInTables(withoutEmail)).toBe(false)
+
+      const noUsersTable = parseCreateTables('CREATE TABLE products (id UUID, email VARCHAR(255));')
+      expect(detectMagicLinkInTables(noUsersTable)).toBe(false)
+    })
+
+    it('MAGIC_LINK_TOKENS_DDL 結構正確', () => {
+      expect(MAGIC_LINK_TOKENS_DDL).toContain('CREATE TABLE IF NOT EXISTS magic_link_tokens')
+      expect(MAGIC_LINK_TOKENS_DDL).toContain('idx_magic_link_tokens_email')
+      expect(MAGIC_LINK_TOKENS_DDL).toContain('idx_magic_link_tokens_expires_at')
+      expect(MAGIC_LINK_TOKENS_DDL).toContain('ROW LEVEL SECURITY')
+    })
   })
 
   it('綜合 MySQL schema 完整轉換', () => {

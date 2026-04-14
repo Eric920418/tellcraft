@@ -237,7 +237,7 @@ Supabase PostgREST 只能做 CRUD + RLS，**搞不定**：
 | `design-moods.ts` | 無 | uiux-phases / fast-build | 8 個設計情緒預設 + `recommendMoods()` 規則推薦 + prompt 注入 getter |
 | `customer-service.ts` | 無 / Sonnet | fast mode + handleContinueFlow | 客服問答：意圖偵測（greeting/question/chitchat/help）+ FAQ 零 LLM 匹配（9 主題）+ Sonnet 開放問答 |
 | `error-enrichment.ts` | 無 | fixFailingAction + red-phase + feature-alignment | **Harness 級修復提示注入**：依已分類的 rootCause（9 類 Coder + 5 類 RED Phase）查 `ROOT_CAUSE_HINTS` 表，把結構化修復方向塞進 LLM prompt，讓修復不只看原始 error 字串 |
-| `skill-loader.ts` | 無 | buildActionSystemPrompt / buildSubOpSystemPrompt | **按需注入技能索引**：13 個 Coder handler SOP 抽到 `coder-handlers/*.md`，模組啟動時一次載入 cache，dev/prod 雙路徑 fallback（src/ vs dist/）。prompt 輸出 byte-identical 於舊硬編碼 const |
+| `skill-loader.ts` | 無 | buildActionSystemPrompt / buildSubOpSystemPrompt | **按需注入技能索引**：14 個 Coder handler SOP 抽到 `coder-handlers/*.md`（含 `email-sender` M7 新增），模組啟動時一次載入 cache，dev/prod 雙路徑 fallback（src/ vs dist/）。prompt 輸出 byte-identical 於舊硬編碼 const |
 | `ui-evaluator.ts` | Sonnet Vision | UIUX/Fast Build/Clone QG 尾端 | **黑盒 Evaluator Agent**：Puppeteer 跑 ephemeral Next.js preview → screenshot + DOM outline（**看不到 tsx**）→ Sonnet Vision + rubric 判斷可用性（layout_broken/content_missing/interaction_dead/visual_regression）。Feature flag `ENABLE_UI_EVALUATOR` 預設 false |
 | `preview-runner.ts` | 無 | coder-e2e-test + ui-evaluator | 共用 ephemeral Next.js dev server 編排（/tmp 專案 → npm install → spawn next dev → 等 ready → 交給 caller run callback → 清理），抽自 coder-e2e-test.ts |
 | `line-notify.ts` | 無 | orchestrator-utils | LINE 推播通知（stage 白名單過濾） |
@@ -911,6 +911,40 @@ Schema 欄位名包含 image/photo/cover/avatar 等 → 自動生成圖片上傳
 
 合理取捨（不追求）：雙語內容（後續 i18n）、Drizzle ORM（用 raw SQL + Neon）、Seed data（Admin 面板輸入）
 
+#### M7：Email Primitive + Magic-link Auth（✅ 已完成 2026-04-14，擴充 M2）
+
+客戶 app 可從代碼發信 + 支援 passwordless（magic-link）登入。**零 LLM 純模板**，schema 驅動能力偵測。
+
+**三個架構決策**：
+- **Resend API Key**：客戶自備（存 `projects.resend_api_key`，Dashboard 設定頁輸入，Deployer 注入 Vercel env）
+- **發信域名**：寬鬆（預設 `onboarding@resend.dev`，客戶要 production 自行驗證域名後改 `EMAIL_FROM`）
+- **Auth 並存**：schema 驅動 — 有 `password_hash` → credentials，有 `email` → magic-link，兩者兼備 → tab UI（default magic-link）
+
+**變更**：
+- [x] `coder-email-templates.ts`（新檔案）：`generateEmailInfrastructure()` 產 `lib/email.ts`（Resend primitive + escapeHtml）、`generateMagicLinkSystem()` 產 5 個檔案（`lib/magic-link.ts` + 2 pages + 2 server actions）
+- [x] `coder-auth-templates.ts` 重構：新增 `detectAuthCapabilities()` 回 `{ hasCredentials, hasMagicLink }`；`generateAuthSystem(schemaSql, caps?)` 接受能力旗標；`buildAuthConfig` 支援兩個 `Credentials` providers（`id: 'credentials'` + `id: 'magic-link'`）；login page 三變體 picker
+- [x] `coder-handlers/email-sender.md` 新 handler（14 個）：教 Coder 呼叫 `sendEmail()`、HTML escape、graceful degrade；`skill-loader.ts` `CODER_HANDLER_IDS` 從 13 加到 14
+- [x] `coder-generation.ts`：`buildActionSystemPrompt` 加 `/email|寄信|通知|notify|verify|confirm|mail|發信/i` 偵測注入 email-sender handler；Step 2.5 改用 caps 傳 `generateAuthSystem`；新增 Step 2.6 呼叫 `generateEmailInfrastructure` + `generateMagicLinkSystem`
+- [x] `schema-derivation.ts`：偵測 `users.email` 欄位自動 append `magic_link_tokens` 表 DDL（與 `created_at`/UUID 化同層的零 LLM 推導），`DerivedSchema` 加 `hasMagicLink` 欄位
+- [x] `deployer.ts` Step 3.5：單次查詢拿 `resend_api_key + email_from + custom_domain`；files 含 `lib/email.ts` → 注入 `RESEND_API_KEY + EMAIL_FROM`；files 含 `lib/magic-link.ts` → 注入 `APP_URL`（優先 custom domain，fallback `{projectName}.vercel.app`）；`KNOWN_PACKAGES` 加 `resend@^4.0.0`
+- [x] `migrations/033_add_email_config.sql`：`projects` 表加 `resend_api_key TEXT + email_from TEXT`
+- [x] `routes/project.ts`：新增 `GET /api/project/:id/email-config`（API key 只回後 4 碼 mask）+ `PATCH /api/project/:id/email-config`；`schemas/project.ts` 加 `emailConfigSchema`
+- [x] 前端：Dashboard `app/[locale]/dashboard/projects/[id]/settings/email/page.tsx` 新增設定頁（輸入 key + EMAIL_FROM + 警示區塊）；`vps-api.ts` 加 `getProjectEmailConfig` / `updateProjectEmailConfig`；專案詳情頁新增「Email 設定」連結
+- [x] 48 個新測試：`coder-email-templates.test.ts` 24 tests（caps 四組合、3 login 變體、5 magic-link 檔、auth.ts 條件 provider）+ `schema-derivation.test.ts` 新增 `magic_link_tokens` 自動附加 5 tests + `skill-loader.test.ts` 更新 handler 數 14
+
+**生成產物（以 users+email+password 並存為例）**：
+| 類型 | 檔案 | 數量 |
+|------|------|------|
+| Auth 系統（M2 + M7） | `auth.ts`、`app/api/auth/[...nextauth]/route.ts`、`app/(auth)/admin/login/page.tsx`（tab UI）、`app/admin/layout.tsx`、`lib/auth-check.ts`、`app/providers.tsx`、`types/next-auth.d.ts` | 7 |
+| Email primitive | `lib/email.ts` | 1 |
+| Magic-link 子系統 | `lib/magic-link.ts`、`app/(auth)/magic-link/{request,verify}/page.tsx`、`app/actions/auth/{request,verify}-magic-link.ts` | 5 |
+
+**Runtime 行為**：
+- `RESEND_API_KEY` 未設 → `sendEmail()` 回 `{ skipped: true }` 不 throw（非關鍵 email 不拖垮 action）
+- Magic-link token：crypto 32 bytes hex，TTL 15 min，rate limit 60s（同 email 60 秒內只能申請一次，DB 查詢實作），`DELETE RETURNING` 原子消耗
+- Magic-link verify 失敗（過期/不存在）→ NextAuth `signIn` return null → action 回 error，不拋到 500
+- Magic-link 自動註冊：查無 email 則 INSERT users，若 `password_hash NOT NULL` 導致 INSERT 失敗 → 拒絕登入（passwordless signup 降級）
+
 ## 部署
 
 ### CI/CD
@@ -1047,6 +1081,7 @@ psql "$DATABASE_URL" -f tellcraft-backend/migrations/xxx.sql
 
 ### 近期更新（2026-03-13 ~ 2026-04-14）
 
+- **Email Primitive + Magic-link Auth（擴充 Coder Skill）**（04-14）：客戶 app 新增兩項能力 — (1) 從代碼發信（Resend SDK，客戶自備 `RESEND_API_KEY`），(2) passwordless magic-link 登入（取代/並存傳統密碼）。**零 LLM 純模板**，schema 驅動偵測。新檔：`coder-email-templates.ts` 產 `lib/email.ts` + 5 個 magic-link 檔；`coder-handlers/email-sender.md`（handler 14 個，+1）；`migrations/033_add_email_config.sql`（`projects.resend_api_key + email_from`）；`routes/project.ts` PATCH/GET `/email-config`；Dashboard 設定頁。改寫：`coder-auth-templates.ts` 新增 `detectAuthCapabilities()` 回 `{hasCredentials, hasMagicLink}`，`generateAuthSystem(schemaSql, caps?)` 接能力旗標，login 頁三變體（純 credentials / magic-link redirect / tab UI default magic-link），`auth.ts` 條件式兩個 Credentials providers（`id: 'credentials'` + `id: 'magic-link'`）。`schema-derivation.ts` 偵測 `users.email` 自動 append `magic_link_tokens` 表（零 LLM）。`deployer.ts` Step 3.5 一次查出 `resend_api_key + email_from + custom_domain`，依 files 內容注入 Vercel env；`KNOWN_PACKAGES` 加 `resend@^4.0.0`。Runtime graceful degrade：key 未設時 `sendEmail` 回 `{skipped: true}` 不 throw；magic-link TTL 15 min + 60s DB 查詢式 rate limit + `DELETE RETURNING` 原子消耗；auto-signup 若 `password_hash NOT NULL` 則降級拒絕。48 個新測試（1148→1196 total）全綠。**不做**：批量發信/broadcast、feedback 專屬流程、SPF/DKIM/DMARC 自動化、OAuth providers、Rate limit 用 Redis（這版用 DB 查詢）
 - **Harness Engineering 三項升級**（04-14）：將 Anthropic/OpenAI Harness Engineering 實踐對應到 Tellcraft 的修復迴圈。(1) **PR3 — Harness 級錯誤反饋攔截**：新增 `services/error-enrichment.ts`，依已分類的 rootCause（`classifyFailureRootCause` 9 類 + `classifyRedPhaseFailure` 5 類）查 `ROOT_CAUSE_HINTS` 表，把結構化修復方向（「常見根因 + 修復方向」）注入 LLM 的 `fixFailingAction`（主 + Per-SubOp 雙路徑）、`red-phase-validator` unexpectedFailures、`feature-alignment-gate` fixMultipleFeatures 三個修復整合點。`var_resolution`/`auth_check`/`spec_inconsistency` 三類 `skipLlmFix=true` 短路不走 LLM。27 個單元測試覆蓋 14 類 rootCause。(2) **PR2 — 按需注入技能索引**：把 Coder Skill 的 13 個 handler SOP（AUTH/BATCH/CREATE/UPDATE/DELETE/QUERY_LIST/QUERY_SINGLE/AGGREGATE/CASCADE/COLUMN_ALIAS/TOGGLE/RESTORE/TRANSACTION）從 `coder-generation.ts` 硬編碼 ~250 行 const 抽到 `services/coder-handlers/*.md` + `index.yml` 目錄索引，新建 `lib/skill-loader.ts` 做模組啟動時一次 cache 載入。觸發邏輯仍在代碼（`rule.type` 組合判斷 YAML 表達不了），**prompt 輸出 byte-identical 於舊實作**（3 種典型組合都驗證過）。`pnpm build` postbuild 自動 copy .md 到 dist/，skill-loader 也有 src/ fallback 防呆。35 個 snapshot 測試保證不退化。(3) **PR1 — 黑盒 Evaluator Agent**：新增 `services/preview-runner.ts` 抽出 coder-e2e-test 的 ephemeral Next.js dev server 編排為共用模組，在 UIUX/Fast Build/Clone QG 尾端插入 `services/ui-evaluator.ts` — Puppeteer 跑 preview → screenshot + DOM outline（**明確過濾掉 tsx 原始碼，只給 tag/role/text/href**）→ Sonnet Vision 依 `ui-evaluator-rubric/base.md` rubric 做黑盒 QA（四類 issue: layout_broken/content_missing/interaction_dead/visual_regression）→ 發現 issue 映射為 QualityIssue 餵回 Generator 修復（UIUX 2 輪、Fast Build/Clone 1 輪）。Feature flag `ENABLE_UI_EVALUATOR` 預設 false（staging 先開），timeout 預算 45s，任何失敗降級 softFail 不阻塞 pipeline。**整體結果**：1115 測試全綠，typecheck 零錯誤。**核心思維轉變**：從「把 prompt 寫得更好」改為「為 LLM 設計更嚴格的防呆機制與獨立驗收軌道」
 - **防雷清單 CI 守衛**（04-12）：Step 2 — 把 CLAUDE.md 60+ 條防雷清單轉化為自動化守衛。(1) **pre-commit hook**：`scripts/pre-commit-checks.sh`（6 條 grep 靜態檢查 + 1 條 telemetry .catch heuristic）+ husky + CI pipeline 整合；(2) **新增 48 個測試**（993→1041）：`coder-generation-rules.test.ts`（36 tests — classifyFailureRootCause 8+1 類覆蓋 + validateSlotColumns softDeleteColumn + _c snake_to_camel）、`uiux-generation-rules.test.ts`（5 tests — generateTailwindConfig 禁止 CSS var）、`semantic-gateway.test.ts` 擴充（7 tests — ITER_DESIGN_SIGNALS 錯誤修復詞 iteration 接受驗證）；(3) **CLAUDE.md 標注**：每條標記 `[CI]`/`[TEST]`/`[ARCH]`，區分 CI 守衛 vs 測試覆蓋 vs 需人工審查的架構約束
 - **Skill Telemetry v3 — Failure Telemetry Expansion**（04-12）：從「哪些成功模式在重複」擴充成「哪類失敗在重複、分佈在哪個 phase、多少被恢復了」。(1) **Schema 擴充** `migrations/031`：`outcome`（success/failed/repaired/timeout/blocked）+ `root_cause_category` + `phase` + `error_type` + `recovered` 五欄位 + 三個 partial index，向後相容既有 row 全為 success；(2) **Dead code 復活**：`coder-generation.ts` 的 `classifyFailureRootCause()` 8 類零 LLM 分類器接入 recordTelemetry（最高 ROI，原本寫好沒用）；(3) **Deployer L1/L3/L4/L5 分層埋點**：L1 validateComponentReferences 修復率、L3 fixBuildErrors 重試、L4 verifyBuildLocally 各輪、L5 useSearchParams Suspense 觸發率；(4) **Feature Alignment Gate**：alignment_blocked/fixed 追蹤，6 項檢查結果 + LLM 修復成敗；(5) **RED Phase L1/L2/L2.5**：靜態 12 檢查 + Stub/Routing 驗證失敗分佈；(6) **Syntax Validator**：esbuild 失敗 + Haiku 修復成功率；(7) **Prefilter**：reject（injection/gibberish/offensive/spam）+ antiloop 冷卻追蹤；(8) **Orchestrator 中心化 catch**：`handlePhaseError` 用 `classifyPhaseError()` 8 類零 LLM 分類（timeout/network/rate_limit/llm_error/filesystem/db_error/redis_error/oom）；(9) **FlowState Recovery**：超時偵測→恢復成功率按 phase 追蹤；(10) **週報 v3**：新增 Failure Overview（outcome×skill 分佈）+ Top Root Causes + Recovery Success Rate 三個 section。**目的**：讓週報直接回答「top 3 failure pattern 是什麼」「哪層防禦從來沒救過人」「同一類 bug 換型態再來比例」——打地鼠的前提是看清地鼠
@@ -1190,6 +1225,7 @@ psql "$DATABASE_URL" -f tellcraft-backend/migrations/xxx.sql
 - **層 5 Fix Loop 跳過**：`coder-generation.ts` 的 `classifyFailureRootCause` 加 `spec_inconsistency` 類別（偵測 scenario 名說 null + expect 非 null + actual=null 的模式）。`fixFailingAction` 遇到此類別直接 return 原代碼，不浪費 tokens
 - **層 6 用戶訊息升級**：`coder-phases.ts` 的 Coder testing 結果訊息呼叫 `analyzeSpecIssuesInFailures`。若偵測到 spec 矛盾，顯示具體矛盾點 + 修復建議 + quickReply「審查並修改 Feature」
 - **層 7 Discovery 主動問**：`services/prd-discovery.ts` 的 A8 級聯效應檢查強化——當需求涉及多 entity 關聯時主動生成 Relationship Lifecycle 問題（「刪父時子如何處理？」4 選項），從源頭避免 Feature/Schema 矛盾
+- **層 8 Feature ↔ actionsYml Summary 機械強制對齊**（2026-04-14）：解決 Coder testing「找不到 API 操作」9/9 全失敗 bug。Feature 與 actionsYml 是兩次獨立 LLM 生成，用詞漂移導致 SpecFormula findBySummary 失敗。根治：**機械對齊 features.name → actionsYml.summary**，不靠 LLM 自律。修 `alignFeatureSummaries` substring bug（單向容錯誤判）；新增 `alignActionsYmlSummariesToFeatures` 函數（actions-design.ts）在 YAML parse 後強制覆寫 summary；RED Phase 加 Check 4b + Alignment Gate 加 Check 6b 檢查每個 When 步驟 summary 在 actionsYml 存在；Fix loop 加 `api_summary_mismatch` rootCause + `shouldSkipLlmFix` skip；coder-phases 用戶訊息顯示具體找不到的 summaries + 建議回 BDD 修正；`findBySummary` 加 backward substring 容錯網（長度 ≥4 門檻避免誤匹配）+ warning log
 - **Phase 2B interrupt 實裝**：Domain / Clone / Fast Build 三個 subgraph 從 wrapper 升級為多 node + `interrupt()` human-in-the-loop
   - **Domain**（8 nodes, 3 interrupt, 2 loops）：entry → search → confirm（interrupt×2：確認/registrant 表單）→ register → complete。DNS path：dns_setup（interrupt）→ dns_verify → complete。retry_or_cancel interrupt + 換域名/DNS 未傳播 loop
   - **Clone**（3 nodes, 1 interrupt）：execute（完整 clone pipeline）→ failed interrupt（重試/取消 loop）

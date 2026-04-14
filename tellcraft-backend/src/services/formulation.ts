@@ -110,11 +110,12 @@ function alignFeatureSummaries(features: GeneratedFeature[]): void {
 
     while ((match = whenRegex.exec(feature.content)) !== null) {
       const stepSummary = match[2].trim()
-      // 如果 summary 跟 feature.name 完全一致或互相包含 → 不用修
+      // 唯一允許跳過的條件：完全相等。
+      // 移除 substring 容錯（之前有 bug：「使用者登入".includes("登入")` = true 會跳過，
+      // 但 SpecFormula 用 "使用者登入" 查 actionsYml 的 "登入" 會失敗）。
       if (stepSummary === feature.name) continue
-      if (feature.name.includes(stepSummary) || stepSummary.includes(feature.name)) continue
 
-      // 也檢查 Then 步驟是否引用同樣的 summary（Then summary 必須跟 When 一致）
+      // 任何差異（包含/被包含/字數差）都強制改為 feature.name（單一 source of truth）
       replacements.push({
         full: match[0],
         replacement: `${match[1]}${feature.name}${match[3]}`,

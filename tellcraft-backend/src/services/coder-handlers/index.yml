@@ -63,3 +63,7 @@ handlers:
     file: column-alias.md
     description: snake_case → camelCase 欄位轉換（幾乎所有 action 都需要）
     trigger: 有 hasResponseRules 或 hasStateRules
+  - id: email-sender
+    file: email-sender.md
+    description: Resend 發信（驗證信/通知信/magic-link）+ HTML escape
+    trigger: name 匹配 /email|寄信|通知|notify|verify|confirm|mail|發信/i
