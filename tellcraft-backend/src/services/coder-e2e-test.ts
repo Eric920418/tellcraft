@@ -1,22 +1,21 @@
 /**
  * Coder E2E 測試 — 在 /tmp 啟動 Next.js dev server + puppeteer 訪問每個頁面
  * 檢查 500 error / runtime error，發現問題自動修復
+ *
+ * PR1 重構：dev server 編排已抽到 preview-runner.ts。本檔只保留 Coder 專屬的
+ * scanPages + tryFixFromErrors 邏輯，包在 runEphemeralPreview 的 run callback 裡。
  */
 
-import { spawn, type ChildProcess } from 'child_process'
 import * as fs from 'fs/promises'
 import * as path from 'path'
-import * as os from 'os'
 import { createLogger } from '../lib/logger'
-import { wrapInNextJs, runNpmInstall } from './deployer'
 import type { GeneratedCode } from '../types/flow-state'
 import type { GeneratedComponent } from './uiux-generation'
 import { getEnv } from '../lib/env'
+import { runEphemeralPreview, type PreviewContext, type PreviewRoute } from './preview-runner'
 
 const logger = createLogger('coder-e2e-test')
 
-const E2E_TIMEOUT = 180_000 // 3 分鐘總超時
-const DEV_SERVER_TIMEOUT = 60_000 // 1 分鐘等 dev server 啟動
 const PAGE_TIMEOUT = 15_000 // 每頁 15 秒
 const MAX_FIX_ROUNDS = 2
 
@@ -35,48 +34,10 @@ interface E2EResult {
   summary: string
 }
 
-/** 從 pages 提取 Next.js 路由 */
-function extractRoutes(pages: GeneratedComponent[]): Array<{ route: string; filePath: string }> {
-  return pages.map(p => {
-    let route = p.path
-      .replace(/^app\//, '/')
-      .replace(/\/page\.tsx$/, '')
-      .replace(/\[locale\]\//, '')
-
-    // 動態路由替換成測試 ID
-    route = route.replace(/\[(\w+)\]/g, 'test-$1')
-
-    if (!route || route === '/') route = '/'
-    if (!route.startsWith('/')) route = '/' + route
-
-    return { route, filePath: p.path }
-  })
-}
-
-/** 找可用的 port */
-function getRandomPort(): number {
-  return 3456 + Math.floor(Math.random() * 44) // 3456-3499
-}
-
-/** 等待 dev server ready */
-async function waitForServerReady(port: number, timeoutMs: number): Promise<boolean> {
-  const start = Date.now()
-  while (Date.now() - start < timeoutMs) {
-    try {
-      const resp = await fetch(`http://localhost:${port}/`, { signal: AbortSignal.timeout(3000) })
-      if (resp.status < 502) return true // 任何非 502/503 都算 ready（包括 500，因為頁面可能有 runtime error 但 server 已啟動）
-    } catch {
-      // server 還沒啟動
-    }
-    await new Promise(r => setTimeout(r, 2000))
-  }
-  return false
-}
-
 /** Puppeteer 訪問每個頁面，收集 500 error */
 async function scanPages(
   port: number,
-  routes: Array<{ route: string; filePath: string }>,
+  routes: PreviewRoute[],
 ): Promise<E2EError[]> {
   const errors: E2EError[] = []
 
@@ -219,142 +180,89 @@ export async function runCoderE2ETests(input: {
 }): Promise<E2EResult> {
   const { code, tailwindConfig, extraDependencies, neonConnectionString, onProgress } = input
 
-  // 記憶體安全檢查：可用記憶體 < 1.5GB 時跳過（next dev + npm install 吃記憶體）
-  const freeMemMB = Math.round(os.freemem() / 1024 / 1024)
-  if (freeMemMB < 1536) {
-    logger.warn({ freeMemMB }, '記憶體不足，跳過 E2E 測試')
-    return { passed: false, softFail: true, errors: [], fixedFiles: [], summary: `記憶體不足（${freeMemMB}MB），跳過 E2E` }
-  }
-
   // 沒有 DB 連線 → 跳過（只有前端，不測後端）
   if (!neonConnectionString) {
     logger.info('無 neonConnectionString，跳過 E2E 測試')
     return { passed: true, errors: [], fixedFiles: [], summary: '跳過（無資料庫）' }
   }
 
-  const port = getRandomPort()
-  const tmpDir = path.join(os.tmpdir(), `tellcraft-e2e-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`)
-  let devProcess: ChildProcess | null = null
+  const previewResult = await runEphemeralPreview<E2EResult>({
+    code,
+    tailwindConfig,
+    extraDependencies,
+    neonConnectionString,
+    onProgress,
+    run: async (ctx: PreviewContext) => {
+      let allFixedFiles: Array<{ path: string; content: string }> = []
 
-  try {
-    // 1. 建立 /tmp 專案
-    onProgress?.('建立測試環境...')
-    const files = wrapInNextJs(code, 'e2e-test', tailwindConfig, extraDependencies)
-    await fs.mkdir(tmpDir, { recursive: true })
+      for (let round = 0; round <= MAX_FIX_ROUNDS; round++) {
+        onProgress?.(round === 0 ? `測試 ${ctx.routes.length} 個頁面...` : `修復第 ${round} 輪，重新測試...`)
 
-    for (const f of files) {
-      const filePath = path.join(tmpDir, f.file)
-      await fs.mkdir(path.dirname(filePath), { recursive: true })
-      await fs.writeFile(filePath, f.data)
-    }
+        const errors = await scanPages(ctx.port, ctx.routes)
 
-    // 寫入 .env
-    await fs.writeFile(path.join(tmpDir, '.env'), `DATABASE_URL=${neonConnectionString}\n`)
-
-    // 2. npm install
-    onProgress?.('安裝依賴...')
-    const installResult = await runNpmInstall(tmpDir)
-    if (!installResult.success) {
-      logger.warn({ output: installResult.output.slice(-500) }, 'E2E npm install 失敗')
-      return { passed: false, softFail: true, errors: [], fixedFiles: [], summary: 'npm install 失敗' }
-    }
-
-    // 3. 啟動 next dev
-    onProgress?.('啟動 Next.js dev server...')
-    const nextBin = path.join(tmpDir, 'node_modules', '.bin', 'next')
-    devProcess = spawn(nextBin, ['dev', '--port', String(port)], {
-      cwd: tmpDir,
-      env: { ...process.env, NODE_ENV: 'development', PORT: String(port), NODE_OPTIONS: '--max-old-space-size=768' },
-      stdio: ['ignore', 'pipe', 'pipe'],
-    })
-
-    const devLogs: string[] = []
-    devProcess.stdout?.on('data', (d: Buffer) => devLogs.push(d.toString()))
-    devProcess.stderr?.on('data', (d: Buffer) => devLogs.push(d.toString()))
-
-    const serverReady = await waitForServerReady(port, DEV_SERVER_TIMEOUT)
-    if (!serverReady) {
-      const logTail = devLogs.join('').slice(-500)
-      logger.warn({ port, logTail }, 'E2E dev server 啟動超時')
-      return { passed: false, softFail: true, errors: [], fixedFiles: [], summary: `dev server 啟動超時：${logTail.slice(-200)}` }
-    }
-
-    logger.info({ port }, 'E2E dev server ready')
-
-    // 4. 提取路由 + 掃描
-    const routes = extractRoutes(code.pages)
-    let allFixedFiles: Array<{ path: string; content: string }> = []
-
-    for (let round = 0; round <= MAX_FIX_ROUNDS; round++) {
-      onProgress?.(round === 0 ? `測試 ${routes.length} 個頁面...` : `修復第 ${round} 輪，重新測試...`)
-
-      const errors = await scanPages(port, routes)
-
-      if (errors.length === 0) {
-        logger.info({ round, routeCount: routes.length }, 'E2E 全部通過')
-        return {
-          passed: true,
-          errors: [],
-          fixedFiles: allFixedFiles,
-          summary: `${routes.length} 個頁面全部通過${round > 0 ? `（修復 ${round} 輪）` : ''}`,
+        if (errors.length === 0) {
+          logger.info({ round, routeCount: ctx.routes.length }, 'E2E 全部通過')
+          return {
+            passed: true,
+            errors: [],
+            fixedFiles: allFixedFiles,
+            summary: `${ctx.routes.length} 個頁面全部通過${round > 0 ? `（修復 ${round} 輪）` : ''}`,
+          }
         }
-      }
 
-      // 記錄 dev server 日誌以診斷 500 根因
-      const devLogTail = devLogs.join('').slice(-2000)
-      logger.warn({ round, errorCount: errors.length, errors: errors.map(e => `${e.route}: ${e.error.slice(0, 80)}`), devLogTail }, 'E2E 發現錯誤')
+        // 記錄 dev server 日誌以診斷 500 根因
+        const devLogTail = ctx.devLogs.join('').slice(-2000)
+        logger.warn({ round, errorCount: errors.length, errors: errors.map(e => `${e.route}: ${e.error.slice(0, 80)}`), devLogTail }, 'E2E 發現錯誤')
 
-      // 最後一輪不修了
-      if (round === MAX_FIX_ROUNDS) {
-        return {
-          passed: false,
-          errors,
-          fixedFiles: allFixedFiles,
-          summary: `${errors.length} 個頁面仍有錯誤（已修 ${round} 輪）：${errors.map(e => e.route).join(', ')}`,
+        // 最後一輪不修了
+        if (round === MAX_FIX_ROUNDS) {
+          return {
+            passed: false,
+            errors,
+            fixedFiles: allFixedFiles,
+            summary: `${errors.length} 個頁面仍有錯誤（已修 ${round} 輪）：${errors.map(e => e.route).join(', ')}`,
+          }
         }
-      }
 
-      // 嘗試修復
-      onProgress?.(`修復 ${errors.length} 個頁面錯誤...`)
-      const { fixedCode, fixedFiles } = tryFixFromErrors(errors, code)
-      allFixedFiles.push(...fixedFiles)
+        // 嘗試修復
+        onProgress?.(`修復 ${errors.length} 個頁面錯誤...`)
+        const { fixedFiles } = tryFixFromErrors(errors, code)
+        allFixedFiles.push(...fixedFiles)
 
-      if (fixedFiles.length === 0) {
-        // 沒有可修的 → 直接回傳
-        return {
-          passed: false,
-          errors,
-          fixedFiles: allFixedFiles,
-          summary: `${errors.length} 個頁面有錯誤（無法自動修復）：${errors.map(e => e.route).join(', ')}`,
+        if (fixedFiles.length === 0) {
+          // 沒有可修的 → 直接回傳
+          return {
+            passed: false,
+            errors,
+            fixedFiles: allFixedFiles,
+            summary: `${errors.length} 個頁面有錯誤（無法自動修復）：${errors.map(e => e.route).join(', ')}`,
+          }
         }
+
+        // 把修復後的檔案寫回 /tmp → HMR 生效
+        for (const f of fixedFiles) {
+          const filePath = path.join(ctx.tmpDir, f.path)
+          await fs.mkdir(path.dirname(filePath), { recursive: true })
+          await fs.writeFile(filePath, f.content)
+        }
+
+        // 等 HMR 重新編譯
+        await new Promise(r => setTimeout(r, 5000))
       }
 
-      // 把修復後的檔案寫回 /tmp → HMR 生效
-      for (const f of fixedFiles) {
-        const filePath = path.join(tmpDir, f.path)
-        await fs.mkdir(path.dirname(filePath), { recursive: true })
-        await fs.writeFile(filePath, f.content)
-      }
+      return { passed: false, errors: [], fixedFiles: allFixedFiles, summary: '未預期的結束' }
+    },
+  })
 
-      // 等 HMR 重新編譯
-      await new Promise(r => setTimeout(r, 5000))
-    }
-
-    return { passed: false, errors: [], fixedFiles: allFixedFiles, summary: '未預期的結束' }
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err)
-    logger.error({ err }, 'E2E 測試異常')
-    return { passed: false, softFail: true, errors: [], fixedFiles: [], summary: `E2E 測試異常：${msg.slice(0, 200)}` }
-  } finally {
-    // 清理
-    if (devProcess && !devProcess.killed) {
-      devProcess.kill('SIGTERM')
-      setTimeout(() => { if (!devProcess!.killed) devProcess!.kill('SIGKILL') }, 5000)
-    }
-    try {
-      await fs.rm(tmpDir, { recursive: true, force: true })
-    } catch {
-      // ignore cleanup error
+  if (!previewResult.ok) {
+    return {
+      passed: false,
+      softFail: previewResult.softFail,
+      errors: [],
+      fixedFiles: [],
+      summary: previewResult.skipReason || 'preview 失敗',
     }
   }
+
+  return previewResult.result!
 }

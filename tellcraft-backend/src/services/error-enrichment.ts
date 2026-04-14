@@ -149,11 +149,14 @@ ${enriched.harnessHint}
 /**
  * 把 EnrichedError 格式化為 RedPhaseUnexpectedFailure.error 的短字串。
  * 前置 hint 摘要 + 截斷的原始錯誤。
+ *
+ * 注意：不加 `[rootCause]` 前綴，因為下游消費者（如 coder-phases）會在外層
+ * 包 `[${f.failureType}]`，重複前綴會讓訊息變 `[entity_setup] ... [entity_setup] ...`。
  */
 export function formatHintForRedPhase(enriched: EnrichedError, maxOriginalLen: number = 300): string {
   const truncated = enriched.originalError.substring(0, maxOriginalLen)
   if (!enriched.harnessHint) return truncated
   // 取 hint 第一行（現象那一行）做 summary，完整 hint 留給 LLM 修復 prompt 用
   const hintSummary = enriched.harnessHint.split('\n')[0]
-  return `[${enriched.rootCause}] ${hintSummary}\n原始錯誤: ${truncated}`
+  return `${hintSummary}\n原始錯誤: ${truncated}`
 }

@@ -17,6 +17,9 @@ import {
   type CloneImageAnalysis,
 } from '../../services/web-clone-service'
 import { runQualityGate, autoFixCriticalIssuesRuleBased, autoFixCriticalIssues } from '../../services/quality-gate'
+import { evaluateUi, type UiEvaluationIssue } from '../../services/ui-evaluator'
+import type { QualityIssue } from '../../services/quality-gate'
+import { getEnv } from '../../lib/env'
 import { buildPostDeployFastBuildQuickReplies } from './fast-build-phases'
 import { createLogger } from '../../lib/logger'
 
@@ -494,6 +497,34 @@ async function finalizeMergedCode(
     }
   } catch (qgErr) {
     logger.warn({ err: qgErr }, 'Clone QG 執行失敗，跳過')
+  }
+
+  // ── 黑盒 Evaluator（PR1，1 輪）──
+  // Clone 場景 cloneDesignSystem 結構與 UIUX 不同，tailwindConfig 用空字串（preview 仰賴生成代碼內嵌的樣式）
+  if (getEnv().ENABLE_UI_EVALUATOR) try {
+    const evalResult = await evaluateUi({
+      code: currentCode,
+      tailwindConfig: '',
+      trackingContext: { userId: userId ?? undefined, conversationId },
+    })
+    if (!evalResult.softFail && !evalResult.report.passed) {
+      const evalIssues = evalResult.report.issues.filter(i => i.severity === 'critical')
+      if (evalIssues.length > 0) {
+        const qualityIssues: QualityIssue[] = evalIssues.map((i: UiEvaluationIssue, idx: number) => ({
+          id: `eval-clone-${idx}`,
+          category: 'code_quality',
+          severity: 'critical',
+          rule: `evaluator_${i.category}`,
+          message: `[Evaluator] ${i.description}（路由 ${i.route}）`,
+          file: i.route,
+          suggestion: '請從使用者視角修復此問題',
+        }))
+        const evalFixed = await autoFixCriticalIssues(currentCode, qualityIssues, { userId, conversationId, projectId: state.projectId })
+        if (evalFixed) currentCode = evalFixed
+      }
+    }
+  } catch (evalErr) {
+    logger.warn({ err: evalErr }, 'Clone Evaluator 失敗，跳過')
   }
 
   // ── 保存 + 轉 uiux_complete ──

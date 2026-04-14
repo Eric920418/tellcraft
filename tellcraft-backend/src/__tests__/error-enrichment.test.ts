@@ -121,10 +121,10 @@ describe('formatHintForPrompt', () => {
 // ============================================================
 
 describe('formatHintForRedPhase', () => {
-  it('有 hint 時前置 [rootCause] + hint summary + 截斷原文', () => {
+  it('有 hint 時：hint summary + 截斷原文（不加 [rootCause] 前綴避免下游重複）', () => {
     const enriched = enrichError('entity_setup 失敗：NOT NULL 欄位 email 未提供', 'entity_setup')
     const output = formatHintForRedPhase(enriched)
-    expect(output).toContain('[entity_setup]')
+    expect(output).not.toContain('[entity_setup]')  // 避免與下游 [f.failureType] 重複
     expect(output).toContain('原始錯誤:')
     expect(output).toContain('entity_setup 失敗')
   })

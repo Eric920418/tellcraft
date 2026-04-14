@@ -1,0 +1,65 @@
+# Coder Skill Handler 索引
+#
+# 這是 PR2「On-Demand Context / 按需注入式技能索引」的目錄索引。
+# 每個 handler 的實際 SOP 內容存於同目錄下的 .md 檔案，
+# 由 skill-loader.ts 在進程啟動時一次性載入並 cache。
+#
+# 觸發邏輯（trigger）為人類可讀的文件描述，實際匹配仍在 coder-generation.ts
+# 的 buildActionSystemPrompt / buildSubOpSystemPrompt 中以 TypeScript 實作，
+# 因為涉及 rule.type 組合判斷（hasStateRules + hasResponseRules）無法用 YAML 表達。
+
+version: 1
+skill: coder
+handlers:
+  - id: create
+    file: create.md
+    description: INSERT + RETURNING * 建立操作
+    trigger: 有「後置（狀態）」rule、或 SubOp type=create
+  - id: query-list
+    file: query-list.md
+    description: SELECT 多筆列表查詢 + snake_to_camel 轉換
+    trigger: 有「後置（回應）」rule、或 SubOp type=query_list/export
+  - id: query-single
+    file: query-single.md
+    description: SELECT 單筆查詢
+    trigger: 有「後置（回應）」rule、或 SubOp type=query_single
+  - id: update
+    file: update.md
+    description: UPDATE + RETURNING * 更新操作（前置狀態驗證）
+    trigger: 有「後置（狀態）」rule、或 SubOp type=update
+  - id: delete
+    file: delete.md
+    description: DELETE 或軟刪除（根據 Schema 是否有 deleted_at）
+    trigger: 有「後置（狀態）」rule、或 SubOp type=delete
+  - id: toggle
+    file: toggle.md
+    description: SELECT + UPDATE SET field = NOT field 切換操作
+    trigger: SubOp type=toggle
+  - id: restore
+    file: restore.md
+    description: UPDATE SET deleted_at = NULL 軟刪除復原
+    trigger: SubOp type=restore
+  - id: batch
+    file: batch.md
+    description: 逗號分隔 ID 批次 UPDATE（排序/拖曳）
+    trigger: name 匹配 /reorder|sort|batch|drag|拖曳|排序|批次/i
+  - id: auth
+    file: auth.md
+    description: 註冊/登入/登出（bcrypt + JWT）
+    trigger: name 匹配 /auth|login|register|signup|signin|logout|password|token|verify/i
+  - id: transaction
+    file: transaction.md
+    description: sql.begin() 原子性多表操作
+    trigger: name 匹配 /order.*item|cart.*product|transfer|transaction|原子/i 或 rules.length > 8
+  - id: aggregate
+    file: aggregate.md
+    description: SUM/COUNT/GROUP BY 聚合查詢（COALESCE + Number() 轉型）
+    trigger: rule 文字匹配 /摘要|統計|彙總|加總|合計|summary|aggregate|total|count|average|平均/i
+  - id: cascade
+    file: cascade.md
+    description: 父實體刪除時級聯處理子記錄
+    trigger: rule 文字匹配 /未分類|相關.*應|級聯|cascade|歸入|改為/i
+  - id: column-alias
+    file: column-alias.md
+    description: snake_case → camelCase 欄位轉換（幾乎所有 action 都需要）
+    trigger: 有 hasResponseRules 或 hasStateRules

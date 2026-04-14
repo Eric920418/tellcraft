@@ -8,7 +8,7 @@
   },
   "scripts": {
     "dev": "tsx watch src/index.ts",
-    "build": "tsc",
+    "build": "tsc && node -e \"const fs=require('fs'),p=require('path');for(const d of ['services/coder-handlers','services/ui-evaluator-rubric']){const src=p.join('src',d),dst=p.join('dist',d);fs.mkdirSync(dst,{recursive:true});for(const f of fs.readdirSync(src))fs.copyFileSync(p.join(src,f),p.join(dst,f));}\"",
     "start": "node dist/index.js",
     "typecheck": "tsc --noEmit",
     "test": "vitest",

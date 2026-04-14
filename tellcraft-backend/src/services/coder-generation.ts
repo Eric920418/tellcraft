@@ -20,6 +20,7 @@ import { sanitizeNamedImports } from '../utils/sanitize-named-imports'
 import { validateComponentSyntax } from './syntax-validator'
 import { recordTelemetry, truncateFeedback } from './skill-telemetry'
 import { enrichError, formatHintForPrompt } from './error-enrichment'
+import { getCoderHandlersJoined, type CoderHandlerId } from '../lib/skill-loader'
 import { generateAuthSystem, injectSessionProvider } from './coder-auth-templates'
 import { generateAdminPanel } from './coder-admin-templates'
 import { generateUploadFiles } from './coder-upload-templates'
@@ -305,278 +306,10 @@ TIMESTAMP → \`row.x instanceof Date ? row.x.toISOString() : row.x\`
 ## 輸出
 只輸出 TypeScript 代碼，不要任何解釋或 markdown 包裹。`
 
-// --- Handler: 建立操作 (INSERT) ---
-const CREATE_HANDLER = `
-## 建立操作 Handler
-\`\`\`typescript
-// 前置（參數）驗證
-if (!input.xxx) throw new Error('xxx 必須提供')
-
-// INSERT + RETURNING *（必須展開 row 到回傳物件）
-const [row] = await sql\`
-  INSERT INTO table_name (id, user_id, ..., created_at, updated_at)
-  VALUES (gen_random_uuid(), \${userId}, ..., NOW(), NOW())
-  RETURNING *
-\`
-return { __status: 201, ...row }
-\`\`\`
-重點：__status: 201，RETURNING * 展開到 return。`
-
-// --- Handler: 列表查詢 (SELECT 多筆) ---
-const QUERY_LIST_HANDLER = `
-## 列表查詢 Handler
-\`\`\`typescript
-function _c(row: any) {
-  if (!row) return row
-  const r: any = {}
-  for (const [k, v] of Object.entries(row)) {
-    r[k.replace(/_([a-z])/g, (_: any, c: string) => c.toUpperCase())] = v
-  }
-  return r
-}
-
-const rows = await sql\`
-  SELECT * FROM table_name
-  WHERE user_id = \${userId}
-  ORDER BY sort_order ASC
-\`
-const result = Array.from(rows).map(_c)
-;(result as any).__status = 200
-return result
-\`\`\`
-重點：
-- 回傳 Array（不要包成 { items: rows }），在 Array 上設 __status = 200
-- 必須用 _c() 做 snake_to_camel 轉換（PostgreSQL 回傳 snake_case，BDD 期望 camelCase）
-- 只有 Schema DDL 明確定義了 deleted_at 欄位時才加 WHERE deleted_at IS NULL。Schema 沒有 deleted_at 就不加！
-- **篩選/排序參數都是選填的**：不提供 filter/status 時查全部（不 throw），不提供 orderBy 時用預設排序
-- **禁止** \`if (!input.filter) throw\`，改用 \`const filter = input.filter || 'all'\` 提供預設值`
-
-// --- Handler: 單筆查詢 (SELECT 一筆) ---
-const QUERY_SINGLE_HANDLER = `
-## 單筆查詢 Handler
-\`\`\`typescript
-const entityId = input.id || input.xxxId
-if (!entityId) throw new Error('缺少 ID 參數')
-const [row] = await sql\`SELECT * FROM table_name WHERE id = \${entityId}\`
-if (!row) throw new Error('找不到資料')
-return { __status: 200, ...row }
-\`\`\``
-
-// --- Handler: 更新操作 (UPDATE) ---
-const UPDATE_HANDLER = `
-## 更新操作 Handler
-\`\`\`typescript
-const entityId = input.id || input.xxxId
-if (!entityId) throw new Error('缺少 ID 參數')
-
-// 前置（狀態）驗證：必須存在且屬於當前使用者
-const existing = await sql\`SELECT * FROM table_name WHERE id = \${entityId} AND user_id = \${userId}\`
-if (existing.length === 0) throw new Error('不存在或不屬於當前使用者')
-
-// UPDATE + RETURNING *（必須展開 row 到回傳物件）
-const [row] = await sql\`
-  UPDATE table_name SET col = \${val}, updated_at = NOW()
-  WHERE id = \${entityId}
-  RETURNING *
-\`
-return { __status: 200, ...row }
-\`\`\`
-重點：__status: 200，RETURNING * 展開到 return。`
-
-// --- Handler: 刪除操作 (DELETE/軟刪除) ---
-const DELETE_HANDLER = `
-## 刪除操作 Handler
-\`\`\`typescript
-const entityId = input.id || input.xxxId
-if (!entityId) throw new Error('缺少 ID 參數')
-
-// ⚠️ 先看 Schema DDL：
-// 如果 Schema 有 deleted_at 欄位 → 軟刪除：
-//   UPDATE table_name SET deleted_at = NOW(), updated_at = NOW() WHERE id = \${entityId} RETURNING *
-// 如果 Schema 沒有 deleted_at 欄位 → 硬刪除：
-const [row] = await sql\`
-  DELETE FROM table_name
-  WHERE id = \${entityId}
-  RETURNING *
-\`
-return { __status: 200, ...row }
-\`\`\`
-重點：先檢查 Schema DDL 是否有 deleted_at 欄位。沒有就用 DELETE FROM，不要腦補 soft delete。`
-
-// --- Handler: 切換操作 (TOGGLE) ---
-const TOGGLE_HANDLER = `
-## 切換操作 Handler
-\`\`\`typescript
-const entityId = input.id || input.xxxId
-if (!entityId) throw new Error('缺少 ID 參數')
-
-// 查找當前狀態
-const [existing] = await sql\`SELECT * FROM table_name WHERE id = \${entityId} AND deleted_at IS NULL\`
-if (!existing) throw new Error('不存在或已被刪除')
-
-// 切換布林欄位（如 is_completed）
-const [row] = await sql\`
-  UPDATE table_name SET is_xxx = NOT is_xxx, updated_at = NOW()
-  WHERE id = \${entityId}
-  RETURNING *
-\`
-return { __status: 200, ...row }
-\`\`\`
-重點：先 SELECT 確認存在且未刪除，再 UPDATE SET field = NOT field。`
-
-// --- Handler: 復原操作 (RESTORE soft-deleted) ---
-const RESTORE_HANDLER = `
-## 復原操作 Handler
-\`\`\`typescript
-const entityId = input.id || input.xxxId
-if (!entityId) throw new Error('缺少 ID 參數')
-
-// 確認已被軟刪除
-const [existing] = await sql\`SELECT * FROM table_name WHERE id = \${entityId} AND deleted_at IS NOT NULL\`
-if (!existing) throw new Error('該記錄未被刪除或不存在')
-
-const [row] = await sql\`
-  UPDATE table_name SET deleted_at = NULL, updated_at = NOW()
-  WHERE id = \${entityId}
-  RETURNING *
-\`
-return { __status: 200, ...row }
-\`\`\`
-重點：復原 = 將 deleted_at 設為 NULL。必須先確認 deleted_at IS NOT NULL。`
-
-// --- Handler: 批次操作 (排序/拖曳) ---
-const BATCH_HANDLER = `
-## 批次操作 Handler
-\`\`\`typescript
-// 輸入：逗號分隔字串 → split 成陣列
-const ids = (input.orderedItemIds || '').split(',').map(s => s.trim()).filter(Boolean)
-if (ids.length === 0) throw new Error('缺少 orderedItemIds 參數')
-
-// 逐筆 UPDATE
-for (let i = 0; i < ids.length; i++) {
-  await sql\`UPDATE table_name SET sort_order = \${i + 1}, updated_at = NOW() WHERE id = \${ids[i]}\`
-}
-return { __status: 200, success: true }
-\`\`\`
-重點：回傳 { success: true }，PostgreSQL array 查詢用 ANY(\${ids}::uuid[])。`
-
-// --- Handler: 認證操作 (登入/註冊/登出) ---
-const AUTH_HANDLER = `
-## 認證操作 Handler
-\`\`\`typescript
-// 註冊：INSERT + bcrypt hash + 回傳 userId
-const hashedPassword = await bcrypt.hash(input.password, 10)
-const [user] = await sql\`INSERT INTO users (...) VALUES (...) RETURNING *\`
-return { __status: 201, userId: user.id, message: '註冊成功' }
-
-// 登入：bcrypt.compare + JWT
-const [user] = await sql\`SELECT * FROM users WHERE email = \${input.email}\`
-if (!user) throw new Error('使用者不存在')
-const valid = await bcrypt.compare(input.password, user.password_hash)
-if (!valid) throw new Error('密碼不正確')
-const accessToken = jwt.sign({ userId: user.id }, process.env.JWT_SECRET || 'secret', { expiresIn: '7d' })
-return { __status: 200, userId: user.id, accessToken, message: '登入成功' }
-
-// 登出：直接回傳
-return { __status: 200, message: '登出成功' }
-\`\`\`
-重點：註冊/登入必須回 userId + message。登入必須回 accessToken。`
-
-// --- Handler: Transaction ---
-const TRANSACTION_HANDLER = `
-## Transaction Handler
-\`\`\`typescript
-const result = await sql.begin(async (tx) => {
-  const [row] = await tx\`INSERT INTO ... RETURNING *\`
-  await tx\`UPDATE ... WHERE ...\`
-  return row
-})
-return { __status: 201, ...result }
-\`\`\``
-
-// --- Handler: 聚合/摘要查詢 ---
-const AGGREGATE_HANDLER = `
-## 聚合/摘要查詢 Handler
-\`\`\`typescript
-// 聚合查詢必須用 COALESCE 防止 NULL，非聚合欄位必須 GROUP BY
-const rows = await sql\`
-  SELECT
-    COALESCE(SUM(CASE WHEN type = 'income' THEN amount ELSE 0 END), 0) as "totalIncome",
-    COALESCE(SUM(CASE WHEN type = 'expense' THEN amount ELSE 0 END), 0) as "totalExpense"
-  FROM table_name
-  WHERE device_id = \${deviceId}
-    AND date_trunc('month', transaction_date) = date_trunc('month', \${month}::date)
-\`
-const result = rows[0] || { totalIncome: 0, totalExpense: 0 }
-// 數值欄位必須轉 Number（PostgreSQL 回傳 string）
-return { __status: 200, totalIncome: Number(result.totalIncome), totalExpense: Number(result.totalExpense) }
-\`\`\`
-規則：
-- SELECT 中非聚合函數的欄位**必須**出現在 GROUP BY
-- 用 COALESCE(..., 0) 防止空結果回傳 NULL
-- 用 Number() 轉型（PostgreSQL SUM/COUNT 回傳 string）
-- 用 date_trunc() 做月份比較，不要拼字串
-- 分組查詢（GROUP BY）回傳 Array 設 __status；單一聚合取 rows[0] 回傳 Object
-- 無資料時回傳零值物件，不要回傳 404
-- 只有 Schema 有 deleted_at 欄位時才加 WHERE deleted_at IS NULL。Schema 沒有就不加！`
-
-// --- Handler: 級聯刪除/更新 ---
-const CASCADE_HANDLER = `
-## 級聯刪除/更新 Handler
-當刪除父實體時，如果有子實體透過 FK 引用它，必須同時處理子記錄：
-\`\`\`typescript
-const result = await sql.begin(async (tx) => {
-  // ⚠️ 先看 Schema DDL：有 deleted_at → 軟刪除；沒有 → 硬刪除
-  // 如果 Schema 有 ON DELETE CASCADE，硬刪除 parent 會自動刪子記錄，不需手動處理
-  const [parent] = await tx\`
-    DELETE FROM parent_table WHERE id = \${entityId} RETURNING *
-  \`
-  if (!parent) throw new Error('找不到資料')
-
-  // 如果 BDD 測試提到「未分類」且 Schema 沒有 CASCADE：
-  // const [defaultCategory] = await tx\`SELECT id FROM categories WHERE name = '未分類' LIMIT 1\`
-  // await tx\`UPDATE child_table SET parent_id = \${defaultCategory?.id} WHERE parent_id = \${entityId}\`
-  return parent
-})
-return { __status: 200, ...result }
-\`\`\`
-規則：
-- 先看 Schema DDL：如果 FK 有 ON DELETE CASCADE，直接 DELETE parent（子記錄自動刪除）
-- 如果 Schema 有 deleted_at 欄位，用 UPDATE SET deleted_at = NOW() 代替 DELETE
-- 如果 BDD 測試提到「未分類」，先查找未分類類別 ID 來替換 FK
-- 用 sql.begin() 確保原子性`
-
-// --- Handler: 欄位別名（snake_case → camelCase）---
-const COLUMN_ALIAS_HANDLER = `
-## 欄位別名（PostgreSQL snake_case → camelCase）
-PostgreSQL 回傳的欄位名是 snake_case（category_id, created_at, transaction_date）。
-BDD 測試驗證的欄位名是 camelCase（categoryId, createdAt, transactionDate）。
-必須在回傳前轉換，否則測試一定失敗！
-\`\`\`typescript
-// 方法 1: SQL AS 別名（推薦）
-SELECT category_id as "categoryId", created_at as "createdAt", updated_at as "updatedAt" FROM ...
-
-// 方法 2: 程式碼轉換（適合 RETURNING * 展開場景）
-function snakeToCamel(row: any) {
-  if (!row) return row
-  const result: any = {}
-  for (const [key, value] of Object.entries(row)) {
-    const camelKey = key.replace(/_([a-z])/g, (_, c: string) => c.toUpperCase())
-    result[camelKey] = value
-  }
-  return result
-}
-// 用在 INSERT/UPDATE/DELETE RETURNING * 後
-const [row] = await sql\`UPDATE ... RETURNING *\`
-return { __status: 200, ...snakeToCamel(row) }
-
-// 列表查詢
-const rows = await sql\`SELECT * FROM ...\`
-const camelRows = rows.map(snakeToCamel)
-;(camelRows as any).__status = 200
-return camelRows
-\`\`\`
-重點：BDD requiredResponseFields 列表中的名稱是精確的 camelCase，你的回傳必須完全匹配。`
+// ============================================================
+// Handler SOP 內容已抽離到 services/coder-handlers/*.md（PR2 — 按需注入技能索引）
+// 透過 lib/skill-loader.ts 的 getCoderHandler(id) 載入，觸發邏輯仍在本檔 buildActionSystemPrompt / buildSubOpSystemPrompt
+// ============================================================
 
 /**
  * 根據 action 的 rules 類型，選擇性注入相關 handler。
@@ -585,18 +318,18 @@ return camelRows
 function buildActionSystemPrompt(action?: ActionEntry): CacheableSystemPrompt {
   if (!action) return buildCacheableSystem(BASE_PROMPT)
 
-  const handlers: string[] = []
+  const handlers: CoderHandlerId[] = []
   const rules = action.rules || []
   const nameHint = ((action.name || '') + ' ' + (action.summary || '')).toLowerCase()
 
   // 認證相關
   if (/auth|login|register|signup|signin|logout|password|token|verify/i.test(nameHint)) {
-    handlers.push(AUTH_HANDLER)
+    handlers.push('auth')
   }
 
   // 批次操作
   if (/reorder|sort|batch|drag|拖曳|排序|批次/i.test(nameHint)) {
-    handlers.push(BATCH_HANDLER)
+    handlers.push('batch')
   }
 
   // 從 rules 類型判斷需要的 handler
@@ -605,25 +338,25 @@ function buildActionSystemPrompt(action?: ActionEntry): CacheableSystemPrompt {
 
   // 有後置（狀態）→ 可能有 INSERT/UPDATE/DELETE
   if (hasStateRules) {
-    handlers.push(CREATE_HANDLER)
-    handlers.push(UPDATE_HANDLER)
-    handlers.push(DELETE_HANDLER)
+    handlers.push('create')
+    handlers.push('update')
+    handlers.push('delete')
   }
 
   // 有後置（回應）→ 有查詢操作
   if (hasResponseRules) {
-    handlers.push(QUERY_LIST_HANDLER)
-    handlers.push(QUERY_SINGLE_HANDLER)
+    handlers.push('query-list')
+    handlers.push('query-single')
   }
 
   // 如果沒有匹配到任何 handler（兜底），注入所有
   if (handlers.length === 0) {
-    handlers.push(CREATE_HANDLER, QUERY_LIST_HANDLER, QUERY_SINGLE_HANDLER, UPDATE_HANDLER, DELETE_HANDLER, BATCH_HANDLER)
+    handlers.push('create', 'query-list', 'query-single', 'update', 'delete', 'batch')
   }
 
   // Transaction handler（如果有多表操作暗示）
   if (/order.*item|cart.*product|transfer|transaction|原子/i.test(nameHint) || rules.length > 8) {
-    handlers.push(TRANSACTION_HANDLER)
+    handlers.push('transaction')
   }
 
   // --- 語義感知 handler 選擇（補充 rule-type 之外的模式）---
@@ -632,20 +365,20 @@ function buildActionSystemPrompt(action?: ActionEntry): CacheableSystemPrompt {
 
   // 聚合/摘要查詢（SUM, GROUP BY, 統計）
   if (/摘要|統計|彙總|加總|合計|summary|aggregate|total|count|average|平均/i.test(allText)) {
-    handlers.push(AGGREGATE_HANDLER)
+    handlers.push('aggregate')
   }
 
   // 級聯操作（刪除父實體需要更新子記錄）
   if (rules.some(r => /未分類|相關.*應|級聯|cascade|歸入|改為/i.test((r as any).rule || (r as any).description || ''))) {
-    handlers.push(CASCADE_HANDLER)
+    handlers.push('cascade')
   }
 
   // camelCase 欄位別名（所有有回應或狀態驗證的 action 都需要）
   if (hasResponseRules || hasStateRules) {
-    handlers.push(COLUMN_ALIAS_HANDLER)
+    handlers.push('column-alias')
   }
 
-  return buildCacheableSystem(BASE_PROMPT, handlers.join('\n'))
+  return buildCacheableSystem(BASE_PROMPT, getCoderHandlersJoined(handlers))
 }
 
 function buildActionUserPrompt(
@@ -846,25 +579,25 @@ function extractResponseFieldsFromGherkin(gherkinText: string): string[] {
 
 /** 精準 handler 選擇（每個子操作只注入 1 個主 handler） */
 function buildSubOpSystemPrompt(subOp: SubOperation): CacheableSystemPrompt {
-  const handlers: string[] = []
+  const handlers: CoderHandlerId[] = []
   switch (subOp.operationType) {
-    case 'create':      handlers.push(CREATE_HANDLER); break
-    case 'update':      handlers.push(UPDATE_HANDLER); break
-    case 'delete':      handlers.push(DELETE_HANDLER); break
-    case 'query_list':  handlers.push(QUERY_LIST_HANDLER); break
-    case 'query_single': handlers.push(QUERY_SINGLE_HANDLER); break
-    case 'aggregate':   handlers.push(AGGREGATE_HANDLER); break
-    case 'toggle':      handlers.push(TOGGLE_HANDLER); break
-    case 'restore':     handlers.push(RESTORE_HANDLER); break
-    case 'cascade':     handlers.push(CASCADE_HANDLER); break
-    case 'auth':        handlers.push(AUTH_HANDLER); break
-    case 'batch':       handlers.push(BATCH_HANDLER); break
-    case 'export':      handlers.push(QUERY_LIST_HANDLER); break
+    case 'create':      handlers.push('create'); break
+    case 'update':      handlers.push('update'); break
+    case 'delete':      handlers.push('delete'); break
+    case 'query_list':  handlers.push('query-list'); break
+    case 'query_single': handlers.push('query-single'); break
+    case 'aggregate':   handlers.push('aggregate'); break
+    case 'toggle':      handlers.push('toggle'); break
+    case 'restore':     handlers.push('restore'); break
+    case 'cascade':     handlers.push('cascade'); break
+    case 'auth':        handlers.push('auth'); break
+    case 'batch':       handlers.push('batch'); break
+    case 'export':      handlers.push('query-list'); break
     default:
-      handlers.push(CREATE_HANDLER, QUERY_LIST_HANDLER, UPDATE_HANDLER, DELETE_HANDLER)
+      handlers.push('create', 'query-list', 'update', 'delete')
   }
-  handlers.push(COLUMN_ALIAS_HANDLER)
-  return buildCacheableSystem(BASE_PROMPT, handlers.join('\n'))
+  handlers.push('column-alias')
+  return buildCacheableSystem(BASE_PROMPT, getCoderHandlersJoined(handlers))
 }
 
 // ============================================================

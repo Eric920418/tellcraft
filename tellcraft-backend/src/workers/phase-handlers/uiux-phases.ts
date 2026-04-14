@@ -17,6 +17,9 @@ import {
 } from '../../services/uiux-generation'
 import { translateBddToUISpec, buildUISpecSummary } from '../../services/bdd-to-ui-spec'
 import { runQualityGate, autoFixCriticalIssues, autoFixCriticalIssuesRuleBased } from '../../services/quality-gate'
+import { evaluateUi, type UiEvaluationIssue } from '../../services/ui-evaluator'
+import type { QualityIssue } from '../../services/quality-gate'
+import { getEnv } from '../../lib/env'
 import { getBddSession, updateBddSession } from '../../services/bdd-session'
 import { analyzeReference, analyzeUploadedImage } from '../../services/reference-analyzer'
 import { recommendMoods, getMoodSummary } from '../../services/design-moods'
@@ -1508,6 +1511,49 @@ export async function executeFullCodePipeline(
 
   report.summary.autoFixed = totalAutoFixed
 
+  // ===== 黑盒 Evaluator 二階段 QA（PR1 Harness Engineering）=====
+  // 獨立驗收軌道：看不到 tsx 代碼，只從 screenshot + DOM outline 判斷可用性
+  // flag off 時完全跳過迴圈，避免 generateTailwindConfig 白算
+  if (getEnv().ENABLE_UI_EVALUATOR) {
+    const MAX_EVAL_ATTEMPTS = 2
+    const evalTwConfig = generateTailwindConfig(uiuxDesignSystem)
+    const qgTrackingContextEval = { userId: state.userId, conversationId, projectId: state.projectId }
+    for (let evalAttempt = 0; evalAttempt < MAX_EVAL_ATTEMPTS; evalAttempt++) {
+      const evalResult = await evaluateUi({
+        code: currentCode,
+        tailwindConfig: evalTwConfig,
+        tier: state.uiuxDesignTier,
+        bddBrief: state.uiuxDesignBrief?.styleSummary,
+        trackingContext: { userId: state.userId ?? undefined, conversationId },
+      })
+
+      // softFail（preview 失敗 / LLM 失敗）→ 不阻塞
+      if (evalResult.softFail || evalResult.report.passed) break
+
+      const evalIssues = evalResult.report.issues.filter(i => i.severity === 'critical')
+      if (evalIssues.length === 0) break
+
+      logger.info({ evalAttempt, issueCount: evalIssues.length }, 'Evaluator 發現 critical 問題，嘗試 Generator 修復')
+
+      const qualityIssues: QualityIssue[] = evalIssues.map((i: UiEvaluationIssue, idx: number) => ({
+        id: `eval-${evalAttempt}-${idx}`,
+        category: 'code_quality',
+        severity: 'critical',
+        rule: `evaluator_${i.category}`,
+        message: `[Evaluator] ${i.description}（路由 ${i.route}）`,
+        file: i.route,
+        suggestion: '請從使用者視角修復此問題，不要只是改 class 名稱',
+      }))
+
+      const evalFixed = await autoFixCriticalIssues(currentCode, qualityIssues, qgTrackingContextEval)
+      if (!evalFixed) break
+      currentCode = evalFixed
+      totalAutoFixed += evalIssues.length
+    }
+
+    report.summary.autoFixed = totalAutoFixed
+  }
+
   // ===== 保存最終結果 =====
   state.uiuxGeneratedCode = currentCode
   state.uiuxQualityReport = report
@@ -1969,6 +2015,38 @@ export async function executeQualityGate(
 
   // 更新 autoFixed 計數
   report.summary.autoFixed = totalAutoFixed
+
+  // ===== 黑盒 Evaluator 二階段 QA（PR1）=====
+  if (getEnv().ENABLE_UI_EVALUATOR) {
+    const MAX_EVAL_ATTEMPTS_2 = 2
+    const evalTwConfig2 = generateTailwindConfig(uiuxDesignSystem)
+    for (let evalAttempt = 0; evalAttempt < MAX_EVAL_ATTEMPTS_2; evalAttempt++) {
+      const evalResult = await evaluateUi({
+        code: currentCode,
+        tailwindConfig: evalTwConfig2,
+        tier: state.uiuxDesignTier,
+        bddBrief: state.uiuxDesignBrief?.styleSummary,
+        trackingContext: { userId: state.userId ?? undefined, conversationId },
+      })
+      if (evalResult.softFail || evalResult.report.passed) break
+      const evalIssues = evalResult.report.issues.filter(i => i.severity === 'critical')
+      if (evalIssues.length === 0) break
+      const qualityIssues: QualityIssue[] = evalIssues.map((i: UiEvaluationIssue, idx: number) => ({
+        id: `eval-alt-${evalAttempt}-${idx}`,
+        category: 'code_quality',
+        severity: 'critical',
+        rule: `evaluator_${i.category}`,
+        message: `[Evaluator] ${i.description}（路由 ${i.route}）`,
+        file: i.route,
+        suggestion: '請從使用者視角修復此問題',
+      }))
+      const evalFixed = await autoFixCriticalIssues(currentCode, qualityIssues, { userId: state.userId, conversationId, projectId: state.projectId })
+      if (!evalFixed) break
+      currentCode = evalFixed
+      totalAutoFixed += evalIssues.length
+    }
+    report.summary.autoFixed = totalAutoFixed
+  }
 
   // 更新代碼和報告到 state
   state.uiuxGeneratedCode = currentCode

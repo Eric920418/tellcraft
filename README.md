@@ -236,6 +236,10 @@ Supabase PostgREST 只能做 CRUD + RLS，**搞不定**：
 | `template-matcher.ts` | 無 | orchestrator | 三層評分匹配（零 LLM） |
 | `design-moods.ts` | 無 | uiux-phases / fast-build | 8 個設計情緒預設 + `recommendMoods()` 規則推薦 + prompt 注入 getter |
 | `customer-service.ts` | 無 / Sonnet | fast mode + handleContinueFlow | 客服問答：意圖偵測（greeting/question/chitchat/help）+ FAQ 零 LLM 匹配（9 主題）+ Sonnet 開放問答 |
+| `error-enrichment.ts` | 無 | fixFailingAction + red-phase + feature-alignment | **Harness 級修復提示注入**：依已分類的 rootCause（9 類 Coder + 5 類 RED Phase）查 `ROOT_CAUSE_HINTS` 表，把結構化修復方向塞進 LLM prompt，讓修復不只看原始 error 字串 |
+| `skill-loader.ts` | 無 | buildActionSystemPrompt / buildSubOpSystemPrompt | **按需注入技能索引**：13 個 Coder handler SOP 抽到 `coder-handlers/*.md`，模組啟動時一次載入 cache，dev/prod 雙路徑 fallback（src/ vs dist/）。prompt 輸出 byte-identical 於舊硬編碼 const |
+| `ui-evaluator.ts` | Sonnet Vision | UIUX/Fast Build/Clone QG 尾端 | **黑盒 Evaluator Agent**：Puppeteer 跑 ephemeral Next.js preview → screenshot + DOM outline（**看不到 tsx**）→ Sonnet Vision + rubric 判斷可用性（layout_broken/content_missing/interaction_dead/visual_regression）。Feature flag `ENABLE_UI_EVALUATOR` 預設 false |
+| `preview-runner.ts` | 無 | coder-e2e-test + ui-evaluator | 共用 ephemeral Next.js dev server 編排（/tmp 專案 → npm install → spawn next dev → 等 ready → 交給 caller run callback → 清理），抽自 coder-e2e-test.ts |
 | `line-notify.ts` | 無 | orchestrator-utils | LINE 推播通知（stage 白名單過濾） |
 | `telegram-notify.ts` | 無 | orchestrator-utils | Telegram 里程碑推播通知（stage 白名單，非 Bot 對話才推） |
 | `telegram-full-push.ts` | 無 | orchestrator-utils | Telegram Bot 全量翻譯推送（Telegram 來源的對話） |
@@ -1041,8 +1045,9 @@ psql "$DATABASE_URL" -f tellcraft-backend/migrations/xxx.sql
 <details>
 <summary><h2>開發更新紀錄（點擊展開）</h2></summary>
 
-### 近期更新（2026-03-13 ~ 2026-04-08）
+### 近期更新（2026-03-13 ~ 2026-04-14）
 
+- **Harness Engineering 三項升級**（04-14）：將 Anthropic/OpenAI Harness Engineering 實踐對應到 Tellcraft 的修復迴圈。(1) **PR3 — Harness 級錯誤反饋攔截**：新增 `services/error-enrichment.ts`，依已分類的 rootCause（`classifyFailureRootCause` 9 類 + `classifyRedPhaseFailure` 5 類）查 `ROOT_CAUSE_HINTS` 表，把結構化修復方向（「常見根因 + 修復方向」）注入 LLM 的 `fixFailingAction`（主 + Per-SubOp 雙路徑）、`red-phase-validator` unexpectedFailures、`feature-alignment-gate` fixMultipleFeatures 三個修復整合點。`var_resolution`/`auth_check`/`spec_inconsistency` 三類 `skipLlmFix=true` 短路不走 LLM。27 個單元測試覆蓋 14 類 rootCause。(2) **PR2 — 按需注入技能索引**：把 Coder Skill 的 13 個 handler SOP（AUTH/BATCH/CREATE/UPDATE/DELETE/QUERY_LIST/QUERY_SINGLE/AGGREGATE/CASCADE/COLUMN_ALIAS/TOGGLE/RESTORE/TRANSACTION）從 `coder-generation.ts` 硬編碼 ~250 行 const 抽到 `services/coder-handlers/*.md` + `index.yml` 目錄索引，新建 `lib/skill-loader.ts` 做模組啟動時一次 cache 載入。觸發邏輯仍在代碼（`rule.type` 組合判斷 YAML 表達不了），**prompt 輸出 byte-identical 於舊實作**（3 種典型組合都驗證過）。`pnpm build` postbuild 自動 copy .md 到 dist/，skill-loader 也有 src/ fallback 防呆。35 個 snapshot 測試保證不退化。(3) **PR1 — 黑盒 Evaluator Agent**：新增 `services/preview-runner.ts` 抽出 coder-e2e-test 的 ephemeral Next.js dev server 編排為共用模組，在 UIUX/Fast Build/Clone QG 尾端插入 `services/ui-evaluator.ts` — Puppeteer 跑 preview → screenshot + DOM outline（**明確過濾掉 tsx 原始碼，只給 tag/role/text/href**）→ Sonnet Vision 依 `ui-evaluator-rubric/base.md` rubric 做黑盒 QA（四類 issue: layout_broken/content_missing/interaction_dead/visual_regression）→ 發現 issue 映射為 QualityIssue 餵回 Generator 修復（UIUX 2 輪、Fast Build/Clone 1 輪）。Feature flag `ENABLE_UI_EVALUATOR` 預設 false（staging 先開），timeout 預算 45s，任何失敗降級 softFail 不阻塞 pipeline。**整體結果**：1115 測試全綠，typecheck 零錯誤。**核心思維轉變**：從「把 prompt 寫得更好」改為「為 LLM 設計更嚴格的防呆機制與獨立驗收軌道」
 - **防雷清單 CI 守衛**（04-12）：Step 2 — 把 CLAUDE.md 60+ 條防雷清單轉化為自動化守衛。(1) **pre-commit hook**：`scripts/pre-commit-checks.sh`（6 條 grep 靜態檢查 + 1 條 telemetry .catch heuristic）+ husky + CI pipeline 整合；(2) **新增 48 個測試**（993→1041）：`coder-generation-rules.test.ts`（36 tests — classifyFailureRootCause 8+1 類覆蓋 + validateSlotColumns softDeleteColumn + _c snake_to_camel）、`uiux-generation-rules.test.ts`（5 tests — generateTailwindConfig 禁止 CSS var）、`semantic-gateway.test.ts` 擴充（7 tests — ITER_DESIGN_SIGNALS 錯誤修復詞 iteration 接受驗證）；(3) **CLAUDE.md 標注**：每條標記 `[CI]`/`[TEST]`/`[ARCH]`，區分 CI 守衛 vs 測試覆蓋 vs 需人工審查的架構約束
 - **Skill Telemetry v3 — Failure Telemetry Expansion**（04-12）：從「哪些成功模式在重複」擴充成「哪類失敗在重複、分佈在哪個 phase、多少被恢復了」。(1) **Schema 擴充** `migrations/031`：`outcome`（success/failed/repaired/timeout/blocked）+ `root_cause_category` + `phase` + `error_type` + `recovered` 五欄位 + 三個 partial index，向後相容既有 row 全為 success；(2) **Dead code 復活**：`coder-generation.ts` 的 `classifyFailureRootCause()` 8 類零 LLM 分類器接入 recordTelemetry（最高 ROI，原本寫好沒用）；(3) **Deployer L1/L3/L4/L5 分層埋點**：L1 validateComponentReferences 修復率、L3 fixBuildErrors 重試、L4 verifyBuildLocally 各輪、L5 useSearchParams Suspense 觸發率；(4) **Feature Alignment Gate**：alignment_blocked/fixed 追蹤，6 項檢查結果 + LLM 修復成敗；(5) **RED Phase L1/L2/L2.5**：靜態 12 檢查 + Stub/Routing 驗證失敗分佈；(6) **Syntax Validator**：esbuild 失敗 + Haiku 修復成功率；(7) **Prefilter**：reject（injection/gibberish/offensive/spam）+ antiloop 冷卻追蹤；(8) **Orchestrator 中心化 catch**：`handlePhaseError` 用 `classifyPhaseError()` 8 類零 LLM 分類（timeout/network/rate_limit/llm_error/filesystem/db_error/redis_error/oom）；(9) **FlowState Recovery**：超時偵測→恢復成功率按 phase 追蹤；(10) **週報 v3**：新增 Failure Overview（outcome×skill 分佈）+ Top Root Causes + Recovery Success Rate 三個 section。**目的**：讓週報直接回答「top 3 failure pattern 是什麼」「哪層防禦從來沒救過人」「同一類 bug 換型態再來比例」——打地鼠的前提是看清地鼠
 - **Skill Telemetry v2 — 真閉環**（04-11）：升級自我強化迴圈。(1) **Week-over-week delta**：`aggregateWeeklyReportWithDelta` 同時查當前+前一週，每個 pattern 顯示 `↑/↓ N%` 對照，不再只有絕對數字；(2) **Prompt Change 註冊表**：`migrations/030_add_prompt_changes.sql` + `registerPromptChange()` / `retirePromptChange()` / `measurePromptChangeEffects()`。每次改 prompt 或加 code rule 後用 `register-prompt-change.ts` CLI 註冊，自動查 baseline_count（近 7 天觸發數），下週報顯示 `注入前基線 vs 最新觸發 → reduction %`；(3) **汰換候選**：`currentWeeklyCount < 5 && weeksActive >= 4` 自動標記「畢業候選」，防 prompt 堆疊膨脹；(4) **Direction A 候選**：`findDirectionACandidates()` 零 LLM 檢測「高頻 + 已有 sanitize regex 能修但 QG 路徑沒覆蓋」的 pattern，建議轉 deterministic code rule 而非教 LLM。**核心原則不變**：禁止自動回灌 prompt，人工看週報→決策→註冊→量化效應→汰換
@@ -1234,32 +1239,19 @@ psql "$DATABASE_URL" -f tellcraft-backend/migrations/xxx.sql
 - `&isNull` 在 entity_setup → 跳過欄位（DB 用 DEFAULT）
 - response_validate 缺 DataTable → warn + skip
 
-### 核心功能建設（2026-02-24 ~ 2026-02-28）
+### 地基建設（2026-01-31 ~ 2026-02-28，已整合到現行系統）
 
-- **LLM JSON 解析統一**（02-28）：safeParseJson 四層防禦，12 service 替換
-- **i18n Phase 1+2**（02-28）：766→883 keys / 27→29 namespaces，Server Action error code 機制
-- **LINE Bot 深度整合**（02-27）：Webhook+Handler+Translator+Full Push，完整 Fast Build 生命週期
-- **帳號綁定**（02-27）：user_providers 表 + Google↔LINE 雙綁 + 解綁保護
-- **LINE LIFF + 推播**（02-27）：Flex Message 卡片 + LIFF 深度連結 + Stage 配色
-- **BDD 需求藍圖面板**（02-27）：純 React Q&A 歷史面板（取代 3D 鍛造場景）
-- **Sandpack 串流防閃爍**（02-28，已移除）：providerKey 凍結 + 增量 updateFile + 輪詢去重（已被 WebContainers HMR 取代）
-- **預覽編輯模式**（02-26，03-01 升級）：多選 toggle + PropertyEditor + Undo/Redo + 聊天附圖迭代
-- **Classifier 防禦體系**（02-08，03-04 重構）：9 層防禦 + Content Policy + Phase-aware 品質閘門 + 違規升級
-- **防刷三層防護**（02-26）：前端冷卻 + Redis Lua 限速 + Worker 對話鎖
-
-### 早期功能建設（2026-01-31 ~ 2026-02-25）
-
-- **BDD Skill 完整流程**（02-24~25）：ES Phase 0 + Discovery/Clarify/Formulation + Actions Design + ISA Config + 變更管理 + 回退/恢復
-- **UIUX 生成重構**（02-05）：5 變體 + Design System + Structure→Animation→RWD 三階段
-- **Fast Build**（02-09，02-25 升級）：一句話建站 + 25 產品類型 + 22 配色 + Tier 偵測 + App/Website 佈局
-- **Quality Gate**（02-06，04-01 升級）：A11y per-element + 色彩對比度 + 效能 + 代碼品質 + SVG ID + Design Tier 合規 + Rule-based 5 規則確定性修復 + Haiku LLM fallback
-- **即時預覽**（02-06~08，03-17 遷移至 WebContainers）：串流增量更新 + 裝置切換 + BDD→UI 翻譯 + VariantConcept
-- **3D 動畫**（02-24~25）：BDD 低多邊形城堡 + Fast Build 3D 工廠流水線（Remotion + Three.js）
+- **BDD Skill 完整流程**（02-24~25）：ES Phase 0 + Discovery/Clarify/Formulation + Actions Design + ISA Config + 變更管理
+- **UIUX 生成管線**（02-05）：5 變體 + Design System + Structure→Animation→RWD 三階段
+- **Fast Build**（02-09，02-25 升級）：一句話建站 + 產品類型/配色庫 + Tier 偵測 + App/Website 佈局
+- **Quality Gate**（02-06，後續多次升級）：5 類靜態檢查 + Design Tier 合規 + Rule-based + Haiku LLM fallback
 - **VPS 後端遷移**（02-03）：Vercel Serverless → Express + BullMQ + Socket.io
-- **認證系統**：Google/LINE OAuth + JWT 雙軌 + 訪客帳號合併
-- **儀表板**：用戶/管理員面板 + 專案管理 + LLM 用量追蹤
-- **智能模板匹配**（02-15）：三層評分引擎（零 LLM）
-- **迭代 Skill 拆分**（02-16）：iteration-skill.ts + 撤銷 + 回滾
-- **PRD Discovery + Feature Files**（01-31）：多輪釐清 + 分批生成 + 語意去重 + Token 優化
+- **認證 + 儀表板 + 帳號綁定**（02-27）：Google/LINE OAuth + JWT 雙軌 + user_providers 雙綁 + 管理員面板 + LLM 用量
+- **LINE 整合**（02-27）：Webhook/Handler/Translator/Full Push + LIFF + Flex Message 推播
+- **BDD 需求藍圖面板**（02-27）：純 React Q&A 歷史面板
+- **智能模板匹配 + 迭代 Skill**（02-15~16）：三層評分（零 LLM） + iteration-skill.ts + 撤銷/回滾
+- **防禦體系**（02-08~28）：safeParseJson 四層、Classifier 9 層 + Content Policy、三層防刷（前端冷卻 + Redis Lua + Worker 鎖）
+- **i18n Phase 1+2**（02-28）：883 keys / 29 namespaces，Server Action error code 機制
+- **已被取代**：Sandpack 串流預覽（03-17 → WebContainers）、3D 鍛造場景（02-27 → BDD 藍圖面板）、2D 即時預覽（03-17 → WebContainers HMR）
 
 </details>

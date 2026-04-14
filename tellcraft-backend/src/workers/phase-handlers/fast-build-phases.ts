@@ -13,6 +13,8 @@ import {
   VariantConcept, GeneratedComponent,
 } from '../../services/uiux-generation'
 import { runQualityGate, autoFixCriticalIssues, autoFixCriticalIssuesRuleBased } from '../../services/quality-gate'
+import { evaluateUi, type UiEvaluationIssue } from '../../services/ui-evaluator'
+import type { QualityIssue } from '../../services/quality-gate'
 import {
   detectDesignTier, inferProductType, inferPages,
   buildDefaultDesignSystem, buildMinimalTemplate,
@@ -951,6 +953,39 @@ export async function runFastBuildPipeline(params: {
     } catch (qgErr) {
       logger.warn({ err: qgErr }, 'QG 修復失敗，跳過')
       break
+    }
+  }
+
+  // ===== 黑盒 Evaluator（PR1，1 輪，成本考量）=====
+  // 只在最後一批執行（所有頁面都到齊才有意義）
+  const candidateCompletedPages = [...(state.fastBuildCompletedPages || []), ...targetPages]
+  const remainingAfterThis = allPages.filter(p => !candidateCompletedPages.includes(p))
+  if (remainingAfterThis.length === 0 && getEnv().ENABLE_UI_EVALUATOR) {
+    try {
+      const evalResult = await evaluateUi({
+        code: currentCode,
+        tailwindConfig: generateTailwindConfig(designSystem),
+        tier,
+        trackingContext: { userId: state.userId ?? undefined, conversationId },
+      })
+      if (!evalResult.softFail && !evalResult.report.passed) {
+        const evalIssues = evalResult.report.issues.filter(i => i.severity === 'critical')
+        if (evalIssues.length > 0) {
+          const qualityIssues: QualityIssue[] = evalIssues.map((i: UiEvaluationIssue, idx: number) => ({
+            id: `eval-fast-${idx}`,
+            category: 'code_quality',
+            severity: 'critical',
+            rule: `evaluator_${i.category}`,
+            message: `[Evaluator] ${i.description}（路由 ${i.route}）`,
+            file: i.route,
+            suggestion: '請從使用者視角修復此問題',
+          }))
+          const evalFixed = await autoFixCriticalIssues(currentCode, qualityIssues, { userId: state.userId, conversationId, projectId: state.projectId })
+          if (evalFixed) currentCode = evalFixed
+        }
+      }
+    } catch (evalErr) {
+      logger.warn({ err: evalErr }, 'Fast Build Evaluator 失敗，跳過')
     }
   }
 
