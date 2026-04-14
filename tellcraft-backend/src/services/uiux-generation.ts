@@ -2765,14 +2765,23 @@ export function getSyntaxErrors(filename: string, content: string): string[] {
   // 只檢查 TS/TSX 檔案，CSS/JSON 等非 TS 檔案跳過
   if (/\.(css|json|md|html|svg)$/i.test(filename)) return []
   const tsxName = filename.endsWith('.tsx') || filename.endsWith('.ts') ? filename : filename + '.tsx'
-  const result = ts.transpileModule(content, {
-    compilerOptions: {
-      jsx: ts.JsxEmit.Preserve,
-      target: ts.ScriptTarget.Latest,
-    },
-    fileName: tsxName,
-    reportDiagnostics: true,
-  })
+  let result: ts.TranspileOutput
+  try {
+    result = ts.transpileModule(content, {
+      compilerOptions: {
+        jsx: ts.JsxEmit.Preserve,
+        target: ts.ScriptTarget.Latest,
+      },
+      fileName: tsxName,
+      reportDiagnostics: true,
+    })
+  } catch (err) {
+    // TypeScript 內部 assertion 崩潰（"Debug Failure. Output generation failed"）
+    // 放行內容而非觸發 stub 替換（破壞性）。API 不 500，內容照原樣流出，
+    // 最差情況是前端看到 runtime 錯誤，但不會無限 500 迴圈。
+    logger.warn({ filename, err: String(err).slice(0, 200) }, 'transpileModule 崩潰，跳過 syntax firewall')
+    return []
+  }
   const errors: string[] = []
   if (result.diagnostics?.length) {
     errors.push(...result.diagnostics.map(d => {
