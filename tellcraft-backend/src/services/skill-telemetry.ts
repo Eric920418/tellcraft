@@ -255,6 +255,22 @@ export function getSanitizePatternKeys(): string[] {
   return SANITIZE_PATTERN_MAP.map(([, key]) => key)
 }
 
+/**
+ * 找出 SANITIZE_PATTERN_MAP 裡定義了、但 prompt_changes 表沒註冊的 pattern。
+ *
+ * 存在 = 開發者加了 sanitize rule 但忘了跑 register-prompt-change.ts。
+ * 後果：週報無法追蹤這條規則的效應基線、無法做汰換決策。
+ *
+ * 用在週報頂部警示區塊 + pre-commit hook 檢測。
+ * 純函數不碰 DB，由呼叫端注入 activeChanges 避免重複查詢。
+ */
+export function findUnregisteredSanitizePatterns(
+  activeChanges: Array<{ pattern_key: string }>
+): string[] {
+  const registered = new Set(activeChanges.map(c => c.pattern_key))
+  return getSanitizePatternKeys().filter(key => !registered.has(key))
+}
+
 // ============================================================
 // Phase error 分類器（零 LLM）
 // ============================================================

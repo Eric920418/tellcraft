@@ -421,6 +421,16 @@ export async function handleUiuxMixedPhaseRouting(
     String.fromCharCode(ch.charCodeAt(0) - 0xFEE0)
   )
 
+    // ── 舊對話逃生出口：__regenerate_features__ 一鍵重新生成 Features（適用第 9 層粒度規則）──
+    if (trimmedMsg === '__regenerate_features__') {
+      const { regenerateFeaturesTask } = await import('./coder-phases')
+      await regenerateFeaturesTask({
+        projectId, conversationId, userId,
+        redis, io,
+      })
+      return
+    }
+
     if (state.phase === 'spec_completed' && hasChangeIntent(trimmedMsg)) {
       const specChangeHandler = await getSpecChangeHandler()
       await specChangeHandler(conversationId, state, trimmedMsg, redis, io)

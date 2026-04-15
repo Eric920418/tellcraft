@@ -22,6 +22,7 @@ import {
   measurePromptChangeEffects,
   getActivePromptChanges,
   findDirectionACandidates,
+  findUnregisteredSanitizePatterns,
   type WeeklyReportWithDelta,
   type PromptChangeEffect,
   type DirectionACandidate,

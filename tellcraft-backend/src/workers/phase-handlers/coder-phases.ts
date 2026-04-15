@@ -13,6 +13,8 @@ import { runCoderE2ETests } from '../../services/coder-e2e-test'
 import { executeRedPhase, formatRedPhaseReport, runRedPhaseFullValidation, runRedPhaseRoutingValidation } from '../../services/red-phase-validator'
 import { runFeatureAlignmentGate } from '../../services/feature-alignment-gate'
 import { analyzeSpecIssuesInFailures } from '../../services/semantic-consistency-validator'
+import { runFormulation, generateDraftBatch, type FormulationResult } from '../../services/formulation'
+import type { ClarifyItem } from '../../services/bdd-session'
 import { createLogger } from '../../lib/logger'
 import { sanitizeForPreview } from '../../services/code-verify'
 
@@ -338,7 +340,8 @@ export async function executeCoderSkill(input: CoderSkillInput): Promise<void> {
           content: gateResult.blockMessage || 'Feature 對齊檢查失敗，請修正 BDD 規格後重試。',
           stage: 'coder_error',
           quickReplies: [
-            { label: isChinese ? '重試' : 'Retry', value: '__retry_coder__' },
+            { label: isChinese ? '重新生成 Features（適用新粒度規則）' : 'Regenerate Features', value: '__regenerate_features__', style: 'primary' as const },
+            { label: isChinese ? '重試 Coder' : 'Retry Coder', value: '__retry_coder__', style: 'secondary' as const },
           ],
         })
         return
@@ -841,9 +844,10 @@ export async function executeCoderTesting(input: CoderSkillInput): Promise<void>
       quickReplies.push({ label: isChinese ? '強制重試（我確認 Feature 正確）' : 'Force Retry', value: '__verify_backend__', style: 'secondary' })
       quickReplies.push({ label: isChinese ? '帶風險部署' : 'Deploy (risky)', value: '__deploy_with_risk__', style: 'ghost' })
     } else if (hasApiMismatch) {
-      // API summary 不對齊 → 建議回 BDD 修正 Feature
-      quickReplies.push({ label: isChinese ? '回 BDD 修正 Feature' : 'Back to BDD', value: '__retry_coder__', style: 'primary' })
-      quickReplies.push({ label: isChinese ? '帶風險部署' : 'Deploy (risky)', value: '__deploy_with_risk__', style: 'secondary' })
+      // API summary 不對齊 → 一鍵重新生成 Features（適用新粒度規則）為主要選項
+      quickReplies.push({ label: isChinese ? '重新生成 Features（適用新粒度規則）' : 'Regenerate Features', value: '__regenerate_features__', style: 'primary' })
+      quickReplies.push({ label: isChinese ? '回 BDD 修正 Feature' : 'Back to BDD', value: '__retry_coder__', style: 'secondary' })
+      quickReplies.push({ label: isChinese ? '帶風險部署' : 'Deploy (risky)', value: '__deploy_with_risk__', style: 'ghost' })
     } else {
       quickReplies.push({ label: isChinese ? '重試測試' : 'Retry Tests', value: '__verify_backend__', style: 'primary' })
       quickReplies.push({ label: isChinese ? '帶風險部署' : 'Deploy (risky)', value: '__deploy_with_risk__', style: 'secondary' })
@@ -941,5 +945,183 @@ function summarizeResult(result: { backendFiles: unknown[]; rewrittenFrontend: u
     backendFiles: result.backendFiles.length,
     rewrittenFrontend: result.rewrittenFrontend.length,
     unchangedFrontend: result.unchangedFrontend.length,
+  }
+}
+
+// ============================================================
+// 舊對話逃生出口：重新生成 Features（適用第 9 層新粒度規則）
+// ============================================================
+
+/**
+ * 從既有 BDD session 重新生成 Features（適用第 9 層 1 Feature = 1 Operation 規則）。
+ * 適用場景：舊對話的 Feature 含 CRUD 合併，新規則下 Coder 跑 RED Phase 失敗。
+ * 用戶點「重新生成 Features（適用新粒度規則）」quickReply 觸發。
+ *
+ * 流程：
+ * 1. 讀 BDD session（保留 originalRequirements + resolvedItems + ES doc）
+ * 2. 清空 features_content / actions_yml_content / open_api_spec_content / isa_config_content
+ * 3. 跑 generateDraftBatch（有 ES）或 runFormulation（無 ES）
+ * 4. 寫回 features_content
+ * 5. 呼叫 completeSpecPhase 自動跑 actionsYml + isaConfig + DB provisioning + dry-run
+ */
+export async function regenerateFeaturesTask(input: {
+  projectId: string
+  conversationId: string
+  userId: string
+  redis: Redis
+  io: IoEmitter
+}): Promise<void> {
+  const { projectId, conversationId, userId, redis, io } = input
+
+  const state = await getFlowState(redis, conversationId)
+  if (!state) {
+    await sendMessage(conversationId, io, { content: '找不到對話狀態', stage: 'error' })
+    return
+  }
+  const isChinese = state.locale !== 'en'
+
+  // 1. 讀最新 BDD session
+  const bddSession = await db.queryOne<{
+    id: string
+    original_requirements: string
+    clarify_items: unknown
+    staging_items: unknown
+    resolved_items: unknown
+    es_document_content: string | null
+    project_context: string | null
+  }>(
+    `SELECT id, original_requirements, clarify_items, staging_items, resolved_items,
+            es_document_content, project_context
+     FROM bdd_sessions WHERE project_id = $1 ORDER BY updated_at DESC LIMIT 1`,
+    [projectId]
+  )
+
+  if (!bddSession) {
+    await sendMessage(conversationId, io, {
+      content: isChinese ? '找不到規格資料，無法重新生成。' : 'BDD session not found.',
+      stage: 'error',
+    })
+    return
+  }
+
+  // 2. 清空舊生成結果
+  await db.updateBddSession(bddSession.id, {
+    featuresContent: null,
+    actionsYmlContent: null,
+    openApiSpecContent: null,
+    isaConfigContent: null,
+  })
+
+  // 3. 告知用戶 + 設 phase
+  state.phase = 'formulation'
+  state.sessionId = bddSession.id
+  state.waitingForReply = false
+  state.formulationStartedAt = Date.now()
+  await saveFlowState(redis, conversationId, state)
+
+  const estimatedTime = bddSession.es_document_content ? '30-60 秒' : '1-2 分鐘'
+  await sendMessage(conversationId, io, {
+    content: isChinese
+      ? `正在使用新粒度規則重新生成 Features（預估 ${estimatedTime}）...`
+      : `Regenerating Features with new granularity rules (est. ${estimatedTime})...`,
+    stage: 'formulation_start',
+  })
+
+  // 4. 合併 resolved items
+  const staging = Array.isArray(bddSession.staging_items) ? bddSession.staging_items : []
+  const resolved = Array.isArray(bddSession.resolved_items) ? bddSession.resolved_items : []
+  const allResolvedItems = ([...staging, ...resolved] as ClarifyItem[]).filter(
+    (item): item is ClarifyItem => !!item?.answer
+  )
+
+  try {
+    // 5. 執行 formulation
+    let result: FormulationResult
+    if (bddSession.es_document_content) {
+      const draft = await generateDraftBatch(
+        bddSession.es_document_content,
+        bddSession.original_requirements,
+        allResolvedItems,
+        bddSession.project_context || undefined,
+        { conversationId, userId }
+      )
+      result = {
+        success: draft.success,
+        schemaSql: draft.schemaSql,
+        entityMapping: draft.entityMapping,
+        features: draft.features,
+        error: draft.error,
+      }
+    } else {
+      result = await runFormulation(
+        bddSession.original_requirements,
+        allResolvedItems,
+        bddSession.project_context || undefined,
+        undefined,
+        { conversationId, userId }
+      )
+    }
+
+    if (!result.success || !result.features) {
+      state.phase = 'uiux_complete'
+      state.formulationStartedAt = undefined
+      await saveFlowState(redis, conversationId, state)
+      await sendMessage(conversationId, io, {
+        content: isChinese
+          ? `重新生成失敗：${result.error || '未知錯誤'}`
+          : `Regeneration failed: ${result.error || 'unknown'}`,
+        stage: 'error',
+        quickReplies: [
+          { label: isChinese ? '再試一次' : 'Retry', value: '__regenerate_features__', style: 'primary' as const },
+        ],
+      })
+      return
+    }
+
+    // 6. 保存新 features 到 session
+    await db.updateBddSession(bddSession.id, {
+      schemaSqlContent: result.schemaSql,
+      entityMappingContent: result.entityMapping,
+      featuresContent: result.features,
+      currentPhase: 'spec_discovery',
+    })
+
+    // 7. 觸發 completeSpecPhase（自動跑 Feature 驗證 + actionsYml + isaConfig + DB + dry-run）
+    state.sessionId = bddSession.id
+    await saveFlowState(redis, conversationId, state)
+
+    const { completeSpecPhase } = await import('./bdd-phases')
+    await completeSpecPhase(conversationId, state, redis, io)
+
+    // 8. completeSpecPhase 完成後追加引導訊息
+    const updatedState = await getFlowState(redis, conversationId)
+    if (updatedState?.phase === 'spec_completed' || updatedState?.phase === 'uiux_design_preference') {
+      await sendMessage(conversationId, io, {
+        content: isChinese
+          ? `✅ Features 已用新粒度規則重新生成（${result.features.length} 個獨立 Feature）。\n現在可以重新執行後端代碼生成。`
+          : `✅ Features regenerated (${result.features.length} independent Features). Ready to re-run backend generation.`,
+        stage: 'info',
+        quickReplies: [
+          { label: isChinese ? '重新生成後端' : 'Re-run Coder', value: '__connect_database__', style: 'primary' as const },
+        ],
+      })
+    }
+
+    logger.info({
+      projectId, conversationId, sessionId: bddSession.id, featureCount: result.features.length,
+    }, 'regenerateFeaturesTask 完成')
+  } catch (err) {
+    logger.error({ err, projectId, conversationId }, '重新生成 Features 失敗')
+    state.phase = 'uiux_complete'
+    state.formulationStartedAt = undefined
+    await saveFlowState(redis, conversationId, state)
+    const errorMsg = err instanceof Error ? err.message : String(err)
+    await sendMessage(conversationId, io, {
+      content: isChinese ? `重新生成失敗：${errorMsg}` : `Regeneration failed: ${errorMsg}`,
+      stage: 'error',
+      quickReplies: [
+        { label: isChinese ? '再試一次' : 'Retry', value: '__regenerate_features__', style: 'primary' as const },
+      ],
+    })
   }
 }
