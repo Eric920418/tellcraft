@@ -220,6 +220,7 @@ const SANITIZE_PATTERN_MAP: Array<[RegExp, string]> = [
   [/\?\? 與 \|\|\/&& 混用/, 'nullish-mixed-parens'],
   [/移除 Google Fonts <link>/, 'google-fonts-link-removal'],
   [/移除 Google Fonts @import/, 'google-fonts-import-removal'],
+  [/移除非 variable font 的 axes 參數/, 'font-axes-removal'],
   [/Next\.js 15 async params/, 'next15-async-params'],
   [/useSearchParams Suspense/, 'search-params-suspense'],
   [/broken import.*→ 生成 stub/, 'broken-import-stub'],

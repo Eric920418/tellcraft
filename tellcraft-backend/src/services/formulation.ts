@@ -542,43 +542,76 @@ export async function identifyFeatures(
 
   const systemPrompt = `你是一位資深的 BDD 分析師。根據需求和 Schema，識別所有需要的功能（Feature）。
 
-## 核心原則：需求驅動 + 智能分組
+## 核心原則：需求驅動 + 1 Feature = 1 Operation
 
 **只為需求描述或釐清決策中明確提到的操作生成 Feature**，不因 Schema 有 table 就自動補全所有 CRUD。
 
-### 需求權重原則（Critical）
-- **核心功能**（用戶大量描述的）→ 按需拆分為合理的 Feature
-- **附屬功能**（用戶用 1-2 句提到的，如「要後台管理」）→ 合併為 1 個 Feature（如 manage_admin），不要拆成 manage_users + manage_content + manage_settings
-- **Feature 數量應正比於需求描述篇幅**
+### Feature 粒度規則（硬性約束，絕對遵守）
 
-### 智能合併規則
+**每個 Feature 必須對應且僅對應一個 HTTP operation**（1 Feature = 1 Action = 1 HTTP 端點）。
+
+**為什麼這是硬性約束**：
+- SpecFormula findBySummary 在 OpenAPI operation.summary 層級查找
+- 如果 1 Feature 有多個 When summary（如 CRUD 合併），OpenAPI spec 只有 1 個 operation
+- findBySummary 找不到其他 sub-summary → scenario 100% 失敗
+- 這是技術架構要求，不是風格偏好
+
+### CRUD 必須拆成獨立 Feature（即使同一實體）
+
+❌ **錯誤**：1 個 Feature 「交易記錄管理」(manage_transaction) 包含新增/查詢/編輯/刪除
+✅ **正確**：4 個獨立 Feature：
+  - \`addTransaction\` / 新增交易記錄 (POST /api/transactions)
+  - \`listTransactions\` / 查詢交易記錄 (GET /api/transactions)
+  - \`updateTransaction\` / 編輯交易記錄 (PATCH /api/transactions/{id})
+  - \`deleteTransaction\` / 刪除交易記錄 (DELETE /api/transactions/{id})
+
+### 需求權重原則（Critical）
+- **核心功能**（用戶大量描述的）→ 按需求拆分為獨立的 Feature（每個操作一個）
+- **附屬功能**（用戶用 1-2 句提到的，如「要後台管理」）→ **仍須拆成多個獨立 Feature**，不要合併成 manage_admin
+  - ✅ 正確：\`listAdminUsers\`、\`deleteAdminUser\`（獨立 Feature）
+  - ❌ 錯誤：\`manageAdmin\`（包含 list/delete 的聚合 Feature）
+- **Feature 數量應正比於實際操作數量**（不是描述篇幅）
+
+### Feature 分類規則
 | 情境 | 處理方式 | 範例 |
 |------|----------|------|
-| 同一實體的標準 CRUD（建立/查詢/更新/刪除） | **合併為 1 個 Feature**，包含多個 Action block | manage_order（含 create/get/list/update/delete） |
-| 狀態轉換（有獨立業務邏輯） | **保持獨立** | cancel_order、complete_order |
-| 跨實體操作 | **保持獨立** | add_order_item（涉及 order + product） |
-| 簡單查詢/列表 | **合併到對應實體的 CRUD Feature** | list_orders 併入 manage_order |
+| 同一實體的 CRUD | **每個操作獨立 Feature** | add_transaction, list_transactions, update_transaction, delete_transaction |
+| 狀態轉換（獨立業務邏輯） | **獨立 Feature** | cancel_order, complete_order, approve_request |
+| 跨實體操作 | **獨立 Feature** | add_order_item（涉及 order + product） |
+| 列表/查詢 | **獨立 Feature** | list_orders, search_products, get_user_profile |
 
-### actionName 格式
-| 操作類型 | actionName 格式 | 範例 |
-|----------|-----------------|------|
-| CRUD 合併 | manage_{entity} | manage_order |
-| 狀態轉換 | {action}_{entity} | cancel_order, approve_order |
-| 跨實體操作 | {action}_{target} | add_order_item |
+### actionName 格式（禁止使用聚合詞）
+
+**禁止**：\`manage_\`、\`_management\`、\`_system\`、\`_module\` 前綴/後綴
+**推薦**：\`動詞_名詞\` 格式明確描述單一操作
+
+| 操作 | 正確 actionName | 錯誤 actionName |
+|-----|---|---|
+| 新增交易記錄 | \`add_transaction\` / \`create_transaction\` | ❌ manage_transaction |
+| 查詢交易列表 | \`list_transactions\` / \`get_transactions\` | ❌ transaction_management |
+| 編輯交易記錄 | \`update_transaction\` / \`edit_transaction\` | |
+| 刪除交易記錄 | \`delete_transaction\` | |
+
+### Feature.name 與 When summary 的對齊規則
+
+- **Feature.name** = 操作的中文名稱（如「新增交易記錄」）
+- Feature 內所有 **When 步驟的 summary** 必須等於 Feature.name（完全相等）
+- actionsYml 的 **action.summary** 也必須等於 Feature.name
+- **三方 100% 一致**
 
 ## 任務
-1. 從需求和釐清決策中提取**明確提到的操作**（不要腦補 Schema 有但需求沒提的操作）
-2. 同一實體的標準 CRUD 合併為一個 Feature
-3. 狀態轉換和跨實體操作保持獨立
+1. 從需求和釐清決策中提取**每一個明確提到的操作**
+2. **每個操作生成一個獨立 Feature**（不要合併）
+3. Feature.name 精確描述單一操作（動詞+名詞）
 
 ## 輸出格式
 \`\`\`json
 {
   "features": [
     {
-      "name": "功能中文名稱",
-      "actionName": "manage_xxx 或 action_xxx",
-      "description": "簡短描述這個功能做什麼（合併的 Feature 說明包含哪些操作）"
+      "name": "功能中文名稱（單一操作）",
+      "actionName": "動詞_名詞的 snake_case",
+      "description": "簡短描述這個單一操作做什麼"
     }
   ]
 }
@@ -586,9 +619,8 @@ export async function identifyFeatures(
 
 ## 命名規則
 - actionName 使用 snake_case
-- 合併的 CRUD Feature 用 \`manage_{entity}\`
-- 獨立操作用 \`動詞_名詞\`（如 cancel_order, approve_request）
-- 功能名稱要精確描述交互，不要太抽象`
+- 每個 Feature 對應**單一**操作（禁止 manage_ 聚合詞）
+- 功能名稱要精確描述**單一** HTTP 端點的行為`
 
   const userMessage = `${projectContext ? `專案背景：${projectContext}\n\n` : ''}需求描述：
 ${requirements}
@@ -635,9 +667,39 @@ ${schemaHints}` : ''}`
   }
 
   logger.info({ featureCount: result.data.features.length }, '識別 Features 完成')
+
+  // 後置驗證：偵測聚合詞命名（可能違反 1 Feature = 1 Operation 規則）
+  warnOnAggregateFeatures(result.data.features as Array<{ name: string; actionName: string; description: string }>)
+
   return {
     success: true,
     features: result.data.features,
+  }
+}
+
+/**
+ * 偵測 Feature 名稱是否疑似「聚合」（多個 operation 合併），違反 1 Feature = 1 Operation 規則。
+ * 只記 warning log，不阻塞（後續 Alignment Gate Check 6b 會抓真正的違反）。
+ */
+const AGGREGATE_NAME_PATTERNS = [
+  /管理$/,              // 「交易記錄管理」
+  /^manage[A-Z_]/,      // "manageOrder", "manage_order"
+  /系統$/,              // 「訂單系統」
+  /模組$/,              // 「分類模組」
+  /_management$/i,      // "order_management"
+  /_system$/i,          // "order_system"
+  /_module$/i,          // "order_module"
+]
+
+function warnOnAggregateFeatures(features: Array<{ name: string; actionName: string }>): void {
+  const suspicious = features.filter(f => {
+    const nameOrAction = [f.name || '', f.actionName || '']
+    return AGGREGATE_NAME_PATTERNS.some(p => nameOrAction.some(s => p.test(s)))
+  })
+  if (suspicious.length > 0) {
+    logger.warn({
+      aggregateFeatures: suspicious.map(f => ({ name: f.name, actionName: f.actionName })),
+    }, 'Feature 疑似粒度過粗（聚合命名），可能包含多個 operation → Alignment Gate Check 6b 會阻塞')
   }
 }
 
@@ -841,6 +903,10 @@ Feature: ${featureInfo.name}
 - **When 必須有 Actor 前綴**：\`(No Actor)\` 或 \`(UID="$var")\`
 - **Then 成功必須有 HTTP status code**：\`{summary}(201)回應, with table:\`
 - **Then 的 summary 必須與 When 完全一致**：When 用 \`切換待辦事項完成狀態\`，Then 也用 \`切換待辦事項完成狀態(200)回應\`，不可縮寫
+- **When/Then summary 必須等於 Feature.name（硬性規則）**：此 Feature 所有 When/Then 步驟的 summary 必須完全等於 Feature.name（也就是 actionsYml 的 action.summary）。這是技術約束：SpecFormula findBySummary 用 When summary 查 OpenAPI operation，只在 action.summary 層級查找，所以 When summary ≠ Feature.name 會導致 100% 失敗。
+  - ✅ 正確：Feature.name = "新增交易記錄" → When (No Actor) 新增交易記錄, call table: → Then 新增交易記錄(201)回應
+  - ❌ 錯誤：Feature.name = "交易記錄管理" → When (No Actor) 新增交易記錄, call table:（summary 違反對齊，會導致 findBySummary 失敗）
+  - 如果需求涉及 CRUD，不要把它們塞進同一個 Feature。應該生成多個獨立 Feature，每個 Feature.name 是單一操作的具體動詞（新增/查詢/編輯/刪除）。
 - **Array 回應多行驗證**：列表查詢的 Then 回應 DataTable 可以有多行來驗證多個陣列元素。行順序 = 陣列元素順序（第一行=第一個元素）。**禁止用 \`index\` 欄位**表示位置，直接用行順序。正確：\`| id | name | \\n | $list1Id | 工作 | \\n | $list2Id | 生活 |\`。錯誤：\`| index | name | \\n | 0 | 工作 |\`
 - **Entity 驗證**：使用 \`應該存在一個\`（非舊的「存在一個」）
 - DataTable 命名慣例：
@@ -1365,6 +1431,17 @@ export async function generateDraftBatch(
 3. 生成 Entity Mapping（中文↔英文）
 4. 為每個 clear 的 Command/ReadModel 生成一個 Feature File
 5. 標記不確定的項目（ES 中標記為「待澄清」的）
+
+## Feature 粒度規則（硬性約束）
+
+**1 Feature = 1 Action = 1 HTTP operation**。CRUD 必須拆成獨立 Feature。
+
+- ❌ 錯誤：1 個 Feature「交易記錄管理」(manage_transaction) 包含新增/查詢/編輯/刪除
+- ✅ 正確：4 個獨立 Feature（add_transaction / list_transactions / update_transaction / delete_transaction）
+
+**禁止 actionName 使用聚合詞**：\`manage_\`、\`_management\`、\`_system\`、\`_module\`。用 \`動詞_名詞\`（add_X、list_X、update_X、delete_X、cancel_X 等）。
+
+**Feature.name = Feature 內所有 When/Then summary = actionsYml.action.summary**（三方 100% 一致）。
 
 ## sdd.os ISA 格式規範（SpecFormula 標準）
 - 檔案開頭：\`# Action: actionName\` + \`# [METHOD] /path\` + \`# Summary: xxx\`

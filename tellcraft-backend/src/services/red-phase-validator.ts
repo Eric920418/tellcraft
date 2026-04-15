@@ -481,21 +481,36 @@ export async function executeRedPhase(input: RedPhaseInput): Promise<RedPhaseRes
 
     // ---- Check 4b: When 步驟 summary 必須在 actionsYml 找得到 ----
     // SpecFormula 用 Feature 的 When summary 查 api-spec（findBySummary）。
-    // 找不到 → scenario 100% 失敗。這個檢查比 Check 4 更嚴格（檢查每個 When 步驟而非只檢查 Feature 名稱）。
+    // 找不到 → scenario 100% 失敗。
+    // 這個檢查是為了強制執行「1 Feature = 1 Operation」設計：Feature 內所有 When summary
+    // 都必須等於 Feature.name（= action.summary）。
     const whenSummaries = extractWhenSummariesFromContent(feature.content)
     const allActionSummaries = new Set(
       Array.from(actionsByName.values()).map(a => a.summary).filter(Boolean)
     )
+    const distinctWhenSums = [...new Set(whenSummaries)]
     for (const whenSum of whenSummaries) {
       if (allActionSummaries.has(whenSum)) continue
-      // 精確比對不到 → 嘗試看是否是同一個 action 的 summary（action.summary === whenSum 已在上面檢查過）
       if (action.summary === whenSum) continue
+
+      // 多個不同 When summary → 幾乎確定是「粒度過粗」（CRUD 合併）
+      const isAggregate = distinctWhenSums.length > 1
+      const description = isAggregate
+        ? `Feature 的 When 步驟 summary "${whenSum}" 在 actionsYml 找不到對應 operation → SpecFormula findBySummary 失敗，scenario 100% 失敗。\n` +
+          `根因：此 Feature 包含 ${distinctWhenSums.length} 個不同 When summary（${distinctWhenSums.join(', ')}），違反「1 Feature = 1 Operation」規則。\n` +
+          `修復：將此 Feature 拆成 ${distinctWhenSums.length} 個獨立 Feature，每個 Feature.name 等於對應的 When summary`
+        : `Feature 的 When 步驟 summary "${whenSum}" 在 actionsYml 找不到對應 operation → SpecFormula findBySummary 失敗，scenario 100% 失敗。\n` +
+          `根因：When summary 與 Feature.name/action.summary 不一致（用詞漂移）。\n` +
+          `修復：將 When summary 統一為 Feature.name "${action.summary}"（Feature.name / When summary / action.summary 必須三方一致）`
+
       issues.push({
         featureName: displayName,
         issueType: 'when_summary_mismatch',
         severity: 'error',
-        description: `Feature 的 When 步驟 summary "${whenSum}" 在 actionsYml 找不到對應 operation → SpecFormula findBySummary 失敗，scenario 100% 失敗`,
-        suggestion: `將 When 步驟 summary 改為 "${action.summary}" (actionsYml 中此 action 的 summary)`,
+        description,
+        suggestion: isAggregate
+          ? `方案（推薦）：拆 Feature — 為每個 CRUD 子操作建立獨立 Feature（Feature.name = 各自 When summary）。方案（暫時）：將所有 When summary 統一為 "${action.summary}"，但會失去子操作語義。`
+          : `將 When summary 改為 "${action.summary}"（= Feature.name / action.summary）`,
       })
     }
 

@@ -457,6 +457,36 @@ export function sanitizeCodeForDeploy(code: GeneratedCode): SanitizeResult {
       fixes.push(`${file.path}: 移除 Google Fonts <link>（應用 next/font）`)
     }
 
+    // ── 修復 4.5: next/font 非 variable font 誤用 axes 參數 ──
+    // Google Fonts 的 `axes` 參數只對 variable font 合法，LLM 常誤加到 Playfair Display / Lora 等
+    // 固定字重字體上 → Next.js build 報 "Axes can only be defined for variable fonts"
+    // 黑名單維護：Google Fonts 部分字體會升級為 variable，發現誤傷時從此移除即可
+    {
+      const NON_VARIABLE_FONTS = [
+        'Playfair_Display', 'Lora', 'Merriweather', 'Instrument_Serif',
+        'Libre_Baskerville', 'Cormorant_Garamond', 'DM_Serif_Display',
+        'Cabin', 'Crimson_Pro', 'Cormorant', 'Gentium_Book_Plus',
+      ]
+      const fontCallRegex = new RegExp(
+        `\\b(${NON_VARIABLE_FONTS.join('|')})\\s*\\(\\s*\\{([\\s\\S]*?)\\}\\s*\\)`,
+        'g'
+      )
+      const removedFonts: string[] = []
+      file.content = file.content.replace(fontCallRegex, (full, fontName: string, args: string) => {
+        if (!/\baxes\s*:/.test(args)) return full
+        // 依序清理：前逗號版本、後逗號版本、無逗號版本
+        const newArgs = args
+          .replace(/,\s*axes\s*:\s*\[[^\]]*\]/g, '')
+          .replace(/axes\s*:\s*\[[^\]]*\]\s*,\s*/g, '')
+          .replace(/axes\s*:\s*\[[^\]]*\]/g, '')
+        removedFonts.push(fontName)
+        return `${fontName}({${newArgs}})`
+      })
+      if (removedFonts.length > 0) {
+        fixes.push(`${file.path}: 移除非 variable font 的 axes 參數（${[...new Set(removedFonts)].join(', ')}）`)
+      }
+    }
+
     // ── 修復 6: Next.js 15 async params/searchParams ──
     // Next.js 15 要求 page/layout 的 params 和 searchParams 為 Promise 類型
     // 檢測 `{ params: { xxx: string } }` 舊式同步寫法並自動轉換

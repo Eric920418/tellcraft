@@ -155,6 +155,126 @@ describe('Fix 4: Google Fonts link 移除', () => {
 })
 
 // ============================================================
+// Fix 4.5: 非 variable font 的 axes 參數移除
+// ============================================================
+
+describe('Fix 4.5: next/font 非 variable font axes 參數移除', () => {
+  it('Playfair_Display 含 axes → 應移除 axes（中間位置）', () => {
+    const code = makeCode({
+      pages: [makeFile(
+        'app/layout.tsx',
+        `import { Playfair_Display } from 'next/font/google'\nconst playfair = Playfair_Display({ subsets: ['latin'], axes: ['opsz'], display: 'swap' })\nexport default function Layout({ children }: any) { return <html className={playfair.className}><body>{children}</body></html> }`
+      )],
+    })
+    const result = sanitizeCodeForDeploy(code)
+    expect(result.code.pages[0].content).not.toMatch(/axes\s*:/)
+    expect(result.code.pages[0].content).toContain("subsets: ['latin']")
+    expect(result.code.pages[0].content).toContain("display: 'swap'")
+    expect(result.fixes.some(f => f.includes('axes') && f.includes('Playfair_Display'))).toBe(true)
+  })
+
+  it('Lora 含 axes → 應移除（結尾位置，雙引號）', () => {
+    const code = makeCode({
+      pages: [makeFile(
+        'app/layout.tsx',
+        `import { Lora } from "next/font/google"\nconst lora = Lora({ subsets: ["latin"], display: "swap", axes: ["opsz"] })`
+      )],
+    })
+    const result = sanitizeCodeForDeploy(code)
+    expect(result.code.pages[0].content).not.toMatch(/axes\s*:/)
+    expect(result.code.pages[0].content).toContain('subsets: ["latin"]')
+  })
+
+  it('Merriweather 只有 axes → 移除後應剩空物件', () => {
+    const code = makeCode({
+      pages: [makeFile(
+        'app/layout.tsx',
+        `const merri = Merriweather({ axes: ['opsz'] })`
+      )],
+    })
+    const result = sanitizeCodeForDeploy(code)
+    expect(result.code.pages[0].content).not.toMatch(/axes\s*:/)
+    expect(result.fixes.some(f => f.includes('Merriweather'))).toBe(true)
+  })
+
+  it('多行 axes（格式化代碼）也應移除', () => {
+    const code = makeCode({
+      pages: [makeFile(
+        'app/layout.tsx',
+        `const instrument = Instrument_Serif({\n  subsets: ['latin'],\n  axes: ['opsz'],\n  display: 'swap',\n  weight: '400'\n})`
+      )],
+    })
+    const result = sanitizeCodeForDeploy(code)
+    expect(result.code.pages[0].content).not.toMatch(/axes\s*:/)
+    expect(result.code.pages[0].content).toContain("weight: '400'")
+    expect(result.code.pages[0].content).toContain("subsets: ['latin']")
+  })
+
+  it('axes 多值 → 整個移除', () => {
+    const code = makeCode({
+      pages: [makeFile(
+        'app/layout.tsx',
+        `const x = Playfair_Display({ subsets: ['latin'], axes: ['opsz', 'wght', 'wdth'] })`
+      )],
+    })
+    const result = sanitizeCodeForDeploy(code)
+    expect(result.code.pages[0].content).not.toMatch(/axes\s*:/)
+    expect(result.code.pages[0].content).not.toContain('opsz')
+    expect(result.code.pages[0].content).not.toContain('wght')
+  })
+
+  it('variable font（Inter）帶 axes → 不應修改', () => {
+    const code = makeCode({
+      pages: [makeFile(
+        'app/layout.tsx',
+        `const inter = Inter({ subsets: ['latin'], axes: ['opsz'], display: 'swap' })`
+      )],
+    })
+    const result = sanitizeCodeForDeploy(code)
+    expect(result.code.pages[0].content).toContain("axes: ['opsz']")
+    expect(result.fixes.some(f => f.includes('移除非 variable font'))).toBe(false)
+  })
+
+  it('variable font（Plus_Jakarta_Sans）帶 axes → 不應修改', () => {
+    const code = makeCode({
+      pages: [makeFile(
+        'app/layout.tsx',
+        `const pjs = Plus_Jakarta_Sans({ subsets: ['latin'], axes: ['wght'] })`
+      )],
+    })
+    const result = sanitizeCodeForDeploy(code)
+    expect(result.code.pages[0].content).toContain('axes:')
+  })
+
+  it('同一檔案多個非 variable font → 全部清理', () => {
+    const code = makeCode({
+      pages: [makeFile(
+        'app/layout.tsx',
+        `const p = Playfair_Display({ subsets: ['latin'], axes: ['opsz'] })\nconst l = Lora({ axes: ['opsz'], subsets: ['latin'] })`
+      )],
+    })
+    const result = sanitizeCodeForDeploy(code)
+    expect(result.code.pages[0].content).not.toMatch(/axes\s*:/)
+    const fixMsg = result.fixes.find(f => f.includes('axes'))
+    expect(fixMsg).toBeDefined()
+    expect(fixMsg).toContain('Playfair_Display')
+    expect(fixMsg).toContain('Lora')
+  })
+
+  it('非 variable font 但無 axes → 不應修改', () => {
+    const code = makeCode({
+      pages: [makeFile(
+        'app/layout.tsx',
+        `const p = Playfair_Display({ subsets: ['latin'], display: 'swap' })`
+      )],
+    })
+    const result = sanitizeCodeForDeploy(code)
+    expect(result.code.pages[0].content).toContain("display: 'swap'")
+    expect(result.fixes.some(f => f.includes('axes'))).toBe(false)
+  })
+})
+
+// ============================================================
 // Fix 5: Tailwind v4 CSS
 // ============================================================
 

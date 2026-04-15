@@ -370,6 +370,7 @@ Feature 註解：`# Action: actionName` + `# [METHOD] /path` + `# Summary: xxx`
 - **Layout 禁止 opacity:0**：SplitLayout/split-layout 外層不能用 `initial={{ opacity: 0 }}`（多層疊加→黑屏）。useEffect 依賴不含 `fastBuildChunks`。split→default 回退需檢查 code_preview 歷史
 - **動畫庫是 `framer-motion`**（v12+），import 用 `from 'framer-motion'`
 - `[CI]` **字體只能用 `next/font`**，禁止 `<link>` / `@import` Google Fonts
+- `[TEST]` **next/font `axes` 只能用於 variable font**：LLM 容易把 `axes: [...]` 加到 Playfair Display / Lora / Merriweather / Instrument Serif / Libre Baskerville / Cormorant Garamond / DM Serif Display / Cabin / Crimson Pro / Cormorant / Gentium Book Plus 等非 variable font 上 → build 報 "Axes can only be defined for variable fonts"。`sanitizeCodeForDeploy` Fix 4.5 以黑名單 regex 移除。新增誤傷字體時從 `NON_VARIABLE_FONTS` 陣列移除；發現新的非 variable font 受害時加入
 - `[CI]` **Tailwind v4**：用 `@import "tailwindcss"`，不是 v3 的 `@tailwind`
 - `[TEST]` **Tailwind config 禁止 CSS 變數引用**：`generateTailwindConfig()` 必須用硬編碼值（`'9999px'` 非 `'var(--radius-full)'`），否則部署後 CSS 變數可能遺失導致樣式失效
 - **`app/components/templates/` 已廢棄**，PreviewPanel 用 WebContainers 渲染
@@ -384,7 +385,7 @@ Feature 註解：`# Action: actionName` + `# [METHOD] /path` + `# Summary: xxx`
 - `[ARCH]` **文檔與實作同步**：改後端流程 → 同步更新 `uiux-skill/instructions/` + 此文件
 - **`handleCodePhaseRedo` 需要快照**：`uiuxStructureCode`/`uiuxAnimationCode`，否則 redo 在已修改代碼上重做
 - **`verifyBuildLocally` 的修復結果必須同步回 DB**：否則預覽和部署代碼分岔
-- `[TEST]` **部署五層防禦**：L1 generateStructure 後驗證引用 → L2 sanitizeCodeForDeploy stub 生成 + `??` 與 `||/&&` 混用自動加括號 + root layout html/body 自動補全 → L3 fixBuildErrors API 重試 → L4 build 循環 3+1 次 → L5 useSearchParams Suspense 拆分
+- `[TEST]` **部署五層防禦**：L1 generateStructure 後驗證引用 → L2 sanitizeCodeForDeploy stub 生成 + `??` 與 `||/&&` 混用自動加括號 + root layout html/body 自動補全 + 非 variable font 移除 axes → L3 fixBuildErrors API 重試 → L4 build 循環 3+1 次 → L5 useSearchParams Suspense 拆分
 - `[CI]` **Anthropic 模型 ID**：一律用 `claude-sonnet-4-6`（不加日期後綴），`claude-sonnet-4-6-20250514` 不存在會 404。全 codebase 用 `semantic-gateway.ts` 定義的常數而非手打
 - **Anthropic SDK v0.72+**：大 `max_tokens` 必須用 `messages.stream()` + `await stream.finalMessage()`
 - **Skill 函數提前 return 必須保存 FlowState**：否則 `handleContinueFlow` 找不到 state → 用戶對話永久卡死
