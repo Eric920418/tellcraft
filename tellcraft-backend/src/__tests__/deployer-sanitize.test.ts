@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { sanitizeCodeForDeploy, toVercelSlug } from '../services/deployer'
+import { sanitizeCodeForDeploy, toVercelSlug, wrapInNextJs } from '../services/deployer'
 
 // Helper：建立最小 GeneratedCode
 function makeCode(overrides: {
@@ -708,6 +708,68 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     const layout = result.code.components[0].content
     expect(layout).toContain('<body>')
     expect(layout).toContain('</body>')
+  })
+})
+
+// ============================================================
+// wrapInNextJs — root layout 路徑變體歸位
+// ============================================================
+
+describe('wrapInNextJs: root layout 路徑變體歸位', () => {
+  it('components 含 app/layout.tsx → 被識別為 custom layout，不塞預設版', () => {
+    const code = {
+      pages: [],
+      components: [makeFile('app/layout.tsx', `export default function RootLayout({children}:any){return <html><body>{children}</body></html>}`)],
+      styles: '',
+    }
+    const files = wrapInNextJs(code, 'test-proj', '', {})
+    const layouts = files.filter(f => f.file === 'app/layout.tsx')
+    expect(layouts).toHaveLength(1)
+    expect(layouts[0].data).toContain('<html><body>')
+    // 不應有預設版（預設版帶 "Built with Tellcraft"）
+    expect(layouts[0].data).not.toContain('Built with Tellcraft')
+  })
+
+  it('components 含 layout.tsx (無 app/ 前綴) → 應強制歸位到 app/layout.tsx', () => {
+    const code = {
+      pages: [],
+      components: [makeFile('layout.tsx', `export default function RootLayout({children}:any){return <html><body>{children}</body></html>}`)],
+      styles: '',
+    }
+    const files = wrapInNextJs(code, 'test-proj', '', {})
+    // 用戶 layout 應該在 app/layout.tsx 而不是根目錄 layout.tsx
+    const rootLayouts = files.filter(f => f.file === 'layout.tsx')
+    expect(rootLayouts).toHaveLength(0)
+    const appLayouts = files.filter(f => f.file === 'app/layout.tsx')
+    expect(appLayouts).toHaveLength(1)
+    expect(appLayouts[0].data).toContain('<html><body>')
+    // 不應產生預設 layout（覆蓋用戶版）
+    expect(appLayouts[0].data).not.toContain('Built with Tellcraft')
+  })
+
+  it('components 含 components/app/layout.tsx → 應歸位到 app/layout.tsx', () => {
+    const code = {
+      pages: [],
+      components: [makeFile('components/app/layout.tsx', `export default function RootLayout({children}:any){return <html lang="zh-TW"><body>{children}</body></html>}`)],
+      styles: '',
+    }
+    const files = wrapInNextJs(code, 'test-proj', '', {})
+    const appLayouts = files.filter(f => f.file === 'app/layout.tsx')
+    expect(appLayouts).toHaveLength(1)
+    expect(appLayouts[0].data).toContain('lang="zh-TW"')
+  })
+
+  it('完全沒 layout → 塞預設 app/layout.tsx', () => {
+    const code = {
+      pages: [makeFile('app/page.tsx', 'export default function Page(){return <div>Hi</div>}')],
+      components: [],
+      styles: '',
+    }
+    const files = wrapInNextJs(code, 'my-site', '', {})
+    const layouts = files.filter(f => f.file === 'app/layout.tsx')
+    expect(layouts).toHaveLength(1)
+    expect(layouts[0].data).toContain('my-site')
+    expect(layouts[0].data).toContain('Built with Tellcraft')
   })
 })
 

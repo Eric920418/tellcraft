@@ -1605,12 +1605,18 @@ export default config
   // 生成的 components — 智慧路徑處理
   // 這些頂層目錄直接放根目錄，不加 components/ 前綴
   const ROOT_LEVEL_DIRS = ['app/', 'lib/', 'hooks/', 'utils/', 'types/', 'context/', 'stores/', 'data/', 'config/', 'api/']
+  // Root layout 路徑變體：LLM 有時漏寫 app/ 前綴。必須與 sanitizeCodeForDeploy Fix 8 一致覆蓋
+  const ROOT_LAYOUT_PATHS = new Set(['app/layout.tsx', 'app/layout.ts', 'layout.tsx', 'layout.ts'])
   let hasCustomLayout = false
   for (const comp of code.components) {
     const cleanPath = stripRouteGroups(comp.path.replace(/^(components\/)?/, ''))
 
-    if (cleanPath === 'app/layout.tsx' || cleanPath === 'app/layout.ts') {
+    // Root layout：強制歸位到 app/layout.tsx，避免無前綴版本被放到根目錄變死檔
+    if (ROOT_LAYOUT_PATHS.has(cleanPath)) {
       hasCustomLayout = true
+      const normalized = cleanPath.startsWith('app/') ? cleanPath : `app/${cleanPath}`
+      files.push({ file: normalized, data: comp.content })
+      continue
     }
 
     // 頂層目錄放到對應位置（不加 components/ 前綴）
