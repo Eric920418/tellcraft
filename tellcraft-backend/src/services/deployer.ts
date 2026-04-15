@@ -1353,8 +1353,9 @@ export async function executeDeployment(
       if (deployedCode.styles) {
         fileRows.push({ filePath: 'app/globals.css', content: deployedCode.styles, fileType: 'style' })
       }
-      await db.upsertProjectFiles(projectId, 'uiux', fileRows)
-      logger.info({ fileCount: fileRows.length }, '已同步 build 修復後的代碼到 project_files')
+      // Deploy 成功後的代碼已過全五層防禦 + Vercel build → 絕對 LKG
+      await db.upsertProjectFiles(projectId, 'uiux', fileRows, 'passed')
+      logger.info({ fileCount: fileRows.length }, '已同步 build 修復後的代碼到 project_files (LKG)')
 
       // 若此專案是某個已上線模板的來源，自動更新模板縮圖（fire-and-forget）
       db.query<{ id: string }>(

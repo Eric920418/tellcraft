@@ -1588,8 +1588,10 @@ export async function executeFullCodePipeline(
   })
 
   if (state.projectId) {
+    // 代碼已過 QG + L1 防禦，屬於「最終 stable 版本」→ 建立 LKG 快照
     await db.upsertProjectFiles(state.projectId, 'uiux',
-      generatedCodeToFileRows(currentCode, state.uiuxDesignSystem))
+      generatedCodeToFileRows(currentCode, state.uiuxDesignSystem),
+      'passed')
     await snapshotCodeToGeneration(state.projectId, {
       changeSummary: 'UIUX 設計完成',
       conversationId,

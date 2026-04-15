@@ -346,30 +346,94 @@ export interface ProjectFile {
   file_type: string
   created_at: string
   updated_at: string
+  validation_status?: 'passed' | 'failed' | 'unknown'
+  last_validated_at?: string | null
+  last_validated_content?: string | null
 }
+
+export type ValidationStatus = 'passed' | 'failed' | 'unknown'
 
 /**
  * 批量 UPSERT 專案檔案
+ *
+ * validationStatus 'passed' 時同步更新 last_validated_content（建立 LKG 快照）；
+ * 'failed' 時只更新 content 但保留舊的 last_validated_content（LKG 永不被覆蓋）；
+ * 'unknown' 時兩者都不動（向後相容）。
  */
 export async function upsertProjectFiles(
   projectId: string,
   skillSource: string,
-  files: { filePath: string; content: string; description?: string; fileType: string }[]
+  files: { filePath: string; content: string; description?: string; fileType: string }[],
+  validationStatus: ValidationStatus = 'unknown'
 ) {
   if (files.length === 0) return
 
   // 用事務批量 UPSERT
   return transaction(async (client) => {
     for (const file of files) {
-      await client.query(
-        `INSERT INTO project_files (project_id, skill_source, file_path, content, description, file_type, created_at, updated_at)
-         VALUES ($1, $2, $3, $4, $5, $6, NOW(), NOW())
-         ON CONFLICT (project_id, skill_source, file_path)
-         DO UPDATE SET content = $4, description = $5, file_type = $6, updated_at = NOW()`,
-        [projectId, skillSource, file.filePath, file.content, file.description || null, file.fileType]
-      )
+      if (validationStatus === 'passed') {
+        // 通過驗證：同步更新 LKG
+        await client.query(
+          `INSERT INTO project_files (project_id, skill_source, file_path, content, description, file_type, validation_status, last_validated_at, last_validated_content, created_at, updated_at)
+           VALUES ($1, $2, $3, $4, $5, $6, 'passed', NOW(), $4, NOW(), NOW())
+           ON CONFLICT (project_id, skill_source, file_path)
+           DO UPDATE SET content = $4, description = $5, file_type = $6, validation_status = 'passed', last_validated_at = NOW(), last_validated_content = $4, updated_at = NOW()`,
+          [projectId, skillSource, file.filePath, file.content, file.description || null, file.fileType]
+        )
+      } else if (validationStatus === 'failed') {
+        // 驗證失敗：更新 content 但保留 last_validated_content
+        await client.query(
+          `INSERT INTO project_files (project_id, skill_source, file_path, content, description, file_type, validation_status, created_at, updated_at)
+           VALUES ($1, $2, $3, $4, $5, $6, 'failed', NOW(), NOW())
+           ON CONFLICT (project_id, skill_source, file_path)
+           DO UPDATE SET content = $4, description = $5, file_type = $6, validation_status = 'failed', updated_at = NOW()`,
+          [projectId, skillSource, file.filePath, file.content, file.description || null, file.fileType]
+        )
+      } else {
+        // 未驗證：向後相容舊行為，兩者都不動
+        await client.query(
+          `INSERT INTO project_files (project_id, skill_source, file_path, content, description, file_type, created_at, updated_at)
+           VALUES ($1, $2, $3, $4, $5, $6, NOW(), NOW())
+           ON CONFLICT (project_id, skill_source, file_path)
+           DO UPDATE SET content = $4, description = $5, file_type = $6, updated_at = NOW()`,
+          [projectId, skillSource, file.filePath, file.content, file.description || null, file.fileType]
+        )
+      }
     }
   })
+}
+
+/**
+ * 取得 Last Known Good 版本：
+ * 優先回傳 last_validated_content（LKG）；若 null 則 fallback content（向後相容）。
+ * 用於前端首次載入 / F5 / 切 conversation 時保證不拿到壞代碼。
+ */
+export async function getLastValidatedProjectFiles(
+  projectId: string,
+  skillSource?: string
+): Promise<ProjectFile[]> {
+  const rows = skillSource
+    ? await queryMany<ProjectFile>(
+        `SELECT id, project_id, skill_source, file_path,
+                COALESCE(last_validated_content, content) AS content,
+                description, file_type, created_at, updated_at,
+                validation_status, last_validated_at, last_validated_content
+         FROM project_files
+         WHERE project_id = $1 AND skill_source = $2
+         ORDER BY file_path`,
+        [projectId, skillSource]
+      )
+    : await queryMany<ProjectFile>(
+        `SELECT id, project_id, skill_source, file_path,
+                COALESCE(last_validated_content, content) AS content,
+                description, file_type, created_at, updated_at,
+                validation_status, last_validated_at, last_validated_content
+         FROM project_files
+         WHERE project_id = $1
+         ORDER BY skill_source, file_path`,
+        [projectId]
+      )
+  return rows
 }
 
 /**

@@ -30,12 +30,14 @@ export interface ChatPreviewPanelProps {
     styles: string
     tailwindConfig: string
     isStreaming: boolean
+    isLkgFallback?: boolean  // 來自 Last Known Good 快照
     neonConnectionString?: string
     serverActions?: { path: string; content: string; description: string }[]
     apiRoutes?: { path: string; content: string; description: string }[]
     dbLib?: { path: string; content: string; description: string }[]
     phase: 'structure' | 'animation' | 'rwd'
   } | null
+  previewStaleReason?: 'optimizing' | 'iframe_frozen' | null
   codePreviewEditMode: boolean
   setCodePreviewEditMode: (v: boolean) => void
   codePreviewSelectedElements: ElementInfo[]
@@ -106,9 +108,16 @@ export default function ChatPreviewPanel({
   selectedTemplateId,
   selectedTemplate,
   onRuntimeError,
+  previewStaleReason,
 }: ChatPreviewPanelProps) {
   const tPreview = useTranslations('preview')
   const tUiux = useTranslations('uiux')
+
+  // Health beacon：WebContainerPreview 偵測到 iframe 超過 5s 無心跳時設 true
+  const [iframeFrozen, setIframeFrozen] = useState(false)
+  // 實際要顯示的 overlay 原因：外部 stale > iframe frozen
+  const effectiveStaleReason: 'optimizing' | 'iframe_frozen' | null =
+    previewStaleReason || (iframeFrozen ? 'iframe_frozen' : null)
 
   // 容器寬度追蹤
   const [codePreviewContainerWidth, setCodePreviewContainerWidth] = useState(0)
@@ -218,7 +227,9 @@ export default function ChatPreviewPanel({
   const isCodeGenerating = isGeneratingByStage || isStreamingFirstGen
 
   // 生成期間（不管有無 streaming 數據）→ 純等待畫面，不掛載 WebContainer
-  if (isCodeGenerating) {
+  // 例外：若有 LKG 可用（isLkgFallback），不顯示等待畫面，改顯示 LKG iframe + overlay
+  // 讓客戶生成中還能看到上一版可用預覽，而非空白動畫
+  if (isCodeGenerating && !stablePreviewData?.isLkgFallback) {
     return (
       <AIGenerationWaitingScene
         stage={lastGeneratingMsg?.stage}
@@ -432,9 +443,56 @@ export default function ChatPreviewPanel({
                   onElementResized={handleCodePreviewElementResized}
                   onRuntimeError={onRuntimeError}
                   codeVersion={codeVersion}
+                  onFrozenStateChange={setIframeFrozen}
                 />
               </div>
             </div>
+            {/* Preview Stale Overlay — AI 正在優化，蓋在 iframe 上但不擋互動 */}
+            {effectiveStaleReason && (
+              <div
+                style={{
+                  position: 'absolute',
+                  inset: 0,
+                  zIndex: 40,
+                  background: 'rgba(255, 255, 255, 0.3)',
+                  backdropFilter: 'blur(2px)',
+                  WebkitBackdropFilter: 'blur(2px)',
+                  display: 'flex',
+                  alignItems: 'flex-end',
+                  justifyContent: 'center',
+                  padding: 24,
+                  pointerEvents: 'none',  // 不擋滑鼠，iframe 保持可互動
+                }}
+              >
+                <div
+                  style={{
+                    background: 'rgba(15, 23, 42, 0.9)',
+                    color: '#fff',
+                    padding: '10px 18px',
+                    borderRadius: 20,
+                    fontSize: 13,
+                    fontWeight: 500,
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 8,
+                    boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
+                  }}
+                >
+                  <div
+                    style={{
+                      width: 12,
+                      height: 12,
+                      border: '2px solid rgba(255,255,255,0.3)',
+                      borderTopColor: '#fff',
+                      borderRadius: '50%',
+                      animation: 'tc-spin 0.8s linear infinite',
+                    }}
+                  />
+                  {effectiveStaleReason === 'iframe_frozen' ? '預覽回應中...' : 'AI 正在優化...'}
+                </div>
+                <style>{`@keyframes tc-spin { to { transform: rotate(360deg); } }`}</style>
+              </div>
+            )}
             {/* 編輯模式提示浮層 */}
             {codePreviewEditMode && codePreviewSelectedElements.length === 0 && !isStreaming && (
               <div style={{

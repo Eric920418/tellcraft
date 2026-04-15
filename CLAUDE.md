@@ -386,6 +386,7 @@ Feature 註解：`# Action: actionName` + `# [METHOD] /path` + `# Summary: xxx`
 - **`handleCodePhaseRedo` 需要快照**：`uiuxStructureCode`/`uiuxAnimationCode`，否則 redo 在已修改代碼上重做
 - **`verifyBuildLocally` 的修復結果必須同步回 DB**：否則預覽和部署代碼分岔
 - `[TEST]` **部署五層防禦**：L1 generateStructure 後驗證引用 → L2 sanitizeCodeForDeploy stub 生成 + `??` 與 `||/&&` 混用自動加括號 + root layout html/body 自動補全 + 非 variable font 移除 axes → L3 fixBuildErrors API 重試 → L4 build 循環 3+1 次 → L5 useSearchParams Suspense 拆分
+- `[TEST]` **預覽零錯誤三層防禦**：客戶預覽絕對看不到 build / runtime error 的架構保證。(1) **Preview Gate**（`services/preview-gate.ts`）：`makeStreamingCallback` 寫 Redis 前跑 esbuild 批次驗證，壞代碼不推送，emit `preview_stale`；(2) **Last Known Good (LKG)**（`project_files` 新三欄 validation_status/last_validated_at/last_validated_content via migration 034）：`upsertProjectFiles` 接 `validationStatus: 'passed' | 'failed' | 'unknown'`，passed 同步寫 last_validated_content，failed **保留舊 LKG 永不被覆蓋**；前端 polling 在 `isGenerating && !streamingPreview` 時拿 LKG 顯示上一版 + 「AI 正在優化」overlay；(3) **Health Beacon** Edit Bridge 每 2s postMessage `tc_health`，父層 5s 沒收到觸發 `iframe_frozen` overlay 兜住 HMR race / 白屏。三層互補可達 ~99.99%。**不保證 100%**（WebContainer 崩潰等極端 case 屬「產品功能壞了」，不同維度）。禁止自動回灌 prompt
 - `[CI]` **Anthropic 模型 ID**：一律用 `claude-sonnet-4-6`（不加日期後綴），`claude-sonnet-4-6-20250514` 不存在會 404。全 codebase 用 `semantic-gateway.ts` 定義的常數而非手打
 - **Anthropic SDK v0.72+**：大 `max_tokens` 必須用 `messages.stream()` + `await stream.finalMessage()`
 - **Skill 函數提前 return 必須保存 FlowState**：否則 `handleContinueFlow` 找不到 state → 用戶對話永久卡死

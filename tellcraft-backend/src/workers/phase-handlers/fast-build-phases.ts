@@ -1079,8 +1079,10 @@ export async function runFastBuildPipeline(params: {
   }
 
   if (projectId) {
+    // Fast Build 完成：代碼已過 QG，建立 LKG 快照
     await db.upsertProjectFiles(projectId, 'uiux',
-      generatedCodeToFileRows(currentCode, designSystem))
+      generatedCodeToFileRows(currentCode, designSystem),
+      'passed')
     await snapshotCodeToGeneration(projectId, {
       changeSummary: '快速建站完成',
       conversationId,

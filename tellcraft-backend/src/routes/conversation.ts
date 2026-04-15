@@ -477,6 +477,27 @@ router.get('/:id/messages', optionalAuth, async (req, res) => {
     // 對 code_preview richContent 套用 in-memory 修復（確保舊對話也能正確渲染）
     const { messages: fixedMessages, changed: messagesChanged } = repairCodePreviewInMessages(conversation.messages)
 
+    // Last Known Good fallback：生成中但 preview-gate 攔下壞代碼時，前端需要有上一版可顯示
+    // 條件：正在生成（activeTask 或 activePhase 存在）且當前無 streamingPreview → 回傳 LKG
+    // 其他情況不查詢，避免每次 polling 都打 project_files
+    let lastValidatedFiles = null
+    const isGenerating = Boolean(activeTask || activePhase)
+    if (isGenerating && !streamingPreview) {
+      try {
+        const lkgRows = await db.getLastValidatedProjectFiles(conversation.project_id)
+        if (lkgRows.length > 0) {
+          lastValidatedFiles = lkgRows.map(r => ({
+            file_path: r.file_path,
+            content: r.content,
+            skill_source: r.skill_source,
+            file_type: r.file_type,
+          }))
+        }
+      } catch (err) {
+        logger.warn({ err, projectId: conversation.project_id }, 'LKG 查詢失敗（不阻塞）')
+      }
+    }
+
     res.json({
       messages: fixedMessages,
       updatedAt: conversation.updated_at,
@@ -485,6 +506,7 @@ router.get('/:id/messages', optionalAuth, async (req, res) => {
       taskStatus: activeTask?.status || activePhase,
       isComplete: conversation.spec_complete && !activeTask && !activeSessionId,
       streamingPreview,
+      lastValidatedFiles,
     })
 
     // 背景存回 DB，讓後續輪詢直接拿到修復版本

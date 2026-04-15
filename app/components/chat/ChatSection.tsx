@@ -98,6 +98,8 @@ export default function ChatSection({
   const [streamingPreview, setStreamingPreview] = useState<StreamingPreview | null>(null)
   const [codePreviewData, setCodePreviewData] = useState<Record<string, unknown> | null>(null)
   const [fastBuildChunks, setFastBuildChunks] = useState(0)
+  // LKG（Last Known Good）— 後端在「生成中但 gate 攔下壞代碼」時回傳，前端據此顯示上一版
+  const [lastValidatedFiles, setLastValidatedFiles] = useState<Array<{ file_path: string; content: string; skill_source: string; file_type: string }> | null>(null)
 
   // ── Template Submit Modal ──
   const [showTemplateSubmitModal, setShowTemplateSubmitModal] = useState(false)
@@ -253,6 +255,7 @@ export default function ChatSection({
       })
     },
     onTypewriterTarget: (id: string | null) => setTypewriterMessageId(id),
+    onLastValidatedFiles: (files: Array<{ file_path: string; content: string; skill_source: string; file_type: string }> | null) => setLastValidatedFiles(files),
   }), [])
 
   const polling = useChatPolling(
@@ -887,9 +890,29 @@ export default function ChatSection({
   const mappedStage = mapBackendStageToFrontend(currentStage)
   const currentStageIndex = stages.findIndex(s => s.key === mappedStage)
 
+  // ── LKG 轉成 preview data shape ──
+  // 後端 LKG 是扁平 file 陣列，需轉成 { pages, components, styles }
+  const lkgAsPreviewData = useMemo(() => {
+    if (!lastValidatedFiles || lastValidatedFiles.length === 0) return null
+    const pages: { path: string; content: string; description: string }[] = []
+    const components: { path: string; content: string; description: string }[] = []
+    let styles = ''
+    for (const f of lastValidatedFiles) {
+      if (f.file_path === 'app/globals.css' || f.file_type === 'style') {
+        styles = f.content
+      } else if (f.file_path.endsWith('/page.tsx') || f.file_path === 'app/page.tsx') {
+        pages.push({ path: f.file_path, content: f.content, description: '' })
+      } else {
+        components.push({ path: f.file_path, content: f.content, description: '' })
+      }
+    }
+    return { pages, components, styles, tailwindConfig: '' }
+  }, [lastValidatedFiles])
+
   // ── Stable preview data ──
+  // 優先級：streamingPreview > codePreviewData > LKG（fallback，保證客戶永遠有東西可看）
   const stablePreviewData = useMemo(() => {
-    const activeData = streamingPreview || codePreviewData
+    const activeData = streamingPreview || codePreviewData || lkgAsPreviewData
     if (!activeData) return null
     return {
       pages: (activeData.pages || []) as { path: string; content: string; description: string }[],
@@ -897,6 +920,7 @@ export default function ChatSection({
       styles: (activeData.styles || '') as string,
       tailwindConfig: (activeData.tailwindConfig || '') as string,
       isStreaming: !!streamingPreview,
+      isLkgFallback: !streamingPreview && !codePreviewData && !!lkgAsPreviewData,
       phase: ((streamingPreview as StreamingPreview | null)?.phase || 'structure') as 'structure' | 'animation' | 'rwd',
       // Server-side files (from Coder Skill, for WebContainer full preview)
       // These only exist in codePreviewData (Record<string, unknown>), not StreamingPreview
@@ -906,7 +930,17 @@ export default function ChatSection({
       hasServerActions: !!((activeData as Record<string, unknown>).hasServerActions),
       neonConnectionString: ((activeData as Record<string, unknown>).neonConnectionString || undefined) as string | undefined,
     }
-  }, [streamingPreview, codePreviewData])
+  }, [streamingPreview, codePreviewData, lkgAsPreviewData])
+
+  // ── Preview stale reason（決定是否顯示「AI 正在優化」overlay）──
+  // 當 isTyping（正在生成）且沒有新 chunk 到達、且顯示的是 LKG 時 → 設 'optimizing'
+  // 代表後端 preview-gate 正在攔壞代碼或 LLM 修復中，客戶看的是上一版
+  const previewStaleReason = useMemo<'optimizing' | null>(() => {
+    if (!isTyping) return null
+    if (streamingPreview) return null // 有新 chunk 到達，不是 stale
+    if (stablePreviewData?.isLkgFallback) return 'optimizing'
+    return null
+  }, [isTyping, streamingPreview, stablePreviewData])
 
   // ── Auto-repair phase guard ──
   const isRepairablePhase = useMemo(() => {
@@ -1172,6 +1206,7 @@ export default function ChatSection({
                 streamingPreview={streamingPreview}
                 fastBuildChunks={fastBuildChunks}
                 stablePreviewData={stablePreviewData}
+                previewStaleReason={previewStaleReason}
                 codePreviewEditMode={editorHook.codePreviewEditMode}
                 setCodePreviewEditMode={editorHook.setCodePreviewEditMode}
                 codePreviewSelectedElements={editorHook.codePreviewSelectedElements}

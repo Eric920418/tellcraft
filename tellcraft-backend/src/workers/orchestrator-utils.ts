@@ -8,6 +8,7 @@ import * as db from '../db/client'
 import type { FlowState, IoEmitter } from '../types/flow-state'
 import type { GeneratedComponent, DesignSystem, PartialCodeCallback } from '../services/uiux-generation'
 import { generateTailwindConfig } from '../services/uiux-generation'
+import { validatePreviewBatch } from '../services/preview-gate'
 import { sendLineNotifyIfNeeded } from '../services/line-notify'
 import { sendLineFullMessage } from '../services/line-full-push'
 import { sendTelegramNotifyIfNeeded } from '../services/telegram-notify'
@@ -349,7 +350,7 @@ export function makeStreamingCallback(
   let chunkCount = 0
   let lastActivityAt = 0
 
-  return (partialCode) => {
+  return async (partialCode) => {
     const now = Date.now()
     chunkCount++
 
@@ -367,6 +368,29 @@ export function makeStreamingCallback(
       phase,
     }
 
+    const room = `conversation:${conversationId}`
+
+    // ── Preview Gate：推送前 esbuild 驗證，壞代碼永遠不離開後端 ──
+    // 任何檔案 syntax fail → 不寫 Redis、不 emit preview_update
+    // 改 emit preview_stale，前端保留上一個 LKG 版本 + 蓋 overlay
+    try {
+      const gate = await validatePreviewBatch(partialCode)
+      if (!gate.ok) {
+        io.to(room).emit('preview_stale', {
+          reason: 'validation_failed',
+          phase,
+          chunkCount,
+          failedPaths: gate.failed.map(f => f.path),
+        })
+        // 仍發送 chunk 計數，讓 FastBuildProgress 繼續更新（進度感）
+        io.to(room).emit('fast_build_chunks', { phase, chunkCount })
+        return
+      }
+    } catch (err) {
+      // Gate 本身壞了不該阻塞流程，降級為推送（維持現狀行為）
+      logger.warn({ err }, 'preview-gate 執行異常，降級為直接推送')
+    }
+
     // 存入 Redis，前端透過 HTTP 輪詢取得（解決 Mixed Content 問題）
     const redisKey = `streaming:preview:${conversationId}`
     redis.set(redisKey, JSON.stringify(previewData), 'EX', 30).catch(err => {
@@ -374,7 +398,6 @@ export function makeStreamingCallback(
     })
 
     // 同時透過 Socket.io 推送（供未來 WSS 或本地開發使用）
-    const room = `conversation:${conversationId}`
     io.to(room).emit('preview_update', previewData)
 
     // 發送 chunk 計數給前端（用於 FastBuildProgress 子進度更新）

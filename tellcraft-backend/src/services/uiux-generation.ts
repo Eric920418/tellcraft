@@ -3225,11 +3225,12 @@ function parseCompletedFileBlocks(accumulatedText: string): {
 // ============================================================
 
 // Streaming partial code callback type
+// 支援 async：preview-gate 驗證需要在推送前 await
 export type PartialCodeCallback = (partial: {
   pages: GeneratedComponent[]
   components: GeneratedComponent[]
   styles: string
-}) => void
+}) => void | Promise<void>
 
 /**
  * 建構 throttled text delta handler（雙條件：新區塊 + 時間間隔）

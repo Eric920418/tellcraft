@@ -41,6 +41,9 @@ interface WebContainerPreviewProps {
   onElementResized?: (elementId: string, width: number, height: number) => void
   onRuntimeError?: (error: { name: string; message: string; path?: string }) => void
   codeVersion?: string
+  // Health beacon：iframe 超過 5s 沒回報 tc_health 心跳 → frozen=true
+  // 用於偵測 HMR race / build 卡住 / 白屏等 gate 攔不到的情況
+  onFrozenStateChange?: (frozen: boolean) => void
 }
 
 // ── Progress UI ──
@@ -193,6 +196,7 @@ export default function WebContainerPreview({
   annotations,
   onElementResized,
   onRuntimeError,
+  onFrozenStateChange,
 }: WebContainerPreviewProps) {
   const [supported] = useState(() => isWebContainerSupported())
   const [progressDetail, setProgressDetail] = useState<string>()
@@ -506,10 +510,37 @@ export default function WebContainerPreview({
         // 丟進 dispatcher，會 debounce 合併 preview-message 的錯誤訊息後觸發修復
         dispatchRuntimeErrorRef.current?.({ name: msg.name || 'Error', message: msg.message || 'Unknown', path: msg.path })
       }
+      if (msg.type === 'tc_health') {
+        lastHealthAtRef.current = Date.now()
+        // 如果之前標記為 frozen，現在收到 beacon → 解除
+        if (frozenRef.current) {
+          frozenRef.current = false
+          onFrozenStateChangeRef.current?.(false)
+        }
+      }
     }
     window.addEventListener('message', handleMessage)
     return () => window.removeEventListener('message', handleMessage)
   }, [onRuntimeError])
+
+  // Health beacon frozen 偵測：每 1 秒檢查，超過 5 秒沒心跳即視為凍結
+  const lastHealthAtRef = useRef<number>(0)
+  const frozenRef = useRef<boolean>(false)
+  const onFrozenStateChangeRef = useRef(onFrozenStateChange)
+  onFrozenStateChangeRef.current = onFrozenStateChange
+  useEffect(() => {
+    if (!onFrozenStateChange) return
+    const timer = setInterval(() => {
+      // 還沒收到過 beacon → 可能 iframe 還在初始化，不急著判 frozen
+      if (lastHealthAtRef.current === 0) return
+      const elapsed = Date.now() - lastHealthAtRef.current
+      if (elapsed > 5000 && !frozenRef.current) {
+        frozenRef.current = true
+        onFrozenStateChangeRef.current?.(true)
+      }
+    }, 1000)
+    return () => clearInterval(timer)
+  }, [onFrozenStateChange])
 
   // PropertyEditor pending effects
   useEffect(() => {

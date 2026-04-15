@@ -19,6 +19,7 @@ export function useChatPolling(
     onLayoutModeChange: (mode: 'split') => void
     onSessionTaskIdUpdate: (taskId: string | null) => void
     onTypewriterTarget: (id: string | null) => void
+    onLastValidatedFiles?: (files: Array<{ file_path: string; content: string; skill_source: string; file_type: string }> | null) => void
   }
 ) {
   const [lastTimestamp, setLastTimestamp] = useState<string | null>(null)
@@ -68,6 +69,13 @@ export function useChatPolling(
           if (typeof window !== 'undefined' && window.innerWidth >= 768) {
             callbacksRef.current.onLayoutModeChange('split')
           }
+        }
+
+        // Last Known Good fallback（僅在後端判定需要時才傳，前端無條件接收）
+        // 後端條件：isGenerating && !streamingPreview → 回 lastValidatedFiles
+        if (callbacksRef.current.onLastValidatedFiles) {
+          const lkg = (result.data as { lastValidatedFiles?: Array<{ file_path: string; content: string; skill_source: string; file_type: string }> | null }).lastValidatedFiles ?? null
+          callbacksRef.current.onLastValidatedFiles(lkg)
         }
 
         if (result.data.hasChanges === false) {

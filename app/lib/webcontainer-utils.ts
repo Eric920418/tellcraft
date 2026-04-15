@@ -413,6 +413,19 @@ const EDIT_BRIDGE_SCRIPT = `
     tagElements();
     observer.observe(document.body, { childList: true, subtree: true });
     postToParent({ type: 'tc_iframeReady' });
+
+    // Health beacon — 每 2 秒通報 iframe 健康狀態
+    // 父層 5 秒沒收到 → 觸發 freeze overlay（iframe 卡 build / 白屏 / HMR race 的兜底）
+    setInterval(function() {
+      try {
+        postToParent({
+          type: 'tc_health',
+          at: Date.now(),
+          hasBody: !!(document.body && document.body.children && document.body.children.length > 0),
+          url: location && location.pathname,
+        });
+      } catch (e) { /* noop */ }
+    }, 2000);
   }
 
   if (document.readyState === 'loading') {
