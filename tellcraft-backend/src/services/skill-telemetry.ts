@@ -229,6 +229,7 @@ const SANITIZE_PATTERN_MAP: Array<[RegExp, string]> = [
   [/自動補充 .* 個第三方依賴/, 'auto-add-dependency'],
   [/補上缺失的 <body>/, 'missing-body-tag'],
   [/補上缺失的.*標籤/, 'missing-html-tags'],
+  [/偵測到缺失 <html>\/<body> 但無法自動修復/, 'root-layout-fix8-unreachable'],
   [/Tailwind v4 語法/, 'tailwind-v4-cleanup'],
   [/路徑正規化/, 'path-normalize'],
   [/圖片 URL 正規化/, 'upload-url-rewrite'],

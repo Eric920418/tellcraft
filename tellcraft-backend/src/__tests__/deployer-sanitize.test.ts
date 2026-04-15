@@ -616,6 +616,99 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     expect(layout).toContain('<body>')
     expect(layout).not.toMatch(/<div className="min-h-screen">/)
   })
+
+  // 路徑變體：漏掉 app/ 前綴
+  it('路徑變體：layout.tsx (無 app/ 前綴) 也應被修復', () => {
+    const code = makeCode({
+      components: [makeFile('layout.tsx', `export default function RootLayout({ children }: any) {
+  return (
+    <>
+      {children}
+    </>
+  )
+}`)],
+    })
+    const result = sanitizeCodeForDeploy(code)
+    expect(result.code.components[0].content).toContain('<html lang="zh-TW">')
+    expect(result.code.components[0].content).toContain('<body>')
+  })
+
+  // 路徑變體：components/app/layout.tsx（LLM 經常放錯）
+  it('路徑變體：components/app/layout.tsx 也應被修復', () => {
+    const code = makeCode({
+      components: [makeFile('components/app/layout.tsx', `export default function RootLayout({ children }: any) {
+  return (
+    <div>
+      {children}
+    </div>
+  )
+}`)],
+    })
+    const result = sanitizeCodeForDeploy(code)
+    expect(result.code.components[0].content).toContain('<html lang="zh-TW">')
+    expect(result.code.components[0].content).toContain('<body>')
+  })
+
+  // 路徑變體：route group
+  it('路徑變體：app/(site)/layout.tsx route group 也應被修復', () => {
+    const code = makeCode({
+      components: [makeFile('app/(site)/layout.tsx', `export default function RootLayout({ children }: any) {
+  return (
+    <>
+      {children}
+    </>
+  )
+}`)],
+    })
+    const result = sanitizeCodeForDeploy(code)
+    expect(result.code.components[0].content).toContain('<html lang="zh-TW">')
+  })
+
+  // 路徑變體：i18n layout 不應被當 root layout 修改
+  it('路徑變體：app/[locale]/layout.tsx (i18n) 不應被修改', () => {
+    const original = `export default function LocaleLayout({ children }: any) {
+  return <div>{children}</div>
+}`
+    const code = makeCode({
+      components: [makeFile('app/[locale]/layout.tsx', original)],
+    })
+    const result = sanitizeCodeForDeploy(code)
+    expect(result.code.components[0].content).not.toContain('<html')
+    expect(result.code.components[0].content).not.toContain('<body>')
+  })
+
+  // 無括號 return
+  it('無括號 return <main> 應被修復', () => {
+    const code = makeCode({
+      components: [makeFile('app/layout.tsx', `export default function RootLayout({ children }: any) {
+  return <main className="min-h-screen">{children}</main>
+}`)],
+    })
+    const result = sanitizeCodeForDeploy(code)
+    const layout = result.code.components[0].content
+    expect(layout).toContain('<html lang="zh-TW">')
+    expect(layout).toContain('<body>')
+    expect(layout).toContain('<main')
+  })
+
+  // 有 html 無 body（多行換行版）
+  it('多行 html 標籤但缺 body 應補上', () => {
+    const code = makeCode({
+      components: [makeFile('app/layout.tsx', `export default function RootLayout({ children }: any) {
+  return (
+    <html
+      lang="zh-TW"
+    >
+      {children}
+    </html>
+  )
+}`)],
+    })
+    const result = sanitizeCodeForDeploy(code)
+    const layout = result.code.components[0].content
+    expect(layout).toContain('<body>')
+    expect(layout).toContain('</body>')
+  })
 })
 
 // ============================================================

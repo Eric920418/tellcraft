@@ -604,8 +604,16 @@ export default function Page() {
 
   // ── 修復 8: root layout 缺少 <html>/<body> 標籤 ──
   // LLM 可能生成 app/layout.tsx 但只有 Header/Footer 包裹，缺少 Next.js 必要的 <html> 和 <body>
+  // Path 比對採用與 wrapInNextJs cleanPath 一致的邏輯，避免 layout.tsx / components/layout.tsx
+  // / app/(group)/layout.tsx 等變體在這層漏掉。排除 [locale]、[slug] 等 dynamic segments（非 root layout）
   for (const file of [...sanitized.pages, ...sanitized.components]) {
-    if (file.path !== 'app/layout.tsx' && file.path !== 'app/layout.ts') continue
+    const cleanPath = stripRouteGroups(file.path.replace(/^(components\/)?/, ''))
+    const isRootLayout =
+      cleanPath === 'app/layout.tsx' ||
+      cleanPath === 'app/layout.ts' ||
+      cleanPath === 'layout.tsx' ||  // LLM 有時漏寫 app/ 前綴
+      cleanPath === 'layout.ts'
+    if (!isRootLayout) continue
     const hasHtml = /<html[\s>]/.test(file.content)
     const hasBody = /<body[\s>]/.test(file.content)
     if (hasHtml && hasBody) continue
@@ -648,8 +656,8 @@ export default function Page() {
         fixed = true
       }
 
-      // 情況 C：其他情況 — 在 return ( 之後和對應的 ) 之前包裹
-      if (!fixed) {
+      // 情況 C：有 return ( 但不是 <> 或 <div —— 在 return ( 後包裹
+      if (!fixed && /return\s*\(/.test(file.content)) {
         file.content = file.content.replace(
           /return\s*\(/,
           'return (\n    <html lang="zh-TW">\n      <body>'
@@ -662,10 +670,43 @@ export default function Page() {
         fixed = true
       }
 
-      const fixedParts: string[] = []
-      if (!hasHtml) fixedParts.push('<html>')
-      if (!hasBody) fixedParts.push('<body>')
-      fixes.push(`${file.path}: 自動補上缺失的 ${fixedParts.join(' 和 ')} 標籤`)
+      // 情況 D：return <JSX> 無括號（LLM 常見寫法）→ 加括號同時包 html+body
+      // 例：`return <main>{children}</main>` → `return (<html><body><main>...</main></body></html>)`
+      if (!fixed && /return\s*<[A-Za-z]/.test(file.content)) {
+        // 定位整個 return 語句到語句結束（下一個 } 之前是函式末尾）
+        // 用 balanced approach：從 return 後的第一個 < 開始，找配對的 JSX 結尾
+        const returnMatch = file.content.match(/(return\s*)(<[\s\S]*?)(\n\s*\}\s*$|\n\}\s*\n)/m)
+        if (returnMatch) {
+          const [full, returnKw, jsxBody, ending] = returnMatch
+          // 去掉 jsxBody 尾部可能的分號與空白
+          const cleanJsx = jsxBody.replace(/[;\s]+$/, '')
+          const replaced = `${returnKw}(\n    <html lang="zh-TW">\n      <body>\n        ${cleanJsx}\n      </body>\n    </html>\n  )${ending}`
+          file.content = file.content.replace(full, replaced)
+          fixed = true
+        }
+      }
+
+      // 情況 E：arrow function 直接返回（const Layout = ({children}) => <X>{children}</X>）
+      if (!fixed && /=>\s*<[A-Za-z]/.test(file.content)) {
+        file.content = file.content.replace(
+          /(=>\s*)(<[\s\S]*?)(\n\s*$|\n(?=\w)|$)/m,
+          (_m, arrow: string, jsx: string, tail: string) => {
+            const cleanJsx = jsx.replace(/[;\s]+$/, '')
+            return `${arrow}(\n    <html lang="zh-TW">\n      <body>\n        ${cleanJsx}\n      </body>\n    </html>\n  )${tail}`
+          }
+        )
+        fixed = true
+      }
+
+      if (fixed) {
+        const fixedParts: string[] = []
+        if (!hasHtml) fixedParts.push('<html>')
+        if (!hasBody) fixedParts.push('<body>')
+        fixes.push(`${file.path}: 自動補上缺失的 ${fixedParts.join(' 和 ')} 標籤`)
+      } else {
+        // 任何 case 都抓不到 → 不強改（避免破壞代碼），只記錄讓 L3 LLM 修復接手
+        fixes.push(`${file.path}: ⚠ 偵測到缺失 <html>/<body> 但無法自動修復，交給 L3 LLM`)
+      }
     }
   }
 
