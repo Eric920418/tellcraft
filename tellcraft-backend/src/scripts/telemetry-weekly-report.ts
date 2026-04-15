@@ -364,10 +364,35 @@ function formatEscalations(report: WeeklyReportWithDelta): string {
 // Markdown 組裝
 // ============================================================
 
+function formatUnregisteredPatterns(unregistered: string[]): string {
+  if (unregistered.length === 0) return ''
+  const lines = unregistered.map(p => `- \`${p}\``).join('\n')
+  return `## ⚠ 未註冊的 sanitize pattern（${unregistered.length} 條）
+
+> 這些 pattern 定義在 \`SANITIZE_PATTERN_MAP\` 但沒有 \`prompt_changes\` 表對應的 row，
+> 代表曾有人加了 sanitize rule 卻沒執行 \`register-prompt-change.ts\` 註冊。
+> 後果：本週報無法追蹤這些規則的效應基線，也無法判斷何時可汰換。
+
+${lines}
+
+**處理方式**：對每條 pattern 執行（action_type 依實際用途選）：
+\`\`\`
+pnpm tsx src/scripts/register-prompt-change.ts \\
+  --pattern <key> --skill <deployer|uiux|quality_gate|...> \\
+  --action <sanitize_rule|qg_rule|prompt_fewshot> \\
+  --target <target_file> --note "<why>"
+\`\`\`
+
+---
+
+`
+}
+
 function renderMarkdown(
   report: WeeklyReportWithDelta,
   effects: PromptChangeEffect[],
   directionA: DirectionACandidate[],
+  unregistered: string[],
   failureData?: { byOutcome: FailureOverviewRow[]; byPhase: FailureByPhaseRow[]; topRootCauses: RootCauseRow[]; recoveryStats: RecoveryRow[] }
 ): string {
   const date = new Date().toISOString().slice(0, 10)
@@ -381,11 +406,12 @@ function renderMarkdown(
 - Window: **${report.windowDays} days**
 - Total events: **${report.totalEvents}** (prev: ${report.previousPeriodTotal}, Δ ${totalDelta}%)
 - Active prompt changes: **${effects.length}**
+- Unregistered sanitize patterns: **${unregistered.length}** ${unregistered.length > 0 ? '⚠' : '✓'}
 - Generated at: ${report.generatedAt}
 
 ---
 
-## Top Patterns (with Δ vs previous period)
+${formatUnregisteredPatterns(unregistered)}## Top Patterns (with Δ vs previous period)
 
 ${formatTopPatterns(report, statusMap)}
 
@@ -477,11 +503,12 @@ async function main() {
     ])
 
     const directionA = findDirectionACandidates(report.topPatterns, activeChanges)
+    const unregistered = findUnregisteredSanitizePatterns(activeChanges)
 
     if (json) {
-      process.stdout.write(JSON.stringify({ report, effects, directionA, failureData }, null, 2) + '\n')
+      process.stdout.write(JSON.stringify({ report, effects, directionA, unregistered, failureData }, null, 2) + '\n')
     } else {
-      process.stdout.write(renderMarkdown(report, effects, directionA, failureData))
+      process.stdout.write(renderMarkdown(report, effects, directionA, unregistered, failureData))
     }
   } catch (err) {
     console.error('週報生成失敗：', err)

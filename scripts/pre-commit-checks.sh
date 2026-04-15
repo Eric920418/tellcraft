@@ -133,6 +133,34 @@ for f in $(grep -rl 'recordTelemetry\|recordTelemetryBatch\|recordFailure' "$ROO
   fi
 done
 
+# ── 8. 新增 sanitize pattern 但沒註冊提示 ──
+# CLAUDE.md: 每次改 prompt 或加 code rule 後必須執行 register-prompt-change.ts 註冊
+# 偵測 staged diff 是否新增 SANITIZE_PATTERN_MAP entry（格式 [/regex/, 'pattern-key']）
+# 不阻擋 commit（作者可能稍後在 VPS 跑註冊），只印 WARN + 指令範本
+TELEMETRY_FILE="tellcraft-backend/src/services/skill-telemetry.ts"
+if git diff --cached --name-only 2>/dev/null | grep -q "^${TELEMETRY_FILE}$"; then
+  NEW_PATTERNS=$(git diff --cached --unified=0 "$TELEMETRY_FILE" 2>/dev/null \
+    | grep -E "^\+[[:space:]]*\[/.+/," \
+    | grep -oE "'[a-z0-9-]+'" \
+    | tr -d "'" \
+    | sort -u || true)
+  if [ -n "$NEW_PATTERNS" ]; then
+    echo -e "${YELLOW}WARN${NC} 偵測到新增 sanitize pattern — 部署到 VPS 後必須執行註冊，否則週報無法追蹤效應："
+    echo ""
+    for pattern in $NEW_PATTERNS; do
+      echo "  pnpm tsx src/scripts/register-prompt-change.ts \\"
+      echo "    --pattern ${pattern} \\"
+      echo "    --skill <deployer|uiux|quality_gate|coder|iteration> \\"
+      echo "    --action <sanitize_rule|qg_rule|prompt_fewshot> \\"
+      echo "    --target <target_file> \\"
+      echo "    --note \"<why>\""
+      echo ""
+    done
+    echo "  （WARN 只提示，不阻擋 commit。若這條是重新命名既有 pattern，忽略即可）"
+    echo ""
+  fi
+fi
+
 # ── Summary ──
 echo ""
 if [ "$ERRORS" -eq 0 ]; then

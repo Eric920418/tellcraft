@@ -13,6 +13,7 @@ import {
   measurePromptChangeEffects,
   isCodeFixablePattern,
   findDirectionACandidates,
+  findUnregisteredSanitizePatterns,
   type WeeklyReportRow,
 } from '../services/skill-telemetry'
 import * as db from '../db/client'
@@ -552,5 +553,56 @@ describe('findDirectionACandidates', () => {
 
     const candidates = findDirectionACandidates(topPatterns, [], 10)
     expect(candidates).toHaveLength(0)
+  })
+})
+
+// ============================================================
+// findUnregisteredSanitizePatterns — 未註冊 pattern 兜底偵測
+// ============================================================
+
+describe('findUnregisteredSanitizePatterns', () => {
+  it('空 activeChanges → 應回傳所有 SANITIZE_PATTERN_MAP 內 key', () => {
+    const result = findUnregisteredSanitizePatterns([])
+    const allKeys = getSanitizePatternKeys()
+    expect(result).toEqual(allKeys)
+    expect(result.length).toBeGreaterThan(0)
+  })
+
+  it('所有 pattern 都註冊 → 回傳空陣列', () => {
+    const allKeys = getSanitizePatternKeys()
+    const activeChanges = allKeys.map(k => ({ pattern_key: k }))
+    expect(findUnregisteredSanitizePatterns(activeChanges)).toEqual([])
+  })
+
+  it('部分註冊 → 只回傳未註冊的', () => {
+    const registered = ['motion-import', 'use-client-missing', 'font-axes-removal']
+    const activeChanges = registered.map(k => ({ pattern_key: k }))
+    const result = findUnregisteredSanitizePatterns(activeChanges)
+    expect(result).not.toContain('motion-import')
+    expect(result).not.toContain('use-client-missing')
+    expect(result).not.toContain('font-axes-removal')
+    // 其他 pattern 應該還在
+    expect(result).toContain('nullish-mixed-parens')
+  })
+
+  it('activeChanges 含非 sanitize pattern（qg_rule / prompt_fewshot）也計入已註冊', () => {
+    // 註冊時用什麼 action_type 不影響「是否註冊」的判定
+    const activeChanges = [
+      { pattern_key: 'motion-import' },        // sanitize_rule
+      { pattern_key: 'missing-hooks-import' }, // qg_rule
+    ]
+    const result = findUnregisteredSanitizePatterns(activeChanges)
+    expect(result).not.toContain('motion-import')
+    expect(result).not.toContain('missing-hooks-import')
+  })
+
+  it('activeChanges 含不在 SANITIZE_PATTERN_MAP 的 key 應被忽略（不報錯）', () => {
+    const activeChanges = [
+      { pattern_key: 'motion-import' },
+      { pattern_key: 'some-qg-only-pattern' }, // 不存在於 sanitize map
+    ]
+    const result = findUnregisteredSanitizePatterns(activeChanges)
+    expect(result).not.toContain('motion-import')
+    expect(result).not.toContain('some-qg-only-pattern') // 本來就不在 sanitize map
   })
 })
