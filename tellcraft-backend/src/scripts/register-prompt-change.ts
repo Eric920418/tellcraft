@@ -21,14 +21,14 @@
  *   pnpm tsx src/scripts/register-prompt-change.ts --list-all
  */
 
-import {
-  registerPromptChange,
-  retirePromptChange,
-  getActivePromptChanges,
-  getAllPromptChanges,
-  type PromptChangeActionType,
-} from '../services/skill-telemetry'
-import { closePool } from '../db/client'
+// CLI 腳本必須：(1) 先載 .env 到 process.env；(2) 在 import db/client 前呼叫 validateEnv()
+// 因為 db/client.ts 在 module top-level new Pool({ connectionString: getEnv().DATABASE_URL })
+// ES module import 是 hoisted 的，只有 dynamic import 能延後到 validateEnv 之後
+import 'dotenv/config'
+import { validateEnv } from '../lib/env'
+import type { PromptChangeActionType } from '../services/skill-telemetry'
+
+validateEnv()
 
 const VALID_ACTIONS = new Set<PromptChangeActionType>(['prompt_fewshot', 'sanitize_rule', 'qg_rule'])
 
@@ -64,7 +64,9 @@ function parseArgs() {
   return { parsed, listMode, retireId }
 }
 
-function formatTable(changes: Awaited<ReturnType<typeof getActivePromptChanges>>) {
+type PromptChangeRow = Awaited<ReturnType<typeof import('../services/skill-telemetry').getActivePromptChanges>>[number]
+
+function formatTable(changes: PromptChangeRow[]) {
   if (changes.length === 0) {
     console.log('（無資料）')
     return
@@ -94,6 +96,15 @@ function formatTable(changes: Awaited<ReturnType<typeof getActivePromptChanges>>
 
 async function main() {
   const { parsed, listMode, retireId } = parseArgs()
+
+  // 動態 import — 必須在 validateEnv() 之後，避免 db/client top-level getEnv() 炸掉
+  const {
+    registerPromptChange,
+    retirePromptChange,
+    getActivePromptChanges,
+    getAllPromptChanges,
+  } = await import('../services/skill-telemetry')
+  const { closePool } = await import('../db/client')
 
   try {
     // --list / --list-all
