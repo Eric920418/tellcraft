@@ -211,4 +211,203 @@ Scenario: 刪除分類後 categoryId 應變為 null
       expect(result.hasSpecIssues).toBe(false)
     })
   })
+
+  // ==========================================================
+  // hasExplicitNullIntent 寬鬆偵測（覆蓋中英文變體）
+  // ==========================================================
+  describe('hasExplicitNullIntent（寬鬆 null 意圖偵測）', () => {
+    const positiveExamples = [
+      // 用戶實際失敗的 case
+      '分類應可被設為未分類（null） - 成功將分類清除為未分類',
+      // 中文變體
+      '分類應可清除',
+      '應清除為未分類',
+      '應可以設為無',
+      '應設為 null',
+      'categoryId 應變為 null',
+      '標籤應被清空',
+      '取消分類關聯',
+      '移除選擇',
+      '解除群組連結',
+      // 英文變體
+      'category should become null',
+      'tag should be cleared',
+      'project should be unset',
+      'foo should be reset to null',
+      'bar is cleared after remove',
+      // 括號強信號
+      '執行刪除 (null)',
+      '處理結果（null）',
+    ]
+    positiveExamples.forEach(name => {
+      it(`[positive] "${name}" → true`, async () => {
+        const { hasExplicitNullIntent } = await import('../services/semantic-consistency-validator')
+        expect(hasExplicitNullIntent(name)).toBe(true)
+      })
+    })
+
+    const negativeExamples = [
+      '建立分類成功',
+      '更新標籤',
+      '查詢所有記錄',
+      '編輯交易記錄',
+      'create category success',
+      'list all items',
+    ]
+    negativeExamples.forEach(name => {
+      it(`[negative] "${name}" → false`, async () => {
+        const { hasExplicitNullIntent } = await import('../services/semantic-consistency-validator')
+        expect(hasExplicitNullIntent(name)).toBe(false)
+      })
+    })
+  })
+
+  // ==========================================================
+  // Actual-driven 偵測：scenario 名稱全中文時能抓到矛盾
+  // ==========================================================
+  describe('Actual-driven DataTable 掃描（中文 scenario 無英文欄位名）', () => {
+    it('用戶實際案例：「分類應可被設為未分類（null） - 成功將分類清除為未分類」+ DataTable categoryId = UUID → 偵測為矛盾', async () => {
+      const feature = {
+        name: '編輯交易記錄',
+        content: `
+Feature: 編輯交易記錄
+
+Scenario: 分類應可被設為未分類（null） - 成功將分類清除為未分類
+  Given 準備一個分類, with table:
+    | id >cat1.id | name |
+    | <id         | 飲食 |
+  Given 準備一個帳目記錄, with table:
+    | id >txn1.id | categoryId |
+    | <id         | $cat1.id   |
+  When (No Actor) 編輯交易記錄, call table:
+    | id       | categoryId |
+    | $txn1.id | null       |
+  Then 編輯交易記錄(200)回應
+  And 應該存在一個帳目記錄, with table:
+    | id       | categoryId |
+    | $txn1.id | $cat1.id   |
+`,
+      }
+
+      const result = await validateSemanticConsistency({
+        features: [feature],
+        schemaSql: '',
+      })
+
+      expect(result.passed).toBe(false)
+      const issues = result.issues.filter(i => i.issueType === 'name_vs_datatable')
+      expect(issues.length).toBeGreaterThan(0)
+      expect(issues[0].severity).toBe('error')
+      expect(issues[0].description).toContain('categoryId')
+    })
+
+    it('「脫勾 / 取消關聯」表述 + DataTable 有 FK 非 null → 偵測', async () => {
+      const feature = {
+        name: '任務管理',
+        content: `
+Feature: 任務管理
+
+Scenario: 解除群組關聯 - 任務應不屬於任何群組
+  Given 準備一個任務, with table:
+    | id >task1.id | groupId    |
+    | <id          | $group1.id |
+  Then 應該存在一個任務, with table:
+    | id        | groupId    |
+    | $task1.id | $group1.id |
+`,
+      }
+
+      const result = await validateSemanticConsistency({
+        features: [feature],
+        schemaSql: '',
+      })
+
+      const issues = result.issues.filter(i => i.issueType === 'name_vs_datatable')
+      expect(issues.length).toBeGreaterThan(0)
+    })
+
+    it('正確用 &isNull 的全中文 scenario → 不誤報', async () => {
+      const feature = {
+        name: '編輯交易記錄',
+        content: `
+Feature: 編輯交易記錄
+
+Scenario: 分類應可被設為未分類（null）
+  Then 應該存在一個帳目記錄, with table:
+    | id       | categoryId |
+    | $txn1.id | &isNull    |
+`,
+      }
+
+      const result = await validateSemanticConsistency({
+        features: [feature],
+        schemaSql: '',
+      })
+
+      const issues = result.issues.filter(i => i.issueType === 'name_vs_datatable')
+      expect(issues.length).toBe(0)
+    })
+
+    it('有 null 意圖但 DataTable 僅有 non-FK 欄位 → 不誤報（沒 FK 就沒衝突對象）', async () => {
+      const feature = {
+        name: '更新',
+        content: `
+Feature: 更新
+
+Scenario: 應清除描述 (null)
+  Then 應該存在一個記錄, with table:
+    | id | title |
+    | $x | foo   |
+`,
+      }
+
+      const result = await validateSemanticConsistency({
+        features: [feature],
+        schemaSql: '',
+      })
+
+      const issues = result.issues.filter(i => i.issueType === 'name_vs_datatable')
+      expect(issues.length).toBe(0)
+    })
+  })
+
+  // ==========================================================
+  // analyzeSpecIssuesInFailures 對用戶實際失敗訊息的偵測
+  // ==========================================================
+  describe('analyzeSpecIssuesInFailures（用戶實際失敗格式）', () => {
+    it('scenario 名稱含「應可被設為...(null)」+ error expect/actual → 偵測', () => {
+      const failures = [
+        {
+          scenarioName: '分類應可被設為未分類（null） - 成功將分類清除為未分類',
+          error: '[entity_validate] [帳目記錄.categoryId] expect: [dda4721b-22a9-4b42-95c0-f3694077ac54], actual: [null]',
+        },
+      ]
+      const result = analyzeSpecIssuesInFailures(failures, [])
+      expect(result.hasSpecIssues).toBe(true)
+      expect(result.issues.length).toBeGreaterThan(0)
+      expect(result.humanReadableReport).toContain('null')
+    })
+
+    it('scenario 名稱含「清除為」+ error expect/actual → 偵測', () => {
+      const failures = [
+        {
+          scenarioName: '欄位清除為空',
+          error: 'expect: [abc123], actual: [null]',
+        },
+      ]
+      const result = analyzeSpecIssuesInFailures(failures, [])
+      expect(result.hasSpecIssues).toBe(true)
+    })
+
+    it('scenario 名稱含「取消關聯」+ error expect/actual → 偵測', () => {
+      const failures = [
+        {
+          scenarioName: '取消選擇標籤',
+          error: 'expect: [tag-uuid], actual: [null]',
+        },
+      ]
+      const result = analyzeSpecIssuesInFailures(failures, [])
+      expect(result.hasSpecIssues).toBe(true)
+    })
+  })
 })

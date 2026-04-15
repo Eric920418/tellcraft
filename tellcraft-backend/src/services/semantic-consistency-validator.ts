@@ -10,7 +10,12 @@
 // - → LLM 永遠無法修好的矛盾，直接阻塞並提示用戶
 // ============================================================
 
+import { z } from 'zod'
 import { createLogger } from '../lib/logger'
+import { getEnv } from '../lib/env'
+import { MODEL } from '../lib/anthropic'
+import { callStructured } from '../lib/structured-output'
+import { recordTelemetry } from './skill-telemetry'
 
 const logger = createLogger('semantic-consistency-validator')
 
@@ -147,11 +152,45 @@ function flushPendingValidation(
 
 /** 偵測 scenario 名稱是否明確期望某欄位為 null */
 const NULL_INTENT_PATTERNS = [
+  // 經典：「categoryId 應變為 null」
   /([\w_\u4e00-\u9fa5]+)\s*應\s*(?:變為|為|改為|清空|清除|置為|設為|設成|歸為)\s*(?:null|空|無|None)/i,
+  // 「應 + 變/改/清 + null」
   /(?:應\s*(?:變為|為|改為|清空|清除|設為)|成為|改為|設定為|變成)\s*null\s*[，,。\s]*([\w_\u4e00-\u9fa5]+)?/i,
+  // 英文「should become null」
   /([\w_\u4e00-\u9fa5]+)\s*(?:should|must)\s+(?:become|be|turn)\s+null/i,
+  // 「被清除 / 被清空 / 被設為 null」
   /([\w_\u4e00-\u9fa5]+)\s*被\s*(?:清除|清空|設為\s*null)/i,
+  // NEW: 「應可被設為未分類（null）」「應可以設為 null」「應可清空」
+  /([\w_\u4e00-\u9fa5]+)?\s*應\s*(?:可|能|可以|能夠|可被|能被)\s*(?:被)?\s*(?:清除|清空|設|改|變|置|歸)\s*(?:為|成|到|作)?\s*(?:null|無|空|未分類|未選|無選擇)?/i,
+  // NEW: 「清除為未分類」「清空為無」「設為未分類(null)」
+  /([\w_\u4e00-\u9fa5]+)?\s*(?:清除|清空|設|改|變|置|歸)\s*(?:為|成|到|作)\s*(?:null|無|空|未分類|未選|無選擇|無關聯)/i,
+  // NEW: 括號寫法「...（null）」或「...(null)」— 強信號
+  /[（(]\s*null\s*[)）]/i,
+  // NEW: 英文 unset/clear/reset/remove association
+  /([\w_\u4e00-\u9fa5]+)?\s*(?:unset|clear(?:ed)?|reset\s+to\s+null|remov(?:ed|e)\s+(?:reference|association|link))/i,
+  // NEW: 「取消選擇 / 取消關聯 / 脫勾 / 取消分類 / 解除群組連結」— 允許中間插入業務詞
+  /(?:取消|移除|解除|脫勾|解綁)[\s\u4e00-\u9fa5]{0,6}?(?:選擇|關聯|關連|連結|連接|綁定|分類|標籤|指派|群組|類別)/i,
 ]
+
+/**
+ * 寬鬆偵測：scenario 名稱是否含有任何「清除/設為 null」的語義信號
+ * 比 extractNullExpectationFields 更寬鬆，只回 boolean。
+ * 用途：hasExplicitNullIntent 為 true 但 extractNullExpectationFields 無法抽出具體英文欄位名時，
+ * 觸發 actual-driven DataTable 掃描（不依賴精確欄位名）。
+ */
+export function hasExplicitNullIntent(scenarioName: string): boolean {
+  if (!scenarioName) return false
+
+  // Pattern 1: 任何 NULL_INTENT_PATTERNS 命中
+  if (NULL_INTENT_PATTERNS.some(p => p.test(scenarioName))) return true
+
+  // Pattern 2: 含 null 關鍵詞 + 動作詞（雙條件降低 false positive）
+  const hasNullKeyword = /\bnull\b|（\s*null\s*）|\(\s*null\s*\)|未分類|未選|無關聯|無選擇/i.test(scenarioName)
+  const hasActionVerb = /應|設|清|改|變|置|歸|should|must|become|turn|set|clear|reset|unset/i.test(scenarioName)
+  if (hasNullKeyword && hasActionVerb) return true
+
+  return false
+}
 
 /**
  * 從 scenario 名稱提取可能被期望為 null 的欄位名
@@ -159,19 +198,16 @@ const NULL_INTENT_PATTERNS = [
  */
 function extractNullExpectationFields(scenarioName: string): string[] {
   const candidates = new Set<string>()
-  const normalized = scenarioName.toLowerCase()
 
   // 只有在有「null 意圖」時才嘗試提取
-  const hasNullIntent = NULL_INTENT_PATTERNS.some(p => p.test(scenarioName)) ||
-    /null|清空|清除/i.test(scenarioName)
-  if (!hasNullIntent) return []
+  if (!hasExplicitNullIntent(scenarioName)) return []
 
   // 提取所有可能的欄位名（camelCase、snake_case、包含 Id 的詞）
   const fieldMatches = scenarioName.matchAll(/\b([a-z][a-zA-Z0-9]*(?:Id|_id)?)\b/g)
   for (const m of fieldMatches) {
     const field = m[1]
     // 排除常用非欄位詞
-    if (['null', 'should', 'must', 'be', 'become', 'turn', 'is', 'and', 'or', 'the', 'a', 'an'].includes(field.toLowerCase())) continue
+    if (['null', 'should', 'must', 'be', 'become', 'turn', 'is', 'and', 'or', 'the', 'a', 'an', 'set', 'clear', 'reset', 'unset'].includes(field.toLowerCase())) continue
     if (field.length < 2) continue
     candidates.add(field)
   }
@@ -182,8 +218,36 @@ function extractNullExpectationFields(scenarioName: string): string[] {
     for (const f of chineseFieldMatch) candidates.add(f)
   }
 
+  // 中文業務術語 → 英文欄位候選（當 scenario 全中文時才有這個救援）
+  for (const [cnTerm, enFields] of CHINESE_FIELD_HINTS) {
+    if (scenarioName.includes(cnTerm)) {
+      for (const f of enFields) candidates.add(f)
+    }
+  }
+
   return Array.from(candidates)
 }
+
+/**
+ * 中文業務術語 → 可能對應的英文欄位名
+ * 用於全中文 scenario 名稱時的救援（無法從名稱本身抽英文欄位時）
+ * 不要求精確匹配，只列出候選讓 DataTable 掃描去嘗試
+ */
+const CHINESE_FIELD_HINTS: Array<[string, string[]]> = [
+  ['分類', ['category', 'categoryId', 'category_id', 'categoryID']],
+  ['類別', ['category', 'categoryId', 'type', 'typeId', 'kind', 'kindId']],
+  ['標籤', ['tag', 'tagId', 'tag_id', 'label', 'labelId']],
+  ['使用者', ['user', 'userId', 'user_id', 'owner', 'ownerId']],
+  ['用戶', ['user', 'userId', 'user_id', 'owner', 'ownerId']],
+  ['作者', ['author', 'authorId', 'author_id', 'creator', 'creatorId']],
+  ['專案', ['project', 'projectId', 'project_id']],
+  ['群組', ['group', 'groupId', 'group_id', 'team', 'teamId']],
+  ['組織', ['organization', 'organizationId', 'org', 'orgId']],
+  ['父', ['parent', 'parentId', 'parent_id']],
+  ['上層', ['parent', 'parentId', 'parent_id']],
+  ['關聯', ['ref', 'refId', 'link', 'linkId']],
+  ['指派', ['assignee', 'assigneeId', 'assignedTo', 'assignedUserId']],
+]
 
 function checkNameVsDataTable(
   featureName: string,
@@ -192,24 +256,23 @@ function checkNameVsDataTable(
   const issues: SemanticIssue[] = []
 
   for (const scenario of scenarios) {
-    const nullFields = extractNullExpectationFields(scenario.name)
-    if (nullFields.length === 0) continue
+    const hasNullIntent = hasExplicitNullIntent(scenario.name)
+    if (!hasNullIntent) continue
 
-    // 檢查 Then entity_validate 的 DataTable，看這些 null 欄位的期望值
-    for (const validation of scenario.thenValidations) {
-      for (const field of nullFields) {
-        // 在 DataTable 中找該欄位（case-insensitive，支援 camelCase/snake_case 互轉）
+    const nullFields = extractNullExpectationFields(scenario.name)
+    const matchedAnyField = new Set<string>()  // 追蹤「已被精確欄位匹配到的 DataTable 欄位」
+
+    // Stage 1：精確欄位匹配（既有行為）
+    for (const field of nullFields) {
+      for (const validation of scenario.thenValidations) {
         const matchedKey = findMatchingColumn(validation.dataTable, field)
         if (!matchedKey) continue
+        matchedAnyField.add(`${validation.entityName}.${matchedKey}`)
 
         const expectedValue = validation.dataTable.get(matchedKey) ?? ''
         const normalizedExpected = expectedValue.trim()
 
-        // 如果期望值不是 null 相關標記 → 矛盾
-        const isNullExpression = ['&isNull', '$null', 'null', ''].includes(normalizedExpected.toLowerCase()) ||
-          normalizedExpected === '&isNull' || normalizedExpected === '$null'
-
-        if (!isNullExpression) {
+        if (!isNullExpression(normalizedExpected)) {
           issues.push({
             severity: 'error',
             featureName,
@@ -221,9 +284,48 @@ function checkNameVsDataTable(
         }
       }
     }
+
+    // Stage 2：Actual-driven fallback — 當 scenario 明顯有 null 意圖，
+    // 但精確欄位匹配階段沒掃到任何 DataTable 欄位（例如 scenario 名稱全中文，
+    // 無英文欄位名可抽取），改為掃描整個 DataTable 找「可能矛盾」的 FK/Id 類欄位
+    if (matchedAnyField.size === 0 && scenario.thenValidations.length > 0) {
+      const suspects: Array<{ entity: string; column: string; expected: string }> = []
+
+      for (const validation of scenario.thenValidations) {
+        for (const [col, expected] of validation.dataTable.entries()) {
+          const normExpected = expected.trim()
+          if (isNullExpression(normExpected)) continue
+          // 跳過顯然不可能是 null-target 的欄位（id, created_at, updated_at）
+          if (/^(id|created_?at|updated_?at|deleted_?at)$/i.test(col)) continue
+          // 可疑目標：FK 類欄位（*Id / *_id）或含「類別/分類/標籤/父」中文標記的欄位
+          const isFkLikeColumn = /(?:_id|Id)$/i.test(col) || /parent|category|tag|type|ref|assign|owner|author|user|group|project|organization/i.test(col)
+          if (!isFkLikeColumn) continue
+          suspects.push({ entity: validation.entityName, column: col, expected: normExpected })
+        }
+      }
+
+      if (suspects.length > 0) {
+        const suspectList = suspects.map(s => `${s.entity}.${s.column} = ${s.expected}`).join('、')
+        issues.push({
+          severity: 'error',
+          featureName,
+          scenarioName: scenario.name,
+          issueType: 'name_vs_datatable',
+          description: `Scenario「${scenario.name}」明顯含「清除/設為 null」語義，但 DataTable 下列 FK/Id 類欄位期望值為非 null：${suspectList}。名稱與期望值互相矛盾。`,
+          suggestedFix: `選擇其一：(A) 修改 Scenario 名稱明確說明期望保留原值；(B) 將 DataTable 中相關欄位改為 \`&isNull\`（與名稱一致）；(C) 若此 scenario 不需要，直接刪除`,
+        })
+      }
+    }
   }
 
   return issues
+}
+
+/** 判斷 DataTable 儲存格的 expected 值是否是「null 表達」 */
+function isNullExpression(normalized: string): boolean {
+  const lower = normalized.toLowerCase()
+  return lower === '&isnull' || lower === '$null' || lower === 'null' || lower === '' ||
+    lower === 'none' || lower === 'nil'
 }
 
 /** 在 DataTable 中找欄位名（支援 camelCase ↔ snake_case 互相匹配） */
@@ -408,6 +510,82 @@ function checkContradictoryScenarios(
 }
 
 // ============================================================
+// Check D（LLM Fallback）：Haiku 一次性語義矛盾檢查
+// 當 regex 對某 scenario 抓到「弱信號」（名稱含 null 關鍵字但 Check A 沒產出 issue）
+// 時觸發，補足自然語言變體的無限性。SPEC_CONSISTENCY_LLM_CHECK=true 啟用。
+// ============================================================
+
+const LlmSpecCheckSchema = z.object({
+  isContradictory: z.boolean(),
+  fieldName: z.string().nullable().optional(),
+  explanation: z.string(),
+})
+
+async function llmCheckSpecConsistency(
+  scenarioName: string,
+  validations: Array<{ entityName: string; dataTable: Map<string, string> }>,
+  trackingContext?: { userId?: string; conversationId?: string },
+): Promise<{ isContradictory: boolean; fieldName?: string; explanation: string } | null> {
+  // 將 DataTable 轉成 LLM 可讀的表格字串
+  const tablesText = validations.map(v => {
+    const rows = Array.from(v.dataTable.entries())
+      .map(([col, val]) => `    ${col}: ${val}`)
+      .join('\n')
+    return `- ${v.entityName}:\n${rows}`
+  }).join('\n')
+
+  const systemPrompt = `你是 BDD 規格語義檢查員。
+任務：判斷 scenario 名稱的意圖是否與 DataTable 期望值矛盾。
+
+典型矛盾範例：
+- 名稱：「X 應被清除為 null」
+- DataTable：X = <某個 UUID / $variable / 具體字串>
+- → isContradictory=true
+
+非矛盾範例：
+- 名稱：「X 應為 null」
+- DataTable：X = &isNull 或 null 或 空白
+- → isContradictory=false
+
+不要過度敏感：若 scenario 沒有明確「清除/設 null」意圖，或 DataTable 無對應欄位時 → isContradictory=false`
+
+  const userPrompt = `## Scenario 名稱
+${scenarioName}
+
+## Then entity_validate DataTable（DB 驗證期望值）
+${tablesText || '(無 entity_validate 步驟)'}
+
+請判斷並回傳 JSON。`
+
+  try {
+    const result = await callStructured({
+      schema: LlmSpecCheckSchema,
+      model: MODEL.HAIKU,
+      system: systemPrompt,
+      messages: [{ role: 'user', content: userPrompt }],
+      maxTokens: 512,
+      temperature: 0,
+      purpose: 'spec_consistency_llm_fallback',
+      trackingContext,
+    })
+
+    if (!result.success) {
+      logger.warn({ err: result.error }, 'LLM spec consistency check 失敗，降級')
+      return null
+    }
+
+    return {
+      isContradictory: result.data.isContradictory,
+      fieldName: result.data.fieldName ?? undefined,
+      explanation: result.data.explanation,
+    }
+  } catch (err) {
+    logger.warn({ err }, 'LLM spec consistency check 拋出例外，降級')
+    return null
+  }
+}
+
+// ============================================================
 // 主函數
 // ============================================================
 
@@ -415,9 +593,11 @@ export async function validateSemanticConsistency(input: {
   features: Array<{ name?: string; actionName?: string; content: string }>
   schemaSql: string
   entityMapping?: string
+  trackingContext?: { userId?: string; conversationId?: string }
 }): Promise<SemanticValidationResult> {
   const start = Date.now()
   const allIssues: SemanticIssue[] = []
+  const llmCheckEnabled = getEnv().SPEC_CONSISTENCY_LLM_CHECK
 
   // 解析 Schema FKs（只解析一次）
   const fks = parseSchemaFks(input.schemaSql)
@@ -427,11 +607,55 @@ export async function validateSemanticConsistency(input: {
     const scenarios = parseFeature(feature.content)
 
     // Check A
-    allIssues.push(...checkNameVsDataTable(featureName, scenarios))
+    const aIssues = checkNameVsDataTable(featureName, scenarios)
+    allIssues.push(...aIssues)
     // Check B
     allIssues.push(...checkExpectationVsSchema(featureName, scenarios, fks))
     // Check C
     allIssues.push(...checkContradictoryScenarios(featureName, scenarios))
+
+    // Check D（LLM Fallback）：只對「有 null 意圖但規則沒抓到 issue」的 scenario 觸發
+    if (llmCheckEnabled) {
+      const scenariosWithIssues = new Set(
+        aIssues
+          .filter(i => i.issueType === 'name_vs_datatable' && i.featureName === featureName)
+          .map(i => i.scenarioName)
+      )
+      for (const scenario of scenarios) {
+        if (!hasExplicitNullIntent(scenario.name)) continue
+        if (scenariosWithIssues.has(scenario.name)) continue  // 規則已抓到
+        if (scenario.thenValidations.length === 0) continue   // 沒 DataTable 可檢查
+
+        const llmResult = await llmCheckSpecConsistency(scenario.name, scenario.thenValidations, input.trackingContext)
+        if (!llmResult) continue
+
+        recordTelemetry({
+          skillName: 'feature_gate',
+          eventType: llmResult.isContradictory ? 'alignment_blocked' : 'alignment_fixed',
+          patternKey: `spec_consistency_llm:${llmResult.isContradictory ? 'contradiction' : 'ok'}`,
+          outcome: llmResult.isContradictory ? 'failed' : 'success',
+          phase: 'feature_alignment',
+          userId: input.trackingContext?.userId,
+          conversationId: input.trackingContext?.conversationId,
+          payload: {
+            featureName,
+            scenarioName: scenario.name,
+            fieldName: llmResult.fieldName,
+          },
+        }).catch(() => {})
+
+        if (llmResult.isContradictory) {
+          allIssues.push({
+            severity: 'error',
+            featureName,
+            scenarioName: scenario.name,
+            issueType: 'name_vs_datatable',
+            description: `[LLM 偵測] Scenario「${scenario.name}」與 DataTable 期望值矛盾${llmResult.fieldName ? `（欄位 ${llmResult.fieldName}）` : ''}。${llmResult.explanation}`,
+            suggestedFix: `選擇其一：(A) 修改 Scenario 名稱明確說明期望保留原值；(B) 將 DataTable 中相關欄位改為 \`&isNull\`（與名稱一致）；(C) 若此 scenario 不需要，直接刪除`,
+          })
+        }
+      }
+    }
   }
 
   const errorCount = allIssues.filter(i => i.severity === 'error').length
@@ -446,6 +670,7 @@ export async function validateSemanticConsistency(input: {
     issueCount: allIssues.length,
     errorCount,
     warningCount: allIssues.length - errorCount,
+    llmCheckEnabled,
     durationMs: result.durationMs,
   }, 'Semantic Consistency 驗證完成')
 
@@ -485,8 +710,8 @@ export function analyzeSpecIssuesInFailures(
     const expect = errorMatch[1].trim()
     const actual = errorMatch[2].trim()
 
-    // Scenario 名說 null，但 expect 是 UUID → 矛盾
-    const nullInScenario = /應變為\s*null|應為\s*null|應清空|應清除|become\s*null/i.test(failed.scenarioName)
+    // Scenario 名說 null（寬鬆判斷，統一走 hasExplicitNullIntent），但 expect 是 UUID → 矛盾
+    const nullInScenario = hasExplicitNullIntent(failed.scenarioName)
     if (nullInScenario && actual.toLowerCase() === 'null' && expect.toLowerCase() !== 'null') {
       // 避免重複
       const alreadyAdded = relevantIssues.some(i => i.scenarioName === failed.scenarioName)

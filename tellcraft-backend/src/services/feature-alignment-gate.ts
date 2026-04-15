@@ -539,6 +539,7 @@ async function runAlignmentChecks(input: AlignmentGateInput): Promise<AlignmentI
       features: input.features,
       schemaSql: input.schemaSql,
       entityMapping: input.entityMapping,
+      trackingContext: input.trackingContext,
     })
     for (const issue of semanticResult.issues) {
       issues.push({
@@ -835,7 +836,7 @@ function formatBlockMessage(errors: AlignmentIssue[]): string {
   const lines: string[] = []
 
   if (semanticErrors.length > 0) {
-    lines.push('**Feature 內部語義矛盾**（這類問題會導致測試永遠無法通過，必須先修正 Feature）：\n')
+    lines.push('**Feature 內部語義矛盾**（Scenario 名稱與 DataTable 期望值互相矛盾 — LLM 無論修幾輪代碼都無法通過，必須先修正 Feature 規格）：\n')
     const groupedSemantic = new Map<string, AlignmentIssue[]>()
     for (const e of semanticErrors) {
       const arr = groupedSemantic.get(e.featureName) || []
@@ -849,6 +850,12 @@ function formatBlockMessage(errors: AlignmentIssue[]): string {
       }
       lines.push('')
     }
+    // A/B/C 決策指引
+    lines.push('**如何修正**（每個矛盾選一）：')
+    lines.push('  **(A) 改 Scenario 名稱** — 若原本的業務行為是「保留原值」，改為更精確的名稱（例如「X 應保留原值」）')
+    lines.push('  **(B) 改 DataTable 期望值為 `&isNull`** — 若業務行為確實是「設為 null」，把 DataTable 對應欄位改為 `&isNull`')
+    lines.push('  **(C) 刪除此 Scenario** — 若此 scenario 其實不符合真實業務需求')
+    lines.push('')
   }
 
   if (otherErrors.length > 0) {
@@ -872,6 +879,6 @@ function formatBlockMessage(errors: AlignmentIssue[]): string {
     lines.push('Feature 對齊檢查發現無法自動修復的問題。')
   }
 
-  lines.push('\n建議：回到 BDD 階段修正 Feature 規格後重試，或直接告訴我您想要的正確行為。')
+  lines.push('\n下一步：回到 BDD 階段修正上述 Feature 規格後重試；或直接在對話中告訴我要採用哪個選項（例如「選 A」、「改為 &isNull」、「刪除該 scenario」），我會幫你改。')
   return lines.join('\n')
 }

@@ -73,6 +73,11 @@ const envSchema = z.object({
   CODER_TEMPLATE_V2: z.stringbool().default(false),              // 走 coder-templates/ registry + 4 新 template（soft_delete/count/exists_check/search）
   CODER_AST_SANITIZE: z.stringbool().default(false),             // sanitizeCodeForDeploy 的 next15-async-params / search-params-suspense / missing-hooks 改 AST
   DETERMINISTIC_FIX_V1: z.stringbool().default(false),           // fixFailingAction 對 missing_column / wrong_status / field_naming 先跑零 LLM 修復
+
+  // Spec Consistency LLM Fallback（Feature Alignment Gate Check 7）
+  // regex 對 scenario null intent 覆蓋不完（中英文變體多），啟用後對「規則判斷無 issue 但
+  // 名稱含可疑 null 意圖信號」的 scenario 追加 Haiku 二次檢查。失敗降級不阻塞
+  SPEC_CONSISTENCY_LLM_CHECK: z.stringbool().default(false),
 })
 
 // ============================================================
