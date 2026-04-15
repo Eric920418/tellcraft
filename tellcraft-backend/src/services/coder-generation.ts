@@ -25,6 +25,8 @@ import { generateAuthSystem, injectSessionProvider, detectAuthCapabilities } fro
 import { generateEmailInfrastructure, generateMagicLinkSystem } from './coder-email-templates'
 import { generateAdminPanel } from './coder-admin-templates'
 import { generateUploadFiles } from './coder-upload-templates'
+import { getTemplate } from './coder-templates'
+import { tryDeterministicFix } from './coder-deterministic-fixes'
 export { detectAuthInSchema, detectAuthCapabilities, generateAuthSystem, injectSessionProvider } from './coder-auth-templates'
 export { generateEmailInfrastructure, generateMagicLinkSystem } from './coder-email-templates'
 export { generateAdminPanel } from './coder-admin-templates'
@@ -66,8 +68,12 @@ const ID_PATTERN = `${ID_CHAR}+`
 interface SubOperation {
   /** _stepSummary 值，如 "建立記帳記錄" */
   summary: string
-  /** 推斷的操作類型 */
-  operationType: 'create' | 'update' | 'delete' | 'query_list' | 'query_single' | 'toggle' | 'restore' | 'aggregate' | 'cascade' | 'auth' | 'batch' | 'export' | 'unknown'
+  /**
+   * 推斷的操作類型
+   * V1 既有：create | update | delete | query_list | query_single | toggle | restore | aggregate | cascade | auth | batch | export | unknown
+   * V2 擴充（CODER_TEMPLATE_V2=true 時才會被推斷出來，走 coder-templates registry）：count | exists_check | search
+   */
+  operationType: 'create' | 'update' | 'delete' | 'query_list' | 'query_single' | 'toggle' | 'restore' | 'aggregate' | 'cascade' | 'auth' | 'batch' | 'export' | 'count' | 'exists_check' | 'search' | 'unknown'
   /** 此子操作相關的 Rule + Example 區塊（含 Background） */
   relevantGherkin: string
   /** 此子操作必須回傳的欄位 */
@@ -533,6 +539,15 @@ function extractSubOperations(featureContent: string, action: ActionEntry): SubO
 /** 從 summary 文字推斷操作類型 */
 function inferOperationType(summary: string, ruleText: string): SubOperation['operationType'] {
   const s = summary + ' ' + ruleText
+
+  // V2 擴充類型（只有 CODER_TEMPLATE_V2=true 時才推斷，否則 fall through 到 V1）
+  // 順序重要：exists_check 和 count 必須在 query_list / query_single 之前
+  if (getEnv().CODER_TEMPLATE_V2) {
+    if (/是否存在|已?註冊|已?佔用|已?被使用|重複.*檢查|唯一性|\bexists?\b|duplicate/i.test(s)) return 'exists_check'
+    if (/幾筆|幾個|數量|有多少|計算.*(筆|個|總數)|\bcount\b|total count/i.test(s)) return 'count'
+    if (/模糊.*(搜尋|查詢|搜索)|關鍵字.*(搜尋|查詢)|^搜尋|\bsearch\b|ILIKE/i.test(s)) return 'search'
+  }
+
   if (/摘要|統計|彙總|加總|合計|summary|aggregate|total/i.test(s)) return 'aggregate'
   if (/匯出|export/i.test(s)) return 'export'
   if (/未分類|相關.*應|級聯|cascade/i.test(s)) return 'cascade'
@@ -600,6 +615,10 @@ function buildSubOpSystemPrompt(subOp: SubOperation): CacheableSystemPrompt {
     case 'auth':        handlers.push('auth'); break
     case 'batch':       handlers.push('batch'); break
     case 'export':      handlers.push('query-list'); break
+    // V2 擴充類型：選擇語意最接近的既有 handler（避免新建 handler 炸 prompt cache）
+    case 'count':        handlers.push('aggregate'); break
+    case 'exists_check': handlers.push('query-single'); break
+    case 'search':       handlers.push('query-list'); break
     default:
       handlers.push('create', 'query-list', 'update', 'delete')
   }
@@ -1184,6 +1203,21 @@ async function tryTemplateGeneration(
   fnName: string,
   trackingContext?: { userId?: string; conversationId?: string },
 ): Promise<string | null> {
+  // V2 registry 路徑（僅處理新 operationType：count / exists_check / search）
+  // V1 既有 10 類仍走下方 switch 作為 production truth，確保 byte-identity
+  if (getEnv().CODER_TEMPLATE_V2) {
+    if (subOp.operationType === 'count' || subOp.operationType === 'exists_check' || subOp.operationType === 'search') {
+      const tmpl = getTemplate(subOp.operationType)
+      if (!tmpl) return null
+      const slots = await extractSlots(tmpl.schema, subOp, ctx.schemaSql, ctx.entityMapping, trackingContext)
+      if (!slots) return null
+      if (tmpl.needsColumnValidation) {
+        validateSlotColumns(slots as { table: string; softDeleteColumn?: string; scopeColumn?: string; scopeParam?: string }, ctx.schemaSql)
+      }
+      return tmpl.render(slots, fnName)
+    }
+  }
+
   switch (subOp.operationType) {
     case 'aggregate': {
       const slots = await extractSlots(AggregateSlotSchema, subOp, ctx.schemaSql, ctx.entityMapping, trackingContext)
@@ -4213,6 +4247,28 @@ export async function fixFailingAction(
     // 多餘的 auth 檢查 — 直接用 removeAuthChecks 而不是 LLM
     logger.info({ actionName, rootCause }, 'fixFailingAction: auth 問題，直接移除 auth 檢查')
     return removeAuthChecks(currentCode)
+  }
+
+  // === 零 LLM 機械修復（DETERMINISTIC_FIX_V1=true 時啟用） ===
+  // 三類 rootCause 有確定性修復路徑，比 LLM 更快、更穩、省 token
+  if (env.DETERMINISTIC_FIX_V1 && (rootCause === 'missing_column' || rootCause === 'wrong_status' || rootCause === 'field_naming')) {
+    try {
+      const deterministic = await tryDeterministicFix(rootCause, currentCode, {
+        actionName,
+        schemaSql,
+        error: primaryError,
+        featureContent,
+        trackingContext,
+      })
+      if (deterministic) {
+        logger.info({ actionName, rootCause }, '零 LLM 機械修復成功，跳過 LLM 修復')
+        return deterministic
+      }
+      // 修復失敗 → 繼續走下方 LLM 路徑（帶 harnessHint），不 return
+      logger.info({ actionName, rootCause }, '零 LLM 修復未命中，fallback 到 LLM 修復')
+    } catch (detErr) {
+      logger.warn({ err: detErr, actionName, rootCause }, '零 LLM 修復例外，fallback 到 LLM')
+    }
   }
 
   // === Per-SubOp 精準修復：偵測組裝式程式碼結構 ===

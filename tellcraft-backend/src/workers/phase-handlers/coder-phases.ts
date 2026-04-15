@@ -1019,12 +1019,12 @@ export async function regenerateFeaturesTask(input: {
   state.formulationStartedAt = Date.now()
   await saveFlowState(redis, conversationId, state)
 
-  const estimatedTime = bddSession.es_document_content ? '30-60 秒' : '1-2 分鐘'
   await sendMessage(conversationId, io, {
     content: isChinese
-      ? `正在使用新粒度規則重新生成 Features（預估 ${estimatedTime}）...`
-      : `Regenerating Features with new granularity rules (est. ${estimatedTime})...`,
+      ? '🔄 步驟 1/4：使用新粒度規則重新生成 Features（預估 1-2 分鐘）...'
+      : 'Step 1/4: Regenerating Features with new granularity (est. 1-2 min)...',
     stage: 'formulation_start',
+    progress: { current: 1, total: 4, step: 'Features 生成' },
   })
 
   // 4. 合併 resolved items
@@ -1086,12 +1086,27 @@ export async function regenerateFeaturesTask(input: {
       currentPhase: 'spec_discovery',
     })
 
+    await sendMessage(conversationId, io, {
+      content: isChinese
+        ? `✅ 已生成 ${result.features.length} 個 Features。\n🔄 步驟 2/4：驗證規格格式 + 生成 actions.yml + isa_config（預估 5-7 分鐘，內含 LLM 呼叫）...`
+        : `✅ Generated ${result.features.length} Features.\nStep 2/4: Validating + generating actions.yml + isa_config (est. 5-7 min)...`,
+      stage: 'info',
+      progress: { current: 2, total: 4, step: '規格驗證與生成' },
+    })
+
     // 7. 觸發 completeSpecPhase（自動跑 Feature 驗證 + actionsYml + isaConfig + DB + dry-run）
+    // 加 15min timeout 防止 LLM 卡死讓 FlowState 永久孤兒
     state.sessionId = bddSession.id
     await saveFlowState(redis, conversationId, state)
 
     const { completeSpecPhase } = await import('./bdd-phases')
-    await completeSpecPhase(conversationId, state, redis, io)
+    const COMPLETE_SPEC_TIMEOUT_MS = 15 * 60 * 1000 // 15 分鐘
+    await Promise.race([
+      completeSpecPhase(conversationId, state, redis, io),
+      new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error('completeSpecPhase 超時（> 15 分鐘）')), COMPLETE_SPEC_TIMEOUT_MS)
+      ),
+    ])
 
     // 8. completeSpecPhase 完成後追加引導訊息
     const updatedState = await getFlowState(redis, conversationId)

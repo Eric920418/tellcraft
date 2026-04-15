@@ -356,8 +356,9 @@ export function createOrchestratorWorker(
     {
       connection: workerConnection,
       concurrency: getEnv().WORKER_CONCURRENCY,
-      // Stalled job 保護（Coder Testing + Deploy 長任務安全餘量）
-      lockDuration: 300_000,      // 5min（預設 30s，specformula sync I/O 需要大窗口）
+      // Stalled job 保護（Coder Testing + Deploy + regenerateFeaturesTask 等長任務安全餘量）
+      // regenerateFeaturesTask 的 completeSpecPhase 實測需 7-10 分鐘
+      lockDuration: 1_200_000,    // 20min（預設 30s，含 specformula sync I/O 和 LLM 多輪修復）
       stalledInterval: 300_000,   // 每 5min 檢查（配合 FlowState recovery 頻率）
       maxStalledCount: 3,         // 允許 stall 3 次再 fail（預設 1）
     }

@@ -884,6 +884,88 @@ export function safeMotionProps<T extends Record<string, unknown>>(props: T) {
 }
 
 // ============================================================
+// AST-enhanced sanitize（CODER_AST_SANITIZE=true 時啟用）
+// ------------------------------------------------------------
+// 替代 sanitizeCodeForDeploy 中最脆弱的 3 類 regex：
+//   #2.5 missing React hooks import  → ensureReactHooksImports
+//   #6   Next15 async params         → fixNext15AsyncParams
+//   #7   useSearchParams Suspense    → splitPageForSuspense
+// AST 先跑（對複雜 case 較穩），剩餘 regex 同步 pipeline 再補齊。
+// AST 失敗降級純同步，絕不阻塞 pipeline。
+// ============================================================
+export async function sanitizeCodeForDeployAsync(code: GeneratedCode): Promise<SanitizeResult> {
+  if (!getEnv().CODER_AST_SANITIZE) {
+    return sanitizeCodeForDeploy(code)
+  }
+
+  const astFixes: string[] = []
+
+  // 深拷貝避免污染 caller
+  const workCode: GeneratedCode = {
+    pages: code.pages.map(p => ({ ...p })),
+    components: code.components.map(c => ({ ...c })),
+    styles: code.styles,
+  }
+
+  try {
+    const { ensureReactHooksImports, fixNext15AsyncParams, splitPageForSuspense } =
+      await import('../lib/ast/fixers')
+
+    // 1. React hooks import（僅 client files）
+    for (const file of [...workCode.pages, ...workCode.components]) {
+      const isBackend =
+        /^['"]use server['"]/.test(file.content.trimStart()) ||
+        file.path.startsWith('lib/') ||
+        file.path.startsWith('app/api/')
+      if (isBackend) continue
+      const r = await ensureReactHooksImports(file.content, file.path)
+      if (r?.repaired) {
+        file.content = r.content
+        astFixes.push(`[AST] ${file.path}: ${r.detail ?? '補 React hooks import'}`)
+      }
+    }
+
+    // 2. Next15 async params（僅 page/layout）
+    for (const file of workCode.pages) {
+      const r = await fixNext15AsyncParams(file.content, file.path)
+      if (r?.repaired) {
+        file.content = r.content
+        astFixes.push(`[AST] ${file.path}: ${r.detail ?? 'Next15 async params'}`)
+      }
+    }
+
+    // 3. useSearchParams → Suspense 拆分（僅 pages）
+    const pageUpdates: Array<{ index: number; content: string }> = []
+    const addedClientComponents: Array<{ path: string; content: string; description: string }> = []
+    for (let i = 0; i < workCode.pages.length; i++) {
+      const page = workCode.pages[i]
+      const r = await splitPageForSuspense(page.content, page.path)
+      if (!r) continue
+      pageUpdates.push({ index: i, content: r.pageContent })
+      addedClientComponents.push({
+        path: r.clientComponentPath,
+        content: r.clientComponentContent,
+        description: '[AST] Client component extracted for Suspense boundary',
+      })
+      astFixes.push(`[AST] ${page.path}: useSearchParams Suspense 提取 ${r.clientComponentName}`)
+    }
+    for (const u of pageUpdates) {
+      workCode.pages[u.index] = { ...workCode.pages[u.index], content: u.content }
+    }
+    workCode.components = [...workCode.components, ...addedClientComponents]
+  } catch (err) {
+    logger.warn({ err }, 'AST sanitize 失敗，降級純同步 regex pipeline')
+  }
+
+  // 再跑一次同步 regex pipeline，補齊其他 7 類修復（冪等）
+  const syncResult = sanitizeCodeForDeploy(workCode)
+  return {
+    ...syncResult,
+    fixes: [...astFixes, ...syncResult.fixes],
+  }
+}
+
+// ============================================================
 // 主要函數
 // ============================================================
 
@@ -995,8 +1077,8 @@ export async function prepareDeployment(
 
   const slug = toVercelSlug(project.name, projectId)
 
-  // 部署前預檢 + 自動修復
-  const sanitizeResult = sanitizeCodeForDeploy(code)
+  // 部署前預檢 + 自動修復（CODER_AST_SANITIZE=true 時走 AST，否則純 regex）
+  const sanitizeResult = await sanitizeCodeForDeployAsync(code)
   const sanitizedCode = sanitizeResult.code
 
   if (sanitizeResult.fixes.length > 0) {

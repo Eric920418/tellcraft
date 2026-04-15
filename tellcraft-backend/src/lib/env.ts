@@ -68,6 +68,11 @@ const envSchema = z.object({
   EXTENDED_THINKING_BUDGET: z.coerce.number().default(10000),    // Thinking budget tokens（最小 1024）
   ENABLE_UI_EVALUATOR: z.stringbool().default(false),            // UI Evaluator 黑盒 QA（PR1 Harness Engineering，staging 先開啟）
   UI_EVALUATOR_TIMEOUT_MS: z.coerce.number().default(45000),     // Evaluator 單輪預算，超時降級跳過
+
+  // Determinism over Prompt（Phase 1：Template 擴充 + AST + 零 LLM 修復）
+  CODER_TEMPLATE_V2: z.stringbool().default(false),              // 走 coder-templates/ registry + 4 新 template（soft_delete/count/exists_check/search）
+  CODER_AST_SANITIZE: z.stringbool().default(false),             // sanitizeCodeForDeploy 的 next15-async-params / search-params-suspense / missing-hooks 改 AST
+  DETERMINISTIC_FIX_V1: z.stringbool().default(false),           // fixFailingAction 對 missing_column / wrong_status / field_naming 先跑零 LLM 修復
 })
 
 // ============================================================

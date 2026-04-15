@@ -373,6 +373,7 @@ export async function validateAndFixFeatures(
   const MAX_FIX_ROUNDS = 3
   let currentFeatures = [...features]
   let lastResult: FeatureValidationResult = { lintPassed: true, validatePassed: true, errors: [] }
+  let prevErrorCount = Infinity
 
   for (let round = 0; round < MAX_FIX_ROUNDS; round++) {
     lastResult = await validateFeatures(currentFeatures, schemaSql, entityMapping)
@@ -387,7 +388,18 @@ export async function validateAndFixFeatures(
       }
     }
 
-    logger.info({ round: round + 1, errorCount: lastResult.errors.length }, '驗證失敗，嘗試修復...')
+    const errorCount = lastResult.errors.length
+    // Early stop: round >= 1 且錯誤數沒下降 → LLM 已無法再修復，再跑也浪費時間
+    if (round >= 1 && errorCount >= prevErrorCount) {
+      logger.warn(
+        { round: round + 1, errorCount, prevErrorCount },
+        '錯誤數未下降，提前停止修復迴圈（LLM 已收斂失敗）'
+      )
+      break
+    }
+    prevErrorCount = errorCount
+
+    logger.info({ round: round + 1, errorCount }, '驗證失敗，嘗試修復...')
 
     // 構建修復輸入：將錯誤分配到對應 Feature
     const featureErrorMap = new Map<string, string[]>()

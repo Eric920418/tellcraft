@@ -100,7 +100,8 @@
       "Bash(bun --version)",
       "WebFetch(domain:docs.langchain.com)",
       "WebFetch(domain:llmrefs.com)",
-      "Bash(pnpm remove:*)"
+      "Bash(pnpm remove:*)",
+      "Bash(bash /Users/eric/Desktop/tellcraft/scripts/pre-commit-checks.sh)"
     ]
   }
 }

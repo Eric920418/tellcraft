@@ -7,7 +7,7 @@ import * as db from '../db/client'
 import { createLogger } from '../lib/logger'
 
 import { sanitizeForPreview } from './code-verify'
-import { sanitizeCodeForDeploy } from './deployer'
+import { sanitizeCodeForDeployAsync } from './deployer'
 import { recordTelemetry, truncateFeedback } from './skill-telemetry'
 
 const logger = createLogger('iteration-skill')
@@ -434,8 +434,8 @@ ${enrichedFeedback}`
           updatedCode.components = updatedCode.components.filter(c => !deletedPaths!.includes(c.path))
         }
 
-        // 儲存前端（sanitize 先於 DB 寫入）
-        const fsSanitized = sanitizeCodeForDeploy(updatedCode)
+        // 儲存前端（sanitize 先於 DB 寫入；CODER_AST_SANITIZE=true 時走 AST）
+        const fsSanitized = await sanitizeCodeForDeployAsync(updatedCode)
         if (fsSanitized.fixes.length > 0) {
           logger.info({ fixes: fsSanitized.fixes }, '全棧迭代結果存入 DB 前 sanitize 修復')
           updatedCode = fsSanitized.code
@@ -546,8 +546,8 @@ ${enrichedFeedback}`
       }
       recordIterationHistory(state, userFeedback, changedFiles!)
 
-      // sanitize 在存入 DB 之前（不是之後），確保 DB 裡的代碼是乾淨的
-      const preSaveSanitized = sanitizeCodeForDeploy(updatedCode)
+      // sanitize 在存入 DB 之前（不是之後），確保 DB 裡的代碼是乾淨的（AST flag on 時走 AST）
+      const preSaveSanitized = await sanitizeCodeForDeployAsync(updatedCode)
       if (preSaveSanitized.fixes.length > 0) {
         logger.info({ fixes: preSaveSanitized.fixes }, '迭代結果存入 DB 前 sanitize 修復')
         updatedCode = preSaveSanitized.code
