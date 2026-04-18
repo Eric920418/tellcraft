@@ -13,7 +13,7 @@ import { runCoderE2ETests } from '../../services/coder-e2e-test'
 import { executeRedPhase, formatRedPhaseReport, runRedPhaseFullValidation, runRedPhaseRoutingValidation } from '../../services/red-phase-validator'
 import { runFeatureAlignmentGate } from '../../services/feature-alignment-gate'
 import { analyzeSpecIssuesInFailures } from '../../services/semantic-consistency-validator'
-import { runFormulation, generateDraftBatch, type FormulationResult } from '../../services/formulation'
+import { runFormulation, generateDraftBatch, sanitizeFeatureContent, type FormulationResult } from '../../services/formulation'
 import type { ClarifyItem } from '../../services/bdd-session'
 import { createLogger } from '../../lib/logger'
 import { sanitizeForPreview } from '../../services/code-verify'
@@ -680,13 +680,16 @@ export async function executeCoderTesting(input: CoderSkillInput): Promise<void>
   }))
 
   // 解析 featureFiles（features_content 是 JSONB，pg driver 自動解析為陣列）
+  // 套用 sanitizeFeatureContent 剝除舊對話遺留的 {entity} 花括號語法
   const rawFeatures = bddSession.features_content
   const featureFiles: { name: string; content: string }[] = Array.isArray(rawFeatures)
     ? rawFeatures.map((f: unknown) => {
         const obj = f as Record<string, unknown>
+        const rawContent = (obj.content as string) || (obj.featureContent as string) || ''
+        const { content: sanitized } = sanitizeFeatureContent(rawContent)
         return {
           name: (obj.name as string) || (obj.featureName as string) || 'unknown',
-          content: (obj.content as string) || (obj.featureContent as string) || '',
+          content: sanitized,
         }
       })
     : []
