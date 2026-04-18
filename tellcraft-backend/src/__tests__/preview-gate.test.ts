@@ -1,6 +1,10 @@
-import { describe, it, expect } from 'vitest'
-import { validatePreviewBatch } from '../services/preview-gate'
+import { describe, it, expect, beforeEach } from 'vitest'
+import { validatePreviewBatch, _clearPreviewGateCache } from '../services/preview-gate'
 import type { GeneratedCode } from '../types/flow-state'
+
+beforeEach(() => {
+  _clearPreviewGateCache()
+})
 
 function code(files: Array<{ path: string; content: string; isPage?: boolean }>): GeneratedCode {
   return {
@@ -127,5 +131,74 @@ export default function X() { return <div/> }` },
     const result = await validatePreviewBatch(code(files))
     expect(result.ok).toBe(true)
     expect(result.durationMs).toBeLessThan(5000)
+  })
+
+  // ============================================================
+  // L9：內容 hash cache（streaming heartbeat 重複驗證防護）
+  // ============================================================
+
+  describe('L9: 內容 hash cache', () => {
+    it('同一內容重複驗證 → 第二次顯著快於第一次（cache hit）', async () => {
+      const files = Array.from({ length: 20 }, (_, i) => ({
+        path: `components/Cached${i}.tsx`,
+        content: `export default function C${i}() { return <div>c${i}</div> }`,
+      }))
+
+      const first = await validatePreviewBatch(code(files))
+      const second = await validatePreviewBatch(code(files))
+
+      expect(first.ok).toBe(true)
+      expect(second.ok).toBe(true)
+      // 第二次完全 cache hit，應該幾乎瞬間返回（< 第一次的一半）
+      expect(second.durationMs).toBeLessThanOrEqual(Math.max(5, first.durationMs / 2))
+    })
+
+    it('相同壞檔重複驗證 → cache 記住失敗，不重跑 esbuild', async () => {
+      const badFile = {
+        path: 'components/Bad.tsx',
+        content: `export default function Bad() { return <div`,  // 未閉合 JSX
+      }
+      const first = await validatePreviewBatch(code([badFile]))
+      const second = await validatePreviewBatch(code([badFile]))
+
+      expect(first.ok).toBe(false)
+      expect(second.ok).toBe(false)
+      // 兩次都記錄相同錯誤
+      expect(second.failed[0].path).toBe('components/Bad.tsx')
+      expect(second.failed[0].errors.length).toBeGreaterThan(0)
+    })
+
+    it('內容變更後 cache 不命中，重新驗證', async () => {
+      const path = 'components/Mut.tsx'
+      // v1：合法
+      await validatePreviewBatch(code([
+        { path, content: 'export default function M() { return <div>v1</div> }' },
+      ]))
+      // v2：壞了 — cache 應該不命中（不同 hash），偵測到失敗
+      const v2Result = await validatePreviewBatch(code([
+        { path, content: 'export default function M() { return <div' },
+      ]))
+      expect(v2Result.ok).toBe(false)
+      expect(v2Result.failed[0].path).toBe(path)
+    })
+
+    it('streaming 場景模擬：同一檔被驗 20 次，總時間應遠小於 20 次完整驗證', async () => {
+      const files = Array.from({ length: 10 }, (_, i) => ({
+        path: `components/Stream${i}.tsx`,
+        content: `export default function S${i}() { return <div>s${i}</div> }`,
+      }))
+
+      // 第一次（cache miss）
+      const first = await validatePreviewBatch(code(files))
+      // 後續 19 次都應該全 hit
+      const start = Date.now()
+      for (let i = 0; i < 19; i++) {
+        await validatePreviewBatch(code(files))
+      }
+      const totalDurationMs = Date.now() - start
+
+      // 19 次 cache hit 加總應該明顯小於 19 * 第一次（粗估比第一次少 50% 以上）
+      expect(totalDurationMs).toBeLessThan(first.durationMs * 19 * 0.5)
+    })
   })
 })

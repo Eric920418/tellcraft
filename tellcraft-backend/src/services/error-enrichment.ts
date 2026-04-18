@@ -88,11 +88,11 @@ const ROOT_CAUSE_HINTS: Record<EnrichableRootCause, string> = {
   // ── RED Phase 專屬 6 類（部分與 Coder 共用 key） ──
   entity_setup: `entity_setup 失敗：Feature Background 的資料準備階段報錯。
 常見根因：(1) 欄位名與 Schema DDL 不一致；(2) NOT NULL 欄位未在 DataTable 提供值；(3) FK 欄位引用的父 table/ID 不存在；(4) 型別不匹配（字串塞進 UUID 欄位）。
-修復方向：檢查 Feature Background 的 \`準備一個{entity}, with table:\` 區塊，對照 Schema DDL 逐欄位驗證。`,
+修復方向：檢查 Feature Background 的 \`準備一個<實體名>, with table:\` 區塊，對照 Schema DDL 逐欄位驗證。`,
 
-  step_parsing: `Feature 解析失敗：Gherkin 步驟文字無法對應到 ISA instruction regex。
-常見根因：(1) When 格式缺 Actor 前綴（應為 \`UID="$var" {summary}, call table:\` 或 \`No Actor {summary}, call table:\`）；(2) Then 格式缺 HTTP status code；(3) Rule 缺四類前綴標註。
-修復方向：對照 sdd.os ISA SpecFormula 標準格式，補齊 Actor/status/四類前綴。`,
+  step_parsing: `Feature 解析失敗：Gherkin 步驟文字無法對應到 ISA instruction regex（Feature 規格問題，修代碼無效）。
+常見根因：(1) entity 名用花括號包裹（如 \`準備一個{顧客}\`），SpecFormula regex 不接受 {}，應為 \`準備一個顧客\`；(2) When 格式缺 Actor 前綴；(3) Then 格式缺 HTTP status code；(4) Rule 缺四類前綴標註。
+修復方向：這是 Feature 規格語法問題，修 backend 代碼永遠無效。應修正 Feature 檔案的步驟格式（sanitizeFeatureContent 會自動剝除花括號）。`,
 
   api_spec_mismatch: `API spec 不匹配：Feature 的 Action summary 在 actionsYml 找不到對應 action。
 常見根因：(1) Feature 的 \`# Action: actionName\` 與 actionsYml 的 action name 不一致；(2) summary 文字在 Feature 與 actionsYml 間漂移。
@@ -106,8 +106,8 @@ const ROOT_CAUSE_HINTS: Record<EnrichableRootCause, string> = {
 /**
  * 判斷是否應該跳過 LLM 修復（Harness 已知怎麼修，或修代碼無效）。
  *
- * 短路的三類都是「Feature 規格問題或已知直接機械修復」：
- *   - var_resolution / spec_inconsistency：修代碼永遠無效（必須修 Feature）
+ * 短路的類別都是「Feature 規格問題或已知直接機械修復」：
+ *   - var_resolution / spec_inconsistency / step_parsing：修代碼永遠無效（必須修 Feature）
  *   - auth_check：有機械修復函數 removeAuthChecks()，不需 LLM
  *
  * 其餘 rootCause 仍走 LLM 修復，但帶上 harnessHint。
@@ -117,6 +117,7 @@ function shouldSkipLlmFix(rootCause: EnrichableRootCause): boolean {
     || rootCause === 'auth_check'
     || rootCause === 'spec_inconsistency'
     || rootCause === 'api_summary_mismatch'
+    || rootCause === 'step_parsing'
 }
 
 /**

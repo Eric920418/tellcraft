@@ -78,9 +78,9 @@
 | 成功回應 | `{summary}(STATUS)回應, with table:` | `建立訂單(201)回應, with table:` |
 | 成功回應（JSON） | `{summary}(STATUS)回應為, with JSON:` | `查詢訂單(200)回應為, with JSON:` |
 | 操作失敗 | `操作失敗` | 錯誤情境時使用 |
-| Entity 存在驗證 | `應該存在一個{entity}, with table:` | `應該存在一個訂單, with table:` |
-| Entity 不存在驗證 | `應該不存在一個{entity}, with table:` | `應該不存在一個訂單, with table:` |
-| 資料準備 | `準備一個{entity}, with table:` | `準備一個商品, with table:` |
+| Entity 存在驗證 | `應該存在一個<實體名>, with table:` | `應該存在一個訂單, with table:`（不加花括號 {}） |
+| Entity 不存在驗證 | `應該不存在一個<實體名>, with table:` | `應該不存在一個訂單, with table:`（不加花括號 {}） |
+| 資料準備 | `準備一個<實體名>, with table:` | `準備一個商品, with table:`（不加花括號 {}） |
 | 時間控制 | `現在時間為 "{datetime}"` | `現在時間為 "2026-01-15T10:00:00Z"` |
 
 ### VAR 系統
@@ -233,12 +233,12 @@ SpecFormula 使用三種變數前綴取代硬編碼值：
 Feature: 功能名稱
 
   Background:
-    Given 準備一個{entity1}, with table:
-      | >Entity1.id | column2 |
-      | <entity1Id  | value2  |
-    And 準備一個{entity2}, with table:
-      | >Entity2.id | column2     |
-      | <entity2Id  | $Entity1.id |
+    Given 準備一個使用者, with table:
+      | >User1.id | email            | name |
+      | <user1Id  | user@example.com | 小明 |
+    And 準備一個商品, with table:
+      | >Product1.id | name     | price |
+      | <product1Id  | 宮保雞丁 | 120   |
 
   # ========== 前置條件 ==========
 

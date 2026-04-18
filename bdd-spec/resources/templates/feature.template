@@ -17,12 +17,12 @@ Feature: {summary}
   # 每個 Example 執行前都會先執行 Background
   # 使用 > 宣告 Context Key，< 捕捉 Execution Key
   Background:
-    Given 準備一個{entity1}, with table:
-      | >{Entity1}.id | {field1} | {field2} |
-      | <entity1Id    | value1   | value2   |
-    And 準備一個{entity2}, with table:
-      | >{Entity2}.id | {field1}      | {field2} |
-      | <entity2Id    | ${Entity1}.id | value2   |
+    Given 準備一個使用者, with table:
+      | >User1.id | email            | name |
+      | <user1Id  | user@example.com | 小明 |
+    And 準備一個商品, with table:
+      | >Product1.id | name   | price |
+      | <product1Id  | 宮保雞丁 | 120   |
 
   #------------------------------------------------------------
   # Rule 格式：{前置|後置}（{子類}）- {規則描述}

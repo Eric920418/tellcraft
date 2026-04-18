@@ -95,6 +95,16 @@ export function sanitizeFeatureContent(content: string): { content: string; fixe
     result = result.replace(original, replacement)
   }
 
+  // 4. entity_setup 花括號剝除：`準備一個{顧客}` → `準備一個顧客`
+  // LLM 常把 prompt 中的 `{entity}` 佔位符語法照抄到 Gherkin 輸出，
+  // SpecFormula regex 字元類不含 {} → entity_setup 100% 失敗
+  // 同樣處理 `應該存在一個{entity}` 和 `應該不存在一個{entity}`
+  result = result.replace(/(?:準備一個|應該(?:不)?存在一個)\{([^}]+)\}/g, (match, entity) => {
+    const prefix = match.substring(0, match.indexOf('{'))
+    fixes.push(`entity 花括號剝除：${match} → ${prefix}${entity}`)
+    return `${prefix}${entity}`
+  })
+
   return { content: result, fixes }
 }
 
@@ -759,12 +769,12 @@ export async function generateSingleFeature(
 ### Given 設定方式選擇指引
 | 判定條件 | 選擇 | 範例 |
 |----------|------|------|
-| 簡單 Invariant（單一欄位約束） | Choice A: 直接用 \`準備一個{entity}, with table:\` | price >= 0、status = 'active' |
+| 簡單 Invariant（單一欄位約束） | Choice A: 直接用 \`準備一個商品, with table:\`（entity 直接寫名稱，不加花括號） | price >= 0、status = 'active' |
 | 複雜 Invariant（跨屬性計算） | Choice B: 用 \`(UID="$var") {summary}, call table:\` 透過 Action 設定 | 總額 = 單價 × 數量 |
 | 狀態流轉（需前置 Action 建立狀態） | Choice B: 用 Action 設定 | 訂單需先經過「建立」才能「取消」 |
 
 ### Given 步驟格式（資料準備）
-- 資料準備：\`準備一個{entity}, with table:\`（使用 \`>contextKey\` / \`<executionKey\`）
+- 資料準備：\`準備一個<實體名>, with table:\`（**不加花括號 {}**，直接寫實體名如 \`準備一個商品, with table:\`）（使用 \`>contextKey\` / \`<executionKey\`）
 - 時間控制：\`現在時間為 "{datetime}"\`
 
 ### When 步驟格式（Action 呼叫，必須有 Actor 前綴）
@@ -830,9 +840,9 @@ Rule: <四類前綴> - <主詞> 必須/應 <單一條件>
 Feature: ${featureInfo.name}
 
   Background:
-    Given 準備一個{entity}, with table:
-      | >Entity1.id | 欄位 |
-      | <entity1Id  | 值   |
+    Given 準備一個使用者, with table:
+      | >User1.id | email            | name |
+      | <user1Id  | user@example.com | 小明 |
 
   # ========== 前置條件 ==========
 
@@ -1257,12 +1267,12 @@ export async function fixMultipleFeatures(
 5. When 格式：\`(No Actor|UID="$var") {summary}, call table:\`（必須有 Actor 前綴）
 6. Then 成功格式：\`{summary}(STATUS)回應, with table:\`（必須有 HTTP status code）
 7. Then 失敗格式：\`操作失敗\`
-8. Entity 驗證格式：\`應該存在一個{entity}, with table:\` 或 \`應該不存在一個{entity}, with table:\`
-9. Given 資料準備：\`準備一個{entity}, with table:\`
+8. Entity 驗證格式：\`應該存在一個<實體名>, with table:\` 或 \`應該不存在一個<實體名>, with table:\`（直接寫實體名，不加花括號 {}）
+9. Given 資料準備：\`準備一個<實體名>, with table:\`（直接寫實體名如 \`準備一個商品, with table:\`，**禁止花括號** {} 包裹）
 10. VAR 系統：\`>contextKey\` 宣告、\`$variable\` 引用、\`<executionKey\` 捕捉
 11. **VAR 對齊規則**：Header 有 \`>contextKey\` → 同一欄 Data **必須**是 \`<executionKey\`；Data 有 \`<executionKey\` → 同一欄 Header **必須**有 \`>contextKey\`。範例：\`| >User.id | name |\` → \`| <userId | "John" |\` ✅。\`| >User.id | name |\` → \`| email | "John" |\` ❌
 12. Entity 準備（\`準備一個\`）的 DataTable data row **至少要有一個非空欄位值**，不可全空
-13. **DataTable 欄位必須存在於 Schema 中**：\`準備一個{entity}\` 的欄位名必須是對應資料表中的實際欄位（camelCase → snake_case 映射）
+13. **DataTable 欄位必須存在於 Schema 中**：\`準備一個<實體名>\` 的欄位名必須是對應資料表中的實際欄位（camelCase → snake_case 映射）
 14. **VAR 作用域（關鍵）**：每個 Scenario 獨立重新執行 Background + 自己的步驟，跨 Scenario 不共享 context。所有 \`$xxx\` 引用必須在**本 Scenario 的 Background 或 Given** 已有對應 \`>\` 宣告。**禁止**假設「別的 Scenario/Feature 已宣告」。
 15. **複合概念正確拆 entity/field（這是常見致命錯誤）**：
     - 「商家的 userId」= \`>Merchant1.userId\`（entity=Merchant1, field=userId），引用 \`$Merchant1.userId\` 或 \`$merchant1UserId\`

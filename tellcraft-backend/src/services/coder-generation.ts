@@ -498,12 +498,15 @@ function extractSubOperations(featureContent: string, action: ActionEntry): SubO
   if (ruleBlocks.length === 0) return []
 
   // 3. 對每個 Rule 區塊找 When 步驟的 summary
-  const summaryRegex = /(?:When|And)\s+(?:\((?:No Actor|UID="[^"]*")\)\s+)?(.+?),\s*call\s+table:/i
+  // L7：regex 容錯 \(? \)? 兼容 LLM 寫成「When UID="$Store.id" 查看銷售報表」（無括號）
+  const summaryRegex = /(?:When|And)\s+(?:\(?(?:No Actor|UID="[^"]*")\)?\s+)?(.+?),\s*call\s+table:/i
   const groups = new Map<string, string[]>()
 
   for (const block of ruleBlocks) {
     const match = block.content.match(summaryRegex)
-    const summary = match?.[1]?.trim() || '__default__'
+    const rawSummary = match?.[1]?.trim()
+    // L7 後處理：regex 沒抓到 Actor 時，summary 兜底再 strip 一次
+    const summary = rawSummary ? cleanSubOpSummary(rawSummary) : '__default__'
     if (!groups.has(summary)) groups.set(summary, [])
     groups.get(summary)!.push(block.content)
   }
@@ -1276,7 +1279,8 @@ async function generateSubOperationCode(
   ctx: { schemaSql: string; entityMapping: string; types: Record<string, unknown> },
   trackingContext?: { userId?: string; conversationId?: string }
 ): Promise<{ summary: string; code: string }> {
-  const handleName = `handle${toPascalCase(subOp.summary)}`
+  // L7：用 buildHandleName 走 sanitize + toPascalCase，保證 JS 識別符合法
+  const handleName = buildHandleName(subOp.summary)
 
   // === 優先嘗試 template 生成（確定性） ===
   if (subOp.operationType !== 'unknown' && subOp.operationType !== 'auth' && subOp.operationType !== 'batch') {
@@ -1472,7 +1476,8 @@ function composeActionFunction(
       cleaned = cleaned.replace(fullHelper, '')
     }
     // 確保函數名稱正確（使用 Unicode-aware pattern 匹配中文函數名）
-    const handleName = `handle${toPascalCase(summary)}`
+    // L7：走 buildHandleName 保證 JS 識別符合法
+    const handleName = buildHandleName(summary)
     cleaned = cleaned.replace(
       new RegExp(`(?:export\\s+)?(?:async\\s+)?function\\s+${ID_PATTERN}`),
       `async function ${handleName}`
@@ -1484,7 +1489,8 @@ function composeActionFunction(
   // 5. 組裝 _stepSummary 分派（長 summary 在前，避免子字串衝突）
   const sortedOps = [...subOps].sort((a, b) => b.summary.length - a.summary.length)
   const dispatchBranches = sortedOps.map((op, i) => {
-    const handleName = `handle${toPascalCase(op.summary)}`
+    // L7：走 buildHandleName 保證 JS 識別符合法（dispatch + 函數名拼接必須一致）
+    const handleName = buildHandleName(op.summary)
     const prefix = i === 0 ? 'if' : 'else if'
     return `  ${prefix} (op === '${op.summary}') return ${handleName}(input)`
   }).join('\n')
@@ -2115,6 +2121,12 @@ ${issueText}
 
   logger.info({ path: component.path, totalBlocks: blocks.length, applied: appliedCount }, '二次改寫 diff 應用完成')
 
+  // L8：偵測 LLM 在 replace block 寫進 git conflict marker → 回退原版本
+  if (hasConflictMarker(modifiedContent)) {
+    logger.warn({ path: component.path, applied: appliedCount }, '二次改寫偵測到 git conflict marker，回退原始版本')
+    return component
+  }
+
   return { path: component.path, content: modifiedContent, description: component.description }
 }
 
@@ -2670,6 +2682,13 @@ SEARCH 部分必須精確匹配原始代碼（逐字元對應）。
 
   if (appliedCount === 0) {
     logger.warn({ path: component.path }, '所有 SEARCH/REPLACE block 都失敗，回退原始版本')
+    return component
+  }
+
+  // L8：LLM 偶爾在 replace block 寫進 git conflict marker（<<<<<<<、=======、>>>>>>>）
+  // 在 esbuild 驗證之前先攔截，避免污染後續 syntax firewall + 變空殼
+  if (hasConflictMarker(modifiedContent)) {
+    logger.warn({ path: component.path, applied: appliedCount }, '偵測到 git conflict marker 流入代碼，回退原始版本')
     return component
   }
 
@@ -3773,6 +3792,56 @@ function toPascalCase(str: string): string {
 }
 
 /**
+ * L7 helper：strip BDD When 步驟的 Actor prefix（兼容有/無括號）
+ * 用於 extractSubOperations 的 summary 後處理，兜底 regex 沒抓到的邊界 case
+ *
+ * 範例：
+ *   `(UID="$Store.id") 查看銷售報表` → `查看銷售報表`
+ *   `UID="$Store.id" 查看銷售報表` → `查看銷售報表`（無括號，LLM 常寫的版本）
+ *   `(No Actor) 建立訂單` → `建立訂單`
+ *   `No Actor 建立訂單` → `建立訂單`
+ *   `查看銷售報表` → `查看銷售報表`（無 Actor，原樣返回）
+ */
+export function cleanSubOpSummary(rawSummary: string): string {
+  return rawSummary
+    .replace(/^\s*\((?:No Actor|UID="[^"]*")\)\s*/i, '')   // 帶括號
+    .replace(/^\s*UID\s*=\s*"[^"]*"\s+/i, '')              // 無括號 UID
+    .replace(/^\s*No Actor\s+/i, '')                        // 無括號 No Actor
+    .trim()
+}
+
+/**
+ * L7 helper：把任意字串 sanitize 成合法的 JS 識別符片段
+ * 移除所有非「中文 / 字母 / 數字」的字符（保留中文支援 toPascalCase 的中文 handler 名）
+ *
+ * 範例：
+ *   `UID="$store.id" 查看銷售報表` → `UIDstoreid查看銷售報表`
+ *   `查看銷售報表` → `查看銷售報表`（原樣）
+ *   `Foo Bar Baz!` → `FooBarBaz`
+ */
+export function sanitizeForJsIdentifier(str: string): string {
+  // 保留：CJK 統一漢字、CJK 擴展 A、半形字母數字、空白（給 toPascalCase 切詞用）
+  return str.replace(/[^\u4e00-\u9fff\u3400-\u4dbfa-zA-Z0-9\s]/g, '')
+}
+
+/** L7：handleName 拼接專用，組合 sanitize + toPascalCase，保證輸出是合法 JS 識別符 */
+export function buildHandleName(summary: string): string {
+  return `handle${toPascalCase(sanitizeForJsIdentifier(summary))}`
+}
+
+/**
+ * L8：偵測代碼是否含 git conflict marker
+ * 場景：LLM 在 SEARCH/REPLACE diff 模式下偶爾把 marker 寫進 replace block，
+ * apply 後 modifiedContent 會包含 `<<<<<<< / ======= / >>>>>>>`，TS parser 看不懂報錯
+ *
+ * 偵測規則：行首 7 個連續 `<` / `=` / `>` 才算（避免誤判 markdown 文字）
+ */
+export function hasConflictMarker(code: string): boolean {
+  if (!code) return false
+  return /(?:^|\n)(?:<{7}|={7}|>{7})(?=\s|\n|$)/.test(code)
+}
+
+/**
  * 從 LLM 回應中提取代碼（移除 markdown 包裹）
  */
 function extractCodeFromResponse(response: string): string {
@@ -4104,6 +4173,7 @@ export type FailureRootCause =
   | 'fk_constraint'        // FK 約束違反
   | 'spec_inconsistency'   // Feature 內部矛盾（scenario 名稱 vs DataTable 期望值衝突）
   | 'api_summary_mismatch' // Feature When summary 在 api-spec/actionsYml 找不到（修代碼絕對沒用）
+  | 'step_parsing'         // Given/When/Then 步驟格式無法匹配 ISA instruction（Feature 語法問題，修代碼無效）
   | 'unknown'
 
 /**
@@ -4134,7 +4204,13 @@ export function classifyFailureRootCause(error: string, scenarioName?: string): 
   if (!error) return 'unknown'
   const e = error.toLowerCase()
 
-  // API summary mismatch 偵測（優先級最高：修代碼絕對沒用，必須修 Feature/actionsYml summary）
+  // Step parsing failure（優先級最高：修代碼絕對沒用，Feature 步驟語法錯誤）
+  // 典型：`準備一個{顧客}` 花括號語法 → SpecFormula regex 不匹配
+  if (e.includes('步驟無法匹配') || e.includes('step could not be matched')) {
+    return 'step_parsing'
+  }
+
+  // API summary mismatch 偵測（修代碼絕對沒用，必須修 Feature/actionsYml summary）
   // 典型：Feature When summary "新增一筆收支記錄" 在 api-spec 找不到 → 所有 scenario 100% 失敗
   if (e.includes('找不到 api 操作') || e.includes('api operation not found')) {
     return 'api_summary_mismatch'
