@@ -11,6 +11,7 @@ import type { ESKnowledgeMap } from '../services/event-storming'
 import type { ReferenceAnalysis } from '../services/reference-analyzer'
 import type { ImpactAnalysis } from '../services/change-management'
 import type { RegistrantInfo } from '../schemas/domain'
+import type { ImageLibrary } from '../services/image-library-service'
 import type Redis from 'ioredis'
 import type { Server as SocketIOServer } from 'socket.io'
 import type { Emitter } from '@socket.io/redis-emitter'
@@ -95,6 +96,8 @@ export interface FlowState {
   uiuxDesignTier?: DesignTier
   // Design Mood（設計情緒預設）
   uiuxDesignMood?: string
+  // Unsplash 圖片庫（供 sanitize 校驗 + ImageCredits 注入用）
+  uiuxImageLibrary?: ImageLibrary
   // Quality Gate 報告
   uiuxQualityReport?: QualityReport
   // Deployer 專用

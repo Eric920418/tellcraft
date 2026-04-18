@@ -127,6 +127,14 @@ export class EntitySetup {
         }
       }
 
+      // L1 修復：$notnull / $null 是驗證標記，不是資料值
+      // 若 LLM 在 entity_setup 誤放 $notnull（應只在 entity_validate 用），
+      // 跳過此欄位（不插入 → 讓 DB default 或 NULL 生效）。
+      // 相容 entity-validate.ts:291 的對稱處理。
+      if (trimmedValue === '$notnull' || trimmedValue === '$null') {
+        continue;
+      }
+
       const actualColName = this.resolveColumnName(tableDef, header);
       const snakeCol = actualColName.toLowerCase();
 

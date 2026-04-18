@@ -15,6 +15,24 @@ import { repairMissingReactImports, repairBracketLookupAccess } from './uiux-gen
 import { sanitizeNamedImports } from '../utils/sanitize-named-imports'
 import { inferFileType } from '../workers/orchestrator-utils'
 import { recordTelemetry, recordTelemetryBatch, categorizeSanitizeFix, truncateFeedback } from './skill-telemetry'
+import {
+  buildAttributionBlock,
+  extractUsedUnsplashAssets,
+  triggerUnsplashDownloads,
+  type ImageLibrary,
+  type ImageCategory,
+} from './image-library-service'
+
+// ============================================================
+// 客戶 app 的 next.config images.remotePatterns
+// （允許 picsum.photos, images.unsplash.com, placehold.co）
+// wrapInNextJs 和 wrapInNextJsWithIgnoreErrors 共用此常數
+// ============================================================
+const CLIENT_APP_IMAGE_REMOTE_PATTERNS = `    remotePatterns: [
+      { protocol: 'https', hostname: 'picsum.photos' },
+      { protocol: 'https', hostname: 'images.unsplash.com' },
+      { protocol: 'https', hostname: 'placehold.co' },
+    ],`
 
 const logger = createLogger('deployer')
 const execFileAsync = promisify(execFile)
@@ -925,6 +943,134 @@ export function safeMotionProps<T extends Record<string, unknown>>(props: T) {
 }
 
 // ============================================================
+// Fix 9：Image Library 白名單校驗 + ImageCredits 注入
+// ------------------------------------------------------------
+// 在 sanitizeCodeForDeploy 之後、wrap 進 Next.js 之前呼叫
+// - 掃描 <img>/<Image> 的 Unsplash URL，違規 id 替換為白名單同分類第一張
+// - 產出 components/ImageCredits.tsx（若有實際使用 Unsplash）
+// - 返回 download_location 給 caller fire-and-forget trigger
+// ============================================================
+
+export interface ImageLibraryApplyResult {
+  code: GeneratedCode
+  fixes: string[]
+  injectedFile: { file: string; data: string } | null
+  downloadLocations: string[]
+}
+
+const IMAGE_SRC_REGEX = /<(?:img|Image)\b[^>]*?\bsrc\s*=\s*["']([^"']+)["'][^>]*?>/g
+const UNSPLASH_HOST_RE = /images\.unsplash\.com/
+const UNSPLASH_ID_RE = /images\.unsplash\.com\/photo-([A-Za-z0-9_-]+)/
+
+function getAllLibraryAssets(lib: ImageLibrary) {
+  return [
+    ...lib.hero, ...lib.product, ...lib.team,
+    ...lib.background, ...lib.lifestyle, ...lib.detail,
+  ]
+}
+
+/**
+ * 推斷 <img> 出現在哪類上下文（從 src 前後文用 className/alt 關鍵字猜）
+ */
+function inferCategoryFromContext(imgTag: string): ImageCategory {
+  const lower = imgTag.toLowerCase()
+  if (/hero|banner|jumbotron|cover/.test(lower)) return 'hero'
+  if (/avatar|headshot|portrait|team|member|profile/.test(lower)) return 'team'
+  if (/bg|background/.test(lower)) return 'background'
+  if (/product|item|card|menu/.test(lower)) return 'product'
+  if (/detail|closeup|icon|thumb/.test(lower)) return 'detail'
+  return 'lifestyle'
+}
+
+function pickFallbackAsset(lib: ImageLibrary, category: ImageCategory) {
+  const pool = lib[category]
+  if (pool.length > 0) return pool[0]
+  // 所有類都可能空，按優先順序找第一個非空
+  const order: ImageCategory[] = ['lifestyle', 'hero', 'product', 'background', 'detail', 'team']
+  for (const c of order) {
+    if (lib[c].length > 0) return lib[c][0]
+  }
+  return null
+}
+
+function replaceImageUrlsInContent(
+  content: string,
+  lib: ImageLibrary,
+  allowedIds: Set<string>,
+): { replaced: string; fixCount: number } {
+  let fixCount = 0
+  const replaced = content.replace(IMAGE_SRC_REGEX, (imgTag, src) => {
+    // 只攔 Unsplash URL（picsum/placehold.co/本地路徑放行）
+    if (!UNSPLASH_HOST_RE.test(src)) return imgTag
+    const match = src.match(UNSPLASH_ID_RE)
+    if (!match) return imgTag
+    const photoId = match[1]
+    // 白名單命中（完整或前綴匹配）→ 不動
+    for (const id of allowedIds) {
+      if (photoId === id || photoId.startsWith(id) || id.startsWith(photoId)) {
+        return imgTag
+      }
+    }
+    // 違規：替換
+    const cat = inferCategoryFromContext(imgTag)
+    const fallback = pickFallbackAsset(lib, cat)
+    if (!fallback) return imgTag
+    fixCount++
+    return imgTag.replace(src, fallback.url)
+  })
+  return { replaced, fixCount }
+}
+
+/**
+ * 對整個 GeneratedCode 套用白名單校驗 + 生成 ImageCredits
+ * 會變動 code 內容（不可變模式：回傳新物件）
+ */
+export function applyImageLibraryToDeployCode(
+  code: GeneratedCode,
+  library: ImageLibrary | null | undefined,
+): ImageLibraryApplyResult {
+  if (!library) {
+    return { code, fixes: [], injectedFile: null, downloadLocations: [] }
+  }
+
+  const fixes: string[] = []
+  const allowedIds = new Set(getAllLibraryAssets(library).map((a) => a.sourceId))
+
+  const patchedPages = code.pages.map((p) => {
+    const { replaced, fixCount } = replaceImageUrlsInContent(p.content, library, allowedIds)
+    if (fixCount > 0) {
+      fixes.push(`${p.path}: Image whitelist 替換 ${fixCount} 處非白名單 Unsplash URL`)
+    }
+    return { ...p, content: replaced }
+  })
+  const patchedComponents = code.components.map((c) => {
+    const { replaced, fixCount } = replaceImageUrlsInContent(c.content, library, allowedIds)
+    if (fixCount > 0) {
+      fixes.push(`${c.path}: Image whitelist 替換 ${fixCount} 處非白名單 Unsplash URL`)
+    }
+    return { ...c, content: replaced }
+  })
+
+  const patchedCode: GeneratedCode = {
+    pages: patchedPages,
+    components: patchedComponents,
+    styles: code.styles,
+  }
+
+  const allText = [...patchedPages, ...patchedComponents].map((f) => f.content).join('\n')
+  const injectedFile = buildAttributionBlock(allText, library)
+  const usedAssets = extractUsedUnsplashAssets(allText, library)
+  const downloadLocations = usedAssets.map((a) => a.downloadLocation).filter(Boolean)
+
+  if (injectedFile) {
+    const photographerCount = new Set(usedAssets.map((a) => a.photographer.name)).size
+    fixes.push(`注入 ImageCredits.tsx（${usedAssets.length} 張 Unsplash 圖，${photographerCount} 位 photographer）`)
+  }
+
+  return { code: patchedCode, fixes, injectedFile, downloadLocations }
+}
+
+// ============================================================
 // AST-enhanced sanitize（CODER_AST_SANITIZE=true 時啟用）
 // ------------------------------------------------------------
 // 替代 sanitizeCodeForDeploy 中最脆弱的 3 類 regex：
@@ -1016,7 +1162,8 @@ export async function sanitizeCodeForDeployAsync(code: GeneratedCode): Promise<S
  */
 export async function prepareDeployment(
   projectId: string,
-  userId: string
+  userId: string,
+  opts: { imageLibrary?: ImageLibrary | null } = {},
 ): Promise<DeployPreCheckResult> {
   // 1. 檢查 VERCEL_ACCESS_TOKEN
   if (!getEnv().VERCEL_ACCESS_TOKEN) {
@@ -1120,15 +1267,31 @@ export async function prepareDeployment(
 
   // 部署前預檢 + 自動修復（CODER_AST_SANITIZE=true 時走 AST，否則純 regex）
   const sanitizeResult = await sanitizeCodeForDeployAsync(code)
-  const sanitizedCode = sanitizeResult.code
+  let sanitizedCode = sanitizeResult.code
+  let finalInjectedFiles = [...sanitizeResult.injectedFiles]
+  let finalFixes = [...sanitizeResult.fixes]
 
-  if (sanitizeResult.fixes.length > 0) {
-    logger.info({ count: sanitizeResult.fixes.length, fixes: sanitizeResult.fixes }, '預檢修復')
+  // Fix 9：Image Library 白名單校驗 + ImageCredits 注入（供 Unsplash ToS 合規）
+  if (opts.imageLibrary) {
+    const imgResult = applyImageLibraryToDeployCode(sanitizedCode, opts.imageLibrary)
+    sanitizedCode = imgResult.code
+    finalFixes = [...finalFixes, ...imgResult.fixes]
+    if (imgResult.injectedFile) {
+      finalInjectedFiles.push(imgResult.injectedFile)
+    }
+    // fire-and-forget 觸發 Unsplash download（ToS 要求）
+    if (imgResult.downloadLocations.length > 0) {
+      triggerUnsplashDownloads(imgResult.downloadLocations)
+    }
+  }
+
+  if (finalFixes.length > 0) {
+    logger.info({ count: finalFixes.length, fixes: finalFixes }, '預檢修復')
 
     // Telemetry: 把 fixes 用 regex 分類器歸類 → 高頻 pattern 進週報
     // 這是 MVP 最高 ROI 的訊號源之一：每次 LLM 生成完都會被 sanitize 擦一次屁股
     recordTelemetryBatch(
-      sanitizeResult.fixes.map(fix => ({
+      finalFixes.map(fix => ({
         skillName: 'deployer' as const,
         eventType: 'sanitize_fix' as const,
         patternKey: categorizeSanitizeFix(fix),
@@ -1148,9 +1311,9 @@ export async function prepareDeployment(
     estimatedUrl: `https://${slug}.vercel.app`,
     code: sanitizedCode,
     tailwindConfig,
-    sanitizeFixes: sanitizeResult.fixes,
+    sanitizeFixes: finalFixes,
     extraDependencies: sanitizeResult.extraDependencies,
-    injectedFiles: sanitizeResult.injectedFiles,
+    injectedFiles: finalInjectedFiles,
   }
 }
 
@@ -1472,12 +1635,7 @@ const nextConfig: NextConfig = {
     ignoreBuildErrors: true,
   },
   images: {
-    remotePatterns: [
-      {
-        protocol: 'https',
-        hostname: 'picsum.photos',
-      },
-    ],
+${CLIENT_APP_IMAGE_REMOTE_PATTERNS}
   },
 }
 
@@ -1774,9 +1932,53 @@ export default function RootLayout({
     }
   }
 
+  // 若 components/ImageCredits.tsx 被注入 → 在 layout 的 </body> 前插入
+  if (files.some(f => f.file === 'components/ImageCredits.tsx')) {
+    injectImageCreditsIntoLayout(files)
+  }
+
   logger.info({ fileCount: files.length, paths: files.map(f => f.file) }, 'wrapInNextJs 最終檔案清單')
 
   return files
+}
+
+/**
+ * 在 app/layout.tsx 的 </body> 前插入 <ImageCredits />
+ * import 區加 `import ImageCredits from '@/components/ImageCredits'`
+ * 找不到 </body> 或 layout 缺失 → 記 warn，跳過（不阻斷部署）
+ */
+function injectImageCreditsIntoLayout(files: VercelFile[]): void {
+  const idx = files.findIndex(f => f.file === 'app/layout.tsx')
+  if (idx < 0) {
+    logger.warn('注入 ImageCredits：找不到 app/layout.tsx，跳過')
+    return
+  }
+  let content = files[idx].data
+
+  // 已經引用則跳過（避免重複注入）
+  if (content.includes('ImageCredits')) return
+
+  const IMPORT_LINE = `import ImageCredits from '@/components/ImageCredits'`
+
+  // 找最後一個 import 語句後面插入
+  const importRegex = /^import[^\n]+$/gm
+  const importMatches = [...content.matchAll(importRegex)]
+  if (importMatches.length > 0) {
+    const last = importMatches[importMatches.length - 1]
+    const insertAt = (last.index ?? 0) + last[0].length
+    content = content.slice(0, insertAt) + '\n' + IMPORT_LINE + content.slice(insertAt)
+  } else {
+    content = IMPORT_LINE + '\n' + content
+  }
+
+  // </body> 前插入 <ImageCredits />
+  if (content.includes('</body>')) {
+    content = content.replace('</body>', '        <ImageCredits />\n      </body>')
+  } else {
+    logger.warn('注入 ImageCredits：layout.tsx 找不到 </body>，跳過渲染注入（import 仍保留）')
+  }
+
+  files[idx].data = content
 }
 
 /**
@@ -2699,12 +2901,7 @@ const nextConfig: NextConfig = {
     ignoreBuildErrors: true,
   },
   images: {
-    remotePatterns: [
-      {
-        protocol: 'https',
-        hostname: 'picsum.photos',
-      },
-    ],
+${CLIENT_APP_IMAGE_REMOTE_PATTERNS}
   },
 }
 

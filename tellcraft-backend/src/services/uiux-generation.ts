@@ -3456,9 +3456,8 @@ const font = DM_Sans({ subsets: ['latin'], variable: '--font-sans' })
 - container max-width 全局統一（max-w-6xl 或 max-w-7xl），不要混用
 - Flex 子元素要加 min-w-0 — 否則 truncate/line-clamp 在 flex 容器裡不生效
 - <img> 必須有 explicit width + height 屬性防止 CLS
-- 圖片佔位一律用 picsum seed URL：<img src="https://picsum.photos/seed/{英文關鍵字}/{寬}/{高}" width={寬} height={高} alt="描述" className="object-cover" />
+- 圖片使用規則：從 user message 的「圖片資源（白名單）」段落挑選 URL；該段落未提供時降級用 https://picsum.photos/seed/{英文語意詞}/{寬}/{高}
 - 禁止用 /placeholder.png、/image.jpg 等本地路徑
-- seed 關鍵字用語義英文詞（hero、team-alice、product-shoes），同類型內容用同一 seed 保持一致
 - 常用尺寸：hero 1280×720、卡片 800×450、頭像 200×200、縮圖 400×300`
 }
 
@@ -3549,7 +3548,7 @@ function getBaseRulesFast(): string {
 ## 佈局防坑（常見 build/視覺 bug）
 - 有 fixed navbar 時 main content 加 padding-top
 - Flex 子元素加 min-w-0（否則 truncate 不生效）
-- 圖片用 picsum seed：<img src="https://picsum.photos/seed/{關鍵字}/{寬}/{高}" width={寬} height={高} alt="..." className="object-cover" />（禁止本地路徑，必須有 width+height 防 CLS）
+- 圖片：從 user message 的「圖片資源（白名單）」段落挑 URL；該段落未提供時降級 https://picsum.photos/seed/{關鍵字}/{寬}/{高}（禁止本地路徑，必須有 width+height 防 CLS）
 - 所有可點擊元素 cursor-pointer`
 }
 
@@ -3592,6 +3591,8 @@ export async function generateStructure(
     existingComponentSummary?: string  // 已有組件路徑列表（增量生成用）
     incrementalFirstBatch?: boolean    // 增量首批：只生成指定頁面 + Layout/Header/Footer
     generationProfile?: GenerationProfile
+    imageLibrary?: import('./image-library-service').ImageLibrary  // Unsplash 圖片白名單
+    projectSeed?: string  // 用於圖庫 shuffle 確定性（通常傳 projectId）
   },
   trackingContext?: LlmTrackingContext,
   onPartialCode?: PartialCodeCallback,
@@ -3904,6 +3905,17 @@ ${sections.join('\n\n')}
 `
   }
 
+  // 圖片資源白名單（Unsplash 相關假圖 / picsum 降級）
+  // 不同 productType 清單不同，放 dynamic user message 避免污染 static prompt cache
+  let imageLibrarySection = ''
+  if (productContext?.imageLibrary) {
+    const { formatImageLibraryForPrompt } = await import('./image-library-service')
+    imageLibrarySection = formatImageLibraryForPrompt(productContext.imageLibrary, {
+      maxPerCategory: isFastMode ? 4 : 8,
+      projectSeed: productContext.projectSeed,
+    })
+  }
+
   // mood code：完整模式用完整代碼片段，快速模式用精簡版（3 行核心 className）
   const moodCodeSection = productContext?.moodId
     ? (isFastMode
@@ -3946,6 +3958,7 @@ ${productSection}
 ${designSection}
 ${referenceSection}
 ${briefSection}
+${imageLibrarySection}
 ${moodCodeSection}${overridesSection}
 ${templateStyleSection}
 ${layoutGuardSection}

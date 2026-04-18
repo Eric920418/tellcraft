@@ -157,12 +157,29 @@ export async function runFeatureDryRun(input: DryRunInput): Promise<DryRunResult
 
       const featureErrors: string[] = []
 
+      // L4 級聯失敗抑制：當 entity_setup 失敗時，該步宣告的 >contextKey 變成「未就緒」。
+      // 後續步驟若在 DataTable 中引用這些 $key，直接 skip 不跑 SQL —— 避免
+      // FK 衍生錯誤膨脹失敗數。每個 feature 獨立維護一份（跨 feature reset）。
+      const unresolvedContextKeys = new Set<string>()
+
       for (const step of stepsToRun) {
         totalSteps++
         const stepType = classifyStep(step.text)
 
         if (!RUNNABLE_TYPES.has(stepType)) {
           skippedSteps++
+          continue
+        }
+
+        // L4 級聯檢查：若本步驟引用任一未就緒的 contextKey → skip（不算 failed）
+        const blockedBy = stepReferencesUnresolvedKey(step, unresolvedContextKeys)
+        if (blockedBy) {
+          skippedSteps++
+          logger.info({
+            feature: feature.name,
+            step: step.text.substring(0, 80),
+            blockedBy: `$${blockedBy}`,
+          }, 'Dry-run step skipped (父步驟失敗級聯)')
           continue
         }
 
@@ -224,6 +241,18 @@ export async function runFeatureDryRun(input: DryRunInput): Promise<DryRunResult
           const errMsg = `[${stepType}] ${err instanceof Error ? err.message : String(err)}`
           featureErrors.push(errMsg)
           logger.warn({ feature: feature.name, step: step.text.substring(0, 80), error: errMsg }, 'Dry-run step 失敗')
+
+          // L4 級聯失敗記錄：entity_setup 失敗時，該步試圖宣告的 contextKey 全部變成未就緒。
+          // 後續 DataTable 引用這些 key 的步驟會在上方的 stepReferencesUnresolvedKey 被 skip。
+          if (stepType === 'entity_setup' && step.dataTable) {
+            for (const header of step.dataTable.headers) {
+              const trimmed = (header || '').trim()
+              if (trimmed.startsWith('>')) {
+                const contextKey = trimmed.substring(1).trim()
+                if (contextKey) unresolvedContextKeys.add(contextKey)
+              }
+            }
+          }
         }
       }
 
@@ -259,6 +288,55 @@ export async function runFeatureDryRun(input: DryRunInput): Promise<DryRunResult
 // ============================================================
 // 輔助函數
 // ============================================================
+
+/**
+ * L4 輔助：判斷 step 的 DataTable 是否引用任一未就緒的 contextKey。
+ * 掃所有 header + cell 的 `$VariableName`，與 unresolved set 做多種格式匹配：
+ * - 精確（`$Merchant1.id` ↔ `Merchant1.id`）
+ * - normalize（去 . _ - 後 case-insensitive）
+ * - entityField 組合（`Merchant1.id` 被 `$merchant1Id` 引用）
+ * 回傳第一個命中的 unresolved key；無命中則 null。
+ */
+export function stepReferencesUnresolvedKey(step: ParsedStep, unresolved: Set<string>): string | null {
+  if (unresolved.size === 0 || !step.dataTable) return null
+
+  const cells: string[] = []
+  for (const h of step.dataTable.headers) {
+    if (typeof h === 'string') cells.push(h)
+  }
+  for (const row of step.dataTable.rows) {
+    for (const v of Object.values(row)) {
+      if (typeof v === 'string') cells.push(v)
+    }
+  }
+
+  const normalize = (s: string) => s.toLowerCase().replace(/[._\-]/g, '')
+  // 預計算 unresolved 的 normalize 和 entityField 組合形式
+  const unresolvedVariants = new Map<string, string>()  // variant → original key
+  for (const key of unresolved) {
+    unresolvedVariants.set(key, key)
+    unresolvedVariants.set(normalize(key), key)
+    if (key.includes('.')) {
+      const [entity, field] = key.split('.')
+      const combined = entity.charAt(0).toLowerCase() + entity.slice(1) + field.charAt(0).toUpperCase() + field.slice(1)
+      unresolvedVariants.set(combined, key)
+      unresolvedVariants.set(normalize(combined), key)
+    }
+  }
+
+  for (const cell of cells) {
+    // 找所有 $VariableName 引用（$letter 開頭；$數字 開頭是 bcrypt hash）
+    const refs = cell.matchAll(/\$([a-zA-Z][\w.]*)/g)
+    for (const m of refs) {
+      const varName = m[1]
+      if (unresolvedVariants.has(varName)) return unresolvedVariants.get(varName)!
+      const varNorm = normalize(varName)
+      if (unresolvedVariants.has(varNorm)) return unresolvedVariants.get(varNorm)!
+    }
+  }
+
+  return null
+}
 
 /** 取得 api_call 之前的所有步驟 */
 function getStepsBeforeApiCall(steps: ParsedStep[]): ParsedStep[] {

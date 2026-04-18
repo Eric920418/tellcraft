@@ -27,6 +27,7 @@ import { generateIsaConfig } from '../../services/isa-config'
 import { validateAndFixFeatures } from '../../services/feature-validation'
 import { analyzeChangeImpact, executeChange, verifyConsistency, rollbackChange } from '../../services/change-management'
 import { matchTemplates } from '../../services/template-matcher'
+import { fetchImageLibrary } from '../../services/image-library-service'
 import { deriveSchemaFromBdd } from '../../services/schema-derivation'
 import { checkDbQuota, provisionNeonDatabase } from '../../services/neon-service'
 import { checkInputQuality } from '../../services/prefilter'
@@ -2780,6 +2781,13 @@ export async function completeSpecPhase(
   redis: Redis,
   io: IoEmitter
 ) {
+  // 預熱圖片資源庫（fire-and-forget，不阻塞 BDD 完成流程）
+  // 讓後續 UIUX 生成時能命中 Redis cache，省下 1-3 秒 API fetch
+  if (state.fastModeProductType) {
+    void fetchImageLibrary(state.fastModeProductType, { locale: state.locale })
+      .catch(() => { /* 預熱失敗不阻塞，UIUX pipeline 會再 fallback 一次 */ })
+  }
+
   // 取得 session 資料（Phase 4/5 需要）
   const session = await getBddSession({ sessionId: state.sessionId! })
   const rawFeatures = session.data?.featuresContent || []

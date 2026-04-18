@@ -922,6 +922,24 @@ Feature: ${featureInfo.name}
 - **回應驗證（Then 回應）DataTable 的 header 必須用純欄位名**：header 用 camelCase 欄位名（如 \`id\`、\`isCompleted\`、\`totalAmount\`），**禁止用 \`$Var.field\` 格式**（如 \`$Todo.id\`）。\`$variable\` 只能出現在 data row 的值中（引用之前宣告的變數），不能當 header。正確：\`| id | isCompleted |\` → \`| $Todo.id | true |\`。錯誤：\`| $Todo.id | $Todo.isCompleted |\` → \`| true | true |\`
 - **Entity 驗證（應該存在一個）DataTable 必須包含至少一個主鍵或唯一識別欄位**：\`應該存在一個{entity}\` 的 DataTable header 至少要有一個 \`id\` 或可查詢欄位，讓 SpecFormula 能用 WHERE 條件查到精確的記錄。只有約束欄位（\`&isTrue\`、\`&isNotNull\`）不夠 — 需要至少一個具體值欄位。正確：\`| id | isDeleted |\` → \`| $Todo.id | &isTrue |\`。錯誤：\`| isDeleted |\` → \`| &isTrue |\`（缺少 ID，無法精確查詢）
 
+## ⚠️ VAR 作用域（關鍵，違反 100% 失敗）
+
+- **VAR 宣告與引用必須在「同一個 Feature 的 Background 或同一個 Scenario」內**。跨 Feature 不共享、跨 Scenario 不共享。
+- **每個 Scenario 獨立重新執行 Background + 自己的步驟**：如果 Scenario A 宣告 \`>Consumer1.id\`，Scenario B 無法引用 \`$Consumer1.id\`（各自獨立 context）。需要在每個 Scenario 的 Background 或 Given 裡重新宣告。
+- **FK 引用鏈必須完整宣告**：如果 \`>Product1.merchantId\` 要引用 \`$Merchant1.userId\`，那本 Feature 的 Background 或 Given 必須**先**有 \`>Merchant1.userId\` 的宣告步驟。不能假設「Merchant 在別的 Feature 有宣告」。
+
+## ⚠️ 常見致命錯誤（寫完每個 Feature 必自檢，否則 Dry-run 直接炸）
+
+寫完一個 Feature 後，回頭掃一遍，針對**每一個 \`$xxx\` 引用**執行以下清單：
+
+1. **本 Feature 內有對應 \`>\` 宣告？** 若沒有 → 引用無效，Dry-run VAR 解析失敗。
+2. **命名完全一致？** \`>Merchant1.userId\` 宣告後只能引用 \`$Merchant1.userId\`（或其 camelCase 壓縮 \`$merchant1UserId\`）。不可亂寫 \`$Merchant1User.id\`（entity 變成 \`Merchant1User\`，field 變成 \`id\`，語義完全不同）。
+3. **複合概念正確拆 entity/field**：「商家的使用者 ID」應該是 \`>Merchant1.userId\`（entity=Merchant1, field=userId）。**禁止**寫成 \`>Merchant1User.id\`（除非 schema 真的有叫 \`merchant1_users\` 的表）。
+4. **entity_setup DataTable 禁用驗證標記**：\`準備一個\` 的 DataTable 禁止出現 \`$notnull\` / \`&isNull\` / \`&isNotNull\`。要「不填某欄位」→ 直接**不放該 header**（讓 DB default 生效）。\`$notnull\` 只能在 \`應該存在一個\` 或 \`(STATUS)回應\` DataTable 出現。
+5. **FK 先行**：若 entity_setup 的 \`>Product1.merchantId\` 欄位值是 \`$Merchant1.userId\` —— 那 \`>Merchant1.userId\` 的 entity_setup 步驟必須**排在此步之前**（Background 或更早的 Given）。否則父記錄還沒建，子記錄 FK 炸。
+
+如果自檢發現任一問題，**立刻改正再輸出**。Dry-run 階段沒有第二次機會。
+
 ## Array 類型參數（如拖曳排序、批次操作）
 
 如果 action 需要接收多個 ID（如 orderedItemIds），在 DataTable 中用**逗號分隔 $variable**：
@@ -1245,6 +1263,13 @@ export async function fixMultipleFeatures(
 11. **VAR 對齊規則**：Header 有 \`>contextKey\` → 同一欄 Data **必須**是 \`<executionKey\`；Data 有 \`<executionKey\` → 同一欄 Header **必須**有 \`>contextKey\`。範例：\`| >User.id | name |\` → \`| <userId | "John" |\` ✅。\`| >User.id | name |\` → \`| email | "John" |\` ❌
 12. Entity 準備（\`準備一個\`）的 DataTable data row **至少要有一個非空欄位值**，不可全空
 13. **DataTable 欄位必須存在於 Schema 中**：\`準備一個{entity}\` 的欄位名必須是對應資料表中的實際欄位（camelCase → snake_case 映射）
+14. **VAR 作用域（關鍵）**：每個 Scenario 獨立重新執行 Background + 自己的步驟，跨 Scenario 不共享 context。所有 \`$xxx\` 引用必須在**本 Scenario 的 Background 或 Given** 已有對應 \`>\` 宣告。**禁止**假設「別的 Scenario/Feature 已宣告」。
+15. **複合概念正確拆 entity/field（這是常見致命錯誤）**：
+    - 「商家的 userId」= \`>Merchant1.userId\`（entity=Merchant1, field=userId），引用 \`$Merchant1.userId\` 或 \`$merchant1UserId\`
+    - **禁止**寫成 \`>Merchant1User.id\`（除非 schema 真的有叫 \`merchant1_users\` 的表 + 該表有 id 欄位）
+    - 修復時若看到 \`$Merchant1User.id\` 解析失敗 → 90% 是這個原因 → 改成 \`$Merchant1.userId\`
+16. **entity_setup 的 DataTable 禁用 \`$notnull\` / \`&isNull\` / \`&isNotNull\`**：這些是 validate 標記，在 \`準備一個\` DataTable 會被當字面字串 INSERT → UUID 欄位報 \`invalid input syntax for type uuid: "$notnull"\`。要「不填某欄位」→ 直接**不放該 header**（DB default 生效）。
+17. **FK 引用鏈依賴順序**：若 \`>Product1.merchantId\` 的 data 是 \`$Merchant1.userId\` → \`>Merchant1.userId\` 的 entity_setup 步驟必須**排在此步之前**（同 Scenario 的更早 Given 或 Background）。否則父記錄不存在，FK 炸。
 
 ## 四類規則分類
 - **前置（狀態）**：系統既有狀態約束（如庫存>0）
@@ -1505,9 +1530,10 @@ ${esDocumentContent}
 ${decisions || '（無額外決策）'}`
 
   logger.info('Draft Batch: 開始一次性生成草稿...')
-  // 動態 maxTokens：每個 Feature 的 Gherkin 內容 ~1500 tokens + schema/entityMapping ~3000
+  // 動態 maxTokens：每個 Feature 的 Gherkin 內容 ~2500 tokens + schema/entityMapping ~5000
+  // 1 Feature = 1 Operation 粒度下 Feature 數更多（CRUD 拆 4 個），Floor 32768 確保不截斷
   const estimatedFeatureCount = (esDocumentContent.match(/Command|ReadModel/gi) || []).length || 10
-  const maxTokens = Math.min(Math.max(estimatedFeatureCount * 2000 + 5000, 16384), 65536)
+  const maxTokens = Math.min(Math.max(estimatedFeatureCount * 3000 + 5000, 32768), 65536)
 
   const DraftBatchSchema = z.object({
     schemaSql: z.string().nullable(),

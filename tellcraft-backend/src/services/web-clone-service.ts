@@ -325,7 +325,7 @@ const CLONE_SYSTEM_PROMPT = `你是前端工程師。根據截圖和 DOM 結構�
 - Tailwind CSS v4（@import "tailwindcss" 語法）
 - 動畫庫：motion/react（不是 framer-motion）
 - 字體：不要 import，由 layout.tsx 統一設定
-- 圖片：使用 placeholder（https://placehold.co/WIDTHxHEIGHT 或描述性 SVG placeholder）
+- 圖片：從 user message 的「圖片資源（白名單）」段落挑選；該段落未提供時降級用 https://picsum.photos/seed/{英文關鍵字}/{寬}/{高}
 - Icons：lucide-react
 
 ## 輸出格式
@@ -340,6 +340,7 @@ export async function generateSectionCode(
   designSystem: CloneDesignSystem,
   trackingContext?: LlmTrackingContext,
   referenceHint?: string,
+  imageLibraryPrompt?: string,
 ): Promise<{ componentName: string; code: string } | null> {
   try {
     const client = getAnthropicClient()
@@ -386,7 +387,7 @@ ${imagesText}
 3. 保持原始間距（padding/margin/gap）
 4. 文字內容完整保留
 5. 組件命名：${section.componentName}
-6. export default function ${section.componentName}()${referenceHint ? `\n\n## 額外設計參考（來自用戶上傳的參考圖片）\n${referenceHint}` : ''}`
+6. export default function ${section.componentName}()${referenceHint ? `\n\n## 額外設計參考（來自用戶上傳的參考圖片）\n${referenceHint}` : ''}${imageLibraryPrompt ? `\n\n${imageLibraryPrompt}` : ''}`
 
     const response = await client.messages.create({
       model: MODEL.SONNET,
@@ -665,7 +666,7 @@ const CLONE_IMAGE_PAGE_SYSTEM_PROMPT = `你是前端工程師。根據截圖精�
 - Tailwind CSS v4（@import "tailwindcss" 語法）
 - 動畫庫：motion/react（不是 framer-motion）
 - 字體：不要 import，由 layout.tsx 統一設定
-- 圖片：使用 placeholder（https://placehold.co/WIDTHxHEIGHT 或描述性 SVG placeholder）
+- 圖片：從 user message 的「圖片資源（白名單）」段落挑選；該段落未提供時降級用 https://picsum.photos/seed/{英文關鍵字}/{寬}/{高}
 - Icons：lucide-react
 
 ## 輸出格式
@@ -703,7 +704,8 @@ export async function generatePageFromImage(
   imageUrl: string,
   analysis: CloneImageAnalysis,
   pageIndex: number,
-  trackingContext?: LlmTrackingContext
+  trackingContext?: LlmTrackingContext,
+  imageLibraryPrompt?: string,
 ): Promise<ImagePageResult | null> {
   try {
     const controller = new AbortController()
@@ -744,7 +746,7 @@ ${sectionsHint}
 1. 每個可見的 section 拆為獨立組件
 2. 使用 Tailwind 精確復刻色彩、間距、佈局
 3. 文字內容完整保留
-4. 組件放在 components/clone/ 目錄`
+4. 組件放在 components/clone/ 目錄${imageLibraryPrompt ? `\n\n${imageLibraryPrompt}` : ''}`
 
     const response = await client.messages.create({
       model: MODEL.SONNET,

@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest'
-import { sanitizeCodeForDeploy, toVercelSlug, wrapInNextJs } from '../services/deployer'
+import { sanitizeCodeForDeploy, toVercelSlug, wrapInNextJs, applyImageLibraryToDeployCode } from '../services/deployer'
+import { buildPicsumFallbackLibrary, type ImageLibrary } from '../services/image-library-service'
 
 // Helper：建立最小 GeneratedCode
 function makeCode(overrides: {
@@ -798,5 +799,179 @@ describe('Coder Skill 後端依賴偵測', () => {
     const result = sanitizeCodeForDeploy(code)
     expect(result.code.components[0].content).toMatch(/^'use server'/)
     expect(result.code.components[0].content).not.toContain("'use client'")
+  })
+})
+
+// ============================================================
+// Fix 9: Image Library 白名單校驗 + ImageCredits 注入
+// ============================================================
+
+function makeUnsplashLibrary(): ImageLibrary {
+  return {
+    productType: 'restaurant',
+    generatedAt: Date.now(),
+    source: 'unsplash',
+    hero: [
+      {
+        url: 'https://images.unsplash.com/photo-ABC123?w=1280&h=720&fit=crop',
+        rawUrl: 'https://images.unsplash.com/photo-ABC123',
+        width: 1280, height: 720,
+        alt: 'restaurant interior', category: 'hero',
+        photographer: {
+          name: 'Alice Wang',
+          profileUrl: 'https://unsplash.com/@alice?utm_source=tellcraft&utm_medium=referral',
+        },
+        sourceId: 'ABC123',
+        downloadLocation: 'https://api.unsplash.com/photos/ABC123/download',
+      },
+    ],
+    product: [
+      {
+        url: 'https://images.unsplash.com/photo-DEF456?w=800&h=600&fit=crop',
+        rawUrl: 'https://images.unsplash.com/photo-DEF456',
+        width: 800, height: 600,
+        alt: 'plated dish', category: 'product',
+        photographer: {
+          name: 'Bob Chen',
+          profileUrl: 'https://unsplash.com/@bob?utm_source=tellcraft&utm_medium=referral',
+        },
+        sourceId: 'DEF456',
+        downloadLocation: 'https://api.unsplash.com/photos/DEF456/download',
+      },
+    ],
+    team: [], background: [], lifestyle: [], detail: [],
+  }
+}
+
+describe('Fix 9: Image whitelist', () => {
+  it('合法 Unsplash URL（白名單內）→ 不動', () => {
+    const lib = makeUnsplashLibrary()
+    const code = makeCode({
+      pages: [makeFile('app/page.tsx',
+        `export default function Page() { return <img src="https://images.unsplash.com/photo-ABC123?w=1280&h=720&fit=crop" alt="hero" /> }`)],
+    })
+    const result = applyImageLibraryToDeployCode(code, lib)
+    expect(result.code.pages[0].content).toContain('photo-ABC123')
+    expect(result.fixes.some(f => f.includes('whitelist 替換'))).toBe(false)
+  })
+
+  it('偽造 Unsplash URL（非白名單）→ 替換為同分類白名單第一張', () => {
+    const lib = makeUnsplashLibrary()
+    const code = makeCode({
+      pages: [makeFile('app/page.tsx',
+        `export default function Page() { return <img src="https://images.unsplash.com/photo-FAKE999" className="hero" alt="x" /> }`)],
+    })
+    const result = applyImageLibraryToDeployCode(code, lib)
+    expect(result.code.pages[0].content).toContain('photo-ABC123')
+    expect(result.code.pages[0].content).not.toContain('photo-FAKE999')
+    expect(result.fixes.some(f => f.includes('whitelist 替換'))).toBe(true)
+  })
+
+  it('picsum URL → 不動（只攔 Unsplash）', () => {
+    const lib = makeUnsplashLibrary()
+    const code = makeCode({
+      pages: [makeFile('app/page.tsx',
+        `export default function Page() { return <img src="https://picsum.photos/seed/x/800/600" alt="x" /> }`)],
+    })
+    const result = applyImageLibraryToDeployCode(code, lib)
+    expect(result.code.pages[0].content).toContain('picsum.photos')
+  })
+
+  it('library=null → 不做任何事（合法與偽造 URL 都保留）', () => {
+    const code = makeCode({
+      pages: [makeFile('app/page.tsx',
+        `<img src="https://images.unsplash.com/photo-XXX" />`)],
+    })
+    const result = applyImageLibraryToDeployCode(code, null)
+    expect(result.fixes).toHaveLength(0)
+    expect(result.injectedFile).toBeNull()
+  })
+
+  it('picsum fallback library → 不生成 ImageCredits', () => {
+    const lib = buildPicsumFallbackLibrary('restaurant')
+    const code = makeCode({
+      pages: [makeFile('app/page.tsx',
+        `<img src="${lib.hero[0].url}" alt="x" />`)],
+    })
+    const result = applyImageLibraryToDeployCode(code, lib)
+    expect(result.injectedFile).toBeNull()
+  })
+
+  it('代碼使用 Unsplash 圖 → 生成 ImageCredits 並含 photographer', () => {
+    const lib = makeUnsplashLibrary()
+    const code = makeCode({
+      pages: [makeFile('app/page.tsx',
+        `<img src="https://images.unsplash.com/photo-ABC123?w=1280" /><img src="https://images.unsplash.com/photo-DEF456?w=800" />`)],
+    })
+    const result = applyImageLibraryToDeployCode(code, lib)
+    expect(result.injectedFile).not.toBeNull()
+    expect(result.injectedFile!.file).toBe('components/ImageCredits.tsx')
+    expect(result.injectedFile!.data).toContain('Alice Wang')
+    expect(result.injectedFile!.data).toContain('Bob Chen')
+    expect(result.injectedFile!.data).toContain('utm_source=tellcraft')
+    expect(result.downloadLocations.length).toBeGreaterThan(0)
+  })
+
+  it('只使用部分圖 → ImageCredits 只列 used photographer', () => {
+    const lib = makeUnsplashLibrary()
+    const code = makeCode({
+      pages: [makeFile('app/page.tsx',
+        `<img src="https://images.unsplash.com/photo-ABC123?w=1280" />`)],
+    })
+    const result = applyImageLibraryToDeployCode(code, lib)
+    expect(result.injectedFile!.data).toContain('Alice Wang')
+    expect(result.injectedFile!.data).not.toContain('Bob Chen')
+  })
+})
+
+// ============================================================
+// wrapInNextJs：ImageCredits 注入到 layout
+// ============================================================
+
+describe('wrapInNextJs: ImageCredits 注入 layout', () => {
+  it('無 ImageCredits injectedFile → layout 保持乾淨', () => {
+    const code = makeCode({
+      pages: [makeFile('app/page.tsx', `export default function Page() { return <div>hi</div> }`)],
+    })
+    const files = wrapInNextJs(code, 'test-app', '', undefined, [])
+    const layout = files.find(f => f.file === 'app/layout.tsx')!
+    expect(layout.data).not.toContain('ImageCredits')
+  })
+
+  it('ImageCredits injectedFile 存在 → layout 自動 import + 渲染 <ImageCredits />', () => {
+    const code = makeCode({
+      pages: [makeFile('app/page.tsx', `export default function Page() { return <div>hi</div> }`)],
+    })
+    const injected = [{
+      file: 'components/ImageCredits.tsx',
+      data: `export default function ImageCredits() { return <div>credits</div> }`,
+    }]
+    const files = wrapInNextJs(code, 'test-app', '', undefined, injected)
+    const layout = files.find(f => f.file === 'app/layout.tsx')!
+    expect(layout.data).toContain(`import ImageCredits from '@/components/ImageCredits'`)
+    expect(layout.data).toContain('<ImageCredits />')
+    expect(layout.data).toContain('</body>')
+    // ImageCredits 應在 </body> 前
+    const creditsIdx = layout.data.indexOf('<ImageCredits />')
+    const bodyCloseIdx = layout.data.indexOf('</body>')
+    expect(creditsIdx).toBeGreaterThan(0)
+    expect(creditsIdx).toBeLessThan(bodyCloseIdx)
+  })
+})
+
+// ============================================================
+// next.config.ts: remotePatterns 三個 host
+// ============================================================
+
+describe('next.config.ts remotePatterns', () => {
+  it('允許 picsum.photos / images.unsplash.com / placehold.co', () => {
+    const code = makeCode({
+      pages: [makeFile('app/page.tsx', `export default function Page() { return <div /> }`)],
+    })
+    const files = wrapInNextJs(code, 'test-app', '', undefined, [])
+    const config = files.find(f => f.file === 'next.config.ts')!
+    expect(config.data).toContain(`hostname: 'picsum.photos'`)
+    expect(config.data).toContain(`hostname: 'images.unsplash.com'`)
+    expect(config.data).toContain(`hostname: 'placehold.co'`)
   })
 })

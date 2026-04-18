@@ -47,6 +47,9 @@ const envSchema = z.object({
   CHROMIUM_PATH: z.string().optional(),
   CLAUDE_API_KEY: z.string().optional(),   // 歷史遺留，優先讀 ANTHROPIC_API_KEY
 
+  // Unsplash 圖片庫（相關假圖生成，缺 key 降級 picsum）
+  UNSPLASH_ACCESS_KEY: z.string().optional(),
+
   // Neon Database Provisioning（自動建立客戶 DB）
   NEON_API_KEY: z.string().optional(),
   NEON_DEFAULT_REGION: z.string().default('aws-ap-southeast-1'),
@@ -68,6 +71,11 @@ const envSchema = z.object({
   EXTENDED_THINKING_BUDGET: z.coerce.number().default(10000),    // Thinking budget tokens（最小 1024）
   ENABLE_UI_EVALUATOR: z.stringbool().default(false),            // UI Evaluator 黑盒 QA（PR1 Harness Engineering，staging 先開啟）
   UI_EVALUATOR_TIMEOUT_MS: z.coerce.number().default(45000),     // Evaluator 單輪預算，超時降級跳過
+
+  // Unsplash 圖片庫開關（功能層）
+  ENABLE_UNSPLASH_LIBRARY: z.stringbool().default(true),            // kill switch：緊急回退到 picsum 時設 false
+  UNSPLASH_CACHE_TTL_SECONDS: z.coerce.number().default(60 * 60 * 24 * 7),  // 7 天
+  UNSPLASH_API_TIMEOUT_MS: z.coerce.number().default(5000),
 
   // Determinism over Prompt（Phase 1：Template 擴充 + AST + 零 LLM 修復）
   CODER_TEMPLATE_V2: z.stringbool().default(false),              // 走 coder-templates/ registry + 4 新 template（soft_delete/count/exists_check/search）

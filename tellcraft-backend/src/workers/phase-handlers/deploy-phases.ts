@@ -34,8 +34,13 @@ export async function executeDeployerSkill(input: DeployerSkillInput) {
     progress: { current: 0, total: 3, step: '檢查部署條件' },
   })
 
+  // 先讀 FlowState（供 prepareDeployment 使用 imageLibrary 做白名單校驗 + ImageCredits 注入）
+  const priorState = await getFlowState(redis, conversationId)
+
   // 執行部署前檢查
-  const preCheck = await prepareDeployment(projectId, userId)
+  const preCheck = await prepareDeployment(projectId, userId, {
+    imageLibrary: priorState?.uiuxImageLibrary ?? null,
+  })
 
   if (!preCheck.ready) {
     await sendMessage(conversationId, io, {
@@ -45,8 +50,8 @@ export async function executeDeployerSkill(input: DeployerSkillInput) {
     return
   }
 
-  // 取得流程狀態
-  let state = await getFlowState(redis, conversationId)
+  // 建立或更新流程狀態
+  let state = priorState
   if (!state) {
     state = {
       phase: 'deployer_deploying',

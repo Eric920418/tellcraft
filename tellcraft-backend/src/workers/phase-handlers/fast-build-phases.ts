@@ -28,6 +28,7 @@ import { sendMessage, saveFlowState, saveFlowStateLight, getFlowState, deleteFlo
 import { CREDIT_COSTS } from '../../config/plans'
 import { recommendMoods } from '../../services/design-moods'
 import { analyzeUploadedImage, type ReferenceAnalysis } from '../../services/reference-analyzer'
+import { getImageLibraryOrFallback } from '../../services/image-library-service'
 import { z } from 'zod'
 import { getEnv } from '../../lib/env'
 import { MODEL } from '../../lib/anthropic'
@@ -568,6 +569,16 @@ export async function runFastBuildPipeline(params: {
     } catch { /* 降級跳過 */ }
   }
 
+  // 相關假圖白名單：首批載入，後續批次複用（fail-safe 不阻塞）
+  if (!isLaterBatch && !state.uiuxImageLibrary) {
+    try {
+      state.uiuxImageLibrary = await getImageLibraryOrFallback(productType, { locale: state.locale })
+      await saveFlowState(redis, conversationId, state)
+    } catch (err) {
+      logger.warn({ err, productType }, 'imageLibrary 載入失敗（降級跳過）')
+    }
+  }
+
   const structureResult = await generateStructure(
     designSystem,
     targetPages,
@@ -586,6 +597,8 @@ export async function runFastBuildPipeline(params: {
       existingComponentSummary,
       incrementalFirstBatch: isIncrementalFirstBatch,
       generationProfile: 'fast',
+      imageLibrary: state.uiuxImageLibrary,
+      projectSeed: projectId,
     },
     { userId, conversationId, purpose: isLaterBatch ? 'fast-build-structure-batch' : 'fast-build-structure' },
     structureStreamingCallback,

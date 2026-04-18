@@ -17,6 +17,8 @@ import {
   type CloneImageAnalysis,
 } from '../../services/web-clone-service'
 import { runQualityGate, autoFixCriticalIssuesRuleBased, autoFixCriticalIssues } from '../../services/quality-gate'
+import { getImageLibraryOrFallback, formatImageLibraryForPrompt } from '../../services/image-library-service'
+import { inferProductType } from '../../services/fast-build-generation'
 import { evaluateUi, type UiEvaluationIssue } from '../../services/ui-evaluator'
 import type { QualityIssue } from '../../services/quality-gate'
 import { getEnv } from '../../lib/env'
@@ -159,6 +161,25 @@ async function hybridCloneFlow(params: {
     ? imageAnalyses.map(a => `參考圖片色彩: ${a.designHints.colors.join(', ')}; 風格: ${a.designHints.fontStyle}; 佈局: ${a.designHints.layoutDescription}`).join('\n')
     : undefined
 
+  // 相關假圖白名單（clone 場景：一律用 Unsplash 替代原站圖，版權+CDN hotlink 風險高）
+  // 用 analysis.title 推 productType
+  let imageLibraryPrompt: string | undefined
+  if (!state.uiuxImageLibrary) {
+    const productType = inferProductType(analysis.title || state.cloneSourceUrl || '')
+    try {
+      state.uiuxImageLibrary = await getImageLibraryOrFallback(productType, { locale: state.locale })
+      await saveFlowState(redis, conversationId, state)
+    } catch (err) {
+      logger.warn({ err, productType }, 'clone: imageLibrary 載入失敗（降級跳過）')
+    }
+  }
+  if (state.uiuxImageLibrary) {
+    imageLibraryPrompt = formatImageLibraryForPrompt(state.uiuxImageLibrary, {
+      maxPerCategory: 4,
+      projectSeed: conversationId,
+    })
+  }
+
   const sectionMetas = toSectionMetas(analysis.sections)
   state.phase = 'clone_generating'
   state.cloneSections = sectionMetas
@@ -191,7 +212,7 @@ async function hybridCloneFlow(params: {
   const generatePromises = analysis.sections.map(async (section) => {
     await semaphore.acquire()
     try {
-      const result = await generateSectionCode(section, analysis.designSystem, trackingContext, referenceHint)
+      const result = await generateSectionCode(section, analysis.designSystem, trackingContext, referenceHint, imageLibraryPrompt)
       if (result) {
         sectionCodes.push({ ...result, index: section.index })
 
@@ -351,13 +372,32 @@ async function imageOnlyCloneFlow(params: {
     },
   })
 
+  // 相關假圖白名單（clone 圖片模式：從第一張圖的 title 推 productType）
+  let clonePagesImageLibraryPrompt: string | undefined
+  if (!state.uiuxImageLibrary) {
+    const firstTitle = analyses[0]?.pageTitle || ''
+    const productType = inferProductType(firstTitle)
+    try {
+      state.uiuxImageLibrary = await getImageLibraryOrFallback(productType, { locale: state.locale })
+      await saveFlowState(redis, conversationId, state)
+    } catch (err) {
+      logger.warn({ err, productType }, 'clone(image): imageLibrary 載入失敗（降級跳過）')
+    }
+  }
+  if (state.uiuxImageLibrary) {
+    clonePagesImageLibraryPrompt = formatImageLibraryForPrompt(state.uiuxImageLibrary, {
+      maxPerCategory: 4,
+      projectSeed: conversationId,
+    })
+  }
+
   const semaphore = new Semaphore(2)
   const pageResults: Array<{ index: number; result: NonNullable<Awaited<ReturnType<typeof generatePageFromImage>>> }> = []
 
   const generatePromises = analyses.map(async (analysis, index) => {
     await semaphore.acquire()
     try {
-      const result = await generatePageFromImage(analysis.imageUrl, analysis, index, trackingContext)
+      const result = await generatePageFromImage(analysis.imageUrl, analysis, index, trackingContext, clonePagesImageLibraryPrompt)
       if (result) {
         pageResults.push({ index, result })
 

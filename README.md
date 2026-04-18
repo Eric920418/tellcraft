@@ -90,12 +90,34 @@ cd tellcraft-backend && pnpm tsx src/scripts/register-prompt-change.ts --retire 
 `VPS_API_URL` `NEXT_PUBLIC_VPS_API_URL` `NEXT_PUBLIC_VPS_WS_URL` `NEXT_PUBLIC_UPLOAD_BASE_URL` `NEXT_PUBLIC_SUPABASE_URL` `NEXT_PUBLIC_SUPABASE_ANON_KEY` `NEXT_PUBLIC_LIFF_ID` `NEXT_PUBLIC_SENTRY_DSN` `SENTRY_ORG` `SENTRY_PROJECT` `SENTRY_AUTH_TOKEN`
 
 **後端**（`tellcraft-backend/.env`）：
-`DATABASE_URL` `REDIS_URL` `JWT_SECRET` `ANTHROPIC_API_KEY` `GOOGLE_CLIENT_ID` `GOOGLE_CLIENT_SECRET` `LINE_CHANNEL_ID` `LINE_CHANNEL_SECRET` `LINE_BOT_CHANNEL_SECRET` `LINE_MESSAGING_CHANNEL_ACCESS_TOKEN` `LIFF_ID` `UPLOAD_DIR` `UPLOAD_BASE_URL` `SOCKET_VERBOSE_LOG` `NEON_API_KEY` `NEON_DEFAULT_REGION`
+`DATABASE_URL` `REDIS_URL` `JWT_SECRET` `ANTHROPIC_API_KEY` `GOOGLE_CLIENT_ID` `GOOGLE_CLIENT_SECRET` `LINE_CHANNEL_ID` `LINE_CHANNEL_SECRET` `LINE_BOT_CHANNEL_SECRET` `LINE_MESSAGING_CHANNEL_ACCESS_TOKEN` `LIFF_ID` `UPLOAD_DIR` `UPLOAD_BASE_URL` `SOCKET_VERBOSE_LOG` `NEON_API_KEY` `NEON_DEFAULT_REGION` `UNSPLASH_ACCESS_KEY`
 
 **Determinism over Prompt flags**（預設全 false，穩定後逐一開啟）：
 `CODER_TEMPLATE_V2`（啟用 coder-templates/ registry + 4 個新 template：count / exists_check / search / soft-delete 子模組）、`CODER_AST_SANITIZE`（啟用 ts-morph AST 替代 next15-async-params / search-params-suspense / missing-hooks 三類 regex）、`DETERMINISTIC_FIX_V1`（fixFailingAction 對 missing_column / wrong_status / field_naming 三類 rootCause 先跑零 LLM 機械修復，失敗才 fallback LLM）、`SPEC_CONSISTENCY_LLM_CHECK`（Feature Alignment Gate Check 7 的 Haiku fallback，覆蓋 regex 抓不到的中英文 null-intent 變體）
 
+**Image Library（相關假圖）功能開關**（預設 true，緊急回退設 false 降級 picsum）：
+`ENABLE_UNSPLASH_LIBRARY`、`UNSPLASH_CACHE_TTL_SECONDS`（預設 7 天）、`UNSPLASH_API_TIMEOUT_MS`（預設 5000）
+
 > `UPLOAD_BASE_URL` 必填（例如 `https://api.tellcraft.com/uploads/tellcraft`），未設定時 `/api/upload/image` 會回傳 `UPLOAD_BASE_URL_MISSING`。
+>
+> `UNSPLASH_ACCESS_KEY` 強烈建議 production 設定（[註冊](https://unsplash.com/developers)）。未設或 API 失敗會自動降級回 picsum random seed，但產出圖片將與網站主題無關。
+
+### Image Library 預熱（選配，首次部署 / 新增 productType 建議執行）
+
+根據 26 個 productType 預抓 Unsplash 圖片 URL 到 Redis cache（7 天 TTL）：
+
+```bash
+# 預熱全部 26 個 productType（約 300-500 requests，遠低於 demo key 5000/hr 限額）
+cd tellcraft-backend && pnpm tsx src/scripts/warm-image-library.ts
+
+# 只預熱指定 productType
+cd tellcraft-backend && pnpm tsx src/scripts/warm-image-library.ts --type=restaurant
+
+# 強制刷新已有 cache
+cd tellcraft-backend && pnpm tsx src/scripts/warm-image-library.ts --force
+```
+
+預熱完成後，UIUX/Fast Build/Clone 生成的網站圖片會與 productType 語義相關（例：餐廳 → 美食/廚房、健身房 → 運動器材）。部署後的頁面 footer 會自動注入 ImageCredits 組件顯示 photographer 署名（Unsplash ToS 合規）。
 
 ## 系統架構
 
@@ -670,6 +692,7 @@ tellcraft-backend/
 │   │   ├── iteration-skill.ts    # 迭代 + 撤銷 + 回滾
 │   │   ├── fast-build-generation.ts # 快速模式（規則式，零 LLM）
 │   │   ├── template-matcher.ts   # 智能模板匹配（零 LLM）
+│   │   ├── image-library-service.ts # 相關假圖白名單（Unsplash Search API + Redis cache 7d + picsum fallback）
 │   │   ├── line-notify.ts        # LINE 推播通知（Web 用戶，stage 白名單）
 │   │   ├── line-full-push.ts    # LINE Bot 全量翻譯推送（LINE 來源的對話）
 │   │   ├── line-bot-handler.ts  # LINE Bot 業務邏輯（Follow/Text/Postback）
@@ -1083,8 +1106,9 @@ psql "$DATABASE_URL" -f tellcraft-backend/migrations/xxx.sql
 <details>
 <summary><h2>開發更新紀錄（點擊展開）</h2></summary>
 
-### 近期更新（2026-03-13 ~ 2026-04-16）
+### 近期更新（2026-03-13 ~ 2026-04-18）
 
+- **BDD Dry-Run VAR 系統根治（L1 + L4 + L5）**（04-18）：用戶 16-entity 電商 schema（merchants/products/variants/orders/cart/favorites/refunds）跑 dry-run 後修 16 個 feature 卻只從 45→42 失敗步驟，幾乎沒改善。5 層根因拆解 + 3 層根治：**(L1) `$notnull` 在 entity_setup 誤插 bug**（純 code 不對稱 bug，非 LLM 問題）：`entity-validate.ts:291` 有 `$notnull` 分支處理（驗證非空），但 `entity-setup.ts:117-128` **沒有對稱分支** → 當字面字串 INSERT 到 UUID 欄位 → `invalid input syntax for type uuid: "$notnull"`。修復：entity-setup.ts 加 `$notnull` / `$null` 分支，比照 `&isNull` 邏輯跳過該欄位（不 INSERT，讓 DB default/NULL 生效）。**(L4) 級聯失敗抑制**（最大槓桿）：父 entity_setup 失敗後，子步驟仍執行 → FK 不存在衍生錯誤 → 失敗數膨脹。`feature-dry-run.ts` 新增 `unresolvedContextKeys: Set<string>` 每 feature 獨立追蹤，entity_setup 失敗時抽取該步 header 的 `>contextKey` 加入 set；`stepReferencesUnresolvedKey()` 每步執行前掃 DataTable，找 `$VariableName` 引用（精確 / normalize / entityField 組合三種匹配），命中 unresolved → `skippedSteps++` 不跑 SQL。衍生錯誤歸零，dry-run 報告真實反映獨立錯誤數。**(L5) Formulation prompt 強化**（源頭降低錯誤率）：`generateSingleFeature` 的 static system prompt 加兩塊：(a) **VAR 作用域規則**（每 Scenario 獨立 context，禁假設跨 Scenario 共享），(b) **常見致命錯誤自檢清單 5 條**（本 Feature 內有對應 `>` 宣告？/ 命名一致？/ 複合概念正確拆 entity/field（「商家的 userId」= `>Merchant1.userId` 不是 `>Merchant1User.id`）/ entity_setup 禁用驗證標記 / FK 先行）；`fixMultipleFeatures` 的修復 prompt 新增規則 14-17 同步這些規則。**L2（補存原始 key 格式）/ L3（fallback 複合 entity 名）暫緩**：探索發現 ScenarioContext 4 層 fallback 已含 normalize 匹配，真正沒命中的是「LLM 根本沒宣告」的 case，fallback 擴充收益小。新增 9 個單元測試覆蓋 L4 的 `stepReferencesUnresolvedKey`（精確 / normalize / entityField 組合 / bcrypt hash 誤判防護 / 多未就緒優先順序 / PascalCase 複合 entity 名）。1302 tests 全綠、typecheck 零錯誤。**核心洞察**：`$notnull` bug 是純 code 對稱性修 15 分鐘解決；級聯抑制讓衍生錯誤歸零，dry-run 報告只剩「真正獨立」的 LLM 生成錯誤；Formulation prompt 自檢清單從源頭降低錯誤率。**再聰明的 LLM 都改不好 BDD，因為 runtime 收不到宣告** — code fix 永遠優先於 prompt fix
 - **預覽畫面零錯誤架構（Preview Gate + LKG + Health Beacon）**（04-16）：用戶質疑「世界第一模型為何不能 100% 自我修復」——糾正認知：LLM 永遠有 edge case 錯誤，但「客戶永遠看不到」是**架構題**不是 AI 能力題。三層互補防禦可達 ~99.99%：(1) **Preview Gate**（新檔 `services/preview-gate.ts` + migration 034）：`makeStreamingCallback` 在寫 Redis 前跑 esbuild 批次驗證（native binary、100 檔並行 < 500ms），壞代碼不推送，emit `preview_stale`。`PartialCodeCallback` type 擴為 `() => void | Promise<void>` 支援 async gate。**所有 sanitize pattern 失敗類型都會被攔**（未閉合 JSX / 缺 import / 語法錯誤等）——12 個新單元測試覆蓋。`syntax-validator.ts:25` 現有 `validateComponentSyntax` 直接復用，零新 LLM 依賴。(2) **Last Known Good (LKG)** `project_files` 加三欄 `validation_status / last_validated_at / last_validated_content`，`upsertProjectFiles` 接 `validationStatus` 參數：`passed` 同步寫 LKG，`failed` **永不覆蓋舊 LKG**。UIUX/Fast Build/Deploy 三個「最終態」點傳 `'passed'` 建立 LKG 快照。`conversation.ts` polling 路由在 `isGenerating && !streamingPreview` 時回 `lastValidatedFiles`。`getLastValidatedProjectFiles()` `COALESCE(last_validated_content, content)` 向後相容。(3) **前端 Freeze Overlay + Health Beacon**：`ChatSection` 加 `lastValidatedFiles` state，`lkgAsPreviewData` 轉成 `{pages, components, styles}` shape 注入 `stablePreviewData`（優先級：streaming > codePreview > LKG）。`isCodeGenerating` 早返回邏輯加 `!isLkgFallback` 守衛——有 LKG 時保留 iframe 顯示、蓋 `pointerEvents: none` 的 overlay（「AI 正在優化」），不擋互動。`EDIT_BRIDGE_SCRIPT` 每 2s postMessage `tc_health`，`WebContainerPreview` 5s 沒收到 beacon 觸發 `onFrozenStateChange(true)` → ChatPreviewPanel 顯示 `iframe_frozen` overlay（兜 HMR race / 白屏 / build 卡住）。1244→1256 tests，frontend + backend 兩端 typecheck 零錯誤。**誠實告知**：不保證 100%（WebContainer SDK 崩潰等屬「產品功能壞了」不同維度）、犧牲「串流邊生成邊看 UI 長出來」UX 換可靠性（生成中看上一版 + overlay）。VPS 部署後需跑 migration 034
 - **Spec Inconsistency 根治（BDD Alignment Gate Check 7 強化）**（04-16）：用戶實際案例暴露 `validateSemanticConsistency` 漏掉「分類應可被設為未分類（null）」類 scenario — 18 輪修復後仍 107/108 因為 regex 不覆蓋「應可被設為」且 `extractNullExpectationFields` 只找英文欄位名，全中文 scenario 直接 bypass。三層補強：**(1) regex 擴充**：`NULL_INTENT_PATTERNS` 新增 4 條 pattern 覆蓋「應可被設為」「清除為未分類」「括號 (null) 強信號」「unset/clear/reset/取消關聯/脫勾/解除連結」（含中英文變體），新增 `hasExplicitNullIntent()` 寬鬆 boolean 偵測（null 關鍵詞 + 動作動詞雙條件降低 false positive）。**(2) Actual-driven DataTable 掃描**：`checkNameVsDataTable` 改兩段式 — Stage 1 精確欄位匹配（既有，加中文業務術語映射表「分類/類別/標籤/使用者/作者/專案/群組/組織/父/指派」→ 對應英文欄位候選）；Stage 2 fallback — 若 Stage 1 無匹配但 scenario 明顯有 null 意圖，**掃描整個 DataTable 找 FK/Id 類欄位**（`*Id` / `*_id` 結尾或含 parent/category/tag 等關鍵字），任一 expect 非 null 即標記為矛盾。**(3) LLM fallback**：`SPEC_CONSISTENCY_LLM_CHECK=true` 時對「有 null 意圖但規則無 issue 產生」的 scenario 追加一次 Haiku 呼叫（512 tokens 成本），`callStructured` 回 `{isContradictory, fieldName, explanation}`，補足自然語言變體的無限性，失敗降級不阻塞。**(4) blockMessage 強化**：加「A/B/C 三選一」決策指引（改 scenario 名稱 / 改 DataTable `&isNull` / 刪除 scenario）。**(5) analyzeSpecIssuesInFailures**：`nullInScenario` regex 替換為 `hasExplicitNullIntent` 統一判斷。新增 40 個單元測試（20 positive + 6 negative `hasExplicitNullIntent` 變體 + 4 actual-driven DataTable 掃描 + 3 analyzeSpecIssuesInFailures 用戶實際失敗格式）。1244 tests 全綠、typecheck 零錯誤。**核心洞察**：剩下 1/108 的失敗不是技術問題是**人類寫需求時的意圖模糊**，根治靠的是在進 Coder 之前就把這類矛盾卡下來推回人類做選擇，不是再加一輪修復
 
@@ -1240,6 +1264,7 @@ psql "$DATABASE_URL" -f tellcraft-backend/migrations/xxx.sql
 - **層 9 Feature 粒度統一 1 Feature = 1 Operation**（2026-04-14）：解決 RED Phase 35 個 `when_summary_mismatch` error 的根因——formulation prompt 允許 CRUD 合併成單一 Feature，但 convertToOpenAPI 是 1:1 映射，導致 OpenAPI spec 少了子操作 operation。根治：**移除 formulation 的「CRUD 可合併」規則，強制 1 Feature = 1 Action = 1 HTTP Operation**（服務於現有 `findBySummary` 在 operation.summary 層級查找的設計）。禁止 `manage_` / `_management` / `_system` / `_module` 聚合詞。CRUD 必須拆成 4 個獨立 Feature（如 `add_transaction` / `list_transactions` / `update_transaction` / `delete_transaction`）。`identifyFeatures` 加 `warnOnAggregateFeatures` 後置偵測；RED Phase Check 4b 錯誤訊息升級，根因提示（「Feature 粒度過粗」+ 拆分建議）；新增 `feature-granularity.test.ts` 驗證。好處：所有既有對齊機制（alignFeatureSummaries / alignActionsYmlSummariesToFeatures / Check 6b）天然生效。
 - **層 9 + 舊對話逃生出口** `__regenerate_features__` quickReply：第 9 層部署後，舊對話（用舊規則生成 CRUD 合併 Feature）進 Coder 會卡在 `when_summary_mismatch`。新增一鍵重生機制：`coder-phases.ts` 的 `regenerateFeaturesTask` 從既有 BDD session 重跑 formulation（保留 originalRequirements + resolvedItems + ES doc），清空 features/actionsYml/openApiSpec/isaConfig，呼叫 `generateDraftBatch`/`runFormulation` → 寫回 features → 觸發 `completeSpecPhase` 自動跑 actionsYml/isaConfig/DB provisioning/dry-run。Alignment Gate blocked 訊息和 Coder testing API mismatch 訊息都加 `__regenerate_features__` quickReply（primary）。`handleUiuxMixedPhaseRouting` 攔截 token（兼顧 LangGraph + 舊路徑）。**實測耗時 7-10 分鐘**（validation 3 輪 LLM 修復 + actionsYml + isaConfig + Neon + dry-run）。
 - **層 9 + 長任務防卡死**（2026-04-15）：修復 `regenerateFeaturesTask` 靜默卡死 bug。用戶回報對話 stuck 在 `phase=formulation`，根因：(1) BullMQ `lockDuration=300s`（5 min）<< 實測耗時（7-10 min），worker 被 stall detection kill → FlowState 孤兒；(2) `completeSpecPhase` 無 timeout，LLM 卡住會讓整個 pipeline hang；(3) `validateAndFixFeatures` 3 輪硬跑，錯誤數不降也繼續浪費 2 分鐘；(4) 進度訊息只有「正在生成...」用戶無法判斷是否活著。修復：`orchestrator.ts` `lockDuration: 300_000 → 1_200_000`（20 min）；`regenerateFeaturesTask` 用 `Promise.race` 包 `completeSpecPhase` 加 15 min timeout；`feature-validation.ts` 加 early stop（round ≥ 1 且 errorCount >= prevErrorCount 提早退出）；`regenerateFeaturesTask` 加階段性進度訊息（步驟 1/4 Features 生成 → 步驟 2/4 驗證 + actionsYml + isaConfig，ETA 5-7 min）。
+- **Draft Batch max_tokens 截斷修復**（2026-04-18）：1 Feature = 1 Operation 粒度下 Feature 數翻倍（CRUD 拆 4 個），`generateDraftBatch` 的 `maxTokens` floor 16384 不足，導致 structured output JSON 在 40765 字元被截斷（`Unterminated string`）。SDK `messages.parse()` 截斷時直接 throw（不走 `stop_reason` 檢查）。修復：maxTokens floor 從 16384 → 32768（自動觸發 streaming 路徑 > STREAMING_THRESHOLD 21000），per-feature 估算從 2000 → 3000 tokens。
 - **Phase 2B interrupt 實裝**：Domain / Clone / Fast Build 三個 subgraph 從 wrapper 升級為多 node + `interrupt()` human-in-the-loop
   - **Domain**（8 nodes, 3 interrupt, 2 loops）：entry → search → confirm（interrupt×2：確認/registrant 表單）→ register → complete。DNS path：dns_setup（interrupt）→ dns_verify → complete。retry_or_cancel interrupt + 換域名/DNS 未傳播 loop
   - **Clone**（3 nodes, 1 interrupt）：execute（完整 clone pipeline）→ failed interrupt（重試/取消 loop）

@@ -22,6 +22,7 @@ import type { QualityIssue } from '../../services/quality-gate'
 import { getEnv } from '../../lib/env'
 import { getBddSession, updateBddSession } from '../../services/bdd-session'
 import { analyzeReference, analyzeUploadedImage } from '../../services/reference-analyzer'
+import { getImageLibraryOrFallback } from '../../services/image-library-service'
 import { recommendMoods, getMoodSummary } from '../../services/design-moods'
 import { executeIteration, executeUndoIteration } from '../../services/iteration-skill'
 import { semanticGateway } from '../../services/semantic-gateway'
@@ -1330,6 +1331,17 @@ export async function executeFullCodePipeline(
 
   // ===== 階段 1/3：結構（尚未完成時才執行）=====
   if (resumeIndex <= 0) {
+    // 相關假圖白名單（fail-safe：失敗不阻塞 pipeline）
+    if (!state.uiuxImageLibrary) {
+      const productType = (template as any).category || state.fastModeProductType || 'landing'
+      try {
+        state.uiuxImageLibrary = await getImageLibraryOrFallback(productType, { locale: state.locale })
+        await saveFlowState(redis, conversationId, state)
+      } catch (err) {
+        logger.warn({ err }, 'imageLibrary 載入失敗（降級跳過）')
+      }
+    }
+
     const structureResult = await generateStructure(
       uiuxDesignSystem,
       pages,
@@ -1346,6 +1358,8 @@ export async function executeFullCodePipeline(
         referenceAnalysis: state.uiuxReferenceAnalysis,
         moodId: state.uiuxDesignMood,
         generationProfile: 'balanced',
+        imageLibrary: state.uiuxImageLibrary,
+        projectSeed: state.projectId,
       },
       { userId: state.userId, conversationId, purpose: 'uiux_structure' },
       makeStreamingCallback(conversationId, io, redis, 'structure', twConfig),
@@ -1691,6 +1705,18 @@ async function executeCodePhaseStructure(
   // 生成結構
   const pages = template.pageStructure.pages || ['home']
   const twCfg = generateTailwindConfig(uiuxDesignSystem)
+
+  // 相關假圖白名單（fail-safe）
+  if (!state.uiuxImageLibrary) {
+    const productType = (template as any).category || state.fastModeProductType || 'landing'
+    try {
+      state.uiuxImageLibrary = await getImageLibraryOrFallback(productType, { locale: state.locale })
+      await saveFlowState(redis, conversationId, state)
+    } catch (err) {
+      logger.warn({ err }, 'imageLibrary 載入失敗（降級跳過）')
+    }
+  }
+
   const structureResult = await generateStructure(
     uiuxDesignSystem,
     pages,
@@ -1706,6 +1732,8 @@ async function executeCodePhaseStructure(
       referenceAnalysis: state.uiuxReferenceAnalysis,
       moodId: state.uiuxDesignMood,
       generationProfile: 'balanced',
+      imageLibrary: state.uiuxImageLibrary,
+      projectSeed: state.projectId,
     },
     { userId: state.userId, conversationId, purpose: 'uiux_structure' },
     makeStreamingCallback(conversationId, io, redis, 'structure', twCfg),
