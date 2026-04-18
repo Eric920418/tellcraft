@@ -147,15 +147,22 @@ export class ISAFeatureArgumentResolver {
           //   Beautician1Id     (PascalCase + 數字，無 dot)
           //   beauticianId      (去除數字，camelCase)
           //   beautician1.id    (lowercase + 數字 + dot)
+          //   Beautician.id     (L2：去數字 PascalCase + dot — LLM 常省略數字引用)
+          //   beautician.id     (L2：去數字 lowercase + dot)
           if (contextKey.includes('.')) {
             const [entity, field] = contextKey.split('.');
             const entityLower = entity.charAt(0).toLowerCase() + entity.slice(1);
             const fieldCamel = field.charAt(0).toUpperCase() + field.slice(1);
+            const entityNoDigit = entity.replace(/\d+$/, '');
+            const entityNoDigitLower = entityNoDigit.charAt(0).toLowerCase() + entityNoDigit.slice(1);
             const aliases = [
               entityLower + fieldCamel,                       // beautician1Id
               entity + fieldCamel,                            // Beautician1Id
               entity.toLowerCase() + '.' + field.toLowerCase(), // beautician1.id
               entityLower.replace(/\d+$/, '') + fieldCamel,   // beauticianId（去數字）
+              // L2 新增：去數字 PascalCase / lowercase + dot（LLM 省略數字引用）
+              entityNoDigit + '.' + field,                    // Beautician.id
+              entityNoDigitLower + '.' + field.toLowerCase(), // beautician.id
             ];
             for (const alias of aliases) {
               if (alias && alias !== contextKey && alias !== originalExecKeyName) {

@@ -200,6 +200,77 @@ describe('ISAFeatureArgumentResolver', () => {
         resolver.extractAndStoreVariables(['<todoId'], contextKeyMap, { id: 'uuid-todo' })
         expect(resolver.resolveVariable('$todoId')).toBe('uuid-todo')
       })
+
+      // ========== L2 擴充：去數字 PascalCase + dot 形式 alias ==========
+      it('L2: >Beautician1.id 能被 $Beautician.id 省略數字引用解析', () => {
+        const contextKeyMap = new Map([[0, 'Beautician1.id']])
+        resolver.extractAndStoreVariables(['<id'], contextKeyMap, { id: 'uuid-b1' })
+        // 去數字 PascalCase + dot
+        expect(resolver.resolveVariable('$Beautician.id')).toBe('uuid-b1')
+        // 去數字 lowercase + dot
+        expect(resolver.resolveVariable('$beautician.id')).toBe('uuid-b1')
+        // 原有 alias 仍可用（不破壞既有行為）
+        expect(resolver.resolveVariable('$beautician1Id')).toBe('uuid-b1')
+        expect(resolver.resolveVariable('$Beautician1.id')).toBe('uuid-b1')
+      })
+
+      it('L2: >Merchant2.userId 支援去數字省略引用 $Merchant.userId', () => {
+        const contextKeyMap = new Map([[0, 'Merchant2.userId']])
+        resolver.extractAndStoreVariables(['<userId'], contextKeyMap, { id: 'uuid-mu' })
+        expect(resolver.resolveVariable('$Merchant.userId')).toBe('uuid-mu')
+        expect(resolver.resolveVariable('$merchant.userid')).toBe('uuid-mu')
+      })
+
+      it('L2: 無數字後綴的 entity（如 Admin.id）不會產生空字串 alias', () => {
+        const contextKeyMap = new Map([[0, 'Admin.id']])
+        resolver.extractAndStoreVariables(['<id'], contextKeyMap, { id: 'uuid-admin' })
+        // 去數字後還是 Admin（沒變），alias 不應覆蓋任何有效 key
+        expect(resolver.resolveVariable('$Admin.id')).toBe('uuid-admin')
+        expect(resolver.resolveVariable('$admin.id')).toBe('uuid-admin')
+      })
+
+      // ========== 用戶實際 dry-run 錯誤訊息全面驗證（L3 必要性判斷）==========
+      // 假設 LLM 宣告合理的 >Entity1.field 格式，驗證用戶錯誤訊息中的各種引用變體能否被
+      // 現有 6 alias + Tier 3 normalize fallback 抓到。抓得到 → L3 不必要。
+      describe('用戶實際錯誤變體 × 合理宣告的命中率', () => {
+        it('宣告 >Merchant1.userId → 查 $Merchant1User.id（用戶原錯誤格式）能抓到', () => {
+          const contextKeyMap = new Map([[0, 'Merchant1.userId']])
+          resolver.extractAndStoreVariables(['<userId'], contextKeyMap, { id: 'uuid-m1u' })
+          // 用戶錯誤格式：$Merchant1User.id（把 User 移到 entity 尾）
+          // 這會走 Tier 3 normalize: merchant1userid vs alias `merchant1.userid` normalize 相同
+          expect(resolver.resolveVariable('$Merchant1User.id')).toBe('uuid-m1u')
+        })
+
+        it('宣告 >Merchant1.userId → 查 $merchant1UserId（camelCase 壓縮）能抓到', () => {
+          const contextKeyMap = new Map([[0, 'Merchant1.userId']])
+          resolver.extractAndStoreVariables(['<userId'], contextKeyMap, { id: 'uuid-m2u' })
+          expect(resolver.resolveVariable('$merchant1UserId')).toBe('uuid-m2u')
+        })
+
+        it('宣告 >Consumer1.id → 查 $Consumer1.id（原始）能抓到', () => {
+          const contextKeyMap = new Map([[0, 'Consumer1.id']])
+          resolver.extractAndStoreVariables(['<id'], contextKeyMap, { id: 'uuid-c1' })
+          expect(resolver.resolveVariable('$Consumer1.id')).toBe('uuid-c1')
+          expect(resolver.resolveVariable('$consumer1Id')).toBe('uuid-c1')
+          expect(resolver.resolveVariable('$consumerId')).toBe('uuid-c1')
+        })
+
+        it('宣告 >OtherMerchant1.userId → 查 $otherMerchantUserId（去數字壓縮）能抓到', () => {
+          const contextKeyMap = new Map([[0, 'OtherMerchant1.userId']])
+          resolver.extractAndStoreVariables(['<userId'], contextKeyMap, { id: 'uuid-om1u' })
+          // alias 4 (去數字 camelCase) = otherMerchantUserId
+          expect(resolver.resolveVariable('$otherMerchantUserId')).toBe('uuid-om1u')
+        })
+
+        it('宣告 >Product1.id → 查 $product1Id / $Product.id / $productId 全通', () => {
+          const contextKeyMap = new Map([[0, 'Product1.id']])
+          resolver.extractAndStoreVariables(['<id'], contextKeyMap, { id: 'uuid-p1' })
+          expect(resolver.resolveVariable('$product1Id')).toBe('uuid-p1')
+          expect(resolver.resolveVariable('$Product.id')).toBe('uuid-p1')  // L2 加的
+          expect(resolver.resolveVariable('$productId')).toBe('uuid-p1')
+          expect(resolver.resolveVariable('$Product1.id')).toBe('uuid-p1')
+        })
+      })
     })
 
     describe('resolveVariable', () => {
