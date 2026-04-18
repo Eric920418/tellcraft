@@ -1724,7 +1724,7 @@ export async function runAllFeatures(input: {
  *     table: members
  *     fields: { ... }
  */
-function normalizeEntityMapping(rawYml: string): string {
+export function normalizeEntityMapping(rawYml: string): string {
   try {
     const parsed = yaml.load(rawYml) as Record<string, unknown>
     if (!parsed || typeof parsed !== 'object') return rawYml
@@ -1732,6 +1732,54 @@ function normalizeEntityMapping(rawYml: string): string {
     // 已經是格式 A → 直接返回
     if (Array.isArray((parsed as any).entity_to_table_mapping)) {
       return rawYml
+    }
+
+    // 格式 D：entity_to_table_mapping 是 object（非 array）— LLM 常漏掉 array dash
+    //   entity_to_table_mapping:
+    //     會員: members
+    //     美容師: beauticians
+    const rawMap = (parsed as any).entity_to_table_mapping
+    if (rawMap && typeof rawMap === 'object' && !Array.isArray(rawMap)) {
+      const entries: Record<string, string>[] = []
+      for (const [entity, table] of Object.entries(rawMap)) {
+        if (typeof table === 'string') {
+          entries.push({ [entity]: table })
+        } else if (table && typeof table === 'object') {
+          // 格式 D2：每個 entry 是 { table: 'xxx', zh: 'xxx' } 物件
+          const t = table as { table?: string; zh?: string }
+          if (t.table) {
+            entries.push({ [t.zh || entity]: t.table })
+          }
+        }
+      }
+      if (entries.length > 0) {
+        logger.info({ entryCount: entries.length }, 'Entity mapping 格式 D (nested object) → 格式 A 正規化')
+        return yaml.dump({ entity_to_table_mapping: entries })
+      }
+    }
+
+    // 格式 E：頂層 key 是 `entities`（BDD Formulation 實際生成格式），
+    //   每個 entity 有 zh/table/fields 子欄位。這是 VPS 實際踩到的格式。
+    //   entities:
+    //     customer:
+    //       zh: 顧客
+    //       table: customers
+    //       fields: { ... }
+    const entitiesBlock = (parsed as any).entities
+    if (entitiesBlock && typeof entitiesBlock === 'object' && !Array.isArray(entitiesBlock)) {
+      const entries: Record<string, string>[] = []
+      for (const [entityKey, value] of Object.entries(entitiesBlock)) {
+        if (!value || typeof value !== 'object') continue
+        const v = value as { zh?: string; table?: string }
+        if (v.table) {
+          // 優先用 zh 作 key（中文 entity 名），沒有則用頂層英文 key
+          entries.push({ [v.zh || entityKey]: v.table })
+        }
+      }
+      if (entries.length > 0) {
+        logger.info({ entryCount: entries.length }, 'Entity mapping 格式 E (entities: 頂層 key) → 格式 A 正規化')
+        return yaml.dump({ entity_to_table_mapping: entries })
+      }
     }
 
     // 偵測格式 B：每個頂層 key 是 entity，有 zh/table 子欄位

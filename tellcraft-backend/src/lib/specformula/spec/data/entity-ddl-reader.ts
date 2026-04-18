@@ -75,6 +75,26 @@ export class EntityDdlReader {
     // Read entity_to_table_mapping.yml
     const mappingContent = fs.readFileSync(mappingFile, 'utf-8');
     const mapping = yaml.load(mappingContent) as EntityTableMapping;
+
+    // 防禦性檢查：mapping 結構必須是 { entity_to_table_mapping: [...] }
+    // 若 normalizeEntityMapping 上游沒抓到的格式（例如 mapping 為 null / 缺 key / value 不是 array），
+    // 在這裡給清晰錯誤訊息，而不是 Node 原生「is not iterable」
+    if (!mapping || typeof mapping !== 'object') {
+      throw new Error(
+        `entity_to_table_mapping.yml 解析失敗：內容為空或非 YAML object。請確認檔案格式。`
+      );
+    }
+    if (!Array.isArray(mapping.entity_to_table_mapping)) {
+      const actualType = mapping.entity_to_table_mapping === undefined
+        ? 'undefined（缺少此頂層 key）'
+        : mapping.entity_to_table_mapping === null
+          ? 'null'
+          : Array.isArray(mapping.entity_to_table_mapping) ? 'array' : typeof mapping.entity_to_table_mapping;
+      throw new Error(
+        `entity_to_table_mapping.yml 格式錯誤：期望 'entity_to_table_mapping' 為 array of { entity: table } 物件，實際為 ${actualType}。\n正確格式範例：\nentity_to_table_mapping:\n  - 會員: members\n  - 美容師: beauticians`
+      );
+    }
+
     schema.setEntityTableMapping(mapping);
 
     // Validate mapping against SQL table names

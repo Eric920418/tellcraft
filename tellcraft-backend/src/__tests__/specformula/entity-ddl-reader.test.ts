@@ -1,5 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import * as path from 'path'
+import * as fs from 'fs'
+import * as os from 'os'
 import { EntityDdlReader } from '../../lib/specformula/spec/data/entity-ddl-reader'
 import type { IsaDataSourceConfig } from '../../lib/specformula/spec/isa/models'
 
@@ -78,5 +80,46 @@ describe('EntityDdlReader', () => {
     expect(sql).toContain('SELECT')
     expect(sql).toContain('FROM users')
     expect(sql).toContain('WHERE id=$1')
+  })
+
+  // ========== L6 防禦性錯誤訊息（Pre-normalize 漏抓時的人類可讀錯誤） ==========
+  describe('L6: mapping 結構異常的防禦性錯誤', () => {
+    function makeTmpDirWithBadMapping(badYml: string): string {
+      const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ddl-reader-bad-'))
+      fs.writeFileSync(path.join(tmpDir, 'schema.sql'), 'CREATE TABLE users (id UUID PRIMARY KEY);')
+      fs.writeFileSync(path.join(tmpDir, 'entity_to_table_mapping.yml'), badYml)
+      return tmpDir
+    }
+
+    it('mapping 是 object 而非 array → 拋出人類可讀錯誤（非 "is not iterable"）', () => {
+      // 格式 D 未經 normalize 的樣子
+      const tmpDir = makeTmpDirWithBadMapping(`entity_to_table_mapping:\n  會員: members\n  美容師: beauticians\n`)
+      try {
+        expect(() => new EntityDdlReader(makeConfig(tmpDir)).read())
+          .toThrow(/格式錯誤.*array/)
+      } finally {
+        fs.rmSync(tmpDir, { recursive: true, force: true })
+      }
+    })
+
+    it('mapping 缺少 entity_to_table_mapping 頂層 key → 拋出 undefined 錯誤', () => {
+      const tmpDir = makeTmpDirWithBadMapping(`something_else:\n  - foo: bar\n`)
+      try {
+        expect(() => new EntityDdlReader(makeConfig(tmpDir)).read())
+          .toThrow(/undefined.*缺少此頂層 key/)
+      } finally {
+        fs.rmSync(tmpDir, { recursive: true, force: true })
+      }
+    })
+
+    it('mapping 為空字串 → 拋出解析失敗錯誤', () => {
+      const tmpDir = makeTmpDirWithBadMapping('')
+      try {
+        expect(() => new EntityDdlReader(makeConfig(tmpDir)).read())
+          .toThrow(/解析失敗|格式錯誤/)
+      } finally {
+        fs.rmSync(tmpDir, { recursive: true, force: true })
+      }
+    })
   })
 })
