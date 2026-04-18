@@ -1098,16 +1098,18 @@ export async function regenerateFeaturesTask(input: {
     })
 
     // 7. 觸發 completeSpecPhase（自動跑 Feature 驗證 + actionsYml + isaConfig + DB + dry-run）
-    // 加 15min timeout 防止 LLM 卡死讓 FlowState 永久孤兒
+    // 加 timeout 防止 LLM 卡死讓 FlowState 永久孤兒。
+    // L11：原 15 min 對 7-16 entity 複雜 schema 不夠（actionsYml + isaConfig + DB + dry-run 串起來可能 20-25 min），
+    // 實測 VPS 上用戶 7 entity 電商 schema 撞到 15 min 硬超時 → 改 30 min 更符合真實工作負載
     state.sessionId = bddSession.id
     await saveFlowState(redis, conversationId, state)
 
     const { completeSpecPhase } = await import('./bdd-phases')
-    const COMPLETE_SPEC_TIMEOUT_MS = 15 * 60 * 1000 // 15 分鐘
+    const COMPLETE_SPEC_TIMEOUT_MS = 30 * 60 * 1000 // 30 分鐘（L11 從 15 升級）
     await Promise.race([
       completeSpecPhase(conversationId, state, redis, io),
       new Promise<never>((_, reject) =>
-        setTimeout(() => reject(new Error('completeSpecPhase 超時（> 15 分鐘）')), COMPLETE_SPEC_TIMEOUT_MS)
+        setTimeout(() => reject(new Error('completeSpecPhase 超時（> 30 分鐘）')), COMPLETE_SPEC_TIMEOUT_MS)
       ),
     ])
 
