@@ -2337,6 +2337,39 @@ export async function handleConfirmTemplate(
  * A = 有想法，進入設計釐清
  * B = 沒想法，顯示模板
  */
+/**
+ * L12：全域 system quickReply 逃生出口
+ * 讓 `__regenerate_features__` / `__connect_database__` 無視當前 phase 都能被攔截路由
+ * 根因：phase-router.ts 對 uiux_design_* phase 直接交給 handleDesignXxx handler，
+ *       若不加全域攔截，用戶被問卷卡住無法觸發 regenerate/coder 等 system-level command
+ */
+async function tryEscapeToSystemQuickReply(
+  conversationId: string,
+  state: FlowState,
+  trimmedMsg: string,
+  redis: Redis,
+  io: IoEmitter,
+): Promise<boolean> {
+  if (trimmedMsg !== '__regenerate_features__' && trimmedMsg !== '__connect_database__') {
+    return false
+  }
+  const projectId = state.projectId || ''
+  const userId = state.userId || ''
+  if (!projectId || !userId) {
+    logger.warn({ conversationId, trimmedMsg, hasProjectId: !!projectId, hasUserId: !!userId }, 'system quickReply escape: state 缺 projectId/userId')
+    return false
+  }
+  if (trimmedMsg === '__regenerate_features__') {
+    const { regenerateFeaturesTask } = await import('./coder-phases')
+    await regenerateFeaturesTask({ projectId, conversationId, userId, redis, io })
+    return true
+  }
+  // __connect_database__
+  const { executeCoderSkill } = await import('./coder-phases')
+  await executeCoderSkill({ taskId: state.taskId || '', projectId, conversationId, userId, redis, io })
+  return true
+}
+
 export async function handleDesignPreferenceReply(
   conversationId: string,
   state: FlowState,
@@ -2344,6 +2377,9 @@ export async function handleDesignPreferenceReply(
   redis: Redis,
   io: IoEmitter
 ) {
+  // L12：system quickReply 全域逃生（__regenerate_features__ / __connect_database__）
+  if (await tryEscapeToSystemQuickReply(conversationId, state, message.trim(), redis, io)) return
+
   const trimmed = message.trim().toUpperCase()
 
   // 判斷用戶選擇
@@ -2436,6 +2472,9 @@ export async function handleDesignClarifyReply(
   io: IoEmitter,
   imageUrls?: string[]
 ) {
+  // L12：system quickReply 全域逃生
+  if (await tryEscapeToSystemQuickReply(conversationId, state, message.trim(), redis, io)) return
+
   const step = state.uiuxDesignClarifyStep || 1
   const ideas = state.uiuxDesignIdeas || []
 
@@ -2829,6 +2868,9 @@ export async function handleDesignBriefReply(
   redis: Redis,
   io: IoEmitter
 ) {
+  // L12：system quickReply 全域逃生
+  if (await tryEscapeToSystemQuickReply(conversationId, state, message.trim(), redis, io)) return
+
   const msg = message.trim().toLowerCase()
 
   // 判斷是否確認
