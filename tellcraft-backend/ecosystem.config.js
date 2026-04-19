@@ -29,8 +29,8 @@ module.exports = {
       instances: 1,
       autorestart: true,
       watch: false,
-      max_memory_restart: '3G',
-      node_args: '--max-old-space-size=2560 --max-semi-space-size=64',
+      max_memory_restart: '5G',
+      node_args: '--max-old-space-size=4096 --max-semi-space-size=64',
       env: {
         NODE_ENV: 'production',
       },
