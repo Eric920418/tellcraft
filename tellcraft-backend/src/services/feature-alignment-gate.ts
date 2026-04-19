@@ -176,6 +176,21 @@ function extractResponseHeaders(content: string): string[] {
 }
 
 /**
+ * SpecFormula 系統常數（非一般變數，不需要宣告）。
+ * - `$notnull` — 非空驗證標記（see formulation.ts:814, red-phase-validator.ts:925）
+ * - `$null` — 明確 null 驗證
+ * - `&isNull` / `&isNotNull` — 舊語法，有些 scenario 仍用
+ *   （`&` 前綴會被 L199 的 regex `/^\$[a-zA-Z]/` 過濾掉不進 references，但保留在白名單以防未來 regex 放寬）
+ */
+const SPECFORMULA_SYSTEM_VARS = new Set<string>([
+  'notnull',
+  'null',
+  'undefined',
+  'isnull',
+  'isnotnull',
+])
+
+/**
  * 提取所有 VAR 宣告（>Context.field）和引用（$variable）
  */
 function extractVarDeclarationsAndReferences(content: string): {
@@ -211,7 +226,7 @@ function extractVarDeclarationsAndReferences(content: string): {
 // 6 項對齊檢查
 // ============================================================
 
-async function runAlignmentChecks(input: AlignmentGateInput): Promise<AlignmentIssue[]> {
+export async function runAlignmentChecks(input: AlignmentGateInput): Promise<AlignmentIssue[]> {
   const issues: AlignmentIssue[] = []
   const actionsMeta = parseActionsMeta(input.actionsYml)
   const actionsByName = new Map(actionsMeta.map(a => [a.name, a]))
@@ -441,6 +456,9 @@ async function runAlignmentChecks(input: AlignmentGateInput): Promise<AlignmentI
 
     for (const ref of vars.references) {
       const varName = ref.varName
+      // 系統常數跳過（非一般變數引用，不需要宣告）
+      if (SPECFORMULA_SYSTEM_VARS.has(varName.toLowerCase())) continue
+
       // 檢查是否能解析
       let resolved = false
       // 直接匹配
@@ -480,7 +498,33 @@ async function runAlignmentChecks(input: AlignmentGateInput): Promise<AlignmentI
           }
         }
       }
-      // 注意：跨 Feature 的 VAR 引用無法在此檢查（需要整體上下文），只檢查同一 Feature 內
+
+      // Check 5b：完全未宣告偵測（L15.P0）
+      // 既沒匹配到 declared context key，也沒匹配到 executionKey，也非系統常數 →
+      // runtime 會拋「VAR 解析失敗：$X 無法解析為有效值」，整個 scenario fail。
+      // 報 error + 明確修復提示，讓 LLM 修復 loop 有方向。
+      // Scenario 獨立重 run Background，不允許跨 Feature 引用 → 無匹配一律視為錯。
+      if (!resolved) {
+        const parts = varName.split('.')
+        let suggestion: string
+        if (parts.length === 2) {
+          // $Entity.field → 建議補宣告
+          const entity = parts[0]
+          const field = parts[1]
+          const entityLower = entity.charAt(0).toLowerCase() + entity.slice(1)
+          const fieldUpper = field.charAt(0).toUpperCase() + field.slice(1)
+          suggestion = `在 Background / Given 的 DataTable 加入宣告行，例如：\`| >${entity}1.${field} | ... |\` 搭配同 cell 的 \`<${entityLower}1${fieldUpper}\`（或直接用 Entity Mapping 既有的 entity）`
+        } else {
+          // $someVar → 建議確認 executionKey 捕獲
+          suggestion = `確認此變數有在 Background / Given 先宣告（\`>Xxx.yyy\`）或從前一個 Then 回應捕獲（\`<${varName}\`）`
+        }
+        issues.push({
+          featureName: displayName,
+          checkName: 'var_system_alignment',
+          severity: 'error',
+          description: `VAR 引用 "$${varName}" (line ${ref.line}) 完全未宣告 → runtime 會拋「VAR 解析失敗：$${varName} 無法解析為有效值」。${suggestion}`,
+        })
+      }
     }
 
     // ---- Check 6: Summary ↔ actionsYml 精確匹配 ----
@@ -561,6 +605,54 @@ async function runAlignmentChecks(input: AlignmentGateInput): Promise<AlignmentI
 // 自動修復
 // ============================================================
 
+/**
+ * L15.P1：對「完全未宣告」的 VAR issue，生成 schema-aware 修復範本附加到 issue hint。
+ * Deterministic 查 schema 找到對應 table + 必要欄位 → 產出具體可複製的 Background 補宣告模板。
+ * LLM 照範本填入修復後 Feature，不用自己推測 entity → table → required columns 的映射。
+ */
+export function buildUndeclaredVarRepairHint(
+  description: string,
+  schemas: DatabaseSchema[],
+): string | null {
+  // 只處理 Check 5 的「完全未宣告」issue
+  if (!description.includes('完全未宣告')) return null
+  const match = description.match(/\$([A-Za-z_][\w]*)\.([A-Za-z_][\w]*)/)
+  if (!match) return null
+  const [, entity, field] = match
+
+  // 查 schema：entityTableMapping key 通常是 PascalCase entity（L13 強制英文後）
+  let targetTable: { tableName: string; requiredCols: string[] } | null = null
+  for (const schema of schemas) {
+    const table = schema.findByEntityName(entity)
+    if (table) {
+      const required = table.columns
+        .filter(c => c.notNull && !c.primaryKey
+          && !['created_at', 'updated_at', 'deleted_at'].includes(c.name.toLowerCase()))
+        .slice(0, 3)  // 最多提示 3 個必要欄位，避免 DataTable 過長
+        .map(c => c.name)
+      targetTable = { tableName: table.tableName, requiredCols: required }
+      break
+    }
+  }
+
+  if (!targetTable) {
+    // Entity 不在 schema → 可能是規格真的需要新 entity，LLM 需自行處理
+    return `【Schema 檢查】entity "${entity}" 不在 Entity Mapping 中。若確實需要，先在 Schema + Entity Mapping 補上；否則改用其他 entity 名。`
+  }
+
+  // 產生可複製的 Background 補宣告模板
+  const entityLower = entity.charAt(0).toLowerCase() + entity.slice(1)
+  const fieldUpper = field.charAt(0).toUpperCase() + field.slice(1)
+  const execKey = `${entityLower}1${fieldUpper}`
+  const headerCols = ['>' + entity + '1.' + field, ...targetTable.requiredCols]
+  const dataRow = ['<' + execKey, ...targetTable.requiredCols.map(c => `Sample ${c}`)]
+  const template = `    And 準備一個${entity}, with table:\n      | ${headerCols.join(' | ')} |\n      | ${dataRow.join(' | ')} |`
+  return `【Schema 提示】${entity} 對應 table \`${targetTable.tableName}\`，必要欄位：${targetTable.requiredCols.join(', ') || '(無)'}。
+在 Background 補上以下宣告（若 Background 不存在則先 \`Background:\` 再加）：
+${template}
+注意：Sample 值僅為範本，請替換為有業務意義的值。`
+}
+
 async function autoFixFeatures(
   features: Array<{ name?: string; actionName: string; content: string }>,
   issues: AlignmentIssue[],
@@ -581,6 +673,14 @@ async function autoFixFeatures(
     issuesByFeature.set(issue.featureName, arr)
   }
 
+  // L15.P1：解析 schema 供修復範本用（失敗時空陣列，fallthrough 到原有 hint）
+  let schemasForRepair: DatabaseSchema[] = []
+  try {
+    schemasForRepair = await parseSchemasFromString(schemaSql, entityMapping)
+  } catch (e) {
+    logger.warn({ err: e }, 'autoFixFeatures: schema 解析失敗，schema-aware hint 將跳過')
+  }
+
   // 構建 FeatureFixInput
   const featuresToFix: FeatureFixInput[] = []
   for (const feature of features) {
@@ -596,10 +696,19 @@ async function autoFixFeatures(
     const issuesWithHints = errorIssues.map(i => {
       const rootCause = alignmentCheckToRootCause(i.checkName)
       const enriched = enrichError(i.description, rootCause, { phase: 'feature_alignment' })
-      if (!enriched.harnessHint) return `[${i.checkName}] ${i.description}`
-      // hint 取第一段（現象 + 根因那一行），完整 hint 過長會稀釋多個 issue 的資訊
-      const hintShort = enriched.harnessHint.split('\n').slice(0, 2).join(' ')
-      return `[${i.checkName}] ${i.description}\n  → Harness: ${hintShort}`
+      // L15.P1: schema-aware 修復範本（只對 var_system_alignment 的「完全未宣告」case）
+      const schemaHint = i.checkName === 'var_system_alignment' && schemasForRepair.length > 0
+        ? buildUndeclaredVarRepairHint(i.description, schemasForRepair)
+        : null
+      const parts = [`[${i.checkName}] ${i.description}`]
+      if (enriched.harnessHint) {
+        const hintShort = enriched.harnessHint.split('\n').slice(0, 2).join(' ')
+        parts.push(`  → Harness: ${hintShort}`)
+      }
+      if (schemaHint) {
+        parts.push(`  → ${schemaHint}`)
+      }
+      return parts.join('\n')
     })
 
     featuresToFix.push({
