@@ -399,11 +399,16 @@ export async function generateSchemaSql(
 
   const schemaHints = extractSchemaHints(resolvedItems)
 
-  const systemPrompt = `你是一位資深的資料庫架構師。根據需求和釐清決策，產出 **PostgreSQL** SQL Schema 和 Entity 映射。
+  const systemPrompt = `You are a senior database architect. Given the requirements and clarification decisions, produce a **PostgreSQL** SQL Schema and Entity Mapping.
 
-## 輸出格式
+## ⚠️ LANGUAGE POLICY
+- All identifiers (table names, column names) MUST be **English snake_case**
+- Entity Mapping's top-level key MUST be **English PascalCase** (e.g. \`Customer\`, \`MenuItem\`) — NOT Chinese like \`顧客\`
+- No Chinese in SQL/YAML output (except as string literal values if requirements explicitly ask)
 
-### 1. SQL Schema (schema.sql) — PostgreSQL（Neon）
+## Output Format
+
+### 1. SQL Schema (schema.sql) — PostgreSQL (Neon)
 \`\`\`sql
 CREATE TABLE table_name (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -419,8 +424,11 @@ CREATE TABLE table_name (
 ### 2. Entity Mapping (YAML)
 \`\`\`yaml
 entity_to_table_mapping:
-  - 中文實體名: table_name
+  - Customer: customers
+  - MenuItem: menu_items
+  - Order: orders
 \`\`\`
+(PascalCase English entity name → snake_case plural table name. Feature Files will reference entities by this PascalCase key, e.g. \`準備一個Customer, with table:\`.)
 
 ## PostgreSQL 型別規則（嚴格遵守）
 - 目標資料庫是 **PostgreSQL（Neon）**，禁止使用 MySQL 語法
@@ -550,7 +558,13 @@ export async function identifyFeatures(
 
   const schemaHints = extractSchemaHints(resolvedItems)
 
-  const systemPrompt = `你是一位資深的 BDD 分析師。根據需求和 Schema，識別所有需要的功能（Feature）。
+  const systemPrompt = `You are a senior BDD analyst. Given the requirements and Schema, identify all required features.
+
+## ⚠️ LANGUAGE POLICY
+- **Feature.name MUST be an ENGLISH verb phrase** (e.g. \`Create Order\`, \`List Transactions\`, \`Update Menu Item\`) — NOT Chinese \`建立訂單\` / \`查詢交易\`
+- **Feature.description MUST be in English**
+- **Feature.actionName MUST be snake_case English** (e.g. \`create_order\`, \`list_transactions\`)
+- **Feature.summary** (the \`# Summary:\` header content) MUST match Feature.name exactly (English)
 
 ## 核心原則：需求驅動 + 1 Feature = 1 Operation
 
@@ -751,87 +765,108 @@ export async function generateSingleFeature(
     : extractSchemaHints(resolvedItems)
 
   // ── Prompt Caching: 靜態 ISA 規則放 Block 1（跨 feature 快取），動態 feature info 放 Block 2 ──
-  const staticSystemPrompt = `你是一位資深的 BDD 分析師。請為指定的功能產出 Gherkin Feature File。
+  const staticSystemPrompt = `You are a senior BDD analyst. Output a Gherkin Feature File for the specified function.
 
-## sdd.os ISA SpecFormula 標準格式規範
+## ⚠️ LANGUAGE POLICY — READ FIRST
 
-### ⚠️ 無腦補原則（最高優先）
-**嚴格遵守需求和釐清決策，不擅自假設任何功能、欄位或行為。** 如果需求沒提到的東西，就不要加。
+ALL generated content MUST be in **ENGLISH**, except the SpecFormula DSL keywords below which MUST remain Chinese:
 
-### VAR 系統（取代硬編碼 UUID）
-| 前綴 | 用途 | 範例 |
-|------|------|------|
-| \`>\` | Given 中宣告 Context Key | \`>TestUser.id\` |
-| \`$\` | 引用之前宣告的值 | \`$TestUser.id\` |
-| \`<\` | 捕捉執行結果 | \`<userId\` |
-- \`$notnull\` 表示非空即可
+**Keep in Chinese (DSL keywords — SpecFormula parser depends on them)**:
+- \`準備一個<Entity>, with table:\` (Given data setup)
+- \`應該存在一個<Entity>\` / \`應該不存在一個<Entity>\` (Entity assertions)
+- \`現在時間為 "..."\` (Time control)
+- \`(No Actor)\` / \`(UID="$var")\` (Actor prefix)
+- \`{summary}(STATUS)回應, with table:\` / \`(STATUS)回應為, with JSON:\` (Response validation)
+- \`操作失敗\` (Operation failure)
+- Rule category prefix: \`前置（狀態）\` / \`前置（參數）\` / \`後置（回應）\` / \`後置（狀態）\`
 
-### Given 設定方式選擇指引
-| 判定條件 | 選擇 | 範例 |
-|----------|------|------|
-| 簡單 Invariant（單一欄位約束） | Choice A: 直接用 \`準備一個商品, with table:\`（entity 直接寫名稱，不加花括號） | price >= 0、status = 'active' |
-| 複雜 Invariant（跨屬性計算） | Choice B: 用 \`(UID="$var") {summary}, call table:\` 透過 Action 設定 | 總額 = 單價 × 數量 |
-| 狀態流轉（需前置 Action 建立狀態） | Choice B: 用 Action 設定 | 訂單需先經過「建立」才能「取消」 |
+**Everything else MUST be in English**:
+- Feature/Rule/Scenario/Example title text
+- Entity names (e.g. \`Customer\`, \`Store\`, \`MenuItem\` — NOT \`顧客\`, \`店家\`, \`菜單項目\`)
+- When summary text (e.g. \`Create Order\` — NOT \`建立訂單\`)
+- DataTable column headers (camelCase English: \`totalAmount\`, \`customerId\`)
+- DataTable data values (e.g. \`John Doe\`, \`Kung Pao Chicken\`, \`pending\` — NOT \`小明\`, \`宮保雞丁\`, \`待處理\`)
+- Rule descriptions (e.g. \`Rule: 前置（參數）- Required parameters must be provided\`)
 
-### Given 步驟格式（資料準備）
-- 資料準備：\`準備一個<實體名>, with table:\`（**不加花括號 {}**，直接寫實體名如 \`準備一個商品, with table:\`）（使用 \`>contextKey\` / \`<executionKey\`）
-- 時間控制：\`現在時間為 "{datetime}"\`
+## sdd.os ISA SpecFormula Standard Format
 
-### When 步驟格式（Action 呼叫，必須有 Actor 前綴）
-- 無身份：\`(No Actor) {summary}, call table:\`
-- 帶身份：\`(UID="$var") {summary}, call table:\`
+### ⚠️ Don't-Hallucinate Principle (HIGHEST PRIORITY)
+**Strictly follow requirements and clarification decisions. Do not assume any fields, behaviors, or features not explicitly stated.** If requirements don't mention it, don't add it.
 
-### Then 步驟格式（回應驗證，含 HTTP status code）
-- 成功回應：\`{summary}(STATUS)回應, with table:\`（如 201、200）
-- 成功回應 JSON：\`{summary}(STATUS)回應為, with JSON:\`
-- 操作失敗：\`操作失敗\`
-- Entity 存在驗證：\`應該存在一個{entity}, with table:\`
-- Entity 不存在驗證：\`應該不存在一個{entity}, with table:\`
+### VAR System (replaces hardcoded UUIDs)
+| Prefix | Purpose | Example |
+|--------|---------|---------|
+| \`>\` | Declare Context Key in Given | \`>Customer1.id\` |
+| \`$\` | Reference a previously declared value | \`$Customer1.id\` |
+| \`<\` | Capture execution result | \`<customer1Id\` |
+- \`$notnull\` means "non-null, value doesn't matter"
 
-### 必要 Header（檔案開頭）
-- \`# Action: actionName\`：標註這是哪個 Action（camelCase 或 snake_case）
-- \`# [METHOD] /path\`：HTTP method 和 API 路徑
-- \`# Summary: xxx\`：Action 的一句話說明
+### Given Setup Strategy
+| Condition | Choice | Example |
+|-----------|--------|---------|
+| Simple invariant (single-field constraint) | Choice A: direct \`準備一個Product, with table:\` | price >= 0, status = 'active' |
+| Complex invariant (cross-attribute computation) | Choice B: \`(UID="$var") {summary}, call table:\` via Action | totalAmount = unitPrice × quantity |
+| State transition (requires prior Action to set up state) | Choice B: Action-based setup | Order must pass "create" before "cancel" |
 
-## 四類規則分類法（關鍵 ⚠️）
+### Given step formats (data preparation)
+- Data prep: \`準備一個<EntityName>, with table:\` (**no curly braces**, write entity name directly, e.g. \`準備一個Product, with table:\`). Uses \`>contextKey\` / \`<executionKey\`.
+- Time control: \`現在時間為 "{datetime}"\`
 
-每條 Rule **必須**標註四類之一，不可使用舊的 @Pre/@Post：
+### When step format (Action call, Actor prefix REQUIRED)
+- No identity: \`(No Actor) {summary}, call table:\`
+- With identity: \`(UID="$var") {summary}, call table:\`
 
-| 類型 | 說明 | 失敗的 Then |
-|------|------|------------|
-| \`前置（狀態）\` | 系統既有狀態約束（如庫存>0） | \`Then 操作失敗\` |
-| \`前置（參數）\` | 輸入參數約束（如數量>0、必填） | \`Then 操作失敗\` |
-| \`後置（回應）\` | 回傳資料預期（查詢類功能用） | \`Then {summary}(200)回應, with table:\` |
-| \`後置（狀態）\` | 資料庫狀態變化（命令類功能用） | \`Then {summary}(201)回應, with table:\` + Entity 驗證 |
+### Then step format (response validation, MUST include HTTP status code)
+- Success: \`{summary}(STATUS)回應, with table:\` (e.g. 201, 200)
+- Success JSON: \`{summary}(STATUS)回應為, with JSON:\`
+- Operation failure: \`操作失敗\`
+- Entity exists: \`應該存在一個<EntityName>, with table:\`
+- Entity not exists: \`應該不存在一個<EntityName>, with table:\`
 
-### Rule 命名句型（嚴格遵守）
+### Mandatory Headers (top of file)
+- \`# Action: actionName\` — camelCase or snake_case action identifier
+- \`# [METHOD] /path\` — HTTP method and API path
+- \`# Summary: xxx\` — one-line English summary of the action
+
+## Rule Category Taxonomy (CRITICAL ⚠️)
+
+Every Rule MUST be tagged with one of these four categories. **Do NOT use legacy @Pre/@Post**.
+
+| Category (Chinese DSL) | Meaning | Failure Then |
+|------------------------|---------|--------------|
+| \`前置（狀態）\` | Pre-state constraint (e.g. stock > 0) | \`Then 操作失敗\` |
+| \`前置（參數）\` | Pre-parameter constraint (e.g. quantity > 0, required fields) | \`Then 操作失敗\` |
+| \`後置（回應）\` | Post-response expectation (for query-type features) | \`Then {summary}(200)回應, with table:\` |
+| \`後置（狀態）\` | Post-state change (for command-type features) | \`Then {summary}(201)回應, with table:\` + entity assertion |
+
+### Rule Naming Pattern (STRICT)
 
 \`\`\`
-Rule: <四類前綴> - <主詞> 必須/應 <單一條件>
+Rule: <Chinese-category-prefix> - <Subject> must <single-condition> (ENGLISH description after the prefix)
 \`\`\`
 
-正確範例：
-- \`Rule: 前置（狀態）- 商品庫存必須充足\`
-- \`Rule: 前置（參數）- 必要參數必須提供\`
-- \`Rule: 後置（狀態）- 訂單總額應為所有品項小計加總\`
-- \`Rule: 後置（回應）- 查詢結果應包含訂單明細\`
+Correct examples:
+- \`Rule: 前置（狀態）- Product stock must be sufficient\`
+- \`Rule: 前置（參數）- Required parameters must be provided\`
+- \`Rule: 後置（狀態）- Order total must equal sum of item subtotals\`
+- \`Rule: 後置（回應）- Query result must include order line items\`
 
-### Rule 原子化判定
-- 包含「且」「和」「並且」→ **必須拆分**為多條 Rule
-- 包含「或」→ 保留為單條（or 條件）
-- 混合前後置條件 → **必須拆分**（前置一條、後置一條）
+### Rule Atomicity
+- Contains "and" / "&" → **MUST be split** into multiple Rules
+- Contains "or" → keep as single Rule (or-condition)
+- Mixed pre/post condition → **MUST be split** (one pre, one post)
 
-### 每個 Feature 至少必須有
-- 至少 1 條「前置（參數）」Rule（必要參數檢查）
-- 至少 1 條「後置」Rule（回應或狀態）`
+### Every Feature MUST have at least
+- At least 1 \`前置（參數）\` Rule (required parameter check)
+- At least 1 post-condition Rule (\`後置（回應）\` or \`後置（狀態）\`)`
 
-  const dynamicSystemPrompt = `## 目標功能
-- 名稱：${featureInfo.name}
-- Action：${featureInfo.actionName}
-- 描述：${featureInfo.description}
+  const dynamicSystemPrompt = `## Target Feature
+- Name: ${featureInfo.name}
+- Action: ${featureInfo.actionName}
+- Description: ${featureInfo.description}
 
-## 輸出格式
-直接輸出完整的 .feature 檔案內容，不需要 JSON 包裝。
+## Output Format
+Output the complete .feature file content directly (no JSON wrapper).
 
 \`\`\`gherkin
 # Action: ${featureInfo.actionName}
@@ -840,115 +875,117 @@ Rule: <四類前綴> - <主詞> 必須/應 <單一條件>
 Feature: ${featureInfo.name}
 
   Background:
-    Given 準備一個使用者, with table:
-      | >User1.id | email            | name |
-      | <user1Id  | user@example.com | 小明 |
+    Given 準備一個User, with table:
+      | >User1.id | email            | name     |
+      | <user1Id  | user@example.com | John Doe |
 
-  # ========== 前置條件 ==========
+  # ========== Preconditions ==========
 
-  Rule: 前置（狀態）- 規則描述
+  Rule: 前置（狀態）- <English description of the state-level constraint>
 
-    Example: 情境說明
+    Example: <English situation description>
       When (UID="$Entity.id") {summary}, call table:
-        | 欄位        | 值 |
-        | $Entity2.id | 值 |
+        | fieldName   | value |
+        | $Entity2.id | <val> |
       Then 操作失敗
 
-  Rule: 前置（參數）- 規則描述
+  Rule: 前置（參數）- <English description of the parameter-level constraint>
 
-    Example: 情境說明
+    Example: <English situation description>
       When (No Actor) {summary}, call table:
-        | 欄位 | 值 |
+        | fieldName | value |
       Then 操作失敗
 
-  # ========== 後置條件 ==========
+  # ========== Postconditions ==========
 
-  Rule: 後置（回應）- 規則描述
+  Rule: 後置（回應）- <English description of the response expectation>
 
-    Example: 情境說明
+    Example: <English situation description>
       When (UID="$Entity.id") {summary}, call table:
-        | 欄位 | 值 |
+        | fieldName | value |
       Then {summary}(200)回應, with table:
-        | id         | 欄位     |
-        | $Entity.id | $notnull |
+        | id         | fieldName |
+        | $Entity.id | $notnull  |
 
-  Rule: 後置（狀態）- 規則描述
+  Rule: 後置（狀態）- <English description of the state change>
 
-    Example: 情境說明
+    Example: <English situation description>
       When (UID="$Entity.id") {summary}, call table:
-        | 欄位 | 值 |
+        | fieldName | value |
       Then {summary}(201)回應, with table:
-        | >result.id | 欄位         |
-        | <resultId  | 值           |
-      And 應該存在一個{entity}, with table:
-        | id        | 欄位     | 狀態欄位 |
-        | $resultId | 預期值   | 預期狀態 |
+        | >Result.id | fieldName |
+        | <resultId  | <val>     |
+      And 應該存在一個Order, with table:
+        | id        | fieldName     | status        |
+        | $resultId | <expectedVal> | <expectedSts> |
+      # ⚠️ "Order" is illustrative — replace with the actual entity name from Entity Mapping's English key
+      #   (e.g. "Customer", "Store", "MenuItem"). Do NOT keep curly-brace placeholders.
 \`\`\`
 
-## 規則
-- 檔案開頭必須用 \`# Action: actionName\`、\`# [METHOD] /path\`、\`# Summary: xxx\`
-- **每個 feature content 只能有一個 \`Feature:\` 宣告**：禁止在同一個 content 裡放多個 Feature 區塊（即使用 \`---\` 分隔）。一個 action = 一個 feature = 一個 Feature: 宣告。如果需要多個相關操作（如登入+登出），拆成兩個獨立的 feature object，各自有獨立的 name、actionName、content
-- 每條 Rule 標註四類之一（前置（狀態）/前置（參數）/後置（回應）/後置（狀態）），**禁止使用舊的 @Pre/@Post**
-- Rule 命名遵循嚴格句型：\`<四類前綴> - <主詞> 必須/應 <單一條件>\`
-- 每條 Rule 只驗證一件事（原子化）— 包含「且/和/並且」必須拆分
-- 每條 Rule 至少有一個 Example
-- 邊界條件要有對應的 Example
-- 使用 Entity Mapping 中的中文實體名
-- **必須使用 VAR 系統**：\`>contextKey\` 在 Given 宣告、\`$variable\` 引用、\`<executionKey\` 捕捉結果，禁止硬編碼 UUID
-- **>contextKey 命名規則（關鍵 ⚠️）**：
-  - 用**首字母大寫的概念名 + 數字後綴**：\`>List1.id\`、\`>Todo1.id\`、\`>User1.id\`
-  - **禁止用 table name（複數）**：\`>lists.id\`（❌）、\`>todos.id\`（❌）、\`>users.id\`（❌）
-  - 同類型多個實體用數字區分：\`>Product1.id\`、\`>Product2.id\`
-  - 只有一個實體時也要用概念名：\`>List1.id\`（不是 \`>lists.id\`）
-  - \`<executionKey\` 的名稱必須與後續 \`$variable\` 引用匹配：\`<listId\` → \`$listId\`、\`<list1Id\` → \`$list1Id\`
-- **VAR 對齊規則（關鍵 ⚠️）**：
-  - DataTable 中 Header 有 \`>contextKey\` → 同一欄的 Data **必須**是 \`<executionKey\`（配對捕獲）
-  - Data 有 \`<executionKey\` → 同一欄的 Header **必須**有 \`>contextKey\`
-  - 正確：\`| >User.id | name |\` → \`| <userId | "John" |\`
-  - 錯誤：\`| >User.id | name |\` → \`| email | "John" |\`（data 缺 \`<\` 前綴）
-  - 錯誤：\`| id | name |\` → \`| <userId | "John" |\`（header 缺 \`>\` 前綴）
-  - Entity 準備（\`準備一個\`）的 DataTable data row **至少要有一個非空欄位值**，不可全空
-  - **\`>contextKey\`/\`<executionKey\` 只用於 Given 準備（\`準備一個\`）和 Then 回應（\`(STATUS)回應\`）**：\`應該存在一個{entity}\` 的 DataTable header 用**純欄位名**（如 \`id\`、\`isCompleted\`），**禁止加 \`>\` 前綴**。正確：\`| id | isCompleted |\` → \`| $todo1Id | true |\`。錯誤：\`| >id | isCompleted |\` → \`| $todo1Id | true |\`（entity 驗證不需要擷取變數）
-  - **\`&\` 約束標記（\`&isNull\`/\`&isNotNull\`/\`&isTrue\`/\`&isFalse\`）只用於 Then 驗證步驟**：Given 準備（\`準備一個\`）的 DataTable **禁止使用 \`&isNull\`**。要表達「欄位為空」→ 直接不填該欄位（DB 用 DEFAULT 或 NULL）。錯誤：\`| deleted_at |\` → \`| &isNull |\`。正確：不包含 \`deleted_at\` 欄位
-- **When 必須有 Actor 前綴**：\`(No Actor)\` 或 \`(UID="$var")\`
-- **Then 成功必須有 HTTP status code**：\`{summary}(201)回應, with table:\`
-- **Then 的 summary 必須與 When 完全一致**：When 用 \`切換待辦事項完成狀態\`，Then 也用 \`切換待辦事項完成狀態(200)回應\`，不可縮寫
-- **When/Then summary 必須等於 Feature.name（硬性規則）**：此 Feature 所有 When/Then 步驟的 summary 必須完全等於 Feature.name（也就是 actionsYml 的 action.summary）。這是技術約束：SpecFormula findBySummary 用 When summary 查 OpenAPI operation，只在 action.summary 層級查找，所以 When summary ≠ Feature.name 會導致 100% 失敗。
-  - ✅ 正確：Feature.name = "新增交易記錄" → When (No Actor) 新增交易記錄, call table: → Then 新增交易記錄(201)回應
-  - ❌ 錯誤：Feature.name = "交易記錄管理" → When (No Actor) 新增交易記錄, call table:（summary 違反對齊，會導致 findBySummary 失敗）
-  - 如果需求涉及 CRUD，不要把它們塞進同一個 Feature。應該生成多個獨立 Feature，每個 Feature.name 是單一操作的具體動詞（新增/查詢/編輯/刪除）。
-- **Array 回應多行驗證**：列表查詢的 Then 回應 DataTable 可以有多行來驗證多個陣列元素。行順序 = 陣列元素順序（第一行=第一個元素）。**禁止用 \`index\` 欄位**表示位置，直接用行順序。正確：\`| id | name | \\n | $list1Id | 工作 | \\n | $list2Id | 生活 |\`。錯誤：\`| index | name | \\n | 0 | 工作 |\`
-- **Entity 驗證**：使用 \`應該存在一個\`（非舊的「存在一個」）
-- DataTable 命名慣例：
-  - 欄位名用 camelCase（\`totalAmount\`、\`memberLevel\`）
-  - JSON 值整體用雙引號：\`[{"productId":"$Product1.id","quantity":2}]\`
-  - 布林值用 true/false，列舉值用原始大寫（如 PENDING、ACTIVE）
-  - 禁止模糊描述（如「某商品」「一些數量」），必須用具體值
-- **級聯刪除後的 FK 驗證**：如果刪除了父實體（如清單），子實體（如待辦事項）的 FK 欄位（如 listId）會變為 null。entity_validate 應該用 \`&isNull\` 驗證 FK，不是用原來的 \`$variable\`。正確：\`| id | listId |\` → \`| $todo1Id | &isNull |\`。錯誤：\`| id | listId |\` → \`| $todo1Id | $list1Id |\`（list1Id 已被刪除，值不再是它的 UUID）
-- **測試數據日期必須用未來日期**：截止日期、到期日等 DataTable 值用 \`2099-12-31\` 而非具體的過去日期，避免與 handler 的時間驗證衝突。正確：\`| dueDate | 2099-12-31 |\`。錯誤：\`| dueDate | 2025-12-31 |\`（可能早於 handler 執行時的 NOW()）
-- **無腦補原則**：嚴格按需求和決策來，不擅自添加需求中沒提到的欄位或功能
-- **Entity 必須存在於 Schema**：\`準備一個{entity}\` 和 \`應該存在一個{entity}\` 的 entity 名稱必須是 Schema 中已定義的資料表（透過 Entity Mapping 映射）。禁止發明 Schema 中不存在的 table（如 Schema 沒有 sessions 表就不能 \`準備一個sessions\`）
-- **DataTable 欄位必須存在於 Schema**：DataTable 的 header 欄位名稱（camelCase）必須能映射到對應 table 的實際 column name（snake_case）。禁止使用 Schema 中不存在的欄位
-- **回應驗證（Then 回應）DataTable 的 header 必須用純欄位名**：header 用 camelCase 欄位名（如 \`id\`、\`isCompleted\`、\`totalAmount\`），**禁止用 \`$Var.field\` 格式**（如 \`$Todo.id\`）。\`$variable\` 只能出現在 data row 的值中（引用之前宣告的變數），不能當 header。正確：\`| id | isCompleted |\` → \`| $Todo.id | true |\`。錯誤：\`| $Todo.id | $Todo.isCompleted |\` → \`| true | true |\`
-- **Entity 驗證（應該存在一個）DataTable 必須包含至少一個主鍵或唯一識別欄位**：\`應該存在一個{entity}\` 的 DataTable header 至少要有一個 \`id\` 或可查詢欄位，讓 SpecFormula 能用 WHERE 條件查到精確的記錄。只有約束欄位（\`&isTrue\`、\`&isNotNull\`）不夠 — 需要至少一個具體值欄位。正確：\`| id | isDeleted |\` → \`| $Todo.id | &isTrue |\`。錯誤：\`| isDeleted |\` → \`| &isTrue |\`（缺少 ID，無法精確查詢）
+## Rules
+- File must start with \`# Action: actionName\`, \`# [METHOD] /path\`, \`# Summary: xxx\`
+- **One Feature per file content**: Do NOT put multiple Feature blocks in one content (even with \`---\` separators). One action = one feature = one \`Feature:\` declaration. For multiple related actions (e.g. login + logout), emit separate feature objects with independent name/actionName/content.
+- Every Rule MUST be tagged with one of the four categories (\`前置（狀態）\` / \`前置（參數）\` / \`後置（回應）\` / \`後置（狀態）\`). **Do NOT use legacy @Pre/@Post**.
+- Rule naming follows the strict pattern: \`<Chinese-category> - <Subject> must <single-condition>\` (English description after the Chinese prefix)
+- Each Rule validates exactly ONE thing (atomicity) — if it contains "and" / "且" it must be split
+- Each Rule has at least one Example
+- Boundary conditions must have a matching Example
+- Use the ENGLISH entity name from Entity Mapping (the key), NOT the Chinese \`zh\` display name
+- **VAR system is MANDATORY**: \`>contextKey\` declare in Given, \`$variable\` reference, \`<executionKey\` capture. Hardcoded UUIDs are FORBIDDEN.
+- **\`>contextKey\` naming rules (CRITICAL ⚠️)**:
+  - Use **PascalCase concept name + digit suffix**: \`>List1.id\`, \`>Todo1.id\`, \`>User1.id\`
+  - **Do NOT use table name (plural)**: \`>lists.id\` (❌), \`>todos.id\` (❌), \`>users.id\` (❌)
+  - For multiple entities of the same type, use digits: \`>Product1.id\`, \`>Product2.id\`
+  - Even for a single entity, use the concept name: \`>List1.id\` (not \`>lists.id\`)
+  - \`<executionKey\` name MUST match the subsequent \`$variable\` reference: \`<listId\` → \`$listId\`, \`<list1Id\` → \`$list1Id\`
+- **VAR alignment rules (CRITICAL ⚠️)**:
+  - DataTable header containing \`>contextKey\` → same column's data MUST be \`<executionKey\` (paired capture)
+  - Data containing \`<executionKey\` → same column's header MUST have \`>contextKey\`
+  - Correct: \`| >User.id | name |\` → \`| <userId | "John" |\`
+  - Wrong: \`| >User.id | name |\` → \`| email | "John" |\` (data missing \`<\` prefix)
+  - Wrong: \`| id | name |\` → \`| <userId | "John" |\` (header missing \`>\` prefix)
+  - Entity-setup (\`準備一個\`) DataTable row MUST have at least one non-empty data field — no all-empty rows
+  - **\`>contextKey\`/\`<executionKey\` only appear in Given-setup (\`準備一個\`) and Then-response (\`(STATUS)回應\`)**: \`應該存在一個<Entity>\` DataTable header uses **plain field names** (e.g. \`id\`, \`isCompleted\`), **NO \`>\` prefix**. Correct: \`| id | isCompleted |\` → \`| $todo1Id | true |\`. Wrong: \`| >id | isCompleted |\` (entity assertion doesn't capture variables).
+  - **\`&\` constraint markers (\`&isNull\` / \`&isNotNull\` / \`&isTrue\` / \`&isFalse\`) only appear in Then validation steps**. Given-setup (\`準備一個\`) DataTable MUST NOT use \`&isNull\`. To express "field is empty" → simply omit that header (DB uses DEFAULT or NULL). Wrong: \`| deleted_at |\` → \`| &isNull |\`. Correct: don't include the \`deleted_at\` column.
+- **When MUST have Actor prefix**: \`(No Actor)\` or \`(UID="$var")\`
+- **Then success MUST include HTTP status code**: \`{summary}(201)回應, with table:\`
+- **Then summary MUST exactly match When summary**: if When uses \`Toggle Todo Completion\`, Then also uses \`Toggle Todo Completion(200)回應\` — no abbreviation.
+- **When/Then summary MUST equal Feature.name (HARD RULE)**: every When/Then step's summary in this Feature must exactly equal Feature.name (i.e. actionsYml action.summary). Technical constraint: SpecFormula \`findBySummary\` looks up the OpenAPI operation at the action.summary level only, so When summary ≠ Feature.name causes 100% test failure.
+  - ✅ Correct: Feature.name = \`Create Transaction\` → When (No Actor) Create Transaction, call table: → Then Create Transaction(201)回應
+  - ❌ Wrong: Feature.name = \`Transaction Management\` → When (No Actor) Create Transaction, call table: (summary breaks alignment → findBySummary fails)
+  - For CRUD requirements, do NOT cram them into one Feature. Emit multiple independent Features, each with a Feature.name that's a single specific verb (Create / Query / Update / Delete).
+- **Array response multi-row validation**: List-query Then responses may have multiple rows to validate array elements. Row order = array element order (row 1 = element 0). **Do NOT use \`index\` column** — just use row order. Correct: \`| id | name | \\n | $list1Id | Work | \\n | $list2Id | Life |\`. Wrong: \`| index | name | \\n | 0 | Work |\`
+- **Entity assertion**: use \`應該存在一個\` (not the legacy \`存在一個\`)
+- DataTable naming conventions:
+  - Column headers in camelCase (\`totalAmount\`, \`memberLevel\`)
+  - JSON values wrapped in double quotes: \`[{"productId":"$Product1.id","quantity":2}]\`
+  - Booleans use \`true\`/\`false\`; enum values in original uppercase (\`PENDING\`, \`ACTIVE\`)
+  - No vague descriptions (e.g. "some product", "a few") — use concrete values
+- **FK validation after cascade delete**: if a parent entity (e.g. list) is deleted, child entities' FK (e.g. listId) become null. entity_validate should use \`&isNull\` to validate FK, not the original \`$variable\`. Correct: \`| id | listId |\` → \`| $todo1Id | &isNull |\`. Wrong: \`| $todo1Id | $list1Id |\` (list1Id was deleted, value no longer equals that UUID).
+- **Test data dates MUST use future dates**: due dates, expiration dates, etc. — use \`2099-12-31\` rather than past concrete dates, to avoid handler's time-validation conflicts. Correct: \`| dueDate | 2099-12-31 |\`. Wrong: \`| dueDate | 2025-12-31 |\` (may precede handler's NOW()).
+- **Don't-hallucinate principle**: stick strictly to requirements and clarification decisions; do not add fields or features not explicitly mentioned.
+- **Entity MUST exist in Schema**: the entity name in \`準備一個<Entity>\` and \`應該存在一個<Entity>\` must match a table defined in the Schema (via Entity Mapping). Do NOT invent tables not in Schema (if Schema has no \`sessions\` table, don't write \`準備一個Sessions\`).
+- **DataTable columns MUST exist in Schema**: DataTable header column names (camelCase) must map to actual column names (snake_case) in the corresponding table. Do NOT use columns absent from Schema.
+- **Response validation (Then 回應) DataTable header MUST use plain field names**: header uses camelCase field names (e.g. \`id\`, \`isCompleted\`, \`totalAmount\`). **Do NOT use \`$Var.field\` as header** (e.g. \`$Todo.id\`). \`$variable\` only appears in data row values (referencing previously-declared variables), never as a header. Correct: \`| id | isCompleted |\` → \`| $Todo.id | true |\`. Wrong: \`| $Todo.id | $Todo.isCompleted |\` → \`| true | true |\`.
+- **Entity assertion (\`應該存在一個\`) DataTable MUST include at least one primary-key or unique-identifier column**: header must have at least one \`id\` or queryable column so SpecFormula can locate the exact record with a WHERE. Constraint-only columns (\`&isTrue\`, \`&isNotNull\`) aren't enough — need at least one concrete-value column. Correct: \`| id | isDeleted |\` → \`| $Todo.id | &isTrue |\`. Wrong: \`| isDeleted |\` → \`| &isTrue |\` (no ID → can't query precisely).
 
-## ⚠️ VAR 作用域（關鍵，違反 100% 失敗）
+## ⚠️ VAR Scope (CRITICAL — violations cause 100% failure)
 
-- **VAR 宣告與引用必須在「同一個 Feature 的 Background 或同一個 Scenario」內**。跨 Feature 不共享、跨 Scenario 不共享。
-- **每個 Scenario 獨立重新執行 Background + 自己的步驟**：如果 Scenario A 宣告 \`>Consumer1.id\`，Scenario B 無法引用 \`$Consumer1.id\`（各自獨立 context）。需要在每個 Scenario 的 Background 或 Given 裡重新宣告。
-- **FK 引用鏈必須完整宣告**：如果 \`>Product1.merchantId\` 要引用 \`$Merchant1.userId\`，那本 Feature 的 Background 或 Given 必須**先**有 \`>Merchant1.userId\` 的宣告步驟。不能假設「Merchant 在別的 Feature 有宣告」。
+- **VAR declaration and reference MUST be within the SAME Feature's Background or the SAME Scenario.** No sharing across Features or across Scenarios.
+- **Each Scenario independently re-runs Background + its own steps**: if Scenario A declares \`>Consumer1.id\`, Scenario B CANNOT reference \`$Consumer1.id\` (separate contexts). Each Scenario must re-declare in its Background or Given.
+- **FK reference chains MUST be fully declared**: if \`>Product1.merchantId\` references \`$Merchant1.userId\`, this Feature's Background or Given MUST declare \`>Merchant1.userId\` **first**. Don't assume "Merchant was declared in another Feature".
 
-## ⚠️ 常見致命錯誤（寫完每個 Feature 必自檢，否則 Dry-run 直接炸）
+## ⚠️ Common Fatal Errors (self-check after every Feature, or dry-run breaks)
 
-寫完一個 Feature 後，回頭掃一遍，針對**每一個 \`$xxx\` 引用**執行以下清單：
+After writing a Feature, scan back and run this checklist for **every \`$xxx\` reference**:
 
-1. **本 Feature 內有對應 \`>\` 宣告？** 若沒有 → 引用無效，Dry-run VAR 解析失敗。
-2. **命名完全一致？** \`>Merchant1.userId\` 宣告後只能引用 \`$Merchant1.userId\`（或其 camelCase 壓縮 \`$merchant1UserId\`）。不可亂寫 \`$Merchant1User.id\`（entity 變成 \`Merchant1User\`，field 變成 \`id\`，語義完全不同）。
-3. **複合概念正確拆 entity/field**：「商家的使用者 ID」應該是 \`>Merchant1.userId\`（entity=Merchant1, field=userId）。**禁止**寫成 \`>Merchant1User.id\`（除非 schema 真的有叫 \`merchant1_users\` 的表）。
-4. **entity_setup DataTable 禁用驗證標記**：\`準備一個\` 的 DataTable 禁止出現 \`$notnull\` / \`&isNull\` / \`&isNotNull\`。要「不填某欄位」→ 直接**不放該 header**（讓 DB default 生效）。\`$notnull\` 只能在 \`應該存在一個\` 或 \`(STATUS)回應\` DataTable 出現。
-5. **FK 先行**：若 entity_setup 的 \`>Product1.merchantId\` 欄位值是 \`$Merchant1.userId\` —— 那 \`>Merchant1.userId\` 的 entity_setup 步驟必須**排在此步之前**（Background 或更早的 Given）。否則父記錄還沒建，子記錄 FK 炸。
+1. **Is there a matching \`>\` declaration in this Feature?** If not, the reference is invalid → dry-run VAR resolution fails.
+2. **Is the naming consistent?** After declaring \`>Merchant1.userId\`, only reference with \`$Merchant1.userId\` (or its camelCase compression \`$merchant1UserId\`). Do NOT write \`$Merchant1User.id\` (that means entity=\`Merchant1User\`, field=\`id\` — semantically different).
+3. **Compound concept correctly split into entity/field**: "Merchant's user ID" should be \`>Merchant1.userId\` (entity=Merchant1, field=userId). Do NOT write \`>Merchant1User.id\` unless Schema actually has a \`merchant1_users\` table.
+4. **Entity-setup DataTable must not use validation markers**: \`準備一個\` DataTable forbids \`$notnull\` / \`&isNull\` / \`&isNotNull\`. To skip a field → simply omit the header (DB uses DEFAULT). \`$notnull\` may only appear in \`應該存在一個\` or \`(STATUS)回應\` DataTable.
+5. **FK-first**: if entity-setup's \`>Product1.merchantId\` value is \`$Merchant1.userId\`, the \`>Merchant1.userId\` entity-setup step MUST come **earlier** (Background or earlier Given). Otherwise the parent record doesn't exist yet → child FK fails.
 
-如果自檢發現任一問題，**立刻改正再輸出**。Dry-run 階段沒有第二次機會。
+If the self-check finds any issue, **fix it before outputting**. There's no second chance at dry-run stage.
 
 ## Array 類型參數（如拖曳排序、批次操作）
 
@@ -1257,7 +1294,19 @@ export async function fixMultipleFeatures(
     batch: FeatureFixInput[],
     batchLabel: string
   ): Promise<{ success: boolean; fixedFeatures?: GeneratedFeature[]; updatedSchemaSql?: string; updatedEntityMapping?: string; error?: string }> {
-    const systemPrompt = `你是一位 sdd.os ISA SpecFormula 標準 Gherkin 專家。請根據用戶反饋修正以下 Feature Files。
+    const systemPrompt = `You are an sdd.os ISA SpecFormula standard Gherkin expert. Fix the following Feature Files per user feedback.
+
+## ⚠️ LANGUAGE POLICY (CRITICAL)
+When fixing, **unify language to ENGLISH** for all code-level content:
+- Feature/Rule/Scenario titles → English
+- Entity names in \`準備一個<EntityName>\` / \`應該存在一個<EntityName>\` → English PascalCase (\`Customer\`, \`Store\`, \`MenuItem\`)
+- When summary → English verb phrase matching actionsYml
+- DataTable values → English (e.g. \`John Doe\`, \`Kung Pao Chicken\`, \`pending\`)
+- DataTable headers → camelCase English (\`totalAmount\`, \`customerId\`)
+
+**Keep Chinese (DSL keywords only)**: \`準備一個\` / \`應該存在一個\` / \`應該不存在一個\` / \`現在時間為\` / \`(No Actor)\` / \`(UID="$var")\` / \`(STATUS)回應\` / \`操作失敗\` / Rule category prefix \`前置（狀態）\` / \`前置（參數）\` / \`後置（回應）\` / \`後置（狀態）\`.
+
+If the input contains Chinese entity names or data, **translate them to English** in the output (use Entity Mapping's English key, or reasonable English data values).
 
 ## sdd.os ISA SpecFormula 標準格式規範
 1. 檔案開頭必須有 \`# Action: actionName\`、\`# [METHOD] /path\` 和 \`# Summary:\` 註解
@@ -1458,7 +1507,17 @@ export async function generateDraftBatch(
     .map(item => `Q: ${item.whiteTextQuestion || item.question}\nA: ${item.answer}`)
     .join('\n\n')
 
-  const systemPrompt = `你是一位資深的 BDD 分析師和資料庫架構師。根據 Event Storming 分析結果和需求，一次性產出完整的規格草稿。
+  const systemPrompt = `You are a senior BDD analyst and database architect. Given the Event Storming analysis and requirements, produce a complete spec draft in one pass.
+
+## ⚠️ LANGUAGE POLICY (ALL code-level output MUST be ENGLISH)
+- Feature.name / Feature.description / Rule description / Scenario title / Example title → English
+- Entity name (e.g. \`準備一個Customer\` — \`Customer\` in English PascalCase, not \`顧客\`)
+- Entity Mapping key → English PascalCase (\`entity_to_table_mapping: [{ Customer: customers }]\`)
+- actionsYml summary (matches Feature.name) → English verb phrase (\`Create Order\`, not \`建立訂單\`)
+- DataTable column headers → camelCase English (\`totalAmount\`, \`customerId\`)
+- DataTable data values → English (\`John Doe\`, \`Kung Pao Chicken\`, \`pending\`)
+- SQL Schema → snake_case English identifiers; no Chinese COMMENT
+- **Keep Chinese only for SpecFormula DSL keywords**: \`準備一個\` / \`應該存在一個\` / \`應該不存在一個\` / \`現在時間為\` / \`(No Actor)\` / \`(UID="$var")\` / \`(STATUS)回應\` / \`回應為, with JSON\` / \`操作失敗\` / Rule category prefix \`前置（狀態）\` / \`前置（參數）\` / \`後置（回應）\` / \`後置（狀態）\`
 
 ## 任務
 1. 分析 ES 文檔中所有 clear 的 Commands 和 ReadModels

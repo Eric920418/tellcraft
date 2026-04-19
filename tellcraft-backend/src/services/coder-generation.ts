@@ -263,56 +263,55 @@ export function parseActionsYml(actionsYml: string): {
 // Handler 化 System Prompt（按操作類型拆分，只注入相關的 handler）
 // ============================================================
 
-const BASE_PROMPT = `你是一位 Next.js + PostgreSQL 後端工程師。你的任務是根據 Action 定義和 BDD Feature 規格實作一個純邏輯函數。
+const BASE_PROMPT = `You are a Next.js + PostgreSQL backend engineer. Your task is to implement a pure-logic function based on an Action definition and BDD Feature spec.
 
-## 技術約束
-- import { sql } from '@/lib/db'（@neondatabase/serverless 的 neon SQL tagged template）
-- 函數必須 export + async，回傳型別明確
-- 錯誤處理：驗證失敗時 throw new Error(中文錯誤描述)
-- SQL 必須用 parameterized query（$1, $2...），嚴禁字串拼接
-- ID 欄位用 UUID，日期用 ISO 8601 字串
-- 密碼用 bcryptjs（import bcrypt from 'bcryptjs'），JWT 用 jsonwebtoken
-- 不做認證檢查 — Server Action 層已處理，userId 由呼叫者注入
-- 不要 import 'next/headers' 或操作 cookie
-- ON CONFLICT 用 PostgreSQL 語法（不用 MySQL 的 ON DUPLICATE KEY）
-- 如果測試傳 email 識別使用者：先用 input.userId，沒有再查 users 表
-- **禁止腦補 deleted_at**：只有 Schema DDL 明確定義 deleted_at 欄位時才加 WHERE deleted_at IS NULL。Schema 沒有就不加，否則 SQL 報 "column does not exist"
-- **驗證規則的正確解釋（重要！）**：
-  - 規則「截止日期不可早於建立日期」→ 比較此記錄的 createdAt（新建時 = NOW()），**不是**比較「當前時刻」
-  - 更新操作中必須用已存記錄的 created_at：\`new Date(dueDate) < new Date(existing.created_at)\`
-  - **如果 BDD Feature 的測試數據包含某個日期值（如 2099-12-31），那個值就是合法的。你的驗證不應拒絕它**
-  - 不要自作聰明添加 BDD 規則中沒有提到的驗證（如格式檢查、長度上限、日期是否過去等）
-- **複合主鍵表（多對多 junction table）**：
-  - 偵測：欄位清單若標示「⚠️ 複合主鍵表」，該表**沒有 id 欄位**
-  - WHERE/UPDATE/DELETE 必須用複合主鍵：
-    錯誤 ❌：\`sql\\\`DELETE FROM todo_tags WHERE id = \\\${tagId}\\\`\`
-    正確 ✅：\`sql\\\`DELETE FROM todo_tags WHERE todo_id = \\\${todoId} AND tag_id = \\\${tagId}\\\`\`
-  - INSERT 也不需要 id 欄位：\`sql\\\`INSERT INTO todo_tags (todo_id, tag_id) VALUES (\\\${a}, \\\${b})\\\`\`
-  - 禁止對複合主鍵表使用 RETURNING id（沒有 id）；用 RETURNING * 或具體欄位
+## ⚠️ LANGUAGE POLICY (MUST)
+- ALL generated TypeScript code (error messages, variable names, comments) MUST be in **ENGLISH**
+- \`throw new Error('<message>')\` — message MUST be English (e.g. \`'Customer not found'\`, \`'Unsupported operation'\`)
+- Comments MUST be English
+- Variable names MUST be English camelCase
+- BDD step summaries in \`_stepSummary\` dispatch come from Feature's When summary (which is now English) — use the exact summary string verbatim
 
-## 子操作派發
+## Technical Constraints
+- \`import { sql } from '@/lib/db'\` (@neondatabase/serverless's neon SQL tagged template)
+- Functions MUST be exported + async, with explicit return types
+- Error handling: on validation failure, \`throw new Error('<english message>')\`
+- SQL MUST use parameterized queries (\`\${var}\` interpolation), NEVER string concatenation
+- ID fields use UUID; dates use ISO 8601 strings
+- Passwords use bcryptjs (\`import bcrypt from 'bcryptjs'\`); JWT uses \`jsonwebtoken\`
+- No auth checks — the Server Action layer handles that; userId is injected by the caller
+- Do NOT \`import 'next/headers'\` or manipulate cookies
+- Use PostgreSQL \`ON CONFLICT\` syntax (not MySQL \`ON DUPLICATE KEY\`)
+- If a test passes email to identify a user: try \`input.userId\` first, else query the \`users\` table
+- **Don't hallucinate \`deleted_at\`**: only add \`WHERE deleted_at IS NULL\` when the Schema DDL explicitly defines \`deleted_at\`. If Schema doesn't have it, don't add — otherwise SQL reports "column does not exist".
+- **Correct interpretation of validation rules (IMPORTANT)**:
+  - Rule "due date cannot be earlier than creation date" → compare this record's \`createdAt\` (= NOW() at creation), **NOT** the current moment
+  - In update operations, use the existing record's \`created_at\`: \`new Date(dueDate) < new Date(existing.created_at)\`
+  - **If a BDD Feature's test data contains a specific date value (e.g. 2099-12-31), that value is valid — your validation must not reject it**
+  - Don't be clever and add validations not stated in BDD rules (format check, length cap, past-date check, etc.)
+- **Composite primary key tables (many-to-many junction tables)**:
+  - Detection: if the column list is tagged \`⚠️ Composite PK Table\`, the table **has no \`id\` column**
+  - WHERE/UPDATE/DELETE MUST use the composite primary key:
+    Wrong ❌: \`sql\\\`DELETE FROM todo_tags WHERE id = \\\${tagId}\\\`\`
+    Correct ✅: \`sql\\\`DELETE FROM todo_tags WHERE todo_id = \\\${todoId} AND tag_id = \\\${tagId}\\\`\`
+  - INSERT also doesn't need \`id\`: \`sql\\\`INSERT INTO todo_tags (todo_id, tag_id) VALUES (\\\${a}, \\\${b})\\\`\`
+  - Do NOT use \`RETURNING id\` on composite-PK tables (no id column); use \`RETURNING *\` or explicit columns
+
+## Sub-operation Dispatch
 \`\`\`typescript
 const op = input._stepSummary || ''
-if (op === '建立待辦事項') { /* 子操作 1 */ }
-else if (op === '更新待辦事項') { /* 子操作 2 */ }
-else { throw new Error('不支援的操作') }
+if (op === 'Create Todo') { /* sub-op 1 */ }
+else if (op === 'Update Todo') { /* sub-op 2 */ }
+else { throw new Error('Unsupported operation') }
 \`\`\`
-用 BDD Feature 的 When 步驟 summary **精確完整文字**作為 === 條件（不是 includes，防止子字串碰撞）。
+Use the **exact verbatim text** of the Feature's When step summary as the \`===\` condition (not \`includes\`, to prevent substring collisions).
 
-## 日期欄位
+## Date Fields
 DATE → \`row.x instanceof Date ? row.x.toISOString().split('T')[0] : row.x\`
 TIMESTAMP → \`row.x instanceof Date ? row.x.toISOString() : row.x\`
 
-## 複合主鍵表（多對多 junction table）
-- 偵測：欄位清單若標示「⚠️ 複合主鍵表」，該表**沒有 id 欄位**
-- WHERE/UPDATE/DELETE 必須用複合主鍵的所有欄位：
-  ❌ 錯誤：\`sql\\\`DELETE FROM todo_tags WHERE id = \${tagId}\\\`\`
-  ✅ 正確：\`sql\\\`DELETE FROM todo_tags WHERE todo_id = \${todoId} AND tag_id = \${tagId}\\\`\`
-- INSERT 不需要 id：\`sql\\\`INSERT INTO todo_tags (todo_id, tag_id) VALUES (\${a}, \${b})\\\`\`
-- 禁止對複合主鍵表使用 \`RETURNING id\`（沒有 id 欄位）；用 \`RETURNING *\` 或具體欄位
-
-## 輸出
-只輸出 TypeScript 代碼，不要任何解釋或 markdown 包裹。`
+## Output
+Output TypeScript code ONLY — no explanations, no markdown wrappers.`
 
 // ============================================================
 // Handler SOP 內容已抽離到 services/coder-handlers/*.md（PR2 — 按需注入技能索引）
@@ -1157,7 +1156,7 @@ ${subOp.requiredResponseFields.map(f => `- ${f}`).join('\n') || '（無特定欄
 
 只輸出 JSON：`
 
-  const systemPrompt = '你是一個結構化資料提取專家。從 BDD Feature 和 SQL Schema 中提取精確的 JSON 槽位。'
+  const systemPrompt = 'You are a structured-data extraction expert. Extract precise JSON slot values from the BDD Feature and SQL Schema. Output JSON only (no prose).'
 
   // 第一次嘗試（Structured Output 保證 JSON 合規 + Zod 驗證）
   const result1 = await callStructured({
@@ -1350,7 +1349,8 @@ function removeAuthChecks(code: string): string {
   // Pattern 2: if (!userId) throw/return ...
   code = code.replace(/if\s*\(\s*!(?:input\.)?userId\s*\)\s*(?:throw|return)[^\n]*/g, '')
   // Pattern 3: 包含 auth 相關的 throw 語句（完整模式）
-  code = code.replace(/if\s*\([^)]*\)\s*\{?\s*throw\s+new\s+Error\s*\(\s*['"`][^'"`]*(?:必須已登入|認證|已過期|unauthorized|must.*log|未登入|操作者必須|認證憑證無效|token.*(?:invalid|expired)|session.*(?:invalid|expired))[^'"`]*['"`]\s*\)\s*\}?/gi, '')
+  // 中英文 keyword 並存：舊 conversation 可能留中文 auth 訊息，新生成以英文為主
+  code = code.replace(/if\s*\([^)]*\)\s*\{?\s*throw\s+new\s+Error\s*\(\s*['"`][^'"`]*(?:必須已登入|認證|已過期|unauthorized|must.*log|未登入|操作者必須|認證憑證無效|token.*(?:invalid|expired)|session.*(?:invalid|expired)|authentication required|not authenticated|not logged in|login required|must be logged in|permission denied|forbidden|user id (?:is )?(?:required|missing))[^'"`]*['"`]\s*\)\s*\}?/gi, '')
   // Pattern 4: token/session 驗證的 if block
   code = code.replace(/if\s*\(\s*!(?:input\.)?(?:token|session|authToken)\s*\)\s*\{[^}]*(?:throw|return)[^}]*\}/g, '')
   code = code.replace(/if\s*\(\s*!(?:input\.)?(?:token|session|authToken)\s*\)\s*(?:throw|return)[^\n]*/g, '')
@@ -2153,7 +2153,12 @@ function extractComponentSummary(content: string): string {
   return summary
 }
 
-const MOCK_IDENTIFICATION_SYSTEM_PROMPT = `你是前端代碼分析專家。判斷 React 組件中是否包含「需要替換為 Server Action 呼叫的 mock/硬編碼業務資料」。
+const MOCK_IDENTIFICATION_SYSTEM_PROMPT = `You are a frontend code analysis expert. Determine whether a React component contains mock/hardcoded business data that needs to be replaced with Server Action calls.
+
+## ⚠️ LANGUAGE POLICY
+Your JSON output (reason field, etc.) MUST be in ENGLISH. Do not output Chinese.
+
+你是前端代碼分析專家。判斷 React 組件中是否包含「需要替換為 Server Action 呼叫的 mock/硬編碼業務資料」。
 
 ## 需要改寫（標記）
 - useState 初始化為硬編碼的業務資料陣列（如產品列表、訂單列表、用戶資料、節目列表）
@@ -2287,7 +2292,16 @@ export async function identifyMockDataComponents(
 // ============================================================
 
 function buildRewriteSystemPrompt(): CacheableSystemPrompt {
-  return buildCacheableSystem(`你是一位 Next.js 前端工程師。你的任務是改寫一個 React 組件，將 mock 數據替換為 Server Action 調用。
+  return buildCacheableSystem(`You are a Next.js frontend engineer. Your task is to rewrite a React component, replacing mock data with Server Action calls.
+
+## ⚠️ LANGUAGE POLICY
+All generated code (error messages, comments, state labels) MUST be in ENGLISH.
+- \`throw new Error('<english>')\` / \`catch (e) { setError('<english>') }\`
+- Comments in English
+- Variable names in English camelCase
+- Loading text, error text: use existing UI text (keep if already Chinese — those are user-facing), but any NEW strings you introduce default to English
+
+你是一位 Next.js 前端工程師。你的任務是改寫一個 React 組件，將 mock 數據替換為 Server Action 調用。
 
 ## 改寫規則
 1. 保留所有 UI 結構、樣式（Tailwind class）、動畫（motion/react）不變
@@ -3430,13 +3444,15 @@ const STANDARD_SUMMARIES = {
   delete: '刪除資料',
 } as const
 
-const LIST_KEYWORDS = ['列表', '全部']
-const QUERY_KEYWORDS = ['查詢', '詳情', '取得']
-const CREATE_KEYWORDS = ['建立', '新增', '註冊', '加入', '添加']
-const UPDATE_KEYWORDS = ['更新', '修改', '編輯', '重命名', '變更', '設定']
-const DELETE_KEYWORDS = ['刪除', '移除']
-const TOGGLE_KEYWORDS = ['切換', 'toggle']
-const RESTORE_KEYWORDS = ['復原', '恢復', 'restore', '取消刪除', '取消軟刪除']
+// Keyword lists — both Chinese (legacy / backward compat) and English (new standard).
+// 匹配使用 includes() 會對英文單詞做子字串比對，所以英文 keyword 用帶空白或 PascalCase 的完整詞
+const LIST_KEYWORDS = ['列表', '全部', 'List ', 'list ', ' all ', 'All ']
+const QUERY_KEYWORDS = ['查詢', '詳情', '取得', 'Query', 'query', 'Get ', 'get ', 'Fetch', 'fetch', 'Search', 'search', 'View', 'view ']
+const CREATE_KEYWORDS = ['建立', '新增', '註冊', '加入', '添加', 'Create', 'create ', 'Add ', 'add ', 'Register', 'register', 'Insert', 'insert']
+const UPDATE_KEYWORDS = ['更新', '修改', '編輯', '重命名', '變更', '設定', 'Update', 'update', 'Edit', 'edit', 'Modify', 'modify', 'Change', 'change', 'Rename', 'rename', 'Set ', 'set ']
+const DELETE_KEYWORDS = ['刪除', '移除', 'Delete', 'delete', 'Remove', 'remove', 'Destroy', 'destroy']
+const TOGGLE_KEYWORDS = ['切換', 'toggle', 'Toggle']
+const RESTORE_KEYWORDS = ['復原', '恢復', 'restore', 'Restore', 'Recover', 'recover', '取消刪除', '取消軟刪除']
 
 /** 從呼叫上下文提取完整的參數物件內容（brace matching） */
 function extractCallParams(content: string, callStart: number): { params: Set<string>; fullCallEnd: number } {
@@ -4182,7 +4198,8 @@ export type FailureRootCause =
  */
 function detectSpecInconsistency(error: string, scenarioName?: string): boolean {
   if (!scenarioName) return false
-  const nullIntentInName = /應變為\s*null|應為\s*null|應清空|應清除|become\s*null|should\s+be\s+null/i.test(scenarioName)
+  // 中英文 null-intent 並存
+  const nullIntentInName = /應變為\s*null|應為\s*null|應清空|應清除|become\s*null|should\s+be\s+null|set\s+to\s+null|become\s+empty|clear(?:ed)?|unset|reset\s+to\s+null|nullified/i.test(scenarioName)
   if (!nullIntentInName) return false
 
   // error 格式: [entity.field] expect: [X], actual: [Y]
@@ -4227,7 +4244,7 @@ export function classifyFailureRootCause(error: string, scenarioName?: string): 
   }
 
   // VAR resolution failure（Feature 問題，不要修代碼）
-  if (e.includes('var 解析失敗') || e.includes('無法解析')) {
+  if (e.includes('var 解析失敗') || e.includes('無法解析') || e.includes('cannot resolve') || e.includes('failed to resolve var') || e.includes('variable not declared')) {
     return 'var_resolution'
   }
 
@@ -4237,12 +4254,19 @@ export function classifyFailureRootCause(error: string, scenarioName?: string): 
   }
 
   // wrong status
-  if (e.includes('http 狀態碼不匹配') || e.includes('status code') || /預期\s*\d+/.test(e)) {
+  if (e.includes('http 狀態碼不匹配') || e.includes('status code') || /預期\s*\d+/.test(e) || /expected\s+\d{3}/i.test(e) || e.includes('status mismatch')) {
     return 'wrong_status'
   }
 
   // field naming
-  if (e.includes('值不匹配') || (e.includes('欄位') && e.includes('不存在')) || (e.includes('field') && e.includes('not found'))) {
+  if (
+    e.includes('值不匹配') ||
+    (e.includes('欄位') && e.includes('不存在')) ||
+    (e.includes('field') && e.includes('not found')) ||
+    e.includes('value mismatch') ||
+    (e.includes('column') && e.includes('not found in response')) ||
+    /response.*field.*(missing|mismatch)/i.test(e)
+  ) {
     return 'field_naming'
   }
 

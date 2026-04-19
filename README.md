@@ -1231,7 +1231,7 @@ psql "$DATABASE_URL" -f tellcraft-backend/migrations/xxx.sql
 - **列表查詢指引**：`buildRewriteSystemPrompt()` 加強列表查詢指引，告知改寫 LLM 傳合理預設值
 
 **BDD Feature 後置驗證**：
-- **`sanitizeFeatureContent()`**：零 LLM 自動修正 — `回應, with JSON:` → `回應, with table:`、`回應為, with JSON:` → `回應, with table:`、entity_validate header `>id` → `id`
+- **`sanitizeFeatureContent()`**：零 LLM 自動修正 — `回應, with JSON:` → `回應, with table:`、`回應為, with JSON:` → `回應, with table:`、entity_validate header `>id` → `id`、entity 花括號剝除 `準備一個{顧客}` → `準備一個顧客`（規則 4；LLM 偶爾照抄 prompt 模板 `{entity}` 佔位符 → SpecFormula regex 字元類不含 `{}` → matchStepToInstruction 100% 失敗；單元測試 `sanitize-feature-content.test.ts` 覆蓋 6 個 case）
 - **formulation prompt 強化**：明確禁止 entity_validate 使用 `>contextKey`；`>contextKey`/`<executionKey` 只用於 Given 準備和 Then 回應
 
 ### LangGraph.js 狀態機遷移 + Fix Loop 根治 + SpecFormula 完善（2026-04-08 ~ 2026-04-12）

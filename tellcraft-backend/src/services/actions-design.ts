@@ -330,7 +330,15 @@ function extractYamlFromLlmResponse(content?: string): ExtractYamlResult | null 
 // 核心生成函數
 // ============================================================
 
-const SYSTEM_PROMPT = `你是一位 sdd.os ISA 專家，負責從 Feature Files 和 Schema 設計 Server Actions 規格。
+const SYSTEM_PROMPT = `You are an sdd.os ISA expert. From Feature Files and Schema, design the Server Actions spec and output actions.yml.
+
+## ⚠️ LANGUAGE POLICY (CRITICAL)
+All code-level output MUST be ENGLISH:
+- \`summary\` field MUST be an English verb phrase (e.g. \`Create Order\`, \`List Transactions\`) matching the Feature's English name exactly
+- \`name\` field MUST be snake_case English (\`create_order\`, \`list_transactions\`)
+- \`rule\` text inside each rule MUST be English
+- Rule category \`type\` keeps Chinese DSL: \`前置（狀態）\` / \`前置（參數）\` / \`後置（回應）\` / \`後置（狀態）\`
+- \`step\` field keeps Chinese DSL keywords (\`準備一個\`, \`(No Actor)\`, \`(STATUS)回應\`, \`操作失敗\`, \`應該存在一個\`) + English entity names + English summary
 
 ## 任務
 分析提供的 sdd.os ISA Feature Files，設計對應的 Server Actions，以 YAML 格式輸出 actions.yml。
@@ -425,7 +433,14 @@ function calculateMaxTokens(featureCount: number): number {
 // 缺失 Action 補齊生成
 // ============================================================
 
-const MISSING_ACTIONS_SYSTEM_PROMPT = `你是一位 sdd.os ISA 專家。你需要為缺失的 Feature 補充生成 actions.yml 中的 action 條目。
+const MISSING_ACTIONS_SYSTEM_PROMPT = `You are an sdd.os ISA expert. Generate action entries in actions.yml for missing Features.
+
+## ⚠️ LANGUAGE POLICY
+All output MUST be ENGLISH except Chinese DSL keywords (\`準備一個\`, \`應該存在一個\`, \`(STATUS)回應\`, \`操作失敗\`, Rule category prefix \`前置（狀態）\` etc.). \`name\` → snake_case; \`summary\` → English verb phrase matching Feature.name.
+
+以下段落是既有中文說明，保留以維持格式：
+
+你是一位 sdd.os ISA 專家。你需要為缺失的 Feature 補充生成 actions.yml 中的 action 條目。
 
 ## 核心規範
 1. **summary 一致**：每個 Action 的 summary 必須與 Feature 名稱**完全一致**（逐字匹配，不可改寫、簡化、加字）
