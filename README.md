@@ -1234,6 +1234,26 @@ psql "$DATABASE_URL" -f tellcraft-backend/migrations/xxx.sql
 - **`sanitizeFeatureContent()`**：零 LLM 自動修正 — `回應, with JSON:` → `回應, with table:`、`回應為, with JSON:` → `回應, with table:`、entity_validate header `>id` → `id`、entity 花括號剝除 `準備一個{顧客}` → `準備一個顧客`（規則 4；LLM 偶爾照抄 prompt 模板 `{entity}` 佔位符 → SpecFormula regex 字元類不含 `{}` → matchStepToInstruction 100% 失敗；單元測試 `sanitize-feature-content.test.ts` 覆蓋 6 個 case）
 - **formulation prompt 強化**：明確禁止 entity_validate 使用 `>contextKey`；`>contextKey`/`<executionKey` 只用於 Given 準備和 Then 回應
 
+### L15 VAR 對齊 + L16 Neon Schema Drift（2026-04-19）
+
+上承 L14，**解決 user 診斷的 BDD→Coder pipeline 剩餘 85% 失敗根因**（VAR 對齊 ~50% + DB drift ~35%，中英命名只佔 ~15% 已由 L13/L14 處理）。
+
+**L15 VAR 宣告/引用對齊**（`feature-alignment-gate.ts`）：
+- **P0 Check 5 強化**：既有邏輯只抓「case 大小寫不一致」，**漏掉「完全未宣告」case**（Background 根本沒 `>Store1.id` → 所有 `$Store.id` 引用靜默放過）。新增第二層偵測：引用無法解析且非系統常數（`$notnull` / `$null` / `&isNull` / `&isNotNull`）→ 報 error + 精確修復提示（`在 Background 補上 >Store1.id 搭配 <store1Id`），讓 fix LLM prompt 有方向。單元測試 `feature-alignment-gate-var.test.ts` 7 case
+- **P1 schema-aware 修復範本**：`buildUndeclaredVarRepairHint()` 對未宣告變數查 `DatabaseSchema.findByEntityName()` 拿到 table + 必要欄位（排除 id/created_at/updated_at/deleted_at）→ 產出可複製的 Background 補宣告模板（`準備一個Store, with table: | >Store1.id | name | address |`），注入 `fixMultipleFeatures` issue hint → LLM 不用自己推 entity→table→required cols 映射。Entity 不在 Schema 時提示需先補 Mapping。單元測試 `feature-alignment-schema-hint.test.ts` 7 case
+
+**L16 Neon DB Schema Drift Tier 1**（`neon-service.ts` + `coder-phases.ts`）：
+- **P0.1 Partial state 清淨**：`provisionNeonDatabase` 所有失敗路徑（DDL 失敗 / catch 全 error）統一呼叫新 helper `clearNeonFieldsInDb()` 清掉 `neon_project_id` / `neon_connection_string` / `neon_host`。同時入口檢查舊 Neon project → 存在則先刪 + 清欄位再建新（規避 regenerate 孤兒）
+- **P1 DDL 5min timeout**：`executeDDL()` 的 `client.query()` 用 `Promise.race` 加 `DDL_TIMEOUT_MS = 5min`，防 Neon 端長查詢卡住整個 30min `completeSpecPhase`
+- **P0.2 Pre-flight schema check**：新 helper `ensureNeonSchemaFresh()` 在 Coder Testing（RED Phase Stub + Routing）前 `SELECT FROM information_schema.tables` 比對 DDL 要求的所有 table，缺表自動清 + re-provision。兩個 RED Phase 共用同一次 check 結果避免重複查詢。Fail-open（info_schema 查詢失敗 → 視為無缺表，讓下游測試炸時再處理）。新 helper `extractTableNamesFromDDL()` + 單元測試 `neon-schema-check.test.ts` 8 case
+
+**預期效果（user 診斷基線）**：
+- L15 解 VAR 對齊 failure（~50%）→ pipeline 失敗率應降到 <10%
+- L16 解 DB drift failure（~35%）→ regenerate 後 Coder Testing 不再看到 `"inventory table does not exist"` 類錯誤
+- 剩 <10% 為複雜 FK 依賴鏈 / 需求曖昧等 LLM 品質問題，留給後續觀察 `skill_telemetry` 再決定要不要做更強 prompt 自檢或拆小 schema
+
+**測試**：54 test files / 1412 tests 全綠；typecheck clean。
+
 ### L14 英文化 P0 補漏 + 結構性補強（2026-04-19）
 
 上承 L13（`e4d118bb`）BDD/Coder 產物英文化，L14 修補 L13 遺漏範圍並強化測試/重構：

@@ -17,6 +17,8 @@ import { runFormulation, generateDraftBatch, sanitizeFeatureContent, type Formul
 import type { ClarifyItem } from '../../services/bdd-session'
 import { createLogger } from '../../lib/logger'
 import { sanitizeForPreview } from '../../services/code-verify'
+import { ensureNeonSchemaFresh } from '../../services/neon-service'
+import { deriveSchemaFromBdd } from '../../services/schema-derivation'
 
 const logger = createLogger('coder-phases')
 
@@ -185,16 +187,41 @@ export async function executeCoderSkill(input: CoderSkillInput): Promise<void> {
   }
 
   // 6. RED Phase Stub — 全場景 SpecFormula 驗證（用 StubHttpAdapter 跑完整場景）
+  // L16.P0.2：先用 ensureNeonSchemaFresh 做 pre-flight schema check
+  //   - schema 不齊（regenerate 場景）→ 自動 re-provision，避免後續測試炸 "table does not exist"
+  //   - schema 齊全 → 直接用現有 connection
+  let neonConnectionString: string | null = null
   if (bddSession.features_content && bddSession.features_content.length > 0
       && bddSession.open_api_spec_content && bddSession.isa_config_content) {
     try {
-      // 查詢 Neon 連線字串
-      const project = await db.queryOne<{ neon_connection_string: string | null }>(
-        `SELECT neon_connection_string FROM projects WHERE id = $1`,
-        [projectId]
+      const derivedSchema = deriveSchemaFromBdd(
+        bddSession.schema_sql_content,
+        bddSession.entity_mapping_content || ''
       )
+      const schemaCheck = await ensureNeonSchemaFresh({
+        projectId,
+        projectName: `tc-${projectId.slice(0, 8)}`,
+        schema: derivedSchema,
+        conversationId,
+        io,
+        locale: state.locale,
+      })
+      neonConnectionString = schemaCheck.connectionString
 
-      if (project?.neon_connection_string) {
+      if (schemaCheck.reprovisioned && schemaCheck.missingTables && schemaCheck.missingTables.length > 0) {
+        logger.warn({
+          projectId,
+          missingTables: schemaCheck.missingTables,
+        }, 'Neon schema drift — 已自動重建 DB')
+        await sendMessage(conversationId, io, {
+          content: isChinese
+            ? `⚠ 偵測到資料庫 schema 不一致（缺 ${schemaCheck.missingTables.length} 張表），已自動重建 DB。`
+            : `⚠ Database schema drift detected (missing ${schemaCheck.missingTables.length} table(s)), DB auto-rebuilt.`,
+          stage: 'coder_generating',
+        })
+      }
+
+      if (neonConnectionString) {
         const stubResult = await runRedPhaseFullValidation({
           features: bddSession.features_content,
           actionsYml: bddSession.actions_yml_content,
@@ -202,7 +229,7 @@ export async function executeCoderSkill(input: CoderSkillInput): Promise<void> {
           isaConfigYml: bddSession.isa_config_content,
           schemaSql: bddSession.schema_sql_content,
           entityMapping: bddSession.entity_mapping_content || '',
-          neonConnectionString: project.neon_connection_string,
+          neonConnectionString,
         })
 
         // 更新 FlowState
@@ -241,14 +268,12 @@ export async function executeCoderSkill(input: CoderSkillInput): Promise<void> {
   }
 
   // 6.5 RED Phase Routing — 路由匹配驗證（in-process Express + SupertestAdapter）
+  // 重用 section 6 的 neonConnectionString（已經過 schema drift check + 可能 re-provision），
+  // 避免重複查詢 projects 表 + 重複 information_schema check。
   if (bddSession.features_content && bddSession.features_content.length > 0
       && bddSession.open_api_spec_content && bddSession.isa_config_content) {
     try {
-      const project = await db.queryOne<{ neon_connection_string: string | null }>(
-        `SELECT neon_connection_string FROM projects WHERE id = $1`, [projectId]
-      )
-
-      if (project?.neon_connection_string) {
+      if (neonConnectionString) {
         const routingResult = await runRedPhaseRoutingValidation({
           features: bddSession.features_content,
           actionsYml: bddSession.actions_yml_content,
@@ -256,7 +281,7 @@ export async function executeCoderSkill(input: CoderSkillInput): Promise<void> {
           isaConfigYml: bddSession.isa_config_content,
           schemaSql: bddSession.schema_sql_content,
           entityMapping: bddSession.entity_mapping_content || '',
-          neonConnectionString: project.neon_connection_string,
+          neonConnectionString,
         })
 
         if (!routingResult.passed && routingResult.routingMismatches.length > 0) {
