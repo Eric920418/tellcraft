@@ -2972,6 +2972,103 @@ export async function completeSpecPhase(
   }
 
   // ============================================================
+  // L18.P0: Feature Alignment Gate（前置到 Formulation phase）
+  // 上承 L17：原 Gate 只在 Coder pipeline 跑，L1-L6 的 Formulation 驗證層
+  // 無 VAR 宣告檢查（Scenario 步驟文字的 $X.id 是否有 Background >X1.id）。
+  // 這個盲點讓壞 Feature 穿過 L1-L6 寫入 DB，直到 Coder 階段才被攔下。
+  // L18 把 Gate 前移：Feature 保存到 DB 前 → Check 5 + Check 8 + deterministic 補宣告
+  // 結果：Feature 進 Dry-Run 和 Coder 時已乾淨，Coder 階段的 Gate 變成冪等驗證。
+  // ============================================================
+  if (features.length > 0 && generatedActionsYml) {
+    try {
+      const { runFeatureAlignmentGate } = await import('../../services/feature-alignment-gate')
+      const gateResult = await runFeatureAlignmentGate({
+        features,
+        actionsYml: generatedActionsYml,
+        schemaSql,
+        entityMapping,
+        trackingContext,
+      })
+
+      if (gateResult.fixedFeatures || gateResult.fixedSchemaSql || gateResult.fixedEntityMapping) {
+        // 修復後寫回 DB 供 Dry-Run / Coder 共用
+        if (gateResult.fixedFeatures) {
+          // 同步更新 local features 陣列（後續 dry-run 用）
+          for (let i = 0; i < features.length; i++) {
+            const fixed = gateResult.fixedFeatures.find(f => f.actionName === features[i].actionName)
+            if (fixed) features[i] = { ...features[i], content: fixed.content }
+          }
+          await updateBddSession({
+            sessionId: state.sessionId!,
+            updates: { featuresContent: features },
+          })
+        }
+        if (gateResult.fixedSchemaSql || gateResult.fixedEntityMapping) {
+          const schemaUpdates: Record<string, string> = {}
+          if (gateResult.fixedSchemaSql) schemaUpdates.schemaSqlContent = gateResult.fixedSchemaSql
+          if (gateResult.fixedEntityMapping) schemaUpdates.entityMappingContent = gateResult.fixedEntityMapping
+          await updateBddSession({ sessionId: state.sessionId!, updates: schemaUpdates })
+        }
+        logger.info({
+          fixedIssueCount: gateResult.fixedIssueCount,
+          schemaUpdated: !!gateResult.fixedSchemaSql,
+          mappingUpdated: !!gateResult.fixedEntityMapping,
+        }, 'Formulation Alignment Gate: 已修復並更新 DB')
+      }
+
+      if (gateResult.blocked) {
+        // Gate 阻塞：Feature 有結構性問題無法自動修 → 不進 Dry-Run / 不 spec_completed
+        // 告知用戶原因 + 引導 regenerate，避免讓壞 Feature 被保存走到 Coder
+        const isChinese = state.locale !== 'en'
+        logger.warn({
+          blockMessage: gateResult.blockMessage,
+          remainingIssueCount: gateResult.remainingIssueCount,
+        }, 'Formulation Alignment Gate: 阻塞 — Feature 無法自動修復')
+        await sendMessage(conversationId, io, {
+          content: (isChinese ? '⚠ Feature 規格有無法自動修復的問題：\n\n' : '⚠ Feature spec has unfixable issues:\n\n')
+            + (gateResult.blockMessage || '')
+            + (isChinese
+              ? '\n\n建議重新生成 Features，或回報此錯誤。'
+              : '\n\nPlease regenerate Features or report this error.'),
+          stage: 'spec_alignment_blocked',
+          quickReplies: [
+            { label: isChinese ? '重新生成 Features' : 'Regenerate Features', value: '__regenerate_features__', style: 'primary' as const },
+          ],
+        })
+        return
+      }
+
+      if (gateResult.fixedIssueCount > 0) {
+        const isChinese = state.locale !== 'en'
+        await sendMessage(conversationId, io, {
+          content: isChinese
+            ? `✓ Feature 對齊閘門：已自動修復 ${gateResult.fixedIssueCount} 個規格問題（${gateResult.durationMs}ms）`
+            : `✓ Feature Alignment Gate: auto-fixed ${gateResult.fixedIssueCount} spec issue(s) (${gateResult.durationMs}ms)`,
+          stage: 'spec_alignment_fixed',
+        })
+      } else {
+        logger.info({ durationMs: gateResult.durationMs }, 'Formulation Alignment Gate: 通過（無需修復）')
+      }
+    } catch (err) {
+      // L18 重要決策：Gate 執行失敗時**阻塞**，跟 L17.P0.1 一致
+      // spec 驗證層 fail-open 是災難；寧可阻塞讓用戶看到錯誤，也不要靜默放行
+      const errMsg = err instanceof Error ? err.message : String(err)
+      const isChinese = state.locale !== 'en'
+      logger.error({ err, errMsg }, 'Formulation Alignment Gate 執行失敗 — 阻塞（避免壞 Feature 保存到 DB）')
+      await sendMessage(conversationId, io, {
+        content: isChinese
+          ? `⚠ Feature 對齊檢查執行失敗（${errMsg}），已阻塞以避免保存錯誤規格。請重新生成 Features 後重試。`
+          : `⚠ Feature alignment check crashed (${errMsg}). Blocked to avoid saving bad spec. Please regenerate Features and retry.`,
+        stage: 'spec_alignment_blocked',
+        quickReplies: [
+          { label: isChinese ? '重新生成 Features' : 'Regenerate Features', value: '__regenerate_features__', style: 'primary' as const },
+        ],
+      })
+      return
+    }
+  }
+
+  // ============================================================
   // Step 5/5: Feature Dry-Run（entity_setup 對真實 DB 驗證）
   // 在 Neon DB 建好後、spec_completed 之前執行
   // ============================================================

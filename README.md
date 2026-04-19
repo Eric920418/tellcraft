@@ -1234,6 +1234,34 @@ psql "$DATABASE_URL" -f tellcraft-backend/migrations/xxx.sql
 - **`sanitizeFeatureContent()`**：零 LLM 自動修正 — `回應, with JSON:` → `回應, with table:`、`回應為, with JSON:` → `回應, with table:`、entity_validate header `>id` → `id`、entity 花括號剝除 `準備一個{顧客}` → `準備一個顧客`（規則 4；LLM 偶爾照抄 prompt 模板 `{entity}` 佔位符 → SpecFormula regex 字元類不含 `{}` → matchStepToInstruction 100% 失敗；單元測試 `sanitize-feature-content.test.ts` 覆蓋 6 個 case）
 - **formulation prompt 強化**：明確禁止 entity_validate 使用 `>contextKey`；`>contextKey`/`<executionKey` 只用於 Given 準備和 Then 回應
 
+### L18 Alignment Gate 前移 Formulation 階段（2026-04-19）
+
+補 L1-L12 的結構性盲點：**L1-L6（BDD Formulation 驗證層）只檢查 Gherkin 格式 + Schema 對齊，不掃 Scenario 步驟文字裡 `$variable` 引用是否在 Background 有 `>` 宣告**。今天實測的 bug 就是從這個盲點穿過：
+
+- LLM 生成 Feature，Scenario 寫 `When (UID="$Customer.id") ..., call table: | storeId | $Store.id |`
+- Background 只宣告了 `>Customer1.id`，沒 `>Store1.id`
+- **L1-L6 全部放行**（只驗 DataTable header/data 形式對齊、不掃 Scenario 步驟文字）
+- L6 Dry-Run 只執行 entity_setup + entity_validate，跳過 api_call → `When` 裡的 `$Store.id` 不會被驗證
+- 壞 Feature 寫進 `bdd_sessions.features_content` → 用戶點 Coder 才在 L15 Alignment Gate 抓到，但已浪費大量 BDD phase 時間
+
+**L18.P0 修復**（`bdd-phases.ts:2974-3074` `completeSpecPhase`）：
+- 在 Neon provisioning 之後、Feature Dry-Run 之前**前置呼叫 `runFeatureAlignmentGate`**
+- 此時已有 `features` + `generatedActionsYml` + `schemaSql` + `entityMapping`，Gate 能完整跑 Check 1-8
+- Gate 修復後的 Features / Schema / EntityMapping **寫回 `bdd_sessions`**，供後續 Dry-Run 和 Coder pipeline 共用（冪等）
+- `blocked` → 阻塞流程，顯示 `__regenerate_features__` 逃生按鈕；不進 Dry-Run、不 spec_completed
+- Gate 本身 throw → 同樣**阻塞**（跟 L17.P0.1 策略一致：spec 驗證層 fail-open 是災難）
+- 修復通過 → 顯示 `✓ Feature 對齊閘門：已自動修復 N 個規格問題`
+
+**效果**：
+- BDD Formulation 保存到 DB 前，Feature 已通過完整 Check 1-8 + L17.P2 Deterministic 補宣告
+- 用戶點 Coder 時，Alignment Gate 再跑一次變冪等操作（幾乎不 fix）
+- 壞 Feature **根本進不到 DB**，Coder 階段的 fix loop 壓力降到最低
+- 配合 L17 Deterministic 補宣告，「VAR 未宣告」類錯誤在最早期就被消滅
+
+**L18.P1 評估後 skip**（L11 timeout heartbeat）：L17 Deterministic 已大減 LLM 工作量，30min 硬 timeout 在新架構下應足夠。Stream-level heartbeat 需改每個 LLM call 點，ROI 低。Dogfood 觀察是否真需要再決定。
+
+**測試**：57 files / 1458 tests 全綠；typecheck clean。
+
 ### L17 Deterministic Feature 修復 + Alignment Gate 失效路徑堵漏（2026-04-19）
 
 L15 的 schema-aware hint 依賴 LLM 修 VAR 對齊，實測發現 **LLM 會偷懶症狀修復**（改名、刪 scenario）讓 errorCount 騙過去但沒真補宣告。L16 deploy 後用戶仍看到 61/83 失敗，分析三條失效路徑 + 一個全新 bug：
