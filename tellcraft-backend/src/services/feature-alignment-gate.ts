@@ -25,6 +25,7 @@ function alignmentCheckToRootCause(checkName: string): EnrichableRootCause {
     case 'var_system_alignment': return 'var_resolution'
     case 'summary_action_match': return 'api_spec_mismatch'
     case 'semantic_consistency': return 'unknown'  // semantic 矛盾的修復策略由 issue description 本身提供，不走 rootCause 路徑
+    case 'check_constraint': return 'unknown'  // L17.P1：CHECK 約束違反，fix hint 由 description 本身提供（含允許值）
     default: return 'unknown'
   }
 }
@@ -173,6 +174,99 @@ function extractResponseHeaders(content: string): string[] {
     }
   }
   return headers
+}
+
+/**
+ * L17.P1：解析 PostgreSQL CHECK 約束字串。支援常見 pattern：
+ *   IN (...)  → { kind: 'enum', values }
+ *   = 'x'     → { kind: 'enum', values: ['x'] }
+ *   >= N / <= N / > N / < N / = N → { kind: 'range', op, value }
+ * 複雜 expression（length() / ~ regex / 多條件 AND）→ null（fail-open，不誤報）
+ */
+export type CheckSpec =
+  | { kind: 'enum'; values: string[] }
+  | { kind: 'range'; op: '>=' | '<=' | '>' | '<' | '='; value: number }
+
+export function parseCheckConstraintSpec(check: string): CheckSpec | null {
+  if (!check) return null
+  const trimmed = check.trim()
+
+  // IN (...) 優先
+  const inMatch = trimmed.match(/\bIN\s*\(([^)]+)\)/i)
+  if (inMatch) {
+    const values = inMatch[1]
+      .split(',')
+      .map(v => v.trim().replace(/^['"]|['"]$/g, ''))
+      .filter(Boolean)
+    if (values.length > 0) return { kind: 'enum', values }
+  }
+
+  // 單一 = 'x' / = N
+  const eqMatch = trimmed.match(/[a-zA-Z_][\w]*\s*=\s*(?:'([^']+)'|(-?\d+(?:\.\d+)?))/)
+  if (eqMatch) {
+    if (eqMatch[1] !== undefined) return { kind: 'enum', values: [eqMatch[1]] }
+    if (eqMatch[2] !== undefined) return { kind: 'range', op: '=', value: parseFloat(eqMatch[2]) }
+  }
+
+  // 數值比較 >= / <= / > / <
+  const cmpMatch = trimmed.match(/[a-zA-Z_][\w]*\s*(>=|<=|>|<)\s*(-?\d+(?:\.\d+)?)/)
+  if (cmpMatch) {
+    return { kind: 'range', op: cmpMatch[1] as '>=' | '<=' | '>' | '<', value: parseFloat(cmpMatch[2]) }
+  }
+
+  return null
+}
+
+/**
+ * L17.P1：從 Feature content 提取所有 entity_setup 步驟的完整結構
+ * （包含 entityName、stepLine、原始 headers、完整 data rows）
+ * 比 red-phase-validator 的 extractEntitySetupSteps 多保留 data rows。
+ */
+export interface EntitySetupWithData {
+  entityName: string
+  stepLine: number       // 1-based
+  rawHeaders: string[]   // 原始含 > 前綴
+  dataRows: Array<{ line: number; cells: string[] }>
+}
+
+function splitDataTableRow(text: string): string[] {
+  // `| a | b | c |` → ['', 'a', 'b', 'c', ''] → 去頭尾空字串 → ['a', 'b', 'c']
+  // 保留中間空 cell（若有）
+  const parts = text.split('|').map(c => c.trim())
+  if (parts.length > 0 && parts[0] === '') parts.shift()
+  if (parts.length > 0 && parts[parts.length - 1] === '') parts.pop()
+  return parts
+}
+
+export function extractEntitySetupWithData(content: string): EntitySetupWithData[] {
+  const results: EntitySetupWithData[] = []
+  const lines = content.split('\n')
+  for (let i = 0; i < lines.length; i++) {
+    const trimmed = lines[i].trim()
+    const match = trimmed.match(/(?:Given|When|Then|And|But)\s+準備一個\s*(.+?)\s*[,，]\s*with\s+table:/i)
+    if (!match) continue
+
+    const entityName = match[1].trim()
+    const tableLines: Array<{ line: number; text: string }> = []
+    for (let j = i + 1; j < lines.length; j++) {
+      const tl = lines[j].trim()
+      if (tl.startsWith('|')) {
+        tableLines.push({ line: j + 1, text: tl })
+      } else {
+        break
+      }
+    }
+    if (tableLines.length < 1) continue
+
+    const rawHeaders = splitDataTableRow(tableLines[0].text)
+    const dataRows = tableLines.slice(1).map(({ line, text }) => ({
+      line,
+      cells: splitDataTableRow(text),
+    }))
+
+    results.push({ entityName, stepLine: i + 1, rawHeaders, dataRows })
+  }
+  return results
 }
 
 /**
@@ -598,6 +692,91 @@ export async function runAlignmentChecks(input: AlignmentGateInput): Promise<Ali
     logger.warn({ error: e }, 'Semantic consistency 驗證失敗，降級跳過')
   }
 
+  // ---- Check 8: DDL CHECK 約束違反（L17.P1） ----
+  // 偵測 entity_setup DataTable 的值是否違反 DDL CHECK 約束。
+  // 典型案例：DDL `CHECK (delivery_type IN ('pickup','delivery'))`，Feature 給 `'takeout'` → runtime INSERT 爆
+  //   "violates check constraint" 全 scenario fail。
+  // 只處理 `IN (...)` / `= 'x'` / 數值比較等簡單 pattern；複雜 expression fail-open 不誤報。
+  if (schemas.length > 0) {
+    for (const feature of input.features) {
+      const displayName = feature.name || feature.actionName
+      const setupSteps = extractEntitySetupWithData(feature.content)
+      for (const step of setupSteps) {
+        const found = DatabaseSchema.findSchemaAndTable(schemas, step.entityName)
+        if (!found) continue
+        const { table } = found
+
+        // 對每個 header 找出有 CHECK 的 column
+        const colsWithCheck: Array<{ col: typeof table.columns[0]; headerIdx: number; spec: CheckSpec }> = []
+        for (let h = 0; h < step.rawHeaders.length; h++) {
+          const headerRaw = step.rawHeaders[h]
+          // 去 > / < / $ 前綴 + 去 entity 前綴（>Store.id → id）
+          let clean = headerRaw
+          if (clean.startsWith('>') || clean.startsWith('<') || clean.startsWith('$')) clean = clean.substring(1)
+          const dotIdx = clean.lastIndexOf('.')
+          if (dotIdx >= 0) clean = clean.substring(dotIdx + 1)
+          const cleanLower = clean.toLowerCase()
+          // 在 table 找對應 column（支援 snake/camel）
+          const matched = table.columns.find(c => {
+            const cn = c.name.toLowerCase()
+            return cn === cleanLower
+              || cn === toSnakeCase(clean).toLowerCase()
+              || cn === toCamelCase(clean).toLowerCase()
+          })
+          if (!matched || !matched.checkConstraint) continue
+          const spec = parseCheckConstraintSpec(matched.checkConstraint)
+          if (!spec) continue // 複雜 CHECK → 跳過不誤報
+          colsWithCheck.push({ col: matched, headerIdx: h, spec })
+        }
+
+        if (colsWithCheck.length === 0) continue
+
+        // 掃 data rows 驗證值
+        for (const row of step.dataRows) {
+          for (const { col, headerIdx, spec } of colsWithCheck) {
+            if (headerIdx >= row.cells.length) continue
+            const cell = row.cells[headerIdx]
+            if (!cell) continue
+            // runtime value 跳過（$Variable / <executionKey）
+            if (cell.startsWith('$') || cell.startsWith('<') || cell.startsWith('>')) continue
+            // 去首尾引號做比較
+            const stripped = cell.replace(/^['"]|['"]$/g, '')
+
+            if (spec.kind === 'enum') {
+              if (!spec.values.includes(stripped)) {
+                issues.push({
+                  featureName: displayName,
+                  checkName: 'check_constraint',
+                  severity: 'error',
+                  description: `Feature "${displayName}" line ${row.line} 的 "準備一個${step.entityName}" DataTable 值 "${stripped}" 違反欄位 ${col.name} 的 CHECK 約束。允許值：[${spec.values.map(v => `'${v}'`).join(', ')}]`,
+                })
+              }
+            } else if (spec.kind === 'range') {
+              const num = parseFloat(stripped)
+              if (Number.isNaN(num)) continue // 非數字跳過（可能是 $var 未識別等）
+              let ok = true
+              switch (spec.op) {
+                case '>=': ok = num >= spec.value; break
+                case '<=': ok = num <= spec.value; break
+                case '>': ok = num > spec.value; break
+                case '<': ok = num < spec.value; break
+                case '=': ok = num === spec.value; break
+              }
+              if (!ok) {
+                issues.push({
+                  featureName: displayName,
+                  checkName: 'check_constraint',
+                  severity: 'error',
+                  description: `Feature "${displayName}" line ${row.line} 的 "準備一個${step.entityName}" DataTable 值 "${stripped}" 違反欄位 ${col.name} 的 CHECK 約束（${spec.op} ${spec.value}）。`,
+                })
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+
   return issues
 }
 
@@ -681,22 +860,88 @@ async function autoFixFeatures(
     logger.warn({ err: e }, 'autoFixFeatures: schema 解析失敗，schema-aware hint 將跳過')
   }
 
+  // L17.P2：Deterministic 補宣告（LLM fix 前置步驟）
+  // 目的：對「$X.field 完全未宣告」issue 直接修改 Feature content 補 Background 宣告，
+  // 不依賴 LLM。減少 LLM 偷懶改名/刪 scenario 造成的症狀修復。
+  const workingFeatures = features.map(f => ({ ...f }))
+  let deterministicFixCount = 0
+  if (schemasForRepair.length > 0) {
+    const { autoDeclareUndeclaredVars } = await import('./deterministic-feature-fix')
+    for (let fi = 0; fi < workingFeatures.length; fi++) {
+      const displayName = workingFeatures[fi].name || workingFeatures[fi].actionName
+      const featureIssues = issuesByFeature.get(displayName) || []
+      const undeclared: Array<{ entity: string; field: string }> = []
+      const seen = new Set<string>()
+      for (const it of featureIssues) {
+        if (it.checkName !== 'var_system_alignment') continue
+        if (!it.description.includes('完全未宣告')) continue
+        const m = it.description.match(/\$([A-Za-z_][\w]*)\.([A-Za-z_][\w]*)/)
+        if (!m) continue
+        const key = `${m[1]}.${m[2]}`
+        if (seen.has(key)) continue
+        seen.add(key)
+        undeclared.push({ entity: m[1], field: m[2] })
+      }
+      if (undeclared.length === 0) continue
+
+      try {
+        const result = autoDeclareUndeclaredVars(workingFeatures[fi].content, undeclared, schemasForRepair)
+        if (result.declaredEntities.length > 0) {
+          workingFeatures[fi] = { ...workingFeatures[fi], content: result.content }
+          deterministicFixCount += result.declaredEntities.length
+          logger.info({
+            feature: displayName,
+            declaredEntities: result.declaredEntities,
+            skippedWithReason: result.skippedWithReason,
+          }, 'Deterministic 補宣告')
+          recordTelemetry({
+            skillName: 'feature_gate', eventType: 'alignment_fixed',
+            patternKey: 'deterministic_declared_vars', outcome: 'repaired', phase: 'feature_alignment_gate',
+            userId: trackingContext?.userId, conversationId: trackingContext?.conversationId,
+            payload: { feature: displayName, declaredCount: result.declaredEntities.length, skipped: result.skippedWithReason.length },
+          }).catch(() => {})
+        }
+      } catch (e) {
+        logger.warn({ err: e, feature: displayName }, 'Deterministic 補宣告失敗，fallthrough 到 LLM')
+      }
+    }
+  }
+
+  // 若 deterministic 已修完所有 feature 的 var issues → 直接回傳，skip LLM
+  if (deterministicFixCount > 0) {
+    // 重新驗證：如果這次 deterministic 補完後剩下 error 都不是 var_system_alignment → LLM 也不用跑
+    // 但保守起見仍走 LLM 修剩餘 issue（例如 check_constraint / summary_action_match 等）
+    // 所以下面的 featuresToFix 會重新從 workingFeatures 建
+  }
+
   // 構建 FeatureFixInput
+  // L17.P2：用 workingFeatures（已 deterministic 補宣告）而非原 features
+  //   這樣 LLM 看到的 content 已含 Background 宣告，只需修剩下的 issue（check_constraint / summary_action_match）
+  //   deterministic 已修的 var_system_alignment issue 不會再報，所以 errorIssues 自動縮小
   const featuresToFix: FeatureFixInput[] = []
-  for (const feature of features) {
+  for (const feature of workingFeatures) {
     const displayName = feature.name || feature.actionName
     const featureIssues = issuesByFeature.get(displayName)
     if (!featureIssues || featureIssues.length === 0) continue
 
-    // 只修 error 級 issues
-    const errorIssues = featureIssues.filter(i => i.severity === 'error')
+    // 只修 error 級 issues，且排除 deterministic 已處理的 var_system_alignment-未宣告
+    // （deterministic 補後再跑 runAlignmentChecks 會省略，但我們這邊還拿著舊 issues 列表；
+    //  LLM 修時應忽略已由 deterministic 處理的，避免重複工作）
+    const errorIssues = featureIssues.filter(i => {
+      if (i.severity !== 'error') return false
+      if (deterministicFixCount > 0 && i.checkName === 'var_system_alignment'
+          && i.description.includes('完全未宣告')) {
+        return false  // deterministic 已補宣告，跳過這類 issue
+      }
+      return true
+    })
     if (errorIssues.length === 0) continue
 
     // Harness 修復提示：把已知 checkName 轉成 rootCause hint 附加到 issue 描述
     const issuesWithHints = errorIssues.map(i => {
       const rootCause = alignmentCheckToRootCause(i.checkName)
       const enriched = enrichError(i.description, rootCause, { phase: 'feature_alignment' })
-      // L15.P1: schema-aware 修復範本（只對 var_system_alignment 的「完全未宣告」case）
+      // L15.P1: schema-aware 修復範本（只對 var_system_alignment 的「完全未宣告」case，保留給 deterministic 跳過的）
       const schemaHint = i.checkName === 'var_system_alignment' && schemasForRepair.length > 0
         ? buildUndeclaredVarRepairHint(i.description, schemasForRepair)
         : null
@@ -720,6 +965,10 @@ async function autoFixFeatures(
   }
 
   if (featuresToFix.length === 0) {
+    // deterministic 補宣告後沒有剩餘 issue 要送 LLM → 直接回傳修過的 features
+    if (deterministicFixCount > 0) {
+      return { fixedFeatures: workingFeatures, fixApplied: true }
+    }
     return { fixedFeatures: features, fixApplied: false }
   }
 
@@ -739,19 +988,20 @@ async function autoFixFeatures(
   }
 
   // 合併修復結果：用修復後的 feature 替換原始 feature
+  // L17.P2：base 從 workingFeatures（deterministic 已補）開始，LLM 修的覆蓋其上
   const fixedMap = new Map<string, GeneratedFeature>()
   for (const ff of result.fixedFeatures) {
     fixedMap.set(ff.actionName, ff)
   }
 
-  const merged = features.map(f => {
+  const merged = workingFeatures.map(f => {
     const fixed = fixedMap.get(f.actionName)
     if (fixed) {
       // 後置 sanitize
       const { content: sanitized } = sanitizeFeatureContent(fixed.content)
       return { ...f, content: sanitized }
     }
-    return f
+    return f  // LLM 沒碰 → 保留 workingFeatures 版本（可能已 deterministic 補過）
   })
 
   return {
@@ -767,6 +1017,19 @@ async function autoFixFeatures(
 // ============================================================
 
 const MAX_FIX_ROUNDS = 2
+
+/**
+ * L17.P0.3：把 issue 轉成指紋 key（feature|check|line|var）供 fix 前後比對。
+ * 目的：擋 LLM「改名症狀修復」— 例如把 $Store.id 改成 $storeId（仍未宣告）→
+ *   純 errorCount 比對看起來「一樣」，但 fingerprint 能看出是「解了 A、新增了 B」。
+ * 從 issue.description 抽取穩定部分：`$var` 名 + `line N`（若有）。
+ */
+export function issueFingerprint(i: AlignmentIssue): string {
+  const lineMatch = i.description.match(/line\s+(\d+)/)
+  const varMatch = i.description.match(/\$([A-Za-z_][\w.]*)/)
+  // line 或 var 缺任一都退化為「只靠 checkName + featureName」比對，寬鬆一點不誤報
+  return `${i.featureName}|${i.checkName}|${lineMatch?.[1] ?? '?'}|${varMatch?.[1] ?? '?'}`
+}
 
 export async function runFeatureAlignmentGate(input: AlignmentGateInput): Promise<AlignmentGateResult> {
   const start = Date.now()
@@ -884,6 +1147,51 @@ export async function runFeatureAlignmentGate(input: AlignmentGateInput): Promis
     const postFixErrors = postFixIssues.filter(i => i.severity === 'error')
     const fixedThisRound = beforeCount - postFixErrors.length
     totalFixedCount += Math.max(0, fixedThisRound)
+
+    // L17.P0.3：issue fingerprint 比對（擋 LLM 症狀修復騙過純數值比較）
+    // 場景：LLM 把 `$Store.id` 改名為 `$storeId`（兩者皆未宣告）→
+    //   before 1 個「`$Store.id` 未宣告」error，after 1 個「`$storeId` 未宣告」error → 純數值看不出差
+    // 解法：fingerprint = feature|checkName|line|varName，比對實際解決 vs 新引入
+    const beforeKeys = new Set(errorIssues.map(issueFingerprint))
+    const afterKeys = new Set(postFixErrors.map(issueFingerprint))
+    const resolvedKeys = [...beforeKeys].filter(k => !afterKeys.has(k))
+    const newKeys = [...afterKeys].filter(k => !beforeKeys.has(k))
+
+    // 提前 block 條件：
+    //   - 一個 before issue 都沒解（resolvedKeys 空）→ LLM 無實質修復
+    //   - OR 新引入 issue 超過原來一半 → LLM 很可能改名/重組讓問題換殼
+    if (postFixErrors.length > 0 && (resolvedKeys.length === 0 || newKeys.length > Math.max(1, beforeKeys.size / 2))) {
+      logger.warn({
+        beforeCount: beforeKeys.size,
+        afterCount: afterKeys.size,
+        resolvedCount: resolvedKeys.length,
+        newCount: newKeys.length,
+        sampleNewKeys: newKeys.slice(0, 3),
+      }, 'Alignment Gate: LLM 未實質修復（或引入新問題）— 提前 block')
+      recordTelemetry({
+        skillName: 'feature_gate', eventType: 'alignment_blocked',
+        patternKey: 'llm_fix_no_real_progress', outcome: 'blocked', phase: 'feature_alignment_gate',
+        fixRounds: round + 1, severity: 'critical',
+        userId: input.trackingContext?.userId, conversationId: input.trackingContext?.conversationId,
+        payload: {
+          beforeCount: beforeKeys.size, afterCount: afterKeys.size,
+          resolvedCount: resolvedKeys.length, newCount: newKeys.length,
+        },
+      }).catch(() => {})
+      const blockMessage = formatBlockMessage(postFixErrors)
+      return {
+        passed: false,
+        blocked: true,
+        fixedFeatures: totalFixedCount > 0 ? currentFeatures : undefined,
+        fixedSchemaSql: latestFixedSchemaSql,
+        fixedEntityMapping: latestFixedEntityMapping,
+        issues: postFixIssues,
+        fixedIssueCount: totalFixedCount,
+        remainingIssueCount: postFixErrors.length,
+        blockMessage,
+        durationMs: Date.now() - start,
+      }
+    }
 
     if (fixedThisRound <= 0) {
       // 修了但沒效果 → 不再重試

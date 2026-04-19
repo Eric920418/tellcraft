@@ -383,8 +383,26 @@ export async function executeCoderSkill(input: CoderSkillInput): Promise<void> {
         logger.info({ durationMs: gateResult.durationMs }, 'Alignment Gate: 通過（無需修復）')
       }
     } catch (e) {
-      // Alignment Gate 失敗不阻塞 Pipeline — 降級跳過
-      logger.error({ error: e }, 'Alignment Gate 執行失敗，降級跳過')
+      // L17.P0.1：Alignment Gate crash 不再降級跳過 — 必須阻塞 pipeline
+      // 原邏輯 logger.error 後 fallthrough 會讓爛 Feature 直接進 Coder Testing → 用戶看到假裝通過的結果
+      // Spec 驗證層 fail-open 是災難，改為硬阻塞 + 顯示錯誤 + regenerate 逃生口
+      const errMsg = e instanceof Error ? e.message : String(e)
+      logger.error({ error: e, projectId, conversationId }, 'Alignment Gate 執行失敗 — 阻塞 pipeline（避免生成錯誤代碼）')
+      state = await getFlowState(redis, conversationId) || state
+      state.phase = 'uiux_complete'
+      state.waitingForReply = true
+      await saveFlowState(redis, conversationId, state)
+      await sendMessage(conversationId, io, {
+        content: isChinese
+          ? `⚠ Feature 對齊檢查執行失敗（${errMsg}），已阻塞以避免生成錯誤代碼。請重新生成 Features 後重試。`
+          : `⚠ Feature alignment check crashed (${errMsg}). Pipeline blocked to avoid bad codegen. Please regenerate Features and retry.`,
+        stage: 'coder_error',
+        quickReplies: [
+          { label: isChinese ? '重新生成 Features' : 'Regenerate Features', value: '__regenerate_features__', style: 'primary' as const },
+          { label: isChinese ? '重試 Coder' : 'Retry Coder', value: '__retry_coder__', style: 'secondary' as const },
+        ],
+      })
+      return
     }
   }
 

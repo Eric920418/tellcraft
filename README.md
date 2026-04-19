@@ -1234,6 +1234,35 @@ psql "$DATABASE_URL" -f tellcraft-backend/migrations/xxx.sql
 - **`sanitizeFeatureContent()`**：零 LLM 自動修正 — `回應, with JSON:` → `回應, with table:`、`回應為, with JSON:` → `回應, with table:`、entity_validate header `>id` → `id`、entity 花括號剝除 `準備一個{顧客}` → `準備一個顧客`（規則 4；LLM 偶爾照抄 prompt 模板 `{entity}` 佔位符 → SpecFormula regex 字元類不含 `{}` → matchStepToInstruction 100% 失敗；單元測試 `sanitize-feature-content.test.ts` 覆蓋 6 個 case）
 - **formulation prompt 強化**：明確禁止 entity_validate 使用 `>contextKey`；`>contextKey`/`<executionKey` 只用於 Given 準備和 Then 回應
 
+### L17 Deterministic Feature 修復 + Alignment Gate 失效路徑堵漏（2026-04-19）
+
+L15 的 schema-aware hint 依賴 LLM 修 VAR 對齊，實測發現 **LLM 會偷懶症狀修復**（改名、刪 scenario）讓 errorCount 騙過去但沒真補宣告。L16 deploy 後用戶仍看到 61/83 失敗，分析三條失效路徑 + 一個全新 bug：
+
+**P0 Alignment Gate 失效堵漏**：
+- **P0.1 catch 降級→阻塞**（`coder-phases.ts:385-411`）：原 `catch (e) { logger.error(...'降級跳過') }` 讓 Alignment Gate crash 後壞 Feature 直接進 Coder。改為硬阻塞 + 清楚錯誤訊息 + `__regenerate_features__` 逃生按鈕
+- **P0.3 issue fingerprint 比對**（`feature-alignment-gate.ts:769-791`）：原 fix loop 用純數值比較 `fixedThisRound = beforeCount - postFixErrors.length`，LLM 改名（`$Store.id → $storeId`，兩者都未宣告）就能騙過。新 `issueFingerprint()` 用 `feature|check|line|varName` 組合 key，若 `resolvedKeys=0 || newKeys > beforeSize/2` → 提前 block。單元測試 `feature-alignment-fingerprint.test.ts` 8 case
+- P0.2 原 case-insensitive match + resolved=true 邏輯檢視後無需改（case 不一致報 error 本身合理）
+
+**P1 Check 8 — DDL CHECK 約束違反偵測**（新增，`feature-alignment-gate.ts`）：
+- `orders_delivery_type_check violation` 是全新 bug。DDL `CHECK (delivery_type IN ('pickup','delivery'))` + Feature DataTable 給 `'takeout'` → runtime INSERT 炸全 scenario
+- 新 `parseCheckConstraintSpec()` 解析 `IN (...)` / `= 'x'` / `>= N` 等簡單 pattern（複雜 expression fail-open 不誤報）
+- 新 `extractEntitySetupWithData()` 提取 entity_setup 步驟的 headers + data rows（比 red-phase-validator 原 `extractEntitySetupSteps` 多保留 data）
+- Check 8 掃每個 cell 值 vs column 的 CHECK spec，runtime value（`$var`/`<key`）跳過；不合法 → error 含允許值列表
+- 單元測試 `feature-alignment-check-constraint.test.ts` 16 case
+
+**P2 Deterministic 補宣告（最大改動）**（`services/deterministic-feature-fix.ts` 新檔 + `feature-alignment-gate.ts autoFixFeatures` 整合）：
+- 新 `autoDeclareUndeclaredVars()` 對「$X.field 完全未宣告」issue 直接修改 Feature content 補 Background，**不靠 LLM**
+- **FK 拓撲排序**：`buildForeignKeyGraph()` 從 `ColumnDefinition.foreignKey` 建 adjacency；`topologicalSort()` Kahn 演算法 + 環偵測；傳遞依賴自動帶入（補 Order 時連 Customer / Store 一起補）
+- **CHECK 約束值選擇**：`sampleValueForColumn()` — FK 欄位用 `$ParentEntity1.id`；CHECK enum 取第一個允許值；CHECK range 取邊界；TEXT 用 `Sample <col>`；INTEGER 用 0；BOOLEAN 用 true
+- **Background 插入**：`extractBackgroundBounds()` 找邊界，有則 append 第一步改 `And`，無則在 `Feature:` 後插新 Background 區塊
+- **失敗優雅處理**：循環 FK / entity 不在 schema → skip 並記 `skippedWithReason`，由 LLM fallback
+- **autoFixFeatures 整合**：LLM fix 前先 deterministic 補，剩餘 issue（check_constraint / summary_action_match 等）才送 LLM；LLM 看到的 content 已含 Background 宣告 → 不會再出現「完全未宣告」噪音；若 deterministic 已修完所有 issue → 直接回傳省 token
+- 單元測試 `deterministic-feature-fix.test.ts` 22 case（含 FK 依賴 / 循環 FK / self-FK / CHECK / 有/無 Background）
+
+**策略轉向**：從「L15 報告讓 LLM 修」→ 「L17 deterministic 直接改 + LLM 只修剩的」。不再依賴 LLM 的意願與理解力。
+
+**測試**：57 files / 1458 tests 全綠（原 1412 + 46 新）；typecheck clean。
+
 ### L15 VAR 對齊 + L16 Neon Schema Drift（2026-04-19）
 
 上承 L14，**解決 user 診斷的 BDD→Coder pipeline 剩餘 85% 失敗根因**（VAR 對齊 ~50% + DB drift ~35%，中英命名只佔 ~15% 已由 L13/L14 處理）。
