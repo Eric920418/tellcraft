@@ -1,10 +1,14 @@
-# sdd.os ISA Feature File 模板（SpecFormula 標準）
+# sdd.os ISA Feature File template (SpecFormula standard)
 #
-# 使用說明：
-# 1. 將 {action_name} 替換為實際的 Server Action 函數名稱（camelCase）
-# 2. 將 {http_method} 和 {api_path} 替換為 API 端點
-# 3. 將 {summary} 替換為功能的中文描述（與 Feature 名稱一致）
-# 4. 使用 VAR 系統（>/$/<）取代硬編碼 ID
+# Usage:
+# 1. Replace {action_name} with the actual Server Action function name (camelCase)
+# 2. Replace {http_method} and {api_path} with the API endpoint
+# 3. Replace {summary} with the feature's English verb phrase (matching Feature name)
+# 4. Use the VAR system (>/$/<) instead of hardcoded IDs
+#
+# LANGUAGE POLICY: all code-level content (Feature/Rule/Scenario text, Entity names,
+# DataTable values) MUST be in ENGLISH. Only SpecFormula DSL keywords remain in Chinese
+# (準備一個/應該存在一個/(STATUS)回應/操作失敗/Rule four-category prefixes).
 #
 # ============================================================
 
@@ -13,53 +17,52 @@
 # Summary: {summary}
 Feature: {summary}
 
-  # Background 用於準備測試所需的基礎資料
-  # 每個 Example 執行前都會先執行 Background
-  # 使用 > 宣告 Context Key，< 捕捉 Execution Key
+  # Background prepares baseline test data. Executed before every Example.
+  # Use > to declare a Context Key, < to capture an Execution Key.
   Background:
-    Given 準備一個使用者, with table:
-      | >User1.id | email            | name |
-      | <user1Id  | user@example.com | 小明 |
-    And 準備一個商品, with table:
-      | >Product1.id | name   | price |
-      | <product1Id  | 宮保雞丁 | 120   |
+    Given 準備一個User, with table:
+      | >User1.id | email            | name     |
+      | <user1Id  | user@example.com | John Doe |
+    And 準備一個Product, with table:
+      | >Product1.id | name             | price |
+      | <product1Id  | Kung Pao Chicken | 120   |
 
   #------------------------------------------------------------
-  # Rule 格式：{前置|後置}（{子類}）- {規則描述}
-  # 前置：執行前的驗證條件，失敗時回傳錯誤
-  # 後置：執行成功後的系統狀態變更
+  # Rule format: {前置|後置}（{sub-category}）- {rule description in English}
+  # 前置: precondition (validation before execution; failure → error response)
+  # 後置: postcondition (system state change after successful execution)
   #------------------------------------------------------------
-  Rule: 後置（狀態）- {規則描述}
+  Rule: 後置（狀態）- {rule description in English}
   #------------------------------------------------------------
 
-    # Example 名稱應清楚描述測試場景
-    Example: 成功{action_description}
-      # When 步驟：呼叫 Server Action（必須有 Actor 前綴）
-      # 格式：(No Actor|UID="$var") {summary}, call table:
+    # Example name should clearly describe the test scenario (in English)
+    Example: Successfully {action_description}
+      # When step: call the Server Action (MUST have Actor prefix)
+      # Format: (No Actor|UID="$var") {summary}, call table:
       When (UID="${Entity1}.id") {summary}, call table:
         | {input_field1}  | {input_field2} |
         | ${Entity2}.id   | value2         |
 
-      # Then 步驟（成功）：驗證回應（含 HTTP status code）
-      # 格式：{summary}(STATUS)回應, with table:
+      # Then step (success): verify response (include HTTP status code)
+      # Format: {summary}(STATUS)回應, with table:
       Then {summary}(201)回應, with table:
         | >{result}.{field1} | {output_field2} |
         | <resultField1      | expected2       |
 
-      # 可選：驗證資料庫狀態
-      # 格式：應該存在一個{entity}, with table:
-      And 應該存在一個{entity}, with table:
+      # Optional: verify DB state
+      # Format: 應該存在一個{Entity}, with table:
+      And 應該存在一個{Entity}, with table:
         | entityId      | {field1}  | {field2}  |
         | ${Entity1}.id | expected1 | expected2 |
 
   #------------------------------------------------------------
-  Rule: 前置（狀態）- {驗證條件描述}
+  Rule: 前置（狀態）- {validation condition description in English}
   #------------------------------------------------------------
 
-    # 失敗場景範例
-    Example: {validation_description}時拒絕操作
-      # Given 可用於覆寫 Background 中的資料
-      Given 準備一個{entity}, with table:
+    # Failure scenario example
+    Example: Reject the operation when {validation_description}
+      # Given can override data set up in Background
+      Given 準備一個{Entity}, with table:
         | >{Entity3}.id | {field1}       | {field2} |
         | <entity3Id    | invalid_value  | value    |
 
@@ -67,20 +70,20 @@ Feature: {summary}
         | {input_field1}  | {input_field2} |
         | ${Entity3}.id   | value          |
 
-      # Then 步驟（失敗）：驗證操作失敗
+      # Then step (failure): assert operation failure
       Then 操作失敗
 
 # ============================================================
-# 檢查清單（完成後刪除此區塊）
+# Checklist (delete this section when done)
 # ============================================================
-# [ ] Action 名稱為 camelCase（如 createOrder）
-# [ ] 有 [METHOD] /path HTTP 端點註解
-# [ ] Summary 與 Feature 名稱一致
-# [ ] 所有 Rule 都標註四類前綴（前置/後置 + 子類）
-# [ ] When 步驟有 Actor 前綴 (No Actor|UID="$var")
-# [ ] 成功 Then 使用 "{summary}(STATUS)回應, with table:" 格式
-# [ ] 失敗 Then 使用 "操作失敗"
-# [ ] Entity 驗證使用 "應該存在一個{entity}, with table:"
-# [ ] DataTable 使用 VAR 系統（>/$/<）取代硬編碼 UUID
-# [ ] DataTable 欄位與 schema.sql 一致
-# [ ] Entity 名稱與 entity_to_table_mapping.yml 一致
+# [ ] Action name is camelCase (e.g. createOrder)
+# [ ] Has [METHOD] /path HTTP endpoint comment
+# [ ] Summary matches the Feature name exactly (both English verb phrase)
+# [ ] Every Rule has one of the four category prefixes (前置（狀態）/ 前置（參數）/ 後置（回應）/ 後置（狀態）)
+# [ ] When steps have an Actor prefix (No Actor|UID="$var")
+# [ ] Success Then uses "{summary}(STATUS)回應, with table:" format
+# [ ] Failure Then uses "操作失敗"
+# [ ] Entity validation uses "應該存在一個{EntityName}, with table:"
+# [ ] DataTable uses the VAR system (>/$/<) instead of hardcoded UUIDs
+# [ ] DataTable columns match schema.sql
+# [ ] Entity names match the Entity Mapping (PascalCase English)

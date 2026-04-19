@@ -108,6 +108,37 @@ export function sanitizeFeatureContent(content: string): { content: string; fixe
   return { content: result, fixes }
 }
 
+// ============================================================
+// 共用 LANGUAGE POLICY block（Feature content 生成用）
+// 給 generateSingleFeature / fixMultipleFeatures / generateDraftBatch 共用，
+// 統一措辭避免 LLM 在 3 個 prompt 間看到不同邊界規則。
+// 非 Feature content 的 prompt（generateSchemaSql / identifyFeatures）保留自己的
+// context-specific 簡版 policy，因為他們不產 Gherkin。
+// ============================================================
+const LANGUAGE_POLICY_FEATURE_BLOCK = `## ⚠️ LANGUAGE POLICY — READ FIRST
+
+ALL generated content MUST be in **ENGLISH**, except the SpecFormula DSL keywords below which MUST remain Chinese:
+
+**Keep in Chinese (DSL keywords — SpecFormula parser depends on them)**:
+- \`準備一個<Entity>, with table:\` (Given data setup)
+- \`應該存在一個<Entity>\` / \`應該不存在一個<Entity>\` (Entity assertions)
+- \`現在時間為 "..."\` (Time control)
+- \`(No Actor)\` / \`(UID="$var")\` (Actor prefix)
+- \`{summary}(STATUS)回應, with table:\` / \`(STATUS)回應為, with JSON:\` (Response validation)
+- \`操作失敗\` (Operation failure)
+- Rule category prefix: \`前置（狀態）\` / \`前置（參數）\` / \`後置（回應）\` / \`後置（狀態）\`
+
+**Everything else MUST be in English**:
+- Feature / Rule / Scenario / Example title text
+- Entity names (e.g. \`Customer\`, \`Store\`, \`MenuItem\` — NOT \`顧客\`, \`店家\`, \`菜單項目\`)
+- When summary text (e.g. \`Create Order\` — NOT \`建立訂單\`)
+- actionsYml \`summary\` field — English verb phrase matching the Feature's When summary
+- DataTable column headers — camelCase English (\`totalAmount\`, \`customerId\`)
+- DataTable data values (e.g. \`John Doe\`, \`Kung Pao Chicken\`, \`pending\` — NOT \`小明\`, \`宮保雞丁\`, \`待處理\`)
+- Rule descriptions (e.g. \`Rule: 前置（參數）- Required parameters must be provided\`)
+- SQL Schema identifiers — snake_case English; no Chinese COMMENT
+- Entity Mapping top-level key — English PascalCase (\`Customer: customers\`)`
+
 /**
  * Feature summary 自動對齊：確保 When 步驟中的 summary 與 feature.name 一致。
  * 問題：LLM 可能把 feature.name=「建立待辦事項」縮寫成 When 步驟的「建立待辦」→ actionsYml 用 feature.name → OpenAPI summary 是「建立待辦事項」→ SpecFormula 用 When 步驟的「建立待辦」去找 → 找不到。
@@ -767,26 +798,7 @@ export async function generateSingleFeature(
   // ── Prompt Caching: 靜態 ISA 規則放 Block 1（跨 feature 快取），動態 feature info 放 Block 2 ──
   const staticSystemPrompt = `You are a senior BDD analyst. Output a Gherkin Feature File for the specified function.
 
-## ⚠️ LANGUAGE POLICY — READ FIRST
-
-ALL generated content MUST be in **ENGLISH**, except the SpecFormula DSL keywords below which MUST remain Chinese:
-
-**Keep in Chinese (DSL keywords — SpecFormula parser depends on them)**:
-- \`準備一個<Entity>, with table:\` (Given data setup)
-- \`應該存在一個<Entity>\` / \`應該不存在一個<Entity>\` (Entity assertions)
-- \`現在時間為 "..."\` (Time control)
-- \`(No Actor)\` / \`(UID="$var")\` (Actor prefix)
-- \`{summary}(STATUS)回應, with table:\` / \`(STATUS)回應為, with JSON:\` (Response validation)
-- \`操作失敗\` (Operation failure)
-- Rule category prefix: \`前置（狀態）\` / \`前置（參數）\` / \`後置（回應）\` / \`後置（狀態）\`
-
-**Everything else MUST be in English**:
-- Feature/Rule/Scenario/Example title text
-- Entity names (e.g. \`Customer\`, \`Store\`, \`MenuItem\` — NOT \`顧客\`, \`店家\`, \`菜單項目\`)
-- When summary text (e.g. \`Create Order\` — NOT \`建立訂單\`)
-- DataTable column headers (camelCase English: \`totalAmount\`, \`customerId\`)
-- DataTable data values (e.g. \`John Doe\`, \`Kung Pao Chicken\`, \`pending\` — NOT \`小明\`, \`宮保雞丁\`, \`待處理\`)
-- Rule descriptions (e.g. \`Rule: 前置（參數）- Required parameters must be provided\`)
+${LANGUAGE_POLICY_FEATURE_BLOCK}
 
 ## sdd.os ISA SpecFormula Standard Format
 
@@ -1296,15 +1308,7 @@ export async function fixMultipleFeatures(
   ): Promise<{ success: boolean; fixedFeatures?: GeneratedFeature[]; updatedSchemaSql?: string; updatedEntityMapping?: string; error?: string }> {
     const systemPrompt = `You are an sdd.os ISA SpecFormula standard Gherkin expert. Fix the following Feature Files per user feedback.
 
-## ⚠️ LANGUAGE POLICY (CRITICAL)
-When fixing, **unify language to ENGLISH** for all code-level content:
-- Feature/Rule/Scenario titles → English
-- Entity names in \`準備一個<EntityName>\` / \`應該存在一個<EntityName>\` → English PascalCase (\`Customer\`, \`Store\`, \`MenuItem\`)
-- When summary → English verb phrase matching actionsYml
-- DataTable values → English (e.g. \`John Doe\`, \`Kung Pao Chicken\`, \`pending\`)
-- DataTable headers → camelCase English (\`totalAmount\`, \`customerId\`)
-
-**Keep Chinese (DSL keywords only)**: \`準備一個\` / \`應該存在一個\` / \`應該不存在一個\` / \`現在時間為\` / \`(No Actor)\` / \`(UID="$var")\` / \`(STATUS)回應\` / \`操作失敗\` / Rule category prefix \`前置（狀態）\` / \`前置（參數）\` / \`後置（回應）\` / \`後置（狀態）\`.
+${LANGUAGE_POLICY_FEATURE_BLOCK}
 
 If the input contains Chinese entity names or data, **translate them to English** in the output (use Entity Mapping's English key, or reasonable English data values).
 
@@ -1509,15 +1513,7 @@ export async function generateDraftBatch(
 
   const systemPrompt = `You are a senior BDD analyst and database architect. Given the Event Storming analysis and requirements, produce a complete spec draft in one pass.
 
-## ⚠️ LANGUAGE POLICY (ALL code-level output MUST be ENGLISH)
-- Feature.name / Feature.description / Rule description / Scenario title / Example title → English
-- Entity name (e.g. \`準備一個Customer\` — \`Customer\` in English PascalCase, not \`顧客\`)
-- Entity Mapping key → English PascalCase (\`entity_to_table_mapping: [{ Customer: customers }]\`)
-- actionsYml summary (matches Feature.name) → English verb phrase (\`Create Order\`, not \`建立訂單\`)
-- DataTable column headers → camelCase English (\`totalAmount\`, \`customerId\`)
-- DataTable data values → English (\`John Doe\`, \`Kung Pao Chicken\`, \`pending\`)
-- SQL Schema → snake_case English identifiers; no Chinese COMMENT
-- **Keep Chinese only for SpecFormula DSL keywords**: \`準備一個\` / \`應該存在一個\` / \`應該不存在一個\` / \`現在時間為\` / \`(No Actor)\` / \`(UID="$var")\` / \`(STATUS)回應\` / \`回應為, with JSON\` / \`操作失敗\` / Rule category prefix \`前置（狀態）\` / \`前置（參數）\` / \`後置（回應）\` / \`後置（狀態）\`
+${LANGUAGE_POLICY_FEATURE_BLOCK}
 
 ## 任務
 1. 分析 ES 文檔中所有 clear 的 Commands 和 ReadModels

@@ -534,28 +534,30 @@ async function llmCheckSpecConsistency(
     return `- ${v.entityName}:\n${rows}`
   }).join('\n')
 
-  const systemPrompt = `你是 BDD 規格語義檢查員。
-任務：判斷 scenario 名稱的意圖是否與 DataTable 期望值矛盾。
+  const systemPrompt = `You are a BDD spec semantic validator.
+Task: decide whether a scenario's name intent contradicts its DataTable expected values.
 
-典型矛盾範例：
-- 名稱：「X 應被清除為 null」
-- DataTable：X = <某個 UUID / $variable / 具體字串>
-- → isContradictory=true
+Typical contradictions (isContradictory=true):
+- Name: "X should be cleared to null" / "should become null" / "X is nullified"
+- DataTable: X = <UUID / $variable / concrete string value>
+- → The scenario declares null intent but the DataTable still expects a concrete value.
 
-非矛盾範例：
-- 名稱：「X 應為 null」
-- DataTable：X = &isNull 或 null 或 空白
-- → isContradictory=false
+Non-contradictions (isContradictory=false):
+- Name: "X should be null"
+- DataTable: X = &isNull / null / empty
+- → Consistent with null intent.
 
-不要過度敏感：若 scenario 沒有明確「清除/設 null」意圖，或 DataTable 無對應欄位時 → isContradictory=false`
+Do NOT be overly aggressive: if the scenario has no explicit "clear / set to null" intent, or the DataTable has no corresponding field, return isContradictory=false.
 
-  const userPrompt = `## Scenario 名稱
+The scenario name may be in English or Chinese — recognize null intent in both languages (e.g. "cleared to null", "set to null", "nullified", "清除為 null", "應變為 null").`
+
+  const userPrompt = `## Scenario Name
 ${scenarioName}
 
-## Then entity_validate DataTable（DB 驗證期望值）
-${tablesText || '(無 entity_validate 步驟)'}
+## Then entity_validate DataTable (expected DB values)
+${tablesText || '(no entity_validate step)'}
 
-請判斷並回傳 JSON。`
+Decide and return JSON.`
 
   try {
     const result = await callStructured({

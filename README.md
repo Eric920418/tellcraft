@@ -1234,6 +1234,30 @@ psql "$DATABASE_URL" -f tellcraft-backend/migrations/xxx.sql
 - **`sanitizeFeatureContent()`**：零 LLM 自動修正 — `回應, with JSON:` → `回應, with table:`、`回應為, with JSON:` → `回應, with table:`、entity_validate header `>id` → `id`、entity 花括號剝除 `準備一個{顧客}` → `準備一個顧客`（規則 4；LLM 偶爾照抄 prompt 模板 `{entity}` 佔位符 → SpecFormula regex 字元類不含 `{}` → matchStepToInstruction 100% 失敗；單元測試 `sanitize-feature-content.test.ts` 覆蓋 6 個 case）
 - **formulation prompt 強化**：明確禁止 entity_validate 使用 `>contextKey`；`>contextKey`/`<executionKey` 只用於 Given 準備和 Then 回應
 
+### L14 英文化 P0 補漏 + 結構性補強（2026-04-19）
+
+上承 L13（`e4d118bb`）BDD/Coder 產物英文化，L14 修補 L13 遺漏範圍並強化測試/重構：
+
+**P0 致命 bug 修復 — REWRITE prompt 雙頭馬車**（`coder-generation.ts`）：
+- L13 讓 Action 函數派發條件英文化（`op === 'Create Order'`），但 REWRITE prompt L2304-2347 大段中文規則 + `_stepSummary: '建立XXX'` 範例仍指示 LLM 用中文。結果：Coder 產英文 op，組件卻 dispatch 中文 `_stepSummary` → 100% 走到 `Unsupported operation`
+- 修正：整段中文規則改英文；`_stepSummary` 範例全改 `'Create Order'`/`'Update Order'`/`'Delete Order'`/`'List Orders'`/`'Get Order'`；`L425` 動態 stepSummary 注入 block + `L69` type comment 的中文範例同步英文化
+- `STANDARD_SUMMARIES` L3440 中文 fallback 改英文（`'List Items'` 等），讓 `generateSafeSummary()` 對英文 Action 有效 match；舊中文 Action 仍有 `correctBranch.keywords[0]` 動態 fallback 保底
+
+**P1 結構性補強**：
+- **`coder-handlers/*.md` 14 個 SOP 全英文化**（create / update / delete / query-list / query-single / toggle / restore / batch / auth / transaction / aggregate / cascade / column-alias / email-sender）：錯誤訊息 / 註釋 / 說明全英文；保留代碼結構不變。防雷清單 PR2 的 byte-identity 保證改為「以 `\n` 開頭、不以 `\n` 結尾」，內容本身已主動打破（英文化 trade-off），跑 skill-loader.test.ts 的 38 個 byte-identity + join 測試全綠
+- **`semantic-consistency-validator.ts:537` LLM system prompt 英文化**：BDD→Coder spec 驗證層的 Haiku prompt 改英文，同時 recognize 中英文 null intent（向下相容舊對話）
+
+**P2 品質改善**：
+- **`LANGUAGE_POLICY_FEATURE_BLOCK` 常數提煉**（`formulation.ts:111`）：3 個 Feature content 生成 prompt（generateSingleFeature / fixMultipleFeatures / generateDraftBatch）統一引用，避免措辭差異造成 LLM 對中英邊界判斷不穩；L404 schemaSql / L563 identifyFeatures 屬不同 context 保留自己的簡版
+- **`stepSummaryMatches()` word-boundary 比對**（`coder-generation.ts:3505`）：`includes()` 改 `\b` 邊界 regex 防 `'list'` 誤 match `'playlist'` / `'get'` 誤 match `'forget'`。CJK keyword 保持 `includes()`（中文無 word boundary）。新檔 `coder-step-summary-matches.test.ts` 14 個 case
+- **7 個 KEYWORD list 英文變體擴充**：`DELETE+Cancel` / `LIST+Index,Collection` / `TOGGLE+Switch,Enable,Disable` / `RESTORE+Undelete`
+- **`removeAuthChecks` export + 10 個單元測試**（`coder-remove-auth-checks.test.ts`）：覆蓋 Pattern 1-4 中英 auth throw 正常移除 + 業務 throw 不誤傷 + `forbidden` 邊界 trade-off 顯式記錄
+
+**P3 文檔**：
+- `bdd-spec/resources/templates/feature.template` 範例值改英文（`小明` → `John Doe` / `宮保雞丁` → `Kung Pao Chicken` / `準備一個使用者` → `準備一個User`），保留中文 DSL keyword 不變
+
+**測試結果**：51 test files / 1390 tests 全綠（L13 基礎 1366 + P2.3 removeAuthChecks 10 + P2.2 stepSummaryMatches 14）；typecheck clean。
+
 ### LangGraph.js 狀態機遷移 + Fix Loop 根治 + SpecFormula 完善（2026-04-08 ~ 2026-04-12）
 
 **LangGraph.js StateGraph 架構（Phase 1 骨架 + Phase 2 Subgraphs）**：

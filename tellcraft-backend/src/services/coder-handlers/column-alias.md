@@ -1,13 +1,13 @@
 
-## 欄位別名（PostgreSQL snake_case → camelCase）
-PostgreSQL 回傳的欄位名是 snake_case（category_id, created_at, transaction_date）。
-BDD 測試驗證的欄位名是 camelCase（categoryId, createdAt, transactionDate）。
-必須在回傳前轉換，否則測試一定失敗！
+## Column Aliasing (PostgreSQL snake_case → camelCase)
+PostgreSQL returns column names in snake_case (`category_id`, `created_at`, `transaction_date`).
+BDD tests verify column names in camelCase (`categoryId`, `createdAt`, `transactionDate`).
+You MUST convert before returning, or tests will always fail!
 ```typescript
-// 方法 1: SQL AS 別名（推薦）
+// Option 1: SQL AS alias (recommended)
 SELECT category_id as "categoryId", created_at as "createdAt", updated_at as "updatedAt" FROM ...
 
-// 方法 2: 程式碼轉換（適合 RETURNING * 展開場景）
+// Option 2: Code-level conversion (ideal for RETURNING * spread scenarios)
 function snakeToCamel(row: any) {
   if (!row) return row
   const result: any = {}
@@ -17,14 +17,14 @@ function snakeToCamel(row: any) {
   }
   return result
 }
-// 用在 INSERT/UPDATE/DELETE RETURNING * 後
+// Use after INSERT/UPDATE/DELETE RETURNING *
 const [row] = await sql`UPDATE ... RETURNING *`
 return { __status: 200, ...snakeToCamel(row) }
 
-// 列表查詢
+// List query
 const rows = await sql`SELECT * FROM ...`
 const camelRows = rows.map(snakeToCamel)
 ;(camelRows as any).__status = 200
 return camelRows
 ```
-重點：BDD requiredResponseFields 列表中的名稱是精確的 camelCase，你的回傳必須完全匹配。
+Key point: names in the BDD `requiredResponseFields` list are exact camelCase — your return MUST match exactly.

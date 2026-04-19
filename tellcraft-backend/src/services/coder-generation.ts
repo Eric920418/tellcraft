@@ -66,7 +66,7 @@ const ID_CHAR = '[\\w\\u4e00-\\u9fff\\u3400-\\u4dbf\\u00c0-\\u024f]'
 const ID_PATTERN = `${ID_CHAR}+`
 
 interface SubOperation {
-  /** _stepSummary 值，如 "建立記帳記錄" */
+  /** _stepSummary value, e.g. "Create Expense Record" */
   summary: string
   /**
    * 推斷的操作類型
@@ -419,10 +419,10 @@ ${requiredResponseFields.map(f => `- \`${f}\``).join('\n')}
     : ''
 
   const stepSummariesText = stepSummaries && stepSummaries.length > 0
-    ? `\n## _stepSummary 精確派發值（嚴格遵守，禁止改寫）
-BDD 測試會用以下精確的 _stepSummary 值呼叫此函數。你的 if/else 分支必須用 === 精確匹配這些值：
+    ? `\n## _stepSummary Exact Dispatch Values (STRICT — do NOT rewrite)
+BDD tests will invoke this function with exactly these _stepSummary values. Your if/else branches MUST match these with \`===\`:
 ${stepSummaries.map(s => `- "${s}"`).join('\n')}
-重要：使用 op === '完整文字' 精確匹配，**不要用 op.includes()**，防止子字串碰撞。例如：if (op === '建立待辦事項')，不要改成 op.includes('建立') 或 op.includes('新增')。`
+IMPORTANT: use \`op === '<full text>'\` for exact match. **Do NOT use \`op.includes()\`** — it causes substring collisions. Example: \`if (op === 'Create Todo')\`, NOT \`op.includes('Create')\` or \`op.includes('Add')\`.`
     : ''
 
   return `## Action 定義
@@ -1343,7 +1343,7 @@ ${subOp.relevantGherkin}
 }
 
 /** 移除 LLM 偶爾加入的認證檢查（共用） */
-function removeAuthChecks(code: string): string {
+export function removeAuthChecks(code: string): string {
   // Pattern 1: if (!userId) { throw/return ... }
   code = code.replace(/if\s*\(\s*!(?:input\.)?userId\s*\)\s*\{[^}]*(?:throw|return)[^}]*\}/g, '')
   // Pattern 2: if (!userId) throw/return ...
@@ -2301,50 +2301,50 @@ All generated code (error messages, comments, state labels) MUST be in ENGLISH.
 - Variable names in English camelCase
 - Loading text, error text: use existing UI text (keep if already Chinese — those are user-facing), but any NEW strings you introduce default to English
 
-你是一位 Next.js 前端工程師。你的任務是改寫一個 React 組件，將 mock 數據替換為 Server Action 調用。
+## Rewrite Rules
+1. Preserve all UI structure, styles (Tailwind classes), and animations (motion/react) unchanged
+2. Replace \`useState([{...mock data...}])\` with \`useState<Type[]>([])\` + \`useEffect\` calling the Server Action to fetch data
+3. Replace \`useState({...mock object...})\` with \`useState<Type | null>(null)\` + \`useEffect\` to load
+4. Replace hardcoded constant arrays (\`const items = [{...}]\`) with Server Action dynamic loading
+5. Replace form submission mock logic with the corresponding create/update/delete Server Action call
+6. Server Action import format: \`import { actionNameAction } from '@/app/actions/domain'\`
+7. Keep the \`'use client'\` directive
+8. Add loading state (simple spinner or skeleton)
+9. Add error state (try/catch + error state + error message — keep user-facing text in its existing language; any NEW text defaults to English)
+10. Do NOT introduce any new npm packages
+11. If the component is pure UI (no data operations), leave it unchanged
 
-## 改寫規則
-1. 保留所有 UI 結構、樣式（Tailwind class）、動畫（motion/react）不變
-2. 將 useState([{...mock data...}]) 替換為 useState<Type[]>([]) + useEffect 中調用 Server Action 獲取資料
-3. 將 useState({...mock object...}) 替換為 useState<Type | null>(null) + useEffect 載入
-4. 將硬編碼常數陣列 const items = [{...}] 替換為 Server Action 動態載入
-5. 將表單提交的 mock 邏輯替換為調用對應的 create/update/delete Server Action
-6. Server Action import 格式：import { actionNameAction } from '@/app/actions/domain'
-7. 保留 'use client' 指令
-8. 加 loading 狀態（簡單的 loading spinner 或 skeleton）
-9. 加 error 狀態（try/catch + error state + 錯誤提示）
-10. 不要引入任何新的 npm 套件
-11. 如果組件只是純 UI 展示（沒有資料操作），保持原樣不改
+## Server Action Call Convention (CRITICAL)
+These Server Actions dispatch on the **_stepSummary** field — NOT an intent/action field.
 
-## Server Action 調用規範（重要！）
-這些 Server Actions 使用 **_stepSummary** 欄位（中文子操作名稱）作為操作派發，**不是** intent/action 欄位。
+**_stepSummary MUST be the exact string defined in the Action function** (see the literals in \`if (op === '...')\` or \`if (op.includes('...'))\` within the Action interface definitions below).
+Do NOT invent _stepSummary values — find the exact matching condition from the Action source.
 
-**_stepSummary 必須使用 Action 函數中定義的精確值**（見下方 Action 介面定義中 if (op === '...') 或 if (op.includes('...')) 的字串）。
-不要自己發明 _stepSummary 值，必須從 Action 原始碼中找到對應的匹配條件。
+The Action's summary strings are English verbs produced by BDD Features (e.g. \`Create Order\`, \`Update Order\`, \`List Orders\`). Use them verbatim — do not translate, pluralize differently, or substitute synonyms.
 
-例如：如果 Action 程式碼中寫 if (op === '使用者註冊')，那 _stepSummary 必須是 '使用者註冊'，不能用「建立帳號」等同義詞。
+Example: if the Action code has \`if (op === 'Register User')\`, then \`_stepSummary\` MUST be \`'Register User'\` — not a synonym like \`'Create Account'\`, and not a Chinese translation.
 
-標準調用方式：
-- **列表查詢**（頁面初始載入）：查看 Action 介面定義中「需要的參數」註解，如果分支需要 filter/status 等篩選參數，前端載入時傳合理預設值。例如 actionFn({ _stepSummary: '查詢列表', filter: 'all' })。**不傳 ID，不傳 userId**
-- **單筆查詢**（詳情頁）：actionFn({ _stepSummary: '查詢詳情', entityId: '...' }) — 傳 ID
-- **建立**：actionFn({ _stepSummary: '建立XXX', ...fields })
-- **更新**：actionFn({ _stepSummary: '更新XXX', id: '...', ...fields })
-- **刪除**：actionFn({ _stepSummary: '刪除XXX', id: '...' })
+Standard call patterns (summary strings below are illustrative — always pick the real one from the Action interface):
+- **List query** (initial page load): check the "required parameters" comments in the Action interface; if the branch needs filter/status, pass reasonable defaults. Example: \`actionFn({ _stepSummary: 'List Orders', filter: 'all' })\`. **Do NOT pass ID, do NOT pass userId**
+- **Single query** (detail page): \`actionFn({ _stepSummary: 'Get Order', entityId: '...' })\` — pass ID
+- **Create**: \`actionFn({ _stepSummary: 'Create Order', ...fields })\`
+- **Update**: \`actionFn({ _stepSummary: 'Update Order', id: '...', ...fields })\`
+- **Delete**: \`actionFn({ _stepSummary: 'Delete Order', id: '...' })\`
 
-**認證已自動處理**：Server Action 會從 cookie 自動注入 userId，**組件絕對不需要手動傳 userId**。登入成功後 cookie 自動設定，你只需管理 UI 狀態（如 setIsLoggedIn(true)）。
+**Authentication is handled automatically**: the Server Action auto-injects userId from cookie. The component **MUST NOT pass userId manually**. After login the cookie is set automatically — you only manage UI state (e.g. \`setIsLoggedIn(true)\`).
 
-**不要重複 key**：每個參數只寫一次（JS 物件中重複 key 只保留最後一個，浪費且易混淆）。
+**Do NOT duplicate keys**: each parameter appears once (duplicate keys in JS objects only keep the last occurrence — wasteful and confusing).
 
-**頁面初始載入資料時，必須使用包含「列表」或「全部」的 _stepSummary，不要用「查詢」（那是單筆，需要 ID）。**
+**For initial page loads, pick the LIST-type summary (returns an array, usually named with \`List\`/\`All\`/\`Fetch All\` or similar). Do NOT use the single-query summary (requires an ID) — match by the Action's return type and parameter shape.**
 
-回傳格式：成功時直接回傳欄位（result.fieldName 或 result 本身是陣列），失敗時 throw Error。
-**不要用 result.data.xxx，要直接用 result.xxx。** 列表查詢回傳陣列時直接用 result（它就是陣列）。
-**不要傳 { intent: 'get' }，這樣的調用無效。**
+Return format: on success, return fields directly (\`result.fieldName\`, or \`result\` itself when it is an array); on failure, \`throw new Error(...)\`.
+**Do NOT use \`result.data.xxx\` — use \`result.xxx\` directly.** For list queries returning arrays, use \`result\` directly (it IS the array).
+**Do NOT pass \`{ intent: 'get' }\` — such calls are invalid.**
 
-以下是實際函數的 Input/Output 介面定義和完整實作，**_stepSummary 必須精確匹配**：
+Below are the actual function Input/Output interface definitions and full implementations. **_stepSummary must match exactly**:
 
-## 輸出
-只輸出完整的改寫後 TypeScript/JSX 代碼，不要任何解釋或 markdown 包裹。`)
+## Output
+Output the full rewritten TypeScript/JSX code ONLY — no explanations, no markdown wrappers.`)
 }
 
 function extractInterfacesFromActionFile(content: string): string {
@@ -3436,23 +3436,30 @@ function buildActionNameMap(
 }
 
 // 標準 _stepSummary 值（避免關鍵字衝突）
+// Illustrative default summaries for the `generateSafeSummary()` fast path.
+// These are the "first guess" when we have to repair a frontend _stepSummary. If this
+// guess doesn't match any real branch keyword, the caller falls back to the actual
+// `correctBranch.keywords[0]` (see validateAndFixActionCalls L3661-3663), which keeps
+// legacy Chinese Actions working. So these values only need to cover the common-case
+// English vocabulary — they do not need to match every historical Action.
 const STANDARD_SUMMARIES = {
-  list: '查詢列表',
-  query: '查詢詳情',
-  create: '建立資料',
-  update: '更新資料',
-  delete: '刪除資料',
+  list: 'List Items',
+  query: 'Get Item',
+  create: 'Create Item',
+  update: 'Update Item',
+  delete: 'Delete Item',
 } as const
 
 // Keyword lists — both Chinese (legacy / backward compat) and English (new standard).
 // 匹配使用 includes() 會對英文單詞做子字串比對，所以英文 keyword 用帶空白或 PascalCase 的完整詞
-const LIST_KEYWORDS = ['列表', '全部', 'List ', 'list ', ' all ', 'All ']
+// 防誤傷策略：尾隨空白（`'List '`）避免 match `'listing'`；大寫開頭（`'Get '`）配合空白避免 match `'forget '`
+const LIST_KEYWORDS = ['列表', '全部', 'List ', 'list ', ' all ', 'All ', 'Index ', 'index ', 'Collection', 'collection']
 const QUERY_KEYWORDS = ['查詢', '詳情', '取得', 'Query', 'query', 'Get ', 'get ', 'Fetch', 'fetch', 'Search', 'search', 'View', 'view ']
 const CREATE_KEYWORDS = ['建立', '新增', '註冊', '加入', '添加', 'Create', 'create ', 'Add ', 'add ', 'Register', 'register', 'Insert', 'insert']
 const UPDATE_KEYWORDS = ['更新', '修改', '編輯', '重命名', '變更', '設定', 'Update', 'update', 'Edit', 'edit', 'Modify', 'modify', 'Change', 'change', 'Rename', 'rename', 'Set ', 'set ']
-const DELETE_KEYWORDS = ['刪除', '移除', 'Delete', 'delete', 'Remove', 'remove', 'Destroy', 'destroy']
-const TOGGLE_KEYWORDS = ['切換', 'toggle', 'Toggle']
-const RESTORE_KEYWORDS = ['復原', '恢復', 'restore', 'Restore', 'Recover', 'recover', '取消刪除', '取消軟刪除']
+const DELETE_KEYWORDS = ['刪除', '移除', 'Delete', 'delete', 'Remove', 'remove', 'Destroy', 'destroy', 'Cancel', 'cancel']
+const TOGGLE_KEYWORDS = ['切換', 'toggle', 'Toggle', 'Switch', 'switch', 'Enable', 'enable', 'Disable', 'disable']
+const RESTORE_KEYWORDS = ['復原', '恢復', 'restore', 'Restore', 'Recover', 'recover', 'Undelete', 'undelete', '取消刪除', '取消軟刪除']
 
 /** 從呼叫上下文提取完整的參數物件內容（brace matching） */
 function extractCallParams(content: string, callStart: number): { params: Set<string>; fullCallEnd: number } {
@@ -3495,6 +3502,28 @@ function isListCall(params: Set<string>): boolean {
   return businessParams.length === 0 || !businessParams.some(p => p.endsWith('Id') || p === 'id')
 }
 
+/**
+ * Word-boundary aware keyword match for step summaries.
+ * CJK keywords use plain `includes()` (no word boundaries in Chinese);
+ * ASCII keywords use `\b` regex to avoid substring collisions
+ * (e.g. 'list' in 'playlist', 'get' in 'forget', 'add' in 'address').
+ */
+export function stepSummaryMatches(text: string, keywords: readonly string[]): boolean {
+  for (const kw of keywords) {
+    const trimmed = kw.trim()
+    if (!trimmed) continue
+    // CJK: plain substring match
+    if (/[\u4e00-\u9fff]/.test(trimmed)) {
+      if (text.includes(trimmed)) return true
+    } else {
+      // ASCII: word-boundary match, case-insensitive
+      const escaped = trimmed.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+      if (new RegExp(`\\b${escaped}\\b`, 'i').test(text)) return true
+    }
+  }
+  return false
+}
+
 /** 從 _stepSummary 值和參數推斷意圖 */
 function inferIntent(
   stepSummary: string,
@@ -3504,16 +3533,16 @@ function inferIntent(
   const businessParams = [...params].filter(p => p !== '_stepSummary' && p !== 'userId')
 
   // 明確的刪除/取消意圖
-  if (DELETE_KEYWORDS.some(kw => stepSummary.includes(kw))) return 'delete'
+  if (stepSummaryMatches(stepSummary, DELETE_KEYWORDS)) return 'delete'
 
   // 明確的建立意圖
-  if (CREATE_KEYWORDS.some(kw => stepSummary.includes(kw)) && !QUERY_KEYWORDS.some(kw => stepSummary.includes(kw))) return 'create'
+  if (stepSummaryMatches(stepSummary, CREATE_KEYWORDS) && !stepSummaryMatches(stepSummary, QUERY_KEYWORDS)) return 'create'
 
   // 明確的更新意圖
-  if (UPDATE_KEYWORDS.some(kw => stepSummary.includes(kw))) return 'update'
+  if (stepSummaryMatches(stepSummary, UPDATE_KEYWORDS)) return 'update'
 
   // 明確的列表意圖
-  if (LIST_KEYWORDS.some(kw => stepSummary.includes(kw))) return 'list'
+  if (stepSummaryMatches(stepSummary, LIST_KEYWORDS)) return 'list'
 
   // 不傳 ID 且沒有其他業務參數 → 列表
   if (!hasId && businessParams.length === 0) return 'list'
@@ -3558,7 +3587,7 @@ function findBranchForIntent(branches: ActionBranch[], intent: string): ActionBr
 
 /** 生成不會衝突的 _stepSummary 值 */
 function generateSafeSummary(intent: string): string {
-  return STANDARD_SUMMARIES[intent as keyof typeof STANDARD_SUMMARIES] || '查詢列表'
+  return STANDARD_SUMMARIES[intent as keyof typeof STANDARD_SUMMARIES] || 'List Items'
 }
 
 /** 驗證並修正前端組件中的 _stepSummary 呼叫 */

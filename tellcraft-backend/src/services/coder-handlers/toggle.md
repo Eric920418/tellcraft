@@ -1,14 +1,14 @@
 
-## 切換操作 Handler
+## Toggle Handler
 ```typescript
 const entityId = input.id || input.xxxId
-if (!entityId) throw new Error('缺少 ID 參數')
+if (!entityId) throw new Error('id is required')
 
-// 查找當前狀態
+// Check current state
 const [existing] = await sql`SELECT * FROM table_name WHERE id = ${entityId} AND deleted_at IS NULL`
-if (!existing) throw new Error('不存在或已被刪除')
+if (!existing) throw new Error('not found or already deleted')
 
-// 切換布林欄位（如 is_completed）
+// Toggle the boolean column (e.g. is_completed)
 const [row] = await sql`
   UPDATE table_name SET is_xxx = NOT is_xxx, updated_at = NOW()
   WHERE id = ${entityId}
@@ -16,4 +16,4 @@ const [row] = await sql`
 `
 return { __status: 200, ...row }
 ```
-重點：先 SELECT 確認存在且未刪除，再 UPDATE SET field = NOT field。
+Key point: SELECT first to confirm existence and non-deletion, then `UPDATE SET field = NOT field`.

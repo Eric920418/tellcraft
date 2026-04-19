@@ -1,10 +1,10 @@
 
-## 建立操作 Handler
+## Create Handler
 ```typescript
-// 前置（參數）驗證
-if (!input.xxx) throw new Error('xxx 必須提供')
+// Precondition (params) validation
+if (!input.xxx) throw new Error('xxx is required')
 
-// INSERT + RETURNING *（必須展開 row 到回傳物件）
+// INSERT + RETURNING * (MUST spread row into the returned object)
 const [row] = await sql`
   INSERT INTO table_name (id, user_id, ..., created_at, updated_at)
   VALUES (gen_random_uuid(), ${userId}, ..., NOW(), NOW())
@@ -12,4 +12,4 @@ const [row] = await sql`
 `
 return { __status: 201, ...row }
 ```
-重點：__status: 201，RETURNING * 展開到 return。
+Key points: `__status: 201`, spread `RETURNING *` into the return object.

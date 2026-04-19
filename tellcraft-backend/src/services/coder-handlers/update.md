@@ -1,14 +1,14 @@
 
-## 更新操作 Handler
+## Update Handler
 ```typescript
 const entityId = input.id || input.xxxId
-if (!entityId) throw new Error('缺少 ID 參數')
+if (!entityId) throw new Error('id is required')
 
-// 前置（狀態）驗證：必須存在且屬於當前使用者
+// Precondition (state) validation: must exist and belong to the current user
 const existing = await sql`SELECT * FROM table_name WHERE id = ${entityId} AND user_id = ${userId}`
-if (existing.length === 0) throw new Error('不存在或不屬於當前使用者')
+if (existing.length === 0) throw new Error('not found or not owned by current user')
 
-// UPDATE + RETURNING *（必須展開 row 到回傳物件）
+// UPDATE + RETURNING * (MUST spread row into the returned object)
 const [row] = await sql`
   UPDATE table_name SET col = ${val}, updated_at = NOW()
   WHERE id = ${entityId}
@@ -16,4 +16,4 @@ const [row] = await sql`
 `
 return { __status: 200, ...row }
 ```
-重點：__status: 200，RETURNING * 展開到 return。
+Key points: `__status: 200`, spread `RETURNING *` into the return object.

@@ -1,5 +1,5 @@
 
-## 列表查詢 Handler
+## List Query Handler
 ```typescript
 function _c(row: any) {
   if (!row) return row
@@ -19,9 +19,9 @@ const result = Array.from(rows).map(_c)
 ;(result as any).__status = 200
 return result
 ```
-重點：
-- 回傳 Array（不要包成 { items: rows }），在 Array 上設 __status = 200
-- 必須用 _c() 做 snake_to_camel 轉換（PostgreSQL 回傳 snake_case，BDD 期望 camelCase）
-- 只有 Schema DDL 明確定義了 deleted_at 欄位時才加 WHERE deleted_at IS NULL。Schema 沒有 deleted_at 就不加！
-- **篩選/排序參數都是選填的**：不提供 filter/status 時查全部（不 throw），不提供 orderBy 時用預設排序
-- **禁止** `if (!input.filter) throw`，改用 `const filter = input.filter || 'all'` 提供預設值
+Key points:
+- Return an Array (do NOT wrap as `{ items: rows }`); set `__status = 200` on the Array itself.
+- MUST use `_c()` for snake_to_camel conversion (PostgreSQL returns snake_case, BDD expects camelCase).
+- Only add `WHERE deleted_at IS NULL` when the Schema DDL explicitly defines `deleted_at`. If Schema doesn't have it, don't add!
+- **Filter/sort parameters are optional**: if `filter`/`status` is absent, return everything (don't throw); if `orderBy` is absent, use a default sort order.
+- **Do NOT** write `if (!input.filter) throw`. Use `const filter = input.filter || 'all'` to provide a default.

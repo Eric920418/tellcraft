@@ -111,18 +111,18 @@ describe('典型 action 場景', () => {
   it('CRUD action（hasStateRules + hasResponseRules + column-alias）', () => {
     const ids: CoderHandlerId[] = ['create', 'update', 'delete', 'query-list', 'query-single', 'column-alias']
     const joined = getCoderHandlersJoined(ids)
-    // 必含每個 handler 的標題
-    expect(joined).toContain('## 建立操作 Handler')
-    expect(joined).toContain('## 更新操作 Handler')
-    expect(joined).toContain('## 刪除操作 Handler')
-    expect(joined).toContain('## 列表查詢 Handler')
-    expect(joined).toContain('## 單筆查詢 Handler')
-    expect(joined).toContain('## 欄位別名')
+    // 必含每個 handler 的標題（L13 英文化後）
+    expect(joined).toContain('## Create Handler')
+    expect(joined).toContain('## Update Handler')
+    expect(joined).toContain('## Delete Handler')
+    expect(joined).toContain('## List Query Handler')
+    expect(joined).toContain('## Single-Record Query Handler')
+    expect(joined).toContain('## Column Aliasing')
   })
 
   it('auth action（只注入 auth handler）', () => {
     const joined = getCoderHandlersJoined(['auth'])
-    expect(joined).toContain('## 認證操作 Handler')
+    expect(joined).toContain('## Auth Handler')
     expect(joined).toContain('bcrypt')
     expect(joined).toContain('jwt.sign')
   })
