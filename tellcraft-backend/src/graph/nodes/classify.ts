@@ -64,6 +64,22 @@ export async function classifyNode(
   // ── 2. 讀取現有 FlowState ──
   const flowState = await getFlowState(redis, state.conversationId)
 
+  // ── 2.5. 特殊 token 優先路由（L22：舊 BullMQ 路徑 orchestrator.ts L987 對應邏輯）
+  //        LangGraph 原本只在 SPECIAL_TOKENS 存 token 不做路由，
+  //        導致 uiux_complete + __connect_database__ 被當 continue_flow → fallback
+  const trimmedMsg = trimmed
+  if (trimmedMsg === '__connect_database__') {
+    // 觸發 Coder Skill（相當於舊 orchestrator handleProcessMessage L987 的攔截）
+    return { skillIntent: 'coder', specialToken: token, phase: flowState?.phase || 'idle' }
+  }
+  if (trimmedMsg === '__verify_backend__') {
+    // 只重跑 SpecFormula Testing
+    return { skillIntent: 'coder', specialToken: token, phase: flowState?.phase || 'idle' }
+  }
+  if (trimmedMsg === '__retry_coder__') {
+    return { skillIntent: 'coder', specialToken: token, phase: flowState?.phase || 'idle' }
+  }
+
   // ── 3. 已有進行中的 flow → 直接跳到 phase_router ──
   if (flowState && flowState.phase && flowState.phase !== 'idle') {
     return {
