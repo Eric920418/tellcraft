@@ -11,6 +11,10 @@ import {
   topologicalSort,
   getRequiredColumns,
   sampleValueForColumn,
+  extractSingleLayerVarRefs,
+  extractExistingDeclarationIndexes,
+  autoFillSingleLayerVarGaps,
+  removeEmptyEntitySetup,
 } from '../services/deterministic-feature-fix'
 import { DatabaseSchema, TableDefinition, type ColumnDefinition } from '../lib/specformula/spec/data/models'
 
@@ -422,5 +426,215 @@ describe('autoDeclareUndeclaredVars', () => {
     const result = autoDeclareUndeclaredVars(content, [], schemas)
     expect(result.content).toBe(content)
     expect(result.declaredEntities).toEqual([])
+  })
+})
+
+// ============================================================
+// L19.P0.1：extractSingleLayerVarRefs
+// ============================================================
+
+describe('extractSingleLayerVarRefs', () => {
+  const schemas = makeSchema({
+    Section: { tableName: 'sections', cols: [col('id', 'UUID', { primaryKey: true })] },
+    PageSection: { tableName: 'page_sections', cols: [col('id', 'UUID', { primaryKey: true })] },
+    MenuItem: { tableName: 'menu_items', cols: [col('id', 'UUID', { primaryKey: true })] },
+  })
+
+  it('解析 `$section6Id` → Section idx 6 field id', () => {
+    const refs = extractSingleLayerVarRefs('some $section6Id here', schemas)
+    expect(refs).toEqual([{ varName: 'section6Id', entity: 'Section', index: 6, field: 'id' }])
+  })
+
+  it('長 prefix 優先：`$pageSection2Id` → PageSection（不是 Section）', () => {
+    const refs = extractSingleLayerVarRefs('and $pageSection2Id here', schemas)
+    expect(refs[0].entity).toBe('PageSection')
+    expect(refs[0].index).toBe(2)
+  })
+
+  it('多行 + 去重', () => {
+    const content = `line1: $section6Id
+line2: $section6Id
+line3: $pageSection1Id`
+    const refs = extractSingleLayerVarRefs(content, schemas)
+    const entities = refs.map(r => `${r.entity}-${r.index}`).sort()
+    expect(entities).toEqual(['PageSection-1', 'Section-6'])
+  })
+
+  it('跳過 `$Entity.field` 格式（L17 主流程已處理）', () => {
+    const refs = extractSingleLayerVarRefs('$Section.id not this', schemas)
+    expect(refs).toEqual([])
+  })
+
+  it('entity 不在 schema → 解析失敗略過', () => {
+    const refs = extractSingleLayerVarRefs('$unknownEntity3Id', schemas)
+    expect(refs).toEqual([])
+  })
+
+  it('非 camelCase pattern → 略過', () => {
+    expect(extractSingleLayerVarRefs('$notnull', schemas)).toEqual([])
+    expect(extractSingleLayerVarRefs('$sectionId', schemas)).toEqual([])  // 無數字
+    expect(extractSingleLayerVarRefs('$Section6Id', schemas)).toEqual([])  // 大寫開頭（non camel）
+  })
+
+  it('field 其他欄位（非 id）', () => {
+    const refs = extractSingleLayerVarRefs('$section3Name', schemas)
+    expect(refs).toEqual([{ varName: 'section3Name', entity: 'Section', index: 3, field: 'name' }])
+  })
+})
+
+// ============================================================
+// L19.P0.1：extractExistingDeclarationIndexes
+// ============================================================
+
+describe('extractExistingDeclarationIndexes', () => {
+  it('抓所有 >EntityN.field 宣告', () => {
+    const content = `Background:
+      | >Section1.id | >Section2.id | >PageSection1.id |
+      | <s1           | <s2           | <p1              |
+    Another:
+      | >Section3.id |`
+    const result = extractExistingDeclarationIndexes(content)
+    expect(result.get('Section')).toEqual(new Set([1, 2, 3]))
+    expect(result.get('PageSection')).toEqual(new Set([1]))
+  })
+
+  it('無 > 宣告 → 空 map', () => {
+    const result = extractExistingDeclarationIndexes('no declarations here')
+    expect(result.size).toBe(0)
+  })
+})
+
+// ============================================================
+// L19.P0.1：autoFillSingleLayerVarGaps（整合）
+// ============================================================
+
+describe('autoFillSingleLayerVarGaps', () => {
+  it('引用 $section6Id 但只宣告 >Section1 → 補 >Section6', () => {
+    const schemas = makeSchema({
+      Section: {
+        tableName: 'sections',
+        cols: [
+          col('id', 'UUID', { primaryKey: true, notNull: true }),
+          col('name', 'TEXT', { notNull: true }),
+        ],
+      },
+    })
+    const content = `Feature: Test
+  Background:
+    Given 準備一個Section, with table:
+      | >Section1.id | name |
+      | <section1Id  | A    |
+  Rule: R
+    Example: ok
+      When X $section6Id here`
+    const result = autoFillSingleLayerVarGaps(content, schemas)
+    expect(result.filledGaps).toHaveLength(1)
+    expect(result.filledGaps[0].entity).toBe('Section')
+    expect(result.filledGaps[0].index).toBe(6)
+    expect(result.content).toContain('>Section6.id')
+    expect(result.content).toContain('<section6Id')
+  })
+
+  it('引用與宣告都對齊 → 無 gap', () => {
+    const schemas = makeSchema({
+      Section: { tableName: 'sections', cols: [col('id', 'UUID', { primaryKey: true, notNull: true })] },
+    })
+    const content = `  Background:
+    Given 準備一個Section, with table:
+      | >Section1.id |
+      | <section1Id  |
+  Example: X uses $section1Id`
+    const result = autoFillSingleLayerVarGaps(content, schemas)
+    expect(result.filledGaps).toEqual([])
+    expect(result.content).toBe(content)
+  })
+
+  it('多個 gap：$section5Id + $pageSection2Id 全部補', () => {
+    const schemas = makeSchema({
+      Section: { tableName: 'sections', cols: [col('id', 'UUID', { primaryKey: true, notNull: true })] },
+      PageSection: { tableName: 'page_sections', cols: [col('id', 'UUID', { primaryKey: true, notNull: true })] },
+    })
+    const content = `Feature: T
+  Rule: R
+    Example: uses $section5Id and $pageSection2Id`
+    const result = autoFillSingleLayerVarGaps(content, schemas)
+    expect(result.filledGaps).toHaveLength(2)
+    expect(result.content).toContain('>Section5.id')
+    expect(result.content).toContain('>PageSection2.id')
+  })
+})
+
+// ============================================================
+// L19.P0.2：removeEmptyEntitySetup
+// ============================================================
+
+describe('removeEmptyEntitySetup', () => {
+  it('刪除 DataTable 全空的 entity_setup', () => {
+    const content = `Feature: T
+  Rule: R
+    Example: no data
+      Given 準備一個SeoSetting, with table:
+        | siteTitle | siteDescription |
+        |           |                 |
+      Then response`
+    const result = removeEmptyEntitySetup(content)
+    expect(result.removed).toEqual(['SeoSetting'])
+    expect(result.content).not.toContain('準備一個SeoSetting')
+    expect(result.content).not.toContain('siteTitle')
+    expect(result.content).toContain('Then response')
+  })
+
+  it('刪除只 header 無 data row 的 entity_setup', () => {
+    const content = `    Given 準備一個Store, with table:
+      | name | status |
+    Then X`
+    const result = removeEmptyEntitySetup(content)
+    expect(result.removed).toEqual(['Store'])
+    expect(result.content).not.toContain('準備一個Store')
+  })
+
+  it('保留合法 placeholder（>Entity.id + <executionKey 的純宣告）', () => {
+    const content = `    Given 準備一個Store, with table:
+      | >Store1.id |
+      | <store1Id  |`
+    const result = removeEmptyEntitySetup(content)
+    expect(result.removed).toEqual([])
+    expect(result.content).toBe(content)
+  })
+
+  it('保留有業務值的 entity_setup', () => {
+    const content = `    Given 準備一個Product, with table:
+      | name    | price |
+      | Widget  | 99    |`
+    const result = removeEmptyEntitySetup(content)
+    expect(result.removed).toEqual([])
+    expect(result.content).toBe(content)
+  })
+
+  it('null 字面值視為空', () => {
+    const content = `    Given 準備一個X, with table:
+      | a    | b    |
+      | null | NULL |`
+    const result = removeEmptyEntitySetup(content)
+    expect(result.removed).toEqual(['X'])
+  })
+
+  it('多步驟：只刪空的、保留有資料的', () => {
+    const content = `Feature: T
+    Given 準備一個Store, with table:
+      | name    |
+      | MyStore |
+    And 準備一個Empty, with table:
+      | field |
+      |       |
+    And 準備一個Another, with table:
+      | x |
+      | y |`
+    const result = removeEmptyEntitySetup(content)
+    expect(result.removed).toEqual(['Empty'])
+    expect(result.content).toContain('MyStore')
+    expect(result.content).toContain('準備一個Store')
+    expect(result.content).toContain('準備一個Another')
+    expect(result.content).not.toContain('準備一個Empty')
   })
 })

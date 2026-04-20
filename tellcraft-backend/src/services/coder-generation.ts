@@ -306,6 +306,23 @@ else { throw new Error('Unsupported operation') }
 \`\`\`
 Use the **exact verbatim text** of the Feature's When step summary as the \`===\` condition (not \`includes\`, to prevent substring collisions).
 
+## Input Parameter Naming (CRITICAL — L19.P2)
+**Your \`input.X\` names MUST match the Feature's DataTable headers EXACTLY.**
+
+Example: Feature declares
+\`\`\`
+When (UID="$User.id") Get Portfolio Section, call table:
+  | sectionId        |
+  | $pageSection1.id |
+\`\`\`
+→ Your action MUST read \`input.sectionId\` (NOT \`input.id\` even if the summary "Get Portfolio Section" sounds like single-record fetch).
+
+**Rules**:
+- \`Get X\` / \`Get X Section\` with \`sectionId\` header → use \`input.sectionId\`, NOT \`input.id\`
+- Validation: \`if (!input.sectionId) throw new Error('sectionId is required')\` — the error message should reference the actual param name
+- Do NOT guess or rename: the header in Feature DataTable is the contract
+- When in doubt, look at the Feature's \`call table:\` headers (ignore \`_stepSummary\` and \`userId\` which are system params)
+
 ## Date Fields
 DATE → \`row.x instanceof Date ? row.x.toISOString().split('T')[0] : row.x\`
 TIMESTAMP → \`row.x instanceof Date ? row.x.toISOString() : row.x\`

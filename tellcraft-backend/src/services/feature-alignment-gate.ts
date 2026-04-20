@@ -26,6 +26,7 @@ function alignmentCheckToRootCause(checkName: string): EnrichableRootCause {
     case 'summary_action_match': return 'api_spec_mismatch'
     case 'semantic_consistency': return 'unknown'  // semantic 矛盾的修復策略由 issue description 本身提供，不走 rootCause 路徑
     case 'check_constraint': return 'unknown'  // L17.P1：CHECK 約束違反，fix hint 由 description 本身提供（含允許值）
+    case 'pagination_mismatch': return 'unknown'  // L19.P1：pagination/DataTable 衝突，fix hint 由 description 提供（二選一改法）
     default: return 'unknown'
   }
 }
@@ -777,7 +778,81 @@ export async function runAlignmentChecks(input: AlignmentGateInput): Promise<Ali
     }
   }
 
+  // ---- Check 9: Pagination 參數 vs DataTable 驗證衝突（L19.P1） ----
+  // 場景：Feature 的 When 步驟 api_call 傳 `page`/`pageSize`/`limit`/`offset` headers → Coder 合理
+  //   wrap 回應為 `{items: [...], total, page, pageSize}`。但 Feature 的 Then `...回應, with table:`
+  //   DataTable 驗證預設把 response 當純 array → 驗證永遠失敗（實際 List Media Files 實測就是這個）。
+  // 解法：Feature 層二選一：用 `with JSON:` 指定 `$.items[*].id`，或移除 pagination input headers。
+  for (const feature of input.features) {
+    const displayName = feature.name || feature.actionName
+    const pr = detectPaginationConflict(feature.content)
+    if (pr.hasPaginationInput && pr.hasDataTableValidation && pr.paginationParams.length > 0) {
+      issues.push({
+        featureName: displayName,
+        checkName: 'pagination_mismatch',
+        severity: 'error',
+        description: `Feature "${displayName}" 的 api_call 含分頁參數 [${pr.paginationParams.join(', ')}]，Coder 會回 \`{items:[...], total, page, pageSize}\` wrap 格式；但 Then 步驟用 "with table:" DataTable 驗證預設當純陣列 → runtime 驗證必失敗。解法二選一：(1) 改用 \`with JSON:\` 並用 \`$.items[*].id\` 指定路徑；(2) 移除 api_call 的分頁參數（測試層不分頁）。`,
+      })
+    }
+  }
+
   return issues
+}
+
+/**
+ * L19.P1: 偵測 Feature content 的 pagination input vs DataTable validation 衝突
+ */
+function detectPaginationConflict(content: string): {
+  hasPaginationInput: boolean
+  hasDataTableValidation: boolean
+  paginationParams: string[]
+} {
+  const paginationKeywords = ['page', 'pageSize', 'pagesize', 'limit', 'offset', 'perPage', 'per_page']
+  const lines = content.split('\n')
+  const paginationParams = new Set<string>()
+  let hasDataTableValidation = false
+
+  for (let i = 0; i < lines.length; i++) {
+    const trimmed = lines[i].trim()
+
+    // api_call 步驟：收集下一行 DataTable header
+    if (/(?:When|And)\s+(?:\(No Actor\)|\(UID="[^"]*"\))\s+.+?[,，]\s*call\s+table:/i.test(trimmed)) {
+      for (let j = i + 1; j < lines.length; j++) {
+        const tl = lines[j].trim()
+        if (!tl.startsWith('|')) break
+        // 第一行是 header
+        const cells = tl.split('|').map(c => c.trim()).filter(Boolean)
+        for (const cell of cells) {
+          const clean = cell.replace(/^[>$<]/, '')
+          if (paginationKeywords.some(kw => clean.toLowerCase() === kw.toLowerCase())) {
+            paginationParams.add(clean)
+          }
+        }
+        break  // 只看 header，不看 data row
+      }
+    }
+
+    // Then `{summary}(STATUS)回應, with table:` — 2xx status 才算（錯誤情境沒 pagination 衝突）
+    const thenMatch = trimmed.match(/^(?:Then|And)\s+.+?\((\d+)\)回應\s*[,，]\s*with\s+table:/i)
+    if (thenMatch) {
+      const status = parseInt(thenMatch[1], 10)
+      if (status >= 200 && status < 300) {
+        // 確認有 ≥1 data row（header + 至少 1 row）
+        let tableRowCount = 0
+        for (let j = i + 1; j < lines.length; j++) {
+          if (lines[j].trim().startsWith('|')) tableRowCount++
+          else break
+        }
+        if (tableRowCount >= 2) hasDataTableValidation = true  // 1 header + ≥1 data row
+      }
+    }
+  }
+
+  return {
+    hasPaginationInput: paginationParams.size > 0,
+    hasDataTableValidation,
+    paginationParams: [...paginationParams],
+  }
 }
 
 // ============================================================
@@ -903,6 +978,40 @@ async function autoFixFeatures(
         }
       } catch (e) {
         logger.warn({ err: e, feature: displayName }, 'Deterministic 補宣告失敗，fallthrough 到 LLM')
+      }
+    }
+
+    // L19.P0.1 + P0.2：對所有 feature 再跑一次單層 VAR gap 填補 + 空 entity_setup 刪除
+    // 這兩個 pass 不依賴 issue list（主動 scan content），所以對「Check 5 抓不到但 runtime 會爆」
+    // 的場景也有效（例如 $section6Id 這類單層變數，Check 5 只偵測 $Entity.field 格式）
+    const { autoFillSingleLayerVarGaps, removeEmptyEntitySetup } = await import('./deterministic-feature-fix')
+    for (let fi = 0; fi < workingFeatures.length; fi++) {
+      const displayName = workingFeatures[fi].name || workingFeatures[fi].actionName
+      try {
+        const gapResult = autoFillSingleLayerVarGaps(workingFeatures[fi].content, schemasForRepair)
+        if (gapResult.filledGaps.length > 0) {
+          workingFeatures[fi] = { ...workingFeatures[fi], content: gapResult.content }
+          deterministicFixCount += gapResult.filledGaps.length
+          recordTelemetry({
+            skillName: 'feature_gate', eventType: 'alignment_fixed',
+            patternKey: 'deterministic_single_layer_vars', outcome: 'repaired', phase: 'feature_alignment_gate',
+            userId: trackingContext?.userId, conversationId: trackingContext?.conversationId,
+            payload: { feature: displayName, gapCount: gapResult.filledGaps.length },
+          }).catch(() => {})
+        }
+        const emptyResult = removeEmptyEntitySetup(workingFeatures[fi].content)
+        if (emptyResult.removed.length > 0) {
+          workingFeatures[fi] = { ...workingFeatures[fi], content: emptyResult.content }
+          deterministicFixCount += emptyResult.removed.length
+          recordTelemetry({
+            skillName: 'feature_gate', eventType: 'alignment_fixed',
+            patternKey: 'deterministic_removed_empty_setup', outcome: 'repaired', phase: 'feature_alignment_gate',
+            userId: trackingContext?.userId, conversationId: trackingContext?.conversationId,
+            payload: { feature: displayName, removedCount: emptyResult.removed.length, entities: emptyResult.removed },
+          }).catch(() => {})
+        }
+      } catch (e) {
+        logger.warn({ err: e, feature: displayName }, 'L19 deterministic 單層 VAR/空 setup 修復失敗，fallthrough')
       }
     }
   }

@@ -313,6 +313,205 @@ export function autoDeclareUndeclaredVars(
   return { content: newContent, declaredEntities: declared, skippedWithReason: skipped }
 }
 
+// ============================================================
+// L19.P0.1：單層 VAR 編號補齊
+// 處理 LLM 引用 $section6Id / $pageSection2Id 等單層 camelCase 變數
+// ============================================================
+
+export interface SingleLayerRef {
+  varName: string
+  entity: string
+  index: number
+  field: string
+}
+
+function escapeRegex(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+
+/** 切割 `| a | b | c |` → `['a', 'b', 'c']`，保留中間空 cell */
+function splitDataTableRow(text: string): string[] {
+  const parts = text.split('|').map(c => c.trim())
+  if (parts.length > 0 && parts[0] === '') parts.shift()
+  if (parts.length > 0 && parts[parts.length - 1] === '') parts.pop()
+  return parts
+}
+
+/**
+ * 掃 content 的所有單層 camelCase VAR 引用，對照 schema entities 反推。
+ * 範例：`$pageSection6Id` + schema 有 `PageSection` → { entity: 'PageSection', index: 6, field: 'id' }
+ * 多候選時取長 prefix 優先（避免誤拆 `pageSection6Id` 成 `Section`）。
+ */
+export function extractSingleLayerVarRefs(content: string, schemas: DatabaseSchema[]): SingleLayerRef[] {
+  const matches = new Set<string>()
+  const pattern = /\$([a-z][a-zA-Z0-9]*)(?![.\w])/g
+  let m: RegExpExecArray | null
+  while ((m = pattern.exec(content)) !== null) {
+    matches.add(m[1])
+  }
+
+  const entities: string[] = []
+  for (const schema of schemas) {
+    for (const entity of schema.getTablesByEntityName().keys()) entities.push(entity)
+  }
+  entities.sort((a, b) => b.length - a.length)
+
+  const refs: SingleLayerRef[] = []
+  for (const varName of matches) {
+    for (const entity of entities) {
+      const entityLower = entity.charAt(0).toLowerCase() + entity.slice(1)
+      const re = new RegExp(`^${escapeRegex(entityLower)}(\\d+)([A-Z]\\w*)$`)
+      const match = varName.match(re)
+      if (match) {
+        const index = parseInt(match[1], 10)
+        const fieldUpper = match[2]
+        const field = fieldUpper.charAt(0).toLowerCase() + fieldUpper.slice(1)
+        refs.push({ varName, entity, index, field })
+        break
+      }
+    }
+  }
+  return refs
+}
+
+/** 掃 content 現有 `>EntityN.field` 宣告，建 Map<entity, Set<index>> */
+export function extractExistingDeclarationIndexes(content: string): Map<string, Set<number>> {
+  const result = new Map<string, Set<number>>()
+  const pattern = />([A-Z][A-Za-z]*?)(\d+)\.(\w+)/g
+  let m: RegExpExecArray | null
+  while ((m = pattern.exec(content)) !== null) {
+    const entity = m[1]
+    const index = parseInt(m[2], 10)
+    if (!result.has(entity)) result.set(entity, new Set())
+    result.get(entity)!.add(index)
+  }
+  return result
+}
+
+/**
+ * L19.P0.1：deterministic 補單層 VAR 編號缺失的宣告。
+ * 場景：Feature 宣告 `>Section1.id ~ >Section5.id`，引用 `$section6Id` → 無對應 → runtime 爆
+ * 解法：掃引用 → 對比現有宣告 → 缺失 index 補 `>Entity<N>.id + <entity<N>Id`
+ */
+export function autoFillSingleLayerVarGaps(
+  content: string,
+  schemas: DatabaseSchema[],
+): { content: string; filledGaps: SingleLayerRef[] } {
+  const refs = extractSingleLayerVarRefs(content, schemas)
+  if (refs.length === 0) return { content, filledGaps: [] }
+
+  const existing = extractExistingDeclarationIndexes(content)
+  const gaps: SingleLayerRef[] = []
+  for (const ref of refs) {
+    const declared = existing.get(ref.entity)
+    if (!declared || !declared.has(ref.index)) gaps.push(ref)
+  }
+  if (gaps.length === 0) return { content, filledGaps: [] }
+
+  const lines: string[] = []
+  for (const gap of gaps) {
+    const found = DatabaseSchema.findSchemaAndTable(schemas, gap.entity)
+    if (!found) continue
+    const { table } = found
+    const required = getRequiredColumns(table)
+
+    const entityLower = gap.entity.charAt(0).toLowerCase() + gap.entity.slice(1)
+    const fieldUpper = gap.field.charAt(0).toUpperCase() + gap.field.slice(1)
+    const execKey = `${entityLower}${gap.index}${fieldUpper}`
+    const headers = [`>${gap.entity}${gap.index}.${gap.field}`, ...required.map(c => c.name)]
+    const dataCells = [
+      `<${execKey}`,
+      ...required.map(c => sampleValueForColumn(c, (col) => {
+        if (!col.foreignKey) return null
+        const refTable = col.foreignKey.split('.')[0]?.toLowerCase()
+        if (!refTable) return null
+        for (const schema of schemas) {
+          const byEntity = schema.getTablesByEntityName()
+          for (const [ent, tbl] of byEntity) {
+            if (tbl.tableName.toLowerCase() === refTable) return `$${ent}1.id`
+          }
+        }
+        return null
+      })),
+    ]
+
+    lines.push(`    And 準備一個${gap.entity}, with table:`)
+    lines.push(`      | ${headers.join(' | ')} |`)
+    lines.push(`      | ${dataCells.join(' | ')} |`)
+  }
+
+  if (lines.length === 0) return { content, filledGaps: [] }
+
+  const newContent = insertIntoBackground(content, lines)
+  logger.info({ gaps }, 'Deterministic 補單層 VAR 編號完成')
+  return { content: newContent, filledGaps: gaps }
+}
+
+// ============================================================
+// L19.P0.2：空 entity_setup 刪除
+// ============================================================
+
+/**
+ * 掃 Feature content 的 entity_setup 步驟。
+ * 若 DataTable 只有 header 或所有 data cells 全空 → 刪除整個步驟。
+ *
+ * 保留規則：header 有 `>Entity.field` + data 有 `<executionKey` → 合法 VAR placeholder，保留。
+ */
+export function removeEmptyEntitySetup(content: string): { content: string; removed: string[] } {
+  const lines = content.split('\n')
+  const removed: string[] = []
+  const keepMask = new Array(lines.length).fill(true)
+
+  for (let i = 0; i < lines.length; i++) {
+    const trimmed = lines[i].trim()
+    const match = trimmed.match(/^(?:Given|When|Then|And|But)\s+準備一個\s*(.+?)\s*[,，]\s*with\s+table:/i)
+    if (!match) continue
+    const entityName = match[1].trim()
+
+    const tableStart = i + 1
+    let tableEnd = tableStart - 1
+    for (let j = tableStart; j < lines.length; j++) {
+      if (lines[j].trim().startsWith('|')) tableEnd = j
+      else break
+    }
+    if (tableEnd < tableStart) continue
+
+    const headerLine = lines[tableStart]
+    const dataLines = lines.slice(tableStart + 1, tableEnd + 1)
+    const headers = splitDataTableRow(headerLine.trim())
+    const hasVarDeclaration = headers.some(h => h.startsWith('>'))
+
+    let hasNonEmptyData = false
+    let hasExecutionKey = false
+    for (const dl of dataLines) {
+      const cells = splitDataTableRow(dl.trim())
+      for (const c of cells) {
+        if (c === '' || c === 'null' || c === 'NULL') continue
+        if (c.startsWith('<')) {
+          hasExecutionKey = true
+          continue
+        }
+        hasNonEmptyData = true
+        break
+      }
+      if (hasNonEmptyData) break
+    }
+
+    const isLegitPlaceholder = hasVarDeclaration && hasExecutionKey
+    if (hasNonEmptyData || isLegitPlaceholder) continue
+
+    for (let k = i; k <= tableEnd; k++) keepMask[k] = false
+    removed.push(entityName)
+    i = tableEnd
+  }
+
+  if (removed.length === 0) return { content, removed: [] }
+
+  const newLines = lines.filter((_, idx) => keepMask[idx])
+  logger.info({ removed }, 'Deterministic 刪除空 entity_setup')
+  return { content: newLines.join('\n'), removed }
+}
+
 /**
  * 把新 step lines 插到 Feature 的 Background 區塊。
  *   有 Background：在最末 data row 後 append，關鍵字改為 And

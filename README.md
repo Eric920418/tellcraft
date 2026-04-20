@@ -1245,6 +1245,43 @@ psql "$DATABASE_URL" -f tellcraft-backend/migrations/xxx.sql
 - **`sanitizeFeatureContent()`**：零 LLM 自動修正 — `回應, with JSON:` → `回應, with table:`、`回應為, with JSON:` → `回應, with table:`、entity_validate header `>id` → `id`、entity 花括號剝除 `準備一個{顧客}` → `準備一個顧客`（規則 4；LLM 偶爾照抄 prompt 模板 `{entity}` 佔位符 → SpecFormula regex 字元類不含 `{}` → matchStepToInstruction 100% 失敗；單元測試 `sanitize-feature-content.test.ts` 覆蓋 6 個 case）
 - **formulation prompt 強化**：明確禁止 entity_validate 使用 `>contextKey`；`>contextKey`/`<executionKey` 只用於 Given 準備和 Then 回應
 
+### L19 剩餘 11 個失敗根因修復 — 衝 ~100%（2026-04-20）
+
+L13-L18 部署後 dogfood（session `ae96d4d4`）：**232/243 = 95.5%**（從 26.5% 大幅進步）。SSH VPS 抓 `worker-out.log` 分析剩 11 個失敗 → 4 類根因都在 L18 範圍外：
+
+**L19.P0.1 單層 VAR 編號補齊**（`deterministic-feature-fix.ts`）：
+- L17 Deterministic 只補 `Entity1`，LLM 引用 `$section6Id` / `$pageSection2Id`（camelCase 單層）不處理
+- 新 `extractSingleLayerVarRefs()` — 掃 `$camelCaseVar`，對照 schema entities 反推 `{entity, index, field}`，**長 prefix 優先**避免 `pageSection6Id` 被誤拆成 `Section`
+- 新 `extractExistingDeclarationIndexes()` — 掃 `>EntityN.field` 建 `Map<entity, Set<index>>`
+- 新 `autoFillSingleLayerVarGaps()` — 比對引用 vs 宣告，缺失 index 補 `>Entity<N>.id + <entity<N>Id`
+- 整合到 `autoFixFeatures`：deterministic pass 後主動 scan，不依賴 Check 5 issue
+
+**L19.P0.2 空 entity_setup 刪除**：
+- Feature 寫「準備一個SeoSetting + DataTable 全空」表達「DB 無資料」意圖，SpecFormula 不接受 → `沒有可插入的欄位`
+- 新 `removeEmptyEntitySetup()` — 掃 entity_setup，DataTable 只 header / data 全空 → 整段刪除
+- **保留合法 placeholder**：header 有 `>Entity.id` + data 有 `<executionKey` 的純 VAR 宣告不誤刪
+
+**L19.P1 Check 9 — pagination input vs DataTable validation 衝突**（`feature-alignment-gate.ts`）：
+- Feature api_call 傳 `page/pageSize/limit/offset` → Coder 合理 wrap `{items:[...], total, page, pageSize}`；但 Feature 的 `Then ... with table:` DataTable 驗證預設當純 array → 必失敗
+- 新 `detectPaginationConflict()` 偵測衝突，error 含二選一修復建議（`with JSON:` + `$.items[*].id` / 移除 pagination input）
+- 只對 2xx 狀態回應檢查（錯誤場景不誤報）
+
+**L19.P2 Coder param 名對齊強化**（`coder-generation.ts` BASE_PROMPT）：
+- Feature DataTable 傳 `sectionId`，Coder 看 `Get Portfolio Section` summary 誤以為單筆查 → 用 `input.id` → 回 400「缺少 ID 參數」
+- BASE_PROMPT 新增 **Input Parameter Naming (CRITICAL)** 段落：`input.X` 名**必須**匹配 Feature DataTable headers；錯誤訊息引用實際 param 名
+- 純 prompt 改動，無 AST 改寫（留給後續觀察頻率）
+
+**預期對照表（11 個失敗）**：
+
+| 失敗 | P0.1 | P0.2 | P1 | P2 |
+|------|:---:|:---:|:---:|:---:|
+| `$section6Id` / `$pageSection2Id`（×2） | ✅ | — | — | — |
+| SEO Settings 空欄位（×1） | — | ✅ | — | — |
+| Services Section title 不匹配（×2）/ Media Files id 不匹配（×2） | — | — | ✅ | — |
+| Portfolio Section 400 缺少 ID（×4） | — | — | — | ✅ |
+
+**測試**：58 files / 1493 tests 全綠（原 1458 + 35 新）；typecheck clean。
+
 ### L18 Alignment Gate 前移 Formulation 階段（2026-04-19）
 
 補 L1-L12 的結構性盲點：**L1-L6（BDD Formulation 驗證層）只檢查 Gherkin 格式 + Schema 對齊，不掃 Scenario 步驟文字裡 `$variable` 引用是否在 Background 有 `>` 宣告**。今天實測的 bug 就是從這個盲點穿過：
