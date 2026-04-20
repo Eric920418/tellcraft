@@ -480,6 +480,33 @@ line3: $pageSection1Id`
     const refs = extractSingleLayerVarRefs('$section3Name', schemas)
     expect(refs).toEqual([{ varName: 'section3Name', entity: 'Section', index: 3, field: 'name' }])
   })
+
+  it('L20.D：大寫 ID field 對齊 schema column', () => {
+    // 若 schema 有 `id` column → `$section6ID` 解析後 field 應該是 `id`（非 `iD`）
+    const schemasWithIdCol = makeSchema({
+      Section: {
+        tableName: 'sections',
+        cols: [col('id', 'UUID', { primaryKey: true, notNull: true })],
+      },
+    })
+    const refs = extractSingleLayerVarRefs('$section6ID', schemasWithIdCol)
+    expect(refs).toEqual([{ varName: 'section6ID', entity: 'Section', index: 6, field: 'id' }])
+  })
+
+  it('L20.D：snake_case column 對齊', () => {
+    // schema 有 `user_id` column，LLM 寫 `$order3UserId`（camelCase） → field 對齊 `user_id`
+    const schemasSnake = makeSchema({
+      Order: {
+        tableName: 'orders',
+        cols: [
+          col('id', 'UUID', { primaryKey: true }),
+          col('user_id', 'UUID', { notNull: true }),
+        ],
+      },
+    })
+    const refs = extractSingleLayerVarRefs('$order3UserId', schemasSnake)
+    expect(refs[0].field).toBe('user_id')
+  })
 })
 
 // ============================================================
@@ -611,12 +638,38 @@ describe('removeEmptyEntitySetup', () => {
     expect(result.content).toBe(content)
   })
 
-  it('null 字面值視為空', () => {
+  it('L20.B：單欄顯式 null → 視為合法 NULL 測試，保留', () => {
+    const content = `    Given 準備一個X, with table:
+      | status |
+      | null   |`
+    const result = removeEmptyEntitySetup(content)
+    expect(result.removed).toEqual([])
+    expect(result.content).toBe(content)
+  })
+
+  it('L20.B：2 欄位皆顯式 null → 保留（邊界）', () => {
     const content = `    Given 準備一個X, with table:
       | a    | b    |
       | null | NULL |`
     const result = removeEmptyEntitySetup(content)
+    expect(result.removed).toEqual([])
+  })
+
+  it('L20.B：3+ 欄位全 null → 仍刪除（避免 LLM 寫超大空表）', () => {
+    const content = `    Given 準備一個X, with table:
+      | a    | b    | c    |
+      | null | NULL | null |`
+    const result = removeEmptyEntitySetup(content)
     expect(result.removed).toEqual(['X'])
+  })
+
+  it('L20.A：缺 <executionKey 但有 >Entity.id header → 保留（合法 VAR 宣告 scaffold）', () => {
+    const content = `    Given 準備一個Page, with table:
+      | >Page1.id | title |
+      |           |       |`
+    const result = removeEmptyEntitySetup(content)
+    expect(result.removed).toEqual([])
+    expect(result.content).toBe(content)
   })
 
   it('多步驟：只刪空的、保留有資料的', () => {

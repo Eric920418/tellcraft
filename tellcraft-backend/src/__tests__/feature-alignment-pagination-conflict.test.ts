@@ -109,6 +109,45 @@ Feature: List Media Files
     expect(paginationErrors(issues)).toHaveLength(0)
   })
 
+  it('L20.F：cursor-based pagination 也偵測（$cursor / after / before）', async () => {
+    const feature = `# Action: list_media_files
+# [GET] /api/media
+# Summary: List Media Files
+Feature: List Media Files
+
+  Rule: 後置（回應）- Cursor pagination
+    Example: ok
+      When (No Actor) List Media Files, call table:
+        | cursor      | first |
+        | $lastToken  | 10    |
+      Then List Media Files(200)回應, with table:
+        | id       |
+        | $notnull |`
+    const issues = await runAlignmentChecks(makeInput(feature))
+    const errs = paginationErrors(issues)
+    expect(errs.length).toBeGreaterThan(0)
+    expect(errs[0].description).toContain('cursor')
+  })
+
+  it('L20.F：Relay style `first`/`last` 也偵測', async () => {
+    const feature = `# Action: list_media_files
+# [GET] /api/media
+# Summary: List Media Files
+Feature: List Media Files
+
+  Rule: R
+    Example: ok
+      When (No Actor) List Media Files, call table:
+        | first | after |
+        | 10    | abc   |
+      Then List Media Files(200)回應, with table:
+        | id       |
+        | $notnull |`
+    const issues = await runAlignmentChecks(makeInput(feature))
+    const errs = paginationErrors(issues)
+    expect(errs.length).toBeGreaterThan(0)
+  })
+
   it('✅ 失敗情境（4xx）不報 pagination 衝突', async () => {
     const feature = `# Action: list_media_files
 # [GET] /api/media

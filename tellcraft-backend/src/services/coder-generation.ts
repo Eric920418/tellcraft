@@ -263,7 +263,7 @@ export function parseActionsYml(actionsYml: string): {
 // Handler 化 System Prompt（按操作類型拆分，只注入相關的 handler）
 // ============================================================
 
-const BASE_PROMPT = `You are a Next.js + PostgreSQL backend engineer. Your task is to implement a pure-logic function based on an Action definition and BDD Feature spec.
+export const BASE_PROMPT = `You are a Next.js + PostgreSQL backend engineer. Your task is to implement a pure-logic function based on an Action definition and BDD Feature spec.
 
 ## ⚠️ LANGUAGE POLICY (MUST)
 - ALL generated TypeScript code (error messages, variable names, comments) MUST be in **ENGLISH**

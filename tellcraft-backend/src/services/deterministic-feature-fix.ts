@@ -362,13 +362,32 @@ export function extractSingleLayerVarRefs(content: string, schemas: DatabaseSche
       const entityLower = entity.charAt(0).toLowerCase() + entity.slice(1)
       const re = new RegExp(`^${escapeRegex(entityLower)}(\\d+)([A-Z]\\w*)$`)
       const match = varName.match(re)
-      if (match) {
-        const index = parseInt(match[1], 10)
-        const fieldUpper = match[2]
-        const field = fieldUpper.charAt(0).toLowerCase() + fieldUpper.slice(1)
-        refs.push({ varName, entity, index, field })
-        break
+      if (!match) continue
+
+      const index = parseInt(match[1], 10)
+      const fieldUpper = match[2]
+
+      // L20.D：field 名對齊 schema 實際 column 名（而非字面 lowercase 轉換）
+      // 場景：LLM 寫 `$section6ID`（大寫 ID）→ fieldUpper="ID" → 字面轉換成 "iD"（錯）
+      // 解法：查 schema column 是否有 match（試 snake_case / camelCase / lowercase）
+      const table = DatabaseSchema.findSchemaAndTable(schemas, entity)?.table
+      let field: string
+      if (table) {
+        const fuLower = fieldUpper.toLowerCase()
+        const fuSnake = fieldUpper.replace(/([a-z])([A-Z])/g, '$1_$2').toLowerCase()
+        // 先找完全匹配，再找 case-insensitive，最後 fallback 到 snake
+        const matched = table.columns.find(c => {
+          const cn = c.name.toLowerCase()
+          return cn === fuLower || cn === fuSnake
+        })
+        field = matched ? matched.name : fieldUpper.charAt(0).toLowerCase() + fieldUpper.slice(1)
+      } else {
+        // 無 table 可查 → 字面轉換（舊行為）
+        field = fieldUpper.charAt(0).toLowerCase() + fieldUpper.slice(1)
       }
+
+      refs.push({ varName, entity, index, field })
+      break
     }
   }
   return refs
@@ -483,10 +502,16 @@ export function removeEmptyEntitySetup(content: string): { content: string; remo
 
     let hasNonEmptyData = false
     let hasExecutionKey = false
+    let hasExplicitNull = false
     for (const dl of dataLines) {
       const cells = splitDataTableRow(dl.trim())
       for (const c of cells) {
-        if (c === '' || c === 'null' || c === 'NULL') continue
+        if (c === '') continue
+        if (c === 'null' || c === 'NULL') {
+          // L20.B：顯式 null 可能是合法 NULL 測試，標記但不算空
+          hasExplicitNull = true
+          continue
+        }
         if (c.startsWith('<')) {
           hasExecutionKey = true
           continue
@@ -497,8 +522,15 @@ export function removeEmptyEntitySetup(content: string): { content: string; remo
       if (hasNonEmptyData) break
     }
 
-    const isLegitPlaceholder = hasVarDeclaration && hasExecutionKey
-    if (hasNonEmptyData || isLegitPlaceholder) continue
+    // L20.A：isLegitPlaceholder 放寬 — 只要 header 有 `>Entity.*` 宣告就保留
+    //   理由：LLM 常漏加 `<executionKey`，但純 `>` 宣告仍是合法 VAR 宣告。
+    //   後續 L17/P0.1 的 deterministic 會補齊 executionKey；此處不該誤刪 scaffold。
+    const isLegitPlaceholder = hasVarDeclaration
+    // L20.B：顯式 null 測試場景
+    //   Feature 寫「準備一個Item, | status | \n | null |」意圖測 NULL 欄位 insert
+    //   若只有 1-2 個 header + data 顯式 null → 視為合法 NULL 測試不刪
+    const isExplicitNullTest = hasExplicitNull && headers.length <= 2
+    if (hasNonEmptyData || isLegitPlaceholder || isExplicitNullTest) continue
 
     for (let k = i; k <= tableEnd; k++) keepMask[k] = false
     removed.push(entityName)

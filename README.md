@@ -1245,6 +1245,41 @@ psql "$DATABASE_URL" -f tellcraft-backend/migrations/xxx.sql
 - **`sanitizeFeatureContent()`**：零 LLM 自動修正 — `回應, with JSON:` → `回應, with table:`、`回應為, with JSON:` → `回應, with table:`、entity_validate header `>id` → `id`、entity 花括號剝除 `準備一個{顧客}` → `準備一個顧客`（規則 4；LLM 偶爾照抄 prompt 模板 `{entity}` 佔位符 → SpecFormula regex 字元類不含 `{}` → matchStepToInstruction 100% 失敗；單元測試 `sanitize-feature-content.test.ts` 覆蓋 6 個 case）
 - **formulation prompt 強化**：明確禁止 entity_validate 使用 `>contextKey`；`>contextKey`/`<executionKey` 只用於 Given 準備和 Then 回應
 
+### L20 衍生風險深挖與修復（2026-04-20）
+
+L19 commit 後啟動 proactive audit（3 個並行 Explore agent），找出 12 個衍生風險：4 個 P0（可能實際觸發）、4 個 P1（建議）、4 個 P2（觀察）。L20 修 P0 全部 + P1 高 ROI 2 項。
+
+**P0.A / L20.A — `isLegitPlaceholder` 放寬**（`deterministic-feature-fix.ts`）：
+- 原邏輯 `hasVarDeclaration && hasExecutionKey` → LLM 漏填 `<executionKey` 時整段被誤刪 → 後續 `$Page1.id` 引用失敗
+- 改為 `hasVarDeclaration`（只要 header 有 `>Entity.*` 即保留）— LLM 常見的漏加 executionKey 場景不會再誤刪
+
+**P0.B / L20.B — null 字面值保護**：
+- 原邏輯把 `| null | NULL |` 當空 cell 直接刪 → LLM 明確測「INSERT NULL 到 nullable 欄位」的場景被誤刪
+- 加 `isExplicitNullTest = hasExplicitNull && headers.length <= 2` — 單欄或雙欄顯式 null 視為合法 NULL 測試；3+ 欄全 null 仍刪（避免 LLM 寫超大空表）
+
+**P0.C / L20.C — Schema 漂移 / Neon 重建時序**（`bdd-phases.ts`）：
+- 原時序：`deriveSchemaFromBdd` → Neon provisioning → Alignment Gate 可能修改 `fixedSchemaSql`
+- 結果：Neon 實際 schema 跟 Feature 期望 schema 不一致（Coder Testing SELECT 時爆 table not found）
+- 解法：Gate 若修改 schema / entityMapping → 呼叫 `ensureNeonSchemaFresh()`（L16.P0.2 helper）re-provision，並同步 local 變數供 Dry-Run 用
+
+**P0.D / L20.D — 大寫 field 對齊 schema**（`deterministic-feature-fix.ts`）：
+- LLM 寫 `$section6ID`（大寫 ID）→ regex match 後 `fieldUpper="ID"` → 字面 camelCase 轉 `iD`（錯）→ schema 找不到 column
+- 改為查 schema 實際 column 名（試 snake_case / camelCase / lowercase match）→ 對齊實際 column（如 `id`）
+
+**P1.E / L20.E — Coder param 對齊 golden test**：
+- L19.P2 加的 BASE_PROMPT "Input Parameter Naming (CRITICAL)" 段落無測試保障
+- 新 `coder-param-alignment.test.ts` 8 case：驗 BASE_PROMPT 含關鍵段落、反例（`sectionId` vs `input.id`）、不退化（保 LANGUAGE POLICY / 不回中文範例）
+- 未來有人動 prompt 結構會立刻爆測試 → prompt 穩定性守門
+
+**P1.F / L20.F — Pagination keywords 擴充**：
+- 原列表漏 cursor-based（`cursor`/`after`/`before`/`nextToken`/`pageToken`）和 GraphQL Relay style（`first`/`last`）
+- 擴充至 18 個 keyword，完整覆蓋三種常見分頁模式
+- 新 2 個 test case 驗證 cursor / Relay 偵測
+
+**測試**：59 files / 1508 tests 全綠（原 1493 + 15 新）；typecheck clean。
+
+**P2 暫緩（觀察）**：Coder SQL output 格式多樣性、Build fix loop flip 偵測、E2E payload shape mismatch、fixMultipleFeatures batch 粒度。這 4 項多為邊界 / 低頻，等 dogfood 實測決定是否升級。
+
 ### L19 剩餘 11 個失敗根因修復 — 衝 ~100%（2026-04-20）
 
 L13-L18 部署後 dogfood（session `ae96d4d4`）：**232/243 = 95.5%**（從 26.5% 大幅進步）。SSH VPS 抓 `worker-out.log` 分析剩 11 個失敗 → 4 類根因都在 L18 範圍外：

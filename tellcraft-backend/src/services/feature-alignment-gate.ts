@@ -807,7 +807,15 @@ function detectPaginationConflict(content: string): {
   hasDataTableValidation: boolean
   paginationParams: string[]
 } {
-  const paginationKeywords = ['page', 'pageSize', 'pagesize', 'limit', 'offset', 'perPage', 'per_page']
+  // L20.F：offset-based + cursor-based + GraphQL style 都涵蓋
+  const paginationKeywords = [
+    // offset-based
+    'page', 'pageSize', 'pagesize', 'limit', 'offset', 'perPage', 'per_page', 'pageNum', 'pageNumber',
+    // cursor-based
+    'cursor', 'after', 'before', 'startId', 'lastId', 'nextToken', 'pageToken',
+    // GraphQL Relay style
+    'first', 'last',
+  ]
   const lines = content.split('\n')
   const paginationParams = new Set<string>()
   let hasDataTableValidation = false

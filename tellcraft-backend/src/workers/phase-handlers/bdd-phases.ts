@@ -2812,8 +2812,8 @@ export async function completeSpecPhase(
       content: f.content,
     })
   )
-  const schemaSql: string = session.data?.schemaSqlContent || ''
-  const entityMapping: string = session.data?.entityMappingContent || ''
+  let schemaSql: string = session.data?.schemaSqlContent || ''
+  let entityMapping: string = session.data?.entityMappingContent || ''
   const featureCount = features.length
 
   // 構建 LLM tracking context
@@ -3018,9 +3018,42 @@ export async function completeSpecPhase(
         }
         if (gateResult.fixedSchemaSql || gateResult.fixedEntityMapping) {
           const schemaUpdates: Record<string, string> = {}
-          if (gateResult.fixedSchemaSql) schemaUpdates.schemaSqlContent = gateResult.fixedSchemaSql
-          if (gateResult.fixedEntityMapping) schemaUpdates.entityMappingContent = gateResult.fixedEntityMapping
+          if (gateResult.fixedSchemaSql) {
+            schemaUpdates.schemaSqlContent = gateResult.fixedSchemaSql
+            schemaSql = gateResult.fixedSchemaSql  // 同步 local scope 供後續 Dry-Run 用
+          }
+          if (gateResult.fixedEntityMapping) {
+            schemaUpdates.entityMappingContent = gateResult.fixedEntityMapping
+            entityMapping = gateResult.fixedEntityMapping
+          }
           await updateBddSession({ sessionId: state.sessionId!, updates: schemaUpdates })
+
+          // L20.C：Gate 若修改 schema → 重新 provision Neon 讓實際 DB 與 Feature 對齊
+          // 原時序：L2949 deriveSchemaFromBdd → Neon 建表（舊 schema）→ L3019 Gate 改 schemaSql
+          //   → 舊 Neon schema vs 新 Feature schema 不一致 → Coder Testing SELECT 時爆「table not found」
+          // 解法：Gate 改 schema 後呼叫 ensureNeonSchemaFresh 比對 + re-provision（L16.P0.2 已有該 helper）
+          try {
+            const { ensureNeonSchemaFresh } = await import('../../services/neon-service')
+            const newDerived = deriveSchemaFromBdd(schemaSql, entityMapping)
+            if (newDerived.entityCount > 0 && state.projectId && state.dbProvisionStatus === 'completed') {
+              const res = await ensureNeonSchemaFresh({
+                projectId: state.projectId,
+                projectName: `tc-${state.projectId.slice(0, 8)}`,
+                schema: newDerived,
+                conversationId,
+                io,
+                locale: state.locale,
+              })
+              if (res.reprovisioned && res.missingTables) {
+                logger.info({
+                  projectId: state.projectId,
+                  missingTables: res.missingTables,
+                }, 'L20.C: Gate 修改 schema 後偵測到 drift，已 re-provision Neon')
+              }
+            }
+          } catch (e) {
+            logger.warn({ err: e }, 'L20.C: re-provision Neon 失敗，降級跳過（Coder Testing pre-flight 會再嘗試）')
+          }
         }
         logger.info({
           fixedIssueCount: gateResult.fixedIssueCount,
