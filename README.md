@@ -1245,6 +1245,44 @@ psql "$DATABASE_URL" -f tellcraft-backend/migrations/xxx.sql
 - **`sanitizeFeatureContent()`**：零 LLM 自動修正 — `回應, with JSON:` → `回應, with table:`、`回應為, with JSON:` → `回應, with table:`、entity_validate header `>id` → `id`、entity 花括號剝除 `準備一個{顧客}` → `準備一個顧客`（規則 4；LLM 偶爾照抄 prompt 模板 `{entity}` 佔位符 → SpecFormula regex 字元類不含 `{}` → matchStepToInstruction 100% 失敗；單元測試 `sanitize-feature-content.test.ts` 覆蓋 6 個 case）
 - **formulation prompt 強化**：明確禁止 entity_validate 使用 `>contextKey`；`>contextKey`/`<executionKey` 只用於 Given 準備和 Then 回應
 
+### L21 第二輪深挖：CRITICAL + P1 結構性修復（2026-04-20）
+
+L20 push 後第二輪 audit（3 並行 Explore agent）：Agent 1 找 L20 自身衍生風險、Agent 2 重估 P2 觸發頻率、Agent 3 找跨 L13-L20 未涵蓋的結構性盲點。整合 12 個風險，L21 修 **1 CRITICAL + 4 P1**。
+
+**🔴 L21.CRIT-1 Neon 資料遺失陷阱**（`services/neon-service.ts`）：
+- Coder Skill 生成的客戶 app 使用 Neon DB 存**客戶真實資料**。用戶改需求 → `provisionNeonDatabase` 無條件 `deleteNeonProject` → **客戶生產資料永久刪除**（無 backup）
+- GDPR / 信任崩塌根本問題
+- 修：入口加 `hasNonEmptyUserTables()` 守門（`SELECT EXISTS (SELECT 1 FROM t LIMIT 1)` 逐表掃），偵測舊 project 含非空資料時**拒絕 drop**，回 null + 警告訊息；只有 `allowDestructiveReprovision=true`（用戶明確 opt-in）才允許。預設保守
+- CLAUDE.md 防雷清單新增「Neon schema 變更必須保留客戶資料」
+
+**L21.P1-A Coder list-query wrap 修復**（`coder-generation.ts`）：
+- `query-list.md` handler 禁 wrap（回純 array），但 LLM 看 Feature api_call 帶 page/pageSize 就加 `{items, total, page, pageSize}` wrap
+- 新 `unwrapListResponse()` 後置掃 `return { items: X, total, page, pageSize }` pattern → 改寫為 `;(X as any).__status = 200; return X`
+- 保守：含業務欄位（非 pagination meta）的 wrap 不動；arrayVar 非 simple identifier 不動
+- 10 case 單元測試 `coder-unwrap-list-response.test.ts`
+
+**L21.P1-B L20 邊界修復**（`deterministic-feature-fix.ts`）：
+- **L20.A 補宣告後仍無資料欄**：required columns 為空（entity 只有 PK）→ 生的 DataTable INSERT 爆「沒有可插入欄位」。修：補顯式 `id` column + `@uuid(1)` sample
+- **L20.B 閾值改用 dataHeaders**：`isExplicitNullTest` 閾值從 `headers.length <= 2` 改 `dataHeaders.length <= 2`（排除 VAR 宣告欄），避免「>Entity.id + 2 業務 null 欄位」被誤判
+- **L20.D snake→camel 轉換**：補宣告時 `gap.field` 可能是 snake_case（schema column 對齊後果），但 DSL 慣例 camelCase。用 `NamingConverter.snakeToCamel` 統一轉 camelCase（`user_id → userId`）
+- +3 case 測試
+
+**L21.P1-C Formulation Race Condition**（`conversation-lock.ts` + `coder-phases.ts`）：
+- conv-lock 10min TTL 在 Formulation 30min 流程中可能 expire → 雙擊 / worker crash 時並發執行 → 雙寫 features
+- 新 `acquireFormulationLock(sessionId)` + `releaseFormulationLock()`，session-level + 30min TTL
+- `regenerateFeaturesTask` 入口 acquireFormulationLock；`finally` 釋放
+- 鎖衝突時回「已在進行中」訊息，不重複執行
+
+**L21.P1-D Formulation Heartbeat**（`bdd-phases.ts completeSpecPhase`）：
+- Formulation phase 含多個串行 LLM 呼叫（actionsYml / isaConfig / dry-run / Alignment Gate），原本無心跳
+- flowstate-recovery 可能因「lock 存在 + 無心跳」誤判超時殺掉中途流程
+- 修：completeSpecPhase 包一層 `setInterval(() => touchFlowActivity(), 15_000)`，完成後 `clearInterval`
+- 已有機制（fast build streaming / coder generating）已有心跳，此為補 Formulation 缺口
+
+**P2 保留觀察**：Prompt cache 監控、LLM 失敗 fallback、Telemetry write 監控、架構圖文檔、Build fix loop flip、E2E payload shape、batch fix 粒度、first/last 誤報 — 記 CLAUDE.md 等 dogfood 實測決定升級。
+
+**測試**：60 files / 1521 tests 全綠（原 1508 + 13 新）；typecheck clean。
+
 ### L20 衍生風險深挖與修復（2026-04-20）
 
 L19 commit 後啟動 proactive audit（3 個並行 Explore agent），找出 12 個衍生風險：4 個 P0（可能實際觸發）、4 個 P1（建議）、4 個 P2（觀察）。L20 修 P0 全部 + P1 高 ROI 2 項。

@@ -414,6 +414,7 @@ Feature 註解：`# Action: actionName` + `# [METHOD] /path` + `# Summary: xxx`
 - **Coder E2E 必須含 backendFiles**：`runCoderE2ETests` 的 code 須含 `result.backendFiles`，否則 Module not found → 500
 - **`rewriteComponentForServerActions` maxTokens 32768**：截斷偵測 JSX 平衡，不平衡回退原始組件
 - `[ARCH]` **Prompt Caching**：`buildCacheableSystem()` 拆 system prompt 為 static+dynamic block。5 個服務已套用。**修改 system prompt 時不要把 per-request 內容放進 static block，否則 cache hit 率歸零**
+- `[ARCH]` **Neon schema 變更必須保留客戶資料（L21.CRIT-1）**：`provisionNeonDatabase` 預設 `allowDestructiveReprovision=false` — 偵測舊 project 含非空 user table 時**拒絕** drop，回 null + 顯示警告。原因：Coder Skill 生成的客戶 app 用 Neon DB 存**客戶真實資料**，改 schema 絕不能靜默刪除。若要覆寫（丟棄舊資料重建），呼叫端必須明確傳 `allowDestructiveReprovision: true`（future：配合前端 opt-in 按鈕）。`hasNonEmptyUserTables` 用 `SELECT EXISTS (SELECT 1 FROM t LIMIT 1)` 逐表掃，fail-open（查詢失敗視為無資料不誤擋）。呼叫點：`ensureNeonSchemaFresh` L20.C re-provision 繼承預設保守策略，除非呼叫端明確允許
 - **Extended Thinking（修復路徑）**：`ENABLE_EXTENDED_THINKING=false`（預設關閉）+ `EXTENDED_THINKING_BUDGET=10000`。只用在 `fixFailingAction()`（coder RED-GREEN cycle）和 `fixMultipleFeatures()`（Feature Alignment Gate）。`callClaude` 和 `callStructured` 都支援 `thinking` 參數，maxTokens 自動加上 budget_tokens。response 解析用 `.find(b => b.type === 'text')` 跳過 thinking blocks（向後相容）。purpose 加 `+thinking` 後綴用於 A/B 比較
 - **`ENABLE_DIFF_OUTPUT`**：Animation/RWD/Merged 用 SEARCH/REPLACE block（省 60-70% output token）。解析失敗 fallback full-file。SEARCH 多處匹配拒絕替換。不影響 `generateStructure`（從零生成）
 - **`FAST_BUILD_MERGED_ANIM_RWD` 只影響首批**：增量批次仍用分離 Animation + RWD

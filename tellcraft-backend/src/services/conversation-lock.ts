@@ -79,6 +79,51 @@ export async function forceReleaseConversationLock(
 }
 
 // ============================================================
+// L21.P1-C: Formulation-specific 冪等鎖
+// conv-lock 10min TTL 可能在 Formulation 進行中 expire（大 schema 30min 流程），
+// 導致第二個並發 request 拿到新 conv-lock → 雙寫 features。
+// Formulation lock 用更長 TTL（30min）+ sessionId key 級，保證同 session Formulation
+// 任何時間只有一個執行緒。
+// ============================================================
+
+const FORMULATION_LOCK_PREFIX = 'formulation-running:'
+const FORMULATION_LOCK_TTL_SECONDS = 30 * 60  // 30 分鐘，覆蓋最大 Formulation 流程
+
+/**
+ * 嘗試取得 Formulation 執行鎖。
+ * 用於保護 regenerateFeaturesTask + completeSpecPhase 整段流程，避免雙擊 / conv-lock 過期的並發。
+ *
+ * @returns { acquired: true } 成功；{ acquired: false } 表示另一個 Formulation 正在進行中
+ * Redis 不可用 → fail-open (acquired: true)（寧可讓重複執行也不卡 pipeline）
+ */
+export async function acquireFormulationLock(
+  redis: Redis,
+  sessionId: string
+): Promise<{ acquired: boolean }> {
+  try {
+    const key = `${FORMULATION_LOCK_PREFIX}${sessionId}`
+    const result = await redis.set(key, '1', 'EX', FORMULATION_LOCK_TTL_SECONDS, 'NX')
+    return { acquired: result === 'OK' }
+  } catch {
+    return { acquired: true }
+  }
+}
+
+/**
+ * Formulation 完成（成功或失敗）後釋放鎖。不需驗證 lockId（session 粒度，單線程意圖）。
+ */
+export async function releaseFormulationLock(
+  redis: Redis,
+  sessionId: string
+): Promise<void> {
+  try {
+    await redis.del(`${FORMULATION_LOCK_PREFIX}${sessionId}`)
+  } catch {
+    // 失敗沒關係：TTL 30min 會自動 expire
+  }
+}
+
+// ============================================================
 // 用戶全局任務鎖（user-active）
 // 同一用戶任何時間只能有一個活躍 AI 任務
 // ============================================================

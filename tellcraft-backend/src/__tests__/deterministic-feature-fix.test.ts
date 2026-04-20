@@ -493,6 +493,68 @@ line3: $pageSection1Id`
     expect(refs).toEqual([{ varName: 'section6ID', entity: 'Section', index: 6, field: 'id' }])
   })
 
+  it('L21.P1-B.3：補宣告後 field 轉 camelCase（DSL 慣例）', () => {
+    // schema 有 `user_id` snake_case column
+    // 預期：`>Order1.userId` + `<order1UserId` (camelCase)，非 `>Order1.user_id`
+    const schemasSnake = makeSchema({
+      Order: {
+        tableName: 'orders',
+        cols: [
+          col('id', 'UUID', { primaryKey: true, notNull: true }),
+          col('user_id', 'UUID', { notNull: true, foreignKey: 'users.id' }),
+        ],
+      },
+      User: {
+        tableName: 'users',
+        cols: [col('id', 'UUID', { primaryKey: true, notNull: true })],
+      },
+    })
+    // 引用 $order3UserId — 通過 extractSingleLayerVarRefs.L20.D 對齊到 user_id
+    const content = `Feature: T
+  Rule: R
+    Example: uses $order3UserId`
+    const result = autoFillSingleLayerVarGaps(content, schemasSnake)
+    expect(result.filledGaps).toHaveLength(1)
+    // 補的宣告用 camelCase
+    expect(result.content).toContain('>Order3.userId')
+    expect(result.content).toContain('<order3UserId')
+    // 沒有 snake_case 在 VAR declaration 裡
+    expect(result.content).not.toContain('>Order3.user_id')
+  })
+
+  it('L21.P1-B.1：entity 無 required columns 時補顯式 id 欄位', () => {
+    // Entity 只有 PK（`id`），無任何 notNull 必填欄位 → required 列表為空
+    // 原邏輯：headers=[`>Entity1.id`]、data=[`<entity1Id`] → INSERT 無可插入 column → 爆錯
+    // 修復：補顯式 `id` column + `@uuid(1)` sample
+    const schemas = makeSchema({
+      Session: {
+        tableName: 'sessions',
+        cols: [col('id', 'UUID', { primaryKey: true, notNull: true })],  // 只有 PK
+      },
+    })
+    const content = `Feature: T
+    Example: uses $session5Id`
+    const result = autoFillSingleLayerVarGaps(content, schemas)
+    expect(result.filledGaps).toHaveLength(1)
+    // 預期 header 包含 `id` column（不只 `>Session5.id`）
+    expect(result.content).toMatch(/\|\s*>Session5\.id\s*\|\s*id\s*\|/)
+    // data 包含 `@uuid(1)` 非空值
+    expect(result.content).toContain('@uuid(1)')
+  })
+
+  it('L21.P1-B.2：dataHeaders 閾值改用過濾後的業務欄位數', () => {
+    // header 有 >Entity.id + 2 個業務欄位 + data 全 null → 業務欄位 2 個，視為 NULL test 保留
+    const content = `Feature: T
+    Given 準備一個Item, with table:
+      | >Item1.id | status | timeout |
+      |           | null   | null    |
+    Then Y`
+    const result = removeEmptyEntitySetup(content)
+    // dataHeaders = ['status', 'timeout'] 長度 2 → isExplicitNullTest=true → 保留
+    // 但 hasVarDeclaration=true（>Item1.id）會先觸發 isLegitPlaceholder → 保留
+    expect(result.removed).toEqual([])
+  })
+
   it('L20.D：snake_case column 對齊', () => {
     // schema 有 `user_id` column，LLM 寫 `$order3UserId`（camelCase） → field 對齊 `user_id`
     const schemasSnake = makeSchema({

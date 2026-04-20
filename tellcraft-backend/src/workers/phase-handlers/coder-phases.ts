@@ -1050,6 +1050,22 @@ export async function regenerateFeaturesTask(input: {
     return
   }
 
+  // L21.P1-C：Formulation session-level 冪等鎖
+  //   防止用戶雙擊 __regenerate_features__ / conv-lock expire 時並發執行雙寫 features
+  //   30min TTL 覆蓋整個 regenerate + completeSpecPhase 流程
+  const { acquireFormulationLock, releaseFormulationLock } = await import('../../services/conversation-lock')
+  const lockResult = await acquireFormulationLock(redis, bddSession.id)
+  if (!lockResult.acquired) {
+    logger.warn({ sessionId: bddSession.id, conversationId }, 'L21.P1-C: Formulation 已在進行中，拒絕重複執行')
+    await sendMessage(conversationId, io, {
+      content: isChinese
+        ? '⚠ Features 重新生成已在進行中，請稍候（預估 1-5 分鐘）。若長時間無反應，請回報。'
+        : '⚠ Feature regeneration is already in progress. Please wait (1-5 min). Report if stuck.',
+      stage: 'info',
+    })
+    return
+  }
+
   // 2. 清空舊生成結果
   await db.updateBddSession(bddSession.id, {
     featuresContent: null,
@@ -1186,5 +1202,8 @@ export async function regenerateFeaturesTask(input: {
         { label: isChinese ? '再試一次' : 'Retry', value: '__regenerate_features__', style: 'primary' as const },
       ],
     })
+  } finally {
+    // L21.P1-C：無論成功/失敗都釋放 Formulation lock
+    await releaseFormulationLock(redis, bddSession.id)
   }
 }

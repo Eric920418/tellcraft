@@ -31,7 +31,7 @@ import { fetchImageLibrary } from '../../services/image-library-service'
 import { deriveSchemaFromBdd } from '../../services/schema-derivation'
 import { checkDbQuota, provisionNeonDatabase } from '../../services/neon-service'
 import { checkInputQuality } from '../../services/prefilter'
-import { sendMessage, saveFlowState, saveFlowStateLight, getFlowState, deleteFlowState, deductCredits } from '../orchestrator-utils'
+import { sendMessage, saveFlowState, saveFlowStateLight, getFlowState, deleteFlowState, deductCredits, touchFlowActivity } from '../orchestrator-utils'
 import { CREDIT_COSTS } from '../../config/plans'
 import { sanitizeClarifyForDisplay, sanitizeForDisplay } from '../../utils/white-text-sanitizer'
 import { semanticGateway } from '../../services/semantic-gateway'
@@ -2776,6 +2776,26 @@ export async function handleSpecChange(
 }
 
 export async function completeSpecPhase(
+  conversationId: string,
+  state: FlowState,
+  redis: Redis,
+  io: IoEmitter
+) {
+  // L21.P1-D：Formulation phase 定時心跳
+  //   completeSpecPhase 內含多個串行 LLM 呼叫（actionsYml / isaConfig / dry-run 修復 / Alignment Gate）
+  //   每個都可能 5-10min。原本無心跳 → flowstate-recovery 誤判超時可能把中途流程殺掉。
+  //   每 15s touchFlowActivity，保證 L2（lock 存在 + 有心跳）偵測為「仍活躍」不觸發恢復
+  const heartbeatInterval = setInterval(() => {
+    void touchFlowActivity(redis, conversationId)
+  }, 15_000)
+  try {
+    await _completeSpecPhaseInner(conversationId, state, redis, io)
+  } finally {
+    clearInterval(heartbeatInterval)
+  }
+}
+
+async function _completeSpecPhaseInner(
   conversationId: string,
   state: FlowState,
   redis: Redis,

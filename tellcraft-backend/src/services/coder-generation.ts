@@ -1355,6 +1355,7 @@ ${subOp.relevantGherkin}
   let code = extractCodeFromResponse(result.content)
   code = removeAuthChecks(code)
   code = fixMySqlSyntax(code)
+  code = unwrapListResponse(code)  // L21.P1-A：擋 `return { items, total, page, pageSize }` wrap
 
   return { summary: subOp.summary, code }
 }
@@ -1383,6 +1384,78 @@ function fixMySqlSyntax(code: string): string {
       return `ON CONFLICT (id) DO UPDATE SET ${pgCols}`
     }
   )
+}
+
+/**
+ * L21.P1-A：偵測並修復 Coder 生成的 list query action 回 wrap 格式
+ *
+ * 問題場景（實測 List Media Files fail on L19）：
+ *   return { items: camelRows, total: camelRows.length, page: 1, pageSize: 20 }
+ * 但 Feature 驗證預設把 response 當純 array → row lookup 失敗。
+ *
+ * `query-list.md` handler 已明確禁 wrap，但 LLM 看到 Feature api_call 帶 page/pageSize
+ * 就合理地加 pagination wrap。此 helper 後置抓 wrap pattern 改回純 array。
+ *
+ * 策略（保守）：
+ *   - 只對明確是 list query 的 pattern 動手（`return` 某個 array 變數包成 items）
+ *   - 保留 __status assignment（SpecFormula 依賴）
+ *   - 不動非 wrap 情境（return { __status: 200, ...row } 是合法的單筆回應）
+ */
+export function unwrapListResponse(code: string): string {
+  // Pattern 1: return { items: X } → return X (with __status preserved if present)
+  //   e.g.
+  //     return { items: camelRows, total: camelRows.length, page: 1, pageSize: 20 }
+  //   →
+  //     ;(camelRows as any).__status = 200
+  //     return camelRows
+  // 策略：regex 抓 `return { (items|data|rows|results): <ident>[, ...]*[, __status?: ...]? }`
+  //   若 wrap key 以外只剩 total/page/pageSize/等 pagination meta → 拆成 `__status 設定 + return array`
+  //   否則（含業務欄位）→ 不動（可能是合法包裝）
+  const WRAP_KEYS = new Set(['items', 'data', 'rows', 'results', 'list'])
+  const META_KEYS = new Set(['total', 'page', 'pageSize', 'perPage', 'totalPages', 'hasMore', 'nextCursor', 'count', 'limit', 'offset'])
+
+  const lines = code.split('\n')
+  const out: string[] = []
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i]
+    const m = line.match(/^(\s*)return\s*\{\s*([^}]+)\}\s*;?\s*$/)
+    if (!m) {
+      out.push(line)
+      continue
+    }
+    const [, indent, body] = m
+    // 解析 `key: value` pairs（簡單 split，不處理 nested object）
+    const pairs = body.split(',').map(s => s.trim()).filter(Boolean)
+    const parsed = pairs.map(p => {
+      const colon = p.indexOf(':')
+      if (colon < 0) return null
+      return { key: p.substring(0, colon).trim(), value: p.substring(colon + 1).trim() }
+    }).filter((p): p is { key: string; value: string } => !!p)
+
+    // 找 wrap key（items/data/rows/results）
+    const wrapPair = parsed.find(p => WRAP_KEYS.has(p.key))
+    if (!wrapPair) {
+      out.push(line)
+      continue
+    }
+    // 其他 key 除了 META / __status 都視為業務欄位（不動）
+    const otherKeys = parsed.filter(p => p.key !== wrapPair.key && p.key !== '__status')
+    const allMeta = otherKeys.every(p => META_KEYS.has(p.key))
+    if (!allMeta) {
+      out.push(line)
+      continue
+    }
+    // 安全解包：先 `__status = 200` 設 array 上，再 return 純 array
+    const arrayVar = wrapPair.value
+    // 簡單 identifier 才改寫（避免改到 arrayVar 是 complex expression 的情況）
+    if (!/^[a-zA-Z_$][a-zA-Z0-9_$]*$/.test(arrayVar)) {
+      out.push(line)
+      continue
+    }
+    out.push(`${indent};(${arrayVar} as any).__status = 200`)
+    out.push(`${indent}return ${arrayVar}`)
+  }
+  return out.join('\n')
 }
 
 /** 移除 import 語句 */
@@ -1659,6 +1732,7 @@ export async function generateActionFunction(
   let code = extractCodeFromResponse(result.content)
   code = removeAuthChecks(code)
   code = fixMySqlSyntax(code)
+  code = unwrapListResponse(code)  // L21.P1-A：擋 `return { items, total, page, pageSize }` wrap
 
   return {
     path: `lib/actions/${toKebabCase(action.name)}.ts`,

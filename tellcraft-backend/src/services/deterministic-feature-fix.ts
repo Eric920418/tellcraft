@@ -6,6 +6,7 @@
 // ============================================================
 
 import { DatabaseSchema, TableDefinition, type ColumnDefinition } from '../lib/specformula/spec/data/models'
+import { NamingConverter } from '../lib/specformula/helper/naming-converter'
 import { parseCheckConstraintSpec } from './feature-alignment-gate'
 import { createLogger } from '../lib/logger'
 
@@ -435,23 +436,39 @@ export function autoFillSingleLayerVarGaps(
     const required = getRequiredColumns(table)
 
     const entityLower = gap.entity.charAt(0).toLowerCase() + gap.entity.slice(1)
-    const fieldUpper = gap.field.charAt(0).toUpperCase() + gap.field.slice(1)
+
+    // L21.P1-B.3：gap.field 可能是 snake_case（L20.D 對齊 schema column 的後果）
+    //   但 DSL VAR declaration 習慣 camelCase + executionKey 也是 camelCase
+    //   統一轉 camelCase：user_id → userId，保持 `>EntityN.userId` + `<entityNUserId` 一致
+    const fieldForDsl = NamingConverter.snakeToCamel(gap.field)
+    const fieldUpper = fieldForDsl.charAt(0).toUpperCase() + fieldForDsl.slice(1)
     const execKey = `${entityLower}${gap.index}${fieldUpper}`
-    const headers = [`>${gap.entity}${gap.index}.${gap.field}`, ...required.map(c => c.name)]
+
+    // L21.P1-B.1：若 required columns 為空（如 entity 只有 PK + auto-managed columns）
+    //   原本只會生 `>EntityN.id | <entityNId`，data row 無非 VAR cell → EntitySetup.insertRow
+    //   在 entity-setup.ts:158 會爆「沒有可插入的欄位」。
+    //   解法：至少帶一個 safe `id` column（顯式 UUID sample）補一欄，保證 INSERT 有可插入 column
+    const hasRequiredCols = required.length > 0
+    const headers = hasRequiredCols
+      ? [`>${gap.entity}${gap.index}.${fieldForDsl}`, ...required.map(c => c.name)]
+      : [`>${gap.entity}${gap.index}.${fieldForDsl}`, 'id']
     const dataCells = [
       `<${execKey}`,
-      ...required.map(c => sampleValueForColumn(c, (col) => {
-        if (!col.foreignKey) return null
-        const refTable = col.foreignKey.split('.')[0]?.toLowerCase()
-        if (!refTable) return null
-        for (const schema of schemas) {
-          const byEntity = schema.getTablesByEntityName()
-          for (const [ent, tbl] of byEntity) {
-            if (tbl.tableName.toLowerCase() === refTable) return `$${ent}1.id`
-          }
-        }
-        return null
-      })),
+      ...(hasRequiredCols
+        ? required.map(c => sampleValueForColumn(c, (col) => {
+            if (!col.foreignKey) return null
+            const refTable = col.foreignKey.split('.')[0]?.toLowerCase()
+            if (!refTable) return null
+            for (const schema of schemas) {
+              const byEntity = schema.getTablesByEntityName()
+              for (const [ent, tbl] of byEntity) {
+                if (tbl.tableName.toLowerCase() === refTable) return `$${ent}1.id`
+              }
+            }
+            return null
+          }))
+        : ['@uuid(1)']  // 無 required columns → 顯式 id 保證 INSERT 可用
+      ),
     ]
 
     lines.push(`    And 準備一個${gap.entity}, with table:`)
@@ -526,10 +543,13 @@ export function removeEmptyEntitySetup(content: string): { content: string; remo
     //   理由：LLM 常漏加 `<executionKey`，但純 `>` 宣告仍是合法 VAR 宣告。
     //   後續 L17/P0.1 的 deterministic 會補齊 executionKey；此處不該誤刪 scaffold。
     const isLegitPlaceholder = hasVarDeclaration
-    // L20.B：顯式 null 測試場景
-    //   Feature 寫「準備一個Item, | status | \n | null |」意圖測 NULL 欄位 insert
-    //   若只有 1-2 個 header + data 顯式 null → 視為合法 NULL 測試不刪
-    const isExplicitNullTest = hasExplicitNull && headers.length <= 2
+    // L20.B + L21.P1-B.2：顯式 null 測試場景
+    //   閾值應該看「非 VAR 宣告的業務 data column 數」，不是 raw header 數。
+    //   例：header `| >Entity1.id | status | timeout |`（3 header）其中 2 個是 data column
+    //       → 業務 data column 2 → 合法 NULL test
+    //   避免「header 含 >VAR 就把閾值擠過 2」造成誤刪合法場景
+    const dataHeaders = headers.filter(h => !h.startsWith('>') && !h.startsWith('<'))
+    const isExplicitNullTest = hasExplicitNull && dataHeaders.length <= 2
     if (hasNonEmptyData || isLegitPlaceholder || isExplicitNullTest) continue
 
     for (let k = i; k <= tableEnd; k++) keepMask[k] = false

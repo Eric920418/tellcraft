@@ -235,6 +235,61 @@ async function clearNeonFieldsInDb(projectId: string): Promise<void> {
   }
 }
 
+/**
+ * L21.CRIT-1：檢查 Neon project 內是否有非空 user table（含客戶真實資料）。
+ * 為避免 `provisionNeonDatabase` drop 舊 project 時誤刪客戶生產資料而設。
+ *
+ * 策略：掃 public schema 的所有 table → 對每張 SELECT EXISTS (SELECT 1 FROM t LIMIT 1)
+ * 任一回 true → 視為含資料，拒絕 drop。
+ *
+ * Fail-open：若查詢本身失敗（DB 不通 / project 不存在）→ 回 false（假設無資料），讓原流程繼續。
+ * 這是**保守誤報**：若查不到資料，寧可讓 drop 跑下去（原行為），也不卡住 pipeline。
+ * 若真有資料但 query 失敗 → Neon 端可能已故障，drop 風險已相對降低。
+ */
+async function hasNonEmptyUserTables(connectionString: string): Promise<{ hasData: boolean; tableCount: number }> {
+  const client = new Client({ connectionString, ssl: { rejectUnauthorized: false } })
+  try {
+    await client.connect()
+    const listResult = await Promise.race([
+      client.query<{ table_name: string }>(
+        `SELECT table_name FROM information_schema.tables
+         WHERE table_schema = 'public' AND table_type = 'BASE TABLE'`,
+      ),
+      new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error('information_schema 查詢超時（> 15s）')), 15_000)
+      ),
+    ])
+    const tables = listResult.rows.map(r => r.table_name)
+    if (tables.length === 0) return { hasData: false, tableCount: 0 }
+
+    // 逐 table 查 EXISTS 避免 COUNT(*) 全表掃。任一有資料就提前返回。
+    for (const tableName of tables) {
+      try {
+        // tableName 來自 information_schema 查詢結果（PostgreSQL 保證為合法識別符），
+        // 但仍用 format identifier 防禦。pg 不支援參數化 identifier，只能拼 string。
+        // 這裡 tableName 已經是 PostgreSQL 驗證過的合法識別符，安全。
+        const safe = tableName.replace(/[^a-zA-Z0-9_]/g, '')
+        if (!safe || safe !== tableName) continue  // 非標準命名跳過
+        const res = await Promise.race([
+          client.query<{ exists: boolean }>(`SELECT EXISTS (SELECT 1 FROM "${safe}" LIMIT 1) AS exists`),
+          new Promise<never>((_, reject) =>
+            setTimeout(() => reject(new Error(`EXISTS 查詢超時 ${safe}`)), 5_000)
+          ),
+        ])
+        if (res.rows[0]?.exists) return { hasData: true, tableCount: tables.length }
+      } catch (err) {
+        logger.warn({ err, tableName }, 'hasNonEmptyUserTables: 單表查詢失敗，繼續掃描')
+      }
+    }
+    return { hasData: false, tableCount: tables.length }
+  } catch (err) {
+    logger.warn({ err }, 'hasNonEmptyUserTables: 整體查詢失敗 — fail-open 視為無資料')
+    return { hasData: false, tableCount: 0 }
+  } finally {
+    await client.end().catch(() => {})
+  }
+}
+
 export async function provisionNeonDatabase(params: {
   projectId: string
   projectName: string
@@ -242,20 +297,46 @@ export async function provisionNeonDatabase(params: {
   conversationId: string
   io: IoEmitter
   locale?: 'zh' | 'en'
+  /**
+   * L21.CRIT-1: 是否允許刪除含非空資料的舊 Neon project（destructive re-provision）。
+   * 預設 false → 偵測到舊 project 有客戶資料時拒絕 drop，回傳 null + 警告訊息。
+   * 只有用戶明確 opt-in（UI 按「我知道會刪光舊資料」）才傳 true。
+   */
+  allowDestructiveReprovision?: boolean
 }): Promise<NeonProvisionResult | null> {
-  const { projectId, projectName, schema, conversationId, io, locale } = params
+  const { projectId, projectName, schema, conversationId, io, locale, allowDestructiveReprovision = false } = params
   const isZh = locale !== 'en'
 
-  // L16.P0.1：檢查是否已有舊 Neon project（regenerate 情境）
-  // 若有 → 刪掉 + 清 DB 欄位，避免新舊 project 並存造成孤兒 + drift
+  // L16.P0.1 + L21.CRIT-1：檢查是否已有舊 Neon project（regenerate 情境）
+  //   L16：若有 → 刪舊 + 清 DB 欄位，避免孤兒 + drift
+  //   L21：若舊 project 含非空 user table（客戶生產資料）→ **拒絕 drop**，除非 allowDestructiveReprovision=true
   try {
-    const existing = await db.query<{ neon_project_id: string | null }>(
-      'SELECT neon_project_id FROM projects WHERE id = $1',
+    const existing = await db.query<{ neon_project_id: string | null; neon_connection_string: string | null }>(
+      'SELECT neon_project_id, neon_connection_string FROM projects WHERE id = $1',
       [projectId]
     )
     const oldNeonProjectId = existing.rows[0]?.neon_project_id
+    const oldConnectionString = existing.rows[0]?.neon_connection_string
     if (oldNeonProjectId) {
-      logger.info({ projectId, oldNeonProjectId }, 'Found existing Neon project — deleting before re-provision')
+      // L21.CRIT-1 資料遺失守門
+      if (!allowDestructiveReprovision && oldConnectionString) {
+        const dataCheck = await hasNonEmptyUserTables(oldConnectionString)
+        if (dataCheck.hasData) {
+          logger.error({
+            projectId,
+            oldNeonProjectId,
+            tableCount: dataCheck.tableCount,
+          }, 'L21.CRIT-1: 舊 Neon project 含非空資料，拒絕 destructive re-provision（保護客戶生產資料）')
+          await sendMessage(conversationId, io, {
+            content: isZh
+              ? `⚠ 無法更新資料庫 schema：偵測到舊資料庫（${dataCheck.tableCount} 張表）含客戶資料，拒絕自動刪除。\n\n若確定要丟棄舊資料並重建，請在設定中明確允許「破壞性資料庫重建」後再試。`
+              : `⚠ Cannot update DB schema: existing database (${dataCheck.tableCount} tables) contains user data, destructive reprovision is blocked.\n\nTo discard old data and rebuild, explicitly enable "destructive DB rebuild" in settings first.`,
+            stage: 'db_destructive_blocked',
+          })
+          return null
+        }
+      }
+      logger.info({ projectId, oldNeonProjectId, destructive: allowDestructiveReprovision }, 'Found existing Neon project — deleting before re-provision')
       await deleteNeonProject(oldNeonProjectId)
       await clearNeonFieldsInDb(projectId)
     }
