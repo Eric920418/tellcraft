@@ -570,9 +570,21 @@ export async function runFastBuildPipeline(params: {
   }
 
   // 相關假圖白名單：首批載入，後續批次複用（fail-safe 不阻塞）
+  // 專案級 cache（conversationId scope）+ Haiku 生專案 query（expandedPrompt + variantConcept + mood）
   if (!isLaterBatch && !state.uiuxImageLibrary) {
     try {
-      state.uiuxImageLibrary = await getImageLibraryOrFallback(productType, { locale: state.locale })
+      state.uiuxImageLibrary = await getImageLibraryOrFallback(productType, {
+        locale: state.locale,
+        cacheKey: conversationId,
+        queryContext: {
+          productType,
+          primaryDescription: expandedPrompt,
+          variantConceptName: variantConcept?.name,
+          variantConceptMood: variantConcept?.description,
+          designMood: moodId,
+        },
+        trackingContext: { userId, conversationId },
+      })
       await saveFlowState(redis, conversationId, state)
     } catch (err) {
       logger.warn({ err, productType }, 'imageLibrary 載入失敗（降級跳過）')

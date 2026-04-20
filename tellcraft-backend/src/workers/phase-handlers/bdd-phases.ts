@@ -2781,15 +2781,28 @@ export async function completeSpecPhase(
   redis: Redis,
   io: IoEmitter
 ) {
-  // 預熱圖片資源庫（fire-and-forget，不阻塞 BDD 完成流程）
-  // 讓後續 UIUX 生成時能命中 Redis cache，省下 1-3 秒 API fetch
-  if (state.fastModeProductType) {
-    void fetchImageLibrary(state.fastModeProductType, { locale: state.locale })
-      .catch(() => { /* 預熱失敗不阻塞，UIUX pipeline 會再 fallback 一次 */ })
-  }
-
-  // 取得 session 資料（Phase 4/5 需要）
+  // 取得 session 資料（Phase 4/5 需要；pre-warm 也需要 originalRequirements）
   const session = await getBddSession({ sessionId: state.sessionId! })
+
+  // 預熱圖片資源庫（fire-and-forget，不阻塞 BDD 完成流程）
+  // 讓後續 UIUX 生成時能命中 Redis cache。cacheKey 用 conversationId 與 UIUX call site 對齊
+  if (state.fastModeProductType) {
+    const primaryDescription =
+      state.fastModeExpandedPrompt ||
+      session.data?.originalRequirements ||
+      state.fastModeOriginalMessage ||
+      ''
+    void fetchImageLibrary(state.fastModeProductType, {
+      locale: state.locale,
+      cacheKey: conversationId,
+      queryContext: {
+        productType: state.fastModeProductType,
+        primaryDescription,
+        designMood: state.uiuxDesignMood,
+      },
+      trackingContext: { userId: state.userId, conversationId },
+    }).catch(() => { /* 預熱失敗不阻塞，UIUX pipeline 會再 fallback 一次 */ })
+  }
   const rawFeatures = session.data?.featuresContent || []
   // FeatureFile.actionName 是可選的，補上空字串
   const features: Array<{ name: string; actionName: string; content: string }> = rawFeatures.map(

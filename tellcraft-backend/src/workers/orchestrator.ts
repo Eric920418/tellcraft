@@ -37,6 +37,7 @@ import { executeDomainSkill } from './phase-handlers/domain-phases'
 import { executeCloneSkill } from './phase-handlers/clone-phases'
 import { handleGoBack } from './phase-handlers/bdd-phases'
 import { handleBddWaitingForReply } from './phase-handlers/bdd-phases'
+import { proceedToVariantGeneration } from './phase-handlers/uiux-phases'
 import { extractFirstUrl, isSafeUrl } from '../services/reference-analyzer'
 
 const logger = createLogger('orchestrator')
@@ -850,6 +851,20 @@ async function handleContinueFlow(
     state.waitingForReply = true
     await saveFlowState(redis, conversationId, state)
     await sendMessage(conversationId, io, { content: '請重新輸入你的回覆。', stage: state.phase })
+    return
+  }
+  if (trimmedMsg === '__retry_variants__') {
+    if (!state.uiuxPreparedTemplate || !state.sessionId) {
+      logger.warn({ conversationId, hasTemplate: !!state.uiuxPreparedTemplate, hasSession: !!state.sessionId }, '__retry_variants__ 缺少必要狀態')
+      await sendMessage(conversationId, io, {
+        content: '無法重試變體生成：設計資訊已過期，請重新開始設計流程。',
+        stage: 'error',
+        quickReplies: [{ label: '開始新專案', value: '__new_project__', style: 'primary' as const }],
+      })
+      return
+    }
+    logger.info({ conversationId }, '重試變體生成')
+    await proceedToVariantGeneration(conversationId, state, redis, io)
     return
   }
   if (trimmedMsg === '__retry_fast_build__' && state.fastMode && state.fastModeOriginalMessage) {

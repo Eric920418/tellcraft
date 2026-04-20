@@ -162,12 +162,26 @@ async function hybridCloneFlow(params: {
     : undefined
 
   // 相關假圖白名單（clone 場景：一律用 Unsplash 替代原站圖，版權+CDN hotlink 風險高）
-  // 用 analysis.title 推 productType
+  // 專案級 cache + Haiku 生專案 query（用 cloneSourceUrl + analysis.title + referenceHint 作上下文）
   let imageLibraryPrompt: string | undefined
   if (!state.uiuxImageLibrary) {
     const productType = inferProductType(analysis.title || state.cloneSourceUrl || '')
+    const primaryDescription = [
+      state.cloneSourceUrl && `Source URL: ${state.cloneSourceUrl}`,
+      analysis.title && `Page title: ${analysis.title}`,
+      referenceHint,
+    ].filter(Boolean).join('\n').slice(0, 800)
     try {
-      state.uiuxImageLibrary = await getImageLibraryOrFallback(productType, { locale: state.locale })
+      state.uiuxImageLibrary = await getImageLibraryOrFallback(productType, {
+        locale: state.locale,
+        cacheKey: conversationId,
+        queryContext: {
+          productType,
+          primaryDescription,
+          referenceAnalysisSummary: state.uiuxReferenceAnalysis?.visionAnalysis,
+        },
+        trackingContext: { userId, conversationId },
+      })
       await saveFlowState(redis, conversationId, state)
     } catch (err) {
       logger.warn({ err, productType }, 'clone: imageLibrary 載入失敗（降級跳過）')
@@ -373,12 +387,31 @@ async function imageOnlyCloneFlow(params: {
   })
 
   // 相關假圖白名單（clone 圖片模式：從第一張圖的 title 推 productType）
+  // 專案級 cache + Haiku 生專案 query（匯集所有圖的 pageTitle + sectionDescriptions 前幾段）
   let clonePagesImageLibraryPrompt: string | undefined
   if (!state.uiuxImageLibrary) {
     const firstTitle = analyses[0]?.pageTitle || ''
     const productType = inferProductType(firstTitle)
+    const primaryDescription = analyses
+      .slice(0, 3)
+      .map(a => {
+        const secs = (a.sectionDescriptions || []).slice(0, 3).map(s => `${s.type}: ${s.description}`).join('; ')
+        return [a.pageTitle, secs].filter(Boolean).join(' — ')
+      })
+      .filter(Boolean)
+      .join('\n')
+      .slice(0, 800)
     try {
-      state.uiuxImageLibrary = await getImageLibraryOrFallback(productType, { locale: state.locale })
+      state.uiuxImageLibrary = await getImageLibraryOrFallback(productType, {
+        locale: state.locale,
+        cacheKey: conversationId,
+        queryContext: {
+          productType,
+          primaryDescription,
+          referenceAnalysisSummary: state.uiuxReferenceAnalysis?.visionAnalysis,
+        },
+        trackingContext: { userId, conversationId },
+      })
       await saveFlowState(redis, conversationId, state)
     } catch (err) {
       logger.warn({ err, productType }, 'clone(image): imageLibrary 載入失敗（降級跳過）')

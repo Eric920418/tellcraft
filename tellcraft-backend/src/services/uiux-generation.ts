@@ -110,7 +110,7 @@ function isRetryableError(err: unknown): boolean {
 }
 
 // 將 LLM 錯誤轉換為用戶可讀訊息
-function humanizeError(err: unknown): string {
+export function humanizeError(err: unknown): string {
   const msg = String(err)
   if (msg.includes('overloaded_error') || msg.includes('529')) {
     return 'AI 伺服器目前繁忙，已自動重試但仍無法處理。請稍等 1-2 分鐘後再試。'

@@ -1,18 +1,22 @@
 /**
- * Image Library 預熱 CLI
+ * Image Library 預熱 CLI（Legacy — 僅預熱 productType-scoped 靜態字典路徑）
+ *
+ * ⚠️ 注意：
+ *   自 ENABLE_SMART_IMAGE_QUERIES 上線後，生產環境所有 image library fetch 都使用
+ *   conversationId-scoped cache key（image-lib:v2:<conversationId>:<locale>）+ Haiku
+ *   生專案級 query。這個腳本預熱的 productType-scoped key（image-lib:v2:<productType>:en）
+ *   **不會被生產流量命中**。
+ *
+ *   保留此腳本的目的：
+ *   1. 作為 Haiku API 全掛時的手動冷啟動工具（若將來加入 productType 兜底 fetch 路徑）
+ *   2. 冒煙測試 Unsplash API key + 靜態字典是否正常
+ *
+ *   日常維運不再需要定期執行。
  *
  * 用法：
- *   # 預熱所有 26 個 productType（使用前請先設 UNSPLASH_ACCESS_KEY）
- *   pnpm tsx src/scripts/warm-image-library.ts
+ *   pnpm tsx src/scripts/warm-image-library.ts [--type=<productType>] [--force]
  *
- *   # 只預熱指定 productType
- *   pnpm tsx src/scripts/warm-image-library.ts --type=restaurant
- *
- *   # 強制刷新已有 cache
- *   pnpm tsx src/scripts/warm-image-library.ts --force
- *
- * 建議在 VPS 部署後跑一次，或每週執行一次保持新鮮度（TTL 7 天）。
- * rate limit：Unsplash demo key 5000/hr；26 × 6 × 2-3 query ≈ 312-468 requests，單次預熱遠低於限額。
+ * rate limit：Unsplash demo key 5000/hr；26 × 6 × 2-3 query ≈ 312-468 requests，遠低於限額。
  */
 
 import 'dotenv/config'

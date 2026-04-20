@@ -74,6 +74,7 @@ const envSchema = z.object({
 
   // Unsplash 圖片庫開關（功能層）
   ENABLE_UNSPLASH_LIBRARY: z.stringbool().default(true),            // kill switch：緊急回退到 picsum 時設 false
+  ENABLE_SMART_IMAGE_QUERIES: z.stringbool().default(true),          // Haiku 生專案級 query（取代 PRODUCTTYPE_TO_UNSPLASH_QUERIES）。false 走靜態字典
   UNSPLASH_CACHE_TTL_SECONDS: z.coerce.number().default(60 * 60 * 24 * 7),  // 7 天
   UNSPLASH_API_TIMEOUT_MS: z.coerce.number().default(5000),
 

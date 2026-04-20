@@ -96,28 +96,37 @@ cd tellcraft-backend && pnpm tsx src/scripts/register-prompt-change.ts --retire 
 `CODER_TEMPLATE_V2`（啟用 coder-templates/ registry + 4 個新 template：count / exists_check / search / soft-delete 子模組）、`CODER_AST_SANITIZE`（啟用 ts-morph AST 替代 next15-async-params / search-params-suspense / missing-hooks 三類 regex）、`DETERMINISTIC_FIX_V1`（fixFailingAction 對 missing_column / wrong_status / field_naming 三類 rootCause 先跑零 LLM 機械修復，失敗才 fallback LLM）、`SPEC_CONSISTENCY_LLM_CHECK`（Feature Alignment Gate Check 7 的 Haiku fallback，覆蓋 regex 抓不到的中英文 null-intent 變體）
 
 **Image Library（相關假圖）功能開關**（預設 true，緊急回退設 false 降級 picsum）：
-`ENABLE_UNSPLASH_LIBRARY`、`UNSPLASH_CACHE_TTL_SECONDS`（預設 7 天）、`UNSPLASH_API_TIMEOUT_MS`（預設 5000）
+`ENABLE_UNSPLASH_LIBRARY`、`ENABLE_SMART_IMAGE_QUERIES`（預設 true，Haiku 生專案級 query；設 false 回退 26 格 productType 靜態字典）、`UNSPLASH_CACHE_TTL_SECONDS`（預設 7 天）、`UNSPLASH_API_TIMEOUT_MS`（預設 5000）
 
 > `UPLOAD_BASE_URL` 必填（例如 `https://api.tellcraft.com/uploads/tellcraft`），未設定時 `/api/upload/image` 會回傳 `UPLOAD_BASE_URL_MISSING`。
 >
 > `UNSPLASH_ACCESS_KEY` 強烈建議 production 設定（[註冊](https://unsplash.com/developers)）。未設或 API 失敗會自動降級回 picsum random seed，但產出圖片將與網站主題無關。
 
-### Image Library 預熱（選配，首次部署 / 新增 productType 建議執行）
+### Image Library 相關性升級（2026-04-20）
 
-根據 26 個 productType 預抓 Unsplash 圖片 URL 到 Redis cache（7 天 TTL）：
+舊版問題：26 格 productType 靜態字典（`PRODUCTTYPE_TO_UNSPLASH_QUERIES`）不分青紅皂白，所有餐廳都搜 "restaurant interior"，導致「台式滷肉飯小店」看到美式牛排館、「日式居酒屋」看到義大利麵。
+
+新版（`ENABLE_SMART_IMAGE_QUERIES=true`，預設開啟）：
+- **Haiku 一次 LLM 呼叫**（~800ms，~$0.0005/專案）把專案真實上下文（`primaryDescription` + `variantConcept` + `referenceAnalysis` + `designMood`）翻譯成 6 類 × 2-3 個精準英文 Unsplash query
+- **cache key 從 productType-scoped 改為 conversationId-scoped**（`image-lib:v2:<conversationId>:<locale>`），同專案 7 天 TTL 內複用，不同專案各有各的圖庫
+- **變體切換時 auto-invalidate**（Redis + FlowState 雙清），新 variantConcept 會重生 image library
+- **4 層降級鏈**：Haiku 生 queries → 靜態字典 → picsum fallback → 空 library 不阻塞 pipeline
+
+6 個注入點（全部傳 `cacheKey: conversationId`）：
+- `bdd-phases.ts` `completeSpecPhase`（pre-warm，BDD 完成時）
+- `fast-build-phases.ts` `runFastBuildPipeline`（首批）
+- `uiux-phases.ts` × 2（structure 階段 1/3、redo 路徑）
+- `clone-phases.ts` × 2（URL 模式、圖片模式）
+
+### Image Library 預熱（Legacy，日常不需執行）
+
+⚠️ 自 `ENABLE_SMART_IMAGE_QUERIES` 上線後，生產流量用 conversationId-scoped cache，此腳本預熱的 productType-scoped cache 不會被命中。保留作為 Haiku 全掛時的手動冷啟動工具 + Unsplash API key 冒煙測試。
 
 ```bash
-# 預熱全部 26 個 productType（約 300-500 requests，遠低於 demo key 5000/hr 限額）
-cd tellcraft-backend && pnpm tsx src/scripts/warm-image-library.ts
-
-# 只預熱指定 productType
-cd tellcraft-backend && pnpm tsx src/scripts/warm-image-library.ts --type=restaurant
-
-# 強制刷新已有 cache
-cd tellcraft-backend && pnpm tsx src/scripts/warm-image-library.ts --force
+cd tellcraft-backend && pnpm tsx src/scripts/warm-image-library.ts [--type=<productType>] [--force]
 ```
 
-預熱完成後，UIUX/Fast Build/Clone 生成的網站圖片會與 productType 語義相關（例：餐廳 → 美食/廚房、健身房 → 運動器材）。部署後的頁面 footer 會自動注入 ImageCredits 組件顯示 photographer 署名（Unsplash ToS 合規）。
+部署後的頁面 footer 會自動注入 ImageCredits 組件顯示 photographer 署名（Unsplash ToS 合規）。
 
 ## 系統架構
 
@@ -692,7 +701,7 @@ tellcraft-backend/
 │   │   ├── iteration-skill.ts    # 迭代 + 撤銷 + 回滾
 │   │   ├── fast-build-generation.ts # 快速模式（規則式，零 LLM）
 │   │   ├── template-matcher.ts   # 智能模板匹配（零 LLM）
-│   │   ├── image-library-service.ts # 相關假圖白名單（Unsplash Search API + Redis cache 7d + picsum fallback）
+│   │   ├── image-library-service.ts # 專案級圖庫（Haiku 生專案 query + Unsplash Search + conversationId-scoped Redis cache 7d + 靜態字典/picsum 雙層兜底 + auto-invalidate on variant change）
 │   │   ├── line-notify.ts        # LINE 推播通知（Web 用戶，stage 白名單）
 │   │   ├── line-full-push.ts    # LINE Bot 全量翻譯推送（LINE 來源的對話）
 │   │   ├── line-bot-handler.ts  # LINE Bot 業務邏輯（Follow/Text/Postback）
@@ -1106,7 +1115,9 @@ psql "$DATABASE_URL" -f tellcraft-backend/migrations/xxx.sql
 <details>
 <summary><h2>開發更新紀錄（點擊展開）</h2></summary>
 
-### 近期更新（2026-03-13 ~ 2026-04-18）
+### 近期更新（2026-03-13 ~ 2026-04-20）
+
+- **UIUX Variant 失敗的 silent fallback 修復**（04-20）：用戶選 Path A「我有想法要討論」生成 5 變體時 LLM 失敗，前端只看到通用文案「生成設計方案時發生錯誤。讓我們改用模板開始。」並被**強制切到 Path B（模板選擇）**。雙重違規：(1) 真實錯誤 `variantsResult.error` 進 `logger.error` 沒進前端，違反 CLAUDE.md「所有錯誤完整顯示在前端」；(2) Path A→Path B 跨產品路徑降級違反用戶明確選擇。修復 `uiux-phases.ts:3141-3158`：呼叫既有 `humanizeError()`（同檔 L113，原 file-local，本次改 export）把 raw error 轉成可讀訊息並附完整 detail；不再呼叫 `showTemplatePicker`；phase 回退到 `uiux_variant_selection`（保留 PHASE_BACKTRACK_MAP 路徑），清空 `uiuxVariants` / `uiuxVariantConcept` 但保留 `uiuxPreparedTemplate` / `uiuxDesignBrief` / `sessionId` 給重試用；發 quickReplies `[重試變體生成 / 返回設計方向 / 開始新專案]`（Path A 把第二顆改為「換其他模板」走 `__go_back__`）。新增 `__retry_variants__` 全域路由在 `orchestrator.ts:855` 旁邊，缺 `uiuxPreparedTemplate` 或 `sessionId` 時 fail-loud 而非 fail-silent；同步加入 `graph/nodes/classify.ts` 的 `SPECIAL_TOKENS` 維持 LangGraph 路徑符號一致。**核心洞察**：silent fallback 製造「薛丁格的 bug」——使用者以為是功能、工程師以為是 edge case，沒人有動機修。`callStructured` 已內建 RETRY_MAX=3 指數退避，外層不再加 retry 避免疊乘成本；用戶層的「重試」是 explicit consent 不是自動化。同類問題（`uiux-phases.ts:1899` Animation / `:2002` RWD / `coder-phases.ts:185` RED Phase advisory）留待獨立 ticket，不在此 PR 擴大範圍
 
 - **BDD/Coder 三波修復 Wave 3（L6 + L7 + L8）**（04-18 晚）：用戶 VPS 連續暴露另兩個獨立 bug。**(L6 Wave 2) Entity mapping 格式 E**：`mapping.entity_to_table_mapping is not iterable` 阻塞 dry-run 啟動。SSH 撈 DB 真實 `entity_mapping_content` 證實是格式 E（頂層 key 叫 `entities:` 而非 `entity_to_table_mapping:`）—— 不是我先前猜的格式 D。`normalizeEntityMapping` 加格式 D（object 無 array dash）+ 格式 E（`entities:` 頂層）兩個分支；`EntityDdlReader.scanDirectory` 加 array assertion 給人類可讀錯誤取代 `is not iterable`。**(L7 Wave 3 致命) Per-SubOp 函數名拼進 Actor prefix**：log 顯示 `async function handleUid="$store.id"查看銷售報表(input: any) {` esbuild 直接炸，4 個 action 全失敗降級。根因雙層：`extractSubOperations` 的 summaryRegex 強制要求 Actor 有括號 `\(...\)`，但 LLM 寫 `When UID="$Store.id" 查看銷售報表`（無括號）→ summary 把 Actor 整段吃進去；`handleName = handle${toPascalCase(summary)}` 拼接前不 sanitize JS 識別符非法字符。三層修：(1) regex `\(?` `\)?` 容錯；(2) 新 `cleanSubOpSummary()` 後處理兜底 strip；(3) 新 `sanitizeForJsIdentifier()` + `buildHandleName()` 把任意 summary 過濾成合法 JS 識別符（保中文+字母數字），3 處 `handleName` 拼接全切換到 `buildHandleName`。**(L8) SEARCH/REPLACE diff 後 conflict marker 流入**：LLM 偶爾在 replace block 寫進 `<<<<<<<`/`=======`/`>>>>>>>` → 後續 syntax firewall 把組件替換為 stub（UI 變空殼）。新 `hasConflictMarker()` helper（行首 7 個連續字符檢測，避開 markdown 文字誤判），在 SEARCH/REPLACE 主流程 + 二次改寫流程的 esbuild 驗證前先攔截 → 直接回退原始版本不污染下游。新增 33 個單元測試（21 L7 含真實 esbuild round-trip 驗證 + 12 L8 含 6 vs 7 字符邊界 case）。1356 tests 全綠、typecheck 零錯誤。**核心洞察**：Wave 2/3 都是「LLM 輸出格式變體 + downstream 沒做防禦性檢查」，正規化層和 sanitize 函數是吸收 LLM 不可預測輸出的必要邊界。先前我把 Wave 2 診斷成格式 D（entity_to_table_mapping 是 object）—— 部分對但用戶 SSH 撈真實 data 證實是格式 E。**教訓**：debug 不能只靠推論，要 SSH 撈真實 input
 

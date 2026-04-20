@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 
-// 必須在 import 被測模組前 mock env + cache
+// 必須在 import 被測模組前 mock env + cache + LLM
 vi.mock('../lib/env', () => ({
   getEnv: vi.fn(),
 }))
@@ -8,9 +8,16 @@ vi.mock('../lib/cache', () => ({
   cached: vi.fn(async (_key: string, _ttl: number, fn: () => Promise<any>) => fn()),
   invalidateCache: vi.fn(async () => {}),
 }))
+vi.mock('../lib/anthropic', () => ({
+  MODEL: { HAIKU: 'claude-haiku-4-5-20251001', SONNET: 'claude-sonnet-4-6' },
+}))
+vi.mock('../lib/structured-output', () => ({
+  callStructured: vi.fn(),
+}))
 
 import * as envModule from '../lib/env'
 import * as cacheModule from '../lib/cache'
+import * as structuredModule from '../lib/structured-output'
 import {
   fetchImageLibrary,
   getImageLibraryOrFallback,
@@ -18,8 +25,10 @@ import {
   formatImageLibraryForPrompt,
   buildAttributionBlock,
   extractUsedUnsplashAssets,
+  generateProjectQueries,
+  invalidateImageLibrary,
   __internals,
-  type ImageLibrary,
+  type QueryGenContext,
 } from '../services/image-library-service'
 
 // ============================================================
@@ -30,6 +39,7 @@ function mockEnv(overrides: Partial<ReturnType<typeof envModule.getEnv>> = {}) {
   ;(envModule.getEnv as any).mockReturnValue({
     UNSPLASH_ACCESS_KEY: 'test-key',
     ENABLE_UNSPLASH_LIBRARY: true,
+    ENABLE_SMART_IMAGE_QUERIES: false,  // 預設關閉，避免多數測試誤觸 Haiku
     UNSPLASH_CACHE_TTL_SECONDS: 3600,
     UNSPLASH_API_TIMEOUT_MS: 5000,
     ...overrides,
@@ -68,7 +78,6 @@ function mockFetchSuccess(photos: ReturnType<typeof makeUnsplashPhoto>[]) {
   })) as any
 }
 
-// 每次 call 產生 unique id，確保跨 query 不會被 dedupe（模擬真實 Unsplash 行為）
 function mockFetchUnique(perBatch = 12) {
   let counter = 0
   global.fetch = vi.fn(async () => {
@@ -89,6 +98,30 @@ function mockFetchStatus(status: number) {
   })) as any
 }
 
+function mockHaikuSuccess(queries?: Partial<Record<string, string[]>>) {
+  const defaults = {
+    hero: ['izakaya counter night', 'yakitori grill smoke'],
+    product: ['yakitori skewers', 'sake tasting'],
+    team: ['izakaya chef portrait', 'japanese bartender'],
+    background: ['dark wood japanese texture', 'paper lantern glow'],
+    lifestyle: ['friends drinking sake', 'izakaya customers'],
+    detail: ['chicken yakitori closeup', 'sake pour ceramic'],
+    ...queries,
+  }
+  ;(structuredModule.callStructured as any).mockResolvedValue({
+    success: true,
+    data: defaults,
+    usage: { inputTokens: 100, outputTokens: 50 },
+  })
+}
+
+function mockHaikuFailure(error = 'Haiku API error') {
+  ;(structuredModule.callStructured as any).mockResolvedValue({
+    success: false,
+    error,
+  })
+}
+
 beforeEach(() => {
   vi.clearAllMocks()
   mockEnv()
@@ -105,7 +138,6 @@ afterEach(() => {
 describe('fetchImageLibrary', () => {
   it('對已知 productType 呼叫多個 query 並合併去重', async () => {
     mockFetchUnique()
-
     const lib = await fetchImageLibrary('restaurant')
 
     expect(lib.productType).toBe('restaurant')
@@ -158,15 +190,133 @@ describe('fetchImageLibrary', () => {
     await expect(fetchImageLibrary('restaurant')).rejects.toThrow(/empty/)
   })
 
-  it('429 rate limit 時整批跳過但不 crash（若 hero/product 都空則 throw empty）', async () => {
+  it('429 rate limit 時整批跳過但不 crash', async () => {
     mockFetchStatus(429)
     await expect(fetchImageLibrary('restaurant')).rejects.toThrow(/empty/)
   })
 
-  it('forceRefresh=true 呼叫 invalidateCache', async () => {
+  it('forceRefresh=true 呼叫 invalidateCache（v2 key）', async () => {
     mockFetchSuccess([makeUnsplashPhoto('xyz')])
     await fetchImageLibrary('restaurant', { forceRefresh: true })
-    expect(cacheModule.invalidateCache).toHaveBeenCalledWith('image-lib:v1:restaurant:en')
+    expect(cacheModule.invalidateCache).toHaveBeenCalledWith('image-lib:v2:restaurant:en')
+  })
+
+  it('cacheKey 指定時 → cache key 用 cacheKey 而非 productType', async () => {
+    mockFetchSuccess([makeUnsplashPhoto('xyz')])
+    await fetchImageLibrary('restaurant', { forceRefresh: true, cacheKey: 'conv-123' })
+    expect(cacheModule.invalidateCache).toHaveBeenCalledWith('image-lib:v2:conv-123:en')
+  })
+
+  it('queryContext + ENABLE_SMART_IMAGE_QUERIES=true → 走 Haiku 生專案 query', async () => {
+    mockEnv({ ENABLE_SMART_IMAGE_QUERIES: true })
+    mockFetchUnique()
+    mockHaikuSuccess()
+
+    const ctx: QueryGenContext = {
+      productType: 'restaurant',
+      primaryDescription: 'Japanese izakaya specializing in yakitori and sake',
+    }
+    await fetchImageLibrary('restaurant', { queryContext: ctx })
+
+    expect(structuredModule.callStructured).toHaveBeenCalledOnce()
+    const callArg = (structuredModule.callStructured as any).mock.calls[0][0]
+    expect(callArg.model).toBe('claude-haiku-4-5-20251001')
+    expect(callArg.purpose).toBe('image_query_generation')
+  })
+
+  it('queryContext 提供但 Haiku 失敗 → 降級靜態字典（仍成功）', async () => {
+    mockEnv({ ENABLE_SMART_IMAGE_QUERIES: true })
+    mockFetchUnique()
+    mockHaikuFailure('timeout')
+
+    const lib = await fetchImageLibrary('restaurant', {
+      queryContext: { productType: 'restaurant', primaryDescription: 'X' },
+    })
+    expect(lib.source).toBe('unsplash')
+    expect(lib.hero.length).toBeGreaterThan(0)
+  })
+
+  it('ENABLE_SMART_IMAGE_QUERIES=false → 不呼叫 Haiku，直接靜態字典', async () => {
+    mockEnv({ ENABLE_SMART_IMAGE_QUERIES: false })
+    mockFetchUnique()
+
+    await fetchImageLibrary('restaurant', {
+      queryContext: { productType: 'restaurant', primaryDescription: 'X' },
+    })
+    expect(structuredModule.callStructured).not.toHaveBeenCalled()
+  })
+})
+
+// ============================================================
+// generateProjectQueries
+// ============================================================
+
+describe('generateProjectQueries', () => {
+  it('成功回傳 6 類 × 2-3 個英文 queries', async () => {
+    mockEnv({ ENABLE_SMART_IMAGE_QUERIES: true })
+    mockHaikuSuccess()
+
+    const result = await generateProjectQueries({
+      productType: 'restaurant',
+      primaryDescription: 'Japanese izakaya',
+    })
+
+    expect(result.hero.length).toBeGreaterThanOrEqual(2)
+    expect(result.product.length).toBeGreaterThanOrEqual(2)
+    expect(result.hero[0]).toBe('izakaya counter night')
+  })
+
+  it('ENABLE_SMART_IMAGE_QUERIES=false → 立即 throw', async () => {
+    mockEnv({ ENABLE_SMART_IMAGE_QUERIES: false })
+
+    await expect(
+      generateProjectQueries({ productType: 'restaurant', primaryDescription: 'x' }),
+    ).rejects.toThrow(/ENABLE_SMART_IMAGE_QUERIES/)
+    expect(structuredModule.callStructured).not.toHaveBeenCalled()
+  })
+
+  it('Haiku 失敗 → throw', async () => {
+    mockEnv({ ENABLE_SMART_IMAGE_QUERIES: true })
+    mockHaikuFailure('rate limit')
+
+    await expect(
+      generateProjectQueries({ productType: 'restaurant', primaryDescription: 'x' }),
+    ).rejects.toThrow(/rate limit/)
+  })
+
+  it('referenceAnalysisSummary 會被 sanitize（newline 壓扁 + 截斷 300 字元）', async () => {
+    mockEnv({ ENABLE_SMART_IMAGE_QUERIES: true })
+    mockHaikuSuccess()
+
+    const longText = 'line1\nline2\n\n\nline3' + 'x'.repeat(500)
+    await generateProjectQueries({
+      productType: 'cafe',
+      primaryDescription: 'cafe test',
+      referenceAnalysisSummary: longText,
+    })
+
+    const userContent = (structuredModule.callStructured as any).mock.calls[0][0].messages[0].content
+    expect(userContent).not.toContain('\n\n\n')  // 多重 newline 清除
+    // 被截到 300 字元
+    const summaryLineMatch = userContent.match(/referenceAnalysisSummary: (.*)/)
+    expect(summaryLineMatch[1].length).toBeLessThanOrEqual(300)
+  })
+
+  it('只帶必要欄位時不注入 optional lines', async () => {
+    mockEnv({ ENABLE_SMART_IMAGE_QUERIES: true })
+    mockHaikuSuccess()
+
+    await generateProjectQueries({
+      productType: 'saas',
+      primaryDescription: 'team collaboration tool',
+    })
+
+    const userContent = (structuredModule.callStructured as any).mock.calls[0][0].messages[0].content
+    expect(userContent).toContain('productType: saas')
+    expect(userContent).toContain('primaryDescription: team collaboration tool')
+    expect(userContent).not.toContain('variantConceptName')
+    expect(userContent).not.toContain('referenceAnalysisSummary')
+    expect(userContent).not.toContain('designMood')
   })
 })
 
@@ -200,6 +350,35 @@ describe('getImageLibraryOrFallback', () => {
     mockFetchSuccess([makeUnsplashPhoto('abc')])
     const lib = await getImageLibraryOrFallback('restaurant')
     expect(lib.source).toBe('unsplash')
+  })
+
+  it('帶 queryContext + Haiku 成功 → 用 Haiku queries 搜圖', async () => {
+    mockEnv({ ENABLE_SMART_IMAGE_QUERIES: true })
+    mockFetchUnique()
+    mockHaikuSuccess()
+
+    const lib = await getImageLibraryOrFallback('restaurant', {
+      cacheKey: 'conv-abc',
+      queryContext: { productType: 'restaurant', primaryDescription: 'Japanese izakaya' },
+    })
+    expect(lib.source).toBe('unsplash')
+    expect(structuredModule.callStructured).toHaveBeenCalledOnce()
+  })
+})
+
+// ============================================================
+// invalidateImageLibrary
+// ============================================================
+
+describe('invalidateImageLibrary', () => {
+  it('用 v2 key scheme + 傳入 scope 與 locale', async () => {
+    await invalidateImageLibrary('conv-xyz', 'zh')
+    expect(cacheModule.invalidateCache).toHaveBeenCalledWith('image-lib:v2:conv-xyz:zh')
+  })
+
+  it('locale 預設為 en', async () => {
+    await invalidateImageLibrary('restaurant')
+    expect(cacheModule.invalidateCache).toHaveBeenCalledWith('image-lib:v2:restaurant:en')
   })
 })
 
@@ -243,7 +422,6 @@ describe('formatImageLibraryForPrompt', () => {
     expect(text).toContain('detail 類')
     expect(text).toContain('禁止')
     expect(text).toContain('使用規則')
-    // 包含至少一張真實 URL
     expect(text).toMatch(/images\.unsplash\.com\/photo-uniq-\d+/)
   })
 
@@ -258,7 +436,6 @@ describe('formatImageLibraryForPrompt', () => {
     const lib = buildPicsumFallbackLibrary('restaurant')
     const text = formatImageLibraryForPrompt(lib, { maxPerCategory: 1 })
     const heroMatches = text.match(/1\. `https:\/\/picsum/g) ?? []
-    // 六類，每類只顯示 1 張，共 6 個「1. 」
     expect(heroMatches.length).toBe(6)
   })
 
@@ -335,7 +512,7 @@ describe('buildAttributionBlock', () => {
 // ============================================================
 
 describe('字典覆蓋率', () => {
-  it('所有 26 個 productType 都有 query 定義', () => {
+  it('所有 26 個 productType 都有 query 定義（保留當 Haiku 失敗兜底）', () => {
     const expected = [
       'restaurant', 'cafe', 'fitness', 'healthcare', 'legal', 'finance',
       'realestate', 'salon', 'wedding', 'photography', 'music', 'hotel',

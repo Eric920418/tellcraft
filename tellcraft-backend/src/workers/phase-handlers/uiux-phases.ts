@@ -13,7 +13,7 @@ import {
   generateStructure, generateAnimations, generateRwd,
   generateTailwindConfig, generateDesignBrief, adjustDesignBrief,
   DesignBrief, TemplateData, GeneratedComponent, VariantConcept,
-  ensureResponsiveClasses,
+  ensureResponsiveClasses, humanizeError,
 } from '../../services/uiux-generation'
 import { translateBddToUISpec, buildUISpecSummary } from '../../services/bdd-to-ui-spec'
 import { runQualityGate, autoFixCriticalIssues, autoFixCriticalIssuesRuleBased } from '../../services/quality-gate'
@@ -22,7 +22,7 @@ import type { QualityIssue } from '../../services/quality-gate'
 import { getEnv } from '../../lib/env'
 import { getBddSession, updateBddSession } from '../../services/bdd-session'
 import { analyzeReference, analyzeUploadedImage } from '../../services/reference-analyzer'
-import { getImageLibraryOrFallback } from '../../services/image-library-service'
+import { getImageLibraryOrFallback, invalidateImageLibrary } from '../../services/image-library-service'
 import { recommendMoods, getMoodSummary } from '../../services/design-moods'
 import { executeIteration, executeUndoIteration } from '../../services/iteration-skill'
 import { semanticGateway } from '../../services/semantic-gateway'
@@ -1212,6 +1212,15 @@ export async function handleVariantSelection(
   state.uiuxVariantConcept = variantConcept
   logger.info(`變體創意概念: ${variantConcept.name}${variantConcept.signatureElement ? ` (Signature: ${variantConcept.signatureElement})` : ''}`)
 
+  // Variant 選定會重塑整個設計方向 → 失效 image library cache（Redis + FlowState 雙清）
+  // 下一次 generateStructure 會用新的 variantConcept 重新生 queries
+  try {
+    await invalidateImageLibrary(conversationId, state.locale ?? 'en')
+  } catch (err) {
+    logger.warn({ err }, 'invalidateImageLibrary 失敗（忽略，下次 fetch 會 refresh）')
+  }
+  state.uiuxImageLibrary = undefined
+
   // 保存到 BDD Session
   await updateBddSession({
     sessionId: state.sessionId,
@@ -1332,10 +1341,28 @@ export async function executeFullCodePipeline(
   // ===== 階段 1/3：結構（尚未完成時才執行）=====
   if (resumeIndex <= 0) {
     // 相關假圖白名單（fail-safe：失敗不阻塞 pipeline）
+    // 專案級 cache + Haiku 生專案 query（bddSpec + variantConcept + referenceAnalysis + mood）
     if (!state.uiuxImageLibrary) {
       const productType = (template as any).category || state.fastModeProductType || 'landing'
+      const primaryDescription = [
+        bddSpec?.slice(0, 400),
+        originalRequirements?.slice(0, 400),
+        state.fastModeExpandedPrompt,
+      ].filter(Boolean).join('\n').slice(0, 800)
       try {
-        state.uiuxImageLibrary = await getImageLibraryOrFallback(productType, { locale: state.locale })
+        state.uiuxImageLibrary = await getImageLibraryOrFallback(productType, {
+          locale: state.locale,
+          cacheKey: conversationId,
+          queryContext: {
+            productType,
+            primaryDescription,
+            variantConceptName: state.uiuxVariantConcept?.name,
+            variantConceptMood: state.uiuxVariantConcept?.description,
+            referenceAnalysisSummary: state.uiuxReferenceAnalysis?.visionAnalysis,
+            designMood: state.uiuxDesignMood,
+          },
+          trackingContext: { userId: state.userId, conversationId },
+        })
         await saveFlowState(redis, conversationId, state)
       } catch (err) {
         logger.warn({ err }, 'imageLibrary 載入失敗（降級跳過）')
@@ -1707,10 +1734,28 @@ async function executeCodePhaseStructure(
   const twCfg = generateTailwindConfig(uiuxDesignSystem)
 
   // 相關假圖白名單（fail-safe）
+  // 專案級 cache + Haiku 生專案 query（redo 路徑：沿用當下 variant/reference 快照）
   if (!state.uiuxImageLibrary) {
     const productType = (template as any).category || state.fastModeProductType || 'landing'
+    const primaryDescription = [
+      bddSpec?.slice(0, 400),
+      originalRequirements?.slice(0, 400),
+      state.fastModeExpandedPrompt,
+    ].filter(Boolean).join('\n').slice(0, 800)
     try {
-      state.uiuxImageLibrary = await getImageLibraryOrFallback(productType, { locale: state.locale })
+      state.uiuxImageLibrary = await getImageLibraryOrFallback(productType, {
+        locale: state.locale,
+        cacheKey: conversationId,
+        queryContext: {
+          productType,
+          primaryDescription,
+          variantConceptName: state.uiuxVariantConcept?.name,
+          variantConceptMood: state.uiuxVariantConcept?.description,
+          referenceAnalysisSummary: state.uiuxReferenceAnalysis?.visionAnalysis,
+          designMood: state.uiuxDesignMood,
+        },
+        trackingContext: { userId: state.userId, conversationId },
+      })
       await saveFlowState(redis, conversationId, state)
     } catch (err) {
       logger.warn({ err }, 'imageLibrary 載入失敗（降級跳過）')
@@ -3094,22 +3139,40 @@ export async function proceedToVariantGeneration(
   )
 
   if (!variantsResult.success || !variantsResult.variants) {
-    logger.error({ err: variantsResult.error }, '生成設計變體失敗')
-    if (sourceType === 'ideas') {
-      // Path A fallback：切換到模板選擇
-      await sendMessage(conversationId, io, {
-        content: '生成設計方案時發生錯誤。讓我們改用模板開始。',
-        stage: 'error',
-      })
-      await showTemplatePicker(conversationId, state, redis, io)
-    } else {
-      // Path B：降級回模板選擇
-      await sendMessage(conversationId, io, {
-        content: '生成設計方案時發生錯誤。讓我們重新選擇模板。',
-        stage: 'error',
-      })
-      await showTemplatePicker(conversationId, state, redis, io)
-    }
+    const rawError = variantsResult.error || '未知錯誤'
+    const humanMsg = humanizeError(rawError)
+    logger.error({ err: rawError, sourceType, conversationId }, '生成設計變體失敗')
+
+    // 回退 phase 到 variant_selection（保留 PHASE_BACKTRACK_MAP 路徑可用）
+    // 不切換到模板路線，尊重 Path A 用戶的明確選擇
+    state.phase = 'uiux_variant_selection'
+    state.uiuxVariants = undefined
+    state.uiuxVariantConcept = undefined
+    state.waitingForReply = true
+    await saveFlowState(redis, conversationId, state)
+    await updateBddSession({
+      sessionId: state.sessionId,
+      updates: { currentPhase: 'uiux_variant_selection' },
+    })
+
+    const quickReplies: { label: string; value: string; style: 'primary' | 'secondary' | 'ghost' }[] =
+      sourceType === 'ideas'
+        ? [
+            { label: '重試變體生成', value: '__retry_variants__', style: 'primary' },
+            { label: '返回設計方向', value: '__go_back__', style: 'secondary' },
+            { label: '開始新專案', value: '__new_project__', style: 'ghost' },
+          ]
+        : [
+            { label: '重試變體生成', value: '__retry_variants__', style: 'primary' },
+            { label: '換其他模板', value: '__go_back__', style: 'secondary' },
+            { label: '開始新專案', value: '__new_project__', style: 'ghost' },
+          ]
+
+    await sendMessage(conversationId, io, {
+      content: `${humanMsg}\n\n錯誤詳情：${rawError}`,
+      stage: 'error',
+      quickReplies,
+    })
     return
   }
 

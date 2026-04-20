@@ -15,6 +15,8 @@ import { z } from 'zod'
 import { cached, invalidateCache } from '../lib/cache'
 import { getEnv } from '../lib/env'
 import { createLogger } from '../lib/logger'
+import { MODEL } from '../lib/anthropic'
+import { callStructured } from '../lib/structured-output'
 
 const logger = createLogger('image-library')
 
@@ -313,6 +315,115 @@ const PRODUCTTYPE_TO_UNSPLASH_QUERIES: Record<string, QuerySet> = {
 }
 
 // ============================================================
+// Haiku 專案上下文 → 英文 Unsplash queries（取代 PRODUCTTYPE_TO_UNSPLASH_QUERIES）
+// Haiku 失敗時 caller 降級回靜態字典
+// ============================================================
+
+export interface QueryGenContext {
+  /** 粗分類（fallback 兜底 + Haiku coarse hint） */
+  productType: string
+  /** 主要語意訊號（caller 選最佳來源：expandedPrompt / bddSpec.title+description / referenceAnalysis.visionAnalysis） */
+  primaryDescription: string
+  /** UIUX 變體名稱（例：「簡約奶油白」） */
+  variantConceptName?: string
+  /** UIUX 變體情緒（例：「warm, elegant, editorial」） */
+  variantConceptMood?: string
+  /** 參考網站 / 圖片 Vision 分析摘要（caller 傳入前**毋需**清理，內部會 sanitize） */
+  referenceAnalysisSummary?: string
+  /** 8 種 Design Mood 預設之一（非 hex code） */
+  designMood?: string
+}
+
+/** 清理 reference summary：去除換行 + 截斷 300 字元，防 prompt 挾持 */
+function sanitizeReferenceSummary(raw: string): string {
+  return raw.replace(/\s+/g, ' ').trim().slice(0, 300)
+}
+
+const QueryOutputSchema = z.object({
+  hero: z.array(z.string().min(2).max(40)).min(2).max(3),
+  product: z.array(z.string().min(2).max(40)).min(2).max(3),
+  team: z.array(z.string().min(2).max(40)).min(2).max(3),
+  background: z.array(z.string().min(2).max(40)).min(2).max(3),
+  lifestyle: z.array(z.string().min(2).max(40)).min(2).max(3),
+  detail: z.array(z.string().min(2).max(40)).min(2).max(3),
+})
+
+const QUERY_SYSTEM_PROMPT = `You generate English Unsplash search queries tailored to a specific project.
+
+## Rules
+1. Output language: ENGLISH ONLY (Unsplash search performs far better on English).
+2. Each query: 2-4 words, specific enough to return project-relevant photos.
+3. Avoid generic filler ("modern", "professional", "beautiful") unless paired with concrete noun.
+4. Reflect the project's real domain (cuisine type, industry specifics, cultural context, aesthetic direction).
+5. Six categories, 2-3 queries each:
+   - hero: 1280x720 main visual / hero background
+   - product: 800x600 product / menu item / service cards
+   - team: 400x400 people portraits / staff / customers
+   - background: 1920x1080 texture / ambience / section bg
+   - lifestyle: 800x600 narrative scenes with people
+   - detail: 600x600 close-ups / ingredient / material detail
+
+## Example
+Input: productType=restaurant, primaryDescription="Japanese izakaya specializing in yakitori and sake, warm dim lighting"
+Output:
+{
+  "hero": ["izakaya counter night", "yakitori grill smoke"],
+  "product": ["yakitori skewers", "sake flight tasting", "japanese small plates"],
+  "team": ["izakaya chef portrait", "japanese bartender"],
+  "background": ["dark wood japanese texture", "paper lantern glow"],
+  "lifestyle": ["friends drinking sake", "izakaya customers laughing"],
+  "detail": ["chicken yakitori closeup", "sake pour ceramic cup"]
+}
+
+## Anti-example (DO NOT DO)
+Input same as above.
+Bad output: { "hero": ["restaurant interior"], "product": ["gourmet dish"] }  // too generic, ignores Japanese / yakitori signal`
+
+/**
+ * 用 Haiku 把專案真實上下文翻譯成 6 類 × 2-3 個精準英文 Unsplash query
+ * 失敗 throw：caller 降級回 PRODUCTTYPE_TO_UNSPLASH_QUERIES
+ * 成本：~$0.0005 / 次，~800ms
+ */
+export async function generateProjectQueries(
+  ctx: QueryGenContext,
+  trackingContext?: { userId?: string; conversationId?: string },
+): Promise<QuerySet> {
+  const env = getEnv()
+  if (!env.ENABLE_SMART_IMAGE_QUERIES) {
+    throw new Error('ENABLE_SMART_IMAGE_QUERIES=false')
+  }
+
+  const lines: string[] = [
+    `productType: ${ctx.productType}`,
+    `primaryDescription: ${ctx.primaryDescription.replace(/\s+/g, ' ').trim().slice(0, 600)}`,
+  ]
+  if (ctx.variantConceptName) lines.push(`variantConceptName: ${ctx.variantConceptName}`)
+  if (ctx.variantConceptMood) lines.push(`variantConceptMood: ${ctx.variantConceptMood}`)
+  if (ctx.designMood) lines.push(`designMood: ${ctx.designMood}`)
+  if (ctx.referenceAnalysisSummary) {
+    lines.push(`referenceAnalysisSummary: ${sanitizeReferenceSummary(ctx.referenceAnalysisSummary)}`)
+  }
+  const userContent = lines.join('\n')
+
+  const result = await callStructured({
+    schema: QueryOutputSchema,
+    model: MODEL.HAIKU,
+    system: QUERY_SYSTEM_PROMPT,
+    messages: [{ role: 'user', content: userContent }],
+    maxTokens: 1024,
+    temperature: 0.2,
+    purpose: 'image_query_generation',
+    trackingContext,
+  })
+
+  if (!result.success) {
+    throw new Error(`generateProjectQueries failed: ${result.error}`)
+  }
+
+  return result.data as QuerySet
+}
+
+// ============================================================
 // Unsplash API client
 // ============================================================
 
@@ -436,10 +547,17 @@ function toImageAsset(photo: UnsplashPhoto, category: ImageCategory): ImageAsset
 export interface FetchImageLibraryOpts {
   locale?: 'zh' | 'en'
   forceRefresh?: boolean
+  /** Haiku 專案上下文。傳入則先跑 generateProjectQueries，失敗降級靜態字典 */
+  queryContext?: QueryGenContext
+  /** cache key scope。通常傳 conversationId；不傳則 fallback 為 productType（legacy pre-warm 相容） */
+  cacheKey?: string
+  /** LLM usage tracking */
+  trackingContext?: { userId?: string; conversationId?: string }
 }
 
 /**
- * 從 Unsplash 抓 productType 對應的 6 類圖庫
+ * 從 Unsplash 抓專案相關的 6 類圖庫
+ * 優先 Haiku 生專案 query（queryContext 有時），失敗降級 PRODUCTTYPE_TO_UNSPLASH_QUERIES
  * 多 query 合併、按 sourceId 去重、截斷到 CATEGORY_TARGET_COUNT
  * 會 throw：caller 用 getImageLibraryOrFallback 包一層兜底
  */
@@ -456,14 +574,24 @@ export async function fetchImageLibrary(
   }
 
   const locale = opts.locale ?? 'en'
-  const cacheKey = `image-lib:v1:${productType}:${locale}`
+  const scope = opts.cacheKey ?? productType
+  const cacheKey = `image-lib:v2:${scope}:${locale}`
 
   if (opts.forceRefresh) {
     await invalidateCache(cacheKey)
   }
 
   return cached(cacheKey, env.UNSPLASH_CACHE_TTL_SECONDS, async () => {
-    const querySet = PRODUCTTYPE_TO_UNSPLASH_QUERIES[productType] ?? DEFAULT_QUERIES
+    // 優先 Haiku 生專案 query；失敗降級靜態字典
+    let querySet: QuerySet = PRODUCTTYPE_TO_UNSPLASH_QUERIES[productType] ?? DEFAULT_QUERIES
+    if (opts.queryContext) {
+      try {
+        querySet = await generateProjectQueries(opts.queryContext, opts.trackingContext)
+        logger.info({ productType, scope }, 'generateProjectQueries 成功，使用專案級 queries')
+      } catch (err) {
+        logger.warn({ err, productType, scope }, 'generateProjectQueries 失敗，降級靜態字典')
+      }
+    }
     const result: Record<ImageCategory, ImageAsset[]> = {
       hero: [],
       product: [],
@@ -595,11 +723,16 @@ export async function getImageLibraryOrFallback(
 // 手動失效
 // ============================================================
 
+/**
+ * 失效 image library 快取
+ * @param scope 通常傳 conversationId（專案級）；legacy pre-warm 路徑傳 productType
+ * @param locale cache key 的 locale partition
+ */
 export async function invalidateImageLibrary(
-  productType: string,
+  scope: string,
   locale: 'zh' | 'en' = 'en',
 ): Promise<void> {
-  await invalidateCache(`image-lib:v1:${productType}:${locale}`)
+  await invalidateCache(`image-lib:v2:${scope}:${locale}`)
 }
 
 // ============================================================

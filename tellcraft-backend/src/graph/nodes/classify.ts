@@ -36,6 +36,7 @@ const SPECIAL_TOKENS = [
   '__cancel_risky_deploy__',
   '__cancel_domain__',
   '__retry_clone__',
+  '__retry_variants__',
   '__auto_repair_preview__',
 ] as const
 
