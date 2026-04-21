@@ -418,7 +418,8 @@ function buildActionUserPrompt(
   requiredResponseFields?: string[],
   stepSummaries?: string[],
   featureContent?: string,
-  requiredInputFields?: string[]
+  requiredInputFields?: string[],
+  mixedShapes?: { hasMixedShapes: boolean; singleRowFields: string[]; multiRowFields: string[] }
 ): string {
   const rulesText = (action.rules || [])
     .map(r => `- [${r.type}] ${r.rule}`)
@@ -444,6 +445,26 @@ ${requiredInputFields.map(f => `- \`input.${f}\``).join('\n')}
 驗證範例：\`if (!input.${requiredInputFields[0]}) throw new Error('${requiredInputFields[0]} is required')\``
     : ''
 
+  // L22.E: 混合 response shape 提示（同一 action 的多個 Rule 有 single-row + multi-row Then table）
+  const mixedShapesText = mixedShapes && mixedShapes.hasMixedShapes
+    ? `\n## 混合 Response Shape（重要！Feature 同時要求 object 和 array）
+此 action 的 Feature Then tables 混合：
+- Single-row（期望 object 形式）: ${mixedShapes.singleRowFields.join(', ')}
+- Multi-row（期望 array 形式）: ${mixedShapes.multiRowFields.join(', ')}
+
+**必須用 wrapped 結構**（不要把 array 和 object 硬拼在一起）：
+\`\`\`typescript
+return {
+  __status: 200,
+  // ↓ single-row rules 對應的 top-level 欄位
+  ${mixedShapes.singleRowFields.slice(0, 4).map(f => `${f}: ...`).join(',\n  ')},
+  // ↓ multi-row rules 對應的 items 陣列（validator 會自動 drill-down）
+  items: [ /* 每個元素包含 ${mixedShapes.multiRowFields.slice(0, 3).join(', ')} 等欄位 */ ],
+}
+\`\`\`
+SpecFormula validator 偵測到 multi-row table + object response 時，會自動從 \`items\` / \`data\` / \`rows\` 欄位抓 array 來驗證。不要用 \`[header, ...items]\` 混合 array（會 offset 錯位）。`
+    : ''
+
   const stepSummariesText = stepSummaries && stepSummaries.length > 0
     ? `\n## _stepSummary Exact Dispatch Values (STRICT — do NOT rewrite)
 BDD tests will invoke this function with exactly these _stepSummary values. Your if/else branches MUST match these with \`===\`:
@@ -465,7 +486,7 @@ ${generateColumnListText(schemaSql)}
 
 ## Entity Mapping（中文實體 → 表名）
 ${entityMapping}
-${typesText}${responseFieldsText}${inputFieldsText}${stepSummariesText}${featureContent ? `
+${typesText}${responseFieldsText}${inputFieldsText}${mixedShapesText}${stepSummariesText}${featureContent ? `
 
 ## BDD Feature 規格（最重要！你的代碼必須通過這些測試場景）
 以下是 SpecFormula 測試會執行的完整 Feature 文件。仔細閱讀每個 Scenario 的：
@@ -1814,6 +1835,17 @@ export async function generateActionFunction(
   if (requiredInputFields && requiredInputFields.length > 0) {
     logger.info({ actionName: action.name, fields: requiredInputFields }, 'BDD input fields 注入')
   }
+  // L22.E: 偵測混合 response shape（同時要求 object + array）
+  const mixedShapes = ctx.features
+    ? detectMixedResponseShapes(ctx.features, action.name)
+    : undefined
+  if (mixedShapes?.hasMixedShapes) {
+    logger.info({
+      actionName: action.name,
+      singleRow: mixedShapes.singleRowFields,
+      multiRow: mixedShapes.multiRowFields,
+    }, 'BDD 混合 response shape 偵測到 — 提示 Coder 用 wrapped 結構')
+  }
   // 找到對應的 Feature 文件內容
   const featureContent = ctx.features
     ? ctx.features.find(f => f.actionName === action.name)?.content
@@ -1821,7 +1853,7 @@ export async function generateActionFunction(
   if (featureContent) {
     logger.info({ actionName: action.name, featureLen: featureContent.length }, 'BDD Feature 內容注入')
   }
-  const userPrompt = buildActionUserPrompt(action, ctx.schemaSql, ctx.entityMapping, ctx.types, requiredResponseFields, stepSummaries, featureContent, requiredInputFields)
+  const userPrompt = buildActionUserPrompt(action, ctx.schemaSql, ctx.entityMapping, ctx.types, requiredResponseFields, stepSummaries, featureContent, requiredInputFields, mixedShapes)
 
   // 複雜 action（多規則）→ 更多 token（Feature 注入後 prompt 更長，output 也需更多空間）
   const ruleCount = (action.rules || []).length
@@ -4064,6 +4096,74 @@ function extractInputFieldsFromFeatures(
   }
 
   return [...fields]
+}
+
+/**
+ * L22.E: 偵測 Feature 是否有混合 single-row + multi-row Then response table
+ * 若有 → 告知 LLM 用 wrapped `{...headerFields, items: [...]}` pattern
+ * validator 的 L22.E drill-down 會自動從 items/data/rows/results/list 提取 array
+ */
+function detectMixedResponseShapes(
+  features: Array<{ actionName: string; content: string }>,
+  actionName: string
+): { hasMixedShapes: boolean; singleRowFields: string[]; multiRowFields: string[] } {
+  const matched = features.filter(f => f.actionName === actionName)
+  if (matched.length === 0) return { hasMixedShapes: false, singleRowFields: [], multiRowFields: [] }
+
+  const singleFields = new Set<string>()
+  const multiFields = new Set<string>()
+
+  for (const feature of matched) {
+    const lines = feature.content.split('\n')
+    let inResponseTable = false
+    let headerLine = ''
+    let dataRowCount = 0
+    let currentHeaders: string[] = []
+
+    const flushTable = () => {
+      if (currentHeaders.length === 0) return
+      const target = dataRowCount > 1 ? multiFields : singleFields
+      for (const h of currentHeaders) {
+        if (h.startsWith('>') || h.startsWith('<')) continue
+        target.add(h)
+      }
+    }
+
+    for (const line of lines) {
+      const trimmed = line.trim()
+      if (/(?:Then|And)\s+.+\(\d+\)回應/.test(trimmed)) {
+        flushTable()
+        inResponseTable = true
+        headerLine = ''
+        dataRowCount = 0
+        currentHeaders = []
+        continue
+      }
+      if (inResponseTable) {
+        if (trimmed.startsWith('|')) {
+          if (!headerLine) {
+            headerLine = trimmed
+            currentHeaders = headerLine.split('|').map(c => c.trim()).filter(Boolean)
+          } else {
+            dataRowCount++
+          }
+        } else if (trimmed === '' || !trimmed.startsWith('|')) {
+          flushTable()
+          inResponseTable = false
+          headerLine = ''
+          currentHeaders = []
+          dataRowCount = 0
+        }
+      }
+    }
+    flushTable()
+  }
+
+  return {
+    hasMixedShapes: singleFields.size > 0 && multiFields.size > 0,
+    singleRowFields: [...singleFields],
+    multiRowFields: [...multiFields],
+  }
 }
 
 // ============================================================

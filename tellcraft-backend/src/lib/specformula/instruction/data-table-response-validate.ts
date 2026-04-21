@@ -78,12 +78,25 @@ export class DataTableResponseValidate {
     // 過濾出實際驗證用的 header（排除 index 位置標記欄位）
     const validateHeaders = headers.filter(h => h.trim() !== 'index');
 
-    if (Array.isArray(parsed) && rows.length > 1) {
+    // L22.E: wrapped array drill-down — 多行 table + object response 時，
+    //   嘗試從 items/data/rows/results/list 欄位抓 array（處理 Feature 同時要求 object 和 array 的情境）
+    let arrayTarget: unknown[] | null = null;
+    if (Array.isArray(parsed)) {
+      arrayTarget = parsed;
+    } else if (rows.length > 1 && parsed && typeof parsed === 'object') {
+      const WRAP_KEYS = ['items', 'data', 'rows', 'results', 'list'] as const;
+      for (const k of WRAP_KEYS) {
+        const v = (parsed as Record<string, unknown>)[k];
+        if (Array.isArray(v)) { arrayTarget = v; break; }
+      }
+    }
+
+    if (arrayTarget && rows.length > 1) {
       // ===== 多行 Array 回應驗證：每行對應 array 中的一個元素（按位置對齊）=====
       for (let rowIdx = 0; rowIdx < rows.length; rowIdx++) {
         const row = rows[rowIdx];
-        const elementMap: Record<string, unknown> = rowIdx < parsed.length
-          ? (parsed[rowIdx] as Record<string, unknown>)
+        const elementMap: Record<string, unknown> = rowIdx < arrayTarget.length
+          ? (arrayTarget[rowIdx] as Record<string, unknown>)
           : {};
 
         this.validateSingleRow(summary, validateHeaders, row, elementMap);
