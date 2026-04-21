@@ -11,7 +11,9 @@ const [user] = await sql`SELECT * FROM users WHERE email = ${input.email}`
 if (!user) throw new Error('User not found')
 const valid = await bcrypt.compare(input.password, user.password_hash)
 if (!valid) throw new Error('Invalid password')
-const accessToken = jwt.sign({ userId: user.id }, process.env.JWT_SECRET || 'secret', { expiresIn: '7d' })
+const jwtSecret = process.env.JWT_SECRET
+if (!jwtSecret) throw new Error('JWT_SECRET env var is not configured')
+const accessToken = jwt.sign({ userId: user.id }, jwtSecret, { expiresIn: '7d' })
 return { __status: 200, userId: user.id, accessToken, message: 'Login successful' }
 
 // Logout: return directly

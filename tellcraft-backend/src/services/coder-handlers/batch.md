@@ -1,9 +1,12 @@
 
 ## Batch Handler
 ```typescript
-// Input: comma-separated string → split into array
-const ids = (input.orderedItemIds || '').split(',').map(s => s.trim()).filter(Boolean)
-if (ids.length === 0) throw new Error('orderedItemIds is required')
+// Input: comma-separated string → split into array.
+// Use the EXACT parameter name from the Feature When table header (e.g. `input.orderedItemIds`,
+// `input.itemIds`, `input.ids`). Do NOT hardcode — read the Feature's header.
+const raw = input.<ExactHeaderNameFromFeature> || ''
+const ids = raw.split(',').map(s => s.trim()).filter(Boolean)
+if (ids.length === 0) throw new Error('<ExactHeaderNameFromFeature> is required')
 
 // UPDATE each row
 for (let i = 0; i < ids.length; i++) {

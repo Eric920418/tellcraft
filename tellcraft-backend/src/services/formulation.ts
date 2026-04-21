@@ -824,6 +824,33 @@ ${LANGUAGE_POLICY_FEATURE_BLOCK}
 - Data prep: \`準備一個<EntityName>, with table:\` (**no curly braces**, write entity name directly, e.g. \`準備一個Product, with table:\`). Uses \`>contextKey\` / \`<executionKey\`.
 - Time control: \`現在時間為 "{datetime}"\`
 
+### ⚠️ VAR Scope Rule (CRITICAL — violating this makes the whole scenario fail)
+
+SpecFormula runs each \`Scenario:\` / \`Example:\` **independently** — Background + that scenario's own Given re-execute each time. **VARs do NOT carry across scenarios.**
+
+- Any \`$X\` referenced in a scenario's When/Then **MUST** be declared (\`>Entity.id\` + \`<X\`) in that scenario's **Background or Given** — NOT in another Rule/Example.
+- Common data shared across scenarios → put in **Background** (re-runs per scenario automatically).
+- Scenario-specific data → declare in that scenario's own **Given**.
+
+❌ WRONG:
+\`\`\`gherkin
+Rule: A
+  Example: E1
+    Given 準備一個 Section, with table: | >PageSection2.id | ... | <pageSection2Id | ... |  # 宣告在這
+Rule: B
+  Example: E2
+    When (No Actor) call, call table: | sectionId | | $pageSection2Id |  # ❌ 別 scenario 宣告的，跑 E2 時不存在
+\`\`\`
+
+✅ CORRECT: declare in Background (shared), or add the declaration to E2's own Given.
+
+### ⚠️ DataTable Non-Empty Rule
+
+Every data row under \`準備一個X, with table:\` **MUST have at least one non-empty, non-VAR-capture cell** (not just \`<xxxId\`). Empty rows cause EntitySetup INSERT to fail with "no columns to insert".
+
+- ❌ \`| <x.id | | | |\` (only capture, all else empty)
+- ✅ \`| <x.id | "Real Name" | 100 | true |\` (has real values)
+
 ### When step format (Action call, Actor prefix REQUIRED)
 - No identity: \`(No Actor) {summary}, call table:\`
 - With identity: \`(UID="$var") {summary}, call table:\`
@@ -1551,6 +1578,20 @@ ${LANGUAGE_POLICY_FEATURE_BLOCK}
 - \`<executionKey\`：Execution Key，捕獲執行時產生的值（如自動生成的 ID）
 - \`$ContextName.field\`：Variable Reference，引用先前宣告的 Context Key 值
 - \`$notnull\`：特殊值，驗證欄位不為 null
+
+### ⚠️ VAR 作用域規則（關鍵 — 違反會讓整個 scenario 掛掉）
+
+SpecFormula 每個 Scenario/Example 獨立執行：Background + 該 scenario 自己的 Given 每次重跑。**VAR 不跨 scenario 傳承**。
+- scenario 的 When/Then 引用的 \`$X\` **必須**在該 scenario 的 **Background 或 Given** 宣告（\`>Entity.id\` + \`<X\`），不可引用別 Rule/Example 宣告的 VAR
+- 共用資料 → 放 Background；scenario 專屬資料 → 該 scenario 自己的 Given
+
+❌ \`Rule B/Example E2 的 When: | $pageSection2Id |\` 但 pageSection2Id 只在 Rule A/Example E1 宣告 → runtime fail
+
+### ⚠️ DataTable 非空規則
+
+\`準備一個X, with table:\` 的每個 data row **必須至少有一個非空、非 VAR 前綴（\`<xxxId\`）欄位值**。整 row 全空或只有 VAR capture 會導致 EntitySetup INSERT fail「沒有可插入的欄位」。
+- ❌ \`| <x.id | | | |\`
+- ✅ \`| <x.id | "實名" | 100 | true |\`
 
 ## PostgreSQL 型別規則（嚴格遵守）
 - 目標資料庫是 **PostgreSQL（Neon）**，禁止使用 MySQL 語法

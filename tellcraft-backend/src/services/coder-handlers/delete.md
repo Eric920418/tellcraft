@@ -1,8 +1,10 @@
 
 ## Delete Handler
 ```typescript
-const entityId = input.id || input.xxxId
-if (!entityId) throw new Error('id is required')
+// Use the EXACT parameter name from the Feature When table header.
+// Examples: `input.sectionId`, `input.itemId`. Do NOT use `input.id || input.xxxId` fallback.
+const entityId = input.<ExactHeaderNameFromFeature>
+if (!entityId) throw new Error('<ExactHeaderNameFromFeature> is required')
 
 // ⚠️ Check the Schema DDL first:
 // If the Schema has a `deleted_at` column → soft delete:

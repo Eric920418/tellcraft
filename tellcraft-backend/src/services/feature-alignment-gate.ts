@@ -286,6 +286,138 @@ const SPECFORMULA_SYSTEM_VARS = new Set<string>([
 ])
 
 /**
+ * L23.C: 按 Scenario / Example 切割 Feature，回傳每個 scenario 的 scope：
+ *   - 該 scenario 有效的 VAR 宣告 = Background 宣告 + 該 scenario Given 宣告
+ *   - 該 scenario 的 VAR 引用 = 該 scenario When/Then 引用
+ * 用於檢測 cross-scenario VAR 引用（SpecFormula 每個 scenario 獨立執行）
+ */
+export function extractScenariosWithScope(content: string): Array<{
+  scenarioName: string
+  startLine: number
+  declaredInBackground: Set<string>
+  declaredInLocalGiven: Set<string>
+  referencedInWhenThen: Array<{ varName: string; line: number }>
+}> {
+  const lines = content.split('\n')
+
+  // 第一遍：收集 Background 宣告
+  const backgroundDecls = new Set<string>()
+  let inBackground = false
+  for (let i = 0; i < lines.length; i++) {
+    const trimmed = lines[i].trim()
+    if (/^Background:/.test(trimmed)) { inBackground = true; continue }
+    if (/^(Rule:|Scenario:|Scenario Outline:|Example:|@)/.test(trimmed)) { inBackground = false }
+    if (!inBackground || !trimmed.startsWith('|')) continue
+    const cells = trimmed.split('|').map(c => c.trim()).filter(Boolean)
+    for (const cell of cells) {
+      if (cell.startsWith('>')) {
+        // Context Key 宣告：>Entity.field
+        const key = cell.substring(1)
+        backgroundDecls.add(key)
+        // 衍生變數名（entity.charAt(0).toLower + field.charAt(0).toUpper + ...）
+        const parts = key.split('.')
+        if (parts.length === 2) {
+          const entity = parts[0]
+          const field = parts[1]
+          backgroundDecls.add(field)
+          backgroundDecls.add(entity.charAt(0).toLowerCase() + entity.slice(1) + field.charAt(0).toUpperCase() + field.slice(1))
+        }
+      } else if (cell.startsWith('<')) {
+        backgroundDecls.add(cell.substring(1)) // executionKey 捕獲
+      }
+    }
+  }
+
+  // 第二遍：按 scenario / example 切割並收集 local scope
+  const scenarios: Array<{
+    scenarioName: string
+    startLine: number
+    declaredInBackground: Set<string>
+    declaredInLocalGiven: Set<string>
+    referencedInWhenThen: Array<{ varName: string; line: number }>
+  }> = []
+
+  let currentScenario: (typeof scenarios)[number] | null = null
+  let currentStepType: 'given' | 'when' | 'then' | null = null
+
+  const flushScenario = () => {
+    if (currentScenario) scenarios.push(currentScenario)
+  }
+
+  for (let i = 0; i < lines.length; i++) {
+    const trimmed = lines[i].trim()
+
+    // 新 scenario 開頭
+    const scenarioMatch = trimmed.match(/^(?:Scenario:|Scenario Outline:|Example:)\s*(.+)$/)
+    if (scenarioMatch) {
+      flushScenario()
+      currentScenario = {
+        scenarioName: scenarioMatch[1].trim(),
+        startLine: i + 1,
+        declaredInBackground: backgroundDecls,
+        declaredInLocalGiven: new Set<string>(),
+        referencedInWhenThen: [],
+      }
+      currentStepType = null
+      continue
+    }
+
+    // Rule: 分隔 — 不重置 scenario（scenario 在 Rule 內）
+    if (/^Rule:/.test(trimmed)) { currentStepType = null; continue }
+    // Background: / 結尾 — 不在 scenario 內
+    if (/^Background:/.test(trimmed)) { continue }
+
+    if (!currentScenario) continue
+
+    // 追蹤 step 類型
+    if (/^(Given|And|But)\b/.test(trimmed) && currentStepType !== 'when' && currentStepType !== 'then') {
+      currentStepType = 'given'
+    } else if (/^When\b/.test(trimmed)) {
+      currentStepType = 'when'
+    } else if (/^Then\b/.test(trimmed)) {
+      currentStepType = 'then'
+    } else if (/^(And|But)\b/.test(trimmed)) {
+      // And/But 繼承前一個 step 類型
+    }
+
+    // table 行處理
+    if (trimmed.startsWith('|')) {
+      const cells = trimmed.split('|').map(c => c.trim()).filter(Boolean)
+      for (const cell of cells) {
+        if (currentStepType === 'given') {
+          if (cell.startsWith('>')) {
+            const key = cell.substring(1)
+            currentScenario.declaredInLocalGiven.add(key)
+            const parts = key.split('.')
+            if (parts.length === 2) {
+              const entity = parts[0]
+              const field = parts[1]
+              currentScenario.declaredInLocalGiven.add(field)
+              currentScenario.declaredInLocalGiven.add(entity.charAt(0).toLowerCase() + entity.slice(1) + field.charAt(0).toUpperCase() + field.slice(1))
+            }
+          } else if (cell.startsWith('<')) {
+            currentScenario.declaredInLocalGiven.add(cell.substring(1))
+          } else if (cell.startsWith('$') && /^\$[a-zA-Z]/.test(cell)) {
+            // Given 也可能用 $ 引用（如 FK 指向 Background 宣告的實體）
+            currentScenario.referencedInWhenThen.push({ varName: cell.substring(1), line: i + 1 })
+          }
+        } else if (currentStepType === 'when' || currentStepType === 'then') {
+          if (cell.startsWith('$') && /^\$[a-zA-Z]/.test(cell)) {
+            currentScenario.referencedInWhenThen.push({ varName: cell.substring(1), line: i + 1 })
+          } else if (cell.startsWith('<')) {
+            // Then 的 <executionKey 也是宣告（捕獲回應欄位）
+            currentScenario.declaredInLocalGiven.add(cell.substring(1))
+          }
+        }
+      }
+    }
+  }
+  flushScenario()
+
+  return scenarios
+}
+
+/**
  * 提取所有 VAR 宣告（>Context.field）和引用（$variable）
  */
 function extractVarDeclarationsAndReferences(content: string): {
@@ -529,6 +661,37 @@ export async function runAlignmentChecks(input: AlignmentGateInput): Promise<Ali
       }
     }
 
+    // ---- Check 5.5 (L23.C): Scenario-scope VAR 對齊 ----
+    // SpecFormula 每個 scenario 獨立執行，VAR 不跨 scenario 傳承。
+    // Background + 該 scenario 自己的 Given 才是有效 scope；引用在 scope 外 → runtime fail。
+    const scenarios = extractScenariosWithScope(feature.content)
+    const crossScenarioIssues = new Set<string>() // dedupe by (scenario+varName)
+    for (const scenario of scenarios) {
+      const scope = new Set([
+        ...scenario.declaredInBackground,
+        ...scenario.declaredInLocalGiven,
+      ])
+      for (const ref of scenario.referencedInWhenThen) {
+        if (SPECFORMULA_SYSTEM_VARS.has(ref.varName.toLowerCase())) continue
+        if (scope.has(ref.varName)) continue
+        // case-insensitive 二次嘗試（大小寫誤用由 Check 5 另外報）
+        let inScopeCI = false
+        for (const s of scope) {
+          if (s.toLowerCase() === ref.varName.toLowerCase()) { inScopeCI = true; break }
+        }
+        if (inScopeCI) continue
+        const key = `${scenario.scenarioName}::${ref.varName}`
+        if (crossScenarioIssues.has(key)) continue
+        crossScenarioIssues.add(key)
+        issues.push({
+          featureName: displayName,
+          checkName: 'cross_scenario_var_reference',
+          severity: 'error',
+          description: `Scenario "${scenario.scenarioName}" (line ${ref.line}) 引用 "$${ref.varName}" 未在該 scenario 的 Background 或 Given 宣告。SpecFormula 每個 scenario 獨立執行，VAR 不跨 scenario 傳承 — 在別的 Rule/Example 宣告的 VAR 在此 scenario 無效。請在該 scenario 自己的 Given 補上宣告（如 \`| >Xxx.id | ... | <${ref.varName} | ... |\`），或把共用資料移到 Background。`,
+        })
+      }
+    }
+
     // ---- Check 5: VAR-System 對齊 ----
     const vars = extractVarDeclarationsAndReferences(feature.content)
     // 檢查 $variable 引用是否有對應的 >context 宣告或 <executionKey 捕獲
@@ -593,6 +756,10 @@ export async function runAlignmentChecks(input: AlignmentGateInput): Promise<Ali
           }
         }
       }
+
+      // Check 5.5：Cross-scenario VAR reference（L23.C）
+      // （在 Check 5b 前執行 — 若在本 scenario scope 外宣告，精確指出是 cross-scenario 問題）
+      // 注意：此處的 "resolved" 是 flat-scope 結果。下面的 L23.C 檢查會在更精確的 scope 重跑。
 
       // Check 5b：完全未宣告偵測（L15.P0）
       // 既沒匹配到 declared context key，也沒匹配到 executionKey，也非系統常數 →
@@ -793,6 +960,37 @@ export async function runAlignmentChecks(input: AlignmentGateInput): Promise<Ali
         severity: 'error',
         description: `Feature "${displayName}" 的 api_call 含分頁參數 [${pr.paginationParams.join(', ')}]，Coder 會回 \`{items:[...], total, page, pageSize}\` wrap 格式；但 Then 步驟用 "with table:" DataTable 驗證預設當純陣列 → runtime 驗證必失敗。解法二選一：(1) 改用 \`with JSON:\` 並用 \`$.items[*].id\` 指定路徑；(2) 移除 api_call 的分頁參數（測試層不分頁）。`,
       })
+    }
+  }
+
+  // ── Check 10: DataTable 空 row 偵測（L23.B）──
+  //   Given 準備一個 X, with table: 下的 data row 若 cells 全空或只有 VAR capture (<xxxId)，
+  //   EntitySetup 會爆「沒有可插入的欄位」。此處提前攔下，避免到 SpecFormula 才炸。
+  for (const feature of input.features) {
+    const displayName = feature.name || '(unnamed)'
+    const setupSteps = extractEntitySetupWithData(feature.content)
+    for (const step of setupSteps) {
+      for (let rowIdx = 0; rowIdx < step.dataRows.length; rowIdx++) {
+        const row = step.dataRows[rowIdx]
+        const cells = row.cells
+        if (cells.length === 0) continue
+        // 有效欄位 = 非空 + 非純 VAR capture（<xxxId）+ 非純 VAR reference（$xxx）
+        const hasRealValue = cells.some(raw => {
+          const c = (raw || '').trim()
+          if (!c) return false
+          if (/^<[\w.]+$/.test(c)) return false
+          if (/^\$[\w.]+$/.test(c)) return false
+          return true
+        })
+        if (!hasRealValue) {
+          issues.push({
+            featureName: displayName,
+            checkName: 'datatable_empty_row',
+            severity: 'error',
+            description: `Feature "${displayName}" 的 \`準備一個 ${step.entityName}\` DataTable (line ${row.line}) 整 row 無任何實值（全空或只有 VAR capture/reference）。EntitySetup INSERT 會失敗「沒有可插入的欄位」。請至少提供一個非空、非 \`<\`/\`$\` 前綴的欄位值。`,
+          })
+        }
+      }
     }
   }
 

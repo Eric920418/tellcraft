@@ -1,8 +1,9 @@
 
 ## Update Handler
 ```typescript
-const entityId = input.id || input.xxxId
-if (!entityId) throw new Error('id is required')
+// Use the EXACT parameter name from the Feature When table header. Do NOT use `input.id || input.xxxId`.
+const entityId = input.<ExactHeaderNameFromFeature>
+if (!entityId) throw new Error('<ExactHeaderNameFromFeature> is required')
 
 // Precondition (state) validation: must exist and belong to the current user
 const existing = await sql`SELECT * FROM table_name WHERE id = ${entityId} AND user_id = ${userId}`
