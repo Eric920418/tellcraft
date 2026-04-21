@@ -417,7 +417,8 @@ function buildActionUserPrompt(
   types: Record<string, unknown>,
   requiredResponseFields?: string[],
   stepSummaries?: string[],
-  featureContent?: string
+  featureContent?: string,
+  requiredInputFields?: string[]
 ): string {
   const rulesText = (action.rules || [])
     .map(r => `- [${r.type}] ${r.rule}`)
@@ -433,6 +434,14 @@ BDD 規格驗證會從 response body 精確提取以下欄位，名稱不一致�
 ${requiredResponseFields.map(f => `- \`${f}\``).join('\n')}
 例如建立操作成功時：return { __status: 201, ${requiredResponseFields.join(', ')}, ...其他欄位 }
 這些欄位名稱是 BDD 規格硬編碼的，必須完全一致（區分大小寫）。`
+    : ''
+
+  // L22.A2: 注入 input 參數名（和 responseFieldsText 對稱）
+  const inputFieldsText = requiredInputFields && requiredInputFields.length > 0
+    ? `\n## 必須接收的輸入參數名稱（嚴格遵守，不可改名）
+BDD 規格驗證會傳入以下參數名稱，你的函數必須用 \`input.X\` 讀取，**不可猜測或改名**（例如不可用 \`input.id\` 取代 \`input.sectionId\`）：
+${requiredInputFields.map(f => `- \`input.${f}\``).join('\n')}
+驗證範例：\`if (!input.${requiredInputFields[0]}) throw new Error('${requiredInputFields[0]} is required')\``
     : ''
 
   const stepSummariesText = stepSummaries && stepSummaries.length > 0
@@ -456,7 +465,7 @@ ${generateColumnListText(schemaSql)}
 
 ## Entity Mapping（中文實體 → 表名）
 ${entityMapping}
-${typesText}${responseFieldsText}${stepSummariesText}${featureContent ? `
+${typesText}${responseFieldsText}${inputFieldsText}${stepSummariesText}${featureContent ? `
 
 ## BDD Feature 規格（最重要！你的代碼必須通過這些測試場景）
 以下是 SpecFormula 測試會執行的完整 Feature 文件。仔細閱讀每個 Scenario 的：
@@ -1403,8 +1412,13 @@ function fixMySqlSyntax(code: string): string {
  */
 export function unwrapListResponse(code: string): string {
   // Pattern 1: return { items: X } → return X (with __status preserved if present)
+  //   單行或多行都支援
   //   e.g.
   //     return { items: camelRows, total: camelRows.length, page: 1, pageSize: 20 }
+  //   或
+  //     return {
+  //       items: camelRows,
+  //     }
   //   →
   //     ;(camelRows as any).__status = 200
   //     return camelRows
@@ -1414,7 +1428,40 @@ export function unwrapListResponse(code: string): string {
   const WRAP_KEYS = new Set(['items', 'data', 'rows', 'results', 'list'])
   const META_KEYS = new Set(['total', 'page', 'pageSize', 'perPage', 'totalPages', 'hasMore', 'nextCursor', 'count', 'limit', 'offset'])
 
-  const lines = code.split('\n')
+  // L22 擴充：先收集 multi-line `return { ... }` 區塊合併為單行，再走原邏輯
+  const normalized: string[] = []
+  {
+    const srcLines = code.split('\n')
+    for (let i = 0; i < srcLines.length; i++) {
+      const line = srcLines[i]
+      // 偵測 multi-line return 開頭：`return {` 結尾（下一行開始是 body）
+      const openMatch = line.match(/^(\s*)return\s*\{\s*$/)
+      if (openMatch) {
+        const indent = openMatch[1]
+        const bodyParts: string[] = []
+        let j = i + 1
+        let closed = false
+        while (j < srcLines.length) {
+          const t = srcLines[j].trim()
+          if (t === '}' || t === '};') { closed = true; break }
+          // 忽略內層巢狀結構（含 `{` 或 `[` 深度）— 簡化處理：只收 top-level key: value
+          bodyParts.push(srcLines[j])
+          j++
+          // 安全門：超過 20 行視為複雜結構不動
+          if (j - i > 20) break
+        }
+        if (closed) {
+          const body = bodyParts.map(l => l.trim().replace(/,$/, '')).filter(Boolean).join(', ')
+          normalized.push(`${indent}return { ${body} }`)
+          i = j
+          continue
+        }
+      }
+      normalized.push(line)
+    }
+  }
+
+  const lines = normalized
   const out: string[] = []
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i]
@@ -1456,6 +1503,56 @@ export function unwrapListResponse(code: string): string {
     out.push(`${indent}return ${arrayVar}`)
   }
   return out.join('\n')
+}
+
+/**
+ * L22.A4: Deterministic input 參數對齊
+ * 偵測 LLM 生成的 input.id / input.xxxId fallback pattern，如果 Feature 的 When table
+ * 指定不同名稱（如 sectionId），機械改寫為正確名稱。
+ */
+function alignInputParameters(code: string, requiredInputFields: string[]): { code: string; fixes: string[] } {
+  const fixes: string[] = []
+  if (!requiredInputFields || requiredInputFields.length === 0) return { code, fixes }
+  let result = code
+
+  // Pattern 1: `const xxx = input.id || input.xxxId`（通用 fallback）
+  // 如果 requiredInputFields 不含 'id'，把 `input.id || input.xxxId` 替換
+  for (const field of requiredInputFields) {
+    if (field === 'id') continue // id 本身是合法的
+    // 偵測 `input.id` 被用在 `input.id || input.{field}` 或反向
+    const fallbackRegex = new RegExp(
+      `(const\\s+\\w+\\s*=\\s*)input\\.id\\s*\\|\\|\\s*input\\.${field}`,
+      'g'
+    )
+    if (fallbackRegex.test(result)) {
+      result = result.replace(fallbackRegex, `$1input.${field}`)
+      fixes.push(`input.id || input.${field} → input.${field}`)
+    }
+    // 反向：input.{field} || input.id → input.{field}（保留正確的）
+    const reverseRegex = new RegExp(
+      `(const\\s+\\w+\\s*=\\s*)input\\.${field}\\s*\\|\\|\\s*input\\.id`,
+      'g'
+    )
+    if (reverseRegex.test(result)) {
+      result = result.replace(reverseRegex, `$1input.${field}`)
+      fixes.push(`input.${field} || input.id → input.${field}`)
+    }
+  }
+
+  // Pattern 2: `if (!input.id)` throw 但 Feature 用 sectionId
+  // 只在 requiredInputFields 只有一個 ID-like 欄位（排除 _stepSummary）時改寫
+  const idLikeFields = requiredInputFields.filter(f => /id$/i.test(f))
+  if (idLikeFields.length === 1 && idLikeFields[0] !== 'id') {
+    const correctField = idLikeFields[0]
+    // 把 `input.id` 在 throw/if 語境中替換為 input.{correctField}
+    // 只替換 standalone `input.id`，不替換已正確的 `input.{correctField}`
+    if (!result.includes(`input.${correctField}`) && result.includes('input.id')) {
+      result = result.replace(/\binput\.id\b/g, `input.${correctField}`)
+      fixes.push(`input.id → input.${correctField}（全局替換，Feature 僅需 ${correctField}）`)
+    }
+  }
+
+  return { code: result, fixes }
 }
 
 /** 移除 import 語句 */
@@ -1710,6 +1807,13 @@ export async function generateActionFunction(
   if (stepSummaries && stepSummaries.length > 0) {
     logger.info({ actionName: action.name, summaries: stepSummaries }, 'BDD step summaries 注入')
   }
+  // L22.A3: 提取 input 參數名
+  const requiredInputFields = ctx.features
+    ? extractInputFieldsFromFeatures(ctx.features, action.name)
+    : undefined
+  if (requiredInputFields && requiredInputFields.length > 0) {
+    logger.info({ actionName: action.name, fields: requiredInputFields }, 'BDD input fields 注入')
+  }
   // 找到對應的 Feature 文件內容
   const featureContent = ctx.features
     ? ctx.features.find(f => f.actionName === action.name)?.content
@@ -1717,7 +1821,7 @@ export async function generateActionFunction(
   if (featureContent) {
     logger.info({ actionName: action.name, featureLen: featureContent.length }, 'BDD Feature 內容注入')
   }
-  const userPrompt = buildActionUserPrompt(action, ctx.schemaSql, ctx.entityMapping, ctx.types, requiredResponseFields, stepSummaries, featureContent)
+  const userPrompt = buildActionUserPrompt(action, ctx.schemaSql, ctx.entityMapping, ctx.types, requiredResponseFields, stepSummaries, featureContent, requiredInputFields)
 
   // 複雜 action（多規則）→ 更多 token（Feature 注入後 prompt 更長，output 也需更多空間）
   const ruleCount = (action.rules || []).length
@@ -1733,6 +1837,15 @@ export async function generateActionFunction(
   code = removeAuthChecks(code)
   code = fixMySqlSyntax(code)
   code = unwrapListResponse(code)  // L21.P1-A：擋 `return { items, total, page, pageSize }` wrap
+
+  // L22.A4: deterministic input 參數對齊 — 修正 input.id → input.sectionId 等 param 名
+  if (requiredInputFields && requiredInputFields.length > 0) {
+    const { code: aligned, fixes } = alignInputParameters(code, requiredInputFields)
+    if (fixes.length > 0) {
+      logger.info({ actionName: action.name, fixes }, 'L22.A4 input param alignment')
+      code = aligned
+    }
+  }
 
   return {
     path: `lib/actions/${toKebabCase(action.name)}.ts`,
@@ -3900,6 +4013,59 @@ function extractStepSummariesFromFeatures(
   return [...summaries]
 }
 
+/**
+ * L22.A1: 從 Feature When call table headers 提取 input 參數名（和 extractResponseFieldsFromFeatures 對稱）
+ * 過濾：_stepSummary（自動注入）、> / $ / < 開頭的 VAR headers
+ */
+function extractInputFieldsFromFeatures(
+  features: Array<{ actionName: string; content: string }>,
+  actionName: string
+): string[] {
+  const matched = features.filter(f => f.actionName === actionName)
+  if (matched.length === 0) return []
+
+  const fields = new Set<string>()
+  for (const feature of matched) {
+    const lines = feature.content.split('\n')
+    let inCallTable = false
+    let headerLine = ''
+
+    for (const line of lines) {
+      const trimmed = line.trim()
+
+      // 偵測 When/And ... call table: 步驟
+      if (/(?:When|And)\s+(?:\((?:No Actor|UID="[^"]*")\)\s+)?.+,\s*call\s+table:/i.test(trimmed)) {
+        inCallTable = true
+        headerLine = ''
+        continue
+      }
+
+      if (inCallTable) {
+        if (trimmed.startsWith('|')) {
+          if (!headerLine) {
+            headerLine = trimmed // header row
+          } else {
+            // data row → header 確定，提取欄位名
+            const headers = headerLine.split('|').map(c => c.trim()).filter(Boolean)
+            for (const header of headers) {
+              // 過濾 VAR 前綴和自動注入欄位
+              if (header === '_stepSummary') continue
+              if (header.startsWith('>') || header.startsWith('$') || header.startsWith('<')) continue
+              fields.add(header)
+            }
+            // 繼續掃描（可能有多行 data row），但不重複提取 header
+          }
+        } else {
+          inCallTable = false
+          headerLine = ''
+        }
+      }
+    }
+  }
+
+  return [...fields]
+}
+
 // ============================================================
 // 工具函數
 // ============================================================
@@ -4341,9 +4507,15 @@ export function classifyFailureRootCause(error: string, scenarioName?: string): 
   if (!error) return 'unknown'
   const e = error.toLowerCase()
 
-  // Step parsing failure（優先級最高：修代碼絕對沒用，Feature 步驟語法錯誤）
-  // 典型：`準備一個{顧客}` 花括號語法 → SpecFormula regex 不匹配
-  if (e.includes('步驟無法匹配') || e.includes('step could not be matched')) {
+  // Step parsing / Feature 層語法錯誤（優先級最高：修代碼絕對沒用，Feature 本身問題）
+  // 典型：(1) `準備一個{顧客}` 花括號語法 regex 不匹配
+  //       (2) EntitySetup DataTable 全空 row → 「沒有可插入的欄位」
+  //       (3) EntitySetup / EntityValidate 類 Feature-layer 前置錯誤
+  if (
+    e.includes('步驟無法匹配') || e.includes('step could not be matched') ||
+    e.includes('沒有可插入的欄位') || e.includes('no fields to insert') ||
+    e.includes('[entitysetup]') || e.includes('[entityvalidate]')
+  ) {
     return 'step_parsing'
   }
 

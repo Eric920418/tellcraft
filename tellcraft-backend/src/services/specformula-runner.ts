@@ -2650,6 +2650,7 @@ export async function runRedGreenCycle(input: {
       if (backupFileIdx !== -1) backupCode = currentFiles[backupFileIdx].content
     }
     let featurePassed = false
+    let lastFailedCount = Infinity // L22.C1: per-feature 早停追蹤
 
     for (let attempt = 1; attempt <= maxAttemptsPerFeature; attempt++) {
       totalAttempts++
@@ -2681,6 +2682,13 @@ export async function runRedGreenCycle(input: {
       }
 
       logger.info({ feature: feature.name, attempt, passed: result.passed, failed: result.failed }, '逐 Feature 測試結果')
+
+      // L22.C1: 早停 — 連續兩次失敗數不降，修復無效
+      if (attempt > 1 && result.failed >= lastFailedCount) {
+        logger.info({ feature: feature.name, attempt, failed: result.failed, lastFailed: lastFailedCount }, 'Feature 修復無進展，提前停止')
+        break
+      }
+      lastFailedCount = result.failed
 
       // 通過 → 下一個 Feature
       if (result.failed === 0) {
@@ -2770,6 +2778,7 @@ export async function runRedGreenCycle(input: {
   const maxRegressionRounds = Math.max(1, input.maxRegressionRounds ?? 2)
   let regressionRounds = 0
   let previousFailedNames: Set<string> | null = null
+  let previousFailedCount: number | null = null // L22.C2: 數字級早停
   let finalResult: SpecFormulaTestResult = {
     totalScenarios: 0, passed: 0, failed: 0, skipped: 0, scenarios: [], durationMs: 0,
   }
@@ -2817,6 +2826,13 @@ export async function runRedGreenCycle(input: {
 
     // 最後一輪只測試不修復
     if (isLastRound) break
+
+    // L22.C2: 數字級早停 — 失敗計數不降就停（比 setsEqual 更快的信號）
+    if (previousFailedCount !== null && finalResult.failed >= previousFailedCount) {
+      logger.info({ failed: finalResult.failed, previousFailed: previousFailedCount, round }, '回歸失敗計數無進展，停止修復迴圈')
+      break
+    }
+    previousFailedCount = finalResult.failed
 
     // 智能跳過：失敗集合與上輪完全相同 → 修復無效，停止
     // 用 scenario-level 比較（比 feature-level 更精確：避免 Feature 內不同 scenario 輪流失敗被誤判為「無進展」）

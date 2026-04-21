@@ -90,9 +90,9 @@ const ROOT_CAUSE_HINTS: Record<EnrichableRootCause, string> = {
 常見根因：(1) 欄位名與 Schema DDL 不一致；(2) NOT NULL 欄位未在 DataTable 提供值；(3) FK 欄位引用的父 table/ID 不存在；(4) 型別不匹配（字串塞進 UUID 欄位）。
 修復方向：檢查 Feature Background 的 \`準備一個<實體名>, with table:\` 區塊，對照 Schema DDL 逐欄位驗證。`,
 
-  step_parsing: `Feature 解析失敗：Gherkin 步驟文字無法對應到 ISA instruction regex（Feature 規格問題，修代碼無效）。
-常見根因：(1) entity 名用花括號包裹（如 \`準備一個{顧客}\`），SpecFormula regex 不接受 {}，應為 \`準備一個顧客\`；(2) When 格式缺 Actor 前綴；(3) Then 格式缺 HTTP status code；(4) Rule 缺四類前綴標註。
-修復方向：這是 Feature 規格語法問題，修 backend 代碼永遠無效。應修正 Feature 檔案的步驟格式（sanitizeFeatureContent 會自動剝除花括號）。`,
+  step_parsing: `Feature 解析失敗：Gherkin 步驟 / DataTable 結構錯誤（Feature 規格問題，修代碼無效）。
+常見根因：(1) entity 名用花括號包裹（\`準備一個{顧客}\`）→ regex 不匹配；(2) Background DataTable data row 全空 → 「沒有可插入的欄位」；(3) EntitySetup / EntityValidate 期望欄位在 Schema 不存在；(4) When 格式缺 Actor 前綴、Then 缺 HTTP status、Rule 缺四類前綴。
+修復方向：這是 Feature 規格層問題，修 backend 代碼永遠無效。應修正 Feature 檔案本身（由 formulation 的 sanitizeFeatureContent + Feature Alignment Gate 處理）。`,
 
   api_spec_mismatch: `API spec 不匹配：Feature 的 Action summary 在 actionsYml 找不到對應 action。
 常見根因：(1) Feature 的 \`# Action: actionName\` 與 actionsYml 的 action name 不一致；(2) summary 文字在 Feature 與 actionsYml 間漂移。
