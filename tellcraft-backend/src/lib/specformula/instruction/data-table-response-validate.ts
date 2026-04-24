@@ -78,12 +78,12 @@ export class DataTableResponseValidate {
     // 過濾出實際驗證用的 header（排除 index 位置標記欄位）
     const validateHeaders = headers.filter(h => h.trim() !== 'index');
 
-    // L22.E: wrapped array drill-down — 多行 table + object response 時，
-    //   嘗試從 items/data/rows/results/list 欄位抓 array（處理 Feature 同時要求 object 和 array 的情境）
+    // L22.E / L24.B: wrapped array drill-down — object response 含 items/data/rows/results/list 欄位時，
+    //   自動抓 array（單行 / 多行 Then table 都支援，解 pagination wrap case）
     let arrayTarget: unknown[] | null = null;
     if (Array.isArray(parsed)) {
       arrayTarget = parsed;
-    } else if (rows.length > 1 && parsed && typeof parsed === 'object') {
+    } else if (parsed && typeof parsed === 'object') {
       const WRAP_KEYS = ['items', 'data', 'rows', 'results', 'list'] as const;
       for (const k of WRAP_KEYS) {
         const v = (parsed as Record<string, unknown>)[k];
@@ -108,10 +108,28 @@ export class DataTableResponseValidate {
         }
       }
     } else {
-      // ===== 單行驗證（原有邏輯）=====
-      const responseMap: Record<string, unknown> = Array.isArray(parsed)
-        ? (parsed.length > 0 ? (parsed[0] as Record<string, unknown>) : {})
-        : (parsed as Record<string, unknown>);
+      // ===== 單行驗證 =====
+      // L24.B: 若 Feature 的 Then headers 與 top-level wrap 欄位（items/total/page/...）
+      //        不匹配（代表 Feature 期望的是 item 欄位而非 wrap 欄位） → drill 到 arrayTarget[0]
+      let responseMap: Record<string, unknown>;
+      if (Array.isArray(parsed)) {
+        responseMap = parsed.length > 0 ? (parsed[0] as Record<string, unknown>) : {};
+      } else if (arrayTarget && parsed && typeof parsed === 'object') {
+        const topLevelObj = parsed as Record<string, unknown>;
+        const firstNonVarHeader = validateHeaders
+          .map(h => h.trim())
+          .find(h => !h.startsWith('>') && !h.startsWith('<'));
+        if (firstNonVarHeader && !(firstNonVarHeader in topLevelObj)) {
+          // Feature 驗證的欄位在 top-level 找不到 → drill 到 array 第一元素
+          responseMap = arrayTarget.length > 0
+            ? (arrayTarget[0] as Record<string, unknown>)
+            : {};
+        } else {
+          responseMap = topLevelObj;
+        }
+      } else {
+        responseMap = parsed as Record<string, unknown>;
+      }
 
       const row = rows[0];
       this.validateSingleRow(summary, validateHeaders, row, responseMap);

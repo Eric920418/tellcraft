@@ -483,39 +483,12 @@ export async function runAlignmentChecks(input: AlignmentGateInput): Promise<Ali
     }
   }
 
-  // 檢查 substring collision（同一 action 內的 summary 不能互為 substring）
-  const summariesByAction = new Map<string, Array<{ summary: string; featureName: string }>>()
-  for (const s of allSummaries) {
-    const arr = summariesByAction.get(s.actionName) || []
-    arr.push({ summary: s.summary, featureName: s.featureName })
-    summariesByAction.set(s.actionName, arr)
-  }
-
-  // 跨 action 的 summary 也需要唯一（因為 composeActionFunction 合併多個 action 時）
-  for (let i = 0; i < allSummaries.length; i++) {
-    for (let j = i + 1; j < allSummaries.length; j++) {
-      const a = allSummaries[i]
-      const b = allSummaries[j]
-      if (a.summary === b.summary) continue // 完全相同不算碰撞（同一 action 的重複 When 步驟）
-      if (a.summary.includes(b.summary) || b.summary.includes(a.summary)) {
-        // 兩邊都報 issue，確保兩個 Feature 都被送去修復
-        issues.push({
-          featureName: a.featureName,
-          checkName: 'summary_uniqueness',
-          severity: 'error',
-          description: `Summary "${a.summary}" 與 "${b.summary}" (${b.featureName}) 互為子字串 → dispatch 碰撞。必須讓兩者的 When summary 互不包含`,
-        })
-        if (a.featureName !== b.featureName) {
-          issues.push({
-            featureName: b.featureName,
-            checkName: 'summary_uniqueness',
-            severity: 'error',
-            description: `Summary "${b.summary}" 與 "${a.summary}" (${a.featureName}) 互為子字串 → dispatch 碰撞。必須讓兩者的 When summary 互不包含`,
-          })
-        }
-      }
-    }
-  }
+  // L24.A: 移除 substring collision 檢查
+  // 理由：Coder 現在一律用 `op === 'exact'` 精確匹配（coder-generation.ts:1703、:472），
+  //   substring 不會造成實際 dispatch 碰撞。原本這個檢查是 L14 前用 `op.includes()` 時代的防禦，
+  //   現在是誤報來源：LLM 被誤導把合法命名（如 "Delete Pricing Plan" vs "Delete Pricing Plan Item"）
+  //   改成 "Remove Pricing Plan" → 打破 actionsYml 對齊 → 造成真 bug。
+  //   若未來某些場景重新引入 substring 比對，應該改成 warning（非 error）並在實際 runtime 偵測
 
   for (const feature of input.features) {
     const displayName = feature.name || feature.actionName
@@ -954,11 +927,14 @@ export async function runAlignmentChecks(input: AlignmentGateInput): Promise<Ali
     const displayName = feature.name || feature.actionName
     const pr = detectPaginationConflict(feature.content)
     if (pr.hasPaginationInput && pr.hasDataTableValidation && pr.paginationParams.length > 0) {
+      // L24.C: 降為 warning（非 error 阻擋）— L22.E + L24.B 的 validator drill-down 已支援
+      // wrapped array（object + items/data/rows/results/list 欄位）的單行/多行驗證，大多數 pagination
+      // 情境 runtime 可通過。保留為 warning 提示開發者可能的結構不對稱。
       issues.push({
         featureName: displayName,
         checkName: 'pagination_mismatch',
-        severity: 'error',
-        description: `Feature "${displayName}" 的 api_call 含分頁參數 [${pr.paginationParams.join(', ')}]，Coder 會回 \`{items:[...], total, page, pageSize}\` wrap 格式；但 Then 步驟用 "with table:" DataTable 驗證預設當純陣列 → runtime 驗證必失敗。解法二選一：(1) 改用 \`with JSON:\` 並用 \`$.items[*].id\` 指定路徑；(2) 移除 api_call 的分頁參數（測試層不分頁）。`,
+        severity: 'warning',
+        description: `Feature "${displayName}" 的 api_call 含分頁參數 [${pr.paginationParams.join(', ')}]，Coder 會回 \`{items:[...], total, page, pageSize}\` wrap 格式。L22.E/L24.B validator drill-down 通常可自動處理，但若 Feature 的 Then 驗證欄位同時出現在 top-level wrap（如 \`total\`）和 item 內（如 \`id\`）可能產生混淆。可改用 \`with JSON:\` + \`$.items[*].id\` 明確指定路徑以避免歧義。`,
       })
     }
   }
@@ -994,7 +970,19 @@ export async function runAlignmentChecks(input: AlignmentGateInput): Promise<Ali
     }
   }
 
-  return issues
+  // L24.D: Dedupe — 同一 (featureName, checkName, description) 只報一次
+  // 避免 extractWhenSummaries 抓到重複 When 步驟造成多倍誤報（如 1 個 Feature 內 16 個 scenario
+  // 各產生一組相同的 summary_uniqueness issue）
+  const seen = new Set<string>()
+  const dedupedIssues: AlignmentIssue[] = []
+  for (const issue of issues) {
+    const key = `${issue.featureName}|${issue.checkName}|${issue.description}`
+    if (seen.has(key)) continue
+    seen.add(key)
+    dedupedIssues.push(issue)
+  }
+
+  return dedupedIssues
 }
 
 /**
