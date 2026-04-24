@@ -105,6 +105,11 @@ function isRetryableError(err: unknown): boolean {
     msg.includes('rate_limit_error') ||
     msg.includes('529') ||
     msg.includes('503') ||
+    // L26.A: 加 500/502/504 Cloudflare transient errors
+    msg.includes('500 Internal') ||
+    msg.includes('502 Bad Gateway') ||
+    msg.includes('504 Gateway') ||
+    msg.includes('cloudflare') ||
     msg.includes('ECONNRESET') ||
     msg.includes('ETIMEDOUT')
 }

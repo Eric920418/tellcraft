@@ -192,12 +192,15 @@ const RETRY_MAX = 3
 const RETRY_BASE_DELAY_MS = 2000
 
 function isRetryableStatus(status: number): boolean {
+  // L26.A: 加 500/502/504 — Cloudflare transient errors
   return status === 429 || status === 529 || status === 503
+    || status === 500 || status === 502 || status === 504
 }
 
 function isRetryableFetchError(err: unknown): boolean {
   const msg = String(err)
   return msg.includes('ECONNRESET') || msg.includes('ETIMEDOUT') || msg.includes('fetch failed')
+    || msg.includes('502 Bad Gateway') || msg.includes('504 Gateway') || msg.includes('cloudflare')
 }
 
 async function callClaude(

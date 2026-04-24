@@ -15,7 +15,9 @@ const RETRY_MAX = 3
 const RETRY_BASE_DELAY_MS = 2000
 
 function isRetryableStatus(status: number): boolean {
+  // L26.A: 加 500/502/504 — Cloudflare transient errors
   return status === 429 || status === 529 || status === 503
+    || status === 500 || status === 502 || status === 504
 }
 
 /**
