@@ -1343,16 +1343,32 @@ export async function runFeatureAlignmentGate(input: AlignmentGateInput): Promis
   let latestFixedEntityMapping: string | undefined
   let totalFixedCount = 0
 
+  // L25.A: 追蹤「最佳版本」— LLM 可能越修越糟（例：13 issue → 32 issue），
+  // 此時不該 return 最後那份更糟的，而是回到錯誤數最少的版本
+  let bestFeatures: typeof currentFeatures = [...currentFeatures]
+  let bestErrorCount = Infinity
+  let bestSchemaSql: string | undefined
+  let bestEntityMapping: string | undefined
+
   for (let round = 0; round < MAX_FIX_ROUNDS; round++) {
     // 執行檢查（使用可能已更新的 schema）
     const issues = await runAlignmentChecks({ ...input, features: currentFeatures, schemaSql: currentSchemaSql, entityMapping: currentEntityMapping })
     const errorIssues = issues.filter(i => i.severity === 'error')
+
+    // L25.A: 每輪更新最佳版本（錯誤數嚴格更少才算更好，避免平手時誤替換）
+    if (errorIssues.length < bestErrorCount) {
+      bestErrorCount = errorIssues.length
+      bestFeatures = [...currentFeatures]
+      bestSchemaSql = currentSchemaSql !== input.schemaSql ? currentSchemaSql : undefined
+      bestEntityMapping = currentEntityMapping !== input.entityMapping ? currentEntityMapping : undefined
+    }
 
     logger.info({
       round: round + 1,
       totalIssues: issues.length,
       errors: errorIssues.length,
       warnings: issues.length - errorIssues.length,
+      bestErrorCount,
     }, 'Alignment Gate: 檢查完成')
 
     // 無 error 級問題 → 通過
@@ -1369,9 +1385,9 @@ export async function runFeatureAlignmentGate(input: AlignmentGateInput): Promis
       return {
         passed: true,
         blocked: false,
-        fixedFeatures: totalFixedCount > 0 ? currentFeatures : undefined,
-        fixedSchemaSql: latestFixedSchemaSql,
-        fixedEntityMapping: latestFixedEntityMapping,
+        fixedFeatures: totalFixedCount > 0 ? bestFeatures : undefined,
+        fixedSchemaSql: bestSchemaSql ?? latestFixedSchemaSql,
+        fixedEntityMapping: bestEntityMapping ?? latestFixedEntityMapping,
         issues,
         fixedIssueCount: totalFixedCount,
         remainingIssueCount: issues.filter(i => i.severity === 'warning').length,
@@ -1393,9 +1409,9 @@ export async function runFeatureAlignmentGate(input: AlignmentGateInput): Promis
       return {
         passed: false,
         blocked: true,
-        fixedFeatures: totalFixedCount > 0 ? currentFeatures : undefined,
-        fixedSchemaSql: latestFixedSchemaSql,
-        fixedEntityMapping: latestFixedEntityMapping,
+        fixedFeatures: totalFixedCount > 0 ? bestFeatures : undefined,
+        fixedSchemaSql: bestSchemaSql ?? latestFixedSchemaSql,
+        fixedEntityMapping: bestEntityMapping ?? latestFixedEntityMapping,
         issues,
         fixedIssueCount: totalFixedCount,
         remainingIssueCount: errorIssues.length,
@@ -1427,7 +1443,7 @@ export async function runFeatureAlignmentGate(input: AlignmentGateInput): Promis
       return {
         passed: false,
         blocked: true,
-        fixedFeatures: totalFixedCount > 0 ? currentFeatures : undefined,
+        fixedFeatures: totalFixedCount > 0 ? bestFeatures : undefined,
         issues,
         fixedIssueCount: totalFixedCount,
         remainingIssueCount: errorIssues.length,
@@ -1485,9 +1501,9 @@ export async function runFeatureAlignmentGate(input: AlignmentGateInput): Promis
       return {
         passed: false,
         blocked: true,
-        fixedFeatures: totalFixedCount > 0 ? currentFeatures : undefined,
-        fixedSchemaSql: latestFixedSchemaSql,
-        fixedEntityMapping: latestFixedEntityMapping,
+        fixedFeatures: totalFixedCount > 0 ? bestFeatures : undefined,
+        fixedSchemaSql: bestSchemaSql ?? latestFixedSchemaSql,
+        fixedEntityMapping: bestEntityMapping ?? latestFixedEntityMapping,
         issues: postFixIssues,
         fixedIssueCount: totalFixedCount,
         remainingIssueCount: postFixErrors.length,
@@ -1504,9 +1520,9 @@ export async function runFeatureAlignmentGate(input: AlignmentGateInput): Promis
         return {
           passed: false,
           blocked: true,
-          fixedFeatures: totalFixedCount > 0 ? currentFeatures : undefined,
-          fixedSchemaSql: latestFixedSchemaSql,
-          fixedEntityMapping: latestFixedEntityMapping,
+          fixedFeatures: totalFixedCount > 0 ? bestFeatures : undefined,
+          fixedSchemaSql: bestSchemaSql ?? latestFixedSchemaSql,
+          fixedEntityMapping: bestEntityMapping ?? latestFixedEntityMapping,
           issues: postFixIssues,
           fixedIssueCount: totalFixedCount,
           remainingIssueCount: postFixErrors.length,
@@ -1527,7 +1543,7 @@ export async function runFeatureAlignmentGate(input: AlignmentGateInput): Promis
     return {
       passed: true,
       blocked: false,
-      fixedFeatures: totalFixedCount > 0 ? currentFeatures : undefined,
+      fixedFeatures: totalFixedCount > 0 ? bestFeatures : undefined,
       issues: finalIssues,
       fixedIssueCount: totalFixedCount,
       remainingIssueCount: finalIssues.filter(i => i.severity === 'warning').length,
@@ -1539,7 +1555,7 @@ export async function runFeatureAlignmentGate(input: AlignmentGateInput): Promis
   return {
     passed: false,
     blocked: true,
-    fixedFeatures: totalFixedCount > 0 ? currentFeatures : undefined,
+    fixedFeatures: totalFixedCount > 0 ? bestFeatures : undefined,
     issues: finalIssues,
     fixedIssueCount: totalFixedCount,
     remainingIssueCount: finalErrors.length,

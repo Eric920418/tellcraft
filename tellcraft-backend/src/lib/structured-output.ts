@@ -140,15 +140,21 @@ function isRetryable(err: unknown): boolean {
   if (!err || typeof err !== 'object') return false
 
   // Anthropic SDK APIError — check status
+  // L25.C: 加 500/502/504 — Anthropic API 在 Cloudflare 後面，transient 錯誤常見
   if ('status' in err) {
     const status = (err as { status: number }).status
     if (status === 429 || status === 529 || status === 503) return true
+    if (status === 500 || status === 502 || status === 504) return true
   }
 
-  // Network errors
+  // Network errors + Cloudflare 502 HTML body（有時不帶 status）
   if (err instanceof Error) {
     const msg = err.message
     if (msg.includes('ECONNRESET') || msg.includes('ETIMEDOUT') || msg.includes('overloaded')) {
+      return true
+    }
+    // Cloudflare error pages leak HTML into error message
+    if (msg.includes('502 Bad Gateway') || msg.includes('504 Gateway') || msg.includes('cloudflare')) {
       return true
     }
   }

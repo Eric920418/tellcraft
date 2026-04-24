@@ -375,6 +375,12 @@ export async function validateAndFixFeatures(
   let lastResult: FeatureValidationResult = { lintPassed: true, validatePassed: true, errors: [] }
   let prevErrorCount = Infinity
 
+  // L25.B: 追蹤最佳版本 — LLM 可能越修越糟（用戶實測 276 → 286），
+  // return 時用最少錯誤的版本，不是最後那輪
+  let bestFeatures: typeof currentFeatures = [...features]
+  let bestResult: FeatureValidationResult = lastResult
+  let bestErrorCount = Infinity
+
   for (let round = 0; round < MAX_FIX_ROUNDS; round++) {
     lastResult = await validateFeatures(currentFeatures, schemaSql, entityMapping)
 
@@ -389,10 +395,18 @@ export async function validateAndFixFeatures(
     }
 
     const errorCount = lastResult.errors.length
+
+    // L25.B: 更新最佳版本（嚴格更少才算更好）
+    if (errorCount < bestErrorCount) {
+      bestErrorCount = errorCount
+      bestFeatures = [...currentFeatures]
+      bestResult = lastResult
+    }
+
     // Early stop: round >= 1 且錯誤數沒下降 → LLM 已無法再修復，再跑也浪費時間
     if (round >= 1 && errorCount >= prevErrorCount) {
       logger.warn(
-        { round: round + 1, errorCount, prevErrorCount },
+        { round: round + 1, errorCount, prevErrorCount, bestErrorCount },
         '錯誤數未下降，提前停止修復迴圈（LLM 已收斂失敗）'
       )
       break
@@ -469,12 +483,17 @@ export async function validateAndFixFeatures(
     })
   }
 
-  // 修復迴圈結束，使用最後結果
-  logger.warn({ maxRounds: MAX_FIX_ROUNDS }, '修復輪次用盡仍有問題，使用最後修復版本繼續')
+  // L25.B: 修復迴圈結束，使用最佳版本（可能非最後一輪）
+  logger.warn({
+    maxRounds: MAX_FIX_ROUNDS,
+    finalErrorCount: lastResult.errors.length,
+    bestErrorCount,
+    usingBest: bestErrorCount < lastResult.errors.length,
+  }, '修復輪次用盡，使用最佳版本（bestErrorCount）繼續')
   return {
     success: false,
-    fixedFeatures: currentFeatures,
-    validationResult: lastResult,
+    fixedFeatures: bestFeatures,
+    validationResult: bestResult,
     fixRounds: MAX_FIX_ROUNDS,
   }
 }

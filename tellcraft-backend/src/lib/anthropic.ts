@@ -92,6 +92,9 @@ export function getAnthropicClient(): Anthropic {
     const env = getEnv()
     _client = new Anthropic({
       apiKey: env.ANTHROPIC_API_KEY,
+      // L25.C: SDK 層 retry（補足 structured-output 的 app 層 retry）
+      // 覆蓋 429/500/502/503/504/529 等 transient 錯誤
+      maxRetries: 3,
     })
   }
   return _client
