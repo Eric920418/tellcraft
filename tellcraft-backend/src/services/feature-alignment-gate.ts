@@ -970,6 +970,90 @@ export async function runAlignmentChecks(input: AlignmentGateInput): Promise<Ali
     }
   }
 
+  // ── Check 11: Credential 矛盾偵測（L29.C）──
+  // 偵測 entity_setup 的 hashed credential 字面值與 When step 測試 plain 值是否有可驗證關係。
+  // 三選一才放行：
+  //   - 真實 bcrypt hash（$2b$10$... / $2a$10$... / $2y$10$...）— Coder 用 bcrypt.compare
+  //   - 字面相等 — Coder 走 plain compare fallback
+  //   - 任一為空（不適用本 check）
+  // 都不滿足 → warning（避免 Admin Login 那種「永遠 fail」場景）
+  const HASHED_FIELDS = ['passwordHash', 'apiKeyHash', 'secretHash', 'tokenHash', 'password_hash', 'api_key_hash']
+  const PLAIN_FIELDS = ['password', 'apiKey', 'secret', 'token']
+  const BCRYPT_PATTERN = /^\$2[aby]\$\d+\$/
+
+  for (const feature of input.features) {
+    const displayName = feature.name || '(unnamed)'
+    const setupSteps = extractEntitySetupWithData(feature.content)
+    // 收集 entity_setup 的 hashed 欄位字面值（去除 < / $ 前綴的純值）
+    const hashedValues = new Map<string, string[]>()  // fieldName → [literal values]
+    for (const step of setupSteps) {
+      for (let i = 0; i < step.rawHeaders.length; i++) {
+        const headerRaw = step.rawHeaders[i]
+        const header = headerRaw.replace(/^[><]/, '').trim()
+        if (!HASHED_FIELDS.includes(header)) continue
+        for (const row of step.dataRows) {
+          const cell = (row.cells[i] || '').trim()
+          if (!cell) continue
+          if (cell.startsWith('<') || cell.startsWith('$') || cell.startsWith('&')) continue
+          const stripped = cell.replace(/^["']|["']$/g, '')  // 去掉外層引號
+          if (!hashedValues.has(header)) hashedValues.set(header, [])
+          hashedValues.get(header)!.push(stripped)
+        }
+      }
+    }
+    if (hashedValues.size === 0) continue
+
+    // 從 When call table 抓 plain 字面值（簡易 regex：找 |欄位名| ... 的 data row）
+    const lines = feature.content.split('\n')
+    const plainValues = new Map<string, string[]>()  // fieldName → [literal values]
+    for (let li = 0; li < lines.length; li++) {
+      const trimmed = lines[li].trim()
+      if (!/(?:When|And)\s+.+,\s*call\s+table:/i.test(trimmed)) continue
+      // 找接下來的 header + data row
+      let headerLine = ''
+      for (let lj = li + 1; lj < lines.length && lj < li + 10; lj++) {
+        const t = lines[lj].trim()
+        if (!t.startsWith('|')) break
+        if (!headerLine) {
+          headerLine = t
+          continue
+        }
+        // data row
+        const headers = headerLine.split('|').map(c => c.trim()).filter(Boolean)
+        const cells = t.split('|').map(c => c.trim())
+          .filter((_, idx, arr) => idx > 0 && idx < arr.length - 1)  // 去掉前後空 cell
+        for (let ci = 0; ci < headers.length && ci < cells.length; ci++) {
+          const h = headers[ci]
+          if (!PLAIN_FIELDS.includes(h)) continue
+          const v = cells[ci]
+          if (!v || v.startsWith('<') || v.startsWith('$') || v.startsWith('&')) continue
+          const stripped = v.replace(/^["']|["']$/g, '')
+          if (!plainValues.has(h)) plainValues.set(h, [])
+          plainValues.get(h)!.push(stripped)
+        }
+      }
+    }
+
+    // 比對：每個 hashed 值要找到匹配的 plain 值（或 hashed 是真 bcrypt format）
+    for (const [hashField, hashLiterals] of hashedValues) {
+      // 對應的 plain 欄位（passwordHash → password；apiKeyHash → apiKey）
+      const plainField = hashField.replace(/Hash$/, '').replace(/_hash$/, '')
+      const plainsForField = plainValues.get(plainField) || []
+      for (const hashLit of hashLiterals) {
+        if (BCRYPT_PATTERN.test(hashLit)) continue  // ✅ 真實 bcrypt
+        if (plainsForField.includes(hashLit)) continue  // ✅ 字面相等（plain fixture）
+        // 三條件都不滿足 → 矛盾
+        const samplePlain = plainsForField.length > 0 ? plainsForField[0] : '(no plain test value found)'
+        issues.push({
+          featureName: displayName,
+          checkName: 'credential_mismatch',
+          severity: 'warning',
+          description: `Feature "${displayName}" 的 \`${hashField}\` 字面值 "${hashLit}" 與測試的 \`${plainField}\` 字面值 "${samplePlain}" 無法對應。bcrypt.compare 會失敗（因為 "${hashLit}" 不是 \`$2b$10$\` 開頭的 bcrypt hash），plain compare 也不相等 → 該 scenario 永遠 fail。請選一：(A) 把 \`${hashField}\` 改成真實 bcrypt hash + 對應 plain，或 (B) \`${hashField}\` 改成等同於測試 \`${plainField}\` 的明文。`,
+        })
+      }
+    }
+  }
+
   // L24.D: Dedupe — 同一 (featureName, checkName, description) 只報一次
   // 避免 extractWhenSummaries 抓到重複 When 步驟造成多倍誤報（如 1 個 Feature 內 16 個 scenario
   // 各產生一組相同的 summary_uniqueness issue）

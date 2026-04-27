@@ -2,6 +2,7 @@ import type { Pool } from 'pg';
 import type { ISAFeatureArgumentResolver } from '../helper/isa-feature-argument-resolver';
 import { NamingConverter } from '../helper/naming-converter';
 import { TypeConverter } from '../helper/type-converter';
+import { isSentinelValue } from '../helper/sentinel-values';
 import { DatabaseSchema, type TableDefinition } from '../spec/data/models';
 
 /**
@@ -127,11 +128,10 @@ export class EntitySetup {
         }
       }
 
-      // L1 修復：$notnull / $null 是驗證標記，不是資料值
-      // 若 LLM 在 entity_setup 誤放 $notnull（應只在 entity_validate 用），
-      // 跳過此欄位（不插入 → 讓 DB default 或 NULL 生效）。
-      // 相容 entity-validate.ts:291 的對稱處理。
-      if (trimmedValue === '$notnull' || trimmedValue === '$null') {
+      // L1 修復 + L29.B 擴展：$notnull / $null / 'null' / `<` capture 等 sentinel 跳過
+      // entity_setup 不該收 sentinel 值（會塞 SQL 失敗），統一用 isSentinelValue
+      // 注意：此處 isTrue/isFalse 已在上面分支轉值，不會走到這裡
+      if (isSentinelValue(trimmedValue)) {
         continue;
       }
 

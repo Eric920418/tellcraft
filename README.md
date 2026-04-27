@@ -551,15 +551,24 @@ Server Action 錯誤訊息 + 工具模組中文字串國際化（+117 keys，2 n
 
 | 功能 | 說明 | 限制 |
 |------|------|------|
-| **代碼下載 (ZIP)** | 下載專案全部 `project_files` 打包為 ZIP | creator / pro / business |
+| **代碼下載 (ZIP)** | 下載完整可直接 `pnpm install && pnpm dev` 跑起來的 Next.js 專案 | creator / pro / business |
 
-- **API**：`GET /api/project/:id/download-code`（後端 archiver ZIP 串流）
-- **版本代碼下載 API**：`GET /api/project/:id/versions/:versionNumber/download-code`（從 `generations.code_snapshot` JSONB 讀取指定版本的代碼快照打包 ZIP）
+- **核心服務**：`tellcraft-backend/src/services/download-bundler.ts` 的 `buildDownloadBundle(projectId, { snapshot? })`，重用 `wrapInNextJs()` + `sanitizeCodeForDeploy()` + `deriveSchemaFromBdd()`，與部署管線**共享同一份 scaffolding source of truth**（避免下載版/部署版漂移）
+- **產出檔案**（除了用戶代碼還包含）：
+  - `package.json`、`next.config.ts`、`tsconfig.json`、`tailwind.config.ts`、`postcss.config.js`、`app/globals.css`、`app/layout.tsx`、`lib/fonts.ts`、`components/ImageCredits.tsx` — 由 `wrapInNextJs()` 動態組裝
+  - `db/schema.sql` — 由 `deriveSchemaFromBdd()` 從 `bdd_sessions.schema_sql_content` 即時衍生為 PostgreSQL DDL（含 magic-link 自動補齊、UUID/FK/timestamp 處理）
+  - `.env.example` — 占位符範本，**禁止帶出真實 secrets**（不外洩 `neon_connection_string` / `resend_api_key`），條件式列出 DATABASE_URL/RESEND_API_KEY/EMAIL_FROM/APP_URL/AUTH_SECRET（只在偵測到 `lib/email.ts` / `lib/magic-link.ts` / `auth.ts` 才加）
+  - `README.md` — 安裝、跑起來、部署到 Vercel 三步驟說明
+  - `.gitignore` — 標準 Next.js + node_modules + .env
+- **API**：
+  - `GET /api/project/:id/download-code`（最新狀態下載）
+  - `GET /api/project/:id/versions/:versionNumber/download-code`（從 `generations.code_snapshot` 快照下載）
+  - `GET /api/project/:id/deployments/:deploymentId/download-code`（從 `deployments.code_snapshot` 快照下載）
+- **三條 route 共用**：`zipBundleFiles()` helper（`routes/project.ts` 開頭）封裝 archiver；以及 `buildDownloadBundle()` 處理組裝
 - **前端 Route**：`/api/projects/[id]/download-code`（binary 透傳，不走 vps proxy，避免 JSON 解析損壞 binary）
-- **版本下載前端 Route**：`/api/projects/[id]/versions/[versionNumber]/download-code`
-- **UI**：Dashboard 專案列表每列加下載按鈕，免費方案 `opacity:0.4` + `cursor:not-allowed` + title 提示升級
-- **版本下載 UI**：VersionHistory 組件每個有 `code_snapshot` 的版本顯示「下載代碼」按鈕
+- **UI**：Dashboard 專案列表每列加下載按鈕，免費方案 `opacity:0.4` + `cursor:not-allowed` + title 提示升級。VersionHistory 組件每個有 `code_snapshot` 的版本顯示「下載代碼」按鈕
 - **代碼快照**：`snapshotCodeToGeneration()` 在 UIUX/FastBuild/Coder/部署/迭代完成時自動快照 `project_files` 到 `generations.code_snapshot`（JSONB），失敗不阻塞主流程。舊版本無快照不顯示下載按鈕
+- **快照下載權衡**：版本/部署快照下載時，scaffolding 仍即時組裝、`db/schema.sql` 仍從**當前** `bdd_sessions` 衍生（因為快照本身只存源碼，沒存 schema 與 designSystem），這是合理權衡 — 大多 schema 變動少，極端情況需提示用戶
 
 ### 核心檔案
 
@@ -1497,6 +1506,7 @@ L15 的 schema-aware hint 依賴 LLM 修 VAR 對齊，實測發現 **LLM 會偷�
 - **L26 Retry 覆蓋補完**（2026-04-24）：回頭檢查 VPS 才發現 **`actions-design.ts` 用自己的 fetch 繞過 L25.C**（不走 `structured-output.ts` 也不走 SDK client），它自己的 `isRetryableStatus` 只包 429/529/503 — **用戶 VPS 實測 502 Bad Gateway 直接降級的真兇就是這裡沒 retry**。全 codebase 掃描 `isRetryableStatus` 發現 5 個地方各自定義（違反 DRY）：`actions-design.ts` / `formulation.ts` / `syntax-validator.ts` / `structured-output.ts` / `uiux-generation.ts(isRetryableError)`。統一全部加 500/502/504 + error.message 含 Cloudflare HTML 字串（`502 Bad Gateway` / `504 Gateway` / `cloudflare`）。這才是 502 問題的完整修復（L25.C 只修了 1/5，真正阻塞 generateActionsYml 的那個沒修到）。
 - **L27 Neon 配額靜默失敗 + UX 訊息誠實化**（2026-04-27）：用戶開新專案，UIUX 完成只看到「設計完成！輸入部署即可上線」**完全沒有「生成後端」按鈕**。VPS 追查：用戶 business plan（DB 限額 5）已用滿（11 個 project 中 5 個有 Neon），`completeSpecPhase` 的 `if (quota.allowed)` 條件 `5<5=false` → **整段 Neon provisioning 靜默跳過**（無 log、無使用者訊息）→ `shouldShowCoderButton` 因 Neon 不存在永遠 false → 用戶完全看不到 Coder 流程。**修復**：(A) `bdd-phases.ts` quota 拒絕加 warn log + 主動告知用戶「⚠ DB 配額已用滿（X/Y）」+ 引導刪舊 project / 升級方案，附 quickReply；(B) `FlowState.dbProvisionStatus` 加 `'quota_exceeded'` + 新增 `dbQuotaInfo` 欄位（current/limit/plan）；(C) 重構 `shouldShowCoderButton` → 新增 `getCoderButtonState()` 返回 `{show, reason}`（reason: `ready` / `quota_exhausted` / `no_bdd` / `fast_mode` / `completed`），quota_exhausted 時仍顯示按鈕（label 改「重試資料庫」）；(D) `__connect_database__` 路徑加 quota 重新檢查，未釋放 → 引導，已釋放 → 自動重 provision；(E) UIUX 完成訊息 + quickReplies 按 reason 分三流（ready 顯示「生成後端」/ quota_exhausted 顯示「⚠ 後端尚未建立」+ 配額資訊 + 「重試資料庫」/ no_bdd 直接「部署即可上線」）。根本架構問題：**靜默失敗 + 訊息誤導**雙重 UX 災難，用戶不知道哪裡壞了。
 - **L28 Coder 116/131 → 衝向 100%（不打地鼠 + 衍生防禦）**（2026-04-27）：用戶 d08dc24d 對話 Coder 跑出 116/131（88.5%），15 fails 分三類根因。下載完整 code 驗證，找到結構性根因：**(A) Coder LLM 用 `${sql(obj)}` postgres.js 反模式**（10 fails，Update Hero/Service Item）— Tellcraft `lib/db.ts` 用 `@neondatabase/serverless` 不支援動態欄位 spread。修復：BASE_PROMPT 明示「禁止 `sql(obj)` spread，partial UPDATE 用 `COALESCE(${input.x}, x)`」；`update.md` handler 加 COALESCE 範例對比；新增 `detectSqlObjectSpread()` post-processing 偵測（log warn 觸發後續 LLM 重生）。**(B) SpecFormula entity-validate `$notnull` 在 PK 路徑漏跳過**（4 fails，Create Pricing Plan）— Feature 用 `| id | $notnull |` 表達「id 應存在不為空」，但 entity-validate.ts:90 PK 路徑只跳 `&` / `<` 前綴，`$notnull` 進到 `TypeConverter.convertToColumnType('$notnull', uuid)` 試圖塞 SQL → PG `invalid input syntax for type uuid: "$notnull"`。**根本性修復**：新增 `lib/specformula/helper/sentinel-values.ts` 統一 `isSentinelValue()`（涵蓋 `&` / `<` / `>` / `$notnull` / `$null` / `null` / `<non-empty>`），entity-validate / entity-non-existence-validate PK + Probe 路徑全套用，杜絕後續類似 sentinel 漏網。**(C) Feature passwordHash 規格內部矛盾**（1 fail，Admin Login）— Feature 寫 `passwordHash: HashedPasswordForTest01` + 測試 `password: CorrectPassword`，bcrypt compare 失敗、plain compare 也不等 → 永遠 fail。formulation prompt 加「Credential 測試 fixture 規則」三選一明示：真實 bcrypt hash / 明文 fixture / **禁用模糊字串**。+ 2 個單元測試（sentinel 7 cases、sql obj spread 6 cases）。預期 116/131 → 130/131（Login 殘留依賴 Feature 修復）或 131/131（連 Feature 一起重生）。
+- **L29 衝向 100% 結構性 — 三層補強閉環**（2026-04-28）：用戶要求**結構性 100%**（未來所有客戶 / 所有專案），不是這次 99%。L28 殘留三個「LLM 隨機性」漏洞，L29 全閉環。**(A) `${sql(obj)}` 偵測 → 自動重生閉環**：L28 只 log warn 靠下游 fix loop 碰運氣。L29 命中時 `coder-generation.ts` 直接拿原 prompt + 強化「絕對禁止 `sql(obj)`，附具體出錯位置」+ 4 條重生指令（COALESCE / 動態 INSERT 列欄位 / 動態 WHERE 用 OR），重 call LLM。重生後再次偵測，無 issue 才採用，仍中招則用原代碼讓下游 fix loop 接手。**主 action 路徑 + sub-op 路徑雙重覆蓋**。**(B) 全 SpecFormula instruction sentinel 審查**：L28 只修 entity-validate / entity-non-existence-validate；L29 擴展到 `api-call.ts`（避免 LLM 把 `$notnull` 當 API param 送出）+ `entity-setup.ts`（內部 inline 改用 `isSentinelValue` helper 統一邏輯）。**(C) Alignment Gate `credential_mismatch` 主動偵測**（Check 11）：L28 只在 prompt 教，LLM 偶違反。L29 加 deterministic 攔截 — 掃 entity_setup 的 `passwordHash` / `apiKeyHash` / `secretHash` / `tokenHash` 字面值，若**非 bcrypt format**（不以 `$2[aby]$\d+$` 開頭）**且**與 When step 對應 plain 欄位字面不相等 → push warning 詳述矛盾 + 引導三選一。+ 4 個 credential_mismatch 單元測試。**最終 robustness**：A 85→95% / B 95→99% / C 50→95%。註：**100% 不存在於 LLM 系統**，但結構性失敗已堵住 — 未來其他客戶 / 專案吃到的是「LLM occasional miss」（被自動重生閉環擋大半）而非「結構性 bug」。
 - **Phase 2B interrupt 實裝**：Domain / Clone / Fast Build 三個 subgraph 從 wrapper 升級為多 node + `interrupt()` human-in-the-loop
   - **Domain**（8 nodes, 3 interrupt, 2 loops）：entry → search → confirm（interrupt×2：確認/registrant 表單）→ register → complete。DNS path：dns_setup（interrupt）→ dns_verify → complete。retry_or_cancel interrupt + 換域名/DNS 未傳播 loop
   - **Clone**（3 nodes, 1 interrupt）：execute（完整 clone pipeline）→ failed interrupt（重試/取消 loop）

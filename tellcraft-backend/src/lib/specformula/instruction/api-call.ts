@@ -1,4 +1,5 @@
 import type { ISAFeatureArgumentResolver } from '../helper/isa-feature-argument-resolver';
+import { isSentinelValue } from '../helper/sentinel-values';
 import type { ScenarioContext } from '../context/scenario-context';
 import type { HttpClientAdapter } from '../http/http-client-adapter';
 import { TestRequest } from '../http/test-request';
@@ -108,6 +109,8 @@ export class ApiCall {
       const value = row[header];
       if (value === undefined || value === null) continue;
       if (cleanHeader.startsWith('<') || cleanHeader.startsWith('>')) continue;
+      // L29.B: 跳過 sentinel 驗證標記（$notnull / $null / & 約束等不該當 API param）
+      if (isSentinelValue(value)) continue;
 
       const columnInfo = this.resolver.parseColumnPrefix(cleanHeader);
       const resolvedValue = this.resolver.resolveVariable(value);

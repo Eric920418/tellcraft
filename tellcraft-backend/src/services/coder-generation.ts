@@ -1391,13 +1391,38 @@ ${subOp.relevantGherkin}
   code = fixMySqlSyntax(code)
   code = unwrapListResponse(code)  // L21.P1-A：擋 `return { items, total, page, pageSize }` wrap
 
-  // L28.A2: 偵測 ${sql(obj)} 反模式（Neon 不支援動態欄位 spread）
+  // L28.A2 + L29.A: 偵測 ${sql(obj)} 反模式 → 自動重生閉環
   const sqlSpreadCheck = detectSqlObjectSpread(code)
   if (sqlSpreadCheck.hasIssue) {
     logger.warn({
       subOp: subOp.summary,
       matches: sqlSpreadCheck.matches,
-    }, 'L28.A2: 偵測到 ${sql(obj)} 反模式 — Neon serverless 不支援，會 SQL syntax error。標記需 LLM 重生。')
+    }, 'L29.A: 偵測到 ${sql(obj)} 反模式 — 觸發 LLM 自動重生（sub-op）')
+
+    const regenSystemPrompt = systemPrompt + `
+
+## ⚠️ 上一次生成的代碼錯誤使用了 \`\${sql(obj)}\` 動態欄位 spread
+
+具體出錯位置：${sqlSpreadCheck.matches.slice(0, 3).join(', ')}
+
+**這在 @neondatabase/serverless 會直接 SQL syntax error，絕對不能用**。
+
+**這次重新生成必須**：
+1. 絕對不能寫 \`SET \${sql(updateData)}\`、\`VALUES (\${sql(data)})\`、\`WHERE \${sql(filters)}\`
+2. partial UPDATE 用 COALESCE：\`SET col1 = COALESCE(\${input.col1}, col1), col2 = COALESCE(\${input.col2}, col2), updated_at = NOW()\`
+3. 動態 INSERT 列出所有欄位（用 NULL 給未提供的）
+`
+    const regenResult = await callClaude(regenSystemPrompt, userPrompt, { maxTokens }, trackingContext)
+    if (regenResult.success && regenResult.content) {
+      const regenCode = unwrapListResponse(fixMySqlSyntax(removeAuthChecks(extractCodeFromResponse(regenResult.content))))
+      const finalCheck = detectSqlObjectSpread(regenCode)
+      if (!finalCheck.hasIssue) {
+        logger.info({ subOp: subOp.summary }, 'L29.A: sub-op 重生成功')
+        code = regenCode
+      } else {
+        logger.warn({ subOp: subOp.summary }, 'L29.A: sub-op 重生後仍有反模式，使用原代碼')
+      }
+    }
   }
 
   return { summary: subOp.summary, code }
@@ -1912,13 +1937,57 @@ export async function generateActionFunction(
     }
   }
 
-  // L28.A2: 偵測 ${sql(obj)} 反模式（Neon 不支援動態欄位 spread）
-  const sqlSpreadCheck = detectSqlObjectSpread(code)
+  // L28.A2 + L29.A: 偵測 ${sql(obj)} 反模式 → 自動重生閉環
+  // 命中時 prompt 強化「絕對禁止 sql(obj)，只用 COALESCE」並重新生成 1 次
+  let sqlSpreadCheck = detectSqlObjectSpread(code)
   if (sqlSpreadCheck.hasIssue) {
     logger.warn({
       actionName: action.name,
       matches: sqlSpreadCheck.matches,
-    }, 'L28.A2: 偵測到 ${sql(obj)} 反模式 — Neon serverless 不支援，會 SQL syntax error。下游修復循環會嘗試 LLM 重生。')
+    }, 'L29.A: 偵測到 ${sql(obj)} 反模式 — 觸發 LLM 自動重生（強化 prompt 禁止）')
+
+    const regenSystemPrompt = systemPrompt + `
+
+## ⚠️ 上一次生成的代碼錯誤使用了 \`\${sql(obj)}\` 動態欄位 spread
+
+具體出錯位置：${sqlSpreadCheck.matches.slice(0, 3).join(', ')}
+
+**這在 @neondatabase/serverless 會直接 SQL syntax error，永遠不能用**。
+
+**這次重新生成必須**：
+1. 絕對不能寫 \`SET \${sql(updateData)}\`、\`VALUES (\${sql(data)})\`、\`WHERE \${sql(filters)}\` 等 spread
+2. partial UPDATE 改用 COALESCE：
+   \`\`\`typescript
+   UPDATE table SET
+     col1 = COALESCE(\${input.col1}, col1),
+     col2 = COALESCE(\${input.col2}, col2),
+     updated_at = NOW()
+   WHERE id = \${input.id}
+   \`\`\`
+3. 動態 INSERT 用條件分支或列出所有欄位
+4. 動態 WHERE 條件用 \`COALESCE\` 或 OR 子句
+`
+    const regenMaxTokens = actionMaxTokens
+    const regenResult = await callClaude(regenSystemPrompt, userPrompt, { maxTokens: regenMaxTokens }, trackingContext)
+    if (regenResult.success && regenResult.content) {
+      const regenCode = extractCodeFromResponse(regenResult.content)
+      const regenChecked = unwrapListResponse(fixMySqlSyntax(removeAuthChecks(regenCode)))
+      const finalCheck = detectSqlObjectSpread(regenChecked)
+      if (!finalCheck.hasIssue) {
+        logger.info({ actionName: action.name }, 'L29.A: 自動重生成功，反模式已消除')
+        code = regenChecked
+        // 重生後再做 input alignment（保險）
+        if (requiredInputFields && requiredInputFields.length > 0) {
+          const { code: aligned } = alignInputParameters(code, requiredInputFields)
+          code = aligned
+        }
+      } else {
+        logger.warn({ actionName: action.name, matches: finalCheck.matches }, 'L29.A: 重生後仍有反模式，使用原代碼（fix loop 會繼續嘗試）')
+      }
+      sqlSpreadCheck = finalCheck
+    } else {
+      logger.warn({ actionName: action.name, err: regenResult.error }, 'L29.A: 重生 LLM call 失敗，使用原代碼')
+    }
   }
 
   return {
