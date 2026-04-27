@@ -140,7 +140,12 @@ export function hasCoderIntent(msg: string): boolean {
   const kw = [
     '接上資料庫', '連上資料庫', '連結資料庫', '連接資料庫', '串接資料庫',
     '生成後端', '生成程式碼', '寫後端', '建立後端',
+    // L28: 加「重試資料庫」/「重新建立資料庫」等用戶實際打的詞
+    //   原本 L27 訊息引導用戶打「重試資料庫」但這詞不在關鍵字列表 →
+    //   被 semantic gateway 當迭代修改誤判 → LLM 回「網頁設計修改意見」
+    '重試資料庫', '重新建立資料庫', '重建資料庫', '重新連接資料庫',
     'connect database', 'generate backend', 'setup database', 'link database',
+    'retry database', 'rebuild database',
   ]
   return kw.some(k => msg.toLowerCase().includes(k))
 }
