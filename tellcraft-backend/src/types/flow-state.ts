@@ -185,8 +185,10 @@ export interface FlowState {
   domainRegistrationStartedAt?: number
   domainRegistrant?: RegistrantInfo
   // Database Provisioning（provider-agnostic）
-  dbProvisionStatus?: 'completed' | 'failed' | 'skipped'
+  dbProvisionStatus?: 'completed' | 'failed' | 'skipped' | 'quota_exceeded'
   dbDerivedSchema?: { displaySummary: string; entityCount: number }
+  // L27.B: 配額耗盡時記錄 — UI 顯示 + Coder 按鈕路由用
+  dbQuotaInfo?: { current: number; limit: number; plan: string }
   // Coder Skill 專用
   coderGenerationStartedAt?: number       // 超時偵測
   coderCompleted?: boolean                // 標記已完成（deployer/quickReply 可識別）

@@ -2965,7 +2965,42 @@ async function _completeSpecPhaseInner(
       const userPlan = userRow.rows[0]?.plan || 'free'
       const quota = await checkDbQuota(state.userId, userPlan)
 
-      if (quota.allowed) {
+      // L27.A: 配額耗盡 — 不再靜默跳過，主動告知用戶
+      if (!quota.allowed) {
+        logger.warn({
+          userId: state.userId,
+          plan: userPlan,
+          current: quota.current,
+          limit: quota.limit,
+        }, 'DB 配額已耗盡，跳過 Neon provisioning（已通知用戶）')
+
+        state.dbProvisionStatus = 'quota_exceeded'
+        state.dbQuotaInfo = { current: quota.current, limit: quota.limit, plan: userPlan }
+        await saveFlowState(redis, conversationId, state)
+
+        const isZh = state.locale !== 'en'
+        const planLabel = userPlan === 'free' ? '免費方案（不支援 DB）' : `${userPlan} 方案`
+        await sendMessage(conversationId, io, {
+          content: isZh
+            ? `⚠ 你的資料庫配額已用滿（${quota.current}/${quota.limit}，${planLabel}）\n\n` +
+              `後端代碼需要連接資料庫才能運作，目前無法為這個新專案建立資料庫。\n\n` +
+              `**解決方法**：\n` +
+              `1. 進入「我的專案」刪除舊專案的資料庫（會清除該專案 DB，前端不受影響）\n` +
+              `2. 或升級到更高方案（pro: 3 / business: 5）\n\n` +
+              `處理完後，回到此對話按「重試資料庫」重新嘗試建立。`
+            : `⚠ Database quota exhausted (${quota.current}/${quota.limit}, ${userPlan} plan).\n\n` +
+              `Backend code requires a database. Cannot create one for this new project.\n\n` +
+              `**Resolution**:\n` +
+              `1. Delete old project databases under "My Projects"\n` +
+              `2. Or upgrade your plan\n\n` +
+              `After resolving, click "Retry Database" in this conversation.`,
+          stage: 'db_quota_exhausted',
+          quickReplies: [
+            { label: isZh ? '管理我的專案' : 'My Projects', value: '__manage_projects__', style: 'primary' as const },
+            { label: isZh ? '稍後處理' : 'Skip for now', value: '__skip_db__', style: 'secondary' as const },
+          ],
+        })
+      } else if (quota.allowed) {
         const derivedSchema = deriveSchemaFromBdd(schemaSql, entityMapping)
 
         if (derivedSchema.entityCount > 0) {

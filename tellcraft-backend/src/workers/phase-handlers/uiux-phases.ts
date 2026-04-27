@@ -44,23 +44,35 @@ const getSpecChangeHandler = () => import('./bdd-phases').then(m => m.handleSpec
 const logger = createLogger('uiux-phases')
 
 /**
- * 判斷是否顯示「接上資料庫」quickReply
- * 條件：有 BDD actionsYml + 有 Neon DB + 未完成 coder + 不是 fast-build
+ * L27.C: 判斷是否顯示「生成後端」quickReply + 返回 reason
+ * - reason='ready'：BDD 完成 + Neon 已建 → 直接跑 Coder
+ * - reason='quota_exhausted'：BDD 完成但 Neon 配額滿 → 顯示按鈕但按下去引導用戶處理 quota
+ * - reason='no_bdd' / 'fast_mode' / 'completed'：不顯示
  */
-async function shouldShowCoderButton(state: FlowState): Promise<boolean> {
-  if (state.coderCompleted) return false
-  if (state.fastMode) return false
-  if (!state.projectId) return false
+export async function getCoderButtonState(state: FlowState): Promise<{
+  show: boolean
+  reason: 'no_bdd' | 'fast_mode' | 'completed' | 'quota_exhausted' | 'ready'
+}> {
+  if (state.coderCompleted) return { show: false, reason: 'completed' }
+  if (state.fastMode) return { show: false, reason: 'fast_mode' }
+  if (!state.projectId) return { show: false, reason: 'no_bdd' }
   const bdd = await db.queryOne<{ actions_yml_content: string }>(
     'SELECT actions_yml_content FROM bdd_sessions WHERE project_id = $1 AND actions_yml_content IS NOT NULL ORDER BY updated_at DESC LIMIT 1',
     [state.projectId]
   )
-  if (!bdd) return false
+  if (!bdd) return { show: false, reason: 'no_bdd' }
   const neon = await db.queryOne<{ neon_connection_string: string }>(
     'SELECT neon_connection_string FROM projects WHERE id = $1 AND neon_connection_string IS NOT NULL',
     [state.projectId]
   )
-  return !!neon
+  if (neon) return { show: true, reason: 'ready' }
+  // BDD 有 actions_yml 但無 Neon → 仍顯示按鈕（按下去引導 quota 處理或重試）
+  return { show: true, reason: 'quota_exhausted' }
+}
+
+/** Backward-compatible wrapper（既有 callsite 仍可用 boolean） */
+async function shouldShowCoderButton(state: FlowState): Promise<boolean> {
+  return (await getCoderButtonState(state)).show
 }
 
 // ============================================================
@@ -738,6 +750,39 @@ export async function handleUiuxMixedPhaseRouting(
         if (!neonRow) {
           // DB 不可用 → 自動重試 provisioning（不多問一步）
           const isChinese = state.locale !== 'en'
+
+          // L27.D: 先重新檢查 quota — 若用戶上次卡在 quota_exceeded 但還沒釋放，
+          //   provisionNeonDatabase 會再次失敗 → 給用戶明確指引而非靜默失敗
+          if (state.userId) {
+            try {
+              const { checkDbQuota } = await import('../../services/neon-service')
+              const userRow = await db.queryOne<{ plan: string }>('SELECT plan FROM users WHERE id = $1', [state.userId])
+              const userPlan = userRow?.plan || 'free'
+              const quota = await checkDbQuota(state.userId, userPlan)
+              if (!quota.allowed) {
+                state.dbProvisionStatus = 'quota_exceeded'
+                state.dbQuotaInfo = { current: quota.current, limit: quota.limit, plan: userPlan }
+                await saveFlowState(redis, conversationId, state)
+                const planLabel = userPlan === 'free' ? '免費方案（不支援 DB）' : `${userPlan} 方案`
+                await sendMessage(conversationId, io, {
+                  content: isChinese
+                    ? `⚠ 資料庫配額仍未釋放（${quota.current}/${quota.limit}，${planLabel}）\n\n` +
+                      `請先到「我的專案」刪除舊專案的資料庫，或升級方案，再回到此對話按「重試資料庫」。`
+                    : `⚠ DB quota still exhausted (${quota.current}/${quota.limit}, ${userPlan}).\n\n` +
+                      `Please delete old DBs under "My Projects" or upgrade plan, then click "Retry Database" here.`,
+                  stage: 'db_quota_exhausted',
+                  quickReplies: [
+                    { label: isChinese ? '管理我的專案' : 'My Projects', value: '__manage_projects__', style: 'primary' as const },
+                    { label: isChinese ? '重試資料庫' : 'Retry Database', value: '__connect_database__', style: 'secondary' as const },
+                  ],
+                })
+                return
+              }
+            } catch (e) {
+              logger.warn({ err: e }, 'L27.D quota 重檢查失敗，繼續嘗試 provision')
+            }
+          }
+
           try {
             const bddRow = await db.queryOne<{ schema_sql_content: string; entity_mapping_content: string }>(
               'SELECT schema_sql_content, entity_mapping_content FROM bdd_sessions WHERE project_id = $1 AND schema_sql_content IS NOT NULL ORDER BY updated_at DESC LIMIT 1',
@@ -1650,9 +1695,22 @@ export async function executeFullCodePipeline(
   await sendMessage(conversationId, io, {
     content: await (async () => {
       const base = `設計完成！共 ${finalPageCount} 個頁面、${finalComponentCount} 個組件。`
-      if (await shouldShowCoderButton(state)) {
+      // L27.E: 按 Coder 按鈕狀態分流訊息（避免「即可上線」誤導）
+      const btnState = await getCoderButtonState(state)
+      if (btnState.reason === 'ready') {
         return base + `\n\n下一步：點擊「**生成後端**」讓 AI 自動開發後端邏輯並連接資料庫，再部署上線。`
       }
+      if (btnState.reason === 'quota_exhausted') {
+        const quotaInfo = state.dbQuotaInfo
+        const quotaText = quotaInfo
+          ? `（${quotaInfo.current}/${quotaInfo.limit}，${quotaInfo.plan} 方案）`
+          : ''
+        return base +
+          `\n\n⚠ **後端尚未建立** — 資料庫配額已用滿${quotaText}。\n\n` +
+          `請先到「我的專案」刪除舊資料庫，或升級方案，再點「**重試資料庫**」生成後端。\n\n` +
+          `若直接部署，只會發布前端假資料，**功能不會運作**。`
+      }
+      // no_bdd / fast_mode / completed → 直接部署即可
       return base + `輸入「**部署**」即可上線。`
     })(),
     stage: 'uiux_generation_complete',
@@ -1666,13 +1724,20 @@ export async function executeFullCodePipeline(
       })() as Record<string, unknown>,
     },
     quickReplies: await (async () => {
-      const showCoder = await shouldShowCoderButton(state)
-      if (showCoder) {
-        // 有 DB 時：接上資料庫優先，部署次要
+      // L27.E: 按 Coder 按鈕狀態分流（quota_exhausted 也顯示按鈕，但 label 不同）
+      const btnState = await getCoderButtonState(state)
+      if (btnState.reason === 'ready') {
         return [
           { label: '生成後端', value: '__connect_database__', style: 'primary' as const },
           { label: '先部署前端', value: '部署', style: 'secondary' as const },
           { label: '上傳到模板庫', value: '__upload_template__', style: 'ghost' as const },
+        ]
+      }
+      if (btnState.reason === 'quota_exhausted') {
+        return [
+          { label: '重試資料庫', value: '__connect_database__', style: 'primary' as const },
+          { label: '管理我的專案', value: '__manage_projects__', style: 'secondary' as const },
+          { label: '仍要部署（僅前端）', value: '__deploy_without_coder__', style: 'ghost' as const },
         ]
       }
       return [
