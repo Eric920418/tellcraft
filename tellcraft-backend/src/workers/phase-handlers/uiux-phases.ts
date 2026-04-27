@@ -732,15 +732,30 @@ export async function handleUiuxMixedPhaseRouting(
 
       // 接上資料庫（Coder Skill）
       if (trimmed === '__connect_database__' || hasCoderIntent(trimmed)) {
-        if (state.coderCompleted) {
+        // L30: 區分三種情況
+        //   1. coderCompleted + testPassed → 攔下，告訴用戶已完成
+        //   2. coderCompleted + 用戶明確說「重新/重跑/regenerate」 → 強制重跑
+        //   3. coderCompleted + testPassed=false → 自動允許重跑（之前測試沒過，理當再試）
+        const wantsRegenerate = /重新|重跑|重新生成|重新開發|regenerate|rerun|retry coder/i.test(trimmed)
+        const previousRunPassed = state.coderTestPassed === true
+        if (state.coderCompleted && previousRunPassed && !wantsRegenerate) {
           await sendMessage(conversationId, io, {
-            content: '後端已經開發完成了！如果有功能需要調整，可以直接告訴我修改內容。',
+            content: '後端已經開發完成且測試通過！如果有功能需要調整，可以直接告訴我修改內容；或輸入「**重新生成後端**」強制重跑。',
             quickReplies: [
               { label: '部署上線', value: '部署', style: 'primary' as const },
               { label: '修改設計', value: '我想修改', style: 'secondary' as const },
+              { label: '強制重新生成', value: '重新生成後端', style: 'ghost' as const },
             ],
           })
           return
+        }
+        if (state.coderCompleted && (wantsRegenerate || !previousRunPassed)) {
+          // 清除上次 coder 標記，準備重跑
+          const reason = wantsRegenerate ? '用戶明確要求重新生成' : '上次測試未通過'
+          logger.info({ conversationId, reason, previousRunPassed, wantsRegenerate }, 'L30: 允許 Coder 重跑')
+          state.coderCompleted = false
+          state.coderTestPassed = false
+          await saveFlowState(redis, conversationId, state)
         }
         // 檢查 Neon DB 是否可用（provision 成功），不可用時自動重試
         const neonRow = await db.queryOne<{ neon_connection_string: string }>(
