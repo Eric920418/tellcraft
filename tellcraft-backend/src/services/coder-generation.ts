@@ -277,6 +277,10 @@ export const BASE_PROMPT = `You are a Next.js + PostgreSQL backend engineer. You
 - Functions MUST be exported + async, with explicit return types
 - Error handling: on validation failure, \`throw new Error('<english message>')\`
 - SQL MUST use parameterized queries (\`\${var}\` interpolation), NEVER string concatenation
+- **CRITICAL: \`@neondatabase/serverless\` does NOT support \`sql(obj)\` dynamic field spread** (that's a postgres.js / Sequelize feature).
+  - ❌ FORBIDDEN: \`SET \${sql(updateData)}\`, \`INSERT ... VALUES (\${sql(data)})\`, \`WHERE \${sql(filters)}\` → SQL syntax error
+  - ✅ For partial UPDATE, use \`COALESCE\`: \`SET col = COALESCE(\${input.col}, col), updated_at = NOW()\` (passing undefined keeps the original value)
+  - ✅ For dynamic INSERT, list each column explicitly. If truly dynamic, build the query with conditional branches per shape
 - ID fields use UUID; dates use ISO 8601 strings
 - Passwords use bcryptjs (\`import bcrypt from 'bcryptjs'\`); JWT uses \`jsonwebtoken\`
 - No auth checks — the Server Action layer handles that; userId is injected by the caller
@@ -1387,6 +1391,15 @@ ${subOp.relevantGherkin}
   code = fixMySqlSyntax(code)
   code = unwrapListResponse(code)  // L21.P1-A：擋 `return { items, total, page, pageSize }` wrap
 
+  // L28.A2: 偵測 ${sql(obj)} 反模式（Neon 不支援動態欄位 spread）
+  const sqlSpreadCheck = detectSqlObjectSpread(code)
+  if (sqlSpreadCheck.hasIssue) {
+    logger.warn({
+      subOp: subOp.summary,
+      matches: sqlSpreadCheck.matches,
+    }, 'L28.A2: 偵測到 ${sql(obj)} 反模式 — Neon serverless 不支援，會 SQL syntax error。標記需 LLM 重生。')
+  }
+
   return { summary: subOp.summary, code }
 }
 
@@ -1574,6 +1587,26 @@ function alignInputParameters(code: string, requiredInputFields: string[]): { co
   }
 
   return { code: result, fixes }
+}
+
+/**
+ * L28.A2: 偵測 `${sql(ident)}` 動態欄位 spread 反模式（postgres.js 風格，Neon 不支援）
+ *
+ * LLM 偶會用 `SET ${sql(updateData)}` / `INSERT ... VALUES (${sql(data)})`，
+ * 這在 postgres.js 合法但 Neon serverless 會 SQL syntax error。
+ * 偵測到 → 由呼叫端決定是否觸發 LLM 重生（帶詳細錯誤）。
+ *
+ * 注意：本函數不嘗試重寫（動態欄位轉 COALESCE 需知 schema），由 LLM 在帶錯誤訊息的 prompt 重生。
+ */
+export function detectSqlObjectSpread(code: string): { hasIssue: boolean; matches: string[] } {
+  // 匹配 ${sql(identifier)} 模式 — 排除 ${sql\`...\`} 巢狀 template
+  // 安全模式：只抓單純識別字（updateData, fields, ...），不抓函數呼叫鏈
+  const pattern = /\$\{\s*sql\s*\(\s*([a-zA-Z_$][a-zA-Z0-9_$]*)\s*\)\s*\}/g
+  const matches: string[] = []
+  for (const match of code.matchAll(pattern)) {
+    matches.push(match[0])
+  }
+  return { hasIssue: matches.length > 0, matches }
 }
 
 /** 移除 import 語句 */
@@ -1877,6 +1910,15 @@ export async function generateActionFunction(
       logger.info({ actionName: action.name, fixes }, 'L22.A4 input param alignment')
       code = aligned
     }
+  }
+
+  // L28.A2: 偵測 ${sql(obj)} 反模式（Neon 不支援動態欄位 spread）
+  const sqlSpreadCheck = detectSqlObjectSpread(code)
+  if (sqlSpreadCheck.hasIssue) {
+    logger.warn({
+      actionName: action.name,
+      matches: sqlSpreadCheck.matches,
+    }, 'L28.A2: 偵測到 ${sql(obj)} 反模式 — Neon serverless 不支援，會 SQL syntax error。下游修復循環會嘗試 LLM 重生。')
   }
 
   return {

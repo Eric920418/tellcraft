@@ -2,6 +2,7 @@ import type { Pool } from 'pg';
 import type { ISAFeatureArgumentResolver } from '../helper/isa-feature-argument-resolver';
 import { NamingConverter } from '../helper/naming-converter';
 import { TypeConverter } from '../helper/type-converter';
+import { isSentinelValue } from '../helper/sentinel-values';
 import { DatabaseSchema, type TableDefinition } from '../spec/data/models';
 
 /**
@@ -87,7 +88,9 @@ export class EntityValidate {
       if (pkRaw === null) {
         pkRaw = row[`>${pkCol}`] ?? null;
       }
-      if (!pkRaw || !pkRaw.trim() || pkRaw.trim().startsWith('&') || pkRaw.trim().startsWith('<')) {
+      // L28.B: 用統一 sentinel 過濾（涵蓋 & / < / > / $notnull / $null / null / 空）
+      // 修復：之前漏跳 $notnull → 試圖把 "$notnull" 轉 UUID 塞 SQL → PG 拋型別錯
+      if (!pkRaw || isSentinelValue(pkRaw)) {
         hasAllPks = false;
         break;
       }
@@ -120,10 +123,8 @@ export class EntityValidate {
     for (const fieldName of probeFields) {
       const expected = NamingConverter.getRowValue(row, fieldName);
       if (!expected) continue;
-      const trim = expected.trim();
-      if (!trim || trim.startsWith('&') || trim.startsWith('<')) continue;
-      // 跳過特殊語義值（不能當查詢條件）
-      if (trim === 'null' || trim === '$null' || trim === '$notnull' || trim === '&isNotNull' || trim === '&isNull') continue;
+      // L28.B: 統一用 sentinel helper（涵蓋 & / < / > / $notnull / $null / null / 空）
+      if (isSentinelValue(expected)) continue;
 
       const rv = this.resolver.resolveVariable(expected);
       // 跳過未解析的 $variable（rv === null 且原始值以 $ 開頭）

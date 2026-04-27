@@ -2,6 +2,7 @@ import type { Pool } from 'pg';
 import type { ISAFeatureArgumentResolver } from '../helper/isa-feature-argument-resolver';
 import { NamingConverter } from '../helper/naming-converter';
 import { TypeConverter } from '../helper/type-converter';
+import { isSentinelValue } from '../helper/sentinel-values';
 import { DatabaseSchema, type TableDefinition } from '../spec/data/models';
 
 /**
@@ -42,7 +43,8 @@ export class EntityNonExistenceValidate {
 
       for (const pkCol of pkColumns) {
         const pkRaw = NamingConverter.getRowValue(row, pkCol);
-        if (!pkRaw || !pkRaw.trim() || pkRaw.trim().startsWith('&') || pkRaw.trim().startsWith('<')) {
+        // L28.B: 用統一 sentinel 過濾（涵蓋 & / < / > / $notnull / $null / null / 空）
+        if (!pkRaw || isSentinelValue(pkRaw)) {
           hasAllPks = false;
           break;
         }
@@ -95,8 +97,8 @@ export class EntityNonExistenceValidate {
     for (const fieldName of probeFields) {
       const expected = NamingConverter.getRowValue(row, fieldName);
       if (!expected) continue;
-      const trim = expected.trim();
-      if (!trim || trim.startsWith('&') || trim.startsWith('<')) continue;
+      // L28.B: 統一用 sentinel helper
+      if (isSentinelValue(expected)) continue;
 
       const rv = this.resolver.resolveVariable(expected);
       if (rv != null) {

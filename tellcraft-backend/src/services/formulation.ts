@@ -1363,6 +1363,11 @@ If the input contains Chinese entity names or data, **translate them to English*
     - 修復時若看到 \`$Merchant1User.id\` 解析失敗 → 90% 是這個原因 → 改成 \`$Merchant1.userId\`
 16. **entity_setup 的 DataTable 禁用 \`$notnull\` / \`&isNull\` / \`&isNotNull\`**：這些是 validate 標記，在 \`準備一個\` DataTable 會被當字面字串 INSERT → UUID 欄位報 \`invalid input syntax for type uuid: "$notnull"\`。要「不填某欄位」→ 直接**不放該 header**（DB default 生效）。
 17. **FK 引用鏈依賴順序**：若 \`>Product1.merchantId\` 的 data 是 \`$Merchant1.userId\` → \`>Merchant1.userId\` 的 entity_setup 步驟必須**排在此步之前**（同 Scenario 的更早 Given 或 Background）。否則父記錄不存在，FK 炸。
+18. **Credential / passwordHash 測試 fixture（嚴格規則）**：當 Feature 涉及密碼 / API key / token 等 credential 比對時，entity_setup 的 hashed 欄位（如 \`passwordHash\`）**必須**與測試傳入的明文有可驗證關係，三選一：
+    - ✅ **真實 bcrypt hash**：\`passwordHash: $2b$10$<bcrypt_of_X>\` + 測試 \`password: X\`（Coder 用 bcrypt.compare）
+    - ✅ **明文 fixture**：\`passwordHash: SecretPass123\` + 測試 \`password: SecretPass123\`（兩者字面相等，Coder 走 plain compare fallback）
+    - ❌ **模糊字串**：\`passwordHash: HashedPasswordForTest01\` + 測試 \`password: CorrectPassword\` — **絕對禁止**，bcrypt 不認得這個假 hash，plain compare 又不相等 → 永遠 fail
+    類似情境：API key、refresh token、OAuth secret 等 credential 比對。
 
 ## 四類規則分類
 - **前置（狀態）**：系統既有狀態約束（如庫存>0）
