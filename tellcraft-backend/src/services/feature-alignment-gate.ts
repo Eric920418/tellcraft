@@ -1044,11 +1044,13 @@ export async function runAlignmentChecks(input: AlignmentGateInput): Promise<Ali
         if (plainsForField.includes(hashLit)) continue  // ✅ 字面相等（plain fixture）
         // 三條件都不滿足 → 矛盾
         const samplePlain = plainsForField.length > 0 ? plainsForField[0] : '(no plain test value found)'
+        // L31: 從 warning 升級為 error → 觸發 alignment gate 自動修復
+        // 原因：warning 不阻擋，Feature 帶矛盾進 Coder 後永遠 fail，浪費所有下游成本
         issues.push({
           featureName: displayName,
           checkName: 'credential_mismatch',
-          severity: 'warning',
-          description: `Feature "${displayName}" 的 \`${hashField}\` 字面值 "${hashLit}" 與測試的 \`${plainField}\` 字面值 "${samplePlain}" 無法對應。bcrypt.compare 會失敗（因為 "${hashLit}" 不是 \`$2b$10$\` 開頭的 bcrypt hash），plain compare 也不相等 → 該 scenario 永遠 fail。請選一：(A) 把 \`${hashField}\` 改成真實 bcrypt hash + 對應 plain，或 (B) \`${hashField}\` 改成等同於測試 \`${plainField}\` 的明文。`,
+          severity: 'error',
+          description: `Feature "${displayName}" 的 \`${hashField}\` 字面值 "${hashLit}" 與測試的 \`${plainField}\` 字面值 "${samplePlain}" 無法對應 → 該 scenario 永遠 fail（bcrypt.compare 失敗因為 "${hashLit}" 不是 bcrypt hash，plain compare 也不等）。**修法**：把 \`${hashField}\` 改為等同於測試 \`${plainField}\` 的明文（例：\`${hashField}: ${samplePlain}\`），讓 Coder 的 plain compare fallback 能匹配。或改為對應的真實 bcrypt hash（\`$2b$10$...\`）。**最簡單**：直接把 \`${hashField}\` 字面值改成 "${samplePlain}"。`,
         })
       }
     }
