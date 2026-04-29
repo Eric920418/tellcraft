@@ -569,10 +569,17 @@ export async function handleUiuxMixedPhaseRouting(
       return
     }
 
-    if (state.uiuxCodePhase && state.waitingForReply && (
-      message.includes('重新生成') ||
-      message.includes('重做')
-    )) {
+    // L32: code phase redo 只在 pipeline 中途有階段可重做才 trigger
+    //   - uiuxCodePhase === 'complete' → 已完成全部階段，沒階段可 redo（會誤吃「重新生成後端」）
+    //   - 訊息含「後端」/「coder」→ 屬於 Coder 重跑（讓下面 hasCoderIntent 處理）
+    const isCoderRegenIntent = /後端|coder|backend/i.test(message)
+    if (
+      state.uiuxCodePhase &&
+      state.uiuxCodePhase !== 'complete' &&
+      state.waitingForReply &&
+      !isCoderRegenIntent &&
+      (message.includes('重新生成') || message.includes('重做'))
+    ) {
       await handleCodePhaseRedo(conversationId, state, redis, io)
       return
     }
