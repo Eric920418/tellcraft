@@ -1039,11 +1039,14 @@ export async function runAlignmentChecks(input: AlignmentGateInput): Promise<Ali
       // 對應的 plain 欄位（passwordHash → password；apiKeyHash → apiKey）
       const plainField = hashField.replace(/Hash$/, '').replace(/_hash$/, '')
       const plainsForField = plainValues.get(plainField) || []
+      // L31.fix: 該 Feature 沒有對應的 plain field 比對（如 Update/Delete admin 操作只用 UID 引用，
+      // passwordHash 純粹是 entity_setup fixture data，不會被 Coder 拿來 bcrypt.compare）→ 不可能 mismatch
+      if (plainsForField.length === 0) continue
       for (const hashLit of hashLiterals) {
         if (BCRYPT_PATTERN.test(hashLit)) continue  // ✅ 真實 bcrypt
         if (plainsForField.includes(hashLit)) continue  // ✅ 字面相等（plain fixture）
         // 三條件都不滿足 → 矛盾
-        const samplePlain = plainsForField.length > 0 ? plainsForField[0] : '(no plain test value found)'
+        const samplePlain = plainsForField[0]
         // L31: 從 warning 升級為 error → 觸發 alignment gate 自動修復
         // 原因：warning 不阻擋，Feature 帶矛盾進 Coder 後永遠 fail，浪費所有下游成本
         issues.push({

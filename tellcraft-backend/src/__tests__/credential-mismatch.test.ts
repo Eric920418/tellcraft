@@ -109,6 +109,34 @@ Feature: Admin Login
     expect(mismatch).toHaveLength(0)
   })
 
+  it('✅ Feature 有 passwordHash 但沒任何 password 比對 scenario（admin update/delete）→ 不報（L31.fix）', async () => {
+    const feature = `# Action: update_hero_section
+# [PUT] /api/admin/hero-section
+# Summary: Update Hero Section
+Feature: Update Hero Section
+
+  Background:
+    Given 準備一個AdminUser, with table:
+      | >AdminUser1.id | username | passwordHash            |
+      | <adminUser1Id  | admin    | HashedPasswordForTest01 |
+
+  Rule: 後置（狀態）- HeroSection updated
+    Example: Update succeeds
+      When (UID="$adminUser1Id") Update Hero Section, call table:
+        | id              | title     |
+        | $heroSection1Id | New Title |
+      Then Update Hero Section(200)回應, with table:
+        | id              |
+        | $heroSection1Id |
+`
+    const issues = await runAlignmentChecks({
+      ...makeInput(feature),
+      features: [{ name: 'Update Hero Section', actionName: 'update_hero_section', content: feature }],
+    })
+    const mismatch = issues.filter(i => i.checkName === 'credential_mismatch')
+    expect(mismatch).toHaveLength(0)  // 沒 plain password field → 不該誤報
+  })
+
   it('Feature 沒 hashed 欄位 → 不報', async () => {
     const feature = `# Action: admin_login
 # [POST] /api/admin/login
