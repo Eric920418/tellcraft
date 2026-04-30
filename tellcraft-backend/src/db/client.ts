@@ -24,24 +24,56 @@ pool.on('error', (err) => {
 // ============================================================
 
 /**
- * 執行 SQL 查詢
+ * 偵測「連線層 transient 錯誤」— 這類錯誤重試通常會成功
+ * (1) Server 端關閉 idle client，pool 還持有死 client
+ * (2) 網路瞬斷
+ * (3) PostgreSQL 重啟 / failover
+ */
+function isTransientConnectionError(err: unknown): boolean {
+  if (!(err instanceof Error)) return false
+  const msg = err.message
+  return msg.includes('Connection terminated') ||
+    msg.includes('connection timeout') ||
+    msg.includes('terminated unexpectedly') ||
+    msg.includes('ECONNRESET') ||
+    msg.includes('ETIMEDOUT') ||
+    msg.includes('socket hang up')
+}
+
+/**
+ * 執行 SQL 查詢（L34: 加 transient 錯誤自動重試 1 次）
  */
 export async function query<T extends QueryResultRow = QueryResultRow>(
   text: string,
   params?: unknown[]
 ): Promise<QueryResult<T>> {
   const start = Date.now()
-  try {
-    const result = await pool.query<T>(text, params)
-    const duration = Date.now() - start
-    if (duration > 100) {
-      logger.warn({ duration, query: text.substring(0, 100) }, '慢查詢')
+  let lastError: unknown
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    try {
+      const result = await pool.query<T>(text, params)
+      const duration = Date.now() - start
+      if (duration > 100) {
+        logger.warn({ duration, query: text.substring(0, 100), attempts: attempt }, '慢查詢')
+      }
+      if (attempt > 1) {
+        logger.info({ query: text.substring(0, 80) }, '重試後成功（transient 連線錯誤）')
+      }
+      return result
+    } catch (error) {
+      lastError = error
+      if (attempt < 2 && isTransientConnectionError(error)) {
+        const errMsg = error instanceof Error ? error.message.substring(0, 100) : String(error).substring(0, 100)
+        logger.warn({ err: errMsg, attempt }, '查詢遇 transient 連線錯誤，重試中')
+        // 短暫等待讓 pool 清掉死 client
+        await new Promise(resolve => setTimeout(resolve, 200))
+        continue
+      }
+      logger.error({ err: error }, '查詢錯誤')
+      throw error
     }
-    return result
-  } catch (error) {
-    logger.error({ err: error }, '查詢錯誤')
-    throw error
   }
+  throw lastError
 }
 
 /**
