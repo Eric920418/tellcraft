@@ -1921,6 +1921,51 @@ export function applySearchReplace(baseCode: CodeBundle, blocks: SearchReplaceBl
   }
 }
 
+// ============================================================
+// P6: refine 路徑 hybrid 解析 — 先試 SEARCH/REPLACE，失敗 fallback null
+// 把 SR block 結果轉成 RefinePatchSet（diff baseCode vs updatedCode 出 modified files）
+// 呼叫端 fallback：null → 走既有 parseModifiedCodeBlocks
+// ============================================================
+
+export function tryParseRefineDiff(
+  content: string,
+  baseCode: CodeBundle,
+): { patches: RefinePatchSet; appliedCount: number; failedCount: number } | null {
+  const blocks = parseSearchReplaceBlocks(content)
+  if (!blocks || blocks.length === 0) return null
+
+  const result = applySearchReplace(baseCode, blocks)
+
+  // 全部失敗 → 視為解析失敗，呼叫端 fallback
+  if (result.appliedCount === 0) return null
+
+  const modifiedPages = new Map<string, string>()
+  const modifiedComponents = new Map<string, string>()
+  let modifiedStyles = ''
+
+  for (const updated of result.updatedCode.pages) {
+    const original = baseCode.pages.find(p => p.path === updated.path)
+    if (!original || original.content !== updated.content) {
+      modifiedPages.set(updated.path, updated.content)
+    }
+  }
+  for (const updated of result.updatedCode.components) {
+    const original = baseCode.components.find(c => c.path === updated.path)
+    if (!original || original.content !== updated.content) {
+      modifiedComponents.set(updated.path, updated.content)
+    }
+  }
+  if (result.updatedCode.styles !== baseCode.styles) {
+    modifiedStyles = result.updatedCode.styles
+  }
+
+  return {
+    patches: { modifiedPages, modifiedComponents, modifiedStyles },
+    appliedCount: result.appliedCount,
+    failedCount: result.failedBlocks.length,
+  }
+}
+
 function buildCodeManifest(code: CodeBundle): string {
   const pageList = code.pages.map(page => `- page: ${page.path}`).join('\n')
   const componentList = code.components.map(component => `- component: ${component.path}`).join('\n')
@@ -6465,7 +6510,20 @@ ${targetPreviewRoute ? `
 ` : ''}
 
 ## 輸出格式
-只輸出**被修改的檔案**，使用以下格式：
+${getEnv().ENABLE_REFINE_DIFF_OUTPUT ? `使用 SEARCH/REPLACE block 精確標示每處修改（省 token + 避免大檔案截斷）：
+
+<<<<<<< SEARCH:path/to/file.tsx
+// 原代碼片段（必須精確匹配，含 3-5 行上下文確保唯一定位）
+=======
+// 修改後的代碼片段
+>>>>>>> REPLACE
+
+規則：
+1. SEARCH 必須精確匹配現有代碼（含空白縮排）
+2. SEARCH 多處匹配會被拒絕，請含足夠上下文確保唯一
+3. CSS 修改用 <<<<<<< SEARCH:globals.css
+4. 新建檔案用 CREATE 格式（SEARCH 留空）：<<<<<<< CREATE:path
+5. 不要輸出 code fence \`\`\`tsx，只用 SEARCH/REPLACE block` : `只輸出**被修改的檔案**，使用以下格式：
 
 \`\`\`tsx:path/to/modified-file.tsx
 // 完整的修改後代碼
@@ -6476,7 +6534,7 @@ ${targetPreviewRoute ? `
 \`\`\`
 
 未修改的檔案不需要輸出。
-⚠️ code fence 規則：每個 code block 的第一行必須直接是代碼，禁止在代碼前加任何說明文字（如 "Here is..."、"This component..."）。
+⚠️ code fence 規則：每個 code block 的第一行必須直接是代碼，禁止在代碼前加任何說明文字（如 "Here is..."、"This component..."）。`}
 ${largeFileWarnings ? `
 ⚠️ **大檔案防截斷（Critical）**：以下檔案行數較多，修改時必須輸出完整內容：
 ${largeFileWarnings}
@@ -6551,7 +6609,20 @@ ${codeBlocks.join('\n\n')}
     return { success: false, error: noChangeMatch[1].trim() || '無法理解修改需求，請提供具體的修改描述。' }
   }
 
-  const initialPatches = parseModifiedCodeBlocks(response.content, currentCode)
+  // P6: hybrid 解析 — 先試 SEARCH/REPLACE diff，沒 block 或全失敗 fallback 到完整檔案解析
+  let initialPatches: RefinePatchSet
+  const diffResult = tryParseRefineDiff(response.content, currentCode)
+  if (diffResult) {
+    logger.info({
+      appliedCount: diffResult.appliedCount,
+      failedCount: diffResult.failedCount,
+      modifiedPages: diffResult.patches.modifiedPages.size,
+      modifiedComponents: diffResult.patches.modifiedComponents.size,
+    }, 'refineCode：用 SEARCH/REPLACE diff 解析成功')
+    initialPatches = diffResult.patches
+  } else {
+    initialPatches = parseModifiedCodeBlocks(response.content, currentCode)
+  }
 
   // 零改動檢測：LLM 沒回 [NO_CHANGE] 但也沒輸出任何代碼區塊
   if (!hasAnyPatch(initialPatches)) {

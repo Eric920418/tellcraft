@@ -183,6 +183,174 @@ const DOM_OUTLINE_SCRIPT = `(() => {
 })()`
 
 // ============================================================
+// P5: 結構性 UX 檢查 — nav 深度 + viewport overlap
+// ============================================================
+
+/**
+ * page.evaluate 用 string callback（tsconfig lib=ES2022 不含 DOM types）
+ * 抓內部連結（`/...` 路徑，排除 hash 與外部）+ 高 z-index overlay 的 bounding rect
+ * 同時抓 above-the-fold 的「主 CTA 候選」（醒目色或 font-bold button/a）
+ */
+const STRUCTURE_PROBE_SCRIPT = `(() => {
+  const links = Array.from(document.querySelectorAll('a[href]'))
+    .map(a => a.getAttribute('href') || '')
+    .filter(h => h.startsWith('/') && !h.startsWith('//'))
+    .map(h => h.split('#')[0].split('?')[0])
+    .filter(h => h.length > 0)
+  const uniqueLinks = Array.from(new Set(links))
+
+  function rectInViewport(r) {
+    return r.top < 800 && r.bottom > 0 && r.width > 1 && r.height > 1
+  }
+  function rectIntersect(a, b) {
+    const x = Math.max(0, Math.min(a.right, b.right) - Math.max(a.left, b.left))
+    const y = Math.max(0, Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top))
+    return x * y
+  }
+
+  const ctas = []
+  const candidates = Array.from(document.querySelectorAll('button, a'))
+  for (const el of candidates) {
+    const cs = getComputedStyle(el)
+    if (cs.display === 'none' || cs.visibility === 'hidden') continue
+    const r = el.getBoundingClientRect()
+    if (!rectInViewport(r)) continue
+    const cls = el.className || ''
+    const isProminent = /\\bbg-(blue|indigo|purple|primary|emerald|amber|orange|red|pink|cyan|sky|violet|fuchsia|rose)-/.test(cls)
+      || /\\bfont-(bold|semibold|black)\\b/.test(cls)
+      || cs.backgroundColor.match(/rgb\\(/)
+    if (isProminent) {
+      ctas.push({
+        tag: el.tagName.toLowerCase(),
+        text: (el.innerText || '').trim().substring(0, 40),
+        rect: { left: r.left, top: r.top, right: r.right, bottom: r.bottom, width: r.width, height: r.height },
+      })
+    }
+  }
+
+  const overlays = []
+  const all = Array.from(document.querySelectorAll('*'))
+  for (const el of all) {
+    const cs = getComputedStyle(el)
+    const z = parseInt(cs.zIndex, 10)
+    if (!isNaN(z) && z >= 50 && (cs.position === 'fixed' || cs.position === 'absolute')) {
+      const r = el.getBoundingClientRect()
+      if (!rectInViewport(r)) continue
+      overlays.push({
+        zIndex: z,
+        text: (el.textContent || '').trim().substring(0, 40),
+        rect: { left: r.left, top: r.top, right: r.right, bottom: r.bottom, width: r.width, height: r.height },
+      })
+    }
+  }
+
+  // 算 CTA 與 overlay 的最大重疊比例
+  let maxOverlapRatio = 0
+  let blockedCta = null
+  let blockingOverlay = null
+  for (const cta of ctas) {
+    const ctaArea = cta.rect.width * cta.rect.height
+    if (ctaArea === 0) continue
+    for (const overlay of overlays) {
+      const intersection = rectIntersect(cta.rect, overlay.rect)
+      const ratio = intersection / ctaArea
+      if (ratio > maxOverlapRatio) {
+        maxOverlapRatio = ratio
+        blockedCta = cta
+        blockingOverlay = overlay
+      }
+    }
+  }
+
+  return {
+    links: uniqueLinks,
+    ctaCount: ctas.length,
+    overlayCount: overlays.length,
+    maxOverlapRatio,
+    blockedCta,
+    blockingOverlay,
+  }
+})()`
+
+export interface StructureProbe {
+  route: string
+  links: string[]
+  ctaCount: number
+  overlayCount: number
+  maxOverlapRatio: number
+  blockedCta: { tag: string; text: string } | null
+  blockingOverlay: { zIndex: number; text: string } | null
+}
+
+/**
+ * BFS 從 / 出發算到每個已 visit route 的最短 hop 數
+ * 鄰接表用所有 route 的 links（去除 self loop）
+ */
+export function computeNavDepths(probes: StructureProbe[]): Map<string, number> {
+  const adjacency = new Map<string, Set<string>>()
+  for (const probe of probes) {
+    if (!adjacency.has(probe.route)) adjacency.set(probe.route, new Set())
+    for (const link of probe.links) {
+      if (link === probe.route) continue
+      adjacency.get(probe.route)!.add(link)
+    }
+  }
+
+  const depths = new Map<string, number>()
+  if (!probes.some(p => p.route === '/')) {
+    return depths  // 沒首頁就無法計算
+  }
+  depths.set('/', 0)
+  const queue: string[] = ['/']
+  while (queue.length > 0) {
+    const current = queue.shift()!
+    const currentDepth = depths.get(current)!
+    const neighbors = adjacency.get(current) || new Set()
+    for (const next of neighbors) {
+      if (!depths.has(next)) {
+        depths.set(next, currentDepth + 1)
+        queue.push(next)
+      }
+    }
+  }
+  return depths
+}
+
+/**
+ * 從 probes 產出結構性 issue
+ * - nav depth > 2 → warning（影片提到的「第三層導覽」）
+ * - CTA overlap > 50% → critical
+ */
+export function deriveStructureIssues(probes: StructureProbe[]): UiEvaluationIssue[] {
+  const issues: UiEvaluationIssue[] = []
+  const depths = computeNavDepths(probes)
+
+  for (const [route, depth] of depths) {
+    if (depth > 2 && route !== '/') {
+      issues.push({
+        severity: 'warning',
+        category: 'task_failed',
+        route,
+        description: `頁面 ${route} 從首頁需要 ${depth} 次點擊才能抵達，超過影片框架建議的 ≤2 層導覽深度。考慮提升到主導覽列或加入首頁直連。`,
+      })
+    }
+  }
+
+  for (const probe of probes) {
+    if (probe.maxOverlapRatio > 0.5 && probe.blockedCta && probe.blockingOverlay) {
+      issues.push({
+        severity: 'critical',
+        category: 'task_failed',
+        route: probe.route,
+        description: `主 CTA「${probe.blockedCta.text || probe.blockedCta.tag}」被 z-index=${probe.blockingOverlay.zIndex} 的 overlay（"${probe.blockingOverlay.text}"）遮蓋 ${(probe.maxOverlapRatio * 100).toFixed(0)}%。`,
+      })
+    }
+  }
+
+  return issues
+}
+
+// ============================================================
 // P2: Task derivation（從 BDD 推導 user-facing tasks）
 // 用 Haiku 一次推 ≤5 個 task，純文字 prompt + 結構化輸出。
 // 失敗 fail-open：回空陣列，evaluator 退化到原本的黑盒評分。
@@ -327,14 +495,22 @@ export async function evaluateUi(opts: EvaluateUiOptions): Promise<EvaluateUiRes
           const page = await browser.newPage()
           await page.setViewport({ width: 1280, height: 800 })
 
-          // 逐 route 收集觀察
+          // 逐 route 收集觀察 + P5 結構性 probes
           const observations: Array<{ route: string; screenshotB64: string; outline: string }> = []
+          const structureProbes: StructureProbe[] = []
           for (const { route } of ctx.routes.slice(0, 6)) { // 上限 6 頁，控成本
             try {
               await page.goto(`${ctx.baseUrl}${route}`, { waitUntil: 'networkidle2', timeout: 15_000 })
               const screenshotB64 = await page.screenshot({ encoding: 'base64', type: 'jpeg', quality: 70, fullPage: false }) as string
               const outline = await page.evaluate(DOM_OUTLINE_SCRIPT) as string
               observations.push({ route, screenshotB64, outline: outline.substring(0, 3000) })
+              // P5: 順便抓結構 probe（成本低、避免重複 navigate）
+              try {
+                const probe = await page.evaluate(STRUCTURE_PROBE_SCRIPT) as Omit<StructureProbe, 'route'>
+                structureProbes.push({ route, ...probe })
+              } catch (probeErr) {
+                logger.warn({ route, err: String(probeErr).slice(0, 120) }, 'P5 structure probe 失敗')
+              }
             } catch (err) {
               logger.warn({ route, err: String(err).slice(0, 120) }, 'Evaluator 頁面訪問失敗')
             }
@@ -359,8 +535,24 @@ export async function evaluateUi(opts: EvaluateUiOptions): Promise<EvaluateUiRes
             }, 'P2 task 模擬完成')
           }
 
-          // 呼叫 Vision LLM（傳入 task 結果做整合判斷）
-          return await reviewWithVision(observations, { tier, bddBrief, trackingContext, tasks, taskResults })
+          // P5: 從 probes 產結構性 issue（advisory）
+          const structureIssues = deriveStructureIssues(structureProbes)
+          if (structureIssues.length > 0) {
+            logger.info({
+              count: structureIssues.length,
+              critical: structureIssues.filter(i => i.severity === 'critical').length,
+              navDepthIssues: structureIssues.filter(i => i.description.includes('導覽深度')).length,
+              ctaBlockedIssues: structureIssues.filter(i => i.description.includes('遮蓋')).length,
+            }, 'P5 結構性檢查完成')
+          }
+
+          // 呼叫 Vision LLM（傳入 task 結果 + 結構 issue 做整合判斷）
+          const visionReport = await reviewWithVision(observations, { tier, bddBrief, trackingContext, tasks, taskResults })
+          // P5 issue 直接合進最終 report（不經 Vision 判斷，因為它們是靜態事實）
+          return {
+            passed: visionReport.passed && structureIssues.filter(i => i.severity === 'critical').length === 0,
+            issues: [...visionReport.issues, ...structureIssues],
+          }
         } finally {
           await browser.close()
         }

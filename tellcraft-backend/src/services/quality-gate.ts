@@ -15,6 +15,8 @@ import {
 import { auditCssConsistency } from './css-consistency-audit'
 import { resolveColor, extractBgAndText, isLargeText } from './tailwind-color-resolver'
 import { hex as wcagHex } from 'wcag-contrast'
+import { parseSearchReplaceBlocks, applySearchReplace } from './uiux-generation'
+import { getEnv } from '../lib/env'
 
 const logger = createLogger('quality-gate')
 
@@ -930,12 +932,25 @@ export async function autoFixCriticalIssues(
     `- [${i.severity}] ${i.rule}: ${i.message} (${i.file}${i.line ? `:${i.line}` : ''})${i.suggestion ? ` → ${i.suggestion}` : ''}`
   ).join('\n')
 
+  const useDiff = getEnv().ENABLE_REFINE_DIFF_OUTPUT
+  const outputFormatHint = useDiff
+    ? `3. 用 SEARCH/REPLACE block 標示每處修改（省 token + 避免大檔案截斷）：
+
+<<<<<<< SEARCH:path/to/file.tsx
+// 原代碼片段（必須精確匹配，含 3-5 行上下文確保唯一定位）
+=======
+// 修復後的代碼片段
+>>>>>>> REPLACE
+
+CSS 修改用 <<<<<<< SEARCH:globals.css。SEARCH 多處匹配會被拒絕，請含足夠上下文。`
+    : `3. 輸出修復後的完整檔案（與原始格式相同的 \`\`\`tsx:path 或 \`\`\`css:path 代碼塊）`
+
   const prompt = `你是程式碼修復專家。以下是前端程式碼和需要修復的品質問題清單。
 
 ## 規則
 1. **只修復列出的問題**，不要改變任何設計、佈局、功能或樣式
 2. 保持所有現有代碼結構不變
-3. 輸出修復後的完整檔案（與原始格式相同的 \`\`\`tsx:path 或 \`\`\`css:path 代碼塊）
+${outputFormatHint}
 4. 動畫庫用 motion/react（不是 framer-motion）
 5. 字體載入用 next/font（不用 <link> 或 @import Google Fonts）
 6. Tailwind v4 用 @import "tailwindcss"（不用 @tailwind）
@@ -946,7 +961,7 @@ ${issueList}
 ## 原始代碼
 ${codeBlocks.join('\n\n')}
 
-請輸出修復後的所有檔案（保持相同的 \`\`\`tsx:filepath 格式）。`
+${useDiff ? '請用 SEARCH/REPLACE block 輸出每處修改。' : '請輸出修復後的所有檔案（保持相同的 ```tsx:filepath 格式）。'}`
 
   try {
     const stream = client.messages.stream({
@@ -974,9 +989,25 @@ ${codeBlocks.join('\n\n')}
       .map(block => block.text)
       .join('\n')
 
-    // 解析修復後的檔案
-    const result = parseFixedFiles(content, scopedCode)
-    const merged = mergeGeneratedCode(code, result)
+    // P6: hybrid 解析 — 先試 SEARCH/REPLACE diff，沒 block 或全失敗 fallback 完整檔案
+    let merged: GeneratedCode
+    const srBlocks = parseSearchReplaceBlocks(content)
+    if (srBlocks && srBlocks.length > 0) {
+      const srResult = applySearchReplace(scopedCode, srBlocks)
+      if (srResult.appliedCount > 0) {
+        logger.info({
+          appliedCount: srResult.appliedCount,
+          failedCount: srResult.failedBlocks.length,
+        }, 'autoFixCriticalIssues：用 SEARCH/REPLACE diff 解析成功')
+        merged = mergeGeneratedCode(code, srResult.updatedCode)
+      } else {
+        const result = parseFixedFiles(content, scopedCode)
+        merged = mergeGeneratedCode(code, result)
+      }
+    } else {
+      const result = parseFixedFiles(content, scopedCode)
+      merged = mergeGeneratedCode(code, result)
+    }
     // LLM 修復後再跑一輪靜態 repair，防止 Haiku 引入新問題
     const applyRepairs = (f: GeneratedComponent) => {
       let current = f
