@@ -374,6 +374,31 @@ export function sanitizeCodeForDeploy(code: GeneratedCode): SanitizeResult {
       || file.path.startsWith('lib/')
       || file.path.startsWith('app/api/')
 
+    // ── L35 修復 0: strip leading file-path 標頭 ──
+    //   LLM 偶會把檔名 `app/admin/login/page.tsx` 當代碼寫在第一行 → SWC parser 拋
+    //   "use client must be placed before other expressions"。先 strip 再判 use client。
+    {
+      const lines = file.content.split('\n')
+      let stripped = 0
+      // 從頭掃，連續移除「看起來像檔案路徑」的單獨行（不超過前 5 行）
+      while (stripped < 5 && lines.length > 0) {
+        const line = lines[0].trim()
+        // 路徑樣式：含 `/` 且以 .ts/.tsx/.js/.jsx/.css 結尾，且不是 import/comment/JSX
+        if (/^[\w./-]+\.(tsx?|jsx?|css|scss|md)$/.test(line) && line.includes('/')) {
+          lines.shift()
+          stripped++
+          continue
+        }
+        // 第一行是空行就跳過繼續看
+        if (line === '') { lines.shift(); continue }
+        break
+      }
+      if (stripped > 0) {
+        file.content = lines.join('\n')
+        fixes.push(`${file.path}: 移除 ${stripped} 行 LLM 誤寫的檔案路徑標頭`)
+      }
+    }
+
     // ── 修復 1: framer-motion → motion/react ──（對所有檔案安全）
     if (/from\s+['"]framer-motion['"]/.test(file.content)) {
       file.content = file.content.replace(
@@ -393,6 +418,20 @@ export function sanitizeCodeForDeploy(code: GeneratedCode): SanitizeResult {
       if (needsClient && !hasUseClient && !hasUseServer) {
         file.content = "'use client'\n\n" + file.content
         fixes.push(`${file.path}: 自動加入 'use client'`)
+      }
+      // L35 補強：去重「重複的 'use client'」— 若 strip 後又有第二個 'use client' 在文件內
+      const useClientCount = (file.content.match(/^['"]use client['"]\s*$/gm) || []).length
+      if (useClientCount > 1) {
+        // 保留第一個（最頂的），移除後續所有
+        let firstSeen = false
+        file.content = file.content.split('\n').filter(line => {
+          if (/^['"]use client['"]\s*$/.test(line.trim())) {
+            if (firstSeen) return false
+            firstSeen = true
+          }
+          return true
+        }).join('\n')
+        fixes.push(`${file.path}: 移除重複的 'use client' (保留最頂的 1 個)`)
       }
     }
 
