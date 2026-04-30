@@ -288,15 +288,43 @@ export function maybeTransposeVerticalDataTable(
 
   const VALID_HEADER = /^[A-Za-z_$>][A-Za-z0-9_.]*$|^[PQH]:/
 
-  // 先檢查第一行是否已經是合法的水平 header
-  // 如果第一行的兩個 cell 都是合法欄位名，且第二行有 $Variable 或具體值 → 保持水平格式
   const firstRow = raw[0].map(c => (c || '').trim())
   const secondRow = raw[1].map(c => (c || '').trim())
-  const firstRowAllValidHeaders = firstRow.every(h => VALID_HEADER.test(h))
-  const secondRowHasValues = secondRow.some(v => v.startsWith('$') || v.startsWith('<') || v.startsWith('>') || v === 'true' || v === 'false' || /^\d/.test(v) || v.startsWith('"'))
 
-  if (firstRowAllValidHeaders && secondRowHasValues) {
-    // 第一行是 header，第二行是 data → 水平格式，不轉置
+  // L33 修：明確區分「水平 vs 垂直」格式，避免水平 [username, password] / [admin_owner, CorrectPassword]
+  // 因為 secondRow 純識別字（admin_owner 也 match VALID_HEADER）被誤判為垂直 → headers/rows 互換錯位
+  //
+  // 垂直格式的 cell[1] 必須「看起來像值不像 key」:
+  //   - 引號開頭（"alice@x.com"）
+  //   - VAR 前綴（$X, <Y）
+  //   - 含特殊字符（@ ! # 空格 等 — 識別字不允許的）
+  //   - 純數字 / true/false
+  //   - 不是 valid header pattern（即非識別字）
+  //
+  // 兩行都符合「key-value」模式才轉置；否則優先當水平格式
+  const looksLikeKeyValuePair = (row: string[]): boolean => {
+    if (row.length !== 2) return false
+    const [key, value] = row
+    if (!VALID_HEADER.test(key)) return false
+    // value 必須「看起來像資料值」
+    if (value.startsWith('$') || value.startsWith('<') || value.startsWith('>')) return true
+    if (value.startsWith('"') || value.startsWith("'")) return true
+    if (value === 'true' || value === 'false' || value === 'null') return true
+    if (/^-?\d/.test(value)) return true
+    // 含識別字不允許的字元（空格、@、!、#、$、%、^、&、*、,、;、:、?、+、=）→ 看起來像值
+    if (/[\s@!#%^&*,;?+=()\[\]{}]/.test(value)) return true
+    if (/[一-鿿]/.test(value)) return true  // 含中文 → 是值
+    if (!VALID_HEADER.test(value)) return true  // 不符合識別字 pattern → 是值
+    return false  // 純 ASCII 識別字（如 'CorrectPassword'）→ 看起來像 key，水平格式可能
+  }
+
+  const firstRowAllValidHeaders = firstRow.every(h => VALID_HEADER.test(h))
+  // 水平格式優先：firstRow 全是 valid header 且 secondRow 不像 [key, value] pair
+  if (firstRowAllValidHeaders && !looksLikeKeyValuePair(secondRow)) {
+    return null
+  }
+  // 額外保險：firstRow 自己看起來不像 key-value（如 [username, password] 兩個都是 valid header）→ 水平
+  if (!looksLikeKeyValuePair(firstRow) && firstRowAllValidHeaders) {
     return null
   }
 
