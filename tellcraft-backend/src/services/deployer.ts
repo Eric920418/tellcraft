@@ -1802,12 +1802,15 @@ export default config
 
   // 生成的 components — 智慧路徑處理
   // 這些頂層目錄直接放根目錄，不加 components/ 前綴
-  const ROOT_LEVEL_DIRS = ['app/', 'lib/', 'hooks/', 'utils/', 'types/', 'context/', 'stores/', 'data/', 'config/', 'api/']
+  const ROOT_LEVEL_DIRS = ['app/', 'lib/', 'hooks/', 'utils/', 'types/', 'context/', 'stores/', 'data/', 'config/', 'api/', 'components/']
   // Root layout 路徑變體：LLM 有時漏寫 app/ 前綴。必須與 sanitizeCodeForDeploy Fix 8 一致覆蓋
   const ROOT_LAYOUT_PATHS = new Set(['app/layout.tsx', 'app/layout.ts', 'layout.tsx', 'layout.ts'])
   let hasCustomLayout = false
   for (const comp of code.components) {
-    const cleanPath = stripRouteGroups(comp.path.replace(/^(components\/)?/, ''))
+    // L36: 不再 strip components/ 前綴 — strip 後 components/AdminShell.tsx 會變
+    // AdminShell.tsx 走「裸檔案放根目錄」路徑，但 import '@/components/AdminShell' 找不到。
+    // 正確邏輯：path 已含目錄前綴（含 components/）→ 保留原樣；只有裸檔案才加 components/。
+    const cleanPath = stripRouteGroups(comp.path)
 
     // Root layout：強制歸位到 app/layout.tsx，避免無前綴版本被放到根目錄變死檔
     if (ROOT_LAYOUT_PATHS.has(cleanPath)) {
@@ -1817,15 +1820,15 @@ export default config
       continue
     }
 
-    // 頂層目錄放到對應位置（不加 components/ 前綴）
+    // 已有頂層目錄前綴（含 components/）→ 保留原路徑
     if (ROOT_LEVEL_DIRS.some(dir => cleanPath.startsWith(dir))) {
       files.push({ file: cleanPath, data: comp.content })
     }
-    // 根目錄裸檔案（如 auth.ts）直接放根目錄
+    // 根目錄裸檔案（如 LLM 寫 'Dashboard.tsx' 沒前綴）→ 默認歸 components/
     else if (!cleanPath.includes('/')) {
-      files.push({ file: cleanPath, data: comp.content })
+      files.push({ file: `components/${cleanPath}`, data: comp.content })
     }
-    // 其他才放到 components/
+    // 其他子目錄但無頂層前綴（如 'admin/AdminShell.tsx'）→ 加 components/ 前綴
     else {
       files.push({ file: `components/${cleanPath}`, data: comp.content })
     }
