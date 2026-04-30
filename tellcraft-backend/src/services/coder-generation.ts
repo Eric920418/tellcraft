@@ -2055,12 +2055,19 @@ export function generateServerActions(
         }
 
         // 一般 action：讀 cookie 注入 userId
+        // P1-3 監控：production 模式 + 非 WebContainer 環境下 cookie 拿不到 userId 是異常情況。
+        // 不直接 throw（會誤殺 public read action），但寫 server log 方便偵測 silent fail。
         return `export async function ${fnName}Action(input: ${inputType}) {
   let userId: string | undefined
+  let cookieAvailable = false
   try {
     const cookieStore = await cookies()
+    cookieAvailable = true
     userId = cookieStore.get('userId')?.value
   } catch { /* WebContainer WASM 環境無 AsyncLocalStorage，跳過 cookie 讀取 */ }
+  if (cookieAvailable && !userId && process.env.NODE_ENV === 'production') {
+    console.warn('[Tellcraft Auth] Server Action invoked without userId cookie: ${fnName}')
+  }
   return ${fnName}({ ...input, ...(userId ? { userId } : {}) })
 }`
       })
@@ -2126,6 +2133,20 @@ export function guessHttpMethodForSummary(summary: string): string {
   return 'POST' // 預設
 }
 
+/**
+ * P1-1: Sanitize API error helper — 注入到每個生成的 API route 開頭。
+ * production 模式下統一回 generic message，原始 error 進 server log；
+ * dev 模式保留 error.message 方便除錯。避免洩漏 Postgres schema、SQL syntax、
+ * connection string 等敏感資訊給終端用戶。
+ */
+const SAFE_API_ERROR_HELPER = `function safeApiError(error: unknown): string {
+  console.error('[API Error]', error)
+  if (process.env.NODE_ENV === 'production') {
+    return 'An error occurred. Please try again.'
+  }
+  return error instanceof Error ? error.message : 'Unknown error'
+}`
+
 export function generateApiRoutes(
   actions: ActionEntry[],
   actionsYml: string,
@@ -2181,6 +2202,8 @@ export function generateApiRoutes(
         content = `import { NextRequest, NextResponse } from 'next/server'
 import { ${fnName} } from '${importPath}'
 
+${SAFE_API_ERROR_HELPER}
+
 export async function GET(req: NextRequest) {
   try {
     const params = Object.fromEntries(req.nextUrl.searchParams.entries())
@@ -2188,14 +2211,15 @@ export async function GET(req: NextRequest) {
     const status = (result as any).__status || ${defaultStatus}
     return NextResponse.json(result, { status })
   } catch (error: unknown) {
-    const message = error instanceof Error ? error.message : 'Unknown error'
-    return NextResponse.json({ error: message }, { status: 400 })
+    return NextResponse.json({ error: safeApiError(error) }, { status: 400 })
   }
 }
 `
       } else {
         content = `import { NextRequest, NextResponse } from 'next/server'
 import { ${fnName} } from '${importPath}'
+
+${SAFE_API_ERROR_HELPER}
 
 export async function ${meta.method}(req: NextRequest) {
   try {
@@ -2204,8 +2228,7 @@ export async function ${meta.method}(req: NextRequest) {
     const status = (result as any).__status || ${defaultStatus}
     return NextResponse.json(result, { status })
   } catch (error: unknown) {
-    const message = error instanceof Error ? error.message : 'Unknown error'
-    return NextResponse.json({ error: message }, { status: 400 })
+    return NextResponse.json({ error: safeApiError(error) }, { status: 400 })
   }
 }
 `
@@ -2230,8 +2253,7 @@ export async function ${meta.method}(req: NextRequest) {
     const status = (result as any).__status || 200
     return NextResponse.json(result, { status })
   } catch (error: unknown) {
-    const message = error instanceof Error ? error.message : 'Unknown error'
-    return NextResponse.json({ error: message }, { status: 500 })
+    return NextResponse.json({ error: safeApiError(error) }, { status: 500 })
   }
 }`)
         } else if (method === 'DELETE') {
@@ -2243,8 +2265,7 @@ export async function ${meta.method}(req: NextRequest) {
     const status = (result as any).__status || 200
     return NextResponse.json(result, { status })
   } catch (error: unknown) {
-    const message = error instanceof Error ? error.message : 'Unknown error'
-    return NextResponse.json({ error: message }, { status: 400 })
+    return NextResponse.json({ error: safeApiError(error) }, { status: 400 })
   }
 }`)
         } else {
@@ -2256,8 +2277,7 @@ export async function ${meta.method}(req: NextRequest) {
     const status = (result as any).__status || ${defaultStatus}
     return NextResponse.json(result, { status })
   } catch (error: unknown) {
-    const message = error instanceof Error ? error.message : 'Unknown error'
-    return NextResponse.json({ error: message }, { status: 400 })
+    return NextResponse.json({ error: safeApiError(error) }, { status: 400 })
   }
 }`)
         }
@@ -2278,14 +2298,15 @@ export async function ${meta.method}(req: NextRequest) {
     const status = (result as any).__status || 200
     return NextResponse.json(result, { status })
   } catch (error: unknown) {
-    const message = error instanceof Error ? error.message : 'Unknown error'
-    return NextResponse.json({ error: message }, { status: 400 })
+    return NextResponse.json({ error: safeApiError(error) }, { status: 400 })
   }
 }`)
       }
 
       content = `import { NextRequest, NextResponse } from 'next/server'
 import { ${fnName} } from '${importPath}'
+
+${SAFE_API_ERROR_HELPER}
 
 ${methodHandlers.join('\n\n')}
 `

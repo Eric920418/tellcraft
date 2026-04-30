@@ -71,6 +71,7 @@ const envSchema = z.object({
   EXTENDED_THINKING_BUDGET: z.coerce.number().default(10000),    // Thinking budget tokens（最小 1024）
   ENABLE_UI_EVALUATOR: z.stringbool().default(false),            // UI Evaluator 黑盒 QA（PR1 Harness Engineering，staging 先開啟）
   UI_EVALUATOR_TIMEOUT_MS: z.coerce.number().default(45000),     // Evaluator 單輪預算，超時降級跳過
+  ENABLE_DESIGN_QUALITY_REPORT: z.stringbool().default(false),   // P3 結構化設計品質報告（dimension scoring + fixPlan，advisory），staging 先開
 
   // Unsplash 圖片庫開關（功能層）
   ENABLE_UNSPLASH_LIBRARY: z.stringbool().default(true),            // kill switch：緊急回退到 picsum 時設 false

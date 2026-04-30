@@ -38,6 +38,21 @@ function isAllowedCallbackHost(host: string): boolean {
   return ALLOWED_CALLBACK_HOSTS.some(allowed => host === allowed)
 }
 
+/**
+ * P2-4：驗證 returnTo 不會變成 open redirect。
+ *
+ * 只接受同站相對路徑：以 / 開頭、不含 schema (://)、不含 protocol-relative (//)。
+ * 外部 URL、JS 偽協議、不合法輸入一律 fallback 到 '/'。
+ */
+function sanitizeReturnTo(input: unknown): string {
+  if (typeof input !== 'string' || !input) return '/'
+  if (!input.startsWith('/')) return '/'
+  if (input.startsWith('//')) return '/' // protocol-relative URL
+  if (input.includes('://')) return '/'
+  if (/^javascript:/i.test(input)) return '/' // 雖然 / 開頭已擋住，雙保險
+  return input
+}
+
 // OAuth State 簽名（防 CSRF）
 function signState(data: Record<string, unknown>): string {
   const payload = Buffer.from(JSON.stringify(data)).toString('base64')
@@ -365,7 +380,7 @@ router.get('/google', (req, res) => {
 
   const scope = encodeURIComponent('openid email profile')
   const state = signState({
-    returnTo: req.query.returnTo || '/',
+    returnTo: sanitizeReturnTo(req.query.returnTo),
     callbackHost: callbackHost || null,
     linkUserId: req.query.linkUserId || null,
   })
@@ -402,7 +417,7 @@ router.get('/google/callback', async (req, res) => {
       if (!stateData) {
         return res.redirect(`${APP_URL}/auth/login?error=invalid_state`)
       }
-      returnTo = (stateData.returnTo as string) || '/'
+      returnTo = sanitizeReturnTo(stateData.returnTo)
       linkUserId = (stateData.linkUserId as string) || null
     } else {
       return res.redirect(`${APP_URL}/auth/login?error=missing_state`)
@@ -462,7 +477,7 @@ router.post('/google/exchange', async (req, res) => {
       if (!stateData) {
         return res.status(400).json({ error: 'invalid_state' })
       }
-      returnTo = (stateData.returnTo as string) || '/'
+      returnTo = sanitizeReturnTo(stateData.returnTo)
       linkUserId = (stateData.linkUserId as string) || null
     }
 
@@ -524,7 +539,7 @@ router.get('/line', (req, res) => {
 
   const scope = encodeURIComponent('profile openid email')
   const state = signState({
-    returnTo: req.query.returnTo || '/',
+    returnTo: sanitizeReturnTo(req.query.returnTo),
     callbackHost: callbackHost || null,
     linkUserId: req.query.linkUserId || null,
   })
@@ -560,7 +575,7 @@ router.get('/line/callback', async (req, res) => {
       if (!stateData) {
         return res.redirect(`${APP_URL}/auth/login?error=invalid_state`)
       }
-      returnTo = (stateData.returnTo as string) || '/'
+      returnTo = sanitizeReturnTo(stateData.returnTo)
       linkUserId = (stateData.linkUserId as string) || null
     } else {
       return res.redirect(`${APP_URL}/auth/login?error=missing_state`)
@@ -620,7 +635,7 @@ router.post('/line/exchange', async (req, res) => {
       if (!stateData) {
         return res.status(400).json({ error: 'invalid_state' })
       }
-      returnTo = (stateData.returnTo as string) || '/'
+      returnTo = sanitizeReturnTo(stateData.returnTo)
       linkUserId = (stateData.linkUserId as string) || null
     }
 

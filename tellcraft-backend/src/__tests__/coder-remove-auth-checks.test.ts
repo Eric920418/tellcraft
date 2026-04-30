@@ -112,3 +112,37 @@ describe('removeAuthChecks — 不應誤傷的合法 throw', () => {
     expect(removeAuthChecks(input)).toBe(input)
   })
 })
+
+describe('removeAuthChecks — P1-3 行為固化（防回歸）', () => {
+  it('連續多個 auth throw 全部移除', () => {
+    const input = `if (!input.userId) throw new Error('unauthorized')
+if (!input.token) throw new Error('token expired')
+if (!input.session) throw new Error('session invalid')
+const x = 1`
+    const out = removeAuthChecks(input)
+    expect(out).not.toContain('unauthorized')
+    expect(out).not.toContain('token expired')
+    expect(out).not.toContain('session invalid')
+    expect(out).toContain('const x = 1')
+  })
+
+  it('業務邏輯與 auth 混合：只移除 auth，保留業務', () => {
+    const input = `export async function transfer(input) {
+  if (!input.userId) throw new Error('not logged in')
+  if (input.amount <= 0) throw new Error('amount must be positive')
+  if (input.amount > 10000) throw new Error('exceeds daily limit')
+  return await sql\`UPDATE accounts SET balance = balance - \${input.amount}\`
+}`
+    const out = removeAuthChecks(input)
+    expect(out).not.toContain('not logged in')
+    expect(out).toContain('amount must be positive')
+    expect(out).toContain('exceeds daily limit')
+    expect(out).toContain('UPDATE accounts')
+  })
+
+  it('return 形式（非 throw）的 auth 檢查也移除', () => {
+    const input = `if (!input.userId) return { __status: 401, error: 'unauthorized' }`
+    const out = removeAuthChecks(input)
+    expect(out.trim()).toBe('')
+  })
+})

@@ -87,7 +87,8 @@ async function loadNeonConnection(): Promise<string> {
   const row = result.rows[0]
   if (!row?.neon_connection_string) throw new Error('找不到 Neon 連線字串')
 
-  console.log(`  ✅ 連線字串: ${row.neon_connection_string.substring(0, 50)}...`)
+  // P2-2：不要印出 connection string 任何片段（即使是前 50 字元也含 host/user/部分 password）
+  console.log('  ✅ 連線字串已載入')
   return row.neon_connection_string
 }
 

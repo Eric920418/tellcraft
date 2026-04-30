@@ -12,6 +12,9 @@ import {
   recordTelemetry,
   type TelemetryTrackingContext,
 } from './skill-telemetry'
+import { auditCssConsistency } from './css-consistency-audit'
+import { resolveColor, extractBgAndText, isLargeText } from './tailwind-color-resolver'
+import { hex as wcagHex } from 'wcag-contrast'
 
 const logger = createLogger('quality-gate')
 
@@ -537,6 +540,73 @@ function checkColorContrast(code: GeneratedCode, moodId?: string): QualityIssue[
     ...code.components.map(f => ({ path: f.path, content: f.content })),
   ]
 
+  // ========================================================
+  // Layer 0：真實 WCAG luminance ratio 計算（P1 升級）
+  // 找 element 上同時存在的 bg-* + text-* class 配對，算 ratio。
+  // - ratio < 3.0 → critical（即使 large text 也不過）
+  // - ratio < 4.5 且非 large text → warning（normal text 不過 AA）
+  // - large text / UI 閾值放寬到 3.0
+  // 不解析 parent inherited bg（首版限制）
+  // ========================================================
+  const classNameMatcher = /className\s*=\s*(["'])([^"']+?)\1/g
+  for (const { path, content } of allFiles) {
+    const lines = content.split('\n')
+    let perFileFlagged = 0
+    const PER_FILE_CAP = 3
+    for (let i = 0; i < lines.length && perFileFlagged < PER_FILE_CAP; i++) {
+      const matches = [...lines[i].matchAll(classNameMatcher)]
+      for (const m of matches) {
+        const className = m[2]
+        const { bg, text } = extractBgAndText(className)
+        if (bg.length === 0 || text.length === 0) continue
+
+        const bgHex = resolveColor(bg[0])
+        const fgHex = resolveColor(text[0])
+        if (!bgHex || !fgHex) continue
+        if (bgHex === 'transparent' || fgHex === 'transparent') continue
+
+        let ratio: number
+        try {
+          ratio = wcagHex(bgHex, fgHex)
+        } catch {
+          continue
+        }
+
+        const large = isLargeText(className)
+        const failsCritical = ratio < 3.0
+        const failsAA = !large && ratio < 4.5
+
+        if (failsCritical) {
+          issues.push({
+            id: `contrast-${++issueCounter}`,
+            category: 'a11y',
+            severity: 'critical',
+            rule: 'contrast-ratio',
+            file: path,
+            line: i + 1,
+            message: `對比度僅 ${ratio.toFixed(2)}:1（${bg[0]} + ${text[0]}），低於 WCAG 最低門檻 3:1`,
+            suggestion: `提高對比度到 ≥ 4.5:1（normal text）或 ≥ 3:1（large/UI）。建議用更深 bg + 更亮 text，例如 bg-slate-900 + text-white`,
+          })
+          perFileFlagged++
+          break
+        } else if (failsAA) {
+          issues.push({
+            id: `contrast-${++issueCounter}`,
+            category: 'a11y',
+            severity: 'warning',
+            rule: 'contrast-ratio-aa',
+            file: path,
+            line: i + 1,
+            message: `對比度 ${ratio.toFixed(2)}:1（${bg[0]} + ${text[0]}），未達 WCAG AA normal text 4.5:1（可能誤報若實際是 large text）`,
+            suggestion: `若該文字是 body/UI label，提升對比度到 4.5:1；若是 ≥18px heading 可放寬到 3:1`,
+          })
+          perFileFlagged++
+          break
+        }
+      }
+    }
+  }
+
   // Layer A：通用亮底白字偵測（所有 mood 都跑）
   const lightBgPatterns = [
     'bg-white', 'bg-muted', 'bg-surface-1', 'bg-surface-2', 'bg-surface-3',
@@ -633,9 +703,11 @@ export function runQualityGate(code: GeneratedCode, designTier?: DesignTier, moo
   const cqIssues = checkCodeQuality(code, designTier)
   const contrastIssues = checkColorContrast(code, moodId)
   const idIssues = checkIdUniqueness(code)
+  // P0: CSS Token 一致性（rule prefix 'consistency-*'，category=code_quality）
+  const consistencyIssues = auditCssConsistency(code).issues
 
   const allA11yIssues = [...a11yIssues, ...contrastIssues]
-  const allCqIssues = [...cqIssues, ...idIssues]
+  const allCqIssues = [...cqIssues, ...idIssues, ...consistencyIssues]
   const allIssues = [...allA11yIssues, ...perfIssues, ...allCqIssues]
 
   const critical = allIssues.filter(i => i.severity === 'critical').length

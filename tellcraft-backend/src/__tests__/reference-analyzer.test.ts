@@ -3,11 +3,72 @@ import {
   hexDistance,
   postProcessExtraction,
   formatStructuredDataForPrompt,
+  isSafeUrl,
   type ReferenceAnalysis,
   type ExtractedColors,
   type ExtractedTypography,
   type ExtractedLayout,
 } from '../services/reference-analyzer'
+
+// ── isSafeUrl（SSRF 防護）──
+
+describe('isSafeUrl SSRF 防護', () => {
+  describe('應拒絕（私有 / 內網 / 雲端 metadata）', () => {
+    it.each([
+      ['localhost', 'http://localhost/'],
+      ['localhost with port', 'http://localhost:3000/'],
+      ['127.0.0.1 loopback', 'http://127.0.0.1/'],
+      ['127.x loopback', 'http://127.1.2.3/'],
+      ['0.0.0.0', 'http://0.0.0.0/'],
+      ['10.x 私有', 'http://10.0.0.1/'],
+      ['172.16-31 私有', 'http://172.20.0.1/'],
+      ['192.168 私有', 'http://192.168.1.1/'],
+      ['169.254 link-local', 'http://169.254.1.1/'],
+      ['AWS metadata 169.254.169.254', 'http://169.254.169.254/latest/meta-data/'],
+      ['GCP metadata', 'http://169.254.169.254/computeMetadata/v1/'],
+      ['CGNAT 100.64', 'http://100.64.0.1/'],
+      ['CGNAT 100.127', 'http://100.127.255.254/'],
+      ['IPv6 loopback ::1', 'http://[::1]/'],
+      ['IPv6 unspecified ::', 'http://[::]/'],
+      ['IPv6 ULA fc00::', 'http://[fc00::1]/'],
+      ['IPv6 ULA fd12::', 'http://[fd12:3456::1]/'],
+      ['IPv6 link-local fe80::', 'http://[fe80::1]/'],
+      ['IPv4-mapped IPv6 loopback', 'http://[::ffff:127.0.0.1]/'],
+      ['IPv4-mapped IPv6 metadata', 'http://[::ffff:169.254.169.254]/'],
+      ['IPv4-mapped IPv6 RFC1918', 'http://[::ffff:10.0.0.1]/'],
+      ['.local 域名', 'http://printer.local/'],
+      ['.internal 域名', 'http://my-service.internal/api'],
+      ['ftp protocol', 'ftp://example.com/'],
+      ['file protocol', 'file:///etc/passwd'],
+      ['javascript protocol', 'javascript:alert(1)'],
+    ])('拒絕 %s', (_label, url) => {
+      expect(isSafeUrl(url)).toBe(false)
+    })
+  })
+
+  describe('應通過（合法外網）', () => {
+    it.each([
+      ['標準 https', 'https://example.com/'],
+      ['帶 port', 'https://example.com:8443/path'],
+      ['帶 query', 'https://stripe.com/?ref=test'],
+      ['公網 IPv4', 'https://1.1.1.1/'],
+      ['公網 IPv4 8.8.8.8', 'https://8.8.8.8/'],
+      ['公網 IPv6', 'https://[2606:4700::1]/'],
+      ['子域名', 'https://api.tellcraft.com/'],
+    ])('通過 %s', (_label, url) => {
+      expect(isSafeUrl(url)).toBe(true)
+    })
+  })
+
+  describe('格式錯誤', () => {
+    it('空字串拒絕', () => {
+      expect(isSafeUrl('')).toBe(false)
+    })
+    it('非 URL 拒絕', () => {
+      expect(isSafeUrl('not-a-url')).toBe(false)
+    })
+  })
+})
 
 // ── hexDistance ──
 

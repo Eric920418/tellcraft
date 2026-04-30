@@ -19,6 +19,7 @@ import { translateBddToUISpec, buildUISpecSummary } from '../../services/bdd-to-
 import { runQualityGate, autoFixCriticalIssues, autoFixCriticalIssuesRuleBased } from '../../services/quality-gate'
 import { evaluateUi, type UiEvaluationIssue } from '../../services/ui-evaluator'
 import type { QualityIssue } from '../../services/quality-gate'
+import { generateDesignQualityReport, logDesignQualityReport } from '../../services/design-quality-report'
 import { getEnv } from '../../lib/env'
 import { getBddSession, updateBddSession } from '../../services/bdd-session'
 import { analyzeReference, analyzeUploadedImage } from '../../services/reference-analyzer'
@@ -1672,6 +1673,16 @@ export async function executeFullCodePipeline(
     report.summary.autoFixed = totalAutoFixed
   }
 
+  // P3: 設計品質報告（feature flag，advisory only，不阻塞 pipeline）
+  try {
+    if (getEnv().ENABLE_DESIGN_QUALITY_REPORT) {
+      const dqReport = generateDesignQualityReport(report)
+      logDesignQualityReport(dqReport, { conversationId, phase: 'uiux_quality_gate' })
+    }
+  } catch (err) {
+    // fail-open：報告生成失敗絕不阻塞主流程
+  }
+
   // ===== 保存最終結果 =====
   state.uiuxGeneratedCode = currentCode
   state.uiuxQualityReport = report
@@ -2218,6 +2229,16 @@ export async function executeQualityGate(
       totalAutoFixed += evalIssues.length
     }
     report.summary.autoFixed = totalAutoFixed
+  }
+
+  // P3: 設計品質報告（feature flag，advisory only，不阻塞 pipeline）
+  try {
+    if (getEnv().ENABLE_DESIGN_QUALITY_REPORT) {
+      const dqReport = generateDesignQualityReport(report)
+      logDesignQualityReport(dqReport, { conversationId, phase: 'uiux_quality_gate_redo' })
+    }
+  } catch (err) {
+    // fail-open
   }
 
   // 更新代碼和報告到 state

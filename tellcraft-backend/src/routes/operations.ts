@@ -69,6 +69,7 @@ router.get('/generations/:projectId/latest', requireAuth, async (req: Request, r
   try {
     const { projectId } = req.params
 
+    // P2-1：驗 project ownership 防 IDOR
     const generation = await queryOne<{
       id: string
       status: string
@@ -76,11 +77,12 @@ router.get('/generations/:projectId/latest', requireAuth, async (req: Request, r
       generated_code_url: string | null
       created_at: string
     }>(
-      `SELECT id, status, attempt_count, generated_code_url, created_at
-       FROM generations
-       WHERE project_id = $1
-       ORDER BY created_at DESC LIMIT 1`,
-      [projectId]
+      `SELECT g.id, g.status, g.attempt_count, g.generated_code_url, g.created_at
+       FROM generations g
+       JOIN projects p ON g.project_id = p.id
+       WHERE g.project_id = $1 AND p.user_id = $2
+       ORDER BY g.created_at DESC LIMIT 1`,
+      [projectId, req.user!.id]
     )
 
     res.json({

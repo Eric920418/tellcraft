@@ -244,7 +244,7 @@ Supabase PostgREST 只能做 CRUD + RLS，**搞不定**：
 | `bdd-spec` | 需求釐清 + BDD 規格產出（ES → Discovery → Formulation → Actions → ISA） | Sonnet | ✅ 完成 |
 | `uiux` | 前端介面設計（Design Discovery → Design Lab → Implementation） | Sonnet | ✅ 完成 |
 | `fast-build` | 一句話快速建站，Haiku 概念生成 + Tier 智能修正 + Sonnet 三階段生成 | Haiku ×1 + Sonnet ×3 | ✅ 完成 |
-| `quality-gate` | UIUX/Fast Build/Clone 完成後自動觸發，5 類靜態檢查（A11y+對比度+效能+代碼品質+SVG ID）+ Design Tier 合規 + Rule-based/LLM 雙層自動修復 | Haiku | ✅ 完成 |
+| `quality-gate` | UIUX/Fast Build/Clone 完成後自動觸發，5 類靜態檢查（A11y+對比度+效能+代碼品質+SVG ID）+ Design Tier 合規 + Rule-based/LLM 雙層自動修復；**P0~P3 設計品質四維度**：CSS Token 一致性統計（`css-consistency-audit.ts`）、真實 WCAG luminance 對比度（`tailwind-color-resolver.ts` + wcag-contrast）、UI Evaluator 任務模擬（`ui-evaluator.ts` deriveTasksFromBdd + runTask）、結構化品質報告（`design-quality-report.ts` dimension scoring + fixPlan，feature flag `ENABLE_DESIGN_QUALITY_REPORT` 預設關） | Haiku | ✅ 完成 |
 | `deployer` | 代碼 → sanitize → 本地 build 驗證 → Vercel 部署 → 回滾 | Haiku（修復） | ✅ 完成 |
 | `iteration` | 迭代修改 + 撤銷上一步 + 版本回滾 | Sonnet | ✅ 完成 |
 | `db-provision` | BDD 完成後自動建 Neon DB + 套用 Schema（同步 < 10s） | — | ✅ 完成 |
@@ -594,7 +594,7 @@ Server Action 錯誤訊息 + 工具模組中文字串國際化（+117 keys，2 n
 | **BDD 規格** | 5 階段釐清、Event Storming、提案模式、草稿批量、變更管理、規格回滾、Scenario Outline、OpenAPI 產出 |
 | **UIUX 設計** | 雙軌 Discovery、Design Tier、5 變體、三階段生成、串流即時預覽、BDD→UI 翻譯（含 actionsYml 欄位精確注入）、Variant 概念注入 |
 | **快速建站** | 26 種產品類型、22 套產業配色、Haiku 概念生成（設計靈魂）、Tier 智能修正、vague 攔截引導、失敗重試、進度預估、手機全屏預覽、App/Website 佈局模式、模板風格整合、智能模板匹配 |
-| **品質** | Quality Gate 5 類靜態檢查（A11y per-element + 色彩對比度 + 效能動畫時長 + 代碼品質 + SVG ID 碰撞）、Design Tier 合規（functional 禁漸層/glow/spring）、Rule-based 確定性修復（5 規則）+ Haiku LLM fallback、RWD 響應式安全網 |
+| **品質** | Quality Gate 5 類靜態檢查（A11y per-element + 色彩對比度 + 效能動畫時長 + 代碼品質 + SVG ID 碰撞）、Design Tier 合規（functional 禁漸層/glow/spring）、Rule-based 確定性修復（5 規則）+ Haiku LLM fallback、RWD 響應式安全網；**設計品質四維度（P0~P3）**：CSS Token 一致性統計（灰階/圓角/字級/shadow per-file + global 閾值）、真實 WCAG luminance 對比度（normal 4.5:1 / large 3:1 區分，arbitrary value 支援）、UI Evaluator 任務模擬（從 BDD 推導 user-facing tasks 用 puppeteer 跑 find_text/click_text）、結構化品質報告（4 維度評分 + fixPlan 加權平均，accessibility 權重 35%） |
 | **部署** | sanitize 8 類預檢（含 'use server' 保護 + 未知依賴警告 + root layout html/body 自動補全）、本地 build 驗證（3 輪 LLM 修復）、Vercel 部署、版本回滾 |
 | **迭代** | 對話內迭代修改、撤銷上一步、部署歷史回滾、迭代歷史追蹤、重複抱怨偵測+策略升級、視覺診斷指引 |
 | **預覽** | WebContainers 完整 Next.js 預覽（Server Actions + DB 連線）、HMR 增量更新、裝置切換、編輯模式、圖片上傳、Pre-boot + Pre-install 載入優化、生成期間禁止渲染（UIUX/Coder 生成時只顯示等待動畫）、路由衝突去重（strip route groups 防 parallel pages 錯誤） |

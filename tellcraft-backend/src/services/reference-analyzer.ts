@@ -108,16 +108,80 @@ export function extractFirstUrl(input: string): string | null {
   return match ? match[0] : null
 }
 
+/**
+ * 判斷 IPv4 字串是否屬於私有 / 保留段。
+ *
+ * 不直接接受 hostname — 呼叫端需確認傳入的是 IPv4 字串（純數字 + 點）。
+ * 涵蓋：
+ *  - 0.0.0.0/8（unspecified）
+ *  - 10.0.0.0/8、172.16.0.0/12、192.168.0.0/16（RFC1918 私有）
+ *  - 127.0.0.0/8（loopback）
+ *  - 169.254.0.0/16（link-local，含 AWS/GCP/Azure metadata 169.254.169.254）
+ *  - 100.64.0.0/10（CGNAT）
+ */
+function isPrivateIPv4(ip: string): boolean {
+  const parts = ip.split('.').map(n => parseInt(n, 10))
+  if (parts.length !== 4 || parts.some(n => Number.isNaN(n) || n < 0 || n > 255)) return false
+  const [a, b] = parts
+  if (a === 0) return true
+  if (a === 10) return true
+  if (a === 127) return true
+  if (a === 169 && b === 254) return true // link-local + cloud metadata
+  if (a === 172 && b >= 16 && b <= 31) return true
+  if (a === 192 && b === 168) return true
+  if (a === 100 && b >= 64 && b <= 127) return true // CGNAT
+  return false
+}
+
+/**
+ * 判斷 IPv6 字串是否屬於私有 / loopback / link-local / IPv4-mapped 私有段。
+ */
+function isPrivateIPv6(host: string): boolean {
+  // 移除 [] 包裝
+  const ip = host.replace(/^\[/, '').replace(/\]$/, '').toLowerCase()
+
+  // ::1（loopback）、::（unspecified）
+  if (ip === '::1' || ip === '::') return true
+
+  // ::ffff:* — IPv4-mapped IPv6 一律拒絕。
+  // Node URL parser 會把 ::ffff:127.0.0.1 規範化為 hex 形式 ::ffff:7f00:1，
+  // 解析 hex 還原 IPv4 太繁瑣且容易漏；合法外網不會用 IPv4-mapped 形式存取，
+  // 全擋是最安全做法。
+  if (ip.startsWith('::ffff:')) return true
+
+  // fc00::/7 (ULA Unique Local Address)：fc** 或 fd**
+  if (/^fc[0-9a-f]{2}:/i.test(ip) || /^fd[0-9a-f]{2}:/i.test(ip)) return true
+
+  // fe80::/10 (link-local)：fe8x / fe9x / feax / febx
+  if (/^fe[89ab][0-9a-f]:/i.test(ip)) return true
+
+  return false
+}
+
 export function isSafeUrl(url: string): boolean {
   try {
     const parsed = new URL(url)
     if (!['http:', 'https:'].includes(parsed.protocol)) return false
+
+    // hostname 已被 URL parser 處理（含 IDN 規範化 + 小寫 + IPv6 帶 []）
     const host = parsed.hostname.toLowerCase()
-    if (host === 'localhost' || host === '127.0.0.1' || host === '0.0.0.0') return false
-    if (host.startsWith('192.168.') || host.startsWith('10.')) return false
-    if (/^172\.(1[6-9]|2\d|3[01])\./.test(host)) return false
+
+    // 明確主機名稱黑名單
+    if (host === 'localhost' || host === '0.0.0.0') return false
     if (host.endsWith('.local') || host.endsWith('.internal')) return false
-    if (host === '[::1]') return false
+
+    // IPv4 純數字 hostname
+    if (/^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(host)) {
+      if (isPrivateIPv4(host)) return false
+      return true
+    }
+
+    // IPv6 hostname — URL parser 會給出帶 [] 或不帶 [] 的形式
+    if (host.includes(':') || host.startsWith('[')) {
+      if (isPrivateIPv6(host)) return false
+      return true
+    }
+
     return true
   } catch {
     return false

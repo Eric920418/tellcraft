@@ -7,12 +7,35 @@ import * as db from '../db/client'
 import { toVercelSlug, deleteVercelProject } from '../services/deployer'
 import { deleteNeonProject } from '../services/neon-service'
 import { repairProjectFiles, applyFixersToContent } from '../services/code-repair'
+import { buildDownloadBundle } from '../services/download-bundler'
 import { getProjectLimit } from '../config/plans'
 import { createLogger } from '../lib/logger'
 
 const logger = createLogger('project')
 
 const router: RouterType = Router()
+
+/**
+ * 把 download bundler 產出的檔案陣列打包成 ZIP buffer。
+ * 共用於三個 download-code route。
+ */
+async function zipBundleFiles(
+  files: Array<{ path: string; content: string }>
+): Promise<Buffer> {
+  const archive = archiver('zip', { zlib: { level: 6 } })
+  const chunks: Buffer[] = []
+  await new Promise<void>((resolve, reject) => {
+    archive.on('data', (chunk: Buffer) => chunks.push(chunk))
+    archive.on('end', resolve)
+    archive.on('error', reject)
+    archive.on('warning', (warn) => logger.warn({ warn }, 'archiver warning'))
+    for (const f of files) {
+      archive.append(Buffer.from(f.content), { name: f.path })
+    }
+    archive.finalize().catch(reject)
+  })
+  return Buffer.concat(chunks)
+}
 
 // ============================================================
 // 專案 API
@@ -1070,33 +1093,12 @@ router.get('/:id/download-code', requireAuth, requirePlan('creator', 'pro', 'bus
       return res.status(404).json({ error: 'Project not found' })
     }
 
-    const files = await db.getProjectFiles(id)
-    if (files.length === 0) {
-      return res.status(400).json({ error: 'No files found for this project' })
-    }
+    const { files } = await buildDownloadBundle(id)
 
-    // 在記憶體組裝 ZIP，再一次送出（避免 pipe + chunked 的 streaming 複雜性）
-    // ASCII-only fallback + RFC 5987 UTF-8 filename（支援中文專案名稱）
     const asciiName = project.name.replace(/[^a-z0-9-]/gi, '-').replace(/-+/g, '-').replace(/^-|-$/g, '').slice(0, 50) || 'project'
     const encodedName = encodeURIComponent(`${project.name.slice(0, 50)}-code.zip`)
 
-    const archive = archiver('zip', { zlib: { level: 6 } })
-    const chunks: Buffer[] = []
-
-    await new Promise<void>((resolve, reject) => {
-      archive.on('data', (chunk: Buffer) => chunks.push(chunk))
-      archive.on('end', resolve)
-      archive.on('error', reject)
-      archive.on('warning', (warn) => logger.warn({ warn }, 'archiver warning'))
-
-      for (const file of files) {
-        archive.append(Buffer.from(file.content), { name: file.file_path })
-      }
-
-      archive.finalize().catch(reject)
-    })
-
-    const zipBuffer = Buffer.concat(chunks)
+    const zipBuffer = await zipBundleFiles(files)
     res.setHeader('Content-Type', 'application/zip')
     res.setHeader('Content-Disposition', `attachment; filename="${asciiName}-code.zip"; filename*=UTF-8''${encodedName}`)
     res.setHeader('Content-Length', String(zipBuffer.length))
@@ -1136,31 +1138,17 @@ router.get('/:id/versions/:versionNumber/download-code', requireAuth, requirePla
       return res.status(404).json({ error: '此版本無代碼快照' })
     }
 
-    const files = generation.code_snapshot as Array<{ filePath: string; content: string }>
-    if (!Array.isArray(files) || files.length === 0) {
+    const snapshot = generation.code_snapshot as Array<{ filePath: string; content: string }>
+    if (!Array.isArray(snapshot) || snapshot.length === 0) {
       return res.status(400).json({ error: 'No files found in snapshot' })
     }
+
+    const { files } = await buildDownloadBundle(id, { snapshot })
 
     const asciiName = project.name.replace(/[^a-z0-9-]/gi, '-').replace(/-+/g, '-').replace(/^-|-$/g, '').slice(0, 50) || 'project'
     const encodedName = encodeURIComponent(`${project.name.slice(0, 50)}-v${versionNumber}-code.zip`)
 
-    const archive = archiver('zip', { zlib: { level: 6 } })
-    const chunks: Buffer[] = []
-
-    await new Promise<void>((resolve, reject) => {
-      archive.on('data', (chunk: Buffer) => chunks.push(chunk))
-      archive.on('end', resolve)
-      archive.on('error', reject)
-      archive.on('warning', (warn) => logger.warn({ warn }, 'archiver warning'))
-
-      for (const file of files) {
-        archive.append(Buffer.from(file.content), { name: file.filePath })
-      }
-
-      archive.finalize().catch(reject)
-    })
-
-    const zipBuffer = Buffer.concat(chunks)
+    const zipBuffer = await zipBundleFiles(files)
     res.setHeader('Content-Type', 'application/zip')
     res.setHeader('Content-Disposition', `attachment; filename="${asciiName}-v${versionNumber}-code.zip"; filename*=UTF-8''${encodedName}`)
     res.setHeader('Content-Length', String(zipBuffer.length))
@@ -1200,34 +1188,19 @@ router.get('/:id/deployments/:deploymentId/download-code', requireAuth, requireP
       return res.status(404).json({ error: '此部署無代碼快照' })
     }
 
-    const files = deploy.code_snapshot as Array<{ filePath: string; content: string }>
-    if (!Array.isArray(files) || files.length === 0) {
+    const snapshot = deploy.code_snapshot as Array<{ filePath: string; content: string }>
+    if (!Array.isArray(snapshot) || snapshot.length === 0) {
       return res.status(400).json({ error: 'No files found in snapshot' })
     }
 
-    // 用部署 URL 的前綴作為檔名（更有辨識度）
+    const { files } = await buildDownloadBundle(id, { snapshot })
+
     const urlSlug = deploy.url
       ? deploy.url.replace('https://', '').split('.')[0].slice(0, 30)
       : 'deploy'
     const asciiName = project.name.replace(/[^a-z0-9-]/gi, '-').replace(/-+/g, '-').replace(/^-|-$/g, '').slice(0, 30) || 'project'
 
-    const archive = archiver('zip', { zlib: { level: 6 } })
-    const chunks: Buffer[] = []
-
-    await new Promise<void>((resolve, reject) => {
-      archive.on('data', (chunk: Buffer) => chunks.push(chunk))
-      archive.on('end', resolve)
-      archive.on('error', reject)
-      archive.on('warning', (warn) => logger.warn({ warn }, 'archiver warning'))
-
-      for (const file of files) {
-        archive.append(Buffer.from(file.content), { name: file.filePath })
-      }
-
-      archive.finalize().catch(reject)
-    })
-
-    const zipBuffer = Buffer.concat(chunks)
+    const zipBuffer = await zipBundleFiles(files)
     const fileName = `${asciiName}-${urlSlug}-code.zip`
     res.setHeader('Content-Type', 'application/zip')
     res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`)

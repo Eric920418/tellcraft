@@ -86,6 +86,66 @@ function rowToSession(row: any): BddSession {
 }
 
 // ============================================================
+// Ownership helpers（P0-3 修復：所有讀寫必須驗 user_id）
+//
+// bdd_sessions → projects.user_id 是唯一可信的 ownership 來源。
+// 若 row 不存在或不屬於當前 user，一律回 404（不要回 403，避免 enumerate
+// 導致洩漏「session 是否存在」這個訊號）。
+// ============================================================
+
+async function getOwnedBddSession(sessionId: string, userId: string): Promise<any | null> {
+  return queryOne<any>(
+    `SELECT bs.*
+     FROM bdd_sessions bs
+     JOIN projects p ON bs.project_id = p.id
+     WHERE bs.id = $1 AND p.user_id = $2`,
+    [sessionId, userId]
+  )
+}
+
+async function getOwnedBddSessionByConversation(conversationId: string, userId: string): Promise<any | null> {
+  return queryOne<any>(
+    `SELECT bs.*
+     FROM bdd_sessions bs
+     JOIN conversations c ON bs.conversation_id = c.id
+     JOIN projects p ON c.project_id = p.id
+     WHERE bs.conversation_id = $1 AND p.user_id = $2
+     ORDER BY bs.created_at DESC LIMIT 1`,
+    [conversationId, userId]
+  )
+}
+
+async function getOwnedBddSessionByProject(projectId: string, userId: string): Promise<any | null> {
+  return queryOne<any>(
+    `SELECT bs.*
+     FROM bdd_sessions bs
+     JOIN projects p ON bs.project_id = p.id
+     WHERE bs.project_id = $1 AND p.user_id = $2
+     ORDER BY bs.created_at DESC LIMIT 1`,
+    [projectId, userId]
+  )
+}
+
+async function assertConversationOwnership(conversationId: string, userId: string): Promise<boolean> {
+  const row = await queryOne<{ id: string }>(
+    `SELECT c.id
+     FROM conversations c
+     JOIN projects p ON c.project_id = p.id
+     WHERE c.id = $1 AND p.user_id = $2`,
+    [conversationId, userId]
+  )
+  return !!row
+}
+
+async function assertProjectOwnership(projectId: string, userId: string): Promise<boolean> {
+  const row = await queryOne<{ id: string }>(
+    `SELECT id FROM projects WHERE id = $1 AND user_id = $2`,
+    [projectId, userId]
+  )
+  return !!row
+}
+
+// ============================================================
 // API 端點
 // ============================================================
 
@@ -95,6 +155,7 @@ function rowToSession(row: any): BddSession {
  */
 router.post('/session', requireAuth, validateBody(createBddSessionSchema), async (req: Request, res: Response) => {
   try {
+    const userId = req.user!.id
     const {
       conversationId,
       projectId,
@@ -103,14 +164,24 @@ router.post('/session', requireAuth, validateBody(createBddSessionSchema), async
       projectContext,
     } = req.body
 
-    // 查找之前的 session 來繼承已解決的項目
+    // P0-3：建立 session 前驗 conversation 與 project 都屬於當前 user
+    if (!await assertConversationOwnership(conversationId, userId)) {
+      return res.status(404).json({ error: 'Session 不存在' })
+    }
+    if (projectId && !await assertProjectOwnership(projectId, userId)) {
+      return res.status(404).json({ error: 'Session 不存在' })
+    }
+
+    // 查找之前的 session 來繼承已解決的項目（同樣經 ownership 驗證）
     let inheritedResolvedItems: ClarifyItem[] = []
     if (projectId) {
       const prevSession = await queryOne<{ resolved_items: ClarifyItem[] }>(
-        `SELECT resolved_items FROM bdd_sessions
-         WHERE project_id = $1
-         ORDER BY created_at DESC LIMIT 1`,
-        [projectId]
+        `SELECT bs.resolved_items
+         FROM bdd_sessions bs
+         JOIN projects p ON bs.project_id = p.id
+         WHERE bs.project_id = $1 AND p.user_id = $2
+         ORDER BY bs.created_at DESC LIMIT 1`,
+        [projectId, userId]
       )
       if (prevSession?.resolved_items) {
         inheritedResolvedItems = prevSession.resolved_items
@@ -151,10 +222,7 @@ router.get('/session/:id', requireAuth, async (req: Request, res: Response) => {
   try {
     const { id } = req.params
 
-    const row = await queryOne<any>(
-      'SELECT * FROM bdd_sessions WHERE id = $1',
-      [id]
-    )
+    const row = await getOwnedBddSession(id, req.user!.id)
 
     if (!row) {
       return res.status(404).json({ error: 'Session 不存在' })
@@ -175,12 +243,7 @@ router.get('/session/by-conversation/:conversationId', requireAuth, async (req: 
   try {
     const { conversationId } = req.params
 
-    const row = await queryOne<any>(
-      `SELECT * FROM bdd_sessions
-       WHERE conversation_id = $1
-       ORDER BY created_at DESC LIMIT 1`,
-      [conversationId]
-    )
+    const row = await getOwnedBddSessionByConversation(conversationId, req.user!.id)
 
     if (!row) {
       return res.json({ session: null })
@@ -201,12 +264,7 @@ router.get('/session/by-project/:projectId', requireAuth, async (req: Request, r
   try {
     const { projectId } = req.params
 
-    const row = await queryOne<any>(
-      `SELECT * FROM bdd_sessions
-       WHERE project_id = $1
-       ORDER BY created_at DESC LIMIT 1`,
-      [projectId]
-    )
+    const row = await getOwnedBddSessionByProject(projectId, req.user!.id)
 
     if (!row) {
       return res.json({ session: null })
@@ -226,6 +284,14 @@ router.get('/session/by-project/:projectId', requireAuth, async (req: Request, r
 router.patch('/session/:id', requireAuth, async (req: Request, res: Response) => {
   try {
     const { id } = req.params
+    const userId = req.user!.id
+
+    // P0-3：更新前先驗 ownership
+    const owned = await getOwnedBddSession(id, userId)
+    if (!owned) {
+      return res.status(404).json({ error: 'Session 不存在' })
+    }
+
     const updates = req.body as Partial<{
       currentPhase: string
       currentRound: number
@@ -286,8 +352,8 @@ router.patch('/session/:id', requireAuth, async (req: Request, res: Response) =>
 
     await query(sql, params)
 
-    // 返回更新後的 session
-    const row = await queryOne<any>('SELECT * FROM bdd_sessions WHERE id = $1', [id])
+    // 返回更新後的 session（重新驗 ownership 確保 race-safe）
+    const row = await getOwnedBddSession(id, userId)
     if (!row) {
       return res.status(404).json({ error: 'Session 不存在' })
     }
@@ -308,8 +374,7 @@ router.post('/session/:id/answer', requireAuth, validateBody(answerSchema), asyn
     const { id } = req.params
     const { itemId, answer } = req.body
 
-    // 獲取 session
-    const row = await queryOne<any>('SELECT * FROM bdd_sessions WHERE id = $1', [id])
+    const row = await getOwnedBddSession(id, req.user!.id)
     if (!row) {
       return res.status(404).json({ error: 'Session 不存在' })
     }
@@ -360,8 +425,7 @@ router.post('/session/:id/confirm', requireAuth, validateBody(confirmSchema), as
     const { id } = req.params
     const { itemIds, answers } = req.body
 
-    // 獲取 session
-    const row = await queryOne<any>('SELECT * FROM bdd_sessions WHERE id = $1', [id])
+    const row = await getOwnedBddSession(id, req.user!.id)
     if (!row) {
       return res.status(404).json({ error: 'Session 不存在' })
     }
@@ -411,8 +475,7 @@ router.post('/session/:id/revert', requireAuth, validateBody(revertSchema), asyn
     const { id } = req.params
     const { itemId } = req.body
 
-    // 獲取 session
-    const row = await queryOne<any>('SELECT * FROM bdd_sessions WHERE id = $1', [id])
+    const row = await getOwnedBddSession(id, req.user!.id)
     if (!row) {
       return res.status(404).json({ error: 'Session 不存在' })
     }
@@ -462,8 +525,7 @@ router.post('/session/:id/skip', requireAuth, validateBody(skipSchema), async (r
     const { id } = req.params
     const { itemId } = req.body
 
-    // 獲取 session
-    const row = await queryOne<any>('SELECT * FROM bdd_sessions WHERE id = $1', [id])
+    const row = await getOwnedBddSession(id, req.user!.id)
     if (!row) {
       return res.status(404).json({ error: 'Session 不存在' })
     }
@@ -503,8 +565,7 @@ router.post('/session/:id/items', requireAuth, validateBody(addItemsSchema), asy
     const { id } = req.params
     const { items } = req.body
 
-    // 獲取 session
-    const row = await queryOne<any>('SELECT * FROM bdd_sessions WHERE id = $1', [id])
+    const row = await getOwnedBddSession(id, req.user!.id)
     if (!row) {
       return res.status(404).json({ error: 'Session 不存在' })
     }
@@ -547,7 +608,7 @@ router.get('/session/:id/current', requireAuth, async (req: Request, res: Respon
   try {
     const { id } = req.params
 
-    const row = await queryOne<any>('SELECT * FROM bdd_sessions WHERE id = $1', [id])
+    const row = await getOwnedBddSession(id, req.user!.id)
     if (!row) {
       return res.status(404).json({ error: 'Session 不存在' })
     }
@@ -578,7 +639,7 @@ router.get('/session/:id/progress', requireAuth, async (req: Request, res: Respo
   try {
     const { id } = req.params
 
-    const row = await queryOne<any>('SELECT * FROM bdd_sessions WHERE id = $1', [id])
+    const row = await getOwnedBddSession(id, req.user!.id)
     if (!row) {
       return res.status(404).json({ error: 'Session 不存在' })
     }

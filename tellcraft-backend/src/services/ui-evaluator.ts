@@ -59,10 +59,36 @@ function loadRubric(): string {
 
 const UiEvaluationIssueSchema = z.object({
   severity: z.enum(['critical', 'warning']),
-  category: z.enum(['layout_broken', 'content_missing', 'interaction_dead', 'visual_regression']),
+  category: z.enum(['layout_broken', 'content_missing', 'interaction_dead', 'visual_regression', 'task_failed']),
   route: z.string(),
   description: z.string(),
 })
+
+// ============================================================
+// P2: Task-based Testing 型別
+// ============================================================
+
+const UiTaskSchema = z.object({
+  taskId: z.string(),
+  intent: z.string().describe('用戶想完成的事，例如「找到 Pro 方案的月費」'),
+  preferredRoute: z.string().describe('預期任務發生的路由，例如 /pricing 或 / (首頁)'),
+  action: z.enum(['find_text', 'click_text']).describe('find_text=驗證頁面有指定文字；click_text=點擊含指定文字的可點擊元素'),
+  target: z.string().describe('要找的文字或要點擊的按鈕文字'),
+})
+
+const UiTaskListSchema = z.object({
+  tasks: z.array(UiTaskSchema).max(5),
+})
+
+export type UiTask = z.infer<typeof UiTaskSchema>
+
+const UiTaskResultSchema = z.object({
+  taskId: z.string(),
+  passed: z.boolean(),
+  reason: z.string().optional(),
+})
+
+export type UiTaskResult = z.infer<typeof UiTaskResultSchema>
 
 const UiEvaluationReportSchema = z.object({
   passed: z.boolean(),
@@ -157,6 +183,101 @@ const DOM_OUTLINE_SCRIPT = `(() => {
 })()`
 
 // ============================================================
+// P2: Task derivation（從 BDD 推導 user-facing tasks）
+// 用 Haiku 一次推 ≤5 個 task，純文字 prompt + 結構化輸出。
+// 失敗 fail-open：回空陣列，evaluator 退化到原本的黑盒評分。
+// ============================================================
+
+export async function deriveTasksFromBdd(
+  bddBrief: string | undefined,
+  routes: string[],
+  trackingContext?: TelemetryTrackingContext,
+): Promise<UiTask[]> {
+  if (!bddBrief || bddBrief.trim().length < 30) return []
+  if (routes.length === 0) return []
+
+  const system = [
+    '你是 UI 黑盒驗收測試的任務生成器。',
+    '從 BDD 規格摘要推導 3-5 個用戶會做的事，每個 task 對應到一個 user-facing 動作。',
+    '只產出能由「在頁面上找到文字」或「點擊含文字的按鈕」驗證的 task，不要產出需要填表單/上傳檔案/驗證後端的 task。',
+    '過濾掉純後端 action（如 token 驗證、cron 排程、後台清理）。',
+    'preferredRoute 必須從給定的 routes 列表挑一個（不要編造）。',
+  ].join('\n')
+
+  const userText = `## BDD 規格摘要\n${bddBrief.substring(0, 2500)}\n\n## 可用路由\n${routes.join(', ')}\n\n請產出 3-5 個任務。`
+
+  try {
+    const result = await callStructured({
+      schema: UiTaskListSchema,
+      model: MODEL.HAIKU,
+      system,
+      messages: [{ role: 'user', content: userText }],
+      maxTokens: 1024,
+      temperature: 0.3,
+      purpose: 'ui_evaluator_task_derivation',
+      trackingContext: trackingContext
+        ? {
+            userId: trackingContext.userId ?? undefined,
+            conversationId: trackingContext.conversationId ?? undefined,
+          }
+        : undefined,
+    })
+    if (!result.success) {
+      logger.warn({ error: result.error }, 'task derivation 失敗，降級不跑任務模擬')
+      return []
+    }
+    // 過濾掉路由不在已知列表的（LLM 偶爾會編）
+    return result.data.tasks.filter(t => routes.includes(t.preferredRoute))
+  } catch (err) {
+    logger.warn({ err: String(err).slice(0, 120) }, 'task derivation 異常')
+    return []
+  }
+}
+
+// ============================================================
+// P2: 在已開啟的 puppeteer Page 上跑單一 task
+// ============================================================
+
+async function runTask(page: any, task: UiTask, baseUrl: string): Promise<UiTaskResult> {
+  try {
+    await page.goto(`${baseUrl}${task.preferredRoute}`, { waitUntil: 'networkidle2', timeout: 10_000 })
+
+    if (task.action === 'find_text') {
+      // 用 string callback 避免 DOM lib 型別問題（tsconfig lib=ES2022）
+      const findScript = `(() => {
+  const body = document.body && document.body.innerText || ''
+  return body.toLowerCase().includes(${JSON.stringify(task.target.toLowerCase())})
+})()`
+      const found = await page.evaluate(findScript)
+      return {
+        taskId: task.taskId,
+        passed: !!found,
+        reason: found ? undefined : `頁面 ${task.preferredRoute} 找不到文字「${task.target}」`,
+      }
+    }
+
+    if (task.action === 'click_text') {
+      const clickScript = `(() => {
+  const candidates = Array.from(document.querySelectorAll('a, button, [role="button"]'))
+  const target = candidates.find(el => (el.innerText || '').trim().toLowerCase().includes(${JSON.stringify(task.target.toLowerCase())}))
+  if (target) { target.click(); return true }
+  return false
+})()`
+      const clicked = await page.evaluate(clickScript)
+      return {
+        taskId: task.taskId,
+        passed: !!clicked,
+        reason: clicked ? undefined : `頁面 ${task.preferredRoute} 找不到含「${task.target}」的可點擊元素`,
+      }
+    }
+
+    return { taskId: task.taskId, passed: false, reason: '未知 action' }
+  } catch (err) {
+    return { taskId: task.taskId, passed: false, reason: `task 執行錯誤：${String(err).slice(0, 120)}` }
+  }
+}
+
+// ============================================================
 // 主流程
 // ============================================================
 
@@ -223,8 +344,23 @@ export async function evaluateUi(opts: EvaluateUiOptions): Promise<EvaluateUiRes
             throw new Error('no-observations')
           }
 
-          // 呼叫 Vision LLM
-          return await reviewWithVision(observations, { tier, bddBrief, trackingContext })
+          // P2: 在 Vision 評分前先跑 task 模擬（失敗時 fail-open）
+          const visitedRoutes = observations.map(o => o.route)
+          const tasks = await deriveTasksFromBdd(bddBrief, visitedRoutes, trackingContext)
+          const taskResults: UiTaskResult[] = []
+          if (tasks.length > 0) {
+            for (const task of tasks) {
+              const r = await runTask(page, task, ctx.baseUrl)
+              taskResults.push(r)
+            }
+            logger.info({
+              total: taskResults.length,
+              passed: taskResults.filter(r => r.passed).length,
+            }, 'P2 task 模擬完成')
+          }
+
+          // 呼叫 Vision LLM（傳入 task 結果做整合判斷）
+          return await reviewWithVision(observations, { tier, bddBrief, trackingContext, tasks, taskResults })
         } finally {
           await browser.close()
         }
@@ -275,13 +411,30 @@ async function reviewWithVision(
     tier?: 'functional' | 'creative'
     bddBrief?: string
     trackingContext?: TelemetryTrackingContext
+    tasks?: UiTask[]
+    taskResults?: UiTaskResult[]
   },
 ): Promise<UiEvaluationReport> {
   const rubric = loadRubric()
   const tierNote = opts.tier ? `Design Tier: **${opts.tier}**（functional=資訊密集，creative=情緒導向）。` : ''
   const briefNote = opts.bddBrief ? `\n\n## 預期功能（BDD 摘要）\n${opts.bddBrief.substring(0, 1500)}` : ''
 
-  const system = buildCacheableSystem(rubric, tierNote + briefNote)
+  // P2: 把 task 結果注入 system prompt（dynamic 區，不污染 cache）
+  let taskNote = ''
+  if (opts.tasks && opts.taskResults && opts.tasks.length > 0) {
+    const failed = opts.taskResults.filter(r => !r.passed)
+    if (failed.length > 0) {
+      const failedDescriptions = failed.map(r => {
+        const task = opts.tasks?.find(t => t.taskId === r.taskId)
+        return `- 任務「${task?.intent}」（${task?.preferredRoute}）失敗：${r.reason}`
+      }).join('\n')
+      taskNote = `\n\n## 任務模擬結果（黑盒執行驗證）\n以下任務在頁面上**找不到對應內容或可點擊元素**，請判斷是否為 design 問題（CTA 隱蔽、資訊缺失、導航斷裂等）：\n${failedDescriptions}\n\n如果失敗源自設計問題，請在 issues 中加入 category=task_failed 的 issue。`
+    } else {
+      taskNote = `\n\n## 任務模擬結果\n${opts.taskResults.length} 個用戶任務全數通過 ✓`
+    }
+  }
+
+  const system = buildCacheableSystem(rubric, tierNote + briefNote + taskNote)
 
   // 組裝 multi-image user message
   const userContent: Array<{ type: 'image'; source: { type: 'base64'; media_type: 'image/jpeg'; data: string } } | { type: 'text'; text: string }> = []
