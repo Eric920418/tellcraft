@@ -21,6 +21,7 @@ import { recordTelemetry } from './skill-telemetry'
 import { validateVariantDiversity, buildRetryHint } from './variant-diversity'
 import { formatIndustryPriorForPrompt } from './industry-priors'
 import { parseIterationIntent, selectFilesByIntent, describeIntentForPrompt } from './iteration-intent'
+import { enforceStyleLock } from './style-lock'
 
 const logger = createLogger('uiux-generation')
 
@@ -6933,6 +6934,41 @@ ${codeBlocks.join('\n\n')}
           error: '偵測到剛上傳的圖片在更新後遺失，為避免覆蓋您的設計，本次修改已取消。請再按一次儲存，或縮小修改範圍重試。',
         }
       }
+    }
+  }
+
+  // T12: Style Lock — 防止 LLM 順手改了 design tokens
+  // 跳過：用戶 feedback 明確要求改色 (palette) / 換字體 (typography)
+  if (
+    designContext.designSystem &&
+    parsedIntent?.scope !== 'palette' &&
+    parsedIntent?.scope !== 'typography'
+  ) {
+    try {
+      const lockResult = enforceStyleLock(designContext.designSystem, mergedCode)
+      if (lockResult.violations.length > 0) {
+        logger.info({
+          violations: lockResult.violations.map(v => `${v.type}:${v.token}`),
+        }, 'T12 Style Lock：偵測到 design token 漂移，已自動還原')
+
+        recordTelemetry({
+          skillName: 'iteration',
+          eventType: 'iteration',
+          patternKey: 'style_lock_violation',
+          userId: trackingContext?.userId || null,
+          conversationId: trackingContext?.conversationId || null,
+          payload: {
+            violations: lockResult.violations.map(v => ({ type: v.type, token: v.token })),
+            count: lockResult.violations.length,
+            intentScope: parsedIntent?.scope || 'unknown',
+          },
+        }).catch(() => {})
+
+        mergedCode = lockResult.restoredCode
+      }
+    } catch (err) {
+      // fail-open：style lock 失敗絕不阻塞迭代
+      logger.warn({ err: String(err).slice(0, 200) }, 'T12 Style Lock 失敗，跳過')
     }
   }
 
