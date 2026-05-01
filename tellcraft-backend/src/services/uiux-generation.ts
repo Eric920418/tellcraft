@@ -1177,6 +1177,19 @@ ${structuredRef}
 設計變體應參考但不照搬這些設計特徵。提取其設計精神，結合產品需求做差異化。${structuredRef ? '\n至少 2-3 個變體的主色應接近參考色板。' : ''}`
     : ''
 
+  // T1: Design Memory — 讀取使用者歷史偏好（fail-open，無記憶不影響流程）
+  let memorySection = ''
+  if (trackingContext?.userId) {
+    try {
+      const { getDesignMemory, formatMemoryForVariantPrompt } = await import('./design-memory')
+      const memory = await getDesignMemory(trackingContext.userId)
+      memorySection = formatMemoryForVariantPrompt(memory)
+      if (memorySection) memorySection = `\n${memorySection}\n`
+    } catch (err) {
+      // fail-open
+    }
+  }
+
   const systemPrompt = `你是一位資深的 UI/UX 設計師和前端架構師。你的任務是為一個產品生成 5 個不同方向的設計變體。
 
 ## 產品類型
@@ -1188,7 +1201,7 @@ BDD 規格列出了技術功能，但設計變體應服務於用戶的原始願�
 如果用戶 80% 的描述在講前端展覽動畫體驗，5 個變體都應圍繞前端體驗來差異化，
 不要圍繞後台管理介面的佈局差異。
 
-${originalRequirements || '（無原始描述）'}${referenceSection}
+${originalRequirements || '（無原始描述）'}${referenceSection}${memorySection}
 
 ## 模板基礎
 - 名稱：${template.name}
@@ -5602,6 +5615,18 @@ ${referenceAnalysis.metadata?.themeColor ? `主題色: ${referenceAnalysis.metad
 ${structuredBriefRef}`
       : ''
 
+  // T1: Design Memory — 老用戶歷史偏好（fail-open）
+  let memoryContext = ''
+  if (trackingContext?.userId) {
+    try {
+      const { getDesignMemory, formatMemoryForBriefPrompt } = await import('./design-memory')
+      const memory = await getDesignMemory(trackingContext.userId)
+      memoryContext = formatMemoryForBriefPrompt(memory)
+    } catch (err) {
+      // fail-open
+    }
+  }
+
   const systemPrompt = `你是一位資深 UI/UX 設計顧問。你的任務是根據用戶提供的資訊，總結設計方向並給出專業建議。
 
 ## 產品類型
@@ -5615,6 +5640,8 @@ ${templateContext}
 ${ideasContext}
 
 ${referenceContext}
+
+${memoryContext}
 
 ## 你的角色
 ${sourceType === 'ideas'

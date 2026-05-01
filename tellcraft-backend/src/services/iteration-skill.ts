@@ -9,6 +9,7 @@ import { createLogger } from '../lib/logger'
 import { sanitizeForPreview } from './code-verify'
 import { sanitizeCodeForDeployAsync } from './deployer'
 import { recordTelemetry, truncateFeedback } from './skill-telemetry'
+import { updateDesignMemory } from './design-memory'
 
 const logger = createLogger('iteration-skill')
 import type { FlowState, IoEmitter } from '../types/flow-state'
@@ -210,6 +211,34 @@ function tokenize(text: string): Set<string> {
     tokens.add(cjk.slice(i, i + 2))
   }
   return tokens
+}
+
+/**
+ * T1: 從 iteration feedback 抽出「拒絕的設計元素」關鍵詞 → 寫 Design Memory
+ * 規則：含 hasRemovalIntent 詞 + 後接的 1-3 個字（中文）/單字（英文）→ rejected keyword
+ * 例：「拿掉漸層」→ "漸層"；「不要紫色」→ "紫色"；「remove the glow」→ "glow"
+ */
+function extractRejectedKeywords(feedback: string): string[] {
+  const text = feedback.toLowerCase()
+  const removalRegex = /(拿掉|移除|刪除|取消|去掉|不要|不需要|砍掉|remove|delete|drop|get rid of|no more)\s*(?:the\s+|個|的|了)?([\p{L}\p{N}]+)/giu
+  const found = new Set<string>()
+  let m: RegExpExecArray | null
+  while ((m = removalRegex.exec(text)) !== null) {
+    const word = (m[2] || '').trim()
+    if (word.length >= 2 && word.length <= 12) found.add(word)
+    if (found.size >= 3) break
+  }
+  return Array.from(found)
+}
+
+function recordRejectedToMemory(userId: string | undefined, feedback: string): void {
+  if (!userId) return
+  const rejected = extractRejectedKeywords(feedback)
+  if (rejected.length === 0) return
+  updateDesignMemory({
+    userId,
+    brandTone: { keywords: [], avoid: rejected },
+  }).catch(() => {})
 }
 
 /**
@@ -476,6 +505,7 @@ ${enrichedFeedback}`
         state.lastIterationFeedback = undefined
         state.lastIterationImageUrls = undefined
         recordIterationHistory(state, userFeedback, changedFiles)
+        recordRejectedToMemory(state.userId, userFeedback)  // T1: Design Memory
 
         // 跳到預覽發送（下方共用邏輯）
         // updatedCode, changedFiles, deletedPaths 已設定
@@ -536,6 +566,7 @@ ${enrichedFeedback}`
       state.iterationCount = (state.iterationCount || 0) + 1
       state.lastIterationFeedback = undefined
       state.lastIterationImageUrls = undefined
+      recordRejectedToMemory(state.userId, userFeedback)  // T1: Design Memory
 
       changedFiles = result.pages.map(p => p.path)
       if (result.components) {

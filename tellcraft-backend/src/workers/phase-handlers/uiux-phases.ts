@@ -25,6 +25,7 @@ import { getBddSession, updateBddSession } from '../../services/bdd-session'
 import { analyzeReference, analyzeUploadedImage } from '../../services/reference-analyzer'
 import { getImageLibraryOrFallback, invalidateImageLibrary } from '../../services/image-library-service'
 import { recommendMoods, getMoodSummary } from '../../services/design-moods'
+import { updateDesignMemory, extractPaletteFromDesignSystem, extractFontFamily } from '../../services/design-memory'
 import { executeIteration, executeUndoIteration } from '../../services/iteration-skill'
 import { semanticGateway } from '../../services/semantic-gateway'
 import { detectFastModeIntent, getFaqReply, answerWithSonnet } from '../../services/customer-service'
@@ -1274,6 +1275,18 @@ export async function handleVariantSelection(
 
   // 合併變體生成最終 Design System
   const finalDesignSystem = synthesizeVariants(selectedIds, variants, state.uiuxDesignMood)
+
+  // T1: 寫 Design Memory（fire-and-forget — 變體選定後記錄 palette / mood / font / 完成樣本 +1）
+  if (state.userId) {
+    const fontFamily = extractFontFamily(finalDesignSystem)
+    updateDesignMemory({
+      userId: state.userId,
+      palette: extractPaletteFromDesignSystem(finalDesignSystem),
+      moodId: state.uiuxDesignMood,
+      fontFamily: fontFamily ?? undefined,
+      incrementSample: true,
+    }).catch(() => {})
+  }
 
   // 提取選中 variant 的創意概念
   const variantConcept = extractVariantConcept(selectedIds, variants)
@@ -3176,6 +3189,17 @@ export async function proceedToVariantGeneration(
     template.description = template.description
       ? `${template.description}\n\n## AI 設計顧問建議\n${briefEnhancement}`
       : `## AI 設計顧問建議\n${briefEnhancement}`
+  }
+
+  // T1: 寫 Design Memory（fire-and-forget — brief 確認後記錄 brand_tone / tier / signature）
+  if (state.userId && state.uiuxDesignBrief) {
+    const brief = state.uiuxDesignBrief
+    updateDesignMemory({
+      userId: state.userId,
+      brandTone: { keywords: [brief.styleSummary], avoid: [] },
+      tier: state.uiuxDesignTier,
+      signatureKeywords: brief.domainKeywords ?? [],
+    }).catch(() => {})
   }
 
   const sourceType = state.uiuxDesignBrief?.sourceType || 'template'
