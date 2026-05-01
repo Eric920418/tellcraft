@@ -587,7 +587,7 @@ async function finalizeMergedCode(
           id: `eval-clone-${idx}`,
           category: 'code_quality',
           severity: 'critical',
-          rule: `evaluator_${i.category}`,
+          rule: `evaluator_${i.viewport ?? "desktop-light"}_${i.category}`,
           message: `[Evaluator] ${i.description}（路由 ${i.route}）`,
           file: i.route,
           suggestion: '請從使用者視角修復此問題',

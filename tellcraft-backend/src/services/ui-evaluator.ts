@@ -62,6 +62,8 @@ const UiEvaluationIssueSchema = z.object({
   category: z.enum(['layout_broken', 'content_missing', 'interaction_dead', 'visual_regression', 'task_failed']),
   route: z.string(),
   description: z.string(),
+  // T7: 由合併步驟附加，LLM 不直接輸出（schema 仍可解析空值因 z.optional）
+  viewport: z.enum(['desktop-light', 'mobile-light', 'desktop-dark']).optional(),
 })
 
 // ============================================================
@@ -102,11 +104,95 @@ export interface EvaluateUiOptions {
   code: GeneratedCode
   tailwindConfig: string
   tier?: 'functional' | 'creative'
+  productType?: string  // T7: 決定是否跑 mobile viewport
   bddBrief?: string  // 摘要 BDD 規格，讓 Evaluator 知道「預期頁面做什麼」
   trackingContext?: TelemetryTrackingContext
   extraDependencies?: Record<string, string>
   neonConnectionString?: string
   onProgress?: (step: string) => void
+}
+
+// ============================================================
+// T7: Viewport 配置（desktop-light / mobile-light / desktop-dark）
+// ============================================================
+
+export type ViewportKey = 'desktop-light' | 'mobile-light' | 'desktop-dark'
+
+export interface ViewportConfig {
+  key: ViewportKey
+  width: number
+  height: number
+  isMobile: boolean
+  prefersDark: boolean
+}
+
+const VIEWPORT_CONFIGS: Record<ViewportKey, ViewportConfig> = {
+  'desktop-light': { key: 'desktop-light', width: 1280, height: 800, isMobile: false, prefersDark: false },
+  'mobile-light':  { key: 'mobile-light',  width: 375,  height: 667, isMobile: true,  prefersDark: false },
+  'desktop-dark':  { key: 'desktop-dark',  width: 1280, height: 800, isMobile: false, prefersDark: true  },
+}
+
+/** mobile-heavy 場景 → 開 mobile viewport（tier=creative 也算）*/
+const MOBILE_HEAVY_PRODUCT_TYPES = new Set([
+  'restaurant', 'cafe', 'portfolio', 'landing', 'event', 'travel',
+  'ecommerce', 'fitness', 'salon',
+])
+
+export function shouldRunMobileViewport(
+  tier?: 'functional' | 'creative',
+  productType?: string,
+): boolean {
+  if (tier === 'creative') return true
+  if (productType && MOBILE_HEAVY_PRODUCT_TYPES.has(productType.toLowerCase())) return true
+  return false
+}
+
+/** 偵測代碼是否使用 dark mode（僅在偵測到 `dark:` className 時跑 dark viewport） */
+export function shouldRunDarkViewport(code: GeneratedCode): boolean {
+  const DARK_CLASS_REGEX = /\bdark:[\w-]/  // dark:bg-... / dark:text-... 等
+  for (const file of [...code.pages, ...code.components]) {
+    if (DARK_CLASS_REGEX.test(file.content)) return true
+  }
+  return false
+}
+
+/** Vision LLM prompt 用的 viewport 提醒（dynamic 區，不污染 cache） */
+export function buildViewportNote(vp: ViewportKey): string {
+  if (vp === 'desktop-light') return ''
+  if (vp === 'mobile-light') {
+    return `\n\n## 當前視角：MOBILE（375×667）— 只回報 mobile 特有問題\n` +
+      `桌面版的問題已在 desktop 視角檢查過，**請只關注 mobile 才會出現的問題**：\n` +
+      `- horizontal scroll：頁面有橫向捲動條（佈局沒適配窄螢幕）\n` +
+      `- 字體過小：正文 < 14px 在手機上不易讀\n` +
+      `- 觸控目標過小：按鈕 / 連結 < 44×44px 不利點擊\n` +
+      `- 漢堡選單無 trigger：navigation 在 mobile 隱藏但找不到開關\n` +
+      `- 內容溢出：卡片 / 圖片超出 viewport 邊界\n` +
+      `- 表單欄位擠在一行：input 應該堆疊不應並排\n` +
+      `如果 mobile 看起來跟 desktop 同樣可用 → \`{ passed: true, issues: [] }\`。`
+  }
+  if (vp === 'desktop-dark') {
+    return `\n\n## 當前視角：DESKTOP-DARK（深色模式）— 只回報 dark mode 特有問題\n` +
+      `頁面已注入 \`<html class="dark">\` + prefers-color-scheme: dark。**請只關注 dark mode 才會出現的問題**：\n` +
+      `- 對比度不足：白底黑字殘留 / 文字幾乎與背景同色\n` +
+      `- 背景未切換：整段保持淺色背景，看起來像「忘了做 dark mode」\n` +
+      `- 圖片無 dark variant：白底 logo / icon 在暗色背景刺眼\n` +
+      `- 邊框消失：light mode 用 gray-200 的邊框在 dark 變得透明\n` +
+      `- 強調色失調：primary 色在深色背景變得不夠亮 / 過於刺眼\n` +
+      `如果 dark mode 看起來完整可用 → \`{ passed: true, issues: [] }\`。`
+  }
+  return ''
+}
+
+/** 根據 tier / productType / code 算要跑哪些 viewport */
+export function selectViewports(
+  code: GeneratedCode,
+  tier?: 'functional' | 'creative',
+  productType?: string,
+): ViewportConfig[] {
+  const list: ViewportConfig[] = [VIEWPORT_CONFIGS['desktop-light']]
+  if (shouldRunMobileViewport(tier, productType)) list.push(VIEWPORT_CONFIGS['mobile-light'])
+  if (shouldRunDarkViewport(code)) list.push(VIEWPORT_CONFIGS['desktop-dark'])
+  return list
 }
 
 export interface EvaluateUiResult {
@@ -462,7 +548,11 @@ export async function evaluateUi(opts: EvaluateUiOptions): Promise<EvaluateUiRes
     }
   }
 
-  const { code, tailwindConfig, tier, bddBrief, trackingContext, extraDependencies, neonConnectionString, onProgress } = opts
+  const { code, tailwindConfig, tier, productType, bddBrief, trackingContext, extraDependencies, neonConnectionString, onProgress } = opts
+
+  // T7: 決定要跑哪些 viewport（desktop-light 永遠跑，mobile/dark 條件觸發）
+  const viewports = selectViewports(code, tier, productType)
+  logger.info({ viewports: viewports.map(v => v.key), tier, productType }, 'T7: Evaluator viewport 配置')
 
   // timeout 保護：超過預算直接 softFail，不阻塞 pipeline
   const timeoutMs = env.UI_EVALUATOR_TIMEOUT_MS
@@ -492,66 +582,108 @@ export async function evaluateUi(opts: EvaluateUiOptions): Promise<EvaluateUiRes
         }
 
         try {
-          const page = await browser.newPage()
-          await page.setViewport({ width: 1280, height: 800 })
+          // T7: 為每個 viewport 開新 page 收集 observations，每個 viewport 各自呼叫 Vision LLM
+          const allIssues: UiEvaluationIssue[] = []
+          let totalPassed = true
+          let didAnyObservation = false
 
-          // 逐 route 收集觀察 + P5 結構性 probes
-          const observations: Array<{ route: string; screenshotB64: string; outline: string }> = []
-          const structureProbes: StructureProbe[] = []
-          for (const { route } of ctx.routes.slice(0, 6)) { // 上限 6 頁，控成本
-            try {
-              await page.goto(`${ctx.baseUrl}${route}`, { waitUntil: 'networkidle2', timeout: 15_000 })
-              const screenshotB64 = await page.screenshot({ encoding: 'base64', type: 'jpeg', quality: 70, fullPage: false }) as string
-              const outline = await page.evaluate(DOM_OUTLINE_SCRIPT) as string
-              observations.push({ route, screenshotB64, outline: outline.substring(0, 3000) })
-              // P5: 順便抓結構 probe（成本低、避免重複 navigate）
-              try {
-                const probe = await page.evaluate(STRUCTURE_PROBE_SCRIPT) as Omit<StructureProbe, 'route'>
-                structureProbes.push({ route, ...probe })
-              } catch (probeErr) {
-                logger.warn({ route, err: String(probeErr).slice(0, 120) }, 'P5 structure probe 失敗')
-              }
-            } catch (err) {
-              logger.warn({ route, err: String(err).slice(0, 120) }, 'Evaluator 頁面訪問失敗')
+          // P5 structure probes 只在 desktop-light 跑（結構性事實不會因 viewport 改變）
+          let structureProbes: StructureProbe[] = []
+          let tasks: UiTask[] = []
+          let taskResults: UiTaskResult[] = []
+
+          for (const vp of viewports) {
+            const page = await browser.newPage()
+            await page.setViewport({ width: vp.width, height: vp.height, isMobile: vp.isMobile })
+            if (vp.prefersDark) {
+              await page.emulateMediaFeatures([{ name: 'prefers-color-scheme', value: 'dark' }])
+              // 強制注入 dark class（許多專案用 className 切換而非 media query）
+              // 用 string callback 因 tsconfig lib 不含 DOM types
+              await page.evaluateOnNewDocument(`document.documentElement.classList.add('dark')`)
             }
+
+            const observations: Array<{ route: string; screenshotB64: string; outline: string }> = []
+            for (const { route } of ctx.routes.slice(0, 6)) {
+              try {
+                await page.goto(`${ctx.baseUrl}${route}`, { waitUntil: 'networkidle2', timeout: 15_000 })
+                const screenshotB64 = await page.screenshot({ encoding: 'base64', type: 'jpeg', quality: 70, fullPage: false }) as string
+                const outline = await page.evaluate(DOM_OUTLINE_SCRIPT) as string
+                observations.push({ route, screenshotB64, outline: outline.substring(0, 3000) })
+
+                // P5 + P2 只在 desktop-light 跑，避免重複 LLM 成本
+                if (vp.key === 'desktop-light') {
+                  try {
+                    const probe = await page.evaluate(STRUCTURE_PROBE_SCRIPT) as Omit<StructureProbe, 'route'>
+                    structureProbes.push({ route, ...probe })
+                  } catch (probeErr) {
+                    logger.warn({ route, err: String(probeErr).slice(0, 120) }, 'P5 structure probe 失敗')
+                  }
+                }
+              } catch (err) {
+                logger.warn({ route, vp: vp.key, err: String(err).slice(0, 120) }, 'Evaluator 頁面訪問失敗')
+              }
+            }
+
+            if (observations.length === 0) {
+              await page.close()
+              continue
+            }
+            didAnyObservation = true
+
+            // P2 task 模擬只在 desktop-light 跑
+            if (vp.key === 'desktop-light') {
+              const visitedRoutes = observations.map(o => o.route)
+              tasks = await deriveTasksFromBdd(bddBrief, visitedRoutes, trackingContext)
+              if (tasks.length > 0) {
+                for (const task of tasks) {
+                  const r = await runTask(page, task, ctx.baseUrl)
+                  taskResults.push(r)
+                }
+                logger.info({
+                  total: taskResults.length,
+                  passed: taskResults.filter(r => r.passed).length,
+                }, 'P2 task 模擬完成')
+              }
+            }
+
+            // 呼叫 Vision LLM — 每個 viewport 各跑一次
+            const visionReport = await reviewWithVision(observations, {
+              tier, bddBrief, trackingContext,
+              tasks: vp.key === 'desktop-light' ? tasks : undefined,
+              taskResults: vp.key === 'desktop-light' ? taskResults : undefined,
+              viewport: vp.key,
+            })
+
+            // 把 viewport 標籤附到 issue（category 保持 enum 純淨；description 帶 [viewport] 前綴）
+            for (const issue of visionReport.issues) {
+              const isDesktopLight = vp.key === 'desktop-light'
+              allIssues.push({
+                ...issue,
+                viewport: vp.key,
+                description: isDesktopLight ? issue.description : `[${vp.key}] ${issue.description}`,
+              })
+            }
+            if (!visionReport.passed) totalPassed = false
+
+            await page.close()
           }
 
-          if (observations.length === 0) {
+          if (!didAnyObservation) {
             throw new Error('no-observations')
           }
 
-          // P2: 在 Vision 評分前先跑 task 模擬（失敗時 fail-open）
-          const visitedRoutes = observations.map(o => o.route)
-          const tasks = await deriveTasksFromBdd(bddBrief, visitedRoutes, trackingContext)
-          const taskResults: UiTaskResult[] = []
-          if (tasks.length > 0) {
-            for (const task of tasks) {
-              const r = await runTask(page, task, ctx.baseUrl)
-              taskResults.push(r)
-            }
-            logger.info({
-              total: taskResults.length,
-              passed: taskResults.filter(r => r.passed).length,
-            }, 'P2 task 模擬完成')
-          }
-
-          // P5: 從 probes 產結構性 issue（advisory）
+          // P5: 從 desktop-light probes 產結構性 issue（advisory）
           const structureIssues = deriveStructureIssues(structureProbes)
           if (structureIssues.length > 0) {
             logger.info({
               count: structureIssues.length,
               critical: structureIssues.filter(i => i.severity === 'critical').length,
-              navDepthIssues: structureIssues.filter(i => i.description.includes('導覽深度')).length,
-              ctaBlockedIssues: structureIssues.filter(i => i.description.includes('遮蓋')).length,
             }, 'P5 結構性檢查完成')
           }
 
-          // 呼叫 Vision LLM（傳入 task 結果 + 結構 issue 做整合判斷）
-          const visionReport = await reviewWithVision(observations, { tier, bddBrief, trackingContext, tasks, taskResults })
-          // P5 issue 直接合進最終 report（不經 Vision 判斷，因為它們是靜態事實）
           return {
-            passed: visionReport.passed && structureIssues.filter(i => i.severity === 'critical').length === 0,
-            issues: [...visionReport.issues, ...structureIssues],
+            passed: totalPassed && structureIssues.filter(i => i.severity === 'critical').length === 0,
+            issues: [...allIssues, ...structureIssues],
           }
         } finally {
           await browser.close()
@@ -605,11 +737,13 @@ async function reviewWithVision(
     trackingContext?: TelemetryTrackingContext
     tasks?: UiTask[]
     taskResults?: UiTaskResult[]
+    viewport?: ViewportKey  // T7
   },
 ): Promise<UiEvaluationReport> {
   const rubric = loadRubric()
   const tierNote = opts.tier ? `Design Tier: **${opts.tier}**（functional=資訊密集，creative=情緒導向）。` : ''
   const briefNote = opts.bddBrief ? `\n\n## 預期功能（BDD 摘要）\n${opts.bddBrief.substring(0, 1500)}` : ''
+  const viewportNote = opts.viewport ? buildViewportNote(opts.viewport) : ''
 
   // P2: 把 task 結果注入 system prompt（dynamic 區，不污染 cache）
   let taskNote = ''
@@ -626,7 +760,7 @@ async function reviewWithVision(
     }
   }
 
-  const system = buildCacheableSystem(rubric, tierNote + briefNote + taskNote)
+  const system = buildCacheableSystem(rubric, tierNote + briefNote + taskNote + viewportNote)
 
   // 組裝 multi-image user message
   const userContent: Array<{ type: 'image'; source: { type: 'base64'; media_type: 'image/jpeg'; data: string } } | { type: 'text'; text: string }> = []

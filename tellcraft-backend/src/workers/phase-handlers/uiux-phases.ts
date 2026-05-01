@@ -1659,6 +1659,7 @@ export async function executeFullCodePipeline(
         code: currentCode,
         tailwindConfig: evalTwConfig,
         tier: state.uiuxDesignTier,
+        productType: state.uiuxPreparedTemplate?.category,
         bddBrief: state.uiuxDesignBrief?.styleSummary,
         trackingContext: { userId: state.userId ?? undefined, conversationId },
       })
@@ -1675,7 +1676,7 @@ export async function executeFullCodePipeline(
         id: `eval-${evalAttempt}-${idx}`,
         category: 'code_quality',
         severity: 'critical',
-        rule: `evaluator_${i.category}`,
+        rule: `evaluator_${i.viewport ?? "desktop-light"}_${i.category}`,
         message: `[Evaluator] ${i.description}（路由 ${i.route}）`,
         file: i.route,
         suggestion: '請從使用者視角修復此問題，不要只是改 class 名稱',
@@ -2225,6 +2226,7 @@ export async function executeQualityGate(
         code: currentCode,
         tailwindConfig: evalTwConfig2,
         tier: state.uiuxDesignTier,
+        productType: state.uiuxPreparedTemplate?.category,
         bddBrief: state.uiuxDesignBrief?.styleSummary,
         trackingContext: { userId: state.userId ?? undefined, conversationId },
       })
@@ -2235,7 +2237,7 @@ export async function executeQualityGate(
         id: `eval-alt-${evalAttempt}-${idx}`,
         category: 'code_quality',
         severity: 'critical',
-        rule: `evaluator_${i.category}`,
+        rule: `evaluator_${i.viewport ?? "desktop-light"}_${i.category}`,
         message: `[Evaluator] ${i.description}（路由 ${i.route}）`,
         file: i.route,
         suggestion: '請從使用者視角修復此問題',
