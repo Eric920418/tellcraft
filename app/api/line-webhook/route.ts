@@ -1,6 +1,6 @@
 import { NextRequest } from 'next/server'
 
-const VPS_API_URL = process.env.VPS_API_URL || 'http://54.238.4.117:8080'
+const VPS_API_URL = process.env.VPS_API_URL || 'https://api.tellcraft.com'
 
 /**
  * LINE Webhook 專用 Proxy

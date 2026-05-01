@@ -595,14 +595,15 @@ Server Action 錯誤訊息 + 工具模組中文字串國際化（+117 keys，2 n
 | **UIUX 設計** | 雙軌 Discovery、Design Tier、5 變體、三階段生成、串流即時預覽、BDD→UI 翻譯（含 actionsYml 欄位精確注入）、Variant 概念注入 |
 | **快速建站** | 26 種產品類型、22 套產業配色、Haiku 概念生成（設計靈魂）、Tier 智能修正、vague 攔截引導、失敗重試、進度預估、手機全屏預覽、App/Website 佈局模式、模板風格整合、智能模板匹配 |
 | **品質** | Quality Gate 5 類靜態檢查（A11y per-element + 色彩對比度 + 效能動畫時長 + 代碼品質 + SVG ID 碰撞）、Design Tier 合規（functional 禁漸層/glow/spring）、Rule-based 確定性修復（5 規則）+ Haiku LLM fallback、RWD 響應式安全網；**設計品質四維度（P0~P3）**：CSS Token 一致性統計（灰階/圓角/字級/shadow per-file + global 閾值）、真實 WCAG luminance 對比度（normal 4.5:1 / large 3:1 區分，arbitrary value 支援）、UI Evaluator 任務模擬（從 BDD 推導 user-facing tasks 用 puppeteer 跑 find_text/click_text）、結構化品質報告（4 維度評分 + fixPlan 加權平均，accessibility 權重 35%）；**進階補強（P4~P6）**：spacing tokens 統計 + button variant fingerprint 跨頁比對（{bg,text,padding,rounded,fontWeight} 五元組去重，≥6 種 → warning，≥10 → critical 含具體範例）、nav depth BFS（>2 hop 報 warning「第三層導覽」）+ viewport overlap CTA 偵測（>50% 重疊報 critical）、refineCode + autoFixCriticalIssues 升級 SEARCH/REPLACE diff hybrid 解析（fallback 完整檔案，省 60-70% output token） |
-| **部署** | sanitize 8 類預檢（含 'use server' 保護 + 未知依賴警告 + root layout html/body 自動補全）、本地 build 驗證（3 輪 LLM 修復）、Vercel 部署、版本回滾 |
+| **部署** | sanitize 8+ 類預檢（含 'use server' 保護 + 未知依賴警告 + root layout html/body 自動補全 + brace-aware 重複 className 合併）、本地 build 驗證（3 輪 LLM 修復）、Vercel 部署、**Critical env fail-fast**（DATABASE_URL 注入失敗或 Neon connection_string 缺失即阻斷部署，不再 fail-silent 讓客戶 runtime 看到 500）、**Post-deploy HTTP smoke test**（Vercel READY 後再對 `/` 與 `/admin/login` 打真實 HTTP，≥500 視為部署失敗回報用戶具體錯誤）、版本回滾 |
 | **迭代** | 對話內迭代修改、撤銷上一步、部署歷史回滾、迭代歷史追蹤、重複抱怨偵測+策略升級、視覺診斷指引 |
 | **預覽** | WebContainers 完整 Next.js 預覽（Server Actions + DB 連線）、HMR 增量更新、裝置切換、編輯模式、圖片上傳、Pre-boot + Pre-install 載入優化、生成期間禁止渲染（UIUX/Coder 生成時只顯示等待動畫）、路由衝突去重（strip route groups 防 parallel pages 錯誤） |
 | **動畫** | BDD 需求藍圖面板（即時 Q&A 歷史視覺化）、3D 工廠流水線（Fast Build）、Remotion 驅動 |
 | **認證** | Google/LINE OAuth、JWT 雙軌（localStorage + Cookie）、訪客→帳號合併、帳號綁定（雙登入）、auth 頁面 i18n（next-intl） |
 | **儀表板** | 用戶統計、專案管理、版本歷史、管理員面板、LLM 用量追蹤（統一 PRICING + trackLlmUsage）、即時系統日誌監控（Socket.io tail -F）、Dashboard 元件 i18n（next-intl） |
 | **可觀察性** | Sentry 前端錯誤追蹤（@sentry/nextjs，error boundary + replay + tunnel）、ChatMessageItem React.memo |
-| **測試** | 關鍵路徑單元測試 241 條（intent-helpers/log-parser/deployer-sanitize/semantic-gateway），Vitest |
+| **測試** | 關鍵路徑單元測試 1900+ 條（intent-helpers/log-parser/deployer-sanitize 含重複 className 合併/semantic-gateway），Vitest |
+| **Coder 契約** | Server Action wrapper 統一 `{ __status, data }` 信封（page client 一律 `result.data` 取資料，array/object/null 自動歸一），HTTP route.ts 與 BDD validators 路徑完全不變；page rewrite prompt 強制 `result.data` 正向指引；singleton section 表（hero_section / services_section 等）empty 不再 throw，Server Action 層 try/catch 兜底防止 throw 泄漏到瀏覽器 |
 | **效能** | Redis 快取工具（`cached()` + `invalidateCache()`）、Dashboard admin stats 快取（5min TTL）、LATERAL JOIN 取代子查詢、GROUP BY 取代迴圈計數、複合索引（conversations/deployments/messages/llm_usage） |
 | **i18n** | next-intl 多語系（zh/en）、UI 元件全量翻譯、Server Action 錯誤訊息 i18n（getTranslations）、lib 模組英文化、error code 機制、883 keys / 29 namespaces |
 | **防護** | 三層防刷（前端冷卻 + API 限速 + Worker 鎖）、八層輸入防禦（含 Content Policy 語義審查 + Universal Input Quality Gate 亂碼/髒話/垃圾規則式攔截 + 設計問卷驗證）+ 違規冷卻升級（3→60s / 6→5min / 10→30min）、LLM 自動重試、Guest 限制（Fast Only + 一次使用 + 登入推薦） |
@@ -1000,8 +1001,8 @@ Schema 欄位名包含 image/photo/cover/avatar 等 → 自動生成圖片上傳
 ### VPS 首次設定
 
 ```bash
-# 1. SSH 到 VPS
-ssh -i ~/Desktop/LightsailDefaultKey-ap-northeast-1.pem ubuntu@54.238.4.117
+# 1. SSH 到 VPS（Lightsail ap-northeast-1, IP 18.179.205.105）
+ssh -i ~/Desktop/LightsailDefaultKey-ap-northeast-666.pem ubuntu@18.179.205.105
 
 # 2. Clone repo
 git clone git@github.com:Eric920418/tellcraft.git ~/tellcraft-repo
@@ -1014,10 +1015,16 @@ cp ~/tellcraft-repo/tellcraft-backend/.env.example ~/tellcraft-repo/tellcraft-ba
 cd ~/tellcraft-repo/tellcraft-backend
 pnpm install && pnpm build
 
-# 5. 配置 Nginx
+# 5. 配置 Nginx（含 api.tellcraft.com + 過渡用 8080 入口）
 sudo cp nginx/tellcraft.conf /etc/nginx/sites-available/tellcraft
-sudo ln -s /etc/nginx/sites-available/tellcraft /etc/nginx/sites-enabled/
+sudo ln -sf /etc/nginx/sites-available/tellcraft /etc/nginx/sites-enabled/tellcraft
 sudo nginx -t && sudo systemctl reload nginx
+
+# 5.1 申請 Let's Encrypt SSL（首次部署一次，之後 certbot.timer 自動續約）
+#     先確認 DNS api.tellcraft.com → VPS_IP 已生效（dig +short api.tellcraft.com）
+sudo apt-get install -y python3-certbot-nginx
+sudo certbot --nginx -d api.tellcraft.com --redirect --agree-tos -m <your-email>
+# certbot 會直接改寫 sites-enabled/tellcraft：補上 listen 443 ssl + 證書 + 80→443 redirect
 
 # 5.5 高併發 WebSocket（必做，否則容易在 ~700 連線附近出現 websocket error）
 # /etc/nginx/nginx.conf：提高 worker 連線上限
@@ -1061,7 +1068,7 @@ cd tellcraft-backend && pnpm install && pnpm build
 pm2 startOrReload ecosystem.config.js --wait-ready
 
 # 方法 2：本地直接執行（deploy.sh）
-ssh -i ~/Desktop/LightsailDefaultKey-ap-northeast-1.pem ubuntu@54.238.4.117 '~/deploy.sh'
+ssh -i ~/Desktop/LightsailDefaultKey-ap-northeast-666.pem ubuntu@18.179.205.105 '~/deploy.sh'
 ```
 
 **deploy.sh**：
@@ -1099,12 +1106,15 @@ curl -s http://localhost:3100/health
 ### 驗證
 
 ```bash
-# 健康檢查
-curl http://54.238.4.117:8080/health
+# 健康檢查（推薦走 HTTPS）
+curl https://api.tellcraft.com/health
 # 預期: {"status":"ok","services":{"database":"connected","redis":"connected"}}
 
+# 過渡入口（前端切到 api.tellcraft.com 後可移除 8080 server block）
+curl http://18.179.205.105:8080/health
+
 # 並發監控（含 Socket 即時連線/峰值/錯誤分類）
-curl http://54.238.4.117:8080/health/stats
+curl https://api.tellcraft.com/health/stats
 
 # 即時日誌
 pm2 logs tellcraft-backend --lines 100
