@@ -19,6 +19,7 @@ import { createLogger } from '../lib/logger'
 import { validateAndFixFiles } from './syntax-validator'
 import { recordTelemetry } from './skill-telemetry'
 import { validateVariantDiversity, buildRetryHint } from './variant-diversity'
+import { formatIndustryPriorForPrompt } from './industry-priors'
 
 const logger = createLogger('uiux-generation')
 
@@ -1203,6 +1204,8 @@ BDD 規格列出了技術功能，但設計變體應服務於用戶的原始願�
 不要圍繞後台管理介面的佈局差異。
 
 ${originalRequirements || '（無原始描述）'}${referenceSection}${memorySection}
+
+${formatIndustryPriorForPrompt(productType)}
 
 ## 模板基礎
 - 名稱：${template.name}
@@ -3860,9 +3863,11 @@ ${getDataAnimateSpec()}
 
 ${baseRulesBlock}`
 
-  // Dynamic block：每次不同（mood、patterns、constraints、techniques、designSystem、interaction rules）
+  // Dynamic block：每次不同（mood、patterns、constraints、techniques、designSystem、interaction rules、industry prior）
+  const industryPriorSection = formatIndustryPriorForPrompt(template.category)
   const structureDynamicPrompt = `${moodSystemSection}
 ${moodConflictWarning}
+${industryPriorSection}
 ${patternsSection}
 
 ${constraintsBlock}
@@ -5701,6 +5706,8 @@ ${ideasContext}
 ${referenceContext}
 
 ${memoryContext}
+
+${formatIndustryPriorForPrompt(productType)}
 
 ## 你的角色
 ${sourceType === 'ideas'
