@@ -31,6 +31,7 @@ import { analyzeUploadedImage, type ReferenceAnalysis } from '../../services/ref
 import { getImageLibraryOrFallback } from '../../services/image-library-service'
 import { z } from 'zod'
 import { getEnv } from '../../lib/env'
+import { isFeatureEnabledForUser } from '../../lib/feature-flag'
 import { MODEL } from '../../lib/anthropic'
 import { callStructured } from '../../lib/structured-output'
 import { createLogger } from '../../lib/logger'
@@ -985,12 +986,13 @@ export async function runFastBuildPipeline(params: {
   // 只在最後一批執行（所有頁面都到齊才有意義）
   const candidateCompletedPages = [...(state.fastBuildCompletedPages || []), ...targetPages]
   const remainingAfterThis = allPages.filter(p => !candidateCompletedPages.includes(p))
-  if (remainingAfterThis.length === 0 && getEnv().ENABLE_UI_EVALUATOR) {
+  if (remainingAfterThis.length === 0 && isFeatureEnabledForUser('ui_evaluator', state.userId)) {
     try {
       const evalResult = await evaluateUi({
         code: currentCode,
         tailwindConfig: generateTailwindConfig(designSystem),
         tier,
+        productType: state.uiuxPreparedTemplate?.category,
         trackingContext: { userId: state.userId ?? undefined, conversationId },
       })
       if (!evalResult.softFail && !evalResult.report.passed) {
@@ -1000,7 +1002,7 @@ export async function runFastBuildPipeline(params: {
             id: `eval-fast-${idx}`,
             category: 'code_quality',
             severity: 'critical',
-            rule: `evaluator_${i.category}`,
+            rule: `evaluator_${i.viewport ?? "desktop-light"}_${i.category}`,
             message: `[Evaluator] ${i.description}（路由 ${i.route}）`,
             file: i.route,
             suggestion: '請從使用者視角修復此問題',

@@ -13,6 +13,7 @@ import {
   type TelemetryTrackingContext,
 } from './skill-telemetry'
 import { auditCssConsistency } from './css-consistency-audit'
+import { auditVisualCraft } from './visual-craft-audit'
 import { resolveColor, extractBgAndText, isLargeText } from './tailwind-color-resolver'
 import { hex as wcagHex } from 'wcag-contrast'
 import { parseSearchReplaceBlocks, applySearchReplace } from './uiux-generation'
@@ -707,9 +708,11 @@ export function runQualityGate(code: GeneratedCode, designTier?: DesignTier, moo
   const idIssues = checkIdUniqueness(code)
   // P0: CSS Token 一致性（rule prefix 'consistency-*'，category=code_quality）
   const consistencyIssues = auditCssConsistency(code).issues
+  // T8: 視覺品質（rule prefix 'craft-*'，category=code_quality）
+  const craftIssues = auditVisualCraft(code).issues
 
   const allA11yIssues = [...a11yIssues, ...contrastIssues]
-  const allCqIssues = [...cqIssues, ...idIssues, ...consistencyIssues]
+  const allCqIssues = [...cqIssues, ...idIssues, ...consistencyIssues, ...craftIssues]
   const allIssues = [...allA11yIssues, ...perfIssues, ...allCqIssues]
 
   const critical = allIssues.filter(i => i.severity === 'critical').length
@@ -932,7 +935,9 @@ export async function autoFixCriticalIssues(
     `- [${i.severity}] ${i.rule}: ${i.message} (${i.file}${i.line ? `:${i.line}` : ''})${i.suggestion ? ` → ${i.suggestion}` : ''}`
   ).join('\n')
 
-  const useDiff = getEnv().ENABLE_REFINE_DIFF_OUTPUT
+  // T9: per-user rollout（trackingContext.userId hash bucket）
+  const { isFeatureEnabledForUser } = await import('../lib/feature-flag')
+  const useDiff = isFeatureEnabledForUser('refine_diff_output', trackingContext?.userId)
   const outputFormatHint = useDiff
     ? `3. 用 SEARCH/REPLACE block 標示每處修改（省 token + 避免大檔案截斷）：
 

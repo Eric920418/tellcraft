@@ -18,6 +18,11 @@ import { formatStructuredDataForPrompt } from './reference-analyzer'
 import { createLogger } from '../lib/logger'
 import { validateAndFixFiles } from './syntax-validator'
 import { recordTelemetry } from './skill-telemetry'
+import { validateVariantDiversity, buildRetryHint } from './variant-diversity'
+import { formatIndustryPriorForPrompt } from './industry-priors'
+import { parseIterationIntent, selectFilesByIntent, describeIntentForPrompt } from './iteration-intent'
+import { enforceStyleLock } from './style-lock'
+import { isFeatureEnabledForUser } from '../lib/feature-flag'
 
 const logger = createLogger('uiux-generation')
 
@@ -1177,6 +1182,19 @@ ${structuredRef}
 設計變體應參考但不照搬這些設計特徵。提取其設計精神，結合產品需求做差異化。${structuredRef ? '\n至少 2-3 個變體的主色應接近參考色板。' : ''}`
     : ''
 
+  // T1: Design Memory — 讀取使用者歷史偏好（fail-open，無記憶不影響流程）
+  let memorySection = ''
+  if (trackingContext?.userId) {
+    try {
+      const { getDesignMemory, formatMemoryForVariantPrompt } = await import('./design-memory')
+      const memory = await getDesignMemory(trackingContext.userId)
+      memorySection = formatMemoryForVariantPrompt(memory)
+      if (memorySection) memorySection = `\n${memorySection}\n`
+    } catch (err) {
+      // fail-open
+    }
+  }
+
   const systemPrompt = `你是一位資深的 UI/UX 設計師和前端架構師。你的任務是為一個產品生成 5 個不同方向的設計變體。
 
 ## 產品類型
@@ -1188,7 +1206,9 @@ BDD 規格列出了技術功能，但設計變體應服務於用戶的原始願�
 如果用戶 80% 的描述在講前端展覽動畫體驗，5 個變體都應圍繞前端體驗來差異化，
 不要圍繞後台管理介面的佈局差異。
 
-${originalRequirements || '（無原始描述）'}${referenceSection}
+${originalRequirements || '（無原始描述）'}${referenceSection}${memorySection}
+
+${formatIndustryPriorForPrompt(productType)}
 
 ## 模板基礎
 - 名稱：${template.name}
@@ -1369,13 +1389,16 @@ ${tier === 'functional' ? '- 不要使用漸層（除非明確要求）\n- 不�
     })),
   })
 
-  const result = await callStructuredWithSlot({
+  const baseTemperature = tier === 'creative' ? 0.6 : 0.4
+
+  // T4: 嘗試最多 2 次（base + 1 retry），中間插 diversity 驗證
+  let result = await callStructuredWithSlot({
     schema: DesignVariantsSchema,
     model: MODEL.SONNET,
     system: systemPrompt,
     messages: [{ role: 'user', content: userMessage }],
     maxTokens: 16384,
-    temperature: tier === 'creative' ? 0.6 : 0.4,
+    temperature: baseTemperature,
     purpose: 'generate_design_variants',
     trackingContext,
   })
@@ -1384,9 +1407,64 @@ ${tier === 'functional' ? '- 不要使用漸層（除非明確要求）\n- 不�
     return { success: false, error: result.error || '無法生成設計變體' }
   }
 
-  // 驗證變體數量（Structured Outputs 保證結構正確但不保證陣列長度）
   if (result.data.variants.length !== 5) {
     return { success: false, error: `變體數量不正確，預期 5 個，實際 ${result.data.variants.length} 個` }
+  }
+
+  // T4: 驗證 5 個變體真的有差異（layout / font / depth / hue / signature）
+  let diversity = validateVariantDiversity(result.data.variants as DesignVariant[])
+
+  recordTelemetry({
+    skillName: 'uiux',
+    eventType: 'variant_diversity',
+    patternKey: diversity.passed ? 'diversity_pass_first' : 'diversity_fail_first',
+    userId: trackingContext?.userId || null,
+    conversationId: trackingContext?.conversationId || null,
+    payload: {
+      tier,
+      productType,
+      issues: diversity.issues.map(i => i.key),
+      metrics: diversity.metrics,
+    },
+  }).catch(() => {})
+
+  if (!diversity.passed) {
+    logger.info({ issues: diversity.issues.map(i => i.key), metrics: diversity.metrics }, 'T4: 變體差異化驗證失敗，retry 一次')
+
+    const retryHint = buildRetryHint(diversity.issues)
+    const retryResult = await callStructuredWithSlot({
+      schema: DesignVariantsSchema,
+      model: MODEL.SONNET,
+      system: `${systemPrompt}\n\n${retryHint}`,
+      messages: [{ role: 'user', content: userMessage }],
+      maxTokens: 16384,
+      temperature: 0.7,  // 升溫加大隨機性
+      purpose: 'generate_design_variants_retry',
+      trackingContext,
+    })
+
+    if (retryResult.success && retryResult.data.variants.length === 5) {
+      const retryDiversity = validateVariantDiversity(retryResult.data.variants as DesignVariant[])
+      recordTelemetry({
+        skillName: 'uiux',
+        eventType: 'variant_diversity',
+        patternKey: retryDiversity.passed ? 'diversity_pass_retry' : 'diversity_fail_retry',
+        userId: trackingContext?.userId || null,
+        conversationId: trackingContext?.conversationId || null,
+        payload: {
+          tier,
+          productType,
+          issues: retryDiversity.issues.map(i => i.key),
+          metrics: retryDiversity.metrics,
+        },
+      }).catch(() => {})
+
+      // retry 結果優於 base：採用（即使仍不完美也比第一輪好）
+      if (retryDiversity.issues.length < diversity.issues.length) {
+        result = retryResult
+        diversity = retryDiversity
+      }
+    }
   }
 
   return {
@@ -3648,6 +3726,7 @@ export async function generateStructure(
   onPartialCode?: PartialCodeCallback,
   heartbeatFn?: () => void,  // 長時間 post-processing 期間刷新 Redis 活動心跳
   onCheckpoint?: (partial: { pages: GeneratedComponent[]; components: GeneratedComponent[]; styles: string }) => Promise<void>,
+  abortChecker?: () => Promise<boolean>,  // T6: 批次邊界檢查中止訊號
 ): Promise<GenerationResult> {
   const tier = designTier || 'functional'
   const generationProfile = productContext?.generationProfile || 'balanced'
@@ -3788,9 +3867,11 @@ ${getDataAnimateSpec()}
 
 ${baseRulesBlock}`
 
-  // Dynamic block：每次不同（mood、patterns、constraints、techniques、designSystem、interaction rules）
+  // Dynamic block：每次不同（mood、patterns、constraints、techniques、designSystem、interaction rules、industry prior）
+  const industryPriorSection = formatIndustryPriorForPrompt(template.category)
   const structureDynamicPrompt = `${moodSystemSection}
 ${moodConflictWarning}
+${industryPriorSection}
 ${patternsSection}
 
 ${constraintsBlock}
@@ -4131,6 +4212,26 @@ ${isLaterBatch
     logger.info({ totalPages: pages.length, batchCount: batches.length, generationProfile }, 'generateStructure multi-pass 模式')
 
     for (let batchIdx = 0; batchIdx < batches.length; batchIdx++) {
+      // T6: 批次邊界檢查中止訊號 — 第 1 批不檢查（避免立刻退出，至少跑一批）
+      if (batchIdx > 0 && abortChecker && await abortChecker()) {
+        logger.info({ batchIdx, completedBatches: batchIdx, totalBatches: batches.length }, 'generateStructure 收到中止訊號，提早退出')
+        recordTelemetry({
+          skillName: 'uiux',
+          eventType: 'iteration',
+          patternKey: 'generation_aborted',
+          userId: trackingContext?.userId || null,
+          conversationId: trackingContext?.conversationId || null,
+          payload: {
+            phase: 'structure',
+            completedBatches: batchIdx,
+            totalBatches: batches.length,
+            partialPages: allRawPages.length,
+            partialComponents: allRawComponents.length,
+          },
+        }).catch(() => {})
+        break
+      }
+
       const batch = batches[batchIdx]
       const isFirstBatch = batchIdx === 0
       const existingPaths = isFirstBatch
@@ -5602,6 +5703,18 @@ ${referenceAnalysis.metadata?.themeColor ? `主題色: ${referenceAnalysis.metad
 ${structuredBriefRef}`
       : ''
 
+  // T1: Design Memory — 老用戶歷史偏好（fail-open）
+  let memoryContext = ''
+  if (trackingContext?.userId) {
+    try {
+      const { getDesignMemory, formatMemoryForBriefPrompt } = await import('./design-memory')
+      const memory = await getDesignMemory(trackingContext.userId)
+      memoryContext = formatMemoryForBriefPrompt(memory)
+    } catch (err) {
+      // fail-open
+    }
+  }
+
   const systemPrompt = `你是一位資深 UI/UX 設計顧問。你的任務是根據用戶提供的資訊，總結設計方向並給出專業建議。
 
 ## 產品類型
@@ -5615,6 +5728,10 @@ ${templateContext}
 ${ideasContext}
 
 ${referenceContext}
+
+${memoryContext}
+
+${formatIndustryPriorForPrompt(productType)}
 
 ## 你的角色
 ${sourceType === 'ideas'
@@ -6398,8 +6515,27 @@ ${retryFileBlocks}
     )
   }
 
-  const promptCodeBundle = pickRefineTargetBundle(currentCode)
+  // T11: 解析 feedback 意圖 → 縮窄送給 LLM 的檔案範圍
+  const parsedIntent = parseIterationIntent(userFeedback)
+  if (parsedIntent) {
+    recordTelemetry({
+      skillName: 'iteration',
+      eventType: 'iteration',
+      patternKey: `intent:${parsedIntent.scope}:${parsedIntent.action}`,
+      userId: trackingContext?.userId || null,
+      conversationId: trackingContext?.conversationId || null,
+      payload: {
+        scope: parsedIntent.scope,
+        action: parsedIntent.action,
+        targets: parsedIntent.targets,
+        confidence: parsedIntent.confidence,
+      },
+    }).catch(() => {})
+  }
+
+  const promptCodeBundle = selectFilesByIntent(pickRefineTargetBundle(currentCode), parsedIntent)
   const codeBlocks = buildCodeBlocks(promptCodeBundle)
+  const intentSection = describeIntentForPrompt(parsedIntent)
 
   // 計算大檔案行數，注入防截斷提示
   const largeFileWarnings = [...promptCodeBundle.pages, ...promptCodeBundle.components]
@@ -6445,6 +6581,7 @@ ${briefSection}
 ${refineConceptSection}
 ${designContext.moodId ? `\n## 設計風格（修改時不可丟失）\nMood: ${getMoodSummary(designContext.moodId)}\n` : ''}
 ${iterationHistorySection}
+${intentSection}
 ${getStructureConstraints(tier)}
 
 ## 重要：輸入驗證（最高優先）
@@ -6510,7 +6647,7 @@ ${targetPreviewRoute ? `
 ` : ''}
 
 ## 輸出格式
-${getEnv().ENABLE_REFINE_DIFF_OUTPUT ? `使用 SEARCH/REPLACE block 精確標示每處修改（省 token + 避免大檔案截斷）：
+${isFeatureEnabledForUser('refine_diff_output', trackingContext?.userId) ? `使用 SEARCH/REPLACE block 精確標示每處修改（省 token + 避免大檔案截斷）：
 
 <<<<<<< SEARCH:path/to/file.tsx
 // 原代碼片段（必須精確匹配，含 3-5 行上下文確保唯一定位）
@@ -6819,6 +6956,41 @@ ${codeBlocks.join('\n\n')}
           error: '偵測到剛上傳的圖片在更新後遺失，為避免覆蓋您的設計，本次修改已取消。請再按一次儲存，或縮小修改範圍重試。',
         }
       }
+    }
+  }
+
+  // T12: Style Lock — 防止 LLM 順手改了 design tokens
+  // 跳過：用戶 feedback 明確要求改色 (palette) / 換字體 (typography)
+  if (
+    designContext.designSystem &&
+    parsedIntent?.scope !== 'palette' &&
+    parsedIntent?.scope !== 'typography'
+  ) {
+    try {
+      const lockResult = enforceStyleLock(designContext.designSystem, mergedCode)
+      if (lockResult.violations.length > 0) {
+        logger.info({
+          violations: lockResult.violations.map(v => `${v.type}:${v.token}`),
+        }, 'T12 Style Lock：偵測到 design token 漂移，已自動還原')
+
+        recordTelemetry({
+          skillName: 'iteration',
+          eventType: 'iteration',
+          patternKey: 'style_lock_violation',
+          userId: trackingContext?.userId || null,
+          conversationId: trackingContext?.conversationId || null,
+          payload: {
+            violations: lockResult.violations.map(v => ({ type: v.type, token: v.token })),
+            count: lockResult.violations.length,
+            intentScope: parsedIntent?.scope || 'unknown',
+          },
+        }).catch(() => {})
+
+        mergedCode = lockResult.restoredCode
+      }
+    } catch (err) {
+      // fail-open：style lock 失敗絕不阻塞迭代
+      logger.warn({ err: String(err).slice(0, 200) }, 'T12 Style Lock 失敗，跳過')
     }
   }
 

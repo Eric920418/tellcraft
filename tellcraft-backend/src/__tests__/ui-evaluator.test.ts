@@ -37,7 +37,7 @@ describe('ui-evaluator feature flag', () => {
     expect(result.softFail).toBe(true)
     expect(result.report.passed).toBe(true)
     expect(result.report.issues).toEqual([])
-    expect(result.skipReason).toContain('ENABLE_UI_EVALUATOR=false')
+    expect(result.skipReason).toContain('ui_evaluator disabled')
   })
 
   it('ENABLE_UI_EVALUATOR=false 顯式設定也是 softFail', async () => {

@@ -38,6 +38,14 @@
 - 頁面看起來正常 → 回 `{ passed: true, issues: [] }`
 - 至少一個 critical → `passed: false`
 
+## Viewport 規則（T7：多視角驗收）
+
+- 系統可能對同一個頁面從多個 viewport 截圖（desktop / mobile / dark）
+- 每次 LLM 呼叫只會傳一個 viewport — 訊息 dynamic 區會有「當前視角」段落
+- **若收到 mobile-light 視角**：只回報 mobile 才會出現的問題（橫向捲動、字體 < 14px、觸控目標 < 44px、漢堡選單無 trigger、內容溢出 viewport）
+- **若收到 desktop-dark 視角**：只回報 dark mode 才會出現的問題（對比度不足、背景未切換、白底圖片刺眼、邊框消失、強調色失調）
+- 若 mobile / dark 看起來與 desktop-light 同樣可用 → 回 `{ passed: true, issues: [] }`，不要重複報告 desktop 已抓到的問題
+
 ## 注意事項
 
 - 你只看 screenshot + DOM outline，沒有原始碼上下文

@@ -21,10 +21,16 @@ import { evaluateUi, type UiEvaluationIssue } from '../../services/ui-evaluator'
 import type { QualityIssue } from '../../services/quality-gate'
 import { generateDesignQualityReport, logDesignQualityReport } from '../../services/design-quality-report'
 import { getEnv } from '../../lib/env'
+import { isFeatureEnabledForUser } from '../../lib/feature-flag'
 import { getBddSession, updateBddSession } from '../../services/bdd-session'
-import { analyzeReference, analyzeUploadedImage } from '../../services/reference-analyzer'
+import { analyzeReference, analyzeUploadedImage, analyzeMultipleReferences, extractAllUrls, formatMergedReferenceForPrompt } from '../../services/reference-analyzer'
 import { getImageLibraryOrFallback, invalidateImageLibrary } from '../../services/image-library-service'
 import { recommendMoods, getMoodSummary } from '../../services/design-moods'
+import { updateDesignMemory, extractPaletteFromDesignSystem, extractFontFamily } from '../../services/design-memory'
+import {
+  pickNextClarifyAxis, shouldAskSupplementary, pickSupplementaryQuestion,
+  type ClarifyAxis,
+} from '../../services/design-clarify-axes'
 import { executeIteration, executeUndoIteration } from '../../services/iteration-skill'
 import { semanticGateway } from '../../services/semantic-gateway'
 import { detectFastModeIntent, getFaqReply, answerWithSonnet } from '../../services/customer-service'
@@ -1275,6 +1281,18 @@ export async function handleVariantSelection(
   // 合併變體生成最終 Design System
   const finalDesignSystem = synthesizeVariants(selectedIds, variants, state.uiuxDesignMood)
 
+  // T1: 寫 Design Memory（fire-and-forget — 變體選定後記錄 palette / mood / font / 完成樣本 +1）
+  if (state.userId) {
+    const fontFamily = extractFontFamily(finalDesignSystem)
+    updateDesignMemory({
+      userId: state.userId,
+      palette: extractPaletteFromDesignSystem(finalDesignSystem),
+      moodId: state.uiuxDesignMood,
+      fontFamily: fontFamily ?? undefined,
+      incrementSample: true,
+    }).catch(() => {})
+  }
+
   // 提取選中 variant 的創意概念
   const variantConcept = extractVariantConcept(selectedIds, variants)
   state.uiuxVariantConcept = variantConcept
@@ -1633,7 +1651,7 @@ export async function executeFullCodePipeline(
   // ===== 黑盒 Evaluator 二階段 QA（PR1 Harness Engineering）=====
   // 獨立驗收軌道：看不到 tsx 代碼，只從 screenshot + DOM outline 判斷可用性
   // flag off 時完全跳過迴圈，避免 generateTailwindConfig 白算
-  if (getEnv().ENABLE_UI_EVALUATOR) {
+  if (isFeatureEnabledForUser('ui_evaluator', state.userId)) {
     const MAX_EVAL_ATTEMPTS = 2
     const evalTwConfig = generateTailwindConfig(uiuxDesignSystem)
     const qgTrackingContextEval = { userId: state.userId, conversationId, projectId: state.projectId }
@@ -1642,6 +1660,7 @@ export async function executeFullCodePipeline(
         code: currentCode,
         tailwindConfig: evalTwConfig,
         tier: state.uiuxDesignTier,
+        productType: state.uiuxPreparedTemplate?.category,
         bddBrief: state.uiuxDesignBrief?.styleSummary,
         trackingContext: { userId: state.userId ?? undefined, conversationId },
       })
@@ -1658,7 +1677,7 @@ export async function executeFullCodePipeline(
         id: `eval-${evalAttempt}-${idx}`,
         category: 'code_quality',
         severity: 'critical',
-        rule: `evaluator_${i.category}`,
+        rule: `evaluator_${i.viewport ?? "desktop-light"}_${i.category}`,
         message: `[Evaluator] ${i.description}（路由 ${i.route}）`,
         file: i.route,
         suggestion: '請從使用者視角修復此問題，不要只是改 class 名稱',
@@ -1675,7 +1694,7 @@ export async function executeFullCodePipeline(
 
   // P3: 設計品質報告（feature flag，advisory only，不阻塞 pipeline）
   try {
-    if (getEnv().ENABLE_DESIGN_QUALITY_REPORT) {
+    if (isFeatureEnabledForUser('design_quality_report', state.userId)) {
       const dqReport = generateDesignQualityReport(report)
       logDesignQualityReport(dqReport, { conversationId, phase: 'uiux_quality_gate' })
     }
@@ -2200,7 +2219,7 @@ export async function executeQualityGate(
   report.summary.autoFixed = totalAutoFixed
 
   // ===== 黑盒 Evaluator 二階段 QA（PR1）=====
-  if (getEnv().ENABLE_UI_EVALUATOR) {
+  if (isFeatureEnabledForUser('ui_evaluator', state.userId)) {
     const MAX_EVAL_ATTEMPTS_2 = 2
     const evalTwConfig2 = generateTailwindConfig(uiuxDesignSystem)
     for (let evalAttempt = 0; evalAttempt < MAX_EVAL_ATTEMPTS_2; evalAttempt++) {
@@ -2208,6 +2227,7 @@ export async function executeQualityGate(
         code: currentCode,
         tailwindConfig: evalTwConfig2,
         tier: state.uiuxDesignTier,
+        productType: state.uiuxPreparedTemplate?.category,
         bddBrief: state.uiuxDesignBrief?.styleSummary,
         trackingContext: { userId: state.userId ?? undefined, conversationId },
       })
@@ -2218,7 +2238,7 @@ export async function executeQualityGate(
         id: `eval-alt-${evalAttempt}-${idx}`,
         category: 'code_quality',
         severity: 'critical',
-        rule: `evaluator_${i.category}`,
+        rule: `evaluator_${i.viewport ?? "desktop-light"}_${i.category}`,
         message: `[Evaluator] ${i.description}（路由 ${i.route}）`,
         file: i.route,
         suggestion: '請從使用者視角修復此問題',
@@ -2233,7 +2253,7 @@ export async function executeQualityGate(
 
   // P3: 設計品質報告（feature flag，advisory only，不阻塞 pipeline）
   try {
-    if (getEnv().ENABLE_DESIGN_QUALITY_REPORT) {
+    if (isFeatureEnabledForUser('design_quality_report', state.userId)) {
       const dqReport = generateDesignQualityReport(report)
       logDesignQualityReport(dqReport, { conversationId, phase: 'uiux_quality_gate_redo' })
     }
@@ -2596,21 +2616,56 @@ async function startDesignClarifyWithInitialIdea(
   redis: Redis,
   io: IoEmitter
 ) {
-  // 保存初始想法
   state.phase = 'uiux_design_clarify'
-  state.uiuxDesignClarifyStep = 2
   state.uiuxDesignIdeas = [{ step: 'initial', answer: initialIdea }]
 
-  await sendMessage(conversationId, io, {
-    content: `收到！「${initialIdea}」\n\n接下來，請告訴我：\n\n**你有沒有喜歡的網站或 App 可以參考？**\n\n_可以提供名稱或網址，例如：Notion、Stripe、Apple..._`,
-    stage: 'uiux_design_clarify',
-    quickReplies: [
-      { label: '← 返回重選', value: '__go_back__', style: 'ghost' },
-    ],
-  })
+  // 4 個 axis 對應的 step + 提問內容（與 handleDesignClarifyReply 同步）
+  const QUESTIONS: Record<ClarifyAxis, { step: number; question: string; hint: string }> = {
+    feeling:   { step: 1, question: '你希望產品給用戶什麼樣的感覺？', hint: '例如：專業可靠、活潑有趣、簡約現代、溫暖親切...' },
+    reference: { step: 2, question: '你有沒有喜歡的網站或 App 可以參考？', hint: '可以提供名稱或網址，例如：Notion、Stripe、Apple...也可以直接上傳參考截圖' },
+    color:     { step: 3, question: '你對顏色有什麼偏好嗎？', hint: '例如：藍色系、暖色調、黑白灰、品牌色是 #FF5733...' },
+    layout:    { step: 4, question: '你偏好什麼樣的佈局風格？', hint: '例如：簡潔留白、內容密集、卡片式、列表式...' },
+  }
 
-  state.waitingForReply = true
-  await saveFlowStateLight(redis, conversationId, state)
+  // T2: 從 initial idea 偵測已涵蓋的軸線，跳到下一個未涵蓋的軸
+  const nextAxis = pickNextClarifyAxis(state.uiuxDesignIdeas)
+
+  if (nextAxis) {
+    const q = QUESTIONS[nextAxis]
+    state.uiuxDesignClarifyStep = q.step
+    await sendMessage(conversationId, io, {
+      content: `收到！「${initialIdea}」\n\n接下來，請告訴我：\n\n**${q.question}**\n\n_${q.hint}_`,
+      stage: 'uiux_design_clarify',
+      quickReplies: [
+        { label: '跳過此題', value: '__skip__', style: 'ghost' },
+        { label: '← 返回重選', value: '__go_back__', style: 'ghost' },
+      ],
+    })
+    state.waitingForReply = true
+    await saveFlowStateLight(redis, conversationId, state)
+    return
+  }
+
+  // 4 軸已全涵蓋 — 補充追問或直接生成
+  if (shouldAskSupplementary(state.uiuxDesignIdeas)) {
+    const supp = pickSupplementaryQuestion(state.uiuxDesignIdeas)
+    if (supp) {
+      state.uiuxDesignClarifyStep = 5
+      await sendMessage(conversationId, io, {
+        content: `不錯，方向很清楚！再問一個問題幫我抓更精準：\n\n**${supp.question}**\n\n_${supp.hint}_`,
+        stage: 'uiux_design_clarify',
+        quickReplies: [
+          { label: '跳過此題', value: '__skip_supplementary__', style: 'ghost' },
+          { label: '直接生成', value: '__skip_supplementary__', style: 'primary' },
+        ],
+      })
+      state.waitingForReply = true
+      await saveFlowStateLight(redis, conversationId, state)
+      return
+    }
+  }
+
+  await completeDesignClarify(conversationId, state, redis, io)
 }
 
 
@@ -2660,6 +2715,17 @@ export async function handleDesignClarifyReply(
   ]
 
   // 驗證並保存當前回答
+  // T2: 補充追問階段（step=5）— 不走 4 軸驗證，直接保存答案後 fall through 到完成
+  if (step === 5) {
+    const trimmedMsg = message.trim()
+    if (trimmedMsg && trimmedMsg !== '__skip_supplementary__' && trimmedMsg !== '__skip__') {
+      ideas.push({ step: 'supplementary', answer: trimmedMsg })
+      state.uiuxDesignIdeas = ideas
+    }
+    await completeDesignClarify(conversationId, state, redis, io)
+    return
+  }
+
   const currentQuestion = clarifyQuestions.find(q => q.step === step)
   if (currentQuestion) {
     const trimmedMsg = message.trim()
@@ -2705,27 +2771,56 @@ export async function handleDesignClarifyReply(
     }
   }
 
-  // 檢查是否還有下一個問題
-  const nextQuestion = clarifyQuestions.find(q => q.step === step + 1)
+  // T2: 動態軸線追蹤 — 跳過用戶已涵蓋的軸線
+  // step=5 代表已進入補充追問階段，不再返回 axis 詢問
+  if (step !== 5) {
+    const nextAxis = pickNextClarifyAxis(state.uiuxDesignIdeas || [])
 
-  if (nextQuestion) {
-    // 繼續下一個問題
-    await sendMessage(conversationId, io, {
-      content: `好的，收到！\n\n**${nextQuestion.question}**\n\n_${nextQuestion.hint}_`,
-      stage: 'uiux_design_clarify',
-      quickReplies: [
-        { label: '跳過此題', value: '__skip__', style: 'ghost' },
-        { label: '← 重來', value: '__go_back__', style: 'ghost' },
-      ],
-    })
+    if (nextAxis) {
+      const nextQuestion = clarifyQuestions.find(q => q.key === nextAxis)
+      if (nextQuestion) {
+        const skipped = nextQuestion.step - (step + 1)
+        const intro = skipped > 0
+          ? `收到！我看你提到了一些其他面向，先聚焦剩下的部分：\n\n`
+          : `好的，收到！\n\n`
+        await sendMessage(conversationId, io, {
+          content: `${intro}**${nextQuestion.question}**\n\n_${nextQuestion.hint}_`,
+          stage: 'uiux_design_clarify',
+          quickReplies: [
+            { label: '跳過此題', value: '__skip__', style: 'ghost' },
+            { label: '← 重來', value: '__go_back__', style: 'ghost' },
+          ],
+        })
 
-    state.uiuxDesignClarifyStep = step + 1
-    state.waitingForReply = true
-    await saveFlowStateLight(redis, conversationId, state)
-  } else {
-    // 釐清完成，生成設計方案
-    await completeDesignClarify(conversationId, state, redis, io)
+        state.uiuxDesignClarifyStep = nextQuestion.step
+        state.waitingForReply = true
+        await saveFlowStateLight(redis, conversationId, state)
+        return
+      }
+    }
+
+    // 4 軸全涵蓋 — 視 ideas 數量決定是否補追問一次（power user 一句話覆蓋全部時）
+    if (shouldAskSupplementary(state.uiuxDesignIdeas || [])) {
+      const supp = pickSupplementaryQuestion(state.uiuxDesignIdeas || [])
+      if (supp) {
+        await sendMessage(conversationId, io, {
+          content: `不錯，方向很清楚！再問一個問題幫我抓更精準：\n\n**${supp.question}**\n\n_${supp.hint}_`,
+          stage: 'uiux_design_clarify',
+          quickReplies: [
+            { label: '跳過此題', value: '__skip_supplementary__', style: 'ghost' },
+            { label: '直接生成', value: '__skip_supplementary__', style: 'primary' },
+          ],
+        })
+        state.uiuxDesignClarifyStep = 5
+        state.waitingForReply = true
+        await saveFlowStateLight(redis, conversationId, state)
+        return
+      }
+    }
   }
+
+  // 釐清完成，生成設計方案
+  await completeDesignClarify(conversationId, state, redis, io)
 }
 
 /**
@@ -2749,26 +2844,53 @@ export async function completeDesignClarify(
 
   // 分析參考圖片和/或參考網站（兩者都做，合併結果）
   const referenceIdea = ideas.find(i => i.step === 'reference')
-  const hasUploadedImage = state.uiuxReferenceImageUrls?.length
-  const hasUrlInput = referenceIdea?.answer
+  const allImages = state.uiuxReferenceImageUrls ?? []
+  const allUrls = referenceIdea?.answer ? extractAllUrls(referenceIdea.answer) : []
+  const totalSources = allImages.length + allUrls.length
 
-  // 並行分析上傳圖片 + URL（如果兩者都有）
-  const [imageAnalysisResult, urlAnalysisResult] = await Promise.allSettled([
-    hasUploadedImage
-      ? analyzeUploadedImage(state.uiuxReferenceImageUrls![0], {
-          userId: state.userId,
-          conversationId,
-          purpose: 'uploaded_image_analysis',
+  // T5: 多來源（≥ 2）走融合分析；單來源沿用既有路徑
+  if (totalSources >= 2) {
+    try {
+      const merged = await analyzeMultipleReferences(
+        { urls: allUrls, imageUrls: allImages },
+        { userId: state.userId, conversationId, purpose: 'multi_reference_analysis' },
+      )
+      if (merged) {
+        state.uiuxReferenceAnalysis = merged
+        await saveFlowState(redis, conversationId, state)
+        await sendMessage(conversationId, io, {
+          content: `已融合分析您提供的 ${merged.sources.length} 個參考來源${merged.commonTraits ? '，並抽取共通設計語言' : ''}，設計會體現於後續方案。`,
+          stage: 'uiux_design_clarify_complete',
         })
-      : Promise.resolve(null),
-    hasUrlInput
-      ? analyzeReference(referenceIdea!.answer, {
-          userId: state.userId,
-          conversationId,
-          purpose: 'reference_analysis',
-        })
-      : Promise.resolve(null),
-  ])
+        // 若多源分析成功，跳過下方單源 fallback
+        // 取得 BDD Session 並繼續
+        // （下面的 imageAnalysis/urlAnalysis 區塊用 noop 跳過）
+      }
+    } catch (err) {
+      logger.warn({ err: String(err).slice(0, 200) }, 'T5 多來源融合失敗，降級單源分析')
+    }
+  }
+
+  // 並行分析上傳圖片 + URL（如果兩者都有，single-source path）
+  const skipSingleSource = !!state.uiuxReferenceAnalysis && totalSources >= 2
+  const [imageAnalysisResult, urlAnalysisResult] = skipSingleSource
+    ? [{ status: 'fulfilled' as const, value: null }, { status: 'fulfilled' as const, value: null }]
+    : await Promise.allSettled([
+        allImages.length > 0
+          ? analyzeUploadedImage(allImages[0], {
+              userId: state.userId,
+              conversationId,
+              purpose: 'uploaded_image_analysis',
+            })
+          : Promise.resolve(null),
+        referenceIdea?.answer
+          ? analyzeReference(referenceIdea.answer, {
+              userId: state.userId,
+              conversationId,
+              purpose: 'reference_analysis',
+            })
+          : Promise.resolve(null),
+      ])
 
   const imageAnalysis = imageAnalysisResult.status === 'fulfilled' ? imageAnalysisResult.value : null
   const urlAnalysis = urlAnalysisResult.status === 'fulfilled' ? urlAnalysisResult.value : null
@@ -3176,6 +3298,17 @@ export async function proceedToVariantGeneration(
     template.description = template.description
       ? `${template.description}\n\n## AI 設計顧問建議\n${briefEnhancement}`
       : `## AI 設計顧問建議\n${briefEnhancement}`
+  }
+
+  // T1: 寫 Design Memory（fire-and-forget — brief 確認後記錄 brand_tone / tier / signature）
+  if (state.userId && state.uiuxDesignBrief) {
+    const brief = state.uiuxDesignBrief
+    updateDesignMemory({
+      userId: state.userId,
+      brandTone: { keywords: [brief.styleSummary], avoid: [] },
+      tier: state.uiuxDesignTier,
+      signatureKeywords: brief.domainKeywords ?? [],
+    }).catch(() => {})
   }
 
   const sourceType = state.uiuxDesignBrief?.sourceType || 'template'

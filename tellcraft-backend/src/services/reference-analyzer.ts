@@ -108,6 +108,18 @@ export function extractFirstUrl(input: string): string | null {
   return match ? match[0] : null
 }
 
+/** T5: 從一段文字抽出所有 URL（去重，保留順序）。 */
+export function extractAllUrls(input: string): string[] {
+  const matches = input.match(/https?:\/\/[^\s,，、;；()'"]+/gi) || []
+  const seen = new Set<string>()
+  const ordered: string[] = []
+  for (const m of matches) {
+    const url = m.replace(/[.,;:!?)]+$/, '')  // 剝末端標點
+    if (!seen.has(url)) { seen.add(url); ordered.push(url) }
+  }
+  return ordered
+}
+
 /**
  * 判斷 IPv4 字串是否屬於私有 / 保留段。
  *
@@ -1096,4 +1108,155 @@ export async function analyzeReference(
     analysisSource: 'text_only',
     error: '無法存取此網站',
   }
+}
+
+// ============================================================
+// T5: 多來源融合
+// ============================================================
+
+const MAX_URLS = 3
+const MAX_IMAGES = 3
+
+export interface MergedReferenceAnalysis extends ReferenceAnalysis {
+  sources: ReferenceAnalysis[]   // 各來源原始分析
+  commonTraits?: string          // ≥ 2 來源出現的共通特徵（Haiku 萃取）
+  divergentTraits?: string       // 各來源獨有特徵
+}
+
+/**
+ * 並行分析多個 URL + 多張上傳圖片，合併為一份 ReferenceAnalysis。
+ *
+ * 策略：
+ *  - URL 上限 3 / 圖片上限 3（成本控管）
+ *  - Promise.allSettled 失敗自動降級
+ *  - ≥ 2 個來源有 visionAnalysis → 拼接 + Haiku 萃取 commonTraits / divergentTraits
+ *  - < 2 個來源 → 直接回第一個有效結果（行為與單源相同）
+ *  - 所有來源都失敗 → 回 null
+ */
+export async function analyzeMultipleReferences(
+  inputs: { urls?: string[]; imageUrls?: string[] },
+  trackingContext?: LlmTrackingContext,
+): Promise<MergedReferenceAnalysis | null> {
+  const urls = (inputs.urls ?? []).slice(0, MAX_URLS)
+  const images = (inputs.imageUrls ?? []).slice(0, MAX_IMAGES)
+  if (urls.length === 0 && images.length === 0) return null
+
+  const tasks: Promise<ReferenceAnalysis>[] = [
+    ...urls.map(u => analyzeReference(u, trackingContext)),
+    ...images.map(i => analyzeUploadedImage(i, trackingContext)),
+  ]
+  const settled = await Promise.allSettled(tasks)
+  const sources: ReferenceAnalysis[] = settled
+    .filter((s): s is PromiseFulfilledResult<ReferenceAnalysis> => s.status === 'fulfilled')
+    .map(s => s.value)
+
+  if (sources.length === 0) return null
+
+  // 收集所有 vision 分析非空的來源
+  const visionSources = sources.filter(s => s.visionAnalysis && s.visionAnalysis.trim().length > 0)
+  if (visionSources.length === 0) {
+    // 沒有 vision，直接回第一個來源
+    return { ...sources[0], sources }
+  }
+
+  // 拼接所有 visionAnalysis
+  const combinedVision = visionSources
+    .map((s, i) => {
+      const label = s.metadata?.title || s.url || `來源 ${i + 1}`
+      return `## 來源 ${i + 1}: ${label}\n${s.visionAnalysis}`
+    })
+    .join('\n\n')
+
+  // 多來源 → 跑 Haiku 萃取共通 / 差異特徵
+  let commonTraits: string | undefined
+  let divergentTraits: string | undefined
+  if (visionSources.length >= 2) {
+    const traits = await extractMergedTraits(visionSources, trackingContext)
+    commonTraits = traits?.common
+    divergentTraits = traits?.divergent
+  }
+
+  // 把 commonTraits / divergentTraits 也注入 visionAnalysis 開頭（讓下游 prompt 自動帶到）
+  let prefixedVision = combinedVision
+  if (commonTraits || divergentTraits) {
+    const traitParts: string[] = []
+    if (commonTraits) traitParts.push(`### 共通特徵（必須體現）\n${commonTraits}`)
+    if (divergentTraits) traitParts.push(`### 差異特徵（變體差異化素材）\n${divergentTraits}`)
+    prefixedVision = `## 多來源融合（${visionSources.length} 個來源）\n\n${traitParts.join('\n\n')}\n\n${combinedVision}`
+  }
+
+  // 主結果以第一個來源為基底
+  const base = sources[0]
+  return {
+    ...base,
+    visionAnalysis: prefixedVision,
+    sources,
+    commonTraits,
+    divergentTraits,
+  }
+}
+
+interface MergedTraits { common: string; divergent: string }
+
+async function extractMergedTraits(
+  visionSources: ReferenceAnalysis[],
+  trackingContext?: LlmTrackingContext,
+): Promise<MergedTraits | null> {
+  try {
+    const { z } = await import('zod')
+    const { callStructured } = await import('../lib/structured-output')
+    const { MODEL } = await import('../lib/anthropic')
+
+    const Schema = z.object({
+      commonTraits: z.string(),
+      divergentTraits: z.string(),
+    })
+
+    const sourceText = visionSources
+      .map((s, i) => `### 來源 ${i + 1} (${s.metadata?.title || s.url})\n${s.visionAnalysis?.slice(0, 1500) || ''}`)
+      .join('\n\n')
+
+    const result = await callStructured({
+      schema: Schema,
+      model: MODEL.HAIKU,
+      system: `你是設計分析師。用戶提供了 ${visionSources.length} 個參考來源的視覺分析。
+你的任務：找出 (1) 共通特徵：≥ 2 來源都有的設計傾向（必須體現於最終設計）；
+(2) 差異特徵：每個來源獨有的元素（供變體差異化使用）。
+
+格式要求：
+- commonTraits: 1-3 句話，列出共通設計語言（色彩傾向、字體風格、佈局類型）
+- divergentTraits: 每來源 1 行，說明該來源獨有的元素
+
+注意：不要編造內容，只基於上方提供的真實分析。`,
+      messages: [{ role: 'user', content: sourceText }],
+      maxTokens: 800,
+      temperature: 0.2,
+      purpose: 'merge_reference_traits',
+      trackingContext,
+    })
+
+    if (!result.success) return null
+    return { common: result.data.commonTraits, divergent: result.data.divergentTraits }
+  } catch (err) {
+    logger.warn({ err: String(err).slice(0, 200) }, 'extractMergedTraits 失敗（fail-open）')
+    return null
+  }
+}
+
+/**
+ * 把 MergedReferenceAnalysis 格式化為 prompt 段落（取代既有單源格式）。
+ */
+export function formatMergedReferenceForPrompt(merged: MergedReferenceAnalysis): string {
+  const parts: string[] = []
+  if (merged.commonTraits) {
+    parts.push(`### 共通特徵（≥ 2 來源都有 — 最終設計必須體現）\n${merged.commonTraits}`)
+  }
+  if (merged.divergentTraits) {
+    parts.push(`### 差異特徵（變體差異化素材）\n${merged.divergentTraits}`)
+  }
+  if (merged.visionAnalysis) {
+    parts.push(`### 各來源原始分析\n${merged.visionAnalysis}`)
+  }
+  if (parts.length === 0) return ''
+  return `## 參考來源融合分析（共 ${merged.sources.length} 個來源）\n\n${parts.join('\n\n')}`
 }

@@ -248,39 +248,30 @@ output_format:
 
 ---
 
-## Design Memory（設計記憶）- 規劃中
+## Design Memory（設計記憶）
 
-> **狀態：尚未實作。** 設計記憶功能目前處於規劃階段，未來將支援持久化設計決策供跨會話使用。
+跨 session 的使用者層級設計偏好記憶（v1，2026-05 上線）。
 
-格式範例（供未來參考）：
+**儲存（PostgreSQL `design_memory` 表，user-scoped）**：
+- `brand_tone`：累積語彙 + 拒絕詞（`{keywords, avoid}`）
+- `preferred_palettes`：過往採用的色板（FIFO 最多 5 筆）
+- `preferred_moods` / `preferred_tiers` / `fonts_used`：過往挑選紀錄
+- `rejected_patterns`：iteration 階段明確拒絕的 pattern
+- `signature_keywords`：domain 探索關鍵詞累積
 
-```markdown
-# Design Memory - [Project Name]
+**寫入點（fire-and-forget，絕不阻塞 pipeline）**：
+- `proceedToVariantGeneration`（brief 確認後）→ brand_tone / tier / signature_keywords
+- `handleVariantSelection`（變體選定後）→ palette / mood / font / sample_count +1
+- `executeIteration`（含 removal 詞時）→ brand_tone.avoid
 
-## Brand Tone
-- **Style**: minimal, professional
-- **Avoid**: playful, cartoon-like
+**讀取點（fail-open，DB 錯誤不中斷生成）**：
+- `generateDesignBrief` → 注入「用戶歷史偏好」block，AI 顧問可給延續性建議
+- `generateDesignVariants` → 注入「家族色板提示」，要求至少 1 個變體繼承用戶常用主色
 
-## Color Palette
-- **Primary**: #3B82F6
-- **Secondary**: #10B981
-- **Background**: #FAFAFA
-- **Text**: #0F172A
-
-## Typography
-- **Heading**: DM Sans, font-bold
-- **Body**: DM Sans, font-normal
-- **Mono**: JetBrains Mono
-
-## Spacing Scale
-- Base: 4px
-- Density: comfortable
-
-## Component Patterns
-- **Buttons**: rounded-lg, shadow-sm
-- **Cards**: border, rounded-xl
-- **Forms**: inline validation
-```
+**API**（`services/design-memory.ts`）：
+- `getDesignMemory(userId)` / `updateDesignMemory({...})`
+- `formatMemoryForBriefPrompt(memory)` / `formatMemoryForVariantPrompt(memory)`
+- `extractPaletteFromDesignSystem(ds)` / `extractFontFamily(ds)`
 
 ---
 

@@ -58,6 +58,7 @@ export type EventType =
   | 'prefilter_antiloop'
   | 'syntax_repair'
   | 'preview_gate'
+  | 'variant_diversity'
 
 export type TelemetrySeverity = 'critical' | 'warning' | 'info'
 export type TelemetryOutcome = 'success' | 'failed' | 'repaired' | 'timeout' | 'blocked'
