@@ -22,7 +22,7 @@ import type { QualityIssue } from '../../services/quality-gate'
 import { generateDesignQualityReport, logDesignQualityReport } from '../../services/design-quality-report'
 import { getEnv } from '../../lib/env'
 import { getBddSession, updateBddSession } from '../../services/bdd-session'
-import { analyzeReference, analyzeUploadedImage } from '../../services/reference-analyzer'
+import { analyzeReference, analyzeUploadedImage, analyzeMultipleReferences, extractAllUrls, formatMergedReferenceForPrompt } from '../../services/reference-analyzer'
 import { getImageLibraryOrFallback, invalidateImageLibrary } from '../../services/image-library-service'
 import { recommendMoods, getMoodSummary } from '../../services/design-moods'
 import { updateDesignMemory, extractPaletteFromDesignSystem, extractFontFamily } from '../../services/design-memory'
@@ -2843,26 +2843,53 @@ export async function completeDesignClarify(
 
   // 分析參考圖片和/或參考網站（兩者都做，合併結果）
   const referenceIdea = ideas.find(i => i.step === 'reference')
-  const hasUploadedImage = state.uiuxReferenceImageUrls?.length
-  const hasUrlInput = referenceIdea?.answer
+  const allImages = state.uiuxReferenceImageUrls ?? []
+  const allUrls = referenceIdea?.answer ? extractAllUrls(referenceIdea.answer) : []
+  const totalSources = allImages.length + allUrls.length
 
-  // 並行分析上傳圖片 + URL（如果兩者都有）
-  const [imageAnalysisResult, urlAnalysisResult] = await Promise.allSettled([
-    hasUploadedImage
-      ? analyzeUploadedImage(state.uiuxReferenceImageUrls![0], {
-          userId: state.userId,
-          conversationId,
-          purpose: 'uploaded_image_analysis',
+  // T5: 多來源（≥ 2）走融合分析；單來源沿用既有路徑
+  if (totalSources >= 2) {
+    try {
+      const merged = await analyzeMultipleReferences(
+        { urls: allUrls, imageUrls: allImages },
+        { userId: state.userId, conversationId, purpose: 'multi_reference_analysis' },
+      )
+      if (merged) {
+        state.uiuxReferenceAnalysis = merged
+        await saveFlowState(redis, conversationId, state)
+        await sendMessage(conversationId, io, {
+          content: `已融合分析您提供的 ${merged.sources.length} 個參考來源${merged.commonTraits ? '，並抽取共通設計語言' : ''}，設計會體現於後續方案。`,
+          stage: 'uiux_design_clarify_complete',
         })
-      : Promise.resolve(null),
-    hasUrlInput
-      ? analyzeReference(referenceIdea!.answer, {
-          userId: state.userId,
-          conversationId,
-          purpose: 'reference_analysis',
-        })
-      : Promise.resolve(null),
-  ])
+        // 若多源分析成功，跳過下方單源 fallback
+        // 取得 BDD Session 並繼續
+        // （下面的 imageAnalysis/urlAnalysis 區塊用 noop 跳過）
+      }
+    } catch (err) {
+      logger.warn({ err: String(err).slice(0, 200) }, 'T5 多來源融合失敗，降級單源分析')
+    }
+  }
+
+  // 並行分析上傳圖片 + URL（如果兩者都有，single-source path）
+  const skipSingleSource = !!state.uiuxReferenceAnalysis && totalSources >= 2
+  const [imageAnalysisResult, urlAnalysisResult] = skipSingleSource
+    ? [{ status: 'fulfilled' as const, value: null }, { status: 'fulfilled' as const, value: null }]
+    : await Promise.allSettled([
+        allImages.length > 0
+          ? analyzeUploadedImage(allImages[0], {
+              userId: state.userId,
+              conversationId,
+              purpose: 'uploaded_image_analysis',
+            })
+          : Promise.resolve(null),
+        referenceIdea?.answer
+          ? analyzeReference(referenceIdea.answer, {
+              userId: state.userId,
+              conversationId,
+              purpose: 'reference_analysis',
+            })
+          : Promise.resolve(null),
+      ])
 
   const imageAnalysis = imageAnalysisResult.status === 'fulfilled' ? imageAnalysisResult.value : null
   const urlAnalysis = urlAnalysisResult.status === 'fulfilled' ? urlAnalysisResult.value : null
