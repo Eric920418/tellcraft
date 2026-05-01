@@ -10,6 +10,8 @@ import { sanitizeForPreview } from './code-verify'
 import { sanitizeCodeForDeployAsync } from './deployer'
 import { recordTelemetry, truncateFeedback } from './skill-telemetry'
 import { updateDesignMemory } from './design-memory'
+import { runQualityGate } from './quality-gate'
+import { assessIteration, buildFailedToImproveMessage } from './iteration-feedback-loop'
 
 const logger = createLogger('iteration-skill')
 import type { FlowState, IoEmitter } from '../types/flow-state'
@@ -594,18 +596,70 @@ ${enrichedFeedback}`
       }
     }
 
-    // 8. 發送預覽（tailwindConfig 已在上方計算）
+    // 8. T10: 迭代閉環評估 — 比對前後 QG 看用戶抱怨是否實際改善
+    let assessmentNote = ''
+    let escalationQuickReplies: { label: string; value: string; style?: 'primary' | 'secondary' | 'ghost' }[] = []
+    try {
+      const newReport = runQualityGate(updatedCode, state.uiuxDesignTier, state.uiuxDesignMood)
+      const assessment = assessIteration({
+        before: state.lastIterationQualityReport ?? state.uiuxQualityReport,
+        after: newReport,
+        feedback: userFeedback,
+        previousFailedCount: state.iterationFailedToImproveCount ?? 0,
+      })
+
+      if (assessment.failedToImproveCategory) {
+        assessmentNote = `\n\n⚠️ ${buildFailedToImproveMessage(assessment.failedToImproveCategory)}`
+      }
+
+      const newFailedCount = assessment.improved && !assessment.failedToImproveCategory
+        ? 0
+        : (state.iterationFailedToImproveCount ?? 0) + 1
+      state.iterationFailedToImproveCount = newFailedCount
+      state.lastIterationQualityReport = newReport
+
+      recordTelemetry({
+        skillName: 'iteration',
+        eventType: 'iteration',
+        patternKey: assessment.improved ? 'iteration_improved' : 'iteration_no_improve',
+        userId,
+        conversationId,
+        projectId: pid,
+        payload: {
+          netImprovement: assessment.diff.netImprovement,
+          resolved: assessment.diff.resolvedCount,
+          introduced: assessment.diff.introducedCount,
+          unchanged: assessment.diff.unchangedCount,
+          failedAxis: assessment.failedToImproveCategory,
+          consecutiveFailedCount: newFailedCount,
+        },
+      }).catch(() => {})
+
+      // 連續 ≥ 2 輪沒改善 → 提供逃離選項，避免無限循環
+      if (assessment.shouldEscalate) {
+        escalationQuickReplies = [
+          { label: '保留現狀部署', value: '部署', style: 'primary' as const },
+          { label: '撤銷這次修改', value: '撤銷', style: 'secondary' as const },
+          { label: '從新模板重做', value: '__new_project__', style: 'ghost' as const },
+        ]
+      }
+    } catch (err) {
+      logger.warn({ err: String(err).slice(0, 200) }, 'T10 迭代評估失敗（不阻塞流程）')
+    }
+
+    // 9. 發送預覽（tailwindConfig 已在上方計算）
     // quickReplies：有迭代前快照時顯示撤銷按鈕
-    const quickReplies: { label: string; value: string; style?: 'primary' | 'secondary' | 'ghost' }[] = [
-      { label: '部署上線', value: '部署', style: 'primary' },
-    ]
-    if (state.uiuxPreIterationCode) {
+    const quickReplies: { label: string; value: string; style?: 'primary' | 'secondary' | 'ghost' }[] =
+      escalationQuickReplies.length > 0
+        ? escalationQuickReplies
+        : [{ label: '部署上線', value: '部署', style: 'primary' }]
+    if (escalationQuickReplies.length === 0 && state.uiuxPreIterationCode) {
       quickReplies.push({ label: '撤銷修改', value: '撤銷', style: 'ghost' })
     }
 
     const iterMsg = repeatCount >= 1
-      ? `**已嘗試修改** (第 ${state.iterationCount} 次迭代)\n\n本次針對重複問題進行了深層修復，請在預覽面板確認效果。如果問題仍在，請繼續描述。\n\n---\n\n輸入「**部署**」重新上線，或繼續提供修改建議。`
-      : `**已嘗試修改** (第 ${state.iterationCount} 次迭代)\n\n請在預覽面板確認效果。如果問題仍在，請繼續描述。\n\n---\n\n輸入「**部署**」重新上線，或繼續提供修改建議。`
+      ? `**已嘗試修改** (第 ${state.iterationCount} 次迭代)\n\n本次針對重複問題進行了深層修復，請在預覽面板確認效果。如果問題仍在，請繼續描述。${assessmentNote}\n\n---\n\n輸入「**部署**」重新上線，或繼續提供修改建議。`
+      : `**已嘗試修改** (第 ${state.iterationCount} 次迭代)\n\n請在預覽面板確認效果。如果問題仍在，請繼續描述。${assessmentNote}\n\n---\n\n輸入「**部署**」重新上線，或繼續提供修改建議。`
 
     // 取得 Coder 後端檔案供 WebContainer 預覽
     const coderFiles = pid ? await db.getProjectFiles(pid, 'coder') : []

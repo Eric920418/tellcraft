@@ -110,6 +110,9 @@ export interface FlowState {
   iterationHistory?: IterationHistoryEntry[] // 迭代歷史摘要
   lastIterationFeedback?: string       // 上次迭代反饋（供重試）
   lastIterationImageUrls?: string[]    // 上次迭代圖片（供重試）
+  // T10: 迭代閉環評估
+  lastIterationQualityReport?: QualityReport  // 上輪迭代後的 QG 報告，下輪用來 diff 是否真的改善
+  iterationFailedToImproveCount?: number      // 連續沒改善次數（≥ 2 提供逃離選項）
   // 回滾
   rollbackDeployments?: DeploymentRecord[]  // 可選的回滾版本列表
   // BDD→UI 翻譯結果快取
