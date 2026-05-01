@@ -935,7 +935,9 @@ export async function autoFixCriticalIssues(
     `- [${i.severity}] ${i.rule}: ${i.message} (${i.file}${i.line ? `:${i.line}` : ''})${i.suggestion ? ` → ${i.suggestion}` : ''}`
   ).join('\n')
 
-  const useDiff = getEnv().ENABLE_REFINE_DIFF_OUTPUT
+  // T9: per-user rollout（trackingContext.userId hash bucket）
+  const { isFeatureEnabledForUser } = await import('../lib/feature-flag')
+  const useDiff = isFeatureEnabledForUser('refine_diff_output', trackingContext?.userId)
   const outputFormatHint = useDiff
     ? `3. 用 SEARCH/REPLACE block 標示每處修改（省 token + 避免大檔案截斷）：
 

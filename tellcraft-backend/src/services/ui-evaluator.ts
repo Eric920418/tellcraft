@@ -539,11 +539,13 @@ export async function evaluateUi(opts: EvaluateUiOptions): Promise<EvaluateUiRes
   const env = getEnv()
   const start = Date.now()
 
-  if (!env.ENABLE_UI_EVALUATOR) {
+  // T9: per-user rollout — boolean flag 仍生效，加上 percentage rollout
+  const { isFeatureEnabledForUser } = await import('../lib/feature-flag')
+  if (!isFeatureEnabledForUser('ui_evaluator', opts.trackingContext?.userId)) {
     return {
       report: { passed: true, issues: [] },
       softFail: true,
-      skipReason: 'ENABLE_UI_EVALUATOR=false',
+      skipReason: 'ui_evaluator disabled for this user',
       durationMs: Date.now() - start,
     }
   }

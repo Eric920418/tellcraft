@@ -73,6 +73,10 @@ const envSchema = z.object({
   UI_EVALUATOR_TIMEOUT_MS: z.coerce.number().default(45000),     // Evaluator 單輪預算，超時降級跳過
   ENABLE_DESIGN_QUALITY_REPORT: z.stringbool().default(false),   // P3 結構化設計品質報告（dimension scoring + fixPlan，advisory），staging 先開
   ENABLE_REFINE_DIFF_OUTPUT: z.stringbool().default(false),      // P6 refineCode + autoFixCriticalIssues 用 SEARCH/REPLACE diff（省 60-70% output token），fallback full-file
+  // T9: 金絲雀放量百分比（0-100，default 0；> 0 時優先於 ENABLE_*=true 的硬開關）
+  ENABLE_UI_EVALUATOR_ROLLOUT_PERCENT: z.coerce.number().min(0).max(100).default(0),
+  ENABLE_DESIGN_QUALITY_REPORT_ROLLOUT_PERCENT: z.coerce.number().min(0).max(100).default(0),
+  ENABLE_REFINE_DIFF_OUTPUT_ROLLOUT_PERCENT: z.coerce.number().min(0).max(100).default(0),
 
   // Unsplash 圖片庫開關（功能層）
   ENABLE_UNSPLASH_LIBRARY: z.stringbool().default(true),            // kill switch：緊急回退到 picsum 時設 false

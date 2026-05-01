@@ -22,6 +22,7 @@ import { validateVariantDiversity, buildRetryHint } from './variant-diversity'
 import { formatIndustryPriorForPrompt } from './industry-priors'
 import { parseIterationIntent, selectFilesByIntent, describeIntentForPrompt } from './iteration-intent'
 import { enforceStyleLock } from './style-lock'
+import { isFeatureEnabledForUser } from '../lib/feature-flag'
 
 const logger = createLogger('uiux-generation')
 
@@ -6646,7 +6647,7 @@ ${targetPreviewRoute ? `
 ` : ''}
 
 ## 輸出格式
-${getEnv().ENABLE_REFINE_DIFF_OUTPUT ? `使用 SEARCH/REPLACE block 精確標示每處修改（省 token + 避免大檔案截斷）：
+${isFeatureEnabledForUser('refine_diff_output', trackingContext?.userId) ? `使用 SEARCH/REPLACE block 精確標示每處修改（省 token + 避免大檔案截斷）：
 
 <<<<<<< SEARCH:path/to/file.tsx
 // 原代碼片段（必須精確匹配，含 3-5 行上下文確保唯一定位）

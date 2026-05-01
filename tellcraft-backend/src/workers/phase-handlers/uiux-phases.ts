@@ -21,6 +21,7 @@ import { evaluateUi, type UiEvaluationIssue } from '../../services/ui-evaluator'
 import type { QualityIssue } from '../../services/quality-gate'
 import { generateDesignQualityReport, logDesignQualityReport } from '../../services/design-quality-report'
 import { getEnv } from '../../lib/env'
+import { isFeatureEnabledForUser } from '../../lib/feature-flag'
 import { getBddSession, updateBddSession } from '../../services/bdd-session'
 import { analyzeReference, analyzeUploadedImage, analyzeMultipleReferences, extractAllUrls, formatMergedReferenceForPrompt } from '../../services/reference-analyzer'
 import { getImageLibraryOrFallback, invalidateImageLibrary } from '../../services/image-library-service'
@@ -1650,7 +1651,7 @@ export async function executeFullCodePipeline(
   // ===== 黑盒 Evaluator 二階段 QA（PR1 Harness Engineering）=====
   // 獨立驗收軌道：看不到 tsx 代碼，只從 screenshot + DOM outline 判斷可用性
   // flag off 時完全跳過迴圈，避免 generateTailwindConfig 白算
-  if (getEnv().ENABLE_UI_EVALUATOR) {
+  if (isFeatureEnabledForUser('ui_evaluator', state.userId)) {
     const MAX_EVAL_ATTEMPTS = 2
     const evalTwConfig = generateTailwindConfig(uiuxDesignSystem)
     const qgTrackingContextEval = { userId: state.userId, conversationId, projectId: state.projectId }
@@ -1693,7 +1694,7 @@ export async function executeFullCodePipeline(
 
   // P3: 設計品質報告（feature flag，advisory only，不阻塞 pipeline）
   try {
-    if (getEnv().ENABLE_DESIGN_QUALITY_REPORT) {
+    if (isFeatureEnabledForUser('design_quality_report', state.userId)) {
       const dqReport = generateDesignQualityReport(report)
       logDesignQualityReport(dqReport, { conversationId, phase: 'uiux_quality_gate' })
     }
@@ -2218,7 +2219,7 @@ export async function executeQualityGate(
   report.summary.autoFixed = totalAutoFixed
 
   // ===== 黑盒 Evaluator 二階段 QA（PR1）=====
-  if (getEnv().ENABLE_UI_EVALUATOR) {
+  if (isFeatureEnabledForUser('ui_evaluator', state.userId)) {
     const MAX_EVAL_ATTEMPTS_2 = 2
     const evalTwConfig2 = generateTailwindConfig(uiuxDesignSystem)
     for (let evalAttempt = 0; evalAttempt < MAX_EVAL_ATTEMPTS_2; evalAttempt++) {
@@ -2252,7 +2253,7 @@ export async function executeQualityGate(
 
   // P3: 設計品質報告（feature flag，advisory only，不阻塞 pipeline）
   try {
-    if (getEnv().ENABLE_DESIGN_QUALITY_REPORT) {
+    if (isFeatureEnabledForUser('design_quality_report', state.userId)) {
       const dqReport = generateDesignQualityReport(report)
       logDesignQualityReport(dqReport, { conversationId, phase: 'uiux_quality_gate_redo' })
     }

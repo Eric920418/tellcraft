@@ -22,6 +22,7 @@ import { inferProductType } from '../../services/fast-build-generation'
 import { evaluateUi, type UiEvaluationIssue } from '../../services/ui-evaluator'
 import type { QualityIssue } from '../../services/quality-gate'
 import { getEnv } from '../../lib/env'
+import { isFeatureEnabledForUser } from '../../lib/feature-flag'
 import { buildPostDeployFastBuildQuickReplies } from './fast-build-phases'
 import { createLogger } from '../../lib/logger'
 
@@ -574,7 +575,7 @@ async function finalizeMergedCode(
 
   // ── 黑盒 Evaluator（PR1，1 輪）──
   // Clone 場景 cloneDesignSystem 結構與 UIUX 不同，tailwindConfig 用空字串（preview 仰賴生成代碼內嵌的樣式）
-  if (getEnv().ENABLE_UI_EVALUATOR) try {
+  if (isFeatureEnabledForUser('ui_evaluator', userId)) try {
     const evalResult = await evaluateUi({
       code: currentCode,
       tailwindConfig: '',
