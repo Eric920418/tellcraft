@@ -3915,8 +3915,11 @@ ${variantConcept.signatureElement ? `Signature Element：${variantConcept.signat
 `
     : ''
 
-  const designSection = designIdeas.length > 0
-    ? `## 用戶設計偏好\n${designIdeas.map(i => `- ${i.step}：${i.answer}`).join('\n')}\n`
+  // 過濾 '__skipped__' sentinel —— 用戶按「跳過此題」時推進的 placeholder，
+  // 不該污染設計生成 prompt（會誤導 LLM 把字串「__skipped__」當需求）
+  const meaningfulIdeas = designIdeas.filter(i => i.answer !== '__skipped__')
+  const designSection = meaningfulIdeas.length > 0
+    ? `## 用戶設計偏好\n${meaningfulIdeas.map(i => `- ${i.step}：${i.answer}`).join('\n')}\n`
     : ''
 
   // 參考網站真實分析
@@ -5669,9 +5672,11 @@ export async function generateDesignBrief(
   displayText?: string
   error?: string
 }> {
-  const ideasContext = sourceType === 'ideas' && userIdeas
+  // 過濾 '__skipped__' sentinel（用戶按「跳過此題」的標記，不該當真實偏好餵給 LLM）
+  const meaningfulIdeas = userIdeas?.filter(i => i.answer !== '__skipped__') ?? null
+  const ideasContext = sourceType === 'ideas' && meaningfulIdeas && meaningfulIdeas.length > 0
     ? `## 用戶的設計想法
-${userIdeas.map(i => `- **${i.step}**: ${i.answer}`).join('\n')}`
+${meaningfulIdeas.map(i => `- **${i.step}**: ${i.answer}`).join('\n')}`
     : ''
 
   const templateContext = `## 模板資訊

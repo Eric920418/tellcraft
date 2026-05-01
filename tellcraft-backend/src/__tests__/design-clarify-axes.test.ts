@@ -200,3 +200,53 @@ describe('pickSupplementaryQuestion', () => {
     expect(a?.key).toBe(b?.key)
   })
 })
+
+// ============================================================
+// 防迴圈回歸：__skipped__ sentinel 必須讓軸線被視為已涵蓋
+// 防止「跳過此題」按了三次仍重複問同一題的 bug
+// ============================================================
+
+describe('regression: __skipped__ sentinel 防止無限迴圈', () => {
+  it('skip reference 後 pickNextClarifyAxis 不再選 reference', () => {
+    const ideas = [
+      { step: 'initial', answer: '想要簡約現代風' },  // covers feeling via text scan
+      { step: 'reference', answer: '__skipped__' },     // explicit skip sentinel
+    ]
+    const next = pickNextClarifyAxis(ideas)
+    expect(next).not.toBe('reference')
+  })
+
+  it('skip 所有題目後 pickNextClarifyAxis 回 null（4 軸都覆蓋）', () => {
+    const ideas = [
+      { step: 'feeling', answer: '__skipped__' },
+      { step: 'reference', answer: '__skipped__' },
+      { step: 'color', answer: '__skipped__' },
+      { step: 'layout', answer: '__skipped__' },
+    ]
+    const next = pickNextClarifyAxis(ideas)
+    expect(next).toBeNull()
+  })
+
+  it('__skipped__ 視為 covered（getCoveredAxes 認得 step + length>=2）', () => {
+    const ideas = [{ step: 'reference', answer: '__skipped__' }]
+    const covered = getCoveredAxes(ideas)
+    expect(covered.has('reference')).toBe(true)
+  })
+
+  it('__skipped__ 文字本身不該誤觸其他軸的 detector', () => {
+    // __skipped__ 不該包含任何 feeling/color/layout 關鍵字
+    const covered = extractCoveredAxes('__skipped__')
+    expect(covered.size).toBe(0)
+  })
+
+  it('混合：真實答案 + skip sentinel，行為正確', () => {
+    const ideas = [
+      { step: 'feeling', answer: '專業可靠' },          // feeling covered (text)
+      { step: 'reference', answer: '__skipped__' },      // reference covered (skip)
+      { step: 'color', answer: '藍色系' },               // color covered (text)
+    ]
+    const next = pickNextClarifyAxis(ideas)
+    // 4 軸只剩 layout 沒覆蓋
+    expect(next).toBe('layout')
+  })
+})

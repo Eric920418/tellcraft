@@ -2730,9 +2730,12 @@ export async function handleDesignClarifyReply(
   if (currentQuestion) {
     const trimmedMsg = message.trim()
 
-    // __skip__ → 跳過此題，不保存答案
+    // __skip__ → 跳過此題，推 sentinel 讓軸線被標記為「已處理」
+    // 否則 pickNextClarifyAxis 看 uiuxDesignIdeas 沒這個軸 → 永遠重抽同一題（無限迴圈 bug）。
+    // sentinel '__skipped__' 在下游 prompt 注入處需被過濾，避免污染設計生成。
     if (trimmedMsg === '__skip__') {
-      // 不保存，直接進入下一題
+      ideas.push({ step: currentQuestion.key, answer: '__skipped__' })
+      state.uiuxDesignIdeas = ideas
     } else {
       // 語義閘門驗證回答品質
       const gatewayResult = await semanticGateway({
@@ -2833,9 +2836,14 @@ export async function completeDesignClarify(
   io: IoEmitter
 ) {
   const ideas = state.uiuxDesignIdeas || []
+  // 過濾 '__skipped__' sentinel：跳過的題目不該出現在「收到的設計想法」摘要中（UX）
+  // 也不該被當 reference URL 抽取（會浪費一次 extractAllUrls 呼叫但最壞無害）
+  const meaningfulIdeas = ideas.filter(i => i.answer !== '__skipped__')
 
-  // 整理用戶的設計想法
-  const designBrief = ideas.map(i => `- ${i.step}: ${i.answer}`).join('\n')
+  // 整理用戶的設計想法（摘要顯示給用戶）
+  const designBrief = meaningfulIdeas.length > 0
+    ? meaningfulIdeas.map(i => `- ${i.step}: ${i.answer}`).join('\n')
+    : '（你跳過了所有問題，我會根據需求自動配置設計）'
 
   await sendMessage(conversationId, io, {
     content: `太好了！收到你的設計想法：\n\n${designBrief}\n\n讓我整理一下方向...`,
@@ -2843,7 +2851,8 @@ export async function completeDesignClarify(
   })
 
   // 分析參考圖片和/或參考網站（兩者都做，合併結果）
-  const referenceIdea = ideas.find(i => i.step === 'reference')
+  // 注意：referenceIdea 用 meaningfulIdeas 找，避免拿到 '__skipped__' 去 extractAllUrls
+  const referenceIdea = meaningfulIdeas.find(i => i.step === 'reference')
   const allImages = state.uiuxReferenceImageUrls ?? []
   const allUrls = referenceIdea?.answer ? extractAllUrls(referenceIdea.answer) : []
   const totalSources = allImages.length + allUrls.length
@@ -2990,10 +2999,15 @@ export async function completeDesignClarify(
 /** 從用戶設計偏好構建 fallback brief（Brief LLM 生成失敗時使用） */
 function buildFallbackBrief(state: FlowState, productType: string): DesignBrief {
   const ideas = state.uiuxDesignIdeas || []
-  const feeling = ideas.find(i => i.step === 'feeling')?.answer || ''
-  const reference = ideas.find(i => i.step === 'reference')?.answer || ''
-  const color = ideas.find(i => i.step === 'color')?.answer || ''
-  const layout = ideas.find(i => i.step === 'layout')?.answer || ''
+  // 過濾 '__skipped__' sentinel（用戶跳過此題的標記，不該污染 brief）
+  const realAnswer = (step: string) => {
+    const a = ideas.find(i => i.step === step)?.answer
+    return a && a !== '__skipped__' ? a : ''
+  }
+  const feeling = realAnswer('feeling')
+  const reference = realAnswer('reference')
+  const color = realAnswer('color')
+  const layout = realAnswer('layout')
 
   const creativeKeywords = ['創意', '藝術', '大膽', '獨特', '極簡', '高端', '前衛', '時尚', 'creative', 'artistic', 'minimal']
   const isCreative = creativeKeywords.some(k => feeling.toLowerCase().includes(k))
