@@ -20,6 +20,7 @@ import { validateAndFixFiles } from './syntax-validator'
 import { recordTelemetry } from './skill-telemetry'
 import { validateVariantDiversity, buildRetryHint } from './variant-diversity'
 import { formatIndustryPriorForPrompt } from './industry-priors'
+import { parseIterationIntent, selectFilesByIntent, describeIntentForPrompt } from './iteration-intent'
 
 const logger = createLogger('uiux-generation')
 
@@ -6491,8 +6492,27 @@ ${retryFileBlocks}
     )
   }
 
-  const promptCodeBundle = pickRefineTargetBundle(currentCode)
+  // T11: 解析 feedback 意圖 → 縮窄送給 LLM 的檔案範圍
+  const parsedIntent = parseIterationIntent(userFeedback)
+  if (parsedIntent) {
+    recordTelemetry({
+      skillName: 'iteration',
+      eventType: 'iteration',
+      patternKey: `intent:${parsedIntent.scope}:${parsedIntent.action}`,
+      userId: trackingContext?.userId || null,
+      conversationId: trackingContext?.conversationId || null,
+      payload: {
+        scope: parsedIntent.scope,
+        action: parsedIntent.action,
+        targets: parsedIntent.targets,
+        confidence: parsedIntent.confidence,
+      },
+    }).catch(() => {})
+  }
+
+  const promptCodeBundle = selectFilesByIntent(pickRefineTargetBundle(currentCode), parsedIntent)
   const codeBlocks = buildCodeBlocks(promptCodeBundle)
+  const intentSection = describeIntentForPrompt(parsedIntent)
 
   // 計算大檔案行數，注入防截斷提示
   const largeFileWarnings = [...promptCodeBundle.pages, ...promptCodeBundle.components]
@@ -6538,6 +6558,7 @@ ${briefSection}
 ${refineConceptSection}
 ${designContext.moodId ? `\n## 設計風格（修改時不可丟失）\nMood: ${getMoodSummary(designContext.moodId)}\n` : ''}
 ${iterationHistorySection}
+${intentSection}
 ${getStructureConstraints(tier)}
 
 ## 重要：輸入驗證（最高優先）
