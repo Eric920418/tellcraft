@@ -231,6 +231,48 @@ export function extractFontFamily(ds: DesignSystem): string | null {
   return first || null
 }
 
+/**
+ * 從 styleSummary（Design Brief 1-2 句長文）抽取 ≤3 個短詞當 keyword。
+ *
+ * 動機：直接把整段 styleSummary 推進 brand_tone.keywords 會：
+ * 1. 累積 20 條長文 → formatMemoryForBriefPrompt 注入下次 prompt → 膨脹 token
+ * 2. 每次內容不同 → prompt cache hit 率歸零（違反 CLAUDE.md 防雷「dynamic 不能放 static block」精神）
+ *
+ * 策略（純零 LLM）：
+ * 1. 用全形/半形標點 + 空白切分
+ * 2. 過濾長度 2-12 字（單字過短易誤觸、過長等於沒抽詞）
+ * 3. dedupe（保留首次出現順序）
+ * 4. 取前 3 個
+ */
+export function extractStyleKeywords(styleSummary: string | undefined | null): string[] {
+  if (!styleSummary || typeof styleSummary !== 'string') return []
+  const trimmed = styleSummary.trim()
+  if (trimmed.length === 0) return []
+
+  // 中英混排：用全形/半形標點 + 空白 + 連接詞切分
+  const SPLIT_PATTERN = /[，。、！？；：,.!?;:\s　]+|(?:\band\b|\bor\b|\bwith\b|的|且|和|跟|或|並|又)/gi
+  const tokens = trimmed
+    .split(SPLIT_PATTERN)
+    .map(s => s.trim().replace(/^["'「」『』]+|["'「」『』]+$/g, ''))
+    .filter(s => {
+      if (s.length < 2 || s.length > 12) return false
+      // 過濾純標點 / 數字 / 空字串
+      if (/^[\d.,!?;:\-_]+$/.test(s)) return false
+      return true
+    })
+
+  const seen = new Set<string>()
+  const out: string[] = []
+  for (const t of tokens) {
+    const lower = t.toLowerCase()
+    if (seen.has(lower)) continue
+    seen.add(lower)
+    out.push(t)
+    if (out.length >= 3) break
+  }
+  return out
+}
+
 // ============================================================
 // Prompt 注入：把記憶格式化為「用戶歷史偏好」block
 // ============================================================

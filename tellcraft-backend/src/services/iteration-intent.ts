@@ -102,6 +102,28 @@ const PALETTE_HINT_PATTERNS: Record<string, RegExp> = {
   duller: /低飽和|柔和|muted|toned\s+down|dull/i,
 }
 
+// 具體色名 — 中文要求「+色 / +的」後綴（避免「藍圖」「紅利」誤觸），英文用 \b 邊界
+// 命中後 looksLikeColor=true → scope='palette' → style-lock 跳過 → LLM 改色不被還原
+const COLOR_NAME_REGEX = /(?:紫|藍|蓝|綠|绿|紅|红|橙|黃|黄|粉|黑|白|灰|金|銀|银|棕|咖啡|米|青|靛)(?:色|的)|\b(?:purple|violet|indigo|blue|cyan|teal|green|lime|emerald|red|rose|pink|orange|amber|yellow|magenta|fuchsia|black|white|gray|grey|gold|silver|brown|beige|navy|maroon|lavender|crimson|coral|turquoise)\b/i
+
+// 色名 → palette hint 映射（給下游 LLM 提示用戶想要的色相）
+const COLOR_TO_HINT: Array<{ regex: RegExp; hint: string }> = [
+  { regex: /紫色|紫的|\bpurple\b|\bviolet\b|\blavender\b/i, hint: 'purple' },
+  { regex: /藍色|蓝色|藍的|蓝的|\bblue\b|\bnavy\b/i, hint: 'blue' },
+  { regex: /綠色|绿色|綠的|绿的|\bgreen\b|\bemerald\b|\blime\b/i, hint: 'green' },
+  { regex: /紅色|红色|紅的|红的|\bred\b|\bcrimson\b|\brose\b/i, hint: 'red' },
+  { regex: /橙色|橙的|\borange\b|\bamber\b|\bcoral\b/i, hint: 'orange' },
+  { regex: /黃色|黄色|黃的|黄的|\byellow\b|\bgold\b/i, hint: 'yellow' },
+  { regex: /粉色|粉的|\bpink\b|\bmagenta\b|\bfuchsia\b/i, hint: 'pink' },
+  { regex: /青色|青的|靛色|\bcyan\b|\bteal\b|\bturquoise\b/i, hint: 'cyan' },
+  { regex: /黑色|黑的|\bblack\b/i, hint: 'black' },
+  { regex: /白色|白的|\bwhite\b/i, hint: 'white' },
+  { regex: /灰色|灰的|\bgray\b|\bgrey\b/i, hint: 'gray' },
+  { regex: /棕色|咖啡色|米色|\bbrown\b|\bbeige\b|\bmaroon\b/i, hint: 'brown' },
+  { regex: /\bindigo\b/i, hint: 'indigo' },
+  { regex: /銀色|银色|\bsilver\b/i, hint: 'silver' },
+]
+
 // ============================================================
 // 主解析函數
 // ============================================================
@@ -131,14 +153,28 @@ export function parseIterationIntent(feedback: string): IterationIntent | null {
   let scope: IterationScope = 'whole'
   let paletteHint: string | undefined
   const hexMatch = text.match(/#[0-9a-f]{3,6}\b/i)
-  const looksLikeColor = /顏色|配色|色調|主色|品牌色|色彩|color|palette|hue|tone/i.test(text) || !!hexMatch
+  // 抽象色彩詞 OR 具體色名（紫色/blue 等）OR HEX → 一律進 palette branch（讓 style-lock 跳過）
+  const colorNameMatched = COLOR_NAME_REGEX.test(text)
+  const looksLikeColor = /顏色|配色|色調|主色|品牌色|色彩|color|palette|hue|tone/i.test(text) || colorNameMatched || !!hexMatch
 
   if (/字體|字型|字級|font|typography/i.test(text)) {
     scope = 'typography'
   } else if (looksLikeColor) {
     scope = 'palette'
+    // 1) 先試抽象 hint（warmer/cooler/...）
     for (const [hint, regex] of Object.entries(PALETTE_HINT_PATTERNS)) {
       if (regex.test(text)) { paletteHint = hint; break }
+    }
+    // 2) 具體色名 hint（purple/blue/...）— 抽象 hint 與具體色名可同時存在（例如「紫色 + 暖一點」）
+    if (colorNameMatched) {
+      const concrete: string[] = []
+      for (const { regex, hint } of COLOR_TO_HINT) {
+        if (regex.test(text)) concrete.push(hint)
+      }
+      if (concrete.length > 0) {
+        const concreteStr = concrete.join('+')
+        paletteHint = paletteHint ? `${paletteHint},${concreteStr}` : concreteStr
+      }
     }
     if (hexMatch) paletteHint = paletteHint ? `${paletteHint},${hexMatch[0]}` : hexMatch[0]
   } else if (/動畫|過場|animation|transition|motion/i.test(text)) {

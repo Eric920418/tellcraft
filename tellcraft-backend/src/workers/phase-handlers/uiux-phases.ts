@@ -26,7 +26,7 @@ import { getBddSession, updateBddSession } from '../../services/bdd-session'
 import { analyzeReference, analyzeUploadedImage, analyzeMultipleReferences, extractAllUrls, formatMergedReferenceForPrompt } from '../../services/reference-analyzer'
 import { getImageLibraryOrFallback, invalidateImageLibrary } from '../../services/image-library-service'
 import { recommendMoods, getMoodSummary } from '../../services/design-moods'
-import { updateDesignMemory, extractPaletteFromDesignSystem, extractFontFamily } from '../../services/design-memory'
+import { updateDesignMemory, extractPaletteFromDesignSystem, extractFontFamily, extractStyleKeywords } from '../../services/design-memory'
 import {
   pickNextClarifyAxis, shouldAskSupplementary, pickSupplementaryQuestion,
   type ClarifyAxis,
@@ -1290,7 +1290,7 @@ export async function handleVariantSelection(
       moodId: state.uiuxDesignMood,
       fontFamily: fontFamily ?? undefined,
       incrementSample: true,
-    }).catch(() => {})
+    }).catch(err => logger.warn({ err: String(err).slice(0, 200), userId: state.userId, conversationId }, 'updateDesignMemory（variant 選定）寫入失敗'))
   }
 
   // 提取選中 variant 的創意概念
@@ -3301,14 +3301,17 @@ export async function proceedToVariantGeneration(
   }
 
   // T1: 寫 Design Memory（fire-and-forget — brief 確認後記錄 brand_tone / tier / signature）
+  // styleSummary 是 1-2 句長文，**不能整段塞 keywords**（會污染後續 prompt cache + 膨脹 token）
+  // 改用零 LLM 抽詞：標點切分 → 過濾長度 2-12 字 → 取前 3 個
   if (state.userId && state.uiuxDesignBrief) {
     const brief = state.uiuxDesignBrief
+    const styleKeywords = extractStyleKeywords(brief.styleSummary)
     updateDesignMemory({
       userId: state.userId,
-      brandTone: { keywords: [brief.styleSummary], avoid: [] },
+      brandTone: { keywords: styleKeywords, avoid: [] },
       tier: state.uiuxDesignTier,
       signatureKeywords: brief.domainKeywords ?? [],
-    }).catch(() => {})
+    }).catch(err => logger.warn({ err: String(err).slice(0, 200), userId: state.userId, conversationId }, 'updateDesignMemory（brief 確認）寫入失敗'))
   }
 
   const sourceType = state.uiuxDesignBrief?.sourceType || 'template'

@@ -49,6 +49,49 @@ describe('parseIterationIntent', () => {
     expect(intent?.paletteHint).toContain('#FF5733')
   })
 
+  // ── Fix #1: 具體色名（紫/藍/綠/purple/blue）必須進 palette branch ──
+  // 否則 style-lock 會把 LLM 改好的 primary 色 regex 還原回原值（卡死合理修改）
+  it('「把 hero 改紫色」→ scope=palette + hint=purple（不會被 style-lock 還原）', () => {
+    const intent = parseIterationIntent('把 hero 改紫色')
+    expect(intent?.scope).toBe('palette')
+    expect(intent?.paletteHint).toContain('purple')
+  })
+
+  it('「換成藍色」→ scope=palette + hint=blue', () => {
+    const intent = parseIterationIntent('換成藍色')
+    expect(intent?.scope).toBe('palette')
+    expect(intent?.paletteHint).toContain('blue')
+  })
+
+  it('英文「make it more purple」→ scope=palette + hint=purple', () => {
+    const intent = parseIterationIntent('make the hero more purple')
+    expect(intent?.scope).toBe('palette')
+    expect(intent?.paletteHint).toContain('purple')
+  })
+
+  it('「換成綠色，暖一點」→ palette + 抽象 hint(warmer) + 具體 hint(green) 共存', () => {
+    const intent = parseIterationIntent('換成綠色，暖一點')
+    expect(intent?.scope).toBe('palette')
+    expect(intent?.paletteHint).toContain('warmer')
+    expect(intent?.paletteHint).toContain('green')
+  })
+
+  it('避免誤觸：「畫藍圖」「紅利方案」不進 palette（沒 +色 +的）', () => {
+    const blueprintIntent = parseIterationIntent('畫藍圖規劃下一階段')
+    expect(blueprintIntent?.scope).not.toBe('palette')
+
+    const bonusIntent = parseIterationIntent('加一個紅利方案 section')
+    expect(bonusIntent?.scope).not.toBe('palette')
+  })
+
+  it('英文 word boundary：「red」是色但「redirect」不是', () => {
+    const colorIntent = parseIterationIntent('change accent to red')
+    expect(colorIntent?.scope).toBe('palette')
+
+    const redirectIntent = parseIterationIntent('add a redirect to /home')
+    expect(redirectIntent?.scope).not.toBe('palette')
+  })
+
   it('detects scope=typography', () => {
     const intent = parseIterationIntent('把字體換成襯線體')
     expect(intent?.scope).toBe('typography')

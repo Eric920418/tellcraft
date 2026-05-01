@@ -131,6 +131,27 @@ describe('countIssuesForAxis', () => {
   it('returns 0 for null report', () => {
     expect(countIssuesForAxis(null, 'contrast')).toBe(0)
   })
+
+  // ── Fix #4: warning 也要計入（visual-craft-audit / consistency-* 多數為 warning）──
+  // 否則 T10 escalation 對「字體太擠/spacing 不一致」這類連續抱怨永遠不觸發逃離選項
+  it('counts warning issues alongside critical (for warning-heavy audits like consistency-*)', () => {
+    const r = report([
+      issue('consistency-spacing', 'a.tsx', 'warning'),
+      issue('consistency-spacing', 'b.tsx', 'warning'),
+      issue('craft-vertical-rhythm', 'c.tsx', 'warning'),
+      issue('motion-import', 'd.tsx', 'critical'),  // 不算 spacing 軸
+    ])
+    // spacing 軸：含 consistency-spacing → 應計到 2 個 warning（修前永遠是 0）
+    expect(countIssuesForAxis(r, 'spacing')).toBeGreaterThanOrEqual(2)
+  })
+
+  it('info severity 不計入（保留排除）', () => {
+    const r = report([
+      issue('consistency-spacing', 'a.tsx', 'warning'),
+      { ...issue('consistency-spacing', 'b.tsx', 'warning'), severity: 'info' as const },
+    ])
+    expect(countIssuesForAxis(r, 'spacing')).toBe(1)
+  })
 })
 
 // ============================================================

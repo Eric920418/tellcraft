@@ -7,6 +7,7 @@ import {
   formatMemoryForVariantPrompt,
   extractPaletteFromDesignSystem,
   extractFontFamily,
+  extractStyleKeywords,
   type DesignMemory,
 } from '../services/design-memory'
 import type { DesignSystem } from '../services/uiux-generation'
@@ -232,5 +233,81 @@ describe('extractFontFamily', () => {
   it('handles single name without comma', () => {
     const ds = { ...minimalDesignSystem, typography: { fontFamily: 'DM Sans', scale: {} } }
     expect(extractFontFamily(ds)).toBe('DM Sans')
+  })
+})
+
+// ============================================================
+// Fix #6: extractStyleKeywords — 防止 styleSummary 整段污染 prompt cache
+// ============================================================
+
+describe('extractStyleKeywords', () => {
+  it('空字串 / null / undefined → 回 []', () => {
+    expect(extractStyleKeywords('')).toEqual([])
+    expect(extractStyleKeywords('   ')).toEqual([])
+    expect(extractStyleKeywords(null)).toEqual([])
+    expect(extractStyleKeywords(undefined)).toEqual([])
+  })
+
+  it('中文標點切分：「現代簡約，溫暖溫馨，有溫度」→ ≤3 個短詞', () => {
+    const out = extractStyleKeywords('現代簡約，溫暖溫馨，有溫度')
+    expect(out).toContain('現代簡約')
+    expect(out).toContain('溫暖溫馨')
+    expect(out.length).toBeLessThanOrEqual(3)
+    // 沒有整段塞入
+    expect(out.some(k => k.includes('，'))).toBe(false)
+  })
+
+  it('英文 with/and 連接詞切分', () => {
+    const out = extractStyleKeywords('modern with warm tones and minimal elegance')
+    expect(out).toContain('modern')
+    expect(out.length).toBeGreaterThan(0)
+    expect(out.length).toBeLessThanOrEqual(3)
+  })
+
+  it('過濾長度 > 12 字的 token（避免假抽詞效果）', () => {
+    const longText = 'thisisaveryveryverylongkeyword another short'
+    const out = extractStyleKeywords(longText)
+    // 'thisisaveryveryverylongkeyword' (30 字) 應被過濾
+    expect(out.every(k => k.length <= 12)).toBe(true)
+    expect(out).toContain('another')
+  })
+
+  it('過濾長度 < 2 字（中文單字易誤觸）', () => {
+    const out = extractStyleKeywords('現代 簡約 a 溫暖')
+    expect(out).not.toContain('a')
+    expect(out).toContain('現代')
+  })
+
+  it('dedupe（保留首次順序）', () => {
+    const out = extractStyleKeywords('現代 簡約 現代 簡約 溫暖')
+    expect(out).toEqual(['現代', '簡約', '溫暖'])
+  })
+
+  it('上限 3 個（即使原文有更多）', () => {
+    const out = extractStyleKeywords('a1 a2 a3 a4 a5 a6 a7')
+    expect(out.length).toBe(3)
+  })
+
+  it('純標點/數字 token 過濾', () => {
+    const out = extractStyleKeywords('現代, 123, 簡約')
+    expect(out).not.toContain('123')
+    expect(out).toContain('現代')
+  })
+
+  it('中英混合：「現代 modern minimal 簡約」', () => {
+    const out = extractStyleKeywords('現代 modern minimal 簡約')
+    expect(out).toContain('現代')
+    expect(out).toContain('modern')
+    expect(out.length).toBe(3)
+  })
+
+  // 關鍵測試：複製真實 styleSummary 場景
+  it('真實 brief styleSummary 場景：1-2 句長文 → 抽 3 個短詞', () => {
+    const realLike = '我們想做一個現代簡約的設計，主打溫暖、人性化的品牌感，避免過於冷硬的科技風。'
+    const out = extractStyleKeywords(realLike)
+    expect(out.length).toBeGreaterThan(0)
+    expect(out.length).toBeLessThanOrEqual(3)
+    // 確認沒有整段塞入（最大長度 12 字）
+    expect(out.every(k => k.length <= 12)).toBe(true)
   })
 })

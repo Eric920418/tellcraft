@@ -131,9 +131,12 @@ const AXIS_TO_RULES: Record<string, RegExp> = {
   alignment: /^(layout-|align-)/,
 }
 
-/** 計算 report 中與某軸相關的 critical issue 數量。 */
+/** 計算 report 中與某軸相關的 critical + warning issue 數量。
+ * 注意：visual-craft-audit 與多數 consistency-* 規則都是 warning 而非 critical。
+ * 若只計 critical，T10 escalation 對「字體太擠/spacing 不一致」這類連續抱怨永遠不會觸發逃離選項。
+ */
 export function countIssuesForAxis(report: QualityReport | undefined | null, axis: string): number {
-  const list = flattenIssues(report).filter(i => i.severity === 'critical')
+  const list = flattenIssues(report).filter(i => i.severity !== 'info')
   const filter = AXIS_TO_RULES[axis]
   if (!filter) return 0
   return list.filter(i => filter.test(i.rule || '')).length

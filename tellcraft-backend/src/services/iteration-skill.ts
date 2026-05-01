@@ -240,7 +240,7 @@ function recordRejectedToMemory(userId: string | undefined, feedback: string): v
   updateDesignMemory({
     userId,
     brandTone: { keywords: [], avoid: rejected },
-  }).catch(() => {})
+  }).catch(err => logger.warn({ err: String(err).slice(0, 200), userId }, 'recordRejectedToMemory 寫入失敗'))
 }
 
 /**
