@@ -26,6 +26,10 @@ import { analyzeReference, analyzeUploadedImage } from '../../services/reference
 import { getImageLibraryOrFallback, invalidateImageLibrary } from '../../services/image-library-service'
 import { recommendMoods, getMoodSummary } from '../../services/design-moods'
 import { updateDesignMemory, extractPaletteFromDesignSystem, extractFontFamily } from '../../services/design-memory'
+import {
+  pickNextClarifyAxis, shouldAskSupplementary, pickSupplementaryQuestion,
+  type ClarifyAxis,
+} from '../../services/design-clarify-axes'
 import { executeIteration, executeUndoIteration } from '../../services/iteration-skill'
 import { semanticGateway } from '../../services/semantic-gateway'
 import { detectFastModeIntent, getFaqReply, answerWithSonnet } from '../../services/customer-service'
@@ -2609,21 +2613,56 @@ async function startDesignClarifyWithInitialIdea(
   redis: Redis,
   io: IoEmitter
 ) {
-  // 保存初始想法
   state.phase = 'uiux_design_clarify'
-  state.uiuxDesignClarifyStep = 2
   state.uiuxDesignIdeas = [{ step: 'initial', answer: initialIdea }]
 
-  await sendMessage(conversationId, io, {
-    content: `收到！「${initialIdea}」\n\n接下來，請告訴我：\n\n**你有沒有喜歡的網站或 App 可以參考？**\n\n_可以提供名稱或網址，例如：Notion、Stripe、Apple..._`,
-    stage: 'uiux_design_clarify',
-    quickReplies: [
-      { label: '← 返回重選', value: '__go_back__', style: 'ghost' },
-    ],
-  })
+  // 4 個 axis 對應的 step + 提問內容（與 handleDesignClarifyReply 同步）
+  const QUESTIONS: Record<ClarifyAxis, { step: number; question: string; hint: string }> = {
+    feeling:   { step: 1, question: '你希望產品給用戶什麼樣的感覺？', hint: '例如：專業可靠、活潑有趣、簡約現代、溫暖親切...' },
+    reference: { step: 2, question: '你有沒有喜歡的網站或 App 可以參考？', hint: '可以提供名稱或網址，例如：Notion、Stripe、Apple...也可以直接上傳參考截圖' },
+    color:     { step: 3, question: '你對顏色有什麼偏好嗎？', hint: '例如：藍色系、暖色調、黑白灰、品牌色是 #FF5733...' },
+    layout:    { step: 4, question: '你偏好什麼樣的佈局風格？', hint: '例如：簡潔留白、內容密集、卡片式、列表式...' },
+  }
 
-  state.waitingForReply = true
-  await saveFlowStateLight(redis, conversationId, state)
+  // T2: 從 initial idea 偵測已涵蓋的軸線，跳到下一個未涵蓋的軸
+  const nextAxis = pickNextClarifyAxis(state.uiuxDesignIdeas)
+
+  if (nextAxis) {
+    const q = QUESTIONS[nextAxis]
+    state.uiuxDesignClarifyStep = q.step
+    await sendMessage(conversationId, io, {
+      content: `收到！「${initialIdea}」\n\n接下來，請告訴我：\n\n**${q.question}**\n\n_${q.hint}_`,
+      stage: 'uiux_design_clarify',
+      quickReplies: [
+        { label: '跳過此題', value: '__skip__', style: 'ghost' },
+        { label: '← 返回重選', value: '__go_back__', style: 'ghost' },
+      ],
+    })
+    state.waitingForReply = true
+    await saveFlowStateLight(redis, conversationId, state)
+    return
+  }
+
+  // 4 軸已全涵蓋 — 補充追問或直接生成
+  if (shouldAskSupplementary(state.uiuxDesignIdeas)) {
+    const supp = pickSupplementaryQuestion(state.uiuxDesignIdeas)
+    if (supp) {
+      state.uiuxDesignClarifyStep = 5
+      await sendMessage(conversationId, io, {
+        content: `不錯，方向很清楚！再問一個問題幫我抓更精準：\n\n**${supp.question}**\n\n_${supp.hint}_`,
+        stage: 'uiux_design_clarify',
+        quickReplies: [
+          { label: '跳過此題', value: '__skip_supplementary__', style: 'ghost' },
+          { label: '直接生成', value: '__skip_supplementary__', style: 'primary' },
+        ],
+      })
+      state.waitingForReply = true
+      await saveFlowStateLight(redis, conversationId, state)
+      return
+    }
+  }
+
+  await completeDesignClarify(conversationId, state, redis, io)
 }
 
 
@@ -2673,6 +2712,17 @@ export async function handleDesignClarifyReply(
   ]
 
   // 驗證並保存當前回答
+  // T2: 補充追問階段（step=5）— 不走 4 軸驗證，直接保存答案後 fall through 到完成
+  if (step === 5) {
+    const trimmedMsg = message.trim()
+    if (trimmedMsg && trimmedMsg !== '__skip_supplementary__' && trimmedMsg !== '__skip__') {
+      ideas.push({ step: 'supplementary', answer: trimmedMsg })
+      state.uiuxDesignIdeas = ideas
+    }
+    await completeDesignClarify(conversationId, state, redis, io)
+    return
+  }
+
   const currentQuestion = clarifyQuestions.find(q => q.step === step)
   if (currentQuestion) {
     const trimmedMsg = message.trim()
@@ -2718,27 +2768,56 @@ export async function handleDesignClarifyReply(
     }
   }
 
-  // 檢查是否還有下一個問題
-  const nextQuestion = clarifyQuestions.find(q => q.step === step + 1)
+  // T2: 動態軸線追蹤 — 跳過用戶已涵蓋的軸線
+  // step=5 代表已進入補充追問階段，不再返回 axis 詢問
+  if (step !== 5) {
+    const nextAxis = pickNextClarifyAxis(state.uiuxDesignIdeas || [])
 
-  if (nextQuestion) {
-    // 繼續下一個問題
-    await sendMessage(conversationId, io, {
-      content: `好的，收到！\n\n**${nextQuestion.question}**\n\n_${nextQuestion.hint}_`,
-      stage: 'uiux_design_clarify',
-      quickReplies: [
-        { label: '跳過此題', value: '__skip__', style: 'ghost' },
-        { label: '← 重來', value: '__go_back__', style: 'ghost' },
-      ],
-    })
+    if (nextAxis) {
+      const nextQuestion = clarifyQuestions.find(q => q.key === nextAxis)
+      if (nextQuestion) {
+        const skipped = nextQuestion.step - (step + 1)
+        const intro = skipped > 0
+          ? `收到！我看你提到了一些其他面向，先聚焦剩下的部分：\n\n`
+          : `好的，收到！\n\n`
+        await sendMessage(conversationId, io, {
+          content: `${intro}**${nextQuestion.question}**\n\n_${nextQuestion.hint}_`,
+          stage: 'uiux_design_clarify',
+          quickReplies: [
+            { label: '跳過此題', value: '__skip__', style: 'ghost' },
+            { label: '← 重來', value: '__go_back__', style: 'ghost' },
+          ],
+        })
 
-    state.uiuxDesignClarifyStep = step + 1
-    state.waitingForReply = true
-    await saveFlowStateLight(redis, conversationId, state)
-  } else {
-    // 釐清完成，生成設計方案
-    await completeDesignClarify(conversationId, state, redis, io)
+        state.uiuxDesignClarifyStep = nextQuestion.step
+        state.waitingForReply = true
+        await saveFlowStateLight(redis, conversationId, state)
+        return
+      }
+    }
+
+    // 4 軸全涵蓋 — 視 ideas 數量決定是否補追問一次（power user 一句話覆蓋全部時）
+    if (shouldAskSupplementary(state.uiuxDesignIdeas || [])) {
+      const supp = pickSupplementaryQuestion(state.uiuxDesignIdeas || [])
+      if (supp) {
+        await sendMessage(conversationId, io, {
+          content: `不錯，方向很清楚！再問一個問題幫我抓更精準：\n\n**${supp.question}**\n\n_${supp.hint}_`,
+          stage: 'uiux_design_clarify',
+          quickReplies: [
+            { label: '跳過此題', value: '__skip_supplementary__', style: 'ghost' },
+            { label: '直接生成', value: '__skip_supplementary__', style: 'primary' },
+          ],
+        })
+        state.uiuxDesignClarifyStep = 5
+        state.waitingForReply = true
+        await saveFlowStateLight(redis, conversationId, state)
+        return
+      }
+    }
   }
+
+  // 釐清完成，生成設計方案
+  await completeDesignClarify(conversationId, state, redis, io)
 }
 
 /**

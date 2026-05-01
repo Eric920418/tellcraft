@@ -36,9 +36,20 @@ BDD 階段結束後，系統詢問用戶：
 
 ---
 
-## Path A: 4 步設計釐清（有想法）
+## Path A: 動態釐清（有想法）
 
-逐步收集用戶的設計偏好，共 4 個問題：
+收集 4 個軸的設計偏好（feeling / reference / color / layout）。**不固定 4 步**：每收到一個答案後，後端用零 LLM 規則 (`services/design-clarify-axes.ts`) 偵測該答案已涵蓋哪些軸，動態跳過已涵蓋的問題。
+
+判定流程：
+1. 用戶送出回答 → `getCoveredAxes(ideas)` 算總涵蓋集（明確 step 標記 + 文字偵測）
+2. `pickNextClarifyAxis(ideas)` 回傳第一個未涵蓋的軸 → 顯示對應問題
+3. 全 4 軸涵蓋 + ideas 只有 1 筆（power user 一句話覆蓋全部）→ `shouldAskSupplementary` 觸發補充追問池
+4. 全 4 軸涵蓋 + ideas ≥ 2 筆 → 直接 `completeDesignClarify`
+
+例：用戶第 1 步回答「我想要像 Stripe 的專業藍色簡潔卡片佈局」→ 4 軸全命中 → 跳到補充追問（如「主要使用情境是行動還是桌面為主？」）→ 答完即進變體生成。
+跳過 3 個固定題，把問題額度留給 power user 真正缺的細節。
+
+4 個基礎問題（順序固定，但會被 axis 偵測動態跳過）：
 
 ### Step A.1: Feeling（感覺）
 
