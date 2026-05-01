@@ -208,12 +208,19 @@ describe('validateSlotColumns', () => {
 // 防雷清單：INLINE_SNAKE_TO_CAMEL 必須內嵌模板，獨立 function 會被拔出
 // ============================================================
 
-describe('INLINE_SNAKE_TO_CAMEL (_c function behavior)', () => {
+describe('INLINE_SNAKE_TO_CAMEL (_c function behavior — 遞迴版)', () => {
   // 從 coder-generation.ts 的 INLINE_SNAKE_TO_CAMEL 常數提取的 _c 函數邏輯
-  const _c = (row: any) => {
-    if (!row) return row
+  // 遞迴版：JSONB 嵌套 object / array 也轉換
+  const _c = (val: any): any => {
+    if (val == null) return val
+    if (Array.isArray(val)) return val.map(_c)
+    if (val instanceof Date || ArrayBuffer.isView(val)) return val
+    if (typeof val !== 'object') return val
     const r: any = {}
-    for (const [k, v] of Object.entries(row)) r[k.replace(/_([a-z])/g, (_: any, c: string) => c.toUpperCase())] = v
+    for (const [k, v] of Object.entries(val)) {
+      const camelKey = k.replace(/_([a-z])/g, (_: any, c: string) => c.toUpperCase())
+      r[camelKey] = _c(v)
+    }
     return r
   }
 
@@ -240,9 +247,45 @@ describe('INLINE_SNAKE_TO_CAMEL (_c function behavior)', () => {
     expect(_c({ created_at_utc: '2024' })).toEqual({ createdAtUtc: '2024' })
   })
 
-  it('should preserve values of any type', () => {
-    expect(_c({ is_active: true, count_total: 42, tags_list: ['a', 'b'] })).toEqual({
-      isActive: true, countTotal: 42, tagsList: ['a', 'b'],
+  it('should preserve primitive types in values', () => {
+    expect(_c({ is_active: true, count_total: 42 })).toEqual({
+      isActive: true, countTotal: 42,
     })
+  })
+
+  // 遞迴行為：JSONB column 嵌套物件 / 陣列
+  it('遞迴轉換 JSONB nested object', () => {
+    expect(_c({ user_meta: { full_name: 'Alice', user_id: 1 } })).toEqual({
+      userMeta: { fullName: 'Alice', userId: 1 },
+    })
+  })
+
+  it('遞迴轉換 array of objects', () => {
+    expect(_c({ tag_list: [{ tag_name: 'foo' }, { tag_name: 'bar' }] })).toEqual({
+      tagList: [{ tagName: 'foo' }, { tagName: 'bar' }],
+    })
+  })
+
+  it('Date 物件保留不轉換（PostgreSQL timestamp）', () => {
+    const d = new Date('2024-01-01')
+    const result = _c({ created_at: d })
+    expect(result.createdAt).toBe(d)
+    expect(result.createdAt instanceof Date).toBe(true)
+  })
+
+  it('Buffer / Uint8Array 保留不轉換（bytea 欄位）', () => {
+    const buf = new Uint8Array([1, 2, 3])
+    const result = _c({ image_data: buf })
+    expect(result.imageData).toBe(buf)
+  })
+
+  it('多層 JSONB 巢狀都轉換', () => {
+    expect(_c({ a_b: { c_d: { e_f: 1 } } })).toEqual({
+      aB: { cD: { eF: 1 } },
+    })
+  })
+
+  it('陣列裡的 primitives 保留', () => {
+    expect(_c({ tag_ids: [1, 2, 3] })).toEqual({ tagIds: [1, 2, 3] })
   })
 })

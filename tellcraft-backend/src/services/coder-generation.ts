@@ -700,11 +700,28 @@ function buildScopeClause(scopeColumn?: string, scopeParam?: string): { varDecl:
   }
 }
 
-/** inline snakeToCamel 代碼片段（不依賴 helper function，避免 composition 丟失） */
-const INLINE_SNAKE_TO_CAMEL = `  const _c = (row: any) => {
-    if (!row) return row
+/**
+ * inline snakeToCamel 代碼片段（不依賴 helper function，避免 composition 丟失）。
+ *
+ * 遞迴版本：除了頂層 row keys 轉 camelCase，遇到值為 plain object（例如 JSONB
+ * column 取出的 `{user_name: 'x'}`）也要遞迴轉換，否則 page 拿到 `metadata.user_name`
+ * 而非預期的 `metadata.userName`，畫面該欄位完全空白（不會 throw，靜默失敗）。
+ *
+ * 不遞迴轉換的情境：
+ *   - Date 物件（pg 驅動回的 timestamp）— 用 instanceof Date 排除
+ *   - Buffer / Uint8Array（bytea 欄位）— 用 ArrayBuffer.isView 排除
+ *   - 陣列（JSONB 內也可能是 array）— 進入陣列遞迴每個 element
+ */
+const INLINE_SNAKE_TO_CAMEL = `  const _c = (val: any): any => {
+    if (val == null) return val
+    if (Array.isArray(val)) return val.map(_c)
+    if (val instanceof Date || ArrayBuffer.isView(val)) return val
+    if (typeof val !== 'object') return val
     const r: any = {}
-    for (const [k, v] of Object.entries(row)) r[k.replace(/_([a-z])/g, (_: any, c: string) => c.toUpperCase())] = v
+    for (const [k, v] of Object.entries(val)) {
+      const camelKey = k.replace(/_([a-z])/g, (_: any, c: string) => c.toUpperCase())
+      r[camelKey] = _c(v)
+    }
     return r
   }`
 
@@ -1058,15 +1075,35 @@ function renderQueryListTemplate(slots: z.infer<typeof QueryListSlotSchema>, fnN
   const scope = buildScopeClause(slots.scopeColumn, slots.scopeParam)
 
   // 動態篩選條件
+  // 跨契約防護：filters[] 內若有與 scopeColumn 同欄位的條目，必須 skip
+  // 否則生成 SQL 會出現 `WHERE col = $a AND col = $b`（兩個都是同個 column），
+  // BDD setup 用同 ID 還能過，runtime 拿到 NULL filter 直接 0 rows 看似正常實則漏資料。
+  // 真實案例：services_section_id 同時是 scopeColumn 與 filter[0].column → 雙 WHERE。
+  const scopeColumnLower = slots.scopeColumn?.toLowerCase()
   const filterParts: string[] = []
   if (slots.filters && slots.filters.length > 0) {
     for (const f of slots.filters) {
+      // 跳過與 scopeColumn 重複的 filter（避免雙 WHERE on same column）
+      if (scopeColumnLower && f.column.toLowerCase() === scopeColumnLower) {
+        continue
+      }
       if (f.operator === 'IS NULL' || f.operator === 'IS NOT NULL') {
         filterParts.push(`AND ${f.column} ${f.operator}`)
       } else if (f.literal) {
         filterParts.push(`AND ${f.column} ${f.operator} ${f.literal}`)
       } else if (f.param) {
-        filterParts.push(`AND ${f.column} ${f.operator} \${input.${f.param}}`)
+        // NULL-safe filter：用 PostgreSQL `(col = $1 OR $1 IS NULL)` 模式。
+        // 為什麼不用 nested sql 模板：@neondatabase/serverless 的 tag function 不支援
+        // sql fragment 嵌套，傳 sql\`\` 進外層模板會被當字串拼接。
+        // 為什麼不用 if/else 分兩條 SQL：1. 重複代碼 2. ORDER BY 子句拼接複雜
+        // 為什麼必須 NULL-safe：page 呼叫 `xxxAction({})` 不帶 filter 是常見場景；
+        // 若硬塞 `col = NULL`，PostgreSQL NULL 比較規則永不匹配 → 0 rows 看似正常實則漏資料。
+        if (f.operator === '=') {
+          filterParts.push(`AND (${f.column} = \${input.${f.param}} OR \${input.${f.param}}::text IS NULL)`)
+        } else {
+          // 其他 operator (!=、>、< 等) NULL 語義不同，保留原樣由 LLM 自決
+          filterParts.push(`AND ${f.column} ${f.operator} \${input.${f.param}}`)
+        }
       }
     }
   }
@@ -2035,22 +2072,22 @@ export function generateServerActions(
     const cookieStore = await cookies()
     cookieStore.delete('userId')
   } catch { /* WebContainer WASM 環境無 AsyncLocalStorage，跳過 cookie 操作 */ }
-  return ${fnName}(input)
+  return wrapActionResult(await ${fnName}(input))
 }`
         }
 
         if (authType === 'login') {
           // 登入/註冊：呼叫後設 cookie（多欄位名 fallback）
           return `export async function ${fnName}Action(input: ${inputType}) {
-  const result = await ${fnName}(input)
-  const uid = (result as any).userId || (result as any).createdUserId || (result as any).user_id
-  if (uid && result.__status && result.__status < 300) {
+  const result: any = await ${fnName}(input)
+  const uid = result?.userId || result?.createdUserId || result?.user_id
+  if (uid && result?.__status && result.__status < 300) {
     try {
       const cookieStore = await cookies()
       cookieStore.set('userId', String(uid), { httpOnly: true, path: '/', maxAge: 60 * 60 * 24 * 7 })
     } catch { /* WebContainer WASM 環境無 AsyncLocalStorage，跳過 cookie 操作 */ }
   }
-  return result
+  return wrapActionResult(result)
 }`
         }
 
@@ -2068,7 +2105,11 @@ export function generateServerActions(
   if (cookieAvailable && !userId && process.env.NODE_ENV === 'production') {
     console.warn('[Tellcraft Auth] Server Action invoked without userId cookie: ${fnName}')
   }
-  return ${fnName}({ ...input, ...(userId ? { userId } : {}) })
+  try {
+    return wrapActionResult(await ${fnName}({ ...input, ...(userId ? { userId } : {}) }))
+  } catch (err: any) {
+    return { __status: 500, data: null, error: err?.message ?? String(err) }
+  }
 }`
       })
       .join('\n\n')
@@ -2083,6 +2124,26 @@ export function generateServerActions(
 import { cookies } from 'next/headers'
 ${imports}
 ${typeImports}
+
+// Normalize heterogeneous lib-action return shapes into uniform { __status, data } envelope.
+// Lib actions historically returned arrays-with-__status, flat objects with __status spread,
+// or other shapes; pages consistently expect result.data. This wrapper bridges both contracts
+// without touching lib actions or HTTP route.ts (BDD HTTP path stays byte-identical).
+function wrapActionResult<T = unknown>(result: any): { __status: number; data: T } {
+  if (result == null) return { __status: 200, data: null as T }
+  if (Array.isArray(result)) {
+    const status = (result as any).__status ?? 200
+    return { __status: status, data: result as unknown as T }
+  }
+  if (typeof result === 'object') {
+    const { __status, ...rest } = result
+    if ('data' in rest && Object.keys(rest).length === 1) {
+      return { __status: __status ?? 200, data: rest.data }
+    }
+    return { __status: __status ?? 200, data: rest as T }
+  }
+  return { __status: 200, data: result as T }
+}
 
 ${exports}
 `
@@ -2705,8 +2766,28 @@ Standard call patterns (summary strings below are illustrative — always pick t
 
 **For initial page loads, pick the LIST-type summary (returns an array, usually named with \`List\`/\`All\`/\`Fetch All\` or similar). Do NOT use the single-query summary (requires an ID) — match by the Action's return type and parameter shape.**
 
-Return format: on success, return fields directly (\`result.fieldName\`, or \`result\` itself when it is an array); on failure, \`throw new Error(...)\`.
-**Do NOT use \`result.data.xxx\` — use \`result.xxx\` directly.** For list queries returning arrays, use \`result\` directly (it IS the array).
+## Server Action Return Shape (CRITICAL — MUST FOLLOW)
+
+Every Server Action wrapper returns the uniform envelope: \`{ __status: number, data: <payload>, error?: string }\`.
+- LIST queries → \`result.data\` is the **array** of rows
+- GET / CREATE / UPDATE / DELETE → \`result.data\` is the **object** (one row, camelCase fields)
+- Empty / not found → \`result.data\` is **null** (do NOT throw on null — render an empty state)
+- Errors → \`result.error\` is set, \`result.__status >= 400\`. Show in UI; do NOT swallow.
+
+**ALWAYS access via \`result.data\`. NEVER use \`result.fieldName\` or \`result\` itself as the array — those return undefined and the page silently breaks.**
+
+Correct examples:
+\`\`\`typescript
+const res = await listOrdersAction({ _stepSummary: 'List Orders' })
+if (res.error) { setError(res.error); return }
+setOrders(res.data ?? [])              // ✓ array via .data, with [] fallback
+\`\`\`
+\`\`\`typescript
+const res = await getOrderAction({ _stepSummary: 'Get Order', id })
+if (res.data) setOrder(res.data)       // ✓ object via .data; null = not found
+else setError('Order not found')
+\`\`\`
+
 **Do NOT pass \`{ intent: 'get' }\` — such calls are invalid.**
 
 Below are the actual function Input/Output interface definitions and full implementations. **_stepSummary must match exactly**:
@@ -4570,14 +4651,59 @@ if (op === '查詢訂閱列表') {
 }
 \`\`\`
 
-## 單一設定表操作（常見錯誤！）
-如果表只有一筆記錄（如 channel_config，id 固定為 1），查詢就是 SELECT * WHERE id = 1，
-更新就是 UPDATE ... WHERE id = 1。不要要求 action/type 參數。
-直接用 _stepSummary 精確匹配判斷是查詢還是更新：
+## NULL-safe filter（嚴重錯誤！）
+**page 端 useEffect 經常呼叫 \`xxxAction({})\` 不帶 filter 參數**——這時 input.filter 是 undefined，
+若你硬寫 \`WHERE col = \${input.filter}\`，PostgreSQL 把 NULL 當不可比較 → SQL 永不匹配 → 0 rows
+看似正常實則漏資料（這個 bug 不會 throw，是「靜默失敗」最難 debug 的類型）。
+
+\`\`\`typescript
+// ❌ 錯誤示範（input.foo 為 null 時 SQL 永不匹配）
+const rows = await sql\`SELECT * FROM items WHERE foo = \${input.foo}\`
+
+// ✅ 正確示範一：NULL-safe condition（推薦）
+const rows = await sql\`
+  SELECT * FROM items
+  WHERE (foo = \${input.foo} OR \${input.foo}::text IS NULL)
+\`
+
+// ✅ 正確示範二：條件分支（filter 為 null 時不加該 WHERE）
+const rows = input.foo != null
+  ? await sql\`SELECT * FROM items WHERE foo = \${input.foo}\`
+  : await sql\`SELECT * FROM items\`
+\`\`\`
+
+## 禁止對同欄位重複 WHERE（嚴重錯誤！）
+**絕對不能在同一個 SQL 裡對同一個 column 寫兩次 \`=\` 比較**：
+\`\`\`typescript
+// ❌ 錯誤示範（兩個 WHERE 同欄位 = 永遠互相約束）
+const rows = await sql\`
+  SELECT * FROM items
+  WHERE section_id = \${sectionId}
+    AND section_id = \${input.sectionId}
+\`
+\`\`\`
+若需要 scope（例：services_section 的 service_items），只在「scope WHERE」寫一次即可，
+不要再額外加同欄位的 filter。如果意圖是「複合條件」，改用不同 column 或用 IN/OR 表達。
+
+## 單一設定/區塊表操作（singleton — 嚴重錯誤！）
+如果表只有一筆記錄（如 channel_config / hero_section / services_section / pricing_section / faq_section / contact_section 等以 \`_section\` 或 \`_config\` 結尾的單例表），不需要 entity ID 參數，查詢就是 SELECT * LIMIT 1 或 WHERE id = 1。
+
+**🔴 絕對禁止對 singleton empty 拋錯！**生產環境中表剛建立時是空的，這會直接讓首次訪問 500：
+\`\`\`typescript
+// ❌ 錯誤示範（會在 prod 第一次訪問時 500）
+const [row] = await sql\`SELECT * FROM hero_section LIMIT 1\`
+if (!row) throw new Error('找不到資料')
+
+// ✅ 正確示範（empty 回 null，page 顯示空狀態 / 引導建立）
+const [row] = await sql\`SELECT * FROM hero_section LIMIT 1\`
+return { __status: 200, ...(row ? convertSnakeToCamel(row) : {}) }   // 缺資料時送出空物件，由 wrapper 包成 { __status, data: {} }
+\`\`\`
+
+更新就是 UPDATE ... WHERE id = X。不要要求 action/type 參數，用 _stepSummary 精確匹配判斷查詢還是更新：
 \`\`\`typescript
 if (op === '查詢頻道設定') {
-  const row = await sql\`SELECT * FROM channel_config WHERE id = 1\`
-  return { __status: 200, ...row[0] }
+  const [row] = await sql\`SELECT * FROM channel_config WHERE id = 1\`
+  return { __status: 200, ...(row ?? {}) }   // empty → 空物件，由 wrapper 包成 data: {}
 }
 // 更新：把所有輸入欄位 SET 進去
 const setCols = Object.keys(input).filter(k => k !== '_stepSummary' && k !== 'userId')

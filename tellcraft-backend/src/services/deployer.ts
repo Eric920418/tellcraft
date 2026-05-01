@@ -399,6 +399,17 @@ export function sanitizeCodeForDeploy(code: GeneratedCode): SanitizeResult {
       }
     }
 
+    // ── 修復 0.5: lib/actions SQL 內重複 WHERE 條件 dedup ──
+    // LLM 偶把 scopeColumn 與 filters[] 同欄位疊成 `WHERE col = $1 AND col = $2`，
+    // BDD setup 用同 ID 還能過，runtime 帶 NULL filter 直接 0 rows 漏資料。
+    if (file.path.startsWith('lib/actions/') && /\.(tsx?|jsx?)$/.test(file.path)) {
+      const dedupRes = dedupeRedundantWhereClauses(file.content)
+      if (dedupRes.count > 0) {
+        file.content = dedupRes.content
+        fixes.push(`${file.path}: 移除 ${dedupRes.count} 處重複的 WHERE 條件（同欄位 = 比較）`)
+      }
+    }
+
     // ── 修復 1: framer-motion → motion/react ──（對所有檔案安全）
     if (/from\s+['"]framer-motion['"]/.test(file.content)) {
       file.content = file.content.replace(
@@ -444,11 +455,74 @@ export function sanitizeCodeForDeploy(code: GeneratedCode): SanitizeResult {
       }
     }
 
+    // ── 修復 2.6: page.tsx 跨界 import server-only 模組 ──
+    // Tellcraft 架構規定：app/**/page.tsx 應透過 @/app/actions/* (Server Action wrapper)
+    // 與後端互動，禁止直接 import @/lib/db 或 @/lib/actions/*。違規分兩類：
+    //   (A) page 沒寫 'use client' + import @/lib/db → Server Component 直接查 DB
+    //       → SSR 階段 DATABASE_URL 缺失或表空就直接 500（不像 Server Action 可 try/catch）
+    //   (B) page 寫 'use client' + import @/lib/db → webpack 拒絕 build（ESM error）
+    //
+    // 偵測後改寫成正確 import：把 @/lib/actions/foo → @/app/actions/foo（同名 wrapper），
+    // 或加 console.error 警告（無對應 wrapper 時）。改寫風險低於 build error，因 wrapper
+    // 一定包含對應 lib action 的調用。
+    const isPageFile = /^app\/.*\/page\.(tsx|jsx|ts|js)$/.test(file.path)
+    if (isPageFile && !isBackendFile) {
+      const libImportRe = /import\s+(?:[^'"]*?)\s+from\s+['"]@\/lib\/(db|actions\/[^'"]+)['"];?/g
+      const libImports: string[] = []
+      let m: RegExpExecArray | null
+      while ((m = libImportRe.exec(file.content)) !== null) {
+        libImports.push(m[1])
+      }
+      if (libImports.length > 0) {
+        // 改寫 @/lib/actions/foo → @/app/actions/foo（per-action 同名 wrapper）
+        // 注意：lib/db 沒有 client-safe 替代，無法自動修；只能 warn
+        let rewriteCount = 0
+        file.content = file.content.replace(
+          /import\s+(\{[^}]+\})\s+from\s+['"]@\/lib\/actions\/([^'"]+)['"]/g,
+          (match, namedImports, actionName) => {
+            // 把 import { foo } 改成 import { fooAction }（wrapper 加 `Action` 後綴）
+            const camelName = String(actionName).replace(/-([a-z])/g, (_: string, c: string) => c.toUpperCase())
+            const remappedImports = String(namedImports).replace(
+              /(\b)([a-zA-Z_$][\w$]*)(\b)/g,
+              (_n, w1, name, w2) => {
+                if (name === camelName) return `${w1}${name}Action${w2}`
+                return _n
+              }
+            )
+            rewriteCount++
+            return `import ${remappedImports} from '@/app/actions/${actionName}'`
+          }
+        )
+        if (rewriteCount > 0) {
+          fixes.push(`${file.path}: 重寫 ${rewriteCount} 處跨界 @/lib/actions → @/app/actions（Server Component 防護）`)
+        }
+        if (libImports.includes('db')) {
+          // page 直接 import lib/db 沒辦法自動修；強警告 + telemetry
+          fixes.push(`${file.path}: ⚠ 偵測到 page.tsx 直接 import @/lib/db（Server Component 查 DB），若 DATABASE_URL 或表缺失將直接 SSR 500`)
+        }
+      }
+    }
+
     // ── 修復 2.7: bracket lookup 可能回傳 undefined → 補 optional chaining ──
     const { content: lookupFixed, repaired: lookupRepaired } = repairBracketLookupAccess(file)
     if (lookupRepaired) {
       file.content = lookupFixed
       fixes.push(`${file.path}: 補 optional chaining（bracket lookup）`)
+    }
+
+    // ── 修復 2.8: 同一 JSX tag 內的重複 className attribute ──
+    // LLM 偶會在同一個 <button>/<div> 等 tag 寫兩次 className（例：focus 樣式塞前面、
+    // 排版樣式塞後面）。HTML 規範是「last wins」，runtime 不 crash，但前面的
+    // focus-visible 等 class 永遠失效，留下隱藏的 a11y 漏洞。
+    // 純 regex 行不通：JSX 屬性裡的 `onClick={() => fn()}` 帶 `>`，`[^<>]` 會被截斷。
+    // 改用 brace-aware 掃描：定位所有 `className="..."`、檢查兩個之間是否仍在同一
+    // JSX 開標籤內（brace-balanced 的情況下沒有真實的 `<` 或 `>`）。
+    if (!isBackendFile) {
+      const merge = mergeDuplicateClassNames(file.content)
+      if (merge.count > 0) {
+        file.content = merge.content
+        fixes.push(`${file.path}: 合併 ${merge.count} 處重複的 className attribute`)
+      }
     }
 
     // ── 修復 3: motion.* 上的 spread props（TypeScript 類型衝突）──（跳過後端檔案）
@@ -978,6 +1052,20 @@ export function safeMotionProps<T extends Record<string, unknown>>(props: T) {
     }
   }
 
+  // ── 修復 10: Page → Action 契約檢查（warning only） ──
+  // page 呼叫 xxxAction({}) 不帶 action 需要的 input.x → runtime SQL NULL filter
+  // → 0 rows 漏資料。不阻斷部署（auto-fix 風險高），只記錄 telemetry 供週報追蹤。
+  const sanitizedAsVercelFiles: VercelFile[] = [
+    ...sanitized.pages.map(p => ({ file: p.path, data: p.content })),
+    ...sanitized.components.map(c => ({ file: c.path, data: c.content })),
+  ]
+  const contractCheck = checkPageActionContract(sanitizedAsVercelFiles)
+  if (contractCheck.warnings.length > 0) {
+    for (const w of contractCheck.warnings) {
+      fixes.push(`⚠ Page-Action 契約: ${w}`)
+    }
+  }
+
   return { code: sanitized, fixes, injectedFiles, extraDependencies }
 }
 
@@ -1451,60 +1539,129 @@ export async function executeDeployment(
     }
 
     // 3.5 Env vars 注入（Neon DB + Auth + Email + Magic-link 一次完成）
-    try {
-      const cfgRow = await db.query<{
-        neon_connection_string: string | null
-        resend_api_key: string | null
-        email_from: string | null
-        custom_domain: string | null
-      }>(
-        'SELECT neon_connection_string, resend_api_key, email_from, custom_domain FROM projects WHERE id = $1',
-        [projectId]
+    // CRITICAL：DATABASE_URL 缺失或注入失敗必須阻斷部署，不能 fail-open。
+    // 否則 Vercel build 過 → runtime `lib/db.ts` throw `DATABASE_URL is not set`
+    // → 客戶看到 500 才回報，產品口碑炸裂。
+    const cfgRow = await db.query<{
+      neon_connection_string: string | null
+      resend_api_key: string | null
+      email_from: string | null
+      custom_domain: string | null
+    }>(
+      'SELECT neon_connection_string, resend_api_key, email_from, custom_domain FROM projects WHERE id = $1',
+      [projectId]
+    )
+    const cfg = cfgRow.rows[0]
+
+    // 偵測客戶 app 是否需要 DATABASE_URL（任一 lib/db.ts 或 lib/actions/* 存在即視為需要）
+    const needsDatabase = files.some(f =>
+      f.file === 'lib/db.ts' || f.file.startsWith('lib/actions/') || f.file.startsWith('app/actions/')
+    )
+    if (needsDatabase && !cfg?.neon_connection_string) {
+      throw new Error(
+        'Neon 資料庫連線字串缺失（projects.neon_connection_string is null），無法部署。' +
+        '請確認 Neon provisioning 階段完成且寫入 DB。'
       )
-      const cfg = cfgRow.rows[0]
-      const envVars: Record<string, string> = {}
-
-      // Neon DB 連線字串
-      if (cfg?.neon_connection_string) {
-        envVars['DATABASE_URL'] = cfg.neon_connection_string
-      }
-
-      // Email primitive：客戶有 lib/email.ts → 注入 Resend 配置
-      const hasEmailFile = files.some(f => f.file === 'lib/email.ts')
-      if (hasEmailFile) {
-        if (cfg?.resend_api_key) {
-          envVars['RESEND_API_KEY'] = cfg.resend_api_key
-        }
-        envVars['EMAIL_FROM'] = cfg?.email_from || 'onboarding@resend.dev'
-      }
-
-      // Magic-link：注入 APP_URL（優先 custom domain，fallback Vercel 預設）
-      const hasMagicLinkFile = files.some(f => f.file === 'lib/magic-link.ts')
-      if (hasMagicLinkFile) {
-        const appUrl = cfg?.custom_domain
-          ? `https://${cfg.custom_domain}`
-          : `https://${projectName}.vercel.app`
-        envVars['APP_URL'] = appUrl
-      }
-
-      if (Object.keys(envVars).length > 0) {
-        await injectVercelEnvVars(projectName, envVars)
-      }
-
-      // Auth 系統：AUTH_SECRET 只建立一次，不覆蓋（避免迭代部署後用戶被強制登出）
-      const hasAuthFile = files.some(f => f.file === 'auth.ts')
-      if (hasAuthFile) {
-        const crypto = await import('crypto')
-        await injectVercelEnvVarIfNotExists(projectName, 'AUTH_SECRET', crypto.randomBytes(32).toString('base64'))
-      }
-
-      logger.info(
-        { projectId, hasAuth: hasAuthFile, hasEmail: hasEmailFile, hasMagicLink: hasMagicLinkFile, hasResendKey: !!cfg?.resend_api_key },
-        'Vercel env vars 已注入'
-      )
-    } catch (err) {
-      logger.warn({ err, projectId }, 'Env vars 注入失敗，繼續部署')
     }
+
+    // Pre-deploy Neon schema check：客戶 app 在 lib/actions/*.ts 引用的表必須真的存在
+    if (needsDatabase && cfg?.neon_connection_string) {
+      const expectedTables = extractReferencedTables(files)
+      if (expectedTables.length > 0) {
+        const schemaCheck = await checkNeonSchemaExists(cfg.neon_connection_string, expectedTables)
+        if (schemaCheck && schemaCheck.missing.length > 0) {
+          // 有缺表 = schema 沒建好 = runtime 查詢必 500，必須阻斷
+          void recordTelemetry({
+            skillName: 'deployer',
+            eventType: 'deployer_layer_trigger',
+            patternKey: 'neon_schema_missing_tables',
+            severity: 'critical',
+            outcome: 'failed',
+            projectId,
+            payload: { expected: expectedTables, missing: schemaCheck.missing, existing: schemaCheck.existing },
+          }).catch(() => {})
+          throw new Error(
+            `Neon schema 缺失表（部署中止）：${schemaCheck.missing.join(', ')}。` +
+            `客戶 app 代碼引用了這些表但 Neon DB 中不存在。請重新跑 db_provisioning 或檢查 schema-derivation。` +
+            `已存在的表：${schemaCheck.existing.length === 0 ? '（無）' : schemaCheck.existing.join(', ')}`
+          )
+        }
+        if (schemaCheck) {
+          logger.info({ projectId, expectedCount: expectedTables.length, existingCount: schemaCheck.existing.length }, 'Neon schema check 通過')
+        }
+      }
+    }
+
+    const envVars: Record<string, string> = {}
+
+    // Neon DB 連線字串
+    if (cfg?.neon_connection_string) {
+      envVars['DATABASE_URL'] = cfg.neon_connection_string
+    }
+
+    // Email primitive：客戶有 lib/email.ts → 注入 Resend 配置
+    const hasEmailFile = files.some(f => f.file === 'lib/email.ts')
+    if (hasEmailFile) {
+      if (cfg?.resend_api_key) {
+        envVars['RESEND_API_KEY'] = cfg.resend_api_key
+      }
+      envVars['EMAIL_FROM'] = cfg?.email_from || 'onboarding@resend.dev'
+    }
+
+    // Magic-link：注入 APP_URL（優先 custom domain，fallback Vercel 預設）
+    const hasMagicLinkFile = files.some(f => f.file === 'lib/magic-link.ts')
+    if (hasMagicLinkFile) {
+      const appUrl = cfg?.custom_domain
+        ? `https://${cfg.custom_domain}`
+        : `https://${projectName}.vercel.app`
+      envVars['APP_URL'] = appUrl
+    }
+
+    // Auth 系統：AUTH_SECRET 由 injectVercelEnvVarIfNotExists 不覆蓋注入；
+    // 為了 scan 比對先把它記入 injected 名單
+    const hasAuthFile = files.some(f => f.file === 'auth.ts')
+    const injectedKeys = new Set([...Object.keys(envVars), ...(hasAuthFile ? ['AUTH_SECRET'] : [])])
+
+    // 掃描客戶 app 代碼引用了哪些 process.env.X，與已注入清單比對
+    const envScan = scanProcessEnvReferences(files, injectedKeys)
+    if (envScan.missingCritical.length > 0) {
+      throw new Error(
+        `客戶 app 代碼引用了未注入的 critical env vars（部署中止）：${envScan.missingCritical.join(', ')}。` +
+        `這些 key 缺失會直接導致 runtime 500，請檢查 Tellcraft pipeline 的 provisioning 階段。`
+      )
+    }
+    if (envScan.missing.length > 0) {
+      logger.warn(
+        { projectId, missing: envScan.missing, referenced: envScan.referenced, injected: envScan.injected },
+        `客戶 app 引用了 ${envScan.missing.length} 個未自動注入的 env vars（不阻斷，但 runtime 將為 undefined）`
+      )
+      // Telemetry：fire-and-forget 記錄，週報追蹤需求
+      void recordTelemetry({
+        skillName: 'deployer',
+        eventType: 'deployer_layer_trigger',
+        patternKey: 'env_var_unhandled',
+        severity: 'warning',
+        outcome: 'failed',
+        projectId,
+        payload: { missing: envScan.missing, referenced: envScan.referenced },
+      }).catch(() => {})
+    }
+
+    if (Object.keys(envVars).length > 0) {
+      // injectVercelEnvVars 內部對 CRITICAL_ENV_KEYS 有 fail-fast；non-critical
+      // 失敗只 warn 不 throw，不影響部署成功率
+      await injectVercelEnvVars(projectName, envVars)
+    }
+
+    if (hasAuthFile) {
+      const crypto = await import('crypto')
+      await injectVercelEnvVarIfNotExists(projectName, 'AUTH_SECRET', crypto.randomBytes(32).toString('base64'))
+    }
+
+    logger.info(
+      { projectId, hasAuth: hasAuthFile, hasEmail: hasEmailFile, hasMagicLink: hasMagicLinkFile, hasResendKey: !!cfg?.resend_api_key, hasDb: !!cfg?.neon_connection_string },
+      'Vercel env vars 已注入'
+    )
 
     // 4. 部署檔案（70%）
     await onProgress({ percent: 70, step: '上傳並部署到 Vercel...' })
@@ -1524,6 +1681,37 @@ export async function executeDeployment(
       const buildLogs = await fetchVercelBuildLogs(deployment.id)
       if (buildLogs) logger.error({ buildLogs }, 'Vercel build logs')
       return { success: false, error: 'Vercel 建置失敗，請檢查代碼。', vercelDeploymentId: deployment.id }
+    }
+
+    // 5.5 Post-deploy runtime smoke test
+    // Vercel 回 READY 只代表 build 成功，不代表 runtime 健康（DATABASE_URL 缺失、
+    // 環境變數錯誤、SSR 拋例外等都會 build 過但 runtime 500）。打幾個關鍵路徑確認
+    // 客戶不會打開瀏覽器看到一片紅。失敗 → 部署視為失敗，給用戶具體錯誤而不是「成功」。
+    await onProgress({ percent: 92, step: 'Smoke test — 驗證部署實際可訪問...' })
+    const smokeFailures = await runDeploymentSmokeTest(deploymentUrl, files)
+    if (smokeFailures.length > 0) {
+      const summary = smokeFailures
+        .map(f => `${f.path} → HTTP ${f.status}${f.snippet ? `\n  ${f.snippet}` : ''}`)
+        .join('\n')
+      logger.error({ deploymentUrl, failures: smokeFailures }, 'Post-deploy smoke test failed')
+      // Telemetry：fire-and-forget 記錄失敗，週報追蹤改善
+      void recordTelemetry({
+        skillName: 'deployer',
+        eventType: 'deployer_layer_trigger',
+        patternKey: 'smoke_test_failed',
+        severity: 'critical',
+        outcome: 'failed',
+        projectId,
+        payload: {
+          deploymentUrl,
+          failures: smokeFailures.map(f => ({ path: f.path, status: f.status })),
+        },
+      }).catch(() => {})
+      return {
+        success: false,
+        error: `部署完成但運行時 smoke test 失敗，可能是 DATABASE_URL 缺失或頁面 SSR 出錯：\n${summary}`,
+        vercelDeploymentId: deployment.id,
+      }
     }
 
     // 6. 更新 DB（95-100%）
@@ -3145,18 +3333,541 @@ async function verifyBuildLocally(
 // Vercel Environment Variables 注入
 // ============================================================
 
+/**
+ * Brace-aware merge of duplicate `className="..."` within the same JSX opening tag.
+ *
+ * Pure regex breaks because JSX expressions like `onClick={() => fn()}` contain a real
+ * `>` character; `[^<>]` would terminate at the `=>` arrow. We scan all string-literal
+ * className occurrences and pair adjacent ones that share an opening tag (no real `<` or
+ * `>` between them at brace-depth 0). Multi-occurrence tags handled by re-scanning rounds.
+ */
+function mergeDuplicateClassNames(content: string): { content: string; count: number } {
+  let totalCount = 0
+  let working = content
+  for (let round = 0; round < 5; round++) {
+    const re = /className="([^"]*)"/g
+    const matches: Array<{ start: number; end: number; value: string }> = []
+    let m: RegExpExecArray | null
+    while ((m = re.exec(working)) !== null) {
+      matches.push({ start: m.index, end: m.index + m[0].length, value: m[1] })
+    }
+    if (matches.length < 2) break
+
+    let merged = false
+    for (let i = matches.length - 1; i >= 1; i--) {
+      const a = matches[i - 1]
+      const b = matches[i]
+      const between = working.slice(a.end, b.start)
+
+      let depth = 0
+      let inSameTag = true
+      for (let j = 0; j < between.length; j++) {
+        const c = between[j]
+        if (c === '{') depth++
+        else if (c === '}') depth--
+        else if (depth === 0 && (c === '<' || c === '>')) {
+          inSameTag = false
+          break
+        }
+      }
+      if (!inSameTag) continue
+
+      const mergedValue = `${a.value} ${b.value}`.replace(/\s+/g, ' ').trim()
+      const newFirst = `className="${mergedValue}"`
+
+      let removeFrom = b.start
+      while (removeFrom > a.end && /\s/.test(working[removeFrom - 1])) {
+        removeFrom--
+      }
+
+      working =
+        working.slice(0, a.start) +
+        newFirst +
+        working.slice(a.end, removeFrom) +
+        working.slice(b.end)
+
+      totalCount++
+      merged = true
+      break
+    }
+    if (!merged) break
+  }
+  return { content: working, count: totalCount }
+}
+
+// Keys whose absence guarantees runtime 500 — must fail-fast so the deployment never
+// reaches Vercel build with broken env. Lib actions throw `DATABASE_URL is not set`
+// before any meaningful page render, so a "deployed app" without DATABASE_URL is worse
+// than a clear deployment failure (user gets to retry instead of seeing 500s in browser).
+const CRITICAL_ENV_KEYS = new Set(['DATABASE_URL'])
+
+// Vercel/Node 自動提供，不需 Tellcraft 注入；scan 時 skip
+const VERCEL_AUTO_ENV_KEYS = new Set([
+  'NODE_ENV',
+  'VERCEL',
+  'VERCEL_URL',
+  'VERCEL_ENV',
+  'VERCEL_REGION',
+  'VERCEL_DEPLOYMENT_ID',
+  'VERCEL_GIT_COMMIT_SHA',
+  'VERCEL_GIT_COMMIT_REF',
+  'PORT',
+])
+
+/**
+ * Page → Action 參數契約檢查。
+ *
+ * 動機：page 經常呼叫 `xxxAction({})` 或 `xxxAction({ id })` 不帶 filter，
+ * 而 lib action 內部讀 `input.servicesSectionId` 等。Server Action wrapper 會把
+ * userId 從 cookie 注入但**不會推導其他必要參數**——LLM 沒考慮 page 端可能不傳。
+ *
+ * Runtime 行為：input.X 是 undefined → SQL 帶 NULL 參數 → 0 rows → page 顯示空。
+ * 不會 throw，是「靜默資料缺失」最難 debug 的類型。
+ *
+ * 此檢查兩階段：
+ *   1. 從 lib/actions/*.ts 抽出 `input.\w+` 引用集合（除了 _stepSummary, userId）
+ *   2. 從 app 頁面檔抽出 `xxxAction({...})` 呼叫，比對是否傳了所有 required keys
+ *
+ * 回傳警告清單（不阻斷部署，由 telemetry 追蹤改善）。複雜呼叫（spread、條件參數、
+ * 動態 key）保守 skip 不報警，避免誤殺。
+ */
+export function checkPageActionContract(files: VercelFile[]): { warnings: string[] } {
+  // 第一步：collect action → required input keys
+  // action filename：lib/actions/get-services-section.ts → fnName getServicesSection → wrapper getServicesSectionAction
+  const actionRequirements = new Map<string, Set<string>>()
+  for (const f of files) {
+    if (!f.file.startsWith('lib/actions/') || !/\.tsx?$/.test(f.file)) continue
+    const fileName = f.file.replace(/^lib\/actions\//, '').replace(/\.tsx?$/, '')
+    // toCamelCase
+    const fnName = fileName.replace(/-([a-z])/g, (_, c) => c.toUpperCase())
+    const actionName = fnName + 'Action'
+
+    const inputRefs = new Set<string>()
+    const re = /\binput\.(\w+)\b/g
+    let m: RegExpExecArray | null
+    while ((m = re.exec(f.data)) !== null) {
+      const key = m[1]
+      if (key === '_stepSummary' || key === 'userId') continue
+      inputRefs.add(key)
+    }
+    actionRequirements.set(actionName, inputRefs)
+  }
+
+  // 第二步：scan pages 的 action calls
+  const warnings: string[] = []
+  for (const f of files) {
+    if (!f.file.startsWith('app/') || !/page\.(tsx|jsx)$/.test(f.file)) continue
+
+    // 匹配 `xxxAction(arg)` — arg 可能跨多行，需要 brace counting
+    // 先粗略匹配：find `\w+Action(` 開頭，找到對應 close paren
+    const callRe = /\b(\w+Action)\s*\(/g
+    let m: RegExpExecArray | null
+    while ((m = callRe.exec(f.data)) !== null) {
+      const actionName = m[1]
+      const required = actionRequirements.get(actionName)
+      if (!required || required.size === 0) continue
+
+      // 從 ( 開始，brace count 找到匹配的 )
+      const argStart = m.index + m[0].length
+      let depth = 1
+      let argEnd = argStart
+      while (argEnd < f.data.length && depth > 0) {
+        const c = f.data[argEnd]
+        if (c === '(' || c === '{' || c === '[') depth++
+        else if (c === ')' || c === '}' || c === ']') depth--
+        if (depth === 0) break
+        argEnd++
+      }
+      const argStr = f.data.slice(argStart, argEnd).trim()
+
+      // 若含 spread `...` 或 conditional `?:` 或變數展開，保守 skip
+      if (/\.\.\./.test(argStr) || /\?\s*[\w[]/.test(argStr)) continue
+
+      // 抽出 object literal keys (`key: value` pattern at top level)
+      const passedKeys = new Set<string>()
+      // 簡化：只抓 `\bkey\s*:` 形式（不嚴謹但足以涵蓋大多數情況）
+      const keyRe = /\b(\w+)\s*:/g
+      let km: RegExpExecArray | null
+      // 限定在 argStr 第一層（不進入 nested object）
+      let topDepth = 0
+      let inString: string | null = null
+      const topLevelStr: string[] = []
+      for (let i = 0; i < argStr.length; i++) {
+        const c = argStr[i]
+        if (inString) {
+          if (c === inString && argStr[i - 1] !== '\\') inString = null
+          continue
+        }
+        if (c === '"' || c === "'" || c === '`') inString = c
+        else if (c === '{' || c === '[' || c === '(') topDepth++
+        else if (c === '}' || c === ']' || c === ')') topDepth--
+        else if (topDepth === 1) topLevelStr.push(c)
+      }
+      // topLevelStr 含第一層 object 內容
+      const topLevel = topLevelStr.join('')
+      while ((km = keyRe.exec(topLevel)) !== null) {
+        passedKeys.add(km[1])
+      }
+
+      const missing = [...required].filter(k => !passedKeys.has(k))
+      if (missing.length > 0) {
+        warnings.push(
+          `${f.file}: 呼叫 ${actionName}({...}) 缺少必要參數 [${missing.join(', ')}]，` +
+          `runtime 該欄位將為 undefined → SQL 永不匹配 → 0 rows / 漏資料`
+        )
+      }
+    }
+  }
+  return { warnings }
+}
+
+/**
+ * 偵測並移除 lib/actions/*.ts 內 `sql\`...\`` template literal 中重複的 WHERE 條件。
+ *
+ * 真實案例（用戶下載專案 `list-service-items.ts:11-12`）：
+ * ```
+ * WHERE services_section_id = ${servicesSectionId}
+ *
+ *   AND services_section_id = ${input.servicesSectionId}
+ * ```
+ *
+ * 同欄位被 `WHERE col = $1 AND col = $2` 寫成兩次。BDD setup 時兩個 binding 都同 ID
+ * 還能過，runtime 用戶呼叫沒帶 sectionId → 兩個 binding 都 NULL → SQL 永不匹配
+ * 看似返回空陣列正常實則完全漏資料。
+ *
+ * 此函數在每個 sql 模板內：
+ *   1. 抽出所有 `WHERE/AND <col> = ${...}` 條件
+ *   2. 用 column name + operator 做 key 偵測重複
+ *   3. 保留第一個出現的，移除後續重複（含前置的 `AND` 與該行 whitespace）
+ *
+ * 不處理：跨 sql 模板、複雜 OR 條件、sub-query 內的 WHERE。
+ */
+function dedupeRedundantWhereClauses(content: string): { content: string; count: number } {
+  let totalCount = 0
+  // 找出所有 sql 標籤模板（lib/db.ts 的 `sql\`...\`` pattern）
+  const sqlBlockRe = /(sql`)([^`]*)(`)/g
+  const result = content.replace(sqlBlockRe, (full, opener, body, closer) => {
+    // 抽出所有 `WHERE col = ...` 與 `AND col = ...` 條件
+    // pattern: 邊界（WHERE 或 AND）+ 欄位名 + `=` 或其他比較 + 值（${...} 或字面值）
+    const condRe = /\b(WHERE|AND)\b\s+(\w+)\s*(=|!=|<>)\s*(\$\{[^}]*\}|[^\s]+)/gi
+    const seen = new Map<string, { matchStart: number; matchEnd: number }>()
+    const removed: Array<{ start: number; end: number }> = []
+
+    let m: RegExpExecArray | null
+    while ((m = condRe.exec(body)) !== null) {
+      const op = m[1].toUpperCase()
+      const col = m[2].toLowerCase()
+      const cmp = m[3]
+      const key = `${col}|${cmp}`
+      if (seen.has(key) && op === 'AND') {
+        // 重複：擴展到包含前置 AND 與行首 whitespace
+        let removeStart = m.index
+        // 往前吃掉一個 AND 前的所有 whitespace（保留換行格式整齊）
+        while (removeStart > 0 && /[ \t]/.test(body[removeStart - 1])) {
+          removeStart--
+        }
+        // 若前一字元是換行符，整行刪掉
+        if (removeStart > 0 && body[removeStart - 1] === '\n') {
+          removeStart--
+        }
+        removed.push({ start: removeStart, end: m.index + m[0].length })
+        totalCount++
+      } else {
+        seen.set(key, { matchStart: m.index, matchEnd: m.index + m[0].length })
+      }
+    }
+
+    if (removed.length === 0) return full
+
+    // 從後往前刪（保持索引有效）
+    removed.sort((a, b) => b.start - a.start)
+    let modifiedBody = body
+    for (const r of removed) {
+      modifiedBody = modifiedBody.slice(0, r.start) + modifiedBody.slice(r.end)
+    }
+    return opener + modifiedBody + closer
+  })
+  return { content: result, count: totalCount }
+}
+
+/**
+ * 從 lib/actions/*.ts 內所有 SQL 抽取 `FROM <table>` 與 `INSERT INTO <table>` 的表名集合。
+ * 用於部署前對 Neon 實際 schema 做存在性比對。
+ *
+ * 為什麼需要：BDD 階段如果 `準備一個 X` 失敗會直接報錯，但 deployer 沒辦法重現 BDD
+ * 的 setup；如果 schema 因為 DDL 部分失敗 / 客戶手動 drop 表 / Neon provisioning 沒跑
+ * 完整等原因有缺表，runtime 第一次 SQL 查詢就 500。
+ */
+export function extractReferencedTables(files: VercelFile[]): string[] {
+  const tables = new Set<string>()
+  for (const f of files) {
+    if (!f.file.startsWith('lib/actions/') && !f.file.startsWith('app/api/')) continue
+    if (!/\.(tsx?|jsx?)$/.test(f.file)) continue
+    // 匹配 sql\` ... FROM <table> ... \` / INSERT INTO <table> / UPDATE <table> / DELETE FROM <table>
+    // 表名用 [a-z_][a-z0-9_]* 通配（PostgreSQL 標準命名）
+    const re = /(?:FROM|INTO|UPDATE)\s+([a-z_][a-z0-9_]*)\b/gi
+    let m: RegExpExecArray | null
+    while ((m = re.exec(f.data)) !== null) {
+      const name = m[1].toLowerCase()
+      // 跳過 PostgreSQL 系統表 / 常見 SQL 關鍵字（避免誤抓 `INSERT INTO ... VALUES` 之類）
+      if (['values', 'select', 'where', 'on'].includes(name)) continue
+      // 跳過 pg_*、information_schema.* 系統表
+      if (name.startsWith('pg_') || name.startsWith('information_schema')) continue
+      tables.add(name)
+    }
+  }
+  return [...tables].sort()
+}
+
+/**
+ * 查詢 Neon 實際存在的 public schema 表清單，與 expected 對照。
+ *
+ * 失敗（連不上 Neon）回 null，呼叫端用 fallback 不阻斷部署；查到結果則回差集。
+ */
+async function checkNeonSchemaExists(
+  connectionString: string,
+  expectedTables: string[],
+): Promise<{ existing: string[]; missing: string[] } | null> {
+  if (expectedTables.length === 0) {
+    return { existing: [], missing: [] }
+  }
+  const { Client } = await import('pg')
+  const client = new Client({ connectionString })
+  try {
+    const ctrl = new AbortController()
+    const timer = setTimeout(() => ctrl.abort(), 8000)
+    await client.connect()
+    clearTimeout(timer)
+    const res = await client.query(
+      `SELECT tablename FROM pg_tables WHERE schemaname = 'public'`
+    )
+    const existing = new Set<string>(res.rows.map((r: { tablename: string }) => r.tablename.toLowerCase()))
+    const missing = expectedTables.filter(t => !existing.has(t))
+    return {
+      existing: [...existing].sort(),
+      missing,
+    }
+  } catch (err) {
+    logger.warn({ err }, 'Neon schema check 失敗，降級不阻斷部署')
+    return null
+  } finally {
+    try { await client.end() } catch { /* swallow */ }
+  }
+}
+
+interface EnvScanReport {
+  /** 在生成代碼中被 `process.env.X` 引用的 key 集合 */
+  referenced: string[]
+  /** 已在 envVars 注入清單裡的 key 集合 */
+  injected: string[]
+  /** 引用了但未注入、也不是 Vercel 自動提供 → 部署後 runtime 會是 undefined */
+  missing: string[]
+  /** missing 中屬於 CRITICAL_ENV_KEYS 的子集 → fail-fast */
+  missingCritical: string[]
+}
+
+/**
+ * 掃描客戶 app 代碼裡所有 `process.env.X` 引用，並與 envVars 注入清單比對。
+ *
+ * 為什麼需要：BDD 階段 envVars 是測試環境完整準備的，runtime Vercel 端需要靠
+ * deployer 主動注入才有。LLM 偶爾會在生成代碼中 reference 一個 Tellcraft 不認識
+ * 的 env var（如 BDD 提到 Stripe → `process.env.STRIPE_SECRET_KEY`），deployer
+ * 不會自動 inject，runtime 該行就是 undefined → 客戶 app 的相關功能直接無聲失敗。
+ *
+ * 這個掃描分兩級：
+ * - **CRITICAL 缺失**（如 DATABASE_URL）→ 阻斷部署
+ * - **非 CRITICAL 缺失**（如 STRIPE_SECRET_KEY）→ warn + telemetry，讓用戶知道
+ *   有哪些 env 需要去 Vercel UI 自己補（不阻斷，因為 user 可能已手動設過）
+ */
+export function scanProcessEnvReferences(
+  files: VercelFile[],
+  injected: Set<string>,
+): EnvScanReport {
+  const referenced = new Set<string>()
+  // Tellcraft 平台自身的 env（用於後端 BDD 測試），絕不該出現在客戶 app 代碼中
+  const TELLCRAFT_INTERNAL = new Set([
+    'JWT_SECRET',  // Tellcraft 後端 only
+    'NEON_API_KEY',
+    'VERCEL_ACCESS_TOKEN',
+    'ANTHROPIC_API_KEY',
+    'CLAUDE_API_KEY',
+    'OPENAI_API_KEY',  // 除非客戶 app 自己用 OpenAI，否則屬內部
+  ])
+
+  for (const f of files) {
+    // 只掃客戶 app 會在 runtime 執行的檔案：lib/、app/、middleware
+    const isRuntimeFile =
+      f.file === 'middleware.ts' ||
+      f.file.startsWith('lib/') ||
+      f.file.startsWith('app/')
+    if (!isRuntimeFile) continue
+    if (!/\.(tsx?|jsx?|mjs|cjs)$/.test(f.file)) continue
+
+    // 匹配 `process.env.X` 與 `process.env["X"]` 兩種形式
+    const re = /process\.env(?:\.([A-Z][A-Z0-9_]*)|\[\s*['"]([A-Z][A-Z0-9_]*)['"]\s*\])/g
+    let m: RegExpExecArray | null
+    while ((m = re.exec(f.data)) !== null) {
+      const key = m[1] || m[2]
+      if (!key) continue
+      if (VERCEL_AUTO_ENV_KEYS.has(key)) continue
+      if (TELLCRAFT_INTERNAL.has(key)) {
+        // 出現 Tellcraft 內部 env 在客戶 app → bug 但不算 missing；獨立警告處理
+        continue
+      }
+      referenced.add(key)
+    }
+  }
+
+  const missing = [...referenced].filter(k => !injected.has(k)).sort()
+  const missingCritical = missing.filter(k => CRITICAL_ENV_KEYS.has(k))
+
+  return {
+    referenced: [...referenced].sort(),
+    injected: [...injected].sort(),
+    missing,
+    missingCritical,
+  }
+}
+
+interface SmokeFailure {
+  path: string
+  status: number
+  snippet?: string
+}
+
+/**
+ * 從生成檔案推導出該打哪些 HTTP 路徑做 smoke test。
+ *
+ * 設計思路：早期版本只打 `/` + `/admin/login`，但這兩條路徑都不查 DB——
+ * 客戶真實的 500 通常落在 admin/* 內部那種 useEffect → Server Action → DB
+ * 的頁面。所以這個函數要把所有「真的會載入資料」的頁面都挖出來。
+ *
+ * 規則：
+ *   1. 一定打 `/` 與所有 admin/* 子頁
+ *   2. 偵測 i18n locale 路由（app/[locale]/）→ 補 `/zh` 前綴版本
+ *   3. dynamic 段（[id]）跳過——沒真實 ID 試會 404 或 500 但是預期內
+ *   4. route group `(auth)` 在 URL 上不出現 → strip 掉
+ *   5. 上限 12 條（避免太慢）
+ */
+export function deriveSmokeTestPaths(files: VercelFile[]): string[] {
+  const pageFiles = files.filter(f =>
+    f.file.startsWith('app/') && /\/page\.(tsx|jsx|ts|js)$/.test(f.file)
+  )
+
+  const hasLocaleRoute = pageFiles.some(f => f.file.includes('app/[locale]/'))
+  const localePrefix = hasLocaleRoute ? '/zh' : ''
+
+  // 把 file path 轉成 URL path：strip `app/`, `(group)/`, locale segment, page.tsx
+  function fileToUrl(file: string): string | null {
+    let p = file.replace(/^app\//, '').replace(/\/page\.(tsx|jsx|ts|js)$/, '')
+    // route group `(auth)` 在 URL 上不出現
+    p = p.split('/').filter(seg => !/^\(.+\)$/.test(seg)).join('/')
+    // dynamic segment [id] / [...slug] → 跳過（無真實值）
+    if (/\[[^\]]+\]/.test(p.replace(/^\[locale\]\//, ''))) return null
+    // 移除 [locale] 前綴（後面手動補）
+    p = p.replace(/^\[locale\]\//, '')
+    return '/' + p
+  }
+
+  const set = new Set<string>()
+  set.add(`${localePrefix}/`)
+
+  for (const f of pageFiles) {
+    const url = fileToUrl(f.file)
+    if (!url) continue
+    // 限定打 admin/* 與根目錄頁面（其他靜態 landing 頁面已經透過 / 涵蓋）
+    if (url === '/' || url.startsWith('/admin/') || url.startsWith('/dashboard')) {
+      set.add(`${localePrefix}${url}`)
+    }
+  }
+
+  // 上限 12 條 + 排序：優先打有 DB 查詢相關的 admin/dashboard 頁面
+  const arr = Array.from(set)
+  arr.sort((a, b) => {
+    // 根頁優先；其次 admin/services 之類的列表頁；admin/login 等靜態頁殿後
+    const score = (p: string): number => {
+      if (p === `${localePrefix}/`) return 0
+      if (/\/admin\/login$/.test(p)) return 100  // 靜態，殿後
+      if (/\/admin\//.test(p)) return 10
+      if (/\/dashboard/.test(p)) return 20
+      return 50
+    }
+    return score(a) - score(b)
+  })
+  return arr.slice(0, 12)
+}
+
+/**
+ * 部署後對 Vercel runtime 打 HTTP 探測，回傳所有 ≥500 的失敗路徑。
+ *
+ * Vercel `READY` 只代表 Next build 過了，不代表 SSR 跑得起來：
+ * 1. DATABASE_URL 缺失 → `lib/db.ts` throw → 任何 server action 都 500
+ * 2. SSR render 抛例外（root layout / 共用組件）→ HTML 路徑 500
+ * 3. 只查靜態頁的 smoke 形同虛設——必須打 useEffect+DB 的真實 admin 頁面
+ *
+ * 並行打多個路徑，每路徑 5s timeout，follow 一次重定向，抓 body 前 400 char。
+ * 失敗回 array；空 array 代表全綠。永不 throw（telemetry/UI 處理）。
+ */
+async function runDeploymentSmokeTest(
+  deploymentUrl: string,
+  files: VercelFile[]
+): Promise<SmokeFailure[]> {
+  const candidates = deriveSmokeTestPaths(files)
+  logger.info({ deploymentUrl, paths: candidates }, 'Smoke test 路徑清單')
+
+  // 並行打所有路徑，加快速度（最多 12 條 × 5s = 5s 而不是 60s）
+  const results = await Promise.all(candidates.map(async (p): Promise<SmokeFailure | null> => {
+    let status = 0
+    let snippet: string | undefined
+    try {
+      const ctrl = new AbortController()
+      const timer = setTimeout(() => ctrl.abort(), 5000)
+      const res = await fetch(`${deploymentUrl}${p}`, {
+        method: 'GET',
+        redirect: 'manual',
+        signal: ctrl.signal,
+      })
+      clearTimeout(timer)
+      status = res.status
+      if (status >= 500) {
+        const body = await res.text().catch(() => '')
+        snippet = body.slice(0, 400).replace(/\s+/g, ' ').trim()
+      }
+    } catch (err: any) {
+      status = 0
+      snippet = `fetch error: ${err?.message ?? String(err)}`
+    }
+    if (status >= 500 || status === 0) {
+      return { path: p, status, snippet }
+    }
+    return null
+  }))
+
+  return results.filter((r): r is SmokeFailure => r !== null)
+}
+
 async function injectVercelEnvVars(
   projectName: string,
   envVars: Record<string, string>
 ): Promise<void> {
   const token = getEnv().VERCEL_ACCESS_TOKEN
-  if (!token) return
+  if (!token) {
+    const criticalAttempted = Object.keys(envVars).filter(k => CRITICAL_ENV_KEYS.has(k))
+    if (criticalAttempted.length > 0) {
+      throw new Error(`VERCEL_ACCESS_TOKEN 未設定，無法注入 critical env: ${criticalAttempted.join(', ')}`)
+    }
+    return
+  }
 
   const teamId = getEnv().VERCEL_TEAM_ID
   const params = new URLSearchParams()
   if (teamId) params.append('teamId', teamId)
 
+  // Collect per-key failures; throw at end if any CRITICAL key never landed.
+  const failedKeys: string[] = []
+
   for (const [key, value] of Object.entries(envVars)) {
+    let succeeded = false
     try {
       // 先嘗試建立
       const res = await fetch(`${VERCEL_API}/v10/projects/${encodeURIComponent(projectName)}/env?${params}`, {
@@ -3173,8 +3884,10 @@ async function injectVercelEnvVars(
         }),
       })
 
-      // 已存在（400 或 409）→ 查詢 env id 後 PATCH 更新
-      if (res.status === 400 || res.status === 409) {
+      if (res.ok) {
+        succeeded = true
+      } else if (res.status === 400 || res.status === 409) {
+        // 已存在 → 查詢 env id 後 PATCH 更新
         const listRes = await fetch(`${VERCEL_API}/v9/projects/${encodeURIComponent(projectName)}/env?${params}`, {
           headers: { 'Authorization': `Bearer ${token}` },
         })
@@ -3190,19 +3903,26 @@ async function injectVercelEnvVars(
               },
               body: JSON.stringify({ value, target: ['production', 'preview'], type: 'encrypted' }),
             })
-            if (!patchRes.ok) {
-              logger.warn({ key, status: patchRes.status }, 'Vercel env var 更新失敗')
-            } else {
+            if (patchRes.ok) {
+              succeeded = true
               logger.info({ key }, 'Vercel env var 已更新（覆寫）')
+            } else {
+              logger.warn({ key, status: patchRes.status }, 'Vercel env var 更新失敗')
             }
           }
         }
-      } else if (!res.ok) {
+      } else {
         logger.warn({ key, status: res.status }, 'Vercel env var 注入失敗')
       }
     } catch (err) {
       logger.warn({ err, key }, 'Vercel env var 注入異常')
     }
+    if (!succeeded) failedKeys.push(key)
+  }
+
+  const criticalFailed = failedKeys.filter(k => CRITICAL_ENV_KEYS.has(k))
+  if (criticalFailed.length > 0) {
+    throw new Error(`Vercel critical env vars 注入失敗（部署中止）：${criticalFailed.join(', ')}`)
   }
 }
 

@@ -1,5 +1,14 @@
 import { describe, it, expect } from 'vitest'
-import { sanitizeCodeForDeploy, toVercelSlug, wrapInNextJs, applyImageLibraryToDeployCode } from '../services/deployer'
+import {
+  sanitizeCodeForDeploy,
+  toVercelSlug,
+  wrapInNextJs,
+  applyImageLibraryToDeployCode,
+  deriveSmokeTestPaths,
+  scanProcessEnvReferences,
+  extractReferencedTables,
+  checkPageActionContract,
+} from '../services/deployer'
 import { buildPicsumFallbackLibrary, type ImageLibrary } from '../services/image-library-service'
 
 // Helper：建立最小 GeneratedCode
@@ -975,3 +984,533 @@ describe('next.config.ts remotePatterns', () => {
     expect(config.data).toContain(`hostname: 'placehold.co'`)
   })
 })
+
+// ============================================================
+// Fix 2.8: 重複 className attribute 合併
+// ============================================================
+
+describe('Fix 2.8: duplicate className attribute', () => {
+  it('合併同一 button 上的兩個 className', () => {
+    const code = makeCode({
+      pages: [makeFile('app/page.tsx', `'use client'
+export default function Page() {
+  return (
+    <button className="focus-visible:ring-2"
+      onClick={() => {}}
+      className="flex-1 rounded-lg"
+    >
+      點我
+    </button>
+  )
+}`)],
+    })
+    const result = sanitizeCodeForDeploy(code)
+    const fixed = result.code.pages[0].content
+    // 應該合併成單一 className，包含兩邊的 class
+    expect(fixed).toContain('focus-visible:ring-2 flex-1 rounded-lg')
+    // 不應該再有兩個 className=
+    const classNameCount = (fixed.match(/className="/g) || []).length
+    expect(classNameCount).toBe(1)
+    // 修復記錄應該被加入
+    expect(result.fixes.some(f => f.includes('重複的 className'))).toBe(true)
+  })
+
+  it('處理三個 className 出現在同一個 tag（多輪迭代）', () => {
+    const code = makeCode({
+      pages: [makeFile('app/page.tsx', `'use client'
+export default function Page() {
+  return <div className="a" id="x" className="b" data-x="1" className="c">x</div>
+}`)],
+    })
+    const result = sanitizeCodeForDeploy(code)
+    const fixed = result.code.pages[0].content
+    expect(fixed).toMatch(/className="a b c"/)
+    const classNameCount = (fixed.match(/className="/g) || []).length
+    expect(classNameCount).toBe(1)
+  })
+
+  it('單一 className 不被誤改', () => {
+    const code = makeCode({
+      pages: [makeFile('app/page.tsx', `'use client'
+export default function Page() {
+  return <div className="a b c">x</div>
+}`)],
+    })
+    const result = sanitizeCodeForDeploy(code)
+    const fixed = result.code.pages[0].content
+    expect(fixed).toContain('className="a b c"')
+    expect(result.fixes.some(f => f.includes('重複的 className'))).toBe(false)
+  })
+
+  it('多行展開的 button 也能正確合併', () => {
+    const code = makeCode({
+      pages: [makeFile('app/page.tsx', `'use client'
+export default function Page() {
+  return (
+    <button className="focus-visible:ring-2 focus-visible:ring-offset-2"
+      onClick={() => {}}
+      aria-label="編輯"
+      className="flex-1 rounded-lg cursor-pointer"
+      style={{ minHeight: 44 }}
+    >
+      編輯
+    </button>
+  )
+}`)],
+    })
+    const result = sanitizeCodeForDeploy(code)
+    const fixed = result.code.pages[0].content
+    expect(fixed).toContain('focus-visible:ring-2 focus-visible:ring-offset-2 flex-1 rounded-lg cursor-pointer')
+    const classNameCount = (fixed.match(/className="/g) || []).length
+    expect(classNameCount).toBe(1)
+    // 其他 attributes 應該保留
+    expect(fixed).toContain('aria-label="編輯"')
+    expect(fixed).toContain('onClick={() => {}}')
+  })
+
+  it('後端檔案不處理（lib/actions/...）', () => {
+    // backend 檔通常沒 className，但若 LLM 生成奇怪內容也不該被改
+    const code = makeCode({
+      pages: [makeFile('lib/actions/foo.ts', `'use server'\nexport async function foo() { return { className: 'a className: b' } }`)],
+    })
+    const result = sanitizeCodeForDeploy(code)
+    // sanitize 不應該動 lib/ 檔案（即便這個 case 已經是無關 JSX 場景）
+    expect(result.fixes.some(f => f.includes('lib/actions/foo.ts: 合併'))).toBe(false)
+  })
+})
+
+// ============================================================
+// A: deriveSmokeTestPaths — 從 file 列表推導 smoke test 路徑
+// ============================================================
+
+describe('A: deriveSmokeTestPaths', () => {
+  function vf(file: string) {
+    return { file, data: '' }
+  }
+
+  it('一定包含根頁 /', () => {
+    const paths = deriveSmokeTestPaths([vf('app/page.tsx')])
+    expect(paths).toContain('/')
+  })
+
+  it('掃出所有 admin/* 子頁', () => {
+    const paths = deriveSmokeTestPaths([
+      vf('app/page.tsx'),
+      vf('app/admin/services/page.tsx'),
+      vf('app/admin/hero-section/page.tsx'),
+      vf('app/admin/login/page.tsx'),
+    ])
+    expect(paths).toContain('/')
+    expect(paths).toContain('/admin/services')
+    expect(paths).toContain('/admin/hero-section')
+    expect(paths).toContain('/admin/login')
+  })
+
+  it('route group (auth) 在 URL 上不出現', () => {
+    const paths = deriveSmokeTestPaths([
+      vf('app/page.tsx'),
+      vf('app/(auth)/admin/login/page.tsx'),
+    ])
+    expect(paths).toContain('/admin/login')
+    expect(paths.some(p => p.includes('(auth)'))).toBe(false)
+  })
+
+  it('dynamic 段 [id] 跳過（無真實值無法打）', () => {
+    const paths = deriveSmokeTestPaths([
+      vf('app/page.tsx'),
+      vf('app/admin/services/[id]/page.tsx'),
+      vf('app/admin/services/page.tsx'),
+    ])
+    expect(paths).toContain('/admin/services')
+    expect(paths.some(p => p.includes('[id]'))).toBe(false)
+  })
+
+  it('i18n locale prefix 自動補 /zh', () => {
+    const paths = deriveSmokeTestPaths([
+      vf('app/[locale]/page.tsx'),
+      vf('app/[locale]/admin/services/page.tsx'),
+    ])
+    expect(paths).toContain('/zh/')
+    expect(paths).toContain('/zh/admin/services')
+  })
+
+  it('admin/login 排到清單末尾（靜態頁優先級最低）', () => {
+    const paths = deriveSmokeTestPaths([
+      vf('app/page.tsx'),
+      vf('app/admin/login/page.tsx'),
+      vf('app/admin/services/page.tsx'),
+    ])
+    const idxLogin = paths.indexOf('/admin/login')
+    const idxServices = paths.indexOf('/admin/services')
+    expect(idxServices).toBeLessThan(idxLogin)
+  })
+
+  it('上限 12 條', () => {
+    const files = Array.from({ length: 30 }, (_, i) => vf(`app/admin/page-${i}/page.tsx`))
+    files.unshift(vf('app/page.tsx'))
+    const paths = deriveSmokeTestPaths(files)
+    expect(paths.length).toBeLessThanOrEqual(12)
+  })
+})
+
+// ============================================================
+// B: scanProcessEnvReferences — env 引用掃描
+// ============================================================
+
+describe('B: scanProcessEnvReferences', () => {
+  function vf(file: string, data: string) {
+    return { file, data }
+  }
+
+  it('掃出 lib/ 內所有 process.env.X 引用', () => {
+    const files = [
+      vf('lib/db.ts', `if (!process.env.DATABASE_URL) throw new Error('x')`),
+      vf('lib/email.ts', `const key = process.env.RESEND_API_KEY`),
+    ]
+    const report = scanProcessEnvReferences(files, new Set())
+    expect(report.referenced).toContain('DATABASE_URL')
+    expect(report.referenced).toContain('RESEND_API_KEY')
+  })
+
+  it('區別 missing vs injected', () => {
+    const files = [
+      vf('lib/db.ts', `process.env.DATABASE_URL`),
+      vf('lib/payment.ts', `process.env.STRIPE_SECRET_KEY`),
+    ]
+    const report = scanProcessEnvReferences(files, new Set(['DATABASE_URL']))
+    expect(report.missing).toEqual(['STRIPE_SECRET_KEY'])
+    expect(report.missingCritical).toEqual([])
+  })
+
+  it('DATABASE_URL 缺失 → missingCritical', () => {
+    const files = [vf('lib/db.ts', `process.env.DATABASE_URL`)]
+    const report = scanProcessEnvReferences(files, new Set())
+    expect(report.missingCritical).toContain('DATABASE_URL')
+  })
+
+  it('Vercel 自動提供的 env (NODE_ENV / VERCEL_URL) 不算 missing', () => {
+    const files = [
+      vf('lib/foo.ts', `if (process.env.NODE_ENV === 'production') console.log(process.env.VERCEL_URL)`),
+    ]
+    const report = scanProcessEnvReferences(files, new Set())
+    expect(report.missing).not.toContain('NODE_ENV')
+    expect(report.missing).not.toContain('VERCEL_URL')
+  })
+
+  it('支援 process.env["KEY"] bracket 寫法', () => {
+    const files = [vf('lib/foo.ts', `const x = process.env['MY_API_KEY']`)]
+    const report = scanProcessEnvReferences(files, new Set())
+    expect(report.referenced).toContain('MY_API_KEY')
+  })
+
+  it('Tellcraft 內部 env (JWT_SECRET / NEON_API_KEY) 不報 missing', () => {
+    // 客戶 app 不該 reference 這些；若 LLM 誤生成不該因此 fail
+    const files = [vf('lib/foo.ts', `const t = process.env.JWT_SECRET`)]
+    const report = scanProcessEnvReferences(files, new Set())
+    expect(report.missing).not.toContain('JWT_SECRET')
+  })
+
+  it('只掃 runtime 路徑（lib/, app/）', () => {
+    const files = [
+      vf('scripts/build.ts', `process.env.SCRIPT_ONLY_KEY`),  // 不算
+      vf('lib/db.ts', `process.env.DATABASE_URL`),
+    ]
+    const report = scanProcessEnvReferences(files, new Set())
+    expect(report.referenced).not.toContain('SCRIPT_ONLY_KEY')
+    expect(report.referenced).toContain('DATABASE_URL')
+  })
+})
+
+// ============================================================
+// C: page.tsx 跨界 import server-only 模組
+// ============================================================
+
+describe('C: page 跨界 import server-only', () => {
+  it('page.tsx import @/lib/actions/foo → 自動改寫成 @/app/actions/foo', () => {
+    const code = makeCode({
+      pages: [makeFile('app/admin/services/page.tsx', `'use client'
+import { useState, useEffect } from 'react'
+import { getServicesSection } from '@/lib/actions/get-services-section'
+export default function Page() {
+  return <div>x</div>
+}`)],
+    })
+    const result = sanitizeCodeForDeploy(code)
+    const fixed = result.code.pages[0].content
+    expect(fixed).toContain(`from '@/app/actions/get-services-section'`)
+    expect(fixed).not.toContain(`from '@/lib/actions/get-services-section'`)
+    // 函數名要加 Action 後綴
+    expect(fixed).toContain('getServicesSectionAction')
+    expect(result.fixes.some(f => f.includes('Server Component 防護'))).toBe(true)
+  })
+
+  it('page.tsx 直接 import @/lib/db → 警告', () => {
+    const code = makeCode({
+      pages: [makeFile('app/admin/dashboard/page.tsx', `import { sql } from '@/lib/db'
+export default async function Page() {
+  const rows = await sql\`SELECT 1\`
+  return <div>{rows.length}</div>
+}`)],
+    })
+    const result = sanitizeCodeForDeploy(code)
+    expect(result.fixes.some(f => f.includes('直接 import @/lib/db'))).toBe(true)
+  })
+
+  it('正常 page.tsx import @/app/actions/* 不觸發改寫', () => {
+    const code = makeCode({
+      pages: [makeFile('app/admin/services/page.tsx', `'use client'
+import { getServicesSectionAction } from '@/app/actions/_services_section'
+export default function Page() { return <div>x</div> }`)],
+    })
+    const result = sanitizeCodeForDeploy(code)
+    expect(result.fixes.some(f => f.includes('Server Component 防護'))).toBe(false)
+  })
+
+  it('非 page.tsx 檔案不觸發（component 可以直接用 lib/actions）', () => {
+    const code = makeCode({
+      components: [makeFile('components/Foo.tsx', `import { foo } from '@/lib/actions/foo'\nexport default function Foo() {}`)],
+    })
+    const result = sanitizeCodeForDeploy(code)
+    expect(result.fixes.some(f => f.includes('Server Component 防護'))).toBe(false)
+  })
+})
+
+// ============================================================
+// E: extractReferencedTables — schema 對照前置抽表
+// ============================================================
+
+describe('E: extractReferencedTables', () => {
+  function vf(file: string, data: string) {
+    return { file, data }
+  }
+
+  it('抽出 lib/actions/*.ts 內所有 FROM <table>', () => {
+    const files = [
+      vf('lib/actions/get-hero.ts', `await sql\`SELECT * FROM hero_section LIMIT 1\``),
+      vf('lib/actions/list-items.ts', `await sql\`SELECT id FROM service_items WHERE x = \${y}\``),
+    ]
+    const tables = extractReferencedTables(files)
+    expect(tables).toContain('hero_section')
+    expect(tables).toContain('service_items')
+  })
+
+  it('包含 INSERT INTO 與 UPDATE 表名', () => {
+    const files = [
+      vf('lib/actions/create.ts', `INSERT INTO contact_inquiries (id) VALUES ($1)`),
+      vf('lib/actions/update.ts', `UPDATE pricing_section SET title = $1`),
+    ]
+    const tables = extractReferencedTables(files)
+    expect(tables).toContain('contact_inquiries')
+    expect(tables).toContain('pricing_section')
+  })
+
+  it('忽略 pg_* / information_schema 系統表', () => {
+    const files = [
+      vf('lib/actions/admin.ts', `SELECT * FROM pg_tables WHERE schemaname = 'public'`),
+    ]
+    const tables = extractReferencedTables(files)
+    expect(tables).not.toContain('pg_tables')
+  })
+
+  it('忽略 SQL 關鍵字（VALUES / SELECT / WHERE）誤抓', () => {
+    const files = [
+      vf('lib/actions/x.ts', `INSERT INTO foo VALUES ($1, $2)`),
+    ]
+    const tables = extractReferencedTables(files)
+    expect(tables).toContain('foo')
+    expect(tables).not.toContain('values')
+    expect(tables).not.toContain('select')
+  })
+
+  it('lib/db.ts 與 client component 不掃（只掃 actions/api routes）', () => {
+    const files = [
+      vf('lib/db.ts', `FROM dummy_table`),
+      vf('app/page.tsx', `// FROM should_not_appear`),
+      vf('lib/actions/foo.ts', `FROM real_table`),
+    ]
+    const tables = extractReferencedTables(files)
+    expect(tables).toEqual(['real_table'])
+  })
+
+  it('去重相同表名', () => {
+    const files = [
+      vf('lib/actions/get.ts', `FROM hero_section`),
+      vf('lib/actions/update.ts', `UPDATE hero_section SET ...`),
+    ]
+    const tables = extractReferencedTables(files)
+    expect(tables.filter(t => t === 'hero_section').length).toBe(1)
+  })
+})
+
+// ============================================================
+// H: dedupeRedundantWhereClauses — lib/actions SQL 重複 WHERE 兜底
+// ============================================================
+
+describe('H: lib/actions SQL 重複 WHERE 兜底掃描', () => {
+  it('移除同欄位 = 比較的重複 AND 條件', () => {
+    const buggyCode = `import { sql } from '@/lib/db'
+export async function listServiceItems(input: any) {
+  const servicesSectionId = input.servicesSectionId
+  const rows = await sql\`
+    SELECT * FROM service_items
+    WHERE services_section_id = \${servicesSectionId}
+      AND services_section_id = \${input.servicesSectionId}
+    ORDER BY sort_order ASC
+  \`
+  return rows
+}`
+    const code = makeCode({
+      pages: [makeFile('lib/actions/list-service-items.ts', buggyCode)],
+    })
+    const result = sanitizeCodeForDeploy(code)
+    const fixed = result.code.pages[0].content
+    // 應該只剩一個 services_section_id 條件
+    const sscount = (fixed.match(/services_section_id\s*=/g) || []).length
+    expect(sscount).toBe(1)
+    expect(result.fixes.some(f => f.includes('重複的 WHERE'))).toBe(true)
+  })
+
+  it('保留不同欄位的多條件 AND', () => {
+    const cleanCode = `import { sql } from '@/lib/db'
+export async function listFiltered(input: any) {
+  const rows = await sql\`
+    SELECT * FROM items
+    WHERE user_id = \${input.userId}
+      AND status = \${input.status}
+  \`
+  return rows
+}`
+    const code = makeCode({
+      pages: [makeFile('lib/actions/list-filtered.ts', cleanCode)],
+    })
+    const result = sanitizeCodeForDeploy(code)
+    expect(result.fixes.some(f => f.includes('重複的 WHERE'))).toBe(false)
+    // user_id 與 status 都應該保留
+    const fixed = result.code.pages[0].content
+    expect(fixed).toMatch(/user_id\s*=/)
+    expect(fixed).toMatch(/status\s*=/)
+  })
+
+  it('不影響非 lib/actions 檔案', () => {
+    const code = makeCode({
+      pages: [makeFile('app/page.tsx', `'use client'\nconst x = 'WHERE col = \${1} AND col = \${2}'\nexport default function Page() { return <div /> }`)],
+    })
+    const result = sanitizeCodeForDeploy(code)
+    expect(result.fixes.some(f => f.includes('重複的 WHERE'))).toBe(false)
+  })
+
+  it('多個 sql block 各自獨立去重', () => {
+    const code = makeCode({
+      pages: [makeFile('lib/actions/multi.ts', `import { sql } from '@/lib/db'
+export async function multi(input: any) {
+  const a = await sql\`SELECT * FROM t WHERE id = \${input.id} AND id = \${input.id}\`
+  const b = await sql\`SELECT * FROM u WHERE foo = \${input.foo} AND foo = \${input.foo}\`
+  return { a, b }
+}`)],
+    })
+    const result = sanitizeCodeForDeploy(code)
+    const fixed = result.code.pages[0].content
+    // 兩個 sql block 各自有重複，應該各被去一次
+    expect(result.fixes.filter(f => f.includes('重複的 WHERE')).length).toBeGreaterThanOrEqual(1)
+    // 第一個 sql：id 只剩一個
+    const block1Match = fixed.match(/SELECT \* FROM t[^`]*/)
+    expect(block1Match![0].match(/id\s*=/g)!.length).toBe(1)
+  })
+})
+
+// ============================================================
+// K: checkPageActionContract — page → action 參數契約
+// ============================================================
+
+describe('K: checkPageActionContract', () => {
+  function vf(file: string, data: string) {
+    return { file, data }
+  }
+
+  it('偵測 page 呼叫 xxxAction({}) 但 action 需要 input.id', () => {
+    const files = [
+      vf('lib/actions/get-order.ts', `
+export async function getOrder(input: any) {
+  const id = input.id
+  if (!id) throw new Error('missing id')
+  return { __status: 200 }
+}`),
+      vf('app/admin/orders/page.tsx', `'use client'
+import { getOrderAction } from '@/app/actions/_order'
+useEffect(() => {
+  getOrderAction({})
+}, [])`),
+    ]
+    const result = checkPageActionContract(files)
+    expect(result.warnings.length).toBeGreaterThan(0)
+    expect(result.warnings[0]).toContain('getOrderAction')
+    expect(result.warnings[0]).toContain('id')
+  })
+
+  it('正確傳完所有 required keys 不警告', () => {
+    const files = [
+      vf('lib/actions/get-order.ts', `
+export async function getOrder(input: any) {
+  const id = input.id
+  return { id }
+}`),
+      vf('app/admin/orders/page.tsx', `'use client'
+useEffect(() => {
+  getOrderAction({ id: '123', _stepSummary: 'Get Order' })
+}, [])`),
+    ]
+    const result = checkPageActionContract(files)
+    expect(result.warnings).toEqual([])
+  })
+
+  it('忽略 _stepSummary / userId（會自動注入）', () => {
+    const files = [
+      vf('lib/actions/list-items.ts', `
+export async function listItems(input: any) {
+  if (!input._stepSummary) return null
+  if (!input.userId) return null
+  return { items: [] }
+}`),
+      vf('app/admin/items/page.tsx', `useEffect(() => { listItemsAction({}) })`),
+    ]
+    const result = checkPageActionContract(files)
+    // _stepSummary 與 userId 應自動排除，無警告
+    expect(result.warnings).toEqual([])
+  })
+
+  it('保守 skip：spread 與 conditional 參數', () => {
+    const files = [
+      vf('lib/actions/update.ts', `
+export async function update(input: any) {
+  const id = input.id
+  const title = input.title
+  return { id, title }
+}`),
+      vf('app/admin/page.tsx', `useEffect(() => {
+  updateAction({ ...form })
+})`),
+    ]
+    const result = checkPageActionContract(files)
+    // spread 無法分析，保守不警告
+    expect(result.warnings).toEqual([])
+  })
+
+  it('多個 required keys 都列出', () => {
+    const files = [
+      vf('lib/actions/create.ts', `
+export async function create(input: any) {
+  const a = input.fieldA
+  const b = input.fieldB
+  const c = input.fieldC
+  return { a, b, c }
+}`),
+      vf('app/admin/new/page.tsx', `createAction({ fieldA: 'x' })`),
+    ]
+    const result = checkPageActionContract(files)
+    expect(result.warnings.length).toBe(1)
+    expect(result.warnings[0]).toContain('fieldB')
+    expect(result.warnings[0]).toContain('fieldC')
+    expect(result.warnings[0]).not.toMatch(/fieldA(?=[^\w])/)  // fieldA 已傳，不該在 missing 裡
+  })
+})
+
