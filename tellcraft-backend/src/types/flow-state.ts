@@ -113,6 +113,9 @@ export interface FlowState {
   // T10: 迭代閉環評估
   lastIterationQualityReport?: QualityReport  // 上輪迭代後的 QG 報告，下輪用來 diff 是否真的改善
   iterationFailedToImproveCount?: number      // 連續沒改善次數（≥ 2 提供逃離選項）
+  // T6: 漸進可中斷生成
+  uiuxAbortRequested?: boolean         // 用戶要求中止生成（state 鏡像 Redis flag，UI 顯示用）
+  uiuxPartialCode?: GeneratedCode      // 中止時保存的 partial 結果
   // 回滾
   rollbackDeployments?: DeploymentRecord[]  // 可選的回滾版本列表
   // BDD→UI 翻譯結果快取

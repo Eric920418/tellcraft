@@ -3725,6 +3725,7 @@ export async function generateStructure(
   onPartialCode?: PartialCodeCallback,
   heartbeatFn?: () => void,  // 長時間 post-processing 期間刷新 Redis 活動心跳
   onCheckpoint?: (partial: { pages: GeneratedComponent[]; components: GeneratedComponent[]; styles: string }) => Promise<void>,
+  abortChecker?: () => Promise<boolean>,  // T6: 批次邊界檢查中止訊號
 ): Promise<GenerationResult> {
   const tier = designTier || 'functional'
   const generationProfile = productContext?.generationProfile || 'balanced'
@@ -4210,6 +4211,26 @@ ${isLaterBatch
     logger.info({ totalPages: pages.length, batchCount: batches.length, generationProfile }, 'generateStructure multi-pass 模式')
 
     for (let batchIdx = 0; batchIdx < batches.length; batchIdx++) {
+      // T6: 批次邊界檢查中止訊號 — 第 1 批不檢查（避免立刻退出，至少跑一批）
+      if (batchIdx > 0 && abortChecker && await abortChecker()) {
+        logger.info({ batchIdx, completedBatches: batchIdx, totalBatches: batches.length }, 'generateStructure 收到中止訊號，提早退出')
+        recordTelemetry({
+          skillName: 'uiux',
+          eventType: 'iteration',
+          patternKey: 'generation_aborted',
+          userId: trackingContext?.userId || null,
+          conversationId: trackingContext?.conversationId || null,
+          payload: {
+            phase: 'structure',
+            completedBatches: batchIdx,
+            totalBatches: batches.length,
+            partialPages: allRawPages.length,
+            partialComponents: allRawComponents.length,
+          },
+        }).catch(() => {})
+        break
+      }
+
       const batch = batches[batchIdx]
       const isFirstBatch = batchIdx === 0
       const existingPaths = isFirstBatch
