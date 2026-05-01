@@ -18,6 +18,7 @@ import { formatStructuredDataForPrompt } from './reference-analyzer'
 import { createLogger } from '../lib/logger'
 import { validateAndFixFiles } from './syntax-validator'
 import { recordTelemetry } from './skill-telemetry'
+import { validateVariantDiversity, buildRetryHint } from './variant-diversity'
 
 const logger = createLogger('uiux-generation')
 
@@ -1382,13 +1383,16 @@ ${tier === 'functional' ? '- 不要使用漸層（除非明確要求）\n- 不�
     })),
   })
 
-  const result = await callStructuredWithSlot({
+  const baseTemperature = tier === 'creative' ? 0.6 : 0.4
+
+  // T4: 嘗試最多 2 次（base + 1 retry），中間插 diversity 驗證
+  let result = await callStructuredWithSlot({
     schema: DesignVariantsSchema,
     model: MODEL.SONNET,
     system: systemPrompt,
     messages: [{ role: 'user', content: userMessage }],
     maxTokens: 16384,
-    temperature: tier === 'creative' ? 0.6 : 0.4,
+    temperature: baseTemperature,
     purpose: 'generate_design_variants',
     trackingContext,
   })
@@ -1397,9 +1401,64 @@ ${tier === 'functional' ? '- 不要使用漸層（除非明確要求）\n- 不�
     return { success: false, error: result.error || '無法生成設計變體' }
   }
 
-  // 驗證變體數量（Structured Outputs 保證結構正確但不保證陣列長度）
   if (result.data.variants.length !== 5) {
     return { success: false, error: `變體數量不正確，預期 5 個，實際 ${result.data.variants.length} 個` }
+  }
+
+  // T4: 驗證 5 個變體真的有差異（layout / font / depth / hue / signature）
+  let diversity = validateVariantDiversity(result.data.variants as DesignVariant[])
+
+  recordTelemetry({
+    skillName: 'uiux',
+    eventType: 'variant_diversity',
+    patternKey: diversity.passed ? 'diversity_pass_first' : 'diversity_fail_first',
+    userId: trackingContext?.userId || null,
+    conversationId: trackingContext?.conversationId || null,
+    payload: {
+      tier,
+      productType,
+      issues: diversity.issues.map(i => i.key),
+      metrics: diversity.metrics,
+    },
+  }).catch(() => {})
+
+  if (!diversity.passed) {
+    logger.info({ issues: diversity.issues.map(i => i.key), metrics: diversity.metrics }, 'T4: 變體差異化驗證失敗，retry 一次')
+
+    const retryHint = buildRetryHint(diversity.issues)
+    const retryResult = await callStructuredWithSlot({
+      schema: DesignVariantsSchema,
+      model: MODEL.SONNET,
+      system: `${systemPrompt}\n\n${retryHint}`,
+      messages: [{ role: 'user', content: userMessage }],
+      maxTokens: 16384,
+      temperature: 0.7,  // 升溫加大隨機性
+      purpose: 'generate_design_variants_retry',
+      trackingContext,
+    })
+
+    if (retryResult.success && retryResult.data.variants.length === 5) {
+      const retryDiversity = validateVariantDiversity(retryResult.data.variants as DesignVariant[])
+      recordTelemetry({
+        skillName: 'uiux',
+        eventType: 'variant_diversity',
+        patternKey: retryDiversity.passed ? 'diversity_pass_retry' : 'diversity_fail_retry',
+        userId: trackingContext?.userId || null,
+        conversationId: trackingContext?.conversationId || null,
+        payload: {
+          tier,
+          productType,
+          issues: retryDiversity.issues.map(i => i.key),
+          metrics: retryDiversity.metrics,
+        },
+      }).catch(() => {})
+
+      // retry 結果優於 base：採用（即使仍不完美也比第一輪好）
+      if (retryDiversity.issues.length < diversity.issues.length) {
+        result = retryResult
+        diversity = retryDiversity
+      }
+    }
   }
 
   return {
