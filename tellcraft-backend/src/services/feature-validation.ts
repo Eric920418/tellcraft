@@ -374,12 +374,36 @@ export async function validateAndFixFeatures(
   let currentFeatures = [...features]
   let lastResult: FeatureValidationResult = { lintPassed: true, validatePassed: true, errors: [] }
   let prevErrorCount = Infinity
+  let prevErrorSet = new Set<string>()
 
   // L25.B: 追蹤最佳版本 — LLM 可能越修越糟（用戶實測 276 → 286），
   // return 時用最少錯誤的版本，不是最後那輪
   let bestFeatures: typeof currentFeatures = [...features]
   let bestResult: FeatureValidationResult = lastResult
   let bestErrorCount = Infinity
+
+  // L26 Helper：把 lastResult.errors 投影成 set 用來偵測 identity 變動
+  // （只看「錯誤訊息文字」，避免比較 line number 變動的偽變化）
+  const errorIdentitySet = (errors: string[]): Set<string> => {
+    return new Set(errors.map(e => e.replace(/L\d+:/g, 'L?:').trim()))
+  }
+
+  // L26 Helper：從錯誤訊息推斷它屬於哪個 feature（兼容兩種格式）
+  // - 內部驗證: [FeatureName] L5: ... （無 .feature 副檔名）
+  // - 外部腳本: [spec/features/get-services.feature:42] ... （含 .feature）
+  const attributeError = (error: string, candidates: { name: string }[]): string | null => {
+    const m = error.match(/\[([^\]]+?)\]/)
+    if (!m) return null
+    const inner = m[1]
+    // 含 .feature → basename 比對
+    if (/\.feature/.test(inner)) {
+      const fileName = path.basename(inner.split(':')[0], '.feature')
+      if (candidates.some(c => c.name === fileName)) return fileName
+    }
+    // 直接當 feature name 比對
+    if (candidates.some(c => c.name === inner)) return inner
+    return null
+  }
 
   for (let round = 0; round < MAX_FIX_ROUNDS; round++) {
     lastResult = await validateFeatures(currentFeatures, schemaSql, entityMapping)
@@ -395,6 +419,26 @@ export async function validateAndFixFeatures(
     }
 
     const errorCount = lastResult.errors.length
+    const currentErrorSet = errorIdentitySet(lastResult.errors)
+
+    // L26: round-over-round error diff log（除錯利器）
+    if (round >= 1) {
+      const introduced = [...currentErrorSet].filter(e => !prevErrorSet.has(e))
+      const resolved = [...prevErrorSet].filter(e => !currentErrorSet.has(e))
+      const stable = [...currentErrorSet].filter(e => prevErrorSet.has(e))
+      logger.info(
+        {
+          round: round + 1,
+          totalCount: errorCount,
+          introduced: introduced.length,
+          resolved: resolved.length,
+          stable: stable.length,
+          sampleIntroduced: introduced.slice(0, 3),
+          sampleResolved: resolved.slice(0, 3),
+        },
+        '修復迴圈 round diff'
+      )
+    }
 
     // L25.B: 更新最佳版本（嚴格更少才算更好）
     if (errorCount < bestErrorCount) {
@@ -403,30 +447,40 @@ export async function validateAndFixFeatures(
       bestResult = lastResult
     }
 
-    // Early stop: round >= 1 且錯誤數沒下降 → LLM 已無法再修復，再跑也浪費時間
-    if (round >= 1 && errorCount >= prevErrorCount) {
+    // L26 改良 early stop：count 與 identity set 都不變才停（identity 有變→還在動）
+    const setUnchanged = round >= 1 &&
+      currentErrorSet.size === prevErrorSet.size &&
+      [...currentErrorSet].every(e => prevErrorSet.has(e))
+    if (round >= 1 && errorCount >= prevErrorCount && setUnchanged) {
       logger.warn(
         { round: round + 1, errorCount, prevErrorCount, bestErrorCount },
-        '錯誤數未下降，提前停止修復迴圈（LLM 已收斂失敗）'
+        '錯誤數與內容皆未變動，提前停止修復迴圈（LLM 已收斂失敗）'
       )
       break
     }
+    if (round >= 1 && errorCount >= prevErrorCount && !setUnchanged) {
+      logger.info(
+        { round: round + 1, errorCount, prevErrorCount },
+        '錯誤數未降但內容仍在變動，繼續嘗試修復'
+      )
+    }
     prevErrorCount = errorCount
+    prevErrorSet = currentErrorSet
 
     logger.info({ round: round + 1, errorCount }, '驗證失敗，嘗試修復...')
 
-    // 構建修復輸入：將錯誤分配到對應 Feature
+    // L26: 構建修復輸入 — 兼容兩種錯誤訊息格式做正確歸屬
     const featureErrorMap = new Map<string, string[]>()
+    let unattributed = 0
     for (const error of lastResult.errors) {
-      // 嘗試從錯誤訊息提取檔名（格式：[path/file.feature:line] message）
-      const fileMatch = error.match(/\[([^\]:]+\.feature)/)
-      if (fileMatch) {
-        const fileName = path.basename(fileMatch[1], '.feature')
-        const existing = featureErrorMap.get(fileName) || []
+      const featureName = attributeError(error, currentFeatures)
+      if (featureName) {
+        const existing = featureErrorMap.get(featureName) || []
         existing.push(error)
-        featureErrorMap.set(fileName, existing)
+        featureErrorMap.set(featureName, existing)
       } else {
-        // 無法定位到特定檔案，只分配給前 3 個 Feature（避免大量 Features 全送修導致 LLM 截斷）
+        unattributed++
+        // 無法定位到特定 feature，只分配給前 3 個 Feature（避免大量 Features 全送修導致 LLM 截斷）
         const fallbackTargets = currentFeatures.slice(0, 3)
         for (const f of fallbackTargets) {
           const existing = featureErrorMap.get(f.name) || []
@@ -434,6 +488,12 @@ export async function validateAndFixFeatures(
           featureErrorMap.set(f.name, existing)
         }
       }
+    }
+    if (unattributed > 0) {
+      logger.warn(
+        { round: round + 1, unattributed, totalErrors: errorCount },
+        '無法歸屬到具體 feature 的錯誤（fallback 到前 3 個 features）'
+      )
     }
 
     // 只修復有問題的 Features

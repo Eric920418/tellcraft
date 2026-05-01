@@ -1331,11 +1331,45 @@ export async function fixMultipleFeatures(
 
   const BATCH_SIZE = 3
 
+  // L26: 統計批次內錯誤類型比例。schema 相關錯誤多時，需要明確引導 LLM 修 schema
+  // 而非死守「預設遵守 schema」的保守策略，否則 features 永遠對不上錯誤的 schema。
+  function analyzeBatchErrors(batch: FeatureFixInput[]): { schemaHeavy: boolean; schemaErrorCount: number; totalErrorCount: number; samples: string[] } {
+    const allIssues = batch.flatMap(b => b.issues)
+    const totalErrorCount = allIssues.length
+    if (totalErrorCount === 0) return { schemaHeavy: false, schemaErrorCount: 0, totalErrorCount: 0, samples: [] }
+    const SCHEMA_ERROR_PATTERNS = [
+      /不在 entity_to_table_mapping 中/,
+      /Schema 中沒有此表/,
+      /沒有欄位「/,
+      /Entity「[^」]+」.*不存在/,
+      /column .* does not exist/i,
+      /relation .* does not exist/i,
+      /table .* not found/i,
+    ]
+    const schemaErrors = allIssues.filter(e => SCHEMA_ERROR_PATTERNS.some(p => p.test(e)))
+    const schemaErrorCount = schemaErrors.length
+    const ratio = schemaErrorCount / totalErrorCount
+    return {
+      schemaHeavy: ratio > 0.4,
+      schemaErrorCount,
+      totalErrorCount,
+      samples: schemaErrors.slice(0, 3),
+    }
+  }
+
   // ── 內部函數：修復一批 Features ──
   async function fixFeatureBatch(
     batch: FeatureFixInput[],
     batchLabel: string
   ): Promise<{ success: boolean; fixedFeatures?: GeneratedFeature[]; updatedSchemaSql?: string; updatedEntityMapping?: string; error?: string }> {
+    const errorAnalysis = analyzeBatchErrors(batch)
+    if (errorAnalysis.schemaHeavy) {
+      logger.info(
+        { batchLabel, schemaErrorCount: errorAnalysis.schemaErrorCount, totalErrorCount: errorAnalysis.totalErrorCount, samples: errorAnalysis.samples },
+        '批次錯誤以 schema 不對齊為主，prompt 將切到 schema-update 模式'
+      )
+    }
+
     const systemPrompt = `You are an sdd.os ISA SpecFormula standard Gherkin expert. Fix the following Feature Files per user feedback.
 
 ${LANGUAGE_POLICY_FEATURE_BLOCK}
@@ -1382,8 +1416,21 @@ If the input contains Chinese entity names or data, **translate them to English*
 3. 若原有 @Post → 改為「後置（回應）」或「後置（狀態）」（根據內容判斷）
 
 ## Schema 修改權限
+${errorAnalysis.schemaHeavy ? `
+**🔴 本批次 ${errorAnalysis.schemaErrorCount}/${errorAnalysis.totalErrorCount} 的錯誤直指 Schema 不對齊（>40%）。**
+Schema 與 Features 之間的差距不是 Feature 寫錯，而是 **Schema 漏定義 / 命名錯誤 / 欄位不全**。
+你**必須主動更新 Schema SQL 與 Entity Mapping** 來對齊 Features 的真實需求，**不要**強行讓 Features 遷就錯誤的 Schema。
+
+判斷指引：
+- 錯誤訊息「Entity X 不在 mapping 中」→ 在 Entity Mapping 加映射，必要時在 Schema SQL 加表
+- 錯誤訊息「沒有欄位 X」→ 在對應 Schema 表上 ALTER 加欄位（用合理型別，camelCase → snake_case）
+- 錯誤訊息「映射到 table Y 但 Schema 中沒有此表」→ 在 Schema SQL 加 CREATE TABLE
+範例樣本：
+${errorAnalysis.samples.map(s => `- ${s}`).join('\n')}
+` : `
 - **預設情況**：Feature 修復應遵守現有 Schema 定義的欄位名稱和類型
 - **允許修改 Schema 的情況**：當用戶釐清決策明確要求新增欄位、新增表、或修改欄位類型時，你**必須**同時修改 Schema SQL 和 Entity Mapping
+`}
 - 修改 Schema 時，輸出完整的 SQL DDL（不是 diff），保留所有原有表和欄位
 - 修改 Entity Mapping 時，輸出完整的 YAML（不是 diff），保留所有原有映射
 - 如果不需要修改 Schema/Entity Mapping，對應欄位輸出 null
@@ -1441,12 +1488,16 @@ ${decisions}` : ''}
       entityMapping: z.string().nullable(),
     })
 
+    // L26: maxTokens 從 16384 提高到 32768
+    // 原因：3 features × ~5-10KB content + 大量錯誤訊息容易在 16K output 截斷，
+    // structured output schema 解析失敗 → 整批修復失敗 → 錯誤數不變看似收斂。
+    // 32K 足夠 3 features 完整輸出且 LLM 不需要刻意省字。
     const result = await callStructured({
       schema: FixFeaturesSchema,
       model: MODEL.SONNET,
       system: systemPrompt,
       messages: [{ role: 'user', content: userMessage }],
-      maxTokens: 16384,
+      maxTokens: 32768,
       temperature: 0.1,
       thinking: thinkingConfig,
       purpose: 'formulation_fix_features',
