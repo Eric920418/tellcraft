@@ -80,6 +80,25 @@ jobs:
           echo "Building TypeScript..."
           pnpm build
 
+          # 套用未執行的 SQL migrations（idempotent，靠 _migrations 表追蹤）
+          # 第一次部署需先在 VPS 跑 `bash scripts/migrate.sh --bootstrap` 把
+          # 既有 001~034 標為已套用；之後每次 deploy 自動跑新 migration（如 035_add_design_memory）
+          # DATABASE_URL 從 VPS 的 .env 讀取（不在 GitHub Actions 環境）
+          echo "Running migrations..."
+          if [ -f scripts/migrate.sh ]; then
+            # 從 .env 讀 DATABASE_URL 注入給 migrate.sh
+            if [ -f .env ]; then
+              export $(grep -E '^DATABASE_URL=' .env | xargs -d '\n' || true)
+            fi
+            if [ -n "${DATABASE_URL:-}" ]; then
+              bash scripts/migrate.sh
+            else
+              echo "⚠️ DATABASE_URL 未設定（.env 找不到），跳過 migration"
+            fi
+          else
+            echo "⚠️ migrate.sh 不存在，跳過 migration"
+          fi
+
           # 首次部署時 PM2 進程名可能從 tellcraft-backend 改為 tellcraft-api + tellcraft-worker
           # 先刪除舊進程（如果存在），再用新 ecosystem.config.js 啟動
           echo "Reloading PM2..."

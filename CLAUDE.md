@@ -267,10 +267,29 @@ L5: useSearchParams Suspense boundary 自動拆分
 
 ### 資料庫 Migration
 
-`tellcraft-backend/migrations/` 共 33+ 個（`001` ~ `036`），檔名自說明。新增後在 VPS 執行：
+`tellcraft-backend/migrations/` 共 36+ 個（`001` ~ `036`），檔名自說明。
+
+**自動套用**：每次 push 到 `main` 觸發 `.github/workflows/deploy-vps.yml`，VPS 部署步驟會跑 `bash scripts/migrate.sh`：
+- 用 `_migrations` 表追蹤已套用檔名（idempotent，不會重做）
+- 每個檔案包在 transaction（`-1`），失敗 rollback + 終止後續
+
+**首次切換到 migrate.sh（VPS 上 001~034 已手動套用）**：
+```bash
+# 1. 把已套用的 001~034 標記為已套用（不執行 SQL）
+DATABASE_URL=... bash scripts/migrate.sh --bootstrap-up-to=034
+# 2. 自動跑 035 + 036 + 之後的（真實執行）
+DATABASE_URL=... bash scripts/migrate.sh
 ```
-psql "$DATABASE_URL" -f tellcraft-backend/migrations/xxx.sql
+
+**手動操作**：
+```bash
+DATABASE_URL=... bash scripts/migrate.sh --dry-run                  # 預覽待套用
+DATABASE_URL=... bash scripts/migrate.sh --bootstrap-up-to=034      # 標記 ≤034 為已套用（不跑）
+DATABASE_URL=... bash scripts/migrate.sh                            # 套用未執行的（之後 deploy 自動）
+DATABASE_URL=... bash scripts/migrate.sh --bootstrap                # 標記全部為已套用（危險，僅當 DB 完全同步時用）
 ```
+
+**禁止**：直接 `psql -f migrations/xxx.sql` 不更新 `_migrations` 表 → 下次 deploy migration 重跑造成 `relation already exists`。緊急 hotfix 時若繞過腳本，務必接著 `INSERT INTO _migrations VALUES ('xxx.sql')` 補登。
 
 ### Skill 定義目錄
 
