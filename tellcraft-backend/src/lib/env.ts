@@ -76,6 +76,7 @@ const envSchema = z.object({
   // Phase F: DesignSystem pipeline 風險修正 flag
   USE_FROZEN_DESIGN_SYSTEM_PIPELINE: z.stringbool().default(true), // Phase A-E 整體 master kill switch。預設 true（部署即啟用），緊急 rollback 設 false 回 baseline 行為（refineCode/Animation/RWD 用 compact prompt、freeze hook noop、iteration tier hint 不注入、DS snapshot 不寫 designSystem 欄位）
   SYNC_DESIGN_SYSTEM_AFTER_ITERATION: z.stringbool().default(true), // Phase G: tier='design-system-token'/'mixed' 迭代後同步 state.uiuxDesignSystem。預設 true，緊急 rollback 設 false 跳過 LLM patch 呼叫（已知缺口：DS 物件保持舊值，design-token-compliance 可能誤觸發）
+  ENABLE_DESIGN_MD_EXPORT: z.stringbool().default(true),         // Phase H: deployer 產出時把 DESIGN.md 寫進 project_files（root 目錄），用戶下載 zip / git clone 看得到。awesome-design-md 風格 markdown，跨 AI 工具可攜。預設 true，render 函數出問題可關
   VENDORED_FAST_PATH: z.stringbool().default(false),             // Phase B.4 vendored 命中時跳過 Brief + Variant 直接進 Structure。預設關閉因 convertVendoredToDesignSystem lossy（borderRadius/shadows/animationPersonality 失真）。觀察 vendored 用戶反饋後手動開
   DESIGN_TOKEN_SEVERITY: z.enum(['critical', 'warning']).default('warning'), // Phase D 違反 design-token-compliance 的 severity。預設 warning 不阻塞部署，先收集 telemetry。違反率 < 10% 後切 critical
   ENABLE_AXE_CORE: z.stringbool().default(true),                 // axe-core a11y 工業標準工具整合到 ui-evaluator（90+ WCAG 規則）。在 evaluator desktop-light viewport 跑，違反 critical/serious 等級會 fail evaluator

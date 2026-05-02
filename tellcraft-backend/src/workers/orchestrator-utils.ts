@@ -8,7 +8,9 @@ import * as db from '../db/client'
 import type { FlowState, IoEmitter } from '../types/flow-state'
 import type { GeneratedComponent, DesignSystem, PartialCodeCallback } from '../services/uiux-generation'
 import { generateTailwindConfig } from '../services/uiux-generation'
+import { renderTellcraftDesignSystemAsMarkdown } from '../services/design-system-renderer'
 import { validatePreviewBatch } from '../services/preview-gate'
+import { getEnv } from '../lib/env'
 import { sendLineNotifyIfNeeded } from '../services/line-notify'
 import { sendLineFullMessage } from '../services/line-full-push'
 import { sendTelegramNotifyIfNeeded } from '../services/telegram-notify'
@@ -426,6 +428,18 @@ export function generatedCodeToFileRows(
   }
   if (designSystem) {
     rows.push({ filePath: 'tailwind.config.ts', content: generateTailwindConfig(designSystem), fileType: 'config' })
+
+    // Phase H: 寫一份 awesome-design-md 風格 DESIGN.md 到 project root
+    // 用戶下載 zip / git clone / Vercel file tree 都能看見，跨 AI 工具可攜
+    // fail-soft：render 失敗（不應發生）skip，不阻塞 deploy
+    if (getEnv().ENABLE_DESIGN_MD_EXPORT) {
+      try {
+        const md = renderTellcraftDesignSystemAsMarkdown(designSystem)
+        rows.push({ filePath: 'DESIGN.md', content: md, fileType: 'doc' })
+      } catch (err) {
+        logger.warn({ err: String(err).slice(0, 120) }, 'DESIGN.md render 失敗（fail-soft）')
+      }
+    }
   }
 
   return rows
