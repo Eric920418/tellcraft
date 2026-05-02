@@ -63,7 +63,8 @@ export function computeAllowedColorTokens(ds: DesignSystem): Set<string> {
 
 const COLOR_CLASS_REGEX = /\b(?:bg|text|border|from|to|via|ring|divide|placeholder|fill|stroke)-([a-z]+(?:-\d+)?(?:\/[\d.]+)?|\[[^\]]+\])/g
 
-function extractColorTokens(content: string): Array<{ raw: string; key: string; line: number }> {
+// export for Phase G design-system-sync.ts 重用
+export function extractColorTokens(content: string): Array<{ raw: string; key: string; line: number }> {
   const out: Array<{ raw: string; key: string; line: number }> = []
   const lines = content.split('\n')
   for (let i = 0; i < lines.length; i++) {

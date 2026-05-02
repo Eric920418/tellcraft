@@ -21,6 +21,7 @@ import { refineCode, refineFullStackCode, generateTailwindConfig, GeneratedCompo
 import { parseIterationIntent, type IterationTier } from './iteration-intent'
 import { listProjectDeployments, rollbackToDeployment, toVercelSlug } from './deployer'
 import { getEnv } from '../lib/env'
+import { syncDesignSystemAfterIteration } from './design-system-sync'
 
 const MAX_ITERATIONS_PER_SESSION = 50
 
@@ -517,6 +518,32 @@ ${enrichedFeedback}`
           updatedCode = fsSanitized.code
         }
         state.uiuxGeneratedCode = updatedCode
+
+        // Phase G: 全棧迭代也走同步（與 frontend 分支一致行為）
+        if (
+          getEnv().USE_FROZEN_DESIGN_SYSTEM_PIPELINE
+          && getEnv().SYNC_DESIGN_SYSTEM_AFTER_ITERATION
+          && state.uiuxDesignSystem
+          && (iterationTier === 'design-system-token' || iterationTier === 'mixed')
+        ) {
+          const syncResult = await syncDesignSystemAfterIteration({
+            baseDesignSystem: state.uiuxDesignSystem,
+            modifiedCode: updatedCode,
+            tier: iterationTier,
+            trackingContext: { userId: state.userId, conversationId: input.conversationId },
+          })
+          if (syncResult && syncResult.hasChanges) {
+            state.uiuxDesignSystem = syncResult.designSystem
+            state.uiuxDesignSystemHash = syncResult.hash
+            state.uiuxDesignSystemSource = 'iteration_modified'
+            logger.info({
+              tier: iterationTier,
+              driftCount: syncResult.driftCount,
+              path: 'fullstack',
+            }, 'Phase G DesignSystem 同步完成（全棧分支）')
+          }
+        }
+
         if (pid) {
           await db.upsertProjectFiles(pid, 'uiux',
             generatedCodeToFileRows(updatedCode, state.uiuxDesignSystem))
@@ -634,6 +661,33 @@ ${enrichedFeedback}`
       if (preSaveSanitized.fixes.length > 0) {
         logger.info({ fixes: preSaveSanitized.fixes }, '迭代結果存入 DB 前 sanitize 修復')
         updatedCode = preSaveSanitized.code
+      }
+
+      // Phase G: tier='design-system-token' 或 'mixed' 時同步 state.uiuxDesignSystem
+      // 雙重 flag gate：master USE_FROZEN_DESIGN_SYSTEM_PIPELINE + 細節 SYNC_DESIGN_SYSTEM_AFTER_ITERATION
+      // fail-soft：sync 失敗保留舊 DS，不阻塞 pipeline
+      if (
+        getEnv().USE_FROZEN_DESIGN_SYSTEM_PIPELINE
+        && getEnv().SYNC_DESIGN_SYSTEM_AFTER_ITERATION
+        && state.uiuxDesignSystem
+        && (iterationTier === 'design-system-token' || iterationTier === 'mixed')
+      ) {
+        const syncResult = await syncDesignSystemAfterIteration({
+          baseDesignSystem: state.uiuxDesignSystem,
+          modifiedCode: updatedCode,
+          tier: iterationTier,
+          trackingContext: { userId: state.userId, conversationId: input.conversationId },
+        })
+        if (syncResult && syncResult.hasChanges) {
+          state.uiuxDesignSystem = syncResult.designSystem
+          state.uiuxDesignSystemHash = syncResult.hash
+          state.uiuxDesignSystemSource = 'iteration_modified'
+          logger.info({
+            tier: iterationTier,
+            driftCount: syncResult.driftCount,
+            newPrimary: syncResult.designSystem.colorPalette.primary,
+          }, 'Phase G DesignSystem 同步完成')
+        }
       }
 
       if (pid) {
