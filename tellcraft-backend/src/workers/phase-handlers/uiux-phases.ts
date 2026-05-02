@@ -1321,10 +1321,12 @@ export async function handleVariantSelection(
   // 更新狀態，開始完整生成管線
   state.phase = 'uiux_code_generation'
   state.uiuxDesignSystem = finalDesignSystem
-  // Phase A: freezeDesignSystem hook — 計算 hash + audit log，給 cache key / 回滾驗證 / telemetry 用
-  const freeze = freezeDesignSystem(finalDesignSystem, 'user_designed', { conversationId })
-  state.uiuxDesignSystemHash = freeze.hash
-  state.uiuxDesignSystemSource = freeze.source
+  // Phase A: freezeDesignSystem hook — 計算 hash + audit log（master flag gate：false 時 noop baseline）
+  if (getEnv().USE_FROZEN_DESIGN_SYSTEM_PIPELINE) {
+    const freeze = freezeDesignSystem(finalDesignSystem, 'user_designed', { conversationId })
+    state.uiuxDesignSystemHash = freeze.hash
+    state.uiuxDesignSystemSource = freeze.source
+  }
   state.uiuxCodePhase = 'structure'
   state.waitingForReply = false
   state.uiuxCodeGenerationStartedAt = Date.now()

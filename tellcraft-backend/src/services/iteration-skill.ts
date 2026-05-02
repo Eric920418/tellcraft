@@ -20,6 +20,7 @@ import { CREDIT_COSTS } from '../config/plans'
 import { refineCode, refineFullStackCode, generateTailwindConfig, GeneratedComponent, buildStreamingHandler } from './uiux-generation'
 import { parseIterationIntent, type IterationTier } from './iteration-intent'
 import { listProjectDeployments, rollbackToDeployment, toVercelSlug } from './deployer'
+import { getEnv } from '../lib/env'
 
 const MAX_ITERATIONS_PER_SESSION = 50
 
@@ -377,21 +378,24 @@ export async function executeIteration(input: {
         },
       }).catch(() => {})
     }
-    if (iterationTier === 'design-system-token') {
-      enrichedFeedback = `${enrichedFeedback}
+    // master flag gate：USE_FROZEN_DESIGN_SYSTEM_PIPELINE=false 時不注入 hint（baseline 行為），telemetry 仍寫供觀察
+    if (getEnv().USE_FROZEN_DESIGN_SYSTEM_PIPELINE) {
+      if (iterationTier === 'design-system-token') {
+        enrichedFeedback = `${enrichedFeedback}
 
 [Phase C 提示] 此修改屬於**設計系統層**（影響全站視覺一致性）。請：
 1. 跨**所有 .tsx 頁面與組件**搜尋並替換受影響的 className（例如 \`bg-primary\` / \`bg-blue-600\` / \`text-foreground\` / \`border-muted\`）
 2. 不只改一個區塊 — 全站所有出現該色號 / 字體 / 間距的位置都要一起改
 3. 若 globals.css 內有對應 CSS variable（--color-primary 等），同步修改
 4. 修完後檢查：grep 不應再有舊色號的 hard-coded 字串殘留`
-    } else if (iterationTier === 'mixed') {
-      enrichedFeedback = `${enrichedFeedback}
+      } else if (iterationTier === 'mixed') {
+        enrichedFeedback = `${enrichedFeedback}
 
 [Phase C 提示] 此修改同時涉及**設計系統層 + 局部代碼**。請：
 1. 全局範圍：跨所有頁面 / 組件搜尋替換受影響的 className，globals.css CSS variables 同步
 2. 局部範圍：針對提到的 section（${intent?.targets.join(' / ') || '具體位置'}）做精準調整
 3. 兩者必須一致 — 局部 section 不能違反全局已修改的 className`
+      }
     }
 
     // 偵測重複抱怨 → 策略升級
@@ -534,8 +538,11 @@ ${enrichedFeedback}`
           await snapshotCodeToGeneration(pid, {
             changeSummary: `迭代修改 #${(state.iterationCount || 0) + 1}`,
             conversationId: input.conversationId,
-            designSystem: state.uiuxDesignSystem,
-            designSystemHash: state.uiuxDesignSystemHash,
+            // master flag gate：false 時不寫 designSystem 欄位（baseline）
+            ...(getEnv().USE_FROZEN_DESIGN_SYSTEM_PIPELINE && {
+              designSystem: state.uiuxDesignSystem,
+              designSystemHash: state.uiuxDesignSystemHash,
+            }),
           })
         }
 
@@ -635,8 +642,10 @@ ${enrichedFeedback}`
         await snapshotCodeToGeneration(pid, {
           changeSummary: `迭代修改 #${state.iterationCount || 1}`,
           conversationId: input.conversationId,
-          designSystem: state.uiuxDesignSystem,
-          designSystemHash: state.uiuxDesignSystemHash,
+          ...(getEnv().USE_FROZEN_DESIGN_SYSTEM_PIPELINE && {
+            designSystem: state.uiuxDesignSystem,
+            designSystemHash: state.uiuxDesignSystemHash,
+          }),
         })
       }
     }
@@ -807,8 +816,10 @@ export async function executeUndoIteration(input: {
       await snapshotCodeToGeneration(pid, {
         changeSummary: '撤銷迭代修改',
         conversationId,
-        designSystem: state.uiuxDesignSystem,
-        designSystemHash: state.uiuxDesignSystemHash,
+        ...(getEnv().USE_FROZEN_DESIGN_SYSTEM_PIPELINE && {
+          designSystem: state.uiuxDesignSystem,
+          designSystemHash: state.uiuxDesignSystemHash,
+        }),
       })
     }
 

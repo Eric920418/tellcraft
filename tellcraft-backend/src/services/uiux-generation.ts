@@ -1595,6 +1595,21 @@ function generateCssVariables(ds: DesignSystem): string {
 /**
  * 共用的 Design System Prompt 構建函數
  */
+/**
+ * Phase A-E master flag gate：根據 USE_FROZEN_DESIGN_SYSTEM_PIPELINE 切換 prompt 版本。
+ *
+ * - flag=true（預設）：用完整 buildDesignSystemPrompt（~1200 字），跨階段一致性硬保證
+ * - flag=false：用 buildCompactDesignPrompt（~500 字），baseline 行為，緊急 rollback 用
+ *
+ * 4 處呼叫：refineCode / generateAnimations / generateRwd / generateAnimationsAndRwd
+ */
+function pickDesignSystemPrompt(designSystem: DesignSystem, opts?: { includeMood?: boolean }): string {
+  if (getEnv().USE_FROZEN_DESIGN_SYSTEM_PIPELINE) {
+    return buildDesignSystemPrompt(designSystem)
+  }
+  return buildCompactDesignPrompt(designSystem, { includeMood: opts?.includeMood ?? true })
+}
+
 export function buildDesignSystemPrompt(designSystem: DesignSystem): string {
   return `## Design System（必須嚴格遵守）
 
@@ -4499,10 +4514,9 @@ ${getAnimationConstraints(tier)}
 - "hover-lift" → whileHover={{ y:-4 }} transition={{ type:'spring', stiffness:300 }}
 - "parallax" → useScroll + useTransform(scrollY, [0,500], [0,-100])`
 
-  // Phase B.2: 改用完整版 DesignSystem prompt（~1200 字）取代 compact 版（~500 字）
-  // 修跨階段不一致：Structure 看完整 / Animation 看精簡 → LLM 在 Animation 寫超出色族
-  // 觸發 design-token-compliance critical 阻塞。dynamic block 多 ~700 字，cache 不失效（cache 在 static）
-  const animDynamicPrompt = buildDesignSystemPrompt(designSystem)
+  // Phase B.2: 完整版 DesignSystem prompt（~1200 字）取代 compact 版（~500 字）
+  // 修跨階段不一致；USE_FROZEN_DESIGN_SYSTEM_PIPELINE=false 時回 baseline compact 版（緊急 rollback）
+  const animDynamicPrompt = pickDesignSystemPrompt(designSystem)
 
   const systemPrompt = buildCacheableSystemBlocks(animStaticPrompt, animDynamicPrompt)
 
@@ -4847,9 +4861,9 @@ ${layoutMode === 'app'
 - [ ] 尊重 prefers-reduced-motion，禁止 transition-all
 - [ ] ${layoutMode === 'app' ? '移動端功能完整可用' : '移動端漢堡選單可用且可關閉'}`
 
-  // Phase B.2: 改用完整版 DesignSystem prompt（~1200 字）取代 compact 版
-  // 確保 RWD 階段 LLM 看到完整色號規範，避免 hover state 寫出超出色族
-  const rwdDynamicPrompt = `${buildDesignSystemPrompt(designSystem)}
+  // Phase B.2: 完整版 DesignSystem prompt（~1200 字）取代 compact 版
+  // USE_FROZEN_DESIGN_SYSTEM_PIPELINE=false 時回 baseline compact 版（緊急 rollback）
+  const rwdDynamicPrompt = `${pickDesignSystemPrompt(designSystem)}
 
 ${rwdTierHint}`
 
@@ -5269,8 +5283,9 @@ ${layoutMode === 'app'
 - 移動端動畫可以簡化（reduce motion for small screens）`
 
   // ── Dynamic prompt（每次不同）──
-  // Phase B.2: 改用完整版 DesignSystem prompt — 與 Animation/RWD 分離模式對齊
-  const mergedDynamicPrompt = buildDesignSystemPrompt(designSystem)
+  // Phase B.2: 完整版 DesignSystem prompt — 與 Animation/RWD 分離模式對齊
+  // USE_FROZEN_DESIGN_SYSTEM_PIPELINE=false 時回 baseline compact 版（緊急 rollback）
+  const mergedDynamicPrompt = pickDesignSystemPrompt(designSystem)
 
   const systemPrompt = buildCacheableSystemBlocks(mergedStaticPrompt, mergedDynamicPrompt)
 
@@ -6554,10 +6569,10 @@ ${retryFileBlocks}
     .map(f => `- ${f.path}（${f.content.split('\n').length} 行）`)
     .join('\n')
 
-  // Phase B.1: 改用完整版 buildDesignSystemPrompt 取代 compact 版（~500字 → ~1200字）
-  // 修跨階段漂移最大破口 — refineCode 之前看到的設計系統被截斷 1/3，導致迭代色號漂移
+  // Phase B.1: 完整版 buildDesignSystemPrompt 取代 compact（~500字 → ~1200字）
+  // 修跨階段漂移最大破口；USE_FROZEN_DESIGN_SYSTEM_PIPELINE=false 時回 compact baseline
   const designSystemSection = designContext.designSystem
-    ? buildDesignSystemPrompt(designContext.designSystem)
+    ? pickDesignSystemPrompt(designContext.designSystem)
     : ''
 
   const briefSection = designContext.designBrief
