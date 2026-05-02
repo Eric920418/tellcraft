@@ -193,8 +193,35 @@ export function hasExplicitNullIntent(scenarioName: string): boolean {
 }
 
 /**
+ * 連接詞：把 scenario 名稱切成獨立 clauses
+ * 各 clause 的「null 意圖」必須獨立判斷，跨 clause 的欄位不該被互相牽連。
+ *
+ * 歷史 bug：「Successfully clear metaDescription while updating pageTitle」
+ * 整句被當成「pageTitle 應為 null」，因為 extractNullExpectationFields 從整
+ * 句抽欄位 + hasExplicitNullIntent 看到 clear 就標 true → pageTitle 是 update
+ * 意圖（不是 null）卻被誤報。
+ */
+const CLAUSE_SEPARATORS = /\s+(?:while|and|but(?:\s+also)?|whereas|whilst|yet|然後|接著|同時|並且|並|且|而|，|,|;|；)\s+/i
+
+/** 一個 clause 是否含 null 意圖 */
+function clauseHasNullVerb(clause: string): boolean {
+  // 若 clause 含 update / change to / set to <value>（非 null）等明確「非 null」動作 → 直接視為非 null clause
+  // update / updating / set X to "..."（被引號包的字面值）
+  if (/\b(?:updat(?:e|ing)|chang(?:e|ing)\s+to)\b/i.test(clause) && !/\bto\s+(?:null|empty|無|空)\b/i.test(clause)) {
+    // 同時若 clause 包含明確 null 動詞才算曖昧；只有 update 沒有 clear → 非 null
+    if (!/\b(?:clear(?:ed|ing)?|unset|reset(?:\s+to\s+null)?|empty|null)\b/i.test(clause)) {
+      return false
+    }
+  }
+  return /\b(?:clear(?:ed|ing)?|unset|reset(?:\s+to\s+null)?|null)\b|（\s*null\s*）|\(\s*null\s*\)|清除|清空|設為\s*null|設成\s*null|歸零/i.test(clause)
+}
+
+/**
  * 從 scenario 名稱提取可能被期望為 null 的欄位名
  * 回傳可能的欄位名陣列（可能多個候選，因為 regex 不能 100% 精確）
+ *
+ * v2: clause-aware 抽取 — 只從含 null-verb 的 clause 抽欄位，避免
+ * 「clear A while updating B」誤把 B 當 null candidate
  */
 function extractNullExpectationFields(scenarioName: string): string[] {
   const candidates = new Set<string>()
@@ -202,25 +229,33 @@ function extractNullExpectationFields(scenarioName: string): string[] {
   // 只有在有「null 意圖」時才嘗試提取
   if (!hasExplicitNullIntent(scenarioName)) return []
 
+  // 切成 clauses
+  const clauses = scenarioName.split(CLAUSE_SEPARATORS)
+  // 只保留含 null-verb 的 clause（避免 update clause 的欄位被誤抽）
+  const nullClauses = clauses.filter(clauseHasNullVerb)
+  // 若所有 clause 都不含 null-verb（罕見，因為 hasExplicitNullIntent=true 但分句後找不到），
+  // fallback 回原句以維持既有行為（避免漏報）
+  const targetText = nullClauses.length > 0 ? nullClauses.join(' ') : scenarioName
+
   // 提取所有可能的欄位名（camelCase、snake_case、包含 Id 的詞）
-  const fieldMatches = scenarioName.matchAll(/\b([a-z][a-zA-Z0-9]*(?:Id|_id)?)\b/g)
+  const fieldMatches = targetText.matchAll(/\b([a-z][a-zA-Z0-9]*(?:Id|_id)?)\b/g)
   for (const m of fieldMatches) {
     const field = m[1]
     // 排除常用非欄位詞
-    if (['null', 'should', 'must', 'be', 'become', 'turn', 'is', 'and', 'or', 'the', 'a', 'an', 'set', 'clear', 'reset', 'unset'].includes(field.toLowerCase())) continue
+    if (['null', 'should', 'must', 'be', 'become', 'turn', 'is', 'and', 'or', 'the', 'a', 'an', 'set', 'clear', 'reset', 'unset', 'while', 'whilst', 'whereas', 'updating', 'changing'].includes(field.toLowerCase())) continue
     if (field.length < 2) continue
     candidates.add(field)
   }
 
-  // 中文欄位名（較寬鬆）：含 "Id" 或 "id" 後綴
-  const chineseFieldMatch = scenarioName.match(/([a-zA-Z_][a-zA-Z0-9_]*[Ii][Dd])/g)
+  // 中文欄位名（較寬鬆）：含 "Id" 或 "id" 後綴 — 同樣只看 nullClauses
+  const chineseFieldMatch = targetText.match(/([a-zA-Z_][a-zA-Z0-9_]*[Ii][Dd])/g)
   if (chineseFieldMatch) {
     for (const f of chineseFieldMatch) candidates.add(f)
   }
 
   // 中文業務術語 → 英文欄位候選（當 scenario 全中文時才有這個救援）
   for (const [cnTerm, enFields] of CHINESE_FIELD_HINTS) {
-    if (scenarioName.includes(cnTerm)) {
+    if (targetText.includes(cnTerm)) {
       for (const f of enFields) candidates.add(f)
     }
   }

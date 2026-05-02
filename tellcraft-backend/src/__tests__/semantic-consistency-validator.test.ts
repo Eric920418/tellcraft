@@ -410,4 +410,84 @@ Scenario: 應清除描述 (null)
       expect(result.hasSpecIssues).toBe(true)
     })
   })
+
+  // ==========================================================
+  // Regression: clause-aware null intent extraction
+  // 歷史 case：「Successfully clear A while updating B」誤報 B 應為 null
+  // ==========================================================
+
+  describe('clause-aware null intent (regression)', () => {
+    it('「clear X while updating Y」不該把 Y 當 null candidate', async () => {
+      const feature = {
+        name: 'Update SEO Settings',
+        content: `
+Feature: Update SEO Settings
+
+Scenario: Successfully clear metaDescription while updating pageTitle
+  When (No Actor) Update SEO Settings, call table:
+    | metaDescription | pageTitle                    |
+    | &isNull         | "AC Cleaning Taipei Expert"  |
+  Then Update SEO Settings(200)回應
+  And 應該存在一個SEOSettings, with table:
+    | metaDescription | pageTitle                    |
+    | &isNull         | "AC Cleaning Taipei Expert"  |
+`,
+      }
+      const result = await validateSemanticConsistency({
+        features: [feature],
+        schemaSql: '',
+      })
+      const pageTitleIssues = result.issues.filter(
+        i => i.issueType === 'name_vs_datatable' && i.description.includes('pageTitle')
+      )
+      expect(pageTitleIssues).toEqual([])
+    })
+
+    it('「clear A and clear B」兩個 clause 都應該偵測（合理 case）', async () => {
+      const feature = {
+        name: 'Clear Multiple',
+        content: `
+Feature: Clear Multiple
+
+Scenario: Clear categoryId and clear tagId
+  When (No Actor) Clear Multiple, call table:
+    | id       |
+    | $rec.id  |
+  Then 應該存在一個Record, with table:
+    | id      | categoryId    | tagId         |
+    | $rec.id | actual-cat-id | actual-tag-id |
+`,
+      }
+      const result = await validateSemanticConsistency({
+        features: [feature],
+        schemaSql: '',
+      })
+      const issues = result.issues.filter(i => i.issueType === 'name_vs_datatable')
+      // 至少抓到 categoryId 或 tagId 其一（兩個都該抓到）
+      expect(issues.length).toBeGreaterThan(0)
+    })
+
+    it('「clear A while updating B」中 A 仍然要被偵測為 null candidate', async () => {
+      const feature = {
+        name: 'SEO',
+        content: `
+Feature: SEO
+
+Scenario: Successfully clear metaDescription while updating pageTitle
+  Then 應該存在一個SEOSettings, with table:
+    | metaDescription           | pageTitle |
+    | "still-has-old-meta-desc" | "new"     |
+`,
+      }
+      const result = await validateSemanticConsistency({
+        features: [feature],
+        schemaSql: '',
+      })
+      const metaDescIssues = result.issues.filter(
+        i => i.issueType === 'name_vs_datatable' && i.description.includes('metaDescription')
+      )
+      // metaDescription 在 clear clause 裡 + DataTable 是非 null → 應該被偵測
+      expect(metaDescIssues.length).toBeGreaterThan(0)
+    })
+  })
 })
