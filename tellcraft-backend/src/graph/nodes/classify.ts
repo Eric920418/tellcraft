@@ -17,6 +17,7 @@ import { detectFastModeIntent } from '../../services/customer-service'
 import { checkBuildRelevance, recordAbuseViolation } from '../../services/prefilter'
 import * as db from '../../db/client'
 import { createLogger } from '../../lib/logger'
+import { autoRenameIfDefault } from '../../services/project-naming'
 
 const logger = createLogger('graph:classify')
 
@@ -121,6 +122,17 @@ export async function classifyNode(
       logger.warn('checkBuildRelevance 失敗，降級放行')
     }
 
+    // Fast 模式自動命名（與舊 orchestrator 行為一致）
+    if (state.projectId && state.userId) {
+      await autoRenameIfDefault({
+        userId: state.userId,
+        projectId: state.projectId,
+        desiredName: trimmed.slice(0, 25),
+        maxLength: 25,
+        fallbackName: '介面建站',
+      })
+    }
+
     return { skillIntent: 'fast', specialToken: token, phase: 'idle' }
   }
 
@@ -149,6 +161,19 @@ export async function classifyNode(
     // Skill intent
     const intent = INTENT_TO_ROUTE[classification.intent] || 'bdd'
     logger.info({ conversationId: state.conversationId, intent: classification.intent, confidence: classification.confidence }, 'LangGraph classify')
+
+    // BDD 模式自動命名（與舊 orchestrator Step 5.5 行為一致）
+    // 歷史 bug：LangGraph 路徑丟棄 classification.suggestedProjectName
+    // → 所有專案永遠停在預設名「專案 YYYY/M/D」
+    if (classification.suggestedProjectName && state.projectId && state.userId) {
+      await autoRenameIfDefault({
+        userId: state.userId,
+        projectId: state.projectId,
+        desiredName: classification.suggestedProjectName,
+        maxLength: 50,
+        fallbackName: '新專案',
+      })
+    }
 
     return { skillIntent: intent, specialToken: token, phase: 'idle' }
   } catch (err) {
