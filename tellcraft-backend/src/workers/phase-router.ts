@@ -509,6 +509,38 @@ export async function routePhase(
 
   // ── Code Generation / Quality Gate ──
   if (state.phase === 'uiux_code_generation' || state.phase === 'uiux_quality_gate') {
+    // Phase B.4: vendored 短路後用戶反悔 → 退回正常變體探索
+    // 條件：用戶按下「我想看其他變體」(__force_variants__) + 當前是 vendored 來源 + 還在 structure 階段（變體尚未生成代碼）
+    if (
+      message.trim() === '__force_variants__' &&
+      state.uiuxDesignSystemSource === 'vendored_designmd' &&
+      state.uiuxCodePhase === 'structure'
+    ) {
+      // 清除 vendored 旗標 + DesignSystem，回到 Brief 確認
+      state.uiuxDesignSystem = undefined
+      state.uiuxDesignSystemHash = undefined
+      state.uiuxDesignSystemSource = undefined
+      state.uiuxCodePhase = undefined
+      state.uiuxCodeGenerationStartedAt = undefined
+      state.phase = 'uiux_design_brief_confirm'
+      state.waitingForReply = true
+      // 注意：state.uiuxReferenceAnalysis 保留 — vendored DESIGN.md 仍可作為設計參考注入變體生成
+      // 由 phase router 重新導入 startDesignBriefConfirm
+      // saveFlowState + sendMessage 由下層處理（重新進入 phase router 的 uiux_design_brief_confirm 分支）
+      // 但此處我們需要重新觸發 brief 流程。最簡單：直接結束此次處理，下次用戶輸入會走 brief confirm
+      const { saveFlowState, sendMessage } = await import('./orchestrator-utils')
+      await saveFlowState(redis, conversationId, state)
+      await sendMessage(conversationId, io, {
+        content: '已退出 vendored 風格。請告訴我您想要的設計方向（例如「現代簡約」「大膽創意」），我會生成 5 個變體讓您選擇。',
+        stage: 'uiux_design_brief_confirm',
+        quickReplies: [
+          { label: '我想要更專業正式', value: '我想要更專業正式的風格', style: 'secondary' },
+          { label: '我想要更大膽創意', value: '我想要更大膽創意的風格', style: 'secondary' },
+          { label: '← 重新進入 Discovery', value: '__new_project__', style: 'ghost' },
+        ],
+      })
+      return true
+    }
     await handleUiuxCodeGenerating(conversationId, state, redis, io)
     return true
   }

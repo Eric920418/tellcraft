@@ -1068,11 +1068,21 @@ Make the concept unique. signatureElement must be specific enough to code (e.g. 
       userMsg += isChinese
         ? `\n\n## 參考設計分析\n用戶提供了一張參考設計圖片，以下是分析結果，請讓概念風格與參考一致：\n${referenceAnalysis.visionAnalysis}`
         : `\n\n## Reference Design Analysis\nThe user provided a reference design image. Align the concept style with this analysis:\n${referenceAnalysis.visionAnalysis}`
-      // 注入精確主色（如有 DOM 提取的 accent 色）
+      // 注入精確主色：優先從 DOM 提取（puppeteer 路徑），降級從 vendored designSystem 取
+      // - puppeteer 路徑：referenceAnalysis.colorPalette.accents 是 ExtractedColors（DOM computed）
+      // - vendored 短路路徑：colorPalette 為 undefined，但 designSystem.colorPalette.primary 有 hex 陣列
+      let exactAccent: string | undefined
       if (referenceAnalysis.colorPalette?.accents.length) {
+        exactAccent = referenceAnalysis.colorPalette.accents[0]
+      } else if (referenceAnalysis.designSystem?.colorPalette) {
+        const ds = referenceAnalysis.designSystem.colorPalette
+        const firstHex = (ds.primary?.[0]?.value || ds.brand?.[0]?.value || ds.accent?.[0]?.value)
+        if (firstHex && /^#[0-9a-f]{3,8}$/i.test(firstHex)) exactAccent = firstHex
+      }
+      if (exactAccent) {
         userMsg += isChinese
-          ? `\n精確主色（從 DOM 提取）: ${referenceAnalysis.colorPalette.accents[0]}`
-          : `\nExact accent color (from DOM): ${referenceAnalysis.colorPalette.accents[0]}`
+          ? `\n精確主色（從參考來源提取）: ${exactAccent}`
+          : `\nExact accent color (from reference): ${exactAccent}`
       }
     }
 

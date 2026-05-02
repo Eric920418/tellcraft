@@ -33,6 +33,7 @@ import {
 } from '../../services/design-clarify-axes'
 import { executeIteration, executeUndoIteration } from '../../services/iteration-skill'
 import { semanticGateway } from '../../services/semantic-gateway'
+import { freezeDesignSystem, convertVendoredToDesignSystem } from '../../services/design-system-freeze'
 import { detectFastModeIntent, getFaqReply, answerWithSonnet } from '../../services/customer-service'
 import { sendMessage, streamLlmMessage, saveFlowState, saveFlowStateLight, getFlowState, deleteFlowState, makeStreamingCallback, generatedCodeToFileRows, deductCredits, hasRecentFlowActivity, touchFlowActivity, snapshotCodeToGeneration } from '../orchestrator-utils'
 import { CREDIT_COSTS } from '../../config/plans'
@@ -1320,6 +1321,10 @@ export async function handleVariantSelection(
   // 更新狀態，開始完整生成管線
   state.phase = 'uiux_code_generation'
   state.uiuxDesignSystem = finalDesignSystem
+  // Phase A: freezeDesignSystem hook — 計算 hash + audit log，給 cache key / 回滾驗證 / telemetry 用
+  const freeze = freezeDesignSystem(finalDesignSystem, 'user_designed', { conversationId })
+  state.uiuxDesignSystemHash = freeze.hash
+  state.uiuxDesignSystemSource = freeze.source
   state.uiuxCodePhase = 'structure'
   state.waitingForReply = false
   state.uiuxCodeGenerationStartedAt = Date.now()
@@ -2914,11 +2919,14 @@ export async function completeDesignClarify(
   // 合併分析結果
   if (imageAnalysis && urlAnalysis && imageAnalysis.visionAnalysis && urlAnalysis.visionAnalysis) {
     // 兩者都有 Vision 結果 → 合併 visionAnalysis
+    // 保留 urlAnalysis.designSystem（vendored brand 路徑命中時的完整 DESIGN.md），
+    // 否則下游 formatStructuredDataForPrompt 拿不到結構化 brand 知識
     state.uiuxReferenceAnalysis = {
       url: urlAnalysis.url,
       metadata: urlAnalysis.metadata,
       visionAnalysis: `## 上傳參考圖片分析\n${imageAnalysis.visionAnalysis}\n\n## 參考網站分析（${urlAnalysis.metadata?.title || urlAnalysis.url}）\n${urlAnalysis.visionAnalysis}`,
       analysisSource: 'uploaded_image',
+      designSystem: urlAnalysis.designSystem,
     }
     await saveFlowState(redis, conversationId, state)
     await sendMessage(conversationId, io, {
@@ -2988,8 +2996,100 @@ export async function completeDesignClarify(
     await saveFlowState(redis, conversationId, state)
   }
 
+  // Phase B.4: vendored brand 命中時跳過 Brief + Variant 直接進代碼生成
+  // 用戶明確說「像 Stripe」表態 → 不需再走 5 變體探索
+  if (await tryVendoredFastPath(conversationId, state, redis, io)) {
+    return
+  }
+
   // 進入 Design Brief 確認環節
   await startDesignBriefConfirm(conversationId, state, customTemplate, 'ideas', redis, io)
+}
+
+/**
+ * Phase B.4: vendored brand 短路捷徑
+ *
+ * 偵測條件：
+ *   - state.uiuxReferenceAnalysis.analysisSource === 'vendored_designmd'
+ *   - state.uiuxReferenceAnalysis.designSystem 存在
+ *
+ * 處理：
+ *   - convertVendoredToDesignSystem → state.uiuxDesignSystem
+ *   - freezeDesignSystem(source='vendored_designmd') → 寫 hash
+ *   - phase = 'uiux_code_generation' → executeFullCodePipeline
+ *   - sendMessage 提示 + quickReply「我想看其他變體」(__force_variants__) 退路
+ *
+ * 返回 true 表示已處理（呼叫端應 return），false 表示走原邏輯
+ */
+async function tryVendoredFastPath(
+  conversationId: string,
+  state: FlowState,
+  redis: Redis,
+  io: IoEmitter
+): Promise<boolean> {
+  // Phase F.1: feature flag guard — 預設關閉
+  // 原因：convertVendoredToDesignSystem 是 lossy 轉型（borderRadius/shadows/animationPersonality 失真）
+  // 用戶輸入 stripe.com 拿到「色像 Stripe，其他都很普通」品質下降。
+  // 開啟前需確認 lossy 影響可接受（觀察 staging 反饋 + 補強 converter）
+  if (!getEnv().VENDORED_FAST_PATH) {
+    logger.info({ conversationId }, 'vendored fast path env 關閉，走原 5 變體流程')
+    return false
+  }
+  const ref = state.uiuxReferenceAnalysis
+  if (!ref || ref.analysisSource !== 'vendored_designmd' || !ref.designSystem) {
+    return false
+  }
+  const brandKey = ref.designSystem.metadata?.brandKey ?? 'unknown'
+
+  // 轉型 vendored → uiux DesignSystem
+  let uiuxDs: ReturnType<typeof convertVendoredToDesignSystem>
+  try {
+    uiuxDs = convertVendoredToDesignSystem(ref.designSystem)
+  } catch (err) {
+    logger.warn({ err, brandKey }, 'vendored 轉型失敗，降級走變體探索')
+    return false
+  }
+
+  // 寫入 state + freeze
+  state.uiuxDesignSystem = uiuxDs
+  const freeze = freezeDesignSystem(uiuxDs, 'vendored_designmd', { conversationId })
+  state.uiuxDesignSystemHash = freeze.hash
+  state.uiuxDesignSystemSource = freeze.source
+
+  // tier 推斷：vendored 預設 creative（品牌設計通常較大膽）
+  state.uiuxDesignTier = state.uiuxDesignTier ?? 'creative'
+
+  // 寫 BDD Session（補完整 finalDesignSystem 給後續流程）
+  if (state.sessionId) {
+    try {
+      await updateBddSession({
+        sessionId: state.sessionId,
+        updates: {
+          finalDesignSystem: uiuxDs,
+          currentPhase: 'uiux_code_generation',
+        },
+      })
+    } catch (err) {
+      logger.warn({ err }, 'updateBddSession 失敗（vendored fast path），不阻塞')
+    }
+  }
+
+  state.phase = 'uiux_code_generation'
+  state.uiuxCodePhase = 'structure'
+  state.waitingForReply = false
+  state.uiuxCodeGenerationStartedAt = Date.now()
+  await saveFlowState(redis, conversationId, state)
+
+  await sendMessage(conversationId, io, {
+    content: `偵測到您想要 **${brandKey}** 風格，已直接套用該品牌設計系統並開始生成代碼，跳過變體選擇。\n\n如果您想看其他設計變體，可以點下方按鈕重新進入探索流程。`,
+    stage: 'uiux_pipeline_progress',
+    quickReplies: [
+      { label: '我想看其他變體', value: '__force_variants__', style: 'ghost' },
+    ],
+  })
+
+  await executeFullCodePipeline(conversationId, state, redis, io)
+  return true
 }
 
 // ============================================================

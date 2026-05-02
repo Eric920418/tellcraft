@@ -18,6 +18,7 @@ import type { FlowState, IoEmitter } from '../types/flow-state'
 import { sendMessage, saveFlowState, getFlowState, generatedCodeToFileRows, deductCredits, makeStreamingCallback, snapshotCodeToGeneration } from '../workers/orchestrator-utils'
 import { CREDIT_COSTS } from '../config/plans'
 import { refineCode, refineFullStackCode, generateTailwindConfig, GeneratedComponent, buildStreamingHandler } from './uiux-generation'
+import { parseIterationIntent, type IterationTier } from './iteration-intent'
 import { listProjectDeployments, rollbackToDeployment, toVercelSlug } from './deployer'
 
 const MAX_ITERATIONS_PER_SESSION = 50
@@ -353,6 +354,46 @@ export async function executeIteration(input: {
       enrichedFeedback = `${userFeedback}\n\n[產品完整描述（用於理解上下文，不是修改指令）]\n${state.fastModeExpandedPrompt}`
     }
 
+    // Phase C: tier 意圖分層 — 偵測「設計系統層 vs 代碼層」迭代並注入對應 hint
+    // - design-system-token：影響整體設計系統（主色 / 品牌字體 / 全站配色）
+    //   → 提示 LLM 修改要全局一致，且改 cssVariables / colorPalette 而非局部 className
+    // - code-override：局部代碼修改（hero 動效 / footer 文字）→ 維持精準小改
+    // - mixed：兩者混合 → 提示 LLM 同時注意全局與局部
+    // - 無 intent：fallback 'code-override'（最安全，refineCode 既有行為）
+    const intent = parseIterationIntent(userFeedback)
+    const iterationTier: IterationTier = intent?.tier ?? 'code-override'
+    if (intent) {
+      recordTelemetry({
+        skillName: 'iteration',
+        eventType: 'iteration',
+        patternKey: `tier:${iterationTier}:scope:${intent.scope}`,
+        userId: state.userId || userId,
+        conversationId,
+        payload: {
+          tier: iterationTier,
+          scope: intent.scope,
+          confidence: intent.confidence,
+          targets: intent.targets,
+        },
+      }).catch(() => {})
+    }
+    if (iterationTier === 'design-system-token') {
+      enrichedFeedback = `${enrichedFeedback}
+
+[Phase C 提示] 此修改屬於**設計系統層**（影響全站視覺一致性）。請：
+1. 跨**所有 .tsx 頁面與組件**搜尋並替換受影響的 className（例如 \`bg-primary\` / \`bg-blue-600\` / \`text-foreground\` / \`border-muted\`）
+2. 不只改一個區塊 — 全站所有出現該色號 / 字體 / 間距的位置都要一起改
+3. 若 globals.css 內有對應 CSS variable（--color-primary 等），同步修改
+4. 修完後檢查：grep 不應再有舊色號的 hard-coded 字串殘留`
+    } else if (iterationTier === 'mixed') {
+      enrichedFeedback = `${enrichedFeedback}
+
+[Phase C 提示] 此修改同時涉及**設計系統層 + 局部代碼**。請：
+1. 全局範圍：跨所有頁面 / 組件搜尋替換受影響的 className，globals.css CSS variables 同步
+2. 局部範圍：針對提到的 section（${intent?.targets.join(' / ') || '具體位置'}）做精準調整
+3. 兩者必須一致 — 局部 section 不能違反全局已修改的 className`
+    }
+
     // 偵測重複抱怨 → 策略升級
     const repeatCount = detectRepeatedComplaint(userFeedback, state.iterationHistory || [])
     let escalationTemperature: number | undefined
@@ -493,6 +534,8 @@ ${enrichedFeedback}`
           await snapshotCodeToGeneration(pid, {
             changeSummary: `迭代修改 #${(state.iterationCount || 0) + 1}`,
             conversationId: input.conversationId,
+            designSystem: state.uiuxDesignSystem,
+            designSystemHash: state.uiuxDesignSystemHash,
           })
         }
 
@@ -592,6 +635,8 @@ ${enrichedFeedback}`
         await snapshotCodeToGeneration(pid, {
           changeSummary: `迭代修改 #${state.iterationCount || 1}`,
           conversationId: input.conversationId,
+          designSystem: state.uiuxDesignSystem,
+          designSystemHash: state.uiuxDesignSystemHash,
         })
       }
     }
@@ -762,6 +807,8 @@ export async function executeUndoIteration(input: {
       await snapshotCodeToGeneration(pid, {
         changeSummary: '撤銷迭代修改',
         conversationId,
+        designSystem: state.uiuxDesignSystem,
+        designSystemHash: state.uiuxDesignSystemHash,
       })
     }
 

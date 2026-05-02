@@ -474,7 +474,14 @@ export function inferFileType(filePath: string): string {
  */
 export async function snapshotCodeToGeneration(
   projectId: string,
-  options?: { changeSummary?: string; conversationId?: string }
+  options?: {
+    changeSummary?: string
+    conversationId?: string
+    /** Phase E: 將當前 DesignSystem 一起 snapshot，回滾時可同步還原 */
+    designSystem?: import('../services/uiux-generation').DesignSystem
+    /** Phase E: freezeDesignSystem 計算的 hash，回滾後 audit 用 */
+    designSystemHash?: string
+  }
 ): Promise<void> {
   try {
     const files = await db.getProjectFiles(projectId)
@@ -489,12 +496,20 @@ export async function snapshotCodeToGeneration(
 
     const snapshotJson = JSON.stringify(snapshot)
 
+    // Phase E: DesignSystem snapshot — 序列化時不需特殊剝除（uiux-generation DesignSystem 不含 rawMarkdown）
+    const dsSnapshotJson = options?.designSystem
+      ? JSON.stringify(options.designSystem)
+      : null
+
     // 嘗試更新最新 generation 的 code_snapshot（總是覆蓋）
     const updated = await db.query(
-      `UPDATE generations SET code_snapshot = $1, updated_at = NOW()
+      `UPDATE generations
+       SET code_snapshot = $1, updated_at = NOW(),
+           design_system_snapshot = COALESCE($3::jsonb, design_system_snapshot),
+           design_system_hash = COALESCE($4, design_system_hash)
        WHERE project_id = $2
        AND version_number = (SELECT MAX(version_number) FROM generations WHERE project_id = $2)`,
-      [snapshotJson, projectId]
+      [snapshotJson, projectId, dsSnapshotJson, options?.designSystemHash || null]
     )
 
     // 如果沒有 generation 記錄（Fast Build 跳過 BDD），自動創建
@@ -504,19 +519,22 @@ export async function snapshotCodeToGeneration(
            id, project_id, status, attempt_count,
            version_number, conversation_id,
            change_summary, code_snapshot,
+           design_system_snapshot, design_system_hash,
            created_at, updated_at
-         ) VALUES ($1, $2, 'success', 1, 1, $3, $4, $5, NOW(), NOW())`,
+         ) VALUES ($1, $2, 'success', 1, 1, $3, $4, $5, $6, $7, NOW(), NOW())`,
         [
           crypto.randomUUID(),
           projectId,
           options?.conversationId || null,
           options?.changeSummary || null,
           snapshotJson,
+          dsSnapshotJson,
+          options?.designSystemHash || null,
         ]
       )
     }
 
-    logger.info({ projectId, fileCount: files.length }, '代碼快照已保存')
+    logger.info({ projectId, fileCount: files.length, hasDesignSystem: !!dsSnapshotJson }, '代碼快照已保存')
   } catch (err) {
     logger.warn({ err, projectId }, '代碼快照保存失敗（不影響主流程）')
   }

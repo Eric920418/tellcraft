@@ -269,6 +269,283 @@ const DOM_OUTLINE_SCRIPT = `(() => {
 })()`
 
 // ============================================================
+// axe-core 整合（無障礙工業標準工具，覆蓋 90+ WCAG 規則）
+// 整合位置：每個 viewport navigate 後，inject axe.min.js + 跑 axe.run()
+// ============================================================
+
+let axeSourceCache: string | null = null
+
+/**
+ * 載入 axe.min.js 內容（module-level cache）。
+ * axe-core 是 browser-side library，npm 套件含 axe.min.js。
+ * 注入後 axe 物件掛在 window.axe，可呼叫 axe.run() 取 violations。
+ */
+function loadAxeSource(): string | null {
+  if (axeSourceCache !== null) return axeSourceCache
+  try {
+    // node_modules/axe-core/axe.min.js — 套件入口在 axe.js 但 min 版適合 inject
+    const axePath = require.resolve('axe-core/axe.min.js')
+    axeSourceCache = fs.readFileSync(axePath, 'utf-8')
+    return axeSourceCache
+  } catch (err) {
+    logger.warn({ err: String(err).slice(0, 120) }, 'axe-core 載入失敗，跳過 a11y 自動檢查')
+    axeSourceCache = ''  // 設空字串避免重試
+    return null
+  }
+}
+
+/**
+ * axe.run() 結果（簡化版，只取我們需要的欄位）。
+ * 完整 schema 見 https://github.com/dequelabs/axe-core/blob/develop/doc/API.md
+ */
+// export for unit testing
+export interface AxeViolation {
+  id: string
+  impact: 'critical' | 'serious' | 'moderate' | 'minor' | null
+  description: string
+  helpUrl: string
+  nodes: Array<{ target: string[]; failureSummary?: string }>
+}
+
+interface AxeRunResult {
+  violations: AxeViolation[]
+  // passes / incomplete / inapplicable 我們不關心
+}
+
+/**
+ * 在 puppeteer page 跑 axe-core。
+ *
+ * 失敗策略：fail-soft — 任何步驟失敗（inject / run / parse）都返回空陣列，不阻塞 evaluator。
+ * 因為 axe-core 是補強工具，主軌道（Vision LLM + structure probe）已經涵蓋 baseline。
+ *
+ * page.evaluate 用 string callback（tsconfig lib=ES2022 不含 DOM types）。
+ */
+async function runAxeOnPage(page: any, axeSource: string): Promise<AxeViolation[]> {
+  try {
+    // 1. Inject axe.min.js — 用 page.evaluate(string)，內容會被當 IIFE 執行掛 window.axe
+    await page.evaluate(axeSource)
+
+    // 2. 跑 axe.run() — 用 IIFE async 包，let puppeteer await promise resolve
+    const result = await page.evaluate(`(async () => {
+      try {
+        const r = await window.axe.run({
+          // 只跑 wcag2a / wcag2aa / wcag21aa 三個 tag（去掉實驗性 best-practice）
+          // best-practice 規則太嚴會誤殺，我們聚焦在 WCAG 標準合規
+          runOnly: { type: 'tag', values: ['wcag2a', 'wcag2aa', 'wcag21aa'] },
+        });
+        // 只回傳必要欄位避免 100KB+ payload
+        return {
+          violations: r.violations.map(v => ({
+            id: v.id,
+            impact: v.impact,
+            description: v.description,
+            helpUrl: v.help,
+            nodes: v.nodes.slice(0, 3).map(n => ({
+              target: n.target,
+              failureSummary: n.failureSummary,
+            })),
+          })),
+        };
+      } catch (e) {
+        return { violations: [], _error: String(e).substring(0, 200) };
+      }
+    })()`) as AxeRunResult & { _error?: string }
+
+    if (result._error) {
+      logger.warn({ err: result._error }, 'axe.run 內部錯誤')
+      return []
+    }
+    return result.violations ?? []
+  } catch (err) {
+    logger.warn({ err: String(err).slice(0, 120) }, 'axe-core 執行失敗（fail-soft）')
+    return []
+  }
+}
+
+/**
+ * axe-core violation → UiEvaluationIssue（保持 enum 純淨，category 統一 'visual_regression'，
+ * description 加 [a11y] 前綴讓下游區分）
+ *
+ * severity 對映：
+ *   - axe 'critical' / 'serious' → Tellcraft 'critical'（嚴重影響障礙者使用）
+ *   - axe 'moderate' / 'minor' / null → Tellcraft 'warning'
+ */
+// export for unit testing
+export function axeViolationToIssue(
+  violation: AxeViolation,
+  route: string,
+): UiEvaluationIssue {
+  const severity: 'critical' | 'warning' =
+    violation.impact === 'critical' || violation.impact === 'serious' ? 'critical' : 'warning'
+  const firstNode = violation.nodes[0]
+  const targetSelector = firstNode?.target?.join(' > ') ?? '?'
+  return {
+    severity,
+    category: 'visual_regression',  // 保持 enum 純淨，[a11y] 前綴在 description 區分
+    route,
+    description: `[a11y/${violation.id}] ${violation.description}（節點: ${targetSelector}）`,
+  }
+}
+
+// ============================================================
+// 可讀性檢查（Flesch-Kincaid 英文 + 中文規則式長度）
+// 補強影片建議的「Readability」維度，跟 axe-core 同階段（desktop-light）跑
+// ============================================================
+
+/**
+ * 偵測文字主要語言（極簡判斷，不需 i18n 套件）。
+ * 規則：CJK 字元佔比 > 30% 視為中文，否則英文。
+ * 中英混雜以主體語言為準。
+ */
+function detectLanguage(text: string): 'zh' | 'en' {
+  const cjkChars = (text.match(/[一-鿿]/g) || []).length
+  const totalChars = text.replace(/\s+/g, '').length
+  if (totalChars === 0) return 'en'
+  return cjkChars / totalChars > 0.3 ? 'zh' : 'en'
+}
+
+interface ReadabilityIssue {
+  severity: 'critical' | 'warning'
+  description: string
+}
+
+/**
+ * 英文：Flesch-Kincaid Grade Level（FKGL）
+ *   - FKGL 14+ = 大學以上難度，影片建議「3 秒會離開」→ critical
+ *   - FKGL 11-14 = 高中以上 → warning
+ *   - FKGL ≤ 10 = 標準 → 不報
+ *   - 短文（< 50 字符）skip：FKGL 對短文失真嚴重
+ *
+ * 中文：規則式長度檢查（FKGL 不適用中文）
+ *   - Hero 標題 > 30 字 → warning（中文行銷常見「冗長空泛」問題）
+ *   - CTA 按鈕 > 12 字 → warning
+ *   - 不抓抽象詞表（「賦能」「卓越」等）— 容易誤殺，先看 telemetry
+ */
+function evaluateReadability(text: string, kind: 'hero' | 'cta' | 'body'): ReadabilityIssue | null {
+  const trimmed = text.trim()
+  if (trimmed.length === 0) return null
+  const lang = detectLanguage(trimmed)
+
+  if (lang === 'en') {
+    if (trimmed.length < 50) return null  // 太短 FKGL 失真
+    try {
+      // text-readability 沒 .d.ts，且套件用 ES export default — 必須走 .default 拿 instance
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const rs = require('text-readability').default as { fleschKincaidGrade: (s: string) => number }
+      const grade = rs.fleschKincaidGrade(trimmed)
+      if (grade >= 14) {
+        return {
+          severity: 'critical',
+          description: `[readability/fkgl] 英文文案閱讀難度 grade ${grade.toFixed(1)}（大學以上），一般用戶 3 秒內會離開。建議簡化句構、縮短句長。`,
+        }
+      }
+      if (grade >= 11) {
+        return {
+          severity: 'warning',
+          description: `[readability/fkgl] 英文文案閱讀難度 grade ${grade.toFixed(1)}（高中以上），考慮簡化以擴大可讀群體。`,
+        }
+      }
+    } catch (err) {
+      logger.warn({ err: String(err).slice(0, 120) }, 'text-readability 失敗（fail-soft）')
+    }
+    return null
+  }
+
+  // 中文：規則式
+  // 注意：CJK 字元 length === 視覺字元數，不需 grapheme cluster
+  const cjkLength = (trimmed.match(/[一-鿿]/g) || []).length
+  if (kind === 'hero' && cjkLength > 30) {
+    return {
+      severity: 'warning',
+      description: `[readability/zh-length] Hero 中文標題 ${cjkLength} 字過長，建議精簡至 20 字內讓視覺焦點集中。`,
+    }
+  }
+  if (kind === 'cta' && cjkLength > 12) {
+    return {
+      severity: 'warning',
+      description: `[readability/zh-length] CTA 按鈕 ${cjkLength} 字過長，建議 4-8 字（如「立即試用」「了解更多」）。`,
+    }
+  }
+  return null
+}
+
+/**
+ * 抓 page 主要文字：H1 / 主 CTA button / body 第一個 <p>
+ * page.evaluate 用 string callback。
+ */
+const READABILITY_PROBE_SCRIPT = `(() => {
+  const out = { hero: '', ctas: [], body: '' };
+
+  // Hero 候選：第一個 h1 或最大字級的視覺顯著文字
+  const h1 = document.querySelector('h1');
+  if (h1) out.hero = (h1.textContent || '').trim().substring(0, 200);
+
+  // CTA：above-the-fold 的 button / a 含 prominent 樣式
+  const ctaCandidates = Array.from(document.querySelectorAll('button, a')).slice(0, 30);
+  for (const el of ctaCandidates) {
+    const r = el.getBoundingClientRect();
+    if (r.top < 0 || r.top > 800) continue;
+    if (r.width < 1 || r.height < 1) continue;
+    const cs = getComputedStyle(el);
+    if (cs.display === 'none' || cs.visibility === 'hidden') continue;
+    const text = (el.textContent || '').trim();
+    if (text.length === 0 || text.length > 60) continue;
+    out.ctas.push(text);
+    if (out.ctas.length >= 5) break;
+  }
+
+  // Body 取第一個 <p>（above-the-fold 內）
+  const paragraphs = Array.from(document.querySelectorAll('p')).slice(0, 10);
+  for (const p of paragraphs) {
+    const r = p.getBoundingClientRect();
+    if (r.top < 0 || r.top > 1200) continue;
+    const text = (p.textContent || '').trim();
+    if (text.length < 30) continue;
+    out.body = text.substring(0, 500);
+    break;
+  }
+
+  return out;
+})()`
+
+interface ReadabilityProbeResult {
+  hero: string
+  ctas: string[]
+  body: string
+}
+
+/**
+ * 在 puppeteer page 跑可讀性檢查。
+ * fail-soft：失敗返回空陣列，不阻塞 evaluator。
+ */
+// export for unit testing
+export async function runReadabilityCheckOnPage(page: any, route: string): Promise<UiEvaluationIssue[]> {
+  try {
+    const probe = await page.evaluate(READABILITY_PROBE_SCRIPT) as ReadabilityProbeResult
+    const issues: UiEvaluationIssue[] = []
+    if (probe.hero) {
+      const r = evaluateReadability(probe.hero, 'hero')
+      if (r) issues.push({ severity: r.severity, category: 'visual_regression', route, description: r.description })
+    }
+    for (const cta of probe.ctas) {
+      const r = evaluateReadability(cta, 'cta')
+      if (r) issues.push({ severity: r.severity, category: 'visual_regression', route, description: r.description })
+    }
+    if (probe.body) {
+      const r = evaluateReadability(probe.body, 'body')
+      if (r) issues.push({ severity: r.severity, category: 'visual_regression', route, description: r.description })
+    }
+    return issues
+  } catch (err) {
+    logger.warn({ err: String(err).slice(0, 120) }, 'readability check 失敗（fail-soft）')
+    return []
+  }
+}
+
+// export for unit testing
+export { evaluateReadability, detectLanguage }
+
+// ============================================================
 // P5: 結構性 UX 檢查 — nav 深度 + viewport overlap
 // ============================================================
 
@@ -619,6 +896,48 @@ export async function evaluateUi(opts: EvaluateUiOptions): Promise<EvaluateUiRes
                     structureProbes.push({ route, ...probe })
                   } catch (probeErr) {
                     logger.warn({ route, err: String(probeErr).slice(0, 120) }, 'P5 structure probe 失敗')
+                  }
+
+                  // 可讀性檢查（Flesch-Kincaid 英文 + 中文長度規則）
+                  // 跟 axe-core 同階段，desktop-light 跑
+                  if (getEnv().ENABLE_READABILITY_CHECK) {
+                    const readabilityIssues = await runReadabilityCheckOnPage(page, route)
+                    for (const issue of readabilityIssues) {
+                      allIssues.push({ ...issue, viewport: vp.key })
+                      if (issue.severity === 'critical') totalPassed = false
+                    }
+                    if (readabilityIssues.length > 0) {
+                      logger.info({
+                        route,
+                        count: readabilityIssues.length,
+                        critical: readabilityIssues.filter(i => i.severity === 'critical').length,
+                      }, 'readability check')
+                    }
+                  }
+
+                  // axe-core a11y 檢查（只在 desktop-light 跑，避免每 viewport 重複跑）
+                  // env ENABLE_AXE_CORE 預設 true（對 evaluator 整體流程影響小，價值高）
+                  if (getEnv().ENABLE_AXE_CORE) {
+                    const axeSource = loadAxeSource()
+                    if (axeSource) {
+                      const violations = await runAxeOnPage(page, axeSource)
+                      if (violations.length > 0) {
+                        logger.info({
+                          route,
+                          violationCount: violations.length,
+                          critical: violations.filter(v => v.impact === 'critical' || v.impact === 'serious').length,
+                        }, 'axe-core a11y violations')
+                      }
+                      for (const v of violations) {
+                        allIssues.push({
+                          ...axeViolationToIssue(v, route),
+                          viewport: vp.key,
+                        })
+                        if (v.impact === 'critical' || v.impact === 'serious') {
+                          totalPassed = false
+                        }
+                      }
+                    }
                   }
                 }
               } catch (err) {

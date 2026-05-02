@@ -194,6 +194,83 @@ export function resolveColor(token: string): string | null {
 }
 
 /**
+ * Phase D: 展開 Tailwind 色族 — 給 design-token-compliance 用。
+ *
+ * 範例：
+ *   expandColorFamily('purple-500') → ['purple-50', 'purple-100', ..., 'purple-950']
+ *   expandColorFamily('slate-700')  → ['slate-50' ... 'slate-950']
+ *   expandColorFamily('white')      → ['white']  (單色不展開)
+ *   expandColorFamily('foreground') → []  (自訂 token 不在色板)
+ *
+ * 設計理由：DesignSystem 通常只指定一個基準 shade（primary='#A855F7' ≈ purple-500），
+ * 但 LLM 寫 hover state 自然會用 purple-700/800。把整個色族視為合規 → 不會誤殺常見用法。
+ */
+export function expandColorFamily(token: string): string[] {
+  // 單色（white/black/transparent）不展開
+  if (['white', 'black', 'transparent', 'current', 'inherit'].includes(token)) {
+    return token in TAILWIND_COLORS ? [token] : []
+  }
+  // 解析 family-shade（purple-500 → family='purple'）
+  const match = token.match(/^([a-z]+)-\d+$/)
+  if (!match) return []
+  const family = match[1]
+  // 從 TAILWIND_COLORS 找所有同 family 的 key
+  const prefix = `${family}-`
+  return Object.keys(TAILWIND_COLORS).filter(k => k.startsWith(prefix))
+}
+
+/**
+ * 把 hex 色號（DesignSystem.colorPalette.primary 的格式）反向找回最接近的 Tailwind 色族。
+ *
+ * 用於：DesignSystem 給的是 hex（'#533afd'），design-token-compliance 要算允許的 Tailwind 色族。
+ * 演算法：對 TAILWIND_COLORS 每個 hex 算 Δhsl 距離，取最小，返回該 token。
+ *
+ * 範例：findClosestTailwindToken('#533afd') → 'violet-600' 或 'indigo-600'
+ */
+export function findClosestTailwindToken(hex: string): string | null {
+  const normalized = hex.toLowerCase().replace(/^#/, '')
+  if (!/^[0-9a-f]{3,8}$/i.test(normalized)) return null
+  const target = parseHex(normalized)
+  if (!target) return null
+
+  let bestToken: string | null = null
+  let bestDist = Infinity
+  for (const [key, value] of Object.entries(TAILWIND_COLORS)) {
+    if (!value.startsWith('#')) continue
+    const candidate = parseHex(value.slice(1))
+    if (!candidate) continue
+    const dist = colorDistance(target, candidate)
+    if (dist < bestDist) {
+      bestDist = dist
+      bestToken = key
+    }
+  }
+  return bestToken
+}
+
+interface RGB { r: number; g: number; b: number }
+
+function parseHex(hex: string): RGB | null {
+  let h = hex
+  if (h.length === 3) h = h.split('').map(c => c + c).join('')
+  if (h.length === 8) h = h.slice(0, 6)
+  if (h.length !== 6) return null
+  const r = parseInt(h.slice(0, 2), 16)
+  const g = parseInt(h.slice(2, 4), 16)
+  const b = parseInt(h.slice(4, 6), 16)
+  if ([r, g, b].some(v => Number.isNaN(v))) return null
+  return { r, g, b }
+}
+
+function colorDistance(a: RGB, b: RGB): number {
+  // 加權 RGB 距離（人眼對綠色敏感）
+  const dr = a.r - b.r
+  const dg = a.g - b.g
+  const db = a.b - b.b
+  return Math.sqrt(0.30 * dr * dr + 0.59 * dg * dg + 0.11 * db * db)
+}
+
+/**
  * 從 className 字串抽取所有 bg/text class。
  * 例如 "p-4 bg-slate-900 hover:bg-slate-800 text-white" → { bg: ['bg-slate-900', 'bg-slate-800'], text: ['text-white'] }
  *

@@ -18,9 +18,25 @@ export type IterationScope = 'whole' | 'section' | 'palette' | 'typography' | 'a
 
 export type IterationAction = 'replace' | 'add' | 'remove' | 'tweak'
 
+/**
+ * Phase C: 迭代意圖層級
+ * - design-system-token：影響整體設計系統的全局改動（主色 / 品牌字體 / 全站配色），
+ *   應觸發 patch DesignSystem + big-bang 重生
+ * - code-override：局部代碼修改（hero 動效 / footer 文字 / 某 section 樣式），
+ *   走 refineCode 既有路徑（5-10 秒）
+ * - mixed：兩者混合或無法明確判斷，呼叫端應詢問用戶優先度
+ */
+export type IterationTier = 'design-system-token' | 'code-override' | 'mixed'
+
 export interface IterationIntent {
   scope: IterationScope
   action: IterationAction
+  /**
+   * Phase C: 設計系統層 vs 代碼層 — 決定 iteration-skill 的分流路徑。
+   * Optional 是為了向下兼容既有測試的 mock 物件；parseIterationIntent 永遠會填。
+   * 呼叫端讀取時 fallback 'code-override'（最安全分支，走 refineCode 既有路徑）。
+   */
+  tier?: IterationTier
   /** 偵測到的 section 關鍵詞（hero / nav / footer / card / ...） */
   targets: string[]
   /** scope=palette 時：要改成的色彩傾向（warm / cool / monochrome / 具體 hex） */
@@ -196,9 +212,31 @@ export function parseIterationIntent(feedback: string): IterationIntent | null {
   // 信心過低 → 不嘗試縮窄（呼叫端 fallback 全代碼）
   if (confidence < 0.6) return null
 
+  // Phase C: tier 分層
+  // - design-system-token：全局視覺改動（HEX / var / 主色 / 全站 / 純 palette / 純 typography）
+  // - code-override：純局部代碼修改（特定 section + 動畫 / 文案 等不影響全局視覺）
+  // - mixed：全局訊號 + 特定 section 同時出現
+  const hasTokenSignal = !!hexMatch
+    || /var\(--/i.test(text)
+    || /token|變數|變量/i.test(text)
+    || /主色|整體|整個(?:網站|頁面)|全站|品牌色|品牌風|統一/i.test(text)
+  const hasSectionSignal = targets.length > 0
+  // palette / typography 本質都是全局影響（即使指定 section，色號/字體改動會跨檔）
+  const hasGlobalSignal = hasTokenSignal || scope === 'palette' || scope === 'typography'
+
+  let tier: IterationTier
+  if (hasGlobalSignal && hasSectionSignal) {
+    tier = 'mixed'
+  } else if (hasGlobalSignal) {
+    tier = 'design-system-token'
+  } else {
+    tier = 'code-override'
+  }
+
   return {
     scope,
     action,
+    tier,
     targets,
     paletteHint,
     rawFeedback: text.length > 200 ? text.slice(0, 200) + '...' : text,

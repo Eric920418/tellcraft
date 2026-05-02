@@ -73,6 +73,11 @@ const envSchema = z.object({
   UI_EVALUATOR_TIMEOUT_MS: z.coerce.number().default(45000),     // Evaluator 單輪預算，超時降級跳過
   ENABLE_DESIGN_QUALITY_REPORT: z.stringbool().default(false),   // P3 結構化設計品質報告（dimension scoring + fixPlan，advisory），staging 先開
   ENABLE_REFINE_DIFF_OUTPUT: z.stringbool().default(false),      // P6 refineCode + autoFixCriticalIssues 用 SEARCH/REPLACE diff（省 60-70% output token），fallback full-file
+  // Phase F: DesignSystem pipeline 風險修正 flag
+  VENDORED_FAST_PATH: z.stringbool().default(false),             // Phase B.4 vendored 命中時跳過 Brief + Variant 直接進 Structure。預設關閉因 convertVendoredToDesignSystem lossy（borderRadius/shadows/animationPersonality 失真）。觀察 vendored 用戶反饋後手動開
+  DESIGN_TOKEN_SEVERITY: z.enum(['critical', 'warning']).default('warning'), // Phase D 違反 design-token-compliance 的 severity。預設 warning 不阻塞部署，先收集 telemetry。違反率 < 10% 後切 critical
+  ENABLE_AXE_CORE: z.stringbool().default(true),                 // axe-core a11y 工業標準工具整合到 ui-evaluator（90+ WCAG 規則）。在 evaluator desktop-light viewport 跑，違反 critical/serious 等級會 fail evaluator
+  ENABLE_READABILITY_CHECK: z.stringbool().default(true),        // Flesch-Kincaid 英文 + 中文長度規則（hero >30 字 / CTA >12 字）。在 evaluator desktop-light 跑，FKGL ≥14 critical，11-14 warning
   // T9: 金絲雀放量百分比（0-100，default 0；> 0 時優先於 ENABLE_*=true 的硬開關）
   ENABLE_UI_EVALUATOR_ROLLOUT_PERCENT: z.coerce.number().min(0).max(100).default(0),
   ENABLE_DESIGN_QUALITY_REPORT_ROLLOUT_PERCENT: z.coerce.number().min(0).max(100).default(0),

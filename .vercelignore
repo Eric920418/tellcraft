@@ -1,0 +1,7 @@
+# 後端專屬資源，Vercel 前端 build 不需要
+tellcraft-backend/external/
+
+# 後端整體（前端 tsconfig 已 exclude，但 Vercel build context 會掃描整個 repo）
+# 不直接 ignore tellcraft-backend/，因為前端 vps-api.ts 不需要後端代碼，
+# 但 Vercel 預設只 build 根目錄 Next.js，後端目錄被 Next.js routing 自動忽略。
+# 若未來有需要可加 tellcraft-backend/dist/、tellcraft-backend/node_modules/。

@@ -270,6 +270,7 @@ Supabase PostgREST 只能做 CRUD + RLS，**搞不定**：
 | `fast-build-generation.ts` | 無 | fast-build | 規則式 tier/產品/DesignSystem（零 LLM） |
 | `template-matcher.ts` | 無 | orchestrator | 三層評分匹配（零 LLM） |
 | `design-moods.ts` | 無 | uiux-phases / fast-build | 8 個設計情緒預設 + `recommendMoods()` 規則推薦 + prompt 注入 getter |
+| `design-md-loader.ts` + `design-md-parser.ts` + `brand-domain-map.ts` | 無 | reference-analyzer 入口 | **awesome-design-md 短路**：71 個 brand vendored DESIGN.md（git submodule，MIT），啟動時 eager parse 為 `DesignSystem` schema 進 in-memory cache。`analyzeReference` 收到 stripe.com / 「像 Stripe」時跳過 puppeteer + Vision，~5-8s + 10K tokens → < 200ms 純讀檔。`inferBrandFromText` 多名稱出現自動 return null（防「Stripe vs Linear 哪個比較好」誤觸發）。Submodule 沒拉到時 fail-soft 降級回原 puppeteer 路徑 |
 | `customer-service.ts` | 無 / Sonnet | fast mode + handleContinueFlow | 客服問答：意圖偵測（greeting/question/chitchat/help）+ FAQ 零 LLM 匹配（9 主題）+ Sonnet 開放問答 |
 | `error-enrichment.ts` | 無 | fixFailingAction + red-phase + feature-alignment | **Harness 級修復提示注入**：依已分類的 rootCause（9 類 Coder + 5 類 RED Phase）查 `ROOT_CAUSE_HINTS` 表，把結構化修復方向塞進 LLM prompt，讓修復不只看原始 error 字串 |
 | `skill-loader.ts` | 無 | buildActionSystemPrompt / buildSubOpSystemPrompt | **按需注入技能索引**：14 個 Coder handler SOP 抽到 `coder-handlers/*.md`（含 `email-sender` M7 新增），模組啟動時一次載入 cache，dev/prod 雙路徑 fallback（src/ vs dist/）。prompt 輸出 byte-identical 於舊硬編碼 const |

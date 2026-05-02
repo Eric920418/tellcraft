@@ -699,7 +699,15 @@ function checkIdUniqueness(code: GeneratedCode): QualityIssue[] {
 // 主函數：runQualityGate
 // ============================================================
 
-export function runQualityGate(code: GeneratedCode, designTier?: DesignTier, moodId?: string): QualityReport {
+export function runQualityGate(
+  code: GeneratedCode,
+  designTier?: DesignTier,
+  moodId?: string,
+  /** Phase D: 注入 DesignSystem → 跑 design-token-compliance；不傳則跳過此檢查 */
+  designSystem?: import('./uiux-generation').DesignSystem,
+  /** Phase D: 用戶按下「強制覆寫」按鈕 → 跳過 design-token-compliance critical 阻塞 */
+  designTokenOverride?: boolean,
+): QualityReport {
   // 並行執行 checkers
   const a11yIssues = checkAccessibility(code)
   const perfIssues = checkPerformance(code)
@@ -711,8 +719,38 @@ export function runQualityGate(code: GeneratedCode, designTier?: DesignTier, moo
   // T8: 視覺品質（rule prefix 'craft-*'，category=code_quality）
   const craftIssues = auditVisualCraft(code).issues
 
+  // Phase D: design-token-compliance（rule prefix 'design-token-*'，category=code_quality）
+  // - severity 由 env DESIGN_TOKEN_SEVERITY 控制：預設 'warning' (advisory)
+  // - 觀察 violation rate < 10% 後手動切 'critical'（升級後違反阻塞部署）
+  // - 強制覆寫（designTokenOverride=true）：所有 issues 強制降級為 'warning'，不阻塞 — critical 模式下的逃生口
+  const designTokenIssues: QualityIssue[] = []
+  if (designSystem) {
+    try {
+      const { auditDesignTokenCompliance } = require('./design-token-compliance') as typeof import('./design-token-compliance')
+      const { getEnv } = require('../lib/env') as typeof import('../lib/env')
+      const envSeverity = getEnv().DESIGN_TOKEN_SEVERITY  // 'critical' | 'warning'
+      const allFiles = [
+        ...code.pages.map(p => ({ path: p.path, content: p.content })),
+        ...code.components.map(c => ({ path: c.path, content: c.content })),
+        ...(code.styles ? [{ path: 'app/globals.css', content: code.styles }] : []),
+      ]
+      const result = auditDesignTokenCompliance(allFiles, designSystem)
+      for (const issue of result.issues) {
+        // 優先順序：用戶覆寫 > env 設定
+        const finalSeverity: Severity = designTokenOverride
+          ? 'warning'
+          : (envSeverity === 'critical' ? 'critical' : 'warning')
+        designTokenIssues.push({ ...issue, severity: finalSeverity })
+      }
+    } catch (err) {
+      // fail-soft：design-token-compliance 異常不阻塞 QG
+      // eslint-disable-next-line no-console
+      console.warn('[quality-gate] design-token-compliance audit 失敗（跳過）:', err)
+    }
+  }
+
   const allA11yIssues = [...a11yIssues, ...contrastIssues]
-  const allCqIssues = [...cqIssues, ...idIssues, ...consistencyIssues, ...craftIssues]
+  const allCqIssues = [...cqIssues, ...idIssues, ...consistencyIssues, ...craftIssues, ...designTokenIssues]
   const allIssues = [...allA11yIssues, ...perfIssues, ...allCqIssues]
 
   const critical = allIssues.filter(i => i.severity === 'critical').length

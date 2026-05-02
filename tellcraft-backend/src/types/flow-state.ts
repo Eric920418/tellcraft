@@ -78,6 +78,9 @@ export interface FlowState {
   uiuxTemplateId?: string      // 用戶選擇的模板 ID
   uiuxVariants?: DesignVariant[] // 生成的 5 個設計變體
   uiuxDesignSystem?: DesignSystem // 最終合併的 Design System
+  uiuxDesignSystemHash?: string // freezeDesignSystem 計算的穩定 hash（cache key + 回滾驗證 + telemetry）
+  uiuxDesignSystemSource?: 'user_designed' | 'vendored_designmd' | 'vendored_modified' | 'rolled_back'
+  uiuxDesignTokenOverride?: boolean // 用戶按下「強制覆寫」跳過 design-token-compliance critical 檢查
   uiuxCodePhase?: 'structure' | 'animation' | 'rwd' | 'quality_gate' | 'complete' // 當前代碼生成階段
   uiuxGeneratedCode?: GeneratedCode // 已生成的代碼（跨階段保留）
   uiuxStructureCode?: GeneratedCode // Structure 階段快照（供 redo 時回溯）

@@ -8,6 +8,8 @@ import * as cheerio from 'cheerio'
 import { getAnthropicClient, MODEL, trackLlmUsage } from '../lib/anthropic'
 import { getEnv } from '../lib/env'
 import { createLogger } from '../lib/logger'
+import { lookupBrandByDomain, inferBrandFromText } from './brand-domain-map'
+import { loadDesignMdParsed } from './design-md-loader'
 
 const logger = createLogger('reference-analyzer')
 
@@ -83,12 +85,18 @@ export interface ReferenceAnalysis {
     themeColor?: string
   }
   visionAnalysis?: string
-  analysisSource: 'vision' | 'uploaded_image' | 'metadata_only' | 'text_only'
+  analysisSource: 'vision' | 'uploaded_image' | 'metadata_only' | 'text_only' | 'vendored_designmd'
   error?: string
   domStructure?: DomSection[]
   colorPalette?: ExtractedColors
   typography?: ExtractedTypography
   layoutInfo?: ExtractedLayout
+  /**
+   * 結構化設計系統（DESIGN.md schema）。
+   * 來源：(1) vendored awesome-design-md 短路，(2) callStructured Vision 路徑（B 階段，feature-flagged）。
+   * 既有欄位（colorPalette/typography/layoutInfo）保留作 backward-compat — 5 個下游消費點漸進遷移。
+   */
+  designSystem?: import('../types/design-system-schema').DesignSystem
 }
 
 interface LlmTrackingContext {
@@ -651,6 +659,11 @@ async function extractPageData(url: string): Promise<PageExtractionResult> {
  * 無數據時返回空字串（降級不注入）
  */
 export function formatStructuredDataForPrompt(analysis: ReferenceAnalysis): string {
+  // 優先消費結構化 DesignSystem（Phase B 重構後 vendored / vision 路徑都會填這個）
+  // 其次降級到舊欄位（colorPalette/typography/layoutInfo）— 5 個下游消費點漸進遷移
+  if (analysis.designSystem) {
+    return formatDesignSystemForPrompt(analysis.designSystem)
+  }
   if (!analysis.colorPalette && !analysis.typography && !analysis.layoutInfo) return ''
 
   const sections: string[] = []
@@ -695,6 +708,64 @@ export function formatStructuredDataForPrompt(analysis: ReferenceAnalysis): stri
   }
 
   return sections.join('\n\n')
+}
+
+/**
+ * 把結構化 DesignSystem 格式化為 prompt 段落。
+ *
+ * 設計選擇：
+ *   - 優先輸出 brand vendored 的整段 rawMarkdown（高保真，LLM cache 對齊）
+ *   - Vision 來源無 rawMarkdown 時從結構化欄位 render
+ *   - 截斷在 ~6000 字元以避免單一 reference 吃光 prompt budget（DESIGN.md 平均 22KB
+ *     → ~5500 字元 effective payload，超出時保留 visualTheme + colorPalette + typography
+ *     的 markdown 片段）
+ */
+function formatDesignSystemForPrompt(ds: import('../types/design-system-schema').DesignSystem): string {
+  const MAX_LEN = 6000
+  const sourceLabel = ds.metadata.source === 'vendored_designmd'
+    ? `### 參考品牌設計系統（${ds.metadata.brandKey ?? 'unknown'}）— 高保真 vendored`
+    : `### 參考設計系統（${ds.metadata.source}）`
+
+  const md = ds.rawMarkdown
+  if (md && md.length <= MAX_LEN) return `${sourceLabel}\n\n${md}`
+  if (md) {
+    // 找第一個 H2 (## ) 開頭，從該位置截到 MAX_LEN
+    const cutoff = md.slice(0, MAX_LEN)
+    const lastH2 = cutoff.lastIndexOf('\n## ')
+    const safe = lastH2 > 0 ? md.slice(0, lastH2) : cutoff
+    return `${sourceLabel}\n\n${safe}\n\n_(截斷以節省 prompt budget — 完整 ${md.length} 字元)_`
+  }
+  // No rawMarkdown — render from structured fields
+  const lines: string[] = [sourceLabel]
+  if (ds.visualTheme?.atmosphere) {
+    lines.push('', '#### Visual Theme', ds.visualTheme.atmosphere)
+  }
+  if (ds.colorPalette) {
+    lines.push('', '#### Color Palette')
+    for (const [k, arr] of Object.entries(ds.colorPalette)) {
+      if (!arr || !arr.length) continue
+      lines.push(`- ${k}: ${arr.slice(0, 6).map(e => `${e.name} (${e.value})`).join(', ')}`)
+    }
+  }
+  if (ds.typography) {
+    lines.push('', '#### Typography')
+    if (ds.typography.primaryFont) lines.push(`- Primary: ${ds.typography.primaryFont}`)
+    if (ds.typography.monoFont) lines.push(`- Mono: ${ds.typography.monoFont}`)
+    if (ds.typography.hierarchy?.length) {
+      const sample = ds.typography.hierarchy.slice(0, 6)
+        .map(r => `${r.role}${r.size ? ` ${r.size}` : ''}${r.weight ? ` w${r.weight}` : ''}`)
+        .join(' / ')
+      lines.push(`- Hierarchy: ${sample}`)
+    }
+  }
+  if (ds.components) {
+    const compNames: string[] = []
+    for (const arr of Object.values(ds.components)) {
+      if (arr) for (const s of arr.slice(0, 3)) compNames.push(s.name)
+    }
+    if (compNames.length) lines.push('', `#### Components (sample): ${compNames.slice(0, 8).join(', ')}`)
+  }
+  return lines.join('\n')
 }
 
 // ── Claude Vision 分析 ──
@@ -1009,15 +1080,91 @@ export async function analyzeUploadedImage(
 
 // ── 主函數 ──
 
+/**
+ * Known-brand 短路（Phase A）：
+ *   - URL 命中 awesome-design-md 收錄品牌 → 跳過 puppeteer + Vision，
+ *     直接讀 vendored DESIGN.md 注入結構化 DesignSystem
+ *   - 純文字命中（用戶說「像 Stripe」）→ 同上
+ *   - 未命中 → 走原 puppeteer 路徑
+ *
+ * 收益：~5-8s puppeteer + ~10K vision tokens → < 200ms 純讀檔 + 零 LLM
+ */
+/**
+ * 把 DesignSystem 摘要為短文字，填進 visionAnalysis 欄位。
+ *
+ * 為什麼要這個摘要？兩個下游消費點 (`generateVariants` / `generateDesignBrief`) 用
+ * `referenceAnalysis?.visionAnalysis` 作 truthy check 包整段 reference prompt：
+ *   const referenceSection = referenceAnalysis?.visionAnalysis ? `...` : ''
+ * 短路若不填 visionAnalysis，整段 reference 注入都被吃掉。
+ *
+ * 內容互補不重疊：
+ *   - visionAnalysis（這裡）：visualTheme atmosphere + key characteristics（~500 字）
+ *   - structuredRef（formatStructuredDataForPrompt → formatDesignSystemForPrompt）：完整 DESIGN.md（~6KB 截斷）
+ */
+function summarizeDesignSystemAsVision(ds: import('../types/design-system-schema').DesignSystem): string {
+  const lines: string[] = [`Vendored DESIGN.md（${ds.metadata.brandKey ?? 'unknown'}）摘要：`]
+  if (ds.visualTheme?.atmosphere) {
+    const atm = ds.visualTheme.atmosphere
+    lines.push('', atm.length > 600 ? atm.slice(0, 600) + '...' : atm)
+  }
+  if (ds.visualTheme?.keyCharacteristics?.length) {
+    lines.push('', '關鍵特徵：')
+    for (const c of ds.visualTheme.keyCharacteristics.slice(0, 6)) {
+      lines.push(`- ${c}`)
+    }
+  }
+  if (ds.typography?.primaryFont) {
+    lines.push('', `主字體：${ds.typography.primaryFont}`)
+  }
+  // 主色 1-3 個（讓下游 LLM 一眼看到）
+  const primaries = ds.colorPalette?.primary?.slice(0, 3) ?? []
+  if (primaries.length) {
+    lines.push(`主色：${primaries.map(c => `${c.name} (${c.value})`).join(' / ')}`)
+  }
+  return lines.join('\n')
+}
+
+function tryShortCircuitToVendoredBrand(input: string, url: string | null): ReferenceAnalysis | null {
+  const brandKey = (url && lookupBrandByDomain(url)) || inferBrandFromText(input)
+  if (!brandKey) return null
+
+  const designSystem = loadDesignMdParsed(brandKey)
+  if (!designSystem) return null
+
+  const dsWithUrl = {
+    ...designSystem,
+    metadata: { ...designSystem.metadata, url: url ?? undefined },
+  }
+
+  return {
+    url: url ?? '',
+    metadata: {
+      title: `${brandKey} (vendored DESIGN.md)`,
+      description: designSystem.visualTheme?.atmosphere?.slice(0, 200),
+    },
+    // 同時填 visionAnalysis（摘要）+ designSystem（完整結構）
+    // - visionAnalysis 確保下游既有 truthy-check 通過
+    // - designSystem 提供結構化 + formatStructuredDataForPrompt 完整 markdown
+    visionAnalysis: summarizeDesignSystemAsVision(dsWithUrl),
+    analysisSource: 'vendored_designmd',
+    designSystem: dsWithUrl,
+  }
+}
+
 export async function analyzeReference(
   input: string,
   trackingContext?: LlmTrackingContext
 ): Promise<ReferenceAnalysis> {
   const trimmed = input.trim()
 
-  // 非 URL → 純文字模式（行為與原本相同）
+  // 非 URL → 純文字模式（行為與原本相同，但先試品牌名匹配）
   const url = extractFirstUrl(trimmed)
   if (!url || !isUrl(url)) {
+    const brandShortCircuit = tryShortCircuitToVendoredBrand(trimmed, null)
+    if (brandShortCircuit) {
+      logger.info({ brandKey: brandShortCircuit.designSystem?.metadata.brandKey }, 'reference 短路：純文字命中 vendored brand')
+      return brandShortCircuit
+    }
     return {
       url: '',
       metadata: {},
@@ -1033,6 +1180,13 @@ export async function analyzeReference(
       analysisSource: 'text_only',
       error: '此網址無法分析（內部網路位址）',
     }
+  }
+
+  // URL 命中 vendored brand → 短路
+  const brandShortCircuit = tryShortCircuitToVendoredBrand(trimmed, url)
+  if (brandShortCircuit) {
+    logger.info({ brandKey: brandShortCircuit.designSystem?.metadata.brandKey, url }, 'reference 短路：URL 命中 vendored brand')
+    return brandShortCircuit
   }
 
   // 並行：metadata 抓取 + 截圖 + DOM/CSS 提取

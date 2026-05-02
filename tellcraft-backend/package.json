@@ -8,7 +8,7 @@
   },
   "scripts": {
     "dev": "tsx watch src/index.ts",
-    "build": "tsc && node -e \"const fs=require('fs'),p=require('path');for(const d of ['services/coder-handlers','services/ui-evaluator-rubric']){const src=p.join('src',d),dst=p.join('dist',d);fs.mkdirSync(dst,{recursive:true});for(const f of fs.readdirSync(src))fs.copyFileSync(p.join(src,f),p.join(dst,f));}\"",
+    "build": "tsc && node scripts/copy-build-resources.mjs",
     "start": "node dist/index.js",
     "typecheck": "tsc --noEmit",
     "test": "vitest",
@@ -28,6 +28,7 @@
     "@socket.io/redis-adapter": "^8.3.0",
     "@socket.io/redis-emitter": "^5.1.0",
     "archiver": "^7.0.1",
+    "axe-core": "^4.11.4",
     "bcryptjs": "^3.0.3",
     "bullmq": "^5.1.0",
     "cheerio": "^1.2.0",
@@ -44,6 +45,7 @@
     "pino": "^10.3.1",
     "puppeteer-core": "^24.38.0",
     "socket.io": "^4.7.4",
+    "text-readability": "^1.1.1",
     "ts-morph": "^28.0.0",
     "wcag-contrast": "^3.0.0",
     "zod": "^4.3.6"

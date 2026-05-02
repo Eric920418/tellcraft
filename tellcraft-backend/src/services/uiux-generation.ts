@@ -7,7 +7,7 @@
 import type Anthropic from '@anthropic-ai/sdk'
 import { z } from 'zod'
 import * as ts from 'typescript'
-import { getAnthropicClient, MODEL, trackLlmUsage } from '../lib/anthropic'
+import { getAnthropicClient, MODEL, trackLlmUsage, buildCacheableSystem } from '../lib/anthropic'
 import { callStructured, type StructuredOptions, type StructuredResult } from '../lib/structured-output'
 import { getEnv } from '../lib/env'
 import { formatUISpecForPrompt, UIRequirementsSpec } from './bdd-to-ui-spec'
@@ -4499,7 +4499,10 @@ ${getAnimationConstraints(tier)}
 - "hover-lift" → whileHover={{ y:-4 }} transition={{ type:'spring', stiffness:300 }}
 - "parallax" → useScroll + useTransform(scrollY, [0,500], [0,-100])`
 
-  const animDynamicPrompt = buildCompactDesignPrompt(designSystem, { includeMood: true })
+  // Phase B.2: 改用完整版 DesignSystem prompt（~1200 字）取代 compact 版（~500 字）
+  // 修跨階段不一致：Structure 看完整 / Animation 看精簡 → LLM 在 Animation 寫超出色族
+  // 觸發 design-token-compliance critical 阻塞。dynamic block 多 ~700 字，cache 不失效（cache 在 static）
+  const animDynamicPrompt = buildDesignSystemPrompt(designSystem)
 
   const systemPrompt = buildCacheableSystemBlocks(animStaticPrompt, animDynamicPrompt)
 
@@ -4844,7 +4847,9 @@ ${layoutMode === 'app'
 - [ ] 尊重 prefers-reduced-motion，禁止 transition-all
 - [ ] ${layoutMode === 'app' ? '移動端功能完整可用' : '移動端漢堡選單可用且可關閉'}`
 
-  const rwdDynamicPrompt = `${buildCompactDesignPrompt(designSystem, { includeMood: true })}
+  // Phase B.2: 改用完整版 DesignSystem prompt（~1200 字）取代 compact 版
+  // 確保 RWD 階段 LLM 看到完整色號規範，避免 hover state 寫出超出色族
+  const rwdDynamicPrompt = `${buildDesignSystemPrompt(designSystem)}
 
 ${rwdTierHint}`
 
@@ -5264,7 +5269,8 @@ ${layoutMode === 'app'
 - 移動端動畫可以簡化（reduce motion for small screens）`
 
   // ── Dynamic prompt（每次不同）──
-  const mergedDynamicPrompt = buildCompactDesignPrompt(designSystem, { includeMood: true })
+  // Phase B.2: 改用完整版 DesignSystem prompt — 與 Animation/RWD 分離模式對齊
+  const mergedDynamicPrompt = buildDesignSystemPrompt(designSystem)
 
   const systemPrompt = buildCacheableSystemBlocks(mergedStaticPrompt, mergedDynamicPrompt)
 
@@ -6548,8 +6554,10 @@ ${retryFileBlocks}
     .map(f => `- ${f.path}（${f.content.split('\n').length} 行）`)
     .join('\n')
 
+  // Phase B.1: 改用完整版 buildDesignSystemPrompt 取代 compact 版（~500字 → ~1200字）
+  // 修跨階段漂移最大破口 — refineCode 之前看到的設計系統被截斷 1/3，導致迭代色號漂移
   const designSystemSection = designContext.designSystem
-    ? buildCompactDesignPrompt(designContext.designSystem, { includeMood: true })
+    ? buildDesignSystemPrompt(designContext.designSystem)
     : ''
 
   const briefSection = designContext.designBrief
@@ -6577,16 +6585,14 @@ ${designContext.variantConcept.signatureElement ? `Signature Element：${designC
     return `\n## 迭代歷史（最近 ${recent.length} 次，共 ${history.length} 次）\n以下是之前的修改請求。**如果用戶在重複抱怨同一問題，代表之前的修改沒有修復根因，你必須採取不同策略。**\n${lines.join('\n')}\n`
   })()
 
-  const systemPrompt = `你是一位專業的前端設計師和開發者。用戶對已完成的設計有修改意見，請根據反饋修改代碼。
+  // Phase B.1: 拆 static / dynamic 套 buildCacheableSystem
+  // - static：角色定義 + 完整 DesignSystem（同會話內 hash 不變）+ tier constraints + 修改規則 + 診斷 + 輸出格式
+  //   會話內反覆迭代時 cache 命中，input token 走 0.1× 計費
+  // - dynamic：brief / concept / mood / iterationHistory / intent / lockedUrls / targetRoute / largeFileWarnings / imageUrls
+  //   每次呼叫變化的部分（不在 cache key 內）
+  const staticSystemPart = `你是一位專業的前端設計師和開發者。用戶對已完成的設計有修改意見，請根據反饋修改代碼。
 
 ${designSystemSection}
-
-${briefSection}
-
-${refineConceptSection}
-${designContext.moodId ? `\n## 設計風格（修改時不可丟失）\nMood: ${getMoodSummary(designContext.moodId)}\n` : ''}
-${iterationHistorySection}
-${intentSection}
 ${getStructureConstraints(tier)}
 
 ## 重要：輸入驗證（最高優先）
@@ -6635,21 +6641,6 @@ ${getStructureConstraints(tier)}
 2. **catch 吞掉錯誤**：\`catch (e) { console.error(e) }\` 用戶看不到 → 改成顯示在 UI 上（toast/alert）
 3. **API route 回傳格式不匹配**：fetch 回傳的 JSON 結構跟前端取值不一致 → 檢查 \`result.xxx\` 是否存在
 4. **Server Action 未 import**：組件用了 mock data（useState 硬編碼陣列）而非呼叫 Server Action → 替換為 action 呼叫
-${lockedUploadUrls.length ? `
-## 圖片資產鎖定（最高優先）
-以下圖片 URL 屬於用戶剛上傳的資產，修改時必須原樣保留：
-${lockedUploadUrls.map((u, i) => `${i + 1}. ${u}`).join('\n')}
-
-嚴格禁止：
-- 將上述 URL 改成 placeholder（例如 unsplash、picsum、dummyimage、placehold）
-- 刪除對上述 URL 的使用（除非用戶明確要求移除該圖片）
-- 改成 data URI、相對路徑或其他網域
-` : ''}
-${targetPreviewRoute ? `
-## 路由鎖定（最高優先）
-本次修改的目標路由為：${targetPreviewRoute}
-含鎖定圖片 URL 的修改必須保留在此路由對應頁面（或其引入組件），禁止改到其他頁面路由。
-` : ''}
 
 ## 輸出格式
 ${isFeatureEnabledForUser('refine_diff_output', trackingContext?.userId) ? `使用 SEARCH/REPLACE block 精確標示每處修改（省 token + 避免大檔案截斷）：
@@ -6676,20 +6667,52 @@ ${isFeatureEnabledForUser('refine_diff_output', trackingContext?.userId) ? `使�
 \`\`\`
 
 未修改的檔案不需要輸出。
-⚠️ code fence 規則：每個 code block 的第一行必須直接是代碼，禁止在代碼前加任何說明文字（如 "Here is..."、"This component..."）。`}
-${largeFileWarnings ? `
+⚠️ code fence 規則：每個 code block 的第一行必須直接是代碼，禁止在代碼前加任何說明文字（如 "Here is..."、"This component..."）。`}`
+
+  // Dynamic system part — 每次呼叫變化，不參與 cache key
+  const moodSection = designContext.moodId ? `\n## 設計風格（修改時不可丟失）\nMood: ${getMoodSummary(designContext.moodId)}\n` : ''
+  const lockedUrlsSystemSection = lockedUploadUrls.length ? `
+## 圖片資產鎖定（最高優先）
+以下圖片 URL 屬於用戶剛上傳的資產，修改時必須原樣保留：
+${lockedUploadUrls.map((u, i) => `${i + 1}. ${u}`).join('\n')}
+
+嚴格禁止：
+- 將上述 URL 改成 placeholder（例如 unsplash、picsum、dummyimage、placehold）
+- 刪除對上述 URL 的使用（除非用戶明確要求移除該圖片）
+- 改成 data URI、相對路徑或其他網域
+` : ''
+  const targetRouteSystemSection = targetPreviewRoute ? `
+## 路由鎖定（最高優先）
+本次修改的目標路由為：${targetPreviewRoute}
+含鎖定圖片 URL 的修改必須保留在此路由對應頁面（或其引入組件），禁止改到其他頁面路由。
+` : ''
+  const largeFileWarningsSection = largeFileWarnings ? `
 ⚠️ **大檔案防截斷（Critical）**：以下檔案行數較多，修改時必須輸出完整內容：
 ${largeFileWarnings}
 - 禁止省略、壓縮、或用註釋替代未修改的代碼段（如 "// ... rest of the code"）
 - 即使只改了幾行，也要輸出該檔案的完整內容（包含所有未修改的部分）
-- 如果檔案超過 300 行，請特別注意不要在中途停止輸出` : ''}
-${imageUrls?.length ? `
+- 如果檔案超過 300 行，請特別注意不要在中途停止輸出` : ''
+  const imageUrlsSystemSection = imageUrls?.length ? `
 ## 用戶附加的圖片（${imageUrls.length} 張）
 用戶附加了參考圖片。請根據用戶的文字指示決定如何使用：
 - 如果用戶要求「加入這張圖」「用這張圖當背景」等 → 直接在代碼中使用下方的圖片 URL（作為 img src 或 CSS backgroundImage）
 - 如果用戶要求「照這個改」「參考這個設計」等 → 觀察圖片中的設計細節（佈局、配色、字體、間距等），據此修改代碼
 - 圖片 URL（可直接在代碼中使用）：
-${imageUrls.map((u, i) => `  ${i + 1}. ${u}`).join('\n')}` : ''}`
+${imageUrls.map((u, i) => `  ${i + 1}. ${u}`).join('\n')}` : ''
+
+  const dynamicSystemPart = [
+    briefSection,
+    refineConceptSection,
+    moodSection,
+    iterationHistorySection,
+    intentSection,
+    lockedUrlsSystemSection,
+    targetRouteSystemSection,
+    largeFileWarningsSection,
+    imageUrlsSystemSection,
+  ].filter(Boolean).join('\n\n')
+
+  const systemPrompt = buildCacheableSystem(staticSystemPart, dynamicSystemPart || undefined)
 
   const imageUrlsSection = imageUrls?.length
     ? `\n## 附加圖片 URL\n${imageUrls.map((u, i) => `${i + 1}. ${u}`).join('\n')}\n`
