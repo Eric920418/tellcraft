@@ -914,6 +914,17 @@ async function handleContinueFlow(
   }
   // __verify_backend__：觸發 SpecFormula 測試
   if (trimmedMsg === '__verify_backend__') {
+    // 開場明確標示「上次失敗訊息已過時」，避免用戶看 ❌ 訊息誤以為當前狀態還是失敗
+    const isChinese = state.locale === 'zh' || /[一-鿿]/.test(message)
+    const previousFailedCount = state.coderTestFailedScenarios || 0
+    if (previousFailedCount > 0) {
+      await sendMessage(conversationId, io, {
+        content: isChinese
+          ? `🔄 開始重新測試 — 上方 ❌ ${previousFailedCount} 個失敗訊息屬於上一次執行的舊狀態，本次重測完成後會給出最新結果。`
+          : `🔄 Re-running tests — the ❌ ${previousFailedCount} failure message above is from the previous run. New results will replace it.`,
+        stage: 'coder_testing',
+      })
+    }
     const { executeCoderTesting } = await import('./phase-handlers/coder-phases')
     await executeCoderTesting({
       taskId: state.taskId || '',

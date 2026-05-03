@@ -208,9 +208,11 @@ export interface FlowState {
   coderRedPhaseFixRounds?: number         // LLM 修復輪數（0=一次通過）
   // Coder Testing（SpecFormula 紅綠燈）
   coderTestPassed?: boolean               // 測試是否全部通過
-  coderTestAttempts?: number              // 紅綠燈循環次數
+  coderTestAttempts?: number              // 本次 invoke 累計測試嘗試次數（用戶按 retry 開新 invoke 時會重置）
   coderTestStartedAt?: number             // 超時偵測
   coderTestFailedScenarios?: number       // 失敗場景數（供部署風險提示）
+  coderTestFeatureCount?: number          // 本次 invoke 測試的 Feature 總數（拆解 attemptsDetail 用）
+  coderTestRegressionRounds?: number      // 本次 invoke Phase 2 全量回歸跑了幾輪
   deployedWithFailingTests?: boolean      // 是否帶風險部署（測試未全通過即部署）
   // Clone Skill（網站復刻）
   cloneMode?: boolean

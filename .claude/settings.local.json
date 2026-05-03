@@ -101,7 +101,8 @@
       "WebFetch(domain:docs.langchain.com)",
       "WebFetch(domain:llmrefs.com)",
       "Bash(pnpm remove:*)",
-      "Bash(bash /Users/eric/Desktop/tellcraft/scripts/pre-commit-checks.sh)"
+      "Bash(bash /Users/eric/Desktop/tellcraft/scripts/pre-commit-checks.sh)",
+      "Bash(ssh -i ~/Desktop/LightsailDefaultKey-ap-northeast-666.pem ubuntu@18.179.205.105:*)"
     ]
   }
 }

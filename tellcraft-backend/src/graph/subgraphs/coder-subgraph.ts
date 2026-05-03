@@ -554,10 +554,18 @@ async function testNode(state: TellcraftStateType): Promise<Partial<TellcraftSta
     }
 
     // 更新 FlowState
+    // round=0 是 LangGraph fresh invoke 第一輪 → 重置 attempts（不繼承上次 retry 的累積）
+    // round>0 是 graph 內部重試 loop → 累加（同一個 invoke 內的多輪測試應該加總）
     flowState = await getFlowState(redis, conversationId) || flowState
     flowState.coderTestPassed = result.allPassed
-    flowState.coderTestAttempts = (flowState.coderTestAttempts || 0) + result.attempts
+    flowState.coderTestAttempts = round === 0
+      ? result.attempts
+      : (flowState.coderTestAttempts || 0) + result.attempts
     flowState.coderTestFailedScenarios = result.testResults.failed
+    flowState.coderTestFeatureCount = featureFiles.length
+    flowState.coderTestRegressionRounds = round === 0
+      ? result.regressionRounds
+      : (flowState.coderTestRegressionRounds || 0) + result.regressionRounds
 
     // 儲存上一輪 failed 數量（用於 no_progress 判斷）
     const previousFailed = (flowState as unknown as Record<string, unknown>)._previousTestFailed as number | undefined
@@ -609,11 +617,30 @@ async function finalizeNode(state: TellcraftStateType): Promise<Partial<Tellcraf
   const passed = state.coderStage === 'test_passed'
   const failed = flowState.coderTestFailedScenarios || 0
   const attempts = flowState.coderTestAttempts || 0
+  const featureCount = flowState.coderTestFeatureCount || 0
+  const regressionRounds = flowState.coderTestRegressionRounds || 0
+  const estimatedFixRounds = Math.max(0, attempts - featureCount - regressionRounds)
+  const wasFixedDuringRun = featureCount > 0 && attempts > featureCount
+
+  // 拆解 attempts 成「Feature 首測 + LLM 修復 + 回歸」，避免「X 輪修復後」誤導用戶以為單一 scenario 被改 X 次
+  const attemptsDetail = featureCount > 0
+    ? (isChinese
+      ? `共 ${attempts} 次測試（${featureCount} 個 Feature × 首測 + ${estimatedFixRounds} 次 LLM 修復 + ${regressionRounds} 輪回歸）`
+      : `${attempts} test runs total (${featureCount} feature × first-pass + ${estimatedFixRounds} LLM fixes + ${regressionRounds} regression rounds)`)
+    : (isChinese ? `共 ${attempts} 次測試嘗試` : `${attempts} test attempts`)
 
   const statusEmoji = passed ? '✅' : '❌'
   const summary = passed
-    ? (isChinese ? '所有測試通過！' : 'All tests passed!')
-    : (isChinese ? `${failed} 個場景仍然失敗（${attempts} 輪修復後）` : `${failed} scenarios still failing after ${attempts} attempts`)
+    ? (isChinese
+      ? wasFixedDuringRun
+        ? `所有測試通過！\n\n📌 **這次通過經歷了 ${estimatedFixRounds} 次 LLM 修復 + ${regressionRounds} 輪回歸驗證。如果上方對話有 ❌ 失敗訊息，那是已被修復的舊狀態，可以忽略。**\n\n⚠️ 提醒：retry 出來的綠燈不等於穩定 — 部署到正式環境後請務必再驗證一次核心流程。`
+        : '所有測試通過！'
+      : wasFixedDuringRun
+        ? `All tests passed!\n\n📌 **This pass involved ${estimatedFixRounds} LLM fixes + ${regressionRounds} regression rounds. Any ❌ messages above are now outdated — please disregard them.**\n\n⚠️ Heads up: a retry-induced green is not the same as a stable green. Re-verify core flows after deploying to production.`
+        : 'All tests passed!')
+    : (isChinese
+      ? `${failed} 個 scenario 仍然失敗（${attemptsDetail}）`
+      : `${failed} scenarios still failing (${attemptsDetail})`)
 
   const quickReplies: Array<{ label: string; value: string; style: 'primary' | 'secondary' | 'ghost' }> = []
   if (passed) {

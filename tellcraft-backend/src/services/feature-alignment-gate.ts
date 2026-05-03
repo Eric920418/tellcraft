@@ -1059,6 +1059,115 @@ export async function runAlignmentChecks(input: AlignmentGateInput): Promise<Ali
     }
   }
 
+  // ── Check 12: Then $notnull 期望欄位 vs entity_setup DataTable 對齊（L31.A）──
+  // 偵測 Feature Then 表用 `$notnull` 驗證某欄位 X，但該 scenario 的 entity_setup 沒給 X 值
+  //   → DB column 預設 null → response 也是 null → response_validate 永遠失敗
+  //   → LLM 修代碼修不好（不是 code 問題，是 spec 自己的資料矛盾）
+  // 真實案例：List Service Items.imageUrl 期望 $notnull，但 entity_setup ServiceItem
+  //   只提供 [title, description, isActive]，沒給 imageUrl → 永遠 fail
+  const SYSTEM_AUTO_FIELDS = new Set([
+    'id', 'createdAt', 'updatedAt', 'deletedAt', 'created_at', 'updated_at', 'deleted_at',
+    'submittedAt', 'submitted_at', 'publishedAt', 'published_at',
+  ])
+  for (const feature of input.features) {
+    const displayName = feature.name || '(unnamed)'
+    const lines = feature.content.split('\n')
+
+    // 收集整個 Feature 的所有 entity_setup headers union（含 Background）
+    const allEntitySetupHeaders = new Set<string>()
+    const setupSteps = extractEntitySetupWithData(feature.content)
+    for (const step of setupSteps) {
+      for (const headerRaw of step.rawHeaders) {
+        const header = headerRaw.replace(/^[><]/, '').trim()
+        if (!header) continue
+        // 加 case-variant 提高匹配率
+        allEntitySetupHeaders.add(header)
+        allEntitySetupHeaders.add(toCamelCase(header))
+        allEntitySetupHeaders.add(toSnakeCase(header))
+      }
+    }
+
+    // 解析 Then 表格中標記為 $notnull 的欄位
+    // 結構：Then ...回應, with table:
+    //       | field1 | field2 | field3 |   <- header row
+    //       | val    | $notnull | val |   <- data row
+    let inResponseTable = false
+    let responseHeaderRow: string[] | null = null
+    let currentScenarioName = ''
+    const reportedFields = new Set<string>() // 避免同 scenario 內同 field 重複報
+
+    for (let li = 0; li < lines.length; li++) {
+      const trimmed = lines[li].trim()
+
+      // 追蹤當前 scenario name（顯示在錯誤訊息）
+      const scMatch = trimmed.match(/^(?:Scenario:|Scenario Outline:|Example:)\s*(.+)$/)
+      if (scMatch) {
+        currentScenarioName = scMatch[1].trim()
+        reportedFields.clear()
+        inResponseTable = false
+        responseHeaderRow = null
+        continue
+      }
+
+      // Then ...(STATUS)回應, with table:
+      if (/(?:Then|And)\s+.+\(\d+\)回應.*with\s+table:/.test(trimmed)) {
+        inResponseTable = true
+        responseHeaderRow = null
+        continue
+      }
+
+      if (!inResponseTable) continue
+
+      if (!trimmed.startsWith('|')) {
+        inResponseTable = false
+        responseHeaderRow = null
+        continue
+      }
+
+      const cells = trimmed.split('|').map(c => c.trim()).filter(Boolean)
+
+      if (responseHeaderRow === null) {
+        // 第一個 row = headers（去 VAR 前綴）
+        responseHeaderRow = cells.map(c => {
+          let clean = c
+          if (clean.startsWith('>') || clean.startsWith('<') || clean.startsWith('$')) clean = clean.substring(1)
+          const dotIdx = clean.lastIndexOf('.')
+          if (dotIdx >= 0) clean = clean.substring(dotIdx + 1)
+          return clean
+        })
+        continue
+      }
+
+      // data row：找 cell === '$notnull' 或 '$notNull' 或 '&isNotNull'
+      for (let ci = 0; ci < cells.length && ci < responseHeaderRow.length; ci++) {
+        const cell = cells[ci].trim().toLowerCase()
+        if (cell !== '$notnull' && cell !== '&isnotnull') continue
+
+        const fieldName = responseHeaderRow[ci]
+        if (!fieldName) continue
+        if (SYSTEM_AUTO_FIELDS.has(fieldName)) continue
+        if (reportedFields.has(fieldName)) continue
+
+        // 比對：fieldName 在任何 entity_setup headers？（含 case variant）
+        const fieldVariants = [fieldName, toCamelCase(fieldName), toSnakeCase(fieldName)]
+        const inAnySetup = fieldVariants.some(v => allEntitySetupHeaders.has(v))
+
+        if (!inAnySetup) {
+          reportedFields.add(fieldName)
+          const setupSummary = setupSteps.length > 0
+            ? setupSteps.map(s => `${s.entityName}[${s.rawHeaders.map(h => h.replace(/^[><]/, '').trim()).join(', ')}]`).join('; ')
+            : '(無 entity_setup)'
+          issues.push({
+            featureName: displayName,
+            checkName: 'notnull_field_missing_from_setup',
+            severity: 'error',
+            description: `Scenario "${currentScenarioName}" 的 Then 表期望欄位 \`${fieldName}\` 為 \`$notnull\`，但本 Feature 的 entity_setup DataTable 從未提供 \`${fieldName}\` 值（現有 setup: ${setupSummary}）。DB column 會用預設值（通常 null）→ response 也是 null → \`response_validate\` 永遠失敗 → **LLM 修 code 永遠修不好**（這是 spec 資料矛盾，不是 code bug）。**修法**：把 \`${fieldName}\` 加進對應的 \`準備一個 X, with table:\` headers 並提供值，例如 \`| title | description | isActive | ${fieldName} |\` + 對應 data row。或者把 Then 的 \`${fieldName}: $notnull\` 改成允許 null（移除該欄位驗證）。`,
+          })
+        }
+      }
+    }
+  }
+
   // L24.D: Dedupe — 同一 (featureName, checkName, description) 只報一次
   // 避免 extractWhenSummaries 抓到重複 When 步驟造成多倍誤報（如 1 個 Feature 內 16 個 scenario
   // 各產生一組相同的 summary_uniqueness issue）

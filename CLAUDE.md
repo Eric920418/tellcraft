@@ -416,6 +416,8 @@ Feature 註解：`# Action: actionName` + `# [METHOD] /path` + `# Summary: xxx`
 ### Coder / SpecFormula / RED Phase
 
 - **Feature Alignment Gate**：RED Phase 後、Coder 前執行。修不好**阻塞 pipeline**（回退 `uiux_complete`），不像 RED Phase advisory 模式。修復後自動更新 DB `bdd_sessions.features_content`
+- `[TEST]` **Alignment Gate Check 12（L31.A）notnull_field_missing_from_setup**：Then 表用 `$notnull` 期望某欄位 X，但該 Feature entity_setup DataTable 從未提供 X 值 → DB column 預設 null → response 也是 null → `response_validate` 永遠失敗 → **LLM 修 code 修不好**（這是 spec 資料矛盾，不是 code bug）。真實案例：`List Service Items.imageUrl` 期望 `$notnull` 但 entity_setup ServiceItem 只給 `[title, description, isActive]`，跑 104 attempts 都失敗。系統自動欄位（id/createdAt/updatedAt 等）白名單跳過。case-insensitive + camelCase ↔ snake_case 對齊
+- `[TEST]` **LangGraph 路徑 `coderTestAttempts` 必須 round=0 重置（不累加）**：`coder-subgraph.ts:559` 內 `flowState.coderTestAttempts = round === 0 ? result.attempts : (...) + result.attempts`。**錯誤地累加會跨 LangGraph fresh invoke 累積**（user 按 retry 開新 invoke 時看到「104 輪」實際是「歷史總和」）。`coderTestRegressionRounds` 同理。新加 `coderTestFeatureCount` 給 finalizeNode 拆解「Feature 首測 + LLM 修復 + 回歸」用
 - **RED Phase 三層驗證**：L1 靜態（12 項零 LLM，含 Schema DataTable 對齊、**Check 12** 偵測 WHEN call table headers 誤用 `>/<` 前綴）、L2 Stub 全場景（StubHttp 回 501）、L2.5 Routing（in-process Express）。L2/L2.5 需 `open_api_spec_content` + `isa_config_content` + `neon_connection_string`，缺則跳過。三層都不阻塞
 - **Feature 驗證腳本用 `tsx` 不是 `ts-node`**：`feature-validation.ts` `runScript()` 用 `npx tsx`。腳本解析失敗視為通過（不觸發無效 LLM 修復循環）
 - **Feature Dry-Run**：spec_completed 前用真實 Neon DB 跑 entity_setup 驗證。失敗 LLM 修復（2 輪）。跳過 api_call/response_validate
